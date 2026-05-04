@@ -411,8 +411,14 @@ func (s *chatServiceImpl) HandleMessage(ctx context.Context, sessionID, content 
 	if s.pathGrants != nil {
 		granted := s.pathGrants.RegisterFromUserMessage(sessionID, content)
 		if len(granted) > 0 {
+			// INFO carries a count only — the granted slice contains user
+			// filesystem paths from chat input and shouldn't land in
+			// production logs. DEBUG sibling carries the full list for
+			// opt-in diagnostics.
 			slog.Info("permission: explicit-mention grants registered",
 				"session_id", sessionID, "count", len(granted))
+			slog.Debug("permission: explicit-mention grants registered (paths)",
+				"session_id", sessionID, "paths", granted)
 		}
 	}
 

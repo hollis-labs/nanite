@@ -626,42 +626,29 @@ func (s *chatServiceImpl) generateResponse(ctx context.Context, sessionID, assis
 		diagCurrentIter = ls.iteration
 		diagLogIterStart(ctx, sessionID, assistantMsgID, ls.iteration, ch)
 
+		// CW-20260504-0001: soft max_turns budget signal — fires once per
+		// generation when iteration crosses the strategy planner's estimate.
+		// Always logged (telemetry / inspector replay); SSE event only when
+		// developer mode is on. The agent continues running — this is a
+		// signal, not a terminator.
+		if fire, maxTurns := ls.checkSoftMaxTurnsWarning(); fire {
+			s.emitChatLoopBudgetSoftWarning(sessionID, ls.iteration, maxTurns, ch)
+		}
+
 		// Check layered iteration limits.
 		if stop, code, reason := ls.shouldStop(); stop {
 			slog.Warn("chat-loop stopped", "reason", reason, "code", code, "session_id", sessionID, "agent", agent.ID, "iter", ls.iteration)
 
-			// E3 (CW-20260419-0026, Phase 5): mid-execution review fires
-			// at budget exhaustion. When max_turns is hit AND no tool result
-			// was load-bearing this turn, we ask a clarifying question
-			// instead of synthesising a thin / fabricated answer. When data
-			// IS load-bearing, we fall through to the existing early-stop
-			// synthesis path which wraps with partial data.
-			handledByStrategy := false
-			if code == TerminationMaxTurns {
-				hasUsableData := strategyHasUsableData(ls)
-				decision := reviewExhaustedBudget(ctx, turnStrategy, ls.iteration, ls.resolvedMaxTurns(), hasUsableData)
-				slog.Info("chat-service: strategy review",
-					"session_id", sessionID,
-					"decision", string(decision),
-					"has_usable_data", hasUsableData,
-					"iteration", ls.iteration,
-					"max_turns", ls.resolvedMaxTurns(),
-				)
-				if decision == strategy_pkg_ReviewAskToClarify() {
-					q := strategyClarifyingQuestion(userContent, scopeTier, turnStrategy)
-					ch <- chat.StreamEvent{Type: "delta", Content: q, Phase: chat.PhaseFinal}
-					fullContent.WriteString(q)
-					finalContent.WriteString(q)
-					handledByStrategy = true
-				}
-			}
-
-			// Early-stopping-generate: when the loop hits its iteration ceiling
-			// (max_turns or runaway tool failures), make one final no-tools LLM
-			// call to synthesize a best-effort answer from the work done so far.
-			// Synthesis deltas land in the stream before the terminated envelope
-			// so the user sees a coherent response rather than an abrupt cutoff.
-			if !handledByStrategy && (code == TerminationMaxTurns || code == TerminationRunawayToolFailures) {
+			// Early-stopping-generate: when the loop hits the runaway hard
+			// circuit-breaker, make one final no-tools LLM call to
+			// synthesize a best-effort answer from the work done so far.
+			// Synthesis deltas land in the stream before the terminated
+			// envelope so the user sees a coherent response rather than an
+			// abrupt cutoff. CW-20260504-0001: max_turns is no longer a
+			// terminator, so the strategy-review-on-max-turns branch and
+			// max-turns synthesis paths are gone (max_turns surfaces via
+			// the soft warning above instead).
+			if code == TerminationRunawayToolFailures {
 				s.earlyStopSynthesis(ctx, prov, model, extraSystemPrefix, slotResult, chatMessages, ch, &fullContent, &finalContent)
 			}
 

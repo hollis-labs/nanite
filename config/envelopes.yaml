@@ -122,6 +122,13 @@ core:
     component: components/chat/envelopes/ChatLoopTerminatedCard
     export: ChatLoopTerminatedCard
 
+  # CW-20260504-0001 — chat-loop soft budget warning. Emitted once per
+  # generation when the loop crosses the strategy planner's soft max_turns
+  # budget without terminating. Signal-only; loop continues. Devmode-gated
+  # on the SSE stream (always logged). FE component is intentionally
+  # omitted — to be reviewed in the inspector/widget review pass.
+  - type: chat-loop-budget-soft-warning
+
   # CW-20260420-0018 — MCP elicitation/create mid-tool user prompt (G4).
   # Renders inline in chat with boolean (accept/decline) or string (text input)
   # input depending on schema_type. User response routes back via ResponseV1.

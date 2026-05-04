@@ -21,7 +21,7 @@ func TestBwrapArgs_NarrowedMounts(t *testing.T) {
 	}
 
 	cmd := exec.Command("/bin/true")
-	cleanup, err := applyOSSandbox(cmd, t.TempDir(), nil)
+	cleanup, err := applyOSSandbox(cmd, t.TempDir(), "", nil)
 	if err != nil {
 		t.Fatalf("applyOSSandbox: %v", err)
 	}
@@ -73,7 +73,7 @@ func TestBwrapArgs_UnshareNetConditional(t *testing.T) {
 	// With an empty allowlist, --unshare-net must be present: the sandbox
 	// is fully offline.
 	cmdEmpty := exec.Command("/bin/true")
-	cleanupEmpty, err := applyOSSandbox(cmdEmpty, t.TempDir(), nil)
+	cleanupEmpty, err := applyOSSandbox(cmdEmpty, t.TempDir(), "", nil)
 	if err != nil {
 		t.Fatalf("applyOSSandbox (empty): %v", err)
 	}
@@ -87,7 +87,7 @@ func TestBwrapArgs_UnshareNetConditional(t *testing.T) {
 	// sandboxed process can reach the host-side allowlist proxy via
 	// loopback.
 	cmdAllow := exec.Command("/bin/true")
-	cleanupAllow, err := applyOSSandbox(cmdAllow, t.TempDir(), []string{"example.com"})
+	cleanupAllow, err := applyOSSandbox(cmdAllow, t.TempDir(), "", []string{"example.com"})
 	if err != nil {
 		t.Fatalf("applyOSSandbox (allowlist): %v", err)
 	}

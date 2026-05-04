@@ -157,26 +157,32 @@ func TestLoopState_ShouldStop_CustomRunawayCap(t *testing.T) {
 	}
 }
 
-func TestLoopState_ShouldStop_MaxTurns(t *testing.T) {
+// TestLoopState_ShouldStop_MaxTurnsIsSoft (CW-20260504-0001) — max_turns
+// is no longer a hard terminator. Hitting it fires a one-shot soft warning
+// (see TestLoopState_CheckSoftMaxTurnsWarning) and the loop continues. Only
+// runaway/idle/hardCeiling/retry-budget actively terminate.
+func TestLoopState_ShouldStop_MaxTurnsIsSoft(t *testing.T) {
 	ls := newLoopState(chat.AgentConstraints{MaxTurns: 5}, nil, false)
 	ls.iteration = 5
-	stop, code, reason := ls.shouldStop()
-	if !stop {
-		t.Error("shouldStop() should return true at max turns")
+	stop, code, _ := ls.shouldStop()
+	if stop {
+		t.Errorf("shouldStop() at max_turns must NOT terminate after CW-20260504-0001 surgery; got stop=true code=%q", code)
 	}
-	if code != TerminationMaxTurns {
-		t.Errorf("code = %q, want %q", code, TerminationMaxTurns)
+	// Sanity: the soft-warning helper fires once at the budget mark.
+	fire, mt := ls.checkSoftMaxTurnsWarning()
+	if !fire {
+		t.Errorf("checkSoftMaxTurnsWarning should fire at iteration == maxTurns")
 	}
-	if reason == "" {
-		t.Error("expected a reason")
+	if mt != 5 {
+		t.Errorf("soft warning maxTurns = %d, want 5", mt)
 	}
 }
 
+// TestLoopState_ShouldStop_HardCeiling — hardCeiling stays the absolute
+// turn-based terminator even after max_turns goes soft (CW-20260504-0001).
+// The strategy planner sets MaxTurns way above hardCeiling here to prove
+// that it's hardCeiling — not the (now-soft) maxTurns clamp — that fires.
 func TestLoopState_ShouldStop_HardCeiling(t *testing.T) {
-	// MaxTurns explicitly higher than hard ceiling. resolvedMaxTurns() clamps
-	// to hardCeiling, so at iter==10 both the maxTurns and hardCeiling checks
-	// are true. PR #64 feedback: hardCeiling must be checked first so the
-	// termination code reflects the actual constraint that tripped.
 	ls := newLoopState(chat.AgentConstraints{MaxTurns: 200, HardCeiling: 10}, nil, false)
 	ls.iteration = 10
 	stop, code, _ := ls.shouldStop()
@@ -184,23 +190,47 @@ func TestLoopState_ShouldStop_HardCeiling(t *testing.T) {
 		t.Error("shouldStop() should return true at hard ceiling")
 	}
 	if code != TerminationHardCeiling {
-		t.Errorf("code = %q, want %q (hard_ceiling must be checked before max_turns)", code, TerminationHardCeiling)
+		t.Errorf("code = %q, want %q", code, TerminationHardCeiling)
 	}
 }
 
-// TestLoopState_ShouldStop_MaxTurnsBeforeCeiling asserts that when MaxTurns is
-// explicitly lower than HardCeiling, the max_turns layer still fires at the
-// configured MaxTurns value (not the ceiling). Complements HardCeiling test
-// to prove both codes remain reachable after the layer reorder.
-func TestLoopState_ShouldStop_MaxTurnsBeforeCeiling(t *testing.T) {
+// TestLoopState_ShouldStop_PastMaxTurnsBeforeCeiling — even when iteration
+// is well past the configured MaxTurns, the loop keeps running until
+// hardCeiling (or another active terminator). CW-20260504-0001.
+func TestLoopState_ShouldStop_PastMaxTurnsBeforeCeiling(t *testing.T) {
 	ls := newLoopState(chat.AgentConstraints{MaxTurns: 5, HardCeiling: 50}, nil, false)
-	ls.iteration = 5
+	ls.iteration = 25 // 5x past the soft budget
 	stop, code, _ := ls.shouldStop()
-	if !stop {
-		t.Error("shouldStop() should return true at max turns")
+	if stop {
+		t.Errorf("shouldStop() at iter=25 (5x past MaxTurns=5, well below HardCeiling=50) must NOT terminate; got code=%q", code)
 	}
-	if code != TerminationMaxTurns {
-		t.Errorf("code = %q, want %q", code, TerminationMaxTurns)
+}
+
+// TestLoopState_CheckSoftMaxTurnsWarning_OneShot — the warning fires
+// exactly once per generation at the budget mark, no matter how many times
+// it's polled. CW-20260504-0001.
+func TestLoopState_CheckSoftMaxTurnsWarning_OneShot(t *testing.T) {
+	ls := newLoopState(chat.AgentConstraints{MaxTurns: 3}, nil, false)
+	// Pre-budget: silent.
+	ls.iteration = 2
+	if fire, _ := ls.checkSoftMaxTurnsWarning(); fire {
+		t.Error("warning should not fire below maxTurns")
+	}
+	// At budget: fires.
+	ls.iteration = 3
+	fire, mt := ls.checkSoftMaxTurnsWarning()
+	if !fire {
+		t.Fatal("warning should fire at iteration == maxTurns")
+	}
+	if mt != 3 {
+		t.Errorf("warning maxTurns = %d, want 3", mt)
+	}
+	// Past budget: silent (one-shot latch).
+	for i := 4; i < 10; i++ {
+		ls.iteration = i
+		if fire, _ := ls.checkSoftMaxTurnsWarning(); fire {
+			t.Errorf("warning should fire only once; refired at iter=%d", i)
+		}
 	}
 }
 

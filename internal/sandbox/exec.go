@@ -59,6 +59,21 @@ type AgentExecOpts struct {
 	Timeout      time.Duration     // execution timeout (default 30s, max 5m)
 	Env          map[string]string // additional env vars (filtered for secrets)
 	NetworkAllow []string          // domains to allow via proxy (empty = deny all network)
+
+	// WorkingDir is the directory the command should execute in. When
+	// non-empty:
+	//   - cmd.Dir is set to WorkingDir (instead of the sandbox scoping dir)
+	//   - The OS sandbox profile is widened to permit read+write under
+	//     WorkingDir (seatbelt subpath on darwin; bwrap --bind on linux)
+	// When empty, cmd.Dir falls back to the sandbox scoping dir (status quo
+	// before CW-20260504-0003).
+	//
+	// The CALLER is responsible for validating WorkingDir against the
+	// permission gate (e.g. resolveAllowed in dev_tools). AgentExec does
+	// NOT re-validate; it trusts the caller's resolved path. This keeps
+	// the gate authority in one place (the dev_tools permission check)
+	// and the sandbox enforcement as belt-and-braces.
+	WorkingDir string
 }
 
 // UserExecOpts configures a user-initiated command execution.
@@ -126,11 +141,21 @@ func AgentExec(opts AgentExecOpts) (*ExecResult, error) {
 	defer cancel()
 
 	cmd := exec.CommandContext(ctx, opts.Command, opts.Args...)
-	cmd.Dir = sandboxDir
+	// CW-20260504-0003: when the caller provided an explicit WorkingDir
+	// (already permission-gated upstream), execute the command there so
+	// the agent operates on the user-granted path. Otherwise default to
+	// the sandbox scoping dir (legacy behavior). The OS sandbox profile
+	// receives WorkingDir as an additional allowed write subpath; reads
+	// are unrestricted on darwin and bind-mounted on linux.
+	if opts.WorkingDir != "" {
+		cmd.Dir = opts.WorkingDir
+	} else {
+		cmd.Dir = sandboxDir
+	}
 	cmd.Env = env
 
 	// Apply OS-level sandbox (no-op on unsupported platforms).
-	cleanup, err := applyOSSandbox(cmd, sandboxDir, opts.NetworkAllow)
+	cleanup, err := applyOSSandbox(cmd, sandboxDir, opts.WorkingDir, opts.NetworkAllow)
 	if err != nil {
 		return nil, fmt.Errorf("sandbox: os-level setup: %w", err)
 	}
@@ -171,9 +196,11 @@ func UserExec(opts UserExecOpts) (*ExecResult, error) {
 	cmd.Dir = opts.Dir
 	cmd.Env = env
 
-	// Apply OS-level sandbox when requested (session/ask modes).
+	// Apply OS-level sandbox when requested (session/ask modes). UserExec
+	// already runs in the user's chosen directory; no extra write-allow
+	// path is needed because opts.Dir is itself the writable root.
 	if opts.Sandboxed {
-		cleanup, err := applyOSSandbox(cmd, opts.Dir, nil)
+		cleanup, err := applyOSSandbox(cmd, opts.Dir, "", nil)
 		if err != nil {
 			return nil, fmt.Errorf("sandbox: os-level setup: %w", err)
 		}

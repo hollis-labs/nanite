@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -207,12 +208,46 @@ func (d *DevToolsTransport) resolveAllowed(ctx context.Context, userPath string)
 // kept around for the EscapeError diagnostic when a downstream call needs
 // it (this helper does not raise such errors itself — it just signals
 // allow/no-match).
+//
+// Emits a structured INFO log on every call regardless of outcome so the
+// path-grant resolution boundary is observable in production. Without
+// this, a silent miss looks identical to a silent never-stamped-ctx —
+// the c138 reproduction (Glass-8 partial regression) was invisible until
+// this log was added. Tool calls are low-frequency enough that volume
+// is not a concern.
 func (d *DevToolsTransport) tryResolveViaSessionGrant(ctx context.Context, abs, _ string) (string, bool) {
 	sessionID, checker := permission.PathGrantsFromContext(ctx)
-	if checker == nil || sessionID == "" {
-		return "", false
+	hadChecker := checker != nil
+
+	var (
+		bucketSize    int
+		matched       bool
+		kind          = permission.LookupKindNone
+		viaSessionID  string
+	)
+	if hadChecker && sessionID != "" {
+		bucketSize = checker.BucketSize(sessionID)
+		matched, kind, viaSessionID = checker.LookupPath(sessionID, abs)
 	}
-	if !checker.IsPathAllowed(sessionID, abs) {
+
+	// INFO log carries diagnostic flags only — no sensitive path text — so
+	// production logs can correlate by session_id + classification without
+	// recording every user file path. The full candidate path is emitted at
+	// DEBUG so investigators can opt in via log-level when chasing a miss.
+	slog.Info("permission: dev_tools grant-resolution",
+		"session_id", sessionID,
+		"had_checker", hadChecker,
+		"bucket_size", bucketSize,
+		"match_found", matched,
+		"match_kind", string(kind),
+		"match_via_session_id", viaSessionID,
+	)
+	slog.Debug("permission: dev_tools grant-resolution (path detail)",
+		"session_id", sessionID,
+		"candidate_abs", abs,
+	)
+
+	if !matched {
 		return "", false
 	}
 	// Resolve symlinks on the existing-ancestor of the target so the
@@ -256,19 +291,44 @@ func (d *DevToolsTransport) exampleRootPath() string {
 	return "/path/to/project"
 }
 
+// tildeAcceptanceNote returns the shared LLM-facing instruction included
+// in every dev_* tool description: paths beginning with ~/ are accepted
+// and expanded server-side to the session user's actual home directory,
+// and the agent must pass user-supplied ~/ paths verbatim rather than
+// fabricating an absolute path with a guessed username.
+//
+// Background (CW-fix-dev-glob-grant): smoke sessions surfaced a
+// non-deterministic LLM failure where the agent, faced with "must start
+// with /" and a user message containing ~/Projects-apps, would convert
+// the tilde to /Users/<fabricated-name>/Projects-apps. The path-grant
+// store had the correct grants registered against the real user's home,
+// so the lookup missed and dev_* failed. Telling the agent up-front
+// that ~/ is acceptable removes the impulse to invent.
+//
+// The phrasing is intentionally generic ("the session user's home
+// directory") rather than embedding the resolved absolute home path —
+// the description ships in the tool inventory prompt and we don't want
+// to leak host filesystem layout to the model.
+func tildeAcceptanceNote() string {
+	return "Paths starting with ~/ are accepted and expanded server-side to the session user's home directory. " +
+		"When the user mentions a ~/ path, pass it VERBATIM (e.g. ~/Projects-apps); " +
+		"do NOT substitute a username — fabricated paths like /Users/<name>/... where <name> is guessed will fail."
+}
+
 // ListTools returns the dev tools with descriptions derived from the
 // configured AllowedPaths so LLM-facing content reflects the actual workspace.
 func (d *DevToolsTransport) ListTools(_ context.Context) ([]Tool, error) {
 	exRoot := d.exampleRootPath()
 	allowedDirs := d.allowedDirsSummary()
+	tildeNote := tildeAcceptanceNote()
 	return []Tool{
 		{
 			Name:        "dev_read",
-			Description: fmt.Sprintf("Read file contents with optional line range. Returns contents with line numbers. All paths must be absolute (start with /). Glob/search before read on unfamiliar paths — dev_read on a non-existent path wastes a round-trip. Allowed directories: %s. Example: dev_read(path=%q)", allowedDirs, filepath.Join(exRoot, "docs", "README.md")),
+			Description: fmt.Sprintf("Read file contents with optional line range. Returns contents with line numbers. Paths must be absolute (start with / or ~/). %s Glob/search before read on unfamiliar paths — dev_read on a non-existent path wastes a round-trip. Allowed directories: %s. Example: dev_read(path=%q)", tildeNote, allowedDirs, filepath.Join(exRoot, "docs", "README.md")),
 			InputSchema: map[string]any{
 				"type": "object",
 				"properties": map[string]any{
-					"path":   map[string]any{"type": "string", "description": fmt.Sprintf("Absolute file path (must start with /). Example: %s", filepath.Join(exRoot, "README.md"))},
+					"path":   map[string]any{"type": "string", "description": fmt.Sprintf("Absolute file path (must start with / or ~/). Example: %s", filepath.Join(exRoot, "README.md"))},
 					"offset": map[string]any{"type": "integer", "description": "Start line (1-based, default 1)"},
 					"limit":  map[string]any{"type": "integer", "description": "Number of lines to return (default 200)"},
 				},
@@ -277,12 +337,12 @@ func (d *DevToolsTransport) ListTools(_ context.Context) ([]Tool, error) {
 		},
 		{
 			Name:        "dev_grep",
-			Description: fmt.Sprintf("Search file contents matching a regex pattern within a directory. Returns matches with surrounding context lines. Both pattern and directory are required. Directory must be an absolute path. Example: dev_grep(pattern=\"func main\", directory=%q)", exRoot),
+			Description: fmt.Sprintf("Search file contents matching a regex pattern within a directory. Returns matches with surrounding context lines. Both pattern and directory are required. Directory must be an absolute path (start with / or ~/). %s Example: dev_grep(pattern=\"func main\", directory=%q)", tildeNote, exRoot),
 			InputSchema: map[string]any{
 				"type": "object",
 				"properties": map[string]any{
 					"pattern":   map[string]any{"type": "string", "description": "Regex pattern to search for. Example: TODO|FIXME"},
-					"directory": map[string]any{"type": "string", "description": fmt.Sprintf("Absolute directory path to search in. Example: %s", exRoot)},
+					"directory": map[string]any{"type": "string", "description": fmt.Sprintf("Absolute directory path to search in (must start with / or ~/). Example: %s", exRoot)},
 					"glob":      map[string]any{"type": "string", "description": "File glob filter (e.g. *.go, *.ts). Default: all files"},
 					"context":   map[string]any{"type": "integer", "description": "Lines of context around matches (default 2)"},
 				},
@@ -291,11 +351,11 @@ func (d *DevToolsTransport) ListTools(_ context.Context) ([]Tool, error) {
 		},
 		{
 			Name:        "dev_write",
-			Description: fmt.Sprintf("Write content to a file. Creates parent directories if needed. Overwrites existing content. Path must be absolute. Example: dev_write(path=%q, content=\"# Notes\\nContent here\")", filepath.Join(exRoot, "notes.md")),
+			Description: fmt.Sprintf("Write content to a file. Creates parent directories if needed. Overwrites existing content. Path must be absolute (start with / or ~/). %s Example: dev_write(path=%q, content=\"# Notes\\nContent here\")", tildeNote, filepath.Join(exRoot, "notes.md")),
 			InputSchema: map[string]any{
 				"type": "object",
 				"properties": map[string]any{
-					"path":    map[string]any{"type": "string", "description": "Absolute file path to write (must start with /)"},
+					"path":    map[string]any{"type": "string", "description": "Absolute file path to write (must start with / or ~/)"},
 					"content": map[string]any{"type": "string", "description": "File content to write"},
 				},
 				"required": []string{"path", "content"},
@@ -303,12 +363,12 @@ func (d *DevToolsTransport) ListTools(_ context.Context) ([]Tool, error) {
 		},
 		{
 			Name:        "dev_glob",
-			Description: fmt.Sprintf("Find files matching a glob pattern within a directory. The 'pattern' and 'directory' are SEPARATE parameters — do NOT combine them. Pattern is relative to directory. Supports ** for recursive matching. Results sorted by modification time (newest first). Example: dev_glob(pattern=\"**/*.md\", directory=%q)", filepath.Join(exRoot, "docs")),
+			Description: fmt.Sprintf("Find files matching a glob pattern within a directory. The 'pattern' and 'directory' are SEPARATE parameters — do NOT combine them. Pattern is relative to directory. Supports ** for recursive matching. Results sorted by modification time (newest first). Directory must be absolute (start with / or ~/). %s Example: dev_glob(pattern=\"**/*.md\", directory=%q)", tildeNote, filepath.Join(exRoot, "docs")),
 			InputSchema: map[string]any{
 				"type": "object",
 				"properties": map[string]any{
 					"pattern":     map[string]any{"type": "string", "description": "Glob pattern RELATIVE to directory. Examples: **/*.md, *.go, src/**/*.ts. Do NOT include the directory path in the pattern."},
-					"directory":   map[string]any{"type": "string", "description": fmt.Sprintf("Absolute directory path to search in. Must start with /. Example: %s", exRoot)},
+					"directory":   map[string]any{"type": "string", "description": fmt.Sprintf("Absolute directory path to search in (must start with / or ~/). Example: %s", exRoot)},
 					"max_results": map[string]any{"type": "integer", "description": "Maximum results to return (default 50)"},
 				},
 				"required": []string{"pattern", "directory"},
@@ -316,11 +376,11 @@ func (d *DevToolsTransport) ListTools(_ context.Context) ([]Tool, error) {
 		},
 		{
 			Name:        "dev_edit",
-			Description: fmt.Sprintf("Edit a file by finding and replacing a string. The old_string must appear in the file. If replace_all is false (default), old_string must appear exactly once. Path must be absolute. Example: dev_edit(path=%q, old_string=\"port: 8080\", new_string=\"port: 9090\")", filepath.Join(exRoot, "config.yaml")),
+			Description: fmt.Sprintf("Edit a file by finding and replacing a string. The old_string must appear in the file. If replace_all is false (default), old_string must appear exactly once. Path must be absolute (start with / or ~/). %s Example: dev_edit(path=%q, old_string=\"port: 8080\", new_string=\"port: 9090\")", tildeNote, filepath.Join(exRoot, "config.yaml")),
 			InputSchema: map[string]any{
 				"type": "object",
 				"properties": map[string]any{
-					"path":        map[string]any{"type": "string", "description": "Absolute file path to edit (must start with /)"},
+					"path":        map[string]any{"type": "string", "description": "Absolute file path to edit (must start with / or ~/)"},
 					"old_string":  map[string]any{"type": "string", "description": "Exact text to find and replace (must exist in the file)"},
 					"new_string":  map[string]any{"type": "string", "description": "Replacement text"},
 					"replace_all": map[string]any{"type": "boolean", "description": "Replace all occurrences (default false — requires old_string to be unique)"},
@@ -330,12 +390,12 @@ func (d *DevToolsTransport) ListTools(_ context.Context) ([]Tool, error) {
 		},
 		{
 			Name:        "dev_bash",
-			Description: fmt.Sprintf("Execute a shell command and return stdout + stderr. Use for git, ls, find, build commands, etc. Working directory must be absolute and in allowed paths. Example: dev_bash(command=\"git log --oneline -5\", working_dir=%q)", exRoot),
+			Description: fmt.Sprintf("Execute a shell command and return stdout + stderr. Use for git, ls, find, build commands, etc. Working directory must be absolute and in allowed paths (start with / or ~/). %s Example: dev_bash(command=\"git log --oneline -5\", working_dir=%q)", tildeNote, exRoot),
 			InputSchema: map[string]any{
 				"type": "object",
 				"properties": map[string]any{
 					"command":     map[string]any{"type": "string", "description": "Shell command to execute. Example: ls -la, git status, go build ./..."},
-					"working_dir": map[string]any{"type": "string", "description": "Absolute working directory (must be in allowed paths). Defaults to first allowed path if omitted."},
+					"working_dir": map[string]any{"type": "string", "description": "Absolute working directory (must start with / or ~/, and be in allowed paths). Defaults to first allowed path if omitted."},
 					"timeout":     map[string]any{"type": "integer", "description": "Timeout in seconds (default 30, max 120)"},
 				},
 				"required": []string{"command"},
@@ -891,6 +951,30 @@ func globMatchParts(patParts, pathParts []string) bool {
 	return globMatchParts(patParts[1:], pathParts[1:])
 }
 
+// deriveDefaultWorkingDir returns a sensible default working_dir for
+// dev_bash when the agent omits the argument. Cascade:
+//
+//  1. Session path-grant best-dir (most specific existing-directory
+//     grant for the chat session — typically the directory the user
+//     just mentioned with ~/ or / in their message)
+//  2. Static AllowedPaths[0] (the configured allow-list root)
+//  3. Empty string — caller must surface a guidance error
+//
+// Returning empty signals "no allowed default available"; callBash
+// turns that into a clean error rather than silently falling back to
+// the sandbox CWD.
+func (d *DevToolsTransport) deriveDefaultWorkingDir(ctx context.Context) string {
+	if sessionID, checker := permission.PathGrantsFromContext(ctx); checker != nil && sessionID != "" {
+		if best := checker.BestSessionDir(sessionID); best != "" {
+			return best
+		}
+	}
+	if len(d.AllowedPaths) > 0 {
+		return d.AllowedPaths[0]
+	}
+	return ""
+}
+
 // devBashSessionID is the session ID used for dev_bash sandbox scoping. All
 // dev_bash invocations share one session so callers can observe consistent
 // resource limits and denylist behavior; the underlying command still runs
@@ -907,21 +991,37 @@ func (d *DevToolsTransport) callBash(ctx context.Context, args map[string]any) (
 		return errorResult("command is required"), nil
 	}
 
+	// CW-fix-dev-glob-grant Stage B: unify the dev_* permission gate.
+	// Previously, an empty working_dir skipped resolveAllowed entirely
+	// and relied on sandbox CWD enforcement as the sole authority,
+	// which gave dev_bash a different permission model than every
+	// other dev_* tool. The c138/c140/c141 reproduction surfaced this
+	// when dev_bash silently "succeeded" via the bypass while dev_glob
+	// failed under the same user intent. Now: if the agent omits
+	// working_dir, derive a default from the session path-grant store
+	// (most-specific existing-dir grant) or the static AllowedPaths,
+	// and run resolveAllowed on the chosen value uniformly. The
+	// sandbox CWD enforcement remains as redundancy, not an alternate
+	// permission path.
 	workDir, _ := args["working_dir"].(string)
 	if workDir == "" {
-		if len(d.AllowedPaths) > 0 {
-			workDir = d.AllowedPaths[0]
+		workDir = d.deriveDefaultWorkingDir(ctx)
+		if workDir == "" {
+			return errorResult("dev_bash: no working_dir provided and no allowed path available for this session — supply working_dir explicitly, or have the user mention a path with ~/ or / so a session grant is registered"), nil
 		}
-	} else {
-		resolved, err := d.resolveAllowed(ctx, workDir)
-		if err != nil {
-			return pathErrorResult(workDir, err), nil
-		}
-		workDir = resolved
 	}
-	_ = workDir // sandbox scopes CWD to its own directory; working_dir is
-	// accepted for compatibility and is validated above but the sandbox
-	// enforces its own sandboxDir regardless.
+	resolved, err := d.resolveAllowed(ctx, workDir)
+	if err != nil {
+		return pathErrorResult(workDir, err), nil
+	}
+	workDir = resolved
+	// CW-20260504-0003: pass workDir through to the sandbox so the
+	// command actually executes in the user-granted directory. The
+	// path-grant gate above is the authoritative allow check; the
+	// sandbox profile (seatbelt on darwin, bwrap on linux) treats
+	// workDir as an additional permitted write subpath. Without this
+	// the agent's "git status in ~/foo" silently ran in the sandbox
+	// scoping dir and reported "fatal: not a git repository" (c150).
 
 	timeout := intArg(args, "timeout", 30)
 	if timeout < 1 {
@@ -943,16 +1043,16 @@ func (d *DevToolsTransport) callBash(ctx context.Context, args map[string]any) (
 	done := make(chan execOutcome, 1)
 	safego.Go(ctx, "mcp.dev_bash.exec", func() {
 		res, err := execFn(sandbox.AgentExecOpts{
-			SessionID: devBashSessionID,
-			Command:   "sh",
-			Args:      []string{"-c", command},
-			Timeout:   time.Duration(timeout) * time.Second,
+			SessionID:  devBashSessionID,
+			Command:    "sh",
+			Args:       []string{"-c", command},
+			Timeout:    time.Duration(timeout) * time.Second,
+			WorkingDir: workDir,
 		})
 		done <- execOutcome{res: res, err: err}
 	})
 
 	var result *sandbox.ExecResult
-	var err error
 	select {
 	case <-ctx.Done():
 		// Caller cancellation. The sandbox subprocess is still bounded by its

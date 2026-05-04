@@ -193,6 +193,114 @@ func TestDevTools_PathGrants_C127TildeMention_NoHOME(t *testing.T) {
 	}
 }
 
+// TestDevTools_TildeAcceptanceInDescriptions guards the LLM-facing
+// instruction surface that prevents the c140/c141 username-hallucination
+// regression. Background: when the user's message contains ~/Projects-apps
+// and the dev_* tool description says "must start with /", Sonnet 4 has
+// been observed to convert the tilde into /Users/<fabricated-name>/...
+// instead of passing it verbatim. The descriptions must (a) explicitly
+// advertise that ~/ paths are accepted, (b) tell the agent to pass them
+// VERBATIM, and (c) warn against substituting a username. If any of the
+// six dev_* tools loses this language, this test goes red — the smoke
+// failure mode it prevents is non-deterministic and very expensive to
+// re-discover via live chat.
+func TestDevTools_TildeAcceptanceInDescriptions(t *testing.T) {
+	dt := NewDevToolsTransport(nil)
+	tools, err := dt.ListTools(context.Background())
+	if err != nil {
+		t.Fatalf("ListTools: %v", err)
+	}
+	if len(tools) == 0 {
+		t.Fatal("ListTools returned no tools")
+	}
+	expectedNames := map[string]bool{
+		"dev_read": true, "dev_grep": true, "dev_write": true,
+		"dev_glob": true, "dev_edit": true, "dev_bash": true,
+	}
+	for _, tool := range tools {
+		if !expectedNames[tool.Name] {
+			continue
+		}
+		desc := tool.Description
+		// (a) tilde acceptance advertised
+		if !strings.Contains(desc, "~/") {
+			t.Errorf("%s description missing ~/ acceptance language: %s", tool.Name, desc)
+		}
+		// (b) "VERBATIM" caps to make the instruction stick under
+		//     non-deterministic sampling
+		if !strings.Contains(desc, "VERBATIM") {
+			t.Errorf("%s description missing VERBATIM nudge: %s", tool.Name, desc)
+		}
+		// (c) explicit anti-fabrication guidance
+		if !strings.Contains(desc, "do NOT substitute") {
+			t.Errorf("%s description missing anti-fabrication guidance: %s", tool.Name, desc)
+		}
+	}
+}
+
+// TestDevBash_NoWorkingDir_UsesSessionGrant exercises Stage B's
+// permission-gate unification (CW-fix-dev-glob-grant): when the agent
+// omits working_dir, callBash must derive a default from the session
+// path-grant store and route through resolveAllowed rather than
+// silently falling through to sandbox CWD enforcement. Pre-fix:
+// dev_bash with empty working_dir bypassed the path-grant gate
+// entirely and "succeeded" via the sandbox, masking the lookup miss
+// that simultaneously failed dev_glob (the c138 reproduction shape).
+// Post-fix: the grant gate runs uniformly; dev_bash either resolves
+// against a session grant or returns a clean guidance error.
+func TestDevBash_NoWorkingDir_UsesSessionGrant(t *testing.T) {
+	tmpDir, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	grants := permission.NewPathGrants()
+	if got := grants.RegisterFromUserMessage("sess-bash", "please poke around in "+tmpDir); len(got) == 0 {
+		t.Fatalf("registration produced no grants for tempdir %q", tmpDir)
+	}
+	ctx := permission.WithPathGrants(context.Background(), "sess-bash", grants)
+
+	// AllowedPaths empty → only the session grant can authorise the call.
+	dt := NewDevToolsTransport(nil)
+	res, err := dt.CallTool(ctx, "dev_bash", map[string]any{
+		"command": "echo unified-gate",
+	})
+	if err != nil {
+		t.Fatalf("CallTool: %v", err)
+	}
+	if res.IsError {
+		t.Fatalf("expected dev_bash to succeed via session grant fallback, got error: %s",
+			res.Content[0].Text)
+	}
+	if !strings.Contains(res.Content[0].Text, "unified-gate") {
+		t.Errorf("expected stdout to contain 'unified-gate', got: %s", res.Content[0].Text)
+	}
+}
+
+// TestDevBash_NoWorkingDir_NoGrantsNoAllowedPaths_ErrorsCleanly is the
+// Stage B negative case: with no session path-grant AND no static
+// AllowedPaths, the empty-working_dir path must surface a guidance
+// error instead of silently dispatching to the sandbox. This
+// regression-locks the Stage B bypass closure: any future code that
+// re-introduces a sandbox-only fallback for empty working_dir will
+// trip this test.
+func TestDevBash_NoWorkingDir_NoGrantsNoAllowedPaths_ErrorsCleanly(t *testing.T) {
+	dt := NewDevToolsTransport(nil)
+	res, err := dt.CallTool(context.Background(), "dev_bash", map[string]any{
+		"command": "echo should-not-run",
+	})
+	if err != nil {
+		t.Fatalf("CallTool: %v", err)
+	}
+	if !res.IsError {
+		t.Fatal("expected dev_bash to error when no grants and no allowed paths are available")
+	}
+	got := res.Content[0].Text
+	if !strings.Contains(got, "no working_dir") || !strings.Contains(got, "no allowed path") {
+		t.Errorf("expected guidance error mentioning no working_dir + no allowed path, got: %s", got)
+	}
+}
+
 // TestDevTools_PathGrants_DevReadFlow exercises the path-grant fallback
 // through the public CallTool surface (dev_read), confirming the
 // integration is wired all the way through CallTool → callRead →

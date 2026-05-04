@@ -46,6 +46,8 @@ var knownTypes = []string{
 	"resolution-capture",
 	// CW-20260417-0485 — chat-loop terminal pause envelope.
 	"chat-loop-terminated",
+	// CW-20260504-0001 — chat-loop soft budget warning (max_turns crossed).
+	"chat-loop-budget-soft-warning",
 	// CW-20260420-0018 — MCP elicitation/create mid-tool user prompt.
 	"elicitation-prompt",
 }
@@ -231,6 +233,12 @@ var examplePayloads = map[string]string{
 		"last_error": "ARG_VALIDATION_FAILED: /limit: got string, want number",
 		"last_tool": "list_tasks",
 		"timestamp": "2026-04-17T17:48:44Z"
+	}`,
+	"chat-loop-budget-soft-warning": `{
+		"max_turns": 10,
+		"iteration": 10,
+		"reason": "iteration crossed soft max_turns budget; agent continuing",
+		"timestamp": "2026-05-04T00:50:00Z"
 	}`,
 	"elicitation-prompt": `{
 		"elicitation_id": "e1c2d3a4-0000-0000-0000-000000000001",

@@ -27,28 +27,35 @@ const (
 
 // Default iteration limits.
 //
-// CW-20260419-0020 (E4) is now ABSORBED INTO E3 (CW-20260419-0026) —
-// `defaultMaxTurns` is the fallback only. The strategy planner
-// (internal/strategy.PlanStrategy) chooses the per-turn budget based on
-// intent classification + reflex match + (future) grounding evidence,
-// and the chat loop overwrites limits.maxTurns with Strategy.MaxTurns
-// before entering the loop body. On budget exhaustion, the strategy
-// reviewer (ReviewMidExecution) decides whether to wrap with partial
-// data, ask a clarifying question, or extend the budget (v2). Every
-// decision + rationale is logged to strategy_decisions.
+// CW-20260504-0001: `defaultMaxTurns` and `Strategy.MaxTurns` are now SOFT
+// HINTS, not hard terminators. The chat loop terminates on actual
+// pathology — `runawayFailCap` (consecutive tool failures), `idleTimeout`
+// (wall clock), `hardCeiling` (absolute backstop) — or on the agent's
+// natural `end_turn` stop signal. Hitting `maxTurns` no longer kills the
+// loop; instead, `checkSoftMaxTurnsWarning` fires once at the budget
+// mark so the chat loop can log a telemetry line (always) and emit a
+// devmode-gated SSE event (only when developer_mode || NANITE_DEVMODE=1).
 //
-// The constant below is preserved so unit tests, code paths that bypass
-// the strategy planner, and on-disk migrations that compare to the
-// historical default keep working.
+// The architectural shape mirrors the CW-20260417-0485 surgery on
+// `consecutiveFailCap` (terminator → soft warning emitter): the agent
+// keeps running, the true-runaway breaker still trips, the user sees a
+// signal in dev mode but no SSE noise in production.
 //
-// Historical context (preserved for the audit trail): the constant was
-// bumped to 75 (from 25) after c17/c27 UAT showed 25 is the default-case
-// ceiling, not a rare safety net — list+analyze asks routinely need
-// 20-30 tool calls just for the fetching phase, and the LLM was being
-// cut off mid-thought with no final message. 75 gives headroom without
-// uncorking; hardCeiling=200 still catches true runaways. Strategy now
-// supersedes the constant — the typical Strategy.MaxTurns is 10-40, and
-// 75 only applies when the strategy planner is bypassed entirely.
+// Strategy.MaxTurns continues to be emitted by the strategy planner for
+// `strategy_decisions` log + inspector views + the strategy reviewer's
+// "should we keep going?" decision. The chat loop reads it but no
+// longer wires it to the active terminator.
+//
+// The constant below remains the fallback when the strategy planner is
+// bypassed (tests, edge paths). 75 is unchanged — it was bumped from 25
+// historically (c17/c27 UAT showed 25 is default-case ceiling) and the
+// soft-warning surgery does not change that floor.
+//
+// `TerminationMaxTurns` constant is preserved for back-compat with
+// stored run rows + the chat-loop-terminated envelope schema enum, but
+// `shouldStop` no longer returns it — only `runaway_tool_failures`,
+// `idle_timeout`, `hard_ceiling`, and `retry_budget_exhausted` actively
+// terminate.
 const (
 	defaultMaxTurns    = 75
 	defaultHardCeiling = 200
@@ -147,6 +154,12 @@ type loopState struct {
 	// chat-loop-terminated envelope can carry the triggering error.
 	lastToolError string
 	lastToolName  string
+
+	// CW-20260504-0001: one-shot latch for the soft max_turns warning.
+	// Set by checkSoftMaxTurnsWarning the first time iteration crosses
+	// the resolved budget so the telemetry/SSE signal fires exactly once
+	// per generation (not on every subsequent iter).
+	softMaxTurnsWarningFired bool
 
 	// Progressive discovery.
 	loadedTools              map[string]bool
@@ -340,13 +353,25 @@ func (ls *loopState) resolvedMaxTurns() int {
 	return max
 }
 
-// shouldStop checks all iteration limits and returns whether the loop should
-// exit, along with a structured TerminationCode + human-readable reason.
+// shouldStop checks the loop's hard terminators and returns whether the loop
+// should exit, along with a structured TerminationCode + human-readable
+// reason.
 //
-// CW-20260417-0485: the consecutiveFailCap (soft) threshold no longer stops
-// the loop — it is now a warning-level signal only. The loop terminates on
-// the runaway cap (hard circuit-breaker) instead, which gives the LLM room
-// to observe its tool_result errors and self-correct or stop gracefully.
+// Active terminators (in priority order):
+//   - Runaway tool failures (`runawayFailCap`, default 10) — consecutive
+//     tool errors trip the hard circuit-breaker (CW-20260417-0485 made
+//     `consecutiveFailCap` soft; `runawayFailCap` is its hard counterpart).
+//   - Idle timeout — wall-clock backstop.
+//   - Hard ceiling (`hardCeiling`, default 200) — absolute turn-count
+//     backstop. The agent's natural `end_turn` stop signal is still the
+//     normal termination path; hardCeiling exists for true runaways.
+//   - Retry budget exhausted — explicit caller-set budget.
+//
+// CW-20260504-0001: `max_turns` is no longer a terminator. Hitting it
+// fires a soft-warning telemetry event (see `checkSoftMaxTurnsWarning`)
+// instead of killing the loop. The agent decides when exploration is
+// done; the dup-detector ticket (CW-20260504-0002) closes the
+// successful-but-stuck-loop gap that this softening opens.
 func (ls *loopState) shouldStop() (bool, TerminationCode, string) {
 	// Layer 1: Runaway tool failures (hard circuit-breaker).
 	if ls.consecutiveFailures >= ls.limits.runawayFailCap {
@@ -360,29 +385,41 @@ func (ls *loopState) shouldStop() (bool, TerminationCode, string) {
 			fmt.Sprintf("idle timeout after %s", ls.limits.idleTimeout)
 	}
 
-	// Layer 3: Hard ceiling (absolute circuit-breaker).
-	// Checked before maxTurns so hitting the ceiling reports the correct code.
-	// resolvedMaxTurns() clamps maxTurns to hardCeiling, so without this order
-	// a hard-ceiling hit would always report as TerminationMaxTurns and the
-	// hard_ceiling envelope code would be unreachable (PR #64 feedback).
+	// Layer 3: Hard ceiling (absolute backstop).
 	if ls.iteration >= ls.limits.hardCeiling {
 		return true, TerminationHardCeiling,
 			fmt.Sprintf("hard ceiling reached (%d)", ls.limits.hardCeiling)
 	}
 
-	// Layer 4: Max turns (configured, <= hardCeiling).
-	maxTurns := ls.resolvedMaxTurns()
-	if ls.iteration >= maxTurns {
-		return true, TerminationMaxTurns,
-			fmt.Sprintf("max turns reached (%d)", maxTurns)
-	}
-
-	// Layer 5: Retry budget exhausted.
+	// Layer 4: Retry budget exhausted.
 	if ls.retryBudget == 0 {
 		return true, TerminationRetryBudgetExhausted, "retry budget exhausted"
 	}
 
 	return false, "", ""
+}
+
+// checkSoftMaxTurnsWarning returns (true, maxTurns) exactly once per
+// generation when the loop's iteration count crosses the soft maxTurns
+// budget set by the strategy planner (or the default fallback). Subsequent
+// calls return (false, _) until the loopState is recreated for a new turn.
+//
+// Callers use this to fire a one-shot telemetry/SSE signal at the budget
+// mark without killing the loop. See CW-20260504-0001 for the soft-cap
+// architecture rationale.
+func (ls *loopState) checkSoftMaxTurnsWarning() (bool, int) {
+	if ls.softMaxTurnsWarningFired {
+		return false, 0
+	}
+	maxTurns := ls.resolvedMaxTurns()
+	if maxTurns <= 0 {
+		return false, 0
+	}
+	if ls.iteration < maxTurns {
+		return false, 0
+	}
+	ls.softMaxTurnsWarningFired = true
+	return true, maxTurns
 }
 
 // recordToolCall updates counters after a tool call. Returns true if the tool

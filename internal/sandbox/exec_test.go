@@ -254,3 +254,86 @@ func TestIsSecretKey(t *testing.T) {
 		}
 	}
 }
+
+// TestAgentExec_HonorsWorkingDir (CW-20260504-0003) — when WorkingDir is
+// non-empty, AgentExec runs the command with cmd.Dir = WorkingDir
+// instead of the sandbox scoping dir. Verified by /bin/pwd: caller-set
+// dir wins over sandboxDir. The OS sandbox profile is widened to permit
+// reads under that dir (already true on darwin; bind-mounted on linux).
+func TestAgentExec_HonorsWorkingDir(t *testing.T) {
+	tmpHome := t.TempDir()
+	t.Setenv("HOME", tmpHome)
+
+	workDir := t.TempDir()
+	result, err := AgentExec(AgentExecOpts{
+		SessionID:  "test-workingdir",
+		Command:    "/bin/pwd",
+		Timeout:    5 * time.Second,
+		WorkingDir: workDir,
+	})
+	if err != nil {
+		t.Fatalf("AgentExec: %v", err)
+	}
+	got := strings.TrimSpace(result.Stdout)
+	// macOS may resolve /var → /private/var; accept either.
+	if got != workDir && !strings.HasSuffix(got, strings.TrimPrefix(workDir, "/private")) {
+		t.Errorf("CWD = %q, want WorkingDir %q", got, workDir)
+	}
+}
+
+// TestAgentExec_EmptyWorkingDir_FallsBackToSandboxDir verifies the
+// back-compat path: when WorkingDir is empty (legacy callers), cmd.Dir
+// is the sandbox scoping dir as before. Same shape as
+// TestAgentExec_CWDRestricted but with the field explicitly empty so
+// the regression is locked against future field additions.
+func TestAgentExec_EmptyWorkingDir_FallsBackToSandboxDir(t *testing.T) {
+	tmpHome := t.TempDir()
+	t.Setenv("HOME", tmpHome)
+
+	result, err := AgentExec(AgentExecOpts{
+		SessionID:  "test-empty-workdir",
+		Command:    "/bin/pwd",
+		Timeout:    5 * time.Second,
+		WorkingDir: "", // explicit empty
+	})
+	if err != nil {
+		t.Fatalf("AgentExec: %v", err)
+	}
+	sandboxDir, _ := Dir("test-empty-workdir")
+	got := strings.TrimSpace(result.Stdout)
+	if got != sandboxDir && !strings.HasSuffix(got, "/test-empty-workdir") {
+		t.Errorf("CWD = %q, want sandbox dir %q (legacy fallback)", got, sandboxDir)
+	}
+}
+
+// TestAgentExec_WorkingDir_AllowsReads (CW-20260504-0003) — when
+// WorkingDir is set, the OS sandbox profile is widened so the command
+// can read files under that dir. We write a fixture file in workDir
+// then cat it; success proves the read-allow path works.
+func TestAgentExec_WorkingDir_AllowsReads(t *testing.T) {
+	tmpHome := t.TempDir()
+	t.Setenv("HOME", tmpHome)
+
+	workDir := t.TempDir()
+	fixturePath := workDir + "/hello.txt"
+	if err := os.WriteFile(fixturePath, []byte("hi from workdir\n"), 0o644); err != nil {
+		t.Fatalf("write fixture: %v", err)
+	}
+
+	result, err := AgentExec(AgentExecOpts{
+		SessionID:  "test-workdir-read",
+		Command:    "/bin/cat",
+		Args:       []string{fixturePath},
+		Timeout:    5 * time.Second,
+		WorkingDir: workDir,
+	})
+	if err != nil {
+		t.Fatalf("AgentExec: %v", err)
+	}
+	if result.ExitCode != 0 {
+		t.Errorf("exit code = %d, want 0; stderr: %s", result.ExitCode, result.Stderr)
+	}
+	if !strings.Contains(result.Stdout, "hi from workdir") {
+		t.Errorf("stdout = %q, want it to contain the fixture content", result.Stdout)
+	}
+}

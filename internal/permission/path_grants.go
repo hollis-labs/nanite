@@ -182,47 +182,61 @@ func (g *PathGrants) LookupPath(sessionID, candidate string) (bool, LookupKind, 
 		return false, LookupKindNone, ""
 	}
 
-	g.mu.RLock()
-	defer g.mu.RUnlock()
+	// Hold the read lock only for the bucket + lineage walk; the warn-level
+	// log on a depth-cap hit fires AFTER the lock is released so it can't
+	// stall sibling readers if the slog handler blocks. The IIFE bounds the
+	// lock scope; walkCapped escapes via the closure capture.
+	var walkCapped bool
+	matched, kind, via := func() (bool, LookupKind, string) {
+		g.mu.RLock()
+		defer g.mu.RUnlock()
 
-	// Own bucket first — keep the existing literal/ancestor classification
-	// so callers that already grant against their own session see the same
-	// kind value as before this change.
-	if matched, kind := lookupInBucket(g.grants[sessionID], abs); matched {
-		return true, kind, ""
-	}
+		// Own bucket first — keep the existing literal/ancestor classification
+		// so callers that already grant against their own session see the same
+		// kind value as before this change.
+		if m, k := lookupInBucket(g.grants[sessionID], abs); m {
+			return true, k, ""
+		}
 
-	// Lineage walk. Re-classify any hit against an ancestor bucket as
-	// ancestor_session so callers can distinguish "this session's own
-	// grant" from "inherited via parent chain" in the diagnostic log.
-	visited := map[string]struct{}{sessionID: {}}
-	cursor := sessionID
-	for hop := 0; hop < lineageMaxHops; hop++ {
-		parent, ok := g.lineage[cursor]
-		if !ok || parent == "" {
-			return false, LookupKindNone, ""
+		// Lineage walk. Re-classify any hit against an ancestor bucket as
+		// ancestor_session so callers can distinguish "this session's own
+		// grant" from "inherited via parent chain" in the diagnostic log.
+		visited := map[string]struct{}{sessionID: {}}
+		cursor := sessionID
+		for hop := 0; hop < lineageMaxHops; hop++ {
+			parent, ok := g.lineage[cursor]
+			if !ok || parent == "" {
+				return false, LookupKindNone, ""
+			}
+			if _, dup := visited[parent]; dup {
+				// Cycle: the lineage map should be acyclic (worker → chat
+				// is a one-shot pointer cleared on spawn-finish), but bail
+				// rather than spin if it ever isn't.
+				return false, LookupKindNone, ""
+			}
+			visited[parent] = struct{}{}
+			if m, _ := lookupInBucket(g.grants[parent], abs); m {
+				return true, LookupKindAncestorSession, parent
+			}
+			cursor = parent
 		}
-		if _, dup := visited[parent]; dup {
-			// Cycle: the lineage map should be acyclic (worker → chat
-			// is a one-shot pointer cleared on spawn-finish), but bail
-			// rather than spin if it ever isn't.
-			return false, LookupKindNone, ""
-		}
-		visited[parent] = struct{}{}
-		if matched, _ := lookupInBucket(g.grants[parent], abs); matched {
-			return true, LookupKindAncestorSession, parent
-		}
-		cursor = parent
+		// Walk hit the depth cap. Signal to the caller; the slog.Warn fires
+		// outside the lock to avoid blocking sibling readers.
+		walkCapped = true
+		return false, LookupKindNone, ""
+	}()
+
+	if walkCapped {
+		// Production lineage chains should be one or two hops; logging at
+		// warn surfaces a misuse without failing the tool call (the dev_*
+		// call reports a clean miss).
+		slog.Warn("permission: path-grant lineage walk capped",
+			"session_id", sessionID,
+			"candidate_abs", abs,
+			"max_hops", lineageMaxHops,
+		)
 	}
-	// Walk hit the depth cap without resolving. Production lineage chains
-	// should be one or two hops; logging at warn surfaces a misuse without
-	// failing the tool call (the dev_* call will report a clean miss).
-	slog.Warn("permission: path-grant lineage walk capped",
-		"session_id", sessionID,
-		"candidate_abs", abs,
-		"max_hops", lineageMaxHops,
-	)
-	return false, LookupKindNone, ""
+	return matched, kind, via
 }
 
 // lookupInBucket runs the existing literal + ancestor check against a

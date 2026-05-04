@@ -361,19 +361,25 @@ func TestEarlyStopSynthesis_PromptInjected(t *testing.T) {
 
 // TestEarlyStopSynthesis_FiringCodes verifies the logic that determines for
 // which TerminationCode the early-stop synthesis fires.
+//
+// CW-20260504-0001: max_turns is no longer emitted by the loop (it's a soft
+// hint now), and even if a caller emits it manually for back-compat the
+// synthesis path no longer routes on it. Synthesis fires only on
+// runaway_tool_failures — the case where the agent is still mid-thought
+// and being cut off by the hard circuit-breaker.
 func TestEarlyStopSynthesis_FiringCodes(t *testing.T) {
 	synthCodes := []TerminationCode{
-		TerminationMaxTurns,
 		TerminationRunawayToolFailures,
 	}
 	noSynthCodes := []TerminationCode{
+		TerminationMaxTurns, // soft now; no synthesis
 		TerminationHardCeiling,
 		TerminationIdleTimeout,
 		TerminationRetryBudgetExhausted,
 	}
 
 	fires := func(code TerminationCode) bool {
-		return code == TerminationMaxTurns || code == TerminationRunawayToolFailures
+		return code == TerminationRunawayToolFailures
 	}
 
 	for _, code := range synthCodes {

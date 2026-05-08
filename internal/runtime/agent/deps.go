@@ -108,6 +108,16 @@ type RuntimeStore interface {
 
 	// GetCheckpoint loads a runtime checkpoint payload for ModeResume.
 	GetCheckpoint(checkpointID string) (*RuntimeCheckpoint, error)
+
+	// ListRunningRows returns the persisted lifecycle rows currently in
+	// state="launching" or state="running". Used by SweepOrphans at
+	// daemon bootstrap to reconcile rows whose PID is no longer alive.
+	ListRunningRows() ([]*RuntimeRow, error)
+
+	// MarkRuntimeOrphaned transitions a runtime row to state="orphaned"
+	// with the supplied reason. SweepOrphans calls this for rows whose
+	// persisted PID is no longer alive.
+	MarkRuntimeOrphaned(runtimeID, reason string) error
 }
 
 // RuntimeRow is the lifecycle-tracking row Boot writes. Distinct from
@@ -121,6 +131,7 @@ type RuntimeRow struct {
 	Mode            string
 	Workdir         string
 	State           string
+	PID             int
 	ParentSessionID *string
 	StartedAt       time.Time
 	Meta            map[string]any

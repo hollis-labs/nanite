@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"sync/atomic"
 
 	agentsessions "github.com/hollis-labs/go-agent-sessions/agentsessions"
@@ -40,8 +41,9 @@ type AgentDepsConfig struct {
 
 // BuildAgentDependencies wires a *runtimeagent.Dependencies plus the singleton
 // agentsessions.Manager. Returns the composed Dependencies struct, the
-// Manager instance (for daemon-bootstrap orphan sweep + Shutdown drain), and
-// the unbound EventBridge / TypedCallback factories.
+// Manager instance (for daemon-bootstrap orphan sweep + Shutdown drain), the
+// agentEventBridge (held by the chat service so driveBootSession can bind
+// per-turn routers), and any construction error.
 //
 // The composition root is the single point that:
 //
@@ -51,19 +53,19 @@ type AgentDepsConfig struct {
 //   - resolves the per-provider CLIAdapter
 //   - threads the EventFanout / TypedEventCallback factories the chat service
 //     binds per-session.
-func BuildAgentDependencies(cfg AgentDepsConfig) (*runtimeagent.Dependencies, *agentsessions.Manager, error) {
+func BuildAgentDependencies(cfg AgentDepsConfig) (*runtimeagent.Dependencies, *agentsessions.Manager, *agentEventBridge, error) {
 	if cfg.Store == nil {
-		return nil, nil, errors.New("BuildAgentDependencies: Store is required")
+		return nil, nil, nil, errors.New("BuildAgentDependencies: Store is required")
 	}
 	if cfg.Streams == nil {
-		return nil, nil, errors.New("BuildAgentDependencies: Streams is required")
+		return nil, nil, nil, errors.New("BuildAgentDependencies: Streams is required")
 	}
 
 	binPath := cfg.BinaryPath
 	if binPath == "" {
 		exe, err := os.Executable()
 		if err != nil {
-			return nil, nil, fmt.Errorf("BuildAgentDependencies: resolve binary: %w", err)
+			return nil, nil, nil, fmt.Errorf("BuildAgentDependencies: resolve binary: %w", err)
 		}
 		if resolved, rerr := filepath.EvalSymlinks(exe); rerr == nil {
 			binPath = resolved
@@ -130,7 +132,7 @@ func BuildAgentDependencies(cfg AgentDepsConfig) (*runtimeagent.Dependencies, *a
 		SandboxBaseProfile: cfg.SandboxBaseProf,
 	}
 
-	return deps, manager, nil
+	return deps, manager, bridge, nil
 }
 
 // stripRegistryPrefix drops the nanite registry-side prefix
@@ -357,25 +359,89 @@ func (agentTelemetry) RecordPTYRestart(sessionID string, attempt int, prevExit *
 //     events.Event taxonomy emitted by CLI adapters. ToolUse / ToolResult
 //     drive the per-tool SSE pipeline (closes G-PTY-NO-TOOL-EVENTS).
 //
-// The bridge is stateless across sessions; per-session state lives in the
-// closures returned by fanout/typedCallback.
+// Per-session routers (Phase 4c.4) let driveBootSession redirect a turn's
+// runtime stream events into a dedicated chat-harness consumer chan instead
+// of broadcasting them as SSE. When no router is bound for a session id, the
+// fanout falls back to the SSE-broadcast path used by spawned agents and
+// background tasks.
 type agentEventBridge struct {
 	streams *StreamManager
 	seq     atomic.Uint64
+	routers sync.Map // sessionID -> *sessionRouter
+}
+
+// sessionRouter wraps a per-turn turnCh with a close-once guard so the bridge
+// fanout goroutine, the chat-harness ctx-cancel watcher, and explicit
+// SetPerSessionRouter(nil) calls can all race to release the chan without
+// double-close panics.
+type sessionRouter struct {
+	ch     chan provider.StreamEvent
+	closed atomic.Bool
+}
+
+func (r *sessionRouter) closeOnce() {
+	if r.closed.CompareAndSwap(false, true) {
+		close(r.ch)
+	}
 }
 
 func (b *agentEventBridge) nextEventID() uint64 {
 	return b.seq.Add(1)
 }
 
+// SetPerSessionRouter binds (or unbinds) a per-turn chan that the fanout
+// goroutine forwards runtime events to. Passing nil unbinds + closes the
+// previously bound chan. The bridge owns the close lifecycle so callers don't
+// race against in-flight sends.
+//
+// Phase 4c.4: driveBootSession binds turnCh before SendInput; the bridge
+// unbinds + closes when EventDone or EventError flows through, or when the
+// chat-harness explicitly clears the router on ctx cancel.
+func (b *agentEventBridge) SetPerSessionRouter(sessionID string, ch chan provider.StreamEvent) {
+	if ch == nil {
+		if v, ok := b.routers.LoadAndDelete(sessionID); ok {
+			v.(*sessionRouter).closeOnce()
+		}
+		return
+	}
+	router := &sessionRouter{ch: ch}
+	if prev, loaded := b.routers.Swap(sessionID, router); loaded {
+		// A stale router was still bound (e.g. takeover before the prior
+		// turn's Done arrived). Release it so the prior chat-harness
+		// consumer terminates cleanly.
+		prev.(*sessionRouter).closeOnce()
+	}
+}
+
 // fanout returns the per-session StreamEvent channel. Closes naturally when
 // the runtime drains its EventFanout at session-stop; the bridge goroutine
 // exits at that point. Buffer is sized for typical burst rates from
 // provider.StreamChat (deltas at ~10-30 Hz under load).
+//
+// When a router is bound for sessionID via SetPerSessionRouter, runtime
+// events forward to the bound turnCh instead of broadcasting SSE. Done /
+// Error close the turnCh and unbind the router so subsequent inter-turn
+// events fall back to SSE broadcast.
 func (b *agentEventBridge) fanout(sessionID string) chan<- provider.StreamEvent {
 	out := make(chan provider.StreamEvent, 64)
 	go func() {
 		for ev := range out {
+			if v, ok := b.routers.Load(sessionID); ok {
+				router := v.(*sessionRouter)
+				if !router.closed.Load() {
+					select {
+					case router.ch <- ev:
+					default:
+						// Drop on full to avoid stalling the runtime; the
+						// chat-harness consumer is expected to keep up.
+					}
+				}
+				if ev.Type == provider.EventDone || ev.Type == provider.EventError {
+					b.routers.CompareAndDelete(sessionID, router)
+					router.closeOnce()
+				}
+				continue
+			}
 			translated, ok := b.translateStreamEvent(ev)
 			if !ok {
 				continue

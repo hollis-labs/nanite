@@ -617,7 +617,7 @@ func NewContainer(cfg ContainerConfig) (*Container, error) {
 			provider.NewOpencodeAdapter(),
 		}
 	}
-	agentDeps, agentManager, agentDepsErr := BuildAgentDependencies(AgentDepsConfig{
+	agentDeps, agentManager, agentBridge, agentDepsErr := BuildAgentDependencies(AgentDepsConfig{
 		Store:       cfg.Store,
 		PathGrants:  pathGrants,
 		Streams:     streams,
@@ -672,6 +672,7 @@ func NewContainer(cfg ContainerConfig) (*Container, error) {
 		// Phase 4c.1 (CW-20260508-0002): agent-runtime composition root.
 		AgentDeps:            agentDeps,
 		AgentSessionsManager: agentManager,
+		AgentEventBridge:     agentBridge,
 	})
 
 	// G-3 + G-5: subagent service with the real chat-engine-backed

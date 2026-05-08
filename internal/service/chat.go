@@ -158,6 +158,13 @@ type ChatServiceConfig struct {
 	// by the runtime. Held by the chat service so Shutdown can drain
 	// running sessions cleanly. nil-safe: drain is skipped when absent.
 	AgentSessionsManager *agentsessions.Manager
+
+	// AgentEventBridge is the per-session event router owned by the chat
+	// service. driveBootSession (Phase 4c.4) uses it to bind a per-turn
+	// turnCh that receives runtime events instead of broadcasting them as
+	// SSE. nil-safe: when absent, CLI sessions cannot route events through
+	// the chat-harness loop (and the long-lived path is unavailable).
+	AgentEventBridge *agentEventBridge
 }
 
 // chatServiceImpl is the concrete ChatService implementation.
@@ -249,6 +256,19 @@ type chatServiceImpl struct {
 	// session boots the runtime; subsequent calls SendInput on the existing
 	// session. Map values are *runtimeagent.Session.
 	activeSessions sync.Map
+
+	// agentEventBridge owns per-session router state. driveBootSession
+	// (Phase 4c.4) binds a per-turn turnCh via SetPerSessionRouter so the
+	// chat-harness loop consumes the runtime's StreamEvent stream without
+	// double-emitting SSE for inter-turn events. nil when the runtime is
+	// not wired (matches agentDeps == nil).
+	agentEventBridge *agentEventBridge
+
+	// activeSessionSlots remembers the last slot-content hash applied per
+	// session so driveBootSession only regenerates CLAUDE.md /
+	// agent-context.md when System / Agent / Mode / Rules slots change.
+	// Map values are uint64 (FNV-1a hash). Phase 4c.4 / 4c.5.
+	activeSessionSlots sync.Map
 }
 
 // inFlightGen records the currently-running generateResponse for a session
@@ -306,6 +326,7 @@ func NewChatService(cfg ChatServiceConfig) ChatService {
 		reminderEngine:      cfg.ReminderEngine,
 		agentDeps:           cfg.AgentDeps,
 		agentSessionsManager: cfg.AgentSessionsManager,
+		agentEventBridge:    cfg.AgentEventBridge,
 	}
 }
 

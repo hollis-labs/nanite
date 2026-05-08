@@ -856,13 +856,28 @@ func (s *chatServiceImpl) generateResponse(ctx context.Context, sessionID, assis
 		}
 		slog.Info("request_build", rbArgs...)
 
-		provCh, err = prov.StreamChat(provCtx, provider.ChatRequest{
-			SystemPrompt: extraSystemPrefix,
-			SlotBlocks:   slotBlocksFor(slotResult),
-			Messages:     chatMessages,
-			Model:        model,
-			Tools:        tools,
-		})
+		// Phase 4c.4: CLI providers route through the long-lived agent.Boot
+		// path. The chat-harness slot pipeline still ran above (telemetry,
+		// classification, mode-suggestion), but the slot blocks themselves
+		// are delivered via the boot dir's CLAUDE.md / agent-context.md
+		// (planted at Boot, regenerated on slot change). Per-turn delivery
+		// is the user message + UserContext slot via SendInput.
+		//
+		// HTTP API providers (anthropic / openai / gemini-api / mistral /
+		// openrouter / openzen / azure-openai / ollama) keep going through
+		// provider.StreamChat per turn with the slot pipeline running as
+		// today.
+		if chat.IsCLIProvider(providerName) {
+			provCh, err = s.driveBootSession(provCtx, sessionID, session, agent, mode, slotResult, userContent, ls.iteration)
+		} else {
+			provCh, err = prov.StreamChat(provCtx, provider.ChatRequest{
+				SystemPrompt: extraSystemPrefix,
+				SlotBlocks:   slotBlocksFor(slotResult),
+				Messages:     chatMessages,
+				Model:        model,
+				Tools:        tools,
+			})
+		}
 		if err != nil {
 			// T9 — provider-error recovery: detect a compaction-recoverable
 			// failure (context-window overflow OR rate-budget overflow), run

@@ -6,7 +6,7 @@ import type {
   PluginEnvelopeItem,
   ToolCall,
   ToolWarning,
-} from '@/lib/types'
+} from "@/lib/types";
 
 /**
  * G-FE-SINGLETON: per-session slice for chat state.
@@ -17,51 +17,51 @@ import type {
  */
 export interface ChatSessionState {
   // Streaming
-  isStreaming: boolean
-  streamingContent: string
-  streamingNarration: string
-  streamingFinal: string
-  streamingThinking: string
+  isStreaming: boolean;
+  streamingContent: string;
+  streamingNarration: string;
+  streamingFinal: string;
+  streamingThinking: string;
 
   // Status / banners
-  statusMessage: string | null
-  circuitOpen: boolean
-  sessionTakeover: boolean
-  streamStalled: boolean
-  textOnlyMode: boolean
+  statusMessage: string | null;
+  circuitOpen: boolean;
+  sessionTakeover: boolean;
+  streamStalled: boolean;
+  textOnlyMode: boolean;
 
   // Errors / approvals / warnings
-  chatErrors: ChatError[]
-  pendingApprovals: PendingApproval[]
-  toolWarnings: ToolWarning[]
-  pendingModeSuggestion: ModeSuggestion | null
+  chatErrors: ChatError[];
+  pendingApprovals: PendingApproval[];
+  toolWarnings: ToolWarning[];
+  pendingModeSuggestion: ModeSuggestion | null;
 
   // Per-session dials
-  activeMode: AgentMode
-  activeModel: string
-  activeEffort: string
+  activeMode: AgentMode;
+  activeModel: string;
+  activeEffort: string;
 
   // Already session-keyed; folded into the slice for shape consistency
-  toolCalls: ToolCall[]
-  pluginEnvelopes: PluginEnvelopeItem[]
-  toolCallsLastActivity: number
-  pluginEnvelopesLastActivity: number
+  toolCalls: ToolCall[];
+  pluginEnvelopes: PluginEnvelopeItem[];
+  toolCallsLastActivity: number;
+  pluginEnvelopesLastActivity: number;
 
   // LRU bookkeeping
-  lastActivityAt: number
+  lastActivityAt: number;
 }
 
-export const DEFAULT_ACTIVE_MODE: AgentMode = 'default'
-export const DEFAULT_ACTIVE_MODEL = 'claude-sonnet-4-20250514'
-export const DEFAULT_ACTIVE_EFFORT = 'normal'
+export const DEFAULT_ACTIVE_MODE: AgentMode = "default";
+export const DEFAULT_ACTIVE_MODEL = "claude-sonnet-4-20250514";
+export const DEFAULT_ACTIVE_EFFORT = "normal";
 
 export function emptyChatSessionState(now: number = Date.now()): ChatSessionState {
   return {
     isStreaming: false,
-    streamingContent: '',
-    streamingNarration: '',
-    streamingFinal: '',
-    streamingThinking: '',
+    streamingContent: "",
+    streamingNarration: "",
+    streamingFinal: "",
+    streamingThinking: "",
     statusMessage: null,
     circuitOpen: false,
     sessionTakeover: false,
@@ -79,7 +79,7 @@ export function emptyChatSessionState(now: number = Date.now()): ChatSessionStat
     toolCallsLastActivity: now,
     pluginEnvelopesLastActivity: now,
     lastActivityAt: now,
-  }
+  };
 }
 
 /**
@@ -89,7 +89,7 @@ export function emptyChatSessionState(now: number = Date.now()): ChatSessionStat
  */
 export const EMPTY_CHAT_SESSION_STATE: Readonly<ChatSessionState> = Object.freeze({
   ...emptyChatSessionState(0),
-})
+});
 
 /**
  * Soft cap on retained per-session slices. Beyond this we LRU-evict on
@@ -98,4 +98,4 @@ export const EMPTY_CHAT_SESSION_STATE: Readonly<ChatSessionState> = Object.freez
  * on demand, so eviction does not lose user data — it only clears in-memory
  * UI state for the evicted session.
  */
-export const MAX_RETAINED_SESSIONS = 20
+export const MAX_RETAINED_SESSIONS = 20;

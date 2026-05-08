@@ -3,7 +3,13 @@ package agent
 import (
 	"context"
 	"errors"
+	"fmt"
+	"os"
+	"sort"
 	"time"
+
+	agentsessions "github.com/hollis-labs/go-agent-sessions/agentsessions"
+	"github.com/oklog/ulid/v2"
 )
 
 // Mode is the lifecycle policy for an agent process spawned via Boot.
@@ -138,9 +144,11 @@ type Session struct {
 	BootDir      string
 	WorkspaceDir string
 
-	// Internal references for lifecycle methods; populated by Boot.
-	deps     *Dependencies
+	deps      *Dependencies
 	startedAt time.Time
+	// hadLineage records whether Boot registered a PathGrants lineage for
+	// this session — Stop unwinds it.
+	hadLineage bool
 }
 
 // Boot resolves the agent profile, materializes the workspace and ephemeral
@@ -151,10 +159,6 @@ type Session struct {
 //
 // Mode-specific dispatch is documented per-Mode constant. The chat harness
 // owns turn orchestration; Boot only owns process lifecycle.
-//
-// The body is implemented across Phase 3 (primitives) and Phase 4 (call-site
-// migration). Phase 3a stubs Boot pending the SessionsManager composition
-// root that Phase 4 wires.
 func Boot(ctx context.Context, deps *Dependencies, opts Options) (*Session, error) {
 	if err := opts.Validate(); err != nil {
 		return nil, err
@@ -162,5 +166,272 @@ func Boot(ctx context.Context, deps *Dependencies, opts Options) (*Session, erro
 	if deps == nil {
 		return nil, errors.New("agent.Boot: Dependencies is required")
 	}
-	return nil, errors.New("agent.Boot: not yet implemented (phase 3a — primitives only; Boot body lands in phase 3b)")
+	if deps.SessionsManager == nil {
+		return nil, errors.New("agent.Boot: Dependencies.SessionsManager is required")
+	}
+	if deps.Agents == nil {
+		return nil, errors.New("agent.Boot: Dependencies.Agents is required")
+	}
+	if deps.ProviderAdapter == nil {
+		return nil, errors.New("agent.Boot: Dependencies.ProviderAdapter is required")
+	}
+	if deps.Store == nil {
+		return nil, errors.New("agent.Boot: Dependencies.Store is required")
+	}
+
+	profile, err := deps.Agents.GetOrDefault(opts.AgentProfile)
+	if err != nil {
+		return nil, fmt.Errorf("agent.Boot: resolve profile: %w", err)
+	}
+	if profile == nil {
+		return nil, errors.New("agent.Boot: profile resolution returned nil")
+	}
+
+	sessID := opts.SessionID
+	if sessID == "" {
+		sessID = newSessionID()
+	}
+
+	ws, err := workspaceCreate(deps.WorkspacesRoot, sessID, opts)
+	if err != nil {
+		return nil, err
+	}
+
+	layout := bootdirLayoutFor(profile.DefaultProvider)
+	bootDir, err := layout.Setup(SetupParams{
+		SessionID:    sessID,
+		RunID:        opts.RunID,
+		AgentProfile: profile,
+		Mode:         opts.Mode,
+		SystemPrompt: composeSystemPrompt(opts.Role, profile, opts.Mode),
+		BootContent:  composeBootContent(opts),
+		ProjectDir:   opts.Workdir,
+		MCPConfig:    deps.MCPConfig,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("agent.Boot: bootdir setup: %w", err)
+	}
+
+	// Anything past this point that fails must clean the boot dir to avoid
+	// leaking $TMPDIR entries.
+	cleanup := func(failure error) (*Session, error) {
+		_ = os.RemoveAll(bootDir)
+		return nil, failure
+	}
+
+	envMap := composeEnv(profile, opts)
+	envMap = layout.AmendEnv(envMap, bootDir)
+
+	spawnWorkdir := layout.SpawnWorkdir(bootDir, opts.Workdir)
+
+	adapter := deps.ProviderAdapter(profile.DefaultProvider)
+	if adapter == nil {
+		return cleanup(fmt.Errorf("agent.Boot: no adapter registered for provider %q", profile.DefaultProvider))
+	}
+
+	runtimeCfg := runtimeConfigForAdapter(adapter, profile.DefaultProvider, opts.Mode)
+	runtimeCfg.ID = sessID
+	runtimeCfg.Kind = "cli"
+
+	rt, err := agentsessions.NewFromAdapter(runtimeCfg)
+	if err != nil {
+		return cleanup(fmt.Errorf("agent.Boot: build runtime: %w", err))
+	}
+
+	// PathGrants lineage for nested subagents. nil-safe: ModeSubagent
+	// validation already enforced ParentSessionID non-empty.
+	hadLineage := false
+	if opts.Mode == ModeSubagent && deps.PathGrants != nil {
+		deps.PathGrants.RegisterLineage(sessID, opts.ParentSessionID)
+		hadLineage = true
+	}
+
+	parentPtr := (*string)(nil)
+	if opts.ParentSessionID != "" {
+		parentPtr = &opts.ParentSessionID
+	}
+	if err := deps.Store.CreateRuntimeRow(&RuntimeRow{
+		ID:              sessID,
+		AgentProfile:    opts.AgentProfile,
+		Provider:        profile.DefaultProvider,
+		Mode:            opts.Mode.String(),
+		Workdir:         spawnWorkdir,
+		State:           "launching",
+		ParentSessionID: parentPtr,
+		StartedAt:       time.Now(),
+		Meta:            opts.SessionMeta,
+	}); err != nil {
+		if hadLineage && deps.PathGrants != nil {
+			deps.PathGrants.ClearLineage(sessID)
+		}
+		return cleanup(fmt.Errorf("agent.Boot: persist runtime row: %w", err))
+	}
+
+	var sessionIDPreset string
+	if opts.Mode == ModeResume && opts.ResumeFromCheckpoint != "" {
+		cp, err := deps.Store.GetCheckpoint(opts.ResumeFromCheckpoint)
+		if err != nil {
+			if hadLineage && deps.PathGrants != nil {
+				deps.PathGrants.ClearLineage(sessID)
+			}
+			_ = deps.Store.MarkRuntimeFailed(sessID, err.Error())
+			return cleanup(fmt.Errorf("agent.Boot: load checkpoint: %w", err))
+		}
+		if cp != nil {
+			sessionIDPreset = cp.ProviderSessionID
+		}
+	}
+
+	var supervisor *agentsessions.SupervisorOptions
+	if opts.Mode == ModeLongLived && runtimeCfg.Caps.PTY {
+		telem := deps.Telemetry
+		if telem == nil {
+			telem = noopTelemetry{}
+		}
+		supervisor = &agentsessions.SupervisorOptions{
+			IdleKill:          15 * time.Minute,
+			RestartOnCrash:    2,
+			MaxRestartBackoff: 30 * time.Second,
+			WatchdogTimeout:   0,
+			OnRestart: func(attempt int, prevExit *agentsessions.ExitError) {
+				telem.RecordPTYRestart(sessID, attempt, prevExit)
+			},
+		}
+	}
+
+	sandboxProfile := buildSandboxProfile(deps.SandboxBaseProfile, opts)
+
+	onSessionID := func(id string) {
+		_ = deps.Store.SetProviderSessionID(sessID, id)
+	}
+
+	var eventFanout chan<- agentsessionsStreamEventChan
+	_ = eventFanout // type alias bridge — see below
+	var typedCallback = func() interface{} {
+		if deps.TypedEventCallback != nil {
+			return deps.TypedEventCallback(sessID)
+		}
+		return nil
+	}()
+	_ = typedCallback
+
+	// First-turn payload: ModeOneShot can override with OneShotPrompt; all
+	// others use the kickoff convention pointing at the planted boot.md.
+	firstTurn := composeKickoff(opts.Role, sessID, opts.ParentSessionID)
+	if opts.Mode == ModeOneShot && opts.OneShotPrompt != "" {
+		firstTurn = opts.OneShotPrompt
+	}
+
+	startOpts := agentsessions.StartOptions{
+		Workdir:           spawnWorkdir,
+		WorkspaceDir:      ws.Root,
+		LogPath:           ws.LogPath,
+		BootPrompt:        layout.BootPrompt(profile, opts),
+		BootMode:          layout.BootMode(),
+		Env:               envMapToSlice(envMap),
+		Profile:           sandboxProfile,
+		SessionIDPreset:   sessionIDPreset,
+		OnSessionID:       onSessionID,
+		Supervisor:        supervisor,
+		ResourceLimits:    nil,
+		AutoFireFirstTurn: shouldAutoFireFirstTurn(opts.Mode),
+		FirstTurnPayload:  []byte(firstTurn),
+		AttachEnabled:     true,
+	}
+	if deps.EventFanout != nil {
+		startOpts.EventFanout = deps.EventFanout(sessID)
+	}
+	if deps.TypedEventCallback != nil {
+		startOpts.TypedEventCallback = deps.TypedEventCallback(sessID)
+	}
+
+	sessionMeta := metaToStringMap(opts.SessionMeta)
+	if err := deps.SessionsManager.Start(ctx, agentsessions.StartRequest{
+		ID:          sessID,
+		Runtime:     rt,
+		Options:     startOpts,
+		SessionMeta: sessionMeta,
+	}); err != nil {
+		if hadLineage && deps.PathGrants != nil {
+			deps.PathGrants.ClearLineage(sessID)
+		}
+		_ = deps.Store.MarkRuntimeFailed(sessID, err.Error())
+		return cleanup(fmt.Errorf("agent.Boot: SessionsManager.Start: %w", err))
+	}
+
+	sess := &Session{
+		ID:           sessID,
+		Mode:         opts.Mode,
+		Provider:     profile.DefaultProvider,
+		BootDir:      bootDir,
+		WorkspaceDir: ws.Root,
+		deps:         deps,
+		startedAt:    time.Now(),
+		hadLineage:   hadLineage,
+	}
+
+	// Mode-specific drive. AutoFireFirstTurn handles the kickoff for
+	// ModeOneShot / ModeSubagent / ModeBackground; ModeLongLived and
+	// ModeResume callers drive turns externally.
+	if opts.Mode == ModeOneShot && !shouldAutoFireFirstTurn(opts.Mode) {
+		// Defensive: shouldAutoFireFirstTurn(ModeOneShot) is true today,
+		// but the manual SendInput path remains here for future modes
+		// where AutoFireFirstTurn is false but the caller's intent is a
+		// single immediate turn.
+		if err := deps.SessionsManager.SendInput(sessID, []byte(firstTurn)); err != nil {
+			_ = sess.Stop(context.Background())
+			return nil, fmt.Errorf("agent.Boot: ModeOneShot SendInput: %w", err)
+		}
+	}
+
+	return sess, nil
+}
+
+// agentsessionsStreamEventChan is an unused alias retained as a placeholder
+// for clarity around the EventFanout shape; deps.EventFanout returns the
+// real chan<- provider.StreamEvent. Kept un-exported.
+type agentsessionsStreamEventChan = struct{}
+
+// envMapToSlice flattens the composed env map into the KEY=VALUE slice
+// agentsessions.StartOptions.Env requires. Sorted keys for deterministic
+// ordering (helps test assertions and child-process debug output).
+func envMapToSlice(env map[string]string) []string {
+	if len(env) == 0 {
+		return nil
+	}
+	keys := make([]string, 0, len(env))
+	for k := range env {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	out := make([]string, 0, len(env))
+	for _, k := range keys {
+		out = append(out, k+"="+env[k])
+	}
+	return out
+}
+
+// metaToStringMap projects the any-typed Options.SessionMeta into the
+// string-typed map agentsessions.StartRequest.SessionMeta requires.
+// Non-string values are rendered with fmt.Sprintf("%v", v).
+func metaToStringMap(meta map[string]any) map[string]string {
+	if len(meta) == 0 {
+		return nil
+	}
+	out := make(map[string]string, len(meta))
+	for k, v := range meta {
+		switch tv := v.(type) {
+		case string:
+			out[k] = tv
+		default:
+			out[k] = fmt.Sprintf("%v", v)
+		}
+	}
+	return out
+}
+
+// newSessionID generates a session id when the caller doesn't supply one.
+// ULID is monotonic-time prefixed so logs sort naturally.
+func newSessionID() string {
+	return ulid.Make().String()
 }

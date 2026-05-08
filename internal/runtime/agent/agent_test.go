@@ -58,10 +58,10 @@ func TestOptions_Validate(t *testing.T) {
 	})
 }
 
-// TestBoot_PhaseThreeStub confirms Boot still returns a clear error rather
-// than panicking; the body lands in Phase 3b. The Validate guard runs first,
-// then the Dependencies guard, then the not-implemented sentinel.
-func TestBoot_PhaseThreeStub(t *testing.T) {
+// TestBoot_EarlyValidation covers the validation guards that run before
+// any side effects (workspace mkdir, boot dir, SessionsManager.Start).
+// Mode-dispatch + happy-path coverage lives in boot_test.go with fakes.
+func TestBoot_EarlyValidation(t *testing.T) {
 	t.Run("validate_first", func(t *testing.T) {
 		_, err := Boot(context.Background(), nil, Options{Mode: ModeSubagent})
 		if err == nil || !strings.Contains(err.Error(), "ParentSessionID") {
@@ -74,10 +74,10 @@ func TestBoot_PhaseThreeStub(t *testing.T) {
 			t.Fatalf("expected Dependencies error, got %v", err)
 		}
 	})
-	t.Run("body_pending", func(t *testing.T) {
+	t.Run("requires_sessions_manager", func(t *testing.T) {
 		_, err := Boot(context.Background(), &Dependencies{}, Options{})
-		if err == nil || !strings.Contains(err.Error(), "not yet implemented") {
-			t.Fatalf("expected pending-body sentinel, got %v", err)
+		if err == nil || !strings.Contains(err.Error(), "SessionsManager") {
+			t.Fatalf("expected SessionsManager error, got %v", err)
 		}
 	})
 }

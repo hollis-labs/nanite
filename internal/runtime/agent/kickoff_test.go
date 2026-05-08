@@ -48,6 +48,27 @@ func Test_composeBootContent_one_shot_includes_task_when_provided(t *testing.T) 
 	}
 }
 
+// Test_composeBootContent_subagent_includes_task_when_provided confirms
+// ModeSubagent threads OneShotPrompt into the planted boot.md as a Task
+// section, matching the ModeOneShot pattern. Phase 4a (CW-20260508-0002):
+// the BootRunner passes run.Prompt as Options.OneShotPrompt so the
+// auto-fired kickoff `Boot @./boot.md` resolves to the actual subagent
+// task instead of just the role-anchor framing.
+func Test_composeBootContent_subagent_includes_task_when_provided(t *testing.T) {
+	got := composeBootContent(Options{
+		Mode:            ModeSubagent,
+		Role:            "reviewer",
+		ParentSessionID: "sess-parent",
+		OneShotPrompt:   "Audit auth/login.go for missing nil checks.",
+	})
+	if !strings.Contains(got, "nested subagent") {
+		t.Errorf("ModeSubagent framing missing:\n%s", got)
+	}
+	if !strings.Contains(got, "Audit auth/login.go") {
+		t.Errorf("OneShotPrompt missing from subagent boot.md:\n%s", got)
+	}
+}
+
 // Test_composeKickoffRaw_falls_back_to_content_when_at_unsupported
 // confirms the raw-content fallback never returns empty.
 func Test_composeKickoffRaw_falls_back_to_content_when_at_unsupported(t *testing.T) {

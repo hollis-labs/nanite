@@ -65,6 +65,9 @@ func composeBootContent(opts Options) string {
 		}
 	case ModeSubagent:
 		b.WriteString("\nYou are a nested subagent. Your parent will consume your final output as a tool result.\n")
+		if opts.OneShotPrompt != "" {
+			fmt.Fprintf(&b, "\n## Task\n\n%s\n", strings.TrimSpace(opts.OneShotPrompt))
+		}
 	case ModeBackground:
 		b.WriteString("\nYou are running as a background task. No interactive user is attached; surface results via the messaging substrate.\n")
 	case ModeResume:

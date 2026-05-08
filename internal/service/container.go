@@ -675,11 +675,13 @@ func NewContainer(cfg ContainerConfig) (*Container, error) {
 		AgentEventBridge:     agentBridge,
 	})
 
-	// G-3 + G-5: subagent service with the real chat-engine-backed
-	// runner. ChatRunner spawns a persisted child session per run and
-	// drives one assistant turn through chatServiceImpl.generateResponse.
-	// subagentStreamSink emits subagent_run_status_changed events on
-	// the parent session's SSE stream for each transition.
+	// G-3 + G-5: subagent service with the real chat-engine-backed runner.
+	// Phase 4a (CW-20260508-0002): BootRunner is the entry point — CLI-provider
+	// subagents (claude/codex/opencode etc.) Boot a fresh ModeSubagent process
+	// and stream events through the agentEventBridge per-session router; HTTP-
+	// provider subagents (anthropic/openai/gemini/etc.) delegate to the legacy
+	// ChatRunner which still drives one chat-harness turn through
+	// chatServiceImpl.generateResponse against a child session.
 	chatSvcImpl, ok := chatSvc.(*chatServiceImpl)
 	if !ok {
 		stopCatalog()
@@ -694,7 +696,8 @@ func NewContainer(cfg ContainerConfig) (*Container, error) {
 		sessImpl.SetArchiveHook(chatSvcImpl.CloseAgentSession)
 	}
 
-	subagentRunner := NewChatRunner(chatSvcImpl, agentReader, cfg.Store, cfg.Store.DB, pathGrants)
+	legacyRunner := NewChatRunner(chatSvcImpl, agentReader, cfg.Store, cfg.Store.DB, pathGrants)
+	subagentRunner := NewBootRunner(agentDeps, agentBridge, agentReader, cfg.Store, cfg.Store.DB, pathGrants, legacyRunner)
 	approvalEmitter := NewApprovalEmitter(cfg.Store, streams)
 	subagentSvc := subagent.NewService(cfg.Store.DB, subagentRunner, messagingSvc, approvalEmitter, cfg.Store)
 	subagentSvc.SetStreamSink(&subagentStreamSink{streams: streams})

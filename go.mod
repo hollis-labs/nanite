@@ -15,10 +15,12 @@ require (
 
 require (
 	github.com/google/jsonschema-go v0.4.2
+	github.com/hollis-labs/go-agent-sessions v0.1.0
 	github.com/hollis-labs/go-agentmux-client v0.1.0
 	github.com/hollis-labs/go-modelsdev v0.0.0-00010101000000-000000000000
 	github.com/hollis-labs/go-otel v0.0.2
 	github.com/hollis-labs/go-providers v0.8.0
+	github.com/hollis-labs/go-sandbox v0.1.0
 	github.com/hollis-labs/go-toolbroker v0.1.0
 	github.com/hollis-labs/vanta-conduit v0.5.0
 	github.com/modelcontextprotocol/go-sdk v1.5.0
@@ -31,6 +33,7 @@ require (
 	github.com/dlclark/regexp2 v1.11.4 // indirect
 	github.com/grpc-ecosystem/grpc-gateway/v2 v2.28.0 // indirect
 	github.com/hollis-labs/go-queue v0.1.2 // indirect
+	github.com/hollis-labs/go-runner v0.3.0 // indirect
 	github.com/segmentio/asm v1.1.3 // indirect
 	github.com/segmentio/encoding v0.5.4 // indirect
 	go.opentelemetry.io/otel/exporters/otlp/otlptrace v1.41.0 // indirect

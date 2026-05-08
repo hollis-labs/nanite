@@ -74,9 +74,36 @@ type Dependencies struct {
 	// Telemetry receives PTY restart and lifecycle observability events.
 	Telemetry Telemetry
 
+	// Recovery, when non-nil, observes lib-level restart attempts and
+	// terminal session exits. Implemented by the in-process recovery
+	// broker (internal/runtime/agent/recovery). Optional — nil leaves
+	// the chat harness's existing per-turn recoverable-error handling
+	// as the only remediation path.
+	Recovery RecoveryHooks
+
 	// SandboxBaseProfile is the starting profile composed per-spawn with
 	// AllowLoopback, FS allowlists, and ModeBackground/WideOpen overrides.
 	SandboxBaseProfile sandbox.Profile
+}
+
+// RecoveryHooks is the in-process subagent recovery broker's hook
+// surface. Implemented by recovery.Broker; declared here so the agent
+// package can hold the contract without importing recovery (which
+// would create an import cycle).
+//
+// OnRestart is invoked from agent.Boot's SupervisorOptions.OnRestart
+// closure when the lib-level supervisor triggers a restart. The broker
+// observes (records breadcrumb, optionally overlays an info-card) but
+// does not re-dispatch — the lib has already handled the restart.
+//
+// OnSessionExit is invoked from the chat composition root's
+// Wait-observer goroutine when a session's terminal *ExitError lands.
+// The meta bag carries chat-side context (stderr tail, sandbox state,
+// MCP transport health, etc.) the classifier consults; missing keys
+// degrade to zero-valued FailureEvent fields.
+type RecoveryHooks interface {
+	OnRestart(sessionID string, attempt int, prevExit *agentsessions.ExitError)
+	OnSessionExit(sessionID string, exit *agentsessions.ExitError, meta map[string]any)
 }
 
 // AgentProfiles resolves agent profile names. Backed by

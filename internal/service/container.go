@@ -685,6 +685,15 @@ func NewContainer(cfg ContainerConfig) (*Container, error) {
 		stopCatalog()
 		return nil, fmt.Errorf("service container: chatSvc is %T, expected *chatServiceImpl for ChatRunner", chatSvc)
 	}
+
+	// Phase 4c.8 (CW-20260508-0002): wire the SessionService archive hook to
+	// chatSvc.CloseAgentSession so closing a chat session releases the
+	// underlying long-lived runtime session immediately instead of waiting
+	// for the IdleKill=15min supervisor timeout. Best-effort, nil-safe.
+	if sessImpl, ok := sessions.(*sessionServiceImpl); ok {
+		sessImpl.SetArchiveHook(chatSvcImpl.CloseAgentSession)
+	}
+
 	subagentRunner := NewChatRunner(chatSvcImpl, agentReader, cfg.Store, cfg.Store.DB, pathGrants)
 	approvalEmitter := NewApprovalEmitter(cfg.Store, streams)
 	subagentSvc := subagent.NewService(cfg.Store.DB, subagentRunner, messagingSvc, approvalEmitter, cfg.Store)

@@ -406,9 +406,24 @@ func (b *agentEventBridge) SetPerSessionRouter(sessionID string, ch chan provide
 	}
 	router := &sessionRouter{ch: ch}
 	if prev, loaded := b.routers.Swap(sessionID, router); loaded {
-		// A stale router was still bound (e.g. takeover before the prior
-		// turn's Done arrived). Release it so the prior chat-harness
-		// consumer terminates cleanly.
+		// Phase 4c.7 (CW-20260508-0002): session takeover detected. The
+		// prior turn's Done hadn't arrived yet (or its ctx-cancel watcher
+		// hadn't run) when the chat-harness bound a fresh turnCh — most
+		// likely a user-driven retry / new message before the prior
+		// generateResponse drained.
+		//
+		// Conservative semantics: release the stale router (close-once
+		// terminates the prior streamLoop), then let the new turn proceed.
+		// The Boot'd CLI process is still running; its mid-turn output may
+		// interleave with the new turn's response.
+		//
+		// Known limitation: claude-code's PTY surface doesn't expose a
+		// mid-turn interrupt today, so we can't tell the agent to abort
+		// the prior turn before delivering new input. Phase 5+ adds
+		// Session.Interrupt(ctx) once go-agent-sessions surfaces a
+		// non-blocking interrupt (follow-up ticket).
+		slog.Warn("agent_event_bridge: session takeover — closing stale per-turn chan",
+			"session_id", sessionID)
 		prev.(*sessionRouter).closeOnce()
 	}
 }

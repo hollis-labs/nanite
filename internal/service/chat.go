@@ -639,6 +639,34 @@ func (s *chatServiceImpl) SetWorkers(w *worker.Manager) {
 	s.workers = w
 }
 
+// CloseAgentSession stops + drops any long-lived runtime session bound to
+// the supplied chat session id. Phase 4c.8 (CW-20260508-0002): wired as the
+// SessionService archive hook so closing a chat session releases the
+// underlying claude-code (or other CLI) PTY process immediately instead of
+// waiting for the IdleKill=15min supervisor timeout.
+//
+// Idempotent. nil-safe when the runtime is not wired (no-op).
+func (s *chatServiceImpl) CloseAgentSession(ctx context.Context, sessionID string) {
+	if sessionID == "" {
+		return
+	}
+	v, ok := s.activeSessions.LoadAndDelete(sessionID)
+	if !ok {
+		return
+	}
+	s.activeSessionSlots.Delete(sessionID)
+	if s.agentEventBridge != nil {
+		s.agentEventBridge.SetPerSessionRouter(sessionID, nil)
+	}
+	sess, typeOK := v.(*runtimeagent.Session)
+	if !typeOK {
+		return
+	}
+	if err := sess.Stop(ctx); err != nil {
+		slog.Warn("chat-service: CloseAgentSession Stop", "session_id", sessionID, "err", err)
+	}
+}
+
 // ---------------------------------------------------------------------------
 // Internal helpers
 // ---------------------------------------------------------------------------

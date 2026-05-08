@@ -50,6 +50,19 @@ type sessionServiceImpl struct {
 	agents   AgentWriter // for EnsureSessionAgent on create
 	settings SettingsStore
 	events   EventEmitter // may be nil
+
+	// onArchive is a best-effort hook fired after the writer.ArchiveSession
+	// succeeds. Phase 4c.8 (CW-20260508-0002): the chat service uses this
+	// to Stop + drop any long-lived agent runtime session bound to the
+	// archived chat session. nil-safe.
+	onArchive func(ctx context.Context, sessionID string)
+}
+
+// SetArchiveHook installs (or clears) the onArchive callback. The container
+// uses this post-chatSvc construction since sessionService is built first.
+// Idempotent across calls.
+func (s *sessionServiceImpl) SetArchiveHook(hook func(ctx context.Context, sessionID string)) {
+	s.onArchive = hook
 }
 
 // SessionServiceDeps groups the dependencies for constructing a SessionService.
@@ -128,6 +141,10 @@ func (s *sessionServiceImpl) Update(_ context.Context, sess *store.Session) erro
 func (s *sessionServiceImpl) Archive(ctx context.Context, id string) error {
 	if err := s.writer.ArchiveSession(id); err != nil {
 		return fmt.Errorf("archive session %s: %w", id, err)
+	}
+
+	if s.onArchive != nil {
+		s.onArchive(ctx, id)
 	}
 
 	if s.events != nil {

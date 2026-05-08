@@ -195,6 +195,26 @@ func (r Remediation) String() string {
 	}
 }
 
+// Description renders Remediation as a short user-facing phrase that
+// slots into the "Resolved {{X}}; retrying…" template on info-card
+// envelopes for ActionRetryConfigFixed. Distinct from String() —
+// String is for telemetry/logs (machine-friendly), Description is for
+// chat surface (human-friendly).
+func (r Remediation) Description() string {
+	switch r {
+	case RemediationRepopulateSandbox:
+		return "rebuilt the agent's sandbox directory"
+	case RemediationRefreshMCPTransport:
+		return "restarted the agent's MCP transport"
+	case RemediationRefreshCredentials:
+		return "refreshed agent credentials"
+	case RemediationRegenerateCLAUDEMD:
+		return "refreshed the agent's instructions"
+	default:
+		return "a configuration issue"
+	}
+}
+
 // Classification is the classifier's decision. Reason is human-readable
 // and threads into both telemetry breadcrumbs and (when ClassPermanent)
 // the user-facing error-report payload.

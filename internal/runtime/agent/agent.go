@@ -146,16 +146,21 @@ type Session struct {
 // Boot resolves the agent profile, materializes the workspace and ephemeral
 // boot dir, composes env + system prompt, selects a runtime (PTY for chat
 // sessions with PTY-capable adapters; subprocess-per-turn elsewhere), wires
-// supervisor + sandbox gates per Mode, persists the session row, and starts
+// supervisor + sandbox gates per Mode, persists the runtime row, and starts
 // the runtime via Dependencies.SessionsManager.
 //
 // Mode-specific dispatch is documented per-Mode constant. The chat harness
 // owns turn orchestration; Boot only owns process lifecycle.
 //
-// Body is implemented in Phase 3.
+// The body is implemented across Phase 3 (primitives) and Phase 4 (call-site
+// migration). Phase 3a stubs Boot pending the SessionsManager composition
+// root that Phase 4 wires.
 func Boot(ctx context.Context, deps *Dependencies, opts Options) (*Session, error) {
 	if err := opts.Validate(); err != nil {
 		return nil, err
 	}
-	return nil, errors.New("agent.Boot: not yet implemented (skeleton — phase 2)")
+	if deps == nil {
+		return nil, errors.New("agent.Boot: Dependencies is required")
+	}
+	return nil, errors.New("agent.Boot: not yet implemented (phase 3a — primitives only; Boot body lands in phase 3b)")
 }

@@ -1,6 +1,10 @@
 package agent
 
-import "errors"
+import (
+	"errors"
+
+	"github.com/hollis-labs/nanite/internal/store"
+)
 
 // claudeLayout plants nanite's claude-specific boot dir shape:
 //
@@ -35,7 +39,7 @@ func (claudeLayout) SpawnWorkdir(bootDir, _ string) string { return bootDir }
 
 // BootPrompt is the system prompt payload for the PTY runtime.
 // Sourced from composeSystemPrompt(role, profile, mode); see prompt.go.
-func (claudeLayout) BootPrompt(profile AgentProfile, opts Options) string {
+func (claudeLayout) BootPrompt(profile *store.AgentProfile, opts Options) string {
 	return composeSystemPrompt(opts.Role, profile, opts.Mode)
 }
 

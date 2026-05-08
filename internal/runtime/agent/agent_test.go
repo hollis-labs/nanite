@@ -27,7 +27,7 @@ func TestMode_String(t *testing.T) {
 }
 
 // TestOptions_Validate enforces the mode-specific invariants Boot
-// will rely on once Phase 3 wires the body.
+// will rely on once Phase 3b wires the body.
 func TestOptions_Validate(t *testing.T) {
 	t.Run("ModeSubagent_requires_ParentSessionID", func(t *testing.T) {
 		err := Options{Mode: ModeSubagent}.Validate()
@@ -58,17 +58,28 @@ func TestOptions_Validate(t *testing.T) {
 	})
 }
 
-// TestBoot_PhaseTwoStub confirms the skeleton compiles and Boot returns
-// a clear "not yet implemented" error rather than panicking. Phase 3
-// replaces this with real Boot lifecycle tests.
-func TestBoot_PhaseTwoStub(t *testing.T) {
-	_, err := Boot(context.Background(), nil, Options{})
-	if err == nil {
-		t.Fatal("expected skeleton error, got nil")
-	}
-	if !strings.Contains(err.Error(), "not yet implemented") {
-		t.Fatalf("expected skeleton sentinel, got %v", err)
-	}
+// TestBoot_PhaseThreeStub confirms Boot still returns a clear error rather
+// than panicking; the body lands in Phase 3b. The Validate guard runs first,
+// then the Dependencies guard, then the not-implemented sentinel.
+func TestBoot_PhaseThreeStub(t *testing.T) {
+	t.Run("validate_first", func(t *testing.T) {
+		_, err := Boot(context.Background(), nil, Options{Mode: ModeSubagent})
+		if err == nil || !strings.Contains(err.Error(), "ParentSessionID") {
+			t.Fatalf("expected validate-first error, got %v", err)
+		}
+	})
+	t.Run("requires_dependencies", func(t *testing.T) {
+		_, err := Boot(context.Background(), nil, Options{})
+		if err == nil || !strings.Contains(err.Error(), "Dependencies is required") {
+			t.Fatalf("expected Dependencies error, got %v", err)
+		}
+	})
+	t.Run("body_pending", func(t *testing.T) {
+		_, err := Boot(context.Background(), &Dependencies{}, Options{})
+		if err == nil || !strings.Contains(err.Error(), "not yet implemented") {
+			t.Fatalf("expected pending-body sentinel, got %v", err)
+		}
+	})
 }
 
 // Test_shouldUsePTY validates the runtime selection matrix locked at
@@ -121,6 +132,27 @@ func Test_bootdirLayoutFor_unsupported(t *testing.T) {
 		layout := bootdirLayoutFor(p)
 		if _, err := layout.Setup(SetupParams{}); err == nil {
 			t.Errorf("provider %q: expected unsupported-stub error, got nil", p)
+		}
+	}
+}
+
+// Test_bootdirLayoutFor_supported confirms the three implemented adapters
+// resolve to their concrete layouts.
+func Test_bootdirLayoutFor_supported(t *testing.T) {
+	cases := []struct {
+		provider string
+		want     Layout
+	}{
+		{"claude", claudeLayout{}},
+		{"claude-code", claudeLayout{}},
+		{"claudecode", claudeLayout{}},
+		{"codex", codexLayout{}},
+		{"opencode", opencodeLayout{}},
+	}
+	for _, c := range cases {
+		got := bootdirLayoutFor(c.provider)
+		if _, ok := got.(interface{ BootMode() string }); !ok {
+			t.Errorf("provider %q: layout missing BootMode()", c.provider)
 		}
 	}
 }

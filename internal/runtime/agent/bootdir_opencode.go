@@ -1,6 +1,10 @@
 package agent
 
-import "errors"
+import (
+	"errors"
+
+	"github.com/hollis-labs/nanite/internal/store"
+)
 
 // opencodeLayout plants opencode's config-dir shape:
 //
@@ -37,7 +41,7 @@ func (opencodeLayout) AmendEnv(base map[string]string, bootDir string) map[strin
 // SpawnWorkdir returns the project dir (boot dir is the config dir, not cwd).
 func (opencodeLayout) SpawnWorkdir(_, projectDir string) string { return projectDir }
 
-func (opencodeLayout) BootPrompt(profile AgentProfile, opts Options) string {
+func (opencodeLayout) BootPrompt(profile *store.AgentProfile, opts Options) string {
 	return composeSystemPrompt(opts.Role, profile, opts.Mode)
 }
 

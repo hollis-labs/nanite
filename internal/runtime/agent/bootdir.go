@@ -1,6 +1,10 @@
 package agent
 
-import "fmt"
+import (
+	"fmt"
+
+	"github.com/hollis-labs/nanite/internal/store"
+)
 
 // Layout abstracts per-provider boot-dir population. Each provider's
 // Layout owns the planted file shapes (CLAUDE.md / AGENTS.md /
@@ -25,7 +29,7 @@ type Layout interface {
 	// BootPrompt returns the system-prompt payload threaded into
 	// agentsessions.StartOptions.BootPrompt. PTY claude consumes this on
 	// process start; subsequent slot regeneration writes to <bootDir>/CLAUDE.md.
-	BootPrompt(profile AgentProfile, opts Options) string
+	BootPrompt(profile *store.AgentProfile, opts Options) string
 
 	// BootMode returns the boot-prompt delivery mode threaded into
 	// agentsessions.StartOptions.BootMode. PTY runtimes use "stdin"; legacy
@@ -36,14 +40,19 @@ type Layout interface {
 // SetupParams aggregates the inputs Setup needs. Kept stable so individual
 // Layout implementations can extend over time without rippling signatures.
 type SetupParams struct {
-	SessionID      string
-	RunID          string
-	AgentProfile   AgentProfile
-	Mode           Mode
-	SystemPrompt   string
-	BootContent    string
-	ProjectDir     string
-	MCPLoopbackURL string
+	SessionID    string
+	RunID        string
+	AgentProfile *store.AgentProfile
+	Mode         Mode
+	SystemPrompt string
+	BootContent  string
+	ProjectDir   string
+	// MCPConfig is the per-session MCP subprocess descriptor planted as
+	// .mcp.json in the boot dir. Nanite MCP transport is subprocess-spawn-
+	// based: the planted config names the nanite binary and the
+	// per-session args ("mcp --db <db> --session <sessID>"). Zero-value
+	// MCPConfig disables MCP planting.
+	MCPConfig MCPConfig
 }
 
 // bootdirLayoutFor returns the Layout for the named provider. Unsupported
@@ -86,6 +95,6 @@ func (u unsupportedLayout) AmendEnv(base map[string]string, _ string) map[string
 	return base
 }
 
-func (u unsupportedLayout) SpawnWorkdir(_, projectDir string) string { return projectDir }
-func (u unsupportedLayout) BootPrompt(AgentProfile, Options) string  { return "" }
-func (u unsupportedLayout) BootMode() string                         { return "" }
+func (u unsupportedLayout) SpawnWorkdir(_, projectDir string) string         { return projectDir }
+func (u unsupportedLayout) BootPrompt(*store.AgentProfile, Options) string   { return "" }
+func (u unsupportedLayout) BootMode() string                                 { return "" }

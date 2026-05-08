@@ -1,50 +1,58 @@
 package agent
 
 import (
-	"context"
 	"time"
 
 	agentsessions "github.com/hollis-labs/go-agent-sessions/agentsessions"
 	"github.com/hollis-labs/go-providers/provider"
 	"github.com/hollis-labs/go-sandbox/sandbox"
+	"github.com/hollis-labs/nanite/internal/permission"
+	"github.com/hollis-labs/nanite/internal/store"
 )
 
 // Dependencies is the composition-root injection point. The chat service,
-// scheduler, and background dispatcher each construct one of these and pass
-// it into Boot per spawn.
+// scheduler, and background dispatcher each construct one and pass it into
+// Boot per spawn.
 //
-// Concrete field types are deliberately interface-shaped where the
-// surrounding nanite packages already define the abstraction (Store,
-// PathGrants, EventFanout); they pin to lib types where the lib owns
-// the contract (SessionsManager, ProviderAdapter).
+// Field types reference real nanite packages where the abstraction already
+// exists (*store.AgentProfile, *permission.PathGrants); they reference lib
+// types where the lib owns the contract (*agentsessions.Manager,
+// provider.CLIAdapter); they declare local interfaces only where nanite
+// currently spreads the responsibility across many call sites that Phase 4
+// will normalize (Store, Telemetry, AgentProfiles, MCPConfig).
 type Dependencies struct {
-	// Agents resolves an AgentProfile name to its full configuration
-	// (provider, binary, args, env policy, role assembly inputs).
+	// Agents resolves an AgentProfile name to the persisted profile row.
+	// Phase 4 wires this against internal/service.AgentService or the
+	// store directly.
 	Agents AgentProfiles
 
 	// SessionsManager owns the runtime lifecycle (Start / SendInput / Stop /
 	// Wait / Checkpoint / Resume / Attach). Boot is a thin orchestration
-	// layer over this.
+	// layer over this. Constructed in the composition root; nanite has no
+	// existing Manager wiring, so this is a fresh dependency for Phase 4.
 	SessionsManager *agentsessions.Manager
 
-	// Store persists the session row + checkpoints. Boot writes the row
-	// in state=launching prior to Start; the manager promotes it as the
-	// runtime emits state events.
-	Store SessionStore
+	// Store persists the runtime-lifecycle row Boot writes prior to Start.
+	// Phase 4 backs this against store.Session, subagent_runs, or a new
+	// dedicated table — kept as an interface here so the composition root
+	// chooses without rippling through the agent package.
+	Store RuntimeStore
 
-	// PathGrants is the path-authority register. ModeSubagent registers
-	// lineage here; cleanup defers to session stop.
-	PathGrants PathGrants
+	// PathGrants registers and clears subagent lineage. ModeSubagent
+	// registers <child, parent> on Boot; the manager clears on session
+	// stop via the lifecycle hook.
+	PathGrants *permission.PathGrants
 
-	// EventFanout returns a per-session channel the runtime fans
-	// provider.StreamEvent values onto. Production composition roots
-	// allocate the channel and own the consumer goroutine; nanite reuses
-	// the existing chat-stream sink here.
+	// EventFanout returns the channel the runtime fans
+	// provider.StreamEvent onto for downstream consumers (cost ledger,
+	// chat-stream sink). The composition root translates StreamEvent ->
+	// chat.StreamEvent before forwarding to the FE; that bridge is
+	// outside the agent package.
 	EventFanout func(sessionID string) chan<- provider.StreamEvent
 
 	// TypedEventCallback returns the per-line typed-event handler used to
-	// surface CLI-internal tool calls as nanite SSE tool_call/tool_result
-	// events. Closes G-PTY-NO-TOOL-EVENTS.
+	// surface CLI-internal tool calls as nanite SSE tool_call /
+	// tool_result events. Closes G-PTY-NO-TOOL-EVENTS.
 	TypedEventCallback func(sessionID string) provider.EventsCallback
 
 	// ProviderAdapter resolves a provider name to its CLI adapter
@@ -52,9 +60,12 @@ type Dependencies struct {
 	// Caps and BootDirSpec.
 	ProviderAdapter func(providerName string) provider.CLIAdapter
 
-	// MCPLoopback exposes the per-session MCP loopback URL planted in the
-	// agent's .mcp.json. Required for tools to reach back into nanite.
-	MCPLoopback MCPLoopback
+	// MCPConfig describes how to plant the per-session .mcp.json. Nanite
+	// MCP transport is subprocess-spawn-based: the planted config names
+	// the nanite binary and the per-session args ("mcp --db <db> --session
+	// <sessID>"). The composition root constructs an MCPConfig with the
+	// resolved binary path and the active store DB path.
+	MCPConfig MCPConfig
 
 	// WorkspacesRoot is the persistent workspace base dir
 	// (default ~/.nanite/workspaces).
@@ -68,39 +79,42 @@ type Dependencies struct {
 	SandboxBaseProfile sandbox.Profile
 }
 
-// AgentProfiles is the minimal interface Boot needs from the existing
-// internal/agent package to resolve a profile name. Phase 3 will refine
-// this as the chat-service composition root takes shape.
+// AgentProfiles resolves agent profile names. Backed by
+// internal/store.GetAgentBySlug + a service-layer fallback, or by an in-memory
+// registry for tests.
 type AgentProfiles interface {
-	GetOrDefault(name string) AgentProfile
+	// GetOrDefault returns the named profile or a sensible default when
+	// name is empty / unresolved.
+	GetOrDefault(name string) (*store.AgentProfile, error)
 }
 
-// AgentProfile is a snapshot of the resolved agent configuration. Phase 3
-// will switch this to a concrete type referencing internal/agent or
-// internal/store; declared here so the skeleton compiles standalone.
-type AgentProfile struct {
-	Name     string
-	Provider string
-	Binary   string
-	Args     []string
-	Env      map[string]string
+// RuntimeStore is the persistence contract Boot relies on for the runtime
+// lifecycle row. Backed by internal/store in production; the row may live
+// in store.sessions, subagent_runs, or a dedicated agent_runtime table —
+// the composition root decides.
+type RuntimeStore interface {
+	// CreateRuntimeRow persists the launching-state row Boot creates
+	// before SessionsManager.Start. The id is the agent runtime id
+	// (typically equal to opts.SessionID for chat ModeLongLived).
+	CreateRuntimeRow(row *RuntimeRow) error
+
+	// MarkRuntimeFailed transitions the row to state="failed" with reason.
+	MarkRuntimeFailed(runtimeID, reason string) error
+
+	// SetProviderSessionID records the provider-side session id (claude's
+	// session_id, codex's, etc.) once the adapter reports it via
+	// StartOptions.OnSessionID.
+	SetProviderSessionID(runtimeID, providerSessionID string) error
+
+	// GetCheckpoint loads a runtime checkpoint payload for ModeResume.
+	GetCheckpoint(checkpointID string) (*RuntimeCheckpoint, error)
 }
 
-// SessionStore is the persistence contract Boot relies on. The full
-// internal/store.Session shape lives in nanite's existing store package;
-// this minimal interface lets the skeleton compile before Phase 3 wires
-// the concrete dependency.
-type SessionStore interface {
-	CreateSession(s *StoreSession) error
-	MarkSessionFailed(sessionID, reason string) error
-	SetAgentSessionID(sessionID, providerSessionID string) error
-	GetSessionCheckpoint(checkpointID string) (*StoreCheckpoint, error)
-}
-
-// StoreSession is the persistence shape Boot writes. Field set chosen to
-// match the columns the existing internal/store.Session row owns. Phase 3
-// will replace this with a type alias / direct dependency.
-type StoreSession struct {
+// RuntimeRow is the lifecycle-tracking row Boot writes. Distinct from
+// store.Session (which tracks chat sessions) because not every Boot is a
+// chat session: ModeBackground tasks, scheduler-dispatched executors, and
+// nested subagents all create runtime rows without owning a chat row.
+type RuntimeRow struct {
 	ID              string
 	AgentProfile    string
 	Provider        string
@@ -112,45 +126,39 @@ type StoreSession struct {
 	Meta            map[string]any
 }
 
-// StoreCheckpoint is the resume payload Boot consults for ModeResume.
-type StoreCheckpoint struct {
+// RuntimeCheckpoint is the resume payload Boot consults for ModeResume.
+type RuntimeCheckpoint struct {
 	ID                string
 	ProviderSessionID string
 	CapturedAt        time.Time
 }
 
-// PathGrants is the path-authority lineage register. Phase 3 will pin
-// this to internal/permission.PathGrants.
-type PathGrants interface {
-	RegisterLineage(childSessionID, parentSessionID string) error
-	ReleaseLineage(sessionID string)
+// MCPConfig carries the inputs the bootdir layouts need to plant a valid
+// .mcp.json subprocess descriptor.
+type MCPConfig struct {
+	// BinaryPath is the absolute path to the nanite binary. Resolved once
+	// at composition root; symlinks already evaluated.
+	BinaryPath string
+
+	// DBPath is the active store DB the spawned MCP subprocess should
+	// open. Empty disables MCP planting (some tests / standalone runs).
+	DBPath string
+
+	// ServerID identifies the planted MCP server entry. Defaults to
+	// brand.ID when empty.
+	ServerID string
 }
 
-// MCPLoopback exposes the per-session loopback URL.
-type MCPLoopback interface {
-	URL(sessionID string) string
-}
-
-// Telemetry is the observability sink. Phase 3 will compose nanite's
-// existing OpenTelemetry plumbing here.
+// Telemetry is the observability sink. The production composition root
+// wires this against nanite's existing OpenTelemetry plumbing.
 type Telemetry interface {
 	RecordPTYRestart(sessionID string, attempt int, prevExit *agentsessions.ExitError)
 }
 
-// noop helpers used by Phase 2 tests / future no-op composition
-// roots; intentionally unexported so callers must construct
-// Dependencies explicitly.
-type noopPathGrants struct{}
-
-func (noopPathGrants) RegisterLineage(string, string) error { return nil }
-func (noopPathGrants) ReleaseLineage(string)                {}
-
+// noopTelemetry is the test-friendly default when no observability is wired.
 type noopTelemetry struct{}
 
 func (noopTelemetry) RecordPTYRestart(string, int, *agentsessions.ExitError) {}
 
-var (
-	_ PathGrants = noopPathGrants{}
-	_ Telemetry  = noopTelemetry{}
-	_           = context.Background // keep import in place for Phase 3 wiring
-)
+// Compile-time interface compliance assertions.
+var _ Telemetry = noopTelemetry{}

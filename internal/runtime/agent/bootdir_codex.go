@@ -1,6 +1,10 @@
 package agent
 
-import "errors"
+import (
+	"errors"
+
+	"github.com/hollis-labs/nanite/internal/store"
+)
 
 // codexLayout plants the codex-specific shape:
 //
@@ -24,7 +28,7 @@ func (codexLayout) AmendEnv(base map[string]string, _ string) map[string]string 
 
 func (codexLayout) SpawnWorkdir(bootDir, _ string) string { return bootDir }
 
-func (codexLayout) BootPrompt(profile AgentProfile, opts Options) string {
+func (codexLayout) BootPrompt(profile *store.AgentProfile, opts Options) string {
 	return composeSystemPrompt(opts.Role, profile, opts.Mode)
 }
 

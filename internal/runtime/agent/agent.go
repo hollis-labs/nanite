@@ -299,7 +299,7 @@ func Boot(ctx context.Context, deps *Dependencies, opts Options) (*Session, erro
 		}
 	}
 
-	sandboxProfile := buildSandboxProfile(deps.SandboxBaseProfile, opts)
+	sandboxProfile := buildSandboxProfile(deps.SandboxBaseProfile, opts, ws.Root, bootDir)
 
 	onSessionID := func(id string) {
 		_ = deps.Store.SetProviderSessionID(sessID, id)

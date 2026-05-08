@@ -20,7 +20,7 @@ require (
 	github.com/hollis-labs/go-modelsdev v0.0.0-00010101000000-000000000000
 	github.com/hollis-labs/go-otel v0.0.2
 	github.com/hollis-labs/go-providers v0.8.0
-	github.com/hollis-labs/go-sandbox v0.1.0
+	github.com/hollis-labs/go-sandbox v0.2.0
 	github.com/hollis-labs/go-toolbroker v0.1.0
 	github.com/hollis-labs/vanta-conduit v0.5.0
 	github.com/modelcontextprotocol/go-sdk v1.5.0

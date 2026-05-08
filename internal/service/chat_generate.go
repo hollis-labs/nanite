@@ -27,6 +27,7 @@ import (
 	"github.com/hollis-labs/nanite/internal/safego"
 	"github.com/hollis-labs/nanite/internal/sandbox"
 	"github.com/hollis-labs/nanite/internal/store"
+	"github.com/hollis-labs/nanite/internal/toolclient"
 	"github.com/hollis-labs/nanite/pkg/models"
 )
 
@@ -305,6 +306,39 @@ func (s *chatServiceImpl) generateResponse(ctx context.Context, sessionID, assis
 			"tools_before", before, "tools_after", len(tools))
 	}
 
+	// G-HOT-SWAP-DEAD activation. NANITE_TOOLS_LAZY_LOAD=true partitions the
+	// tool universe into "essential" (inline, full schemas) and "lazy"
+	// (announced via a LoadHint pointer; fetched via request_tools). The
+	// progressive-discovery path already curates a builtins-only surface,
+	// so partition stacks above non-progressive selections only — applying
+	// it on top of progressive would double-curate the same content.
+	var toolsLazyHint string
+	var lazyToolCount, essentialToolCount int
+	lazyLoadActive := false
+	if chat.IsToolsLazyLoadEnabled() && !selection.Progressive {
+		prevState := s.loadToolPartitionState(sessionID)
+		partition, newState := chat.PartitionTools(tools, modeOverrideSpec, nil, prevState, chat.ToolEssentialCap)
+		s.storeToolPartitionState(sessionID, newState)
+		if len(partition.Lazy) > 0 {
+			lazyLoadActive = true
+			lazyToolCount = len(partition.Lazy)
+			essentialToolCount = len(partition.Essential)
+			tools = partition.Essential
+			// Ensure request_tools is reachable so the agent can hydrate
+			// lazy entries on demand. Idempotent — partition leaves the
+			// meta-tool in essential if it was in the input.
+			if !containsToolNamed(tools, "request_tools") {
+				tools = append(tools, toolclient.RequestToolsMetaTool())
+			}
+			toolsLazyHint = chat.RenderToolLazyHint(partition.Lazy)
+			slog.Debug("chat-service: tools-lazy-load partition applied",
+				"session_id", sessionID,
+				"essential", essentialToolCount,
+				"lazy", lazyToolCount,
+				"hyst_pinned", len(newState.PromotedAt))
+		}
+	}
+
 	// Build the dynamic per-turn system prefix from tool selection. This text
 	// is sent verbatim in ChatRequest.SystemPrompt (it leads the slot blocks
 	// in the provider payload) and varies per turn; static agent / rules /
@@ -406,7 +440,7 @@ func (s *chatServiceImpl) generateResponse(ctx context.Context, sessionID, assis
 	}
 
 	// --- Assemble context (slot-based) ---
-	slotResult, err := s.assembleTurnContext(ctx, session, agent, mode, workspace, tools, extraSystemPrefix, providerName, model, ch, sessionMode)
+	slotResult, err := s.assembleTurnContext(ctx, session, agent, mode, workspace, tools, extraSystemPrefix, providerName, model, ch, sessionMode, toolsLazyHint)
 	if err != nil {
 		return
 	}
@@ -851,6 +885,16 @@ func (s *chatServiceImpl) generateResponse(ctx context.Context, sessionID, assis
 			"total_estimated_request_tokens", totalEstimate,
 			"rate_limit_tpm_observed", rateLimitTPM,
 			"cacheable_prefix_tokens", cacheablePrefixTokens,
+			// G-HOT-SWAP-DEAD activation telemetry. tools_lazy_load_active=false
+			// indicates the partition either was disabled or produced an empty
+			// lazy set (no overflow — every tool fit inline). When active, the
+			// slot's tools_tokens already reflects the inline+hint-only payload,
+			// so the savings vs. legacy can be derived as
+			// `legacy_tools_tokens - tools_tokens` once a control sample is
+			// captured (off-flag run on the same agent + workspace).
+			"tools_essential_count", essentialToolCount,
+			"tools_lazy_count", lazyToolCount,
+			"tools_lazy_load_active", lazyLoadActive,
 		}
 		for _, name := range ctxpkg.SlotOrder {
 			rbArgs = append(rbArgs, name+"_tokens", slotTokens[name])
@@ -1990,9 +2034,10 @@ func (s *chatServiceImpl) assembleTurnContext(
 	providerName, model string,
 	ch chan chat.StreamEvent,
 	sessionMode *store.Mode,
+	toolsLazyHint string,
 ) (*SlotAssemblyResult, error) {
 	windowSize := s.contextWindowSize(providerName, model)
-	result, err := s.context.AssembleSlots(ctx, session, agent, mode, workspace, tools, extraSystemPrefix, windowSize, sessionMode)
+	result, err := s.context.AssembleSlots(ctx, session, agent, mode, workspace, tools, extraSystemPrefix, windowSize, sessionMode, toolsLazyHint)
 	if err != nil {
 		ch <- chat.ErrorEvent(chat.ErrorCodeInternal, "Failed to assemble context",
 			map[string]interface{}{"raw": err.Error()})

@@ -186,7 +186,7 @@ func cmdServe(args []string) {
 	plugin.SetEnvelopeValidatorDevModeFunc(func() bool { return envelopeValidatorDevMode })
 
 	// Set up provider registry (API keys, Ollama, CLI adapters).
-	registry := initProviders(envelopeValidatorDevMode)
+	registry, cliAdapters := initProviders(envelopeValidatorDevMode)
 
 	slog.Info("app config loaded",
 		"cli_active_throttle_seconds", appCfg.Presence.CLIActiveThrottleSeconds,
@@ -279,6 +279,7 @@ func cmdServe(args []string) {
 		MaxCLIProcesses: maxCLIProcs,
 		CoordStore:      coord,
 		Worktrees:       wtMgr,
+		CLIAdapters:     cliAdapters,
 	})
 	if err != nil {
 		slogx.Fatal("failed to create service container", "err", err)
@@ -419,7 +420,12 @@ func (a skipPermsAdapter) BuildArgs(prompt, systemPrompt, cliSessionID string) [
 	return append(a.CLIAdapter.BuildArgs(prompt, systemPrompt, cliSessionID), "--dangerously-skip-permissions")
 }
 
-func initProviders(devMode bool) *provider.Registry {
+// initProviders constructs the provider.Registry plus the slice of go-providers
+// CLI adapters threaded into the agent-runtime composition root (Phase 4c.1
+// of agent-boot adoption). The slice carries the dev-mode skipPermsAdapter
+// wrap on claude so agent.Boot inherits the same `--dangerously-skip-permissions`
+// behavior the bridges get.
+func initProviders(devMode bool) (*provider.Registry, []provider.CLIAdapter) {
 	registry := provider.NewRegistry()
 
 	resolveKey := func(providerID string) string {
@@ -494,7 +500,12 @@ func initProviders(devMode bool) *provider.Registry {
 	registry.Register("ollama", provider.NewOllama())
 	slog.Info("provider registered", "provider", "ollama", "host", "http://localhost:11434")
 
-	// Register CLI adapters — PTY (unix) and subprocess (all platforms).
+	// Phase 4c.6 (CW-20260508-0002): provider.PTYBridge / SubprocessBridge
+	// registry registrations deleted. CLI agents (claude / codex / opencode /
+	// gemini / copilot / aider / junie / kiro / qwen) now spawn through
+	// internal/runtime/agent.Boot; the CLIAdapter slice still feeds the
+	// agent runtime composition root via ContainerConfig.CLIAdapters so the
+	// per-provider bootdir layouts can resolve their adapter binaries.
 	var claudeAdapter provider.CLIAdapter = provider.NewClaudeAdapter()
 	if devMode {
 		claudeAdapter = skipPermsAdapter{claudeAdapter}
@@ -502,6 +513,7 @@ func initProviders(devMode bool) *provider.Registry {
 	cliAdapters := []provider.CLIAdapter{
 		claudeAdapter,
 		provider.NewCodexAdapter(),
+		provider.NewOpencodeAdapter(),
 		provider.NewGeminiAdapter(),
 		provider.NewCopilotAdapter(),
 		provider.NewAiderAdapter(),
@@ -509,32 +521,8 @@ func initProviders(devMode bool) *provider.Registry {
 		provider.NewKiroAdapter(),
 		provider.NewQwenAdapter(),
 	}
-	for _, adapter := range cliAdapters {
-		if path, ok := adapter.Detect(); ok {
-			ptyName := "pty-" + adapter.Name()
-			registry.Register(ptyName, provider.NewPTYBridgeWithAdapter(adapter, path))
-			slog.Info("pty provider registered", "name", ptyName, "path", path)
 
-			subName := "sub-" + adapter.Name()
-			registry.Register(subName, provider.NewSubprocessBridge(adapter, path))
-			slog.Info("subprocess provider registered", "name", subName, "path", path)
-		}
-	}
-	registerLegacyPTYAlias(registry)
-
-	return registry
-}
-
-func registerLegacyPTYAlias(registry *provider.Registry) {
-	// Backwards-compat alias: "pty" should mirror the registered Claude PTY
-	// provider so it inherits the same adapter wrapping and sandbox flags.
-	if claudePTY, ok := registry.Get("pty-claude"); ok {
-		registry.Register("pty", claudePTY)
-		return
-	}
-	if ptyBridge := provider.NewPTYBridge(); ptyBridge != nil {
-		registry.Register("pty", ptyBridge)
-	}
+	return registry, cliAdapters
 }
 
 // resolveDevToolsAllowedPaths returns the effective allow-list for the dev_*

@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	agentsessions "github.com/hollis-labs/go-agent-sessions/agentsessions"
 	"github.com/hollis-labs/nanite/internal/agent"
 	"github.com/hollis-labs/nanite/internal/chat"
 	"github.com/hollis-labs/nanite/internal/config"
@@ -19,6 +20,7 @@ import (
 	"github.com/hollis-labs/nanite/internal/permission"
 	"github.com/hollis-labs/nanite/internal/reminders"
 	"github.com/hollis-labs/go-providers/provider"
+	runtimeagent "github.com/hollis-labs/nanite/internal/runtime/agent"
 	"github.com/hollis-labs/nanite/internal/safego"
 	"github.com/hollis-labs/nanite/internal/store"
 	"github.com/hollis-labs/go-modelsdev/modelsdev"
@@ -143,6 +145,26 @@ type ChatServiceConfig struct {
 	// ReminderEngine is the deterministic trigger engine for agent-set reminders
 	// (J11, CW-20260426-0009). nil-safe: when nil reminder eval is skipped.
 	ReminderEngine *reminders.Engine
+
+	// AgentDeps is the agent-runtime composition root (Phase 4c.1 of the
+	// agent-boot adoption). Threaded through here so HandleMessage can
+	// gate the long-lived PTY path on the session's CLIAdapter capabilities
+	// (Caps.PTY=true). nil = the legacy chat-harness path is taken
+	// universally; useful for tests and bootstrapping configurations that
+	// haven't wired the runtime yet.
+	AgentDeps *runtimeagent.Dependencies
+
+	// AgentSessionsManager is the singleton agentsessions.Manager owned
+	// by the runtime. Held by the chat service so Shutdown can drain
+	// running sessions cleanly. nil-safe: drain is skipped when absent.
+	AgentSessionsManager *agentsessions.Manager
+
+	// AgentEventBridge is the per-session event router owned by the chat
+	// service. driveBootSession (Phase 4c.4) uses it to bind a per-turn
+	// turnCh that receives runtime events instead of broadcasting them as
+	// SSE. nil-safe: when absent, CLI sessions cannot route events through
+	// the chat-harness loop (and the long-lived path is unavailable).
+	AgentEventBridge *agentEventBridge
 }
 
 // chatServiceImpl is the concrete ChatService implementation.
@@ -220,6 +242,33 @@ type chatServiceImpl struct {
 	// waits that look like stalls from the UI.
 	activeGenMu sync.Mutex
 	activeGen   map[string]*inFlightGen // sessionID -> current in-flight generation
+
+	// agentDeps is the agent-runtime composition root (Phase 4c.1). nil
+	// when the runtime is not wired (legacy chat-harness path universal).
+	agentDeps *runtimeagent.Dependencies
+
+	// agentSessionsManager is the singleton runtime manager. Held so
+	// Shutdown can drain running sessions cleanly. nil-safe.
+	agentSessionsManager *agentsessions.Manager
+
+	// activeSessions tracks long-lived runtime sessions keyed by chat
+	// session id (Phase 4c). First HandleMessage call for a CLI-PTY-capable
+	// session boots the runtime; subsequent calls SendInput on the existing
+	// session. Map values are *runtimeagent.Session.
+	activeSessions sync.Map
+
+	// agentEventBridge owns per-session router state. driveBootSession
+	// (Phase 4c.4) binds a per-turn turnCh via SetPerSessionRouter so the
+	// chat-harness loop consumes the runtime's StreamEvent stream without
+	// double-emitting SSE for inter-turn events. nil when the runtime is
+	// not wired (matches agentDeps == nil).
+	agentEventBridge *agentEventBridge
+
+	// activeSessionSlots remembers the last slot-content hash applied per
+	// session so driveBootSession only regenerates CLAUDE.md /
+	// agent-context.md when System / Agent / Mode / Rules slots change.
+	// Map values are uint64 (FNV-1a hash). Phase 4c.4 / 4c.5.
+	activeSessionSlots sync.Map
 }
 
 // inFlightGen records the currently-running generateResponse for a session
@@ -275,6 +324,9 @@ func NewChatService(cfg ChatServiceConfig) ChatService {
 		inspector:           cfg.Inspector,
 		loopDetector:        cfg.LoopDetector,
 		reminderEngine:      cfg.ReminderEngine,
+		agentDeps:           cfg.AgentDeps,
+		agentSessionsManager: cfg.AgentSessionsManager,
+		agentEventBridge:    cfg.AgentEventBridge,
 	}
 }
 
@@ -558,13 +610,21 @@ func (s *chatServiceImpl) GetStream(messageID string) (<-chan chat.StreamEvent, 
 	return s.streams.GetStream(messageID)
 }
 
-// Shutdown implements ChatService. It kills tracked CLI processes and then
-// cancels the service's lifecycle context, waiting up to chatShutdownMaxWait
-// for in-flight generateResponse goroutines to exit. Any goroutines still
-// running after the timeout are logged; see lifecycle.ShutdownTimeoutError.
+// Shutdown implements ChatService. It kills tracked CLI processes, drains
+// active runtime sessions, and then cancels the service's lifecycle
+// context, waiting up to chatShutdownMaxWait for in-flight goroutines to
+// exit. Any goroutines still running after the timeout are logged; see
+// lifecycle.ShutdownTimeoutError.
 func (s *chatServiceImpl) Shutdown() {
 	if s.processTracker != nil {
 		s.processTracker.KillAll()
+	}
+	if s.agentSessionsManager != nil {
+		ctx, cancel := context.WithTimeout(context.Background(), chatShutdownMaxWait)
+		if err := s.agentSessionsManager.Shutdown(ctx); err != nil {
+			slog.Warn("chat-service: agent sessions shutdown", "err", err)
+		}
+		cancel()
 	}
 	if s.lifecycle != nil {
 		if err := s.lifecycle.Shutdown(chatShutdownMaxWait); err != nil {
@@ -577,6 +637,34 @@ func (s *chatServiceImpl) Shutdown() {
 // circular dependency (ChatService <-> WorkerManager).
 func (s *chatServiceImpl) SetWorkers(w *worker.Manager) {
 	s.workers = w
+}
+
+// CloseAgentSession stops + drops any long-lived runtime session bound to
+// the supplied chat session id. Phase 4c.8 (CW-20260508-0002): wired as the
+// SessionService archive hook so closing a chat session releases the
+// underlying claude-code (or other CLI) PTY process immediately instead of
+// waiting for the IdleKill=15min supervisor timeout.
+//
+// Idempotent. nil-safe when the runtime is not wired (no-op).
+func (s *chatServiceImpl) CloseAgentSession(ctx context.Context, sessionID string) {
+	if sessionID == "" {
+		return
+	}
+	v, ok := s.activeSessions.LoadAndDelete(sessionID)
+	if !ok {
+		return
+	}
+	s.activeSessionSlots.Delete(sessionID)
+	if s.agentEventBridge != nil {
+		s.agentEventBridge.SetPerSessionRouter(sessionID, nil)
+	}
+	sess, typeOK := v.(*runtimeagent.Session)
+	if !typeOK {
+		return
+	}
+	if err := sess.Stop(ctx); err != nil {
+		slog.Warn("chat-service: CloseAgentSession Stop", "session_id", sessionID, "err", err)
+	}
 }
 
 // ---------------------------------------------------------------------------

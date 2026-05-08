@@ -117,6 +117,19 @@ type Options struct {
 	// SessionMeta is opaque metadata persisted on the session row for
 	// downstream introspection (FE drawer, broker routing, etc.).
 	SessionMeta map[string]any
+
+	// IsRelaunch, when true, signals that this Boot is a recovery
+	// broker's replacement-session dispatch for a previously failed
+	// session. The runtime row already exists in state="failed"; the
+	// broker has transitioned it to state="launching" via
+	// Store.MarkRuntimeRelaunching. Boot must SKIP CreateRuntimeRow
+	// (it would conflict on the unique sessionID key) but otherwise
+	// proceed normally — workspace + bootdir setup, manager.Start, etc.
+	//
+	// SessionID must be non-empty when IsRelaunch is true; the broker
+	// always passes the original SessionID to preserve chat-history /
+	// slot-state / path-grant lineage.
+	IsRelaunch bool
 }
 
 // Validate enforces mode-specific invariants.
@@ -130,6 +143,9 @@ func (o Options) Validate() error {
 		if o.ResumeFromCheckpoint == "" {
 			return errors.New("agent.Boot: ModeResume requires Options.ResumeFromCheckpoint")
 		}
+	}
+	if o.IsRelaunch && o.SessionID == "" {
+		return errors.New("agent.Boot: IsRelaunch requires Options.SessionID")
 	}
 	return nil
 }
@@ -250,21 +266,27 @@ func Boot(ctx context.Context, deps *Dependencies, opts Options) (*Session, erro
 	if opts.ParentSessionID != "" {
 		parentPtr = &opts.ParentSessionID
 	}
-	if err := deps.Store.CreateRuntimeRow(&RuntimeRow{
-		ID:              sessID,
-		AgentProfile:    opts.AgentProfile,
-		Provider:        profile.DefaultProvider,
-		Mode:            opts.Mode.String(),
-		Workdir:         spawnWorkdir,
-		State:           "launching",
-		ParentSessionID: parentPtr,
-		StartedAt:       time.Now(),
-		Meta:            opts.SessionMeta,
-	}); err != nil {
-		if hadLineage && deps.PathGrants != nil {
-			deps.PathGrants.ClearLineage(sessID)
+	// Skip CreateRuntimeRow on relaunch — the broker's
+	// Store.MarkRuntimeRelaunching has already transitioned the
+	// existing row from failed -> launching, and a second
+	// CreateRuntimeRow would conflict on the unique sessionID key.
+	if !opts.IsRelaunch {
+		if err := deps.Store.CreateRuntimeRow(&RuntimeRow{
+			ID:              sessID,
+			AgentProfile:    opts.AgentProfile,
+			Provider:        profile.DefaultProvider,
+			Mode:            opts.Mode.String(),
+			Workdir:         spawnWorkdir,
+			State:           "launching",
+			ParentSessionID: parentPtr,
+			StartedAt:       time.Now(),
+			Meta:            opts.SessionMeta,
+		}); err != nil {
+			if hadLineage && deps.PathGrants != nil {
+				deps.PathGrants.ClearLineage(sessID)
+			}
+			return cleanup(fmt.Errorf("agent.Boot: persist runtime row: %w", err))
 		}
-		return cleanup(fmt.Errorf("agent.Boot: persist runtime row: %w", err))
 	}
 
 	var sessionIDPreset string
@@ -288,6 +310,7 @@ func Boot(ctx context.Context, deps *Dependencies, opts Options) (*Session, erro
 		if telem == nil {
 			telem = noopTelemetry{}
 		}
+		recovery := deps.Recovery
 		supervisor = &agentsessions.SupervisorOptions{
 			IdleKill:          15 * time.Minute,
 			RestartOnCrash:    2,
@@ -295,6 +318,9 @@ func Boot(ctx context.Context, deps *Dependencies, opts Options) (*Session, erro
 			WatchdogTimeout:   0,
 			OnRestart: func(attempt int, prevExit *agentsessions.ExitError) {
 				telem.RecordPTYRestart(sessID, attempt, prevExit)
+				if recovery != nil {
+					recovery.OnRestart(sessID, attempt, prevExit)
+				}
 			},
 		}
 	}

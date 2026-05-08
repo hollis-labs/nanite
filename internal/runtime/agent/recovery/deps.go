@@ -148,12 +148,21 @@ type Logger interface {
 }
 
 // classifierState captures the per-session classifier state that drives
-// the "transient retry on first occurrence; permanent on second" rule.
-// Held inside the broker; not exposed.
+// the "transient retry on first occurrence; permanent on second" rule
+// AND the broker-level hard-cap attempt counter. Held inside the
+// broker; not exposed.
 type classifierState struct {
+	// attemptCount is the broker-level attempt counter (1-indexed).
+	// Increments on every OnSessionExit invocation for this sessionID.
+	// Drives the broker hard cap (Attempt > maxRetries -> Permanent)
+	// and feeds FailureEvent.Attempt for the classifier's own
+	// "first vs second occurrence" rule.
+	attemptCount int
+
 	// transientCountByCause counts how many transient retries the
-	// broker has already issued for this session keyed by ExitError.Cause.
-	// Used by the second-occurrence-is-permanent rule.
+	// broker has already issued for this session keyed by
+	// ExitError.Cause. Reserved for cause-aware second-occurrence
+	// escalation; v1 uses the simpler attemptCount rule.
 	transientCountByCause map[string]int
 }
 

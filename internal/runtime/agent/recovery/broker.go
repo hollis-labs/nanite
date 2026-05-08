@@ -127,47 +127,9 @@ func (b *Broker) OnRestart(sessionID string, attempt int, prevExit *agentsession
 	// learns about recovery on terminal exit (broker's OnSessionExit).
 }
 
-// OnSessionExit implements the agent.RecoveryHooks contract. Invoked
-// from the chat composition root's Wait-observer goroutine when the
-// session's terminal *agentsessions.ExitError lands.
-//
-// meta is a free-form context bag the chat harness populates with
-// session-level state (StderrTail, SandboxDirState, MCPTransport,
-// LastTurnPos, etc.) — keys documented in package docs.
-//
-// This is the broker's main entry point. It classifies the failure,
-// runs any remediation, dispatches a replacement session if classified
-// recoverable, and emits user-facing envelopes through Dependencies.Envelope.
-//
-// Phase 1: signature only; Phase 6 wires the orchestration.
-func (b *Broker) OnSessionExit(sessionID string, exit *agentsessions.ExitError, meta map[string]any) {
-	logger := b.logger()
-	if exit == nil {
-		// Clean exit — nothing to recover. Defensive: callers should
-		// not invoke OnSessionExit on nil exits, but we no-op rather
-		// than crash if they do.
-		logger.Info("recovery: nil exit skipped", "session_id", sessionID)
-		return
-	}
-
-	// Phase 6 will own the orchestration:
-	//   1. Construct FailureEvent from (sessionID, exit, meta) + per-session state.
-	//   2. Classify.
-	//   3. If ClassConfigPermissions, run Remediate.
-	//   4. If retryable and not over the broker hard cap, DispatchRetry.
-	//   5. Render the user-facing envelope and emit through Dependencies.Envelope.
-	//   6. Write breadcrumb with the resolved Outcome.
-	//
-	// For Phase 1, observe-and-log only so the package compiles and
-	// the agent-side Dependencies.Recovery wiring (Phase 7) has a
-	// stable callee.
-	logger.Info("recovery: terminal exit observed",
-		"session_id", sessionID,
-		"cause", exit.Cause,
-		"code", exit.Code,
-		"signal", exit.Signal,
-		"killed", exit.Killed)
-}
+// OnSessionExit lives in orchestration.go (Phase 6 implementation).
+// Kept here only as a forward-reference comment so readers of broker.go
+// see the full hook surface in one place.
 
 // CancelRetry aborts an in-flight retry identified by token. Called
 // when the FE posts a cancel_retry event (the user clicked the

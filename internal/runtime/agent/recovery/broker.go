@@ -242,31 +242,96 @@ func (slogLogger) Info(msg string, kv ...any)  { slog.Info(msg, kv...) }
 func (slogLogger) Warn(msg string, kv ...any)  { slog.Warn(msg, kv...) }
 func (slogLogger) Error(msg string, kv ...any) { slog.Error(msg, kv...) }
 
-// dispatchRetry is the broker-internal replacement-session dispatch.
-// Called from the Phase 6 orchestration once Classify + (optional)
-// Remediate decide a retry is appropriate. Reuses the SessionID and
-// preserves lineage.
+// DispatchRetry dispatches a replacement session for a failed
+// FailureEvent. Called from the Phase 6 orchestration once Classify +
+// (optional) Remediate decide a retry is appropriate. Exported so
+// tests can drive the dispatch path directly without reconstructing
+// the full classify→remediate pipeline.
 //
-// Phase 1: signature + skeleton. Phase 4 fleshes out the Store
-// transition + Boot call.
-func (b *Broker) dispatchRetry(ctx context.Context, ev *FailureEvent) (*agent.Session, error) {
+// Lineage preservation:
+//   - Same SessionID (chat session row, history, slot state, path
+//     grants all carry through).
+//   - Same AgentProfile, ParentSessionID, Workdir.
+//   - Mode derived from ev.Mode (string form persisted on the failed
+//     RuntimeRow, mapped back to agent.Mode).
+//
+// Pre-Boot, the broker transitions the failed RuntimeRow to
+// state="launching" via Store.MarkRuntimeRelaunching. NB: this is a
+// soft contract — the production agent.Boot path also calls
+// Store.CreateRuntimeRow with the same SessionID, which on most
+// store backends would conflict with the existing row. The composition
+// root in Phase 7 is responsible for either (a) extending agent.Options
+// with an IsRelaunch flag that suppresses CreateRuntimeRow on retry,
+// or (b) making the Store implementation upsert-aware. Documented as
+// a Phase 7 follow-up in the implementer report.
+func (b *Broker) DispatchRetry(ctx context.Context, ev *FailureEvent) (*agent.Session, error) {
+	if ev == nil {
+		return nil, errNilFailureEvent
+	}
 	if b.deps.AgentBoot == nil {
 		return nil, errNoAgentBootWired
 	}
 	if b.deps.Store != nil {
-		if err := b.deps.Store.MarkRuntimeRelaunching(ev.SessionID, "broker retry"); err != nil {
+		if err := b.deps.Store.MarkRuntimeRelaunching(ev.SessionID, "broker retry attempt "+itoa(ev.Attempt)); err != nil {
 			return nil, err
 		}
 	}
-	parentPtr := ""
-	if ev.LineageOf != "" {
-		parentPtr = ev.LineageOf
-	}
 	return b.deps.AgentBoot.Boot(ctx, agent.Options{
-		Mode:            agent.ModeLongLived, // Phase 4: derive from ev.Mode
+		Mode:            parseMode(ev.Mode),
 		SessionID:       ev.SessionID,
 		AgentProfile:    ev.AgentProfile,
-		ParentSessionID: parentPtr,
+		ParentSessionID: ev.LineageOf,
 		Workdir:         ev.Workdir,
 	})
 }
+
+// parseMode maps the string form of agent.Mode (as persisted on the
+// RuntimeRow) back to the typed enum. Mirrors agent.Mode.String() and
+// defaults to ModeLongLived for unknown inputs — long-lived is the
+// most common chat case, and the defensive default makes mid-flight
+// schema drift fail soft (replacement session boots in the safest mode).
+func parseMode(s string) agent.Mode {
+	switch s {
+	case "long_lived", "":
+		return agent.ModeLongLived
+	case "one_shot":
+		return agent.ModeOneShot
+	case "resume":
+		return agent.ModeResume
+	case "subagent":
+		return agent.ModeSubagent
+	case "background":
+		return agent.ModeBackground
+	default:
+		return agent.ModeLongLived
+	}
+}
+
+// itoa is a tiny zero-alloc-ish int formatter for the relaunch reason
+// string. Avoids a strconv import for the single use site.
+func itoa(n int) string {
+	if n == 0 {
+		return "0"
+	}
+	neg := false
+	if n < 0 {
+		neg = true
+		n = -n
+	}
+	var buf [20]byte
+	i := len(buf)
+	for n > 0 {
+		i--
+		buf[i] = byte('0' + n%10)
+		n /= 10
+	}
+	if neg {
+		i--
+		buf[i] = '-'
+	}
+	return string(buf[i:])
+}
+
+// errNilFailureEvent is returned by DispatchRetry when the caller
+// hands it a nil event. Defensive guard against orchestration bugs.
+var errNilFailureEvent = brokerErr("recovery.DispatchRetry: nil failure event")

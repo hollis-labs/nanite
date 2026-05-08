@@ -186,6 +186,14 @@ type ContainerConfig struct {
 
 	// CLI process concurrency limit (0 = unlimited).
 	MaxCLIProcesses int
+
+	// CLIAdapters is the slice of go-providers CLI adapters the agent-runtime
+	// composition root resolves by Name(). Threaded from main.go so the
+	// dev-mode `--dangerously-skip-permissions` wrapping (and other
+	// per-process customizations) is preserved. nil = the runtime has no
+	// adapters and Boot fails for any provider; callers should populate
+	// at least claude/codex/opencode.
+	CLIAdapters []provider.CLIAdapter
 }
 
 func newRuntimeAdapterRegistry() *agent.AdapterRegistry {
@@ -595,6 +603,35 @@ func NewContainer(cfg ContainerConfig) (*Container, error) {
 	reminderEngine := reminders.NewEngine(cfg.Store)
 	slog.Info("service container: reminder engine enabled (J11, CW-20260426-0009)")
 
+	// Phase 4c.1 (CW-20260508-0002): construct *agent.Dependencies +
+	// agentsessions.Manager once, after the core deps (store, pathGrants,
+	// streams) exist. Threaded through ChatServiceConfig so HandleMessage
+	// + subagent runner + future background dispatcher reuse the singleton.
+	// CLIAdapters fallback covers older main.go versions until the slice is
+	// populated; agent.Boot fails clean when no adapter matches.
+	cliAdapters := cfg.CLIAdapters
+	if len(cliAdapters) == 0 {
+		cliAdapters = []provider.CLIAdapter{
+			provider.NewClaudeAdapter(),
+			provider.NewCodexAdapter(),
+			provider.NewOpencodeAdapter(),
+		}
+	}
+	agentDeps, agentManager, agentDepsErr := BuildAgentDependencies(AgentDepsConfig{
+		Store:       cfg.Store,
+		PathGrants:  pathGrants,
+		Streams:     streams,
+		CLIAdapters: cliAdapters,
+		DBPath:      cfg.Store.DBPath(),
+	})
+	if agentDepsErr != nil {
+		stopCatalog()
+		return nil, fmt.Errorf("service container: build agent dependencies: %w", agentDepsErr)
+	}
+	slog.Info("service container: agent runtime dependencies built",
+		"adapters", len(cliAdapters),
+		"workspaces_root", agentDeps.WorkspacesRoot)
+
 	chatSvc := NewChatService(ChatServiceConfig{
 		Sessions:           sessions,
 		Agents:             agents,
@@ -632,6 +669,9 @@ func NewContainer(cfg ContainerConfig) (*Container, error) {
 		LoopDetector: loopDetector,
 		// J11 (CW-20260426-0009): reminder engine — always-on.
 		ReminderEngine: reminderEngine,
+		// Phase 4c.1 (CW-20260508-0002): agent-runtime composition root.
+		AgentDeps:            agentDeps,
+		AgentSessionsManager: agentManager,
 	})
 
 	// G-3 + G-5: subagent service with the real chat-engine-backed

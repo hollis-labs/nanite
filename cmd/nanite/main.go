@@ -186,7 +186,7 @@ func cmdServe(args []string) {
 	plugin.SetEnvelopeValidatorDevModeFunc(func() bool { return envelopeValidatorDevMode })
 
 	// Set up provider registry (API keys, Ollama, CLI adapters).
-	registry := initProviders(envelopeValidatorDevMode)
+	registry, cliAdapters := initProviders(envelopeValidatorDevMode)
 
 	slog.Info("app config loaded",
 		"cli_active_throttle_seconds", appCfg.Presence.CLIActiveThrottleSeconds,
@@ -279,6 +279,7 @@ func cmdServe(args []string) {
 		MaxCLIProcesses: maxCLIProcs,
 		CoordStore:      coord,
 		Worktrees:       wtMgr,
+		CLIAdapters:     cliAdapters,
 	})
 	if err != nil {
 		slogx.Fatal("failed to create service container", "err", err)
@@ -419,7 +420,12 @@ func (a skipPermsAdapter) BuildArgs(prompt, systemPrompt, cliSessionID string) [
 	return append(a.CLIAdapter.BuildArgs(prompt, systemPrompt, cliSessionID), "--dangerously-skip-permissions")
 }
 
-func initProviders(devMode bool) *provider.Registry {
+// initProviders constructs the provider.Registry plus the slice of go-providers
+// CLI adapters threaded into the agent-runtime composition root (Phase 4c.1
+// of agent-boot adoption). The slice carries the dev-mode skipPermsAdapter
+// wrap on claude so agent.Boot inherits the same `--dangerously-skip-permissions`
+// behavior the bridges get.
+func initProviders(devMode bool) (*provider.Registry, []provider.CLIAdapter) {
 	registry := provider.NewRegistry()
 
 	resolveKey := func(providerID string) string {
@@ -522,7 +528,7 @@ func initProviders(devMode bool) *provider.Registry {
 	}
 	registerLegacyPTYAlias(registry)
 
-	return registry
+	return registry, cliAdapters
 }
 
 func registerLegacyPTYAlias(registry *provider.Registry) {

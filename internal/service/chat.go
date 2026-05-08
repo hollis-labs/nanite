@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	agentsessions "github.com/hollis-labs/go-agent-sessions/agentsessions"
 	"github.com/hollis-labs/nanite/internal/agent"
 	"github.com/hollis-labs/nanite/internal/chat"
 	"github.com/hollis-labs/nanite/internal/config"
@@ -19,6 +20,7 @@ import (
 	"github.com/hollis-labs/nanite/internal/permission"
 	"github.com/hollis-labs/nanite/internal/reminders"
 	"github.com/hollis-labs/go-providers/provider"
+	runtimeagent "github.com/hollis-labs/nanite/internal/runtime/agent"
 	"github.com/hollis-labs/nanite/internal/safego"
 	"github.com/hollis-labs/nanite/internal/store"
 	"github.com/hollis-labs/go-modelsdev/modelsdev"
@@ -143,6 +145,19 @@ type ChatServiceConfig struct {
 	// ReminderEngine is the deterministic trigger engine for agent-set reminders
 	// (J11, CW-20260426-0009). nil-safe: when nil reminder eval is skipped.
 	ReminderEngine *reminders.Engine
+
+	// AgentDeps is the agent-runtime composition root (Phase 4c.1 of the
+	// agent-boot adoption). Threaded through here so HandleMessage can
+	// gate the long-lived PTY path on the session's CLIAdapter capabilities
+	// (Caps.PTY=true). nil = the legacy chat-harness path is taken
+	// universally; useful for tests and bootstrapping configurations that
+	// haven't wired the runtime yet.
+	AgentDeps *runtimeagent.Dependencies
+
+	// AgentSessionsManager is the singleton agentsessions.Manager owned
+	// by the runtime. Held by the chat service so Shutdown can drain
+	// running sessions cleanly. nil-safe: drain is skipped when absent.
+	AgentSessionsManager *agentsessions.Manager
 }
 
 // chatServiceImpl is the concrete ChatService implementation.
@@ -220,6 +235,20 @@ type chatServiceImpl struct {
 	// waits that look like stalls from the UI.
 	activeGenMu sync.Mutex
 	activeGen   map[string]*inFlightGen // sessionID -> current in-flight generation
+
+	// agentDeps is the agent-runtime composition root (Phase 4c.1). nil
+	// when the runtime is not wired (legacy chat-harness path universal).
+	agentDeps *runtimeagent.Dependencies
+
+	// agentSessionsManager is the singleton runtime manager. Held so
+	// Shutdown can drain running sessions cleanly. nil-safe.
+	agentSessionsManager *agentsessions.Manager
+
+	// activeSessions tracks long-lived runtime sessions keyed by chat
+	// session id (Phase 4c). First HandleMessage call for a CLI-PTY-capable
+	// session boots the runtime; subsequent calls SendInput on the existing
+	// session. Map values are *runtimeagent.Session.
+	activeSessions sync.Map
 }
 
 // inFlightGen records the currently-running generateResponse for a session
@@ -275,6 +304,8 @@ func NewChatService(cfg ChatServiceConfig) ChatService {
 		inspector:           cfg.Inspector,
 		loopDetector:        cfg.LoopDetector,
 		reminderEngine:      cfg.ReminderEngine,
+		agentDeps:           cfg.AgentDeps,
+		agentSessionsManager: cfg.AgentSessionsManager,
 	}
 }
 
@@ -558,13 +589,21 @@ func (s *chatServiceImpl) GetStream(messageID string) (<-chan chat.StreamEvent, 
 	return s.streams.GetStream(messageID)
 }
 
-// Shutdown implements ChatService. It kills tracked CLI processes and then
-// cancels the service's lifecycle context, waiting up to chatShutdownMaxWait
-// for in-flight generateResponse goroutines to exit. Any goroutines still
-// running after the timeout are logged; see lifecycle.ShutdownTimeoutError.
+// Shutdown implements ChatService. It kills tracked CLI processes, drains
+// active runtime sessions, and then cancels the service's lifecycle
+// context, waiting up to chatShutdownMaxWait for in-flight goroutines to
+// exit. Any goroutines still running after the timeout are logged; see
+// lifecycle.ShutdownTimeoutError.
 func (s *chatServiceImpl) Shutdown() {
 	if s.processTracker != nil {
 		s.processTracker.KillAll()
+	}
+	if s.agentSessionsManager != nil {
+		ctx, cancel := context.WithTimeout(context.Background(), chatShutdownMaxWait)
+		if err := s.agentSessionsManager.Shutdown(ctx); err != nil {
+			slog.Warn("chat-service: agent sessions shutdown", "err", err)
+		}
+		cancel()
 	}
 	if s.lifecycle != nil {
 		if err := s.lifecycle.Shutdown(chatShutdownMaxWait); err != nil {

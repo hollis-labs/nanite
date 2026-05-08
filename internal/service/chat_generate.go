@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
-	"os"
 	"sort"
 	"strings"
 	"time"
@@ -742,10 +741,12 @@ func (s *chatServiceImpl) generateResponse(ctx context.Context, sessionID, assis
 			})
 		}
 
-		// CLI session setup.
-		if chat.IsCLIProvider(providerName) {
-			provCtx = s.setupCLIContext(provCtx, sessionID, session, agent, mode, ch)
-		}
+		// Phase 4c.6 (CW-20260508-0002): setupCLIContext deleted. CLI
+		// agents now spawn through internal/runtime/agent.Boot via the
+		// driveBootSession branch below; sandbox planting, --resume
+		// session-id threading, and process tracking moved into the agent
+		// runtime composition root. The HTTP-API providers below get the
+		// existing per-turn provCtx unchanged.
 
 		// --- Pre-hook: message.sending ---
 		// Plugins observing "message.sending" may cancel the LLM call.
@@ -1173,9 +1174,14 @@ func (s *chatServiceImpl) generateResponse(ctx context.Context, sessionID, assis
 				return
 
 			case "session_id":
-				if evt.SessionID != "" {
-					s.persistCLISessionID(sessionID, session, evt.SessionID)
-				}
+				// Phase 4c.6 (CW-20260508-0002): persistCLISessionID
+				// deleted. Boot's StartOptions.OnSessionID writes the
+				// provider session id straight to the agent_runtime row
+				// via SetProviderSessionID — no chat-harness side
+				// persistence needed. The case branch is kept so
+				// EventSessionID events remain a known type the loop
+				// observes and discards (vs falling into the default).
+				_ = evt.SessionID
 
 			case "thinking":
 				// F3 (CW-20260420-0023): interleaved thinking block. Persist
@@ -2605,70 +2611,18 @@ func captureEnvelopeData(result, toolName string, pending []string) []string {
 	return pending
 }
 
-// setupCLIContext prepares the context for CLI provider calls (sandbox, resume, process tracking).
-func (s *chatServiceImpl) setupCLIContext(ctx context.Context, sessionID string, session *store.Session, agent *store.AgentProfile, mode *store.AgentMode, ch chan chat.StreamEvent) context.Context {
-	// Concurrency limit.
-	if s.processTracker != nil && s.processTracker.AtCapacity() {
-		ch <- chat.ErrorEvent(chat.ErrorCodeProviderError,
-			fmt.Sprintf("CLI process limit reached (%d). Close other CLI sessions or wait for them to finish.", s.processTracker.MaxProcesses),
-			map[string]interface{}{"raw": "max concurrent CLI processes exceeded"})
-		return ctx
-	}
-
-	// Sandbox.
-	if sbDir, err := sandbox.Dir(sessionID); err != nil {
-		slog.Warn("chat-service: sandbox dir error", "err", err)
-	} else {
-		if err := sandbox.Populate(sbDir, agent, mode, sandbox.PopulateOpts{
-			SessionID: sessionID,
-			DBPath:    s.dbPath,
-			Adapters:  s.adapterRegistry,
-		}); err != nil {
-			slog.Warn("chat-service: sandbox populate error", "err", err)
-		}
-		ctx = provider.WithSandboxDir(ctx, sbDir)
-	}
-
-	// CLI session ID for --resume.
-	var meta map[string]any
-	if err := json.Unmarshal([]byte(session.Metadata), &meta); err == nil {
-		if cliSID, ok := meta["cli_session_id"].(string); ok && cliSID != "" {
-			ctx = provider.WithCLISessionID(ctx, cliSID)
-		}
-	}
-
-	// Process tracker callbacks.
-	if s.processTracker != nil {
-		sid := sessionID
-		ctx = provider.WithProcessCallback(ctx, func(proc *os.Process, started bool) {
-			if started {
-				s.processTracker.Track(sid, proc)
-			} else {
-				s.processTracker.Untrack(sid, proc)
-			}
-		})
-		ctx = provider.WithActivityCallback(ctx, func(pid int) {
-			s.processTracker.Touch(sid, pid)
-			s.streams.ThrottledCLIPresence(sid)
-		})
-	}
-
-	return ctx
-}
-
-// persistCLISessionID saves the CLI session ID to session metadata.
-func (s *chatServiceImpl) persistCLISessionID(sessionID string, session *store.Session, cliSessionID string) {
-	var meta map[string]any
-	if err := json.Unmarshal([]byte(session.Metadata), &meta); err != nil || meta == nil {
-		meta = make(map[string]any)
-	}
-	meta["cli_session_id"] = cliSessionID
-	metaJSON, _ := json.Marshal(meta)
-	session.Metadata = string(metaJSON)
-	if err := s.store.UpdateSessionMetadata(sessionID, session.Metadata); err != nil {
-		slog.Warn("chat-service: failed to persist CLI session ID", "err", err)
-	}
-}
+// Phase 4c.6 (CW-20260508-0002): setupCLIContext + persistCLISessionID
+// deleted. CLI agents now spawn through internal/runtime/agent.Boot via
+// driveBootSession (chat_boot_drive.go); sandbox planting moved to the
+// per-provider bootdir layouts in internal/runtime/agent/bootdir_*.go,
+// process tracking moved into the lib's PTY supervisor (IdleKill /
+// RestartOnCrash), --resume threading moved into Boot.OnSessionID +
+// store.SetAgentRuntimeProviderSessionID, and the cli_session_id
+// session-metadata field is no longer written. retryEnvelopeCorrection
+// (line ~2700) still threads provider.WithCLISessionID for the HTTP
+// envelope-retry path, but that path is unreachable for CLI sessions
+// post-Phase 4c.4 (driveBootSession's chan never surfaces envelope-retry
+// triggers).
 
 // maybeCreateAutoArtifact checks if a tool call wrote a file and auto-creates
 // an artifact record.

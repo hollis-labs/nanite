@@ -113,7 +113,7 @@ func TestContextService_AssembleSlots(t *testing.T) {
 		Status:       "active",
 	}
 
-	result, err := svc.AssembleSlots(context.Background(), sess, agent, &store.AgentMode{}, nil, nil, "", 200000, nil)
+	result, err := svc.AssembleSlots(context.Background(), sess, agent, &store.AgentMode{}, nil, nil, "", 200000, nil, "")
 	if err != nil {
 		t.Fatalf("AssembleSlots: %v", err)
 	}

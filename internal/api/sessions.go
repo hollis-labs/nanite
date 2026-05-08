@@ -486,7 +486,7 @@ func (a *API) handleCompactSession(w http.ResponseWriter, r *http.Request) {
 	// B1 (CW-20260428-0009): manual /compact path doesn't need the session-
 	// mode addendum (compaction operates on the existing window, not on a
 	// new turn). Pass nil sessionMode — same as we pass nil AgentMode here.
-	result, err := a.Services.Context.AssembleSlots(ctx, session, agent, nil, workspace, []provider.ToolDefinition{}, "", windowSize, nil)
+	result, err := a.Services.Context.AssembleSlots(ctx, session, agent, nil, workspace, []provider.ToolDefinition{}, "", windowSize, nil, "")
 	if err != nil {
 		a.errorResp(w, http.StatusInternalServerError, err.Error())
 		return

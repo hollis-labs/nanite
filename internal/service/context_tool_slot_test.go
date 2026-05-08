@@ -103,7 +103,7 @@ func TestAssembleSlots_S3b_RulesHitHydrates(t *testing.T) {
 	svc, s := newStubbedContextService(t, cls, nil, true)
 	sess, agent := seedSession(t, s, "please run the tests")
 
-	r, err := svc.AssembleSlots(context.Background(), sess, agent, &store.AgentMode{}, nil, tools3(), "", 200000, nil)
+	r, err := svc.AssembleSlots(context.Background(), sess, agent, &store.AgentMode{}, nil, tools3(), "", 200000, nil, "")
 	if err != nil {
 		t.Fatalf("AssembleSlots: %v", err)
 	}
@@ -135,7 +135,7 @@ func TestAssembleSlots_S3b_NoIntentKeepsPointer(t *testing.T) {
 	svc, s := newStubbedContextService(t, cls, nil, true)
 	sess, agent := seedSession(t, s, "hello world")
 
-	r, err := svc.AssembleSlots(context.Background(), sess, agent, &store.AgentMode{}, nil, tools3(), "", 200000, nil)
+	r, err := svc.AssembleSlots(context.Background(), sess, agent, &store.AgentMode{}, nil, tools3(), "", 200000, nil, "")
 	if err != nil {
 		t.Fatalf("AssembleSlots: %v", err)
 	}
@@ -163,7 +163,7 @@ func TestAssembleSlots_S3b_PartialHydration(t *testing.T) {
 	svc, s := newStubbedContextService(t, cls, nil, true)
 	sess, agent := seedSession(t, s, "find the thing")
 
-	r, err := svc.AssembleSlots(context.Background(), sess, agent, &store.AgentMode{}, nil, tools3(), "", 200000, nil)
+	r, err := svc.AssembleSlots(context.Background(), sess, agent, &store.AgentMode{}, nil, tools3(), "", 200000, nil, "")
 	if err != nil {
 		t.Fatalf("AssembleSlots: %v", err)
 	}
@@ -197,7 +197,7 @@ func TestAssembleSlots_S3b_ExplicitOverrideOn(t *testing.T) {
 	svc, s := newStubbedContextService(t, cls, overrides, true)
 	sess, agent := seedSession(t, s, "chat about stuff")
 
-	r, err := svc.AssembleSlots(context.Background(), sess, agent, &store.AgentMode{}, nil, tools3(), "", 200000, nil)
+	r, err := svc.AssembleSlots(context.Background(), sess, agent, &store.AgentMode{}, nil, tools3(), "", 200000, nil, "")
 	if err != nil {
 		t.Fatalf("AssembleSlots: %v", err)
 	}
@@ -218,7 +218,7 @@ func TestAssembleSlots_S3b_SelectionHashRebuild(t *testing.T) {
 	sess, agent := seedSession(t, s, "hi")
 
 	// First turn: 3 tools.
-	first, err := svc.AssembleSlots(context.Background(), sess, agent, &store.AgentMode{}, nil, tools3(), "", 200000, nil)
+	first, err := svc.AssembleSlots(context.Background(), sess, agent, &store.AgentMode{}, nil, tools3(), "", 200000, nil, "")
 	if err != nil {
 		t.Fatalf("AssembleSlots first: %v", err)
 	}
@@ -226,7 +226,7 @@ func TestAssembleSlots_S3b_SelectionHashRebuild(t *testing.T) {
 
 	// Second turn: selection changes (drop dev_bash).
 	reduced := tools3()[:2]
-	second, err := svc.AssembleSlots(context.Background(), sess, agent, &store.AgentMode{}, nil, reduced, "", 200000, nil)
+	second, err := svc.AssembleSlots(context.Background(), sess, agent, &store.AgentMode{}, nil, reduced, "", 200000, nil, "")
 	if err != nil {
 		t.Fatalf("AssembleSlots second: %v", err)
 	}
@@ -242,7 +242,7 @@ func TestAssembleSlots_S3b_DisabledFallsBackToS3a(t *testing.T) {
 	svc, s := newStubbedContextService(t, cls, nil, false /* cacheEnabled */)
 	sess, agent := seedSession(t, s, "run the tests")
 
-	r, err := svc.AssembleSlots(context.Background(), sess, agent, &store.AgentMode{}, nil, tools3(), "", 200000, nil)
+	r, err := svc.AssembleSlots(context.Background(), sess, agent, &store.AgentMode{}, nil, tools3(), "", 200000, nil, "")
 	if err != nil {
 		t.Fatalf("AssembleSlots: %v", err)
 	}
@@ -269,14 +269,14 @@ func TestAssembleSlots_S3b_StateTransitionTracking(t *testing.T) {
 	svc, s := newStubbedContextService(t, cls, nil, true)
 	sess, agent := seedSession(t, s, "hi")
 
-	first, _ := svc.AssembleSlots(context.Background(), sess, agent, &store.AgentMode{}, nil, tools3(), "", 200000, nil)
+	first, _ := svc.AssembleSlots(context.Background(), sess, agent, &store.AgentMode{}, nil, tools3(), "", 200000, nil, "")
 	if first.ToolCache.Prev != StatePointer || first.ToolCache.Next != StatePointer {
 		t.Fatalf("fresh session should go pointer→pointer; got %v→%v", first.ToolCache.Prev, first.ToolCache.Next)
 	}
 
 	// Next turn: classifier flips to hydrate.
 	cls.result = intent.Result{Hydrate: true, Source: intent.SourceRules, Reasoning: "run"}
-	second, _ := svc.AssembleSlots(context.Background(), sess, agent, &store.AgentMode{}, nil, tools3(), "", 200000, nil)
+	second, _ := svc.AssembleSlots(context.Background(), sess, agent, &store.AgentMode{}, nil, tools3(), "", 200000, nil, "")
 	if second.ToolCache.Prev != StatePointer || second.ToolCache.Next != StateFull {
 		t.Fatalf("transition should be pointer→full; got %v→%v", second.ToolCache.Prev, second.ToolCache.Next)
 	}
@@ -295,7 +295,7 @@ func TestAssembleSlots_S3b_TokensBeforeReflectsPriorSlot(t *testing.T) {
 	sess, agent := seedSession(t, s, "run tests")
 
 	// Turn 1: full hydration. Records the full-slot size as prior-state.
-	first, err := svc.AssembleSlots(context.Background(), sess, agent, &store.AgentMode{}, nil, tools3(), "", 200000, nil)
+	first, err := svc.AssembleSlots(context.Background(), sess, agent, &store.AgentMode{}, nil, tools3(), "", 200000, nil, "")
 	if err != nil {
 		t.Fatalf("turn 1: %v", err)
 	}
@@ -308,7 +308,7 @@ func TestAssembleSlots_S3b_TokensBeforeReflectsPriorSlot(t *testing.T) {
 	// slot's size (what we previously emitted), not the pointer summary's —
 	// that's the exact bug the fix addresses.
 	cls.result = intent.Result{Hydrate: false, Source: intent.SourceRules, Reasoning: "ambient"}
-	second, err := svc.AssembleSlots(context.Background(), sess, agent, &store.AgentMode{}, nil, tools3(), "", 200000, nil)
+	second, err := svc.AssembleSlots(context.Background(), sess, agent, &store.AgentMode{}, nil, tools3(), "", 200000, nil, "")
 	if err != nil {
 		t.Fatalf("turn 2: %v", err)
 	}
@@ -323,7 +323,7 @@ func TestAssembleSlots_S3b_TokensBeforeReflectsPriorSlot(t *testing.T) {
 	// from turn 2.
 	pointerTokens := second.ToolCache.TokensAfter
 	cls.result = intent.Result{Hydrate: true, Categories: nil, Source: intent.SourceRules, Reasoning: "hydrate all"}
-	third, err := svc.AssembleSlots(context.Background(), sess, agent, &store.AgentMode{}, nil, tools3(), "", 200000, nil)
+	third, err := svc.AssembleSlots(context.Background(), sess, agent, &store.AgentMode{}, nil, tools3(), "", 200000, nil, "")
 	if err != nil {
 		t.Fatalf("turn 3: %v", err)
 	}
@@ -347,7 +347,7 @@ func TestAssembleSlots_S3b_ClassifierErrorStillRenders(t *testing.T) {
 	svc, s := newStubbedContextService(t, cls, nil, true)
 	sess, agent := seedSession(t, s, "find something")
 
-	r, err := svc.AssembleSlots(context.Background(), sess, agent, &store.AgentMode{}, nil, tools3(), "", 200000, nil)
+	r, err := svc.AssembleSlots(context.Background(), sess, agent, &store.AgentMode{}, nil, tools3(), "", 200000, nil, "")
 	if err != nil {
 		t.Fatalf("AssembleSlots must not fail on classifier error: %v", err)
 	}

@@ -9,11 +9,38 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/hollis-labs/go-envelopes"
 	"github.com/santhosh-tekuri/jsonschema/v6"
 	"github.com/santhosh-tekuri/jsonschema/v6/kind"
 	"golang.org/x/text/language"
 	"golang.org/x/text/message"
 )
+
+// envelopeRegistry is the shared go-envelopes Registry, set once at
+// composition root via SetEnvelopeRegistry. P3b switches loadSchema to
+// look up compiled schemas through this registry; until then it's a
+// reference-keeper for orphan-aware lookups.
+var (
+	envelopeRegistryMu sync.RWMutex
+	envelopeRegistry   *envelopes.Registry
+)
+
+// SetEnvelopeRegistry installs the shared registry used for envelope
+// schema lookup. Called once at startup from cmd/nanite/main.go after
+// envelopes.LoadCore. Passing nil unsets — useful for tests that want
+// to fall back to the legacy embed.FS path.
+func SetEnvelopeRegistry(r *envelopes.Registry) {
+	envelopeRegistryMu.Lock()
+	envelopeRegistry = r
+	envelopeRegistryMu.Unlock()
+}
+
+// getEnvelopeRegistry returns the currently-installed registry (may be nil).
+func getEnvelopeRegistry() *envelopes.Registry {
+	envelopeRegistryMu.RLock()
+	defer envelopeRegistryMu.RUnlock()
+	return envelopeRegistry
+}
 
 // localePrinter is the printer the kind.* LocalizedString calls require.
 // jsonschema/v6 keeps its own defaultPrinter unexported, so we maintain

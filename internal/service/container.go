@@ -815,15 +815,14 @@ func NewContainer(cfg ContainerConfig) (*Container, error) {
 		slog.Info("service container: memory extraction hooks registered")
 	}
 
-	// Register memory tools as a built-in MCP transport.
-	if memorySvc != nil && cfg.MCP != nil {
-		memoryTransport := mcp.NewMemoryToolsTransport(memorySvc)
-		if err := cfg.MCP.AddServer("nanite-memory", memoryTransport, mcp.TierBuiltin); err != nil {
-			slog.Warn("service container: failed to register memory MCP server", "err", err)
-		} else {
-			slog.Info("service container: memory agent tools registered")
-		}
-	}
+	// Memory tools (nanite_memory_save / nanite_memory_recall) were
+	// removed in CW-20260508-0017 (Decision 3): the local SQLite memory
+	// store is no longer agent-facing — Vanta is the canonical memory
+	// substrate (vanta-primary-since: 2026-04-19). The underlying
+	// memory.Service stays load-bearing for grounding/recall.go,
+	// contextbroker.NewMemorySource, and the per-turn / post-compact
+	// extractor hooks; only the agent-facing tool surface and the
+	// `nanite-memory` MCP server registration are dropped here.
 
 	// Model selector for operation-specific model resolution (e.g., cheap model for summarization).
 	modelSelector := provider.NewStaticModelSelector(cfg.UtilityProvider, cfg.UtilityModel)

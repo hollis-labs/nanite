@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"io/fs"
+	"log/slog"
 	"time"
 
 	"github.com/hollis-labs/go-envelopes"
@@ -14,9 +15,12 @@ import (
 // whose tests exercise ValidateData / DefaultRenderTarget /
 // IsPassiveRenderable so they don't fall through to the
 // "envelope registry not configured" guard. Mirrors the runtime
-// composition root in cmd/nanite/main.go but never panics on partial
-// orphan registration — tests inspect the returned registry if they need
-// finer control.
+// composition root in cmd/nanite/main.go: LoadCore is required (panic on
+// failure — without core schemas no test can validate anything), but
+// RegisterOrphans is best-effort. A partial orphan failure logs a warning
+// with the count of registered + the first error, keeps any successfully
+// registered orphans, and returns the registry so tests can still run
+// against the rest of the catalog.
 func SetupForTesting() *envelopes.Registry {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
@@ -24,8 +28,13 @@ func SetupForTesting() *envelopes.Registry {
 	if err != nil {
 		panic(fmt.Sprintf("envelope.SetupForTesting: LoadCore: %v", err))
 	}
-	if _, err := RegisterOrphans(reg); err != nil {
-		panic(fmt.Sprintf("envelope.SetupForTesting: RegisterOrphans: %v", err))
+	if registered, err := RegisterOrphans(reg); err != nil {
+		// Best-effort: log the partial outcome and continue. Mirrors the
+		// production composition root (cmd/nanite/main.go) which logs and
+		// proceeds rather than panicking on a missing/changed orphan
+		// schema.
+		slog.Warn("envelope.SetupForTesting: partial orphan registration",
+			"registered", registered, "want", len(OrphanTypes), "err", err)
 	}
 	SetEnvelopeRegistry(reg)
 	return reg

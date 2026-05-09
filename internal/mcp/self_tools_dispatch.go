@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 
+	"github.com/hollis-labs/go-agent-broker/broker"
 	"github.com/hollis-labs/nanite/internal/classify"
 	"github.com/hollis-labs/nanite/internal/dispatch"
 	"github.com/hollis-labs/nanite/internal/grounding"
@@ -125,6 +126,34 @@ func (st *SelfToolsTransport) callExecuteTask(ctx context.Context, args map[stri
 					Mode:                match.Reflex.SideEffects.ModeSignal,
 				})
 			}
+		}
+	}
+
+	// CW-20260502-0005: agent-broker consultation (no-op scaffold).
+	// The broker is upstream of dispatch; the no-op impl reads SessionMode
+	// and returns the current-behavior agent profile so wiring it produces
+	// no semantic change. Decision.Reason is logged to event_log so future
+	// sessions (and the v1 deterministic replacement) can audit routing.
+	if st.Broker != nil {
+		mode := ""
+		if st.Store != nil {
+			if m, err := st.Store.GetSessionMode(sessionID); err == nil && m != nil {
+				mode = m.Slug
+			}
+		}
+		brokerInput := broker.Input{
+			UserText:    message,
+			SessionMode: mode,
+		}
+		if reflexHints != nil {
+			brokerInput.ReflexMatchID = reflexHints.ReflexID
+		}
+		if decision, derr := st.Broker.Decide(ctx, brokerInput); derr == nil && st.Store != nil {
+			meta := fmt.Sprintf(
+				`{"agent_profile":%q,"reason":%q,"confidence":%g,"session_mode":%q,"reflex_match_id":%q}`,
+				decision.AgentProfile, decision.Reason, decision.Confidence, mode, brokerInput.ReflexMatchID,
+			)
+			st.Store.LogEvent(sessionID, "broker_decision", "info", decision.Reason, meta)
 		}
 	}
 

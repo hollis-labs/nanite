@@ -14,6 +14,7 @@ import (
 	"github.com/hollis-labs/nanite/internal/builders"
 	"github.com/hollis-labs/nanite/internal/classify"
 	"github.com/hollis-labs/nanite/internal/crossapp"
+	"github.com/hollis-labs/go-agent-broker/broker"
 	"github.com/hollis-labs/nanite/internal/dispatch"
 	"github.com/hollis-labs/nanite/internal/envelope"
 	"github.com/hollis-labs/nanite/internal/grounding"
@@ -111,6 +112,14 @@ type SelfToolsTransport struct {
 	// Set post-construction; defaults to dispatch.DefaultEnvelopeWrapper{}
 	// when the transport detects a configured Dispatch with no wrapper.
 	DispatchWrapper dispatch.EnvelopeWrapper
+
+	// Broker is the agent-broker primitive consulted before dispatch
+	// (CW-20260502-0005 scaffold). The no-op `broker.NewModeBroker()` impl
+	// preserves current behavior; the deterministic v1 impl per
+	// `decisions.nanite.architecture.agent_broker_v1` lands in a follow-up.
+	// Nil-safe — when unset, callExecuteTask skips broker consultation
+	// and dispatches via the legacy classifier path.
+	Broker broker.Broker
 
 	// ReflexSet is the merged (builtin + user-override) reflex slice used
 	// by the E1 reflex matcher (CW-20260419-0027). Set post-construction

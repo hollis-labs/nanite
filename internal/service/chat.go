@@ -13,6 +13,7 @@ import (
 	"github.com/hollis-labs/nanite/internal/agent"
 	"github.com/hollis-labs/nanite/internal/chat"
 	"github.com/hollis-labs/nanite/internal/config"
+	"github.com/hollis-labs/nanite/internal/dispatch"
 	"github.com/hollis-labs/nanite/internal/filter"
 	inspectsvc "github.com/hollis-labs/nanite/internal/inspector"
 	"github.com/hollis-labs/nanite/internal/lifecycle"
@@ -165,6 +166,14 @@ type ChatServiceConfig struct {
 	// SSE. nil-safe: when absent, CLI sessions cannot route events through
 	// the chat-harness loop (and the long-lived path is unavailable).
 	AgentEventBridge *agentEventBridge
+
+	// EnvelopeRenderExecutor is the B3 in-process executor pilot
+	// (CW-20260429-0032 — internal/executor/envelope_render). Wired
+	// here so chat_generate.go's dispatch seam (B2 — CW-20260429-0031)
+	// can hand off non-chat-direct routes emitted by the classifier.
+	// nil-safe: when absent, the route hint stays purely informative
+	// and every turn runs the chat-direct loop.
+	EnvelopeRenderExecutor dispatch.Executor
 }
 
 // chatServiceImpl is the concrete ChatService implementation.
@@ -276,6 +285,12 @@ type chatServiceImpl struct {
 	// don't bounce them back to lazy and thrash the Tools-slot CacheKey.
 	// G-HOT-SWAP-DEAD activation.
 	toolPartitionStates sync.Map
+
+	// envelopeRenderExecutor is the B3 in-process executor pilot,
+	// dispatched by chat_generate.go's route seam when the B2
+	// classifier emits RouteExecutorEnvelopeRender. nil-safe: when nil
+	// the route is purely informative and the chat-direct loop runs.
+	envelopeRenderExecutor dispatch.Executor
 }
 
 // inFlightGen records the currently-running generateResponse for a session
@@ -334,6 +349,7 @@ func NewChatService(cfg ChatServiceConfig) ChatService {
 		agentDeps:           cfg.AgentDeps,
 		agentSessionsManager: cfg.AgentSessionsManager,
 		agentEventBridge:    cfg.AgentEventBridge,
+		envelopeRenderExecutor: cfg.EnvelopeRenderExecutor,
 	}
 }
 

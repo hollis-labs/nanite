@@ -186,6 +186,15 @@ type loopState struct {
 	scopeTier        classify.ScopeTier
 	executionPattern classify.ExecutionPattern
 
+	// Pre-loop route hint from B2 (CW-20260429-0031). Set once by
+	// generateResponse alongside scopeTier; read by the dispatch seam
+	// to decide whether to attempt an executor handoff before the
+	// chat-direct loop runs. Empty string indicates the route classifier
+	// has not yet run for this generation; consumers MUST treat that as
+	// equivalent to RouteChatDirect (the conservative default — see
+	// docs/architecture/classifier-routing.md §1).
+	routeDecision classify.RouteDecision
+
 	// F1 (CW-20260420-0014): Effort scalar. Set once by generateResponse from
 	// the request context before the loop runs. Biases token budget (via
 	// BudgetMultiplier) and reasoning-block enablement (via ReasoningCfg).
@@ -522,6 +531,21 @@ func (ls *loopState) Classification() (classify.ScopeTier, classify.ExecutionPat
 func (ls *loopState) SetClassification(tier classify.ScopeTier, pattern classify.ExecutionPattern) {
 	ls.scopeTier = tier
 	ls.executionPattern = pattern
+}
+
+// RouteDecision returns the pre-loop route hint emitted by
+// classify.ClassifyRoute (B2, CW-20260429-0031). Returns the zero
+// RouteDecision (Route == "") when the route classifier has not yet
+// run for this generation; consumers MUST treat that as equivalent to
+// RouteChatDirect.
+func (ls *loopState) RouteDecision() classify.RouteDecision {
+	return ls.routeDecision
+}
+
+// SetRouteDecision stores the pre-loop route hint. Called by
+// generateResponse once per generation, before the loop body runs.
+func (ls *loopState) SetRouteDecision(d classify.RouteDecision) {
+	ls.routeDecision = d
 }
 
 // touchActivity updates the last activity timestamp.

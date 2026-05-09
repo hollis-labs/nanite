@@ -30,6 +30,7 @@ import (
 	"github.com/hollis-labs/go-providers/provider"
 	"github.com/hollis-labs/go-toolbroker/broker"
 	"github.com/hollis-labs/nanite/internal/api"
+	nllmopenai "github.com/hollis-labs/nanite/internal/llm/openai"
 	"github.com/hollis-labs/nanite/internal/chat"
 	"github.com/hollis-labs/nanite/internal/filter"
 	"github.com/hollis-labs/nanite/internal/lifecycle"
@@ -495,8 +496,13 @@ func initProviders(devMode bool) (*provider.Registry, []provider.CLIAdapter) {
 			},
 			func(p llmcontracts.Provider, k string) { p.(*nllmanthropic.Client).SetAPIKey(k) }},
 		{"openai", "openai-001",
-			func() llmcontracts.Provider { return provider.NewOpenAI() },
-			func(p llmcontracts.Provider, k string) { p.(*provider.OpenAI).SetAPIKey(k) }},
+			// CW-20260508-0012: SDK-backed wrapper (replaces deleted
+			// go-providers HTTP openai client). Implements
+			// llmcontracts.Provider; no rate-budget plumbing per spike
+			// verdict (parity deferred to followup
+			// followups.nanite.cw_20260508_0012.openai_rate_budget_parity).
+			func() llmcontracts.Provider { return nllmopenai.New("", nil) },
+			func(p llmcontracts.Provider, k string) { p.(*nllmopenai.Client).SetAPIKey(k) }},
 		{"gemini", "gemini-api-001",
 			func() llmcontracts.Provider { return provider.NewGemini() },
 			func(p llmcontracts.Provider, k string) { p.(*provider.Gemini).SetAPIKey(k) }},

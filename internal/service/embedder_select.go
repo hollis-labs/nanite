@@ -5,7 +5,9 @@ import (
 	"os"
 	"time"
 
+	embedcontracts "github.com/hollis-labs/go-embed-contracts"
 	"github.com/hollis-labs/go-providers/provider"
+	nllmopenai "github.com/hollis-labs/nanite/internal/llm/openai"
 	"github.com/hollis-labs/nanite/internal/secrets"
 )
 
@@ -102,7 +104,7 @@ func DefaultEmbedderSelectDeps() EmbedderSelectDeps {
 //   - Credential-requiring provider with no key → (nil, model, "missing_credentials").
 //   - Ollama probe fails → (nil, model, "unreachable").
 //   - All checks pass → (embedder, model, "active").
-func SelectEmbedder(ctx context.Context, s EmbedderSettings, deps EmbedderSelectDeps) (provider.Embedder, string, string) {
+func SelectEmbedder(ctx context.Context, s EmbedderSettings, deps EmbedderSelectDeps) (embedcontracts.Embedder, string, string) {
 	if s.Mode == "" || s.Mode == "disabled" {
 		return nil, "", EmbeddingStatusDisabled
 	}
@@ -127,9 +129,10 @@ func SelectEmbedder(ctx context.Context, s EmbedderSettings, deps EmbedderSelect
 		if key == "" {
 			return nil, model, EmbeddingStatusMissingCredentials
 		}
-		p := provider.NewOpenAI()
-		p.SetAPIKey(key)
-		return p, model, EmbeddingStatusActive
+		// CW-20260508-0012: SDK-backed Embedder (replaces deleted go-providers
+		// HTTP openai client). Implements embedcontracts.Embedder; nil http
+		// client uses the openai-go default, matching prior behavior.
+		return nllmopenai.NewEmbedder(key, nil), model, EmbeddingStatusActive
 
 	case "azure_openai":
 		key := deps.LookupSecret("azure_openai-001")

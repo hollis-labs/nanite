@@ -1,11 +1,35 @@
 package envelope
 
 import (
+	"context"
 	"fmt"
 	"io/fs"
+	"time"
 
 	"github.com/hollis-labs/go-envelopes"
 )
+
+// SetupForTesting builds a registry with core types + orphan schemas and
+// installs it via SetEnvelopeRegistry. Call from TestMain in any package
+// whose tests exercise ValidateData / DefaultRenderTarget /
+// IsPassiveRenderable so they don't fall through to the
+// "envelope registry not configured" guard. Mirrors the runtime
+// composition root in cmd/nanite/main.go but never panics on partial
+// orphan registration — tests inspect the returned registry if they need
+// finer control.
+func SetupForTesting() *envelopes.Registry {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	reg, err := envelopes.LoadCore(ctx)
+	if err != nil {
+		panic(fmt.Sprintf("envelope.SetupForTesting: LoadCore: %v", err))
+	}
+	if _, err := RegisterOrphans(reg); err != nil {
+		panic(fmt.Sprintf("envelope.SetupForTesting: RegisterOrphans: %v", err))
+	}
+	SetEnvelopeRegistry(reg)
+	return reg
+}
 
 // LegacyPluginID is the synthetic plugin ID used to register Nanite's
 // orphan envelope schemas with the shared go-envelopes Registry. The

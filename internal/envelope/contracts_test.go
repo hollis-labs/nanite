@@ -1,17 +1,14 @@
 package envelope
 
 import (
-	"embed"
 	"encoding/json"
 	"io/fs"
 	"strings"
 	"testing"
 
+	"github.com/hollis-labs/go-envelopes"
 	"github.com/santhosh-tekuri/jsonschema/v6"
 )
-
-//go:embed schemas/*.json
-var schemaFS embed.FS
 
 // knownTypes is the authoritative list of envelope types from the backend registry.
 // This list must stay in sync with internal/chat/envelope.go registeredTypes.
@@ -258,19 +255,22 @@ var invalidPayloads = map[string]string{
 	"subagent-spawn-approval": `{"run_id":"r-1"}`,
 }
 
-// loadSchemaFiles returns all schema files from the embedded FS.
+// loadSchemaFiles returns all schema files from the go-envelopes lib's
+// embedded manifest. Pre-Cap-5 this read from a local embed.FS that has
+// since been removed; the lib is now the single source of truth.
 func loadSchemaFiles(t *testing.T) map[string][]byte {
 	t.Helper()
 	schemas := make(map[string][]byte)
-	entries, err := fs.ReadDir(schemaFS, "schemas")
+	libFS := envelopes.EmbeddedFS()
+	entries, err := fs.ReadDir(libFS, "manifest/schemas")
 	if err != nil {
-		t.Fatalf("read schemas dir: %v", err)
+		t.Fatalf("read manifest/schemas dir: %v", err)
 	}
 	for _, entry := range entries {
 		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".schema.json") {
 			continue
 		}
-		data, err := schemaFS.ReadFile("schemas/" + entry.Name())
+		data, err := fs.ReadFile(libFS, "manifest/schemas/"+entry.Name())
 		if err != nil {
 			t.Fatalf("read schema %s: %v", entry.Name(), err)
 		}

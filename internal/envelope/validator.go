@@ -1,7 +1,6 @@
 package envelope
 
 import (
-	"embed"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -47,12 +46,6 @@ func getEnvelopeRegistry() *envelopes.Registry {
 // a parallel English printer here for our flatten walk. Cheap to allocate
 // and reused across calls — see structuredErrorFromLeaf.
 var localePrinter = message.NewPrinter(language.English)
-
-// schemaFiles embeds the per-type JSON Schema definitions so the runtime
-// validator does not depend on a filesystem layout outside the binary.
-//
-//go:embed schemas/*.json
-var schemaFiles embed.FS
 
 // PassiveRenderableTypes is the v1 allow-list of envelope types the agent
 // may emit through nanite_show_card. These are the cards that carry no
@@ -110,36 +103,16 @@ var (
 	schemaRawCache = map[string]map[string]any{}
 )
 
-// schemaResourceURI returns the stable in-memory URI used to register a
-// schema with the jsonschema compiler. Schemas are //go:embed-ed, so we
-// don't want the compiler synthesising a file:// URL from the process cwd
-// (which would leak filesystem layout into validation error messages and
-// vary per host — see the c107 chat-session report). The "mem://" scheme is
-// arbitrary but absolute, so the compiler treats it as already-resolved and
-// the resulting Validate error reports a stable, host-independent location.
-func schemaResourceURI(envelopeType string) string {
-	return "mem://nanite/envelope/" + envelopeType + ".schema.json"
-}
-
-// loadSchema returns a compiled schema for the given envelope type, lazily
-// compiling on first use. Errors carry the type name so the caller's error
-// message stays informative. Populates both schemaCache (compiled) and
-// schemaRawCache (parsed map) so DefaultRenderTarget can read annotation
-// keywords without re-parsing the file.
-//
-// Resolution order (post-P2 / go-envelopes consumption):
-//  1. Shared registry under the bare type name (core types).
-//  2. Shared registry under the nanite-legacy.<bare> alias (orphan types).
-//  3. Local embed FS fallback — kept for tests that exercise the validator
-//     without standing up a registry. P7 deletes the embed FS once tests
-//     migrate to SetEnvelopeRegistry; until then both paths produce the
-//     same compiled schemas because the lib's manifest/schemas/ directory
-//     was extracted verbatim from this dir.
+// loadSchema returns a compiled schema for the given envelope type. The
+// shared go-envelopes Registry is the only source post-Cap-5; bare names
+// resolve to core types, and the nanite-legacy.<bare> alias covers the
+// orphan schemas registered at startup. Returns an informative error
+// when the registry is unset (composition-root setup mistake) or when
+// the type isn't registered.
 //
 // The raw schema map (used by DefaultRenderTarget for the
 // default_render_target annotation) is read from envelopes.EmbeddedFS()
-// regardless of which compile path serves the schema, since lib registry
-// TypeSpecs do not surface annotation bytes.
+// since lib registry TypeSpecs do not surface annotation bytes.
 func loadSchema(envelopeType string) (*jsonschema.Schema, error) {
 	schemaCacheMu.Lock()
 	defer schemaCacheMu.Unlock()
@@ -147,17 +120,19 @@ func loadSchema(envelopeType string) (*jsonschema.Schema, error) {
 		return cached, nil
 	}
 
-	if reg := getEnvelopeRegistry(); reg != nil {
-		if compiled, ok := lookupRegistrySchema(reg, envelopeType); ok {
-			schemaCache[envelopeType] = compiled
-			if doc, err := readEmbeddedSchemaDoc(envelopeType); err == nil {
-				schemaRawCache[envelopeType] = doc
-			}
-			return compiled, nil
-		}
+	reg := getEnvelopeRegistry()
+	if reg == nil {
+		return nil, fmt.Errorf("envelope registry not configured (call SetEnvelopeRegistry at startup)")
 	}
-
-	return loadSchemaFromLocalEmbed(envelopeType)
+	compiled, ok := lookupRegistrySchema(reg, envelopeType)
+	if !ok {
+		return nil, fmt.Errorf("no schema registered for envelope type %q", envelopeType)
+	}
+	schemaCache[envelopeType] = compiled
+	if doc, err := readEmbeddedSchemaDoc(envelopeType); err == nil {
+		schemaRawCache[envelopeType] = doc
+	}
+	return compiled, nil
 }
 
 // lookupRegistrySchema fetches a compiled schema from the shared registry
@@ -192,38 +167,6 @@ func readEmbeddedSchemaDoc(envelopeType string) (map[string]any, error) {
 	return doc, nil
 }
 
-// loadSchemaFromLocalEmbed is the legacy compile path that reads from
-// nanite/internal/envelope/schemas/. Retained as a fallback for tests
-// that don't set the shared registry; deleted in P7 alongside the
-// embed.FS declaration.
-//
-// Caller must hold schemaCacheMu.
-func loadSchemaFromLocalEmbed(envelopeType string) (*jsonschema.Schema, error) {
-	path := "schemas/" + envelopeType + ".schema.json"
-	raw, err := schemaFiles.ReadFile(path)
-	if err != nil {
-		if errIsNotExist(err) {
-			return nil, fmt.Errorf("no schema registered for envelope type %q", envelopeType)
-		}
-		return nil, fmt.Errorf("read schema for %q: %w", envelopeType, err)
-	}
-	var docMap map[string]any
-	if err := json.Unmarshal(raw, &docMap); err != nil {
-		return nil, fmt.Errorf("parse schema for %q: %w", envelopeType, err)
-	}
-	uri := schemaResourceURI(envelopeType)
-	compiler := jsonschema.NewCompiler()
-	if err := compiler.AddResource(uri, any(docMap)); err != nil {
-		return nil, fmt.Errorf("register schema for %q: %w", envelopeType, err)
-	}
-	compiled, err := compiler.Compile(uri)
-	if err != nil {
-		return nil, fmt.Errorf("compile schema for %q: %w", envelopeType, err)
-	}
-	schemaCache[envelopeType] = compiled
-	schemaRawCache[envelopeType] = docMap
-	return compiled, nil
-}
 
 // DefaultRenderTarget returns the schema-declared default render-target for
 // envelopeType, or "" if the schema does not declare one (or the type is
@@ -245,11 +188,6 @@ func DefaultRenderTarget(envelopeType string) string {
 	}
 	v, _ := doc["default_render_target"].(string)
 	return v
-}
-
-// errIsNotExist returns true for fs.ErrNotExist (fs.ReadFile wraps it).
-func errIsNotExist(err error) bool {
-	return err != nil && (err == fs.ErrNotExist || strings.Contains(err.Error(), "file does not exist"))
 }
 
 // ValidateData validates a card payload against the registered schema for

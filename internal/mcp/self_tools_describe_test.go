@@ -120,7 +120,7 @@ func TestNaniteToolDescribe_AllSelfToolsHaveExamples(t *testing.T) {
 func TestNaniteToolDescribe_UnknownToolHasClosestMatches(t *testing.T) {
 	st := newSelfTools(t)
 	res, err := st.CallTool(context.Background(), "tool_describe", map[string]any{
-		"name": "nanite_show_carrd", // typo — should suggest card_show
+		"name": "card_shwo", // typo of post-rename `card_show`; near-miss is stable as the registry evolves
 	})
 	if err != nil {
 		t.Fatalf("describe unknown: %v", err)

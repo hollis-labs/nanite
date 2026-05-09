@@ -594,8 +594,10 @@ func (m *Manager) assignUniformNameLocked(serverName, toolName string) string {
 			if _, conflict := m.uniformIndex[incumbentDisambig]; conflict && existing.uniformName != incumbentDisambig {
 				// Incumbent's disambiguated slot is already taken by a
 				// third tool — refuse to clobber. Returning "" drops the
-				// self-tool, which is loud-detected upstream (see
-				// "self_tool_renamed" warning in DiscoverTools).
+				// self-tool; DiscoverTools then emits a
+				// `uniform_name_collision` discovery warning for it (the
+				// generic drop path, not `self_tool_renamed` — that only
+				// fires when uniform != t.Name).
 				return ""
 			}
 			delete(m.uniformIndex, bare)

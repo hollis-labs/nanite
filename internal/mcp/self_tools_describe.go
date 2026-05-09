@@ -60,7 +60,7 @@ func naniteToolDescribeDefinition() Tool {
 		Name: "tool_describe",
 		Description: "Return a tool's contract on demand: description, input schema, golden examples, and related tools/skills.\n\n" +
 			"**When to use:** When you're unsure about a tool's input shape, when you've never rendered a particular envelope `type` for `card_show`, or after a call fails with a schema-validation error. Cheap (registry + embed lookup, no LLM call) — prefer it to failing-and-retrying.\n\n" +
-			"**When NOT to use:** Skip this when you have already called the tool successfully in the same session, or when the tool is from a third-party MCP server (this only describes nanite_* self-tools at v1).\n\n" +
+			"**When NOT to use:** Skip this when you have already called the tool successfully in the same session, or when the tool is from a third-party MCP server (this only describes built-in self-server tools at v1).\n\n" +
 			"**Output shape:** {name, description, input_schema, examples: [{title, args, result?, notes?}], related_tools?: [string], related_skills?: [string]}.\n\n" +
 			"**Unknown tool name:** Returns a structured error with `closest_matches` (Levenshtein) so you can correct typos in one round-trip.",
 		InputSchema: map[string]any{

@@ -2,12 +2,28 @@ package contextbroker
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"strings"
+	"time"
 
 	"github.com/hollis-labs/nanite/internal/memory"
 )
+
+// memoryDefaultLimit is the result cap MemorySource uses when the caller
+// does not pin Intent.AutoRecallLimit. Matches the prior hardcoded value.
+const memoryDefaultLimit = 30
+
+// memoryDefaultMinConfidence is the confidence floor MemorySource uses
+// when the caller does not pin Intent.AutoRecallMinConfidence. Matches
+// the prior hardcoded value.
+const memoryDefaultMinConfidence = 0.4
+
+// memoryDefaultTimeout caps the Vanta round-trip when Intent.AutoRecallTimeout
+// is zero. Memory is enrichment, not identity — the chat loop should not
+// stall on a slow recall. Matches the implementer-prompt's 2s budget.
+const memoryDefaultTimeout = 2 * time.Second
 
 // MemorySource retrieves memories from Vanta Conduit via the MemoryService.
 // It cascades through session, project, and user namespaces to assemble
@@ -30,9 +46,37 @@ func (s *MemorySource) Name() string { return "memory" }
 
 // Fetch recalls memories relevant to the current intent, cascading through
 // namespace scopes: session -> project -> user.
+//
+// Per-turn auto-recall behavior is gated by Intent.AutoRecall (chat-harness
+// reads AgentProfile.Settings.auto_recall and plumbs it here). When set
+// explicitly to false, Fetch short-circuits with a debug log so the agent
+// sees an empty Memory slot for the turn. Limit, MinConfidence, and Timeout
+// fall back to source defaults when the intent leaves them zero.
 func (s *MemorySource) Fetch(ctx context.Context, intent Intent, budget int) ([]ContextItem, error) {
 	if s.Memory == nil {
 		return nil, fmt.Errorf("memory source: no memory service configured")
+	}
+
+	// Per-agent disable: chat-harness sets AutoRecall=false when the
+	// profile pins it off. nil = use source default (enabled).
+	if intent.AutoRecall != nil && !*intent.AutoRecall {
+		slog.Debug("contextbroker/memory: auto-recall disabled by intent",
+			"session_id", intent.SessionID, "agent_id", intent.AgentID)
+		return nil, nil
+	}
+
+	// Resolve overrides with source defaults.
+	limit := memoryDefaultLimit
+	if intent.AutoRecallLimit > 0 {
+		limit = intent.AutoRecallLimit
+	}
+	minConfidence := memoryDefaultMinConfidence
+	if intent.AutoRecallMinConfidence > 0 && intent.AutoRecallMinConfidence <= 1 {
+		minConfidence = intent.AutoRecallMinConfidence
+	}
+	timeout := memoryDefaultTimeout
+	if intent.AutoRecallTimeout > 0 {
+		timeout = intent.AutoRecallTimeout
 	}
 
 	// Build namespace cascade based on available scope info.
@@ -66,16 +110,34 @@ func (s *MemorySource) Fetch(ctx context.Context, intent Intent, budget int) ([]
 		Namespaces:    namespaces,
 		Ranking:       "relevance", // hybrid BM25 + cosine via RRF (Vanta v0.4.0+)
 		Query:         intent.QueryText,
-		Limit:         30,
-		MinConfidence: 0.4,
+		Limit:         limit,
+		MinConfidence: minConfidence,
 	}
 
-	memories, err := s.Memory.Recall(ctx, opts)
+	recallCtx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+
+	start := time.Now()
+	memories, err := s.Memory.Recall(recallCtx, opts)
+	elapsed := time.Since(start)
+
 	if err != nil {
+		// Distinguish timeouts from other errors so operators can spot a
+		// slow Vanta from a misconfigured source.
+		if errors.Is(err, context.DeadlineExceeded) {
+			slog.Info("contextbroker/memory: auto-recall timed out",
+				"session_id", intent.SessionID, "agent_id", intent.AgentID,
+				"timeout_ms", timeout.Milliseconds(), "elapsed_ms", elapsed.Milliseconds())
+			return nil, nil
+		}
 		return nil, fmt.Errorf("memory source recall: %w", err)
 	}
 
 	if len(memories) == 0 {
+		slog.Info("contextbroker/memory: auto-recall hit_count=0",
+			"session_id", intent.SessionID, "agent_id", intent.AgentID,
+			"limit", limit, "min_confidence", minConfidence,
+			"latency_ms", elapsed.Milliseconds(), "query_len", len(intent.QueryText))
 		return nil, nil
 	}
 
@@ -117,7 +179,15 @@ func (s *MemorySource) Fetch(ctx context.Context, intent Intent, budget int) ([]
 		usedTokens += tokens
 	}
 
-	slog.Debug("contextbroker/memory: recalled memories", "count", len(items), "tokens", usedTokens)
+	// Single structured INFO line per turn — mirrors S3b's tool_cache classify
+	// pattern so operators can grep one log shape for memory-recall outcomes.
+	slog.Info("contextbroker/memory: auto-recall ok",
+		"session_id", intent.SessionID, "agent_id", intent.AgentID,
+		"hit_count", len(memories), "items_kept", len(items),
+		"tokens_estimate", usedTokens, "limit", limit,
+		"min_confidence", minConfidence,
+		"latency_ms", elapsed.Milliseconds(), "query_len", len(intent.QueryText))
+
 	return items, nil
 }
 

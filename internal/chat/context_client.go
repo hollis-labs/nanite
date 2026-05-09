@@ -327,6 +327,12 @@ func buildUserContextSlot(s *store.Store, sessionID string) string {
 // deriveIntent extracts the broker intent from the session's recent user turn.
 // Mirrors the logic from enrichWithContextBroker so slot- and legacy-paths
 // produce identical broker queries.
+//
+// Auto-recall fields are resolved from the agent profile and plumbed into
+// the Intent so MemorySource can honor per-agent disable / limit / min-confidence
+// without re-reading the profile itself. AutoRecall is set as an explicit
+// pointer so MemorySource can distinguish "no opinion" (defaults) from
+// "explicitly off" (skip).
 func (cb *ContextClient) deriveIntent(session *store.Session, agent *store.AgentProfile) contextbroker.Intent {
 	intentType := contextbroker.IntentCustom
 	var keywords []string
@@ -342,13 +348,19 @@ func (cb *ContextClient) deriveIntent(session *store.Session, agent *store.Agent
 			}
 		}
 	}
+	autoRecallCfg := ResolveAutoRecallConfig(agent)
+	enabled := autoRecallCfg.Enabled
 	return contextbroker.Intent{
-		Type:      intentType,
-		Keywords:  keywords,
-		QueryText: queryText,
-		Scope:     session.ProjectID,
-		SessionID: session.ID,
-		AgentID:   agent.ID,
+		Type:                    intentType,
+		Keywords:                keywords,
+		QueryText:               queryText,
+		Scope:                   session.ProjectID,
+		SessionID:               session.ID,
+		AgentID:                 agent.ID,
+		AutoRecall:              &enabled,
+		AutoRecallLimit:         autoRecallCfg.Limit,
+		AutoRecallMinConfidence: autoRecallCfg.MinConfidence,
+		AutoRecallTimeout:       autoRecallCfg.Timeout,
 	}
 }
 

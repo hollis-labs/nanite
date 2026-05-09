@@ -79,6 +79,25 @@ type Intent struct {
 
 	// AgentID is the requesting agent (for agent-aware sources).
 	AgentID string
+
+	// AutoRecall, when non-nil and false, instructs MemorySource to skip
+	// the recall for this turn (per-agent disable). Nil means "use the
+	// source's own default" — MemorySource's prior behavior. Plumbed by
+	// the chat-harness from AgentProfile.Settings.auto_recall.
+	AutoRecall *bool
+
+	// AutoRecallLimit, when > 0, overrides MemorySource's default result
+	// cap for this turn. Zero means "use the source default".
+	AutoRecallLimit int
+
+	// AutoRecallMinConfidence, when in (0, 1], overrides MemorySource's
+	// default confidence floor. Zero means "use the source default".
+	// Negative or > 1 values are ignored.
+	AutoRecallMinConfidence float64
+
+	// AutoRecallTimeout, when > 0, caps the Vanta round-trip for this
+	// turn's recall. Zero means "use the source default" (currently 2s).
+	AutoRecallTimeout time.Duration
 }
 
 // ContextItem is a single piece of retrieved context.

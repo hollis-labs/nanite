@@ -75,38 +75,38 @@ func (a *API) handleGetProviderStatus(w http.ResponseWriter, r *http.Request) {
 	registered := a.Services.Providers != nil && a.Services.Providers.Has(p.ProviderType)
 
 	a.jsonResp(w, http.StatusOK, map[string]any{
-		"provider":   p,
+		"provider":    p,
 		"has_api_key": hasKey,
-		"registered": registered,
+		"registered":  registered,
 	})
 }
 
 // CLIDetectionResult describes the auto-detection status for one CLI adapter.
 type CLIDetectionResult struct {
-	Name         string `json:"name"`          // adapter name (claude, codex, gemini, copilot, aider)
+	Name         string `json:"name"`          // adapter name (claude, codex, opencode)
 	ProviderType string `json:"provider_type"` // pty-claude, pty-codex, etc.
 	Detected     bool   `json:"detected"`
-	Path         string `json:"path"`          // resolved path if found
-	EnvVar       string `json:"env_var"`       // env var for override
+	Path         string `json:"path"`    // resolved path if found
+	EnvVar       string `json:"env_var"` // env var for override
 }
 
 // handleDetectCLI runs auto-detection for all CLI adapters using the same
 // Detect() logic that the runtime uses at startup.
 func (a *API) handleDetectCLI(w http.ResponseWriter, r *http.Request) {
 	type cliSpec struct {
-		adapter provider.CLIAdapter
+		adapter                  provider.CLIAdapter
 		provType, provID, envVar string
 	}
 
+	// CW-20260508-0010: detection list mirrors the production CLIAdapter
+	// slice in cmd/nanite/main.go — claude / codex / opencode only.
+	// gemini/copilot/aider/junie/kiro/qwen were never reached by any
+	// production code path (factory.shouldUsePTY filters to claude shapes;
+	// codex/opencode use the SubprocessBridge path).
 	specs := []cliSpec{
 		{provider.NewClaudeAdapter(), "pty", "pty-001", "CLAUDE_CLI_PATH"},
 		{provider.NewCodexAdapter(), "pty-codex", "pty-codex-001", "CODEX_CLI_PATH"},
-		{provider.NewGeminiAdapter(), "pty-gemini", "pty-gemini-001", "GEMINI_CLI_PATH"},
-		{provider.NewCopilotAdapter(), "pty-copilot", "pty-copilot-001", "COPILOT_CLI_PATH"},
-		{provider.NewAiderAdapter(), "pty-aider", "pty-aider-001", "AIDER_CLI_PATH"},
-		{provider.NewJunieAdapter(), "pty-junie", "pty-junie-001", "JUNIE_CLI_PATH"},
-		{provider.NewKiroAdapter(), "pty-kiro", "pty-kiro-001", "KIRO_CLI_PATH"},
-		{provider.NewQwenAdapter(), "pty-qwen", "pty-qwen-001", "QWEN_CLI_PATH"},
+		{provider.NewOpencodeAdapter(), "pty-opencode", "pty-opencode-001", "OPENCODE_CLI_PATH"},
 	}
 
 	results := make([]CLIDetectionResult, 0, len(specs))

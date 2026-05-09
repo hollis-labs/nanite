@@ -25,7 +25,10 @@ import (
 	"github.com/hollis-labs/nanite/internal/reflex"
 	"github.com/hollis-labs/nanite/internal/worktree"
 
+	llmcontracts "github.com/hollis-labs/go-llm-contracts"
+	llmtypes "github.com/hollis-labs/go-llm-types"
 	"github.com/hollis-labs/go-providers/provider"
+	"github.com/hollis-labs/go-toolbroker/broker"
 	"github.com/hollis-labs/nanite/internal/api"
 	"github.com/hollis-labs/nanite/internal/chat"
 	"github.com/hollis-labs/nanite/internal/filter"
@@ -33,7 +36,6 @@ import (
 	"github.com/hollis-labs/nanite/internal/mcp"
 	"github.com/hollis-labs/nanite/internal/mcpserver"
 	"github.com/hollis-labs/nanite/internal/muxproxy"
-	"github.com/hollis-labs/nanite/pkg/models"
 	"github.com/hollis-labs/nanite/internal/plugin"
 	_ "github.com/hollis-labs/nanite/internal/plugin/allplugins" // registers all built-in plugins
 	"github.com/hollis-labs/nanite/internal/safego"
@@ -45,7 +47,7 @@ import (
 	"github.com/hollis-labs/nanite/internal/toolclient"
 	"github.com/hollis-labs/nanite/internal/truncate"
 	"github.com/hollis-labs/nanite/internal/version"
-	"github.com/hollis-labs/go-toolbroker/broker"
+	"github.com/hollis-labs/nanite/pkg/models"
 
 	agentbroker "github.com/hollis-labs/go-agent-broker/broker"
 )
@@ -474,12 +476,12 @@ func initProviders(devMode bool) (*provider.Registry, []provider.CLIAdapter) {
 
 	type apiProvSpec struct {
 		name, provID string
-		create       func() provider.Provider
-		setKey       func(provider.Provider, string)
+		create       func() llmcontracts.Provider
+		setKey       func(llmcontracts.Provider, string)
 	}
 	apiProviders := []apiProvSpec{
 		{"anthropic", "anthropic-001",
-			func() provider.Provider {
+			func() llmcontracts.Provider {
 				ap := provider.NewAnthropic()
 				if v := os.Getenv("NANITE_PROVIDER_RATE_BUDGET_TPM"); v != "" {
 					if n, err := strconv.Atoi(v); err == nil && n > 0 {
@@ -490,22 +492,22 @@ func initProviders(devMode bool) (*provider.Registry, []provider.CLIAdapter) {
 				}
 				return ap
 			},
-			func(p provider.Provider, k string) { p.(*provider.Anthropic).SetAPIKey(k) }},
+			func(p llmcontracts.Provider, k string) { p.(*provider.Anthropic).SetAPIKey(k) }},
 		{"openai", "openai-001",
-			func() provider.Provider { return provider.NewOpenAI() },
-			func(p provider.Provider, k string) { p.(*provider.OpenAI).SetAPIKey(k) }},
+			func() llmcontracts.Provider { return provider.NewOpenAI() },
+			func(p llmcontracts.Provider, k string) { p.(*provider.OpenAI).SetAPIKey(k) }},
 		{"gemini", "gemini-api-001",
-			func() provider.Provider { return provider.NewGemini() },
-			func(p provider.Provider, k string) { p.(*provider.Gemini).SetAPIKey(k) }},
+			func() llmcontracts.Provider { return provider.NewGemini() },
+			func(p llmcontracts.Provider, k string) { p.(*provider.Gemini).SetAPIKey(k) }},
 		{"mistral", "mistral-001",
-			func() provider.Provider { return provider.NewMistral() },
-			func(p provider.Provider, k string) { p.(*provider.Mistral).SetAPIKey(k) }},
+			func() llmcontracts.Provider { return provider.NewMistral() },
+			func(p llmcontracts.Provider, k string) { p.(*provider.Mistral).SetAPIKey(k) }},
 		{"openrouter", "openrouter-001",
-			func() provider.Provider { return provider.NewOpenRouter() },
-			func(p provider.Provider, k string) { p.(*provider.OpenRouter).SetAPIKey(k) }},
+			func() llmcontracts.Provider { return provider.NewOpenRouter() },
+			func(p llmcontracts.Provider, k string) { p.(*provider.OpenRouter).SetAPIKey(k) }},
 		{"openzen", "openzen-001",
-			func() provider.Provider { return provider.NewOpenZen() },
-			func(p provider.Provider, k string) { p.(*provider.OpenZen).SetAPIKey(k) }},
+			func() llmcontracts.Provider { return provider.NewOpenZen() },
+			func(p llmcontracts.Provider, k string) { p.(*provider.OpenZen).SetAPIKey(k) }},
 	}
 
 	var registeredAPI, missingAPI []string
@@ -541,11 +543,17 @@ func initProviders(devMode bool) (*provider.Registry, []provider.CLIAdapter) {
 	slog.Info("provider registered", "provider", "ollama", "host", "http://localhost:11434")
 
 	// Phase 4c.6 (CW-20260508-0002): provider.PTYBridge / SubprocessBridge
-	// registry registrations deleted. CLI agents (claude / codex / opencode /
-	// gemini / copilot / aider / junie / kiro / qwen) now spawn through
-	// internal/runtime/agent.Boot; the CLIAdapter slice still feeds the
-	// agent runtime composition root via ContainerConfig.CLIAdapters so the
-	// per-provider bootdir layouts can resolve their adapter binaries.
+	// registry registrations deleted. CLI agents (claude / codex / opencode)
+	// now spawn through internal/runtime/agent.Boot; the CLIAdapter slice
+	// still feeds the agent runtime composition root via
+	// ContainerConfig.CLIAdapters so the per-provider bootdir layouts can
+	// resolve their adapter binaries.
+	//
+	// CW-20260508-0010: pruned gemini/copilot/aider/junie/kiro/qwen
+	// registrations — they were never reached by any production code path
+	// (factory.shouldUsePTY only matches claude/codex/opencode shapes).
+	// Adapters remain in go-providers for other portfolio consumers
+	// (agent-mux, clockwork-manifold).
 	var claudeAdapter provider.CLIAdapter = provider.NewClaudeAdapter()
 	if devMode {
 		claudeAdapter = skipPermsAdapter{claudeAdapter}
@@ -554,12 +562,6 @@ func initProviders(devMode bool) (*provider.Registry, []provider.CLIAdapter) {
 		claudeAdapter,
 		provider.NewCodexAdapter(),
 		provider.NewOpencodeAdapter(),
-		provider.NewGeminiAdapter(),
-		provider.NewCopilotAdapter(),
-		provider.NewAiderAdapter(),
-		provider.NewJunieAdapter(),
-		provider.NewKiroAdapter(),
-		provider.NewQwenAdapter(),
 	}
 
 	return registry, cliAdapters
@@ -697,7 +699,7 @@ func initMCP(s *store.Store, cfg *config.Config) (*mcp.Manager, *toolclient.Tool
 
 	// Register result-cache meta-tools (S4a). These let the LLM recall
 	// truncated tool results via fetch_tool_result / search_tool_result.
-	tb.Builtins.RegisterBuiltins("result-cache", []provider.ToolDefinition{
+	tb.Builtins.RegisterBuiltins("result-cache", []llmtypes.ToolDefinition{
 		toolclient.FetchToolResultMetaTool(),
 		toolclient.SearchToolResultMetaTool(),
 	})
@@ -965,4 +967,3 @@ func cmdMCPServe(args []string) {
 		os.Exit(1)
 	}
 }
-

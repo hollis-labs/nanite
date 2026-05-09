@@ -142,7 +142,15 @@ var describeRelations = map[string]struct {
 	"panel_close":  {relatedTools: []string{"panel_open"}},
 	"signal_mode":  {relatedTools: []string{"panel_open"}},
 	"task_execute": {
-		relatedTools: []string{"subagent_spawn", "background_job"},
+		relatedTools: []string{"subagent_spawn", "background_job", "dispatch_executor"},
+	},
+	// CW-20260429-0036 (B2 closing piece) — dispatch_executor is the
+	// agent-facing destination for the executor-handoff. Cross-reference
+	// task_execute (the spawn-a-role-agent dispatch primitive — different
+	// lane, sometimes confusable) and tool_describe (the agent reads the
+	// describe payload to learn the contract).
+	"dispatch_executor": {
+		relatedTools: []string{"task_execute", "tool_describe"},
 	},
 	// D1 (CW-20260429-0009) — lesson_capture bundles with the layer 1/2
 	// self-tools (describe + validate) because they form the

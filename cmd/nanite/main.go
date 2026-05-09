@@ -20,6 +20,7 @@ import (
 	"github.com/hollis-labs/nanite/internal/config"
 	"github.com/hollis-labs/nanite/internal/coordination"
 	"github.com/hollis-labs/nanite/internal/envelope"
+	envelope_render "github.com/hollis-labs/nanite/internal/executor/envelope_render"
 	"github.com/hollis-labs/nanite/internal/learnings"
 	naniteotel "github.com/hollis-labs/nanite/internal/otel"
 	"github.com/hollis-labs/nanite/internal/reflex"
@@ -352,6 +353,17 @@ func cmdServe(args []string) {
 	// surfaces Decision.Reason in event_log. The no-op preserves current
 	// behavior; the deterministic v1 impl drops in via the same seam.
 	selfTools.Broker = agentbroker.NewModeBroker()
+
+	// CW-20260429-0036 (B2 closing piece): wire the dispatch_executor
+	// self-tool to the B3 in-process envelope_render executor pilot.
+	// The chat-agent-facing capability bullet B5 added to the chat prompt
+	// now resolves to a callable destination; the executor-handoff loop
+	// closes (B5 cue → B4 surface narrowing → this tool → B3 executor →
+	// returned envelope). Stateless executor — independent of the chat
+	// service's route_dispatch instance is intentional (different lane:
+	// chat service drives the upstream side-channel route hint, the
+	// self-tool is the agent-initiated downstream invocation).
+	selfTools.Executor = envelope_render.New()
 
 	// CW-20260426-0006 (J8 v1): wire panel-control surface.
 	//   - PanelSignalSink — push panel_signal SSE events on the originating session.

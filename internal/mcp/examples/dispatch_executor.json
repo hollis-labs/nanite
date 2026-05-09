@@ -1,0 +1,66 @@
+[
+  {
+    "title": "Render an info-card via the in-process pilot",
+    "args": {
+      "intent": "render_envelope",
+      "target_envelope_type": "info-card",
+      "user_request": "Show a quick info card about the new sprint freeze",
+      "data": {
+        "title": "Sprint freeze begins 2026-03-05",
+        "body": "Mobile team is cutting a release branch; non-critical merges are paused until 2026-03-09."
+      }
+    },
+    "notes": "info-card is not a grounded type — no sources required. The executor validates data against the info-card schema, attaches render_target (default bottom_chat_drawer), and returns the envelope plus a one-line summary."
+  },
+  {
+    "title": "Render a grounded report-card with source citations",
+    "args": {
+      "intent": "render_envelope",
+      "target_envelope_type": "report-card",
+      "user_request": "Summarize the latest sprint metrics into a report card",
+      "data": {
+        "title": "SP-20260429-0001 Phase B status",
+        "summary": "5 of 6 tickets merged; B2 dispatch_executor wiring in flight.",
+        "metrics": [
+          {"label": "Tickets merged", "value": "5"},
+          {"label": "Open", "value": "1"}
+        ]
+      },
+      "sources": [
+        {"tool_use_id": "toolu_01abc", "tool_name": "memory_recall", "note": "Sprint state recall"},
+        {"tool_use_id": "toolu_01def", "tool_name": "knowledge_get", "note": "Phase B status doc"}
+      ]
+    },
+    "notes": "report-card and document-viewer are grounded — at least one source with tool_use_id or tool_name is required. The executor stamps generated_at via its injected clock if the data does not already carry it."
+  },
+  {
+    "title": "Synthetic demo render — disclosure rides in the response summary",
+    "args": {
+      "intent": "render_envelope",
+      "target_envelope_type": "metric-card",
+      "user_request": "Sketch a metric card with sample latency numbers — just for the demo",
+      "data": {
+        "title": "API latency p50",
+        "value": "120ms",
+        "delta": "-8ms"
+      },
+      "synthetic_allowed": true
+    },
+    "notes": "When the user invites a sketch / demo / test, set synthetic_allowed=true. The executor's response.Summary discloses the synthesis so you can pass that disclosure through to the user verbatim."
+  },
+  {
+    "title": "Unknown intent → invalid_intent failure (do not retry)",
+    "args": {
+      "intent": "render_pdf",
+      "user_request": "Print this as a PDF"
+    },
+    "result": {
+      "summary": "Dispatch failed: unknown intent.",
+      "failure": {
+        "code": "invalid_intent",
+        "message": "no executor recognizes intent render_pdf"
+      }
+    },
+    "notes": "v1 ships render_envelope only. Surface the failure to the user; do NOT auto-retry with a different intent. New intents land per executor-profile registration in Phase 3 of the executor-handoff rollout."
+  }
+]

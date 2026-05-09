@@ -594,6 +594,16 @@ func (s *chatServiceImpl) generateResponse(ctx context.Context, sessionID, assis
 		s.inspector.RecordScopeTier(sessionID, inspectorTurnID, classifiedTier.String())
 	}
 
+	// B2 (CW-20260429-0031): route-dispatch seam. When the classifier
+	// emits a non-chat-direct route AND the envelope-render executor is
+	// wired, dispatch the executor and emit the resulting envelope (if
+	// any) onto the SSE stream as a side-channel plugin_envelope event.
+	// The chat-direct LLM loop runs regardless — the route is
+	// INFORMATIVE per docs/architecture/classifier-routing.md §1, and
+	// short-circuit on success is reserved for B5 / Phase 2 graduation
+	// (executor-handoff.md §6).
+	s.attemptRouteDispatch(ctx, sessionID, userContent, ls, ch)
+
 	// F1 (CW-20260420-0014): Effort scalar. Extracted from request context;
 	// defaults to EffortNormal when the caller did not set it. Biases the
 	// per-iteration token budget ceiling and reasoning-block configuration.
@@ -2331,21 +2341,37 @@ func ClassifyCompactionMode(agent *store.AgentProfile) string {
 // up the full classifier path. Production code path stays direct.
 var classifyFn = classify.Classify
 
+// classifyRouteFn is the package-level indirection for classify.ClassifyRoute
+// (B2 — CW-20260429-0031). Same role as classifyFn: tests override to
+// force routes without exercising the full keyword rubric.
+var classifyRouteFn = classify.ClassifyRoute
+
 // classifyAndAttach runs the P3 pre-loop classifier for a generation,
 // logs the result, and attaches it to the loop state. Extracted from
 // generateResponse so TestClassifyAndAttach_AttachesClassification can
 // exercise the wire itself rather than reconstructing it (CW-20260420-0013).
+//
+// B2 (CW-20260429-0031) extension: also runs ClassifyRoute and stores
+// the route hint on the loop state. The route is informative — see
+// docs/architecture/classifier-routing.md §1 — and the dispatch seam
+// (chat_generate.go) consults it to decide whether to attempt an
+// executor handoff before the chat-direct loop runs.
 func classifyAndAttach(ls *loopState, sessionID, userContent string, toolNames []string) {
 	intent := buildIntentSignals(userContent, toolNames, false /* attachments currently not tracked in pre-loop intent signals */)
 	scopeTier, executionPattern := classifyFn(intent)
+	routeDecision := classifyRouteFn(intent)
 	slog.Info("chat-service: pre-loop classification",
 		"session_id", sessionID,
 		"scope_tier", scopeTier.String(),
 		"execution_pattern", executionPattern.String(),
+		"route", routeDecision.Route.String(),
+		"target_envelope_type", routeDecision.TargetEnvelopeType,
+		"synthetic_allowed", routeDecision.SyntheticAllowed,
 		"message_token_est", intent.MessageTokenEst,
 		"tools_available", intent.ToolsAvailable,
 	)
 	ls.SetClassification(scopeTier, executionPattern)
+	ls.SetRouteDecision(routeDecision)
 }
 
 // buildIntentSignals assembles the pre-loop signal struct consumed by

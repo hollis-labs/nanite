@@ -19,6 +19,7 @@ import (
 	"github.com/hollis-labs/nanite/internal/chat"
 	"github.com/hollis-labs/nanite/internal/elicitation"
 	"github.com/hollis-labs/nanite/internal/config"
+	envelope_render "github.com/hollis-labs/nanite/internal/executor/envelope_render"
 	"github.com/hollis-labs/nanite/internal/contextbroker"
 	"github.com/hollis-labs/nanite/internal/coordination"
 	"github.com/hollis-labs/nanite/internal/filter"
@@ -675,6 +676,11 @@ func NewContainer(cfg ContainerConfig) (*Container, error) {
 		AgentDeps:            agentDeps,
 		AgentSessionsManager: agentManager,
 		AgentEventBridge:     agentBridge,
+		// B2 (CW-20260429-0031): wire the B3 in-process envelope-render
+		// executor pilot so the route-dispatch seam can hand off
+		// non-chat-direct routes. nil-safe — when omitted, the route
+		// classifier's hint stays purely informative.
+		EnvelopeRenderExecutor: envelope_render.New(),
 	})
 
 	// G-3 + G-5: subagent service with the real chat-engine-backed runner.

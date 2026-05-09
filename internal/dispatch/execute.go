@@ -26,7 +26,23 @@ type Envelope struct {
 	ID       string         `json:"id,omitempty"`
 	Title    string         `json:"title,omitempty"`
 	Subtitle string         `json:"subtitle,omitempty"`
-	Data     map[string]any `json:"data,omitempty"`
+	// Target is the optional drawer ID hint propagated from card_show
+	// (J8 v1 — CW-20260426-0006). Mirrors chat.Envelope.Target so the
+	// executor's emit path can stamp the same field the show_card tool
+	// does.
+	Target string `json:"target,omitempty"`
+	// RenderTarget is the optional panel ID where the envelope should
+	// render (A2 — CW-20260428-0008). Mirrors chat.Envelope.RenderTarget;
+	// the executor's render-target resolution stamps this.
+	RenderTarget string `json:"render_target,omitempty"`
+	// RenderTargetBlocked carries the deny-reason when an explicit
+	// RenderTarget was rejected by the trust gate. Mirrors
+	// chat.Envelope.RenderTargetBlocked.
+	RenderTargetBlocked string `json:"render_target_blocked,omitempty"`
+	// Mode is the optional workspace-mode hint propagated from card_show
+	// (J8 v1 — CW-20260426-0006). Mirrors chat.Envelope.Mode.
+	Mode string         `json:"mode,omitempty"`
+	Data map[string]any `json:"data,omitempty"`
 }
 
 // ExecuteTaskArgs carries the input to the executeTask dispatch primitive.

@@ -266,12 +266,117 @@ func TestCallDispatchExecutor_PassesAllOptionalFields(t *testing.T) {
 	}
 }
 
+// TestDispatchExecutorTool_Schema_ConditionalRequiresOnRenderEnvelope
+// locks the if/then conditional require-list: when intent="render_envelope",
+// target_envelope_type is required and at least one of (data,
+// context_handles) must be present. Schema validators that honor JSON
+// Schema draft-07 if/then enforce this at the boundary; validators that
+// don't fall back to the executor's missing_context surface. Either way,
+// regression on the schema shape would silently drop the boundary-side
+// enforcement — guard the structure here.
+func TestDispatchExecutorTool_Schema_ConditionalRequiresOnRenderEnvelope(t *testing.T) {
+	def := dispatchExecutorToolDefinition()
+	ifClause, ok := def.InputSchema["if"].(map[string]any)
+	if !ok {
+		t.Fatalf("schema missing if clause; got %v", def.InputSchema["if"])
+	}
+	intentConst, _ := ifClause["properties"].(map[string]any)["intent"].(map[string]any)["const"].(string)
+	if intentConst != "render_envelope" {
+		t.Errorf("if clause should gate on intent=render_envelope; got %q", intentConst)
+	}
+	thenClause, ok := def.InputSchema["then"].(map[string]any)
+	if !ok {
+		t.Fatalf("schema missing then clause; got %v", def.InputSchema["then"])
+	}
+	thenRequired, _ := thenClause["required"].([]string)
+	hasTargetType := false
+	for _, r := range thenRequired {
+		if r == "target_envelope_type" {
+			hasTargetType = true
+		}
+	}
+	if !hasTargetType {
+		t.Errorf("then.required missing target_envelope_type; got %v", thenRequired)
+	}
+	anyOf, ok := thenClause["anyOf"].([]any)
+	if !ok || len(anyOf) != 2 {
+		t.Fatalf("then.anyOf should have two entries (data, context_handles); got %v", thenClause["anyOf"])
+	}
+}
+
+// TestCallDispatchExecutor_MalformedSources_FailFast asserts the args-
+// boundary tightening from PR #117 review: a non-array sources value or a
+// non-object entry surfaces immediately as IsError rather than silently
+// dropping citations and letting the executor surface a confusing
+// missing_context further downstream. Citations are load-bearing for
+// grounded types — losing one changes the executor's grounding decision.
+func TestCallDispatchExecutor_MalformedSources_FailFast(t *testing.T) {
+	stub := &stubExecutor{
+		intents: []string{"render_envelope"},
+		resp:    &dispatch.ExecutorResponse{Summary: "ok"},
+	}
+	st := &SelfToolsTransport{Executor: stub}
+
+	t.Run("sources not an array", func(t *testing.T) {
+		res, _ := st.callDispatchExecutor(context.Background(), map[string]any{
+			"intent":               "render_envelope",
+			"target_envelope_type": "report-card",
+			"user_request":         "report",
+			"data":                 map[string]any{"title": "x"},
+			"sources":              "not an array",
+		})
+		if !res.IsError {
+			t.Fatalf("string sources should fail fast; got %+v", res)
+		}
+		if !strings.Contains(textBody(res), "sources must be an array") {
+			t.Errorf("error message did not name the type mismatch: %q", textBody(res))
+		}
+	})
+
+	t.Run("sources entry not an object", func(t *testing.T) {
+		res, _ := st.callDispatchExecutor(context.Background(), map[string]any{
+			"intent":               "render_envelope",
+			"target_envelope_type": "report-card",
+			"user_request":         "report",
+			"data":                 map[string]any{"title": "x"},
+			"sources": []any{
+				map[string]any{"tool_use_id": "ok"},
+				"not an object",
+			},
+		})
+		if !res.IsError {
+			t.Fatalf("non-object source entry should fail fast; got %+v", res)
+		}
+		if !strings.Contains(textBody(res), "sources[1]") {
+			t.Errorf("error message did not name the offending index: %q", textBody(res))
+		}
+	})
+
+	t.Run("nil sources is fine (optional field)", func(t *testing.T) {
+		res, _ := st.callDispatchExecutor(context.Background(), map[string]any{
+			"intent":               "render_envelope",
+			"target_envelope_type": "info-card",
+			"user_request":         "info",
+			"data":                 map[string]any{"title": "x"},
+		})
+		if res.IsError {
+			t.Fatalf("absent sources should not be an error: %+v", res)
+		}
+	})
+}
+
 // TestCallDispatchExecutor_DroppedMalformedHandles_DoesNotFail asserts the
 // handler tolerates malformed context_handles entries (missing source or
 // key) by dropping them silently. Per the schema, both fields are required;
 // a malformed entry is a model bug and the schema-level validation catches
 // it pre-call. The runtime drop ensures the executor sees only well-formed
 // handles even if validation is bypassed.
+//
+// Asymmetric vs sources by design: context_handles is a forward-compat
+// field — the in-process pilot does not even resolve them, so a dropped
+// handle has no immediate effect. Sources are load-bearing today (grounded
+// types); dropping silently would corrupt grounding. See parseExecutorSources
+// for the fail-fast counterpart.
 func TestCallDispatchExecutor_DroppedMalformedHandles_DoesNotFail(t *testing.T) {
 	stub := &stubExecutor{
 		intents: []string{"render_envelope"},

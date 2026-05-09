@@ -87,6 +87,27 @@ func dispatchExecutorToolDefinition() Tool {
 				},
 			},
 			"required": []string{"intent", "user_request"},
+			// Conditional required-list per v1 intent. Schema validators that
+			// honor JSON Schema draft-07+ if/then will enforce
+			// target_envelope_type + (data OR context_handles) for
+			// intent="render_envelope"; validators that ignore if/then fall
+			// back to the strict required list above plus the tool
+			// description's prose contract plus the executor's own
+			// missing_context responses (defense in depth — same constraint
+			// expressed at three layers, ratcheting closer to the call site).
+			"if": map[string]any{
+				"properties": map[string]any{
+					"intent": map[string]any{"const": "render_envelope"},
+				},
+				"required": []string{"intent"},
+			},
+			"then": map[string]any{
+				"required": []string{"target_envelope_type"},
+				"anyOf": []any{
+					map[string]any{"required": []string{"data"}},
+					map[string]any{"required": []string{"context_handles"}},
+				},
+			},
 		},
 	}
 }
@@ -135,7 +156,11 @@ func (st *SelfToolsTransport) callDispatchExecutor(ctx context.Context, args map
 	if data, ok := args["data"].(map[string]any); ok {
 		req.Data = data
 	}
-	if sources := parseExecutorSources(args["sources"]); len(sources) > 0 {
+	sources, srcErr := parseExecutorSources(args["sources"])
+	if srcErr != nil {
+		return errorResult(fmt.Sprintf("dispatch_executor: %v", srcErr)), nil
+	}
+	if len(sources) > 0 {
 		req.Sources = sources
 	}
 	if handles := parseContextHandles(args["context_handles"]); len(handles) > 0 {
@@ -167,20 +192,35 @@ func (st *SelfToolsTransport) callDispatchExecutor(ctx context.Context, args map
 }
 
 // parseExecutorSources converts the raw `sources` arg (an array of objects)
-// into typed []dispatch.ExecutorSource. Per-entry validation lives in the
-// executor itself (envelope_render rejects entries missing both
-// tool_use_id and tool_name), so this helper keeps the conversion lossless
-// and lets the executor produce the structured failure message.
-func parseExecutorSources(raw any) []dispatch.ExecutorSource {
+// into typed []dispatch.ExecutorSource. Returns (nil, nil) when sources is
+// absent/null — the optional-field common case.
+//
+// Fails fast on type mismatches (sources present but not an array, or any
+// entry not an object) so a malformed citation list surfaces at the
+// boundary rather than silently dropping entries. Citations are
+// load-bearing for grounded types (report-card, document-viewer) — a
+// missing entry would change the executor's grounding decision and could
+// produce a confusing missing_context further downstream.
+//
+// Per-entry CONTENT validation (must include tool_use_id or tool_name) is
+// the executor's job — envelope_render produces a structured failure with
+// the offending index, which is more useful than this helper could be.
+func parseExecutorSources(raw any) ([]dispatch.ExecutorSource, error) {
+	if raw == nil {
+		return nil, nil
+	}
 	list, ok := raw.([]any)
-	if !ok || len(list) == 0 {
-		return nil
+	if !ok {
+		return nil, fmt.Errorf("sources must be an array of objects (got %T)", raw)
+	}
+	if len(list) == 0 {
+		return nil, nil
 	}
 	out := make([]dispatch.ExecutorSource, 0, len(list))
-	for _, item := range list {
+	for i, item := range list {
 		obj, ok := item.(map[string]any)
 		if !ok {
-			continue
+			return nil, fmt.Errorf("sources[%d] must be an object (got %T)", i, item)
 		}
 		out = append(out, dispatch.ExecutorSource{
 			ToolUseID: strArg(obj, "tool_use_id", ""),
@@ -188,7 +228,7 @@ func parseExecutorSources(raw any) []dispatch.ExecutorSource {
 			Note:      strArg(obj, "note", ""),
 		})
 	}
-	return out
+	return out, nil
 }
 
 // parseContextHandles converts the raw `context_handles` arg into typed

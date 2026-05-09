@@ -11,6 +11,7 @@ import (
 
 	conduit "github.com/hollis-labs/vanta-conduit"
 
+	embedcontracts "github.com/hollis-labs/go-embed-contracts"
 	"github.com/hollis-labs/go-modelsdev/modelsdev"
 	"github.com/hollis-labs/go-providers/provider"
 	"github.com/hollis-labs/nanite/internal/agent"
@@ -385,7 +386,7 @@ func NewContainer(cfg ContainerConfig) (*Container, error) {
 
 		// Embedder selection: resolve from user settings via selectEmbedder.
 		// No configured embedder = no-op (similarity recall unavailable).
-		var embedder provider.Embedder
+		var embedder embedcontracts.Embedder
 		us, usErr := cfg.Store.GetUserSettings()
 		if usErr != nil {
 			slog.Warn("service container: user_settings read failed; embedder disabled", "err", usErr)

@@ -31,7 +31,10 @@ loop runs as before.
 ## 1. The `Route` field
 
 `internal/classify/route.go` introduces a stable wire-string type with
-three v1 values and a forward-compatible vocabulary:
+two v1 values and a forward-compatible vocabulary (additional kinds —
+e.g. `executor_knowledge_answer`, `executor_research_sweep` — are
+reserved per the design's extensibility note and registered as future
+executor profiles ship):
 
 ```go
 type Route string
@@ -114,10 +117,12 @@ var (
 )
 ```
 
-Matching is case-insensitive substring (same as `ScopeTier*` keyword
-matching). Word-boundary anchoring is NOT applied at this layer — these
-phrases are long enough that substring false positives are rare; if
-they accumulate, follow `mode.go::phraseHit`'s pattern.
+Matching is case-insensitive and word-boundary anchored via
+`mode.go::phraseHit` (the same primitive `ClassifyMode` uses), so
+`render` doesn't fire on `rendering` and `display` doesn't fire on
+`displayed`. The exception is **explicit envelope-type matching** in
+Rule 1 — type slugs are kebab-case (`report-card`, `list-card`) so
+substring matching is intentional and false-positive-safe.
 
 ### Tool-availability gating
 
@@ -162,15 +167,36 @@ attached to `loopState` alongside `ScopeTier` / `ExecutionPattern`.
   best-guess `TargetEnvelopeType` if pinned by the explicit-type rule,
   `SyntheticAllowed` flag if the demo cue fired). Call
   `dispatch.DispatchExecutor` with the wired executor. Three outcomes:
-  - **Envelope returned** — emit it to the chat session as a
-    structured response, narrate `ExecutorResponse.Summary`, end the
-    turn. The chat-direct LLM loop is short-circuited.
+  - **Envelope returned** — emit it as a `plugin_envelope` SSE event
+    on the chat stream (the FE's plugin_envelope handler routes it to
+    the configured drawer/panel) and log the dispatch with telemetry.
+    **The chat-direct LLM loop continues** — dispatch is a side-channel
+    in B2, not a short-circuit. Both the executor's envelope and the
+    chat-direct LLM response can reach the user; the dispatch-seam log
+    + B6 telemetry record which path the classifier preferred.
   - **Failure (missing_context, invalid_intent, etc.)** — log the
     failure with telemetry, fall through to the chat-direct loop. The
     user gets normal LLM response; the route was informative.
   - **Wiring nil** — when no executor is injected (early bring-up,
     test paths), the route is purely informative: log it and run the
     chat-direct loop.
+
+**Why side-channel, not short-circuit (in B2).** Anti-pattern 2 from
+B1's decision-rules pass (preemptive vs reactive) — gating chat-direct
+on a heuristic classifier is the exact failure mode B1 mitigates with
+"the route is informative, not prohibitive". The dominant failure mode
+is missing-context: the classifier predicts a structured-render intent,
+but the executor returns `missing_context` because the data isn't
+pre-resolved; if we short-circuit on the classifier's guess, the user
+sees nothing and the LLM never gets a chance to answer normally. By
+emitting the executor's envelope as a side-channel and letting the
+chat-direct loop run, we preserve the safe fallback and let users see
+both the structured render (when it succeeds) and the conversational
+narration. **Short-circuit is reserved for B5 / Phase-2 graduation
+(executor-handoff.md §6)**, when the chat agent's prompt is updated to
+dispatch via a `dispatch_executor` tool rather than via runtime
+injection — at that point the model itself decides whether to dispatch,
+and short-circuit becomes safe.
 
 This is the **single decision the chat agent makes per
 executor-eligible intent**: dispatch or handle inline. Consistent with
@@ -200,11 +226,15 @@ default fallback:
   give me an example card" → SyntheticAllowed flag set.
 - **executor_envelope_render — multi-step** — "fetch the latest
   metrics then show me a report-card".
-- **chat_direct — ambiguous render verb without target** — "render a
-  thought" (verb hits but context is conversational, no envelope-type
-  cue OR demo cue) → falls back to chat_direct (under the v1 rules
-  matrix, render-verb alone is not enough; the c117 test scenario
-  pairs with a demo cue or an explicit type).
+- **executor_envelope_render — render verb alone is sufficient** —
+  "render a card showing the open tickets" (no explicit type, no demo
+  cue) → still routes to executor with empty `TargetEnvelopeType` per
+  Rule 3. Verbs are the primary signal; the executor decides whether
+  it has enough context to satisfy the request, returning
+  `missing_context` if not (which the dispatch seam handles by falling
+  through to chat-direct). The c117 test scenario adds a demo cue on
+  top so `SyntheticAllowed=true` is set; the demo cue is what carries
+  the synthetic flag, not what triggers the route.
 
 `internal/service/chat_route_dispatch_test.go` covers the wiring: a
 fake executor dispatched on `executor_envelope_render`, returning an

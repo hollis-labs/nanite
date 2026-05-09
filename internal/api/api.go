@@ -3,7 +3,6 @@ package api
 import (
 	"encoding/json"
 	"net/http"
-	"time"
 
 	"github.com/hollis-labs/nanite/internal/service"
 )
@@ -12,16 +11,14 @@ import (
 type API struct {
 	Services *service.Container
 	// embedderSelectDeps is injected for embedding_status computation. Defaults
-	// to service.DefaultEmbedderSelectDeps with a short probe timeout so the
-	// settings endpoint can't block a request for seconds on a cold Ollama probe.
-	// Tests override via SetEmbedderSelectDeps.
+	// to service.DefaultEmbedderSelectDeps. Tests override via
+	// SetEmbedderSelectDeps.
 	embedderSelectDeps service.EmbedderSelectDeps
 }
 
 // New creates a new API instance from a service container.
 func New(svc *service.Container) *API {
 	deps := service.DefaultEmbedderSelectDeps()
-	deps.ProbeTimeout = 500 * time.Millisecond
 	return &API{Services: svc, embedderSelectDeps: deps}
 }
 

@@ -2,15 +2,13 @@ package service
 
 import (
 	"context"
-	"errors"
 	"testing"
 )
 
-func testDeps(secrets map[string]string, env map[string]string, ollamaErr error) EmbedderSelectDeps {
+func testDeps(secrets map[string]string, env map[string]string) EmbedderSelectDeps {
 	return EmbedderSelectDeps{
 		LookupSecret: func(id string) string { return secrets[id] },
 		Getenv:       func(k string) string { return env[k] },
-		ProbeOllama:  func(ctx context.Context, model string) error { return ollamaErr },
 	}
 }
 
@@ -26,7 +24,7 @@ func TestSelectEmbedder_DisabledModes(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			e, _, status := SelectEmbedder(context.Background(), tc.settings, testDeps(nil, nil, nil))
+			e, _, status := SelectEmbedder(context.Background(), tc.settings, testDeps(nil, nil))
 			if e != nil {
 				t.Errorf("expected nil embedder, got %T", e)
 			}
@@ -46,15 +44,13 @@ func TestSelectEmbedder_CredentialProviders(t *testing.T) {
 	}
 	cases := []caseT{
 		{"openai", "openai-001", "OPENAI_API_KEY", "text-embedding-3-large"},
-		{"gemini", "gemini-001", "GEMINI_API_KEY", "text-embedding-004"},
-		{"mistral", "mistral-001", "MISTRAL_API_KEY", "mistral-embed"},
 	}
 
 	for _, tc := range cases {
 		t.Run(tc.provider+"_missing_credentials", func(t *testing.T) {
 			e, _, status := SelectEmbedder(context.Background(),
 				EmbedderSettings{Mode: "explicit", Provider: tc.provider, Model: tc.defaultModel},
-				testDeps(nil, nil, nil))
+				testDeps(nil, nil))
 			if e != nil {
 				t.Errorf("expected nil embedder when credentials missing")
 			}
@@ -66,7 +62,7 @@ func TestSelectEmbedder_CredentialProviders(t *testing.T) {
 		t.Run(tc.provider+"_with_keychain_key", func(t *testing.T) {
 			e, model, status := SelectEmbedder(context.Background(),
 				EmbedderSettings{Mode: "explicit", Provider: tc.provider, Model: tc.defaultModel},
-				testDeps(map[string]string{tc.secretKey: "sk-test"}, nil, nil))
+				testDeps(map[string]string{tc.secretKey: "sk-test"}, nil))
 			if e == nil {
 				t.Errorf("expected embedder, got nil")
 			}
@@ -81,7 +77,7 @@ func TestSelectEmbedder_CredentialProviders(t *testing.T) {
 		t.Run(tc.provider+"_with_env_fallback", func(t *testing.T) {
 			e, _, status := SelectEmbedder(context.Background(),
 				EmbedderSettings{Mode: "explicit", Provider: tc.provider, Model: tc.defaultModel},
-				testDeps(nil, map[string]string{tc.envKey: "sk-test"}, nil))
+				testDeps(nil, map[string]string{tc.envKey: "sk-test"}))
 			if e == nil {
 				t.Errorf("expected embedder via env fallback, got nil")
 			}
@@ -92,82 +88,18 @@ func TestSelectEmbedder_CredentialProviders(t *testing.T) {
 	}
 }
 
-func TestSelectEmbedder_Ollama(t *testing.T) {
-	t.Run("reachable", func(t *testing.T) {
-		e, model, status := SelectEmbedder(context.Background(),
-			EmbedderSettings{Mode: "explicit", Provider: "ollama", Model: "nomic-embed-text"},
-			testDeps(nil, nil, nil))
-		if e == nil {
-			t.Errorf("expected embedder")
-		}
-		if status != EmbeddingStatusActive {
-			t.Errorf("status: got %q, want active", status)
-		}
-		if model != "nomic-embed-text" {
-			t.Errorf("model: got %q", model)
-		}
-	})
-
-	t.Run("unreachable", func(t *testing.T) {
-		e, _, status := SelectEmbedder(context.Background(),
-			EmbedderSettings{Mode: "explicit", Provider: "ollama", Model: "nomic-embed-text"},
-			testDeps(nil, nil, errors.New("connection refused")))
-		if e != nil {
-			t.Errorf("expected nil embedder on probe failure")
-		}
-		if status != EmbeddingStatusUnreachable {
-			t.Errorf("status: got %q, want unreachable", status)
-		}
-	})
-}
-
-func TestSelectEmbedder_AzureRequiresFullConfig(t *testing.T) {
-	full := map[string]string{
-		"AZURE_OPENAI_API_KEY":     "sk-test",
-		"AZURE_OPENAI_ENDPOINT":    "https://example.openai.azure.com",
-		"AZURE_OPENAI_DEPLOYMENT":  "embed-deploy",
-		"AZURE_OPENAI_API_VERSION": "2024-02-15-preview",
-	}
-	settings := EmbedderSettings{Mode: "explicit", Provider: "azure_openai", Model: "text-embedding-3-large"}
-
-	// Fully configured → active.
-	e, _, status := SelectEmbedder(context.Background(), settings, testDeps(nil, full, nil))
-	if e == nil || status != EmbeddingStatusActive {
-		t.Errorf("full azure config should activate, got status=%q embedder=%v", status, e != nil)
-	}
-
-	// Each required env missing → missing_credentials.
-	for _, missing := range []string{"AZURE_OPENAI_API_KEY", "AZURE_OPENAI_ENDPOINT", "AZURE_OPENAI_DEPLOYMENT", "AZURE_OPENAI_API_VERSION"} {
-		env := map[string]string{}
-		for k, v := range full {
-			if k != missing {
-				env[k] = v
-			}
-		}
-		e, _, status := SelectEmbedder(context.Background(), settings, testDeps(nil, env, nil))
-		if e != nil || status != EmbeddingStatusMissingCredentials {
-			t.Errorf("missing %s: expected missing_credentials, got status=%q embedder=%v", missing, status, e != nil)
-		}
-	}
-}
-
 func TestSelectEmbedder_DefaultsModelWhenBlank(t *testing.T) {
 	cases := map[string]string{
-		"openai":       "text-embedding-3-large",
-		"gemini":       "text-embedding-004",
-		"mistral":      "mistral-embed",
-		"ollama":       "nomic-embed-text",
+		"openai": "text-embedding-3-large",
 	}
 	for prov, want := range cases {
 		t.Run(prov, func(t *testing.T) {
 			env := map[string]string{
-				"OPENAI_API_KEY":  "x",
-				"GEMINI_API_KEY":  "x",
-				"MISTRAL_API_KEY": "x",
+				"OPENAI_API_KEY": "x",
 			}
 			_, model, status := SelectEmbedder(context.Background(),
 				EmbedderSettings{Mode: "explicit", Provider: prov}, // empty Model
-				testDeps(nil, env, nil))
+				testDeps(nil, env))
 			if status != EmbeddingStatusActive {
 				t.Fatalf("status: got %q, want active", status)
 			}

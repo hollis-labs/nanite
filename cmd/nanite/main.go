@@ -222,7 +222,7 @@ func cmdServe(args []string) {
 	}
 	plugin.SetEnvelopeValidatorDevModeFunc(func() bool { return envelopeValidatorDevMode })
 
-	// Set up provider registry (API keys, Ollama, CLI adapters).
+	// Set up provider registry (API keys, CLI adapters).
 	registry, cliAdapters := initProviders(envelopeValidatorDevMode)
 
 	slog.Info("app config loaded",
@@ -454,8 +454,8 @@ func cmdServe(args []string) {
 	}
 }
 
-// initProviders creates the provider registry with all available API providers,
-// Ollama (local, no key required), and CLI adapters (PTY + subprocess).
+// initProviders creates the provider registry with all available API providers
+// and CLI adapters (PTY + subprocess).
 // skipPermsAdapter wraps a CLIAdapter and appends --dangerously-skip-permissions
 // to BuildArgs. Used when developer_mode is enabled.
 type skipPermsAdapter struct{ provider.CLIAdapter }
@@ -503,18 +503,6 @@ func initProviders(devMode bool) (*provider.Registry, []provider.CLIAdapter) {
 			// followups.nanite.cw_20260508_0012.openai_rate_budget_parity).
 			func() llmcontracts.Provider { return nllmopenai.New("", nil) },
 			func(p llmcontracts.Provider, k string) { p.(*nllmopenai.Client).SetAPIKey(k) }},
-		{"gemini", "gemini-api-001",
-			func() llmcontracts.Provider { return provider.NewGemini() },
-			func(p llmcontracts.Provider, k string) { p.(*provider.Gemini).SetAPIKey(k) }},
-		{"mistral", "mistral-001",
-			func() llmcontracts.Provider { return provider.NewMistral() },
-			func(p llmcontracts.Provider, k string) { p.(*provider.Mistral).SetAPIKey(k) }},
-		{"openrouter", "openrouter-001",
-			func() llmcontracts.Provider { return provider.NewOpenRouter() },
-			func(p llmcontracts.Provider, k string) { p.(*provider.OpenRouter).SetAPIKey(k) }},
-		{"openzen", "openzen-001",
-			func() llmcontracts.Provider { return provider.NewOpenZen() },
-			func(p llmcontracts.Provider, k string) { p.(*provider.OpenZen).SetAPIKey(k) }},
 	}
 
 	var registeredAPI, missingAPI []string
@@ -531,23 +519,9 @@ func initProviders(devMode bool) (*provider.Registry, []provider.CLIAdapter) {
 		}
 	}
 
-	// Azure OpenAI — needs both key and endpoint.
-	azureKey := resolveKey("azure-openai-001")
-	if azureKey != "" && os.Getenv("AZURE_OPENAI_ENDPOINT") != "" {
-		p := provider.NewAzureOpenAI()
-		p.SetAPIKey(azureKey)
-		registry.Register("azure-openai", p)
-		slog.Info("provider registered", "provider", "azure-openai")
-		registeredAPI = append(registeredAPI, "azure-openai")
-	}
-
 	if len(missingAPI) > 0 && len(registeredAPI) == 0 {
 		slog.Warn("no API providers configured — chat will not work")
 	}
-
-	// Always register Ollama — it requires no API key (local service).
-	registry.Register("ollama", provider.NewOllama())
-	slog.Info("provider registered", "provider", "ollama", "host", "http://localhost:11434")
 
 	// Phase 4c.6 (CW-20260508-0002): provider.PTYBridge / SubprocessBridge
 	// registry registrations deleted. CLI agents (claude / codex / opencode)

@@ -55,10 +55,6 @@ func (a *API) handleEmbeddingProviders(w http.ResponseWriter, r *http.Request) {
 	}
 	catalog := []providerInfo{
 		{"openai", "OpenAI", []string{"text-embedding-3-large", "text-embedding-3-small"}},
-		{"azure_openai", "Azure OpenAI", []string{"text-embedding-3-large", "text-embedding-3-small"}},
-		{"ollama", "Ollama (local)", []string{"nomic-embed-text", "mxbai-embed-large"}},
-		{"gemini", "Google Gemini", []string{"text-embedding-004"}},
-		{"mistral", "Mistral", []string{"mistral-embed"}},
 	}
 	a.jsonResp(w, http.StatusOK, map[string]any{"providers": catalog})
 }
@@ -165,7 +161,7 @@ func (a *API) handleUpdateSettings(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		if existing.EmbeddingProvider != "" && !service.IsSupportedEmbeddingProvider(existing.EmbeddingProvider) {
-			a.errorResp(w, http.StatusBadRequest, "embedding_provider must be one of: openai, azure_openai, ollama, gemini, mistral")
+			a.errorResp(w, http.StatusBadRequest, "embedding_provider must be one of: openai")
 			return
 		}
 	}

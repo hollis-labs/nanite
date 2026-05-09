@@ -2,7 +2,6 @@ package api
 
 import (
 	"bytes"
-	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -13,7 +12,7 @@ import (
 
 // newSettingsTestAPI wraps newTestAPI, seeds the singleton user_settings row,
 // and injects an embedder-select deps that never hits the network. That keeps
-// settings-endpoint tests deterministic and fast regardless of local Ollama state.
+// settings-endpoint tests deterministic and fast.
 func newSettingsTestAPI(t *testing.T) (*API, *http.ServeMux) {
 	t.Helper()
 	a, mux := newTestAPI(t)
@@ -23,9 +22,6 @@ func newSettingsTestAPI(t *testing.T) (*API, *http.ServeMux) {
 	a.SetEmbedderSelectDeps(service.EmbedderSelectDeps{
 		LookupSecret: func(string) string { return "" },
 		Getenv:       func(string) string { return "" },
-		// Pretend Ollama is always reachable so provider=ollama paths can
-		// deterministically hit active.
-		ProbeOllama: func(context.Context, string) error { return nil },
 	})
 	return a, mux
 }
@@ -81,9 +77,20 @@ func TestSettings_PutValidatesMode(t *testing.T) {
 }
 
 func TestSettings_PutRoundTripsEmbeddingFields(t *testing.T) {
-	_, mux := newSettingsTestAPI(t)
+	a, mux := newSettingsTestAPI(t)
 
-	body := bytes.NewBufferString(`{"embedding_provider":"ollama","embedding_model":"nomic-embed-text","embedding_mode":"explicit"}`)
+	// Inject an OpenAI key so the active embedder selects without a real network call.
+	a.SetEmbedderSelectDeps(service.EmbedderSelectDeps{
+		LookupSecret: func(id string) string {
+			if id == "openai-001" {
+				return "sk-test"
+			}
+			return ""
+		},
+		Getenv: func(string) string { return "" },
+	})
+
+	body := bytes.NewBufferString(`{"embedding_provider":"openai","embedding_model":"text-embedding-3-large","embedding_mode":"explicit"}`)
 	req := httptest.NewRequest("PUT", "/api/settings", body)
 	w := httptest.NewRecorder()
 	mux.ServeHTTP(w, req)
@@ -95,13 +102,12 @@ func TestSettings_PutRoundTripsEmbeddingFields(t *testing.T) {
 	if err := json.NewDecoder(w.Body).Decode(&got); err != nil {
 		t.Fatalf("decode: %v", err)
 	}
-	if got["embedding_provider"] != "ollama" {
+	if got["embedding_provider"] != "openai" {
 		t.Errorf("embedding_provider: got %v", got["embedding_provider"])
 	}
 	if got["embedding_mode"] != "explicit" {
 		t.Errorf("embedding_mode: got %v", got["embedding_mode"])
 	}
-	// Fake probe always reports reachable, so we expect active.
 	if got["embedding_status"] != "active" {
 		t.Errorf("embedding_status: got %v, want active", got["embedding_status"])
 	}
@@ -125,7 +131,8 @@ func TestSettings_EmbeddingProvidersEndpoint(t *testing.T) {
 	if !ok {
 		t.Fatalf("providers missing or wrong type: %v", got)
 	}
-	if len(providers) != 5 {
-		t.Errorf("expected 5 providers, got %d", len(providers))
+	// Step 6.5 reduced supported providers to OpenAI only.
+	if len(providers) != 1 {
+		t.Errorf("expected 1 provider, got %d", len(providers))
 	}
 }

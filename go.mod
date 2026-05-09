@@ -93,4 +93,9 @@ require (
 
 replace github.com/hollis-labs/go-modelsdev => ../go-modelsdev
 
+// go-envelopes v0.1.0 just landed (Cap 5 of the extraction); local replace
+// while we shake out the Nanite consumer. Drop once the proxy state is clean
+// and downstream lockfiles can resolve via the published tag.
+replace github.com/hollis-labs/go-envelopes => ../go-envelopes
+
 replace github.com/chrispian/agent-mux => /Users/chrispian/Projects-apps/agent-mux

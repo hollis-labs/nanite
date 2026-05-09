@@ -18,13 +18,6 @@ import (
 	"github.com/hollis-labs/go-toolbroker/broker"
 )
 
-// selfServerName is the canonical name reserved for the in-process
-// self-tools transport. The reserved-namespace defense in
-// assignUniformNameLocked exempts this server so its `nanite_*` tools
-// are indexed under their bare names — the agent invokes them by that
-// name and a force-prefix would make every self-tool unreachable.
-const selfServerName = "self"
-
 // MCPTransport is the interface for MCP server connections (stdio or HTTP).
 type MCPTransport interface {
 	ListTools(ctx context.Context) ([]Tool, error)
@@ -380,7 +373,7 @@ func (m *Manager) DiscoverTools(ctx context.Context) error {
 				// Self-server tools that get renamed are unreachable to agents
 				// (the agent invokes by bare name). Loud-detect any future
 				// regression in the namespace defense.
-				if name == selfServerName {
+				if name == SelfServerName {
 					slog.Warn("mcp: self-server tool renamed at registration — agents cannot invoke it",
 						"tool", t.Name, "uniform", uniform)
 					m.discoveryWarnings = append(m.discoveryWarnings, DiscoveryWarning{
@@ -565,15 +558,19 @@ func (m *Manager) HasServer(name string) bool {
 // tool, resolving collisions against the existing uniformIndex.
 //
 // Resolution order:
-//  1. Default — bare tool name (`memory_write` from `mux`).
-//  2. Reserved-namespace defense — if the bare name lives in `nanite_*`,
-//     force-prefix with the server (`<server>_<tool>`) regardless of any
-//     collision. The nanite_ namespace is exclusive to first-party
-//     self-tools.
+//  1. Reserved-namespace defense (CW-20260508-0015) — server-scoped. If
+//     the newcomer is the self server, it ALWAYS wins the bare slot; any
+//     incumbent third-party tool sitting on it is force-prefixed and
+//     rewritten in place. If the newcomer is non-self and the bare slot
+//     is currently held by the self server, the newcomer is force-
+//     prefixed with the server (`<server>_<tool>`).
+//  2. Default — bare tool name (`memory_write` from `mux`) when no self
+//     ownership applies and the slot is free.
 //  3. Collision — if the default slot is already occupied by a tool from
-//     a different server, fall back to `<server>_<tool>` and try that
-//     slot. Both the incumbent and the newcomer keep their disambiguated
-//     forms; the bare slot is freed (the incumbent is rewritten too).
+//     a different (non-self) server, fall back to `<server>_<tool>` and
+//     try that slot. Both the incumbent and the newcomer keep their
+//     disambiguated forms; the bare slot is freed (the incumbent is
+//     rewritten too).
 //  4. If the disambiguated slot is also occupied, drop the tool with a
 //     warning — this is a hard collision (two servers exporting the same
 //     `<server>_<tool>` shape, which can only happen if servers share a
@@ -587,21 +584,52 @@ func (m *Manager) assignUniformNameLocked(serverName, toolName string) string {
 		return ""
 	}
 
-	// (2) Reserved-namespace defense — third-party servers only.
-	// The `self` transport publishes the canonical nanite_* tools and must
-	// keep its bare names; force-prefixing them would make every self-tool
-	// unreachable to agents (they invoke by bare name).
-	if IsReservedSelfToolName(bare) && serverName != selfServerName {
+	// (1a) Reserved-namespace defense — newcomer is self.
+	// Self ALWAYS owns the bare slot for any name it publishes. A third-
+	// party that registered alphabetically earlier and grabbed the slot
+	// gets force-prefixed and rewritten in place.
+	if IsReservedSelfToolName(serverName, toolName) {
+		if existing, taken := m.uniformIndex[bare]; taken && existing.serverName != serverName {
+			incumbentDisambig := DisambiguatedToolName(existing.serverName, existing.tool.Name)
+			if _, conflict := m.uniformIndex[incumbentDisambig]; conflict && existing.uniformName != incumbentDisambig {
+				// Incumbent's disambiguated slot is already taken by a
+				// third tool — refuse to clobber. Returning "" drops the
+				// self-tool, which is loud-detected upstream (see
+				// "self_tool_renamed" warning in DiscoverTools).
+				return ""
+			}
+			delete(m.uniformIndex, bare)
+			existing.uniformName = incumbentDisambig
+			m.uniformIndex[incumbentDisambig] = existing
+			slog.Warn("mcp: self-server claims bare slot — incumbent third-party tool force-prefixed",
+				"name", bare,
+				"incumbent_server", existing.serverName,
+				"incumbent_uniform", incumbentDisambig,
+			)
+			m.discoveryWarnings = append(m.discoveryWarnings, DiscoveryWarning{
+				ServerName: existing.serverName,
+				ToolName:   existing.tool.Name,
+				Reason:     "uniform_name_collision_disambiguated",
+			})
+		}
+		return bare
+	}
+
+	// (1b) Reserved-namespace defense — newcomer is non-self and the bare
+	// slot is held by the self server. Force-prefix the newcomer; the
+	// self-tool keeps the bare slot it already owns.
+	if existing, taken := m.uniformIndex[bare]; taken &&
+		IsReservedSelfToolName(existing.serverName, existing.tool.Name) {
 		disambig := DisambiguatedToolName(serverName, toolName)
-		if _, taken := m.uniformIndex[disambig]; taken {
+		if _, takenDisambig := m.uniformIndex[disambig]; takenDisambig {
 			return ""
 		}
-		slog.Warn("mcp: third-party tool name collides with reserved nanite_ namespace; force-prefixed",
+		slog.Warn("mcp: third-party tool collides with reserved self-tool namespace; force-prefixed",
 			"server", serverName, "tool", toolName, "uniform", disambig)
 		return disambig
 	}
 
-	// (1) Default slot.
+	// (2) Default slot.
 	if existing, taken := m.uniformIndex[bare]; !taken {
 		return bare
 	} else if existing.serverName == serverName {

@@ -646,8 +646,8 @@ func initMCP(s *store.Store, cfg *config.Config) (*mcp.Manager, *toolclient.Tool
 	// in-process self-tools. Without this, sibling-server tools like
 	// nanite_memory_recall are invisible to the discovery primitive.
 	selfTools.Inventory = mcpManager
-	if err := mcpManager.AddServer("self", selfTools, mcp.TierBuiltin); err != nil {
-		slog.Error("mcp: failed to register builtin server", "name", "self", "err", err)
+	if err := mcpManager.AddServer(mcp.SelfServerName, selfTools, mcp.TierBuiltin); err != nil {
+		slog.Error("mcp: failed to register builtin server", "name", mcp.SelfServerName, "err", err)
 	}
 
 	// CW-20260501-0005 sub-ticket 2: register Vanta MCP server when configured.

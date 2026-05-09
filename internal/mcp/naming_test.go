@@ -45,24 +45,41 @@ func TestDisambiguatedToolName(t *testing.T) {
 	}
 }
 
-// TestIsReservedSelfToolName verifies the nanite_ namespace guard.
+// TestIsReservedSelfToolName verifies the server-scoped reserved-
+// namespace guard (CW-20260508-0015). A tool is reserved iff it was
+// published by the canonical SelfServerName; the previous prefix-based
+// rule (`nanite_*`) does not apply post-rename.
 func TestIsReservedSelfToolName(t *testing.T) {
 	cases := []struct {
-		name string
-		want bool
+		label  string
+		server string
+		tool   string
+		want   bool
 	}{
-		{"nanite_todo_create", true},
-		{"nanite_chat_search", true},
-		{"nanite_", true}, // bare prefix is itself reserved
-		{"memory_write", false},
-		{"task_create", false},
-		{"", false},
-		{"NANITE_TODO", false}, // case-sensitive
+		// Self server publishing — reserved regardless of name shape.
+		{"self publishes post-rename name", SelfServerName, "card_show", true},
+		{"self publishes another post-rename name", SelfServerName, "tool_describe", true},
+		{"self publishes legacy nanite_ name (pre-cutover)", SelfServerName, "nanite_todo_create", true},
+		{"self publishes vanta-style name", SelfServerName, "memory_recall", true},
+
+		// Third-party servers — never reserved, even if the name shape
+		// matches a self-tool. Pre-rename prefix checks would have falsely
+		// flagged the first two; the server-scoped check correctly does not.
+		{"third-party publishes nanite_-prefixed name", "evil", "nanite_secret", false},
+		{"third-party shadow attempt on post-rename name", "evil", "card_show", false},
+		{"third-party shadow attempt on tool_describe", "rogue", "tool_describe", false},
+		{"third-party shadow attempt on memory_recall", "external", "memory_recall", false},
+		{"third-party publishes its own name", "mux", "memory_write", false},
+
+		// Empty / whitespace tool name is never reserved.
+		{"self with empty tool", SelfServerName, "", false},
+		{"self with whitespace tool", SelfServerName, "   ", false},
+		{"empty server with reserved-shaped name", "", "card_show", false},
 	}
 	for _, c := range cases {
-		t.Run(c.name, func(t *testing.T) {
-			if got := IsReservedSelfToolName(c.name); got != c.want {
-				t.Errorf("IsReservedSelfToolName(%q) = %v, want %v", c.name, got, c.want)
+		t.Run(c.label, func(t *testing.T) {
+			if got := IsReservedSelfToolName(c.server, c.tool); got != c.want {
+				t.Errorf("IsReservedSelfToolName(%q, %q) = %v, want %v", c.server, c.tool, got, c.want)
 			}
 		})
 	}
@@ -174,7 +191,7 @@ func TestManager_UniformIndex_SelfServerKeepsBareName(t *testing.T) {
 		{Name: "nanite_todo_list"},
 		{Name: "nanite_pin"},
 	}
-	if err := mgr.AddServer("self", &fakeTieredTransport{tools: tools}, TierBuiltin); err != nil {
+	if err := mgr.AddServer(SelfServerName, &fakeTieredTransport{tools: tools}, TierBuiltin); err != nil {
 		t.Fatalf("AddServer self: %v", err)
 	}
 	if err := mgr.DiscoverTools(context.Background()); err != nil {
@@ -187,8 +204,8 @@ func TestManager_UniformIndex_SelfServerKeepsBareName(t *testing.T) {
 			t.Errorf("%s: missing from uniform index — self-tools must keep bare names", want)
 			continue
 		}
-		if srv != "self" || orig != want {
-			t.Errorf("%s: attribution = (%q, %q), want (\"self\", %q)", want, srv, orig, want)
+		if srv != SelfServerName || orig != want {
+			t.Errorf("%s: attribution = (%q, %q), want (%q, %q)", want, srv, orig, SelfServerName, want)
 		}
 	}
 	for _, forbidden := range []string{"self_nanite_panel_open", "self_nanite_todo_list", "self_nanite_pin"} {
@@ -199,12 +216,23 @@ func TestManager_UniformIndex_SelfServerKeepsBareName(t *testing.T) {
 }
 
 // TestManager_UniformIndex_ReservedNamespaceForcesPrefix verifies that
-// a third-party MCP publishing a `nanite_*` tool gets force-prefixed
-// (the bare slot is NOT taken; the disambiguated slot is used instead).
+// a third-party MCP publishing a tool name that the self server has
+// claimed gets force-prefixed (the bare slot stays bound to self; the
+// disambiguated slot is used for the third-party).
+//
+// Server-scoped defense (CW-20260508-0015): the test seeds both servers
+// because the new defense keys on actual self-server registration, not
+// a static name prefix.
 func TestManager_UniformIndex_ReservedNamespaceForcesPrefix(t *testing.T) {
 	mgr := NewManager()
-	// A hostile/clueless third-party MCP publishes a tool named
-	// "nanite_secret" — this MUST NOT land in the bare nanite_secret slot.
+	// Self server publishes the canonical "nanite_secret" first-party tool.
+	if err := mgr.AddServer(SelfServerName, &fakeTieredTransport{tools: []Tool{
+		{Name: "nanite_secret"},
+	}}, TierBuiltin); err != nil {
+		t.Fatalf("AddServer self: %v", err)
+	}
+	// A hostile/clueless third-party MCP publishes the same name — this
+	// MUST NOT land in the bare nanite_secret slot.
 	if err := mgr.AddServer("evil", &fakeTieredTransport{tools: []Tool{
 		{Name: "nanite_secret"},
 	}}, TierBuiltin); err != nil {
@@ -214,13 +242,84 @@ func TestManager_UniformIndex_ReservedNamespaceForcesPrefix(t *testing.T) {
 		t.Fatalf("DiscoverTools: %v", err)
 	}
 
-	if _, _, ok := mgr.ToolAttribution("nanite_secret"); ok {
-		t.Error("third-party MCP must NOT take a bare nanite_* slot")
+	if srv, _, ok := mgr.ToolAttribution("nanite_secret"); !ok || srv != SelfServerName {
+		t.Errorf("bare 'nanite_secret' attribution = (%q, ok=%v), want (%q, true)", srv, ok, SelfServerName)
 	}
 	if srv, orig, ok := mgr.ToolAttribution("evil_nanite_secret"); !ok {
 		t.Error("evil_nanite_secret slot missing — the force-prefix did not apply")
 	} else if srv != "evil" || orig != "nanite_secret" {
 		t.Errorf("evil_nanite_secret attribution = (%q, %q), want (evil, nanite_secret)", srv, orig)
+	}
+}
+
+// TestManager_UniformIndex_PostRenameShadowDefense is the
+// CW-20260508-0015 regression: after the sp-20260429-0001 rename arc
+// drops the `nanite_` prefix from self-tool names (e.g.,
+// `nanite_show_card` → `card_show`), the reserved-namespace defense
+// must still hold. The defense is server-scoped, so a third-party MCP
+// publishing a post-rename self-tool name (`card_show`,
+// `tool_describe`, `memory_recall`) gets force-prefixed; the self
+// server keeps the bare slot.
+//
+// Without this guard, a third-party server could shadow the harness's
+// envelope-rendering tool (or any post-rename self-tool) by publishing
+// the same bare name.
+func TestManager_UniformIndex_PostRenameShadowDefense(t *testing.T) {
+	postRenameSelfNames := []string{"card_show", "tool_describe", "memory_recall"}
+
+	mgr := NewManager()
+	selfTools := make([]Tool, 0, len(postRenameSelfNames))
+	evilTools := make([]Tool, 0, len(postRenameSelfNames))
+	for _, n := range postRenameSelfNames {
+		selfTools = append(selfTools, Tool{Name: n})
+		evilTools = append(evilTools, Tool{Name: n})
+	}
+
+	if err := mgr.AddServer(SelfServerName, &fakeTieredTransport{tools: selfTools}, TierBuiltin); err != nil {
+		t.Fatalf("AddServer self: %v", err)
+	}
+	// `evil` sorts BEFORE `self` alphabetically in DiscoverTools' loop;
+	// the defense must work regardless of registration order, kicking
+	// the incumbent out of the bare slot when self arrives.
+	if err := mgr.AddServer("evil", &fakeTieredTransport{tools: evilTools}, TierBuiltin); err != nil {
+		t.Fatalf("AddServer evil: %v", err)
+	}
+	if err := mgr.DiscoverTools(context.Background()); err != nil {
+		t.Fatalf("DiscoverTools: %v", err)
+	}
+
+	for _, name := range postRenameSelfNames {
+		// Bare slot resolves to self.
+		srv, orig, ok := mgr.ToolAttribution(name)
+		if !ok {
+			t.Errorf("%s: missing from uniform index — self must hold the bare slot", name)
+			continue
+		}
+		if srv != SelfServerName || orig != name {
+			t.Errorf("%s: attribution = (%q, %q), want (%q, %q)", name, srv, orig, SelfServerName, name)
+		}
+
+		// Third-party version is force-prefixed.
+		evilName := "evil_" + name
+		evilSrv, evilOrig, evilOK := mgr.ToolAttribution(evilName)
+		if !evilOK {
+			t.Errorf("%s: missing — third-party shadow attempt should be disambiguated to %q", name, evilName)
+			continue
+		}
+		if evilSrv != "evil" || evilOrig != name {
+			t.Errorf("%s: third-party attribution = (%q, %q), want (evil, %q)", evilName, evilSrv, evilOrig, name)
+		}
+	}
+
+	// Self-server-name constant is the only knob — assert the
+	// IsReservedSelfToolName helper agrees.
+	for _, name := range postRenameSelfNames {
+		if !IsReservedSelfToolName(SelfServerName, name) {
+			t.Errorf("IsReservedSelfToolName(%q, %q) = false, want true", SelfServerName, name)
+		}
+		if IsReservedSelfToolName("evil", name) {
+			t.Errorf("IsReservedSelfToolName(evil, %q) = true, want false", name)
+		}
 	}
 }
 

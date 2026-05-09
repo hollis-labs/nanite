@@ -84,7 +84,9 @@ func IsContextOverflowMessage(msg string) bool {
 //  2. Per-minute rate-budget overflow — the prompt estimate exceeds the
 //     provider's per-minute token budget. Pacing can't fix it because the
 //     request will never fit in a single window. Surfaced as
-//     provider.ErrRequestExceedsRateBudget by go-providers ≥ v0.2.1.
+//     llmcontracts.ErrRequestExceedsRateBudget (Wave-1 relocation; the
+//     equivalent sentinel previously lived at provider.ErrRequestExceedsRateBudget
+//     in go-providers ≥ v0.2.1).
 //
 // Without this unified predicate the chat loop would compact on (1) and
 // repeat 58-second pacing waits on (2) until the 5-minute wall-clock

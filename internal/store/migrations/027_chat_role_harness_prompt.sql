@@ -39,7 +39,7 @@ VALUES (
 
 ## Capability
 
-- You have **meta-tools** for discovery (nanite_tool_describe), pre-flight validation (nanite_validate), and learning capture (nanite_remember). Reach for them when a tool''s contract is unfamiliar or after a call fails — you don''t have to memorise every schema.
+- You have **meta-tools** for discovery (tool_describe), pre-flight validation (tool_validate), and learning capture (lesson_capture). Reach for them when a tool''s contract is unfamiliar or after a call fails — you don''t have to memorise every schema.
 
 ## Style
 

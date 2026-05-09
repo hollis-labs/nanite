@@ -235,6 +235,7 @@ func (s *chatServiceImpl) observeSessionForRecovery(sess *runtimeagent.Session, 
 		// Clean exit — nothing for the broker to recover.
 		s.activeSessions.Delete(sessionID)
 		s.activeSessionSlots.Delete(sessionID)
+		s.toolPartitionStates.Delete(sessionID)
 		// Comma-ok rather than panicking type assert: future
 		// RecoveryHooks impls (mocks in tests) may not expose
 		// ClearSession; the cleanup is best-effort.
@@ -262,9 +263,12 @@ func (s *chatServiceImpl) observeSessionForRecovery(sess *runtimeagent.Session, 
 	// activeSessions cleanup. The broker may dispatch a replacement
 	// session via DispatchRetry → agent.Boot, which re-stores in
 	// activeSessions; the Delete here precedes the new Store so the
-	// map shows the latest session reference.
+	// map shows the latest session reference. toolPartitionStates is
+	// session-id-keyed too — the replacement session boots fresh, so
+	// pruning here mirrors the activeSessions-side reset.
 	s.activeSessions.Delete(sessionID)
 	s.activeSessionSlots.Delete(sessionID)
+	s.toolPartitionStates.Delete(sessionID)
 }
 
 // regenerateBootDirSlots rewrites the boot dir's CLAUDE.md and

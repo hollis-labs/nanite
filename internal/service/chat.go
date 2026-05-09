@@ -662,6 +662,7 @@ func (s *chatServiceImpl) CloseAgentSession(ctx context.Context, sessionID strin
 		return
 	}
 	s.activeSessionSlots.Delete(sessionID)
+	s.toolPartitionStates.Delete(sessionID)
 	if s.agentEventBridge != nil {
 		s.agentEventBridge.SetPerSessionRouter(sessionID, nil)
 	}

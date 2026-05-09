@@ -65,9 +65,18 @@ func NewBroker(deps Dependencies, opts ...Option) *Broker {
 // Option configures a Broker at construction time.
 type Option func(*Broker)
 
-// WithMaxRetries overrides the broker-level hard cap. Default is
-// MaxBrokerRetries (3). Combined with go-agent-sessions's RestartOnCrash=2
-// the total spawn budget is up to maxRetries + 1 + 2 = 6 attempts.
+// WithMaxRetries overrides the broker-level hard cap on terminal-exit
+// observations the broker will retry for a single chat session. Default
+// is MaxBrokerRetries (3): the broker dispatches at most 3 replacement
+// sessions (each a fresh agent.Boot) before escalating to ClassPermanent
+// on attempt 4 (see orchestration.go's `attempt > b.maxRetries` guard).
+//
+// The broker cap is independent of the lib-level go-agent-sessions
+// RestartOnCrash budget: each broker-dispatched replacement session has
+// its own internal RestartOnCrash window (currently 2) that the lib
+// consumes silently before surfacing a terminal ExitError back to the
+// broker. So the broker's ceiling counts terminal exits the chat layer
+// observes, not raw process spawns.
 func WithMaxRetries(n int) Option {
 	return func(b *Broker) {
 		if n < 0 {

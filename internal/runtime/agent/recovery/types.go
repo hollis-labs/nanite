@@ -320,9 +320,14 @@ type Breadcrumb struct {
 	Reason string
 }
 
-// MaxBrokerRetries is the broker-level hard cap. Combined with the
-// lib-level RestartOnCrash=2, the total spawn budget per session is up
-// to 5 attempts before a Permanent escalation.
+// MaxBrokerRetries is the broker-level hard cap on the number of
+// terminal-exit observations the broker will retry for a single chat
+// session. With the default value, the broker dispatches up to 3
+// replacement sessions before escalating to ClassPermanent on the next
+// observation. The cap counts broker.OnSessionExit invocations only —
+// the lib-level RestartOnCrash budget (currently 2) is consumed silently
+// inside each replacement session before its terminal exit reaches the
+// broker, so it is independent of this constant.
 //
 // Configurable via Broker.WithMaxRetries; this is the default.
 const MaxBrokerRetries = 3

@@ -38,6 +38,13 @@ type Broker struct {
 	// from the FE can abort. Map key is the cancel token; value is the
 	// CancelFunc bound to the retry's context.
 	activeRetries map[string]context.CancelFunc
+
+	// replacementHook, when non-nil, is invoked synchronously after a
+	// successful DispatchRetry with the replacement session. The chat
+	// composition root sets this so it can adopt the replacement into
+	// its activeSessions map (otherwise the new session is orphaned and
+	// the next user turn boots yet another). nil-safe.
+	replacementHook func(sessionID string, sess *agent.Session)
 }
 
 // NewBroker constructs a Broker with the supplied dependencies and
@@ -96,6 +103,27 @@ func WithRemediationTimeout(d time.Duration) Option {
 	}
 }
 
+// WithReplacementSessionHook installs a callback invoked synchronously
+// from the orchestration loop after each successful DispatchRetry. The
+// chat composition root uses this to adopt the replacement session into
+// its activeSessions map so the next user turn binds to the freshly
+// booted process instead of orphaning it and booting another.
+//
+// Hook semantics:
+//   - sessionID is the chat sessionID (stable across the failure → retry
+//     cycle); sess is the broker-dispatched replacement.
+//   - Invoked before recordOutcome writes the breadcrumb, so any panic
+//     in the hook (defended elsewhere with safego) does not corrupt
+//     the postmortem record.
+//   - Replacement Store should precede activeSessions.Delete on the
+//     observer side; see chat_boot_drive.go's observeSessionForRecovery
+//     for the call ordering.
+func WithReplacementSessionHook(hook func(sessionID string, sess *agent.Session)) Option {
+	return func(b *Broker) {
+		b.replacementHook = hook
+	}
+}
+
 // OnRestart implements the agent.RecoveryHooks contract. Invoked from
 // agent.Boot's existing SupervisorOptions.OnRestart closure when the
 // supervisor itself triggered a restart. The broker observes (records
@@ -139,6 +167,18 @@ func (b *Broker) OnRestart(sessionID string, attempt int, prevExit *agentsession
 // OnSessionExit lives in orchestration.go (Phase 6 implementation).
 // Kept here only as a forward-reference comment so readers of broker.go
 // see the full hook surface in one place.
+
+// SetReplacementSessionHook installs the replacement-session callback
+// post-construction. Useful when the chat composition root needs to
+// inject a closure that captures state created after NewBroker (e.g.
+// the chat service's activeSessions map). nil clears the hook.
+//
+// Safe for concurrent callers: the Broker's mu guards the assignment.
+func (b *Broker) SetReplacementSessionHook(hook func(sessionID string, sess *agent.Session)) {
+	b.mu.Lock()
+	b.replacementHook = hook
+	b.mu.Unlock()
+}
 
 // CancelRetry aborts an in-flight retry identified by token. Called
 // when the FE posts a cancel_retry event (the user clicked the
@@ -306,3 +346,26 @@ func itoa(n int) string {
 // errNilFailureEvent is returned by DispatchRetry when the caller
 // hands it a nil event. Defensive guard against orchestration bugs.
 var errNilFailureEvent = brokerErr("recovery.DispatchRetry: nil failure event")
+
+// notifyReplacement invokes the replacementHook (when set) with the
+// freshly booted replacement session. nil-safe on every front: a nil
+// hook, a nil session, or a panicking hook are all swallowed with a
+// log so the orchestration loop's recordOutcome step still runs.
+func (b *Broker) notifyReplacement(sessionID string, sess *agent.Session) {
+	if sess == nil {
+		return
+	}
+	b.mu.Lock()
+	hook := b.replacementHook
+	b.mu.Unlock()
+	if hook == nil {
+		return
+	}
+	defer func() {
+		if r := recover(); r != nil {
+			b.logger().Warn("recovery: replacement-session hook panicked",
+				"session_id", sessionID, "panic", r)
+		}
+	}()
+	hook(sessionID, sess)
+}

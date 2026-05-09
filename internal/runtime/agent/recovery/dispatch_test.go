@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	agentsessions "github.com/hollis-labs/go-agent-sessions/agentsessions"
 	"github.com/hollis-labs/nanite/internal/runtime/agent"
 )
 
@@ -216,6 +217,120 @@ func TestDispatchRetryPropagatesBootErr(t *testing.T) {
 	if !errors.Is(err, wantErr) {
 		t.Errorf("error = %v, want wrapping %v", err, wantErr)
 	}
+}
+
+// TestReplacementSessionHook_FiredOnSuccessfulDispatch pins the chat-side
+// adoption contract: when DispatchRetry succeeds (via the orchestration
+// runTransientRetry path), the broker invokes the replacement-session
+// hook with the chat sessionID and the booted *agent.Session. Without
+// this hook the broker's replacement is orphaned and the next user
+// turn boots yet another session (the bug Copilot flagged on PR #107).
+func TestReplacementSessionHook_FiredOnSuccessfulDispatch(t *testing.T) {
+	stub := &agent.Session{}
+	boot := &fakeAgentBoot{retSess: stub}
+
+	type call struct {
+		sessionID string
+		sess      *agent.Session
+	}
+	var got []call
+
+	b := NewBroker(Dependencies{
+		AgentBoot: boot,
+		Store:     &fakeStore{},
+		Envelope:  &nopEnvelope{},
+	},
+		WithReplacementSessionHook(func(sessionID string, s *agent.Session) {
+			got = append(got, call{sessionID, s})
+		}),
+	)
+
+	// Trigger an OnSessionExit that lands in runTransientRetry — the
+	// idle_timeout cause maps to ClassTransient/RemediationNone.
+	b.OnSessionExit("sess-replace", makeIdleTimeoutExit(), nil)
+
+	if len(got) != 1 {
+		t.Fatalf("replacement hook: got %d calls, want 1", len(got))
+	}
+	if got[0].sessionID != "sess-replace" {
+		t.Errorf("hook sessionID = %q, want sess-replace", got[0].sessionID)
+	}
+	if got[0].sess != stub {
+		t.Errorf("hook session = %p, want stub %p", got[0].sess, stub)
+	}
+}
+
+// TestReplacementSessionHook_NotFiredOnDispatchFailure pins the negative
+// case: when DispatchRetry returns an error the broker escalates to
+// permanent and MUST NOT invoke the replacement hook (no real session
+// exists to adopt).
+func TestReplacementSessionHook_NotFiredOnDispatchFailure(t *testing.T) {
+	bootErr := errors.New("boot failed")
+	boot := &fakeAgentBoot{retErr: bootErr}
+
+	called := 0
+	b := NewBroker(Dependencies{
+		AgentBoot: boot,
+		Store:     &fakeStore{},
+		Envelope:  &nopEnvelope{},
+	},
+		WithReplacementSessionHook(func(string, *agent.Session) { called++ }),
+	)
+
+	b.OnSessionExit("sess-fail", makeIdleTimeoutExit(), nil)
+
+	if called != 0 {
+		t.Errorf("replacement hook should not fire on dispatch failure; got %d calls", called)
+	}
+}
+
+// TestSetReplacementSessionHook_PostConstruction verifies the
+// composition root path: the hook is installed AFTER NewBroker runs
+// (because chatServiceImpl is constructed after agentDeps in the
+// container) and still fires on the next OnSessionExit.
+func TestSetReplacementSessionHook_PostConstruction(t *testing.T) {
+	stub := &agent.Session{}
+	boot := &fakeAgentBoot{retSess: stub}
+	b := NewBroker(Dependencies{
+		AgentBoot: boot,
+		Store:     &fakeStore{},
+		Envelope:  &nopEnvelope{},
+	})
+
+	// No hook set yet: dispatch fires but no callback runs.
+	called := 0
+	b.OnSessionExit("sess-pre", makeIdleTimeoutExit(), nil)
+	if called != 0 {
+		t.Errorf("baseline (no hook): callback fired %d times", called)
+	}
+
+	// Install hook post-construction; subsequent dispatches invoke it.
+	b.SetReplacementSessionHook(func(string, *agent.Session) { called++ })
+	b.OnSessionExit("sess-post", makeIdleTimeoutExit(), nil)
+	if called != 1 {
+		t.Errorf("post-set hook: got %d calls, want 1", called)
+	}
+
+	// Clearing the hook (nil) restores the no-op behavior.
+	b.SetReplacementSessionHook(nil)
+	b.OnSessionExit("sess-cleared", makeIdleTimeoutExit(), nil)
+	if called != 1 {
+		t.Errorf("cleared hook: should still be %d calls, got %d", 1, called)
+	}
+}
+
+// nopEnvelope satisfies recovery.EnvelopeSink for tests that don't care
+// about envelope content — only the dispatch path.
+type nopEnvelope struct{}
+
+func (nopEnvelope) Emit(string, Envelope) error { return nil }
+
+// makeIdleTimeoutExit is a helper for the replacement-hook tests above.
+// idle_timeout cause maps to ClassTransient/RemediationNone, which
+// routes through runTransientRetry — the dispatch-but-no-remediation
+// path that exercises notifyReplacement directly.
+func makeIdleTimeoutExit() *agentsessions.ExitError {
+	return &agentsessions.ExitError{Cause: agentsessions.CauseIdleTimeout}
 }
 
 // TestItoa exercises the small int formatter used in the relaunch

@@ -210,6 +210,39 @@ func hashSlots(slotResult *SlotAssemblyResult) uint64 {
 	return h.Sum64()
 }
 
+// adoptReplacementSession is the recovery-broker replacement hook. The
+// broker calls this synchronously from its orchestration loop after a
+// successful DispatchRetry so the chat-side activeSessions map binds to
+// the freshly booted process — without this, the next user turn would
+// not find an entry under sessionID and boot yet another session,
+// orphaning the broker's replacement.
+//
+// The chat composition root installs this via Broker.SetReplacementSessionHook
+// once both chatServiceImpl and the broker exist (see container.go).
+//
+// Also re-arms the per-session Wait observer so the replacement's own
+// terminal exits route back through the broker. Without this, the
+// replacement would not be observed and a second-tier failure would go
+// unrecovered.
+func (s *chatServiceImpl) adoptReplacementSession(sessionID string, sess *runtimeagent.Session) {
+	if sess == nil {
+		return
+	}
+	s.activeSessions.Store(sessionID, sess)
+	// Slot hash + tool-partition state reset is implicit: the prior
+	// session's Delete(sessionID) ran before adoptReplacementSession is
+	// invoked (see observeSessionForRecovery's call ordering), so the
+	// replacement starts with a clean slot/regen window. The boot dir
+	// itself is reused — agent.Boot's IsRelaunch=true path skips
+	// CreateRuntimeRow + workdir reseed.
+
+	// Re-arm the Wait observer for the replacement. The broker may
+	// dispatch additional retries up to its hard cap; without a fresh
+	// observer the second terminal exit would not surface to the
+	// broker.
+	go s.observeSessionForRecovery(sess, sessionID, "", "", time.Now())
+}
+
 // observeSessionForRecovery is the Wait-observer goroutine that watches
 // a booted runtime session and routes terminal *agentsessions.ExitError
 // to the recovery broker via deps.Recovery.OnSessionExit. Spawned per
@@ -258,17 +291,21 @@ func (s *chatServiceImpl) observeSessionForRecovery(sess *runtimeagent.Session, 
 		"code", xe.Code,
 		"signal", xe.Signal)
 
-	s.agentDeps.Recovery.OnSessionExit(sessionID, xe, meta)
-
-	// activeSessions cleanup. The broker may dispatch a replacement
-	// session via DispatchRetry → agent.Boot, which re-stores in
-	// activeSessions; the Delete here precedes the new Store so the
-	// map shows the latest session reference. toolPartitionStates is
-	// session-id-keyed too — the replacement session boots fresh, so
-	// pruning here mirrors the activeSessions-side reset.
+	// Per-session state cleanup happens BEFORE OnSessionExit. The broker
+	// may dispatch a replacement session (DispatchRetry → agent.Boot),
+	// at which point it invokes the replacement-session hook installed
+	// at container.go and that hook re-stores the new session into
+	// activeSessions. Cleaning up after OnSessionExit returns would
+	// race-clobber the freshly stored replacement.
+	//
+	// toolPartitionStates is session-id-keyed too — the replacement
+	// session boots fresh, so pruning here mirrors the activeSessions
+	// reset.
 	s.activeSessions.Delete(sessionID)
 	s.activeSessionSlots.Delete(sessionID)
 	s.toolPartitionStates.Delete(sessionID)
+
+	s.agentDeps.Recovery.OnSessionExit(sessionID, xe, meta)
 }
 
 // regenerateBootDirSlots rewrites the boot dir's CLAUDE.md and

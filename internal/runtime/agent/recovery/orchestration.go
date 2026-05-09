@@ -137,7 +137,8 @@ func (b *Broker) runConfigFixedRetry(ev *FailureEvent, c Classification, started
 		return
 	}
 
-	if _, err := b.DispatchRetry(ctx, ev); err != nil {
+	sess, err := b.DispatchRetry(ctx, ev)
+	if err != nil {
 		b.logger().Warn("recovery: retry dispatch failed",
 			"session_id", ev.SessionID,
 			"err", err)
@@ -148,6 +149,7 @@ func (b *Broker) runConfigFixedRetry(ev *FailureEvent, c Classification, started
 		}, started)
 		return
 	}
+	b.notifyReplacement(ev.SessionID, sess)
 
 	b.recordOutcome(ev, c, ActionRetryConfigFixed, OutcomeRemediated, started)
 }
@@ -170,7 +172,8 @@ func (b *Broker) runTransientRetry(ev *FailureEvent, c Classification, started t
 		return
 	}
 
-	if _, err := b.DispatchRetry(ctx, ev); err != nil {
+	sess, err := b.DispatchRetry(ctx, ev)
+	if err != nil {
 		b.logger().Warn("recovery: retry dispatch failed",
 			"session_id", ev.SessionID,
 			"err", err)
@@ -181,6 +184,7 @@ func (b *Broker) runTransientRetry(ev *FailureEvent, c Classification, started t
 		}, started)
 		return
 	}
+	b.notifyReplacement(ev.SessionID, sess)
 
 	b.recordOutcome(ev, c, ActionRetryTransient, OutcomeTransientRetrySucceeded, started)
 }

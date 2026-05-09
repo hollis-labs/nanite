@@ -1,7 +1,7 @@
 package service
 
 import (
-	"github.com/hollis-labs/go-providers/provider"
+	llmtypes "github.com/hollis-labs/go-llm-types"
 	"github.com/hollis-labs/nanite/internal/chat"
 )
 
@@ -32,7 +32,7 @@ func (s *chatServiceImpl) storeToolPartitionState(sessionID string, st chat.Tool
 // containsToolNamed reports whether a tool with the given name is already in
 // the slice. Used to keep the request_tools meta-tool insertion idempotent
 // when LazyLoad partitions a tool surface that already includes it.
-func containsToolNamed(tools []provider.ToolDefinition, name string) bool {
+func containsToolNamed(tools []llmtypes.ToolDefinition, name string) bool {
 	for _, t := range tools {
 		if t.Name == name {
 			return true

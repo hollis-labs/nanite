@@ -5,8 +5,8 @@ import (
 	"strings"
 	"testing"
 
+	llmtypes "github.com/hollis-labs/go-llm-types"
 	"github.com/hollis-labs/nanite/internal/mcp"
-	"github.com/hollis-labs/go-providers/provider"
 )
 
 // All tool names in this file use the uniform agent-facing form
@@ -89,7 +89,7 @@ func TestSelectToolsAsProvider_DevToolsExcludedWhenDevModeOff(t *testing.T) {
 	tb.DeveloperModeFunc = func() bool { return false }
 
 	// Register a mix of dev tools and a safe tool as builtins.
-	tb.Builtins.RegisterBuiltins("dev", []provider.ToolDefinition{
+	tb.Builtins.RegisterBuiltins("dev", []llmtypes.ToolDefinition{
 		{Name: "dev_bash", Description: "Execute shell commands"},
 		{Name: "dev_read", Description: "Read files"},
 		{Name: "dev_write", Description: "Write files"},
@@ -97,7 +97,7 @@ func TestSelectToolsAsProvider_DevToolsExcludedWhenDevModeOff(t *testing.T) {
 		{Name: "dev_glob", Description: "Glob files"},
 		{Name: "dev_grep", Description: "Grep files"},
 	})
-	tb.Builtins.RegisterBuiltins("self", []provider.ToolDefinition{
+	tb.Builtins.RegisterBuiltins("self", []llmtypes.ToolDefinition{
 		{Name: "todo_create", Description: "Create a todo"},
 	})
 
@@ -126,7 +126,7 @@ func TestSelectToolsAsProvider_DevToolsIncludedWhenDevModeOn(t *testing.T) {
 	tb := New(nil, nil, DefaultConfig())
 	tb.DeveloperModeFunc = func() bool { return true }
 
-	tb.Builtins.RegisterBuiltins("dev", []provider.ToolDefinition{
+	tb.Builtins.RegisterBuiltins("dev", []llmtypes.ToolDefinition{
 		{Name: "dev_bash", Description: "Execute shell commands"},
 		{Name: "dev_read", Description: "Read files"},
 	})
@@ -304,7 +304,7 @@ func TestCallToolWithPolicyCheck_DevToolsDeniedWhenDevModeOff(t *testing.T) {
 
 func TestDevModeFallClosed_NoStoreNoFunc(t *testing.T) {
 	tb := New(nil, nil, DefaultConfig())
-	tb.Builtins.RegisterBuiltins("dev", []provider.ToolDefinition{
+	tb.Builtins.RegisterBuiltins("dev", []llmtypes.ToolDefinition{
 		{Name: "dev_bash", Description: "Shell"},
 	})
 
@@ -325,7 +325,7 @@ func TestDevModeFallClosed_NoStoreNoFunc(t *testing.T) {
 
 // toolNames converts a slice of ToolDefinition to a set of names for easy
 // membership tests.
-func toolNames(defs []provider.ToolDefinition) map[string]bool {
+func toolNames(defs []llmtypes.ToolDefinition) map[string]bool {
 	out := make(map[string]bool, len(defs))
 	for _, d := range defs {
 		out[d.Name] = true

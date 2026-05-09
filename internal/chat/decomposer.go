@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 
+	llmtypes "github.com/hollis-labs/go-llm-types"
 	"github.com/hollis-labs/go-providers/provider"
 )
 
@@ -73,11 +74,11 @@ func (d *Decomposer) DecomposeTask(ctx context.Context, userMessage string, agen
 		prompt += fmt.Sprintf("\n\nAgent context (capabilities and role):\n%s", agentContext)
 	}
 
-	messages := []provider.ChatMessage{
+	messages := []llmtypes.ChatMessage{
 		{Role: "user", Content: userMessage},
 	}
 
-	raw, err := prov.Complete(ctx, provider.ChatRequest{SystemPrompt: prompt, Messages: messages, Model: model})
+	raw, err := prov.Complete(ctx, llmtypes.ChatRequest{SystemPrompt: prompt, Messages: messages, Model: model})
 	if err != nil {
 		return nil, fmt.Errorf("decomposition LLM call: %w", err)
 	}

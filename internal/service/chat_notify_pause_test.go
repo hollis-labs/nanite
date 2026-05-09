@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/hollis-labs/go-providers/provider"
+	llmtypes "github.com/hollis-labs/go-llm-types"
 	"github.com/hollis-labs/nanite/internal/chat"
 )
 
@@ -23,8 +23,8 @@ func TestShouldNotifyPause(t *testing.T) {
 		{"dev_write", true},
 		{"dev_edit", true},
 		{"dev_bash", true},
-		{"dev_grep", false},  // exempted — read-only discovery
-		{"dev_glob", false},  // exempted — read-only discovery
+		{"dev_grep", false}, // exempted — read-only discovery
+		{"dev_glob", false}, // exempted — read-only discovery
 		{"card_show", false},
 		{"fetch_tool_result", false},
 		{"plugin_giphy_search", false},
@@ -42,7 +42,7 @@ func TestShouldNotifyPause(t *testing.T) {
 // TestEmitNotifyPause_EmitsPlaceholderEnvelope confirms the middleware
 // emits a `notify_pause` SSE event with the expected JSON payload.
 func TestEmitNotifyPause_EmitsPlaceholderEnvelope(t *testing.T) {
-	tu := provider.ToolUseBlock{
+	tu := llmtypes.ToolUseBlock{
 		ID:   "call-1",
 		Name: "dev_read",
 		Input: map[string]any{
@@ -95,7 +95,7 @@ func TestEmitNotifyPause_EmitsPlaceholderEnvelope(t *testing.T) {
 // no-op for tools outside the dev_* surface — the agent's structured
 // surface (nanite_*) and plugin tools do NOT pause.
 func TestEmitNotifyPause_SkipsNonDevTools(t *testing.T) {
-	tu := provider.ToolUseBlock{
+	tu := llmtypes.ToolUseBlock{
 		ID:   "call-2",
 		Name: "card_show",
 	}
@@ -118,7 +118,7 @@ func TestEmitNotifyPause_SkipsNonDevTools(t *testing.T) {
 // CW-20260501-0003 toast cancel button will hit (it cancels the
 // per-message ctx).
 func TestEmitNotifyPause_CancelsOnCtx(t *testing.T) {
-	tu := provider.ToolUseBlock{
+	tu := llmtypes.ToolUseBlock{
 		ID:    "call-3",
 		Name:  "dev_write",
 		Input: map[string]any{"path": "/tmp/foo.txt"},
@@ -144,7 +144,7 @@ func TestEmitNotifyPause_CancelsOnCtx(t *testing.T) {
 // mutex is supplied (concurrent execution path), the notify_pause SSE
 // write does not race with the caller's tool_call write.
 func TestEmitNotifyPause_HonorsMutex(t *testing.T) {
-	tu := provider.ToolUseBlock{
+	tu := llmtypes.ToolUseBlock{
 		ID:    "call-4",
 		Name:  "dev_read",
 		Input: map[string]any{"path": "/tmp/foo.txt"},

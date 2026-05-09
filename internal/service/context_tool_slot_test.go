@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/hollis-labs/go-providers/provider"
+	llmtypes "github.com/hollis-labs/go-llm-types"
 	"github.com/hollis-labs/nanite/internal/chat"
 	"github.com/hollis-labs/nanite/internal/store"
 	"github.com/hollis-labs/nanite/internal/tool/intent"
@@ -88,8 +88,8 @@ func seedSession(t *testing.T, s *store.Store, userTurn string) (*store.Session,
 	return sess, agent
 }
 
-func tools3() []provider.ToolDefinition {
-	return []provider.ToolDefinition{
+func tools3() []llmtypes.ToolDefinition {
+	return []llmtypes.ToolDefinition{
 		{Name: "dev_grep", Description: "search files"},
 		{Name: "dev_read", Description: "read a file"},
 		{Name: "dev_bash", Description: "run bash"},
@@ -119,7 +119,7 @@ func TestAssembleSlots_S3b_RulesHitHydrates(t *testing.T) {
 
 	// Tools slot should be full JSON.
 	slot := r.Window.Slot("tools")
-	var defs []provider.ToolDefinition
+	var defs []llmtypes.ToolDefinition
 	if err := json.Unmarshal([]byte(slot.Content), &defs); err != nil {
 		t.Fatalf("hydrated slot should be JSON-marshaled defs: %v (raw=%q)", err, slot.Content)
 	}
@@ -176,7 +176,7 @@ func TestAssembleSlots_S3b_PartialHydration(t *testing.T) {
 	if len(parts) < 2 {
 		t.Fatalf("partial content should have JSON + summary sections: %q", content)
 	}
-	var defs []provider.ToolDefinition
+	var defs []llmtypes.ToolDefinition
 	if err := json.Unmarshal([]byte(parts[0]), &defs); err != nil {
 		t.Fatalf("partial JSON section invalid: %v", err)
 	}
@@ -253,7 +253,7 @@ func TestAssembleSlots_S3b_DisabledFallsBackToS3a(t *testing.T) {
 		t.Fatalf("classifier must not be invoked when cache is disabled; calls=%d", cls.calls)
 	}
 	// Tools slot must be full JSON (S3a behavior).
-	var defs []provider.ToolDefinition
+	var defs []llmtypes.ToolDefinition
 	if err := json.Unmarshal([]byte(r.Window.Slot("tools").Content), &defs); err != nil {
 		t.Fatalf("S3a slot should be JSON-marshaled defs: %v", err)
 	}
@@ -358,4 +358,3 @@ func TestAssembleSlots_S3b_ClassifierErrorStillRenders(t *testing.T) {
 		t.Fatalf("fail-open must hydrate all; got %v", r.ToolCache.Next)
 	}
 }
-

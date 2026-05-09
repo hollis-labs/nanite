@@ -4,8 +4,8 @@ import (
 	"context"
 	"testing"
 
+	llmtypes "github.com/hollis-labs/go-llm-types"
 	"github.com/hollis-labs/nanite/internal/chat"
-	"github.com/hollis-labs/go-providers/provider"
 	"github.com/hollis-labs/nanite/internal/store"
 	"github.com/hollis-labs/nanite/internal/toolclient"
 )
@@ -13,9 +13,9 @@ import (
 // --- stub MCP manager for tool tests ---
 
 type stubMCPManager struct {
-	tools      map[string]string // toolName -> result
-	execErr    error
-	serverTools map[string][]provider.ToolDefinition
+	tools       map[string]string // toolName -> result
+	execErr     error
+	serverTools map[string][]llmtypes.ToolDefinition
 }
 
 func (m *stubMCPManager) ExecuteTool(_ context.Context, name string, _ map[string]any) (string, error) {
@@ -103,7 +103,7 @@ func TestExtractIntent(t *testing.T) {
 
 func TestFilterToolsByAllowlist(t *testing.T) {
 	// Uniform agent-facing names (ADR-002 — no `mcp__server__` prefix).
-	tools := []provider.ToolDefinition{
+	tools := []llmtypes.ToolDefinition{
 		{Name: "engine_task_create"},
 		{Name: "engine_task_list"},
 		{Name: "context_search"},
@@ -134,7 +134,7 @@ func TestFilterToolsByAllowlist(t *testing.T) {
 // counter consults the toolclient's BuiltinToolRegistry.
 func TestCountMCPOriginTools(t *testing.T) {
 	// nil toolClient — pessimistic: count everything as MCP-origin.
-	tools := []provider.ToolDefinition{
+	tools := []llmtypes.ToolDefinition{
 		{Name: "task_create"},
 		{Name: "dev_read"},
 	}
@@ -144,15 +144,15 @@ func TestCountMCPOriginTools(t *testing.T) {
 
 	// With a toolclient that knows two builtins, only the unknown name counts.
 	tc := toolclient.New(nil, nil, toolclient.DefaultConfig())
-	tc.Builtins.RegisterBuiltins("dev", []provider.ToolDefinition{
+	tc.Builtins.RegisterBuiltins("dev", []llmtypes.ToolDefinition{
 		{Name: "dev_read"},
 	})
-	tc.Builtins.RegisterBuiltins("self", []provider.ToolDefinition{
+	tc.Builtins.RegisterBuiltins("self", []llmtypes.ToolDefinition{
 		{Name: "request_tools"},
 	})
-	mixed := []provider.ToolDefinition{
-		{Name: "task_create"},   // MCP-origin
-		{Name: "dev_read"},      // builtin
+	mixed := []llmtypes.ToolDefinition{
+		{Name: "task_create"},    // MCP-origin
+		{Name: "dev_read"},       // builtin
 		{Name: "context_search"}, // MCP-origin
 		{Name: "request_tools"},  // builtin (meta)
 	}

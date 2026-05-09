@@ -5,8 +5,8 @@ import (
 	"strings"
 	"testing"
 
+	llmtypes "github.com/hollis-labs/go-llm-types"
 	"github.com/hollis-labs/nanite/internal/mcp"
-	"github.com/hollis-labs/go-providers/provider"
 )
 
 // All tool names in this file use uniform agent-facing form (ADR-002).
@@ -83,7 +83,7 @@ func TestSelectToolsAsProvider_BuiltinFilteredThroughPermissions(t *testing.T) {
 	// dev-mode gate. See devmode_gate_test.go for dev-mode gate coverage.
 
 	tb := New(nil, nil, DefaultConfig())
-	tb.Builtins.RegisterBuiltins("self", []provider.ToolDefinition{
+	tb.Builtins.RegisterBuiltins("self", []llmtypes.ToolDefinition{
 		{Name: "todo_create", Description: "Create a todo"},
 		{Name: "plan_create", Description: "Create a plan"},
 	})
@@ -127,7 +127,7 @@ func TestHandleRequestToolsForAgent_FiltersDeniedInnerNames(t *testing.T) {
 	// of policy. Tool names are uniform — newTestBrokerWithTools registers
 	// them under the "test" server name, so via the broker their uniform
 	// names are exactly the original names (ADR-002).
-	tools := []provider.ToolDefinition{
+	tools := []llmtypes.ToolDefinition{
 		{Name: "volon_task_create", Description: "Create a task"},
 		{Name: "dev_bash", Description: "Shell execution"},
 	}
@@ -143,7 +143,7 @@ func TestHandleRequestToolsForAgent_FiltersDeniedInnerNames(t *testing.T) {
 }
 
 func TestHandleRequestToolsForAgent_DeniesPathTraversalArg(t *testing.T) {
-	tb := newTestBrokerWithTools([]provider.ToolDefinition{
+	tb := newTestBrokerWithTools([]llmtypes.ToolDefinition{
 		{Name: "dev_read", Description: "Read files"},
 	})
 
@@ -160,7 +160,7 @@ func TestHandleRequestToolsForAgent_DeniesPathTraversalArg(t *testing.T) {
 }
 
 func TestHandleRequestToolsForAgent_DeniesNestedTraversal(t *testing.T) {
-	tb := newTestBrokerWithTools([]provider.ToolDefinition{
+	tb := newTestBrokerWithTools([]llmtypes.ToolDefinition{
 		{Name: "dev_read", Description: "Read files"},
 	})
 

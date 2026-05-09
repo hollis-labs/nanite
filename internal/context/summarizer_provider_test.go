@@ -6,22 +6,22 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/hollis-labs/go-providers/provider"
+	llmtypes "github.com/hollis-labs/go-llm-types"
 )
 
-// mockProvider implements provider.Provider for summarizer tests.
+// mockProvider implements llmcontracts.Provider for summarizer tests.
 type mockProvider struct {
-	completeFn func(ctx context.Context, in provider.ChatRequest) (string, error)
+	completeFn func(ctx context.Context, in llmtypes.ChatRequest) (string, error)
 }
 
-func (m *mockProvider) StreamChat(ctx context.Context, in provider.ChatRequest) (<-chan provider.StreamEvent, error) {
+func (m *mockProvider) StreamChat(ctx context.Context, in llmtypes.ChatRequest) (<-chan llmtypes.StreamEvent, error) {
 	return nil, nil
 }
-func (m *mockProvider) Complete(ctx context.Context, in provider.ChatRequest) (string, error) {
+func (m *mockProvider) Complete(ctx context.Context, in llmtypes.ChatRequest) (string, error) {
 	return m.completeFn(ctx, in)
 }
-func (m *mockProvider) Capabilities() provider.ProviderCapabilities {
-	return provider.ProviderCapabilities{}
+func (m *mockProvider) Capabilities() llmtypes.ProviderCapabilities {
+	return llmtypes.ProviderCapabilities{}
 }
 
 func TestProviderSummarizer_PassesModeSystemPrompt(t *testing.T) {
@@ -29,7 +29,7 @@ func TestProviderSummarizer_PassesModeSystemPrompt(t *testing.T) {
 	var gotModel string
 	var gotMessages int
 	mock := &mockProvider{
-		completeFn: func(_ context.Context, in provider.ChatRequest) (string, error) {
+		completeFn: func(_ context.Context, in llmtypes.ChatRequest) (string, error) {
 			gotSystem = in.SystemPrompt
 			gotModel = in.Model
 			gotMessages = len(in.Messages)
@@ -38,7 +38,7 @@ func TestProviderSummarizer_PassesModeSystemPrompt(t *testing.T) {
 	}
 	s := NewProviderSummarizer(mock, "test-model")
 	sys := summarySystemPrompt(CompactionModeCode)
-	got, err := s.Summarize(context.Background(), sys, []provider.ChatMessage{
+	got, err := s.Summarize(context.Background(), sys, []llmtypes.ChatMessage{
 		{Role: "user", Content: "hello"},
 	})
 	if err != nil {
@@ -60,7 +60,7 @@ func TestProviderSummarizer_PassesModeSystemPrompt(t *testing.T) {
 
 func TestProviderSummarizer_WrapsError(t *testing.T) {
 	mock := &mockProvider{
-		completeFn: func(_ context.Context, _ provider.ChatRequest) (string, error) {
+		completeFn: func(_ context.Context, _ llmtypes.ChatRequest) (string, error) {
 			return "", errors.New("boom")
 		},
 	}

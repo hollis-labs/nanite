@@ -7,10 +7,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/hollis-labs/go-providers/provider"
+	llmtypes "github.com/hollis-labs/go-llm-types"
 )
 
-// stubProvider implements provider.Provider with a synthetic response.
+// stubProvider implements llmcontracts.Provider with a synthetic response.
 type stubProvider struct {
 	response string
 	err      error
@@ -23,17 +23,17 @@ type stubProvider struct {
 	calls            int
 }
 
-func (s *stubProvider) Capabilities() provider.ProviderCapabilities {
-	return provider.ProviderCapabilities{}
+func (s *stubProvider) Capabilities() llmtypes.ProviderCapabilities {
+	return llmtypes.ProviderCapabilities{}
 }
 
-func (s *stubProvider) StreamChat(_ context.Context, _ provider.ChatRequest) (<-chan provider.StreamEvent, error) {
-	ch := make(chan provider.StreamEvent)
+func (s *stubProvider) StreamChat(_ context.Context, _ llmtypes.ChatRequest) (<-chan llmtypes.StreamEvent, error) {
+	ch := make(chan llmtypes.StreamEvent)
 	close(ch)
 	return ch, errors.New("stub does not implement StreamChat")
 }
 
-func (s *stubProvider) Complete(ctx context.Context, req provider.ChatRequest) (string, error) {
+func (s *stubProvider) Complete(ctx context.Context, req llmtypes.ChatRequest) (string, error) {
 	s.calls++
 	s.lastModel = req.Model
 	s.lastSystemPrompt = req.SystemPrompt
@@ -465,7 +465,7 @@ func TestRepairSystemPrompt_AntiMarkdown(t *testing.T) {
 
 // TestRepair_HonorsCallerMaxTokens is a smoke test confirming Repair
 // accepts a caller-supplied MaxTokens override without erroring.
-// Repair() threads this value into provider.ChatRequest.MaxTokens; this
+// Repair() threads this value into llmtypes.ChatRequest.MaxTokens; this
 // test keeps the recover-package surface covered without changing its
 // existing smoke-test scope.
 func TestRepair_HonorsCallerMaxTokens(t *testing.T) {

@@ -11,7 +11,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/hollis-labs/go-providers/provider"
+	llmtypes "github.com/hollis-labs/go-llm-types"
 )
 
 // CompactionMode determines how the summary prompt is shaped.
@@ -26,24 +26,24 @@ const (
 // CompactionResult captures what happened during compaction for event emission
 // and debugging.
 type CompactionResult struct {
-	Summary               string                 // LLM-generated summary that replaced the compacted span
-	RemovedMessages       int                    // count of messages replaced
-	TokensSaved           int                    // tokens reclaimed
-	Mode                  string                 // compaction mode used
-	StagesApplied         []string
-	RawMessages           []provider.ChatMessage // original messages (for plugin extraction)
-	HandoffStashID        string                 // P7: stash_id written pre-compaction; empty if StashWriter nil
-	CoverageWindowStart   *string                // P8: turn_id marking span start (nullable)
-	CoverageWindowEnd     *string                // P8: turn_id marking span end (nullable)
-	EvictedCachePointers  []string               // P8: cache pointers lost during compaction
-	PreservedSources      []string               // P8: what was preserved/referenced
-	OriginalTokenCount    int                    // P8: token count before compaction
+	Summary              string // LLM-generated summary that replaced the compacted span
+	RemovedMessages      int    // count of messages replaced
+	TokensSaved          int    // tokens reclaimed
+	Mode                 string // compaction mode used
+	StagesApplied        []string
+	RawMessages          []llmtypes.ChatMessage // original messages (for plugin extraction)
+	HandoffStashID       string                 // P7: stash_id written pre-compaction; empty if StashWriter nil
+	CoverageWindowStart  *string                // P8: turn_id marking span start (nullable)
+	CoverageWindowEnd    *string                // P8: turn_id marking span end (nullable)
+	EvictedCachePointers []string               // P8: cache pointers lost during compaction
+	PreservedSources     []string               // P8: what was preserved/referenced
+	OriginalTokenCount   int                    // P8: token count before compaction
 }
 
 // Summarizer makes a simple non-streaming LLM call. Implemented by the
 // provider layer — the compaction system doesn't know which model runs it.
 type Summarizer interface {
-	Summarize(ctx context.Context, systemPrompt string, messages []provider.ChatMessage) (string, error)
+	Summarize(ctx context.Context, systemPrompt string, messages []llmtypes.ChatMessage) (string, error)
 }
 
 // CompactionPipeline runs escalating stages to bring the conversation slot
@@ -57,7 +57,7 @@ type CompactionPipeline struct {
 	Mode       string // compaction mode (code, plan, research, general)
 
 	// ConversationMessages is the current message list. Stages may modify it.
-	ConversationMessages []provider.ChatMessage
+	ConversationMessages []llmtypes.ChatMessage
 
 	// P7 HandoffStash — optional pre-compaction stash write (CW-20260420-0024).
 	// If StashWriter is nil the stash step is skipped (backwards-compatible).
@@ -278,12 +278,12 @@ func stageSummarizeOldest(ctx context.Context, p *CompactionPipeline) (bool, err
 	newTokens := p.Estimator.Estimate(summary)
 
 	// Replace span with summary message + kept messages.
-	summaryMsg := provider.ChatMessage{
+	summaryMsg := llmtypes.ChatMessage{
 		Role:    "user",
 		Content: fmt.Sprintf("[Conversation summary — %d messages compacted]\n\n%s", len(compactSpan), summary),
 	}
 
-	p.ConversationMessages = append([]provider.ChatMessage{summaryMsg}, keepSpan...)
+	p.ConversationMessages = append([]llmtypes.ChatMessage{summaryMsg}, keepSpan...)
 
 	slog.Info("compaction: summarized messages",
 		"count", len(compactSpan), "old_tokens", oldTokens, "new_tokens", newTokens,
@@ -315,7 +315,7 @@ func stageStripToolBlocks(ctx context.Context, p *CompactionPipeline) (bool, err
 		}
 
 		// Strip tool blocks, keep text blocks. Also add a compact reference.
-		var kept []provider.ContentBlock
+		var kept []llmtypes.ContentBlock
 		var removedCount int
 		for _, b := range m.ContentBlocks {
 			if b.Type == "tool_use" || b.Type == "tool_result" {
@@ -327,7 +327,7 @@ func stageStripToolBlocks(ctx context.Context, p *CompactionPipeline) (bool, err
 
 		if removedCount > 0 {
 			// Add a note about removed tool blocks.
-			kept = append(kept, provider.ContentBlock{
+			kept = append(kept, llmtypes.ContentBlock{
 				Type: "text",
 				Text: fmt.Sprintf("[%d tool call/result blocks stripped during compaction]", removedCount),
 			})
@@ -485,7 +485,7 @@ func summarySystemPrompt(mode string) string {
 // serializeMessages converts a message list to a string for token estimation.
 // This is used internally by the compaction pipeline to update the conversation
 // slot content.
-func serializeMessages(msgs []provider.ChatMessage, est TokenEstimator) string {
+func serializeMessages(msgs []llmtypes.ChatMessage, est TokenEstimator) string {
 	var b strings.Builder
 	for _, m := range msgs {
 		b.WriteString(m.Role)
@@ -499,4 +499,3 @@ func serializeMessages(msgs []provider.ChatMessage, est TokenEstimator) string {
 	}
 	return b.String()
 }
-

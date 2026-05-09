@@ -9,6 +9,7 @@ import (
 	"sync"
 	"time"
 
+	llmtypes "github.com/hollis-labs/go-llm-types"
 	conduit "github.com/hollis-labs/vanta-conduit"
 
 	embedcontracts "github.com/hollis-labs/go-embed-contracts"
@@ -18,17 +19,14 @@ import (
 	"github.com/hollis-labs/nanite/internal/agent/builtin"
 	"github.com/hollis-labs/nanite/internal/background"
 	"github.com/hollis-labs/nanite/internal/chat"
-	"github.com/hollis-labs/nanite/internal/elicitation"
 	"github.com/hollis-labs/nanite/internal/config"
-	envelope_render "github.com/hollis-labs/nanite/internal/executor/envelope_render"
 	"github.com/hollis-labs/nanite/internal/contextbroker"
 	"github.com/hollis-labs/nanite/internal/coordination"
+	"github.com/hollis-labs/nanite/internal/elicitation"
+	envelope_render "github.com/hollis-labs/nanite/internal/executor/envelope_render"
 	"github.com/hollis-labs/nanite/internal/filter"
 	inspectsvc "github.com/hollis-labs/nanite/internal/inspector"
 	"github.com/hollis-labs/nanite/internal/loopdetect"
-	"github.com/hollis-labs/nanite/internal/reminders"
-	runtimeagent "github.com/hollis-labs/nanite/internal/runtime/agent"
-	"github.com/hollis-labs/nanite/internal/runtime/agent/recovery"
 	"github.com/hollis-labs/nanite/internal/mcp"
 	"github.com/hollis-labs/nanite/internal/memory"
 	"github.com/hollis-labs/nanite/internal/messaging"
@@ -39,6 +37,9 @@ import (
 	adaptergemini "github.com/hollis-labs/nanite/internal/plugin/builtin/adapter-gemini"
 	nanitenative "github.com/hollis-labs/nanite/internal/plugin/builtin/adapter-nanite-native"
 	adapteropencode "github.com/hollis-labs/nanite/internal/plugin/builtin/adapter-opencode"
+	"github.com/hollis-labs/nanite/internal/reminders"
+	runtimeagent "github.com/hollis-labs/nanite/internal/runtime/agent"
+	"github.com/hollis-labs/nanite/internal/runtime/agent/recovery"
 	"github.com/hollis-labs/nanite/internal/skill"
 	skillbuiltin "github.com/hollis-labs/nanite/internal/skill/builtin"
 	"github.com/hollis-labs/nanite/internal/store"
@@ -796,8 +797,8 @@ func NewContainer(cfg ContainerConfig) (*Container, error) {
 		var utilityCall memory.UtilityCallFunc
 		if prov, ok := cfg.Providers.Get(utilityProvider); ok {
 			utilityCall = func(ctx context.Context, prompt string) (string, error) {
-				msgs := []provider.ChatMessage{{Role: "user", Content: prompt}}
-				return prov.Complete(ctx, provider.ChatRequest{
+				msgs := []llmtypes.ChatMessage{{Role: "user", Content: prompt}}
+				return prov.Complete(ctx, llmtypes.ChatRequest{
 					SystemPrompt: "You are a memory extraction assistant. Follow instructions precisely.",
 					Messages:     msgs,
 					Model:        utilityModel,

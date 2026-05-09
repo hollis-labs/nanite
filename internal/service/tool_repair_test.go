@@ -8,12 +8,12 @@ import (
 	"testing"
 	"time"
 
-	"github.com/hollis-labs/go-providers/provider"
+	llmtypes "github.com/hollis-labs/go-llm-types"
 	"github.com/hollis-labs/nanite/internal/envelope"
 	"github.com/hollis-labs/nanite/internal/store"
 )
 
-// repairStubProvider is a minimal provider.Provider that returns a
+// repairStubProvider is a minimal llmcontracts.Provider that returns a
 // canned repair response. Captures the model + system prompt for
 // assertions.
 type repairStubProvider struct {
@@ -26,17 +26,17 @@ type repairStubProvider struct {
 	lastUserContent  string
 }
 
-func (s *repairStubProvider) Capabilities() provider.ProviderCapabilities {
-	return provider.ProviderCapabilities{}
+func (s *repairStubProvider) Capabilities() llmtypes.ProviderCapabilities {
+	return llmtypes.ProviderCapabilities{}
 }
 
-func (s *repairStubProvider) StreamChat(_ context.Context, _ provider.ChatRequest) (<-chan provider.StreamEvent, error) {
-	ch := make(chan provider.StreamEvent)
+func (s *repairStubProvider) StreamChat(_ context.Context, _ llmtypes.ChatRequest) (<-chan llmtypes.StreamEvent, error) {
+	ch := make(chan llmtypes.StreamEvent)
 	close(ch)
 	return ch, errors.New("repair stub does not stream")
 }
 
-func (s *repairStubProvider) Complete(_ context.Context, req provider.ChatRequest) (string, error) {
+func (s *repairStubProvider) Complete(_ context.Context, req llmtypes.ChatRequest) (string, error) {
 	s.calls++
 	s.lastModel = req.Model
 	s.lastSystemPrompt = req.SystemPrompt
@@ -165,7 +165,7 @@ func TestExecute_Repair_MissingRequired_ReturnsStructuredEnvelope(t *testing.T) 
 	}
 
 	svc := &toolServiceImpl{
-		repairConfig: &RepairConfig{Provider: llm},
+		repairConfig:  &RepairConfig{Provider: llm},
 		transportHook: transport.hook(),
 	}
 

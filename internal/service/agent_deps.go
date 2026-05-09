@@ -13,6 +13,7 @@ import (
 	"sync/atomic"
 
 	agentsessions "github.com/hollis-labs/go-agent-sessions/agentsessions"
+	llmtypes "github.com/hollis-labs/go-llm-types"
 	"github.com/hollis-labs/go-providers/provider"
 	"github.com/hollis-labs/go-providers/provider/events"
 	"github.com/hollis-labs/go-sandbox/sandbox"
@@ -438,7 +439,7 @@ func (agentTelemetry) RecordPTYRestart(sessionID string, attempt int, prevExit *
 //
 // Two distinct surfaces feed the bridge:
 //
-//  1. EventFanout — chan provider.StreamEvent (the legacy stream taxonomy
+//  1. EventFanout — chan llmtypes.StreamEvent (the legacy stream taxonomy
 //     used by Provider.StreamChat). The chat-harness assembles deltas /
 //     errors / usage onto this channel; the bridge translates each event
 //     to chat.StreamEvent and forwards via streams.BroadcastSessionStreamEvent.
@@ -462,7 +463,7 @@ type agentEventBridge struct {
 // SetPerSessionRouter(nil) calls can all race to release the chan without
 // double-close panics.
 type sessionRouter struct {
-	ch     chan provider.StreamEvent
+	ch     chan llmtypes.StreamEvent
 	closed atomic.Bool
 }
 
@@ -484,7 +485,7 @@ func (b *agentEventBridge) nextEventID() uint64 {
 // Phase 4c.4: driveBootSession binds turnCh before SendInput; the bridge
 // unbinds + closes when EventDone or EventError flows through, or when the
 // chat-harness explicitly clears the router on ctx cancel.
-func (b *agentEventBridge) SetPerSessionRouter(sessionID string, ch chan provider.StreamEvent) {
+func (b *agentEventBridge) SetPerSessionRouter(sessionID string, ch chan llmtypes.StreamEvent) {
 	if ch == nil {
 		if v, ok := b.routers.LoadAndDelete(sessionID); ok {
 			v.(*sessionRouter).closeOnce()
@@ -524,8 +525,8 @@ func (b *agentEventBridge) SetPerSessionRouter(sessionID string, ch chan provide
 // events forward to the bound turnCh instead of broadcasting SSE. Done /
 // Error close the turnCh and unbind the router so subsequent inter-turn
 // events fall back to SSE broadcast.
-func (b *agentEventBridge) fanout(sessionID string) chan<- provider.StreamEvent {
-	out := make(chan provider.StreamEvent, 64)
+func (b *agentEventBridge) fanout(sessionID string) chan<- llmtypes.StreamEvent {
+	out := make(chan llmtypes.StreamEvent, 64)
 	go func() {
 		for ev := range out {
 			if v, ok := b.routers.Load(sessionID); ok {
@@ -538,7 +539,7 @@ func (b *agentEventBridge) fanout(sessionID string) chan<- provider.StreamEvent 
 						// chat-harness consumer is expected to keep up.
 					}
 				}
-				if ev.Type == provider.EventDone || ev.Type == provider.EventError {
+				if ev.Type == llmtypes.EventDone || ev.Type == llmtypes.EventError {
 					b.routers.CompareAndDelete(sessionID, router)
 					router.closeOnce()
 				}
@@ -554,34 +555,34 @@ func (b *agentEventBridge) fanout(sessionID string) chan<- provider.StreamEvent 
 	return out
 }
 
-// translateStreamEvent maps a provider.StreamEvent to a chat.StreamEvent
+// translateStreamEvent maps a llmtypes.StreamEvent to a chat.StreamEvent
 // suitable for SSE broadcast. Returns (zero, false) when the event has no
 // useful FE projection (e.g. EventSessionID is informational only — the
 // chat service handles session-id persistence elsewhere).
-func (b *agentEventBridge) translateStreamEvent(ev provider.StreamEvent) (chat.StreamEvent, bool) {
+func (b *agentEventBridge) translateStreamEvent(ev llmtypes.StreamEvent) (chat.StreamEvent, bool) {
 	switch ev.Type {
-	case provider.EventDelta:
+	case llmtypes.EventDelta:
 		return chat.StreamEvent{
 			EventID: b.nextEventID(),
 			Type:    "delta",
 			Content: ev.Content,
 		}, true
-	case provider.EventDone:
+	case llmtypes.EventDone:
 		return chat.StreamEvent{
 			EventID: b.nextEventID(),
 			Type:    "stream_end",
 		}, true
-	case provider.EventError:
+	case llmtypes.EventError:
 		return chat.StreamEvent{
 			EventID: b.nextEventID(),
 			Type:    "error",
 			Error:   ev.Error,
 		}, true
-	case provider.EventUsage:
+	case llmtypes.EventUsage:
 		// Usage rows feed the cost ledger upstream; surface as a stream_end
 		// piggyback when present, otherwise drop.
 		return chat.StreamEvent{}, false
-	case provider.EventThinking:
+	case llmtypes.EventThinking:
 		if ev.ThinkingBlock == nil {
 			return chat.StreamEvent{}, false
 		}
@@ -591,11 +592,11 @@ func (b *agentEventBridge) translateStreamEvent(ev provider.StreamEvent) (chat.S
 			Content: ev.ThinkingBlock.Thinking,
 			Phase:   "thinking",
 		}, true
-	case provider.EventToolUse:
+	case llmtypes.EventToolUse:
 		// Tool invocations also surface via TypedEventCallback (richer
 		// per-tool SSE); skip here to avoid double-emission.
 		return chat.StreamEvent{}, false
-	case provider.EventSessionID:
+	case llmtypes.EventSessionID:
 		// Provider session id propagates through Boot's OnSessionID path.
 		return chat.StreamEvent{}, false
 	default:
@@ -661,7 +662,7 @@ func (b *agentEventBridge) typedCallback(sessionID string) provider.EventsCallba
 		case events.SessionID:
 			// Provider session id flows via Boot.OnSessionID; drop here.
 		case events.Delta:
-			// Lib-native delta is redundant with provider.StreamEvent
+			// Lib-native delta is redundant with llmtypes.StreamEvent
 			// EventDelta (which the EventFanout bridge already forwards).
 			// Drop to avoid double-emission.
 		case events.Usage, events.Done, events.SubprocessStderr:

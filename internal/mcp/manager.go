@@ -12,10 +12,10 @@ import (
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/codes"
 
-	"github.com/hollis-labs/go-providers/provider"
+	llmtypes "github.com/hollis-labs/go-llm-types"
+	"github.com/hollis-labs/go-toolbroker/broker"
 	"github.com/hollis-labs/nanite/internal/plugin/subprocess"
 	"github.com/hollis-labs/nanite/internal/store"
-	"github.com/hollis-labs/go-toolbroker/broker"
 )
 
 // MCPTransport is the interface for MCP server connections (stdio or HTTP).
@@ -432,16 +432,16 @@ func (m *Manager) DiscoverTools(ctx context.Context) error {
 	return nil
 }
 
-// GetTools returns available tools as provider.ToolDefinition slice, filtered
+// GetTools returns available tools as llmtypes.ToolDefinition slice, filtered
 // by the broker's default rules (intent "*"). Names are uniform (no
 // `mcp__server__` prefix) — see ADR-002.
-func (m *Manager) GetTools() []provider.ToolDefinition {
+func (m *Manager) GetTools() []llmtypes.ToolDefinition {
 	return m.GetToolsForIntent("*", nil)
 }
 
 // GetToolsForIntent returns tools filtered by the broker for the given intent and hints.
 // If no broker is configured, returns all tools unfiltered. Names are uniform.
-func (m *Manager) GetToolsForIntent(intent string, hints []string) []provider.ToolDefinition {
+func (m *Manager) GetToolsForIntent(intent string, hints []string) []llmtypes.ToolDefinition {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 
@@ -458,9 +458,9 @@ func (m *Manager) GetToolsForIntent(intent string, hints []string) []provider.To
 
 	// The broker is registered with uniform names already (see
 	// DiscoverTools); selection results carry uniform names directly.
-	defs := make([]provider.ToolDefinition, 0, len(result.Tools))
+	defs := make([]llmtypes.ToolDefinition, 0, len(result.Tools))
 	for _, t := range result.Tools {
-		defs = append(defs, provider.ToolDefinition{
+		defs = append(defs, llmtypes.ToolDefinition{
 			Name:        t.Name,
 			Description: t.Description,
 			InputSchema: t.InputSchema,
@@ -472,7 +472,7 @@ func (m *Manager) GetToolsForIntent(intent string, hints []string) []provider.To
 }
 
 // GetAllTools returns all enabled tools. Opt-in tools excluded unless enabled.
-func (m *Manager) GetAllTools() []provider.ToolDefinition {
+func (m *Manager) GetAllTools() []llmtypes.ToolDefinition {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	return m.getAllToolsLocked()
@@ -480,13 +480,13 @@ func (m *Manager) GetAllTools() []provider.ToolDefinition {
 
 // getAllToolsLocked returns all enabled tools. Opt-in tools are excluded
 // unless the LoadChecker says they are enabled. Caller must hold mu.RLock.
-func (m *Manager) getAllToolsLocked() []provider.ToolDefinition {
-	defs := make([]provider.ToolDefinition, 0, len(m.tools))
+func (m *Manager) getAllToolsLocked() []llmtypes.ToolDefinition {
+	defs := make([]llmtypes.ToolDefinition, 0, len(m.tools))
 	for _, entry := range m.tools {
 		if m.LoadChecker != nil && !m.LoadChecker.IsToolEnabled(entry.uniformName) {
 			continue
 		}
-		defs = append(defs, provider.ToolDefinition{
+		defs = append(defs, llmtypes.ToolDefinition{
 			Name:        entry.uniformName,
 			Description: entry.tool.Description,
 			InputSchema: entry.tool.InputSchema,
@@ -497,12 +497,12 @@ func (m *Manager) getAllToolsLocked() []provider.ToolDefinition {
 
 // GetAllToolsUnfiltered returns every discovered tool regardless of loadType.
 // Used for diagnostics and the tool load preferences UI. Names are uniform.
-func (m *Manager) GetAllToolsUnfiltered() []provider.ToolDefinition {
+func (m *Manager) GetAllToolsUnfiltered() []llmtypes.ToolDefinition {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
-	defs := make([]provider.ToolDefinition, 0, len(m.tools))
+	defs := make([]llmtypes.ToolDefinition, 0, len(m.tools))
 	for _, entry := range m.tools {
-		defs = append(defs, provider.ToolDefinition{
+		defs = append(defs, llmtypes.ToolDefinition{
 			Name:        entry.uniformName,
 			Description: entry.tool.Description,
 			InputSchema: entry.tool.InputSchema,

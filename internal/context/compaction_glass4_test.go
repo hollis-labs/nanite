@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/hollis-labs/go-providers/provider"
+	llmtypes "github.com/hollis-labs/go-llm-types"
 )
 
 // stubSummarizer counts calls so tests can assert the summarizer was (or
@@ -15,7 +15,7 @@ type stubSummarizer struct {
 	returns string
 }
 
-func (s *stubSummarizer) Summarize(_ context.Context, _ string, _ []provider.ChatMessage) (string, error) {
+func (s *stubSummarizer) Summarize(_ context.Context, _ string, _ []llmtypes.ChatMessage) (string, error) {
 	s.calls++
 	if s.returns == "" {
 		return "summarized text", nil
@@ -43,9 +43,9 @@ func TestStageSummarizeOldest_DefersToHandoff(t *testing.T) {
 	stub := &stubSummarizer{}
 
 	// Build a long message list so the stage would normally proceed.
-	msgs := make([]provider.ChatMessage, 0, 12)
+	msgs := make([]llmtypes.ChatMessage, 0, 12)
 	for i := 0; i < 12; i++ {
-		msgs = append(msgs, provider.ChatMessage{
+		msgs = append(msgs, llmtypes.ChatMessage{
 			Role:    "user",
 			Content: strings.Repeat("filler ", 50),
 		})
@@ -75,7 +75,7 @@ func TestStageSummarizeOldest_NegativeSavingsGuard(t *testing.T) {
 	stub := &stubSummarizer{}
 
 	// Tiny conversation: well below SummarizeMinTokens.
-	msgs := []provider.ChatMessage{
+	msgs := []llmtypes.ChatMessage{
 		{Role: "user", Content: "hi"},
 		{Role: "assistant", Content: "hello"},
 		{Role: "user", Content: "ok"},
@@ -108,9 +108,9 @@ func TestStageSummarizeOldest_RunsForLargeSpanWithoutHandoff(t *testing.T) {
 	stub := &stubSummarizer{returns: "ok"}
 
 	// Span large enough to clear SummarizeMinTokens.
-	msgs := make([]provider.ChatMessage, 0, 10)
+	msgs := make([]llmtypes.ChatMessage, 0, 10)
 	for i := 0; i < 10; i++ {
-		msgs = append(msgs, provider.ChatMessage{
+		msgs = append(msgs, llmtypes.ChatMessage{
 			Role:    "user",
 			Content: strings.Repeat("substantive content with many words here to clear the threshold ", 4),
 		})

@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/hollis-labs/go-providers/provider"
+	llmtypes "github.com/hollis-labs/go-llm-types"
 	ctxpkg "github.com/hollis-labs/nanite/internal/context"
 	"github.com/hollis-labs/nanite/internal/messaging"
 	"github.com/hollis-labs/nanite/internal/store"
@@ -24,8 +24,8 @@ type fakeEventEmitter struct {
 type fakeCompactEvent struct {
 	sessionID     string
 	messageCount  int
-	reason        string // pre only
-	tokensSaved   int    // post only
+	reason        string   // pre only
+	tokensSaved   int      // post only
 	stagesApplied []string // post only
 }
 
@@ -40,7 +40,7 @@ func (f *fakeEventEmitter) EmitPostCompact(_ context.Context, sessionID string, 
 	f.post = append(f.post, fakeCompactEvent{sessionID: sessionID, tokensSaved: tokensSaved, stagesApplied: stagesApplied})
 }
 func (f *fakeEventEmitter) EmitSessionStart(_ context.Context, _, _, _, _ string) {}
-func (f *fakeEventEmitter) EmitSessionEnd(_ context.Context, _ string)             {}
+func (f *fakeEventEmitter) EmitSessionEnd(_ context.Context, _ string)            {}
 func (f *fakeEventEmitter) EmitAgentAssigned(_ context.Context, _, _, _ string)   {}
 func (f *fakeEventEmitter) EmitResponseComplete(_ context.Context, _, _, _ string, _, _ int) {
 }
@@ -86,7 +86,7 @@ func TestRecoverFromContextOverflow_DisabledFlag(t *testing.T) {
 		"sess-1",
 		result,
 		&store.AgentProfile{ID: "a1"},
-		[]provider.ChatMessage{{Role: "user", Content: "hi"}},
+		[]llmtypes.ChatMessage{{Role: "user", Content: "hi"}},
 		nil,
 		nil, // nil stream channel — helper must tolerate
 		"prompt is too long", compactTriggerContextOverflow,
@@ -123,7 +123,7 @@ func TestRecoverFromContextOverflow_NoSummarizerSkips(t *testing.T) {
 		"sess-1",
 		result,
 		&store.AgentProfile{ID: "a1"},
-		[]provider.ChatMessage{{Role: "user", Content: "hi"}},
+		[]llmtypes.ChatMessage{{Role: "user", Content: "hi"}},
 		nil,
 		nil,
 		"prompt is too long", compactTriggerContextOverflow,

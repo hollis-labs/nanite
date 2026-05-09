@@ -197,10 +197,10 @@ func (r *FilterRegistry) RemoveByPlugin(pluginID string) int {
 
 // Standard filter point names. Plugins reference these when registering filters.
 const (
-	FilterSystemPrompt     = "system_prompt"      // string → string
-	FilterUserMessage      = "user_message"       // string → string
-	FilterToolResult       = "tool_result"         // string → string
+	FilterSystemPrompt      = "system_prompt"      // string → string
+	FilterUserMessage       = "user_message"       // string → string
+	FilterToolResult        = "tool_result"        // string → string
 	FilterAssistantResponse = "assistant_response" // string → string
-	FilterContextWindow    = "context_window"      // []provider.ChatMessage → []provider.ChatMessage
-	FilterEnvelopeData     = "envelope_data"       // map[string]interface{} → map[string]interface{}
+	FilterContextWindow     = "context_window"     // []llmtypes.ChatMessage → []llmtypes.ChatMessage
+	FilterEnvelopeData      = "envelope_data"      // map[string]interface{} → map[string]interface{}
 )

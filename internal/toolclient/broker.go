@@ -9,10 +9,10 @@ import (
 	"log/slog"
 	"strings"
 
-	"github.com/hollis-labs/nanite/internal/mcp"
-	"github.com/hollis-labs/go-providers/provider"
-	"github.com/hollis-labs/nanite/internal/store"
+	llmtypes "github.com/hollis-labs/go-llm-types"
 	"github.com/hollis-labs/go-toolbroker/broker"
+	"github.com/hollis-labs/nanite/internal/mcp"
+	"github.com/hollis-labs/nanite/internal/store"
 )
 
 // MaxSelectedTools is the maximum number of tools returned by SelectTools.
@@ -60,7 +60,7 @@ type ToolClient struct {
 // markdown override block composed from per-tool Hints (via the broker's
 // WithEnricher option), ready to append to the system prompt.
 type SelectResult struct {
-	Tools         []provider.ToolDefinition
+	Tools         []llmtypes.ToolDefinition
 	OverrideBlock string
 }
 
@@ -275,7 +275,7 @@ func (tb *ToolClient) developerModeEnabled() bool {
 	return us.DeveloperMode
 }
 
-// SelectToolsAsProvider returns selected tools converted to provider.ToolDefinition format,
+// SelectToolsAsProvider returns selected tools converted to llmtypes.ToolDefinition format,
 // together with the per-turn override block composed from per-tool Hints for
 // the FINAL tool set (post permission filtering). Built-in tools are always
 // prepended and do not count against selection limits. Enrichment compose
@@ -304,10 +304,10 @@ func (tb *ToolClient) SelectToolsAsProvider(ctx context.Context, intent string, 
 	// prepend would bypass deny/allow lists for sensitive builtins (e.g.,
 	// dev_bash, dev_write) and let the LLM call them before the execution-
 	// time check in CallTool denies them.
-	var defs []provider.ToolDefinition
+	var defs []llmtypes.ToolDefinition
 	if tb.Builtins != nil {
 		builtins := tb.Builtins.GetBuiltins()
-		defs = make([]provider.ToolDefinition, 0, len(builtins)+len(tools))
+		defs = make([]llmtypes.ToolDefinition, 0, len(builtins)+len(tools))
 		for _, bt := range builtins {
 			// Dev-tool gate: skip dev tools when developer_mode is off.
 			if !devMode && isDevTool(bt.Name) {
@@ -319,7 +319,7 @@ func (tb *ToolClient) SelectToolsAsProvider(ctx context.Context, intent string, 
 			defs = append(defs, bt)
 		}
 	} else {
-		defs = make([]provider.ToolDefinition, 0, len(tools))
+		defs = make([]llmtypes.ToolDefinition, 0, len(tools))
 	}
 
 	// Append broker-selected MCP tools, filtered by agent permissions.
@@ -344,7 +344,7 @@ func (tb *ToolClient) SelectToolsAsProvider(ctx context.Context, intent string, 
 		if !tb.CheckPermission(agentID, name) {
 			continue
 		}
-		defs = append(defs, provider.ToolDefinition{
+		defs = append(defs, llmtypes.ToolDefinition{
 			Name:        name,
 			Description: t.Description,
 			InputSchema: t.InputSchema,
@@ -413,7 +413,7 @@ func (tb *ToolClient) CallToolWithPolicyCheck(ctx context.Context, agentID, tool
 //
 // Policies today do not expose arg-level predicates per tool, so the arg
 // check is a conservative global safety net rather than per-tool policy.
-func (tb *ToolClient) HandleRequestToolsForAgent(agentID string, input map[string]any) ([]provider.ToolDefinition, string) {
+func (tb *ToolClient) HandleRequestToolsForAgent(agentID string, input map[string]any) ([]llmtypes.ToolDefinition, string) {
 	if ArgsContainEscalationPattern(input) {
 		return nil, fmt.Sprintf("permission denied: request_tools arguments contain escalation pattern (\"..\") for agent %q", agentID)
 	}
@@ -423,7 +423,7 @@ func (tb *ToolClient) HandleRequestToolsForAgent(agentID string, input map[strin
 		return merged, summary
 	}
 
-	permitted := make([]provider.ToolDefinition, 0, len(merged))
+	permitted := make([]llmtypes.ToolDefinition, 0, len(merged))
 	var denied []string
 	for _, t := range merged {
 		if tb.CheckPermission(agentID, t.Name) {
@@ -513,14 +513,14 @@ func (tb *ToolClient) ListToolSummaries() []ToolSummary {
 }
 
 // GetToolsByNames returns full tool definitions for the given names.
-func (tb *ToolClient) GetToolsByNames(names []string) []provider.ToolDefinition {
+func (tb *ToolClient) GetToolsByNames(names []string) []llmtypes.ToolDefinition {
 	allTools := tb.ListTools()
 	nameSet := make(map[string]bool, len(names))
 	for _, n := range names {
 		nameSet[n] = true
 	}
 
-	var result []provider.ToolDefinition
+	var result []llmtypes.ToolDefinition
 	for _, t := range allTools {
 		if nameSet[t.Name] {
 			result = append(result, t)
@@ -529,10 +529,10 @@ func (tb *ToolClient) GetToolsByNames(names []string) []provider.ToolDefinition 
 	return result
 }
 
-// ListTools returns all registered tools as provider.ToolDefinition.
+// ListTools returns all registered tools as llmtypes.ToolDefinition.
 // Built-in tools are always included regardless of MCP manager status.
-func (tb *ToolClient) ListTools() []provider.ToolDefinition {
-	var all []provider.ToolDefinition
+func (tb *ToolClient) ListTools() []llmtypes.ToolDefinition {
+	var all []llmtypes.ToolDefinition
 
 	// Always include built-in tools.
 	if tb.Builtins != nil {

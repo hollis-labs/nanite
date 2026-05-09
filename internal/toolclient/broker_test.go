@@ -6,9 +6,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/hollis-labs/nanite/internal/mcp"
-	"github.com/hollis-labs/go-providers/provider"
+	llmtypes "github.com/hollis-labs/go-llm-types"
 	"github.com/hollis-labs/go-toolbroker/broker"
+	"github.com/hollis-labs/nanite/internal/mcp"
 )
 
 func TestSelectTools_ReturnsTools(t *testing.T) {
@@ -291,8 +291,8 @@ func (m *mockTransport) CallTool(_ context.Context, _ string, _ map[string]any) 
 }
 
 // newTestBrokerWithTools creates a ToolClient backed by an MCP manager
-// populated with the given provider.ToolDefinition set (via a mock transport).
-func newTestBrokerWithTools(tools []provider.ToolDefinition) *ToolClient {
+// populated with the given llmtypes.ToolDefinition set (via a mock transport).
+func newTestBrokerWithTools(tools []llmtypes.ToolDefinition) *ToolClient {
 	mgr := mcp.NewManager()
 
 	mcpTools := make([]mcp.Tool, len(tools))
@@ -316,7 +316,7 @@ func newTestBrokerWithTools(tools []provider.ToolDefinition) *ToolClient {
 // --- SelectByIntent tests ---
 
 func TestSelectByIntent_FindsRelevantTools(t *testing.T) {
-	tools := []provider.ToolDefinition{
+	tools := []llmtypes.ToolDefinition{
 		{Name: "volon_task_create", Description: "Create a new task in the backlog"},
 		{Name: "volon_sprint_list", Description: "List all sprints"},
 		{Name: "conduit_context_view", Description: "View a context packet"},
@@ -345,7 +345,7 @@ func TestSelectByIntent_FindsRelevantTools(t *testing.T) {
 }
 
 func TestSelectByIntent_RespectsMaxTools(t *testing.T) {
-	tools := []provider.ToolDefinition{
+	tools := []llmtypes.ToolDefinition{
 		{Name: "tool_sprint_a", Description: "Sprint tool A"},
 		{Name: "tool_sprint_b", Description: "Sprint tool B"},
 		{Name: "tool_sprint_c", Description: "Sprint tool C"},
@@ -361,7 +361,7 @@ func TestSelectByIntent_RespectsMaxTools(t *testing.T) {
 }
 
 func TestSelectByIntent_EmptyOnNoMatch(t *testing.T) {
-	tools := []provider.ToolDefinition{
+	tools := []llmtypes.ToolDefinition{
 		{Name: "volon_task_create", Description: "Create a new task"},
 		{Name: "conduit_context_view", Description: "View a context packet"},
 	}
@@ -375,7 +375,7 @@ func TestSelectByIntent_EmptyOnNoMatch(t *testing.T) {
 }
 
 func TestSelectByIntent_EmptyIntent(t *testing.T) {
-	tools := []provider.ToolDefinition{
+	tools := []llmtypes.ToolDefinition{
 		{Name: "volon_task_create", Description: "Create a new task"},
 	}
 	tb := newTestBrokerWithTools(tools)
@@ -397,7 +397,7 @@ func TestSelectByIntent_NoMCPManager(t *testing.T) {
 // --- Scoring unit tests ---
 
 func TestScoreToolAgainstIntent(t *testing.T) {
-	tool := provider.ToolDefinition{
+	tool := llmtypes.ToolDefinition{
 		Name:        "volon_task_create",
 		Description: "Create a new task in the backlog",
 	}
@@ -461,7 +461,7 @@ func TestRequestToolsMetaTool_HasCorrectSchema(t *testing.T) {
 }
 
 func TestHandleRequestTools_ByIntent(t *testing.T) {
-	tools := []provider.ToolDefinition{
+	tools := []llmtypes.ToolDefinition{
 		{Name: "volon_task_create", Description: "Create a new task in the backlog"},
 		{Name: "hadron_pipeline_run", Description: "Run a build pipeline"},
 	}
@@ -480,7 +480,7 @@ func TestHandleRequestTools_ByIntent(t *testing.T) {
 }
 
 func TestHandleRequestTools_ByName(t *testing.T) {
-	tools := []provider.ToolDefinition{
+	tools := []llmtypes.ToolDefinition{
 		{Name: "volon_task_create", Description: "Create a task"},
 		{Name: "hadron_pipeline_run", Description: "Run a pipeline"},
 	}
@@ -499,7 +499,7 @@ func TestHandleRequestTools_ByName(t *testing.T) {
 }
 
 func TestHandleRequestTools_NoMatch(t *testing.T) {
-	tools := []provider.ToolDefinition{
+	tools := []llmtypes.ToolDefinition{
 		{Name: "volon_task_create", Description: "Create a task"},
 	}
 	tb := newTestBrokerWithTools(tools)
@@ -517,7 +517,7 @@ func TestHandleRequestTools_NoMatch(t *testing.T) {
 }
 
 // namesOf extracts tool names from a slice of ToolDefinition.
-func namesOf(tools []provider.ToolDefinition) []string {
+func namesOf(tools []llmtypes.ToolDefinition) []string {
 	names := make([]string, len(tools))
 	for i, t := range tools {
 		names[i] = t.Name
@@ -534,7 +534,7 @@ func TestSelectToolsAsProvider_BrokerToolsDefaultNonStrict(t *testing.T) {
 
 	// Register tools directly with the LocalBroker so SelectToolsAsProvider
 	// returns them. SelectToolsAsProvider converts broker.ToolDefinition →
-	// provider.ToolDefinition and must leave Strict nil (default-off).
+	// llmtypes.ToolDefinition and must leave Strict nil (default-off).
 	brokerTools := []broker.ToolDefinition{
 		{Name: "volon_task_create", Server: "volon", Description: "Create a task in the backlog"},
 		{Name: "conduit_context_view", Server: "conduit", Description: "View a context packet"},
@@ -560,7 +560,7 @@ func TestSelectToolsAsProvider_BrokerToolsDefaultNonStrict(t *testing.T) {
 func TestMetaTools_HaveAdditionalPropertiesFalse(t *testing.T) {
 	cases := []struct {
 		name string
-		def  provider.ToolDefinition
+		def  llmtypes.ToolDefinition
 	}{
 		{"request_tools", RequestToolsMetaTool()},
 		{"fetch_tool_result", FetchToolResultMetaTool()},

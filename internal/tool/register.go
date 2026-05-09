@@ -1,7 +1,7 @@
 package tool
 
 import (
-	"github.com/hollis-labs/go-providers/provider"
+	llmtypes "github.com/hollis-labs/go-llm-types"
 )
 
 // devToolNames are the known dev (core-io + search) tools.
@@ -31,20 +31,20 @@ var generalToolCategories = map[string]string{
 // selfToolCategories maps self-service tools to categories.
 var selfToolCategories = map[string]string{
 	"skill_create":    CategorySession,
-	"skill_list":     CategorySession,
+	"skill_list":      CategorySession,
 	"skill_update":    CategorySession,
 	"skill_delete":    CategorySession,
 	"agent_create":    CategoryAgent,
-	"agent_list":     CategoryAgent,
+	"agent_list":      CategoryAgent,
 	"agent_update":    CategoryAgent,
 	"engine_navigate": CategoryAgent,
 }
 
-// WrapExistingTools converts a slice of provider.ToolDefinition from the
+// WrapExistingTools converts a slice of llmtypes.ToolDefinition from the
 // existing MCP/builtin tool system into tool.Tool implementations suitable
 // for broker registration. Each tool is categorized and tagged based on
 // known tool name mappings.
-func WrapExistingTools(defs []provider.ToolDefinition) []Tool {
+func WrapExistingTools(defs []llmtypes.ToolDefinition) []Tool {
 	tools := make([]Tool, 0, len(defs))
 	for _, def := range defs {
 		cat, source, tags := classifyExisting(def.Name)

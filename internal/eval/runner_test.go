@@ -9,15 +9,15 @@ import (
 	"runtime"
 	"testing"
 
-	"github.com/hollis-labs/go-providers/provider"
+	llmtypes "github.com/hollis-labs/go-llm-types"
 )
 
 // mockProvider implements ChatProvider with a configurable response function.
 type mockProvider struct {
-	fn func(req provider.ChatRequest) (string, error)
+	fn func(req llmtypes.ChatRequest) (string, error)
 }
 
-func (m *mockProvider) Complete(ctx context.Context, req provider.ChatRequest) (string, error) {
+func (m *mockProvider) Complete(ctx context.Context, req llmtypes.ChatRequest) (string, error) {
 	return m.fn(req)
 }
 
@@ -65,7 +65,7 @@ func TestLoadScenarios(t *testing.T) {
 // none of the distractor tools; expects score 1.0.
 func TestRunNoisyToolBench_Pass(t *testing.T) {
 	s := noisyToolBenchScenario(t)
-	p := &mockProvider{fn: func(_ provider.ChatRequest) (string, error) {
+	p := &mockProvider{fn: func(_ llmtypes.ChatRequest) (string, error) {
 		return `I'll call get_weather to fetch the current conditions.`, nil
 	}}
 	result := runOne(context.Background(), s, p, RunOptions{Model: "mock"})
@@ -81,7 +81,7 @@ func TestRunNoisyToolBench_Pass(t *testing.T) {
 // tool; expects score 0.0.
 func TestRunNoisyToolBench_Fail(t *testing.T) {
 	s := noisyToolBenchScenario(t)
-	p := &mockProvider{fn: func(_ provider.ChatRequest) (string, error) {
+	p := &mockProvider{fn: func(_ llmtypes.ChatRequest) (string, error) {
 		return `Let me use web_search to look that up.`, nil
 	}}
 	result := runOne(context.Background(), s, p, RunOptions{Model: "mock"})
@@ -96,7 +96,7 @@ func TestRunNoisyToolBench_Fail(t *testing.T) {
 // TestRunCARBench_Pass feeds a response that asks a clarifying question.
 func TestRunCARBench_Pass(t *testing.T) {
 	s := carBenchScenario(t)
-	p := &mockProvider{fn: func(_ provider.ChatRequest) (string, error) {
+	p := &mockProvider{fn: func(_ llmtypes.ChatRequest) (string, error) {
 		return `Could you clarify what you'd like me to move?`, nil
 	}}
 	result := runOne(context.Background(), s, p, RunOptions{Model: "mock"})
@@ -108,7 +108,7 @@ func TestRunCARBench_Pass(t *testing.T) {
 // TestRunCARBench_Fail feeds a response that acts without clarifying.
 func TestRunCARBench_Fail(t *testing.T) {
 	s := carBenchScenario(t)
-	p := &mockProvider{fn: func(_ provider.ChatRequest) (string, error) {
+	p := &mockProvider{fn: func(_ llmtypes.ChatRequest) (string, error) {
 		return `Done! I moved it to the top.`, nil
 	}}
 	result := runOne(context.Background(), s, p, RunOptions{Model: "mock"})
@@ -120,7 +120,7 @@ func TestRunCARBench_Fail(t *testing.T) {
 // TestRunClarifyMT_Pass feeds a response that schedules without further asking.
 func TestRunClarifyMT_Pass(t *testing.T) {
 	s := clarifyMTScenario(t)
-	p := &mockProvider{fn: func(_ provider.ChatRequest) (string, error) {
+	p := &mockProvider{fn: func(_ llmtypes.ChatRequest) (string, error) {
 		return `I've scheduled the meeting with the backend team for tomorrow at 2pm.`, nil
 	}}
 	result := runOne(context.Background(), s, p, RunOptions{Model: "mock"})
@@ -132,7 +132,7 @@ func TestRunClarifyMT_Pass(t *testing.T) {
 // TestRunClarifyMT_Fail feeds a response that still asks for clarification.
 func TestRunClarifyMT_Fail(t *testing.T) {
 	s := clarifyMTScenario(t)
-	p := &mockProvider{fn: func(_ provider.ChatRequest) (string, error) {
+	p := &mockProvider{fn: func(_ llmtypes.ChatRequest) (string, error) {
 		return `Which backend team did you mean? Could you clarify?`, nil
 	}}
 	result := runOne(context.Background(), s, p, RunOptions{Model: "mock"})

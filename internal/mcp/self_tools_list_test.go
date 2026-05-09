@@ -6,17 +6,17 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/hollis-labs/go-providers/provider"
+	llmtypes "github.com/hollis-labs/go-llm-types"
 )
 
 // stubInventoryLookup is a minimal ToolInventoryLookup stub used to
 // prove the cross-server enumeration path is exercised by callToolList
 // (CW-20260501-0001). Returns a fixed slice of tool definitions.
 type stubInventoryLookup struct {
-	tools []provider.ToolDefinition
+	tools []llmtypes.ToolDefinition
 }
 
-func (s *stubInventoryLookup) GetAllToolsUnfiltered() []provider.ToolDefinition {
+func (s *stubInventoryLookup) GetAllToolsUnfiltered() []llmtypes.ToolDefinition {
 	return s.tools
 }
 
@@ -306,7 +306,7 @@ func TestFirstSentenceSummary(t *testing.T) {
 func TestNaniteToolList_CrossServerEnumeration(t *testing.T) {
 	st := newSelfTools(t)
 	st.Inventory = &stubInventoryLookup{
-		tools: []provider.ToolDefinition{
+		tools: []llmtypes.ToolDefinition{
 			{
 				Name:        "memory_recall",
 				Description: "Recall memories relevant to the current turn from the durable Vanta substrate.",
@@ -373,7 +373,7 @@ func TestNaniteToolList_CrossServerEnumeration(t *testing.T) {
 func TestNaniteToolList_DedupesAcrossSources(t *testing.T) {
 	st := newSelfTools(t)
 	st.Inventory = &stubInventoryLookup{
-		tools: []provider.ToolDefinition{
+		tools: []llmtypes.ToolDefinition{
 			{
 				Name:        "tool_list",
 				Description: "Stub description from the manager that should win on dedup.",
@@ -416,7 +416,7 @@ func TestNaniteToolList_DedupesAcrossSources(t *testing.T) {
 func TestNaniteToolList_CrossServerSizeMeasurement(t *testing.T) {
 	st := newSelfTools(t)
 	st.Inventory = &stubInventoryLookup{
-		tools: []provider.ToolDefinition{
+		tools: []llmtypes.ToolDefinition{
 			{
 				Name:        "memory_recall",
 				Description: "Recall memories relevant to the current turn from durable storage.",
@@ -451,7 +451,7 @@ func TestNaniteToolList_CrossServerSizeMeasurement(t *testing.T) {
 func TestNaniteToolList_FullInventoryIncludesNonNanitePrefixed(t *testing.T) {
 	st := newSelfTools(t)
 	st.Inventory = &stubInventoryLookup{
-		tools: []provider.ToolDefinition{
+		tools: []llmtypes.ToolDefinition{
 			{
 				Name:        "dev_read",
 				Description: "Read a file from the workspace (dev-mode shell tool).",

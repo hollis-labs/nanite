@@ -63,13 +63,13 @@ type pendingRoute struct {
 
 // ConnectorStatus tracks the health state of a registered connector.
 type ConnectorStatus struct {
-	Name               string    `json:"name"`
-	PluginID           string    `json:"plugin_id"`
-	Healthy            bool      `json:"healthy"`
-	LastCheckAt        time.Time `json:"last_check_at,omitempty"`
-	LastError          string    `json:"last_error,omitempty"`
-	LastErrorAt        time.Time `json:"last_error_at,omitempty"`
-	ConsecutiveFailures int      `json:"consecutive_failures"`
+	Name                string    `json:"name"`
+	PluginID            string    `json:"plugin_id"`
+	Healthy             bool      `json:"healthy"`
+	LastCheckAt         time.Time `json:"last_check_at,omitempty"`
+	LastError           string    `json:"last_error,omitempty"`
+	LastErrorAt         time.Time `json:"last_error_at,omitempty"`
+	ConsecutiveFailures int       `json:"consecutive_failures"`
 }
 
 // Host implements the plugin.Host interface for Nanite.
@@ -95,41 +95,41 @@ type crudHandlerEntry struct {
 }
 
 type Host struct {
-	mu            sync.RWMutex
-	plugins       map[string]plugin.Plugin
-	eventHooks    map[string][]eventHookEntry
-	crudHandlers  map[string]crudHandlerEntry
-	uiComponents  []plugin.UIComponent
-	uiOwners      map[string]string // component ID → plugin ID that registered it
-	connectors    map[string]plugin.Connector
-	connectorOwners  map[string]string          // connector name → plugin ID
-	connectorHealth  map[string]*ConnectorStatus // connector name → health status
-	commands      CommandRegistrar // unified command registry (nil-safe)
-	mcpRegistrar  MCPRegistrar     // MCP server registrar (nil-safe; set via SetMCPRegistrar)
-	keybindings   map[string]KeybindingDef   // keybinding ID → definition
-	kbOwners      map[string]string                 // keybinding ID → plugin ID
-	slots         map[UISlotName][]UISlotEntry // slot name → entries, sorted by priority
-	services      map[string]interface{}
-	serviceOwners map[string]string // service name → plugin ID (only non-core, plugin-registered services)
+	mu              sync.RWMutex
+	plugins         map[string]plugin.Plugin
+	eventHooks      map[string][]eventHookEntry
+	crudHandlers    map[string]crudHandlerEntry
+	uiComponents    []plugin.UIComponent
+	uiOwners        map[string]string // component ID → plugin ID that registered it
+	connectors      map[string]plugin.Connector
+	connectorOwners map[string]string            // connector name → plugin ID
+	connectorHealth map[string]*ConnectorStatus  // connector name → health status
+	commands        CommandRegistrar             // unified command registry (nil-safe)
+	mcpRegistrar    MCPRegistrar                 // MCP server registrar (nil-safe; set via SetMCPRegistrar)
+	keybindings     map[string]KeybindingDef     // keybinding ID → definition
+	kbOwners        map[string]string            // keybinding ID → plugin ID
+	slots           map[UISlotName][]UISlotEntry // slot name → entries, sorted by priority
+	services        map[string]interface{}
+	serviceOwners   map[string]string // service name → plugin ID (only non-core, plugin-registered services)
 	// B.6b host-side owner maps for categories whose underlying registry cannot
 	// carry plugin-ID context (interfaces live in external/pinned modules, or
 	// are plugin-agnostic by design — task.Service, store.Store). Event hooks
 	// and CRUD handlers carry their owner inline via eventHookEntry /
 	// crudHandlerEntry; see those types above.
-	taskBackendOwners  map[string]string   // task backend name → plugin ID
-	providerOwners     map[string]string   // provider name → plugin ID (forward-compat; see providerUnregistrar)
-	configSchemaOwners map[string]struct{} // plugin IDs with a persisted config schema (clear on unload)
-	configs       map[string]*PluginConfig // per-plugin config, keyed by plugin ID
-	activePlugin  string                   // ID of the plugin currently being loaded
-	store         *store.Store             // DB-backed plugin settings (nil if unavailable)
-	router        *http.ServeMux
-	pluginMux     *MutablePluginMux // mutable wrapper that owns all plugin-registered routes
-	routePatterns map[string]bool   // patterns already wired on core router (forwarder installed)
-	pendingRoutes []pendingRoute // routes queued before router was set
-	triggers      *TriggerDispatcher // event → connector dispatch
-	filters       *FilterRegistry    // named filter chains
-	eventSubs     []chan plugin.Event // SSE subscribers for event streaming
-	envelopes     map[string]EnvelopeRegistryEntry // envelope type → registry entry (B.4)
+	taskBackendOwners  map[string]string        // task backend name → plugin ID
+	providerOwners     map[string]string        // provider name → plugin ID (forward-compat; see providerUnregistrar)
+	configSchemaOwners map[string]struct{}      // plugin IDs with a persisted config schema (clear on unload)
+	configs            map[string]*PluginConfig // per-plugin config, keyed by plugin ID
+	activePlugin       string                   // ID of the plugin currently being loaded
+	store              *store.Store             // DB-backed plugin settings (nil if unavailable)
+	router             *http.ServeMux
+	pluginMux          *MutablePluginMux                // mutable wrapper that owns all plugin-registered routes
+	routePatterns      map[string]bool                  // patterns already wired on core router (forwarder installed)
+	pendingRoutes      []pendingRoute                   // routes queued before router was set
+	triggers           *TriggerDispatcher               // event → connector dispatch
+	filters            *FilterRegistry                  // named filter chains
+	eventSubs          []chan plugin.Event              // SSE subscribers for event streaming
+	envelopes          map[string]EnvelopeRegistryEntry // envelope type → registry entry (B.4)
 	// envelopeRegistry is the shared go-envelopes Registry that owns
 	// compiled JSON Schemas for both core and plugin envelope types.
 	// Plugin types land here under "<pluginID>.<envType>" via
@@ -161,15 +161,15 @@ type Host struct {
 	// plugin rules are registered at plugin load and deregistered at
 	// plugin unload. Access is via RegisterCardRule / UnregisterPluginCardRules
 	// / DetectCardType / GetCardRules.
-	cardRules     cardRulesRegistry
+	cardRules cardRulesRegistry
 	// panels is the right-rail v2 panel registry (J9 — CW-20260426-0007).
 	// Built-in panels are registered at host init (tier=0); plugin panels are
 	// registered at plugin load (tier=1) and deregistered at plugin unload.
 	// Access is via RegisterPanel / UnregisterPluginPanels / GetPanels.
-	panels        panelRegistry
-	logger        plugin.Logger
-	ctx           context.Context
-	ctxCancel     context.CancelFunc
+	panels    panelRegistry
+	logger    plugin.Logger
+	ctx       context.Context
+	ctxCancel context.CancelFunc
 }
 
 // NewHost creates a new plugin host for Nanite.
@@ -875,7 +875,7 @@ func (h *Host) recordConnectorSuccess(name string) {
 }
 
 // RegisterProvider registers a runtime LLM provider from a plugin.
-// The provider must implement the provider.Provider interface; the host
+// The provider must implement the llmcontracts.Provider interface; the host
 // registers it with the provider registry via the "provider-registry" service.
 func (h *Host) RegisterProvider(name string, prov interface{}) error {
 	h.mu.Lock()

@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/hollis-labs/go-providers/provider"
+	llmtypes "github.com/hollis-labs/go-llm-types"
 	"github.com/hollis-labs/nanite/internal/chat"
 )
 
@@ -172,7 +172,7 @@ func TestHandleScratchpadTool_ChannelEvents(t *testing.T) {
 	ls := newTestLoopState()
 	ch := make(chan chat.StreamEvent, 10)
 
-	tu := provider.ToolUseBlock{
+	tu := llmtypes.ToolUseBlock{
 		ID:    "test-id",
 		Name:  "scratchpad_write",
 		Input: map[string]any{"key": "k", "value": "v"},
@@ -212,7 +212,7 @@ func TestHandleScratchpadTool_SummaryTruncation(t *testing.T) {
 	}
 
 	ch := make(chan chat.StreamEvent, 10)
-	tu := provider.ToolUseBlock{
+	tu := llmtypes.ToolUseBlock{
 		ID:    "read-id",
 		Name:  "scratchpad_read",
 		Input: map[string]any{"key": "big"},

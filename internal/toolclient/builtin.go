@@ -3,7 +3,7 @@ package toolclient
 import (
 	"sync"
 
-	"github.com/hollis-labs/go-providers/provider"
+	llmtypes "github.com/hollis-labs/go-llm-types"
 )
 
 // BuiltinToolRegistry holds built-in tool definitions that are always available
@@ -11,30 +11,30 @@ import (
 // discovery limits.
 type BuiltinToolRegistry struct {
 	mu    sync.RWMutex
-	tools map[string][]provider.ToolDefinition // category -> tools
+	tools map[string][]llmtypes.ToolDefinition // category -> tools
 }
 
 // NewBuiltinToolRegistry creates an empty BuiltinToolRegistry.
 func NewBuiltinToolRegistry() *BuiltinToolRegistry {
 	return &BuiltinToolRegistry{
-		tools: make(map[string][]provider.ToolDefinition),
+		tools: make(map[string][]llmtypes.ToolDefinition),
 	}
 }
 
 // RegisterBuiltins registers a set of tool definitions under the given category.
 // Supported categories: "dev", "general".
-func (r *BuiltinToolRegistry) RegisterBuiltins(category string, tools []provider.ToolDefinition) {
+func (r *BuiltinToolRegistry) RegisterBuiltins(category string, tools []llmtypes.ToolDefinition) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.tools[category] = tools
 }
 
 // GetBuiltins returns all registered built-in tools across all categories.
-func (r *BuiltinToolRegistry) GetBuiltins() []provider.ToolDefinition {
+func (r *BuiltinToolRegistry) GetBuiltins() []llmtypes.ToolDefinition {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
-	var all []provider.ToolDefinition
+	var all []llmtypes.ToolDefinition
 	for _, tools := range r.tools {
 		all = append(all, tools...)
 	}
@@ -43,7 +43,7 @@ func (r *BuiltinToolRegistry) GetBuiltins() []provider.ToolDefinition {
 
 // GetBuiltinsByCategory returns built-in tools for a specific category.
 // Returns nil if the category is not registered.
-func (r *BuiltinToolRegistry) GetBuiltinsByCategory(category string) []provider.ToolDefinition {
+func (r *BuiltinToolRegistry) GetBuiltinsByCategory(category string) []llmtypes.ToolDefinition {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	return r.tools[category]

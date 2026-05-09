@@ -8,13 +8,13 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/hollis-labs/go-providers/provider"
+	llmtypes "github.com/hollis-labs/go-llm-types"
 )
 
 // ChatProvider is the minimal interface the runner needs. It matches the
-// provider.Provider interface so real providers drop in without adaptation.
+// llmcontracts.Provider interface so real providers drop in without adaptation.
 type ChatProvider interface {
-	Complete(ctx context.Context, req provider.ChatRequest) (string, error)
+	Complete(ctx context.Context, req llmtypes.ChatRequest) (string, error)
 }
 
 // RunOptions configures a Run call.
@@ -37,9 +37,9 @@ func Run(ctx context.Context, scenarios []Scenario, p ChatProvider, opts RunOpti
 
 func runOne(ctx context.Context, s Scenario, p ChatProvider, opts RunOptions) Result {
 	// Build tool definitions from stubs.
-	tools := make([]provider.ToolDefinition, 0, len(s.ToolsOffered))
+	tools := make([]llmtypes.ToolDefinition, 0, len(s.ToolsOffered))
 	for _, stub := range s.ToolsOffered {
-		tools = append(tools, provider.ToolDefinition{
+		tools = append(tools, llmtypes.ToolDefinition{
 			Name:        stub.Name,
 			Description: stub.Description,
 			InputSchema: map[string]any{
@@ -50,19 +50,19 @@ func runOne(ctx context.Context, s Scenario, p ChatProvider, opts RunOptions) Re
 	}
 
 	// Build message history (prev turns + current user message).
-	messages := make([]provider.ChatMessage, 0, len(s.PrevTurns)+1)
+	messages := make([]llmtypes.ChatMessage, 0, len(s.PrevTurns)+1)
 	for _, t := range s.PrevTurns {
-		messages = append(messages, provider.ChatMessage{
+		messages = append(messages, llmtypes.ChatMessage{
 			Role:    t.Role,
 			Content: t.Content,
 		})
 	}
-	messages = append(messages, provider.ChatMessage{
+	messages = append(messages, llmtypes.ChatMessage{
 		Role:    "user",
 		Content: s.UserMessage,
 	})
 
-	req := provider.ChatRequest{
+	req := llmtypes.ChatRequest{
 		Model:    opts.Model,
 		Messages: messages,
 		Tools:    tools,

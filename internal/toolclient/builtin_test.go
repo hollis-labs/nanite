@@ -3,18 +3,18 @@ package toolclient
 import (
 	"testing"
 
-	"github.com/hollis-labs/go-providers/provider"
+	llmtypes "github.com/hollis-labs/go-llm-types"
 )
 
 func TestRegisterBuiltins(t *testing.T) {
 	reg := NewBuiltinToolRegistry()
 
-	devTools := []provider.ToolDefinition{
+	devTools := []llmtypes.ToolDefinition{
 		{Name: "dev_read", Description: "Read file contents"},
 		{Name: "dev_write", Description: "Write file contents"},
 		{Name: "dev_grep", Description: "Search files"},
 	}
-	generalTools := []provider.ToolDefinition{
+	generalTools := []llmtypes.ToolDefinition{
 		{Name: "web_fetch", Description: "Fetch a URL"},
 		{Name: "datetime", Description: "Get current time"},
 	}
@@ -41,11 +41,11 @@ func TestGetBuiltins_AlwaysAvailable(t *testing.T) {
 	reg := NewBuiltinToolRegistry()
 
 	// Even with no MCP servers, builtins are available after registration.
-	devTools := []provider.ToolDefinition{
+	devTools := []llmtypes.ToolDefinition{
 		{Name: "dev_read", Description: "Read file contents"},
 		{Name: "dev_bash", Description: "Execute shell command"},
 	}
-	generalTools := []provider.ToolDefinition{
+	generalTools := []llmtypes.ToolDefinition{
 		{Name: "datetime", Description: "Get current time"},
 	}
 
@@ -72,10 +72,10 @@ func TestGetBuiltins_AlwaysAvailable(t *testing.T) {
 func TestGetBuiltinsByCategory(t *testing.T) {
 	reg := NewBuiltinToolRegistry()
 
-	reg.RegisterBuiltins("dev", []provider.ToolDefinition{
+	reg.RegisterBuiltins("dev", []llmtypes.ToolDefinition{
 		{Name: "dev_read", Description: "Read file"},
 	})
-	reg.RegisterBuiltins("general", []provider.ToolDefinition{
+	reg.RegisterBuiltins("general", []llmtypes.ToolDefinition{
 		{Name: "web_fetch", Description: "Fetch URL"},
 	})
 
@@ -111,7 +111,7 @@ func TestGetBuiltins_EmptyRegistry(t *testing.T) {
 func TestRegisterBuiltins_OverwritesCategory(t *testing.T) {
 	reg := NewBuiltinToolRegistry()
 
-	reg.RegisterBuiltins("dev", []provider.ToolDefinition{
+	reg.RegisterBuiltins("dev", []llmtypes.ToolDefinition{
 		{Name: "dev_read", Description: "Read file"},
 	})
 	if reg.Count() != 1 {
@@ -119,7 +119,7 @@ func TestRegisterBuiltins_OverwritesCategory(t *testing.T) {
 	}
 
 	// Re-register overwrites the category.
-	reg.RegisterBuiltins("dev", []provider.ToolDefinition{
+	reg.RegisterBuiltins("dev", []llmtypes.ToolDefinition{
 		{Name: "dev_read", Description: "Read file"},
 		{Name: "dev_write", Description: "Write file"},
 	})

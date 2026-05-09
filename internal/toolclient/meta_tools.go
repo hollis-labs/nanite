@@ -6,14 +6,14 @@ import (
 	"log/slog"
 	"strings"
 
-	"github.com/hollis-labs/go-providers/provider"
+	llmtypes "github.com/hollis-labs/go-llm-types"
 )
 
-// RequestToolsMetaTool returns the provider.ToolDefinition for the
+// RequestToolsMetaTool returns the llmtypes.ToolDefinition for the
 // request_tools meta-tool. The LLM can call this to request specific
 // tools by name or by intent description.
-func RequestToolsMetaTool() provider.ToolDefinition {
-	return provider.ToolDefinition{
+func RequestToolsMetaTool() llmtypes.ToolDefinition {
+	return llmtypes.ToolDefinition{
 		Name: "request_tools",
 		Description: "Load additional tool schemas into context by name or by intent description, then call them.\n\n" +
 			"**When to use:** When you need a tool that is not currently in your context window (progressive discovery). Call with tool_names for exact lookups, or intent for semantic search when you're not sure of the exact name.\n\n" +
@@ -46,9 +46,9 @@ const DefaultMaxIntentResults = 10
 // HandleRequestTools processes a request_tools meta-tool call.
 // It resolves tools by exact name and/or by intent scoring, returning the
 // matched tool definitions as a JSON-encoded result string.
-func (tb *ToolClient) HandleRequestTools(input map[string]any) ([]provider.ToolDefinition, string) {
-	var byName []provider.ToolDefinition
-	var byIntent []provider.ToolDefinition
+func (tb *ToolClient) HandleRequestTools(input map[string]any) ([]llmtypes.ToolDefinition, string) {
+	var byName []llmtypes.ToolDefinition
+	var byIntent []llmtypes.ToolDefinition
 
 	// Resolve by explicit tool names.
 	if names, ok := input["tool_names"]; ok {
@@ -75,7 +75,7 @@ func (tb *ToolClient) HandleRequestTools(input map[string]any) ([]provider.ToolD
 
 	// Merge results, deduplicating by name.
 	seen := make(map[string]bool)
-	var merged []provider.ToolDefinition
+	var merged []llmtypes.ToolDefinition
 	for _, t := range byName {
 		if !seen[t.Name] {
 			seen[t.Name] = true
@@ -118,8 +118,8 @@ func (tb *ToolClient) HandleRequestTools(input map[string]any) ([]provider.ToolD
 
 // FetchToolResultMetaTool returns the tool definition for the fetch_tool_result
 // meta-tool. The LLM uses this to retrieve slices of cached large tool results.
-func FetchToolResultMetaTool() provider.ToolDefinition {
-	return provider.ToolDefinition{
+func FetchToolResultMetaTool() llmtypes.ToolDefinition {
+	return llmtypes.ToolDefinition{
 		Name: "fetch_tool_result",
 		Description: "Retrieve a byte slice of a cached large tool result that was truncated in context.\n\n" +
 			"**When to use:** When a previous tool result showed a truncation notice with a `tool_result://<ULID>` pointer at the footer, call this with that ULID to read more of the content. Useful for paging through large file listings, long API responses, or any tool output that exceeded the context cap.\n\n" +
@@ -152,8 +152,8 @@ func FetchToolResultMetaTool() provider.ToolDefinition {
 // SearchToolResultMetaTool returns the tool definition for the
 // search_tool_result meta-tool. The LLM uses this to regex-search cached
 // large tool results.
-func SearchToolResultMetaTool() provider.ToolDefinition {
-	return provider.ToolDefinition{
+func SearchToolResultMetaTool() llmtypes.ToolDefinition {
+	return llmtypes.ToolDefinition{
 		Name: "search_tool_result",
 		Description: "Regex-search a cached large tool result and return matching lines with context (like grep -C 2).\n\n" +
 			"**When to use:** When a previous tool result was truncated and you need to find a specific pattern (function name, error string, field key) without reading the entire cache sequentially. More efficient than fetch_tool_result + manual scanning for targeted lookups.\n\n" +

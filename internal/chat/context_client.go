@@ -11,8 +11,8 @@ import (
 	feotel "github.com/hollis-labs/go-otel"
 	"go.opentelemetry.io/otel/attribute"
 
+	llmtypes "github.com/hollis-labs/go-llm-types"
 	"github.com/hollis-labs/nanite/internal/contextbroker"
-	"github.com/hollis-labs/go-providers/provider"
 	"github.com/hollis-labs/nanite/internal/store"
 )
 
@@ -33,9 +33,9 @@ const ToolResultPruneAge = 2
 
 // ContextClient assembles and manages context for chat turns.
 type ContextClient struct {
-	Store          *store.Store
-	BudgetPct      float64               // fraction of context window to use (default 0.75)
-	ContextBroker  *contextbroker.Broker // universal context retrieval (nil = disabled)
+	Store         *store.Store
+	BudgetPct     float64               // fraction of context window to use (default 0.75)
+	ContextBroker *contextbroker.Broker // universal context retrieval (nil = disabled)
 	// HintDispatcher, when set, enables v2 dynamic hint selection via the
 	// hint-selector peer agent (F5 / CW-20260420-0022). nil means the assembler
 	// falls through to the v0/v1 static ThinkToolBlock path. Also requires
@@ -55,7 +55,7 @@ func NewContextClient(s *store.Store) *ContextClient {
 // 1. System prompt (from prompt templates or legacy agent + mode + workspace)
 // 2. Recent messages (from session history)
 // 3. Enforce budget ceiling
-func (cb *ContextClient) AssembleContext(ctx context.Context, session *store.Session, agent *store.AgentProfile, mode *store.AgentMode, workspace *store.Workspace) (string, []provider.ChatMessage, error) {
+func (cb *ContextClient) AssembleContext(ctx context.Context, session *store.Session, agent *store.AgentProfile, mode *store.AgentMode, workspace *store.Workspace) (string, []llmtypes.ChatMessage, error) {
 	_, span := feotel.StartSpan(ctx, "nanite.broker.assembleContext")
 	defer span.End()
 
@@ -90,13 +90,13 @@ func (cb *ContextClient) AssembleContext(ctx context.Context, session *store.Ses
 	}
 
 	// 3. Convert to provider messages.
-	chatMessages := make([]provider.ChatMessage, len(messages))
+	chatMessages := make([]llmtypes.ChatMessage, len(messages))
 	for i, m := range messages {
 		role := m.Role
 		if role == "system" || role == "tool" || role == RoleEnvelopeResponse {
 			role = "user" // Anthropic API only accepts user/assistant
 		}
-		chatMessages[i] = provider.ChatMessage{Role: role, Content: m.Content}
+		chatMessages[i] = llmtypes.ChatMessage{Role: role, Content: m.Content}
 	}
 
 	// 4. Estimate total tokens and enforce budget.
@@ -144,7 +144,7 @@ type SlotSources struct {
 	Session          string                 // session name, mode label, workspace name
 	Context          string                 // formatted ContextBroker items where Source != "memory"
 	UserContext      string                 // J10 (CW-20260426-0008): user-authored session context prompt + included docs.
-	Messages         []provider.ChatMessage // conversation slot messages
+	Messages         []llmtypes.ChatMessage // conversation slot messages
 	EnrichmentActive bool                   // true when Context slot was populated by the broker
 }
 
@@ -226,13 +226,13 @@ func (cb *ContextClient) AssembleSlotSources(ctx context.Context, session *store
 	if err != nil {
 		return nil, err
 	}
-	chatMessages := make([]provider.ChatMessage, len(messages))
+	chatMessages := make([]llmtypes.ChatMessage, len(messages))
 	for i, m := range messages {
 		role := m.Role
 		if role == "system" || role == "tool" || role == RoleEnvelopeResponse {
 			role = "user"
 		}
-		chatMessages[i] = provider.ChatMessage{Role: role, Content: m.Content}
+		chatMessages[i] = llmtypes.ChatMessage{Role: role, Content: m.Content}
 	}
 
 	// J10 (CW-20260426-0008): user context prompt + included documents.
@@ -538,7 +538,7 @@ type TokenBreakdown struct {
 }
 
 // EstimateToolDefTokens estimates total tokens for provider tool definitions.
-func EstimateToolDefTokens(tools []provider.ToolDefinition) int {
+func EstimateToolDefTokens(tools []llmtypes.ToolDefinition) int {
 	total := 0
 	for _, t := range tools {
 		data, err := json.Marshal(t)
@@ -561,7 +561,7 @@ func EstimateToolDefTokens(tools []provider.ToolDefinition) int {
 
 // EstimateMessagesTokens estimates total tokens for a message slice, including
 // both simple content and content blocks (tool_use/tool_result).
-func EstimateMessagesTokens(messages []provider.ChatMessage) int {
+func EstimateMessagesTokens(messages []llmtypes.ChatMessage) int {
 	total := 0
 	for _, m := range messages {
 		total += EstimateTokens(m.Content)
@@ -588,10 +588,10 @@ func EstimateMessagesTokens(messages []provider.ChatMessage) int {
 // Returns the (possibly modified) messages, tools, and a token breakdown.
 func EnforceTokenBudget(
 	systemPrompt string,
-	messages []provider.ChatMessage,
-	tools []provider.ToolDefinition,
+	messages []llmtypes.ChatMessage,
+	tools []llmtypes.ToolDefinition,
 	ceilingOverride int,
-) ([]provider.ChatMessage, []provider.ToolDefinition, *TokenBreakdown, error) {
+) ([]llmtypes.ChatMessage, []llmtypes.ToolDefinition, *TokenBreakdown, error) {
 	ceiling := int(float64(DefaultContextWindow) * HardCeilingPct)
 	if ceilingOverride > 0 {
 		ceiling = ceilingOverride
@@ -759,7 +759,7 @@ func matchesAny(text string, subs ...string) bool {
 // pruneToolResultsInMemory replaces tool_result content blocks older than the
 // last 2 tool-use rounds with compact references. This operates on the in-memory
 // message slice without touching the DB.
-func pruneToolResultsInMemory(messages []provider.ChatMessage) []provider.ChatMessage {
+func pruneToolResultsInMemory(messages []llmtypes.ChatMessage) []llmtypes.ChatMessage {
 	// Count tool-use rounds from the end to find the cutoff.
 	toolRounds := 0
 	cutoffIdx := len(messages)
@@ -782,7 +782,7 @@ func pruneToolResultsInMemory(messages []provider.ChatMessage) []provider.ChatMe
 	}
 
 	pruned := 0
-	result := make([]provider.ChatMessage, len(messages))
+	result := make([]llmtypes.ChatMessage, len(messages))
 	copy(result, messages)
 
 	for i := 0; i <= cutoffIdx; i++ {
@@ -790,7 +790,7 @@ func pruneToolResultsInMemory(messages []provider.ChatMessage) []provider.ChatMe
 		if len(m.ContentBlocks) == 0 {
 			continue
 		}
-		newBlocks := make([]provider.ContentBlock, len(m.ContentBlocks))
+		newBlocks := make([]llmtypes.ContentBlock, len(m.ContentBlocks))
 		copy(newBlocks, m.ContentBlocks)
 		for j := range newBlocks {
 			b := &newBlocks[j]

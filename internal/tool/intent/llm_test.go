@@ -7,21 +7,21 @@ import (
 	"testing"
 	"time"
 
-	"github.com/hollis-labs/go-providers/provider"
+	llmtypes "github.com/hollis-labs/go-llm-types"
 )
 
 // stubProvider lets us control Complete's output for classifier tests.
 type stubProvider struct {
-	reply        string
-	err          error
-	capturedReq  *provider.ChatRequest
-	sleepBefore  time.Duration
+	reply       string
+	err         error
+	capturedReq *llmtypes.ChatRequest
+	sleepBefore time.Duration
 }
 
-func (s *stubProvider) StreamChat(context.Context, provider.ChatRequest) (<-chan provider.StreamEvent, error) {
+func (s *stubProvider) StreamChat(context.Context, llmtypes.ChatRequest) (<-chan llmtypes.StreamEvent, error) {
 	return nil, errors.New("not implemented")
 }
-func (s *stubProvider) Complete(ctx context.Context, req provider.ChatRequest) (string, error) {
+func (s *stubProvider) Complete(ctx context.Context, req llmtypes.ChatRequest) (string, error) {
 	s.capturedReq = &req
 	if s.sleepBefore > 0 {
 		select {
@@ -35,8 +35,8 @@ func (s *stubProvider) Complete(ctx context.Context, req provider.ChatRequest) (
 	}
 	return s.reply, nil
 }
-func (s *stubProvider) Capabilities() provider.ProviderCapabilities {
-	return provider.ProviderCapabilities{}
+func (s *stubProvider) Capabilities() llmtypes.ProviderCapabilities {
+	return llmtypes.ProviderCapabilities{}
 }
 
 func TestLLMClassifier_PromptShape(t *testing.T) {

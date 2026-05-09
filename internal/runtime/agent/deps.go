@@ -4,6 +4,7 @@ import (
 	"time"
 
 	agentsessions "github.com/hollis-labs/go-agent-sessions/agentsessions"
+	llmtypes "github.com/hollis-labs/go-llm-types"
 	"github.com/hollis-labs/go-providers/provider"
 	"github.com/hollis-labs/go-sandbox/sandbox"
 	"github.com/hollis-labs/nanite/internal/permission"
@@ -44,11 +45,11 @@ type Dependencies struct {
 	PathGrants *permission.PathGrants
 
 	// EventFanout returns the channel the runtime fans
-	// provider.StreamEvent onto for downstream consumers (cost ledger,
+	// llmtypes.StreamEvent onto for downstream consumers (cost ledger,
 	// chat-stream sink). The composition root translates StreamEvent ->
 	// chat.StreamEvent before forwarding to the FE; that bridge is
 	// outside the agent package.
-	EventFanout func(sessionID string) chan<- provider.StreamEvent
+	EventFanout func(sessionID string) chan<- llmtypes.StreamEvent
 
 	// TypedEventCallback returns the per-line typed-event handler used to
 	// surface CLI-internal tool calls as nanite SSE tool_call /

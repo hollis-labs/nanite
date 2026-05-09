@@ -9,6 +9,7 @@ import (
 	"sync"
 	"time"
 
+	llmtypes "github.com/hollis-labs/go-llm-types"
 	feotel "github.com/hollis-labs/go-otel"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/codes"
@@ -19,7 +20,6 @@ import (
 	"github.com/hollis-labs/nanite/internal/mcp"
 	"github.com/hollis-labs/nanite/internal/permission"
 	pluginpkg "github.com/hollis-labs/nanite/internal/plugin"
-	"github.com/hollis-labs/go-providers/provider"
 	"github.com/hollis-labs/nanite/internal/safego"
 	"github.com/hollis-labs/nanite/internal/truncate"
 )
@@ -36,20 +36,20 @@ const (
 
 // toolPlan describes a single tool invocation after pre-checking.
 type toolPlan struct {
-	tu            provider.ToolUseBlock
+	tu            llmtypes.ToolUseBlock
 	status        toolPlanStatus
 	denyReason    string
 	concurrent    bool
 	originalIndex int
 	// resultBlock is set during pre-check for blocked/denied tools.
-	resultBlock *provider.ContentBlock
+	resultBlock *llmtypes.ContentBlock
 	ref         *chat.ToolCallRef
 }
 
 // toolExecResult holds the outcome of executing one tool.
 type toolExecResult struct {
 	originalIndex int
-	resultBlock   provider.ContentBlock
+	resultBlock   llmtypes.ContentBlock
 	ref           chat.ToolCallRef
 	isError       bool
 	rawOutput     string
@@ -72,11 +72,11 @@ func (s *chatServiceImpl) preCheckTools(
 	ctx context.Context,
 	sessionID string,
 	agentID string,
-	toolUseBlocks []provider.ToolUseBlock,
+	toolUseBlocks []llmtypes.ToolUseBlock,
 	ls *loopState,
 	ch chan chat.StreamEvent,
 	selection *ToolSelection,
-	tools []provider.ToolDefinition,
+	tools []llmtypes.ToolDefinition,
 ) []toolPlan {
 	plans := make([]toolPlan, 0, len(toolUseBlocks))
 
@@ -101,7 +101,7 @@ func (s *chatServiceImpl) preCheckTools(
 			slog.Warn("chat-service: tool SKIPPED (blocked)", "tool", tu.Name)
 			ch <- chat.StreamEvent{Type: "tool_call", Tool: tu.Name, ToolID: tu.ID, Detail: toolCallDetail(tu.Name, tu.Input)}
 			ch <- chat.StreamEvent{Type: "tool_result", Tool: tu.Name, ToolID: tu.ID, Summary: blockedResult}
-			block := provider.ContentBlock{
+			block := llmtypes.ContentBlock{
 				Type: "tool_result", ToolUseID: tu.ID, Content: blockedResult,
 			}
 			ref := chat.ToolCallRef{ID: tu.ID, Name: tu.Name, Status: "blocked", ErrorReason: blockedResult}
@@ -129,7 +129,7 @@ func (s *chatServiceImpl) preCheckTools(
 				slog.Warn("chat-service: tool denied", "tool", tu.Name, "reason", permResult.Reason)
 				ch <- chat.StreamEvent{Type: "tool_call", Tool: tu.Name, ToolID: tu.ID, Detail: toolCallDetail(tu.Name, tu.Input)}
 				ch <- chat.StreamEvent{Type: "tool_result", Tool: tu.Name, ToolID: tu.ID, Summary: denyMsg}
-				block := provider.ContentBlock{
+				block := llmtypes.ContentBlock{
 					Type: "tool_result", ToolUseID: tu.ID, Content: denyMsg,
 				}
 				ref := chat.ToolCallRef{ID: tu.ID, Name: tu.Name, Status: "denied", ErrorReason: denyMsg}
@@ -173,7 +173,7 @@ func (s *chatServiceImpl) preCheckTools(
 						})
 						ch <- chat.StreamEvent{Type: "tool_warning", Data: string(warningJSON)}
 					}
-					block := provider.ContentBlock{
+					block := llmtypes.ContentBlock{
 						Type: "tool_result", ToolUseID: tu.ID, Content: denyMsg,
 					}
 					ref := chat.ToolCallRef{ID: tu.ID, Name: tu.Name, Status: "denied", ErrorReason: denyMsg}
@@ -196,7 +196,7 @@ func (s *chatServiceImpl) preCheckTools(
 				slog.Warn("chat-service: tool denied, unknown permission decision", "tool", tu.Name, "decision", permResult.Decision)
 				ch <- chat.StreamEvent{Type: "tool_call", Tool: tu.Name, ToolID: tu.ID, Detail: toolCallDetail(tu.Name, tu.Input)}
 				ch <- chat.StreamEvent{Type: "tool_result", Tool: tu.Name, ToolID: tu.ID, Summary: denyMsg}
-				block := provider.ContentBlock{
+				block := llmtypes.ContentBlock{
 					Type: "tool_result", ToolUseID: tu.ID, Content: denyMsg,
 				}
 				ref := chat.ToolCallRef{ID: tu.ID, Name: tu.Name, Status: "denied", ErrorReason: denyMsg}
@@ -224,7 +224,7 @@ func (s *chatServiceImpl) preCheckTools(
 				slog.Info("chat-service: tool blocked by plugin pre-hook", "tool", tu.Name)
 				ch <- chat.StreamEvent{Type: "tool_call", Tool: tu.Name, ToolID: tu.ID, Detail: toolCallDetail(tu.Name, tu.Input)}
 				ch <- chat.StreamEvent{Type: "tool_result", Tool: tu.Name, ToolID: tu.ID, Summary: blockMsg}
-				block := provider.ContentBlock{
+				block := llmtypes.ContentBlock{
 					Type: "tool_result", ToolUseID: tu.ID, Content: blockMsg,
 				}
 				ref := chat.ToolCallRef{ID: tu.ID, Name: tu.Name, Status: "blocked", ErrorReason: blockMsg}
@@ -243,7 +243,7 @@ func (s *chatServiceImpl) preCheckTools(
 			slog.Warn("chat-service: tool denied by execution rules", "tool", tu.Name, "reason", reason)
 			ch <- chat.StreamEvent{Type: "tool_call", Tool: tu.Name, ToolID: tu.ID, Detail: toolCallDetail(tu.Name, tu.Input)}
 			ch <- chat.StreamEvent{Type: "tool_result", Tool: tu.Name, ToolID: tu.ID, Summary: denyMsg}
-			block := provider.ContentBlock{
+			block := llmtypes.ContentBlock{
 				Type: "tool_result", ToolUseID: tu.ID, Content: denyMsg, IsError: true,
 			}
 			ref := chat.ToolCallRef{ID: tu.ID, Name: tu.Name, Status: "denied", ErrorReason: denyMsg}
@@ -267,7 +267,7 @@ func (s *chatServiceImpl) preCheckTools(
 				slog.Warn("chat-service: tool arg validation failed", "tool", tu.Name, "err", errMsg)
 				ch <- chat.StreamEvent{Type: "tool_call", Tool: tu.Name, ToolID: tu.ID, Detail: toolCallDetail(tu.Name, tu.Input)}
 				ch <- chat.StreamEvent{Type: "tool_result", Tool: tu.Name, ToolID: tu.ID, Summary: errMsg}
-				block := provider.ContentBlock{
+				block := llmtypes.ContentBlock{
 					Type: "tool_result", ToolUseID: tu.ID, Content: errMsg, IsError: true,
 				}
 				ref := chat.ToolCallRef{ID: tu.ID, Name: tu.Name, Status: "error", ErrorReason: errMsg}
@@ -412,7 +412,7 @@ func (s *chatServiceImpl) executeToolBatch(
 // non-nil, presence broadcasts are serialized through it.
 func (s *chatServiceImpl) executeSingleTool(
 	ctx context.Context,
-	tu provider.ToolUseBlock,
+	tu llmtypes.ToolUseBlock,
 	ls *loopState,
 	agentID string,
 	sessionID string,
@@ -457,7 +457,7 @@ func (s *chatServiceImpl) executeSingleTool(
 		ls.recordToolCall(tu.Name, false)
 		ch <- chat.StreamEvent{Type: "tool_result", Tool: tu.Name, ToolID: tu.ID, Summary: cancelMsg}
 		return toolExecResult{
-			resultBlock: provider.ContentBlock{
+			resultBlock: llmtypes.ContentBlock{
 				Type: "tool_result", ToolUseID: tu.ID, Content: cancelMsg, IsError: true,
 			},
 			ref:       chat.ToolCallRef{ID: tu.ID, Name: tu.Name, Status: "cancelled", ErrorReason: cancelMsg},
@@ -578,7 +578,7 @@ func (s *chatServiceImpl) executeSingleTool(
 	}
 
 	return toolExecResult{
-		resultBlock: provider.ContentBlock{
+		resultBlock: llmtypes.ContentBlock{
 			Type: "tool_result", ToolUseID: tu.ID, Content: resultText, IsError: toolIsError,
 		},
 		ref:       chat.ToolCallRef{ID: tu.ID, Name: tu.Name},
@@ -607,8 +607,8 @@ func (s *chatServiceImpl) postProcessToolResults(
 	agentID string,
 	assistantMsgID string,
 	modelID string,
-) ([]provider.ContentBlock, []chat.ToolCallRef) {
-	var resultBlocks []provider.ContentBlock
+) ([]llmtypes.ContentBlock, []chat.ToolCallRef) {
+	var resultBlocks []llmtypes.ContentBlock
 	var refs []chat.ToolCallRef
 
 	for i, plan := range plans {
@@ -745,7 +745,7 @@ func (s *chatServiceImpl) postProcessToolResults(
 		}
 
 		// Build final result block with truncated content.
-		resultBlocks = append(resultBlocks, provider.ContentBlock{
+		resultBlocks = append(resultBlocks, llmtypes.ContentBlock{
 			Type: "tool_result", ToolUseID: tu.ID, Content: tr.Content, IsError: r.isError,
 		})
 		if shouldDirectReturnSubagentLiteral(plans, tu.Name, tr.Content, r.isError) {
@@ -845,7 +845,7 @@ func toolCallDetail(toolName string, input map[string]any) string {
 // handleResultCacheMetaTool handles fetch_tool_result and search_tool_result
 // meta-tool calls locally without MCP routing.
 func (s *chatServiceImpl) handleResultCacheMetaTool(
-	tu provider.ToolUseBlock,
+	tu llmtypes.ToolUseBlock,
 	sessionID string,
 	ch chan chat.StreamEvent,
 	mu *sync.Mutex,
@@ -880,7 +880,7 @@ func (s *chatServiceImpl) handleResultCacheMetaTool(
 	ch <- chat.StreamEvent{Type: "tool_result", Tool: tu.Name, ToolID: tu.ID, Summary: summary}
 
 	return toolExecResult{
-		resultBlock: provider.ContentBlock{
+		resultBlock: llmtypes.ContentBlock{
 			Type: "tool_result", ToolUseID: tu.ID, Content: resultText, IsError: isError,
 		},
 		ref:       chat.ToolCallRef{ID: tu.ID, Name: tu.Name},

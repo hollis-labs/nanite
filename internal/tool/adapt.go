@@ -4,14 +4,14 @@ import (
 	"encoding/json"
 	"strings"
 
-	"github.com/hollis-labs/go-providers/provider"
+	llmtypes "github.com/hollis-labs/go-llm-types"
 )
 
-// WrapProviderDef wraps a provider.ToolDefinition as a Tool interface
+// WrapProviderDef wraps a llmtypes.ToolDefinition as a Tool interface
 // implementation. The resulting tool has no Call function (will error if
 // called) — it exists for registration in the broker registry so that
 // selection works. Execution still flows through the existing MCP/ToolClient path.
-func WrapProviderDef(def provider.ToolDefinition, category, source string, tags []string) Tool {
+func WrapProviderDef(def llmtypes.ToolDefinition, category, source string, tags []string) Tool {
 	opts := []ToolOption{
 		WithCategory(category),
 		WithSource(source),
@@ -27,23 +27,23 @@ func WrapProviderDef(def provider.ToolDefinition, category, source string, tags 
 	return NewTool(def.Name, def.Description, opts...)
 }
 
-// ToProviderDefinition converts a Tool back to provider.ToolDefinition
+// ToProviderDefinition converts a Tool back to llmtypes.ToolDefinition
 // for the existing chat loop / provider interface.
-func ToProviderDefinition(t Tool) provider.ToolDefinition {
+func ToProviderDefinition(t Tool) llmtypes.ToolDefinition {
 	var schema map[string]any
 	if raw := t.InputSchema(); raw != nil {
 		_ = json.Unmarshal(raw, &schema)
 	}
-	return provider.ToolDefinition{
+	return llmtypes.ToolDefinition{
 		Name:        t.Name(),
 		Description: t.Description(),
 		InputSchema: schema,
 	}
 }
 
-// ToProviderDefinitions converts a slice of Tools to provider.ToolDefinition.
-func ToProviderDefinitions(tools []Tool) []provider.ToolDefinition {
-	defs := make([]provider.ToolDefinition, len(tools))
+// ToProviderDefinitions converts a slice of Tools to llmtypes.ToolDefinition.
+func ToProviderDefinitions(tools []Tool) []llmtypes.ToolDefinition {
+	defs := make([]llmtypes.ToolDefinition, len(tools))
 	for i, t := range tools {
 		defs[i] = ToProviderDefinition(t)
 	}

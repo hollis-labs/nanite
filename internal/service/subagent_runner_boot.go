@@ -8,7 +8,7 @@ import (
 	"strings"
 
 	"github.com/google/uuid"
-	"github.com/hollis-labs/go-providers/provider"
+	llmtypes "github.com/hollis-labs/go-llm-types"
 	"github.com/hollis-labs/nanite/internal/permission"
 	runtimeagent "github.com/hollis-labs/nanite/internal/runtime/agent"
 	"github.com/hollis-labs/nanite/internal/store"
@@ -19,7 +19,7 @@ import (
 // per-session router emits an EventError.
 var errBootStreamFailure = errors.New("subagent: boot session emitted error event")
 
-// drainBootSession consumes a chan provider.StreamEvent (the bridge's
+// drainBootSession consumes a chan llmtypes.StreamEvent (the bridge's
 // per-session router output for a Boot'd subagent) and assembles a
 // summary string + envelope payload for subagent.Result. Pure logic so the
 // rules can be unit-tested without spawning a runtime.
@@ -33,19 +33,19 @@ var errBootStreamFailure = errors.New("subagent: boot session emitted error even
 //
 // Returns summary, envelope (always valid JSON; "{}" today since the
 // long-lived PTY surface does not yet emit a structured envelope through
-// provider.StreamEvent), and a non-nil error if the stream emitted an
+// llmtypes.StreamEvent), and a non-nil error if the stream emitted an
 // error event. Channel close without EventDone is treated as a clean drain.
-func drainBootSession(ch <-chan provider.StreamEvent) (summary string, envelope string, err error) {
+func drainBootSession(ch <-chan llmtypes.StreamEvent) (summary string, envelope string, err error) {
 	var sb strings.Builder
 	envelope = "{}"
 
 	for ev := range ch {
 		switch ev.Type {
-		case provider.EventDelta:
+		case llmtypes.EventDelta:
 			sb.WriteString(ev.Content)
-		case provider.EventDone:
+		case llmtypes.EventDone:
 			return sb.String(), envelope, nil
-		case provider.EventError:
+		case llmtypes.EventError:
 			msg := ev.Error
 			if msg == "" {
 				msg = "stream error event with no message"
@@ -60,7 +60,7 @@ func drainBootSession(ch <-chan provider.StreamEvent) (summary string, envelope 
 // agentEventBridge so tests can stub the per-session router without a real
 // bridge. Satisfied structurally by *agentEventBridge.
 type bootEventBridge interface {
-	SetPerSessionRouter(sessionID string, ch chan provider.StreamEvent)
+	SetPerSessionRouter(sessionID string, ch chan llmtypes.StreamEvent)
 }
 
 // agentBooter is the narrow surface BootRunner needs to spawn a Boot'd
@@ -215,7 +215,7 @@ func (r *BootRunner) runBoot(ctx context.Context, run *subagent.Run, agent *stor
 	}
 	run.ChildSessionID = childID
 
-	eventsCh := make(chan provider.StreamEvent, 64)
+	eventsCh := make(chan llmtypes.StreamEvent, 64)
 	if r.bridge != nil {
 		r.bridge.SetPerSessionRouter(childID, eventsCh)
 	} else {

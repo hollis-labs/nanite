@@ -415,7 +415,7 @@ func Boot(ctx context.Context, deps *Dependencies, opts Options) (*Session, erro
 
 // agentsessionsStreamEventChan is an unused alias retained as a placeholder
 // for clarity around the EventFanout shape; deps.EventFanout returns the
-// real chan<- provider.StreamEvent. Kept un-exported.
+// real chan<- llmtypes.StreamEvent. Kept un-exported.
 type agentsessionsStreamEventChan = struct{}
 
 // envMapToSlice flattens the composed env map into the KEY=VALUE slice

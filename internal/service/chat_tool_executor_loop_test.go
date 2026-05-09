@@ -11,7 +11,7 @@ import (
 	"encoding/json"
 	"testing"
 
-	"github.com/hollis-labs/go-providers/provider"
+	llmtypes "github.com/hollis-labs/go-llm-types"
 	"github.com/hollis-labs/nanite/internal/chat"
 	"github.com/hollis-labs/nanite/internal/inspector"
 	"github.com/hollis-labs/nanite/internal/loopdetect"
@@ -31,7 +31,7 @@ func (s *loopTestToolStub) SelectForAgent(_ context.Context, _, _, _, _ string, 
 func (s *loopTestToolStub) Execute(_ context.Context, _, _ string, _ map[string]any) (*ToolResult, error) {
 	return &ToolResult{Output: s.output}, nil
 }
-func (*loopTestToolStub) HandleRequestTools(_ context.Context, _ map[string]any) ([]provider.ToolDefinition, string, error) {
+func (*loopTestToolStub) HandleRequestTools(_ context.Context, _ map[string]any) ([]llmtypes.ToolDefinition, string, error) {
 	return nil, "no tools", nil
 }
 func (*loopTestToolStub) ListSummaries() []toolclient.ToolSummary   { return nil }
@@ -75,7 +75,7 @@ func makeLoopTestService() *chatServiceImpl {
 func runTool(svc *chatServiceImpl, sessionID, turnID, toolName, argsJSON string) {
 	var input map[string]any
 	_ = json.Unmarshal([]byte(argsJSON), &input)
-	tu := provider.ToolUseBlock{ID: "id-" + toolName, Name: toolName, Input: input}
+	tu := llmtypes.ToolUseBlock{ID: "id-" + toolName, Name: toolName, Input: input}
 
 	ls := newLoopState(chat.AgentConstraints{}, nil, false)
 	ls.inspectorTurnID = turnID

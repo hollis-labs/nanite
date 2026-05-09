@@ -8,7 +8,7 @@ package service
 // the conversion logic lives here.
 
 import (
-	"github.com/hollis-labs/go-providers/provider"
+	llmtypes "github.com/hollis-labs/go-llm-types"
 	ctxpkg "github.com/hollis-labs/nanite/internal/context"
 	inspectsvc "github.com/hollis-labs/nanite/internal/inspector"
 )
@@ -68,7 +68,7 @@ func trafficLightFor(tokens int, cached bool) string {
 // entry for the combined system prompt.
 func (s *chatServiceImpl) recordInspectorLLMMessages(
 	sessionID, turnID string,
-	msgs []provider.ChatMessage,
+	msgs []llmtypes.ChatMessage,
 	systemPrompt string,
 ) {
 	if s.inspector == nil {

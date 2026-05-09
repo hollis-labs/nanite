@@ -9,7 +9,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/hollis-labs/go-providers/provider"
+	llmtypes "github.com/hollis-labs/go-llm-types"
 	"github.com/hollis-labs/nanite/internal/chat"
 )
 
@@ -74,7 +74,7 @@ type notifyPausePayload struct {
 // SSE writes when the call is concurrent-safe; nil for serial execution.
 func emitNotifyPause(
 	ctx context.Context,
-	tu provider.ToolUseBlock,
+	tu llmtypes.ToolUseBlock,
 	ch chan chat.StreamEvent,
 	mu *sync.Mutex,
 	delay time.Duration,

@@ -40,7 +40,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/hollis-labs/go-providers/provider"
+	llmcontracts "github.com/hollis-labs/go-llm-contracts"
+	llmtypes "github.com/hollis-labs/go-llm-types"
 )
 
 // DefaultRepairModel is the Haiku-class model used when
@@ -73,7 +74,7 @@ const DefaultRepairTimeout = 5000 * time.Millisecond
 // repairSystemPrompt) is the complementary behavioral fix.
 //
 // DefaultRepairMaxTokens is the per-call output ceiling threaded into
-// provider.ChatRequest.MaxTokens for the repair LLM pass. Callers can
+// llmtypes.ChatRequest.MaxTokens for the repair LLM pass. Callers can
 // override it via RepairOptions.MaxTokens (used by tests + by callers
 // that want a tighter budget for shape-only fixes).
 const DefaultRepairMaxTokens = 4096
@@ -135,7 +136,7 @@ type SchemaProvider interface {
 type RepairOptions struct {
 	// Provider is the LLM provider used for the repair call. Required
 	// — Repair returns an error when nil.
-	Provider provider.Provider
+	Provider llmcontracts.Provider
 
 	// Model is the repair model name. When empty, DefaultRepairModel.
 	Model string
@@ -148,7 +149,7 @@ type RepairOptions struct {
 	// (e.g. a tool with an unusually large repaired_args) can override
 	// the default. CW-20260429-0028.
 	//
-	// NOTE — known wiring gap: provider.ChatRequest does not currently
+	// NOTE — known wiring gap: llmtypes.ChatRequest does not currently
 	// expose a MaxTokens field, so this value is captured by Repair()
 	// but cannot yet be threaded into the outgoing provider request. See
 	// the DefaultRepairMaxTokens docstring for the upstream-fix path.
@@ -217,10 +218,10 @@ func Repair(ctx context.Context, rec *RecoverableError, opts RepairOptions) (*Re
 	callCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
-	req := provider.ChatRequest{
+	req := llmtypes.ChatRequest{
 		Model:        model,
 		SystemPrompt: systemPrompt,
-		Messages: []provider.ChatMessage{
+		Messages: []llmtypes.ChatMessage{
 			{Role: "user", Content: userMsg},
 		},
 		MaxTokens: maxTokens,

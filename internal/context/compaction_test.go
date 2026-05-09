@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/hollis-labs/go-providers/provider"
+	llmtypes "github.com/hollis-labs/go-llm-types"
 )
 
 // mockSummarizer returns a canned summary.
@@ -14,19 +14,19 @@ type mockSummarizer struct {
 	called bool
 }
 
-func (m *mockSummarizer) Summarize(ctx context.Context, systemPrompt string, messages []provider.ChatMessage) (string, error) {
+func (m *mockSummarizer) Summarize(ctx context.Context, systemPrompt string, messages []llmtypes.ChatMessage) (string, error) {
 	m.called = true
 	return fmt.Sprintf("Summary of %d messages.", len(messages)), nil
 }
 
-func makeMessages(n int, tokensPer int) []provider.ChatMessage {
-	msgs := make([]provider.ChatMessage, n)
+func makeMessages(n int, tokensPer int) []llmtypes.ChatMessage {
+	msgs := make([]llmtypes.ChatMessage, n)
 	for i := range msgs {
 		role := "user"
 		if i%2 == 1 {
 			role = "assistant"
 		}
-		msgs[i] = provider.ChatMessage{
+		msgs[i] = llmtypes.ChatMessage{
 			Role:    role,
 			Content: strings.Repeat("x", tokensPer*4), // 4 bytes per token
 		}
@@ -43,7 +43,7 @@ func TestCompactionPipeline_noCompactionNeeded(t *testing.T) {
 		Window:               cw,
 		Estimator:            DefaultEstimator{},
 		Mode:                 CompactionModeGeneral,
-		ConversationMessages: []provider.ChatMessage{{Role: "user", Content: "hello"}},
+		ConversationMessages: []llmtypes.ChatMessage{{Role: "user", Content: "hello"}},
 	}
 
 	result, err := p.Run(context.Background())
@@ -62,26 +62,26 @@ func TestStageDedupeToolResults(t *testing.T) {
 	input := map[string]any{"path": "/Users/x/foo.md"}
 	bigResult := strings.Repeat("x", 4000)
 
-	msgs := []provider.ChatMessage{
+	msgs := []llmtypes.ChatMessage{
 		// Turn 1: tool_use + tool_result (the original).
-		{Role: "assistant", ContentBlocks: []provider.ContentBlock{
+		{Role: "assistant", ContentBlocks: []llmtypes.ContentBlock{
 			{Type: "tool_use", ID: "call-1", Name: "dev_read", Input: &input},
 		}},
-		{Role: "user", ContentBlocks: []provider.ContentBlock{
+		{Role: "user", ContentBlocks: []llmtypes.ContentBlock{
 			{Type: "tool_result", ToolUseID: "call-1", Content: bigResult},
 		}},
 		// Turn 2: identical call — should become dedupe target.
-		{Role: "assistant", ContentBlocks: []provider.ContentBlock{
+		{Role: "assistant", ContentBlocks: []llmtypes.ContentBlock{
 			{Type: "tool_use", ID: "call-2", Name: "dev_read", Input: &input},
 		}},
-		{Role: "user", ContentBlocks: []provider.ContentBlock{
+		{Role: "user", ContentBlocks: []llmtypes.ContentBlock{
 			{Type: "tool_result", ToolUseID: "call-2", Content: bigResult},
 		}},
 		// Turn 3: different input — unique, should survive intact.
-		{Role: "assistant", ContentBlocks: []provider.ContentBlock{
+		{Role: "assistant", ContentBlocks: []llmtypes.ContentBlock{
 			{Type: "tool_use", ID: "call-3", Name: "dev_read", Input: &map[string]any{"path": "/Users/x/bar.md"}},
 		}},
-		{Role: "user", ContentBlocks: []provider.ContentBlock{
+		{Role: "user", ContentBlocks: []llmtypes.ContentBlock{
 			{Type: "tool_result", ToolUseID: "call-3", Content: bigResult},
 		}},
 	}
@@ -132,17 +132,17 @@ func TestStageDedupeToolResults(t *testing.T) {
 // genuinely changed state is preserved.
 func TestStageDedupeToolResults_DifferentResultsNotDeduped(t *testing.T) {
 	input := map[string]any{"path": "/Users/x/foo.md"}
-	msgs := []provider.ChatMessage{
-		{Role: "assistant", ContentBlocks: []provider.ContentBlock{
+	msgs := []llmtypes.ChatMessage{
+		{Role: "assistant", ContentBlocks: []llmtypes.ContentBlock{
 			{Type: "tool_use", ID: "call-1", Name: "dev_read", Input: &input},
 		}},
-		{Role: "user", ContentBlocks: []provider.ContentBlock{
+		{Role: "user", ContentBlocks: []llmtypes.ContentBlock{
 			{Type: "tool_result", ToolUseID: "call-1", Content: "original content"},
 		}},
-		{Role: "assistant", ContentBlocks: []provider.ContentBlock{
+		{Role: "assistant", ContentBlocks: []llmtypes.ContentBlock{
 			{Type: "tool_use", ID: "call-2", Name: "dev_read", Input: &input},
 		}},
-		{Role: "user", ContentBlocks: []provider.ContentBlock{
+		{Role: "user", ContentBlocks: []llmtypes.ContentBlock{
 			{Type: "tool_result", ToolUseID: "call-2", Content: "content after edit"},
 		}},
 	}
@@ -189,11 +189,11 @@ func TestCanonicalizeToolInput_StableForNestedMaps(t *testing.T) {
 // TestStageDedupeToolResults_NoDuplicates verifies the stage is a no-op
 // when every tool invocation is unique.
 func TestStageDedupeToolResults_NoDuplicates(t *testing.T) {
-	msgs := []provider.ChatMessage{
-		{Role: "assistant", ContentBlocks: []provider.ContentBlock{
+	msgs := []llmtypes.ChatMessage{
+		{Role: "assistant", ContentBlocks: []llmtypes.ContentBlock{
 			{Type: "tool_use", ID: "c1", Name: "dev_read", Input: &map[string]any{"path": "/a"}},
 		}},
-		{Role: "assistant", ContentBlocks: []provider.ContentBlock{
+		{Role: "assistant", ContentBlocks: []llmtypes.ContentBlock{
 			{Type: "tool_use", ID: "c2", Name: "dev_read", Input: &map[string]any{"path": "/b"}},
 		}},
 	}
@@ -262,7 +262,7 @@ func TestCompactionPipeline_dropsEnrichment(t *testing.T) {
 	// Small window to force compaction.
 	cw := NewContextWindow(2000, nil) // budget = 1600 tokens
 
-	cw.SetContent(SlotSystem, strings.Repeat("x", 400))  // 100 tokens
+	cw.SetContent(SlotSystem, strings.Repeat("x", 400))   // 100 tokens
 	cw.SetContent(SlotContext, strings.Repeat("x", 2000)) // 500 tokens of enrichment
 
 	msgs := makeMessages(6, 200) // 6 messages × 200 tokens = 1200 tokens
@@ -331,18 +331,18 @@ func TestStageStripToolBlocks(t *testing.T) {
 	cw := NewContextWindow(100_000, nil)
 
 	emptyInput := map[string]any{}
-	msgs := []provider.ChatMessage{
+	msgs := []llmtypes.ChatMessage{
 		{Role: "user", Content: "do something"},
 		{
 			Role: "assistant",
-			ContentBlocks: []provider.ContentBlock{
+			ContentBlocks: []llmtypes.ContentBlock{
 				{Type: "text", Text: "Let me help."},
 				{Type: "tool_use", ID: "t1", Name: "read", Input: &emptyInput},
 			},
 		},
 		{
 			Role: "user",
-			ContentBlocks: []provider.ContentBlock{
+			ContentBlocks: []llmtypes.ContentBlock{
 				{Type: "tool_result", ToolUseID: "t1", Content: strings.Repeat("x", 400)},
 			},
 		},
@@ -408,9 +408,9 @@ func (m *mockStashWriter) WriteHandoffStash(ctx context.Context, sessionID, stas
 
 func TestCompactionPipeline_WritesHandoffStash(t *testing.T) {
 	// Build a tiny window that forces compaction.
-	cw := NewContextWindow(500, nil) // budget = 400 tokens
+	cw := NewContextWindow(500, nil)                   // budget = 400 tokens
 	cw.SetContent(SlotSystem, strings.Repeat("x", 40)) // 10 tokens
-	msgs := makeMessages(10, 50)                        // 10 msgs × 50 tokens = 500 tokens → over budget
+	msgs := makeMessages(10, 50)                       // 10 msgs × 50 tokens = 500 tokens → over budget
 	cw.SetContent(SlotConversation, serializeMessages(msgs, DefaultEstimator{}))
 
 	writer := &mockStashWriter{}
@@ -607,13 +607,13 @@ func TestCompactionPipeline_eventEmission(t *testing.T) {
 	eventWriter := &mockCompactionEventWriter{}
 
 	p := &CompactionPipeline{
-		Window:                   cw,
-		Estimator:                DefaultEstimator{},
-		Summarizer:               &mockSummarizer{},
-		Mode:                     CompactionModeCode,
-		ConversationMessages:     msgs,
-		SessionID:                "emit-test-sess",
-		CompactionEventWriter:    eventWriter,
+		Window:                cw,
+		Estimator:             DefaultEstimator{},
+		Summarizer:            &mockSummarizer{},
+		Mode:                  CompactionModeCode,
+		ConversationMessages:  msgs,
+		SessionID:             "emit-test-sess",
+		CompactionEventWriter: eventWriter,
 	}
 
 	// Use RunForce to guarantee stages apply

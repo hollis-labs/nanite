@@ -6,7 +6,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/hollis-labs/go-providers/provider"
+	llmtypes "github.com/hollis-labs/go-llm-types"
 	"github.com/hollis-labs/nanite/internal/store"
 )
 
@@ -61,20 +61,20 @@ type ToolPartition struct {
 	// schemas. Always preserves the input order so callers can replace
 	// `tools = essential` without disrupting downstream ordering
 	// invariants.
-	Essential []provider.ToolDefinition
+	Essential []llmtypes.ToolDefinition
 	// Lazy is the subset announced via the LoadHint pointer. The agent
 	// reaches for them via request_tools.
-	Lazy []provider.ToolDefinition
+	Lazy []llmtypes.ToolDefinition
 }
 
 // PartitionTools splits an agent's tool universe into Essential and Lazy
 // sets per the G-HOT-SWAP-DEAD locked decisions:
 //
-//   1. Mode-explicit (top priority): tool_overrides.allow names.
-//   2. Recently-used: invoked in the last RecentToolWindow assistant turns.
-//   3. Mode-pattern: tool_overrides.allow_patterns matches.
-//   4. Hysteresis: pinned for ToolHysteresisFloor turns post-promotion.
-//   5. Filler: remaining input tools, in input order.
+//  1. Mode-explicit (top priority): tool_overrides.allow names.
+//  2. Recently-used: invoked in the last RecentToolWindow assistant turns.
+//  3. Mode-pattern: tool_overrides.allow_patterns matches.
+//  4. Hysteresis: pinned for ToolHysteresisFloor turns post-promotion.
+//  5. Filler: remaining input tools, in input order.
 //
 // All input tools that don't make the cut after the cap is applied move
 // into Lazy. Meta-tools (request_tools, fetch_tool_result, …) are
@@ -89,7 +89,7 @@ type ToolPartition struct {
 //
 // Returns the partition plus the new state to persist for the next turn.
 func PartitionTools(
-	tools []provider.ToolDefinition,
+	tools []llmtypes.ToolDefinition,
 	modeSpec store.ToolOverrideSpec,
 	recentNames []string,
 	prev ToolPartitionState,
@@ -120,7 +120,7 @@ func PartitionTools(
 	// The score determines trim order when overflow occurs.
 	type scored struct {
 		idx   int
-		def   provider.ToolDefinition
+		def   llmtypes.ToolDefinition
 		score int
 		// hyst indicates the tool is hysteresis-pinned (must stay essential
 		// regardless of whether other rules re-elected it this turn).
@@ -211,8 +211,8 @@ func PartitionTools(
 	}
 
 	// Materialize Essential and Lazy in input order.
-	essential := make([]provider.ToolDefinition, 0, count)
-	lazy := make([]provider.ToolDefinition, 0, len(tools)-count)
+	essential := make([]llmtypes.ToolDefinition, 0, count)
+	lazy := make([]llmtypes.ToolDefinition, 0, len(tools)-count)
 	for i, t := range tools {
 		if essentialMask[i] {
 			essential = append(essential, t)
@@ -246,7 +246,7 @@ func PartitionTools(
 //
 // Ignores user / tool_result messages. Returns empty when no tool_use
 // blocks are found within the window.
-func RecentlyUsedToolNames(msgs []provider.ChatMessage, n int) []string {
+func RecentlyUsedToolNames(msgs []llmtypes.ChatMessage, n int) []string {
 	if n <= 0 || len(msgs) == 0 {
 		return nil
 	}
@@ -290,7 +290,7 @@ func RecentlyUsedToolNames(msgs []provider.ChatMessage, n int) []string {
 // Names are emitted in input order (which mirrors broker ranking) so
 // the agent sees the most-relevant lazy tools first. No descriptions —
 // schemas are paid for via request_tools.
-func RenderToolLazyHint(lazy []provider.ToolDefinition) string {
+func RenderToolLazyHint(lazy []llmtypes.ToolDefinition) string {
 	if len(lazy) == 0 {
 		return ""
 	}

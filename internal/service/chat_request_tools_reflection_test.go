@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/hollis-labs/go-providers/provider"
+	llmtypes "github.com/hollis-labs/go-llm-types"
 	"github.com/hollis-labs/nanite/internal/chat"
 	"github.com/hollis-labs/nanite/internal/store"
 )
@@ -59,7 +59,7 @@ func TestHandleRequestTools_ReflectionThenHalt(t *testing.T) {
 	// one tool_call + one tool_result per request_tools invocation.
 	ch := make(chan chat.StreamEvent, 8)
 
-	tu := provider.ToolUseBlock{
+	tu := llmtypes.ToolUseBlock{
 		ID:   "call_1",
 		Name: "request_tools",
 		Input: map[string]any{
@@ -74,7 +74,7 @@ func TestHandleRequestTools_ReflectionThenHalt(t *testing.T) {
 		&consecutiveEmpty, &totalCalls, maxCalls,
 		nil, nil,
 		sessionID, &reflectionFired,
-		"", // inspectorTurnID — inspector not wired in this test
+		"",                       // inspectorTurnID — inspector not wired in this test
 		store.ToolOverrideSpec{}, // F1 — no overrides for this test
 	)
 	if len(resultBlocks) != 1 || len(refs) != 1 {
@@ -130,7 +130,7 @@ func TestHandleRequestTools_LogsLoadedOutcome(t *testing.T) {
 	sessionID := "s2"
 
 	ch := make(chan chat.StreamEvent, 8)
-	tu := provider.ToolUseBlock{
+	tu := llmtypes.ToolUseBlock{
 		ID:   "call_x",
 		Name: "request_tools",
 		Input: map[string]any{

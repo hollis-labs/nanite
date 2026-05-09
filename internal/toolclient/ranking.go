@@ -7,7 +7,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/hollis-labs/go-providers/provider"
+	llmtypes "github.com/hollis-labs/go-llm-types"
 	"github.com/hollis-labs/go-toolbroker/broker"
 )
 
@@ -33,22 +33,22 @@ import (
 // rank — better to load one extra description than to make the LLM call
 // request_tools again.
 type RankingSignals struct {
-	Skills        []ToolPreferenceSkill
-	MemoryHits    []ToolPatternHit
-	KeywordTools  []provider.ToolDefinition // pre-scored by SelectByIntent
-	BrokerResult  []broker.ToolDefinition   // raw broker.SelectTools result
+	Skills       []ToolPreferenceSkill
+	MemoryHits   []ToolPatternHit
+	KeywordTools []llmtypes.ToolDefinition // pre-scored by SelectByIntent
+	BrokerResult []broker.ToolDefinition   // raw broker.SelectTools result
 }
 
 // ScoredTool is a tool with its aggregated rank score and the per-signal
 // breakdown. The breakdown is preserved for diagnostics: when an operator
 // asks "why did the broker pick X?", we can answer.
 type ScoredTool struct {
-	Tool          broker.ToolDefinition
-	Score         int
-	SkillScore    int
-	MemoryScore   int
-	KeywordScore  int
-	SkillSources  []string // skill file paths that contributed
+	Tool         broker.ToolDefinition
+	Score        int
+	SkillScore   int
+	MemoryScore  int
+	KeywordScore int
+	SkillSources []string // skill file paths that contributed
 }
 
 // RankTools combines the ranking signals into a single ordered slice of

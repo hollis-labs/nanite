@@ -11,7 +11,7 @@ import (
 	"time"
 
 	agentsessions "github.com/hollis-labs/go-agent-sessions/agentsessions"
-	"github.com/hollis-labs/go-providers/provider"
+	llmtypes "github.com/hollis-labs/go-llm-types"
 	ctxpkg "github.com/hollis-labs/nanite/internal/context"
 	"github.com/hollis-labs/nanite/internal/fsutil"
 	runtimeagent "github.com/hollis-labs/nanite/internal/runtime/agent"
@@ -53,7 +53,7 @@ func (s *chatServiceImpl) driveBootSession(
 	slotResult *SlotAssemblyResult,
 	userContent string,
 	iteration int,
-) (<-chan provider.StreamEvent, error) {
+) (<-chan llmtypes.StreamEvent, error) {
 	if s.agentDeps == nil || s.agentEventBridge == nil {
 		return nil, errors.New("driveBootSession: agent runtime not wired (AgentDeps / AgentEventBridge nil)")
 	}
@@ -65,7 +65,7 @@ func (s *chatServiceImpl) driveBootSession(
 		// path. Surface a closed chan so the outer harness exits.
 		slog.Warn("driveBootSession: iteration > 0 for CLI session — returning closed chan",
 			"session_id", sessionID, "iter", iteration)
-		closed := make(chan provider.StreamEvent)
+		closed := make(chan llmtypes.StreamEvent)
 		close(closed)
 		return closed, nil
 	}
@@ -136,7 +136,7 @@ func (s *chatServiceImpl) driveBootSession(
 	// 5. Bind the per-turn router. The bridge writes runtime events into
 	// turnCh until Done / Error flow through (close-once via the bridge)
 	// or until the watcher goroutine below clears the router on ctx cancel.
-	turnCh := make(chan provider.StreamEvent, 64)
+	turnCh := make(chan llmtypes.StreamEvent, 64)
 	s.agentEventBridge.SetPerSessionRouter(sessionID, turnCh)
 
 	go func() {

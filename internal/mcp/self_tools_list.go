@@ -6,7 +6,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/hollis-labs/go-providers/provider"
+	llmtypes "github.com/hollis-labs/go-llm-types"
 )
 
 // naniteToolListDefinition is the cheap discovery primitive (SP6 —
@@ -76,7 +76,7 @@ type ToolInventoryLookup interface {
 	// its elements are caller-owned; the implementation is expected to
 	// return a fresh slice on each call so the caller can mutate it
 	// without racing the manager.
-	GetAllToolsUnfiltered() []provider.ToolDefinition
+	GetAllToolsUnfiltered() []llmtypes.ToolDefinition
 }
 
 // summaryMaxBytes caps the per-tool summary length so the unfiltered

@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/hollis-labs/go-providers/provider"
+	llmtypes "github.com/hollis-labs/go-llm-types"
 	"github.com/hollis-labs/nanite/internal/chat"
 )
 
@@ -266,8 +266,8 @@ func TestShouldDirectReturnSubagentLiteral(t *testing.T) {
 	}
 }
 
-func chatTool(name string) provider.ToolUseBlock {
-	return provider.ToolUseBlock{Name: name}
+func chatTool(name string) llmtypes.ToolUseBlock {
+	return llmtypes.ToolUseBlock{Name: name}
 }
 
 func TestLoopState_ShouldStop_RetryBudget(t *testing.T) {
@@ -461,9 +461,9 @@ func TestToolMetaInfo_ConcurrencySafe(t *testing.T) {
 	svc := &toolServiceImpl{}
 
 	tests := []struct {
-		name       string
-		tool       string
-		wantSafe   bool
+		name     string
+		tool     string
+		wantSafe bool
 	}{
 		// Uniform agent-facing names per ADR-002 — no `mcp__server__` prefix.
 		{"read tool", "dev_read", true},

@@ -10,7 +10,7 @@ import (
 	"encoding/json"
 
 	agentmux "github.com/hollis-labs/go-agentmux-client"
-	"github.com/hollis-labs/go-providers/provider"
+	llmtypes "github.com/hollis-labs/go-llm-types"
 	"github.com/hollis-labs/nanite/internal/dispatch"
 )
 
@@ -107,7 +107,7 @@ func WithCallerCtx(ctx context.Context, _, _ string) context.Context { return ct
 
 // ToolDefinitions returns an empty slice in non-devmode builds.
 // Production tool surface contains no mux_* tools.
-func ToolDefinitions() []provider.ToolDefinition { return []provider.ToolDefinition{} }
+func ToolDefinitions() []llmtypes.ToolDefinition { return []llmtypes.ToolDefinition{} }
 
 // Client returns nil in non-devmode builds. The return type matches the
 // devmode signature so call sites in build-tagged helpers compile cleanly.

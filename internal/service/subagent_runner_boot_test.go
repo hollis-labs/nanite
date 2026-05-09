@@ -7,6 +7,7 @@ import (
 	"sync"
 	"testing"
 
+	llmtypes "github.com/hollis-labs/go-llm-types"
 	"github.com/hollis-labs/go-providers/provider"
 	runtimeagent "github.com/hollis-labs/nanite/internal/runtime/agent"
 	"github.com/hollis-labs/nanite/internal/store"
@@ -16,10 +17,10 @@ import (
 // --- drainBootSession unit tests ---
 
 func TestDrainBootSession_DeltasConcatenateIntoSummary(t *testing.T) {
-	ch := make(chan provider.StreamEvent, 8)
-	ch <- provider.StreamEvent{Type: provider.EventDelta, Content: "Hello "}
-	ch <- provider.StreamEvent{Type: provider.EventDelta, Content: "world"}
-	ch <- provider.StreamEvent{Type: provider.EventDone}
+	ch := make(chan llmtypes.StreamEvent, 8)
+	ch <- llmtypes.StreamEvent{Type: llmtypes.EventDelta, Content: "Hello "}
+	ch <- llmtypes.StreamEvent{Type: llmtypes.EventDelta, Content: "world"}
+	ch <- llmtypes.StreamEvent{Type: llmtypes.EventDone}
 	close(ch)
 
 	summary, envelope, err := drainBootSession(ch)
@@ -35,10 +36,10 @@ func TestDrainBootSession_DeltasConcatenateIntoSummary(t *testing.T) {
 }
 
 func TestDrainBootSession_DoneTerminatesEarly(t *testing.T) {
-	ch := make(chan provider.StreamEvent, 8)
-	ch <- provider.StreamEvent{Type: provider.EventDelta, Content: "first"}
-	ch <- provider.StreamEvent{Type: provider.EventDone}
-	ch <- provider.StreamEvent{Type: provider.EventDelta, Content: "after-done should not be read"}
+	ch := make(chan llmtypes.StreamEvent, 8)
+	ch <- llmtypes.StreamEvent{Type: llmtypes.EventDelta, Content: "first"}
+	ch <- llmtypes.StreamEvent{Type: llmtypes.EventDone}
+	ch <- llmtypes.StreamEvent{Type: llmtypes.EventDelta, Content: "after-done should not be read"}
 	close(ch)
 
 	summary, _, err := drainBootSession(ch)
@@ -51,9 +52,9 @@ func TestDrainBootSession_DoneTerminatesEarly(t *testing.T) {
 }
 
 func TestDrainBootSession_ErrorEventTerminates(t *testing.T) {
-	ch := make(chan provider.StreamEvent, 8)
-	ch <- provider.StreamEvent{Type: provider.EventDelta, Content: "partial"}
-	ch <- provider.StreamEvent{Type: provider.EventError, Error: "runtime exploded"}
+	ch := make(chan llmtypes.StreamEvent, 8)
+	ch <- llmtypes.StreamEvent{Type: llmtypes.EventDelta, Content: "partial"}
+	ch <- llmtypes.StreamEvent{Type: llmtypes.EventError, Error: "runtime exploded"}
 	close(ch)
 
 	_, _, err := drainBootSession(ch)
@@ -69,8 +70,8 @@ func TestDrainBootSession_ErrorEventTerminates(t *testing.T) {
 }
 
 func TestDrainBootSession_ChannelCloseWithoutDoneIsCleanDrain(t *testing.T) {
-	ch := make(chan provider.StreamEvent, 4)
-	ch <- provider.StreamEvent{Type: provider.EventDelta, Content: "partial"}
+	ch := make(chan llmtypes.StreamEvent, 4)
+	ch <- llmtypes.StreamEvent{Type: llmtypes.EventDelta, Content: "partial"}
 	close(ch)
 
 	summary, _, err := drainBootSession(ch)
@@ -83,12 +84,12 @@ func TestDrainBootSession_ChannelCloseWithoutDoneIsCleanDrain(t *testing.T) {
 }
 
 func TestDrainBootSession_IgnoresOtherEventTypes(t *testing.T) {
-	ch := make(chan provider.StreamEvent, 8)
-	ch <- provider.StreamEvent{Type: provider.EventToolUse}
-	ch <- provider.StreamEvent{Type: provider.EventUsage}
-	ch <- provider.StreamEvent{Type: provider.EventSessionID}
-	ch <- provider.StreamEvent{Type: provider.EventDelta, Content: "real text"}
-	ch <- provider.StreamEvent{Type: provider.EventDone}
+	ch := make(chan llmtypes.StreamEvent, 8)
+	ch <- llmtypes.StreamEvent{Type: llmtypes.EventToolUse}
+	ch <- llmtypes.StreamEvent{Type: llmtypes.EventUsage}
+	ch <- llmtypes.StreamEvent{Type: llmtypes.EventSessionID}
+	ch <- llmtypes.StreamEvent{Type: llmtypes.EventDelta, Content: "real text"}
+	ch <- llmtypes.StreamEvent{Type: llmtypes.EventDone}
 	close(ch)
 
 	summary, _, err := drainBootSession(ch)
@@ -106,15 +107,15 @@ func TestDrainBootSession_IgnoresOtherEventTypes(t *testing.T) {
 // runtime events without spinning up a real agentEventBridge.
 type fakeBridge struct {
 	mu      sync.Mutex
-	bound   map[string]chan provider.StreamEvent
+	bound   map[string]chan llmtypes.StreamEvent
 	unbound []string
 }
 
 func newFakeBridge() *fakeBridge {
-	return &fakeBridge{bound: make(map[string]chan provider.StreamEvent)}
+	return &fakeBridge{bound: make(map[string]chan llmtypes.StreamEvent)}
 }
 
-func (b *fakeBridge) SetPerSessionRouter(sessionID string, ch chan provider.StreamEvent) {
+func (b *fakeBridge) SetPerSessionRouter(sessionID string, ch chan llmtypes.StreamEvent) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	if ch == nil {
@@ -125,7 +126,7 @@ func (b *fakeBridge) SetPerSessionRouter(sessionID string, ch chan provider.Stre
 	b.bound[sessionID] = ch
 }
 
-func (b *fakeBridge) chanFor(sessionID string) chan provider.StreamEvent {
+func (b *fakeBridge) chanFor(sessionID string) chan llmtypes.StreamEvent {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	return b.bound[sessionID]
@@ -187,7 +188,7 @@ func TestBootRunner_HTTPProvider_DelegatesToLegacy(t *testing.T) {
 		ProviderAdapter: func(name string) provider.CLIAdapter { return nil }, // HTTP-only
 	}
 	r := &BootRunner{
-		deps:   deps,
+		deps: deps,
 		agents: &stubAgentReaderForRunner{agents: map[string]*store.AgentProfile{
 			"role-http": {ID: "ag-http", DefaultProvider: "anthropic"},
 		}},
@@ -219,7 +220,7 @@ func TestBootRunner_HTTPProvider_NoLegacyErrors(t *testing.T) {
 		ProviderAdapter: func(name string) provider.CLIAdapter { return nil },
 	}
 	r := &BootRunner{
-		deps:   deps,
+		deps: deps,
 		agents: &stubAgentReaderForRunner{agents: map[string]*store.AgentProfile{
 			"role-http": {ID: "ag-http", DefaultProvider: "anthropic"},
 		}},
@@ -241,10 +242,10 @@ type fakeCLIAdapter struct {
 	name string
 }
 
-func (f *fakeCLIAdapter) Name() string                                          { return f.name }
-func (f *fakeCLIAdapter) BuildArgs(_, _, _ string) []string                     { return nil }
-func (f *fakeCLIAdapter) ParseLine(_ []byte) ([]provider.StreamEvent, error)    { return nil, nil }
-func (f *fakeCLIAdapter) Detect() (string, bool)                                { return "", true }
+func (f *fakeCLIAdapter) Name() string                                       { return f.name }
+func (f *fakeCLIAdapter) BuildArgs(_, _, _ string) []string                  { return nil }
+func (f *fakeCLIAdapter) ParseLine(_ []byte) ([]llmtypes.StreamEvent, error) { return nil, nil }
+func (f *fakeCLIAdapter) Detect() (string, bool)                             { return "", true }
 
 // TestBootRunner_CLIProvider_BootsAndDrains exercises the happy path:
 // canBoot true → createChildSession → persistChild → SetPerSessionRouter →
@@ -271,9 +272,9 @@ func TestBootRunner_CLIProvider_BootsAndDrains(t *testing.T) {
 			if ch == nil {
 				return
 			}
-			ch <- provider.StreamEvent{Type: provider.EventDelta, Content: "Project X has "}
-			ch <- provider.StreamEvent{Type: provider.EventDelta, Content: "3 open tasks."}
-			ch <- provider.StreamEvent{Type: provider.EventDone}
+			ch <- llmtypes.StreamEvent{Type: llmtypes.EventDelta, Content: "Project X has "}
+			ch <- llmtypes.StreamEvent{Type: llmtypes.EventDelta, Content: "3 open tasks."}
+			ch <- llmtypes.StreamEvent{Type: llmtypes.EventDone}
 		}()
 		// Return a Session shell. deps left nil → Stop returns
 		// "session not initialized" which BootRunner swallows in defer.
@@ -395,7 +396,7 @@ func TestBootRunner_CLIProvider_EmptySummaryFallback(t *testing.T) {
 		go func() {
 			ch := bridge.chanFor(opts.SessionID)
 			if ch != nil {
-				ch <- provider.StreamEvent{Type: provider.EventDone}
+				ch <- llmtypes.StreamEvent{Type: llmtypes.EventDone}
 			}
 		}()
 		return &runtimeagent.Session{ID: opts.SessionID}, nil
@@ -479,7 +480,7 @@ func TestBootRunner_ProviderOverride_RoutesToCLIPath(t *testing.T) {
 		go func() {
 			ch := bridge.chanFor(opts.SessionID)
 			if ch != nil {
-				ch <- provider.StreamEvent{Type: provider.EventDone}
+				ch <- llmtypes.StreamEvent{Type: llmtypes.EventDone}
 			}
 		}()
 		return &runtimeagent.Session{ID: opts.SessionID}, nil

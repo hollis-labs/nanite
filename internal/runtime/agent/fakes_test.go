@@ -4,7 +4,7 @@ import (
 	"errors"
 	"sync"
 
-	"github.com/hollis-labs/go-providers/provider"
+	llmtypes "github.com/hollis-labs/go-llm-types"
 	"github.com/hollis-labs/nanite/internal/store"
 )
 
@@ -101,7 +101,8 @@ func (f *fakeAdapter) Name() string { return f.name }
 func (f *fakeAdapter) BuildArgs(prompt, system, sessID string) []string {
 	return []string{"--prompt", prompt}
 }
-func (f *fakeAdapter) ParseLine(line []byte) ([]provider.StreamEvent, error) { return nil, nil }
+func (f *fakeAdapter) ParseLine(line []byte) ([]llmtypes.StreamEvent, error) { return nil, nil }
+
 // Detect returns /usr/bin/true on darwin/linux so AutoFireFirstTurn modes
 // (Subagent / Background / OneShot) can run runner.Run end-to-end without
 // hitting fork/exec failures. /usr/bin/true exits 0 immediately.

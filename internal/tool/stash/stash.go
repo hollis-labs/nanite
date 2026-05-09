@@ -17,7 +17,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/hollis-labs/go-providers/provider"
+	llmtypes "github.com/hollis-labs/go-llm-types"
 )
 
 // CategoryOther is the fallback category used when a Categorizer returns empty
@@ -44,7 +44,7 @@ func (f CategorizerFunc) Categorize(toolName string) string { return f(toolName)
 type Stash struct {
 	SessionID     string
 	SelectionHash string
-	FullDefs      map[string]provider.ToolDefinition // keyed by tool name
+	FullDefs      map[string]llmtypes.ToolDefinition // keyed by tool name
 	Categories    map[string][]string                // category → []tool names (sorted)
 	CategoryOf    map[string]string                  // tool name → category
 	SummaryText   string                             // D5 pointer-summary
@@ -63,7 +63,7 @@ func (s *Stash) CategoriesList() []string {
 
 // DefsForCategories returns the full definitions for tools in the given
 // categories, preserving name order. Unknown categories contribute no tools.
-func (s *Stash) DefsForCategories(cats []string) []provider.ToolDefinition {
+func (s *Stash) DefsForCategories(cats []string) []llmtypes.ToolDefinition {
 	wanted := make(map[string]struct{}, len(cats))
 	for _, c := range cats {
 		wanted[c] = struct{}{}
@@ -73,7 +73,7 @@ func (s *Stash) DefsForCategories(cats []string) []provider.ToolDefinition {
 		names = append(names, s.Categories[c]...)
 	}
 	sort.Strings(names)
-	defs := make([]provider.ToolDefinition, 0, len(names))
+	defs := make([]llmtypes.ToolDefinition, 0, len(names))
 	for _, n := range names {
 		if d, ok := s.FullDefs[n]; ok {
 			defs = append(defs, d)
@@ -106,7 +106,7 @@ func NewManager(cat Categorizer) *Manager {
 // Get returns the current stash for a session, or nil if there is none or the
 // selection-hash has drifted. Callers that need guaranteed freshness should
 // prefer GetOrBuild.
-func (m *Manager) Get(sessionID string, selected []provider.ToolDefinition) *Stash {
+func (m *Manager) Get(sessionID string, selected []llmtypes.ToolDefinition) *Stash {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	s, ok := m.byID[sessionID]
@@ -121,7 +121,7 @@ func (m *Manager) Get(sessionID string, selected []provider.ToolDefinition) *Sta
 
 // GetOrBuild returns the session's current stash, rebuilding it if missing or
 // stale. This is the common path from AssembleSlots.
-func (m *Manager) GetOrBuild(sessionID string, selected []provider.ToolDefinition) *Stash {
+func (m *Manager) GetOrBuild(sessionID string, selected []llmtypes.ToolDefinition) *Stash {
 	if s := m.Get(sessionID, selected); s != nil {
 		return s
 	}
@@ -130,7 +130,7 @@ func (m *Manager) GetOrBuild(sessionID string, selected []provider.ToolDefinitio
 
 // Build constructs a fresh stash for the session and stores it, replacing any
 // prior entry.
-func (m *Manager) Build(sessionID string, selected []provider.ToolDefinition) *Stash {
+func (m *Manager) Build(sessionID string, selected []llmtypes.ToolDefinition) *Stash {
 	s := m.buildStash(sessionID, selected)
 	m.mu.Lock()
 	m.byID[sessionID] = s
@@ -145,8 +145,8 @@ func (m *Manager) Invalidate(sessionID string) {
 	m.mu.Unlock()
 }
 
-func (m *Manager) buildStash(sessionID string, selected []provider.ToolDefinition) *Stash {
-	fullDefs := make(map[string]provider.ToolDefinition, len(selected))
+func (m *Manager) buildStash(sessionID string, selected []llmtypes.ToolDefinition) *Stash {
+	fullDefs := make(map[string]llmtypes.ToolDefinition, len(selected))
 	categoryOf := make(map[string]string, len(selected))
 	categories := make(map[string][]string)
 
@@ -177,7 +177,7 @@ func (m *Manager) buildStash(sessionID string, selected []provider.ToolDefinitio
 // SelectionHash returns a deterministic hash of the tool names in selected.
 // Order-independent. Used to detect when the broker's output has changed for
 // a session, triggering a stash rebuild.
-func SelectionHash(selected []provider.ToolDefinition) string {
+func SelectionHash(selected []llmtypes.ToolDefinition) string {
 	if len(selected) == 0 {
 		return "empty"
 	}
@@ -192,7 +192,7 @@ func SelectionHash(selected []provider.ToolDefinition) string {
 
 // buildSummary renders the D5 pointer-summary text. Target < 300 tokens
 // regardless of tool count; grows O(category-count), not O(tool-count).
-func buildSummary(selected []provider.ToolDefinition, categories map[string][]string) string {
+func buildSummary(selected []llmtypes.ToolDefinition, categories map[string][]string) string {
 	if len(selected) == 0 {
 		return ""
 	}

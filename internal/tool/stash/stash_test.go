@@ -5,11 +5,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/hollis-labs/go-providers/provider"
+	llmtypes "github.com/hollis-labs/go-llm-types"
 )
 
-func def(name string) provider.ToolDefinition {
-	return provider.ToolDefinition{Name: name, Description: "desc-" + name}
+func def(name string) llmtypes.ToolDefinition {
+	return llmtypes.ToolDefinition{Name: name, Description: "desc-" + name}
 }
 
 // staticCategorizer categorizes by a fixed map; unmatched names return "".
@@ -19,12 +19,12 @@ func (s staticCategorizer) Categorize(name string) string { return s[name] }
 
 func newTestManager() *Manager {
 	cat := staticCategorizer{
-		"search_notes":  "search",
-		"search_web":    "search",
-		"shell":         "code-exec",
-		"read_file":     "core-io",
-		"write_file":    "core-io",
-		"http_fetch":    "http",
+		"search_notes": "search",
+		"search_web":   "search",
+		"shell":        "code-exec",
+		"read_file":    "core-io",
+		"write_file":   "core-io",
+		"http_fetch":   "http",
 	}
 	m := NewManager(cat)
 	m.now = func() time.Time { return time.Unix(1700000000, 0).UTC() }
@@ -32,16 +32,16 @@ func newTestManager() *Manager {
 }
 
 func TestSelectionHash_OrderIndependent(t *testing.T) {
-	a := []provider.ToolDefinition{def("b"), def("a"), def("c")}
-	b := []provider.ToolDefinition{def("c"), def("a"), def("b")}
+	a := []llmtypes.ToolDefinition{def("b"), def("a"), def("c")}
+	b := []llmtypes.ToolDefinition{def("c"), def("a"), def("b")}
 	if SelectionHash(a) != SelectionHash(b) {
 		t.Fatalf("hash should be order-independent: %s vs %s", SelectionHash(a), SelectionHash(b))
 	}
 }
 
 func TestSelectionHash_DifferentSets(t *testing.T) {
-	a := []provider.ToolDefinition{def("a"), def("b")}
-	b := []provider.ToolDefinition{def("a"), def("c")}
+	a := []llmtypes.ToolDefinition{def("a"), def("b")}
+	b := []llmtypes.ToolDefinition{def("a"), def("c")}
 	if SelectionHash(a) == SelectionHash(b) {
 		t.Fatalf("different selections must produce different hashes")
 	}
@@ -55,7 +55,7 @@ func TestSelectionHash_Empty(t *testing.T) {
 
 func TestManager_BuildCategorizesAndStores(t *testing.T) {
 	m := newTestManager()
-	selected := []provider.ToolDefinition{def("shell"), def("read_file"), def("write_file"), def("search_web"), def("mystery_plugin_tool")}
+	selected := []llmtypes.ToolDefinition{def("shell"), def("read_file"), def("write_file"), def("search_web"), def("mystery_plugin_tool")}
 
 	s := m.Build("sess-1", selected)
 
@@ -84,7 +84,7 @@ func TestManager_BuildCategorizesAndStores(t *testing.T) {
 
 func TestManager_GetReturnsNilOnHashMismatch(t *testing.T) {
 	m := newTestManager()
-	initial := []provider.ToolDefinition{def("shell"), def("read_file")}
+	initial := []llmtypes.ToolDefinition{def("shell"), def("read_file")}
 	m.Build("sess-1", initial)
 
 	// Same selection — cache hit.
@@ -93,7 +93,7 @@ func TestManager_GetReturnsNilOnHashMismatch(t *testing.T) {
 	}
 
 	// Different selection — miss.
-	changed := []provider.ToolDefinition{def("shell"), def("write_file")}
+	changed := []llmtypes.ToolDefinition{def("shell"), def("write_file")}
 	if m.Get("sess-1", changed) != nil {
 		t.Fatalf("expected cache miss on selection change")
 	}
@@ -101,10 +101,10 @@ func TestManager_GetReturnsNilOnHashMismatch(t *testing.T) {
 
 func TestManager_GetOrBuildRebuildsOnHashMismatch(t *testing.T) {
 	m := newTestManager()
-	initial := []provider.ToolDefinition{def("shell")}
+	initial := []llmtypes.ToolDefinition{def("shell")}
 	first := m.GetOrBuild("sess-1", initial)
 
-	changed := []provider.ToolDefinition{def("shell"), def("read_file")}
+	changed := []llmtypes.ToolDefinition{def("shell"), def("read_file")}
 	second := m.GetOrBuild("sess-1", changed)
 
 	if first.SelectionHash == second.SelectionHash {
@@ -121,7 +121,7 @@ func TestManager_GetOrBuildRebuildsOnHashMismatch(t *testing.T) {
 
 func TestManager_GetOrBuildReusesOnIdenticalSelection(t *testing.T) {
 	m := newTestManager()
-	selected := []provider.ToolDefinition{def("shell"), def("search_web")}
+	selected := []llmtypes.ToolDefinition{def("shell"), def("search_web")}
 
 	first := m.GetOrBuild("sess-1", selected)
 	second := m.GetOrBuild("sess-1", selected)
@@ -133,7 +133,7 @@ func TestManager_GetOrBuildReusesOnIdenticalSelection(t *testing.T) {
 
 func TestManager_Invalidate(t *testing.T) {
 	m := newTestManager()
-	selected := []provider.ToolDefinition{def("shell")}
+	selected := []llmtypes.ToolDefinition{def("shell")}
 	m.Build("sess-1", selected)
 
 	if m.Get("sess-1", selected) == nil {
@@ -147,7 +147,7 @@ func TestManager_Invalidate(t *testing.T) {
 
 func TestSummary_IncludesCategoryCountsAndTotal(t *testing.T) {
 	m := newTestManager()
-	selected := []provider.ToolDefinition{def("shell"), def("read_file"), def("write_file"), def("search_web")}
+	selected := []llmtypes.ToolDefinition{def("shell"), def("read_file"), def("write_file"), def("search_web")}
 	s := m.Build("sess-1", selected)
 
 	if !strings.Contains(s.SummaryText, "[4 tools available — pointer]") {
@@ -175,7 +175,7 @@ func TestSummary_EmptySelection(t *testing.T) {
 func TestSummary_BoundedSize(t *testing.T) {
 	m := newTestManager()
 	// 30 tools across known categories — summary must stay compact.
-	selected := make([]provider.ToolDefinition, 0, 30)
+	selected := make([]llmtypes.ToolDefinition, 0, 30)
 	for i := 0; i < 10; i++ {
 		selected = append(selected, def("shell_"+string(rune('a'+i))))
 	}
@@ -198,7 +198,7 @@ func TestSummary_BoundedSize(t *testing.T) {
 
 func TestDefsForCategories(t *testing.T) {
 	m := newTestManager()
-	selected := []provider.ToolDefinition{def("shell"), def("read_file"), def("write_file"), def("search_web")}
+	selected := []llmtypes.ToolDefinition{def("shell"), def("read_file"), def("write_file"), def("search_web")}
 	s := m.Build("sess-1", selected)
 
 	defs := s.DefsForCategories([]string{"core-io"})
@@ -223,7 +223,7 @@ func TestDefsForCategories(t *testing.T) {
 
 func TestCategoriesList_Sorted(t *testing.T) {
 	m := newTestManager()
-	selected := []provider.ToolDefinition{def("shell"), def("read_file"), def("search_web"), def("http_fetch")}
+	selected := []llmtypes.ToolDefinition{def("shell"), def("read_file"), def("search_web"), def("http_fetch")}
 	s := m.Build("sess-1", selected)
 
 	cats := s.CategoriesList()
@@ -236,7 +236,7 @@ func TestCategoriesList_Sorted(t *testing.T) {
 
 func TestNewManager_NilCategorizerBucketsEverythingToOther(t *testing.T) {
 	m := NewManager(nil)
-	s := m.Build("sess-1", []provider.ToolDefinition{def("anything"), def("else")})
+	s := m.Build("sess-1", []llmtypes.ToolDefinition{def("anything"), def("else")})
 	if s.CategoryOf["anything"] != CategoryOther || s.CategoryOf["else"] != CategoryOther {
 		t.Fatalf("nil categorizer should bucket everything to %q", CategoryOther)
 	}

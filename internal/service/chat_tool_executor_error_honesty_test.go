@@ -27,7 +27,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/hollis-labs/go-providers/provider"
+	llmtypes "github.com/hollis-labs/go-llm-types"
 	"github.com/hollis-labs/nanite/internal/chat"
 )
 
@@ -63,14 +63,14 @@ func runPostProcessForError(
 	t *testing.T,
 	toolName string,
 	errText string,
-) []provider.ContentBlock {
+) []llmtypes.ContentBlock {
 	t.Helper()
 
 	svc := makeErrorHonestyService()
 	ls := newLoopState(chat.AgentConstraints{}, nil, false)
 	ch := make(chan chat.StreamEvent, 32)
 
-	tu := provider.ToolUseBlock{
+	tu := llmtypes.ToolUseBlock{
 		ID:    "tu-error-honesty-1",
 		Name:  toolName,
 		Input: map[string]any{"query": "anything"},
@@ -83,7 +83,7 @@ func runPostProcessForError(
 	}}
 	results := []toolExecResult{{
 		originalIndex: 0,
-		resultBlock: provider.ContentBlock{
+		resultBlock: llmtypes.ContentBlock{
 			Type: "tool_result", ToolUseID: tu.ID,
 			Content: errText, IsError: true,
 		},
@@ -206,7 +206,7 @@ func runPostProcessForErrorReturningRefs(
 	ls := newLoopState(chat.AgentConstraints{}, nil, false)
 	ch := make(chan chat.StreamEvent, 32)
 
-	tu := provider.ToolUseBlock{
+	tu := llmtypes.ToolUseBlock{
 		ID:    "tu-error-honesty-2",
 		Name:  toolName,
 		Input: map[string]any{"query": "anything"},
@@ -218,7 +218,7 @@ func runPostProcessForErrorReturningRefs(
 	}}
 	results := []toolExecResult{{
 		originalIndex: 0,
-		resultBlock: provider.ContentBlock{
+		resultBlock: llmtypes.ContentBlock{
 			Type: "tool_result", ToolUseID: tu.ID,
 			Content: errText, IsError: true,
 		},

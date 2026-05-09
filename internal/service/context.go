@@ -9,9 +9,9 @@ import (
 	"sync"
 	"time"
 
+	llmtypes "github.com/hollis-labs/go-llm-types"
 	"github.com/hollis-labs/nanite/internal/chat"
 	ctxpkg "github.com/hollis-labs/nanite/internal/context"
-	"github.com/hollis-labs/go-providers/provider"
 	"github.com/hollis-labs/nanite/internal/store"
 	"github.com/hollis-labs/nanite/internal/tool/intent"
 	"github.com/hollis-labs/nanite/internal/tool/stash"
@@ -22,7 +22,7 @@ import (
 // context assembly.
 type ContextService interface {
 	// AssembleContext is the legacy path: returns a flat system prompt and messages.
-	AssembleContext(ctx context.Context, session *store.Session, agent *store.AgentProfile, mode *store.AgentMode, workspace *store.Workspace) (systemPrompt string, messages []provider.ChatMessage, err error)
+	AssembleContext(ctx context.Context, session *store.Session, agent *store.AgentProfile, mode *store.AgentMode, workspace *store.Workspace) (systemPrompt string, messages []llmtypes.ChatMessage, err error)
 
 	// AssembleSlots returns slot blocks for provider adapters that can exploit
 	// slot boundaries (e.g., Anthropic cache_control). The tools slice is
@@ -44,7 +44,7 @@ type ContextService interface {
 	// surfaced after S3b's tools-slot output when the caller's
 	// chat.PartitionTools step produced a non-empty lazy set. Empty string
 	// disables the hint append — preserves legacy behavior.
-	AssembleSlots(ctx context.Context, session *store.Session, agent *store.AgentProfile, mode *store.AgentMode, workspace *store.Workspace, tools []provider.ToolDefinition, extraSystemPrefix string, providerWindowSize int, sessionMode *store.Mode, toolsLazyHint string) (*SlotAssemblyResult, error)
+	AssembleSlots(ctx context.Context, session *store.Session, agent *store.AgentProfile, mode *store.AgentMode, workspace *store.Workspace, tools []llmtypes.ToolDefinition, extraSystemPrefix string, providerWindowSize int, sessionMode *store.Mode, toolsLazyHint string) (*SlotAssemblyResult, error)
 
 	PruneAfterTurn(ctx context.Context, sessionID string) error
 }
@@ -54,7 +54,7 @@ type SlotAssemblyResult struct {
 	Blocks          []ctxpkg.SlotBlock
 	Window          *ctxpkg.ContextWindow
 	SystemPrompt    string                 // convenience: content of the system slot
-	Messages        []provider.ChatMessage // convenience: parsed from conversation slot
+	Messages        []llmtypes.ChatMessage // convenience: parsed from conversation slot
 	NeedsCompaction bool
 	// ToolCache describes this turn's tool-slot outcome. Nil when the S3b
 	// tool-cache pipeline is inactive (deps missing or setting disabled).
@@ -89,15 +89,15 @@ func (h HydrationState) String() string {
 // ToolCacheOutcome describes what happened to the Tools slot this turn.
 // Consumed by chat_generate to emit the slot_changed envelope variant (T5).
 type ToolCacheOutcome struct {
-	Prev             HydrationState
-	Next             HydrationState
-	Categories       []string // subset hydrated when Next == StatePartial; empty when StateFull or StatePointer
-	Source           string   // intent.Source*
-	Reasoning        string
-	TokensBefore     int
-	TokensAfter      int
-	SelectionHash    string
-	ClassifierLatMS  int64 // milliseconds spent in the classifier
+	Prev            HydrationState
+	Next            HydrationState
+	Categories      []string // subset hydrated when Next == StatePartial; empty when StateFull or StatePointer
+	Source          string   // intent.Source*
+	Reasoning       string
+	TokensBefore    int
+	TokensAfter     int
+	SelectionHash   string
+	ClassifierLatMS int64 // milliseconds spent in the classifier
 }
 
 // ToolCacheOverrideStore looks up the session's /tools on|off pin. T6
@@ -163,7 +163,7 @@ func NewContextService(cfg ContextServiceConfig) ContextService {
 }
 
 // AssembleContext is the legacy path — delegates directly to ContextClient.
-func (s *contextServiceImpl) AssembleContext(ctx context.Context, session *store.Session, agent *store.AgentProfile, mode *store.AgentMode, workspace *store.Workspace) (string, []provider.ChatMessage, error) {
+func (s *contextServiceImpl) AssembleContext(ctx context.Context, session *store.Session, agent *store.AgentProfile, mode *store.AgentMode, workspace *store.Workspace) (string, []llmtypes.ChatMessage, error) {
 	return s.client.AssembleContext(ctx, session, agent, mode, workspace)
 }
 
@@ -183,7 +183,7 @@ func (s *contextServiceImpl) AssembleContext(ctx context.Context, session *store
 // the G-HOT-SWAP-DEAD layer's pointer at the lazy partition. The caller
 // (chat-service) decides whether the partition is active and renders the
 // hint via chat.RenderToolLazyHint; AssembleSlots only attaches it.
-func (s *contextServiceImpl) AssembleSlots(ctx context.Context, session *store.Session, agent *store.AgentProfile, mode *store.AgentMode, workspace *store.Workspace, tools []provider.ToolDefinition, extraSystemPrefix string, providerWindowSize int, sessionMode *store.Mode, toolsLazyHint string) (*SlotAssemblyResult, error) {
+func (s *contextServiceImpl) AssembleSlots(ctx context.Context, session *store.Session, agent *store.AgentProfile, mode *store.AgentMode, workspace *store.Workspace, tools []llmtypes.ToolDefinition, extraSystemPrefix string, providerWindowSize int, sessionMode *store.Mode, toolsLazyHint string) (*SlotAssemblyResult, error) {
 	sources, err := s.client.AssembleSlotSources(ctx, session, agent, mode, workspace, sessionMode)
 	if err != nil {
 		return nil, err
@@ -276,7 +276,7 @@ func (s *contextServiceImpl) toolCacheActive() bool {
 // buildToolsSlot produces the content for the Tools slot plus (when the S3b
 // pipeline runs) an outcome for the caller to surface in telemetry and the
 // slot_changed envelope.
-func (s *contextServiceImpl) buildToolsSlot(ctx context.Context, session *store.Session, tools []provider.ToolDefinition, msgs []provider.ChatMessage) (string, *ToolCacheOutcome) {
+func (s *contextServiceImpl) buildToolsSlot(ctx context.Context, session *store.Session, tools []llmtypes.ToolDefinition, msgs []llmtypes.ChatMessage) (string, *ToolCacheOutcome) {
 	if !s.toolCacheActive() {
 		return serializeToolsForSlot(tools), nil
 	}
@@ -366,12 +366,12 @@ func (s *contextServiceImpl) buildToolsSlot(ctx context.Context, session *store.
 
 // defsFromStash returns every def in the stash, sorted by category then name —
 // matches the shape renderToolsSlot produces when fully hydrating.
-func defsFromStash(st *stash.Stash) []provider.ToolDefinition {
+func defsFromStash(st *stash.Stash) []llmtypes.ToolDefinition {
 	if st == nil {
 		return nil
 	}
 	cats := st.CategoriesList()
-	out := make([]provider.ToolDefinition, 0, len(st.FullDefs))
+	out := make([]llmtypes.ToolDefinition, 0, len(st.FullDefs))
 	for _, c := range cats {
 		for _, name := range st.Categories[c] {
 			if d, ok := st.FullDefs[name]; ok {
@@ -399,7 +399,7 @@ func renderToolsSlot(st *stash.Stash, r intent.Result) (content string, state Hy
 	picked := r.Categories
 	if len(picked) == 0 || containsAll(picked, allCats) {
 		// Hydrate everything.
-		all := make([]provider.ToolDefinition, 0, len(st.FullDefs))
+		all := make([]llmtypes.ToolDefinition, 0, len(st.FullDefs))
 		for _, c := range allCats {
 			for _, name := range st.Categories[c] {
 				if d, ok := st.FullDefs[name]; ok {
@@ -501,7 +501,7 @@ func (s *contextServiceImpl) storeLastToolCache(sessionID string, st toolCacheSe
 
 // lastUserTurn returns the content of the most recent user-role message, or
 // empty string when there is none.
-func lastUserTurn(msgs []provider.ChatMessage) string {
+func lastUserTurn(msgs []llmtypes.ChatMessage) string {
 	for i := len(msgs) - 1; i >= 0; i-- {
 		if msgs[i].Role == "user" {
 			if msgs[i].Content != "" {
@@ -525,7 +525,7 @@ func lastUserTurn(msgs []provider.ChatMessage) string {
 	return ""
 }
 
-func toolNames(tools []provider.ToolDefinition) []string {
+func toolNames(tools []llmtypes.ToolDefinition) []string {
 	out := make([]string, len(tools))
 	for i, t := range tools {
 		out[i] = t.Name
@@ -546,7 +546,7 @@ var nowFunc = time.Now
 // serializeToolsForSlot stringifies tool definitions into a deterministic JSON
 // blob so the Tools slot has stable cache-key behavior. S3b replaces this with
 // a cache-pointer scheme that doesn't ship full defs in the prompt.
-func serializeToolsForSlot(tools []provider.ToolDefinition) string {
+func serializeToolsForSlot(tools []llmtypes.ToolDefinition) string {
 	if len(tools) == 0 {
 		return ""
 	}
@@ -560,7 +560,7 @@ func serializeToolsForSlot(tools []provider.ToolDefinition) string {
 
 // hasToolBlocks reports whether any conversation message carries tool_use or
 // tool_result blocks; used to set the UsingTools flag on the conversation slot.
-func hasToolBlocks(msgs []provider.ChatMessage) bool {
+func hasToolBlocks(msgs []llmtypes.ChatMessage) bool {
 	for _, m := range msgs {
 		for _, b := range m.ContentBlocks {
 			if b.Type == "tool_use" || b.Type == "tool_result" {
@@ -598,7 +598,7 @@ func (s *contextServiceImpl) PruneAfterTurn(_ context.Context, sessionID string)
 
 // serializeMessagesForSlot converts messages to a string for token estimation
 // in the conversation slot.
-func serializeMessagesForSlot(msgs []provider.ChatMessage) string {
+func serializeMessagesForSlot(msgs []llmtypes.ChatMessage) string {
 	total := 0
 	for _, m := range msgs {
 		total += len(m.Role) + len(m.Content) + 3 // ": " + "\n"

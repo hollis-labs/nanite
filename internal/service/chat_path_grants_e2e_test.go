@@ -28,7 +28,7 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/hollis-labs/go-providers/provider"
+	llmtypes "github.com/hollis-labs/go-llm-types"
 	"github.com/hollis-labs/nanite/internal/chat"
 	"github.com/hollis-labs/nanite/internal/mcp"
 	"github.com/hollis-labs/nanite/internal/permission"
@@ -114,7 +114,7 @@ func TestChat_PathGrants_DevGlobE2E(t *testing.T) {
 	}
 
 	plans := []toolPlan{{
-		tu: provider.ToolUseBlock{
+		tu: llmtypes.ToolUseBlock{
 			ID:    "tu-glob-1",
 			Name:  "dev_glob",
 			Input: map[string]any{"pattern": "*.md", "directory": tmpDir},
@@ -222,7 +222,7 @@ func TestE2E_WorkerInheritsParentGrant(t *testing.T) {
 	}
 
 	plans := []toolPlan{{
-		tu: provider.ToolUseBlock{
+		tu: llmtypes.ToolUseBlock{
 			ID:    "tu-glob-worker",
 			Name:  "dev_glob",
 			Input: map[string]any{"pattern": "*.md", "directory": tmpDir},

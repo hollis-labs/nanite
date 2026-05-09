@@ -3,7 +3,7 @@ package service
 import (
 	"testing"
 
-	"github.com/hollis-labs/go-providers/provider"
+	llmtypes "github.com/hollis-labs/go-llm-types"
 	"github.com/hollis-labs/nanite/internal/store"
 	"github.com/hollis-labs/nanite/internal/toolclient"
 )
@@ -11,7 +11,7 @@ import (
 // TestApplyModeToolOverridesToTools_DenyPath covers the deny-list path on
 // the progressive seed builtins. F1 (CW-20260429-0001).
 func TestApplyModeToolOverridesToTools_DenyPath(t *testing.T) {
-	tools := []provider.ToolDefinition{
+	tools := []llmtypes.ToolDefinition{
 		{Name: "dev_read"},
 		{Name: "dev_bash"},
 		{Name: "context_search"},
@@ -44,7 +44,7 @@ func TestApplyModeToolOverridesToTools_DenyPath(t *testing.T) {
 // always be reachable; mode policy operates one rung up on the regular tool
 // catalog. F1 (CW-20260429-0001).
 func TestApplyModeToolOverridesToTools_DenyMetaToolStaysReachable(t *testing.T) {
-	tools := []provider.ToolDefinition{
+	tools := []llmtypes.ToolDefinition{
 		{Name: "request_tools"},
 		{Name: "dev_read"},
 	}
@@ -64,7 +64,7 @@ func TestApplyModeToolOverridesToTools_DenyMetaToolStaysReachable(t *testing.T) 
 // the second of the two paths called out in the F1 ticket. F1
 // (CW-20260429-0001).
 func TestApplyModeToolOverridesToTools_DenyPattern(t *testing.T) {
-	tools := []provider.ToolDefinition{
+	tools := []llmtypes.ToolDefinition{
 		{Name: "dev_read"},
 		{Name: "dev_bash"},
 		{Name: "dev_write"},
@@ -85,7 +85,7 @@ func TestApplyModeToolOverridesToTools_DenyPattern(t *testing.T) {
 // resolution precedence is preserved end-to-end through the service-layer
 // adapter: explicit Allow beats DenyPattern. F1 (CW-20260429-0001).
 func TestApplyModeToolOverridesToTools_AllowOverridesDenyPattern(t *testing.T) {
-	tools := []provider.ToolDefinition{
+	tools := []llmtypes.ToolDefinition{
 		{Name: "dev_read"},
 		{Name: "dev_bash"},
 		{Name: "dev_write"},
@@ -104,7 +104,7 @@ func TestApplyModeToolOverridesToTools_AllowOverridesDenyPattern(t *testing.T) {
 
 // TestApplyModeToolOverridesToTools_EmptySpecPassthrough is the no-op path.
 func TestApplyModeToolOverridesToTools_EmptySpecPassthrough(t *testing.T) {
-	tools := []provider.ToolDefinition{
+	tools := []llmtypes.ToolDefinition{
 		{Name: "dev_read"},
 		{Name: "context_search"},
 	}

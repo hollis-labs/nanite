@@ -7,7 +7,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/hollis-labs/go-providers/provider"
+	llmtypes "github.com/hollis-labs/go-llm-types"
 	"github.com/hollis-labs/nanite/internal/safego"
 	"github.com/hollis-labs/nanite/internal/store"
 )
@@ -170,13 +170,13 @@ func (a *API) handleAutotitleBookmark(w http.ResponseWriter, r *http.Request) {
 	}
 
 	prompt := "Generate a concise 3-8 word title for this bookmarked message. Respond with ONLY the title, no quotes or punctuation."
-	msgs := []provider.ChatMessage{
+	msgs := []llmtypes.ChatMessage{
 		{Role: "user", Content: msg.Content},
 	}
 
 	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
 	defer cancel()
-	title, err := prov.Complete(ctx, provider.ChatRequest{SystemPrompt: prompt, Messages: msgs, Model: a.Services.UtilityModel})
+	title, err := prov.Complete(ctx, llmtypes.ChatRequest{SystemPrompt: prompt, Messages: msgs, Model: a.Services.UtilityModel})
 	if err != nil {
 		a.errorResp(w, http.StatusInternalServerError, "autotitle failed: "+err.Error())
 		return

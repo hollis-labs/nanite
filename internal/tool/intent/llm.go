@@ -7,7 +7,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/hollis-labs/go-providers/provider"
+	llmcontracts "github.com/hollis-labs/go-llm-contracts"
+	llmtypes "github.com/hollis-labs/go-llm-types"
 )
 
 // DefaultLLMTimeout bounds an LLMClassifier call. See UserSettings.
@@ -20,14 +21,14 @@ const DefaultLLMTimeout = 500 * time.Millisecond
 // (hydrate=true, empty categories → "hydrate all") so the user's request is
 // never stranded by a classifier issue (plan §D9).
 type LLMClassifier struct {
-	provider provider.Provider
+	provider llmcontracts.Provider
 	model    string
 	timeout  time.Duration
 }
 
 // NewLLMClassifier constructs a classifier backed by the given provider+model.
 // Pass 0 for timeout to use DefaultLLMTimeout.
-func NewLLMClassifier(p provider.Provider, model string, timeout time.Duration) *LLMClassifier {
+func NewLLMClassifier(p llmcontracts.Provider, model string, timeout time.Duration) *LLMClassifier {
 	if timeout <= 0 {
 		timeout = DefaultLLMTimeout
 	}
@@ -52,10 +53,10 @@ func (c *LLMClassifier) Classify(ctx context.Context, in Input) (Result, error) 
 	callCtx, cancel := context.WithTimeout(ctx, c.timeout)
 	defer cancel()
 
-	req := provider.ChatRequest{
+	req := llmtypes.ChatRequest{
 		Model:        c.model,
 		SystemPrompt: systemPromptFor(in.AvailableCategories),
-		Messages: []provider.ChatMessage{
+		Messages: []llmtypes.ChatMessage{
 			{Role: "user", Content: in.UserTurn},
 		},
 	}

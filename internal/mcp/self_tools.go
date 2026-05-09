@@ -1,6 +1,8 @@
 package mcp
 
-import "github.com/hollis-labs/go-providers/provider"
+import (
+	llmtypes "github.com/hollis-labs/go-llm-types"
+)
 
 // showEnvelopeTargetDesc and showEnvelopeModeDesc are shared input-schema
 // descriptions for the optional `target` and `mode` fields on
@@ -25,12 +27,12 @@ const (
 )
 
 // SelfToolProviderDefinitions returns all self-service tool definitions
-// in provider.ToolDefinition format, suitable for registering as built-ins.
-func SelfToolProviderDefinitions() []provider.ToolDefinition {
+// in llmtypes.ToolDefinition format, suitable for registering as built-ins.
+func SelfToolProviderDefinitions() []llmtypes.ToolDefinition {
 	tools := selfToolDefinitions()
-	defs := make([]provider.ToolDefinition, len(tools))
+	defs := make([]llmtypes.ToolDefinition, len(tools))
 	for i, t := range tools {
-		defs[i] = provider.ToolDefinition{
+		defs[i] = llmtypes.ToolDefinition{
 			Name:        t.Name,
 			Description: t.Description,
 			InputSchema: t.InputSchema,
@@ -366,12 +368,12 @@ func selfToolDefinitions() []Tool {
 			InputSchema: map[string]any{
 				"type": "object",
 				"properties": map[string]any{
-					"scope":    map[string]any{"type": "string", "enum": []string{"turn", "session", "project"}, "description": "Filter by scope: turn, session, or project. Required to render an interactive card."},
-					"scope_id": map[string]any{"type": "string", "description": "Scope ID (session_id for turn/session; project_id for project). Auto-filled from the current chat session when scope is 'session' and this field is omitted."},
+					"scope":      map[string]any{"type": "string", "enum": []string{"turn", "session", "project"}, "description": "Filter by scope: turn, session, or project. Required to render an interactive card."},
+					"scope_id":   map[string]any{"type": "string", "description": "Scope ID (session_id for turn/session; project_id for project). Auto-filled from the current chat session when scope is 'session' and this field is omitted."},
 					"project_id": map[string]any{"type": "string", "description": "Convenience: filter by project_id directly (matches both project-scoped todos and session/turn todos whose originating session belongs to this project)."},
-					"status":   map[string]any{"type": "string", "description": "Filter by status: pending, in_progress, done, blocked (optional)"},
-					"priority": map[string]any{"type": "string", "description": "Filter by priority: low, medium, high, critical (optional)"},
-					"title":    map[string]any{"type": "string", "description": "Title shown at the top of the interactive card (optional, defaults to \"Todos\")"},
+					"status":     map[string]any{"type": "string", "description": "Filter by status: pending, in_progress, done, blocked (optional)"},
+					"priority":   map[string]any{"type": "string", "description": "Filter by priority: low, medium, high, critical (optional)"},
+					"title":      map[string]any{"type": "string", "description": "Title shown at the top of the interactive card (optional, defaults to \"Todos\")"},
 				},
 			},
 		},

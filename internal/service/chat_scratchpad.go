@@ -6,8 +6,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/hollis-labs/go-providers/provider"
-
+	llmtypes "github.com/hollis-labs/go-llm-types"
 	"github.com/hollis-labs/nanite/internal/chat"
 )
 
@@ -23,7 +22,7 @@ func isScratchpadTool(name string) bool {
 // handleScratchpadTool executes a scratchpad tool call directly against loopState.
 // No MCP transport, no DB — pure in-process. Mirrors handleResultCacheMetaTool.
 func handleScratchpadTool(
-	tu provider.ToolUseBlock,
+	tu llmtypes.ToolUseBlock,
 	ls *loopState,
 	ch chan chat.StreamEvent,
 	mu *sync.Mutex,
@@ -60,7 +59,7 @@ func handleScratchpadTool(
 
 	duration := time.Since(start)
 	return toolExecResult{
-		resultBlock: provider.ContentBlock{
+		resultBlock: llmtypes.ContentBlock{
 			Type: "tool_result", ToolUseID: tu.ID, Content: resultText, IsError: isError,
 		},
 		ref:       chat.ToolCallRef{ID: tu.ID, Name: tu.Name},

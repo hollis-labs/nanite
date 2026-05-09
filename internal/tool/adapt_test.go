@@ -3,12 +3,12 @@ package tool_test
 import (
 	"testing"
 
-	"github.com/hollis-labs/go-providers/provider"
+	llmtypes "github.com/hollis-labs/go-llm-types"
 	"github.com/hollis-labs/nanite/internal/tool"
 )
 
 func TestWrapProviderDef(t *testing.T) {
-	def := provider.ToolDefinition{
+	def := llmtypes.ToolDefinition{
 		Name:        "dev_read",
 		Description: "Read a file",
 		InputSchema: map[string]any{
@@ -40,7 +40,7 @@ func TestWrapProviderDef(t *testing.T) {
 }
 
 func TestToProviderDefinition_Roundtrip(t *testing.T) {
-	original := provider.ToolDefinition{
+	original := llmtypes.ToolDefinition{
 		Name:        "web_fetch",
 		Description: "Fetch a URL",
 		InputSchema: map[string]any{
@@ -80,7 +80,7 @@ func TestToProviderDefinitions(t *testing.T) {
 }
 
 func TestWrapExistingTools(t *testing.T) {
-	defs := []provider.ToolDefinition{
+	defs := []llmtypes.ToolDefinition{
 		{Name: "dev_read", Description: "read"},
 		{Name: "dev_write", Description: "write"},
 		{Name: "web_fetch", Description: "fetch"},
@@ -117,7 +117,7 @@ func TestWrapExistingTools(t *testing.T) {
 }
 
 func TestBashSafety(t *testing.T) {
-	def := provider.ToolDefinition{
+	def := llmtypes.ToolDefinition{
 		Name:        "dev_bash",
 		Description: "shell",
 		InputSchema: map[string]any{"type": "object"},

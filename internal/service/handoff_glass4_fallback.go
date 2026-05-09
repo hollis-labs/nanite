@@ -6,8 +6,7 @@ import (
 	"log/slog"
 	"unicode/utf8"
 
-	"github.com/hollis-labs/go-providers/provider"
-
+	llmtypes "github.com/hollis-labs/go-llm-types"
 	"github.com/hollis-labs/nanite/internal/chat"
 	ctxpkg "github.com/hollis-labs/nanite/internal/context"
 	"github.com/hollis-labs/nanite/internal/store"
@@ -41,7 +40,7 @@ import (
 func (s *chatServiceImpl) ensureGlass4HandoffPreCompact(
 	ctx context.Context,
 	sess *store.Session,
-	chatMessages []provider.ChatMessage,
+	chatMessages []llmtypes.ChatMessage,
 	ch chan chat.StreamEvent,
 ) (string, error) {
 	_ = ctx // ctx reserved for future LLM tiebreaker; deterministic path doesn't need it.
@@ -74,7 +73,7 @@ func (s *chatServiceImpl) ensureGlass4HandoffPreCompact(
 // the conversation tail when no agent-authored handoff exists. Required
 // fields (session_intent, next_step_anchor) are always populated; optional
 // fields are filled when corresponding signal is present.
-func buildFallbackHandoff(chatMessages []provider.ChatMessage) ctxpkg.HandoffPayload {
+func buildFallbackHandoff(chatMessages []llmtypes.ChatMessage) ctxpkg.HandoffPayload {
 	anchor := lastUserMessageText(chatMessages)
 	if anchor == "" {
 		anchor = "(no recent user message — pick up from the prior assistant response)"
@@ -94,7 +93,7 @@ func buildFallbackHandoff(chatMessages []provider.ChatMessage) ctxpkg.HandoffPay
 // lastUserMessageText returns the most recent user message's textual content,
 // concatenating Content + any text blocks. Tool blocks are skipped — they
 // don't carry user-intent text useful as a NextStepAnchor.
-func lastUserMessageText(msgs []provider.ChatMessage) string {
+func lastUserMessageText(msgs []llmtypes.ChatMessage) string {
 	for i := len(msgs) - 1; i >= 0; i-- {
 		m := msgs[i]
 		if m.Role != "user" {

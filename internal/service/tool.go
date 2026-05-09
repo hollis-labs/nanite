@@ -10,7 +10,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/hollis-labs/go-providers/provider"
+	llmcontracts "github.com/hollis-labs/go-llm-contracts"
+	llmtypes "github.com/hollis-labs/go-llm-types"
 	"github.com/hollis-labs/nanite/internal/chat"
 	"github.com/hollis-labs/nanite/internal/mcp"
 	recoverpkg "github.com/hollis-labs/nanite/internal/recover"
@@ -21,7 +22,7 @@ import (
 // ToolSelection holds the result of tool selection, including progressive
 // discovery metadata. Mirrors chat.toolSelection but is owned by the service layer.
 type ToolSelection struct {
-	Tools         []provider.ToolDefinition // tools to send to the LLM
+	Tools         []llmtypes.ToolDefinition // tools to send to the LLM
 	Catalog       string                    // non-empty when progressive discovery is active
 	Progressive   bool                      // true when using progressive discovery
 	OverrideBlock string                    // markdown "## Tool Overrides" section composed from per-tool Hints (go-toolbroker); empty when no tool in the final selection has enrichment
@@ -53,7 +54,7 @@ type ToolService interface {
 	// HandleRequestTools processes a request_tools meta-tool call for
 	// progressive discovery. Returns newly-discovered tool definitions and
 	// a human-readable summary string.
-	HandleRequestTools(ctx context.Context, input map[string]any) ([]provider.ToolDefinition, string, error)
+	HandleRequestTools(ctx context.Context, input map[string]any) ([]llmtypes.ToolDefinition, string, error)
 
 	// ListSummaries returns lightweight name+description pairs for all
 	// registered tools (no full schemas).
@@ -127,7 +128,7 @@ type RepairConfig struct {
 	// Provider is the LLM provider used for repair calls. Typically
 	// the same provider as the user's default chat provider, resolved
 	// via *provider.Registry at container build.
-	Provider provider.Provider
+	Provider llmcontracts.Provider
 
 	// Model is the repair model name (default DefaultRepairModel
 	// from internal/recover when empty).
@@ -212,7 +213,7 @@ func (s *toolServiceImpl) SelectForAgent(ctx context.Context, sessionID, agentID
 	slog.Debug("service/tool: extracted intent", "intent", intent, "hints", hints)
 
 	// Collect tools via broker selection.
-	var allTools []provider.ToolDefinition
+	var allTools []llmtypes.ToolDefinition
 	var overrideBlock string
 	seen := map[string]bool{} // dedup: Anthropic API rejects duplicate tool names
 
@@ -235,7 +236,7 @@ func (s *toolServiceImpl) SelectForAgent(ctx context.Context, sessionID, agentID
 		// signal pass returns the same tool universe as SelectToolsAsProvider
 		// for the time being — it informs ranking, not surface composition,
 		// because the agent permission filter downstream of this path
-		// expects provider.ToolDefinition output. Future work: pass the
+		// expects llmtypes.ToolDefinition output. Future work: pass the
 		// augmented order into provider conversion so the LLM receives
 		// skills-prioritised tools first. (See follow-ups in the ADR-003
 		// "Limitations" section.)
@@ -278,7 +279,7 @@ func (s *toolServiceImpl) SelectForAgent(ctx context.Context, sessionID, agentID
 		catalog := chat.BuildToolCatalog(summaries)
 
 		// Keep builtin tools alongside request_tools meta-tool.
-		builtinTools := []provider.ToolDefinition{toolclient.RequestToolsMetaTool()}
+		builtinTools := []llmtypes.ToolDefinition{toolclient.RequestToolsMetaTool()}
 		for _, t := range allTools {
 			if s.toolClient.IsBuiltinTool(t.Name) {
 				builtinTools = append(builtinTools, t)
@@ -305,13 +306,13 @@ func (s *toolServiceImpl) SelectForAgent(ctx context.Context, sessionID, agentID
 }
 
 // logDecision persists the broker selection decision for the debug panel.
-func (s *toolServiceImpl) logDecision(sessionID, intent, layer string, tools []provider.ToolDefinition) {
+func (s *toolServiceImpl) logDecision(sessionID, intent, layer string, tools []llmtypes.ToolDefinition) {
 	s.logDecisionWithSignals(sessionID, intent, layer, tools, "")
 }
 
 // logDecisionWithSignals is logDecision plus the diagnostic signals JSON.
 // Phase 5 / D3 routes the reasoning-augmented selection signals here.
-func (s *toolServiceImpl) logDecisionWithSignals(sessionID, intent, layer string, tools []provider.ToolDefinition, signals string) {
+func (s *toolServiceImpl) logDecisionWithSignals(sessionID, intent, layer string, tools []llmtypes.ToolDefinition, signals string) {
 	if s.decisionLogger == nil || sessionID == "" {
 		return
 	}
@@ -662,7 +663,7 @@ func wrapWithRepairNote(toolOutput string, rec *recoverpkg.RecoverableError, ori
 }
 
 // HandleRequestTools implements ToolService.
-func (s *toolServiceImpl) HandleRequestTools(_ context.Context, input map[string]any) ([]provider.ToolDefinition, string, error) {
+func (s *toolServiceImpl) HandleRequestTools(_ context.Context, input map[string]any) ([]llmtypes.ToolDefinition, string, error) {
 	if s.toolClient == nil {
 		return nil, "No tool client configured.", fmt.Errorf("no tool client configured")
 	}
@@ -730,9 +731,9 @@ func (s *toolServiceImpl) GetToolMeta(toolName string) (ToolMetaInfo, bool) {
 func (s *toolServiceImpl) discoverAgentMCPTools(
 	ctx context.Context,
 	mcpServersJSON string,
-	allTools []provider.ToolDefinition,
+	allTools []llmtypes.ToolDefinition,
 	seen map[string]bool,
-) ([]provider.ToolDefinition, map[string]bool) {
+) ([]llmtypes.ToolDefinition, map[string]bool) {
 	var servers []string
 	// Silently ignore bad JSON — matches existing engine behaviour.
 	_ = parseJSONStrings(mcpServersJSON, &servers)
@@ -750,7 +751,7 @@ func (s *toolServiceImpl) discoverAgentMCPTools(
 				continue
 			}
 			seen[name] = true
-			allTools = append(allTools, provider.ToolDefinition{
+			allTools = append(allTools, llmtypes.ToolDefinition{
 				Name:        name,
 				Description: t.Description,
 				InputSchema: t.InputSchema,
@@ -768,7 +769,7 @@ func (s *toolServiceImpl) discoverAgentMCPTools(
 // registry — i.e. those that originated from an MCP server. With ADR-002
 // the agent-facing surface is uniform; we no longer have a name-prefix
 // signal to count by, so we ask the toolclient to classify each name.
-func countMCPOriginTools(tc *toolclient.ToolClient, tools []provider.ToolDefinition) int {
+func countMCPOriginTools(tc *toolclient.ToolClient, tools []llmtypes.ToolDefinition) int {
 	if tc == nil {
 		// Without a toolclient we cannot distinguish; treat all as MCP-origin
 		// to preserve the historical behaviour of triggering progressive
@@ -786,7 +787,7 @@ func countMCPOriginTools(tc *toolclient.ToolClient, tools []provider.ToolDefinit
 
 // filterToolsByAllowlist removes tools not in the agent's tools allowlist.
 // An empty or "[]" allowlist means no filtering.
-func filterToolsByAllowlist(tools []provider.ToolDefinition, allowlistJSON string) []provider.ToolDefinition {
+func filterToolsByAllowlist(tools []llmtypes.ToolDefinition, allowlistJSON string) []llmtypes.ToolDefinition {
 	if allowlistJSON == "" || allowlistJSON == "[]" {
 		return tools
 	}
@@ -794,7 +795,7 @@ func filterToolsByAllowlist(tools []provider.ToolDefinition, allowlistJSON strin
 	if err := parseJSONStrings(allowlistJSON, &allowlist); err != nil || len(allowlist) == 0 {
 		return tools
 	}
-	filtered := make([]provider.ToolDefinition, 0, len(tools))
+	filtered := make([]llmtypes.ToolDefinition, 0, len(tools))
 	for _, t := range tools {
 		for _, pattern := range allowlist {
 			if toolclient.MatchPattern(pattern, t.Name) {

@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/hollis-labs/go-providers/provider"
+	llmtypes "github.com/hollis-labs/go-llm-types"
 	"github.com/hollis-labs/nanite/internal/store"
 )
 
@@ -12,10 +12,10 @@ import (
 // locked decisions: cap-driven partition, four-rule selection, hysteresis
 // stability, request_tools idempotency, LoadHint format.
 
-func mkTools(names ...string) []provider.ToolDefinition {
-	out := make([]provider.ToolDefinition, len(names))
+func mkTools(names ...string) []llmtypes.ToolDefinition {
+	out := make([]llmtypes.ToolDefinition, len(names))
 	for i, n := range names {
-		out[i] = provider.ToolDefinition{
+		out[i] = llmtypes.ToolDefinition{
 			Name:        n,
 			Description: "tool " + n,
 		}
@@ -23,7 +23,7 @@ func mkTools(names ...string) []provider.ToolDefinition {
 	return out
 }
 
-func tnames(td []provider.ToolDefinition) []string {
+func tnames(td []llmtypes.ToolDefinition) []string {
 	out := make([]string, len(td))
 	for i, t := range td {
 		out[i] = t.Name
@@ -216,15 +216,15 @@ func TestPartitionTools_CapZeroFallsBackToDefault(t *testing.T) {
 }
 
 func TestRecentlyUsedToolNames_ScansAssistantToolUseBlocks(t *testing.T) {
-	msgs := []provider.ChatMessage{
+	msgs := []llmtypes.ChatMessage{
 		{Role: "user", Content: "do thing 1"},
-		{Role: "assistant", ContentBlocks: []provider.ContentBlock{
+		{Role: "assistant", ContentBlocks: []llmtypes.ContentBlock{
 			{Type: "text", Text: "ok"},
 			{Type: "tool_use", Name: "alpha"},
 		}},
-		{Role: "tool", ContentBlocks: []provider.ContentBlock{{Type: "tool_result"}}},
+		{Role: "tool", ContentBlocks: []llmtypes.ContentBlock{{Type: "tool_result"}}},
 		{Role: "user", Content: "another"},
-		{Role: "assistant", ContentBlocks: []provider.ContentBlock{
+		{Role: "assistant", ContentBlocks: []llmtypes.ContentBlock{
 			{Type: "tool_use", Name: "beta"},
 			{Type: "tool_use", Name: "gamma"},
 		}},
@@ -243,9 +243,9 @@ func TestRecentlyUsedToolNames_ScansAssistantToolUseBlocks(t *testing.T) {
 }
 
 func TestRecentlyUsedToolNames_DedupsAcrossTurns(t *testing.T) {
-	msgs := []provider.ChatMessage{
-		{Role: "assistant", ContentBlocks: []provider.ContentBlock{{Type: "tool_use", Name: "alpha"}}},
-		{Role: "assistant", ContentBlocks: []provider.ContentBlock{
+	msgs := []llmtypes.ChatMessage{
+		{Role: "assistant", ContentBlocks: []llmtypes.ContentBlock{{Type: "tool_use", Name: "alpha"}}},
+		{Role: "assistant", ContentBlocks: []llmtypes.ContentBlock{
 			{Type: "tool_use", Name: "alpha"},
 			{Type: "tool_use", Name: "beta"},
 		}},
@@ -257,12 +257,12 @@ func TestRecentlyUsedToolNames_DedupsAcrossTurns(t *testing.T) {
 }
 
 func TestRecentlyUsedToolNames_RespectsTurnLimit(t *testing.T) {
-	msgs := []provider.ChatMessage{
-		{Role: "assistant", ContentBlocks: []provider.ContentBlock{{Type: "tool_use", Name: "old1"}}},
-		{Role: "assistant", ContentBlocks: []provider.ContentBlock{{Type: "tool_use", Name: "old2"}}},
-		{Role: "assistant", ContentBlocks: []provider.ContentBlock{{Type: "tool_use", Name: "old3"}}},
-		{Role: "assistant", ContentBlocks: []provider.ContentBlock{{Type: "tool_use", Name: "old4"}}},
-		{Role: "assistant", ContentBlocks: []provider.ContentBlock{{Type: "tool_use", Name: "recent"}}},
+	msgs := []llmtypes.ChatMessage{
+		{Role: "assistant", ContentBlocks: []llmtypes.ContentBlock{{Type: "tool_use", Name: "old1"}}},
+		{Role: "assistant", ContentBlocks: []llmtypes.ContentBlock{{Type: "tool_use", Name: "old2"}}},
+		{Role: "assistant", ContentBlocks: []llmtypes.ContentBlock{{Type: "tool_use", Name: "old3"}}},
+		{Role: "assistant", ContentBlocks: []llmtypes.ContentBlock{{Type: "tool_use", Name: "old4"}}},
+		{Role: "assistant", ContentBlocks: []llmtypes.ContentBlock{{Type: "tool_use", Name: "recent"}}},
 	}
 	got := RecentlyUsedToolNames(msgs, 2)
 	// 2-turn window starting from newest → recent + old4.
@@ -320,9 +320,9 @@ func TestIsToolsLazyLoadEnabled_FalsyValues(t *testing.T) {
 // the "essential surface" plus the lazy hint should collectively be much
 // smaller than naive serialization of all 50 tool defs.
 func TestPartitionTools_TokenSavingsScale(t *testing.T) {
-	tools := make([]provider.ToolDefinition, 50)
+	tools := make([]llmtypes.ToolDefinition, 50)
 	for i := range tools {
-		tools[i] = provider.ToolDefinition{
+		tools[i] = llmtypes.ToolDefinition{
 			Name:        "t" + string(rune('a'+i%26)) + string(rune('0'+i/26)),
 			Description: strings.Repeat("filler description blob ", 32), // ~768 bytes per tool
 			InputSchema: map[string]any{

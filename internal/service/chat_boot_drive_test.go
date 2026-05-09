@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/hollis-labs/go-providers/provider"
+	llmtypes "github.com/hollis-labs/go-llm-types"
 	ctxpkg "github.com/hollis-labs/nanite/internal/context"
 	runtimeagent "github.com/hollis-labs/nanite/internal/runtime/agent"
 	"github.com/hollis-labs/nanite/internal/store"
@@ -21,14 +21,14 @@ func TestAgentEventBridge_RouterBindForwardsEvents(t *testing.T) {
 	bridge := &agentEventBridge{streams: NewStreamManager()}
 	in := bridge.fanout("sess-1")
 
-	turnCh := make(chan provider.StreamEvent, 4)
+	turnCh := make(chan llmtypes.StreamEvent, 4)
 	bridge.SetPerSessionRouter("sess-1", turnCh)
 
-	in <- provider.StreamEvent{Type: provider.EventDelta, Content: "hello"}
+	in <- llmtypes.StreamEvent{Type: llmtypes.EventDelta, Content: "hello"}
 
 	select {
 	case ev := <-turnCh:
-		if ev.Type != provider.EventDelta || ev.Content != "hello" {
+		if ev.Type != llmtypes.EventDelta || ev.Content != "hello" {
 			t.Fatalf("unexpected event: %+v", ev)
 		}
 	case <-time.After(time.Second):
@@ -36,7 +36,7 @@ func TestAgentEventBridge_RouterBindForwardsEvents(t *testing.T) {
 	}
 
 	// Done event closes the chan + unbinds the router.
-	in <- provider.StreamEvent{Type: provider.EventDone}
+	in <- llmtypes.StreamEvent{Type: llmtypes.EventDone}
 
 	select {
 	case ev, ok := <-turnCh:
@@ -45,7 +45,7 @@ func TestAgentEventBridge_RouterBindForwardsEvents(t *testing.T) {
 			// scheduling; the close itself is what we care about.
 			break
 		}
-		if ev.Type != provider.EventDone {
+		if ev.Type != llmtypes.EventDone {
 			t.Fatalf("expected Done, got %+v", ev)
 		}
 		// Drain to confirm close-after-Done.
@@ -65,10 +65,10 @@ func TestAgentEventBridge_RouterBindForwardsEvents(t *testing.T) {
 func TestAgentEventBridge_RouterEvictionOnTakeover(t *testing.T) {
 	bridge := &agentEventBridge{streams: NewStreamManager()}
 
-	stale := make(chan provider.StreamEvent, 1)
+	stale := make(chan llmtypes.StreamEvent, 1)
 	bridge.SetPerSessionRouter("sess-1", stale)
 
-	fresh := make(chan provider.StreamEvent, 1)
+	fresh := make(chan llmtypes.StreamEvent, 1)
 	bridge.SetPerSessionRouter("sess-1", fresh)
 
 	// Stale chan should be closed.
@@ -98,7 +98,7 @@ func TestAgentEventBridge_RouterEvictionOnTakeover(t *testing.T) {
 // closes the bound chan and removes the router entry.
 func TestAgentEventBridge_NilRouterUnbinds(t *testing.T) {
 	bridge := &agentEventBridge{streams: NewStreamManager()}
-	turnCh := make(chan provider.StreamEvent, 1)
+	turnCh := make(chan llmtypes.StreamEvent, 1)
 	bridge.SetPerSessionRouter("sess-1", turnCh)
 	bridge.SetPerSessionRouter("sess-1", nil)
 
@@ -124,8 +124,8 @@ func TestAgentEventBridge_NoRouterFallsBackToSSE(t *testing.T) {
 	// Push a delta through; no router → translateStreamEvent → BroadcastSessionStreamEvent.
 	// With no SSE subscribers registered the broadcast is a no-op; we're
 	// asserting that the goroutine consumes the event without blocking.
-	in <- provider.StreamEvent{Type: provider.EventDelta, Content: "x"}
-	in <- provider.StreamEvent{Type: provider.EventDone}
+	in <- llmtypes.StreamEvent{Type: llmtypes.EventDelta, Content: "x"}
+	in <- llmtypes.StreamEvent{Type: llmtypes.EventDone}
 	close(in)
 
 	// Allow the goroutine to drain.

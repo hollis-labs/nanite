@@ -4,7 +4,7 @@ import (
 	"reflect"
 	"testing"
 
-	"github.com/hollis-labs/go-providers/provider"
+	llmtypes "github.com/hollis-labs/go-llm-types"
 	"github.com/hollis-labs/nanite/internal/mcp"
 )
 
@@ -26,7 +26,7 @@ func TestNormalizeToolInputSchemas_SourceMapInvariance(t *testing.T) {
 		"properties": props,
 	}
 
-	tools := []provider.ToolDefinition{
+	tools := []llmtypes.ToolDefinition{
 		{Name: "fake_tool", InputSchema: root},
 	}
 	normalizeToolInputSchemas(tools)
@@ -65,7 +65,7 @@ func TestNormalizeToolInputSchemas_ProviderFacingNormalization(t *testing.T) {
 			},
 		},
 	}
-	tools := []provider.ToolDefinition{
+	tools := []llmtypes.ToolDefinition{
 		{Name: "fake_tool", InputSchema: root},
 	}
 	normalizeToolInputSchemas(tools)
@@ -128,7 +128,7 @@ func TestNormalizeToolInputSchemas_ShowCardC107Regression(t *testing.T) {
 		t.Fatal("live card_show schema has no data property")
 	}
 
-	tools := []provider.ToolDefinition{
+	tools := []llmtypes.ToolDefinition{
 		{Name: "card_show", InputSchema: liveSchema},
 	}
 	// Run normalize twice — the bug surfaced after the FIRST chat call, but

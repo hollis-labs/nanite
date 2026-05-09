@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/hollis-labs/go-providers/provider"
+	llmtypes "github.com/hollis-labs/go-llm-types"
 	"github.com/hollis-labs/nanite/internal/store"
 )
 
@@ -27,8 +27,8 @@ func TestEstimateTokens(t *testing.T) {
 		want  int
 	}{
 		{"", 0},
-		{"Hi", 1},       // 2 chars / 4 = 0, but min 1
-		{"Hello world", 2}, // 11 chars / 4 = 2
+		{"Hi", 1},                       // 2 chars / 4 = 0, but min 1
+		{"Hello world", 2},              // 11 chars / 4 = 2
 		{strings.Repeat("a", 400), 100}, // 400 / 4 = 100
 	}
 
@@ -144,11 +144,11 @@ func TestAssembleContextBudgetEnforcement(t *testing.T) {
 
 func TestEnforceTokenBudget_UnderCeiling(t *testing.T) {
 	sys := "You are a helpful assistant."
-	msgs := []provider.ChatMessage{
+	msgs := []llmtypes.ChatMessage{
 		{Role: "user", Content: "Hello"},
 		{Role: "assistant", Content: "Hi there!"},
 	}
-	tools := []provider.ToolDefinition{
+	tools := []llmtypes.ToolDefinition{
 		{Name: "test_tool", Description: "A test tool"},
 	}
 
@@ -171,24 +171,24 @@ func TestEnforceTokenBudget_PrunesToolResults(t *testing.T) {
 	sys := "Short."
 	// Build messages with old tool results that should get pruned.
 	bigResult := strings.Repeat("x", 4000) // ~1000 tokens
-	msgs := []provider.ChatMessage{
+	msgs := []llmtypes.ChatMessage{
 		{Role: "user", Content: "first"},
-		{Role: "assistant", ContentBlocks: []provider.ContentBlock{
+		{Role: "assistant", ContentBlocks: []llmtypes.ContentBlock{
 			{Type: "tool_use", ID: "tu1", Name: "search"},
 		}},
-		{Role: "user", ContentBlocks: []provider.ContentBlock{
+		{Role: "user", ContentBlocks: []llmtypes.ContentBlock{
 			{Type: "tool_result", ToolUseID: "tu1", Content: bigResult},
 		}},
-		{Role: "assistant", ContentBlocks: []provider.ContentBlock{
+		{Role: "assistant", ContentBlocks: []llmtypes.ContentBlock{
 			{Type: "tool_use", ID: "tu2", Name: "search"},
 		}},
-		{Role: "user", ContentBlocks: []provider.ContentBlock{
+		{Role: "user", ContentBlocks: []llmtypes.ContentBlock{
 			{Type: "tool_result", ToolUseID: "tu2", Content: bigResult},
 		}},
-		{Role: "assistant", ContentBlocks: []provider.ContentBlock{
+		{Role: "assistant", ContentBlocks: []llmtypes.ContentBlock{
 			{Type: "tool_use", ID: "tu3", Name: "search"},
 		}},
-		{Role: "user", ContentBlocks: []provider.ContentBlock{
+		{Role: "user", ContentBlocks: []llmtypes.ContentBlock{
 			{Type: "tool_result", ToolUseID: "tu3", Content: bigResult},
 		}},
 		{Role: "user", Content: "last question"},
@@ -215,7 +215,7 @@ func TestEnforceTokenBudget_PrunesToolResults(t *testing.T) {
 func TestEnforceTokenBudget_RefusesOversize(t *testing.T) {
 	// System prompt alone exceeds the ceiling.
 	sys := strings.Repeat("a", 4000) // ~1000 tokens
-	msgs := []provider.ChatMessage{
+	msgs := []llmtypes.ChatMessage{
 		{Role: "user", Content: strings.Repeat("b", 4000)},
 	}
 
@@ -232,11 +232,11 @@ func TestEnforceTokenBudget_RefusesOversize(t *testing.T) {
 func TestEnforceTokenBudget_CeilingOverridePerModel(t *testing.T) {
 	defaultCeiling := int(float64(DefaultContextWindow) * HardCeilingPct)
 	sys := "system"
-	msgs := []provider.ChatMessage{{Role: "user", Content: "hello"}}
+	msgs := []llmtypes.ChatMessage{{Role: "user", Content: "hello"}}
 
 	tests := []struct {
 		name        string
-		windowSize  int  // 0 = pass 0 to EnforceTokenBudget (use built-in default)
+		windowSize  int // 0 = pass 0 to EnforceTokenBudget (use built-in default)
 		wantCeiling int
 	}{
 		{
@@ -281,33 +281,33 @@ func TestEnforceTokenBudget_CeilingOverridePerModel(t *testing.T) {
 
 func TestPruneToolResultsInMemory(t *testing.T) {
 	big := strings.Repeat("x", 1000)
-	msgs := []provider.ChatMessage{
+	msgs := []llmtypes.ChatMessage{
 		// Round 1 (old — should be pruned)
-		{Role: "assistant", ContentBlocks: []provider.ContentBlock{
+		{Role: "assistant", ContentBlocks: []llmtypes.ContentBlock{
 			{Type: "tool_use", ID: "tu1", Name: "search"},
 		}},
-		{Role: "user", ContentBlocks: []provider.ContentBlock{
+		{Role: "user", ContentBlocks: []llmtypes.ContentBlock{
 			{Type: "tool_result", ToolUseID: "tu1", Content: big},
 		}},
 		// Round 2 (old — should be pruned)
-		{Role: "assistant", ContentBlocks: []provider.ContentBlock{
+		{Role: "assistant", ContentBlocks: []llmtypes.ContentBlock{
 			{Type: "tool_use", ID: "tu2", Name: "fetch"},
 		}},
-		{Role: "user", ContentBlocks: []provider.ContentBlock{
+		{Role: "user", ContentBlocks: []llmtypes.ContentBlock{
 			{Type: "tool_result", ToolUseID: "tu2", Content: big},
 		}},
 		// Round 3 (recent — keep)
-		{Role: "assistant", ContentBlocks: []provider.ContentBlock{
+		{Role: "assistant", ContentBlocks: []llmtypes.ContentBlock{
 			{Type: "tool_use", ID: "tu3", Name: "write"},
 		}},
-		{Role: "user", ContentBlocks: []provider.ContentBlock{
+		{Role: "user", ContentBlocks: []llmtypes.ContentBlock{
 			{Type: "tool_result", ToolUseID: "tu3", Content: big},
 		}},
 		// Round 4 (recent — keep)
-		{Role: "assistant", ContentBlocks: []provider.ContentBlock{
+		{Role: "assistant", ContentBlocks: []llmtypes.ContentBlock{
 			{Type: "tool_use", ID: "tu4", Name: "read"},
 		}},
-		{Role: "user", ContentBlocks: []provider.ContentBlock{
+		{Role: "user", ContentBlocks: []llmtypes.ContentBlock{
 			{Type: "tool_result", ToolUseID: "tu4", Content: big},
 		}},
 	}

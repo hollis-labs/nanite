@@ -2,12 +2,14 @@
 
 package muxproxy
 
-import "github.com/hollis-labs/go-providers/provider"
+import (
+	llmtypes "github.com/hollis-labs/go-llm-types"
+)
 
 // ToolDefinitions returns the four orchestrator tools in the
-// provider.ToolDefinition format accepted by the tool broker.
-func ToolDefinitions() []provider.ToolDefinition {
-	return []provider.ToolDefinition{
+// llmtypes.ToolDefinition format accepted by the tool broker.
+func ToolDefinitions() []llmtypes.ToolDefinition {
+	return []llmtypes.ToolDefinition{
 		{
 			Name:        "mux_list_launches",
 			Description: "List available agent-mux launches (subordinate agent templates). Returns {launches:[{id,project,agent,provider}]}.",

@@ -6,8 +6,9 @@ import (
 	"log/slog"
 	"strings"
 
-	"github.com/hollis-labs/nanite/internal/mcp"
+	llmtypes "github.com/hollis-labs/go-llm-types"
 	"github.com/hollis-labs/go-providers/provider"
+	"github.com/hollis-labs/nanite/internal/mcp"
 )
 
 // OrchestrationPlan represents the plan for executing decomposed sub-tasks.
@@ -111,11 +112,11 @@ func (o *Orchestrator) Aggregate(ctx context.Context, plan *OrchestrationPlan, r
 		plan.Aggregation,
 	)
 
-	messages := []provider.ChatMessage{
+	messages := []llmtypes.ChatMessage{
 		{Role: "user", Content: sb.String()},
 	}
 
-	finalOutput, err := prov.Complete(ctx, provider.ChatRequest{SystemPrompt: aggregatePrompt, Messages: messages, Model: model})
+	finalOutput, err := prov.Complete(ctx, llmtypes.ChatRequest{SystemPrompt: aggregatePrompt, Messages: messages, Model: model})
 	if err != nil {
 		slog.Warn("orchestrator: aggregation LLM call failed — using raw concatenation", "err", err)
 		orchResult.FinalOutput = sb.String()

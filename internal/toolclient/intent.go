@@ -4,7 +4,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/hollis-labs/go-providers/provider"
+	llmtypes "github.com/hollis-labs/go-llm-types"
 )
 
 // MinIntentScore is the minimum keyword-overlap score a tool must reach
@@ -16,7 +16,7 @@ const MinIntentScore = 1
 // using simple keyword overlap (substring matches in tool name and
 // description) and returns the top maxTools results sorted by relevance.
 // If no tool scores above MinIntentScore, an empty slice is returned.
-func (tb *ToolClient) SelectByIntent(intent string, maxTools int) []provider.ToolDefinition {
+func (tb *ToolClient) SelectByIntent(intent string, maxTools int) []llmtypes.ToolDefinition {
 	allTools := tb.ListTools()
 	if len(allTools) == 0 || intent == "" {
 		return nil
@@ -29,7 +29,7 @@ func (tb *ToolClient) SelectByIntent(intent string, maxTools int) []provider.Too
 	}
 
 	type scored struct {
-		tool  provider.ToolDefinition
+		tool  llmtypes.ToolDefinition
 		score int
 	}
 
@@ -54,7 +54,7 @@ func (tb *ToolClient) SelectByIntent(intent string, maxTools int) []provider.Too
 		candidates = candidates[:maxTools]
 	}
 
-	result := make([]provider.ToolDefinition, len(candidates))
+	result := make([]llmtypes.ToolDefinition, len(candidates))
 	for i, c := range candidates {
 		result[i] = c.tool
 	}
@@ -63,7 +63,7 @@ func (tb *ToolClient) SelectByIntent(intent string, maxTools int) []provider.Too
 
 // scoreToolAgainstIntent counts how many intent words appear as substrings
 // in the tool's name or description (case-insensitive).
-func scoreToolAgainstIntent(t provider.ToolDefinition, intentWords []string) int {
+func scoreToolAgainstIntent(t llmtypes.ToolDefinition, intentWords []string) int {
 	nameLower := strings.ToLower(t.Name)
 	descLower := strings.ToLower(t.Description)
 

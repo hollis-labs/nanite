@@ -14,7 +14,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/hollis-labs/go-providers/provider"
+	llmtypes "github.com/hollis-labs/go-llm-types"
 	"github.com/hollis-labs/nanite/internal/pathsafe"
 	"github.com/hollis-labs/nanite/internal/permission"
 	"github.com/hollis-labs/nanite/internal/safego"
@@ -220,10 +220,10 @@ func (d *DevToolsTransport) tryResolveViaSessionGrant(ctx context.Context, abs, 
 	hadChecker := checker != nil
 
 	var (
-		bucketSize    int
-		matched       bool
-		kind          = permission.LookupKindNone
-		viaSessionID  string
+		bucketSize   int
+		matched      bool
+		kind         = permission.LookupKindNone
+		viaSessionID string
 	)
 	if hadChecker && sessionID != "" {
 		bucketSize = checker.BucketSize(sessionID)
@@ -405,13 +405,13 @@ func (d *DevToolsTransport) ListTools(_ context.Context) ([]Tool, error) {
 }
 
 // DevToolProviderDefinitions returns all dev tool definitions as
-// provider.ToolDefinition, suitable for registering as builtins so
+// llmtypes.ToolDefinition, suitable for registering as builtins so
 // they appear in every session's tool list regardless of broker selection.
-func DevToolProviderDefinitions() []provider.ToolDefinition {
+func DevToolProviderDefinitions() []llmtypes.ToolDefinition {
 	tools, _ := (&DevToolsTransport{}).ListTools(context.Background())
-	defs := make([]provider.ToolDefinition, len(tools))
+	defs := make([]llmtypes.ToolDefinition, len(tools))
 	for i, t := range tools {
-		defs[i] = provider.ToolDefinition{
+		defs[i] = llmtypes.ToolDefinition{
 			Name:        t.Name,
 			Description: t.Description,
 			InputSchema: t.InputSchema,

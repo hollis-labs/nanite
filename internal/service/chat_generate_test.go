@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/hollis-labs/go-providers/provider"
+	llmtypes "github.com/hollis-labs/go-llm-types"
 	"github.com/hollis-labs/go-toolbroker/broker"
 	"github.com/hollis-labs/nanite/internal/chat"
 	"github.com/hollis-labs/nanite/internal/store"
@@ -64,14 +64,14 @@ func TestHasUsableTools(t *testing.T) {
 	if hasUsableTools(nil) {
 		t.Fatal("nil tool slice should not count as usable tools")
 	}
-	if hasUsableTools([]provider.ToolDefinition{}) {
+	if hasUsableTools([]llmtypes.ToolDefinition{}) {
 		t.Fatal("empty tool slice should not count as usable tools")
 	}
-	if !hasUsableTools([]provider.ToolDefinition{{Name: "dev_read"}}) {
+	if !hasUsableTools([]llmtypes.ToolDefinition{{Name: "dev_read"}}) {
 		t.Fatal("built-in tools must count as usable tools")
 	}
 	// Uniform MCP-origin name (ADR-002 — no `mcp__server__` prefix).
-	if !hasUsableTools([]provider.ToolDefinition{{Name: "context_lookup"}}) {
+	if !hasUsableTools([]llmtypes.ToolDefinition{{Name: "context_lookup"}}) {
 		t.Fatal("MCP tools must count as usable tools")
 	}
 }
@@ -197,20 +197,20 @@ func TestOverrideBlockReachesPrefix_EndToEnd(t *testing.T) {
 
 // --- early-stopping-generate tests ---
 
-// mockStreamProvider is a minimal provider.Provider that emits a fixed sequence
+// mockStreamProvider is a minimal llmcontracts.Provider that emits a fixed sequence
 // of StreamEvents and records whether StreamChat was called with tools.
 type mockStreamProvider struct {
-	events       []provider.StreamEvent
-	gotTools     []provider.ToolDefinition
-	lastMessages []provider.ChatMessage
+	events       []llmtypes.StreamEvent
+	gotTools     []llmtypes.ToolDefinition
+	lastMessages []llmtypes.ChatMessage
 	callCount    int
 }
 
-func (m *mockStreamProvider) StreamChat(_ context.Context, req provider.ChatRequest) (<-chan provider.StreamEvent, error) {
+func (m *mockStreamProvider) StreamChat(_ context.Context, req llmtypes.ChatRequest) (<-chan llmtypes.StreamEvent, error) {
 	m.callCount++
 	m.gotTools = req.Tools
 	m.lastMessages = req.Messages
-	ch := make(chan provider.StreamEvent, len(m.events)+1)
+	ch := make(chan llmtypes.StreamEvent, len(m.events)+1)
 	for _, ev := range m.events {
 		ch <- ev
 	}
@@ -218,16 +218,16 @@ func (m *mockStreamProvider) StreamChat(_ context.Context, req provider.ChatRequ
 	return ch, nil
 }
 
-func (m *mockStreamProvider) Complete(_ context.Context, _ provider.ChatRequest) (string, error) {
+func (m *mockStreamProvider) Complete(_ context.Context, _ llmtypes.ChatRequest) (string, error) {
 	return "", nil
 }
 
-func (m *mockStreamProvider) CompleteWithUsage(_ context.Context, _ provider.ChatRequest) (provider.CompleteResult, error) {
-	return provider.CompleteResult{}, nil
+func (m *mockStreamProvider) CompleteWithUsage(_ context.Context, _ llmtypes.ChatRequest) (llmtypes.CompleteResult, error) {
+	return llmtypes.CompleteResult{}, nil
 }
 
-func (m *mockStreamProvider) Capabilities() provider.ProviderCapabilities {
-	return provider.ProviderCapabilities{}
+func (m *mockStreamProvider) Capabilities() llmtypes.ProviderCapabilities {
+	return llmtypes.ProviderCapabilities{}
 }
 
 // TestEarlyStopSynthesisPrompt verifies the constant value matches the spec.
@@ -243,7 +243,7 @@ func TestEarlyStopSynthesisPrompt(t *testing.T) {
 // them in fullContent.
 func TestEarlyStopSynthesis_StreamsDeltasToChannel(t *testing.T) {
 	prov := &mockStreamProvider{
-		events: []provider.StreamEvent{
+		events: []llmtypes.StreamEvent{
 			{Type: "delta", Content: "Here is "},
 			{Type: "delta", Content: "my best answer."},
 			{Type: "done"},
@@ -292,7 +292,7 @@ func TestEarlyStopSynthesis_StreamsDeltasToChannel(t *testing.T) {
 // sends an empty tools slice so the model cannot call tools and recurse.
 func TestEarlyStopSynthesis_NoToolsForwarded(t *testing.T) {
 	prov := &mockStreamProvider{
-		events: []provider.StreamEvent{{Type: "done"}},
+		events: []llmtypes.StreamEvent{{Type: "done"}},
 	}
 
 	svc := &chatServiceImpl{}
@@ -305,7 +305,7 @@ func TestEarlyStopSynthesis_NoToolsForwarded(t *testing.T) {
 		"test-model",
 		"",
 		nil,
-		[]provider.ChatMessage{{Role: "user", Content: "prior message"}},
+		[]llmtypes.ChatMessage{{Role: "user", Content: "prior message"}},
 		ch,
 		&fullContent,
 		nil, // finalContent — optional; nil is safe
@@ -321,14 +321,14 @@ func TestEarlyStopSynthesis_NoToolsForwarded(t *testing.T) {
 // injected as the final user message so the LLM receives it.
 func TestEarlyStopSynthesis_PromptInjected(t *testing.T) {
 	prov := &mockStreamProvider{
-		events: []provider.StreamEvent{{Type: "done"}},
+		events: []llmtypes.StreamEvent{{Type: "done"}},
 	}
 
 	svc := &chatServiceImpl{}
 	ch := make(chan chat.StreamEvent, 8)
 	var fullContent strings.Builder
 
-	prior := []provider.ChatMessage{
+	prior := []llmtypes.ChatMessage{
 		{Role: "user", Content: "prior message"},
 		{Role: "assistant", Content: "prior response"},
 	}
@@ -445,7 +445,7 @@ func TestStreamEventPhaseFieldOmitEmpty(t *testing.T) {
 // F4 persistence path: narrationContent stays separate; synthesis → finalContent.
 func TestEarlyStopSynthesis_FinalContentPopulated(t *testing.T) {
 	prov := &mockStreamProvider{
-		events: []provider.StreamEvent{
+		events: []llmtypes.StreamEvent{
 			{Type: "delta", Content: "The answer is 42."},
 			{Type: "done"},
 		},
@@ -485,7 +485,7 @@ func TestEarlyStopSynthesis_FinalContentPopulated(t *testing.T) {
 // carry Phase=PhaseFinal so the frontend routes them to the answer bubble.
 func TestEarlyStopSynthesis_DeltasTaggedFinal(t *testing.T) {
 	prov := &mockStreamProvider{
-		events: []provider.StreamEvent{
+		events: []llmtypes.StreamEvent{
 			{Type: "delta", Content: "answer text"},
 			{Type: "done"},
 		},
@@ -545,10 +545,10 @@ func TestStreamEventPhaseConstants_F3(t *testing.T) {
 func TestThinkingEventRoutedAsPhaseThinking(t *testing.T) {
 	// A mock that emits thinking + text + done.
 	prov := &mockStreamProvider{
-		events: []provider.StreamEvent{
+		events: []llmtypes.StreamEvent{
 			{
 				Type: "thinking",
-				ThinkingBlock: &provider.ThinkingBlock{
+				ThinkingBlock: &llmtypes.ThinkingBlock{
 					Thinking:  "Let me reason about this.",
 					Signature: "sig-test",
 				},
@@ -563,8 +563,8 @@ func TestThinkingEventRoutedAsPhaseThinking(t *testing.T) {
 	ch := make(chan chat.StreamEvent, 16)
 
 	// Direct routing test: simulate what the loop does with a thinking event.
-	thinkBlock := &provider.ThinkingBlock{Thinking: "deep thought", Signature: "sig-abc"}
-	evtThinking := provider.StreamEvent{Type: "thinking", ThinkingBlock: thinkBlock}
+	thinkBlock := &llmtypes.ThinkingBlock{Thinking: "deep thought", Signature: "sig-abc"}
+	evtThinking := llmtypes.StreamEvent{Type: "thinking", ThinkingBlock: thinkBlock}
 
 	// Verify the condition that routes to PhaseThinking.
 	if evtThinking.ThinkingBlock == nil {

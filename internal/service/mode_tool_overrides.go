@@ -1,7 +1,7 @@
 package service
 
 import (
-	"github.com/hollis-labs/go-providers/provider"
+	llmtypes "github.com/hollis-labs/go-llm-types"
 	"github.com/hollis-labs/nanite/internal/store"
 	"github.com/hollis-labs/nanite/internal/toolclient"
 )
@@ -11,13 +11,13 @@ import (
 // search_tool_result, …) are exempt — they're the agent's escape hatches and
 // must remain reachable regardless of mode policy. The underlying resolution
 // (deny > allow, explicit > pattern) lives in store.ApplyToolOverrides; this
-// is a thin adapter for provider.ToolDefinition slices.
+// is a thin adapter for llmtypes.ToolDefinition slices.
 //
 // Empty spec returns the input unchanged. F1 (CW-20260429-0001).
 func applyModeToolOverridesToTools(
-	tools []provider.ToolDefinition,
+	tools []llmtypes.ToolDefinition,
 	spec store.ToolOverrideSpec,
-) []provider.ToolDefinition {
+) []llmtypes.ToolDefinition {
 	if isEmptySpec(spec) || len(tools) == 0 {
 		return tools
 	}
@@ -42,7 +42,7 @@ func applyModeToolOverridesToTools(
 		keep[n] = struct{}{}
 	}
 
-	filtered := make([]provider.ToolDefinition, 0, len(keep))
+	filtered := make([]llmtypes.ToolDefinition, 0, len(keep))
 	for _, t := range tools {
 		if _, ok := keep[t.Name]; ok {
 			filtered = append(filtered, t)

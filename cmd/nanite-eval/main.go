@@ -26,7 +26,7 @@ import (
 	"path/filepath"
 	"runtime"
 
-	"github.com/hollis-labs/go-providers/provider"
+	llmtypes "github.com/hollis-labs/go-llm-types"
 	"github.com/hollis-labs/nanite/internal/eval"
 )
 
@@ -86,7 +86,7 @@ func buildProvider() eval.ChatProvider {
 // inject targeted responses; this mock is for smoke-testing the CLI pipeline.
 type deterministicMock struct{}
 
-func (d *deterministicMock) Complete(_ context.Context, req provider.ChatRequest) (string, error) {
+func (d *deterministicMock) Complete(_ context.Context, req llmtypes.ChatRequest) (string, error) {
 	return "mock response: no live provider configured", nil
 }
 

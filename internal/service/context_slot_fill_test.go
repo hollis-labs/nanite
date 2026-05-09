@@ -6,9 +6,9 @@ import (
 	"strings"
 	"testing"
 
+	llmtypes "github.com/hollis-labs/go-llm-types"
 	"github.com/hollis-labs/nanite/internal/chat"
 	ctxpkg "github.com/hollis-labs/nanite/internal/context"
-	"github.com/hollis-labs/go-providers/provider"
 	"github.com/hollis-labs/nanite/internal/store"
 )
 
@@ -49,7 +49,7 @@ func TestAssembleSlots_FillsAllSlotsFromRawSources(t *testing.T) {
 		Tools:        `["dev_grep","dev_read"]`,
 	}
 	mode := &store.AgentMode{Slug: "default", PromptAddendum: ""}
-	tools := []provider.ToolDefinition{
+	tools := []llmtypes.ToolDefinition{
 		{Name: "dev_grep", Description: "Search files via ripgrep"},
 		{Name: "dev_read", Description: "Read a file"},
 	}
@@ -112,7 +112,7 @@ func TestAssembleSlots_FillsAllSlotsFromRawSources(t *testing.T) {
 	if toolsSlot == nil {
 		t.Fatal("Tools slot missing")
 	}
-	var roundtrip []provider.ToolDefinition
+	var roundtrip []llmtypes.ToolDefinition
 	if err := json.Unmarshal([]byte(toolsSlot.Content), &roundtrip); err != nil {
 		t.Errorf("Tools slot content should be JSON-marshaled tool defs: %v (raw=%q)", err, toolsSlot.Content)
 	}

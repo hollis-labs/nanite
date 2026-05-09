@@ -4,7 +4,7 @@
 -- installs carry the older Style section text — this migration UPDATEs the
 -- row in place to append the new bullet at the end of the Style section.
 --
--- Why: c110 evidence showed the agent making 4 failing nanite_show_card
+-- Why: c110 evidence showed the agent making 4 failing card_show
 -- calls, then a 5th successful one, then responding "Perfect! I''ve created
 -- a demo report card..." with no mention of the failed attempts. The
 -- structured tool_calls array already records the failures with status

@@ -8,7 +8,7 @@
 --      authoritative response (the call did succeed).
 --   2. Read repair_note.lesson_hint to learn what the harness reshaped
 --      so future calls don't repeat the same mistake.
---   3. When the nanite_remember self-tool is available (D1 ships
+--   3. When the lesson_capture self-tool is available (D1 ships
 --      separately), persist the lesson_hint to durable memory.
 --
 -- The sentence is anchored after the "discover before failing" hint
@@ -23,9 +23,9 @@
 UPDATE prompt_templates
 SET template = REPLACE(
         template,
-        '- **Discover before failing.** If you''re unsure about a tool''s input shape, call nanite_tool_describe(name="<tool>") first. It returns the schema plus 1-3 golden examples — cheaper than failing the real call repeatedly. Or call nanite_validate(tool_name, args) to pre-flight check args before invoking — it returns structured errors with fix hints.',
-        '- **Discover before failing.** If you''re unsure about a tool''s input shape, call nanite_tool_describe(name="<tool>") first. It returns the schema plus 1-3 golden examples — cheaper than failing the real call repeatedly. Or call nanite_validate(tool_name, args) to pre-flight check args before invoking — it returns structured errors with fix hints.
-- **Recover with awareness.** If a tool result carries a `repair_note`, your input was reshaped by the auto-repair pipeline so the call could succeed. Read the actual response from `result` / `result_text` as authoritative. Then read `repair_note.lesson_hint` — it is a one-sentence note describing what the harness fixed. Call `nanite_remember` with the lesson when that tool is available so future calls avoid the same mistake.'
+        '- **Discover before failing.** If you''re unsure about a tool''s input shape, call tool_describe(name="<tool>") first. It returns the schema plus 1-3 golden examples — cheaper than failing the real call repeatedly. Or call tool_validate(tool_name, args) to pre-flight check args before invoking — it returns structured errors with fix hints.',
+        '- **Discover before failing.** If you''re unsure about a tool''s input shape, call tool_describe(name="<tool>") first. It returns the schema plus 1-3 golden examples — cheaper than failing the real call repeatedly. Or call tool_validate(tool_name, args) to pre-flight check args before invoking — it returns structured errors with fix hints.
+- **Recover with awareness.** If a tool result carries a `repair_note`, your input was reshaped by the auto-repair pipeline so the call could succeed. Read the actual response from `result` / `result_text` as authoritative. Then read `repair_note.lesson_hint` — it is a one-sentence note describing what the harness fixed. Call `lesson_capture` with the lesson when that tool is available so future calls avoid the same mistake.'
     ),
     updated_at = datetime('now')
 WHERE id = 'blt-chat-harness-001'

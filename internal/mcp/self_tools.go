@@ -1090,6 +1090,14 @@ the current turn for subsequent writes.
 				"required": []string{"session_id", "message"},
 			},
 		},
+		// --- Executor handoff (CW-20260429-0036, B2 closing piece) ---
+		// dispatch_executor is the chat-agent-facing destination for the
+		// executor-handoff capability bullet B5 added to the chat prompt.
+		// v1 routes "render_envelope" intents to internal/executor/
+		// envelope_render — the B3 in-process pilot — via
+		// dispatch.DispatchExecutor (which handles unknown-intent routing
+		// and returns the typed ExecutorResponse the chat agent expects).
+		dispatchExecutorToolDefinition(),
 		// --- Discovery / introspection (CW-20260429-0005, A1) ---
 		// tool_describe surfaces a tool's schema + golden examples
 		// so agents can introspect any internal tool when uncertain about

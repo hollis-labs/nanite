@@ -121,6 +121,18 @@ type SelfToolsTransport struct {
 	// and dispatches via the legacy classifier path.
 	Broker broker.Broker
 
+	// Executor is the dispatch.Executor wired behind the dispatch_executor
+	// self-tool (CW-20260429-0036, B2 closing piece — chat-agent-facing
+	// destination for the executor-handoff capability bullet B5 added to the
+	// chat prompt). v1 plumbs internal/executor/envelope_render — the B3
+	// pilot — and dispatches "render_envelope" intents to it via
+	// dispatch.DispatchExecutor (which handles unknown-intent routing).
+	// Future LLM-driven executor profiles register as additional
+	// dispatch.Executor implementations; the seam stays unchanged.
+	// Nil-safe — when unset, dispatch_executor returns a clear errorResult
+	// so a wiring miss is visible rather than silently dropped.
+	Executor dispatch.Executor
+
 	// ReflexSet is the merged (builtin + user-override) reflex slice used
 	// by the E1 reflex matcher (CW-20260419-0027). Set post-construction
 	// from the startup wiring (see internal/service or cmd/nanite). When
@@ -360,6 +372,9 @@ func (st *SelfToolsTransport) CallTool(ctx context.Context, name string, args ma
 		return st.callBackgroundCancel(ctx, args)
 	case "task_execute":
 		return st.callExecuteTask(ctx, args)
+	// --- Executor handoff (CW-20260429-0036, B2 closing piece) ---
+	case "dispatch_executor":
+		return st.callDispatchExecutor(ctx, args)
 	case "chat_search":
 		return st.callChatSearch(ctx, args)
 	case "python_run":

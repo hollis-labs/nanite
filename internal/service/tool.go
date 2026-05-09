@@ -13,11 +13,18 @@ import (
 	llmcontracts "github.com/hollis-labs/go-llm-contracts"
 	llmtypes "github.com/hollis-labs/go-llm-types"
 	"github.com/hollis-labs/nanite/internal/chat"
+	"github.com/hollis-labs/nanite/internal/dispatch"
 	"github.com/hollis-labs/nanite/internal/mcp"
 	recoverpkg "github.com/hollis-labs/nanite/internal/recover"
 	"github.com/hollis-labs/nanite/internal/store"
 	"github.com/hollis-labs/nanite/internal/toolclient"
 )
+
+// chatRoleAgentSlug is the canonical slug of the chat-role agent profile
+// (internal/agent/builtin/default.md). Surface filtering keys off this
+// slug — Worker, Planner, executor, hint-selector and mux-orchestrator
+// profiles use distinct slugs and bypass the chat-surface filter.
+const chatRoleAgentSlug = "default"
 
 // ToolSelection holds the result of tool selection, including progressive
 // discovery metadata. Mirrors chat.toolSelection but is owned by the service layer.
@@ -256,10 +263,26 @@ func (s *toolServiceImpl) SelectForAgent(ctx context.Context, sessionID, agentID
 		}
 	}
 
-	// Apply agent tools allowlist (schema v2).
+	// Apply agent tools allowlist (schema v2) and the chat-role surface
+	// filter. The allowlist is always applied (when configured); the
+	// chat-surface filter only applies when the agent is the chat-role
+	// profile (slug "default"). Worker / Planner / executor / hint-selector
+	// / mux-orchestrator profiles bypass the chat-surface filter — they
+	// have their own surface decisions per
+	// decisions.nanite.architecture.role_profile_seeding.
+	//
+	// Phase 2 graduation per executor-handoff design (CW-20260429-0033 / B4):
+	// the four lens primitives (tool_describe, tool_validate, lesson_capture,
+	// card_show) are filtered out for the chat agent so the multi-step
+	// recovery flow stays inside the executor (B3 pilot —
+	// internal/executor/envelope_render). See internal/dispatch/chat_surface.go
+	// for the canonical exclusion list.
 	if s.agents != nil {
 		if agent, err := s.agents.GetAgent(agentID); err == nil {
 			allTools = filterToolsByAllowlist(allTools, agent.Tools)
+			if agent.Slug == chatRoleAgentSlug {
+				allTools = applyChatSurfaceFilter(allTools, dispatch.DefaultChatToolSurface())
+			}
 		}
 	}
 
@@ -783,6 +806,28 @@ func countMCPOriginTools(tc *toolclient.ToolClient, tools []llmtypes.ToolDefinit
 		}
 	}
 	return n
+}
+
+// applyChatSurfaceFilter narrows the tool list by dropping every tool the
+// surface filter excludes. Used only on the chat-role profile per the B4
+// Phase 2 graduation (CW-20260429-0033). A nil filter is treated as a
+// pass-through so callers can disable filtering without conditionals.
+func applyChatSurfaceFilter(tools []llmtypes.ToolDefinition, surface *dispatch.ChatToolSurface) []llmtypes.ToolDefinition {
+	if surface == nil || len(tools) == 0 {
+		return tools
+	}
+	before := len(tools)
+	filtered := make([]llmtypes.ToolDefinition, 0, before)
+	for _, t := range tools {
+		if surface.Filter(t.Name) {
+			filtered = append(filtered, t)
+		}
+	}
+	if removed := before - len(filtered); removed > 0 {
+		slog.Debug("service/tool: chat-surface filter removed tools",
+			"before", before, "after", len(filtered), "removed", removed)
+	}
+	return filtered
 }
 
 // filterToolsByAllowlist removes tools not in the agent's tools allowlist.

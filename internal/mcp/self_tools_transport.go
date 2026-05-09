@@ -10,11 +10,11 @@ import (
 	"strings"
 	"time"
 
+	"github.com/hollis-labs/go-agent-broker/broker"
 	"github.com/hollis-labs/nanite/internal/background"
 	"github.com/hollis-labs/nanite/internal/builders"
 	"github.com/hollis-labs/nanite/internal/classify"
 	"github.com/hollis-labs/nanite/internal/crossapp"
-	"github.com/hollis-labs/go-agent-broker/broker"
 	"github.com/hollis-labs/nanite/internal/dispatch"
 	"github.com/hollis-labs/nanite/internal/envelope"
 	"github.com/hollis-labs/nanite/internal/grounding"
@@ -792,9 +792,9 @@ func (st *SelfToolsTransport) callShowCard(ctx context.Context, args map[string]
 //     are limited to built-in IDs by convention so they bypass the gate.
 //   - Explicit agent value pointing at a built-in panel → (id, "") allowed.
 //   - Explicit agent value pointing at a plugin panel:
-//     * trust gate passes → (id, "") allowed.
-//     * trust gate fails  → ("", reason). Render falls back to inline and
-//       the FE surfaces the blocked-reason as a debug pill.
+//   - trust gate passes → (id, "") allowed.
+//   - trust gate fails  → ("", reason). Render falls back to inline and
+//     the FE surfaces the blocked-reason as a debug pill.
 //
 // The agent can pass render_target="" explicitly to force-inline a card
 // whose schema would otherwise route to a drawer; the empty string is
@@ -1142,9 +1142,9 @@ func (st *SelfToolsTransport) callPlanStepAdd(args map[string]any) (*ToolResult,
 	st.notifyWorkChanged()
 
 	out, _ := json.Marshal(map[string]any{
-		"plan_id":         planID,
-		"appended":        appended,
-		"appended_count":  len(appended),
+		"plan_id":        planID,
+		"appended":       appended,
+		"appended_count": len(appended),
 	})
 	return textResult(fmt.Sprintf("Appended %d step(s) to plan %s\n%s", len(appended), planID, string(out))), nil
 }
@@ -1709,7 +1709,7 @@ func normalizeLiteralLines(literal string) ([]string, bool) {
 }
 
 var (
-	promptPathPattern      = regexp.MustCompile(`/[^\s` + "`" + `]+`)
+	promptPathPattern       = regexp.MustCompile(`/[^\s` + "`" + `]+`)
 	promptFirstLinesPattern = regexp.MustCompile(`(?i)first\s+(\d+)\s+lines?`)
 )
 

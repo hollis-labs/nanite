@@ -40,6 +40,7 @@ VALUES (
 ## Capability
 
 - You have **meta-tools** for discovery (tool_describe), pre-flight validation (tool_validate), and learning capture (lesson_capture). Reach for them when a tool''s contract is unfamiliar or after a call fails — you don''t have to memorise every schema.
+- For multi-step flows like rendering envelope cards, you don''t need to own the recipe — describe the intent and the harness routes you to a specialized executor.
 
 ## Style
 

@@ -62,6 +62,15 @@ type Executor struct {
 	// fixed clock so executor output is fully deterministic given a
 	// deterministic Data payload — supports replay/diff use cases (B6).
 	Clock func() time.Time
+
+	// validate is an injection point for tests that want to drive the
+	// non-ValidationError branch (registry not configured / schema
+	// missing). Production callers leave this nil and get
+	// envelope.ValidateData; tests set it to return a contrived non-
+	// ValidationError to exercise harnessFailure end-to-end. Lowercase
+	// because the hook is for in-package tests only — external callers
+	// should never need to swap the validator.
+	validate func(envelopeType string, data any) error
 }
 
 // New returns the pilot executor. Kept as a constructor so future
@@ -76,6 +85,15 @@ func (e *Executor) now() time.Time {
 		return e.Clock().UTC()
 	}
 	return time.Now().UTC()
+}
+
+// validateData routes through the test seam if set, otherwise calls
+// the package-level envelope.ValidateData.
+func (e *Executor) validateData(envelopeType string, data any) error {
+	if e.validate != nil {
+		return e.validate(envelopeType, data)
+	}
+	return envelope.ValidateData(envelopeType, data)
 }
 
 // Intents satisfies dispatch.Executor.
@@ -170,7 +188,7 @@ func (e *Executor) Execute(ctx context.Context, req dispatch.ExecutorRequest) (*
 	data := cloneShallow(req.Data)
 
 	repaired := false
-	if err := envelope.ValidateData(envType, data); err != nil {
+	if err := e.validateData(envType, data); err != nil {
 		// Distinguish schema-validation misses (recoverable, the
 		// dispatching caller can re-shape data and re-dispatch) from
 		// harness/config failures (registry not initialized, schema
@@ -187,7 +205,7 @@ func (e *Executor) Execute(ctx context.Context, req dispatch.ExecutorRequest) (*
 		// missing_context.
 		if attemptRepair(envType, data) {
 			repaired = true
-			if reErr := envelope.ValidateData(envType, data); reErr != nil {
+			if reErr := e.validateData(envType, data); reErr != nil {
 				var reVE *envelope.ValidationError
 				if !errors.As(reErr, &reVE) {
 					return harnessFailure(envType, reErr), nil

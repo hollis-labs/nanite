@@ -2,9 +2,11 @@ package envelope_render
 
 import (
 	"context"
+	"errors"
 	"os"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/hollis-labs/nanite/internal/dispatch"
 	"github.com/hollis-labs/nanite/internal/envelope"
@@ -338,6 +340,203 @@ func TestPromptIsEmbeddedAndUnderBudget(t *testing.T) {
 		if !strings.Contains(body, m) {
 			t.Errorf("prompt is missing the c119 judgment phrase %q", m)
 		}
+	}
+}
+
+// TestExecute_GroundedType_PerEntrySourceShape covers PR #110 c2:
+// for grounded types each source must carry at least one of
+// tool_use_id or tool_name. A request with a non-empty Sources slice
+// whose entries are blank must fail closed with missing_context, not
+// be silently stamped onto the envelope.
+func TestExecute_GroundedType_PerEntrySourceShape(t *testing.T) {
+	exec := New()
+	resp, err := exec.Execute(context.Background(), dispatch.ExecutorRequest{
+		Intent:             IntentRenderEnvelope,
+		TargetEnvelopeType: "report-card",
+		Data: map[string]any{
+			"title":   "PerEntrySource",
+			"metrics": []any{map[string]any{"label": "x", "value": "1"}},
+		},
+		Sources: []dispatch.ExecutorSource{
+			// Index 0 is well-formed; index 1 is the offender.
+			{ToolUseID: "tu_real", ToolName: "real"},
+			{ToolUseID: "   ", ToolName: ""},
+		},
+	})
+	if err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	if resp.Failure == nil {
+		t.Fatal("expected per-entry source-shape failure, got success")
+	}
+	if resp.Failure.Code != dispatch.ExecutorFailureMissingContext {
+		t.Fatalf("expected missing_context, got %q", resp.Failure.Code)
+	}
+	// Failure message should pinpoint the offending index so the
+	// dispatching caller (and ops) can see what's wrong.
+	if !strings.Contains(resp.Failure.Message, "sources[1]") {
+		t.Errorf("failure message should reference sources[1], got: %q", resp.Failure.Message)
+	}
+	if resp.Envelope != nil {
+		t.Error("expected nil envelope on per-entry source-shape failure")
+	}
+}
+
+// TestExecute_InjectableClock_Determinism covers PR #110 c3: when the
+// executor's Clock is set, generated_at must be derived from it and
+// not from time.Now. Same Clock + same Data ⇒ same envelope, byte-for-
+// byte stable across runs.
+func TestExecute_InjectableClock_Determinism(t *testing.T) {
+	fixed := time.Date(2026, 5, 8, 12, 30, 0, 0, time.UTC)
+	exec := &Executor{Clock: func() time.Time { return fixed }}
+	wantStamp := fixed.Format(time.RFC3339)
+
+	req := dispatch.ExecutorRequest{
+		Intent:             IntentRenderEnvelope,
+		TargetEnvelopeType: "report-card",
+		Data: map[string]any{
+			"title":   "Deterministic",
+			"metrics": []any{map[string]any{"label": "x", "value": "1"}},
+		},
+		Sources: []dispatch.ExecutorSource{{ToolUseID: "tu", ToolName: "synth"}},
+	}
+
+	for i := 0; i < 3; i++ {
+		resp, err := exec.Execute(context.Background(), req)
+		if err != nil {
+			t.Fatalf("Execute (run %d): %v", i, err)
+		}
+		if resp.Failure != nil {
+			t.Fatalf("run %d: unexpected failure: %+v", i, resp.Failure)
+		}
+		got, _ := resp.Envelope.Data["generated_at"].(string)
+		if got != wantStamp {
+			t.Fatalf("run %d: generated_at not driven by injected clock — got %q, want %q", i, got, wantStamp)
+		}
+	}
+
+	// Caller-supplied generated_at must still take precedence over the
+	// clock — the executor should not overwrite it.
+	caller := req
+	caller.Data = map[string]any{
+		"title":        "CallerStamp",
+		"metrics":      []any{map[string]any{"label": "x", "value": "1"}},
+		"generated_at": "2025-01-01T00:00:00Z",
+	}
+	resp, err := exec.Execute(context.Background(), caller)
+	if err != nil {
+		t.Fatalf("Execute (caller stamp): %v", err)
+	}
+	if got, _ := resp.Envelope.Data["generated_at"].(string); got != "2025-01-01T00:00:00Z" {
+		t.Errorf("caller-supplied generated_at must be preserved, got %q", got)
+	}
+}
+
+// TestExecute_RepairNeeded_ListCardItemCoercion covers PR #110 c4: the
+// previous list-card repair wrapped a single string as []any{string}
+// which couldn't pass validation since list-card items are objects
+// with `label` required. The corrected coercion wraps the string as
+// []any{{"label": s}} so the repair path actually succeeds.
+func TestExecute_RepairNeeded_ListCardItemCoercion(t *testing.T) {
+	t.Run("StringItemsCoercedToLabel", func(t *testing.T) {
+		exec := New()
+		resp, err := exec.Execute(context.Background(), dispatch.ExecutorRequest{
+			Intent:             IntentRenderEnvelope,
+			TargetEnvelopeType: "list-card",
+			Data: map[string]any{
+				"title": "Repair Test (string item)",
+				"items": "Single bare string item",
+			},
+		})
+		if err != nil {
+			t.Fatalf("Execute: %v", err)
+		}
+		if resp.Failure != nil {
+			t.Fatalf("expected repair to succeed, got failure: %+v", resp.Failure)
+		}
+		if resp.Envelope == nil {
+			t.Fatal("expected envelope after repair")
+		}
+		items, ok := resp.Envelope.Data["items"].([]any)
+		if !ok {
+			t.Fatalf("items should have been coerced to []any, got %T", resp.Envelope.Data["items"])
+		}
+		if len(items) != 1 {
+			t.Fatalf("expected one item after coercion, got %d", len(items))
+		}
+		first, ok := items[0].(map[string]any)
+		if !ok {
+			t.Fatalf("coerced item should be an object, got %T", items[0])
+		}
+		if first["label"] != "Single bare string item" {
+			t.Errorf("string should land as label, got %v", first["label"])
+		}
+		if !strings.Contains(strings.ToLower(resp.Summary), "coerced") {
+			t.Errorf("Summary should disclose the coercion, got: %q", resp.Summary)
+		}
+	})
+
+	t.Run("SingleObjectItemCoercedToList", func(t *testing.T) {
+		exec := New()
+		resp, err := exec.Execute(context.Background(), dispatch.ExecutorRequest{
+			Intent:             IntentRenderEnvelope,
+			TargetEnvelopeType: "list-card",
+			Data: map[string]any{
+				"title": "Repair Test (single object)",
+				"items": map[string]any{"label": "Solo", "description": "wraps to a one-element list"},
+			},
+		})
+		if err != nil {
+			t.Fatalf("Execute: %v", err)
+		}
+		if resp.Failure != nil {
+			t.Fatalf("expected repair to succeed, got failure: %+v", resp.Failure)
+		}
+		items, ok := resp.Envelope.Data["items"].([]any)
+		if !ok || len(items) != 1 {
+			t.Fatalf("expected one item after object→list coercion, got %T %v", resp.Envelope.Data["items"], resp.Envelope.Data["items"])
+		}
+	})
+}
+
+// TestExecute_NonValidationError_RoutesToUnrecoverable covers PR #110
+// c1: envelope.ValidateData can return non-validation errors (registry
+// not configured, schema missing) which are harness/config failures,
+// NOT recoverable schema misses. Routing those through
+// missing_context would invite a re-dispatch loop on a problem only
+// ops can fix. The executor type-switches and routes them to
+// unrecoverable instead.
+func TestExecute_NonValidationError_RoutesToUnrecoverable(t *testing.T) {
+	harnessErr := errors.New("schema registry not configured for envelope type")
+	exec := &Executor{
+		validate: func(envelopeType string, data any) error {
+			return harnessErr
+		},
+	}
+	resp, err := exec.Execute(context.Background(), dispatch.ExecutorRequest{
+		Intent:             IntentRenderEnvelope,
+		TargetEnvelopeType: "report-card",
+		Data: map[string]any{
+			"title":   "Harness fault",
+			"metrics": []any{map[string]any{"label": "x", "value": "1"}},
+		},
+		Sources: []dispatch.ExecutorSource{{ToolUseID: "tu", ToolName: "synth"}},
+	})
+	if err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	if resp.Failure == nil {
+		t.Fatal("expected typed failure for harness-shaped error")
+	}
+	if resp.Failure.Code != dispatch.ExecutorFailureUnrecoverable {
+		t.Fatalf("non-validation error must route to unrecoverable (re-dispatch loop guard), got %q (%s)",
+			resp.Failure.Code, resp.Failure.Message)
+	}
+	if !strings.Contains(resp.Failure.Message, "schema registry not configured") {
+		t.Errorf("failure message should pass through the underlying harness error, got: %q", resp.Failure.Message)
+	}
+	if resp.Failure.PartialEnvelope != nil {
+		t.Error("harness failure should not carry a PartialEnvelope — there's nothing to render and ops can't fix it from a degraded card")
 	}
 }
 

@@ -153,6 +153,34 @@ func TestMemorySource_TimeoutShortCircuits(t *testing.T) {
 	}
 }
 
+func TestMemorySource_MinConfidenceZeroIsHonored(t *testing.T) {
+	// AutoRecallMinConfidence=0 must override the source default (0.4) so a
+	// low-confidence memory still surfaces. Pre-fix, the > 0 guard treated
+	// the literal zero as "use the default" and the seed below (confidence
+	// 0.1) was filtered out.
+	svc := newTestMemoryService(t)
+	seedTestMemory(t, svc, memory.UserNamespace("default"),
+		"low-confidence widget", "body about widgets", 0.1)
+
+	src := NewMemorySource(svc)
+	enabled := true
+	intent := Intent{
+		QueryText:               "widgets",
+		SessionID:               "test-session",
+		AgentID:                 "agent-x",
+		AutoRecall:              &enabled,
+		AutoRecallMinConfidence: 0,
+	}
+
+	items, err := src.Fetch(context.Background(), intent, 5000)
+	if err != nil {
+		t.Fatalf("Fetch: %v", err)
+	}
+	if len(items) == 0 {
+		t.Fatalf("min_confidence=0 should return the low-confidence seed; got 0 items")
+	}
+}
+
 func TestMemorySource_NilService_ReturnsError(t *testing.T) {
 	// Sanity-check the long-standing precondition: a nil memory service
 	// surfaces an explicit error rather than silently no-op'ing. This lets

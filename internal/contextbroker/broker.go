@@ -90,9 +90,12 @@ type Intent struct {
 	// cap for this turn. Zero means "use the source default".
 	AutoRecallLimit int
 
-	// AutoRecallMinConfidence, when in (0, 1], overrides MemorySource's
-	// default confidence floor. Zero means "use the source default".
-	// Negative or > 1 values are ignored.
+	// AutoRecallMinConfidence, when in [0, 1], overrides MemorySource's
+	// default confidence floor. The sentinel for "use the source default"
+	// is a negative value (or > 1) — a literal 0 is a valid override that
+	// asks the source to return everything regardless of confidence. The
+	// chat-harness's ResolveAutoRecallConfig pre-clamps profile settings
+	// so a missing override surfaces as a negative (e.g. -1) here.
 	AutoRecallMinConfidence float64
 
 	// AutoRecallTimeout, when > 0, caps the Vanta round-trip for this

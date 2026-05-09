@@ -70,8 +70,11 @@ func (s *MemorySource) Fetch(ctx context.Context, intent Intent, budget int) ([]
 	if intent.AutoRecallLimit > 0 {
 		limit = intent.AutoRecallLimit
 	}
+	// AutoRecallMinConfidence override range is [0, 1]. A literal 0 is a
+	// valid override (return everything regardless of confidence); the
+	// "use source default" sentinel is a negative value or anything > 1.
 	minConfidence := memoryDefaultMinConfidence
-	if intent.AutoRecallMinConfidence > 0 && intent.AutoRecallMinConfidence <= 1 {
+	if intent.AutoRecallMinConfidence >= 0 && intent.AutoRecallMinConfidence <= 1 {
 		minConfidence = intent.AutoRecallMinConfidence
 	}
 	timeout := memoryDefaultTimeout

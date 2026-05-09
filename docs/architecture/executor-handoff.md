@@ -99,9 +99,12 @@ type ExecutorResponse struct {
     Envelope *chat.Envelope `json:"envelope,omitempty"`
 
     // Lessons are repair-hints the executor learned during the flow.
-    // The chat agent records these via lesson_capture on its own
-    // surface. (Could also be done by the executor; see §3 trade-off.)
-    Lessons []recovery.Hint `json:"lessons,omitempty"`
+    // **Informational / telemetry only** — the executor persists them
+    // via `lesson_capture` itself before responding (see §3 lens
+    // placement). The chat agent does NOT call `lesson_capture` (it
+    // no longer has the tool). The field is kept for narration ("I
+    // learned X") and observability, not for persistence.
+    Lessons []learnings.Hint `json:"lessons,omitempty"`
 
     // Summary is a one-paragraph account of what the executor did,
     // what got coerced/repaired, and what (if anything) was deferred.
@@ -138,14 +141,14 @@ const (
 )
 ```
 
-**Tool surface on the chat side:** one tool, `dispatch_executor`, with input shape `ExecutorRequest` and output shape `ExecutorResponse`. The chat agent's existing `dispatch.ExecuteTask` primitive is **not reused** — that primitive is for Worker/Planner spawn (full agent profile, full tool surface, async-capable). The executor handoff is synchronous, single-round-trip, and does not boot a new agent profile from scratch; it dispatches into a long-lived executor session managed by the harness.
+**Tool surface on the chat side:** one tool, `dispatch_executor`, with input shape `ExecutorRequest` and output shape `ExecutorResponse`. The chat agent's existing `dispatch.ExecuteTask` primitive is **not reused** — that primitive is for Worker/Planner spawn (full agent profile, full tool surface). Note: `ExecuteTask` is sync today (it coerces `async → sync` at `internal/dispatch/execute.go:221-226` because it must capture the result before returning); the "async-capable" framing applies to its `Mode` field for telemetry, not to runtime behavior. The executor handoff is also synchronous, single-round-trip, and does not boot a new agent profile from scratch; it dispatches into a long-lived executor session managed by the harness.
 
 **Chat agent's contract:**
 
 1. Receive user message.
 2. Classifier (B2) produces `Intent` + `TargetEnvelopeType` if applicable.
 3. If the intent maps to an executor, build `ExecutorRequest` (verbatim user message, minimum context handles, session ID) and call `dispatch_executor`.
-4. Receive `ExecutorResponse`. Render the envelope if present; narrate the summary; record lessons via `lesson_capture`.
+4. Receive `ExecutorResponse`. Render the envelope if present; narrate the summary. (Lessons in the response are informational only — the executor already persisted them via `lesson_capture`; see §3.)
 5. **Do not re-execute the executor's flow.** No re-running of `tool_describe`, no re-validating the envelope, no second-pass repair attempts. The executor's response is authoritative for its turn.
 
 **Anti-patterns explicitly excluded from the contract:**
@@ -171,7 +174,7 @@ Concretely:
 
 **Trade-off considered:** the executor could **delegate** lens calls to a sub-tool (i.e., make `describe` / `validate` / `remember` tools the executor calls, rather than tools the executor profile carries). The trade-off is whether "describe" is a tool a model reaches for or a function the executor invokes deterministically. **Decision: keep them as tools on the executor's profile**, not as deterministic functions. The lens was always designed to be model-reached (per `agentic-error-recovery.md`'s "ask a peer" variation — the LLM repair pass needs a tool boundary). Making them deterministic on the executor closes off the LLM-repair fallback. Stay with tools.
 
-**Lessons handling — open trade-off explicit:** in §2 the contract has `Lessons []recovery.Hint` returning to chat for the chat agent to record via `lesson_capture`. The alternative is: the executor calls `lesson_capture` itself before responding (it has the tool). **Decision: executor calls `lesson_capture` itself**; the `Lessons` field in the response is informational (so the chat agent can narrate "I learned X" if it wants), not load-bearing for persistence. Rationale: (a) the executor has fresher context for the lesson; (b) keeps the chat agent's surface narrower (it no longer needs `lesson_capture`); (c) avoids a race where the chat agent forgets to record. The `Lessons` field stays in the response shape for narration / telemetry but is not a checklist the chat agent must execute.
+**Lessons handling — decision:** the §2 contract returns `Lessons []learnings.Hint` in `ExecutorResponse`, but the **executor calls `lesson_capture` itself** before responding (it has the tool); the `Lessons` field is informational only (so the chat agent can narrate "I learned X" if it wants), not load-bearing for persistence. Rationale: (a) the executor has fresher context for the lesson; (b) keeps the chat agent's surface narrower (it no longer needs `lesson_capture`); (c) avoids a race where the chat agent forgets to record. (Field naming note: `learnings.Hint` is the actual Go type — `internal/learnings/learnings.go:268`; the recovery package referenced elsewhere doesn't define `Hint`.)
 
 ## 4. Trust + permission
 
@@ -180,7 +183,7 @@ Concretely:
 Mechanism:
 
 - **Path grants** (`internal/permission/path_grants.go::LookupPath`): the existing lineage walk (`lineageMaxHops = 4`) handles this for free. When the executor session is spawned, the dispatch wiring stamps `lineage[executorSessionID] = chatSessionID` (same as the worker-spawn path does today). `LookupPath` walks the lineage chain; the executor's path lookups resolve through the chat session's bucket. No new code path needed; reuse `RegisterLineage`.
-- **Trust-tier** (`internal/dispatch/trust.go::TrustResolver`): the executor agent profile registers with a `default_trust_tier` matching the worker pattern (`trusted` for built-in executors; `normal` for plugin-shipped ones, requiring approval). The `ResolveTrust(workspace, executorAgentProfileID)` call returns the executor's tier; the chat agent's tier is irrelevant at dispatch time. Per the H1 contract: an `untrusted` executor profile can never be dispatched (`ErrUntrustedRole`). A `normal` tier executor goes through the existing approval flow; a `trusted` executor dispatches without approval.
+- **Trust-tier** (`internal/dispatch/trust.go::TrustResolver`): the executor agent profile registers with `default_trust_tier = 'normal'` in `agent_profiles` (per migration 035 — that's the project-wide default for built-ins; only the chat role stays at default and explicitly remains `normal`). Per-workspace promotion to `trusted` happens via `workspace_role_trust` seeding (the dogfood pattern in migration 036, which seeds every workspace × every internal built-in agent at `trusted`). Plugin-shipped executor profiles register with `default_trust_tier = 'normal'` and require the existing approval flow on first dispatch unless a workspace operator promotes them. `ResolveTrust(workspace, executorAgentProfileID)` returns the resolved tier; the chat agent's tier is irrelevant at dispatch time. Per the H1 contract: an `untrusted` executor can never be dispatched (`ErrUntrustedRole`). A `normal` executor goes through the approval flow; a `trusted` executor dispatches without approval.
 - **Implications for high-stakes mutations:** if an executor's flow needs a high-stakes capability (subagent spawn, plugin write, etc.), it requests it through the same H1 channel — emit a `subagent-spawn-approval` (or analogous) envelope as part of its response, let the chat agent route it to the user, then resume on the next dispatch with the approval result in `ContextHandles`. The executor does not silently elevate.
 - **Reference:** `decisions.nanite.permission.trust_agent_model` (H1, CW-20260421-0014). The executor handoff is a new dispatch *target*; it does not change the trust model. It uses the existing untrusted/normal/trusted ladder and the existing audit-event log.
 
@@ -190,7 +193,7 @@ Mechanism:
 - **Decision rule 3 (redundant enforcement):** if both the chat session AND the executor have their own path-grant buckets, every grant is duplicated. The lineage walk avoids this.
 - **Anti-pattern 5 (mechanism-without-trust):** elevating the executor would say "we don't trust the chat agent's grants; the executor needs its own." The chat agent's grants are correct — the user issued them. Inherit.
 
-**Special case — plugin-shipped executor profiles:** plugins MAY register executor profiles (future, post-pilot). These follow the same trust ladder: a plugin-shipped executor with `default_trust_tier: "normal"` requires the existing approval prompt before its first dispatch in a session. Subsequent dispatches in the same session reuse the granted approval (per session-scoped trust caching, which is how subagent dispatch already works).
+**Special case — plugin-shipped executor profiles:** plugins MAY register executor profiles (future, post-pilot). These follow the same trust ladder: a plugin-shipped executor with `default_trust_tier: "normal"` requires the existing approval prompt before its first dispatch in a session, and stays at `normal` in `workspace_role_trust` until a workspace operator explicitly promotes it. Subsequent dispatches in the same session reuse the granted approval (per session-scoped trust caching, which is how subagent dispatch already works).
 
 ## 5. Failure modes
 
@@ -198,13 +201,13 @@ The executor is bounded on three axes — turn budget, wall-clock budget, and re
 
 | Budget | Mechanism | File:Symbol |
 |---|---|---|
-| Tool failures (consecutive) | `runawayFailCap = 10` per executor session | `internal/service/chat_loop_state.go:77` |
-| Soft turn budget | `defaultMaxTurns = 75`, fires `chat-loop-terminated` warning | `internal/service/chat_loop_state.go:60` |
-| Hard turn ceiling | `defaultHardCeiling = 200`, terminates loop | `internal/service/chat_loop_state.go:61` |
-| Idle timeout | `defaultIdleTimeoutSeconds = 900` (15m) | `internal/service/chat_loop_state.go:78` |
+| Tool failures (consecutive) — **terminates** | `defaultRunawayFailCap = 10` per executor session | `internal/service/chat_loop_state.go:77` |
+| Soft turn budget — **does NOT terminate** | `defaultMaxTurns = 75` (SOFT per CW-20260504-0001) — emits a one-shot `chat-loop-budget-soft-warning` SSE envelope; only `defaultRunawayFailCap`, `defaultHardCeiling`, and `end_turn` actually terminate | `internal/service/chat_loop_state.go:60` |
+| Hard turn ceiling — **terminates** | `defaultHardCeiling = 200`, terminates loop | `internal/service/chat_loop_state.go:61` |
+| Idle timeout — **terminates** | `defaultIdleTimeoutSeconds = 900` (15m) | `internal/service/chat_loop_state.go:78` |
 | Per-tool repeat cap | `defaultMaxRequestToolsCalls = 6` | `internal/service/chat_loop_state.go:84` |
 
-The executor session runs the same chat loop as the chat session does; the same termination codes apply (`runaway_tool_failures`, `hard_ceiling`, `idle_timeout`, `retry_budget_exhausted`). When any of these fire, the executor's loop terminates and the harness composes an `ExecutorResponse` with `Failure.Code = ExecutorFailureBudgetExhausted` (or `ExecutorFailureUnrecoverable` for non-budget terminations) and the partial envelope if one was produced.
+The executor session runs the same chat loop as the chat session does; the same termination codes apply (`runaway_tool_failures`, `hard_ceiling`, `idle_timeout`, `retry_budget_exhausted`). `defaultMaxTurns` does NOT terminate — it just emits a soft warning envelope. When any *terminating* budget fires, the executor's loop ends and the harness composes an `ExecutorResponse` with `Failure.Code = ExecutorFailureBudgetExhausted` (or `ExecutorFailureUnrecoverable` for non-budget terminations) and the partial envelope if one was produced.
 
 **The chat agent receives a failure response, not a hung dispatch.** The dispatch is a single tool call from the chat agent's perspective; if the executor hits a budget, the response comes back with `Failure` set. The chat agent's reaction is to **surface the failure to the user** — not to retry the dispatch on the same intent. (Retrying without changed inputs would just exhaust the budget again.)
 
@@ -345,7 +348,7 @@ The chat agent **never reads the prohibition rule** because the rule no longer e
 
 - `agent-context-architecture.md` — gating reference; decision rules + anti-patterns this design respects.
 - `agentic-error-recovery.md` — co-lens; the recovery layer the executor pattern wraps.
-- `docs/architecture/chat-system/02-tool-invocation-and-authority.md` — current chat tool surface (Phase 3 deny-list empty); §"Tool surface today" is the pre-handoff baseline.
+- `docs/architecture/chat-system/02-tool-invocation-and-authority.md` — current chat tool surface (Phase 3 deny-list empty); §"Tool surface today" is the pre-handoff baseline. **Naming drift note:** that doc still uses pre-rename `nanite_*` self-tool names (`nanite_show_card`, `nanite_tool_describe`, etc.); this design assumes the post-rename baseline. Use the audit + convention docs (`docs/tool-naming-audit.md`, `docs/tool-naming-convention.md`) as the canonical source of truth for tool names; the chat-system doc needs a follow-up reflow (tracked separately, see implementer report).
 - `docs/architecture/envelope-pipeline.md` — the envelope construction + validation pipeline executors emit into.
 - `docs/panels/envelope-render-target.md` — the v1 default-render-target table and the "10 passive renderables" list defining the B3 pilot scope.
 - `docs/agent-pattern-catalog.md` — the three-role agent model the executor pattern slots into (Chat / Worker / Planner; the executor is a Worker-role specialization).

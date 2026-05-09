@@ -14,8 +14,9 @@ import (
 // init wires the production passive-renderable envelope-type provider
 // so classify.ClassifyRoute's tool-availability gate consults the live
 // allow-list (envelope.PassiveRenderableTypes) instead of the v1
-// baseline. The provider is a no-op slice copy — cheap to call on every
-// classification.
+// baseline. The provider returns a defensive copy so callers can't
+// accidentally mutate the package-level slice's backing array (cheap —
+// the list is short and classification runs once per turn).
 //
 // Defined here rather than in the classify package to keep classify
 // import-edge-free of envelope (the test-overridable provider pattern
@@ -23,7 +24,9 @@ import (
 // depends on both, making it the natural composition seam.
 func init() {
 	classify.SetEnvelopeTypeProvider(func() []string {
-		return envelope.PassiveRenderableTypes
+		out := make([]string, len(envelope.PassiveRenderableTypes))
+		copy(out, envelope.PassiveRenderableTypes)
+		return out
 	})
 }
 
@@ -200,12 +203,13 @@ func (s *chatServiceImpl) attemptRouteDispatch(
 		outcome.EmittedEnvelope = true
 	}
 	outcome.Dispatched = true
-	slog.Info("chat-service: route dispatch — executor returned envelope, emitted on stream",
+	slog.Info("chat-service: route dispatch — executor returned envelope",
 		"session_id", sessionID,
 		"route", decision.Route.String(),
 		"target_envelope_type", decision.TargetEnvelopeType,
 		"envelope_type", resp.Envelope.Type,
 		"summary", resp.Summary,
+		"emitted_envelope", outcome.EmittedEnvelope,
 	)
 	return outcome
 }

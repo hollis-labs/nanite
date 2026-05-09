@@ -346,6 +346,7 @@ The chat agent **never reads the prohibition rule** because the rule no longer e
 
 ## Cross-references
 
+- `docs/measurements/executor-handoff-pilot.md` — B6 measurement report; static + dispatch-overhead metrics against the pilot, plus the live-LLM benchmark procedure (CW-20260429-0035).
 - `agent-context-architecture.md` — gating reference; decision rules + anti-patterns this design respects.
 - `agentic-error-recovery.md` — co-lens; the recovery layer the executor pattern wraps.
 - `docs/architecture/chat-system/02-tool-invocation-and-authority.md` — current chat tool surface (Phase 3 deny-list empty); §"Tool surface today" is the pre-handoff baseline. **Naming drift note:** that doc still uses pre-rename `nanite_*` self-tool names (`nanite_show_card`, `nanite_tool_describe`, etc.); this design assumes the post-rename baseline. Use the audit + convention docs (`docs/tool-naming-audit.md`, `docs/tool-naming-convention.md`) as the canonical source of truth for tool names; the chat-system doc needs a follow-up reflow (tracked separately, see implementer report).

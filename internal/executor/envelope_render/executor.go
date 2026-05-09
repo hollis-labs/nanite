@@ -56,11 +56,27 @@ var groundedTypes = map[string]bool{
 // intent. The zero value is usable; no construction needed for the
 // pilot (no per-instance config). Future revisions may carry trust
 // resolvers, panel access checks, etc.
-type Executor struct{}
+type Executor struct {
+	// Clock is the injectable time source used to stamp generated_at on
+	// report-card envelopes. When nil, time.Now is used. Tests can set a
+	// fixed clock so executor output is fully deterministic given a
+	// deterministic Data payload — supports replay/diff use cases (B6).
+	Clock func() time.Time
+}
 
 // New returns the pilot executor. Kept as a constructor so future
 // dependencies can be wired without changing call sites.
 func New() *Executor { return &Executor{} }
+
+// now returns the current time via the injected clock or time.Now.
+// Always normalized to UTC so the wire format (RFC3339) is stable
+// regardless of host timezone.
+func (e *Executor) now() time.Time {
+	if e.Clock != nil {
+		return e.Clock().UTC()
+	}
+	return time.Now().UTC()
+}
 
 // Intents satisfies dispatch.Executor.
 func (*Executor) Intents() []string { return []string{IntentRenderEnvelope} }
@@ -72,9 +88,11 @@ func (*Executor) SystemPrompt() string { return Prompt }
 
 // Execute satisfies dispatch.Executor. Validates the request, runs the
 // in-process render flow, and returns an ExecutorResponse. Returns a
-// non-nil error only on harness-level wiring problems (none in the
-// pilot — the function never returns a non-nil error today, but the
-// signature reserves the option).
+// non-nil error only on harness-level wiring problems — specifically
+// when envelope.ValidateData reports a non-validation error (schema
+// registry not configured, schema missing for a registered type, etc.).
+// Schema-validation misses are agent-visible failures and ride in the
+// response's Failure field, not in the error return.
 //
 // Flow:
 //  1. Sanity-check the intent (defensive — DispatchExecutor already
@@ -84,14 +102,19 @@ func (*Executor) SystemPrompt() string { return Prompt }
 //  3. Reject missing Data with missing_context (the pilot does not
 //     resolve ContextHandles — that's a future LLM-driven step).
 //  4. Validate Data against the per-type envelope schema. On
-//     failure: attempt one repair pass for known coercible mistakes,
-//     then re-validate. Persistent failures return missing_context
-//     with the structured validator output, plus PartialEnvelope so
-//     the Chat agent can render a degraded card if appropriate.
-//  5. Stamp `generated_at` for report-card; stamp Sources for grounded
-//     types.
-//  6. Build the dispatch.Envelope, attach the Summary, return.
-func (*Executor) Execute(ctx context.Context, req dispatch.ExecutorRequest) (*dispatch.ExecutorResponse, error) {
+//     *envelope.ValidationError: attempt one repair pass for known
+//     coercible mistakes, then re-validate. Persistent failures return
+//     missing_context with the structured validator output, plus
+//     PartialEnvelope so the Chat agent can render a degraded card if
+//     appropriate. On any non-ValidationError: return a typed
+//     unrecoverable failure with the error text — the harness/registry
+//     is misconfigured and re-dispatching will not help.
+//  5. Validate per-entry source shape for grounded types (each source
+//     must carry tool_use_id or tool_name).
+//  6. Stamp `generated_at` for report-card via the injected clock;
+//     stamp Sources for grounded types.
+//  7. Build the dispatch.Envelope, attach the Summary, return.
+func (e *Executor) Execute(ctx context.Context, req dispatch.ExecutorRequest) (*dispatch.ExecutorResponse, error) {
 	if req.Intent != IntentRenderEnvelope {
 		return &dispatch.ExecutorResponse{
 			Failure: &dispatch.ExecutorFailure{
@@ -148,16 +171,31 @@ func (*Executor) Execute(ctx context.Context, req dispatch.ExecutorRequest) (*di
 
 	repaired := false
 	if err := envelope.ValidateData(envType, data); err != nil {
-		// Repair pass — coerce known shape mistakes (e.g., a string in a
-		// field where the schema expects a list of strings). Bounded to
-		// one attempt; persistent failures escalate to missing_context.
+		// Distinguish schema-validation misses (recoverable, the
+		// dispatching caller can re-shape data and re-dispatch) from
+		// harness/config failures (registry not initialized, schema
+		// missing for a registered type, IO error reading a schema).
+		// Misrouting the latter as missing_context would invite a
+		// re-dispatch loop on a problem only ops can fix.
+		var ve *envelope.ValidationError
+		if !errors.As(err, &ve) {
+			return harnessFailure(envType, err), nil
+		}
+		// Repair pass — coerce known shape mistakes (e.g., a single
+		// metric object where the schema expects a list of objects).
+		// Bounded to one attempt; persistent failures escalate to
+		// missing_context.
 		if attemptRepair(envType, data) {
 			repaired = true
 			if reErr := envelope.ValidateData(envType, data); reErr != nil {
-				return failValidation(envType, data, reErr), nil
+				var reVE *envelope.ValidationError
+				if !errors.As(reErr, &reVE) {
+					return harnessFailure(envType, reErr), nil
+				}
+				return failValidation(envType, data, reVE), nil
 			}
 		} else {
-			return failValidation(envType, data, err), nil
+			return failValidation(envType, data, ve), nil
 		}
 	}
 
@@ -178,12 +216,30 @@ func (*Executor) Execute(ctx context.Context, req dispatch.ExecutorRequest) (*di
 				Summary: fmt.Sprintf("Cannot render %q: missing required source citations.", envType),
 			}, nil
 		}
+		// Mirror parseSourcesArg's per-entry contract (chat-direct path):
+		// each citation must carry at least one of tool_use_id or
+		// tool_name. Without this, the executor can emit `sources`
+		// entries that are structurally invalid for grounding audits.
+		for i, s := range req.Sources {
+			if strings.TrimSpace(s.ToolUseID) == "" && strings.TrimSpace(s.ToolName) == "" {
+				return &dispatch.ExecutorResponse{
+					Failure: &dispatch.ExecutorFailure{
+						Code: dispatch.ExecutorFailureMissingContext,
+						Message: fmt.Sprintf(
+							"sources[%d] must include tool_use_id or tool_name; %s requires citations that point at the tool calls whose results ground the card",
+							i, envType,
+						),
+					},
+					Summary: fmt.Sprintf("Cannot render %q: source citation %d is missing tool_use_id and tool_name.", envType, i),
+				}, nil
+			}
+		}
 		data["sources"] = sourcesToMap(req.Sources)
 	}
 
 	if envType == "report-card" {
 		if _, has := data["generated_at"]; !has {
-			data["generated_at"] = time.Now().UTC().Format(time.RFC3339)
+			data["generated_at"] = e.now().Format(time.RFC3339)
 		}
 	}
 
@@ -206,11 +262,15 @@ func (*Executor) Execute(ctx context.Context, req dispatch.ExecutorRequest) (*di
 }
 
 // failValidation builds the ExecutorResponse for a final-validation
-// miss. Returns missing_context (the recoverable path — the dispatching
-// caller can re-shape data and re-dispatch) with a structured error
-// list and a PartialEnvelope so the Chat agent has the option of a
-// degraded render.
-func failValidation(envType string, data map[string]any, err error) *dispatch.ExecutorResponse {
+// miss against the per-type schema. Returns missing_context (the
+// recoverable path — the dispatching caller can re-shape data and
+// re-dispatch) with a structured error list and a PartialEnvelope so
+// the Chat agent has the option of a degraded render.
+//
+// Callers must pass an actual *envelope.ValidationError; non-validation
+// errors should route through harnessFailure to avoid prompting a
+// re-dispatch loop on a config/registry problem.
+func failValidation(envType string, data map[string]any, err *envelope.ValidationError) *dispatch.ExecutorResponse {
 	leaves := envelope.FlattenSchemaError(err, nil)
 	msg := fmt.Sprintf("data does not match the %q schema", envType)
 	if len(leaves) > 0 {
@@ -243,14 +303,38 @@ func failValidation(envType string, data map[string]any, err error) *dispatch.Ex
 	}
 }
 
+// harnessFailure builds the ExecutorResponse for a non-validation error
+// out of envelope.ValidateData (schema registry not configured, schema
+// missing for a registered type, IO error reading a schema). These are
+// harness/config problems and re-dispatching cannot help — route to
+// unrecoverable so the Chat agent surfaces the problem to the user (and
+// telemetry surfaces it to ops) without prompting a retry loop.
+func harnessFailure(envType string, err error) *dispatch.ExecutorResponse {
+	return &dispatch.ExecutorResponse{
+		Failure: &dispatch.ExecutorFailure{
+			Code: dispatch.ExecutorFailureUnrecoverable,
+			Message: fmt.Sprintf(
+				"envelope schema for %q could not be loaded: %v",
+				envType, err,
+			),
+		},
+		Summary: fmt.Sprintf("Cannot render %q: envelope schema registry returned a non-validation error.", envType),
+	}
+}
+
 // attemptRepair performs bounded, conservative coercions for known
 // shape mistakes the dispatching caller is likely to make. Returns
 // true when at least one coercion was applied (the caller re-validates).
 //
-// Pilot scope: report-card.metrics is the most common slip — schema
-// requires an array of {label, value} objects; callers sometimes pass
-// a single object or a flat label/value at the top level. Other types
-// can grow their own coercions when failure modes accumulate.
+// Pilot scope:
+//   - report-card.metrics: schema requires an array of {label, value}
+//     objects; callers sometimes pass a single object. Coerce object
+//     → [object].
+//   - list-card.items: schema requires an array of objects each with a
+//     `label` string (and optional description/icon/action). Coerce a
+//     single string → [{"label": s}], or a single object → [object].
+//
+// Other types can grow their own coercions when failure modes accumulate.
 func attemptRepair(envType string, data map[string]any) bool {
 	switch envType {
 	case "report-card":
@@ -261,9 +345,17 @@ func attemptRepair(envType string, data map[string]any) bool {
 			return true
 		}
 	case "list-card":
-		// Coerce a single string into a one-element list.
+		// list-card.items elements are objects with at least `label`
+		// (see manifest/schemas/list-card.schema.json in go-envelopes).
+		// A bare string is the most common slip — wrap it as
+		// [{"label": s}] so the schema's per-item required check passes.
 		if s, ok := data["items"].(string); ok && s != "" {
-			data["items"] = []any{s}
+			data["items"] = []any{map[string]any{"label": s}}
+			return true
+		}
+		// A single item-object also fails the array-typed check; wrap.
+		if m, ok := data["items"].(map[string]any); ok {
+			data["items"] = []any{m}
 			return true
 		}
 	}
@@ -299,13 +391,19 @@ func sourcesToMap(srcs []dispatch.ExecutorSource) []map[string]any {
 	return out
 }
 
-// buildSummary composes the executor's narration. Discloses synthesis
-// when SyntheticAllowed was set so the Chat agent can pass the disclosure
-// through to the user verbatim (c119 judgment 1).
+// buildSummary composes the executor's narration. Discloses the
+// synthesis-permission flag when SyntheticAllowed was set so the Chat
+// agent can pass the disclosure through to the user (c119 judgment 1).
+//
+// Note: SyntheticAllowed is a permission, not a fact about the payload.
+// The pilot executor does not fetch or synthesize — Data is supplied by
+// the dispatching caller. So the summary states the permission, not a
+// claim about provenance; the prompt (and future LLM-driven path) is
+// where the "demo intent → synthesize with disclosure" judgment lives.
 func buildSummary(envType string, req dispatch.ExecutorRequest, repaired bool) string {
 	parts := []string{fmt.Sprintf("Rendered %s.", envType)}
 	if req.SyntheticAllowed {
-		parts = append(parts, "This card uses synthesized demo data — no real metrics were fetched.")
+		parts = append(parts, "Synthesis was permitted for this request.")
 	}
 	if repaired {
 		parts = append(parts, "Coerced one shape mistake during validation.")

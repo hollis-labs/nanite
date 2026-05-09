@@ -72,10 +72,12 @@ func TestExecute_HappyPath_ReportCard(t *testing.T) {
 	if srcs[0]["tool_name"] != "synthesized" {
 		t.Errorf("source tool_name should pass through verbatim, got %v", srcs[0]["tool_name"])
 	}
-	// c119 judgment 1: the synthesis disclosure must reach the Chat
-	// agent verbatim via the Summary so it can pass to the user.
-	if !strings.Contains(strings.ToLower(resp.Summary), "synthesized") {
-		t.Errorf("Summary must disclose synthesis, got: %q", resp.Summary)
+	// c119 judgment 1: the executor must disclose the synthesis
+	// permission (not a claim about provenance — the pilot doesn't
+	// fetch or synthesize, the caller supplies Data) so the Chat agent
+	// can pass the disclosure through to the user.
+	if !strings.Contains(strings.ToLower(resp.Summary), "synthesis was permitted") {
+		t.Errorf("Summary must disclose synthesis permission, got: %q", resp.Summary)
 	}
 }
 

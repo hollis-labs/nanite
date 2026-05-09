@@ -23,7 +23,7 @@ require (
 	github.com/hollis-labs/go-providers v0.8.0
 	github.com/hollis-labs/go-sandbox v0.2.0
 	github.com/hollis-labs/go-toolbroker v0.1.0
-	github.com/hollis-labs/vanta-conduit v0.5.0
+	github.com/hollis-labs/vanta-conduit v0.6.0
 	github.com/modelcontextprotocol/go-sdk v1.5.0
 	github.com/oklog/ulid/v2 v2.1.1
 	github.com/santhosh-tekuri/jsonschema/v6 v6.0.2
@@ -101,8 +101,21 @@ replace github.com/hollis-labs/go-envelopes => ../go-envelopes
 
 replace github.com/chrispian/agent-mux => /Users/chrispian/Projects-apps/agent-mux
 
-// CW-20260502-0005: go-agent-broker scaffold (no-op impl). Local replace while
-// the sibling repo lacks a published tag — drop once the first release lands.
-require github.com/hollis-labs/go-agent-broker v0.0.0-00010101000000-000000000000
+require (
+	// CW-20260502-0005: go-agent-broker scaffold (no-op impl). Local replace while
+	// the sibling repo lacks a published tag — drop once the first release lands.
+	github.com/hollis-labs/go-agent-broker v0.0.0-00010101000000-000000000000
+	github.com/hollis-labs/go-embed-contracts v0.1.0 // indirect
+	github.com/hollis-labs/go-llm-contracts v0.1.0 // indirect
+	github.com/hollis-labs/go-llm-types v0.1.0 // indirect
+)
 
 replace github.com/hollis-labs/go-agent-broker => ../go-agent-broker
+
+replace github.com/hollis-labs/vanta-conduit => ../vanta-conduit
+
+replace github.com/hollis-labs/go-llm-types => ../go-llm-types
+
+replace github.com/hollis-labs/go-llm-contracts => ../go-llm-contracts
+
+replace github.com/hollis-labs/go-embed-contracts => ../go-embed-contracts

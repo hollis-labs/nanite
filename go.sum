@@ -55,8 +55,6 @@ github.com/hollis-labs/go-toolbroker v0.1.0 h1:2b2c3gcjLRphxbj4NC95OZ/eH1EGw3HOY
 github.com/hollis-labs/go-toolbroker v0.1.0/go.mod h1:OWsxhIzSjtbVRDXANuyfLQ/NjaQt9jSWEGxBLtAKD4U=
 github.com/hollis-labs/plugin-sdk v0.3.0 h1:xlFWssODdGkrInZv36ocSkDruYarMo2Rvvq6CrCujHY=
 github.com/hollis-labs/plugin-sdk v0.3.0/go.mod h1:+FcTow9tco3OoINjc5LSCkm8RZzWSLNG1tTCzLSQuHs=
-github.com/hollis-labs/vanta-conduit v0.5.0 h1:ZV/lOLQR1rtm3ZE6l3UjcQ8u+V/7g2xYiWJvJI+4dW4=
-github.com/hollis-labs/vanta-conduit v0.5.0/go.mod h1:zFswVQ2BD5PgCY6H6zx0fr1aisHZ/MnDPKK57joEgEs=
 github.com/klauspost/compress v1.18.3 h1:9PJRvfbmTabkOX8moIpXPbMMbYN60bWImDDU7L+/6zw=
 github.com/klauspost/compress v1.18.3/go.mod h1:R0h/fSBs8DE4ENlcrlib3PsXS61voFxhIs2DeRhCvJ4=
 github.com/kr/pretty v0.3.1 h1:flRD4NNwYAUpkphVc1HcthR4KEIFJ65n8Mw5qdRn3LE=

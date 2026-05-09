@@ -88,8 +88,9 @@ func (r Route) String() string { return string(r) }
 //     executor may synthesize realistic placeholder content with a
 //     disclosure.
 //
-// Empty input returns the zero RouteDecision (Route == "", which is
-// !IsValid; callers MUST treat that as RouteChatDirect).
+// Empty input returns RouteDecision{Route: RouteChatDirect} — the
+// conservative default per ClassifyRoute's contract. Callers don't need
+// to special-case empty input.
 type RouteDecision struct {
 	Route              Route
 	TargetEnvelopeType string
@@ -145,19 +146,21 @@ var RouteMultiStepRenderKeywords = []string{
 	"go grab",
 }
 
-// envelopeTypeAvailability returns the v1 list of passive-renderable
-// envelope types reachable by the envelope-render executor. Defined as
-// a function (not a direct call to envelope.PassiveRenderableTypes) so
-// tests can override without import-cycle pain — the classify package
-// must NOT import internal/envelope (same anti-cycle reason
-// internal/dispatch projects its own Envelope type).
+// envelopeTypeProvider holds the production passive-renderable
+// envelope-type lookup. Defined as a function (not a direct call to
+// envelope.PassiveRenderableTypes) so tests can override without
+// import-cycle pain — the classify package must NOT import
+// internal/envelope (same anti-cycle reason internal/dispatch projects
+// its own Envelope type).
 //
-// Production wiring registers the envelope.PassiveRenderableTypes
-// slice via SetEnvelopeTypeProvider at composition time. When unset,
-// the function returns the v1 baseline list (kept in sync with
-// envelope.PassiveRenderableTypes manually; CI catches drift via the
-// route_test.go `TestRouteV1EnvelopeTypes_BaselineMatchesEnvelopePackage`
-// check below).
+// Production wiring registers a provider over
+// envelope.PassiveRenderableTypes via SetEnvelopeTypeProvider at
+// composition time (internal/service/chat_route_dispatch.go::init).
+// When unset, availableEnvelopeTypes() returns the v1 baseline list
+// (kept in sync manually; the drift test
+// TestV1EnvelopeTypeBaseline_MatchesEnvelopePackage in
+// internal/service/chat_route_dispatch_test.go catches drift in CI by
+// importing both packages).
 var envelopeTypeProvider func() []string
 
 // SetEnvelopeTypeProvider installs the production envelope-type lookup
@@ -170,15 +173,16 @@ func SetEnvelopeTypeProvider(p func() []string) {
 
 // v1EnvelopeTypeBaseline is the static fallback list when no provider
 // is installed. Kept in sync with envelope.PassiveRenderableTypes by
-// CI (see route_test.go::TestV1EnvelopeTypeBaseline_MatchesEnvelopePackage,
-// which references envelope.PassiveRenderableTypes by import in the
-// service package's wiring tests, not here).
+// CI (drift test
+// TestV1EnvelopeTypeBaseline_MatchesEnvelopePackage in
+// internal/service/chat_route_dispatch_test.go imports both packages
+// and asserts equality).
 //
 // Drift cost: if a passive-renderable type is added in the envelope
 // package and not here, the classifier won't recognize the explicit-type
 // cue for the new type until the production provider is wired (which
-// is the steady-state path). Acceptable for v1 — the test wiring
-// catches drift in a CI-visible way.
+// is the steady-state path). Acceptable for v1 — the drift test catches
+// any divergence in CI.
 var v1EnvelopeTypeBaseline = []string{
 	"giphy-modal",
 	"document-viewer",
@@ -201,6 +205,20 @@ func availableEnvelopeTypes() []string {
 		return envelopeTypeProvider()
 	}
 	return v1EnvelopeTypeBaseline
+}
+
+// V1EnvelopeTypeBaseline returns a defensive copy of the v1 fallback
+// list of passive-renderable envelope types. Exported for the
+// cross-package drift test (service package imports both classify and
+// envelope and asserts the baseline matches envelope.PassiveRenderableTypes).
+//
+// Production callers should prefer SetEnvelopeTypeProvider over reading
+// the baseline directly — the baseline is the no-provider fallback,
+// not the source of truth.
+func V1EnvelopeTypeBaseline() []string {
+	out := make([]string, len(v1EnvelopeTypeBaseline))
+	copy(out, v1EnvelopeTypeBaseline)
+	return out
 }
 
 // ClassifyRoute walks the priority-ordered heuristics and returns the

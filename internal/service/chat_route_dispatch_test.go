@@ -9,6 +9,7 @@ import (
 	"github.com/hollis-labs/nanite/internal/chat"
 	"github.com/hollis-labs/nanite/internal/classify"
 	"github.com/hollis-labs/nanite/internal/dispatch"
+	"github.com/hollis-labs/nanite/internal/envelope"
 )
 
 // fakeExecutor is a controllable Executor for the route-dispatch wiring
@@ -246,6 +247,32 @@ func TestRouteToIntent(t *testing.T) {
 	for _, c := range cases {
 		if got := routeToIntent(c.r); got != c.want {
 			t.Errorf("routeToIntent(%q) = %q, want %q", c.r, got, c.want)
+		}
+	}
+}
+
+// TestV1EnvelopeTypeBaseline_MatchesEnvelopePackage is the cross-package
+// drift test referenced by classify/route.go. classify can't import
+// envelope (anti-cycle constraint — envelope is downstream of classify),
+// so this test lives in the service package, which already depends on
+// both. It asserts the v1 baseline (used as the no-provider fallback in
+// classify) matches envelope.PassiveRenderableTypes element-for-element
+// in order.
+//
+// If this fails: a passive-renderable type was added/removed/reordered
+// in internal/envelope/validator.go; mirror the change in
+// internal/classify/route.go::v1EnvelopeTypeBaseline.
+func TestV1EnvelopeTypeBaseline_MatchesEnvelopePackage(t *testing.T) {
+	got := classify.V1EnvelopeTypeBaseline()
+	want := envelope.PassiveRenderableTypes
+
+	if len(got) != len(want) {
+		t.Fatalf("baseline length mismatch: got %d, want %d\n  got:  %v\n  want: %v",
+			len(got), len(want), got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Errorf("baseline[%d] = %q, want %q", i, got[i], want[i])
 		}
 	}
 }

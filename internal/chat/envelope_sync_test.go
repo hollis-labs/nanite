@@ -11,7 +11,8 @@ import (
 )
 
 // TestEnvelopeRegistrySync verifies that every core envelope type declared
-// in config/envelopes.yaml (that has a component) has a matching entry in the
+// in the go-envelopes manifest (../go-envelopes/manifest/envelopes.yaml,
+// the source of truth post Cap-5 migration) has a matching entry in the
 // generated frontend registry (ui/src/generated/plugin-envelopes.ts).
 func TestEnvelopeRegistrySync(t *testing.T) {
 	_, thisFile, _, ok := runtime.Caller(0)
@@ -20,8 +21,8 @@ func TestEnvelopeRegistrySync(t *testing.T) {
 	}
 	projectRoot := filepath.Join(filepath.Dir(thisFile), "..", "..")
 
-	// Load the envelope manifest (source of truth).
-	manifestPath := filepath.Join(projectRoot, "config", "envelopes.yaml")
+	// Load the envelope manifest from the lib (source of truth).
+	manifestPath := filepath.Join(projectRoot, "..", "go-envelopes", "manifest", "envelopes.yaml")
 	manifestData, err := os.ReadFile(manifestPath)
 	if err != nil {
 		t.Fatalf("failed to read envelope manifest: %v", err)

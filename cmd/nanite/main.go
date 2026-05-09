@@ -14,11 +14,12 @@ import (
 	"syscall"
 	"time"
 
-	"gopkg.in/yaml.v3"
+	"github.com/hollis-labs/go-envelopes"
 
 	"github.com/hollis-labs/nanite/internal/brand"
 	"github.com/hollis-labs/nanite/internal/config"
 	"github.com/hollis-labs/nanite/internal/coordination"
+	"github.com/hollis-labs/nanite/internal/envelope"
 	"github.com/hollis-labs/nanite/internal/learnings"
 	naniteotel "github.com/hollis-labs/nanite/internal/otel"
 	"github.com/hollis-labs/nanite/internal/reflex"
@@ -158,10 +159,40 @@ func cmdServe(args []string) {
 		slogx.Fatal("failed to seed modes", "err", err)
 	}
 
-	// Load core envelope types from manifest.
-	if coreTypes := loadEnvelopeManifest("config/envelopes.yaml"); len(coreTypes) > 0 {
-		chat.InitCoreTypes(coreTypes)
-		slog.Info("envelope manifest loaded", "count", len(coreTypes))
+	// Load the canonical envelope catalog from go-envelopes (lib v0.1.0).
+	// The lib's embedded manifest replaces nanite/config/envelopes.yaml as the
+	// single source of truth for core type definitions and per-type schemas.
+	envelopeCtx, envelopeCancel := context.WithTimeout(context.Background(), 5*time.Second)
+	envReg, err := envelopes.LoadCore(envelopeCtx)
+	envelopeCancel()
+	if err != nil {
+		slogx.Fatal("envelope registry load failed", "err", err)
+	}
+	chat.SetEnvelopeRegistry(envReg)
+	envelope.SetEnvelopeRegistry(envReg)
+
+	// Mirror the registry's bare core type names into the chat-side
+	// allowlist used by ParseEnvelopes. The registry is authoritative for
+	// schema lookups; chat.registeredTypes stays as a wire-format index
+	// until the orphan/namespacing story lets us collapse them (separate
+	// catalog-cleanup task).
+	coreTypes := envReg.Names()
+	chat.InitCoreTypes(coreTypes)
+	slog.Info("envelope registry loaded", "count", len(coreTypes), "source", "go-envelopes v0.1.0")
+
+	// Register Nanite's five orphan schemas (kb-result, giphy-modal,
+	// resolution-capture, ticket-form, ticket-confirmation) under the
+	// nanite-legacy plugin id. Catalog cleanup is a separate task; this
+	// preserves prior behavior where ValidateEnvelopeData / nanite_show_card
+	// could resolve a schema for these types. Bare names also land in the
+	// chat allowlist so wire-format envelopes carrying them keep parsing.
+	if n, err := envelope.RegisterOrphans(envReg); err != nil {
+		slog.Warn("envelope: partial orphan registration", "registered", n, "err", err)
+	} else {
+		slog.Info("envelope: orphan schemas registered", "count", n, "plugin_id", envelope.LegacyPluginID)
+	}
+	for _, bare := range envelope.OrphanTypes {
+		chat.RegisterEnvelopeType(bare)
 	}
 
 	// Wire the plugin→chat envelope registrar hook (B.4). Without this, the
@@ -231,6 +262,7 @@ func cmdServe(args []string) {
 	logger := plugin.NewLogger(brand.ID + "-plugin")
 	pluginHost := plugin.NewHost(nil, logger)
 	pluginHost.SetStore(s)
+	pluginHost.SetEnvelopeRegistry(envReg)
 	pluginHost.SetMCPRegistrar(mcpManager)
 	pluginHost.RegisterService("store", s)
 	pluginHost.RegisterService("mcp", mcpManager)
@@ -768,36 +800,6 @@ func discoverAndLoadPlugins(pluginHost *plugin.Host, dbPath string, mcpManager *
 	}
 
 	return pluginsDir
-}
-
-// loadEnvelopeManifest reads config/envelopes.yaml and returns the list of
-// core envelope type strings for registration.
-func loadEnvelopeManifest(path string) []string {
-	type entry struct {
-		Type string `yaml:"type"`
-	}
-	type manifest struct {
-		Core []entry `yaml:"core"`
-	}
-
-	data, err := os.ReadFile(path)
-	if err != nil {
-		slogx.Fatal("failed to read envelope manifest", "path", path, "err", err)
-	}
-
-	var m manifest
-	if err := yaml.Unmarshal(data, &m); err != nil {
-		slogx.Fatal("failed to parse envelope manifest", "path", path, "err", err)
-	}
-
-	types := make([]string, 0, len(m.Core))
-	for _, e := range m.Core {
-		if strings.TrimSpace(e.Type) == "" {
-			continue
-		}
-		types = append(types, e.Type)
-	}
-	return types
 }
 
 // loadPersistedMCPServers loads user-configured MCP servers from the database

@@ -5,6 +5,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/hollis-labs/go-envelopes"
 	sdkplugin "github.com/hollis-labs/plugin-sdk"
 )
 
@@ -21,6 +22,10 @@ const objectSchema = `{
 func testHost(t *testing.T) *Host {
 	t.Helper()
 	h := NewHost(http.NewServeMux(), NewLogger("test"))
+	// Stand up an empty registry so RegisterPluginEnvelopeSchema /
+	// ValidatePluginEnvelope have storage. Tests that exercise plugin
+	// types only — without core types — don't need LoadCore.
+	h.SetEnvelopeRegistry(envelopes.NewRegistry())
 	return h
 }
 
@@ -125,14 +130,23 @@ func TestUnloadPluginDropsEnvelopeSchemas(t *testing.T) {
 	if err := h.RegisterPluginEnvelopeSchema("p1", "card", []byte(objectSchema)); err != nil {
 		t.Fatalf("RegisterPluginEnvelopeSchema: %v", err)
 	}
+	if !h.pluginRegistryHas("p1", "card") {
+		t.Fatalf("expected p1.card registered before unload sweep")
+	}
 
-	h.mu.Lock()
-	n := h.unregisterPluginEnvelopeSchemasLocked("p1")
-	h.mu.Unlock()
-	if n != 1 {
+	// Plugin envelope schemas now live in the shared go-envelopes Registry
+	// under "<pluginID>.<envType>". Hot-unload cleanup goes through
+	// Registry.UnregisterPlugin (called from Host.UnloadPlugin); the test
+	// exercises the same path directly to avoid standing up a full plugin
+	// lifecycle for a unit-scoped check.
+	reg := h.EnvelopeRegistry()
+	if reg == nil {
+		t.Fatalf("expected envelope registry on test host")
+	}
+	if n := reg.UnregisterPlugin("p1"); n != 1 {
 		t.Fatalf("expected 1 schema removed, got %d", n)
 	}
-	if got := h.envelopeSchemas["p1"]; got != nil {
-		t.Fatalf("expected schemas for p1 cleared, got %v", got)
+	if h.pluginRegistryHas("p1", "card") {
+		t.Fatalf("expected p1.card cleared from registry after UnregisterPlugin")
 	}
 }

@@ -10,12 +10,12 @@ import (
 	"sync"
 	"time"
 
+	"github.com/hollis-labs/go-envelopes"
 	"github.com/hollis-labs/nanite/internal/plugin/subprocess"
 	"github.com/hollis-labs/nanite/internal/safego"
 	"github.com/hollis-labs/nanite/internal/secrets"
 	"github.com/hollis-labs/nanite/internal/store"
 	"github.com/hollis-labs/plugin-sdk"
-	"github.com/santhosh-tekuri/jsonschema/v6"
 )
 
 // validComponentID matches alphanumeric + hyphens, 2-64 chars, no leading/trailing hyphens.
@@ -130,12 +130,14 @@ type Host struct {
 	filters       *FilterRegistry    // named filter chains
 	eventSubs     []chan plugin.Event // SSE subscribers for event streaming
 	envelopes     map[string]EnvelopeRegistryEntry // envelope type → registry entry (B.4)
-	// envelopeSchemas stores compiled JSON Schemas for plugin-owned envelope
-	// types, keyed by plugin ID then envelope type. Populated at plugin load
-	// via applyManifestRegistrations when the manifest declares a schema path;
-	// cleared on UnloadPlugin via unregisterPluginEnvelopeSchemasLocked. Used
-	// by FilterPluginEnvelopes (B.11) to enforce envelope shape at emission.
-	envelopeSchemas map[string]map[string]*jsonschema.Schema
+	// envelopeRegistry is the shared go-envelopes Registry that owns
+	// compiled JSON Schemas for both core and plugin envelope types.
+	// Plugin types land here under "<pluginID>.<envType>" via
+	// RegisterPluginEnvelopeSchema; UnloadPlugin drops them via
+	// envelopeRegistry.UnregisterPlugin. Set once at startup via
+	// SetEnvelopeRegistry; nil-tolerant so unit tests that don't
+	// exercise schema validation can run without standing up a registry.
+	envelopeRegistry *envelopes.Registry
 	// manifests holds the parsed plugin.yaml for each loaded plugin, keyed by
 	// plugin ID. Populated by applyManifestRegistrations and cleared by
 	// UnloadPlugin. Consumed by the B.7 /api/plugins/registry endpoint to
@@ -192,7 +194,6 @@ func NewHost(router *http.ServeMux, logger plugin.Logger) *Host {
 		configSchemaOwners: make(map[string]struct{}),
 		configs:            make(map[string]*PluginConfig),
 		envelopes:          make(map[string]EnvelopeRegistryEntry),
-		envelopeSchemas:    make(map[string]map[string]*jsonschema.Schema),
 		manifests:          make(map[string]*PluginManifest),
 		router:             router,
 		pluginMux:          NewMutablePluginMux(),
@@ -230,7 +231,6 @@ func NewHostWithStore(store interface{}) *Host {
 		configSchemaOwners: make(map[string]struct{}),
 		configs:            make(map[string]*PluginConfig),
 		envelopes:          make(map[string]EnvelopeRegistryEntry),
-		envelopeSchemas:    make(map[string]map[string]*jsonschema.Schema),
 		manifests:          make(map[string]*PluginManifest),
 		router:             http.NewServeMux(),
 		pluginMux:          NewMutablePluginMux(),
@@ -621,6 +621,20 @@ func (h *Host) SetStore(s *store.Store) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	h.store = s
+}
+
+// SetEnvelopeRegistry installs the shared go-envelopes Registry used for
+// plugin envelope schema storage and lookup. Called once at startup
+// before any plugin loads. Plugin-owned envelope schemas land in this
+// registry under "<pluginID>.<envType>" via RegisterPluginEnvelopeSchema;
+// UnloadPlugin sweeps them via Registry.UnregisterPlugin. A nil registry
+// is tolerated so unit tests that don't exercise schema validation can
+// run without one — RegisterPluginEnvelopeSchema returns an error in
+// that case.
+func (h *Host) SetEnvelopeRegistry(reg *envelopes.Registry) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.envelopeRegistry = reg
 }
 
 // GetConfig returns a configuration value for the currently-loading plugin.
@@ -1397,9 +1411,13 @@ func (h *Host) UnloadPlugin(id string) error {
 
 	// 9b. Envelope schemas (B.11 strict validation). Drop all compiled
 	// schemas owned by this plugin so a stale schema can't validate a
-	// re-registered envelope type after hot-unload + reload.
-	if n := h.unregisterPluginEnvelopeSchemasLocked(id); n > 0 {
-		h.logger.Debug("plugin unload: removed envelope schemas", "plugin", id, "count", n)
+	// re-registered envelope type after hot-unload + reload. Storage
+	// lives in the shared go-envelopes Registry under "<id>.<envType>"
+	// since the migration to the lib (Cap 5).
+	if h.envelopeRegistry != nil {
+		if n := h.envelopeRegistry.UnregisterPlugin(id); n > 0 {
+			h.logger.Debug("plugin unload: removed envelope schemas", "plugin", id, "count", n)
+		}
 	}
 
 	// 10. HTTP routes — remove from mutable plugin mux. Forwarder entries on

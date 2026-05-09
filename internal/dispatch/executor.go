@@ -201,13 +201,6 @@ type Executor interface {
 	Execute(ctx context.Context, req ExecutorRequest) (*ExecutorResponse, error)
 }
 
-// ErrExecutorNotRegistered is returned by DispatchExecutor when no
-// registered executor recognizes the request's Intent. Indicates a
-// classifier coverage gap (B1 §5: surfaces as ExecutorFailureInvalidIntent
-// to the Chat agent, but the wiring layer typically promotes Go errors
-// to typed failures itself).
-var ErrExecutorNotRegistered = errors.New("dispatch: no executor registered for intent")
-
 // DispatchExecutor is the in-process executor entry seam. It looks up
 // the Executor that recognizes req.Intent and invokes Execute. Returns
 // the executor's response unchanged.
@@ -222,11 +215,16 @@ var ErrExecutorNotRegistered = errors.New("dispatch: no executor registered for 
 // emits a "render_envelope" intent. The executor argument is provided
 // by the service-layer composition root.
 //
-// Returns:
-//   - non-nil *ExecutorResponse with Failure set when the executor
-//     reports an agent-visible failure (the typical case);
-//   - nil *ExecutorResponse with a Go error only on harness-level
-//     wiring problems (nil executor, intent mismatch).
+// Return contract:
+//   - A non-nil *ExecutorResponse is returned in the common case. When
+//     the request's Intent is empty or unrecognized, the response carries
+//     a typed Failure with code ExecutorFailureInvalidIntent (and nil
+//     error). Callers branch on resp.Failure, NOT on a Go sentinel.
+//   - A non-nil Go error is reserved for harness/runtime failures —
+//     specifically a nil Executor argument today, plus whatever the
+//     wrapped Executor.Execute returns (which by its own contract is
+//     reserved for wiring problems). Agent-visible failures, including
+//     unknown intents, are typed responses, never errors.
 func DispatchExecutor(ctx context.Context, executor Executor, req ExecutorRequest) (*ExecutorResponse, error) {
 	if executor == nil {
 		return nil, errors.New("dispatch: executor is nil")

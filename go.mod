@@ -26,6 +26,7 @@ require (
 	github.com/hollis-labs/vanta-conduit v0.6.0
 	github.com/modelcontextprotocol/go-sdk v1.5.0
 	github.com/oklog/ulid/v2 v2.1.1
+	github.com/openai/openai-go v1.12.0
 	github.com/santhosh-tekuri/jsonschema/v6 v6.0.2
 )
 
@@ -37,6 +38,10 @@ require (
 	github.com/hollis-labs/go-runner v0.3.0 // indirect
 	github.com/segmentio/asm v1.1.3 // indirect
 	github.com/segmentio/encoding v0.5.4 // indirect
+	github.com/tidwall/gjson v1.18.0 // indirect
+	github.com/tidwall/match v1.1.1 // indirect
+	github.com/tidwall/pretty v1.2.1 // indirect
+	github.com/tidwall/sjson v1.2.5 // indirect
 	go.opentelemetry.io/otel/exporters/otlp/otlptrace v1.41.0 // indirect
 	go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracehttp v1.41.0 // indirect
 	go.opentelemetry.io/proto/otlp v1.9.0 // indirect
@@ -105,9 +110,9 @@ require (
 	// CW-20260502-0005: go-agent-broker scaffold (no-op impl). Local replace while
 	// the sibling repo lacks a published tag — drop once the first release lands.
 	github.com/hollis-labs/go-agent-broker v0.0.0-00010101000000-000000000000
-	github.com/hollis-labs/go-embed-contracts v0.1.0 // indirect
-	github.com/hollis-labs/go-llm-contracts v0.1.0 // indirect
-	github.com/hollis-labs/go-llm-types v0.1.0 // indirect
+	github.com/hollis-labs/go-embed-contracts v0.1.0
+	github.com/hollis-labs/go-llm-contracts v0.1.0
+	github.com/hollis-labs/go-llm-types v0.1.0
 )
 
 replace github.com/hollis-labs/go-agent-broker => ../go-agent-broker

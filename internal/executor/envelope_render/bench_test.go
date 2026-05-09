@@ -186,15 +186,19 @@ func fixedClock() func() time.Time {
 // envelope. If a future schema change rejects one of these payloads the
 // benchmark numbers are no longer comparable, so we trip the test loud.
 //
+// The gate exercises the same entry seam as BenchmarkDispatchExecutor —
+// dispatch.DispatchExecutor — so a regression in the dispatch-side intent
+// routing/guard logic fails the gate, not just an Executor.Execute change.
+//
 // Run with: go test ./internal/executor/envelope_render -run TestBenchCorpus_AllPass
 func TestBenchCorpus_AllPass(t *testing.T) {
 	exec := &Executor{Clock: fixedClock()}
 	for _, p := range benchCorpus() {
 		p := p
 		t.Run(p.name, func(t *testing.T) {
-			resp, err := exec.Execute(context.Background(), p.req)
+			resp, err := dispatch.DispatchExecutor(context.Background(), exec, p.req)
 			if err != nil {
-				t.Fatalf("Execute: %v", err)
+				t.Fatalf("DispatchExecutor: %v", err)
 			}
 			if resp == nil {
 				t.Fatal("nil response")

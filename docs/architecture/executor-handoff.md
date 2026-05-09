@@ -238,6 +238,8 @@ Three phases. Each phase has explicit graduation criteria measured by B6 telemet
 
 **Phase 2 — Lens primitives removed from chat surface (B4, CW-20260429-0033).** Once Phase 1 graduates, the chat agent's tool surface drops the lens primitives. `tool_describe`, `tool_validate`, `lesson_capture` are no longer registered on the chat profile. Chat-direct fallback is removed; classifier misses surface as `invalid_intent` and the chat agent narrates the gap rather than improvising. Chat prompt (B5) is updated to remove the lens framing entirely; system prompt budget targets ~310 words (the pre-c107 baseline).
 
+**Phase 2 graduation status (2026-05-09).** B4 has landed (`internal/dispatch/chat_surface.go`, `dispatch.ChatToolSurface` + `DefaultChatToolSurface()`; wired in `service.toolServiceImpl.SelectForAgent` for chat-role profiles only — slug `default`). The four lens primitives (`tool_describe`, `tool_validate`, `lesson_capture`, `card_show`) are filtered out of the chat agent's tool catalog; non-chat profiles (Worker, Planner, executor sessions, hint-selector, mux-orchestrator) bypass the filter. Phase 2 graduation criteria met: (a) ≤ 400-word prompt — current 347w / 12 bullets at ceiling per B5; (b) lens cluster removed from chat surface — measured at ~7,467 chars / ~1,867 tokens by B6's `docs/measurements/executor-handoff-pilot.md`. The live ≤ 5/100 `invalid_intent` measurement remains gated on `dispatch_executor` self-tool wiring (B2) plus the live-LLM benchmark procedure (B6); B4 unblocks that measurement but does not itself produce it.
+
 **Graduation to Phase 3:**
 
 - ≤ 5 `invalid_intent` failures per 100 envelope-emit attempts (classifier coverage validated).

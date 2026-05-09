@@ -49,7 +49,7 @@ const (
 	// can plausibly fix on the next call: missing required fields,
 	// additional/unknown properties, enum-value mismatches, and the
 	// generic "data does not match schema" prose form. This is the
-	// originating-incident kind (chat session c107 — `nanite_show_card`).
+	// originating-incident kind (chat session c107 — `card_show`).
 	KindSchemaValidation Kind = "schema_validation"
 
 	// KindTypeCoercion covers cases where the value's JSON type is wrong
@@ -61,7 +61,7 @@ const (
 	// repair seed.
 	KindTypeCoercion Kind = "type_coercion"
 
-	// KindWrongCardType covers the `nanite_show_card` (and adjacent)
+	// KindWrongCardType covers the `card_show` (and adjacent)
 	// envelope-emit surface specifically: the agent picked an envelope
 	// type that isn't passive-renderable, or named a type that isn't
 	// registered. C2's repair pass can remap the type when the data
@@ -157,7 +157,7 @@ func (e *RecoverableError) Unwrap() error {
 //  4. Unrecoverable prose patterns (auth, permission, service unavailable,
 //     not implemented, network) → KindNone explicitly.
 //  5. Recoverable prose patterns (envelope.ValidateData formatted message,
-//     nanite_show_card "not addressable" + "no schema registered" etc.) →
+//     card_show "not addressable" + "no schema registered" etc.) →
 //     the matching Kind.
 //  6. Fallback → KindNone.
 func Classify(err error) Kind {
@@ -195,7 +195,7 @@ func Classify(err error) Kind {
 
 	// (5) Recoverable prose patterns.
 	switch {
-	case strings.Contains(msg, "not addressable through nanite_show_card"),
+	case strings.Contains(msg, "not addressable through card_show"),
 		strings.Contains(msg, "is not on the passive-renderable allow-list"),
 		strings.Contains(msg, "no schema registered for envelope type"),
 		strings.Contains(msg, "unknown envelope type"):

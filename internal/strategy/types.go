@@ -21,7 +21,7 @@
 //
 //   - Multiple stop_points / structured plans with checkpoints.
 //   - Active sub-agent dispatch from the strategy layer (today's loop
-//     still relies on the LLM choosing nanite_execute_task; the strategy
+//     still relies on the LLM choosing task_execute; the strategy
 //     decision logs the recommendation).
 //   - LLM-generated clarifying questions (we use a fixed template).
 //   - Result-cache or tool-broker enrichment as strategy inputs.

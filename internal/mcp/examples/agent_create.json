@@ -8,6 +8,6 @@
       "description": "Multi-step planning specialist.",
       "default_model": "claude-opus-4-7"
     },
-    "notes": "Use nanite_list_agents first to confirm the slug is unique."
+    "notes": "Use agent_list first to confirm the slug is unique."
   }
 ]

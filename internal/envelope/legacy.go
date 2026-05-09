@@ -46,7 +46,7 @@ func SetupForTesting() *envelopes.Registry {
 // but were never carried into the YAML manifest because they predate the
 // catalog tightening. Until the catalog cleanup task lands and decides
 // promote-vs-delete for each, Nanite registers them at startup so
-// callers like nanite_show_card and chat.BuildKBEnvelope continue to
+// callers like card_show and chat.BuildKBEnvelope continue to
 // resolve schemas.
 const LegacyPluginID = "nanite-legacy"
 

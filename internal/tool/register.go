@@ -30,14 +30,14 @@ var generalToolCategories = map[string]string{
 
 // selfToolCategories maps self-service tools to categories.
 var selfToolCategories = map[string]string{
-	"nanite_create_skill":    CategorySession,
-	"nanite_list_skills":     CategorySession,
-	"nanite_update_skill":    CategorySession,
-	"nanite_delete_skill":    CategorySession,
-	"nanite_create_agent":    CategoryAgent,
-	"nanite_list_agents":     CategoryAgent,
-	"nanite_update_agent":    CategoryAgent,
-	"nanite_navigate_engine": CategoryAgent,
+	"skill_create":    CategorySession,
+	"skill_list":     CategorySession,
+	"skill_update":    CategorySession,
+	"skill_delete":    CategorySession,
+	"agent_create":    CategoryAgent,
+	"agent_list":     CategoryAgent,
+	"agent_update":    CategoryAgent,
+	"engine_navigate": CategoryAgent,
 }
 
 // WrapExistingTools converts a slice of provider.ToolDefinition from the

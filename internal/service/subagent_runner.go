@@ -242,7 +242,7 @@ func (r *ChatRunner) Run(ctx context.Context, run *subagent.Run) (*subagent.Resu
 	// Path-grant lineage: stamp (worker → parent) so the worker session's
 	// dev_* lookups can fall through to grants the user explicitly issued
 	// in the parent chat thread (e.g. the ~/Projects-apps/nanite mention
-	// that prompted nanite_execute_task). Profile permissions stay
+	// that prompted task_execute). Profile permissions stay
 	// isolated; this only widens the session-scoped explicit-mention
 	// grant store, which is naturally scoped to the conversation thread.
 	// Cleared via defer so the entry's lifetime is exactly the worker's.

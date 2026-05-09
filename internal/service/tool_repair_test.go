@@ -91,7 +91,7 @@ func (r *transportRecorder) hook() func(ctx context.Context, agentID, toolName s
 }
 
 // TestExecute_Repair_Success_WrapsResultWithRepairNote is the C2
-// acceptance gate: a `nanite_show_card` call with a missing
+// acceptance gate: a `card_show` call with a missing
 // required field is repaired by the LLM, retried once, and the
 // success result comes back wrapped with a repair_note.
 func TestExecute_Repair_Success_WrapsResultWithRepairNote(t *testing.T) {
@@ -111,7 +111,7 @@ func TestExecute_Repair_Success_WrapsResultWithRepairNote(t *testing.T) {
 	}
 
 	args := map[string]any{"type": "report-card", "data": map[string]any{"title": "X", "sections": []any{"a"}}}
-	res, err := svc.Execute(context.Background(), "agent-1", "nanite_show_card", args)
+	res, err := svc.Execute(context.Background(), "agent-1", "card_show", args)
 	if err != nil {
 		t.Fatalf("Execute returned error: %v", err)
 	}
@@ -134,7 +134,7 @@ func TestExecute_Repair_Success_WrapsResultWithRepairNote(t *testing.T) {
 	if note["lesson_hint"] != "report-card requires metrics, not sections" {
 		t.Errorf("unexpected lesson_hint: %v", note["lesson_hint"])
 	}
-	if note["tool"] != "nanite_show_card" {
+	if note["tool"] != "card_show" {
 		t.Errorf("unexpected tool: %v", note["tool"])
 	}
 	if note["kind"] != "schema_validation" {
@@ -170,7 +170,7 @@ func TestExecute_Repair_MissingRequired_ReturnsStructuredEnvelope(t *testing.T) 
 	}
 
 	args := map[string]any{"type": "report-card", "data": map[string]any{"title": "X"}}
-	res, err := svc.Execute(context.Background(), "agent-1", "nanite_show_card", args)
+	res, err := svc.Execute(context.Background(), "agent-1", "card_show", args)
 	if err != nil {
 		t.Fatalf("Execute returned error: %v", err)
 	}
@@ -209,7 +209,7 @@ func TestExecute_Repair_RetryFails_ReturnsOriginalEnvelope(t *testing.T) {
 		transportHook: transport.hook(),
 	}
 
-	res, err := svc.Execute(context.Background(), "agent-1", "nanite_show_card", map[string]any{"x": 1})
+	res, err := svc.Execute(context.Background(), "agent-1", "card_show", map[string]any{"x": 1})
 	if err != nil {
 		t.Fatalf("Execute returned error: %v", err)
 	}
@@ -250,7 +250,7 @@ func TestExecute_Repair_IterationCap_Hard(t *testing.T) {
 		transportHook: transport.hook(),
 	}
 
-	_, err := svc.Execute(context.Background(), "agent-1", "nanite_show_card", map[string]any{"x": 1})
+	_, err := svc.Execute(context.Background(), "agent-1", "card_show", map[string]any{"x": 1})
 	if err != nil {
 		t.Fatalf("Execute returned error: %v", err)
 	}
@@ -276,7 +276,7 @@ func TestExecute_Repair_TimeoutFallthrough(t *testing.T) {
 		transportHook: transport.hook(),
 	}
 
-	res, err := svc.Execute(context.Background(), "agent-1", "nanite_show_card", map[string]any{"x": 1})
+	res, err := svc.Execute(context.Background(), "agent-1", "card_show", map[string]any{"x": 1})
 	if err != nil {
 		t.Fatalf("Execute returned error: %v", err)
 	}
@@ -311,7 +311,7 @@ func TestExecute_Repair_EnvDisabled_BypassesPipeline(t *testing.T) {
 		transportHook: transport.hook(),
 	}
 
-	res, err := svc.Execute(context.Background(), "agent-1", "nanite_show_card", map[string]any{"x": 1})
+	res, err := svc.Execute(context.Background(), "agent-1", "card_show", map[string]any{"x": 1})
 	if err != nil {
 		t.Fatalf("Execute returned error: %v", err)
 	}
@@ -345,7 +345,7 @@ func TestExecute_Repair_UserPrefNever_BypassesPipeline(t *testing.T) {
 		transportHook: transport.hook(),
 	}
 
-	res, err := svc.Execute(context.Background(), "agent-1", "nanite_show_card", map[string]any{"x": 1})
+	res, err := svc.Execute(context.Background(), "agent-1", "card_show", map[string]any{"x": 1})
 	if err != nil {
 		t.Fatalf("Execute returned error: %v", err)
 	}
@@ -369,7 +369,7 @@ func TestExecute_Repair_NoRepairConfig_PreservesC1Envelope(t *testing.T) {
 		transportHook: transport.hook(),
 	}
 
-	res, err := svc.Execute(context.Background(), "agent-1", "nanite_show_card", map[string]any{"x": 1})
+	res, err := svc.Execute(context.Background(), "agent-1", "card_show", map[string]any{"x": 1})
 	if err != nil {
 		t.Fatalf("Execute returned error: %v", err)
 	}
@@ -421,7 +421,7 @@ func TestExecute_Repair_TransportSuccess_Unchanged(t *testing.T) {
 		transportHook: transport.hook(),
 	}
 
-	res, err := svc.Execute(context.Background(), "agent-1", "nanite_show_card", nil)
+	res, err := svc.Execute(context.Background(), "agent-1", "card_show", nil)
 	if err != nil {
 		t.Fatalf("Execute returned error: %v", err)
 	}

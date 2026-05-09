@@ -35,7 +35,7 @@ var VantaToolDescriptions = map[string]string{
 }
 
 // VantaToolRelations records cross-references for Vanta-origin tools so
-// `nanite_tool_describe` (renamed `tool_describe` in sub-ticket 3) can surface
+// `tool_describe` (renamed `tool_describe` in sub-ticket 3) can surface
 // related tools/skills inline. Same shape as the existing self-tool
 // describeRelations map, kept separate so the rename in sub-ticket 3 doesn't
 // have to thread Vanta entries into a self-tool registry.
@@ -72,7 +72,7 @@ var VantaToolRelations = map[string]struct {
 //
 // Authoring rationale:
 //   - Reactive framing — the description explicitly tells the agent NOT to
-//     sweep memory on every turn, mirroring `nanite_memory_recall`'s
+//     sweep memory on every turn, mirroring `memory_recall`'s
 //     description (which exists for the local in-process store and was
 //     scaffolded against the c114 describe-gate anti-pattern).
 //   - Contract block matches Vanta's own argument schema (queries +

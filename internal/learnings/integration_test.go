@@ -36,7 +36,7 @@ func TestIntegration_CaptureAndRecall_RoundTrip(t *testing.T) {
 	hint := "report-card requires {title, metrics}; sections are not allowed"
 	out, err := rec.Capture(ctx, CaptureInput{
 		Scope:         ScopeToolUse,
-		Subject:       "nanite_show_card",
+		Subject:       "card_show",
 		Hint:          hint,
 		SourceEventID: "evt-roundtrip",
 		SessionID:     "test-session",
@@ -49,7 +49,7 @@ func TestIntegration_CaptureAndRecall_RoundTrip(t *testing.T) {
 		t.Fatal("Capture returned nil outcome")
 	}
 
-	hints := rcl.RecallByToolName(ctx, "default", "nanite_show_card")
+	hints := rcl.RecallByToolName(ctx, "default", "card_show")
 	if len(hints) == 0 {
 		t.Fatal("RecallByToolName returned no hints; expected the just-captured lesson")
 	}
@@ -66,8 +66,8 @@ func TestIntegration_CaptureAndRecall_RoundTrip(t *testing.T) {
 }
 
 // TestIntegration_DifferentToolsDoNotBleed verifies the per-tool
-// namespace isolation: a learning about nanite_show_card must NOT
-// surface when recalling for nanite_giphy_search.
+// namespace isolation: a learning about card_show must NOT
+// surface when recalling for giphy_search.
 func TestIntegration_DifferentToolsDoNotBleed(t *testing.T) {
 	svc := newConduitMemory(t)
 	rec := NewRecorder(svc)
@@ -76,16 +76,16 @@ func TestIntegration_DifferentToolsDoNotBleed(t *testing.T) {
 
 	if _, err := rec.Capture(ctx, CaptureInput{
 		Scope:     ScopeToolUse,
-		Subject:   "nanite_show_card",
+		Subject:   "card_show",
 		Hint:      "report-card requires metrics",
 		SessionID: "s1",
 	}); err != nil {
 		t.Fatalf("Capture: %v", err)
 	}
 
-	hits := rcl.RecallByToolName(ctx, "default", "nanite_giphy_search")
+	hits := rcl.RecallByToolName(ctx, "default", "giphy_search")
 	if len(hits) != 0 {
-		t.Errorf("namespaces leaked: nanite_giphy_search recall returned %d hits, want 0", len(hits))
+		t.Errorf("namespaces leaked: giphy_search recall returned %d hits, want 0", len(hits))
 	}
 }
 
@@ -103,7 +103,7 @@ func TestIntegration_AcceptanceFromTicket(t *testing.T) {
 	const lesson = "report-card requires {title, metrics}; sections are not allowed"
 	out, err := rec.Capture(ctx, CaptureInput{
 		Scope:   ScopeToolUse,
-		Subject: "nanite_show_card",
+		Subject: "card_show",
 		Hint:    lesson,
 	})
 	if err != nil {
@@ -112,7 +112,7 @@ func TestIntegration_AcceptanceFromTicket(t *testing.T) {
 	if out.Namespace != "user/default/memory" {
 		t.Errorf("unexpected namespace: %s", out.Namespace)
 	}
-	hints := rcl.RecallByToolName(ctx, "default", "nanite_show_card")
+	hints := rcl.RecallByToolName(ctx, "default", "card_show")
 	if len(hints) == 0 {
 		t.Fatal("recall surfaced zero hints; expected the just-captured lesson")
 	}

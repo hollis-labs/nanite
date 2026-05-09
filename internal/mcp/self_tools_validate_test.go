@@ -20,11 +20,11 @@ type validateRespErrItem struct {
 	Suggestion string `json:"suggestion,omitempty"`
 }
 
-// callValidateForTest is a small helper that invokes nanite_validate via
+// callValidateForTest is a small helper that invokes tool_validate via
 // the public CallTool dispatch path and unmarshals the result.
 func callValidateForTest(t *testing.T, st *SelfToolsTransport, args map[string]any) validateResp {
 	t.Helper()
-	res, err := st.CallTool(context.Background(), "nanite_validate", args)
+	res, err := st.CallTool(context.Background(), "tool_validate", args)
 	if err != nil {
 		t.Fatalf("CallTool error: %v", err)
 	}
@@ -49,7 +49,7 @@ func callValidateForTest(t *testing.T, st *SelfToolsTransport, args map[string]a
 func TestValidate_ShowCard_ValidReportCard(t *testing.T) {
 	st := newSelfTools(t)
 	resp := callValidateForTest(t, st, map[string]any{
-		"tool_name": "nanite_show_card",
+		"tool_name": "card_show",
 		"args": map[string]any{
 			"type": "report-card",
 			"data": map[string]any{
@@ -72,7 +72,7 @@ func TestValidate_ShowCard_ValidReportCard(t *testing.T) {
 func TestValidate_ShowCard_AdditionalPropsRejected(t *testing.T) {
 	st := newSelfTools(t)
 	resp := callValidateForTest(t, st, map[string]any{
-		"tool_name": "nanite_show_card",
+		"tool_name": "card_show",
 		"args": map[string]any{
 			"type": "report-card",
 			"data": map[string]any{
@@ -117,7 +117,7 @@ func TestValidate_ShowCard_AdditionalPropsRejected(t *testing.T) {
 //
 // `artifact-mini` is intentionally absent: it is on
 // envelope.PassiveRenderableTypes (the IsPassiveRenderable Go gate) but
-// is NOT listed in the nanite_show_card top-level input-schema enum at
+// is NOT listed in the card_show top-level input-schema enum at
 // internal/mcp/self_tools.go. That asymmetry is a pre-existing
 // inconsistency outside this ticket's scope (B1 — CW-20260429-0006);
 // surfacing here as a documented mismatch rather than masking it. The
@@ -142,7 +142,7 @@ func TestValidate_ShowCard_AllPassiveRenderables(t *testing.T) {
 		envType, data := envType, data
 		t.Run(envType, func(t *testing.T) {
 			resp := callValidateForTest(t, st, map[string]any{
-				"tool_name": "nanite_show_card",
+				"tool_name": "card_show",
 				"args": map[string]any{
 					"type": envType,
 					"data": data,
@@ -161,7 +161,7 @@ func TestValidate_ShowCard_AllPassiveRenderables(t *testing.T) {
 func TestValidate_ShowCard_MissingRequiredHints(t *testing.T) {
 	st := newSelfTools(t)
 	resp := callValidateForTest(t, st, map[string]any{
-		"tool_name": "nanite_show_card",
+		"tool_name": "card_show",
 		"args": map[string]any{
 			"type": "report-card",
 			"data": map[string]any{"title": "X"}, // missing metrics
@@ -189,7 +189,7 @@ func TestValidate_ShowCard_MissingRequiredHints(t *testing.T) {
 func TestValidate_ShowCard_UnknownEnvelopeType(t *testing.T) {
 	st := newSelfTools(t)
 	resp := callValidateForTest(t, st, map[string]any{
-		"tool_name": "nanite_show_card",
+		"tool_name": "card_show",
 		"args": map[string]any{
 			"type": "approval-card", // not on the passive-renderable allow-list
 			"data": map[string]any{"x": 1},
@@ -221,12 +221,12 @@ func TestValidate_ShowCard_UnknownEnvelopeType(t *testing.T) {
 // TestValidate_NonEnvelopeSelfTool exercises the non-envelope path: a
 // plain self-tool's input schema is checked against the args.
 //
-// nanite_create_skill has required {name, slug, description}; an empty
+// skill_create has required {name, slug, description}; an empty
 // args object should yield three missing-property errors.
 func TestValidate_NonEnvelopeSelfTool(t *testing.T) {
 	st := newSelfTools(t)
 	resp := callValidateForTest(t, st, map[string]any{
-		"tool_name": "nanite_create_skill",
+		"tool_name": "skill_create",
 		"args":      map[string]any{},
 	})
 	if resp.Valid {
@@ -252,7 +252,7 @@ func TestValidate_NonEnvelopeSelfTool(t *testing.T) {
 func TestValidate_NonEnvelopeSelfTool_HappyPath(t *testing.T) {
 	st := newSelfTools(t)
 	resp := callValidateForTest(t, st, map[string]any{
-		"tool_name": "nanite_create_skill",
+		"tool_name": "skill_create",
 		"args": map[string]any{
 			"name":        "X",
 			"slug":        "x",
@@ -264,14 +264,14 @@ func TestValidate_NonEnvelopeSelfTool_HappyPath(t *testing.T) {
 	}
 }
 
-// TestValidate_TodoCreate covers nanite_todo_create — another
+// TestValidate_TodoCreate covers todo_create — another
 // non-envelope tool with the required field "title" — to confirm the
 // path generalises beyond the skill/agent set.
 func TestValidate_TodoCreate(t *testing.T) {
 	st := newSelfTools(t)
 	// missing required title
 	resp := callValidateForTest(t, st, map[string]any{
-		"tool_name": "nanite_todo_create",
+		"tool_name": "todo_create",
 		"args":      map[string]any{},
 	})
 	if resp.Valid {
@@ -289,7 +289,7 @@ func TestValidate_TodoCreate(t *testing.T) {
 
 	// happy path
 	resp = callValidateForTest(t, st, map[string]any{
-		"tool_name": "nanite_todo_create",
+		"tool_name": "todo_create",
 		"args":      map[string]any{"title": "test"},
 	})
 	if !resp.Valid {
@@ -320,8 +320,8 @@ func TestValidate_UnknownTool(t *testing.T) {
 // the validator surfaces it as a structured error rather than crashing.
 func TestValidate_MissingArgsField(t *testing.T) {
 	st := newSelfTools(t)
-	res, err := st.CallTool(context.Background(), "nanite_validate", map[string]any{
-		"tool_name": "nanite_show_card",
+	res, err := st.CallTool(context.Background(), "tool_validate", map[string]any{
+		"tool_name": "card_show",
 		// args field omitted entirely
 	})
 	if err != nil {
@@ -343,12 +343,12 @@ func TestValidate_MissingArgsField(t *testing.T) {
 }
 
 // TestValidate_TopLevelInputSchema verifies the top-level input-schema
-// pass on nanite_show_card flags missing `type` (the schema requires it)
+// pass on card_show flags missing `type` (the schema requires it)
 // independently of the per-data validation.
 func TestValidate_TopLevelInputSchema(t *testing.T) {
 	st := newSelfTools(t)
 	resp := callValidateForTest(t, st, map[string]any{
-		"tool_name": "nanite_show_card",
+		"tool_name": "card_show",
 		"args": map[string]any{
 			"data": map[string]any{"title": "X", "metrics": []any{}},
 			// `type` omitted — top-level schema requires it.
@@ -368,13 +368,13 @@ func TestValidate_TopLevelInputSchema(t *testing.T) {
 	}
 }
 
-// TestValidate_SelfIntrospection — nanite_validate can validate calls
+// TestValidate_SelfIntrospection — tool_validate can validate calls
 // to itself. The schema requires {tool_name, args}; an empty args here
 // should flag both as missing.
 func TestValidate_SelfIntrospection(t *testing.T) {
 	st := newSelfTools(t)
 	resp := callValidateForTest(t, st, map[string]any{
-		"tool_name": "nanite_validate",
+		"tool_name": "tool_validate",
 		"args":      map[string]any{},
 	})
 	if resp.Valid {

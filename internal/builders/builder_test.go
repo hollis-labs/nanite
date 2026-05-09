@@ -453,7 +453,7 @@ func TestBuilderStep_NoActiveSession(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error when no session active")
 	}
-	if !strings.Contains(err.Error(), "nanite_start_builder") {
-		t.Errorf("expected error to mention nanite_start_builder, got: %v", err)
+	if !strings.Contains(err.Error(), "builder_start") {
+		t.Errorf("expected error to mention builder_start, got: %v", err)
 	}
 }

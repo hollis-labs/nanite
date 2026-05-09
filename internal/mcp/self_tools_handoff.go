@@ -12,7 +12,7 @@ import (
 	"github.com/hollis-labs/nanite/internal/store"
 )
 
-// handoffStashToolDefinition returns the nanite_handoff_stash self-tool —
+// handoffStashToolDefinition returns the handoff_stash self-tool —
 // the agent-facing primitive for self-authored continuity (Glass-4,
 // CW-20260502-0015, SP-20260502-0001).
 //
@@ -21,7 +21,7 @@ import (
 // the harness preserves it across compaction and re-injects it post.
 func handoffStashToolDefinition() Tool {
 	return Tool{
-		Name: "nanite_handoff_stash",
+		Name: "handoff_stash",
 		Description: "Write a self-authored handoff that survives compaction. Use proactively at natural checkpoints in long-running sessions — not only at compaction time.\n\n" +
 			"**When to use:** After locking a decision, completing a phase, or whenever you'd want a future-self version of you (post-compaction) to pick up coherently. Aim for one stash per natural checkpoint, not per turn.\n\n" +
 			"**Schema:**\n" +
@@ -70,12 +70,12 @@ func handoffStashToolDefinition() Tool {
 	}
 }
 
-// handoffPointersExpandToolDefinition returns the nanite_handoff_pointers_expand
+// handoffPointersExpandToolDefinition returns the handoff_pointers_expand
 // self-tool. Used by the post-compaction agent to retrieve the full payload
 // of a stashed handoff via its cache_key (Glass-4, CW-20260502-0015).
 func handoffPointersExpandToolDefinition() Tool {
 	return Tool{
-		Name: "nanite_handoff_pointers_expand",
+		Name: "handoff_pointers_expand",
 		Description: "Retrieve the full payload of a previously-stashed handoff by cache_key.\n\n" +
 			"**When to use:** When the SlotHandoff content references an `active_pointers` entry and you need the full body the pointer summarized.\n\n" +
 			"**Output:** The decoded handoff payload (`{session_intent, next_step_anchor, recent_decisions, active_pointers}`).",
@@ -88,7 +88,7 @@ func handoffPointersExpandToolDefinition() Tool {
 				},
 				"cache_key": map[string]any{
 					"type":        "string",
-					"description": "The cache_key returned by a prior nanite_handoff_stash call.",
+					"description": "The cache_key returned by a prior handoff_stash call.",
 				},
 			},
 			"required": []string{"session_id", "cache_key"},
@@ -96,7 +96,7 @@ func handoffPointersExpandToolDefinition() Tool {
 	}
 }
 
-// callHandoffStash dispatches nanite_handoff_stash. Validates the input
+// callHandoffStash dispatches handoff_stash. Validates the input
 // against ctxpkg.ValidateHandoff (caps, required fields, total budget),
 // persists it as a Glass-4 envelope in handoff_stashes, and returns
 // `{cache_key, validated}` for the agent to record.
@@ -165,7 +165,7 @@ func (st *SelfToolsTransport) callHandoffStash(_ context.Context, args map[strin
 	return textResult(string(body)), nil
 }
 
-// callHandoffPointersExpand dispatches nanite_handoff_pointers_expand.
+// callHandoffPointersExpand dispatches handoff_pointers_expand.
 // Returns the full HandoffPayload bytes for the (session_id, cache_key) pair.
 func (st *SelfToolsTransport) callHandoffPointersExpand(_ context.Context, args map[string]any) (*ToolResult, error) {
 	sessionID := strArg(args, "session_id", "")

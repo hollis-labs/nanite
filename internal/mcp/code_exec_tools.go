@@ -13,7 +13,7 @@ import (
 	"github.com/hollis-labs/nanite/internal/truncate"
 )
 
-// CodeExecTransport provides the nanite_code_execute built-in tool for
+// CodeExecTransport provides the code_execute built-in tool for
 // running code in the agent sandbox with full isolation.
 type CodeExecTransport struct {
 	// DefaultSessionID is used when the tool caller does not provide a session_id.
@@ -33,11 +33,11 @@ func NewCodeExecTransport(defaultSessionID string) *CodeExecTransport {
 func (c *CodeExecTransport) ListTools(_ context.Context) ([]Tool, error) {
 	return []Tool{
 		{
-			Name: "nanite_code_execute",
+			Name: "code_execute",
 			Description: "Execute code in a sandboxed environment. Runs the provided code in an isolated sandbox directory " +
 				"with restricted permissions. Use for running scripts, testing code snippets, or performing computations. " +
 				"Output is truncated if too large. " +
-				"Tip: for multi-step workflows, use dev_write to write a script to disk, nanite_code_execute to run it, " +
+				"Tip: for multi-step workflows, use dev_write to write a script to disk, code_execute to run it, " +
 				"and dev_read to inspect output files.",
 			InputSchema: map[string]any{
 				"type": "object",
@@ -70,7 +70,7 @@ func (c *CodeExecTransport) ListTools(_ context.Context) ([]Tool, error) {
 
 // CallTool dispatches to the code execution handler.
 func (c *CodeExecTransport) CallTool(_ context.Context, name string, args map[string]any) (*ToolResult, error) {
-	if name != "nanite_code_execute" {
+	if name != "code_execute" {
 		return errorResult(fmt.Sprintf("unknown tool: %s", name)), nil
 	}
 	return c.callCodeExecute(args)
@@ -190,7 +190,7 @@ func formatExecResult(result *sandbox.ExecResult) *ToolResult {
 	}
 
 	// Truncate large output using the truncation system.
-	tr := truncate.Output(output, "nanite_code_execute")
+	tr := truncate.Output(output, "code_execute")
 	if tr.Truncated {
 		return textResult(tr.Content +
 			"\nOutput was truncated. To see specific parts, modify your code to print only the relevant output.")

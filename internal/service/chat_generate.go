@@ -109,10 +109,10 @@ Workflow:
 - **Stop when done.** Extra tool calls don't add trust; they just dilute the grounding.
 
 Grounded rendering:
-- ` + "`nanite_show_card`" + ` with ` + "`type=\"report-card\"`" + ` or ` + "`type=\"document-viewer\"`" + ` requires a ` + "`sources`" + ` array citing the tool_use_ids whose results ground the content. Build that list as you make the calls — if you didn't fetch the data this turn, render a plain-text reply instead of an empty card.
+- ` + "`card_show`" + ` with ` + "`type=\"report-card\"`" + ` or ` + "`type=\"document-viewer\"`" + ` requires a ` + "`sources`" + ` array citing the tool_use_ids whose results ground the content. Build that list as you make the calls — if you didn't fetch the data this turn, render a plain-text reply instead of an empty card.
 
 Tool contract discovery:
-- If you're unsure about a tool's input shape, call ` + "`nanite_tool_describe(name=\"<tool>\")`" + ` first. It returns the schema plus 1-3 golden examples — cheaper than failing the real call repeatedly.`
+- If you're unsure about a tool's input shape, call ` + "`tool_describe(name=\"<tool>\")`" + ` first. It returns the schema plus 1-3 golden examples — cheaper than failing the real call repeatedly.`
 
 // generateResponse loads context, calls the provider, streams events, and saves
 // the result. This is the refactored version of Engine.generateResponse — it
@@ -539,7 +539,7 @@ func (s *chatServiceImpl) generateResponse(ctx context.Context, sessionID, assis
 	}
 
 	// CW-20260420-0032: PTY observability — emit pty_turn_start so
-	// nanite_diagnose_session can reconstruct what happened. The deferred
+	// session_diagnose can reconstruct what happened. The deferred
 	// closer emits pty_turn_complete or pty_turn_failed when the function
 	// returns. Only emitted for PTY-provider sessions; API-path sessions
 	// already have sufficient observability via event_log + execution_metrics.
@@ -2970,7 +2970,7 @@ func (s *chatServiceImpl) earlyStopSynthesis(
 // CW-20260429-0017: each tool's InputSchema is deep-cloned BEFORE normalization
 // so the in-memory map shared with BuiltinToolRegistry / mcp.SelfToolProviderDefinitions
 // stays untouched. Without the clone, a deliberately-loose object node such as
-// `nanite_show_card.data` (declared `{type: object}` because per-type validation
+// `card_show.data` (declared `{type: object}` because per-type validation
 // lives in the show_card handler) would gain `additionalProperties: false` on
 // the FIRST chat call, after which every subsequent harness arg-validation pass
 // would reject any inner field as "additional properties not allowed at /data."

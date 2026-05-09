@@ -12,7 +12,7 @@ func TestCodeExecute_Shell(t *testing.T) {
 	t.Setenv("HOME", tmpHome)
 
 	transport := NewCodeExecTransport("test-shell")
-	result, err := transport.CallTool(context.Background(), "nanite_code_execute", map[string]any{
+	result, err := transport.CallTool(context.Background(), "code_execute", map[string]any{
 		"code":     "echo hello",
 		"language": "shell",
 	})
@@ -32,7 +32,7 @@ func TestCodeExecute_ShellDefault(t *testing.T) {
 	t.Setenv("HOME", tmpHome)
 
 	transport := NewCodeExecTransport("test-shell-default")
-	result, err := transport.CallTool(context.Background(), "nanite_code_execute", map[string]any{
+	result, err := transport.CallTool(context.Background(), "code_execute", map[string]any{
 		"code": "echo default_language",
 	})
 	if err != nil {
@@ -51,7 +51,7 @@ func TestCodeExecute_Timeout(t *testing.T) {
 	t.Setenv("HOME", tmpHome)
 
 	transport := NewCodeExecTransport("test-timeout")
-	result, err := transport.CallTool(context.Background(), "nanite_code_execute", map[string]any{
+	result, err := transport.CallTool(context.Background(), "code_execute", map[string]any{
 		"code":     "sleep 60",
 		"language": "shell",
 		"timeout":  float64(2),
@@ -76,7 +76,7 @@ func TestCodeExecute_Python(t *testing.T) {
 	t.Setenv("HOME", tmpHome)
 
 	transport := NewCodeExecTransport("test-python")
-	result, err := transport.CallTool(context.Background(), "nanite_code_execute", map[string]any{
+	result, err := transport.CallTool(context.Background(), "code_execute", map[string]any{
 		"code":     "print('hello from python')",
 		"language": "python",
 	})
@@ -96,7 +96,7 @@ func TestCodeExecute_ExitCode(t *testing.T) {
 	t.Setenv("HOME", tmpHome)
 
 	transport := NewCodeExecTransport("test-exitcode")
-	result, err := transport.CallTool(context.Background(), "nanite_code_execute", map[string]any{
+	result, err := transport.CallTool(context.Background(), "code_execute", map[string]any{
 		"code":     "exit 1",
 		"language": "shell",
 	})
@@ -115,7 +115,7 @@ func TestCodeExecute_LargeOutput(t *testing.T) {
 	// Generate output that exceeds the truncation limit (>4000 chars).
 	// Each iteration of seq prints a number + newline. 2000 lines of 50-char strings should do it.
 	transport := NewCodeExecTransport("test-large")
-	result, err := transport.CallTool(context.Background(), "nanite_code_execute", map[string]any{
+	result, err := transport.CallTool(context.Background(), "code_execute", map[string]any{
 		"code":     `i=0; while [ $i -lt 500 ]; do echo "line_${i}_padding_to_make_this_line_longer_than_normal_xxxxxxxxxxxxxxxx"; i=$((i+1)); done`,
 		"language": "shell",
 		"timeout":  float64(10),
@@ -148,7 +148,7 @@ func TestCodeExecute_InvalidLanguage(t *testing.T) {
 	t.Setenv("HOME", tmpHome)
 
 	transport := NewCodeExecTransport("test-invalid")
-	result, err := transport.CallTool(context.Background(), "nanite_code_execute", map[string]any{
+	result, err := transport.CallTool(context.Background(), "code_execute", map[string]any{
 		"code":     "print('hi')",
 		"language": "ruby",
 	})
@@ -165,7 +165,7 @@ func TestCodeExecute_InvalidLanguage(t *testing.T) {
 
 func TestCodeExecute_EmptyCode(t *testing.T) {
 	transport := NewCodeExecTransport("test")
-	result, err := transport.CallTool(context.Background(), "nanite_code_execute", map[string]any{
+	result, err := transport.CallTool(context.Background(), "code_execute", map[string]any{
 		"code": "",
 	})
 	if err != nil {
@@ -185,7 +185,7 @@ func TestCodeExecute_ListTools(t *testing.T) {
 	if len(tools) != 1 {
 		t.Fatalf("len(tools) = %d, want 1", len(tools))
 	}
-	if tools[0].Name != "nanite_code_execute" {
-		t.Errorf("tool name = %q, want %q", tools[0].Name, "nanite_code_execute")
+	if tools[0].Name != "code_execute" {
+		t.Errorf("tool name = %q, want %q", tools[0].Name, "code_execute")
 	}
 }

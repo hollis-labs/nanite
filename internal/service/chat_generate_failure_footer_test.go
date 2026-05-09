@@ -15,8 +15,8 @@ func TestMaybeAppendFailureFooter_NoErrors_TextUnchanged(t *testing.T) {
 	t.Setenv(failureFooterEnvVar, "")
 
 	refs := []chat.ToolCallRef{
-		{ID: "t1", Name: "nanite_show_card", Status: "success", HasEnvelope: true},
-		{ID: "t2", Name: "nanite_validate", Status: "success"},
+		{ID: "t1", Name: "card_show", Status: "success", HasEnvelope: true},
+		{ID: "t2", Name: "tool_validate", Status: "success"},
 	}
 	text := "Perfect! I've created a demo report card."
 	got := maybeAppendFailureFooter(text, refs)
@@ -29,8 +29,8 @@ func TestMaybeAppendFailureFooter_ErrorsButTextAcknowledges_NoFooter(t *testing.
 	t.Setenv(failureFooterEnvVar, "")
 
 	refs := []chat.ToolCallRef{
-		{ID: "t1", Name: "nanite_show_card", Status: "error"},
-		{ID: "t2", Name: "nanite_show_card", Status: "success", HasEnvelope: true},
+		{ID: "t1", Name: "card_show", Status: "error"},
+		{ID: "t2", Name: "card_show", Status: "success", HasEnvelope: true},
 	}
 	// Marker: "first attempt" (case-insensitive).
 	text := "On the First Attempt the call rejected, so I retried with a corrected schema and it worked."
@@ -55,9 +55,9 @@ func TestMaybeAppendFailureFooter_ErrorsAndCleanText_FooterAppended(t *testing.T
 	t.Setenv(failureFooterEnvVar, "")
 
 	refs := []chat.ToolCallRef{
-		{ID: "t1", Name: "nanite_show_card", Status: "error", ErrorReason: "schema validation: additionalProperties"},
-		{ID: "t2", Name: "nanite_validate", Status: "success"},
-		{ID: "t3", Name: "nanite_show_card", Status: "success", HasEnvelope: true},
+		{ID: "t1", Name: "card_show", Status: "error", ErrorReason: "schema validation: additionalProperties"},
+		{ID: "t2", Name: "tool_validate", Status: "success"},
+		{ID: "t3", Name: "card_show", Status: "success", HasEnvelope: true},
 	}
 	text := "Perfect! I've created a demo report card showing Q1 2024 performance metrics."
 	got := maybeAppendFailureFooter(text, refs)
@@ -67,7 +67,7 @@ func TestMaybeAppendFailureFooter_ErrorsAndCleanText_FooterAppended(t *testing.T
 	if !strings.HasPrefix(got, text) {
 		t.Fatalf("footer must be appended after original text; got:\n%s", got)
 	}
-	want := "_(harness note: 1 tool call this turn returned an error: `nanite_show_card` — \"schema validation: additionalProperties\". See the tool_calls array for the full list.)_"
+	want := "_(harness note: 1 tool call this turn returned an error: `card_show` — \"schema validation: additionalProperties\". See the tool_calls array for the full list.)_"
 	if !strings.Contains(got, want) {
 		t.Fatalf("footer text mismatch.\nwant substring: %s\nfull output:\n%s", want, got)
 	}
@@ -85,11 +85,11 @@ func TestMaybeAppendFailureFooter_NoReason_BareToolName(t *testing.T) {
 	t.Setenv(failureFooterEnvVar, "")
 
 	refs := []chat.ToolCallRef{
-		{ID: "t1", Name: "nanite_show_card", Status: "error"},
-		{ID: "t2", Name: "nanite_show_card", Status: "success", HasEnvelope: true},
+		{ID: "t1", Name: "card_show", Status: "error"},
+		{ID: "t2", Name: "card_show", Status: "success", HasEnvelope: true},
 	}
 	got := maybeAppendFailureFooter("Done.", refs)
-	want := "_(harness note: 1 tool call this turn returned an error: `nanite_show_card`. See the tool_calls array for the full list.)_"
+	want := "_(harness note: 1 tool call this turn returned an error: `card_show`. See the tool_calls array for the full list.)_"
 	if !strings.Contains(got, want) {
 		t.Fatalf("bare-name footer mismatch.\nwant substring: %s\nfull output:\n%s", want, got)
 	}
@@ -98,31 +98,31 @@ func TestMaybeAppendFailureFooter_NoReason_BareToolName(t *testing.T) {
 func TestMaybeAppendFailureFooter_MultipleErrors_UniqueToolNames(t *testing.T) {
 	t.Setenv(failureFooterEnvVar, "")
 
-	// nanite_show_card errors twice — should appear once in the name list,
+	// card_show errors twice — should appear once in the name list,
 	// but the count should reflect all error-status calls (here: 3).
 	// First-encounter ErrorReason wins for the de-duped tool.
 	refs := []chat.ToolCallRef{
-		{ID: "t1", Name: "nanite_show_card", Status: "error", ErrorReason: "schema validation"},
-		{ID: "t2", Name: "nanite_validate", Status: "error", ErrorReason: "query is required"},
-		{ID: "t3", Name: "nanite_show_card", Status: "error", ErrorReason: "different reason — should be ignored"},
-		{ID: "t4", Name: "nanite_show_card", Status: "success", HasEnvelope: true},
+		{ID: "t1", Name: "card_show", Status: "error", ErrorReason: "schema validation"},
+		{ID: "t2", Name: "tool_validate", Status: "error", ErrorReason: "query is required"},
+		{ID: "t3", Name: "card_show", Status: "error", ErrorReason: "different reason — should be ignored"},
+		{ID: "t4", Name: "card_show", Status: "success", HasEnvelope: true},
 	}
 	text := "All set."
 	got := maybeAppendFailureFooter(text, refs)
-	want := "_(harness note: 3 tool calls this turn returned errors: `nanite_show_card` — \"schema validation\", `nanite_validate` — \"query is required\". See the tool_calls array for the full list.)_"
+	want := "_(harness note: 3 tool calls this turn returned errors: `card_show` — \"schema validation\", `tool_validate` — \"query is required\". See the tool_calls array for the full list.)_"
 	if !strings.Contains(got, want) {
 		t.Fatalf("multi-error footer mismatch.\nwant substring: %s\nfull output:\n%s", want, got)
 	}
-	// `nanite_show_card` should appear exactly once in the name list portion
+	// `card_show` should appear exactly once in the name list portion
 	// (the de-dup contract).
 	footerStart := strings.Index(got, "_(harness note:")
 	if footerStart < 0 {
 		t.Fatalf("footer not found in output:\n%s", got)
 	}
 	footer := got[footerStart:]
-	occurrences := strings.Count(footer, "`nanite_show_card`")
+	occurrences := strings.Count(footer, "`card_show`")
 	if occurrences != 1 {
-		t.Fatalf("expected nanite_show_card to appear exactly once in footer, got %d.\nfooter: %s", occurrences, footer)
+		t.Fatalf("expected card_show to appear exactly once in footer, got %d.\nfooter: %s", occurrences, footer)
 	}
 	// Subsequent encounters of the same tool with a different reason must NOT
 	// leak into the footer (first-encounter-wins contract).
@@ -133,8 +133,8 @@ func TestMaybeAppendFailureFooter_MultipleErrors_UniqueToolNames(t *testing.T) {
 
 func TestMaybeAppendFailureFooter_EnvOff_NoFooter(t *testing.T) {
 	refs := []chat.ToolCallRef{
-		{ID: "t1", Name: "nanite_show_card", Status: "error"},
-		{ID: "t2", Name: "nanite_show_card", Status: "success"},
+		{ID: "t1", Name: "card_show", Status: "error"},
+		{ID: "t2", Name: "card_show", Status: "success"},
 	}
 	text := "Perfect! Done."
 
@@ -151,8 +151,8 @@ func TestMaybeAppendFailureFooter_EnvOff_NoFooter(t *testing.T) {
 
 func TestMaybeAppendFailureFooter_EnvOn_ExplicitTruthy(t *testing.T) {
 	refs := []chat.ToolCallRef{
-		{ID: "t1", Name: "nanite_show_card", Status: "error"},
-		{ID: "t2", Name: "nanite_show_card", Status: "success"},
+		{ID: "t1", Name: "card_show", Status: "error"},
+		{ID: "t2", Name: "card_show", Status: "success"},
 	}
 	text := "Perfect! Done."
 
@@ -174,7 +174,7 @@ func TestMaybeAppendFailureFooter_EmptyText_FooterStandalone(t *testing.T) {
 	t.Setenv(failureFooterEnvVar, "")
 
 	refs := []chat.ToolCallRef{
-		{ID: "t1", Name: "nanite_show_card", Status: "error"},
+		{ID: "t1", Name: "card_show", Status: "error"},
 	}
 	got := maybeAppendFailureFooter("", refs)
 	if !strings.HasPrefix(got, "_(harness note:") {
@@ -187,24 +187,24 @@ func TestMaybeAppendFailureFooter_EmptyText_FooterStandalone(t *testing.T) {
 
 // CW-20260501-0013: c121-shaped reproducer. The exact failure that produced
 // the "I don't have access to a memory recall tool" hallucination — a single
-// tool error from nanite_memory_recall with reason "memory service not
+// tool error from memory_recall with reason "memory service not
 // configured" — must surface that reason verbatim in the next-turn footer.
 func TestMaybeAppendFailureFooter_C121Reproducer_VerbatimReasonInlined(t *testing.T) {
 	t.Setenv(failureFooterEnvVar, "")
 
 	refs := []chat.ToolCallRef{
-		{ID: "t1", Name: "nanite_memory_recall", Status: "error", ErrorReason: "memory service not configured"},
+		{ID: "t1", Name: "memory_recall", Status: "error", ErrorReason: "memory service not configured"},
 	}
 	// Use a body that does NOT contain any honesty marker so the footer fires.
 	got := maybeAppendFailureFooter("I'll get right on that.", refs)
 	if !strings.Contains(got, `"memory service not configured"`) {
 		t.Fatalf("c121 reproducer: verbatim reason missing from footer.\noutput:\n%s", got)
 	}
-	if !strings.Contains(got, "`nanite_memory_recall`") {
+	if !strings.Contains(got, "`memory_recall`") {
 		t.Fatalf("c121 reproducer: tool name missing from footer.\noutput:\n%s", got)
 	}
 	// Sanity: the inlined slot should be `tool` — "reason".
-	wantSubstr := "`nanite_memory_recall` — \"memory service not configured\""
+	wantSubstr := "`memory_recall` — \"memory service not configured\""
 	if !strings.Contains(got, wantSubstr) {
 		t.Fatalf("c121 reproducer: expected substring %q in footer.\noutput:\n%s", wantSubstr, got)
 	}
@@ -299,7 +299,7 @@ func TestMaybeAppendFailureFooter_MultilineReason_Collapsed(t *testing.T) {
 
 	refs := []chat.ToolCallRef{
 		{
-			ID: "t1", Name: "nanite_show_card", Status: "error",
+			ID: "t1", Name: "card_show", Status: "error",
 			ErrorReason: "schema validation:\n  field foo:\n    required\n",
 		},
 	}

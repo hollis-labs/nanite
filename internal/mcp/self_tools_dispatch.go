@@ -11,7 +11,7 @@ import (
 	"github.com/hollis-labs/nanite/internal/reflex"
 )
 
-// callExecuteTask handles nanite_execute_task — the Chat agent's
+// callExecuteTask handles task_execute — the Chat agent's
 // dispatch primitive (CW-20260421-0010, B3). Translates the tool args
 // into dispatch.ExecuteTaskArgs, invokes the dispatch primitive, and
 // returns the resulting envelope JSON as the tool result.

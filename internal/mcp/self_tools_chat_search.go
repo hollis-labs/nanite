@@ -19,7 +19,7 @@ const chatSearchDefaultLimit = 20
 // chatSearchMaxLimit caps the limit arg so the tool can't blow memory.
 const chatSearchMaxLimit = 100
 
-// ChatSearchSnippet is one search hit returned by nanite_chat_search.
+// ChatSearchSnippet is one search hit returned by chat_search.
 type ChatSearchSnippet struct {
 	TurnID             string  `json:"turn_id"`
 	Role               string  `json:"role"`
@@ -28,7 +28,7 @@ type ChatSearchSnippet struct {
 	CompactionEventID  *string `json:"compaction_event_id,omitempty"`
 }
 
-// callChatSearch implements nanite_chat_search — search this session's
+// callChatSearch implements chat_search — search this session's
 // conversation history including compacted (summarised) spans.
 // Shape mirrors fetch_tool_result per D3. (P8B, CW-20260420-0026)
 func (st *SelfToolsTransport) callChatSearch(ctx context.Context, args map[string]any) (*ToolResult, error) {
@@ -59,7 +59,7 @@ func (st *SelfToolsTransport) callChatSearch(ctx context.Context, args map[strin
 		sessionID = sid
 	}
 	if sessionID == "" {
-		return errorResult("no session_id in context — nanite_chat_search requires a session context"), nil
+		return errorResult("no session_id in context — chat_search requires a session context"), nil
 	}
 
 	// Compile the query as a case-insensitive regexp. Fall back to a

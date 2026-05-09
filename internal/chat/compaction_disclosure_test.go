@@ -91,7 +91,7 @@ func TestRenderCompactionDisclosure_freshEventInjects(t *testing.T) {
 		t.Errorf("expected all variables interpolated, got leftover {{ in: %q", got)
 	}
 	// Spot-check interpolated values.
-	for _, want := range []string{stash, startTurn, endTurn, "321", "nanite_chat_search"} {
+	for _, want := range []string{stash, startTurn, endTurn, "321", "chat_search"} {
 		if !strings.Contains(got, want) {
 			t.Errorf("expected disclosure to contain %q, missing in: %q", want, got)
 		}

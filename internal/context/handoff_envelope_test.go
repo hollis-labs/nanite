@@ -115,7 +115,7 @@ func TestRenderHandoffForSlot_HasAllExpectedSections(t *testing.T) {
 		// the bare handoff_pointers_expand — the unprefixed form does not
 		// exist in the registry and the agent's call would fail. Both
 		// session_id and cache_key are required by the tool schema.
-		"nanite_handoff_pointers_expand",
+		"handoff_pointers_expand",
 		"session_id",
 		"cache_key",
 		"k1",

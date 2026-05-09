@@ -6,8 +6,8 @@
       "slug": "code-review-helper",
       "description": "Walks through a PR diff and surfaces inline suggestions.",
       "category": "dev",
-      "tool_bindings": "[\"dev_read\", \"dev_grep\", \"nanite_show_card\"]"
+      "tool_bindings": "[\"dev_read\", \"dev_grep\", \"card_show\"]"
     },
-    "notes": "tool_bindings is a JSON array passed as a string. Use nanite_list_skills before to confirm the slug is unique."
+    "notes": "tool_bindings is a JSON array passed as a string. Use skill_list before to confirm the slug is unique."
   }
 ]

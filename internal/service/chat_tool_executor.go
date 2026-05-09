@@ -329,9 +329,9 @@ func (s *chatServiceImpl) executeToolBatch(
 
 	// CW-20260429-0024: stamp the union of (prior iterations' tool_use_ids
 	// from ls.toolCallRefs) and (this iteration's plan tool_use_ids) so the
-	// nanite_show_card sources gate can reject fabricated tool_use_id values.
+	// card_show sources gate can reject fabricated tool_use_id values.
 	// Including the current iteration matters: the agent may call
-	// nanite_show_card in the same assistant batch as the data tools whose
+	// card_show in the same assistant batch as the data tools whose
 	// results ground the card, citing those peer tool_use_ids. Without
 	// "this iteration" the gate would over-block and force the agent to
 	// produce sources after a follow-up turn even when the citation is
@@ -661,7 +661,7 @@ func (s *chatServiceImpl) postProcessToolResults(
 		}
 
 		// Detect stuck loops (modifies result text).
-		// Scratchpad tools are exempt: nanite_scratchpad_read legitimately returns
+		// Scratchpad tools are exempt: scratchpad_read legitimately returns
 		// the same value on repeated reads (the scratchpad contents haven't changed),
 		// and blocking it would deny the agent its own working memory.
 		var resultText string
@@ -680,7 +680,7 @@ func (s *chatServiceImpl) postProcessToolResults(
 		// Meta-tools (discovery + cache-navigation) are exempt: their
 		// output is what the agent reads to *decide* its next action, and
 		// caching them produces a pointer-to-pointer dance that wastes
-		// turns. nanite_tool_describe in particular went over the 2 KiB
+		// turns. tool_describe in particular went over the 2 KiB
 		// soft cap in c114 (6813 bytes), forcing the agent through
 		// fetch/search and burning all 10 turns before it could emit a
 		// card.
@@ -775,7 +775,7 @@ func (s *chatServiceImpl) postProcessToolResults(
 }
 
 func shouldDirectReturnSubagentLiteral(plans []toolPlan, toolName, content string, isError bool) bool {
-	if isError || len(plans) != 1 || toolName != "nanite_spawn_subagent" {
+	if isError || len(plans) != 1 || toolName != "subagent_spawn" {
 		return false
 	}
 	content = strings.TrimSpace(content)
@@ -793,7 +793,7 @@ func shouldDirectReturnSubagentLiteral(plans []toolPlan, toolName, content strin
 // isWorkTool returns true for agent tools that mutate todos or plans.
 func isWorkTool(name string) bool {
 	switch name {
-	case "nanite_todo_create", "nanite_todo_update", "nanite_plan_create", "nanite_plan_update":
+	case "todo_create", "todo_update", "plan_create", "plan_update":
 		return true
 	}
 	return false

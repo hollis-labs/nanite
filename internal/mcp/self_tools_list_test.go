@@ -28,24 +28,24 @@ func TestNaniteToolList_RegistrationAndShape(t *testing.T) {
 	defs := selfToolDefinitions()
 	var found bool
 	for _, d := range defs {
-		if d.Name == "nanite_tool_list" {
+		if d.Name == "tool_list" {
 			found = true
 			if d.InputSchema == nil {
-				t.Fatal("nanite_tool_list missing InputSchema")
+				t.Fatal("tool_list missing InputSchema")
 			}
 			// filter is optional — schema must NOT mark it required.
 			if reqd, ok := d.InputSchema["required"].([]string); ok && len(reqd) > 0 {
-				t.Errorf("nanite_tool_list must have no required fields, got %v", reqd)
+				t.Errorf("tool_list must have no required fields, got %v", reqd)
 			}
 			break
 		}
 	}
 	if !found {
-		t.Fatal("nanite_tool_list not in selfToolDefinitions()")
+		t.Fatal("tool_list not in selfToolDefinitions()")
 	}
 
 	st := newSelfTools(t)
-	res, err := st.CallTool(context.Background(), "nanite_tool_list", map[string]any{})
+	res, err := st.CallTool(context.Background(), "tool_list", map[string]any{})
 	if err != nil {
 		t.Fatalf("call: %v", err)
 	}
@@ -68,17 +68,17 @@ func TestNaniteToolList_RegistrationAndShape(t *testing.T) {
 	if out.Count == 0 {
 		t.Fatal("expected non-empty tool inventory")
 	}
-	// Spot-check: the surface includes nanite_tool_describe (sibling
-	// discovery primitive) and nanite_tool_list itself.
+	// Spot-check: the surface includes tool_describe (sibling
+	// discovery primitive) and tool_list itself.
 	saw := map[string]string{}
 	for _, t := range out.Tools {
 		saw[t.Name] = t.Summary
 	}
-	if _, ok := saw["nanite_tool_describe"]; !ok {
-		t.Error("inventory missing nanite_tool_describe")
+	if _, ok := saw["tool_describe"]; !ok {
+		t.Error("inventory missing tool_describe")
 	}
-	if _, ok := saw["nanite_tool_list"]; !ok {
-		t.Error("inventory missing nanite_tool_list (self-include)")
+	if _, ok := saw["tool_list"]; !ok {
+		t.Error("inventory missing tool_list (self-include)")
 	}
 	// Every entry must carry a non-empty summary — a missing summary
 	// defeats the purpose of the cheap-discovery primitive.
@@ -95,11 +95,11 @@ func TestNaniteToolList_RegistrationAndShape(t *testing.T) {
 // TestNaniteToolList_FilterNarrowsByNameAndSummary asserts the filter
 // is case-insensitive and matches against BOTH the tool name and its
 // summary. The "reminder" filter is the canonical c120 case — agent
-// guessed `nanite_reminder_create` instead of `nanite_set_reminder`.
+// guessed `nanite_reminder_create` instead of `reminder_set`.
 func TestNaniteToolList_FilterNarrowsByNameAndSummary(t *testing.T) {
 	st := newSelfTools(t)
 	// Substring match in NAME — `set_reminder`.
-	res, err := st.CallTool(context.Background(), "nanite_tool_list", map[string]any{
+	res, err := st.CallTool(context.Background(), "tool_list", map[string]any{
 		"filter": "reminder",
 	})
 	if err != nil {
@@ -119,11 +119,11 @@ func TestNaniteToolList_FilterNarrowsByNameAndSummary(t *testing.T) {
 		t.Fatalf("decode: %v", err)
 	}
 	if out.Count == 0 {
-		t.Fatal("expected ≥1 match for filter=reminder (nanite_set_reminder must surface)")
+		t.Fatal("expected ≥1 match for filter=reminder (reminder_set must surface)")
 	}
 	sawSetReminder := false
 	for _, tool := range out.Tools {
-		if tool.Name == "nanite_set_reminder" {
+		if tool.Name == "reminder_set" {
 			sawSetReminder = true
 		}
 		// Every survivor must contain the filter token in name OR summary.
@@ -133,11 +133,11 @@ func TestNaniteToolList_FilterNarrowsByNameAndSummary(t *testing.T) {
 		}
 	}
 	if !sawSetReminder {
-		t.Error("filter=reminder must surface nanite_set_reminder (the c120 motivating case)")
+		t.Error("filter=reminder must surface reminder_set (the c120 motivating case)")
 	}
 
 	// Case-insensitive: "REMINDER" should match the same set as "reminder".
-	resUC, err := st.CallTool(context.Background(), "nanite_tool_list", map[string]any{
+	resUC, err := st.CallTool(context.Background(), "tool_list", map[string]any{
 		"filter": "REMINDER",
 	})
 	if err != nil {
@@ -157,7 +157,7 @@ func TestNaniteToolList_FilterNarrowsByNameAndSummary(t *testing.T) {
 // The agent reading the response decides whether to widen the filter.
 func TestNaniteToolList_FilterNotFoundReturnsEmpty(t *testing.T) {
 	st := newSelfTools(t)
-	res, err := st.CallTool(context.Background(), "nanite_tool_list", map[string]any{
+	res, err := st.CallTool(context.Background(), "tool_list", map[string]any{
 		"filter": "this_substring_appears_in_no_tool_name_or_summary_zzz",
 	})
 	if err != nil {
@@ -187,12 +187,11 @@ func TestNaniteToolList_FilterNotFoundReturnsEmpty(t *testing.T) {
 // text (not in any tool's name) and assert at least one match.
 func TestNaniteToolList_FilterMatchesSummaryNotJustName(t *testing.T) {
 	st := newSelfTools(t)
-	// "skill" appears in nanite_create_skill / list / update / delete
-	// names directly — pick a token that's likely only in summaries.
-	// The remember tool's first sentence mentions "lesson"; no tool is
-	// named "lesson".
-	res, _ := st.CallTool(context.Background(), "nanite_tool_list", map[string]any{
-		"filter": "lesson",
+	// Pick a token that appears in summary text but is NOT part of any
+	// tool name. "durable" appears in lesson_capture's "persist ... to
+	// durable memory" and in handoff_stash; no tool is named "durable".
+	res, _ := st.CallTool(context.Background(), "tool_list", map[string]any{
+		"filter": "durable",
 	})
 	var out struct {
 		Tools []struct {
@@ -203,13 +202,13 @@ func TestNaniteToolList_FilterMatchesSummaryNotJustName(t *testing.T) {
 	}
 	_ = json.Unmarshal([]byte(res.Content[0].Text), &out)
 	if out.Count == 0 {
-		t.Fatal("expected at least one tool whose summary contains 'lesson' (e.g. nanite_remember)")
+		t.Fatal("expected at least one tool whose summary contains 'durable'")
 	}
-	// At least one survivor's name must NOT contain "lesson" — proving
+	// At least one survivor's name must NOT contain "durable" — proving
 	// the summary-side match path fired.
 	matchedViaSummary := false
 	for _, tool := range out.Tools {
-		if !strings.Contains(strings.ToLower(tool.Name), "lesson") {
+		if !strings.Contains(strings.ToLower(tool.Name), "durable") {
 			matchedViaSummary = true
 			break
 		}
@@ -226,18 +225,18 @@ func TestNaniteToolList_FilterMatchesSummaryNotJustName(t *testing.T) {
 // adds a tool. Use the test output (-v) to read the size.
 func TestNaniteToolList_UnfilteredSize(t *testing.T) {
 	st := newSelfTools(t)
-	res, err := st.CallTool(context.Background(), "nanite_tool_list", map[string]any{})
+	res, err := st.CallTool(context.Background(), "tool_list", map[string]any{})
 	if err != nil {
 		t.Fatalf("call: %v", err)
 	}
 	body := res.Content[0].Text
-	t.Logf("nanite_tool_list unfiltered: %d bytes", len(body))
+	t.Logf("tool_list unfiltered: %d bytes", len(body))
 
 	// Filtered "reminder" — should be small.
-	resF, _ := st.CallTool(context.Background(), "nanite_tool_list", map[string]any{
+	resF, _ := st.CallTool(context.Background(), "tool_list", map[string]any{
 		"filter": "reminder",
 	})
-	t.Logf("nanite_tool_list filter=\"reminder\": %d bytes", len(resF.Content[0].Text))
+	t.Logf("tool_list filter=\"reminder\": %d bytes", len(resF.Content[0].Text))
 }
 
 // TestFirstSentenceSummary covers the summary-extraction strategy at
@@ -302,30 +301,30 @@ func TestFirstSentenceSummary(t *testing.T) {
 // CW-20260501-0001: with a wired ToolInventoryLookup the discovery
 // primitive must surface tools registered on sibling MCP servers, not
 // just the in-process self-tools. The motivating bug was c121, where
-// the agent burned 6 list calls trying to find `nanite_memory_recall`
+// the agent burned 6 list calls trying to find `memory_recall`
 // (registered on `nanite-memory`) and concluded it didn't exist.
 func TestNaniteToolList_CrossServerEnumeration(t *testing.T) {
 	st := newSelfTools(t)
 	st.Inventory = &stubInventoryLookup{
 		tools: []provider.ToolDefinition{
 			{
-				Name:        "nanite_memory_recall",
+				Name:        "memory_recall",
 				Description: "Recall memories relevant to the current turn from the durable Vanta substrate.",
 			},
 			{
-				Name:        "nanite_memory_save",
+				Name:        "memory_write",
 				Description: "Save a memory for future sessions.",
 			},
 			{
 				// Self-tool advertised via the manager too — the dedup
 				// guard in gatherInventory should keep this single-entry.
-				Name:        "nanite_remember",
+				Name:        "lesson_capture",
 				Description: "Persist a one-sentence lesson to durable memory.",
 			},
 		},
 	}
 
-	res, err := st.CallTool(context.Background(), "nanite_tool_list", map[string]any{
+	res, err := st.CallTool(context.Background(), "tool_list", map[string]any{
 		"filter": "memory",
 	})
 	if err != nil {
@@ -351,19 +350,19 @@ func TestNaniteToolList_CrossServerEnumeration(t *testing.T) {
 		saw[tool.Name] = true
 	}
 
-	// nanite_memory_recall MUST surface — the c121 motivating case.
-	if !saw["nanite_memory_recall"] {
-		t.Error("filter=memory must surface nanite_memory_recall (the cross-server bug fix)")
+	// memory_recall MUST surface — the c121 motivating case.
+	if !saw["memory_recall"] {
+		t.Error("filter=memory must surface memory_recall (the cross-server bug fix)")
 	}
-	// nanite_memory_save matches filter=memory by name and surfaces too —
+	// memory_write matches filter=memory by name and surfaces too —
 	// discovery shows the full inventory regardless of caller role.
-	if !saw["nanite_memory_save"] {
-		t.Error("filter=memory must surface nanite_memory_save (full cross-server inventory)")
+	if !saw["memory_write"] {
+		t.Error("filter=memory must surface memory_write (full cross-server inventory)")
 	}
 	// Sibling self-tool with `memory` in summary should surface
-	// (nanite_remember mentions "durable memory").
-	if !saw["nanite_remember"] {
-		t.Error("filter=memory must surface nanite_remember (summary contains 'memory')")
+	// (lesson_capture mentions "durable memory").
+	if !saw["lesson_capture"] {
+		t.Error("filter=memory must surface lesson_capture (summary contains 'memory')")
 	}
 }
 
@@ -376,14 +375,14 @@ func TestNaniteToolList_DedupesAcrossSources(t *testing.T) {
 	st.Inventory = &stubInventoryLookup{
 		tools: []provider.ToolDefinition{
 			{
-				Name:        "nanite_tool_list",
+				Name:        "tool_list",
 				Description: "Stub description from the manager that should win on dedup.",
 			},
 		},
 	}
 
-	res, err := st.CallTool(context.Background(), "nanite_tool_list", map[string]any{
-		"filter": "nanite_tool_list",
+	res, err := st.CallTool(context.Background(), "tool_list", map[string]any{
+		"filter": "tool_list",
 	})
 	if err != nil {
 		t.Fatalf("call: %v", err)
@@ -401,12 +400,12 @@ func TestNaniteToolList_DedupesAcrossSources(t *testing.T) {
 
 	hits := 0
 	for _, tool := range out.Tools {
-		if tool.Name == "nanite_tool_list" {
+		if tool.Name == "tool_list" {
 			hits++
 		}
 	}
 	if hits != 1 {
-		t.Errorf("nanite_tool_list appeared %d times; want exactly 1 (dedup across sources)", hits)
+		t.Errorf("tool_list appeared %d times; want exactly 1 (dedup across sources)", hits)
 	}
 }
 
@@ -419,22 +418,22 @@ func TestNaniteToolList_CrossServerSizeMeasurement(t *testing.T) {
 	st.Inventory = &stubInventoryLookup{
 		tools: []provider.ToolDefinition{
 			{
-				Name:        "nanite_memory_recall",
+				Name:        "memory_recall",
 				Description: "Recall memories relevant to the current turn from durable storage.",
 			},
 		},
 	}
-	res, err := st.CallTool(context.Background(), "nanite_tool_list", map[string]any{})
+	res, err := st.CallTool(context.Background(), "tool_list", map[string]any{})
 	if err != nil {
 		t.Fatalf("call: %v", err)
 	}
 	body := res.Content[0].Text
-	t.Logf("nanite_tool_list cross-server unfiltered: %d bytes", len(body))
+	t.Logf("tool_list cross-server unfiltered: %d bytes", len(body))
 
-	resF, _ := st.CallTool(context.Background(), "nanite_tool_list", map[string]any{
+	resF, _ := st.CallTool(context.Background(), "tool_list", map[string]any{
 		"filter": "memory",
 	})
-	t.Logf("nanite_tool_list cross-server filter=\"memory\": %d bytes", len(resF.Content[0].Text))
+	t.Logf("tool_list cross-server filter=\"memory\": %d bytes", len(resF.Content[0].Text))
 }
 
 // TestNaniteToolList_FullInventoryIncludesNonNanitePrefixed pins the
@@ -446,7 +445,7 @@ func TestNaniteToolList_CrossServerSizeMeasurement(t *testing.T) {
 //
 // The probe registers a non-nanite_*-prefixed tool (`dev_read`, the
 // canonical dev-mode shell tool) on the manager-fed inventory and asserts
-// it appears in unfiltered nanite_tool_list output. Reach for any caller
+// it appears in unfiltered tool_list output. Reach for any caller
 // to actually call dev_read is governed elsewhere (agent permissions +
 // dev-mode gate); the catalog primitive must surface it regardless.
 func TestNaniteToolList_FullInventoryIncludesNonNanitePrefixed(t *testing.T) {
@@ -465,7 +464,7 @@ func TestNaniteToolList_FullInventoryIncludesNonNanitePrefixed(t *testing.T) {
 	}
 
 	// Unfiltered call — full inventory mode.
-	res, err := st.CallTool(context.Background(), "nanite_tool_list", map[string]any{})
+	res, err := st.CallTool(context.Background(), "tool_list", map[string]any{})
 	if err != nil {
 		t.Fatalf("call: %v", err)
 	}
@@ -491,10 +490,10 @@ func TestNaniteToolList_FullInventoryIncludesNonNanitePrefixed(t *testing.T) {
 
 	// Non-nanite_*-prefixed tools must appear — full inventory contract.
 	if !saw["dev_read"] {
-		t.Error("nanite_tool_list must surface non-nanite_*-prefixed tools (dev_read missing — runtime surface filter regression?)")
+		t.Error("tool_list must surface non-nanite_*-prefixed tools (dev_read missing — runtime surface filter regression?)")
 	}
 	if !saw["web_fetch"] {
-		t.Error("nanite_tool_list must surface non-nanite_*-prefixed tools (web_fetch missing — runtime surface filter regression?)")
+		t.Error("tool_list must surface non-nanite_*-prefixed tools (web_fetch missing — runtime surface filter regression?)")
 	}
 }
 

@@ -10,7 +10,7 @@ import (
 // Glass-5 (CW-20260502-0012) — sanity tests for the catalog-discoverability
 // LoadHint and the SkillEssentialCap. The LoadHint partition is the
 // hot-swap primitive: assigned skills inline, broader catalog reachable
-// via nanite_list_skills / nanite_tool_list. Tests pin both halves.
+// via skill_list / tool_list. Tests pin both halves.
 
 const loadHintMarker = "additional skills are available"
 
@@ -127,7 +127,7 @@ func TestBuildSkillListForSession_LoadHintReferencesRealTools(t *testing.T) {
 	mustCreateSkill(t, s, &store.Skill{Name: "Catalog-X", Slug: "c-x", Description: "x", ToolBindings: `[]`, ModeIDs: `[]`})
 
 	got := buildSkillListForSession(s, agent.ID, "")
-	for _, tool := range []string{"nanite_list_skills", "nanite_tool_list"} {
+	for _, tool := range []string{"skill_list", "tool_list"} {
 		if !strings.Contains(got, tool) {
 			t.Errorf("LoadHint must reference %q tool, got: %q", tool, got)
 		}

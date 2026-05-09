@@ -43,7 +43,7 @@ func TestBuildPluginEnvelopeWrap_OmitsEmptyRouting(t *testing.T) {
 // (ui/src/lib/panel-signal.ts) can drive openPanelById /
 // routeEnvelopeToPanel / resolvePanelMode from the SSE event. This is the
 // fix path for the bottom_chat_drawer regression (CW-20260429-0029) where
-// nanite_show_card envelopes carried render_target but the wire wrapper
+// card_show envelopes carried render_target but the wire wrapper
 // dropped it.
 func TestBuildPluginEnvelopeWrap_IncludesNonEmptyRouting(t *testing.T) {
 	payload := []byte(`{"title":"Status"}`)

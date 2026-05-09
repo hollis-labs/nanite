@@ -4,7 +4,7 @@ import "github.com/hollis-labs/go-providers/provider"
 
 // showEnvelopeTargetDesc and showEnvelopeModeDesc are shared input-schema
 // descriptions for the optional `target` and `mode` fields on
-// nanite_show_card. They mirror the chat.Envelope.Target / chat.Envelope.Mode
+// card_show. They mirror the chat.Envelope.Target / chat.Envelope.Mode
 // contract (J8 v1 — CW-20260426-0006); the FE picks them up via
 // applyEnvelopePanelEffects.
 const (
@@ -40,7 +40,7 @@ func SelfToolProviderDefinitions() []provider.ToolDefinition {
 }
 
 // selfToolDefinitions returns all self-service tool definitions.
-// NOTE: nanite_run_python is included here so it appears in the
+// NOTE: python_run is included here so it appears in the
 // worker/planner surface; reach for chat agents is governed by the
 // agent profile's permissions.
 func selfToolDefinitions() []Tool {
@@ -51,11 +51,11 @@ func selfToolDefinitions() []Tool {
 		handoffStashToolDefinition(),
 		handoffPointersExpandToolDefinition(),
 		{
-			Name: "nanite_create_skill",
+			Name: "skill_create",
 			Description: "Create a new skill that binds a set of tool names to a named category.\n\n" +
 				"**When to use:** When the user asks to define a new skill, workflow, or named capability that groups related tools.\n\n" +
-				"**When NOT to use:** Do not create duplicate slugs — use nanite_update_skill to modify an existing one.\n\n" +
-				"**Output shape:** \"Created skill <name> (<id>)\" on success. Use nanite_list_skills to verify afterward.",
+				"**When NOT to use:** Do not create duplicate slugs — use skill_update to modify an existing one.\n\n" +
+				"**Output shape:** \"Created skill <name> (<id>)\" on success. Use skill_list to verify afterward.",
 			InputSchema: map[string]any{
 				"type": "object",
 				"properties": map[string]any{
@@ -70,7 +70,7 @@ func selfToolDefinitions() []Tool {
 			},
 		},
 		{
-			Name: "nanite_list_skills",
+			Name: "skill_list",
 			Description: "List all skills, optionally filtered by category.\n\n" +
 				"**When to use:** When the user asks what skills are available, or before creating a skill to check for duplicates.\n\n" +
 				"**Output shape:** Text list of skills with name, slug, category, and description. Empty list if none match the filter.",
@@ -82,10 +82,10 @@ func selfToolDefinitions() []Tool {
 			},
 		},
 		{
-			Name: "nanite_update_skill",
+			Name: "skill_update",
 			Description: "Update an existing skill by ID. Only the fields you provide are changed (partial update).\n\n" +
 				"**When to use:** When the user asks to rename, re-categorize, or change the tool bindings of an existing skill.\n\n" +
-				"**Required context:** You need the skill ID — get it from nanite_list_skills first if you only have the name or slug.\n\n" +
+				"**Required context:** You need the skill ID — get it from skill_list first if you only have the name or slug.\n\n" +
 				"**Output shape:** \"Updated skill <id>\" on success.",
 			InputSchema: map[string]any{
 				"type": "object",
@@ -102,10 +102,10 @@ func selfToolDefinitions() []Tool {
 			},
 		},
 		{
-			Name: "nanite_delete_skill",
+			Name: "skill_delete",
 			Description: "Permanently delete a skill by ID. Irreversible. Only non-builtin skills can be deleted.\n\n" +
 				"**When to use:** When the user explicitly asks to remove a custom skill.\n\n" +
-				"**Required context:** You need the skill ID — get it from nanite_list_skills if you only have the name.\n\n" +
+				"**Required context:** You need the skill ID — get it from skill_list if you only have the name.\n\n" +
 				"**Output shape:** \"Deleted skill <id>\" on success. Returns an error if the skill is builtin or not found.",
 			InputSchema: map[string]any{
 				"type": "object",
@@ -116,11 +116,11 @@ func selfToolDefinitions() []Tool {
 			},
 		},
 		{
-			Name: "nanite_create_agent",
+			Name: "agent_create",
 			Description: "Create a new agent profile with a name, slug, system prompt, and optional default model.\n\n" +
 				"**When to use:** When the user asks to define a new agent persona or role.\n\n" +
-				"**When NOT to use:** Do not create duplicate slugs — use nanite_update_agent to modify an existing profile.\n\n" +
-				"**Output shape:** \"Created agent <name> (<id>)\" on success. Use nanite_list_agents to verify.",
+				"**When NOT to use:** Do not create duplicate slugs — use agent_update to modify an existing profile.\n\n" +
+				"**Output shape:** \"Created agent <name> (<id>)\" on success. Use agent_list to verify.",
 			InputSchema: map[string]any{
 				"type": "object",
 				"properties": map[string]any{
@@ -134,7 +134,7 @@ func selfToolDefinitions() []Tool {
 			},
 		},
 		{
-			Name: "nanite_list_agents",
+			Name: "agent_list",
 			Description: "List all agent profiles.\n\n" +
 				"**When to use:** When the user asks what agents are configured, or before creating one to check for name/slug conflicts.\n\n" +
 				"**Output shape:** Text list of agents with name, slug, description, and default model. Returns all agents — no filter parameters.",
@@ -144,10 +144,10 @@ func selfToolDefinitions() []Tool {
 			},
 		},
 		{
-			Name: "nanite_update_agent",
+			Name: "agent_update",
 			Description: "Update an existing agent profile by ID. Only the fields you provide are changed (partial update).\n\n" +
 				"**When to use:** When the user asks to change an agent's system prompt, name, slug, or default model.\n\n" +
-				"**Required context:** You need the agent ID — get it from nanite_list_agents first if you only have the slug.\n\n" +
+				"**Required context:** You need the agent ID — get it from agent_list first if you only have the slug.\n\n" +
 				"**Output shape:** \"Updated agent <id>\" on success.",
 			InputSchema: map[string]any{
 				"type": "object",
@@ -164,7 +164,7 @@ func selfToolDefinitions() []Tool {
 		},
 		// Cross-app navigation tools — control Engine GUI via SSE
 		{
-			Name:        "nanite_navigate_engine",
+			Name:        "engine_navigate",
 			Description: "Navigate the Engine GUI to a specific page with optional filters. Use when the user asks to see tasks, sprints, kanban, or any Engine view. The Engine GUI will navigate in real-time via SSE. You can apply filters like project, status, priority, and sort order.",
 			InputSchema: map[string]any{
 				"type": "object",
@@ -198,7 +198,7 @@ func selfToolDefinitions() []Tool {
 			},
 		},
 		{
-			Name:        "nanite_refresh_engine",
+			Name:        "engine_refresh",
 			Description: "Trigger a data refresh in the Engine GUI. Use after making changes (task transitions, sprint updates) so the GUI reflects the latest state.",
 			InputSchema: map[string]any{
 				"type":       "object",
@@ -206,12 +206,12 @@ func selfToolDefinitions() []Tool {
 			},
 		},
 		{
-			Name: "nanite_giphy_search",
+			Name: "giphy_search",
 			Description: "Search GIPHY for an animated GIF and return its URL plus metadata. Pure data fetch — does NOT render anything in chat.\n\n" +
-				"**When to use:** When the user asks for a GIF or the conversation tone calls for a visual reaction. Call this first to fetch the URL, then chain into nanite_show_card to render.\n\n" +
+				"**When to use:** When the user asks for a GIF or the conversation tone calls for a visual reaction. Call this first to fetch the URL, then chain into card_show to render.\n\n" +
 				"**Chaining pattern:**\n" +
-				"1. nanite_giphy_search(query: \"celebration\") → {gif_url, title, attribution, alt_text}\n" +
-				"2. nanite_show_card(type: \"giphy-modal\", data: {gif_url: <step 1>, title: <step 1 title>, source: <step 1 attribution>, query: \"celebration\"})\n\n" +
+				"1. giphy_search(query: \"celebration\") → {gif_url, title, attribution, alt_text}\n" +
+				"2. card_show(type: \"giphy-modal\", data: {gif_url: <step 1>, title: <step 1 title>, source: <step 1 attribution>, query: \"celebration\"})\n\n" +
 				"**Demo mode:** When the server's GIPHY_API_KEY is unset, this returns one of a curated set of demo GIFs (deterministic per query). Useful for development; production should set the key.\n\n" +
 				"**Output shape:** Single object {gif_url, title, attribution, alt_text} for limit=1 (default). For limit>1: {results: [{...}, ...]}. " +
 				"Failures return a structured-error object instead: {error: \"http_error\"|\"no_results\"|\"parse_error\", details?, query}. IsError stays false on these — the call succeeded, the search did not. Branch on `error`.",
@@ -225,11 +225,11 @@ func selfToolDefinitions() []Tool {
 			},
 		},
 		{
-			Name: "nanite_show_card",
-			Description: "Render a structured envelope card in chat or in a drawer. One generic surface for the v1 passive-renderable card types — replaces the older per-type nanite_show_giphy / nanite_show_document / nanite_show_report tools (CW-20260428-0019, A3).\n\n" +
+			Name: "card_show",
+			Description: "Render a structured envelope card in chat or in a drawer. One generic surface for the v1 passive-renderable card types — replaces the older per-type giphy_show / document_show / report_show tools (CW-20260428-0019, A3).\n\n" +
 				"**When to use:** When you want to display structured content (a metric, a list, a table, a side-by-side diff, a long-form document, a metrics report, an animated GIF). Pick the smallest card that fits the data.\n\n" +
 				"**When NOT to use:** Decision-flow envelopes (approval-card, proposal-card, confirmation-card, question-form), runtime-emitted envelopes (chat-loop-terminated, elicitation-prompt), and plugin-shipped envelopes (kb-result, ticket-*) have their own emission paths and are NOT addressable here.\n\n" +
-				"**Per-type required-fields cheat sheet** (full examples + optional fields via `nanite_tool_describe(name=\"nanite_show_card\")`):\n" +
+				"**Per-type required-fields cheat sheet** (full examples + optional fields via `tool_describe(name=\"card_show\")`):\n" +
 				"- `report-card`: data={title, metrics:[{label, value}, ...]} — REQUIRES sources arg. Default → bottom_chat_drawer.\n" +
 				"- `document-viewer`: data={title, content} — REQUIRES sources. body field is `content` (markdown|html), NOT `body_markdown`. Default → bottom_chat_drawer.\n" +
 				"- `info-card`: data={title, body} — optional variant: info|success|warning|danger.\n" +
@@ -239,9 +239,9 @@ func selfToolDefinitions() []Tool {
 				"- `table-card`: data={columns:[{key, label}, ...], rows:[{...}, ...]} — row keys match column keys.\n" +
 				"- `timeline-card`: data={events:[{timestamp, label}, ...]} — timestamp is ISO 8601; optional status: completed|active|pending.\n" +
 				"- `diff-card`: data={before:{label, content}, after:{label, content}} — optional format: text|code.\n" +
-				"- `giphy-modal`: data={gif_url, title, source, query} — typically chained from `nanite_giphy_search`.\n\n" +
-				"**Unfamiliar type or first failure?** Call `nanite_tool_describe(name=\"nanite_show_card\")` for the full set of golden examples — one per v1 type with realistic values + optional fields populated, plus reference shapes for the decision-flow / backend-only types (session-task, error-report, approval-card, proposal-card, question-form, confirmation-card). The per-type schemas use `additionalProperties: false`, so unknown field names are rejected; the examples are the fastest way to anchor on the exact field set.\n\n" +
-				"**Fetch-then-render pattern:** External-data-into-card flows are two steps. First call the data tool, then pass its result into `nanite_show_card`. Example: `nanite_giphy_search(query=\"celebration\")` → `nanite_show_card(type=\"giphy-modal\", data={gif_url: <from step 1>, ...})`.\n\n" +
+				"- `giphy-modal`: data={gif_url, title, source, query} — typically chained from `giphy_search`.\n\n" +
+				"**Unfamiliar type or first failure?** Call `tool_describe(name=\"card_show\")` for the full set of golden examples — one per v1 type with realistic values + optional fields populated, plus reference shapes for the decision-flow / backend-only types (session-task, error-report, approval-card, proposal-card, question-form, confirmation-card). The per-type schemas use `additionalProperties: false`, so unknown field names are rejected; the examples are the fastest way to anchor on the exact field set.\n\n" +
+				"**Fetch-then-render pattern:** External-data-into-card flows are two steps. First call the data tool, then pass its result into `card_show`. Example: `giphy_search(query=\"celebration\")` → `card_show(type=\"giphy-modal\", data={gif_url: <from step 1>, ...})`.\n\n" +
 				"**Grounding for `report-card` / `document-viewer`:** these prose-bearing types require a `sources` array — each source's `tool_use_id` must come from a tool call you actually made this turn. If the user asks for one of these and you have no real data yet, **call any data tool first to get sourceable content** — don't dodge to a different envelope type. For demo / test prompts, you may synthesize the metric values; the source must still be a real `tool_use_id` from this turn.\n\n" +
 				"**Required context:** `type` from the v1 allow-list and `data` matching the per-type schema. The handler validates `data` against `internal/envelope/schemas/<type>.schema.json` at the boundary; payloads that miss required fields, wrong types, or carry unknown keys are rejected with a structured error citing the schema field that failed.\n\n" +
 				"**Render destination:** By default the card lands wherever the schema's `default_render_target` says — for the 10 passive renderables that's the bottom drawer. Pass `render_target` to override, or `render_target=\"\"` to force-inline. `target` (visibility — open this drawer) and `mode` (workspace preset) remain independent levers; both can travel with the envelope.",
@@ -281,13 +281,13 @@ func selfToolDefinitions() []Tool {
 		},
 		// Builder tools — interactive step-by-step creation flows
 		{
-			Name: "nanite_start_builder",
+			Name: "builder_start",
 			Description: "Start a step-by-step creation wizard for a new agent, skill, or prompt template.\n\n" +
 				"**When to use:** When the user wants to interactively create a new agent, skill, or prompt template and you want to gather the required fields one step at a time.\n\n" +
-				"**When NOT to use:** NOT for asking arbitrary questions — this builder only drives entity creation (agent / skill / prompt_template). Do not call this for read or update operations. If you already have all required fields, use nanite_create_agent or nanite_create_skill directly.\n\n" +
+				"**When NOT to use:** NOT for asking arbitrary questions — this builder only drives entity creation (agent / skill / prompt_template). Do not call this for read or update operations. If you already have all required fields, use agent_create or skill_create directly.\n\n" +
 				"**Required context:** You MUST supply builder_name. Omit it only to list available builder types.\n\n" +
-				"**Output shape:** Returns the first step prompt. Pass the response to nanite_builder_step to advance through subsequent steps.\n\n" +
-				"**Chaining:** Always follow with nanite_builder_step for each subsequent step until the builder signals completion.",
+				"**Output shape:** Returns the first step prompt. Pass the response to builder_step to advance through subsequent steps.\n\n" +
+				"**Chaining:** Always follow with builder_step for each subsequent step until the builder signals completion.",
 			InputSchema: map[string]any{
 				"type": "object",
 				"properties": map[string]any{
@@ -296,10 +296,10 @@ func selfToolDefinitions() []Tool {
 			},
 		},
 		{
-			Name: "nanite_builder_step",
+			Name: "builder_step",
 			Description: "Submit a value for the current step in an active builder flow and advance to the next.\n\n" +
-				"**When to use:** After nanite_start_builder has been called and returned the first step, call this for each step until the builder indicates completion.\n\n" +
-				"**When NOT to use:** Do not call this before nanite_start_builder — there must be an active builder session for this to work.\n\n" +
+				"**When to use:** After builder_start has been called and returned the first step, call this for each step until the builder indicates completion.\n\n" +
+				"**When NOT to use:** Do not call this before builder_start — there must be an active builder session for this to work.\n\n" +
 				"**Output shape:** Returns the next step's prompt text, or the final entity record (JSON) on completion.",
 			InputSchema: map[string]any{
 				"type": "object",
@@ -313,13 +313,13 @@ func selfToolDefinitions() []Tool {
 		},
 		// --- Todo/Plan tools ---
 		{
-			Name: "nanite_todo_create",
+			Name: "todo_create",
 			Description: "Create a todo item scoped to project, session, or turn (D1, CW-20260428-0014).\n\n" +
 				"**When to use:** When the user asks to track a task, action item, or follow-up. Choose the scope that matches where the work lives:\n" +
 				"- `session` (default): items tied to this chat conversation only. scope_id auto-filled from the current session when omitted.\n" +
 				"- `project`: items that belong to a project and surface in any session of the same project. scope_id = project_id (or pass project_id explicitly).\n" +
 				"- `turn`: items scoped to the current turn (rare — most callers want session).\n\n" +
-				"**When NOT to use:** Do not use for multi-step plans with dependencies — use nanite_plan_create for those.\n\n" +
+				"**When NOT to use:** Do not use for multi-step plans with dependencies — use plan_create for those.\n\n" +
 				"**Required context:** `scope=project` requires `project_id`. For scope=session/turn, `scope_id` is auto-filled from the current session context if omitted.\n\n" +
 				"**Output shape:** \"Created todo <title> (<id>)\" on success.",
 			InputSchema: map[string]any{
@@ -338,10 +338,10 @@ func selfToolDefinitions() []Tool {
 			},
 		},
 		{
-			Name: "nanite_todo_update",
+			Name: "todo_update",
 			Description: "Update a todo's status, priority, title, or description. Partial update — only provided fields change.\n\n" +
 				"**When to use:** When the user marks a task done, blocks it, changes its priority, or renames it. Typical status transitions: pending → in_progress → done, or → blocked.\n\n" +
-				"**Required context:** You need the todo ID. Get it from nanite_todo_list if you don't have it.\n\n" +
+				"**Required context:** You need the todo ID. Get it from todo_list if you don't have it.\n\n" +
 				"**Output shape:** \"Updated todo <id>\" on success.",
 			InputSchema: map[string]any{
 				"type": "object",
@@ -357,7 +357,7 @@ func selfToolDefinitions() []Tool {
 			},
 		},
 		{
-			Name: "nanite_todo_list",
+			Name: "todo_list",
 			Description: "List todos with optional filters, and render an interactive todo-list card when scope is provided.\n\n" +
 				"**When to use:** When the user asks to see their todos, check what's pending, or view the task list for a session or project.\n\n" +
 				"**Scope semantics:** Pass `scope` + `scope_id` to get a correctly scoped live card. For `scope=session`, `scope_id` is auto-filled from the current session context when omitted — you do not need to supply it explicitly. For `scope=project`, supply the project_id explicitly (or rely on the current session's project).\n\n" +
@@ -376,15 +376,15 @@ func selfToolDefinitions() []Tool {
 			},
 		},
 		{
-			Name: "nanite_plan_create",
+			Name: "plan_create",
 			Description: "Create a multi-step plan with ordered phases, dependencies, and acceptance criteria.\n\n" +
 				"**When to use:** When the user describes a multi-step or phased deliverable where order and dependencies matter — code migrations, feature rollouts, structured workflows. Prefer plans over todos when steps have depends_on relationships or acceptance criteria.\n\n" +
-				"**When NOT to use:** For simple unordered checklists, use nanite_todo_create instead. Do not create a plan for a single action.\n\n" +
+				"**When NOT to use:** For simple unordered checklists, use todo_create instead. Do not create a plan for a single action.\n\n" +
 				"**Scope semantics:** Same three-tier scope as todos (workspace / project / session). For `scope=session`, `scope_id` is auto-filled from the current session context when omitted.\n\n" +
 				"**After creating a plan with status 'proposed'**, emit a plan-review envelope so the user can approve or reject inline:\n" +
 				"```nanite-envelope\n{\"kind\":\"envelope\",\"version\":1,\"type\":\"plan-review\",\"data\":{\"plan_id\":\"...\",\"title\":\"...\",\"description\":\"...\",\"status\":\"proposed\",\"steps\":[{\"id\":\"...\",\"title\":\"...\"}]}}\n```\n\n" +
-				"**Output shape:** \"Created plan <title> (<id>)\" on success. Use nanite_plan_get to retrieve the full plan with step IDs.\n\n" +
-				"**Chaining:** Follow with nanite_plan_update(step_id=...) to advance individual step statuses as work progresses.",
+				"**Output shape:** \"Created plan <title> (<id>)\" on success. Use plan_get to retrieve the full plan with step IDs.\n\n" +
+				"**Chaining:** Follow with plan_update(step_id=...) to advance individual step statuses as work progresses.",
 			InputSchema: map[string]any{
 				"type": "object",
 				"properties": map[string]any{
@@ -398,10 +398,10 @@ func selfToolDefinitions() []Tool {
 			},
 		},
 		{
-			Name: "nanite_plan_update",
+			Name: "plan_update",
 			Description: "Update a plan's top-level fields or transition a single step's status.\n\n" +
 				"**When to use:** To advance a step as work progresses (e.g. pending → in_progress → done), or to rename/re-status the plan itself.\n\n" +
-				"**When NOT to use:** Do NOT use this to add a new step — it only mutates existing steps and plan-level fields. To append a new step to an existing plan, use nanite_plan_step_add (do not delete and recreate the plan).\n\n" +
+				"**When NOT to use:** Do NOT use this to add a new step — it only mutates existing steps and plan-level fields. To append a new step to an existing plan, use plan_step_add (do not delete and recreate the plan).\n\n" +
 				"**Required context:** Always supply the plan `id`. Supply `step_id` to update only that step; omit it to update plan-level fields.\n\n" +
 				"**Plan status transitions:** proposed → approved → in_progress → complete (or abandoned).\n" +
 				"**Step status transitions:** pending → in_progress → done (or skipped).\n\n" +
@@ -419,15 +419,15 @@ func selfToolDefinitions() []Tool {
 			},
 		},
 		{
-			Name: "nanite_plan_step_add",
+			Name: "plan_step_add",
 			Description: "Append one or more new steps to an existing plan without deleting or recreating it. Existing step IDs and statuses are preserved.\n\n" +
-				"**When to use:** When the user adds a new step to a plan that already exists, or when you need to extend a plan mid-flight (e.g. a discovery during execution justifies one more step). Always prefer this over nanite_plan_delete + nanite_plan_create — recreation loses step history and reorders IDs.\n\n" +
-				"**When NOT to use:** To rename, re-status, or transition an existing step, use nanite_plan_update(step_id=...). To create the very first set of steps, use nanite_plan_create.\n\n" +
-				"**Required context:** plan_id (from nanite_plan_create / nanite_plan_list / nanite_plan_get) and a non-empty `steps` array. Each step needs a `title`. The `id` is optional — when omitted, an ID is auto-assigned (e.g. s4 if your plan already has s1..s3). Supplying an ID that collides with an existing step is an error.\n\n" +
-				"**Behavior:** Steps are appended at the end in the order given. Existing steps are not reordered, renumbered, or modified. Returns the appended steps with their resolved IDs so you can immediately reference them in nanite_plan_update.\n\n" +
+				"**When to use:** When the user adds a new step to a plan that already exists, or when you need to extend a plan mid-flight (e.g. a discovery during execution justifies one more step). Always prefer this over plan_delete + plan_create — recreation loses step history and reorders IDs.\n\n" +
+				"**When NOT to use:** To rename, re-status, or transition an existing step, use plan_update(step_id=...). To create the very first set of steps, use plan_create.\n\n" +
+				"**Required context:** plan_id (from plan_create / plan_list / plan_get) and a non-empty `steps` array. Each step needs a `title`. The `id` is optional — when omitted, an ID is auto-assigned (e.g. s4 if your plan already has s1..s3). Supplying an ID that collides with an existing step is an error.\n\n" +
+				"**Behavior:** Steps are appended at the end in the order given. Existing steps are not reordered, renumbered, or modified. Returns the appended steps with their resolved IDs so you can immediately reference them in plan_update.\n\n" +
 				"**Output shape:** \"Appended N step(s) to plan <plan_id>\" plus a JSON object {plan_id, appended: [step...], appended_count}. The `appended` array contains each step exactly as stored, including the resolved `id`.\n\n" +
 				"**Golden example:** plan_id=\"pln-01HZ...\", steps=`[{\"title\":\"Write integration test\",\"acceptance\":\"covers happy path + plan-not-found\",\"depends_on\":[\"s2\"]}]` → appends one step at the end with auto-assigned id (e.g. s4) and the rest of the plan untouched.\n\n" +
-				"**Cross-references:** nanite_plan_create (initial plan + steps), nanite_plan_update (advance a step's status), nanite_plan_get (read step IDs before appending).",
+				"**Cross-references:** plan_create (initial plan + steps), plan_update (advance a step's status), plan_get (read step IDs before appending).",
 			InputSchema: map[string]any{
 				"type": "object",
 				"properties": map[string]any{
@@ -444,10 +444,10 @@ func selfToolDefinitions() []Tool {
 			},
 		},
 		{
-			Name: "nanite_plan_list",
+			Name: "plan_list",
 			Description: "List plans, optionally filtered by scope, scope_id, and/or status.\n\n" +
 				"**When to use:** When the user asks what plans are active, or before creating a plan to check for duplicates. For scope=session, scope_id is auto-filled when omitted.\n\n" +
-				"**Output shape:** Text list of matching plans with title, status, scope, and step count. Use nanite_plan_get for full step detail.",
+				"**Output shape:** Text list of matching plans with title, status, scope, and step count. Use plan_get for full step detail.",
 			InputSchema: map[string]any{
 				"type": "object",
 				"properties": map[string]any{
@@ -458,9 +458,9 @@ func selfToolDefinitions() []Tool {
 			},
 		},
 		{
-			Name: "nanite_plan_get",
+			Name: "plan_get",
 			Description: "Get a single plan by ID, including all steps with their IDs, statuses, and dependencies.\n\n" +
-				"**When to use:** After nanite_plan_create or nanite_plan_list to retrieve step IDs needed for nanite_plan_update(step_id=...).\n\n" +
+				"**When to use:** After plan_create or plan_list to retrieve step IDs needed for plan_update(step_id=...).\n\n" +
 				"**Output shape:** Full plan as JSON — {id, title, scope, scope_id, status, description, steps: [{id, title, status, depends_on, acceptance, notes}]}.",
 			InputSchema: map[string]any{
 				"type": "object",
@@ -471,10 +471,10 @@ func selfToolDefinitions() []Tool {
 			},
 		},
 		{
-			Name: "nanite_plan_delete",
+			Name: "plan_delete",
 			Description: "Permanently delete a plan by ID, including all its steps. Irreversible.\n\n" +
 				"**When to use:** When the user explicitly discards a plan they no longer need.\n\n" +
-				"**Required context:** You need the plan ID — get it from nanite_plan_list if you don't have it.\n\n" +
+				"**Required context:** You need the plan ID — get it from plan_list if you don't have it.\n\n" +
 				"**Output shape:** \"Deleted plan <id>\" on success.",
 			InputSchema: map[string]any{
 				"type": "object",
@@ -486,7 +486,7 @@ func selfToolDefinitions() []Tool {
 		},
 		// --- Install tools ---
 		{
-			Name: "nanite_install_home",
+			Name: "install_home",
 			Description: "Extract the embedded Nanite framework assets (roles, skills, config templates) to ~/.nanite/.\n\n" +
 				"**When to use:** On first install or to update framework assets after a Nanite upgrade.\n\n" +
 				"**When NOT to use:** Do not use with force=true unless the user explicitly asks — it overwrites user-modified files.\n\n" +
@@ -499,7 +499,7 @@ func selfToolDefinitions() []Tool {
 			},
 		},
 		{
-			Name: "nanite_install_project",
+			Name: "install_project",
 			Description: "Scaffold .nanite/ and NANITE.md in a project directory, or adopt an existing .nanite/ project into Nanite-managed adapter wiring.\n\n" +
 				"**When to use:** When onboarding a new project to Nanite or normalizing an existing .nanite/ project.\n\n" +
 				"**Required context:** project_dir must be an absolute path to the project root.\n\n" +
@@ -513,9 +513,9 @@ func selfToolDefinitions() []Tool {
 			},
 		},
 		{
-			Name: "nanite_install_diff",
+			Name: "install_diff",
 			Description: "Dry-run a project install: show what files would be created or modified without actually changing anything.\n\n" +
-				"**When to use:** Before running nanite_install_project to preview the impact.\n\n" +
+				"**When to use:** Before running install_project to preview the impact.\n\n" +
 				"**Note:** Not yet implemented — returns a not-implemented error.\n\n" +
 				"**Output shape:** Diff summary of would-be changes (when implemented).",
 			InputSchema: map[string]any{
@@ -527,16 +527,16 @@ func selfToolDefinitions() []Tool {
 			},
 		},
 		// --- messaging tools ---
-		// nanite_message_subscribe is intentionally NOT registered here: it
+		// message_subscribe is intentionally NOT registered here: it
 		// requires streaming support in mcp-go or a custom server-side
 		// handler, which is deferred to a follow-up task.
 		{
-			Name: "nanite_message_send",
+			Name: "message_send",
 			Description: "Send a message from one agent/session to another.\n\n" +
 				"**When to use:** To deliver a message to the user (to_agent_id='user'), hand off context to another agent, or notify a peer session.\n\n" +
 				"**Channel policy:** 'chat' for in-session conversation visible inline; 'inbox' for async work the recipient polls; 'alert' for one-off agent-triggered notifications.\n\n" +
 				"**Required context:** from_session_id, from_agent_id, to_session_id, to_agent_id, and body are required. Set reply_to to the parent message ID to thread a reply.\n\n" +
-				"**Output shape:** Confirmation with the new message ID. Use nanite_message_inbox to poll for replies.",
+				"**Output shape:** Confirmation with the new message ID. Use message_inbox to poll for replies.",
 			InputSchema: map[string]any{
 				"type": "object",
 				"properties": map[string]any{
@@ -557,11 +557,11 @@ func selfToolDefinitions() []Tool {
 			},
 		},
 		{
-			Name: "nanite_message_inbox",
+			Name: "message_inbox",
 			Description: "Read the messaging inbox for a (session_id, agent_id) pair.\n\n" +
 				"**When to use:** To poll for new messages (unread), check async replies, or review alerts. Filter by status=unread to see only new messages.\n\n" +
 				"**Required context:** session_id and agent_id are required.\n\n" +
-				"**Output shape:** List of messages with id, sender, channel, kind, subject, body, and status. Chain with nanite_message_ack to mark messages read.",
+				"**Output shape:** List of messages with id, sender, channel, kind, subject, body, and status. Chain with message_ack to mark messages read.",
 			InputSchema: map[string]any{
 				"type": "object",
 				"properties": map[string]any{
@@ -575,7 +575,7 @@ func selfToolDefinitions() []Tool {
 			},
 		},
 		{
-			Name: "nanite_message_thread",
+			Name: "message_thread",
 			Description: "Get all messages in a thread by thread_id, filtered to messages where the caller is sender or recipient.\n\n" +
 				"**When to use:** When you have a thread_id from a prior message and want to see the full conversation history.\n\n" +
 				"**Required context:** thread_id, session_id, and agent_id are all required. Non-participants receive an empty slice (no existence leak).\n\n" +
@@ -591,7 +591,7 @@ func selfToolDefinitions() []Tool {
 			},
 		},
 		{
-			Name: "nanite_message_ack",
+			Name: "message_ack",
 			Description: "Mark a message as read (acknowledged).\n\n" +
 				"**When to use:** After processing a message from the inbox to clear the unread state. Idempotent — safe to call multiple times.\n\n" +
 				"**Output shape:** Confirmation of updated status.",
@@ -606,7 +606,7 @@ func selfToolDefinitions() []Tool {
 			},
 		},
 		{
-			Name: "nanite_message_resolve",
+			Name: "message_resolve",
 			Description: "Mark a message as resolved (work completed on this message).\n\n" +
 				"**When to use:** After a request message has been fully handled and the work is done. Distinct from ack (read) — resolved means action is complete.\n\n" +
 				"**Output shape:** Confirmation of updated status.",
@@ -621,7 +621,7 @@ func selfToolDefinitions() []Tool {
 			},
 		},
 		{
-			Name: "nanite_message_catch_up",
+			Name: "message_catch_up",
 			Description: "Get the last N messages for a session across both sides of the conversation.\n\n" +
 				"**When to use:** At the start of a handoff or when an incoming agent needs a quick summary of recent session activity without reading the full transcript.\n\n" +
 				"**Required context:** session_id is required. limit defaults to 20.\n\n" +
@@ -636,11 +636,11 @@ func selfToolDefinitions() []Tool {
 			},
 		},
 		{
-			Name: "nanite_handoff_request",
+			Name: "handoff_request",
 			Description: "Request a session handoff, transferring primary responsibility from one agent to another.\n\n" +
-				"**When to use:** When the current agent has completed its scope and another agent should take over. The handoff is pending until the user approves it via nanite_handoff_approve.\n\n" +
+				"**When to use:** When the current agent has completed its scope and another agent should take over. The handoff is pending until the user approves it via handoff_approve.\n\n" +
 				"**Required context:** session_id, to_agent_id, and requested_by are required. requested_by identifies who initiated the handoff (departing agent, incoming agent, or user).\n\n" +
-				"**Output shape:** Handoff record with ID. Chain with nanite_handoff_approve or nanite_handoff_reject.",
+				"**Output shape:** Handoff record with ID. Chain with handoff_approve or handoff_reject.",
 			InputSchema: map[string]any{
 				"type": "object",
 				"properties": map[string]any{
@@ -653,10 +653,10 @@ func selfToolDefinitions() []Tool {
 			},
 		},
 		{
-			Name: "nanite_handoff_approve",
+			Name: "handoff_approve",
 			Description: "Approve a pending handoff, atomically rebinding the session's primary agent.\n\n" +
-				"**When to use:** After nanite_handoff_request, when the user (or logic) confirms the transfer should proceed.\n\n" +
-				"**Required context:** handoff_id from a prior nanite_handoff_request call.\n\n" +
+				"**When to use:** After handoff_request, when the user (or logic) confirms the transfer should proceed.\n\n" +
+				"**Required context:** handoff_id from a prior handoff_request call.\n\n" +
 				"**Output shape:** Confirmation that the session is now bound to the new agent.",
 			InputSchema: map[string]any{
 				"type": "object",
@@ -667,10 +667,10 @@ func selfToolDefinitions() []Tool {
 			},
 		},
 		{
-			Name: "nanite_handoff_reject",
+			Name: "handoff_reject",
 			Description: "Reject a pending handoff, cancelling the transfer request.\n\n" +
 				"**When to use:** When the user or logic determines the handoff should not proceed. Provide a reason so the requesting agent can understand the outcome.\n\n" +
-				"**Required context:** handoff_id from a prior nanite_handoff_request call.\n\n" +
+				"**Required context:** handoff_id from a prior handoff_request call.\n\n" +
 				"**Output shape:** Confirmation that the handoff is cancelled; the session remains with the current agent.",
 			InputSchema: map[string]any{
 				"type": "object",
@@ -683,7 +683,7 @@ func selfToolDefinitions() []Tool {
 		},
 		// --- Subagent spawn (S7 T9) ---
 		{
-			Name: "nanite_spawn_subagent",
+			Name: "subagent_spawn",
 			Description: "Spawn a child agent to handle a delegated subtask, optionally blocking until it completes.\n\n" +
 				"**When to use:** When a subtask is well-bounded and can be handled by a specialized role without the primary agent doing the work inline. Use sync for tasks that the caller must wait for; async or api for fire-and-forget or parallel work.\n\n" +
 				"**Mode semantics:**\n" +
@@ -691,8 +691,8 @@ func selfToolDefinitions() []Tool {
 				"- async: returns immediately; reply lands in the parent session inbox (channel=inbox) when done.\n" +
 				"- api: returns immediately; reply lands in the parent session chat (channel=chat).\n\n" +
 				"**Required context:** parent_session_id, parent_agent_id, role, and prompt are required.\n\n" +
-				"**Output shape (sync):** Subagent's final reply text. (async/api): run_id for tracking — use nanite_subagent_status to check progress.\n\n" +
-				"**Chaining:** Follow async/api spawns with nanite_message_inbox to receive the reply, or nanite_subagent_status to check completion.",
+				"**Output shape (sync):** Subagent's final reply text. (async/api): run_id for tracking — use subagent_status to check progress.\n\n" +
+				"**Chaining:** Follow async/api spawns with message_inbox to receive the reply, or subagent_status to check completion.",
 			InputSchema: map[string]any{
 				"type": "object",
 				"properties": map[string]any{
@@ -709,10 +709,10 @@ func selfToolDefinitions() []Tool {
 			},
 		},
 		{
-			Name: "nanite_subagent_status",
+			Name: "subagent_status",
 			Description: "Return the current lifecycle state of a spawned subagent run.\n\n" +
-				"**When to use:** After nanite_spawn_subagent in async or api mode, to check whether the subagent has completed.\n\n" +
-				"**Required context:** run_id from the nanite_spawn_subagent response.\n\n" +
+				"**When to use:** After subagent_spawn in async or api mode, to check whether the subagent has completed.\n\n" +
+				"**Required context:** run_id from the subagent_spawn response.\n\n" +
 				"**Output shape:** {run_id, status: pending|running|done|failed|cancelled, ...}.",
 			InputSchema: map[string]any{
 				"type": "object",
@@ -723,10 +723,10 @@ func selfToolDefinitions() []Tool {
 			},
 		},
 		{
-			Name: "nanite_subagent_cancel",
+			Name: "subagent_cancel",
 			Description: "Cancel an in-flight subagent run. Idempotent — calling on an already-terminal run is a no-op.\n\n" +
 				"**When to use:** When the parent agent no longer needs the subagent's result (e.g. user cancelled the request), or the subagent is taking too long.\n\n" +
-				"**Required context:** run_id from the nanite_spawn_subagent response.\n\n" +
+				"**Required context:** run_id from the subagent_spawn response.\n\n" +
 				"**Output shape:** Confirmation of cancellation or no-op if already terminal.",
 			InputSchema: map[string]any{
 				"type": "object",
@@ -738,15 +738,15 @@ func selfToolDefinitions() []Tool {
 		},
 		// --- Background job (P9 BackgroundJob, CW-20260420-0016) ---
 		{
-			Name: "nanite_background_job",
+			Name: "background_job",
 			Description: "Dispatch a long-running task as an async, non-session-bound background job. Returns a job_id immediately; the result lands as an inbox notification on the originating session when the job completes.\n\n" +
 				"**Contrast with sibling primitives — pick the right one:**\n" +
 				"- **peer_query** (sync, in-session): a single quick question to a peer agent; you wait for the reply inline. Lightest.\n" +
-				"- **nanite_spawn_subagent** (sync/async, in-session): a delegated subtask whose lifecycle is tied to this session. Medium.\n" +
-				"- **nanite_background_job** (async, NON-session-bound): heavy or long-running work that should not block this session. Reply arrives via the messaging inbox when done — possibly after this turn ends.\n\n" +
+				"- **subagent_spawn** (sync/async, in-session): a delegated subtask whose lifecycle is tied to this session. Medium.\n" +
+				"- **background_job** (async, NON-session-bound): heavy or long-running work that should not block this session. Reply arrives via the messaging inbox when done — possibly after this turn ends.\n\n" +
 				"**When to use:** Codebase crawls, multi-file research, transcript analysis, or anything you'd otherwise abandon partway through because the calling turn ends. Only fires when the P3 ScopeTier classifier says ExecutionPattern=background — pass that pattern explicitly.\n\n" +
 				"**Required context:** task (the prompt the spawned process runs), originating_session_id, originating_agent_id. agent (role slug) and budget are optional (defaults: 30 min wall-clock, 1 MiB output cap).\n\n" +
-				"**Output shape:** {job_id}. The completion envelope (channel=inbox, kind=notification, from_agent_id=background-job) carries a structured JobResult JSON in payload_json with status (succeeded/failed/cancelled), output, error, started_at, completed_at. Poll nanite_message_inbox after the turn or chain via nanite_background_status.",
+				"**Output shape:** {job_id}. The completion envelope (channel=inbox, kind=notification, from_agent_id=background-job) carries a structured JobResult JSON in payload_json with status (succeeded/failed/cancelled), output, error, started_at, completed_at. Poll message_inbox after the turn or chain via background_status.",
 			InputSchema: map[string]any{
 				"type": "object",
 				"properties": map[string]any{
@@ -761,10 +761,10 @@ func selfToolDefinitions() []Tool {
 			},
 		},
 		{
-			Name: "nanite_background_status",
+			Name: "background_status",
 			Description: "Return the current lifecycle state and (when terminal) result of a background job.\n\n" +
-				"**When to use:** After nanite_background_job, to poll progress. Prefer waiting for the inbox notification; this is for active polling cases.\n\n" +
-				"**Required context:** job_id from the nanite_background_job response.\n\n" +
+				"**When to use:** After background_job, to poll progress. Prefer waiting for the inbox notification; this is for active polling cases.\n\n" +
+				"**Required context:** job_id from the background_job response.\n\n" +
 				"**Output shape:** {job_id, status: pending|running|succeeded|failed|cancelled, output, error, started_at, completed_at, output_truncated}.",
 			InputSchema: map[string]any{
 				"type": "object",
@@ -775,10 +775,10 @@ func selfToolDefinitions() []Tool {
 			},
 		},
 		{
-			Name: "nanite_background_cancel",
+			Name: "background_cancel",
 			Description: "Cancel an in-flight background job. Idempotent — calling on an already-terminal job is a no-op.\n\n" +
 				"**When to use:** When the background work is no longer needed (e.g. the user cancelled the request, or a faster path materialized). The backend kills the process group; descendants are reaped.\n\n" +
-				"**Required context:** job_id from the nanite_background_job response.\n\n" +
+				"**Required context:** job_id from the background_job response.\n\n" +
 				"**Output shape:** Confirmation of cancellation or no-op if already terminal.",
 			InputSchema: map[string]any{
 				"type": "object",
@@ -790,7 +790,7 @@ func selfToolDefinitions() []Tool {
 		},
 		// --- Scratchpad tools (P4 Scratchpad, CW-20260419-0025) ---
 		{
-			Name: "nanite_scratchpad_write",
+			Name: "scratchpad_write",
 			Description: `Write a value to the per-turn scratchpad under a named key.
 
 **When to use:** When you want to stash interim findings, running totals, or
@@ -800,7 +800,7 @@ tool call to look up a value you already fetched, or when you need to accumulate
 state across multiple tool calls.
 
 **When NOT to use:** Do NOT use as long-term memory — that is Vanta
-(nanite_memory_save / nanite_memory_recall). Do NOT use to pass data to another agent
+(memory_write / memory_recall). Do NOT use to pass data to another agent
 — that is peer_query. Do NOT use across sessions — the scratchpad clears on
 turn exit. This is NOT a replacement for the think tool: think is for reasoning
 within one LLM call; scratchpad_write is for persisting a value you want to
@@ -829,16 +829,16 @@ error string describing the byte count so you can decide to truncate or omit.`,
 			},
 		},
 		{
-			Name: "nanite_scratchpad_read",
+			Name: "scratchpad_read",
 			Description: `Read values from the per-turn scratchpad.
 
-**When to use:** After calling nanite_scratchpad_write earlier in this turn, to
+**When to use:** After calling scratchpad_write earlier in this turn, to
 retrieve what you stashed. Call with a specific key to read one entry, or omit
 the key to read all current entries.
 
 **When NOT to use:** Do not use to read data from previous turns or other
 sessions — the scratchpad is cleared on turn exit and is per-generation only.
-For cross-session data use Vanta (nanite_memory_recall). For data from other agents
+For cross-session data use Vanta (memory_recall). For data from other agents
 use peer_query.
 
 **Output shape:** {"entries": {key: value, ...}} — a map of matching entries.
@@ -854,7 +854,7 @@ Empty map when no entries match (key not found, or scratchpad is empty).`,
 			},
 		},
 		{
-			Name: "nanite_scratchpad_clear",
+			Name: "scratchpad_clear",
 			Description: `Delete a key from the per-turn scratchpad.
 
 **When to use:** When a stashed value is no longer needed mid-turn and you want
@@ -880,7 +880,7 @@ the current turn for subsequent writes.
 		},
 		// --- chat_search self-tool (P8B, CW-20260420-0026) ---
 		{
-			Name: "nanite_chat_search",
+			Name: "chat_search",
 			Description: "Search your own past conversation, including parts that were summarized away during compaction. " +
 				"Use this when the post-compaction disclosure prompt mentions an elided detail you need.\n\n" +
 				"**When to use:** When you need to find something from earlier in this session — a specific decision, " +
@@ -912,7 +912,7 @@ the current turn for subsequent writes.
 		},
 		// --- Panel control (J8 v1, CW-20260426-0006) ---
 		{
-			Name: "nanite_panel_open",
+			Name: "panel_open",
 			Description: "Open a UI drawer/panel by stable ID so its content is visible to the user.\n\n" +
 				"**When to use:** When the conversation enters a state where a particular surface is helpful — e.g. asking the user to triage todos opens `work`, picking a workflow opens `workflows`, surfacing a long document for reference opens `bottom_chat_drawer`.\n\n" +
 				"**When NOT to use:** Do NOT call this just because content is being emitted into a drawer — envelopes can carry a `target` field that auto-routes and opens the drawer declaratively. Use the explicit tool only when you want to bring a drawer up WITHOUT (or before) emitting envelope content.\n\n" +
@@ -931,7 +931,7 @@ the current turn for subsequent writes.
 			},
 		},
 		{
-			Name: "nanite_panel_close",
+			Name: "panel_close",
 			Description: "Close a UI drawer/panel by stable ID.\n\n" +
 				"**When to use:** Sparingly — closing surfaces hides information from the user. Reasonable case: a workflow finished and you want to clear the workflow drawer so the user's attention returns to chat.\n\n" +
 				"**When NOT to use:** Do not close a drawer the user opened manually (`user_opened` state). The dispatcher enforces this: a close on a user-opened drawer is a NO-OP.\n\n" +
@@ -949,11 +949,11 @@ the current turn for subsequent writes.
 			},
 		},
 		{
-			Name: "nanite_signal_mode",
+			Name: "signal_mode",
 			Description: "Signal a workspace mode/status to the FE so it can open the corresponding preset of panels.\n\n" +
-				"**When to use:** When the conversation enters a recognized state where multiple drawers should come up together — e.g. switching into planning surfaces both `work` and `workflows`. Cleaner than calling `nanite_panel_open` per drawer.\n\n" +
+				"**When to use:** When the conversation enters a recognized state where multiple drawers should come up together — e.g. switching into planning surfaces both `work` and `workflows`. Cleaner than calling `panel_open` per drawer.\n\n" +
 				"**v1 vocabulary:** `planning` → opens [work, workflows]. The map is intentionally tiny in v1; emitting an unknown mode is a NO-OP on the FE (no error). The vocabulary is documented at ui/src/lib/panel-modes.ts.\n\n" +
-				"**Dismiss policy:** the same 4-state dismiss machine that gates `nanite_panel_open` applies — if the user has dismissed `work`, the planning preset will NOT re-open it until a new conversational trigger fires.\n\n" +
+				"**Dismiss policy:** the same 4-state dismiss machine that gates `panel_open` applies — if the user has dismissed `work`, the planning preset will NOT re-open it until a new conversational trigger fires.\n\n" +
 				"**Output shape:** `{signaled: true, mode: string}` on success. Unknown modes still return `signaled: true` (the FE silently ignores them) — the contract is that emission always succeeds; preset interpretation lives in the FE.",
 			InputSchema: map[string]any{
 				"type": "object",
@@ -968,7 +968,7 @@ the current turn for subsequent writes.
 		},
 		// --- Reminders + Pin (J11, CW-20260426-0009; D1, CW-20260428-0014) ---
 		{
-			Name: "nanite_set_reminder",
+			Name: "reminder_set",
 			Description: "Set a deterministic reminder that fires at a future time or after N turns, " +
 				"injecting your reminder text into context as a <system-reminder> block.\n\n" +
 				"**When to use:** When you want to remember to do something later — e.g. 'don't forget to file a ticket', " +
@@ -1016,7 +1016,7 @@ the current turn for subsequent writes.
 			},
 		},
 		{
-			Name: "nanite_pin",
+			Name: "context_pin",
 			Description: "Pin content so the system keeps it in context across turns (session scope) or across sessions in a project (project scope). " +
 				"Pinned content rides in the SlotUserContext budget and is visible in the bottom drawer Pins tab.\n\n" +
 				"**When to use:** When you want to keep a piece of context visible throughout the conversation or across sessions — " +
@@ -1049,18 +1049,18 @@ the current turn for subsequent writes.
 			},
 		},
 		{
-			Name: "nanite_unpin",
+			Name: "context_unpin",
 			Description: "Remove a pinned item by ID, freeing its context budget.\n\n" +
 				"**When to use:** When pinned content is no longer needed — after the user acknowledges it, " +
 				"after the task it describes is complete, or when the budget needs freeing.\n\n" +
-				"**Required context:** pin_id from a prior nanite_pin call.\n\n" +
+				"**Required context:** pin_id from a prior context_pin call.\n\n" +
 				"**Output shape:** `{pin_id, status: 'unpinned'}`.",
 			InputSchema: map[string]any{
 				"type": "object",
 				"properties": map[string]any{
 					"pin_id": map[string]any{
 						"type":        "string",
-						"description": "Pin ID to remove (from prior nanite_pin call).",
+						"description": "Pin ID to remove (from prior context_pin call).",
 					},
 				},
 				"required": []string{"pin_id"},
@@ -1068,7 +1068,7 @@ the current turn for subsequent writes.
 		},
 		// --- executeTask dispatch primitive (CW-20260421-0010, B3) ---
 		{
-			Name: "nanite_execute_task",
+			Name: "task_execute",
 			Description: "Dispatch a task to a Worker or Planner role agent. The Chat agent (harness) calls this when the user's request needs concrete execution — file edits, tool runs, code work, planning — instead of a direct conversational reply.\n\n" +
 				"**When to use:** When the user asks for any work that requires tool calls beyond Chat's static surface (todos / plans / scratchpad / messaging / narration / executeTask itself). Examples: \"fix the bug\", \"audit X\", \"refactor Y\", \"build Z\".\n\n" +
 				"**When NOT to use:** Trivial conversational replies (\"thanks\", \"what does X mean\"). The Chat harness handles those directly without dispatch.\n\n" +
@@ -1089,14 +1089,14 @@ the current turn for subsequent writes.
 			},
 		},
 		// --- Discovery / introspection (CW-20260429-0005, A1) ---
-		// nanite_tool_describe surfaces a tool's schema + golden examples
+		// tool_describe surfaces a tool's schema + golden examples
 		// so agents can introspect any internal tool when uncertain about
 		// input shape. Layer 1 of the self-healing tool surface lens.
 		naniteToolDescribeDefinition(),
 		// --- Cheap discovery primitive (SP6, CW-20260430-0006) ---
-		// nanite_tool_list returns name + one-line summary for every
+		// tool_list returns name + one-line summary for every
 		// self-tool, with optional case-insensitive filter. Sister to
-		// nanite_tool_describe but ~2 orders of magnitude cheaper —
+		// tool_describe but ~2 orders of magnitude cheaper —
 		// agents browse the surface here, then describe a single tool
 		// for the deep dive.
 		naniteToolListDefinition(),

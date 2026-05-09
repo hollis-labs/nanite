@@ -497,7 +497,7 @@ func (ls *loopState) isToolExhausted(toolName string) bool {
 func isMetaTool(name string) bool {
 	switch name {
 	case "request_tools", "fetch_tool_result", "search_tool_result",
-		"nanite_scratchpad_read": // P4: read-only access to loopState; exempt from per-tool caps
+		"scratchpad_read": // P4: read-only access to loopState; exempt from per-tool caps
 		return true
 	}
 	return false

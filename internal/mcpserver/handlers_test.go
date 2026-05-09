@@ -145,7 +145,7 @@ func TestNewErrorResult_WrappedError(t *testing.T) {
 func TestMakeHandler_MalformedArguments(t *testing.T) {
 	srv := newTestServer(t)
 	// Use any valid tool name; argument parsing happens before dispatch.
-	h := srv.makeHandler("nanite_list_skills")
+	h := srv.makeHandler("skill_list")
 
 	req := &mcp.CallToolRequest{
 		Params: &mcp.CallToolParamsRaw{
@@ -169,8 +169,8 @@ func TestMakeHandler_MalformedArguments(t *testing.T) {
 // returns a TextContent result.
 func TestMakeHandler_EmptyArguments(t *testing.T) {
 	srv := newTestServer(t)
-	// nanite_list_skills accepts empty args (listing all skills).
-	h := srv.makeHandler("nanite_list_skills")
+	// skill_list accepts empty args (listing all skills).
+	h := srv.makeHandler("skill_list")
 
 	req := &mcp.CallToolRequest{
 		Params: &mcp.CallToolParamsRaw{
@@ -200,10 +200,10 @@ func TestMakeHandler_EmptyArguments(t *testing.T) {
 // blocks before being returned to the SDK caller.
 func TestMakeHandler_EnvelopeConversion(t *testing.T) {
 	srv := newTestServer(t)
-	// nanite_show_card emits an envelope marker in its text output. Using
+	// card_show emits an envelope marker in its text output. Using
 	// info-card here because it has no grounding/sources requirement, so
 	// the smoke check stays focused on the envelope-conversion path.
-	h := srv.makeHandler("nanite_show_card")
+	h := srv.makeHandler("card_show")
 
 	args, _ := json.Marshal(map[string]any{
 		"type": "info-card",

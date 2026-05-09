@@ -14,7 +14,7 @@ import (
 // isScratchpadTool reports whether name is one of the P4 scratchpad tools.
 func isScratchpadTool(name string) bool {
 	switch name {
-	case "nanite_scratchpad_write", "nanite_scratchpad_read", "nanite_scratchpad_clear":
+	case "scratchpad_write", "scratchpad_read", "scratchpad_clear":
 		return true
 	}
 	return false
@@ -41,11 +41,11 @@ func handleScratchpadTool(
 	var isError bool
 
 	switch tu.Name {
-	case "nanite_scratchpad_write":
+	case "scratchpad_write":
 		resultText, isError = callScratchpadWrite(tu.Input, ls)
-	case "nanite_scratchpad_read":
+	case "scratchpad_read":
 		resultText, isError = callScratchpadRead(tu.Input, ls)
-	case "nanite_scratchpad_clear":
+	case "scratchpad_clear":
 		resultText, isError = callScratchpadClear(tu.Input, ls)
 	default:
 		resultText = fmt.Sprintf("unknown scratchpad tool: %s", tu.Name)

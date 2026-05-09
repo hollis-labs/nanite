@@ -588,7 +588,7 @@ func buildAgentErrorEnvelope(rec *recoverpkg.RecoverableError) string {
 // the C2 repair LLM declined to fabricate a value for a required field.
 // The shape extends the C1 envelope with `missing_required` (the field
 // list) and `lesson_hint` (an explainer the agent can persist via
-// nanite_remember once D1 ships). repaired_args is intentionally absent
+// lesson_capture once D1 ships). repaired_args is intentionally absent
 // — the contract is "no fabrication".
 func buildMissingRequiredEnvelope(rec *recoverpkg.RecoverableError, outcome *recoverpkg.RepairOutcome) string {
 	payload := map[string]any{
@@ -627,7 +627,7 @@ func buildMissingRequiredEnvelope(rec *recoverpkg.RecoverableError, outcome *rec
 // the JSON envelope self-describing even for tools that return prose.
 //
 // Note: the calling agent's system prompt (see migration 047) tells it
-// to read repair_note.lesson_hint and persist via nanite_remember when
+// to read repair_note.lesson_hint and persist via lesson_capture when
 // that tool is available.
 func wrapWithRepairNote(toolOutput string, rec *recoverpkg.RecoverableError, originalArgs map[string]any, outcome *recoverpkg.RepairOutcome) string {
 	note := map[string]any{

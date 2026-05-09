@@ -6,6 +6,6 @@
       "step_name": "name",
       "value": "Strategic Planner"
     },
-    "notes": "Call after nanite_start_builder. Each call advances to the next step until the builder signals completion."
+    "notes": "Call after builder_start. Each call advances to the next step until the builder signals completion."
   }
 ]

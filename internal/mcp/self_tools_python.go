@@ -123,7 +123,7 @@ _args = _envelope.get("args", {})
 import socket as _socket_mod
 _orig_socket_init = _socket_mod.socket.__init__
 def _socket_deny(self, *a, **kw):
-    raise PermissionError("network access is not permitted inside nanite_run_python")
+    raise PermissionError("network access is not permitted inside python_run")
 _socket_mod.socket.__init__ = _socket_deny  # type: ignore[method-assign]
 
 # ── tool_call FD channel ─────────────────────────────────────────────────────
@@ -167,7 +167,7 @@ _tool_calls_log = []
 _ns = {"args": _args, "tool_call": tool_call, "__builtins__": builtins}
 
 try:
-    exec(compile(_code, "<nanite_run_python>", "exec"), _ns)
+    exec(compile(_code, "<python_run>", "exec"), _ns)
     _result = _ns.get("result", None)
 except Exception as _exc:
     import traceback as _tb
@@ -227,7 +227,7 @@ func RunPythonSandbox(
 	// Locate python3 on PATH.
 	py3, err := exec.LookPath("python3")
 	if err != nil {
-		return nil, fmt.Errorf("nanite_run_python: python3 not found on PATH — install Python ≥ 3.10")
+		return nil, fmt.Errorf("python_run: python3 not found on PATH — install Python ≥ 3.10")
 	}
 
 	// Build stdin envelope.
@@ -245,7 +245,7 @@ func RunPythonSandbox(
 		MemLimitMB:   memLimitMB,
 	})
 	if err != nil {
-		return nil, fmt.Errorf("nanite_run_python: marshal envelope: %w", err)
+		return nil, fmt.Errorf("python_run: marshal envelope: %w", err)
 	}
 
 	// Create the two pipe pairs for FD3 (req) and FD4 (resp).
@@ -255,13 +255,13 @@ func RunPythonSandbox(
 	// Named from Python's perspective: FD3 = write-only req, FD4 = read-only resp.
 	pyReqR, pyReqW, err := os.Pipe() // Python writes here (FD3); Go reads
 	if err != nil {
-		return nil, fmt.Errorf("nanite_run_python: create req pipe: %w", err)
+		return nil, fmt.Errorf("python_run: create req pipe: %w", err)
 	}
 	pyRespR, pyRespW, err := os.Pipe() // Go writes here (FD4); Python reads
 	if err != nil {
 		pyReqR.Close()
 		pyReqW.Close()
-		return nil, fmt.Errorf("nanite_run_python: create resp pipe: %w", err)
+		return nil, fmt.Errorf("python_run: create resp pipe: %w", err)
 	}
 	defer pyReqR.Close()
 	defer pyReqW.Close()
@@ -307,7 +307,7 @@ func RunPythonSandbox(
 
 	// Start the subprocess.
 	if err := cmd.Start(); err != nil {
-		return nil, fmt.Errorf("nanite_run_python: start python3: %w", err)
+		return nil, fmt.Errorf("python_run: start python3: %w", err)
 	}
 
 	// Close the child-side ends in the parent after Start() so EOF propagates
@@ -512,13 +512,13 @@ func applySandboxSysProcAttr(cmd *exec.Cmd) {
 }
 
 // naniteRunPythonToolDefinition returns the tool definition for
-// nanite_run_python. Reach for any caller (Chat, Planner, Worker, or a
+// python_run. Reach for any caller (Chat, Planner, Worker, or a
 // custom agent profile) is governed by the agent profile's tool
 // permissions and the dev-mode gate, not by a hard-coded surface
 // restriction in this definition.
 func naniteRunPythonToolDefinition() Tool {
 	return Tool{
-		Name: "nanite_run_python",
+		Name: "python_run",
 		Description: `Execute a Python script in an isolated sandbox, with access to Nanite tools via tool_call().
 
 **When to use:**

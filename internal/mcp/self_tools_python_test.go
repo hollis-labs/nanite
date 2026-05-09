@@ -512,7 +512,7 @@ func TestSelfToolsTransport_RunPython_BasicViaCallTool(t *testing.T) {
 r = tool_call("test_add", {"a": 3.0, "b": 4.0})
 result = r["sum"]
 `
-	callResult, err := st.CallTool(context.Background(), "nanite_run_python", map[string]any{
+	callResult, err := st.CallTool(context.Background(), "python_run", map[string]any{
 		"code":       code,
 		"session_id": "test-sess",
 	})
@@ -545,21 +545,21 @@ func TestSelfToolsTransport_RunPython_PresentInSelfToolDefinitions(t *testing.T)
 	defs := selfToolDefinitions()
 	found := false
 	for _, d := range defs {
-		if d.Name == "nanite_run_python" {
+		if d.Name == "python_run" {
 			found = true
 			// Verify required fields.
 			if d.Description == "" {
-				t.Error("nanite_run_python description is empty")
+				t.Error("python_run description is empty")
 			}
 			props, _ := d.InputSchema["properties"].(map[string]any)
 			if _, ok := props["code"]; !ok {
-				t.Error("nanite_run_python schema missing 'code' property")
+				t.Error("python_run schema missing 'code' property")
 			}
 			break
 		}
 	}
 	if !found {
-		t.Error("nanite_run_python not found in selfToolDefinitions()")
+		t.Error("python_run not found in selfToolDefinitions()")
 	}
 }
 

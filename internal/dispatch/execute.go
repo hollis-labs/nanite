@@ -149,7 +149,7 @@ var ErrNoSpawner = errors.New("dispatch: no spawner configured")
 var ErrNoWrapper = errors.New("dispatch: no envelope wrapper configured")
 
 // ExecuteTask is the dispatch primitive. The Chat agent invokes it (via
-// the nanite_execute_task tool) when its harness prompt determines the
+// the task_execute tool) when its harness prompt determines the
 // request needs to be handed to a Worker or Planner. The primitive:
 //
 //  1. Classifies the message into ScopeTier + ExecutionPattern.

@@ -88,7 +88,7 @@ func DisambiguatedToolName(server, tool string) string {
 //
 // The previous implementation gated on a `nanite_` name prefix. That
 // guard breaks once the sp-20260429-0001 rename arc drops the prefix
-// (e.g., `nanite_show_card` → `card_show`), so this function now keys
+// (e.g., `card_show` → `card_show`), so this function now keys
 // on server identity to keep the invariant intact during and after the
 // cutover.
 //

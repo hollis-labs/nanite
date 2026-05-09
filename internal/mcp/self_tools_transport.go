@@ -45,7 +45,7 @@ type PanelSignalSink interface {
 }
 
 // PanelLookup returns the IDs of plugin-shipped panels currently registered
-// with the host. nanite_panel_open / nanite_panel_close use this to validate
+// with the host. panel_open / panel_close use this to validate
 // a panel_id outside the V1BuiltinPanelIDs set before applying H1 trust
 // gating. Wired from main.go via a closure over plugin.Host.GetPanels — using
 // a closure (rather than an interface) avoids importing the plugin package
@@ -103,7 +103,7 @@ type SelfToolsTransport struct {
 
 	// Dispatch is the executeTask dispatch primitive. Set post-
 	// construction from the container; nil-safe (callers receive an
-	// errorResult). The transport translates the nanite_execute_task
+	// errorResult). The transport translates the task_execute
 	// tool call to dispatch.ExecuteTask.
 	// (CW-20260421-0010, B3)
 	Dispatch dispatch.Spawner
@@ -122,7 +122,7 @@ type SelfToolsTransport struct {
 	// runs and influences dispatch). *store.Store satisfies this interface.
 	ReflexLogger reflex.MatchLogger
 
-	// PythonPermChecker is the permission engine used by nanite_run_python
+	// PythonPermChecker is the permission engine used by python_run
 	// to validate tool calls made from inside the Python sandbox.
 	// Set post-construction; nil disables permission checks (all tool calls
 	// from the sandbox are allowed — only appropriate for tests).
@@ -149,7 +149,7 @@ type SelfToolsTransport struct {
 	GroundingLogger grounding.ConsultationLogger
 
 	// Elicitation is the G4 mid-call user-prompt service (CW-20260420-0018).
-	// When set, write tools that need user confirmation (e.g. nanite_message_send
+	// When set, write tools that need user confirmation (e.g. message_send
 	// kind=directive) issue an elicitation/create request before proceeding.
 	// Nil-safe: tools auto-approve when Elicitation is not wired.
 	Elicitation ElicitationService
@@ -177,31 +177,31 @@ type SelfToolsTransport struct {
 	TrustResolver PanelTrustResolver
 
 	// ReminderEngine is the deterministic trigger engine for agent-set reminders
-	// (J11, CW-20260426-0009). When set, nanite_set_reminder calls register the
+	// (J11, CW-20260426-0009). When set, reminder_set calls register the
 	// creation turn with the engine so turn_count triggers compute correctly.
 	// Nil-safe — without the engine, reminders are persisted but turn_count
 	// triggers fall back to turn 0 as the creation baseline.
 	ReminderEngine *reminders.Engine
 
 	// SchemaLookup is the cross-server tool-schema registry used by
-	// nanite_validate (B1, CW-20260429-0006). When set, the validator can
+	// tool_validate (B1, CW-20260429-0006). When set, the validator can
 	// resolve input schemas for tools published by ANY registered MCP
 	// server, not just the self-tools. *mcp.Manager satisfies this.
-	// Nil-safe — when unwired, nanite_validate falls back to self-tool
+	// Nil-safe — when unwired, tool_validate falls back to self-tool
 	// schemas only and returns "unknown tool" for everything else.
 	SchemaLookup ToolSchemaLookup
 
 	// Inventory is the cross-server tool inventory used by
-	// nanite_tool_list (CW-20260501-0001). When set, the discovery
+	// tool_list (CW-20260501-0001). When set, the discovery
 	// primitive enumerates every registered MCP tool — self, memory,
 	// dev, general, plugin — rather than only the in-process self
 	// tools. *mcp.Manager satisfies this via GetAllToolsUnfiltered.
-	// Nil-safe — when unwired, nanite_tool_list falls back to
+	// Nil-safe — when unwired, tool_list falls back to
 	// selfToolDefinitions() (the legacy SP6 behavior).
 	Inventory ToolInventoryLookup
 
 	// LearningRecorder is the Vanta-backed write surface for the D1
-	// nanite_remember self-tool (CW-20260429-0009). When unset, the
+	// lesson_capture self-tool (CW-20260429-0009). When unset, the
 	// tool returns a clear errorResult on every call so a wiring miss
 	// is visible rather than silently dropped.
 	LearningRecorder *learnings.Recorder
@@ -212,7 +212,7 @@ type SelfToolsTransport struct {
 	// when unwired, the lesson-recall slot extension is a no-op.
 	LearningRecaller *learnings.Recaller
 
-	// RememberCounters tracks per-session counts of nanite_remember
+	// RememberCounters tracks per-session counts of lesson_capture
 	// calls bucketed by scope (D1 telemetry requirement). Lazily
 	// constructed by NewSelfToolsTransport so SnapshotSession works
 	// without explicit wiring.
@@ -267,120 +267,120 @@ const messageCallTimeout = 30 * time.Second
 // MCP stream indefinitely (F06).
 func (st *SelfToolsTransport) CallTool(ctx context.Context, name string, args map[string]any) (*ToolResult, error) {
 	switch name {
-	case "nanite_create_skill":
+	case "skill_create":
 		return st.callCreateSkill(args)
-	case "nanite_list_skills":
+	case "skill_list":
 		return st.callListSkills(args)
-	case "nanite_update_skill":
+	case "skill_update":
 		return st.callUpdateSkill(args)
-	case "nanite_delete_skill":
+	case "skill_delete":
 		return st.callDeleteSkill(args)
-	case "nanite_create_agent":
+	case "agent_create":
 		return st.callCreateAgent(args)
-	case "nanite_list_agents":
+	case "agent_list":
 		return st.callListAgents(args)
-	case "nanite_update_agent":
+	case "agent_update":
 		return st.callUpdateAgent(args)
-	case "nanite_navigate_engine":
+	case "engine_navigate":
 		return st.callNavigateEngine(args)
-	case "nanite_refresh_engine":
+	case "engine_refresh":
 		return st.callRefreshEngine(args)
-	case "nanite_show_card":
+	case "card_show":
 		return st.callShowCard(ctx, args)
-	case "nanite_validate":
+	case "tool_validate":
 		return st.callValidate(ctx, args)
-	case "nanite_giphy_search":
+	case "giphy_search":
 		return st.callGiphySearch(args)
-	case "nanite_start_builder":
+	case "builder_start":
 		return st.callStartBuilder(args)
-	case "nanite_builder_step":
+	case "builder_step":
 		return st.callBuilderStep(args)
-	case "nanite_todo_create":
+	case "todo_create":
 		return st.callTodoCreate(ctx, args)
-	case "nanite_todo_update":
+	case "todo_update":
 		return st.callTodoUpdate(args)
-	case "nanite_todo_list":
+	case "todo_list":
 		return st.callTodoList(ctx, args)
-	case "nanite_plan_create":
+	case "plan_create":
 		return st.callPlanCreate(ctx, args)
-	case "nanite_plan_update":
+	case "plan_update":
 		return st.callPlanUpdate(args)
-	case "nanite_plan_step_add":
+	case "plan_step_add":
 		return st.callPlanStepAdd(args)
-	case "nanite_plan_list":
+	case "plan_list":
 		return st.callPlanList(ctx, args)
-	case "nanite_plan_get":
+	case "plan_get":
 		return st.callPlanGet(args)
-	case "nanite_plan_delete":
+	case "plan_delete":
 		return st.callPlanDelete(args)
-	case "nanite_install_home":
+	case "install_home":
 		return st.callInstallHome(args)
-	case "nanite_install_project":
+	case "install_project":
 		return st.callInstallProject(args)
-	case "nanite_install_diff":
+	case "install_diff":
 		return st.callInstallDiff(args)
-	case "nanite_message_send":
+	case "message_send":
 		return st.callMessageSend(ctx, args)
-	case "nanite_message_inbox":
+	case "message_inbox":
 		return st.callMessageInbox(ctx, args)
-	case "nanite_message_thread":
+	case "message_thread":
 		return st.callMessageThread(ctx, args)
-	case "nanite_message_ack":
+	case "message_ack":
 		return st.callMessageAck(ctx, args)
-	case "nanite_message_resolve":
+	case "message_resolve":
 		return st.callMessageResolve(ctx, args)
-	case "nanite_message_catch_up":
+	case "message_catch_up":
 		return st.callMessageCatchUp(ctx, args)
-	case "nanite_handoff_request":
+	case "handoff_request":
 		return st.callHandoffRequest(ctx, args)
-	case "nanite_handoff_approve":
+	case "handoff_approve":
 		return st.callHandoffApprove(ctx, args)
-	case "nanite_handoff_reject":
+	case "handoff_reject":
 		return st.callHandoffReject(ctx, args)
-	case "nanite_spawn_subagent":
+	case "subagent_spawn":
 		return st.callSpawnSubagent(ctx, args)
-	case "nanite_subagent_status":
+	case "subagent_status":
 		return st.callSubagentStatus(ctx, args)
-	case "nanite_subagent_cancel":
+	case "subagent_cancel":
 		return st.callSubagentCancel(ctx, args)
-	case "nanite_background_job":
+	case "background_job":
 		return st.callBackgroundJob(ctx, args)
-	case "nanite_background_status":
+	case "background_status":
 		return st.callBackgroundStatus(ctx, args)
-	case "nanite_background_cancel":
+	case "background_cancel":
 		return st.callBackgroundCancel(ctx, args)
-	case "nanite_execute_task":
+	case "task_execute":
 		return st.callExecuteTask(ctx, args)
-	case "nanite_chat_search":
+	case "chat_search":
 		return st.callChatSearch(ctx, args)
-	case "nanite_run_python":
+	case "python_run":
 		return st.callRunPython(ctx, args)
-	case "nanite_panel_open":
+	case "panel_open":
 		return st.callPanelOpen(ctx, args)
-	case "nanite_panel_close":
+	case "panel_close":
 		return st.callPanelClose(ctx, args)
-	case "nanite_signal_mode":
+	case "signal_mode":
 		return st.callSignalMode(ctx, args)
 	// --- Reminders + Pin (J11, CW-20260426-0009) ---
-	case "nanite_set_reminder":
+	case "reminder_set":
 		return st.callSetReminder(ctx, args)
-	case "nanite_pin":
+	case "context_pin":
 		return st.callPin(ctx, args)
-	case "nanite_unpin":
+	case "context_unpin":
 		return st.callUnpin(ctx, args)
 	// --- Discovery / introspection (CW-20260429-0005, A1) ---
-	case "nanite_tool_describe":
+	case "tool_describe":
 		return st.callToolDescribe(ctx, args)
 	// --- Cheap discovery primitive (SP6, CW-20260430-0006) ---
-	case "nanite_tool_list":
+	case "tool_list":
 		return st.callToolList(ctx, args)
 	// --- Learning capture (CW-20260429-0009, D1) ---
-	case "nanite_remember":
+	case "lesson_capture":
 		return st.callRemember(ctx, args)
 	// --- Self-handoff (Glass-4, CW-20260502-0015) ---
-	case "nanite_handoff_stash":
+	case "handoff_stash":
 		return st.callHandoffStash(ctx, args)
-	case "nanite_handoff_pointers_expand":
+	case "handoff_pointers_expand":
 		return st.callHandoffPointersExpand(ctx, args)
 	default:
 		return errorResult(fmt.Sprintf("unknown tool: %s", name)), nil
@@ -648,7 +648,7 @@ func (st *SelfToolsTransport) callRefreshEngine(args map[string]any) (*ToolResul
 // --- envelope injection handlers ---
 
 // buildShowEnvelope assembles the envelope JSON shape emitted by
-// nanite_show_card. It propagates the optional `target` and `mode` args
+// card_show. It propagates the optional `target` and `mode` args
 // onto top-level envelope fields so the FE's applyEnvelopePanelEffects can
 // route drawer-visibility from a tool result (CW-20260428-0007 / J8 v1).
 // Empty values are omitted so unknown-mode/unknown-target cases stay silent.
@@ -690,7 +690,7 @@ var groundedShowCardTypes = map[string]bool{
 
 // callShowCard is the generic envelope-emission tool for the v1 passive-
 // renderable allow-list (CW-20260428-0019, A3 — Collab UI v1). It replaces
-// the per-type nanite_show_giphy / nanite_show_document / nanite_show_report
+// the per-type giphy_show / document_show / report_show
 // tools that existed pre-A3.
 //
 // The agent supplies the envelope `type` (any value in
@@ -724,7 +724,7 @@ func (st *SelfToolsTransport) callShowCard(ctx context.Context, args map[string]
 	}
 	if !envelope.IsPassiveRenderable(envType) {
 		return errorResult(fmt.Sprintf(
-			"envelope type %q is not addressable through nanite_show_card. Allow-list (v1): %s. "+
+			"envelope type %q is not addressable through card_show. Allow-list (v1): %s. "+
 				"Decision-flow envelopes (approval-card, proposal-card, confirmation-card, question-form), "+
 				"runtime-emitted envelopes (chat-loop-terminated, elicitation-prompt, subagent-spawn-approval), "+
 				"and plugin-shipped envelopes (kb-result, ticket-*) have their own emission paths.",
@@ -1264,7 +1264,7 @@ func (st *SelfToolsTransport) callInstallDiff(args map[string]any) (*ToolResult,
 
 // --- Messaging handlers ---
 //
-// The nanite_message_subscribe tool is intentionally not registered here: it
+// The message_subscribe tool is intentionally not registered here: it
 // requires streaming support in mcp-go or a custom server-side handler,
 // which is deferred to a follow-up task. See Task 10 notes.
 
@@ -1282,7 +1282,7 @@ func (st *SelfToolsTransport) callMessageSend(ctx context.Context, args map[stri
 	// G4 elicitation pilot (CW-20260420-0018, D5): directive messages broadcast
 	// instructions to all recipients and carry elevated blast radius. Require
 	// explicit user confirmation before sending when elicitation is wired.
-	// Directive is a `type` value (see nanite_message_send InputSchema), not kind.
+	// Directive is a `type` value (see message_send InputSchema), not kind.
 	if msgType == "directive" && st.Elicitation != nil {
 		fromSessionID := strArg(args, "from_session_id", "")
 		fromAgentID := strArg(args, "from_agent_id", "")
@@ -1497,10 +1497,10 @@ func (st *SelfToolsTransport) callHandoffReject(ctx context.Context, args map[st
 
 // --- subagent handlers (T9) ---
 
-// callSpawnSubagent handles nanite_spawn_subagent. Happy-path: all
+// callSpawnSubagent handles subagent_spawn. Happy-path: all
 // three modes auto-approve for MVP; interactive approval is a
 // follow-up (T9.2). The spawn returns a runID the caller can poll
-// via nanite_subagent_status or observe via the reply message
+// via subagent_status or observe via the reply message
 // posted back to the parent session on completion.
 func (st *SelfToolsTransport) callSpawnSubagent(ctx context.Context, args map[string]any) (*ToolResult, error) {
 	if st.Subagent == nil {
@@ -1751,7 +1751,7 @@ func (st *SelfToolsTransport) callSubagentCancel(ctx context.Context, args map[s
 
 // --- background-job handlers (CW-20260420-0016) ---
 //
-// nanite_background_job dispatches the P3 PatternBackground gate
+// background_job dispatches the P3 PatternBackground gate
 // before delegating to background.Service. Async by definition —
 // returns immediately with a job_id; the result envelope arrives
 // via messaging when the backend completes.
@@ -1830,7 +1830,7 @@ func strArg(args map[string]any, key, def string) string {
 	return v
 }
 
-// parseSourcesArg decodes the `sources` argument for nanite_show_card when
+// parseSourcesArg decodes the `sources` argument for card_show when
 // type is report-card or document-viewer (the prose-bearing card types).
 // Shape: JSON array of objects with at least a `tool_use_id` or `tool_name`
 // field. Enforces presence + non-empty + basic per-entry shape — this is
@@ -1898,9 +1898,9 @@ func validateSourcesAgainstTurn(ctx context.Context, sources []map[string]any) e
 	return nil
 }
 
-// --- nanite_run_python handler (CW-20260420-0019, D6) ---
+// --- python_run handler (CW-20260420-0019, D6) ---
 
-// callRunPython handles the nanite_run_python self-tool. Runs Python code
+// callRunPython handles the python_run self-tool. Runs Python code
 // in an isolated subprocess sandbox with a dual-FD tool-call channel that
 // routes through the permission engine on every tool invocation.
 //

@@ -36,18 +36,18 @@ func TestSelfToolsTransport_ListTools(t *testing.T) {
 	}
 
 	expected := map[string]bool{
-		"nanite_create_skill":     false,
-		"nanite_list_skills":      false,
-		"nanite_update_skill":     false,
-		"nanite_delete_skill":     false,
-		"nanite_create_agent":     false,
-		"nanite_list_agents":      false,
-		"nanite_update_agent":     false,
-		"nanite_start_builder":    false,
-		"nanite_builder_step":     false,
-		"nanite_install_home":    false,
-		"nanite_install_project": false,
-		"nanite_install_diff":    false,
+		"skill_create":     false,
+		"skill_list":      false,
+		"skill_update":     false,
+		"skill_delete":     false,
+		"agent_create":     false,
+		"agent_list":      false,
+		"agent_update":     false,
+		"builder_start":    false,
+		"builder_step":     false,
+		"install_home":    false,
+		"install_project": false,
+		"install_diff":    false,
 	}
 
 	for _, tool := range tools {
@@ -73,7 +73,7 @@ func TestSelfToolsTransport_CreateSkill(t *testing.T) {
 	ctx := context.Background()
 
 	// Create a skill.
-	result, err := st.CallTool(ctx, "nanite_create_skill", map[string]any{
+	result, err := st.CallTool(ctx, "skill_create", map[string]any{
 		"name":        "Test Skill",
 		"slug":        "test-skill",
 		"description": "A test skill for unit testing",
@@ -90,7 +90,7 @@ func TestSelfToolsTransport_CreateSkill(t *testing.T) {
 	}
 
 	// List skills and verify it appears.
-	listResult, err := st.CallTool(ctx, "nanite_list_skills", map[string]any{
+	listResult, err := st.CallTool(ctx, "skill_list", map[string]any{
 		"category": "testing",
 	})
 	if err != nil {
@@ -113,21 +113,21 @@ func TestSelfToolsTransport_ListSkills(t *testing.T) {
 	ctx := context.Background()
 
 	// Create two skills in different categories.
-	st.CallTool(ctx, "nanite_create_skill", map[string]any{
+	st.CallTool(ctx, "skill_create", map[string]any{
 		"name": "Skill A", "slug": "skill-a", "description": "cat-x skill", "category": "cat-x",
 	})
-	st.CallTool(ctx, "nanite_create_skill", map[string]any{
+	st.CallTool(ctx, "skill_create", map[string]any{
 		"name": "Skill B", "slug": "skill-b", "description": "cat-y skill", "category": "cat-y",
 	})
 
 	// List all.
-	allResult, _ := st.CallTool(ctx, "nanite_list_skills", map[string]any{})
+	allResult, _ := st.CallTool(ctx, "skill_list", map[string]any{})
 	if !strings.Contains(allResult.Content[0].Text, "Skill A") || !strings.Contains(allResult.Content[0].Text, "Skill B") {
 		t.Errorf("expected both skills, got: %s", allResult.Content[0].Text)
 	}
 
 	// Filter by cat-x.
-	filteredResult, _ := st.CallTool(ctx, "nanite_list_skills", map[string]any{"category": "cat-x"})
+	filteredResult, _ := st.CallTool(ctx, "skill_list", map[string]any{"category": "cat-x"})
 	if !strings.Contains(filteredResult.Content[0].Text, "Skill A") {
 		t.Errorf("expected Skill A, got: %s", filteredResult.Content[0].Text)
 	}
@@ -141,7 +141,7 @@ func TestSelfToolsTransport_CreateAgent(t *testing.T) {
 	st := newSelfTools(t)
 	ctx := context.Background()
 
-	result, err := st.CallTool(ctx, "nanite_create_agent", map[string]any{
+	result, err := st.CallTool(ctx, "agent_create", map[string]any{
 		"name":          "Test Agent",
 		"slug":          "test-agent",
 		"system_prompt": "You are a helpful test agent.",
@@ -159,7 +159,7 @@ func TestSelfToolsTransport_CreateAgent(t *testing.T) {
 	}
 
 	// List agents and verify.
-	listResult, err := st.CallTool(ctx, "nanite_list_agents", map[string]any{})
+	listResult, err := st.CallTool(ctx, "agent_list", map[string]any{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -179,7 +179,7 @@ func TestSelfToolsTransport_CreateSkill_MissingFields(t *testing.T) {
 	st := newSelfTools(t)
 	ctx := context.Background()
 
-	result, _ := st.CallTool(ctx, "nanite_create_skill", map[string]any{
+	result, _ := st.CallTool(ctx, "skill_create", map[string]any{
 		"name": "Only Name",
 	})
 	if !result.IsError {
@@ -193,7 +193,7 @@ func TestSelfToolsTransport_DeleteSkill(t *testing.T) {
 	ctx := context.Background()
 
 	// Create a skill first.
-	createResult, _ := st.CallTool(ctx, "nanite_create_skill", map[string]any{
+	createResult, _ := st.CallTool(ctx, "skill_create", map[string]any{
 		"name": "To Delete", "slug": "to-delete", "description": "Will be deleted",
 	})
 	if createResult.IsError {
@@ -214,7 +214,7 @@ func TestSelfToolsTransport_DeleteSkill(t *testing.T) {
 	}
 
 	// Delete it.
-	delResult, _ := st.CallTool(ctx, "nanite_delete_skill", map[string]any{"id": skillID})
+	delResult, _ := st.CallTool(ctx, "skill_delete", map[string]any{"id": skillID})
 	if delResult.IsError {
 		t.Fatalf("delete failed: %s", delResult.Content[0].Text)
 	}
@@ -251,7 +251,7 @@ func TestSelfToolsTransport_WorkBroadcast(t *testing.T) {
 	ctx := context.Background()
 
 	// Create todo → 1 broadcast.
-	r, err := st.CallTool(ctx, "nanite_todo_create", map[string]any{
+	r, err := st.CallTool(ctx, "todo_create", map[string]any{
 		"title": "wire test", "scope": "session", "scope_id": "sess-wire",
 	})
 	if err != nil || r.IsError {
@@ -262,7 +262,7 @@ func TestSelfToolsTransport_WorkBroadcast(t *testing.T) {
 	}
 
 	// List is read-only — no broadcast.
-	if _, err := st.CallTool(ctx, "nanite_todo_list", map[string]any{"scope": "session"}); err != nil {
+	if _, err := st.CallTool(ctx, "todo_list", map[string]any{"scope": "session"}); err != nil {
 		t.Fatal(err)
 	}
 	if b.calls != 1 {
@@ -270,7 +270,7 @@ func TestSelfToolsTransport_WorkBroadcast(t *testing.T) {
 	}
 
 	// Create plan → 2 broadcasts.
-	if _, err := st.CallTool(ctx, "nanite_plan_create", map[string]any{
+	if _, err := st.CallTool(ctx, "plan_create", map[string]any{
 		"title": "wire plan", "scope": "session", "scope_id": "sess-wire",
 	}); err != nil {
 		t.Fatal(err)
@@ -285,7 +285,7 @@ func TestSelfToolsTransport_WorkBroadcast(t *testing.T) {
 	}
 
 	// Delete plan → 3 broadcasts.
-	if _, err := st.CallTool(ctx, "nanite_plan_delete", map[string]any{"id": plans[0].ID}); err != nil {
+	if _, err := st.CallTool(ctx, "plan_delete", map[string]any{"id": plans[0].ID}); err != nil {
 		t.Fatal(err)
 	}
 	if b.calls != 3 {
@@ -293,7 +293,7 @@ func TestSelfToolsTransport_WorkBroadcast(t *testing.T) {
 	}
 }
 
-// TestSelfToolsTransport_TodoListEmitsEnvelope verifies that nanite_todo_list
+// TestSelfToolsTransport_TodoListEmitsEnvelope verifies that todo_list
 // emits a todo-list envelope carrying the scope/scope_id the caller filtered
 // on, so TodoListCard can lazy-fetch correctly. CW-20260418-0045.
 func TestSelfToolsTransport_TodoListEmitsEnvelope(t *testing.T) {
@@ -302,7 +302,7 @@ func TestSelfToolsTransport_TodoListEmitsEnvelope(t *testing.T) {
 	ctx := context.Background()
 
 	// With scope: envelope must appear and carry scope + scope_id.
-	r, err := st.CallTool(ctx, "nanite_todo_list", map[string]any{
+	r, err := st.CallTool(ctx, "todo_list", map[string]any{
 		"scope":    "session",
 		"scope_id": "sess-env",
 		"title":    "Session Todos",
@@ -325,7 +325,7 @@ func TestSelfToolsTransport_TodoListEmitsEnvelope(t *testing.T) {
 	}
 
 	// Without scope: no envelope (would render an un-scoped card).
-	r2, _ := st.CallTool(ctx, "nanite_todo_list", map[string]any{})
+	r2, _ := st.CallTool(ctx, "todo_list", map[string]any{})
 	if strings.Contains(r2.Content[0].Text, "<!--ENVELOPE_DATA:") {
 		t.Fatalf("expected no envelope when scope is empty, got: %s", r2.Content[0].Text)
 	}
@@ -341,7 +341,7 @@ func TestSelfToolsTransport_PlanCreate_AutoFillsSessionIDFromCtx(t *testing.T) {
 	st.TodoStore = st.Store
 	ctx := WithSessionID(context.Background(), "ctx-session-xyz")
 
-	r, err := st.CallTool(ctx, "nanite_plan_create", map[string]any{
+	r, err := st.CallTool(ctx, "plan_create", map[string]any{
 		"title": "ctx autofill",
 		"scope": "session",
 		// scope_id intentionally omitted
@@ -362,7 +362,7 @@ func TestSelfToolsTransport_PlanCreate_ErrorsWithoutSessionID(t *testing.T) {
 	st := newSelfTools(t)
 	st.TodoStore = st.Store
 
-	r, _ := st.CallTool(context.Background(), "nanite_plan_create", map[string]any{
+	r, _ := st.CallTool(context.Background(), "plan_create", map[string]any{
 		"title": "no scope_id",
 		"scope": "session",
 	})
@@ -380,7 +380,7 @@ func TestSelfToolsTransport_PlanStepAdd_HappyPath(t *testing.T) {
 	ctx := context.Background()
 
 	// Seed a plan with one step via plan_create.
-	createRes, err := st.CallTool(ctx, "nanite_plan_create", map[string]any{
+	createRes, err := st.CallTool(ctx, "plan_create", map[string]any{
 		"title":    "step-add target",
 		"scope":    "workspace",
 		"scope_id": "",
@@ -396,7 +396,7 @@ func TestSelfToolsTransport_PlanStepAdd_HappyPath(t *testing.T) {
 	planID := plans[0].ID
 
 	// Append two new steps.
-	addRes, err := st.CallTool(ctx, "nanite_plan_step_add", map[string]any{
+	addRes, err := st.CallTool(ctx, "plan_step_add", map[string]any{
 		"plan_id": planID,
 		"steps":   `[{"title":"second"},{"title":"third","depends_on":["s2"]}]`,
 	})
@@ -442,7 +442,7 @@ func TestSelfToolsTransport_PlanStepAdd_PlanIDNotFound(t *testing.T) {
 	st.TodoStore = st.Store
 	ctx := context.Background()
 
-	r, err := st.CallTool(ctx, "nanite_plan_step_add", map[string]any{
+	r, err := st.CallTool(ctx, "plan_step_add", map[string]any{
 		"plan_id": "no-such-plan",
 		"steps":   `[{"title":"orphan step"}]`,
 	})
@@ -462,17 +462,17 @@ func TestSelfToolsTransport_PlanStepAdd_PlanIDNotFound(t *testing.T) {
 func TestSelfToolDefinitions_PlanStepAddPresent(t *testing.T) {
 	defs := selfToolDefinitions()
 	for _, d := range defs {
-		if d.Name == "nanite_plan_step_add" {
+		if d.Name == "plan_step_add" {
 			// Sanity-check Bucket-2 description sections.
 			for _, want := range []string{"When to use", "When NOT to use", "Output shape", "Cross-references"} {
 				if !strings.Contains(d.Description, want) {
-					t.Errorf("nanite_plan_step_add description missing %q", want)
+					t.Errorf("plan_step_add description missing %q", want)
 				}
 			}
 			return
 		}
 	}
-	t.Fatal("nanite_plan_step_add missing from selfToolDefinitions()")
+	t.Fatal("plan_step_add missing from selfToolDefinitions()")
 }
 
 func TestSelfToolDefinitions_ScratchpadToolsPresent(t *testing.T) {
@@ -482,9 +482,9 @@ func TestSelfToolDefinitions_ScratchpadToolsPresent(t *testing.T) {
 		names[d.Name] = true
 	}
 	for _, want := range []string{
-		"nanite_scratchpad_write",
-		"nanite_scratchpad_read",
-		"nanite_scratchpad_clear",
+		"scratchpad_write",
+		"scratchpad_read",
+		"scratchpad_clear",
 	} {
 		if !names[want] {
 			t.Errorf("tool %q missing from selfToolDefinitions()", want)
@@ -496,7 +496,7 @@ func TestScratchpadToolDescriptions_RequiredSections(t *testing.T) {
 	defs := selfToolDefinitions()
 	for _, d := range defs {
 		switch d.Name {
-		case "nanite_scratchpad_write", "nanite_scratchpad_read", "nanite_scratchpad_clear":
+		case "scratchpad_write", "scratchpad_read", "scratchpad_clear":
 			if !strings.Contains(d.Description, "When to use") {
 				t.Errorf("%s description missing 'When to use' section", d.Name)
 			}
@@ -513,7 +513,7 @@ func TestScratchpadToolDescriptions_RequiredSections(t *testing.T) {
 func TestScratchpadWriteSchema_ValueHasExplicitTypes(t *testing.T) {
 	defs := selfToolDefinitions()
 	for _, d := range defs {
-		if d.Name != "nanite_scratchpad_write" {
+		if d.Name != "scratchpad_write" {
 			continue
 		}
 		props, _ := d.InputSchema["properties"].(map[string]any)
@@ -541,7 +541,7 @@ func TestScratchpadWriteSchema_ValueHasExplicitTypes(t *testing.T) {
 		}
 		return
 	}
-	t.Fatal("nanite_scratchpad_write not found")
+	t.Fatal("scratchpad_write not found")
 }
 
 func TestExtractStoredAssistantText(t *testing.T) {
@@ -595,7 +595,7 @@ func TestSelfToolsTransport_PlanCRUD(t *testing.T) {
 	st.TodoStore = st.Store
 	ctx := context.Background()
 
-	createResult, err := st.CallTool(ctx, "nanite_plan_create", map[string]any{
+	createResult, err := st.CallTool(ctx, "plan_create", map[string]any{
 		"title":       "UAT Plan",
 		"scope":       "session",
 		"scope_id":    "sess-1",
@@ -611,7 +611,7 @@ func TestSelfToolsTransport_PlanCRUD(t *testing.T) {
 	}
 	planID := plans[0].ID
 
-	listResult, _ := st.CallTool(ctx, "nanite_plan_list", map[string]any{
+	listResult, _ := st.CallTool(ctx, "plan_list", map[string]any{
 		"scope":    "session",
 		"scope_id": "sess-1",
 	})
@@ -619,12 +619,12 @@ func TestSelfToolsTransport_PlanCRUD(t *testing.T) {
 		t.Fatalf("plan_list did not surface plan: %s", listResult.Content[0].Text)
 	}
 
-	getResult, _ := st.CallTool(ctx, "nanite_plan_get", map[string]any{"id": planID})
+	getResult, _ := st.CallTool(ctx, "plan_get", map[string]any{"id": planID})
 	if getResult.IsError || !strings.Contains(getResult.Content[0].Text, planID) {
 		t.Fatalf("plan_get did not return plan: %s", getResult.Content[0].Text)
 	}
 
-	delResult, _ := st.CallTool(ctx, "nanite_plan_delete", map[string]any{"id": planID})
+	delResult, _ := st.CallTool(ctx, "plan_delete", map[string]any{"id": planID})
 	if delResult.IsError {
 		t.Fatalf("plan_delete failed: %s", delResult.Content[0].Text)
 	}

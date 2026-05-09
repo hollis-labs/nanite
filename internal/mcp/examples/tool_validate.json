@@ -2,7 +2,7 @@
   {
     "title": "Pre-flight a report-card payload (valid)",
     "args": {
-      "tool_name": "nanite_show_card",
+      "tool_name": "card_show",
       "args": {
         "type": "report-card",
         "data": {
@@ -13,12 +13,12 @@
       }
     },
     "result": {"valid": true, "errors": []},
-    "notes": "Returns valid=true when args match both the top-level input schema and (for nanite_show_card) the per-type envelope schema."
+    "notes": "Returns valid=true when args match both the top-level input schema and (for card_show) the per-type envelope schema."
   },
   {
     "title": "Catch the wrong-shape report-card mistake from incident c107",
     "args": {
-      "tool_name": "nanite_show_card",
+      "tool_name": "card_show",
       "args": {
         "type": "report-card",
         "data": {"sections": [{"heading": "x"}]}
@@ -34,7 +34,7 @@
         }
       ]
     },
-    "notes": "Use this BEFORE calling nanite_show_card to avoid the c107-class failure mode (10 retries on the same wrong shape)."
+    "notes": "Use this BEFORE calling card_show to avoid the c107-class failure mode (10 retries on the same wrong shape)."
   },
   {
     "title": "Unknown tool name",

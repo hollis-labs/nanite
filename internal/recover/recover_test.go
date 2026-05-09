@@ -10,7 +10,7 @@ import (
 )
 
 // TestClassify_SchemaValidation_ReportCardMissingMetrics is the canonical
-// chat-session-c107 case: nanite_show_card with a report-card missing the
+// chat-session-c107 case: card_show with a report-card missing the
 // required `metrics` field. Must classify as KindSchemaValidation.
 func TestClassify_SchemaValidation_ReportCardMissingMetrics(t *testing.T) {
 	err := envelope.ValidateData("report-card", map[string]any{"title": "x"})
@@ -73,7 +73,7 @@ func TestClassify_FormatMismatch_ProsePath(t *testing.T) {
 // not on the passive-renderable allow-list" path that the transport
 // emits via errorResult.
 func TestClassify_WrongCardType_NotAddressable(t *testing.T) {
-	err := errors.New(`tool error: envelope type "approval-card" is not addressable through nanite_show_card. Allow-list (v1): info-card, list-card`)
+	err := errors.New(`tool error: envelope type "approval-card" is not addressable through card_show. Allow-list (v1): info-card, list-card`)
 	if got := Classify(err); got != KindWrongCardType {
 		t.Errorf("expected %q, got %q", KindWrongCardType, got)
 	}
@@ -209,7 +209,7 @@ func TestWrap_RecoverableEnrichesContext(t *testing.T) {
 		t.Fatalf("expected validation error")
 	}
 	args := map[string]any{"type": "report-card", "data": map[string]any{"title": "x"}}
-	wrapped := Wrap(err, "nanite_show_card", args)
+	wrapped := Wrap(err, "card_show", args)
 
 	var rec *RecoverableError
 	if !errors.As(wrapped, &rec) {
@@ -218,8 +218,8 @@ func TestWrap_RecoverableEnrichesContext(t *testing.T) {
 	if rec.Kind != KindSchemaValidation {
 		t.Errorf("expected kind %q, got %q", KindSchemaValidation, rec.Kind)
 	}
-	if rec.ToolName != "nanite_show_card" {
-		t.Errorf("expected tool nanite_show_card, got %q", rec.ToolName)
+	if rec.ToolName != "card_show" {
+		t.Errorf("expected tool card_show, got %q", rec.ToolName)
 	}
 	if rec.SchemaURI != "mem://nanite/envelope/report-card.schema.json" {
 		t.Errorf("unexpected schema_uri: %q", rec.SchemaURI)
@@ -257,14 +257,14 @@ func TestWrap_UnrecoverablePassesThrough(t *testing.T) {
 func TestWrap_Idempotent(t *testing.T) {
 	err := envelope.ValidateData("report-card", map[string]any{"title": "x"})
 	first := Wrap(err, "", nil)
-	second := Wrap(first, "nanite_show_card", map[string]any{"type": "report-card"})
+	second := Wrap(first, "card_show", map[string]any{"type": "report-card"})
 
 	var rec *RecoverableError
 	if !errors.As(second, &rec) {
 		t.Fatalf("expected *RecoverableError after second wrap")
 	}
-	if rec.ToolName != "nanite_show_card" {
-		t.Errorf("expected ToolName backfilled to nanite_show_card, got %q", rec.ToolName)
+	if rec.ToolName != "card_show" {
+		t.Errorf("expected ToolName backfilled to card_show, got %q", rec.ToolName)
 	}
 	if rec.SentArgs == nil {
 		t.Errorf("expected SentArgs backfilled on second Wrap")
@@ -290,12 +290,12 @@ func TestWrap_NilNil(t *testing.T) {
 func TestRecoverableError_ErrorString(t *testing.T) {
 	rec := &RecoverableError{
 		Kind:        KindSchemaValidation,
-		ToolName:    "nanite_show_card",
+		ToolName:    "card_show",
 		ErrorPath:   "/metrics",
 		ErrorReason: "missing properties: 'metrics'",
 	}
 	got := rec.Error()
-	for _, want := range []string{"recoverable[schema_validation]", "tool=nanite_show_card", "/metrics", "missing"} {
+	for _, want := range []string{"recoverable[schema_validation]", "tool=card_show", "/metrics", "missing"} {
 		if !strings.Contains(got, want) {
 			t.Errorf("Error() missing %q: %q", want, got)
 		}
@@ -307,7 +307,7 @@ func TestRecoverableError_ErrorString(t *testing.T) {
 // whether the underlying envelope.ValidationError is in play.
 func TestRecoverableError_UnwrapPreservesChain(t *testing.T) {
 	original := envelope.ValidateData("report-card", map[string]any{"title": "x"})
-	rec := Wrap(original, "nanite_show_card", nil)
+	rec := Wrap(original, "card_show", nil)
 	var ve *envelope.ValidationError
 	if !errors.As(rec, &ve) {
 		t.Errorf("errors.As must reach *envelope.ValidationError through Unwrap")

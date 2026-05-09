@@ -2,7 +2,7 @@
   {
     "title": "Fetch a single GIF URL for a query",
     "args": { "query": "celebration" },
-    "notes": "Pure data fetch — does NOT render anything. Chain into nanite_show_card with type=\"giphy-modal\" to render."
+    "notes": "Pure data fetch — does NOT render anything. Chain into card_show with type=\"giphy-modal\" to render."
   },
   {
     "title": "Fetch multiple results",

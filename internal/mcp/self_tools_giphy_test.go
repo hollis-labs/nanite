@@ -299,9 +299,9 @@ func TestCallGiphySearch_ListedAsTool(t *testing.T) {
 		t.Fatalf("ListTools: %v", err)
 	}
 	for _, tool := range tools {
-		if tool.Name == "nanite_giphy_search" {
+		if tool.Name == "giphy_search" {
 			return
 		}
 	}
-	t.Errorf("nanite_giphy_search not registered in ListTools output")
+	t.Errorf("giphy_search not registered in ListTools output")
 }

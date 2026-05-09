@@ -41,7 +41,7 @@ func (s *stubStore) Recall(_ context.Context, opts memory.RecallOpts) ([]memory.
 // memory_key, not in the namespace, because Vanta's strict three-form
 // contract forbids extra segments under /memory.
 func TestNamespace_ToolUse(t *testing.T) {
-	got := Namespace(ScopeToolUse, "alice", "nanite_show_card")
+	got := Namespace(ScopeToolUse, "alice", "card_show")
 	want := "user/alice/memory"
 	if got != want {
 		t.Errorf("Namespace tool_use mismatch: got %q want %q", got, want)
@@ -105,8 +105,8 @@ func TestNamespace_SubjectSanitization(t *testing.T) {
 // see ticket scope).
 func TestDeriveMemoryKey_Deterministic(t *testing.T) {
 	hint := "report-card requires {title, metrics}; sections are not allowed"
-	k1 := DeriveMemoryKey(ScopeToolUse, "nanite_show_card", hint)
-	k2 := DeriveMemoryKey(ScopeToolUse, "nanite_show_card", hint)
+	k1 := DeriveMemoryKey(ScopeToolUse, "card_show", hint)
+	k2 := DeriveMemoryKey(ScopeToolUse, "card_show", hint)
 	if k1 != k2 {
 		t.Errorf("DeriveMemoryKey is non-deterministic: %q vs %q", k1, k2)
 	}
@@ -127,8 +127,8 @@ func TestDeriveMemoryKey_Deterministic(t *testing.T) {
 // produce different keys so Vanta doesn't overwrite the wrong row.
 func TestDeriveMemoryKey_DifferentToolsDoNotCollide(t *testing.T) {
 	hint := "shared-shape lesson"
-	a := DeriveMemoryKey(ScopeToolUse, "nanite_show_card", hint)
-	b := DeriveMemoryKey(ScopeToolUse, "nanite_giphy_search", hint)
+	a := DeriveMemoryKey(ScopeToolUse, "card_show", hint)
+	b := DeriveMemoryKey(ScopeToolUse, "giphy_search", hint)
 	if a == b {
 		t.Errorf("DeriveMemoryKey collided across tools: %q == %q", a, b)
 	}
@@ -139,7 +139,7 @@ func TestDeriveMemoryKey_DifferentToolsDoNotCollide(t *testing.T) {
 // Vanta's per-segment cap so writes don't fail at the boundary.
 func TestDeriveMemoryKey_FitsVantaSegmentBudget(t *testing.T) {
 	long := strings.Repeat("longhint-", 30) // ~270 chars
-	k := DeriveMemoryKey(ScopeToolUse, "nanite_show_card", long)
+	k := DeriveMemoryKey(ScopeToolUse, "card_show", long)
 	if len(k) > MaxMemoryKeyLen {
 		t.Errorf("memory_key length %d exceeds budget %d (key=%q)", len(k), MaxMemoryKeyLen, k)
 	}
@@ -154,7 +154,7 @@ func TestCapture_HappyPath_ToolUse(t *testing.T) {
 
 	out, err := rec.Capture(context.Background(), CaptureInput{
 		Scope:         ScopeToolUse,
-		Subject:       "nanite_show_card",
+		Subject:       "card_show",
 		Hint:          "report-card requires {title, metrics}; sections are not allowed",
 		SourceEventID: "evt-c107",
 		SessionID:     "sess-1",
@@ -198,7 +198,7 @@ func TestCapture_HappyPath_ToolUse(t *testing.T) {
 	// Tag invariants: order matters for human review tools.
 	wantTags := []string{
 		"learning", "self_healed", "captured_during_session",
-		"tool_use", "tool:nanite_show_card", "source:evt-c107",
+		"tool_use", "tool:card_show", "source:evt-c107",
 	}
 	if len(got.Tags) != len(wantTags) {
 		t.Fatalf("tags len = %d, want %d (got=%v)", len(got.Tags), len(wantTags), got.Tags)
@@ -215,7 +215,7 @@ func TestCapture_HintRequired(t *testing.T) {
 	rec := NewRecorder(&stubStore{})
 	_, err := rec.Capture(context.Background(), CaptureInput{
 		Scope:   ScopeToolUse,
-		Subject: "nanite_show_card",
+		Subject: "card_show",
 		Hint:    "   ",
 	})
 	if err == nil {
@@ -260,7 +260,7 @@ func TestCapture_NilStore(t *testing.T) {
 	rec := NewRecorder(nil)
 	_, err := rec.Capture(context.Background(), CaptureInput{
 		Scope:   ScopeToolUse,
-		Subject: "nanite_show_card",
+		Subject: "card_show",
 		Hint:    "anything",
 	})
 	if err == nil {
@@ -276,7 +276,7 @@ func TestCapture_StoreErrorPropagates(t *testing.T) {
 	rec := NewRecorder(store)
 	_, err := rec.Capture(context.Background(), CaptureInput{
 		Scope:   ScopeToolUse,
-		Subject: "nanite_show_card",
+		Subject: "card_show",
 		Hint:    "x",
 	})
 	if err == nil {
@@ -329,13 +329,13 @@ func TestRecallByToolName_HappyPath(t *testing.T) {
 	store := &stubStore{
 		recallReply: []memory.Memory{
 			{Summary: "report-card requires metrics, not sections", Confidence: 0.85, MemoryKey: "k1", Namespace: "user/alice/memory",
-				Tags: []string{"learning", "tool:nanite_show_card"}},
+				Tags: []string{"learning", "tool:card_show"}},
 			{Summary: "info-card 'sources' is optional", Confidence: 0.85, MemoryKey: "k2", Namespace: "user/alice/memory",
-				Tags: []string{"learning", "tool:nanite_show_card"}},
+				Tags: []string{"learning", "tool:card_show"}},
 		},
 	}
 	r := NewRecaller(store)
-	hints := r.RecallByToolName(context.Background(), "alice", "nanite_show_card")
+	hints := r.RecallByToolName(context.Background(), "alice", "card_show")
 	if len(hints) != 2 {
 		t.Fatalf("expected 2 hints, got %d", len(hints))
 	}
@@ -347,7 +347,7 @@ func TestRecallByToolName_HappyPath(t *testing.T) {
 		t.Errorf("recall namespace = %q, want %q", store.recallOpts.Namespaces[0], wantNS)
 	}
 	// We always pass the per-tool tag so Conduit narrows by tool.
-	wantTag := "tool:nanite_show_card"
+	wantTag := "tool:card_show"
 	hasToolTag := false
 	for _, tg := range store.recallOpts.Tags {
 		if tg == wantTag {
@@ -365,13 +365,13 @@ func TestRecallByToolName_HappyPath(t *testing.T) {
 func TestRecallByToolName_FiltersOutWrongTool(t *testing.T) {
 	store := &stubStore{
 		recallReply: []memory.Memory{
-			{Summary: "show_card lesson", Tags: []string{"learning", "tool:nanite_show_card"}},
-			{Summary: "giphy lesson", Tags: []string{"learning", "tool:nanite_giphy_search"}},
+			{Summary: "show_card lesson", Tags: []string{"learning", "tool:card_show"}},
+			{Summary: "giphy lesson", Tags: []string{"learning", "tool:giphy_search"}},
 			{Summary: "untagged learning", Tags: []string{"learning"}}, // missing tool tag — discard
 		},
 	}
 	r := NewRecaller(store)
-	hints := r.RecallByToolName(context.Background(), "alice", "nanite_show_card")
+	hints := r.RecallByToolName(context.Background(), "alice", "card_show")
 	if len(hints) != 1 {
 		t.Fatalf("expected exactly 1 hint after client-side filter, got %d (%+v)", len(hints), hints)
 	}
@@ -386,7 +386,7 @@ func TestRecallByToolName_FiltersOutWrongTool(t *testing.T) {
 func TestRecallByToolName_FailsOpen(t *testing.T) {
 	store := &stubStore{recallErr: errors.New("conduit timeout")}
 	r := NewRecaller(store)
-	hints := r.RecallByToolName(context.Background(), "alice", "nanite_show_card")
+	hints := r.RecallByToolName(context.Background(), "alice", "card_show")
 	if hints != nil {
 		t.Errorf("expected nil hints on store error, got %v", hints)
 	}
@@ -424,8 +424,8 @@ func TestSystemPromptBlock_Format(t *testing.T) {
 		{Summary: "report-card requires metrics, not sections"},
 		{Summary: "info-card sources is optional"},
 	}
-	got := SystemPromptBlock("nanite_show_card", hints)
-	want := "## Prior learnings for nanite_show_card\n" +
+	got := SystemPromptBlock("card_show", hints)
+	want := "## Prior learnings for card_show\n" +
 		"- report-card requires metrics, not sections\n" +
 		"- info-card sources is optional\n"
 	if got != want {
@@ -436,7 +436,7 @@ func TestSystemPromptBlock_Format(t *testing.T) {
 // TestSystemPromptBlock_EmptyReturnsBlank ensures callers can
 // concatenate the block unconditionally.
 func TestSystemPromptBlock_EmptyReturnsBlank(t *testing.T) {
-	if SystemPromptBlock("nanite_show_card", nil) != "" {
+	if SystemPromptBlock("card_show", nil) != "" {
 		t.Error("empty hints should render an empty block")
 	}
 }

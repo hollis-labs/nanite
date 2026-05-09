@@ -51,7 +51,7 @@
         "title": "Open PRs awaiting review",
         "items": [
           { "label": "#142 — fix flaky retry test", "description": "auth-service" },
-          { "label": "#143 — add nanite_tool_describe coverage", "description": "nanite" },
+          { "label": "#143 — add tool_describe coverage", "description": "nanite" },
           { "label": "#147 — bump go-providers to v0.18", "description": "nanite" }
         ],
         "ordered": false
@@ -158,7 +158,7 @@
     "notes": "Empty render_target overrides the schema's default_render_target so the card renders inline in chat instead of the bottom drawer. Distinct from omitting the field (which uses the default)."
   },
   {
-    "title": "REFERENCE — session-task (NOT emitted via nanite_show_card; backend-only)",
+    "title": "REFERENCE — session-task (NOT emitted via card_show; backend-only)",
     "args": {
       "type": "session-task",
       "data": {
@@ -168,10 +168,10 @@
         "description": "Cross-check Datadog headroom against forecast in planning/q3-capacity.md."
       }
     },
-    "notes": "REFERENCE ONLY: session-task is registered for validation but NOT in the nanite_show_card allow-list. Emitted by the chat engine through a different path. Field shape shown so callers/components emitting it match the schema. status enum: pending|in_progress|completed|failed|cancelled."
+    "notes": "REFERENCE ONLY: session-task is registered for validation but NOT in the card_show allow-list. Emitted by the chat engine through a different path. Field shape shown so callers/components emitting it match the schema. status enum: pending|in_progress|completed|failed|cancelled."
   },
   {
-    "title": "REFERENCE — error-report (NOT emitted via nanite_show_card)",
+    "title": "REFERENCE — error-report (NOT emitted via card_show)",
     "args": {
       "type": "error-report",
       "data": {
@@ -194,7 +194,7 @@
         "details": "Includes the OAuth scope-narrowing change discussed in PR #218. Rollback plan: redeploy v3.6.2 — 2 min cutover."
       }
     },
-    "notes": "REFERENCE ONLY: approval-card is a decision-flow envelope, not addressable through nanite_show_card. Emitted by the approval pipeline. Field shape shown for callers building approval flows. risk_level enum: low|medium|high."
+    "notes": "REFERENCE ONLY: approval-card is a decision-flow envelope, not addressable through card_show. Emitted by the approval pipeline. Field shape shown for callers building approval flows. risk_level enum: low|medium|high."
   },
   {
     "title": "REFERENCE — proposal-card (decision-flow envelope)",
@@ -216,7 +216,7 @@
         }
       }
     },
-    "notes": "REFERENCE ONLY: proposal-card carries a draft action with editable fields. Emitted by the proposal pipeline, not nanite_show_card. The outer `type` is the proposal kind (e.g. create_task); the envelope `type` is `proposal-card`."
+    "notes": "REFERENCE ONLY: proposal-card carries a draft action with editable fields. Emitted by the proposal pipeline, not card_show. The outer `type` is the proposal kind (e.g. create_task); the envelope `type` is `proposal-card`."
   },
   {
     "title": "REFERENCE — question-form (interactive form envelope)",
@@ -230,7 +230,7 @@
         ]
       }
     },
-    "notes": "REFERENCE ONLY: question-form is the InterviewCard envelope. Emitted by the interview pipeline, not nanite_show_card. Each question requires prompt + type + required. type enum: text|textarea|select|radio|checkbox."
+    "notes": "REFERENCE ONLY: question-form is the InterviewCard envelope. Emitted by the interview pipeline, not card_show. Each question requires prompt + type + required. type enum: text|textarea|select|radio|checkbox."
   },
   {
     "title": "REFERENCE — confirmation-card (decision-flow envelope)",
@@ -244,6 +244,6 @@
         "risk": "high"
       }
     },
-    "notes": "REFERENCE ONLY: confirmation-card is emitted by the confirmation pipeline, not nanite_show_card. risk enum: low|medium|high — drives button styling."
+    "notes": "REFERENCE ONLY: confirmation-card is emitted by the confirmation pipeline, not card_show. risk enum: low|medium|high — drives button styling."
   }
 ]

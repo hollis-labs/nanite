@@ -20,7 +20,7 @@
 //     form widgets.
 //   - D4: The elicitation-prompt envelope carries the request; the response
 //     routes back via the envelope response pipeline (ResponseV1).
-//   - D5: One existing write tool (nanite_message_send kind=directive) is wired
+//   - D5: One existing write tool (message_send kind=directive) is wired
 //     to issue elicitation for confirmation before sending.
 package elicitation
 

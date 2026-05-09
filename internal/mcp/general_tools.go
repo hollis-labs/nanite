@@ -230,7 +230,7 @@ func (g *GeneralToolsTransport) ListTools(_ context.Context) ([]Tool, error) {
 			Name: "think",
 			Description: "A scratchpad for organizing reasoning before acting — not a data-fetching tool.\n\n" +
 				"**When to use:** When you want to reason through a multi-step problem, plan a sequence of tool calls, or review what you already know before committing to an approach. Useful before complex queries where a wrong choice would waste round-trips.\n\n" +
-				"**When NOT to use:** Do NOT use as a substitute for actual tool calls — thinking about data you haven't fetched does not make the data available. If you need information, call the tool that provides it. Do not use to \"remember\" something across turns — use nanite_scratchpad_write for intra-turn state, or Vanta memory tools for cross-session state.\n\n" +
+				"**When NOT to use:** Do NOT use as a substitute for actual tool calls — thinking about data you haven't fetched does not make the data available. If you need information, call the tool that provides it. Do not use to \"remember\" something across turns — use scratchpad_write for intra-turn state, or Vanta memory tools for cross-session state.\n\n" +
 				"**Output shape:** Always returns \"Thought recorded.\" — the server stores nothing. The value is the structured reasoning you produce inside the call itself.",
 			InputSchema: map[string]any{
 				"type": "object",

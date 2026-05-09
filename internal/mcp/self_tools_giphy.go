@@ -24,7 +24,7 @@ var (
 // giphyDemoGifs is the keyword→URL fallback map used when GIPHY_API_KEY is
 // unset. Recovered verbatim from the pre-A3 callShowGiphy handler
 // (af781b9, removed in 3187da6) so the development experience is unchanged
-// when the new data tool is paired with nanite_show_card.
+// when the new data tool is paired with card_show.
 var giphyDemoGifs = map[string]string{
 	"celebration": "https://media.giphy.com/media/g9582DNuQppxC/giphy.gif",
 	"success":     "https://media.giphy.com/media/a0h7sAqON67nO/giphy.gif",
@@ -42,9 +42,9 @@ var giphyDemoGifs = map[string]string{
 	"fire":        "https://media.giphy.com/media/j3IxJRLNLZz9sXR7ZA/giphy.gif",
 }
 
-// giphySearchHit is the per-result shape returned by nanite_giphy_search.
+// giphySearchHit is the per-result shape returned by giphy_search.
 // Field order matches the tool description so the agent gets a stable
-// vocabulary it can plug straight into nanite_show_card{type:"giphy-modal"}.
+// vocabulary it can plug straight into card_show{type:"giphy-modal"}.
 type giphySearchHit struct {
 	GifURL      string `json:"gif_url"`
 	Title       string `json:"title,omitempty"`
@@ -58,14 +58,14 @@ type giphySearchHit struct {
 // not browse a feed.
 const giphyMaxLimit = 10
 
-// callGiphySearch is the handler for nanite_giphy_search. Returns a
+// callGiphySearch is the handler for giphy_search. Returns a
 // structured JSON result the agent can introspect: a single hit object
 // (default, limit=1) or {results: [...]} for higher limits. Errors are
 // always structured ({error: "...", details?, query?}) so the agent can
 // branch on the failure mode instead of pattern-matching prose.
 //
 // CW-20260428-0020 (A4) — separates the GIPHY data fetch from the display
-// path, complementing the generic nanite_show_card surface added in A3.
+// path, complementing the generic card_show surface added in A3.
 func (st *SelfToolsTransport) callGiphySearch(args map[string]any) (*ToolResult, error) {
 	query, _ := args["query"].(string)
 	if query == "" {
@@ -268,7 +268,7 @@ func giphyLiveSearch(query string, limit int, apiKey string) ([]giphySearchHit, 
 // giphyResultJSON serialises hits into the agent-facing shape: a single
 // object for limit=1 (the common case), or {results:[...]} for limit>1.
 // The shape difference is deliberate — keeping the limit=1 case flat lets
-// the agent plug `gif_url` straight into nanite_show_card without
+// the agent plug `gif_url` straight into card_show without
 // indexing into a 1-element array.
 func giphyResultJSON(hits []giphySearchHit, limit int) *ToolResult {
 	if limit <= 1 || len(hits) == 1 {

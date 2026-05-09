@@ -516,7 +516,7 @@ func (m *Manager) GetAllToolsUnfiltered() []provider.ToolDefinition {
 // is the uniform agent-facing name (post ADR-002 flattening) — the same
 // name an LLM would pass to a tool call.
 //
-// Used by nanite_validate (B1, CW-20260429-0006) so the pre-flight
+// Used by tool_validate (B1, CW-20260429-0006) so the pre-flight
 // schema check can reach across every registered server uniformly. The
 // returned map is the raw schema and MUST NOT be mutated by callers.
 func (m *Manager) LookupToolInputSchema(uniformName string) (map[string]any, bool) {

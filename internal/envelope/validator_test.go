@@ -230,7 +230,7 @@ func TestValidateData_ReportCard_ErrorReferencesStableURI(t *testing.T) {
 }
 
 // TestValidateData_AllPassiveRenderables_NoFileURLInErrors covers the same
-// guarantee for every type the agent can emit through nanite_show_card. Any
+// guarantee for every type the agent can emit through card_show. Any
 // of these surfacing a filesystem URL would re-introduce the same UX bug.
 func TestValidateData_AllPassiveRenderables_NoFileURLInErrors(t *testing.T) {
 	for _, envType := range PassiveRenderableTypes {

@@ -9,7 +9,7 @@ import (
 )
 
 // V1BuiltinPanelIDs is the locked v1 built-in panel catalog the chat agent
-// can target with nanite_panel_open / nanite_panel_close. Per J8 v1 Decision
+// can target with panel_open / panel_close. Per J8 v1 Decision
 // Log (CW-20260426-0006) this is intentionally narrow: 3 drawers only.
 //
 //   - bottom_chat_drawer — sits below the chat transcript; long-form reference
@@ -49,7 +49,7 @@ type PanelSignal struct {
 	Source string `json:"source"`
 }
 
-// callPanelOpen handles nanite_panel_open. Validates the panel ID against the
+// callPanelOpen handles panel_open. Validates the panel ID against the
 // v1 built-in catalog and (for plugin-shipped panel IDs) gates on H1 trust.
 // Returns a structured JSON result the agent can introspect: {opened, panel_id,
 // reason?}. The FE applies the dismiss state machine — the backend NEVER
@@ -79,7 +79,7 @@ func (st *SelfToolsTransport) callPanelOpen(ctx context.Context, args map[string
 	}), nil
 }
 
-// callSignalMode handles nanite_signal_mode. The mode signal is broadcast as
+// callSignalMode handles signal_mode. The mode signal is broadcast as
 // a panel_signal event with action="mode" and panel_id="" — the FE applies
 // its preset map (panel-modes.ts) to translate the mode name into a set of
 // panel opens. The backend never resolves the preset — the contract is
@@ -101,7 +101,7 @@ func (st *SelfToolsTransport) callSignalMode(ctx context.Context, args map[strin
 	}), nil
 }
 
-// callPanelClose handles nanite_panel_close. Symmetric to callPanelOpen; the
+// callPanelClose handles panel_close. Symmetric to callPanelOpen; the
 // FE state machine refuses to close panels the user has manually opened.
 func (st *SelfToolsTransport) callPanelClose(ctx context.Context, args map[string]any) (*ToolResult, error) {
 	panelID := strArg(args, "panel_id", "")

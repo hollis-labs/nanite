@@ -41,9 +41,32 @@ Memory-key normalization: Vanta requires `[a-z0-9_]` per segment. The capture sk
 
 ## Memory slot
 
-The `SlotMemory` slot ([09](09-session-and-slot-management.md)) is the staged-recall surface. `assembleTurnContext` populates it from a recall pass; the slot is `Compactable=true` (drops first under overflow) so it doesn't hard-bind context survival.
+The `SlotMemory` slot ([09](09-session-and-slot-management.md)) is the staged-recall surface. The chat-harness populates it per turn via the ContextBroker pipeline; the slot is `Compactable=true` (drops first under overflow) so it doesn't hard-bind context survival.
 
-There is **no automatic `memory_recall` sweep at chat-loop start** — population relies on the agent calling the tool, or upstream code priming the slot. The current pattern is agent-prompted recall.
+**Per-turn auto-recall is on by default.** `internal/contextbroker/source_memory.go` (`MemorySource`) is registered with the broker whenever `memorySvc != nil` at container startup (`internal/service/container.go:491`). Each turn:
+
+1. `chat.AssembleSlotSources` (`internal/chat/context_client.go`) derives an Intent from the session's last user message.
+2. The chat-harness reads the agent profile's auto-recall settings (`ResolveAutoRecallConfig`, `internal/chat/auto_recall_settings.go`) and plumbs them onto the Intent: `AutoRecall *bool`, `AutoRecallLimit`, `AutoRecallMinConfidence`, `AutoRecallTimeout`.
+3. `Broker.Fetch` calls every registered source in parallel; `MemorySource.Fetch` honors the intent's auto-recall fields — short-circuits when `AutoRecall=false`, applies the override floors/caps, and wraps the Vanta call in a `context.WithTimeout` (default 2s) so a slow recall can't stall the chat loop.
+4. Items with `Source=="memory"` flow through `formatPacketItemsBySource` and into `cw.SetContent(ctxpkg.SlotMemory, ...)`.
+
+**Per-agent control via `agent_profiles.settings` JSON.** The same blob that already carries `debug` carries the auto-recall dials:
+
+```json
+{ "auto_recall": false, "auto_recall_limit": 10, "auto_recall_min_confidence": 0.5 }
+```
+
+Defaults: `auto_recall=true`, `limit=30`, `min_confidence=0.4`, `timeout=2s`. Profiles that don't pin the keys keep the prior behavior unchanged.
+
+**Telemetry.** `MemorySource.Fetch` emits one structured `slog.Info` per turn:
+
+```
+contextbroker/memory: auto-recall ok session_id=… agent_id=… hit_count=… items_kept=… tokens_estimate=… latency_ms=… query_len=…
+```
+
+Variants for the empty-result path (`auto-recall hit_count=0`), the disabled path (`auto-recall disabled by intent`, debug level), and the timeout path (`auto-recall timed out`).
+
+**When recall isn't useful.** If an agent's task-context arrives via prompt rather than memory (e.g. a focused executor agent), pin `auto_recall: false` on its profile. The Memory slot will stay empty for that agent's sessions, saving the per-turn Vanta round-trip without affecting the rest of the broker pipeline.
 
 ## Embedding warning
 
@@ -64,8 +87,8 @@ The point: if recall would silently miss because embeddings aren't active, tell 
 
 ## Current gaps
 
-- **G-NO-AUTO-RECALL** — no automatic memory_recall at session start. Agent must prompt itself. For a first-class assistant experience, primed-on-session-start recall might be valuable; today it's pull-only.
-- **G-MEMORY-SLOT-EMPTY** — the Memory slot is structured but rarely populated by the harness; it's mostly populated by tool-call results during the turn (which then go into Conversation, not Memory).
+- ~~**G-NO-AUTO-RECALL**~~ — ✓ Closed 2026-05-08. Per-turn auto-recall has been live since `phase-3 S2b`; per-agent gating + observability landed on `feat/memory-auto-recall`. See the Memory-slot section above for the current contract.
+- ~~**G-MEMORY-SLOT-EMPTY**~~ — ✓ Closed 2026-05-08 (framing was stale). `MemorySource` has been registered and the slot populated per turn since the broker landed.
 
 ## Test surface
 

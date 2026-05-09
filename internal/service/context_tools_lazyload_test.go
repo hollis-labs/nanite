@@ -50,23 +50,45 @@ func TestAssembleSlots_EmptyLazyHintIsNoOp(t *testing.T) {
 	svc, s := newStubbedContextService(t, nil, nil, false)
 	sess, agent := seedSession(t, s, "test empty hint")
 
-	// Two runs: with empty hint and with no hint should produce identical
-	// Tools-slot content. Empty string must not introduce a trailing "\n\n".
-	rA, err := svc.AssembleSlots(context.Background(), sess, agent, &store.AgentMode{}, nil, tools3(), "", 200000, nil, "")
+	// The toolsLazyHint parameter is a required positional arg now, so
+	// "no hint" and "empty hint" are the same input — passing "". This
+	// test asserts the observable contract for that input:
+	//
+	//   1. The Tools slot content is identical to assembling with a
+	//      non-empty hint stripped — i.e. no hint suffix is appended.
+	//   2. The empty string never introduces a trailing "\n\n".
+	//   3. Repeated runs with the same empty hint are deterministic.
+	//
+	// CacheKey behavior for the empty-hint case is covered separately by
+	// TestAssembleSlots_LazyHintInvalidatesCacheKey (which uses
+	// "" as the baseline).
+	r, err := svc.AssembleSlots(context.Background(), sess, agent, &store.AgentMode{}, nil, tools3(), "", 200000, nil, "")
 	if err != nil {
-		t.Fatalf("AssembleSlots A: %v", err)
+		t.Fatalf("AssembleSlots: %v", err)
 	}
-	rB, err := svc.AssembleSlots(context.Background(), sess, agent, &store.AgentMode{}, nil, tools3(), "", 200000, nil, "")
+	content := slotContent(r.Blocks, "tools")
+	if content == "" {
+		t.Fatal("tools slot content should not be empty when tools are present")
+	}
+	if strings.HasSuffix(content, "\n\n") {
+		t.Errorf("empty hint must not introduce trailing newlines; got %q", content)
+	}
+	// Determinism: a second call with identical inputs must produce
+	// identical content.
+	r2, err := svc.AssembleSlots(context.Background(), sess, agent, &store.AgentMode{}, nil, tools3(), "", 200000, nil, "")
 	if err != nil {
-		t.Fatalf("AssembleSlots B: %v", err)
+		t.Fatalf("AssembleSlots (second pass): %v", err)
 	}
-	contentA := slotContent(rA.Blocks, "tools")
-	contentB := slotContent(rB.Blocks, "tools")
-	if contentA != contentB {
-		t.Errorf("empty-hint runs should produce identical content; got %q vs %q", contentA, contentB)
+	if content != slotContent(r2.Blocks, "tools") {
+		t.Errorf("repeated empty-hint runs should produce identical content")
 	}
-	if strings.HasSuffix(contentA, "\n\n") {
-		t.Errorf("empty hint must not introduce trailing newlines; got %q", contentA)
+	// And: the Tools slot from the empty-hint case must NOT contain any
+	// content the LazyHintAppendedToToolsSlot test pins to a non-empty
+	// hint (verifies the no-op path doesn't accidentally inject a
+	// hint-shaped suffix).
+	hintMarker := "[Tool catalog (lazy):"
+	if strings.Contains(content, hintMarker) {
+		t.Errorf("empty hint should not produce any hint-marker suffix; got %q", content)
 	}
 }
 

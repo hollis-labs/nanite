@@ -162,80 +162,12 @@ func (s *Store) Seed() error {
 		return fmt.Errorf("insert aider-cli model: %w", err)
 	}
 
-	// --- Provider: Google Gemini API ---
-	geminiAPIProviderID := "gemini-api-001"
-	if _, err := tx.Exec(
-		`INSERT OR IGNORE INTO providers (id, name, provider_type, api_key)
-		 VALUES (?, ?, ?, ?)`,
-		geminiAPIProviderID, "Google Gemini", "gemini", "",
-	); err != nil {
-		return fmt.Errorf("insert gemini api provider: %w", err)
-	}
-
-	for _, m := range []struct {
-		id, modelID, display string
-		ctx, maxOut          int
-	}{
-		{"gemini-2.5-flash", "gemini-2.5-flash", "Gemini 2.5 Flash", 1048576, 8192},
-		{"gemini-2.5-pro", "gemini-2.5-pro", "Gemini 2.5 Pro", 1048576, 8192},
-		{"gemini-2.0-flash", "gemini-2.0-flash", "Gemini 2.0 Flash", 1048576, 8192},
-	} {
-		if _, err := tx.Exec(
-			`INSERT OR IGNORE INTO models (id, provider_id, model_id, display_name, context_window, max_output, supports_tools)
-			 VALUES (?, ?, ?, ?, ?, ?, ?)`,
-			m.id, geminiAPIProviderID, m.modelID, m.display, m.ctx, m.maxOut, true,
-		); err != nil {
-			return fmt.Errorf("insert gemini model %s: %w", m.id, err)
-		}
-	}
-
-	// --- Provider: Mistral ---
-	mistralProviderID := "mistral-001"
-	if _, err := tx.Exec(
-		`INSERT OR IGNORE INTO providers (id, name, provider_type, api_key)
-		 VALUES (?, ?, ?, ?)`,
-		mistralProviderID, "Mistral", "mistral", "",
-	); err != nil {
-		return fmt.Errorf("insert mistral provider: %w", err)
-	}
-
-	for _, m := range []struct {
-		id, modelID, display string
-		ctx, maxOut          int
-	}{
-		{"mistral-large", "mistral-large-latest", "Mistral Large", 131072, 8192},
-		{"mistral-medium", "mistral-medium-latest", "Mistral Medium", 131072, 8192},
-		{"mistral-small", "mistral-small-latest", "Mistral Small", 131072, 8192},
-		{"codestral", "codestral-latest", "Codestral", 262144, 8192},
-	} {
-		if _, err := tx.Exec(
-			`INSERT OR IGNORE INTO models (id, provider_id, model_id, display_name, context_window, max_output, supports_tools)
-			 VALUES (?, ?, ?, ?, ?, ?, ?)`,
-			m.id, mistralProviderID, m.modelID, m.display, m.ctx, m.maxOut, true,
-		); err != nil {
-			return fmt.Errorf("insert mistral model %s: %w", m.id, err)
-		}
-	}
-
-	// --- Provider: Azure OpenAI ---
-	azureProviderID := "azure-openai-001"
-	if _, err := tx.Exec(
-		`INSERT OR IGNORE INTO providers (id, name, provider_type, api_key)
-		 VALUES (?, ?, ?, ?)`,
-		azureProviderID, "Azure OpenAI", "azure-openai", "",
-	); err != nil {
-		return fmt.Errorf("insert azure-openai provider: %w", err)
-	}
-
-	// Azure models are deployment-specific; seed a placeholder.
-	if _, err := tx.Exec(
-		`INSERT OR IGNORE INTO models (id, provider_id, model_id, display_name, context_window, max_output, supports_tools)
-		 VALUES (?, ?, ?, ?, ?, ?, ?)`,
-		"azure-gpt4o", azureProviderID, "gpt-4o", "Azure GPT-4o",
-		128000, 16384, true,
-	); err != nil {
-		return fmt.Errorf("insert azure gpt-4o model: %w", err)
-	}
+	// Removed Step 6.5 follow-up (SP-20260508-0001): Google Gemini API,
+	// Mistral, and Azure OpenAI provider/model seed blocks. Their runtime
+	// constructors were deleted in commit 376390c — these rows were inert
+	// at runtime but surfaced in the providers UI dropdown. Existing
+	// deployments retain stale rows; operator cleanup is tracked at
+	// followups.nanite.cw_20260508_0010.seed_registry_dead_cli_entries.
 
 	// --- User settings singleton ---
 	if _, err := tx.Exec(`INSERT OR IGNORE INTO user_settings (id) VALUES (1)`); err != nil {
@@ -263,20 +195,19 @@ type providerRow struct {
 
 // seededProviders is the canonical provider catalog. Order matters: parent
 // rows must insert before any model that references them.
+//
+// Step 6.5 (SP-20260508-0001) reduced the API-provider catalog to
+// Anthropic + OpenAI; the gemini/mistral/azure-openai/openrouter/openzen/
+// ollama API rows have been removed. PTY-style entries (CLI binary
+// adapters) are unrelated and retained.
 var seededProviders = []providerRow{
 	{"anthropic-001", "Anthropic", "anthropic"},
 	{"openai-001", "OpenAI", "openai"},
-	{"ollama-001", "Ollama", "ollama"},
-	{"gemini-api-001", "Google Gemini", "gemini"},
-	{"mistral-001", "Mistral", "mistral"},
-	{"azure-openai-001", "Azure OpenAI", "azure-openai"},
 	{"pty-001", "Claude CLI (PTY)", "pty"},
 	{"pty-codex-001", "Codex CLI (PTY)", "pty-codex"},
 	{"pty-gemini-001", "Gemini CLI (PTY)", "pty-gemini"},
 	{"pty-copilot-001", "GitHub Copilot CLI (PTY)", "pty-copilot"},
 	{"pty-aider-001", "Aider CLI (PTY)", "pty-aider"},
-	{"openrouter-001", "OpenRouter", "openrouter"},
-	{"openzen-001", "OpenZen", "openzen"},
 	{"pty-junie-001", "Junie CLI (PTY)", "pty-junie"},
 	{"pty-kiro-001", "Kiro CLI (PTY)", "pty-kiro"},
 	{"pty-qwen-001", "Qwen CLI (PTY)", "pty-qwen"},

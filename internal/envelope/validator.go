@@ -126,12 +126,79 @@ func schemaResourceURI(envelopeType string) string {
 // message stays informative. Populates both schemaCache (compiled) and
 // schemaRawCache (parsed map) so DefaultRenderTarget can read annotation
 // keywords without re-parsing the file.
+//
+// Resolution order (post-P2 / go-envelopes consumption):
+//  1. Shared registry under the bare type name (core types).
+//  2. Shared registry under the nanite-legacy.<bare> alias (orphan types).
+//  3. Local embed FS fallback — kept for tests that exercise the validator
+//     without standing up a registry. P7 deletes the embed FS once tests
+//     migrate to SetEnvelopeRegistry; until then both paths produce the
+//     same compiled schemas because the lib's manifest/schemas/ directory
+//     was extracted verbatim from this dir.
+//
+// The raw schema map (used by DefaultRenderTarget for the
+// default_render_target annotation) is read from envelopes.EmbeddedFS()
+// regardless of which compile path serves the schema, since lib registry
+// TypeSpecs do not surface annotation bytes.
 func loadSchema(envelopeType string) (*jsonschema.Schema, error) {
 	schemaCacheMu.Lock()
 	defer schemaCacheMu.Unlock()
 	if cached, ok := schemaCache[envelopeType]; ok {
 		return cached, nil
 	}
+
+	if reg := getEnvelopeRegistry(); reg != nil {
+		if compiled, ok := lookupRegistrySchema(reg, envelopeType); ok {
+			schemaCache[envelopeType] = compiled
+			if doc, err := readEmbeddedSchemaDoc(envelopeType); err == nil {
+				schemaRawCache[envelopeType] = doc
+			}
+			return compiled, nil
+		}
+	}
+
+	return loadSchemaFromLocalEmbed(envelopeType)
+}
+
+// lookupRegistrySchema fetches a compiled schema from the shared registry
+// for envelopeType, attempting the bare name first and the
+// nanite-legacy.<bare> alias second. Returns the compiled schema and a
+// found-ok bool, treating a registered-but-schema-less spec as not-found.
+func lookupRegistrySchema(reg *envelopes.Registry, envelopeType string) (*jsonschema.Schema, bool) {
+	if spec, ok := reg.Lookup(envelopeType); ok && spec.DataSchema != nil {
+		return spec.DataSchema, true
+	}
+	if spec, ok := reg.Lookup(LegacyTypeName(envelopeType)); ok && spec.DataSchema != nil {
+		return spec.DataSchema, true
+	}
+	return nil, false
+}
+
+// readEmbeddedSchemaDoc reads the raw schema document from
+// envelopes.EmbeddedFS() so DefaultRenderTarget can inspect annotation
+// keywords (default_render_target). The lib's TypeSpec intentionally
+// omits annotations — see the lib's known-limitations entry on
+// "Schema annotation passthrough is one-way".
+func readEmbeddedSchemaDoc(envelopeType string) (map[string]any, error) {
+	libFS := envelopes.EmbeddedFS()
+	raw, err := fs.ReadFile(libFS, "manifest/schemas/"+envelopeType+".schema.json")
+	if err != nil {
+		return nil, err
+	}
+	var doc map[string]any
+	if err := json.Unmarshal(raw, &doc); err != nil {
+		return nil, err
+	}
+	return doc, nil
+}
+
+// loadSchemaFromLocalEmbed is the legacy compile path that reads from
+// nanite/internal/envelope/schemas/. Retained as a fallback for tests
+// that don't set the shared registry; deleted in P7 alongside the
+// embed.FS declaration.
+//
+// Caller must hold schemaCacheMu.
+func loadSchemaFromLocalEmbed(envelopeType string) (*jsonschema.Schema, error) {
 	path := "schemas/" + envelopeType + ".schema.json"
 	raw, err := schemaFiles.ReadFile(path)
 	if err != nil {

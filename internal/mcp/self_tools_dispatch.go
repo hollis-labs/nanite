@@ -4,7 +4,9 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 
+	"github.com/hollis-labs/go-agent-broker/broker"
 	"github.com/hollis-labs/nanite/internal/classify"
 	"github.com/hollis-labs/nanite/internal/dispatch"
 	"github.com/hollis-labs/nanite/internal/grounding"
@@ -125,6 +127,67 @@ func (st *SelfToolsTransport) callExecuteTask(ctx context.Context, args map[stri
 					Mode:                match.Reflex.SideEffects.ModeSignal,
 				})
 			}
+		}
+	}
+
+	// CW-20260502-0005: agent-broker consultation (no-op scaffold).
+	// The broker is upstream of dispatch; the no-op impl reads SessionMode
+	// and returns the current-behavior agent profile so wiring it produces
+	// no semantic change. Decision.Reason is logged to event_log so future
+	// sessions (and the v1 deterministic replacement) can audit routing.
+	if st.Broker != nil {
+		mode := ""
+		var modeLookupErr error
+		if st.Store != nil {
+			m, err := st.Store.GetSessionMode(sessionID)
+			if err != nil {
+				// Log the lookup failure so an empty mode in the broker
+				// audit trail isn't ambiguous between "no mode set" and
+				// "mode lookup failed". PR #113 review feedback.
+				modeLookupErr = err
+				slog.Warn("mcp: broker session_mode lookup failed",
+					"session_id", sessionID, "err", err)
+			} else if m != nil {
+				mode = m.Slug
+			}
+		}
+		brokerInput := broker.Input{
+			// PR #113 review: broker must see the same effective text
+			// dispatch will see (post-grounding-injection), otherwise the
+			// audit trail and any future non-noop broker logic won't
+			// correspond to the actual dispatched prompt.
+			UserText:    dispatchMessage,
+			SessionMode: mode,
+		}
+		if reflexHints != nil {
+			brokerInput.ReflexMatchID = reflexHints.ReflexID
+		}
+		decision, derr := st.Broker.Decide(ctx, brokerInput)
+		switch {
+		case derr != nil:
+			// PR #113 review: surface broker failures via slog + event_log
+			// so wiring/config regressions are detectable. Non-fatal — the
+			// no-op contract preserves current dispatch behavior on broker
+			// failure (we just skip recording a decision).
+			slog.Warn("mcp: broker decide failed",
+				"session_id", sessionID, "err", derr)
+			if st.Store != nil {
+				meta := fmt.Sprintf(
+					`{"error":%q,"session_mode":%q,"reflex_match_id":%q}`,
+					derr.Error(), mode, brokerInput.ReflexMatchID,
+				)
+				st.Store.LogEvent(sessionID, "broker_decision_error", "error", derr.Error(), meta)
+			}
+		case st.Store != nil:
+			modeErrStr := ""
+			if modeLookupErr != nil {
+				modeErrStr = modeLookupErr.Error()
+			}
+			meta := fmt.Sprintf(
+				`{"agent_profile":%q,"reason":%q,"confidence":%g,"session_mode":%q,"reflex_match_id":%q,"mode_lookup_error":%q}`,
+				decision.AgentProfile, decision.Reason, decision.Confidence, mode, brokerInput.ReflexMatchID, modeErrStr,
+			)
+			st.Store.LogEvent(sessionID, "broker_decision", "info", decision.Reason, meta)
 		}
 	}
 

@@ -46,6 +46,8 @@ import (
 	"github.com/hollis-labs/nanite/internal/truncate"
 	"github.com/hollis-labs/nanite/internal/version"
 	"github.com/hollis-labs/go-toolbroker/broker"
+
+	agentbroker "github.com/hollis-labs/go-agent-broker/broker"
 )
 
 func main() {
@@ -340,6 +342,12 @@ func cmdServe(args []string) {
 		// DispatchWrapper left nil — the transport falls back to
 		// dispatch.DefaultEnvelopeWrapper when unset.
 	}
+
+	// CW-20260502-0005: agent-broker scaffold (no-op impl). Wires the
+	// upstream broker so callExecuteTask consults it before dispatch and
+	// surfaces Decision.Reason in event_log. The no-op preserves current
+	// behavior; the deterministic v1 impl drops in via the same seam.
+	selfTools.Broker = agentbroker.NewModeBroker()
 
 	// CW-20260426-0006 (J8 v1): wire panel-control surface.
 	//   - PanelSignalSink — push panel_signal SSE events on the originating session.

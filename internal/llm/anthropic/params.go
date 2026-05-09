@@ -109,15 +109,14 @@ func (c *Client) buildMessages(messages []llmtypes.ChatMessage) []sdk.MessagePar
 
 	out := make([]sdk.MessageParam, 0, len(messages))
 	for i, m := range messages {
-		role := sdk.MessageParamRoleUser
+		var role sdk.MessageParamRole
 		switch m.Role {
-		case "user":
-			role = sdk.MessageParamRoleUser
 		case "assistant":
 			role = sdk.MessageParamRoleAssistant
 		default:
-			// Unknown roles fall through as user; matches the lenient
-			// shape the deleted adapter accepted (it never errored on role).
+			// "user" plus any unknown role falls through as user — matches
+			// the lenient shape the deleted adapter accepted (it never
+			// errored on role).
 			role = sdk.MessageParamRoleUser
 		}
 
@@ -218,7 +217,7 @@ func contentBlocksFromMessage(m llmtypes.ChatMessage, applyCache bool) []sdk.Con
 // the streaming and non-streaming paths so request shape stays consistent.
 func (c *Client) buildMessageParams(in llmtypes.ChatRequest, model string, interleavedThinking bool, reasoningCfg llmcontracts.ReasoningConfig) sdk.MessageNewParams {
 	params := sdk.MessageNewParams{
-		Model:     sdk.Model(model),
+		Model:     model,
 		MaxTokens: resolveMaxTokens(in),
 		Messages:  c.buildMessages(in.Messages),
 	}

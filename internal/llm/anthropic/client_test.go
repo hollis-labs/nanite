@@ -13,7 +13,7 @@ import (
 func TestClient_ImplementsContracts(t *testing.T) {
 	// Compile-time assertions are in client.go; these explicitly type-check
 	// at runtime so failures surface as a test rather than a build error.
-	var c *Client = New()
+	c := New()
 	var _ llmcontracts.Provider = c
 	var _ llmcontracts.RateLimited = c
 	var _ llmcontracts.CacheableProvider = c

@@ -1,7 +1,6 @@
 package anthropic
 
 import (
-	"bytes"
 	"errors"
 	"io"
 	"net/http"
@@ -12,17 +11,9 @@ import (
 	llmcontracts "github.com/hollis-labs/go-llm-contracts"
 )
 
-// roundTripperFunc adapts a function into an http.RoundTripper for use as
-// the test SDK transport.
-type roundTripperFunc func(*http.Request) (*http.Response, error)
-
-func (f roundTripperFunc) RoundTrip(r *http.Request) (*http.Response, error) {
-	return f(r)
-}
-
 // stubResponse builds a synthetic *http.Response with the given status,
 // headers, and body — used by the middleware tests to inspect calibration
-// and breaker behaviour without standing up a real Anthropic endpoint.
+// and breaker behavior without standing up a real Anthropic endpoint.
 func stubResponse(status int, headers http.Header, body string) *http.Response {
 	if headers == nil {
 		headers = http.Header{}
@@ -221,5 +212,3 @@ func TestCalibrateRateTracker_NoHeaderNoOp(t *testing.T) {
 	}
 }
 
-// Helper to silence linter on bytes import (used in client_test).
-var _ = bytes.NewBuffer

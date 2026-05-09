@@ -16,7 +16,7 @@ import (
 )
 
 // StreamChat implements llmcontracts.Provider.StreamChat. Mirrors the
-// behaviour of the deleted hand-rolled adapter:
+// behavior of the deleted hand-rolled adapter:
 //
 //  1. Pre-flight: estimate request tokens (cache-aware), reject with
 //     ErrRequestExceedsRateBudget when the request alone is bigger than the
@@ -78,7 +78,7 @@ func (c *Client) StreamChat(ctx context.Context, in llmtypes.ChatRequest) (<-cha
 		// regex parser at chat_rate_budget_pause.go:rateBudgetEstimateRE
 		// still matches.
 		if limit > 0 && estimatedTokens > limit {
-			slog.Warn("provider: request exceeds per-minute rate budget — signalling caller to compact",
+			slog.Warn("provider: request exceeds per-minute rate budget — signaling caller to compact",
 				"provider", "anthropic",
 				"estimated_tokens", estimatedTokens,
 				"limit", limit,
@@ -95,7 +95,7 @@ func (c *Client) StreamChat(ctx context.Context, in llmtypes.ChatRequest) (<-cha
 				"limit_tpm", limit,
 			)
 			if werr := llmcontracts.PacingWait(ctx, wait, c.OnStatus); werr != nil {
-				return nil, fmt.Errorf("anthropic: ctx cancelled during rate-limit wait: %w", werr)
+				return nil, fmt.Errorf("anthropic: ctx canceled during rate-limit wait: %w", werr)
 			}
 		}
 	}
@@ -122,7 +122,12 @@ func (c *Client) StreamChat(ctx context.Context, in llmtypes.ChatRequest) (<-cha
 // accurate across turns.
 func (c *Client) runStream(ctx context.Context, stream *ssestream.Stream[sdk.MessageStreamEventUnion], ch chan<- llmtypes.StreamEvent, interleavedThinking bool) {
 	defer close(ch)
-	defer stream.Close()
+	defer func() {
+		// Close errors here are best-effort: the stream is already drained
+		// (or aborted), and surfacing a close error would obscure the real
+		// stream error already emitted.
+		_ = stream.Close()
+	}()
 
 	type toolUseAcc struct {
 		id    string
@@ -140,7 +145,7 @@ func (c *Client) runStream(ctx context.Context, stream *ssestream.Stream[sdk.Mes
 	for stream.Next() {
 		select {
 		case <-ctx.Done():
-			ch <- llmtypes.StreamEvent{Type: llmtypes.EventError, Error: "context cancelled"}
+			ch <- llmtypes.StreamEvent{Type: llmtypes.EventError, Error: "context canceled"}
 			return
 		default:
 		}

@@ -15,8 +15,9 @@ func TestTranslateError_NilReturnsNil(t *testing.T) {
 
 func TestTranslateError_NonAPIErrorPassesThrough(t *testing.T) {
 	in := errors.New("network fail")
-	if got := translateError(in); got != in {
-		t.Fatalf("expected passthrough, got %v", got)
+	got := translateError(in)
+	if !errors.Is(got, in) {
+		t.Fatalf("expected passthrough err, got %v", got)
 	}
 }
 

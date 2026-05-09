@@ -46,9 +46,6 @@ const DefaultModel = "claude-sonnet-4-5"
 // 20250514. Mirrors the constant the deleted adapter exported.
 const InterleavedThinkingBetaHeader = "interleaved-thinking-2025-05-14"
 
-// minInterleavedThinkingModelDate gates which models accept the beta header.
-const minInterleavedThinkingModelDate = 20250514
-
 // Client wraps anthropic-sdk-go and exposes the rate-budget primitives nanite
 // chat-service expects (RateTracker + CircuitBreaker fields, RateLimitTPM
 // method, ErrRequestExceedsRateBudget pre-flight). Concrete-type field
@@ -219,8 +216,8 @@ func modelSupportsInterleavedThinking(model string) bool {
 		return false
 	}
 	// Compare lexicographically — fixed 8-digit width makes string compare
-	// semantically equivalent to numeric compare for valid YYYYMMDD. The
-	// minimum is encoded by the minInterleavedThinkingModelDate constant.
+	// semantically equivalent to numeric compare for valid YYYYMMDD. Min
+	// release date is 2025-05-14 (interleaved-thinking-2025-05-14 GA).
 	return dateStr >= "20250514"
 }
 

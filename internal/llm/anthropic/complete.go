@@ -14,7 +14,7 @@ import (
 // Complete implements llmcontracts.Provider.Complete. Non-streaming
 // completion. Returns the concatenated text from all "text" content blocks.
 //
-// Mirrors the deleted adapter's behaviour: returns an error when the
+// Mirrors the deleted adapter's behavior: returns an error when the
 // response had no text blocks (rather than an empty string) so callers
 // can distinguish "no content" from "tool_use only".
 func (c *Client) Complete(ctx context.Context, in llmtypes.ChatRequest) (string, error) {

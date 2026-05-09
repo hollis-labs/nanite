@@ -11,12 +11,12 @@ import (
 )
 
 // Anthropic rate-limit response headers — match the names parsed by the
-// deleted hand-rolled adapter so behaviour is preserved across the
-// migration.
+// deleted hand-rolled adapter so behavior is preserved across the
+// migration. Header names, not credentials — gosec G101 false-positive.
 const (
-	headerRateLimitInputTokens          = "x-ratelimit-limit-input-tokens"
-	headerRateLimitRemainingInputTokens = "x-ratelimit-remaining-input-tokens"
-	headerRateLimitResetInputTokens     = "x-ratelimit-reset-input-tokens"
+	headerRateLimitInputTokens          = "x-ratelimit-limit-input-tokens"          //nolint:gosec // header name
+	headerRateLimitRemainingInputTokens = "x-ratelimit-remaining-input-tokens"      //nolint:gosec // header name
+	headerRateLimitResetInputTokens     = "x-ratelimit-reset-input-tokens"          //nolint:gosec // header name
 )
 
 // rateAwareMiddleware returns an option.Middleware that:

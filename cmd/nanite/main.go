@@ -262,6 +262,7 @@ func cmdServe(args []string) {
 	logger := plugin.NewLogger(brand.ID + "-plugin")
 	pluginHost := plugin.NewHost(nil, logger)
 	pluginHost.SetStore(s)
+	pluginHost.SetEnvelopeRegistry(envReg)
 	pluginHost.SetMCPRegistrar(mcpManager)
 	pluginHost.RegisterService("store", s)
 	pluginHost.RegisterService("mcp", mcpManager)

@@ -39,7 +39,12 @@ type ContextService interface {
 	// *store.Mode — pass nil when no session-mode pointer is set. Distinct
 	// from the legacy `mode *store.AgentMode` argument which still feeds the
 	// Agent slot.
-	AssembleSlots(ctx context.Context, session *store.Session, agent *store.AgentProfile, mode *store.AgentMode, workspace *store.Workspace, tools []provider.ToolDefinition, extraSystemPrefix string, providerWindowSize int, sessionMode *store.Mode) (*SlotAssemblyResult, error)
+	//
+	// toolsLazyHint (G-HOT-SWAP-DEAD activation) is the LoadHint string
+	// surfaced after S3b's tools-slot output when the caller's
+	// chat.PartitionTools step produced a non-empty lazy set. Empty string
+	// disables the hint append — preserves legacy behavior.
+	AssembleSlots(ctx context.Context, session *store.Session, agent *store.AgentProfile, mode *store.AgentMode, workspace *store.Workspace, tools []provider.ToolDefinition, extraSystemPrefix string, providerWindowSize int, sessionMode *store.Mode, toolsLazyHint string) (*SlotAssemblyResult, error)
 
 	PruneAfterTurn(ctx context.Context, sessionID string) error
 }
@@ -173,7 +178,12 @@ func (s *contextServiceImpl) AssembleContext(ctx context.Context, session *store
 // stash + classifier deps are wired), the Tools slot carries a compact
 // pointer-summary by default and hydrates full defs on detected intent.
 // Otherwise it carries the full JSON-serialized defs every turn (S3a).
-func (s *contextServiceImpl) AssembleSlots(ctx context.Context, session *store.Session, agent *store.AgentProfile, mode *store.AgentMode, workspace *store.Workspace, tools []provider.ToolDefinition, extraSystemPrefix string, providerWindowSize int, sessionMode *store.Mode) (*SlotAssemblyResult, error) {
+//
+// toolsLazyHint, when non-empty, is appended after the S3b/S3a output —
+// the G-HOT-SWAP-DEAD layer's pointer at the lazy partition. The caller
+// (chat-service) decides whether the partition is active and renders the
+// hint via chat.RenderToolLazyHint; AssembleSlots only attaches it.
+func (s *contextServiceImpl) AssembleSlots(ctx context.Context, session *store.Session, agent *store.AgentProfile, mode *store.AgentMode, workspace *store.Workspace, tools []provider.ToolDefinition, extraSystemPrefix string, providerWindowSize int, sessionMode *store.Mode, toolsLazyHint string) (*SlotAssemblyResult, error) {
 	sources, err := s.client.AssembleSlotSources(ctx, session, agent, mode, workspace, sessionMode)
 	if err != nil {
 		return nil, err
@@ -189,8 +199,17 @@ func (s *contextServiceImpl) AssembleSlots(ctx context.Context, session *store.S
 	cw.SetContent(ctxpkg.SlotRules, sources.Rules)
 
 	// Tools slot: either S3b's classifier-driven pointer/hydrated content or
-	// the S3a "always full" serialization.
+	// the S3a "always full" serialization. G-HOT-SWAP-DEAD lazy hint is
+	// appended here so the agent sees the inline (essential) surface plus
+	// a pointer at the lazy remainder.
 	toolsContent, outcome := s.buildToolsSlot(ctx, session, tools, sources.Messages)
+	if toolsLazyHint != "" {
+		if toolsContent != "" {
+			toolsContent = toolsContent + "\n\n" + toolsLazyHint
+		} else {
+			toolsContent = toolsLazyHint
+		}
+	}
 	cw.SetContent(ctxpkg.SlotTools, toolsContent)
 
 	cw.SetContent(ctxpkg.SlotSession, sources.Session)

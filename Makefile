@@ -21,12 +21,14 @@ install: generate-envelopes build-ui
 	go install ./cmd/nanite
 
 # Generate TypeScript types from envelope JSON schemas (source of truth)
+# Reads from the shared go-envelopes lib's manifest at ../go-envelopes/manifest/schemas/.
+# Override --manifest-dir if your sibling checkout lives elsewhere.
 generate-envelopes:
-	node scripts/generate-envelope-types.mjs
+	node scripts/generate-envelope-types.mjs --manifest-dir ../go-envelopes/manifest/schemas
 
 # Check that generated envelope types are not stale (CI use)
 check-envelopes:
-	node scripts/generate-envelope-types.mjs --check
+	node scripts/generate-envelope-types.mjs --manifest-dir ../go-envelopes/manifest/schemas --check
 
 build-ui:
 	cd ui && npm run build

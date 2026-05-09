@@ -1,13 +1,12 @@
 package plugin
 
 import (
-	"encoding/json"
 	"fmt"
 	"os"
 	"sync/atomic"
 
+	"github.com/hollis-labs/go-envelopes"
 	sdkplugin "github.com/hollis-labs/plugin-sdk"
-	"github.com/santhosh-tekuri/jsonschema/v6"
 )
 
 // envelopeValidatorDevModeFn returns whether the host should treat envelope
@@ -36,15 +35,26 @@ func isEnvelopeValidatorDevMode() bool {
 	return false
 }
 
+// pluginRegistryName is the key under which a plugin envelope type lives
+// in the shared go-envelopes Registry. The lib's RegisterTypeFromManifest
+// auto-prefixes with the plugin id when the supplied entry type is bare,
+// yielding "<pluginID>.<envType>"; Lookup must use the same form.
+func pluginRegistryName(pluginID, envType string) string {
+	return pluginID + "." + envType
+}
+
 // RegisterPluginEnvelopeSchema compiles a JSON Schema for a plugin-owned
-// envelope type and records it on the host. Called from
-// applyManifestRegistrations when a plugin declares an envelope with a schema
-// file. The schema is used by ValidatePluginEnvelope / FilterPluginEnvelopes
-// at emission time (B.11).
+// envelope type and records it in the shared go-envelopes Registry under
+// "<pluginID>.<envType>". Called from applyManifestRegistrations when a
+// plugin declares an envelope with a schema file. The schema is used by
+// ValidatePluginEnvelope / FilterPluginEnvelopes at emission time (B.11).
 //
 // Empty schemaBytes returns an error — an envelope declared with a schema
 // path but no loadable content is a plugin bug the host should not paper
-// over. Callers that want "no schema" should simply not call this.
+// over. Callers that want "no schema" should simply not call this; the
+// type-ownership side-map (h.envelopes via RegisterEnvelope) is enough
+// for ValidatePluginEnvelope's "declared without schema → pass-through"
+// branch.
 func (h *Host) RegisterPluginEnvelopeSchema(pluginID, envType string, schemaBytes []byte) error {
 	if pluginID == "" || envType == "" {
 		return fmt.Errorf("plugin id and envelope type are required")
@@ -52,30 +62,16 @@ func (h *Host) RegisterPluginEnvelopeSchema(pluginID, envType string, schemaByte
 	if len(schemaBytes) == 0 {
 		return fmt.Errorf("schema bytes empty")
 	}
-	var raw any
-	if err := json.Unmarshal(schemaBytes, &raw); err != nil {
-		return fmt.Errorf("parse schema: %w", err)
+	h.mu.RLock()
+	reg := h.envelopeRegistry
+	h.mu.RUnlock()
+	if reg == nil {
+		return fmt.Errorf("envelope registry not configured on host")
 	}
-	c := jsonschema.NewCompiler()
-	url := fmt.Sprintf("plugin://%s/envelopes/%s.schema.json", pluginID, envType)
-	if err := c.AddResource(url, raw); err != nil {
-		return fmt.Errorf("add schema resource: %w", err)
+	manifestBytes := []byte(`{"type":"` + envType + `"}`)
+	if err := reg.RegisterTypeFromManifest(manifestBytes, schemaBytes, pluginID); err != nil {
+		return fmt.Errorf("register schema: %w", err)
 	}
-	schema, err := c.Compile(url)
-	if err != nil {
-		return fmt.Errorf("compile schema: %w", err)
-	}
-	h.mu.Lock()
-	if h.envelopeSchemas == nil {
-		h.envelopeSchemas = make(map[string]map[string]*jsonschema.Schema)
-	}
-	byType, ok := h.envelopeSchemas[pluginID]
-	if !ok {
-		byType = make(map[string]*jsonschema.Schema)
-		h.envelopeSchemas[pluginID] = byType
-	}
-	byType[envType] = schema
-	h.mu.Unlock()
 	return nil
 }
 
@@ -103,8 +99,7 @@ func (h *Host) ValidatePluginEnvelope(pluginID, envType string, data any) error 
 	}
 	h.mu.RLock()
 	entry, declared := h.envelopes[envType]
-	byType := h.envelopeSchemas[pluginID]
-	schema, haveSchema := byType[envType]
+	reg := h.envelopeRegistry
 	h.mu.RUnlock()
 
 	if !declared {
@@ -114,11 +109,16 @@ func (h *Host) ValidatePluginEnvelope(pluginID, envType string, data any) error 
 		return fmt.Errorf("envelope type %q owned by plugin %q, not emitter %q",
 			envType, entry.PluginID, pluginID)
 	}
-	if !haveSchema {
+	if reg == nil {
+		// No registry configured (test-only) — degrade to declared-without-schema.
+		return nil
+	}
+	spec, ok := reg.Lookup(pluginRegistryName(pluginID, envType))
+	if !ok || spec.DataSchema == nil {
 		// Declared without a schema — nothing to validate against.
 		return nil
 	}
-	if err := schema.Validate(data); err != nil {
+	if err := spec.DataSchema.Validate(data); err != nil {
 		return fmt.Errorf("schema validation: %w", err)
 	}
 	return nil
@@ -160,13 +160,26 @@ func (h *Host) FilterPluginEnvelopes(pluginID string, envs []sdkplugin.EnvelopeO
 	return out
 }
 
-// unregisterPluginEnvelopeSchemasLocked drops all envelope schemas owned by a
-// plugin. Caller must hold h.mu (write). Returns the number of schemas removed.
-func (h *Host) unregisterPluginEnvelopeSchemasLocked(pluginID string) int {
-	if h.envelopeSchemas == nil {
-		return 0
+// pluginRegistryHas reports whether the shared registry knows about the
+// "<pluginID>.<envType>" entry. Test helper retained for migration coverage
+// (TestUnloadPlugin*Schema tests) so we can assert registry-side cleanup
+// without exporting envelopes.Registry through the test seam.
+func (h *Host) pluginRegistryHas(pluginID, envType string) bool {
+	h.mu.RLock()
+	reg := h.envelopeRegistry
+	h.mu.RUnlock()
+	if reg == nil {
+		return false
 	}
-	n := len(h.envelopeSchemas[pluginID])
-	delete(h.envelopeSchemas, pluginID)
-	return n
+	return reg.Has(pluginRegistryName(pluginID, envType))
+}
+
+// EnvelopeRegistry returns the shared registry installed via
+// SetEnvelopeRegistry. May be nil in unit tests that don't exercise schema
+// validation. Exported so test files in the same package can stand up a
+// registry alongside a Host without re-importing envelopes everywhere.
+func (h *Host) EnvelopeRegistry() *envelopes.Registry {
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+	return h.envelopeRegistry
 }

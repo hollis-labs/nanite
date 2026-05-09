@@ -1,5 +1,26 @@
-import { create } from 'zustand'
-import type { ToolCall, ToolCallDisplayMode, ToolWarning, AgentMode, ChatError, ActiveStreamInfo, PendingToolInfo, CLIActiveInfo, PendingApproval, PluginEnvelopeItem, ModeSuggestion, ModeAutoSwitchOverride, ModeAutoSwitchEffective } from '@/lib/types'
+import { create } from "zustand";
+import type {
+  ActiveStreamInfo,
+  AgentMode,
+  ChatError,
+  CLIActiveInfo,
+  ModeAutoSwitchEffective,
+  ModeAutoSwitchOverride,
+  ModeSuggestion,
+  PendingApproval,
+  PendingToolInfo,
+  PluginEnvelopeItem,
+  ToolCall,
+  ToolCallDisplayMode,
+  ToolWarning,
+} from "@/lib/types";
+import { useAppStore } from "@/stores/useAppStore";
+import {
+  type ChatSessionState,
+  EMPTY_CHAT_SESSION_STATE,
+  emptyChatSessionState,
+  MAX_RETAINED_SESSIONS,
+} from "./chatSessionState";
 
 /**
  * B3 (CW-20260428-0011) — pure resolver for the effective auto-switch
@@ -15,453 +36,646 @@ import type { ToolCall, ToolCallDisplayMode, ToolWarning, AgentMode, ChatError, 
  */
 export function getAutoSwitchEffective(
   override: ModeAutoSwitchOverride | undefined,
-  pref: '' | 'always' | 'ask' | 'never' | undefined,
+  pref: "" | "always" | "ask" | "never" | undefined,
 ): ModeAutoSwitchEffective {
-  if (override === 'off') return 'off'
-  const p = pref ?? ''
-  if (p === '') return 'firstUse'
-  if (p === 'never') return 'off'
-  if (p === 'always') return 'auto'
-  return 'ask'
+  if (override === "off") return "off";
+  const p = pref ?? "";
+  if (p === "") return "firstUse";
+  if (p === "never") return "off";
+  if (p === "always") return "auto";
+  return "ask";
 }
 
-interface ChatState {
-  // Streaming
-  isStreaming: boolean
-  streamingContent: string
-  /** F4 (CW-20260419-0029) — inter-iteration narration text. Live during streaming.
-   *  Collapses to a pill after stream_end. Empty when the turn had no tool calls. */
-  streamingNarration: string
-  /** F4 — post-end_turn final answer text. This becomes the assistant bubble. */
-  streamingFinal: string
-  /** F3 (CW-20260420-0023) — interleaved thinking text. Live during streaming.
-   *  Shown in the "Working…" strip alongside narration. Collapses to the pill
-   *  post-stream, rendered with a distinct "thinking" badge. */
-  streamingThinking: string
-  streamingSessionId: string | null
-  setStreaming: (streaming: boolean) => void
-  setStreamingSessionId: (id: string | null) => void
-  appendStreamContent: (content: string) => void
-  appendStreamNarration: (content: string) => void
-  appendStreamFinal: (content: string) => void
-  appendStreamThinking: (content: string) => void
-  replaceStreamContent: (content: string) => void
-  clearStream: () => void
+interface ChatStore {
+  /** Per-session state slices (G-FE-SINGLETON). */
+  sessions: Map<string, ChatSessionState>;
 
-  // Status messages (transient, e.g. retry notifications)
-  statusMessage: string | null
-  setStatusMessage: (msg: string | null) => void
+  // ── Lifecycle ──
+  ensureSession: (sessionID: string) => void;
+  removeSession: (sessionID: string) => void;
+  clearStreaming: (sessionID: string) => void;
 
-  // Tool calls (session-scoped retention)
-  toolCalls: ToolCall[]
-  toolCallsBySession: Map<string, { calls: ToolCall[]; lastActivity: number }>
-  addToolCall: (tc: ToolCall, sessionId?: string) => void
-  updateToolCall: (id: string, update: Partial<ToolCall>, sessionId?: string) => void
-  clearToolCalls: () => void
-  loadSessionToolCalls: (sessionId: string | null, retentionMinutes?: number) => void
+  // ── Streaming writers ──
+  setStreaming: (sessionID: string, streaming: boolean) => void;
+  appendStreamContent: (sessionID: string, content: string) => void;
+  appendStreamNarration: (sessionID: string, content: string) => void;
+  appendStreamFinal: (sessionID: string, content: string) => void;
+  appendStreamThinking: (sessionID: string, content: string) => void;
+  replaceStreamContent: (sessionID: string, content: string) => void;
 
-  // Tool warnings
-  toolWarnings: ToolWarning[]
-  addToolWarning: (warning: ToolWarning) => void
-  clearToolWarnings: () => void
+  // ── Status / banners ──
+  setStatusMessage: (sessionID: string, msg: string | null) => void;
+  setCircuitOpen: (sessionID: string, open: boolean) => void;
+  setSessionTakeover: (sessionID: string, taken: boolean) => void;
+  setStreamStalled: (sessionID: string, stalled: boolean) => void;
+  setTextOnlyMode: (sessionID: string, enabled: boolean) => void;
 
-  // Pending approvals (vNext permission system)
-  pendingApprovals: PendingApproval[]
-  addPendingApproval: (approval: PendingApproval) => void
-  resolvePendingApproval: (requestId: string, decision: PendingApproval['resolved']) => void
-  clearPendingApprovals: () => void
+  // ── Tool calls ──
+  addToolCall: (sessionID: string, tc: ToolCall) => void;
+  updateToolCall: (sessionID: string, id: string, update: Partial<ToolCall>) => void;
+  clearToolCalls: (sessionID: string) => void;
+  /** Prune stale per-session tool-call lists by retention TTL (in minutes). Negative disables pruning. */
+  pruneToolCallRetention: (retentionMinutes: number) => void;
 
-  // Plugin envelopes — standalone cards emitted by plugin event hooks
-  // (BLG-20260413-012 / BLG-20260414-010). Session-scoped so switching
-  // sessions does not mix envelopes from different conversations.
-  pluginEnvelopes: PluginEnvelopeItem[]
-  pluginEnvelopesBySession: Map<string, { items: PluginEnvelopeItem[]; lastActivity: number }>
-  addPluginEnvelope: (item: PluginEnvelopeItem, sessionId?: string) => void
-  clearPluginEnvelopes: () => void
-  loadSessionPluginEnvelopes: (sessionId: string | null, retentionMinutes?: number) => void
+  // ── Tool warnings ──
+  addToolWarning: (sessionID: string, warning: ToolWarning) => void;
+  clearToolWarnings: (sessionID: string) => void;
 
-  // Text-only mode (agent has 0 MCP tools)
-  textOnlyMode: boolean
-  setTextOnlyMode: (enabled: boolean) => void
+  // ── Pending approvals ──
+  addPendingApproval: (sessionID: string, approval: PendingApproval) => void;
+  resolvePendingApproval: (
+    sessionID: string,
+    requestId: string,
+    decision: PendingApproval["resolved"],
+  ) => void;
+  clearPendingApprovals: (sessionID: string) => void;
 
-  // Chat errors
-  chatErrors: ChatError[]
-  addChatError: (error: ChatError) => void
-  dismissChatError: (id: string) => void
-  clearChatErrors: () => void
+  // ── Plugin envelopes ──
+  addPluginEnvelope: (sessionID: string, item: PluginEnvelopeItem) => void;
+  clearPluginEnvelopes: (sessionID: string) => void;
+  pruneEnvelopeRetention: (retentionMinutes: number) => void;
 
-  // Circuit breaker
-  circuitOpen: boolean
-  setCircuitOpen: (open: boolean) => void
+  // ── Errors ──
+  addChatError: (sessionID: string, error: ChatError) => void;
+  dismissChatError: (sessionID: string, id: string) => void;
+  clearChatErrors: (sessionID: string) => void;
 
-  // Session takeover (another tab took this session's SSE connection)
-  sessionTakeover: boolean
-  setSessionTakeover: (taken: boolean) => void
+  // ── Mode suggestion ──
+  setPendingModeSuggestion: (sessionID: string, s: ModeSuggestion | null) => void;
+  clearModeSuggestion: (sessionID: string) => void;
 
-  // Stream stalled watchdog — flipped when the SSE connection delivers no
-  // events for an extended period while streaming is still marked active.
-  streamStalled: boolean
-  setStreamStalled: (stalled: boolean) => void
+  // ── Per-session dials ──
+  setActiveMode: (sessionID: string, mode: AgentMode) => void;
+  setActiveModel: (sessionID: string, model: string) => void;
+  setActiveEffort: (sessionID: string, effort: string) => void;
 
-  // Tool call display mode (per-session override)
-  toolCallDisplayMode: ToolCallDisplayMode
-  setToolCallDisplayMode: (mode: ToolCallDisplayMode) => void
-  loadToolCallDisplayMode: (sessionId: string | null) => void
-  saveToolCallDisplayMode: (sessionId: string | null, mode: ToolCallDisplayMode) => void
+  // ── Genuinely cross-session state (stays global) ──
+  /** Tool-call display preference. User-level pref with optional per-session override (localStorage-backed). */
+  toolCallDisplayMode: ToolCallDisplayMode;
+  setToolCallDisplayMode: (mode: ToolCallDisplayMode) => void;
+  loadToolCallDisplayMode: (sessionID: string | null) => void;
+  saveToolCallDisplayMode: (sessionID: string | null, mode: ToolCallDisplayMode) => void;
 
-  // Mode
-  activeMode: AgentMode
-  setActiveMode: (mode: AgentMode) => void
+  /** Multi-session presence — sidebar surfaces across all sessions. Keyed by sessionID. */
+  activeStreams: Map<string, ActiveStreamInfo>;
+  pendingTools: Map<string, PendingToolInfo>;
+  cliActiveSessions: Map<string, CLIActiveInfo>;
+  setActiveStream: (sessionID: string, info: ActiveStreamInfo) => void;
+  removeActiveStream: (sessionID: string) => void;
+  setPendingTool: (sessionID: string, info: PendingToolInfo) => void;
+  removePendingTool: (sessionID: string) => void;
+  setCLIActive: (sessionID: string, info: CLIActiveInfo) => void;
+  removeCLIActive: (sessionID: string) => void;
 
-  // Model
-  activeModel: string
-  setActiveModel: (model: string) => void
+  /** Cross-session jump-to-message (search result navigation). */
+  pendingJump: { sessionId: string; messageId: string } | null;
+  setPendingJump: (jump: { sessionId: string; messageId: string } | null) => void;
+  scrollToMessageId: string | null;
+  setScrollToMessageId: (id: string | null) => void;
 
-  // Effort (F1 / CW-20260420-0014) — per-turn token-budget + reasoning dial.
-  // Values: "low" | "normal" | "high" | "max". Default: "normal".
-  activeEffort: string
-  setActiveEffort: (effort: string) => void
+  /** Per-session auto-switch override. Keyed by sessionID; absence = inherit global pref. */
+  autoSwitchSessionOverrides: Record<string, ModeAutoSwitchOverride>;
+  setAutoSwitchOverride: (sessionID: string, override: ModeAutoSwitchOverride | "inherit") => void;
 
-  // Presence
-  activeStreams: Map<string, ActiveStreamInfo>
-  pendingTools: Map<string, PendingToolInfo>
-  cliActiveSessions: Map<string, CLIActiveInfo>
-  setActiveStream: (sessionId: string, info: ActiveStreamInfo) => void
-  removeActiveStream: (sessionId: string) => void
-  setPendingTool: (sessionId: string, info: PendingToolInfo) => void
-  removePendingTool: (sessionId: string) => void
-  setCLIActive: (sessionId: string, info: CLIActiveInfo) => void
-  removeCLIActive: (sessionId: string) => void
-
-  // Cross-session jump-to-message (search result navigation)
-  pendingJump: { sessionId: string; messageId: string } | null
-  setPendingJump: (jump: { sessionId: string; messageId: string } | null) => void
-  scrollToMessageId: string | null
-  setScrollToMessageId: (id: string | null) => void
-
-  // B2 (CW-20260428-0010) — non-binding mode classifier suggestion from the
-  // backend. Populated by the SSE `mode_suggestion` event in useChat.
-  // B3 will hook into this to render the confirm-card / auto-apply UX;
-  // B2 only stages the value.
-  pendingModeSuggestion: ModeSuggestion | null
-  setPendingModeSuggestion: (s: ModeSuggestion | null) => void
-  clearModeSuggestion: () => void
-
-  // B3 (CW-20260428-0011) — per-session override for auto-mode-switching.
-  // Absence = inherit global pref. "off" suppresses all auto-switches for
-  // the session; "on" lets the global pref take effect (does NOT bypass
-  // first-use prompt). Resets on full page reload by design.
-  autoSwitchSessionOverrides: Record<string, ModeAutoSwitchOverride>
-  setAutoSwitchOverride: (sessionId: string, override: ModeAutoSwitchOverride | 'inherit') => void
-
-  // B3 (CW-20260428-0011) — lightweight chat-scoped toast (e.g. "Switched
-  // to plan mode"). Mirrors useWorkStore.toastMessage shape but separately
-  // owned so chat surfaces don't depend on the work store.
-  chatToast: { message: string; tone: 'success' | 'info' } | null
-  showChatToast: (message: string, tone?: 'success' | 'info') => void
-  dismissChatToast: () => void
+  /**
+   * Chat-scoped toast (e.g. "Switched to plan mode").
+   *
+   * Intentional cross-session global per the locked decision in the
+   * fe-singleton-refactor implementer prompt: a 3s auto-dismiss toast that the
+   * user will visually consume before any session switch matters. Double-routing
+   * to the wrong session is a non-issue given the fleeting lifetime, and the
+   * alternative (one toast per session) loses the simple "show one thing at the
+   * bottom" UX.
+   */
+  chatToast: { message: string; tone: "success" | "info" } | null;
+  showChatToast: (message: string, tone?: "success" | "info") => void;
+  dismissChatToast: () => void;
 }
 
-export const useChatStore = create<ChatState>((set) => ({
-  // Streaming
-  isStreaming: false,
-  streamingContent: '',
-  streamingNarration: '',
-  streamingFinal: '',
-  streamingThinking: '',
-  streamingSessionId: null,
-  setStreaming: (streaming) => set({ isStreaming: streaming }),
-  setStreamingSessionId: (id) => set({ streamingSessionId: id }),
-  appendStreamContent: (content) =>
-    set((state) => ({ streamingContent: state.streamingContent + content })),
-  appendStreamNarration: (content) =>
-    set((state) => ({ streamingNarration: state.streamingNarration + content })),
-  appendStreamFinal: (content) =>
-    set((state) => ({
-      streamingFinal: state.streamingFinal + content,
-      // Keep streamingContent in sync with final text so legacy consumers
-      // (e.g. ChatTranscript's streamingContent prop) render the answer.
-      streamingContent: state.streamingFinal + content,
-    })),
-  appendStreamThinking: (content) =>
-    set((state) => ({ streamingThinking: state.streamingThinking + content })),
-  replaceStreamContent: (content) => set({ streamingContent: content, streamingFinal: content }),
-  clearStream: () => set({
-    streamingContent: '',
-    streamingNarration: '',
-    streamingFinal: '',
-    streamingThinking: '',
-    isStreaming: false,
-    streamingSessionId: null,
-    statusMessage: null,
-    streamStalled: false,
-  }),
+// ── Internal helpers ──
 
-  // Status messages
-  statusMessage: null,
-  setStatusMessage: (msg) => set({ statusMessage: msg }),
+function evictLRUIfNeeded(sessions: Map<string, ChatSessionState>): Map<string, ChatSessionState> {
+  if (sessions.size <= MAX_RETAINED_SESSIONS) return sessions;
+  const sorted = Array.from(sessions.entries()).sort(
+    ([, a], [, b]) => a.lastActivityAt - b.lastActivityAt,
+  );
+  const evictCount = sessions.size - MAX_RETAINED_SESSIONS;
+  const next = new Map(sessions);
+  for (let i = 0; i < evictCount; i++) {
+    const entry = sorted[i];
+    if (entry) next.delete(entry[0]);
+  }
+  return next;
+}
 
-  // Tool calls (session-scoped retention)
-  toolCalls: [],
-  toolCallsBySession: new Map(),
-  addToolCall: (tc, sessionId?) =>
+/**
+ * Apply a partial update to the slice for `sessionID`. Auto-creates the slice
+ * if missing — writers always have a real sessionID, and forcing every caller
+ * to ensureSession first would be noisy. Does NOT enforce the LRU cap on
+ * mutation paths: that runs only on explicit ensureSession to avoid evicting
+ * an actively-mounted session while writes flow.
+ */
+function applyToSession(
+  sessions: Map<string, ChatSessionState>,
+  sessionID: string,
+  patch: Partial<ChatSessionState>,
+): Map<string, ChatSessionState> {
+  const current = sessions.get(sessionID) ?? emptyChatSessionState();
+  const updated: ChatSessionState = {
+    ...current,
+    ...patch,
+    lastActivityAt: Date.now(),
+  };
+  const next = new Map(sessions);
+  next.set(sessionID, updated);
+  return next;
+}
+
+export const useChatStore = create<ChatStore>((set) => ({
+  sessions: new Map(),
+
+  // ── Lifecycle ──
+  ensureSession: (sessionID) =>
     set((state) => {
-      const targetSession = sessionId ?? state.streamingSessionId
-      const next = new Map(state.toolCallsBySession)
-      const existing = targetSession ? next.get(targetSession)?.calls ?? [] : state.toolCalls
-      // CW-20260419-0014: upsert by id. SSE replay on reconnect (ring
-      // buffer + Last-Event-ID) should prevent duplicates at the wire
-      // level, but this is defense-in-depth — same id means update the
-      // existing entry, not append. Prevents the 14→28 doubling we saw
-      // in UAT c13/c14 when the browser auto-reconnected without a
-      // cursor.
-      const existingIdx = existing.findIndex((x) => x.id === tc.id)
+      if (state.sessions.has(sessionID)) return {};
+      const next = new Map(state.sessions);
+      next.set(sessionID, emptyChatSessionState());
+      return { sessions: evictLRUIfNeeded(next) };
+    }),
+
+  removeSession: (sessionID) =>
+    set((state) => {
+      if (!state.sessions.has(sessionID)) return {};
+      const next = new Map(state.sessions);
+      next.delete(sessionID);
+      return { sessions: next };
+    }),
+
+  clearStreaming: (sessionID) =>
+    set((state) => ({
+      sessions: applyToSession(state.sessions, sessionID, {
+        isStreaming: false,
+        streamingContent: "",
+        streamingNarration: "",
+        streamingFinal: "",
+        streamingThinking: "",
+        statusMessage: null,
+        streamStalled: false,
+      }),
+    })),
+
+  // ── Streaming writers ──
+  setStreaming: (sessionID, streaming) =>
+    set((state) => ({
+      sessions: applyToSession(state.sessions, sessionID, { isStreaming: streaming }),
+    })),
+
+  appendStreamContent: (sessionID, content) =>
+    set((state) => {
+      const slice = state.sessions.get(sessionID) ?? emptyChatSessionState();
+      return {
+        sessions: applyToSession(state.sessions, sessionID, {
+          streamingContent: slice.streamingContent + content,
+        }),
+      };
+    }),
+
+  appendStreamNarration: (sessionID, content) =>
+    set((state) => {
+      const slice = state.sessions.get(sessionID) ?? emptyChatSessionState();
+      return {
+        sessions: applyToSession(state.sessions, sessionID, {
+          streamingNarration: slice.streamingNarration + content,
+        }),
+      };
+    }),
+
+  appendStreamFinal: (sessionID, content) =>
+    set((state) => {
+      const slice = state.sessions.get(sessionID) ?? emptyChatSessionState();
+      const nextFinal = slice.streamingFinal + content;
+      // Keep streamingContent in sync with final text so consumers reading
+      // streamingContent (e.g. ChatTranscript) render the answer.
+      return {
+        sessions: applyToSession(state.sessions, sessionID, {
+          streamingFinal: nextFinal,
+          streamingContent: nextFinal,
+        }),
+      };
+    }),
+
+  appendStreamThinking: (sessionID, content) =>
+    set((state) => {
+      const slice = state.sessions.get(sessionID) ?? emptyChatSessionState();
+      return {
+        sessions: applyToSession(state.sessions, sessionID, {
+          streamingThinking: slice.streamingThinking + content,
+        }),
+      };
+    }),
+
+  replaceStreamContent: (sessionID, content) =>
+    set((state) => ({
+      sessions: applyToSession(state.sessions, sessionID, {
+        streamingContent: content,
+        streamingFinal: content,
+      }),
+    })),
+
+  // ── Status / banners ──
+  setStatusMessage: (sessionID, msg) =>
+    set((state) => ({
+      sessions: applyToSession(state.sessions, sessionID, { statusMessage: msg }),
+    })),
+  setCircuitOpen: (sessionID, open) =>
+    set((state) => ({
+      sessions: applyToSession(state.sessions, sessionID, { circuitOpen: open }),
+    })),
+  setSessionTakeover: (sessionID, taken) =>
+    set((state) => ({
+      sessions: applyToSession(state.sessions, sessionID, { sessionTakeover: taken }),
+    })),
+  setStreamStalled: (sessionID, stalled) =>
+    set((state) => ({
+      sessions: applyToSession(state.sessions, sessionID, { streamStalled: stalled }),
+    })),
+  setTextOnlyMode: (sessionID, enabled) =>
+    set((state) => ({
+      sessions: applyToSession(state.sessions, sessionID, { textOnlyMode: enabled }),
+    })),
+
+  // ── Tool calls ──
+  addToolCall: (sessionID, tc) =>
+    set((state) => {
+      const slice = state.sessions.get(sessionID) ?? emptyChatSessionState();
+      // CW-20260419-0014: upsert by id. Defense-in-depth for SSE replay on
+      // reconnect — same id means update, not append.
+      const existingIdx = slice.toolCalls.findIndex((x) => x.id === tc.id);
       const updated =
         existingIdx >= 0
-          ? existing.map((x, i) => (i === existingIdx ? { ...x, ...tc } : x)).slice(-50)
-          : [...existing, tc].slice(-50)
-      if (targetSession) {
-        next.set(targetSession, { calls: updated, lastActivity: Date.now() })
-      }
-      // Only update the displayed toolCalls if this is the active session
-      const displayUpdate = targetSession === state.streamingSessionId ? { toolCalls: updated } : {}
-      return { ...displayUpdate, toolCallsBySession: next }
+          ? slice.toolCalls.map((x, i) => (i === existingIdx ? { ...x, ...tc } : x)).slice(-50)
+          : [...slice.toolCalls, tc].slice(-50);
+      return {
+        sessions: applyToSession(state.sessions, sessionID, {
+          toolCalls: updated,
+          toolCallsLastActivity: Date.now(),
+        }),
+      };
     }),
-  updateToolCall: (id, update, sessionId?) =>
+
+  updateToolCall: (sessionID, id, update) =>
     set((state) => {
-      const targetSession = sessionId ?? state.streamingSessionId
-      const next = new Map(state.toolCallsBySession)
-      const existing = targetSession ? next.get(targetSession)?.calls ?? [] : state.toolCalls
-      const updated = existing.map((tc) => (tc.id === id ? { ...tc, ...update } : tc))
-      if (targetSession) {
-        next.set(targetSession, { calls: updated, lastActivity: Date.now() })
-      }
-      const displayUpdate = targetSession === state.streamingSessionId ? { toolCalls: updated } : {}
-      return { ...displayUpdate, toolCallsBySession: next }
+      const slice = state.sessions.get(sessionID) ?? emptyChatSessionState();
+      const updated = slice.toolCalls.map((tc) => (tc.id === id ? { ...tc, ...update } : tc));
+      return {
+        sessions: applyToSession(state.sessions, sessionID, {
+          toolCalls: updated,
+          toolCallsLastActivity: Date.now(),
+        }),
+      };
     }),
-  clearToolCalls: () =>
+
+  clearToolCalls: (sessionID) =>
+    set((state) => ({
+      sessions: applyToSession(state.sessions, sessionID, {
+        toolCalls: [],
+        toolCallsLastActivity: Date.now(),
+      }),
+    })),
+
+  pruneToolCallRetention: (retentionMinutes) =>
     set((state) => {
-      const sessionId = state.streamingSessionId
-      if (sessionId) {
-        const next = new Map(state.toolCallsBySession)
-        next.set(sessionId, { calls: [], lastActivity: Date.now() })
-        return { toolCalls: [], toolCallsBySession: next }
-      }
-      return { toolCalls: [] }
-    }),
-  loadSessionToolCalls: (sessionId, retentionMinutes = 15) =>
-    set((state) => {
-      if (!sessionId) return { toolCalls: [] }
-      const next = new Map(state.toolCallsBySession)
-      // Prune stale entries only when retention is non-negative; negative values keep until refresh
-      if (retentionMinutes >= 0) {
-        const cutoff = Date.now() - retentionMinutes * 60 * 1000
-        for (const [id, entry] of next) {
-          if (entry.lastActivity < cutoff) next.delete(id)
+      if (retentionMinutes < 0) return {};
+      const cutoff = Date.now() - retentionMinutes * 60 * 1000;
+      let mutated = false;
+      const next = new Map(state.sessions);
+      for (const [id, slice] of next) {
+        if (slice.toolCallsLastActivity < cutoff && slice.toolCalls.length > 0) {
+          next.set(id, { ...slice, toolCalls: [] });
+          mutated = true;
         }
       }
-      const entry = next.get(sessionId)
+      return mutated ? { sessions: next } : {};
+    }),
+
+  // ── Tool warnings ──
+  addToolWarning: (sessionID, warning) =>
+    set((state) => {
+      const slice = state.sessions.get(sessionID) ?? emptyChatSessionState();
       return {
-        toolCalls: entry?.calls ?? [],
-        toolCallsBySession: next,
-      }
+        sessions: applyToSession(state.sessions, sessionID, {
+          toolWarnings: [...slice.toolWarnings, warning],
+        }),
+      };
     }),
-
-  // Tool warnings
-  toolWarnings: [],
-  addToolWarning: (warning: ToolWarning) =>
-    set((state: ChatState) => ({ toolWarnings: [...state.toolWarnings, warning] })),
-  clearToolWarnings: () => set({ toolWarnings: [] }),
-
-  // Pending approvals
-  pendingApprovals: [],
-  addPendingApproval: (approval: PendingApproval) =>
-    set((state: ChatState) => ({ pendingApprovals: [...state.pendingApprovals, approval] })),
-  resolvePendingApproval: (requestId: string, decision: PendingApproval['resolved']) =>
-    set((state: ChatState) => ({
-      pendingApprovals: state.pendingApprovals.map((a) =>
-        a.request_id === requestId ? { ...a, resolved: decision } : a
-      ),
+  clearToolWarnings: (sessionID) =>
+    set((state) => ({
+      sessions: applyToSession(state.sessions, sessionID, { toolWarnings: [] }),
     })),
-  clearPendingApprovals: () => set({ pendingApprovals: [] }),
 
-  // Plugin envelopes (session-scoped, mirrors toolCallsBySession retention)
-  pluginEnvelopes: [],
-  pluginEnvelopesBySession: new Map(),
-  addPluginEnvelope: (item, sessionId) =>
+  // ── Pending approvals ──
+  addPendingApproval: (sessionID, approval) =>
     set((state) => {
-      const targetSession = sessionId ?? state.streamingSessionId
-      if (!targetSession) return {}
-      const next = new Map(state.pluginEnvelopesBySession)
-      const existing = next.get(targetSession)?.items ?? []
-      const updated = [...existing, item].slice(-50)
-      next.set(targetSession, { items: updated, lastActivity: Date.now() })
-      const displayUpdate =
-        targetSession === state.streamingSessionId ? { pluginEnvelopes: updated } : {}
-      return { ...displayUpdate, pluginEnvelopesBySession: next }
+      const slice = state.sessions.get(sessionID) ?? emptyChatSessionState();
+      return {
+        sessions: applyToSession(state.sessions, sessionID, {
+          pendingApprovals: [...slice.pendingApprovals, approval],
+        }),
+      };
     }),
-  clearPluginEnvelopes: () =>
+  resolvePendingApproval: (sessionID, requestId, decision) =>
     set((state) => {
-      const sessionId = state.streamingSessionId
-      if (sessionId) {
-        const next = new Map(state.pluginEnvelopesBySession)
-        next.set(sessionId, { items: [], lastActivity: Date.now() })
-        return { pluginEnvelopes: [], pluginEnvelopesBySession: next }
-      }
-      return { pluginEnvelopes: [] }
+      const slice = state.sessions.get(sessionID) ?? emptyChatSessionState();
+      return {
+        sessions: applyToSession(state.sessions, sessionID, {
+          pendingApprovals: slice.pendingApprovals.map((a) =>
+            a.request_id === requestId ? { ...a, resolved: decision } : a,
+          ),
+        }),
+      };
     }),
-  loadSessionPluginEnvelopes: (sessionId, retentionMinutes = 15) =>
+  clearPendingApprovals: (sessionID) =>
+    set((state) => ({
+      sessions: applyToSession(state.sessions, sessionID, { pendingApprovals: [] }),
+    })),
+
+  // ── Plugin envelopes ──
+  addPluginEnvelope: (sessionID, item) =>
     set((state) => {
-      if (!sessionId) return { pluginEnvelopes: [] }
-      const next = new Map(state.pluginEnvelopesBySession)
-      // Prune stale entries (mirrors loadSessionToolCalls). Negative
-      // retention disables pruning (keep until refresh).
-      if (retentionMinutes >= 0) {
-        const cutoff = Date.now() - retentionMinutes * 60 * 1000
-        for (const [id, entry] of next) {
-          if (entry.lastActivity < cutoff) next.delete(id)
+      const slice = state.sessions.get(sessionID) ?? emptyChatSessionState();
+      const updated = [...slice.pluginEnvelopes, item].slice(-50);
+      return {
+        sessions: applyToSession(state.sessions, sessionID, {
+          pluginEnvelopes: updated,
+          pluginEnvelopesLastActivity: Date.now(),
+        }),
+      };
+    }),
+  clearPluginEnvelopes: (sessionID) =>
+    set((state) => ({
+      sessions: applyToSession(state.sessions, sessionID, {
+        pluginEnvelopes: [],
+        pluginEnvelopesLastActivity: Date.now(),
+      }),
+    })),
+  pruneEnvelopeRetention: (retentionMinutes) =>
+    set((state) => {
+      if (retentionMinutes < 0) return {};
+      const cutoff = Date.now() - retentionMinutes * 60 * 1000;
+      let mutated = false;
+      const next = new Map(state.sessions);
+      for (const [id, slice] of next) {
+        if (slice.pluginEnvelopesLastActivity < cutoff && slice.pluginEnvelopes.length > 0) {
+          next.set(id, { ...slice, pluginEnvelopes: [] });
+          mutated = true;
         }
       }
-      const entry = next.get(sessionId)
-      return {
-        pluginEnvelopes: entry?.items ?? [],
-        pluginEnvelopesBySession: next,
-      }
+      return mutated ? { sessions: next } : {};
     }),
 
-  // Text-only mode
-  textOnlyMode: false,
-  setTextOnlyMode: (enabled: boolean) => set({ textOnlyMode: enabled }),
-
-  // Chat errors
-  chatErrors: [],
-  addChatError: (error: ChatError) =>
-    set((state: ChatState) => ({ chatErrors: [...state.chatErrors, error] })),
-  dismissChatError: (id: string) =>
-    set((state: ChatState) => ({
-      chatErrors: state.chatErrors.map((e: ChatError) =>
-        e.id === id ? { ...e, dismissed: true } : e
-      ),
+  // ── Errors ──
+  addChatError: (sessionID, error) =>
+    set((state) => {
+      const slice = state.sessions.get(sessionID) ?? emptyChatSessionState();
+      return {
+        sessions: applyToSession(state.sessions, sessionID, {
+          chatErrors: [...slice.chatErrors, error],
+        }),
+      };
+    }),
+  dismissChatError: (sessionID, id) =>
+    set((state) => {
+      const slice = state.sessions.get(sessionID) ?? emptyChatSessionState();
+      return {
+        sessions: applyToSession(state.sessions, sessionID, {
+          chatErrors: slice.chatErrors.map((e) => (e.id === id ? { ...e, dismissed: true } : e)),
+        }),
+      };
+    }),
+  clearChatErrors: (sessionID) =>
+    set((state) => ({
+      sessions: applyToSession(state.sessions, sessionID, { chatErrors: [] }),
     })),
-  clearChatErrors: () => set({ chatErrors: [] }),
 
-  // Circuit breaker
-  circuitOpen: false,
-  setCircuitOpen: (open: boolean) => set({ circuitOpen: open }),
+  // ── Mode suggestion ──
+  setPendingModeSuggestion: (sessionID, s) =>
+    set((state) => ({
+      sessions: applyToSession(state.sessions, sessionID, { pendingModeSuggestion: s }),
+    })),
+  clearModeSuggestion: (sessionID) =>
+    set((state) => ({
+      sessions: applyToSession(state.sessions, sessionID, { pendingModeSuggestion: null }),
+    })),
 
-  // Session takeover
-  sessionTakeover: false,
-  setSessionTakeover: (taken: boolean) => set({ sessionTakeover: taken }),
+  // ── Per-session dials ──
+  setActiveMode: (sessionID, mode) =>
+    set((state) => ({
+      sessions: applyToSession(state.sessions, sessionID, { activeMode: mode }),
+    })),
+  setActiveModel: (sessionID, model) =>
+    set((state) => ({
+      sessions: applyToSession(state.sessions, sessionID, { activeModel: model }),
+    })),
+  setActiveEffort: (sessionID, effort) =>
+    set((state) => ({
+      sessions: applyToSession(state.sessions, sessionID, { activeEffort: effort }),
+    })),
 
-  // Stream stalled watchdog
-  streamStalled: false,
-  setStreamStalled: (stalled: boolean) => set({ streamStalled: stalled }),
-
-  // Tool call display mode — per-session override stored in localStorage
-  toolCallDisplayMode: (typeof window !== 'undefined'
-    ? localStorage.getItem('nanite:toolCallDisplayMode') as ToolCallDisplayMode
-    : null) || 'minimal',
-  setToolCallDisplayMode: (mode: ToolCallDisplayMode) => {
-    if (typeof window !== 'undefined') {
-      localStorage.setItem('nanite:toolCallDisplayMode', mode)
+  // ── Tool-call display preference (cross-session) ──
+  toolCallDisplayMode:
+    (typeof window !== "undefined"
+      ? (localStorage.getItem("nanite:toolCallDisplayMode") as ToolCallDisplayMode)
+      : null) || "minimal",
+  setToolCallDisplayMode: (mode) => {
+    if (typeof window !== "undefined") {
+      localStorage.setItem("nanite:toolCallDisplayMode", mode);
     }
-    set({ toolCallDisplayMode: mode })
+    set({ toolCallDisplayMode: mode });
   },
-  loadToolCallDisplayMode: (sessionId: string | null) => {
-    if (!sessionId || typeof window === 'undefined') return
-    const sessionMode = localStorage.getItem(`nanite:tcMode:${sessionId}`) as ToolCallDisplayMode | null
-    const globalMode = localStorage.getItem('nanite:toolCallDisplayMode') as ToolCallDisplayMode | null
-    set({ toolCallDisplayMode: sessionMode || globalMode || 'minimal' })
+  loadToolCallDisplayMode: (sessionID) => {
+    if (!sessionID || typeof window === "undefined") return;
+    const sessionMode = localStorage.getItem(
+      `nanite:tcMode:${sessionID}`,
+    ) as ToolCallDisplayMode | null;
+    const globalMode = localStorage.getItem(
+      "nanite:toolCallDisplayMode",
+    ) as ToolCallDisplayMode | null;
+    set({ toolCallDisplayMode: sessionMode || globalMode || "minimal" });
   },
-  saveToolCallDisplayMode: (sessionId: string | null, mode: ToolCallDisplayMode) => {
-    if (typeof window !== 'undefined') {
-      localStorage.setItem('nanite:toolCallDisplayMode', mode)
-      if (sessionId) {
-        localStorage.setItem(`nanite:tcMode:${sessionId}`, mode)
+  saveToolCallDisplayMode: (sessionID, mode) => {
+    if (typeof window !== "undefined") {
+      localStorage.setItem("nanite:toolCallDisplayMode", mode);
+      if (sessionID) {
+        localStorage.setItem(`nanite:tcMode:${sessionID}`, mode);
       }
     }
-    set({ toolCallDisplayMode: mode })
+    set({ toolCallDisplayMode: mode });
   },
 
-  // Mode
-  activeMode: 'default' as AgentMode,
-  setActiveMode: (mode: AgentMode) => set({ activeMode: mode }),
-
-  // Model
-  activeModel: 'claude-sonnet-4-20250514',
-  setActiveModel: (model: string) => set({ activeModel: model }),
-
-  // Effort
-  activeEffort: 'normal',
-  setActiveEffort: (effort: string) => set({ activeEffort: effort }),
-
-  // Presence
+  // ── Multi-session presence (cross-session) ──
   activeStreams: new Map(),
   pendingTools: new Map(),
   cliActiveSessions: new Map(),
-  setActiveStream: (sessionId, info) =>
+  setActiveStream: (sessionID, info) =>
     set((state) => {
-      const next = new Map(state.activeStreams)
-      next.set(sessionId, info)
-      return { activeStreams: next }
+      const next = new Map(state.activeStreams);
+      next.set(sessionID, info);
+      return { activeStreams: next };
     }),
-  removeActiveStream: (sessionId) =>
+  removeActiveStream: (sessionID) =>
     set((state) => {
-      const next = new Map(state.activeStreams)
-      next.delete(sessionId)
-      return { activeStreams: next }
+      const next = new Map(state.activeStreams);
+      next.delete(sessionID);
+      return { activeStreams: next };
     }),
-  setPendingTool: (sessionId, info) =>
+  setPendingTool: (sessionID, info) =>
     set((state) => {
-      const next = new Map(state.pendingTools)
-      next.set(sessionId, info)
-      return { pendingTools: next }
+      const next = new Map(state.pendingTools);
+      next.set(sessionID, info);
+      return { pendingTools: next };
     }),
-  removePendingTool: (sessionId) =>
+  removePendingTool: (sessionID) =>
     set((state) => {
-      const next = new Map(state.pendingTools)
-      next.delete(sessionId)
-      return { pendingTools: next }
+      const next = new Map(state.pendingTools);
+      next.delete(sessionID);
+      return { pendingTools: next };
     }),
-  setCLIActive: (sessionId, info) =>
+  setCLIActive: (sessionID, info) =>
     set((state) => {
-      const next = new Map(state.cliActiveSessions)
-      next.set(sessionId, info)
-      return { cliActiveSessions: next }
+      const next = new Map(state.cliActiveSessions);
+      next.set(sessionID, info);
+      return { cliActiveSessions: next };
     }),
-  removeCLIActive: (sessionId) =>
+  removeCLIActive: (sessionID) =>
     set((state) => {
-      const next = new Map(state.cliActiveSessions)
-      next.delete(sessionId)
-      return { cliActiveSessions: next }
+      const next = new Map(state.cliActiveSessions);
+      next.delete(sessionID);
+      return { cliActiveSessions: next };
     }),
 
-  // Cross-session jump-to-message
+  // ── Cross-session jump-to-message ──
   pendingJump: null,
   setPendingJump: (jump) => set({ pendingJump: jump }),
   scrollToMessageId: null,
   setScrollToMessageId: (id) => set({ scrollToMessageId: id }),
 
-  // B2 — pending mode suggestion (consumed by B3 confirm-card / auto-apply).
-  pendingModeSuggestion: null,
-  setPendingModeSuggestion: (s) => set({ pendingModeSuggestion: s }),
-  clearModeSuggestion: () => set({ pendingModeSuggestion: null }),
-
-  // B3 — per-session override map.
+  // ── Per-session auto-switch override (already keyed) ──
   autoSwitchSessionOverrides: {},
-  setAutoSwitchOverride: (sessionId, override) =>
+  setAutoSwitchOverride: (sessionID, override) =>
     set((state) => {
-      const next = { ...state.autoSwitchSessionOverrides }
-      if (override === 'inherit') {
-        delete next[sessionId]
+      const next = { ...state.autoSwitchSessionOverrides };
+      if (override === "inherit") {
+        delete next[sessionID];
       } else {
-        next[sessionId] = override
+        next[sessionID] = override;
       }
-      return { autoSwitchSessionOverrides: next }
+      return { autoSwitchSessionOverrides: next };
     }),
 
-  // B3 — chat toast slice.
+  // ── Chat toast (intentional global) ──
   chatToast: null,
-  showChatToast: (message, tone = 'success') => set({ chatToast: { message, tone } }),
+  showChatToast: (message, tone = "success") => set({ chatToast: { message, tone } }),
   dismissChatToast: () => set({ chatToast: null }),
-}))
+}));
+
+// ──────────────────────────────────────────────────────────────────────────────
+// Selector hooks (Phase 3 of the singleton refactor).
+//
+// Components consume per-session state through these instead of reaching into
+// the store directly. `useActiveChatSession()` follows `useAppStore.activeSessionId`
+// and is the right default for chat-surface UI; `useChatSession(id)` is for
+// callers that need a specific session (e.g. presence-list rendering one row).
+// Convenience selectors return individual fields and only re-render on that
+// field's change.
+// ──────────────────────────────────────────────────────────────────────────────
+
+/** Slice for the explicitly-named session (or the EMPTY fallback if absent). */
+export function useChatSession(sessionID: string | null | undefined): ChatSessionState {
+  return useChatStore((s) =>
+    sessionID ? (s.sessions.get(sessionID) ?? EMPTY_CHAT_SESSION_STATE) : EMPTY_CHAT_SESSION_STATE,
+  );
+}
+
+/** Slice for `useAppStore.activeSessionId`. */
+export function useActiveChatSession(): ChatSessionState {
+  const activeSessionId = useAppStore((s) => s.activeSessionId);
+  return useChatSession(activeSessionId);
+}
+
+function selectField<K extends keyof ChatSessionState>(
+  sessionID: string | null | undefined,
+  field: K,
+): (s: { sessions: Map<string, ChatSessionState> }) => ChatSessionState[K] {
+  return (s) => {
+    if (!sessionID) return EMPTY_CHAT_SESSION_STATE[field];
+    const slice = s.sessions.get(sessionID);
+    return slice ? slice[field] : EMPTY_CHAT_SESSION_STATE[field];
+  };
+}
+
+function useActiveSliceField<K extends keyof ChatSessionState>(
+  sessionID: string | null | undefined,
+  field: K,
+): ChatSessionState[K] {
+  const activeSessionId = useAppStore((s) => s.activeSessionId);
+  const id = sessionID ?? activeSessionId;
+  return useChatStore(selectField(id, field));
+}
+
+export function useIsStreaming(sessionID?: string | null): boolean {
+  return useActiveSliceField(sessionID, "isStreaming");
+}
+export function useStreamingContent(sessionID?: string | null): string {
+  return useActiveSliceField(sessionID, "streamingContent");
+}
+export function useStreamingNarration(sessionID?: string | null): string {
+  return useActiveSliceField(sessionID, "streamingNarration");
+}
+export function useStreamingFinal(sessionID?: string | null): string {
+  return useActiveSliceField(sessionID, "streamingFinal");
+}
+export function useStreamingThinking(sessionID?: string | null): string {
+  return useActiveSliceField(sessionID, "streamingThinking");
+}
+export function useStatusMessage(sessionID?: string | null): string | null {
+  return useActiveSliceField(sessionID, "statusMessage");
+}
+export function useCircuitOpen(sessionID?: string | null): boolean {
+  return useActiveSliceField(sessionID, "circuitOpen");
+}
+export function useSessionTakeover(sessionID?: string | null): boolean {
+  return useActiveSliceField(sessionID, "sessionTakeover");
+}
+export function useStreamStalled(sessionID?: string | null): boolean {
+  return useActiveSliceField(sessionID, "streamStalled");
+}
+export function useTextOnlyMode(sessionID?: string | null): boolean {
+  return useActiveSliceField(sessionID, "textOnlyMode");
+}
+export function useChatErrors(sessionID?: string | null): ChatError[] {
+  return useActiveSliceField(sessionID, "chatErrors");
+}
+export function usePendingApprovals(sessionID?: string | null): PendingApproval[] {
+  return useActiveSliceField(sessionID, "pendingApprovals");
+}
+export function useToolWarnings(sessionID?: string | null): ToolWarning[] {
+  return useActiveSliceField(sessionID, "toolWarnings");
+}
+export function usePendingModeSuggestion(sessionID?: string | null): ModeSuggestion | null {
+  return useActiveSliceField(sessionID, "pendingModeSuggestion");
+}
+export function useActiveMode(sessionID?: string | null): AgentMode {
+  return useActiveSliceField(sessionID, "activeMode");
+}
+export function useActiveModel(sessionID?: string | null): string {
+  return useActiveSliceField(sessionID, "activeModel");
+}
+export function useActiveEffort(sessionID?: string | null): string {
+  return useActiveSliceField(sessionID, "activeEffort");
+}
+export function useToolCalls(sessionID?: string | null): ToolCall[] {
+  return useActiveSliceField(sessionID, "toolCalls");
+}
+export function usePluginEnvelopes(sessionID?: string | null): PluginEnvelopeItem[] {
+  return useActiveSliceField(sessionID, "pluginEnvelopes");
+}

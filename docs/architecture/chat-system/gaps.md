@@ -28,8 +28,8 @@
 | [G-TYPED-EVENTS-ADAPTER-PATH](#g-typed-events-adapter-path) | P3 | `go-agent-sessions` v0.5.0 `TypedEventCallback` fires only on PTY runtime, not adapter (subprocess-per-turn) runtime | [05](05-external-agent-execution.md), [03](03-sse-envelope-and-interaction-protocol.md) |
 | [G-EVENTRESOURCELIMITHIT-NOT-EMITTED](#g-eventresourcelimithit-not-emitted) | P3 | `go-runner` v0.3.0 declares `EventResourceLimitHit` but does not emit it (heuristic only); consumers correlate `ExitError.Signal` themselves | [04](04-chat-harness-and-loop-orchestration.md) |
 | [G-MODE-CONFIRM-UX](#g-mode-confirm-ux) | P3 | Mode-suggestion plumbing wired; confirm-card UX staged but not in production | [08](08-classification-and-intent.md), [13](13-notification-and-card-surface.md) |
-| [G-NO-AUTO-RECALL](#g-no-auto-recall) | P3 | No automatic memory_recall at session start; pull-only | [11](11-memory-and-knowledge-integration.md) |
-| [G-MEMORY-SLOT-EMPTY](#g-memory-slot-empty) | P3 | Memory slot rarely populated by the harness | [11](11-memory-and-knowledge-integration.md), [09](09-session-and-slot-management.md) |
+| [G-NO-AUTO-RECALL](#g-no-auto-recall) | P3 ✓ Closed (2026-05-08) | Auto-recall has been per-turn since `phase-3 S2b`; per-agent gating + observability landed on `feat/memory-auto-recall` | [11](11-memory-and-knowledge-integration.md) |
+| [G-MEMORY-SLOT-EMPTY](#g-memory-slot-empty) | P3 ✓ Closed (2026-05-08) | `MemorySource` is registered with the broker and populates `SlotMemory` per turn; the original gap framing was stale | [11](11-memory-and-knowledge-integration.md), [09](09-session-and-slot-management.md) |
 | [G-PROGRESSIVE-ALLOW-LIST](#g-progressive-allow-list) | P3 | `tools_allow_list` × progressive seed builtins interaction not fully traced | [02](02-tool-invocation-and-authority.md) |
 | [G-RECOVERY-COVERAGE](#g-recovery-coverage) | P3 | Provider error → recoverable matrix is centralized in one fn; new providers need care | [04](04-chat-harness-and-loop-orchestration.md) |
 | [G-HANDOFF-CLASSIFY](#g-handoff-classify) | P2 | Sessions without `intent` set never hit Glass-4 path | [09](09-session-and-slot-management.md) |
@@ -214,22 +214,24 @@ Mode-suggestion SSE event emits when classifier confidence ≥ 0.7 ([08](08-clas
 ## G-NO-AUTO-RECALL
 
 **Severity:** P3
-**Status:** Open (design call)
+**Status:** ✓ Closed (2026-05-08, `feat/memory-auto-recall`)
 
-No automatic `memory_recall` sweep at chat-loop start. Recall happens only when the agent calls the tool. For a first-class assistant experience, primed-on-session-start recall could be valuable; today it's pull-only.
+Original framing claimed there was no automatic `memory_recall` at chat-loop start. That framing was stale: `MemorySource` (`internal/contextbroker/source_memory.go`) has been registered with the ContextBroker since `phase-3 S2b` (commit `75871a3`), querying Vanta with `relevance` ranking on every turn using the user's last message as the query. The broker's `Fetch` iterates **all** registered sources, so MemorySource runs whenever it is registered (`internal/service/container.go:491` — guarded by `memorySvc != nil`).
 
-**Fix shape:** A pre-loop step that queries memory_recall on the first turn and seeds the Memory slot. Cost trade-off: extra latency + tokens for sessions where recall isn't useful.
+What the 2026-05-08 closure added:
+- `AgentProfile.Settings` keys `auto_recall`, `auto_recall_limit`, `auto_recall_min_confidence` — per-profile dial. Defaults preserve prior behavior (enabled, limit 30, confidence ≥ 0.4).
+- 2s timeout enforced inside `MemorySource.Fetch` (`context.WithTimeout`); silent on timeout, leaves Memory slot empty for that turn.
+- Structured slog output (`contextbroker/memory: auto-recall ok|hit_count=0|timed out|disabled by intent`) so operators can see hit rate, latency, and timeouts per session.
+- `contextbroker.Intent` carries `AutoRecall *bool` + the three override fields, populated by `chat.deriveIntent` from the agent profile.
 
 ---
 
 ## G-MEMORY-SLOT-EMPTY
 
 **Severity:** P3
-**Status:** Open
+**Status:** ✓ Closed (2026-05-08, framing was stale)
 
-The Memory slot ([09](09-session-and-slot-management.md)) is structured but rarely populated by the harness. Most "memory" content reaches the model via the Conversation slot (after a `memory_recall` tool call). The Memory slot's intended role as a recall-staging surface isn't load-bearing.
-
-**Fix shape:** Couple with [G-NO-AUTO-RECALL](#g-no-auto-recall) — auto-recall populates the Memory slot, the slot becomes load-bearing, the agent can read it without re-issuing the tool call.
+Same root cause as [G-NO-AUTO-RECALL](#g-no-auto-recall) above: the Memory slot is populated each turn by `MemorySource` when conduit/`memorySvc` is wired, with results filtered by `formatPacketItemsBySource(memoryOnly=true)` (`internal/chat/context_client.go:216`) and assigned via `cw.SetContent(ctxpkg.SlotMemory, sources.Memory)` (`internal/service/context.go:195`). If a deployment runs without conduit, the slot is legitimately empty — that's the expected fallback, not a gap.
 
 ---
 

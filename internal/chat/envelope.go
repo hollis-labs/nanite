@@ -5,7 +5,37 @@ import (
 	"regexp"
 	"strings"
 	"sync"
+
+	"github.com/hollis-labs/go-envelopes"
 )
+
+// envelopeRegistry is the shared go-envelopes Registry, set once at
+// composition root via SetEnvelopeRegistry. P3 switches ValidateEnvelope
+// to consult this registry directly; until then it's a reference-keeper
+// alongside the existing registeredTypes bare-name index.
+var (
+	envelopeRegistryMu sync.RWMutex
+	envelopeRegistry   *envelopes.Registry
+)
+
+// SetEnvelopeRegistry installs the shared registry used for envelope
+// type lookup. Called once at startup from cmd/nanite/main.go after
+// envelopes.LoadCore. Passing nil unsets — useful for tests that want
+// to fall back to the legacy registeredTypes-only path.
+func SetEnvelopeRegistry(r *envelopes.Registry) {
+	envelopeRegistryMu.Lock()
+	envelopeRegistry = r
+	envelopeRegistryMu.Unlock()
+}
+
+// EnvelopeRegistry returns the currently-installed registry (may be nil).
+// Exported so other packages can reach the registry through chat without
+// re-importing go-envelopes at every call site.
+func EnvelopeRegistry() *envelopes.Registry {
+	envelopeRegistryMu.RLock()
+	defer envelopeRegistryMu.RUnlock()
+	return envelopeRegistry
+}
 
 // EnvelopeError describes a validation failure for an envelope block.
 type EnvelopeError struct {

@@ -25,6 +25,8 @@ import (
 	inspectsvc "github.com/hollis-labs/nanite/internal/inspector"
 	"github.com/hollis-labs/nanite/internal/loopdetect"
 	"github.com/hollis-labs/nanite/internal/reminders"
+	runtimeagent "github.com/hollis-labs/nanite/internal/runtime/agent"
+	"github.com/hollis-labs/nanite/internal/runtime/agent/recovery"
 	"github.com/hollis-labs/nanite/internal/mcp"
 	"github.com/hollis-labs/nanite/internal/memory"
 	"github.com/hollis-labs/nanite/internal/messaging"
@@ -694,6 +696,19 @@ func NewContainer(cfg ContainerConfig) (*Container, error) {
 	// for the IdleKill=15min supervisor timeout. Best-effort, nil-safe.
 	if sessImpl, ok := sessions.(*sessionServiceImpl); ok {
 		sessImpl.SetArchiveHook(chatSvcImpl.CloseAgentSession)
+	}
+
+	// Wire the recovery-broker replacement-session hook so the
+	// observeSessionForRecovery goroutine adopts each broker-dispatched
+	// replacement into chatServiceImpl.activeSessions. Without this, the
+	// next user turn after a recoverable failure misses the replacement
+	// (deleted from activeSessions during cleanup) and boots yet another
+	// session, orphaning the broker's retry. Best-effort: a non-Broker
+	// RecoveryHooks (mocks in tests) silently skips wiring.
+	if broker, ok := agentDeps.Recovery.(*recovery.Broker); ok {
+		broker.SetReplacementSessionHook(func(sessionID string, sess *runtimeagent.Session) {
+			chatSvcImpl.adoptReplacementSession(sessionID, sess)
+		})
 	}
 
 	legacyRunner := NewChatRunner(chatSvcImpl, agentReader, cfg.Store, cfg.Store.DB, pathGrants)

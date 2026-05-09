@@ -1,69 +1,69 @@
-import { useState } from 'react'
-import { Gauge, Info } from 'lucide-react'
-import { useQuery } from '@tanstack/react-query'
-import { Widget, WidgetRow, Bar, pctTone } from './Widget'
-import { useAppStore } from '@/stores/useAppStore'
-import { useChatStore } from '@/stores/useChatStore'
-import { api } from '@/lib/api'
-import { ContextInspectorModal } from './ContextInspectorModal'
+import { useQuery } from "@tanstack/react-query";
+import { Gauge, Info } from "lucide-react";
+import { useState } from "react";
+import { api } from "@/lib/api";
+import { useAppStore } from "@/stores/useAppStore";
+import { useIsStreaming } from "@/stores/useChatStore";
+import { ContextInspectorModal } from "./ContextInspectorModal";
+import { Bar, pctTone, Widget, WidgetRow } from "./Widget";
 
-const BREAKDOWN_STALE = 30_000
+const BREAKDOWN_STALE = 30_000;
 
 const PCT_TEXT: Record<string, string> = {
-  success: 'text-success',
-  warning: 'text-warning',
-  danger:  'text-danger',
-}
+  success: "text-success",
+  warning: "text-warning",
+  danger: "text-danger",
+};
 
 function formatTokens(n: number): string {
-  if (n >= 1000) return `${Math.round(n / 1000)}K`
-  return String(n)
+  if (n >= 1000) return `${Math.round(n / 1000)}K`;
+  return String(n);
 }
 
 function formatCost(usd: number): string {
-  if (usd < 0.01) return '<$0.01'
-  return `$${usd.toFixed(2)}`
+  if (usd < 0.01) return "<$0.01";
+  return `$${usd.toFixed(2)}`;
 }
 
 export function ContextBudgetWidget() {
-  const activeSessionId = useAppStore((s) => s.activeSessionId)
-  const isStreaming = useChatStore((s) => s.isStreaming)
-  const [inspectorOpen, setInspectorOpen] = useState(false)
+  const activeSessionId = useAppStore((s) => s.activeSessionId);
+  const isStreaming = useIsStreaming();
+  const [inspectorOpen, setInspectorOpen] = useState(false);
 
   const { data: usage } = useQuery({
-    queryKey: ['session-usage', activeSessionId],
+    queryKey: ["session-usage", activeSessionId],
     queryFn: () => api.getSessionUsage(activeSessionId!),
     enabled: !!activeSessionId,
     refetchInterval: isStreaming ? 5000 : 30000,
-  })
+  });
 
   const { data: breakdown } = useQuery({
-    queryKey: ['context-breakdown', activeSessionId],
+    queryKey: ["context-breakdown", activeSessionId],
     queryFn: () => api.getContextBreakdown(activeSessionId!),
     enabled: !!activeSessionId,
     staleTime: BREAKDOWN_STALE,
     refetchInterval: isStreaming ? 10000 : 60000,
-  })
+  });
 
-  const ctxTotal = breakdown?.total ?? 0
-  const ctxCeiling = breakdown?.ceiling ?? 1
-  const ctxPct = Math.min((ctxTotal / ctxCeiling) * 100, 100)
-  const systemPromptTokens = breakdown?.system_prompt_tokens ?? 0
-  const toolCallCount = breakdown?.tools?.length ?? 0
-  const toolTokens = breakdown?.tool_tokens_total ?? 0
-  const toolsAvailable = breakdown?.tools_available ?? 0
+  const ctxTotal = breakdown?.total ?? 0;
+  const ctxCeiling = breakdown?.ceiling ?? 1;
+  const ctxPct = Math.min((ctxTotal / ctxCeiling) * 100, 100);
+  const systemPromptTokens = breakdown?.system_prompt_tokens ?? 0;
+  const toolCallCount = breakdown?.tools?.length ?? 0;
+  const toolTokens = breakdown?.tool_tokens_total ?? 0;
+  const toolsAvailable = breakdown?.tools_available ?? 0;
 
-  const totalTokens = usage?.total_tokens ?? 0
-  const inputTokens = usage?.input_tokens ?? 0
-  const outputTokens = usage?.output_tokens ?? 0
-  const cost = usage?.estimated_cost_usd ?? 0
-  const messageCount = usage?.message_count ?? 0
-  const cacheCreation = usage?.cache_creation_tokens ?? 0
-  const cacheRead = usage?.cache_read_tokens ?? 0
-  const tokenPct = ctxCeiling > 1 ? (totalTokens / ctxCeiling) * 100 : 0
+  const totalTokens = usage?.total_tokens ?? 0;
+  const inputTokens = usage?.input_tokens ?? 0;
+  const outputTokens = usage?.output_tokens ?? 0;
+  const cost = usage?.estimated_cost_usd ?? 0;
+  const messageCount = usage?.message_count ?? 0;
+  const cacheCreation = usage?.cache_creation_tokens ?? 0;
+  const cacheRead = usage?.cache_read_tokens ?? 0;
+  const tokenPct = ctxCeiling > 1 ? (totalTokens / ctxCeiling) * 100 : 0;
 
-  const ctxTone = pctTone(ctxPct)
-  const tokenTone = pctTone(tokenPct)
+  const ctxTone = pctTone(ctxPct);
+  const tokenTone = pctTone(tokenPct);
 
   return (
     <>
@@ -111,17 +111,33 @@ export function ContextBudgetWidget() {
           {/* Breakdown */}
           {(totalTokens > 0 || ctxTotal > 0) && (
             <div className="flex flex-col gap-1.5 pt-2 border-t border-divider">
-              <WidgetRow label="Input" mono>{formatTokens(inputTokens)}</WidgetRow>
-              <WidgetRow label="Output" mono>{formatTokens(outputTokens)}</WidgetRow>
-              <WidgetRow label="Messages" mono>{String(messageCount)}</WidgetRow>
-              <WidgetRow label="System prompt" mono>{formatTokens(systemPromptTokens)}</WidgetRow>
-              <WidgetRow label={`Tool calls (${toolCallCount})`} mono>{formatTokens(toolTokens)}</WidgetRow>
-              <WidgetRow label="Tools available" mono>{String(toolsAvailable)}</WidgetRow>
+              <WidgetRow label="Input" mono>
+                {formatTokens(inputTokens)}
+              </WidgetRow>
+              <WidgetRow label="Output" mono>
+                {formatTokens(outputTokens)}
+              </WidgetRow>
+              <WidgetRow label="Messages" mono>
+                {String(messageCount)}
+              </WidgetRow>
+              <WidgetRow label="System prompt" mono>
+                {formatTokens(systemPromptTokens)}
+              </WidgetRow>
+              <WidgetRow label={`Tool calls (${toolCallCount})`} mono>
+                {formatTokens(toolTokens)}
+              </WidgetRow>
+              <WidgetRow label="Tools available" mono>
+                {String(toolsAvailable)}
+              </WidgetRow>
               {(cacheCreation > 0 || cacheRead > 0) && (
                 <>
-                  <WidgetRow label="Cache write" mono>{formatTokens(cacheCreation)}</WidgetRow>
+                  <WidgetRow label="Cache write" mono>
+                    {formatTokens(cacheCreation)}
+                  </WidgetRow>
                   <WidgetRow label="Cache read">
-                    <span className="font-mono text-[11px] text-success">{formatTokens(cacheRead)}</span>
+                    <span className="font-mono text-[11px] text-success">
+                      {formatTokens(cacheRead)}
+                    </span>
                   </WidgetRow>
                 </>
               )}
@@ -138,5 +154,5 @@ export function ContextBudgetWidget() {
         />
       )}
     </>
-  )
+  );
 }

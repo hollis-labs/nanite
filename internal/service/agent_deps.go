@@ -20,6 +20,7 @@ import (
 	"github.com/hollis-labs/nanite/internal/chat"
 	"github.com/hollis-labs/nanite/internal/permission"
 	runtimeagent "github.com/hollis-labs/nanite/internal/runtime/agent"
+	"github.com/hollis-labs/nanite/internal/runtime/agent/recovery"
 	"github.com/hollis-labs/nanite/internal/store"
 )
 
@@ -132,7 +133,93 @@ func BuildAgentDependencies(cfg AgentDepsConfig) (*runtimeagent.Dependencies, *a
 		SandboxBaseProfile: cfg.SandboxBaseProf,
 	}
 
+	// Construct the in-process recovery broker and wire it into deps.
+	// AgentBoot is a closure over `deps` so the broker dispatches
+	// replacement sessions through the same composition root. BootDir
+	// / MCP / Credentials adapters are intentionally nil in this
+	// initial wiring — the broker degrades to "classify + emit
+	// envelope, escalate Permanent for anything that would need
+	// remediation" until those adapters land in a follow-up.
+	broker := recovery.NewBroker(recovery.Dependencies{
+		AgentBoot: &agentBootAdapter{deps: deps},
+		Store: &recoveryBrokerStore{
+			store: cfg.Store,
+		},
+		Envelope: &recoveryEnvelopeSink{
+			streams: cfg.Streams,
+		},
+	})
+	deps.Recovery = broker
+
 	return deps, manager, bridge, nil
+}
+
+// agentBootAdapter satisfies recovery.AgentBoot by forwarding into
+// agent.Boot with IsRelaunch=true so CreateRuntimeRow is skipped (the
+// broker has already transitioned the runtime row via
+// MarkAgentRuntimeRelaunching).
+type agentBootAdapter struct {
+	deps *runtimeagent.Dependencies
+}
+
+func (a *agentBootAdapter) Boot(ctx context.Context, opts runtimeagent.Options) (*runtimeagent.Session, error) {
+	opts.IsRelaunch = true
+	return runtimeagent.Boot(ctx, a.deps, opts)
+}
+
+// recoveryBrokerStore satisfies recovery.BrokerStore against the store
+// package. MarkRuntimeRelaunching sets state="launching" with the
+// broker's audit reason; WriteBreadcrumb persists into
+// nanite_recovery_breadcrumbs (migration 054).
+type recoveryBrokerStore struct {
+	store *store.Store
+}
+
+func (s *recoveryBrokerStore) MarkRuntimeRelaunching(sessionID, reason string) error {
+	return s.store.MarkAgentRuntimeRelaunching(sessionID, reason)
+}
+
+func (s *recoveryBrokerStore) WriteBreadcrumb(b recovery.Breadcrumb) error {
+	return s.store.WriteRecoveryBreadcrumb(&store.RecoveryBreadcrumb{
+		Timestamp:    b.Timestamp,
+		SessionID:    b.SessionID,
+		Class:        b.Class.String(),
+		Cause:        b.Cause,
+		Remediation:  b.Remediation.String(),
+		Action:       b.Action.String(),
+		Outcome:      b.Outcome.String(),
+		AttemptCount: b.AttemptCount,
+		DurationMs:   b.DurationFromFailure.Milliseconds(),
+		Reason:       b.Reason,
+	})
+}
+
+// recoveryEnvelopeSink satisfies recovery.EnvelopeSink by translating
+// the broker's typed Envelope into the chat.StreamEvent vocabulary
+// the FE consumes.
+//
+// Initial wiring uses the "status" event type with the broker's
+// envelope kind in Detail so the broker is end-to-end observable
+// without requiring an FE schema landing first. A follow-up wires the
+// proper info-card / error-report / chat-loop-terminated projection
+// through the existing plugin_envelope path so the FE renders the
+// recovery messages with full UI affordances (cancel-retry button,
+// severity styling).
+type recoveryEnvelopeSink struct {
+	streams *StreamManager
+}
+
+func (e *recoveryEnvelopeSink) Emit(sessionID string, env recovery.Envelope) error {
+	if e.streams == nil {
+		return nil
+	}
+	e.streams.BroadcastSessionStreamEvent(sessionID, chat.StreamEvent{
+		Type:    "status",
+		Detail:  "recovery: " + env.Kind,
+		Summary: env.Title,
+		Content: env.Content,
+	})
+	return nil
 }
 
 // stripRegistryPrefix drops the nanite registry-side prefix

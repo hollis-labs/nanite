@@ -91,6 +91,7 @@ export function LeftSidebar() {
   const activeStreams = useChatStore((s) => s.activeStreams);
   const pendingTools = useChatStore((s) => s.pendingTools);
   const cliActiveSessions = useChatStore((s) => s.cliActiveSessions);
+  const removeSessionState = useChatStore((s) => s.removeSession);
   const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null);
   const [showArchived, setShowArchived] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -107,7 +108,12 @@ export function LeftSidebar() {
       return { prev };
     },
     onSuccess: (_data, { id, archived }) => {
-      if (archived && activeSessionId === id) setActiveSession("");
+      if (archived) {
+        // Drop the per-session chat-store slice so an archived session does
+        // not retain streaming/error state in memory until the next page load.
+        removeSessionState(id);
+        if (activeSessionId === id) setActiveSession("");
+      }
     },
     onError: (_err, _vars, context) => {
       if (context?.prev) queryClient.setQueryData(["sessions", activeWorkspaceId], context.prev);
@@ -128,6 +134,7 @@ export function LeftSidebar() {
       return { prev };
     },
     onSuccess: (_data, id) => {
+      removeSessionState(id);
       if (activeSessionId === id) setActiveSession("");
       setDeleteConfirmId(null);
     },

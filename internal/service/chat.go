@@ -269,6 +269,13 @@ type chatServiceImpl struct {
 	// agent-context.md when System / Agent / Mode / Rules slots change.
 	// Map values are uint64 (FNV-1a hash). Phase 4c.4 / 4c.5.
 	activeSessionSlots sync.Map
+
+	// toolPartitionStates carries per-session ToolPartitionState across
+	// turns when NANITE_TOOLS_LAZY_LOAD is on. Map values are
+	// chat.ToolPartitionState. Hysteresis-pin tools so brief usage gaps
+	// don't bounce them back to lazy and thrash the Tools-slot CacheKey.
+	// G-HOT-SWAP-DEAD activation.
+	toolPartitionStates sync.Map
 }
 
 // inFlightGen records the currently-running generateResponse for a session
@@ -655,6 +662,7 @@ func (s *chatServiceImpl) CloseAgentSession(ctx context.Context, sessionID strin
 		return
 	}
 	s.activeSessionSlots.Delete(sessionID)
+	s.toolPartitionStates.Delete(sessionID)
 	if s.agentEventBridge != nil {
 		s.agentEventBridge.SetPerSessionRouter(sessionID, nil)
 	}

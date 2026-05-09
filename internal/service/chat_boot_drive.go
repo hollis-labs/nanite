@@ -8,11 +8,14 @@ import (
 	"log/slog"
 	"path/filepath"
 	"strings"
+	"time"
 
+	agentsessions "github.com/hollis-labs/go-agent-sessions/agentsessions"
 	"github.com/hollis-labs/go-providers/provider"
 	ctxpkg "github.com/hollis-labs/nanite/internal/context"
 	"github.com/hollis-labs/nanite/internal/fsutil"
 	runtimeagent "github.com/hollis-labs/nanite/internal/runtime/agent"
+	"github.com/hollis-labs/nanite/internal/runtime/agent/recovery"
 	"github.com/hollis-labs/nanite/internal/store"
 )
 
@@ -98,6 +101,17 @@ func (s *chatServiceImpl) driveBootSession(
 		// a redundant regen.
 		s.activeSessionSlots.Store(sessionID, hashSlots(slotResult))
 		sess = booted
+
+		// Spawn the session-lifetime Wait observer. When the runtime
+		// process terminates, the recovery broker classifies + (when
+		// applicable) dispatches a replacement. Uses context.Background
+		// so the goroutine outlives the per-turn ctx; the manager's
+		// Shutdown drain unblocks Wait at daemon shutdown.
+		bootedAt := time.Now()
+		bootedSession := booted
+		bootedProfile := profileSlug
+		bootedWorkdir := workdir
+		go s.observeSessionForRecovery(bootedSession, sessionID, bootedProfile, bootedWorkdir, bootedAt)
 	} else if s.slotsChangedFor(sessionID, slotResult) {
 		// 3. Refresh the boot dir when System / Agent / Mode / Rules
 		// slots have shifted. UserContext changes per turn by design and
@@ -194,6 +208,104 @@ func hashSlots(slotResult *SlotAssemblyResult) uint64 {
 		}
 	}
 	return h.Sum64()
+}
+
+// adoptReplacementSession is the recovery-broker replacement hook. The
+// broker calls this synchronously from its orchestration loop after a
+// successful DispatchRetry so the chat-side activeSessions map binds to
+// the freshly booted process — without this, the next user turn would
+// not find an entry under sessionID and boot yet another session,
+// orphaning the broker's replacement.
+//
+// The chat composition root installs this via Broker.SetReplacementSessionHook
+// once both chatServiceImpl and the broker exist (see container.go).
+//
+// Also re-arms the per-session Wait observer so the replacement's own
+// terminal exits route back through the broker. Without this, the
+// replacement would not be observed and a second-tier failure would go
+// unrecovered.
+func (s *chatServiceImpl) adoptReplacementSession(sessionID string, sess *runtimeagent.Session) {
+	if sess == nil {
+		return
+	}
+	s.activeSessions.Store(sessionID, sess)
+	// Slot hash + tool-partition state reset is implicit: the prior
+	// session's Delete(sessionID) ran before adoptReplacementSession is
+	// invoked (see observeSessionForRecovery's call ordering), so the
+	// replacement starts with a clean slot/regen window. The boot dir
+	// itself is reused — agent.Boot's IsRelaunch=true path skips
+	// CreateRuntimeRow + workdir reseed.
+
+	// Re-arm the Wait observer for the replacement. The broker may
+	// dispatch additional retries up to its hard cap; without a fresh
+	// observer the second terminal exit would not surface to the
+	// broker.
+	go s.observeSessionForRecovery(sess, sessionID, "", "", time.Now())
+}
+
+// observeSessionForRecovery is the Wait-observer goroutine that watches
+// a booted runtime session and routes terminal *agentsessions.ExitError
+// to the recovery broker via deps.Recovery.OnSessionExit. Spawned per
+// session at boot time; exits when the session terminates.
+//
+// The meta bag carries chat-side context the broker's classifier
+// consumes — agent profile, workdir, session age. Future iterations
+// extend this to include stderr tail, sandbox state, MCP transport
+// health (the BootDir/MCP/Credentials adapter wiring).
+func (s *chatServiceImpl) observeSessionForRecovery(sess *runtimeagent.Session, sessionID, agentProfile, workdir string, bootedAt time.Time) {
+	if sess == nil || s.agentDeps == nil || s.agentDeps.Recovery == nil {
+		return
+	}
+
+	// Wait for the session to terminate. Manager.Shutdown unblocks this
+	// at daemon shutdown so the goroutine never leaks past process exit.
+	err := sess.Wait(context.Background())
+
+	// Extract structured exit info. errors.As walks the chain; nil
+	// (clean exit) returns false and we skip the broker hook.
+	var xe *agentsessions.ExitError
+	if !errors.As(err, &xe) {
+		// Clean exit — nothing for the broker to recover.
+		s.activeSessions.Delete(sessionID)
+		s.activeSessionSlots.Delete(sessionID)
+		s.toolPartitionStates.Delete(sessionID)
+		// Comma-ok rather than panicking type assert: future
+		// RecoveryHooks impls (mocks in tests) may not expose
+		// ClearSession; the cleanup is best-effort.
+		if broker, ok := s.agentDeps.Recovery.(*recovery.Broker); ok {
+			broker.ClearSession(sessionID)
+		}
+		return
+	}
+
+	meta := map[string]any{
+		recovery.MetaKeyAgentProfile: agentProfile,
+		recovery.MetaKeyWorkdir:      workdir,
+		recovery.MetaKeyMode:         "long_lived",
+		recovery.MetaKeySessionAge:   time.Since(bootedAt),
+	}
+
+	slog.Warn("recovery: session exited with error — invoking broker",
+		"session_id", sessionID,
+		"cause", xe.Cause,
+		"code", xe.Code,
+		"signal", xe.Signal)
+
+	// Per-session state cleanup happens BEFORE OnSessionExit. The broker
+	// may dispatch a replacement session (DispatchRetry → agent.Boot),
+	// at which point it invokes the replacement-session hook installed
+	// at container.go and that hook re-stores the new session into
+	// activeSessions. Cleaning up after OnSessionExit returns would
+	// race-clobber the freshly stored replacement.
+	//
+	// toolPartitionStates is session-id-keyed too — the replacement
+	// session boots fresh, so pruning here mirrors the activeSessions
+	// reset.
+	s.activeSessions.Delete(sessionID)
+	s.activeSessionSlots.Delete(sessionID)
+	s.toolPartitionStates.Delete(sessionID)
+
+	s.agentDeps.Recovery.OnSessionExit(sessionID, xe, meta)
 }
 
 // regenerateBootDirSlots rewrites the boot dir's CLAUDE.md and

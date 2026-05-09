@@ -91,9 +91,12 @@ func TestUserSettings_EmbeddingDefaults(t *testing.T) {
 func TestUserSettings_EmbeddingRoundTrip(t *testing.T) {
 	s := newSeededStore(t)
 
+	// Step 6.5 (SP-20260508-0001) reduced the embedder catalog to OpenAI;
+	// previously this exercised the Ollama+nomic round-trip. The persistence
+	// path is provider-agnostic — any string round-trips identically.
 	us := &UserSettings{
-		EmbeddingProvider: "ollama",
-		EmbeddingModel:    "nomic-embed-text",
+		EmbeddingProvider: "openai",
+		EmbeddingModel:    "text-embedding-3-small",
 		EmbeddingMode:     "explicit",
 	}
 	if err := s.UpdateUserSettings(us); err != nil {
@@ -104,11 +107,11 @@ func TestUserSettings_EmbeddingRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetUserSettings: %v", err)
 	}
-	if got.EmbeddingProvider != "ollama" {
-		t.Errorf("provider: got %q, want %q", got.EmbeddingProvider, "ollama")
+	if got.EmbeddingProvider != "openai" {
+		t.Errorf("provider: got %q, want %q", got.EmbeddingProvider, "openai")
 	}
-	if got.EmbeddingModel != "nomic-embed-text" {
-		t.Errorf("model: got %q, want %q", got.EmbeddingModel, "nomic-embed-text")
+	if got.EmbeddingModel != "text-embedding-3-small" {
+		t.Errorf("model: got %q, want %q", got.EmbeddingModel, "text-embedding-3-small")
 	}
 	if got.EmbeddingMode != "explicit" {
 		t.Errorf("mode: got %q, want %q", got.EmbeddingMode, "explicit")

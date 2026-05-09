@@ -11,11 +11,15 @@ import (
 
 // Embedding status values returned by SelectEmbedder. Surfaced by the settings
 // API and consumed by the first-turn warning envelope.
+//
+// Step 6.5 (SP-20260508-0001) reduced the embedder catalog to OpenAI only.
+// "Unreachable" was an Ollama-era status indicating a probe failure against a
+// local server — no remaining provider has a reachability check, so the value
+// has been retired.
 const (
 	EmbeddingStatusActive             = "active"
 	EmbeddingStatusDisabled           = "disabled"
 	EmbeddingStatusMissingCredentials = "missing_credentials"
-	EmbeddingStatusUnreachable        = "unreachable"
 )
 
 // EmbedderSettings is the subset of UserSettings consumed by SelectEmbedder.

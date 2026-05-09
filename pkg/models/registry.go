@@ -15,7 +15,6 @@
 package models
 
 import (
-	"strings"
 	"sync"
 )
 
@@ -97,6 +96,10 @@ type ProviderCapabilityDefaults struct {
 // ProviderDefaults is the lookup table of per-provider capability defaults.
 // Adapters fill in any provider-specific quirks (batch support, hooks, etc.)
 // here instead of hardcoding constants in Capabilities() methods.
+//
+// Step 6.5 (SP-20260508-0001) reduced the API-provider catalog to
+// Anthropic + OpenAI. Defaults for gemini, mistral, azure-openai,
+// openrouter, openzen, and ollama were removed alongside their adapters.
 var ProviderDefaults = map[string]ProviderCapabilityDefaults{
 	"anthropic": {
 		SupportsStreamJSON:          true,
@@ -113,51 +116,6 @@ var ProviderDefaults = map[string]ProviderCapabilityDefaults{
 		DefaultEmbeddingModel: "text-embedding-3-small",
 		DefaultMaxOutput:      16384,
 		DefaultContextWindow:  128000,
-	},
-	"gemini": {
-		SupportsStreamJSON:          true,
-		SupportsSystemPromptCaching: true,
-		SupportsImageInput:          true,
-		SupportsEmbedding:           true,
-		DefaultEmbeddingModel:       "text-embedding-004",
-		// Upper bound across the Gemini family (2.5 Pro). Per-model values
-		// live on the individual Model rows and are preferred via
-		// MaxOutputFor when a model name is known.
-		DefaultMaxOutput:     65536,
-		DefaultContextWindow: 1048576,
-	},
-	"mistral": {
-		SupportsStreamJSON:    true,
-		SupportsImageInput:    true,
-		SupportsEmbedding:     true,
-		DefaultEmbeddingModel: "mistral-embed",
-		DefaultMaxOutput:      8192,
-		DefaultContextWindow:  131072,
-	},
-	"azure-openai": {
-		SupportsStreamJSON:    true,
-		SupportsImageInput:    true,
-		SupportsEmbedding:     true,
-		DefaultEmbeddingModel: "text-embedding-3-small",
-		DefaultMaxOutput:      16384,
-		DefaultContextWindow:  128000,
-	},
-	"openrouter": {
-		SupportsStreamJSON:   true,
-		SupportsImageInput:   true,
-		DefaultMaxOutput:     0, // variable per routed model
-		DefaultContextWindow: 200000,
-	},
-	"openzen": {
-		SupportsStreamJSON:   true,
-		SupportsImageInput:   true,
-		DefaultMaxOutput:     0,
-		DefaultContextWindow: 200000,
-	},
-	"ollama": {
-		SupportsStreamJSON:    true,
-		SupportsEmbedding:     true,
-		DefaultEmbeddingModel: "nomic-embed-text",
 	},
 }
 
@@ -234,85 +192,11 @@ var allModels = []Model{
 		},
 	},
 
-	// --- Google Gemini ---
-	{
-		ID: "gemini-2.5-flash", ModelID: "gemini-2.5-flash",
-		DisplayName: "Gemini 2.5 Flash", Provider: "gemini",
-		ContextWindow: 1048576, MaxOutput: 8192,
-		InputPricePerM: 0.15, OutputPricePerM: 0.60,
-		Capabilities: Capabilities{
-			SupportsStreaming: true, SupportsVision: true,
-			SupportsSystemPromptCaching: true,
-		},
-	},
-	{
-		ID: "gemini-2.5-pro", ModelID: "gemini-2.5-pro",
-		DisplayName: "Gemini 2.5 Pro", Provider: "gemini",
-		ContextWindow: 1048576, MaxOutput: 65536,
-		InputPricePerM: 1.25, OutputPricePerM: 10.0,
-		Capabilities: Capabilities{
-			SupportsStreaming: true, SupportsVision: true,
-			SupportsSystemPromptCaching: true,
-		},
-	},
-	{
-		ID: "gemini-2.0-flash", ModelID: "gemini-2.0-flash",
-		DisplayName: "Gemini 2.0 Flash", Provider: "gemini",
-		ContextWindow: 1048576, MaxOutput: 8192,
-		InputPricePerM: 0.10, OutputPricePerM: 0.40,
-		Capabilities: Capabilities{
-			SupportsStreaming: true, SupportsVision: true,
-		},
-	},
-
-	// --- Mistral ---
-	{
-		ID: "mistral-large", ModelID: "mistral-large-latest",
-		DisplayName: "Mistral Large", Provider: "mistral",
-		ContextWindow: 131072, MaxOutput: 8192,
-		InputPricePerM: 2.0, OutputPricePerM: 6.0,
-		Capabilities: Capabilities{SupportsStreaming: true, SupportsVision: true},
-	},
-	{
-		ID: "mistral-medium", ModelID: "mistral-medium-latest",
-		DisplayName: "Mistral Medium", Provider: "mistral",
-		ContextWindow: 131072, MaxOutput: 8192,
-		InputPricePerM: 0.40, OutputPricePerM: 2.0,
-		Capabilities: Capabilities{SupportsStreaming: true},
-	},
-	{
-		ID: "mistral-small", ModelID: "mistral-small-latest",
-		DisplayName: "Mistral Small", Provider: "mistral",
-		ContextWindow: 131072, MaxOutput: 8192,
-		InputPricePerM: 0.10, OutputPricePerM: 0.30,
-		Capabilities: Capabilities{SupportsStreaming: true},
-	},
-	{
-		ID: "codestral", ModelID: "codestral-latest",
-		DisplayName: "Codestral", Provider: "mistral",
-		ContextWindow: 262144, MaxOutput: 8192,
-		InputPricePerM: 0.30, OutputPricePerM: 0.90,
-		Capabilities: Capabilities{SupportsStreaming: true},
-	},
-
-	// --- Azure OpenAI ---
-	{
-		ID: "azure-gpt4o", ModelID: "gpt-4o", DisplayName: "Azure GPT-4o",
-		Provider: "azure-openai", ContextWindow: 128000, MaxOutput: 16384,
-		InputPricePerM: 2.5, OutputPricePerM: 10.0,
-		Capabilities: Capabilities{
-			SupportsToolCalling: true, SupportsStreaming: true,
-			SupportsVision: true,
-		},
-	},
-
-	// --- Ollama (local, no pricing) ---
-	{
-		ID: "ollama-llama3", ModelID: "llama3.1",
-		DisplayName: "Llama 3.1", Provider: "ollama",
-		ContextWindow: 131072, MaxOutput: 4096,
-		Capabilities: Capabilities{SupportsStreaming: true},
-	},
+	// Removed Step 6.5 follow-up (SP-20260508-0001): Google Gemini, Mistral,
+	// Azure OpenAI, and Ollama chat-model rows. Their runtime constructors
+	// were deleted in commit 376390c — these rows were inert at runtime but
+	// surfaced in the providers UI dropdown. Anthropic + OpenAI are the
+	// only supported API vendors (parent CW-20260508-0008).
 
 	// --- PTY CLIs (no token accounting — 0/0 is intentional) ---
 	{ID: "claude-cli", ModelID: "claude-cli", DisplayName: "Claude CLI",
@@ -332,57 +216,9 @@ var allModels = []Model{
 	{ID: "qwen-cli", ModelID: "qwen-cli", DisplayName: "Qwen CLI",
 		Provider: "pty-qwen", Capabilities: Capabilities{SupportsToolCalling: true, SupportsStreaming: true}},
 
-	// --- OpenRouter (model gateway, provider-prefixed IDs) ---
-	{ID: "or-claude-sonnet", ModelID: "anthropic/claude-sonnet-4",
-		DisplayName: "Claude Sonnet 4 (OR)", Provider: "openrouter",
-		ContextWindow: 200000, MaxOutput: 16000,
-		InputPricePerM: 3.0, OutputPricePerM: 15.0,
-		Capabilities: Capabilities{SupportsToolCalling: true, SupportsStreaming: true, SupportsVision: true}},
-	{ID: "or-claude-opus", ModelID: "anthropic/claude-opus-4",
-		DisplayName: "Claude Opus 4 (OR)", Provider: "openrouter",
-		ContextWindow: 200000, MaxOutput: 32000,
-		InputPricePerM: 15.0, OutputPricePerM: 75.0,
-		Capabilities: Capabilities{SupportsToolCalling: true, SupportsStreaming: true, SupportsVision: true}},
-	{ID: "or-gpt-4o", ModelID: "openai/gpt-4o",
-		DisplayName: "GPT-4o (OR)", Provider: "openrouter",
-		ContextWindow: 128000, MaxOutput: 16384,
-		InputPricePerM: 2.5, OutputPricePerM: 10.0,
-		Capabilities: Capabilities{SupportsToolCalling: true, SupportsStreaming: true, SupportsVision: true}},
-	{ID: "or-gemini-2.5-flash", ModelID: "google/gemini-2.5-flash",
-		DisplayName: "Gemini 2.5 Flash (OR)", Provider: "openrouter",
-		ContextWindow: 1048576, MaxOutput: 8192,
-		InputPricePerM: 0.15, OutputPricePerM: 0.60,
-		Capabilities: Capabilities{SupportsStreaming: true, SupportsVision: true}},
-	{ID: "or-llama-3.1-405b", ModelID: "meta-llama/llama-3.1-405b-instruct",
-		DisplayName: "Llama 3.1 405B (OR)", Provider: "openrouter",
-		ContextWindow: 131072, MaxOutput: 4096,
-		Capabilities: Capabilities{SupportsStreaming: true}},
-	{ID: "or-deepseek-r1", ModelID: "deepseek/deepseek-r1",
-		DisplayName: "DeepSeek R1 (OR)", Provider: "openrouter",
-		ContextWindow: 131072, MaxOutput: 8192,
-		Capabilities: Capabilities{SupportsStreaming: true}},
-
-	// --- OpenZen (OpenAI-compat gateway) ---
-	{ID: "oz-claude-sonnet", ModelID: "claude-sonnet-4-20250514",
-		DisplayName: "Claude Sonnet 4 (OZ)", Provider: "openzen",
-		ContextWindow: 200000, MaxOutput: 16000,
-		InputPricePerM: 3.0, OutputPricePerM: 15.0,
-		Capabilities: Capabilities{SupportsToolCalling: true, SupportsStreaming: true, SupportsVision: true}},
-	{ID: "oz-claude-opus", ModelID: "claude-opus-4-20250514",
-		DisplayName: "Claude Opus 4 (OZ)", Provider: "openzen",
-		ContextWindow: 200000, MaxOutput: 32000,
-		InputPricePerM: 15.0, OutputPricePerM: 75.0,
-		Capabilities: Capabilities{SupportsToolCalling: true, SupportsStreaming: true, SupportsVision: true}},
-	{ID: "oz-gpt-4o", ModelID: "gpt-4o",
-		DisplayName: "GPT-4o (OZ)", Provider: "openzen",
-		ContextWindow: 128000, MaxOutput: 16384,
-		InputPricePerM: 2.5, OutputPricePerM: 10.0,
-		Capabilities: Capabilities{SupportsToolCalling: true, SupportsStreaming: true, SupportsVision: true}},
-	{ID: "oz-o3", ModelID: "o3",
-		DisplayName: "o3 (OZ)", Provider: "openzen",
-		ContextWindow: 200000, MaxOutput: 100000,
-		InputPricePerM: 2.0, OutputPricePerM: 8.0,
-		Capabilities: Capabilities{SupportsToolCalling: true, SupportsStreaming: true}},
+	// Removed Step 6.5 follow-up (SP-20260508-0001): OpenRouter (or-*) and
+	// OpenZen (oz-*) gateway model rows. Their runtime constructors were
+	// deleted in commit 376390c.
 
 	// --- Legacy pricing rows (not seeded; used for historical token_usage) ---
 	{ModelID: "claude-haiku-3-20250307", Provider: "anthropic",
@@ -401,6 +237,10 @@ var allModels = []Model{
 		InputPricePerM: 10.0, OutputPricePerM: 30.0, IsLegacy: true},
 
 	// --- Embedding models ---
+	// Step 6.5 (SP-20260508-0001) reduced the embedder catalog to OpenAI
+	// only; gemini text-embedding-004, mistral-embed, and ollama
+	// nomic-embed-text / all-minilm / mxbai-embed-large rows have been
+	// removed alongside their adapters.
 	{ModelID: "text-embedding-3-small", Provider: "openai",
 		EmbeddingDimensions: 1536,
 		Capabilities:        Capabilities{SupportsEmbedding: true}},
@@ -410,21 +250,6 @@ var allModels = []Model{
 	{ModelID: "text-embedding-ada-002", Provider: "openai",
 		EmbeddingDimensions: 1536,
 		Capabilities:        Capabilities{SupportsEmbedding: true}, IsLegacy: true},
-	{ModelID: "text-embedding-004", Provider: "gemini",
-		EmbeddingDimensions: 768,
-		Capabilities:        Capabilities{SupportsEmbedding: true}},
-	{ModelID: "mistral-embed", Provider: "mistral",
-		EmbeddingDimensions: 1024,
-		Capabilities:        Capabilities{SupportsEmbedding: true}},
-	{ModelID: "nomic-embed-text", Provider: "ollama",
-		EmbeddingDimensions: 768,
-		Capabilities:        Capabilities{SupportsEmbedding: true}},
-	{ModelID: "all-minilm", Provider: "ollama",
-		EmbeddingDimensions: 384,
-		Capabilities:        Capabilities{SupportsEmbedding: true}},
-	{ModelID: "mxbai-embed-large", Provider: "ollama",
-		EmbeddingDimensions: 1024,
-		Capabilities:        Capabilities{SupportsEmbedding: true}},
 }
 
 var (
@@ -632,22 +457,14 @@ func EmbeddingDimensionsFor(modelID string) int {
 	return 0
 }
 
-// ProviderHasPrefix helps InferProvider match gateway-prefixed IDs
-// (e.g. "anthropic/claude-sonnet-4" → "openrouter").
+// ProviderHasPrefix helps InferProvider match gateway-prefixed IDs.
+//
+// Step 6.5 (SP-20260508-0001) removed the OpenRouter adapter, which was the
+// only consumer of provider-prefixed routing. The helper is retained as a
+// no-op so InferProvider's call site stays stable; if a future gateway
+// vendor returns, the prefix→provider map can be repopulated here.
 func ProviderHasPrefix(modelID string) (string, bool) {
 	ensureBuilt()
-	// Exact match already handled upstream; this helper handles prefixed IDs
-	// where callers pass the bare upstream name (rare; mostly defensive).
-	for prefix, provider := range map[string]string{
-		"anthropic/":   "openrouter",
-		"openai/":      "openrouter",
-		"google/":      "openrouter",
-		"meta-llama/":  "openrouter",
-		"deepseek/":    "openrouter",
-	} {
-		if strings.HasPrefix(modelID, prefix) {
-			return provider, true
-		}
-	}
+	_ = modelID
 	return "", false
 }

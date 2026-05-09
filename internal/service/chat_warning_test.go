@@ -83,7 +83,9 @@ func TestMaybeEmitEmbeddingWarning_BoundedGrowth(t *testing.T) {
 func testSessionID(i int) string { return "sess-" + strconv.Itoa(i) }
 
 func TestMaybeEmitEmbeddingWarning_DistinctSessions(t *testing.T) {
-	s := &chatServiceImpl{embeddingStatus: EmbeddingStatusUnreachable, embeddingProvider: "ollama", embeddingWarnedSessions: make(map[string]struct{})}
+	// Any non-empty, non-active status drives the per-session emit path;
+	// MissingCredentials is the only non-disabled status that survives Step 6.5.
+	s := &chatServiceImpl{embeddingStatus: EmbeddingStatusMissingCredentials, embeddingProvider: "openai", embeddingWarnedSessions: make(map[string]struct{})}
 	ch := make(chan chat.StreamEvent, 4)
 
 	s.maybeEmitEmbeddingWarning("a", ch)

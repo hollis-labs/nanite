@@ -453,8 +453,6 @@ func (s *chatServiceImpl) maybeEmitEmbeddingWarning(sessionID string, ch chan ch
 		msg = "Memory similarity recall is off. Enable an embedding provider in Settings \u2192 Memory."
 	case EmbeddingStatusMissingCredentials:
 		msg = fmt.Sprintf("Memory similarity recall is disabled: %s credentials not found. Add the key in Settings \u2192 Providers.", s.embeddingProvider)
-	case EmbeddingStatusUnreachable:
-		msg = fmt.Sprintf("Memory similarity recall is disabled: %s is not reachable. Start it or switch providers in Settings \u2192 Memory.", s.embeddingProvider)
 	default:
 		msg = "Memory similarity recall is disabled."
 	}

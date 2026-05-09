@@ -450,12 +450,12 @@ func TestInferProvider(t *testing.T) {
 		{"gpt-4o", "openai"},
 		{"o1-preview", "openai"},
 		{"o3-mini", "openai"},
-		{"llama3.1", "ollama"},
-		// Registered Mistral model resolves through the canonical registry
-		// (audit 2026-04-11 finding 02 — prior prefix match sent Mistral
-		// API models to ollama).
-		{"mistral-large", "mistral"},
-		{"mistral-large-latest", "mistral"},
+		// Step 6.5 (SP-20260508-0001) removed the Mistral and Ollama API
+		// adapters; their registry rows are gone. Bare "llama3.1" /
+		// "mistral-large" inputs now fall through InferProvider's prefix
+		// fallthroughs (ollama-style) or the DefaultProvider terminal,
+		// which is dead-letter behavior. Coverage retained for the
+		// surviving live cases only.
 		{"claude-sonnet-4-20250514", "anthropic"},
 		{"unknown-model", "anthropic"},
 	}

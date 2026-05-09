@@ -10,8 +10,9 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/hollis-labs/go-providers/provider"
+	llmcontracts "github.com/hollis-labs/go-llm-contracts"
 	"github.com/hollis-labs/nanite/internal/chat"
+	nllmanthropic "github.com/hollis-labs/nanite/internal/llm/anthropic"
 )
 
 // rate_budget_pause is the SSE stream event emitted when a chat turn cannot
@@ -91,8 +92,8 @@ func parseRateBudgetEstimate(err error) (estimated, limit int, ok bool) {
 // nil when prov is a different concrete type (e.g. Gemini, OpenAI) or the
 // tracker is unset. Callers must tolerate nil — auto-retry is skipped and
 // retry_after_ms is reported as zero.
-func providerRateTracker(prov provider.Provider) *provider.TokenRateTracker {
-	if ap, ok := prov.(*provider.Anthropic); ok && ap.RateTracker != nil {
+func providerRateTracker(prov llmcontracts.Provider) *llmcontracts.TokenRateTracker {
+	if ap, ok := prov.(*nllmanthropic.Client); ok && ap.RateTracker != nil {
 		return ap.RateTracker
 	}
 	return nil
@@ -130,7 +131,7 @@ func emitRateBudgetPause(ch chan chat.StreamEvent, payload rateBudgetPausePayloa
 func (s *chatServiceImpl) pauseAndMaybeRetryRateBudget(
 	ctx context.Context,
 	sessionID string,
-	prov provider.Provider,
+	prov llmcontracts.Provider,
 	ch chan chat.StreamEvent,
 	err error,
 	triggerKind string,
@@ -213,17 +214,17 @@ func (s *chatServiceImpl) pauseAndMaybeRetryRateBudget(
 	return false
 }
 
-// IsRateBudgetExceeded reports whether err wraps the go-providers rate-budget
-// sentinel. Provided for callers that have not already classified the error
-// (e.g. tests).
+// IsRateBudgetExceeded reports whether err wraps the go-llm-contracts
+// rate-budget sentinel. Provided for callers that have not already
+// classified the error (e.g. tests).
 func IsRateBudgetExceeded(err error) bool {
-	return errors.Is(err, provider.ErrRequestExceedsRateBudget)
+	return errors.Is(err, llmcontracts.ErrRequestExceedsRateBudget)
 }
 
 // asWrappedRateBudgetError synthesizes a wrapped error matching the
-// go-providers format string for tests. Not used by production code; kept
+// wrapper's format string for tests. Not used by production code; kept
 // here so the parser and the producer are colocated.
 func asWrappedRateBudgetError(estimated, limit int) error {
 	return fmt.Errorf("%w: estimated %d tokens vs %d limit",
-		provider.ErrRequestExceedsRateBudget, estimated, limit)
+		llmcontracts.ErrRequestExceedsRateBudget, estimated, limit)
 }

@@ -33,6 +33,7 @@ import (
 	"github.com/hollis-labs/nanite/internal/chat"
 	"github.com/hollis-labs/nanite/internal/filter"
 	"github.com/hollis-labs/nanite/internal/lifecycle"
+	nllmanthropic "github.com/hollis-labs/nanite/internal/llm/anthropic"
 	"github.com/hollis-labs/nanite/internal/mcp"
 	"github.com/hollis-labs/nanite/internal/mcpserver"
 	"github.com/hollis-labs/nanite/internal/muxproxy"
@@ -482,7 +483,7 @@ func initProviders(devMode bool) (*provider.Registry, []provider.CLIAdapter) {
 	apiProviders := []apiProvSpec{
 		{"anthropic", "anthropic-001",
 			func() llmcontracts.Provider {
-				ap := provider.NewAnthropic()
+				ap := nllmanthropic.New()
 				if v := os.Getenv("NANITE_PROVIDER_RATE_BUDGET_TPM"); v != "" {
 					if n, err := strconv.Atoi(v); err == nil && n > 0 {
 						ap.RateTracker.UpdateLimit(n)
@@ -492,7 +493,7 @@ func initProviders(devMode bool) (*provider.Registry, []provider.CLIAdapter) {
 				}
 				return ap
 			},
-			func(p llmcontracts.Provider, k string) { p.(*provider.Anthropic).SetAPIKey(k) }},
+			func(p llmcontracts.Provider, k string) { p.(*nllmanthropic.Client).SetAPIKey(k) }},
 		{"openai", "openai-001",
 			func() llmcontracts.Provider { return provider.NewOpenAI() },
 			func(p llmcontracts.Provider, k string) { p.(*provider.OpenAI).SetAPIKey(k) }},

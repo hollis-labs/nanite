@@ -25,11 +25,14 @@ import (
 	"github.com/hollis-labs/nanite/internal/reflex"
 	"github.com/hollis-labs/nanite/internal/worktree"
 
+	llmcontracts "github.com/hollis-labs/go-llm-contracts"
+	llmtypes "github.com/hollis-labs/go-llm-types"
 	"github.com/hollis-labs/go-providers/provider"
 	"github.com/hollis-labs/nanite/internal/api"
 	"github.com/hollis-labs/nanite/internal/chat"
 	"github.com/hollis-labs/nanite/internal/filter"
 	"github.com/hollis-labs/nanite/internal/lifecycle"
+	nllmanthropic "github.com/hollis-labs/nanite/internal/llm/anthropic"
 	"github.com/hollis-labs/nanite/internal/mcp"
 	"github.com/hollis-labs/nanite/internal/mcpserver"
 	"github.com/hollis-labs/nanite/internal/muxproxy"
@@ -474,13 +477,13 @@ func initProviders(devMode bool) (*provider.Registry, []provider.CLIAdapter) {
 
 	type apiProvSpec struct {
 		name, provID string
-		create       func() provider.Provider
-		setKey       func(provider.Provider, string)
+		create       func() llmcontracts.Provider
+		setKey       func(llmcontracts.Provider, string)
 	}
 	apiProviders := []apiProvSpec{
 		{"anthropic", "anthropic-001",
-			func() provider.Provider {
-				ap := provider.NewAnthropic()
+			func() llmcontracts.Provider {
+				ap := nllmanthropic.New()
 				if v := os.Getenv("NANITE_PROVIDER_RATE_BUDGET_TPM"); v != "" {
 					if n, err := strconv.Atoi(v); err == nil && n > 0 {
 						ap.RateTracker.UpdateLimit(n)
@@ -490,22 +493,22 @@ func initProviders(devMode bool) (*provider.Registry, []provider.CLIAdapter) {
 				}
 				return ap
 			},
-			func(p provider.Provider, k string) { p.(*provider.Anthropic).SetAPIKey(k) }},
+			func(p llmcontracts.Provider, k string) { p.(*nllmanthropic.Client).SetAPIKey(k) }},
 		{"openai", "openai-001",
-			func() provider.Provider { return provider.NewOpenAI() },
-			func(p provider.Provider, k string) { p.(*provider.OpenAI).SetAPIKey(k) }},
+			func() llmcontracts.Provider { return provider.NewOpenAI() },
+			func(p llmcontracts.Provider, k string) { p.(*provider.OpenAI).SetAPIKey(k) }},
 		{"gemini", "gemini-api-001",
-			func() provider.Provider { return provider.NewGemini() },
-			func(p provider.Provider, k string) { p.(*provider.Gemini).SetAPIKey(k) }},
+			func() llmcontracts.Provider { return provider.NewGemini() },
+			func(p llmcontracts.Provider, k string) { p.(*provider.Gemini).SetAPIKey(k) }},
 		{"mistral", "mistral-001",
-			func() provider.Provider { return provider.NewMistral() },
-			func(p provider.Provider, k string) { p.(*provider.Mistral).SetAPIKey(k) }},
+			func() llmcontracts.Provider { return provider.NewMistral() },
+			func(p llmcontracts.Provider, k string) { p.(*provider.Mistral).SetAPIKey(k) }},
 		{"openrouter", "openrouter-001",
-			func() provider.Provider { return provider.NewOpenRouter() },
-			func(p provider.Provider, k string) { p.(*provider.OpenRouter).SetAPIKey(k) }},
+			func() llmcontracts.Provider { return provider.NewOpenRouter() },
+			func(p llmcontracts.Provider, k string) { p.(*provider.OpenRouter).SetAPIKey(k) }},
 		{"openzen", "openzen-001",
-			func() provider.Provider { return provider.NewOpenZen() },
-			func(p provider.Provider, k string) { p.(*provider.OpenZen).SetAPIKey(k) }},
+			func() llmcontracts.Provider { return provider.NewOpenZen() },
+			func(p llmcontracts.Provider, k string) { p.(*provider.OpenZen).SetAPIKey(k) }},
 	}
 
 	var registeredAPI, missingAPI []string
@@ -697,7 +700,7 @@ func initMCP(s *store.Store, cfg *config.Config) (*mcp.Manager, *toolclient.Tool
 
 	// Register result-cache meta-tools (S4a). These let the LLM recall
 	// truncated tool results via fetch_tool_result / search_tool_result.
-	tb.Builtins.RegisterBuiltins("result-cache", []provider.ToolDefinition{
+	tb.Builtins.RegisterBuiltins("result-cache", []llmtypes.ToolDefinition{
 		toolclient.FetchToolResultMetaTool(),
 		toolclient.SearchToolResultMetaTool(),
 	})

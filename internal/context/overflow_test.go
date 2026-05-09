@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"testing"
 
-	"github.com/hollis-labs/go-providers/provider"
+	llmcontracts "github.com/hollis-labs/go-llm-contracts"
 )
 
 func TestIsContextOverflow_Sentinel(t *testing.T) {
@@ -71,8 +71,8 @@ func TestIsCompactRecoverable(t *testing.T) {
 	}{
 		{"nil", nil, false},
 		{"random error", errors.New("some unrelated failure"), false},
-		{"rate budget sentinel", provider.ErrRequestExceedsRateBudget, true},
-		{"wrapped rate budget", fmt.Errorf("stream start: %w", provider.ErrRequestExceedsRateBudget), true},
+		{"rate budget sentinel", llmcontracts.ErrRequestExceedsRateBudget, true},
+		{"wrapped rate budget", fmt.Errorf("stream start: %w", llmcontracts.ErrRequestExceedsRateBudget), true},
 		{"context overflow sentinel", ErrContextOverflow, true},
 		{"wrapped context overflow", fmt.Errorf("x: %w", ErrContextOverflow), true},
 		{"anthropic prompt too long text", errors.New("400 prompt is too long: 224213 tokens > 200000"), true},

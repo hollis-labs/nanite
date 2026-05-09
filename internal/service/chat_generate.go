@@ -11,16 +11,19 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	llmcontracts "github.com/hollis-labs/go-llm-contracts"
+	llmtypes "github.com/hollis-labs/go-llm-types"
 	feotel "github.com/hollis-labs/go-otel"
+	"github.com/hollis-labs/go-providers/provider"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/codes"
 
-	"github.com/hollis-labs/go-providers/provider"
 	"github.com/hollis-labs/nanite/internal/chat"
 	"github.com/hollis-labs/nanite/internal/classify"
 	ctxpkg "github.com/hollis-labs/nanite/internal/context"
 	"github.com/hollis-labs/nanite/internal/effort"
 	inspectsvc "github.com/hollis-labs/nanite/internal/inspector"
+	nllmanthropic "github.com/hollis-labs/nanite/internal/llm/anthropic"
 	"github.com/hollis-labs/nanite/internal/messaging"
 	pluginpkg "github.com/hollis-labs/nanite/internal/plugin"
 	"github.com/hollis-labs/nanite/internal/reminders"
@@ -80,7 +83,7 @@ func composeExtraSystemPrefix(overrideBlock string, cfg composeConfig) string {
 // hasUsableTools reports whether the turn exposes any tools to the LLM.
 // Built-in tools (for example dev_* and self-service tools) count — the
 // "no tools" warning should only fire when the final selection is empty.
-func hasUsableTools(tools []provider.ToolDefinition) bool {
+func hasUsableTools(tools []llmtypes.ToolDefinition) bool {
 	return len(tools) > 0
 }
 
@@ -236,7 +239,7 @@ func (s *chatServiceImpl) generateResponse(ctx context.Context, sessionID, assis
 	}
 
 	// Wire status callback for retry notifications and circuit breaker.
-	if ap, ok := prov.(*provider.Anthropic); ok {
+	if ap, ok := prov.(*nllmanthropic.Client); ok {
 		ap.OnStatus = func(message string) {
 			ch <- chat.StreamEvent{Type: "status", Content: message}
 		}
@@ -249,8 +252,8 @@ func (s *chatServiceImpl) generateResponse(ctx context.Context, sessionID, assis
 	}
 
 	// Apply cache hints.
-	if cacheable, ok := prov.(provider.CacheableProvider); ok {
-		cacheable.SetCacheHints(provider.DefaultCacheStrategy())
+	if cacheable, ok := prov.(llmcontracts.CacheableProvider); ok {
+		cacheable.SetCacheHints(llmcontracts.DefaultCacheStrategy())
 	}
 
 	// --- Tool selection via ToolService (must precede slot assembly so the
@@ -662,7 +665,7 @@ func (s *chatServiceImpl) generateResponse(ctx context.Context, sessionID, assis
 	// the interleaved-thinking-2025-05-14 beta is active. Blocks are stored in
 	// metadata.thinking_blocks for the post-stream pill and round-tripped as
 	// assistant message ContentBlocks on subsequent turns.
-	var thinkingBlocks []provider.ThinkingBlock
+	var thinkingBlocks []llmtypes.ThinkingBlock
 
 	for ls.iteration = 0; ; ls.iteration++ {
 		// CW-20260418-0043 diagnostic.
@@ -778,7 +781,7 @@ func (s *chatServiceImpl) generateResponse(ctx context.Context, sessionID, assis
 		// F3 (CW-20260420-0023): inject reasoning config into provider context so
 		// the Anthropic adapter can gate the interleaved-thinking beta header.
 		if reasoningCfg.Enabled {
-			provCtx = provider.WithReasoningConfig(provCtx, provider.ReasoningConfig{
+			provCtx = llmcontracts.WithReasoningConfig(provCtx, llmcontracts.ReasoningConfig{
 				Enabled:      reasoningCfg.Enabled,
 				BudgetTokens: reasoningCfg.BudgetTokens,
 				BetasHeader:  reasoningCfg.BetasHeader,
@@ -819,12 +822,12 @@ func (s *chatServiceImpl) generateResponse(ctx context.Context, sessionID, assis
 		if s.pluginHost != nil {
 			if filtered, err := s.pluginHost.ApplyFilter(pluginpkg.FilterContextWindow, chatMessages, fctx); err != nil {
 				slog.Warn("chat-service: context_window filter error", "err", err)
-			} else if fm, ok := filtered.([]provider.ChatMessage); ok {
+			} else if fm, ok := filtered.([]llmtypes.ChatMessage); ok {
 				chatMessages = fm
 			}
 		}
 
-		var provCh <-chan provider.StreamEvent
+		var provCh <-chan llmtypes.StreamEvent
 		if len(tools) > 0 {
 			slog.Debug("chat-service: tool-use iteration",
 				"iter", ls.iteration, "tools", len(tools), "messages", len(chatMessages),
@@ -836,7 +839,7 @@ func (s *chatServiceImpl) generateResponse(ctx context.Context, sessionID, assis
 		// (slot trim) which uses this data to identify the biggest contributor to
 		// the cacheable prefix. Walks ctxpkg.SlotOrder so new slots (e.g. Glass-3
 		// SlotHandoff) are picked up automatically — do not hardcode a slot list
-		// here. cacheable_prefix_tokens comes from the optional provider.Cacheable
+		// here. cacheable_prefix_tokens comes from the optional llmcontracts.Cacheable
 		// interface (go-providers): the provider builds the same payload it would
 		// send and reports the offset of the last cache_control marker / 4. Same
 		// heuristic as the rate-budget pre-flight; 0 when the provider doesn't
@@ -852,7 +855,7 @@ func (s *chatServiceImpl) generateResponse(ctx context.Context, sessionID, assis
 			}
 		}
 		rateLimitTPM := 0
-		if rl, ok := prov.(provider.RateLimited); ok {
+		if rl, ok := prov.(llmcontracts.RateLimited); ok {
 			rateLimitTPM = rl.RateLimitTPM()
 		}
 		cacheablePrefixTokens := 0
@@ -874,12 +877,12 @@ func (s *chatServiceImpl) generateResponse(ctx context.Context, sessionID, assis
 		//
 		// Fix is tracked at limitations.nanite.cache_hints_shared_singleton_race
 		// in Vanta. Structural resolution: move cache hints into
-		// provider.ChatRequest (per-call parameter) and deprecate SetCacheHints
+		// llmtypes.ChatRequest (per-call parameter) and deprecate SetCacheHints
 		// — touches the go-providers interface and every caller, so out of
 		// cleanup scope. Until then, telemetry consumers should treat
 		// cacheable_prefix_tokens as best-effort, not authoritative.
-		if cp, ok := prov.(provider.Cacheable); ok {
-			cacheablePrefixTokens = cp.EstimateCacheablePrefix(provCtx, provider.ChatRequest{
+		if cp, ok := prov.(llmcontracts.Cacheable); ok {
+			cacheablePrefixTokens = cp.EstimateCacheablePrefix(provCtx, llmtypes.ChatRequest{
 				SystemPrompt: extraSystemPrefix,
 				SlotBlocks:   slotBlocksFor(slotResult),
 				Messages:     chatMessages,
@@ -925,7 +928,7 @@ func (s *chatServiceImpl) generateResponse(ctx context.Context, sessionID, assis
 		if chat.IsCLIProvider(providerName) {
 			provCh, err = s.driveBootSession(provCtx, sessionID, session, agent, mode, slotResult, userContent, ls.iteration)
 		} else {
-			provCh, err = prov.StreamChat(provCtx, provider.ChatRequest{
+			provCh, err = prov.StreamChat(provCtx, llmtypes.ChatRequest{
 				SystemPrompt: extraSystemPrefix,
 				SlotBlocks:   slotBlocksFor(slotResult),
 				Messages:     chatMessages,
@@ -951,7 +954,7 @@ func (s *chatServiceImpl) generateResponse(ctx context.Context, sessionID, assis
 				// branch below records the error, then ends the span.
 				triggerKind := compactTriggerContextOverflow
 				recoveryReason := "context_overflow at stream start"
-				if errors.Is(err, provider.ErrRequestExceedsRateBudget) {
+				if errors.Is(err, llmcontracts.ErrRequestExceedsRateBudget) {
 					triggerKind = compactTriggerRateBudget
 					recoveryReason = "rate_budget_exceeded at stream start"
 				}
@@ -1083,7 +1086,7 @@ func (s *chatServiceImpl) generateResponse(ctx context.Context, sessionID, assis
 				// rate_budget_pause and end the turn cleanly. context-overflow
 				// retains the prior user-facing internal_error envelope —
 				// Glass-6's scope is rate-budget only.
-				if errors.Is(err, provider.ErrRequestExceedsRateBudget) {
+				if errors.Is(err, llmcontracts.ErrRequestExceedsRateBudget) {
 					if s.pauseAndMaybeRetryRateBudget(ctx, sessionID, prov, ch, err, compactTriggerRateBudget, &ls.rateBudgetPauseAttempts) {
 						ls.iteration--
 						continue
@@ -1106,7 +1109,7 @@ func (s *chatServiceImpl) generateResponse(ctx context.Context, sessionID, assis
 
 		// --- Consume provider stream ---
 		var turnContent strings.Builder
-		var toolUseBlocks []provider.ToolUseBlock
+		var toolUseBlocks []llmtypes.ToolUseBlock
 		var stopReason string
 		var lastPTYToolPending string
 		// T9 — set by the mid-stream overflow handler when the outer loop
@@ -1326,30 +1329,30 @@ func (s *chatServiceImpl) generateResponse(ctx context.Context, sessionID, assis
 		}
 
 		// --- Build assistant message with tool_use blocks ---
-		var assistantBlocks []provider.ContentBlock
+		var assistantBlocks []llmtypes.ContentBlock
 		// F3 (CW-20260420-0023): thinking blocks MUST precede text and tool_use
 		// blocks in the assistant message. Anthropic verifies signatures on round-trip;
 		// preserve Thinking and Signature verbatim.
 		for _, tb := range thinkingBlocks {
-			assistantBlocks = append(assistantBlocks, provider.ContentBlock{
+			assistantBlocks = append(assistantBlocks, llmtypes.ContentBlock{
 				Type:      "thinking",
 				Text:      tb.Thinking,
 				Signature: tb.Signature,
 			})
 		}
 		if text := turnContent.String(); text != "" {
-			assistantBlocks = append(assistantBlocks, provider.ContentBlock{Type: "text", Text: text})
+			assistantBlocks = append(assistantBlocks, llmtypes.ContentBlock{Type: "text", Text: text})
 		}
 		for _, tu := range toolUseBlocks {
 			input := tu.Input
 			if input == nil {
 				input = map[string]any{}
 			}
-			assistantBlocks = append(assistantBlocks, provider.ContentBlock{
+			assistantBlocks = append(assistantBlocks, llmtypes.ContentBlock{
 				Type: "tool_use", ID: tu.ID, Name: tu.Name, Input: &input,
 			})
 		}
-		chatMessages = append(chatMessages, provider.ChatMessage{
+		chatMessages = append(chatMessages, llmtypes.ChatMessage{
 			Role: "assistant", ContentBlocks: assistantBlocks,
 		})
 		// Reset per-iteration thinking accumulator so next iteration starts fresh.
@@ -1358,8 +1361,8 @@ func (s *chatServiceImpl) generateResponse(ctx context.Context, sessionID, assis
 		// --- Execute tools (pre-check → parallel/serial → post-process) ---
 
 		// Handle request_tools meta-tool calls first.
-		var resultBlocks []provider.ContentBlock
-		var regularTools []provider.ToolUseBlock
+		var resultBlocks []llmtypes.ContentBlock
+		var regularTools []llmtypes.ToolUseBlock
 		for _, tu := range toolUseBlocks {
 			if tu.Name == "request_tools" && selection.Progressive {
 				resultBlocks, ls.toolCallRefs = s.handleRequestTools(
@@ -1400,7 +1403,7 @@ func (s *chatServiceImpl) generateResponse(ctx context.Context, sessionID, assis
 		}
 
 		// Append tool results as user message.
-		chatMessages = append(chatMessages, provider.ChatMessage{
+		chatMessages = append(chatMessages, llmtypes.ChatMessage{
 			Role: "user", ContentBlocks: resultBlocks,
 		})
 
@@ -1439,7 +1442,7 @@ func (s *chatServiceImpl) generateResponse(ctx context.Context, sessionID, assis
 		}
 
 		// Check circuit breaker.
-		if ap, ok := prov.(*provider.Anthropic); ok && ap.CircuitBreaker != nil && ap.CircuitBreaker.IsOpen() {
+		if ap, ok := prov.(*nllmanthropic.Client); ok && ap.CircuitBreaker != nil && ap.CircuitBreaker.IsOpen() {
 			slog.Warn("chat-service: circuit breaker open, stopping", "iter", ls.iteration)
 			if s.events != nil {
 				s.events.EmitCircuitBreakerTripped(ctx, sessionID, "anthropic")
@@ -1849,13 +1852,13 @@ func (s *chatServiceImpl) recoverFromContextOverflow(
 	sessionID string,
 	result *SlotAssemblyResult,
 	agent *store.AgentProfile,
-	chatMessages []provider.ChatMessage,
-	tools []provider.ToolDefinition,
+	chatMessages []llmtypes.ChatMessage,
+	tools []llmtypes.ToolDefinition,
 	ch chan chat.StreamEvent,
 	triggerMsg string,
 	triggerKind string,
 	scratchpadSnapshot map[string]any,
-) ([]provider.ChatMessage, []provider.ToolDefinition, bool) {
+) ([]llmtypes.ChatMessage, []llmtypes.ToolDefinition, bool) {
 	if triggerKind == "" {
 		triggerKind = compactTriggerContextOverflow
 	}
@@ -2039,7 +2042,7 @@ func (s *chatServiceImpl) assembleTurnContext(
 	agent *store.AgentProfile,
 	mode *store.AgentMode,
 	workspace *store.Workspace,
-	tools []provider.ToolDefinition,
+	tools []llmtypes.ToolDefinition,
 	extraSystemPrefix string,
 	providerName, model string,
 	ch chan chat.StreamEvent,
@@ -2089,16 +2092,16 @@ func rebuildLegacySystemPrompt(cw *ctxpkg.ContextWindow) string {
 // path, effectively disabling slot-level prompt caching until the
 // go-providers side learns to budget markers. The rest of the
 // DefaultCacheStrategy (system / tools / recent messages) still applies.
-func slotBlocksFor(result *SlotAssemblyResult) []provider.SlotBlock {
+func slotBlocksFor(result *SlotAssemblyResult) []llmtypes.SlotBlock {
 	if result == nil || len(result.Blocks) == 0 {
 		return nil
 	}
-	out := make([]provider.SlotBlock, 0, len(result.Blocks))
+	out := make([]llmtypes.SlotBlock, 0, len(result.Blocks))
 	for _, b := range result.Blocks {
 		if b.Content == "" {
 			continue
 		}
-		out = append(out, provider.SlotBlock{
+		out = append(out, llmtypes.SlotBlock{
 			Name:     b.SlotName,
 			Content:  b.Content,
 			CacheKey: b.CacheKey,
@@ -2135,10 +2138,10 @@ func (s *chatServiceImpl) enforceBudgetOrCompact(
 	sessionID string,
 	result *SlotAssemblyResult,
 	agent *store.AgentProfile,
-	chatMessages []provider.ChatMessage,
-	tools []provider.ToolDefinition,
+	chatMessages []llmtypes.ChatMessage,
+	tools []llmtypes.ToolDefinition,
 	ch chan chat.StreamEvent,
-) ([]provider.ChatMessage, []provider.ToolDefinition) {
+) ([]llmtypes.ChatMessage, []llmtypes.ToolDefinition) {
 	if result == nil || result.Window == nil || !result.NeedsCompaction {
 		return chatMessages, tools
 	}
@@ -2423,20 +2426,20 @@ func classifyModeFromAgentTags(agent *store.AgentProfile) string {
 //     deferred — see follow-ups.)
 func (s *chatServiceImpl) handleRequestTools(
 	ctx context.Context,
-	tu provider.ToolUseBlock,
+	tu llmtypes.ToolUseBlock,
 	ch chan chat.StreamEvent,
-	tools []provider.ToolDefinition,
+	tools []llmtypes.ToolDefinition,
 	loadedTools map[string]bool,
 	consecutiveEmpty *int,
 	totalCalls *int,
 	maxCalls int,
-	resultBlocks []provider.ContentBlock,
+	resultBlocks []llmtypes.ContentBlock,
 	toolCallRefs []chat.ToolCallRef,
 	sessionID string,
 	reflectionFired *bool,
 	inspectorTurnID string, // I1 (CW-20260426-0004): "" when inspector is disabled
 	modeOverrideSpec store.ToolOverrideSpec, // F1 (CW-20260429-0001): scrub mode-denied tools loaded mid-turn
-) ([]provider.ContentBlock, []chat.ToolCallRef) {
+) ([]llmtypes.ContentBlock, []chat.ToolCallRef) {
 	ch <- chat.StreamEvent{Type: "tool_call", Tool: tu.Name, ToolID: tu.ID}
 	*totalCalls++
 
@@ -2477,7 +2480,7 @@ func (s *chatServiceImpl) handleRequestTools(
 		s.persistBrokerCallEx(sessionID, inspectorTurnID, requestedIntent, "reflected", *consecutiveEmpty, *totalCalls, 0, reflection, sortedKeys(loadedTools), "")
 
 		ch <- chat.StreamEvent{Type: "tool_result", Tool: tu.Name, ToolID: tu.ID, Summary: reflection}
-		resultBlocks = append(resultBlocks, provider.ContentBlock{
+		resultBlocks = append(resultBlocks, llmtypes.ContentBlock{
 			Type: "tool_result", ToolUseID: tu.ID, Content: reflection,
 		})
 		toolCallRefs = append(toolCallRefs, chat.ToolCallRef{ID: tu.ID, Name: tu.Name, Status: "success"})
@@ -2504,7 +2507,7 @@ func (s *chatServiceImpl) handleRequestTools(
 		s.persistBrokerCallEx(sessionID, inspectorTurnID, requestedIntent, "halted", *consecutiveEmpty, *totalCalls, 0, "", sortedKeys(loadedTools), "")
 
 		ch <- chat.StreamEvent{Type: "tool_result", Tool: tu.Name, ToolID: tu.ID, Summary: rtResult}
-		resultBlocks = append(resultBlocks, provider.ContentBlock{
+		resultBlocks = append(resultBlocks, llmtypes.ContentBlock{
 			Type: "tool_result", ToolUseID: tu.ID, Content: rtResult,
 		})
 		toolCallRefs = append(toolCallRefs, chat.ToolCallRef{ID: tu.ID, Name: tu.Name, Status: "success"})
@@ -2551,7 +2554,7 @@ func (s *chatServiceImpl) handleRequestTools(
 	s.persistBrokerCallEx(sessionID, inspectorTurnID, requestedIntent, outcome, *consecutiveEmpty, *totalCalls, len(loaded), "", loaded, "")
 
 	ch <- chat.StreamEvent{Type: "tool_result", Tool: tu.Name, ToolID: tu.ID, Summary: rtResult}
-	resultBlocks = append(resultBlocks, provider.ContentBlock{
+	resultBlocks = append(resultBlocks, llmtypes.ContentBlock{
 		Type: "tool_result", ToolUseID: tu.ID, Content: rtResult,
 	})
 	toolCallRefs = append(toolCallRefs, chat.ToolCallRef{ID: tu.ID, Name: tu.Name, Status: "success"})
@@ -2697,7 +2700,7 @@ func captureEnvelopeData(result, toolName string, pending []string) []string {
 
 // maybeCreateAutoArtifact checks if a tool call wrote a file and auto-creates
 // an artifact record.
-func (s *chatServiceImpl) maybeCreateAutoArtifact(sessionID, messageID, agentID string, tu provider.ToolUseBlock) {
+func (s *chatServiceImpl) maybeCreateAutoArtifact(sessionID, messageID, agentID string, tu llmtypes.ToolUseBlock) {
 	if s.appConfig == nil {
 		return
 	}
@@ -2731,7 +2734,7 @@ func (s *chatServiceImpl) retryEnvelopeCorrection(
 	ctx context.Context,
 	sessionID string,
 	session *store.Session,
-	prov provider.Provider,
+	prov llmcontracts.Provider,
 	model string,
 	envErrors []chat.EnvelopeError,
 	ch chan chat.StreamEvent,
@@ -2768,8 +2771,8 @@ func (s *chatServiceImpl) retryEnvelopeCorrection(
 		retryCtx = provider.WithSandboxDir(retryCtx, sbDir)
 	}
 
-	correctionMsgs := []provider.ChatMessage{{Role: "user", Content: correction}}
-	retryCh, err := prov.StreamChat(retryCtx, provider.ChatRequest{Messages: correctionMsgs, Model: model})
+	correctionMsgs := []llmtypes.ChatMessage{{Role: "user", Content: correction}}
+	retryCh, err := prov.StreamChat(retryCtx, llmtypes.ChatRequest{Messages: correctionMsgs, Model: model})
 	if err != nil {
 		slog.Warn("chat-service: envelope retry stream error", "err", err)
 		return nil
@@ -2806,12 +2809,12 @@ func (s *chatServiceImpl) autoTitle(sessionID, userContent string) {
 	}
 
 	prompt := "Generate a concise 3-5 word title for this conversation. Respond with ONLY the title, no quotes or punctuation."
-	msgs := []provider.ChatMessage{
+	msgs := []llmtypes.ChatMessage{
 		{Role: "user", Content: fmt.Sprintf("First message: %s", userContent)},
 	}
 
 	start := time.Now()
-	title, err := prov.Complete(context.Background(), provider.ChatRequest{SystemPrompt: prompt, Messages: msgs, Model: s.utilityModel})
+	title, err := prov.Complete(context.Background(), llmtypes.ChatRequest{SystemPrompt: prompt, Messages: msgs, Model: s.utilityModel})
 	duration := time.Since(start)
 	s.recordUtilityMetrics(sessionID, "autoTitle", duration, err)
 
@@ -2856,10 +2859,10 @@ func (s *chatServiceImpl) autoTags(sessionID string) {
 	}
 
 	prompt := "Generate 2-5 short tags (1-2 words each, lowercase) that describe this conversation's topics. Return ONLY a JSON array of strings, e.g. [\"go\",\"refactoring\",\"api design\"]. No explanation."
-	tagMsgs := []provider.ChatMessage{{Role: "user", Content: sb.String()}}
+	tagMsgs := []llmtypes.ChatMessage{{Role: "user", Content: sb.String()}}
 
 	start := time.Now()
-	raw, err := prov.Complete(context.Background(), provider.ChatRequest{SystemPrompt: prompt, Messages: tagMsgs, Model: s.utilityModel})
+	raw, err := prov.Complete(context.Background(), llmtypes.ChatRequest{SystemPrompt: prompt, Messages: tagMsgs, Model: s.utilityModel})
 	duration := time.Since(start)
 	s.recordUtilityMetrics(sessionID, "autoTags", duration, err)
 
@@ -2931,11 +2934,11 @@ const earlyStopSynthesisPrompt = "You've reached the maximum number of steps. Pr
 // after invoking this helper.
 func (s *chatServiceImpl) earlyStopSynthesis(
 	ctx context.Context,
-	prov provider.Provider,
+	prov llmcontracts.Provider,
 	model string,
 	systemPrompt string,
 	slotResult *SlotAssemblyResult,
-	chatMessages []provider.ChatMessage,
+	chatMessages []llmtypes.ChatMessage,
 	ch chan<- chat.StreamEvent,
 	fullContent *strings.Builder,
 	finalContent *strings.Builder,
@@ -2953,14 +2956,14 @@ func (s *chatServiceImpl) earlyStopSynthesis(
 
 	// Append the synthesis prompt as a user message so the LLM has the
 	// instruction in-context without modifying the shared chatMessages slice.
-	synthMessages := make([]provider.ChatMessage, len(base)+1)
+	synthMessages := make([]llmtypes.ChatMessage, len(base)+1)
 	copy(synthMessages, base)
-	synthMessages[len(base)] = provider.ChatMessage{
+	synthMessages[len(base)] = llmtypes.ChatMessage{
 		Role:    "user",
 		Content: earlyStopSynthesisPrompt,
 	}
 
-	synthCh, err := prov.StreamChat(ctx, provider.ChatRequest{
+	synthCh, err := prov.StreamChat(ctx, llmtypes.ChatRequest{
 		SystemPrompt: systemPrompt,
 		SlotBlocks:   slotBlocksFor(slotResult),
 		Messages:     synthMessages,
@@ -3002,7 +3005,7 @@ func (s *chatServiceImpl) earlyStopSynthesis(
 // would reject any inner field as "additional properties not allowed at /data."
 // The provider-facing slice still carries the closed/normalized schema; the
 // canonical map stays loose.
-func normalizeToolInputSchemas(tools []provider.ToolDefinition) {
+func normalizeToolInputSchemas(tools []llmtypes.ToolDefinition) {
 	for i := range tools {
 		clone := cloneSchemaNode(tools[i].InputSchema)
 		normalizeSchemaNode(clone)

@@ -4,7 +4,7 @@ import (
 	"errors"
 	"strings"
 
-	"github.com/hollis-labs/go-providers/provider"
+	llmcontracts "github.com/hollis-labs/go-llm-contracts"
 )
 
 // ErrContextOverflow is a sentinel for "provider rejected the request because
@@ -94,7 +94,7 @@ func IsCompactRecoverable(err error) bool {
 	if err == nil {
 		return false
 	}
-	if errors.Is(err, provider.ErrRequestExceedsRateBudget) {
+	if errors.Is(err, llmcontracts.ErrRequestExceedsRateBudget) {
 		return true
 	}
 	return IsContextOverflow(err)

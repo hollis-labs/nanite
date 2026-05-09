@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/hollis-labs/go-providers/provider"
+	llmcontracts "github.com/hollis-labs/go-llm-contracts"
 	"github.com/hollis-labs/nanite/internal/chat"
 )
 
@@ -29,7 +29,7 @@ func TestParseRateBudgetEstimate(t *testing.T) {
 		},
 		{
 			name:          "raw sentinel without numbers",
-			err:           provider.ErrRequestExceedsRateBudget,
+			err:           llmcontracts.ErrRequestExceedsRateBudget,
 			wantEstimated: 0,
 			wantLimit:     0,
 			wantOK:        false,
@@ -64,7 +64,7 @@ func TestIsRateBudgetExceeded(t *testing.T) {
 	if !IsRateBudgetExceeded(asWrappedRateBudgetError(100, 50)) {
 		t.Error("wrapped sentinel should match")
 	}
-	if !IsRateBudgetExceeded(provider.ErrRequestExceedsRateBudget) {
+	if !IsRateBudgetExceeded(llmcontracts.ErrRequestExceedsRateBudget) {
 		t.Error("raw sentinel should match")
 	}
 	if IsRateBudgetExceeded(errors.New("other")) {
@@ -186,11 +186,11 @@ func TestPauseAndMaybeRetry_SecondCallStraightToUserAction(t *testing.T) {
 func TestPauseAndMaybeRetry_AutoRetryWhenBudgetFrees(t *testing.T) {
 	// We can't easily construct an *Anthropic without keys, but the helper's
 	// retry path only depends on RateTracker. Since providerRateTracker only
-	// type-asserts against *provider.Anthropic, we skip the full retry path
+	// type-asserts against *nllmanthropic.Client, we skip the full retry path
 	// in unit tests. The integration smoke (boot prompt §Verification)
 	// covers the real retry. Document the gap with a TODO marker so future
 	// work can lift the type assertion to an interface.
-	t.Skip("auto-retry path requires *provider.Anthropic; covered by integration smoke")
+	t.Skip("auto-retry path requires *nllmanthropic.Client; covered by integration smoke")
 }
 
 // TestPauseAndMaybeRetry_UnparseableErrorStillEmitsEvent confirms that even

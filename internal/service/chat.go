@@ -10,6 +10,8 @@ import (
 
 	"github.com/google/uuid"
 	agentsessions "github.com/hollis-labs/go-agent-sessions/agentsessions"
+	llmcontracts "github.com/hollis-labs/go-llm-contracts"
+	"github.com/hollis-labs/go-providers/provider"
 	"github.com/hollis-labs/nanite/internal/agent"
 	"github.com/hollis-labs/nanite/internal/chat"
 	"github.com/hollis-labs/nanite/internal/config"
@@ -17,10 +19,10 @@ import (
 	"github.com/hollis-labs/nanite/internal/filter"
 	inspectsvc "github.com/hollis-labs/nanite/internal/inspector"
 	"github.com/hollis-labs/nanite/internal/lifecycle"
+	nllmanthropic "github.com/hollis-labs/nanite/internal/llm/anthropic"
 	"github.com/hollis-labs/nanite/internal/loopdetect"
 	"github.com/hollis-labs/nanite/internal/permission"
 	"github.com/hollis-labs/nanite/internal/reminders"
-	"github.com/hollis-labs/go-providers/provider"
 	runtimeagent "github.com/hollis-labs/nanite/internal/runtime/agent"
 	"github.com/hollis-labs/nanite/internal/safego"
 	"github.com/hollis-labs/nanite/internal/store"
@@ -529,7 +531,7 @@ func (s *chatServiceImpl) RetryLastMessage(ctx context.Context, sessionID string
 			provName = "anthropic"
 		}
 		if prov, ok := s.providers.Get(provName); ok {
-			if ap, ok := prov.(*provider.Anthropic); ok && ap.CircuitBreaker != nil {
+			if ap, ok := prov.(*nllmanthropic.Client); ok && ap.CircuitBreaker != nil {
 				ap.CircuitBreaker.Reset()
 				slog.Info("chat-service: circuit breaker reset for retry", "session_id", sessionID)
 			}
@@ -704,7 +706,7 @@ func (s *chatServiceImpl) CloseAgentSession(ctx context.Context, sessionID strin
 //
 // When a preferred provider is unavailable and the chain falls through,
 // a provider.fallback plugin event is emitted.
-func (s *chatServiceImpl) resolveProvider(sessionID, sessionProvider, agentProvider, model string) (string, provider.Provider) {
+func (s *chatServiceImpl) resolveProvider(sessionID, sessionProvider, agentProvider, model string) (string, llmcontracts.Provider) {
 	// Track the first requested provider so we can emit a fallback event
 	// when a later candidate is selected instead.
 	requested := sessionProvider

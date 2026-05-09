@@ -20,16 +20,16 @@ The executor pattern handles **structured multi-step tool flows behind a typed c
 
 **Routes through an executor:**
 
-- **Multi-step flows (≥2 tool calls) needed to satisfy a single user intent.** Examples: rendering a `report-card` envelope (describe schema → resolve fields from context → emit → validate → repair if needed); a knowledge-grounded answer that needs `memory_recall` then `knowledge_get` then synthesis; a card-render that needs to consult `nanite_remember` for prior repair hints.
+- **Multi-step flows (≥2 tool calls) needed to satisfy a single user intent.** Examples: rendering a `report-card` envelope (describe schema → resolve fields from context → emit → validate → repair if needed); a knowledge-grounded answer that needs `memory_recall` then `knowledge_get` then synthesis; a card-render that needs to consult `lesson_capture` for prior repair hints.
 - **All v1 passive renderable envelope types (the pilot scope, B3).** Per `docs/panels/envelope-render-target.md` §"v1 default render target table", the 10 passive renderables are: `report-card`, `info-card`, `list-card`, `metric-card`, `progress-card`, `table-card`, `timeline-card`, `diff-card`, `document-viewer`, `giphy-modal`. These all share the shape "agent has an intent + freeform context, and needs to produce a structurally-valid envelope". They are the cleanest pilot — the lens primitives (describe / validate / remember) already exist for these types, and the recovery loop they motivate is exactly what bloated the chat surface.
 - **Recovery loops that span more than one tool.** When validation produces a `wrong_card_type` error, the recovery (re-describe, swap type, re-emit, re-validate) is multi-step by definition — and is exactly the loop the chat agent should *not* be running.
 
 **Stays chat-direct (does NOT route through an executor):**
 
-- **Single read-only tool calls.** `dev_grep`, `dev_glob`, `memory_recall`, `knowledge_get`, `nanite_tool_describe` (when called as discovery, not as part of a render loop). One call, one result, no recovery flow needed.
+- **Single read-only tool calls.** `dev_grep`, `dev_glob`, `memory_recall`, `knowledge_get`, `tool_describe` (when called as discovery, not as part of a render loop). One call, one result, no recovery flow needed.
 - **Conversational responses.** Anything the chat agent can answer from its existing context without calling a tool. The c117 test specifically protects this case: "let's do some testing — show me X" must still work.
 - **Decision-flow envelopes.** `approval-card`, `proposal-card`, `confirmation-card`, `question-form`, `error-report`, `chat-loop-terminated`, `elicitation-prompt`, `subagent-spawn-approval` — these stay inline because they require user-in-the-loop decisions and the chat agent owns the user channel. (Per `envelope-render-target.md` v1 table, these all have `default_render_target: (none — inline)`.)
-- **Lens recovery during chat-direct calls that didn't escalate.** If a single chat-direct tool call fails with a recoverable error, the chat agent gets the structured error and can reach for `nanite_validate` / `nanite_remember` itself. Reactive recovery on a single-call failure does not promote to executor.
+- **Lens recovery during chat-direct calls that didn't escalate.** If a single chat-direct tool call fails with a recoverable error, the chat agent gets the structured error and can reach for `tool_validate` / `lesson_capture` itself. Reactive recovery on a single-call failure does not promote to executor.
 
 **High-stakes mutations — policy-dependent.** Mutations that cross trust boundaries (subagent spawn, plugin tool calls without prior session-grant, dispatch.ExecuteTask of a Worker-tier agent) **stay on the H1 trust path** (`internal/dispatch/trust.go::TrustResolver`, `subagent-spawn-approval` envelope). The executor pattern does NOT bypass H1 — an executor that needs to do a high-stakes mutation requests it through the same approval flow the chat agent would. The simplification is in the *flow shape* (one envelope back to chat instead of N back-and-forth tool calls), not in the trust model. The policy: **executors inherit the dispatching session's trust-tier and path-grants (see §4); they do not get an elevated trust-tier**.
 
@@ -57,7 +57,7 @@ type ExecutorRequest struct {
     // "render_envelope" (e.g. "report-card", "list-card"). Empty for
     // intents that do not produce an envelope. The classifier may
     // leave this empty; the executor's first step is to pick the
-    // type via nanite_tool_describe if so.
+    // type via tool_describe if so.
     TargetEnvelopeType string `json:"target_envelope_type,omitempty"`
 
     // UserRequest is the verbatim user message that motivated the
@@ -99,7 +99,7 @@ type ExecutorResponse struct {
     Envelope *chat.Envelope `json:"envelope,omitempty"`
 
     // Lessons are repair-hints the executor learned during the flow.
-    // The chat agent records these via nanite_remember on its own
+    // The chat agent records these via lesson_capture on its own
     // surface. (Could also be done by the executor; see §3 trade-off.)
     Lessons []recovery.Hint `json:"lessons,omitempty"`
 
@@ -138,15 +138,15 @@ const (
 )
 ```
 
-**Tool surface on the chat side:** one tool, `nanite_dispatch_executor`, with input shape `ExecutorRequest` and output shape `ExecutorResponse`. The chat agent's existing `dispatch.ExecuteTask` primitive is **not reused** — that primitive is for Worker/Planner spawn (full agent profile, full tool surface, async-capable). The executor handoff is synchronous, single-round-trip, and does not boot a new agent profile from scratch; it dispatches into a long-lived executor session managed by the harness.
+**Tool surface on the chat side:** one tool, `dispatch_executor`, with input shape `ExecutorRequest` and output shape `ExecutorResponse`. The chat agent's existing `dispatch.ExecuteTask` primitive is **not reused** — that primitive is for Worker/Planner spawn (full agent profile, full tool surface, async-capable). The executor handoff is synchronous, single-round-trip, and does not boot a new agent profile from scratch; it dispatches into a long-lived executor session managed by the harness.
 
 **Chat agent's contract:**
 
 1. Receive user message.
 2. Classifier (B2) produces `Intent` + `TargetEnvelopeType` if applicable.
-3. If the intent maps to an executor, build `ExecutorRequest` (verbatim user message, minimum context handles, session ID) and call `nanite_dispatch_executor`.
-4. Receive `ExecutorResponse`. Render the envelope if present; narrate the summary; record lessons via `nanite_remember`.
-5. **Do not re-execute the executor's flow.** No re-running of `nanite_tool_describe`, no re-validating the envelope, no second-pass repair attempts. The executor's response is authoritative for its turn.
+3. If the intent maps to an executor, build `ExecutorRequest` (verbatim user message, minimum context handles, session ID) and call `dispatch_executor`.
+4. Receive `ExecutorResponse`. Render the envelope if present; narrate the summary; record lessons via `lesson_capture`.
+5. **Do not re-execute the executor's flow.** No re-running of `tool_describe`, no re-validating the envelope, no second-pass repair attempts. The executor's response is authoritative for its turn.
 
 **Anti-patterns explicitly excluded from the contract:**
 
@@ -160,18 +160,18 @@ const (
 
 Concretely:
 
-- **Pre-handoff (today):** `nanite_tool_describe`, `nanite_validate`, `nanite_remember`, plus the per-type validator at the handler boundary, are all reachable from the chat agent's tool list. The chat agent can call them directly. This is the surface that bloated under c107 → c117.
+- **Pre-handoff (today):** `tool_describe`, `tool_validate`, `lesson_capture`, plus the per-type validator at the handler boundary, are all reachable from the chat agent's tool list. The chat agent can call them directly. This is the surface that bloated under c107 → c117.
 - **Post-handoff (this design):** the lens primitives are registered on the executor session's profile, not on the chat session's profile. The chat agent's tool list shrinks by exactly these tools; the executor's grows by them. Per-type validators stay at the handler boundary (they fire on every emit regardless of caller, per anti-pattern 5 / decision rule 3 — this is mechanical enforcement, not a tool the agent calls).
-- **What the chat agent's tool surface looks like post-handoff:** the existing surface MINUS the lens primitives, PLUS one new tool (`nanite_dispatch_executor`). Net: the surface narrows. This is the "handcuffs OFF" direction — the chat agent has fewer tools but a broader capability framing ("dispatch the executor for any structured envelope").
+- **What the chat agent's tool surface looks like post-handoff:** the existing surface MINUS the lens primitives, PLUS one new tool (`dispatch_executor`). Net: the surface narrows. This is the "handcuffs OFF" direction — the chat agent has fewer tools but a broader capability framing ("dispatch the executor for any structured envelope").
 - **What "tool surface" means for each side:**
-  - *Chat side:* user-facing meta-tools (`nanite_message_send`, `nanite_panel_open`), plan/todo primitives (`nanite_todo_*`, `nanite_plan_*`), the new `nanite_dispatch_executor`, and pass-throughs the chat agent uses for its own work (`memory_recall` for context, `knowledge_get` for grounding the user-facing narration).
-  - *Executor side:* lens primitives (`nanite_tool_describe`, `nanite_validate`, `nanite_remember`), the type-specific data tools (`nanite_giphy_search` etc.), the envelope emit primitive (`nanite_show_card`), plus read-only context tools (`memory_recall`, `knowledge_get`) for grounding.
+  - *Chat side:* user-facing meta-tools (`message_send`, `panel_open`), plan/todo primitives (`todo_*`, `plan_*`), the new `dispatch_executor`, and pass-throughs the chat agent uses for its own work (`memory_recall` for context, `knowledge_get` for grounding the user-facing narration).
+  - *Executor side:* lens primitives (`tool_describe`, `tool_validate`, `lesson_capture`), the type-specific data tools (`giphy_search` etc.), the envelope emit primitive (`card_show`), plus read-only context tools (`memory_recall`, `knowledge_get`) for grounding.
 
 **Why this works:** the lens was designed as a **reactive** recovery layer (§3 of `agent-context-architecture.md`). It belongs *next to* the action that might fail. After the handoff, the action that might fail (multi-step envelope rendering) lives on the executor. The lens lives there too. The chat agent never "passes through" the lens because the chat agent isn't doing the action — it's dispatching the action. This is exactly the orchestrator-workers split: the worker has the recovery surface; the orchestrator has the user surface.
 
 **Trade-off considered:** the executor could **delegate** lens calls to a sub-tool (i.e., make `describe` / `validate` / `remember` tools the executor calls, rather than tools the executor profile carries). The trade-off is whether "describe" is a tool a model reaches for or a function the executor invokes deterministically. **Decision: keep them as tools on the executor's profile**, not as deterministic functions. The lens was always designed to be model-reached (per `agentic-error-recovery.md`'s "ask a peer" variation — the LLM repair pass needs a tool boundary). Making them deterministic on the executor closes off the LLM-repair fallback. Stay with tools.
 
-**Lessons handling — open trade-off explicit:** in §2 the contract has `Lessons []recovery.Hint` returning to chat for the chat agent to record via `nanite_remember`. The alternative is: the executor calls `nanite_remember` itself before responding (it has the tool). **Decision: executor calls `nanite_remember` itself**; the `Lessons` field in the response is informational (so the chat agent can narrate "I learned X" if it wants), not load-bearing for persistence. Rationale: (a) the executor has fresher context for the lesson; (b) keeps the chat agent's surface narrower (it no longer needs `nanite_remember`); (c) avoids a race where the chat agent forgets to record. The `Lessons` field stays in the response shape for narration / telemetry but is not a checklist the chat agent must execute.
+**Lessons handling — open trade-off explicit:** in §2 the contract has `Lessons []recovery.Hint` returning to chat for the chat agent to record via `lesson_capture`. The alternative is: the executor calls `lesson_capture` itself before responding (it has the tool). **Decision: executor calls `lesson_capture` itself**; the `Lessons` field in the response is informational (so the chat agent can narrate "I learned X" if it wants), not load-bearing for persistence. Rationale: (a) the executor has fresher context for the lesson; (b) keeps the chat agent's surface narrower (it no longer needs `lesson_capture`); (c) avoids a race where the chat agent forgets to record. The `Lessons` field stays in the response shape for narration / telemetry but is not a checklist the chat agent must execute.
 
 ## 4. Trust + permission
 
@@ -233,7 +233,7 @@ Three phases. Each phase has explicit graduation criteria measured by B6 telemet
 - Zero regressions on the c117 test (agent does not dodge "show me X" requests).
 - System prompt word count for the chat agent drops below 600 (recovered from current ~1076; target progress).
 
-**Phase 2 — Lens primitives removed from chat surface (B4, CW-20260429-0033).** Once Phase 1 graduates, the chat agent's tool surface drops the lens primitives. `nanite_tool_describe`, `nanite_validate`, `nanite_remember` are no longer registered on the chat profile. Chat-direct fallback is removed; classifier misses surface as `invalid_intent` and the chat agent narrates the gap rather than improvising. Chat prompt (B5) is updated to remove the lens framing entirely; system prompt budget targets ~310 words (the pre-c107 baseline).
+**Phase 2 — Lens primitives removed from chat surface (B4, CW-20260429-0033).** Once Phase 1 graduates, the chat agent's tool surface drops the lens primitives. `tool_describe`, `tool_validate`, `lesson_capture` are no longer registered on the chat profile. Chat-direct fallback is removed; classifier misses surface as `invalid_intent` and the chat agent narrates the gap rather than improvising. Chat prompt (B5) is updated to remove the lens framing entirely; system prompt budget targets ~310 words (the pre-c107 baseline).
 
 **Graduation to Phase 3:**
 
@@ -286,7 +286,7 @@ The handoff design **removes layers (b) and (c) from the chat agent's path**. La
 
 > "Could this go in a tool description instead of the system prompt? If yes, do that. Tool descriptions are evaluated when the agent considers the tool; system prompt rules are evaluated globally."
 
-**Run:** The "you dispatch envelopes via the executor" framing is deliberately **at the tool description layer** for `nanite_dispatch_executor`. The description carries: when to use it, what intents it accepts, what it returns. The system prompt update (B5) carries only the identity-level framing ("you are an agent that dispatches structured work"); the detailed when-to-call lives on the tool.
+**Run:** The "you dispatch envelopes via the executor" framing is deliberately **at the tool description layer** for `dispatch_executor`. The description carries: when to use it, what intents it accepts, what it returns. The system prompt update (B5) carries only the identity-level framing ("you are an agent that dispatches structured work"); the detailed when-to-call lives on the tool.
 
 **Verdict:** **Respects.** B5 prompt diff is small; tool description is where the depth lives.
 
@@ -312,7 +312,7 @@ The handoff design **removes layers (b) and (c) from the chat agent's path**. La
 
 > "Apply the c117 test: would this rule cause an agent to dodge a 'let's do some testing — show me X' request? If yes, the framing is too strict."
 
-**Run:** The c117 test is the gate. Walk through the scenario: user types "let's do some testing — show me a report card with the latest sprint metrics." Pre-handoff: chat agent reads system-prompt rule "do not render a card from data you don't have", picks `info-card` instead, dodges. Post-handoff: chat agent classifier (B2) emits `Intent: render_envelope, TargetEnvelopeType: report-card, UserRequest: "show me a report card with the latest sprint metrics"`. Chat agent dispatches via `nanite_dispatch_executor`. Executor receives the request, runs the multi-step flow (describe report-card schema → resolve fields from context / scratchpad → emit → validate → repair if needed → return). Chat agent renders the result.
+**Run:** The c117 test is the gate. Walk through the scenario: user types "let's do some testing — show me a report card with the latest sprint metrics." Pre-handoff: chat agent reads system-prompt rule "do not render a card from data you don't have", picks `info-card` instead, dodges. Post-handoff: chat agent classifier (B2) emits `Intent: render_envelope, TargetEnvelopeType: report-card, UserRequest: "show me a report card with the latest sprint metrics"`. Chat agent dispatches via `dispatch_executor`. Executor receives the request, runs the multi-step flow (describe report-card schema → resolve fields from context / scratchpad → emit → validate → repair if needed → return). Chat agent renders the result.
 
 The chat agent **never reads the prohibition rule** because the rule no longer exists on its surface (B5 prompt update). The executor reads its own task-shaped framing ("render the requested envelope; if you can't ground a field, return a question-form for it"). The dodging behavior is structurally impossible.
 
@@ -333,7 +333,7 @@ The chat agent **never reads the prohibition rule** because the rule no longer e
 | 1 — Right layer | Respects | Classifier + tool surface, not system prompt. |
 | 2 — Preemptive vs reactive | Respects (mitigated) | Dispatch is routing, not gating; tool description is verb-led. |
 | 3 — Redundant enforcement | Respects, reduces | Net layer removal. |
-| 4 — Tool description vs prompt | Respects | Depth on `nanite_dispatch_executor` description. |
+| 4 — Tool description vs prompt | Respects | Depth on `dispatch_executor` description. |
 | 5 — Classifier injection | Respects | B2 is the dispatch decision-maker. |
 | 6 — Handcuffs OFF | Respects | Surface narrows, capability broadens, no user-facing gates. |
 | 7 — c117 test | Respects | Dodging behavior structurally impossible post-handoff. |

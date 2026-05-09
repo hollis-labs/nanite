@@ -14,9 +14,18 @@
 -- the in-place UPDATE for databases past 055 (the rename-arc reflow) — they
 -- need the new bullet appended into the Capability block.
 --
--- Idempotent: REPLACE matches the pre-B5 capability block exactly (the meta-
--- tools bullet alone, after 053's dedup). The LIKE guard skips rows that
--- already carry the new bullet, so re-running this migration is safe.
+-- Idempotent + resilient: the WHERE clause LIKE-matches the EXACT substring
+-- REPLACE will replace (meta-tools bullet + blank line + ## Style header), so
+-- the UPDATE only fires when REPLACE will actually succeed — no perpetual
+-- updated_at bumps on cohorts where the needle isn't present (user-edited
+-- templates, alternate whitespace, future header reorderings). The NOT LIKE
+-- guard skips rows that already carry the new bullet, so re-running the
+-- migration on an already-updated row is a true no-op.
+--
+-- This addresses PR #114 review (comments 3213258308, 3213258313): the
+-- previous form guarded only on '%memorise every schema.%' which a row could
+-- satisfy without the multi-line REPLACE needle being present, causing
+-- silently-no-op UPDATEs that still touched updated_at every boot.
 --
 -- IMPORTANT: no semicolons inside comments. Bare UPDATE (no BEGIN/COMMIT),
 -- so the literal SQL terminator inside a string literal would be interpreted
@@ -36,5 +45,7 @@ SET template = REPLACE(
     ),
     updated_at = datetime('now')
 WHERE id = 'blt-chat-harness-001'
-  AND template LIKE '%memorise every schema.%'
+  AND template LIKE '%- You have **meta-tools** for discovery (tool_describe), pre-flight validation (tool_validate), and learning capture (lesson_capture). Reach for them when a tool''s contract is unfamiliar or after a call fails — you don''t have to memorise every schema.
+
+## Style%'
   AND template NOT LIKE '%routes you to a specialized executor%';

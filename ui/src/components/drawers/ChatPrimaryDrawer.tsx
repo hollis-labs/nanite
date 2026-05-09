@@ -9,9 +9,10 @@
  * list, matching today's `ToolCallDrawer` body layout.
  */
 
-import { useMemo, useRef, useState, useCallback, useEffect } from 'react'
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
+  ArrowDownLeft,
+  ArrowUpRight,
   ClipboardList,
   Eye,
   EyeOff,
@@ -28,70 +29,69 @@ import {
   Trash2,
   Wrench,
   X,
-  ArrowUpRight,
-  ArrowDownLeft,
-} from 'lucide-react'
-import { ScrollArea } from '@/components/ui/scroll-area'
-import { useLayoutStore } from '@/stores/useLayoutStore'
-import { useAppStore } from '@/stores/useAppStore'
-import { useChatStore } from '@/stores/useChatStore'
-import { api } from '@/lib/api'
+} from "lucide-react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { EnvelopeRenderer } from "@/components/chat/envelopes/EnvelopeRenderer";
+import { ToolCallItem } from "@/components/chat/ToolCallItem";
+import { ScrollArea } from "@/components/ui/scroll-area";
+import { ScopeChip, type ScopeFilter, ScopeFilterChip } from "@/components/work/ScopeChip";
+import { api } from "@/lib/api";
 import type {
+  AgentStateScope,
   Document,
-  PinnedContent,
-  Envelope,
   DrawerCardType,
   DrawerPinnedCard,
-  AgentStateScope,
-} from '@/lib/types'
-import { EnvelopeRenderer } from '@/components/chat/envelopes/EnvelopeRenderer'
-import { ToolCallItem } from '@/components/chat/ToolCallItem'
-import { ScopeChip, ScopeFilterChip, type ScopeFilter } from '@/components/work/ScopeChip'
+  Envelope,
+  PinnedContent,
+} from "@/lib/types";
+import { useAppStore } from "@/stores/useAppStore";
+import { useIsStreaming, useToolCalls } from "@/stores/useChatStore";
+import { useLayoutStore } from "@/stores/useLayoutStore";
 
 export function ChatPrimaryDrawer() {
-  const drawer = useLayoutStore((s) => s.chatPrimaryDrawer)
-  const setDrawer = useLayoutStore((s) => s.setChatPrimaryDrawer)
-  const activeSessionId = useAppStore((s) => s.activeSessionId)
-  const toolCalls = useChatStore((s) => s.toolCalls)
-  const isStreaming = useChatStore((s) => s.isStreaming)
-  const queryClient = useQueryClient()
+  const drawer = useLayoutStore((s) => s.chatPrimaryDrawer);
+  const setDrawer = useLayoutStore((s) => s.setChatPrimaryDrawer);
+  const activeSessionId = useAppStore((s) => s.activeSessionId);
+  const toolCalls = useToolCalls();
+  const isStreaming = useIsStreaming();
+  const queryClient = useQueryClient();
 
-  const hasRunningTool = toolCalls.some((tc) => tc.status === 'running')
+  const hasRunningTool = toolCalls.some((tc) => tc.status === "running");
 
   // DB-backed pinned cards (existing API).
   const { data: pinnedCards = [] } = useQuery<DrawerPinnedCard[]>({
-    queryKey: ['drawer-cards', activeSessionId],
+    queryKey: ["drawer-cards", activeSessionId],
     queryFn: () => api.listDrawerCards(activeSessionId!),
     enabled: !!activeSessionId,
-  })
+  });
 
-  if (!activeSessionId) return null
+  if (!activeSessionId) return null;
 
   // Pull-tab drag mechanics — top-drawer variant. The drag-handle row is
   // always visible at the bottom of the drawer. Drag DOWN to grow (body
   // extends downward into the transcript area), drag UP to shrink. Auto-
   // closes when released near 0 height. Double-click toggles open/closed.
-  const dragRef = useRef<{ y: number; height: number } | null>(null)
+  const dragRef = useRef<{ y: number; height: number } | null>(null);
   const onPointerDown = (e: React.PointerEvent) => {
-    dragRef.current = { y: e.clientY, height: drawer.height || 240 }
-    e.currentTarget.setPointerCapture(e.pointerId)
-    if (!drawer.open) setDrawer({ open: true })
-  }
+    dragRef.current = { y: e.clientY, height: drawer.height || 240 };
+    e.currentTarget.setPointerCapture(e.pointerId);
+    if (!drawer.open) setDrawer({ open: true });
+  };
   const onPointerMove = (e: React.PointerEvent) => {
-    const d = dragRef.current
-    if (!d) return
-    const next = Math.max(0, d.height + (e.clientY - d.y))
-    setDrawer({ height: next })
-  }
+    const d = dragRef.current;
+    if (!d) return;
+    const next = Math.max(0, d.height + (e.clientY - d.y));
+    setDrawer({ height: next });
+  };
   const onPointerUp = (e: React.PointerEvent) => {
-    if (!dragRef.current) return
-    dragRef.current = null
-    e.currentTarget.releasePointerCapture(e.pointerId)
-    if (drawer.height < 24) setDrawer({ open: false, height: 240 })
-  }
+    if (!dragRef.current) return;
+    dragRef.current = null;
+    e.currentTarget.releasePointerCapture(e.pointerId);
+    if (drawer.height < 24) setDrawer({ open: false, height: 240 });
+  };
   const onDoubleClick = () => {
-    setDrawer({ open: !drawer.open, height: drawer.height || 240 })
-  }
+    setDrawer({ open: !drawer.open, height: drawer.height || 240 });
+  };
 
   return (
     <div className="max-w-3xl w-full mx-auto relative">
@@ -114,35 +114,35 @@ export function ChatPrimaryDrawer() {
         <div className="flex items-center justify-between gap-2 px-3 py-0.5 shrink-0 border-x border-t border-border bg-bg-elevated">
           <div className="flex items-center gap-1 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden min-w-0 flex-1">
             <PrimaryTabButton
-              active={drawer.activeTab === 'documents'}
+              active={drawer.activeTab === "documents"}
               icon={<FileText className="w-3.5 h-3.5" />}
               label="Documents"
-              onClick={() => setDrawer({ activeTab: 'documents' })}
+              onClick={() => setDrawer({ activeTab: "documents" })}
             />
             <PrimaryTabButton
-              active={drawer.activeTab === 'reports'}
+              active={drawer.activeTab === "reports"}
               icon={<ClipboardList className="w-3.5 h-3.5" />}
               label="Reports"
-              onClick={() => setDrawer({ activeTab: 'reports' })}
+              onClick={() => setDrawer({ activeTab: "reports" })}
             />
             <PrimaryTabButton
-              active={drawer.activeTab === 'diffs'}
+              active={drawer.activeTab === "diffs"}
               icon={<GitCompare className="w-3.5 h-3.5" />}
               label="Diffs"
-              onClick={() => setDrawer({ activeTab: 'diffs' })}
+              onClick={() => setDrawer({ activeTab: "diffs" })}
             />
             <PrimaryTabButton
-              active={drawer.activeTab === 'tools'}
+              active={drawer.activeTab === "tools"}
               icon={<Wrench className="w-3.5 h-3.5" />}
               label="Tools"
               runningPip={hasRunningTool && isStreaming}
-              onClick={() => setDrawer({ activeTab: 'tools' })}
+              onClick={() => setDrawer({ activeTab: "tools" })}
             />
             <PrimaryTabButton
-              active={drawer.activeTab === 'pins'}
+              active={drawer.activeTab === "pins"}
               icon={<Pin className="w-3.5 h-3.5" />}
               label="Pins"
-              onClick={() => setDrawer({ activeTab: 'pins' })}
+              onClick={() => setDrawer({ activeTab: "pins" })}
             />
             {pinnedCards.length > 0 && (
               <div className="w-px h-4 bg-border mx-1 shrink-0" aria-hidden="true" />
@@ -154,8 +154,10 @@ export function ChatPrimaryDrawer() {
                 card={card}
                 onClick={() => setDrawer({ activeTab: `pin:${card.id}` })}
                 onUnpin={async () => {
-                  await api.unpinDrawerCard(card.id)
-                  void queryClient.invalidateQueries({ queryKey: ['drawer-cards', activeSessionId] })
+                  await api.unpinDrawerCard(card.id);
+                  void queryClient.invalidateQueries({
+                    queryKey: ["drawer-cards", activeSessionId],
+                  });
                 }}
               />
             ))}
@@ -190,7 +192,7 @@ export function ChatPrimaryDrawer() {
         <GripHorizontal size={12} className="text-fg-muted pointer-events-none" />
       </div>
     </div>
-  )
+  );
 }
 
 // ── Tab button components ───────────────────────────────────────────────────
@@ -203,11 +205,11 @@ function PrimaryTabButton({
   onClick,
   runningPip,
 }: {
-  active: boolean
-  icon: React.ReactNode
-  label: string
-  onClick: () => void
-  runningPip?: boolean
+  active: boolean;
+  icon: React.ReactNode;
+  label: string;
+  onClick: () => void;
+  runningPip?: boolean;
 }) {
   return (
     <button
@@ -215,8 +217,8 @@ function PrimaryTabButton({
       onClick={onClick}
       className={`flex items-center gap-1.5 px-2 py-0.5 rounded text-xs transition-colors shrink-0 ${
         active
-          ? 'bg-surface/60 text-fg'
-          : 'text-fg-muted hover:text-fg-secondary hover:bg-surface/40'
+          ? "bg-surface/60 text-fg"
+          : "text-fg-muted hover:text-fg-secondary hover:bg-surface/40"
       }`}
     >
       {icon}
@@ -225,7 +227,7 @@ function PrimaryTabButton({
         <span className="inline-block h-1.5 w-1.5 rounded-full bg-warning animate-pulse" />
       )}
     </button>
-  )
+  );
 }
 
 function PrimaryPinnedTabButton({
@@ -234,17 +236,17 @@ function PrimaryPinnedTabButton({
   onClick,
   onUnpin,
 }: {
-  active: boolean
-  card: DrawerPinnedCard
-  onClick: () => void
-  onUnpin: () => void
+  active: boolean;
+  card: DrawerPinnedCard;
+  onClick: () => void;
+  onUnpin: () => void;
 }) {
   return (
     <div
       className={`group flex items-center gap-1 px-2 py-0.5 rounded text-xs transition-colors shrink-0 max-w-[160px] ${
         active
-          ? 'bg-surface/60 text-fg'
-          : 'text-fg-muted hover:text-fg-secondary hover:bg-surface/40'
+          ? "bg-surface/60 text-fg"
+          : "text-fg-muted hover:text-fg-secondary hover:bg-surface/40"
       }`}
     >
       <button
@@ -259,8 +261,8 @@ function PrimaryPinnedTabButton({
       <button
         type="button"
         onClick={(e) => {
-          e.stopPropagation()
-          onUnpin()
+          e.stopPropagation();
+          onUnpin();
         }}
         className="ml-0.5 p-0.5 rounded text-fg-faint opacity-0 group-hover:opacity-100 hover:text-danger transition-colors"
         aria-label={`Unpin ${card.title || card.card_type}`}
@@ -268,28 +270,33 @@ function PrimaryPinnedTabButton({
         <X className="w-3 h-3" />
       </button>
     </div>
-  )
+  );
 }
 
 function DrawerBody({
   activeTab,
   pinnedCards,
 }: {
-  activeTab: string
-  pinnedCards: DrawerPinnedCard[]
+  activeTab: string;
+  pinnedCards: DrawerPinnedCard[];
 }) {
   switch (activeTab) {
-    case 'documents': return <DocumentsTab />
-    case 'reports': return <ReportsTab />
-    case 'diffs': return <DiffsTab />
-    case 'tools': return <ToolsTab />
-    case 'pins': return <PinsTab />
+    case "documents":
+      return <DocumentsTab />;
+    case "reports":
+      return <ReportsTab />;
+    case "diffs":
+      return <DiffsTab />;
+    case "tools":
+      return <ToolsTab />;
+    case "pins":
+      return <PinsTab />;
     default:
-      if (activeTab.startsWith('pin:')) {
-        const card = pinnedCards.find((c) => `pin:${c.id}` === activeTab)
-        return card ? <PinnedCardTab card={card} /> : null
+      if (activeTab.startsWith("pin:")) {
+        const card = pinnedCards.find((c) => `pin:${c.id}` === activeTab);
+        return card ? <PinnedCardTab card={card} /> : null;
       }
-      return null
+      return null;
   }
 }
 
@@ -299,86 +306,93 @@ function DrawerBody({
 // changes.
 
 function DocumentsTab() {
-  const activeSessionId = useAppStore((s) => s.activeSessionId)
-  const queryClient = useQueryClient()
-  const [selectedId, setSelectedId] = useState<string | null>(null)
-  const [importing, setImporting] = useState(false)
-  const [pasteMode, setPasteMode] = useState(false)
-  const [pasteName, setPasteName] = useState('')
-  const [pasteContent, setPasteContent] = useState('')
-  const fileInputRef = useRef<HTMLInputElement>(null)
+  const activeSessionId = useAppStore((s) => s.activeSessionId);
+  const queryClient = useQueryClient();
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [importing, setImporting] = useState(false);
+  const [pasteMode, setPasteMode] = useState(false);
+  const [pasteName, setPasteName] = useState("");
+  const [pasteContent, setPasteContent] = useState("");
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const { data: documents = [], isLoading } = useQuery({
-    queryKey: ['documents', activeSessionId],
+    queryKey: ["documents", activeSessionId],
     queryFn: () => api.listDocuments(activeSessionId!),
     enabled: !!activeSessionId,
-  })
+  });
 
-  const selectedDoc = documents.find((d) => d.id === selectedId) ?? null
+  const selectedDoc = documents.find((d) => d.id === selectedId) ?? null;
 
   // Auto-select first doc when list arrives and nothing is selected.
   useEffect(() => {
     if (documents.length > 0 && !selectedId) {
-      setSelectedId(documents[0].id)
+      setSelectedId(documents[0].id);
     }
-  }, [documents, selectedId])
+  }, [documents, selectedId]);
 
   const toggleMutation = useMutation({
-    mutationFn: ({ id, included, fullContent }: { id: string; included: boolean; fullContent: boolean }) =>
-      api.updateDocument(id, { included, full_content: fullContent }),
+    mutationFn: ({
+      id,
+      included,
+      fullContent,
+    }: {
+      id: string;
+      included: boolean;
+      fullContent: boolean;
+    }) => api.updateDocument(id, { included, full_content: fullContent }),
     onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: ['documents', activeSessionId] })
+      void queryClient.invalidateQueries({ queryKey: ["documents", activeSessionId] });
     },
-  })
+  });
 
   const deleteMutation = useMutation({
     mutationFn: (id: string) => api.deleteDocument(id),
     onSuccess: (_, id) => {
-      void queryClient.invalidateQueries({ queryKey: ['documents', activeSessionId] })
-      if (selectedId === id) setSelectedId(null)
+      void queryClient.invalidateQueries({ queryKey: ["documents", activeSessionId] });
+      if (selectedId === id) setSelectedId(null);
     },
-  })
+  });
 
   const createMutation = useMutation({
     mutationFn: (doc: { name: string; content: string; mime_type?: string }) =>
       api.createDocument(activeSessionId!, doc),
     onSuccess: (created) => {
-      void queryClient.invalidateQueries({ queryKey: ['documents', activeSessionId] })
-      setSelectedId(created.id)
-      setPasteMode(false)
-      setPasteName('')
-      setPasteContent('')
+      void queryClient.invalidateQueries({ queryKey: ["documents", activeSessionId] });
+      setSelectedId(created.id);
+      setPasteMode(false);
+      setPasteName("");
+      setPasteContent("");
     },
-  })
+  });
 
   const handleFileUpload = useCallback(
     async (files: FileList | null) => {
-      if (!files || !activeSessionId) return
-      setImporting(true)
+      if (!files || !activeSessionId) return;
+      setImporting(true);
       try {
         for (const file of Array.from(files)) {
-          const text = await file.text()
+          const text = await file.text();
           await createMutation.mutateAsync({
             name: file.name,
             content: text,
-            mime_type: file.type || 'text/plain',
-          })
+            mime_type: file.type || "text/plain",
+          });
         }
       } finally {
-        setImporting(false)
-        if (fileInputRef.current) fileInputRef.current.value = ''
+        setImporting(false);
+        if (fileInputRef.current) fileInputRef.current.value = "";
       }
     },
     [activeSessionId, createMutation],
-  )
+  );
 
   const handlePasteSubmit = useCallback(() => {
-    if (!pasteName.trim() || !pasteContent.trim()) return
-    createMutation.mutate({ name: pasteName.trim(), content: pasteContent.trim() })
-  }, [pasteName, pasteContent, createMutation])
+    if (!pasteName.trim() || !pasteContent.trim()) return;
+    createMutation.mutate({ name: pasteName.trim(), content: pasteContent.trim() });
+  }, [pasteName, pasteContent, createMutation]);
 
   if (!activeSessionId) {
-    return <EmptyState message="No active session" />
+    return <EmptyState message="No active session" />;
   }
 
   return (
@@ -414,9 +428,7 @@ function DocumentsTab() {
           />
         </div>
         <ScrollArea className="flex-1">
-          {isLoading && (
-            <div className="p-3 text-xs text-fg-faint">Loading…</div>
-          )}
+          {isLoading && <div className="p-3 text-xs text-fg-faint">Loading…</div>}
           {!isLoading && documents.length === 0 && (
             <div className="p-3 text-xs text-fg-faint">No documents yet</div>
           )}
@@ -427,7 +439,11 @@ function DocumentsTab() {
               selected={selectedId === doc.id}
               onSelect={() => setSelectedId(doc.id)}
               onToggleInclude={() =>
-                toggleMutation.mutate({ id: doc.id, included: !doc.included, fullContent: doc.full_content })
+                toggleMutation.mutate({
+                  id: doc.id,
+                  included: !doc.included,
+                  fullContent: doc.full_content,
+                })
               }
               onDelete={() => deleteMutation.mutate(doc.id)}
             />
@@ -470,7 +486,7 @@ function DocumentsTab() {
         )}
       </div>
     </div>
-  )
+  );
 }
 
 function DocumentRow({
@@ -480,16 +496,16 @@ function DocumentRow({
   onToggleInclude,
   onDelete,
 }: {
-  doc: Document
-  selected: boolean
-  onSelect: () => void
-  onToggleInclude: () => void
-  onDelete: () => void
+  doc: Document;
+  selected: boolean;
+  onSelect: () => void;
+  onToggleInclude: () => void;
+  onDelete: () => void;
 }) {
   return (
     <div
       className={`group flex items-center gap-1.5 px-2 py-1.5 cursor-pointer transition-colors ${
-        selected ? 'bg-surface text-fg' : 'text-fg-muted hover:bg-surface/60 hover:text-fg'
+        selected ? "bg-surface text-fg" : "text-fg-muted hover:bg-surface/60 hover:text-fg"
       }`}
       onClick={onSelect}
     >
@@ -499,21 +515,23 @@ function DocumentRow({
         <button
           type="button"
           onClick={(e) => {
-            e.stopPropagation()
-            onToggleInclude()
+            e.stopPropagation();
+            onToggleInclude();
           }}
           className={`p-0.5 rounded transition-colors ${
-            doc.included ? 'text-primary hover:text-primary-hover' : 'text-fg-faint hover:text-fg-muted'
+            doc.included
+              ? "text-primary hover:text-primary-hover"
+              : "text-fg-faint hover:text-fg-muted"
           }`}
-          title={doc.included ? 'Exclude from context' : 'Include in context'}
+          title={doc.included ? "Exclude from context" : "Include in context"}
         >
           {doc.included ? <Eye className="w-3 h-3" /> : <EyeOff className="w-3 h-3" />}
         </button>
         <button
           type="button"
           onClick={(e) => {
-            e.stopPropagation()
-            onDelete()
+            e.stopPropagation();
+            onDelete();
           }}
           className="p-0.5 rounded text-fg-faint hover:text-danger transition-colors"
           title="Delete document"
@@ -522,7 +540,7 @@ function DocumentRow({
         </button>
       </div>
     </div>
-  )
+  );
 }
 
 function DocumentDetail({
@@ -530,9 +548,9 @@ function DocumentDetail({
   onToggleInclude,
   onToggleFullContent,
 }: {
-  doc: Document
-  onToggleInclude: () => void
-  onToggleFullContent: () => void
+  doc: Document;
+  onToggleInclude: () => void;
+  onToggleFullContent: () => void;
 }) {
   return (
     <div className="flex flex-col h-full">
@@ -549,12 +567,12 @@ function DocumentDetail({
               aria-checked={doc.included}
               onClick={onToggleInclude}
               className={`relative inline-flex w-7 h-4 rounded-full transition-colors ${
-                doc.included ? 'bg-primary' : 'bg-border'
+                doc.included ? "bg-primary" : "bg-border"
               }`}
             >
               <span
                 className={`inline-block w-3 h-3 rounded-full bg-white shadow transform transition-transform mt-0.5 ${
-                  doc.included ? 'translate-x-3.5' : 'translate-x-0.5'
+                  doc.included ? "translate-x-3.5" : "translate-x-0.5"
                 }`}
               />
             </button>
@@ -569,12 +587,12 @@ function DocumentDetail({
                 aria-checked={doc.full_content}
                 onClick={onToggleFullContent}
                 className={`relative inline-flex w-7 h-4 rounded-full transition-colors ${
-                  doc.full_content ? 'bg-primary' : 'bg-border'
+                  doc.full_content ? "bg-primary" : "bg-border"
                 }`}
               >
                 <span
                   className={`inline-block w-3 h-3 rounded-full bg-white shadow transform transition-transform mt-0.5 ${
-                    doc.full_content ? 'translate-x-3.5' : 'translate-x-0.5'
+                    doc.full_content ? "translate-x-3.5" : "translate-x-0.5"
                   }`}
                 />
               </button>
@@ -591,7 +609,7 @@ function DocumentDetail({
         </pre>
       </ScrollArea>
     </div>
-  )
+  );
 }
 
 function PasteForm({
@@ -603,13 +621,13 @@ function PasteForm({
   onCancel,
   submitting,
 }: {
-  name: string
-  content: string
-  onNameChange: (v: string) => void
-  onContentChange: (v: string) => void
-  onSubmit: () => void
-  onCancel: () => void
-  submitting: boolean
+  name: string;
+  content: string;
+  onNameChange: (v: string) => void;
+  onContentChange: (v: string) => void;
+  onSubmit: () => void;
+  onCancel: () => void;
+  submitting: boolean;
 }) {
   return (
     <div className="flex flex-col h-full p-3 gap-2">
@@ -640,11 +658,11 @@ function PasteForm({
           disabled={!name.trim() || !content.trim() || submitting}
           className="px-3 py-1 text-xs rounded bg-primary text-white hover:bg-primary-hover disabled:opacity-50 transition-colors"
         >
-          {submitting ? 'Saving…' : 'Save'}
+          {submitting ? "Saving…" : "Save"}
         </button>
       </div>
     </div>
-  )
+  );
 }
 
 // ── Reports tab (empty state) ────────────────────────────────────────────────
@@ -654,7 +672,7 @@ function ReportsTab() {
     <div className="flex h-full items-center justify-center p-6 text-xs text-fg-muted">
       No reports yet — they'll appear here as agents produce them.
     </div>
-  )
+  );
 }
 
 // ── Diffs tab (empty state) ──────────────────────────────────────────────────
@@ -664,7 +682,7 @@ function DiffsTab() {
     <div className="flex h-full items-center justify-center p-6 text-xs text-fg-muted">
       No diffs in this session yet.
     </div>
-  )
+  );
 }
 
 // ── Tools tab ────────────────────────────────────────────────────────────────
@@ -672,14 +690,14 @@ function DiffsTab() {
 // ToolCallDrawer body.
 
 function ToolsTab() {
-  const toolCalls = useChatStore((s) => s.toolCalls)
+  const toolCalls = useToolCalls();
   return (
     <div className="chat-scroll min-h-0 h-full overflow-y-auto">
       {toolCalls.map((tc) => (
         <ToolCallItem key={tc.id} toolCall={tc} variant="drawer" />
       ))}
     </div>
-  )
+  );
 }
 
 // ── Pins tab ─────────────────────────────────────────────────────────────────
@@ -687,66 +705,73 @@ function ToolsTab() {
 // PinsScopeSection, PinRow). No logic changes.
 
 function PinsTab() {
-  const activeSessionId = useAppStore((s) => s.activeSessionId)
-  const activeProjectId = useAppStore((s) => s.activeProjectId)
-  const queryClient = useQueryClient()
-  const [filter, setFilter] = useState<ScopeFilter>('all')
+  const activeSessionId = useAppStore((s) => s.activeSessionId);
+  const activeProjectId = useAppStore((s) => s.activeProjectId);
+  const queryClient = useQueryClient();
+  const [filter, setFilter] = useState<ScopeFilter>("all");
 
   const { data: pins = [], isLoading } = useQuery({
-    queryKey: ['pins', activeSessionId],
+    queryKey: ["pins", activeSessionId],
     queryFn: () => api.listPins(activeSessionId!),
     enabled: !!activeSessionId,
     refetchInterval: 5000, // refresh frequently — pins can be set during a turn
-  })
+  });
 
   const deleteMutation = useMutation({
     mutationFn: (id: string) => api.deletePin(id),
     onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: ['pins', activeSessionId] })
+      void queryClient.invalidateQueries({ queryKey: ["pins", activeSessionId] });
     },
-  })
+  });
 
   const scopeMutation = useMutation({
-    mutationFn: ({ id, scope, projectId }: { id: string; scope: AgentStateScope; projectId?: string }) =>
-      api.updatePinScope(id, scope, projectId),
+    mutationFn: ({
+      id,
+      scope,
+      projectId,
+    }: {
+      id: string;
+      scope: AgentStateScope;
+      projectId?: string;
+    }) => api.updatePinScope(id, scope, projectId),
     onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: ['pins', activeSessionId] })
+      void queryClient.invalidateQueries({ queryKey: ["pins", activeSessionId] });
     },
-  })
+  });
 
   if (!activeSessionId) {
-    return <EmptyState message="No active session" />
+    return <EmptyState message="No active session" />;
   }
 
   // Partition pins by scope. Filter narrows to a specific tier when set.
-  const sessionPins = pins.filter((p) => p.scope === 'session')
-  const projectPins = pins.filter((p) => p.scope === 'project')
-  const showSession = filter === 'all' || filter === 'session'
-  const showProject = filter === 'all' || filter === 'project'
+  const sessionPins = pins.filter((p) => p.scope === "session");
+  const projectPins = pins.filter((p) => p.scope === "project");
+  const showSession = filter === "all" || filter === "session";
+  const showProject = filter === "all" || filter === "project";
 
   const promote = (id: string) => {
-    if (!activeProjectId) return
-    scopeMutation.mutate({ id, scope: 'project', projectId: activeProjectId })
-  }
+    if (!activeProjectId) return;
+    scopeMutation.mutate({ id, scope: "project", projectId: activeProjectId });
+  };
   const demote = (id: string) => {
-    scopeMutation.mutate({ id, scope: 'session', projectId: '' })
-  }
+    scopeMutation.mutate({ id, scope: "session", projectId: "" });
+  };
 
   return (
     <div className="flex flex-col h-full">
       <div className="flex items-center justify-between px-3 py-1 shrink-0 gap-2">
         <p className="text-xs text-fg-muted">
-          Pinned context — survives compaction · set by agent via <code className="font-mono text-fg-faint">nanite_pin</code>
+          Pinned context — survives compaction · set by agent via{" "}
+          <code className="font-mono text-fg-faint">nanite_pin</code>
         </p>
         <ScopeFilterChip filter={filter} onChange={setFilter} />
       </div>
       <ScrollArea className="flex-1">
-        {isLoading && (
-          <div className="px-3 py-2 text-xs text-fg-faint">Loading…</div>
-        )}
+        {isLoading && <div className="px-3 py-2 text-xs text-fg-faint">Loading…</div>}
         {!isLoading && pins.length === 0 && (
           <div className="px-3 py-4 text-xs text-fg-faint italic">
-            No pinned content yet. The agent can pin content using <code className="font-mono">nanite_pin</code>.
+            No pinned content yet. The agent can pin content using{" "}
+            <code className="font-mono">nanite_pin</code>.
           </div>
         )}
         {showSession && sessionPins.length > 0 && (
@@ -785,7 +810,7 @@ function PinsTab() {
         )}
       </ScrollArea>
     </div>
-  )
+  );
 }
 
 function PinsScopeSection({ label, children }: { label: string; children: React.ReactNode }) {
@@ -794,16 +819,16 @@ function PinsScopeSection({ label, children }: { label: string; children: React.
       <div className="px-1 mb-1 text-[10px] uppercase tracking-wider text-fg-faint">{label}</div>
       {children}
     </div>
-  )
+  );
 }
 
 interface PinRowProps {
-  pin: PinnedContent
-  canPromote: boolean
-  canDemote: boolean
-  onPromote: (id: string) => void
-  onDemote: (id: string) => void
-  onDelete: (id: string) => void
+  pin: PinnedContent;
+  canPromote: boolean;
+  canDemote: boolean;
+  onPromote: (id: string) => void;
+  onDemote: (id: string) => void;
+  onDelete: (id: string) => void;
 }
 
 function PinRow({ pin, canPromote, canDemote, onPromote, onDemote, onDelete }: PinRowProps) {
@@ -814,9 +839,7 @@ function PinRow({ pin, canPromote, canDemote, onPromote, onDemote, onDelete }: P
         <p className="text-fg leading-relaxed break-words">{pin.content}</p>
         <div className="flex items-center gap-2 mt-1">
           <ScopeChip scope={pin.scope} />
-          {pin.agent_id && (
-            <span className="text-[10px] text-fg-faint">by {pin.agent_id}</span>
-          )}
+          {pin.agent_id && <span className="text-[10px] text-fg-faint">by {pin.agent_id}</span>}
         </div>
       </div>
       <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
@@ -850,7 +873,7 @@ function PinRow({ pin, canPromote, canDemote, onPromote, onDemote, onDelete }: P
         </button>
       </div>
     </div>
-  )
+  );
 }
 
 // ── Pinned card tab ──────────────────────────────────────────────────────────
@@ -861,23 +884,23 @@ function PinRow({ pin, canPromote, canDemote, onPromote, onDemote, onDelete }: P
 // Unpin button from the lifted body.
 
 function PinnedCardTab({ card }: { card: DrawerPinnedCard }) {
-  const activeSessionId = useAppStore((s) => s.activeSessionId)
-  const queryClient = useQueryClient()
+  const activeSessionId = useAppStore((s) => s.activeSessionId);
+  const queryClient = useQueryClient();
   const unpinMutation = useMutation({
     mutationFn: (id: string) => api.unpinDrawerCard(id),
     onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: ['drawer-cards', activeSessionId] })
+      void queryClient.invalidateQueries({ queryKey: ["drawer-cards", activeSessionId] });
     },
-  })
+  });
 
   const payload = useMemo<unknown>(() => {
-    if (!card.payload) return null
+    if (!card.payload) return null;
     try {
-      return JSON.parse(card.payload)
+      return JSON.parse(card.payload);
     } catch {
-      return null
+      return null;
     }
-  }, [card.payload])
+  }, [card.payload]);
 
   return (
     <div className="flex flex-col h-full">
@@ -902,67 +925,75 @@ function PinnedCardTab({ card }: { card: DrawerPinnedCard }) {
         </div>
       </ScrollArea>
     </div>
-  )
+  );
 }
 
 function PinnedCardBody({ card, payload }: { card: DrawerPinnedCard; payload: unknown }) {
   switch (card.card_type) {
-    case 'agent-envelope':
-      if (payload && typeof payload === 'object') {
-        return <EnvelopeRenderer envelope={payload as Envelope} />
+    case "agent-envelope":
+      if (payload && typeof payload === "object") {
+        return <EnvelopeRenderer envelope={payload as Envelope} />;
       }
-      return <UnknownCardBody card={card} />
+      return <UnknownCardBody card={card} />;
 
-    case 'markdown': {
-      const text = typeof payload === 'object' && payload !== null && 'content' in payload
-        ? String((payload as { content: unknown }).content ?? '')
-        : ''
+    case "markdown": {
+      const text =
+        typeof payload === "object" && payload !== null && "content" in payload
+          ? String((payload as { content: unknown }).content ?? "")
+          : "";
       return (
         <pre className="text-xs font-mono text-fg-secondary whitespace-pre-wrap break-words leading-relaxed">
           {text || <span className="text-fg-faint italic">No content</span>}
         </pre>
-      )
+      );
     }
 
-    case 'image': {
-      const src = typeof payload === 'object' && payload !== null && 'src' in payload
-        ? String((payload as { src: unknown }).src ?? '')
-        : ''
-      if (!src) return <UnknownCardBody card={card} />
+    case "image": {
+      const src =
+        typeof payload === "object" && payload !== null && "src" in payload
+          ? String((payload as { src: unknown }).src ?? "")
+          : "";
+      if (!src) return <UnknownCardBody card={card} />;
       return (
         <div className="flex items-center justify-center">
-          <img src={src} alt={card.title} className="max-w-full max-h-[60vh] rounded-sm border border-border" />
+          <img
+            src={src}
+            alt={card.title}
+            className="max-w-full max-h-[60vh] rounded-sm border border-border"
+          />
         </div>
-      )
+      );
     }
 
-    case 'diff': {
-      const text = typeof payload === 'object' && payload !== null && 'diff' in payload
-        ? String((payload as { diff: unknown }).diff ?? '')
-        : ''
+    case "diff": {
+      const text =
+        typeof payload === "object" && payload !== null && "diff" in payload
+          ? String((payload as { diff: unknown }).diff ?? "")
+          : "";
       return (
         <pre className="text-xs font-mono text-fg-secondary whitespace-pre-wrap break-words leading-relaxed bg-surface rounded-sm p-2 border border-border">
           {text || <span className="text-fg-faint italic">No diff</span>}
         </pre>
-      )
+      );
     }
 
-    case 'scratchpad': {
-      const text = typeof payload === 'object' && payload !== null && 'content' in payload
-        ? String((payload as { content: unknown }).content ?? '')
-        : ''
+    case "scratchpad": {
+      const text =
+        typeof payload === "object" && payload !== null && "content" in payload
+          ? String((payload as { content: unknown }).content ?? "")
+          : "";
       return (
         <pre className="text-xs font-mono text-fg whitespace-pre-wrap break-words leading-relaxed">
           {text || <span className="text-fg-faint italic">Empty scratchpad snapshot</span>}
         </pre>
-      )
+      );
     }
 
-    case 'artifact-mini':
-      return <ArtifactMiniBody card={card} />
+    case "artifact-mini":
+      return <ArtifactMiniBody card={card} />;
 
     default:
-      return <UnknownCardBody card={card} />
+      return <UnknownCardBody card={card} />;
   }
 }
 
@@ -973,10 +1004,10 @@ function UnknownCardBody({ card }: { card: DrawerPinnedCard }) {
         Unknown card type <code className="font-mono text-fg-faint">{card.card_type}</code>.
       </p>
       <pre className="bg-surface p-2 rounded-sm text-[11px] text-fg-faint break-all whitespace-pre-wrap">
-        {card.payload || '(empty payload)'}
+        {card.payload || "(empty payload)"}
       </pre>
     </div>
-  )
+  );
 }
 
 function ArtifactMiniBody({ card }: { card: DrawerPinnedCard }) {
@@ -984,29 +1015,29 @@ function ArtifactMiniBody({ card }: { card: DrawerPinnedCard }) {
   // re-fetching: name / mime / size live in the payload snapshot. content_ref
   // is the artifact ID.
   const meta = useMemo<{ name?: string; mime_type?: string; size?: number } | null>(() => {
-    if (!card.payload) return null
+    if (!card.payload) return null;
     try {
-      const parsed = JSON.parse(card.payload)
-      if (parsed && typeof parsed === 'object') {
-        return parsed as { name?: string; mime_type?: string; size?: number }
+      const parsed = JSON.parse(card.payload);
+      if (parsed && typeof parsed === "object") {
+        return parsed as { name?: string; mime_type?: string; size?: number };
       }
     } catch {
       // fall through
     }
-    return null
-  }, [card.payload])
+    return null;
+  }, [card.payload]);
 
-  const downloadUrl = card.content_ref ? `/api/artifacts/${card.content_ref}/download` : ''
+  const downloadUrl = card.content_ref ? `/api/artifacts/${card.content_ref}/download` : "";
 
   return (
     <div className="flex flex-col gap-2">
       <div className="flex items-center gap-3 px-3 py-2 rounded-sm bg-bg-elevated/50 border border-border">
         <Package className="w-4 h-4 text-fg-muted shrink-0" />
         <div className="flex-1 min-w-0">
-          <p className="text-sm text-fg truncate">{meta?.name ?? card.title ?? 'Artifact'}</p>
+          <p className="text-sm text-fg truncate">{meta?.name ?? card.title ?? "Artifact"}</p>
           <div className="flex items-center gap-2 mt-0.5 text-xs text-fg-faint">
             {meta?.mime_type && <span>{meta.mime_type}</span>}
-            {typeof meta?.size === 'number' && <span>{formatSize(meta.size)}</span>}
+            {typeof meta?.size === "number" && <span>{formatSize(meta.size)}</span>}
           </div>
         </div>
         {downloadUrl && (
@@ -1020,31 +1051,31 @@ function ArtifactMiniBody({ card }: { card: DrawerPinnedCard }) {
         )}
       </div>
     </div>
-  )
+  );
 }
 
 function formatSize(bytes: number): string {
-  if (bytes < 1024) return `${bytes} B`
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
-  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
 function CardTypeIcon({ type }: { type: DrawerCardType }) {
   switch (type) {
-    case 'markdown':
-      return <FileText className="w-3 h-3 inline-block" />
-    case 'diff':
-      return <GitCompare className="w-3 h-3 inline-block" />
-    case 'image':
-      return <ImageIcon className="w-3 h-3 inline-block" />
-    case 'scratchpad':
-      return <StickyNote className="w-3 h-3 inline-block" />
-    case 'artifact-mini':
-      return <Package className="w-3 h-3 inline-block" />
-    case 'agent-envelope':
-      return <Inbox className="w-3 h-3 inline-block" />
+    case "markdown":
+      return <FileText className="w-3 h-3 inline-block" />;
+    case "diff":
+      return <GitCompare className="w-3 h-3 inline-block" />;
+    case "image":
+      return <ImageIcon className="w-3 h-3 inline-block" />;
+    case "scratchpad":
+      return <StickyNote className="w-3 h-3 inline-block" />;
+    case "artifact-mini":
+      return <Package className="w-3 h-3 inline-block" />;
+    case "agent-envelope":
+      return <Inbox className="w-3 h-3 inline-block" />;
     default:
-      return <FileText className="w-3 h-3 inline-block" />
+      return <FileText className="w-3 h-3 inline-block" />;
   }
 }
 
@@ -1055,6 +1086,5 @@ function EmptyState({ message }: { message: string }) {
     <div className="flex items-center justify-center h-full">
       <p className="text-xs text-fg-faint">{message}</p>
     </div>
-  )
+  );
 }
-

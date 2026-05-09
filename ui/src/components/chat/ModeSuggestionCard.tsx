@@ -1,10 +1,15 @@
-import { useMutation, useQueryClient } from '@tanstack/react-query'
-import { Sparkles } from 'lucide-react'
-import { useState } from 'react'
-import { api } from '@/lib/api'
-import type { ModeSuggestion } from '@/lib/types'
-import { useChatStore } from '@/stores/useChatStore'
-import { Envelope, EnvelopeBody, EnvelopeFooter, EnvelopeHeader } from './envelopes/primitives/Envelope'
+import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { Sparkles } from "lucide-react";
+import { useState } from "react";
+import { api } from "@/lib/api";
+import type { ModeSuggestion } from "@/lib/types";
+import { useChatStore } from "@/stores/useChatStore";
+import {
+  Envelope,
+  EnvelopeBody,
+  EnvelopeFooter,
+  EnvelopeHeader,
+} from "./envelopes/primitives/Envelope";
 
 /**
  * B3 (CW-20260428-0011) — inline card surfacing classifier mode suggestions.
@@ -20,78 +25,81 @@ import { Envelope, EnvelopeBody, EnvelopeFooter, EnvelopeHeader } from './envelo
  * are handled by transcript-level effects (auto-apply or discard).
  */
 
-type Variant = 'firstUse' | 'compact'
+type Variant = "firstUse" | "compact";
 
 interface ModeSuggestionCardProps {
-  suggestion: ModeSuggestion
-  sessionId: string
-  variant: Variant
+  suggestion: ModeSuggestion;
+  sessionId: string;
+  variant: Variant;
 }
 
 export function ModeSuggestionCard({ suggestion, sessionId, variant }: ModeSuggestionCardProps) {
-  const queryClient = useQueryClient()
-  const clearModeSuggestion = useChatStore((s) => s.clearModeSuggestion)
-  const showChatToast = useChatStore((s) => s.showChatToast)
-  const [errMsg, setErrMsg] = useState<string | null>(null)
+  const queryClient = useQueryClient();
+  const clearModeSuggestion = useChatStore((s) => s.clearModeSuggestion);
+  const showChatToast = useChatStore((s) => s.showChatToast);
+  const [errMsg, setErrMsg] = useState<string | null>(null);
 
   const setSessionMode = useMutation({
     mutationFn: (slug: string) => api.setSessionMode(sessionId, { slug }),
     onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: ['session-mode', sessionId] })
-      void queryClient.invalidateQueries({ queryKey: ['session', sessionId] })
+      void queryClient.invalidateQueries({ queryKey: ["session-mode", sessionId] });
+      void queryClient.invalidateQueries({ queryKey: ["session", sessionId] });
     },
-  })
+  });
 
   const setPref = useMutation({
-    mutationFn: (pref: '' | 'always' | 'ask' | 'never') => api.setModeAutoSwitchPref(pref),
+    mutationFn: (pref: "" | "always" | "ask" | "never") => api.setModeAutoSwitchPref(pref),
     onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: ['settings'] })
+      void queryClient.invalidateQueries({ queryKey: ["settings"] });
     },
-  })
+  });
 
   const finish = () => {
-    setErrMsg(null)
-    clearModeSuggestion()
-  }
+    setErrMsg(null);
+    clearModeSuggestion(sessionId);
+  };
 
   const applyOnly = async () => {
     try {
-      await setSessionMode.mutateAsync(suggestion.suggested)
-      showChatToast(`Switched to ${suggestion.suggested} mode`, 'success')
-      finish()
+      await setSessionMode.mutateAsync(suggestion.suggested);
+      showChatToast(`Switched to ${suggestion.suggested} mode`, "success");
+      finish();
     } catch (err) {
-      setErrMsg(err instanceof Error ? err.message : 'Failed to switch mode')
+      setErrMsg(err instanceof Error ? err.message : "Failed to switch mode");
     }
-  }
+  };
 
-  const applyAndSetPref = async (pref: '' | 'always' | 'ask' | 'never') => {
+  const applyAndSetPref = async (pref: "" | "always" | "ask" | "never") => {
     try {
-      await Promise.all([setSessionMode.mutateAsync(suggestion.suggested), setPref.mutateAsync(pref)])
-      showChatToast(`Switched to ${suggestion.suggested} mode`, 'success')
-      finish()
+      await Promise.all([
+        setSessionMode.mutateAsync(suggestion.suggested),
+        setPref.mutateAsync(pref),
+      ]);
+      showChatToast(`Switched to ${suggestion.suggested} mode`, "success");
+      finish();
     } catch (err) {
-      setErrMsg(err instanceof Error ? err.message : 'Failed to apply preference')
+      setErrMsg(err instanceof Error ? err.message : "Failed to apply preference");
     }
-  }
+  };
 
-  const setPrefOnly = async (pref: '' | 'always' | 'ask' | 'never') => {
+  const setPrefOnly = async (pref: "" | "always" | "ask" | "never") => {
     try {
-      await setPref.mutateAsync(pref)
-      finish()
+      await setPref.mutateAsync(pref);
+      finish();
     } catch (err) {
-      setErrMsg(err instanceof Error ? err.message : 'Failed to save preference')
+      setErrMsg(err instanceof Error ? err.message : "Failed to save preference");
     }
-  }
+  };
 
-  const dismiss = () => finish()
+  const dismiss = () => finish();
 
-  const busy = setSessionMode.isPending || setPref.isPending
-  const firstSignal = suggestion.signals?.[0]
+  const busy = setSessionMode.isPending || setPref.isPending;
+  const firstSignal = suggestion.signals?.[0];
   const subline = firstSignal
     ? `We detected '${firstSignal}' in your message.`
-    : `Confidence ${(suggestion.confidence * 100).toFixed(0)}%.`
+    : `Confidence ${(suggestion.confidence * 100).toFixed(0)}%.`;
 
-  if (variant === 'compact') {
+  if (variant === "compact") {
     return (
       <Envelope accent="primary">
         <div className="flex flex-wrap items-center gap-2 px-4 py-2.5 text-[13px] text-fg">
@@ -122,24 +130,27 @@ export function ModeSuggestionCard({ suggestion, sessionId, variant }: ModeSugge
           </div>
         </div>
         {errMsg && (
-          <div role="alert" className="mx-4 mb-3 rounded-[6px] border border-danger/30 bg-danger/5 px-3 py-1.5 text-[12px] text-danger">
+          <div
+            role="alert"
+            className="mx-4 mb-3 rounded-[6px] border border-danger/30 bg-danger/5 px-3 py-1.5 text-[12px] text-danger"
+          >
             {errMsg}
           </div>
         )}
       </Envelope>
-    )
+    );
   }
 
   // firstUse — full 5-option card
   return (
     <Envelope accent="primary">
       <EnvelopeHeader icon={Sparkles} label="Mode suggestion" tone="primary" />
-      <EnvelopeBody
-        title={`Switch to ${suggestion.suggested} mode?`}
-        description={subline}
-      />
+      <EnvelopeBody title={`Switch to ${suggestion.suggested} mode?`} description={subline} />
       {errMsg && (
-        <div role="alert" className="mx-4 mb-3 rounded-[6px] border border-danger/30 bg-danger/5 px-3 py-1.5 text-[12px] text-danger">
+        <div
+          role="alert"
+          className="mx-4 mb-3 rounded-[6px] border border-danger/30 bg-danger/5 px-3 py-1.5 text-[12px] text-danger"
+        >
           {errMsg}
         </div>
       )}
@@ -162,7 +173,7 @@ export function ModeSuggestionCard({ suggestion, sessionId, variant }: ModeSugge
         </button>
         <button
           type="button"
-          onClick={() => void applyAndSetPref('always')}
+          onClick={() => void applyAndSetPref("always")}
           disabled={busy}
           className="rounded-[6px] border border-border-subtle bg-surface px-3 py-1.5 font-mono text-[11px] font-semibold uppercase tracking-wide text-fg transition-colors hover:bg-surface-hover disabled:opacity-50"
         >
@@ -170,7 +181,7 @@ export function ModeSuggestionCard({ suggestion, sessionId, variant }: ModeSugge
         </button>
         <button
           type="button"
-          onClick={() => void applyAndSetPref('ask')}
+          onClick={() => void applyAndSetPref("ask")}
           disabled={busy}
           className="rounded-[6px] border border-border-subtle bg-surface px-3 py-1.5 font-mono text-[11px] font-semibold uppercase tracking-wide text-fg transition-colors hover:bg-surface-hover disabled:opacity-50"
         >
@@ -178,7 +189,7 @@ export function ModeSuggestionCard({ suggestion, sessionId, variant }: ModeSugge
         </button>
         <button
           type="button"
-          onClick={() => void setPrefOnly('never')}
+          onClick={() => void setPrefOnly("never")}
           disabled={busy}
           className="rounded-[6px] border border-border-subtle bg-transparent px-3 py-1.5 font-mono text-[11px] font-semibold uppercase tracking-wide text-fg-muted transition-colors hover:bg-surface-hover hover:text-fg-secondary disabled:opacity-50"
         >
@@ -186,5 +197,5 @@ export function ModeSuggestionCard({ suggestion, sessionId, variant }: ModeSugge
         </button>
       </EnvelopeFooter>
     </Envelope>
-  )
+  );
 }

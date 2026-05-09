@@ -7,54 +7,52 @@
  * Gated behind developer_mode — never rendered for standard users.
  */
 
-import { useState } from 'react'
-import { useQuery } from '@tanstack/react-query'
-import { useInspectorTurns, useInspectorTurn } from '@/hooks/useInspector'
+import { useQuery } from "@tanstack/react-query";
+import { useState } from "react";
+import { Badge } from "@/components/ui/badge";
+import { Input } from "@/components/ui/input";
+import { ScrollArea } from "@/components/ui/scroll-area";
+import { Skeleton } from "@/components/ui/skeleton";
+import { ScopeChip } from "@/components/work/ScopeChip";
+import { useInspectorTurn, useInspectorTurns } from "@/hooks/useInspector";
+import { api } from "@/lib/api";
 import type {
-  InspectorTurnSnapshot,
-  InspectorSlotSnapshot,
   InspectorBrokerDecision,
-  InspectorToolCallRecord,
   InspectorLLMMessageRecord,
   InspectorRemindersRecord,
-} from '@/lib/types'
-import { Skeleton } from '@/components/ui/skeleton'
-import { Badge } from '@/components/ui/badge'
-import { ScrollArea } from '@/components/ui/scroll-area'
-import { Input } from '@/components/ui/input'
-import { ScopeChip } from '@/components/work/ScopeChip'
-import { useChatStore } from '@/stores/useChatStore'
-import { api } from '@/lib/api'
+  InspectorSlotSnapshot,
+  InspectorToolCallRecord,
+  InspectorTurnSnapshot,
+} from "@/lib/types";
+import { usePendingModeSuggestion } from "@/stores/useChatStore";
 
 // ─── Sub-components ──────────────────────────────────────────────────────────
 
 function PanelCard({
   title,
   children,
-  className = '',
+  className = "",
 }: {
-  title: string
-  children: React.ReactNode
-  className?: string
+  title: string;
+  children: React.ReactNode;
+  className?: string;
 }) {
   return (
-    <div className={`rounded-xl border border-border-subtle bg-bg-elevated overflow-hidden ${className}`}>
+    <div
+      className={`rounded-xl border border-border-subtle bg-bg-elevated overflow-hidden ${className}`}
+    >
       <div className="px-4 py-2.5 border-b border-border-subtle">
         <h4 className="text-[11px] uppercase tracking-wider text-fg-muted font-medium">{title}</h4>
       </div>
       <div className="p-3">{children}</div>
     </div>
-  )
+  );
 }
 
-function TrafficDot({ colour }: { colour: 'green' | 'yellow' | 'red' | string }) {
+function TrafficDot({ colour }: { colour: "green" | "yellow" | "red" | string }) {
   const bg =
-    colour === 'green'
-      ? 'bg-green-500'
-      : colour === 'yellow'
-        ? 'bg-yellow-400'
-        : 'bg-red-500'
-  return <span className={`inline-block w-2 h-2 rounded-full mr-1.5 ${bg}`} />
+    colour === "green" ? "bg-green-500" : colour === "yellow" ? "bg-yellow-400" : "bg-red-500";
+  return <span className={`inline-block w-2 h-2 rounded-full mr-1.5 ${bg}`} />;
 }
 
 function TokenBadge({ count }: { count: number }) {
@@ -62,20 +60,16 @@ function TokenBadge({ count }: { count: number }) {
     <span className="text-[10px] font-mono text-fg-muted bg-bg px-1 py-0.5 rounded border border-border-subtle ml-1">
       {count.toLocaleString()}t
     </span>
-  )
+  );
 }
 
 // ─── Slot grid ───────────────────────────────────────────────────────────────
 
-function SlotGrid({
-  slots,
-  reveal,
-}: {
-  slots: InspectorSlotSnapshot[]
-  reveal: boolean
-}) {
+function SlotGrid({ slots, reveal }: { slots: InspectorSlotSnapshot[]; reveal: boolean }) {
   if (!slots || slots.length === 0) {
-    return <EmptyProducer label="No slot data recorded — producer not yet wired or turn is still in flight." />
+    return (
+      <EmptyProducer label="No slot data recorded — producer not yet wired or turn is still in flight." />
+    );
   }
 
   return (
@@ -104,7 +98,7 @@ function SlotGrid({
               ) : (
                 <pre className="text-[10px] text-fg-muted whitespace-pre-wrap break-words max-h-24 overflow-auto font-mono">
                   {slot.content.slice(0, 500)}
-                  {slot.content.length > 500 ? '…' : ''}
+                  {slot.content.length > 500 ? "…" : ""}
                 </pre>
               )}
             </div>
@@ -112,14 +106,14 @@ function SlotGrid({
         </div>
       ))}
     </div>
-  )
+  );
 }
 
 // ─── LLM Messages ────────────────────────────────────────────────────────────
 
 function LLMMessageList({ msgs }: { msgs: InspectorLLMMessageRecord[] }) {
   if (!msgs || msgs.length === 0) {
-    return <EmptyProducer label="No LLM messages recorded." />
+    return <EmptyProducer label="No LLM messages recorded." />;
   }
 
   return (
@@ -137,30 +131,37 @@ function LLMMessageList({ msgs }: { msgs: InspectorLLMMessageRecord[] }) {
           </div>
           <pre className="text-[10px] text-fg-muted whitespace-pre-wrap break-words max-h-20 overflow-auto font-mono">
             {msg.content.slice(0, 400)}
-            {msg.content.length > 400 ? '…' : ''}
+            {msg.content.length > 400 ? "…" : ""}
           </pre>
         </div>
       ))}
     </div>
-  )
+  );
 }
 
 // ─── Broker Decisions ────────────────────────────────────────────────────────
 
 function BrokerDecisionList({ decisions }: { decisions: InspectorBrokerDecision[] }) {
   if (!decisions || decisions.length === 0) {
-    return <EmptyProducer label="No broker decisions recorded (no request_tools calls this turn)." />
+    return (
+      <EmptyProducer label="No broker decisions recorded (no request_tools calls this turn)." />
+    );
   }
 
   const outcomeColour = (outcome: string) => {
     switch (outcome) {
-      case 'loaded': return 'bg-green-100 text-green-800 border-green-300'
-      case 'empty': return 'bg-yellow-100 text-yellow-800 border-yellow-300'
-      case 'halted': return 'bg-red-100 text-red-800 border-red-300'
-      case 'reflected': return 'bg-blue-100 text-blue-800 border-blue-300'
-      default: return 'bg-bg-elevated text-fg-muted border-border-subtle'
+      case "loaded":
+        return "bg-green-100 text-green-800 border-green-300";
+      case "empty":
+        return "bg-yellow-100 text-yellow-800 border-yellow-300";
+      case "halted":
+        return "bg-red-100 text-red-800 border-red-300";
+      case "reflected":
+        return "bg-blue-100 text-blue-800 border-blue-300";
+      default:
+        return "bg-bg-elevated text-fg-muted border-border-subtle";
     }
-  }
+  };
 
   return (
     <div className="space-y-1.5">
@@ -183,7 +184,7 @@ function BrokerDecisionList({ decisions }: { decisions: InspectorBrokerDecision[
             )}
           </div>
           <div className="text-fg text-[10px] mb-1 font-medium truncate">
-            intent: <span className="font-normal text-fg-muted">{d.intent || '(none)'}</span>
+            intent: <span className="font-normal text-fg-muted">{d.intent || "(none)"}</span>
           </div>
           {d.selected_tools && d.selected_tools.length > 0 && (
             <div className="flex flex-wrap gap-1 mt-1">
@@ -205,16 +206,16 @@ function BrokerDecisionList({ decisions }: { decisions: InspectorBrokerDecision[
         </div>
       ))}
     </div>
-  )
+  );
 }
 
 // ─── Tool Calls ──────────────────────────────────────────────────────────────
 
 function ToolCallList({ calls }: { calls: InspectorToolCallRecord[] }) {
-  const [expanded, setExpanded] = useState<Set<number>>(new Set())
+  const [expanded, setExpanded] = useState<Set<number>>(new Set());
 
   if (!calls || calls.length === 0) {
-    return <EmptyProducer label="No tool calls recorded this turn." />
+    return <EmptyProducer label="No tool calls recorded this turn." />;
   }
 
   return (
@@ -225,20 +226,16 @@ function ToolCallList({ calls }: { calls: InspectorToolCallRecord[] }) {
             className="w-full flex items-center gap-2 p-2 text-left hover:bg-bg-elevated/50 transition-colors"
             onClick={() =>
               setExpanded((prev) => {
-                const next = new Set(prev)
-                next.has(i) ? next.delete(i) : next.add(i)
-                return next
+                const next = new Set(prev);
+                next.has(i) ? next.delete(i) : next.add(i);
+                return next;
               })
             }
           >
-            {call.is_error ? (
-              <TrafficDot colour="red" />
-            ) : (
-              <TrafficDot colour="green" />
-            )}
+            {call.is_error ? <TrafficDot colour="red" /> : <TrafficDot colour="green" />}
             <span className="font-mono font-semibold text-fg">{call.name}</span>
             <span className="text-fg-muted text-[10px]">{call.latency_ms}ms</span>
-            <span className="ml-auto text-[10px] text-fg-muted">{expanded.has(i) ? '▲' : '▼'}</span>
+            <span className="ml-auto text-[10px] text-fg-muted">{expanded.has(i) ? "▲" : "▼"}</span>
           </button>
           {expanded.has(i) && (
             <div className="px-2 pb-2 space-y-1.5 border-t border-border-subtle pt-2">
@@ -252,7 +249,7 @@ function ToolCallList({ calls }: { calls: InspectorToolCallRecord[] }) {
                 <span className="text-[9px] uppercase text-fg-muted font-medium">Result</span>
                 <pre className="text-[10px] font-mono text-fg-muted mt-0.5 max-h-32 overflow-auto whitespace-pre-wrap">
                   {call.result.slice(0, 1000)}
-                  {call.result.length > 1000 ? '…' : ''}
+                  {call.result.length > 1000 ? "…" : ""}
                 </pre>
               </div>
             </div>
@@ -260,49 +257,45 @@ function ToolCallList({ calls }: { calls: InspectorToolCallRecord[] }) {
         </div>
       ))}
     </div>
-  )
+  );
 }
 
 // ─── Empty producer placeholder ──────────────────────────────────────────────
 
 function EmptyProducer({ label }: { label: string }) {
-  return (
-    <p className="text-[11px] text-fg-muted italic py-2">
-      {label}
-    </p>
-  )
+  return <p className="text-[11px] text-fg-muted italic py-2">{label}</p>;
 }
 
 // ─── Turn detail view ────────────────────────────────────────────────────────
 
-type TurnTab = 'slots' | 'llm' | 'broker' | 'tools' | 'meta'
+type TurnTab = "slots" | "llm" | "broker" | "tools" | "meta";
 
 function TurnDetail({
   sessionId,
   turnId,
   reveal,
 }: {
-  sessionId: string
-  turnId: string
-  reveal: boolean
+  sessionId: string;
+  turnId: string;
+  reveal: boolean;
 }) {
-  const [activeTab, setActiveTab] = useState<TurnTab>('slots')
-  const { data: snap, isLoading } = useInspectorTurn(sessionId, turnId)
+  const [activeTab, setActiveTab] = useState<TurnTab>("slots");
+  const { data: snap, isLoading } = useInspectorTurn(sessionId, turnId);
 
   if (isLoading) {
-    return <Skeleton className="h-48 w-full" />
+    return <Skeleton className="h-48 w-full" />;
   }
   if (!snap) {
-    return <p className="text-[11px] text-fg-muted italic">Turn not found.</p>
+    return <p className="text-[11px] text-fg-muted italic">Turn not found.</p>;
   }
 
   const tabs: { id: TurnTab; label: string }[] = [
-    { id: 'slots', label: 'Slots' },
-    { id: 'llm', label: 'LLM Messages' },
-    { id: 'broker', label: 'Broker' },
-    { id: 'tools', label: 'Tool Calls' },
-    { id: 'meta', label: 'Meta' },
-  ]
+    { id: "slots", label: "Slots" },
+    { id: "llm", label: "LLM Messages" },
+    { id: "broker", label: "Broker" },
+    { id: "tools", label: "Tool Calls" },
+    { id: "meta", label: "Meta" },
+  ];
 
   return (
     <div className="space-y-3">
@@ -314,7 +307,9 @@ function TurnDetail({
             {snap.scope_tier}
           </Badge>
         )}
-        <span className="text-fg-muted ml-auto">{new Date(snap.started_at).toLocaleTimeString()}</span>
+        <span className="text-fg-muted ml-auto">
+          {new Date(snap.started_at).toLocaleTimeString()}
+        </span>
       </div>
 
       {/* Tabs */}
@@ -325,8 +320,8 @@ function TurnDetail({
             onClick={() => setActiveTab(t.id)}
             className={`px-3 py-1.5 text-[11px] rounded-t transition-colors ${
               activeTab === t.id
-                ? 'bg-bg-elevated text-fg font-medium border border-border-subtle border-b-bg-elevated -mb-px'
-                : 'text-fg-muted hover:text-fg'
+                ? "bg-bg-elevated text-fg font-medium border border-border-subtle border-b-bg-elevated -mb-px"
+                : "text-fg-muted hover:text-fg"
             }`}
           >
             {t.label}
@@ -336,19 +331,11 @@ function TurnDetail({
 
       {/* Tab content */}
       <ScrollArea className="h-[480px]">
-        {activeTab === 'slots' && (
-          <SlotGrid slots={snap.slots ?? []} reveal={reveal} />
-        )}
-        {activeTab === 'llm' && (
-          <LLMMessageList msgs={snap.llm_messages ?? []} />
-        )}
-        {activeTab === 'broker' && (
-          <BrokerDecisionList decisions={snap.broker_decisions ?? []} />
-        )}
-        {activeTab === 'tools' && (
-          <ToolCallList calls={snap.tool_calls ?? []} />
-        )}
-        {activeTab === 'meta' && (
+        {activeTab === "slots" && <SlotGrid slots={snap.slots ?? []} reveal={reveal} />}
+        {activeTab === "llm" && <LLMMessageList msgs={snap.llm_messages ?? []} />}
+        {activeTab === "broker" && <BrokerDecisionList decisions={snap.broker_decisions ?? []} />}
+        {activeTab === "tools" && <ToolCallList calls={snap.tool_calls ?? []} />}
+        {activeTab === "meta" && (
           <div className="space-y-2 text-[11px]">
             {/* F2 (CW-20260429-0002) — SlotMode + pending mode suggestion. */}
             <ModeSection sessionId={sessionId} slots={snap.slots ?? []} />
@@ -371,9 +358,9 @@ function TurnDetail({
             {snap.loop_status ? (
               <PanelCard title="Loop Detection">
                 <p>
-                  Detected:{' '}
-                  <span className={snap.loop_status.detected ? 'text-red-600' : 'text-green-600'}>
-                    {snap.loop_status.detected ? 'yes' : 'no'}
+                  Detected:{" "}
+                  <span className={snap.loop_status.detected ? "text-red-600" : "text-green-600"}>
+                    {snap.loop_status.detected ? "yes" : "no"}
                   </span>
                 </p>
               </PanelCard>
@@ -385,7 +372,7 @@ function TurnDetail({
         )}
       </ScrollArea>
     </div>
-  )
+  );
 }
 
 // ─── Mode section (F2, CW-20260429-0002) ────────────────────────────────────
@@ -395,27 +382,21 @@ function TurnDetail({
 // pendingModeSuggestion row reflects the same B2 SSE signal the mode chip
 // uses (read straight from useChatStore — no separate subscription needed).
 
-function ModeSection({
-  sessionId,
-  slots,
-}: {
-  sessionId: string
-  slots: InspectorSlotSnapshot[]
-}) {
+function ModeSection({ sessionId, slots }: { sessionId: string; slots: InspectorSlotSnapshot[] }) {
   // Live-updated session mode (PATCH /api/sessions/{id}/mode invalidates this
   // query, same key the ChatHeader chip uses — staying on a single source).
   const { data: sessionMode } = useQuery({
-    queryKey: ['session-mode', sessionId],
+    queryKey: ["session-mode", sessionId],
     queryFn: () => api.getSessionMode(sessionId),
     enabled: !!sessionId,
-  })
+  });
 
   // Same SSE-fed signal the mode chip subscribes to. No new subscription.
-  const pendingSuggestion = useChatStore((s) => s.pendingModeSuggestion)
+  const pendingSuggestion = usePendingModeSuggestion(sessionId);
 
-  const slotByName = new Map(slots.map((s) => [s.name, s]))
-  const modeSlot = slotByName.get('mode')
-  const agentSlot = slotByName.get('agent')
+  const slotByName = new Map(slots.map((s) => [s.name, s]));
+  const modeSlot = slotByName.get("mode");
+  const agentSlot = slotByName.get("agent");
 
   return (
     <PanelCard title="Mode">
@@ -428,9 +409,7 @@ function ModeSection({
               <span className="font-mono text-[10px] text-fg-muted">
                 {agentSlot.tokens.toLocaleString()}t
               </span>
-              {agentSlot.cached && (
-                <span className="ml-1 text-[10px] text-green-600">cached</span>
-              )}
+              {agentSlot.cached && <span className="ml-1 text-[10px] text-green-600">cached</span>}
             </>
           ) : (
             <span className="italic text-fg-muted">no slot data</span>
@@ -446,9 +425,7 @@ function ModeSection({
               <span className="font-mono text-[10px] text-fg-muted">
                 {modeSlot.tokens.toLocaleString()}t
               </span>
-              {modeSlot.cached && (
-                <span className="ml-1 text-[10px] text-green-600">cached</span>
-              )}
+              {modeSlot.cached && <span className="ml-1 text-[10px] text-green-600">cached</span>}
               {modeSlot.tokens === 0 && (
                 <span className="ml-1 italic text-fg-muted">empty (no addendum this turn)</span>
               )}
@@ -480,15 +457,14 @@ function ModeSection({
                 {pendingSuggestion.current} → {pendingSuggestion.suggested}
               </div>
               <div className="text-[10px] text-fg-muted">
-                confidence:{' '}
+                confidence:{" "}
                 <span className="font-mono">
                   {(pendingSuggestion.confidence * 100).toFixed(0)}%
                 </span>
               </div>
               {pendingSuggestion.signals && pendingSuggestion.signals.length > 0 && (
                 <div className="text-[10px] text-fg-muted">
-                  reason:{' '}
-                  <span className="text-fg">{pendingSuggestion.signals.join(', ')}</span>
+                  reason: <span className="text-fg">{pendingSuggestion.signals.join(", ")}</span>
                 </div>
               )}
             </div>
@@ -498,7 +474,7 @@ function ModeSection({
         </dd>
       </dl>
     </PanelCard>
-  )
+  );
 }
 
 // ─── Reminders section (J11, CW-20260426-0009) ───────────────────────────────
@@ -506,10 +482,10 @@ function ModeSection({
 function RemindersSection({ reminders }: { reminders?: InspectorRemindersRecord }) {
   const hasData =
     (reminders?.set_this_turn && reminders.set_this_turn.length > 0) ||
-    (reminders?.fired_this_turn && reminders.fired_this_turn.length > 0)
+    (reminders?.fired_this_turn && reminders.fired_this_turn.length > 0);
 
   if (!hasData) {
-    return <EmptyProducer label="Reminders — none set or fired this turn." />
+    return <EmptyProducer label="Reminders — none set or fired this turn." />;
   }
 
   return (
@@ -520,8 +496,12 @@ function RemindersSection({ reminders }: { reminders?: InspectorRemindersRecord 
             <p className="text-[10px] uppercase text-fg-muted font-medium mb-1">Fired this turn</p>
             <div className="space-y-1">
               {reminders.fired_this_turn.map((r) => (
-                <div key={r.id} className="rounded border border-success bg-success-muted px-2 py-1 text-fg">
-                  <span className="font-medium">↑ </span>{r.text}
+                <div
+                  key={r.id}
+                  className="rounded border border-success bg-success-muted px-2 py-1 text-fg"
+                >
+                  <span className="font-medium">↑ </span>
+                  {r.text}
                   {r.scope && <ScopeChip scope={r.scope} className="ml-2" />}
                   <span className="ml-2 text-[9px] text-fg-muted font-mono">{r.trigger_json}</span>
                 </div>
@@ -534,8 +514,12 @@ function RemindersSection({ reminders }: { reminders?: InspectorRemindersRecord 
             <p className="text-[10px] uppercase text-fg-muted font-medium mb-1">Set this turn</p>
             <div className="space-y-1">
               {reminders.set_this_turn.map((r) => (
-                <div key={r.id} className="rounded border border-border-subtle bg-bg px-2 py-1 text-fg-muted">
-                  <span className="font-mono text-[9px] text-fg-faint">{r.id}: </span>{r.text}
+                <div
+                  key={r.id}
+                  className="rounded border border-border-subtle bg-bg px-2 py-1 text-fg-muted"
+                >
+                  <span className="font-mono text-[9px] text-fg-faint">{r.id}: </span>
+                  {r.text}
                   {r.scope && <ScopeChip scope={r.scope} className="ml-2" />}
                   <span className="ml-2 text-[9px] font-mono text-fg-faint">{r.trigger_json}</span>
                 </div>
@@ -545,39 +529,36 @@ function RemindersSection({ reminders }: { reminders?: InspectorRemindersRecord 
         )}
       </div>
     </PanelCard>
-  )
+  );
 }
 
 // ─── Main panel ──────────────────────────────────────────────────────────────
 
 interface InspectorPanelProps {
   /** Active session ID from the parent. If null, prompts the user to select. */
-  sessionId?: string | null
+  sessionId?: string | null;
 }
 
 export function InspectorPanel({ sessionId: propSessionId }: InspectorPanelProps = {}) {
-  const [sessionId, setSessionId] = useState<string>(propSessionId ?? '')
-  const [selectedTurnId, setSelectedTurnId] = useState<string | null>(null)
-  const [reveal, setReveal] = useState(false)
-  const [filter, setFilter] = useState('')
+  const [sessionId, setSessionId] = useState<string>(propSessionId ?? "");
+  const [selectedTurnId, setSelectedTurnId] = useState<string | null>(null);
+  const [reveal, setReveal] = useState(false);
+  const [filter, setFilter] = useState("");
 
-  const activeSession = propSessionId ?? sessionId
+  const activeSession = propSessionId ?? sessionId;
 
-  const { data, isLoading, error } = useInspectorTurns(
-    activeSession || null,
-    50,
-  )
+  const { data, isLoading, error } = useInspectorTurns(activeSession || null, 50);
 
   const turns = (data?.turns ?? []).filter((t: InspectorTurnSnapshot) => {
-    if (!filter) return true
-    const f = filter.toLowerCase()
+    if (!filter) return true;
+    const f = filter.toLowerCase();
     return (
       t.turn_id.includes(f) ||
       t.scope_tier?.toLowerCase().includes(f) ||
       t.broker_decisions?.some((d) => d.intent?.toLowerCase().includes(f)) ||
       t.tool_calls?.some((c) => c.name?.toLowerCase().includes(f))
-    )
-  })
+    );
+  });
 
   return (
     <div className="space-y-4 max-w-6xl">
@@ -605,7 +586,10 @@ export function InspectorPanel({ sessionId: propSessionId }: InspectorPanelProps
         <div className="flex gap-2">
           <Input
             value={sessionId}
-            onChange={(e) => { setSessionId(e.target.value); setSelectedTurnId(null) }}
+            onChange={(e) => {
+              setSessionId(e.target.value);
+              setSelectedTurnId(null);
+            }}
             placeholder="Session ID"
             className="font-mono text-[11px] h-8 max-w-xs"
           />
@@ -647,8 +631,8 @@ export function InspectorPanel({ sessionId: propSessionId }: InspectorPanelProps
                     onClick={() => setSelectedTurnId(turn.turn_id)}
                     className={`w-full text-left rounded-lg border px-2.5 py-2 text-[11px] transition-colors ${
                       selectedTurnId === turn.turn_id
-                        ? 'border-accent bg-accent/10 text-fg'
-                        : 'border-border-subtle bg-bg hover:bg-bg-elevated text-fg-muted hover:text-fg'
+                        ? "border-accent bg-accent/10 text-fg"
+                        : "border-border-subtle bg-bg hover:bg-bg-elevated text-fg-muted hover:text-fg"
                     }`}
                   >
                     <div className="flex items-center justify-between">
@@ -674,11 +658,7 @@ export function InspectorPanel({ sessionId: propSessionId }: InspectorPanelProps
           {/* Turn detail */}
           <div className="min-w-0">
             {selectedTurnId ? (
-              <TurnDetail
-                sessionId={activeSession}
-                turnId={selectedTurnId}
-                reveal={reveal}
-              />
+              <TurnDetail sessionId={activeSession} turnId={selectedTurnId} reveal={reveal} />
             ) : (
               <div className="flex items-center justify-center h-48 text-[11px] text-fg-muted italic border border-border-subtle rounded-xl">
                 Select a turn on the left to inspect it.
@@ -688,5 +668,5 @@ export function InspectorPanel({ sessionId: propSessionId }: InspectorPanelProps
         </div>
       )}
     </div>
-  )
+  );
 }

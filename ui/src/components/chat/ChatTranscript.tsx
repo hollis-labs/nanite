@@ -6,7 +6,18 @@ import { useSettings } from "@/hooks/useSettings";
 import { api } from "@/lib/api";
 import type { AgentMode, Message } from "@/lib/types";
 import { useAppStore } from "@/stores/useAppStore";
-import { getAutoSwitchEffective, useChatStore } from "@/stores/useChatStore";
+import {
+  getAutoSwitchEffective,
+  useActiveMode,
+  useChatErrors,
+  useChatStore,
+  usePendingModeSuggestion,
+  useStreamingFinal,
+  useStreamingNarration,
+  useStreamingThinking,
+  useTextOnlyMode,
+  useToolWarnings,
+} from "@/stores/useChatStore";
 import { ChatMessage } from "./ChatMessage";
 import { CompactionDivider } from "./CompactionDivider";
 import { ErrorBanner } from "./ErrorBanner";
@@ -44,10 +55,10 @@ import { ToolWarningBanner } from "./ToolWarningBanner";
  */
 
 const MODE_AVATAR_STYLES: Record<AgentMode, { bg: string; text: string }> = {
-  default:   { bg: "bg-mode-default/10",   text: "text-mode-default" },
+  default: { bg: "bg-mode-default/10", text: "text-mode-default" },
   architect: { bg: "bg-mode-architect/10", text: "text-mode-architect" },
-  planner:   { bg: "bg-mode-planner/10",   text: "text-mode-planner" },
-  writer:    { bg: "bg-mode-writer/10",    text: "text-mode-writer" },
+  planner: { bg: "bg-mode-planner/10", text: "text-mode-planner" },
+  writer: { bg: "bg-mode-writer/10", text: "text-mode-writer" },
 };
 
 interface ChatTranscriptProps {
@@ -71,12 +82,12 @@ export function ChatTranscript({
 }: ChatTranscriptProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
-  const activeMode = useChatStore((s) => s.activeMode);
-  const toolWarnings = useChatStore((s) => s.toolWarnings);
-  const textOnlyMode = useChatStore((s) => s.textOnlyMode);
+  const activeMode = useActiveMode();
+  const toolWarnings = useToolWarnings();
+  const textOnlyMode = useTextOnlyMode();
   const scrollToMessageId = useChatStore((s) => s.scrollToMessageId);
   const setScrollToMessageId = useChatStore((s) => s.setScrollToMessageId);
-  const chatErrors = useChatStore((s) => s.chatErrors);
+  const chatErrors = useChatErrors();
   const dismissChatError = useChatStore((s) => s.dismissChatError);
   const activeSessionId = useAppStore((s) => s.activeSessionId);
   const queryClient = useQueryClient();
@@ -84,7 +95,7 @@ export function ChatTranscript({
   // B3 (CW-20260428-0011) — pending classifier suggestion + global pref +
   // per-session override. Resolved into one of {auto, ask, off, firstUse}
   // by getAutoSwitchEffective.
-  const pendingModeSuggestion = useChatStore((s) => s.pendingModeSuggestion);
+  const pendingModeSuggestion = usePendingModeSuggestion();
   const clearModeSuggestion = useChatStore((s) => s.clearModeSuggestion);
   const showChatToast = useChatStore((s) => s.showChatToast);
   const autoSwitchOverride = useChatStore((s) =>
@@ -94,33 +105,33 @@ export function ChatTranscript({
   const modeAutoSwitchPref = settings?.mode_auto_switch_pref;
   const effectiveAutoSwitch = getAutoSwitchEffective(autoSwitchOverride, modeAutoSwitchPref);
 
-  // Drop any stale suggestion when the user navigates to a different session.
-  useEffect(() => {
-    clearModeSuggestion();
-  }, [activeSessionId, clearModeSuggestion]);
+  // Per-session slices keep their own pendingModeSuggestion, so a stale
+  // suggestion in session A does not bleed into session B (G-FE-SINGLETON
+  // closure). The previous "drop stale suggestion on session switch" effect
+  // is no longer needed.
 
   // Effect-driven branch for "auto" (apply + toast) and "off" (discard).
   // The "ask" / "firstUse" branches render the card below — render-side
   // calls are avoided here to dodge React state-set-during-render warnings.
   useEffect(() => {
     if (!pendingModeSuggestion || !activeSessionId) return undefined;
-    if (effectiveAutoSwitch === 'off') {
-      clearModeSuggestion();
+    if (effectiveAutoSwitch === "off") {
+      clearModeSuggestion(activeSessionId);
       return undefined;
     }
-    if (effectiveAutoSwitch === 'auto') {
+    if (effectiveAutoSwitch === "auto") {
       let cancelled = false;
       void (async () => {
         try {
           await api.setSessionMode(activeSessionId, { slug: pendingModeSuggestion.suggested });
           if (cancelled) return;
-          showChatToast(`Switched to ${pendingModeSuggestion.suggested} mode`, 'success');
-          void queryClient.invalidateQueries({ queryKey: ['session-mode', activeSessionId] });
-          void queryClient.invalidateQueries({ queryKey: ['session', activeSessionId] });
+          showChatToast(`Switched to ${pendingModeSuggestion.suggested} mode`, "success");
+          void queryClient.invalidateQueries({ queryKey: ["session-mode", activeSessionId] });
+          void queryClient.invalidateQueries({ queryKey: ["session", activeSessionId] });
         } catch (err) {
-          console.error('[ChatTranscript] auto-switch mode failed:', err);
+          console.error("[ChatTranscript] auto-switch mode failed:", err);
         } finally {
-          if (!cancelled) clearModeSuggestion();
+          if (!cancelled) clearModeSuggestion(activeSessionId);
         }
       })();
       return () => {
@@ -139,9 +150,9 @@ export function ChatTranscript({
 
   // F4 (CW-20260419-0029) — narration strip + collapse-pill.
   // F3 (CW-20260420-0023) — thinking strip.
-  const streamingNarration = useChatStore((s) => s.streamingNarration);
-  const streamingFinal = useChatStore((s) => s.streamingFinal);
-  const streamingThinking = useChatStore((s) => s.streamingThinking);
+  const streamingNarration = useStreamingNarration();
+  const streamingFinal = useStreamingFinal();
+  const streamingThinking = useStreamingThinking();
 
   const [isAtBottom, setIsAtBottom] = useState(true);
   const [userHasScrolled, setUserHasScrolled] = useState(false);
@@ -258,14 +269,21 @@ export function ChatTranscript({
   const suppressAutoScrollRef = useRef(false);
   useEffect(() => {
     if (!scrollToMessageId) return;
-    const HIGHLIGHT_CLASSES = ["ring-2", "ring-primary/60", "rounded-[10px]", "transition-shadow"] as const;
+    const HIGHLIGHT_CLASSES = [
+      "ring-2",
+      "ring-primary/60",
+      "rounded-[10px]",
+      "transition-shadow",
+    ] as const;
     let removeTimer: ReturnType<typeof setTimeout> | null = null;
     let rafId: number | null = null;
     let target: HTMLElement | null = null;
     const deadline = Date.now() + 1000;
 
     const giveUp = () => {
-      console.warn(`[ChatTranscript] Jump target ${scrollToMessageId} not found within 1000ms — clearing pending scroll.`);
+      console.warn(
+        `[ChatTranscript] Jump target ${scrollToMessageId} not found within 1000ms — clearing pending scroll.`,
+      );
       setScrollToMessageId(null);
     };
 
@@ -337,7 +355,15 @@ export function ChatTranscript({
           </span>
           <h2 className="text-base font-semibold text-fg">Start a conversation with Nanite</h2>
           <p className="mt-1 text-[13px] leading-relaxed text-fg-muted">
-            Type a message below, use <code className="rounded-[4px] bg-surface px-1 py-0.5 font-mono text-[11px] text-fg-secondary">/</code> for commands, or <code className="rounded-[4px] bg-surface px-1 py-0.5 font-mono text-[11px] text-fg-secondary">@</code> to reference files.
+            Type a message below, use{" "}
+            <code className="rounded-[4px] bg-surface px-1 py-0.5 font-mono text-[11px] text-fg-secondary">
+              /
+            </code>{" "}
+            for commands, or{" "}
+            <code className="rounded-[4px] bg-surface px-1 py-0.5 font-mono text-[11px] text-fg-secondary">
+              @
+            </code>{" "}
+            to reference files.
           </p>
         </div>
       </div>
@@ -366,13 +392,17 @@ export function ChatTranscript({
         {/* Text-only mode banner — system-consistent envelope style */}
         {textOnlyMode && (
           <Envelope accent="neutral">
-            <EnvelopeHeader
-              icon={Info}
-              label="Text-only mode"
-              meta="No tools"
-            />
+            <EnvelopeHeader icon={Info} label="Text-only mode" meta="No tools" />
             <div className="px-4 py-3 text-[13px] leading-relaxed text-fg-secondary">
-              This agent has no tools configured. Use <code className="rounded-[4px] border border-border-subtle bg-surface px-1 py-0.5 font-mono text-[11px] text-fg-secondary">/</code> for commands or <code className="rounded-[4px] border border-border-subtle bg-surface px-1 py-0.5 font-mono text-[11px] text-fg-secondary">@</code> to reference files in the prompt.
+              This agent has no tools configured. Use{" "}
+              <code className="rounded-[4px] border border-border-subtle bg-surface px-1 py-0.5 font-mono text-[11px] text-fg-secondary">
+                /
+              </code>{" "}
+              for commands or{" "}
+              <code className="rounded-[4px] border border-border-subtle bg-surface px-1 py-0.5 font-mono text-[11px] text-fg-secondary">
+                @
+              </code>{" "}
+              to reference files in the prompt.
             </div>
           </Envelope>
         )}
@@ -384,7 +414,9 @@ export function ChatTranscript({
               const prevMeta = JSON.parse(messages[idx - 1].metadata || "{}");
               const currMeta = JSON.parse(msg.metadata || "{}");
               if (prevMeta.compacted && !currMeta.compacted) showCompactionDivider = true;
-            } catch { /* ignore */ }
+            } catch {
+              /* ignore */
+            }
           }
           return (
             <div key={msg.id}>
@@ -416,7 +448,7 @@ export function ChatTranscript({
               </div>
 
               {/* Working strip — live while narration or thinking is arriving; shows ThinkingIndicator when nothing yet */}
-              {(streamingNarration || streamingThinking) ? (
+              {streamingNarration || streamingThinking ? (
                 <div className="mb-2 rounded-[6px] border border-border-subtle bg-surface px-3 py-2">
                   <div className="font-mono text-[10px] uppercase tracking-wide text-fg-faint mb-1">
                     Working…
@@ -439,9 +471,7 @@ export function ChatTranscript({
               ) : null}
 
               {/* Final answer area — renders as it arrives */}
-              {streamingFinal && (
-                <MessageContent content={streamingFinal} role="assistant" />
-              )}
+              {streamingFinal && <MessageContent content={streamingFinal} role="assistant" />}
               {streamStalled && <ThinkingIndicator />}
             </div>
           </div>
@@ -450,19 +480,24 @@ export function ChatTranscript({
         {chatErrors
           .filter((e) => !e.dismissed)
           .map((error) => (
-            <ErrorBanner key={error.id} error={error} onDismiss={dismissChatError} />
+            <ErrorBanner
+              key={error.id}
+              error={error}
+              onDismiss={(id) => activeSessionId && dismissChatError(activeSessionId, id)}
+            />
           ))}
 
         {/* B3 (CW-20260428-0011): mode-suggestion confirm card. Renders only
             when the effective behavior is "ask" (compact strip) or
             "firstUse" (5-option card). The "auto" / "off" branches are
             handled in the effect above. */}
-        {pendingModeSuggestion && activeSessionId &&
-          (effectiveAutoSwitch === 'ask' || effectiveAutoSwitch === 'firstUse') && (
+        {pendingModeSuggestion &&
+          activeSessionId &&
+          (effectiveAutoSwitch === "ask" || effectiveAutoSwitch === "firstUse") && (
             <ModeSuggestionCard
               suggestion={pendingModeSuggestion}
               sessionId={activeSessionId}
-              variant={effectiveAutoSwitch === 'firstUse' ? 'firstUse' : 'compact'}
+              variant={effectiveAutoSwitch === "firstUse" ? "firstUse" : "compact"}
             />
           )}
 
@@ -470,7 +505,7 @@ export function ChatTranscript({
       </div>
 
       {/* Scroll-to-bottom FAB — quieter than the original primary-fill */}
-        {userHasScrolled && !isAtBottom && (
+      {userHasScrolled && !isAtBottom && (
         <button
           onClick={scrollToBottom}
           className="absolute bottom-4 right-4 flex h-9 w-9 items-center justify-center rounded-[10px] border border-border-subtle bg-bg-elevated text-fg-secondary shadow-lg transition-all duration-200 hover:scale-105 hover:text-fg"

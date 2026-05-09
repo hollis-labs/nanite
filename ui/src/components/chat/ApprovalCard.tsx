@@ -1,78 +1,78 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
-import { Shield, ShieldCheck, ShieldX, Clock } from 'lucide-react'
-import { Button } from '@/components/ui/button'
-import { Tooltip } from '@/components/ui/tooltip'
-import { api } from '@/lib/api'
-import type { ApprovalDecision, ApprovalScope, PendingApproval } from '@/lib/types'
-import { useAppStore } from '@/stores/useAppStore'
-import { useChatStore } from '@/stores/useChatStore'
+import { Clock, Shield, ShieldCheck, ShieldX } from "lucide-react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { Button } from "@/components/ui/button";
+import { Tooltip } from "@/components/ui/tooltip";
+import { api } from "@/lib/api";
+import type { ApprovalDecision, ApprovalScope, PendingApproval } from "@/lib/types";
+import { useAppStore } from "@/stores/useAppStore";
+import { useChatStore } from "@/stores/useChatStore";
 
-const AUTO_DENY_SECONDS = 60
+const AUTO_DENY_SECONDS = 60;
 
 interface ApprovalCardProps {
-  approval: PendingApproval
+  approval: PendingApproval;
 }
 
 export function ApprovalCard({ approval }: ApprovalCardProps) {
-  const activeSessionId = useAppStore((s) => s.activeSessionId)
-  const resolvePendingApproval = useChatStore((s) => s.resolvePendingApproval)
-  const [submitting, setSubmitting] = useState(false)
+  const activeSessionId = useAppStore((s) => s.activeSessionId);
+  const resolvePendingApproval = useChatStore((s) => s.resolvePendingApproval);
+  const [submitting, setSubmitting] = useState(false);
   const [secondsLeft, setSecondsLeft] = useState(() => {
-    const elapsed = Math.floor((Date.now() - approval.receivedAt) / 1000)
-    return Math.max(0, AUTO_DENY_SECONDS - elapsed)
-  })
-  const timerRef = useRef<ReturnType<typeof setInterval> | null>(null)
+    const elapsed = Math.floor((Date.now() - approval.receivedAt) / 1000);
+    return Math.max(0, AUTO_DENY_SECONDS - elapsed);
+  });
+  const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
-  const handleDecision = useCallback(async (
-    decision: ApprovalDecision,
-    scope?: ApprovalScope,
-  ) => {
-    if (!activeSessionId || submitting || approval.resolved) return
-    setSubmitting(true)
-    try {
-      await api.respondToApproval(activeSessionId, approval.request_id, decision, scope)
-      resolvePendingApproval(approval.request_id, { decision, scope })
-    } catch (err) {
-      console.error('[ApprovalCard] Failed to respond:', err)
-    } finally {
-      setSubmitting(false)
-    }
-  }, [activeSessionId, approval.request_id, approval.resolved, submitting, resolvePendingApproval])
+  const handleDecision = useCallback(
+    async (decision: ApprovalDecision, scope?: ApprovalScope) => {
+      if (!activeSessionId || submitting || approval.resolved) return;
+      setSubmitting(true);
+      try {
+        await api.respondToApproval(activeSessionId, approval.request_id, decision, scope);
+        resolvePendingApproval(activeSessionId, approval.request_id, { decision, scope });
+      } catch (err) {
+        console.error("[ApprovalCard] Failed to respond:", err);
+      } finally {
+        setSubmitting(false);
+      }
+    },
+    [activeSessionId, approval.request_id, approval.resolved, submitting, resolvePendingApproval],
+  );
 
   // Countdown timer
   useEffect(() => {
-    if (approval.resolved) return
+    if (approval.resolved) return;
 
     timerRef.current = setInterval(() => {
       setSecondsLeft((prev) => {
         if (prev <= 1) {
-          if (timerRef.current) clearInterval(timerRef.current)
-          return 0
+          if (timerRef.current) clearInterval(timerRef.current);
+          return 0;
         }
-        return prev - 1
-      })
-    }, 1000)
+        return prev - 1;
+      });
+    }, 1000);
 
     return () => {
-      if (timerRef.current) clearInterval(timerRef.current)
-    }
-  }, [approval.resolved])
+      if (timerRef.current) clearInterval(timerRef.current);
+    };
+  }, [approval.resolved]);
 
   // Auto-deny on timeout — fires once via ref guard to prevent repeated calls
-  const autoDeniedRef = useRef(false)
+  const autoDeniedRef = useRef(false);
   useEffect(() => {
     if (secondsLeft === 0 && !approval.resolved && !autoDeniedRef.current) {
-      autoDeniedRef.current = true
-      void handleDecision('deny')
+      autoDeniedRef.current = true;
+      void handleDecision("deny");
     }
-  }, [secondsLeft, approval.resolved, handleDecision])
+  }, [secondsLeft, approval.resolved, handleDecision]);
 
   // Summarize tool input (first 2 keys, truncated)
-  const inputSummary = summarizeInput(approval.input)
+  const inputSummary = summarizeInput(approval.input);
 
   // --- Resolved state: collapsed one-liner ---
   if (approval.resolved) {
-    const isAllowed = approval.resolved.decision === 'allow'
+    const isAllowed = approval.resolved.decision === "allow";
     return (
       <div className="flex items-center gap-2 text-[10px] px-1.5 py-0.5 rounded-[6px] bg-bg-elevated border border-border-subtle text-fg-muted">
         {isAllowed ? (
@@ -82,18 +82,18 @@ export function ApprovalCard({ approval }: ApprovalCardProps) {
         )}
         <span className="text-xs text-fg-secondary">
           <span className="font-medium text-fg">{approval.tool}</span>
-          {' — '}
+          {" — "}
           {isAllowed
-            ? `Allowed${approval.resolved.scope ? ` for ${approval.resolved.scope}` : ''}`
-            : 'Denied'}
+            ? `Allowed${approval.resolved.scope ? ` for ${approval.resolved.scope}` : ""}`
+            : "Denied"}
         </span>
       </div>
-    )
+    );
   }
 
   // --- Pending state: full approval card ---
-  const urgency = secondsLeft <= 15
-  const timerColor = urgency ? 'text-primary' : 'text-fg-muted'
+  const urgency = secondsLeft <= 15;
+  const timerColor = urgency ? "text-primary" : "text-fg-muted";
 
   return (
     <div className="rounded-[10px] border border-border-subtle bg-bg-elevated overflow-hidden">
@@ -112,7 +112,9 @@ export function ApprovalCard({ approval }: ApprovalCardProps) {
           )}
         </div>
         <Tooltip content={`Auto-deny in ${secondsLeft}s`} side="left">
-          <div className={`flex items-center gap-1 text-[10px] font-mono tabular-nums ${timerColor}`}>
+          <div
+            className={`flex items-center gap-1 text-[10px] font-mono tabular-nums ${timerColor}`}
+          >
             <Clock className="w-3 h-3" />
             {secondsLeft}s
           </div>
@@ -134,7 +136,7 @@ export function ApprovalCard({ approval }: ApprovalCardProps) {
           variant="default"
           size="sm"
           disabled={submitting}
-          onClick={() => handleDecision('allow', 'once')}
+          onClick={() => handleDecision("allow", "once")}
           className="text-[11px] h-6 px-2"
         >
           Allow Once
@@ -143,7 +145,7 @@ export function ApprovalCard({ approval }: ApprovalCardProps) {
           variant="ghost"
           size="sm"
           disabled={submitting}
-          onClick={() => handleDecision('allow', 'session')}
+          onClick={() => handleDecision("allow", "session")}
           className="text-[11px] h-6 px-2 text-fg-secondary hover:text-fg"
         >
           Allow for Session
@@ -153,33 +155,33 @@ export function ApprovalCard({ approval }: ApprovalCardProps) {
           variant="ghost"
           size="sm"
           disabled={submitting}
-          onClick={() => handleDecision('deny')}
+          onClick={() => handleDecision("deny")}
           className="text-[11px] h-6 px-2 text-primary hover:text-primary-hover hover:bg-primary/10"
         >
           Deny
         </Button>
       </div>
     </div>
-  )
+  );
 }
 
 /** Summarize tool input as key=value lines, truncated to ~120 chars total */
 function summarizeInput(input: Record<string, unknown>): string | null {
-  const entries = Object.entries(input)
-  if (entries.length === 0) return null
+  const entries = Object.entries(input);
+  if (entries.length === 0) return null;
 
-  const lines: string[] = []
-  let total = 0
+  const lines: string[] = [];
+  let total = 0;
   for (const [key, value] of entries.slice(0, 4)) {
-    const val = typeof value === 'string' ? value : JSON.stringify(value)
-    const truncated = val.length > 80 ? val.slice(0, 77) + '...' : val
-    const line = `${key}: ${truncated}`
-    lines.push(line)
-    total += line.length
-    if (total > 200) break
+    const val = typeof value === "string" ? value : JSON.stringify(value);
+    const truncated = val.length > 80 ? val.slice(0, 77) + "..." : val;
+    const line = `${key}: ${truncated}`;
+    lines.push(line);
+    total += line.length;
+    if (total > 200) break;
   }
   if (entries.length > 4) {
-    lines.push(`... +${entries.length - 4} more`)
+    lines.push(`... +${entries.length - 4} more`);
   }
-  return lines.join('\n')
+  return lines.join("\n");
 }

@@ -50,7 +50,7 @@ import (
 )
 
 // DefaultConfidence is the confidence value stamped on every learning
-// captured via the nanite_remember self-tool. Per the ticket: agents are
+// captured via the lesson_capture self-tool. Per the ticket: agents are
 // reporting their own learnings, not architectural decisions.
 const DefaultConfidence = 0.85
 
@@ -76,7 +76,7 @@ const MaxRecallHints = 2
 // (>=0) and let MaxRecallHints + Limit do the gating.
 const RecallSimilarityThreshold = 0.0
 
-// Scope enumerates the three valid scopes the nanite_remember tool
+// Scope enumerates the three valid scopes the lesson_capture tool
 // accepts. Scopes drive the namespace shape and the required Subject
 // field (see ScopeRequiresSubject).
 type Scope string
@@ -103,7 +103,7 @@ func (s Scope) IsValid() bool {
 }
 
 // String returns the scope's wire form (matches the input enum on
-// nanite_remember).
+// lesson_capture).
 func (s Scope) String() string { return string(s) }
 
 // ScopeRequiresSubject reports whether the scope's namespace requires a
@@ -124,7 +124,7 @@ type LearningStore interface {
 }
 
 // CaptureInput is the Recorder.Capture argument. Mirrors the public
-// nanite_remember tool signature so the MCP handler is a thin
+// lesson_capture tool signature so the MCP handler is a thin
 // translation layer.
 type CaptureInput struct {
 	// Scope is one of tool_use / project / session.

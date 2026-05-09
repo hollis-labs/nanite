@@ -127,7 +127,7 @@ func (a *API) RegisterRoutes(mux *http.ServeMux) {
 
 	// Reminders (D1 / D2, CW-20260428-0014/0015) — exposes session +
 	// project-scoped reminders so the FE Work panel can list / promote /
-	// demote / delete them. Originating tool surface is nanite_set_reminder.
+	// demote / delete them. Originating tool surface is reminder_set.
 	mux.HandleFunc("GET /api/sessions/{id}/reminders", a.handleListReminders)
 	mux.HandleFunc("DELETE /api/reminders/{id}", a.handleDeleteReminder)
 	mux.HandleFunc("PATCH /api/reminders/{id}/scope", a.handleUpdateReminderScope)

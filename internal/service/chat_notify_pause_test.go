@@ -25,7 +25,7 @@ func TestShouldNotifyPause(t *testing.T) {
 		{"dev_bash", true},
 		{"dev_grep", false},  // exempted — read-only discovery
 		{"dev_glob", false},  // exempted — read-only discovery
-		{"nanite_show_card", false},
+		{"card_show", false},
 		{"fetch_tool_result", false},
 		{"plugin_giphy_search", false},
 		{"", false},
@@ -97,7 +97,7 @@ func TestEmitNotifyPause_EmitsPlaceholderEnvelope(t *testing.T) {
 func TestEmitNotifyPause_SkipsNonDevTools(t *testing.T) {
 	tu := provider.ToolUseBlock{
 		ID:   "call-2",
-		Name: "nanite_show_card",
+		Name: "card_show",
 	}
 	ch := make(chan chat.StreamEvent, 4)
 	cancelled := emitNotifyPause(context.Background(), tu, ch, nil, 60*time.Millisecond)

@@ -84,7 +84,7 @@ func TestWrapExistingTools(t *testing.T) {
 		{Name: "dev_read", Description: "read"},
 		{Name: "dev_write", Description: "write"},
 		{Name: "web_fetch", Description: "fetch"},
-		{Name: "nanite_list_agents", Description: "list agents"},
+		{Name: "agent_list", Description: "list agents"},
 		{Name: "unknown_tool", Description: "mystery"},
 	}
 
@@ -101,9 +101,9 @@ func TestWrapExistingTools(t *testing.T) {
 	if tools[2].Category() != tool.CategorySearch {
 		t.Errorf("web_fetch category = %q", tools[2].Category())
 	}
-	// nanite_list_agents → agent
+	// agent_list → agent
 	if tools[3].Category() != tool.CategoryAgent {
-		t.Errorf("nanite_list_agents category = %q", tools[3].Category())
+		t.Errorf("agent_list category = %q", tools[3].Category())
 	}
 	// Unknown tool defaults to session/builtin (post ADR-002 there is no
 	// `mcp__` substring signal — callers wrap MCP-origin tools explicitly

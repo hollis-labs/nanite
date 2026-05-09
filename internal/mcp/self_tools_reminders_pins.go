@@ -10,7 +10,7 @@ import (
 	"github.com/hollis-labs/nanite/internal/store"
 )
 
-// callSetReminder handles nanite_set_reminder. Validates the trigger JSON,
+// callSetReminder handles reminder_set. Validates the trigger JSON,
 // persists the reminder, and registers the creation turn with the session's
 // reminder engine (when wired). Returns a confirmation with the new reminder ID.
 //
@@ -86,7 +86,7 @@ func (st *SelfToolsTransport) callSetReminder(ctx context.Context, args map[stri
 	return textResult(fmt.Sprintf(`{"reminder_id":%q,"scope":%q,"status":"set","trigger":%s}`, id, scope, triggerJSON)), nil
 }
 
-// callPin handles nanite_pin. Persists pinned content to the DB for session
+// callPin handles context_pin. Persists pinned content to the DB for session
 // and project scopes. Turn-scoped pins are acknowledged but not stored
 // (they live in-memory in the engine and are cleared after the turn).
 //
@@ -154,7 +154,7 @@ func (st *SelfToolsTransport) callPin(ctx context.Context, args map[string]any) 
 	return textResult(fmt.Sprintf(`{"pin_id":%q,"scope":%q,"status":"pinned"}`, id, scope)), nil
 }
 
-// callUnpin handles nanite_unpin. Deletes a pinned_content row by ID.
+// callUnpin handles context_unpin. Deletes a pinned_content row by ID.
 //
 // J11 (CW-20260426-0009).
 func (st *SelfToolsTransport) callUnpin(_ context.Context, args map[string]any) (*ToolResult, error) {

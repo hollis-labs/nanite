@@ -48,7 +48,7 @@ func getEnvelopeRegistry() *envelopes.Registry {
 var localePrinter = message.NewPrinter(language.English)
 
 // PassiveRenderableTypes is the v1 allow-list of envelope types the agent
-// may emit through nanite_show_card. These are the cards that carry no
+// may emit through card_show. These are the cards that carry no
 // decision-flow / runtime state — the agent decides "use a card with this
 // data", the system decides where it lands. Decision-flow envelopes
 // (approval-card, proposal-card, confirmation-card, question-form),
@@ -224,7 +224,7 @@ func (e *ValidationError) Unwrap() error { return e.Inner }
 
 // StructuredError is the agent-facing shape for a single schema-validation
 // failure. It is produced by FlattenSchemaError (and indirectly by
-// ValidateAgainstSchema) so the nanite_validate self-tool can hand the LLM
+// ValidateAgainstSchema) so the tool_validate self-tool can hand the LLM
 // a precise location, the underlying reason, and (when possible) a fix
 // suggestion.
 //
@@ -467,7 +467,7 @@ func sortStrings(s []string) {
 // through json.Marshal/Unmarshal at the boundary to coerce those into
 // the canonical interface-typed shape, mirroring how the loadSchema
 // path consumes embedded JSON files. The cost is one allocation per
-// call; nanite_validate is rare enough on the hot path that this is
+// call; tool_validate is rare enough on the hot path that this is
 // fine.
 func ValidateAgainstSchema(schemaDoc map[string]any, value any) ([]StructuredError, error) {
 	if schemaDoc == nil {

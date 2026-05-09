@@ -5,6 +5,6 @@
       "id": "agt-01HZ...",
       "default_model": "claude-sonnet-4-20250514"
     },
-    "notes": "Partial update. Get the id from nanite_list_agents first."
+    "notes": "Partial update. Get the id from agent_list first."
   }
 ]

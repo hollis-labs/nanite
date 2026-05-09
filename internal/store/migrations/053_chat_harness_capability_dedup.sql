@@ -13,7 +13,7 @@
 --
 --   2. "When a tool result carries a repair_note..." — Phase A''s commit
 --      message (7f5917b) explicitly says ""Recover with awareness" →
---      nanite_remember description". That relocation is in place
+--      lesson_capture description". That relocation is in place
 --      (see internal/mcp/self_tools_remember.go:29 — the "When to use"
 --      section of the tool description owns the repair_note guidance).
 --      The system-prompt bullet is leftover redundant content.
@@ -39,10 +39,10 @@
 UPDATE prompt_templates
 SET template = REPLACE(
         template,
-        '- You have **meta-tools** for discovery (nanite_tool_describe), pre-flight validation (nanite_validate), and learning capture (nanite_remember). Reach for them when a tool''s contract is unfamiliar or after a call fails — you don''t have to memorise every schema.
+        '- You have **meta-tools** for discovery (tool_describe), pre-flight validation (tool_validate), and learning capture (lesson_capture). Reach for them when a tool''s contract is unfamiliar or after a call fails — you don''t have to memorise every schema.
 - Tool descriptions carry their own usage guidance and examples. Read them when planning a call — they are authoritative.
 - When a tool result carries a repair_note, the harness already reshaped your input so the call could succeed. Read the result as authoritative, and optionally capture the lesson.',
-        '- You have **meta-tools** for discovery (nanite_tool_describe), pre-flight validation (nanite_validate), and learning capture (nanite_remember). Reach for them when a tool''s contract is unfamiliar or after a call fails — you don''t have to memorise every schema.'
+        '- You have **meta-tools** for discovery (tool_describe), pre-flight validation (tool_validate), and learning capture (lesson_capture). Reach for them when a tool''s contract is unfamiliar or after a call fails — you don''t have to memorise every schema.'
     ),
     updated_at = datetime('now')
 WHERE id = 'blt-chat-harness-001'

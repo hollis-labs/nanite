@@ -63,7 +63,7 @@ func (s *stubSchemaProvider) GetToolSchema(_ string) map[string]any { return s.d
 func newRecoverable() *RecoverableError {
 	return &RecoverableError{
 		Kind:        KindSchemaValidation,
-		ToolName:    "nanite_show_card",
+		ToolName:    "card_show",
 		SentArgs:    map[string]any{"type": "report-card", "data": map[string]any{"title": "X", "sections": []any{"a"}}},
 		SchemaURI:   "mem://nanite/envelope/report-card.schema.json",
 		ErrorPath:   "/data/metrics",
@@ -100,7 +100,7 @@ func TestRepair_Success_ProducesRepairedArgs(t *testing.T) {
 		t.Errorf("expected system prompt to be set")
 	}
 	// The user content must mention the tool name and the error path.
-	if !strings.Contains(stub.lastUserContent, "nanite_show_card") {
+	if !strings.Contains(stub.lastUserContent, "card_show") {
 		t.Errorf("user prompt missing tool_name; got %q", stub.lastUserContent)
 	}
 	if !strings.Contains(stub.lastUserContent, "/data/metrics") {

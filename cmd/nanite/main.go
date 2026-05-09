@@ -183,7 +183,7 @@ func cmdServe(args []string) {
 	// Register Nanite's five orphan schemas (kb-result, giphy-modal,
 	// resolution-capture, ticket-form, ticket-confirmation) under the
 	// nanite-legacy plugin id. Catalog cleanup is a separate task; this
-	// preserves prior behavior where ValidateEnvelopeData / nanite_show_card
+	// preserves prior behavior where ValidateEnvelopeData / card_show
 	// could resolve a schema for these types. Bare names also land in the
 	// chat allowlist so wire-format envelopes carrying them keep parsing.
 	if n, err := envelope.RegisterOrphans(envReg); err != nil {
@@ -328,13 +328,13 @@ func cmdServe(args []string) {
 	selfTools.Background = container.Background
 	selfTools.Work = container.Streams
 	// G4 (CW-20260420-0018): wire elicitation service so write tools
-	// (e.g. nanite_message_send kind=directive) can request mid-call
+	// (e.g. message_send kind=directive) can request mid-call
 	// user confirmation via elicitation/create.
 	selfTools.Elicitation = container.Elicitation
 
 	// CW-20260421-0010 (B3): wire the executeTask dispatch primitive.
 	// Adapts subagent.Service.Spawn to dispatch.Spawner so the chat
-	// agent's nanite_execute_task tool can drive role-based dispatch.
+	// agent's task_execute tool can drive role-based dispatch.
 	if container.Subagent != nil {
 		selfTools.Dispatch = service.NewDispatchSpawner(container.Subagent, s)
 		// DispatchWrapper left nil — the transport falls back to
@@ -356,11 +356,11 @@ func cmdServe(args []string) {
 	}
 	selfTools.TrustResolver = s
 	// J11 (CW-20260426-0009): wire the reminder engine so RegisterTurnCount
-	// calls from nanite_set_reminder hit the correct shared Engine instance.
+	// calls from reminder_set hit the correct shared Engine instance.
 	selfTools.ReminderEngine = container.ReminderEngine
 
 	// D1 (CW-20260429-0009): wire the Vanta-backed learning recorder
-	// + recaller used by nanite_remember and the lesson-recall slot
+	// + recaller used by lesson_capture and the lesson-recall slot
 	// extension. memory.Service satisfies the learnings.LearningStore
 	// interface; when it is nil (Conduit not initialised) both wires
 	// stay nil and the self-tool returns a clear errorResult.
@@ -637,17 +637,17 @@ func initMCP(s *store.Store, cfg *config.Config) (*mcp.Manager, *toolclient.Tool
 	selfTools.ReflexSet = reflex.MergeReflexes(reflex.BuiltinReflexes(), userReflexes)
 	selfTools.ReflexLogger = s
 	// B1 (CW-20260429-0006): wire the manager as the cross-server schema
-	// registry so nanite_validate can pre-flight check args for any
+	// registry so tool_validate can pre-flight check args for any
 	// registered tool, not just self-tools.
 	selfTools.SchemaLookup = mcpManager
 	// CW-20260501-0001: wire the manager as the cross-server tool
-	// inventory so nanite_tool_list enumerates every registered MCP
-	// tool (self, nanite-memory, dev, general, plugin) — not just the
-	// in-process self-tools. Without this, sibling-server tools like
-	// nanite_memory_recall are invisible to the discovery primitive.
+	// inventory so tool_list enumerates every registered MCP tool
+	// (self, dev, general, plugin) — not just the in-process self-tools.
+	// Without this, sibling-server tools are invisible to the discovery
+	// primitive.
 	selfTools.Inventory = mcpManager
-	if err := mcpManager.AddServer("self", selfTools, mcp.TierBuiltin); err != nil {
-		slog.Error("mcp: failed to register builtin server", "name", "self", "err", err)
+	if err := mcpManager.AddServer(mcp.SelfServerName, selfTools, mcp.TierBuiltin); err != nil {
+		slog.Error("mcp: failed to register builtin server", "name", mcp.SelfServerName, "err", err)
 	}
 
 	// CW-20260501-0005 sub-ticket 2: register Vanta MCP server when configured.

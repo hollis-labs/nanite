@@ -10,7 +10,7 @@ import (
 )
 
 // naniteToolListDefinition is the cheap discovery primitive (SP6 —
-// CW-20260430-0006). It complements nanite_tool_describe: where describe
+// CW-20260430-0006). It complements tool_describe: where describe
 // returns full per-tool detail (schema + golden examples + relations),
 // list returns just `name + one-line summary` for the full self-tool
 // inventory, with an optional substring filter. Cost target: unfiltered
@@ -19,14 +19,14 @@ import (
 //
 // The motivating evidence is c120 (2026-04-29), where the agent burned
 // turns guessing tool names (`nanite_reminder_create` → `nanite_reminder`
-// → `nanite_set_reminder`) and its self-listing of tools missed
-// `nanite_set_reminder` entirely.
+// → `reminder_set`) and its self-listing of tools missed
+// `reminder_set` entirely.
 //
 // CW-20260501-0001 (SP6 follow-up): the original implementation only
 // enumerated tools defined in `self_tools.go`, which silently hid tools
-// registered on sibling MCP servers like `nanite-memory` (e.g.
-// `nanite_memory_recall`). The list now sources from the full MCP
-// Manager surface (via the ToolInventoryLookup interface).
+// registered on sibling MCP servers (e.g. Vanta's `memory_recall`).
+// The list now sources from the full MCP Manager surface (via the
+// ToolInventoryLookup interface).
 //
 // Output is the FULL inventory regardless of caller — this primitive is
 // a catalog, not a permission check. Whether any specific tool is
@@ -41,12 +41,12 @@ import (
 // docs/architecture/agent-context-architecture.md for the rationale.
 func naniteToolListDefinition() Tool {
 	return Tool{
-		Name: "nanite_tool_list",
+		Name: "tool_list",
 		Description: "Lists registered self-tools by name and one-line summary. Returns the full inventory regardless of caller — actual reachability for any specific tool is governed by agent permissions, the dev-mode gate, and project/session policy, not by this output.\n\n" +
 			"**Contract:** input `{filter?: string}` (optional case-insensitive substring matched against BOTH name and summary). Output `{tools: [{name, summary}], count}`.\n\n" +
-			"**When to use:** Browse the catalog when you're not sure which tool to reach for, or confirm a tool name exists before calling it. Use `nanite_tool_describe` next for the full schema of a specific tool, and `request_tools` to load a tool for use in the current turn.\n\n" +
-			"**Example:** `nanite_tool_list({filter:\"reminder\"}) → {tools:[{name:\"nanite_set_reminder\", summary:\"Schedule a reminder for the user at a specific time.\"}], count:1}`.\n\n" +
-			"**See also:** `nanite_tool_describe(name=\"<tool>\")` for the full contract (schema, golden examples, related tools) of any single tool returned here.",
+			"**When to use:** Browse the catalog when you're not sure which tool to reach for, or confirm a tool name exists before calling it. Use `tool_describe` next for the full schema of a specific tool, and `request_tools` to load a tool for use in the current turn.\n\n" +
+			"**Example:** `tool_list({filter:\"reminder\"}) → {tools:[{name:\"reminder_set\", summary:\"Schedule a reminder for the user at a specific time.\"}], count:1}`.\n\n" +
+			"**See also:** `tool_describe(name=\"<tool>\")` for the full contract (schema, golden examples, related tools) of any single tool returned here.",
 		InputSchema: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
@@ -59,7 +59,7 @@ func naniteToolListDefinition() Tool {
 	}
 }
 
-// ToolInventoryLookup is the narrow registry surface nanite_tool_list
+// ToolInventoryLookup is the narrow registry surface tool_list
 // uses to enumerate every tool registered with the MCP manager,
 // regardless of which server it lives on. *mcp.Manager satisfies this
 // via GetAllToolsUnfiltered; tests can substitute a stub.
@@ -84,7 +84,7 @@ type ToolInventoryLookup interface {
 // usually shorter than this; this is the hard fallback for descriptions
 // without a clean sentence break (e.g. one long run-on sentence). 80
 // chars is just enough to convey "what this tool does" — agents call
-// nanite_tool_describe for the rest.
+// tool_describe for the rest.
 const summaryMaxBytes = 80
 
 // firstSentenceSummary extracts a short summary from a tool description.
@@ -161,7 +161,7 @@ type inventoryEntry struct {
 }
 
 // gatherInventory returns the deduplicated set of tools to consider for
-// nanite_tool_list, sourced from the cross-server MCP inventory when
+// tool_list, sourced from the cross-server MCP inventory when
 // available and falling back to the in-process self-tools when not.
 //
 // Output is the full inventory regardless of caller. Per-agent reach
@@ -212,7 +212,7 @@ func (st *SelfToolsTransport) gatherInventory(_ context.Context) []inventoryEntr
 	return out
 }
 
-// callToolList handles nanite_tool_list. Iterates the cross-server tool
+// callToolList handles tool_list. Iterates the cross-server tool
 // inventory, builds {name, summary} pairs (summary = first-sentence of
 // the tool's description, capped at summaryMaxBytes), and applies the
 // optional filter to BOTH name and summary case-insensitively. Returns
@@ -249,7 +249,7 @@ func (st *SelfToolsTransport) callToolList(ctx context.Context, args map[string]
 		// Marshalling a slice of two-string structs cannot realistically
 		// fail — fall back to a structured error so the caller still
 		// gets a uniform shape.
-		return errorResult("nanite_tool_list: marshal result"), nil
+		return errorResult("tool_list: marshal result"), nil
 	}
 	return textResult(string(body)), nil
 }

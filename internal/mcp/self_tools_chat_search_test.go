@@ -74,7 +74,7 @@ func TestChatSearch_BasicMatch(t *testing.T) {
 	seedMessage(t, s, sessID, "assistant", "Noted. I will not repeat that value.", false)
 
 	ctx := WithSessionID(context.Background(), sessID)
-	result, err := st.CallTool(ctx, "nanite_chat_search", map[string]any{
+	result, err := st.CallTool(ctx, "chat_search", map[string]any{
 		"query": "hunter2",
 	})
 	if err != nil || result.IsError {
@@ -111,7 +111,7 @@ func TestChatSearch_ScopeActive(t *testing.T) {
 	seedMessage(t, s, sessID, "assistant", "[summary] findme was summarized away", true)
 
 	ctx := WithSessionID(context.Background(), sessID)
-	result, err := st.CallTool(ctx, "nanite_chat_search", map[string]any{
+	result, err := st.CallTool(ctx, "chat_search", map[string]any{
 		"query": "findme",
 		"scope": "active",
 	})
@@ -142,7 +142,7 @@ func TestChatSearch_ScopeCompacted(t *testing.T) {
 	seedMessage(t, s, sessID, "assistant", "[summary] findme was summarized away", true)
 
 	ctx := WithSessionID(context.Background(), sessID)
-	result, err := st.CallTool(ctx, "nanite_chat_search", map[string]any{
+	result, err := st.CallTool(ctx, "chat_search", map[string]any{
 		"query": "findme",
 		"scope": "compacted",
 	})
@@ -173,7 +173,7 @@ func TestChatSearch_ScopeAll(t *testing.T) {
 	seedMessage(t, s, sessID, "assistant", "[summary] findme was summarized", true)
 
 	ctx := WithSessionID(context.Background(), sessID)
-	result, err := st.CallTool(ctx, "nanite_chat_search", map[string]any{
+	result, err := st.CallTool(ctx, "chat_search", map[string]any{
 		"query": "findme",
 		"scope": "all",
 	})
@@ -200,7 +200,7 @@ func TestChatSearch_LimitEnforced(t *testing.T) {
 	}
 
 	ctx := WithSessionID(context.Background(), sessID)
-	result, err := st.CallTool(ctx, "nanite_chat_search", map[string]any{
+	result, err := st.CallTool(ctx, "chat_search", map[string]any{
 		"query": "needle",
 		"limit": 3,
 	})
@@ -229,7 +229,7 @@ func TestChatSearch_MaxLimitCapped(t *testing.T) {
 	}
 
 	ctx := WithSessionID(context.Background(), sessID)
-	result, err := st.CallTool(ctx, "nanite_chat_search", map[string]any{
+	result, err := st.CallTool(ctx, "chat_search", map[string]any{
 		"query": "token",
 		"limit": 9999, // should be clamped to 100
 	})
@@ -255,7 +255,7 @@ func TestChatSearch_NoMatch(t *testing.T) {
 	seedMessage(t, s, sessID, "user", "irrelevant content here", false)
 
 	ctx := WithSessionID(context.Background(), sessID)
-	result, err := st.CallTool(ctx, "nanite_chat_search", map[string]any{
+	result, err := st.CallTool(ctx, "chat_search", map[string]any{
 		"query": "xyzzy_notfound_12345",
 	})
 	if err != nil || result.IsError {
@@ -273,7 +273,7 @@ func TestChatSearch_MissingQuery(t *testing.T) {
 	st := NewSelfToolsTransport(s)
 
 	ctx := WithSessionID(context.Background(), "sess-any")
-	result, err := st.CallTool(ctx, "nanite_chat_search", map[string]any{})
+	result, err := st.CallTool(ctx, "chat_search", map[string]any{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -288,7 +288,7 @@ func TestChatSearch_MissingSessionID(t *testing.T) {
 	s := newTestStore(t)
 	st := NewSelfToolsTransport(s)
 
-	result, err := st.CallTool(context.Background(), "nanite_chat_search", map[string]any{
+	result, err := st.CallTool(context.Background(), "chat_search", map[string]any{
 		"query": "anything",
 	})
 	if err != nil {
@@ -309,7 +309,7 @@ func TestChatSearch_CaseInsensitive(t *testing.T) {
 	seedMessage(t, s, sessID, "user", "The API endpoint is /api/V2/items", false)
 
 	ctx := WithSessionID(context.Background(), sessID)
-	result, err := st.CallTool(ctx, "nanite_chat_search", map[string]any{
+	result, err := st.CallTool(ctx, "chat_search", map[string]any{
 		"query": "api/v2", // lower-case, message has V2 uppercase
 	})
 	if err != nil || result.IsError {
@@ -328,7 +328,7 @@ func TestChatSearch_CaseInsensitive(t *testing.T) {
 func TestChatSearchToolDefinition_RequiredSections(t *testing.T) {
 	defs := selfToolDefinitions()
 	for _, d := range defs {
-		if d.Name != "nanite_chat_search" {
+		if d.Name != "chat_search" {
 			continue
 		}
 		checks := []struct {
@@ -344,12 +344,12 @@ func TestChatSearchToolDefinition_RequiredSections(t *testing.T) {
 		}
 		for _, c := range checks {
 			if !strings.Contains(d.Description, c.fragment) {
-				t.Errorf("nanite_chat_search description missing %s (fragment %q)", c.label, c.fragment)
+				t.Errorf("chat_search description missing %s (fragment %q)", c.label, c.fragment)
 			}
 		}
 		return
 	}
-	t.Fatal("nanite_chat_search not found in selfToolDefinitions()")
+	t.Fatal("chat_search not found in selfToolDefinitions()")
 }
 
 // TestChatSearchToolDefinition_InputSchema verifies the input schema has the
@@ -357,22 +357,22 @@ func TestChatSearchToolDefinition_RequiredSections(t *testing.T) {
 func TestChatSearchToolDefinition_InputSchema(t *testing.T) {
 	defs := selfToolDefinitions()
 	for _, d := range defs {
-		if d.Name != "nanite_chat_search" {
+		if d.Name != "chat_search" {
 			continue
 		}
 		props, _ := d.InputSchema["properties"].(map[string]any)
 		for _, field := range []string{"query", "scope", "limit"} {
 			if _, ok := props[field]; !ok {
-				t.Errorf("nanite_chat_search schema missing property %q", field)
+				t.Errorf("chat_search schema missing property %q", field)
 			}
 		}
 		required, _ := d.InputSchema["required"].([]string)
 		if len(required) != 1 || required[0] != "query" {
-			t.Errorf("nanite_chat_search required should be [query], got %v", required)
+			t.Errorf("chat_search required should be [query], got %v", required)
 		}
 		return
 	}
-	t.Fatal("nanite_chat_search not found in selfToolDefinitions()")
+	t.Fatal("chat_search not found in selfToolDefinitions()")
 }
 
 // TestBuildExcerpt_HighlightsMatch verifies the excerpt wraps the match with

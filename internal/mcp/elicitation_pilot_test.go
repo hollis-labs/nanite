@@ -18,7 +18,7 @@ func newTestMessaging(t *testing.T) *messaging.Service {
 }
 
 // TestPilotTool_DirectiveRequiresElicitation verifies the end-to-end pilot:
-// nanite_message_send with kind=directive calls elicitation before sending.
+// message_send with kind=directive calls elicitation before sending.
 //
 // Acceptance criteria from CW-20260420-0018 D5: wire ONE existing write-tool
 // to use elicitation. This test confirms the full path: CallTool → elicitation
@@ -39,7 +39,7 @@ func TestPilotTool_DirectiveRequiresElicitation(t *testing.T) {
 		},
 	}
 
-	result, err := st.CallTool(context.Background(), "nanite_message_send", map[string]any{
+	result, err := st.CallTool(context.Background(), "message_send", map[string]any{
 		"from_session_id": "sess-pilot",
 		"from_agent_id":   "user",
 		"to_session_id":   "sess-target",
@@ -78,7 +78,7 @@ func TestPilotTool_DirectiveDeclined(t *testing.T) {
 		},
 	}
 
-	result, err := st.CallTool(context.Background(), "nanite_message_send", map[string]any{
+	result, err := st.CallTool(context.Background(), "message_send", map[string]any{
 		"from_session_id": "sess-pilot",
 		"from_agent_id":   "user",
 		"to_session_id":   "sess-target",
@@ -122,7 +122,7 @@ func TestPilotTool_NonDirectiveSkipsElicitation(t *testing.T) {
 		},
 	}
 
-	result, err := st.CallTool(context.Background(), "nanite_message_send", map[string]any{
+	result, err := st.CallTool(context.Background(), "message_send", map[string]any{
 		"from_session_id": "sess-pilot",
 		"from_agent_id":   "user",
 		"to_session_id":   "sess-target",

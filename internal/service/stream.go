@@ -552,7 +552,7 @@ func (sm *StreamManager) BroadcastSessionStreamEvent(sessionID string, evt chat.
 }
 
 // BroadcastPanelSignal adapts mcp.PanelSignalSink to the chat.StreamEvent
-// shape. Used by J8 v1 panel-control tools (nanite_panel_open / panel_close /
+// shape. Used by J8 v1 panel-control tools (panel_open / panel_close /
 // signal_mode) so the mcp package can push panel signals without importing
 // chat (which would cycle through chat → toolclient → mcp).
 //

@@ -3,12 +3,12 @@
     "title": "Capture a tool-use lesson from a repair_note (the C2 → D1 closed loop)",
     "args": {
       "scope": "tool_use",
-      "subject": "nanite_show_card",
+      "subject": "card_show",
       "hint": "report-card requires {title, metrics}; sections are not allowed",
       "source_event_id": "evt-c107"
     },
     "result": {
-      "memory_id": "learning_tool_use_nanite_show_card__report_card_requires_title_me",
+      "memory_id": "learning_tool_use_card_show__report_card_requires_title_me",
       "namespace": "user/default/memory"
     },
     "notes": "The headline use case: a tool result carried a `repair_note`, the agent reads `repair_note.lesson_hint`, and persists it here. Subject MUST be the tool name so the lesson surfaces when the same tool is considered next session."

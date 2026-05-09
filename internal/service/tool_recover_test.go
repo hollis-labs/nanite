@@ -10,7 +10,7 @@ import (
 )
 
 // TestClassifyAndFormatToolError_SchemaValidation_EmitsAgentEnvelope is the
-// C1 acceptance check at the harness boundary: a bad nanite_show_card
+// C1 acceptance check at the harness boundary: a bad card_show
 // payload comes back with IsError=true and a JSON envelope carrying
 // kind=schema_validation, the missing-field reason, a suggestion that
 // names 'metrics', and the stable mem://...report-card schema URI.
@@ -22,7 +22,7 @@ func TestClassifyAndFormatToolError_SchemaValidation_EmitsAgentEnvelope(t *testi
 	}
 
 	args := map[string]any{"type": "report-card", "data": map[string]any{"title": "x"}}
-	result := classifyAndFormatToolError(err, "nanite_show_card", args)
+	result := classifyAndFormatToolError(err, "card_show", args)
 	if result == nil {
 		t.Fatalf("classifyAndFormatToolError returned nil")
 	}
@@ -40,8 +40,8 @@ func TestClassifyAndFormatToolError_SchemaValidation_EmitsAgentEnvelope(t *testi
 	if env["kind"] != "schema_validation" {
 		t.Errorf("envelope kind = %v, want schema_validation", env["kind"])
 	}
-	if env["tool"] != "nanite_show_card" {
-		t.Errorf("envelope tool = %v, want nanite_show_card", env["tool"])
+	if env["tool"] != "card_show" {
+		t.Errorf("envelope tool = %v, want card_show", env["tool"])
 	}
 	if uri, _ := env["schema_uri"].(string); !strings.HasSuffix(uri, "report-card.schema.json") || !strings.HasPrefix(uri, "mem://") {
 		t.Errorf("schema_uri must be the stable mem:// form, got %q", uri)
@@ -78,7 +78,7 @@ func TestClassifyAndFormatToolError_PermissionDenied_PreservesLegacyShape(t *tes
 // pass through unchanged.
 func TestClassifyAndFormatToolError_ServiceUnavailable_PreservesLegacyShape(t *testing.T) {
 	err := errors.New("tool error: todo service not available")
-	result := classifyAndFormatToolError(err, "nanite_todo_create", nil)
+	result := classifyAndFormatToolError(err, "todo_create", nil)
 	if !result.IsError {
 		t.Errorf("expected IsError=true")
 	}
@@ -88,12 +88,12 @@ func TestClassifyAndFormatToolError_ServiceUnavailable_PreservesLegacyShape(t *t
 }
 
 // TestClassifyAndFormatToolError_WrongCardType emits the right kind for
-// the audit's `nanite_show_card` "not addressable" path so C2 can pick
+// the audit's `card_show` "not addressable" path so C2 can pick
 // the type-remap repair strategy without LLM-budget spend on auth-class
 // false positives.
 func TestClassifyAndFormatToolError_WrongCardType(t *testing.T) {
-	err := errors.New(`tool error: envelope type "approval-card" is not addressable through nanite_show_card. Allow-list (v1): info-card, list-card`)
-	result := classifyAndFormatToolError(err, "nanite_show_card", map[string]any{"type": "approval-card"})
+	err := errors.New(`tool error: envelope type "approval-card" is not addressable through card_show. Allow-list (v1): info-card, list-card`)
+	result := classifyAndFormatToolError(err, "card_show", map[string]any{"type": "approval-card"})
 	if !result.IsError {
 		t.Errorf("expected IsError=true")
 	}

@@ -10,7 +10,7 @@ import (
 )
 
 // extractEnvelopeJSON pulls the JSON payload out of the
-// <!--ENVELOPE_DATA:...:ENVELOPE_DATA--> marker emitted by nanite_show_card.
+// <!--ENVELOPE_DATA:...:ENVELOPE_DATA--> marker emitted by card_show.
 func extractEnvelopeJSON(t *testing.T, body string) map[string]any {
 	t.Helper()
 	const startTag = "<!--ENVELOPE_DATA:"
@@ -334,7 +334,7 @@ func TestCallShowCard_OmitsEmptyTargetAndMode(t *testing.T) {
 }
 
 // TestCallShowCard_ReportCard_StampsGeneratedAtWhenMissing asserts the
-// timestamp auto-fill behavior preserved from the pre-A3 nanite_show_report.
+// timestamp auto-fill behavior preserved from the pre-A3 report_show.
 func TestCallShowCard_ReportCard_StampsGeneratedAtWhenMissing(t *testing.T) {
 	st := newSelfTools(t)
 	data := cloneMap(validShowCardPayloads["report-card"])
@@ -368,11 +368,11 @@ func TestCallShowCard_ListedAsTool(t *testing.T) {
 		t.Fatalf("ListTools err: %v", err)
 	}
 	for _, tool := range tools {
-		if tool.Name == "nanite_show_card" {
+		if tool.Name == "card_show" {
 			return
 		}
 	}
-	t.Errorf("nanite_show_card not registered in ListTools output")
+	t.Errorf("card_show not registered in ListTools output")
 }
 
 // cloneMap returns a shallow copy so each test's mutation of `data` does not

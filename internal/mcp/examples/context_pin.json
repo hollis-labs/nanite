@@ -2,7 +2,7 @@
   {
     "title": "Pin a key reference for the rest of the session",
     "args": {
-      "content": "Working ticket: CW-20260429-0005 (A1 — nanite_tool_describe).",
+      "content": "Working ticket: CW-20260429-0005 (A1 — tool_describe).",
       "scope": "session"
     },
     "notes": "Pinned content shares the 2000-token SlotUserContext budget. Keep pins thin."

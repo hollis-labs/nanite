@@ -47,7 +47,7 @@ func newRememberSelfTools(t *testing.T, store learnings.LearningStore) *SelfTool
 	return st
 }
 
-// rememberResp is the on-the-wire success shape for nanite_remember.
+// rememberResp is the on-the-wire success shape for lesson_capture.
 type rememberResp struct {
 	MemoryID  string `json:"memory_id"`
 	Namespace string `json:"namespace"`
@@ -60,16 +60,16 @@ func TestRememberToolDefinition_Surface(t *testing.T) {
 	defs := selfToolDefinitions()
 	var found *Tool
 	for i := range defs {
-		if defs[i].Name == "nanite_remember" {
+		if defs[i].Name == "lesson_capture" {
 			found = &defs[i]
 			break
 		}
 	}
 	if found == nil {
-		t.Fatal("nanite_remember not in selfToolDefinitions()")
+		t.Fatal("lesson_capture not in selfToolDefinitions()")
 	}
 	if found.InputSchema == nil {
-		t.Fatal("nanite_remember missing InputSchema")
+		t.Fatal("lesson_capture missing InputSchema")
 	}
 	required, _ := found.InputSchema["required"].([]string)
 	want := map[string]bool{"scope": false, "subject": false, "hint": false}
@@ -80,22 +80,22 @@ func TestRememberToolDefinition_Surface(t *testing.T) {
 	}
 	for k, present := range want {
 		if !present {
-			t.Errorf("nanite_remember required-set missing %q (got %v)", k, required)
+			t.Errorf("lesson_capture required-set missing %q (got %v)", k, required)
 		}
 	}
 }
 
 // TestRemember_HappyPath_ToolUse is the headline acceptance check from
-// the ticket: nanite_remember(scope='tool_use', subject='nanite_show_card',
+// the ticket: lesson_capture(scope='tool_use', subject='card_show',
 // hint='...') writes through to Vanta with the right tags + namespace
 // and returns the memory_id.
 func TestRemember_HappyPath_ToolUse(t *testing.T) {
 	store := &rememberStubStore{}
 	st := newRememberSelfTools(t, store)
 
-	res, err := st.CallTool(context.Background(), "nanite_remember", map[string]any{
+	res, err := st.CallTool(context.Background(), "lesson_capture", map[string]any{
 		"scope":           "tool_use",
-		"subject":         "nanite_show_card",
+		"subject":         "card_show",
 		"hint":            "report-card requires {title, metrics}; sections are not allowed",
 		"source_event_id": "evt-c107",
 		"session_id":      "sess-1",
@@ -122,7 +122,7 @@ func TestRemember_HappyPath_ToolUse(t *testing.T) {
 		t.Fatalf("expected 1 store write, got %d", len(store.stored))
 	}
 	got := store.stored[0]
-	if !containsTag(got.Tags, "tool:nanite_show_card") {
+	if !containsTag(got.Tags, "tool:card_show") {
 		t.Errorf("missing tool tag in %v", got.Tags)
 	}
 	if !containsTag(got.Tags, "source:evt-c107") {
@@ -177,7 +177,7 @@ func TestRemember_MissingFields_ReturnStructuredErrors(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			res, err := st.CallTool(context.Background(), "nanite_remember", c.args)
+			res, err := st.CallTool(context.Background(), "lesson_capture", c.args)
 			if err != nil {
 				t.Fatalf("CallTool error: %v", err)
 			}
@@ -196,7 +196,7 @@ func TestRemember_MissingFields_ReturnStructuredErrors(t *testing.T) {
 func TestRemember_NilRecorder_ClearError(t *testing.T) {
 	st := newSelfTools(t)
 	// LearningRecorder intentionally nil
-	res, err := st.CallTool(context.Background(), "nanite_remember", map[string]any{
+	res, err := st.CallTool(context.Background(), "lesson_capture", map[string]any{
 		"scope": "tool_use", "subject": "x", "hint": "y",
 	})
 	if err != nil {
@@ -216,7 +216,7 @@ func TestRemember_NilRecorder_ClearError(t *testing.T) {
 func TestRemember_StoreFailure_SurfacesAsErrorResult(t *testing.T) {
 	store := &rememberStubStore{storeErr: errors.New("conduit closed")}
 	st := newRememberSelfTools(t, store)
-	res, err := st.CallTool(context.Background(), "nanite_remember", map[string]any{
+	res, err := st.CallTool(context.Background(), "lesson_capture", map[string]any{
 		"scope": "tool_use", "subject": "x", "hint": "y",
 	})
 	if err != nil {
@@ -236,11 +236,11 @@ func TestRemember_StoreFailure_SurfacesAsErrorResult(t *testing.T) {
 func TestRecallToolLearnings_Bridges(t *testing.T) {
 	store := &rememberStubStore{
 		recallReply: []memory.Memory{
-			{Summary: "report-card requires metrics", Tags: []string{"learning", "tool:nanite_show_card"}},
+			{Summary: "report-card requires metrics", Tags: []string{"learning", "tool:card_show"}},
 		},
 	}
 	st := newRememberSelfTools(t, store)
-	hints := st.RecallToolLearnings(context.Background(), "default", "nanite_show_card")
+	hints := st.RecallToolLearnings(context.Background(), "default", "card_show")
 	if len(hints) != 1 {
 		t.Fatalf("expected 1 hint, got %d", len(hints))
 	}
@@ -253,7 +253,7 @@ func TestRecallToolLearnings_Bridges(t *testing.T) {
 // when the wire is missing.
 func TestRecallToolLearnings_NilRecaller(t *testing.T) {
 	st := newSelfTools(t)
-	hints := st.RecallToolLearnings(context.Background(), "default", "nanite_show_card")
+	hints := st.RecallToolLearnings(context.Background(), "default", "card_show")
 	if hints != nil {
 		t.Errorf("expected nil hints from nil recaller, got %v", hints)
 	}
@@ -269,7 +269,7 @@ func containsTag(tags []string, want string) bool {
 }
 
 // TestDescribe_SurfacesPriorLearnings is the headline acceptance check
-// for the recall integration: nanite_tool_describe with prior tool-use
+// for the recall integration: tool_describe with prior tool-use
 // learnings on file includes them in the describe payload as
 // `prior_learnings`. This is the "lesson recall during similar tool
 // selection" surface from the lens.
@@ -277,13 +277,13 @@ func TestDescribe_SurfacesPriorLearnings(t *testing.T) {
 	store := &rememberStubStore{
 		recallReply: []memory.Memory{
 			{Summary: "report-card requires metrics, not sections", Confidence: 0.85,
-				Tags: []string{"learning", "tool:nanite_show_card"}},
+				Tags: []string{"learning", "tool:card_show"}},
 		},
 	}
 	st := newRememberSelfTools(t, store)
 
-	res, err := st.CallTool(context.Background(), "nanite_tool_describe", map[string]any{
-		"name": "nanite_show_card",
+	res, err := st.CallTool(context.Background(), "tool_describe", map[string]any{
+		"name": "card_show",
 	})
 	if err != nil {
 		t.Fatalf("describe: %v", err)
@@ -312,8 +312,8 @@ func TestDescribe_SurfacesPriorLearnings(t *testing.T) {
 func TestDescribe_NoPriorLearningsField_WhenAbsent(t *testing.T) {
 	store := &rememberStubStore{} // no recall reply
 	st := newRememberSelfTools(t, store)
-	res, err := st.CallTool(context.Background(), "nanite_tool_describe", map[string]any{
-		"name": "nanite_show_card",
+	res, err := st.CallTool(context.Background(), "tool_describe", map[string]any{
+		"name": "card_show",
 	})
 	if err != nil || res.IsError {
 		t.Fatalf("describe failed: err=%v body=%s", err, res.Content[0].Text)

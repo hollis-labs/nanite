@@ -23,7 +23,7 @@ type messagingStreamSink struct {
 
 // messageReceivedPayload is the JSON body of a message_received
 // StreamEvent. Kept small — the UI fetches the full message via
-// nanite_message_get on demand if it wants more than the summary.
+// message_get on demand if it wants more than the summary.
 type messageReceivedPayload struct {
 	MessageID     string `json:"message_id"`
 	Channel       string `json:"channel"`

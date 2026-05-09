@@ -16,10 +16,10 @@ func TestNaniteToolDescribe_RegistrationAndSelfDescribe(t *testing.T) {
 	defs := selfToolDefinitions()
 	var found bool
 	for _, d := range defs {
-		if d.Name == "nanite_tool_describe" {
+		if d.Name == "tool_describe" {
 			found = true
 			if d.InputSchema == nil {
-				t.Fatal("nanite_tool_describe missing InputSchema")
+				t.Fatal("tool_describe missing InputSchema")
 			}
 			required, _ := d.InputSchema["required"].([]string)
 			gotName := false
@@ -29,18 +29,18 @@ func TestNaniteToolDescribe_RegistrationAndSelfDescribe(t *testing.T) {
 				}
 			}
 			if !gotName {
-				t.Fatal("nanite_tool_describe must require `name`")
+				t.Fatal("tool_describe must require `name`")
 			}
 			break
 		}
 	}
 	if !found {
-		t.Fatal("nanite_tool_describe not in selfToolDefinitions()")
+		t.Fatal("tool_describe not in selfToolDefinitions()")
 	}
 
 	st := newSelfTools(t)
-	res, err := st.CallTool(context.Background(), "nanite_tool_describe", map[string]any{
-		"name": "nanite_tool_describe",
+	res, err := st.CallTool(context.Background(), "tool_describe", map[string]any{
+		"name": "tool_describe",
 	})
 	if err != nil {
 		t.Fatalf("describe self: %v", err)
@@ -52,25 +52,25 @@ func TestNaniteToolDescribe_RegistrationAndSelfDescribe(t *testing.T) {
 	if err := json.Unmarshal([]byte(res.Content[0].Text), &out); err != nil {
 		t.Fatalf("describe self JSON: %v", err)
 	}
-	if out["name"] != "nanite_tool_describe" {
+	if out["name"] != "tool_describe" {
 		t.Fatalf("self-describe name mismatch: %v", out["name"])
 	}
 }
 
 // TestNaniteToolDescribe_ShowCardAcceptance is the ticket's headline
-// acceptance check: nanite_tool_describe("nanite_show_card") returns an
+// acceptance check: tool_describe("card_show") returns an
 // input schema and at least one golden example whose `type` arg is
 // "report-card".
 func TestNaniteToolDescribe_ShowCardAcceptance(t *testing.T) {
 	st := newSelfTools(t)
-	res, err := st.CallTool(context.Background(), "nanite_tool_describe", map[string]any{
-		"name": "nanite_show_card",
+	res, err := st.CallTool(context.Background(), "tool_describe", map[string]any{
+		"name": "card_show",
 	})
 	if err != nil {
-		t.Fatalf("describe nanite_show_card: %v", err)
+		t.Fatalf("describe card_show: %v", err)
 	}
 	if res.IsError {
-		t.Fatalf("describe nanite_show_card error: %s", res.Content[0].Text)
+		t.Fatalf("describe card_show error: %s", res.Content[0].Text)
 	}
 	var out map[string]any
 	if err := json.Unmarshal([]byte(res.Content[0].Text), &out); err != nil {
@@ -81,7 +81,7 @@ func TestNaniteToolDescribe_ShowCardAcceptance(t *testing.T) {
 	}
 	examples, ok := out["examples"].([]any)
 	if !ok || len(examples) == 0 {
-		t.Fatalf("expected ≥1 golden example for nanite_show_card, got %T %v", out["examples"], out["examples"])
+		t.Fatalf("expected ≥1 golden example for card_show, got %T %v", out["examples"], out["examples"])
 	}
 	hasReportCard := false
 	for _, e := range examples {
@@ -93,7 +93,7 @@ func TestNaniteToolDescribe_ShowCardAcceptance(t *testing.T) {
 		}
 	}
 	if !hasReportCard {
-		t.Fatal("nanite_show_card examples must include at least one report-card entry")
+		t.Fatal("card_show examples must include at least one report-card entry")
 	}
 }
 
@@ -119,8 +119,8 @@ func TestNaniteToolDescribe_AllSelfToolsHaveExamples(t *testing.T) {
 // Levenshtein distance.
 func TestNaniteToolDescribe_UnknownToolHasClosestMatches(t *testing.T) {
 	st := newSelfTools(t)
-	res, err := st.CallTool(context.Background(), "nanite_tool_describe", map[string]any{
-		"name": "nanite_show_carrd", // typo — should suggest nanite_show_card
+	res, err := st.CallTool(context.Background(), "tool_describe", map[string]any{
+		"name": "card_shwo", // typo of post-rename `card_show`; near-miss is stable as the registry evolves
 	})
 	if err != nil {
 		t.Fatalf("describe unknown: %v", err)
@@ -140,8 +140,8 @@ func TestNaniteToolDescribe_UnknownToolHasClosestMatches(t *testing.T) {
 		t.Fatal("closest_matches must be non-empty")
 	}
 	first, _ := matches[0].(string)
-	if first != "nanite_show_card" {
-		t.Fatalf("expected closest match nanite_show_card, got %q (full list: %v)", first, matches)
+	if first != "card_show" {
+		t.Fatalf("expected closest match card_show, got %q (full list: %v)", first, matches)
 	}
 }
 
@@ -149,7 +149,7 @@ func TestNaniteToolDescribe_UnknownToolHasClosestMatches(t *testing.T) {
 // that `name` is present.
 func TestNaniteToolDescribe_MissingNameIsError(t *testing.T) {
 	st := newSelfTools(t)
-	res, _ := st.CallTool(context.Background(), "nanite_tool_describe", map[string]any{})
+	res, _ := st.CallTool(context.Background(), "tool_describe", map[string]any{})
 	if !res.IsError {
 		t.Fatal("expected error when name is omitted")
 	}
@@ -182,8 +182,8 @@ func TestLevenshtein_Smoke(t *testing.T) {
 		{"a", "a", 0},
 		{"a", "b", 1},
 		{"kitten", "sitting", 3},
-		{"nanite_show_carrd", "nanite_show_card", 1},
-		{"NANITE_SHOW_CARD", "nanite_show_card", 0}, // case-insensitive
+		{"card_shows", "card_show", 1},
+		{"CARD_SHOW", "card_show", 0}, // case-insensitive
 	}
 	for _, c := range cases {
 		got := levenshtein(c.a, c.b)
@@ -197,10 +197,10 @@ func TestLevenshtein_Smoke(t *testing.T) {
 // resolve in lexicographic order so describe results don't flap.
 func TestClosestToolNames_DeterministicOrdering(t *testing.T) {
 	candidates := []string{
-		"nanite_plan_get",
-		"nanite_plan_list",
-		"nanite_plan_create",
-		"nanite_plan_update",
+		"plan_get",
+		"plan_list",
+		"plan_create",
+		"plan_update",
 	}
 	got := closestToolNames("nanite_plan_xyz", candidates, 3)
 	if len(got) != 3 {
@@ -225,9 +225,9 @@ func TestClosestToolNames_DeterministicOrdering(t *testing.T) {
 // and grounding-free (info-card or metric-card) cases — the ticket
 // stipulates examples covering the allowed types.
 func TestNaniteToolDescribe_ExamplesIncludePassiveRenderableCoverage(t *testing.T) {
-	examples, err := loadGoldenExamples("nanite_show_card")
+	examples, err := loadGoldenExamples("card_show")
 	if err != nil || len(examples) == 0 {
-		t.Fatalf("nanite_show_card examples missing: %v", err)
+		t.Fatalf("card_show examples missing: %v", err)
 	}
 	types := map[string]bool{}
 	for _, ex := range examples {
@@ -236,7 +236,7 @@ func TestNaniteToolDescribe_ExamplesIncludePassiveRenderableCoverage(t *testing.
 		}
 	}
 	if !types["report-card"] {
-		t.Error("missing report-card example for nanite_show_card")
+		t.Error("missing report-card example for card_show")
 	}
 	if !types["info-card"] && !types["metric-card"] {
 		t.Error("missing at least one passive non-grounded card type (info-card or metric-card)")
@@ -244,9 +244,9 @@ func TestNaniteToolDescribe_ExamplesIncludePassiveRenderableCoverage(t *testing.
 }
 
 // TestNaniteToolDescribe_ShowCardExamplesCoverAllCoreTypes verifies the
-// nanite_show_card golden examples cover every core envelope card type
+// card_show golden examples cover every core envelope card type
 // the harness ships at v1: the 10 passive-renderable types reachable
-// through nanite_show_card, plus the 6 reference-shape types (decision-flow
+// through card_show, plus the 6 reference-shape types (decision-flow
 // and backend-only) that other emission paths use. CW-20260430-0004 (SP4)
 // added these so the agent's first-call success rate on unfamiliar
 // envelope types is anchored on a real example rather than guesswork.
@@ -254,9 +254,9 @@ func TestNaniteToolDescribe_ExamplesIncludePassiveRenderableCoverage(t *testing.
 // Source of truth for the type list: config/envelopes.yaml +
 // internal/envelope/schemas/<type>.schema.json.
 func TestNaniteToolDescribe_ShowCardExamplesCoverAllCoreTypes(t *testing.T) {
-	examples, err := loadGoldenExamples("nanite_show_card")
+	examples, err := loadGoldenExamples("card_show")
 	if err != nil || len(examples) == 0 {
-		t.Fatalf("nanite_show_card examples missing: %v", err)
+		t.Fatalf("card_show examples missing: %v", err)
 	}
 	seen := map[string]bool{}
 	for _, ex := range examples {
@@ -295,16 +295,16 @@ func TestNaniteToolDescribe_ShowCardExamplesCoverAllCoreTypes(t *testing.T) {
 }
 
 // TestNaniteToolDescribe_ShowCardExamplesValidateAgainstSchemas walks
-// every golden example for nanite_show_card and validates the example's
+// every golden example for card_show and validates the example's
 // `data` payload against the registered per-type schema. This guards
 // against the regression class where an example uses a field name the
 // schema doesn't accept (e.g. body_markdown vs content for
 // document-viewer) — the agent that copies the example would then hit
 // the validator and fail. CW-20260430-0004 (SP4).
 func TestNaniteToolDescribe_ShowCardExamplesValidateAgainstSchemas(t *testing.T) {
-	examples, err := loadGoldenExamples("nanite_show_card")
+	examples, err := loadGoldenExamples("card_show")
 	if err != nil || len(examples) == 0 {
-		t.Fatalf("nanite_show_card examples missing: %v", err)
+		t.Fatalf("card_show examples missing: %v", err)
 	}
 	for i, ex := range examples {
 		typ, _ := ex.Args["type"].(string)

@@ -39,7 +39,7 @@ const (
 
 	// PTY / CLI turn lifecycle events. Written by the chat-service layer
 	// (not the messaging layer) for PTY-provider sessions. These allow
-	// nanite_diagnose_session to reconstruct what happened in a PTY turn
+	// session_diagnose to reconstruct what happened in a PTY turn
 	// without having to grep logs.
 	EventPTYTurnStart    = "pty_turn_start"
 	EventPTYTurnComplete = "pty_turn_complete"

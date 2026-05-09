@@ -57,10 +57,10 @@ func loadGoldenExamples(toolName string) ([]goldenExample, error) {
 // CW-20260429-0005 (A1 — Layer 1 of the self-healing tool surface lens).
 func naniteToolDescribeDefinition() Tool {
 	return Tool{
-		Name: "nanite_tool_describe",
+		Name: "tool_describe",
 		Description: "Return a tool's contract on demand: description, input schema, golden examples, and related tools/skills.\n\n" +
-			"**When to use:** When you're unsure about a tool's input shape, when you've never rendered a particular envelope `type` for `nanite_show_card`, or after a call fails with a schema-validation error. Cheap (registry + embed lookup, no LLM call) — prefer it to failing-and-retrying.\n\n" +
-			"**When NOT to use:** Skip this when you have already called the tool successfully in the same session, or when the tool is from a third-party MCP server (this only describes nanite_* self-tools at v1).\n\n" +
+			"**When to use:** When you're unsure about a tool's input shape, when you've never rendered a particular envelope `type` for `card_show`, or after a call fails with a schema-validation error. Cheap (registry + embed lookup, no LLM call) — prefer it to failing-and-retrying.\n\n" +
+			"**When NOT to use:** Skip this when you have already called the tool successfully in the same session, or when the tool is from a third-party MCP server (this only describes built-in self-server tools at v1).\n\n" +
 			"**Output shape:** {name, description, input_schema, examples: [{title, args, result?, notes?}], related_tools?: [string], related_skills?: [string]}.\n\n" +
 			"**Unknown tool name:** Returns a structured error with `closest_matches` (Levenshtein) so you can correct typos in one round-trip.",
 		InputSchema: map[string]any{
@@ -68,7 +68,7 @@ func naniteToolDescribeDefinition() Tool {
 			"properties": map[string]any{
 				"name": map[string]any{
 					"type":        "string",
-					"description": "The exact tool name to describe, e.g. \"nanite_show_card\" or \"nanite_todo_create\".",
+					"description": "The exact tool name to describe, e.g. \"card_show\" or \"todo_create\".",
 				},
 			},
 			"required": []string{"name"},
@@ -87,72 +87,72 @@ var describeRelations = map[string]struct {
 	relatedTools  []string
 	relatedSkills []string
 }{
-	"nanite_show_card": {
-		relatedTools: []string{"nanite_giphy_search", "nanite_panel_open"},
+	"card_show": {
+		relatedTools: []string{"giphy_search", "panel_open"},
 	},
-	"nanite_giphy_search": {
-		relatedTools: []string{"nanite_show_card"},
+	"giphy_search": {
+		relatedTools: []string{"card_show"},
 	},
-	"nanite_todo_create": {
-		relatedTools: []string{"nanite_todo_update", "nanite_todo_list", "nanite_plan_create"},
+	"todo_create": {
+		relatedTools: []string{"todo_update", "todo_list", "plan_create"},
 	},
-	"nanite_todo_update": {
-		relatedTools: []string{"nanite_todo_create", "nanite_todo_list"},
+	"todo_update": {
+		relatedTools: []string{"todo_create", "todo_list"},
 	},
-	"nanite_todo_list": {
-		relatedTools: []string{"nanite_todo_create", "nanite_todo_update"},
+	"todo_list": {
+		relatedTools: []string{"todo_create", "todo_update"},
 	},
-	"nanite_plan_create": {
-		relatedTools: []string{"nanite_plan_update", "nanite_plan_step_add", "nanite_plan_list", "nanite_plan_get", "nanite_todo_create"},
+	"plan_create": {
+		relatedTools: []string{"plan_update", "plan_step_add", "plan_list", "plan_get", "todo_create"},
 	},
-	"nanite_plan_update": {
-		relatedTools: []string{"nanite_plan_step_add", "nanite_plan_create", "nanite_plan_get"},
+	"plan_update": {
+		relatedTools: []string{"plan_step_add", "plan_create", "plan_get"},
 	},
-	"nanite_plan_step_add": {
-		relatedTools: []string{"nanite_plan_create", "nanite_plan_update", "nanite_plan_get"},
+	"plan_step_add": {
+		relatedTools: []string{"plan_create", "plan_update", "plan_get"},
 	},
-	"nanite_plan_list": {
-		relatedTools: []string{"nanite_plan_get", "nanite_plan_create"},
+	"plan_list": {
+		relatedTools: []string{"plan_get", "plan_create"},
 	},
-	"nanite_plan_get": {
-		relatedTools: []string{"nanite_plan_update", "nanite_plan_step_add", "nanite_plan_list"},
+	"plan_get": {
+		relatedTools: []string{"plan_update", "plan_step_add", "plan_list"},
 	},
-	"nanite_plan_delete": {
-		relatedTools: []string{"nanite_plan_list"},
+	"plan_delete": {
+		relatedTools: []string{"plan_list"},
 	},
-	"nanite_create_skill":  {relatedTools: []string{"nanite_list_skills", "nanite_update_skill", "nanite_delete_skill"}},
-	"nanite_list_skills":   {relatedTools: []string{"nanite_create_skill", "nanite_update_skill"}},
-	"nanite_update_skill":  {relatedTools: []string{"nanite_list_skills", "nanite_delete_skill"}},
-	"nanite_delete_skill":  {relatedTools: []string{"nanite_list_skills"}},
-	"nanite_create_agent":  {relatedTools: []string{"nanite_list_agents", "nanite_update_agent"}},
-	"nanite_list_agents":   {relatedTools: []string{"nanite_create_agent", "nanite_update_agent"}},
-	"nanite_update_agent":  {relatedTools: []string{"nanite_list_agents"}},
-	"nanite_message_send":  {relatedTools: []string{"nanite_message_inbox", "nanite_message_thread", "nanite_message_ack"}},
-	"nanite_message_inbox": {relatedTools: []string{"nanite_message_ack", "nanite_message_resolve", "nanite_message_thread"}},
-	"nanite_spawn_subagent": {
-		relatedTools: []string{"nanite_subagent_status", "nanite_subagent_cancel", "nanite_background_job"},
+	"skill_create":  {relatedTools: []string{"skill_list", "skill_update", "skill_delete"}},
+	"skill_list":   {relatedTools: []string{"skill_create", "skill_update"}},
+	"skill_update":  {relatedTools: []string{"skill_list", "skill_delete"}},
+	"skill_delete":  {relatedTools: []string{"skill_list"}},
+	"agent_create":  {relatedTools: []string{"agent_list", "agent_update"}},
+	"agent_list":   {relatedTools: []string{"agent_create", "agent_update"}},
+	"agent_update":  {relatedTools: []string{"agent_list"}},
+	"message_send":  {relatedTools: []string{"message_inbox", "message_thread", "message_ack"}},
+	"message_inbox": {relatedTools: []string{"message_ack", "message_resolve", "message_thread"}},
+	"subagent_spawn": {
+		relatedTools: []string{"subagent_status", "subagent_cancel", "background_job"},
 	},
-	"nanite_background_job": {
-		relatedTools: []string{"nanite_background_status", "nanite_background_cancel", "nanite_spawn_subagent"},
+	"background_job": {
+		relatedTools: []string{"background_status", "background_cancel", "subagent_spawn"},
 	},
-	"nanite_set_reminder": {relatedTools: []string{"nanite_pin", "nanite_unpin"}},
-	"nanite_pin":          {relatedTools: []string{"nanite_set_reminder", "nanite_unpin"}},
-	"nanite_unpin":        {relatedTools: []string{"nanite_pin"}},
-	"nanite_panel_open":   {relatedTools: []string{"nanite_panel_close", "nanite_signal_mode", "nanite_show_card"}},
-	"nanite_panel_close":  {relatedTools: []string{"nanite_panel_open"}},
-	"nanite_signal_mode":  {relatedTools: []string{"nanite_panel_open"}},
-	"nanite_execute_task": {
-		relatedTools: []string{"nanite_spawn_subagent", "nanite_background_job"},
+	"reminder_set": {relatedTools: []string{"context_pin", "context_unpin"}},
+	"context_pin":          {relatedTools: []string{"reminder_set", "context_unpin"}},
+	"context_unpin":        {relatedTools: []string{"context_pin"}},
+	"panel_open":   {relatedTools: []string{"panel_close", "signal_mode", "card_show"}},
+	"panel_close":  {relatedTools: []string{"panel_open"}},
+	"signal_mode":  {relatedTools: []string{"panel_open"}},
+	"task_execute": {
+		relatedTools: []string{"subagent_spawn", "background_job"},
 	},
-	// D1 (CW-20260429-0009) — nanite_remember bundles with the layer 1/2
+	// D1 (CW-20260429-0009) — lesson_capture bundles with the layer 1/2
 	// self-tools (describe + validate) because they form the
 	// discover → validate → remember cluster the harness prompt teaches.
-	"nanite_remember": {
-		relatedTools: []string{"nanite_validate", "nanite_tool_describe"},
+	"lesson_capture": {
+		relatedTools: []string{"tool_validate", "tool_describe"},
 	},
 }
 
-// callToolDescribe handles nanite_tool_describe. It looks up the tool by
+// callToolDescribe handles tool_describe. It looks up the tool by
 // exact name in selfToolDefinitions(), loads any embedded golden examples,
 // and returns a single JSON object with the tool's contract. On miss it
 // returns a structured "tool_not_found" payload with the three closest
@@ -171,7 +171,7 @@ func (st *SelfToolsTransport) callToolDescribe(ctx context.Context, args map[str
 		return errorResult("name is required"), nil
 	}
 
-	// selfToolDefinitions() already includes nanite_tool_describe (see
+	// selfToolDefinitions() already includes tool_describe (see
 	// internal/mcp/self_tools.go), so a self-introspective call falls
 	// through the normal lookup path — no need to append it here.
 	defs := selfToolDefinitions()
@@ -191,7 +191,7 @@ func (st *SelfToolsTransport) callToolDescribe(ctx context.Context, args map[str
 			"error":            "tool_not_found",
 			"name":             name,
 			"closest_matches":  closest,
-			"hint":             "Pick one of closest_matches and re-call nanite_tool_describe with that exact name. If none match, the tool is not on the v1 self-tool surface (this tool does not describe plugin-shipped or third-party MCP tools).",
+			"hint":             "Pick one of closest_matches and re-call tool_describe with that exact name. If none match, the tool is not on the v1 self-tool surface (this tool does not describe plugin-shipped or third-party MCP tools).",
 		}
 		out, _ := json.Marshal(payload)
 		return errorResult(string(out)), nil

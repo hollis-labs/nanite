@@ -266,8 +266,8 @@ const thinkToolBlockV1 = `
 ## Before Responding — Consider Your Affordances
 Use the think tool to plan before multi-step tool sequences or when new context changes your approach.
 
-- **Scratchpad** (nanite_scratchpad_write/read): stash interim values within a turn; avoid re-fetching.
-- **Memory** (nanite_memory_recall/save): recall durable facts before research or planning; save conclusions.
+- **Scratchpad** (scratchpad_write/read): stash interim values within a turn; avoid re-fetching.
+- **Memory** (memory_recall/write): recall durable facts before research or planning; save conclusions.
 - **Playbooks** (reflex catalog): reach for a pre-defined pattern (researcher, planner, reviewer, worker) before improvising.
 - **Peer-query** (forthcoming — F5/CW-20260420-0022): agent-to-agent consultation not yet wired; use memory/scratchpad to share state.`
 
@@ -341,7 +341,7 @@ const SkillEssentialCap = 25
 // SkillEssentialCap) and "discoverable" (everything else in the catalog).
 // Essentials are inlined; discoverable count is surfaced via a LoadHint
 // pointer at the tail of the rendered string. The pointer references real
-// MCP tools (nanite_list_skills, nanite_tool_list) and is framed as
+// MCP tools (skill_list, tool_list) and is framed as
 // invitation, not warning — the agent should feel the catalog has every
 // skill it needs and only carries what it currently uses.
 func buildSkillListForSession(s *store.Store, agentID, sessionID string) string {
@@ -392,7 +392,7 @@ func skillCatalogLoadHint(s *store.Store, renderedCount int) string {
 		return ""
 	}
 	return fmt.Sprintf(
-		"[%d additional skills are available in your catalog. Browse via `nanite_list_skills(category:\"<term>\")` or `nanite_tool_list(filter:\"<term>\")` for the full tool surface — we have skills for nearly any task. If your first lookup misses, widen the search before concluding nothing matches.]",
+		"[%d additional skills are available in your catalog. Browse via `skill_list(category:\"<term>\")` or `tool_list(filter:\"<term>\")` for the full tool surface — we have skills for nearly any task. If your first lookup misses, widen the search before concluding nothing matches.]",
 		discoverable,
 	)
 }

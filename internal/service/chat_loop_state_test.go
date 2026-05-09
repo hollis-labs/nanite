@@ -251,17 +251,17 @@ func TestLoopState_ResolveIterationLimits_ClampsRunawayCap(t *testing.T) {
 }
 
 func TestShouldDirectReturnSubagentLiteral(t *testing.T) {
-	plans := []toolPlan{{tu: chatTool("nanite_spawn_subagent")}}
-	if !shouldDirectReturnSubagentLiteral(plans, "nanite_spawn_subagent", "```text\nx\n```", false) {
+	plans := []toolPlan{{tu: chatTool("subagent_spawn")}}
+	if !shouldDirectReturnSubagentLiteral(plans, "subagent_spawn", "```text\nx\n```", false) {
 		t.Fatal("expected literal sync subagent result to short-circuit")
 	}
-	if shouldDirectReturnSubagentLiteral(plans, "nanite_spawn_subagent", "plain text", false) {
+	if shouldDirectReturnSubagentLiteral(plans, "subagent_spawn", "plain text", false) {
 		t.Fatal("plain text should not short-circuit")
 	}
 	if shouldDirectReturnSubagentLiteral(plans, "dev_read", "```text\nx\n```", false) {
 		t.Fatal("non-subagent tool should not short-circuit")
 	}
-	if shouldDirectReturnSubagentLiteral([]toolPlan{{tu: chatTool("nanite_spawn_subagent")}, {tu: chatTool("dev_read")}}, "nanite_spawn_subagent", "```text\nx\n```", false) {
+	if shouldDirectReturnSubagentLiteral([]toolPlan{{tu: chatTool("subagent_spawn")}, {tu: chatTool("dev_read")}}, "subagent_spawn", "```text\nx\n```", false) {
 		t.Fatal("multi-tool turns should not short-circuit")
 	}
 }

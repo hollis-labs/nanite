@@ -155,16 +155,16 @@ func TestCallScratchpadClear_MissingKeyArg(t *testing.T) {
 
 func TestIsScratchpadTool(t *testing.T) {
 	for _, name := range []string{
-		"nanite_scratchpad_write",
-		"nanite_scratchpad_read",
-		"nanite_scratchpad_clear",
+		"scratchpad_write",
+		"scratchpad_read",
+		"scratchpad_clear",
 	} {
 		if !isScratchpadTool(name) {
 			t.Errorf("isScratchpadTool(%q) = false, want true", name)
 		}
 	}
-	if isScratchpadTool("nanite_create_skill") {
-		t.Error("isScratchpadTool(nanite_create_skill) = true, want false")
+	if isScratchpadTool("skill_create") {
+		t.Error("isScratchpadTool(skill_create) = true, want false")
 	}
 }
 
@@ -174,7 +174,7 @@ func TestHandleScratchpadTool_ChannelEvents(t *testing.T) {
 
 	tu := provider.ToolUseBlock{
 		ID:    "test-id",
-		Name:  "nanite_scratchpad_write",
+		Name:  "scratchpad_write",
 		Input: map[string]any{"key": "k", "value": "v"},
 	}
 
@@ -214,7 +214,7 @@ func TestHandleScratchpadTool_SummaryTruncation(t *testing.T) {
 	ch := make(chan chat.StreamEvent, 10)
 	tu := provider.ToolUseBlock{
 		ID:    "read-id",
-		Name:  "nanite_scratchpad_read",
+		Name:  "scratchpad_read",
 		Input: map[string]any{"key": "big"},
 	}
 

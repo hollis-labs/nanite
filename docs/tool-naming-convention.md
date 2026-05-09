@@ -28,7 +28,7 @@ The verb slot should be a common action word:
 |------|---------|
 | `create` | Create a new resource |
 | `get` | Fetch a single resource by ID |
-| `list` | Enumerate resources (plural noun preferred: `tasks_list`) |
+| `list` | Enumerate resources (singular noun + `_list` — avoid plural roots; use `_batch_<verb>` for multi-item ops) |
 | `update` | Mutate fields on an existing resource |
 | `delete` | Remove a resource |
 | `search` | Query by content or filter |
@@ -37,6 +37,18 @@ The verb slot should be a common action word:
 | `read` / `view` | Read a value |
 | `transition` | Move a resource through a state machine |
 | `health` | Liveness / readiness probe |
+
+### Singular noun, not plural
+
+Use a singular noun in the concept slot — `task_list`, `agent_list`, `todo_list`, `plan_list` — never plural roots like `tasks_list` / `agents_list` / `todos_list` / `plans_list`.
+
+Two roots for the same concept (`todo_*` and `todos_*`) is irregular cognitive overhead. The verb (`_list`, `_search`, `_batch_update`) already disambiguates collection vs single-item ops.
+
+Multi-item explicit operations use `_batch_<verb>`: `todo_batch_update`, `todo_batch_get`, `todo_batch_delete`, etc.
+
+If genuine ambiguity ever arises (rare), use `_list_all` / `_view_all` rather than re-introducing plural roots.
+
+Locked by: `docs/tool-naming-audit.md` Decision 2 (CW-20260502-0008), enforced via the rename arc (CW-20260508-0014).
 
 ---
 

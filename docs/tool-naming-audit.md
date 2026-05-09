@@ -374,11 +374,11 @@ Source files: `internal/mcp/self_tools.go`, `internal/mcp/self_tools_describe.go
 | `nanite_validate` | self_tools_validate.go:33 | `validate` (too bare) → propose `tool_validate` | no | rename to `tool_validate` (concept = "tool", verb = "validate") |
 | `nanite_run_python` | self_tools_python.go:520 | `python_run` | no | rename |
 | `nanite_create_skill` | self_tools.go:53 | `skill_create` | no | rename |
-| `nanite_list_skills` | self_tools.go:72 | `skills_list` | no | rename (plural noun per convention) |
+| `nanite_list_skills` | self_tools.go:72 | `skill_list` | no | rename (singular noun per convention) |
 | `nanite_update_skill` | self_tools.go:84 | `skill_update` | no | rename |
 | `nanite_delete_skill` | self_tools.go:104 | `skill_delete` | no | rename |
 | `nanite_create_agent` | self_tools.go:118 | `agent_create` | no | rename |
-| `nanite_list_agents` | self_tools.go:136 | `agents_list` | no | rename |
+| `nanite_list_agents` | self_tools.go:136 | `agent_list` | no | rename |
 | `nanite_update_agent` | self_tools.go:146 | `agent_update` | no | rename |
 | `nanite_navigate_engine` | self_tools.go:166 | `engine_navigate` | no | rename |
 | `nanite_refresh_engine` | self_tools.go:200 | `engine_refresh` | no | rename |
@@ -391,11 +391,11 @@ Source files: `internal/mcp/self_tools.go`, `internal/mcp/self_tools_describe.go
 | `nanite_builder_step` | self_tools.go:298 | `builder_step` | no | rename |
 | `nanite_todo_create` | self_tools.go:315 | `todo_create` | no | rename |
 | `nanite_todo_update` | self_tools.go:340 | `todo_update` | no | rename |
-| `nanite_todo_list` | self_tools.go:359 | `todos_list` | no | rename (plural) |
+| `nanite_todo_list` | self_tools.go:359 | `todo_list` | no | rename |
 | `nanite_plan_create` | self_tools.go:378 | `plan_create` | no | rename |
 | `nanite_plan_update` | self_tools.go:400 | `plan_update` | no | rename |
 | `nanite_plan_step_add` | self_tools.go:421 | `plan_step_add` | no | rename |
-| `nanite_plan_list` | self_tools.go:446 | `plans_list` | no | rename (plural) |
+| `nanite_plan_list` | self_tools.go:446 | `plan_list` | no | rename |
 | `nanite_plan_get` | self_tools.go:460 | `plan_get` | no | rename |
 | `nanite_plan_delete` | self_tools.go:473 | `plan_delete` | no | rename |
 | `nanite_install_home` | self_tools.go:488 | `install_home` | no | rename |

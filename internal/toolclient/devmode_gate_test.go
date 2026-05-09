@@ -33,7 +33,7 @@ func TestIsDevTool(t *testing.T) {
 		{"dev_grep", "dev_grep", true},
 		// Non-dev tools must not be flagged.
 		{"general web_fetch", "web_fetch", false},
-		{"nanite self-tool", "nanite_todo_create", false},
+		{"nanite self-tool", "todo_create", false},
 		// Edge cases.
 		{"empty string", "", false},
 		{"dev prefix no underscore", "dev", false},
@@ -98,7 +98,7 @@ func TestSelectToolsAsProvider_DevToolsExcludedWhenDevModeOff(t *testing.T) {
 		{Name: "dev_grep", Description: "Grep files"},
 	})
 	tb.Builtins.RegisterBuiltins("self", []provider.ToolDefinition{
-		{Name: "nanite_todo_create", Description: "Create a todo"},
+		{Name: "todo_create", Description: "Create a todo"},
 	})
 
 	res, err := tb.SelectToolsAsProvider(context.Background(), "general", nil, "", "agent-1", 0)
@@ -115,8 +115,8 @@ func TestSelectToolsAsProvider_DevToolsExcludedWhenDevModeOff(t *testing.T) {
 	}
 
 	// Non-dev builtins must still appear.
-	if !names["nanite_todo_create"] {
-		t.Error("non-dev builtin nanite_todo_create must appear when developer_mode=false")
+	if !names["todo_create"] {
+		t.Error("non-dev builtin todo_create must appear when developer_mode=false")
 	}
 }
 

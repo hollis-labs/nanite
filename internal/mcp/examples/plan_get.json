@@ -2,6 +2,6 @@
   {
     "title": "Get a plan with all step IDs",
     "args": { "id": "pln-01HZ..." },
-    "notes": "Use this to retrieve step_ids needed for nanite_plan_update(step_id=...)."
+    "notes": "Use this to retrieve step_ids needed for plan_update(step_id=...)."
   }
 ]

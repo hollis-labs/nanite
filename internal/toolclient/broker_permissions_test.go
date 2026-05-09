@@ -38,8 +38,8 @@ func TestCheckPermission_DenyByGlob(t *testing.T) {
 	if p.CheckPermission("dev_read") {
 		t.Fatal("expected deny on dev_read via dev_* glob")
 	}
-	if !p.CheckPermission("nanite_todo_create") {
-		t.Fatal("expected nanite_todo_create to remain allowed")
+	if !p.CheckPermission("todo_create") {
+		t.Fatal("expected todo_create to remain allowed")
 	}
 }
 
@@ -84,8 +84,8 @@ func TestSelectToolsAsProvider_BuiltinFilteredThroughPermissions(t *testing.T) {
 
 	tb := New(nil, nil, DefaultConfig())
 	tb.Builtins.RegisterBuiltins("self", []provider.ToolDefinition{
-		{Name: "nanite_todo_create", Description: "Create a todo"},
-		{Name: "nanite_plan_create", Description: "Create a plan"},
+		{Name: "todo_create", Description: "Create a todo"},
+		{Name: "plan_create", Description: "Create a plan"},
 	})
 
 	res, err := tb.SelectToolsAsProvider(context.Background(), "general", nil, "", "agent-permissive", 0)
@@ -98,7 +98,7 @@ func TestSelectToolsAsProvider_BuiltinFilteredThroughPermissions(t *testing.T) {
 	for _, d := range res.Tools {
 		names[d.Name] = true
 	}
-	if !names["nanite_todo_create"] || !names["nanite_plan_create"] {
+	if !names["todo_create"] || !names["plan_create"] {
 		t.Errorf("expected both builtins under permissive policy, got: %v", names)
 	}
 }

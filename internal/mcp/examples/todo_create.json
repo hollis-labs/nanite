@@ -2,7 +2,7 @@
   {
     "title": "Create a session-scoped todo (the common case)",
     "args": {
-      "title": "Audit nanite_show_card failure rate",
+      "title": "Audit card_show failure rate",
       "priority": "high"
     },
     "notes": "scope defaults to 'session'; scope_id is auto-filled from the current chat session."

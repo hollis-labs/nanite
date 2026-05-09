@@ -53,37 +53,37 @@ var BuiltinCategories = map[string]string{
 	"url_decode": "http",
 
 	// Think / memory / context.
-	"think":                  "context",
-	"nanite_memory_recall":   "context",
-	"nanite_memory_save":     "context",
-	"nanite_navigate_engine": "context",
-	"nanite_refresh_engine":  "context",
+	"think":           "context",
+	"memory_recall":   "context",
+	"memory_write":    "context",
+	"engine_navigate": "context",
+	"engine_refresh":  "context",
 
 	// Agent management + plans + todos.
-	"nanite_create_agent":     "agent",
-	"nanite_update_agent":     "agent",
-	"nanite_list_agents":      "agent",
-	"nanite_create_skill":     "agent",
-	"nanite_update_skill":     "agent",
-	"nanite_delete_skill":     "agent",
-	"nanite_list_skills":      "agent",
-	"nanite_plan_create":      "agent",
-	"nanite_plan_update":      "agent",
-	"nanite_todo_create":      "agent",
-	"nanite_todo_list":        "agent",
-	"nanite_todo_update":      "agent",
-	"nanite_install_diff":    "agent",
-	"nanite_install_home":    "agent",
-	"nanite_install_project": "agent",
-	"nanite_start_builder":   "agent",
-	"nanite_builder_step":    "agent",
+	"agent_create":     "agent",
+	"agent_update":     "agent",
+	"agent_list":      "agent",
+	"skill_create":     "agent",
+	"skill_update":     "agent",
+	"skill_delete":     "agent",
+	"skill_list":      "agent",
+	"plan_create":      "agent",
+	"plan_update":      "agent",
+	"todo_create":      "agent",
+	"todo_list":        "agent",
+	"todo_update":      "agent",
+	"install_diff":    "agent",
+	"install_home":    "agent",
+	"install_project": "agent",
+	"builder_start":   "agent",
+	"builder_step":    "agent",
 
 	// Envelope card rendering — generic emission tool, reading the result is
 	// the user-facing action.
-	"nanite_show_card": "core-io",
+	"card_show": "core-io",
 
-	// GIPHY data fetch — pairs with nanite_show_card{type:"giphy-modal"}.
-	"nanite_giphy_search": "other",
+	// GIPHY data fetch — pairs with card_show{type:"giphy-modal"}.
+	"giphy_search": "other",
 
 	// Small utilities — bucket under "other"; intent rules don't target them
 	// (and if the user asks for them by name, the explicit-signals layer

@@ -4,12 +4,12 @@ import "testing"
 
 func TestIsCacheExemptTool(t *testing.T) {
 	cases := map[string]bool{
-		"nanite_tool_describe": true,
-		"nanite_validate":      true,
+		"tool_describe": true,
+		"tool_validate":      true,
 		"fetch_tool_result":    true,
 		"search_tool_result":   true,
-		"nanite_show_card":     false,
-		"nanite_remember":      false,
+		"card_show":     false,
+		"lesson_capture":      false,
 		"dev_read":             false,
 		"":                     false,
 	}

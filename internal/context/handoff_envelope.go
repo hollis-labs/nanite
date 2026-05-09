@@ -83,7 +83,7 @@ func ParseHandoffEnvelope(raw []byte) (*HandoffPayload, error) {
 // agent reads this as the first thing in its post-compaction context window.
 //
 // Wording choices matter: "loaded" (not "found" or "available") tells the
-// agent the content is authoritative; "use nanite_handoff_pointers_expand"
+// agent the content is authoritative; "use handoff_pointers_expand"
 // names the discovery tool with both required args (session_id, cache_key)
 // so the agent doesn't have to guess and the call doesn't fail validation.
 func RenderHandoffForSlot(p HandoffPayload) string {
@@ -103,7 +103,7 @@ func RenderHandoffForSlot(p HandoffPayload) string {
 	}
 
 	if len(p.ActivePointers) > 0 {
-		b.WriteString("Active pointers (use `nanite_handoff_pointers_expand({session_id, cache_key})` to retrieve heavy artifacts; both args are required):\n")
+		b.WriteString("Active pointers (use `handoff_pointers_expand({session_id, cache_key})` to retrieve heavy artifacts; both args are required):\n")
 		for _, ptr := range p.ActivePointers {
 			b.WriteString("- ")
 			b.WriteString(ptr.Label)

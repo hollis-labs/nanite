@@ -9,19 +9,19 @@ import (
 	"github.com/hollis-labs/nanite/internal/envelope"
 )
 
-// ToolSchemaLookup is the narrow registry surface nanite_validate uses to
+// ToolSchemaLookup is the narrow registry surface tool_validate uses to
 // resolve a tool's input JSON schema by uniform name. *mcp.Manager
 // satisfies it via LookupToolInputSchema; tests can substitute a stub.
 //
 // Returning (nil, true) is allowed: a tool with no declared input schema
-// has nothing to validate. nanite_validate treats this as "any args
+// has nothing to validate. tool_validate treats this as "any args
 // accepted" — the same effective contract the MCP server would apply.
 type ToolSchemaLookup interface {
 	LookupToolInputSchema(uniformName string) (map[string]any, bool)
 }
 
 // validateToolDefinition returns the self-tool definition for
-// nanite_validate. Kept in its own helper so the slice in
+// tool_validate. Kept in its own helper so the slice in
 // selfToolDefinitions stays readable.
 //
 // The tool is read-only and side-effect-free: it never invokes the named
@@ -30,22 +30,22 @@ type ToolSchemaLookup interface {
 // (validation fail).
 func validateToolDefinition() Tool {
 	return Tool{
-		Name: "nanite_validate",
+		Name: "tool_validate",
 		Description: "Pre-flight check: validate a proposed tool-call's arguments against the tool's declared input schema, without invoking the tool. Cheap, deterministic, no side effects.\n\n" +
 			"**When to use:** Pre-flight check before high-blast-radius calls (envelope emission, mutations, network-effecting tools) when you're unsure whether your `args` shape will be accepted. Cheap, deterministic, side-effect-free.\n\n" +
 			"**When NOT to use:** Don't call this on every tool invocation reflexively — only when the schema is unfamiliar or the call is expensive. Pure read-only tools (search, list, get) typically don't justify a pre-flight; just call them and read the error if they reject the input.\n\n" +
 			"**Output shape:** `{valid: bool, errors: [{path, reason, suggestion?}]}` where `path` is a JSON Pointer rooted at the args object (e.g. `/data/metrics/0/label`), `reason` is the leaf schema-violation message, and `suggestion` (when present) is a single-step fix hint such as `\"add required field 'metrics'\"` or `\"wrap in `[...]`\"`. On `valid: true`, errors is `[]`.\n\n" +
-			"**Special case:** `nanite_show_card` validates `args.data` against the per-type envelope schema in addition to the top-level input schema, so the agent gets per-field feedback against the schema that actually rejects bad payloads (the top-level schema only declares `data: object`).",
+			"**Special case:** `card_show` validates `args.data` against the per-type envelope schema in addition to the top-level input schema, so the agent gets per-field feedback against the schema that actually rejects bad payloads (the top-level schema only declares `data: object`).",
 		InputSchema: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
 				"tool_name": map[string]any{
 					"type":        "string",
-					"description": "The uniform agent-facing tool name to validate against (e.g. `nanite_show_card`, `dev_read`, `task_create`). Must be a tool currently registered with the MCP manager — pass an unknown name and the response is `{valid: false, errors: [{path: \"\", reason: \"unknown tool ...\"}]}`.",
+					"description": "The uniform agent-facing tool name to validate against (e.g. `card_show`, `dev_read`, `task_create`). Must be a tool currently registered with the MCP manager — pass an unknown name and the response is `{valid: false, errors: [{path: \"\", reason: \"unknown tool ...\"}]}`.",
 				},
 				"args": map[string]any{
 					"type":        "object",
-					"description": "The args object you would pass to the tool. Validated against the tool's declared input schema. For `nanite_show_card`, `args.data` is also validated against the envelope schema for `args.type` if both are present.",
+					"description": "The args object you would pass to the tool. Validated against the tool's declared input schema. For `card_show`, `args.data` is also validated against the envelope schema for `args.type` if both are present.",
 				},
 			},
 			"required": []string{"tool_name", "args"},
@@ -53,18 +53,18 @@ func validateToolDefinition() Tool {
 	}
 }
 
-// callValidate is the handler for nanite_validate. It implements Layer 2
+// callValidate is the handler for tool_validate. It implements Layer 2
 // of the self-healing tool surface: schema-only pre-flight check.
 //
 // Resolution order for the schema:
 //  1. Self-tools — found by walking selfToolDefinitions(). This includes
-//     nanite_validate itself (idempotent self-introspection).
+//     tool_validate itself (idempotent self-introspection).
 //  2. ToolSchemaLookup (the MCP manager) — every other registered tool
 //     across every registered server.
 //
-// For nanite_show_card the handler additionally validates args.data
+// For card_show the handler additionally validates args.data
 // against the envelope schema for args.type. The top-level input schema
-// for nanite_show_card declares `data: object` (no per-type structure),
+// for card_show declares `data: object` (no per-type structure),
 // so without this layer the validator would say "valid" for any object
 // in `data`. The envelope schema is what actually rejects bad payloads
 // at runtime in callShowCard, so it's the schema the agent needs to be
@@ -78,7 +78,7 @@ func (st *SelfToolsTransport) callValidate(_ context.Context, args map[string]an
 		return validationResult(false, []envelope.StructuredError{{
 			Path:       "/tool_name",
 			Reason:     "tool_name is required and must be a non-empty string",
-			Suggestion: "pass the uniform agent-facing tool name, e.g. `nanite_show_card`",
+			Suggestion: "pass the uniform agent-facing tool name, e.g. `card_show`",
 		}}), nil
 	}
 	rawArgs, ok := args["args"].(map[string]any)
@@ -121,10 +121,10 @@ func (st *SelfToolsTransport) callValidate(_ context.Context, args map[string]an
 		errs = append(errs, schemaErrs...)
 	}
 
-	// Phase 2: nanite_show_card-specific deep validation. The top-level
+	// Phase 2: card_show-specific deep validation. The top-level
 	// schema declares `data: object` — the per-type envelope schema is
 	// where the real contract lives.
-	if toolName == "nanite_show_card" {
+	if toolName == "card_show" {
 		envType, _ := rawArgs["type"].(string)
 		data, hasData := rawArgs["data"].(map[string]any)
 		// Only run the deep check when both fields are present and shaped

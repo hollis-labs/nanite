@@ -31,11 +31,11 @@ var expectedDisclosureVars = []string{
 }
 
 // expectedDisclosureAffordances are the recovery affordances D2 mandates every
-// disclosure variant must reference: handoff stash id, nanite_chat_search self-
+// disclosure variant must reference: handoff stash id, chat_search self-
 // tool, and summary metadata.
 var expectedDisclosureAffordances = []string{
 	"Handoff stash",
-	"nanite_chat_search",
+	"chat_search",
 	"Summary metadata",
 }
 
@@ -71,7 +71,7 @@ func TestCompactionDisclosureMigration_loadable(t *testing.T) {
 
 // TestCompactionDisclosureMigration_referencesAffordances asserts every
 // disclosure variant references the three recovery affordances locked by D2
-// (stash_id, nanite_chat_search, summary metadata).
+// (stash_id, chat_search, summary metadata).
 func TestCompactionDisclosureMigration_referencesAffordances(t *testing.T) {
 	s := newTestStore(t)
 

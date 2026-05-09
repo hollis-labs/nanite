@@ -187,7 +187,7 @@ func TestE2E_WorkerInheritsParentGrant(t *testing.T) {
 	grants := permission.NewPathGrants()
 	registered := grants.RegisterFromUserMessage(
 		parentSessionID,
-		"Use nanite_execute_task to spawn a Worker that lists "+tmpDir+", first 10 entries.",
+		"Use task_execute to spawn a Worker that lists "+tmpDir+", first 10 entries.",
 	)
 	if len(registered) == 0 {
 		t.Fatalf("setup: RegisterFromUserMessage returned no grants")

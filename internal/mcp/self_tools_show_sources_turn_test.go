@@ -173,9 +173,9 @@ func TestTurnToolNamesFromContext_RoundTrip(t *testing.T) {
 	if got := TurnToolNamesFromContext(context.Background()); got != nil {
 		t.Errorf("bare ctx must return nil, got %v", got)
 	}
-	ctx := WithTurnToolNames(context.Background(), []string{"nanite_tool_describe", "dev_read"})
+	ctx := WithTurnToolNames(context.Background(), []string{"tool_describe", "dev_read"})
 	got := TurnToolNamesFromContext(ctx)
-	if len(got) != 2 || got[0] != "nanite_tool_describe" || got[1] != "dev_read" {
+	if len(got) != 2 || got[0] != "tool_describe" || got[1] != "dev_read" {
 		t.Errorf("unexpected stamped names: %v", got)
 	}
 }

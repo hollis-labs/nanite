@@ -99,7 +99,7 @@ func TestNormalizeToolInputSchemas_ProviderFacingNormalization(t *testing.T) {
 
 // TestNormalizeToolInputSchemas_ShowCardC107Regression is the c107/c109
 // regression guard. It runs normalizeToolInputSchemas against the live
-// nanite_show_card definition pulled from mcp.SelfToolProviderDefinitions, then
+// card_show definition pulled from mcp.SelfToolProviderDefinitions, then
 // validates a realistic report-card payload against the SHARED schema map (the
 // one BuiltinToolRegistry / GetToolSchema reads). Before the fix, the shared
 // map's `data` node had been silently closed and the validator rejected every
@@ -108,28 +108,28 @@ func TestNormalizeToolInputSchemas_ShowCardC107Regression(t *testing.T) {
 	defs := mcp.SelfToolProviderDefinitions()
 	var liveSchema map[string]any
 	for _, d := range defs {
-		if d.Name == "nanite_show_card" {
+		if d.Name == "card_show" {
 			liveSchema = d.InputSchema
 			break
 		}
 	}
 	if liveSchema == nil {
-		t.Fatal("nanite_show_card not found in mcp.SelfToolProviderDefinitions()")
+		t.Fatal("card_show not found in mcp.SelfToolProviderDefinitions()")
 	}
 
 	// Hold a reference to the original `data` sub-schema BEFORE normalize runs.
 	// This is the canonical loose object the show_card handler relies on.
 	rootProps, _ := liveSchema["properties"].(map[string]any)
 	if rootProps == nil {
-		t.Fatal("live nanite_show_card schema has no properties map")
+		t.Fatal("live card_show schema has no properties map")
 	}
 	originalDataNode, _ := rootProps["data"].(map[string]any)
 	if originalDataNode == nil {
-		t.Fatal("live nanite_show_card schema has no data property")
+		t.Fatal("live card_show schema has no data property")
 	}
 
 	tools := []provider.ToolDefinition{
-		{Name: "nanite_show_card", InputSchema: liveSchema},
+		{Name: "card_show", InputSchema: liveSchema},
 	}
 	// Run normalize twice — the bug surfaced after the FIRST chat call, but
 	// running it twice is the strongest invariance assertion.
@@ -137,7 +137,7 @@ func TestNormalizeToolInputSchemas_ShowCardC107Regression(t *testing.T) {
 	normalizeToolInputSchemas(tools)
 
 	if _, exists := originalDataNode["additionalProperties"]; exists {
-		t.Fatalf("nanite_show_card.data was mutated by normalizeToolInputSchemas: "+
+		t.Fatalf("card_show.data was mutated by normalizeToolInputSchemas: "+
 			"additionalProperties=%v (expected key absent — this is the c107/c109 bug)",
 			originalDataNode["additionalProperties"])
 	}
@@ -155,8 +155,8 @@ func TestNormalizeToolInputSchemas_ShowCardC107Regression(t *testing.T) {
 			},
 		},
 	}
-	if msg := v.validate("nanite_show_card", liveSchema, args); msg != "" {
-		t.Fatalf("c107/c109 regression: shared nanite_show_card schema rejects valid "+
+	if msg := v.validate("card_show", liveSchema, args); msg != "" {
+		t.Fatalf("c107/c109 regression: shared card_show schema rejects valid "+
 			"report-card payload after normalize: %s", msg)
 	}
 }

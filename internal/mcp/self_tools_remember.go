@@ -13,23 +13,23 @@ import (
 )
 
 // rememberToolDefinition returns the self-tool definition for
-// nanite_remember (CW-20260429-0009, D1). Layer 4 of the self-healing
+// lesson_capture (CW-20260429-0009, D1). Layer 4 of the self-healing
 // tool surface — the agent calls this with the lesson_hint from a
 // repair_note (or any other in-session insight) so future-self can
 // recall it via the lesson-recall slot extension.
 //
-// The signature mirrors the other layer self-tools (nanite_validate,
-// nanite_tool_describe): tight inputs, explicit when-to-use guidance
+// The signature mirrors the other layer self-tools (tool_validate,
+// tool_describe): tight inputs, explicit when-to-use guidance
 // in the description, output shape spelled out so the agent can build
 // follow-up tool calls without an extra describe round-trip.
 func rememberToolDefinition() Tool {
 	return Tool{
-		Name: "nanite_remember",
+		Name: "lesson_capture",
 		Description: "Persist a one-sentence lesson to durable memory so future sessions surface it on similar tool selection. Layer 4 of the self-healing tool surface (CW-20260429-0009).\n\n" +
 			"**When to use:** When a tool result carries a `repair_note`, capture the `lesson_hint` so future-you avoids the same shape mistake. Also call this when the user explicitly teaches you something durable about a tool. Also fine for any high-signal in-session insight worth carrying forward (a project convention you discovered, a session-specific user preference). Cheap, idempotent on the (scope, subject, hint) triple — re-writing the same lesson updates the existing entry rather than creating duplicates.\n\n" +
 			"**When NOT to use:** Don't capture conversational chatter, partial guesses, or things you'd be embarrassed to read back to the user. Confidence is stamped at 0.85 — these surface in future agent context, so noise here directly degrades future grounding.\n\n" +
 			"**Scopes:**\n" +
-			"- `tool_use` (most common): a lesson about how to call a specific tool. `subject` MUST be the tool name (e.g. \"nanite_show_card\"). Surfaced when that tool is considered in a future session.\n" +
+			"- `tool_use` (most common): a lesson about how to call a specific tool. `subject` MUST be the tool name (e.g. \"card_show\"). Surfaced when that tool is considered in a future session.\n" +
 			"- `project`: a lesson scoped to a project. `subject` is the project_id.\n" +
 			"- `session`: a lesson scoped to a single chat session. `subject` is the session_id.\n\n" +
 			"**Output shape:** `{memory_id: string, namespace: string}`. Echo neither back to the user — they're for downstream tool calls or telemetry.",
@@ -73,7 +73,7 @@ func rememberToolDefinition() Tool {
 }
 
 // rememberCounters holds the per-session telemetry counters required by
-// the ticket ("Count nanite_remember calls by scope per session").
+// the ticket ("Count lesson_capture calls by scope per session").
 // Atomic so the handler can be called from multiple goroutines without
 // a lock around the increment.
 type rememberCounters struct {
@@ -136,7 +136,7 @@ func (c *rememberSessionCounters) SnapshotSession(sessionID string) (toolUse, pr
 	return cnt.toolUse.Load(), cnt.project.Load(), cnt.session.Load()
 }
 
-// callRemember handles nanite_remember. Translates the JSON args into a
+// callRemember handles lesson_capture. Translates the JSON args into a
 // learnings.CaptureInput, invokes the Recorder, and returns the
 // resulting CaptureOutcome as the tool result. Failures surface as
 // structured errorResult — never a Go error — so the agent sees a
@@ -148,21 +148,21 @@ func (c *rememberSessionCounters) SnapshotSession(sessionID string) (toolUse, pr
 // undiagnosed.
 func (st *SelfToolsTransport) callRemember(ctx context.Context, args map[string]any) (*ToolResult, error) {
 	if st.LearningRecorder == nil {
-		return errorResult("nanite_remember: LearningRecorder is not configured (memory service unavailable)"), nil
+		return errorResult("lesson_capture: LearningRecorder is not configured (memory service unavailable)"), nil
 	}
 
 	scopeStr := strArg(args, "scope", "")
 	scope := learnings.Scope(scopeStr)
 	if !scope.IsValid() {
-		return errorResult(fmt.Sprintf("nanite_remember: invalid scope %q (want tool_use|project|session)", scopeStr)), nil
+		return errorResult(fmt.Sprintf("lesson_capture: invalid scope %q (want tool_use|project|session)", scopeStr)), nil
 	}
 	subject := strings.TrimSpace(strArg(args, "subject", ""))
 	if subject == "" {
-		return errorResult("nanite_remember: subject is required (tool name / project_id / session_id)"), nil
+		return errorResult("lesson_capture: subject is required (tool name / project_id / session_id)"), nil
 	}
 	hint := strings.TrimSpace(strArg(args, "hint", ""))
 	if hint == "" {
-		return errorResult("nanite_remember: hint is required and must be a non-empty string"), nil
+		return errorResult("lesson_capture: hint is required and must be a non-empty string"), nil
 	}
 
 	// Optional fields.
@@ -189,7 +189,7 @@ func (st *SelfToolsTransport) callRemember(ctx context.Context, args map[string]
 		Tags:          extraTags,
 	})
 	if err != nil {
-		return errorResult(fmt.Sprintf("nanite_remember: %v", err)), nil
+		return errorResult(fmt.Sprintf("lesson_capture: %v", err)), nil
 	}
 
 	// Telemetry: count by scope per session. Best-effort — never blocks
@@ -209,7 +209,7 @@ func (st *SelfToolsTransport) callRemember(ctx context.Context, args map[string]
 	body, err := json.Marshal(out)
 	if err != nil {
 		// Should be impossible — CaptureOutcome is two strings.
-		return errorResult(fmt.Sprintf("nanite_remember: marshal result: %v", err)), nil
+		return errorResult(fmt.Sprintf("lesson_capture: marshal result: %v", err)), nil
 	}
 	return textResult(string(body)), nil
 }

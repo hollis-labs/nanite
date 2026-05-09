@@ -46,7 +46,7 @@ func TestReminderEngine_TurnCountFiresAndInjectsSlot(t *testing.T) {
 
 	sessionID := "sess-reminder-wireup"
 
-	// Create the reminder row in the DB (simulates nanite_set_reminder tool call).
+	// Create the reminder row in the DB (simulates reminder_set tool call).
 	r := store.Reminder{
 		ID:          "rem-test-001",
 		SessionID:   sessionID,

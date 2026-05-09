@@ -6,7 +6,7 @@
 -- turn after a compaction event, anchored to the active CompactionMode. They
 -- describe what the summarizer preserved vs. summarized, and point the LLM at
 -- recovery affordances: the HandoffStash id (if a stash was written pre-compaction)
--- and the nanite_chat_search self-tool (CW-20260420-0026).
+-- and the chat_search self-tool (CW-20260420-0026).
 --
 -- Variables interpolated by ComposePromptForAgent at runtime:
 --   {{handoff_stash_id}}        — stash id or "(none)"
@@ -17,7 +17,7 @@
 --   {{preserved_source_count}}  — count of preserved sources
 --
 -- D1 + D2 (LOCKED): one disclosure variant per CompactionMode, all four
--- referencing the same recovery affordances (stash_id, nanite_chat_search,
+-- referencing the same recovery affordances (stash_id, chat_search,
 -- summary metadata).
 --
 -- Priority 15 places these AFTER chat-role-harness identity (priority 1) and
@@ -49,7 +49,7 @@ This conversation was compacted just before your turn. An LLM-generated summary 
 
 **Recovery:**
 - **Handoff stash id:** `{{handoff_stash_id}}` — if non-`(none)`, holds decisions, open questions, file refs, ticket IDs captured pre-compaction. Read before answering about earlier-session state.
-- **`nanite_chat_search`** `{query, scope?, limit?}` — search pre-compaction turns for specifics the summary glosses over. Use whenever the user references something the summary does not explicitly mention.
+- **`chat_search`** `{query, scope?, limit?}` — search pre-compaction turns for specifics the summary glosses over. Use whenever the user references something the summary does not explicitly mention.
 - **Summary metadata:** mode=general, window `{{coverage_window_start}}` → `{{coverage_window_end}}`, ≈ {{summary_token_count}} tokens, {{evicted_pointer_count}} cache pointer(s) evicted, {{preserved_source_count}} preserved source(s).
 
 If the summary is silent on prior detail, search rather than guess.',
@@ -76,7 +76,7 @@ This coding conversation was compacted before your turn. A summary replaced the 
 
 **Recovery:**
 - **Handoff stash id:** `{{handoff_stash_id}}` — if non-`(none)`, holds decisions and active file refs from before compaction.
-- **`nanite_chat_search`** `{query, scope?, limit?}` — recover exact pre-compaction text: error strings, command output, prior code blocks. Prefer search over guessing when the user mentions a specific symbol, path, or error.
+- **`chat_search`** `{query, scope?, limit?}` — recover exact pre-compaction text: error strings, command output, prior code blocks. Prefer search over guessing when the user mentions a specific symbol, path, or error.
 - **Summary metadata:** mode=code, window `{{coverage_window_start}}` → `{{coverage_window_end}}`, ≈ {{summary_token_count}} tokens, {{evicted_pointer_count}} cache pointer(s) evicted, {{preserved_source_count}} preserved source(s).
 
 When in doubt about exact code or output, search before re-running tools.',
@@ -103,7 +103,7 @@ This planning conversation was compacted before your turn. A summary replaced th
 
 **Recovery:**
 - **Handoff stash id:** `{{handoff_stash_id}}` — if non-`(none)`, holds `decisions_locked`, `open_questions`, `active_ticket_ids`. Read first when the user references a prior decision.
-- **`nanite_chat_search`** `{query, scope?, limit?}` — recover exact wording of an earlier proposal, requirement, or counter-argument. Cite real quotes from search, not reconstructions.
+- **`chat_search`** `{query, scope?, limit?}` — recover exact wording of an earlier proposal, requirement, or counter-argument. Cite real quotes from search, not reconstructions.
 - **Summary metadata:** mode=plan, window `{{coverage_window_start}}` → `{{coverage_window_end}}`, ≈ {{summary_token_count}} tokens, {{evicted_pointer_count}} cache pointer(s) evicted, {{preserved_source_count}} preserved source(s).
 
 If a prior decision is being revisited, search for the original framing first.',
@@ -130,7 +130,7 @@ This research conversation was compacted before your turn. A summary replaced th
 
 **Recovery:**
 - **Handoff stash id:** `{{handoff_stash_id}}` — if non-`(none)`, key sources and active references from pre-compaction live here.
-- **`nanite_chat_search`** `{query, scope?, limit?}` — recover exact source text or data point behind a summarized finding. Re-verify quotes and figures by search before repeating them.
+- **`chat_search`** `{query, scope?, limit?}` — recover exact source text or data point behind a summarized finding. Re-verify quotes and figures by search before repeating them.
 - **Summary metadata:** mode=research, window `{{coverage_window_start}}` → `{{coverage_window_end}}`, ≈ {{summary_token_count}} tokens, {{evicted_pointer_count}} cache pointer(s) evicted, {{preserved_source_count}} preserved source(s).
 
 Cite from search results, not from the summary, when precision matters.',

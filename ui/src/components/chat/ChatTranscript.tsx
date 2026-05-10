@@ -12,6 +12,7 @@ import {
   useChatErrors,
   useChatStore,
   usePendingModeSuggestion,
+  usePluginEnvelopes,
   useStreamingFinal,
   useStreamingNarration,
   useStreamingThinking,
@@ -21,6 +22,7 @@ import {
 import { ChatMessage } from "./ChatMessage";
 import { CompactionDivider } from "./CompactionDivider";
 import { ErrorBanner } from "./ErrorBanner";
+import { EnvelopeRenderer } from "./envelopes/EnvelopeRenderer";
 import { Envelope, EnvelopeHeader } from "./envelopes/primitives";
 import { MessageContent } from "./MessageContent";
 import { ModeSuggestionCard } from "./ModeSuggestionCard";
@@ -90,6 +92,7 @@ export function ChatTranscript({
   const chatErrors = useChatErrors();
   const dismissChatError = useChatStore((s) => s.dismissChatError);
   const activeSessionId = useAppStore((s) => s.activeSessionId);
+  const pluginEnvelopes = usePluginEnvelopes(activeSessionId);
   const queryClient = useQueryClient();
 
   // B3 (CW-20260428-0011) — pending classifier suggestion + global pref +
@@ -431,6 +434,25 @@ export function ChatTranscript({
             </div>
           );
         })}
+
+        {/* Plugin-emitted envelopes (BLG-20260414-010) — standalone cards
+            arriving on the `plugin_envelope` SSE channel, not appended to
+            any assistant message content. Restored Phase 9 (W2A,
+            CW-20260510-0017) so the recovery broker's info-card /
+            error-report / chat-loop-terminated emissions render in the
+            chat thread. Skip when render_target routes the envelope into
+            a panel inbox (the drawer renders it there instead). */}
+        {pluginEnvelopes.map((item) =>
+          item.envelope.render_target && !item.envelope.render_target_blocked ? null : (
+            <div key={item.id} data-plugin-envelope-id={item.id} data-plugin-id={item.pluginId}>
+              <EnvelopeRenderer
+                envelope={item.envelope}
+                {...(onSendMessage && { onSendMessage })}
+                userMessageCount={userMessageCount}
+              />
+            </div>
+          ),
+        )}
 
         {isStreaming && toolWarnings.length > 0 && <ToolWarningBanner warnings={toolWarnings} />}
 

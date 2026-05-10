@@ -222,6 +222,36 @@ export const api = {
     return res.json();
   },
 
+  /**
+   * Phase 9 (CW-20260510-0017 / W2A): cancel an in-flight recovery
+   * broker retry. The `token` is the wrap-level `cancel_token` lifted
+   * verbatim from the recovery info-card envelope.
+   *
+   * BE: POST /api/sessions/{id}/recovery/cancel with {"token": ...}.
+   * Per W1D's contract:
+   *   - 200 → "cancelled" (broker cancelled; breadcrumb is OutcomeCancelled)
+   *   - 404 → "stale" (token unknown / expired / cross-session)
+   *   - 400 → "error" (malformed body / missing token — should not happen)
+   *   - any other / network failure → "error"
+   *
+   * The FE distinguishes 404 (terminal "no longer cancellable") from
+   * transient errors (button stays interactive) so the UX matches the
+   * reality of the BE state.
+   */
+  cancelRecoveryRetry: async (
+    sessionId: string,
+    token: string,
+  ): Promise<"cancelled" | "stale" | "error"> => {
+    const res = await fetch(`${API_BASE}/sessions/${sessionId}/recovery/cancel`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ token }),
+    });
+    if (res.ok) return "cancelled";
+    if (res.status === 404) return "stale";
+    return "error";
+  },
+
   getMessages: async (sessionId: string, limit = 50): Promise<Message[]> => {
     const res = await fetch(`${API_BASE}/sessions/${sessionId}/messages?limit=${limit}`);
     if (!res.ok) throw new Error(`Failed to get messages: ${res.status}`);

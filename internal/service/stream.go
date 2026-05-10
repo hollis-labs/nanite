@@ -92,6 +92,13 @@ func newMessageStream(messageID, sessionID string) *messageStream {
 
 // pump is the per-message dispatcher goroutine. It owns all mutations to
 // buf/nextID/subscriber; Subscribe and the producer just push through it.
+//
+// The non-blocking send to the current subscriber happens while ms.mu is
+// held. This serialises the write against subscribe()'s close(prev) (and
+// the producer-end close below), eliminating the data race between pump
+// fanout and subscriber replacement (CW-20260510-0002). The send is a
+// `select default`, so holding the lock cannot block — at worst we take
+// the overflow path and drop the slow subscriber under the same lock.
 func (ms *messageStream) pump() {
 	for evt := range ms.produce {
 		ms.mu.Lock()
@@ -102,7 +109,6 @@ func (ms *messageStream) pump() {
 		}
 		ms.buf = append(ms.buf, evt)
 		sub := ms.subscriber
-		ms.mu.Unlock()
 
 		// Forward to subscriber non-blocking. If the subscriber's channel
 		// is full (slow consumer), close it so the SSE handler sees EOF
@@ -110,35 +116,37 @@ func (ms *messageStream) pump() {
 		// buffer still holds the event and replay will cover the gap.
 		// Silently dropping would lose events to an actively-connected
 		// client with no recovery path (PR #66 review #5).
+		var slowSub chan chat.StreamEvent
 		if sub != nil {
 			select {
 			case sub <- evt:
 			default:
-				ms.mu.Lock()
-				dropSub := ms.subscriber == sub
-				if dropSub {
+				if ms.subscriber == sub {
 					ms.subscriber = nil
-				}
-				ms.mu.Unlock()
-				if dropSub {
-					slog.Debug("stream: closing slow subscriber to force cursor-replay",
-						"message_id", ms.messageID, "event_id", evt.EventID, "type", evt.Type)
-					close(sub)
+					slowSub = sub
 				}
 			}
+		}
+		ms.mu.Unlock()
+		if slowSub != nil {
+			slog.Debug("stream: closing slow subscriber to force cursor-replay",
+				"message_id", ms.messageID, "event_id", evt.EventID, "type", evt.Type)
+			close(slowSub)
 		}
 	}
 
 	// Producer closed. Mark closed and close the current subscriber so the
-	// SSE handler sees EOF.
+	// SSE handler sees EOF. Closing under the lock matches the in-loop
+	// discipline so a concurrent subscribe() takeover cannot race the
+	// pump-end close.
 	ms.mu.Lock()
 	ms.closed = true
 	sub := ms.subscriber
 	ms.subscriber = nil
-	ms.mu.Unlock()
 	if sub != nil {
 		close(sub)
 	}
+	ms.mu.Unlock()
 }
 
 // subscribe replays buffered events with EventID > fromEventID then registers
@@ -176,21 +184,25 @@ func (ms *messageStream) subscribe(fromEventID uint64) (<-chan chat.StreamEvent,
 
 	// Replace any existing subscriber. Close the old one so the previous
 	// client sees EOF rather than a silently-abandoned channel.
+	//
+	// close(prev) happens while ms.mu is held so it cannot race the pump's
+	// non-blocking send (which also runs under ms.mu — see pump()). Without
+	// this, a write to prev in the pump and close(prev) here could interleave
+	// on the same channel, which the race detector flags as a data race
+	// (CW-20260510-0002).
 	prev := ms.subscriber
 	if ms.closed {
+		// Pump already closed prev (or it was nil); nothing to do here.
 		ms.mu.Unlock()
-		if prev != nil {
-			// Already closed by pump; nothing to do.
-			_ = prev
-		}
+		_ = prev
 		close(out)
 		return out, true
 	}
 	ms.subscriber = out
-	ms.mu.Unlock()
 	if prev != nil {
 		close(prev)
 	}
+	ms.mu.Unlock()
 	return out, false
 }
 
@@ -601,7 +613,6 @@ func trySendEnvelope(ch chan chat.StreamEvent, evt chat.StreamEvent) (outcome se
 		return sendFull
 	}
 }
-
 
 // Deliver fans validated plugin-emitted envelopes into every active chat
 // message stream for sessionID as StreamEvents of type "plugin_envelope".

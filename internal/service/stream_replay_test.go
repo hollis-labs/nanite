@@ -1,6 +1,7 @@
 package service
 
 import (
+	"sync"
 	"testing"
 	"time"
 
@@ -299,4 +300,67 @@ func TestMessageStream_TakeoverClosesPriorSubscriber(t *testing.T) {
 	case <-time.After(500 * time.Millisecond):
 		t.Error("sub2 never received live event")
 	}
+}
+
+// TestMessageStream_NoRaceOnTakeoverDuringFanout exercises the race the
+// detector flagged in CW-20260510-0002: pump's non-blocking send to the
+// current subscriber must not race subscribe()'s close(prev). A producer
+// fires events while several reconnector goroutines repeatedly Subscribe
+// and abandon, each Subscribe triggering close(prev) on the previous
+// subscriber the pump might be writing to. Under -race, the pre-fix code
+// reliably reproduces a write/close data race; the fix serialises both
+// paths under ms.mu.
+func TestMessageStream_NoRaceOnTakeoverDuringFanout(t *testing.T) {
+	sm := NewStreamManager()
+	ch := sm.CreateStream("msg-race", "sess-1")
+
+	const events = 500
+	const reconnectors = 4
+	const reconnectsEach = 100
+
+	var wg sync.WaitGroup
+
+	// Producer: stream events as fast as possible.
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		for i := 0; i < events; i++ {
+			ch <- chat.StreamEvent{Type: "delta", Content: "x"}
+		}
+		close(ch)
+	}()
+
+	// Reconnect goroutines: each loop's Subscribe triggers a close(prev)
+	// that runs concurrently with the pump's fanout sends.
+	for r := 0; r < reconnectors; r++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for i := 0; i < reconnectsEach; i++ {
+				sub, closed, ok := sm.Subscribe("msg-race", 0)
+				if !ok {
+					return
+				}
+				if closed {
+					return
+				}
+				// Drain a tiny window so the pump pushes events at us
+				// before we abandon and the next Subscribe arrives.
+				timeout := time.After(200 * time.Microsecond)
+			drain:
+				for {
+					select {
+					case _, open := <-sub:
+						if !open {
+							break drain
+						}
+					case <-timeout:
+						break drain
+					}
+				}
+			}
+		}()
+	}
+
+	wg.Wait()
 }

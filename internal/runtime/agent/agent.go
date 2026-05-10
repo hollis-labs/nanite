@@ -213,17 +213,8 @@ func Boot(ctx context.Context, deps *Dependencies, opts Options) (*Session, erro
 		return nil, err
 	}
 
-	layout := bootdirLayoutFor(profile.DefaultProvider)
-	bootDir, err := layout.Setup(SetupParams{
-		SessionID:    sessID,
-		RunID:        opts.RunID,
-		AgentProfile: profile,
-		Mode:         opts.Mode,
-		SystemPrompt: composeSystemPrompt(opts.Role, profile, opts.Mode),
-		BootContent:  composeBootContent(opts),
-		ProjectDir:   opts.Workdir,
-		MCPConfig:    deps.MCPConfig,
-	})
+	layout, params := composeBootdirParams(deps, opts, profile, sessID)
+	bootDir, err := layout.Setup(params)
 	if err != nil {
 		return nil, fmt.Errorf("agent.Boot: bootdir setup: %w", err)
 	}

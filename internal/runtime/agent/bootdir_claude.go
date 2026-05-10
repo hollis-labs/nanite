@@ -30,21 +30,28 @@ const claudeSettingsJSONStub = `{
 }
 `
 
-func (claudeLayout) Setup(params SetupParams) (string, error) {
+func (l claudeLayout) Setup(params SetupParams) (string, error) {
 	bootDir, err := makeBootDir("claude", params)
 	if err != nil {
 		return "", err
 	}
-
-	// On any post-mkdir failure, clean up the partial boot dir so callers
-	// don't leak $TMPDIR entries.
-	cleanup := func(setupErr error) (string, error) {
+	if err := l.Populate(bootDir, params); err != nil {
+		// On any post-mkdir failure, clean up the partial boot dir so
+		// callers don't leak $TMPDIR entries.
 		_ = os.RemoveAll(bootDir)
-		return "", setupErr
+		return "", err
 	}
+	return bootDir, nil
+}
 
+// Populate writes the claude boot-dir shape into bootDir. Idempotent —
+// every file is replaced via fsutil.AtomicWriteFile; mkdir calls use
+// MkdirAll so a partially-populated dir converges. Used by both Setup
+// (post-mkdir) and the recovery BootDirOps adapter (against an existing
+// dir).
+func (claudeLayout) Populate(bootDir string, params SetupParams) error {
 	if params.AgentProfile == nil {
-		return cleanup(fmt.Errorf("agent: claudeLayout.Setup: AgentProfile is required"))
+		return fmt.Errorf("agent: claudeLayout.Populate: AgentProfile is required")
 	}
 
 	if err := fsutil.AtomicWriteFile(
@@ -52,34 +59,51 @@ func (claudeLayout) Setup(params SetupParams) (string, error) {
 		[]byte(BuildCLAUDEMD(params.AgentProfile.Name, params.AgentProfile.Description)),
 		0o644,
 	); err != nil {
-		return cleanup(fmt.Errorf("agent: write CLAUDE.md: %w", err))
+		return fmt.Errorf("agent: write CLAUDE.md: %w", err)
 	}
 
 	if err := plantBootMD(bootDir, params); err != nil {
-		return cleanup(err)
+		return err
 	}
 
 	if err := plantSandboxFiles(bootDir, params); err != nil {
-		return cleanup(err)
+		return err
 	}
 
 	claudeDir := filepath.Join(bootDir, ".claude")
 	if err := os.MkdirAll(claudeDir, 0o755); err != nil {
-		return cleanup(fmt.Errorf("agent: mkdir .claude/: %w", err))
+		return fmt.Errorf("agent: mkdir .claude/: %w", err)
 	}
 	if err := fsutil.AtomicWriteFile(
 		filepath.Join(claudeDir, "settings.json"),
 		[]byte(claudeSettingsJSONStub),
 		0o644,
 	); err != nil {
-		return cleanup(fmt.Errorf("agent: write .claude/settings.json: %w", err))
+		return fmt.Errorf("agent: write .claude/settings.json: %w", err)
 	}
 
 	if err := writeMCPJSON(bootDir, params.MCPConfig, params.SessionID); err != nil {
-		return cleanup(err)
+		return err
 	}
 
-	return bootDir, nil
+	return nil
+}
+
+// RegenerateSystemPromptSlot rewrites only CLAUDE.md, leaving the rest
+// of the sandbox dir intact. Used by recovery.BootDirOps.RegenerateCLAUDEMD
+// for watchdog_kill remediation.
+func (claudeLayout) RegenerateSystemPromptSlot(bootDir string, params SetupParams) error {
+	if params.AgentProfile == nil {
+		return fmt.Errorf("agent: claudeLayout.RegenerateSystemPromptSlot: AgentProfile is required")
+	}
+	if err := fsutil.AtomicWriteFile(
+		filepath.Join(bootDir, "CLAUDE.md"),
+		[]byte(BuildCLAUDEMD(params.AgentProfile.Name, params.AgentProfile.Description)),
+		0o644,
+	); err != nil {
+		return fmt.Errorf("agent: regenerate CLAUDE.md: %w", err)
+	}
+	return nil
 }
 
 func (claudeLayout) AmendEnv(base map[string]string, _ string) map[string]string { return base }

@@ -27,36 +27,29 @@ import (
 // surfaced via OPENCODE_CONFIG_DIR=<bootDir>.
 type opencodeLayout struct{}
 
-func (opencodeLayout) Setup(params SetupParams) (string, error) {
+func (l opencodeLayout) Setup(params SetupParams) (string, error) {
 	bootDir, err := makeBootDir("opencode", params)
 	if err != nil {
 		return "", err
 	}
-
-	cleanup := func(setupErr error) (string, error) {
+	if err := l.Populate(bootDir, params); err != nil {
 		_ = os.RemoveAll(bootDir)
-		return "", setupErr
+		return "", err
+	}
+	return bootDir, nil
+}
+
+// Populate writes the opencode boot-dir shape into bootDir. Idempotent.
+func (l opencodeLayout) Populate(bootDir string, params SetupParams) error {
+	if params.AgentProfile == nil {
+		return fmt.Errorf("agent: opencodeLayout.Populate: AgentProfile is required")
 	}
 
-	if params.AgentProfile == nil {
-		return cleanup(fmt.Errorf("agent: opencodeLayout.Setup: AgentProfile is required"))
+	if err := l.RegenerateSystemPromptSlot(bootDir, params); err != nil {
+		return err
 	}
 
 	slug := agentSlug(params)
-	agentsDir := filepath.Join(bootDir, "agents")
-	if err := os.MkdirAll(agentsDir, 0o755); err != nil {
-		return cleanup(fmt.Errorf("agent: mkdir agents/: %w", err))
-	}
-
-	agentMD := fmt.Sprintf("# %s\n\n%s\n", params.AgentProfile.Name, params.SystemPrompt)
-	if err := fsutil.AtomicWriteFile(
-		filepath.Join(agentsDir, slug+".md"),
-		[]byte(agentMD),
-		0o644,
-	); err != nil {
-		return cleanup(fmt.Errorf("agent: write agents/%s.md: %w", slug, err))
-	}
-
 	agentsJSON := map[string]any{
 		"agents": []map[string]any{
 			{
@@ -68,14 +61,14 @@ func (opencodeLayout) Setup(params SetupParams) (string, error) {
 	}
 	agentsJSONBytes, err := json.MarshalIndent(agentsJSON, "", "  ")
 	if err != nil {
-		return cleanup(fmt.Errorf("agent: marshal agents.json: %w", err))
+		return fmt.Errorf("agent: marshal agents.json: %w", err)
 	}
 	if err := fsutil.AtomicWriteFile(
 		filepath.Join(bootDir, "agents.json"),
 		agentsJSONBytes,
 		0o644,
 	); err != nil {
-		return cleanup(fmt.Errorf("agent: write agents.json: %w", err))
+		return fmt.Errorf("agent: write agents.json: %w", err)
 	}
 
 	opencodeJSON := map[string]any{
@@ -87,29 +80,52 @@ func (opencodeLayout) Setup(params SetupParams) (string, error) {
 	}
 	opencodeJSONBytes, err := json.MarshalIndent(opencodeJSON, "", "  ")
 	if err != nil {
-		return cleanup(fmt.Errorf("agent: marshal opencode.json: %w", err))
+		return fmt.Errorf("agent: marshal opencode.json: %w", err)
 	}
 	if err := fsutil.AtomicWriteFile(
 		filepath.Join(bootDir, "opencode.json"),
 		opencodeJSONBytes,
 		0o644,
 	); err != nil {
-		return cleanup(fmt.Errorf("agent: write opencode.json: %w", err))
+		return fmt.Errorf("agent: write opencode.json: %w", err)
 	}
 
 	if err := plantBootMD(bootDir, params); err != nil {
-		return cleanup(err)
+		return err
 	}
 
 	if err := plantSandboxFiles(bootDir, params); err != nil {
-		return cleanup(err)
+		return err
 	}
 
 	if err := writeMCPJSON(bootDir, params.MCPConfig, params.SessionID); err != nil {
-		return cleanup(err)
+		return err
 	}
 
-	return bootDir, nil
+	return nil
+}
+
+// RegenerateSystemPromptSlot rewrites only agents/<slug>.md, leaving the
+// rest of the sandbox dir intact. Opencode's system-prompt-bearing slot
+// is the per-slug agent file (analogous to claude's CLAUDE.md).
+func (opencodeLayout) RegenerateSystemPromptSlot(bootDir string, params SetupParams) error {
+	if params.AgentProfile == nil {
+		return fmt.Errorf("agent: opencodeLayout.RegenerateSystemPromptSlot: AgentProfile is required")
+	}
+	slug := agentSlug(params)
+	agentsDir := filepath.Join(bootDir, "agents")
+	if err := os.MkdirAll(agentsDir, 0o755); err != nil {
+		return fmt.Errorf("agent: mkdir agents/: %w", err)
+	}
+	agentMD := fmt.Sprintf("# %s\n\n%s\n", params.AgentProfile.Name, params.SystemPrompt)
+	if err := fsutil.AtomicWriteFile(
+		filepath.Join(agentsDir, slug+".md"),
+		[]byte(agentMD),
+		0o644,
+	); err != nil {
+		return fmt.Errorf("agent: regenerate agents/%s.md: %w", slug, err)
+	}
+	return nil
 }
 
 // AmendEnv injects OPENCODE_CONFIG_DIR=<bootDir>.

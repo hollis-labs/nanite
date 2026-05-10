@@ -34,8 +34,9 @@ const (
 // dispatch retry → render+emit user-facing envelope → write breadcrumb.
 // Hard cap (broker-level Attempt > maxRetries) short-circuits to
 // Permanent. Cancel-retry tokens registered on info-card envelopes
-// route the FE's cancel_retry event back to broker.CancelRetry, which
-// aborts the in-flight retry context.
+// route the FE's cancel_retry event back to broker.Cancel, which
+// validates the token's session binding and aborts the in-flight
+// retry context on match.
 //
 // The orchestration is synchronous on the calling goroutine —
 // remediation + dispatch run in line. The chat composition root's
@@ -108,7 +109,7 @@ func (b *Broker) OnSessionExit(sessionID string, exit *agentsessions.ExitError, 
 func (b *Broker) runConfigFixedRetry(ev *FailureEvent, c Classification, started time.Time) {
 	env := b.RenderUserMessage(ev, c, ActionRetryConfigFixed)
 	ctx, cancel := context.WithCancel(context.Background())
-	b.registerActiveRetry(env.CancelToken, cancel)
+	b.registerActiveRetry(ev.SessionID, env.CancelToken, cancel)
 	defer b.unregisterActiveRetry(env.CancelToken)
 	defer cancel()
 
@@ -159,7 +160,7 @@ func (b *Broker) runConfigFixedRetry(ev *FailureEvent, c Classification, started
 func (b *Broker) runTransientRetry(ev *FailureEvent, c Classification, started time.Time) {
 	env := b.RenderUserMessage(ev, c, ActionRetryTransient)
 	ctx, cancel := context.WithCancel(context.Background())
-	b.registerActiveRetry(env.CancelToken, cancel)
+	b.registerActiveRetry(ev.SessionID, env.CancelToken, cancel)
 	defer b.unregisterActiveRetry(env.CancelToken)
 	defer cancel()
 
@@ -242,13 +243,16 @@ func (b *Broker) emitEnvelope(sessionID string, env Envelope) error {
 }
 
 // registerActiveRetry stores the cancel func against an active retry
-// token so a FE-driven CancelRetry can find and abort it.
-func (b *Broker) registerActiveRetry(token string, cancel context.CancelFunc) {
+// token so a FE-driven Cancel can find and abort it. sessionID is
+// captured so Cancel can validate that the token belongs to the
+// session asking to cancel — a token replayed from another session is
+// silently rejected.
+func (b *Broker) registerActiveRetry(sessionID, token string, cancel context.CancelFunc) {
 	if token == "" {
 		return
 	}
 	b.mu.Lock()
-	b.activeRetries[token] = cancel
+	b.activeRetries[token] = activeRetryEntry{sessionID: sessionID, cancel: cancel}
 	b.mu.Unlock()
 }
 

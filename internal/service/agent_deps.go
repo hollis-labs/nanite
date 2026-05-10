@@ -274,33 +274,6 @@ func (a *recoveryMCPAdapter) RestartTransport(ctx context.Context, sessionID str
 	return nil
 }
 
-// recoveryEnvelopeSink satisfies recovery.EnvelopeSink by translating
-// the broker's typed Envelope into the chat.StreamEvent vocabulary
-// the FE consumes.
-//
-// Initial wiring uses the "status" event type with the broker's
-// envelope kind in Detail so the broker is end-to-end observable
-// without requiring an FE schema landing first. A follow-up wires the
-// proper info-card / error-report / chat-loop-terminated projection
-// through the existing plugin_envelope path so the FE renders the
-// recovery messages with full UI affordances (cancel-retry button,
-// severity styling).
-type recoveryEnvelopeSink struct {
-	streams *StreamManager
-}
-
-func (e *recoveryEnvelopeSink) Emit(sessionID string, env recovery.Envelope) error {
-	if e.streams == nil {
-		return nil
-	}
-	e.streams.BroadcastSessionStreamEvent(sessionID, chat.StreamEvent{
-		Type:    "status",
-		Detail:  "recovery: " + env.Kind,
-		Summary: env.Title,
-		Content: env.Content,
-	})
-	return nil
-}
 
 // stripRegistryPrefix drops the nanite registry-side prefix
 // ("pty-claude" → "claude", "sub-codex" → "codex"). Callers that already

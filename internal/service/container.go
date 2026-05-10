@@ -146,6 +146,14 @@ type Container struct {
 	// AdapterRegistry holds registered CLIAgentAdapters for discovery and sandbox ops.
 	AdapterRegistry *agent.AdapterRegistry
 
+	// Recovery is the in-process subagent recovery broker (Phase 8/9).
+	// Exposed on the container so API handlers can route FE-driven
+	// cancel_retry requests back to Broker.Cancel(sessionID, token).
+	// nil-safe: when the broker isn't a *recovery.Broker (test fakes
+	// inject mocks that satisfy agent.RecoveryHooks but not *Broker),
+	// the field is left nil and the cancel endpoint returns 503.
+	Recovery *recovery.Broker
+
 	// Inspector is the I1 per-turn dev-mode aggregator (CW-20260426-0004).
 	// nil when developer_mode is false.
 	Inspector *inspectsvc.Service
@@ -901,6 +909,7 @@ func NewContainer(cfg ContainerConfig) (*Container, error) {
 		Permissions:         permissions,
 		PathGrants:          pathGrants,
 		AdapterRegistry:     adapterRegistry,
+		Recovery:            recoveryBrokerOrNil(agentDeps),
 		Inspector:           inspectorSvc,
 		LoopDetector:        loopDetector,
 		ReminderEngine:      reminderEngine,
@@ -1043,4 +1052,17 @@ func syncCatalogToRegistry(c *modelsdev.Client) {
 		}
 	}
 	models.SyncFromCatalog(input)
+}
+
+// recoveryBrokerOrNil resolves the *recovery.Broker on the agent
+// dependencies, or returns nil when the wired recovery hooks are not a
+// concrete *Broker (test fakes register interface-only mocks). The
+// API recovery-cancel endpoint is no-op when nil — there is nothing
+// to cancel against.
+func recoveryBrokerOrNil(deps *runtimeagent.Dependencies) *recovery.Broker {
+	if deps == nil {
+		return nil
+	}
+	broker, _ := deps.Recovery.(*recovery.Broker)
+	return broker
 }

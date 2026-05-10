@@ -37,7 +37,8 @@ const (
 //	   chat-loop-terminated schema's "supervisor exhausted" semantics)
 //
 // info-card kinds carry a CancelToken so the FE [Cancel retry] button
-// can route the cancel_retry event back to broker.CancelRetry.
+// can route the cancel_retry event back to broker.Cancel (which
+// validates the token's session binding).
 func (b *Broker) RenderUserMessage(ev *FailureEvent, c Classification, action Action) Envelope {
 	switch action {
 	case ActionRetryTransient:

@@ -35,9 +35,11 @@ type Broker struct {
 	stateBySession map[string]*classifierState
 
 	// activeRetries tracks in-flight retry tokens so cancel_retry events
-	// from the FE can abort. Map key is the cancel token; value is the
-	// CancelFunc bound to the retry's context.
-	activeRetries map[string]context.CancelFunc
+	// from the FE can abort. Map key is the cancel token; value pairs
+	// the bound CancelFunc with the sessionID the token was issued for
+	// so cross-session token replay (FE bug or stale token from another
+	// session) cannot cancel a retry that doesn't belong to it.
+	activeRetries map[string]activeRetryEntry
 
 	// replacementHook, when non-nil, is invoked synchronously after a
 	// successful DispatchRetry with the replacement session. The chat
@@ -61,7 +63,7 @@ func NewBroker(deps Dependencies, opts ...Option) *Broker {
 		maxRetries:         MaxBrokerRetries,
 		remediationTimeout: 10 * time.Second,
 		stateBySession:     make(map[string]*classifierState),
-		activeRetries:      make(map[string]context.CancelFunc),
+		activeRetries:      make(map[string]activeRetryEntry),
 	}
 	for _, opt := range opts {
 		opt(b)
@@ -180,24 +182,71 @@ func (b *Broker) SetReplacementSessionHook(hook func(sessionID string, sess *age
 	b.mu.Unlock()
 }
 
-// CancelRetry aborts an in-flight retry identified by token. Called
-// when the FE posts a cancel_retry event (the user clicked the
-// [Cancel retry] button on an info-card). Phase 5 wires the FE side;
-// Phase 6 wires the broker side. Phase 1 supplies the entry point and
-// the cancel-token registry.
+// activeRetryEntry pairs the bound CancelFunc with the sessionID the
+// token was issued for. Stored in Broker.activeRetries; consulted by
+// Cancel for session-bound validation.
+type activeRetryEntry struct {
+	sessionID string
+	cancel    context.CancelFunc
+}
+
+// CancelRetry aborts an in-flight retry identified by token without
+// validating which session the token was issued for. Retained for
+// in-process callers that already trust the token (e.g. tests, broker
+// internals); production HTTP callers should prefer Cancel which
+// enforces session-scoped validation.
+//
+// Phase 9 wires the FE-facing side via Cancel.
 func (b *Broker) CancelRetry(token string) {
 	if token == "" {
 		return
 	}
 	b.mu.Lock()
-	cancel, ok := b.activeRetries[token]
+	entry, ok := b.activeRetries[token]
 	if ok {
 		delete(b.activeRetries, token)
 	}
 	b.mu.Unlock()
-	if cancel != nil {
-		cancel()
+	if ok && entry.cancel != nil {
+		entry.cancel()
 	}
+}
+
+// Cancel aborts the in-flight retry identified by token IFF the token
+// was issued for sessionID. Returns true when a cancel actually ran;
+// false for unknown tokens, mismatched sessionIDs, empty inputs, or
+// already-cancelled tokens. Used by the BE recovery-cancel HTTP
+// endpoint to enforce per-session token ownership: a token leaked or
+// replayed from another session is silently rejected.
+//
+// Cancel is the natural completion of Envelope.CancelToken — info-card
+// envelopes carry the token as a wrap-level affordance, the FE round-
+// trips it back via POST /api/sessions/{id}/recovery/cancel, the
+// handler resolves the broker and calls Cancel(sessionID, token).
+func (b *Broker) Cancel(sessionID, token string) bool {
+	if sessionID == "" || token == "" {
+		return false
+	}
+	b.mu.Lock()
+	entry, ok := b.activeRetries[token]
+	if !ok {
+		b.mu.Unlock()
+		return false
+	}
+	if entry.sessionID != sessionID {
+		// Token exists but was issued for a different session — refuse
+		// to cancel and leave the entry intact so the legitimate session
+		// can still cancel it.
+		b.mu.Unlock()
+		return false
+	}
+	delete(b.activeRetries, token)
+	b.mu.Unlock()
+	if entry.cancel != nil {
+		entry.cancel()
+		return true
+	}
+	return false
 }
 
 // stateFor returns the per-session classifier state, lazily creating

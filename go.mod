@@ -95,12 +95,8 @@ replace github.com/hollis-labs/go-modelsdev => ../go-modelsdev
 replace github.com/chrispian/agent-mux => /Users/chrispian/Projects-apps/agent-mux
 
 require (
-	// CW-20260502-0005: go-agent-broker scaffold (no-op impl). Local replace while
-	// the sibling repo lacks a published tag — drop once the first release lands.
-	github.com/hollis-labs/go-agent-broker v0.0.0-00010101000000-000000000000
+	github.com/hollis-labs/go-agent-broker v0.2.0
 	github.com/hollis-labs/go-embed-contracts v0.1.0
 	github.com/hollis-labs/go-llm-contracts v0.1.0
 	github.com/hollis-labs/go-llm-types v0.1.0
 )
-
-replace github.com/hollis-labs/go-agent-broker => ../go-agent-broker

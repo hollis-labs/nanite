@@ -303,6 +303,16 @@ func cmdServe(args []string) {
 		slog.Info("worktree manager initialized", "dir", wtBaseDir)
 	}
 
+	// CW-20260502-0005 / CW-20260509-0045 / CW-20260509-0046: agent-broker
+	// instance. Constructed BEFORE NewContainer so it can be threaded
+	// into ContainerConfig (chat-service upstream wire site) AND
+	// installed onto selfTools.Broker (downstream scaffold) below. One
+	// broker, two consumers — the deterministic v1 impl
+	// (`broker.New()`) is concurrency-safe (pure function over
+	// broker.Input). See chat_broker_dispatch.go for the load-bearing
+	// boundary between the two wire sites.
+	agentBrokerInstance := agentbroker.New()
+
 	// --- Service container: single wiring point ---
 	container, err := service.NewContainer(service.ContainerConfig{
 		Store:           s,
@@ -319,6 +329,7 @@ func cmdServe(args []string) {
 		CoordStore:      coord,
 		Worktrees:       wtMgr,
 		CLIAdapters:     cliAdapters,
+		AgentBroker:     agentBrokerInstance,
 	})
 	if err != nil {
 		slogx.Fatal("failed to create service container", "err", err)
@@ -348,11 +359,15 @@ func cmdServe(args []string) {
 		// dispatch.DefaultEnvelopeWrapper when unset.
 	}
 
-	// CW-20260502-0005: agent-broker scaffold (no-op impl). Wires the
-	// upstream broker so callExecuteTask consults it before dispatch and
-	// surfaces Decision.Reason in event_log. The no-op preserves current
-	// behavior; the deterministic v1 impl drops in via the same seam.
-	selfTools.Broker = agentbroker.NewModeBroker()
+	// CW-20260509-0046: install the upstream agent-broker instance on
+	// the SelfToolsTransport's downstream scaffold seam. The same
+	// instance was threaded into ContainerConfig.AgentBroker above —
+	// chatServiceImpl now consults the broker BEFORE the chat-loop
+	// entry (load-bearing decision); the downstream wire-up here
+	// preserves the CW-20260502-0005 audit-into-event_log behavior on
+	// the dispatch CALL (callExecuteTask). Sharing one broker is safe
+	// — DeterministicBroker is stateless / concurrency-safe.
+	selfTools.Broker = agentBrokerInstance
 
 	// CW-20260429-0036 (B2 closing piece): wire the dispatch_executor
 	// self-tool to the B3 in-process envelope_render executor pilot.

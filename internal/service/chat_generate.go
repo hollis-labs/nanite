@@ -597,6 +597,22 @@ func (s *chatServiceImpl) generateResponse(ctx context.Context, sessionID, assis
 		s.inspector.RecordScopeTier(sessionID, inspectorTurnID, classifiedTier.String())
 	}
 
+	// CW-20260509-0046: agent-broker dispatch decision (upstream seam).
+	// Consults s.agentBroker (deterministic v1 from go-agent-broker
+	// v0.2.0) BEFORE the chat-loop entry. On dispatch decisions
+	// (AgentProfile != ""), synthesizes a task_execute call so the
+	// resulting envelope reaches the FE as a plugin_envelope SSE event,
+	// matching the pattern attemptRouteDispatch uses for the B2 route
+	// hint. Every consultation appends to agent_broker_decisions
+	// (telemetry — read by v2 peer-agent escape-hatch decision and the
+	// CW-20260509-0049 admin CLI). Nil-safe when the broker isn't wired.
+	//
+	// Ordered BEFORE attemptRouteDispatch because the broker is the
+	// dispatch DECISION layer; the route hint and the existing reflex/
+	// grounding scaffold in callExecuteTask enrich the dispatch CALL.
+	// Boundary spelled out in chat_broker_dispatch.go.
+	s.attemptBrokerDispatch(ctx, sessionID, inspectorTurnID, userContent, agent.ID, ls, ch)
+
 	// B2 (CW-20260429-0031): route-dispatch seam. When the classifier
 	// emits a non-chat-direct route AND the envelope-render executor is
 	// wired, dispatch the executor and emit the resulting envelope (if

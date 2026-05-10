@@ -19,6 +19,7 @@ import (
 	"github.com/hollis-labs/go-sandbox/sandbox"
 	"github.com/hollis-labs/nanite/internal/brand"
 	"github.com/hollis-labs/nanite/internal/chat"
+	"github.com/hollis-labs/nanite/internal/mcp"
 	"github.com/hollis-labs/nanite/internal/permission"
 	runtimeagent "github.com/hollis-labs/nanite/internal/runtime/agent"
 	"github.com/hollis-labs/nanite/internal/runtime/agent/recovery"
@@ -39,6 +40,14 @@ type AgentDepsConfig struct {
 	BinaryPath      string
 	DBPath          string
 	SandboxBaseProf sandbox.Profile
+
+	// MCP, when non-nil, wires the recovery broker's MCP-transport
+	// remediation adapter (recovery.MCPControl). The adapter forwards
+	// RestartTransport to mcp.Manager.RestartStdioTransports so the broker
+	// can recover from a wedged MCP stdio subprocess. Nil leaves
+	// Dependencies.MCP unwired and the broker degrades to escalating
+	// RemediationRefreshMCPTransport classifications as Permanent.
+	MCP *mcp.Manager
 }
 
 // BuildAgentDependencies wires a *runtimeagent.Dependencies plus the singleton
@@ -137,11 +146,14 @@ func BuildAgentDependencies(cfg AgentDepsConfig) (*runtimeagent.Dependencies, *a
 	// Construct the in-process recovery broker and wire it into deps.
 	// AgentBoot is a closure over `deps` so the broker dispatches
 	// replacement sessions through the same composition root. BootDir
-	// / MCP / Credentials adapters are intentionally nil in this
-	// initial wiring — the broker degrades to "classify + emit
-	// envelope, escalate Permanent for anything that would need
-	// remediation" until those adapters land in a follow-up.
-	broker := recovery.NewBroker(recovery.Dependencies{
+	// / Credentials adapters are intentionally nil in this initial
+	// wiring — the broker degrades to "classify + emit envelope,
+	// escalate Permanent for anything that would need remediation"
+	// until those adapters land in a follow-up. MCP is wired here when
+	// cfg.MCP is non-nil (Phase 9 — CW-20260510-0015); otherwise it
+	// stays nil and RemediationRefreshMCPTransport classifications
+	// surface as broker errors handled by the orchestration layer.
+	brokerDeps := recovery.Dependencies{
 		AgentBoot: &agentBootAdapter{deps: deps},
 		Store: &recoveryBrokerStore{
 			store: cfg.Store,
@@ -149,7 +161,11 @@ func BuildAgentDependencies(cfg AgentDepsConfig) (*runtimeagent.Dependencies, *a
 		Envelope: &recoveryEnvelopeSink{
 			streams: cfg.Streams,
 		},
-	})
+	}
+	if cfg.MCP != nil {
+		brokerDeps.MCP = &recoveryMCPAdapter{manager: cfg.MCP}
+	}
+	broker := recovery.NewBroker(brokerDeps)
 	deps.Recovery = broker
 
 	return deps, manager, bridge, nil
@@ -193,6 +209,58 @@ func (s *recoveryBrokerStore) WriteBreadcrumb(b recovery.Breadcrumb) error {
 		DurationMs:   b.DurationFromFailure.Milliseconds(),
 		Reason:       b.Reason,
 	})
+}
+
+// mcpTransportRestarter is the narrow contract recoveryMCPAdapter needs
+// from the host MCP manager. *mcp.Manager satisfies it via
+// RestartStdioTransports. Defined as an interface (not a *mcp.Manager
+// dependency) so unit tests can substitute a fake without spawning real
+// stdio subprocesses.
+type mcpTransportRestarter interface {
+	RestartStdioTransports(ctx context.Context) error
+}
+
+// recoveryMCPAdapter satisfies recovery.MCPControl. Phase 9 (CW-20260510-0015)
+// wiring: the broker's RemediationRefreshMCPTransport action lands here
+// when the classifier observes MCPTransport.Down on a failure event.
+//
+// The adapter cycles every stdio MCP transport the manager owns. The
+// transports use lazy start() — Close reaps the (possibly-wedged)
+// subprocess; the next ListTools / CallTool from any caller spawns a
+// fresh subprocess in its place. Non-stdio transports (HTTP / plugin /
+// builtin) are skipped inside the manager since they don't have a
+// subprocess to wedge.
+//
+// The agent CLI's own .mcp.json-spawned subprocess is owned by the agent
+// process (claude / codex / opencode), not by the host. The broker's
+// follow-up dispatch (replacement session via AgentBoot) handles that
+// side: a relaunched session re-reads .mcp.json and respawns its own
+// MCP subprocess from scratch. This adapter handles only the host-side
+// stdio transports the manager itself spawned.
+//
+// Idempotency: relies on *mcp.StdioTransport.Close being a no-op when
+// the subprocess is already reaped. Back-to-back RestartTransport calls
+// during a still-restarting state cycle the second-call's no-op closes
+// without panicking.
+//
+// Bounded by ctx — RestartStdioTransports returns ctx.Err() between
+// transports so the broker's 10s remediation timeout is honoured.
+type recoveryMCPAdapter struct {
+	manager mcpTransportRestarter
+}
+
+func (a *recoveryMCPAdapter) RestartTransport(ctx context.Context, sessionID string) error {
+	if a == nil || a.manager == nil {
+		// Defensive: a fully-nil adapter would have been left out of
+		// brokerDeps; this guards against a partially-constructed adapter
+		// reaching the dispatch path.
+		return errors.New("recovery: MCP adapter not wired")
+	}
+	if err := a.manager.RestartStdioTransports(ctx); err != nil {
+		return fmt.Errorf("recovery: restart mcp transports: %w", err)
+	}
+	slog.Info("recovery: restarted mcp stdio transports", "session_id", sessionID)
+	return nil
 }
 
 // recoveryEnvelopeSink satisfies recovery.EnvelopeSink by translating

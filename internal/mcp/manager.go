@@ -1051,3 +1051,53 @@ func (m *Manager) GetDiscoveryWarnings() []DiscoveryWarning {
 	copy(out, m.discoveryWarnings)
 	return out
 }
+
+// RestartStdioTransports closes every stdio MCP subprocess registered on
+// the manager. Each transport's start() is lazy, so the next ListTools /
+// CallTool against a closed transport reaps the (already-dead) process and
+// spawns a fresh subprocess in its place. Non-stdio transports (HTTP,
+// plugin, builtin) are skipped — only stdio subprocesses can wedge in a
+// way restart-via-respawn fixes.
+//
+// Idempotent: the underlying *StdioTransport.Close => killAndReapLocked
+// is no-op when !started, so repeated calls during a still-restarting
+// state are safe.
+//
+// Bounded by ctx — returns ctx.Err() promptly when the caller's deadline
+// fires (e.g. the broker's 10s remediation timeout). Mirrors the locking
+// shape of Close: snapshot under lock, release before calling per-
+// transport Close to avoid deadlocking concurrent ExecuteTool callers.
+//
+// Returns nil on success even when zero stdio transports are registered
+// (a vacuously-successful restart for non-stdio-only deployments).
+func (m *Manager) RestartStdioTransports(ctx context.Context) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+
+	m.mu.Lock()
+	type namedStdio struct {
+		name      string
+		transport *StdioTransport
+	}
+	snapshot := make([]namedStdio, 0, len(m.servers))
+	for name, t := range m.servers {
+		if st, ok := t.(*StdioTransport); ok {
+			snapshot = append(snapshot, namedStdio{name: name, transport: st})
+		}
+	}
+	m.mu.Unlock()
+
+	for _, ns := range snapshot {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		if err := ns.transport.Close(); err != nil {
+			// Close logs internally; callers care about ctx errors more
+			// than per-transport reap failures (the next start() will
+			// surface a real spawn failure if the subprocess is broken).
+			slog.Warn("mcp: restart stdio transport close error", "server", ns.name, "err", err)
+		}
+	}
+	return nil
+}

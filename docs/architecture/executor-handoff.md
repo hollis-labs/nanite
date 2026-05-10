@@ -49,7 +49,7 @@ type ExecutorRequest struct {
     // Intent is the executor-recognized verb. The classifier (B2)
     // populates this from the user message; the chat agent does not
     // free-text it. Initial vocabulary for the B3 pilot:
-    //   "render_envelope" — produce one of the 10 v1 passive types.
+    //   "render_envelope" — produce one of the 11 v1 passive types.
     // Future vocabulary lands as additional executor profiles register.
     Intent string `json:"intent"`
 
@@ -96,7 +96,14 @@ type ExecutorResponse struct {
     // populated for "render_envelope" intent. The envelope is fully
     // validated and (if applicable) repair-stamped by the executor
     // before this response is sent — the chat agent does NOT re-validate.
-    Envelope *chat.Envelope `json:"envelope,omitempty"`
+    //
+    // Go shape note: the in-package type is `*dispatch.Envelope` (a
+    // projection; lives in `internal/dispatch` to avoid the chat→mcp→
+    // dispatch import cycle that `*chat.Envelope` would create). The
+    // service-layer seam projects → `chat.Envelope` for over-the-wire
+    // consumers; the wire-format JSON is unchanged. See `ExecuteTask`
+    // for the precedent.
+    Envelope *dispatch.Envelope `json:"envelope,omitempty"`
 
     // Lessons are repair-hints the executor learned during the flow.
     // **Informational / telemetry only** — the executor persists them
@@ -127,7 +134,7 @@ type ExecutorFailure struct {
     // that failed final validation. The chat agent can still render
     // it as a degraded card if appropriate, with a banner indicating
     // the failure.
-    PartialEnvelope *chat.Envelope `json:"partial_envelope,omitempty"`
+    PartialEnvelope *dispatch.Envelope `json:"partial_envelope,omitempty"`
 }
 
 type ExecutorFailureCode string
@@ -227,7 +234,7 @@ The executor session runs the same chat loop as the chat session does; the same 
 
 Three phases. Each phase has explicit graduation criteria measured by B6 telemetry.
 
-**Phase 1 — Envelope-rendering pilot (B3, CW-20260429-0032).** Scope: the 10 v1 passive renderable types (`report-card`, `info-card`, `list-card`, `metric-card`, `progress-card`, `table-card`, `timeline-card`, `diff-card`, `document-viewer`, `giphy-modal`). One executor profile registered (`envelope-renderer`). Classifier (B2) routes `render_envelope` intents at it. Chat agent's lens primitives stay registered during phase 1 as a fallback (so a classifier miss doesn't break existing behavior); chat agent's prompt (B5) tells the agent to prefer dispatch but allows fallback to the inline lens flow.
+**Phase 1 — Envelope-rendering pilot (B3, CW-20260429-0032).** Scope: the 11 v1 passive renderable types (`report-card`, `info-card`, `list-card`, `metric-card`, `progress-card`, `table-card`, `timeline-card`, `diff-card`, `document-viewer`, `giphy-modal`, `artifact-mini`). One executor profile registered (`envelope-renderer`). Classifier (B2) routes `render_envelope` intents at it. Chat agent's lens primitives stay registered during phase 1 as a fallback (so a classifier miss doesn't break existing behavior); chat agent's prompt (B5) tells the agent to prefer dispatch but allows fallback to the inline lens flow.
 
 **Graduation to Phase 2:**
 

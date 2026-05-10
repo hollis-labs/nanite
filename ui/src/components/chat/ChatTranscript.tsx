@@ -435,13 +435,24 @@ export function ChatTranscript({
           );
         })}
 
-        {/* Plugin-emitted envelopes (BLG-20260414-010) — standalone cards
-            arriving on the `plugin_envelope` SSE channel, not appended to
-            any assistant message content. Restored Phase 9 (W2A,
-            CW-20260510-0017) so the recovery broker's info-card /
-            error-report / chat-loop-terminated emissions render in the
-            chat thread. Skip when render_target routes the envelope into
-            a panel inbox (the drawer renders it there instead). */}
+        {/* LOAD-BEARING — do not remove without explicit direction.
+         *
+         * Feeds standalone `plugin_envelope` SSE emissions into EnvelopeRenderer.
+         * Five BE producers depend on it: chat_loop_budget_soft_warning,
+         * chat_loop_terminated, ApprovalEmitterImpl (subagent-spawn-approval +
+         * elicitation-prompt), recovery_envelope_sink, plugin-subprocess Deliver.
+         *
+         * Dropped in commit 585bc47 (2026-04-25 design-reference-final polish);
+         * silently invisible for 14 days until restored by Phase 9 W2A (PR #133).
+         * During that window, gated subagent spawns and MCP elicitation prompts
+         * had no UI consumer.
+         *
+         * Locked by:
+         *   ui/src/__tests__/chat-transcript-plugin-envelope-render.test.tsx
+         *
+         * Source incident: Vanta `followups.nanite.dropped_plugin_envelopes_render_block`
+         * (rev 01KR89NWKFY52QW17R8PPC8V5S). Skip-when-render_target branch routes
+         * to drawer/panel inbox via panel-signal.ts (not the chat thread). */}
         {pluginEnvelopes.map((item) =>
           item.envelope.render_target && !item.envelope.render_target_blocked ? null : (
             <div key={item.id} data-plugin-envelope-id={item.id} data-plugin-id={item.pluginId}>

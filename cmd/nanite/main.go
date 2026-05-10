@@ -58,7 +58,7 @@ import (
 func main() {
 	if len(os.Args) < 2 {
 		fmt.Fprintf(os.Stderr, "usage: %s <command>\n", brand.BinaryName)
-		fmt.Fprintln(os.Stderr, "commands: serve, plugin, mcp, message, version (framework-injection moved to `nanite-agent init`)")
+		fmt.Fprintln(os.Stderr, "commands: serve, plugin, mcp, message, admin, version (framework-injection moved to `nanite-agent init`)")
 		os.Exit(1)
 	}
 
@@ -73,6 +73,8 @@ func main() {
 		cmdInstall(os.Args[2:])
 	case "message":
 		cmdMessage(os.Args[2:])
+	case "admin":
+		cmdAdmin(os.Args[2:])
 	case "version", "--version", "-v":
 		fmt.Println(brand.BinaryName + " " + version.Full())
 	default:

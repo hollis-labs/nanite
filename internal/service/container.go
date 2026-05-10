@@ -641,6 +641,7 @@ func NewContainer(cfg ContainerConfig) (*Container, error) {
 		CLIAdapters: cliAdapters,
 		DBPath:      cfg.Store.DBPath(),
 		MCP:         cfg.MCP,
+		Providers:   cfg.Providers,
 	})
 	if agentDepsErr != nil {
 		stopCatalog()

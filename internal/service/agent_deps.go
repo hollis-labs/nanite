@@ -48,6 +48,13 @@ type AgentDepsConfig struct {
 	// Dependencies.MCP unwired and the broker degrades to escalating
 	// RemediationRefreshMCPTransport classifications as Permanent.
 	MCP *mcp.Manager
+
+	// Providers is the API provider registry the recovery broker's
+	// credentials adapter consults to push refreshed keys onto cached
+	// SDK clients. Optional — nil disables the credentials remediation
+	// path entirely (Refresh returns an error and the broker escalates
+	// to Permanent).
+	Providers *provider.Registry
 }
 
 // BuildAgentDependencies wires a *runtimeagent.Dependencies plus the singleton
@@ -146,13 +153,16 @@ func BuildAgentDependencies(cfg AgentDepsConfig) (*runtimeagent.Dependencies, *a
 	// Construct the in-process recovery broker and wire it into deps.
 	// AgentBoot is a closure over `deps` so the broker dispatches
 	// replacement sessions through the same composition root. BootDir
-	// / Credentials adapters are intentionally nil in this initial
-	// wiring — the broker degrades to "classify + emit envelope,
-	// escalate Permanent for anything that would need remediation"
-	// until those adapters land in a follow-up. MCP is wired here when
-	// cfg.MCP is non-nil (Phase 9 — CW-20260510-0015); otherwise it
-	// stays nil and RemediationRefreshMCPTransport classifications
-	// surface as broker errors handled by the orchestration layer.
+	// adapter is still nil in this wiring — Phase 9 ticket W1A lands it.
+	// MCP is wired here when cfg.MCP is non-nil (Phase 9 — CW-20260510-0015);
+	// otherwise it stays nil and RemediationRefreshMCPTransport
+	// classifications surface as broker errors handled by the orchestration
+	// layer. Credentials is wired here (Phase 9, CW-20260510-0016):
+	// re-reads the OS keychain via internal/secrets and pushes the fresh
+	// key onto the cached internal/llm/{anthropic,openai}.Client via
+	// SetAPIKey. CLI providers (claude/codex/opencode) intentionally
+	// error from Refresh because their auth lives outside nanite's reach
+	// — see recoveryCredentialsAdapter.Refresh for the full disposition.
 	brokerDeps := recovery.Dependencies{
 		AgentBoot: &agentBootAdapter{deps: deps},
 		Store: &recoveryBrokerStore{
@@ -161,6 +171,7 @@ func BuildAgentDependencies(cfg AgentDepsConfig) (*runtimeagent.Dependencies, *a
 		Envelope: &recoveryEnvelopeSink{
 			streams: cfg.Streams,
 		},
+		Credentials: newRecoveryCredentialsAdapter(resolver, cfg.Providers),
 	}
 	if cfg.MCP != nil {
 		brokerDeps.MCP = &recoveryMCPAdapter{manager: cfg.MCP}

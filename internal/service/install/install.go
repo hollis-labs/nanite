@@ -71,7 +71,14 @@ func (s *Service) InstallHome(opts InstallHomeOptions) (*assets.ExtractReport, e
 
 	// Fast path: no existing install → extract directly.
 	if _, err := os.Stat(target); os.IsNotExist(err) {
-		return assets.ExtractTo(target, assets.ExtractOptions{Force: opts.Force})
+		report, err := assets.ExtractTo(target, assets.ExtractOptions{Force: opts.Force})
+		if err != nil {
+			return nil, err
+		}
+		if _, err := EnsureRuntimeDirs(target); err != nil {
+			return nil, fmt.Errorf("ensure runtime dirs: %w", err)
+		}
+		return report, nil
 	} else if err != nil {
 		return nil, fmt.Errorf("stat target %s: %w", target, err)
 	}
@@ -121,6 +128,13 @@ func (s *Service) InstallHome(opts InstallHomeOptions) (*assets.ExtractReport, e
 	// Swap succeeded — remove the backup. Keep it around if removal fails;
 	// it's recoverable state rather than a correctness issue.
 	_ = os.RemoveAll(backup)
+
+	// Provision runtime-state dirs and their READMEs in the live install.
+	// This is best-effort after a successful swap; failures here should not
+	// roll back the install but are still surfaced as errors.
+	if _, err := EnsureRuntimeDirs(target); err != nil {
+		return nil, fmt.Errorf("ensure runtime dirs: %w", err)
+	}
 	return report, nil
 }
 

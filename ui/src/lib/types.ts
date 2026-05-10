@@ -652,6 +652,21 @@ export interface Envelope {
    * modes are silently ignored.
    */
   mode?: string;
+  /**
+   * Phase 9 (CW-20260510-0017 / W1D + W2A): wrap-level opaque cancel
+   * token emitted by the recovery broker for in-flight retry envelopes.
+   * Lives at wrap level (sibling of id/type/data), NOT inside `data`,
+   * because the info-card schema sets `additionalProperties: false`.
+   *
+   * When set, the FE renders a [Cancel retry] button that POSTs the
+   * token verbatim to `POST /api/sessions/{sessionID}/recovery/cancel`
+   * with body `{"token": "<token>"}`. On success, the card transitions
+   * to a cancelled visual state.
+   *
+   * Recovery-broker-only today; if a third caller appears the field
+   * may consolidate with `EnvelopeRouting` per W1D's follow-up note.
+   */
+  cancel_token?: string;
 }
 
 export interface Proposal {

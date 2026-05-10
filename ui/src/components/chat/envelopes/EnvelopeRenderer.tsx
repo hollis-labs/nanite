@@ -15,10 +15,11 @@ import {
 } from "@/lib/plugin-loader";
 import type { Envelope } from "@/lib/types";
 import { ApprovalCard } from "./ApprovalCard";
-import { Envelope as EnvelopeShell, EnvelopeBody, EnvelopeHeader } from "./primitives/Envelope";
+import { InterviewCard } from "./InterviewCard";
 import { PluginLoadErrorCard } from "./PluginLoadErrorCard";
 import { ProposalCard } from "./ProposalCard";
-import { InterviewCard } from "./InterviewCard";
+import { EnvelopeBody, EnvelopeHeader, Envelope as EnvelopeShell } from "./primitives/Envelope";
+import { RecoveryCancelButton } from "./RecoveryCancelButton";
 
 /**
  * The shape cards produce — EnvelopeRenderer injects `v`, `kind`, `id`
@@ -173,7 +174,7 @@ export function EnvelopeRenderer({
               : null;
 
     if (componentProps) {
-      return (
+      const card = (
         <EnvelopeErrorBoundary type={envelope.type}>
           <Suspense
             fallback={<div className="animate-pulse p-4 text-sm text-fg-secondary">Loading...</div>}
@@ -187,6 +188,28 @@ export function EnvelopeRenderer({
           </Suspense>
         </EnvelopeErrorBoundary>
       );
+
+      // Phase 9 (CW-20260510-0017 / W2A): attach the recovery-broker
+      // [Cancel retry] affordance when the envelope wrap carries a
+      // non-empty cancel_token. The token rides at wrap level (sibling
+      // of id/type/data) per W1D's contract — the info-card schema sets
+      // additionalProperties:false, so the token cannot live in `data`.
+      // The button is rendered as a small footer below the card so it
+      // works for any envelope kind the broker projects (today: only
+      // info-card; the wrap-level field is intentionally type-agnostic
+      // for forward-compat with W1D's follow-up note).
+      if (envelope.cancel_token) {
+        return (
+          <div data-recovery-envelope="true" className="space-y-2">
+            {card}
+            <div className="flex">
+              <RecoveryCancelButton token={envelope.cancel_token} />
+            </div>
+          </div>
+        );
+      }
+
+      return card;
     }
   }
 

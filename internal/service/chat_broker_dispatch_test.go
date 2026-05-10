@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"testing"
 
@@ -142,8 +143,14 @@ func TestAttemptBrokerDispatch_NilBroker_NoOp(t *testing.T) {
 
 // TestAttemptBrokerDispatch_ChatDecision_WritesRow covers the
 // chat-direct path: broker returns AgentProfile == "" → no dispatch,
-// no envelope, but agent_broker_decisions row IS written so v2
+// no plugin_envelope, but agent_broker_decisions row IS written so v2
 // telemetry analysis can count chat-direct decisions vs dispatches.
+//
+// CW-20260509-0048: an `agent_broker_decision` SSE event IS emitted
+// even on the chat-direct path so FE inspectors / audit panels see
+// every consultation on the wire (the wire signal mirrors the
+// agent_broker_decisions row + event_log entry, both of which fire
+// in the chat-direct branch too).
 func TestAttemptBrokerDispatch_ChatDecision_WritesRow(t *testing.T) {
 	fb := &fakeAgentBroker{
 		decision: agentbroker.Decision{
@@ -174,11 +181,43 @@ func TestAttemptBrokerDispatch_ChatDecision_WritesRow(t *testing.T) {
 	if out.EmittedEnvelope {
 		t.Errorf("EmittedEnvelope = true, want false for chat-direct")
 	}
-	if got := drain(ch); got != 0 {
-		t.Errorf("emitted %d events, want 0 for chat-direct", got)
+	if !out.EmittedSSEDecision {
+		t.Errorf("EmittedSSEDecision = false, want true for chat-direct (CW-20260509-0048)")
 	}
 	if tools.called != 0 {
 		t.Errorf("tool service called %d times, want 0 for chat-direct", tools.called)
+	}
+
+	// SSE event assertions — exactly one agent_broker_decision event,
+	// no plugin_envelope.
+	events := collect(ch)
+	if len(events) != 1 {
+		t.Fatalf("emitted %d events, want 1 (agent_broker_decision only)", len(events))
+	}
+	if events[0].Type != agentBrokerDecisionEventType {
+		t.Errorf("event Type = %q, want %q", events[0].Type, agentBrokerDecisionEventType)
+	}
+	var payload agentBrokerDecisionPayload
+	if err := json.Unmarshal([]byte(events[0].Data), &payload); err != nil {
+		t.Fatalf("unmarshal SSE payload failed: %v", err)
+	}
+	if payload.Decision != "" {
+		t.Errorf("payload.Decision = %q, want empty for chat-direct (ProfileChat)", payload.Decision)
+	}
+	if payload.Reason != "default-chat-handle" {
+		t.Errorf("payload.Reason = %q, want default-chat-handle", payload.Reason)
+	}
+	if payload.SessionID != "session-1" {
+		t.Errorf("payload.SessionID = %q, want session-1", payload.SessionID)
+	}
+	if payload.TurnID != "turn-1" {
+		t.Errorf("payload.TurnID = %q, want turn-1", payload.TurnID)
+	}
+	if payload.AgentBrokerDecisionID == 0 {
+		t.Errorf("payload.AgentBrokerDecisionID = 0, want non-zero (row was inserted)")
+	}
+	if payload.CreatedAt == "" {
+		t.Errorf("payload.CreatedAt is empty, want server-side timestamp")
 	}
 
 	// The agent_broker_decisions row MUST be written for chat-direct
@@ -213,6 +252,12 @@ func TestAttemptBrokerDispatch_ChatDecision_WritesRow(t *testing.T) {
 	}
 	if out.AgentBrokerDecisionID != row.ID {
 		t.Errorf("outcome ID = %d, want %d", out.AgentBrokerDecisionID, row.ID)
+	}
+
+	// Wire-event AgentBrokerDecisionID must match the persisted row id —
+	// consumers correlate the SSE event with the durable row + log entry.
+	if payload.AgentBrokerDecisionID != row.ID {
+		t.Errorf("payload.AgentBrokerDecisionID = %d, want %d (row.ID)", payload.AgentBrokerDecisionID, row.ID)
 	}
 }
 
@@ -291,17 +336,48 @@ func TestAttemptBrokerDispatch_DispatchDecision_SynthesizesTaskExecute(t *testin
 		t.Errorf("input.turn_id = %v, want %q", got, want)
 	}
 
-	// Envelope emitted on the stream as plugin_envelope — same
-	// side-channel attemptRouteDispatch uses.
+	// Two events on a successful dispatch:
+	//   1. agent_broker_decision (CW-20260509-0048 wire signal — every
+	//      consultation gets one).
+	//   2. plugin_envelope (existing CW-20260509-0046 dispatch path —
+	//      synthesized task_execute output routed to FE).
+	// Order is documented (broker-decision before envelope) so consumers
+	// can match the wire event to the dispatch envelope by session_id +
+	// turn_id when both arrive.
 	events := collect(ch)
-	if len(events) != 1 {
-		t.Fatalf("emitted %d events, want 1", len(events))
+	if len(events) != 2 {
+		t.Fatalf("emitted %d events, want 2 (agent_broker_decision + plugin_envelope)", len(events))
 	}
-	if events[0].Type != "plugin_envelope" {
-		t.Errorf("event Type = %q, want plugin_envelope", events[0].Type)
+	if events[0].Type != agentBrokerDecisionEventType {
+		t.Errorf("event[0] Type = %q, want %q", events[0].Type, agentBrokerDecisionEventType)
 	}
-	if events[0].Envelope == "" {
-		t.Errorf("event Envelope is empty")
+	if events[1].Type != "plugin_envelope" {
+		t.Errorf("event[1] Type = %q, want plugin_envelope", events[1].Type)
+	}
+	if events[1].Envelope == "" {
+		t.Errorf("event[1] Envelope is empty")
+	}
+
+	// agent_broker_decision payload mirrors the dispatch decision.
+	var payload agentBrokerDecisionPayload
+	if err := json.Unmarshal([]byte(events[0].Data), &payload); err != nil {
+		t.Fatalf("unmarshal SSE payload failed: %v", err)
+	}
+	if payload.Decision != agentbroker.ProfileWorker {
+		t.Errorf("payload.Decision = %q, want %q", payload.Decision, agentbroker.ProfileWorker)
+	}
+	if payload.Reason != "mode=work" {
+		t.Errorf("payload.Reason = %q, want mode=work", payload.Reason)
+	}
+	if payload.Confidence != 1.0 {
+		t.Errorf("payload.Confidence = %g, want 1.0", payload.Confidence)
+	}
+	if payload.ScopeTier != classify.TierMedium.String() {
+		t.Errorf("payload.ScopeTier = %q, want %q", payload.ScopeTier, classify.TierMedium.String())
+	}
+
+	if !out.EmittedSSEDecision {
+		t.Errorf("EmittedSSEDecision = false, want true on dispatch")
 	}
 
 	// Telemetry row mirrors the dispatch decision.
@@ -385,11 +461,21 @@ func TestAttemptBrokerDispatch_ToolExecuteError_FallsThrough(t *testing.T) {
 	if out.EmittedEnvelope {
 		t.Errorf("EmittedEnvelope = true, want false on tool execute error")
 	}
+	if !out.EmittedSSEDecision {
+		t.Errorf("EmittedSSEDecision = false, want true (SSE wire event fires even when downstream execute fails)")
+	}
 	if len(rs.insertedRows) != 1 {
 		t.Errorf("inserted %d rows, want 1 (telemetry row still written)", len(rs.insertedRows))
 	}
-	if got := drain(ch); got != 0 {
-		t.Errorf("emitted %d events on tool execute error, want 0", got)
+	// Exactly one event — the agent_broker_decision SSE — fires before
+	// the synthesized task_execute call. The plugin_envelope side-
+	// channel is suppressed because the downstream execute errored.
+	events := collect(ch)
+	if len(events) != 1 {
+		t.Fatalf("emitted %d events on tool execute error, want 1 (agent_broker_decision only)", len(events))
+	}
+	if events[0].Type != agentBrokerDecisionEventType {
+		t.Errorf("event Type = %q, want %q", events[0].Type, agentBrokerDecisionEventType)
 	}
 }
 
@@ -427,8 +513,18 @@ func TestAttemptBrokerDispatch_ToolExecuteMalformedJSON_NoEmit(t *testing.T) {
 	if out.EmittedEnvelope {
 		t.Errorf("EmittedEnvelope = true on malformed JSON, want false")
 	}
-	if got := drain(ch); got != 0 {
-		t.Errorf("emitted %d events on malformed JSON, want 0", got)
+	if !out.EmittedSSEDecision {
+		t.Errorf("EmittedSSEDecision = false, want true (SSE wire event fires even when envelope shape guard rejects the dispatch output)")
+	}
+	// One event — the agent_broker_decision SSE. The plugin_envelope
+	// is correctly suppressed by the JSON-shape guard so the FE never
+	// receives a malformed payload.
+	events := collect(ch)
+	if len(events) != 1 {
+		t.Fatalf("emitted %d events on malformed JSON, want 1 (agent_broker_decision only)", len(events))
+	}
+	if events[0].Type != agentBrokerDecisionEventType {
+		t.Errorf("event Type = %q, want %q", events[0].Type, agentBrokerDecisionEventType)
 	}
 }
 
@@ -478,6 +574,125 @@ func TestAttemptBrokerDispatch_BuildsInputFromClassifications(t *testing.T) {
 	}
 	if got.ExecutionPattern != classify.PatternSubagent.String() {
 		t.Errorf("input.ExecutionPattern = %q, want %q", got.ExecutionPattern, classify.PatternSubagent.String())
+	}
+}
+
+// TestEmitAgentBrokerDecisionSSE_FullPayload exercises the
+// CW-20260509-0048 SSE emitter directly. Validates the wire payload
+// shape with all fields populated (row write succeeded, dispatch
+// decision, all input projections set) so a future FE inspector
+// consumer has a documented decode contract.
+func TestEmitAgentBrokerDecisionSSE_FullPayload(t *testing.T) {
+	s := &chatServiceImpl{}
+	ch := make(chan chat.StreamEvent, 1)
+
+	input := agentbroker.Input{
+		UserText:        "/work refactor the foo",
+		Mode:            agentbroker.ModeWork,
+		ModeConfidence:  1.0,
+		ScopeTier:       classify.TierMedium.String(),
+		ReflexMatchID:   "refactor-handler",
+		ReflexAgentSlug: agentbroker.ProfileWorker,
+	}
+	decision := agentbroker.Decision{
+		AgentProfile: agentbroker.ProfileWorker,
+		Reason:       "mode=work",
+		Confidence:   1.0,
+	}
+	row := &store.AgentBrokerDecision{
+		ID:        42,
+		CreatedAt: "2026-05-10T01:23:45Z",
+	}
+
+	emitted := s.emitAgentBrokerDecisionSSE(ch, "session-1", "turn-7", input, decision, row)
+	close(ch)
+
+	if !emitted {
+		t.Fatalf("emitAgentBrokerDecisionSSE returned false, want true")
+	}
+	events := collect(ch)
+	if len(events) != 1 {
+		t.Fatalf("emitted %d events, want 1", len(events))
+	}
+	if events[0].Type != agentBrokerDecisionEventType {
+		t.Errorf("event Type = %q, want %q", events[0].Type, agentBrokerDecisionEventType)
+	}
+
+	var got agentBrokerDecisionPayload
+	if err := json.Unmarshal([]byte(events[0].Data), &got); err != nil {
+		t.Fatalf("unmarshal payload: %v", err)
+	}
+	want := agentBrokerDecisionPayload{
+		AgentBrokerDecisionID: 42,
+		SessionID:             "session-1",
+		TurnID:                "turn-7",
+		Decision:              agentbroker.ProfileWorker,
+		Reason:                "mode=work",
+		Confidence:            1.0,
+		ModeSignal:            agentbroker.ModeWork,
+		ScopeTier:             classify.TierMedium.String(),
+		ReflexID:              "refactor-handler",
+		CreatedAt:             "2026-05-10T01:23:45Z",
+	}
+	if got != want {
+		t.Errorf("payload mismatch:\n got:  %+v\n want: %+v", got, want)
+	}
+}
+
+// TestEmitAgentBrokerDecisionSSE_NilChannelNoOp covers the wire-up
+// guard: when the SSE channel is nil (test scaffolds, degenerate
+// generateResponse paths), the emitter is a no-op. No panic, no
+// emit, returns false so callers can skip the EmittedSSEDecision
+// flag flip.
+func TestEmitAgentBrokerDecisionSSE_NilChannelNoOp(t *testing.T) {
+	s := &chatServiceImpl{}
+	emitted := s.emitAgentBrokerDecisionSSE(nil, "session-1", "turn-1",
+		agentbroker.Input{UserText: "hi"},
+		agentbroker.Decision{AgentProfile: agentbroker.ProfileChat, Reason: "default-chat-handle"},
+		nil)
+	if emitted {
+		t.Errorf("emitAgentBrokerDecisionSSE(nil ch) = true, want false")
+	}
+}
+
+// TestEmitAgentBrokerDecisionSSE_NilRow covers the store-failure
+// branch: the broker decided, but the agent_broker_decisions insert
+// failed and persistAgentBrokerDecision returned nil. The wire event
+// MUST still fire (so consumers see the decision even when the
+// telemetry table is unavailable) but with AgentBrokerDecisionID=0
+// and no CreatedAt.
+func TestEmitAgentBrokerDecisionSSE_NilRow(t *testing.T) {
+	s := &chatServiceImpl{}
+	ch := make(chan chat.StreamEvent, 1)
+
+	emitted := s.emitAgentBrokerDecisionSSE(ch, "session-1", "turn-1",
+		agentbroker.Input{UserText: "hi", Mode: agentbroker.ModeWork},
+		agentbroker.Decision{AgentProfile: agentbroker.ProfileChat, Reason: "default-chat-handle"},
+		nil)
+	close(ch)
+
+	if !emitted {
+		t.Fatalf("emitAgentBrokerDecisionSSE returned false, want true")
+	}
+	events := collect(ch)
+	if len(events) != 1 {
+		t.Fatalf("emitted %d events, want 1", len(events))
+	}
+	var payload agentBrokerDecisionPayload
+	if err := json.Unmarshal([]byte(events[0].Data), &payload); err != nil {
+		t.Fatalf("unmarshal payload: %v", err)
+	}
+	if payload.AgentBrokerDecisionID != 0 {
+		t.Errorf("payload.AgentBrokerDecisionID = %d, want 0 (row was nil)", payload.AgentBrokerDecisionID)
+	}
+	if payload.CreatedAt != "" {
+		t.Errorf("payload.CreatedAt = %q, want empty (row was nil)", payload.CreatedAt)
+	}
+	if payload.Reason != "default-chat-handle" {
+		t.Errorf("payload.Reason = %q, want default-chat-handle (decision still fires on wire)", payload.Reason)
+	}
+	if payload.ModeSignal != agentbroker.ModeWork {
+		t.Errorf("payload.ModeSignal = %q, want %q", payload.ModeSignal, agentbroker.ModeWork)
 	}
 }
 

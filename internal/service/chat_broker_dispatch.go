@@ -20,9 +20,11 @@
 //   - CW-20260509-0045 — go-agent-broker v0.2.0 (deterministic broker.New).
 //   - CW-20260509-0047 — agent_broker_decisions schema +
 //     Store.InsertAgentBrokerDecision helper.
-//   - CW-20260509-0048 — SSE event emission (deferred; this seam writes
-//     the row + LogEvent — SSE hooks layer on top without changing the
-//     row-write contract).
+//   - CW-20260509-0048 — SSE `agent_broker_decision` event emission. Lands
+//     a typed wire event alongside the agent_broker_decisions row and the
+//     companion event_log entry so dev-mode inspectors and FE audit
+//     consumers see broker activity in real time. The row-write +
+//     event_log contract is unchanged; the SSE event is additive.
 //   - CW-20260509-0049 — admin CLI for ListRecentAgentBrokerDecisions.
 
 package service
@@ -41,6 +43,72 @@ import (
 	"github.com/hollis-labs/nanite/internal/reflex"
 	"github.com/hollis-labs/nanite/internal/store"
 )
+
+// agentBrokerDecisionEventType is the SSE stream event Type emitted on
+// every consultation of the agent broker (CW-20260509-0048). The name
+// matches the agent_broker_decisions table and the companion event_log
+// entry so wire-level tracing aligns with both durable records.
+//
+// Direct-stream event (not a plugin_envelope wrap): this is a signal
+// for FE inspectors / audit panels, not a renderable card. The FE
+// inspector follow-up consumes the same payload shape from the wire —
+// no envelope-manifest registration is required because no FE component
+// dispatch keys off it. Mirrors the rate_budget_pause / notify_pause
+// pattern in chat_rate_budget_pause.go.
+const agentBrokerDecisionEventType = "agent_broker_decision"
+
+// agentBrokerDecisionPayload is the JSON shape carried on the SSE Data
+// field for agent_broker_decision events. Documented here so downstream
+// consumers (FE inspector card, telemetry tools) have a single canonical
+// reference. Field names mirror the agent_broker_decisions columns +
+// the companion event_log metadata blob, so a consumer that already
+// reads the row or the log entry can decode the wire event with the
+// same struct.
+//
+// All fields are omitempty so chat-direct decisions (where the chat
+// agent handles the turn — Decision == "") emit a compact event without
+// noisy zero values.
+type agentBrokerDecisionPayload struct {
+	// AgentBrokerDecisionID is the auto-increment row id assigned by
+	// Store.InsertAgentBrokerDecision. Lets a consumer correlate the
+	// wire event with the durable row + the event_log entry.
+	AgentBrokerDecisionID int64 `json:"agent_broker_decision_id"`
+
+	SessionID string `json:"session_id"`
+	TurnID    string `json:"turn_id,omitempty"`
+
+	// Decision is the broker's chosen agent profile slug ("worker",
+	// "planner", "chat", ...) — empty when AgentProfile == ProfileChat
+	// (chat-direct). Mirrors agent_broker_decisions.decision.
+	Decision string `json:"decision,omitempty"`
+
+	// Reason is the broker's rule label ("default-chat-handle",
+	// "mode=work", "reflex-match", ...). Always populated.
+	Reason string `json:"reason"`
+
+	// Confidence is the broker's [0, 1] confidence in the decision.
+	// 0 for default-chat-handle / unmatched rules.
+	Confidence float64 `json:"confidence"`
+
+	// ModeSignal is the per-turn classified mode ("work", "chat", ...)
+	// from classify.ClassifyMode. Empty when no mode signal fired.
+	ModeSignal string `json:"mode_signal,omitempty"`
+
+	// ScopeTier is the loop-state's classified scope tier
+	// ("small", "medium", "large", ...). Empty when classifyAndAttach
+	// did not populate the loop state (degenerate paths).
+	ScopeTier string `json:"scope_tier,omitempty"`
+
+	// ReflexID is the reflex-catalog match id when a reflex matched
+	// the user input. Empty when no reflex match fired.
+	ReflexID string `json:"reflex_id,omitempty"`
+
+	// CreatedAt is the server-side timestamp the row was written, read
+	// back from agent_broker_decisions.created_at by the Store helper.
+	// Lets consumers order events without trusting the wire-arrival
+	// time.
+	CreatedAt string `json:"created_at,omitempty"`
+}
 
 // brokerDispatchOutcome is the typed result of attemptBrokerDispatch — a
 // readable shape for tests asserting what the seam did. Consumers in
@@ -77,6 +145,14 @@ type brokerDispatchOutcome struct {
 	// (Consulted=false or store insert failed). Carried in the outcome
 	// so CW-20260509-0048 can reference the row id in the SSE payload.
 	AgentBrokerDecisionID int64
+
+	// EmittedSSEDecision is true when the seam pushed an
+	// `agent_broker_decision` SSE event onto the channel
+	// (CW-20260509-0048). Independent of EmittedEnvelope — the
+	// agent_broker_decision wire event fires on every consultation
+	// (chat-direct AND dispatch), the plugin_envelope only fires on
+	// dispatch decisions with a valid envelope output.
+	EmittedSSEDecision bool
 }
 
 // attemptBrokerDispatch is the upstream agent-broker call site
@@ -151,8 +227,26 @@ func (s *chatServiceImpl) attemptBrokerDispatch(
 	// Persist the telemetry row regardless of which branch we take.
 	// Append-only — readers (admin CLI, future FE inspector) tail this
 	// table to understand routing behavior.
-	rowID := s.persistAgentBrokerDecision(sessionID, turnID, input, decision)
-	out.AgentBrokerDecisionID = rowID
+	row := s.persistAgentBrokerDecision(sessionID, turnID, input, decision)
+	if row != nil {
+		out.AgentBrokerDecisionID = row.ID
+	}
+
+	// CW-20260509-0048: emit the agent_broker_decision SSE event on
+	// every consultation (chat-direct AND dispatch). This is the live
+	// wire signal alongside the durable agent_broker_decisions row +
+	// the companion event_log entry. FE inspectors and audit panels
+	// consume the wire event for real-time broker visibility; the
+	// FE inspector card itself is intentionally a follow-up
+	// (CW-20260509-0048 scope §"Boundary").
+	//
+	// Emitted whether or not a row was written — when the store insert
+	// failed, the SSE event still surfaces the broker's decision so
+	// the wire signal isn't dropped because of a telemetry-table
+	// outage. AgentBrokerDecisionID = 0 in that case (consumers tolerate).
+	if s.emitAgentBrokerDecisionSSE(ch, sessionID, turnID, input, decision, row) {
+		out.EmittedSSEDecision = true
+	}
 
 	if decision.AgentProfile == agentbroker.ProfileChat {
 		// Chat-direct path. No dispatch, no envelope emission. The LLM
@@ -334,9 +428,11 @@ func classifyForReflex(ls *loopState) (classify.ScopeTier, classify.ExecutionPat
 }
 
 // persistAgentBrokerDecision writes the per-turn telemetry row to
-// agent_broker_decisions. Returns the auto-increment row id (zero on
-// store errors). Errors are logged and swallowed — the broker decision
-// MUST NOT block the turn.
+// agent_broker_decisions. Returns the persisted row pointer (with
+// auto-increment ID and server-side CreatedAt populated by the Store
+// helper), or nil when the store is unwired or the insert failed.
+// Errors are logged and swallowed — the broker decision MUST NOT block
+// the turn.
 //
 // user_input_hash is sha256(broker.Input.UserText) — documented in the
 // CW-20260509-0047 schema follow-up so v2 telemetry analysis isn't
@@ -344,13 +440,18 @@ func classifyForReflex(ls *loopState) (classify.ScopeTier, classify.ExecutionPat
 // stable identifier for "same input string seen twice across turns"
 // without persisting the input itself (which may contain user data the
 // telemetry consumer shouldn't see).
+//
+// Returning the row pointer lets the SSE emission step
+// (CW-20260509-0048) include the server-side created_at on the wire
+// without an extra DB round-trip — consumers can order broker events
+// by the persisted timestamp instead of trusting wire arrival.
 func (s *chatServiceImpl) persistAgentBrokerDecision(
 	sessionID, turnID string,
 	input agentbroker.Input,
 	decision agentbroker.Decision,
-) int64 {
+) *store.AgentBrokerDecision {
 	if s.store == nil {
-		return 0
+		return nil
 	}
 
 	row := &store.AgentBrokerDecision{
@@ -376,7 +477,7 @@ func (s *chatServiceImpl) persistAgentBrokerDecision(
 		// LogEvent is fire-and-forget (no return).
 		s.store.LogEvent(sessionID, "agent_broker_decision_error", "error", err.Error(),
 			fmt.Sprintf(`{"turn_id":%q,"reason":%q}`, turnID, decision.Reason))
-		return 0
+		return nil
 	}
 
 	// Mirror the pre-existing inner-broker convention from
@@ -390,7 +491,71 @@ func (s *chatServiceImpl) persistAgentBrokerDecision(
 	)
 	s.store.LogEvent(sessionID, "agent_broker_decision", "info", decision.Reason, meta)
 
-	return row.ID
+	return row
+}
+
+// emitAgentBrokerDecisionSSE pushes an `agent_broker_decision` event
+// onto the SSE stream so dev-mode inspectors and FE audit panels see
+// broker activity in real time (CW-20260509-0048). Fires on every
+// consultation — chat-direct decisions emit the event with
+// Decision == "" so consumers can count both branches.
+//
+// Returns true when an event was pushed, false when the channel was
+// nil (test paths / degenerate wire-up) or marshal failed.
+//
+// Direct stream event (Type = "agent_broker_decision", payload in
+// Data) — not a plugin_envelope wrap. Mirrors rate_budget_pause /
+// notify_pause: signal-shaped wire events that carry their payload
+// in the StreamEvent.Data JSON field. The FE inspector card is
+// intentionally out of scope for this ticket — the event lands on
+// the wire so a follow-up FE consumer can pick it up without
+// retroactive backend changes.
+//
+// Marshal failures are logged and silently swallowed: dropping the
+// SSE event is preferable to crashing the turn over a payload-encode
+// error. The durable agent_broker_decisions row + the event_log
+// entry both still landed, so the broker decision is recoverable.
+func (s *chatServiceImpl) emitAgentBrokerDecisionSSE(
+	ch chan chat.StreamEvent,
+	sessionID, turnID string,
+	input agentbroker.Input,
+	decision agentbroker.Decision,
+	row *store.AgentBrokerDecision,
+) bool {
+	if ch == nil {
+		return false
+	}
+
+	payload := agentBrokerDecisionPayload{
+		SessionID:  sessionID,
+		TurnID:     turnID,
+		Decision:   decision.AgentProfile,
+		Reason:     decision.Reason,
+		Confidence: decision.Confidence,
+		ModeSignal: input.Mode,
+		ScopeTier:  input.ScopeTier,
+		ReflexID:   input.ReflexMatchID,
+	}
+	if row != nil {
+		payload.AgentBrokerDecisionID = row.ID
+		payload.CreatedAt = row.CreatedAt
+	}
+
+	data, err := json.Marshal(payload)
+	if err != nil {
+		slog.Warn("chat-service: marshal agent_broker_decision SSE payload failed",
+			"session_id", sessionID,
+			"turn_id", turnID,
+			"err", err,
+		)
+		return false
+	}
+
+	ch <- chat.StreamEvent{
+		Type: agentBrokerDecisionEventType,
+		Data: string(data),
+	}
+	return true
 }
 
 // hashUserInput returns the SHA-256 hex digest of s. Empty input maps

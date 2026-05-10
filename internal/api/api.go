@@ -183,6 +183,11 @@ func (a *API) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("PUT /api/permissions/mode", a.handleSetPermissionMode)
 	mux.HandleFunc("POST /api/sessions/{id}/approvals/{requestId}", a.handleRespondApproval)
 
+	// Recovery broker — cancel an in-flight retry identified by the
+	// info-card cancel_token (Phase 9, CW-20260510-0017). The broker
+	// validates the token belongs to the path-bound sessionID.
+	mux.HandleFunc("POST /api/sessions/{id}/recovery/cancel", a.handleCancelRecoveryRetry)
+
 	// Skills
 	mux.HandleFunc("GET /api/skills", a.handleListSkills)
 	mux.HandleFunc("POST /api/skills", a.handleCreateSkill)

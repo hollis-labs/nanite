@@ -16,12 +16,12 @@ require (
 require (
 	github.com/anthropics/anthropic-sdk-go v1.41.0
 	github.com/google/jsonschema-go v0.4.2
-	github.com/hollis-labs/go-agent-sessions v0.1.0
+	github.com/hollis-labs/go-agent-sessions v0.7.1
 	github.com/hollis-labs/go-agentmux-client v0.1.0
 	github.com/hollis-labs/go-envelopes v0.0.0-00010101000000-000000000000
 	github.com/hollis-labs/go-modelsdev v0.0.0-00010101000000-000000000000
 	github.com/hollis-labs/go-otel v0.0.2
-	github.com/hollis-labs/go-providers v0.8.0
+	github.com/hollis-labs/go-providers v0.12.0
 	github.com/hollis-labs/go-sandbox v0.2.0
 	github.com/hollis-labs/go-toolbroker v0.1.0
 	github.com/hollis-labs/vanta-conduit v0.6.0
@@ -38,7 +38,7 @@ require (
 	github.com/dlclark/regexp2 v1.11.4 // indirect
 	github.com/grpc-ecosystem/grpc-gateway/v2 v2.28.0 // indirect
 	github.com/hollis-labs/go-queue v0.1.2 // indirect
-	github.com/hollis-labs/go-runner v0.3.0 // indirect
+	github.com/hollis-labs/go-runner v0.4.0 // indirect
 	github.com/invopop/jsonschema v0.13.0 // indirect
 	github.com/mailru/easyjson v0.7.7 // indirect
 	github.com/segmentio/asm v1.1.3 // indirect
@@ -61,21 +61,6 @@ require (
 
 // Phase 0 Wave 1 adopted libs (canonical for new code going forward):
 require go.uber.org/goleak v1.3.0
-
-// CW-20260420-0007: strict tool use default-on — local go-providers with Strict field.
-// Requires ../go-providers sibling checkout. CI checks out both repos via go.work.
-// Remove once a tagged release includes the Strict field and go.sum is updated.
-replace github.com/hollis-labs/go-providers => ../go-providers
-
-// Agent-boot foundation libs (2026-05-08): pinned to local sibling worktrees
-// while upstream tags settle. go-runner v0.3.0 tag exists on
-// feat/supervision-and-limits but the published tag points at a pre-supervision
-// commit; go-agent-sessions v0.6.0 lives on main but tracking the branch is
-// safer until the user confirms downstream consumers can drop the replace.
-// Drop these replaces once tags + module-proxy state are clean.
-replace github.com/hollis-labs/go-runner => ../go-runner
-
-replace github.com/hollis-labs/go-agent-sessions => ../go-agent-sessions
 
 require (
 	github.com/cespare/xxhash/v2 v2.3.0 // indirect

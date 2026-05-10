@@ -76,3 +76,39 @@ func TestBuiltinReflexes_Count(t *testing.T) {
 		t.Errorf("BuiltinReflexes: got %d entries, want at least %d", got, wantMin)
 	}
 }
+
+// dispatchableProfileSlugs are profile slugs we know are seeded as agent
+// profiles and therefore safe to dispatch to. An empty slug is also safe —
+// it falls through to dispatch.AssignRole's default (WorkerRoleSlug or
+// PlannerRoleSlug), both of which are seeded.
+//
+// Keep this set in sync with the agent profiles shipped in config/agents/
+// (worker.yaml, planner.yaml) plus any built-in profile registered via
+// internal/agent/builtin/. Adding a new dispatchable profile slug here
+// without also adding the agent profile file will break dispatch at
+// runtime — see internal/service/subagent_runner.go::resolveRole.
+var dispatchableProfileSlugs = map[string]bool{
+	"":        true, // empty → AssignRole default (worker or planner)
+	"worker":  true,
+	"planner": true,
+}
+
+// TestBuiltinReflexes_ProfileResolves guards against the broker-v1 failure
+// mode surfaced in the CW-20260509-0050 catalog audit: a reflex whose
+// Profile slug does not resolve to a seeded agent profile causes the
+// subagent runner to fail at dispatch with errRoleResolveFailed once the
+// broker treats reflex matches as the highest-priority routing rule.
+//
+// If you need a new Profile slug here, first add the agent profile file
+// under config/agents/ (or internal/agent/builtin/) AND extend
+// dispatchableProfileSlugs above.
+func TestBuiltinReflexes_ProfileResolves(t *testing.T) {
+	for _, r := range reflex.BuiltinReflexes() {
+		if !dispatchableProfileSlugs[r.ResolvesTo.Profile] {
+			t.Errorf("reflex %q: Profile %q is not a seeded agent profile slug — "+
+				"dispatch will fail at runtime. Either ship the agent profile or "+
+				"set Profile to \"\" to fall back to AssignRole's default.",
+				r.ID, r.ResolvesTo.Profile)
+		}
+	}
+}

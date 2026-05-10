@@ -157,7 +157,12 @@ func BuiltinReflexes() []Reflex {
 					"summarize the state",
 				},
 			},
-			ResolvesTo:  Resolution{Pattern: "researcher", Role: "worker", Profile: "researcher"},
+			// Profile left empty — no `researcher` agent profile exists yet
+			// (CW-20260509-0050 audit). Falls back to AssignRole's default
+			// (`worker`). Pattern field retains the semantic intent for
+			// telemetry; a dedicated researcher profile can be added in a
+			// later phase by setting Profile: "researcher".
+			ResolvesTo:  Resolution{Pattern: "researcher", Role: "worker"},
 			SideEffects: SideEffects{ModeSignal: "research", DispatchVia: "executeTask"},
 			Priority:    15,
 		},
@@ -174,7 +179,10 @@ func BuiltinReflexes() []Reflex {
 					"give me feedback on",
 				},
 			},
-			ResolvesTo:  Resolution{Pattern: "reviewer", Role: "worker", Profile: "reviewer"},
+			// Profile left empty — no `reviewer` agent profile exists yet
+			// (CW-20260509-0050 audit). Falls back to AssignRole's default
+			// (`worker`).
+			ResolvesTo:  Resolution{Pattern: "reviewer", Role: "worker"},
 			SideEffects: SideEffects{ModeSignal: "review"},
 			Priority:    15,
 		},
@@ -192,7 +200,10 @@ func BuiltinReflexes() []Reflex {
 					"write the changelog",
 				},
 			},
-			ResolvesTo:  Resolution{Pattern: "documentor", Role: "worker", Profile: "documentor"},
+			// Profile left empty — no `documentor` agent profile exists yet
+			// (CW-20260509-0050 audit). Falls back to AssignRole's default
+			// (`worker`).
+			ResolvesTo:  Resolution{Pattern: "documentor", Role: "worker"},
 			SideEffects: SideEffects{ModeSignal: "document", DispatchVia: "executeTask"},
 			Priority:    12,
 		},
@@ -211,7 +222,10 @@ func BuiltinReflexes() []Reflex {
 				},
 				ScopeTierHint: classify.TierMedium,
 			},
-			ResolvesTo:  Resolution{Pattern: "strategist", Role: "worker", Profile: "strategist"},
+			// Profile left empty — no `strategist` agent profile exists yet
+			// (CW-20260509-0050 audit). Falls back to AssignRole's default
+			// (`worker`).
+			ResolvesTo:  Resolution{Pattern: "strategist", Role: "worker"},
 			SideEffects: SideEffects{ModeSignal: "planning"},
 			Priority:    10,
 		},

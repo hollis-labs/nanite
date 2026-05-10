@@ -55,6 +55,14 @@ github.com/hollis-labs/go-agent-sessions v0.7.1 h1:urDDbUrptvZYIDAJQ29cjU3DrTYEM
 github.com/hollis-labs/go-agent-sessions v0.7.1/go.mod h1:xXCZv1BJNd3BLQdE8KnTbLBgwnVYSeLF6giLspAvn1c=
 github.com/hollis-labs/go-agentmux-client v0.1.0 h1:r7uFKIIlVdpAWJo+9yQuYdsyAl01QOLBpV4W2QNz1Ks=
 github.com/hollis-labs/go-agentmux-client v0.1.0/go.mod h1:S0prGahWkijm5+vINebLYuK3NF8dKR2Myqf0cIkVM9A=
+github.com/hollis-labs/go-embed-contracts v0.1.0 h1:OitzASrZ5NkAevbeE99eZkGxj6xBsYEqjZg7bFE3lhM=
+github.com/hollis-labs/go-embed-contracts v0.1.0/go.mod h1:3sLCY4JVhL1oFwqjCBOuC4J5xnJCvpUrlkHvMDRWndo=
+github.com/hollis-labs/go-envelopes v0.1.0 h1:V8EWIuIkA25OjIAgX5Ttl7rzLHW5kcHLB3QUpyoSvA0=
+github.com/hollis-labs/go-envelopes v0.1.0/go.mod h1:v45Dt4l4kYVuUf2oTcxXYh1bBRXSND+Bi6CAM/OxwKY=
+github.com/hollis-labs/go-llm-contracts v0.1.0 h1:AzN35sz1vwXzClgHpx3SWede+U5TiRTGdwIuS7XHYEw=
+github.com/hollis-labs/go-llm-contracts v0.1.0/go.mod h1:msDaHCBEemyTbXhk0Q8lm5doK79aWK5VR/hdzjWgqbU=
+github.com/hollis-labs/go-llm-types v0.1.0 h1:Scdj2p/nKwOQYScDERLPbV4kFtN0p/t4nSWWjK0IW7c=
+github.com/hollis-labs/go-llm-types v0.1.0/go.mod h1:BP8FMqmTWvi2vQ7dNybTGJ+FFzXS4gMMhAjyTHlNq84=
 github.com/hollis-labs/go-otel v0.0.2 h1:Pg0IJtRfC/QdXSeZwHpe5pDQy/dnbx49XR5BgJzlkQk=
 github.com/hollis-labs/go-otel v0.0.2/go.mod h1:E9MbBfbyc+TfJGsaweDIZ8mFq50oTKLONpGbAcaWIQY=
 github.com/hollis-labs/go-providers v0.12.0 h1:lVJwhbF0VT+I23uCD3QugFw4dz+tZ+wV+knpZw/UVLY=
@@ -69,6 +77,8 @@ github.com/hollis-labs/go-toolbroker v0.1.0 h1:2b2c3gcjLRphxbj4NC95OZ/eH1EGw3HOY
 github.com/hollis-labs/go-toolbroker v0.1.0/go.mod h1:OWsxhIzSjtbVRDXANuyfLQ/NjaQt9jSWEGxBLtAKD4U=
 github.com/hollis-labs/plugin-sdk v0.3.0 h1:xlFWssODdGkrInZv36ocSkDruYarMo2Rvvq6CrCujHY=
 github.com/hollis-labs/plugin-sdk v0.3.0/go.mod h1:+FcTow9tco3OoINjc5LSCkm8RZzWSLNG1tTCzLSQuHs=
+github.com/hollis-labs/vanta-conduit v0.6.1 h1:mOGjuOJ9ALexAt/5Dmp5X4bWKO2mH1eX7Hci2Y1IXko=
+github.com/hollis-labs/vanta-conduit v0.6.1/go.mod h1:ZJFaPbig82nd0oVl6n/+3Tchotol/uKd3xy+lPhrR00=
 github.com/invopop/jsonschema v0.13.0 h1:KvpoAJWEjR3uD9Kbm2HWJmqsEaHt8lBUpd0qHcIi21E=
 github.com/invopop/jsonschema v0.13.0/go.mod h1:ffZ5Km5SWWRAIN6wbDXItl95euhFz2uON45H2qjYt+0=
 github.com/josharian/intern v1.0.0/go.mod h1:5DoeVV0s6jJacbCEi61lwdGj/aVlrQvzHFFd8Hwg//Y=

@@ -18,13 +18,13 @@ require (
 	github.com/google/jsonschema-go v0.4.2
 	github.com/hollis-labs/go-agent-sessions v0.7.1
 	github.com/hollis-labs/go-agentmux-client v0.1.0
-	github.com/hollis-labs/go-envelopes v0.0.0-00010101000000-000000000000
+	github.com/hollis-labs/go-envelopes v0.1.0
 	github.com/hollis-labs/go-modelsdev v0.0.0-00010101000000-000000000000
 	github.com/hollis-labs/go-otel v0.0.2
 	github.com/hollis-labs/go-providers v0.12.0
 	github.com/hollis-labs/go-sandbox v0.2.0
 	github.com/hollis-labs/go-toolbroker v0.1.0
-	github.com/hollis-labs/vanta-conduit v0.6.0
+	github.com/hollis-labs/vanta-conduit v0.6.1
 	github.com/modelcontextprotocol/go-sdk v1.5.0
 	github.com/oklog/ulid/v2 v2.1.1
 	github.com/openai/openai-go v1.12.0
@@ -92,11 +92,6 @@ require (
 
 replace github.com/hollis-labs/go-modelsdev => ../go-modelsdev
 
-// go-envelopes v0.1.0 just landed (Cap 5 of the extraction); local replace
-// while we shake out the Nanite consumer. Drop once the proxy state is clean
-// and downstream lockfiles can resolve via the published tag.
-replace github.com/hollis-labs/go-envelopes => ../go-envelopes
-
 replace github.com/chrispian/agent-mux => /Users/chrispian/Projects-apps/agent-mux
 
 require (
@@ -109,11 +104,3 @@ require (
 )
 
 replace github.com/hollis-labs/go-agent-broker => ../go-agent-broker
-
-replace github.com/hollis-labs/vanta-conduit => ../vanta-conduit
-
-replace github.com/hollis-labs/go-llm-types => ../go-llm-types
-
-replace github.com/hollis-labs/go-llm-contracts => ../go-llm-contracts
-
-replace github.com/hollis-labs/go-embed-contracts => ../go-embed-contracts

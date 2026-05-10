@@ -51,6 +51,8 @@ github.com/grpc-ecosystem/grpc-gateway/v2 v2.28.0 h1:HWRh5R2+9EifMyIHV7ZV+MIZqgz
 github.com/grpc-ecosystem/grpc-gateway/v2 v2.28.0/go.mod h1:JfhWUomR1baixubs02l85lZYYOm7LV6om4ceouMv45c=
 github.com/hashicorp/golang-lru/v2 v2.0.7 h1:a+bsQ5rvGLjzHuww6tVxozPZFVghXaHOwFs4luLUK2k=
 github.com/hashicorp/golang-lru/v2 v2.0.7/go.mod h1:QeFd9opnmA6QUJc5vARoKUSoFhyfM2/ZepoAG6RGpeM=
+github.com/hollis-labs/go-agent-broker v0.2.0 h1:uFZ9gHIgHe3AsaPKDWzzOSX0eeWjod1V2OjOP/xFhFE=
+github.com/hollis-labs/go-agent-broker v0.2.0/go.mod h1:iKG7kHYMsDnWHrTT1ppp/5DHxWTEAswSmdXIZIW1YQg=
 github.com/hollis-labs/go-agent-sessions v0.7.1 h1:urDDbUrptvZYIDAJQ29cjU3DrTYEMft8tG+rL/XZ28E=
 github.com/hollis-labs/go-agent-sessions v0.7.1/go.mod h1:xXCZv1BJNd3BLQdE8KnTbLBgwnVYSeLF6giLspAvn1c=
 github.com/hollis-labs/go-agentmux-client v0.1.0 h1:r7uFKIIlVdpAWJo+9yQuYdsyAl01QOLBpV4W2QNz1Ks=

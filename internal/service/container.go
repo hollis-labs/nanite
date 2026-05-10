@@ -642,7 +642,7 @@ func NewContainer(cfg ContainerConfig) (*Container, error) {
 			provider.NewOpencodeAdapter(),
 		}
 	}
-	agentDeps, agentManager, agentBridge, agentDepsErr := BuildAgentDependencies(AgentDepsConfig{
+	agentDepsBundle, agentDepsErr := BuildAgentDependencies(AgentDepsConfig{
 		Store:       cfg.Store,
 		PathGrants:  pathGrants,
 		Streams:     streams,
@@ -655,6 +655,10 @@ func NewContainer(cfg ContainerConfig) (*Container, error) {
 		stopCatalog()
 		return nil, fmt.Errorf("service container: build agent dependencies: %w", agentDepsErr)
 	}
+	agentDeps := agentDepsBundle.Deps
+	agentManager := agentDepsBundle.Manager
+	agentBridge := agentDepsBundle.Bridge
+	agentBootDir := agentDepsBundle.BootDirAdapter
 	slog.Info("service container: agent runtime dependencies built",
 		"adapters", len(cliAdapters),
 		"workspaces_root", agentDeps.WorkspacesRoot)
@@ -700,6 +704,11 @@ func NewContainer(cfg ContainerConfig) (*Container, error) {
 		AgentDeps:            agentDeps,
 		AgentSessionsManager: agentManager,
 		AgentEventBridge:     agentBridge,
+		// Phase 9 (CW-20260510-0014): bootdir adapter for the recovery
+		// broker. Chat-side callers Track / Untrack so the broker can
+		// repopulate the session's sandbox dir / regenerate CLAUDE.md
+		// during remediation.
+		AgentBootDirAdapter: agentBootDir,
 		// B2 (CW-20260429-0031): wire the B3 in-process envelope-render
 		// executor pilot so the route-dispatch seam can hand off
 		// non-chat-direct routes. nil-safe — when omitted, the route

@@ -57,11 +57,36 @@ type AgentDepsConfig struct {
 	Providers *provider.Registry
 }
 
+// AgentDepsBundle aggregates the artifacts BuildAgentDependencies returns.
+// Distinct from a tuple return so callers can pluck the registry-bearing
+// adapters they need without restructuring the signature each time a new
+// composition-root adapter joins the broker wiring.
+type AgentDepsBundle struct {
+	// Deps is the composed runtime agent.Dependencies struct passed
+	// into runtimeagent.Boot.
+	Deps *runtimeagent.Dependencies
+
+	// Manager is the singleton agentsessions.Manager held by the chat
+	// service for daemon-bootstrap orphan sweep + Shutdown drain.
+	Manager *agentsessions.Manager
+
+	// Bridge is the agentEventBridge held by the chat service so
+	// driveBootSession can bind per-session routers.
+	Bridge *agentEventBridge
+
+	// BootDirAdapter is the recovery.BootDirOps adapter wired into the
+	// recovery broker. The chat service calls Track / Untrack on it so
+	// the broker has bootDir + Options on hand when a remediation fires.
+	BootDirAdapter *agentBootDirAdapter
+}
+
 // BuildAgentDependencies wires a *runtimeagent.Dependencies plus the singleton
-// agentsessions.Manager. Returns the composed Dependencies struct, the
-// Manager instance (for daemon-bootstrap orphan sweep + Shutdown drain), the
-// agentEventBridge (held by the chat service so driveBootSession can bind
-// per-turn routers), and any construction error.
+// agentsessions.Manager. Returns an AgentDepsBundle aggregating the composed
+// Dependencies struct, the Manager instance (for daemon-bootstrap orphan
+// sweep + Shutdown drain), the agentEventBridge (held by the chat service
+// so driveBootSession can bind per-turn routers), and the per-adapter
+// registry handles (BootDirAdapter today; MCP / Credentials siblings land
+// alongside as their adapters wire in).
 //
 // The composition root is the single point that:
 //
@@ -71,19 +96,19 @@ type AgentDepsConfig struct {
 //   - resolves the per-provider CLIAdapter
 //   - threads the EventFanout / TypedEventCallback factories the chat service
 //     binds per-session.
-func BuildAgentDependencies(cfg AgentDepsConfig) (*runtimeagent.Dependencies, *agentsessions.Manager, *agentEventBridge, error) {
+func BuildAgentDependencies(cfg AgentDepsConfig) (AgentDepsBundle, error) {
 	if cfg.Store == nil {
-		return nil, nil, nil, errors.New("BuildAgentDependencies: Store is required")
+		return AgentDepsBundle{}, errors.New("BuildAgentDependencies: Store is required")
 	}
 	if cfg.Streams == nil {
-		return nil, nil, nil, errors.New("BuildAgentDependencies: Streams is required")
+		return AgentDepsBundle{}, errors.New("BuildAgentDependencies: Streams is required")
 	}
 
 	binPath := cfg.BinaryPath
 	if binPath == "" {
 		exe, err := os.Executable()
 		if err != nil {
-			return nil, nil, nil, fmt.Errorf("BuildAgentDependencies: resolve binary: %w", err)
+			return AgentDepsBundle{}, fmt.Errorf("BuildAgentDependencies: resolve binary: %w", err)
 		}
 		if resolved, rerr := filepath.EvalSymlinks(exe); rerr == nil {
 			binPath = resolved
@@ -150,21 +175,36 @@ func BuildAgentDependencies(cfg AgentDepsConfig) (*runtimeagent.Dependencies, *a
 		SandboxBaseProfile: cfg.SandboxBaseProf,
 	}
 
+	// BootDir adapter — satisfies recovery.BootDirOps by re-running the
+	// per-provider sandbox-dir population logic against the existing
+	// boot dir. The chat service calls bootDirAdapter.Track right after
+	// each successful runtimeagent.Boot so the broker has bootDir +
+	// Options on hand when a Repopulate / RegenerateCLAUDEMD remediation
+	// fires.
+	bootDirAdapter, err := newAgentBootDirAdapter(deps)
+	if err != nil {
+		return AgentDepsBundle{}, fmt.Errorf("BuildAgentDependencies: bootdir adapter: %w", err)
+	}
+
 	// Construct the in-process recovery broker and wire it into deps.
 	// AgentBoot is a closure over `deps` so the broker dispatches
 	// replacement sessions through the same composition root. BootDir
-	// adapter is still nil in this wiring — Phase 9 ticket W1A lands it.
-	// MCP is wired here when cfg.MCP is non-nil (Phase 9 — CW-20260510-0015);
-	// otherwise it stays nil and RemediationRefreshMCPTransport
-	// classifications surface as broker errors handled by the orchestration
-	// layer. Credentials is wired here (Phase 9, CW-20260510-0016):
-	// re-reads the OS keychain via internal/secrets and pushes the fresh
-	// key onto the cached internal/llm/{anthropic,openai}.Client via
+	// is wired here (Phase 9 — CW-20260510-0014): Repopulate /
+	// RegenerateCLAUDEMD re-run the per-provider sandbox-dir population
+	// logic against the existing boot dir. MCP is wired here when
+	// cfg.MCP is non-nil (Phase 9 — CW-20260510-0015); otherwise it
+	// stays nil and RemediationRefreshMCPTransport classifications
+	// surface as broker errors handled by the orchestration layer.
+	// Credentials is wired here (Phase 9, CW-20260510-0016): re-reads
+	// the OS keychain via internal/secrets and pushes the fresh key
+	// onto the cached internal/llm/{anthropic,openai}.Client via
 	// SetAPIKey. CLI providers (claude/codex/opencode) intentionally
-	// error from Refresh because their auth lives outside nanite's reach
-	// — see recoveryCredentialsAdapter.Refresh for the full disposition.
+	// error from Refresh because their auth lives outside nanite's
+	// reach — see recoveryCredentialsAdapter.Refresh for the full
+	// disposition.
 	brokerDeps := recovery.Dependencies{
 		AgentBoot: &agentBootAdapter{deps: deps},
+		BootDir:   bootDirAdapter,
 		Store: &recoveryBrokerStore{
 			store: cfg.Store,
 		},
@@ -179,7 +219,12 @@ func BuildAgentDependencies(cfg AgentDepsConfig) (*runtimeagent.Dependencies, *a
 	broker := recovery.NewBroker(brokerDeps)
 	deps.Recovery = broker
 
-	return deps, manager, bridge, nil
+	return AgentDepsBundle{
+		Deps:           deps,
+		Manager:        manager,
+		Bridge:         bridge,
+		BootDirAdapter: bootDirAdapter,
+	}, nil
 }
 
 // agentBootAdapter satisfies recovery.AgentBoot by forwarding into

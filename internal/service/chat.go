@@ -170,6 +170,16 @@ type ChatServiceConfig struct {
 	// the chat-harness loop (and the long-lived path is unavailable).
 	AgentEventBridge *agentEventBridge
 
+	// AgentBootDirAdapter is the recovery.BootDirOps adapter that
+	// satisfies repopulate-sandbox / regenerate-CLAUDE.md remediations.
+	// driveBootSession Tracks each successful Boot so the broker has the
+	// per-session bootDir + Options on hand at remediation time;
+	// CloseAgentSession Untracks at archive. nil-safe: when absent the
+	// chat service skips Track/Untrack and the broker degrades to
+	// "Permanent for anything that needs sandbox repair" — the same
+	// pre-Phase-9 behavior.
+	AgentBootDirAdapter *agentBootDirAdapter
+
 	// EnvelopeRenderExecutor is the B3 in-process executor pilot
 	// (CW-20260429-0032 — internal/executor/envelope_render). Wired
 	// here so chat_generate.go's dispatch seam (B2 — CW-20260429-0031)
@@ -295,6 +305,15 @@ type chatServiceImpl struct {
 	// not wired (matches agentDeps == nil).
 	agentEventBridge *agentEventBridge
 
+	// agentBootDirAdapter is the recovery.BootDirOps adapter (Phase 9 —
+	// CW-20260510-0014). driveBootSession Tracks each successful Boot so
+	// the recovery broker can repopulate the sandbox dir / regenerate
+	// CLAUDE.md during remediation; CloseAgentSession Untracks at
+	// archive. nil-safe: when absent the chat service skips Track/Untrack
+	// calls and the broker degrades to "Permanent for anything that needs
+	// sandbox repair".
+	agentBootDirAdapter *agentBootDirAdapter
+
 	// activeSessionSlots remembers the last slot-content hash applied per
 	// session so driveBootSession only regenerates CLAUDE.md /
 	// agent-context.md when System / Agent / Mode / Rules slots change.
@@ -377,6 +396,7 @@ func NewChatService(cfg ChatServiceConfig) ChatService {
 		agentDeps:           cfg.AgentDeps,
 		agentSessionsManager: cfg.AgentSessionsManager,
 		agentEventBridge:    cfg.AgentEventBridge,
+		agentBootDirAdapter: cfg.AgentBootDirAdapter,
 		envelopeRenderExecutor: cfg.EnvelopeRenderExecutor,
 		agentBroker:            cfg.AgentBroker,
 	}
@@ -708,6 +728,9 @@ func (s *chatServiceImpl) CloseAgentSession(ctx context.Context, sessionID strin
 	s.toolPartitionStates.Delete(sessionID)
 	if s.agentEventBridge != nil {
 		s.agentEventBridge.SetPerSessionRouter(sessionID, nil)
+	}
+	if s.agentBootDirAdapter != nil {
+		s.agentBootDirAdapter.Untrack(sessionID)
 	}
 	sess, typeOK := v.(*runtimeagent.Session)
 	if !typeOK {

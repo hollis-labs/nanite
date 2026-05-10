@@ -86,17 +86,26 @@ func (s *chatServiceImpl) driveBootSession(
 		}
 		workdir := bootSessionWorkdir(session)
 		role := bootSessionRole(agent, mode)
-		booted, err := runtimeagent.Boot(ctx, s.agentDeps, runtimeagent.Options{
+		bootOpts := runtimeagent.Options{
 			Mode:         runtimeagent.ModeLongLived,
 			SessionID:    sessionID,
 			AgentProfile: profileSlug,
 			Workdir:      workdir,
 			Role:         role,
-		})
+		}
+		booted, err := runtimeagent.Boot(ctx, s.agentDeps, bootOpts)
 		if err != nil {
 			return nil, fmt.Errorf("driveBootSession: boot: %w", err)
 		}
 		s.activeSessions.Store(sessionID, booted)
+		// Track the bootDir + Options on the recovery BootDirOps adapter
+		// so a Repopulate / RegenerateCLAUDEMD remediation can rebuild
+		// the same SetupParams without us re-encoding them ad-hoc here.
+		// nil-safe: chat-service tests / standalone configs without the
+		// recovery wiring leave agentBootDirAdapter nil.
+		if s.agentBootDirAdapter != nil {
+			s.agentBootDirAdapter.Track(sessionID, booted.BootDir, bootOpts)
+		}
 		// Stamp the slot hash so the first follow-up turn doesn't trigger
 		// a redundant regen.
 		s.activeSessionSlots.Store(sessionID, hashSlots(slotResult))
@@ -235,6 +244,17 @@ func (s *chatServiceImpl) adoptReplacementSession(sessionID string, sess *runtim
 	// replacement starts with a clean slot/regen window. The boot dir
 	// itself is reused — agent.Boot's IsRelaunch=true path skips
 	// CreateRuntimeRow + workdir reseed.
+
+	// Refresh the BootDir adapter's registry entry — the relaunched
+	// session has a fresh $TMPDIR-rolled bootDir but reuses the original
+	// Options (agent profile, workdir, role). agent.Boot's IsRelaunch=true
+	// path doesn't reset the registry, so we re-Track with the new
+	// bootDir while preserving the prior entry's Options shape.
+	if s.agentBootDirAdapter != nil {
+		if prev, ok := s.agentBootDirAdapter.lookup(sessionID); ok {
+			s.agentBootDirAdapter.Track(sessionID, sess.BootDir, prev.opts)
+		}
+	}
 
 	// Re-arm the Wait observer for the replacement. The broker may
 	// dispatch additional retries up to its hard cap; without a fresh

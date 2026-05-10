@@ -9,6 +9,7 @@ import (
 	"sync"
 	"time"
 
+	agentbroker "github.com/hollis-labs/go-agent-broker/broker"
 	llmtypes "github.com/hollis-labs/go-llm-types"
 	conduit "github.com/hollis-labs/vanta-conduit"
 
@@ -199,6 +200,17 @@ type ContainerConfig struct {
 	// adapters and Boot fails for any provider; callers should populate
 	// at least claude/codex/opencode.
 	CLIAdapters []provider.CLIAdapter
+
+	// AgentBroker is the upstream agent-router primitive
+	// (CW-20260509-0046, SP-20260429-0001 broker-v1). The deterministic
+	// v1 impl is `broker.New()` from go-agent-broker v0.2.0. Threaded
+	// through here so chatServiceImpl can consult it at the call-site
+	// upstream of the chat-loop entry. nil-safe — when absent, the
+	// upstream call site is a pass-through and every turn falls
+	// through to the chat-direct LLM loop. main.go shares one broker
+	// instance with the downstream selfTools.Broker scaffold (both
+	// layers run; see chat_broker_dispatch.go for the boundary).
+	AgentBroker agentbroker.Broker
 }
 
 func newRuntimeAdapterRegistry() *agent.AdapterRegistry {
@@ -683,6 +695,13 @@ func NewContainer(cfg ContainerConfig) (*Container, error) {
 		// non-chat-direct routes. nil-safe — when omitted, the route
 		// classifier's hint stays purely informative.
 		EnvelopeRenderExecutor: envelope_render.New(),
+		// CW-20260509-0046: upstream agent-broker. main.go shares one
+		// broker instance with selfTools.Broker (downstream scaffold)
+		// — both layers consult the same deterministic v1 rule set,
+		// the upstream call decides whether dispatch happens, the
+		// downstream call audits the dispatch CALL into event_log.
+		// Concurrency-safe (DeterministicBroker is stateless).
+		AgentBroker: cfg.AgentBroker,
 	})
 
 	// G-3 + G-5: subagent service with the real chat-engine-backed runner.

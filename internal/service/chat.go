@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	agentbroker "github.com/hollis-labs/go-agent-broker/broker"
 	agentsessions "github.com/hollis-labs/go-agent-sessions/agentsessions"
 	llmcontracts "github.com/hollis-labs/go-llm-contracts"
 	"github.com/hollis-labs/go-providers/provider"
@@ -176,6 +177,25 @@ type ChatServiceConfig struct {
 	// nil-safe: when absent, the route hint stays purely informative
 	// and every turn runs the chat-direct loop.
 	EnvelopeRenderExecutor dispatch.Executor
+
+	// AgentBroker is the upstream agent-router primitive
+	// (CW-20260509-0046, SP-20260429-0001 broker-v1). Consulted before
+	// the chat-loop entry to decide whether the turn should dispatch to
+	// a worker/planner subagent OR be handled by the chat agent
+	// directly. The deterministic v1 impl is `broker.New()` from
+	// github.com/hollis-labs/go-agent-broker/broker (v0.2.0+).
+	//
+	// nil-safe: when absent, the call-site is a pass-through and every
+	// turn falls through to the chat-direct LLM loop. Production wiring
+	// in cmd/nanite/main.go installs the deterministic broker; tests
+	// can install a fake or leave nil.
+	//
+	// The broker is UPSTREAM of the existing reflex/grounding/
+	// inner-broker scaffold in self_tools_dispatch.go::callExecuteTask
+	// — that downstream layer enriches the dispatch CALL; this upstream
+	// broker is the dispatch DECISION. Both layers run; the boundary is
+	// load-bearing per `decisions.nanite.architecture.agent_broker_v1`.
+	AgentBroker agentbroker.Broker
 }
 
 // chatServiceImpl is the concrete ChatService implementation.
@@ -293,6 +313,12 @@ type chatServiceImpl struct {
 	// classifier emits RouteExecutorEnvelopeRender. nil-safe: when nil
 	// the route is purely informative and the chat-direct loop runs.
 	envelopeRenderExecutor dispatch.Executor
+
+	// agentBroker is the upstream agent-router primitive
+	// (CW-20260509-0046). nil-safe — when absent the call site is a
+	// pass-through and every turn falls through to the chat-direct
+	// loop. See ChatServiceConfig.AgentBroker for the full contract.
+	agentBroker agentbroker.Broker
 }
 
 // inFlightGen records the currently-running generateResponse for a session
@@ -352,6 +378,7 @@ func NewChatService(cfg ChatServiceConfig) ChatService {
 		agentSessionsManager: cfg.AgentSessionsManager,
 		agentEventBridge:    cfg.AgentEventBridge,
 		envelopeRenderExecutor: cfg.EnvelopeRenderExecutor,
+		agentBroker:            cfg.AgentBroker,
 	}
 }
 

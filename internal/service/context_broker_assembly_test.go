@@ -102,15 +102,17 @@ func TestAssembleSlots_StableCachePrefix_AcrossTurns(t *testing.T) {
 	}
 }
 
-// TestAssembleSlots_SkippedSlotAbsentFromBlocks confirms that when the
-// decider skips a slot (because the per-turn intent doesn't need it),
-// that slot is absent from the assembled SlotBlocks shipped to the
-// provider — preserving cacheable prefix savings.
-func TestAssembleSlots_SkippedSlotAbsentFromBlocks(t *testing.T) {
-	// We exercise the decider directly here because populating SlotContext
-	// from the real broker requires a live Vanta/PCC/Conduit wiring. The
-	// decision logic is the unit under test; integration into AssembleSlots
-	// is covered by TestAssembleSlots_PlanReachesResult.
+// TestDecideAssembly_SkipEmitsEmptyContentAndStashes asserts that when
+// the decider skips a slot (because the per-turn intent doesn't need it),
+// the slot's decision carries empty content (so downstream Assemble drops
+// it from the wire, preserving cacheable prefix savings) and the original
+// content is moved to plan.Stash for recovery.
+func TestDecideAssembly_SkipEmitsEmptyContentAndStashes(t *testing.T) {
+	// We exercise contextbroker.DecideAssembly directly here because
+	// populating SlotContext from the real broker requires a live
+	// Vanta/PCC/Conduit wiring. The decision logic is the unit under test;
+	// end-to-end integration with AssembleSlots → SlotBlocks is covered by
+	// TestAssembleSlots_PlanReachesResult.
 	plan := contextbroker.DecideAssembly(contextbroker.AssemblyInput{
 		Intent:    contextbroker.Intent{Type: contextbroker.IntentReviewSession},
 		SlotOrder: ctxpkg.SlotOrder,

@@ -85,12 +85,16 @@ type SlotDecision struct {
 // AssemblyPlan is the broker's complete per-turn plan: the ordered slot
 // decisions and a stash of unshipped content keyed by slot name.
 type AssemblyPlan struct {
-	// Decisions are in SlotOrder. A decision is emitted for every slot in
-	// the input map (even empty ones), so callers can rely on positions
-	// being stable across turns — empty/skipped slots emit a decision
-	// with ActionSkip + empty Content, which downstream Assemble drops
-	// from the wire but the position semantics are preserved at the
-	// decider layer.
+	// Decisions are emitted one-per-SlotOrder entry — positional stability
+	// is the contract. The decider walks AssemblyInput.SlotOrder and emits
+	// a decision at each position regardless of whether AssemblyInput.Sources
+	// has an entry for that slot; slots absent from Sources (or with empty
+	// content) receive ActionSkip with ReasonTag="skipped_no_content".
+	// Callers can rely on len(Decisions) == len(SlotOrder) and on
+	// Decisions[i].SlotName == SlotOrder[i] across turns, which preserves
+	// the cacheable-prefix position math (Anthropic cacheable_prefix_tokens)
+	// at the decider layer. Downstream Assemble drops empty-content slots
+	// from the wire, but position semantics are preserved here.
 	Decisions []SlotDecision
 
 	// Stash maps slot_name → original-content for slots the broker
@@ -114,10 +118,11 @@ func (p *AssemblyPlan) ContentByAction(action SlotAction) []SlotDecision {
 
 // AssemblyInput is the decider's input — the full slot store plus signals
 // for the per-turn decision (intent, mode, agent identity). Sources is a
-// slot_name → content map; the decider walks `slotOrder` (passed
-// explicitly to avoid an import cycle with internal/context) and emits a
-// decision for every slot in the order, regardless of whether the source
-// has content for that slot.
+// slot_name → content map; the decider walks `SlotOrder` (passed
+// explicitly so this package doesn't import internal/context — keeping
+// internal/context as the substrate and contextbroker as a downstream
+// consumer) and emits a decision for every slot in the order, regardless
+// of whether the source has content for that slot.
 type AssemblyInput struct {
 	// Intent classifies the user's turn (write_code, resume_task, etc.).
 	// Drives which slots are needed: e.g. resume_task needs memory but
@@ -129,9 +134,10 @@ type AssemblyInput struct {
 	// signal; future deciders may gate slots on mode.
 	ModeSlug string
 
-	// SlotOrder is the canonical order to walk. Provided by the caller
-	// to avoid a `internal/context → internal/contextbroker` import
-	// cycle. The caller passes `ctxpkg.SlotOrder`.
+	// SlotOrder is the canonical order to walk. Provided by the caller so
+	// this package doesn't import internal/context — internal/context is
+	// the substrate that defines SlotOrder/slot names/budgets, and
+	// contextbroker is its consumer. The caller passes `ctxpkg.SlotOrder`.
 	SlotOrder []string
 
 	// Sources maps slot_name → content. Empty content is allowed and
@@ -188,18 +194,25 @@ func DecideAssembly(input AssemblyInput) AssemblyPlan {
 		content := input.Sources[name]
 		budget := input.Budgets[name]
 
-		switch {
-		case content == "":
+		if content == "" {
 			decisions = append(decisions, SlotDecision{
 				SlotName:  name,
 				Content:   "",
 				Action:    ActionSkip,
 				ReasonTag: "skipped_no_content",
 			})
+			continue
+		}
 
-		case budget > 0 && EstimateTokens(content) > budget:
+		// Compute token estimate once — EstimateTokens is O(len(content)),
+		// so on large slot bodies we avoid doubling the work between the
+		// oversized check and the pointer-format call.
+		tokens := EstimateTokens(content)
+
+		switch {
+		case budget > 0 && tokens > budget:
 			// Oversized — substitute pointer and stash original.
-			pointer := formatSlotPointer(name, EstimateTokens(content))
+			pointer := formatSlotPointer(name, tokens)
 			if stash == nil {
 				stash = make(map[string]string)
 			}
@@ -279,9 +292,14 @@ func shouldSkipForIntent(slotName string, intent Intent) bool {
 }
 
 // contextSlotName returns the canonical slot name for the dynamic
-// workspace-context slot. Defined here as a constant fn so the file
-// stays self-contained (no internal/context import — that package
-// imports this one transitively through service/ wiring).
+// workspace-context slot. Defined here as a constant fn rather than
+// imported from internal/context to keep the dependency direction
+// one-way: internal/context is the substrate (defines SlotOrder, slot
+// names, budgets); contextbroker is a consumer that the substrate
+// doesn't know about. Importing internal/context here would invert the
+// intended layering even though no cycle exists today. If the slot
+// name string drifts between packages, the assembly_test.go round-trip
+// catches it (it walks ctxpkg.SlotOrder through DecideAssembly).
 func contextSlotName() string {
 	return "context"
 }

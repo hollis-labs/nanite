@@ -217,7 +217,7 @@ func (s *contextServiceImpl) AssembleSlots(ctx context.Context, session *store.S
 	// substitutions get a synthetic marker. The Universal slot sits at
 	// position 0 (per ctxpkg.SlotOrder) with empty content today — Sprint 2 /
 	// T2.4 wires the content. The decision is deterministic and free of I/O.
-	store := slotSourceMap(sources, toolsContent)
+	slotSources := slotSourceMap(sources, toolsContent)
 	modeSlug := ""
 	if sessionMode != nil {
 		modeSlug = sessionMode.Slug
@@ -228,7 +228,7 @@ func (s *contextServiceImpl) AssembleSlots(ctx context.Context, session *store.S
 		Intent:    sources.Intent,
 		ModeSlug:  modeSlug,
 		SlotOrder: ctxpkg.SlotOrder,
-		Sources:   store,
+		Sources:   slotSources,
 		Budgets:   ctxpkg.DefaultBudgets(),
 		AgentID:   agent.ID,
 		SessionID: session.ID,

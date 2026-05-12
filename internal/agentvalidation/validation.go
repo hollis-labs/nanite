@@ -146,6 +146,20 @@ func ValidateAgentConfig(agent *store.AgentProfile) ValidationResult {
 		}
 	}
 
+	// 8b. Validate parent_dispatch_allowlist (JSON string array of role slugs).
+	// Empty or "[]" means "no dispatch permission" (falls back to baseline
+	// task_execute description). Anything else must parse as a well-formed
+	// JSON array of strings — reject objects, non-arrays, and non-string
+	// elements so the API surface fails fast instead of silently treating
+	// malformed input as "no dispatch".
+	if p := strings.TrimSpace(agent.ParentDispatchAllowlist); p != "" && p != "[]" {
+		var roles []string
+		if err := json.Unmarshal([]byte(p), &roles); err != nil {
+			result.Errors = append(result.Errors,
+				fmt.Sprintf("parent_dispatch_allowlist is malformed JSON array of strings: %s", err.Error()))
+		}
+	}
+
 	// 9. Validate status enum
 	if s := agent.Status; s != "" && s != "active" && s != "disabled" {
 		result.Errors = append(result.Errors, fmt.Sprintf("status must be 'active' or 'disabled', got %q", s))

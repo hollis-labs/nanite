@@ -155,6 +155,43 @@ func TestDenyListWithInvalidGlob(t *testing.T) {
 	}
 }
 
+// TestParentDispatchAllowlist exercises the validation added in CW-20260512-0107.
+// The field is a JSON string array of role slugs; empty/"[]" mean "no dispatch
+// permission" and must validate. Malformed JSON, non-array JSON, and non-string
+// elements must be rejected so the API fails fast.
+func TestParentDispatchAllowlist(t *testing.T) {
+	cases := []struct {
+		name      string
+		allowlist string
+		wantErr   bool
+	}{
+		{"empty string accepted", "", false},
+		{"empty array accepted", "[]", false},
+		{"single role accepted", `["worker"]`, false},
+		{"multiple roles accepted", `["worker","researcher"]`, false},
+		{"not json rejected", "not json", true},
+		{"object rejected", `{"role":"worker"}`, true},
+		{"non-string element rejected", `["worker",42]`, true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			agent := &store.AgentProfile{
+				Name:                    "Allowlist Agent",
+				Slug:                    "allowlist-agent",
+				SystemPrompt:            "You dispatch.",
+				MCPServers:              `["conduit"]`,
+				ParentDispatchAllowlist: tc.allowlist,
+			}
+			result := ValidateAgentConfig(agent)
+			gotErr := !result.OK()
+			if gotErr != tc.wantErr {
+				t.Fatalf("ValidateAgentConfig(parent_dispatch_allowlist=%q): wantErr=%v gotErr=%v errors=%v",
+					tc.allowlist, tc.wantErr, gotErr, result.Errors)
+			}
+		})
+	}
+}
+
 func TestPrefixGlobIsValid(t *testing.T) {
 	// Patterns ending in * are prefix globs and should always be valid
 	agent := &store.AgentProfile{

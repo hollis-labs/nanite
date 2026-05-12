@@ -85,6 +85,13 @@ func (d *Definition) ToProfile() *store.AgentProfile {
 		p.ToolPermissions = "{}"
 	}
 
+	// ParentDispatchAllowlist — CW-20260512-0107 (SP-20260512-0008 W2A).
+	// JSON array of role slugs this agent may dispatch via task_execute;
+	// rendered into the task_execute description by the Tool Broker
+	// Describe hook. Default '[]' (no dispatch) matches the migration
+	// 059 column default for legacy / non-parent profiles.
+	p.ParentDispatchAllowlist = marshalSlice(d.ParentDispatchAllowlist)
+
 	p.Settings = "{}"
 	return p
 }

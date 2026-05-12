@@ -112,6 +112,11 @@ type CreateAgentRequest struct {
 	Source          string `json:"source"`
 	SourceRef       string `json:"source_ref"`
 	Icon            string `json:"icon"`
+	// ParentDispatchAllowlist (CW-20260512-0107): JSON array of role
+	// slugs this agent may dispatch via task_execute. Surfaced into
+	// task_execute's per-call description by the Tool Broker Describe
+	// hook. Default '[]' (no dispatch).
+	ParentDispatchAllowlist string `json:"parent_dispatch_allowlist"`
 }
 
 type UpdateAgentRequest struct {
@@ -133,6 +138,8 @@ type UpdateAgentRequest struct {
 	Tags            *string `json:"tags"`
 	Status          *string `json:"status"`
 	Icon            *string `json:"icon"`
+	// CW-20260512-0107 — see CreateAgentRequest.
+	ParentDispatchAllowlist *string `json:"parent_dispatch_allowlist"`
 }
 
 type AddSessionAgentRequest struct {

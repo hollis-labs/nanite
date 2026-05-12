@@ -3,6 +3,16 @@ name: Default
 slug: default
 description: General-purpose chat agent
 icon: chat
+# CW-20260512-0107 (SP-20260512-0008 W2A): the chat-role default agent is
+# the canonical trusted parent for task_execute dispatch. The Tool Broker
+# Describe hook (CW-20260512-0105) reads this list into the task_execute
+# description the LLM sees, so the agent picks an intent fit rather than
+# memorizing role names. Worker / planner / role profiles do NOT carry
+# this field — they are dispatch targets, not dispatchers.
+parentDispatchAllowlist:
+  - researcher
+  - planner
+  - worker
 # PROMPT-SYNC: CW-20260427-0014 + CW-20260512-0100
 # This file is the canonical source for the Chat-role harness prompt.
 # Any edit here MUST be re-flowed into:
@@ -10,6 +20,9 @@ icon: chat
 # Rules: (1) replace backticks with plain text, (2) replace '' with '''' for
 # SQL single-quote escaping, (3) flatten markdown inline code to bare words.
 # Do NOT change the semantic content — only surface formatting.
+# NOTE: PROMPT-SYNC governs the *system_prompt body* (below ---) only.
+# Frontmatter config like parentDispatchAllowlist is a code-level config
+# surface, not a prompt-template field, and does not need SQL reflow.
 #
 # Universal rules (Grounding / Refusal / Verification) were extracted into
 # internal/chat/universal_rules.go (CW-20260512-0100) and are auto-injected

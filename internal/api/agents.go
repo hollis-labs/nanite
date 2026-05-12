@@ -30,27 +30,28 @@ func (a *API) handleCreateAgent(w http.ResponseWriter, r *http.Request) {
 	}
 
 	agent := &store.AgentProfile{
-		ID:              req.ID,
-		Name:            req.Name,
-		Slug:            req.Slug,
-		Avatar:          req.Avatar,
-		SystemPrompt:    req.SystemPrompt,
-		Description:     req.Description,
-		Modes:           req.Modes,
-		DefaultMode:     req.DefaultMode,
-		DefaultModel:    req.DefaultModel,
-		MCPServers:      req.MCPServers,
-		ToolPermissions: req.ToolPermissions,
-		CanExecute:      req.CanExecute,
-		Settings:        req.Settings,
-		Tools:           req.Tools,
-		Directories:     req.Directories,
-		Constraints:     req.Constraints,
-		Tags:            req.Tags,
-		Status:          req.Status,
-		Source:          req.Source,
-		SourceRef:       req.SourceRef,
-		Icon:            req.Icon,
+		ID:                      req.ID,
+		Name:                    req.Name,
+		Slug:                    req.Slug,
+		Avatar:                  req.Avatar,
+		SystemPrompt:            req.SystemPrompt,
+		Description:             req.Description,
+		Modes:                   req.Modes,
+		DefaultMode:             req.DefaultMode,
+		DefaultModel:            req.DefaultModel,
+		MCPServers:              req.MCPServers,
+		ToolPermissions:         req.ToolPermissions,
+		CanExecute:              req.CanExecute,
+		Settings:                req.Settings,
+		Tools:                   req.Tools,
+		Directories:             req.Directories,
+		Constraints:             req.Constraints,
+		Tags:                    req.Tags,
+		Status:                  req.Status,
+		Source:                  req.Source,
+		SourceRef:               req.SourceRef,
+		Icon:                    req.Icon,
+		ParentDispatchAllowlist: req.ParentDispatchAllowlist,
 	}
 	// Validate agent config before persisting.
 	if vr := agentvalidation.ValidateAgentConfig(agent); !vr.OK() {
@@ -161,6 +162,9 @@ func (a *API) handleUpdateAgent(w http.ResponseWriter, r *http.Request) {
 	}
 	if req.Icon != nil {
 		existing.Icon = *req.Icon
+	}
+	if req.ParentDispatchAllowlist != nil {
+		existing.ParentDispatchAllowlist = *req.ParentDispatchAllowlist
 	}
 
 	// Validate agent config before persisting.

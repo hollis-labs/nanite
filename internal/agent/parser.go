@@ -43,6 +43,14 @@ type Definition struct {
 	// and call-budget caps without needing an agent_profiles row.
 	ToolPermissions *AgentToolPermissions `yaml:"toolPermissions,omitempty"`
 
+	// ParentDispatchAllowlist enumerates the role slugs this agent (as a
+	// parent) may dispatch via task_execute. Surfaced into task_execute's
+	// rendered description via the Tool Broker Describe hook
+	// (CW-20260512-0105 W1B). When omitted, the agent has no dispatch
+	// permission and the description renders the baseline body.
+	// Added by CW-20260512-0107 (SP-20260512-0008 W2A).
+	ParentDispatchAllowlist []string `yaml:"parentDispatchAllowlist,omitempty"`
+
 	// SystemPrompt is the markdown body below the YAML frontmatter.
 	SystemPrompt string `yaml:"-"`
 

@@ -7,6 +7,10 @@
 #
 # Do NOT fill out the full tool surface or system prompt here — that is
 # Phase 6 work. Extend this file in the Phase 6 cognition arc ticket.
+#
+# CW-20260512-0100: universal grounding/refusal rules are auto-injected into
+# SlotSystem for every agent (see internal/chat/universal_rules.go), so even
+# this stub inherits refusal-on-failure behavior before Phase 6 lands.
 
 id: planner
 name: Planner

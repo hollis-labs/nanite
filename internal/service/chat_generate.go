@@ -736,7 +736,7 @@ func (s *chatServiceImpl) generateResponse(ctx context.Context, sessionID, assis
 				"timeout": generateResponseTimeout.String(),
 				"session": sessionID,
 			})
-			s.persistPartialAssistantAndNotifyBroker(ctx, sessionID, assistantMsgID, agentID, fullContent.String(), providerName, ctx.Err()) // CW-20260419-0019, CW-20260512-0001
+			s.persistPartialAssistantAndNotifyBroker(ctx, sessionID, assistantMsgID, agentID, fullContent.String(), providerName, agent.Slug, ctx.Err()) // CW-20260419-0019, CW-20260512-0001
 			return
 		}
 
@@ -774,7 +774,7 @@ func (s *chatServiceImpl) generateResponse(ctx context.Context, sessionID, assis
 					"msgs":    breakdown.Messages,
 					"tools":   breakdown.Tools,
 				})
-			s.persistPartialAssistantAndNotifyBroker(ctx, sessionID, assistantMsgID, agentID, fullContent.String(), providerName, budgetErr) // CW-20260419-0019, CW-20260512-0001
+			s.persistPartialAssistantAndNotifyBroker(ctx, sessionID, assistantMsgID, agentID, fullContent.String(), providerName, agent.Slug, budgetErr) // CW-20260419-0019, CW-20260512-0001
 			return
 		}
 		// Log compaction continuation if budget enforcement reduced context.
@@ -1051,7 +1051,7 @@ func (s *chatServiceImpl) generateResponse(ctx context.Context, sessionID, assis
 					}
 					// Pause emitted with user_action_needed; end the turn
 					// cleanly without a fatal envelope.
-					s.persistPartialAssistantAndNotifyBroker(ctx, sessionID, assistantMsgID, agentID, fullContent.String(), providerName, err) // CW-20260419-0019, CW-20260512-0001
+					s.persistPartialAssistantAndNotifyBroker(ctx, sessionID, assistantMsgID, agentID, fullContent.String(), providerName, agent.Slug, err) // CW-20260419-0019, CW-20260512-0001
 					return
 				}
 				var msg string
@@ -1063,7 +1063,7 @@ func (s *chatServiceImpl) generateResponse(ctx context.Context, sessionID, assis
 				}
 				ch <- chat.ErrorEnvelopeDelta(chat.ErrorCodeInternal, msg, map[string]interface{}{"recovery": "refused", "trigger_kind": triggerKind})
 				ch <- chat.ErrorEvent(chat.ErrorCodeInternal, msg, map[string]interface{}{"recovery": "refused", "trigger_kind": triggerKind})
-				s.persistPartialAssistantAndNotifyBroker(ctx, sessionID, assistantMsgID, agentID, fullContent.String(), providerName, err) // CW-20260419-0019, CW-20260512-0001
+				s.persistPartialAssistantAndNotifyBroker(ctx, sessionID, assistantMsgID, agentID, fullContent.String(), providerName, agent.Slug, err) // CW-20260419-0019, CW-20260512-0001
 				return
 			}
 			provSpan.RecordError(err)
@@ -1107,19 +1107,19 @@ func (s *chatServiceImpl) generateResponse(ctx context.Context, sessionID, assis
 						ls.iteration--
 						continue
 					}
-					s.persistPartialAssistantAndNotifyBroker(ctx, sessionID, assistantMsgID, agentID, fullContent.String(), providerName, err) // CW-20260419-0019, CW-20260512-0001
+					s.persistPartialAssistantAndNotifyBroker(ctx, sessionID, assistantMsgID, agentID, fullContent.String(), providerName, agent.Slug, err) // CW-20260419-0019, CW-20260512-0001
 					return
 				}
 				msg := "Context is still too large after compaction. Use `/clear` or split the request."
 				ch <- chat.ErrorEnvelopeDelta(chat.ErrorCodeInternal, msg, map[string]interface{}{"recovery": "failed_after_retry"})
 				ch <- chat.ErrorEvent(chat.ErrorCodeInternal, msg, map[string]interface{}{"recovery": "failed_after_retry"})
-				s.persistPartialAssistantAndNotifyBroker(ctx, sessionID, assistantMsgID, agentID, fullContent.String(), providerName, err) // CW-20260419-0019, CW-20260512-0001
+				s.persistPartialAssistantAndNotifyBroker(ctx, sessionID, assistantMsgID, agentID, fullContent.String(), providerName, agent.Slug, err) // CW-20260419-0019, CW-20260512-0001
 				return
 			}
 			errDetails := map[string]interface{}{"raw": err.Error(), "model": model, "tools": len(tools)}
 			ch <- chat.ErrorEnvelopeDelta(chat.ClassifyError(err), "Provider streaming failed", errDetails)
 			ch <- chat.ErrorEvent(chat.ClassifyError(err), "Provider streaming failed", errDetails)
-			s.persistPartialAssistantAndNotifyBroker(ctx, sessionID, assistantMsgID, agentID, fullContent.String(), providerName, err) // CW-20260419-0019, CW-20260512-0001
+			s.persistPartialAssistantAndNotifyBroker(ctx, sessionID, assistantMsgID, agentID, fullContent.String(), providerName, agent.Slug, err) // CW-20260419-0019, CW-20260512-0001
 			return
 		}
 
@@ -1238,12 +1238,12 @@ func (s *chatServiceImpl) generateResponse(ctx context.Context, sessionID, assis
 					errDetails["recovery"] = "failed_after_retry"
 					ch <- chat.ErrorEnvelopeDelta(chat.ErrorCodeInternal, msg, errDetails)
 					ch <- chat.ErrorEvent(chat.ErrorCodeInternal, msg, errDetails)
-					s.persistPartialAssistantAndNotifyBroker(ctx, sessionID, assistantMsgID, agentID, fullContent.String(), providerName, fmt.Errorf("%s", evt.Error)) // CW-20260419-0019, CW-20260512-0001
+					s.persistPartialAssistantAndNotifyBroker(ctx, sessionID, assistantMsgID, agentID, fullContent.String(), providerName, agent.Slug, fmt.Errorf("%s", evt.Error)) // CW-20260419-0019, CW-20260512-0001
 					return
 				}
 				ch <- chat.ErrorEnvelopeDelta(chat.ClassifyError(fmt.Errorf("%s", evt.Error)), "Streaming error from provider", errDetails)
 				ch <- chat.ErrorEvent(chat.ClassifyError(fmt.Errorf("%s", evt.Error)), "Streaming error from provider", errDetails)
-				s.persistPartialAssistantAndNotifyBroker(ctx, sessionID, assistantMsgID, agentID, fullContent.String(), providerName, fmt.Errorf("%s", evt.Error)) // CW-20260419-0019, CW-20260512-0001
+				s.persistPartialAssistantAndNotifyBroker(ctx, sessionID, assistantMsgID, agentID, fullContent.String(), providerName, agent.Slug, fmt.Errorf("%s", evt.Error)) // CW-20260419-0019, CW-20260512-0001
 				return
 
 			case "session_id":
@@ -2985,7 +2985,7 @@ func truncateToRune(s string, max int) string {
 	}
 	// Walk back from max until we land on a rune boundary.
 	for i := max; i > 0; i-- {
-		if (s[i]&0xC0) != 0x80 { // not a UTF-8 continuation byte
+		if (s[i] & 0xC0) != 0x80 { // not a UTF-8 continuation byte
 			return strings.TrimRight(s[:i], " ")
 		}
 	}

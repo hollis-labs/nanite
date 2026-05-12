@@ -10,6 +10,7 @@ import (
 
 	agentsessions "github.com/hollis-labs/go-agent-sessions/agentsessions"
 	llmcontracts "github.com/hollis-labs/go-llm-contracts"
+	runtimeagent "github.com/hollis-labs/nanite/internal/runtime/agent"
 	"github.com/hollis-labs/nanite/internal/runtime/agent/recovery"
 	"github.com/hollis-labs/nanite/internal/safego"
 )
@@ -54,17 +55,23 @@ const (
 )
 
 // HTTP-stream meta keys threaded into the recovery broker's meta bag.
-// Read by postmortem queries against nanite_recovery_breadcrumbs; not
-// consumed by the broker's classifier (which only reads the standard
-// recovery.MetaKey* keys).
+// These are nanite-specific extras carried alongside the standard
+// recovery.MetaKey* set. The broker's classifier only consumes the
+// standard keys; these extras are used in-process for envelope
+// rendering / logging and would also be available to any future
+// classifier extension. They are NOT persisted to nanite_recovery_breadcrumbs
+// (migration 054 — class/cause/remediation/action/outcome/attempt/reason
+// only); extending the breadcrumb schema to query on source / error_class
+// / provider is a separate concern (see follow-up
+// `cw_20260512_0001_breadcrumb_meta_columns`).
 const (
 	httpStreamMetaKeySource     = "source"
 	httpStreamMetaKeyErrorClass = "error_class"
 )
 
 // httpStreamMetaSource is the canonical value for
-// httpStreamMetaKeySource. Distinguishes broker breadcrumbs originating
-// from this code path from CLI-subagent breadcrumbs (which omit source).
+// httpStreamMetaKeySource. Distinguishes broker observations originating
+// from this code path from CLI-subagent observations (which omit source).
 const httpStreamMetaSource = "http_chat_stream"
 
 // persistPartialAssistantAndNotifyBroker funnels every chat HTTP-stream
@@ -79,7 +86,14 @@ const httpStreamMetaSource = "http_chat_stream"
 //
 // providerName is the resolved chat provider name (anthropic / openai /
 // gemini-api / openrouter / etc.). Threaded into the broker meta bag so
-// postmortem queries can pivot on provider.
+// envelope rendering / logging can surface the provider.
+//
+// agentProfileSlug is the resolved agent profile slug (agent.Slug from
+// the store.AgentProfile resolved at the top of generateResponse). The
+// broker's remediation pipeline (e.g. RefreshCredentials) keys off this
+// to operate on the *right* profile — passing the agent UUID would
+// resolve nothing, and omitting the field falls through to the default
+// profile, which can refresh credentials for the wrong agent.
 //
 // The broker call runs on a safego.Go goroutine — OnSessionExit may
 // dispatch a replacement session via agent.Boot, which is too heavy to
@@ -93,7 +107,7 @@ const httpStreamMetaSource = "http_chat_stream"
 // persistPartialAssistant call. CW-20260512-0001.
 func (s *chatServiceImpl) persistPartialAssistantAndNotifyBroker(
 	ctx context.Context,
-	sessionID, assistantMsgID, agentID, content, providerName string,
+	sessionID, assistantMsgID, agentID, content, providerName, agentProfileSlug string,
 	streamErr error,
 ) {
 	// Always persist the partial-assistant row first; the broker
@@ -127,12 +141,22 @@ func (s *chatServiceImpl) persistPartialAssistantAndNotifyBroker(
 		stderrTail = streamErr.Error()
 	}
 
+	// MetaKeyMode is a canonical agent.Mode string (parseMode in the
+	// broker only understands long_lived / one_shot / resume / subagent
+	// / background and silently defaults unknown values to long_lived,
+	// which would mis-shape any DispatchRetry call). The HTTP chat path
+	// is semantically a synchronous one-shot turn — no long-lived
+	// subprocess is held across turns — so ModeOneShot is the closest
+	// canonical match. The "http_chat_stream" discriminator lives on
+	// the httpStreamMetaKeySource extra key instead of being smuggled
+	// through the Mode slot.
 	meta := map[string]any{
-		recovery.MetaKeyProvider:    providerName,
-		recovery.MetaKeyMode:        "http_chat", // distinct from "long_lived" / "one_shot" — HTTP path has no agent.Mode
-		recovery.MetaKeyStderrTail:  stderrTail,
-		httpStreamMetaKeySource:     httpStreamMetaSource,
-		httpStreamMetaKeyErrorClass: errorClass,
+		recovery.MetaKeyAgentProfile: agentProfileSlug,
+		recovery.MetaKeyProvider:     providerName,
+		recovery.MetaKeyMode:         runtimeagent.ModeOneShot.String(),
+		recovery.MetaKeyStderrTail:   stderrTail,
+		httpStreamMetaKeySource:      httpStreamMetaSource,
+		httpStreamMetaKeyErrorClass:  errorClass,
 	}
 
 	broker := s.agentDeps.Recovery
@@ -156,19 +180,35 @@ func (s *chatServiceImpl) persistPartialAssistantAndNotifyBroker(
 // breadcrumb in that case (postmortem coverage trumps a pristine
 // telemetry tape).
 //
-// Classification precedence:
+// Classification precedence (mirrors the implementation order — keep
+// in sync when adding branches):
 //
-//  1. context.DeadlineExceeded / context.Canceled  → timeout
-//  2. llmcontracts.ErrRequestExceedsRateBudget     → rate_budget
-//  3. net.Error.Timeout() == true                  → timeout
-//  4. net.*Error / url.Error / DNSError            → transport
-//  5. stderr substring "401" / "403" / "unauthorized"
-//                                                  → auth (defers cause
-//                                                    string to http_status
-//                                                    so the classifier's
-//                                                    StderrTail rule fires)
-//  6. stderr substring "5xx" / "server error"      → http_status
-//  7. default                                      → unknown
+//  1. nil error                                    → http_stream / unknown
+//  2. errors.Is(context.DeadlineExceeded|Canceled) → http_stream_timeout / timeout
+//  3. errors.Is(llmcontracts.ErrRequestExceedsRateBudget)
+//     → http_stream_rate_budget / rate_budget
+//  4. errors.As(net.Error) && Timeout()            → http_stream_timeout / timeout
+//  5. errors.As(*net.DNSError)                     → http_stream_transport / transport
+//  6. errors.As(*net.OpError)                      → http_stream_transport / transport
+//  7. errors.As(*url.Error)                        → http_stream_transport / transport
+//  8. substring "429" / "rate limit"               → http_stream_rate_budget / rate_limit
+//  9. substring "401" / "403" / "unauthorized"     → http_stream_http_status / auth
+//     (cause is http_status so the
+//     classifier's StderrTail rule
+//     fires off the threaded message)
+//  10. substring "5xx" / "server error" / "internal server error" /
+//     " 500 " / " 502 " / " 503 " / " 504 "        → http_stream_http_status / http_5xx
+//  11. substring "timeout" / "timed out"            → http_stream_timeout / timeout
+//  12. substring "connection reset" / "connection refused" /
+//     "broken pipe" / "no such host" / "eof"       → http_stream_transport / transport
+//  13. default                                      → http_stream / unknown
+//
+// NB: the 429/rate-limit substring rule (step 8) runs BEFORE the
+// auth/http_5xx substring checks — provider rate-limit error strings
+// frequently include other status digits as context (e.g. "rate
+// limited; retry-after: 5; status=429"), so the rate-limit rule must
+// win over the auth/5xx rules to avoid mis-classifying a 429 as a 401
+// or 503.
 func classifyHTTPStreamError(err error) (cause, errorClass string) {
 	if err == nil {
 		return causeHTTPStream, "unknown"

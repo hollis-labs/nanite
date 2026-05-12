@@ -24,6 +24,13 @@ import (
 	"github.com/hollis-labs/nanite/internal/runtime/agent/recovery"
 )
 
+// canonicalHTTPChatMode is the canonical agent.Mode string the
+// broker-notify helper writes into recovery.MetaKeyMode for HTTP chat
+// observations. Surfacing it as a test-side constant pins the contract
+// (parseMode must round-trip this value) instead of duplicating the
+// magic string across cases.
+var canonicalHTTPChatMode = runtimeagent.ModeOneShot.String()
+
 // recordingRecoveryHooks captures OnSessionExit invocations so tests can
 // assert the synthesized ExitError + meta bag are correctly shaped.
 // Satisfies runtimeagent.RecoveryHooks.
@@ -103,6 +110,7 @@ func TestPersistPartialAssistantAndNotifyBroker_TimeoutClass(t *testing.T) {
 		"sess-timeout", "msg-timeout", "agent-1",
 		"partial content",
 		"anthropic",
+		"claude-sonnet",
 		context.DeadlineExceeded,
 	)
 	rec.waitFor(t, 2*time.Second)
@@ -137,8 +145,11 @@ func TestPersistPartialAssistantAndNotifyBroker_TimeoutClass(t *testing.T) {
 	if got := c.meta[recovery.MetaKeyProvider]; got != "anthropic" {
 		t.Errorf("provider: got %v, want anthropic", got)
 	}
-	if got := c.meta[recovery.MetaKeyMode]; got != "http_chat" {
-		t.Errorf("mode: got %v, want http_chat", got)
+	if got := c.meta[recovery.MetaKeyMode]; got != canonicalHTTPChatMode {
+		t.Errorf("mode: got %v, want %q (canonical agent.Mode string consumed by broker.parseMode)", got, canonicalHTTPChatMode)
+	}
+	if got := c.meta[recovery.MetaKeyAgentProfile]; got != "claude-sonnet" {
+		t.Errorf("agent_profile: got %v, want claude-sonnet (broker remediation pivots on this — UUID or empty silently retargets the default profile)", got)
 	}
 }
 
@@ -162,6 +173,7 @@ func TestPersistPartialAssistantAndNotifyBroker_TransportClass(t *testing.T) {
 		"sess-transport", "msg-transport", "agent-1",
 		"",
 		"openai",
+		"gpt-4",
 		opErr,
 	)
 	rec.waitFor(t, 2*time.Second)
@@ -204,6 +216,7 @@ func TestPersistPartialAssistantAndNotifyBroker_HTTP5xxClass(t *testing.T) {
 		"sess-5xx", "msg-5xx", "agent-1",
 		"some prior delta content",
 		"anthropic",
+		"claude-sonnet",
 		streamErr,
 	)
 	rec.waitFor(t, 2*time.Second)
@@ -240,6 +253,7 @@ func TestPersistPartialAssistantAndNotifyBroker_RateBudgetClass(t *testing.T) {
 		"sess-rate", "msg-rate", "agent-1",
 		"",
 		"openrouter",
+		"openrouter-mix",
 		llmcontracts.ErrRequestExceedsRateBudget,
 	)
 	rec.waitFor(t, 2*time.Second)
@@ -280,6 +294,7 @@ func TestPersistPartialAssistantAndNotifyBroker_NoRecoveryDegradesCleanly(t *tes
 				"sess-degraded", "msg-degraded", "agent-1",
 				"content",
 				"anthropic",
+				"claude-sonnet",
 				errors.New("boom"),
 			)
 			if cs.callCount != before+1 {
@@ -327,6 +342,88 @@ func TestClassifyHTTPStreamError(t *testing.T) {
 				t.Errorf("error_class: got %q, want %q", gotClass, tc.wantErrorClass)
 			}
 		})
+	}
+}
+
+// TestPersistPartialAssistantAndNotifyBroker_StandardMetaBagFields pins
+// the PR #137 Copilot review-fix contract on the meta bag:
+//
+//   - MetaKeyAgentProfile MUST carry the agent profile slug (not the
+//     agent UUID, not empty). Broker remediations (RefreshCredentials,
+//     RepopulateSandbox, etc.) pivot on this slug — an empty value
+//     silently falls through to the default profile, and a UUID resolves
+//     nothing.
+//   - MetaKeyMode MUST be a canonical agent.Mode string (one_shot for
+//     HTTP chat). The broker's parseMode helper only understands
+//     long_lived / one_shot / resume / subagent / background and
+//     silently defaults unknown inputs to long_lived — that would
+//     mis-shape any DispatchRetry against an HTTP failure (no
+//     long-lived subprocess exists to relaunch).
+//   - The HTTP-chat discriminator lives on httpStreamMetaKeySource
+//     (source="http_chat_stream"), not on MetaKeyMode.
+func TestPersistPartialAssistantAndNotifyBroker_StandardMetaBagFields(t *testing.T) {
+	cs := &capturingStore{}
+	rec := newRecordingRecoveryHooks()
+	svc := &chatServiceImpl{
+		store: cs,
+		agentDeps: &runtimeagent.Dependencies{
+			Recovery: rec,
+		},
+	}
+
+	rec.expect(1)
+	svc.persistPartialAssistantAndNotifyBroker(
+		context.Background(),
+		"sess-meta", "msg-meta", "agent-uuid-abcdef",
+		"partial content",
+		"anthropic",
+		"claude-sonnet",
+		errors.New("read tcp: connection reset by peer"),
+	)
+	rec.waitFor(t, 2*time.Second)
+
+	calls := rec.snapshot()
+	if len(calls) != 1 {
+		t.Fatalf("expected 1 broker notify; got %d", len(calls))
+	}
+	c := calls[0]
+
+	// Profile slug, NOT UUID. Compare against the input slug so refactors
+	// to the resolver can't silently regress this.
+	if got := c.meta[recovery.MetaKeyAgentProfile]; got != "claude-sonnet" {
+		t.Errorf("MetaKeyAgentProfile: got %v, want %q (profile slug, NOT agent UUID)", got, "claude-sonnet")
+	}
+	if got := c.meta[recovery.MetaKeyAgentProfile]; got == "agent-uuid-abcdef" {
+		t.Errorf("MetaKeyAgentProfile must not carry the agent UUID (got %v) — broker remediations resolve by profile slug", got)
+	}
+
+	// Mode must round-trip through agent.Mode.String() so the broker's
+	// parseMode accepts it without falling back to ModeLongLived. We
+	// pin the value AND verify it's one of the canonical strings
+	// parseMode understands (defense in depth — if ModeOneShot.String()
+	// ever changes, the canonical-set check still flags this).
+	gotMode, _ := c.meta[recovery.MetaKeyMode].(string)
+	if gotMode != canonicalHTTPChatMode {
+		t.Errorf("MetaKeyMode: got %q, want %q", gotMode, canonicalHTTPChatMode)
+	}
+	canonicalModes := map[string]bool{
+		"long_lived": true,
+		"one_shot":   true,
+		"resume":     true,
+		"subagent":   true,
+		"background": true,
+	}
+	if !canonicalModes[gotMode] {
+		t.Errorf("MetaKeyMode %q is not a canonical agent.Mode string — broker.parseMode will silently default it to long_lived", gotMode)
+	}
+	if gotMode == "http_chat" {
+		t.Errorf("MetaKeyMode must NOT be the legacy 'http_chat' string — broker.parseMode does not recognize it")
+	}
+
+	// The http_chat_stream discriminator lives on the source extra key,
+	// not on MetaKeyMode.
+	if got := c.meta[httpStreamMetaKeySource]; got != httpStreamMetaSource {
+		t.Errorf("httpStreamMetaKeySource: got %v, want %q", got, httpStreamMetaSource)
 	}
 }
 

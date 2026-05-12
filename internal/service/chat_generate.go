@@ -2327,22 +2327,16 @@ func rebuildLegacySystemPrompt(cw *ctxpkg.ContextWindow) string {
 	return strings.Join(parts, "\n\n")
 }
 
-// slotBlocksFor projects the context package's SlotBlock onto the provider
-// package's mirror type. The two are kept separate so the provider module has
-// no dependency on the host's context package.
+// slotBlocksFor projects the context package's SlotBlock onto the
+// provider package's mirror type. Forwards b.Changed from context
+// tracking so the Anthropic adapter (internal/llm/anthropic) can
+// emit cache_control on the last unchanged slot block when its
+// budget permits. The adapter's cachePlan enforces Anthropic's
+// 4-marker cap; see internal/llm/anthropic/cache_plan.go.
 //
-// CW-20260419-0007: every SlotBlock is forwarded with Changed=true
-// regardless of the context-side tracking. go-providers v0.2.1's
-// buildSystemFromRequest emits one `cache_control: ephemeral` marker per
-// unchanged slot, but Anthropic caps total cache_control markers per
-// request at 4 — and DefaultCacheStrategy already consumes all 4 (system
-// + tools + 2 recent_message). Any unchanged slot pushes us past the cap
-// and the request fails with
-// `"A maximum of 4 blocks with cache_control may be provided. Found N"`.
-// Forcing Changed=true opts every slot block out of the cache_control
-// path, effectively disabling slot-level prompt caching until the
-// go-providers side learns to budget markers. The rest of the
-// DefaultCacheStrategy (system / tools / recent messages) still applies.
+// CW-20260419-0007 (closed): the original Changed=true workaround
+// here predated the in-tree Anthropic adapter and was made obsolete
+// when adapter-side budgeting landed alongside this commit.
 func slotBlocksFor(result *SlotAssemblyResult) []llmtypes.SlotBlock {
 	if result == nil || len(result.Blocks) == 0 {
 		return nil
@@ -2356,7 +2350,7 @@ func slotBlocksFor(result *SlotAssemblyResult) []llmtypes.SlotBlock {
 			Name:     b.SlotName,
 			Content:  b.Content,
 			CacheKey: b.CacheKey,
-			Changed:  true, // see function-level comment — CW-20260419-0007
+			Changed:  b.Changed,
 		})
 	}
 	return out

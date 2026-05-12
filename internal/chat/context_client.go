@@ -150,6 +150,13 @@ func (cb *ContextClient) AssembleContext(ctx context.Context, session *store.Ses
 // context assembly. The service layer composes these into a ContextWindow.
 // Tools content is filled by the service layer after tool selection.
 type SlotSources struct {
+	// Universal is the position-0 universal-rules slot (SP-20260512-0008
+	// W1A / CW-20260512-0104). Empty today — Sprint 2 / T2.4 wires the
+	// content. The decider always emits a decision for this slot (empty
+	// content → ActionSkip), which is dropped from the wire by
+	// ContextWindow.Assemble. The slot position is reserved in SlotOrder
+	// so the cacheable prefix stays stable when content arrives.
+	Universal        string
 	System           string                 // think-tool block + workspace identity (no agent-specific text)
 	Memory           string                 // formatted ContextBroker items where Source == "memory"
 	Agent            string                 // agent.SystemPrompt + AgentMode.PromptAddendum (legacy) + skill list
@@ -160,6 +167,10 @@ type SlotSources struct {
 	UserContext      string                 // J10 (CW-20260426-0008): user-authored session context prompt + included docs.
 	Messages         []llmtypes.ChatMessage // conversation slot messages
 	EnrichmentActive bool                   // true when Context slot was populated by the broker
+	// Intent is the resolved per-turn intent used by the broker's
+	// assembly decider. Surfaced so the service layer can pass it to
+	// contextbroker.DecideAssembly without re-running deriveIntent.
+	Intent contextbroker.Intent
 }
 
 // AssembleSlotSources builds the raw per-slot content for slot-based assembly.
@@ -232,10 +243,13 @@ func (cb *ContextClient) AssembleSlotSources(ctx context.Context, session *store
 	sessionContent := buildSessionSlotContent(session, mode, workspace)
 
 	// Memory + Context — both sourced from ContextBroker; split by item.Source.
+	// Intent is derived unconditionally so the service-layer assembly decider
+	// can use it even when ContextBroker is nil (no Fetch happens, but the
+	// intent still drives slot selection for non-broker slots).
+	intent := cb.deriveIntent(session, agent)
 	var memoryContent, contextContent string
 	enrichmentActive := false
 	if cb.ContextBroker != nil {
-		intent := cb.deriveIntent(session, agent)
 		packet, err := cb.ContextBroker.Fetch(ctx, intent)
 		if err != nil {
 			slog.Warn("broker: slot enrichment failed", "err", err)
@@ -279,6 +293,7 @@ func (cb *ContextClient) AssembleSlotSources(ctx context.Context, session *store
 	}
 
 	return &SlotSources{
+		Universal:        "", // SP-20260512-0008 W1A: position-0 reserved; Sprint 2 / T2.4 wires content.
 		System:           systemSlotContent,
 		Memory:           memoryContent,
 		Agent:            agentPrompt,
@@ -289,6 +304,7 @@ func (cb *ContextClient) AssembleSlotSources(ctx context.Context, session *store
 		UserContext:      userContextContent,
 		Messages:         chatMessages,
 		EnrichmentActive: enrichmentActive,
+		Intent:           intent,
 	}, nil
 }
 

@@ -2328,21 +2328,9 @@ func rebuildLegacySystemPrompt(cw *ctxpkg.ContextWindow) string {
 }
 
 // slotBlocksFor projects the context package's SlotBlock onto the provider
-// package's mirror type. The two are kept separate so the provider module has
-// no dependency on the host's context package.
-//
-// CW-20260419-0007: every SlotBlock is forwarded with Changed=true
-// regardless of the context-side tracking. go-providers v0.2.1's
-// buildSystemFromRequest emits one `cache_control: ephemeral` marker per
-// unchanged slot, but Anthropic caps total cache_control markers per
-// request at 4 — and DefaultCacheStrategy already consumes all 4 (system
-// + tools + 2 recent_message). Any unchanged slot pushes us past the cap
-// and the request fails with
-// `"A maximum of 4 blocks with cache_control may be provided. Found N"`.
-// Forcing Changed=true opts every slot block out of the cache_control
-// path, effectively disabling slot-level prompt caching until the
-// go-providers side learns to budget markers. The rest of the
-// DefaultCacheStrategy (system / tools / recent messages) still applies.
+// package's mirror type. Forwards b.Changed so go-providers can emit
+// cache_control markers on unchanged slots (CW-20260419-0007 workaround
+// reverted; upstream marker-cap bug fixed in go-providers >= v0.5.x).
 func slotBlocksFor(result *SlotAssemblyResult) []llmtypes.SlotBlock {
 	if result == nil || len(result.Blocks) == 0 {
 		return nil
@@ -2356,7 +2344,7 @@ func slotBlocksFor(result *SlotAssemblyResult) []llmtypes.SlotBlock {
 			Name:     b.SlotName,
 			Content:  b.Content,
 			CacheKey: b.CacheKey,
-			Changed:  true, // see function-level comment — CW-20260419-0007
+			Changed:  b.Changed,
 		})
 	}
 	return out

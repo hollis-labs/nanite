@@ -12,19 +12,23 @@ import (
 )
 
 // buildSystemBlocks renders the system portion of a request as []TextBlockParam.
-// When the request carries SlotBlocks, each block becomes its own block; the
-// last unchanged slot block carries cache_control if a "system" hint is set.
+// When the request carries SlotBlocks, each block becomes its own block. The
+// SystemPrompt block carries cache_control when plan.System is true; the
+// LAST non-empty unchanged slot block carries cache_control when
+// plan.SlotBoundary is true (a single marker, regardless of how many
+// unchanged slots exist — the slot section is cached in aggregate).
 // When there are no slots, falls back to a single block off SystemPrompt.
 //
-// Mirrors the deleted adapter's buildSystemFromRequest behavior so the wire
-// format identical between the old and new adapters.
-func (c *Client) buildSystemBlocks(in llmtypes.ChatRequest) []sdk.TextBlockParam {
+// Marker emission is gated by the per-request cachePlan rather than by
+// hint inspection directly, so Anthropic's 4-marker cap is enforced
+// centrally — see cache_plan.go.
+func (c *Client) buildSystemBlocks(in llmtypes.ChatRequest, plan cachePlan) []sdk.TextBlockParam {
 	if len(in.SlotBlocks) == 0 {
 		if in.SystemPrompt == "" {
 			return nil
 		}
 		block := sdk.TextBlockParam{Text: in.SystemPrompt}
-		if c.hasCacheHint("system") {
+		if plan.System {
 			block.CacheControl = sdk.NewCacheControlEphemeralParam()
 		}
 		return []sdk.TextBlockParam{block}
@@ -32,20 +36,25 @@ func (c *Client) buildSystemBlocks(in llmtypes.ChatRequest) []sdk.TextBlockParam
 	out := make([]sdk.TextBlockParam, 0, len(in.SlotBlocks)+1)
 	if in.SystemPrompt != "" {
 		block := sdk.TextBlockParam{Text: in.SystemPrompt}
-		if c.hasCacheHint("system") {
+		if plan.System {
 			block.CacheControl = sdk.NewCacheControlEphemeralParam()
 		}
 		out = append(out, block)
 	}
+	// Locate the index (within `out`) of the last non-empty unchanged slot
+	// so we can mark exactly that block when plan.SlotBoundary is true.
+	lastUnchangedIdx := -1
 	for _, s := range in.SlotBlocks {
 		if s.Content == "" {
 			continue
 		}
-		block := sdk.TextBlockParam{Text: s.Content}
+		out = append(out, sdk.TextBlockParam{Text: s.Content})
 		if !s.Changed {
-			block.CacheControl = sdk.NewCacheControlEphemeralParam()
+			lastUnchangedIdx = len(out) - 1
 		}
-		out = append(out, block)
+	}
+	if plan.SlotBoundary && lastUnchangedIdx >= 0 {
+		out[lastUnchangedIdx].CacheControl = sdk.NewCacheControlEphemeralParam()
 	}
 	if len(out) == 0 {
 		return nil
@@ -54,15 +63,15 @@ func (c *Client) buildSystemBlocks(in llmtypes.ChatRequest) []sdk.TextBlockParam
 }
 
 // buildTools converts internal tool definitions into the SDK's
-// []ToolUnionParam shape, applying cache_control on the last entry when a
-// "tools" hint is set. Strict pass-through preserves the
-// CW-20260420-0007 default-non-strict contract — the wrapper only sets
-// Strict=true when ToolDefinition.Strict explicitly points to true.
-func (c *Client) buildTools(tools []llmtypes.ToolDefinition) []sdk.ToolUnionParam {
+// []ToolUnionParam shape, applying cache_control on the last entry when
+// plan.Tools is true. Strict pass-through preserves the CW-20260420-0007
+// default-non-strict contract — the wrapper only sets Strict=true when
+// ToolDefinition.Strict explicitly points to true.
+func (c *Client) buildTools(tools []llmtypes.ToolDefinition, plan cachePlan) []sdk.ToolUnionParam {
 	if len(tools) == 0 {
 		return nil
 	}
-	shouldCache := c.hasCacheHint("tools")
+	shouldCache := plan.Tools
 	out := make([]sdk.ToolUnionParam, len(tools))
 	for i, t := range tools {
 		toolParam := sdk.ToolParam{
@@ -86,13 +95,13 @@ func (c *Client) buildTools(tools []llmtypes.ToolDefinition) []sdk.ToolUnionPara
 	return out
 }
 
-// buildMessages translates internal ChatMessages into MessageParam[]. Trailing
-// user messages get cache_control on their last non-thinking content block
-// when "recent_message" hints are configured (count == number of "recent_message"
-// hints). Ordering follows the same recipe the deleted adapter used:
-// hint count 2 means the last two user messages get cache_control.
-func (c *Client) buildMessages(messages []llmtypes.ChatMessage) []sdk.MessageParam {
-	cacheCount := c.recentMessageCacheCount()
+// buildMessages translates internal ChatMessages into MessageParam[]. The
+// last plan.RecentMessages trailing user messages get cache_control on their
+// last non-thinking content block. plan.RecentMessages is the
+// budget-enforced count (may be less than the raw "recent_message" hint
+// count when the per-request 4-marker cap kicks in — see cache_plan.go).
+func (c *Client) buildMessages(messages []llmtypes.ChatMessage, plan cachePlan) []sdk.MessageParam {
+	cacheCount := plan.RecentMessages
 
 	// Identify the indices of the trailing user messages (last N user messages
 	// where N=cacheCount). Walk backwards counting user messages.
@@ -216,15 +225,16 @@ func contentBlocksFromMessage(m llmtypes.ChatMessage, applyCache bool) []sdk.Con
 // applying cache_control + thinking_config when configured. Used by both
 // the streaming and non-streaming paths so request shape stays consistent.
 func (c *Client) buildMessageParams(in llmtypes.ChatRequest, model string, interleavedThinking bool, reasoningCfg llmcontracts.ReasoningConfig) sdk.MessageNewParams {
+	plan := c.planCacheMarkers(in)
 	params := sdk.MessageNewParams{
 		Model:     model,
 		MaxTokens: resolveMaxTokens(in),
-		Messages:  c.buildMessages(in.Messages),
+		Messages:  c.buildMessages(in.Messages, plan),
 	}
-	if sys := c.buildSystemBlocks(in); len(sys) > 0 {
+	if sys := c.buildSystemBlocks(in, plan); len(sys) > 0 {
 		params.System = sys
 	}
-	if tools := c.buildTools(in.Tools); len(tools) > 0 {
+	if tools := c.buildTools(in.Tools, plan); len(tools) > 0 {
 		params.Tools = tools
 	}
 	if interleavedThinking && reasoningCfg.BudgetTokens > 0 {

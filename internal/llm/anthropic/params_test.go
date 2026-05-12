@@ -11,10 +11,10 @@ import (
 
 // TestBuildSystemBlocks_NoSlotsNoCache asserts the simple case: a single
 // system prompt becomes one TextBlockParam without cache_control when the
-// "system" hint is absent.
+// plan has System=false.
 func TestBuildSystemBlocks_NoSlotsNoCache(t *testing.T) {
 	c := New()
-	out := c.buildSystemBlocks(llmtypes.ChatRequest{SystemPrompt: "you are helpful"})
+	out := c.buildSystemBlocks(llmtypes.ChatRequest{SystemPrompt: "you are helpful"}, cachePlan{})
 	if len(out) != 1 {
 		t.Fatalf("len(out)=%d want 1", len(out))
 	}
@@ -24,14 +24,15 @@ func TestBuildSystemBlocks_NoSlotsNoCache(t *testing.T) {
 	// Marshal and confirm no cache_control marker.
 	data, _ := json.Marshal(out[0])
 	if strings.Contains(string(data), "cache_control") {
-		t.Fatalf("did not expect cache_control without hint, got: %s", data)
+		t.Fatalf("did not expect cache_control without plan.System, got: %s", data)
 	}
 }
 
 func TestBuildSystemBlocks_WithSystemHint(t *testing.T) {
 	c := New()
 	c.SetCacheHints([]llmcontracts.CacheHint{{Position: "system"}})
-	out := c.buildSystemBlocks(llmtypes.ChatRequest{SystemPrompt: "you are helpful"})
+	req := llmtypes.ChatRequest{SystemPrompt: "you are helpful"}
+	out := c.buildSystemBlocks(req, c.planCacheMarkers(req))
 	if len(out) != 1 {
 		t.Fatalf("len(out)=%d want 1", len(out))
 	}
@@ -46,7 +47,7 @@ func TestBuildSystemBlocks_WithSystemHint(t *testing.T) {
 
 func TestBuildSystemBlocks_EmptyReturnsNil(t *testing.T) {
 	c := New()
-	out := c.buildSystemBlocks(llmtypes.ChatRequest{})
+	out := c.buildSystemBlocks(llmtypes.ChatRequest{}, cachePlan{})
 	if out != nil {
 		t.Fatalf("expected nil for empty system + no slots, got %v", out)
 	}
@@ -54,32 +55,132 @@ func TestBuildSystemBlocks_EmptyReturnsNil(t *testing.T) {
 
 func TestBuildSystemBlocks_SlotBlocksUnchangedGetCache(t *testing.T) {
 	c := New()
-	out := c.buildSystemBlocks(llmtypes.ChatRequest{
+	// Need the "system" hint set so plan.SlotBoundary is eligible
+	// (slot-boundary is mutually gated by plan.System per cachePlan).
+	c.SetCacheHints([]llmcontracts.CacheHint{{Position: "system"}})
+	req := llmtypes.ChatRequest{
 		SystemPrompt: "system base",
 		SlotBlocks: []llmtypes.SlotBlock{
 			{Name: "stable", Content: "stable content", Changed: false},
 			{Name: "volatile", Content: "volatile content", Changed: true},
 		},
-	})
+	}
+	out := c.buildSystemBlocks(req, c.planCacheMarkers(req))
 	if len(out) != 3 {
 		t.Fatalf("expected 3 blocks (base + 2 slots), got %d", len(out))
 	}
-	// The base ("system base") has no cache hint set, so no marker.
-	// The unchanged slot (Changed=false) gets cache_control.
+	// Layout: [base, stable, volatile].
+	// The base block carries cache_control (plan.System=true).
+	// The unchanged slot ("stable") gets the slot-boundary marker (it's
+	// the LAST non-empty unchanged slot in this request).
 	// The volatile slot (Changed=true) does NOT.
 	stable, _ := json.Marshal(out[1])
 	volatile, _ := json.Marshal(out[2])
 	if !strings.Contains(string(stable), "cache_control") {
-		t.Fatalf("unchanged slot should have cache_control, got: %s", stable)
+		t.Fatalf("last unchanged slot should have cache_control, got: %s", stable)
 	}
 	if strings.Contains(string(volatile), "cache_control") {
 		t.Fatalf("changed slot should NOT have cache_control, got: %s", volatile)
 	}
 }
 
+// TestBuildSystemBlocks_MarksOnlyLastUnchangedSlot asserts that when
+// plan.SlotBoundary is true and multiple unchanged slots exist, only the
+// LAST unchanged slot block carries cache_control. Earlier unchanged
+// blocks stay unmarked — the slot section is cached in aggregate via a
+// single boundary marker, not per-slot.
+func TestBuildSystemBlocks_MarksOnlyLastUnchangedSlot(t *testing.T) {
+	c := New()
+	req := llmtypes.ChatRequest{
+		SystemPrompt: "base",
+		SlotBlocks: []llmtypes.SlotBlock{
+			{Name: "a", Content: "a-chgd", Changed: true},
+			{Name: "b", Content: "b-unchgd", Changed: false},
+			{Name: "c", Content: "c-unchgd", Changed: false},
+			{Name: "d", Content: "d-chgd", Changed: true},
+			{Name: "e", Content: "e-unchgd", Changed: false},
+		},
+	}
+	plan := cachePlan{SlotBoundary: true}
+	out := c.buildSystemBlocks(req, plan)
+	// 1 system + 5 slot blocks = 6.
+	if len(out) != 6 {
+		t.Fatalf("len(out)=%d want 6", len(out))
+	}
+	// Check each slot block (indices 1..5). Only index 5 (the LAST
+	// unchanged block "e") should carry cache_control.
+	for i := 1; i <= 5; i++ {
+		data, _ := json.Marshal(out[i])
+		hasMarker := strings.Contains(string(data), "cache_control")
+		want := i == 5
+		if hasMarker != want {
+			t.Errorf("block %d cache_control=%v want %v: %s", i, hasMarker, want, data)
+		}
+	}
+}
+
+// TestBuildSystemBlocks_NoSlotMarkerWhenPlanFalse asserts that with
+// plan.SlotBoundary=false, no slot gets a marker regardless of Changed.
+func TestBuildSystemBlocks_NoSlotMarkerWhenPlanFalse(t *testing.T) {
+	c := New()
+	req := llmtypes.ChatRequest{
+		SystemPrompt: "base",
+		SlotBlocks: []llmtypes.SlotBlock{
+			{Name: "a", Content: "a", Changed: false},
+			{Name: "b", Content: "b", Changed: false},
+		},
+	}
+	out := c.buildSystemBlocks(req, cachePlan{})
+	if len(out) != 3 {
+		t.Fatalf("len(out)=%d want 3", len(out))
+	}
+	for i, blk := range out {
+		data, _ := json.Marshal(blk)
+		if strings.Contains(string(data), "cache_control") {
+			t.Errorf("block %d unexpected cache_control with plan={}: %s", i, data)
+		}
+	}
+}
+
+// TestBuildMessages_HonorsReducedRecentMessageCount asserts that the
+// builder uses plan.RecentMessages (the budget-enforced count) rather than
+// the raw hint count. Set 3 recent_message hints on the client but pass a
+// plan with RecentMessages=1, and only the LAST user message should be
+// marked.
+func TestBuildMessages_HonorsReducedRecentMessageCount(t *testing.T) {
+	c := New()
+	c.SetCacheHints([]llmcontracts.CacheHint{
+		{Position: "recent_message", Index: 0},
+		{Position: "recent_message", Index: 1},
+		{Position: "recent_message", Index: 2},
+	})
+	msgs := []llmtypes.ChatMessage{
+		{Role: "user", Content: "first"},
+		{Role: "user", Content: "second"},
+		{Role: "user", Content: "third"},
+	}
+	plan := cachePlan{RecentMessages: 1}
+	out := c.buildMessages(msgs, plan)
+	if len(out) != 3 {
+		t.Fatalf("len(out)=%d want 3", len(out))
+	}
+	first, _ := json.Marshal(out[0])
+	second, _ := json.Marshal(out[1])
+	third, _ := json.Marshal(out[2])
+	if strings.Contains(string(first), "cache_control") {
+		t.Errorf("first user msg unexpectedly cached: %s", first)
+	}
+	if strings.Contains(string(second), "cache_control") {
+		t.Errorf("second user msg unexpectedly cached: %s", second)
+	}
+	if !strings.Contains(string(third), "cache_control") {
+		t.Errorf("third user msg missing cache_control: %s", third)
+	}
+}
+
 func TestBuildTools_EmptyReturnsNil(t *testing.T) {
 	c := New()
-	out := c.buildTools(nil)
+	out := c.buildTools(nil, cachePlan{})
 	if out != nil {
 		t.Fatalf("expected nil for empty tools, got %v", out)
 	}
@@ -91,7 +192,7 @@ func TestBuildTools_NoCacheHint(t *testing.T) {
 		{Name: "t1", Description: "first", InputSchema: map[string]any{"type": "object"}},
 		{Name: "t2", Description: "second", InputSchema: map[string]any{"type": "object"}},
 	}
-	out := c.buildTools(tools)
+	out := c.buildTools(tools, cachePlan{})
 	if len(out) != 2 {
 		t.Fatalf("len(out)=%d want 2", len(out))
 	}
@@ -110,7 +211,7 @@ func TestBuildTools_WithCacheHintMarksLast(t *testing.T) {
 		{Name: "t1", Description: "first", InputSchema: map[string]any{"type": "object"}},
 		{Name: "t2", Description: "second", InputSchema: map[string]any{"type": "object"}},
 	}
-	out := c.buildTools(tools)
+	out := c.buildTools(tools, c.planCacheMarkers(llmtypes.ChatRequest{}))
 	if len(out) != 2 {
 		t.Fatalf("len(out)=%d want 2", len(out))
 	}
@@ -131,7 +232,7 @@ func TestBuildTools_StrictPassThrough(t *testing.T) {
 		{Name: "t1", Description: "always validated", InputSchema: map[string]any{}, Strict: &strictTrue},
 		{Name: "t2", Description: "default mode", InputSchema: map[string]any{}},
 	}
-	out := c.buildTools(tools)
+	out := c.buildTools(tools, cachePlan{})
 	first, _ := json.Marshal(out[0])
 	second, _ := json.Marshal(out[1])
 	if !strings.Contains(string(first), `"strict":true`) {
@@ -155,7 +256,7 @@ func TestBuildMessages_RecentMessageCacheCount(t *testing.T) {
 		{Role: "assistant", Content: "answer2"},
 		{Role: "user", Content: "third"},
 	}
-	out := c.buildMessages(msgs)
+	out := c.buildMessages(msgs, c.planCacheMarkers(llmtypes.ChatRequest{}))
 	if len(out) != 5 {
 		t.Fatalf("len(out)=%d want 5", len(out))
 	}
@@ -192,7 +293,7 @@ func TestBuildMessages_ToolUseAndResultRoundtrip(t *testing.T) {
 			},
 		},
 	}
-	out := c.buildMessages(msgs)
+	out := c.buildMessages(msgs, cachePlan{})
 	if len(out) != 2 {
 		t.Fatalf("len(out)=%d want 2", len(out))
 	}
@@ -224,7 +325,7 @@ func TestBuildMessages_ThinkingBlocksRequireSignature(t *testing.T) {
 			},
 		},
 	}
-	out := c.buildMessages(msgs)
+	out := c.buildMessages(msgs, cachePlan{})
 	if len(out) != 1 {
 		t.Fatalf("len(out)=%d want 1", len(out))
 	}

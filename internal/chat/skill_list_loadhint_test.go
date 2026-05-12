@@ -1,6 +1,7 @@
 package chat
 
 import (
+	"context"
 	"strings"
 	"testing"
 
@@ -22,7 +23,7 @@ func TestBuildSkillListForSession_LoadHintWithZeroAssigned(t *testing.T) {
 	mustCreateSkill(t, s, &store.Skill{Name: "Catalog C", Slug: "cat-c", Description: "third", ToolBindings: `[]`, ModeIDs: `[]`})
 	// No assignments — rendered=0, catalog=3, discoverable=3.
 
-	got := buildSkillListForSession(s, agent.ID, "")
+	got := buildSkillListForSession(context.Background(), s, agent.ID, "")
 	if !strings.Contains(got, loadHintMarker) {
 		t.Errorf("expected LoadHint when zero assigned + non-empty catalog, got: %q", got)
 	}
@@ -46,7 +47,7 @@ func TestBuildSkillListForSession_LoadHintWhenCatalogHasMore(t *testing.T) {
 	mustAssignSkill(t, s, agent.ID, b.ID)
 	// rendered=2, catalog=5, discoverable=3.
 
-	got := buildSkillListForSession(s, agent.ID, "")
+	got := buildSkillListForSession(context.Background(), s, agent.ID, "")
 	if !strings.Contains(got, "Assigned-1") || !strings.Contains(got, "Assigned-2") {
 		t.Errorf("essentials missing from rendered list: %q", got)
 	}
@@ -67,7 +68,7 @@ func TestBuildSkillListForSession_NoLoadHintWhenCatalogExhausted(t *testing.T) {
 	mustAssignSkill(t, s, agent.ID, b.ID)
 	// rendered=2, catalog=2, discoverable=0 → no hint.
 
-	got := buildSkillListForSession(s, agent.ID, "")
+	got := buildSkillListForSession(context.Background(), s, agent.ID, "")
 	if strings.Contains(got, loadHintMarker) {
 		t.Errorf("LoadHint should not render when catalog == rendered, got: %q", got)
 	}
@@ -86,7 +87,7 @@ func TestBuildSkillListForSession_EssentialCapEnforced(t *testing.T) {
 		mustAssignSkill(t, s, agent.ID, sk.ID)
 	}
 
-	got := buildSkillListForSession(s, agent.ID, "")
+	got := buildSkillListForSession(context.Background(), s, agent.ID, "")
 
 	// First SkillEssentialCap names must be present (sk-000, sk-001, …).
 	for i := 0; i < SkillEssentialCap; i++ {
@@ -112,7 +113,7 @@ func TestBuildSkillListForSession_LoadHintTokenBudget(t *testing.T) {
 	mustCreateSkill(t, s, &store.Skill{Name: "Catalog-1", Slug: "c-1", Description: "x", ToolBindings: `[]`, ModeIDs: `[]`})
 	// rendered=0, catalog=1, discoverable=1.
 
-	got := buildSkillListForSession(s, agent.ID, "")
+	got := buildSkillListForSession(context.Background(), s, agent.ID, "")
 	if !strings.Contains(got, loadHintMarker) {
 		t.Fatalf("LoadHint missing: %q", got)
 	}
@@ -126,7 +127,7 @@ func TestBuildSkillListForSession_LoadHintReferencesRealTools(t *testing.T) {
 	agent := mustCreateAgent(t, s, "agent-real-tools")
 	mustCreateSkill(t, s, &store.Skill{Name: "Catalog-X", Slug: "c-x", Description: "x", ToolBindings: `[]`, ModeIDs: `[]`})
 
-	got := buildSkillListForSession(s, agent.ID, "")
+	got := buildSkillListForSession(context.Background(), s, agent.ID, "")
 	for _, tool := range []string{"skill_list", "tool_list"} {
 		if !strings.Contains(got, tool) {
 			t.Errorf("LoadHint must reference %q tool, got: %q", tool, got)

@@ -349,8 +349,8 @@ const SkillEssentialCap = skillbroker.MaxSelectedSkills
 // (skill_list, tool_list) and is framed as invitation, not warning —
 // the agent should feel the catalog has every skill it needs and only
 // carries what it currently uses.
-func buildSkillListForSession(s *store.Store, agentID, sessionID string) string {
-	return buildSkillListForSessionWithIntent(s, agentID, sessionID, contextbroker.Intent{}, skillbroker.AgentIdentity{ID: agentID})
+func buildSkillListForSession(ctx context.Context, s *store.Store, agentID, sessionID string) string {
+	return buildSkillListForSessionWithIntent(ctx, s, agentID, sessionID, contextbroker.Intent{}, skillbroker.AgentIdentity{ID: agentID})
 }
 
 // buildSkillListForSessionWithIntent is the broker-aware variant. The
@@ -364,7 +364,7 @@ func buildSkillListForSession(s *store.Store, agentID, sessionID string) string 
 //
 // SP-20260512-0008 W2B (CW-20260512-0106). Acceptance: same agent +
 // different intent → different ranked subset.
-func buildSkillListForSessionWithIntent(s *store.Store, agentID, sessionID string, intent contextbroker.Intent, identity skillbroker.AgentIdentity) string {
+func buildSkillListForSessionWithIntent(ctx context.Context, s *store.Store, agentID, sessionID string, intent contextbroker.Intent, identity skillbroker.AgentIdentity) string {
 	skills, err := s.ListAgentSkills(agentID)
 	if err != nil {
 		slog.Warn("chat: failed to load agent skills", "err", err)
@@ -376,7 +376,7 @@ func buildSkillListForSessionWithIntent(s *store.Store, agentID, sessionID strin
 	// reach the broker, so they cannot leak into the rendered list.
 	candidates := filterAgentSkillsByMode(s, skills, sessionID)
 
-	rendered := skillbroker.SelectSkills(context.Background(), intent, identity, candidates, skillbroker.Options{})
+	rendered := skillbroker.SelectSkills(ctx, intent, identity, candidates, skillbroker.Options{})
 
 	var sb strings.Builder
 	for _, sk := range rendered {

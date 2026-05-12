@@ -158,9 +158,9 @@ func SelectSkillsScored(_ context.Context, intent contextbroker.Intent, agent Ag
 	if len(candidates) == 0 {
 		return nil
 	}
-	cap := opts.MaxSkills
-	if cap <= 0 {
-		cap = MaxSelectedSkills
+	limit := opts.MaxSkills
+	if limit <= 0 {
+		limit = MaxSelectedSkills
 	}
 
 	keywordSet := buildKeywordSet(intent.Keywords)
@@ -272,8 +272,8 @@ func SelectSkillsScored(_ context.Context, intent contextbroker.Intent, agent Ag
 		return scored[i].Skill.Name < scored[j].Skill.Name
 	})
 
-	if len(scored) > cap {
-		scored = scored[:cap]
+	if len(scored) > limit {
+		scored = scored[:limit]
 	}
 	return scored
 }

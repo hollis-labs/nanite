@@ -1,6 +1,7 @@
 package chat
 
 import (
+	"context"
 	"strings"
 	"testing"
 
@@ -18,23 +19,37 @@ import (
 
 // TestBuildSkillListForSessionWithIntent_RankedSubsetNotFullRegistry is
 // the wire test for "broker returns subset, not full registry". The agent
-// has N assigned skills; with a small max cap configured via the broker
-// default, the rendered list shows the top-ranked subset.
+// has more than skillbroker.MaxSelectedSkills assigned; the rendered list
+// must (a) cap at MaxSelectedSkills, (b) include intent-matched skills,
+// and (c) omit the unrelated overflow skills entirely.
 func TestBuildSkillListForSessionWithIntent_RankedSubsetNotFullRegistry(t *testing.T) {
 	s := newTestStoreForChat(t)
 	agent := mustCreateAgent(t, s, "wire-rs-agent")
 
-	// Create 6 skills, assign all to the agent. With a cap of 3, only
-	// the top-ranked 3 should render.
-	skills := []*store.Skill{
-		mustCreateSkill(t, s, &store.Skill{Name: "Alpha", Slug: "alpha", Description: "general purpose A", ToolBindings: `[]`, ModeIDs: `[]`, Source: "builtin"}),
-		mustCreateSkill(t, s, &store.Skill{Name: "Beta", Slug: "beta", Description: "general purpose B", ToolBindings: `[]`, ModeIDs: `[]`, Source: "builtin"}),
-		mustCreateSkill(t, s, &store.Skill{Name: "Research Codebase", Slug: "research-codebase", Description: "research the codebase architecture", ToolBindings: `[]`, ModeIDs: `[]`, Source: "builtin"}),
-		mustCreateSkill(t, s, &store.Skill{Name: "Plan Feature", Slug: "plan-feature", Description: "plan a new feature", ToolBindings: `[]`, ModeIDs: `[]`, Source: "builtin"}),
-		mustCreateSkill(t, s, &store.Skill{Name: "Debug Issue", Slug: "debug-issue", Description: "debug a runtime error", ToolBindings: `[]`, ModeIDs: `[]`, Source: "builtin"}),
-		mustCreateSkill(t, s, &store.Skill{Name: "Write Tests", Slug: "write-tests", Description: "write a unit test", ToolBindings: `[]`, ModeIDs: `[]`, Source: "builtin"}),
-	}
-	for _, sk := range skills {
+	// Create MaxSelectedSkills+overflow assigned skills. The few named
+	// intent-matchers below must rank above the generic filler so the
+	// filler tail gets trimmed by the broker's cap.
+	overflowExtra := 6
+	totalFiller := skillbroker.MaxSelectedSkills + overflowExtra
+
+	// Named intent-matchers — these score above any generic filler.
+	intentMatch := mustCreateSkill(t, s, &store.Skill{Name: "Debug Issue", Slug: "debug-issue", Description: "debug a runtime error", ToolBindings: `[]`, ModeIDs: `[]`, Source: "builtin"})
+	mustAssignSkill(t, s, agent.ID, intentMatch.ID)
+
+	// Filler with stable, sortable names. Names use a leading "ZZZZ-" prefix
+	// so they sort AFTER "Debug Issue" alphabetically — the broker tiebreaks
+	// on alphabetical when scores tie, and we want a deterministic overflow
+	// tail. With the intent matcher pinned in early ranks, filler IDs
+	// MaxSelectedSkills..end will land in the overflow tail and must not
+	// appear in the rendered output.
+	fillerNames := make([]string, totalFiller)
+	for i := 0; i < totalFiller; i++ {
+		// "ZZZZ-001", "ZZZZ-002", ... — width-stable for alpha sort.
+		name := nameForFillerIdx(i)
+		fillerNames[i] = name
+		sk := mustCreateSkill(t, s, &store.Skill{
+			Name: name, Slug: name, Description: "filler skill", ToolBindings: `[]`, ModeIDs: `[]`, Source: "builtin",
+		})
 		mustAssignSkill(t, s, agent.ID, sk.ID)
 	}
 
@@ -45,33 +60,64 @@ func TestBuildSkillListForSessionWithIntent_RankedSubsetNotFullRegistry(t *testi
 	}
 	identity := skillbroker.AgentIdentity{ID: agent.ID, Slug: agent.Slug}
 
-	// Cap via the package-level constant indirectly — call the broker
-	// directly here so we can control the cap. The actual chat helper
-	// uses the default cap (MaxSelectedSkills = 25), which we'd need
-	// 26 skills to exercise. The wire test instead asserts on the
-	// CONTENT of what the chat helper returns under a constraint where
-	// only some skills match the intent.
-
-	got := buildSkillListForSessionWithIntent(s, agent.ID, "", intent, identity)
+	got := buildSkillListForSessionWithIntent(context.Background(), s, agent.ID, "", intent, identity)
 	if got == "" {
 		t.Fatalf("rendered list should be non-empty")
 	}
 
-	// "Debug Issue" should appear and rank above the generic Alpha/Beta.
+	// "Debug Issue" must render (intent matcher).
 	if !strings.Contains(got, "Debug Issue") {
 		t.Errorf("debug intent should include Debug Issue skill, got: %q", got)
 	}
 
-	// All assigned essentials are present (since count < cap), but the
-	// ORDER should put debug-issue ahead of alpha — verify by index.
-	idxDebug := strings.Index(got, "Debug Issue")
-	idxAlpha := strings.Index(got, "Alpha")
-	if idxDebug == -1 || idxAlpha == -1 {
-		t.Fatalf("both Debug Issue and Alpha should render: %q", got)
+	// Cap enforcement: count "- " rendered lines. The renderer emits one
+	// "- Name: ..." line per selected skill, plus an additional LoadHint
+	// block at the tail (not prefixed with "- "). Selected-skill lines
+	// must equal exactly MaxSelectedSkills.
+	renderedLines := 0
+	for _, line := range strings.Split(got, "\n") {
+		if strings.HasPrefix(line, "- ") {
+			renderedLines++
+		}
 	}
-	if idxDebug >= idxAlpha {
-		t.Errorf("debug-matched skill should rank above generic Alpha; got debug-issue at %d, alpha at %d", idxDebug, idxAlpha)
+	if renderedLines != skillbroker.MaxSelectedSkills {
+		t.Errorf("expected exactly %d rendered skill lines (broker cap), got %d; render:\n%s",
+			skillbroker.MaxSelectedSkills, renderedLines, got)
 	}
+
+	// Overflow filler names (last `overflowExtra` entries by alpha order)
+	// must be absent from the rendered output. Their slot in the inline
+	// list is reserved for higher-ranked skills (Debug Issue + the
+	// MaxSelectedSkills-1 alphabetically-earliest filler names).
+	overflowStart := totalFiller - overflowExtra
+	for i := overflowStart; i < totalFiller; i++ {
+		if strings.Contains(got, fillerNames[i]+":") {
+			t.Errorf("overflow filler %q should be trimmed by cap, but appeared in render:\n%s",
+				fillerNames[i], got)
+		}
+	}
+
+	// LoadHint must surface the trimmed-overflow count so the agent knows
+	// the catalog has more available. With 1 named intent-matcher and
+	// MaxSelectedSkills-1 filler names rendered, the LoadHint count is
+	// the remaining filler tail: overflowExtra+1 (because one filler that
+	// would have rendered now gets bumped by the intent matcher).
+	if !strings.Contains(got, "additional skills are available") {
+		t.Errorf("LoadHint must surface trimmed-overflow count, got: %s", got)
+	}
+}
+
+// nameForFillerIdx returns a stable, alphabetically-sortable filler skill
+// name. The "ZZZZ-" prefix ensures filler names sort AFTER any real intent
+// matcher (e.g. "Debug Issue"), and the zero-padded suffix preserves a
+// deterministic alpha order among filler entries — critical for asserting
+// which tail entries get trimmed by the broker's cap.
+func nameForFillerIdx(i int) string {
+	const a = '0'
+	hundreds := byte(a + (i/100)%10)
+	tens := byte(a + (i/10)%10)
+	ones := byte(a + i%10)
+	return "ZZZZ-" + string([]byte{hundreds, tens, ones})
 }
 
 // TestBuildSkillListForSessionWithIntent_SameAgentDifferentIntents is the
@@ -102,8 +148,8 @@ func TestBuildSkillListForSessionWithIntent_SameAgentDifferentIntents(t *testing
 		QueryText: "plan the next feature",
 	}
 
-	gotDebug := buildSkillListForSessionWithIntent(s, agent.ID, "", intentDebug, identity)
-	gotPlan := buildSkillListForSessionWithIntent(s, agent.ID, "", intentPlan, identity)
+	gotDebug := buildSkillListForSessionWithIntent(context.Background(), s, agent.ID, "", intentDebug, identity)
+	gotPlan := buildSkillListForSessionWithIntent(context.Background(), s, agent.ID, "", intentPlan, identity)
 
 	// The FIRST rendered skill should be different across the two intents.
 	firstDebug := firstSkillLine(gotDebug)
@@ -156,7 +202,7 @@ func TestBuildSkillListForSessionWithIntent_AgentTagBiasesSelection(t *testing.T
 		t.Fatalf("AgentIdentityFromProfile should parse Tags: got %v", identity.Tags)
 	}
 
-	got := buildSkillListForSessionWithIntent(s, agent.ID, "", contextbroker.Intent{}, identity)
+	got := buildSkillListForSessionWithIntent(context.Background(), s, agent.ID, "", contextbroker.Intent{}, identity)
 	if !strings.Contains(got, "Planning Helpers") {
 		t.Fatalf("Planning Helpers skill should render: %q", got)
 	}
@@ -182,7 +228,7 @@ func TestBuildSkillListForSession_BackCompatNoIntent(t *testing.T) {
 	mustAssignSkill(t, s, agent.ID, mustCreateSkill(t, s, &store.Skill{Name: "Alpha", Slug: "a", Description: "x", ToolBindings: `[]`, ModeIDs: `[]`, Source: "user"}).ID)
 	mustAssignSkill(t, s, agent.ID, mustCreateSkill(t, s, &store.Skill{Name: "Beta", Slug: "b", Description: "x", ToolBindings: `[]`, ModeIDs: `[]`, Source: "builtin"}).ID)
 
-	got := buildSkillListForSession(s, agent.ID, "")
+	got := buildSkillListForSession(context.Background(), s, agent.ID, "")
 	// All three should appear (3 < cap).
 	for _, name := range []string{"Alpha", "Beta", "Zeta"} {
 		if !strings.Contains(got, name) {

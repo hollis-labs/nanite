@@ -2327,10 +2327,16 @@ func rebuildLegacySystemPrompt(cw *ctxpkg.ContextWindow) string {
 	return strings.Join(parts, "\n\n")
 }
 
-// slotBlocksFor projects the context package's SlotBlock onto the provider
-// package's mirror type. Forwards b.Changed so go-providers can emit
-// cache_control markers on unchanged slots (CW-20260419-0007 workaround
-// reverted; upstream marker-cap bug fixed in go-providers >= v0.5.x).
+// slotBlocksFor projects the context package's SlotBlock onto the
+// provider package's mirror type. Forwards b.Changed from context
+// tracking so the Anthropic adapter (internal/llm/anthropic) can
+// emit cache_control on the last unchanged slot block when its
+// budget permits. The adapter's cachePlan enforces Anthropic's
+// 4-marker cap; see internal/llm/anthropic/cache_plan.go.
+//
+// CW-20260419-0007 (closed): the original Changed=true workaround
+// here predated the in-tree Anthropic adapter and was made obsolete
+// when adapter-side budgeting landed alongside this commit.
 func slotBlocksFor(result *SlotAssemblyResult) []llmtypes.SlotBlock {
 	if result == nil || len(result.Blocks) == 0 {
 		return nil

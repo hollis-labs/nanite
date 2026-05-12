@@ -11,6 +11,7 @@ import (
 
 	llmtypes "github.com/hollis-labs/go-llm-types"
 	"github.com/hollis-labs/nanite/internal/chat"
+	"github.com/hollis-labs/nanite/internal/contextbroker"
 	ctxpkg "github.com/hollis-labs/nanite/internal/context"
 	"github.com/hollis-labs/nanite/internal/store"
 	"github.com/hollis-labs/nanite/internal/tool/intent"
@@ -59,6 +60,12 @@ type SlotAssemblyResult struct {
 	// ToolCache describes this turn's tool-slot outcome. Nil when the S3b
 	// tool-cache pipeline is inactive (deps missing or setting disabled).
 	ToolCache *ToolCacheOutcome
+	// Plan is the Context Broker's per-turn assembly plan: ordered slot
+	// decisions (ship/skip/pointer) plus a stash of unshipped slot
+	// content. SP-20260512-0008 W1A (CW-20260512-0104). Always populated;
+	// callers can introspect for telemetry or use plan.Stash to recover
+	// content the broker decided not to ship this turn.
+	Plan contextbroker.AssemblyPlan
 }
 
 // HydrationState is the tool slot's content mode for a turn.
@@ -189,19 +196,10 @@ func (s *contextServiceImpl) AssembleSlots(ctx context.Context, session *store.S
 		return nil, err
 	}
 
-	cw := ctxpkg.NewContextWindow(providerWindowSize, s.estimator)
-
-	cw.SetContent(ctxpkg.SlotSystem, sources.System)
-	cw.SetContent(ctxpkg.SlotMemory, sources.Memory)
-	cw.SetContent(ctxpkg.SlotAgent, sources.Agent)
-	// B1 (CW-20260428-0009): SlotMode rides between SlotAgent and SlotRules.
-	cw.SetContent(ctxpkg.SlotMode, sources.Mode)
-	cw.SetContent(ctxpkg.SlotRules, sources.Rules)
-
-	// Tools slot: either S3b's classifier-driven pointer/hydrated content or
-	// the S3a "always full" serialization. G-HOT-SWAP-DEAD lazy hint is
-	// appended here so the agent sees the inline (essential) surface plus
-	// a pointer at the lazy remainder.
+	// Tools slot content is built here (not in AssembleSlotSources) because
+	// the classifier needs the resolved tool definitions and the messages.
+	// G-HOT-SWAP-DEAD lazy hint is appended so the agent sees the inline
+	// (essential) surface plus a pointer at the lazy remainder.
 	toolsContent, outcome := s.buildToolsSlot(ctx, session, tools, sources.Messages)
 	if toolsLazyHint != "" {
 		if toolsContent != "" {
@@ -210,13 +208,44 @@ func (s *contextServiceImpl) AssembleSlots(ctx context.Context, session *store.S
 			toolsContent = toolsLazyHint
 		}
 	}
-	cw.SetContent(ctxpkg.SlotTools, toolsContent)
 
-	cw.SetContent(ctxpkg.SlotSession, sources.Session)
-	cw.SetContent(ctxpkg.SlotContext, sources.Context)
-	// J10 (CW-20260426-0008): user context prompt + included documents.
-	// SlotUserContext is non-compactable (survives compaction like SlotAgent).
-	cw.SetContent(ctxpkg.SlotUserContext, sources.UserContext)
+	// SP-20260512-0008 W1A (CW-20260512-0104): the Context Broker is the
+	// slot-assembly DECIDER, not a content enricher. Build the slot store
+	// (slot_name → content), pass it to DecideAssembly along with the
+	// resolved intent + mode, and apply the returned plan to the
+	// ContextWindow. Skipped slots are stashed in plan.Stash; pointer
+	// substitutions get a synthetic marker. The Universal slot sits at
+	// position 0 (per ctxpkg.SlotOrder) with empty content today — Sprint 2 /
+	// T2.4 wires the content. The decision is deterministic and free of I/O.
+	slotSources := slotSourceMap(sources, toolsContent)
+	modeSlug := ""
+	if sessionMode != nil {
+		modeSlug = sessionMode.Slug
+	} else if mode != nil {
+		modeSlug = mode.Slug
+	}
+	plan := contextbroker.DecideAssembly(contextbroker.AssemblyInput{
+		Intent:    sources.Intent,
+		ModeSlug:  modeSlug,
+		SlotOrder: ctxpkg.SlotOrder,
+		Sources:   slotSources,
+		Budgets:   ctxpkg.DefaultBudgets(),
+		AgentID:   agent.ID,
+		SessionID: session.ID,
+	})
+
+	cw := ctxpkg.NewContextWindow(providerWindowSize, s.estimator)
+	for _, d := range plan.Decisions {
+		// Empty content is a no-op for SetContent (Assemble drops empty
+		// slots from the wire), so ActionSkip with empty content is
+		// already the desired behavior — but we set explicitly so the
+		// per-slot CacheKey/TokenCount get computed (defensive against
+		// future SetContent semantics changes).
+		cw.SetContent(d.SlotName, d.Content)
+	}
+	// SlotConversation is independent of the decider's content map —
+	// messages are always serialized and shipped. The decider doesn't
+	// have authority over conversation history.
 	cw.SetContent(ctxpkg.SlotConversation, serializeMessagesForSlot(sources.Messages))
 
 	if sources.EnrichmentActive {
@@ -238,12 +267,15 @@ func (s *contextServiceImpl) AssembleSlots(ctx context.Context, session *store.S
 	// Tools) plus the caller-provided dynamic prefix. Used by
 	// EnforceTokenBudget, plugin filters, and telemetry — NOT by
 	// ChatRequest.SystemPrompt (which carries only the per-turn prefix).
-	systemPrompt := composeLegacySystemPrompt(sources, toolsContent, extraSystemPrefix)
+	// Now walks the plan so skipped/pointer slots are reflected accurately
+	// in the budget enforcer's view of the prompt.
+	systemPrompt := composeLegacySystemPrompt(plan, extraSystemPrefix)
 
 	slog.Debug("context-service: slot assembly",
 		"blocks", len(blocks), "used_tokens", cw.UsedTokens(),
 		"budget", cw.TotalBudget, "compaction", cw.NeedsCompaction(),
-		"tools", len(tools), "tool_cache_state", toolCacheStateForLog(outcome))
+		"tools", len(tools), "tool_cache_state", toolCacheStateForLog(outcome),
+		"plan", contextbroker.DecisionSummary(plan))
 
 	return &SlotAssemblyResult{
 		Blocks:          blocks,
@@ -252,7 +284,33 @@ func (s *contextServiceImpl) AssembleSlots(ctx context.Context, session *store.S
 		Messages:        sources.Messages,
 		NeedsCompaction: cw.NeedsCompaction(),
 		ToolCache:       outcome,
+		Plan:            plan,
 	}, nil
+}
+
+// slotSourceMap projects SlotSources (+ the freshly built tools content)
+// into the slot_name → content map the assembly decider consumes. The
+// SlotConversation entry is intentionally absent — conversation history
+// is set on the window after the decider runs (the decider has no
+// authority over conversation messages).
+func slotSourceMap(sources *chat.SlotSources, toolsContent string) map[string]string {
+	return map[string]string{
+		ctxpkg.SlotUniversal:   sources.Universal,
+		ctxpkg.SlotSystem:      sources.System,
+		ctxpkg.SlotMemory:      sources.Memory,
+		ctxpkg.SlotAgent:       sources.Agent,
+		ctxpkg.SlotMode:        sources.Mode,
+		ctxpkg.SlotRules:       sources.Rules,
+		ctxpkg.SlotTools:       toolsContent,
+		ctxpkg.SlotSession:     sources.Session,
+		ctxpkg.SlotContext:     sources.Context,
+		ctxpkg.SlotUserContext: sources.UserContext,
+		// SlotHandoff is auto-populated post-compaction by the harness
+		// (Glass-3 / -4); the decider treats it as ambient — when content
+		// arrives, the slot ships. Source is empty here; the actual
+		// content lives in the ContextWindow after compaction wires it.
+		ctxpkg.SlotHandoff: "",
+	}
 }
 
 // toolCacheActive returns true when every S3b dep is wired and the user has
@@ -573,21 +631,30 @@ func hasToolBlocks(msgs []llmtypes.ChatMessage) bool {
 
 // composeLegacySystemPrompt rebuilds the flat system prompt for callers that
 // haven't migrated to SlotBlocks (e.g., EnforceTokenBudget, plugin filters,
-// debug logging, the EmitContextAssembled event). It must account for all
-// slot content that the Anthropic adapter will send in the system payload —
-// including the Tools slot — so budget enforcement doesn't undercount. The
-// prefix appears first so dynamic per-turn additions lead.
-func composeLegacySystemPrompt(sources *chat.SlotSources, toolsContent, prefix string) string {
-	parts := make([]string, 0, 9)
+// debug logging, the EmitContextAssembled event). It must account for the
+// slot content the Anthropic adapter will send in the system payload — so
+// budget enforcement doesn't undercount.
+//
+// SP-20260512-0008 W1A (CW-20260512-0104): walks the broker's assembly plan
+// (in SlotOrder) so skipped slots are absent from the budget view and
+// pointer slots reflect their substituted size. The dynamic prefix appears
+// first so per-turn additions lead.
+func composeLegacySystemPrompt(plan contextbroker.AssemblyPlan, prefix string) string {
+	parts := make([]string, 0, len(plan.Decisions)+1)
 	if prefix != "" {
 		parts = append(parts, prefix)
 	}
-	// B1 (CW-20260428-0009): SlotMode rides between Agent and Rules in slot
-	// order; mirror that here so legacy budget telemetry sees the same shape.
-	for _, p := range []string{sources.System, sources.Agent, sources.Mode, sources.Rules, toolsContent, sources.Session, sources.Memory, sources.Context, sources.UserContext} {
-		if p != "" {
-			parts = append(parts, p)
+	for _, d := range plan.Decisions {
+		if d.SlotName == ctxpkg.SlotConversation {
+			// Conversation lives in the messages payload, not the system
+			// prompt; excluded from the legacy system-prompt view as it
+			// always was.
+			continue
 		}
+		if d.Content == "" {
+			continue
+		}
+		parts = append(parts, d.Content)
 	}
 	return strings.Join(parts, "\n\n")
 }

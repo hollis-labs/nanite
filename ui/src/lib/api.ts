@@ -223,6 +223,40 @@ export const api = {
   },
 
   /**
+   * CW-20260512-0006: cancel the in-flight chat-stream generation for a
+   * session. The 5-minute parent wall-clock deadline has been removed
+   * from the BE, so user-initiated stop is now the load-bearing safety
+   * net for runaway-cost concerns.
+   *
+   * BE: POST /api/sessions/{id}/chat/cancel (no body).
+   *   - 200 → cancel dispatched; the registered context.CancelFunc fires
+   *     and generateResponse exits cleanly on its next loop iteration.
+   *   - 404 → no active generation (idempotent; ignore silently — the
+   *     stream may have already completed in the gap between the FE
+   *     closing the EventSource and this call landing).
+   *   - other → network / config error; surface as "error" so the
+   *     caller can decide whether to retry or just close the SSE.
+   *
+   * The FE composer's stop button calls this so the BE actually cancels
+   * the LLM stream + tool work instead of just closing the SSE
+   * client-side (which would leave the BE generating wasted tokens).
+   */
+  cancelChatStream: async (
+    sessionId: string,
+  ): Promise<"cancelled" | "idle" | "error"> => {
+    try {
+      const res = await fetch(`${API_BASE}/sessions/${sessionId}/chat/cancel`, {
+        method: "POST",
+      });
+      if (res.ok) return "cancelled";
+      if (res.status === 404) return "idle";
+      return "error";
+    } catch {
+      return "error";
+    }
+  },
+
+  /**
    * Phase 9 (CW-20260510-0017 / W2A): cancel an in-flight recovery
    * broker retry. The `token` is the wrap-level `cancel_token` lifted
    * verbatim from the recovery info-card envelope.

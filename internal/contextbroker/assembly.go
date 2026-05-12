@@ -27,7 +27,9 @@
 package contextbroker
 
 import (
+	"context"
 	"fmt"
+	"log/slog"
 	"sort"
 	"strings"
 )
@@ -48,9 +50,14 @@ const (
 	// ActionPointer — replace the slot's content with a pointer/ref. Used
 	// when the content exceeds the per-slot budget and full inlining
 	// would blow the cacheable prefix. The pointer text follows the
-	// `<ref:artifact_id, N tokens, available via dev_read>` convention
-	// from the ticket. Sprint 2 / T2.6 wires the actual artifact store;
-	// for now the pointer is a synthetic marker the agent can act on.
+	// `<ref:artifact_id=ART-..., tokens=N, available via dev_read>`
+	// convention from the ticket. SP-20260512-0008 W2C (CW-20260512-0110)
+	// wired the real artifact-store-backed stash: when the decider
+	// substitutes a pointer it has already written the original content
+	// to the artifact store atomically (stash-before-ship), and the
+	// pointer's artifact_id resolves to that artifact via `dev_read`.
+	// If the stash write fails, the decider falls back to ActionShip
+	// rather than emit a pointer to nowhere.
 	ActionPointer
 )
 
@@ -69,8 +76,9 @@ func (a SlotAction) String() string {
 }
 
 // SlotDecision is the broker's per-slot output. For ActionShip the Content
-// is the slot's effective payload. For ActionPointer it's the synthetic
-// pointer marker. For ActionSkip Content is empty and the original payload
+// is the slot's effective payload. For ActionPointer it's the pointer
+// marker referencing the artifact-store entry the broker wrote before
+// returning. For ActionSkip Content is empty and the original payload
 // (if any) lives in the AssemblyPlan.Stash keyed by SlotName.
 type SlotDecision struct {
 	SlotName string
@@ -78,8 +86,16 @@ type SlotDecision struct {
 	Action   SlotAction
 	// ReasonTag is a short stable tag for telemetry/tests describing why
 	// this decision was made (e.g. "needed", "skipped_no_intent_match",
-	// "skipped_no_content", "pointer_oversized").
+	// "skipped_no_content", "pointer_oversized", "pointer_fallback_ship").
 	ReasonTag string
+
+	// ArtifactID is populated for ActionPointer decisions — the
+	// artifact-store ID the pointer envelope embeds. Empty for non-
+	// pointer decisions and for pointer decisions that fell back to
+	// inline shipping due to stash failure (those carry Action=ActionShip
+	// with ReasonTag="pointer_fallback_ship"). The agent uses this ID
+	// to call `dev_read(artifact_id=...)` and pull the full content.
+	ArtifactID string
 }
 
 // AssemblyPlan is the broker's complete per-turn plan: the ordered slot
@@ -161,24 +177,42 @@ type AssemblyInput struct {
 
 	// SessionID is the requesting session, surfaced for telemetry.
 	SessionID string
+
+	// Stasher is the broker's outbound port for persisting oversized
+	// slot content to the artifact store. The decider invokes it for
+	// any slot whose content exceeds its per-slot budget. Stasher is
+	// optional — when nil the decider uses NopStasher() and oversized
+	// slots fall back to ActionShip with full content (no pointer
+	// emitted). See SlotStasher for the atomicity contract.
+	Stasher SlotStasher
 }
 
 // DecideAssembly runs the assembly-decider for one turn. Returns an
 // AssemblyPlan ordered by SlotOrder with a stash of unshipped slot
-// content. The decider is deterministic — no I/O, no source fetches.
-// External content retrieval already happened upstream (in
-// AssembleSlotSources via *Broker.Fetch).
+// content. The decider is deterministic in its rules — the only I/O
+// it performs is the artifact-store stash write for oversized slots
+// (SP-20260512-0008 W2C, CW-20260512-0110), and that write is
+// content-addressed so the same (session, slot, content) tuple
+// produces the same artifact ID across turns. External content
+// retrieval already happened upstream (in AssembleSlotSources via
+// *Broker.Fetch).
 //
 // The default decision rule is simple by design:
 //
 //  1. Empty content → ActionSkip (ReasonTag=skipped_no_content). No
 //     stash entry — there's nothing to stash.
-//  2. Content over the per-slot budget → ActionPointer with a synthetic
-//     `<ref:slot=<name>, N tokens, source=context-broker>` marker. The
-//     original content lands in Stash[name].
+//  2. Content over the per-slot budget → stash to artifact store, then
+//     ActionPointer with `<ref:artifact_id=ART-..., tokens=N,
+//     available via dev_read>`. The original content also lands in
+//     plan.Stash[name] for in-process recovery (the artifact store is
+//     authoritative for cross-process recovery via dev_read).
+//     If the stash write fails (no stasher configured, or backend
+//     error), the decider falls back to ActionShip with the full
+//     content and ReasonTag="pointer_fallback_ship" — never emits a
+//     pointer to a non-existent artifact.
 //  3. Context-typed slots (SlotContext) when the intent doesn't need
 //     workspace context → ActionSkip (ReasonTag=skipped_no_intent_match).
-//     The original content lands in Stash[name].
+//     The original content lands in plan.Stash[name].
 //  4. Otherwise → ActionShip.
 //
 // Universal slot (position 0) is always emitted at position 0,
@@ -188,7 +222,23 @@ type AssemblyInput struct {
 // content the decider ships the slot (ActionShip) and the wire payload
 // always starts with the universal-rules text — Anthropic's
 // `cacheable_prefix_tokens` math benefits from the stable leading slot.
-func DecideAssembly(input AssemblyInput) AssemblyPlan {
+//
+// Atomicity contract (★ load-bearing per the ticket's sharp edges,
+// CW-20260512-0110): the stash write completes BEFORE this function
+// returns the pointer decision. If the stash fails, the pointer is
+// NOT emitted — the slot ships inline. There is no half-state where a
+// pointer envelope references an artifact that doesn't exist. See the
+// stash.go package comment for the full failure-mode analysis.
+func DecideAssembly(ctx context.Context, input AssemblyInput) AssemblyPlan {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	stasher := input.Stasher
+	if stasher == nil {
+		stasher = NopStasher()
+	}
+
+
 	decisions := make([]SlotDecision, 0, len(input.SlotOrder))
 	var stash map[string]string
 
@@ -213,17 +263,50 @@ func DecideAssembly(input AssemblyInput) AssemblyPlan {
 
 		switch {
 		case budget > 0 && tokens > budget:
-			// Oversized — substitute pointer and stash original.
-			pointer := formatSlotPointer(name, tokens)
+			// Oversized — attempt to stash. Atomicity: stash MUST succeed
+			// before we emit a pointer. On failure, fall back to inline
+			// shipping rather than emit a pointer to nowhere.
+			result, err := stasher.StashSlot(ctx, StashRequest{
+				SessionID: input.SessionID,
+				SlotName:  name,
+				Content:   content,
+				Tokens:    tokens,
+			})
+			if err != nil || result.ArtifactID == "" {
+				slog.Warn("contextbroker: slot stash failed, falling back to inline ship",
+					"slot", name,
+					"session_id", input.SessionID,
+					"tokens", tokens,
+					"budget", budget,
+					"err", err,
+				)
+				// In-memory stash entry only — record the content so callers
+				// inspecting plan.Stash can still recover it. The wire ships
+				// the full content (ActionShip) rather than a pointer to a
+				// non-existent artifact.
+				if stash == nil {
+					stash = make(map[string]string)
+				}
+				stash[name] = content
+				decisions = append(decisions, SlotDecision{
+					SlotName:  name,
+					Content:   content,
+					Action:    ActionShip,
+					ReasonTag: "pointer_fallback_ship",
+				})
+				continue
+			}
+			pointer := formatSlotPointer(result.ArtifactID, tokens)
 			if stash == nil {
 				stash = make(map[string]string)
 			}
 			stash[name] = content
 			decisions = append(decisions, SlotDecision{
-				SlotName:  name,
-				Content:   pointer,
-				Action:    ActionPointer,
-				ReasonTag: "pointer_oversized",
+				SlotName:   name,
+				Content:    pointer,
+				Action:     ActionPointer,
+				ReasonTag:  "pointer_oversized",
+				ArtifactID: result.ArtifactID,
 			})
 
 		case shouldSkipForIntent(name, input.Intent):
@@ -251,18 +334,26 @@ func DecideAssembly(input AssemblyInput) AssemblyPlan {
 	return AssemblyPlan{Decisions: decisions, Stash: stash}
 }
 
-// formatSlotPointer renders the pointer marker the broker substitutes
-// for an oversized slot. The convention follows the ticket spec:
+// formatSlotPointer renders the pointer envelope the broker substitutes
+// for an oversized slot whose content has been successfully stashed to
+// the artifact store. The format matches the ticket spec
+// (CW-20260512-0110):
 //
-//	<ref:slot=<name>, N tokens, source=context-broker>
+//	<ref:artifact_id=ART-..., tokens=N, available via dev_read>
 //
-// Sprint 2 / T2.6 (artifact store) will replace the synthetic marker
-// with a real `<ref:artifact_id, N tokens, available via dev_read>`
-// pointer that an agent can act on with the dev_read tool. For now the
-// marker is informational — the agent sees that content was elided and
-// can ask for it explicitly.
-func formatSlotPointer(slotName string, tokens int) string {
-	return fmt.Sprintf("<ref:slot=%s, %d tokens, source=context-broker>", slotName, tokens)
+// The agent retrieves the full content by calling `dev_read` with the
+// artifact_id parameter; the dev_tools transport resolves the artifact
+// row, reads its storage_path, and returns the content. The envelope
+// itself is small (~50 tokens) — counts toward the slot's token budget
+// at the pointer-substituted size, not the original content size.
+//
+// Content-addressed ID stability (per the ticket's cache-implications
+// sharp edge): when the same content lands in the same slot on a
+// subsequent turn, the stasher returns the same artifact_id, so the
+// pointer envelope is byte-identical across turns and the cacheable
+// prefix is preserved.
+func formatSlotPointer(artifactID string, tokens int) string {
+	return fmt.Sprintf("<ref:artifact_id=%s, tokens=%d, available via dev_read>", artifactID, tokens)
 }
 
 // shouldSkipForIntent encodes the per-intent slot need matrix. This is

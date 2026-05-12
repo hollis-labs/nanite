@@ -26,10 +26,19 @@ type Server struct {
 // New creates a Nanite MCP server backed by the given store. allowedPaths
 // controls which filesystem paths dev tools (dev_read, dev_grep, etc.) may
 // access — use the same roots the main server is configured with.
-func New(s *store.Store, sessionID string, allowedPaths []string) *Server {
+//
+// artifactsRoot is the configured artifacts storage directory used to
+// confine `dev_read(artifact_id=...)` lookups against Context Broker
+// stash pointers (SP-20260512-0008 W2C, CW-20260512-0110). Pass "" to
+// disable artifact resolution from this stdio server (path-only mode).
+func New(s *store.Store, sessionID string, allowedPaths []string, artifactsRoot string) *Server {
+	dev := condmcp.NewDevToolsTransport(allowedPaths)
+	if artifactsRoot != "" {
+		dev = dev.WithArtifactResolver(condmcp.NewStoreArtifactResolver(s), artifactsRoot)
+	}
 	return &Server{
 		self:      condmcp.NewSelfToolsTransport(s),
-		dev:       condmcp.NewDevToolsTransport(allowedPaths),
+		dev:       dev,
 		sessionID: sessionID,
 	}
 }

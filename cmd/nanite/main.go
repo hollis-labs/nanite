@@ -241,7 +241,7 @@ func cmdServe(args []string) {
 	// nil if the agentrc loader failed; initMCP falls back to the hardcoded
 	// default allow-list in that case so dev tools still work for the
 	// running user.
-	mcpManager, tb, selfTools, muxMgr, muxSvc := initMCP(s, cfg)
+	mcpManager, tb, selfTools, muxMgr, muxSvc := initMCP(s, cfg, appCfg)
 
 	// Set up activity emitter (Volon GUI events).
 	activity := chat.NewActivityEmitter("")
@@ -632,12 +632,25 @@ func devAllowedSource(cfg *config.Config) string {
 // devmode build tag via registerMuxTransport (G5 — CW-20260421-0001).
 // In production builds registerMuxTransport is a no-op and no mux_* tools
 // appear in the tool surface.
-func initMCP(s *store.Store, cfg *config.Config) (*mcp.Manager, *toolclient.ToolClient, *mcp.SelfToolsTransport, *muxproxy.Manager, *service.MuxProxy) {
+func initMCP(s *store.Store, cfg *config.Config, appCfg *config.AppConfig) (*mcp.Manager, *toolclient.ToolClient, *mcp.SelfToolsTransport, *muxproxy.Manager, *service.MuxProxy) {
 	mcpManager := mcp.NewManager()
 
 	devAllowed := resolveDevToolsAllowedPaths(cfg)
 	slog.Info("dev tools allow-list", "paths", devAllowed, "source", devAllowedSource(cfg))
-	if err := mcpManager.AddServer("dev", mcp.NewDevToolsTransport(devAllowed), mcp.TierBuiltin); err != nil {
+
+	// SP-20260512-0008 W2C (CW-20260512-0110): wire the artifact resolver
+	// into dev_tools so dev_read(artifact_id=...) can resolve Context
+	// Broker stash pointers to the on-disk artifact body. Resolver +
+	// artifacts root mirror the API-layer download handler so both
+	// surfaces address the same files.
+	artifactsRoot := "data/artifacts"
+	if appCfg != nil && appCfg.Artifacts.StorageDir != "" {
+		artifactsRoot = appCfg.Artifacts.StorageDir
+	}
+	devTools := mcp.NewDevToolsTransport(devAllowed).WithArtifactResolver(
+		mcp.NewStoreArtifactResolver(s), artifactsRoot,
+	)
+	if err := mcpManager.AddServer("dev", devTools, mcp.TierBuiltin); err != nil {
 		slog.Error("mcp: failed to register builtin server", "name", "dev", "err", err)
 	}
 	if err := mcpManager.AddServer("general", mcp.NewGeneralToolsTransport(), mcp.TierBuiltin); err != nil {
@@ -979,7 +992,19 @@ func cmdMCPServe(args []string) {
 	// gracefully matters more than aborting.
 	cfg, _ := config.Load()
 	allowedPaths := resolveDevToolsAllowedPaths(cfg)
-	srv := mcpserver.New(s, *sessionID, allowedPaths)
+	// SP-20260512-0008 W2C (CW-20260512-0110): load app config so
+	// dev_read(artifact_id=...) resolves stash pointers against the
+	// same artifacts root the main server uses. Falls back to the
+	// default ("data/artifacts") if the config can't be loaded.
+	stdioAppCfg, _ := config.LoadAppConfig("config/" + brand.ConfigFileName + ".yaml")
+	if stdioAppCfg == nil {
+		stdioAppCfg = config.DefaultAppConfig()
+	}
+	artifactsRoot := stdioAppCfg.Artifacts.StorageDir
+	if artifactsRoot == "" {
+		artifactsRoot = "data/artifacts"
+	}
+	srv := mcpserver.New(s, *sessionID, allowedPaths, artifactsRoot)
 	if err := srv.Run(ctx); err != nil {
 		fmt.Fprintf(os.Stderr, "%s mcp: %v\n", brand.BinaryName, err)
 		os.Exit(1)

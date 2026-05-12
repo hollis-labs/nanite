@@ -558,6 +558,21 @@ func NewContainer(cfg ContainerConfig) (*Container, error) {
 	overrideStore := newToolCacheOverrideStore()
 	classifier := buildToolIntentClassifier(cfg.Providers, cfg.Store)
 
+	// SP-20260512-0008 W2C (CW-20260512-0110): wire the artifact-store-
+	// backed slot stasher so the Context Broker can substitute pointer
+	// envelopes for oversized slot content. Errors here are non-fatal —
+	// the decider's NopStasher fallback ships content inline if the
+	// stasher can't be constructed.
+	slotStasher, err := NewArtifactStasher(ArtifactStasherConfig{
+		Store:     cfg.Store,
+		AppConfig: cfg.AppConfig,
+	})
+	if err != nil {
+		slog.Warn("service container: artifact stasher unavailable; oversized slots will ship inline",
+			"err", err)
+		slotStasher = nil
+	}
+
 	ctxService := NewContextService(ContextServiceConfig{
 		Client:       contextClient,
 		StashManager: stashManager,
@@ -570,6 +585,7 @@ func NewContainer(cfg ContainerConfig) (*Container, error) {
 			}
 			return us
 		},
+		SlotStasher: slotStasher,
 	})
 
 	// Command registry.

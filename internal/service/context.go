@@ -138,6 +138,12 @@ type contextServiceImpl struct {
 	// detection and to report accurate before/after deltas across all
 	// transitions — not just pointer→x — Copilot review #3095049986.
 	lastToolCache sync.Map // map[sessionID]toolCacheSessionState
+	// slotStasher persists oversized slot content to the artifact store
+	// so the broker can substitute a pointer envelope referencing the
+	// artifact_id. SP-20260512-0008 W2C (CW-20260512-0110). Optional —
+	// when nil the decider's NopStasher fallback ships oversized slots
+	// inline instead of emitting a pointer to nowhere.
+	slotStasher contextbroker.SlotStasher
 }
 
 // ContextServiceConfig holds dependencies for constructing a ContextService.
@@ -151,6 +157,14 @@ type ContextServiceConfig struct {
 	Classifier   intent.Classifier
 	Overrides    ToolCacheOverrideStore
 	SettingsFunc func() *store.UserSettings
+
+	// SlotStasher persists oversized slot content to the artifact store
+	// so the broker substitutes pointer envelopes with real artifact_ids
+	// the agent can resolve via dev_read. Optional — when nil, the
+	// decider falls back to ActionShip with the full content on
+	// oversized slots (never emits a pointer to nowhere).
+	// SP-20260512-0008 W2C (CW-20260512-0110).
+	SlotStasher contextbroker.SlotStasher
 }
 
 // NewContextService wraps an existing ContextClient as a ContextService.
@@ -166,6 +180,7 @@ func NewContextService(cfg ContextServiceConfig) ContextService {
 		classifier:   cfg.Classifier,
 		overrides:    cfg.Overrides,
 		settingsFunc: cfg.SettingsFunc,
+		slotStasher:  cfg.SlotStasher,
 	}
 }
 
@@ -226,7 +241,7 @@ func (s *contextServiceImpl) AssembleSlots(ctx context.Context, session *store.S
 	} else if mode != nil {
 		modeSlug = mode.Slug
 	}
-	plan := contextbroker.DecideAssembly(contextbroker.AssemblyInput{
+	plan := contextbroker.DecideAssembly(ctx, contextbroker.AssemblyInput{
 		Intent:    sources.Intent,
 		ModeSlug:  modeSlug,
 		SlotOrder: ctxpkg.SlotOrder,
@@ -234,6 +249,7 @@ func (s *contextServiceImpl) AssembleSlots(ctx context.Context, session *store.S
 		Budgets:   ctxpkg.DefaultBudgets(),
 		AgentID:   agent.ID,
 		SessionID: session.ID,
+		Stasher:   s.slotStasher,
 	})
 
 	cw := ctxpkg.NewContextWindow(providerWindowSize, s.estimator)

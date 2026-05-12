@@ -27,6 +27,15 @@ type agentExecFunc func(sandbox.AgentExecOpts) (*sandbox.ExecResult, error)
 
 var defaultAgentExec agentExecFunc = sandbox.AgentExec
 
+// errResolverUnconfigured / errArtifactNotFound classify the failure
+// modes the dev_read(artifact_id=) path may return. Defined as package
+// vars for `errors.Is` checks in tests and future telemetry; the user-
+// facing message goes through errorResult unchanged.
+var (
+	errResolverUnconfigured = errors.New("artifact resolver not configured")
+	errArtifactNotFound     = errors.New("artifact not found")
+)
+
 // DevToolsTransport provides built-in developer tools (grep, read, write)
 // that operate on local files, scoped to an allow-list of directories.
 type DevToolsTransport struct {
@@ -36,6 +45,42 @@ type DevToolsTransport struct {
 	// package default (sandbox.AgentExec). Tests override this to capture
 	// invocations without running real commands.
 	agentExec agentExecFunc
+
+	// ArtifactResolver looks up artifact rows by ID for the dev_read(
+	// artifact_id=...) entrypoint. SP-20260512-0008 W2C (CW-20260512-0110):
+	// the Context Broker emits pointer envelopes
+	// `<ref:artifact_id=ART-..., tokens=N, available via dev_read>` for
+	// oversized slot content stashed to the artifact store; the agent
+	// resolves these by calling `dev_read` with the artifact_id arg
+	// instead of a path. Optional — when nil, dev_read's artifact_id
+	// arg returns an explicit "artifact resolution is not configured"
+	// error. The MCP/stdio server wires this via NewDevToolsTransport*.
+	ArtifactResolver ArtifactResolver
+
+	// ArtifactsRoot is the configured artifacts storage directory used
+	// to confine artifact storage paths during dev_read(artifact_id=).
+	// Mirrors api.API.artifactsStorageDir so dev_read and the API layer
+	// resolve the same paths. Required when ArtifactResolver is set.
+	ArtifactsRoot string
+}
+
+// ArtifactResolver is the minimal interface dev_read needs to fetch a
+// stashed artifact row. Implementations typically wrap *store.Store.
+// Returning (nil, error) signals not-found or backend failure — dev_read
+// converts to a tool-level error result.
+type ArtifactResolver interface {
+	GetArtifact(id string) (*ArtifactMeta, error)
+}
+
+// ArtifactMeta is the subset of store.Artifact dev_read consumes. Kept
+// as a local type so internal/mcp does not import internal/store
+// (which would invert the dependency: store is a substrate; mcp tools
+// are consumers, plumbed through this small adapter shape).
+type ArtifactMeta struct {
+	ID          string
+	StoragePath string
+	MimeType    string
+	SizeBytes   int64
 }
 
 // NewDevToolsTransport creates a DevToolsTransport scoped to the given paths.
@@ -51,6 +96,16 @@ func NewDevToolsTransport(allowedPaths []string) *DevToolsTransport {
 		}
 	}
 	return &DevToolsTransport{AllowedPaths: cleaned}
+}
+
+// WithArtifactResolver returns d configured to resolve `dev_read(
+// artifact_id=...)` lookups against the given resolver + artifacts root.
+// Returns d for fluent chaining. Pass nil resolver to disable artifact
+// resolution (default behavior). SP-20260512-0008 W2C (CW-20260512-0110).
+func (d *DevToolsTransport) WithArtifactResolver(resolver ArtifactResolver, artifactsRoot string) *DevToolsTransport {
+	d.ArtifactResolver = resolver
+	d.ArtifactsRoot = artifactsRoot
+	return d
 }
 
 // expandHome replaces a leading ~/ or bare ~ with the user's home directory.
@@ -260,6 +315,88 @@ func (d *DevToolsTransport) tryResolveViaSessionGrant(ctx context.Context, abs, 
 	return filepath.Clean(target), true
 }
 
+// resolveArtifact resolves a Context Broker stash pointer's artifact_id
+// to the absolute filesystem path of the stashed content. Confines the
+// resolved path under the configured artifacts root via pathsafe so a
+// rogue or stale storage_path can't escape that root (defense in depth
+// — the stasher already confined at write time).
+//
+// Returns typed sentinel errors so callers (and tests) can classify
+// failure modes via errors.Is. Reviewer feedback (CW-20260512-0110
+// Comment 4): the original implementation wrapped EVERY resolver error
+// as "artifact ... not found", which silently swallowed unconfigured-
+// resolver and backend-failure cases and defeated errors.Is-based
+// classification.
+//
+// Possible failure modes:
+//   - ArtifactResolver not wired → errResolverUnconfigured (wrapped
+//     with %w so errors.Is(err, errResolverUnconfigured) is true)
+//   - ArtifactsRoot empty → errResolverUnconfigured (same sentinel —
+//     both are "the dev tools transport wasn't fully configured")
+//   - artifact missing → errors.Is(err, errArtifactNotFound) when the
+//     resolver returned errArtifactNotFound or (nil, nil); the textual
+//     message uses "artifact ... not found" wording
+//   - backend failure → original resolver error wrapped with context
+//   - storage_path escapes the artifacts root (corrupted row) →
+//     "artifact %q storage path outside artifacts root"
+//
+// SP-20260512-0008 W2C (CW-20260512-0110).
+func (d *DevToolsTransport) resolveArtifact(artifactID string) (string, error) {
+	if d.ArtifactResolver == nil {
+		return "", fmt.Errorf("%w: dev tools transport has no resolver", errResolverUnconfigured)
+	}
+	if d.ArtifactsRoot == "" {
+		return "", fmt.Errorf("%w: artifacts root is empty", errResolverUnconfigured)
+	}
+	meta, err := d.ArtifactResolver.GetArtifact(artifactID)
+	if err != nil {
+		// Classify "not found" via the typed sentinel so callers see
+		// matching errors.Is(err, errArtifactNotFound). Anything else
+		// is a real backend failure — surface it as-is rather than
+		// pretending the artifact was missing.
+		if errors.Is(err, errArtifactNotFound) {
+			return "", fmt.Errorf("artifact %q not found: %w", artifactID, err)
+		}
+		return "", fmt.Errorf("artifact %q resolver error: %w", artifactID, err)
+	}
+	if meta == nil {
+		// (nil, nil) is the canonical "not found" shape per the
+		// ArtifactResolver contract (some adapters return this rather
+		// than a typed error). Treat the same as errArtifactNotFound.
+		return "", fmt.Errorf("artifact %q not found: %w", artifactID, errArtifactNotFound)
+	}
+	if meta.StoragePath == "" {
+		return "", fmt.Errorf("artifact %q has no storage_path", artifactID)
+	}
+
+	// The stored storage_path is the canonical absolute path written
+	// at stash time. Re-confirm it sits under the configured artifacts
+	// root (defense in depth — a corrupted row could otherwise leak
+	// arbitrary file reads through the dev_read entrypoint).
+	absRoot, err := filepath.Abs(d.ArtifactsRoot)
+	if err != nil {
+		return "", fmt.Errorf("artifacts root invalid: %w", err)
+	}
+	if real, evalErr := filepath.EvalSymlinks(absRoot); evalErr == nil {
+		absRoot = real
+	}
+	absTarget, err := filepath.Abs(meta.StoragePath)
+	if err != nil {
+		return "", fmt.Errorf("artifact %q has invalid storage_path: %w", artifactID, err)
+	}
+	if real, evalErr := filepath.EvalSymlinks(absTarget); evalErr == nil {
+		absTarget = real
+	}
+	rel, err := filepath.Rel(absRoot, absTarget)
+	if err != nil {
+		return "", fmt.Errorf("artifact %q path-rel failed: %w", artifactID, err)
+	}
+	if rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) || filepath.IsAbs(rel) {
+		return "", fmt.Errorf("artifact %q storage path outside artifacts root", artifactID)
+	}
+	return absTarget, nil
+}
+
 // pathErrorResult formats a resolveAllowed error into an MCP tool error,
 // preserving the *pathsafe.EscapeError type in the textual message.
 func pathErrorResult(userPath string, err error) *ToolResult {
@@ -324,15 +461,15 @@ func (d *DevToolsTransport) ListTools(_ context.Context) ([]Tool, error) {
 	return []Tool{
 		{
 			Name:        "dev_read",
-			Description: fmt.Sprintf("Read file contents with optional line range. Returns contents with line numbers. Paths must be absolute (start with / or ~/). %s Glob/search before read on unfamiliar paths — dev_read on a non-existent path wastes a round-trip. Allowed directories: %s. Example: dev_read(path=%q)", tildeNote, allowedDirs, filepath.Join(exRoot, "docs", "README.md")),
+			Description: fmt.Sprintf("Read file contents with optional line range. Returns contents with line numbers. Paths must be absolute (start with / or ~/). %s Glob/search before read on unfamiliar paths — dev_read on a non-existent path wastes a round-trip. Allowed directories: %s. Example: dev_read(path=%q). Stashed-slot retrieval: when the system prompt contains a `<ref:artifact_id=art-stash-..., tokens=N, available via dev_read>` envelope (Context Broker stash for an oversized slot), pass that ID as `artifact_id` instead of `path` — e.g. dev_read(artifact_id=\"art-stash-abc123\").", tildeNote, allowedDirs, filepath.Join(exRoot, "docs", "README.md")),
 			InputSchema: map[string]any{
 				"type": "object",
 				"properties": map[string]any{
-					"path":   map[string]any{"type": "string", "description": fmt.Sprintf("Absolute file path (must start with / or ~/). Example: %s", filepath.Join(exRoot, "README.md"))},
-					"offset": map[string]any{"type": "integer", "description": "Start line (1-based, default 1)"},
-					"limit":  map[string]any{"type": "integer", "description": "Number of lines to return (default 200)"},
+					"path":        map[string]any{"type": "string", "description": fmt.Sprintf("Absolute file path (must start with / or ~/). Example: %s. Mutually exclusive with artifact_id.", filepath.Join(exRoot, "README.md"))},
+					"artifact_id": map[string]any{"type": "string", "description": "Artifact ID from a Context Broker stash pointer envelope (e.g. art-stash-abc123). Mutually exclusive with path."},
+					"offset":      map[string]any{"type": "integer", "description": "Start line (1-based, default 1)"},
+					"limit":       map[string]any{"type": "integer", "description": "Number of lines to return (default 200)"},
 				},
-				"required": []string{"path"},
 			},
 		},
 		{
@@ -478,14 +615,35 @@ func (d *DevToolsTransport) CallTool(ctx context.Context, name string, args map[
 
 func (d *DevToolsTransport) callRead(ctx context.Context, args map[string]any) (*ToolResult, error) {
 	path, _ := args["path"].(string)
-	if path == "" {
-		return errorResult("path is required"), nil
+	artifactID, _ := args["artifact_id"].(string)
+
+	if path != "" && artifactID != "" {
+		return errorResult("path and artifact_id are mutually exclusive — pass one or the other"), nil
 	}
-	resolved, err := d.resolveAllowed(ctx, path)
-	if err != nil {
-		return pathErrorResult(path, err), nil
+	if path == "" && artifactID == "" {
+		return errorResult("path or artifact_id is required"), nil
 	}
-	path = resolved
+
+	if artifactID != "" {
+		// Stashed-slot resolution path (SP-20260512-0008 W2C). Look up
+		// the artifact row, confine its storage_path under the
+		// configured artifacts root (defense-in-depth — the row's path
+		// was set by the stasher and confined at write time, but we
+		// re-check before serving), and read the file like a normal
+		// dev_read. Offset/limit semantics are preserved so the agent
+		// can page through large stashed bodies.
+		resolved, err := d.resolveArtifact(artifactID)
+		if err != nil {
+			return errorResult(err.Error()), nil
+		}
+		path = resolved
+	} else {
+		resolved, err := d.resolveAllowed(ctx, path)
+		if err != nil {
+			return pathErrorResult(path, err), nil
+		}
+		path = resolved
+	}
 
 	offset := intArg(args, "offset", 1)
 	limit := intArg(args, "limit", 200)

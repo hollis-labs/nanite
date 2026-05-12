@@ -694,7 +694,8 @@ func (s *chatServiceImpl) RecomposeSystemPrompt(ctx context.Context, sessionID, 
 	}
 
 	// Delegate to the existing context assembly helpers in the chat package.
-	// assembleSystemPromptFromTemplates and buildSkillList are in chat/context.go.
+	// assembleSystemPromptFromTemplates and buildSkillListForSession are in
+	// chat/context.go.
 	prompt, _, err := s.context.AssembleContext(ctx, session, agent, mode, workspace)
 	if err != nil {
 		return "", fmt.Errorf("assemble context: %w", err)

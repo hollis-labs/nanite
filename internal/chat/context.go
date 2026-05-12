@@ -9,6 +9,8 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/hollis-labs/nanite/internal/contextbroker"
+	"github.com/hollis-labs/nanite/internal/skillbroker"
 	"github.com/hollis-labs/nanite/internal/store"
 )
 
@@ -313,16 +315,6 @@ func ThinkToolBlockWithDispatch(ctx context.Context, dispatcher HintDispatcher, 
 	return thinkToolBlockV1
 }
 
-// buildSkillList creates a human-readable list of skills for the
-// tool-awareness template. When sessionID is non-empty and the session has
-// a current_mode_id, the skills are filtered through the E2 two-pass
-// pipeline (mode binding then mode tool_overrides) before rendering.
-// Empty sessionID falls back to the legacy "all assigned skills" behavior.
-// (E2, CW-20260428-0017)
-func buildSkillList(s *store.Store, agentID string) string {
-	return buildSkillListForSession(s, agentID, "")
-}
-
 // SkillEssentialCap is the soft ceiling for inline-rendered assigned skills.
 // Glass-5 (CW-20260502-0012): when an agent has more than this many mode-passing
 // assigned skills, the overflow is folded into the discoverability LoadHint
@@ -330,31 +322,61 @@ func buildSkillList(s *store.Store, agentID string) string {
 // enough that no real-world agent's curated set hits the cap today, small
 // enough to keep init-time tokens bounded as agents accumulate skills.
 // Tune off Glass-2 telemetry once data accumulates.
-const SkillEssentialCap = 25
+//
+// SP-20260512-0008 W2B (CW-20260512-0106): the cap is also the default
+// Skill Broker top-N. The Skill Broker (internal/skillbroker) is the seat
+// that owns ranking; rendering preserves this cap by deferring to the
+// broker's MaxSelectedSkills default.
+const SkillEssentialCap = skillbroker.MaxSelectedSkills
 
-// buildSkillListForSession is the mode-aware variant. The unfiltered helper
-// above is preserved for callers that have no session context (e.g.
-// background skill registration during boot).
+// buildSkillListForSession is the mode-aware skill-list renderer.
+//
+// SP-20260512-0008 W2B (CW-20260512-0106): selection runs through the
+// Skill Broker (internal/skillbroker) — the ranked top-N subset is what
+// gets rendered, not the full assigned set sliced at SkillEssentialCap.
+// This overload of the function carries no per-turn intent or agent-tag
+// signal — it falls through to the broker's stable rank order
+// (source-bias + alphabetical), which preserves the slot-prefix cache
+// behavior for callers that haven't migrated to the intent-aware overload.
+// The slot-based path (chat.ContextClient.AssembleSlotSources) uses
+// buildSkillListForSessionWithIntent so the broker has real ranking signal.
 //
 // Glass-5 (CW-20260502-0012): the rendered list is partitioned into
-// "essentials" (assigned skills passing the mode filter, capped at
-// SkillEssentialCap) and "discoverable" (everything else in the catalog).
-// Essentials are inlined; discoverable count is surfaced via a LoadHint
-// pointer at the tail of the rendered string. The pointer references real
-// MCP tools (skill_list, tool_list) and is framed as
-// invitation, not warning — the agent should feel the catalog has every
-// skill it needs and only carries what it currently uses.
+// "essentials" (broker-ranked assigned skills passing the mode filter)
+// and "discoverable" (everything else in the catalog). Essentials are
+// inlined; discoverable count is surfaced via a LoadHint pointer at the
+// tail of the rendered string. The pointer references real MCP tools
+// (skill_list, tool_list) and is framed as invitation, not warning —
+// the agent should feel the catalog has every skill it needs and only
+// carries what it currently uses.
 func buildSkillListForSession(s *store.Store, agentID, sessionID string) string {
+	return buildSkillListForSessionWithIntent(s, agentID, sessionID, contextbroker.Intent{}, skillbroker.AgentIdentity{ID: agentID})
+}
+
+// buildSkillListForSessionWithIntent is the broker-aware variant. The
+// slot-based assembly path (AssembleSlotSources) passes the per-turn
+// intent (already derived for the Context Broker) and the agent identity
+// (slug + tags) so the Skill Broker can rank the assigned skills by
+// relevance — intent keyword match, agent-tag/role match, mode-binding
+// bonus. The render shape is unchanged from the legacy hard-slice path
+// (`- name: description [tools: ...]\n` per essential, then the LoadHint
+// pointer).
+//
+// SP-20260512-0008 W2B (CW-20260512-0106). Acceptance: same agent +
+// different intent → different ranked subset.
+func buildSkillListForSessionWithIntent(s *store.Store, agentID, sessionID string, intent contextbroker.Intent, identity skillbroker.AgentIdentity) string {
 	skills, err := s.ListAgentSkills(agentID)
 	if err != nil {
 		slog.Warn("chat: failed to load agent skills", "err", err)
 		return ""
 	}
 
-	rendered := filterAgentSkillsByMode(s, skills, sessionID)
-	if len(rendered) > SkillEssentialCap {
-		rendered = rendered[:SkillEssentialCap]
-	}
+	// E2 mode filter runs first — the broker is a read-only consumer of
+	// the agent's mode-eligible skill set. Mode-denied skills do not
+	// reach the broker, so they cannot leak into the rendered list.
+	candidates := filterAgentSkillsByMode(s, skills, sessionID)
+
+	rendered := skillbroker.SelectSkills(context.Background(), intent, identity, candidates, skillbroker.Options{})
 
 	var sb strings.Builder
 	for _, sk := range rendered {

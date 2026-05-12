@@ -100,7 +100,7 @@ func (s *chatServiceImpl) preCheckTools(
 				"If you need the data it produced, it's already in the conversation above. If you need something different, try a related tool, change the arguments meaningfully, or summarize what you have for the user.", tu.Name)
 			slog.Warn("chat-service: tool SKIPPED (blocked)", "tool", tu.Name)
 			ch <- chat.StreamEvent{Type: "tool_call", Tool: tu.Name, ToolID: tu.ID, Detail: toolCallDetail(tu.Name, tu.Input)}
-			ch <- chat.StreamEvent{Type: "tool_result", Tool: tu.Name, ToolID: tu.ID, Summary: blockedResult}
+			ch <- chat.StreamEvent{Type: "tool_result", Tool: tu.Name, ToolID: tu.ID, Summary: blockedResult, IsError: true}
 			block := llmtypes.ContentBlock{
 				Type: "tool_result", ToolUseID: tu.ID, Content: blockedResult,
 			}
@@ -128,7 +128,7 @@ func (s *chatServiceImpl) preCheckTools(
 				denyMsg := fmt.Sprintf("PERMISSION DENIED: %s — %s", tu.Name, permResult.Reason)
 				slog.Warn("chat-service: tool denied", "tool", tu.Name, "reason", permResult.Reason)
 				ch <- chat.StreamEvent{Type: "tool_call", Tool: tu.Name, ToolID: tu.ID, Detail: toolCallDetail(tu.Name, tu.Input)}
-				ch <- chat.StreamEvent{Type: "tool_result", Tool: tu.Name, ToolID: tu.ID, Summary: denyMsg}
+				ch <- chat.StreamEvent{Type: "tool_result", Tool: tu.Name, ToolID: tu.ID, Summary: denyMsg, IsError: true}
 				block := llmtypes.ContentBlock{
 					Type: "tool_result", ToolUseID: tu.ID, Content: denyMsg,
 				}
@@ -161,7 +161,7 @@ func (s *chatServiceImpl) preCheckTools(
 					denyMsg := fmt.Sprintf("PERMISSION DENIED: %s — %s", tu.Name, denyReason)
 					slog.Warn("chat-service: tool denied", "tool", tu.Name, "reason", denyReason, "scope", resp.Scope)
 					ch <- chat.StreamEvent{Type: "tool_call", Tool: tu.Name, ToolID: tu.ID, Detail: toolCallDetail(tu.Name, tu.Input)}
-					ch <- chat.StreamEvent{Type: "tool_result", Tool: tu.Name, ToolID: tu.ID, Summary: denyMsg}
+					ch <- chat.StreamEvent{Type: "tool_result", Tool: tu.Name, ToolID: tu.ID, Summary: denyMsg, IsError: true}
 					// Warn user when consecutive failures approach the stop threshold.
 					if ls.consecutiveFailures >= ls.limits.consecutiveFailCap-1 {
 						warningJSON, _ := json.Marshal(map[string]any{
@@ -195,7 +195,7 @@ func (s *chatServiceImpl) preCheckTools(
 				denyMsg := fmt.Sprintf("PERMISSION DENIED: %s — unknown permission decision %q", tu.Name, permResult.Decision)
 				slog.Warn("chat-service: tool denied, unknown permission decision", "tool", tu.Name, "decision", permResult.Decision)
 				ch <- chat.StreamEvent{Type: "tool_call", Tool: tu.Name, ToolID: tu.ID, Detail: toolCallDetail(tu.Name, tu.Input)}
-				ch <- chat.StreamEvent{Type: "tool_result", Tool: tu.Name, ToolID: tu.ID, Summary: denyMsg}
+				ch <- chat.StreamEvent{Type: "tool_result", Tool: tu.Name, ToolID: tu.ID, Summary: denyMsg, IsError: true}
 				block := llmtypes.ContentBlock{
 					Type: "tool_result", ToolUseID: tu.ID, Content: denyMsg,
 				}
@@ -223,7 +223,7 @@ func (s *chatServiceImpl) preCheckTools(
 				blockMsg := fmt.Sprintf("Tool %q was refused by a policy plugin for this input. Retrying with the same arguments will be refused again — adjust the arguments, pick a different tool, or explain to the user that this action is gated.", tu.Name)
 				slog.Info("chat-service: tool blocked by plugin pre-hook", "tool", tu.Name)
 				ch <- chat.StreamEvent{Type: "tool_call", Tool: tu.Name, ToolID: tu.ID, Detail: toolCallDetail(tu.Name, tu.Input)}
-				ch <- chat.StreamEvent{Type: "tool_result", Tool: tu.Name, ToolID: tu.ID, Summary: blockMsg}
+				ch <- chat.StreamEvent{Type: "tool_result", Tool: tu.Name, ToolID: tu.ID, Summary: blockMsg, IsError: true}
 				block := llmtypes.ContentBlock{
 					Type: "tool_result", ToolUseID: tu.ID, Content: blockMsg,
 				}
@@ -242,7 +242,7 @@ func (s *chatServiceImpl) preCheckTools(
 			denyMsg := fmt.Sprintf("EXECUTION_RULES_DENIED: %s — %s", tu.Name, reason)
 			slog.Warn("chat-service: tool denied by execution rules", "tool", tu.Name, "reason", reason)
 			ch <- chat.StreamEvent{Type: "tool_call", Tool: tu.Name, ToolID: tu.ID, Detail: toolCallDetail(tu.Name, tu.Input)}
-			ch <- chat.StreamEvent{Type: "tool_result", Tool: tu.Name, ToolID: tu.ID, Summary: denyMsg}
+			ch <- chat.StreamEvent{Type: "tool_result", Tool: tu.Name, ToolID: tu.ID, Summary: denyMsg, IsError: true}
 			block := llmtypes.ContentBlock{
 				Type: "tool_result", ToolUseID: tu.ID, Content: denyMsg, IsError: true,
 			}
@@ -266,7 +266,7 @@ func (s *chatServiceImpl) preCheckTools(
 				ls.recordLastError(tu.Name, errMsg)
 				slog.Warn("chat-service: tool arg validation failed", "tool", tu.Name, "err", errMsg)
 				ch <- chat.StreamEvent{Type: "tool_call", Tool: tu.Name, ToolID: tu.ID, Detail: toolCallDetail(tu.Name, tu.Input)}
-				ch <- chat.StreamEvent{Type: "tool_result", Tool: tu.Name, ToolID: tu.ID, Summary: errMsg}
+				ch <- chat.StreamEvent{Type: "tool_result", Tool: tu.Name, ToolID: tu.ID, Summary: errMsg, IsError: true}
 				block := llmtypes.ContentBlock{
 					Type: "tool_result", ToolUseID: tu.ID, Content: errMsg, IsError: true,
 				}
@@ -455,7 +455,7 @@ func (s *chatServiceImpl) executeSingleTool(
 	if cancelled := emitNotifyPause(ctx, tu, ch, mu, 0); cancelled {
 		cancelMsg := fmt.Sprintf("Tool %q cancelled by user during notify-pause window.", tu.Name)
 		ls.recordToolCall(tu.Name, false)
-		ch <- chat.StreamEvent{Type: "tool_result", Tool: tu.Name, ToolID: tu.ID, Summary: cancelMsg}
+		ch <- chat.StreamEvent{Type: "tool_result", Tool: tu.Name, ToolID: tu.ID, Summary: cancelMsg, IsError: true}
 		return toolExecResult{
 			resultBlock: llmtypes.ContentBlock{
 				Type: "tool_result", ToolUseID: tu.ID, Content: cancelMsg, IsError: true,
@@ -728,7 +728,11 @@ func (s *chatServiceImpl) postProcessToolResults(
 		if len(summary) > 500 {
 			summary = summary[:500] + "... (truncated)"
 		}
-		ch <- chat.StreamEvent{Type: "tool_result", Tool: tu.Name, ToolID: tu.ID, Summary: summary}
+		// IsError mirrors the underlying ToolCallRef.Status — load-bearing
+		// for the subagent fabrication-suspected detector (CW-20260512-0095).
+		// Consumers like drainCapture count tool_result events split by
+		// IsError to detect "tools attempted but none succeeded".
+		ch <- chat.StreamEvent{Type: "tool_result", Tool: tu.Name, ToolID: tu.ID, Summary: summary, IsError: r.isError}
 
 		// Auto-detect artifacts.
 		if !r.isError {
@@ -877,7 +881,7 @@ func (s *chatServiceImpl) handleResultCacheMetaTool(
 	if len(summary) > 500 {
 		summary = summary[:500] + "... (truncated)"
 	}
-	ch <- chat.StreamEvent{Type: "tool_result", Tool: tu.Name, ToolID: tu.ID, Summary: summary}
+	ch <- chat.StreamEvent{Type: "tool_result", Tool: tu.Name, ToolID: tu.ID, Summary: summary, IsError: isError}
 
 	return toolExecResult{
 		resultBlock: llmtypes.ContentBlock{

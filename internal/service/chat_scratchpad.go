@@ -55,7 +55,7 @@ func handleScratchpadTool(
 	if len(summary) > 500 {
 		summary = summary[:500] + "... (truncated)"
 	}
-	ch <- chat.StreamEvent{Type: "tool_result", Tool: tu.Name, ToolID: tu.ID, Summary: summary}
+	ch <- chat.StreamEvent{Type: "tool_result", Tool: tu.Name, ToolID: tu.ID, Summary: summary, IsError: isError}
 
 	duration := time.Since(start)
 	return toolExecResult{

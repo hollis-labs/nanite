@@ -102,6 +102,18 @@ type StreamEvent struct {
 	Data            string     `json:"data,omitempty"`              // JSON payload for tool_warning events
 	Detail          string     `json:"detail,omitempty"`            // Short label for tool_call (e.g., command, path)
 
+	// IsError flags a tool_result event whose underlying tool call did not
+	// succeed (errors, denials, blocks, validation failures, cancellations).
+	// Mirrors ContentBlock.IsError on the LLM-visible tool_result block and
+	// ToolCallRef.Status != "success" on the structured-message accumulator.
+	// Consumers that need to detect "subagent attempted tools but none
+	// returned usable data" (CW-20260512-0095 fabrication-suspected signal)
+	// rely on this field; the legacy alternative is brittle prefix-matching
+	// of Summary against PERMISSION_DENIED / EXECUTION_RULES_DENIED / etc.
+	// Empty (false) for non-tool_result event types and for tool_result
+	// events whose tool call succeeded.
+	IsError bool `json:"is_error,omitempty"`
+
 	// Phase classifies delta events by their narrative role (F4 / CW-20260419-0029).
 	// "narration" — inter-iteration prose between tool_use blocks.
 	// "final"     — post-end_turn text that forms the assistant's answer.

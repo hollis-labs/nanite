@@ -2817,6 +2817,18 @@ func (s *chatServiceImpl) retryEnvelopeCorrection(
 	return retryEnvelopes
 }
 
+// autoTitleMaxLen is the hard cap on stored session titles (CW-20260512-0004).
+// Sidebar layout tolerates this length without truncation.
+const autoTitleMaxLen = 60
+
+// autoTitleSystemPrompt instructs the utility model to emit a short label only.
+// The server-side guard in sanitizeAutoTitle is load-bearing — this prompt is
+// best-effort because small utility models often ignore length/format hints.
+const autoTitleSystemPrompt = "Generate a short conversation label (2-5 words, max 60 characters). " +
+	"Respond with ONLY the label — no quotes, no punctuation, no markdown, no greetings, no caveats, no explanation. " +
+	"If the user message is too thin to summarize, return a 2-4 word topic guess based on the words present. " +
+	"Do not refuse. Do not apologize. Do not write a sentence."
+
 // autoTitle generates a title for a session from the first user message.
 func (s *chatServiceImpl) autoTitle(sessionID, userContent string) {
 	prov, ok := s.providers.Get(s.utilityProvider)
@@ -2824,13 +2836,12 @@ func (s *chatServiceImpl) autoTitle(sessionID, userContent string) {
 		return
 	}
 
-	prompt := "Generate a concise 3-5 word title for this conversation. Respond with ONLY the title, no quotes or punctuation."
 	msgs := []llmtypes.ChatMessage{
 		{Role: "user", Content: fmt.Sprintf("First message: %s", userContent)},
 	}
 
 	start := time.Now()
-	title, err := prov.Complete(context.Background(), llmtypes.ChatRequest{SystemPrompt: prompt, Messages: msgs, Model: s.utilityModel})
+	raw, err := prov.Complete(context.Background(), llmtypes.ChatRequest{SystemPrompt: autoTitleSystemPrompt, Messages: msgs, Model: s.utilityModel})
 	duration := time.Since(start)
 	s.recordUtilityMetrics(sessionID, "autoTitle", duration, err)
 
@@ -2838,7 +2849,24 @@ func (s *chatServiceImpl) autoTitle(sessionID, userContent string) {
 		slog.Warn("chat-service: auto-title failed", "err", err)
 		return
 	}
-	title = strings.TrimSpace(title)
+
+	title := sanitizeAutoTitle(raw, userContent)
+	// One retry if the first response is refusal-shaped. autoTitle runs in
+	// safego.Go so the extra round-trip is off the chat hot path.
+	if title == "" || looksLikeRefusal(raw) {
+		retryStart := time.Now()
+		retryRaw, retryErr := prov.Complete(context.Background(), llmtypes.ChatRequest{SystemPrompt: autoTitleSystemPrompt, Messages: msgs, Model: s.utilityModel})
+		s.recordUtilityMetrics(sessionID, "autoTitle.retry", time.Since(retryStart), retryErr)
+		if retryErr == nil {
+			if t := sanitizeAutoTitle(retryRaw, userContent); t != "" && !looksLikeRefusal(retryRaw) {
+				title = t
+			}
+		}
+	}
+	if title == "" {
+		// Last-resort deterministic fallback: first 40 chars of user message.
+		title = fallbackTitleFromUser(userContent)
+	}
 	if title == "" {
 		return
 	}
@@ -2849,6 +2877,93 @@ func (s *chatServiceImpl) autoTitle(sessionID, userContent string) {
 	}
 	sess.Title = title
 	_ = s.store.UpdateSession(sess)
+}
+
+// sanitizeAutoTitle normalises a raw utility-model response into a stored
+// session title (CW-20260512-0004). Strips newlines, collapses whitespace,
+// trims wrapping quotes/punctuation, and hard-caps length at autoTitleMaxLen.
+// Returns "" when the input is empty after cleanup so the caller can fall
+// back. This is the load-bearing guard — the prompt is best-effort.
+func sanitizeAutoTitle(raw, _ string) string {
+	if raw == "" {
+		return ""
+	}
+	// Replace any newline / tab / CR with a single space, then collapse runs.
+	s := strings.NewReplacer("\r", " ", "\n", " ", "\t", " ").Replace(raw)
+	s = strings.Join(strings.Fields(s), " ")
+	// Trim wrapping quotes and surrounding punctuation the model often adds.
+	s = strings.Trim(s, " \t\"'`")
+	s = strings.TrimRight(s, ".,;:!?")
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return ""
+	}
+	if len(s) > autoTitleMaxLen {
+		s = truncateToRune(s, autoTitleMaxLen)
+	}
+	return s
+}
+
+// looksLikeRefusal returns true when the utility-model output has the shape of
+// an assistant refusal/caveat rather than a label (CW-20260512-0004). Cheap
+// substring checks against the raw response — sanitization may strip the
+// distinguishing prefix, so this runs on the raw text.
+func looksLikeRefusal(raw string) bool {
+	trim := strings.TrimSpace(raw)
+	if trim == "" {
+		return false
+	}
+	// Long-form output is itself a refusal signal regardless of content —
+	// label responses are short.
+	if len(trim) > 120 {
+		return true
+	}
+	lower := strings.ToLower(trim)
+	// "I" + caveat phrasing is the canonical refusal shape from c160.
+	if strings.HasPrefix(lower, "i ") || strings.HasPrefix(lower, "i'") {
+		for _, marker := range []string{
+			"i cannot", "i can't", "i won't",
+			"i don't have access", "i do not have access",
+			"i appreciate", "i'm sorry", "i am sorry",
+			"i need to", "i must",
+		} {
+			if strings.Contains(lower, marker) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// fallbackTitleFromUser returns a deterministic label derived from the first
+// 40 chars of the user message (CW-20260512-0004). Used when both the model
+// response and its retry are unusable.
+func fallbackTitleFromUser(userContent string) string {
+	cleaned := strings.NewReplacer("\r", " ", "\n", " ", "\t", " ").Replace(userContent)
+	cleaned = strings.Join(strings.Fields(cleaned), " ")
+	cleaned = strings.TrimSpace(cleaned)
+	if cleaned == "" {
+		return ""
+	}
+	const fallbackLen = 40
+	if len(cleaned) > fallbackLen {
+		cleaned = truncateToRune(cleaned, fallbackLen)
+	}
+	return cleaned
+}
+
+// truncateToRune cuts s at <= max bytes without splitting a UTF-8 rune.
+func truncateToRune(s string, max int) string {
+	if len(s) <= max {
+		return s
+	}
+	// Walk back from max until we land on a rune boundary.
+	for i := max; i > 0; i-- {
+		if (s[i]&0xC0) != 0x80 { // not a UTF-8 continuation byte
+			return strings.TrimRight(s[:i], " ")
+		}
+	}
+	return ""
 }
 
 // autoTags generates tags for a session based on recent messages.

@@ -41,6 +41,69 @@ func TestCreateAgent(t *testing.T) {
 	}
 }
 
+// TestCreateAgent_ParentDispatchAllowlistDefault — CW-20260512-0107
+// (SP-20260512-0008 W2A). Creating an agent without specifying
+// parent_dispatch_allowlist must default to "[]" so the migration 059
+// column-default invariant holds in code.
+func TestCreateAgent_ParentDispatchAllowlistDefault(t *testing.T) {
+	s := newTestStore(t)
+	a := &AgentProfile{Name: "Plain", Slug: "plain-bot", SystemPrompt: "x"}
+	if err := s.CreateAgent(a); err != nil {
+		t.Fatalf("CreateAgent: %v", err)
+	}
+	if a.ParentDispatchAllowlist != "[]" {
+		t.Errorf("ParentDispatchAllowlist = %q, want \"[]\" after default CreateAgent", a.ParentDispatchAllowlist)
+	}
+
+	got, err := s.GetAgent(a.ID)
+	if err != nil {
+		t.Fatalf("GetAgent: %v", err)
+	}
+	if got.ParentDispatchAllowlist != "[]" {
+		t.Errorf("round-tripped ParentDispatchAllowlist = %q, want \"[]\"", got.ParentDispatchAllowlist)
+	}
+}
+
+// TestCreateAgent_ParentDispatchAllowlistRoundTrip — non-default value
+// must round-trip through INSERT + scan unchanged.
+func TestCreateAgent_ParentDispatchAllowlistRoundTrip(t *testing.T) {
+	s := newTestStore(t)
+	a := &AgentProfile{
+		Name:                    "Trusted",
+		Slug:                    "trusted-bot",
+		SystemPrompt:            "x",
+		ParentDispatchAllowlist: `["researcher","planner","worker"]`,
+	}
+	if err := s.CreateAgent(a); err != nil {
+		t.Fatalf("CreateAgent: %v", err)
+	}
+	got, err := s.GetAgent(a.ID)
+	if err != nil {
+		t.Fatalf("GetAgent: %v", err)
+	}
+	if got.ParentDispatchAllowlist != `["researcher","planner","worker"]` {
+		t.Errorf("ParentDispatchAllowlist round-trip = %q, want canonical 3-role list", got.ParentDispatchAllowlist)
+	}
+}
+
+// TestUpdateAgent_ParentDispatchAllowlistPersists — UPDATE must persist
+// the new column.
+func TestUpdateAgent_ParentDispatchAllowlistPersists(t *testing.T) {
+	s := newTestStore(t)
+	a := makeTestAgent(t, s, "update-target")
+	a.ParentDispatchAllowlist = `["worker"]`
+	if err := s.UpdateAgent(a); err != nil {
+		t.Fatalf("UpdateAgent: %v", err)
+	}
+	got, err := s.GetAgent(a.ID)
+	if err != nil {
+		t.Fatalf("GetAgent: %v", err)
+	}
+	if got.ParentDispatchAllowlist != `["worker"]` {
+		t.Errorf("ParentDispatchAllowlist after UPDATE = %q, want [\"worker\"]", got.ParentDispatchAllowlist)
+	}
+}
+
 func TestGetAgent(t *testing.T) {
 	s := newTestStore(t)
 	a := makeTestAgent(t, s, "get-agent")

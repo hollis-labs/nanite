@@ -50,6 +50,15 @@ type AgentProfile struct {
 	ImportedAt   string `json:"imported_at"`   // RFC3339 timestamp of last ingest; empty for non-file agents
 	OriginSystem string `json:"origin_system"` // "nanite", "agentrc", "claude", etc. — free-form provenance
 	Format       string `json:"format"`        // "markdown", "yaml"
+
+	// ParentDispatchAllowlist is a JSON array of role slugs this agent
+	// (as a *parent*) may dispatch via task_execute. Surfaced into the
+	// task_execute description through the Tool Broker Describe hook
+	// (CW-20260512-0105 W1B) so the LLM picks intent fit, not role-name
+	// memory. Empty "[]" means no dispatch permission — Describer renders
+	// the baseline description without role enumeration.
+	// Added by CW-20260512-0107 (SP-20260512-0008 W2A — migration 059).
+	ParentDispatchAllowlist string `json:"parent_dispatch_allowlist"`
 }
 
 // agentColumns is the canonical SELECT column list for agent_profiles.
@@ -59,7 +68,8 @@ const agentColumns = `id, name, slug, COALESCE(avatar,''), system_prompt, COALES
         agent_hash, version, tools, directories, constraints, tags, status, source, source_ref,
         COALESCE(icon,''),
         kind, capabilities_json, limits_json, model_strategy,
-        COALESCE(imported_at,''), COALESCE(origin_system,''), COALESCE(format,'markdown')`
+        COALESCE(imported_at,''), COALESCE(origin_system,''), COALESCE(format,'markdown'),
+        COALESCE(parent_dispatch_allowlist,'[]')`
 
 // scanAgent scans a row into an AgentProfile using the canonical column order.
 func scanAgent(scanner interface{ Scan(...any) error }, a *AgentProfile) error {
@@ -71,6 +81,7 @@ func scanAgent(scanner interface{ Scan(...any) error }, a *AgentProfile) error {
 		&a.Status, &a.Source, &a.SourceRef, &a.Icon,
 		&a.Kind, &a.CapabilitiesJSON, &a.LimitsJSON, &a.ModelStrategy,
 		&a.ImportedAt, &a.OriginSystem, &a.Format,
+		&a.ParentDispatchAllowlist,
 	)
 }
 
@@ -186,6 +197,13 @@ func (s *Store) CreateAgent(a *AgentProfile) error {
 	if a.Format == "" {
 		a.Format = "markdown"
 	}
+	// ParentDispatchAllowlist (CW-20260512-0107): JSON array of role slugs
+	// this agent may dispatch via task_execute. Default '[]' matches the
+	// migration 059 column default — keeps inserts succeeding without
+	// forcing every caller to populate the field.
+	if a.ParentDispatchAllowlist == "" {
+		a.ParentDispatchAllowlist = "[]"
+	}
 
 	_, err := s.DB.Exec(
 		`INSERT INTO agent_profiles (id, name, slug, avatar, system_prompt, description,
@@ -195,8 +213,9 @@ func (s *Store) CreateAgent(a *AgentProfile) error {
 		                              agent_hash, version, tools, directories, constraints,
 		                              tags, status, source, source_ref, icon,
 		                              kind, capabilities_json, limits_json, model_strategy,
-		                              imported_at, origin_system, format)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		                              imported_at, origin_system, format,
+		                              parent_dispatch_allowlist)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		a.ID, a.Name, a.Slug, nullIfEmpty(a.Avatar), a.SystemPrompt, nullIfEmpty(a.Description),
 		a.Modes, a.DefaultMode, nullIfEmpty(a.DefaultModel), a.DefaultProvider,
 		a.MCPServers, a.ToolPermissions, a.CanExecute, a.Settings,
@@ -205,6 +224,7 @@ func (s *Store) CreateAgent(a *AgentProfile) error {
 		a.Tags, a.Status, a.Source, a.SourceRef, nullIfEmpty(a.Icon),
 		a.Kind, a.CapabilitiesJSON, a.LimitsJSON, a.ModelStrategy,
 		a.ImportedAt, a.OriginSystem, a.Format,
+		a.ParentDispatchAllowlist,
 	)
 	if err != nil {
 		return fmt.Errorf("create agent: %w", err)
@@ -272,6 +292,12 @@ func (s *Store) UpdateAgent(a *AgentProfile) error {
 	}
 	a.AgentHash = newHash
 
+	// ParentDispatchAllowlist (CW-20260512-0107): preserve the column-default
+	// '[]' shape if a caller leaves the field empty during an update.
+	if a.ParentDispatchAllowlist == "" {
+		a.ParentDispatchAllowlist = "[]"
+	}
+
 	_, err := s.DB.Exec(
 		`UPDATE agent_profiles SET name = ?, slug = ?, avatar = ?, system_prompt = ?, description = ?,
 		        modes = ?, default_mode = ?, default_model = ?, default_provider = ?,
@@ -279,7 +305,8 @@ func (s *Store) UpdateAgent(a *AgentProfile) error {
 		        updated_at = ?,
 		        agent_hash = ?, version = ?, tools = ?, directories = ?, constraints = ?,
 		        tags = ?, status = ?, icon = ?,
-		        imported_at = ?, origin_system = ?, format = ?
+		        imported_at = ?, origin_system = ?, format = ?,
+		        parent_dispatch_allowlist = ?
 		 WHERE id = ?`,
 		a.Name, a.Slug, nullIfEmpty(a.Avatar), a.SystemPrompt, nullIfEmpty(a.Description),
 		a.Modes, a.DefaultMode, nullIfEmpty(a.DefaultModel), a.DefaultProvider,
@@ -288,6 +315,7 @@ func (s *Store) UpdateAgent(a *AgentProfile) error {
 		a.AgentHash, a.Version, a.Tools, a.Directories, a.Constraints,
 		a.Tags, a.Status, nullIfEmpty(a.Icon),
 		a.ImportedAt, a.OriginSystem, a.Format,
+		a.ParentDispatchAllowlist,
 		a.ID,
 	)
 	if err != nil {

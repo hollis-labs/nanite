@@ -279,9 +279,11 @@ func (s *toolServiceImpl) SelectForAgent(ctx context.Context, sessionID, agentID
 	// internal/executor/envelope_render). See internal/dispatch/chat_surface.go
 	// for the canonical exclusion list.
 	var callerSlug string
+	var callerDispatchAllowlist []string
 	if s.agents != nil {
 		if agent, err := s.agents.GetAgent(agentID); err == nil {
 			callerSlug = agent.Slug
+			callerDispatchAllowlist = parseParentDispatchAllowlist(agent.ParentDispatchAllowlist)
 			allTools = filterToolsByAllowlist(allTools, agent.Tools)
 			if agent.Slug == chatRoleAgentSlug {
 				allTools = applyChatSurfaceFilter(allTools, dispatch.DefaultChatToolSurface())
@@ -291,16 +293,17 @@ func (s *toolServiceImpl) SelectForAgent(ctx context.Context, sessionID, agentID
 
 	// Per-call description-render hook (CW-20260512-0105 / SP-20260512-0008
 	// W1B). Tools that opted into the Describer registry have their
-	// descriptions re-rendered here, with the caller agent's identity
-	// (and, once W2A lands, dispatch allowlist) threaded through.
+	// descriptions re-rendered here, with the caller agent's identity +
+	// dispatch allowlist threaded through. The DispatchAllowlist is
+	// populated from the AgentProfile.ParentDispatchAllowlist JSON column
+	// (CW-20260512-0107 W2A) — empty list means the caller has no dispatch
+	// permission and the Describer falls back to the baseline description.
 	// Static-description tools are unchanged.
 	if s.toolClient != nil {
 		caller := describer.CallerAgent{
-			ID:   agentID,
-			Slug: callerSlug,
-			// DispatchAllowlist remains empty until W2A Agent Broker
-			// (CW-20260512-0107) wires the parent agent's role-derived
-			// allowlist into this call site.
+			ID:                agentID,
+			Slug:              callerSlug,
+			DispatchAllowlist: callerDispatchAllowlist,
 		}
 		allTools = s.toolClient.RenderDescriptions(ctx, allTools, caller)
 	}
@@ -847,6 +850,30 @@ func applyChatSurfaceFilter(tools []llmtypes.ToolDefinition, surface *dispatch.C
 			"before", before, "after", len(filtered), "removed", removed)
 	}
 	return filtered
+}
+
+// parseParentDispatchAllowlist parses the AgentProfile.ParentDispatchAllowlist
+// JSON column into a string slice of role slugs. An empty / malformed value
+// degrades to a nil slice, which signals "no dispatch permission" to the
+// Tool Broker Describer (the baseline task_execute description is rendered).
+//
+// CW-20260512-0107 (SP-20260512-0008 W2A). Empty "[]" is the migration 059
+// column default for every profile that does not own a dispatch role —
+// only the chat-role default agent is seeded with a non-empty list. Hot
+// path: called once per SelectForAgent invocation, so a small JSON parse
+// is cheap. Logs at debug level on malformed JSON so a hand-edited row
+// doesn't get silently treated as empty.
+func parseParentDispatchAllowlist(raw string) []string {
+	if raw == "" || raw == "[]" {
+		return nil
+	}
+	var out []string
+	if err := parseJSONStrings(raw, &out); err != nil {
+		slog.Debug("service/tool: malformed parent_dispatch_allowlist JSON — treating as empty",
+			"raw", raw, "err", err)
+		return nil
+	}
+	return out
 }
 
 // filterToolsByAllowlist removes tools not in the agent's tools allowlist.

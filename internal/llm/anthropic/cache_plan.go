@@ -59,7 +59,6 @@ func (c *Client) planCacheMarkers(req llmtypes.ChatRequest) cachePlan {
 	}
 	if total > maxCacheControlMarkers && plan.SlotBoundary {
 		plan.SlotBoundary = false
-		total--
 	}
 	// System + Tools alone is <= 2, never need to drop those.
 	return plan

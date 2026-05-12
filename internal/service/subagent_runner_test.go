@@ -20,7 +20,7 @@ func TestDrainCapture_DeltasConcatenateIntoSummary(t *testing.T) {
 	ch <- chat.StreamEvent{Type: "stream_end"}
 	close(ch)
 
-	summary, envelope, err := drainCapture(ch)
+	summary, envelope, counts, err := drainCapture(ch)
 	if err != nil {
 		t.Fatalf("drainCapture: %v", err)
 	}
@@ -29,6 +29,9 @@ func TestDrainCapture_DeltasConcatenateIntoSummary(t *testing.T) {
 	}
 	if envelope != "{}" {
 		t.Errorf("envelope = %q, want \"{}\" (no envelope events)", envelope)
+	}
+	if counts != (toolUsageCounts{}) {
+		t.Errorf("counts = %+v, want zero value (no tool events)", counts)
 	}
 }
 
@@ -39,7 +42,7 @@ func TestDrainCapture_CapturesEnvelopeAsResultJSON(t *testing.T) {
 	ch <- chat.StreamEvent{Type: "stream_end"}
 	close(ch)
 
-	summary, envelope, err := drainCapture(ch)
+	summary, envelope, _, err := drainCapture(ch)
 	if err != nil {
 		t.Fatalf("drainCapture: %v", err)
 	}
@@ -59,7 +62,7 @@ func TestDrainCapture_LastEnvelopeWins(t *testing.T) {
 	ch <- chat.StreamEvent{Type: "stream_end"}
 	close(ch)
 
-	_, envelope, err := drainCapture(ch)
+	_, envelope, _, err := drainCapture(ch)
 	if err != nil {
 		t.Fatalf("drainCapture: %v", err)
 	}
@@ -79,7 +82,7 @@ func TestDrainCapture_CapturesStreamEndEnvelope(t *testing.T) {
 	ch <- chat.StreamEvent{Type: "stream_end", Envelope: `[{"type":"x"}]`}
 	close(ch)
 
-	summary, envelope, err := drainCapture(ch)
+	summary, envelope, _, err := drainCapture(ch)
 	if err != nil {
 		t.Fatalf("drainCapture: %v", err)
 	}
@@ -101,7 +104,7 @@ func TestDrainCapture_StreamEndEnvelopeWinsOverMidStream(t *testing.T) {
 	ch <- chat.StreamEvent{Type: "stream_end", Envelope: `{"final":2}`}
 	close(ch)
 
-	_, envelope, err := drainCapture(ch)
+	_, envelope, _, err := drainCapture(ch)
 	if err != nil {
 		t.Fatalf("drainCapture: %v", err)
 	}
@@ -115,7 +118,7 @@ func TestDrainCapture_EmptySummaryFallback(t *testing.T) {
 	ch <- chat.StreamEvent{Type: "stream_end"}
 	close(ch)
 
-	summary, _, err := drainCapture(ch)
+	summary, _, _, err := drainCapture(ch)
 	if err != nil {
 		t.Fatalf("drainCapture: %v", err)
 	}
@@ -131,7 +134,7 @@ func TestDrainCapture_ErrorEventTerminatesDrain(t *testing.T) {
 	ch <- chat.StreamEvent{Type: "delta", Content: "should not appear"}
 	close(ch)
 
-	_, _, err := drainCapture(ch)
+	_, _, _, err := drainCapture(ch)
 	if err == nil {
 		t.Fatal("expected error from drainCapture, got nil")
 	}
@@ -150,7 +153,7 @@ func TestDrainCapture_IgnoresOtherEventTypes(t *testing.T) {
 	ch <- chat.StreamEvent{Type: "stream_end"}
 	close(ch)
 
-	summary, envelope, err := drainCapture(ch)
+	summary, envelope, counts, err := drainCapture(ch)
 	if err != nil {
 		t.Fatalf("drainCapture: %v", err)
 	}
@@ -159,6 +162,212 @@ func TestDrainCapture_IgnoresOtherEventTypes(t *testing.T) {
 	}
 	if envelope != "{}" {
 		t.Errorf("envelope = %q", envelope)
+	}
+	// tool_call + tool_result events feed counts but not summary —
+	// CW-20260512-0095 contract change. The successful tool_result here
+	// (IsError=false default) means the fabrication detector would NOT
+	// fire for this turn; that's the intended distinction.
+	if counts.calls != 1 {
+		t.Errorf("counts.calls = %d, want 1", counts.calls)
+	}
+	if counts.resultsSuccess != 1 {
+		t.Errorf("counts.resultsSuccess = %d, want 1", counts.resultsSuccess)
+	}
+	if counts.resultsError != 0 {
+		t.Errorf("counts.resultsError = %d, want 0", counts.resultsError)
+	}
+}
+
+// TestDrainCapture_CountsToolErrors verifies the CW-20260512-0095 contract:
+// tool_result events with IsError=true increment counts.resultsError, and
+// successful ones increment counts.resultsSuccess. This is the raw signal
+// the fabrication detector reads.
+func TestDrainCapture_CountsToolErrors(t *testing.T) {
+	ch := make(chan chat.StreamEvent, 16)
+	ch <- chat.StreamEvent{Type: "tool_call", Tool: "dev_read"}
+	ch <- chat.StreamEvent{Type: "tool_result", Tool: "dev_read", Summary: "path denied", IsError: true}
+	ch <- chat.StreamEvent{Type: "tool_call", Tool: "dev_glob"}
+	ch <- chat.StreamEvent{Type: "tool_result", Tool: "dev_glob", Summary: "no matches", IsError: false}
+	ch <- chat.StreamEvent{Type: "delta", Content: "Found nothing useful."}
+	ch <- chat.StreamEvent{Type: "stream_end"}
+	close(ch)
+
+	_, _, counts, err := drainCapture(ch)
+	if err != nil {
+		t.Fatalf("drainCapture: %v", err)
+	}
+	if counts.calls != 2 {
+		t.Errorf("counts.calls = %d, want 2", counts.calls)
+	}
+	if counts.resultsError != 1 {
+		t.Errorf("counts.resultsError = %d, want 1", counts.resultsError)
+	}
+	if counts.resultsSuccess != 1 {
+		t.Errorf("counts.resultsSuccess = %d, want 1", counts.resultsSuccess)
+	}
+}
+
+// TestDetectFabrication_FiresOnAllErrorWithText is the c160 regression
+// case (CW-20260512-0095). The researcher subagent invoked tools that
+// failed (no codebase access), every tool_result came back IsError=true,
+// yet the assistant still produced 8.1KB of fabricated analysis. The
+// detector must convert this turn into a non-nil error so the run lands
+// as subagent_runs.status = "failed" rather than "completed".
+func TestDetectFabrication_FiresOnAllErrorWithText(t *testing.T) {
+	counts := toolUsageCounts{calls: 3, resultsError: 3, resultsSuccess: 0}
+	err := detectFabrication("Since I cannot access the codebase, I'll provide a framework... [8.1KB of fabricated text]", counts)
+	if err == nil {
+		t.Fatal("expected fabrication-suspected error, got nil")
+	}
+	if !errors.Is(err, errSubagentFabricationSuspected) {
+		t.Errorf("error = %v; want wrapped errSubagentFabricationSuspected", err)
+	}
+	// Reason string must surface the counts for operators inspecting
+	// subagent_runs.error after the fact.
+	for _, fragment := range []string{"tool_calls=3", "tool_results_error=3", "tool_results_success=0"} {
+		if !strings.Contains(err.Error(), fragment) {
+			t.Errorf("error %q missing fragment %q", err.Error(), fragment)
+		}
+	}
+}
+
+// TestDetectFabrication_SkipsWhenAnyToolSucceeded — at least one
+// successful tool_result means the assistant text is at least partially
+// grounded; the universal Refusal rules govern further fabrication risk
+// from there, but this detector should not double-fire.
+func TestDetectFabrication_SkipsWhenAnyToolSucceeded(t *testing.T) {
+	counts := toolUsageCounts{calls: 3, resultsError: 2, resultsSuccess: 1}
+	err := detectFabrication("Found 3 tasks. Here's the analysis...", counts)
+	if err != nil {
+		t.Errorf("expected nil (one tool succeeded); got %v", err)
+	}
+}
+
+// TestDetectFabrication_SkipsWhenNoToolsAttempted — text-only replies
+// (no tool calls) are out of this detector's scope. The parent-side
+// fabrication risk is W1B's territory (CW-20260512-0096).
+func TestDetectFabrication_SkipsWhenNoToolsAttempted(t *testing.T) {
+	counts := toolUsageCounts{calls: 0, resultsError: 0, resultsSuccess: 0}
+	err := detectFabrication("Plain prose reply.", counts)
+	if err != nil {
+		t.Errorf("expected nil (no tools attempted); got %v", err)
+	}
+}
+
+// TestDetectFabrication_SkipsWhenSummaryEmpty — empty summary is handled
+// by the empty-summary fallback in ChatRunner.Run; double-failing the
+// run for that case would over-report.
+func TestDetectFabrication_SkipsWhenSummaryEmpty(t *testing.T) {
+	counts := toolUsageCounts{calls: 2, resultsError: 2, resultsSuccess: 0}
+	err := detectFabrication("", counts)
+	if err != nil {
+		t.Errorf("expected nil (empty summary); got %v", err)
+	}
+	// Whitespace-only summary trips the same skip — TrimSpace before checking.
+	err = detectFabrication("   \n\t  ", counts)
+	if err != nil {
+		t.Errorf("expected nil (whitespace-only summary); got %v", err)
+	}
+}
+
+// TestChatRunner_FabricationSuspectedFailsRun is the integration-level
+// acceptance test for CW-20260512-0095. A subagent task whose tool calls
+// all fail but still produces non-empty assistant text must surface as
+// (nil, errSubagentFabricationSuspected) so subagent.Service.execute
+// flips the row to status=failed.
+//
+// This is the runtime backstop for the c160 evidence — the universal
+// Refusal rules (CW-20260512-0100) teach the model to return failure
+// rather than fabricate, but if the model fabricates anyway, this
+// detector converts the turn into a failure the parent can read.
+func TestChatRunner_FabricationSuspectedFailsRun(t *testing.T) {
+	// Emit a stream mirroring the c160 researcher: two tool calls, both
+	// IsError, followed by a long polished assistant reply.
+	fake := &fakeChatService{events: []chat.StreamEvent{
+		{Type: "tool_call", Tool: "dev_read", ToolID: "tu_1"},
+		{Type: "tool_result", Tool: "dev_read", ToolID: "tu_1", Summary: "PERMISSION DENIED: path outside grants", IsError: true},
+		{Type: "tool_call", Tool: "dev_glob", ToolID: "tu_2"},
+		{Type: "tool_result", Tool: "dev_glob", ToolID: "tu_2", Summary: "PERMISSION DENIED: path outside grants", IsError: true},
+		{Type: "delta", Content: "Since I cannot access the codebase directly, I'll provide a comprehensive framework. "},
+		{Type: "delta", Content: "The Fragments Engine architecture is based on..."},
+		{Type: "stream_end"},
+	}}
+
+	st := &recordingSessionStore{
+		parents: map[string]*store.Session{
+			"sess-parent": {ID: "sess-parent", WorkspaceID: "ws-1"},
+		},
+	}
+	runner := &ChatRunner{
+		agents: &stubAgentReaderForRunner{agents: map[string]*store.AgentProfile{
+			"researcher": {ID: "ag-researcher", DefaultProvider: "anthropic", DefaultModel: "claude-sonnet-4-6"},
+		}},
+		store:     st,
+		invoker:   fake,
+		persistFn: func(_ context.Context, _, _ string) error { return nil },
+	}
+
+	run := &subagent.Run{
+		ID:              "run-fab",
+		Role:            "researcher",
+		ParentSessionID: "sess-parent",
+		Prompt:          "Analyze ~/Projects-apps/Fragments Engine codebase",
+	}
+	result, err := runner.Run(context.Background(), run)
+	if err == nil {
+		t.Fatal("expected fabrication-suspected error from runner.Run; got nil")
+	}
+	if !errors.Is(err, errSubagentFabricationSuspected) {
+		t.Errorf("error = %v; want wrapped errSubagentFabricationSuspected", err)
+	}
+	if result != nil {
+		t.Errorf("result = %+v; want nil on fabrication-suspected (so service maps to status=failed)", result)
+	}
+}
+
+// TestChatRunner_GroundedReplyDoesNotFireFabricationDetector pins the
+// negative side of the contract: a subagent that runs tools successfully
+// and produces text MUST land as a normal success, not a false-positive
+// fabrication failure. Without this, the detector would over-report and
+// any subagent reply with a leading text-error followed by recovery
+// would be incorrectly marked failed.
+func TestChatRunner_GroundedReplyDoesNotFireFabricationDetector(t *testing.T) {
+	fake := &fakeChatService{events: []chat.StreamEvent{
+		{Type: "tool_call", Tool: "dev_read", ToolID: "tu_a"},
+		{Type: "tool_result", Tool: "dev_read", ToolID: "tu_a", Summary: "// file contents...", IsError: false},
+		{Type: "delta", Content: "Found 12 functions in the package."},
+		{Type: "stream_end"},
+	}}
+
+	st := &recordingSessionStore{
+		parents: map[string]*store.Session{
+			"sess-parent": {ID: "sess-parent", WorkspaceID: "ws-1"},
+		},
+	}
+	runner := &ChatRunner{
+		agents: &stubAgentReaderForRunner{agents: map[string]*store.AgentProfile{
+			"worker": {ID: "ag-worker", DefaultProvider: "anthropic", DefaultModel: "claude-sonnet-4-6"},
+		}},
+		store:     st,
+		invoker:   fake,
+		persistFn: func(_ context.Context, _, _ string) error { return nil },
+	}
+
+	run := &subagent.Run{
+		ID:              "run-grounded",
+		Role:            "worker",
+		ParentSessionID: "sess-parent",
+		Prompt:          "Count the functions",
+	}
+	result, err := runner.Run(context.Background(), run)
+	if err != nil {
+		t.Fatalf("runner.Run unexpected error: %v", err)
+	}
+	if result == nil || result.Summary == "" {
+		t.Fatal("expected non-nil result with non-empty summary on grounded reply")
+	}
+	if !strings.Contains(result.Summary, "Found 12 functions") {
+		t.Errorf("summary = %q; want the grounded delta content", result.Summary)
 	}
 }
 

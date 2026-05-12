@@ -58,6 +58,28 @@ func resolveRoleWithFallback(agents agentSlugResolver, slug, caller string) (*st
 // preserved in the wrapped error.
 var errStreamFailure = errors.New("subagent: child chat loop emitted error event")
 
+// errSubagentFabricationSuspected is the sentinel returned by ChatRunner.Run
+// when the drained turn shows the fabrication-suspected pattern: the child
+// invoked at least one tool, every tool_result emitted came back with
+// IsError=true (or no successful tool roundtrips were observed), yet the
+// child still produced non-empty assistant text. The text in that scenario
+// is, by construction, not grounded in any successful tool call — most
+// often it is training-data synthesis dressed up as analysis (c160 turn 16
+// evidence, CW-20260512-0095). subagent.Service maps a non-nil run-error
+// to subagent_runs.status = "failed", which is the acceptance criterion
+// the parent agent can read to avoid downstream "I successfully set up X"
+// claims when the subagent's tools never actually succeeded.
+var errSubagentFabricationSuspected = errors.New("subagent: fabrication suspected — tools attempted but none succeeded, yet assistant produced non-empty text")
+
+// toolUsageCounts tallies tool_call and tool_result events partitioned by
+// IsError so the fabrication-suspected detector can decide whether to mark
+// a child run failed. Internal to drainCapture's contract.
+type toolUsageCounts struct {
+	calls          int // tool_call events seen
+	resultsError   int // tool_result events with IsError=true
+	resultsSuccess int // tool_result events with IsError=false
+}
+
 // drainCapture consumes a chat.StreamEvent channel and assembles a
 // summary string + envelope payload for subagent.Result. Pure logic,
 // extracted from ChatRunner.Run so the parsing rules can be unit
@@ -67,18 +89,28 @@ var errStreamFailure = errors.New("subagent: child chat loop emitted error event
 //   - "delta" events: append Content to the summary builder
 //   - "plugin_envelope" events: overwrite envelope buffer with
 //     Envelope field (last-wins)
+//   - "tool_call" events: increment counts.calls (fabrication-detector
+//     input — CW-20260512-0095)
+//   - "tool_result" events: increment counts.resultsError when IsError
+//     is true, counts.resultsSuccess otherwise. The request_tools
+//     meta-tool emits tool_result events with IsError=false even on
+//     outcomes the LLM should treat as "no useful answer" (reflection
+//     prompt, hard halt, empty load); the detector intentionally counts
+//     those as successful roundtrips — they're real harness interactions,
+//     not fabrication risk.
 //   - "error" / "structured_error" events: terminate drain, return
 //     errStreamFailure wrapped with the error message
 //   - "stream_end": capture evt.Envelope if non-empty (production
 //     generateResponse attaches the terminal aggregated envelope JSON
 //     there — chat_generate.go:837), then terminate drain successfully
-//   - everything else (stream_start, status, tool_call, tool_result,
-//     presence, etc.): ignored for capture purposes
+//   - everything else (stream_start, status, presence, etc.): ignored
+//     for capture purposes
 //
 // Returns summary, envelope (always valid JSON; "{}" when no envelope
-// event was seen), and a non-nil error if the stream emitted an error
-// event.
-func drainCapture(ch <-chan chat.StreamEvent) (summary string, envelope string, err error) {
+// event was seen), tool-usage counts (for the caller's fabrication
+// detector — load-bearing for CW-20260512-0095), and a non-nil error
+// if the stream emitted an error event.
+func drainCapture(ch <-chan chat.StreamEvent) (summary string, envelope string, counts toolUsageCounts, err error) {
 	var sb strings.Builder
 	envelope = "{}"
 
@@ -90,12 +122,20 @@ func drainCapture(ch <-chan chat.StreamEvent) (summary string, envelope string, 
 			if evt.Envelope != "" {
 				envelope = evt.Envelope
 			}
+		case "tool_call":
+			counts.calls++
+		case "tool_result":
+			if evt.IsError {
+				counts.resultsError++
+			} else {
+				counts.resultsSuccess++
+			}
 		case "error", "structured_error":
 			msg := evt.Error
 			if msg == "" {
 				msg = "stream error event with no message"
 			}
-			return sb.String(), envelope, errors.Join(errStreamFailure, errors.New(msg))
+			return sb.String(), envelope, counts, errors.Join(errStreamFailure, errors.New(msg))
 		case "stream_end":
 			// Production generateResponse attaches the final aggregated
 			// envelope JSON to stream_end.Envelope. Mid-stream
@@ -106,12 +146,50 @@ func drainCapture(ch <-chan chat.StreamEvent) (summary string, envelope string, 
 			if evt.Envelope != "" {
 				envelope = evt.Envelope
 			}
-			return sb.String(), envelope, nil
+			return sb.String(), envelope, counts, nil
 		}
 	}
 
 	// Channel closed without stream_end — treat as a clean drain.
-	return sb.String(), envelope, nil
+	return sb.String(), envelope, counts, nil
+}
+
+// detectFabrication returns a non-nil error when the drained turn matches
+// the fabrication-suspected pattern: the child attempted at least one tool
+// call AND no tool_result came back successful AND the assistant text is
+// non-empty. The intent is to convert a "subagent fabricated a polished
+// analysis because the data tools all failed" turn into a failed subagent
+// run the parent can detect via subagent_runs.status = "failed" instead of
+// being handed the fabricated text as authoritative output.
+//
+// Returns nil in three cases:
+//
+//   - the child made no tool calls at all (text-only reply — no fabrication
+//     signal here; the parent's own reply may still be wrong but that is a
+//     separate problem for the parent-side reporting layer, CW-20260512-0096);
+//   - at least one tool_result came back successful (the text is at least
+//     partially grounded in real tool output — the universal Refusal rules
+//     govern whether that grounding is sufficient);
+//   - the summary is empty (the empty-summary fallback in ChatRunner.Run
+//     turns this into a "completed without text response" surface that the
+//     parent will not mistake for grounded analysis).
+//
+// The returned error wraps errSubagentFabricationSuspected so callers can
+// match with errors.Is, and carries a structured reason string for
+// operators inspecting subagent_runs.error.
+func detectFabrication(summary string, counts toolUsageCounts) error {
+	if counts.calls == 0 {
+		return nil
+	}
+	if counts.resultsSuccess > 0 {
+		return nil
+	}
+	if strings.TrimSpace(summary) == "" {
+		return nil
+	}
+	return fmt.Errorf("%w: tool_calls=%d, tool_results_error=%d, tool_results_success=%d, assistant_text_chars=%d",
+		errSubagentFabricationSuspected,
+		counts.calls, counts.resultsError, counts.resultsSuccess, len(summary))
 }
 
 // errRoleResolveFailed is the sentinel for when GetAgentBySlug fails.
@@ -308,10 +386,32 @@ func (r *ChatRunner) Run(ctx context.Context, run *subagent.Run) (*subagent.Resu
 	captureCh := make(chan chat.StreamEvent, 64)
 	go r.invokeChat(ctx, childID, assistantMsgID, run.Prompt, captureCh)
 
-	summary, envelope, runErr := drainCapture(captureCh)
+	summary, envelope, counts, runErr := drainCapture(captureCh)
 	if runErr != nil {
 		return nil, runErr
 	}
+
+	// CW-20260512-0095: fabrication-suspected detection. When the child
+	// invoked at least one tool, no tool_result came back successful, and
+	// the assistant still produced non-empty text, fail the run rather
+	// than hand the (likely fabricated) text back to the parent. The
+	// universal Refusal rules (CW-20260512-0100) teach the model not to
+	// fabricate; this is the runtime backstop for when it does anyway.
+	// The error message captures the counts so the operator inspecting
+	// subagent_runs.error sees the evidence shape.
+	if fabErr := detectFabrication(summary, counts); fabErr != nil {
+		slog.Warn("subagent: fabrication suspected; failing run",
+			"run_id", run.ID,
+			"child_session_id", childID,
+			"role", run.Role,
+			"tool_calls", counts.calls,
+			"tool_results_error", counts.resultsError,
+			"tool_results_success", counts.resultsSuccess,
+			"assistant_text_chars", len(summary),
+		)
+		return nil, fabErr
+	}
+
 	if summary == "" {
 		summary = fmt.Sprintf("subagent %s completed without text response", run.Role)
 	}

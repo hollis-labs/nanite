@@ -404,3 +404,131 @@ func TestSurfaceErrorOrSuppress_ThenPreClassified_OneLookup(t *testing.T) {
 		t.Errorf("CreateMessage called %d times; want 1", cs.callCount)
 	}
 }
+
+// ============================================================================
+// PR #139 review #2 — clean-cancel persistence path
+// ============================================================================
+
+// TestPersistPartialAssistantCancelled_NoErrorFlag verifies that the cancel-
+// path helper writes a row with HasError=false in the structured content and
+// no `had_error` flag in the metadata column. A deliberate stop must not
+// mislabel the turn as an error.
+func TestPersistPartialAssistantCancelled_NoErrorFlag(t *testing.T) {
+	cs := &capturingStore{}
+	svc := &chatServiceImpl{store: cs}
+
+	svc.persistPartialAssistantCancelled("sess-1", "msg-1", "agent-1", "partial bytes streamed before cancel")
+
+	if cs.callCount != 1 {
+		t.Fatalf("expected CreateMessage called once, got %d", cs.callCount)
+	}
+	msg := cs.lastMsg
+	if msg == nil {
+		t.Fatal("lastMsg is nil")
+	}
+	// Metadata must NOT carry had_error=true. Empty metadata is acceptable;
+	// non-empty metadata must not assert the flag.
+	if msg.Metadata != "" {
+		var meta map[string]interface{}
+		if err := json.Unmarshal([]byte(msg.Metadata), &meta); err != nil {
+			t.Fatalf("metadata is not valid JSON: %q — %v", msg.Metadata, err)
+		}
+		if v, ok := meta["had_error"]; ok && v == true {
+			t.Errorf("cancel-path metadata must not carry had_error=true; got %q", msg.Metadata)
+		}
+	}
+	// Structured content must record HasError=false.
+	var structured map[string]interface{}
+	if err := json.Unmarshal([]byte(msg.Content), &structured); err != nil {
+		t.Fatalf("content is not valid JSON: %q — %v", msg.Content, err)
+	}
+	flags, _ := structured["flags"].(map[string]interface{})
+	if v, ok := flags["has_error"]; ok && v == true {
+		t.Errorf("StructuredMessage.Flags.HasError must be false for clean cancel; got flags=%v", flags)
+	}
+}
+
+// TestPersistPartialAssistantCancelled_EmptyContentPlaceholder verifies that
+// the cancel-path helper still writes the "[generation interrupted]"
+// placeholder when nothing has been streamed, so a refresh shows the turn
+// stub instead of a missing row.
+func TestPersistPartialAssistantCancelled_EmptyContentPlaceholder(t *testing.T) {
+	cs := &capturingStore{}
+	svc := &chatServiceImpl{store: cs}
+
+	svc.persistPartialAssistantCancelled("sess-1", "msg-1", "agent-1", "")
+
+	if cs.callCount != 1 {
+		t.Fatalf("expected CreateMessage called once, got %d", cs.callCount)
+	}
+	var structured map[string]interface{}
+	if err := json.Unmarshal([]byte(cs.lastMsg.Content), &structured); err != nil {
+		t.Fatalf("content is not valid JSON: %q", cs.lastMsg.Content)
+	}
+	text, _ := structured["text"].(string)
+	if text != "[generation interrupted]" {
+		t.Errorf("expected placeholder text %q, got %q", "[generation interrupted]", text)
+	}
+}
+
+// TestPersistPartialAssistantCancelled_NoSubagentLookup verifies the cancel
+// path does NOT classify against ActiveSubagentRunForParent. Intentional
+// cancels are not "internal errors" we route through the recovery broker,
+// so the suppression classifier isn't needed.
+func TestPersistPartialAssistantCancelled_NoSubagentLookup(t *testing.T) {
+	cs := &capturingStore{}
+	svc := &chatServiceImpl{store: cs}
+
+	svc.persistPartialAssistantCancelled("sess-1", "msg-1", "agent-1", "content")
+
+	if cs.lookupCallCount != 0 {
+		t.Errorf("ActiveSubagentRunForParent called %d times; want 0 — cancel path does not classify", cs.lookupCallCount)
+	}
+}
+
+// TestPersistPartialAssistantCancelled_RealStore exercises the helper end-to-
+// end against a real SQLite store. Verifies the row is readable and that
+// neither HasError nor `had_error` is set.
+func TestPersistPartialAssistantCancelled_RealStore(t *testing.T) {
+	s, err := store.New(t.TempDir() + "/persist_cancel.db")
+	if err != nil {
+		t.Fatalf("store.New: %v", err)
+	}
+	t.Cleanup(func() { s.Close() })
+
+	sess := &store.Session{ID: "test-session", Status: "active"}
+	if err := s.CreateSession(sess); err != nil {
+		t.Fatalf("CreateSession: %v", err)
+	}
+
+	svc := &chatServiceImpl{store: s}
+	const msgID = "test-msg-cancel"
+	svc.persistPartialAssistantCancelled("test-session", msgID, "test-agent", "hello from cancel path")
+
+	msg, err := s.GetMessage(msgID)
+	if err != nil {
+		t.Fatalf("GetMessage: %v — cancel-path row was not persisted", err)
+	}
+	if msg.Role != "assistant" {
+		t.Errorf("role: got %q, want %q", msg.Role, "assistant")
+	}
+	// Metadata is allowed to be empty for the cancel path; if non-empty,
+	// it must not assert had_error=true.
+	if msg.Metadata != "" {
+		var meta map[string]interface{}
+		if err := json.Unmarshal([]byte(msg.Metadata), &meta); err != nil {
+			t.Fatalf("metadata is not valid JSON: %q — %v", msg.Metadata, err)
+		}
+		if v, ok := meta["had_error"]; ok && v == true {
+			t.Errorf("cancel-path metadata must not carry had_error=true; got %q", msg.Metadata)
+		}
+	}
+	var structured map[string]interface{}
+	if err := json.Unmarshal([]byte(msg.Content), &structured); err != nil {
+		t.Fatalf("content not valid JSON: %q — %v", msg.Content, err)
+	}
+	flags, _ := structured["flags"].(map[string]interface{})
+	if v, ok := flags["has_error"]; ok && v == true {
+		t.Errorf("StructuredMessage.Flags.HasError must be false for clean cancel; got flags=%v", flags)
+	}
+}

@@ -739,23 +739,57 @@ func (s *chatServiceImpl) generateResponse(ctx context.Context, sessionID, assis
 			diagLogLoopExit(sessionID, assistantMsgID, ls.iteration, "shouldStop:"+string(code), len(ls.toolCallRefs), ch)
 			break
 		}
-		// Context cancellation — intentional only (takeover / shutdown /
-		// user-initiated stop). CW-20260512-0006 removed the wall-clock
-		// deadline, so a non-nil ctx.Err() here is never a wall-clock
-		// timeout; it's always an intentional cancel. Emit a clean
-		// status event (NOT an ErrorCodeInternal envelope — there is no
-		// internal error) and persist any partial content the assistant
-		// generated before the cancel.
-		if ctx.Err() != nil {
-			slog.Info("generateResponse cancelled", "err", ctx.Err(), "session_id", sessionID)
-			diagLogLoopExit(sessionID, assistantMsgID, ls.iteration, "ctx_cancelled:"+ctx.Err().Error(), len(ls.toolCallRefs), ch)
+		// Context cancellation — split on ctx.Err() shape.
+		//
+		// CW-20260512-0006 removed the global 5-minute wall-clock deadline.
+		// The remaining sources of a non-nil ctx.Err() are:
+		//   1. context.Canceled — intentional stop (takeover / shutdown /
+		//      user-initiated cancel via POST /chat/cancel). NOT an error.
+		//   2. context.DeadlineExceeded — only fires when the per-agent
+		//      `constraints.MaxTimeSeconds` opt-in is set above (~line 220),
+		//      which wraps ctx with context.WithTimeout(ctx, agentTimeout).
+		//      This is the agent's own configured budget firing, distinct
+		//      from the removed global deadline. Surface as an error so the
+		//      FE shows a timeout card and the recovery broker can act.
+		//
+		// PR #139 review (Copilot): the prior single-branch "any ctx.Err is
+		// intentional cancel" was incorrect because the MaxTimeSeconds
+		// wrapper can produce DeadlineExceeded; that path was being
+		// mislabelled "Stopped: cancelled" with no error semantics.
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			diagLogLoopExit(sessionID, assistantMsgID, ls.iteration, "ctx_cancelled:"+ctxErr.Error(), len(ls.toolCallRefs), ch)
+			if errors.Is(ctxErr, context.DeadlineExceeded) {
+				// Per-agent MaxTimeSeconds budget exceeded. Mirror the shape
+				// of the old 5-min deadline emission (envelope + event +
+				// broker-notify pre-classified persist with had_error=true)
+				// but plumb the per-agent constraint context so the user
+				// knows it was the agent's configured budget — not a global
+				// wall clock — that fired.
+				slog.Warn("generateResponse agent MaxTimeSeconds exceeded",
+					"err", ctxErr, "session_id", sessionID,
+					"max_time_seconds", constraints.MaxTimeSeconds)
+				if s.suppressSurfaceIfSubagentCaused(sessionID, "agent_max_time_seconds", fullContent.String()) {
+					return
+				}
+				msg := fmt.Sprintf("Agent execution time limit exceeded (%d seconds). Please try again with a simpler request or raise the agent's MaxTimeSeconds constraint.", constraints.MaxTimeSeconds)
+				details := map[string]interface{}{
+					"max_time_seconds": constraints.MaxTimeSeconds,
+					"session":          sessionID,
+				}
+				ch <- chat.ErrorEnvelopeDelta(chat.ErrorCodeProviderError, msg, details)
+				ch <- chat.ErrorEvent(chat.ErrorCodeProviderError, msg, details)
+				s.persistPartialAssistantAndNotifyBrokerPreClassified(ctx, sessionID, assistantMsgID, agentID, fullContent.String(), providerName, agent.Slug, ctxErr) // CW-20260419-0019, CW-20260512-0001, CW-20260512-0002
+				return
+			}
+			// context.Canceled (or any other non-deadline ctx.Err()) — clean
+			// intentional stop. Emit a status event (NOT an ErrorCodeInternal
+			// envelope) and persist any partial content via the
+			// cancellation-specific helper that writes HasError=false (no
+			// `had_error` metadata) so the FE doesn't render an error turn
+			// for a deliberate stop.
+			slog.Info("generateResponse cancelled", "err", ctxErr, "session_id", sessionID)
 			ch <- chat.StreamEvent{Type: "status", Content: "Stopped: cancelled"}
-			// Persist whatever the assistant managed to stream so far so a
-			// reload doesn't lose the partial work. The broker-notify
-			// pre-classified variant skips the redundant subagent lookup
-			// since intentional cancels are not "internal errors" we
-			// classify to the recovery broker.
-			s.persistPartialAssistantPreClassified(sessionID, assistantMsgID, agentID, fullContent.String())
+			s.persistPartialAssistantCancelled(sessionID, assistantMsgID, agentID, fullContent.String())
 			return
 		}
 
@@ -1905,6 +1939,43 @@ func (s *chatServiceImpl) persistPartialAssistantPreClassified(sessionID, assist
 	}
 	if err := s.store.CreateMessage(msg); err != nil {
 		slog.Warn("chat-service: persistPartialAssistant: failed to save partial message",
+			"session_id", sessionID, "msg_id", assistantMsgID, "err", err)
+	}
+}
+
+// persistPartialAssistantCancelled saves a partial assistant message for a
+// CLEAN cancellation path (intentional stop: takeover / shutdown /
+// user-initiated cancel). The persisted row has StructuredMessage.Flags.HasError=false
+// and the metadata column does NOT carry `had_error:true`, so FE rehydration
+// (loadPersistedErrorState / useChat.ts) does not render the turn as an error.
+//
+// PR #139 review (Copilot): the cancel path previously routed through
+// persistPartialAssistantPreClassified, which always writes HasError=true +
+// `had_error:true` metadata. That mislabels intentional stops as error turns
+// and risks triggering "error turn" UI/analytics behavior. This helper is the
+// cancel-specific persistence path; all other partial-persist call sites
+// continue to use the error-flag-true variants.
+//
+// Like the other persist-partial helpers, the call is best-effort — errors
+// are logged but not propagated.
+func (s *chatServiceImpl) persistPartialAssistantCancelled(sessionID, assistantMsgID, agentID, content string) {
+	if content == "" {
+		content = "[generation interrupted]"
+	}
+	// hasError=false: clean stop, not an error turn.
+	structured := chat.WrapResponse(content, "default", nil, nil, false, false)
+	structuredJSON := structured.MarshalContent()
+	msg := &store.Message{
+		ID:        assistantMsgID,
+		SessionID: sessionID,
+		AgentID:   agentID,
+		Role:      "assistant",
+		Content:   structuredJSON,
+		// Metadata intentionally omitted (empty) — no `had_error` flag for
+		// an intentional cancel.
+	}
+	if err := s.store.CreateMessage(msg); err != nil {
+		slog.Warn("chat-service: persistPartialAssistantCancelled: failed to save partial message",
 			"session_id", sessionID, "msg_id", assistantMsgID, "err", err)
 	}
 }

@@ -16,6 +16,17 @@
 -- When default.md changes, re-flow here — do NOT edit this SQL in isolation.
 -- Slug: chat-role-harness  Priority: 1  Scope: system  is_builtin: 1
 --
+-- CW-20260512-0100 (PROMPT-SYNC note): default.md was demoted to role-identity
+-- + role-specific overrides only when universal grounding/refusal rules moved
+-- into internal/chat/universal_rules.go. Migration 058 is the single in-place
+-- UPDATE that aligns BOTH already-deployed and fresh-install databases onto
+-- that demoted body. This file (027) is intentionally LEFT at the historic
+-- body so the sibling chain (046/048/049/050/051/053/055/056) remains
+-- coherent on fresh installs — those migrations were authored against this
+-- body and only become true no-ops once 058 demotes it. The result on fresh
+-- install is: 027 seeds historic → 046-056 layer-on edits → 058 demotes to
+-- the new slim form. On already-deployed: same terminal state, fewer steps.
+--
 -- The fixed ID 'blt-chat-harness-001' is stable across re-runs.
 -- Idempotent: INSERT OR IGNORE on both rows.
 

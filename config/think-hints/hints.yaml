@@ -49,9 +49,16 @@ hints:
 
   - id: peer_query
     affordance: peer_query
+    # CW-20260512-0100 (R5): rewrote to discourage over-trust of subagent /
+    # peer output. "Specialist peer" + "second opinion" framing primed the
+    # parent agent to treat peer replies as authoritative without verifying
+    # the peer actually grounded its work in tool output — c160 fabrication
+    # chain root cause #2. The replacement frames peer replies as drafts to
+    # verify and explicitly calls out shared training-data risk.
     body: >-
       **Peer-query** (nanite_message_send): dispatch a focused question to a
-      specialist peer; use for second opinions or deep sub-tasks.
+      peer agent for parallel research. Treat the reply as a draft to verify,
+      not as authoritative — the peer has the same training-data risk you do.
     triggers:
       scope_tier_in: [large, open]
       reflex_id_in: [planner-mention, planner-large-task, researcher-mention]

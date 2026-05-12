@@ -55,6 +55,16 @@ func NewContextClient(s *store.Store) *ContextClient {
 // 1. System prompt (from prompt templates or legacy agent + mode + workspace)
 // 2. Recent messages (from session history)
 // 3. Enforce budget ceiling
+//
+// Legacy flat-prompt path. CW-20260512-0100 / Comment 3b: this path used to
+// bypass the universal-rules layer because the prefix was injected only at
+// the slot-based AssembleSlotSources call site. The universal-rules layer's
+// architectural guarantee is "cannot be bypassed", so we now prepend
+// universalRulesPrefix here too. AssembleContext's only non-test production
+// caller is RecomposeSystemPrompt (internal/service/chat.go), which itself
+// has no current callers — but exposing the interface without the prefix
+// would create a silent fabrication-risk regression the moment anyone wires
+// it up. Closing the gap at this layer is cheaper than auditing the future.
 func (cb *ContextClient) AssembleContext(ctx context.Context, session *store.Session, agent *store.AgentProfile, mode *store.AgentMode, workspace *store.Workspace) (string, []llmtypes.ChatMessage, error) {
 	_, span := feotel.StartSpan(ctx, "nanite.broker.assembleContext")
 	defer span.End()
@@ -82,6 +92,10 @@ func (cb *ContextClient) AssembleContext(ctx context.Context, session *store.Ses
 	if cb.ContextBroker != nil {
 		systemPrompt = cb.enrichWithContextBroker(ctx, systemPrompt, session, agent)
 	}
+
+	// 1c. Prepend the universal-rules layer so the legacy path matches the
+	// slot path's "cannot be bypassed" guarantee. See function doc above.
+	systemPrompt = universalRulesPrefix(systemPrompt)
 
 	// 2. Load messages from DB. Start with a generous limit.
 	messages, err := cb.Store.ListMessages(session.ID, 200)
@@ -164,8 +178,20 @@ func (cb *ContextClient) AssembleSlotSources(ctx context.Context, session *store
 		attribute.String("nanite.agent.id", agent.ID),
 	)
 
-	// System slot — think-tool block + workspace identity. Agent-specific
-	// content moves to the Agent slot. v0/v1/v2 selected by feature flags.
+	// System slot — universal rules preamble (CW-20260512-0100) + think-tool
+	// block + workspace identity. Agent-specific content moves to the Agent
+	// slot. v0/v1/v2 selected by feature flags.
+	//
+	// We compose the non-universal content (think-tool + workspace) into
+	// sysB first, then route through universalRulesPrefix so the helper
+	// owns the join semantics (block + "\n\n" + existing). This keeps the
+	// production path and the universal_rules_test.go contract in lockstep
+	// — drift between the two surfaces is exactly what Comment 3a was
+	// flagging. SlotSystem is the first slot in ctxpkg.SlotOrder so the
+	// universal block lands as the stable cache prefix, preserving
+	// Anthropic's `cacheable_prefix_tokens` across agents that share rules.
+	// See internal/chat/universal_rules.go for the architectural rationale
+	// (supersedes deep-dive R1+R2 per CW-20260512-0100).
 	var sysB strings.Builder
 	var thinkBlock string
 	if cb.HintDispatcher != nil && IsThinkBlockV2Enabled() {
@@ -182,6 +208,7 @@ func (cb *ContextClient) AssembleSlotSources(ctx context.Context, session *store
 			sysB.WriteString(workspace.Description)
 		}
 	}
+	systemSlotContent := universalRulesPrefix(sysB.String())
 
 	// Agent slot — composed via prompt templates with skills, falling back to
 	// raw agent + mode strings when no template is assigned. The agent slot
@@ -252,7 +279,7 @@ func (cb *ContextClient) AssembleSlotSources(ctx context.Context, session *store
 	}
 
 	return &SlotSources{
-		System:           sysB.String(),
+		System:           systemSlotContent,
 		Memory:           memoryContent,
 		Agent:            agentPrompt,
 		Mode:             modeContent,

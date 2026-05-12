@@ -203,12 +203,55 @@ func (s *Store) RemovePromptTemplateFromAgent(agentID, templateID string) error 
 // once ensures the canonical template missing warning is emitted only once per process.
 var (
 	canonicalTemplateMissingOnce sync.Once
+	// CW-20260512-0100 (R6): per-agent unassigned-template warning tracker.
+	// Pre-CW-20260512-0100 only the file-default agent surfaced a "no
+	// template assigned" warning; every other builtin/auto profile silently
+	// fell back to agent.SystemPrompt (or empty), which is what created the
+	// c160 fabrication chain — the researcher subagent resolved to the
+	// worker profile, worker had no template, no warning fired, and the
+	// 464-char execute-or-bust prompt produced 8.1KB of fabricated analysis.
+	//
+	// Post CW-20260512-0100 the universal rules layer covers every agent
+	// regardless of template assignment, so a missing template is no longer
+	// a fabrication risk. But surfacing the gap as a one-shot slog.Warn per
+	// agent ID keeps the signal visible — an operator who adds a new
+	// builtin/auto profile and forgets to assign a template gets a log line
+	// rather than silent gradient drift away from the role-specific prompt
+	// they intended.
+	//
+	// sync.Map<string,*sync.Once> rather than a closed-over set so the
+	// once-per-agent-id semantics survive concurrent first-touches without
+	// a separate mutex.
+	unassignedTemplateOnces sync.Map
 )
+
+// warnUnassignedTemplateOnce emits the one-shot warning for the given
+// agentID. Idempotent across goroutines via per-agent sync.Once.
+func warnUnassignedTemplateOnce(agentID string) {
+	if agentID == "" {
+		return
+	}
+	once, _ := unassignedTemplateOnces.LoadOrStore(agentID, &sync.Once{})
+	once.(*sync.Once).Do(func() {
+		slog.Warn(
+			"store: prompt-template unassigned for agent — universal rules layer covers grounding/refusal, but role-specific prompt is empty (or agent.SystemPrompt fallback)",
+			"agent_id", agentID,
+			"hint", "CW-20260512-0100 universal-rules layer auto-injects grounding/refusal/honesty; missing template now means role-identity-only is empty. Assign a template via agent_prompt_templates if role-specific overrides are intended.",
+		)
+	})
+}
 
 // ComposePromptForAgent assembles the system prompt for an agent by merging all assigned
 // prompt templates in priority order, resolving {{var}} placeholders from the variables map.
 // If the agent is file-default (the canonical Chat agent) and has no templates assigned,
 // emits a one-shot warning indicating the canonical chat-role-harness template is missing.
+//
+// CW-20260512-0100 (R6): also emits a one-shot per-agent-ID warning when ANY
+// non-file-default agent has no templates assigned. The universal-rules
+// layer in internal/chat/universal_rules.go now covers grounding/refusal
+// regardless of template assignment, but the warning surfaces the gap so an
+// operator who adds a new profile and forgets to assign a template gets a
+// log signal rather than silent drift.
 func (s *Store) ComposePromptForAgent(agentID string, variables map[string]string) (string, error) {
 	templates, err := s.ListPromptTemplatesForAgent(agentID)
 	if err != nil {
@@ -229,6 +272,12 @@ func (s *Store) ComposePromptForAgent(agentID string, variables map[string]strin
 					"migration", "027_chat_role_harness_prompt.sql",
 				)
 			})
+		} else {
+			// CW-20260512-0100 (R6): one-shot warning per non-file-default
+			// agent ID that lacks a template assignment. Empty-template
+			// agents now inherit grounding via the universal-rules layer,
+			// but surfacing the gap keeps unexpected-profile drift visible.
+			warnUnassignedTemplateOnce(agentID)
 		}
 		return "", nil
 	}

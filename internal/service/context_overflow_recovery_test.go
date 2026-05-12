@@ -60,7 +60,7 @@ func (f *fakeEventEmitter) EmitModeChanged(_ context.Context, _, _, _ string)   
 // that UserSettings.ContextOverflowRecovery=false produces a no-op — callers
 // see ok=false and fall through to the normal error path.
 func TestRecoverFromContextOverflow_DisabledFlag(t *testing.T) {
-	s, err := store.New(t.TempDir() + "/test.db")
+	s, err := store.New(context.Background(), t.TempDir()+"/test.db")
 	if err != nil {
 		t.Fatalf("store.New: %v", err)
 	}
@@ -101,7 +101,7 @@ func TestRecoverFromContextOverflow_DisabledFlag(t *testing.T) {
 // fallback. If the provider registry has no summarizer, we can't compact, so
 // recovery reports unsuccessful and the caller surfaces the original error.
 func TestRecoverFromContextOverflow_NoSummarizerSkips(t *testing.T) {
-	s, err := store.New(t.TempDir() + "/test.db")
+	s, err := store.New(context.Background(), t.TempDir()+"/test.db")
 	if err != nil {
 		t.Fatalf("store.New: %v", err)
 	}

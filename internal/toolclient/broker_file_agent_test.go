@@ -2,6 +2,7 @@ package toolclient
 
 import (
 	"bytes"
+	"context"
 	"log/slog"
 	"path/filepath"
 	"strings"
@@ -15,7 +16,7 @@ import (
 // store.newTestStore (unexported); this helper is the minimal equivalent.
 func newStoreForTest(t *testing.T) *store.Store {
 	t.Helper()
-	s, err := store.New(filepath.Join(t.TempDir(), "test.db"))
+	s, err := store.New(context.Background(), filepath.Join(t.TempDir(), "test.db"))
 	if err != nil {
 		t.Fatalf("store.New: %v", err)
 	}

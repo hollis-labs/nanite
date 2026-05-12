@@ -1,6 +1,7 @@
 package store
 
 import (
+	"context"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -8,7 +9,7 @@ import (
 
 func newSeededStore(t *testing.T) *Store {
 	t.Helper()
-	s, err := New(filepath.Join(t.TempDir(), "test.db"))
+	s, err := New(context.Background(), filepath.Join(t.TempDir(), "test.db"))
 	if err != nil {
 		t.Fatal(err)
 	}

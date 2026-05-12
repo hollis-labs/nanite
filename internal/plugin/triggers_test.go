@@ -74,7 +74,7 @@ func waitForSend(t *testing.T, conn *testConnector, expected int32, timeout time
 func newTestHostWithStore(t *testing.T) (*Host, *store.Store) {
 	t.Helper()
 	dbPath := filepath.Join(t.TempDir(), "test.db")
-	s, err := store.New(dbPath)
+	s, err := store.New(context.Background(), dbPath)
 	if err != nil {
 		t.Fatalf("open test store: %v", err)
 	}

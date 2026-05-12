@@ -71,7 +71,7 @@ func cmdPlugin(args []string) {
 		pluginInstall(args[1])
 	case "uninstall":
 		if len(args) < 2 {
-			fmt.Fprintln(os.Stderr, "usage: " + brand.BinaryName + " plugin uninstall <name>")
+			fmt.Fprintln(os.Stderr, "usage: "+brand.BinaryName+" plugin uninstall <name>")
 			os.Exit(1)
 		}
 		pluginUninstall(args[1])
@@ -109,13 +109,13 @@ func cmdPlugin(args []string) {
 		pluginList()
 	case "disable":
 		if len(args) < 2 {
-			fmt.Fprintln(os.Stderr, "usage: " + brand.BinaryName + " plugin disable <name>")
+			fmt.Fprintln(os.Stderr, "usage: "+brand.BinaryName+" plugin disable <name>")
 			os.Exit(1)
 		}
 		pluginDisable(args[1])
 	case "enable":
 		if len(args) < 2 {
-			fmt.Fprintln(os.Stderr, "usage: " + brand.BinaryName + " plugin enable <name>")
+			fmt.Fprintln(os.Stderr, "usage: "+brand.BinaryName+" plugin enable <name>")
 			os.Exit(1)
 		}
 		pluginEnable(args[1])
@@ -509,7 +509,7 @@ func pluginList() {
 // sufficient for running Uninstall() cleanup methods.
 func buildMinimalHost() (*plugin.Host, error) {
 	dbPath := resolveDBPath()
-	s, err := store.New(dbPath)
+	s, err := store.New(context.Background(), dbPath)
 	if err != nil {
 		return nil, fmt.Errorf("open database %s: %w", dbPath, err)
 	}

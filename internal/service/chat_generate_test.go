@@ -108,7 +108,7 @@ func TestExtraSystemPrefix_ProgressiveCatalog(t *testing.T) {
 // composeExtraSystemPrefix.
 func TestOverrideBlockReachesPrefix_EndToEnd(t *testing.T) {
 	// 1. Real store, migration 022 applied via store.New.
-	s, err := store.New(t.TempDir() + "/e2e.db")
+	s, err := store.New(context.Background(), t.TempDir()+"/e2e.db")
 	if err != nil {
 		t.Fatalf("store.New: %v", err)
 	}

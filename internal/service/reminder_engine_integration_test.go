@@ -36,7 +36,7 @@ import (
 //  4. FormatInjection produces the expected <system-reminder> block.
 //  5. Appending the injection to an existing SlotUserContext works correctly.
 func TestReminderEngine_TurnCountFiresAndInjectsSlot(t *testing.T) {
-	s, err := store.New(t.TempDir() + "/test.db")
+	s, err := store.New(context.Background(), t.TempDir()+"/test.db")
 	if err != nil {
 		t.Fatalf("store.New: %v", err)
 	}
@@ -164,7 +164,7 @@ func TestReminderEngine_TurnCountFiresAndInjectsSlot(t *testing.T) {
 // the post-injection Blocks/SystemPrompt rebuild) and asserts that the
 // derived views actually contain the reminder text.
 func TestReminderEngine_TimeTriggerReachesLLMSlotBlocks(t *testing.T) {
-	s, err := store.New(t.TempDir() + "/test.db")
+	s, err := store.New(context.Background(), t.TempDir()+"/test.db")
 	if err != nil {
 		t.Fatalf("store.New: %v", err)
 	}
@@ -294,7 +294,7 @@ func TestReminderEngine_TimeTriggerReachesLLMSlotBlocks(t *testing.T) {
 // TestReminderEngine_TurnCountFiresThroughInjectionPipeline asserts the
 // equivalent regression for turn_count triggers.
 func TestReminderEngine_TurnCountFiresThroughInjectionPipeline(t *testing.T) {
-	s, err := store.New(t.TempDir() + "/test.db")
+	s, err := store.New(context.Background(), t.TempDir()+"/test.db")
 	if err != nil {
 		t.Fatalf("store.New: %v", err)
 	}
@@ -416,7 +416,7 @@ func TestReminderEngine_InspectorRecordsFiredReminders(t *testing.T) {
 // session.MessageCount (the existing DB field) serves correctly as the
 // monotonic turn counter without requiring a new schema field.
 func TestReminderEngine_SessionMessageCountAsTurnCounter(t *testing.T) {
-	s, err := store.New(t.TempDir() + "/test.db")
+	s, err := store.New(context.Background(), t.TempDir()+"/test.db")
 	if err != nil {
 		t.Fatalf("store.New: %v", err)
 	}

@@ -1,6 +1,7 @@
 package mcpconfig
 
 import (
+	"context"
 	"encoding/json"
 	"os"
 	"path/filepath"
@@ -117,7 +118,7 @@ func TestToStoreConfigs(t *testing.T) {
 
 func TestImportAndExport_Roundtrip(t *testing.T) {
 	dbPath := filepath.Join(t.TempDir(), "test.db")
-	s, err := store.New(dbPath)
+	s, err := store.New(context.Background(), dbPath)
 	if err != nil {
 		t.Fatalf("open store: %v", err)
 	}
@@ -201,7 +202,7 @@ func TestImportAndExport_Roundtrip(t *testing.T) {
 
 func TestImport_EmptyEnvAndArgs(t *testing.T) {
 	dbPath := filepath.Join(t.TempDir(), "test.db")
-	s, err := store.New(dbPath)
+	s, err := store.New(context.Background(), dbPath)
 	if err != nil {
 		t.Fatalf("open store: %v", err)
 	}

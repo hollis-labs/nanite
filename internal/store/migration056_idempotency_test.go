@@ -1,6 +1,7 @@
 package store
 
 import (
+	"context"
 	"strings"
 	"testing"
 )
@@ -24,7 +25,7 @@ import (
 // idempotency matters).
 func TestMigration056_Idempotency(t *testing.T) {
 	dbPath := t.TempDir() + "/migration056test.db"
-	s, err := New(dbPath)
+	s, err := New(context.Background(), dbPath)
 	if err != nil {
 		t.Fatalf("store.New: %v", err)
 	}

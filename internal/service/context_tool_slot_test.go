@@ -35,7 +35,7 @@ func (s *scriptedClassifier) Classify(_ context.Context, in intent.Input) (inten
 
 func newStubbedContextService(t *testing.T, classifier intent.Classifier, overrides ToolCacheOverrideStore, cacheEnabled bool) (*contextServiceImpl, *store.Store) {
 	t.Helper()
-	s, err := store.New(t.TempDir() + "/test.db")
+	s, err := store.New(context.Background(), t.TempDir()+"/test.db")
 	if err != nil {
 		t.Fatalf("store.New: %v", err)
 	}

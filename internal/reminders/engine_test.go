@@ -1,6 +1,7 @@
 package reminders_test
 
 import (
+	"context"
 	"encoding/json"
 	"os"
 	"testing"
@@ -18,7 +19,7 @@ func openTestStore(t *testing.T) *store.Store {
 		t.Fatal(err)
 	}
 	f.Close()
-	s, err := store.New(f.Name())
+	s, err := store.New(context.Background(), f.Name())
 	if err != nil {
 		t.Fatal(err)
 	}

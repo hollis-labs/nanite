@@ -1,6 +1,7 @@
 package store
 
 import (
+	"context"
 	"database/sql"
 	"testing"
 )
@@ -121,7 +122,7 @@ func TestMCPServerTrust_MigrationIdempotent(t *testing.T) {
 	dir := t.TempDir()
 	dbPath := dir + "/test.db"
 
-	s1, err := New(dbPath)
+	s1, err := New(context.Background(), dbPath)
 	if err != nil {
 		t.Fatalf("first New: %v", err)
 	}
@@ -129,7 +130,7 @@ func TestMCPServerTrust_MigrationIdempotent(t *testing.T) {
 		t.Fatalf("close s1: %v", closeErr)
 	}
 
-	s2, err := New(dbPath)
+	s2, err := New(context.Background(), dbPath)
 	if err != nil {
 		t.Fatalf("second New (idempotent migrations): %v", err)
 	}

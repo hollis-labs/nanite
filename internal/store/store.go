@@ -10,6 +10,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/hollis-labs/go-sqlite/sqlitekit"
 	_ "modernc.org/sqlite"
 )
 
@@ -30,27 +31,24 @@ func (s *Store) DBPath() string {
 // New opens a SQLite database at dbPath and runs all embedded migrations.
 // The dbPath is resolved to an absolute path so that DBPath() is safe
 // to use from subprocesses running in different working directories.
-func New(dbPath string) (*Store, error) {
+//
+// The opener is sqlitekit.OpenSingle with WriterOptions: single-connection
+// pool, DSN-level pragmas (WAL + foreign_keys + busy_timeout(5s) +
+// synchronous(NORMAL) + temp_store(memory) + mmap_size(30 GB) +
+// journal_size_limit(64 MiB) + _txlock=immediate) applied on every
+// connection modernc opens.
+func New(ctx context.Context, dbPath string) (*Store, error) {
 	absPath, err := filepath.Abs(dbPath)
 	if err != nil {
 		return nil, fmt.Errorf("resolve db path: %w", err)
 	}
 
-	db, err := sql.Open("sqlite", dbPath)
+	db, err := sqlitekit.OpenSingle(ctx, absPath, sqlitekit.OpenOptions{
+		Options:         sqlitekit.WriterOptions(),
+		CreateParentDir: true,
+	})
 	if err != nil {
 		return nil, fmt.Errorf("open db: %w", err)
-	}
-
-	// Enable WAL mode and foreign keys.
-	for _, pragma := range []string{
-		"PRAGMA journal_mode=WAL",
-		"PRAGMA foreign_keys=ON",
-		"PRAGMA busy_timeout=5000",
-	} {
-		if _, err := db.Exec(pragma); err != nil {
-			db.Close()
-			return nil, fmt.Errorf("exec %s: %w", pragma, err)
-		}
 	}
 
 	s := &Store{DB: db, dbPath: absPath}
@@ -85,29 +83,12 @@ func (s *Store) migrate() error {
 		files = append(files, "migrations/"+e.Name())
 	}
 
-	// Run every migration statement on a single dedicated connection.
-	// SQLite PRAGMAs (notably foreign_keys) are per-connection, so
-	// dispersing statements across pool connections breaks any migration
-	// that toggles PRAGMA state around a DDL block (e.g. 008, 019).
 	ctx := context.Background()
 	conn, err := s.DB.Conn(ctx)
 	if err != nil {
 		return fmt.Errorf("acquire migration conn: %w", err)
 	}
 	defer conn.Close()
-
-	// The pool-level PRAGMAs set in New() ran on an arbitrary pool conn,
-	// not this one. Re-apply the required defaults here so migrations run
-	// with the same invariants the app expects (and leave this conn in a
-	// known state before it returns to the pool).
-	for _, pragma := range []string{
-		"PRAGMA foreign_keys=ON",
-		"PRAGMA busy_timeout=5000",
-	} {
-		if _, err := conn.ExecContext(ctx, pragma); err != nil {
-			return fmt.Errorf("exec %s on migration conn: %w", pragma, err)
-		}
-	}
 
 	for _, f := range files {
 		data, err := migrationsFS.ReadFile(f)

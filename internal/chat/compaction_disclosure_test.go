@@ -15,7 +15,7 @@ import (
 func newTestStoreForChat(t *testing.T) *store.Store {
 	t.Helper()
 	dbPath := filepath.Join(t.TempDir(), "test.db")
-	s, err := store.New(dbPath)
+	s, err := store.New(context.Background(), dbPath)
 	if err != nil {
 		t.Fatalf("store.New: %v", err)
 	}
@@ -355,9 +355,9 @@ func TestRenderedDisclosureUnderTokenBudget(t *testing.T) {
 		t.Fatalf("CreateWorkspace: %v", err)
 	}
 
-	stash := "01HJ8N7XK5R8M3Y6PZQWA9V2BC"           // ULID-shaped, 26 chars
-	start := "turn-msg-01HJ8N7XK5R8M3Y6PZQWA9V2BC"  // 33 chars
-	end := "turn-msg-01HJ8N7XK5R8M3Y6PZQWA9V2BC"    // 33 chars
+	stash := "01HJ8N7XK5R8M3Y6PZQWA9V2BC"          // ULID-shaped, 26 chars
+	start := "turn-msg-01HJ8N7XK5R8M3Y6PZQWA9V2BC" // 33 chars
+	end := "turn-msg-01HJ8N7XK5R8M3Y6PZQWA9V2BC"   // 33 chars
 
 	for _, mode := range []string{"general", "code", "plan", "research"} {
 		t.Run(mode, func(t *testing.T) {

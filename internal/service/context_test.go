@@ -10,7 +10,7 @@ import (
 
 func TestContextService_AssembleContext(t *testing.T) {
 	// Use a real ContextClient backed by an in-memory store.
-	s, err := store.New(t.TempDir() + "/test.db")
+	s, err := store.New(context.Background(), t.TempDir()+"/test.db")
 	if err != nil {
 		t.Fatalf("store.New: %v", err)
 	}
@@ -64,7 +64,7 @@ func TestContextService_AssembleContext(t *testing.T) {
 }
 
 func TestContextService_PruneAfterTurn(t *testing.T) {
-	s, err := store.New(t.TempDir() + "/test.db")
+	s, err := store.New(context.Background(), t.TempDir()+"/test.db")
 	if err != nil {
 		t.Fatalf("store.New: %v", err)
 	}
@@ -84,7 +84,7 @@ func TestContextService_PruneAfterTurn(t *testing.T) {
 }
 
 func TestContextService_AssembleSlots(t *testing.T) {
-	s, err := store.New(t.TempDir() + "/test.db")
+	s, err := store.New(context.Background(), t.TempDir()+"/test.db")
 	if err != nil {
 		t.Fatalf("store.New: %v", err)
 	}

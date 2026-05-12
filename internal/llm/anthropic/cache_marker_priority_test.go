@@ -39,7 +39,9 @@ func TestCacheMarkerPriority_UniversalSlotFirst_LoadBearing(t *testing.T) {
 	plan := c.planCacheMarkers(req)
 	wantSlotMarkers := []string{ctxpkg.SlotUniversal, ctxpkg.SlotSystem}
 	if !reflect.DeepEqual(plan.SlotMarkers, wantSlotMarkers) {
-		t.Errorf("plan.SlotMarkers=%v, want %v (Universal-first priority)",
+		// Fatal: subsequent assertion indexes plan.SlotMarkers[0] and would
+		// panic on an empty/short slice, obscuring the real failure.
+		t.Fatalf("plan.SlotMarkers=%v, want %v (Universal-first priority)",
 			plan.SlotMarkers, wantSlotMarkers)
 	}
 	if plan.SlotMarkers[0] != ctxpkg.SlotUniversal {

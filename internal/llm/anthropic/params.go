@@ -16,9 +16,12 @@ import (
 // SystemPrompt block carries cache_control when plan.System is true. Slot
 // blocks whose names appear in plan.SlotMarkers also carry cache_control —
 // the marker priority is codified in cache_plan.go (CW-20260512-0109, W3):
-// SlotUniversal at position 0 receives the first slot marker, SlotSystem the
-// second, and the contiguous unchanged-prefix run continues from there up to
-// budget. Per-turn dynamic slots (workspace context, broker selections) are
+// the stable cacheable prefix is defined exhaustively by
+// stablePrefixSlotPriority (today [SlotUniversal, SlotSystem]). The
+// planner walks SlotBlocks while the slot name is in that priority list
+// and stops at the first slot not in the list; there is no contiguous-walk
+// past the priority list. Per-turn dynamic slots (workspace context,
+// broker selections) and slots not listed in stablePrefixSlotPriority are
 // never marked.
 // When there are no slots, falls back to a single block off SystemPrompt.
 //

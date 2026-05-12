@@ -7,6 +7,7 @@ import (
 
 	llmcontracts "github.com/hollis-labs/go-llm-contracts"
 	llmtypes "github.com/hollis-labs/go-llm-types"
+	ctxpkg "github.com/hollis-labs/nanite/internal/context"
 )
 
 // TestBuildSystemBlocks_NoSlotsNoCache asserts the simple case: a single
@@ -62,7 +63,7 @@ func TestBuildSystemBlocks_SlotBlocksUnchangedGetCache(t *testing.T) {
 		SystemPrompt: "system base",
 		SlotBlocks: []llmtypes.SlotBlock{
 			// SlotUniversal is in stablePrefixSlotPriority — eligible to mark.
-			{Name: "universal", Content: "stable content", Changed: false},
+			{Name: ctxpkg.SlotUniversal, Content: "stable content", Changed: false},
 			// "volatile" is Changed AND not in priority — breaks the run.
 			{Name: "volatile", Content: "volatile content", Changed: true},
 		},
@@ -97,13 +98,13 @@ func TestBuildSystemBlocks_MarksOnlySlotsInPlan(t *testing.T) {
 		SlotBlocks: []llmtypes.SlotBlock{
 			{Name: "a", Content: "a-chgd", Changed: true},
 			{Name: "b", Content: "b-unchgd", Changed: false},
-			{Name: "universal", Content: "uni", Changed: false},
-			{Name: "system", Content: "sys", Changed: false},
+			{Name: ctxpkg.SlotUniversal, Content: "uni", Changed: false},
+			{Name: ctxpkg.SlotSystem, Content: "sys", Changed: false},
 			{Name: "e", Content: "e-unchgd", Changed: false},
 		},
 	}
 	// Plan explicitly marks Universal + System only.
-	plan := cachePlan{SlotMarkers: []string{"universal", "system"}}
+	plan := cachePlan{SlotMarkers: []string{ctxpkg.SlotUniversal, ctxpkg.SlotSystem}}
 	out := c.buildSystemBlocks(req, plan)
 	// 1 system + 5 slot blocks = 6.
 	if len(out) != 6 {

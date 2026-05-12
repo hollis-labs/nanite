@@ -15,9 +15,15 @@ const maxCacheControlMarkers = 4
 // instead of checking hints directly so the cap is enforced centrally.
 //
 // CW-20260512-0109 (W3, SP-20260512-0008): cache marker placement is
-// codified by priority. The leading stable prefix — SlotUniversal at
-// position 0, then SlotSystem at position 1, then any further contiguous
-// unchanged slots up to budget — receives explicit per-slot markers.
+// codified by priority. The cacheable prefix is defined exhaustively by
+// stablePrefixSlotPriority — today that is exactly [SlotUniversal,
+// SlotSystem]. The planner walks req.SlotBlocks in order while the slot
+// name is in that priority list and stops at the first slot not in the
+// list (or the first Changed slot). The priority list IS the exhaustive
+// definition of the cacheable prefix — there is no contiguous-walk past
+// it. Adding a new stable slot requires explicitly appending it to
+// stablePrefixSlotPriority.
+//
 // Dynamic per-turn content (e.g. tool descriptions emitted by the
 // describer registry, see internal/describer; selected workspace slots
 // chosen per-intent) is NEVER marked.
@@ -30,9 +36,11 @@ type cachePlan struct {
 
 // stablePrefixSlotPriority codifies the slot-marker priority order for
 // the cacheable prefix. SlotUniversal is position 0; SlotSystem is the
-// second tier. Subsequent slots in the prefix run are eligible in the
-// order they appear in ctxpkg.SlotOrder — see planCacheMarkers for the
-// contiguous-prefix walk.
+// second tier. This list is the EXHAUSTIVE definition of which slots are
+// eligible for a cache marker — collectStablePrefixSlots walks blocks
+// while the slot name is in this list and stops at the first slot not in
+// it. There is no contiguous-walk past the priority list; adding a new
+// stable slot requires explicitly appending its name here.
 //
 // Per CW-20260512-0109: only slot positions whose content is structurally
 // stable across turns belong here. Slots that the broker may swap
@@ -65,15 +73,17 @@ var stablePrefixSlotPriority = []string{
 // other markers.
 //
 // SlotMarkers is populated by walking req.SlotBlocks in order, starting
-// from position 0, and collecting consecutive unchanged non-empty slots
-// whose names are in stablePrefixSlotPriority. The walk STOPS at the
-// first Changed slot or the first non-priority slot — markers are never
-// placed past a dynamic break, even if a later slot is unchanged.
+// from position 0, while the slot name is in stablePrefixSlotPriority
+// (today exactly [SlotUniversal, SlotSystem]) and the slot is unchanged
+// + non-empty. The walk STOPS at the first slot whose name is NOT in the
+// priority list and at the first Changed slot — markers are never placed
+// past a dynamic break, and the priority list exhaustively defines the
+// cacheable prefix (there is no contiguous-walk past it).
 //
 // Empty plan.SlotMarkers means no slot-section marker emits this turn —
 // either because no stable prefix slots are present, the "system" hint
 // is absent (slot section is anchored to the system context), or the
-// 4-marker cap consumed every slot slot.
+// 4-marker cap consumed every slot marker.
 func (c *Client) planCacheMarkers(req llmtypes.ChatRequest) cachePlan {
 	plan := cachePlan{
 		System:         c.hasCacheHint("system"),
@@ -110,10 +120,14 @@ func (c *Client) planCacheMarkers(req llmtypes.ChatRequest) cachePlan {
 }
 
 // collectStablePrefixSlots walks SlotBlocks in order and returns the
-// names of consecutive unchanged non-empty slots in the leading prefix
-// that are also in stablePrefixSlotPriority. The walk STOPS at the
-// first non-priority slot or the first Changed/empty slot — markers are
-// never planted past a dynamic break.
+// names of slots eligible for cache markers. A slot is eligible when its
+// name appears in stablePrefixSlotPriority (today exactly [SlotUniversal,
+// SlotSystem]) AND it is unchanged AND its content is non-empty. The
+// walk STOPS at the first slot whose name is NOT in the priority list
+// and at the first Changed slot — the priority list exhaustively defines
+// the cacheable prefix; there is no contiguous-walk past it. Empty-
+// content slots are SKIPPED (not breaking) since they never make the
+// wire either (see slotBlocksFor in chat_generate.go).
 //
 // Returns slot names in placement order (matches req.SlotBlocks order),
 // which is also the order in which buildSystemBlocks will plant the

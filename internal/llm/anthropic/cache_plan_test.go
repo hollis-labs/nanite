@@ -181,7 +181,9 @@ func TestCachePlan_DropsSlotMarkersFromTail(t *testing.T) {
 		t.Errorf("RecentMessages=%d, want 0 (dropped to fit cap)", plan.RecentMessages)
 	}
 	if len(plan.SlotMarkers) != 2 {
-		t.Errorf("SlotMarkers=%v, want both preserved at exactly cap", plan.SlotMarkers)
+		// Fatal: the next assertion indexes plan.SlotMarkers[0] and would
+		// panic on an empty slice, obscuring the real failure.
+		t.Fatalf("SlotMarkers=%v, want both preserved at exactly cap", plan.SlotMarkers)
 	}
 	// SlotUniversal must always be first (codified priority).
 	if plan.SlotMarkers[0] != ctxpkg.SlotUniversal {

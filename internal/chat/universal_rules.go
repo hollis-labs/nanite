@@ -29,11 +29,25 @@
 //
 // Where it lands in assembly:
 //
-// The preamble is prepended to the SlotSystem content in
-// ContextClient.AssembleSlotSources (context_client.go). SlotSystem is the
-// FIRST slot in ctxpkg.SlotOrder, so this content is the leading prefix of
-// every system payload — preserving Anthropic's `cacheable_prefix_tokens`
-// stability across agents that share the universal rules.
+// The preamble is prepended at BOTH context-assembly surfaces so the
+// "cannot be bypassed" guarantee holds across paths:
+//
+//   - ContextClient.AssembleSlotSources — slot-based path (current default).
+//     The block prepends SlotSystem content via universalRulesPrefix.
+//     SlotSystem is the FIRST slot in ctxpkg.SlotOrder, so this content is
+//     the leading prefix of every system payload — preserving Anthropic's
+//     `cacheable_prefix_tokens` stability across agents that share the
+//     universal rules.
+//   - ContextClient.AssembleContext — legacy flat-prompt path. The block
+//     prepends the assembled-and-enriched systemPrompt string before budget
+//     trimming. This caller is exposed via ContextService.AssembleContext
+//     and ChatService.RecomposeSystemPrompt. Even when those interfaces
+//     have no current production callers, exposing them without the prefix
+//     would create a silent fabrication-risk regression the moment a UI /
+//     handler wires them up — so both surfaces apply the prefix.
+//
+// See Comment 3b on PR #142 (CW-20260512-0100) for the architectural
+// discussion that closed this gap.
 //
 // PROMPT-SYNC: CW-20260512-0100 / CW-20260427-0014.
 // Two clauses below ("Use what tools return", "Ask before fabricating",
@@ -51,8 +65,11 @@ import "strings"
 // (chat, worker, planner, researcher, and every auto-discovered profile).
 // Lives at the head of SlotSystem so it is part of the stable cache prefix.
 //
-// Token cost: ~210 tokens (Glass-7 estimator). Adds ~210 tokens to every
-// dispatch. Cache-friendly: stable across turns, stable across agents.
+// Token cost: see PR #142 description for the current measurement. Adds a
+// fixed prefix to every dispatch. Cache-friendly: stable across turns,
+// stable across agents. Avoid hard-coding a token count here — the
+// estimator + block content shift over time, and the PR description is the
+// authoritative ledger of measured cost at any moment.
 //
 // The Refusal section is the load-bearing addition over the prior
 // chat-role-harness body — it explicitly tells subagents and worker-role
@@ -82,8 +99,10 @@ const universalRulesBlock = `## Universal rules (apply to every agent)
 // head of SlotSystem for every agent. Exported for tests and for callers
 // that need to assert the block's presence (R6 observability).
 //
-// Returns the block with a single trailing newline so callers can append it
-// to other slot content with a simple "\n\n" join.
+// The returned string has NO trailing newline — it is the raw constant
+// verbatim. Production callers should route through universalRulesPrefix,
+// which owns the join semantics (block + "\n\n" + existing) against
+// downstream SlotSystem content.
 func UniversalRulesBlock() string {
 	return universalRulesBlock
 }

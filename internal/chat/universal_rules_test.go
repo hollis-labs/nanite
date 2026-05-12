@@ -47,7 +47,8 @@ func TestUniversalRulesBlock_NonEmpty(t *testing.T) {
 // TestUniversalRulesBlock_PrefixHelper asserts universalRulesPrefix returns
 // the block as a prefix on the existing content, with the existing content
 // preserved verbatim after a two-newline separator. This is the contract
-// AssembleSlotSources depends on for SlotSystem composition.
+// both AssembleSlotSources (slot path) and AssembleContext (legacy flat
+// path) depend on for system-prompt composition.
 func TestUniversalRulesBlock_PrefixHelper(t *testing.T) {
 	t.Run("empty existing returns block alone", func(t *testing.T) {
 		got := universalRulesPrefix("")
@@ -133,6 +134,66 @@ func TestAssembleSlotSources_UniversalRulesInjectedForEmptyProfile(t *testing.T)
 	for _, c := range requiredClauses {
 		if !strings.Contains(sources.System, c) {
 			t.Errorf("SlotSystem missing universal clause %q for empty profile", c)
+		}
+	}
+}
+
+// TestAssembleContext_UniversalRulesInjectedForEmptyProfile is the
+// legacy-path counterpart to TestAssembleSlotSources_UniversalRulesInjectedForEmptyProfile.
+// CW-20260512-0100 Comment 3b: the slot-based path applies the universal
+// rules via universalRulesPrefix, but the legacy flat-prompt AssembleContext
+// path was bypassed in the original change. This test pins the gap closed —
+// AssembleContext must also produce a system prompt that starts with the
+// universal rules block.
+func TestAssembleContext_UniversalRulesInjectedForEmptyProfile(t *testing.T) {
+	st := newTestStoreForChat(t)
+
+	if err := st.CreateWorkspace(&store.Workspace{ID: "ws1", Name: "Test"}); err != nil {
+		t.Fatalf("CreateWorkspace: %v", err)
+	}
+	sess := &store.Session{WorkspaceID: "ws1"}
+	if err := st.CreateSession(sess); err != nil {
+		t.Fatalf("CreateSession: %v", err)
+	}
+
+	// Empty-body profile simulating the c160 researcher — same fixture as the
+	// slot-path test. AssembleContext's legacy path must also catch this case.
+	emptyProfile := &store.AgentProfile{
+		ID:           "test-empty-profile",
+		Name:         "Test Empty Profile",
+		Slug:         "test-empty-profile",
+		Description:  "Profile with empty SystemPrompt and no template — universal rules layer must still cover the legacy path",
+		SystemPrompt: "",
+	}
+	if err := st.CreateAgent(emptyProfile); err != nil {
+		t.Fatalf("CreateAgent: %v", err)
+	}
+
+	cb := NewContextClient(st)
+	systemPrompt, _, err := cb.AssembleContext(context.Background(), sess, emptyProfile, &store.AgentMode{}, nil)
+	if err != nil {
+		t.Fatalf("AssembleContext: %v", err)
+	}
+
+	if !strings.HasPrefix(systemPrompt, universalRulesBlock) {
+		head := systemPrompt
+		if len(head) > 400 {
+			head = head[:400]
+		}
+		t.Errorf("AssembleContext systemPrompt did not start with universal rules block.\nFirst 400 chars: %q", head)
+	}
+
+	// Same load-bearing clauses as the slot-path test — they must all reach
+	// the legacy-path system prompt too.
+	requiredClauses := []string{
+		"Use what tools return",
+		"Refuse rather than fabricate",
+		"Acknowledge honestly when you fail",
+		"return an explicit failure",
+	}
+	for _, c := range requiredClauses {
+		if !strings.Contains(systemPrompt, c) {
+			t.Errorf("AssembleContext systemPrompt missing universal clause %q", c)
 		}
 	}
 }

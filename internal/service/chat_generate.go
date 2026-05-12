@@ -89,6 +89,13 @@ func hasUsableTools(tools []llmtypes.ToolDefinition) bool {
 
 // nativeToolGuide is injected into every system prompt so the LLM correctly
 // uses native dev/general tools.
+//
+// CW-20260512-0100 (R3): the "card_show with type=report-card/document-viewer
+// requires sources — if you didn't fetch the data this turn, render plain
+// text" rule was removed from this guide and relocated into card_show's own
+// tool description (internal/mcp/self_tools.go). Agents reading card_show
+// right before invocation now see the rule in the authoritative location,
+// not buried in a generic-tools guide.
 const nativeToolGuide = `
 
 ## Native Tool Usage
@@ -106,9 +113,6 @@ Workflow:
 - **Cache pointer pattern.** When a tool result ends with a footer like ` + "`[TRUNCATED — full result cached as tool_result://<ULID> ...]`" + `, don't re-invoke the source tool to get more. Call ` + "`fetch_tool_result`" + ` with the ULID to retrieve slices, or ` + "`search_tool_result`" + ` to regex-match across the full cached body.
 - **Parallelize independent calls.** If two lookups don't depend on each other, request them in the same assistant turn — the harness executes tool blocks in parallel.
 - **Stop when done.** Extra tool calls don't add trust; they just dilute the grounding.
-
-Grounded rendering:
-- ` + "`card_show`" + ` with ` + "`type=\"report-card\"`" + ` or ` + "`type=\"document-viewer\"`" + ` requires a ` + "`sources`" + ` array citing the tool_use_ids whose results ground the content. Build that list as you make the calls — if you didn't fetch the data this turn, render a plain-text reply instead of an empty card.
 
 Tool contract discovery:
 - If you're unsure about a tool's input shape, call ` + "`tool_describe(name=\"<tool>\")`" + ` first. It returns the schema plus 1-3 golden examples — cheaper than failing the real call repeatedly.`

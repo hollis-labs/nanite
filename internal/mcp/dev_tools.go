@@ -321,26 +321,51 @@ func (d *DevToolsTransport) tryResolveViaSessionGrant(ctx context.Context, abs, 
 // rogue or stale storage_path can't escape that root (defense in depth
 // — the stasher already confined at write time).
 //
-// Returns an error string suitable for surfacing as a tool error.
+// Returns typed sentinel errors so callers (and tests) can classify
+// failure modes via errors.Is. Reviewer feedback (CW-20260512-0110
+// Comment 4): the original implementation wrapped EVERY resolver error
+// as "artifact ... not found", which silently swallowed unconfigured-
+// resolver and backend-failure cases and defeated errors.Is-based
+// classification.
+//
 // Possible failure modes:
-//   - ArtifactResolver not wired (returned: "artifact resolution is not
-//     configured for this dev tools transport")
-//   - artifact not found in store
-//   - storage_path escapes the artifacts root (corrupted row)
+//   - ArtifactResolver not wired → errResolverUnconfigured (wrapped
+//     with %w so errors.Is(err, errResolverUnconfigured) is true)
+//   - ArtifactsRoot empty → errResolverUnconfigured (same sentinel —
+//     both are "the dev tools transport wasn't fully configured")
+//   - artifact missing → errors.Is(err, errArtifactNotFound) when the
+//     resolver returned errArtifactNotFound or (nil, nil); the textual
+//     message uses "artifact ... not found" wording
+//   - backend failure → original resolver error wrapped with context
+//   - storage_path escapes the artifacts root (corrupted row) →
+//     "artifact %q storage path outside artifacts root"
 //
 // SP-20260512-0008 W2C (CW-20260512-0110).
 func (d *DevToolsTransport) resolveArtifact(artifactID string) (string, error) {
 	if d.ArtifactResolver == nil {
-		return "", errors.New("artifact resolution is not configured for this dev tools transport")
+		return "", fmt.Errorf("%w: dev tools transport has no resolver", errResolverUnconfigured)
 	}
 	if d.ArtifactsRoot == "" {
-		return "", errors.New("artifact resolution is misconfigured — ArtifactsRoot is empty")
+		return "", fmt.Errorf("%w: artifacts root is empty", errResolverUnconfigured)
 	}
 	meta, err := d.ArtifactResolver.GetArtifact(artifactID)
 	if err != nil {
-		return "", fmt.Errorf("artifact %q not found: %w", artifactID, err)
+		// Classify "not found" via the typed sentinel so callers see
+		// matching errors.Is(err, errArtifactNotFound). Anything else
+		// is a real backend failure — surface it as-is rather than
+		// pretending the artifact was missing.
+		if errors.Is(err, errArtifactNotFound) {
+			return "", fmt.Errorf("artifact %q not found: %w", artifactID, err)
+		}
+		return "", fmt.Errorf("artifact %q resolver error: %w", artifactID, err)
 	}
-	if meta == nil || meta.StoragePath == "" {
+	if meta == nil {
+		// (nil, nil) is the canonical "not found" shape per the
+		// ArtifactResolver contract (some adapters return this rather
+		// than a typed error). Treat the same as errArtifactNotFound.
+		return "", fmt.Errorf("artifact %q not found: %w", artifactID, errArtifactNotFound)
+	}
+	if meta.StoragePath == "" {
 		return "", fmt.Errorf("artifact %q has no storage_path", artifactID)
 	}
 

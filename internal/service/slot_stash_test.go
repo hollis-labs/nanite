@@ -306,6 +306,246 @@ func TestArtifactStasher_AtomicityOnFSWriteFailure(t *testing.T) {
 	}
 }
 
+// TestArtifactStasher_RecoversFromMissingFile is the reviewer-feedback
+// hardening (CW-20260512-0110 Comment 1): when the DB row exists but
+// the referenced file is missing on disk (manual deletion, partial
+// cleanup, half-state from a prior crash), the idempotency fast-path
+// MUST re-write the content rather than silently returning Reused=true.
+// Otherwise the broker would emit a pointer envelope that resolves to
+// a non-existent file at dev_read time — breaking the atomicity
+// contract.
+func TestArtifactStasher_RecoversFromMissingFile(t *testing.T) {
+	stasher, s, _ := newStasherForTest(t)
+	newSessionForStashTest(t, s, "sess-resurrect")
+
+	content := strings.Repeat("recoverable body\n", 50)
+	req := contextbroker.StashRequest{
+		SessionID: "sess-resurrect",
+		SlotName:  "memory",
+		Content:   content,
+		Tokens:    250,
+	}
+
+	// First stash — happy path.
+	res1, err := stasher.StashSlot(context.Background(), req)
+	if err != nil {
+		t.Fatalf("first stash: %v", err)
+	}
+
+	// Manually delete the on-disk file to simulate disk-loss.
+	row, err := s.GetArtifact(res1.ArtifactID)
+	if err != nil {
+		t.Fatalf("GetArtifact: %v", err)
+	}
+	if err := os.Remove(row.StoragePath); err != nil {
+		t.Fatalf("remove stash file: %v", err)
+	}
+	// Sanity: the file is actually gone.
+	if _, err := os.Stat(row.StoragePath); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("stash file should be missing after Remove, got err=%v", err)
+	}
+
+	// Re-stash — must detect missing file and re-write the content.
+	res2, err := stasher.StashSlot(context.Background(), req)
+	if err != nil {
+		t.Fatalf("recovery stash: %v", err)
+	}
+	if res2.ArtifactID != res1.ArtifactID {
+		t.Errorf("recovery stash should return same ID; got %q want %q", res2.ArtifactID, res1.ArtifactID)
+	}
+	if !res2.Reused {
+		t.Errorf("recovery stash should report Reused=true (row already exists)")
+	}
+
+	// File should be back on disk with the original bytes.
+	disk, err := os.ReadFile(row.StoragePath)
+	if err != nil {
+		t.Fatalf("read resurrected stash file: %v", err)
+	}
+	if string(disk) != content {
+		t.Errorf("resurrected stash content mismatch (got %d bytes, want %d)", len(disk), len(content))
+	}
+}
+
+// TestArtifactStasher_RecoveryFailsCleanlyOnStatError covers the
+// reviewer-feedback edge (CW-20260512-0110 Comment 1) where Stat returns
+// a non-not-exist error (e.g. permission denied). The stasher MUST
+// surface this as a real error so the broker falls back to inline
+// shipping rather than emitting an unverifiable pointer.
+func TestArtifactStasher_RecoveryFailsCleanlyOnStatError(t *testing.T) {
+	if os.Getuid() == 0 {
+		// Root bypasses Unix permission bits — skip rather than yield
+		// a false negative in CI containers that run as root.
+		t.Skip("test requires non-root user to enforce Unix permission bits")
+	}
+	stasher, s, root := newStasherForTest(t)
+	newSessionForStashTest(t, s, "sess-stat-err")
+
+	content := "stat-err body"
+	req := contextbroker.StashRequest{
+		SessionID: "sess-stat-err",
+		SlotName:  "memory",
+		Content:   content,
+		Tokens:    3,
+	}
+	if _, err := stasher.StashSlot(context.Background(), req); err != nil {
+		t.Fatalf("first stash: %v", err)
+	}
+
+	// Strip execute bit from the session directory so Stat on a file
+	// inside it returns EACCES rather than NotExist.
+	sessionDir := filepath.Join(root, "sess-stat-err")
+	if err := os.Chmod(sessionDir, 0o000); err != nil {
+		t.Fatalf("chmod sessionDir: %v", err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(sessionDir, 0o755) })
+
+	_, err := stasher.StashSlot(context.Background(), req)
+	if err == nil {
+		t.Fatal("expected error when Stat on existing stash file fails with non-not-exist error")
+	}
+}
+
+// TestArtifactStasher_ConcurrentStashes_NoInlineFallback is the
+// reviewer-feedback hardening (CW-20260512-0110 Comment 2): two
+// concurrent goroutines stashing the same (session, slot, content)
+// tuple MUST both succeed without falling back to inline shipping. The
+// deterministic artifact_id means exactly one INSERT wins; the loser
+// must detect the conflict, re-read the row, and return Reused=true
+// rather than bubbling the constraint error up to the broker.
+func TestArtifactStasher_ConcurrentStashes_NoInlineFallback(t *testing.T) {
+	stasher, s, _ := newStasherForTest(t)
+	newSessionForStashTest(t, s, "sess-concurrent")
+
+	content := strings.Repeat("concurrent body\n", 200)
+	req := contextbroker.StashRequest{
+		SessionID: "sess-concurrent",
+		SlotName:  "memory",
+		Content:   content,
+		Tokens:    500,
+	}
+
+	const goroutines = 8
+	type outcome struct {
+		res contextbroker.StashResult
+		err error
+	}
+	results := make(chan outcome, goroutines)
+	start := make(chan struct{})
+	for i := 0; i < goroutines; i++ {
+		go func() {
+			<-start
+			res, err := stasher.StashSlot(context.Background(), req)
+			results <- outcome{res: res, err: err}
+		}()
+	}
+	close(start)
+
+	var (
+		ids       = map[string]bool{}
+		successes int
+		errs      []error
+	)
+	for i := 0; i < goroutines; i++ {
+		o := <-results
+		if o.err != nil {
+			errs = append(errs, o.err)
+			continue
+		}
+		successes++
+		ids[o.res.ArtifactID] = true
+	}
+	if len(errs) > 0 {
+		t.Errorf("expected no errors from concurrent stashes (broker would fall back to inline shipping), got %d errors: %v", len(errs), errs)
+	}
+	if successes != goroutines {
+		t.Errorf("expected %d successful stashes, got %d", goroutines, successes)
+	}
+	if len(ids) != 1 {
+		t.Errorf("concurrent stashes should all return the same artifact_id; got %d distinct IDs: %v", len(ids), ids)
+	}
+	// Exactly one DB row regardless of how many goroutines raced.
+	rows, err := s.ListArtifacts("sess-concurrent")
+	if err != nil {
+		t.Fatalf("ListArtifacts: %v", err)
+	}
+	if len(rows) != 1 {
+		t.Errorf("expected exactly 1 artifact row after concurrent stashes, got %d", len(rows))
+	}
+}
+
+// TestArtifactStasher_ConcurrentStashes_WithMissingFile combines the
+// Comment 1 + Comment 2 recovery paths: a row already exists but its
+// FS file is missing, and a concurrent goroutine arrives during the
+// resurrection window. Both callers should converge on Reused=true
+// with the file restored on disk.
+func TestArtifactStasher_ConcurrentStashes_WithMissingFile(t *testing.T) {
+	stasher, s, _ := newStasherForTest(t)
+	newSessionForStashTest(t, s, "sess-conc-miss")
+
+	content := strings.Repeat("recovery race body\n", 80)
+	req := contextbroker.StashRequest{
+		SessionID: "sess-conc-miss",
+		SlotName:  "memory",
+		Content:   content,
+		Tokens:    400,
+	}
+
+	// Seed: stash once so the row exists.
+	first, err := stasher.StashSlot(context.Background(), req)
+	if err != nil {
+		t.Fatalf("seed stash: %v", err)
+	}
+	row, err := s.GetArtifact(first.ArtifactID)
+	if err != nil {
+		t.Fatalf("GetArtifact: %v", err)
+	}
+	// Delete the file to force every subsequent caller into the
+	// disk-loss recovery branch.
+	if err := os.Remove(row.StoragePath); err != nil {
+		t.Fatalf("remove stash file: %v", err)
+	}
+
+	const goroutines = 6
+	type outcome struct {
+		res contextbroker.StashResult
+		err error
+	}
+	results := make(chan outcome, goroutines)
+	start := make(chan struct{})
+	for i := 0; i < goroutines; i++ {
+		go func() {
+			<-start
+			res, err := stasher.StashSlot(context.Background(), req)
+			results <- outcome{res: res, err: err}
+		}()
+	}
+	close(start)
+
+	for i := 0; i < goroutines; i++ {
+		o := <-results
+		if o.err != nil {
+			t.Errorf("goroutine %d failed: %v", i, o.err)
+			continue
+		}
+		if o.res.ArtifactID != first.ArtifactID {
+			t.Errorf("goroutine %d returned id %q, want %q", i, o.res.ArtifactID, first.ArtifactID)
+		}
+		if !o.res.Reused {
+			t.Errorf("goroutine %d should report Reused=true (row exists), got false", i)
+		}
+	}
+
+	// File must be back on disk with original bytes.
+	disk, err := os.ReadFile(row.StoragePath)
+	if err != nil {
+		t.Fatalf("read recovered stash file: %v", err)
+	}
+	if string(disk) != content {
+		t.Errorf("recovered stash content mismatch (got %d bytes, want %d)", len(disk), len(content))
+	}
+}
+
 // Sanity guard against future code refactors: ErrStashUnavailable is the
 // canonical sentinel for "no stash backend wired" — the decider falls
 // back to ActionShip when it sees this. Confirm the production stasher

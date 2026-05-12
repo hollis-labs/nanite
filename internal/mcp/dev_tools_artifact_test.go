@@ -207,6 +207,73 @@ func TestWithArtifactResolver_FluentChainable(t *testing.T) {
 	}
 }
 
+// TestResolveArtifact_UnconfiguredErrorClassifiable confirms the
+// reviewer-feedback fix (CW-20260512-0110 Comment 4): the unconfigured-
+// resolver case returns an error that errors.Is(err, errResolverUnconfigured)
+// classifies cleanly, rather than being silently wrapped as
+// "artifact ... not found". This protects future telemetry / tests
+// that branch on the failure mode.
+func TestResolveArtifact_UnconfiguredErrorClassifiable(t *testing.T) {
+	// No resolver wired.
+	dev := NewDevToolsTransport(nil)
+	_, err := dev.resolveArtifact("art-x")
+	if err == nil {
+		t.Fatal("expected error when resolver is nil")
+	}
+	if !errors.Is(err, errResolverUnconfigured) {
+		t.Errorf("expected errors.Is(err, errResolverUnconfigured) to be true, got err=%v", err)
+	}
+	if errors.Is(err, errArtifactNotFound) {
+		t.Errorf("unconfigured error should NOT classify as errArtifactNotFound, got err=%v", err)
+	}
+
+	// Resolver wired but empty artifacts root.
+	resolver := &stubArtifactResolver{rows: map[string]*ArtifactMeta{}}
+	dev2 := NewDevToolsTransport(nil).WithArtifactResolver(resolver, "")
+	_, err2 := dev2.resolveArtifact("art-x")
+	if err2 == nil {
+		t.Fatal("expected error when artifacts root is empty")
+	}
+	if !errors.Is(err2, errResolverUnconfigured) {
+		t.Errorf("expected errors.Is(err2, errResolverUnconfigured) to be true, got err=%v", err2)
+	}
+}
+
+// TestResolveArtifact_NotFoundErrorClassifiable confirms the
+// not-found classification path: when the resolver returns
+// errArtifactNotFound (or (nil, nil)), errors.Is on the returned error
+// recognizes it as a missing artifact rather than a backend failure.
+func TestResolveArtifact_NotFoundErrorClassifiable(t *testing.T) {
+	// Typed-error path (resolver returned errArtifactNotFound).
+	resolver := &stubArtifactResolver{rows: map[string]*ArtifactMeta{}}
+	dev := NewDevToolsTransport(nil).WithArtifactResolver(resolver, "/tmp/artifacts")
+	_, err := dev.resolveArtifact("art-missing")
+	if err == nil {
+		t.Fatal("expected not-found error")
+	}
+	if !errors.Is(err, errArtifactNotFound) {
+		t.Errorf("expected errors.Is(err, errArtifactNotFound) for typed-error path, got err=%v", err)
+	}
+
+	// (nil, nil) path — some adapters return this shape.
+	nilResolver := &nilNilArtifactResolver{}
+	dev2 := NewDevToolsTransport(nil).WithArtifactResolver(nilResolver, "/tmp/artifacts")
+	_, err2 := dev2.resolveArtifact("art-also-missing")
+	if err2 == nil {
+		t.Fatal("expected not-found error for (nil, nil) path")
+	}
+	if !errors.Is(err2, errArtifactNotFound) {
+		t.Errorf("expected errors.Is(err2, errArtifactNotFound) for (nil, nil) path, got err=%v", err2)
+	}
+}
+
+// nilNilArtifactResolver returns (nil, nil) for every lookup — exercises
+// the canonical "not found" shape for resolvers that don't surface a
+// typed error.
+type nilNilArtifactResolver struct{}
+
+func (nilNilArtifactResolver) GetArtifact(string) (*ArtifactMeta, error) { return nil, nil }
+
 // Compile-time guard: filepath import is used by stash-path checks; if
 // future edits drop the dependency, this test catches the unused-import.
 var _ = filepath.Separator

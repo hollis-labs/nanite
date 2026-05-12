@@ -73,9 +73,14 @@ func selfToolDefinitions() []Tool {
 		},
 		{
 			Name: "skill_list",
-			Description: "List all skills, optionally filtered by category.\n\n" +
-				"**When to use:** When the user asks what skills are available, or before creating a skill to check for duplicates.\n\n" +
-				"**Output shape:** Text list of skills with name, slug, category, and description. Empty list if none match the filter.",
+			// Description is the canonical base string declared once in
+			// self_tools_describer.go (skillListBaseDescription). The
+			// describeSkillList Describer is wired but currently falls
+			// through (returns "") so the static description is what
+			// reaches the LLM — sharing the constant here ensures the
+			// registration-time string and the future per-call extension
+			// can't drift when W2A or later sprints opt-in.
+			Description: skillListBaseDescription,
 			InputSchema: map[string]any{
 				"type": "object",
 				"properties": map[string]any{
@@ -1071,13 +1076,13 @@ the current turn for subsequent writes.
 		// --- executeTask dispatch primitive (CW-20260421-0010, B3) ---
 		{
 			Name: "task_execute",
-			Description: "Dispatch a task to a Worker or Planner role agent. The Chat agent (harness) calls this when the user's request needs concrete execution — file edits, tool runs, code work, planning — instead of a direct conversational reply.\n\n" +
-				"**When to use:** When the user asks for any work that requires tool calls beyond Chat's static surface (todos / plans / scratchpad / messaging / narration / executeTask itself). Examples: \"fix the bug\", \"audit X\", \"refactor Y\", \"build Z\".\n\n" +
-				"**When NOT to use:** Trivial conversational replies (\"thanks\", \"what does X mean\"). The Chat harness handles those directly without dispatch.\n\n" +
-				"**Behavior:** ScopeTier classifies the request, selects a Role (Worker for execution, Planner for open-scope breakdown), spawns the role agent with its own task-appropriate tool surface, captures the result, and returns it as a structured envelope. The Chat agent's context never sees raw worker output — only the envelope.\n\n" +
-				"**Required context:** session_id (your current session) and message (the task to dispatch). parent_agent_id, provider, and timeout_seconds are optional overrides.\n\n" +
-				"**Output shape:** A structured envelope JSON the harness relays to the user. The envelope's `type` describes the result shape (report-card, document-viewer, etc.).\n\n" +
-				"**Static surface note:** This is the ONLY way the Chat harness dispatches work. Do not expect raw spawn / shell / file tools — those are not on Chat's surface.",
+			// Description is the canonical base string declared once in
+			// self_tools_describer.go (taskExecuteBaseDescription); the
+			// per-call describeTaskExecute Describer extends the same
+			// string with caller-specific role enumeration. Sharing the
+			// constant guarantees registration-time and per-call surfaces
+			// can't drift.
+			Description: taskExecuteBaseDescription,
 			InputSchema: map[string]any{
 				"type": "object",
 				"properties": map[string]any{

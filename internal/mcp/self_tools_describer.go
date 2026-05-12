@@ -30,12 +30,13 @@ import (
 	"github.com/hollis-labs/nanite/internal/describer"
 )
 
-// taskExecuteBaseDescription is the static body of the task_execute tool
-// description — kept identical to the registration-time string in
-// selfToolDefinitions() so that a caller without a populated
-// DispatchAllowlist (today's default) sees the same surface as before
-// this ticket landed. The Describer appends a "Dispatchable roles:"
-// section when the allowlist is non-empty.
+// taskExecuteBaseDescription is the canonical static body of the
+// task_execute tool description — referenced from BOTH the
+// registration-time tool definition in selfToolDefinitions() AND the
+// per-call describeTaskExecute Describer below. Single source of truth:
+// any edit lands in both surfaces automatically. The Describer appends
+// a "Dispatchable roles:" section when the caller's DispatchAllowlist
+// is non-empty; an empty allowlist yields this baseline unchanged.
 const taskExecuteBaseDescription = "Dispatch a task to a Worker or Planner role agent. The Chat agent (harness) calls this when the user's request needs concrete execution — file edits, tool runs, code work, planning — instead of a direct conversational reply.\n\n" +
 	"**When to use:** When the user asks for any work that requires tool calls beyond Chat's static surface (todos / plans / scratchpad / messaging / narration / executeTask itself). Examples: \"fix the bug\", \"audit X\", \"refactor Y\", \"build Z\".\n\n" +
 	"**When NOT to use:** Trivial conversational replies (\"thanks\", \"what does X mean\"). The Chat harness handles those directly without dispatch.\n\n" +
@@ -69,9 +70,10 @@ func describeTaskExecute(_ context.Context, caller describer.CallerAgent) string
 		". Pass the role hint in `message` or let ScopeTier infer it; roles outside this list are not reachable from this caller."
 }
 
-// toolListBaseDescription is the registration-time description for
-// tool_list. Kept verbatim from naniteToolListDefinition() so callers
-// without a Describer match see the same string.
+// toolListBaseDescription is the canonical description for tool_list,
+// referenced from BOTH the registration-time naniteToolListDefinition()
+// AND the per-call describeToolList Describer below. Single source of
+// truth: any edit lands in both surfaces automatically.
 const toolListBaseDescription = "Lists registered self-tools by name and one-line summary. Returns the full inventory regardless of caller — actual reachability for any specific tool is governed by agent permissions, the dev-mode gate, and project/session policy, not by this output.\n\n" +
 	"**Contract:** input `{filter?: string}` (optional case-insensitive substring matched against BOTH name and summary). Output `{tools: [{name, summary}], count}`.\n\n" +
 	"**When to use:** Browse the catalog when you're not sure which tool to reach for, or confirm a tool name exists before calling it. Use `tool_describe` next for the full schema of a specific tool, and `request_tools` to load a tool for use in the current turn.\n\n" +
@@ -94,9 +96,13 @@ func describeToolList(_ context.Context, caller describer.CallerAgent) string {
 		"` — the inventory below is the full registry; use `tool_describe` to confirm reachability before relying on a specific tool."
 }
 
-// skillListBaseDescription is the registration-time description for
-// skill_list. Kept verbatim from selfToolDefinitions() so the static
-// path is preserved.
+// skillListBaseDescription is the canonical description for skill_list,
+// referenced from the registration-time selfToolDefinitions() entry.
+// The describeSkillList Describer below currently falls through
+// (returns "") so the static description is what reaches the LLM — but
+// the constant is the single source of truth for when a future sprint
+// opts the Describer in to a per-caller variant; the registration site
+// will pick up the same base automatically.
 const skillListBaseDescription = "List all skills, optionally filtered by category.\n\n" +
 	"**When to use:** When the user asks what skills are available, or before creating a skill to check for duplicates.\n\n" +
 	"**Output shape:** Text list of skills with name, slug, category, and description. Empty list if none match the filter."

@@ -97,11 +97,17 @@ func New(mcpManager *mcp.Manager, s *store.Store, cfg *Config) *ToolClient {
 	}
 }
 
-// RenderDescriptions returns a copy of tools with per-tool descriptions
-// re-rendered for the given caller. Tools without a registered Describer
-// pass through unchanged; tools whose Describer returns "" also pass
-// through (fall back to the static description). The input slice is not
-// mutated — the returned slice is safe for the caller to retain.
+// RenderDescriptions returns a slice with per-tool descriptions rendered
+// for the given caller. Tools without a registered Describer pass through
+// unchanged; tools whose Describer returns "" also pass through (fall
+// back to the static description).
+//
+// Aliasing contract: the hot path (Describers registered for one or more
+// tools in the input) returns a newly-allocated slice so callers may
+// safely retain it without aliasing the input. The fast paths (`tb` is
+// nil, `tb.Describers` is nil, or `len(tools) == 0`) return the input
+// slice as-is — callers must not assume independence from the input in
+// those cases. The input slice is never mutated under any path.
 //
 // This is the materialization-site hook for the Tool Broker's per-call
 // description-render contract (CW-20260512-0105). Call sites: the

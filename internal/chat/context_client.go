@@ -13,6 +13,7 @@ import (
 
 	llmtypes "github.com/hollis-labs/go-llm-types"
 	"github.com/hollis-labs/nanite/internal/contextbroker"
+	"github.com/hollis-labs/nanite/internal/skillbroker"
 	"github.com/hollis-labs/nanite/internal/store"
 )
 
@@ -62,6 +63,12 @@ func NewContextClient(s *store.Store) *ContextClient {
 // callers (RecomposeSystemPrompt has no current callers per the in-tree
 // note) and is queued for removal in a follow-up sprint. Re-applying the
 // block here would be a compat shim per feedback_no_compat_shims.
+//
+// SP-20260512-0008 W2B (CW-20260512-0106): the legacy path still routes the
+// skill list through the Skill Broker so behavior matches the slot path.
+// Messages are loaded once at the top and reused for intent derivation
+// (intentTail + deriveIntentFromMessages), avoiding a redundant
+// ListMessages(session.ID, 5) round trip on the hot path.
 func (cb *ContextClient) AssembleContext(ctx context.Context, session *store.Session, agent *store.AgentProfile, mode *store.AgentMode, workspace *store.Workspace) (string, []llmtypes.ChatMessage, error) {
 	_, span := feotel.StartSpan(ctx, "nanite.broker.assembleContext")
 	defer span.End()
@@ -71,11 +78,26 @@ func (cb *ContextClient) AssembleContext(ctx context.Context, session *store.Ses
 		attribute.String("nanite.agent.id", agent.ID),
 	)
 
-	// 1. Build the system prompt using prompt templates.
+	// 1. Load messages from DB. Start with a generous limit. We pull this
+	// first so the intent-derivation step reuses the same window instead
+	// of issuing a redundant ListMessages(session.ID, 5) round trip.
+	messages, err := cb.Store.ListMessages(session.ID, 200)
+	if err != nil {
+		return "", nil, err
+	}
+
+	// 2. Build the system prompt using prompt templates.
 	// hintOpts enables v2 dynamic hint selection when the ContextClient has a
 	// HintDispatcher wired and NANITE_THINK_BLOCK_V2_ENABLED=true. nil means
 	// the assembler falls back to the v0/v1 static ThinkToolBlock path.
-	skillList := buildSkillListForSession(cb.Store, agent.ID, session.ID)
+	//
+	// SP-20260512-0008 W2B (CW-20260512-0106): legacy path also routes the
+	// skill list through the Skill Broker so behavior matches the slot path.
+	// Intent is derived from the already-loaded message window — same tail
+	// the 5-message-load variant would have scanned, but with zero extra DB
+	// round trips on the hot path.
+	legacyIntent := cb.deriveIntentFromMessages(session, agent, intentTail(messages, 5))
+	skillList := buildSkillListForSessionWithIntent(ctx, cb.Store, agent.ID, session.ID, legacyIntent, skillbroker.AgentIdentityFromProfile(agent))
 	var hintOpts *HintSelectOpts
 	if cb.HintDispatcher != nil {
 		hintOpts = &HintSelectOpts{
@@ -85,15 +107,9 @@ func (cb *ContextClient) AssembleContext(ctx context.Context, session *store.Ses
 	}
 	systemPrompt := assembleSystemPromptFromTemplates(cb.Store, agent, mode, workspace, skillList, session.ID, hintOpts)
 
-	// 1b. Enrich system prompt with universal context retrieval.
+	// 2b. Enrich system prompt with universal context retrieval.
 	if cb.ContextBroker != nil {
 		systemPrompt = cb.enrichWithContextBroker(ctx, systemPrompt, session, agent)
-	}
-
-	// 2. Load messages from DB. Start with a generous limit.
-	messages, err := cb.Store.ListMessages(session.ID, 200)
-	if err != nil {
-		return "", nil, err
 	}
 
 	// 3. Convert to provider messages.
@@ -218,7 +234,18 @@ func (cb *ContextClient) AssembleSlotSources(ctx context.Context, session *store
 	// to tool descriptions. See migration 053 for the in-place DB update.
 	// If the agent observably loses capability after this trim, revert and
 	// re-evaluate.
-	skillList := buildSkillListForSession(cb.Store, agent.ID, session.ID)
+	//
+	// Intent is derived unconditionally so the service-layer assembly decider
+	// (and the Skill Broker, below) can use it even when ContextBroker is
+	// nil (no Fetch happens, but the intent still drives slot selection
+	// for non-broker slots and skill ranking).
+	//
+	// SP-20260512-0008 W2B (CW-20260512-0106): intent derivation moved above
+	// skill-list construction so the Skill Broker has the per-turn intent
+	// signal. Previously intent was derived only for the Context Broker step
+	// further down — that left the skill list with no per-turn ranking input.
+	intent := cb.deriveIntent(session, agent)
+	skillList := buildSkillListForSessionWithIntent(ctx, cb.Store, agent.ID, session.ID, intent, skillbroker.AgentIdentityFromProfile(agent))
 	agentPrompt := assembleAgentSlotContent(cb.Store, agent, mode, skillList, session.ID)
 
 	// Rules slot — agent tags + tool allowlist. S4a expands this.
@@ -228,10 +255,6 @@ func (cb *ContextClient) AssembleSlotSources(ctx context.Context, session *store
 	sessionContent := buildSessionSlotContent(session, mode, workspace)
 
 	// Memory + Context — both sourced from ContextBroker; split by item.Source.
-	// Intent is derived unconditionally so the service-layer assembly decider
-	// can use it even when ContextBroker is nil (no Fetch happens, but the
-	// intent still drives slot selection for non-broker slots).
-	intent := cb.deriveIntent(session, agent)
 	var memoryContent, contextContent string
 	enrichmentActive := false
 	if cb.ContextBroker != nil {
@@ -364,24 +387,54 @@ func buildUserContextSlot(s *store.Store, sessionID string) string {
 // Mirrors the logic from enrichWithContextBroker so slot- and legacy-paths
 // produce identical broker queries.
 //
+// Loads the most recent 5 messages from the store. Hot-path callers that
+// already hold a sufficient tail of session messages should prefer
+// deriveIntentFromMessages to avoid the redundant DB round trip.
+//
 // Auto-recall fields are resolved from the agent profile and plumbed into
 // the Intent so MemorySource can honor per-agent disable / limit / min-confidence
 // without re-reading the profile itself. AutoRecall is set as an explicit
 // pointer so MemorySource can distinguish "no opinion" (defaults) from
 // "explicitly off" (skip).
 func (cb *ContextClient) deriveIntent(session *store.Session, agent *store.AgentProfile) contextbroker.Intent {
+	var msgs []store.Message
+	if loaded, err := cb.Store.ListMessages(session.ID, 5); err == nil {
+		msgs = loaded
+	}
+	return cb.deriveIntentFromMessages(session, agent, msgs)
+}
+
+// intentTail returns the trailing window of n messages from msgs (or fewer
+// if msgs is shorter). Used by AssembleContext to reuse its 200-message DB
+// load for intent derivation, mirroring deriveIntent's 5-message tail.
+func intentTail(msgs []store.Message, n int) []store.Message {
+	if n <= 0 || len(msgs) == 0 {
+		return nil
+	}
+	if len(msgs) <= n {
+		return msgs
+	}
+	return msgs[len(msgs)-n:]
+}
+
+// deriveIntentFromMessages is the no-DB variant of deriveIntent: callers
+// pass a pre-loaded message slice (e.g. the 200-message window already
+// fetched by AssembleContext) and the helper scans the tail for the most
+// recent user turn. Identical output to deriveIntent given the same tail.
+//
+// Tail-scan semantics match deriveIntent — newest-to-oldest, first user
+// message wins, no minimum length on the input slice. Empty input is fine
+// (Intent defaults to IntentCustom with empty keywords/query).
+func (cb *ContextClient) deriveIntentFromMessages(session *store.Session, agent *store.AgentProfile, messages []store.Message) contextbroker.Intent {
 	intentType := contextbroker.IntentCustom
 	var keywords []string
 	var queryText string
-	messages, err := cb.Store.ListMessages(session.ID, 5)
-	if err == nil && len(messages) > 0 {
-		for i := len(messages) - 1; i >= 0; i-- {
-			if messages[i].Role == "user" {
-				_, keywords = ExtractIntent(messages[i].Content)
-				intentType = classifyContextIntent(messages[i].Content)
-				queryText = messages[i].Content
-				break
-			}
+	for i := len(messages) - 1; i >= 0; i-- {
+		if messages[i].Role == "user" {
+			_, keywords = ExtractIntent(messages[i].Content)
+			intentType = classifyContextIntent(messages[i].Content)
+			queryText = messages[i].Content
+			break
 		}
 	}
 	autoRecallCfg := ResolveAutoRecallConfig(agent)

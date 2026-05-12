@@ -1,6 +1,7 @@
 package chat
 
 import (
+	"context"
 	"strings"
 	"testing"
 
@@ -19,7 +20,7 @@ func TestBuildSkillListForSession_BackCompatNoMode(t *testing.T) {
 	mustAssignSkill(t, s, agent.ID, sk2.ID)
 
 	// Empty sessionID → legacy behavior: both skills present.
-	got := buildSkillListForSession(s, agent.ID, "")
+	got := buildSkillListForSession(context.Background(), s, agent.ID, "")
 	if !strings.Contains(got, "Plan Skill") || !strings.Contains(got, "Work Skill") {
 		t.Fatalf("expected both skills in list, got: %q", got)
 	}
@@ -52,7 +53,7 @@ func TestBuildSkillListForSession_FiltersByMode(t *testing.T) {
 		t.Fatalf("SetSessionMode: %v", err)
 	}
 
-	got := buildSkillListForSession(s, agent.ID, sess.ID)
+	got := buildSkillListForSession(context.Background(), s, agent.ID, sess.ID)
 	if !strings.Contains(got, "Plan Skill") {
 		t.Errorf("plan skill missing: %q", got)
 	}
@@ -90,7 +91,7 @@ func TestBuildSkillListForSession_DenyOverridesModeMatch(t *testing.T) {
 		t.Fatalf("SetSessionMode: %v", err)
 	}
 
-	got := buildSkillListForSession(s, agent.ID, sess.ID)
+	got := buildSkillListForSession(context.Background(), s, agent.ID, sess.ID)
 	if strings.Contains(got, "Writing") {
 		t.Errorf("Writing should be denied: %q", got)
 	}

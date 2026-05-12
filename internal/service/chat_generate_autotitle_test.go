@@ -9,7 +9,7 @@ import (
 // CW-20260512-0004: a 1.2 KB refusal blob must not survive as a session title.
 func TestSanitizeAutoTitle_TruncatesLongOutput(t *testing.T) {
 	long := strings.Repeat("a", 1200)
-	got := sanitizeAutoTitle(long, "user msg")
+	got := sanitizeAutoTitle(long)
 	if len(got) > autoTitleMaxLen {
 		t.Fatalf("title exceeded cap: len=%d want<=%d", len(got), autoTitleMaxLen)
 	}
@@ -26,7 +26,7 @@ func TestSanitizeAutoTitle_StripsNewlines(t *testing.T) {
 		"  Refactor\n\n  the broker  ",
 	}
 	for _, raw := range cases {
-		got := sanitizeAutoTitle(raw, "")
+		got := sanitizeAutoTitle(raw)
 		if strings.ContainsAny(got, "\n\r\t") {
 			t.Errorf("sanitizeAutoTitle(%q) returned whitespace-bearing title %q", raw, got)
 		}
@@ -45,7 +45,7 @@ func TestSanitizeAutoTitle_TrimsWrappingPunctuation(t *testing.T) {
 		"`Refactor the broker`": "Refactor the broker",
 	}
 	for in, want := range cases {
-		if got := sanitizeAutoTitle(in, ""); got != want {
+		if got := sanitizeAutoTitle(in); got != want {
 			t.Errorf("sanitizeAutoTitle(%q) = %q, want %q", in, got, want)
 		}
 	}
@@ -53,7 +53,7 @@ func TestSanitizeAutoTitle_TrimsWrappingPunctuation(t *testing.T) {
 
 func TestSanitizeAutoTitle_EmptyInputReturnsEmpty(t *testing.T) {
 	for _, in := range []string{"", "   ", "\n\n\t"} {
-		if got := sanitizeAutoTitle(in, "user msg"); got != "" {
+		if got := sanitizeAutoTitle(in); got != "" {
 			t.Errorf("sanitizeAutoTitle(%q) = %q, want empty", in, got)
 		}
 	}
@@ -64,7 +64,7 @@ func TestSanitizeAutoTitle_TruncationRespectsUTF8(t *testing.T) {
 	// "é" is 2 bytes; pack the cap so the boundary falls inside it.
 	prefix := strings.Repeat("a", autoTitleMaxLen-1)
 	in := prefix + "é" + "more"
-	got := sanitizeAutoTitle(in, "")
+	got := sanitizeAutoTitle(in)
 	if len(got) > autoTitleMaxLen {
 		t.Fatalf("truncation exceeded cap: len=%d", len(got))
 	}
@@ -84,7 +84,7 @@ func TestSanitizeAutoTitle_HappyPath(t *testing.T) {
 		"Title",
 	}
 	for _, in := range cases {
-		if got := sanitizeAutoTitle(in, ""); got != in {
+		if got := sanitizeAutoTitle(in); got != in {
 			t.Errorf("sanitizeAutoTitle(%q) = %q, want unchanged", in, got)
 		}
 	}
@@ -185,10 +185,61 @@ func TestAutoTitleLenInvariant(t *testing.T) {
 		"\"quoted with newlines\nin the middle\"",
 	}
 	for _, in := range inputs {
-		got := sanitizeAutoTitle(in, "fallback")
+		got := sanitizeAutoTitle(in)
 		if len(got) > autoTitleMaxLen {
 			t.Errorf("invariant violated for input %q: len=%d", in, len(got))
 		}
+	}
+}
+
+// TestPickAutoTitle_BothRefusalsFallsBackToUserContent is the load-bearing
+// regression test for the Copilot review fix (PR #136). Previously, when
+// both the first response and the retry were refusal-shaped, the sanitized
+// first response (a truncated refusal snippet) leaked through because the
+// `if title == ""` fallback gate never fired. With pickAutoTitle, both
+// refusals get rejected and the deterministic user-content fallback wins.
+func TestPickAutoTitle_BothRefusalsFallsBackToUserContent(t *testing.T) {
+	rawFirst := "I appreciate the context, but I cannot generate a title for this request."
+	rawRetry := "I'm sorry, I can't help with that."
+	user := "Refactor the broker dispatch path"
+
+	got := pickAutoTitle(rawFirst, rawRetry, user)
+	want := fallbackTitleFromUser(user)
+	if got != want {
+		t.Fatalf("pickAutoTitle both-refusal: got %q, want %q (the user-content fallback)", got, want)
+	}
+	// Belt-and-suspenders: the result must not contain the canonical refusal
+	// markers from either raw response.
+	for _, marker := range []string{"appreciate", "cannot", "sorry", "can't"} {
+		if strings.Contains(strings.ToLower(got), marker) {
+			t.Errorf("pickAutoTitle leaked refusal marker %q into title %q", marker, got)
+		}
+	}
+}
+
+func TestPickAutoTitle_RetrySucceedsAfterFirstRefusal(t *testing.T) {
+	got := pickAutoTitle(
+		"I cannot help with that",
+		"Refactor the broker",
+		"the user message",
+	)
+	if got != "Refactor the broker" {
+		t.Errorf("expected retry label to win, got %q", got)
+	}
+}
+
+func TestPickAutoTitle_FirstResponseUsable(t *testing.T) {
+	// retryRaw == "" mirrors the "no retry attempted" path.
+	got := pickAutoTitle("Refactor the broker", "", "user msg")
+	if got != "Refactor the broker" {
+		t.Errorf("expected first-response label to win, got %q", got)
+	}
+}
+
+func TestPickAutoTitle_BothEmptyFallsBackToUserContent(t *testing.T) {
+	got := pickAutoTitle("", "", "the user wrote something")
+	if got != fallbackTitleFromUser("the user wrote something") {
+		t.Errorf("expected user-content fallback for both-empty, got %q", got)
 	}
 }
 

@@ -2850,23 +2850,20 @@ func (s *chatServiceImpl) autoTitle(sessionID, userContent string) {
 		return
 	}
 
-	title := sanitizeAutoTitle(raw, userContent)
-	// One retry if the first response is refusal-shaped. autoTitle runs in
-	// safego.Go so the extra round-trip is off the chat hot path.
-	if title == "" || looksLikeRefusal(raw) {
+	// One retry if the first response is refusal-shaped or empty after
+	// sanitization. autoTitle runs in safego.Go so the extra round-trip is off
+	// the chat hot path.
+	var retryRaw string
+	if sanitizeAutoTitle(raw) == "" || looksLikeRefusal(raw) {
 		retryStart := time.Now()
-		retryRaw, retryErr := prov.Complete(context.Background(), llmtypes.ChatRequest{SystemPrompt: autoTitleSystemPrompt, Messages: msgs, Model: s.utilityModel})
+		var retryErr error
+		retryRaw, retryErr = prov.Complete(context.Background(), llmtypes.ChatRequest{SystemPrompt: autoTitleSystemPrompt, Messages: msgs, Model: s.utilityModel})
 		s.recordUtilityMetrics(sessionID, "autoTitle.retry", time.Since(retryStart), retryErr)
-		if retryErr == nil {
-			if t := sanitizeAutoTitle(retryRaw, userContent); t != "" && !looksLikeRefusal(retryRaw) {
-				title = t
-			}
+		if retryErr != nil {
+			retryRaw = ""
 		}
 	}
-	if title == "" {
-		// Last-resort deterministic fallback: first 40 chars of user message.
-		title = fallbackTitleFromUser(userContent)
-	}
+	title := pickAutoTitle(raw, retryRaw, userContent)
 	if title == "" {
 		return
 	}
@@ -2884,7 +2881,7 @@ func (s *chatServiceImpl) autoTitle(sessionID, userContent string) {
 // trims wrapping quotes/punctuation, and hard-caps length at autoTitleMaxLen.
 // Returns "" when the input is empty after cleanup so the caller can fall
 // back. This is the load-bearing guard — the prompt is best-effort.
-func sanitizeAutoTitle(raw, _ string) string {
+func sanitizeAutoTitle(raw string) string {
 	if raw == "" {
 		return ""
 	}
@@ -2902,6 +2899,35 @@ func sanitizeAutoTitle(raw, _ string) string {
 		s = truncateToRune(s, autoTitleMaxLen)
 	}
 	return s
+}
+
+// pickAutoTitle is the pure decision logic that chooses a session title from
+// (up to) two raw utility-model responses plus the original user message
+// (CW-20260512-0004). Extracted so the both-refusal fallback path is unit-
+// testable without spinning up a provider. Contract:
+//
+//   - If the retry raw is a usable label (non-empty after sanitize AND not
+//     refusal-shaped), it wins.
+//   - Else if the first raw is a usable label, it wins.
+//   - Else fall back to fallbackTitleFromUser(userContent).
+//   - retryRaw == "" means "no retry was attempted or it errored" and is
+//     treated as unusable.
+//
+// This closes the gap where both attempts were refusal-shaped but the first
+// sanitized to a non-empty truncated refusal snippet — previously that
+// snippet leaked through; now the refusal check gates the fallback.
+func pickAutoTitle(raw, retryRaw, userContent string) string {
+	if retryRaw != "" && !looksLikeRefusal(retryRaw) {
+		if t := sanitizeAutoTitle(retryRaw); t != "" {
+			return t
+		}
+	}
+	if !looksLikeRefusal(raw) {
+		if t := sanitizeAutoTitle(raw); t != "" {
+			return t
+		}
+	}
+	return fallbackTitleFromUser(userContent)
 }
 
 // looksLikeRefusal returns true when the utility-model output has the shape of

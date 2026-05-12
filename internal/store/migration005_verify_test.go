@@ -1,19 +1,24 @@
 package store
 
 import (
+	"context"
 	"database/sql"
 	"testing"
+
+	"github.com/hollis-labs/go-sqlite/sqlitekit"
 )
 
 func TestMigration005_MessagingSessionScoping(t *testing.T) {
 	dbPath := t.TempDir() + "/migration005test.db"
-	s, err := New(dbPath)
+	s, err := New(context.Background(), dbPath)
 	if err != nil {
 		t.Fatalf("store.New failed: %v", err)
 	}
 	defer s.Close()
 
-	db, err := sql.Open("sqlite", dbPath)
+	db, err := sqlitekit.OpenSingle(context.Background(), dbPath, sqlitekit.OpenOptions{
+		Options: sqlitekit.WriterOptions(),
+	})
 	if err != nil {
 		t.Fatalf("open db: %v", err)
 	}
@@ -78,4 +83,3 @@ func keys(m map[string]bool) []string {
 	}
 	return out
 }
-

@@ -13,7 +13,7 @@ import (
 func TestApprovalEmitter_PersistsAndStreams(t *testing.T) {
 	// In-memory store with migrations applied.
 	dbPath := filepath.Join(t.TempDir(), "test.db")
-	s, err := store.New(dbPath)
+	s, err := store.New(context.Background(), dbPath)
 	if err != nil {
 		t.Fatalf("store.New: %v", err)
 	}

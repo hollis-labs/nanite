@@ -12,7 +12,7 @@ import (
 
 func newTestStoreForEnricher(t *testing.T) *store.Store {
 	t.Helper()
-	s, err := store.New(t.TempDir() + "/test.db")
+	s, err := store.New(context.Background(), t.TempDir()+"/test.db")
 	if err != nil {
 		t.Fatalf("store.New: %v", err)
 	}

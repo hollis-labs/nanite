@@ -19,7 +19,7 @@ func newTestServer(t *testing.T) *Server {
 	t.Helper()
 	tmp := t.TempDir()
 	dbPath := tmp + "/test.db"
-	s, err := store.New(dbPath)
+	s, err := store.New(context.Background(), dbPath)
 	if err != nil {
 		t.Fatalf("open store: %v", err)
 	}

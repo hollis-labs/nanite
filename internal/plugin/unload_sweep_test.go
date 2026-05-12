@@ -7,9 +7,9 @@ import (
 	"path/filepath"
 	"testing"
 
-	goplugin "github.com/hollis-labs/plugin-sdk"
 	"github.com/hollis-labs/nanite/internal/plugin/subprocess"
 	"github.com/hollis-labs/nanite/internal/store"
+	goplugin "github.com/hollis-labs/plugin-sdk"
 )
 
 // stubMCPRegistrar records per-plugin server tracking without a real
@@ -77,8 +77,8 @@ func (s *stubCommandRegistrar) RemoveByPlugin(pluginID string) int {
 type stubEventHook struct{ types []string }
 
 func (s *stubEventHook) Handle(_ context.Context, _ goplugin.Event) error { return nil }
-func (s *stubEventHook) EventTypes() []string                              { return s.types }
-func (s *stubEventHook) PluginID() string                                  { return "test-plugin" }
+func (s *stubEventHook) EventTypes() []string                             { return s.types }
+func (s *stubEventHook) PluginID() string                                 { return "test-plugin" }
 
 // stubCRUDHandler implements the plugin-sdk CRUDHandler for the sweep test.
 type stubCRUDHandler struct{}
@@ -158,7 +158,7 @@ func TestUnloadPlugin_FullTeardown(t *testing.T) {
 	// Real store-backed config schema path so we exercise ClearPluginSchema
 	// end-to-end (not just a stub).
 	storePath := filepath.Join(t.TempDir(), "nanite-test.db")
-	db, err := store.New(storePath)
+	db, err := store.New(context.Background(), storePath)
 	if err != nil {
 		t.Fatalf("store.New: %v", err)
 	}

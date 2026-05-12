@@ -1,6 +1,7 @@
 package store
 
 import (
+	"context"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -206,7 +207,7 @@ func TestMigration057_TableExists(t *testing.T) {
 // schema_migrations bookkeeping).
 func TestMigration057_Idempotent(t *testing.T) {
 	dbPath := filepath.Join(t.TempDir(), "migration057.db")
-	s, err := New(dbPath)
+	s, err := New(context.Background(), dbPath)
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}

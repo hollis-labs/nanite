@@ -1,6 +1,7 @@
 package store
 
 import (
+	"context"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -14,7 +15,7 @@ import (
 // schema edits cannot quietly drop the CHECK without breaking this test.
 func TestMigration052_SessionIntentApplied(t *testing.T) {
 	dbPath := filepath.Join(t.TempDir(), "fresh.db")
-	s, err := New(dbPath)
+	s, err := New(context.Background(), dbPath)
 	if err != nil {
 		t.Fatalf("New(%s): %v", dbPath, err)
 	}
@@ -60,7 +61,7 @@ func TestMigration052_SessionIntentApplied(t *testing.T) {
 // "duplicate column" guard in store.go.
 func TestMigration052_IdempotentReRun(t *testing.T) {
 	dbPath := filepath.Join(t.TempDir(), "idempotent.db")
-	s1, err := New(dbPath)
+	s1, err := New(context.Background(), dbPath)
 	if err != nil {
 		t.Fatalf("New first call: %v", err)
 	}
@@ -68,7 +69,7 @@ func TestMigration052_IdempotentReRun(t *testing.T) {
 		t.Fatalf("Close first call: %v", err)
 	}
 
-	s2, err := New(dbPath)
+	s2, err := New(context.Background(), dbPath)
 	if err != nil {
 		t.Fatalf("New second call (re-run migrations): %v", err)
 	}

@@ -1,12 +1,13 @@
 package store
 
 import (
+	"context"
 	"path/filepath"
 	"testing"
 )
 
 func TestRecordExecutionMetrics(t *testing.T) {
-	s, err := New(filepath.Join(t.TempDir(), "test.db"))
+	s, err := New(context.Background(), filepath.Join(t.TempDir(), "test.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -42,7 +43,7 @@ func TestRecordExecutionMetrics(t *testing.T) {
 }
 
 func TestGetSessionExecutionMetrics(t *testing.T) {
-	s, err := New(filepath.Join(t.TempDir(), "test.db"))
+	s, err := New(context.Background(), filepath.Join(t.TempDir(), "test.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -88,7 +89,7 @@ func TestGetSessionExecutionMetrics(t *testing.T) {
 }
 
 func TestGetRecentExecutionMetrics(t *testing.T) {
-	s, err := New(filepath.Join(t.TempDir(), "test.db"))
+	s, err := New(context.Background(), filepath.Join(t.TempDir(), "test.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -115,7 +116,7 @@ func TestGetRecentExecutionMetrics(t *testing.T) {
 }
 
 func TestGetUtilityCallSummary(t *testing.T) {
-	s, err := New(filepath.Join(t.TempDir(), "test.db"))
+	s, err := New(context.Background(), filepath.Join(t.TempDir(), "test.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -171,7 +172,7 @@ func TestGetUtilityCallSummary(t *testing.T) {
 }
 
 func TestGetUtilityCallLog(t *testing.T) {
-	s, err := New(filepath.Join(t.TempDir(), "test.db"))
+	s, err := New(context.Background(), filepath.Join(t.TempDir(), "test.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -203,7 +204,7 @@ func TestGetUtilityCallLog(t *testing.T) {
 }
 
 func TestExecutionMetrics_PTYAdapter(t *testing.T) {
-	s, err := New(filepath.Join(t.TempDir(), "test.db"))
+	s, err := New(context.Background(), filepath.Join(t.TempDir(), "test.db"))
 	if err != nil {
 		t.Fatal(err)
 	}

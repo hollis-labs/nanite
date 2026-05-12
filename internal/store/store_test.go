@@ -1,6 +1,7 @@
 package store
 
 import (
+	"context"
 	"path/filepath"
 	"testing"
 )
@@ -9,7 +10,7 @@ import (
 func newTestStore(t *testing.T) *Store {
 	t.Helper()
 	dbPath := filepath.Join(t.TempDir(), "test.db")
-	s, err := New(dbPath)
+	s, err := New(context.Background(), dbPath)
 	if err != nil {
 		t.Fatalf("newTestStore: %v", err)
 	}
@@ -19,7 +20,7 @@ func newTestStore(t *testing.T) *Store {
 
 func TestNew(t *testing.T) {
 	dbPath := filepath.Join(t.TempDir(), "test.db")
-	s, err := New(dbPath)
+	s, err := New(context.Background(), dbPath)
 	if err != nil {
 		t.Fatalf("New() error: %v", err)
 	}

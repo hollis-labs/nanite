@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -34,7 +35,7 @@ func mcpImport(args []string) {
 		os.Exit(1)
 	}
 
-	s, err := store.New(dbPath)
+	s, err := store.New(context.Background(), dbPath)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "error: open db: %v\n", err)
 		os.Exit(1)
@@ -71,7 +72,7 @@ func mcpExport(args []string) {
 		}
 	}
 
-	s, err := store.New(dbPath)
+	s, err := store.New(context.Background(), dbPath)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "error: open db: %v\n", err)
 		os.Exit(1)

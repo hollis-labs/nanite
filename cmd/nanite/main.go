@@ -31,11 +31,11 @@ import (
 	"github.com/hollis-labs/go-providers/provider"
 	"github.com/hollis-labs/go-toolbroker/broker"
 	"github.com/hollis-labs/nanite/internal/api"
-	nllmopenai "github.com/hollis-labs/nanite/internal/llm/openai"
 	"github.com/hollis-labs/nanite/internal/chat"
 	"github.com/hollis-labs/nanite/internal/filter"
 	"github.com/hollis-labs/nanite/internal/lifecycle"
 	nllmanthropic "github.com/hollis-labs/nanite/internal/llm/anthropic"
+	nllmopenai "github.com/hollis-labs/nanite/internal/llm/openai"
 	"github.com/hollis-labs/nanite/internal/mcp"
 	"github.com/hollis-labs/nanite/internal/mcpserver"
 	"github.com/hollis-labs/nanite/internal/muxproxy"
@@ -145,7 +145,7 @@ func cmdServe(args []string) {
 	}
 
 	// Open store and run migrations.
-	s, err := store.New(*dbPath)
+	s, err := store.New(context.Background(), *dbPath)
 	if err != nil {
 		slogx.Fatal("failed to open store", "err", err)
 	}
@@ -952,7 +952,7 @@ func cmdMCPServe(args []string) {
 	sessionID := fs.String("session", "", "Session ID")
 	fs.Parse(args)
 
-	s, err := store.New(*dbPath)
+	s, err := store.New(context.Background(), *dbPath)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "%s mcp: open db: %v\n", brand.BinaryName, err)
 		os.Exit(1)

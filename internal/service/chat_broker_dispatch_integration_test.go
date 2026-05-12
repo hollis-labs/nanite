@@ -40,7 +40,7 @@ import (
 //     created_at + session/turn ids).
 func TestAttemptBrokerDispatch_Integration_PersistsRowEventLogAndSSE(t *testing.T) {
 	dbPath := filepath.Join(t.TempDir(), "broker-sse.db")
-	st, err := store.New(dbPath)
+	st, err := store.New(context.Background(), dbPath)
 	if err != nil {
 		t.Fatalf("store.New: %v", err)
 	}
@@ -223,7 +223,7 @@ func TestAttemptBrokerDispatch_Integration_PersistsRowEventLogAndSSE(t *testing.
 // no dispatch happened.
 func TestAttemptBrokerDispatch_Integration_ChatDirectFiresWireEvent(t *testing.T) {
 	dbPath := filepath.Join(t.TempDir(), "broker-sse.db")
-	st, err := store.New(dbPath)
+	st, err := store.New(context.Background(), dbPath)
 	if err != nil {
 		t.Fatalf("store.New: %v", err)
 	}

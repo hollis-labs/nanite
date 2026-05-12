@@ -13,8 +13,8 @@ import (
 	"github.com/hollis-labs/nanite/internal/agent"
 	"github.com/hollis-labs/nanite/internal/agent/builtin"
 	"github.com/hollis-labs/nanite/internal/brand"
-	"github.com/hollis-labs/nanite/internal/service"
 	"github.com/hollis-labs/nanite/internal/messaging"
+	"github.com/hollis-labs/nanite/internal/service"
 	"github.com/hollis-labs/nanite/internal/slogx"
 	"github.com/hollis-labs/nanite/internal/store"
 )
@@ -87,7 +87,7 @@ func cmdMessage(args []string) {
 	sub := remaining[0]
 	rest := remaining[1:]
 
-	s, err := store.New(dbPath)
+	s, err := store.New(context.Background(), dbPath)
 	if err != nil {
 		slogx.Fatal("message: open db", "path", dbPath, "err", err)
 	}

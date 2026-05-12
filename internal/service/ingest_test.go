@@ -3,6 +3,7 @@ package service
 // J7 (CW-20260421-0011): tests for the skills/agents DB ingestion pipeline.
 
 import (
+	"context"
 	"path/filepath"
 	"testing"
 
@@ -13,7 +14,7 @@ import (
 
 func newIngestTestStore(t *testing.T) *store.Store {
 	t.Helper()
-	s, err := store.New(filepath.Join(t.TempDir(), "test.db"))
+	s, err := store.New(context.Background(), filepath.Join(t.TempDir(), "test.db"))
 	if err != nil {
 		t.Fatalf("store.New: %v", err)
 	}

@@ -26,7 +26,7 @@ import (
 func newTestDB(t *testing.T) (*sql.DB, *store.Store) {
 	t.Helper()
 	dbPath := filepath.Join(t.TempDir(), "test.db")
-	s, err := store.New(dbPath)
+	s, err := store.New(context.Background(), dbPath)
 	if err != nil {
 		t.Fatalf("store.New: %v", err)
 	}

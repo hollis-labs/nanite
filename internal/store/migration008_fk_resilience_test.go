@@ -60,44 +60,46 @@ func TestMigration008_SurvivesOrphanMessage(t *testing.T) {
 	mustExec(t, s, `INSERT INTO messages (id, session_id, role, content) VALUES ('m1','s1','user','orphan-me')`)
 
 	// Orphan the message by deleting the session with FKs disabled on a
-	// dedicated connection (PRAGMA + DELETE must be on the same conn).
-	// All cleanup is deferred so a failed Exec can't leak a conn with
-	// foreign_keys=OFF back into the pool and flake other tests.
+	// dedicated connection (PRAGMA + DELETE must be on the same conn). The
+	// orphan-check query and connection release must happen before migrate()
+	// is called, because sqlitekit.OpenSingle forces MaxOpenConns=1 — any
+	// s.DB.* call while this conn is pinned would deadlock.
 	ctx := context.Background()
 	conn, err := s.DB.Conn(ctx)
 	if err != nil {
 		t.Fatalf("get conn: %v", err)
 	}
-	defer func() {
-		if err := conn.Close(); err != nil {
-			t.Errorf("close conn: %v", err)
-		}
-	}()
 	if _, err := conn.ExecContext(ctx, `PRAGMA foreign_keys = OFF`); err != nil {
+		conn.Close()
 		t.Fatalf("disable fk: %v", err)
 	}
-	defer func() {
-		if _, err := conn.ExecContext(ctx, `PRAGMA foreign_keys = ON`); err != nil {
-			t.Errorf("re-enable fk: %v", err)
-		}
-	}()
 	if _, err := conn.ExecContext(ctx, `DELETE FROM sessions WHERE id='s1'`); err != nil {
+		_, _ = conn.ExecContext(ctx, `PRAGMA foreign_keys = ON`)
+		conn.Close()
 		t.Fatalf("orphan the message: %v", err)
 	}
 
-	// Confirm we actually produced an orphan.
 	var orphans int
-	if err := s.DB.QueryRow(
+	if err := conn.QueryRowContext(ctx,
 		`SELECT COUNT(*) FROM messages m LEFT JOIN sessions s ON s.id=m.session_id WHERE s.id IS NULL`,
 	).Scan(&orphans); err != nil {
+		_, _ = conn.ExecContext(ctx, `PRAGMA foreign_keys = ON`)
+		conn.Close()
 		t.Fatalf("query orphans: %v", err)
 	}
+
+	if _, err := conn.ExecContext(ctx, `PRAGMA foreign_keys = ON`); err != nil {
+		conn.Close()
+		t.Errorf("re-enable fk: %v", err)
+	}
+	if err := conn.Close(); err != nil {
+		t.Errorf("close conn: %v", err)
+	}
+
 	if orphans == 0 {
 		t.Fatal("test setup failed: expected 1 orphan message")
 	}
 
-	// Re-run migrate() — migration 008 must survive the INSERT path even
-	// though the orphan row would violate session_id FK if FKs were active.
 	if err := s.migrate(); err != nil {
 		t.Fatalf("migrate with orphan message should succeed, got: %v", err)
 	}

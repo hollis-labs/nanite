@@ -1,11 +1,12 @@
 package store
 
 import (
+	"context"
 	"testing"
 )
 
 func TestCatalogSourceCRUD(t *testing.T) {
-	s, err := New(t.TempDir() + "/test.db")
+	s, err := New(context.Background(), t.TempDir()+"/test.db")
 	if err != nil {
 		t.Fatalf("open db: %v", err)
 	}
@@ -88,7 +89,7 @@ func TestCatalogSourceCRUD(t *testing.T) {
 }
 
 func TestCatalogSourceDuplicateURL(t *testing.T) {
-	s, err := New(t.TempDir() + "/test.db")
+	s, err := New(context.Background(), t.TempDir()+"/test.db")
 	if err != nil {
 		t.Fatalf("open db: %v", err)
 	}

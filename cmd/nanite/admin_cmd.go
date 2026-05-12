@@ -18,6 +18,7 @@ package main
 //   convention: `nanite admin agent-broker-decisions`.
 
 import (
+	"context"
 	"encoding/json"
 	"flag"
 	"fmt"
@@ -78,10 +79,10 @@ func cmdAdmin(args []string) {
 // and a zero ConfidenceLT (with HasConfidenceLT=false) means "no
 // confidence filter". Limit is the post-filter cap (default 50).
 type agentBrokerDecisionsFilter struct {
-	Limit            int
-	Since            time.Duration
-	ConfidenceLT     float64
-	HasConfidenceLT  bool
+	Limit           int
+	Since           time.Duration
+	ConfidenceLT    float64
+	HasConfidenceLT bool
 }
 
 // parseAgentBrokerWhere parses a single `--where` clause. v1 supports
@@ -271,7 +272,7 @@ func adminAgentBrokerDecisions(dbPath string, args []string) {
 		filter.HasConfidenceLT = true
 	}
 
-	s, err := store.New(dbPath)
+	s, err := store.New(context.Background(), dbPath)
 	if err != nil {
 		slogx.Fatal("admin agent-broker-decisions: open db", "path", dbPath, "err", err)
 	}
@@ -336,7 +337,7 @@ func printAgentBrokerJSON(w io.Writer, rows []*store.AgentBrokerDecision) {
 }
 
 // emptyDash maps the empty-string sentinel used by AgentBrokerDecision
-// (NOT NULL DEFAULT '' columns) to a dash so the tabular view doesn't
+// (NOT NULL DEFAULT ” columns) to a dash so the tabular view doesn't
 // render visually-empty cells. JSON output preserves the empty string
 // for round-trip consumers.
 func emptyDash(s string) string {

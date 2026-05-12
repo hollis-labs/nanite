@@ -2,14 +2,15 @@ package api
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
 	"testing"
 
-	"github.com/hollis-labs/nanite/internal/chat"
 	"github.com/hollis-labs/go-providers/provider"
+	"github.com/hollis-labs/nanite/internal/chat"
 	"github.com/hollis-labs/nanite/internal/service"
 	"github.com/hollis-labs/nanite/internal/store"
 )
@@ -17,7 +18,7 @@ import (
 func newTestAPI(t *testing.T) (*API, *http.ServeMux) {
 	t.Helper()
 	dbPath := filepath.Join(t.TempDir(), "test.db")
-	s, err := store.New(dbPath)
+	s, err := store.New(context.Background(), dbPath)
 	if err != nil {
 		t.Fatalf("store.New: %v", err)
 	}

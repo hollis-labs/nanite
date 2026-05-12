@@ -16,12 +16,12 @@ require (
 require (
 	github.com/anthropics/anthropic-sdk-go v1.41.0
 	github.com/google/jsonschema-go v0.4.2
-	github.com/hollis-labs/go-agent-sessions v0.7.1
+	github.com/hollis-labs/go-agent-sessions v0.9.2
 	github.com/hollis-labs/go-agentmux-client v0.1.0
 	github.com/hollis-labs/go-envelopes v0.1.0
 	github.com/hollis-labs/go-modelsdev v0.0.0-00010101000000-000000000000
 	github.com/hollis-labs/go-otel v0.0.2
-	github.com/hollis-labs/go-providers v0.12.0
+	github.com/hollis-labs/go-providers v0.17.1
 	github.com/hollis-labs/go-sandbox v0.2.0
 	github.com/hollis-labs/go-toolbroker v0.1.0
 	github.com/hollis-labs/vanta-conduit v0.6.1
@@ -99,4 +99,5 @@ require (
 	github.com/hollis-labs/go-embed-contracts v0.1.0
 	github.com/hollis-labs/go-llm-contracts v0.1.0
 	github.com/hollis-labs/go-llm-types v0.1.0
+	github.com/hollis-labs/go-sqlite v0.1.0
 )

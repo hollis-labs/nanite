@@ -16,7 +16,7 @@ import (
 func newTestSubagentSvc(t *testing.T) *subagent.Service {
 	t.Helper()
 	dbPath := filepath.Join(t.TempDir(), "chat_test.db")
-	s, err := store.New(dbPath)
+	s, err := store.New(context.Background(), dbPath)
 	if err != nil {
 		t.Fatalf("store.New: %v", err)
 	}

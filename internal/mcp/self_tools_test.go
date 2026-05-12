@@ -13,7 +13,7 @@ func newTestStore(t *testing.T) *store.Store {
 	t.Helper()
 	tmp := t.TempDir()
 	dbPath := tmp + "/test.db"
-	s, err := store.New(dbPath)
+	s, err := store.New(context.Background(), dbPath)
 	if err != nil {
 		t.Fatalf("open store: %v", err)
 	}
@@ -36,15 +36,15 @@ func TestSelfToolsTransport_ListTools(t *testing.T) {
 	}
 
 	expected := map[string]bool{
-		"skill_create":     false,
+		"skill_create":    false,
 		"skill_list":      false,
-		"skill_update":     false,
-		"skill_delete":     false,
-		"agent_create":     false,
+		"skill_update":    false,
+		"skill_delete":    false,
+		"agent_create":    false,
 		"agent_list":      false,
-		"agent_update":     false,
-		"builder_start":    false,
-		"builder_step":     false,
+		"agent_update":    false,
+		"builder_start":   false,
+		"builder_step":    false,
 		"install_home":    false,
 		"install_project": false,
 		"install_diff":    false,

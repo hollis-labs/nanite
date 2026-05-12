@@ -2,6 +2,7 @@ package api
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"mime/multipart"
 	"net/http"
@@ -77,7 +78,7 @@ func newArtifactTestAPI(t *testing.T) (*API, string) {
 	t.Helper()
 	dir := t.TempDir()
 	dbPath := filepath.Join(dir, "test.db")
-	s, err := store.New(dbPath)
+	s, err := store.New(context.Background(), dbPath)
 	if err != nil {
 		t.Fatalf("store.New: %v", err)
 	}
@@ -269,11 +270,11 @@ func TestUploadHappyPath(t *testing.T) {
 // are stripped from the download filename header.
 func TestSanitizeContentDispositionName(t *testing.T) {
 	cases := map[string]string{
-		`ok.txt`:              `ok.txt`,
-		"bad\"quote.txt":      `badquote.txt`,
-		"line\r\nbreak.txt":   `linebreak.txt`,
-		"null\x00byte.txt":    `nullbyte.txt`,
-		``:                    `download`,
+		`ok.txt`:            `ok.txt`,
+		"bad\"quote.txt":    `badquote.txt`,
+		"line\r\nbreak.txt": `linebreak.txt`,
+		"null\x00byte.txt":  `nullbyte.txt`,
+		``:                  `download`,
 	}
 	for in, want := range cases {
 		if got := sanitizeContentDispositionName(in); got != want {

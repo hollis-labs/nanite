@@ -62,11 +62,14 @@ func TestSelectForAgent_PopulatesDispatchAllowlistFromAgentProfile(t *testing.T)
 	tc := buildToolClientWithTaskExecute(t)
 
 	reader := newStubReader()
-	// Trusted parent: chat-role agent (slug "default") — NOT using
-	// chatRoleAgentSlug here because the chat-surface filter removes
-	// task_execute from the chat surface; we want to verify the
-	// describer wiring, so we use a distinct slug that bypasses that
-	// filter. The DispatchAllowlist field is what matters for this test.
+	// Trusted parent uses slug "trusted-parent" (NOT the chat-role
+	// default slug "default") specifically to bypass the chat-surface
+	// filter, which would otherwise strip task_execute from the chat
+	// agent's visible surface. The behavior under test is the describer
+	// wiring — AgentProfile.ParentDispatchAllowlist propagating through
+	// SelectForAgent into the rendered task_execute description — so a
+	// non-chat slug keeps the assertion focused on that path. The
+	// DispatchAllowlist field is what matters here, not the slug.
 	reader.addAgent(&store.AgentProfile{
 		ID:                      "trusted-parent",
 		Slug:                    "trusted-parent",

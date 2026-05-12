@@ -702,6 +702,14 @@ func initMCP(s *store.Store, cfg *config.Config) (*mcp.Manager, *toolclient.Tool
 	tb.Builtins.RegisterBuiltins("self-service", selfToolDefs)
 	slog.Info("registered self-service built-in tools", "count", len(selfToolDefs))
 
+	// Per-call description-render hook (CW-20260512-0105 / SP-20260512-0008
+	// W1B). Opt-in: only the named adopters (task_execute, tool_list,
+	// skill_list) get caller-specific descriptions; all other tools emit
+	// their static registration-time string. See
+	// internal/mcp/self_tools_describer.go for the renderer bodies.
+	mcp.RegisterSelfToolDescribers(tb.Describers)
+	slog.Info("registered self-tool describers", "count", tb.Describers.Count())
+
 	// G5 (CW-20260421-0001): mux transport + tool registration — devmode only.
 	// registerMuxTransport is a no-op in non-devmode builds; mux_* tools are
 	// absent from the production tool surface.

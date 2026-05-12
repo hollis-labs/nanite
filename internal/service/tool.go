@@ -13,6 +13,7 @@ import (
 	llmcontracts "github.com/hollis-labs/go-llm-contracts"
 	llmtypes "github.com/hollis-labs/go-llm-types"
 	"github.com/hollis-labs/nanite/internal/chat"
+	"github.com/hollis-labs/nanite/internal/describer"
 	"github.com/hollis-labs/nanite/internal/dispatch"
 	"github.com/hollis-labs/nanite/internal/mcp"
 	recoverpkg "github.com/hollis-labs/nanite/internal/recover"
@@ -277,13 +278,31 @@ func (s *toolServiceImpl) SelectForAgent(ctx context.Context, sessionID, agentID
 	// recovery flow stays inside the executor (B3 pilot —
 	// internal/executor/envelope_render). See internal/dispatch/chat_surface.go
 	// for the canonical exclusion list.
+	var callerSlug string
 	if s.agents != nil {
 		if agent, err := s.agents.GetAgent(agentID); err == nil {
+			callerSlug = agent.Slug
 			allTools = filterToolsByAllowlist(allTools, agent.Tools)
 			if agent.Slug == chatRoleAgentSlug {
 				allTools = applyChatSurfaceFilter(allTools, dispatch.DefaultChatToolSurface())
 			}
 		}
+	}
+
+	// Per-call description-render hook (CW-20260512-0105 / SP-20260512-0008
+	// W1B). Tools that opted into the Describer registry have their
+	// descriptions re-rendered here, with the caller agent's identity
+	// (and, once W2A lands, dispatch allowlist) threaded through.
+	// Static-description tools are unchanged.
+	if s.toolClient != nil {
+		caller := describer.CallerAgent{
+			ID:   agentID,
+			Slug: callerSlug,
+			// DispatchAllowlist remains empty until W2A Agent Broker
+			// (CW-20260512-0107) wires the parent agent's role-derived
+			// allowlist into this call site.
+		}
+		allTools = s.toolClient.RenderDescriptions(ctx, allTools, caller)
 	}
 
 	if len(allTools) == 0 {

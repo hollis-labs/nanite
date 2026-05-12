@@ -136,6 +136,16 @@ type minimalStore struct {
 	stubEnvelopeStore
 	stubReminderStore
 	stubPinnedContentStore
+	stubSubagentRunsReader
+}
+
+// stubSubagentRunsReader returns no active subagent for any session by
+// default. Tests that need to exercise the suppression branch (CW-20260512-0002 d)
+// embed a custom reader instead.
+type stubSubagentRunsReader struct{}
+
+func (stubSubagentRunsReader) ActiveSubagentRunForParent(string) (id, role, child string, ok bool, err error) {
+	return "", "", "", false, nil
 }
 
 type stubEnvelopeStore struct{}

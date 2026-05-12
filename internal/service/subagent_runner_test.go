@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"fmt"
 	"strings"
@@ -162,6 +163,9 @@ func TestDrainCapture_IgnoresOtherEventTypes(t *testing.T) {
 }
 
 // stubAgentReaderForRunner satisfies agentSlugResolver for ChatRunner tests.
+// Returns sql.ErrNoRows-wrapped errors for unknown slugs (matching the real
+// store.GetAgentBySlug behavior), so the runner's slug-fallback path is
+// exercised by tests.
 type stubAgentReaderForRunner struct {
 	agents map[string]*store.AgentProfile
 }
@@ -169,27 +173,83 @@ type stubAgentReaderForRunner struct {
 func (s *stubAgentReaderForRunner) GetAgentBySlug(slug string) (*store.AgentProfile, error) {
 	a, ok := s.agents[slug]
 	if !ok {
-		return nil, fmt.Errorf("agent not found: %s", slug)
+		// Mirror store.GetAgentBySlug — wrap sql.ErrNoRows with %w so
+		// errors.Is(err, sql.ErrNoRows) reports true. CW-20260512-0002 (a).
+		return nil, fmt.Errorf("get agent by slug %s: %w", slug, sql.ErrNoRows)
 	}
 	return a, nil
 }
 
-func TestChatRunner_ResolveRoleFails(t *testing.T) {
+// TestChatRunner_ResolveRoleFallsBackToWorker — CW-20260512-0002 subtodo (a):
+// unknown slugs should fall back to the `worker` profile rather than
+// hard-erroring. Mirrors the reflex-catalog drift guard.
+func TestChatRunner_ResolveRoleFallsBackToWorker(t *testing.T) {
+	workerProfile := &store.AgentProfile{ID: "ag-worker", Slug: "worker", DefaultProvider: "anthropic", DefaultModel: "m"}
+	r := &ChatRunner{
+		agents: &stubAgentReaderForRunner{agents: map[string]*store.AgentProfile{
+			"worker": workerProfile,
+		}},
+	}
+	agent, err := r.resolveRole("researcher")
+	if err != nil {
+		t.Fatalf("resolveRole(\"researcher\"): expected fallback to worker, got error %v", err)
+	}
+	if agent == nil || agent.Slug != "worker" {
+		t.Errorf("resolveRole(\"researcher\") returned slug=%q, want \"worker\"", agentSlugOrEmpty(agent))
+	}
+}
+
+// TestChatRunner_ResolveRoleFailsWhenFallbackMissing — when even the
+// fallback `worker` profile is missing, the runner surfaces the ORIGINAL
+// slug in the error so the deployment misconfiguration is alertable.
+func TestChatRunner_ResolveRoleFailsWhenFallbackMissing(t *testing.T) {
 	r := &ChatRunner{
 		agents: &stubAgentReaderForRunner{agents: map[string]*store.AgentProfile{}},
 	}
-	_, err := r.Run(context.Background(), &subagent.Run{
-		ID:              "run-1",
-		Role:            "nonexistent",
-		ParentSessionID: "sess-1",
-		Prompt:          "p",
-	})
+	_, err := r.resolveRole("nonexistent")
 	if err == nil {
-		t.Fatal("expected error for unknown role, got nil")
+		t.Fatal("expected error when neither slug nor fallback resolve, got nil")
 	}
-	if !errors.Is(err, errRoleResolveFailed) && !strings.Contains(err.Error(), "nonexistent") {
-		t.Errorf("error = %v, want wrapped role-not-found", err)
+	if !errors.Is(err, errRoleResolveFailed) {
+		t.Errorf("error = %v, want wrapped errRoleResolveFailed", err)
 	}
+	if !strings.Contains(err.Error(), "nonexistent") {
+		t.Errorf("error %v: must surface original slug \"nonexistent\"", err)
+	}
+	if !strings.Contains(err.Error(), "fallback") {
+		t.Errorf("error %v: must mention fallback was also missing", err)
+	}
+}
+
+// TestChatRunner_ResolveRoleSurfacesNonNoRowsError — non-sql.ErrNoRows
+// errors (DB I/O, etc.) must NOT trigger the fallback; they need to
+// surface as runner failures so the caller learns about the real fault.
+func TestChatRunner_ResolveRoleSurfacesNonNoRowsError(t *testing.T) {
+	r := &ChatRunner{agents: errAgentReader{err: errors.New("db connection lost")}}
+	_, err := r.resolveRole("worker")
+	if err == nil {
+		t.Fatal("expected error to surface, got nil")
+	}
+	if !errors.Is(err, errRoleResolveFailed) {
+		t.Errorf("error = %v, want wrapped errRoleResolveFailed", err)
+	}
+	if !strings.Contains(err.Error(), "db connection lost") {
+		t.Errorf("error %v: must preserve underlying cause", err)
+	}
+}
+
+// errAgentReader returns the configured error for every lookup. Used to
+// verify that resolveRoleWithFallback does NOT swallow non-sql.ErrNoRows
+// errors with a silent fallback.
+type errAgentReader struct{ err error }
+
+func (e errAgentReader) GetAgentBySlug(string) (*store.AgentProfile, error) { return nil, e.err }
+
+func agentSlugOrEmpty(a *store.AgentProfile) string {
+	if a == nil {
+		return ""
+	}
+	return a.Slug
 }
 
 // recordingSessionStore implements sessionStoreForRunner in memory.

@@ -113,7 +113,37 @@ func (s *chatServiceImpl) persistPartialAssistantAndNotifyBroker(
 	// Always persist the partial-assistant row first; the broker
 	// notification is best-effort observability on top of that.
 	s.persistPartialAssistant(sessionID, assistantMsgID, agentID, content)
+	s.notifyRecoveryBrokerForHTTPStreamError(ctx, sessionID, providerName, agentProfileSlug, streamErr)
+}
 
+// persistPartialAssistantAndNotifyBrokerPreClassified is the pre-classified
+// counterpart: callers that have already run a suppression check at the
+// site (e.g. via suppressSurfaceIfSubagentCaused or surfaceErrorOrSuppress)
+// invoke this variant to skip the redundant ActiveSubagentRunForParent
+// lookup inside persistPartialAssistant. Broker-notification semantics
+// are identical to persistPartialAssistantAndNotifyBroker.
+// CW-20260512-0002 (PR #138 review fixup #2) × CW-20260512-0001.
+func (s *chatServiceImpl) persistPartialAssistantAndNotifyBrokerPreClassified(
+	ctx context.Context,
+	sessionID, assistantMsgID, agentID, content, providerName, agentProfileSlug string,
+	streamErr error,
+) {
+	s.persistPartialAssistantPreClassified(sessionID, assistantMsgID, agentID, content)
+	s.notifyRecoveryBrokerForHTTPStreamError(ctx, sessionID, providerName, agentProfileSlug, streamErr)
+}
+
+// notifyRecoveryBrokerForHTTPStreamError is the broker-side half of the
+// HTTP-stream error helper: synthesizes the ExitError + meta bag and
+// dispatches OnSessionExit on safego.Go. Persistence is the caller's job
+// — both persistPartialAssistantAndNotifyBroker (regular) and
+// persistPartialAssistantAndNotifyBrokerPreClassified (skip-redundant-
+// suppression) invoke this same helper after their respective persist
+// step. CW-20260512-0001.
+func (s *chatServiceImpl) notifyRecoveryBrokerForHTTPStreamError(
+	ctx context.Context,
+	sessionID, providerName, agentProfileSlug string,
+	streamErr error,
+) {
 	if s.agentDeps == nil || s.agentDeps.Recovery == nil {
 		return
 	}

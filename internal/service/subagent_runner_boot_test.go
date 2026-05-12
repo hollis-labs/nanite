@@ -163,6 +163,10 @@ func TestBootRunner_NilAgentsResolver(t *testing.T) {
 	}
 }
 
+// TestBootRunner_ResolveRoleFails — when neither the requested slug NOR
+// the `worker` fallback exists, resolveRole surfaces errRoleResolveFailed
+// with both slugs in the message. CW-20260512-0002 (a): see also the
+// fallback-happy-path test below.
 func TestBootRunner_ResolveRoleFails(t *testing.T) {
 	r := &BootRunner{
 		deps:   &runtimeagent.Dependencies{},
@@ -170,10 +174,27 @@ func TestBootRunner_ResolveRoleFails(t *testing.T) {
 	}
 	_, err := r.Run(context.Background(), &subagent.Run{Role: "missing", ParentSessionID: "p", Prompt: "p"})
 	if err == nil {
-		t.Fatal("expected role-resolve error")
+		t.Fatal("expected role-resolve error when both slug and fallback missing")
 	}
 	if !errors.Is(err, errRoleResolveFailed) {
 		t.Errorf("error = %v, want wrapped errRoleResolveFailed", err)
+	}
+}
+
+// TestBootRunner_ResolveRoleFallsBackToWorker verifies the BootRunner
+// path also picks up the worker fallback. CW-20260512-0002 subtodo (a).
+func TestBootRunner_ResolveRoleFallsBackToWorker(t *testing.T) {
+	worker := &store.AgentProfile{ID: "ag-worker", Slug: "worker", DefaultProvider: "anthropic"}
+	r := &BootRunner{
+		deps:   &runtimeagent.Dependencies{},
+		agents: &stubAgentReaderForRunner{agents: map[string]*store.AgentProfile{"worker": worker}},
+	}
+	agent, err := r.resolveRole("nanite-planner")
+	if err != nil {
+		t.Fatalf("resolveRole(\"nanite-planner\"): expected fallback, got %v", err)
+	}
+	if agent == nil || agent.Slug != "worker" {
+		t.Errorf("resolveRole(\"nanite-planner\") returned slug=%q, want \"worker\"", agentSlugOrEmpty(agent))
 	}
 }
 

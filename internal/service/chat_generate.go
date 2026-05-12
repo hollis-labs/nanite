@@ -728,6 +728,17 @@ func (s *chatServiceImpl) generateResponse(ctx context.Context, sessionID, assis
 		if ctx.Err() != nil {
 			slog.Warn("generateResponse context cancelled", "err", ctx.Err(), "session_id", sessionID)
 			diagLogLoopExit(sessionID, assistantMsgID, ls.iteration, "ctx_cancelled:"+ctx.Err().Error(), len(ls.toolCallRefs), ch)
+			// CW-20260512-0002 subtodo (d): when the deadline fires while
+			// a sync subagent is still running, the cause is a hung
+			// subagent — NOT an internal parent-loop error. Suppress the
+			// FE-visible `ErrorCodeInternal` envelope + event + the
+			// `[generation interrupted]` placeholder write; the
+			// suppression is logged in structured form by the helper so
+			// it remains observable. Parent-stream genuine timeouts
+			// (no active subagent) keep the existing UI.
+			if s.suppressSurfaceIfSubagentCaused(sessionID, "deadline_5min", fullContent.String()) {
+				return
+			}
 			ch <- chat.ErrorEnvelopeDelta(chat.ErrorCodeInternal, "Response timed out after 5 minutes. Please try again with a simpler request.", map[string]interface{}{
 				"timeout": generateResponseTimeout.String(),
 				"session": sessionID,
@@ -736,7 +747,10 @@ func (s *chatServiceImpl) generateResponse(ctx context.Context, sessionID, assis
 				"timeout": generateResponseTimeout.String(),
 				"session": sessionID,
 			})
-			s.persistPartialAssistantAndNotifyBroker(ctx, sessionID, assistantMsgID, agentID, fullContent.String(), providerName, agent.Slug, ctx.Err()) // CW-20260419-0019, CW-20260512-0001
+			// Suppression already checked at line above; use the pre-classified
+			// broker-notify variant to skip the redundant ActiveSubagentRunForParent
+			// lookup inside persistPartialAssistant. CW-20260512-0001, CW-20260512-0002.
+			s.persistPartialAssistantAndNotifyBrokerPreClassified(ctx, sessionID, assistantMsgID, agentID, fullContent.String(), providerName, agent.Slug, ctx.Err()) // CW-20260419-0019, CW-20260512-0001, CW-20260512-0002
 			return
 		}
 
@@ -1061,9 +1075,13 @@ func (s *chatServiceImpl) generateResponse(ctx context.Context, sessionID, assis
 				default:
 					msg = "Context is too large and automatic compaction could not reduce it. Use `/clear` or split the request."
 				}
-				ch <- chat.ErrorEnvelopeDelta(chat.ErrorCodeInternal, msg, map[string]interface{}{"recovery": "refused", "trigger_kind": triggerKind})
-				ch <- chat.ErrorEvent(chat.ErrorCodeInternal, msg, map[string]interface{}{"recovery": "refused", "trigger_kind": triggerKind})
-				s.persistPartialAssistantAndNotifyBroker(ctx, sessionID, assistantMsgID, agentID, fullContent.String(), providerName, agent.Slug, err) // CW-20260419-0019, CW-20260512-0001
+				details := map[string]interface{}{"recovery": "refused", "trigger_kind": triggerKind}
+				if s.surfaceErrorOrSuppress(ch, sessionID, "recovery_refused", msg, details, fullContent.String()) {
+					return
+				}
+				// surfaceErrorOrSuppress already classified above; use the pre-classified
+				// broker-notify variant. CW-20260512-0001, CW-20260512-0002.
+				s.persistPartialAssistantAndNotifyBrokerPreClassified(ctx, sessionID, assistantMsgID, agentID, fullContent.String(), providerName, agent.Slug, err) // CW-20260419-0019, CW-20260512-0001, CW-20260512-0002
 				return
 			}
 			provSpan.RecordError(err)
@@ -1111,15 +1129,29 @@ func (s *chatServiceImpl) generateResponse(ctx context.Context, sessionID, assis
 					return
 				}
 				msg := "Context is still too large after compaction. Use `/clear` or split the request."
-				ch <- chat.ErrorEnvelopeDelta(chat.ErrorCodeInternal, msg, map[string]interface{}{"recovery": "failed_after_retry"})
-				ch <- chat.ErrorEvent(chat.ErrorCodeInternal, msg, map[string]interface{}{"recovery": "failed_after_retry"})
-				s.persistPartialAssistantAndNotifyBroker(ctx, sessionID, assistantMsgID, agentID, fullContent.String(), providerName, agent.Slug, err) // CW-20260419-0019, CW-20260512-0001
+				if s.surfaceErrorOrSuppress(ch, sessionID, "compact_failed_after_retry", msg, map[string]interface{}{"recovery": "failed_after_retry"}, fullContent.String()) {
+					return
+				}
+				// surfaceErrorOrSuppress already classified above; use the pre-classified
+				// broker-notify variant. CW-20260512-0001, CW-20260512-0002.
+				s.persistPartialAssistantAndNotifyBrokerPreClassified(ctx, sessionID, assistantMsgID, agentID, fullContent.String(), providerName, agent.Slug, err) // CW-20260419-0019, CW-20260512-0001, CW-20260512-0002
+				return
+			}
+			// Provider stream error (general) — classifier-driven error code,
+			// not necessarily ErrorCodeInternal. Subagent suppression still
+			// applies: if a subagent is actively running and the parent's
+			// provider call errors, surfacing it as a parent-side failure
+			// confuses the user. The classifier-driven code is preserved
+			// for the non-subagent branch.
+			if s.suppressSurfaceIfSubagentCaused(sessionID, "provider_stream_error", fullContent.String()) {
 				return
 			}
 			errDetails := map[string]interface{}{"raw": err.Error(), "model": model, "tools": len(tools)}
 			ch <- chat.ErrorEnvelopeDelta(chat.ClassifyError(err), "Provider streaming failed", errDetails)
 			ch <- chat.ErrorEvent(chat.ClassifyError(err), "Provider streaming failed", errDetails)
-			s.persistPartialAssistantAndNotifyBroker(ctx, sessionID, assistantMsgID, agentID, fullContent.String(), providerName, agent.Slug, err) // CW-20260419-0019, CW-20260512-0001
+			// Suppression already checked at line above; use the pre-classified
+			// broker-notify variant. CW-20260512-0001, CW-20260512-0002.
+			s.persistPartialAssistantAndNotifyBrokerPreClassified(ctx, sessionID, assistantMsgID, agentID, fullContent.String(), providerName, agent.Slug, err) // CW-20260419-0019, CW-20260512-0001, CW-20260512-0002
 			return
 		}
 
@@ -1236,14 +1268,25 @@ func (s *chatServiceImpl) generateResponse(ctx context.Context, sessionID, assis
 				if ctxpkg.IsContextOverflowMessage(evt.Error) && ls.compactRecoverableAttempts >= maxCompactRecoverableAttempts {
 					msg := "Context is still too large after compaction. Use `/clear` or split the request."
 					errDetails["recovery"] = "failed_after_retry"
-					ch <- chat.ErrorEnvelopeDelta(chat.ErrorCodeInternal, msg, errDetails)
-					ch <- chat.ErrorEvent(chat.ErrorCodeInternal, msg, errDetails)
-					s.persistPartialAssistantAndNotifyBroker(ctx, sessionID, assistantMsgID, agentID, fullContent.String(), providerName, agent.Slug, fmt.Errorf("%s", evt.Error)) // CW-20260419-0019, CW-20260512-0001
+					if s.surfaceErrorOrSuppress(ch, sessionID, "midstream_failed_after_retry", msg, errDetails, fullContent.String()) {
+						return
+					}
+					// surfaceErrorOrSuppress already classified above; use the pre-classified
+					// broker-notify variant. CW-20260512-0001, CW-20260512-0002.
+					s.persistPartialAssistantAndNotifyBrokerPreClassified(ctx, sessionID, assistantMsgID, agentID, fullContent.String(), providerName, agent.Slug, fmt.Errorf("%s", evt.Error)) // CW-20260419-0019, CW-20260512-0001, CW-20260512-0002
+					return
+				}
+				// Mid-stream provider error (general). Same suppression rule
+				// as the pre-stream provider error above: if a subagent is
+				// active, the FE shouldn't see this surface.
+				if s.suppressSurfaceIfSubagentCaused(sessionID, "midstream_provider_error", fullContent.String()) {
 					return
 				}
 				ch <- chat.ErrorEnvelopeDelta(chat.ClassifyError(fmt.Errorf("%s", evt.Error)), "Streaming error from provider", errDetails)
 				ch <- chat.ErrorEvent(chat.ClassifyError(fmt.Errorf("%s", evt.Error)), "Streaming error from provider", errDetails)
-				s.persistPartialAssistantAndNotifyBroker(ctx, sessionID, assistantMsgID, agentID, fullContent.String(), providerName, agent.Slug, fmt.Errorf("%s", evt.Error)) // CW-20260419-0019, CW-20260512-0001
+				// Suppression already checked at line above; use the pre-classified
+				// broker-notify variant. CW-20260512-0001, CW-20260512-0002.
+				s.persistPartialAssistantAndNotifyBrokerPreClassified(ctx, sessionID, assistantMsgID, agentID, fullContent.String(), providerName, agent.Slug, fmt.Errorf("%s", evt.Error)) // CW-20260419-0019, CW-20260512-0001, CW-20260512-0002
 				return
 
 			case "session_id":
@@ -1805,7 +1848,43 @@ func (s *chatServiceImpl) generateResponse(ctx context.Context, sessionID, assis
 // Errors are logged but not propagated — this is a best-effort persistence call
 // on the way out of an error path; the caller is already returning an error to
 // the client.
+//
+// CW-20260512-0002 subtodo (d): when the early-return is caused by a hung
+// subagent (parent has an active subagent_runs row at this moment), SKIP the
+// placeholder row entirely. Refresh-survivability isn't load-bearing for the
+// subagent-caused branch because the parent's next user turn dispatches a
+// fresh subagent — the user pings again and the chat history stays clean.
+// A structured slog.Warn line is emitted so the suppression remains
+// observable / alertable. Genuine parent-stream failures (provider timeout,
+// budget refusal, panic) flow through the normal path.
+//
+// PR #138 review #2: callers that have already run a suppression classification
+// upstream (via suppressSurfaceIfSubagentCaused or surfaceErrorOrSuppress and
+// observed `false`) should call persistPartialAssistantPreClassified instead
+// to avoid a redundant ActiveSubagentRunForParent query on the hot error path.
+// This wrapper performs the lookup for sites that haven't classified yet
+// (e.g. the post-pause rate-budget paths at lines 1065/1123 that end the turn
+// without an error surface).
 func (s *chatServiceImpl) persistPartialAssistant(sessionID, assistantMsgID, agentID, content string) {
+	if s.suppressSurfaceIfSubagentCaused(sessionID, "persistPartialAssistant", content) {
+		return
+	}
+	s.persistPartialAssistantPreClassified(sessionID, assistantMsgID, agentID, content)
+}
+
+// persistPartialAssistantPreClassified is the lower-level persistence path
+// for callers that have already classified the suppression state upstream
+// (via suppressSurfaceIfSubagentCaused or surfaceErrorOrSuppress returning
+// false). It writes the placeholder row without re-querying ActiveSubagentRunForParent,
+// halving the DB hits on the deadline / surfaceErrorOrSuppress error paths.
+//
+// Contract: callers MUST have observed a `false` suppression decision for
+// this sessionID earlier in the same call stack — otherwise a subagent-caused
+// failure may surface as a `[generation interrupted]` row, violating the
+// CW-20260512-0002 subtodo (d) suppression contract.
+//
+// Use persistPartialAssistant when no prior classification exists.
+func (s *chatServiceImpl) persistPartialAssistantPreClassified(sessionID, assistantMsgID, agentID, content string) {
 	if content == "" {
 		content = "[generation interrupted]"
 	}
@@ -1823,6 +1902,86 @@ func (s *chatServiceImpl) persistPartialAssistant(sessionID, assistantMsgID, age
 		slog.Warn("chat-service: persistPartialAssistant: failed to save partial message",
 			"session_id", sessionID, "msg_id", assistantMsgID, "err", err)
 	}
+}
+
+// surfaceErrorOrSuppress emits a chat.ErrorEnvelopeDelta + chat.ErrorEvent
+// pair on ch unless the parent session is currently waiting on a hung
+// subagent — in which case both surfaces are suppressed and the
+// suppression is logged in structured form. callers MUST still skip
+// any subsequent persistPartialAssistant call when this returns true;
+// persistPartialAssistant has the same gate so a stray call is no-op,
+// but skipping it early keeps the early-return path symmetric.
+//
+// Returns true when the surfaces were suppressed (caller should
+// short-circuit to its return). Returns false when the surfaces were
+// emitted normally.
+//
+// CW-20260512-0002 subtodo (d) audit-each: applies the same suppression
+// rule the deadline_5min site uses to every ErrorCodeInternal early-return
+// inside generateResponse's tool-use loop so the FE never sees a
+// subagent-caused internal_error event.
+func (s *chatServiceImpl) surfaceErrorOrSuppress(
+	ch chan chat.StreamEvent,
+	sessionID, callSite, message string,
+	details map[string]interface{},
+	partialContent string,
+) bool {
+	if s.suppressSurfaceIfSubagentCaused(sessionID, callSite, partialContent) {
+		return true
+	}
+	ch <- chat.ErrorEnvelopeDelta(chat.ErrorCodeInternal, message, details)
+	ch <- chat.ErrorEvent(chat.ErrorCodeInternal, message, details)
+	return false
+}
+
+// suppressSurfaceIfSubagentCaused returns true when the parent session has an
+// active subagent_runs row (status='running') AT THIS MOMENT — the strong
+// signal that the early-return / deadline / stream-error path the caller is
+// on was caused by a hung subagent rather than a real parent-side failure.
+//
+// When true, the caller MUST skip whatever FE-visible artifact it was about
+// to emit (placeholder message, ErrorCodeInternal envelope, ErrorEvent). A
+// structured slog.Warn line is emitted in lieu of those artifacts so the
+// suppression remains observable: greppable on `event=subagent_timeout_suppressed_surface`.
+//
+// When false (no active subagent OR the lookup itself errors — fail open),
+// the caller proceeds with its normal artifact emission.
+//
+// Parameters:
+//   - parentSessionID: the chat session whose loop is about to early-return.
+//   - callSite: short identifier (e.g. "persistPartialAssistant",
+//     "deadline_5min") used in the structured log so multiple call sites
+//     remain distinguishable.
+//   - partialContent: streamed bytes accumulated by the parent so far; logged
+//     for diagnostics so post-hoc audits know whether anything reached the
+//     client before suppression.
+//
+// CW-20260512-0002 subtodo (d).
+func (s *chatServiceImpl) suppressSurfaceIfSubagentCaused(parentSessionID, callSite, partialContent string) bool {
+	if s.store == nil || parentSessionID == "" {
+		return false
+	}
+	runID, role, childSessionID, ok, err := s.store.ActiveSubagentRunForParent(parentSessionID)
+	if err != nil {
+		// Fail open: a DB hiccup here must not silently drop a real
+		// parent-side error surface. Log it and let the caller emit
+		// normally.
+		slog.Warn("chat-service: subagent classification lookup failed; surfacing normally",
+			"session_id", parentSessionID, "call_site", callSite, "err", err)
+		return false
+	}
+	if !ok {
+		return false
+	}
+	slog.Warn("subagent_timeout_suppressed_surface",
+		"session_id", parentSessionID,
+		"subagent_run_id", runID,
+		"role", role,
+		"child_session_id", childSessionID,
+		"call_site", callSite,
+		"partial_bytes", len(partialContent),
+	)
+	return true
 }
 
 // Compact-recovery trigger kinds. CW-20260418-0099: the pipeline serves two

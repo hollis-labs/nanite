@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"log/slog"
 	"strings"
 
 	"github.com/google/uuid"
@@ -13,6 +14,44 @@ import (
 	"github.com/hollis-labs/nanite/internal/store"
 	"github.com/hollis-labs/nanite/internal/subagent"
 )
+
+// fallbackRoleSlug is the agent profile slug used when a requested role
+// slug does not resolve. Mirrors the reflex-catalog pattern (CW-20260509-0050)
+// where researcher / reviewer / documentor / strategist all fall back to
+// the `worker` profile. Surfacing the fallback via slog.Warn so seeding
+// drift is alertable without surprising the caller with a hard failure.
+const fallbackRoleSlug = "worker"
+
+// resolveRoleWithFallback looks up a slug through the resolver. If the
+// slug is unknown (wraps sql.ErrNoRows), retries with fallbackRoleSlug
+// and emits a structured warning. If the fallback also misses, the
+// underlying error is returned wrapped with errRoleResolveFailed.
+//
+// caller identifies the runner emitting the warning (ChatRunner / BootRunner)
+// so alerting can attribute the drift correctly.
+func resolveRoleWithFallback(agents agentSlugResolver, slug, caller string) (*store.AgentProfile, error) {
+	agent, err := agents.GetAgentBySlug(slug)
+	if err == nil {
+		return agent, nil
+	}
+	if !errors.Is(err, sql.ErrNoRows) {
+		return nil, fmt.Errorf("%w %q: %v", errRoleResolveFailed, slug, err)
+	}
+	// Unknown slug. Try the fallback before surfacing failure.
+	fallback, fbErr := agents.GetAgentBySlug(fallbackRoleSlug)
+	if fbErr != nil {
+		// Fallback itself missing — the deployment is misconfigured;
+		// surface the ORIGINAL slug so logs point at the user's request.
+		return nil, fmt.Errorf("%w %q: %v (fallback %q also missing: %v)",
+			errRoleResolveFailed, slug, err, fallbackRoleSlug, fbErr)
+	}
+	slog.Warn("subagent: role slug not found, falling back",
+		"requested_slug", slug,
+		"fallback_slug", fallbackRoleSlug,
+		"caller", caller,
+	)
+	return fallback, nil
+}
 
 // errStreamFailure is the sentinel returned by drainCapture when the
 // child chat loop emits an error event. The actual error message is
@@ -153,15 +192,12 @@ func (r *ChatRunner) persistChild(ctx context.Context, runID, childID string) er
 	return r.persistChildSessionID(ctx, runID, childID)
 }
 
-// resolveRole looks up the role slug in the agent registry. Wraps the
-// underlying error with errRoleResolveFailed so callers can use
-// errors.Is for classification.
+// resolveRole looks up the role slug in the agent registry, falling back
+// to the `worker` profile when the slug is unknown (sql.ErrNoRows). Other
+// errors wrap with errRoleResolveFailed so callers can use errors.Is for
+// classification. See resolveRoleWithFallback.
 func (r *ChatRunner) resolveRole(slug string) (*store.AgentProfile, error) {
-	agent, err := r.agents.GetAgentBySlug(slug)
-	if err != nil {
-		return nil, fmt.Errorf("%w %q: %v", errRoleResolveFailed, slug, err)
-	}
-	return agent, nil
+	return resolveRoleWithFallback(r.agents, slug, "ChatRunner")
 }
 
 // createChildSession builds a persisted child session row bound to the

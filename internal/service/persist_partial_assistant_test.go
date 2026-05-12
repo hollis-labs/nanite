@@ -23,6 +23,11 @@ type capturingStore struct {
 	lastMsg   *store.Message
 	callCount int
 
+	// lookupCallCount tracks how many times ActiveSubagentRunForParent was
+	// invoked. PR #138 review #2 asserts that pre-classified call sites
+	// do NOT trigger a second lookup on the hot error path.
+	lookupCallCount int
+
 	// Optional override: when non-nil, ActiveSubagentRunForParent calls
 	// this instead of the embedded no-op. Lets CW-20260512-0002 (d)
 	// tests inject "subagent active" classifications.
@@ -36,6 +41,7 @@ func (c *capturingStore) CreateMessage(msg *store.Message) error {
 }
 
 func (c *capturingStore) ActiveSubagentRunForParent(parentSessionID string) (id, role, child string, ok bool, err error) {
+	c.lookupCallCount++
 	if c.activeRunFn != nil {
 		return c.activeRunFn(parentSessionID)
 	}
@@ -325,5 +331,73 @@ func TestSurfaceErrorOrSuppress_SuppressesWhenSubagentActive(t *testing.T) {
 	}
 	if len(got) != 0 {
 		t.Errorf("emitted %d events, want 0 — subagent-caused surface must not reach FE", len(got))
+	}
+}
+
+// ============================================================================
+// PR #138 review #2 — redundant query elimination.
+// ============================================================================
+
+// TestPersistPartialAssistantPreClassified_SkipsLookup verifies that the
+// pre-classified entry point writes the row WITHOUT re-querying
+// ActiveSubagentRunForParent. Callers that already ran a suppression
+// classification upstream save a DB round-trip per error path.
+func TestPersistPartialAssistantPreClassified_SkipsLookup(t *testing.T) {
+	cs := &capturingStore{}
+	svc := &chatServiceImpl{store: cs}
+
+	svc.persistPartialAssistantPreClassified("sess-1", "msg-1", "agent-1", "pre-classified content")
+
+	if cs.callCount != 1 {
+		t.Errorf("CreateMessage called %d times; want 1", cs.callCount)
+	}
+	if cs.lookupCallCount != 0 {
+		t.Errorf("ActiveSubagentRunForParent called %d times; want 0 — pre-classified path must not re-query", cs.lookupCallCount)
+	}
+}
+
+// TestPersistPartialAssistant_LookupOnceWhenNotPreClassified verifies the
+// baseline contract: the unclassified entry point performs exactly one
+// lookup. Acts as a regression guard so the helper doesn't accidentally
+// double-query in future refactors.
+func TestPersistPartialAssistant_LookupOnceWhenNotPreClassified(t *testing.T) {
+	cs := &capturingStore{}
+	svc := &chatServiceImpl{store: cs}
+
+	svc.persistPartialAssistant("sess-1", "msg-1", "agent-1", "unclassified content")
+
+	if cs.callCount != 1 {
+		t.Errorf("CreateMessage called %d times; want 1", cs.callCount)
+	}
+	if cs.lookupCallCount != 1 {
+		t.Errorf("ActiveSubagentRunForParent called %d times; want 1 — unclassified path must classify once", cs.lookupCallCount)
+	}
+}
+
+// TestSurfaceErrorOrSuppress_ThenPreClassified_OneLookup is the integration
+// shape that previously cost two lookups: surfaceErrorOrSuppress (returns
+// false) followed by persistPartialAssistant on the error path. With the
+// pre-classified wrapper there should be exactly one lookup across both
+// calls. PR #138 review #2 regression test.
+func TestSurfaceErrorOrSuppress_ThenPreClassified_OneLookup(t *testing.T) {
+	cs := &capturingStore{}
+	svc := &chatServiceImpl{store: cs}
+	ch := make(chan chat.StreamEvent, 4)
+
+	suppressed := svc.surfaceErrorOrSuppress(ch, "sess-1", "test_site", "boom",
+		map[string]interface{}{"recovery": "refused"}, "partial")
+	close(ch)
+	if suppressed {
+		t.Fatal("unexpected suppression with no active subagent")
+	}
+
+	// Caller goes on to persist; with pre-classified, no second lookup.
+	svc.persistPartialAssistantPreClassified("sess-1", "msg-1", "agent-1", "partial")
+
+	if cs.lookupCallCount != 1 {
+		t.Errorf("ActiveSubagentRunForParent called %d times; want 1 — pre-classified persist must reuse the upstream classification", cs.lookupCallCount)
+	}
+	if cs.callCount != 1 {
+		t.Errorf("CreateMessage called %d times; want 1", cs.callCount)
 	}
 }

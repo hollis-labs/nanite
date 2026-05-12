@@ -747,7 +747,10 @@ func (s *chatServiceImpl) generateResponse(ctx context.Context, sessionID, assis
 				"timeout": generateResponseTimeout.String(),
 				"session": sessionID,
 			})
-			s.persistPartialAssistantAndNotifyBroker(ctx, sessionID, assistantMsgID, agentID, fullContent.String(), providerName, agent.Slug, ctx.Err()) // CW-20260419-0019, CW-20260512-0001
+			// Suppression already checked at line above; use the pre-classified
+			// broker-notify variant to skip the redundant ActiveSubagentRunForParent
+			// lookup inside persistPartialAssistant. CW-20260512-0001, CW-20260512-0002.
+			s.persistPartialAssistantAndNotifyBrokerPreClassified(ctx, sessionID, assistantMsgID, agentID, fullContent.String(), providerName, agent.Slug, ctx.Err()) // CW-20260419-0019, CW-20260512-0001, CW-20260512-0002
 			return
 		}
 
@@ -1076,7 +1079,9 @@ func (s *chatServiceImpl) generateResponse(ctx context.Context, sessionID, assis
 				if s.surfaceErrorOrSuppress(ch, sessionID, "recovery_refused", msg, details, fullContent.String()) {
 					return
 				}
-				s.persistPartialAssistantAndNotifyBroker(ctx, sessionID, assistantMsgID, agentID, fullContent.String(), providerName, agent.Slug, err) // CW-20260419-0019, CW-20260512-0001, CW-20260512-0002
+				// surfaceErrorOrSuppress already classified above; use the pre-classified
+				// broker-notify variant. CW-20260512-0001, CW-20260512-0002.
+				s.persistPartialAssistantAndNotifyBrokerPreClassified(ctx, sessionID, assistantMsgID, agentID, fullContent.String(), providerName, agent.Slug, err) // CW-20260419-0019, CW-20260512-0001, CW-20260512-0002
 				return
 			}
 			provSpan.RecordError(err)
@@ -1127,7 +1132,9 @@ func (s *chatServiceImpl) generateResponse(ctx context.Context, sessionID, assis
 				if s.surfaceErrorOrSuppress(ch, sessionID, "compact_failed_after_retry", msg, map[string]interface{}{"recovery": "failed_after_retry"}, fullContent.String()) {
 					return
 				}
-				s.persistPartialAssistantAndNotifyBroker(ctx, sessionID, assistantMsgID, agentID, fullContent.String(), providerName, agent.Slug, err) // CW-20260419-0019, CW-20260512-0001, CW-20260512-0002
+				// surfaceErrorOrSuppress already classified above; use the pre-classified
+				// broker-notify variant. CW-20260512-0001, CW-20260512-0002.
+				s.persistPartialAssistantAndNotifyBrokerPreClassified(ctx, sessionID, assistantMsgID, agentID, fullContent.String(), providerName, agent.Slug, err) // CW-20260419-0019, CW-20260512-0001, CW-20260512-0002
 				return
 			}
 			// Provider stream error (general) — classifier-driven error code,
@@ -1142,7 +1149,9 @@ func (s *chatServiceImpl) generateResponse(ctx context.Context, sessionID, assis
 			errDetails := map[string]interface{}{"raw": err.Error(), "model": model, "tools": len(tools)}
 			ch <- chat.ErrorEnvelopeDelta(chat.ClassifyError(err), "Provider streaming failed", errDetails)
 			ch <- chat.ErrorEvent(chat.ClassifyError(err), "Provider streaming failed", errDetails)
-			s.persistPartialAssistantAndNotifyBroker(ctx, sessionID, assistantMsgID, agentID, fullContent.String(), providerName, agent.Slug, err) // CW-20260419-0019, CW-20260512-0001
+			// Suppression already checked at line above; use the pre-classified
+			// broker-notify variant. CW-20260512-0001, CW-20260512-0002.
+			s.persistPartialAssistantAndNotifyBrokerPreClassified(ctx, sessionID, assistantMsgID, agentID, fullContent.String(), providerName, agent.Slug, err) // CW-20260419-0019, CW-20260512-0001, CW-20260512-0002
 			return
 		}
 
@@ -1262,7 +1271,9 @@ func (s *chatServiceImpl) generateResponse(ctx context.Context, sessionID, assis
 					if s.surfaceErrorOrSuppress(ch, sessionID, "midstream_failed_after_retry", msg, errDetails, fullContent.String()) {
 						return
 					}
-					s.persistPartialAssistantAndNotifyBroker(ctx, sessionID, assistantMsgID, agentID, fullContent.String(), providerName, agent.Slug, fmt.Errorf("%s", evt.Error)) // CW-20260419-0019, CW-20260512-0001, CW-20260512-0002
+					// surfaceErrorOrSuppress already classified above; use the pre-classified
+					// broker-notify variant. CW-20260512-0001, CW-20260512-0002.
+					s.persistPartialAssistantAndNotifyBrokerPreClassified(ctx, sessionID, assistantMsgID, agentID, fullContent.String(), providerName, agent.Slug, fmt.Errorf("%s", evt.Error)) // CW-20260419-0019, CW-20260512-0001, CW-20260512-0002
 					return
 				}
 				// Mid-stream provider error (general). Same suppression rule
@@ -1273,7 +1284,9 @@ func (s *chatServiceImpl) generateResponse(ctx context.Context, sessionID, assis
 				}
 				ch <- chat.ErrorEnvelopeDelta(chat.ClassifyError(fmt.Errorf("%s", evt.Error)), "Streaming error from provider", errDetails)
 				ch <- chat.ErrorEvent(chat.ClassifyError(fmt.Errorf("%s", evt.Error)), "Streaming error from provider", errDetails)
-				s.persistPartialAssistantAndNotifyBroker(ctx, sessionID, assistantMsgID, agentID, fullContent.String(), providerName, agent.Slug, fmt.Errorf("%s", evt.Error)) // CW-20260419-0019, CW-20260512-0001
+				// Suppression already checked at line above; use the pre-classified
+				// broker-notify variant. CW-20260512-0001, CW-20260512-0002.
+				s.persistPartialAssistantAndNotifyBrokerPreClassified(ctx, sessionID, assistantMsgID, agentID, fullContent.String(), providerName, agent.Slug, fmt.Errorf("%s", evt.Error)) // CW-20260419-0019, CW-20260512-0001, CW-20260512-0002
 				return
 
 			case "session_id":
@@ -1844,10 +1857,34 @@ func (s *chatServiceImpl) generateResponse(ctx context.Context, sessionID, assis
 // A structured slog.Warn line is emitted so the suppression remains
 // observable / alertable. Genuine parent-stream failures (provider timeout,
 // budget refusal, panic) flow through the normal path.
+//
+// PR #138 review #2: callers that have already run a suppression classification
+// upstream (via suppressSurfaceIfSubagentCaused or surfaceErrorOrSuppress and
+// observed `false`) should call persistPartialAssistantPreClassified instead
+// to avoid a redundant ActiveSubagentRunForParent query on the hot error path.
+// This wrapper performs the lookup for sites that haven't classified yet
+// (e.g. the post-pause rate-budget paths at lines 1065/1123 that end the turn
+// without an error surface).
 func (s *chatServiceImpl) persistPartialAssistant(sessionID, assistantMsgID, agentID, content string) {
 	if s.suppressSurfaceIfSubagentCaused(sessionID, "persistPartialAssistant", content) {
 		return
 	}
+	s.persistPartialAssistantPreClassified(sessionID, assistantMsgID, agentID, content)
+}
+
+// persistPartialAssistantPreClassified is the lower-level persistence path
+// for callers that have already classified the suppression state upstream
+// (via suppressSurfaceIfSubagentCaused or surfaceErrorOrSuppress returning
+// false). It writes the placeholder row without re-querying ActiveSubagentRunForParent,
+// halving the DB hits on the deadline / surfaceErrorOrSuppress error paths.
+//
+// Contract: callers MUST have observed a `false` suppression decision for
+// this sessionID earlier in the same call stack — otherwise a subagent-caused
+// failure may surface as a `[generation interrupted]` row, violating the
+// CW-20260512-0002 subtodo (d) suppression contract.
+//
+// Use persistPartialAssistant when no prior classification exists.
+func (s *chatServiceImpl) persistPartialAssistantPreClassified(sessionID, assistantMsgID, agentID, content string) {
 	if content == "" {
 		content = "[generation interrupted]"
 	}

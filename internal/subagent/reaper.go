@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -60,10 +61,22 @@ type Reaper struct {
 	// to drive deterministic sweeps without sleeping.
 	now func() time.Time
 
+	// started flips to true when Start runs and dispatches (or short-circuits
+	// in the nil-db branch). Stop reads it to decide whether to close doneCh
+	// itself — if Start never ran, neither the loop nor the nil-db branch
+	// will ever close doneCh, so Stop must do it or block forever.
+	started atomic.Bool
+
 	startOnce sync.Once
 	stopOnce  sync.Once
-	stopCh    chan struct{}
-	doneCh    chan struct{}
+	// doneOnce gates the close of doneCh so multiple paths (loop's defer,
+	// the nil-db branch in Start, and the Stop-before-Start branch in
+	// Stop) can all attempt the close without panicking on the second
+	// attempt. Replaces the prior reliance on path-exclusivity, which
+	// broke when Stop was called before Start (CW-20260512-0002 review #1).
+	doneOnce sync.Once
+	stopCh   chan struct{}
+	doneCh   chan struct{}
 }
 
 // ReaperOptions tweaks reaper cadence for tests + ops. Zero values fall
@@ -76,8 +89,9 @@ type ReaperOptions struct {
 	Now func() time.Time
 }
 
-// NewReaper constructs a Reaper bound to db. The supplied options are
-// validated lazily — zero values fall back to defaults. db is required.
+// NewReaper constructs a Reaper bound to db. Defaults for Interval,
+// OrphanGrace, and Now are applied at construction time — pass non-zero
+// values to override. db is required.
 func NewReaper(db *sql.DB, opts ReaperOptions) *Reaper {
 	interval := opts.Interval
 	if interval <= 0 {
@@ -110,32 +124,58 @@ func NewReaper(db *sql.DB, opts ReaperOptions) *Reaper {
 // reaper.
 func (r *Reaper) Start(ctx context.Context) {
 	r.startOnce.Do(func() {
+		r.started.Store(true)
 		if r.db == nil {
 			slog.Warn("subagent reaper: nil db; reaper disabled")
-			close(r.doneCh)
+			r.closeDone()
 			return
 		}
 		go r.loop(ctx)
 	})
 }
 
+// closeDone is the single safe path to close doneCh. Idempotent via
+// doneOnce so the loop's defer, the nil-db Start branch, and the
+// Stop-before-Start branch can each call it without coordination.
+func (r *Reaper) closeDone() {
+	r.doneOnce.Do(func() { close(r.doneCh) })
+}
+
 // Stop signals the reaper goroutine to exit and blocks until it has
-// returned. Safe to call before Start (in which case doneCh is never
-// closed by loop; the stopOnce close-of-stopCh is fine because loop
-// will check it on entry). Calling Stop twice is a no-op.
+// returned. Calling Stop twice is a no-op.
+//
+// Stop-before-Start safety: when Start was never invoked there is no
+// loop goroutine to close doneCh and no nil-db branch will fire, so
+// Stop must close doneCh itself or it would block forever waiting for
+// a writer that does not exist. The doneOnce gate makes the close safe
+// even if a Start call interleaves and reaches the nil-db branch (or
+// loop defer) on a different path.
 func (r *Reaper) Stop() {
 	r.stopOnce.Do(func() {
 		close(r.stopCh)
+		// If Start never ran, take ownership of doneCh closure here.
+		// We also flip started=true and consume startOnce so a late
+		// Start call short-circuits — no goroutine is ever spawned
+		// against a closed stopCh, and the doneOnce gate is the final
+		// belt-and-suspenders against a double close if a Start call
+		// somehow raced past the started check.
+		if !r.started.Load() {
+			r.startOnce.Do(func() {
+				r.started.Store(true)
+				r.closeDone()
+			})
+		}
 	})
 	// Block until the goroutine has actually exited so DB close ordering
-	// is safe. If Start was never called, doneCh is closed by Start's
-	// nil-db branch, otherwise by loop's defer.
+	// is safe. doneCh is closed by Start's nil-db branch, loop's defer,
+	// or the Stop-before-Start branch above — all routed through
+	// closeDone for idempotence.
 	<-r.doneCh
 }
 
 // loop is the goroutine body. Exits on ctx.Done or stopCh.
 func (r *Reaper) loop(ctx context.Context) {
-	defer close(r.doneCh)
+	defer r.closeDone()
 
 	ticker := time.NewTicker(r.interval)
 	defer ticker.Stop()

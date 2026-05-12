@@ -7,8 +7,9 @@ import (
 	"time"
 )
 
-// reapeRow is a convenience helper for tests that inserts a minimal
-// subagent_runs row with the canonical column set the reaper needs. Keep
+// insertRunForReaper is a convenience helper for tests that inserts a
+// minimal subagent_runs row with the canonical column set the reaper
+// needs. Keep
 // in sync with internal/store/migrations/017_subagent_runs.sql + later
 // additive migrations: any new NOT NULL column without a DEFAULT must be
 // supplied here. Fields not relevant to reaper logic stay at SQL DEFAULT.
@@ -281,23 +282,57 @@ func TestReaper_StopIsIdempotent(t *testing.T) {
 // TestReaper_StopBeforeStart — a reaper that's never started can still
 // be Stop'd without deadlocking. Covers the "wired but never reached"
 // path where container init aborts before the start sequence.
+//
+// Regression test for PR #138 review #1: previously Stop would block
+// forever on <-doneCh because neither the loop nor the nil-db branch
+// had run to close it.
 func TestReaper_StopBeforeStart(t *testing.T) {
 	db, _ := newTestDB(t)
 	r := NewReaper(db, ReaperOptions{Interval: 50 * time.Millisecond})
 
 	stopDone := make(chan struct{})
 	go func() {
-		// Start with a nil-db reaper variant — easier: simulate by
-		// closing doneCh manually via Start's nil-db branch.
-		r2 := NewReaper(nil, ReaperOptions{})
-		r2.Start(context.Background())
-		r2.Stop()
+		r.Stop()
 		close(stopDone)
 	}()
 	select {
 	case <-stopDone:
 	case <-time.After(500 * time.Millisecond):
-		t.Fatal("nil-db reaper Stop hung")
+		t.Fatal("Stop-before-Start hung — doneCh was never closed by any path")
 	}
-	_ = r
+}
+
+// TestReaper_StopBeforeStart_NilDB also covers the nil-db reaper variant
+// that's used in test harnesses skipping the reaper. Even with no
+// goroutine to spawn, Stop-before-Start must not deadlock.
+func TestReaper_StopBeforeStart_NilDB(t *testing.T) {
+	r := NewReaper(nil, ReaperOptions{})
+
+	stopDone := make(chan struct{})
+	go func() {
+		r.Stop()
+		close(stopDone)
+	}()
+	select {
+	case <-stopDone:
+	case <-time.After(500 * time.Millisecond):
+		t.Fatal("nil-db Stop-before-Start hung")
+	}
+}
+
+// TestReaper_StartAfterStopIsNoop verifies the inverse order: a Start
+// call that lands after Stop must not spawn a goroutine that would try
+// to close doneCh a second time (which would panic). Belt-and-suspenders
+// for the late-init / late-shutdown race in container teardown.
+func TestReaper_StartAfterStopIsNoop(t *testing.T) {
+	db, _ := newTestDB(t)
+	r := NewReaper(db, ReaperOptions{Interval: 50 * time.Millisecond})
+
+	r.Stop()
+	// Must not panic ("close of closed channel") and must not spawn a
+	// goroutine that would race the already-closed doneCh.
+	r.Start(context.Background())
+
+	// A second Stop must also be safe.
+	r.Stop()
 }

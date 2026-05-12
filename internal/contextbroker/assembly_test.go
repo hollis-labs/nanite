@@ -1,11 +1,42 @@
 package contextbroker
 
 import (
+	"context"
 	"strings"
 	"testing"
 
 	ctxpkg "github.com/hollis-labs/nanite/internal/context"
 )
+
+// fakeStasher is a deterministic in-memory SlotStasher for the
+// assembly_test.go suite. It mirrors the contract the production
+// internal/service implementation honors: content-addressed IDs,
+// idempotent re-stash, no error path under normal conditions. Tests
+// that want to exercise the stash-failure fallback use
+// failingStasher below.
+type fakeStasher struct {
+	stored map[string]string // artifact_id → content
+}
+
+func newFakeStasher() *fakeStasher {
+	return &fakeStasher{stored: map[string]string{}}
+}
+
+func (f *fakeStasher) StashSlot(_ context.Context, req StashRequest) (StashResult, error) {
+	id := DeterministicArtifactID(req.SessionID, req.SlotName, req.Content)
+	_, reused := f.stored[id]
+	f.stored[id] = req.Content
+	return StashResult{ArtifactID: id, Reused: reused}, nil
+}
+
+// failingStasher always returns ErrStashUnavailable so tests can exercise
+// the broker's atomic fallback path (oversized slot → ActionShip when
+// stash fails) without rigging real I/O failure.
+type failingStasher struct{}
+
+func (failingStasher) StashSlot(_ context.Context, _ StashRequest) (StashResult, error) {
+	return StashResult{}, ErrStashUnavailable
+}
 
 // minimalBudgets returns the canonical default budget map for tests. Kept as a
 // helper so a future SlotOrder addition doesn't require updating every test.
@@ -18,7 +49,7 @@ func TestDecideAssembly_UniversalSlotAtPosition0(t *testing.T) {
 	// regardless of whether it has content. SP-20260512-0008 W1A
 	// (CW-20260512-0104) acceptance: universal slot always present at
 	// position 0.
-	plan := DecideAssembly(AssemblyInput{
+	plan := DecideAssembly(context.Background(), AssemblyInput{
 		Intent:    Intent{Type: IntentCustom},
 		SlotOrder: ctxpkg.SlotOrder,
 		Sources: map[string]string{
@@ -27,6 +58,7 @@ func TestDecideAssembly_UniversalSlotAtPosition0(t *testing.T) {
 			ctxpkg.SlotAgent:     "agent content",
 		},
 		Budgets: minimalBudgets(),
+		Stasher: newFakeStasher(),
 	})
 
 	if len(plan.Decisions) != len(ctxpkg.SlotOrder) {
@@ -48,7 +80,7 @@ func TestDecideAssembly_UniversalSlotPositionStableAcrossTurns(t *testing.T) {
 	// populated, oversized — and confirm SlotUniversal is at position 0
 	// every time.
 	for _, content := range []string{"", "## Universal rules\n- be honest", strings.Repeat("x", 5000)} {
-		plan := DecideAssembly(AssemblyInput{
+		plan := DecideAssembly(context.Background(), AssemblyInput{
 			Intent:    Intent{Type: IntentCustom},
 			SlotOrder: ctxpkg.SlotOrder,
 			Sources: map[string]string{
@@ -56,6 +88,7 @@ func TestDecideAssembly_UniversalSlotPositionStableAcrossTurns(t *testing.T) {
 				ctxpkg.SlotSystem:    "stable system",
 			},
 			Budgets: minimalBudgets(),
+			Stasher: newFakeStasher(),
 		})
 		if plan.Decisions[0].SlotName != ctxpkg.SlotUniversal {
 			t.Errorf("content=%q: position 0 must be SlotUniversal, got %q", content, plan.Decisions[0].SlotName)
@@ -84,7 +117,7 @@ func TestDecideAssembly_SkipsContextSlotForReviewIntent(t *testing.T) {
 	}
 
 	for _, tc := range cases {
-		plan := DecideAssembly(AssemblyInput{
+		plan := DecideAssembly(context.Background(), AssemblyInput{
 			Intent:    Intent{Type: tc.intentType},
 			SlotOrder: ctxpkg.SlotOrder,
 			Sources: map[string]string{
@@ -92,6 +125,7 @@ func TestDecideAssembly_SkipsContextSlotForReviewIntent(t *testing.T) {
 				ctxpkg.SlotSystem:  "always ships",
 			},
 			Budgets: minimalBudgets(),
+			Stasher: newFakeStasher(),
 		})
 
 		var ctxDecision *SlotDecision
@@ -124,22 +158,25 @@ func TestDecideAssembly_SkipsContextSlotForReviewIntent(t *testing.T) {
 }
 
 func TestDecideAssembly_PointerForOversizedSlot(t *testing.T) {
-	// Content over the per-slot budget gets replaced by a synthetic
-	// pointer marker and the original goes to the stash. The pointer
-	// content matches the documented format `<ref:slot=<name>, N tokens,
-	// source=context-broker>`.
+	// Content over the per-slot budget gets stashed to the artifact store
+	// and substituted with a pointer envelope referencing the artifact_id.
+	// The pointer content matches the documented format
+	// `<ref:artifact_id=ART-..., tokens=N, available via dev_read>`.
+	// SP-20260512-0008 W2C (CW-20260512-0110).
 	budgets := minimalBudgets()
 	budgets[ctxpkg.SlotMemory] = 10 // tight cap
 
 	bigContent := strings.Repeat("memory body ", 100) // ~1200 chars = 300 tokens
 
-	plan := DecideAssembly(AssemblyInput{
+	plan := DecideAssembly(context.Background(), AssemblyInput{
 		Intent:    Intent{Type: IntentCustom},
 		SlotOrder: ctxpkg.SlotOrder,
+		SessionID: "test-session",
 		Sources: map[string]string{
 			ctxpkg.SlotMemory: bigContent,
 		},
 		Budgets: budgets,
+		Stasher: newFakeStasher(),
 	})
 
 	var memDecision *SlotDecision
@@ -155,12 +192,171 @@ func TestDecideAssembly_PointerForOversizedSlot(t *testing.T) {
 	if memDecision.Action != ActionPointer {
 		t.Errorf("expected ActionPointer for oversized slot, got %v", memDecision.Action)
 	}
-	if !strings.HasPrefix(memDecision.Content, "<ref:slot=memory,") {
+	if !strings.HasPrefix(memDecision.Content, "<ref:artifact_id=art-stash-") {
 		t.Errorf("pointer content malformed: %q", memDecision.Content)
+	}
+	if !strings.Contains(memDecision.Content, "available via dev_read>") {
+		t.Errorf("pointer content missing dev_read affordance: %q", memDecision.Content)
+	}
+	if memDecision.ArtifactID == "" {
+		t.Errorf("pointer decision should carry ArtifactID")
+	}
+	if !strings.Contains(memDecision.Content, memDecision.ArtifactID) {
+		t.Errorf("pointer content %q should embed ArtifactID %q", memDecision.Content, memDecision.ArtifactID)
 	}
 	if plan.Stash[ctxpkg.SlotMemory] != bigContent {
 		t.Errorf("original content should be stashed for oversized slot")
 	}
+}
+
+func TestDecideAssembly_PointerArtifactIDStableAcrossTurns(t *testing.T) {
+	// Cache-implications sharp edge: pointer envelopes for stable content
+	// (e.g. AGENTS.md walk-up) must be byte-identical across turns so the
+	// cacheable prefix is preserved. Same (session, slot, content) →
+	// same artifact_id → same pointer envelope.
+	budgets := minimalBudgets()
+	budgets[ctxpkg.SlotMemory] = 10
+
+	bigContent := strings.Repeat("stable memory ", 200)
+	stasher := newFakeStasher()
+
+	plans := make([]AssemblyPlan, 0, 3)
+	for i := 0; i < 3; i++ {
+		plans = append(plans, DecideAssembly(context.Background(), AssemblyInput{
+			Intent:    Intent{Type: IntentCustom},
+			SlotOrder: ctxpkg.SlotOrder,
+			SessionID: "stable-session",
+			Sources:   map[string]string{ctxpkg.SlotMemory: bigContent},
+			Budgets:   budgets,
+			Stasher:   stasher,
+		}))
+	}
+
+	first := pointerFor(plans[0], ctxpkg.SlotMemory)
+	if first == "" {
+		t.Fatal("first turn missing memory pointer")
+	}
+	for i, p := range plans {
+		got := pointerFor(p, ctxpkg.SlotMemory)
+		if got != first {
+			t.Errorf("turn %d pointer drift: got %q, want %q", i, got, first)
+		}
+	}
+}
+
+func TestDecideAssembly_PointerArtifactIDChangesWithContent(t *testing.T) {
+	// Content-addressed ID: when the slot's content changes, the
+	// artifact_id changes too — different content → different pointer
+	// envelope → cache-prefix is correctly invalidated.
+	budgets := minimalBudgets()
+	budgets[ctxpkg.SlotMemory] = 10
+	stasher := newFakeStasher()
+
+	planA := DecideAssembly(context.Background(), AssemblyInput{
+		Intent:    Intent{Type: IntentCustom},
+		SlotOrder: ctxpkg.SlotOrder,
+		SessionID: "session-x",
+		Sources:   map[string]string{ctxpkg.SlotMemory: strings.Repeat("A ", 500)},
+		Budgets:   budgets,
+		Stasher:   stasher,
+	})
+	planB := DecideAssembly(context.Background(), AssemblyInput{
+		Intent:    Intent{Type: IntentCustom},
+		SlotOrder: ctxpkg.SlotOrder,
+		SessionID: "session-x",
+		Sources:   map[string]string{ctxpkg.SlotMemory: strings.Repeat("B ", 500)},
+		Budgets:   budgets,
+		Stasher:   stasher,
+	})
+
+	a := pointerFor(planA, ctxpkg.SlotMemory)
+	b := pointerFor(planB, ctxpkg.SlotMemory)
+	if a == b {
+		t.Errorf("pointer envelope should differ when content differs; both = %q", a)
+	}
+}
+
+func TestDecideAssembly_PointerFallbackWhenStashFails(t *testing.T) {
+	// Atomicity contract (★ load-bearing): if the stash write fails, the
+	// pointer is NOT emitted. The decider falls back to ActionShip with
+	// the full content and ReasonTag="pointer_fallback_ship". The wire
+	// must never reference a non-existent artifact.
+	budgets := minimalBudgets()
+	budgets[ctxpkg.SlotMemory] = 10
+	bigContent := strings.Repeat("memory body ", 100)
+
+	plan := DecideAssembly(context.Background(), AssemblyInput{
+		Intent:    Intent{Type: IntentCustom},
+		SlotOrder: ctxpkg.SlotOrder,
+		SessionID: "test-session",
+		Sources:   map[string]string{ctxpkg.SlotMemory: bigContent},
+		Budgets:   budgets,
+		Stasher:   failingStasher{},
+	})
+
+	memDec := decisionFor(plan, ctxpkg.SlotMemory)
+	if memDec == nil {
+		t.Fatal("memory decision missing")
+	}
+	if memDec.Action != ActionShip {
+		t.Errorf("expected ActionShip on stash failure, got %v", memDec.Action)
+	}
+	if memDec.ReasonTag != "pointer_fallback_ship" {
+		t.Errorf("expected reason=pointer_fallback_ship, got %q", memDec.ReasonTag)
+	}
+	if memDec.Content != bigContent {
+		t.Errorf("fallback should ship full content; got %d bytes, want %d", len(memDec.Content), len(bigContent))
+	}
+	if memDec.ArtifactID != "" {
+		t.Errorf("fallback must not carry ArtifactID (it would lie about a stashed artifact); got %q", memDec.ArtifactID)
+	}
+	if plan.Stash[ctxpkg.SlotMemory] != bigContent {
+		t.Errorf("fallback should still record content in in-memory stash for callers")
+	}
+}
+
+func TestDecideAssembly_NoStasherFallsBackToInlineShip(t *testing.T) {
+	// When AssemblyInput.Stasher is nil, the decider uses NopStasher()
+	// which returns ErrStashUnavailable. Oversized slots ship inline
+	// rather than emit a pointer to nowhere — same fallback path as
+	// TestDecideAssembly_PointerFallbackWhenStashFails. Verifies the
+	// nil-stasher convenience path explicitly.
+	budgets := minimalBudgets()
+	budgets[ctxpkg.SlotMemory] = 10
+	bigContent := strings.Repeat("x ", 500)
+
+	plan := DecideAssembly(context.Background(), AssemblyInput{
+		Intent:    Intent{Type: IntentCustom},
+		SlotOrder: ctxpkg.SlotOrder,
+		Sources:   map[string]string{ctxpkg.SlotMemory: bigContent},
+		Budgets:   budgets,
+		// Stasher: nil — exercise the nop-default path.
+	})
+	memDec := decisionFor(plan, ctxpkg.SlotMemory)
+	if memDec == nil || memDec.Action != ActionShip {
+		t.Fatalf("expected ActionShip with nil stasher, got %+v", memDec)
+	}
+}
+
+// pointerFor returns the rendered pointer string for a slot in a plan, or
+// empty if the slot's decision isn't an ActionPointer.
+func pointerFor(plan AssemblyPlan, slotName string) string {
+	for _, d := range plan.Decisions {
+		if d.SlotName == slotName && d.Action == ActionPointer {
+			return d.Content
+		}
+	}
+	return ""
+}
+
+// decisionFor returns the decision for a named slot, or nil if absent.
+func decisionFor(plan AssemblyPlan, slotName string) *SlotDecision {
+	for i := range plan.Decisions {
+		if plan.Decisions[i].SlotName == slotName {
+			return &plan.Decisions[i]
+		}
+	}
+	return nil
 }
 
 func TestDecideAssembly_EmptyContentSkippedWithoutStash(t *testing.T) {
@@ -168,7 +364,7 @@ func TestDecideAssembly_EmptyContentSkippedWithoutStash(t *testing.T) {
 	// does NOT create a stash entry — there's nothing to stash. Future
 	// callers that probe the stash to recover content can rely on
 	// "stash key present" as the signal that real content was deferred.
-	plan := DecideAssembly(AssemblyInput{
+	plan := DecideAssembly(context.Background(), AssemblyInput{
 		Intent:    Intent{Type: IntentCustom},
 		SlotOrder: ctxpkg.SlotOrder,
 		Sources: map[string]string{
@@ -176,6 +372,7 @@ func TestDecideAssembly_EmptyContentSkippedWithoutStash(t *testing.T) {
 			ctxpkg.SlotSystem: "real content",
 		},
 		Budgets: minimalBudgets(),
+		Stasher: newFakeStasher(),
 	})
 
 	var memDec *SlotDecision
@@ -205,7 +402,7 @@ func TestDecideAssembly_OrderMatchesSlotOrder(t *testing.T) {
 	budgets := minimalBudgets()
 	budgets[ctxpkg.SlotMemory] = 5 // force pointer
 
-	plan := DecideAssembly(AssemblyInput{
+	plan := DecideAssembly(context.Background(), AssemblyInput{
 		Intent:    Intent{Type: IntentWriteCode},
 		SlotOrder: ctxpkg.SlotOrder,
 		Sources: map[string]string{
@@ -222,6 +419,7 @@ func TestDecideAssembly_OrderMatchesSlotOrder(t *testing.T) {
 			ctxpkg.SlotHandoff:     "",
 		},
 		Budgets: budgets,
+		Stasher: newFakeStasher(),
 	})
 
 	for i, d := range plan.Decisions {
@@ -239,7 +437,7 @@ func TestDecideAssembly_StashSeparatesIntentSkipFromPointerSubst(t *testing.T) {
 	budgets := minimalBudgets()
 	budgets[ctxpkg.SlotMemory] = 5 // pointer
 
-	plan := DecideAssembly(AssemblyInput{
+	plan := DecideAssembly(context.Background(), AssemblyInput{
 		Intent:    Intent{Type: IntentReviewSession}, // skip workspace context
 		SlotOrder: ctxpkg.SlotOrder,
 		Sources: map[string]string{
@@ -247,6 +445,7 @@ func TestDecideAssembly_StashSeparatesIntentSkipFromPointerSubst(t *testing.T) {
 			ctxpkg.SlotContext: "workspace context body",
 		},
 		Budgets: budgets,
+		Stasher: newFakeStasher(),
 	})
 
 	if _, ok := plan.Stash[ctxpkg.SlotMemory]; !ok {

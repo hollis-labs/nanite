@@ -27,7 +27,7 @@ func newTestServer(t *testing.T) *Server {
 		s.Close()
 		os.Remove(dbPath)
 	})
-	return New(s, "test-session", nil)
+	return New(s, "test-session", nil, "")
 }
 
 // TestBuildMCPTool_HappyPath verifies a valid schema passes through cleanly

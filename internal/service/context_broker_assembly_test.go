@@ -113,7 +113,7 @@ func TestDecideAssembly_SkipEmitsEmptyContentAndStashes(t *testing.T) {
 	// Vanta/PCC/Conduit wiring. The decision logic is the unit under test;
 	// end-to-end integration with AssembleSlots → SlotBlocks is covered by
 	// TestAssembleSlots_PlanReachesResult.
-	plan := contextbroker.DecideAssembly(contextbroker.AssemblyInput{
+	plan := contextbroker.DecideAssembly(context.Background(), contextbroker.AssemblyInput{
 		Intent:    contextbroker.Intent{Type: contextbroker.IntentReviewSession},
 		SlotOrder: ctxpkg.SlotOrder,
 		Sources: map[string]string{
@@ -147,13 +147,18 @@ func TestAssembleSlots_PointerSubstitutionStillShipsAtPosition(t *testing.T) {
 	budgets := ctxpkg.DefaultBudgets()
 	budgets[ctxpkg.SlotMemory] = 5 // force pointer
 
-	plan := contextbroker.DecideAssembly(contextbroker.AssemblyInput{
+	// Use a fake stasher so the decider emits ActionPointer (no real
+	// artifact store wired here — the stash test in
+	// contextbroker/assembly_test.go covers the artifact-id format).
+	plan := contextbroker.DecideAssembly(context.Background(), contextbroker.AssemblyInput{
 		Intent:    contextbroker.Intent{Type: contextbroker.IntentCustom},
 		SlotOrder: ctxpkg.SlotOrder,
+		SessionID: "pointer-test",
 		Sources: map[string]string{
 			ctxpkg.SlotMemory: strings.Repeat("memory body ", 200),
 		},
 		Budgets: budgets,
+		Stasher: &fakeArtifactStasher{},
 	})
 
 	var memDec contextbroker.SlotDecision
@@ -165,7 +170,7 @@ func TestAssembleSlots_PointerSubstitutionStillShipsAtPosition(t *testing.T) {
 	if memDec.Action != contextbroker.ActionPointer {
 		t.Fatalf("expected memory ActionPointer, got %v", memDec.Action)
 	}
-	if !strings.Contains(memDec.Content, "<ref:slot=memory,") {
+	if !strings.Contains(memDec.Content, "<ref:artifact_id=") {
 		t.Errorf("pointer marker malformed: %q", memDec.Content)
 	}
 }
@@ -181,7 +186,7 @@ func TestAssembleSlots_PointerSubstitutionStillShipsAtPosition(t *testing.T) {
 // chat.UniversalRulesBlock()) is covered by
 // TestAssembleSlots_UniversalSlotShipsContent below.
 func TestAssembleSlots_UniversalSlotEmptyWhenAbsent(t *testing.T) {
-	plan := contextbroker.DecideAssembly(contextbroker.AssemblyInput{
+	plan := contextbroker.DecideAssembly(context.Background(), contextbroker.AssemblyInput{
 		Intent:    contextbroker.Intent{Type: contextbroker.IntentCustom},
 		SlotOrder: ctxpkg.SlotOrder,
 		Sources:   map[string]string{ctxpkg.SlotSystem: "sys"},
@@ -328,4 +333,16 @@ func TestAssembleSlots_ConversationNotInPlanDecider(t *testing.T) {
 	if convDecision.Action != contextbroker.ActionSkip {
 		t.Errorf("conversation decision should be ActionSkip in the decider's view (handled outside the plan), got %v", convDecision.Action)
 	}
+}
+
+// fakeArtifactStasher is a no-op stasher used by service-layer tests that
+// don't wire a real artifact store. It returns a deterministic ID matching
+// the contextbroker.DeterministicArtifactID convention so pointer envelopes
+// have stable shape across runs. SP-20260512-0008 W2C (CW-20260512-0110).
+type fakeArtifactStasher struct{}
+
+func (fakeArtifactStasher) StashSlot(_ context.Context, req contextbroker.StashRequest) (contextbroker.StashResult, error) {
+	return contextbroker.StashResult{
+		ArtifactID: contextbroker.DeterministicArtifactID(req.SessionID, req.SlotName, req.Content),
+	}, nil
 }

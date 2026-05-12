@@ -8,15 +8,12 @@ import (
 // Slot names. Ordered by assembly priority.
 const (
 	// SlotUniversal is the position-0 universal rules slot emitted by the
-	// Context Broker for every dispatch. SP-20260512-0008 W1A
-	// (CW-20260512-0104): position 0 is reserved here so the Anthropic
-	// cacheable prefix stays stable across agents and turns. Content is
-	// wired by Sprint 2 / T2.4 (SP-20260512-0009) — this slot may carry
-	// empty content until then; it is skipped from the assembled output
-	// when empty (ContextWindow.Assemble), preserving today's wire shape
-	// while reserving the canonical position for the universal-rules
-	// payload that Sprint 2 promotes off the in-tree
-	// `chat.universalRulesPrefix` helper.
+	// Context Broker for every dispatch (chat, sync subagent, async
+	// subagent, background job). SP-20260512-0008 W1A (CW-20260512-0104)
+	// reserved position 0; CW-20260512-0114 wired content via
+	// chat.AssembleSlotSources, which sources the block from
+	// chat.UniversalRulesBlock(). Non-compactable identity-class slot —
+	// keeps the Anthropic cacheable prefix stable across agents.
 	SlotUniversal   = "universal"
 	SlotSystem      = "system"
 	SlotMemory      = "memory"
@@ -56,7 +53,7 @@ const SlotHandoffMaxTokens = 1500
 // provider payload in this sequence. Earlier slots are cached more
 // aggressively (they change less often).
 var SlotOrder = []string{
-	SlotUniversal, // SP-20260512-0008 W1A: position-0 universal rules, content wired by Sprint 2 / T2.4.
+	SlotUniversal, // SP-20260512-0008 W1A reserved; CW-20260512-0114 wired content.
 	SlotSystem,
 	SlotMemory,
 	SlotAgent,

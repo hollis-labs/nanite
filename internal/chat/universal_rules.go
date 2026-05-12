@@ -1,13 +1,13 @@
-// Package chat — universal rules preamble layer.
+// Package chat — universal rules content source.
 //
-// universal_rules.go owns the auto-injected universal-rules preamble that
-// every agent profile inherits regardless of template assignment. The
-// preamble carries the grounding / refusal / honesty / count-don't-estimate
-// rules that previously lived inside the file-default chat-role-harness
-// template (blt-chat-harness-001, seeded by migration 027 and its sibling
-// chain 046/048/049/050/051/053/055/056).
+// universal_rules.go owns the universal-rules content that every agent
+// profile inherits regardless of template assignment. The block carries
+// the grounding / refusal / honesty / count-don't-estimate rules that
+// previously lived inside the file-default chat-role-harness template
+// (blt-chat-harness-001, seeded by migration 027 and its sibling chain
+// 046/048/049/050/051/053/055/056).
 //
-// Why this is a layer, not a template assignment:
+// Why this is a content source, not a template assignment:
 //
 //   - Pre-CW-20260512-0100 the rules were bound only to the file-default
 //     profile via agent_prompt_templates(file-default, blt-chat-harness-001).
@@ -27,31 +27,24 @@
 //     R1+R2 with this universal-rules layer per the user's architectural
 //     direction.
 //
-// Where it lands in assembly:
+// Where it lands in assembly (post-CW-20260512-0114):
 //
-// The preamble is prepended at BOTH context-assembly surfaces so the
-// "cannot be bypassed" guarantee holds across paths:
+//   - ContextClient.AssembleSlotSources sources the universal-rules block
+//     into SlotSources.Universal. The Context Broker assembly decider
+//     (internal/contextbroker.DecideAssembly) then emits it at position 0
+//     of SlotOrder for every dispatch type — chat, sync subagent, async
+//     subagent, background job — unconditionally. Position 0 holds the
+//     cacheable prefix stable across agents that share the universal
+//     rules.
 //
-//   - ContextClient.AssembleSlotSources — slot-based path (current default).
-//     The block prepends SlotSystem content via universalRulesPrefix.
-//     SlotSystem is the FIRST slot in ctxpkg.SlotOrder, so this content is
-//     the leading prefix of every system payload — preserving Anthropic's
-//     `cacheable_prefix_tokens` stability across agents that share the
-//     universal rules.
-//   - ContextClient.AssembleContext — legacy flat-prompt path. The block
-//     prepends the assembled-and-enriched systemPrompt string before budget
-//     trimming. This caller is exposed via ContextService.AssembleContext
-//     and ChatService.RecomposeSystemPrompt. Even when those interfaces
-//     have no current production callers, exposing them without the prefix
-//     would create a silent fabrication-risk regression the moment a UI /
-//     handler wires them up — so both surfaces apply the prefix.
-//
-// See Comment 3b on PR #142 (CW-20260512-0100) for the architectural
-// discussion that closed this gap.
+//   - The legacy `AssembleContext` flat-prompt path no longer prepends the
+//     universal block. The path has no production callers and is queued
+//     for removal in a follow-up sprint; per `feedback_no_compat_shims`,
+//     re-applying the block in a deprecated path would be a compat shim.
 //
 // PROMPT-SYNC: CW-20260512-0100 / CW-20260427-0014.
-// Two clauses below ("Use what tools return", "Ask before fabricating",
-// "Count, don't estimate", "When you fail, acknowledge honestly") are the
+// The clauses below ("Use what tools return", "Ask before fabricating",
+// "Count, don't estimate", "Acknowledge honestly when you fail") are the
 // universal core extracted from the chat-role-harness body. When this file
 // changes, the demoted chat-role-harness body in:
 //   - internal/agent/builtin/default.md
@@ -59,11 +52,10 @@
 // must also be re-flowed. See migration 058's docstring for the procedure.
 package chat
 
-import "strings"
-
-// universalRulesBlock is the auto-injected preamble shared by every agent
-// (chat, worker, planner, researcher, and every auto-discovered profile).
-// Lives at the head of SlotSystem so it is part of the stable cache prefix.
+// universalRulesBlock is the content shared by every agent (chat, worker,
+// planner, researcher, and every auto-discovered profile). Lives at the
+// head of the wire payload via SlotUniversal (position 0 in SlotOrder), so
+// it is part of the stable cache prefix.
 //
 // Token cost: see PR #142 description for the current measurement. Adds a
 // fixed prefix to every dispatch. Cache-friendly: stable across turns,
@@ -95,29 +87,16 @@ const universalRulesBlock = `## Universal rules (apply to every agent)
 - For destructive or externally-visible actions (deletes, pushes, posts, emails), confirm with the user first.
 - When you delegate to a subagent or peer, treat the reply as a draft to verify — not as authoritative. The peer has the same training-data risk you do.`
 
-// UniversalRulesBlock returns the universal rules preamble injected at the
-// head of SlotSystem for every agent. Exported for tests and for callers
-// that need to assert the block's presence (R6 observability).
+// UniversalRulesBlock returns the universal rules content emitted at the
+// head of every dispatch via SlotUniversal (position 0 in SlotOrder).
+// Exported for tests, for callers that need to assert the block's presence
+// (R6 observability), and as the canonical source for the slot-source
+// wire-up in AssembleSlotSources.
 //
 // The returned string has NO trailing newline — it is the raw constant
-// verbatim. Production callers should route through universalRulesPrefix,
-// which owns the join semantics (block + "\n\n" + existing) against
-// downstream SlotSystem content.
+// verbatim. Callers that need to compose it with adjacent slot content
+// should add their own separator; today the Context Broker emits this
+// block as a stand-alone slot at position 0, so no separator is needed.
 func UniversalRulesBlock() string {
 	return universalRulesBlock
-}
-
-// universalRulesPrefix prepends the universal-rules block to the supplied
-// SlotSystem content. Pass the workspace identity / think-tool block as
-// `existing`; the universal preamble lands FIRST so the cacheable prefix
-// stays stable across agents that share the universal rules.
-//
-// When existing is empty the function still returns the rules block — the
-// preamble is unconditional. Empty existing simply means no workspace name
-// + no think-tool addendum on this turn.
-func universalRulesPrefix(existing string) string {
-	if strings.TrimSpace(existing) == "" {
-		return universalRulesBlock
-	}
-	return universalRulesBlock + "\n\n" + existing
 }

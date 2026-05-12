@@ -215,8 +215,10 @@ func (s *contextServiceImpl) AssembleSlots(ctx context.Context, session *store.S
 	// resolved intent + mode, and apply the returned plan to the
 	// ContextWindow. Skipped slots are stashed in plan.Stash; pointer
 	// substitutions get a synthetic marker. The Universal slot sits at
-	// position 0 (per ctxpkg.SlotOrder) with empty content today — Sprint 2 /
-	// T2.4 wires the content. The decision is deterministic and free of I/O.
+	// position 0 (per ctxpkg.SlotOrder); CW-20260512-0114 sources its
+	// content from chat.UniversalRulesBlock() in AssembleSlotSources so
+	// every dispatch carries the universal-rules block as the cacheable
+	// prefix. The decision is deterministic and free of I/O.
 	slotSources := slotSourceMap(sources, toolsContent)
 	modeSlug := ""
 	if sessionMode != nil {

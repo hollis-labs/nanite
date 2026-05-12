@@ -164,9 +164,19 @@ func (cb *ContextClient) AssembleSlotSources(ctx context.Context, session *store
 		attribute.String("nanite.agent.id", agent.ID),
 	)
 
-	// System slot — think-tool block + workspace identity. Agent-specific
-	// content moves to the Agent slot. v0/v1/v2 selected by feature flags.
+	// System slot — universal rules preamble (CW-20260512-0100) + think-tool
+	// block + workspace identity. Agent-specific content moves to the Agent
+	// slot. v0/v1/v2 selected by feature flags.
+	//
+	// universalRulesBlock lands FIRST so it forms the leading prefix of every
+	// system payload. SlotSystem is the first slot in ctxpkg.SlotOrder so
+	// this content is the stable cache prefix — keeps Anthropic's
+	// `cacheable_prefix_tokens` stable across agents that share the rules.
+	// See internal/chat/universal_rules.go for the architectural rationale
+	// (supersedes deep-dive R1+R2 per CW-20260512-0100).
 	var sysB strings.Builder
+	sysB.WriteString(universalRulesBlock)
+	sysB.WriteString("\n\n")
 	var thinkBlock string
 	if cb.HintDispatcher != nil && IsThinkBlockV2Enabled() {
 		thinkBlock = ThinkToolBlockWithDispatch(ctx, cb.HintDispatcher, "", "", "")

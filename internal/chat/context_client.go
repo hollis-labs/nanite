@@ -56,15 +56,12 @@ func NewContextClient(s *store.Store) *ContextClient {
 // 2. Recent messages (from session history)
 // 3. Enforce budget ceiling
 //
-// Legacy flat-prompt path. CW-20260512-0100 / Comment 3b: this path used to
-// bypass the universal-rules layer because the prefix was injected only at
-// the slot-based AssembleSlotSources call site. The universal-rules layer's
-// architectural guarantee is "cannot be bypassed", so we now prepend
-// universalRulesPrefix here too. AssembleContext's only non-test production
-// caller is RecomposeSystemPrompt (internal/service/chat.go), which itself
-// has no current callers — but exposing the interface without the prefix
-// would create a silent fabrication-risk regression the moment anyone wires
-// it up. Closing the gap at this layer is cheaper than auditing the future.
+// Legacy flat-prompt path. CW-20260512-0114: the universal-rules block is
+// no longer prepended here — the Context Broker emits it via SlotUniversal
+// in the slot-based AssembleSlots path. This path has no production
+// callers (RecomposeSystemPrompt has no current callers per the in-tree
+// note) and is queued for removal in a follow-up sprint. Re-applying the
+// block here would be a compat shim per feedback_no_compat_shims.
 func (cb *ContextClient) AssembleContext(ctx context.Context, session *store.Session, agent *store.AgentProfile, mode *store.AgentMode, workspace *store.Workspace) (string, []llmtypes.ChatMessage, error) {
 	_, span := feotel.StartSpan(ctx, "nanite.broker.assembleContext")
 	defer span.End()
@@ -92,10 +89,6 @@ func (cb *ContextClient) AssembleContext(ctx context.Context, session *store.Ses
 	if cb.ContextBroker != nil {
 		systemPrompt = cb.enrichWithContextBroker(ctx, systemPrompt, session, agent)
 	}
-
-	// 1c. Prepend the universal-rules layer so the legacy path matches the
-	// slot path's "cannot be bypassed" guarantee. See function doc above.
-	systemPrompt = universalRulesPrefix(systemPrompt)
 
 	// 2. Load messages from DB. Start with a generous limit.
 	messages, err := cb.Store.ListMessages(session.ID, 200)
@@ -150,12 +143,14 @@ func (cb *ContextClient) AssembleContext(ctx context.Context, session *store.Ses
 // context assembly. The service layer composes these into a ContextWindow.
 // Tools content is filled by the service layer after tool selection.
 type SlotSources struct {
-	// Universal is the position-0 universal-rules slot (SP-20260512-0008
-	// W1A / CW-20260512-0104). Empty today — Sprint 2 / T2.4 wires the
-	// content. The decider always emits a decision for this slot (empty
-	// content → ActionSkip), which is dropped from the wire by
-	// ContextWindow.Assemble. The slot position is reserved in SlotOrder
-	// so the cacheable prefix stays stable when content arrives.
+	// Universal is the position-0 universal-rules slot. Sourced from
+	// chat.UniversalRulesBlock() so the Context Broker assembly decider
+	// emits it unconditionally for every dispatch type (chat, sync
+	// subagent, async subagent, background job). Position 0 keeps the
+	// cacheable prefix stable across agents that share the universal
+	// rules — Anthropic's `cacheable_prefix_tokens` math depends on this
+	// being the leading slot. SP-20260512-0008 W1A reserved position 0;
+	// CW-20260512-0114 wires the content here.
 	Universal        string
 	System           string                 // think-tool block + workspace identity (no agent-specific text)
 	Memory           string                 // formatted ContextBroker items where Source == "memory"
@@ -189,20 +184,10 @@ func (cb *ContextClient) AssembleSlotSources(ctx context.Context, session *store
 		attribute.String("nanite.agent.id", agent.ID),
 	)
 
-	// System slot — universal rules preamble (CW-20260512-0100) + think-tool
-	// block + workspace identity. Agent-specific content moves to the Agent
-	// slot. v0/v1/v2 selected by feature flags.
-	//
-	// We compose the non-universal content (think-tool + workspace) into
-	// sysB first, then route through universalRulesPrefix so the helper
-	// owns the join semantics (block + "\n\n" + existing). This keeps the
-	// production path and the universal_rules_test.go contract in lockstep
-	// — drift between the two surfaces is exactly what Comment 3a was
-	// flagging. SlotSystem is the first slot in ctxpkg.SlotOrder so the
-	// universal block lands as the stable cache prefix, preserving
-	// Anthropic's `cacheable_prefix_tokens` across agents that share rules.
-	// See internal/chat/universal_rules.go for the architectural rationale
-	// (supersedes deep-dive R1+R2 per CW-20260512-0100).
+	// System slot — think-tool block + workspace identity. Agent-specific
+	// content lives in the Agent slot; universal rules live in SlotUniversal
+	// at position 0 (CW-20260512-0114, see below). v0/v1/v2 think-tool
+	// selected by feature flags.
 	var sysB strings.Builder
 	var thinkBlock string
 	if cb.HintDispatcher != nil && IsThinkBlockV2Enabled() {
@@ -219,7 +204,7 @@ func (cb *ContextClient) AssembleSlotSources(ctx context.Context, session *store
 			sysB.WriteString(workspace.Description)
 		}
 	}
-	systemSlotContent := universalRulesPrefix(sysB.String())
+	systemSlotContent := sysB.String()
 
 	// Agent slot — composed via prompt templates with skills, falling back to
 	// raw agent + mode strings when no template is assigned. The agent slot
@@ -293,7 +278,15 @@ func (cb *ContextClient) AssembleSlotSources(ctx context.Context, session *store
 	}
 
 	return &SlotSources{
-		Universal:        "", // SP-20260512-0008 W1A: position-0 reserved; Sprint 2 / T2.4 wires content.
+		// SlotUniversal carries the universal-rules block at position 0
+		// (CW-20260512-0114). Sourced from UniversalRulesBlock() so the
+		// Context Broker assembly decider emits it unconditionally for
+		// every dispatch type — chat, sync subagent, async subagent,
+		// background job. The block was previously prepended onto
+		// SlotSystem via universalRulesPrefix; that helper has been
+		// removed (per feedback_no_compat_shims) now that the broker
+		// owns the wire-shape decision.
+		Universal:        UniversalRulesBlock(),
 		System:           systemSlotContent,
 		Memory:           memoryContent,
 		Agent:            agentPrompt,

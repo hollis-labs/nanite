@@ -170,12 +170,17 @@ func TestAssembleSlots_PointerSubstitutionStillShipsAtPosition(t *testing.T) {
 	}
 }
 
-// TestAssembleSlots_UniversalSlotReservedEmpty exercises the W1A contract
-// that the universal slot is always present at position 0 in the plan
-// even when content is empty. Sprint 2 / T2.4 wires the content; until
-// then the slot is reserved with empty content (skipped at wire level
-// but tracked at the decider layer).
-func TestAssembleSlots_UniversalSlotReservedEmpty(t *testing.T) {
+// TestAssembleSlots_UniversalSlotEmptyWhenAbsent exercises the decider's
+// position-stability contract when SlotUniversal source is empty (e.g. an
+// integration test calling DecideAssembly directly without
+// chat.AssembleSlotSources). Even with empty content, the decision is
+// emitted at position 0 — Anthropic's cacheable_prefix_tokens math depends
+// on positional stability.
+//
+// The production wire-up (chat.AssembleSlotSources sourcing from
+// chat.UniversalRulesBlock()) is covered by
+// TestAssembleSlots_UniversalSlotShipsContent below.
+func TestAssembleSlots_UniversalSlotEmptyWhenAbsent(t *testing.T) {
 	plan := contextbroker.DecideAssembly(contextbroker.AssemblyInput{
 		Intent:    contextbroker.Intent{Type: contextbroker.IntentCustom},
 		SlotOrder: ctxpkg.SlotOrder,
@@ -188,6 +193,91 @@ func TestAssembleSlots_UniversalSlotReservedEmpty(t *testing.T) {
 	}
 	if plan.Decisions[0].Content != "" {
 		t.Errorf("empty universal slot should emit empty content, got %q", plan.Decisions[0].Content)
+	}
+}
+
+// TestAssembleSlots_UniversalSlotShipsContent is the CW-20260512-0114
+// end-to-end smoke test: chat.AssembleSlotSources sources the universal
+// block from chat.UniversalRulesBlock() and the Context Broker ships it at
+// position 0 of the assembled SlotBlocks. Together these prove the slot
+// reaches the wire for every dispatch type — chat sessions and subagent
+// sessions alike use this same code path.
+//
+// The "subagent" framing of the smoke test is the empty-system-prompt
+// profile shape: pre-CW-20260512-0100, an agent with empty SystemPrompt
+// and no template received zero universal rules. Post-CW-20260512-0114,
+// the rules ride on SlotUniversal — independent of profile body or
+// template assignment.
+func TestAssembleSlots_UniversalSlotShipsContent(t *testing.T) {
+	s, err := store.New(context.Background(), t.TempDir()+"/test.db")
+	if err != nil {
+		t.Fatalf("store.New: %v", err)
+	}
+	client := chat.NewContextClient(s)
+	svc := NewContextService(ContextServiceConfig{Client: client})
+
+	sess := &store.Session{ID: "subagent-sess"}
+	if err := s.CreateSession(sess); err != nil {
+		t.Fatalf("CreateSession: %v", err)
+	}
+	// Empty SystemPrompt mirrors the c160 researcher subagent that
+	// previously fabricated 8.1KB of analysis when given no codebase
+	// access. The universal-rules slot is the structural fix.
+	subagentProfile := &store.AgentProfile{
+		ID:           "researcher-subagent",
+		Slug:         "researcher",
+		Status:       "active",
+		SystemPrompt: "",
+	}
+
+	result, err := svc.AssembleSlots(context.Background(), sess, subagentProfile, &store.AgentMode{}, nil, nil, "", 200000, nil, "")
+	if err != nil {
+		t.Fatalf("AssembleSlots: %v", err)
+	}
+
+	// Decision 0 must be SlotUniversal, must be ActionShip, and must
+	// carry the canonical UniversalRulesBlock content.
+	d0 := result.Plan.Decisions[0]
+	if d0.SlotName != ctxpkg.SlotUniversal {
+		t.Fatalf("position 0 must be SlotUniversal, got %q", d0.SlotName)
+	}
+	if d0.Action != contextbroker.ActionShip {
+		t.Errorf("SlotUniversal must ship for subagent dispatch, got action %v (reason %q)", d0.Action, d0.ReasonTag)
+	}
+	if d0.Content == "" {
+		t.Fatal("SlotUniversal content empty — universal rules failed to reach the wire for subagent dispatch")
+	}
+	if d0.Content != chat.UniversalRulesBlock() {
+		t.Error("SlotUniversal content drifted from chat.UniversalRulesBlock — content must be sourced verbatim")
+	}
+
+	// The assembled SlotBlocks must include the universal block at the
+	// leading wire position. ContextWindow.Assemble drops empty slots, so
+	// SlotUniversal is the first non-empty block.
+	if len(result.Blocks) == 0 {
+		t.Fatal("no slot blocks assembled — subagent dispatch produced empty wire")
+	}
+	if result.Blocks[0].SlotName != ctxpkg.SlotUniversal {
+		t.Errorf("first wire block must be SlotUniversal, got %q", result.Blocks[0].SlotName)
+	}
+	if !strings.Contains(result.Blocks[0].Content, "Refuse rather than fabricate") {
+		t.Error("first wire block missing universal-rules refusal clause — content drifted")
+	}
+
+	// Window slot tokens must report SlotUniversal distinct from
+	// SlotSystem. This is what the request_build slog walks (per
+	// chat_generate.go); a non-zero count here means
+	// `universal_tokens` will appear separately from `system_tokens`.
+	uniSlot := result.Window.Slot(ctxpkg.SlotUniversal)
+	if uniSlot == nil {
+		t.Fatal("ContextWindow missing SlotUniversal — request_build slog cannot report it")
+	}
+	if uniSlot.TokenCount == 0 {
+		t.Error("SlotUniversal.TokenCount = 0 with non-empty content — token estimator broke")
+	}
+	sysSlot := result.Window.Slot(ctxpkg.SlotSystem)
+	if sysSlot != nil && strings.Contains(sysSlot.Content, "Refuse rather than fabricate") {
+		t.Error("SlotSystem must NOT carry the universal-rules block post-CW-20260512-0114 — drift would double-ship cacheable content")
 	}
 }
 

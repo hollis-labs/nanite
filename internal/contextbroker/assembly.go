@@ -181,11 +181,13 @@ type AssemblyInput struct {
 //     The original content lands in Stash[name].
 //  4. Otherwise → ActionShip.
 //
-// Universal slot (position 0) is always emitted at position 0, even when
-// empty — preserves the cacheable prefix across turns. Sprint 2 / T2.4
-// will wire actual content; until then the broker emits an ActionSkip
-// with empty content, which Assemble drops from the wire (position
-// stability lives in SlotOrder, not in wire output).
+// Universal slot (position 0) is always emitted at position 0,
+// preserving the cacheable prefix across turns. CW-20260512-0114 wires
+// the slot's content via chat.AssembleSlotSources, which sources the
+// universal-rules block from chat.UniversalRulesBlock(). With non-empty
+// content the decider ships the slot (ActionShip) and the wire payload
+// always starts with the universal-rules text — Anthropic's
+// `cacheable_prefix_tokens` math benefits from the stable leading slot.
 func DecideAssembly(input AssemblyInput) AssemblyPlan {
 	decisions := make([]SlotDecision, 0, len(input.SlotOrder))
 	var stash map[string]string

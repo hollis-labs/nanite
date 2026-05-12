@@ -730,7 +730,18 @@ export function useChat(sessionId: string | null) {
       eventSourceRef.current.close();
       eventSourceRef.current = null;
     }
-    if (sessionId) store().clearStreaming(sessionId);
+    if (sessionId) {
+      store().clearStreaming(sessionId);
+      // CW-20260512-0006: tell the BE to cancel the in-flight LLM
+      // stream + tool work, not just close the FE SSE. Without this,
+      // removing the 5-minute parent wall-clock deadline would let
+      // generation keep burning tokens after the user pressed stop.
+      // Fire-and-forget: 404 means there was nothing to cancel (race
+      // with stream end), network errors are non-fatal — the FE has
+      // already closed its EventSource so the worst case is the BE
+      // finishes the current turn on its own.
+      void api.cancelChatStream(sessionId);
+    }
   }, [sessionId, stopStallWatchdog]);
 
   const retryStream = useCallback(async () => {

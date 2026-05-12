@@ -188,6 +188,13 @@ func (a *API) RegisterRoutes(mux *http.ServeMux) {
 	// validates the token belongs to the path-bound sessionID.
 	mux.HandleFunc("POST /api/sessions/{id}/recovery/cancel", a.handleCancelRecoveryRetry)
 
+	// Chat-stream cancel — user-initiated stop now that the 5-minute
+	// parent wall-clock deadline is gone (CW-20260512-0006). The FE
+	// composer's stop button calls this so the BE actually cancels the
+	// in-flight LLM stream + tool work instead of just closing the SSE
+	// on the FE side.
+	mux.HandleFunc("POST /api/sessions/{id}/chat/cancel", a.handleCancelChat)
+
 	// Skills
 	mux.HandleFunc("GET /api/skills", a.handleListSkills)
 	mux.HandleFunc("POST /api/skills", a.handleCreateSkill)

@@ -318,8 +318,11 @@ func TestSurfaceErrorOrSuppress_SuppressesWhenSubagentActive(t *testing.T) {
 	svc := &chatServiceImpl{store: cs}
 	ch := make(chan chat.StreamEvent, 4)
 
-	suppressed := svc.surfaceErrorOrSuppress(ch, "sess-1", "deadline_5min", "Response timed out after 5 minutes.",
-		map[string]interface{}{"timeout": "5m0s"}, "")
+	// Site label is decoupled from the removed 5-minute deadline
+	// (CW-20260512-0006); the contract is the generic suppression
+	// classifier — the label is just a structured-log breadcrumb.
+	suppressed := svc.surfaceErrorOrSuppress(ch, "sess-1", "provider_stream_error", "boom",
+		map[string]interface{}{"recovery": "refused"}, "")
 	close(ch)
 
 	if !suppressed {

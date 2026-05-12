@@ -628,6 +628,49 @@ func TestChatService_RegisterGeneration_ScopedPerSession(t *testing.T) {
 	}
 }
 
+// TestChatService_CancelActiveGeneration_DispatchesCancel verifies that
+// CancelActiveGeneration invokes the registered cancel for the session
+// and returns true. CW-20260512-0006: this is the user-stop backstop
+// now that the 5-minute parent wall-clock deadline has been removed.
+func TestChatService_CancelActiveGeneration_DispatchesCancel(t *testing.T) {
+	svc := &chatServiceImpl{activeGen: make(map[string]*inFlightGen)}
+
+	cancelled := make(chan struct{})
+	cancel := context.CancelFunc(func() { close(cancelled) })
+
+	svc.registerGeneration("sess-active", "msg-1", cancel)
+
+	if ok := svc.CancelActiveGeneration("sess-active"); !ok {
+		t.Fatal("CancelActiveGeneration returned false for an active generation")
+	}
+	select {
+	case <-cancelled:
+	case <-time.After(200 * time.Millisecond):
+		t.Fatal("registered cancel was not invoked by CancelActiveGeneration")
+	}
+
+	// The slot is NOT cleared here; deregisterGeneration handles that when
+	// the cancelled goroutine returns. This preserves the takeover
+	// semantics — a stale slot for a draining goroutine is fine because
+	// registerGeneration only consults the slot to compute `prev`.
+	svc.activeGenMu.Lock()
+	cur, ok := svc.activeGen["sess-active"]
+	svc.activeGenMu.Unlock()
+	if !ok || cur == nil || cur.msgID != "msg-1" {
+		t.Fatalf("expected slot retained for the cancelled gen, got %+v ok=%v", cur, ok)
+	}
+}
+
+// TestChatService_CancelActiveGeneration_NoActive verifies that the call
+// is idempotent when no generation is registered — returns false so the
+// API layer can surface a 404 without treating it as a failure.
+func TestChatService_CancelActiveGeneration_NoActive(t *testing.T) {
+	svc := &chatServiceImpl{activeGen: make(map[string]*inFlightGen)}
+	if ok := svc.CancelActiveGeneration("sess-no-active"); ok {
+		t.Fatal("CancelActiveGeneration returned true for a session with no active gen")
+	}
+}
+
 // Verify ChatService interface is satisfied at compile time.
 var _ ChatService = (*chatServiceImpl)(nil)
 

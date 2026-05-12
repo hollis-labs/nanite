@@ -68,6 +68,13 @@ type ChatService interface {
 	// GetStream returns the event channel for a given message ID.
 	GetStream(messageID string) (<-chan chat.StreamEvent, bool)
 
+	// CancelActiveGeneration cancels the currently-streaming generateResponse
+	// goroutine for the given session, if one is registered. Returns true
+	// when a cancel was dispatched, false when no generation was active.
+	// CW-20260512-0006: backstop for user-initiated stop now that the
+	// 5-minute parent wall-clock deadline is gone.
+	CancelActiveGeneration(sessionID string) bool
+
 	// Shutdown kills all tracked CLI processes.
 	Shutdown()
 }
@@ -426,6 +433,26 @@ func (s *chatServiceImpl) deregisterGeneration(sessionID, msgID string) {
 	if cur := s.activeGen[sessionID]; cur != nil && cur.msgID == msgID {
 		delete(s.activeGen, sessionID)
 	}
+}
+
+// CancelActiveGeneration cancels the in-flight generateResponse goroutine
+// registered for sessionID, if any. Returns true when a cancel was
+// dispatched (the goroutine will observe ctx.Err() on its next loop
+// iteration and exit cleanly), false when no generation was active.
+// CW-20260512-0006: this is the user-stop endpoint backstop now that the
+// 5-minute wall-clock deadline has been removed. The registry slot is
+// NOT cleared here — deregisterGeneration handles that when the cancelled
+// goroutine returns, preserving the takeover semantics in
+// registerGeneration.
+func (s *chatServiceImpl) CancelActiveGeneration(sessionID string) bool {
+	s.activeGenMu.Lock()
+	defer s.activeGenMu.Unlock()
+	cur, ok := s.activeGen[sessionID]
+	if !ok || cur == nil {
+		return false
+	}
+	cur.cancel()
+	return true
 }
 
 // launchGeneration starts a cancellable generateResponse goroutine for the

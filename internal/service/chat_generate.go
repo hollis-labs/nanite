@@ -87,10 +87,6 @@ func hasUsableTools(tools []llmtypes.ToolDefinition) bool {
 	return len(tools) > 0
 }
 
-// generateResponseTimeout is the maximum wall-clock time a single
-// generateResponse goroutine is allowed to run before being cancelled.
-const generateResponseTimeout = 5 * time.Minute
-
 // nativeToolGuide is injected into every system prompt so the LLM correctly
 // uses native dev/general tools.
 const nativeToolGuide = `
@@ -124,8 +120,21 @@ Tool contract discovery:
 func (s *chatServiceImpl) generateResponse(ctx context.Context, sessionID, assistantMsgID, userContent string, ch chan chat.StreamEvent) {
 	startTime := time.Now()
 
-	ctx, cancel := context.WithTimeout(ctx, generateResponseTimeout)
-	defer cancel()
+	// CW-20260512-0006: removed the 5-minute wall-clock deadline that used to
+	// wrap ctx via context.WithTimeout(ctx, generateResponseTimeout). The
+	// deadline was bad agent DX (interrupted long-running work that was
+	// progressing normally — c160 turn 8) and bad user DX (no way to
+	// distinguish "stuck" from "still working"). Cancellation now comes
+	// from three intentional sources only, all flowing through the same
+	// `ctx`:
+	//   1. Takeover — a new HandleMessage/RetryLastMessage call for the same
+	//      session cancels the prior generation via launchGeneration's
+	//      registerGeneration takeover semantics.
+	//   2. Lifecycle shutdown — process-wide drain bridges bgCtx to cancel.
+	//   3. User-initiated stop — POST /api/sessions/{id}/chat/cancel resolves
+	//      the registered cancel via CancelActiveGeneration.
+	// Hung sync subagents are bounded by the per-row timeout_seconds reaper
+	// (CW-20260512-0002), not by a parent wall-clock deadline.
 
 	ctx, span := feotel.StartSpan(ctx, "nanite.service.generateResponse")
 	span.SetAttributes(
@@ -209,7 +218,13 @@ func (s *chatServiceImpl) generateResponse(ctx context.Context, sessionID, assis
 	constraints := chat.ParseAgentConstraints(agent.Constraints)
 
 	if constraints.MaxTimeSeconds > 0 {
+		// Per-agent MaxTimeSeconds is an explicit opt-in constraint authored
+		// in the agent's constraints schema — distinct from the removed
+		// global 5-minute parent deadline. CW-20260512-0006: when an agent
+		// declares a max-time constraint, honor it; otherwise the parent
+		// chat loop has no wall-clock upper bound.
 		agentTimeout := time.Duration(constraints.MaxTimeSeconds) * time.Second
+		var cancel context.CancelFunc
 		ctx, cancel = context.WithTimeout(ctx, agentTimeout)
 		defer cancel()
 	}
@@ -724,33 +739,23 @@ func (s *chatServiceImpl) generateResponse(ctx context.Context, sessionID, assis
 			diagLogLoopExit(sessionID, assistantMsgID, ls.iteration, "shouldStop:"+string(code), len(ls.toolCallRefs), ch)
 			break
 		}
-		// Deadline check.
+		// Context cancellation — intentional only (takeover / shutdown /
+		// user-initiated stop). CW-20260512-0006 removed the wall-clock
+		// deadline, so a non-nil ctx.Err() here is never a wall-clock
+		// timeout; it's always an intentional cancel. Emit a clean
+		// status event (NOT an ErrorCodeInternal envelope — there is no
+		// internal error) and persist any partial content the assistant
+		// generated before the cancel.
 		if ctx.Err() != nil {
-			slog.Warn("generateResponse context cancelled", "err", ctx.Err(), "session_id", sessionID)
+			slog.Info("generateResponse cancelled", "err", ctx.Err(), "session_id", sessionID)
 			diagLogLoopExit(sessionID, assistantMsgID, ls.iteration, "ctx_cancelled:"+ctx.Err().Error(), len(ls.toolCallRefs), ch)
-			// CW-20260512-0002 subtodo (d): when the deadline fires while
-			// a sync subagent is still running, the cause is a hung
-			// subagent — NOT an internal parent-loop error. Suppress the
-			// FE-visible `ErrorCodeInternal` envelope + event + the
-			// `[generation interrupted]` placeholder write; the
-			// suppression is logged in structured form by the helper so
-			// it remains observable. Parent-stream genuine timeouts
-			// (no active subagent) keep the existing UI.
-			if s.suppressSurfaceIfSubagentCaused(sessionID, "deadline_5min", fullContent.String()) {
-				return
-			}
-			ch <- chat.ErrorEnvelopeDelta(chat.ErrorCodeInternal, "Response timed out after 5 minutes. Please try again with a simpler request.", map[string]interface{}{
-				"timeout": generateResponseTimeout.String(),
-				"session": sessionID,
-			})
-			ch <- chat.ErrorEvent(chat.ErrorCodeInternal, "Response timed out after 5 minutes. Please try again with a simpler request.", map[string]interface{}{
-				"timeout": generateResponseTimeout.String(),
-				"session": sessionID,
-			})
-			// Suppression already checked at line above; use the pre-classified
-			// broker-notify variant to skip the redundant ActiveSubagentRunForParent
-			// lookup inside persistPartialAssistant. CW-20260512-0001, CW-20260512-0002.
-			s.persistPartialAssistantAndNotifyBrokerPreClassified(ctx, sessionID, assistantMsgID, agentID, fullContent.String(), providerName, agent.Slug, ctx.Err()) // CW-20260419-0019, CW-20260512-0001, CW-20260512-0002
+			ch <- chat.StreamEvent{Type: "status", Content: "Stopped: cancelled"}
+			// Persist whatever the assistant managed to stream so far so a
+			// reload doesn't lose the partial work. The broker-notify
+			// pre-classified variant skips the redundant subagent lookup
+			// since intentional cancels are not "internal errors" we
+			// classify to the recovery broker.
+			s.persistPartialAssistantPreClassified(sessionID, assistantMsgID, agentID, fullContent.String())
 			return
 		}
 

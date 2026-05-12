@@ -11,6 +11,7 @@ import (
 
 	llmtypes "github.com/hollis-labs/go-llm-types"
 	"github.com/hollis-labs/go-toolbroker/broker"
+	"github.com/hollis-labs/nanite/internal/describer"
 	"github.com/hollis-labs/nanite/internal/mcp"
 	"github.com/hollis-labs/nanite/internal/store"
 )
@@ -39,6 +40,17 @@ type ToolClient struct {
 	Config             *Config
 	Builtins           *BuiltinToolRegistry
 	PermissionResolver PermissionResolver
+
+	// Describers is the opt-in per-call description-render registry
+	// (CW-20260512-0105 / SP-20260512-0008 W1B). Tools that need
+	// caller-specific descriptions register a Describer keyed by tool
+	// name; the materialization site calls RenderDescriptions on the
+	// final filtered tool set. Static-description tools (the majority)
+	// have no Describer and emit their registration-time description.
+	// Lives in the leaf package internal/describer so internal/mcp can
+	// author Describers without re-introducing an import cycle through
+	// internal/toolclient → internal/mcp → internal/toolclient.
+	Describers *describer.Registry
 
 	// DeveloperModeFunc, when non-nil, overrides the default developer_mode
 	// lookup (which reads user_settings from Store). Used in tests to inject
@@ -81,7 +93,46 @@ func New(mcpManager *mcp.Manager, s *store.Store, cfg *Config) *ToolClient {
 		Store:       s,
 		Config:      cfg,
 		Builtins:    NewBuiltinToolRegistry(),
+		Describers:  describer.NewRegistry(),
 	}
+}
+
+// RenderDescriptions returns a copy of tools with per-tool descriptions
+// re-rendered for the given caller. Tools without a registered Describer
+// pass through unchanged; tools whose Describer returns "" also pass
+// through (fall back to the static description). The input slice is not
+// mutated — the returned slice is safe for the caller to retain.
+//
+// This is the materialization-site hook for the Tool Broker's per-call
+// description-render contract (CW-20260512-0105). Call sites: the
+// service-layer tool selection (service/tool.go SelectForAgent) after
+// allowlist and chat-surface filtering, immediately before the tool set
+// is handed to the LLM.
+//
+// Cacheable-prefix note: per-call descriptions land OUTSIDE the
+// cacheable prefix. Tools opting into Describe should be placed at the
+// tail of the tool array so the cacheable head (static-description
+// tools) is not invalidated per call. The cache-marker priority work
+// (CW-20260512-0109 / W3) codifies this placement constraint.
+func (tb *ToolClient) RenderDescriptions(ctx context.Context, tools []llmtypes.ToolDefinition, caller describer.CallerAgent) []llmtypes.ToolDefinition {
+	if tb == nil || tb.Describers == nil || len(tools) == 0 {
+		return tools
+	}
+	out := make([]llmtypes.ToolDefinition, len(tools))
+	copy(out, tools)
+	for i := range out {
+		d, ok := tb.Describers.Get(out[i].Name)
+		if !ok {
+			continue
+		}
+		rendered := d.Describe(ctx, caller)
+		if rendered == "" {
+			// Describer signaled fall-through — keep static description.
+			continue
+		}
+		out[i].Description = rendered
+	}
+	return out
 }
 
 // SetSkills attaches operator-authored tool-preference skills to the

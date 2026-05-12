@@ -55,13 +55,15 @@ func TestBuildSystemBlocks_EmptyReturnsNil(t *testing.T) {
 
 func TestBuildSystemBlocks_SlotBlocksUnchangedGetCache(t *testing.T) {
 	c := New()
-	// Need the "system" hint set so plan.SlotBoundary is eligible
-	// (slot-boundary is mutually gated by plan.System per cachePlan).
+	// Need the "system" hint set so plan.SlotMarkers is populated
+	// (slot markers are mutually gated by plan.System per cachePlan).
 	c.SetCacheHints([]llmcontracts.CacheHint{{Position: "system"}})
 	req := llmtypes.ChatRequest{
 		SystemPrompt: "system base",
 		SlotBlocks: []llmtypes.SlotBlock{
-			{Name: "stable", Content: "stable content", Changed: false},
+			// SlotUniversal is in stablePrefixSlotPriority — eligible to mark.
+			{Name: "universal", Content: "stable content", Changed: false},
+			// "volatile" is Changed AND not in priority — breaks the run.
 			{Name: "volatile", Content: "volatile content", Changed: true},
 		},
 	}
@@ -69,59 +71,60 @@ func TestBuildSystemBlocks_SlotBlocksUnchangedGetCache(t *testing.T) {
 	if len(out) != 3 {
 		t.Fatalf("expected 3 blocks (base + 2 slots), got %d", len(out))
 	}
-	// Layout: [base, stable, volatile].
+	// Layout: [base, universal, volatile].
 	// The base block carries cache_control (plan.System=true).
-	// The unchanged slot ("stable") gets the slot-boundary marker (it's
-	// the LAST non-empty unchanged slot in this request).
+	// The Universal slot (unchanged, priority) gets a slot marker.
 	// The volatile slot (Changed=true) does NOT.
 	stable, _ := json.Marshal(out[1])
 	volatile, _ := json.Marshal(out[2])
 	if !strings.Contains(string(stable), "cache_control") {
-		t.Fatalf("last unchanged slot should have cache_control, got: %s", stable)
+		t.Fatalf("Universal slot should have cache_control, got: %s", stable)
 	}
 	if strings.Contains(string(volatile), "cache_control") {
 		t.Fatalf("changed slot should NOT have cache_control, got: %s", volatile)
 	}
 }
 
-// TestBuildSystemBlocks_MarksOnlyLastUnchangedSlot asserts that when
-// plan.SlotBoundary is true and multiple unchanged slots exist, only the
-// LAST unchanged slot block carries cache_control. Earlier unchanged
-// blocks stay unmarked — the slot section is cached in aggregate via a
-// single boundary marker, not per-slot.
-func TestBuildSystemBlocks_MarksOnlyLastUnchangedSlot(t *testing.T) {
+// TestBuildSystemBlocks_MarksOnlySlotsInPlan asserts that buildSystemBlocks
+// honors plan.SlotMarkers by name — only slots whose name appears in the
+// list get markers; other slots (even if unchanged) stay unmarked. This
+// is the load-bearing W3 (CW-20260512-0109) contract: marker placement is
+// codified in cache_plan.go and consumed by name here.
+func TestBuildSystemBlocks_MarksOnlySlotsInPlan(t *testing.T) {
 	c := New()
 	req := llmtypes.ChatRequest{
 		SystemPrompt: "base",
 		SlotBlocks: []llmtypes.SlotBlock{
 			{Name: "a", Content: "a-chgd", Changed: true},
 			{Name: "b", Content: "b-unchgd", Changed: false},
-			{Name: "c", Content: "c-unchgd", Changed: false},
-			{Name: "d", Content: "d-chgd", Changed: true},
+			{Name: "universal", Content: "uni", Changed: false},
+			{Name: "system", Content: "sys", Changed: false},
 			{Name: "e", Content: "e-unchgd", Changed: false},
 		},
 	}
-	plan := cachePlan{SlotBoundary: true}
+	// Plan explicitly marks Universal + System only.
+	plan := cachePlan{SlotMarkers: []string{"universal", "system"}}
 	out := c.buildSystemBlocks(req, plan)
 	// 1 system + 5 slot blocks = 6.
 	if len(out) != 6 {
 		t.Fatalf("len(out)=%d want 6", len(out))
 	}
-	// Check each slot block (indices 1..5). Only index 5 (the LAST
-	// unchanged block "e") should carry cache_control.
+	// Layout: [base, a, b, universal, system, e].
+	// Markers expected on indices 3 (universal) and 4 (system) only.
+	expectMarker := map[int]bool{3: true, 4: true}
 	for i := 1; i <= 5; i++ {
 		data, _ := json.Marshal(out[i])
 		hasMarker := strings.Contains(string(data), "cache_control")
-		want := i == 5
+		want := expectMarker[i]
 		if hasMarker != want {
 			t.Errorf("block %d cache_control=%v want %v: %s", i, hasMarker, want, data)
 		}
 	}
 }
 
-// TestBuildSystemBlocks_NoSlotMarkerWhenPlanFalse asserts that with
-// plan.SlotBoundary=false, no slot gets a marker regardless of Changed.
-func TestBuildSystemBlocks_NoSlotMarkerWhenPlanFalse(t *testing.T) {
+// TestBuildSystemBlocks_NoSlotMarkerWhenPlanEmpty asserts that with
+// plan.SlotMarkers empty, no slot gets a marker regardless of Changed.
+func TestBuildSystemBlocks_NoSlotMarkerWhenPlanEmpty(t *testing.T) {
 	c := New()
 	req := llmtypes.ChatRequest{
 		SystemPrompt: "base",

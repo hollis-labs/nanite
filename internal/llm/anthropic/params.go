@@ -13,10 +13,13 @@ import (
 
 // buildSystemBlocks renders the system portion of a request as []TextBlockParam.
 // When the request carries SlotBlocks, each block becomes its own block. The
-// SystemPrompt block carries cache_control when plan.System is true; the
-// LAST non-empty unchanged slot block carries cache_control when
-// plan.SlotBoundary is true (a single marker, regardless of how many
-// unchanged slots exist — the slot section is cached in aggregate).
+// SystemPrompt block carries cache_control when plan.System is true. Slot
+// blocks whose names appear in plan.SlotMarkers also carry cache_control —
+// the marker priority is codified in cache_plan.go (CW-20260512-0109, W3):
+// SlotUniversal at position 0 receives the first slot marker, SlotSystem the
+// second, and the contiguous unchanged-prefix run continues from there up to
+// budget. Per-turn dynamic slots (workspace context, broker selections) are
+// never marked.
 // When there are no slots, falls back to a single block off SystemPrompt.
 //
 // Marker emission is gated by the per-request cachePlan rather than by
@@ -33,6 +36,13 @@ func (c *Client) buildSystemBlocks(in llmtypes.ChatRequest, plan cachePlan) []sd
 		}
 		return []sdk.TextBlockParam{block}
 	}
+	// Build a set of slot names to mark for O(1) lookup during the walk.
+	// Order doesn't matter for placement — each slot block carries its own
+	// name and the marker decision is per-slot.
+	markedSlotNames := make(map[string]bool, len(plan.SlotMarkers))
+	for _, name := range plan.SlotMarkers {
+		markedSlotNames[name] = true
+	}
 	out := make([]sdk.TextBlockParam, 0, len(in.SlotBlocks)+1)
 	if in.SystemPrompt != "" {
 		block := sdk.TextBlockParam{Text: in.SystemPrompt}
@@ -41,20 +51,15 @@ func (c *Client) buildSystemBlocks(in llmtypes.ChatRequest, plan cachePlan) []sd
 		}
 		out = append(out, block)
 	}
-	// Locate the index (within `out`) of the last non-empty unchanged slot
-	// so we can mark exactly that block when plan.SlotBoundary is true.
-	lastUnchangedIdx := -1
 	for _, s := range in.SlotBlocks {
 		if s.Content == "" {
 			continue
 		}
-		out = append(out, sdk.TextBlockParam{Text: s.Content})
-		if !s.Changed {
-			lastUnchangedIdx = len(out) - 1
+		block := sdk.TextBlockParam{Text: s.Content}
+		if markedSlotNames[s.Name] {
+			block.CacheControl = sdk.NewCacheControlEphemeralParam()
 		}
-	}
-	if plan.SlotBoundary && lastUnchangedIdx >= 0 {
-		out[lastUnchangedIdx].CacheControl = sdk.NewCacheControlEphemeralParam()
+		out = append(out, block)
 	}
 	if len(out) == 0 {
 		return nil

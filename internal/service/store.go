@@ -294,6 +294,17 @@ type EnvelopeStore interface {
 	GetEnvelopeInstance(id string) (*store.EnvelopeInstance, error)
 }
 
+// SubagentRunsReader exposes the narrow query the chat loop needs to
+// classify "is the current pause caused by a hung subagent" — used to
+// suppress the FE-visible `[generation interrupted]` placeholder and
+// `ErrorCodeInternal` event when a subagent dispatch is blocking the
+// parent turn (CW-20260512-0002 subtodo (d)). Returns the active row's
+// id + role + child_session_id for structured logging, or empty values
+// when there is no active subagent for the parent session.
+type SubagentRunsReader interface {
+	ActiveSubagentRunForParent(parentSessionID string) (id, role, childSessionID string, ok bool, err error)
+}
+
 type Store interface {
 	SessionReader
 	SessionWriter
@@ -318,6 +329,7 @@ type Store interface {
 	EnvelopeStore
 	ReminderStore
 	PinnedContentStore
+	SubagentRunsReader
 }
 
 // Compile-time verification that *store.Store satisfies the composite interface.

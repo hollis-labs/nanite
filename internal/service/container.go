@@ -169,6 +169,15 @@ type Container struct {
 
 	// stopModelCatalog cancels the model catalog background refresher.
 	stopModelCatalog context.CancelFunc
+
+	// subagentReaper sweeps subagent_runs for timed-out + orphan rows
+	// (CW-20260512-0002 b/c). Started during container build; stopped
+	// during Shutdown before the DB closes.
+	subagentReaper *subagent.Reaper
+	// stopSubagentReaper cancels the reaper's bound context (defense in
+	// depth — Reaper.Stop alone is enough, but the cancel func unblocks
+	// any in-flight ExecContext on shutdown).
+	stopSubagentReaper context.CancelFunc
 }
 
 // ContainerConfig holds all the external dependencies needed to construct
@@ -766,6 +775,19 @@ func NewContainer(cfg ContainerConfig) (*Container, error) {
 	subagentSvc.SetTrustResolver(cfg.Store)
 	subagentSvc.SetEventLogger(cfg.Store)
 
+	// CW-20260512-0002 (b)+(c): subagent reaper — background goroutine
+	// sweeps subagent_runs for timed-out and orphan rows so a hung
+	// runner doesn't leave the parent dispatch path blocked indefinitely.
+	// Bound to a dedicated cancel func so Shutdown can stop it before
+	// the DB closes; goroutine exits on ctx.Done OR Reaper.Stop.
+	reaperCtx, stopReaper := context.WithCancel(context.Background())
+	subagentReaper := subagent.NewReaper(cfg.Store.DB, subagent.ReaperOptions{})
+	subagentReaper.Start(reaperCtx)
+	slog.Info("service container: subagent reaper started",
+		"interval", subagent.DefaultReaperInterval.String(),
+		"orphan_grace", subagent.DefaultReaperOrphanGrace.String(),
+	)
+
 	// G-4: register the subagent-spawn-approval typed response handler so
 	// POST /api/envelopes/:id/respond dispatches to Approve/Reject.
 	chat.RegisterResponseHandler("subagent-spawn-approval", chat.NewSubagentApprovalHandler(subagentSvc))
@@ -926,6 +948,8 @@ func NewContainer(cfg ContainerConfig) (*Container, error) {
 		WorkflowBroadcaster: workflowBroadcaster,
 		AppConfig:           cfg.AppConfig,
 		stopModelCatalog:    stopCatalog,
+		subagentReaper:      subagentReaper,
+		stopSubagentReaper:  stopReaper,
 	}, nil
 }
 
@@ -968,6 +992,17 @@ func (c *Container) Shutdown() {
 
 	if c.stopModelCatalog != nil {
 		c.stopModelCatalog()
+	}
+
+	// CW-20260512-0002 (b)+(c): stop the reaper goroutine before any of
+	// the subsystem shutdowns below kick in. Reaper.Stop blocks until
+	// the loop returns, so by the time we proceed, no concurrent reaper
+	// UPDATEs will race the DB close.
+	if c.stopSubagentReaper != nil {
+		c.stopSubagentReaper()
+	}
+	if c.subagentReaper != nil {
+		c.subagentReaper.Stop()
 	}
 
 	if c.Workers != nil {

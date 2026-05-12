@@ -162,14 +162,11 @@ func (r *BootRunner) Run(ctx context.Context, run *subagent.Run) (*subagent.Resu
 	return r.runBoot(ctx, run, agent)
 }
 
-// resolveRole looks up the role slug. Mirrors ChatRunner.resolveRole so
-// errors surface with the same wrapping (errRoleResolveFailed).
+// resolveRole looks up the role slug. Mirrors ChatRunner.resolveRole —
+// unknown slugs fall back to the `worker` profile with a slog.Warn; other
+// errors wrap with errRoleResolveFailed. See resolveRoleWithFallback.
 func (r *BootRunner) resolveRole(slug string) (*store.AgentProfile, error) {
-	agent, err := r.agents.GetAgentBySlug(slug)
-	if err != nil {
-		return nil, fmt.Errorf("%w %q: %v", errRoleResolveFailed, slug, err)
-	}
-	return agent, nil
+	return resolveRoleWithFallback(r.agents, slug, "BootRunner")
 }
 
 // canBoot reports whether the resolved agent's effective provider has a

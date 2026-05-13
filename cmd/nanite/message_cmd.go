@@ -383,9 +383,20 @@ func newMessagingServiceForCLI(s *store.Store) (*messaging.Service, error) {
 		// agents even if file discovery hits a parse error on one tier.
 		slog.Warn("message: agent discovery", "err", err)
 	}
-	if defaultDef, defErr := builtin.DefaultAgent(); defErr == nil {
-		agentDefs = append(agentDefs, defaultDef)
+	// CW-20260512-0111: load all internal profiles (default, worker,
+	// planner, hint-selector) from internal/agent/builtin/profiles/*.md.
+	// Each is stamped Source="internal" so the CLI resolves "file-<slug>"
+	// against the same set the server does.
+	//
+	// Per profiles.go contract: parse failures here are build-level bugs
+	// (the files are embedded at compile time). Fail-fast so the CLI does
+	// not silently address a partial agent set on an unparseable internal
+	// profile.
+	internalDefs, err := builtin.InternalProfiles()
+	if err != nil {
+		return nil, fmt.Errorf("message: load internal agent profiles: %w", err)
 	}
+	agentDefs = append(agentDefs, internalDefs...)
 
 	agents := service.NewAgentService(service.AgentServiceConfig{
 		Agents:     s,

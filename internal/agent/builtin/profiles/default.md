@@ -13,10 +13,18 @@ parentDispatchAllowlist:
   - researcher
   - planner
   - worker
-# PROMPT-SYNC: CW-20260427-0014 + CW-20260512-0100
+# PROMPT-SYNC: CW-20260427-0014 + CW-20260512-0100 + CW-20260512-0111
 # This file is the canonical source for the Chat-role harness prompt.
+# CW-20260512-0111 made internal/agent/builtin/profiles/*.md the file
+# source-of-truth for ALL internal agents — boot-time sync replaces the
+# `source='internal'` agent_profiles row body with this file's contents on
+# every Nanite start.
 # Any edit here MUST be re-flowed into:
-#   internal/store/migrations/027_chat_role_harness_prompt.sql
+#   internal/store/migrations/027_chat_role_harness_prompt.sql (historic seed)
+#   internal/store/migrations/058_universal_rules_extract.sql  (terminal body)
+#   internal/store/migrations/060_internal_profiles_file_sot.sql (the boot-sync
+#     hydration seed — keep its body identical to this file so a fresh
+#     install lands the same content before the first boot sync runs).
 # Rules: (1) replace backticks with plain text, (2) replace '' with '''' for
 # SQL single-quote escaping, (3) flatten markdown inline code to bare words.
 # Do NOT change the semantic content — only surface formatting.

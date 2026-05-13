@@ -138,6 +138,15 @@ func TestGetAgentBySlug(t *testing.T) {
 
 func TestListAgents(t *testing.T) {
 	s := newTestStore(t)
+	// CW-20260512-0111: migration 060 seeds 4 internal profile rows
+	// (default, worker, planner, hint-selector). Capture the baseline
+	// after migrations, then assert the two newly-created rows on top.
+	baseline, err := s.ListAgents()
+	if err != nil {
+		t.Fatalf("ListAgents baseline: %v", err)
+	}
+	baselineCount := len(baseline)
+
 	makeTestAgent(t, s, "agent-a")
 	makeTestAgent(t, s, "agent-b")
 
@@ -145,8 +154,8 @@ func TestListAgents(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ListAgents: %v", err)
 	}
-	if len(agents) != 2 {
-		t.Fatalf("expected 2 agents, got %d", len(agents))
+	if got, want := len(agents), baselineCount+2; got != want {
+		t.Fatalf("expected %d agents (baseline %d + 2 test-created), got %d", want, baselineCount, got)
 	}
 }
 

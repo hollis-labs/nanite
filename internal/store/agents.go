@@ -298,13 +298,20 @@ func (s *Store) UpdateAgent(a *AgentProfile) error {
 		a.ParentDispatchAllowlist = "[]"
 	}
 
+	// CW-20260512-0111: include `source` and `source_ref` in the UPDATE so
+	// that file-source-of-truth boot sync can flip an already-deployed row
+	// from source='builtin' (or any prior value) to source='internal' when
+	// the file profile is now the canonical source. Without this, the
+	// Wave 2 cleanup (CW-20260512-0112: DELETE WHERE source != 'internal')
+	// would wipe rows whose body was re-synced from internal/agent/builtin/
+	// profiles/*.md but whose source column never flipped.
 	_, err := s.DB.Exec(
 		`UPDATE agent_profiles SET name = ?, slug = ?, avatar = ?, system_prompt = ?, description = ?,
 		        modes = ?, default_mode = ?, default_model = ?, default_provider = ?,
 		        mcp_servers = ?, tool_permissions = ?, can_execute = ?, settings = ?,
 		        updated_at = ?,
 		        agent_hash = ?, version = ?, tools = ?, directories = ?, constraints = ?,
-		        tags = ?, status = ?, icon = ?,
+		        tags = ?, status = ?, source = ?, source_ref = ?, icon = ?,
 		        imported_at = ?, origin_system = ?, format = ?,
 		        parent_dispatch_allowlist = ?
 		 WHERE id = ?`,
@@ -313,7 +320,7 @@ func (s *Store) UpdateAgent(a *AgentProfile) error {
 		a.MCPServers, a.ToolPermissions, a.CanExecute, a.Settings,
 		now,
 		a.AgentHash, a.Version, a.Tools, a.Directories, a.Constraints,
-		a.Tags, a.Status, nullIfEmpty(a.Icon),
+		a.Tags, a.Status, a.Source, a.SourceRef, nullIfEmpty(a.Icon),
 		a.ImportedAt, a.OriginSystem, a.Format,
 		a.ParentDispatchAllowlist,
 		a.ID,

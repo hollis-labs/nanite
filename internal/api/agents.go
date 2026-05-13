@@ -28,6 +28,21 @@ func (a *API) handleCreateAgent(w http.ResponseWriter, r *http.Request) {
 		a.errorResp(w, http.StatusBadRequest, "name, slug, and system_prompt are required")
 		return
 	}
+	// CW-20260512-0111: default omitted source to 'user' so callers that
+	// don't explicitly tag provenance don't insert an empty string (the
+	// error message below previously claimed "or omit" was equivalent to
+	// source='user', but the handler didn't actually default it — leaving
+	// an empty source column on the row).
+	if req.Source == "" {
+		req.Source = "user"
+	}
+	// source='internal' is reserved for file-sourced internal profiles
+	// (boot sync from internal/agent/builtin/profiles/). API-created agents
+	// cannot claim that provenance.
+	if req.Source == "internal" {
+		a.errorResp(w, http.StatusBadRequest, "source='internal' is reserved for file-sourced internal profiles; use source='user' (the default) or another non-reserved value")
+		return
+	}
 
 	agent := &store.AgentProfile{
 		ID:                      req.ID,
@@ -100,6 +115,24 @@ func (a *API) handleUpdateAgent(w http.ResponseWriter, r *http.Request) {
 	existing, err := a.Services.Store.GetAgent(id)
 	if err != nil {
 		a.errorResp(w, http.StatusNotFound, "agent not found")
+		return
+	}
+
+	// CW-20260512-0111: internal profiles are file source-of-truth (boot
+	// sync replaces the row body from internal/agent/builtin/profiles/*.md).
+	// API edits would be overwritten on the next restart, so reject them at
+	// the surface. The UI surfaces this with a read-only affordance + the
+	// `source_ref` path so operators know to edit the file.
+	if existing.Source == "internal" {
+		// Fallback when SourceRef is unexpectedly empty (legacy rows that
+		// pre-date migration 060's source_ref normalization, or any future
+		// gap): point at the canonical file path keyed off slug so the
+		// operator still has a usable hint.
+		ref := existing.SourceRef
+		if ref == "" {
+			ref = "internal/agent/builtin/profiles/" + existing.Slug + ".md"
+		}
+		a.errorResp(w, http.StatusConflict, "agent is internal (file source of truth); edit "+ref+" and restart Nanite")
 		return
 	}
 

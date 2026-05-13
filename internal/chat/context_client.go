@@ -16,6 +16,7 @@ import (
 	"github.com/hollis-labs/nanite/internal/permission"
 	"github.com/hollis-labs/nanite/internal/skillbroker"
 	"github.com/hollis-labs/nanite/internal/store"
+	wsutil "github.com/hollis-labs/nanite/internal/workspace"
 )
 
 // DefaultBudgetPct is the default fraction of the context window to use.
@@ -58,6 +59,23 @@ type ContextClient struct {
 	// READ roots the agent operates against. Empty / nil renders no
 	// "workspace allow-list" section.
 	DevToolsAllowedPaths []string
+
+	// WorkspaceCache is the per-(session, working_dir) AGENTS.md walk-up
+	// cache populating SlotWorkspace (CW-20260512-0116, SP-20260512-0009
+	// W6). nil disables the walk-up entirely — SlotWorkspace ships empty
+	// and the assembly decider treats it as skipped_no_content. Construct
+	// via workspace.NewCache(); the cache is process-lifetime and
+	// concurrency-safe.
+	WorkspaceCache *wsutil.Cache
+
+	// WorkingDirForSession resolves the on-disk working_dir for a
+	// session. Today the closest analogue is the session's project
+	// repo_path (store.Project.RepoPath). The resolver is injected
+	// rather than hard-wired so test paths can supply a t.TempDir() and
+	// future evolution (e.g. session-scoped working_dir column) only
+	// touches the wiring layer. Returns ("", nil) when no working_dir
+	// is resolvable for the session — SlotWorkspace then ships empty.
+	WorkingDirForSession func(session *store.Session) (string, error)
 }
 
 // NewContextClient creates a new ContextClient with default settings.
@@ -196,6 +214,14 @@ type SlotSources struct {
 	// the H1 fabrication gap by making the path-access substrate visible
 	// to the LLM. Empty when no constraints are configured for the agent.
 	Permissions      string
+	// Workspace carries the AGENTS.md walk-up payload for the session's
+	// working_dir. CW-20260512-0116 (SP-20260512-0009 W6). Sourced from
+	// internal/workspace.Cache.Refresh — innermost-first concatenation of
+	// AGENTS.md / CLAUDE.md / NANITE.md / .nanite/rules.md from
+	// working_dir up to the nearest .git root. Empty when no
+	// WorkspaceCache / resolver is wired or no instruction files are
+	// found on the walk path.
+	Workspace        string
 	Session          string                 // session name, mode label, workspace name
 	Context          string                 // formatted ContextBroker items where Source != "memory"
 	UserContext      string                 // J10 (CW-20260426-0008): user-authored session context prompt + included docs.
@@ -292,6 +318,24 @@ func (cb *ContextClient) AssembleSlotSources(ctx context.Context, session *store
 	// the renderer's pure-projection contract.
 	permissionsContent := cb.buildPermissionsSlotContent(session, agent)
 
+	// Workspace slot — CW-20260512-0116 (SP-20260512-0009 W6). AGENTS.md
+	// walk-up from the session's working_dir UP to the nearest .git
+	// root, populating local project conventions into the cacheable
+	// prefix. Same agent in different working_dirs receives different
+	// rules — the architectural intent the user described in the
+	// harness-restoration design session. Wired here (rather than in
+	// the assembly decider) so the on-disk filesystem reads happen at
+	// source-materialization time and the decider remains
+	// I/O-free / deterministic. The Cache layer makes repeat calls
+	// cheap: a stat-only mtime check per cached file plus a stat-only
+	// "new file appeared" sweep over previously-walked directories.
+	// Session start AND post-compaction both rebuild the slot store via
+	// AssembleSlots → AssembleSlotSources, so both hook points are
+	// covered without a dedicated callsite. Empty content (no walk-up
+	// cache wired, no resolver wired, no instruction files found)
+	// ships as skipped_no_content via the assembly decider.
+	workspaceContent := cb.buildWorkspaceSlotContent(ctx, session)
+
 	// Session slot — small, stable identifiers.
 	sessionContent := buildSessionSlotContent(session, mode, workspace)
 
@@ -357,6 +401,7 @@ func (cb *ContextClient) AssembleSlotSources(ctx context.Context, session *store
 		Mode:             modeContent,
 		Rules:            rules,
 		Permissions:      permissionsContent,
+		Workspace:        workspaceContent,
 		Session:          sessionContent,
 		Context:          contextContent,
 		UserContext:      userContextContent,
@@ -502,6 +547,66 @@ func (cb *ContextClient) buildPermissionsSlotContent(session *store.Session, age
 		InheritedGrants: inheritedGrants,
 		SessionScope:    scope,
 	})
+}
+
+// buildWorkspaceSlotContent runs the AGENTS.md walk-up for the session's
+// working_dir and returns the SlotWorkspace payload. CW-20260512-0116
+// (SP-20260512-0009 W6).
+//
+// Dependencies (all optional — when any is nil/empty the slot ships empty
+// and the assembly decider treats it as skipped_no_content):
+//
+//   - cb.WorkspaceCache: per-(session, working_dir) cache. nil disables the
+//     walk-up entirely. Construct via workspace.NewCache(); the cache is
+//     concurrency-safe and process-lifetime.
+//   - cb.WorkingDirForSession: session → working_dir resolver. Today the
+//     closest analogue is the session's project repo_path. Injected rather
+//     than hard-wired so test paths can supply a t.TempDir() and future
+//     evolution (session.working_dir column, etc.) only touches the wiring
+//     layer.
+//
+// Errors from the resolver or walk-up are logged but never propagated —
+// SlotWorkspace failing should never break the chat turn. The slot
+// gracefully degrades to empty content.
+//
+// Cache placement: SlotWorkspace sits after SlotPermissions and before
+// SlotTools in SlotOrder. Both placement and per-slot stability (only
+// rebuilds on mtime drift or new-file-appearance) preserve the Anthropic
+// cacheable prefix across turns within the same session+working_dir.
+func (cb *ContextClient) buildWorkspaceSlotContent(ctx context.Context, session *store.Session) string {
+	if cb == nil || session == nil {
+		return ""
+	}
+	if cb.WorkspaceCache == nil || cb.WorkingDirForSession == nil {
+		return ""
+	}
+
+	workingDir, err := cb.WorkingDirForSession(session)
+	if err != nil {
+		slog.Warn("workspace: working_dir resolve failed",
+			"session_id", session.ID, "err", err)
+		return ""
+	}
+	if workingDir == "" {
+		return ""
+	}
+
+	result, err := cb.WorkspaceCache.Refresh(session.ID, workingDir)
+	if err != nil {
+		slog.Warn("workspace: walk-up refresh failed",
+			"session_id", session.ID, "working_dir", workingDir, "err", err)
+		return ""
+	}
+
+	slog.Debug("workspace: walk-up complete",
+		"session_id", session.ID,
+		"working_dir", workingDir,
+		"git_root", result.GitRoot,
+		"file_count", len(result.Files),
+		"bytes", len(result.Content))
+	_ = ctx // reserved for future tracing spans
+
+	return result.Content
 }
 
 // deriveIntent extracts the broker intent from the session's recent user turn.

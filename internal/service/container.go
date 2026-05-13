@@ -2,6 +2,8 @@ package service
 
 import (
 	"context"
+	"database/sql"
+	"errors"
 	"fmt"
 	"log/slog"
 	"os"
@@ -51,6 +53,7 @@ import (
 	"github.com/hollis-labs/nanite/internal/toolclient"
 	"github.com/hollis-labs/nanite/internal/worker"
 	"github.com/hollis-labs/nanite/internal/workflow"
+	"github.com/hollis-labs/nanite/internal/workspace"
 	"github.com/hollis-labs/nanite/internal/worktree"
 	"github.com/hollis-labs/nanite/pkg/models"
 )
@@ -547,6 +550,52 @@ func NewContainer(cfg ContainerConfig) (*Container, error) {
 	contextClient := chat.NewContextClient(cfg.Store)
 	contextClient.PathGrants = pathGrants
 	contextClient.DevToolsAllowedPaths = cfg.DevToolsAllowedPaths
+
+	// CW-20260512-0116 (SP-20260512-0009 W6): wire the AGENTS.md walk-up
+	// for SlotWorkspace. The cache is process-lifetime, concurrency-safe,
+	// and keyed on (session_id, working_dir) with per-file mtime
+	// invalidation. The resolver maps a session to its on-disk
+	// working_dir via Store.GetProject (primary-key fetch) when both
+	// ProjectID and WorkspaceID are set; the WorkspaceID guard is kept
+	// to defend against cross-workspace project leaks if a stale session
+	// ID ever points at a project that's been moved.
+	//
+	// This differs from internal/api/autocomplete.go::resolveRoot in
+	// that an empty ProjectID returns empty (and the slot ships empty
+	// via the assembly decider's skipped_no_content path) rather than
+	// falling back to the first project in the workspace + cwd.
+	// Autocomplete needs *some* root to scan for completion candidates,
+	// so its fallbacks are a UX safety net. SlotWorkspace explicitly
+	// represents "this session's project conventions" — falling back to
+	// cwd or an arbitrary sibling project would inject the wrong
+	// project's AGENTS.md into the prompt, which is worse than empty.
+	contextClient.WorkspaceCache = workspace.NewCache()
+	contextClient.WorkingDirForSession = func(session *store.Session) (string, error) {
+		if session == nil {
+			return "", nil
+		}
+		if session.ProjectID == "" || session.WorkspaceID == "" {
+			return "", nil
+		}
+		// Primary-key fetch instead of the full project list — this
+		// resolver fires on every AssembleSlotSources call (per turn),
+		// so an O(N) scan would scale poorly as a workspace grows.
+		project, err := cfg.Store.GetProject(session.ProjectID)
+		if err != nil {
+			// "Project not found" is non-fatal for slot assembly: the
+			// slot ships empty rather than failing the turn. Other
+			// errors (DB unavailable etc.) bubble up so the caller can
+			// log + fall back.
+			if errors.Is(err, sql.ErrNoRows) {
+				return "", nil
+			}
+			return "", err
+		}
+		if project == nil || project.WorkspaceID != session.WorkspaceID || project.RepoPath == "" {
+			return "", nil
+		}
+		return project.RepoPath, nil
+	}
 
 	// --- ContextBroker: universal context retrieval ---
 	{

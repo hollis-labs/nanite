@@ -41,16 +41,11 @@ func TestLoopState_ResolvedMaxTurns(t *testing.T) {
 			constraints: chat.AgentConstraints{MaxTurns: -1, HardCeiling: 500},
 			want:        500,
 		},
-		{
-			name:        "legacy MaxIterations respected when lower",
-			constraints: chat.AgentConstraints{MaxIterations: 8},
-			want:        8,
-		},
-		{
-			name:        "legacy MaxIterations ignored when higher than MaxTurns",
-			constraints: chat.AgentConstraints{MaxTurns: 10, MaxIterations: 30},
-			want:        10,
-		},
+		// CW-20260512-0123 (SP-20260512-0011 W3): the legacy
+		// `MaxIterations` agent-constraints field was removed —
+		// `MaxTurns` is now the only agent-author-visible turn-count
+		// knob, and the two legacy-fallback fixtures here were
+		// removed because the field they exercised no longer exists.
 		{
 			name:        "custom hard ceiling higher than default max turns",
 			constraints: chat.AgentConstraints{HardCeiling: 300},
@@ -270,20 +265,14 @@ func chatTool(name string) llmtypes.ToolUseBlock {
 	return llmtypes.ToolUseBlock{Name: name}
 }
 
-func TestLoopState_ShouldStop_RetryBudget(t *testing.T) {
-	ls := newLoopState(chat.AgentConstraints{RetryBudget: 1}, nil, false)
-	ls.recordToolCall("tool", false) // uses the budget
-	stop, code, reason := ls.shouldStop()
-	if !stop {
-		t.Error("shouldStop() should return true when retry budget exhausted")
-	}
-	if code != TerminationRetryBudgetExhausted {
-		t.Errorf("code = %q, want %q", code, TerminationRetryBudgetExhausted)
-	}
-	if reason == "" {
-		t.Error("expected a reason")
-	}
-}
+// CW-20260512-0123 (SP-20260512-0011 W3): TestLoopState_ShouldStop_RetryBudget
+// was removed. The `RetryBudget` agent-constraints field and the
+// `loopState.retryBudget` counter it drove were deleted alongside
+// `MaxTimeSeconds` and `MaxIterations` — the runaway-fail-cap (Layer 1
+// of shouldStop) is now the sole tool-failure terminator. The
+// `TerminationRetryBudgetExhausted` code constant is retained for
+// archived envelope telemetry only and is no longer emitted by the
+// chat loop.
 
 func TestLoopState_ShouldStop_IdleTimeout(t *testing.T) {
 	ls := newLoopState(chat.AgentConstraints{IdleTimeoutSeconds: 1}, nil, false)
@@ -434,9 +423,9 @@ func TestLoopState_CaptureSnapshotWithTools(t *testing.T) {
 func TestNewLoopState_Defaults(t *testing.T) {
 	ls := newLoopState(chat.AgentConstraints{}, []string{"tool-a", "tool-b"}, false)
 
-	if ls.retryBudget != -1 {
-		t.Errorf("retryBudget = %d, want -1", ls.retryBudget)
-	}
+	// CW-20260512-0123 (SP-20260512-0011 W3): the `retryBudget`
+	// counter was removed alongside the deleted `RetryBudget`
+	// agent-constraints field; default check is gone.
 	if !ls.loadedTools["tool-a"] || !ls.loadedTools["tool-b"] {
 		t.Error("loadedTools should contain initial tools")
 	}

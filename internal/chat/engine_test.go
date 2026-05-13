@@ -113,18 +113,26 @@ func TestTruncateStr(t *testing.T) {
 }
 
 func TestParseAgentConstraints(t *testing.T) {
+	// CW-20260512-0123 (SP-20260512-0011 W3): legacy keys
+	// `max_iterations` / `max_time_seconds` / `retry_budget` are no
+	// longer fields on AgentConstraints; json.Unmarshal silently
+	// drops them. The remaining knobs are the Phase-4 chat-loop
+	// runaway breakers (max_turns, hard_ceiling, *_fail_cap, idle).
 	c := ParseAgentConstraints("")
-	if c.MaxIterations != 0 {
-		t.Errorf("expected 0, got %d", c.MaxIterations)
+	if c.MaxTurns != 0 {
+		t.Errorf("empty constraints: MaxTurns = %d, want 0", c.MaxTurns)
 	}
 
-	c = ParseAgentConstraints(`{"max_iterations":5,"max_turns":10}`)
-	if c.MaxIterations != 5 {
-		t.Errorf("expected 5, got %d", c.MaxIterations)
-	}
+	c = ParseAgentConstraints(`{"max_iterations":5,"max_turns":10,"max_time_seconds":300,"retry_budget":2,"hard_ceiling":500}`)
 	if c.MaxTurns != 10 {
-		t.Errorf("expected 10, got %d", c.MaxTurns)
+		t.Errorf("MaxTurns = %d, want 10", c.MaxTurns)
 	}
+	if c.HardCeiling != 500 {
+		t.Errorf("HardCeiling = %d, want 500", c.HardCeiling)
+	}
+	// Legacy keys are silently dropped by json.Unmarshal because they
+	// are no longer struct fields — surfaced via validation warnings
+	// at the API layer (internal/agentvalidation/validation.go).
 }
 
 func containsStr(s, sub string) bool {

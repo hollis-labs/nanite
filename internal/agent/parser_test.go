@@ -56,6 +56,14 @@ You are a test agent. Help the user with testing.
 }
 
 func TestParseMD_AllFields(t *testing.T) {
+	// CW-20260512-0123 (SP-20260512-0011 W3): the `constraints:` block
+	// is intentionally retained in this fixture (with the legacy keys
+	// `maxIterations` / `maxTimeSeconds` / `retryBudget`) to exercise
+	// the tolerant-parse path — yaml.Unmarshal ignores unknown keys
+	// against the empty AgentConstraints struct, so old frontmatter
+	// continues to load without error even though the values are no
+	// longer honored. Validation warns on these keys at the API layer
+	// (see internal/agentvalidation/validation.go).
 	data := []byte(`---
 name: Full Agent
 slug: full-agent
@@ -122,14 +130,11 @@ System prompt body here.
 	if len(def.Directories) != 2 {
 		t.Errorf("Directories = %v", def.Directories)
 	}
-	if def.Constraints.MaxIterations != 50 {
-		t.Errorf("Constraints.MaxIterations = %d", def.Constraints.MaxIterations)
-	}
-	if def.Constraints.MaxTimeSeconds != 300 {
-		t.Errorf("Constraints.MaxTimeSeconds = %d", def.Constraints.MaxTimeSeconds)
-	}
-	if def.Constraints.RetryBudget != 3 {
-		t.Errorf("Constraints.RetryBudget = %d", def.Constraints.RetryBudget)
+	// AgentConstraints is now an empty struct (CW-20260512-0123); just
+	// verify parse tolerates the legacy keys without failing. The
+	// surviving turn-count knob (`maxTurns`) is asserted above.
+	if def.Constraints != (AgentConstraints{}) {
+		t.Errorf("Constraints = %+v, want empty struct (CW-20260512-0123)", def.Constraints)
 	}
 	if len(def.Modes) != 2 {
 		t.Fatalf("Modes len = %d, want 2", len(def.Modes))

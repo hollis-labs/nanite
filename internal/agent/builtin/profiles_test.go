@@ -104,6 +104,39 @@ func TestInternalProfiles_WorkerIdentity(t *testing.T) {
 	}
 }
 
+// TestInternalProfiles_FrontmatterKeys is the regression pin for PR-152
+// review round 1 (item A): the parser recognizes `model:` and
+// `permissionMode:`, not `defaultModel:`. Without this assertion, a
+// typo like `defaultModel:` would silently produce empty Model on every
+// internal profile and the worker would lose can_execute=true (re-opening
+// the c160 fabrication risk because the worker can't actually execute
+// tools, so it would have to fabricate progress).
+func TestInternalProfiles_FrontmatterKeys(t *testing.T) {
+	defs, err := InternalProfiles()
+	if err != nil {
+		t.Fatalf("InternalProfiles: %v", err)
+	}
+	// Every internal profile that ships with a model must parse it
+	// (worker / planner / hint-selector all carry a `model:` field;
+	// default carries none and inherits the harness default).
+	for _, slug := range []string{"worker", "planner", "hint-selector"} {
+		def := findBySlug(t, defs, slug)
+		if def.Model == "" {
+			t.Errorf("slug=%s: Model is empty — frontmatter key likely wrong (must be `model:`, not `defaultModel:`)", slug)
+		}
+	}
+	// Worker must carry PermissionMode=yolo so ToProfile maps to
+	// CanExecute=true. Without it the worker can't run tools and the
+	// post-058 honest-failure path collapses into fabrication.
+	worker := findBySlug(t, defs, "worker")
+	if worker.PermissionMode != "yolo" {
+		t.Errorf("worker.PermissionMode = %q, want %q", worker.PermissionMode, "yolo")
+	}
+	if got := worker.ToProfile().CanExecute; !got {
+		t.Errorf("worker.ToProfile().CanExecute = false; want true (PermissionMode=yolo should map to can_execute=true)")
+	}
+}
+
 // TestInternalProfileSlugs_DeterministicOrder asserts the slug list is
 // returned in sorted order so any log line or comparison test downstream
 // is stable across runs.

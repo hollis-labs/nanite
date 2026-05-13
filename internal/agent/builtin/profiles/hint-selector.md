@@ -13,7 +13,7 @@ icon: zap
 # Tool surface: none (text-in / text-out only).
 #
 # PROMPT-SYNC: when this body changes, re-flow into migration 060.
-defaultModel: claude-haiku-4-20250514
+model: claude-haiku-4-20250514
 effort: low
 toolPermissions:
   allow_list: []

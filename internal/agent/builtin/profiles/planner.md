@@ -16,6 +16,6 @@ icon: list
 # lands.
 #
 # PROMPT-SYNC: when this body changes, re-flow into migration 060.
-defaultModel: claude-sonnet-4-20250514
+model: claude-sonnet-4-20250514
 ---
 Planner role — identity TBD. Phase 6 cognition arc will define authoritative behavior. This stub reserves the slug for M3 reflex dispatch.

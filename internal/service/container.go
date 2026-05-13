@@ -295,11 +295,16 @@ func NewContainer(cfg ContainerConfig) (*Container, error) {
 	// keep-list (agent_profiles WHERE source != 'internal' will be wiped
 	// by CW-20260512-0112). Lower discovery priority than user / project
 	// agents so user overrides by-slug still win.
-	if internalDefs, intErr := builtin.InternalProfiles(); intErr == nil {
-		agentDefs = append(agentDefs, internalDefs...)
-	} else {
-		slog.Warn("service container: internal agent profiles", "err", intErr)
+	//
+	// Per profiles.go contract: parse failures here are build-level bugs
+	// (the files are embedded at compile time). Fail-fast at boot so an
+	// unparseable internal profile surfaces immediately instead of being
+	// silently absent from the agent registry.
+	internalDefs, err := builtin.InternalProfiles()
+	if err != nil {
+		return nil, fmt.Errorf("service.NewContainer: load internal agent profiles: %w", err)
 	}
+	agentDefs = append(agentDefs, internalDefs...)
 	// POC CW-20260420-0047: mux orchestrator agent profile.
 	// MuxOrchestratorAgent returns (nil, nil) in non-devmode builds; guard
 	// the nil-def case so we don't append a nil pointer to agentDefs.

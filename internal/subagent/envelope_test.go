@@ -130,6 +130,46 @@ func TestEnvelopeFromRun_CompletedEmptyReply(t *testing.T) {
 	}
 }
 
+// TestEnvelopeFromRun_PendingApproval pins the non-terminal mapping:
+// StatusRequested / StatusApproved are NOT failures. The run was
+// accepted, approval is in flight, and the parent should be guided
+// toward subagent_status polling rather than treated as a denial.
+//
+// Pre-round-1 this case mapped to Success=false / ErrorKindDenied,
+// which caused the sync path's envelopeResult(IsError = !Success) to
+// stamp IsError=true on every approval-gated spawn — including the
+// production default (SubagentApprovalRequired=true). The fix is
+// here so the call-site logic does not need to special-case
+// non-terminal states.
+func TestEnvelopeFromRun_PendingApproval(t *testing.T) {
+	for _, status := range []string{StatusRequested, StatusApproved} {
+		run := &Run{
+			ID:     "run-pending",
+			Role:   "researcher",
+			Status: status,
+		}
+		env := EnvelopeFromRun(run, "")
+		if !env.Success {
+			t.Errorf("status=%q: expected Success=true (non-terminal), got envelope=%+v", status, env)
+		}
+		if env.Error != nil {
+			t.Errorf("status=%q: expected nil Error on non-terminal envelope, got %+v", status, env.Error)
+		}
+		if env.Result == nil {
+			t.Fatalf("status=%q: expected non-nil Result with run_id", status)
+		}
+		if env.Result.RunID != "run-pending" {
+			t.Errorf("status=%q: Result.RunID = %q, want %q", status, env.Result.RunID, "run-pending")
+		}
+		if !strings.Contains(env.Result.Summary, "awaiting approval") {
+			t.Errorf("status=%q: expected Result.Summary to mention awaiting approval, got %q", status, env.Result.Summary)
+		}
+		if !strings.Contains(env.Result.Summary, "subagent_status") {
+			t.Errorf("status=%q: expected Result.Summary to guide toward subagent_status polling, got %q", status, env.Result.Summary)
+		}
+	}
+}
+
 // TestEnvelopeFromRun_NilRun — defensive nil-handling.
 func TestEnvelopeFromRun_NilRun(t *testing.T) {
 	env := EnvelopeFromRun(nil, "")

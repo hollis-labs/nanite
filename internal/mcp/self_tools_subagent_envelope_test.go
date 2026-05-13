@@ -14,6 +14,51 @@ import (
 	"github.com/hollis-labs/nanite/internal/subagent"
 )
 
+// gatedSubagentTestTransport wires a SelfToolsTransport with a
+// SubagentApprovalRequired=true settings reader and a stub approval
+// emitter — matches the production default for non-developer-mode
+// users. Spawn() will route through the gated path and return a
+// StatusRequested run row instead of executing the runner.
+//
+// Round-1 fix target (Copilot #2/#4/#6): the prior test wiring
+// (newSubagentTestTransport, settings=nil) only exercised the ungated
+// path, masking the pending-approval-as-failure semantic bug.
+func gatedSubagentTestTransport(t *testing.T, runner subagent.Runner) *SelfToolsTransport {
+	t.Helper()
+	dbPath := filepath.Join(t.TempDir(), "test.db")
+	s, err := store.New(context.Background(), dbPath)
+	if err != nil {
+		t.Fatalf("store.New: %v", err)
+	}
+	t.Cleanup(func() { _ = s.Close(); _ = os.Remove(dbPath) })
+
+	emitter := &gatedApprovalEmitter{}
+	settings := gatedSettingsReader{us: store.UserSettings{SubagentApprovalRequired: true}}
+	svc := subagent.NewService(s.DB, runner, nil, emitter, settings)
+	return &SelfToolsTransport{Store: s, Subagent: svc}
+}
+
+// gatedSettingsReader forces SubagentApprovalRequired=true so the
+// service's gating predicate fires.
+type gatedSettingsReader struct{ us store.UserSettings }
+
+func (g gatedSettingsReader) GetUserSettings() (*store.UserSettings, error) {
+	cp := g.us
+	return &cp, nil
+}
+
+// gatedApprovalEmitter records emit calls and returns a stable
+// envelope id. Sufficient to let Spawn complete the gated path
+// without spinning up the real approval substrate.
+type gatedApprovalEmitter struct {
+	count int
+}
+
+func (e *gatedApprovalEmitter) Emit(_ context.Context, _, _ string, _ []byte) (string, error) {
+	e.count++
+	return "env-" + string(rune('0'+e.count)), nil
+}
+
 // newSubagentTestTransport wires a SelfToolsTransport with a *subagent.Service
 // backed by an injected Runner. The store is a fresh file-backed SQLite DB
 // with all nanite migrations applied — matches internal/subagent's test
@@ -335,6 +380,80 @@ func TestCallSpawnSubagent_C160TurnEighteenReproduction(t *testing.T) {
 			}
 		}
 	}
+}
+
+// TestCallSpawnSubagent_GatedApproval_AcksWithSuccessEnvelope is the
+// Copilot review-round-1 regression target for #2/#4/#6. In
+// production (SubagentApprovalRequired=true, the default for
+// non-developer users), Spawn returns the run.ID while the run is in
+// StatusRequested. Pre-round-1, EnvelopeFromRun mapped that to
+// success=false / ErrorKindDenied, which the sync path's
+// envelopeResult(IsError = !Success) translated into IsError=true on
+// the ToolResult. Pending approval is NOT a failure — the spawn was
+// accepted and the runner will execute once a human approves.
+//
+// Post-fix: the envelope is success=true with result.run_id populated
+// and result.summary indicating the awaiting-approval state. IsError
+// is false. The runner is NOT invoked while approval is pending —
+// notCalledRunner asserts that invariant.
+func TestCallSpawnSubagent_GatedApproval_AcksWithSuccessEnvelope(t *testing.T) {
+	// Runner whose Run() fails the test — gated path must not invoke
+	// the runner before approval lands.
+	runner := &gatedNotCalledRunner{t: t}
+	st := gatedSubagentTestTransport(t, runner)
+
+	res, err := st.callSpawnSubagent(context.Background(), map[string]any{
+		"parent_session_id": "sess-1",
+		"parent_agent_id":   "primary",
+		"role":              "researcher",
+		"prompt":            "wait for approval",
+		"mode":              subagent.ModeSync,
+	})
+	if err != nil {
+		t.Fatalf("callSpawnSubagent: %v", err)
+	}
+
+	// IsError must be false — pending approval is non-terminal, not a
+	// failure. This is the load-bearing assertion of the fix.
+	if res.IsError {
+		t.Error("expected IsError=false on approval-gated spawn (pending approval is not a failure)")
+	}
+
+	env := parseEnvelopeFromResult(t, res)
+	if !env.Success {
+		t.Fatalf("expected success=true on approval-gated spawn, got envelope=%+v (text=%q)", env, readToolText(t, res))
+	}
+	if env.Error != nil {
+		t.Errorf("expected no error block on non-terminal envelope, got %+v", env.Error)
+	}
+	if env.Result == nil || env.Result.RunID == "" {
+		t.Fatalf("expected non-empty result.run_id on approval-gated spawn, got %+v", env.Result)
+	}
+	if !strings.Contains(env.Result.Summary, "awaiting approval") {
+		t.Errorf("expected result.summary to indicate awaiting-approval state, got %q", env.Result.Summary)
+	}
+	if !strings.Contains(env.Result.Summary, "subagent_status") {
+		t.Errorf("expected result.summary to guide toward subagent_status polling, got %q", env.Result.Summary)
+	}
+
+	// Confirm the run is parked in StatusRequested — i.e. the gating
+	// fired, not the ungated path.
+	run, err := st.Subagent.Status(context.Background(), env.Result.RunID)
+	if err != nil {
+		t.Fatalf("Status: %v", err)
+	}
+	if run.Status != subagent.StatusRequested {
+		t.Errorf("run.Status = %q, want %q (gated path expected)", run.Status, subagent.StatusRequested)
+	}
+}
+
+// gatedNotCalledRunner fails the test if its Run is invoked. Used to
+// verify the gated path defers runner execution until approval lands.
+type gatedNotCalledRunner struct{ t *testing.T }
+
+func (r *gatedNotCalledRunner) Run(_ context.Context, _ *subagent.Run) (*subagent.Result, error) {
+	r.t.Error("runner should not be invoked while approval is pending")
+	return nil, errors.New("runner invoked during gated path")
 }
 
 // parseEnvelopeFromResult marshals the ToolResult's text body as a

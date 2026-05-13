@@ -146,28 +146,53 @@ func NewFailureEnvelope(runID, kind, message string, context map[string]any) Res
 	}
 }
 
-// EnvelopeFromRun builds an envelope from a terminal *Run row. The
-// summary is the prose recovered from the child session's last
-// assistant text (mode=sync) or empty (mode=async/api). The
-// returned envelope's Success flag is derived from run.Status:
+// EnvelopeFromRun builds an envelope from a *Run row and the
+// recovered assistant summary. The returned envelope's Success flag is
+// derived from run.Status, enumerated explicitly here so the
+// terminal-vs-non-terminal split is not implicit:
 //
-//   - StatusCompleted + non-empty summary → Success=true
-//   - StatusCompleted + empty summary     → Success=false, ErrorKindEmptyReply
-//   - StatusFailed                        → Success=false, ErrorKindTimeout
-//                                            if error string mentions
-//                                            context deadline /
-//                                            timeout, otherwise
-//                                            ErrorKindInternal
-//   - StatusCancelled                     → Success=false, ErrorKindCancelled
-//   - StatusRejected                      → Success=false, ErrorKindDenied
-//   - StatusRequested / StatusApproved    → Success=false, ErrorKindDenied
-//     (non-terminal; should not happen for sync-mode callers but the
-//     envelope must be honest about the wedged state)
-//   - any other status                    → Success=false, ErrorKindInternal
+// Terminal states (run has reached a final outcome):
 //
-// For async/api modes, callers should use NewSuccessEnvelope directly
-// at spawn time with the run ID — the run has not yet terminated so
-// this constructor would always report empty_reply or running.
+//   - StatusCompleted + non-empty summary → Success=true,
+//     Result.Summary = summary (the child's last assistant text).
+//   - StatusCompleted + empty summary     → Success=false,
+//     ErrorKindEmptyReply. The run finished normally but produced no
+//     assistant text the parent can surface — soft failure so the
+//     parent does not narrate a non-existent reply (c160 turn-18
+//     regression target).
+//   - StatusFailed                        → Success=false,
+//     ErrorKindTimeout if run.Error matches a timeout/deadline string,
+//     otherwise ErrorKindInternal. The runner error string is
+//     propagated as the message.
+//   - StatusCancelled                     → Success=false,
+//     ErrorKindCancelled. Distinct from timeout — operator-driven.
+//   - StatusRejected                      → Success=false,
+//     ErrorKindDenied. Includes run.RejectionReason in the message
+//     when present.
+//
+// Non-terminal states (spawn accepted, run still in flight):
+//
+//   - StatusRequested / StatusApproved    → Success=true,
+//     Result.RunID = run.ID, Result.Summary = "awaiting approval".
+//     This is NOT a failure — the spawn is gated on human approval and
+//     the reply will land asynchronously (via subagent_status polling
+//     or the inbox). Mapping this to Success=false would cause
+//     callSpawnSubagent's sync path to set ToolResult.IsError=true for
+//     every approval-gated spawn, even though nothing has failed.
+//     Pending-approval IS the design (SubagentApprovalRequired
+//     defaults true in production); the envelope must communicate
+//     "awaiting" not "failed".
+//
+// Fallback:
+//
+//   - any other status                    → Success=false,
+//     ErrorKindInternal. Defensive — should not occur with the
+//     enumerated status set.
+//
+// For async/api modes that ack immediately at spawn time, callers
+// should use NewSuccessEnvelope directly with the run ID instead of
+// routing through EnvelopeFromRun — the run has not yet terminated so
+// this constructor would map StatusRunning to ErrorKindInternal.
 func EnvelopeFromRun(run *Run, summary string) ResultEnvelope {
 	if run == nil {
 		return NewFailureEnvelope("", ErrorKindInternal, "subagent run not found", nil)
@@ -215,17 +240,24 @@ func EnvelopeFromRun(run *Run, summary string) ResultEnvelope {
 			})
 	case StatusRequested, StatusApproved:
 		// Gated approval path: Spawn returned the run.ID while the human
-		// approval is still pending. Not a failure of the subagent
-		// itself — just that no reply exists yet. Surfaces as
-		// success=false so the parent does not narrate a non-existent
-		// reply; kind=denied because the parent should treat the spawn
-		// as "blocked, waiting" rather than retry.
-		return NewFailureEnvelope(run.ID, ErrorKindDenied,
-			fmt.Sprintf("subagent spawn is awaiting approval (status %q); poll subagent_status for the eventual reply", run.Status),
-			map[string]any{
-				"role":   run.Role,
-				"status": run.Status,
-			})
+		// approval is still pending. NOT a failure — the spawn was
+		// accepted, the runner has not run yet, and the eventual reply
+		// will land via subagent_status polling or the inbox. Surfaces
+		// as success=true with Result.RunID populated and Result.Summary
+		// set to a literal "awaiting approval" so the LLM-visible body
+		// communicates the non-terminal state explicitly and the parent
+		// is guided toward subagent_status polling.
+		//
+		// Pre-round-1 this case returned Success=false with
+		// ErrorKindDenied. That mapping caused callSpawnSubagent's sync
+		// path (envelopeResult IsError = !env.Success) to set
+		// ToolResult.IsError=true on every approval-gated spawn —
+		// including the production default where SubagentApprovalRequired
+		// is true — even though nothing had failed. The fix lives here
+		// in the envelope mapping so the sync-path branching does not
+		// need to special-case pending approval.
+		return NewSuccessEnvelope(run.ID,
+			fmt.Sprintf("awaiting approval (status %q); poll subagent_status for the eventual reply", run.Status))
 	default:
 		return NewFailureEnvelope(run.ID, ErrorKindInternal,
 			fmt.Sprintf("subagent run in unknown state %q", run.Status),

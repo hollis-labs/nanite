@@ -98,7 +98,6 @@ export function AgentCreateWizard({
         mcp_servers: "[]",
         tool_permissions: "{}",
         modes: "",
-        default_mode: "default",
         settings: "{}",
         tools: "[]",
         directories: "[]",

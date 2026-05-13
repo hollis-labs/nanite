@@ -439,7 +439,6 @@ slug: my-agent
 description: >-
   What this agent does
 default_model: claude-sonnet-4-20250514
-default_mode: default
 can_execute: false
 
 mcp_servers:

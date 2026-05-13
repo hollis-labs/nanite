@@ -33,9 +33,6 @@ func TestCreateAgent(t *testing.T) {
 	if a.Modes != "[]" {
 		t.Errorf("expected default modes '[]', got %q", a.Modes)
 	}
-	if a.DefaultMode != "default" {
-		t.Errorf("expected default_mode 'default', got %q", a.DefaultMode)
-	}
 	if a.CreatedAt == "" {
 		t.Error("expected CreatedAt to be set")
 	}

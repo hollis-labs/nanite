@@ -32,7 +32,6 @@ system_prompt: |
   this (your reply is treated as authoritative by the parent).
 
 default_model: claude-sonnet-4-20250514
-default_mode: default
 
 modes:
   - slug: default

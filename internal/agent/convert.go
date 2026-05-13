@@ -61,16 +61,17 @@ func (d *Definition) ToProfile() *store.AgentProfile {
 	}
 
 	// Modes as JSON array of slug strings (for the modes column).
+	// Note: the profile no longer carries a `default_mode` field — the
+	// active mode is a *session* attribute (sessions.current_mode_id), not
+	// an agent attribute. See migration 063 + CW-20260512-0115.
 	if len(d.Modes) > 0 {
 		slugs := make([]string, len(d.Modes))
 		for i, m := range d.Modes {
 			slugs[i] = m.Slug
 		}
 		p.Modes = marshalJSONOr(slugs, "[]")
-		p.DefaultMode = d.Modes[0].Slug
 	} else {
 		p.Modes = "[]"
-		p.DefaultMode = "default"
 	}
 
 	// ToolPermissions — frontmatter wins; fall back to deriving an allow_list

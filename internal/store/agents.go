@@ -16,7 +16,6 @@ type AgentProfile struct {
 	SystemPrompt    string `json:"system_prompt"`
 	Description     string `json:"description"`
 	Modes           string `json:"modes"`
-	DefaultMode     string `json:"default_mode"`
 	DefaultModel    string `json:"default_model"`
 	DefaultProvider string `json:"default_provider"`
 	MCPServers      string `json:"mcp_servers"`
@@ -63,7 +62,7 @@ type AgentProfile struct {
 
 // agentColumns is the canonical SELECT column list for agent_profiles.
 const agentColumns = `id, name, slug, COALESCE(avatar,''), system_prompt, COALESCE(description,''),
-        modes, default_mode, COALESCE(default_model,''), COALESCE(default_provider,''),
+        modes, COALESCE(default_model,''), COALESCE(default_provider,''),
         mcp_servers, tool_permissions, can_execute, settings, created_at, updated_at,
         agent_hash, version, tools, directories, constraints, tags, status, source, source_ref,
         COALESCE(icon,''),
@@ -75,7 +74,7 @@ const agentColumns = `id, name, slug, COALESCE(avatar,''), system_prompt, COALES
 func scanAgent(scanner interface{ Scan(...any) error }, a *AgentProfile) error {
 	return scanner.Scan(
 		&a.ID, &a.Name, &a.Slug, &a.Avatar, &a.SystemPrompt, &a.Description,
-		&a.Modes, &a.DefaultMode, &a.DefaultModel, &a.DefaultProvider,
+		&a.Modes, &a.DefaultModel, &a.DefaultProvider,
 		&a.MCPServers, &a.ToolPermissions, &a.CanExecute, &a.Settings, &a.CreatedAt, &a.UpdatedAt,
 		&a.AgentHash, &a.Version, &a.Tools, &a.Directories, &a.Constraints, &a.Tags,
 		&a.Status, &a.Source, &a.SourceRef, &a.Icon,
@@ -144,9 +143,6 @@ func (s *Store) CreateAgent(a *AgentProfile) error {
 	if a.Modes == "" {
 		a.Modes = "[]"
 	}
-	if a.DefaultMode == "" {
-		a.DefaultMode = "default"
-	}
 	if a.MCPServers == "" {
 		a.MCPServers = "[]"
 	}
@@ -207,7 +203,7 @@ func (s *Store) CreateAgent(a *AgentProfile) error {
 
 	_, err := s.DB.Exec(
 		`INSERT INTO agent_profiles (id, name, slug, avatar, system_prompt, description,
-		                              modes, default_mode, default_model, default_provider,
+		                              modes, default_model, default_provider,
 		                              mcp_servers, tool_permissions, can_execute, settings,
 		                              created_at, updated_at,
 		                              agent_hash, version, tools, directories, constraints,
@@ -215,9 +211,9 @@ func (s *Store) CreateAgent(a *AgentProfile) error {
 		                              kind, capabilities_json, limits_json, model_strategy,
 		                              imported_at, origin_system, format,
 		                              parent_dispatch_allowlist)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		a.ID, a.Name, a.Slug, nullIfEmpty(a.Avatar), a.SystemPrompt, nullIfEmpty(a.Description),
-		a.Modes, a.DefaultMode, nullIfEmpty(a.DefaultModel), a.DefaultProvider,
+		a.Modes, nullIfEmpty(a.DefaultModel), a.DefaultProvider,
 		a.MCPServers, a.ToolPermissions, a.CanExecute, a.Settings,
 		now, now,
 		a.AgentHash, a.Version, a.Tools, a.Directories, a.Constraints,
@@ -307,7 +303,7 @@ func (s *Store) UpdateAgent(a *AgentProfile) error {
 	// profiles/*.md but whose source column never flipped.
 	_, err := s.DB.Exec(
 		`UPDATE agent_profiles SET name = ?, slug = ?, avatar = ?, system_prompt = ?, description = ?,
-		        modes = ?, default_mode = ?, default_model = ?, default_provider = ?,
+		        modes = ?, default_model = ?, default_provider = ?,
 		        mcp_servers = ?, tool_permissions = ?, can_execute = ?, settings = ?,
 		        updated_at = ?,
 		        agent_hash = ?, version = ?, tools = ?, directories = ?, constraints = ?,
@@ -316,7 +312,7 @@ func (s *Store) UpdateAgent(a *AgentProfile) error {
 		        parent_dispatch_allowlist = ?
 		 WHERE id = ?`,
 		a.Name, a.Slug, nullIfEmpty(a.Avatar), a.SystemPrompt, nullIfEmpty(a.Description),
-		a.Modes, a.DefaultMode, nullIfEmpty(a.DefaultModel), a.DefaultProvider,
+		a.Modes, nullIfEmpty(a.DefaultModel), a.DefaultProvider,
 		a.MCPServers, a.ToolPermissions, a.CanExecute, a.Settings,
 		now,
 		a.AgentHash, a.Version, a.Tools, a.Directories, a.Constraints,

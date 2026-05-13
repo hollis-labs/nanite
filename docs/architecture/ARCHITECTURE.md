@@ -333,8 +333,7 @@ CREATE TABLE agent_profiles (
     avatar          TEXT,
     system_prompt   TEXT NOT NULL,
     description     TEXT,
-    modes           TEXT DEFAULT '[]',    -- JSON: available modes
-    default_mode    TEXT DEFAULT 'default',
+    modes           TEXT DEFAULT '[]',    -- JSON: available modes (mode-active is a SESSION attribute via sessions.current_mode_id, not an agent attribute; see migration 063)
     default_model   TEXT,
     mcp_servers     TEXT DEFAULT '[]',    -- JSON: MCP server configs
     tool_permissions TEXT DEFAULT '{}',   -- JSON: allow/deny/ask per tool

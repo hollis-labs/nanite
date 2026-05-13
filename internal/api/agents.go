@@ -52,7 +52,6 @@ func (a *API) handleCreateAgent(w http.ResponseWriter, r *http.Request) {
 		SystemPrompt:            req.SystemPrompt,
 		Description:             req.Description,
 		Modes:                   req.Modes,
-		DefaultMode:             req.DefaultMode,
 		DefaultModel:            req.DefaultModel,
 		MCPServers:              req.MCPServers,
 		ToolPermissions:         req.ToolPermissions,
@@ -159,9 +158,6 @@ func (a *API) handleUpdateAgent(w http.ResponseWriter, r *http.Request) {
 	}
 	if req.Modes != nil {
 		existing.Modes = *req.Modes
-	}
-	if req.DefaultMode != nil {
-		existing.DefaultMode = *req.DefaultMode
 	}
 	if req.DefaultModel != nil {
 		existing.DefaultModel = *req.DefaultModel

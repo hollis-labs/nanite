@@ -95,11 +95,19 @@ export function AgentDetailView({
   const [showTemplatePicker, setShowTemplatePicker] = useState(false);
   const [showProjectPicker, setShowProjectPicker] = useState(false);
 
+  // CW-20260512-0111: internal-source agents are file source of truth
+  // (internal/agent/builtin/profiles/*.md). Edits via API are rejected by
+  // the server (PUT /api/agents/{id} returns 409), so disable inline-edit
+  // hover, switches, and pickers when source='internal'. The "edit the
+  // file" affordance below the header gives the operator the actual path.
+  const isReadOnly = agent.source === "internal";
+
   const updateField = useCallback(
     (field: string, value: string | boolean) => {
+      if (isReadOnly) return;
       onUpdateAgent({ [field]: value } as Partial<AgentProfile>);
     },
-    [onUpdateAgent],
+    [isReadOnly, onUpdateAgent],
   );
 
   // Parse agent.settings JSON for debug toggle
@@ -118,9 +126,10 @@ export function AgentDetailView({
   }, [agent.settings, onUpdateAgent]);
 
   const startEditing = useCallback((field: string, value: string) => {
+    if (isReadOnly) return;
     setEditField(field);
     setEditValue(value);
-  }, []);
+  }, [isReadOnly]);
 
   const saveField = useCallback(
     (field: string) => {
@@ -240,6 +249,35 @@ export function AgentDetailView({
           </div>
         </div>
       </div>
+
+      {/* ── Read-only banner for internal-source agents (CW-20260512-0111) ── */}
+      {isReadOnly && (
+        <div className="flex items-start gap-3 rounded-md border border-border-subtle bg-surface/60 px-3 py-2.5">
+          <FileText className="w-4 h-4 mt-0.5 shrink-0 text-fg-secondary" />
+          <div className="text-xs text-fg-secondary leading-relaxed flex-1 min-w-0">
+            <div className="font-medium text-fg">Internal profile — file source of truth</div>
+            <div className="mt-1 text-fg-muted">
+              This profile is hydrated at boot from{" "}
+              <code className="font-mono bg-bg-elevated px-1 py-0.5 rounded">
+                {agent.source_ref || "internal/agent/builtin/profiles/" + agent.slug + ".md"}
+              </code>
+              . API edits are rejected — edit the file and restart Nanite to roll changes.
+            </div>
+          </div>
+          {agent.source_ref && (
+            <button
+              type="button"
+              onClick={() => {
+                navigator.clipboard?.writeText(agent.source_ref);
+              }}
+              className="text-xs text-fg-muted hover:text-fg shrink-0 px-2 py-1 rounded hover:bg-surface transition-colors"
+              title="Copy file path"
+            >
+              <Copy className="w-3.5 h-3.5" />
+            </button>
+          )}
+        </div>
+      )}
 
       {/* ── Tabs ─────────────────────────────────────────────────── */}
       <Tabs defaultValue="overview">

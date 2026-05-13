@@ -65,6 +65,7 @@ package workspace
 
 import (
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -187,29 +188,11 @@ func WalkUp(workingDir string) (Result, error) {
 func readDirEntries(dir string) []fileEntry {
 	out := make([]fileEntry, 0, len(allowlist))
 	for _, name := range allowlist {
+		info, eligible := isEligibleInstructionFile(dir, name)
+		if !eligible {
+			continue
+		}
 		full := filepath.Join(dir, name)
-		info, err := os.Lstat(full)
-		if err != nil {
-			continue
-		}
-		// Reject symlinks for both the leaf file and (for nested
-		// entries like .nanite/rules.md) any intermediate symlink.
-		// filepath.EvalSymlinks would resolve everything; we want to
-		// REFUSE symlinked instruction files entirely.
-		if info.Mode()&os.ModeSymlink != 0 {
-			continue
-		}
-		if info.IsDir() {
-			continue
-		}
-		// For nested entries the parent directory must also not be a
-		// symlink. .nanite/rules.md is the only such entry today.
-		if parent := filepath.Dir(name); parent != "." {
-			parentInfo, perr := os.Lstat(filepath.Join(dir, parent))
-			if perr != nil || parentInfo.Mode()&os.ModeSymlink != 0 {
-				continue
-			}
-		}
 		content, truncated, rerr := readCapped(full)
 		if rerr != nil {
 			continue
@@ -226,9 +209,58 @@ func readDirEntries(dir string) []fileEntry {
 	return out
 }
 
+// isEligibleInstructionFile applies the same allow/skip logic
+// readDirEntries uses, returning (info, true) when the file would be
+// picked up by a walk and (nil, false) when it would be skipped. The
+// helper exists so Cache.isStale's "new file appeared" sweep matches
+// the same exclusion logic (symlink leaf, intermediate symlink for
+// nested entries like .nanite/rules.md, directory at the path)
+// readDirEntries enforces — otherwise the sweep can mark the cache
+// stale on every call for excluded-but-present files and trigger
+// perpetual re-walks.
+//
+// Note: this does NOT check for read errors at the file level — those
+// only surface from readCapped during the actual walk. If a previously-
+// readable file becomes unreadable, isStale's per-file mtime check
+// reports it as stale via the os.Lstat error path; if a previously-
+// unreadable file remains unreadable, it never appeared in cached
+// Files and the sweep correctly treats it as "not new".
+func isEligibleInstructionFile(dir, name string) (os.FileInfo, bool) {
+	full := filepath.Join(dir, name)
+	info, err := os.Lstat(full)
+	if err != nil {
+		return nil, false
+	}
+	// Reject symlinks for both the leaf file and (for nested
+	// entries like .nanite/rules.md) any intermediate symlink.
+	// filepath.EvalSymlinks would resolve everything; we want to
+	// REFUSE symlinked instruction files entirely.
+	if info.Mode()&os.ModeSymlink != 0 {
+		return nil, false
+	}
+	if info.IsDir() {
+		return nil, false
+	}
+	// For nested entries the parent directory must also not be a
+	// symlink. .nanite/rules.md is the only such entry today.
+	if parent := filepath.Dir(name); parent != "." {
+		parentInfo, perr := os.Lstat(filepath.Join(dir, parent))
+		if perr != nil || parentInfo.Mode()&os.ModeSymlink != 0 {
+			return nil, false
+		}
+	}
+	return info, true
+}
+
 // readCapped reads up to MaxFileBytes from path. Returns (content,
 // truncated, err). When truncated is true the content is exactly
 // MaxFileBytes long and the caller should append a truncation marker.
+//
+// Uses io.ReadAll over an io.LimitReader so partial reads from
+// os.File.Read (which is not guaranteed to fill the buffer or read the
+// full file in one call) don't mis-detect truncation. Reading
+// MaxFileBytes+1 lets us distinguish "fits within cap" from "exceeds
+// cap" with one extra byte of slack.
 func readCapped(path string) (string, bool, error) {
 	f, err := os.Open(path)
 	if err != nil {
@@ -236,15 +268,15 @@ func readCapped(path string) (string, bool, error) {
 	}
 	defer f.Close()
 
-	buf := make([]byte, MaxFileBytes+1)
-	n, err := f.Read(buf)
-	if err != nil && n == 0 {
+	data, err := io.ReadAll(io.LimitReader(f, MaxFileBytes+1))
+	if err != nil {
 		return "", false, err
 	}
-	if n > MaxFileBytes {
-		return string(buf[:MaxFileBytes]), true, nil
+	truncated := len(data) > MaxFileBytes
+	if truncated {
+		data = data[:MaxFileBytes]
 	}
-	return string(buf[:n]), false, nil
+	return string(data), truncated, nil
 }
 
 // concatenate joins file entries with the opencode-style header and a
@@ -395,7 +427,11 @@ func (c *Cache) isStale(cached Result) bool {
 			if _, ok := tracked[full]; ok {
 				continue
 			}
-			if info, err := os.Lstat(full); err == nil && !info.IsDir() && info.Mode()&os.ModeSymlink == 0 {
+			// Use the same eligibility logic readDirEntries applies,
+			// so excluded-but-present files (symlinks, nested entries
+			// behind a symlinked parent, directories at the allowlist
+			// path) never trigger stale-on-every-call.
+			if _, ok := isEligibleInstructionFile(current, name); ok {
 				return true
 			}
 		}

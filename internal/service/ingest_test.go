@@ -267,6 +267,70 @@ func TestAutoIngestAgents_UpdateOnReingest(t *testing.T) {
 	}
 }
 
+// TestAutoIngestAgents_SourceFlipFromBuiltinToInternal verifies that the
+// boot-time sync (which carries def.Source = "internal" for embedded
+// internal profiles) flips the `source` column on an already-deployed row
+// that previously carried `source='builtin'`. Without this guarantee the
+// Wave 2 cleanup migration (CW-20260512-0112, DELETE WHERE source !=
+// 'internal') would wipe these rows on the next operator boot.
+//
+// CW-20260512-0111 W1 regression guard.
+func TestAutoIngestAgents_SourceFlipFromBuiltinToInternal(t *testing.T) {
+	st := newIngestTestStore(t)
+
+	// Use a synthetic slug so we don't collide with migration 060's
+	// INSERT OR IGNORE seed of the four canonical internal profile slugs
+	// (default / worker / planner / hint-selector). The behaviour under
+	// test is the source-column flip itself, not its application to a
+	// specific slug.
+	const slug = "test-internal-profile-flip"
+
+	// Seed an already-deployed-shaped row with source='builtin' (the value
+	// in user DBs before W1 lands).
+	existing := &store.AgentProfile{
+		ID:           "blt-test-flip-001",
+		Name:         "Flip Target",
+		Slug:         slug,
+		SystemPrompt: "legacy body",
+		Source:       "builtin",
+		SourceRef:    "embedded:legacy-path",
+	}
+	if err := st.CreateAgent(existing); err != nil {
+		t.Fatalf("seed CreateAgent: %v", err)
+	}
+
+	// Boot-time sync simulates the InternalProfiles() output: source flips
+	// to 'internal', source_ref points to the new embedded path, body
+	// updates to the file-SOT content.
+	def := &agentpkg.Definition{
+		Slug:         slug,
+		Name:         "Flip Target",
+		SystemPrompt: "new body from internal/agent/builtin/profiles/<slug>.md",
+		Source:       "internal",
+		SourceRef:    "embedded:profiles/" + slug + ".md",
+	}
+	if n := AutoIngestAgents(st, []*agentpkg.Definition{def}); n != 1 {
+		t.Fatalf("AutoIngestAgents count: got %d, want 1", n)
+	}
+
+	got, err := st.GetAgentBySlug(slug)
+	if err != nil {
+		t.Fatalf("GetAgentBySlug: %v", err)
+	}
+	if got.ID != "blt-test-flip-001" {
+		t.Errorf("ID: got %q, want preserved blt-test-flip-001", got.ID)
+	}
+	if got.Source != "internal" {
+		t.Errorf("Source: got %q, want 'internal' (Wave 2 cleanup keeps off this value)", got.Source)
+	}
+	if got.SourceRef != "embedded:profiles/"+slug+".md" {
+		t.Errorf("SourceRef: got %q, want embedded:profiles/%s.md", got.SourceRef, slug)
+	}
+	if got.SystemPrompt != "new body from internal/agent/builtin/profiles/<slug>.md" {
+		t.Errorf("SystemPrompt: got %q, want updated file-SOT body", got.SystemPrompt)
+	}
+}
+
 // TestAutoIngestSkills_EmptyDefsIsNoOp verifies that passing an empty def slice
 // returns 0 and doesn't error.
 func TestAutoIngestSkills_EmptyDefsIsNoOp(t *testing.T) {

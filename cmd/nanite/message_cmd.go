@@ -383,8 +383,14 @@ func newMessagingServiceForCLI(s *store.Store) (*messaging.Service, error) {
 		// agents even if file discovery hits a parse error on one tier.
 		slog.Warn("message: agent discovery", "err", err)
 	}
-	if defaultDef, defErr := builtin.DefaultAgent(); defErr == nil {
-		agentDefs = append(agentDefs, defaultDef)
+	// CW-20260512-0111: load all internal profiles (default, worker,
+	// planner, hint-selector) from internal/agent/builtin/profiles/*.md.
+	// Each is stamped Source="internal" so the CLI resolves "file-<slug>"
+	// against the same set the server does.
+	if internalDefs, intErr := builtin.InternalProfiles(); intErr == nil {
+		agentDefs = append(agentDefs, internalDefs...)
+	} else {
+		slog.Warn("message: load internal agent profiles", "err", intErr)
 	}
 
 	agents := service.NewAgentService(service.AgentServiceConfig{

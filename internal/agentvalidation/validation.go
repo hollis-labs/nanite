@@ -126,9 +126,14 @@ func ValidateAgentConfig(agent *store.AgentProfile) ValidationResult {
 		var constraints map[string]any
 		if err := json.Unmarshal([]byte(c), &constraints); err != nil {
 			result.Errors = append(result.Errors, fmt.Sprintf("constraints is malformed JSON: %s", err.Error()))
-		} else {
+		} else if len(constraints) > 0 {
+			// One summary warning carries the long explanation; per-key
+			// warnings stay short so a busy constraints blob doesn't spam
+			// ValidationResult.Warnings.
+			result.Warnings = append(result.Warnings,
+				"constraints field is deprecated and ignored - per-call deadlines and retry budgets were removed by CW-20260512-0123 (SP-20260512-0011 W3)")
 			for k, v := range constraints {
-				result.Warnings = append(result.Warnings, fmt.Sprintf("constraints: unknown key %q (the constraints schema was emptied by CW-20260512-0123; agent-author per-call deadlines and retry budgets are no longer honored)", k))
+				result.Warnings = append(result.Warnings, fmt.Sprintf("constraints: unknown key %q - ignored", k))
 				switch n := v.(type) {
 				case float64:
 					if n <= 0 {

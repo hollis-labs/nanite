@@ -380,7 +380,11 @@ func (ls *loopState) resolvedMaxTurns() int {
 //   - Hard ceiling (`hardCeiling`, default 200) — absolute turn-count
 //     backstop. The agent's natural `end_turn` stop signal is still the
 //     normal termination path; hardCeiling exists for true runaways.
-//   - Retry budget exhausted — explicit caller-set budget.
+//
+// CW-20260512-0123 (SP-20260512-0011 W3): the retry-budget terminator
+// was removed alongside the `RetryBudget` agent-constraints field.
+// Runaway tool failures are now bounded solely by `runawayFailCap`
+// (Layer 1 above). See the in-body note where Layer 4 used to live.
 //
 // CW-20260504-0001: `max_turns` is no longer a terminator. Hitting it
 // fires a soft-warning telemetry event (see `checkSoftMaxTurnsWarning`)

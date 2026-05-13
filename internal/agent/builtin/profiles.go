@@ -72,12 +72,11 @@ func InternalProfiles() ([]*agent.Definition, error) {
 		if err != nil {
 			return nil, fmt.Errorf("builtin: parse %s: %w", rel, err)
 		}
-		if def.Slug == "" {
-			// Fallback for completeness — parser already enforces
-			// frontmatter slug, but a defensive normalization keeps
-			// the contract loud if a future file omits it.
-			def.Slug = strings.TrimSuffix(name, ".md")
-		}
+		// def.Slug is guaranteed non-empty here: agent.ParseMD returns
+		// an error when frontmatter omits the slug, so the previous
+		// defensive fallback was unreachable. Per feedback_no_compat_shims
+		// (pre-launch, no dead code), keep the contract loud — if a future
+		// file omits the slug, the parse error surfaces immediately.
 		def.Source = SourceInternal
 		def.SourceRef = "embedded:" + rel
 		defs = append(defs, def)

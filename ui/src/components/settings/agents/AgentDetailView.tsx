@@ -120,10 +120,11 @@ export function AgentDetailView({
   const debugMode = agentSettings.debug === true;
 
   const toggleDebugMode = useCallback(() => {
+    if (isReadOnly) return;
     const current = (() => { try { return JSON.parse(agent.settings || "{}"); } catch { return {}; } })();
     const updated = { ...current, debug: !current.debug };
     onUpdateAgent({ settings: JSON.stringify(updated) } as Partial<AgentProfile>);
-  }, [agent.settings, onUpdateAgent]);
+  }, [isReadOnly, agent.settings, onUpdateAgent]);
 
   const startEditing = useCallback((field: string, value: string) => {
     if (isReadOnly) return;
@@ -424,7 +425,7 @@ export function AgentDetailView({
                 size="sm"
                 variant="ghost"
                 className="h-6 gap-1 text-[11px] text-fg-muted hover:text-fg"
-                disabled={availableTemplates.length === 0}
+                disabled={isReadOnly || availableTemplates.length === 0}
               >
                 <Plus className="w-3 h-3" />
                 Assign
@@ -444,7 +445,8 @@ export function AgentDetailView({
                     <span className="text-[10px] text-fg-faint tabular-nums">P{tmpl.priority}</span>
                     <button
                       onClick={() => onRemoveTemplate(tmpl.id)}
-                      className="p-0.5 rounded opacity-0 group-hover:opacity-100 text-fg-faint hover:text-primary transition-all"
+                      disabled={isReadOnly}
+                      className="p-0.5 rounded opacity-0 group-hover:opacity-100 text-fg-faint hover:text-primary transition-all disabled:opacity-0 disabled:cursor-not-allowed"
                     >
                       <X className="w-3 h-3" />
                     </button>
@@ -542,7 +544,7 @@ export function AgentDetailView({
                 size="sm"
                 variant="ghost"
                 className="h-6 gap-1 text-[11px] text-fg-muted hover:text-fg"
-                disabled={availableProjects.length === 0}
+                disabled={isReadOnly || availableProjects.length === 0}
               >
                 <Plus className="w-3 h-3" />
                 Add
@@ -561,7 +563,8 @@ export function AgentDetailView({
                   )}
                   <button
                     onClick={() => onRemoveProject(project.id)}
-                    className="p-0.5 rounded opacity-0 group-hover:opacity-100 text-fg-faint hover:text-primary transition-all"
+                    disabled={isReadOnly}
+                    className="p-0.5 rounded opacity-0 group-hover:opacity-100 text-fg-faint hover:text-primary transition-all disabled:opacity-0 disabled:cursor-not-allowed"
                   >
                     <X className="w-3 h-3" />
                   </button>
@@ -600,6 +603,7 @@ export function AgentDetailView({
               size="sm"
               variant="ghost"
               className="h-7 gap-1 text-xs text-fg-muted hover:text-fg shrink-0"
+              disabled={isReadOnly}
             >
               <Plus className="w-3.5 h-3.5" />
               Add Mode
@@ -661,7 +665,7 @@ export function AgentDetailView({
                 size="sm"
                 variant="ghost"
                 className="h-6 gap-1 text-[11px] text-fg-muted hover:text-fg"
-                disabled={availableSkills.length === 0}
+                disabled={isReadOnly || availableSkills.length === 0}
               >
                 <Plus className="w-3 h-3" />
                 Assign
@@ -678,7 +682,8 @@ export function AgentDetailView({
                   <span className="text-[10px] text-fg-faint bg-surface/60 rounded px-1.5 py-0.5">{skill.category}</span>
                   <button
                     onClick={() => onRemoveSkill(skill.id)}
-                    className="p-0.5 rounded opacity-0 group-hover:opacity-100 text-fg-faint hover:text-primary transition-all"
+                    disabled={isReadOnly}
+                    className="p-0.5 rounded opacity-0 group-hover:opacity-100 text-fg-faint hover:text-primary transition-all disabled:opacity-0 disabled:cursor-not-allowed"
                   >
                     <X className="w-3 h-3" />
                   </button>

@@ -123,7 +123,7 @@ VALUES (
 - For ambiguous input, return your best classification AND a low_confidence marker — do not abstain silently.',
     'Classification and scoring agent — returns structured judgments over a bounded input, not free-form prose',
     '[]', 'default',
-    '[]', '{"allow_list":[]}', 0, '{}',
+    '[]', '{"deny_list":["*"]}', 0, '{}',
     datetime('now'), datetime('now'),
     '', 1, '[]', '[]', '{}', '[]', 'active',
     'internal', 'embedded:profiles/analyst.md', 'chart',

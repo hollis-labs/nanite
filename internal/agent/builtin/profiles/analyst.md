@@ -15,12 +15,19 @@ icon: chart
 # Read-only role: no `permissionMode: yolo`. One-shot classifier; no
 # tool execution needed. Haiku matches hint-selector's tier.
 #
+# No-tools contract: `deny_list: ["*"]` is the deny-all pattern under
+# toolclient.ToolPermissions.CheckPermission — empty allow_list is
+# PERMISSIVE (falls through to allow), so the explicit wildcard deny
+# is required for a no-tools profile. The deny check runs first and
+# matches every tool name via the prefix-glob in toolclient.MatchPattern
+# ("*" → empty prefix → HasPrefix(name, "") → true).
+#
 # PROMPT-SYNC: CW-20260427-0014 + CW-20260512-0113. When this body
 # changes, re-flow into migration 062_populate_role_prompts.sql.
 model: claude-haiku-4-20250514
 effort: low
 toolPermissions:
-  allow_list: []
+  deny_list: ["*"]
 ---
 You are an Analyst agent — a one-shot classifier. You are dispatched with a structured input and a question. You return a structured judgment, not prose.
 

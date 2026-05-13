@@ -363,6 +363,35 @@ func (r *ChatRunner) Run(ctx context.Context, run *subagent.Run) (*subagent.Resu
 	r.pathGrants.RegisterLineage(childID, run.ParentSessionID)
 	defer r.pathGrants.ClearLineage(childID)
 
+	// CW-20260512-0119 (SP-20260512-0010 W3): explicitly forward the
+	// parent's effective denies into the child's effective permission
+	// set. Mirrors opencode's `deriveSubagentSessionPermission`
+	// (agent/subagent-permissions.ts:24-32, issue #26514) — the bug
+	// class where a child silently bypasses a parent-level Plan-mode
+	// deny because naive inheritance reads only the session's own rules.
+	//
+	// Parent rules source: the parent session's previously-derived
+	// RuleSet (set by the runner when the parent was itself a subagent
+	// — composes across a Parent → Child → Grandchild chain). When the
+	// parent has no derived rules registered (top-level chat session),
+	// parentRules is nil and DeriveSubagentRuleSet treats it as empty.
+	//
+	// Subagent rules source: the spawned agent's profile rules. Today
+	// no agent profile carries a per-profile permission.RuleSet
+	// (file-based agents may set a frontmatter `permissions` block in
+	// the future; DB-backed agents have no schema column for this yet).
+	// When subagentRules is nil the derivation is parent-only-forwarding,
+	// which is the H1 protection the ticket requires. As soon as agent
+	// profile rules are wired, the same derivation pass picks them up.
+	//
+	// Resolve(): parent rules MUST already be in canonical absolute form
+	// (W4 contract — RuleSet.Resolve is called by whoever populates
+	// derivedRules). The subagent's own rules are resolved against the
+	// child session's working_dir inside DeriveSubagentRuleSet, so
+	// `./` patterns in a future agent-profile RuleSet anchor at the
+	// child's effective working_dir rather than the parent's.
+	r.registerSubagentDerivedRules(childID, run.ParentSessionID, agent)
+
 	// Persist the prompt as a user message on the child session.
 	// generateResponse's context assembly loads the provider message
 	// list via ListMessages (assembleTurnContext → chat_generate.go);
@@ -426,4 +455,91 @@ func truncatePrompt(s string, n int) string {
 		return s
 	}
 	return s[:n-1] + "…"
+}
+
+// registerSubagentDerivedRules computes the spawned child session's
+// effective permission RuleSet via DeriveSubagentRuleSet and stores it
+// against the child session id so renderers (W2 SlotPermissions) and
+// the runtime gate can read the forwarded denies (CW-20260512-0119,
+// SP-20260512-0010 W3).
+//
+// Inputs:
+//
+//   - childID: the freshly created child session id.
+//   - parentSessionID: the parent session this subagent was spawned from.
+//     Used to look up any RuleSet previously derived for the parent (a
+//     subagent spawning a grandchild composes naturally through this).
+//   - agent: the spawned agent's profile. Carries the (currently
+//     unwired) per-profile RuleSet — when agent profiles eventually grow
+//     a permission.RuleSet column, this is the point at which it gets
+//     read.
+//
+// nil-safe: when pathGrants is nil, the call is a no-op; the runner's
+// downstream consumers (renderer, gate) will read empty.
+//
+// When neither the parent nor the subagent contribute any rules the
+// derived RuleSet is empty. We still register it so the renderer can
+// distinguish "this session has no rules registered" from "this session
+// has an empty derived set" — both render the same content today (no
+// "## Path access" rule section) but a future debug surface may want to
+// tell them apart.
+func (r *ChatRunner) registerSubagentDerivedRules(childID, parentSessionID string, agent *store.AgentProfile) {
+	if r.pathGrants == nil || childID == "" {
+		return
+	}
+
+	// Parent rules: the previously-derived effective set for the parent
+	// session. nil when the parent is a top-level chat session that
+	// hasn't had a RuleSet registered. The derivation propagates naturally
+	// across Parent → Child → Grandchild because the parent's
+	// LookupDerivedRules return value was itself the output of a previous
+	// DeriveSubagentRuleSet call.
+	parentRules := r.pathGrants.LookupDerivedRules(parentSessionID)
+
+	// Subagent rules: the profile-level RuleSet for the spawned agent.
+	// Not wired today — agent profiles don't carry a permission.RuleSet
+	// field. When that lands (file-based agents may grow a frontmatter
+	// `permissions:` block; DB-backed agents would need a schema
+	// column), populate subagentRules from the agent definition here.
+	//
+	// For now this leaves subagentRules nil — the derivation reduces to
+	// "forward all parent denies into the child", which is the H1
+	// protection the ticket calls out as the load-bearing requirement.
+	var subagentRules *permission.RuleSet
+	_ = agent // reserved for future profile-rules wiring
+
+	// Child working_dir for resolving any `./` patterns in the subagent's
+	// future profile rules. Read from PathGrants.BestSessionDir which
+	// walks the lineage chain when the child's own bucket is empty
+	// (CW-20260504-0003) — gives us the most-specific dir the user has
+	// signalled intent toward. May be empty when no path mentions have
+	// been registered; that's fine because subagentRules is nil today
+	// (Resolve fast-paths an empty subagent ruleset).
+	childWorkingDir := r.pathGrants.BestSessionDir(childID)
+
+	derived, err := permission.DeriveSubagentRuleSet(permission.DerivationInput{
+		Parent:             parentRules,
+		Subagent:           subagentRules,
+		SubagentWorkingDir: childWorkingDir,
+	})
+	if err != nil {
+		// Resolve failures (workspace-relative pattern escape, missing
+		// working_dir for a `./` rule) surface as warnings rather than
+		// failing the spawn — the child runs without the forwarded
+		// denies and the dev_* gate (CW-20260512-0095) still backstops
+		// fabrication detection. Failing the spawn here would couple
+		// permission-rule misconfiguration to subagent dispatch
+		// availability, which is the wrong blast radius.
+		slog.Warn("subagent: derive permission ruleset failed; child runs without forwarded denies",
+			"err", err,
+			"child_session_id", childID,
+			"parent_session_id", parentSessionID,
+		)
+		return
+	}
+	if derived == nil {
+		return
+	}
+
+	r.pathGrants.RegisterDerivedRules(childID, derived)
 }

@@ -65,13 +65,24 @@ type PathGrants struct {
 	// honored by spawned workers without making profile permissions
 	// inheritable. Cleared at worker spawn-finish (defer in the runner).
 	lineage map[string]string
+	// derivedRules[sessionID] = the derived effective RuleSet for that
+	// session, populated at subagent spawn time (CW-20260512-0119,
+	// SP-20260512-0010 W3). Stored alongside the existing grant lifecycle
+	// (RegisterLineage/ClearLineage) so the rendered permission summary
+	// (W2 SlotPermissions) and any future runtime gate can read forwarded
+	// parent denies through the same session-scoped store.
+	//
+	// Mutex-guarded together with grants + lineage because the natural
+	// lifetime boundary is identical — spawn registers, defer clears.
+	derivedRules map[string]*RuleSet
 }
 
 // NewPathGrants returns an empty grant store.
 func NewPathGrants() *PathGrants {
 	return &PathGrants{
-		grants:  make(map[string]map[string]struct{}),
-		lineage: make(map[string]string),
+		grants:       make(map[string]map[string]struct{}),
+		lineage:      make(map[string]string),
+		derivedRules: make(map[string]*RuleSet),
 	}
 }
 
@@ -301,6 +312,43 @@ func (g *PathGrants) ClearLineage(sessionID string) {
 	g.mu.Lock()
 	defer g.mu.Unlock()
 	delete(g.lineage, sessionID)
+	delete(g.derivedRules, sessionID)
+}
+
+// RegisterDerivedRules stores the effective RuleSet derived for sessionID
+// at subagent spawn time (CW-20260512-0119). The stored ruleset is the
+// output of DeriveSubagentRuleSet applied to the parent's effective rules
+// + the subagent's profile rules — denies are forwarded, allows stand
+// only when the subagent explicitly grants them.
+//
+// Renderers and the runtime permission gate read from this store via
+// LookupDerivedRules. Cleared by ClearLineage at spawn-finish so the
+// lifetime is exactly the child session's lifetime.
+//
+// Nil-safe at every level: nil receiver, empty sessionID, or nil rules
+// all no-op.
+func (g *PathGrants) RegisterDerivedRules(sessionID string, rules *RuleSet) {
+	if g == nil || sessionID == "" || rules == nil {
+		return
+	}
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	g.derivedRules[sessionID] = rules
+}
+
+// LookupDerivedRules returns the derived RuleSet for sessionID, or nil
+// when no derived ruleset is registered. Nil-safe.
+//
+// The returned pointer is read-only by contract — callers MUST treat the
+// underlying slice as immutable. Internal storage is shared so this
+// avoids a per-lookup deep copy on the renderer hot path.
+func (g *PathGrants) LookupDerivedRules(sessionID string) *RuleSet {
+	if g == nil || sessionID == "" {
+		return nil
+	}
+	g.mu.RLock()
+	defer g.mu.RUnlock()
+	return g.derivedRules[sessionID]
 }
 
 // BucketSize returns the number of grants registered for sessionID. Zero
@@ -392,12 +440,19 @@ func (g *PathGrants) BestSessionDir(sessionID string) string {
 }
 
 // Clear removes all grants for sessionID. Called at session end.
+//
+// Also clears any derived RuleSet stored for the session (CW-20260512-0119)
+// so the bookkeeping stays in sync with the grants lifecycle. The lineage
+// pointer is intentionally NOT touched here — RegisterLineage's pairing
+// is ClearLineage, called via defer in the runner; Clear is the
+// session-end sweep for the grant bucket.
 func (g *PathGrants) Clear(sessionID string) {
 	if g == nil || sessionID == "" {
 		return
 	}
 	g.mu.Lock()
 	delete(g.grants, sessionID)
+	delete(g.derivedRules, sessionID)
 	g.mu.Unlock()
 }
 

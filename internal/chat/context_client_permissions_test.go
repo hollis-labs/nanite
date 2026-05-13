@@ -276,6 +276,75 @@ func TestAssembleSlotSources_PermissionsSlot_c160_RegressionRepro(t *testing.T) 
 	}
 }
 
+// TestAssembleSlotSources_PermissionsSlot_W3ForwardedDeniesRendered is the
+// W2 ↔ W3 integration acceptance (CW-20260512-0119, SP-20260512-0010 W3).
+//
+// Stages a subagent child session whose PathGrants store has a derived
+// RuleSet registered (the shape the subagent runner produces at spawn
+// time). The rendered SlotPermissions block MUST surface the forwarded
+// denies under "You CANNOT access (explicitly denied)" with the parent's
+// Source tag preserved + the "(via parent)" provenance suffix.
+//
+// This closes the visibility loop opened by W2's reserved hook:
+// SlotPermissions now displays parent-forwarded denies so the agent
+// reads "denied by parent profile (via parent)" immediately before
+// deciding whether to attempt a tool call.
+func TestAssembleSlotSources_PermissionsSlot_W3ForwardedDeniesRendered(t *testing.T) {
+	cb, s := newTestBroker(t)
+	cb.PathGrants = permission.NewPathGrants()
+
+	if err := s.CreateWorkspace(&store.Workspace{ID: "ws1", Name: "Test"}); err != nil {
+		t.Fatalf("CreateWorkspace: %v", err)
+	}
+	childSess := &store.Session{WorkspaceID: "ws1"}
+	if err := s.CreateSession(childSess); err != nil {
+		t.Fatalf("CreateSession: %v", err)
+	}
+	researcher := &store.AgentProfile{Name: "researcher", Slug: "researcher"}
+	if err := s.CreateAgent(researcher); err != nil {
+		t.Fatalf("CreateAgent: %v", err)
+	}
+
+	// Stage the derivation the runner would have done at spawn time.
+	parentRules := &permission.RuleSet{
+		Rules: []permission.Rule{
+			{
+				Tool:     "dev_read",
+				Pattern:  "/Users/u/sensitive/**",
+				Behavior: permission.DecisionDeny,
+				Source:   "parent profile.yaml",
+			},
+		},
+	}
+	derived, err := permission.DeriveSubagentRuleSet(permission.DerivationInput{
+		Parent: parentRules,
+	})
+	if err != nil {
+		t.Fatalf("DeriveSubagentRuleSet: %v", err)
+	}
+	cb.PathGrants.RegisterDerivedRules(childSess.ID, derived)
+
+	sources, err := cb.AssembleSlotSources(context.Background(), childSess, researcher, nil, &store.Workspace{Name: "WS"}, nil)
+	if err != nil {
+		t.Fatalf("AssembleSlotSources: %v", err)
+	}
+
+	if !strings.Contains(sources.Permissions, "You CANNOT access (explicitly denied):") {
+		t.Errorf("expected forwarded denies under explicit-deny section; got:\n%s", sources.Permissions)
+	}
+	if !strings.Contains(sources.Permissions, "/Users/u/sensitive/**") {
+		t.Errorf("expected forwarded deny pattern in rendered output; got:\n%s", sources.Permissions)
+	}
+	// Parent Source tag preserved (and W3 provenance suffix appended).
+	if !strings.Contains(sources.Permissions, "parent profile.yaml (via parent)") {
+		t.Errorf("expected parent Source tag preserved with (via parent) suffix; got:\n%s", sources.Permissions)
+	}
+	// Researcher scope qualifier present.
+	if !strings.Contains(sources.Permissions, "this researcher subagent's scope") {
+		t.Errorf("expected researcher scope in closing refusal hook; got:\n%s", sources.Permissions)
+	}
+}
+
 // TestAssembleSlotSources_PermissionsSlot_DeterministicAcrossTurns asserts
 // that two consecutive calls with identical inputs produce byte-identical
 // Permissions slot content — the cache-key invariant the slot

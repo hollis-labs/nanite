@@ -56,7 +56,11 @@ func TestAssembleSlotSources_PermissionsSlot_BinaryAllowList(t *testing.T) {
 	if err := s.CreateSession(sess); err != nil {
 		t.Fatalf("CreateSession: %v", err)
 	}
-	agent := &store.AgentProfile{Name: "default", Slug: "default"}
+	// Slug intentionally empty: this test exercises the GENERIC scope-qualifier
+	// path (`agent.Slug == "" || agent.Slug == "default"` in context_client.go).
+	// "default" itself would now collide with the seed row from migration 060
+	// (CW-20260512-0111, internal profiles file source-of-truth).
+	agent := &store.AgentProfile{Name: "default"}
 	if err := s.CreateAgent(agent); err != nil {
 		t.Fatalf("CreateAgent: %v", err)
 	}
@@ -124,7 +128,10 @@ func TestAssembleSlotSources_PermissionsSlot_SessionGrants(t *testing.T) {
 	if err := s.CreateSession(sess); err != nil {
 		t.Fatalf("CreateSession: %v", err)
 	}
-	agent := &store.AgentProfile{Name: "default", Slug: "default"}
+	// Empty Slug avoids the migration-060 seed-row UNIQUE collision (see
+	// BinaryAllowList test above); behaviorally identical to slug "default"
+	// for the renderer's generic-phrasing branch.
+	agent := &store.AgentProfile{Name: "default"}
 	if err := s.CreateAgent(agent); err != nil {
 		t.Fatalf("CreateAgent: %v", err)
 	}
@@ -363,7 +370,9 @@ func TestAssembleSlotSources_PermissionsSlot_DeterministicAcrossTurns(t *testing
 	if err := s.CreateSession(sess); err != nil {
 		t.Fatalf("CreateSession: %v", err)
 	}
-	agent := &store.AgentProfile{Name: "default", Slug: "default"}
+	// Empty Slug — same reason as BinaryAllowList test (migration-060 seed
+	// collision with slug "default"). Generic-phrasing branch still fires.
+	agent := &store.AgentProfile{Name: "default"}
 	if err := s.CreateAgent(agent); err != nil {
 		t.Fatalf("CreateAgent: %v", err)
 	}

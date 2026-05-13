@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/hollis-labs/nanite/internal/agent"
+	"github.com/hollis-labs/nanite/internal/toolclient"
 )
 
 // TestInternalProfiles_LoadsAllExpectedSlugs asserts the embedded profiles/
@@ -24,7 +25,18 @@ func TestInternalProfiles_LoadsAllExpectedSlugs(t *testing.T) {
 	}
 	sort.Strings(got)
 
-	want := []string{"default", "hint-selector", "planner", "worker"}
+	want := []string{
+		// Wave 1 (CW-20260512-0111):
+		"default", "hint-selector", "planner", "worker",
+		// Wave 4 (CW-20260512-0113): five role profiles authored to close
+		// the slug-existence gap after Wave 2's eject of source!='internal'.
+		// (A `fragments-engine` profile was drafted then dropped in review
+		// round 1 per Phase 2 / Track A — user memory
+		// project_nanite_phase_2_scope.)
+		"analyst", "backend", "background-job", "file-backend",
+		"researcher",
+	}
+	sort.Strings(want)
 	if len(got) != len(want) {
 		t.Fatalf("slugs len: got %d (%v), want %d (%v)", len(got), got, len(want), want)
 	}
@@ -116,10 +128,16 @@ func TestInternalProfiles_FrontmatterKeys(t *testing.T) {
 	if err != nil {
 		t.Fatalf("InternalProfiles: %v", err)
 	}
-	// Every internal profile that ships with a model must parse it
-	// (worker / planner / hint-selector all carry a `model:` field;
-	// default carries none and inherits the harness default).
-	for _, slug := range []string{"worker", "planner", "hint-selector"} {
+	// Every internal profile that ships with a model must parse it.
+	// W1 set: worker, planner, hint-selector. W4 set (CW-20260512-0113):
+	// researcher, analyst, file-backend, backend, background-job — every
+	// Wave 4 role profile carries a `model:` field. Default carries none
+	// and inherits the harness default.
+	for _, slug := range []string{
+		"worker", "planner", "hint-selector",
+		"researcher", "analyst", "file-backend", "backend",
+		"background-job",
+	} {
 		def := findBySlug(t, defs, slug)
 		if def.Model == "" {
 			t.Errorf("slug=%s: Model is empty — frontmatter key likely wrong (must be `model:`, not `defaultModel:`)", slug)
@@ -148,6 +166,154 @@ func TestInternalProfileSlugs_DeterministicOrder(t *testing.T) {
 	for i := 1; i < len(slugs); i++ {
 		if slugs[i-1] >= slugs[i] {
 			t.Errorf("slugs not sorted at [%d]: %q >= %q (full=%v)", i, slugs[i-1], slugs[i], slugs)
+		}
+	}
+}
+
+// TestInternalProfiles_RoleIdentitySmoke is the unit-test-stub smoke
+// evidence path described in the CW-20260512-0113 boot prompt (§8): each
+// of the five Wave 4 role profiles, plus the expanded Wave 4 planner,
+// must carry identity tokens that ground its role-specific behavior.
+// This is the regression target for the c160 fabrication chain — when
+// `Pattern: "researcher"` resolves to this profile (after W4 lands), the
+// body must contain "read-only" + "cite" tokens so the dispatched
+// subagent operates from grounded role-identity rather than inheriting
+// only the universal slot.
+func TestInternalProfiles_RoleIdentitySmoke(t *testing.T) {
+	defs, err := InternalProfiles()
+	if err != nil {
+		t.Fatalf("InternalProfiles: %v", err)
+	}
+	cases := []struct {
+		slug   string
+		tokens []string
+		// canExecuteWant matches store.AgentProfile.CanExecute after
+		// ToProfile (derived from PermissionMode=yolo).
+		canExecuteWant bool
+	}{
+		// Researcher: read-only, cites paths/lines. The boot prompt's
+		// §8.1 smoke "researcher refuses fabrication" — the universal
+		// Refusal rules supply the refuse-rather-than-fabricate behavior;
+		// the role body grounds it with read-only + cite-paths discipline.
+		{
+			slug:           "researcher",
+			tokens:         []string{"read-only", "Cite", "dev_glob"},
+			canExecuteWant: false,
+		},
+		// Planner (boot prompt §8.2 smoke): decomposition + dependency
+		// language. The expanded Wave 4 body preserves the Phase 6 stub
+		// framing AND carries the dependency-ordered planning tokens.
+		{
+			slug:           "planner",
+			tokens:         []string{"Decompose", "dependenc", "Phase 6"},
+			canExecuteWant: false,
+		},
+		{
+			slug:           "analyst",
+			tokens:         []string{"classifier", "schema", "low_confidence"},
+			canExecuteWant: false,
+		},
+		{
+			slug:           "file-backend",
+			tokens:         []string{"file-tier I/O", "Migrations are immutable", "Targeted edits"},
+			canExecuteWant: true,
+		},
+		{
+			slug:           "backend",
+			tokens:         []string{"Go server-side", "go test -race", "Migrations are append-only"},
+			canExecuteWant: true,
+		},
+		{
+			slug:           "background-job",
+			tokens:         []string{"async worker", "Idempotency", "terminal envelope"},
+			canExecuteWant: true,
+		},
+	}
+	for _, c := range cases {
+		def := findBySlug(t, defs, c.slug)
+		for _, tok := range c.tokens {
+			if !strings.Contains(def.SystemPrompt, tok) {
+				t.Errorf("slug=%s: body missing role-identity token %q (role identity drifted?)", c.slug, tok)
+			}
+		}
+		// Confirm the read-only/execute split is preserved through the
+		// PermissionMode → CanExecute mapping in convert.go.
+		if got := def.ToProfile().CanExecute; got != c.canExecuteWant {
+			t.Errorf("slug=%s: ToProfile().CanExecute = %v, want %v (check PermissionMode in .md frontmatter)", c.slug, got, c.canExecuteWant)
+		}
+	}
+}
+
+// TestInternalProfiles_RoleBodiesExcludeUniversalRules guards the five
+// Wave 4 role bodies against re-introducing universal-layer content.
+// The universal grounding/refusal/verification rules live in
+// internal/chat/universal_rules.go and are auto-injected at SlotUniversal
+// for every agent; duplicating them in role bodies undoes the layering
+// benefit and reopens the c160 fabrication regression.
+func TestInternalProfiles_RoleBodiesExcludeUniversalRules(t *testing.T) {
+	defs, err := InternalProfiles()
+	if err != nil {
+		t.Fatalf("InternalProfiles: %v", err)
+	}
+	// Sentinels lifted verbatim from internal/chat/universal_rules.go.
+	universalSentinels := []string{
+		"## Universal rules",
+		"Refuse rather than fabricate",
+		"Acknowledge honestly when you fail",
+		"Use what tools return",
+		"Count, do not estimate",
+	}
+	for _, slug := range []string{"researcher", "analyst", "file-backend", "backend", "background-job", "planner"} {
+		def := findBySlug(t, defs, slug)
+		for _, sentinel := range universalSentinels {
+			if strings.Contains(def.SystemPrompt, sentinel) {
+				t.Errorf("slug=%s: body duplicates universal sentinel %q — universal_rules.go owns this", slug, sentinel)
+			}
+		}
+	}
+}
+
+// TestInternalProfiles_AnalystDeniesAllTools asserts the file SOT for the
+// analyst no-tools contract: parsing analyst.md must yield a ToolPermissions
+// shape that, when evaluated under toolclient.ToolPermissions.CheckPermission,
+// denies a known canonical tool.
+//
+// PR #161 review round 2 (Copilot item E): empty allow_list is PERMISSIVE
+// under toolclient.CheckPermission (falls through to `return true` when no
+// deny list matches), so a no-tools classifier needs an explicit
+// `deny_list: ["*"]`. The wildcard matches every tool name via the
+// prefix-glob in toolclient.MatchPattern.
+//
+// This guards the file SOT independently of the migration seed —
+// AutoIngestAgents replaces the row body with this file's contents on every
+// Nanite restart, so a regression here would silently re-permit every tool
+// even if migration 062 stayed correct on disk.
+func TestInternalProfiles_AnalystDeniesAllTools(t *testing.T) {
+	defs, err := InternalProfiles()
+	if err != nil {
+		t.Fatalf("InternalProfiles: %v", err)
+	}
+	def := findBySlug(t, defs, "analyst")
+	if def.ToolPermissions == nil {
+		t.Fatal("analyst ToolPermissions is nil — frontmatter must declare an explicit deny-all (no-tools contract)")
+	}
+	// Convert agent.AgentToolPermissions → toolclient.ToolPermissions
+	// (identical field shape; safe direct copy). The same struct lives in
+	// two packages because agent frontmatter parsing must not depend on
+	// toolclient.
+	tp := toolclient.ToolPermissions{
+		AllowList:          def.ToolPermissions.AllowList,
+		DenyList:           def.ToolPermissions.DenyList,
+		MaxCallsPerTurn:    def.ToolPermissions.MaxCallsPerTurn,
+		AllowDelegation:    def.ToolPermissions.AllowDelegation,
+		AllowCodeExecution: def.ToolPermissions.AllowCodeExecution,
+	}
+	// dev_read is the canonical anchor — any tool name would match "*"
+	// via the prefix-glob in toolclient.MatchPattern, but dev_read is a
+	// stable, documented tool name used by the researcher profile.
+	for _, tool := range []string{"dev_read", "dev_write", "task_execute", "shell_exec"} {
+		if tp.CheckPermission(tool) {
+			t.Errorf("analyst CheckPermission(%q) = true, want false (no-tools contract — empty allow_list is PERMISSIVE; explicit deny_list:[\"*\"] is required)", tool)
 		}
 	}
 }

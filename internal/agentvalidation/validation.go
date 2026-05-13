@@ -115,17 +115,25 @@ func ValidateAgentConfig(agent *store.AgentProfile) ValidationResult {
 		}
 	}
 
-	// 7. Validate constraints (JSON object with positive numeric values)
+	// 7. Validate constraints (JSON object with positive numeric values).
+	//
+	// CW-20260512-0123 (SP-20260512-0011 W3): the legacy keys
+	// `max_iterations`, `max_time_seconds`, and `retry_budget` were
+	// removed. Empty `{}` is the supported value; non-empty objects
+	// emit warnings (unknown keys) but are tolerated so existing
+	// agent_profiles rows don't fail validation during the cutover.
 	if c := strings.TrimSpace(agent.Constraints); c != "" && c != "{}" {
 		var constraints map[string]any
 		if err := json.Unmarshal([]byte(c), &constraints); err != nil {
 			result.Errors = append(result.Errors, fmt.Sprintf("constraints is malformed JSON: %s", err.Error()))
-		} else {
-			allowedKeys := map[string]bool{"max_iterations": true, "max_time_seconds": true, "retry_budget": true}
+		} else if len(constraints) > 0 {
+			// One summary warning carries the long explanation; per-key
+			// warnings stay short so a busy constraints blob doesn't spam
+			// ValidationResult.Warnings.
+			result.Warnings = append(result.Warnings,
+				"constraints field is deprecated and ignored - per-call deadlines and retry budgets were removed by CW-20260512-0123 (SP-20260512-0011 W3)")
 			for k, v := range constraints {
-				if !allowedKeys[k] {
-					result.Warnings = append(result.Warnings, fmt.Sprintf("constraints: unknown key %q", k))
-				}
+				result.Warnings = append(result.Warnings, fmt.Sprintf("constraints: unknown key %q - ignored", k))
 				switch n := v.(type) {
 				case float64:
 					if n <= 0 {

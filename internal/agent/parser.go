@@ -67,12 +67,20 @@ type ModeDefinition struct {
 	ToolOverrides  map[string]any `yaml:"toolOverrides"`
 }
 
-// AgentConstraints configures iteration and time limits for the agent.
-type AgentConstraints struct {
-	MaxIterations  int `yaml:"maxIterations" json:"max_iterations,omitempty"`
-	MaxTimeSeconds int `yaml:"maxTimeSeconds" json:"max_time_seconds,omitempty"`
-	RetryBudget    int `yaml:"retryBudget" json:"retry_budget,omitempty"`
-}
+// AgentConstraints is the frontmatter slot for per-agent runtime
+// constraints. CW-20260512-0123 (SP-20260512-0011 W3) removed the
+// `maxIterations` / `maxTimeSeconds` / `retryBudget` keys from the
+// supported schema — those fields were heavy per-call deadline /
+// retry restrictions that the user mandate ("get rid of the heavy
+// restrictions on agents, timeouts, etc.") deleted in favor of the
+// subagent reaper as the authoritative hung-run safety net.
+//
+// The struct is intentionally retained as an empty type so existing
+// frontmatter that still declares a `constraints:` block parses
+// without error — unknown keys are tolerated by yaml.Unmarshal and
+// validation downgrades them to a warning (see
+// internal/agentvalidation/validation.go).
+type AgentConstraints struct{}
 
 // AgentToolPermissions mirrors toolclient.ToolPermissions in shape but is
 // declared here so agent frontmatter parsing does not depend on toolclient.

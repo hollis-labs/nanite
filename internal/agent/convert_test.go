@@ -6,6 +6,10 @@ import (
 )
 
 func TestDefinition_ToProfile(t *testing.T) {
+	// CW-20260512-0123 (SP-20260512-0011 W3): the AgentConstraints
+	// struct is now empty — the heavy per-call deadline / retry
+	// restriction class was removed. The constraints column ends up
+	// as the empty-object marker "{}" for every converted profile.
 	def := &Definition{
 		Name:           "Code Agent",
 		Slug:           "code",
@@ -19,17 +23,13 @@ func TestDefinition_ToProfile(t *testing.T) {
 		Tags:           []string{"backend"},
 		Directories:    []string{"./src"},
 		PermissionMode: "yolo",
-		Constraints: AgentConstraints{
-			MaxIterations:  50,
-			MaxTimeSeconds: 300,
-		},
 		Modes: []ModeDefinition{
 			{Slug: "default", Name: "Default", PromptAddendum: "Be helpful."},
 			{Slug: "architect", Name: "Architect", PromptAddendum: "Focus on design."},
 		},
 		SystemPrompt: "You are a code agent.",
-		Source:        "project",
-		SourceRef:     "/path/to/code.md",
+		Source:       "project",
+		SourceRef:    "/path/to/code.md",
 	}
 
 	p := def.ToProfile()
@@ -93,13 +93,10 @@ func TestDefinition_ToProfile(t *testing.T) {
 		t.Errorf("Modes = %v", modesSlugs)
 	}
 
-	// Check constraints.
-	var constraints map[string]any
-	if err := json.Unmarshal([]byte(p.Constraints), &constraints); err != nil {
-		t.Fatalf("Constraints JSON: %v", err)
-	}
-	if constraints["max_iterations"] != float64(50) {
-		t.Errorf("Constraints.max_iterations = %v", constraints["max_iterations"])
+	// Check constraints — empty struct now serializes to "{}"
+	// (CW-20260512-0123 removed all AgentConstraints fields).
+	if p.Constraints != "{}" {
+		t.Errorf("Constraints = %q, want %q (CW-20260512-0123)", p.Constraints, "{}")
 	}
 
 	// Check tool permissions derived from tools.

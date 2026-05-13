@@ -10,11 +10,23 @@ import (
 )
 
 // AgentConstraints holds parsed runtime constraints from AgentProfile.Constraints.
+//
+// CW-20260512-0123 (SP-20260512-0011 W3): the legacy per-call wall-clock
+// restriction class (MaxTimeSeconds, MaxIterations, RetryBudget) was
+// removed. Those fields are reaper-equivalent or per-call deadline
+// concerns — the subagent reaper (internal/subagent/reaper.go) is the
+// authoritative hung-run safety net, and per-call wall-clock deadlines
+// caused the c160 "Agent execution time limit exceeded (0 seconds)"
+// error class. See the W3 implementer report for the full restriction
+// survey.
+//
+// Surviving fields are the Phase-4 chat-loop runaway breakers (soft
+// max-turn warning, hard ceiling on iterations, consecutive/runaway
+// failure caps, and the chat-loop idle wall) which are different in
+// kind from a "this agent must finish by N seconds" deadline — they
+// catch local pathologies (tool storming, no progress) rather than
+// bounding total wall time.
 type AgentConstraints struct {
-	MaxIterations  int `json:"max_iterations"`
-	MaxTimeSeconds int `json:"max_time_seconds"`
-	RetryBudget    int `json:"retry_budget"`
-
 	// Phase 4 — Chat Loop Hardening.
 	MaxTurns           int `json:"max_turns"`              // 0=default(25), -1=unlimited, >0=value
 	HardCeiling        int `json:"hard_ceiling"`           // 0=default(100), absolute max turns

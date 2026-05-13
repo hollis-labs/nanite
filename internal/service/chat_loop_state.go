@@ -144,10 +144,15 @@ type loopState struct {
 	directReturn     string
 
 	// Iteration control.
+	//
+	// CW-20260512-0123 (SP-20260512-0011 W3): the `retryBudget`
+	// counter was removed alongside the agent-constraint
+	// `RetryBudget` field. The runaway-fail-cap (default 10
+	// consecutive tool failures) is now the sole tool-failure
+	// breaker; the retry-budget terminator was redundant deadweight.
 	iteration           int
 	limits              iterationLimits
 	consecutiveFailures int
-	retryBudget         int
 	toolCallCounts      map[string]int
 
 	// CW-20260417-0485: track the last tool failure so the
@@ -275,7 +280,6 @@ func newLoopState(constraints chat.AgentConstraints, tools []string, debugMode b
 		maxRequestToolsCalls: defaultMaxRequestToolsCalls,
 		lastActivity:         time.Now(),
 		debugMode:            debugMode,
-		retryBudget:          -1,
 		scratchpad:           make(map[string]any),
 	}
 
@@ -284,12 +288,13 @@ func newLoopState(constraints chat.AgentConstraints, tools []string, debugMode b
 		ls.loadedTools[name] = true
 	}
 
-	// Resolve retry budget.
-	if constraints.RetryBudget > 0 {
-		ls.retryBudget = constraints.RetryBudget
-	}
-
 	// Resolve iteration limits.
+	//
+	// CW-20260512-0123 (SP-20260512-0011 W3): the `RetryBudget`,
+	// `MaxIterations`, and `MaxTimeSeconds` agent-constraints fields
+	// were removed. `MaxTurns` is the only remaining agent-author-
+	// visible turn-count knob; the runaway-fail-cap and idle-timeout
+	// remain the chat-loop's own breakers.
 	ls.limits = resolveIterationLimits(constraints)
 
 	return ls
@@ -307,15 +312,16 @@ func resolveIterationLimits(c chat.AgentConstraints) iterationLimits {
 	}
 
 	// MaxTurns: 0 = use default, -1 = unlimited (clamped to hard ceiling), >0 = use value.
+	//
+	// CW-20260512-0123 (SP-20260512-0011 W3): the legacy `MaxIterations`
+	// agent-constraints field was removed alongside `MaxTimeSeconds`
+	// and `RetryBudget`. `MaxTurns` is now the only agent-author-visible
+	// turn-count knob. The hard ceiling defined below remains the
+	// absolute backstop regardless of MaxTurns.
 	if c.MaxTurns > 0 {
 		lim.maxTurns = c.MaxTurns
 	} else if c.MaxTurns == -1 {
 		lim.maxTurns = -1
-	}
-
-	// Legacy MaxIterations support: if set and lower than maxTurns, use it.
-	if c.MaxIterations > 0 && (lim.maxTurns == -1 || c.MaxIterations < lim.maxTurns) {
-		lim.maxTurns = c.MaxIterations
 	}
 
 	if c.HardCeiling > 0 {
@@ -374,7 +380,11 @@ func (ls *loopState) resolvedMaxTurns() int {
 //   - Hard ceiling (`hardCeiling`, default 200) — absolute turn-count
 //     backstop. The agent's natural `end_turn` stop signal is still the
 //     normal termination path; hardCeiling exists for true runaways.
-//   - Retry budget exhausted — explicit caller-set budget.
+//
+// CW-20260512-0123 (SP-20260512-0011 W3): the retry-budget terminator
+// was removed alongside the `RetryBudget` agent-constraints field.
+// Runaway tool failures are now bounded solely by `runawayFailCap`
+// (Layer 1 above). See the in-body note where Layer 4 used to live.
 //
 // CW-20260504-0001: `max_turns` is no longer a terminator. Hitting it
 // fires a soft-warning telemetry event (see `checkSoftMaxTurnsWarning`)
@@ -400,10 +410,13 @@ func (ls *loopState) shouldStop() (bool, TerminationCode, string) {
 			fmt.Sprintf("hard ceiling reached (%d)", ls.limits.hardCeiling)
 	}
 
-	// Layer 4: Retry budget exhausted.
-	if ls.retryBudget == 0 {
-		return true, TerminationRetryBudgetExhausted, "retry budget exhausted"
-	}
+	// CW-20260512-0123 (SP-20260512-0011 W3): the retry-budget
+	// terminator (Layer 4) was removed alongside the deleted
+	// `RetryBudget` agent-constraints field. The
+	// `TerminationRetryBudgetExhausted` constant is retained because
+	// the recovery broker's envelope schema may still reference it
+	// in archived telemetry; runaway tool failures are now bounded
+	// by `runawayFailCap` (Layer 1).
 
 	return false, "", ""
 }
@@ -441,9 +454,6 @@ func (ls *loopState) recordToolCall(toolName string, success bool) bool {
 		ls.consecutiveFailures = 0
 	} else {
 		ls.consecutiveFailures++
-		if ls.retryBudget > 0 {
-			ls.retryBudget--
-		}
 	}
 
 	// Meta-tools (fetch_tool_result, search_tool_result, request_tools) are

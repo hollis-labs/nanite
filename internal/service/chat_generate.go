@@ -220,19 +220,20 @@ func (s *chatServiceImpl) generateResponse(ctx context.Context, sessionID, assis
 	}
 
 	// Parse agent constraints (schema v2).
+	//
+	// CW-20260512-0123 (SP-20260512-0011 W3): the per-agent
+	// `MaxTimeSeconds` opt-in wall-clock that used to wrap ctx with
+	// context.WithTimeout was removed entirely. That field was the
+	// origin of the c160 "Agent execution time limit exceeded
+	// (0 seconds)" error class — when MaxTimeSeconds defaulted to 0
+	// the wrap fired immediately. The class is now unreachable: the
+	// field is gone from chat.AgentConstraints and there is no
+	// remaining call site that produces a context.DeadlineExceeded
+	// here. Hung subagents are bounded by the subagent reaper
+	// (internal/subagent/reaper.go), and runaway chat loops are
+	// bounded by the in-loop runaway-fail-cap + idle-timeout +
+	// hard-ceiling (see resolveIterationLimits in chat_loop_state.go).
 	constraints := chat.ParseAgentConstraints(agent.Constraints)
-
-	if constraints.MaxTimeSeconds > 0 {
-		// Per-agent MaxTimeSeconds is an explicit opt-in constraint authored
-		// in the agent's constraints schema — distinct from the removed
-		// global 5-minute parent deadline. CW-20260512-0006: when an agent
-		// declares a max-time constraint, honor it; otherwise the parent
-		// chat loop has no wall-clock upper bound.
-		agentTimeout := time.Duration(constraints.MaxTimeSeconds) * time.Second
-		var cancel context.CancelFunc
-		ctx, cancel = context.WithTimeout(ctx, agentTimeout)
-		defer cancel()
-	}
 
 	// --- Load workspace ---
 	var workspace *store.Workspace
@@ -744,54 +745,33 @@ func (s *chatServiceImpl) generateResponse(ctx context.Context, sessionID, assis
 			diagLogLoopExit(sessionID, assistantMsgID, ls.iteration, "shouldStop:"+string(code), len(ls.toolCallRefs), ch)
 			break
 		}
-		// Context cancellation — split on ctx.Err() shape.
+		// Context cancellation.
 		//
 		// CW-20260512-0006 removed the global 5-minute wall-clock deadline.
-		// The remaining sources of a non-nil ctx.Err() are:
-		//   1. context.Canceled — intentional stop (takeover / shutdown /
-		//      user-initiated cancel via POST /chat/cancel). NOT an error.
-		//   2. context.DeadlineExceeded — only fires when the per-agent
-		//      `constraints.MaxTimeSeconds` opt-in is set above (~line 220),
-		//      which wraps ctx with context.WithTimeout(ctx, agentTimeout).
-		//      This is the agent's own configured budget firing, distinct
-		//      from the removed global deadline. Surface as an error so the
-		//      FE shows a timeout card and the recovery broker can act.
+		// CW-20260512-0123 (SP-20260512-0011 W3) removed the per-agent
+		// `MaxTimeSeconds` opt-in wall-clock that used to be the sole
+		// remaining producer of context.DeadlineExceeded here — that
+		// field was the origin of the c160 "Agent execution time limit
+		// exceeded (0 seconds)" error class and has been deleted.
 		//
-		// PR #139 review (Copilot): the prior single-branch "any ctx.Err is
-		// intentional cancel" was incorrect because the MaxTimeSeconds
-		// wrapper can produce DeadlineExceeded; that path was being
-		// mislabelled "Stopped: cancelled" with no error semantics.
+		// The remaining sources of a non-nil ctx.Err() are all
+		// intentional cancellations (NOT errors):
+		//   - Takeover — a new HandleMessage call for the same session
+		//     cancels the prior generation via registerGeneration.
+		//   - Lifecycle shutdown — process-wide drain bridges bgCtx to
+		//     cancel.
+		//   - User-initiated stop — POST /chat/cancel resolves the
+		//     registered cancel via CancelActiveGeneration.
+		// All three surface as context.Canceled; emit a status event
+		// (NOT an error envelope) and persist any partial content via
+		// the cancellation-specific helper that writes HasError=false.
+		//
+		// Hung subagents continue to be bounded by the subagent reaper
+		// (internal/subagent/reaper.go); runaway chat loops are bounded
+		// by the in-loop runaway-fail-cap + idle-timeout + hard-ceiling
+		// (resolveIterationLimits in chat_loop_state.go).
 		if ctxErr := ctx.Err(); ctxErr != nil {
 			diagLogLoopExit(sessionID, assistantMsgID, ls.iteration, "ctx_cancelled:"+ctxErr.Error(), len(ls.toolCallRefs), ch)
-			if errors.Is(ctxErr, context.DeadlineExceeded) {
-				// Per-agent MaxTimeSeconds budget exceeded. Mirror the shape
-				// of the old 5-min deadline emission (envelope + event +
-				// broker-notify pre-classified persist with had_error=true)
-				// but plumb the per-agent constraint context so the user
-				// knows it was the agent's configured budget — not a global
-				// wall clock — that fired.
-				slog.Warn("generateResponse agent MaxTimeSeconds exceeded",
-					"err", ctxErr, "session_id", sessionID,
-					"max_time_seconds", constraints.MaxTimeSeconds)
-				if s.suppressSurfaceIfSubagentCaused(sessionID, "agent_max_time_seconds", fullContent.String()) {
-					return
-				}
-				msg := fmt.Sprintf("Agent execution time limit exceeded (%d seconds). Please try again with a simpler request or raise the agent's MaxTimeSeconds constraint.", constraints.MaxTimeSeconds)
-				details := map[string]interface{}{
-					"max_time_seconds": constraints.MaxTimeSeconds,
-					"session":          sessionID,
-				}
-				ch <- chat.ErrorEnvelopeDelta(chat.ErrorCodeProviderError, msg, details)
-				ch <- chat.ErrorEvent(chat.ErrorCodeProviderError, msg, details)
-				s.persistPartialAssistantAndNotifyBrokerPreClassified(ctx, sessionID, assistantMsgID, agentID, fullContent.String(), providerName, agent.Slug, ctxErr) // CW-20260419-0019, CW-20260512-0001, CW-20260512-0002
-				return
-			}
-			// context.Canceled (or any other non-deadline ctx.Err()) — clean
-			// intentional stop. Emit a status event (NOT an ErrorCodeInternal
-			// envelope) and persist any partial content via the
-			// cancellation-specific helper that writes HasError=false (no
-			// `had_error` metadata) so the FE doesn't render an error turn
-			// for a deliberate stop.
 			slog.Info("generateResponse cancelled", "err", ctxErr, "session_id", sessionID)
 			ch <- chat.StreamEvent{Type: "status", Content: "Stopped: cancelled"}
 			s.persistPartialAssistantCancelled(sessionID, assistantMsgID, agentID, fullContent.String())
@@ -1169,9 +1149,10 @@ func (s *chatServiceImpl) generateResponse(ctx context.Context, sessionID, assis
 					s.pluginHost.EmitProviderError(sessionID, providerName, model, errMsg)
 				})
 			}
-			if ls.retryBudget > 0 {
-				ls.retryBudget--
-			}
+			// CW-20260512-0123 (SP-20260512-0011 W3): the `loopState.retryBudget`
+			// counter was removed alongside the deleted `RetryBudget`
+			// agent-constraints field; the runaway-fail-cap is the
+			// surviving tool-failure terminator.
 			if ctxpkg.IsCompactRecoverable(err) && ls.compactRecoverableAttempts >= maxCompactRecoverableAttempts {
 				// Already retried once — emit a user-facing message tailored
 				// to which recoverable mode tripped. CW-20260418-0099.

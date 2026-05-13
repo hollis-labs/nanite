@@ -42,14 +42,39 @@
 //     for removal in a follow-up sprint; per `feedback_no_compat_shims`,
 //     re-applying the block in a deprecated path would be a compat shim.
 //
-// PROMPT-SYNC: CW-20260512-0100 / CW-20260427-0014.
-// The clauses below ("Use what tools return", "Ask before fabricating",
-// "Count, don't estimate", "Acknowledge honestly when you fail") are the
-// universal core extracted from the chat-role-harness body. When this file
-// changes, the demoted chat-role-harness body in:
-//   - internal/agent/builtin/default.md
-//   - internal/store/migrations/058_universal_rules_extract.sql
-// must also be re-flowed. See migration 058's docstring for the procedure.
+// PROMPT-SYNC: CW-20260512-0100 / CW-20260427-0014 / CW-20260512-0114 / CW-20260512-0122.
+//
+// universalRulesBlock is the runtime source of truth for universal rules.
+// Post-CW-20260512-0114, UniversalRulesBlock() is read by
+// ContextClient.AssembleSlotSources and emitted as SlotUniversal at
+// position 0 of every dispatch's SlotOrder — chat, sync subagent, async
+// subagent, background job. Changes to the block content take effect on
+// the next dispatch; no DB write or migration re-flow is required.
+//
+// Migration 058 (058_universal_rules_extract.sql) and the demoted body in
+// internal/agent/builtin/profiles/default.md track the historic
+// chat-role-harness body, NOT the universal-rules block here. They are
+// frozen artifacts of the pre-CW-20260512-0100 extraction and are
+// deliberately untouched when universalRulesBlock changes. Re-flowing them
+// for content updates to this file would be incorrect (the two artifacts
+// have different shapes) and unnecessary (production reads this file at
+// runtime, not migration 058). Migration 058 stays under PROMPT-SYNC for
+// its own schema/seed reasons; that is independent of edits here.
+//
+// When the universal rules content changes, however, the subagent_spawn
+// tool description in internal/mcp/self_tools.go SHOULD be reviewed if the
+// change touches failure-handling rules (e.g. the "Acknowledge subagent
+// failure" bullet). The tool description carries the pre-invocation
+// contract the LLM reads before calling subagent_spawn; its language should
+// stay aligned with whatever the universal block tells the LLM to do with
+// the envelope's success flag.
+//
+// The Refusal subsection's "Acknowledge subagent failure" bullet was added
+// by CW-20260512-0122 (SP-20260512-0011 W2) as the LLM-side counterpart to
+// the subagent ResultEnvelope (internal/subagent/envelope.go). The envelope
+// is the wire-side contract; this rule is the parent-side reading
+// discipline that closes the c160 turn-18 "parent narrates fake success"
+// failure class.
 package chat
 
 // universalRulesBlock is the content shared by every agent (chat, worker,
@@ -81,6 +106,7 @@ const universalRulesBlock = `## Universal rules (apply to every agent)
 - **Acknowledge honestly when you fail.** Do not paper over with confident framing. A clear "I could not access X" is more useful than a polished reply over no data.
 - **Refuse rather than fabricate.** If you cannot access the data, file, or path needed to ground your answer, return an explicit failure: state what you tried, what was blocked, and what would unblock you. Do not synthesize a plausible answer from training data — when you are dispatched as a subagent your reply is treated as authoritative by the parent.
 - **Partial is better than fabricated.** If your tools succeed but return less than you need, say so. A partial answer with a clear gap is more useful than a complete-looking answer over thin data.
+- **Acknowledge subagent failure.** When a subagent_spawn result envelope reports ` + "`success: false`" + `, you MUST acknowledge the failure to the user with the structured error.message and error.kind. Do not narrate success. Do not fabricate outcomes. If you cannot recover, say what failed and why. The envelope's success flag is the source of truth — a non-empty result body on a success=false envelope is still a failure.
 
 ### Verification
 

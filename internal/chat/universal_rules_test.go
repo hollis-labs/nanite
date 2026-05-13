@@ -35,6 +35,12 @@ func TestUniversalRulesBlock_NonEmpty(t *testing.T) {
 		{"refusal-explicit-failure", "return an explicit failure", "deep-dive §4 + §6: subagent refusal"},
 		{"refusal-no-fabrication", "Refuse rather than fabricate", "c160 regression target"},
 		{"verification-peer-draft", "treat the reply as a draft to verify", "deep-dive §2: peer over-trust mitigation"},
+		// CW-20260512-0122 (SP-20260512-0011 W2): subagent failure envelope rule.
+		// LLM-side counterpart to internal/subagent/envelope.go — the parent
+		// reads success=false and acknowledges, instead of narrating the
+		// child's last assistant text as authoritative (c160 turn-18 class).
+		{"refusal-subagent-envelope", "Acknowledge subagent failure", "c160 turn-18: parent narrates fake success"},
+		{"refusal-subagent-envelope-flag", "success flag is the source of truth", "envelope contract: do not narrate success on success=false"},
 	}
 
 	for _, r := range required {

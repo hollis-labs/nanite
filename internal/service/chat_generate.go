@@ -21,6 +21,7 @@ import (
 	"github.com/hollis-labs/nanite/internal/chat"
 	"github.com/hollis-labs/nanite/internal/classify"
 	ctxpkg "github.com/hollis-labs/nanite/internal/context"
+	"github.com/hollis-labs/nanite/internal/dispatcher"
 	"github.com/hollis-labs/nanite/internal/effort"
 	inspectsvc "github.com/hollis-labs/nanite/internal/inspector"
 	nllmanthropic "github.com/hollis-labs/nanite/internal/llm/anthropic"
@@ -963,11 +964,31 @@ func (s *chatServiceImpl) generateResponse(ctx context.Context, sessionID, assis
 				Tools:        tools,
 			})
 		}
+		// CW-20260512-0121 (SP-20260512-0011): stamp dispatcher CallerType
+		// on the request_build slog so the cross-call-site smoke can prove
+		// every dispatch type (chat | subagent | background) produces an
+		// identical structural slot shape. The CallerType arrives via the
+		// dispatcher-stamped ctx value (see internal/dispatcher). All
+		// production call-sites (launchGeneration, ChatRunner.invokeChat,
+		// DelegateTask) now route through Dispatcher.Run, so a populated
+		// CallerType is the expected case. The "unknown" fallback covers
+		// only the test-stub seam (`chatInvoker` overrides in
+		// subagent_runner_test.go, subagent_runner_lineage_test.go,
+		// subagent_runner_derivation_test.go) which call generateResponse
+		// without going through the dispatcher by design. Production runs
+		// must NEVER emit caller=unknown — if they do, a call-site has
+		// escaped the dispatcher door and the consolidation is leaking.
+		caller := dispatcher.CallerTypeFromContext(ctx)
+		callerLabel := caller.String()
+		if callerLabel == "" {
+			callerLabel = "unknown"
+		}
 		rbArgs := []any{
 			"session_id", sessionID,
 			"agent_id", agentID,
 			"model", model,
 			"provider", providerName,
+			"caller", callerLabel,
 			"total_estimated_request_tokens", totalEstimate,
 			"rate_limit_tpm_observed", rateLimitTPM,
 			"cacheable_prefix_tokens", cacheablePrefixTokens,

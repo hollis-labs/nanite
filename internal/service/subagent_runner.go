@@ -10,6 +10,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/hollis-labs/nanite/internal/chat"
+	"github.com/hollis-labs/nanite/internal/dispatcher"
 	"github.com/hollis-labs/nanite/internal/permission"
 	"github.com/hollis-labs/nanite/internal/store"
 	"github.com/hollis-labs/nanite/internal/subagent"
@@ -253,13 +254,41 @@ func NewChatRunner(c *chatServiceImpl, agents agentSlugResolver, st sessionStore
 	return &ChatRunner{chat: c, agents: agents, store: st, db: db, pathGrants: pathGrants}
 }
 
-// invokeChat delegates to the test override or the real generateResponse.
+// invokeChat delegates to the test override or routes through the
+// single dispatcher door (CW-20260512-0121 / SP-20260512-0011). The
+// dispatcher stamps CallerSubagent on ctx so the runner's request_build
+// telemetry reports caller=subagent — the cross-call-site slot-shape
+// invariant the consolidation ticket cashes in.
+//
+// Test override path: r.invoker exists for tests that want to stub out
+// generateResponse entirely (subagent_runner_test.go fakeChatService,
+// _lineage_test.go chatInvokerFunc). When set, it short-circuits the
+// dispatcher — those tests assert on the runner's behavior, not on
+// the dispatcher's CallerType plumbing (the dispatcher path is
+// covered by internal/dispatcher tests + this file's new
+// subagent_runner_dispatcher_test.go).
 func (r *ChatRunner) invokeChat(ctx context.Context, sessionID, msgID, prompt string, ch chan chat.StreamEvent) {
 	if r.invoker != nil {
 		r.invoker.generateResponse(ctx, sessionID, msgID, prompt, ch)
 		return
 	}
-	r.chat.generateResponse(ctx, sessionID, msgID, prompt, ch)
+	if err := r.chat.dispatcher.Run(ctx, dispatcher.Request{
+		SessionID:      sessionID,
+		AssistantMsgID: msgID,
+		UserContent:    prompt,
+		CallerType:     dispatcher.CallerSubagent,
+	}, ch); err != nil {
+		slog.Error("subagent: dispatcher.Run rejected subagent request",
+			"session_id", sessionID,
+			"assistant_msg_id", msgID,
+			"err", err,
+		)
+		// Dispatcher rejected pre-runner; close ch so the drain
+		// goroutine in ChatRunner.Run terminates rather than blocking
+		// indefinitely. Mirrors the dispatcher-rejection close in
+		// chat.launchGeneration.
+		close(ch)
+	}
 }
 
 // persistChild delegates to the test override or the real persistChildSessionID.

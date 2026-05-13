@@ -17,6 +17,7 @@ import (
 	"github.com/hollis-labs/nanite/internal/chat"
 	"github.com/hollis-labs/nanite/internal/config"
 	"github.com/hollis-labs/nanite/internal/dispatch"
+	"github.com/hollis-labs/nanite/internal/dispatcher"
 	"github.com/hollis-labs/nanite/internal/filter"
 	inspectsvc "github.com/hollis-labs/nanite/internal/inspector"
 	"github.com/hollis-labs/nanite/internal/lifecycle"
@@ -345,6 +346,16 @@ type chatServiceImpl struct {
 	// pass-through and every turn falls through to the chat-direct
 	// loop. See ChatServiceConfig.AgentBroker for the full contract.
 	agentBroker agentbroker.Broker
+
+	// dispatcher is the single agent-dispatch door
+	// (CW-20260512-0121 / SP-20260512-0011). launchGeneration routes
+	// the user → chat call-site through this; ChatRunner (subagent
+	// path) routes through the same instance; the agent-flavored
+	// background-job path (reserved CallerType) will join when its
+	// caller lands. Always non-nil — initialized in NewChatService
+	// with a self-referencing runner adapter so the "one door"
+	// invariant is structural.
+	dispatcher *dispatcher.Dispatcher
 }
 
 // inFlightGen records the currently-running generateResponse for a session
@@ -365,7 +376,7 @@ func NewChatService(cfg ChatServiceConfig) ChatService {
 	if um == "" {
 		um = models.DefaultChatModel()
 	}
-	return &chatServiceImpl{
+	impl := &chatServiceImpl{
 		sessions:       cfg.Sessions,
 		agents:         cfg.Agents,
 		tools:          cfg.Tools,
@@ -407,6 +418,25 @@ func NewChatService(cfg ChatServiceConfig) ChatService {
 		envelopeRenderExecutor: cfg.EnvelopeRenderExecutor,
 		agentBroker:            cfg.AgentBroker,
 	}
+	// CW-20260512-0121 (SP-20260512-0011): wire the single dispatcher
+	// door. The Dispatcher delegates to chatServiceImpl.generateResponse
+	// (the unified agent-sessions runner) via a thin adapter. Two-step
+	// build because the adapter needs the impl pointer; constructed
+	// here so launchGeneration and ChatRunner.invokeChat both route
+	// through the same Dispatcher instance.
+	impl.dispatcher = dispatcher.New(newChatRunnerAdapter(impl))
+	return impl
+}
+
+// Dispatcher returns the chat service's single agent-dispatch door
+// (CW-20260512-0121). Exposed so the service container can hand the
+// same Dispatcher instance to other call-sites (ChatRunner / future
+// agent-background) — every CallerType MUST share one Dispatcher so
+// the "identical structural shape across CallerTypes" invariant
+// holds. Returning the field rather than re-constructing keeps the
+// runner-adapter binding stable across the service lifetime.
+func (s *chatServiceImpl) Dispatcher() *dispatcher.Dispatcher {
+	return s.dispatcher
 }
 
 // registerGeneration stores the cancel for a new in-flight generation and
@@ -462,6 +492,16 @@ func (s *chatServiceImpl) CancelActiveGeneration(sessionID string) bool {
 //
 // The cancel is wired into both our per-session registry (for takeover) and
 // the lifecycle manager (for graceful Shutdown) via a small bridge goroutine.
+//
+// CW-20260512-0121 (SP-20260512-0011): the actual runner invocation is
+// routed through the single dispatcher door (s.dispatcher.Run). Per-site
+// assembly is gone — the dispatcher stamps CallerChat on ctx so the
+// runner's request_build telemetry reports caller=chat. Dispatcher
+// validation errors are programmer-only failure modes (empty SessionID,
+// invalid CallerType, etc.); the goroutine logs them and closes the
+// stream channel so the caller's stream-drain unblocks. launchGeneration
+// itself returns void and has already returned to the caller by the
+// time the goroutine runs — dispatcher errors never surface synchronously.
 func (s *chatServiceImpl) launchGeneration(name, sessionID, assistantMsgID, userContent string, ch chan chat.StreamEvent) {
 	// Build cancel BEFORE launching so a near-simultaneous retry cannot
 	// register its own cancel before this one — the window would let the
@@ -491,7 +531,27 @@ func (s *chatServiceImpl) launchGeneration(name, sessionID, assistantMsgID, user
 		defer cancel()
 		defer s.deregisterGeneration(sessionID, assistantMsgID)
 
-		s.generateResponse(genCtx, sessionID, assistantMsgID, userContent, ch)
+		// CW-20260512-0121: route through the single dispatcher door.
+		// On dispatcher validation failure (programmer error — should
+		// be unreachable in production), close the channel so the
+		// caller's defer doesn't deadlock waiting for a stream that
+		// will never come.
+		if err := s.dispatcher.Run(genCtx, dispatcher.Request{
+			SessionID:      sessionID,
+			AssistantMsgID: assistantMsgID,
+			UserContent:    userContent,
+			CallerType:     dispatcher.CallerChat,
+		}, ch); err != nil {
+			slog.Error("chat-service: dispatcher.Run rejected request",
+				"session_id", sessionID,
+				"assistant_msg_id", assistantMsgID,
+				"err", err,
+			)
+			// Runner did not run, so it did not close ch — do so here
+			// to release the caller. Mirrors the defer-close contract
+			// the runner would have honored.
+			close(ch)
+		}
 	})
 }
 

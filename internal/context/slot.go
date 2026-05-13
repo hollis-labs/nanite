@@ -205,7 +205,7 @@ func ComputeCacheKey(content string) string {
 // A ceiling of 0 means "dynamic — allocated from remaining budget".
 func DefaultBudgets() map[string]int {
 	return map[string]int{
-		SlotUniversal:    500, // Position-0 reserved budget; tight by design — universal rules are concise.
+		SlotUniversal:    550, // Position-0 reserved budget; tight by design — universal rules are concise (CW-20260513-0036).
 		SlotSystem:       2000,
 		SlotMemory:       2000,
 		SlotAgent:        1000,

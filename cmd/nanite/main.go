@@ -332,6 +332,15 @@ func cmdServe(args []string) {
 		Worktrees:       wtMgr,
 		CLIAdapters:     cliAdapters,
 		AgentBroker:     agentBrokerInstance,
+		// CW-20260512-0118 (SP-20260512-0010 W2): thread the dev-tools
+		// allow-list onto the ContextClient so the per-session
+		// SlotPermissions summary surfaces the baseline READ roots.
+		// resolveDevToolsAllowedPaths is the same function initMCP uses
+		// to populate the DevToolsTransport allow-list — calling it again
+		// here keeps the rendered summary consistent with the gate
+		// (no drift between what the agent reads and what the gate
+		// enforces).
+		DevToolsAllowedPaths: resolveDevToolsAllowedPaths(cfg),
 	})
 	if err != nil {
 		slogx.Fatal("failed to create service container", "err", err)

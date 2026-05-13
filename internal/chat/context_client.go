@@ -13,6 +13,7 @@ import (
 
 	llmtypes "github.com/hollis-labs/go-llm-types"
 	"github.com/hollis-labs/nanite/internal/contextbroker"
+	"github.com/hollis-labs/nanite/internal/permission"
 	"github.com/hollis-labs/nanite/internal/skillbroker"
 	"github.com/hollis-labs/nanite/internal/store"
 )
@@ -42,6 +43,21 @@ type ContextClient struct {
 	// falls through to the v0/v1 static ThinkToolBlock path. Also requires
 	// NANITE_THINK_BLOCK_V2_ENABLED=true in the environment.
 	HintDispatcher HintDispatcher
+
+	// PathGrants is the session-scoped explicit-mention grant store,
+	// shared with the chat / subagent / dev-tools wiring. Used by
+	// AssembleSlotSources to render the SlotPermissions summary
+	// (CW-20260512-0118). nil = no session-grant rows in the rendered
+	// summary; the binary AllowedPaths + per-profile RuleSet still
+	// render normally.
+	PathGrants *permission.PathGrants
+
+	// DevToolsAllowedPaths is the binary-scoped allow-list configured via
+	// nanite.yaml `dev_tools_allowed_paths`. Threaded here so the
+	// permission summary renderer (CW-20260512-0118) surfaces the baseline
+	// READ roots the agent operates against. Empty / nil renders no
+	// "workspace allow-list" section.
+	DevToolsAllowedPaths []string
 }
 
 // NewContextClient creates a new ContextClient with default settings.
@@ -173,6 +189,13 @@ type SlotSources struct {
 	Agent            string                 // agent.SystemPrompt + AgentMode.PromptAddendum (legacy) + skill list
 	Mode             string                 // B1 (CW-20260428-0009): session-level *store.Mode.PromptAddendum.
 	Rules            string                 // agent tags + tool allowlist (S4a expands)
+	// Permissions carries the rendered SlotPermissions block — a
+	// human-readable summary of the session's effective path access
+	// (binary AllowedPaths + session PathGrants + lineage walk + resolved
+	// permission.RuleSet). CW-20260512-0118 (SP-20260512-0010 W2): closes
+	// the H1 fabrication gap by making the path-access substrate visible
+	// to the LLM. Empty when no constraints are configured for the agent.
+	Permissions      string
 	Session          string                 // session name, mode label, workspace name
 	Context          string                 // formatted ContextBroker items where Source != "memory"
 	UserContext      string                 // J10 (CW-20260426-0008): user-authored session context prompt + included docs.
@@ -251,6 +274,24 @@ func (cb *ContextClient) AssembleSlotSources(ctx context.Context, session *store
 	// Rules slot — agent tags + tool allowlist. S4a expands this.
 	rules := buildRulesSlotContent(agent)
 
+	// Permissions slot — CW-20260512-0118 (SP-20260512-0010 W2). Render a
+	// human-readable summary of the session's effective path access so the
+	// LLM reads the constraints it operates under, rather than reasoning
+	// about access from priors and fabricating. This is the upstream
+	// PREVENTION layer for the c160 turn-16 fabrication regression; the
+	// runtime detection added by CW-20260512-0095 (PR #144) stays as the
+	// downstream DETECTION backstop.
+	//
+	// W4 (CW-20260512-0120, PR #154) integration: when an agent-scoped
+	// permission RuleSet is wired (no production callers today; reserved
+	// for the future), the caller MUST call (*RuleSet).Resolve(workingDir)
+	// before passing it to RenderPermissionSummary so workspace-relative
+	// `./` patterns appear in resolved absolute form rather than leaking
+	// un-resolved shapes into the prompt. The resolve call site lives at
+	// the wiring layer (here), not inside the renderer — this preserves
+	// the renderer's pure-projection contract.
+	permissionsContent := cb.buildPermissionsSlotContent(session, agent)
+
 	// Session slot — small, stable identifiers.
 	sessionContent := buildSessionSlotContent(session, mode, workspace)
 
@@ -315,6 +356,7 @@ func (cb *ContextClient) AssembleSlotSources(ctx context.Context, session *store
 		Agent:            agentPrompt,
 		Mode:             modeContent,
 		Rules:            rules,
+		Permissions:      permissionsContent,
 		Session:          sessionContent,
 		Context:          contextContent,
 		UserContext:      userContextContent,
@@ -381,6 +423,72 @@ func buildUserContextSlot(s *store.Store, sessionID string) string {
 	}
 
 	return strings.Join(parts, "\n\n")
+}
+
+// buildPermissionsSlotContent renders the SlotPermissions block — a human-
+// readable per-session path-access summary (CW-20260512-0118,
+// SP-20260512-0010 W2).
+//
+// Inputs (all optional — empty input renders to empty string, slot is
+// silently skipped):
+//
+//   - cb.DevToolsAllowedPaths: the binary-scoped allow-list configured via
+//     nanite.yaml `dev_tools_allowed_paths`. Threaded onto the
+//     ContextClient at composition-root time.
+//
+//   - cb.PathGrants: session-scoped explicit-mention grants. The renderer
+//     reads (own-bucket, lineage-walk-union) so the rendered "session
+//     grants" vs "inherited from parent session" sections stay
+//     attribution-correct.
+//
+//   - permission.RuleSet: not wired today (no production caller populates
+//     a per-session RuleSet). Reserved for future wiring; when added, the
+//     resolve step (W4 / CW-20260512-0120) MUST run here so `./`-prefixed
+//     patterns appear in their absolute form in the rendered summary.
+//
+// Session scope qualifier: when the agent is a subagent (slug != chat
+// default), the qualifier is "this <slug> subagent's scope" so the
+// rendered output matches the agent's identity. Falls back to the generic
+// "this session's scope" otherwise.
+//
+// Determinism: pure projection over the inputs. The slot's SHA-256 cache
+// key (internal/context.ComputeCacheKey) is per-session-stable until
+// path_grants shift or the resolved RuleSet changes — keeps the slot in
+// the Anthropic cacheable prefix.
+func (cb *ContextClient) buildPermissionsSlotContent(session *store.Session, agent *store.AgentProfile) string {
+	if cb == nil || session == nil {
+		return ""
+	}
+
+	var ownGrants, inheritedGrants []string
+	if cb.PathGrants != nil {
+		ownGrants = cb.PathGrants.ListGrants(session.ID)
+		inheritedGrants = cb.PathGrants.ListLineageGrants(session.ID)
+	}
+
+	scope := "this session's scope"
+	if agent != nil && agent.Slug != "" && agent.Slug != "default" {
+		scope = "this " + agent.Slug + " subagent's scope"
+	}
+
+	// Per-session RuleSet resolution hook (W4 integration). When a
+	// caller starts populating a session-scoped *permission.RuleSet,
+	// resolve it against the session's working_dir here so workspace-
+	// relative patterns render as their canonical absolute form. The
+	// best signal we have today for working_dir is
+	// PathGrants.BestSessionDir(session.ID) — the longest grant that
+	// exists on disk as a directory. Empty when the session has no
+	// path-bearing user turn yet; in that case Resolve would error on
+	// any `./` rule, so we keep rules nil until either side is present.
+	var resolvedRules *permission.RuleSet // reserved hook — see W4 PR #154
+
+	return permission.RenderPermissionSummary(permission.SummaryInput{
+		Rules:           resolvedRules,
+		AllowedPaths:    cb.DevToolsAllowedPaths,
+		OwnGrants:       ownGrants,
+		InheritedGrants: inheritedGrants,
+		SessionScope:    scope,
+	})
 }
 
 // deriveIntent extracts the broker intent from the session's recent user turn.

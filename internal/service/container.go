@@ -228,6 +228,14 @@ type ContainerConfig struct {
 	// instance with the downstream selfTools.Broker scaffold (both
 	// layers run; see chat_broker_dispatch.go for the boundary).
 	AgentBroker agentbroker.Broker
+
+	// DevToolsAllowedPaths is the binary-scoped allow-list configured via
+	// nanite.yaml `dev_tools_allowed_paths` (see cmd/nanite/main.go
+	// resolveDevToolsAllowedPaths). Threaded onto the ContextClient so the
+	// per-session SlotPermissions summary (CW-20260512-0118) surfaces the
+	// baseline READ roots the agent operates against. Empty / nil leaves
+	// the "workspace allow-list" section out of the rendered summary.
+	DevToolsAllowedPaths []string
 }
 
 func newRuntimeAdapterRegistry() *agent.AdapterRegistry {
@@ -514,7 +522,20 @@ func NewContainer(cfg ContainerConfig) (*Container, error) {
 	// drops silently, which is the intended MVP behavior.
 	messagingSvc.SetNotificationSink(&messagingStreamSink{streams: streams})
 
+	// Trust-agent path grants (CW-20260430-0009). Session-scoped store
+	// for explicit-mention auto-grants registered at user-message ingest.
+	// Threaded onto the tool-execution context so dev_tools resolveAllowed
+	// can fall back to it when the static AllowedPaths list rejects.
+	// Constructed early so the ContextClient and the chat service share
+	// the same instance — the ContextClient reads it via
+	// AssembleSlotSources to render the SlotPermissions summary
+	// (CW-20260512-0118), and dev_tools reads it via the per-call
+	// context (permission.WithPathGrants) when enforcing the gate.
+	pathGrants := permission.NewPathGrants()
+
 	contextClient := chat.NewContextClient(cfg.Store)
+	contextClient.PathGrants = pathGrants
+	contextClient.DevToolsAllowedPaths = cfg.DevToolsAllowedPaths
 
 	// --- ContextBroker: universal context retrieval ---
 	{
@@ -616,11 +637,9 @@ func NewContainer(cfg ContainerConfig) (*Container, error) {
 		permissions.SetMode(permission.ModeYolo)
 	}
 
-	// Trust-agent path grants (CW-20260430-0009). Session-scoped store
-	// for explicit-mention auto-grants registered at user-message ingest.
-	// Threaded onto the tool-execution context so dev_tools resolveAllowed
-	// can fall back to it when the static AllowedPaths list rejects.
-	pathGrants := permission.NewPathGrants()
+	// (pathGrants is constructed earlier and shared with ContextClient so the
+	// SlotPermissions summary renders against the same grant store the
+	// dev_tools gate consults. See CW-20260512-0118.)
 
 	// Model catalog — fetches pricing and context-window data from models.dev.
 	// After each successful fetch the OnRefresh hook pushes the data into the

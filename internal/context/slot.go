@@ -27,6 +27,23 @@ const (
 	// for back-compat. SlotMode is for the session-scoped *store.Mode only.
 	SlotMode        = "mode"
 	SlotRules       = "rules"
+	// SlotPermissions carries the per-session path-access summary
+	// (CW-20260512-0118, SP-20260512-0010 W2). Sourced via
+	// permission.RenderPermissionSummary from the agent's resolved
+	// permission.RuleSet, the binary-scoped AllowedPaths list, and the
+	// session-scoped PathGrants bucket (own + lineage). The summary makes
+	// the path-access substrate VISIBLE to the LLM so subagents read
+	// constraints and refuse instead of fabricating against inaccessible
+	// paths (the c160 turn-16 regression target). Sibling-split from
+	// SlotSystem rather than concatenated into it so the AGENTS.md walk-up
+	// work (CW-20260512-0116) can plug into SlotSystem without merge
+	// conflict.
+	//
+	// Non-compactable — sits with SlotRules / SlotAgent / SlotUniversal in
+	// the cacheable prefix. Per-session-stable until path_grants shift or
+	// the resolved RuleSet changes; the Anthropic cacheable prefix
+	// invariant survives every turn that doesn't perturb permissions.
+	SlotPermissions = "permissions"
 	SlotTools       = "tools"
 	SlotSession     = "session"
 	SlotContext     = "context"     // dynamic enrichment (plugins, context broker)
@@ -59,6 +76,7 @@ var SlotOrder = []string{
 	SlotAgent,
 	SlotMode,
 	SlotRules,
+	SlotPermissions, // CW-20260512-0118 (SP-20260512-0010 W2): per-session path-access summary.
 	SlotTools,
 	SlotSession,
 	SlotContext,
@@ -92,6 +110,7 @@ func DefaultCompactable() map[string]bool {
 		SlotAgent:        false,
 		SlotMode:         false, // B1: session-mode addendum — survives compaction.
 		SlotRules:        false,
+		SlotPermissions:  false, // CW-20260512-0118 — path-access summary survives compaction; constraints stay visible.
 		SlotTools:        true,
 		SlotSession:      true,
 		SlotContext:      true,
@@ -160,7 +179,8 @@ func DefaultBudgets() map[string]int {
 		SlotAgent:        1000,
 		SlotMode:         500, // B1: session-mode addendum — small by design.
 		SlotRules:        500,
-		SlotTools:        0,    // proportional to selected tool count
+		SlotPermissions:  800, // CW-20260512-0118 — bounded by deny enumeration + provenance tags; per-session stable.
+		SlotTools:        0,   // proportional to selected tool count
 		SlotSession:      1000,
 		SlotContext:      0,    // dynamic
 		SlotUserContext:  2000, // J10: user context prompt; thin by design.

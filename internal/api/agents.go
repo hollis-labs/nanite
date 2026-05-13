@@ -28,6 +28,13 @@ func (a *API) handleCreateAgent(w http.ResponseWriter, r *http.Request) {
 		a.errorResp(w, http.StatusBadRequest, "name, slug, and system_prompt are required")
 		return
 	}
+	// CW-20260512-0111: source='internal' is reserved for file-sourced
+	// internal profiles (boot sync from internal/agent/builtin/profiles/).
+	// API-created agents cannot claim that provenance.
+	if req.Source == "internal" {
+		a.errorResp(w, http.StatusBadRequest, "source='internal' is reserved for file-sourced internal profiles; use source='user' or omit")
+		return
+	}
 
 	agent := &store.AgentProfile{
 		ID:                      req.ID,
@@ -100,6 +107,16 @@ func (a *API) handleUpdateAgent(w http.ResponseWriter, r *http.Request) {
 	existing, err := a.Services.Store.GetAgent(id)
 	if err != nil {
 		a.errorResp(w, http.StatusNotFound, "agent not found")
+		return
+	}
+
+	// CW-20260512-0111: internal profiles are file source-of-truth (boot
+	// sync replaces the row body from internal/agent/builtin/profiles/*.md).
+	// API edits would be overwritten on the next restart, so reject them at
+	// the surface. The UI surfaces this with a read-only affordance + the
+	// `source_ref` path so operators know to edit the file.
+	if existing.Source == "internal" {
+		a.errorResp(w, http.StatusConflict, "agent is internal (file source of truth); edit "+existing.SourceRef+" and restart Nanite")
 		return
 	}
 

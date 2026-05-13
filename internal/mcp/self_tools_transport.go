@@ -1628,23 +1628,49 @@ func (st *SelfToolsTransport) syncSubagentEnvelope(ctx context.Context, runID st
 		return subagent.NewFailureEnvelope(runID, subagent.ErrorKindInternal,
 			"subagent run not found after spawn", nil)
 	}
-	summary := st.recoverSyncSummary(run)
+	summary, recoverErr := st.recoverSyncSummary(run)
+	if recoverErr != nil {
+		// Summary recovery failed due to an actual error (e.g. ListMessages
+		// returned a DB error, store closed). This is an internal failure,
+		// NOT an empty-reply case — routing through EnvelopeFromRun with
+		// summary="" would emit ErrorKindEmptyReply ("completed but
+		// returned no assistant text"), which is misleading when the real
+		// cause is a backend fault. Surface the underlying error so the
+		// parent's failure handling reflects the actual issue.
+		return subagent.NewFailureEnvelope(run.ID, subagent.ErrorKindInternal,
+			fmt.Sprintf("summary recovery failed: %v", recoverErr),
+			map[string]any{
+				"role":   run.Role,
+				"status": run.Status,
+			})
+	}
 	return subagent.EnvelopeFromRun(run, summary)
 }
 
 // recoverSyncSummary scans the child session's assistant messages for
-// the most recent text content. Mirrors the prior syncSubagentSummary
-// helper, but returns "" instead of (text, false) — the caller
-// (EnvelopeFromRun) routes empty summaries to ErrorKindEmptyReply,
-// preserving the prior "ok=false → spawn ack-only" semantics through
-// the envelope shape.
-func (st *SelfToolsTransport) recoverSyncSummary(run *subagent.Run) string {
+// the most recent text content. Returns (summary, nil) on success
+// (including the "no assistant text exists" empty-string case), or
+// ("", err) when the underlying store lookup itself fails. The
+// caller (syncSubagentEnvelope) discriminates between these two cases
+// so a DB error is reported as ErrorKindInternal, not the
+// misleading ErrorKindEmptyReply that the prior eat-the-error
+// signature produced.
+//
+// Round-1 fix (Copilot #3): pre-round-1 this helper returned plain
+// string and swallowed ListMessages errors. The caller had no way to
+// distinguish "store closed" from "no text" — both routed through
+// EnvelopeFromRun with summary="" and emitted ErrorKindEmptyReply.
+func (st *SelfToolsTransport) recoverSyncSummary(run *subagent.Run) (string, error) {
 	if run == nil || run.ChildSessionID == "" {
-		return ""
+		// No child session to scan — legitimately empty, not an error.
+		return "", nil
 	}
 	msgs, err := st.Store.ListMessages(run.ChildSessionID, 20)
 	if err != nil {
-		return ""
+		// Store lookup failure — surface to caller so the envelope can
+		// emit ErrorKindInternal instead of the misleading
+		// ErrorKindEmptyReply ("completed but returned no assistant text").
+		return "", fmt.Errorf("list messages: %w", err)
 	}
 	for i := len(msgs) - 1; i >= 0; i-- {
 		if msgs[i].Role != "assistant" || msgs[i].Content == "" {
@@ -1652,13 +1678,13 @@ func (st *SelfToolsTransport) recoverSyncSummary(run *subagent.Run) string {
 		}
 		if text := extractStoredAssistantText(msgs[i].Content); text != "" {
 			if literal, ok := extractLiteralSubagentOutput(run.Prompt, text); ok {
-				return literal
+				return literal, nil
 			}
-			return text
+			return text, nil
 		}
-		return msgs[i].Content
+		return msgs[i].Content, nil
 	}
-	return ""
+	return "", nil
 }
 
 // envelopeResult marshals a ResultEnvelope into a ToolResult. IsError

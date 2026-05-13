@@ -421,6 +421,43 @@ func (g *PathGrants) ListGrants(sessionID string) []string {
 	return out
 }
 
+// ListLineageGrants returns the union of granted paths across every
+// ancestor session reachable from sessionID via RegisterLineage, EXCLUDING
+// sessionID's own bucket. Walk is depth-bounded by lineageMaxHops and
+// cycle-guarded. Returns nil when sessionID has no lineage entry or every
+// ancestor bucket is empty. Order is unspecified.
+//
+// CW-20260512-0118 (SP-20260512-0010 W2): the permission summary renderer
+// in summary.go consumes (ListGrants, ListLineageGrants) so the agent's
+// rendered "session grants" vs "inherited from parent session" sections
+// stay attribution-correct. Mirrors the LookupPath lineage walk so the
+// rendered view matches the runtime gate's view.
+func (g *PathGrants) ListLineageGrants(sessionID string) []string {
+	if g == nil || sessionID == "" {
+		return nil
+	}
+	g.mu.RLock()
+	defer g.mu.RUnlock()
+	visited := map[string]struct{}{sessionID: {}}
+	cursor := sessionID
+	var out []string
+	for hop := 0; hop < lineageMaxHops; hop++ {
+		parent, ok := g.lineage[cursor]
+		if !ok || parent == "" {
+			break
+		}
+		if _, dup := visited[parent]; dup {
+			break
+		}
+		visited[parent] = struct{}{}
+		for p := range g.grants[parent] {
+			out = append(out, p)
+		}
+		cursor = parent
+	}
+	return out
+}
+
 // ExtractPathMentions returns the set of strict-prefix path tokens found
 // in message. A token qualifies when, after splitting on whitespace, it
 // begins with one of:

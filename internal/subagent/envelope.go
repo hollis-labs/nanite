@@ -122,12 +122,30 @@ func NewSuccessEnvelope(runID, summary string) ResultEnvelope {
 
 // NewFailureEnvelope builds a Success=false envelope. runID may be
 // empty when the failure occurred before a run row was persisted
-// (e.g. spawn validation rejection). The context map MUST NOT carry
-// tool_use_ids — same trust class as SP-20260512-0007 (per
-// CW-20260512-0122 sharp edge).
+// (e.g. spawn validation rejection).
+//
+// Trust contract: the constructor strips known tool_use_id-shaped
+// keys from the caller-provided context map defensively (case-
+// insensitive). Failure envelopes MUST NOT carry fabricated tool IDs
+// — same trust class as SP-20260512-0007 (per CW-20260512-0122
+// sharp edge). Pre-round-1 the docstring declared "MUST NOT" but
+// copied every key verbatim, so a buggy caller could violate the
+// contract silently. Now the constructor enforces it: any key in
+// forbiddenContextKeys (tool_use_id, tool_use_ids, tool_id) is
+// silently dropped during copy. The defense is belt-and-braces with
+// the call-site discipline of only populating from authoritative
+// run state (status, role, run_id).
 func NewFailureEnvelope(runID, kind, message string, context map[string]any) ResultEnvelope {
 	ctx := map[string]any{}
 	for k, v := range context {
+		if isForbiddenContextKey(k) {
+			// Defense in depth: drop silently. A future caller who
+			// accidentally threads a tool_use_id through this map
+			// (the c160 turn-18 trust class) gets the same protection
+			// as the existing call sites without needing to remember
+			// the contract.
+			continue
+		}
 		ctx[k] = v
 	}
 	if runID != "" {
@@ -144,6 +162,50 @@ func NewFailureEnvelope(runID, kind, message string, context map[string]any) Res
 			Context: ctx,
 		},
 	}
+}
+
+// forbiddenContextKeys is the set of map keys NewFailureEnvelope
+// strips defensively (case-insensitive). Stable list — same trust
+// class as SP-20260512-0007 and CW-20260512-0122 sharp edge.
+var forbiddenContextKeys = []string{
+	"tool_use_id",
+	"tool_use_ids",
+	"tool_id",
+}
+
+// isForbiddenContextKey returns true if the key (case-insensitive)
+// matches any entry in forbiddenContextKeys. Used by
+// NewFailureEnvelope to strip tool_use_id-shaped keys from caller-
+// provided context maps.
+func isForbiddenContextKey(k string) bool {
+	for _, forbidden := range forbiddenContextKeys {
+		if equalFold(k, forbidden) {
+			return true
+		}
+	}
+	return false
+}
+
+// equalFold is a tiny case-insensitive string equality without
+// importing strings — matches the in-file containsFold helper's
+// rationale (small isolated package, keep the diff minimal).
+func equalFold(a, b string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := 0; i < len(a); i++ {
+		ca, cb := a[i], b[i]
+		if 'A' <= ca && ca <= 'Z' {
+			ca = ca + 32
+		}
+		if 'A' <= cb && cb <= 'Z' {
+			cb = cb + 32
+		}
+		if ca != cb {
+			return false
+		}
+	}
+	return true
 }
 
 // EnvelopeFromRun builds an envelope from a *Run row and the

@@ -257,6 +257,47 @@ func TestNewFailureEnvelope_NoToolUseIDFabrication(t *testing.T) {
 	}
 }
 
+// TestNewFailureEnvelope_StripsForbiddenContextKeys pins the
+// round-1 #1 defense: NewFailureEnvelope strips known tool_use_id-
+// shaped keys from the caller-provided context map (case-
+// insensitive) so a buggy or unsuspecting caller cannot violate
+// the trust contract by accident. Same trust class as
+// SP-20260512-0007 — see envelope.go's forbiddenContextKeys.
+func TestNewFailureEnvelope_StripsForbiddenContextKeys(t *testing.T) {
+	cases := []map[string]any{
+		// Lowercase canonical forms.
+		{"tool_use_id": "toolu_evil_lower", "role": "researcher"},
+		{"tool_use_ids": []string{"toolu_a", "toolu_b"}, "role": "researcher"},
+		{"tool_id": "toolu_evil_id", "role": "researcher"},
+		// Mixed-case variants — defense is case-insensitive.
+		{"Tool_Use_Id": "toolu_mixed", "role": "researcher"},
+		{"TOOL_USE_IDS": []string{"toolu_upper"}, "role": "researcher"},
+		// Sanity: a caller passing multiple forbidden keys gets ALL
+		// stripped.
+		{"tool_use_id": "a", "tool_use_ids": []string{"b"}, "tool_id": "c", "role": "researcher"},
+	}
+	for _, ctx := range cases {
+		env := NewFailureEnvelope("run-defense", ErrorKindInternal, "test", ctx)
+		if env.Error.Context == nil {
+			t.Fatalf("input=%v: expected context with run_id + role at minimum", ctx)
+		}
+		for _, forbidden := range []string{"tool_use_id", "tool_use_ids", "tool_id",
+			"Tool_Use_Id", "TOOL_USE_IDS"} {
+			if v, present := env.Error.Context[forbidden]; present {
+				t.Errorf("input=%v: forbidden key %q survived (value=%v) — defense did not strip",
+					ctx, forbidden, v)
+			}
+		}
+		// Allowed keys must still pass through.
+		if env.Error.Context["role"] != "researcher" {
+			t.Errorf("input=%v: role key dropped — defense over-stripped", ctx)
+		}
+		if env.Error.Context["run_id"] != "run-defense" {
+			t.Errorf("input=%v: run_id key dropped — defense over-stripped", ctx)
+		}
+	}
+}
+
 // TestNewFailureEnvelope_RunIDEmptySkipped — when no run row was
 // persisted (spawn rejected pre-insert), run_id key is omitted
 // rather than emitted as empty string.

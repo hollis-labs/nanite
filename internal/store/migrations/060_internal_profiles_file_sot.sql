@@ -105,8 +105,14 @@ UPDATE agent_profiles
 --        the live DB and migration 058's WHERE id = 'blt-worker-001'
 --        anchor.
 
+-- NOTE: `default_mode` column dropped from INSERT list (SP-20260512-0011
+-- baseline fix). Migration 063 drops the column entirely; including it in
+-- this INSERT would fail on the second invocation of the migration runner
+-- (which re-executes all SQL files on every store.New). Migration 001 still
+-- creates the column with DEFAULT 'default' for the duration of the 001→063
+-- window on fresh installs.
 INSERT OR IGNORE INTO agent_profiles
-    (id, name, slug, system_prompt, description, modes, default_mode,
+    (id, name, slug, system_prompt, description, modes,
      mcp_servers, tool_permissions, can_execute, settings,
      created_at, updated_at,
      agent_hash, version, tools, directories, constraints, tags, status,
@@ -135,7 +141,7 @@ VALUES (
 
 - Ask one pointed question before a long tool chain when the scope is unclear.',
     'General-purpose chat agent',
-    '[]', 'default',
+    '[]',
     '[]', '{}', 0, '{}',
     datetime('now'), datetime('now'),
     '', 1, '[]', '[]', '{}', '[]', 'active',
@@ -146,7 +152,7 @@ VALUES (
 );
 
 INSERT OR IGNORE INTO agent_profiles
-    (id, name, slug, system_prompt, description, modes, default_mode,
+    (id, name, slug, system_prompt, description, modes,
      mcp_servers, tool_permissions, can_execute, settings,
      created_at, updated_at,
      agent_hash, version, tools, directories, constraints, tags, status,
@@ -162,7 +168,7 @@ VALUES (
 
 Stay within the assigned scope. Do not initiate new conversations or expand the task beyond what the parent dispatched. When the task is done, return the result. When you cannot complete it with the tools and paths available, return an explicit failure — the universal Refusal rules govern this (your reply is treated as authoritative by the parent).',
     'General-purpose execution agent dispatched by the Chat harness or other lead agents',
-    '[]', 'default',
+    '[]',
     '["engine","conduit"]', '{"allow_list":["*"]}', 1, '{}',
     datetime('now'), datetime('now'),
     '', 1, '[]', '[]', '{}', '[]', 'active',
@@ -173,7 +179,7 @@ Stay within the assigned scope. Do not initiate new conversations or expand the 
 );
 
 INSERT OR IGNORE INTO agent_profiles
-    (id, name, slug, system_prompt, description, modes, default_mode,
+    (id, name, slug, system_prompt, description, modes,
      mcp_servers, tool_permissions, can_execute, settings,
      created_at, updated_at,
      agent_hash, version, tools, directories, constraints, tags, status,
@@ -187,7 +193,7 @@ VALUES (
     'planner',
     'Planner role — identity TBD. Phase 6 cognition arc will define authoritative behavior. This stub reserves the slug for M3 reflex dispatch.',
     'Decomposition and sequencing agent — breaks open-scope tasks into structured plans (Phase 6 stub)',
-    '[]', 'default',
+    '[]',
     '[]', '{}', 0, '{}',
     datetime('now'), datetime('now'),
     '', 1, '[]', '[]', '{}', '[]', 'active',
@@ -198,7 +204,7 @@ VALUES (
 );
 
 INSERT OR IGNORE INTO agent_profiles
-    (id, name, slug, system_prompt, description, modes, default_mode,
+    (id, name, slug, system_prompt, description, modes,
      mcp_servers, tool_permissions, can_execute, settings,
      created_at, updated_at,
      agent_hash, version, tools, directories, constraints, tags, status,
@@ -233,7 +239,7 @@ Rules:
 Example response (no prose, no markdown — raw JSON only):
 ["scratchpad","memory_recall","peer_query","scope_check"]',
     'Classification-only peer agent that selects relevant affordance hints for the current turn''s think-tool block',
-    '[]', 'default',
+    '[]',
     '[]', '{"allow_list":[]}', 0, '{}',
     datetime('now'), datetime('now'),
     '', 1, '[]', '[]', '{}', '[]', 'active',

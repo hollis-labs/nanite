@@ -264,6 +264,18 @@ func (s *toolServiceImpl) SelectForAgent(ctx context.Context, sessionID, agentID
 		}
 	}
 
+	// Honor the agent profile's tool_permissions JSON (allow_list /
+	// deny_list) at description-render time (CW-20260512-0117 /
+	// SP-20260512-0010). SelectToolsAsProvider already applies
+	// CheckPermission to broker-selected and builtin tools (broker.go),
+	// but the discoverAgentMCPTools fallback above appends tools without
+	// running them past the policy. Filtering here covers every code path
+	// that lands a tool in allTools so the LLM only sees what it's
+	// permitted to call. The execution-time gate in
+	// ToolClient.CallTool remains the load-bearing backstop — defense in
+	// depth, per the harness-restoration design session.
+	allTools = filterToolsByPermissions(s.toolClient, agentID, allTools)
+
 	// Apply agent tools allowlist (schema v2) and the chat-role surface
 	// filter. The allowlist is always applied (when configured); the
 	// chat-surface filter only applies when the agent is the chat-role
@@ -874,6 +886,44 @@ func parseParentDispatchAllowlist(raw string) []string {
 		return nil
 	}
 	return out
+}
+
+// filterToolsByPermissions narrows the tool list to those permitted by the
+// agent profile's tool_permissions JSON column (allow_list / deny_list).
+// Idempotent for tools already filtered by toolclient.SelectToolsAsProvider —
+// re-applying the same CheckPermission to a tool that passed once is a
+// no-op. The value-add is closing the gap on tools that landed in allTools
+// from outside the broker (e.g., discoverAgentMCPTools fallback) so every
+// tool the LLM sees has cleared the policy.
+//
+// Nil-safe: tc == nil short-circuits (no permission machinery wired); empty
+// agentID returns the input unchanged because GetPermissions would yield
+// permissive default-permit and a wasteful CheckPermission walk.
+//
+// Cacheable-prefix note: tools surviving SelectToolsAsProvider already
+// passed CheckPermission, so this pass preserves their order and does not
+// invalidate the cacheable head of the tool array. Only discovery-fallback
+// tails are subject to net new filtering here. The cache-marker priority
+// work (CW-20260512-0109 / Sprint 1 T1.5) governs where the marker lands
+// — see decisions.nanite.tool_broker.per_call_descriptions_tail in Vanta.
+func filterToolsByPermissions(tc *toolclient.ToolClient, agentID string, tools []llmtypes.ToolDefinition) []llmtypes.ToolDefinition {
+	if tc == nil || agentID == "" || len(tools) == 0 {
+		return tools
+	}
+	filtered := make([]llmtypes.ToolDefinition, 0, len(tools))
+	var denied []string
+	for _, t := range tools {
+		if tc.CheckPermission(agentID, t.Name) {
+			filtered = append(filtered, t)
+			continue
+		}
+		denied = append(denied, t.Name)
+	}
+	if len(denied) > 0 {
+		slog.Debug("service/tool: tool_permissions filtered at description-render",
+			"agent", agentID, "before", len(tools), "after", len(filtered), "denied", denied)
+	}
+	return filtered
 }
 
 // filterToolsByAllowlist removes tools not in the agent's tools allowlist.

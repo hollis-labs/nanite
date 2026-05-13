@@ -425,6 +425,16 @@ func (tb *ToolClient) SelectToolsAsProvider(ctx context.Context, intent string, 
 // is false in user_settings, execution is denied regardless of the
 // agent's permission policy. This is the execution-time backstop that
 // complements the selection-time filter in SelectToolsAsProvider.
+//
+// Defense-in-depth contract (CW-20260512-0117 / SP-20260512-0010): the
+// tool_permissions JSON (allow_list / deny_list) is honored at
+// description-render time so the LLM only sees tools it can call —
+// see SelectToolsAsProvider (broker.go) and filterToolsByPermissions
+// (service/tool.go) for the surface-side filter. This CheckPermission
+// call is the load-bearing backstop: if a tool name slips past the
+// description filter (caller bypass, bug, stale tool cache, etc.), the
+// gate here denies execution. Do NOT remove this check on the
+// assumption the description filter is sufficient.
 func (tb *ToolClient) CallTool(ctx context.Context, agentID, toolName string, args map[string]any) (string, error) {
 	// Dev-tool gate (execution-time backstop). Applied before the permission
 	// check so a misconfigured allow-list cannot re-enable dev tools when

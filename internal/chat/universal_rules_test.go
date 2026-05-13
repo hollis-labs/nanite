@@ -5,6 +5,8 @@ import (
 	"strings"
 	"testing"
 
+	nctx "github.com/hollis-labs/nanite/internal/context"
+	"github.com/hollis-labs/nanite/internal/contextbroker"
 	"github.com/hollis-labs/nanite/internal/store"
 )
 
@@ -172,5 +174,37 @@ func TestAssembleSlotSources_UniversalSlotEmittedForSubagentDispatch(t *testing.
 	}
 	if sources.Universal != universalRulesBlock {
 		t.Error("SlotUniversal content drifted from canonical UniversalRulesBlock — content must be sourced verbatim")
+	}
+}
+
+// TestUniversalRulesBlock_FitsSlotUniversalBudget is the CW-20260513-0036
+// review-round-1 regression guard: pin UniversalRulesBlock()'s token count
+// under DefaultBudgets()[SlotUniversal] so future prompt edits cannot push
+// the block over the ceiling and silently reintroduce the stash/fallback
+// warning (assembly.go emits this when EstimateTokens(content) > budget).
+//
+// The existing TestUniversalRulesBlock_NonEmpty / TestAssembleSlotSources_*
+// tests assert sentinel text and verbatim slot population — they do NOT
+// constrain size. Without this test, an editor can add a clause that
+// pushes the block past 550 tokens; runtime then logs
+// "contextbroker: slot stash failed, falling back to inline ship" every
+// dispatch, but CI stays green. This test fails loud and points at where
+// to fix.
+//
+// Uses contextbroker.EstimateTokens — the SAME helper the assembly path
+// uses to compare against per-slot budgets (see assembly.go ~L262, where
+// `tokens := EstimateTokens(content)` gates the oversized branch). Asserts
+// only the `<= budget` relation, not an exact count, so the block can
+// grow within budget without churning this test.
+func TestUniversalRulesBlock_FitsSlotUniversalBudget(t *testing.T) {
+	block := UniversalRulesBlock()
+	budget := nctx.DefaultBudgets()[nctx.SlotUniversal]
+	tokens := contextbroker.EstimateTokens(block)
+	if tokens > budget {
+		t.Fatalf("UniversalRulesBlock is %d tokens, exceeds SlotUniversal budget of %d "+
+			"(would trigger contextbroker stash/fallback warning at runtime every dispatch). "+
+			"Either trim the block in internal/chat/universal_rules.go or bump the budget "+
+			"in internal/context/slot.go:208.",
+			tokens, budget)
 	}
 }

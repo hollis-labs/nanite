@@ -605,41 +605,37 @@ func TestSlotInvariants_DeliberateViolation_PositionZeroNotUniversal(t *testing.
 }
 
 // TestSlotInvariants_DeliberateViolation_PointerNonDeterministic
-// proves the pointer-determinism invariant catches a stasher whose
-// ArtifactID diverges between runs. Uses a counter-based stasher to
-// simulate a regression where two identical inputs produce different
-// IDs (would invalidate the cacheable prefix).
+// proves invariantPointerStashDeterminism catches a stasher whose
+// ArtifactID diverges between runs. Uses a counter-based stasher
+// (nondeterministicStasher, shared across both DecideAssembly calls)
+// to simulate a regression where two identical inputs produce
+// different IDs — the failure mode that would invalidate the cacheable
+// prefix on every turn that pointers to oversized slots.
+//
+// The test drives invariantPointerStashDeterminism directly and
+// asserts it returns a non-nil error naming the determinism violation.
+// Without this CALL site, the test would only verify the stasher
+// itself misbehaves — Copilot's review-round-1 finding (the
+// pre-fix shape only checked the stasher setup, not the invariant
+// function).
 func TestSlotInvariants_DeliberateViolation_PointerNonDeterministic(t *testing.T) {
-	budgets := ctxpkg.DefaultBudgets()
-	budgets[ctxpkg.SlotMemory] = 5
-	oversized := strings.Repeat("memory body slice — ", 200)
-
 	stasher := &nondeterministicStasher{}
-	plan1 := contextbroker.DecideAssembly(context.Background(), contextbroker.AssemblyInput{
-		Intent:    contextbroker.Intent{Type: contextbroker.IntentCustom},
-		SlotOrder: ctxpkg.SlotOrder,
-		SessionID: "non-det-sess",
-		Sources:   map[string]string{ctxpkg.SlotMemory: oversized},
-		Budgets:   budgets,
-		Stasher:   stasher,
-	})
-	plan2 := contextbroker.DecideAssembly(context.Background(), contextbroker.AssemblyInput{
-		Intent:    contextbroker.Intent{Type: contextbroker.IntentCustom},
-		SlotOrder: ctxpkg.SlotOrder,
-		SessionID: "non-det-sess",
-		Sources:   map[string]string{ctxpkg.SlotMemory: oversized},
-		Budgets:   budgets,
-		Stasher:   stasher,
-	})
-	m1 := findSlotDecision(plan1.Decisions, ctxpkg.SlotMemory)
-	m2 := findSlotDecision(plan2.Decisions, ctxpkg.SlotMemory)
-	if m1.ArtifactID == m2.ArtifactID {
-		t.Fatalf("nondeterministicStasher produced identical IDs across calls — test setup broken")
+	err := invariantPointerStashDeterminism(dispatcher.CallerChat, stasher)
+	if err == nil {
+		t.Fatal("DELIBERATE VIOLATION NOT CAUGHT: invariantPointerStashDeterminism accepted a stasher returning different IDs across calls — assertion has no teeth")
 	}
-	// The invariant check (in its abstracted form) should reject:
-	// reproduce its core assertion locally.
-	if m1.ArtifactID == m2.ArtifactID {
-		t.Fatal("DELIBERATE VIOLATION NOT CAUGHT: pointer IDs are identical despite nondeterministicStasher")
+	// False-positive guard: the error must name the determinism
+	// failure, not some unrelated mismatch (e.g. pointer-not-emitted).
+	// The nondeterministicStasher returns valid pointer envelopes and
+	// non-empty IDs; the ONLY failure mode should be ID disagreement
+	// across the two plans.
+	if !strings.Contains(err.Error(), "non-deterministic") {
+		t.Errorf("violation caught but for the wrong reason — expected 'non-deterministic' in error: %v", err)
+	}
+	// Sanity: confirm the stasher was actually invoked (would catch a
+	// regression where the broker stops calling the stasher at all).
+	if stasher.count < 2 {
+		t.Errorf("stasher invoked %d times, expected ≥2 (one per DecideAssembly call) — broker may have skipped the stash branch", stasher.count)
 	}
 }
 

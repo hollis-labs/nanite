@@ -471,16 +471,29 @@ func (cb *ContextClient) buildPermissionsSlotContent(session *store.Session, age
 		scope = "this " + agent.Slug + " subagent's scope"
 	}
 
-	// Per-session RuleSet resolution hook (W4 integration). When a
-	// caller starts populating a session-scoped *permission.RuleSet,
-	// resolve it against the session's working_dir here so workspace-
-	// relative patterns render as their canonical absolute form. The
-	// best signal we have today for working_dir is
-	// PathGrants.BestSessionDir(session.ID) — the longest grant that
-	// exists on disk as a directory. Empty when the session has no
-	// path-bearing user turn yet; in that case Resolve would error on
-	// any `./` rule, so we keep rules nil until either side is present.
-	var resolvedRules *permission.RuleSet // reserved hook — see W4 PR #154
+	// Per-session RuleSet — populated for subagent child sessions via
+	// CW-20260512-0119 (SP-20260512-0010 W3). The runner calls
+	// DeriveSubagentRuleSet at spawn time and stores the result on
+	// PathGrants.derivedRules; the renderer reads it here so the agent
+	// sees forwarded parent denies under "You CANNOT access (explicitly
+	// denied)" with provenance preserved (Source tagged "(via parent)").
+	//
+	// W4 contract: by the time the derived ruleset reaches this point
+	// it MUST already be in canonical absolute form. The runner
+	// resolves the subagent profile rules against the child session's
+	// working_dir inside DeriveSubagentRuleSet, and parent rules are
+	// assumed already-resolved per the chain invariant (the parent's
+	// own derived set was previously resolved when that session was
+	// itself spawned, or it was loaded from a YAML file via
+	// LoadRulesFromFile → Resolve).
+	//
+	// For top-level chat sessions that haven't been registered with a
+	// per-session ruleset, LookupDerivedRules returns nil and the
+	// renderer skips the rule-list sections naturally.
+	var resolvedRules *permission.RuleSet
+	if cb.PathGrants != nil {
+		resolvedRules = cb.PathGrants.LookupDerivedRules(session.ID)
+	}
 
 	return permission.RenderPermissionSummary(permission.SummaryInput{
 		Rules:           resolvedRules,

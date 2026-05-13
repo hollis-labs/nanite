@@ -12,21 +12,26 @@ import (
 )
 
 // seedMessageInbox inserts one unread message addressed to
-// (sess-1, file-backend) so handler tests can assert inbox reads and
+// (sess-1, test-file-backend) so handler tests can assert inbox reads and
 // unread-count return values.
+//
+// Slugs are test-scoped ("test-file-backend" / "test-file-frontend") to
+// avoid the UNIQUE collision with migration 062's `file-backend` seed
+// (SP-20260512-0009 W4, CW-20260512-0113). Mirrors the CW-20260512-0118
+// fix pattern.
 func seedMessageInbox(t *testing.T, a *API) {
 	t.Helper()
 	if err := a.Services.Store.CreateAgent(&store.AgentProfile{
-		ID:   "file-backend",
-		Slug: "file-backend",
+		ID:   "test-file-backend",
+		Slug: "test-file-backend",
 		Name: "Backend",
 		Kind: "external",
 	}); err != nil {
 		t.Fatalf("CreateAgent: %v", err)
 	}
 	if err := a.Services.Store.CreateAgent(&store.AgentProfile{
-		ID:   "file-frontend",
-		Slug: "file-frontend",
+		ID:   "test-file-frontend",
+		Slug: "test-file-frontend",
 		Name: "Frontend",
 		Kind: "external",
 	}); err != nil {
@@ -39,7 +44,7 @@ func seedMessageInbox(t *testing.T, a *API) {
 		FromSessionID: "sess-other",
 		FromAgentID:   messaging.UserSentinel,
 		ToSessionID:   "sess-1",
-		ToAgentID:     "file-backend",
+		ToAgentID:     "test-file-backend",
 		Body:          "hi",
 	}); err != nil {
 		t.Fatalf("seed: %v", err)
@@ -53,13 +58,13 @@ func TestHandleMessageUnreadCount_MatchingCallerHeadersPass(t *testing.T) {
 	a, mux := newTestAPI(t)
 	seedMessageInbox(t, a)
 
-	req := httptest.NewRequest("GET", "/api/messaging/unread?session_id=sess-1&agent_id=file-backend", nil)
+	req := httptest.NewRequest("GET", "/api/messaging/unread?session_id=sess-1&agent_id=test-file-backend", nil)
 	// In production the middleware stamps these headers onto ctx. This
 	// test exercises the handler-level contract, so we stamp the
 	// CallerIdentity manually via request ctx.
 	req = req.WithContext(messaging.WithCaller(req.Context(), messaging.CallerIdentity{
 		SessionID: "sess-1",
-		AgentID:   "file-backend",
+		AgentID:   "test-file-backend",
 	}))
 	rec := httptest.NewRecorder()
 	mux.ServeHTTP(rec, req)
@@ -85,10 +90,10 @@ func TestHandleMessageUnreadCount_MismatchedCallerHeadersReject(t *testing.T) {
 	a, mux := newTestAPI(t)
 	seedMessageInbox(t, a)
 
-	req := httptest.NewRequest("GET", "/api/messaging/unread?session_id=sess-1&agent_id=file-backend", nil)
+	req := httptest.NewRequest("GET", "/api/messaging/unread?session_id=sess-1&agent_id=test-file-backend", nil)
 	req = req.WithContext(messaging.WithCaller(req.Context(), messaging.CallerIdentity{
 		SessionID: "sess-1",
-		AgentID:   "file-frontend", // caller is NOT the target inbox owner
+		AgentID:   "test-file-frontend", // caller is NOT the target inbox owner
 	}))
 	rec := httptest.NewRecorder()
 	mux.ServeHTTP(rec, req)
@@ -106,7 +111,7 @@ func TestHandleMessageUnreadCount_NoHeadersFallsOpen(t *testing.T) {
 	a, mux := newTestAPI(t)
 	seedMessageInbox(t, a)
 
-	req := httptest.NewRequest("GET", "/api/messaging/unread?session_id=sess-1&agent_id=file-backend", nil)
+	req := httptest.NewRequest("GET", "/api/messaging/unread?session_id=sess-1&agent_id=test-file-backend", nil)
 	// No WithCaller — simulates a client that has not adopted the header contract.
 	rec := httptest.NewRecorder()
 	mux.ServeHTTP(rec, req)
@@ -132,10 +137,10 @@ func TestHandleMessageInbox_MismatchedCallerHeadersReject(t *testing.T) {
 	a, mux := newTestAPI(t)
 	seedMessageInbox(t, a)
 
-	req := httptest.NewRequest("GET", "/api/messaging/inbox?session_id=sess-1&agent_id=file-backend", nil)
+	req := httptest.NewRequest("GET", "/api/messaging/inbox?session_id=sess-1&agent_id=test-file-backend", nil)
 	req = req.WithContext(messaging.WithCaller(req.Context(), messaging.CallerIdentity{
 		SessionID: "sess-1",
-		AgentID:   "file-frontend", // wrong agent
+		AgentID:   "test-file-frontend", // wrong agent
 	}))
 	rec := httptest.NewRecorder()
 	mux.ServeHTTP(rec, req)
@@ -151,10 +156,10 @@ func TestHandleMessageInbox_MatchingCallerHeadersPass(t *testing.T) {
 	a, mux := newTestAPI(t)
 	seedMessageInbox(t, a)
 
-	req := httptest.NewRequest("GET", "/api/messaging/inbox?session_id=sess-1&agent_id=file-backend", nil)
+	req := httptest.NewRequest("GET", "/api/messaging/inbox?session_id=sess-1&agent_id=test-file-backend", nil)
 	req = req.WithContext(messaging.WithCaller(req.Context(), messaging.CallerIdentity{
 		SessionID: "sess-1",
-		AgentID:   "file-backend",
+		AgentID:   "test-file-backend",
 	}))
 	rec := httptest.NewRecorder()
 	mux.ServeHTTP(rec, req)

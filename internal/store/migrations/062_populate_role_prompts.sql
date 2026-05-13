@@ -58,7 +58,7 @@ BEGIN;
 
 -- 1) researcher — read-only investigation, no permissionMode=yolo
 INSERT OR IGNORE INTO agent_profiles
-    (id, name, slug, system_prompt, description, modes, default_mode,
+    (id, name, slug, system_prompt, description, modes,
      mcp_servers, tool_permissions, can_execute, settings,
      created_at, updated_at,
      agent_hash, version, tools, directories, constraints, tags, status,
@@ -84,7 +84,7 @@ VALUES (
 - Follow with evidence — file references and short quoted snippets.
 - Call out gaps. Partial findings beat a complete-looking report over thin data.',
     'Read-only investigation agent — gathers and summarizes evidence from the workspace without modifying state',
-    '[]', 'default',
+    '[]',
     '[]', '{"allow_list":["dev_read","dev_glob","dev_grep","tool_describe","tool_validate","lesson_capture"]}', 0, '{}',
     datetime('now'), datetime('now'),
     '', 1, '[]', '[]', '{}', '[]', 'active',
@@ -96,7 +96,7 @@ VALUES (
 
 -- 2) analyst — one-shot classifier, Haiku tier, no tools
 INSERT OR IGNORE INTO agent_profiles
-    (id, name, slug, system_prompt, description, modes, default_mode,
+    (id, name, slug, system_prompt, description, modes,
      mcp_servers, tool_permissions, can_execute, settings,
      created_at, updated_at,
      agent_hash, version, tools, directories, constraints, tags, status,
@@ -122,7 +122,7 @@ VALUES (
 - Keep rationale to one short sentence per item when requested. Omit otherwise.
 - For ambiguous input, return your best classification AND a low_confidence marker — do not abstain silently.',
     'Classification and scoring agent — returns structured judgments over a bounded input, not free-form prose',
-    '[]', 'default',
+    '[]',
     '[]', '{"deny_list":["*"]}', 0, '{}',
     datetime('now'), datetime('now'),
     '', 1, '[]', '[]', '{}', '[]', 'active',
@@ -134,7 +134,7 @@ VALUES (
 
 -- 3) file-backend — file-tier I/O, permissionMode=yolo
 INSERT OR IGNORE INTO agent_profiles
-    (id, name, slug, system_prompt, description, modes, default_mode,
+    (id, name, slug, system_prompt, description, modes,
      mcp_servers, tool_permissions, can_execute, settings,
      created_at, updated_at,
      agent_hash, version, tools, directories, constraints, tags, status,
@@ -159,7 +159,7 @@ VALUES (
 - Return the paths and line ranges you changed.
 - When a write fails (lock, permission, missing parent dir), report the exact error — do not retry silently with a different path.',
     'File-tier I/O specialist for Nanite local state — targeted reads, writes, and migrations against on-disk artifacts',
-    '[]', 'default',
+    '[]',
     '["engine","conduit"]', '{"allow_list":["dev_read","dev_glob","dev_grep","dev_write","dev_edit","tool_describe","tool_validate","lesson_capture"]}', 1, '{}',
     datetime('now'), datetime('now'),
     '', 1, '[]', '[]', '{}', '[]', 'active',
@@ -171,7 +171,7 @@ VALUES (
 
 -- 4) backend — Go service-layer specialist, permissionMode=yolo
 INSERT OR IGNORE INTO agent_profiles
-    (id, name, slug, system_prompt, description, modes, default_mode,
+    (id, name, slug, system_prompt, description, modes,
      mcp_servers, tool_permissions, can_execute, settings,
      created_at, updated_at,
      agent_hash, version, tools, directories, constraints, tags, status,
@@ -196,7 +196,7 @@ VALUES (
 - Return the package(s) edited, the test command(s) run, and the result.
 - When a build or test fails, paste the exact error verbatim. Do not summarize a compile error into prose.',
     'Go backend specialist — service-layer code, SQL migrations, and server-side test work in the Nanite codebase',
-    '[]', 'default',
+    '[]',
     '["engine","conduit"]', '{"allow_list":["*"]}', 1, '{}',
     datetime('now'), datetime('now'),
     '', 1, '[]', '[]', '{}', '[]', 'active',
@@ -208,7 +208,7 @@ VALUES (
 
 -- 5) background-job — async queue worker, permissionMode=yolo
 INSERT OR IGNORE INTO agent_profiles
-    (id, name, slug, system_prompt, description, modes, default_mode,
+    (id, name, slug, system_prompt, description, modes,
      mcp_servers, tool_permissions, can_execute, settings,
      created_at, updated_at,
      agent_hash, version, tools, directories, constraints, tags, status,
@@ -233,7 +233,7 @@ VALUES (
 - Return a single terminal envelope. Include artifact paths, exit codes, and any error verbatim.
 - On partial failure, return the explicit failure with what was done and what was not.',
     'Async queue-worker agent — runs scoped tasks off the chat-turn critical path, returns a single terminal result',
-    '[]', 'default',
+    '[]',
     '["engine","conduit"]', '{"allow_list":["*"]}', 1, '{}',
     datetime('now'), datetime('now'),
     '', 1, '[]', '[]', '{}', '[]', 'active',

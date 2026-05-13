@@ -100,7 +100,7 @@ func TestAssembleSlotSources_PermissionsSlot_SubagentScope(t *testing.T) {
 	if err := s.CreateSession(sess); err != nil {
 		t.Fatalf("CreateSession: %v", err)
 	}
-	agent := &store.AgentProfile{Name: "researcher", Slug: "researcher"}
+	agent := &store.AgentProfile{Name: "researcher", Slug: "researcher-test"}
 	if err := s.CreateAgent(agent); err != nil {
 		t.Fatalf("CreateAgent: %v", err)
 	}
@@ -109,7 +109,7 @@ func TestAssembleSlotSources_PermissionsSlot_SubagentScope(t *testing.T) {
 	if err != nil {
 		t.Fatalf("AssembleSlotSources: %v", err)
 	}
-	if !strings.Contains(sources.Permissions, "this researcher subagent's scope") {
+	if !strings.Contains(sources.Permissions, "this researcher-test subagent's scope") {
 		t.Errorf("expected researcher-scoped qualifier; got:\n%s", sources.Permissions)
 	}
 }
@@ -171,7 +171,7 @@ func TestAssembleSlotSources_PermissionsSlot_LineageGrants(t *testing.T) {
 	if err := s.CreateSession(childSess); err != nil {
 		t.Fatalf("CreateSession child: %v", err)
 	}
-	agent := &store.AgentProfile{Name: "researcher", Slug: "researcher"}
+	agent := &store.AgentProfile{Name: "researcher", Slug: "researcher-test"}
 	if err := s.CreateAgent(agent); err != nil {
 		t.Fatalf("CreateAgent: %v", err)
 	}
@@ -232,7 +232,7 @@ func TestAssembleSlotSources_PermissionsSlot_c160_RegressionRepro(t *testing.T) 
 	if err := s.CreateSession(childSess); err != nil {
 		t.Fatalf("CreateSession child: %v", err)
 	}
-	researcher := &store.AgentProfile{Name: "researcher", Slug: "researcher"}
+	researcher := &store.AgentProfile{Name: "researcher", Slug: "researcher-test"}
 	if err := s.CreateAgent(researcher); err != nil {
 		t.Fatalf("CreateAgent: %v", err)
 	}
@@ -255,7 +255,7 @@ func TestAssembleSlotSources_PermissionsSlot_c160_RegressionRepro(t *testing.T) 
 
 	// The researcher's scope MUST be named, so the closing refusal hook
 	// points to the right qualifier.
-	if !strings.Contains(sources.Permissions, "this researcher subagent's scope") {
+	if !strings.Contains(sources.Permissions, "this researcher-test subagent's scope") {
 		t.Errorf("c160 regression: researcher scope not surfaced; got:\n%s", sources.Permissions)
 	}
 
@@ -307,7 +307,7 @@ func TestAssembleSlotSources_PermissionsSlot_W3ForwardedDeniesRendered(t *testin
 	if err := s.CreateSession(childSess); err != nil {
 		t.Fatalf("CreateSession: %v", err)
 	}
-	researcher := &store.AgentProfile{Name: "researcher", Slug: "researcher"}
+	researcher := &store.AgentProfile{Name: "researcher", Slug: "researcher-test"}
 	if err := s.CreateAgent(researcher); err != nil {
 		t.Fatalf("CreateAgent: %v", err)
 	}
@@ -347,7 +347,7 @@ func TestAssembleSlotSources_PermissionsSlot_W3ForwardedDeniesRendered(t *testin
 		t.Errorf("expected parent Source tag preserved with (via parent) suffix; got:\n%s", sources.Permissions)
 	}
 	// Researcher scope qualifier present.
-	if !strings.Contains(sources.Permissions, "this researcher subagent's scope") {
+	if !strings.Contains(sources.Permissions, "this researcher-test subagent's scope") {
 		t.Errorf("expected researcher scope in closing refusal hook; got:\n%s", sources.Permissions)
 	}
 }

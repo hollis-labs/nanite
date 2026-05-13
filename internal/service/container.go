@@ -51,6 +51,7 @@ import (
 	"github.com/hollis-labs/nanite/internal/toolclient"
 	"github.com/hollis-labs/nanite/internal/worker"
 	"github.com/hollis-labs/nanite/internal/workflow"
+	"github.com/hollis-labs/nanite/internal/workspace"
 	"github.com/hollis-labs/nanite/internal/worktree"
 	"github.com/hollis-labs/nanite/pkg/models"
 )
@@ -547,6 +548,35 @@ func NewContainer(cfg ContainerConfig) (*Container, error) {
 	contextClient := chat.NewContextClient(cfg.Store)
 	contextClient.PathGrants = pathGrants
 	contextClient.DevToolsAllowedPaths = cfg.DevToolsAllowedPaths
+
+	// CW-20260512-0116 (SP-20260512-0009 W6): wire the AGENTS.md walk-up
+	// for SlotWorkspace. The cache is process-lifetime, concurrency-safe,
+	// and keyed on (session_id, working_dir) with per-file mtime
+	// invalidation. The resolver maps a session to its on-disk
+	// working_dir by looking up its project's repo_path — the same
+	// pattern used by internal/api/autocomplete.go::resolveRoot. When a
+	// session has no project_id, no project, or the project has no
+	// repo_path the resolver returns "" and the slot ships empty (the
+	// assembly decider skips it as skipped_no_content).
+	contextClient.WorkspaceCache = workspace.NewCache()
+	contextClient.WorkingDirForSession = func(session *store.Session) (string, error) {
+		if session == nil {
+			return "", nil
+		}
+		if session.ProjectID == "" || session.WorkspaceID == "" {
+			return "", nil
+		}
+		projects, err := cfg.Store.ListProjects(session.WorkspaceID)
+		if err != nil {
+			return "", err
+		}
+		for _, p := range projects {
+			if p.ID == session.ProjectID && p.RepoPath != "" {
+				return p.RepoPath, nil
+			}
+		}
+		return "", nil
+	}
 
 	// --- ContextBroker: universal context retrieval ---
 	{

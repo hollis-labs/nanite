@@ -3,6 +3,7 @@ package mcp
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"path/filepath"
 	"regexp"
@@ -1521,14 +1522,52 @@ func (st *SelfToolsTransport) callHandoffReject(ctx context.Context, args map[st
 
 // --- subagent handlers (T9) ---
 
-// callSpawnSubagent handles subagent_spawn. Happy-path: all
-// three modes auto-approve for MVP; interactive approval is a
-// follow-up (T9.2). The spawn returns a runID the caller can poll
-// via subagent_status or observe via the reply message
-// posted back to the parent session on completion.
+// callSpawnSubagent handles subagent_spawn. Returns a ResultEnvelope
+// (success boolean + structured result/error) JSON-encoded into the
+// ToolResult text content. The envelope shape is the
+// CW-20260512-0122 structural fix for the c160 turn-18 reproduction:
+// when the subagent fails (timeout / denied / internal / empty reply),
+// the parent reads success=false and the structured error.kind +
+// error.message, instead of receiving a textResult that is
+// indistinguishable from a fabricated success.
+//
+// All three modes auto-approve for MVP; interactive approval is a
+// follow-up (T9.2).
+//
+//   - sync: blocks on the subagent run; the envelope's Success flag is
+//     derived from the terminal Run.Status and the recovered
+//     assistant text. ToolResult.IsError mirrors !Success so the
+//     existing tool-error UI surfaces failures alongside the
+//     structured envelope.
+//   - async / api: returns immediately with an envelope reporting
+//     success=true and the run_id in Result. The parent polls
+//     subagent_status or the inbox for the eventual reply (which
+//     itself carries no envelope today — async failure surfaces
+//     through subagent_status, not the spawn return value).
+//   - spawn-stage errors: pre-run rejections (untrusted role, missing
+//     fields, etc.) return success=false with error.kind=denied or
+//     error.kind=internal depending on the cause.
+//
+// IsError is set on the ToolResult only when success=false so the
+// chat-tool executor's error path lights up alongside the envelope
+// body — defense in depth for callers that read IsError as a
+// shortcut for "did this tool succeed". The envelope JSON is the
+// authoritative shape; IsError is a redundant mirror.
+//
+// Per CW-20260512-0122 sharp edges: the envelope MUST NOT fabricate
+// tool_use_ids (same trust class as SP-20260512-0007). Context fields
+// are populated only from authoritative run state (status, role,
+// run_id). Pre-launch: the prior textResult(summary) shape is gone
+// (feedback_no_compat_shims). Callers parsing the old shape must
+// migrate to the envelope.
 func (st *SelfToolsTransport) callSpawnSubagent(ctx context.Context, args map[string]any) (*ToolResult, error) {
 	if st.Subagent == nil {
-		return errorResult("subagent service not configured"), nil
+		// Wiring miss — no run was ever created, so no run_id. Returns
+		// success=false; the universal slot rule tells the LLM to
+		// acknowledge the failure rather than narrate success.
+		env := subagent.NewFailureEnvelope("", subagent.ErrorKindInternal,
+			"subagent service not configured", nil)
+		return envelopeResult(env), nil
 	}
 	ctx, cancel := context.WithTimeout(ctx, messageCallTimeout)
 	defer cancel()
@@ -1544,24 +1583,68 @@ func (st *SelfToolsTransport) callSpawnSubagent(ctx context.Context, args map[st
 	}
 	id, err := st.Subagent.Spawn(ctx, req)
 	if err != nil {
-		return errorResult(fmt.Sprintf("spawn subagent: %v", err)), nil
+		// Spawn-stage failures (validation, untrusted role, missing
+		// fields, settings load) — no run row exists. Kind=denied for
+		// the untrusted-role case so the parent can distinguish a
+		// trust refusal from an internal error.
+		kind := subagent.ErrorKindInternal
+		if errors.Is(err, dispatch.ErrUntrustedRole) {
+			kind = subagent.ErrorKindDenied
+		}
+		env := subagent.NewFailureEnvelope("", kind,
+			fmt.Sprintf("spawn subagent: %v", err),
+			map[string]any{"role": req.Role})
+		return envelopeResult(env), nil
 	}
 	if req.Mode == "" || req.Mode == subagent.ModeSync {
-		if summary, ok := st.syncSubagentSummary(ctx, id); ok {
-			return textResult(summary), nil
-		}
+		env := st.syncSubagentEnvelope(ctx, id)
+		return envelopeResult(env), nil
 	}
-	return textResult(fmt.Sprintf("spawned: %s", id)), nil
+	// async / api: spawn ack-only. The parent receives the reply
+	// asynchronously (inbox for async, chat for api). Success=true
+	// here means "spawn accepted"; whether the run itself succeeds is
+	// observable via subagent_status.
+	env := subagent.NewSuccessEnvelope(id, "")
+	return envelopeResult(env), nil
 }
 
-func (st *SelfToolsTransport) syncSubagentSummary(ctx context.Context, runID string) (string, bool) {
+// syncSubagentEnvelope blocks until the subagent run is terminal,
+// then builds a ResultEnvelope from the Run row and the recovered
+// assistant text. Called by callSpawnSubagent's sync path.
+//
+// The recovered summary is the child session's last assistant text
+// (the same prose previously returned verbatim by the pre-envelope
+// textResult path). When the run completed but produced no
+// recoverable text, EnvelopeFromRun maps that to ErrorKindEmptyReply
+// so the parent knows there is no reply to surface — the c160
+// turn-18 fabrication-class regression target.
+func (st *SelfToolsTransport) syncSubagentEnvelope(ctx context.Context, runID string) subagent.ResultEnvelope {
 	run, err := st.Subagent.Status(ctx, runID)
-	if err != nil || run == nil || run.ChildSessionID == "" {
-		return "", false
+	if err != nil {
+		return subagent.NewFailureEnvelope(runID, subagent.ErrorKindInternal,
+			fmt.Sprintf("status lookup failed: %v", err), nil)
+	}
+	if run == nil {
+		return subagent.NewFailureEnvelope(runID, subagent.ErrorKindInternal,
+			"subagent run not found after spawn", nil)
+	}
+	summary := st.recoverSyncSummary(run)
+	return subagent.EnvelopeFromRun(run, summary)
+}
+
+// recoverSyncSummary scans the child session's assistant messages for
+// the most recent text content. Mirrors the prior syncSubagentSummary
+// helper, but returns "" instead of (text, false) — the caller
+// (EnvelopeFromRun) routes empty summaries to ErrorKindEmptyReply,
+// preserving the prior "ok=false → spawn ack-only" semantics through
+// the envelope shape.
+func (st *SelfToolsTransport) recoverSyncSummary(run *subagent.Run) string {
+	if run == nil || run.ChildSessionID == "" {
+		return ""
 	}
 	msgs, err := st.Store.ListMessages(run.ChildSessionID, 20)
 	if err != nil {
-		return "", false
+		return ""
 	}
 	for i := len(msgs) - 1; i >= 0; i-- {
 		if msgs[i].Role != "assistant" || msgs[i].Content == "" {
@@ -1569,13 +1652,24 @@ func (st *SelfToolsTransport) syncSubagentSummary(ctx context.Context, runID str
 		}
 		if text := extractStoredAssistantText(msgs[i].Content); text != "" {
 			if literal, ok := extractLiteralSubagentOutput(run.Prompt, text); ok {
-				return literal, true
+				return literal
 			}
-			return text, true
+			return text
 		}
-		return msgs[i].Content, true
+		return msgs[i].Content
 	}
-	return "", false
+	return ""
+}
+
+// envelopeResult marshals a ResultEnvelope into a ToolResult. IsError
+// mirrors !Success so the chat-tool executor's existing error path
+// surfaces failures in parallel with the structured envelope body —
+// belt-and-braces against callers that read IsError as a shortcut.
+func envelopeResult(env subagent.ResultEnvelope) *ToolResult {
+	return &ToolResult{
+		Content: []ToolContent{{Type: "text", Text: subagent.MarshalEnvelope(env)}},
+		IsError: !env.Success,
+	}
 }
 
 func extractStoredAssistantText(content string) string {

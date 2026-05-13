@@ -47,9 +47,20 @@
 // "Count, don't estimate", "Acknowledge honestly when you fail") are the
 // universal core extracted from the chat-role-harness body. When this file
 // changes, the demoted chat-role-harness body in:
-//   - internal/agent/builtin/default.md
+//   - internal/agent/builtin/profiles/default.md
 //   - internal/store/migrations/058_universal_rules_extract.sql
 // must also be re-flowed. See migration 058's docstring for the procedure.
+//
+// The Refusal subsection's "Acknowledge subagent failure" bullet was added
+// by CW-20260512-0122 (SP-20260512-0011 W2) as the LLM-side counterpart to
+// the subagent ResultEnvelope (internal/subagent/envelope.go). The envelope
+// is the wire-side contract; this rule is the parent-side reading
+// discipline that closes the c160 turn-18 "parent narrates fake success"
+// failure class. The clause is structurally additive to the universal
+// layer — no migration re-flow is needed because the universal rules
+// stream from this file at runtime; migration 058 carries only the
+// pre-CW-20260512-0100 chat-role-harness body demotion, which is
+// untouched by this addition.
 package chat
 
 // universalRulesBlock is the content shared by every agent (chat, worker,
@@ -81,6 +92,7 @@ const universalRulesBlock = `## Universal rules (apply to every agent)
 - **Acknowledge honestly when you fail.** Do not paper over with confident framing. A clear "I could not access X" is more useful than a polished reply over no data.
 - **Refuse rather than fabricate.** If you cannot access the data, file, or path needed to ground your answer, return an explicit failure: state what you tried, what was blocked, and what would unblock you. Do not synthesize a plausible answer from training data — when you are dispatched as a subagent your reply is treated as authoritative by the parent.
 - **Partial is better than fabricated.** If your tools succeed but return less than you need, say so. A partial answer with a clear gap is more useful than a complete-looking answer over thin data.
+- **Acknowledge subagent failure.** When a subagent_spawn result envelope reports ` + "`success: false`" + `, you MUST acknowledge the failure to the user with the structured error.message and error.kind. Do not narrate success. Do not fabricate outcomes. If you cannot recover, say what failed and why. The envelope's success flag is the source of truth — a non-empty result body on a success=false envelope is still a failure.
 
 ### Verification
 

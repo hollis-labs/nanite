@@ -698,7 +698,9 @@ func selfToolDefinitions() []Tool {
 				"- async: returns immediately; reply lands in the parent session inbox (channel=inbox) when done.\n" +
 				"- api: returns immediately; reply lands in the parent session chat (channel=chat).\n\n" +
 				"**Required context:** parent_session_id, parent_agent_id, role, and prompt are required.\n\n" +
-				"**Output shape (sync):** Subagent's final reply text. (async/api): run_id for tracking — use subagent_status to check progress.\n\n" +
+				"**Output shape:** A JSON envelope `{success: bool, result?: {run_id, summary}, error?: {kind, message, context}}` (CW-20260512-0122). " +
+				"Check `success` first — when `success: false`, the subagent failed and you MUST acknowledge the failure using error.message and error.kind (timeout | denied | cancelled | internal | empty_reply). Do not narrate success on a failed envelope, and do not fabricate a reply: even a non-empty result body on a success=false envelope is still a failure. " +
+				"For sync mode, `result.summary` carries the subagent's prose. For async/api, `result.run_id` is the handle for subagent_status polling and the eventual reply lands out-of-band.\n\n" +
 				"**Chaining:** Follow async/api spawns with message_inbox to receive the reply, or subagent_status to check completion.",
 			InputSchema: map[string]any{
 				"type": "object",

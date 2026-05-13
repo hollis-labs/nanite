@@ -968,14 +968,16 @@ func (s *chatServiceImpl) generateResponse(ctx context.Context, sessionID, assis
 		// on the request_build slog so the cross-call-site smoke can prove
 		// every dispatch type (chat | subagent | background) produces an
 		// identical structural slot shape. The CallerType arrives via the
-		// dispatcher-stamped ctx value (see internal/dispatcher); when the
-		// caller bypassed Dispatcher.Run (legacy direct generateResponse
-		// invocation that still exists during the refactor window —
-		// internal/service/delegation.go, plus some tests) the value is
-		// the empty CallerType and we render it as "unknown". That label
-		// is the smoke signal that a call-site escaped the dispatcher
-		// door — if production runs show caller=unknown, the consolidation
-		// is leaking.
+		// dispatcher-stamped ctx value (see internal/dispatcher). All
+		// production call-sites (launchGeneration, ChatRunner.invokeChat,
+		// DelegateTask) now route through Dispatcher.Run, so a populated
+		// CallerType is the expected case. The "unknown" fallback covers
+		// only the test-stub seam (`chatInvoker` overrides in
+		// subagent_runner_test.go, subagent_runner_lineage_test.go,
+		// subagent_runner_derivation_test.go) which call generateResponse
+		// without going through the dispatcher by design. Production runs
+		// must NEVER emit caller=unknown — if they do, a call-site has
+		// escaped the dispatcher door and the consolidation is leaking.
 		caller := dispatcher.CallerTypeFromContext(ctx)
 		callerLabel := caller.String()
 		if callerLabel == "" {

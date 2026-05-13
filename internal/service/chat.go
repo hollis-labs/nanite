@@ -496,10 +496,12 @@ func (s *chatServiceImpl) CancelActiveGeneration(sessionID string) bool {
 // CW-20260512-0121 (SP-20260512-0011): the actual runner invocation is
 // routed through the single dispatcher door (s.dispatcher.Run). Per-site
 // assembly is gone — the dispatcher stamps CallerChat on ctx so the
-// runner's request_build telemetry reports caller=chat. The dispatcher
-// validation surfacing as a synchronous error here (before the
-// goroutine starts) is intentional: a wiring bug should fail fast and
-// surface to the caller, not silently leak an unclosed channel.
+// runner's request_build telemetry reports caller=chat. Dispatcher
+// validation errors are programmer-only failure modes (empty SessionID,
+// invalid CallerType, etc.); the goroutine logs them and closes the
+// stream channel so the caller's stream-drain unblocks. launchGeneration
+// itself returns void and has already returned to the caller by the
+// time the goroutine runs — dispatcher errors never surface synchronously.
 func (s *chatServiceImpl) launchGeneration(name, sessionID, assistantMsgID, userContent string, ch chan chat.StreamEvent) {
 	// Build cancel BEFORE launching so a near-simultaneous retry cannot
 	// register its own cancel before this one — the window would let the

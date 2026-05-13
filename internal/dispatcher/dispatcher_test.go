@@ -2,7 +2,6 @@ package dispatcher
 
 import (
 	"context"
-	"errors"
 	"strings"
 	"testing"
 
@@ -244,5 +243,4 @@ func TestRun_doesNotDoubleCloseChannel(t *testing.T) {
 	// If Dispatcher.Run had double-closed, the runner's close would
 	// have panicked above and we'd be in t.Fatal land. Reaching here
 	// is the proof.
-	_ = errors.New
 }

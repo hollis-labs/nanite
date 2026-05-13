@@ -20,30 +20,37 @@ import (
 )
 
 // chatRunnerAdapter is the dispatcher.Runner implementation backed by
-// chatServiceImpl.generateResponse. The adapter holds a pointer to the
-// chat service so it can reach the unexported generateResponse method;
-// dispatcher.Dispatcher holds an interface reference (Runner) and
-// never sees the chatServiceImpl type directly — this preserves the
-// "runner untouched, callers consolidated" sharp edge.
+// chatServiceImpl.generateResponse. The adapter holds a function
+// reference to the runner method (captured at construction time via a
+// bound-method closure) so dispatcher.Dispatcher sees only the Runner
+// interface and never the chatServiceImpl type directly — this
+// preserves the "runner untouched, callers consolidated" sharp edge.
+//
+// The runner field is a function value rather than a method dispatch
+// off a pointer so tests can construct an adapter with a stub runner
+// (see chat_dispatcher_runner_test.go) and exercise Invoke directly
+// without spinning up a full chatServiceImpl.
 type chatRunnerAdapter struct {
-	svc *chatServiceImpl
+	runner func(ctx context.Context, sessionID, assistantMsgID, userContent string, ch chan chat.StreamEvent)
 }
 
-// newChatRunnerAdapter constructs the adapter. Required: svc must be
-// non-nil at construction time (no production code path needs a nil
-// runner). Returning the pointer rather than the interface lets the
-// container wire the same value into Dispatcher.New while keeping
-// per-package nil-safety obvious.
+// newChatRunnerAdapter constructs the adapter from a chat service.
+// Required: svc must be non-nil at construction time (no production
+// code path needs a nil runner). The adapter captures
+// svc.generateResponse as a bound-method closure so Invoke can call
+// the unexported method without exposing it through the interface.
 func newChatRunnerAdapter(svc *chatServiceImpl) *chatRunnerAdapter {
-	return &chatRunnerAdapter{svc: svc}
+	return &chatRunnerAdapter{runner: svc.generateResponse}
 }
 
-// Invoke implements dispatcher.Runner by delegating to
-// chatServiceImpl.generateResponse. The signature MUST match
+// Invoke implements dispatcher.Runner by delegating to the wrapped
+// runner function. The signature MUST match
 // chatServiceImpl.generateResponse byte-for-byte (and it does — that
 // is the load-bearing invariant the dispatcher refactor depends on).
+// ctx is forwarded verbatim so the CallerType stamp put on it by
+// Dispatcher.Run reaches generateResponse's request_build telemetry.
 func (a *chatRunnerAdapter) Invoke(ctx context.Context, sessionID, assistantMsgID, userContent string, ch chan chat.StreamEvent) {
-	a.svc.generateResponse(ctx, sessionID, assistantMsgID, userContent, ch)
+	a.runner(ctx, sessionID, assistantMsgID, userContent, ch)
 }
 
 // chatServiceImpl satisfies dispatcher.Runner structurally because its

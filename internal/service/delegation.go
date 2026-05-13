@@ -12,6 +12,7 @@ import (
 	"go.opentelemetry.io/otel/attribute"
 
 	"github.com/hollis-labs/nanite/internal/chat"
+	"github.com/hollis-labs/nanite/internal/dispatcher"
 	"github.com/hollis-labs/nanite/internal/safego"
 	"github.com/hollis-labs/nanite/internal/store"
 	"github.com/hollis-labs/nanite/internal/task"
@@ -122,8 +123,29 @@ func (s *chatServiceImpl) DelegateTask(ctx context.Context, req chat.DelegationR
 	ch := s.streams.CreateStream(assistantMsgID, workerSession.ID)
 
 	// Start async generation in worker session.
-	safego.Go(ctx, "service.delegation.delegateTask.generateResponse", func() {
-		s.generateResponse(ctx, workerSession.ID, assistantMsgID, taskContent, ch)
+	// CW-20260512-0121 (SP-20260512-0011): delegation spawns a child
+	// worker session and runs one assistant turn against it — the
+	// agent-dispatch flavor of subagent. Route through the single
+	// dispatcher door with CallerSubagent so the request_build slog
+	// reports caller=subagent and the structural slot shape lines up
+	// with the other subagent path (ChatRunner). Dispatcher rejection
+	// (programmer-only path) is fatal for the delegation — close ch
+	// so the drain loop below terminates rather than blocking until
+	// the 5-minute timeout.
+	safego.Go(ctx, "service.delegation.delegateTask.dispatch", func() {
+		if err := s.dispatcher.Run(ctx, dispatcher.Request{
+			SessionID:      workerSession.ID,
+			AssistantMsgID: assistantMsgID,
+			UserContent:    taskContent,
+			CallerType:     dispatcher.CallerSubagent,
+		}, ch); err != nil {
+			slog.Error("delegation: dispatcher.Run rejected",
+				"worker_session_id", workerSession.ID,
+				"assistant_msg_id", assistantMsgID,
+				"err", err,
+			)
+			close(ch)
+		}
 	})
 
 	// Drain the stream and collect the response.

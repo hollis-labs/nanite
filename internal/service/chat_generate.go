@@ -21,6 +21,7 @@ import (
 	"github.com/hollis-labs/nanite/internal/chat"
 	"github.com/hollis-labs/nanite/internal/classify"
 	ctxpkg "github.com/hollis-labs/nanite/internal/context"
+	"github.com/hollis-labs/nanite/internal/dispatcher"
 	"github.com/hollis-labs/nanite/internal/effort"
 	inspectsvc "github.com/hollis-labs/nanite/internal/inspector"
 	nllmanthropic "github.com/hollis-labs/nanite/internal/llm/anthropic"
@@ -963,11 +964,29 @@ func (s *chatServiceImpl) generateResponse(ctx context.Context, sessionID, assis
 				Tools:        tools,
 			})
 		}
+		// CW-20260512-0121 (SP-20260512-0011): stamp dispatcher CallerType
+		// on the request_build slog so the cross-call-site smoke can prove
+		// every dispatch type (chat | subagent | background) produces an
+		// identical structural slot shape. The CallerType arrives via the
+		// dispatcher-stamped ctx value (see internal/dispatcher); when the
+		// caller bypassed Dispatcher.Run (legacy direct generateResponse
+		// invocation that still exists during the refactor window —
+		// internal/service/delegation.go, plus some tests) the value is
+		// the empty CallerType and we render it as "unknown". That label
+		// is the smoke signal that a call-site escaped the dispatcher
+		// door — if production runs show caller=unknown, the consolidation
+		// is leaking.
+		caller := dispatcher.CallerTypeFromContext(ctx)
+		callerLabel := caller.String()
+		if callerLabel == "" {
+			callerLabel = "unknown"
+		}
 		rbArgs := []any{
 			"session_id", sessionID,
 			"agent_id", agentID,
 			"model", model,
 			"provider", providerName,
+			"caller", callerLabel,
 			"total_estimated_request_tokens", totalEstimate,
 			"rate_limit_tpm_observed", rateLimitTPM,
 			"cacheable_prefix_tokens", cacheablePrefixTokens,

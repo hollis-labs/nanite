@@ -6,14 +6,21 @@
 --
 -- Wave 2 (migration 061) ejected every agent_profiles row not carrying
 -- source='internal'. That removed the auto-discovered stubs for
--- `researcher`, `analyst`, `file-backend`, `backend`, `fragments-engine`,
--- and `background-job` — slugs that still have active code references
+-- `researcher`, `analyst`, `file-backend`, `backend`, and `background-job`
+-- — slugs that still have active code references
 -- (e.g. internal/reflex/catalog.go:165 resolves `Pattern: "researcher"`,
 -- internal/background/service.go:61 stamps `from_agent_id="background-job"`
 -- on envelopes). Without this migration, those slugs would not exist in
 -- agent_profiles between W2 merge and W4 merge.
 --
--- This migration seeds the six role rows on FRESH-INSTALL databases (so
+-- Note: an earlier draft of this migration also seeded a `fragments-engine`
+-- read-only historical-reference role. That slug was removed in review
+-- round 1 per the Phase 2 / Track A nuke of the in-tree fragments-engine
+-- plugin (user memory: project_nanite_phase_2_scope). The lineage role
+-- it was meant to capture is now owned by ad-hoc researcher dispatch
+-- against the legacy Volon codebase — no dedicated profile.
+--
+-- This migration seeds the five role rows on FRESH-INSTALL databases (so
 -- the first boot has the right shape before the boot-time
 -- AutoIngestAgents pass runs). On already-deployed DBs the INSERT OR
 -- IGNORE is a true no-op when the slug already exists, and AutoIngestAgents
@@ -22,6 +29,11 @@
 -- it was already seeded by migration 060 in Wave 1, and the file
 -- expansion in this PR replaces the body via the next AutoIngestAgents
 -- pass.
+--
+-- Numbering note: INSERT blocks below are labelled 1..5 against the
+-- final five-row seed list. The original draft labelled them 1..6 with
+-- `fragments-engine` as row 5 — that row was dropped in review round 1
+-- and the remaining rows were renumbered.
 --
 -- ## PROMPT-SYNC chain
 --
@@ -194,45 +206,7 @@ VALUES (
     '[]'
 );
 
--- 5) fragments-engine — read-only historical-reference (Volon/Laravel lineage)
-INSERT OR IGNORE INTO agent_profiles
-    (id, name, slug, system_prompt, description, modes, default_mode,
-     mcp_servers, tool_permissions, can_execute, settings,
-     created_at, updated_at,
-     agent_hash, version, tools, directories, constraints, tags, status,
-     source, source_ref, icon,
-     kind, capabilities_json, limits_json, model_strategy,
-     imported_at, origin_system, format,
-     parent_dispatch_allowlist)
-VALUES (
-    'blt-fragments-engine-001',
-    'Fragments Engine',
-    'fragments-engine',
-    'You are a Fragments Engine agent — read-only historical-reference for the legacy Volon / Laravel Fragments Engine codebase. You are dispatched when the session needs to consult Volon patterns (broker, runtime executor, scheduler, MCP adapter, boundary migrations) for lineage, migration, or comparison work against the current Nanite / Clockwork / Vanta-Conduit codebases.
-
-## How you work
-
-- **You do not modify Volon.** Fragments Engine is archive / lineage. Read, summarize, and cite — do not edit.
-- **Cite absolute paths.** Volon lives outside the Nanite work_root, so references must use full paths.
-- **Tag current vs. archived.** When a Volon pattern has a successor in Nanite, Clockwork, or Vanta-Conduit, name the successor.
-
-## Output discipline
-
-- Lead with the pattern or finding the parent asked about.
-- Follow with cited evidence — file references and short quoted snippets.
-- Call out when a Volon pattern was deliberately not carried forward — signal, not gap.',
-    'Read-only historical-reference agent for the legacy Fragments Engine (Volon / Laravel) codebase — investigates lineage, does not modify',
-    '[]', 'default',
-    '[]', '{"allow_list":["dev_read","dev_glob","dev_grep","tool_describe","tool_validate","lesson_capture"]}', 0, '{}',
-    datetime('now'), datetime('now'),
-    '', 1, '[]', '[]', '{}', '[]', 'active',
-    'internal', 'embedded:profiles/fragments-engine.md', 'archive',
-    'internal', '[]', '{}', '',
-    '', 'nanite', 'markdown',
-    '[]'
-);
-
--- 6) background-job — async queue worker, permissionMode=yolo
+-- 5) background-job — async queue worker, permissionMode=yolo
 INSERT OR IGNORE INTO agent_profiles
     (id, name, slug, system_prompt, description, modes, default_mode,
      mcp_servers, tool_permissions, can_execute, settings,
@@ -271,7 +245,7 @@ VALUES (
 
 COMMIT;
 
--- Down-migration: irreversible by design. These six rows can be removed
+-- Down-migration: irreversible by design. These five rows can be removed
 -- by deleting them by ID. The boot-time AutoIngestAgents pass will
 -- re-create them from internal/agent/builtin/profiles/*.md on the next
 -- Nanite start as long as the .md files exist.

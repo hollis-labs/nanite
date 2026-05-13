@@ -7,28 +7,32 @@ import (
 	"testing"
 )
 
-// TestMigration062_SeedsSixRolePrompts is the acceptance smoke for
-// CW-20260512-0113 Wave 4: migration 062 INSERT-OR-IGNOREs the six role
-// rows (researcher, analyst, file-backend, backend, fragments-engine,
-// background-job) on a fresh database with source='internal' and a body
-// matching the corresponding internal/agent/builtin/profiles/<slug>.md
-// file.
+// TestMigration062_SeedsFiveRolePrompts is the acceptance smoke for
+// CW-20260512-0113 Wave 4: migration 062 INSERT-OR-IGNOREs the five role
+// rows (researcher, analyst, file-backend, backend, background-job) on a
+// fresh database with source='internal' and a body matching the
+// corresponding internal/agent/builtin/profiles/<slug>.md file.
+//
+// The original draft also seeded a `fragments-engine` historical-reference
+// role; that slug was dropped in review round 1 per the Phase 2 / Track A
+// nuke of the in-tree fragments-engine plugin (user memory:
+// project_nanite_phase_2_scope).
 //
 // Test shape:
 //  1. Open a fresh DB. Migrations 001-062 run in order; migration 060
 //     seeds the four canonical slugs (default, worker, planner,
 //     hint-selector), 061 ejects any non-internal rows (no-op on fresh
-//     DB), and 062 seeds the six role slugs.
-//  2. For each of the six expected slugs, assert source='internal',
+//     DB), and 062 seeds the five role slugs.
+//  2. For each of the five expected slugs, assert source='internal',
 //     source_ref='embedded:profiles/<slug>.md', and a non-empty body.
 //  3. Spot-check role identity tokens to guard against accidental body
 //     swaps and to provide the unit-test-stub smoke evidence described
 //     in the CW-20260512-0113 boot prompt (§8).
 //  4. Verify can_execute is set correctly per role: read-only profiles
-//     (researcher, analyst, fragments-engine) must be can_execute=false;
-//     execution profiles (file-backend, backend, background-job) must
-//     be can_execute=true.
-func TestMigration062_SeedsSixRolePrompts(t *testing.T) {
+//     (researcher, analyst) must be can_execute=false; execution
+//     profiles (file-backend, backend, background-job) must be
+//     can_execute=true.
+func TestMigration062_SeedsFiveRolePrompts(t *testing.T) {
 	tempDir := t.TempDir()
 	dbPath := filepath.Join(tempDir, "fresh.db")
 	s, err := New(context.Background(), dbPath)
@@ -62,11 +66,6 @@ func TestMigration062_SeedsSixRolePrompts(t *testing.T) {
 			slug:           "backend",
 			canExecute:     true,
 			identityTokens: []string{"Backend agent", "Go server-side", "go test -race", "Migrations are append-only"},
-		},
-		{
-			slug:           "fragments-engine",
-			canExecute:     false,
-			identityTokens: []string{"Fragments Engine agent", "Volon", "do not modify"},
 		},
 		{
 			slug:           "background-job",
@@ -126,7 +125,7 @@ func TestMigration062_RolePromptsExcludeUniversalRules(t *testing.T) {
 		"Count, do not estimate",
 	}
 
-	for _, slug := range []string{"researcher", "analyst", "file-backend", "backend", "fragments-engine", "background-job"} {
+	for _, slug := range []string{"researcher", "analyst", "file-backend", "backend", "background-job"} {
 		got, err := s.GetAgentBySlug(slug)
 		if err != nil {
 			t.Errorf("GetAgentBySlug %q: %v", slug, err)

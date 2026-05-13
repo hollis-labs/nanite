@@ -27,10 +27,13 @@ func TestInternalProfiles_LoadsAllExpectedSlugs(t *testing.T) {
 	want := []string{
 		// Wave 1 (CW-20260512-0111):
 		"default", "hint-selector", "planner", "worker",
-		// Wave 4 (CW-20260512-0113): six role profiles authored to close
+		// Wave 4 (CW-20260512-0113): five role profiles authored to close
 		// the slug-existence gap after Wave 2's eject of source!='internal'.
+		// (A `fragments-engine` profile was drafted then dropped in review
+		// round 1 per Phase 2 / Track A — user memory
+		// project_nanite_phase_2_scope.)
 		"analyst", "backend", "background-job", "file-backend",
-		"fragments-engine", "researcher",
+		"researcher",
 	}
 	sort.Strings(want)
 	if len(got) != len(want) {
@@ -126,13 +129,13 @@ func TestInternalProfiles_FrontmatterKeys(t *testing.T) {
 	}
 	// Every internal profile that ships with a model must parse it.
 	// W1 set: worker, planner, hint-selector. W4 set (CW-20260512-0113):
-	// researcher, analyst, file-backend, backend, fragments-engine,
-	// background-job — every Wave 4 role profile carries a `model:`
-	// field. Default carries none and inherits the harness default.
+	// researcher, analyst, file-backend, backend, background-job — every
+	// Wave 4 role profile carries a `model:` field. Default carries none
+	// and inherits the harness default.
 	for _, slug := range []string{
 		"worker", "planner", "hint-selector",
 		"researcher", "analyst", "file-backend", "backend",
-		"fragments-engine", "background-job",
+		"background-job",
 	} {
 		def := findBySlug(t, defs, slug)
 		if def.Model == "" {
@@ -168,7 +171,7 @@ func TestInternalProfileSlugs_DeterministicOrder(t *testing.T) {
 
 // TestInternalProfiles_RoleIdentitySmoke is the unit-test-stub smoke
 // evidence path described in the CW-20260512-0113 boot prompt (§8): each
-// of the six Wave 4 role profiles, plus the expanded Wave 4 planner,
+// of the five Wave 4 role profiles, plus the expanded Wave 4 planner,
 // must carry identity tokens that ground its role-specific behavior.
 // This is the regression target for the c160 fabrication chain — when
 // `Pattern: "researcher"` resolves to this profile (after W4 lands), the
@@ -220,11 +223,6 @@ func TestInternalProfiles_RoleIdentitySmoke(t *testing.T) {
 			canExecuteWant: true,
 		},
 		{
-			slug:           "fragments-engine",
-			tokens:         []string{"Volon", "do not modify", "successor"},
-			canExecuteWant: false,
-		},
-		{
 			slug:           "background-job",
 			tokens:         []string{"async worker", "Idempotency", "terminal envelope"},
 			canExecuteWant: true,
@@ -245,7 +243,7 @@ func TestInternalProfiles_RoleIdentitySmoke(t *testing.T) {
 	}
 }
 
-// TestInternalProfiles_RoleBodiesExcludeUniversalRules guards the six
+// TestInternalProfiles_RoleBodiesExcludeUniversalRules guards the five
 // Wave 4 role bodies against re-introducing universal-layer content.
 // The universal grounding/refusal/verification rules live in
 // internal/chat/universal_rules.go and are auto-injected at SlotUniversal
@@ -264,7 +262,7 @@ func TestInternalProfiles_RoleBodiesExcludeUniversalRules(t *testing.T) {
 		"Use what tools return",
 		"Count, do not estimate",
 	}
-	for _, slug := range []string{"researcher", "analyst", "file-backend", "backend", "fragments-engine", "background-job", "planner"} {
+	for _, slug := range []string{"researcher", "analyst", "file-backend", "backend", "background-job", "planner"} {
 		def := findBySlug(t, defs, slug)
 		for _, sentinel := range universalSentinels {
 			if strings.Contains(def.SystemPrompt, sentinel) {

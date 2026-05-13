@@ -214,8 +214,14 @@ func EnvelopeFromRun(run *Run, summary string) ResultEnvelope {
 				"status": run.Status,
 			})
 	case StatusRequested, StatusApproved:
+		// Gated approval path: Spawn returned the run.ID while the human
+		// approval is still pending. Not a failure of the subagent
+		// itself — just that no reply exists yet. Surfaces as
+		// success=false so the parent does not narrate a non-existent
+		// reply; kind=denied because the parent should treat the spawn
+		// as "blocked, waiting" rather than retry.
 		return NewFailureEnvelope(run.ID, ErrorKindDenied,
-			fmt.Sprintf("subagent run is wedged in non-terminal state %q", run.Status),
+			fmt.Sprintf("subagent spawn is awaiting approval (status %q); poll subagent_status for the eventual reply", run.Status),
 			map[string]any{
 				"role":   run.Role,
 				"status": run.Status,

@@ -40,6 +40,10 @@ cerberus_logs nanite-api
 - `config/agents/` — Agent profile definitions
 - `docs/` — Architecture docs
 
+## Slot system invariants (read before touching the Context Broker)
+
+The slot system's six load-bearing invariants — stable sent shape, universal slot at position 0, cache marker priority, mode-aware content swap, pointer/stash determinism, permission visibility — are documented in `internal/context/INVARIANTS.md` and enforced by `internal/service/slot_invariants_test.go`. Update both in lock-step if a future ticket needs to change one.
+
 ## Envelope System (critical — read before touching)
 
 Envelopes are structured UI cards injected into chat messages. The system has two sides kept in sync by a shared manifest:

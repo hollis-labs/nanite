@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"encoding/json"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -45,6 +46,15 @@ func TestMigration062_SeedsFiveRolePrompts(t *testing.T) {
 		slug         string
 		canExecute   bool
 		identityTokens []string // role-identity tokens that must appear in the body
+		// toolPermissionsContains, when non-empty, asserts the raw
+		// tool_permissions JSON contains the substring. The deny-all
+		// pattern for no-tools profiles (analyst) is the regression
+		// target for PR #161 review round 2 (Copilot items A+B+D):
+		// an empty allow_list is PERMISSIVE under
+		// toolclient.ToolPermissions.CheckPermission, so a no-tools
+		// classifier needs an explicit `deny_list: ["*"]` to actually
+		// deny every tool.
+		toolPermissionsContains string
 	}
 	cases := []want{
 		{
@@ -53,9 +63,10 @@ func TestMigration062_SeedsFiveRolePrompts(t *testing.T) {
 			identityTokens: []string{"Researcher agent", "read-only", "Cite", "path/to/file.go:line"},
 		},
 		{
-			slug:           "analyst",
-			canExecute:     false,
-			identityTokens: []string{"Analyst agent", "one-shot classifier", "low_confidence"},
+			slug:                    "analyst",
+			canExecute:              false,
+			identityTokens:          []string{"Analyst agent", "one-shot classifier", "low_confidence"},
+			toolPermissionsContains: `"deny_list":["*"]`,
 		},
 		{
 			slug:           "file-backend",
@@ -99,7 +110,83 @@ func TestMigration062_SeedsFiveRolePrompts(t *testing.T) {
 				t.Errorf("slug=%q: body missing identity token %q (role identity drifted from .md SOT?)", c.slug, token)
 			}
 		}
+		if c.toolPermissionsContains != "" {
+			if !strings.Contains(got.ToolPermissions, c.toolPermissionsContains) {
+				t.Errorf("slug=%q: ToolPermissions = %q, want substring %q (no-tools deny-all contract drifted?)",
+					c.slug, got.ToolPermissions, c.toolPermissionsContains)
+			}
+		}
 	}
+}
+
+// TestMigration062_AnalystDeniesAllTools is the behavioral assertion for the
+// analyst no-tools contract: the seeded tool_permissions JSON must, when
+// parsed and evaluated, deny a known tool. This complements the string
+// containment check in TestMigration062_SeedsFiveRolePrompts by exercising
+// the same matcher semantics the runtime uses (toolclient.MatchPattern).
+//
+// PR #161 review round 2 (Copilot item D): empty allow_list is PERMISSIVE
+// under toolclient.ToolPermissions.CheckPermission — the deny check runs
+// first and "*" matches every tool via the prefix-glob in MatchPattern
+// (HasSuffix("*", "*") → true → HasPrefix(name, "") → true). Without this
+// assertion, a regression to `{"allow_list":[]}` would silently re-permit
+// every tool.
+//
+// Implementation note: the store package cannot import toolclient (toolclient
+// imports store, so the reverse direction creates a cycle). The test
+// re-implements the minimum matcher logic for the wildcard case rather than
+// importing toolclient. The full matcher contract is tested at the
+// toolclient layer (internal/toolclient/permissions_test.go) and again at
+// the file-SoT layer (internal/agent/builtin/profiles_test.go) which can
+// import toolclient.
+func TestMigration062_AnalystDeniesAllTools(t *testing.T) {
+	tempDir := t.TempDir()
+	dbPath := filepath.Join(tempDir, "fresh.db")
+	s, err := New(context.Background(), dbPath)
+	if err != nil {
+		t.Fatalf("store.New: %v", err)
+	}
+	defer s.Close()
+
+	got, err := s.GetAgentBySlug("analyst")
+	if err != nil {
+		t.Fatalf("GetAgentBySlug analyst: %v", err)
+	}
+
+	// Minimal-deny-check shape; mirrors toolclient.ToolPermissions but
+	// avoids the import cycle.
+	var perms struct {
+		AllowList []string `json:"allow_list,omitempty"`
+		DenyList  []string `json:"deny_list,omitempty"`
+	}
+	if err := json.Unmarshal([]byte(got.ToolPermissions), &perms); err != nil {
+		t.Fatalf("unmarshal analyst ToolPermissions %q: %v", got.ToolPermissions, err)
+	}
+
+	// Match the toolclient.MatchPattern("*", name) wildcard semantics:
+	// HasSuffix(pattern, "*") → HasPrefix(name, "") → true for any name.
+	denyAll := false
+	for _, pat := range perms.DenyList {
+		if pat == "*" {
+			denyAll = true
+			break
+		}
+	}
+	if !denyAll {
+		t.Errorf("analyst DenyList = %v; want a wildcard \"*\" entry so a no-tools profile actually denies every tool (empty allow_list is PERMISSIVE under toolclient.CheckPermission)",
+			perms.DenyList)
+	}
+
+	// Spot-check that a known canonical tool would be denied. Using the
+	// dev_read name lifted from the researcher allow_list — any tool name
+	// would match the "*" prefix-glob, dev_read is just a stable anchor.
+	for _, pat := range perms.DenyList {
+		if pat == "*" {
+			// Equivalent to toolclient.MatchPattern("*", "dev_read") = true.
+			return
+		}
+	}
+	t.Error("analyst tool_permissions did not produce a deny-all match for dev_read — regression to permissive empty-allow_list?")
 }
 
 // TestMigration062_RolePromptsExcludeUniversalRules guards against role

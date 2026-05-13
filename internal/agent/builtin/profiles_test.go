@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/hollis-labs/nanite/internal/agent"
+	"github.com/hollis-labs/nanite/internal/toolclient"
 )
 
 // TestInternalProfiles_LoadsAllExpectedSlugs asserts the embedded profiles/
@@ -268,6 +269,51 @@ func TestInternalProfiles_RoleBodiesExcludeUniversalRules(t *testing.T) {
 			if strings.Contains(def.SystemPrompt, sentinel) {
 				t.Errorf("slug=%s: body duplicates universal sentinel %q — universal_rules.go owns this", slug, sentinel)
 			}
+		}
+	}
+}
+
+// TestInternalProfiles_AnalystDeniesAllTools asserts the file SOT for the
+// analyst no-tools contract: parsing analyst.md must yield a ToolPermissions
+// shape that, when evaluated under toolclient.ToolPermissions.CheckPermission,
+// denies a known canonical tool.
+//
+// PR #161 review round 2 (Copilot item E): empty allow_list is PERMISSIVE
+// under toolclient.CheckPermission (falls through to `return true` when no
+// deny list matches), so a no-tools classifier needs an explicit
+// `deny_list: ["*"]`. The wildcard matches every tool name via the
+// prefix-glob in toolclient.MatchPattern.
+//
+// This guards the file SOT independently of the migration seed —
+// AutoIngestAgents replaces the row body with this file's contents on every
+// Nanite restart, so a regression here would silently re-permit every tool
+// even if migration 062 stayed correct on disk.
+func TestInternalProfiles_AnalystDeniesAllTools(t *testing.T) {
+	defs, err := InternalProfiles()
+	if err != nil {
+		t.Fatalf("InternalProfiles: %v", err)
+	}
+	def := findBySlug(t, defs, "analyst")
+	if def.ToolPermissions == nil {
+		t.Fatal("analyst ToolPermissions is nil — frontmatter must declare an explicit deny-all (no-tools contract)")
+	}
+	// Convert agent.AgentToolPermissions → toolclient.ToolPermissions
+	// (identical field shape; safe direct copy). The same struct lives in
+	// two packages because agent frontmatter parsing must not depend on
+	// toolclient.
+	tp := toolclient.ToolPermissions{
+		AllowList:          def.ToolPermissions.AllowList,
+		DenyList:           def.ToolPermissions.DenyList,
+		MaxCallsPerTurn:    def.ToolPermissions.MaxCallsPerTurn,
+		AllowDelegation:    def.ToolPermissions.AllowDelegation,
+		AllowCodeExecution: def.ToolPermissions.AllowCodeExecution,
+	}
+	// dev_read is the canonical anchor — any tool name would match "*"
+	// via the prefix-glob in toolclient.MatchPattern, but dev_read is a
+	// stable, documented tool name used by the researcher profile.
+	for _, tool := range []string{"dev_read", "dev_write", "task_execute", "shell_exec"} {
+		if tp.CheckPermission(tool) {
+			t.Errorf("analyst CheckPermission(%q) = true, want false (no-tools contract — empty allow_list is PERMISSIVE; explicit deny_list:[\"*\"] is required)", tool)
 		}
 	}
 }

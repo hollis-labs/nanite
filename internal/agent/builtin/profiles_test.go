@@ -24,7 +24,15 @@ func TestInternalProfiles_LoadsAllExpectedSlugs(t *testing.T) {
 	}
 	sort.Strings(got)
 
-	want := []string{"default", "hint-selector", "planner", "worker"}
+	want := []string{
+		// Wave 1 (CW-20260512-0111):
+		"default", "hint-selector", "planner", "worker",
+		// Wave 4 (CW-20260512-0113): six role profiles authored to close
+		// the slug-existence gap after Wave 2's eject of source!='internal'.
+		"analyst", "backend", "background-job", "file-backend",
+		"fragments-engine", "researcher",
+	}
+	sort.Strings(want)
 	if len(got) != len(want) {
 		t.Fatalf("slugs len: got %d (%v), want %d (%v)", len(got), got, len(want), want)
 	}
@@ -116,10 +124,16 @@ func TestInternalProfiles_FrontmatterKeys(t *testing.T) {
 	if err != nil {
 		t.Fatalf("InternalProfiles: %v", err)
 	}
-	// Every internal profile that ships with a model must parse it
-	// (worker / planner / hint-selector all carry a `model:` field;
-	// default carries none and inherits the harness default).
-	for _, slug := range []string{"worker", "planner", "hint-selector"} {
+	// Every internal profile that ships with a model must parse it.
+	// W1 set: worker, planner, hint-selector. W4 set (CW-20260512-0113):
+	// researcher, analyst, file-backend, backend, fragments-engine,
+	// background-job — every Wave 4 role profile carries a `model:`
+	// field. Default carries none and inherits the harness default.
+	for _, slug := range []string{
+		"worker", "planner", "hint-selector",
+		"researcher", "analyst", "file-backend", "backend",
+		"fragments-engine", "background-job",
+	} {
 		def := findBySlug(t, defs, slug)
 		if def.Model == "" {
 			t.Errorf("slug=%s: Model is empty — frontmatter key likely wrong (must be `model:`, not `defaultModel:`)", slug)
@@ -148,6 +162,114 @@ func TestInternalProfileSlugs_DeterministicOrder(t *testing.T) {
 	for i := 1; i < len(slugs); i++ {
 		if slugs[i-1] >= slugs[i] {
 			t.Errorf("slugs not sorted at [%d]: %q >= %q (full=%v)", i, slugs[i-1], slugs[i], slugs)
+		}
+	}
+}
+
+// TestInternalProfiles_RoleIdentitySmoke is the unit-test-stub smoke
+// evidence path described in the CW-20260512-0113 boot prompt (§8): each
+// of the six Wave 4 role profiles, plus the expanded Wave 4 planner,
+// must carry identity tokens that ground its role-specific behavior.
+// This is the regression target for the c160 fabrication chain — when
+// `Pattern: "researcher"` resolves to this profile (after W4 lands), the
+// body must contain "read-only" + "cite" tokens so the dispatched
+// subagent operates from grounded role-identity rather than inheriting
+// only the universal slot.
+func TestInternalProfiles_RoleIdentitySmoke(t *testing.T) {
+	defs, err := InternalProfiles()
+	if err != nil {
+		t.Fatalf("InternalProfiles: %v", err)
+	}
+	cases := []struct {
+		slug   string
+		tokens []string
+		// canExecuteWant matches store.AgentProfile.CanExecute after
+		// ToProfile (derived from PermissionMode=yolo).
+		canExecuteWant bool
+	}{
+		// Researcher: read-only, cites paths/lines. The boot prompt's
+		// §8.1 smoke "researcher refuses fabrication" — the universal
+		// Refusal rules supply the refuse-rather-than-fabricate behavior;
+		// the role body grounds it with read-only + cite-paths discipline.
+		{
+			slug:           "researcher",
+			tokens:         []string{"read-only", "Cite", "dev_glob"},
+			canExecuteWant: false,
+		},
+		// Planner (boot prompt §8.2 smoke): decomposition + dependency
+		// language. The expanded Wave 4 body preserves the Phase 6 stub
+		// framing AND carries the dependency-ordered planning tokens.
+		{
+			slug:           "planner",
+			tokens:         []string{"Decompose", "dependenc", "Phase 6"},
+			canExecuteWant: false,
+		},
+		{
+			slug:           "analyst",
+			tokens:         []string{"classifier", "schema", "low_confidence"},
+			canExecuteWant: false,
+		},
+		{
+			slug:           "file-backend",
+			tokens:         []string{"file-tier I/O", "Migrations are immutable", "Targeted edits"},
+			canExecuteWant: true,
+		},
+		{
+			slug:           "backend",
+			tokens:         []string{"Go server-side", "go test -race", "Migrations are append-only"},
+			canExecuteWant: true,
+		},
+		{
+			slug:           "fragments-engine",
+			tokens:         []string{"Volon", "do not modify", "successor"},
+			canExecuteWant: false,
+		},
+		{
+			slug:           "background-job",
+			tokens:         []string{"async worker", "Idempotency", "terminal envelope"},
+			canExecuteWant: true,
+		},
+	}
+	for _, c := range cases {
+		def := findBySlug(t, defs, c.slug)
+		for _, tok := range c.tokens {
+			if !strings.Contains(def.SystemPrompt, tok) {
+				t.Errorf("slug=%s: body missing role-identity token %q (role identity drifted?)", c.slug, tok)
+			}
+		}
+		// Confirm the read-only/execute split is preserved through the
+		// PermissionMode → CanExecute mapping in convert.go.
+		if got := def.ToProfile().CanExecute; got != c.canExecuteWant {
+			t.Errorf("slug=%s: ToProfile().CanExecute = %v, want %v (check PermissionMode in .md frontmatter)", c.slug, got, c.canExecuteWant)
+		}
+	}
+}
+
+// TestInternalProfiles_RoleBodiesExcludeUniversalRules guards the six
+// Wave 4 role bodies against re-introducing universal-layer content.
+// The universal grounding/refusal/verification rules live in
+// internal/chat/universal_rules.go and are auto-injected at SlotUniversal
+// for every agent; duplicating them in role bodies undoes the layering
+// benefit and reopens the c160 fabrication regression.
+func TestInternalProfiles_RoleBodiesExcludeUniversalRules(t *testing.T) {
+	defs, err := InternalProfiles()
+	if err != nil {
+		t.Fatalf("InternalProfiles: %v", err)
+	}
+	// Sentinels lifted verbatim from internal/chat/universal_rules.go.
+	universalSentinels := []string{
+		"## Universal rules",
+		"Refuse rather than fabricate",
+		"Acknowledge honestly when you fail",
+		"Use what tools return",
+		"Count, do not estimate",
+	}
+	for _, slug := range []string{"researcher", "analyst", "file-backend", "backend", "fragments-engine", "background-job", "planner"} {
+		def := findBySlug(t, defs, slug)
+		for _, sentinel := range universalSentinels {
+			if strings.Contains(def.SystemPrompt, sentinel) {
+				t.Errorf("slug=%s: body duplicates universal sentinel %q — universal_rules.go owns this", slug, sentinel)
+			}
 		}
 	}
 }

@@ -100,7 +100,6 @@ export interface AgentProfile {
   system_prompt: string;
   description: string;
   modes: string;
-  default_mode: string;
   default_model: string;
   mcp_servers: string;
   tool_permissions: string;

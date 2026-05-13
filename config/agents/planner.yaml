@@ -27,7 +27,6 @@ system_prompt: |
   behavior. This stub reserves the slug for M3 reflex dispatch.
 
 default_model: claude-sonnet-4-20250514
-default_mode: default
 
 modes:
   - slug: default

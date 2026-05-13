@@ -98,7 +98,6 @@ type CreateAgentRequest struct {
 	SystemPrompt    string `json:"system_prompt"`
 	Description     string `json:"description"`
 	Modes           string `json:"modes"`
-	DefaultMode     string `json:"default_mode"`
 	DefaultModel    string `json:"default_model"`
 	MCPServers      string `json:"mcp_servers"`
 	ToolPermissions string `json:"tool_permissions"`
@@ -126,7 +125,6 @@ type UpdateAgentRequest struct {
 	SystemPrompt    *string `json:"system_prompt"`
 	Description     *string `json:"description"`
 	Modes           *string `json:"modes"`
-	DefaultMode     *string `json:"default_mode"`
 	DefaultModel    *string `json:"default_model"`
 	MCPServers      *string `json:"mcp_servers"`
 	ToolPermissions *string `json:"tool_permissions"`

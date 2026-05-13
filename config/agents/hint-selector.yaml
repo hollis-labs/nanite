@@ -47,7 +47,6 @@ system_prompt: |
   ["scratchpad","memory_recall","peer_query","scope_check"]
 
 default_model: claude-haiku-4-20250514
-default_mode: default
 effort: low
 
 modes:

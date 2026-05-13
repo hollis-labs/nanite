@@ -92,9 +92,6 @@ func TestDefinition_ToProfile(t *testing.T) {
 	if len(modesSlugs) != 2 || modesSlugs[0] != "default" {
 		t.Errorf("Modes = %v", modesSlugs)
 	}
-	if p.DefaultMode != "default" {
-		t.Errorf("DefaultMode = %q", p.DefaultMode)
-	}
 
 	// Check constraints.
 	var constraints map[string]any
@@ -142,9 +139,6 @@ func TestDefinition_ToProfile_Minimal(t *testing.T) {
 	}
 	if p.CanExecute {
 		t.Error("CanExecute should be false for non-yolo")
-	}
-	if p.DefaultMode != "default" {
-		t.Errorf("DefaultMode = %q, want %q", p.DefaultMode, "default")
 	}
 }
 

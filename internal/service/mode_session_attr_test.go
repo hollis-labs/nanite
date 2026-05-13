@@ -47,15 +47,14 @@ func Test_ModeIsSessionAttribute_SameAgentDifferentModes_DifferentSlotContent(t 
 		t.Fatalf("CreateMode read: %v", err)
 	}
 
-	// One agent — identity-only. No DefaultMode read by the runtime; the
-	// session-level pointer alone drives SlotMode content.
+	// One agent — identity-only. The session-level pointer alone drives
+	// SlotMode content. (The prior `DefaultMode` profile field was deleted
+	// in migration 063 as part of CW-20260512-0115 review round 1.)
 	agent := &store.AgentProfile{
 		ID:           "agent-shared-115",
 		Slug:         "shared-115",
 		Status:       "active",
 		SystemPrompt: "shared agent identity",
-		DefaultMode:  "build-115", // intentionally set; the regression test
-		// below pins that this field does NOT bleed into runtime SlotMode.
 	}
 
 	// Session A → build mode.
@@ -301,7 +300,13 @@ func Test_ModeChangeMidSession_CacheableSlotsUnchanged(t *testing.T) {
 
 	client := chat.NewContextClient(s)
 	svc := NewContextService(ContextServiceConfig{Client: client})
-	modeBefore, _ := s.GetSessionMode(sessBefore.ID)
+	modeBefore, err := s.GetSessionMode(sessBefore.ID)
+	if err != nil {
+		t.Fatalf("GetSessionMode before: %v", err)
+	}
+	if modeBefore == nil {
+		t.Fatal("GetSessionMode before returned nil mode")
+	}
 	res1, err := svc.AssembleSlots(context.Background(), sessBefore, agent, nil, nil, nil, "", 200000, modeBefore, "")
 	if err != nil {
 		t.Fatalf("AssembleSlots before: %v", err)
@@ -314,7 +319,13 @@ func Test_ModeChangeMidSession_CacheableSlotsUnchanged(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetSession after: %v", err)
 	}
-	modeAfter, _ := s.GetSessionMode(sessAfter.ID)
+	modeAfter, err := s.GetSessionMode(sessAfter.ID)
+	if err != nil {
+		t.Fatalf("GetSessionMode after: %v", err)
+	}
+	if modeAfter == nil {
+		t.Fatal("GetSessionMode after returned nil mode")
+	}
 	res2, err := svc.AssembleSlots(context.Background(), sessAfter, agent, nil, nil, nil, "", 200000, modeAfter, "")
 	if err != nil {
 		t.Fatalf("AssembleSlots after: %v", err)
@@ -330,81 +341,13 @@ func Test_ModeChangeMidSession_CacheableSlotsUnchanged(t *testing.T) {
 	}
 }
 
-// Test_AgentDefaultMode_NotConsultedDuringSession is the regression pin for
-// the ticket's "default_mode is hint-only at session creation" requirement.
-// Today no production path consults agent_profiles.default_mode AT ALL —
-// not at session creation, not during dispatch. This test pins that
-// invariant: changing the agent profile's DefaultMode field while a session
-// is active does NOT change the SlotMode content the next dispatch emits.
-// The session-level pointer is the sole driver.
-//
-// Note: if W5 follow-up surgery deletes the dead default_mode column
-// (`feedback_no_compat_shims`, pre-launch), this test becomes obsolete and
-// should be deleted with the column. It's preserved here for the codified
-// invariant during the column's twilight.
-//
-// SP-20260512-0009 W5 (CW-20260512-0115).
-func Test_AgentDefaultMode_NotConsultedDuringSession(t *testing.T) {
-	s, err := store.New(context.Background(), t.TempDir()+"/test.db")
-	if err != nil {
-		t.Fatalf("store.New: %v", err)
-	}
-
-	sessionMode := &store.Mode{
-		ID:             "mode-session-115",
-		Slug:           "session-115",
-		Name:           "Session Pin",
-		PromptAddendum: "SESSION_PIN: session-level wins.",
-	}
-	if err := s.CreateMode(sessionMode); err != nil {
-		t.Fatalf("CreateMode session: %v", err)
-	}
-	defaultModeRow := &store.Mode{
-		ID:             "mode-default-115",
-		Slug:           "default-115",
-		Name:           "Profile Default",
-		PromptAddendum: "PROFILE_DEFAULT: must NOT appear in SlotMode for an active session.",
-	}
-	if err := s.CreateMode(defaultModeRow); err != nil {
-		t.Fatalf("CreateMode default: %v", err)
-	}
-
-	agent := &store.AgentProfile{
-		ID:           "agent-default-115",
-		Slug:         "default-test-115",
-		Status:       "active",
-		SystemPrompt: "default-mode-test",
-		DefaultMode:  defaultModeRow.Slug,
-	}
-	sess := &store.Session{ID: "sess-default-115"}
-	if err := s.CreateSession(sess); err != nil {
-		t.Fatalf("CreateSession: %v", err)
-	}
-	if err := s.SetSessionMode(sess.ID, sessionMode.ID); err != nil {
-		t.Fatalf("SetSessionMode: %v", err)
-	}
-	sess, err = s.GetSession(sess.ID)
-	if err != nil {
-		t.Fatalf("GetSession: %v", err)
-	}
-
-	client := chat.NewContextClient(s)
-	svc := NewContextService(ContextServiceConfig{Client: client})
-	modeResolved, _ := s.GetSessionMode(sess.ID)
-	res, err := svc.AssembleSlots(context.Background(), sess, agent, nil, nil, nil, "", 200000, modeResolved, "")
-	if err != nil {
-		t.Fatalf("AssembleSlots: %v", err)
-	}
-
-	slotMode := findSlotDecision(res.Plan.Decisions, ctxpkg.SlotMode)
-	if slotMode.Content != sessionMode.PromptAddendum {
-		t.Errorf("SlotMode content = %q, want session-mode addendum %q (default_mode bleed-through?)",
-			slotMode.Content, sessionMode.PromptAddendum)
-	}
-	if slotMode.Content == defaultModeRow.PromptAddendum {
-		t.Errorf("SlotMode content = profile.default_mode addendum — default_mode is being consulted during session dispatch (regression)")
-	}
-}
+// Test_AgentDefaultMode_NotConsultedDuringSession was deleted in
+// CW-20260512-0115 review round 1: migration 063 drops the
+// `agent_profiles.default_mode` column the test pinned, so the
+// "default_mode never bleeds into runtime" invariant collapses to "the
+// field doesn't exist." The schema-level guarantee is now load-bearing in
+// place of the runtime regression test (per the original test's own doc
+// note that it would become obsolete on column drop).
 
 // findSlotDecision returns the SlotDecision for the named slot, or a
 // zero-value SlotDecision if the slot is absent. Callers test the returned

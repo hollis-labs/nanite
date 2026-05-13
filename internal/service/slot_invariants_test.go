@@ -335,9 +335,14 @@ func invariantCacheMarkerPriority(res *SlotAssemblyResult) error {
 // constant (cache-prefix stability); only its CONTENT changes.
 // Asserted by re-pointing the session's current_mode_id between two
 // modes with sentinel-distinct PromptAddendum text and re-assembling.
-func invariantModeAwareContentSwap(t *testing.T, f *invariantsFixture) error {
+//
+// The caller parameter threads CallerType into both assembly passes so
+// the invariant is checked under the flavor named by the subtest —
+// otherwise the chat-flavored assertion would silently re-run for
+// every flavor and the cross-flavor coverage claim would be vacuous.
+func invariantModeAwareContentSwap(t *testing.T, f *invariantsFixture, caller dispatcher.CallerType) error {
 	t.Helper()
-	res1 := f.assembleWithCaller(t, dispatcher.CallerChat)
+	res1 := f.assembleWithCaller(t, caller)
 	idx1 := indexOfSlot(res1.Plan.Decisions, ctxpkg.SlotMode)
 	if idx1 < 0 {
 		return fmt.Errorf("SlotMode missing from initial plan")
@@ -356,7 +361,7 @@ func invariantModeAwareContentSwap(t *testing.T, f *invariantsFixture) error {
 	}
 	f.session = sessReloaded
 
-	res2 := f.assembleWithCaller(t, dispatcher.CallerChat)
+	res2 := f.assembleWithCaller(t, caller)
 	idx2 := indexOfSlot(res2.Plan.Decisions, ctxpkg.SlotMode)
 	if idx2 != idx1 {
 		return fmt.Errorf("SlotMode position drifted across mode swap: %d → %d (cache prefix broken)", idx1, idx2)
@@ -389,29 +394,39 @@ func invariantModeAwareContentSwap(t *testing.T, f *invariantsFixture) error {
 // cacheable-prefix math relies on (CW-20260512-0110): identical
 // prefix bytes are cache-eligible.
 //
-// Exercised against the real contextbroker.DecideAssembly with a
-// deterministic stasher (fakeArtifactStasher, shared with the
-// existing W1A service-layer tests).
-func invariantPointerStashDeterminism() error {
+// Exercised against the real contextbroker.DecideAssembly with the
+// provided stasher (a deterministic fakeArtifactStasher in the
+// well-behaved case, shared with the existing W1A service-layer tests;
+// a counter-based nondeterministicStasher in the deliberate-violation
+// test that proves this check has teeth). The caller parameter threads
+// CallerType into the ctx passed to DecideAssembly so the invariant is
+// checked under the flavor named by the subtest. The stasher parameter
+// is shared between both DecideAssembly calls so stateful regressions
+// (e.g. counter-based ID drift) are observable as ArtifactID
+// disagreement across the two plans (the determinism check below
+// fires before the canonical-format check, so a non-canonical stasher
+// fails on the load-bearing equality assertion rather than on format).
+func invariantPointerStashDeterminism(caller dispatcher.CallerType, stasher contextbroker.SlotStasher) error {
 	budgets := ctxpkg.DefaultBudgets()
 	budgets[ctxpkg.SlotMemory] = 5
 
 	oversized := strings.Repeat("memory body slice — ", 200)
-	plan1 := contextbroker.DecideAssembly(context.Background(), contextbroker.AssemblyInput{
+	ctx := dispatcher.WithCallerType(context.Background(), caller)
+	plan1 := contextbroker.DecideAssembly(ctx, contextbroker.AssemblyInput{
 		Intent:    contextbroker.Intent{Type: contextbroker.IntentCustom},
 		SlotOrder: ctxpkg.SlotOrder,
 		SessionID: "invariant-pointer-sess",
 		Sources:   map[string]string{ctxpkg.SlotMemory: oversized},
 		Budgets:   budgets,
-		Stasher:   &fakeArtifactStasher{},
+		Stasher:   stasher,
 	})
-	plan2 := contextbroker.DecideAssembly(context.Background(), contextbroker.AssemblyInput{
+	plan2 := contextbroker.DecideAssembly(ctx, contextbroker.AssemblyInput{
 		Intent:    contextbroker.Intent{Type: contextbroker.IntentCustom},
 		SlotOrder: ctxpkg.SlotOrder,
 		SessionID: "invariant-pointer-sess",
 		Sources:   map[string]string{ctxpkg.SlotMemory: oversized},
 		Budgets:   budgets,
-		Stasher:   &fakeArtifactStasher{},
+		Stasher:   stasher,
 	})
 
 	m1 := findSlotDecision(plan1.Decisions, ctxpkg.SlotMemory)
@@ -488,10 +503,10 @@ func TestSlotInvariants_AcrossDispatchTypes(t *testing.T) {
 			if err := invariantCacheMarkerPriority(res); err != nil {
 				t.Errorf("INV3 cache marker priority (%s): %v", flavor.Name, err)
 			}
-			if err := invariantModeAwareContentSwap(t, f); err != nil {
+			if err := invariantModeAwareContentSwap(t, f, flavor.Caller); err != nil {
 				t.Errorf("INV4 mode-aware content swap (%s): %v", flavor.Name, err)
 			}
-			if err := invariantPointerStashDeterminism(); err != nil {
+			if err := invariantPointerStashDeterminism(flavor.Caller, &fakeArtifactStasher{}); err != nil {
 				t.Errorf("INV5 pointer/stash determinism (%s): %v", flavor.Name, err)
 			}
 			if err := invariantPermissionVisibility(res); err != nil {

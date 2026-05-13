@@ -44,7 +44,37 @@ const (
 	// the resolved RuleSet changes; the Anthropic cacheable prefix
 	// invariant survives every turn that doesn't perturb permissions.
 	SlotPermissions = "permissions"
-	SlotTools       = "tools"
+	// SlotWorkspace carries the AGENTS.md walk-up payload — instruction
+	// files (AGENTS.md / CLAUDE.md / NANITE.md / .nanite/rules.md)
+	// collected by walking from the session's working_dir UP to the
+	// nearest .git root (or filesystem root). CW-20260512-0116
+	// (SP-20260512-0009 W6). Same agent in different working dirs
+	// receives different local conventions — the slot is the mechanism
+	// the user described as "project-local agent rules" in the
+	// harness-restoration design session.
+	//
+	// Source: internal/workspace.Cache.Refresh. Walk direction is
+	// innermost-first → outermost-last, matching opencode's findUp
+	// convention. Headers match opencode's instruction.ts:160 format:
+	// `Instructions from: <abs-path>` per block.
+	//
+	// Sits after SlotPermissions in the cacheable prefix: the workspace
+	// slot is per-session-per-working_dir-stable, which in normal
+	// operation (working_dir doesn't change mid-session) is the same as
+	// per-session-stable. Placement near other policy-class slots keeps
+	// cache marker placement deterministic — workspace rules and
+	// path-grant permissions are both load-bearing identity/policy for
+	// the session's local project.
+	//
+	// Non-compactable — workspace rules survive compaction the same way
+	// SlotRules and SlotAgent do; identity-class for the local project.
+	// The earlier SlotPermissions doc-comment noted that AGENTS.md
+	// walk-up would plug into SlotSystem — that plan was superseded by
+	// this dedicated slot (the ticket asks for a `workspace slot`,
+	// distinct from the think-tool + workspace-identity payload that
+	// lives in SlotSystem).
+	SlotWorkspace = "workspace"
+	SlotTools     = "tools"
 	SlotSession     = "session"
 	SlotContext     = "context"     // dynamic enrichment (plugins, context broker)
 	SlotUserContext = "user_context" // J10 (CW-20260426-0008): user-authored session context prompt.
@@ -77,6 +107,7 @@ var SlotOrder = []string{
 	SlotMode,
 	SlotRules,
 	SlotPermissions, // CW-20260512-0118 (SP-20260512-0010 W2): per-session path-access summary.
+	SlotWorkspace,   // CW-20260512-0116 (SP-20260512-0009 W6): AGENTS.md walk-up from working_dir.
 	SlotTools,
 	SlotSession,
 	SlotContext,
@@ -111,6 +142,7 @@ func DefaultCompactable() map[string]bool {
 		SlotMode:         false, // B1: session-mode addendum — survives compaction.
 		SlotRules:        false,
 		SlotPermissions:  false, // CW-20260512-0118 — path-access summary survives compaction; constraints stay visible.
+		SlotWorkspace:    false, // CW-20260512-0116 — workspace rules survive compaction; identity-class for the local project.
 		SlotTools:        true,
 		SlotSession:      true,
 		SlotContext:      true,
@@ -179,8 +211,9 @@ func DefaultBudgets() map[string]int {
 		SlotAgent:        1000,
 		SlotMode:         500, // B1: session-mode addendum — small by design.
 		SlotRules:        500,
-		SlotPermissions:  800, // CW-20260512-0118 — bounded by deny enumeration + provenance tags; per-session stable.
-		SlotTools:        0,   // proportional to selected tool count
+		SlotPermissions:  800,  // CW-20260512-0118 — bounded by deny enumeration + provenance tags; per-session stable.
+		SlotWorkspace:    4000, // CW-20260512-0116 — generous; concatenated AGENTS.md/CLAUDE.md/NANITE.md across the walk path. Oversized payloads stash via the assembly decider's per-slot budget check.
+		SlotTools:        0,    // proportional to selected tool count
 		SlotSession:      1000,
 		SlotContext:      0,    // dynamic
 		SlotUserContext:  2000, // J10: user context prompt; thin by design.

@@ -341,6 +341,13 @@ func cmdServe(args []string) {
 		// (no drift between what the agent reads and what the gate
 		// enforces).
 		DevToolsAllowedPaths: resolveDevToolsAllowedPaths(cfg),
+		// CW-20260514-0047: thread the configured boot-profile catalog
+		// path so the service container builds an in-memory registry of
+		// compiled LaunchSpec entries. ResolvedBootProfileCatalogPath
+		// returns an empty string when the field is unset, in which
+		// case the registry constructor produces an inert (empty)
+		// Registry and the dropdown surfaces only DB-seeded providers.
+		BootProfileCatalogPath: resolveBootProfileCatalogPath(cfg),
 	})
 	if err != nil {
 		slogx.Fatal("failed to create service container", "err", err)
@@ -617,6 +624,21 @@ func resolveDevToolsAllowedPaths(cfg *config.Config) []string {
 		}
 	}
 	return nil
+}
+
+// resolveBootProfileCatalogPath resolves the configured boot-profile
+// catalog root (CW-20260514-0047). Returns an empty string when the
+// field is unset, which the registry constructor interprets as
+// "no catalog" — the dropdown shows only DB-seeded providers and
+// behavior is identical to before this feature. Tilde expansion is
+// delegated to config.ResolvedBootProfileCatalogPath so the rules
+// stay consistent with how every other path-shaped config field is
+// handled.
+func resolveBootProfileCatalogPath(cfg *config.Config) string {
+	if cfg == nil {
+		return ""
+	}
+	return cfg.ResolvedBootProfileCatalogPath()
 }
 
 // devAllowedSource returns a short string describing where the dev tools

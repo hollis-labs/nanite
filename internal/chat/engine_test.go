@@ -103,6 +103,70 @@ func TestIsCLIProvider(t *testing.T) {
 	}
 }
 
+// TestNormalizeCLIProvider exercises the canonical alias-normalization
+// table. CW-20260514-0045: this is the single source of truth shared by
+// chat_generate's CLI bypass, service/agent_deps.stripRegistryPrefix
+// (delegates here), runtime/agent/bootdir.normalizeProviderName
+// (intentional duplicate to avoid the chat→runtime import inversion), and
+// runtime/agent/factory.shouldUsePTY (calls normalizeProviderName). All
+// four sites must agree on the alias table; this test pins the contract.
+func TestNormalizeCLIProvider(t *testing.T) {
+	tests := []struct {
+		in   string
+		want string
+	}{
+		// Dropdown-emitted prefixed aliases → bare adapter names.
+		{"pty-claude", "claude"},
+		{"pty-codex", "codex"},
+		{"pty-opencode", "opencode"},
+		// Legacy bare "pty" → "claude" (pre-CW-20260508-0002 default).
+		{"pty", "claude"},
+		// General PTY / subprocess prefix strip.
+		{"pty-gemini", "gemini"},
+		{"sub-claude", "claude"},
+		{"sub-aider", "aider"},
+		// Bare names pass through unchanged.
+		{"claude", "claude"},
+		{"codex", "codex"},
+		{"opencode", "opencode"},
+		// Non-CLI providers pass through unchanged.
+		{"anthropic", "anthropic"},
+		{"openai", "openai"},
+		// Empty input edge.
+		{"", ""},
+	}
+	for _, tt := range tests {
+		if got := NormalizeCLIProvider(tt.in); got != tt.want {
+			t.Errorf("NormalizeCLIProvider(%q) = %q, want %q", tt.in, got, tt.want)
+		}
+	}
+}
+
+// TestNormalizeCLIProvider_RoundTripWithIsCLIProvider verifies that every
+// input IsCLIProvider classifies as CLI normalizes to a non-empty bare
+// adapter name. This pins the contract that the chat_generate CLI bypass
+// relies on: if IsCLIProvider(name) is true, NormalizeCLIProvider(name)
+// returns a name the runtime CLI adapter index can resolve (after the
+// adapter index is keyed by bare names).
+func TestNormalizeCLIProvider_RoundTripWithIsCLIProvider(t *testing.T) {
+	cliInputs := []string{"pty", "pty-claude", "pty-codex", "pty-opencode", "sub-claude", "sub-codex"}
+	for _, name := range cliInputs {
+		if !IsCLIProvider(name) {
+			t.Fatalf("setup invariant violated: IsCLIProvider(%q) = false; the round-trip test only inspects CLI inputs", name)
+		}
+		got := NormalizeCLIProvider(name)
+		if got == "" {
+			t.Errorf("NormalizeCLIProvider(%q) returned empty string; CLI provider must normalize to a bare adapter name", name)
+		}
+		if got == name {
+			// Sanity: a CLI input that round-trips unchanged means
+			// normalization is a no-op for it, which defeats the bypass.
+			// "pty-" / "sub-" prefixes must strip; bare "pty" must rewrite.
+			t.Errorf("NormalizeCLIProvider(%q) returned the same name; expected a bare adapter name", name)
+		}
+	}
+}
+
 func TestTruncateStr(t *testing.T) {
 	if got := TruncateStr("hello", 10); got != "hello" {
 		t.Errorf("expected 'hello', got %q", got)

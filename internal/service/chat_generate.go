@@ -253,10 +253,33 @@ func (s *chatServiceImpl) generateResponse(ctx context.Context, sessionID, assis
 	// --- Resolve provider ---
 	providerName, prov := s.resolveProvider(sessionID, session.Provider, agent.DefaultProvider, model)
 	if prov == nil {
-		ch <- chat.ErrorEvent(chat.ErrorCodeProviderError,
-			fmt.Sprintf("Provider %q not available — check configuration and restart the server.", providerName),
-			map[string]interface{}{"raw": fmt.Sprintf("provider %q not registered", providerName)})
-		return
+		// CW-20260514-0045: dropdown-selected CLI providers (e.g.
+		// "pty-claude", "pty-codex", "pty-opencode", legacy "pty") no
+		// longer register an llmcontracts.Provider — the bridges were
+		// removed when agent-sessions became the runtime path (Phase
+		// 4c.6, CW-20260508-0002). Resolution therefore returns
+		// (name, nil) for these, but the downstream CLI bypass below
+		// (chat.IsCLIProvider(providerName) branch) still routes them
+		// to driveBootSession.
+		switch s.classifyNilProvider(providerName) {
+		case nilProviderRouteCLI:
+			slog.Info("chat-service: CLI provider routed to agent runtime (no llmcontracts.Provider registered)",
+				"session_id", sessionID, "provider", providerName)
+			// Fall through; the CLI branch at the per-iteration
+			// provider call site routes to driveBootSession. `prov`
+			// stays nil and is only dereferenced via comma-ok type
+			// assertions on the non-CLI path.
+		case nilProviderRouteCLINoAdapter:
+			ch <- chat.ErrorEvent(chat.ErrorCodeProviderError,
+				fmt.Sprintf("CLI provider %q has no runtime adapter registered.", providerName),
+				map[string]interface{}{"raw": fmt.Sprintf("CLI provider %q not in agent runtime adapter index", providerName)})
+			return
+		default:
+			ch <- chat.ErrorEvent(chat.ErrorCodeProviderError,
+				fmt.Sprintf("Provider %q not available — check configuration and restart the server.", providerName),
+				map[string]interface{}{"raw": fmt.Sprintf("provider %q not registered", providerName)})
+			return
+		}
 	}
 
 	// Wire status callback for retry notifications and circuit breaker.
@@ -1603,7 +1626,15 @@ func (s *chatServiceImpl) generateResponse(ctx context.Context, sessionID, assis
 	}
 
 	// CLI envelope retry.
-	if len(envErrors) > 0 && chat.IsCLIProvider(providerName) {
+	//
+	// CW-20260514-0045: retryEnvelopeCorrection drives a fresh
+	// prov.StreamChat for the correction prompt — meaningful only when
+	// the registry returned a real llmcontracts.Provider. The dropdown
+	// CLI bypass (resolveProvider returns nil) leaves prov == nil; skip
+	// the retry rather than NPE on prov.StreamChat. The CLI runtime
+	// path doesn't go through llmcontracts.StreamChat anyway, so the
+	// correction would mis-route even if we built a fake provider here.
+	if len(envErrors) > 0 && chat.IsCLIProvider(providerName) && prov != nil {
 		hasFatal := false
 		for _, envErr := range envErrors {
 			if envErr.Reason == "invalid_json" {
@@ -3335,6 +3366,13 @@ func (s *chatServiceImpl) earlyStopSynthesis(
 	fullContent *strings.Builder,
 	finalContent *strings.Builder,
 ) {
+	// CLI-bypass path (CW-20260514-0045): prov can be nil when classifyNilProvider
+	// routed a CLI alias through driveBootSession. Synthesis is best-effort and
+	// would NPE on the StreamChat call below — skip cleanly. The terminated
+	// envelope still emits in the caller.
+	if prov == nil {
+		return
+	}
 	// Truncate to the most recent messages to avoid sending a near-limit history
 	// to the synthesis call. Near max_turns the context may already be at the
 	// ceiling; a fresh synthesis call with the full slice would fail for the

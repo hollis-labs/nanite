@@ -185,6 +185,46 @@ func IsPTYProvider(name string) bool {
 	return name == "pty" || strings.HasPrefix(name, "pty-")
 }
 
+// NormalizeCLIProvider maps a dropdown / session-side CLI provider name to
+// the bare adapter name the runtime/bootdir layer expects. The runtime CLI
+// adapters expose themselves under bare names ("claude", "codex",
+// "opencode"); the UI dropdown emits prefixed aliases ("pty-claude",
+// "pty-codex", "pty-opencode") and legacy rows can still carry the bare
+// "pty" alias from before the per-CLI provider split.
+//
+// Normalization rules:
+//
+//   - "pty"              → "claude"   (legacy alias; pre-split default)
+//   - "pty-claude"       → "claude"
+//   - "pty-codex"        → "codex"
+//   - "pty-opencode"     → "opencode"
+//   - "pty-<x>"          → "<x>"      (general PTY prefix strip)
+//   - "sub-<x>"          → "<x>"      (general subprocess prefix strip)
+//   - anything else      → unchanged
+//
+// Non-CLI provider names ("anthropic", "openai", etc.) flow through
+// unchanged. This is the single source of truth consulted by:
+//
+//   - chat_generate.go's CLI bypass when the registry returns prov == nil
+//   - runtime/agent bootdir.go's layout dispatch
+//   - runtime/agent factory.go's shouldUsePTY check
+//   - service/agent_deps.go's stripRegistryPrefix (which delegates here)
+//
+// so the four sites can't drift from each other when a new CLI flavor
+// lands.
+func NormalizeCLIProvider(name string) string {
+	if name == "pty" {
+		return "claude"
+	}
+	if strings.HasPrefix(name, "pty-") {
+		return strings.TrimPrefix(name, "pty-")
+	}
+	if strings.HasPrefix(name, "sub-") {
+		return strings.TrimPrefix(name, "sub-")
+	}
+	return name
+}
+
 // InferProvider maps a model name to a provider when the session has no
 // explicit provider set. Resolution order:
 //

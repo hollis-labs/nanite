@@ -136,7 +136,15 @@ type SetupParams struct {
 // providers return a clear-error stub that fails Setup; callers iterate
 // PlantedFiles only when the provider's BootDirSpec.Notes is empty per
 // go-providers v0.8.0 guidance.
+//
+// CW-20260514-0045: prefixed CLI aliases ("pty", "pty-claude",
+// "pty-codex", "pty-opencode", "sub-<x>") normalize to their bare
+// adapter names before dispatch. This protects the bootdir layer when an
+// older agent profile row carries a dropdown-shape default_provider; the
+// chat-side normalization in chat_generate.go is the primary fix, this
+// is the belt-and-suspenders guard at the runtime boundary.
 func bootdirLayoutFor(provider string) Layout {
+	provider = normalizeProviderName(provider)
 	switch provider {
 	case "claude", "claude-code", "claudecode":
 		return claudeLayout{}
@@ -154,6 +162,25 @@ func bootdirLayoutFor(provider string) Layout {
 		return unsupportedLayout{name: "junie"}
 	default:
 		return unsupportedLayout{name: provider}
+	}
+}
+
+// normalizeProviderName maps prefixed CLI aliases to bare adapter names.
+// Duplicates chat.NormalizeCLIProvider's rules locally so the
+// internal/runtime/agent package stays free of an internal/chat
+// dependency (runtime is below chat in the layering — chat imports
+// runtime, not the other way around). The two functions MUST stay in
+// lock-step; see chat.NormalizeCLIProvider for the canonical rule set.
+func normalizeProviderName(name string) string {
+	switch {
+	case name == "pty":
+		return "claude"
+	case len(name) > 4 && name[:4] == "pty-":
+		return name[4:]
+	case len(name) > 4 && name[:4] == "sub-":
+		return name[4:]
+	default:
+		return name
 	}
 }
 

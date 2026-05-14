@@ -13,11 +13,17 @@ import (
 //     enables per-tool SSE via TypedEventCallback).
 //   - everything else → subprocess-per-turn (until per-adapter PTY
 //     work lands).
+//
+// CW-20260514-0045: dropdown / legacy prefixed aliases ("pty",
+// "pty-claude") normalize to "claude" before the switch so an older
+// agent profile row carrying a dropdown-shape default_provider still
+// activates PTY mode. See bootdir.normalizeProviderName for the rule
+// set.
 func shouldUsePTY(providerName string, mode Mode) bool {
 	if mode != ModeLongLived {
 		return false
 	}
-	switch providerName {
+	switch normalizeProviderName(providerName) {
 	case "claude", "claude-code", "claudecode":
 		return true
 	default:

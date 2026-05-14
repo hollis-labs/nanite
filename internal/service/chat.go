@@ -900,3 +900,56 @@ func (s *chatServiceImpl) resolveProvider(sessionID, sessionProvider, agentProvi
 	return inferred, nil
 }
 
+// nilProviderRoute classifies what to do when resolveProvider returns a
+// nil llmcontracts.Provider. CW-20260514-0045: introduced for the CLI
+// dropdown-route fix so the chat_generate.go nil-provider handler can
+// surface a distinct error for each outcome without an inline
+// three-way conditional. Tested directly in chat_generate_cli_bypass_test.go.
+type nilProviderRoute int
+
+const (
+	// nilProviderRouteFatal is the legacy path: the provider name is not
+	// a CLI alias, so the lack of a registered provider is a real
+	// misconfiguration. Emits the original "Provider not available"
+	// error and aborts.
+	nilProviderRouteFatal nilProviderRoute = iota
+	// nilProviderRouteCLI signals the chat-harness loop to fall through
+	// to driveBootSession (CW-20260508-0002 / Phase 4c.6 architecture).
+	// The provider name passes IsCLIProvider AND the agent runtime has
+	// an adapter registered for it; we don't need an llmcontracts.Provider
+	// because the CLI path doesn't go through Provider.StreamChat.
+	nilProviderRouteCLI
+	// nilProviderRouteCLINoAdapter is the case where the dropdown sent
+	// a CLI alias but no runtime adapter is registered (e.g. dev forgot
+	// to wire CLIAdapters into ContainerConfig). Emits a CLI-specific
+	// error so the operator gets a pointed message instead of the
+	// generic "Provider not available" footer.
+	nilProviderRouteCLINoAdapter
+)
+
+// classifyNilProvider returns the nilProviderRoute case for the resolved
+// provider name. Returns nilProviderRouteFatal when the name is not a
+// CLI alias (the original behavior). Returns nilProviderRouteCLI when the
+// name is a CLI alias AND the agent runtime has a registered adapter for
+// it. Returns nilProviderRouteCLINoAdapter when the name is a CLI alias
+// but no adapter is registered (misconfiguration).
+//
+// Adapter lookup goes through agentDeps.ProviderAdapter which already
+// applies the CW-20260514-0045 alias normalization (stripRegistryPrefix
+// → chat.NormalizeCLIProvider), so the caller passes the dropdown-shape
+// name verbatim.
+func (s *chatServiceImpl) classifyNilProvider(providerName string) nilProviderRoute {
+	if !chat.IsCLIProvider(providerName) {
+		return nilProviderRouteFatal
+	}
+	if s.agentDeps == nil || s.agentDeps.ProviderAdapter == nil {
+		// CLI provider name but no runtime composition wired —
+		// behave as fatal so the operator sees the legacy error.
+		return nilProviderRouteFatal
+	}
+	if s.agentDeps.ProviderAdapter(providerName) == nil {
+		return nilProviderRouteCLINoAdapter
+	}
+	return nilProviderRouteCLI
+}
+

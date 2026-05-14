@@ -55,6 +55,13 @@ func LoadCatalog(root string) (*Catalog, error) {
 			Launches: map[string]Launch{},
 		}, nil
 	}
+	// Normalize to an absolute, cleaned path so the catalog Root is
+	// stable regardless of the caller's cwd — see PR #169 round 1.
+	absRoot, err := filepath.Abs(root)
+	if err != nil {
+		return nil, fmt.Errorf("bootprofile: resolve catalog root %s: %w", root, err)
+	}
+	root = filepath.Clean(absRoot)
 	cat := &Catalog{
 		Root:     root,
 		Profiles: map[string]Profile{},

@@ -196,3 +196,43 @@ func TestResolveSlot_MissingType(t *testing.T) {
 		t.Fatalf("error %q should mention missing type", err)
 	}
 }
+
+// TestResolvePath_RelativeWithEmptyRootErrors pins the PR #169 round 1
+// fix: a relative slot path with no catalogRoot must return an
+// explicit error rather than silently joining onto the process cwd
+// (which would make compile non-reproducible).
+func TestResolvePath_RelativeWithEmptyRootErrors(t *testing.T) {
+	_, err := resolvePath("relative/path.md", "")
+	if err == nil {
+		t.Fatal("expected error for relative path with empty catalog root")
+	}
+	if !strings.Contains(err.Error(), "catalog root unset") {
+		t.Fatalf("error %q should mention catalog root unset", err)
+	}
+}
+
+// TestResolvePath_AbsoluteWithEmptyRootOK pins that an absolute path
+// works regardless of catalogRoot — the empty-root rejection above
+// applies only to relative paths.
+func TestResolvePath_AbsoluteWithEmptyRootOK(t *testing.T) {
+	got, err := resolvePath("/tmp/abs.md", "")
+	if err != nil {
+		t.Fatalf("absolute path with empty root unexpectedly failed: %v", err)
+	}
+	if got != "/tmp/abs.md" {
+		t.Fatalf("absolute path got mangled: %q", got)
+	}
+}
+
+// TestResolveStatic_RelativeWithEmptyRootErrors checks the error
+// propagates through resolveStatic. Before PR #169 round 1 this
+// case silently rebased onto cwd.
+func TestResolveStatic_RelativeWithEmptyRootErrors(t *testing.T) {
+	_, err := resolveStatic(SlotSource{Type: "static", Path: "rules.md"}, "")
+	if err == nil {
+		t.Fatal("expected error for static slot with empty catalog root")
+	}
+	if !strings.Contains(err.Error(), "catalog root unset") {
+		t.Fatalf("error %q should mention catalog root unset", err)
+	}
+}

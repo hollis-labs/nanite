@@ -114,7 +114,10 @@ func resolveStatic(src SlotSource, catalogRoot string) (string, error) {
 	if src.Path == "" {
 		return "", fmt.Errorf("static slot missing 'path' field")
 	}
-	path := resolvePath(src.Path, catalogRoot)
+	path, err := resolvePath(src.Path, catalogRoot)
+	if err != nil {
+		return "", err
+	}
 	info, err := os.Stat(path)
 	if err != nil {
 		return "", fmt.Errorf("stat %s: %w", path, err)
@@ -154,19 +157,34 @@ func resolveStatic(src SlotSource, catalogRoot string) (string, error) {
 // root. Env-var expansion is intentionally NOT applied here — the
 // compiler must be reproducible, and ${VANTA_URL}-style references
 // belong in deferred slot types (http) anyway.
-func resolvePath(path, catalogRoot string) string {
+//
+// Two failure modes return an explicit error rather than silently
+// producing a wrong path (PR #169 round 1):
+//
+//   - ~-prefixed path when os.UserHomeDir() fails: previously the
+//     unresolved "~/..." literal was joined onto catalogRoot, which
+//     silently pointed at the wrong file.
+//   - relative path with empty catalogRoot: previously fell through to
+//     the process working directory, breaking the "resolved relative
+//     to catalog root" contract and making compile non-reproducible.
+func resolvePath(path, catalogRoot string) (string, error) {
 	if path == "" {
-		return path
+		return path, nil
 	}
 	if strings.HasPrefix(path, "~/") || path == "~" {
-		if home, err := os.UserHomeDir(); err == nil {
-			path = filepath.Join(home, strings.TrimPrefix(path, "~"))
+		home, err := os.UserHomeDir()
+		if err != nil {
+			return "", fmt.Errorf("expand %q: home directory unavailable: %w", path, err)
 		}
+		path = filepath.Join(home, strings.TrimPrefix(path, "~"))
 	}
 	if !filepath.IsAbs(path) {
+		if catalogRoot == "" {
+			return "", fmt.Errorf("resolve relative path %q: catalog root unset (caller must pass an absolute path or a catalog root)", path)
+		}
 		path = filepath.Join(catalogRoot, path)
 	}
-	return path
+	return path, nil
 }
 
 // requirementFromSlot lifts a SlotSource onto a Requirement, dropping

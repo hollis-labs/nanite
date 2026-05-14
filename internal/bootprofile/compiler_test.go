@@ -242,6 +242,60 @@ func TestCompileFromCatalog_HappyPath(t *testing.T) {
 	}
 }
 
+// TestCompile_LaunchSpecSliceFieldsAreNonNil pins the contract from
+// LaunchSpec docstring: every slice/map field lands non-nil after a
+// successful Compile, so consumers can iterate without nil-checking.
+// PR #169 round 1 caught Args + Requirements being left as nil and
+// MCPServers being nil when profile.MCPServers is nil.
+func TestCompile_LaunchSpecSliceFieldsAreNonNil(t *testing.T) {
+	// Profile with no launch (prompt-only), no MCP servers, no args.
+	prof := newTestProfile()
+	prof.MCPServers = nil
+	spec, err := Compile(prof, nil, nil, "")
+	if err != nil {
+		t.Fatalf("Compile: %v", err)
+	}
+	if spec.Args == nil {
+		t.Error("LaunchSpec.Args is nil; contract requires non-nil")
+	}
+	if spec.Requirements == nil {
+		t.Error("LaunchSpec.Requirements is nil; contract requires non-nil")
+	}
+	if spec.MCPServers == nil {
+		t.Error("LaunchSpec.MCPServers is nil; contract requires non-nil")
+	}
+	if spec.Env == nil {
+		t.Error("LaunchSpec.Env is nil; contract requires non-nil")
+	}
+	if spec.Slots == nil {
+		t.Error("LaunchSpec.Slots is nil; contract requires non-nil")
+	}
+}
+
+// TestCompile_PromptOnlyProfileHasEmptyProvider documents the
+// launch-nil case: Compile against a prompt-only profile succeeds
+// but emits a LaunchSpec with Provider == "" and Provider omitted
+// from the JSON shape (omitempty). PR #169 round 1: this spec is
+// NOT suitable for boot and must be filtered before reaching a
+// selectable dropdown row.
+func TestCompile_PromptOnlyProfileHasEmptyProvider(t *testing.T) {
+	prof := newTestProfile()
+	spec, err := Compile(prof, nil, nil, "")
+	if err != nil {
+		t.Fatalf("Compile: %v", err)
+	}
+	if spec.Provider != "" {
+		t.Errorf("prompt-only spec.Provider = %q, want empty", spec.Provider)
+	}
+	b, err := json.Marshal(spec)
+	if err != nil {
+		t.Fatalf("Marshal: %v", err)
+	}
+	if strings.Contains(string(b), `"provider"`) {
+		t.Errorf("empty Provider should be omitted from JSON; got: %s", string(b))
+	}
+}
+
 func TestCompile_IdentityVarsAvailable(t *testing.T) {
 	prof := newTestProfile()
 	prof.Slots["agent"] = SlotSource{

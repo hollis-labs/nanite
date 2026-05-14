@@ -145,8 +145,11 @@ type Launch struct {
 // is unaffected when no catalog is configured because no caller invokes
 // Compile in that case.
 type Catalog struct {
-	// Root is the absolute path the catalog was loaded from. Empty when
-	// the catalog is constructed in-memory.
+	// Root is the path the catalog was loaded from. LoadCatalog
+	// normalizes this to an absolute, cleaned path so downstream
+	// error messages and slot-path resolution are consistent
+	// regardless of the caller's working directory. Empty when the
+	// catalog is constructed in-memory (no on-disk root).
 	Root string
 
 	// Profiles is the loaded boot profiles keyed by Profile.ID.

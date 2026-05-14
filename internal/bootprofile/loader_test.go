@@ -59,6 +59,28 @@ func TestLoadCatalog_HappyPath(t *testing.T) {
 	}
 }
 
+// TestLoadCatalog_RootIsAbsoluteAndClean pins the PR #169 round 1
+// fix: Catalog.Root must be the absolute, cleaned path regardless
+// of how the caller phrased the input. Previously LoadCatalog stored
+// the root as-provided which made downstream error messages and
+// path resolution inconsistent across callers with different cwds.
+func TestLoadCatalog_RootIsAbsoluteAndClean(t *testing.T) {
+	root := t.TempDir()
+	writeYAML(t, root, "boot-profiles/nanite.backend.main.yaml", happyProfileYAML)
+
+	// Caller hands in a path with a trailing "/.": Clean should strip it.
+	cat, err := LoadCatalog(root + "/.")
+	if err != nil {
+		t.Fatalf("LoadCatalog: %v", err)
+	}
+	if !filepath.IsAbs(cat.Root) {
+		t.Errorf("Catalog.Root not absolute: %q", cat.Root)
+	}
+	if cat.Root != filepath.Clean(root) {
+		t.Errorf("Catalog.Root = %q, want %q (cleaned)", cat.Root, filepath.Clean(root))
+	}
+}
+
 func TestLoadProfile_MissingFile(t *testing.T) {
 	_, err := LoadProfile(filepath.Join(t.TempDir(), "nope.yaml"))
 	if err == nil {

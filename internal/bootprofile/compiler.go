@@ -22,7 +22,13 @@ import (
 //	                          form ("claude" / "codex" / "opencode"
 //	                          / "anthropic" / ...); aliases like
 //	                          "pty-claude" / legacy "pty" are resolved
-//	                          via chat.NormalizeCLIProvider.
+//	                          via chat.NormalizeCLIProvider. EMPTY when
+//	                          Compile is called with launch == nil
+//	                          (prompt-only profiles, e.g. for boot
+//	                          prompt preview without a runtime target);
+//	                          such specs are not suitable for boot and
+//	                          must be filtered before they reach a
+//	                          selectable dropdown row.
 //	ProviderAlias          — the original, un-normalized provider
 //	                          string as the launch declared it. Kept
 //	                          for telemetry and for the dropdown,
@@ -40,7 +46,8 @@ import (
 //	Env / Args             — straight pass-through from Launch.
 //	TemplatePath           — surfaces Profile.Template so 0048 can
 //	                          plug in a custom template; empty for
-//	                          the default 7-section template.
+//	                          the default rendering produced by
+//	                          renderDefaultPrompt.
 //	MCPServers             — pass-through from Profile.MCPServers; 0048
 //	                          will translate to MUX_MCP_SERVERS env.
 //	Slots                  — resolved-slot bodies keyed by slot name.
@@ -62,7 +69,7 @@ import (
 type LaunchSpec struct {
 	ProfileID     string            `json:"profile_id"`
 	LaunchID      string            `json:"launch_id,omitempty"`
-	Provider      string            `json:"provider"`
+	Provider      string            `json:"provider,omitempty"`
 	ProviderAlias string            `json:"provider_alias,omitempty"`
 	Workdir       string            `json:"workdir,omitempty"`
 	BootPrompt    string            `json:"boot_prompt,omitempty"`
@@ -71,7 +78,7 @@ type LaunchSpec struct {
 	Env           map[string]string `json:"env"`
 	Args          []string          `json:"args"`
 	TemplatePath  string            `json:"template_path,omitempty"`
-	MCPServers    []string          `json:"mcp_servers,omitempty"`
+	MCPServers    []string          `json:"mcp_servers"`
 	Slots         map[string]string `json:"slots"`
 	Requirements  []Requirement     `json:"requirements"`
 	Identity      Identity          `json:"identity"`
@@ -132,15 +139,19 @@ func Compile(profile Profile, launch *Launch, vars Vars, catalogRoot string) (*L
 
 	mergedVars := buildVars(profile, vars)
 
+	// All slice/map fields land non-nil so consumers can iterate
+	// without nil-checking (per LaunchSpec docstring).
+	mcp := make([]string, 0, len(profile.MCPServers))
+	mcp = append(mcp, profile.MCPServers...)
 	spec := &LaunchSpec{
 		ProfileID:    profile.ID,
 		UILabel:      uiLabelFor(profile, launch),
 		Env:          map[string]string{},
-		Args:         nil,
+		Args:         []string{},
 		TemplatePath: profile.Template,
-		MCPServers:   append([]string(nil), profile.MCPServers...),
+		MCPServers:   mcp,
 		Slots:        map[string]string{},
-		Requirements: nil,
+		Requirements: []Requirement{},
 		Identity:     profile.Identity,
 	}
 
@@ -267,15 +278,15 @@ func uiLabelFor(profile Profile, launch *Launch) string {
 
 // renderDefaultPrompt produces a stable, minimal prompt body from a
 // fully-resolved LaunchSpec. The compiler intentionally does NOT carry
-// the full 7-section Tether template — that template is a downstream
+// the full Tether boot prompt template — that template is a downstream
 // presentation concern that may diverge between Nanite and Tether (e.g.
 // Nanite may want to inject session metadata Tether doesn't have). The
 // default rendering is enough to drive boot for chat sessions and is
 // trivially overridable by setting Profile.Template + handling it in
 // 0048.
 //
-// Section order matches the canonical 7-section shape so an operator
-// reading the rendered output sees the familiar layout. Sections are
+// Section order follows canonicalSlotOrder so an operator reading the
+// rendered output sees a stable layout across runs. Sections are
 // omitted when their slot resolved to empty content.
 func renderDefaultPrompt(spec *LaunchSpec) string {
 	var b stringsBuilder
@@ -309,10 +320,13 @@ func renderDefaultPrompt(spec *LaunchSpec) string {
 	return b.String()
 }
 
-// canonicalSlotOrder returns the slot names in the canonical
-// 7-section order followed by any unknown slots in alpha order. Keeping
-// the order stable here means downstream rendering tests can pin output
-// without depending on map iteration order.
+// canonicalSlotOrder returns the slot names in a stable, known-name-first
+// order followed by any unknown slot names in alpha order. The known-name
+// list is the union of slot identifiers Nanite + Tether emit today
+// (recap/delta/history/etc.); it is NOT a 1:1 mapping to the Tether
+// 7-section template — that template is a downstream presentation
+// concern. The list is deliberately wider than 7 so future slot kinds
+// can land here without needing to update every caller's sort key.
 func canonicalSlotOrder(slots map[string]string) []string {
 	canonical := []string{"agent", "recap", "delta", "history", "tasks", "status", "memory", "knowledge", "skills", "context", "candidates", "narrative"}
 	seen := map[string]struct{}{}

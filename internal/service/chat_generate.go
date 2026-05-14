@@ -261,14 +261,16 @@ func (s *chatServiceImpl) generateResponse(ctx context.Context, sessionID, assis
 	// NEVER reaches the classifier. The compiled spec is stashed on
 	// s.activeSessionLaunchSpecs so driveBootSession can thread per-profile
 	// env / args / workdir / boot prompt into agent.Boot.
-	resolvedProvider := session.Provider
-	if substituted, _, bpErr := s.resolveBootProfile(sessionID, session.Provider, session, agent); bpErr != nil {
+	// PR #171 round 1: flatten the if-else (lint: indent-error-flow) —
+	// resolvedProvider is always the substituted value on the success
+	// path, so a fresh declaration after the error return is cleaner
+	// than seeding + reassigning.
+	resolvedProvider, _, bpErr := s.resolveBootProfile(sessionID, session.Provider, session, agent)
+	if bpErr != nil {
 		ch <- chat.ErrorEvent(chat.ErrorCodeProviderError,
 			bpErr.Error(),
 			map[string]interface{}{"raw": bpErr.Error()})
 		return
-	} else {
-		resolvedProvider = substituted
 	}
 	providerName, prov := s.resolveProvider(sessionID, resolvedProvider, agent.DefaultProvider, model)
 	if prov == nil {

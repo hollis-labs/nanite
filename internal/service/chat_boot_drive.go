@@ -12,6 +12,7 @@ import (
 
 	agentsessions "github.com/hollis-labs/go-agent-sessions/agentsessions"
 	llmtypes "github.com/hollis-labs/go-llm-types"
+	"github.com/hollis-labs/nanite/internal/bootprofile"
 	ctxpkg "github.com/hollis-labs/nanite/internal/context"
 	"github.com/hollis-labs/nanite/internal/fsutil"
 	runtimeagent "github.com/hollis-labs/nanite/internal/runtime/agent"
@@ -92,6 +93,14 @@ func (s *chatServiceImpl) driveBootSession(
 			AgentProfile: profileSlug,
 			Workdir:      workdir,
 			Role:         role,
+		}
+		// CW-20260514-0048: when this session is backed by a compiled
+		// boot-profile LaunchSpec (provider was a "bootprofile:<id>"
+		// id that chat_generate.go decoded + stashed), merge per-profile
+		// knobs into bootOpts BEFORE handing off to runtimeagent.Boot.
+		// See applyLaunchSpecToBootOpts for the precedence rules.
+		if launchSpec := s.launchSpecFor(sessionID); launchSpec != nil {
+			applyLaunchSpecToBootOpts(&bootOpts, launchSpec)
 		}
 		booted, err := runtimeagent.Boot(ctx, s.agentDeps, bootOpts)
 		if err != nil {
@@ -358,6 +367,62 @@ func (s *chatServiceImpl) regenerateBootDirSlots(bootDir string, agent *store.Ag
 func bootSessionWorkdir(session *store.Session) string {
 	_ = session
 	return ""
+}
+
+// applyLaunchSpecToBootOpts overlays a compiled bootprofile.LaunchSpec
+// onto the agent.Options that driveBootSession passes to runtimeagent.Boot.
+// CW-20260514-0048: factored out of the inline boot setup so the merge
+// semantics are unit-testable without booting a real runtime.
+//
+// Precedence rules (pinned in tests under chat_boot_drive_test.go):
+//
+//	Workdir          — caller-supplied bootOpts.Workdir wins (chat
+//	                    layer may have a session-scoped override);
+//	                    falls through to spec.Workdir when empty.
+//	                    Today bootSessionWorkdir returns "" so the
+//	                    spec value lands; if a future ticket puts a
+//	                    real workdir on store.Session, that wins.
+//	Env              — spec values overlay bootOpts.Env (spec wins on
+//	                    key collision; pre-existing caller-supplied
+//	                    keys persist for keys the spec doesn't touch).
+//	                    Inside agent.Boot, composeEnv then layers:
+//	                    host < profile < Options.Env, so spec values
+//	                    beat the inherited host env.
+//	ExtraArgs        — spec.Args are APPENDED to bootOpts.ExtraArgs
+//	                    so any caller-side argv (none today) is
+//	                    preserved. The runtime splices ExtraArgs
+//	                    after adapter.BuildArgs.
+//	BootPrompt       — spec.BootPrompt overrides the role-derived
+//	                    composeSystemPrompt output via
+//	                    Options.BootPromptOverride. Empty
+//	                    spec.BootPrompt leaves the legacy
+//	                    behavior intact (composeSystemPrompt fires).
+//
+// CW-20260514-0048 scope: ModeResume / ResumeFromCheckpoint are
+// explicitly NOT touched here — normal boot-profile launches start
+// fresh. Crash recovery's resume path (CW-20260514-0049) constructs
+// its own Options and bypasses this helper.
+func applyLaunchSpecToBootOpts(bootOpts *runtimeagent.Options, spec *bootprofile.LaunchSpec) {
+	if bootOpts == nil || spec == nil {
+		return
+	}
+	if spec.Workdir != "" && bootOpts.Workdir == "" {
+		bootOpts.Workdir = spec.Workdir
+	}
+	if len(spec.Env) > 0 {
+		if bootOpts.Env == nil {
+			bootOpts.Env = make(map[string]string, len(spec.Env))
+		}
+		for k, v := range spec.Env {
+			bootOpts.Env[k] = v
+		}
+	}
+	if len(spec.Args) > 0 {
+		bootOpts.ExtraArgs = append(bootOpts.ExtraArgs, spec.Args...)
+	}
+	if spec.BootPrompt != "" {
+		bootOpts.BootPromptOverride = spec.BootPrompt
+	}
 }
 
 // bootSessionRole derives a role identifier from the agent profile + mode for

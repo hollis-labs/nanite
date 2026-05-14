@@ -251,7 +251,28 @@ func (s *chatServiceImpl) generateResponse(ctx context.Context, sessionID, assis
 	}
 
 	// --- Resolve provider ---
-	providerName, prov := s.resolveProvider(sessionID, session.Provider, agent.DefaultProvider, model)
+	//
+	// CW-20260514-0048: when session.Provider carries an encoded boot-profile
+	// id ("bootprofile:<profile_id>"), decode + compile a session-scoped
+	// LaunchSpec NOW so downstream resolveProvider / classifyNilProvider
+	// see the CLI-routable alias form ("pty-claude" etc.) instead of the
+	// bootprofile encoded id. IsCLIProvider stays narrow (only matches
+	// the existing "pty-*" / "sub-*" / "pty" shapes); the boot-profile id
+	// NEVER reaches the classifier. The compiled spec is stashed on
+	// s.activeSessionLaunchSpecs so driveBootSession can thread per-profile
+	// env / args / workdir / boot prompt into agent.Boot.
+	// PR #171 round 1: flatten the if-else (lint: indent-error-flow) —
+	// resolvedProvider is always the substituted value on the success
+	// path, so a fresh declaration after the error return is cleaner
+	// than seeding + reassigning.
+	resolvedProvider, _, bpErr := s.resolveBootProfile(sessionID, session.Provider, session, agent)
+	if bpErr != nil {
+		ch <- chat.ErrorEvent(chat.ErrorCodeProviderError,
+			bpErr.Error(),
+			map[string]interface{}{"raw": bpErr.Error()})
+		return
+	}
+	providerName, prov := s.resolveProvider(sessionID, resolvedProvider, agent.DefaultProvider, model)
 	if prov == nil {
 		// CW-20260514-0045: dropdown-selected CLI providers (e.g.
 		// "pty-claude", "pty-codex", "pty-opencode", legacy "pty") no

@@ -130,6 +130,29 @@ type Options struct {
 	// always passes the original SessionID to preserve chat-history /
 	// slot-state / path-grant lineage.
 	IsRelaunch bool
+
+	// BootPromptOverride, when non-empty, replaces the role-derived
+	// system prompt that Layout.BootPrompt would otherwise compose.
+	// CW-20260514-0048 (boot-profile-driven launches): the compiled
+	// LaunchSpec carries a fully-rendered BootPrompt assembled from
+	// the profile's slots; threading it onto the spawn via this
+	// override keeps Layout.BootPrompt as the single hook so the
+	// existing claude/codex/opencode paths converge on one source.
+	//
+	// Empty leaves the prior behavior intact — composeSystemPrompt
+	// derives the prompt from profile + role + mode as it always has.
+	BootPromptOverride string
+
+	// ExtraArgs is appended verbatim to the spawned process's argv
+	// (after the adapter's BuildArgs output). CW-20260514-0048: lets
+	// a boot-profile-driven launch thread LaunchSpec.Args into the
+	// runtime without forking agent.Boot. The runtime lib already
+	// supports the surface as agentsessions.StartOptions.ExtraArgs.
+	//
+	// Default empty preserves the pre-CW-20260514-0048 behavior. The
+	// runtime does NOT template-substitute these — callers pre-resolve
+	// any placeholders before passing the slice.
+	ExtraArgs []string
 }
 
 // Validate enforces mode-specific invariants.
@@ -354,6 +377,7 @@ func Boot(ctx context.Context, deps *Dependencies, opts Options) (*Session, erro
 		AutoFireFirstTurn: shouldAutoFireFirstTurn(opts.Mode),
 		FirstTurnPayload:  []byte(firstTurn),
 		AttachEnabled:     true,
+		ExtraArgs:         append([]string(nil), opts.ExtraArgs...),
 	}
 	if deps.EventFanout != nil {
 		startOpts.EventFanout = deps.EventFanout(sessID)

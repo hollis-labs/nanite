@@ -54,7 +54,7 @@ func TestDecodeProviderID_RejectsNonNamespaced(t *testing.T) {
 		"",
 		"pty-claude",
 		"anthropic",
-		"bootprofile:", // empty suffix
+		"bootprofile:",          // empty suffix
 		"BOOTPROFILE:something", // case-sensitive prefix on purpose
 		"sub-claude",
 	}

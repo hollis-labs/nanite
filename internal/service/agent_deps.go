@@ -8,7 +8,6 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
-	"strings"
 	"sync"
 	"sync/atomic"
 
@@ -323,14 +322,15 @@ func (a *recoveryMCPAdapter) RestartTransport(ctx context.Context, sessionID str
 // stripRegistryPrefix drops the nanite registry-side prefix
 // ("pty-claude" → "claude", "sub-codex" → "codex"). Callers that already
 // pass the bare adapter name see no change.
+//
+// CW-20260514-0045: legacy bare "pty" (pre-CW-20260508-0002 default)
+// normalizes to "claude" so dropdown-selected CLI providers still resolve
+// to a registered adapter after the PTYBridge registry registrations
+// were removed. Delegates to chat.NormalizeCLIProvider so the four
+// normalization call sites (chat_generate CLI bypass, bootdirLayoutFor,
+// shouldUsePTY, this) can't drift.
 func stripRegistryPrefix(name string) string {
-	if strings.HasPrefix(name, "pty-") {
-		return strings.TrimPrefix(name, "pty-")
-	}
-	if strings.HasPrefix(name, "sub-") {
-		return strings.TrimPrefix(name, "sub-")
-	}
-	return name
+	return chat.NormalizeCLIProvider(name)
 }
 
 // indexAdapters builds the providerName → CLIAdapter resolution map from

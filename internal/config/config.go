@@ -39,6 +39,19 @@ type Config struct {
 	// every call regardless of how the allow-list was sourced; this knob
 	// only widens which roots qualify, it never disables traversal protection.
 	DevToolsAllowedPaths []string                 `yaml:"dev_tools_allowed_paths"`
+	// BootProfileCatalogPath is the on-disk root that
+	// internal/bootprofile.LoadCatalog reads when surfacing boot-profile-
+	// backed entries in the provider/model dropdown (CW-20260514-0047)
+	// and, in a follow-up ticket, when the chat runtime boots a session
+	// against a profile-backed entry (CW-20260514-0048). The path may
+	// use a leading ~/ for the user's home directory; expansion happens
+	// in ResolvedBootProfileCatalogPath.
+	//
+	// When unset (empty string) the boot-profile registry stays inert —
+	// the existing API/CLI provider behavior is unchanged and the
+	// dropdown only shows DB-seeded rows. This satisfies the "no
+	// catalog → no behavior change" acceptance criterion.
+	BootProfileCatalogPath string                  `yaml:"boot_profile_catalog_path"`
 	Executor       ExecutorConfig           `yaml:"executor"`
 	Defaults       DefaultsConfig           `yaml:"defaults"`
 	Projects       map[string]ProjectEntry  `yaml:"projects"`
@@ -172,6 +185,14 @@ func (c *Config) ProjectRoot() string {
 	return expandHome(c.Project.Root)
 }
 
+// ResolvedBootProfileCatalogPath returns the configured BootProfileCatalogPath
+// with a leading ~/ tilde-expanded to the user's home directory. Returns an
+// empty string when the field is unset, which the boot-profile registry
+// treats as "no catalog configured" (inert).
+func (c *Config) ResolvedBootProfileCatalogPath() string {
+	return expandHome(c.BootProfileCatalogPath)
+}
+
 // ResolvedDevToolsAllowedPaths returns the configured DevToolsAllowedPaths
 // list with leading ~/ entries tilde-expanded to the user's home directory.
 // Empty entries are dropped. Returns nil only when the field was never
@@ -240,6 +261,9 @@ func merge(user, project *Config) *Config {
 	}
 	if project.DevToolsAllowedPaths != nil {
 		out.DevToolsAllowedPaths = project.DevToolsAllowedPaths
+	}
+	if project.BootProfileCatalogPath != "" {
+		out.BootProfileCatalogPath = project.BootProfileCatalogPath
 	}
 	if project.HooksDir != "" {
 		out.HooksDir = project.HooksDir

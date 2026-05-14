@@ -870,6 +870,15 @@ func (s *chatServiceImpl) CloseAgentSession(ctx context.Context, sessionID strin
 //
 // When a preferred provider is unavailable and the chain falls through,
 // a provider.fallback plugin event is emitted.
+//
+// CLI providers ("pty", "pty-*", "sub-*") intentionally have no
+// llmcontracts.Provider registered after Phase 4c.6 (CW-20260508-0002) —
+// their turns are driven by internal/runtime/agent.Boot, not StreamChat.
+// At every registry-miss point below, if the requested name is a CLI
+// alias we return (name, nil) so chat_generate's classifyNilProvider can
+// route the turn to driveBootSession. Without these guards, a CLI
+// session silently inherits the HTTP fallback (Anthropic) and the API
+// rejects the CLI model id with a 404 (c195 regression).
 func (s *chatServiceImpl) resolveProvider(sessionID, sessionProvider, agentProvider, model string) (string, llmcontracts.Provider) {
 	// Track the first requested provider so we can emit a fallback event
 	// when a later candidate is selected instead.
@@ -882,6 +891,9 @@ func (s *chatServiceImpl) resolveProvider(sessionID, sessionProvider, agentProvi
 		if p, ok := s.providers.Get(sessionProvider); ok {
 			return sessionProvider, p
 		}
+		if chat.IsCLIProvider(sessionProvider) {
+			return sessionProvider, nil
+		}
 		slog.Warn("chat-service: session provider not registered, falling through", "provider", sessionProvider)
 	}
 
@@ -891,6 +903,12 @@ func (s *chatServiceImpl) resolveProvider(sessionID, sessionProvider, agentProvi
 				s.pluginHost.EmitProviderFallback(sessionID, requested, agentProvider)
 			}
 			return agentProvider, p
+		}
+		if chat.IsCLIProvider(agentProvider) {
+			if requested != "" && requested != agentProvider && s.pluginHost != nil {
+				s.pluginHost.EmitProviderFallback(sessionID, requested, agentProvider)
+			}
+			return agentProvider, nil
 		}
 		slog.Warn("chat-service: agent provider not registered, falling through", "provider", agentProvider)
 	}
@@ -903,6 +921,13 @@ func (s *chatServiceImpl) resolveProvider(sessionID, sessionProvider, agentProvi
 				}
 				return name, p
 			}
+			if chat.IsCLIProvider(name) {
+				if requested != "" && requested != name && s.pluginHost != nil {
+					s.pluginHost.EmitProviderFallback(sessionID, requested, name)
+				}
+				return name, nil
+			}
+			slog.Warn("chat-service: fallback-chain provider not registered, skipping", "provider", name)
 		}
 	}
 
@@ -914,6 +939,14 @@ func (s *chatServiceImpl) resolveProvider(sessionID, sessionProvider, agentProvi
 			})
 		}
 		return inferred, p
+	}
+	if chat.IsCLIProvider(inferred) {
+		if requested != "" && requested != inferred && s.pluginHost != nil {
+			safego.Go(context.Background(), "service.chat.emit.provider-fallback-inferred", func() {
+				s.pluginHost.EmitProviderFallback(sessionID, requested, inferred)
+			})
+		}
+		return inferred, nil
 	}
 
 	if p, ok := s.providers.Get("anthropic"); ok {

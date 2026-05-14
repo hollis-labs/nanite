@@ -3366,6 +3366,13 @@ func (s *chatServiceImpl) earlyStopSynthesis(
 	fullContent *strings.Builder,
 	finalContent *strings.Builder,
 ) {
+	// CLI-bypass path (CW-20260514-0045): prov can be nil when classifyNilProvider
+	// routed a CLI alias through driveBootSession. Synthesis is best-effort and
+	// would NPE on the StreamChat call below — skip cleanly. The terminated
+	// envelope still emits in the caller.
+	if prov == nil {
+		return
+	}
 	// Truncate to the most recent messages to avoid sending a near-limit history
 	// to the synthesis call. Near max_turns the context may already be at the
 	// ceiling; a fresh synthesis call with the full slice would fail for the

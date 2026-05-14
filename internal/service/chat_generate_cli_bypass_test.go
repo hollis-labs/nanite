@@ -23,8 +23,11 @@ package service
 //     where non-CLI dropdown misconfig silently becomes a CLI bypass.
 
 import (
+	"context"
+	"strings"
 	"testing"
 
+	"github.com/hollis-labs/nanite/internal/chat"
 	llmtypes "github.com/hollis-labs/go-llm-types"
 	"github.com/hollis-labs/go-providers/provider"
 	runtimeagent "github.com/hollis-labs/nanite/internal/runtime/agent"
@@ -157,6 +160,37 @@ func TestClassifyNilProvider_NonCLIStaysFatal(t *testing.T) {
 		if got := s.classifyNilProvider(name); got != nilProviderRouteFatal {
 			t.Errorf("classifyNilProvider(%q) = %v, want nilProviderRouteFatal", name, got)
 		}
+	}
+}
+
+// TestEarlyStopSynthesis_NilProvIsNoOp pins the CLI-bypass guard.
+// When classifyNilProvider routes a CLI alias to the bypass branch,
+// the chat loop continues with prov == nil. If the loop later hits
+// TerminationRunawayToolFailures, the call site at chat_generate.go
+// invokes earlyStopSynthesis with that nil prov — without the guard
+// inside earlyStopSynthesis the subsequent prov.StreamChat NPEs.
+// Round-1 Copilot review on PR #168 caught this gap.
+func TestEarlyStopSynthesis_NilProvIsNoOp(t *testing.T) {
+	s := &chatServiceImpl{}
+	ch := make(chan chat.StreamEvent, 1)
+	var full, final strings.Builder
+
+	defer func() {
+		if r := recover(); r != nil {
+			t.Fatalf("earlyStopSynthesis panicked with nil prov: %v", r)
+		}
+	}()
+
+	s.earlyStopSynthesis(context.Background(), nil, "model", "sysprompt", nil,
+		[]llmtypes.ChatMessage{{Role: "user", Content: "hi"}}, ch, &full, &final)
+
+	if got := full.String(); got != "" {
+		t.Errorf("earlyStopSynthesis wrote to fullContent with nil prov: %q", got)
+	}
+	select {
+	case evt := <-ch:
+		t.Errorf("earlyStopSynthesis emitted event with nil prov: %+v", evt)
+	default:
 	}
 }
 

@@ -20,7 +20,7 @@ const __dirname = dirname(__filename);
 const ROOT = resolve(__dirname, '..');
 const OUTPUT_FILE = join(ROOT, 'ui', 'src', 'generated', 'plugin-envelopes.ts');
 const UI_SRC = join(ROOT, 'ui', 'src');
-const MANIFEST_PATH = resolve(ROOT, '..', 'go-envelopes', 'manifest', 'envelopes.yaml');
+const MANIFEST_PATH = resolve(ROOT, '..', '..', 'libs', 'go-envelopes', 'manifest', 'envelopes.yaml');
 
 const CHECK_MODE = process.argv.includes('--check');
 

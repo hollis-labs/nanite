@@ -90,9 +90,9 @@ require (
 	modernc.org/memory v1.11.0 // indirect
 )
 
-replace github.com/hollis-labs/go-modelsdev => ../go-modelsdev
+replace github.com/hollis-labs/go-modelsdev => ../../libs/go-modelsdev
 
-replace github.com/chrispian/agent-mux => /Users/chrispian/Projects-apps/agent-mux
+replace github.com/chrispian/agent-mux => /Users/chrispian/dev/hollis-labs/apps/agent-mux
 
 require (
 	github.com/hollis-labs/go-agent-broker v0.2.0

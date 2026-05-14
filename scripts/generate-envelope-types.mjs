@@ -33,7 +33,7 @@ const CHECK_MODE = process.argv.includes('--check');
 function parseManifestDir() {
   const flagIdx = process.argv.indexOf('--manifest-dir');
   if (flagIdx === -1) {
-    return resolve(ROOT, '..', 'go-envelopes', 'manifest', 'schemas');
+    return resolve(ROOT, '..', '..', 'libs', 'go-envelopes', 'manifest', 'schemas');
   }
   const value = process.argv[flagIdx + 1];
   if (!value || value.startsWith('--')) {

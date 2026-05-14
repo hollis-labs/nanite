@@ -1,0 +1,39 @@
+id: claude-smoke
+display_name: "Claude CLI (smoke)"
+launch: claude-smoke
+
+identity:
+  lineage_alias: nanite-smoke
+  role: backend
+  project: nanite
+  work_root: /tmp/nanite-smoke-workdir
+  tracking_root: /tmp/nanite-smoke-tracking
+  vanta_primary: "true"
+
+# Inline vars get merged into the substitution map (caller-supplied vars win
+# on key collision). Catalog authors use this for stable per-profile knobs.
+vars:
+  agent_label: "Smoke Backend"
+
+# Slots populated entirely from `text` and `static` sources — both resolve at
+# compile time, so this profile boots without a deferred-resolver path.
+#
+# Both substituted variables here are resolvable WITHOUT caller-supplied
+# vars (identity-derived + profile inline vars), so the registry's initial
+# Reload — which compiles every profile with empty caller vars to populate
+# the dropdown cache — succeeds. Profiles whose slot bodies reference
+# caller-only vars like {{session_id}} will fail at Reload and be skipped
+# from the dropdown.
+slots:
+  agent:
+    type: text
+    content: |
+      You are {{agent_label}} for the {{project}} project.
+      work_root: {{work_root}}
+      role: {{role}}
+
+  rules:
+    type: static
+    # Path is resolved relative to the catalog root (the directory
+    # `boot_profile_catalog_path` points at).
+    path: rules.md

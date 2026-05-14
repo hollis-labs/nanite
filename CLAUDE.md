@@ -44,6 +44,10 @@ cerberus_logs nanite-api
 
 The slot system's six load-bearing invariants — stable sent shape, universal slot at position 0, cache marker priority, mode-aware content swap, pointer/stash determinism, permission visibility — are documented in `internal/context/INVARIANTS.md` and enforced by `internal/service/slot_invariants_test.go`. Update both in lock-step if a future ticket needs to change one.
 
+## Boot-profile CLI harness
+
+Boot profiles let an operator register shared catalog YAML that surfaces as additional rows in the chat composer's provider/model dropdown. Selecting a row spins up a headless CLI agent session against the compiled boot prompt. See `docs/boot-profile-cli-harness.md` for the catalog schema, end-to-end happy path, crash-recovery semantics, and known limitations. The example catalog at `examples/boot-profiles/` is wired into a smoke test (`go test ./internal/service/ -run TestBootProfileSmoke_`) and is safe to point `boot_profile_catalog_path` at directly.
+
 ## Envelope System (critical — read before touching)
 
 Envelopes are structured UI cards injected into chat messages. The system has two sides kept in sync by a shared manifest:

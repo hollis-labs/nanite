@@ -223,8 +223,12 @@ func buildBootProfileVarsForRecovery(sessionID, provider, model string, agent *a
 //     If a future ticket wants explicit "restart from last checkpoint"
 //     semantics, it should be a separate method.
 //
-// Returns nil on success or no-op. Returns the error from
-// CloseAgentSession's Stop hook when process termination misbehaves.
+// The error return is reserved for future use — today this always
+// returns nil because CloseAgentSession is void. PR #172 round 1:
+// the previous docstring claimed an error path that didn't exist;
+// if a future ticket needs to surface Stop-hook failures, route
+// them through CloseAgentSession first and update both signatures
+// together.
 func (s *chatServiceImpl) RestartAgentSession(ctx context.Context, sessionID string) error {
 	if s == nil || sessionID == "" {
 		return nil

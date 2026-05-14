@@ -912,6 +912,23 @@ func NewContainer(cfg ContainerConfig) (*Container, error) {
 		})
 	}
 
+	// CW-20260514-0049: install the boot-profile recovery pre-boot
+	// hook on the agentBootAdapter so broker-dispatched relaunches
+	// that target a boot-profile-backed session re-resolve via
+	// Registry.CompileFor (fresh-catalog policy) and overlay the new
+	// LaunchSpec onto agent.Options BEFORE the relaunch fires. This
+	// is the ONLY code path through which the chat layer touches
+	// agent.Options en route to recovery; normal launches go through
+	// driveBootSession's call to runtimeagent.Boot directly. The
+	// resume-vs-normal-start split is therefore structural — the
+	// recovery hook is the single structural entry point for any
+	// future resume-ID threading. nil-safe: bundle.BootAdapter is
+	// unset in tests / standalone configs that don't wire the
+	// adapter.
+	if agentDepsBundle.BootAdapter != nil {
+		agentDepsBundle.BootAdapter.SetPreBootHook(chatSvcImpl.recoveryPreBootHook)
+	}
+
 	legacyRunner := NewChatRunner(chatSvcImpl, agentReader, cfg.Store, cfg.Store.DB, pathGrants)
 	subagentRunner := NewBootRunner(agentDeps, agentBridge, agentReader, cfg.Store, cfg.Store.DB, pathGrants, legacyRunner)
 	approvalEmitter := NewApprovalEmitter(cfg.Store, streams)

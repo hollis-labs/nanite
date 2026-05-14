@@ -77,6 +77,16 @@ type AgentDepsBundle struct {
 	// recovery broker. The chat service calls Track / Untrack on it so
 	// the broker has bootDir + Options on hand when a remediation fires.
 	BootDirAdapter *agentBootDirAdapter
+
+	// BootAdapter is the recovery.AgentBoot adapter wired into the
+	// recovery broker. The chat composition root installs a pre-boot
+	// hook on it (CW-20260514-0049) so boot-profile-backed sessions
+	// re-resolve via Registry.CompileFor under the fresh-catalog
+	// policy at recovery-relaunch time. Normal launches do NOT touch
+	// this adapter — they go through runtimeagent.Boot directly via
+	// driveBootSession, keeping the resume vs normal-start split
+	// structural.
+	BootAdapter *agentBootAdapter
 }
 
 // BuildAgentDependencies wires a *runtimeagent.Dependencies plus the singleton
@@ -201,8 +211,9 @@ func BuildAgentDependencies(cfg AgentDepsConfig) (AgentDepsBundle, error) {
 	// error from Refresh because their auth lives outside nanite's
 	// reach — see recoveryCredentialsAdapter.Refresh for the full
 	// disposition.
+	bootAdapter := &agentBootAdapter{deps: deps}
 	brokerDeps := recovery.Dependencies{
-		AgentBoot: &agentBootAdapter{deps: deps},
+		AgentBoot: bootAdapter,
 		BootDir:   bootDirAdapter,
 		Store: &recoveryBrokerStore{
 			store: cfg.Store,
@@ -223,6 +234,7 @@ func BuildAgentDependencies(cfg AgentDepsConfig) (AgentDepsBundle, error) {
 		Manager:        manager,
 		Bridge:         bridge,
 		BootDirAdapter: bootDirAdapter,
+		BootAdapter:    bootAdapter,
 	}, nil
 }
 
@@ -230,11 +242,53 @@ func BuildAgentDependencies(cfg AgentDepsConfig) (AgentDepsBundle, error) {
 // agent.Boot with IsRelaunch=true so CreateRuntimeRow is skipped (the
 // broker has already transitioned the runtime row via
 // MarkAgentRuntimeRelaunching).
+//
+// CW-20260514-0049: PreBootHook is an optional pre-boot interceptor the
+// chat composition root installs after construction. The hook receives a
+// pointer to the agent.Options the broker assembled and may mutate it
+// before agent.Boot fires — production wiring uses this to re-resolve
+// boot-profile-backed sessions via Registry.CompileFor under the
+// fresh-catalog policy (CW-20260514-0049 design default #2). Hook errors
+// abort the relaunch (returned verbatim to the broker; orchestration
+// escalates to Permanent with an actionable reason). Empty hook = no
+// pre-boot intercept (legacy behavior).
+//
+// The hook is also where resume-flavored fields (Mode=ModeResume,
+// ResumeFromCheckpoint) MAY be threaded onto Options — this is the
+// crash-recovery code path and the only structural entry point for
+// resume IDs. Normal launches go through driveBootSession +
+// applyLaunchSpecToBootOpts, neither of which touches resume fields,
+// keeping the "never pass resume ID on normal launch" guarantee
+// structural.
 type agentBootAdapter struct {
 	deps *runtimeagent.Dependencies
+
+	mu          sync.Mutex
+	preBootHook func(opts *runtimeagent.Options) error
+}
+
+// SetPreBootHook installs (or clears) the pre-boot interceptor. Safe for
+// concurrent callers — the chat composition root installs it once at
+// startup, but tests may rebind during a single chatServiceImpl lifetime.
+// nil clears the hook so a future test can opt out of intercept.
+func (a *agentBootAdapter) SetPreBootHook(hook func(opts *runtimeagent.Options) error) {
+	if a == nil {
+		return
+	}
+	a.mu.Lock()
+	a.preBootHook = hook
+	a.mu.Unlock()
 }
 
 func (a *agentBootAdapter) Boot(ctx context.Context, opts runtimeagent.Options) (*runtimeagent.Session, error) {
+	a.mu.Lock()
+	hook := a.preBootHook
+	a.mu.Unlock()
+	if hook != nil {
+		if err := hook(&opts); err != nil {
+			return nil, err
+		}
+	}
 	opts.IsRelaunch = true
 	return runtimeagent.Boot(ctx, a.deps, opts)
 }

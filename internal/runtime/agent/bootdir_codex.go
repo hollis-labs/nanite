@@ -87,7 +87,7 @@ func (codexLayout) AmendEnv(base map[string]string, _ string) map[string]string 
 func (codexLayout) SpawnWorkdir(bootDir, _ string) string { return bootDir }
 
 func (codexLayout) BootPrompt(profile *store.AgentProfile, opts Options) string {
-	return composeSystemPrompt(opts.Role, profile, opts.Mode)
+	return resolveBootPrompt(profile, opts)
 }
 
 // BootMode is empty for the subprocess-per-turn codex path; the boot

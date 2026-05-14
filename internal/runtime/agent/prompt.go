@@ -34,6 +34,24 @@ func composeSystemPrompt(role string, profile *store.AgentProfile, mode Mode) st
 	return strings.Join(parts, "\n\n")
 }
 
+// resolveBootPrompt is the single hook the per-provider Layout
+// implementations consult. When Options.BootPromptOverride is non-empty,
+// it wins verbatim — CW-20260514-0048 (boot-profile-driven launches)
+// passes the fully-rendered LaunchSpec.BootPrompt through here so the
+// catalog-authored prompt lands on the runtime in place of the
+// role-derived composeSystemPrompt result. Empty override delegates to
+// composeSystemPrompt for the prior behavior.
+//
+// Keeping the resolution in one place means the three live layouts
+// (claude / codex / opencode) — plus any future addition — share one
+// override hook rather than three independently-wired branches.
+func resolveBootPrompt(profile *store.AgentProfile, opts Options) string {
+	if opts.BootPromptOverride != "" {
+		return opts.BootPromptOverride
+	}
+	return composeSystemPrompt(opts.Role, profile, opts.Mode)
+}
+
 // roleFraming returns the role-specific prefix for the system prompt. Empty
 // for unrecognized roles (the agent profile's SystemPrompt covers the
 // default case).
@@ -65,4 +83,3 @@ func modeFraming(mode Mode) string {
 		return ""
 	}
 }
-

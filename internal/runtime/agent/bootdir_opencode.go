@@ -142,7 +142,7 @@ func (opencodeLayout) AmendEnv(base map[string]string, bootDir string) map[strin
 func (opencodeLayout) SpawnWorkdir(_, projectDir string) string { return projectDir }
 
 func (opencodeLayout) BootPrompt(profile *store.AgentProfile, opts Options) string {
-	return composeSystemPrompt(opts.Role, profile, opts.Mode)
+	return resolveBootPrompt(profile, opts)
 }
 
 func (opencodeLayout) BootMode() string { return "" }

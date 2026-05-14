@@ -98,6 +98,12 @@ type Registry struct {
 	// Reload so readers holding a previous snapshot don't see a
 	// partially-rebuilt state.
 	specs map[string]*LaunchSpec
+	// catalog is the most-recently-loaded *Catalog. Cached so
+	// CompileFor (CW-20260514-0048) can re-compile a profile with
+	// session-scoped vars WITHOUT re-walking the catalog directory.
+	// nil = no catalog configured / load failed. Reload swaps this
+	// atomically with the specs map under r.mu.
+	catalog *Catalog
 }
 
 // NewRegistry constructs a Registry rooted at the given catalog path
@@ -167,6 +173,7 @@ func (r *Registry) Reload() error {
 	}
 	r.mu.Lock()
 	r.specs = next
+	r.catalog = cat
 	r.mu.Unlock()
 	if len(compileErrs) > 0 {
 		return fmt.Errorf("bootprofile: registry reload: %d profile(s) failed to compile: %s",
@@ -231,6 +238,48 @@ func (r *Registry) Lookup(id string) (*LaunchSpec, bool) {
 	defer r.mu.RUnlock()
 	spec, ok := r.specs[profileID]
 	return spec, ok
+}
+
+// CompileFor re-compiles the named profile against the cached
+// catalog with caller-supplied session-scoped variables. Distinct
+// from Lookup: Lookup returns the registry's cached *LaunchSpec
+// (compiled with empty vars at Reload time, suitable for the
+// dropdown surface); CompileFor produces a FRESH spec with the
+// caller's vars applied so a session boot can substitute
+// per-session knobs (e.g. {{session_id}}, {{role}}) into slot
+// content WITHOUT mutating the cached spec.
+//
+// CW-20260514-0048: the chat-runtime hookup uses this at boot
+// time. The cached spec stays read-only for the listing surface;
+// the chat layer pulls a fresh compile every Boot.
+//
+// Returns ErrProfileNotFound when the id is unknown to the
+// cached catalog. Returns the underlying compile error verbatim
+// otherwise — callers may want to surface the slot name / missing
+// var name in their own error context.
+//
+// nil receiver / no catalog configured returns ErrProfileNotFound
+// so callers don't have to nil-check separately from the
+// not-in-catalog branch.
+func (r *Registry) CompileFor(profileID string, vars Vars) (*LaunchSpec, error) {
+	if r == nil {
+		return nil, ErrProfileNotFound
+	}
+	if profileID == "" {
+		return nil, ErrProfileNotFound
+	}
+	// Tolerate the encoded provider id form so callers can pass
+	// the value coming off session.Provider verbatim.
+	if decoded, ok := DecodeProviderID(profileID); ok {
+		profileID = decoded
+	}
+	r.mu.RLock()
+	cat := r.catalog
+	r.mu.RUnlock()
+	if cat == nil {
+		return nil, ErrProfileNotFound
+	}
+	return CompileFromCatalog(cat, profileID, vars)
 }
 
 // CatalogPath returns the configured catalog path the registry loads

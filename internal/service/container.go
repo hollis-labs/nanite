@@ -787,6 +787,30 @@ func NewContainer(cfg ContainerConfig) (*Container, error) {
 		"adapters", len(cliAdapters),
 		"workspaces_root", agentDeps.WorkspacesRoot)
 
+	// CW-20260514-0047/0048: build the boot-profile registry from the
+	// configured catalog path. NewRegistry is nil-safe (empty path
+	// returns an empty Registry) so this call is unconditional; an
+	// unset catalog path leaves the dropdown / runtime hookup surfaces
+	// observing an empty List. Per-profile compile errors are logged
+	// here but do not abort container construction — the operator
+	// fixes the bad YAML and triggers a reload (Reload entry point on
+	// the registry; plugin wiring lands in CW-20260514-0049/0050).
+	//
+	// Hoisted above NewChatService so the registry can be threaded into
+	// ChatServiceConfig — driveBootSession needs CompileFor at boot time
+	// (CW-20260514-0048).
+	bootProfileRegistry, bootProfileErr := bootprofile.NewRegistry(cfg.BootProfileCatalogPath)
+	if bootProfileErr != nil {
+		slog.Warn("service container: boot-profile registry: partial load",
+			"catalog_path", cfg.BootProfileCatalogPath,
+			"err", bootProfileErr)
+	}
+	if bootProfileRegistry != nil && !bootProfileRegistry.IsEmpty() {
+		slog.Info("service container: boot-profile registry loaded",
+			"catalog_path", cfg.BootProfileCatalogPath,
+			"profiles", len(bootProfileRegistry.List()))
+	}
+
 	chatSvc := NewChatService(ChatServiceConfig{
 		Sessions:           sessions,
 		Agents:             agents,
@@ -845,6 +869,13 @@ func NewContainer(cfg ContainerConfig) (*Container, error) {
 		// downstream call audits the dispatch CALL into event_log.
 		// Concurrency-safe (DeterministicBroker is stateless).
 		AgentBroker: cfg.AgentBroker,
+		// CW-20260514-0048: the boot-profile registry is threaded
+		// here so chat_generate.go can decode "bootprofile:<id>"
+		// provider names + compile session-scoped LaunchSpecs.
+		// nil-safe — when the catalog isn't configured the
+		// registry is empty and `bootprofile:` ids never appear
+		// in session rows in the first place.
+		BootProfiles: bootProfileRegistry,
 	})
 
 	// G-3 + G-5: subagent service with the real chat-engine-backed runner.
@@ -1009,26 +1040,6 @@ func NewContainer(cfg ContainerConfig) (*Container, error) {
 
 	// Model selector for operation-specific model resolution (e.g., cheap model for summarization).
 	modelSelector := provider.NewStaticModelSelector(cfg.UtilityProvider, cfg.UtilityModel)
-
-	// CW-20260514-0047: build the boot-profile registry from the
-	// configured catalog path. NewRegistry is nil-safe (empty path
-	// returns an empty Registry) so this call is unconditional; an
-	// unset catalog path leaves the dropdown / runtime hookup surfaces
-	// observing an empty List. Per-profile compile errors are logged
-	// here but do not abort container construction — the operator
-	// fixes the bad YAML and triggers a reload (Reload entry point on
-	// the registry; plugin wiring lands in CW-20260514-0049/0050).
-	bootProfileRegistry, bootProfileErr := bootprofile.NewRegistry(cfg.BootProfileCatalogPath)
-	if bootProfileErr != nil {
-		slog.Warn("service container: boot-profile registry: partial load",
-			"catalog_path", cfg.BootProfileCatalogPath,
-			"err", bootProfileErr)
-	}
-	if bootProfileRegistry != nil && !bootProfileRegistry.IsEmpty() {
-		slog.Info("service container: boot-profile registry loaded",
-			"catalog_path", cfg.BootProfileCatalogPath,
-			"profiles", len(bootProfileRegistry.List()))
-	}
 
 	// Workflow run store and SSE broadcaster — always enabled.
 	runStore := workflow.NewRunStore(50)

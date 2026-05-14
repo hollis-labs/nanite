@@ -112,9 +112,11 @@ func (claudeLayout) AmendEnv(base map[string]string, _ string) map[string]string
 func (claudeLayout) SpawnWorkdir(bootDir, _ string) string { return bootDir }
 
 // BootPrompt is the system prompt payload for the PTY runtime.
-// Sourced from composeSystemPrompt(role, profile, mode); see prompt.go.
+// Sourced from resolveBootPrompt (prompt.go), which honors
+// Options.BootPromptOverride (CW-20260514-0048) and falls back to
+// composeSystemPrompt(role, profile, mode) otherwise.
 func (claudeLayout) BootPrompt(profile *store.AgentProfile, opts Options) string {
-	return composeSystemPrompt(opts.Role, profile, opts.Mode)
+	return resolveBootPrompt(profile, opts)
 }
 
 // BootMode is "stdin" for PTY claude; the runtime writes the boot prompt

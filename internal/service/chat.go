@@ -14,6 +14,7 @@ import (
 	llmcontracts "github.com/hollis-labs/go-llm-contracts"
 	"github.com/hollis-labs/go-providers/provider"
 	"github.com/hollis-labs/nanite/internal/agent"
+	"github.com/hollis-labs/nanite/internal/bootprofile"
 	"github.com/hollis-labs/nanite/internal/chat"
 	"github.com/hollis-labs/nanite/internal/config"
 	"github.com/hollis-labs/nanite/internal/dispatch"
@@ -214,6 +215,16 @@ type ChatServiceConfig struct {
 	// broker is the dispatch DECISION. Both layers run; the boundary is
 	// load-bearing per `decisions.nanite.architecture.agent_broker_v1`.
 	AgentBroker agentbroker.Broker
+
+	// BootProfiles is the boot-profile registry (CW-20260514-0047 / 0048).
+	// chat_generate.go decodes `bootprofile:<id>` provider names, compiles a
+	// session-scoped LaunchSpec via CompileFor, drains requirements, and
+	// stashes the spec so driveBootSession can thread Env / Args / Workdir /
+	// BootPrompt into the runtime Boot call. nil-safe: when absent (no
+	// catalog configured / tests), `bootprofile:` provider names fall
+	// through as the legacy "no llmcontracts.Provider registered" fatal
+	// branch — the same shape as a misconfigured CLI provider today.
+	BootProfiles *bootprofile.Registry
 }
 
 // chatServiceImpl is the concrete ChatService implementation.
@@ -347,6 +358,21 @@ type chatServiceImpl struct {
 	// loop. See ChatServiceConfig.AgentBroker for the full contract.
 	agentBroker agentbroker.Broker
 
+	// bootProfiles is the boot-profile registry (CW-20260514-0048).
+	// Used by chat_generate.go to decode `bootprofile:` provider ids and
+	// compile a session-scoped LaunchSpec. nil-safe: when absent, the
+	// `bootprofile:` provider id falls through as a legacy fatal because
+	// classifyNilProvider(...) returns nilProviderRouteFatal for it
+	// (IsCLIProvider is narrow by design).
+	bootProfiles *bootprofile.Registry
+
+	// activeSessionLaunchSpecs stamps the compiled LaunchSpec for sessions
+	// whose chat provider is a boot-profile id. driveBootSession reads it
+	// at boot time to thread per-profile env/args/workdir/boot-prompt into
+	// agent.Options. Map values are *bootprofile.LaunchSpec. Cleared in
+	// CloseAgentSession alongside the other per-session maps.
+	activeSessionLaunchSpecs sync.Map
+
 	// dispatcher is the single agent-dispatch door
 	// (CW-20260512-0121 / SP-20260512-0011). launchGeneration routes
 	// the user → chat call-site through this; ChatRunner (subagent
@@ -417,6 +443,7 @@ func NewChatService(cfg ChatServiceConfig) ChatService {
 		agentBootDirAdapter: cfg.AgentBootDirAdapter,
 		envelopeRenderExecutor: cfg.EnvelopeRenderExecutor,
 		agentBroker:            cfg.AgentBroker,
+		bootProfiles:           cfg.BootProfiles,
 	}
 	// CW-20260512-0121 (SP-20260512-0011): wire the single dispatcher
 	// door. The Dispatcher delegates to chatServiceImpl.generateResponse
@@ -814,6 +841,7 @@ func (s *chatServiceImpl) CloseAgentSession(ctx context.Context, sessionID strin
 	}
 	s.activeSessionSlots.Delete(sessionID)
 	s.toolPartitionStates.Delete(sessionID)
+	s.activeSessionLaunchSpecs.Delete(sessionID)
 	if s.agentEventBridge != nil {
 		s.agentEventBridge.SetPerSessionRouter(sessionID, nil)
 	}

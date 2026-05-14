@@ -47,6 +47,7 @@ package service
 import (
 	"path/filepath"
 	"runtime"
+	"sort"
 	"strings"
 	"testing"
 
@@ -274,12 +275,15 @@ func TestBootProfileSmoke_RegistryListSurface(t *testing.T) {
 }
 
 // catKeys / launchKeys produce a stable sorted key listing for test
-// error messages. Keeping them local keeps the file dependency-light.
+// error messages. PR #173 round 1: the previous version returned map
+// iteration order, so a failed assertion's message was non-deterministic
+// — the comment promised "stable sorted" but the impl didn't sort.
 func catKeys(m map[string]bootprofile.Profile) []string {
 	out := make([]string, 0, len(m))
 	for k := range m {
 		out = append(out, k)
 	}
+	sort.Strings(out)
 	return out
 }
 
@@ -288,6 +292,7 @@ func launchKeys(m map[string]bootprofile.Launch) []string {
 	for k := range m {
 		out = append(out, k)
 	}
+	sort.Strings(out)
 	return out
 }
 

@@ -33,6 +33,14 @@ func (a *API) handleListProviders(w http.ResponseWriter, r *http.Request) {
 
 	if reg := a.Services.BootProfiles; reg != nil {
 		for _, spec := range reg.List() {
+			// PR #170 round 1: skip launchless / prompt-only profiles.
+			// A LaunchSpec with empty Provider compiled without a paired
+			// launch (Profile.Launch == "") and has no CLI target — the
+			// runtime cannot boot it, so it must not appear as a
+			// selectable dropdown row.
+			if spec.Provider == "" {
+				continue
+			}
 			providers = append(providers, bootProfileProviderRow(spec))
 		}
 	}
@@ -60,6 +68,12 @@ func (a *API) handleListModels(w http.ResponseWriter, r *http.Request) {
 
 	if reg := a.Services.BootProfiles; reg != nil {
 		for _, spec := range reg.List() {
+			// PR #170 round 1: see handleListProviders — launchless
+			// profiles have no runtime target, so they must not
+			// surface in the model dropdown either.
+			if spec.Provider == "" {
+				continue
+			}
 			models = append(models, bootProfileModelRow(spec))
 		}
 	}

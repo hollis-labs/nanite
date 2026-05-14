@@ -341,6 +341,94 @@ slots:
 	}
 }
 
+// TestListProviders_LaunchlessProfileIsHidden pins the PR #170
+// round 1 fix: a profile with no `launch:` field compiles to a
+// LaunchSpec with Provider == "" and has no runtime target. It must
+// be invisible to the dropdown (both /api/providers and /api/models)
+// because the user cannot meaningfully boot it. The profile is still
+// present in Registry.Lookup so prompt-preview / non-dropdown callers
+// can compile it; only the dropdown surfaces filter it out.
+func TestListProviders_LaunchlessProfileIsHidden(t *testing.T) {
+	s := newSeededStore(t)
+
+	catalogRoot := t.TempDir()
+	mustWrite := func(rel, body string) {
+		t.Helper()
+		path := filepath.Join(catalogRoot, rel)
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// Launchless profile: no `launch:` key. Compiles cleanly, but
+	// the resulting LaunchSpec.Provider is empty.
+	mustWrite("boot-profiles/nanite.preview-only.yaml",
+		`id: nanite.preview-only
+display_name: "Preview-Only Profile"
+identity:
+  lineage_alias: nanite.preview-only
+  role: preview
+slots:
+  agent:
+    type: text
+    content: "prompt-only profile"
+`)
+
+	svc, err := service.NewContainer(service.ContainerConfig{
+		Store:                  s,
+		Providers:              provider.NewRegistry(),
+		BootProfileCatalogPath: catalogRoot,
+	})
+	if err != nil {
+		t.Fatalf("service.NewContainer: %v", err)
+	}
+	a := New(svc)
+	mux := http.NewServeMux()
+	a.RegisterRoutes(mux)
+
+	// /api/providers must not include the launchless profile.
+	{
+		req := httptest.NewRequest("GET", "/api/providers", nil)
+		w := httptest.NewRecorder()
+		mux.ServeHTTP(w, req)
+		var got []store.ProviderConfig
+		if err := json.NewDecoder(w.Body).Decode(&got); err != nil {
+			t.Fatalf("decode providers: %v", err)
+		}
+		encoded := bootprofile.EncodeProviderID("nanite.preview-only")
+		for _, p := range got {
+			if p.ProviderType == encoded {
+				t.Fatalf("launchless profile leaked into /api/providers as %+v", p)
+			}
+		}
+	}
+
+	// /api/models must not include the launchless profile.
+	{
+		req := httptest.NewRequest("GET", "/api/models", nil)
+		w := httptest.NewRecorder()
+		mux.ServeHTTP(w, req)
+		var got []store.Model
+		if err := json.NewDecoder(w.Body).Decode(&got); err != nil {
+			t.Fatalf("decode models: %v", err)
+		}
+		encoded := bootprofile.EncodeProviderID("nanite.preview-only")
+		for _, m := range got {
+			if m.ProviderID == encoded {
+				t.Fatalf("launchless profile leaked into /api/models as %+v", m)
+			}
+		}
+	}
+
+	// Registry still knows about it — preview callers can compile.
+	encoded := bootprofile.EncodeProviderID("nanite.preview-only")
+	if _, ok := svc.BootProfiles.Lookup(encoded); !ok {
+		t.Fatal("Registry.Lookup should still find launchless profile (only the dropdown surfaces filter)")
+	}
+}
+
 func writeFixtureCatalog(t *testing.T, root string) {
 	t.Helper()
 	mustWrite := func(rel, body string) {

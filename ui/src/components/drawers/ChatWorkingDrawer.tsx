@@ -14,11 +14,11 @@
  * Context) plus a dynamic set of `card:<uuid>` tabs sourced from
  * `panelEnvelopes['bottom_chat_drawer']`.
  *
- * Alert overlay: when any of `sessionTakeover` / `streamStalled` /
- * `circuitOpen` is active, the drawer auto-opens (if closed), the body
- * content fades + becomes non-interactive, and a centered Banner
- * overlay is rendered with a glass backdrop. Drag is locked while the
- * alert is up; restored to the prior open/close state on dismiss.
+ * Alert overlay: when any of `sessionTakeover` / `circuitOpen` is
+ * active, the drawer auto-opens (if closed), the body content fades
+ * + becomes non-interactive, and a centered Banner overlay is rendered
+ * with a glass backdrop. Drag is locked while the alert is up;
+ * restored to the prior open/close state on dismiss.
  *
  * Mounted by `ChatMain.tsx`; receives alert flags + handlers from
  * `useChat`. Pinned-card lifecycle uses the existing
@@ -55,19 +55,15 @@ export interface ChatWorkingDrawerProps {
   /** Alert flags from useChat. When any is true the drawer auto-opens
    *  (if closed) and renders a Banner overlay over the body content. */
   sessionTakeover?: boolean
-  streamStalled?: boolean
   circuitOpen?: boolean
   /** Action handlers. */
-  onReconnect?: () => void
   onRetry?: () => void
   onDismissCircuit?: () => void
 }
 
 export function ChatWorkingDrawer({
   sessionTakeover = false,
-  streamStalled = false,
   circuitOpen = false,
-  onReconnect,
   onRetry,
   onDismissCircuit,
 }: ChatWorkingDrawerProps = {}) {
@@ -134,7 +130,7 @@ export function ChatWorkingDrawer({
   // When any alert becomes active, snapshot the drawer's open state so we can
   // restore it on dismissal: if the drawer was closed when the alert fired,
   // close it again when the alert clears; if it was already open, leave it.
-  const alertActive = sessionTakeover || streamStalled || circuitOpen
+  const alertActive = sessionTakeover || circuitOpen
   const wasOpenBeforeAlertRef = useRef<boolean | null>(null)
 
   // Pull-tab drag mechanics. The drag-handle row is always visible; users
@@ -179,7 +175,7 @@ export function ChatWorkingDrawer({
     }
   }, [alertActive, drawer.open, setDrawer])
 
-  // Resolve which alert renders. Priority: takeover > circuit > stalled.
+  // Resolve which alert renders. Priority: takeover > circuit.
   const bannerProps: BannerProps | null = sessionTakeover
     ? {
         tone: 'info',
@@ -197,16 +193,7 @@ export function ChatWorkingDrawer({
             ...(onDismissCircuit ? [{ label: 'Dismiss', onClick: onDismissCircuit, dismiss: true }] : []),
           ],
         }
-      : streamStalled
-        ? {
-            tone: 'warning',
-            title: 'Connection appears stalled',
-            body: 'No activity from the server in the last minute. Reconnect to retry this turn.',
-            actions: onReconnect
-              ? [{ label: 'Reconnect', onClick: onReconnect, primary: true, refresh: true }]
-              : [],
-          }
-        : null
+      : null
 
   const showChatToast = useChatStore((s) => s.showChatToast)
   const onPinToggle = useCallback(async (id: string) => {

@@ -81,7 +81,6 @@ describe("useChatStore lifecycle", () => {
     store.appendStreamFinal(SESSION_A, "hello");
     store.appendStreamThinking(SESSION_A, "thinking…");
     store.setStatusMessage(SESSION_A, "retrying");
-    store.setStreamStalled(SESSION_A, true);
     store.addChatError(SESSION_A, err("e1"));
     store.addToolCall(SESSION_A, toolCall("t1"));
 
@@ -93,7 +92,6 @@ describe("useChatStore lifecycle", () => {
     expect(slice?.streamingFinal).toBe("");
     expect(slice?.streamingThinking).toBe("");
     expect(slice?.statusMessage).toBe(null);
-    expect(slice?.streamStalled).toBe(false);
     // Errors + tool calls survive — they are not streaming state.
     expect(slice?.chatErrors).toHaveLength(1);
     expect(slice?.toolCalls).toHaveLength(1);
@@ -163,16 +161,14 @@ describe("useChatStore cross-session isolation (G-FE-SINGLETON repro)", () => {
     expect(b.streamingThinking).toBe("");
   });
 
-  it("circuit-open / takeover / stall banners on A do not flip B", () => {
+  it("circuit-open / takeover banners on A do not flip B", () => {
     const store = useChatStore.getState();
     store.setCircuitOpen(SESSION_A, true);
     store.setSessionTakeover(SESSION_A, true);
-    store.setStreamStalled(SESSION_A, true);
 
     const b = useChatStore.getState().sessions.get(SESSION_B) ?? EMPTY_CHAT_SESSION_STATE;
     expect(b.circuitOpen).toBe(false);
     expect(b.sessionTakeover).toBe(false);
-    expect(b.streamStalled).toBe(false);
   });
 
   it("chat errors added to A do not appear on B", () => {

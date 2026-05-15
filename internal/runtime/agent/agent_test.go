@@ -82,6 +82,126 @@ func TestBoot_EarlyValidation(t *testing.T) {
 	})
 }
 
+// Test_shouldUseStreamingStdio pins the c204/c205 regression
+// (CW-20260515-0006) AND its round-1 mode-coverage extension. cmd/
+// nanite registers exactly one Claude adapter (StreamingStdio shape)
+// for every Boot site, so EVERY mode that can boot Claude must get
+// the StreamingStdio runtime — not just ModeLongLived. Round-1
+// Copilot caught that a mode gate here left ModeResume / ModeSubagent
+// / ModeBackground / ModeOneShot Claude boots on the wrong runtime
+// (same hang, different code path). The StreamingStdio runtime honors
+// AutoFireFirstTurn so kickoff modes (OneShot/Subagent/Background)
+// work, and ModeResume spawns with --resume and skips kickoff — also
+// fine.
+//
+// The table is "Claude across every mode" + "other adapters never
+// streaming."
+func Test_shouldUseStreamingStdio(t *testing.T) {
+	cases := []struct {
+		provider string
+		mode     Mode
+		want     bool
+	}{
+		// Every Mode that can boot Claude returns true. Lifting the
+		// ModeLongLived gate is what fixes the round-1 finding.
+		{"claude", ModeLongLived, true},
+		{"claude", ModeOneShot, true},
+		{"claude", ModeSubagent, true},
+		{"claude", ModeBackground, true},
+		{"claude", ModeResume, true},
+		// Alias coverage (claude-code / claudecode / dropdown shapes
+		// normalize to "claude" via normalizeProviderName).
+		{"claude-code", ModeLongLived, true},
+		{"claudecode", ModeLongLived, true},
+		{"pty", ModeLongLived, true},
+		{"pty-claude", ModeLongLived, true},
+		{"sub-claude", ModeLongLived, true},
+		// Subagent kickoff modes hit Claude too in production — pin
+		// those aliases.
+		{"pty-claude", ModeSubagent, true},
+		// Other adapters stay on subprocess-per-turn across every mode.
+		{"codex", ModeLongLived, false},
+		{"codex", ModeSubagent, false},
+		{"opencode", ModeLongLived, false},
+		{"opencode", ModeOneShot, false},
+		{"gemini", ModeLongLived, false},
+	}
+	for _, c := range cases {
+		if got := shouldUseStreamingStdio(c.provider, c.mode); got != c.want {
+			t.Errorf("shouldUseStreamingStdio(%q, %v) = %v, want %v", c.provider, c.mode, got, c.want)
+		}
+	}
+}
+
+// Test_runtimeConfigForAdapter_LifecycleFlagsExclusive pins the
+// agentsessions invariant that at most one of {PTY, StreamingStdio,
+// JsonRpcStdio} is set on a Capabilities value (validateLifecycle in
+// agentsessions/types.go). runtimeConfigForAdapter is the only
+// insertion point setting these flags; this test guards against a
+// future regression that flips two at once and gets rejected by
+// NewFromAdapter at construction time. Includes every Claude mode
+// post-round-1 — they all set StreamingStdio and nothing else.
+func Test_runtimeConfigForAdapter_LifecycleFlagsExclusive(t *testing.T) {
+	cases := []struct {
+		name     string
+		provider string
+		mode     Mode
+	}{
+		{"claude long-lived → StreamingStdio only", "claude", ModeLongLived},
+		{"claude one-shot → StreamingStdio only", "claude", ModeOneShot},
+		{"claude subagent → StreamingStdio only", "claude", ModeSubagent},
+		{"claude background → StreamingStdio only", "claude", ModeBackground},
+		{"claude resume → StreamingStdio only", "claude", ModeResume},
+		{"codex long-lived → neither (subprocess-per-turn)", "codex", ModeLongLived},
+		{"opencode long-lived → neither", "opencode", ModeLongLived},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			cfg := runtimeConfigForAdapter(nil, c.provider, c.mode)
+			n := 0
+			if cfg.Caps.PTY {
+				n++
+			}
+			if cfg.Caps.StreamingStdio {
+				n++
+			}
+			if cfg.Caps.JsonRpcStdio {
+				n++
+			}
+			if n > 1 {
+				t.Errorf("Caps has %d lifecycle flags set; agentsessions allows at most 1: PTY=%v StreamingStdio=%v JsonRpcStdio=%v",
+					n, cfg.Caps.PTY, cfg.Caps.StreamingStdio, cfg.Caps.JsonRpcStdio)
+			}
+		})
+	}
+}
+
+// Test_runtimeConfigForAdapter_ClaudeAllModesSetStreamingStdio is the
+// c204/c205 regression pin, expanded across every Mode Claude can
+// boot in. The factory's Caps output for ("claude", <any mode>) must
+// declare StreamingStdio=true; the underlying adapter argv is the
+// same long-lived NDJSON shape across modes, so the runtime kind
+// must be too. Pre-round-0 the Caps had everything false → the
+// library selected its subprocess-per-turn adapter runtime → claude
+// was launched per-turn with the long-lived argv, stdin closed
+// before any per-turn payload made sense, no parseable output ever
+// surfaced. Pre-round-1 only ModeLongLived was covered; the other
+// modes silently kept the broken behavior.
+func Test_runtimeConfigForAdapter_ClaudeAllModesSetStreamingStdio(t *testing.T) {
+	modes := []Mode{ModeLongLived, ModeOneShot, ModeSubagent, ModeBackground, ModeResume}
+	for _, mode := range modes {
+		t.Run(mode.String(), func(t *testing.T) {
+			cfg := runtimeConfigForAdapter(nil, "claude", mode)
+			if !cfg.Caps.StreamingStdio {
+				t.Fatalf("Caps.StreamingStdio = false, want true (c204/c205 regression + round-1 mode coverage — every Claude Boot site must select the StreamingStdio runtime)")
+			}
+			if cfg.Caps.PTY {
+				t.Errorf("Caps.PTY = true, want false (StreamingStdio is non-PTY)")
+			}
+		})
+	}
+}
+
 // Test_shouldUsePTY pins the post-CW-20260515-0004 contract: no
 // supported provider currently requires a PTY. claude long-lived was
 // the only true case in the prior matrix; it moved to Streaming Input

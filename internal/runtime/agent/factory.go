@@ -36,6 +36,50 @@ func shouldUsePTY(providerName string, mode Mode) bool {
 	return false
 }
 
+// shouldUseStreamingStdio picks the long-lived NDJSON-over-stdio
+// runtime kind for adapters whose BuildArgs produce a long-lived
+// child-process shape (Anthropic's Streaming Input Mode for claude
+// today: `-p --input-format stream-json --output-format stream-json
+// --verbose`).
+//
+// CW-20260515-0006: this used to be implicit (CW-20260515-0004 turned
+// off Caps.PTY without turning on any other lifecycle flag, which
+// agentsessions interprets as "subprocess-per-turn adapter runtime" —
+// the wrong runtime for the StreamingStdio adapter argv we register).
+// The runtime would spawn claude per turn, send the NDJSON payload,
+// close stdin, claude would exit, no parseable output surfaced (c204,
+// c205).
+//
+// Mode-agnostic by design: cmd/nanite registers exactly one Claude
+// adapter (StreamingStdio shape) for every Boot site — chat
+// long-lived, BootRunner ModeSubagent kickoff, recovery's ModeResume,
+// background tasks, one-shot dispatches. All of those drive the same
+// argv, so all of them need the same runtime kind. Round-1 Copilot
+// review caught that a ModeLongLived gate here left ModeResume /
+// ModeSubagent / ModeBackground / ModeOneShot Claude boots on the
+// subprocess-per-turn fallback — same hang, different code path. The
+// StreamingStdio runtime honors AutoFireFirstTurn (see
+// streaming_stdio_session.go:96-105), so kickoff modes work; resume
+// modes spawn with --resume and skip the kickoff — also fine.
+//
+// Other adapters (codex, opencode) still flow through the implicit
+// subprocess-per-turn adapter runtime — their BuildArgs emit per-turn
+// shape and per-adapter long-lived work is outstanding.
+//
+// Lifecycle flags are mutually exclusive in agentsessions
+// (Capabilities.validateLifecycle); callers must ensure at most one of
+// {PTY, StreamingStdio, JsonRpcStdio} is true. runtimeConfigForAdapter
+// is the single insertion point and enforces this by construction.
+func shouldUseStreamingStdio(providerName string, mode Mode) bool {
+	_ = mode // intentionally mode-agnostic; see doc comment
+	switch normalizeProviderName(providerName) {
+	case "claude", "claude-code", "claudecode":
+		return true
+	default:
+		return false
+	}
+}
+
 // shouldAutoFireFirstTurn picks the StartOptions.AutoFireFirstTurn value
 // per Mode.
 //
@@ -58,11 +102,20 @@ func shouldAutoFireFirstTurn(mode Mode) bool {
 // callers use to construct an agentsessions.AdapterRuntimeConfig with the
 // correct Caps for the spawn. Phase 3 fills in capability propagation
 // (CheckpointResume, ProviderSessionID, BinaryRequired, Resize).
+//
+// Lifecycle-flag invariant (CW-20260515-0006): {PTY, StreamingStdio,
+// JsonRpcStdio} are mutually exclusive in agentsessions; this factory
+// is the single insertion point and picks at most one. PTY currently
+// returns false everywhere (see shouldUsePTY); StreamingStdio handles
+// claude long-lived. Codex / opencode get the implicit
+// subprocess-per-turn adapter runtime (no flag set), which is correct
+// for their per-turn argv shape.
 func runtimeConfigForAdapter(adapter provider.CLIAdapter, providerName string, mode Mode) agentsessions.AdapterRuntimeConfig {
 	cfg := agentsessions.AdapterRuntimeConfig{
 		Adapter: adapter,
 	}
 	cfg.Caps.PTY = shouldUsePTY(providerName, mode)
+	cfg.Caps.StreamingStdio = shouldUseStreamingStdio(providerName, mode)
 	cfg.Caps.Resize = true
 	return cfg
 }

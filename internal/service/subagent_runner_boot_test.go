@@ -360,6 +360,150 @@ func TestBootRunner_CLIProvider_BootsAndDrains(t *testing.T) {
 	}
 }
 
+// TestBootRunner_RunProviderOverride_ThreadsToBootOptions pins the
+// CW-20260514-0053 round-1 Copilot finding: a subagent.Run with a
+// per-spawn Provider override (e.g. "claude") whose agent profile
+// declares an HTTP DefaultProvider must reach agent.Boot with
+// opts.Provider populated. Pre-fix the runner used the override to
+// gate canBoot but passed an empty Provider to runtimeagent.Boot, so
+// agent.Boot fell back to profile.DefaultProvider (the wrong adapter).
+//
+// Mismatch shape:
+//
+//	agent.DefaultProvider = "anthropic"   (HTTP — no CLI adapter)
+//	run.Provider          = "claude"      (CLI override)
+//
+// canBoot's effectiveProvider returns "claude" → adapter exists → boot
+// path engages. The test asserts runBoot threads the same "claude" into
+// runtimeagent.Options.Provider so agent.Boot dispatches the claude
+// layout instead of "anthropic" (which has no CLI adapter and would
+// surface as "no adapter registered for provider \"anthropic\"").
+func TestBootRunner_RunProviderOverride_ThreadsToBootOptions(t *testing.T) {
+	bridge := newFakeBridge()
+	st := &recordingSessionStore{
+		parents: map[string]*store.Session{
+			"sess-parent": {ID: "sess-parent", WorkspaceID: "ws-1"},
+		},
+	}
+
+	var capturedOpts runtimeagent.Options
+	booter := func(_ context.Context, _ *runtimeagent.Dependencies, opts runtimeagent.Options) (*runtimeagent.Session, error) {
+		capturedOpts = opts
+		go func() {
+			if ch := bridge.chanFor(opts.SessionID); ch != nil {
+				ch <- llmtypes.StreamEvent{Type: llmtypes.EventDone}
+			}
+		}()
+		return &runtimeagent.Session{ID: opts.SessionID}, nil
+	}
+
+	deps := &runtimeagent.Dependencies{
+		ProviderAdapter: func(name string) provider.CLIAdapter {
+			// Composition root would strip the "pty-" prefix; the test
+			// stub matches the bare adapter name directly. canBoot's
+			// effectiveProvider returns "claude" for this run, so this
+			// is what the lookup sees.
+			if name == "claude" {
+				return &fakeCLIAdapter{name: "claude"}
+			}
+			return nil
+		},
+	}
+
+	r := &BootRunner{
+		deps:   deps,
+		bridge: bridge,
+		agents: &stubAgentReaderForRunner{agents: map[string]*store.AgentProfile{
+			// Profile declares an HTTP default that has NO CLI adapter.
+			// Without the fix, agent.Boot would fall back to this and
+			// fail to dispatch a CLI layout.
+			"role-mixed": {ID: "ag-mixed", Slug: "role-mixed", DefaultProvider: "anthropic"},
+		}},
+		store:     st,
+		booter:    booter,
+		persistFn: func(_ context.Context, _, _ string) error { return nil },
+	}
+
+	run := &subagent.Run{
+		ID:              "run-mixed",
+		Role:            "role-mixed",
+		ParentSessionID: "sess-parent",
+		Prompt:          "go",
+		Provider:        "claude", // per-spawn CLI override
+	}
+	if _, err := r.Run(context.Background(), run); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	if capturedOpts.Provider != "claude" {
+		t.Fatalf("Options.Provider = %q, want %q (CW-20260514-0053 round-1: run.Provider must reach agent.Boot)",
+			capturedOpts.Provider, "claude")
+	}
+}
+
+// TestBootRunner_NoProviderOverride_LeavesOptionsProviderToProfileFallback
+// is the no-regression case: when run.Provider is empty, the BootRunner
+// still passes the agent profile's DefaultProvider into Options.Provider
+// (via effectiveProvider's profile fallback). agent.Boot's
+// effectiveProvider then sees opts.Provider == profile.DefaultProvider,
+// which is the same name the legacy dispatch used — so the behavior is
+// indistinguishable from pre-CW-20260514-0053 for non-override spawns.
+func TestBootRunner_NoProviderOverride_LeavesOptionsProviderToProfileFallback(t *testing.T) {
+	bridge := newFakeBridge()
+	st := &recordingSessionStore{
+		parents: map[string]*store.Session{
+			"sess-parent": {ID: "sess-parent", WorkspaceID: "ws-1"},
+		},
+	}
+
+	var capturedOpts runtimeagent.Options
+	booter := func(_ context.Context, _ *runtimeagent.Dependencies, opts runtimeagent.Options) (*runtimeagent.Session, error) {
+		capturedOpts = opts
+		go func() {
+			if ch := bridge.chanFor(opts.SessionID); ch != nil {
+				ch <- llmtypes.StreamEvent{Type: llmtypes.EventDone}
+			}
+		}()
+		return &runtimeagent.Session{ID: opts.SessionID}, nil
+	}
+
+	deps := &runtimeagent.Dependencies{
+		ProviderAdapter: func(name string) provider.CLIAdapter {
+			if name == "claude" {
+				return &fakeCLIAdapter{name: "claude"}
+			}
+			return nil
+		},
+	}
+
+	r := &BootRunner{
+		deps:   deps,
+		bridge: bridge,
+		agents: &stubAgentReaderForRunner{agents: map[string]*store.AgentProfile{
+			"role-cli": {ID: "ag-cli", Slug: "role-cli", DefaultProvider: "claude"},
+		}},
+		store:     st,
+		booter:    booter,
+		persistFn: func(_ context.Context, _, _ string) error { return nil },
+	}
+
+	run := &subagent.Run{
+		ID:              "run-default",
+		Role:            "role-cli",
+		ParentSessionID: "sess-parent",
+		Prompt:          "go",
+		// Provider intentionally empty — use the profile default.
+	}
+	if _, err := r.Run(context.Background(), run); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	if capturedOpts.Provider != "claude" {
+		t.Fatalf("Options.Provider = %q, want %q (no-override case must still populate from profile)",
+			capturedOpts.Provider, "claude")
+	}
+}
+
 // TestBootRunner_BootError_UnbindsRouter verifies that a Boot failure
 // releases the per-session router so a stale chan doesn't sit on the
 // bridge after the spawn aborts.

@@ -572,23 +572,26 @@ func initProviders(devMode bool) (*provider.Registry, []provider.CLIAdapter) {
 	// Adapters remain in go-providers for other portfolio consumers
 	// (agent-mux, clockwork-manifold).
 	//
-	// CW-20260515-0003: use the PTY-flavored constructor so BuildArgs
-	// emits interactive-shape args (no -p / --print / --output-format).
-	// The runtime layer's factory.shouldUsePTY returns true for
-	// ("claude", ModeLongLived), so agentsessions spawns claude under
-	// a PTY expecting an interactive TUI that reads per-turn payloads
-	// from stdin. Pre-fix the bare NewClaudeAdapter() was emitting
-	// print-mode argv (`-p "" --output-format stream-json --verbose`),
-	// which made claude bail on arg validation in ~750ms with
-	// "Error: Input must be provided either through stdin or as a
-	// prompt argument when using --print". c200 reproduced this three
-	// times in a row → restart_exhausted. Dev mode uses the matching
-	// DevPTY constructor which sets SkipPermissions=true in the
-	// adapter itself; the legacy skipPermsAdapter wrapper is no
-	// longer needed for claude.
-	var claudeAdapter provider.CLIAdapter = provider.NewClaudeAdapterPTY()
+	// CW-20260515-0004: use the StreamingStdio constructor so claude
+	// launches as a long-lived `-p --input-format stream-json
+	// --output-format stream-json --verbose` process that reads NDJSON
+	// `{"type":"user",...}` per-turn payloads from stdin and emits
+	// stream-json events on stdout. ParseLineEvents in go-providers
+	// (pty_claude_events.go) is built for exactly this NDJSON shape.
+	//
+	// History: CW-20260515-0003 swapped to NewClaudeAdapterPTY which
+	// emitted bare-claude (TUI) argv. That fixed the c200 print-mode
+	// crash but produced c202's silent hang — claude TUI ran fine in
+	// the allocated PTY but its output is ANSI/screen redraws which
+	// ParseLineEvents cannot decode. Sessions stayed state=running
+	// forever with zero assistant deltas. StreamingStdio is the
+	// "long-lived claude that the framework can talk to programmatically"
+	// shape go-providers was designed for. Dev mode uses the matching
+	// DevStreamingStdio constructor (sets SkipPermissions=true in the
+	// adapter itself).
+	var claudeAdapter provider.CLIAdapter = provider.NewClaudeAdapterStreamingStdio()
 	if devMode {
-		claudeAdapter = provider.NewClaudeAdapterDevPTY()
+		claudeAdapter = provider.NewClaudeAdapterDevStreamingStdio()
 	}
 	cliAdapters := []provider.CLIAdapter{
 		claudeAdapter,

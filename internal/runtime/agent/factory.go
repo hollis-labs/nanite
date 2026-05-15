@@ -5,30 +5,35 @@ import (
 	"github.com/hollis-labs/go-providers/provider"
 )
 
-// shouldUsePTY decides between the long-lived PTY runtime and the
-// subprocess-per-turn fallback. Per
-// decisions.nanite.architecture.cli_pty_long_lived_default rev 01KR2Y16TZJC8X88E6P497JBH3:
+// shouldUsePTY decides between PTY allocation and regular stdio pipes
+// for the long-lived runtime. The function name now slightly outlives
+// its original intent: post-CW-20260515-0004 it returns false for every
+// supported provider because the long-lived shape we ship today is
+// claude's Streaming Input Mode (NDJSON over regular stdin/stdout
+// pipes, parsed by ParseLineEvents), which does NOT want a PTY. The
+// helper is retained as the single insertion point for any future
+// adapter that genuinely needs a PTY.
 //
-//   - claude + ModeLongLived → PTY (the chat case; closes G-PTY-RESUME-DROP and
-//     enables per-tool SSE via TypedEventCallback).
-//   - everything else → subprocess-per-turn (until per-adapter PTY
-//     work lands).
+// History (decisions.nanite.architecture.cli_pty_long_lived_default
+// rev 01KR2Y16TZJC8X88E6P497JBH3): the original design routed claude
+// long-lived through a PTY runtime expecting "per-tool SSE via
+// TypedEventCallback". That path emitted bare-claude (TUI) argv whose
+// output is ANSI/screen redraws — ParseLine/ParseLineEvents have no
+// TUI scraper, so sessions ran forever with zero assistant deltas
+// surfaced (c202). StreamingStdio replaces both prior shapes:
+// long-lived AND parseable AND no PTY required.
 //
 // CW-20260514-0045: dropdown / legacy prefixed aliases ("pty",
-// "pty-claude") normalize to "claude" before the switch so an older
-// agent profile row carrying a dropdown-shape default_provider still
-// activates PTY mode. See bootdir.normalizeProviderName for the rule
-// set.
+// "pty-claude") normalize to "claude" before the switch so any
+// future adapter that DOES want a PTY can be added below without
+// drift between the chat and runtime layers. See
+// bootdir.normalizeProviderName for the rule set.
 func shouldUsePTY(providerName string, mode Mode) bool {
 	if mode != ModeLongLived {
 		return false
 	}
-	switch normalizeProviderName(providerName) {
-	case "claude", "claude-code", "claudecode":
-		return true
-	default:
-		return false
-	}
+	_ = normalizeProviderName(providerName) // normalize kept warm for future cases
+	return false
 }
 
 // shouldAutoFireFirstTurn picks the StartOptions.AutoFireFirstTurn value

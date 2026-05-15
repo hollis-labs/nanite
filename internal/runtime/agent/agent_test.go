@@ -82,17 +82,25 @@ func TestBoot_EarlyValidation(t *testing.T) {
 	})
 }
 
-// Test_shouldUsePTY validates the runtime selection matrix locked at
-// decisions.nanite.architecture.cli_pty_long_lived_default.
+// Test_shouldUsePTY pins the post-CW-20260515-0004 contract: no
+// supported provider currently requires a PTY. claude long-lived was
+// the only true case in the prior matrix; it moved to Streaming Input
+// Mode (NDJSON over regular stdio pipes) after c202 showed that the
+// PTY-allocated TUI couldn't surface assistant deltas through any
+// existing parser. Codex / opencode / gemini were already false.
+//
+// The helper stays defined as the single insertion point for any
+// future adapter that genuinely needs a PTY; this table is its
+// regression net.
 func Test_shouldUsePTY(t *testing.T) {
 	cases := []struct {
 		provider string
 		mode     Mode
 		want     bool
 	}{
-		{"claude", ModeLongLived, true},
-		{"claude-code", ModeLongLived, true},
-		{"claudecode", ModeLongLived, true},
+		{"claude", ModeLongLived, false},
+		{"claude-code", ModeLongLived, false},
+		{"claudecode", ModeLongLived, false},
 		{"claude", ModeOneShot, false},
 		{"claude", ModeSubagent, false},
 		{"codex", ModeLongLived, false},

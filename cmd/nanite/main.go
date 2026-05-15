@@ -499,21 +499,12 @@ func cmdServe(args []string) {
 	}
 }
 
-// initProviders creates the provider registry with all available API providers
-// and CLI adapters (PTY + subprocess).
-// skipPermsAdapter wraps a CLIAdapter and appends --dangerously-skip-permissions
-// to BuildArgs. Used when developer_mode is enabled.
-type skipPermsAdapter struct{ provider.CLIAdapter }
-
-func (a skipPermsAdapter) BuildArgs(prompt, systemPrompt, cliSessionID string) []string {
-	return append(a.CLIAdapter.BuildArgs(prompt, systemPrompt, cliSessionID), "--dangerously-skip-permissions")
-}
-
 // initProviders constructs the provider.Registry plus the slice of go-providers
 // CLI adapters threaded into the agent-runtime composition root (Phase 4c.1
-// of agent-boot adoption). The slice carries the dev-mode skipPermsAdapter
-// wrap on claude so agent.Boot inherits the same `--dangerously-skip-permissions`
-// behavior the bridges get.
+// of agent-boot adoption). For claude, dev-mode wiring uses the go-providers
+// DevPTY constructor which sets SkipPermissions=true in the adapter itself —
+// CW-20260515-0003 dropped the legacy skipPermsAdapter wrapper that used to
+// append --dangerously-skip-permissions externally.
 func initProviders(devMode bool) (*provider.Registry, []provider.CLIAdapter) {
 	registry := provider.NewRegistry()
 
@@ -580,9 +571,24 @@ func initProviders(devMode bool) (*provider.Registry, []provider.CLIAdapter) {
 	// (factory.shouldUsePTY only matches claude/codex/opencode shapes).
 	// Adapters remain in go-providers for other portfolio consumers
 	// (agent-mux, clockwork-manifold).
-	var claudeAdapter provider.CLIAdapter = provider.NewClaudeAdapter()
+	//
+	// CW-20260515-0003: use the PTY-flavored constructor so BuildArgs
+	// emits interactive-shape args (no -p / --print / --output-format).
+	// The runtime layer's factory.shouldUsePTY returns true for
+	// ("claude", ModeLongLived), so agentsessions spawns claude under
+	// a PTY expecting an interactive TUI that reads per-turn payloads
+	// from stdin. Pre-fix the bare NewClaudeAdapter() was emitting
+	// print-mode argv (`-p "" --output-format stream-json --verbose`),
+	// which made claude bail on arg validation in ~750ms with
+	// "Error: Input must be provided either through stdin or as a
+	// prompt argument when using --print". c200 reproduced this three
+	// times in a row → restart_exhausted. Dev mode uses the matching
+	// DevPTY constructor which sets SkipPermissions=true in the
+	// adapter itself; the legacy skipPermsAdapter wrapper is no
+	// longer needed for claude.
+	var claudeAdapter provider.CLIAdapter = provider.NewClaudeAdapterPTY()
 	if devMode {
-		claudeAdapter = skipPermsAdapter{claudeAdapter}
+		claudeAdapter = provider.NewClaudeAdapterDevPTY()
 	}
 	cliAdapters := []provider.CLIAdapter{
 		claudeAdapter,

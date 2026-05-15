@@ -27,22 +27,35 @@
 -- fresh column with explicit read-side wiring is the correct shape, not a
 -- resurrection of this dead-code column.
 --
--- Transaction shape
--- -----------------
--- BEGIN/END (not BEGIN/COMMIT) so splitSQL's depth counter closes the
--- block cleanly, matching the convention from migration 008. The
--- migration runner swallows "no such column" on DROP COLUMN (store.go
--- gate around lines 111-122), so re-running on a DB where 063 already
--- landed is a no-op.
+-- Transaction shape (CW-20260514-0052 — fixed)
+-- --------------------------------------------
+-- Earlier shape wrapped the ALTER inside an explicit transaction so
+-- splitSQL emitted a single statement matching the style of migration 008.
+-- That shape was incompatible with the migrate runner's suppression of
+-- DROP-COLUMN "no such column" errors at store.go lines 117-122. On
+-- re-run the ALTER fails inside the open transaction, the runner
+-- suppresses the error and continues, but the closing statement never
+-- executes — the transaction stays open on the pinned migration
+-- connection. The next caller that tries to open a transaction
+-- (typically SeedProviders) then trips SQLite "cannot start a
+-- transaction within a transaction" and the process crash-loops on
+-- launchd.
 --
--- splitSQL note
--- -------------
+-- A single ALTER does not need an explicit transaction — SQLite
+-- implicitly wraps each statement. Stripping the wrapper eliminates the
+-- leak surface while keeping the migration semantically identical.
+-- splitSQL emits one statement either way.
+--
+-- splitSQL notes
+-- --------------
 -- The runner splits the file on every semicolon regardless of context
--- (it is not literal- or comment-aware). Keep that punctuation out of
--- the header prose so that the first real statement remains BEGIN.
-
-BEGIN;
+-- (it is not literal- or comment-aware), so keep semicolons out of the
+-- header prose. It ALSO scans for the SQL transaction-control keywords
+-- (the four-letter open and three-letter close, spelled here as B-E-G-I-N
+-- and E-N-D so this comment does not trip the scanner) as case-insensitive
+-- substrings across the whole chunk including comments — any prose word
+-- containing those letter sequences increments the depth counter and can
+-- merge a future second statement into the first. Avoid both tokens in
+-- the preamble.
 
 ALTER TABLE agent_profiles DROP COLUMN default_mode;
-
-END;

@@ -13,18 +13,27 @@ go test ./...
 cd ui && npm install && npm run build
 ```
 
-**Deploying changes:** Always use Cerberus. Direct `go build` outputs to `./nanite` in the project root, but the running service uses `~/go/bin/nanite` (installed by Cerberus via `go install`). These are **separate binaries** — editing one does not affect the other.
+**Deploying changes:** Always use Cerberus. Direct `go build` outputs to `./nanite` in the project root, but the running service uses the artifact at `~/.cerberus/apps/nanite/nanite-api-service/bin/nanite-api-service`. These are **separate binaries** — editing one does not affect the other.
+
+The Cerberus resource id is `nanite-api-service` (NOT `nanite-api`).
 
 ```bash
-# Build + restart the running service (use this, not go build):
-cerberus_rebuild nanite-api --reason "description of changes"
+# Cutover recipe for a code change: build + sync the artifact, THEN
+# restart launchd so the new bytes actually run. Deploy alone may
+# return "launchd unchanged" and leave the prior pid running on the
+# old artifact — reload is the explicit cutover step.
+cerberus_resource_deploy nanite-api-service
+cerberus_resource_reload nanite-api-service
 
-# Restart without rebuilding:
-cerberus_restart nanite-api --reason "reason"
+# Restart without rebuilding (config change, MCP catalog refresh, etc.):
+cerberus_resource_reload nanite-api-service
 
-# Verify deployment:
-cerberus_logs nanite-api
+# Verify deployment — check status, then logs:
+cerberus_resource_status nanite-api-service
+cerberus_resource_logs nanite-api-service --lines 50 --stream stderr
 ```
+
+After `reload`, `cerberus_resource_status` should show a new `launchd_pid` and `last exit code = 0` for the prior process. If the pid hasn't changed, the cutover didn't happen — re-run `reload`.
 
 ## Architecture
 

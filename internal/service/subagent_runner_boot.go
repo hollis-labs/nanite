@@ -223,6 +223,13 @@ func (r *BootRunner) runBoot(ctx context.Context, run *subagent.Run, agent *stor
 		close(eventsCh)
 	}
 
+	// CW-20260514-0053: thread the same effective provider that canBoot
+	// used into Options.Provider so agent.Boot's bootdir + adapter
+	// dispatch sees the per-spawn override (run.Provider). Without this
+	// the runtime falls back to profile.DefaultProvider — and when the
+	// profile carries an HTTP default like "anthropic" while run.Provider
+	// names a CLI adapter like "claude", agent.Boot would either fail
+	// outright or launch the wrong adapter.
 	sess, bootErr := r.boot(ctx, runtimeagent.Options{
 		Mode:            runtimeagent.ModeSubagent,
 		ParentSessionID: run.ParentSessionID,
@@ -231,6 +238,7 @@ func (r *BootRunner) runBoot(ctx context.Context, run *subagent.Run, agent *stor
 		Workdir:         "",
 		Role:            run.Role,
 		OneShotPrompt:   run.Prompt,
+		Provider:        r.effectiveProvider(agent, run),
 	})
 	if bootErr != nil {
 		if r.bridge != nil {

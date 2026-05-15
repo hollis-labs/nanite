@@ -9,6 +9,7 @@ import (
 	"time"
 
 	agentsessions "github.com/hollis-labs/go-agent-sessions/agentsessions"
+	"github.com/hollis-labs/nanite/internal/store"
 	"github.com/oklog/ulid/v2"
 )
 
@@ -153,6 +154,23 @@ type Options struct {
 	// runtime does NOT template-substitute these — callers pre-resolve
 	// any placeholders before passing the slice.
 	ExtraArgs []string
+
+	// Provider overrides the bare adapter name resolved from
+	// profile.DefaultProvider. CW-20260514-0053 (boot-profile-driven
+	// launches): a compiled LaunchSpec carries spec.Provider (e.g.
+	// "claude"), but the file-based default agent profile doesn't
+	// declare DefaultProvider. Without this override, agent.Boot fell
+	// through to bootdirLayoutFor("") and emitted "bootdir for provider
+	// \"\" is not yet implemented" (c197 regression).
+	//
+	// Precedence: opts.Provider WHEN non-empty, else
+	// profile.DefaultProvider. Bare adapter names ("claude", "codex",
+	// "opencode"); CLI prefixes ("pty-claude" etc.) are normalized to
+	// bare via normalizeProviderName before dispatch.
+	//
+	// Empty preserves legacy behavior — agent.Boot continues to rely
+	// solely on profile.DefaultProvider as it did before.
+	Provider string
 }
 
 // Validate enforces mode-specific invariants.
@@ -188,6 +206,25 @@ type Session struct {
 	// hadLineage records whether Boot registered a PathGrants lineage for
 	// this session — Stop unwinds it.
 	hadLineage bool
+}
+
+// effectiveProvider centralizes the precedence rule for the bare
+// adapter name agent.Boot dispatches on. CW-20260514-0053: when a
+// boot-profile-driven launch threads spec.Provider through
+// Options.Provider, that override wins over the agent profile's
+// DefaultProvider. Empty Options.Provider preserves legacy behavior.
+//
+// nil profile is the file-default fallback case; the caller already
+// guards against it by the time we reach the six dispatch sites that
+// consume the return value.
+func effectiveProvider(opts Options, profile *store.AgentProfile) string {
+	if opts.Provider != "" {
+		return opts.Provider
+	}
+	if profile != nil {
+		return profile.DefaultProvider
+	}
+	return ""
 }
 
 // Boot resolves the agent profile, materializes the workspace and ephemeral
@@ -254,12 +291,13 @@ func Boot(ctx context.Context, deps *Dependencies, opts Options) (*Session, erro
 
 	spawnWorkdir := layout.SpawnWorkdir(bootDir, opts.Workdir)
 
-	adapter := deps.ProviderAdapter(profile.DefaultProvider)
+	providerName := effectiveProvider(opts, profile)
+	adapter := deps.ProviderAdapter(providerName)
 	if adapter == nil {
-		return cleanup(fmt.Errorf("agent.Boot: no adapter registered for provider %q", profile.DefaultProvider))
+		return cleanup(fmt.Errorf("agent.Boot: no adapter registered for provider %q", providerName))
 	}
 
-	runtimeCfg := runtimeConfigForAdapter(adapter, profile.DefaultProvider, opts.Mode)
+	runtimeCfg := runtimeConfigForAdapter(adapter, providerName, opts.Mode)
 	runtimeCfg.ID = sessID
 	runtimeCfg.Kind = "cli"
 
@@ -288,7 +326,7 @@ func Boot(ctx context.Context, deps *Dependencies, opts Options) (*Session, erro
 		if err := deps.Store.CreateRuntimeRow(&RuntimeRow{
 			ID:              sessID,
 			AgentProfile:    opts.AgentProfile,
-			Provider:        profile.DefaultProvider,
+			Provider:        providerName,
 			Mode:            opts.Mode.String(),
 			Workdir:         spawnWorkdir,
 			State:           "launching",
@@ -403,7 +441,7 @@ func Boot(ctx context.Context, deps *Dependencies, opts Options) (*Session, erro
 	sess := &Session{
 		ID:           sessID,
 		Mode:         opts.Mode,
-		Provider:     profile.DefaultProvider,
+		Provider:     providerName,
 		BootDir:      bootDir,
 		WorkspaceDir: ws.Root,
 		deps:         deps,

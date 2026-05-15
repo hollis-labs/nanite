@@ -397,6 +397,20 @@ func bootSessionWorkdir(session *store.Session) string {
 //	                    Options.BootPromptOverride. Empty
 //	                    spec.BootPrompt leaves the legacy
 //	                    behavior intact (composeSystemPrompt fires).
+//	Provider         — caller-supplied bootOpts.Provider wins (no
+//	                    caller sets it today, but the precedence
+//	                    mirrors Workdir so a future explicit
+//	                    override remains the most specific signal);
+//	                    spec.Provider (the bare adapter name, e.g.
+//	                    "claude") fills the empty case. The override
+//	                    propagates through agent.Boot via
+//	                    effectiveProvider, replacing the agent
+//	                    profile's DefaultProvider. CW-20260514-0053
+//	                    fix: the file-default agent profile has
+//	                    DefaultProvider="" so without this override
+//	                    agent.Boot would dispatch bootdirLayoutFor("")
+//	                    and crash with the c197 "bootdir for provider
+//	                    \"\" is not yet implemented" error.
 //
 // CW-20260514-0048 scope: ModeResume / ResumeFromCheckpoint are
 // explicitly NOT touched here — normal boot-profile launches start
@@ -422,6 +436,9 @@ func applyLaunchSpecToBootOpts(bootOpts *runtimeagent.Options, spec *bootprofile
 	}
 	if spec.BootPrompt != "" {
 		bootOpts.BootPromptOverride = spec.BootPrompt
+	}
+	if spec.Provider != "" && bootOpts.Provider == "" {
+		bootOpts.Provider = spec.Provider
 	}
 }
 

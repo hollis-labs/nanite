@@ -13,6 +13,7 @@ import (
 	agentsessions "github.com/hollis-labs/go-agent-sessions/agentsessions"
 	llmtypes "github.com/hollis-labs/go-llm-types"
 	"github.com/hollis-labs/nanite/internal/bootprofile"
+	"github.com/hollis-labs/nanite/internal/chat"
 	ctxpkg "github.com/hollis-labs/nanite/internal/context"
 	"github.com/hollis-labs/nanite/internal/fsutil"
 	runtimeagent "github.com/hollis-labs/nanite/internal/runtime/agent"
@@ -94,6 +95,7 @@ func (s *chatServiceImpl) driveBootSession(
 			Workdir:      workdir,
 			Role:         role,
 		}
+		applyLegacyCLIProviderToBootOpts(&bootOpts, session)
 		// CW-20260514-0048: when this session is backed by a compiled
 		// boot-profile LaunchSpec (provider was a "bootprofile:<id>"
 		// id that chat_generate.go decoded + stashed), merge per-profile
@@ -367,6 +369,44 @@ func (s *chatServiceImpl) regenerateBootDirSlots(bootDir string, agent *store.Ag
 func bootSessionWorkdir(session *store.Session) string {
 	_ = session
 	return ""
+}
+
+// applyLegacyCLIProviderToBootOpts threads a legacy CLI alias from
+// session.Provider ("pty" / "pty-claude" / "sub-claude" / etc.) into
+// bootOpts.Provider so agent.Boot's effectiveProvider has a non-empty
+// adapter name to dispatch on. CW-20260515-0005: without this, legacy
+// CLI sessions (the bare "Claude CLI" dropdown row, no bootprofile)
+// reached agent.Boot with bootOpts.Provider="" AND the file-default
+// agent profile's DefaultProvider="" → bootdirLayoutFor("") returned
+// unsupportedLayout → boot crashed with `bootdir for provider ""`
+// (c203 reproducer; identical surface to c195/c197).
+//
+// chat.IsCLIProvider gates the assignment so bootprofile-shaped
+// session providers ("bootprofile:<id>") and HTTP shapes pass
+// through untouched — applyLaunchSpecToBootOpts stays the source of
+// truth for bootprofile sessions, and a session with a real HTTP
+// provider should never have reached driveBootSession in the first
+// place (the chat-resolve layer routes those through the
+// llmcontracts.Provider path).
+//
+// chat.NormalizeCLIProvider applies the canonical alias table:
+// "pty" → "claude", "pty-claude" → "claude", "sub-codex" → "codex",
+// etc. The runtime layer duplicates these rules locally as
+// normalizeProviderName (for the package-cycle reason documented
+// there); this caller routes through chat as the canonical source.
+//
+// Defensive on nil session: noop. The only caller (driveBootSession)
+// has already validated session != nil for other reasons by the
+// time we run, but keeping the guard local makes the helper safe
+// to test in isolation without setup boilerplate.
+func applyLegacyCLIProviderToBootOpts(bootOpts *runtimeagent.Options, session *store.Session) {
+	if bootOpts == nil || session == nil {
+		return
+	}
+	if !chat.IsCLIProvider(session.Provider) {
+		return
+	}
+	bootOpts.Provider = chat.NormalizeCLIProvider(session.Provider)
 }
 
 // applyLaunchSpecToBootOpts overlays a compiled bootprofile.LaunchSpec

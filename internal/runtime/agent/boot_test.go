@@ -223,6 +223,169 @@ func TestBoot_MissingProviderAdapter(t *testing.T) {
 	}
 }
 
+// TestBoot_CreatesMissingWorkdir pins the c198 regression
+// (CW-20260514-0054). A boot profile (or any caller) may declare an
+// opts.Workdir that does not exist on disk yet — e.g. the claude-smoke
+// example points at /tmp/nanite-smoke-workdir. Pre-fix, agent.Boot
+// didn't materialize it; claude was spawned with --add-dir <missing>
+// and exited 1 within ~700ms, three times in a row, until recovery
+// marked the session failed (restart_exhausted).
+//
+// Test shape: name a workdir under TempDir that doesn't exist yet, run
+// Boot, and assert the dir is present after. Uses the codex provider
+// (no PTY, AutoFireFirstTurn=false) so the test doesn't spawn anything
+// real — only the workdir-prep code path matters here.
+func TestBoot_CreatesMissingWorkdir(t *testing.T) {
+	deps, _ := makeBootDeps(t, "codex")
+
+	workdir := t.TempDir() + "/missing-subdir/that-does-not-exist"
+	if _, err := os.Stat(workdir); !os.IsNotExist(err) {
+		t.Fatalf("precondition: workdir %q should not exist yet, got err=%v", workdir, err)
+	}
+
+	sess, err := Boot(context.Background(), deps, Options{
+		Mode:    ModeLongLived,
+		Workdir: workdir,
+		Role:    "executor",
+	})
+	if err != nil {
+		t.Fatalf("Boot: %v (c198 regression — Boot should mkdir -p the workdir)", err)
+	}
+	t.Cleanup(func() { _ = sess.Stop(context.Background()) })
+
+	info, err := os.Stat(workdir)
+	if err != nil {
+		t.Fatalf("workdir %q not created by Boot: %v", workdir, err)
+	}
+	if !info.IsDir() {
+		t.Fatalf("workdir %q is not a directory: %v", workdir, info.Mode())
+	}
+}
+
+// TestBoot_ExistingWorkdir_Idempotent pins the no-regression case
+// for the new mkdir gate. When opts.Workdir already exists, Boot
+// must leave its contents AND its mode alone — MkdirAll is documented
+// to chmod-on-create only, but a future regression that swapped to
+// MkdirAll-then-Chmod would still pass a content-only check, so the
+// test asserts both: contents preserved (sentinel file) AND mode
+// preserved (compare FileMode().Perm() before/after).
+func TestBoot_ExistingWorkdir_Idempotent(t *testing.T) {
+	deps, _ := makeBootDeps(t, "codex")
+
+	workdir := t.TempDir()
+	// Seed an unusual mode so the test catches a permission rewrite.
+	// The TempDir default is typically 0o700; chmod to 0o750 to make
+	// any silent re-chmod observable.
+	const seededMode os.FileMode = 0o750
+	if err := os.Chmod(workdir, seededMode); err != nil {
+		t.Fatalf("seed workdir mode: %v", err)
+	}
+	sentinel := workdir + "/sentinel.txt"
+	if err := os.WriteFile(sentinel, []byte("preserve me"), 0o644); err != nil {
+		t.Fatalf("seed sentinel: %v", err)
+	}
+	beforeInfo, err := os.Stat(workdir)
+	if err != nil {
+		t.Fatalf("stat workdir before Boot: %v", err)
+	}
+
+	sess, err := Boot(context.Background(), deps, Options{
+		Mode:    ModeLongLived,
+		Workdir: workdir,
+		Role:    "executor",
+	})
+	if err != nil {
+		t.Fatalf("Boot against existing workdir: %v", err)
+	}
+	t.Cleanup(func() { _ = sess.Stop(context.Background()) })
+
+	afterInfo, err := os.Stat(workdir)
+	if err != nil {
+		t.Fatalf("stat workdir after Boot: %v", err)
+	}
+	if beforeInfo.Mode().Perm() != afterInfo.Mode().Perm() {
+		t.Errorf("workdir mode changed: before=%o after=%o (Boot must not chmod existing workdirs)",
+			beforeInfo.Mode().Perm(), afterInfo.Mode().Perm())
+	}
+	body, err := os.ReadFile(sentinel)
+	if err != nil {
+		t.Fatalf("sentinel file gone after Boot: %v", err)
+	}
+	if string(body) != "preserve me" {
+		t.Errorf("sentinel contents changed: %q", string(body))
+	}
+}
+
+// TestBoot_EmptyWorkdir_SkipsMkdirBranch narrows what's pinned: when
+// opts.Workdir is empty, the new mkdir gate at the top of Boot must
+// not run (so it doesn't error or create a project workdir). Boot
+// itself still materializes the session workspace + boot dir
+// elsewhere — that's the unrelated workspaceCreate / Layout.Setup
+// machinery and intentionally not asserted here.
+func TestBoot_EmptyWorkdir_SkipsMkdirBranch(t *testing.T) {
+	deps, _ := makeBootDeps(t, "codex")
+
+	sess, err := Boot(context.Background(), deps, Options{
+		Mode: ModeLongLived,
+		Role: "executor",
+	})
+	if err != nil {
+		t.Fatalf("Boot with empty Workdir: %v", err)
+	}
+	t.Cleanup(func() { _ = sess.Stop(context.Background()) })
+}
+
+// TestBoot_TildeWorkdir_Expanded pins the round-1 Copilot finding:
+// boot-profile YAML preserves leading "~" verbatim (the compiler
+// asserts spec.Workdir == "~/Projects-apps/nanite"). Pre-fix MkdirAll
+// would create a literal "./~/..." dir wherever nanite was running,
+// AND every downstream consumer (layout SpawnWorkdir, runtime row,
+// recovery adapter) would observe the unexpanded path.
+//
+// Redirect HOME to a TempDir so the test doesn't write under the
+// real user home. Assert the expanded directory exists, the literal
+// "./~/..." path does NOT exist, and the returned Session sees the
+// expanded form too.
+func TestBoot_TildeWorkdir_Expanded(t *testing.T) {
+	deps, _ := makeBootDeps(t, "codex")
+
+	fakeHome := t.TempDir()
+	t.Setenv("HOME", fakeHome)
+
+	// Run with an isolated CWD so a regression that creates a literal
+	// "./~/..." dir is caught here AND doesn't leak into the source
+	// tree (the source tree's CWD persists across runs, so a leftover
+	// literal trap would false-pass on the next invocation).
+	cwdJail := t.TempDir()
+	origCwd, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("getwd: %v", err)
+	}
+	if err := os.Chdir(cwdJail); err != nil {
+		t.Fatalf("chdir cwdJail: %v", err)
+	}
+	t.Cleanup(func() { _ = os.Chdir(origCwd) })
+
+	sess, err := Boot(context.Background(), deps, Options{
+		Mode:    ModeLongLived,
+		Workdir: "~/smoke/workdir",
+		Role:    "executor",
+	})
+	if err != nil {
+		t.Fatalf("Boot with tilde workdir: %v", err)
+	}
+	t.Cleanup(func() { _ = sess.Stop(context.Background()) })
+
+	expanded := fakeHome + "/smoke/workdir"
+	if _, err := os.Stat(expanded); err != nil {
+		t.Errorf("expanded workdir %q missing: %v (Boot must expand leading ~)", expanded, err)
+	}
+	// The literal "./~/..." trap must not exist inside the cwdJail.
+	if _, err := os.Stat(cwdJail + "/~/smoke/workdir"); !os.IsNotExist(err) {
+		t.Errorf("literal ~/smoke/workdir was created inside cwdJail — tilde expansion didn't run")
+	}
+}
+
 // TestBoot_RequiresProfile guards the GetOrDefault contract.
 func TestBoot_RequiresProfile(t *testing.T) {
 	deps, _ := makeBootDeps(t, "codex")

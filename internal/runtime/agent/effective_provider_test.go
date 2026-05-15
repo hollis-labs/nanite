@@ -6,6 +6,41 @@ import (
 	"github.com/hollis-labs/nanite/internal/store"
 )
 
+// TestExpandUserHome pins the helper's per-shape contract directly,
+// without going through Boot's filesystem-touching path. Mirrors the
+// rule set in expandUserHome's doc comment so a future tweak to the
+// rules updates this table in lock-step.
+func TestExpandUserHome(t *testing.T) {
+	t.Setenv("HOME", "/fake/home")
+
+	tests := []struct {
+		in   string
+		want string
+	}{
+		{"", ""},
+		{"/abs/path", "/abs/path"},
+		{"relative/path", "relative/path"},
+		{"~", "/fake/home"},
+		{"~/", "/fake/home"},
+		{"~/subdir", "/fake/home/subdir"},
+		{"~/Projects-apps/nanite", "/fake/home/Projects-apps/nanite"},
+		// "~user" form: out of scope, preserved verbatim.
+		{"~someoneelse", "~someoneelse"},
+		{"~someoneelse/path", "~someoneelse/path"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.in, func(t *testing.T) {
+			got, err := expandUserHome(tt.in)
+			if err != nil {
+				t.Fatalf("expandUserHome(%q): %v", tt.in, err)
+			}
+			if got != tt.want {
+				t.Errorf("expandUserHome(%q) = %q, want %q", tt.in, got, tt.want)
+			}
+		})
+	}
+}
+
 // TestEffectiveProvider_Precedence pins the c197 regression
 // (CW-20260514-0053). The helper's contract:
 //

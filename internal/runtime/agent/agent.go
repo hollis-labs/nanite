@@ -5,7 +5,9 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
 	"sort"
+	"strings"
 	"time"
 
 	agentsessions "github.com/hollis-labs/go-agent-sessions/agentsessions"
@@ -208,6 +210,34 @@ type Session struct {
 	hadLineage bool
 }
 
+// expandUserHome replaces a leading "~" or "~/" in path with the
+// current user's home directory and returns the result. Paths that
+// don't start with "~" are returned unchanged. The "~user" form is
+// NOT supported (uncommon; punt to a future ticket if it shows up) —
+// such paths flow through verbatim so the caller can decide.
+//
+// Returns an error only when "~" is present but os.UserHomeDir fails
+// (e.g. $HOME unset and /etc/passwd unreadable on darwin). Existing
+// callers see the error wrapped with the original raw path so logs
+// reflect what the operator authored.
+func expandUserHome(path string) (string, error) {
+	if path == "" || path[0] != '~' {
+		return path, nil
+	}
+	if path != "~" && !strings.HasPrefix(path, "~/") {
+		// "~user" or "~ something" — out of scope; preserve verbatim.
+		return path, nil
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", err
+	}
+	if path == "~" {
+		return home, nil
+	}
+	return filepath.Join(home, path[2:]), nil
+}
+
 // effectiveProvider centralizes the precedence rule for the bare
 // adapter name agent.Boot dispatches on. CW-20260514-0053: when a
 // boot-profile-driven launch threads spec.Provider through
@@ -266,6 +296,35 @@ func Boot(ctx context.Context, deps *Dependencies, opts Options) (*Session, erro
 	sessID := opts.SessionID
 	if sessID == "" {
 		sessID = newSessionID()
+	}
+
+	// CW-20260514-0054: ensure the project workdir exists before any
+	// subprocess is spawned. Boot profiles (and future call sites) can
+	// declare a workdir that doesn't exist yet — e.g. claude-smoke.yaml
+	// points at /tmp/nanite-smoke-workdir. Without this, claude exits 1
+	// within ~700ms when --add-dir <missing-path> fails, the runtime
+	// retries twice, and the session lands in state=failed with
+	// restart_exhausted (c198). Idempotent: existing dirs are a no-op.
+	// Empty Workdir keeps legacy behavior unchanged.
+	//
+	// Round-1 review: boot-profile YAML preserves leading "~" verbatim
+	// (the compiler does not expand) — see internal/bootprofile tests
+	// asserting spec.Workdir == "~/Projects-apps/nanite". MkdirAll on
+	// a raw "~/..." would create a literal "./~/..." dir wherever
+	// nanite is running, AND every downstream consumer (layout
+	// SpawnWorkdir, runtime row, recovery adapter) would see the same
+	// unexpanded path. Expand at the Boot boundary and overwrite
+	// opts.Workdir so the rest of this function and the persisted row
+	// observe the absolute path.
+	if opts.Workdir != "" {
+		expanded, err := expandUserHome(opts.Workdir)
+		if err != nil {
+			return nil, fmt.Errorf("agent.Boot: expand workdir %q: %w", opts.Workdir, err)
+		}
+		opts.Workdir = expanded
+		if err := os.MkdirAll(opts.Workdir, 0o755); err != nil {
+			return nil, fmt.Errorf("agent.Boot: ensure workdir %q: %w", opts.Workdir, err)
+		}
 	}
 
 	ws, err := workspaceCreate(deps.WorkspacesRoot, sessID, opts)

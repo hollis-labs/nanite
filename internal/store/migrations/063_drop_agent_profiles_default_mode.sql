@@ -36,19 +36,26 @@
 -- re-run the ALTER fails inside the open transaction, the runner
 -- suppresses the error and continues, but the closing statement never
 -- executes — the transaction stays open on the pinned migration
--- connection. The next caller of s.DB.Begin (typically SeedProviders)
--- then trips SQLite "cannot start a transaction within a transaction"
--- and the process crash-loops on launchd.
+-- connection. The next caller that tries to open a transaction
+-- (typically SeedProviders) then trips SQLite "cannot start a
+-- transaction within a transaction" and the process crash-loops on
+-- launchd.
 --
 -- A single ALTER does not need an explicit transaction — SQLite
 -- implicitly wraps each statement. Stripping the wrapper eliminates the
 -- leak surface while keeping the migration semantically identical.
 -- splitSQL emits one statement either way.
 --
--- splitSQL note
--- -------------
+-- splitSQL notes
+-- --------------
 -- The runner splits the file on every semicolon regardless of context
--- (it is not literal- or comment-aware). Keep semicolons out of the
--- header prose so that the first real statement remains the ALTER.
+-- (it is not literal- or comment-aware), so keep semicolons out of the
+-- header prose. It ALSO scans for the SQL transaction-control keywords
+-- (the four-letter open and three-letter close, spelled here as B-E-G-I-N
+-- and E-N-D so this comment does not trip the scanner) as case-insensitive
+-- substrings across the whole chunk including comments — any prose word
+-- containing those letter sequences increments the depth counter and can
+-- merge a future second statement into the first. Avoid both tokens in
+-- the preamble.
 
 ALTER TABLE agent_profiles DROP COLUMN default_mode;

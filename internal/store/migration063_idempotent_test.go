@@ -38,7 +38,13 @@ func TestMigration063_Idempotent_NoTxLeak(t *testing.T) {
 	if err != nil {
 		t.Fatalf("first New: %v", err)
 	}
-	s1.Close()
+	// Surface a Close error here — if migration 063 ever leaks an open
+	// transaction on the FIRST boot (a future regression we don't have
+	// today), Close will fail with the open transaction in flight and
+	// the second New below would otherwise return a misleading error.
+	if err := s1.Close(); err != nil {
+		t.Fatalf("first Close (open transaction leaked from migrations?): %v", err)
+	}
 
 	s2, err := New(context.Background(), dbPath)
 	if err != nil {

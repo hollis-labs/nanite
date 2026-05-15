@@ -21,18 +21,10 @@ import {
   useSessionTakeover,
   useStatusMessage,
   useStreamingContent,
-  useStreamStalled,
 } from "@/stores/useChatStore";
 import { useLayoutStore } from "@/stores/useLayoutStore";
 
 const PAGE_SIZE = 50;
-
-/** Stall watchdog: flip `streamStalled` true when no SSE event arrives for this
- * long while a stream is active. Intentionally conservative — tool calls can
- * stretch well past the LLM's natural cadence. 60s matches the CW-0043 bug
- * pattern (chat freezes after ~7 tool calls, no events fire). */
-const STALL_THRESHOLD_MS = 60_000;
-const STALL_CHECK_INTERVAL_MS = 5_000;
 
 /** SSE event type constants — single source of truth for stream event names */
 const SSE = {
@@ -110,12 +102,10 @@ export function useChat(sessionId: string | null) {
   } | null>(null);
   const [loadingOlder, setLoadingOlder] = useState(false);
   const eventSourceRef = useRef<EventSource | null>(null);
-  const lastEventAtRef = useRef<number>(0);
-  const watchdogRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   // CW-20260418-0100: ring-buffer cursor for SSE reconnect. The backend
   // stamps every stream event with a monotonic event_id; we track the
-  // highest we've seen so reconnectStalledStream can resume from
+  // highest we've seen so a future reconnect path can resume from
   // `?from=<lastEventId>` instead of the heavier /retry path. The current
   // message id is captured alongside so the reconnect URL is correct.
   const lastEventIdRef = useRef<number>(0);
@@ -129,7 +119,6 @@ export function useChat(sessionId: string | null) {
   const statusMessage = useStatusMessage(sessionId);
   const circuitOpen = useCircuitOpen(sessionId);
   const sessionTakeover = useSessionTakeover(sessionId);
-  const streamStalled = useStreamStalled(sessionId);
 
   // Store actions are stable — read via getState() inside callbacks to avoid
   // bloating dependency arrays. This helper gives typed access to all actions.
@@ -152,48 +141,6 @@ export function useChat(sessionId: string | null) {
       // ignore — malformed events are already handled by the real handler
     }
   }, []);
-
-  const touchStreamEvent = useCallback(() => {
-    lastEventAtRef.current = Date.now();
-    if (!sessionId) return;
-    const slice = useChatStore.getState().sessions.get(sessionId);
-    if (slice?.streamStalled) {
-      store().setStreamStalled(sessionId, false);
-    }
-  }, [sessionId]);
-
-  const stopStallWatchdog = useCallback(() => {
-    if (watchdogRef.current !== null) {
-      clearInterval(watchdogRef.current);
-      watchdogRef.current = null;
-    }
-  }, []);
-
-  const startStallWatchdog = useCallback(() => {
-    stopStallWatchdog();
-    if (!sessionId) return;
-    lastEventAtRef.current = Date.now();
-    watchdogRef.current = setInterval(() => {
-      const slice = useChatStore.getState().sessions.get(sessionId);
-      if (!slice) return;
-      // Only flag a stall if we're actively streaming, not already
-      // flagged, and no benign terminal state applies. The circuit
-      // breaker + takeover banners own their own paths.
-      if (!slice.isStreaming || slice.streamStalled || slice.circuitOpen || slice.sessionTakeover) {
-        return;
-      }
-      if (Date.now() - lastEventAtRef.current >= STALL_THRESHOLD_MS) {
-        useChatStore.getState().setStreamStalled(sessionId, true);
-      }
-    }, STALL_CHECK_INTERVAL_MS);
-  }, [sessionId, stopStallWatchdog]);
-
-  // Clean up the watchdog on unmount so it doesn't outlive the hook.
-  useEffect(() => {
-    return () => {
-      stopStallWatchdog();
-    };
-  }, [stopStallWatchdog]);
 
   const loadMessages = useCallback(async () => {
     if (!sessionId) {
@@ -377,17 +324,15 @@ export function useChat(sessionId: string | null) {
         });
 
         // Connect to SSE stream
-        // CW-20260418-0100: track the message id + reset cursor so
-        // reconnectStalledStream can re-subscribe with ?from=<lastEventId>.
+        // CW-20260418-0100: track the message id + reset cursor so a
+        // future reconnect path can re-subscribe with ?from=<lastEventId>.
         currentMessageIdRef.current = message_id;
         lastEventIdRef.current = 0;
         const es = new EventSource(`/api/stream/${message_id}`);
         eventSourceRef.current = es;
         let accumulated = "";
-        startStallWatchdog();
 
         es.addEventListener(SSE.DELTA, (e: MessageEvent) => {
-          touchStreamEvent();
           recordEventId(e.data as string);
           const data: StreamEvent = JSON.parse(e.data as string);
           if (data.content) {
@@ -413,7 +358,6 @@ export function useChat(sessionId: string | null) {
         });
 
         es.addEventListener(SSE.REPLACE_CONTENT, (e: MessageEvent) => {
-          touchStreamEvent();
           recordEventId(e.data as string);
           const data: StreamEvent = JSON.parse(e.data as string);
           if (data.content != null) {
@@ -424,7 +368,6 @@ export function useChat(sessionId: string | null) {
         });
 
         es.addEventListener(SSE.TOOL_CALL, (e: MessageEvent) => {
-          touchStreamEvent();
           recordEventId(e.data as string);
           const data = JSON.parse(e.data as string) as StreamEvent & {
             tool_id?: string;
@@ -448,7 +391,6 @@ export function useChat(sessionId: string | null) {
         });
 
         es.addEventListener(SSE.TOOL_RESULT, (e: MessageEvent) => {
-          touchStreamEvent();
           recordEventId(e.data as string);
           const data = JSON.parse(e.data as string) as StreamEvent & { tool_id?: string };
           const toolId = data.tool_id || data.message_id;
@@ -461,7 +403,6 @@ export function useChat(sessionId: string | null) {
         });
 
         es.addEventListener(SSE.TOOL_WARNING, (e: MessageEvent) => {
-          touchStreamEvent();
           recordEventId(e.data as string);
           const data: StreamEvent = JSON.parse(e.data as string);
           if (data.data) {
@@ -479,7 +420,6 @@ export function useChat(sessionId: string | null) {
         });
 
         es.addEventListener(SSE.PLUGIN_ENVELOPE, (e: MessageEvent) => {
-          touchStreamEvent();
           recordEventId(e.data as string);
           try {
             const evt: StreamEvent = JSON.parse(e.data as string);
@@ -505,7 +445,6 @@ export function useChat(sessionId: string | null) {
         });
 
         es.addEventListener(SSE.PANEL_SIGNAL, (e: MessageEvent) => {
-          touchStreamEvent();
           recordEventId(e.data as string);
           try {
             const evt: StreamEvent = JSON.parse(e.data as string);
@@ -529,7 +468,6 @@ export function useChat(sessionId: string | null) {
           // B2 (CW-20260428-0010): non-binding classifier signal. We stage
           // the payload in the chat store for B3 to consume; B2 itself
           // performs no UI action beyond a dev-mode debug log.
-          touchStreamEvent();
           recordEventId(e.data as string);
           try {
             const evt: StreamEvent = JSON.parse(e.data as string);
@@ -545,7 +483,6 @@ export function useChat(sessionId: string | null) {
         });
 
         es.addEventListener(SSE.APPROVAL_REQUEST, (e: MessageEvent) => {
-          touchStreamEvent();
           recordEventId(e.data as string);
           try {
             const evt: StreamEvent = JSON.parse(e.data as string);
@@ -562,7 +499,6 @@ export function useChat(sessionId: string | null) {
         });
 
         es.addEventListener(SSE.STATUS, (e: MessageEvent) => {
-          touchStreamEvent();
           recordEventId(e.data as string);
           const data: StreamEvent = JSON.parse(e.data as string);
           if (data.content) {
@@ -571,13 +507,11 @@ export function useChat(sessionId: string | null) {
         });
 
         es.addEventListener(SSE.CIRCUIT_OPEN, () => {
-          touchStreamEvent();
           store().setCircuitOpen(sessionId, true);
           // Do NOT close the EventSource — keep it open for potential retry.
         });
 
         es.addEventListener(SSE.SESSION_TAKEOVER, () => {
-          stopStallWatchdog();
           // Another tab opened this session — stop streaming and show banner.
           console.warn("[useChat] Session takeover — another tab is now active");
           store().setSessionTakeover(sessionId, true);
@@ -602,9 +536,7 @@ export function useChat(sessionId: string | null) {
         });
 
         es.addEventListener(SSE.STREAM_END, (e: MessageEvent) => {
-          touchStreamEvent();
           recordEventId(e.data as string);
-          stopStallWatchdog();
           const data: StreamEvent = JSON.parse(e.data as string);
           // Add the complete assistant message
           // Parse envelope from stream_end event if present.
@@ -636,9 +568,7 @@ export function useChat(sessionId: string | null) {
         });
 
         es.addEventListener(SSE.ERROR, (e: MessageEvent) => {
-          touchStreamEvent();
           recordEventId(e.data as string);
-          stopStallWatchdog();
           // Custom SSE error event from the backend (has data).
           if (e.data) {
             try {
@@ -695,7 +625,6 @@ export function useChat(sessionId: string | null) {
         es.onerror = () => {
           // Only handle if the custom error listener above didn't already fire.
           if (eventSourceRef.current) {
-            stopStallWatchdog();
             console.error("SSE connection lost");
             if (accumulated) {
               const assistantMsg: Message = {
@@ -717,15 +646,13 @@ export function useChat(sessionId: string | null) {
         };
       } catch (err) {
         console.error("Send failed:", err);
-        stopStallWatchdog();
         store().clearStreaming(sessionId);
       }
     },
-    [sessionId, queryClient, startStallWatchdog, stopStallWatchdog, touchStreamEvent],
+    [sessionId, queryClient],
   );
 
   const stopStreaming = useCallback(() => {
-    stopStallWatchdog();
     if (eventSourceRef.current) {
       eventSourceRef.current.close();
       eventSourceRef.current = null;
@@ -742,12 +669,11 @@ export function useChat(sessionId: string | null) {
       // finishes the current turn on its own.
       void api.cancelChatStream(sessionId);
     }
-  }, [sessionId, stopStallWatchdog]);
+  }, [sessionId]);
 
   const retryStream = useCallback(async () => {
     if (!sessionId) return;
     store().setCircuitOpen(sessionId, false);
-    store().setStreamStalled(sessionId, false);
     store().clearToolCalls(sessionId);
     store().clearToolWarnings(sessionId);
 
@@ -766,10 +692,8 @@ export function useChat(sessionId: string | null) {
       const es = new EventSource(`/api/stream/${message_id}`);
       eventSourceRef.current = es;
       store().setStreaming(sessionId, true);
-      startStallWatchdog();
 
       es.addEventListener(SSE.DELTA, (e: MessageEvent) => {
-        touchStreamEvent();
         recordEventId(e.data as string);
         const data: StreamEvent = JSON.parse(e.data as string);
         if (data.content) {
@@ -779,7 +703,6 @@ export function useChat(sessionId: string | null) {
       });
 
       es.addEventListener(SSE.REPLACE_CONTENT, (e: MessageEvent) => {
-        touchStreamEvent();
         recordEventId(e.data as string);
         const data: StreamEvent = JSON.parse(e.data as string);
         if (data.content != null) {
@@ -789,9 +712,7 @@ export function useChat(sessionId: string | null) {
       });
 
       es.addEventListener(SSE.STREAM_END, (e: MessageEvent) => {
-        touchStreamEvent();
         recordEventId(e.data as string);
-        stopStallWatchdog();
         const data: StreamEvent = JSON.parse(e.data as string);
         const slice = useChatStore.getState().sessions.get(sessionId);
         const assistantMsg: Message = {
@@ -811,12 +732,10 @@ export function useChat(sessionId: string | null) {
       });
 
       es.addEventListener(SSE.CIRCUIT_OPEN, () => {
-        touchStreamEvent();
         store().setCircuitOpen(sessionId, true);
       });
 
       es.addEventListener(SSE.SESSION_TAKEOVER, () => {
-        stopStallWatchdog();
         console.warn("[useChat] Session takeover during retry — another tab is now active");
         store().setSessionTakeover(sessionId, true);
         store().clearStreaming(sessionId);
@@ -825,7 +744,6 @@ export function useChat(sessionId: string | null) {
       });
 
       es.addEventListener(SSE.ERROR, () => {
-        stopStallWatchdog();
         store().clearStreaming(sessionId);
         es.close();
         eventSourceRef.current = null;
@@ -833,7 +751,6 @@ export function useChat(sessionId: string | null) {
 
       es.onerror = () => {
         if (eventSourceRef.current) {
-          stopStallWatchdog();
           store().clearStreaming(sessionId);
           es.close();
           eventSourceRef.current = null;
@@ -841,17 +758,15 @@ export function useChat(sessionId: string | null) {
       };
     } catch (err) {
       console.error("Retry failed:", err);
-      stopStallWatchdog();
       if (eventSourceRef.current) {
         eventSourceRef.current.close();
         eventSourceRef.current = null;
       }
       store().clearStreaming(sessionId);
     }
-  }, [sessionId, startStallWatchdog, stopStallWatchdog, touchStreamEvent]);
+  }, [sessionId]);
 
   const dismissCircuit = useCallback(() => {
-    stopStallWatchdog();
     if (!sessionId) return;
     store().setCircuitOpen(sessionId, false);
     if (eventSourceRef.current) {
@@ -875,25 +790,7 @@ export function useChat(sessionId: string | null) {
       setMessages((prev) => [...prev, msg]);
     }
     store().clearStreaming(sessionId);
-  }, [sessionId, stopStallWatchdog]);
-
-  const reconnectStalledStream = useCallback(async () => {
-    // User-triggered from the stall banner. Today this still delegates to
-    // the heavier /retry path (new message_id). CW-20260418-0100's backend
-    // ring buffer + Subscribe-with-cursor are wired on the server and the
-    // cursor is tracked on the client via lastEventIdRef, but the
-    // "reconnect to the SAME message with ?from=<cursor>" frontend path
-    // is deferred to a follow-up that extracts the big block of
-    // addEventListener registrations into a reusable helper. See
-    // CW-20260418-0103.
-    stopStallWatchdog();
-    if (sessionId) store().setStreamStalled(sessionId, false);
-    if (eventSourceRef.current) {
-      eventSourceRef.current.close();
-      eventSourceRef.current = null;
-    }
-    await retryStream();
-  }, [sessionId, retryStream, stopStallWatchdog]);
+  }, [sessionId]);
 
   return {
     messages,
@@ -902,13 +799,11 @@ export function useChat(sessionId: string | null) {
     statusMessage,
     circuitOpen,
     sessionTakeover,
-    streamStalled,
     sendMessage,
     loadMessages,
     stopStreaming,
     retryStream,
     dismissCircuit,
-    reconnectStalledStream,
     loadOlderMessages,
     hasOlderMessages,
     loadingOlder,

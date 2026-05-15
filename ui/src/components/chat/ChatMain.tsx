@@ -25,13 +25,11 @@ export function ChatMain({ onEditorReady }: ChatMainProps) {
     statusMessage,
     circuitOpen,
     sessionTakeover,
-    streamStalled,
     sendMessage,
     loadMessages,
     stopStreaming,
     retryStream,
     dismissCircuit,
-    reconnectStalledStream,
     loadOlderMessages,
     hasOlderMessages,
     loadingOlder,
@@ -56,16 +54,14 @@ export function ChatMain({ onEditorReady }: ChatMainProps) {
           hasOlderMessages={hasOlderMessages}
           loadingOlder={loadingOlder}
         />
-        {statusMessage && !sessionTakeover && !streamStalled && !circuitOpen && (
+        {statusMessage && !sessionTakeover && !circuitOpen && (
           <div className="max-w-3xl w-full mx-auto px-4 py-1.5 text-xs text-warning animate-pulse">
             {statusMessage}
           </div>
         )}
         <ChatWorkingDrawer
           sessionTakeover={sessionTakeover}
-          streamStalled={streamStalled && !circuitOpen && !sessionTakeover}
           circuitOpen={circuitOpen}
-          onReconnect={() => void reconnectStalledStream()}
           onRetry={() => void retryStream()}
           onDismissCircuit={dismissCircuit}
         />

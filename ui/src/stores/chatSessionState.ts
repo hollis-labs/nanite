@@ -27,7 +27,6 @@ export interface ChatSessionState {
   statusMessage: string | null;
   circuitOpen: boolean;
   sessionTakeover: boolean;
-  streamStalled: boolean;
   textOnlyMode: boolean;
 
   // Errors / approvals / warnings
@@ -65,7 +64,6 @@ export function emptyChatSessionState(now: number = Date.now()): ChatSessionStat
     statusMessage: null,
     circuitOpen: false,
     sessionTakeover: false,
-    streamStalled: false,
     textOnlyMode: false,
     chatErrors: [],
     pendingApprovals: [],

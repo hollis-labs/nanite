@@ -67,7 +67,6 @@ interface ChatStore {
   setStatusMessage: (sessionID: string, msg: string | null) => void;
   setCircuitOpen: (sessionID: string, open: boolean) => void;
   setSessionTakeover: (sessionID: string, taken: boolean) => void;
-  setStreamStalled: (sessionID: string, stalled: boolean) => void;
   setTextOnlyMode: (sessionID: string, enabled: boolean) => void;
 
   // ── Tool calls ──
@@ -220,7 +219,6 @@ export const useChatStore = create<ChatStore>((set) => ({
         streamingFinal: "",
         streamingThinking: "",
         statusMessage: null,
-        streamStalled: false,
       }),
     })),
 
@@ -294,10 +292,6 @@ export const useChatStore = create<ChatStore>((set) => ({
   setSessionTakeover: (sessionID, taken) =>
     set((state) => ({
       sessions: applyToSession(state.sessions, sessionID, { sessionTakeover: taken }),
-    })),
-  setStreamStalled: (sessionID, stalled) =>
-    set((state) => ({
-      sessions: applyToSession(state.sessions, sessionID, { streamStalled: stalled }),
     })),
   setTextOnlyMode: (sessionID, enabled) =>
     set((state) => ({
@@ -645,9 +639,6 @@ export function useCircuitOpen(sessionID?: string | null): boolean {
 }
 export function useSessionTakeover(sessionID?: string | null): boolean {
   return useActiveSliceField(sessionID, "sessionTakeover");
-}
-export function useStreamStalled(sessionID?: string | null): boolean {
-  return useActiveSliceField(sessionID, "streamStalled");
 }
 export function useTextOnlyMode(sessionID?: string | null): boolean {
   return useActiveSliceField(sessionID, "textOnlyMode");

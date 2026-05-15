@@ -82,6 +82,100 @@ func TestBoot_EarlyValidation(t *testing.T) {
 	})
 }
 
+// Test_shouldUseStreamingStdio pins the c204/c205 regression
+// (CW-20260515-0006). claude long-lived selects the StreamingStdio
+// runtime so agentsessions launches the long-lived NDJSON child the
+// `-p --input-format stream-json --output-format stream-json
+// --verbose` argv expects. Pre-fix the factory set neither PTY nor
+// StreamingStdio, so the library fell to its subprocess-per-turn
+// default — the wrong runtime for that argv — and sessions hung with
+// pid=0, no parseable output.
+func Test_shouldUseStreamingStdio(t *testing.T) {
+	cases := []struct {
+		provider string
+		mode     Mode
+		want     bool
+	}{
+		{"claude", ModeLongLived, true},
+		{"claude-code", ModeLongLived, true},
+		{"claudecode", ModeLongLived, true},
+		// Dropdown / legacy aliases normalize to "claude".
+		{"pty", ModeLongLived, true},
+		{"pty-claude", ModeLongLived, true},
+		{"sub-claude", ModeLongLived, true},
+		// Non-long-lived modes never streaming.
+		{"claude", ModeOneShot, false},
+		{"claude", ModeSubagent, false},
+		{"claude", ModeBackground, false},
+		// Other adapters stay on subprocess-per-turn.
+		{"codex", ModeLongLived, false},
+		{"opencode", ModeLongLived, false},
+		{"gemini", ModeLongLived, false},
+	}
+	for _, c := range cases {
+		if got := shouldUseStreamingStdio(c.provider, c.mode); got != c.want {
+			t.Errorf("shouldUseStreamingStdio(%q, %v) = %v, want %v", c.provider, c.mode, got, c.want)
+		}
+	}
+}
+
+// Test_runtimeConfigForAdapter_LifecycleFlagsExclusive pins the
+// agentsessions invariant that at most one of {PTY, StreamingStdio,
+// JsonRpcStdio} is set on a Capabilities value (validateLifecycle in
+// agentsessions/types.go). runtimeConfigForAdapter is the only
+// insertion point setting these flags; this test guards against a
+// future regression that flips two at once and gets rejected by
+// NewFromAdapter at construction time.
+func Test_runtimeConfigForAdapter_LifecycleFlagsExclusive(t *testing.T) {
+	cases := []struct {
+		name     string
+		provider string
+		mode     Mode
+	}{
+		{"claude long-lived → StreamingStdio only", "claude", ModeLongLived},
+		{"codex long-lived → neither (subprocess-per-turn)", "codex", ModeLongLived},
+		{"opencode long-lived → neither", "opencode", ModeLongLived},
+		{"claude one-shot → neither", "claude", ModeOneShot},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			cfg := runtimeConfigForAdapter(nil, c.provider, c.mode)
+			n := 0
+			if cfg.Caps.PTY {
+				n++
+			}
+			if cfg.Caps.StreamingStdio {
+				n++
+			}
+			if cfg.Caps.JsonRpcStdio {
+				n++
+			}
+			if n > 1 {
+				t.Errorf("Caps has %d lifecycle flags set; agentsessions allows at most 1: PTY=%v StreamingStdio=%v JsonRpcStdio=%v",
+					n, cfg.Caps.PTY, cfg.Caps.StreamingStdio, cfg.Caps.JsonRpcStdio)
+			}
+		})
+	}
+}
+
+// Test_runtimeConfigForAdapter_ClaudeLongLivedSetsStreamingStdio is
+// the c204/c205 regression pin: the Caps the factory hands to
+// agentsessions for ("claude", ModeLongLived) must declare
+// StreamingStdio=true. Pre-fix the Caps had everything false → the
+// library selected its subprocess-per-turn adapter runtime → claude
+// was launched per-turn with the long-lived StreamingStdio argv,
+// stdin closed before any per-turn payload made sense, no parseable
+// output ever surfaced.
+func Test_runtimeConfigForAdapter_ClaudeLongLivedSetsStreamingStdio(t *testing.T) {
+	cfg := runtimeConfigForAdapter(nil, "claude", ModeLongLived)
+	if !cfg.Caps.StreamingStdio {
+		t.Fatalf("Caps.StreamingStdio = false, want true (c204/c205 regression — claude long-lived must select the StreamingStdio runtime)")
+	}
+	if cfg.Caps.PTY {
+		t.Errorf("Caps.PTY = true, want false (StreamingStdio is non-PTY)")
+	}
+}
+
 // Test_shouldUsePTY pins the post-CW-20260515-0004 contract: no
 // supported provider currently requires a PTY. claude long-lived was
 // the only true case in the prior matrix; it moved to Streaming Input

@@ -90,30 +90,37 @@ func TestBootdirLayoutFor_AcceptsCLIAliases(t *testing.T) {
 	}
 }
 
-// TestShouldUsePTY_AcceptsCLIAliases verifies the PTY-mode gate
-// recognizes dropdown / legacy aliases. Before CW-20260514-0045, a
-// profile carrying "pty-claude" / "pty" as default_provider would fall
-// through the bare-name switch and shouldUsePTY would return false,
-// silently degrading to the subprocess fallback for the chat case
-// (long-lived mode) which is the wrong runtime for claude.
-func TestShouldUsePTY_AcceptsCLIAliases(t *testing.T) {
-	ptyExpected := []string{"pty", "pty-claude", "claude", "claude-code", "claudecode", "sub-claude"}
-	for _, name := range ptyExpected {
-		if !shouldUsePTY(name, ModeLongLived) {
-			t.Errorf("shouldUsePTY(%q, ModeLongLived) = false, want true", name)
-		}
+// TestShouldUsePTY_AllProvidersFalse pins the c202 follow-up
+// (CW-20260515-0004). Before this change, claude + ModeLongLived
+// returned true → agentsessions allocated a PTY → claude TUI ran in
+// the PTY → its ANSI/screen-redraw output had no parser in
+// pty_claude_events.go → sessions sat in state=running forever with
+// zero assistant deltas (c202's "no errors, but nothing else either"
+// symptom). The Streaming Input Mode adapter we ship now wants
+// regular stdio pipes (NDJSON in, stream-json out), not a PTY.
+//
+// New contract: shouldUsePTY returns FALSE for every supported
+// provider. The helper is retained for future adapters that genuinely
+// need a PTY (none today). If a future change reintroduces a PTY
+// case, both the function body and this regression test must update
+// in lock-step.
+func TestShouldUsePTY_AllProvidersFalse(t *testing.T) {
+	// Today every name — claude family, codex, opencode, every alias
+	// shape — must return false in long-lived mode. Pin the full
+	// alias table from the prior contract so a regression that
+	// re-routes any single alias surfaces here.
+	allNames := []string{
+		"pty", "pty-claude", "claude", "claude-code", "claudecode", "sub-claude",
+		"codex", "pty-codex", "sub-codex",
+		"opencode", "pty-opencode", "sub-opencode",
 	}
-
-	// Codex / opencode are subprocess-per-turn (PTY not yet wired) —
-	// dropdown aliases must NOT silently flip them to PTY.
-	notPTY := []string{"codex", "pty-codex", "opencode", "pty-opencode", "sub-codex"}
-	for _, name := range notPTY {
+	for _, name := range allNames {
 		if shouldUsePTY(name, ModeLongLived) {
-			t.Errorf("shouldUsePTY(%q, ModeLongLived) = true, want false", name)
+			t.Errorf("shouldUsePTY(%q, ModeLongLived) = true, want false (CW-20260515-0004: claude moved to StreamingStdio; no provider currently requires a PTY)", name)
 		}
 	}
 
-	// Non-long-lived modes never PTY regardless of alias.
+	// Non-long-lived modes were never PTY and still aren't.
 	for _, mode := range []Mode{ModeOneShot, ModeSubagent, ModeBackground, ModeResume} {
 		if shouldUsePTY("pty-claude", mode) {
 			t.Errorf("shouldUsePTY(pty-claude, %v) = true, want false (only ModeLongLived may PTY)", mode)

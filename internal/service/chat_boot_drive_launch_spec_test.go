@@ -135,6 +135,43 @@ func TestApplyLaunchSpec_BootPromptOverride(t *testing.T) {
 	})
 }
 
+// TestApplyLaunchSpec_ProviderPrecedence pins the c197 regression
+// (CW-20260514-0053). Before this, applyLaunchSpecToBootOpts did not
+// touch Provider, so spec.Provider was never threaded to agent.Boot
+// and the file-default agent profile's empty DefaultProvider caused
+// `bootdir for provider ""` failures the moment anyone selected a
+// bootprofile dropdown row.
+func TestApplyLaunchSpec_ProviderPrecedence(t *testing.T) {
+	t.Run("spec fills empty bootOpts.Provider", func(t *testing.T) {
+		opts := &runtimeagent.Options{}
+		spec := &bootprofile.LaunchSpec{Provider: "claude"}
+		applyLaunchSpecToBootOpts(opts, spec)
+		if opts.Provider != "claude" {
+			t.Errorf("Provider = %q, want claude (c197 regression)", opts.Provider)
+		}
+	})
+	t.Run("caller-supplied Provider wins", func(t *testing.T) {
+		// Today no caller sets bootOpts.Provider before
+		// applyLaunchSpecToBootOpts, but if one ever does, the
+		// caller value must persist (matches the
+		// caller-wins-over-spec rule for Workdir).
+		opts := &runtimeagent.Options{Provider: "codex"}
+		spec := &bootprofile.LaunchSpec{Provider: "claude"}
+		applyLaunchSpecToBootOpts(opts, spec)
+		if opts.Provider != "codex" {
+			t.Errorf("Provider = %q, want codex (caller-supplied wins)", opts.Provider)
+		}
+	})
+	t.Run("empty spec.Provider leaves bootOpts.Provider empty", func(t *testing.T) {
+		opts := &runtimeagent.Options{}
+		spec := &bootprofile.LaunchSpec{Provider: ""}
+		applyLaunchSpecToBootOpts(opts, spec)
+		if opts.Provider != "" {
+			t.Errorf("Provider = %q, want empty (legacy fallthrough)", opts.Provider)
+		}
+	})
+}
+
 // TestApplyLaunchSpec_NoResumeFieldTouched is the explicit pin for
 // the "normal launches do NOT use stored provider resume IDs"
 // acceptance criterion. The helper must NOT set Mode=ModeResume,

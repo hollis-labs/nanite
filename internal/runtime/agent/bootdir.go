@@ -70,7 +70,7 @@ func composeBootdirParams(deps *Dependencies, opts Options, profile *store.Agent
 	if deps != nil {
 		mcp = deps.MCPConfig
 	}
-	layout := bootdirLayoutFor(profile.DefaultProvider)
+	layout := bootdirLayoutFor(effectiveProvider(opts, profile))
 	params := SetupParams{
 		SessionID:    sessID,
 		RunID:        opts.RunID,

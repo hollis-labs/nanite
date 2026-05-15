@@ -395,10 +395,12 @@ func bootSessionWorkdir(session *store.Session) string {
 // normalizeProviderName (for the package-cycle reason documented
 // there); this caller routes through chat as the canonical source.
 //
-// Defensive on nil session: noop. The only caller (driveBootSession)
-// has already validated session != nil for other reasons by the
-// time we run, but keeping the guard local makes the helper safe
-// to test in isolation without setup boilerplate.
+// Defensive on nil session and nil bootOpts: both no-op. The caller
+// (driveBootSession) passes session through without a pre-validating
+// nil guard — matching the surrounding pattern of bootSessionWorkdir
+// and applyLaunchSpecToBootOpts, where each helper owns its own nil
+// handling. Keeping the guards local also makes the helper safe to
+// test in isolation without setup boilerplate.
 func applyLegacyCLIProviderToBootOpts(bootOpts *runtimeagent.Options, session *store.Session) {
 	if bootOpts == nil || session == nil {
 		return

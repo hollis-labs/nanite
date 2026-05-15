@@ -223,6 +223,95 @@ func TestBoot_MissingProviderAdapter(t *testing.T) {
 	}
 }
 
+// TestBoot_CreatesMissingWorkdir pins the c198 regression
+// (CW-20260514-0054). A boot profile (or any caller) may declare an
+// opts.Workdir that does not exist on disk yet — e.g. the claude-smoke
+// example points at /tmp/nanite-smoke-workdir. Pre-fix, agent.Boot
+// didn't materialize it; claude was spawned with --add-dir <missing>
+// and exited 1 within ~700ms, three times in a row, until recovery
+// marked the session failed (restart_exhausted).
+//
+// Test shape: name a workdir under TempDir that doesn't exist yet, run
+// Boot, and assert the dir is present after. Uses the codex provider
+// (no PTY, AutoFireFirstTurn=false) so the test doesn't spawn anything
+// real — only the workdir-prep code path matters here.
+func TestBoot_CreatesMissingWorkdir(t *testing.T) {
+	deps, _ := makeBootDeps(t, "codex")
+
+	workdir := t.TempDir() + "/missing-subdir/that-does-not-exist"
+	if _, err := os.Stat(workdir); !os.IsNotExist(err) {
+		t.Fatalf("precondition: workdir %q should not exist yet, got err=%v", workdir, err)
+	}
+
+	sess, err := Boot(context.Background(), deps, Options{
+		Mode:    ModeLongLived,
+		Workdir: workdir,
+		Role:    "executor",
+	})
+	if err != nil {
+		t.Fatalf("Boot: %v (c198 regression — Boot should mkdir -p the workdir)", err)
+	}
+	t.Cleanup(func() { _ = sess.Stop(context.Background()) })
+
+	info, err := os.Stat(workdir)
+	if err != nil {
+		t.Fatalf("workdir %q not created by Boot: %v", workdir, err)
+	}
+	if !info.IsDir() {
+		t.Fatalf("workdir %q is not a directory: %v", workdir, info.Mode())
+	}
+}
+
+// TestBoot_ExistingWorkdir_Idempotent pins the no-regression case:
+// when opts.Workdir already exists, Boot leaves it alone (no error,
+// no permission rewrite, no contents touched). Uses os.MkdirAll's
+// idempotency guarantee but asserts it at the Boot boundary.
+func TestBoot_ExistingWorkdir_Idempotent(t *testing.T) {
+	deps, _ := makeBootDeps(t, "codex")
+
+	workdir := t.TempDir()
+	sentinel := workdir + "/sentinel.txt"
+	if err := os.WriteFile(sentinel, []byte("preserve me"), 0o644); err != nil {
+		t.Fatalf("seed sentinel: %v", err)
+	}
+
+	sess, err := Boot(context.Background(), deps, Options{
+		Mode:    ModeLongLived,
+		Workdir: workdir,
+		Role:    "executor",
+	})
+	if err != nil {
+		t.Fatalf("Boot against existing workdir: %v", err)
+	}
+	t.Cleanup(func() { _ = sess.Stop(context.Background()) })
+
+	body, err := os.ReadFile(sentinel)
+	if err != nil {
+		t.Fatalf("sentinel file gone after Boot: %v", err)
+	}
+	if string(body) != "preserve me" {
+		t.Errorf("sentinel contents changed: %q", string(body))
+	}
+}
+
+// TestBoot_EmptyWorkdir_NoMkdir confirms the empty-Workdir branch is
+// a no-op — Boot must not error or touch the filesystem when the
+// caller declines to specify a workdir (legacy behavior). Several
+// production paths today pass Workdir="" (driveBootSession via
+// bootSessionWorkdir returns ""), so this case has to stay quiet.
+func TestBoot_EmptyWorkdir_NoMkdir(t *testing.T) {
+	deps, _ := makeBootDeps(t, "codex")
+
+	sess, err := Boot(context.Background(), deps, Options{
+		Mode: ModeLongLived,
+		Role: "executor",
+	})
+	if err != nil {
+		t.Fatalf("Boot with empty Workdir: %v", err)
+	}
+	t.Cleanup(func() { _ = sess.Stop(context.Background()) })
+}
+
 // TestBoot_RequiresProfile guards the GetOrDefault contract.
 func TestBoot_RequiresProfile(t *testing.T) {
 	deps, _ := makeBootDeps(t, "codex")

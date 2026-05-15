@@ -268,6 +268,20 @@ func Boot(ctx context.Context, deps *Dependencies, opts Options) (*Session, erro
 		sessID = newSessionID()
 	}
 
+	// CW-20260514-0054: ensure the project workdir exists before any
+	// subprocess is spawned. Boot profiles (and future call sites) can
+	// declare a workdir that doesn't exist yet — e.g. claude-smoke.yaml
+	// points at /tmp/nanite-smoke-workdir. Without this, claude exits 1
+	// within ~700ms when --add-dir <missing-path> fails, the runtime
+	// retries twice, and the session lands in state=failed with
+	// restart_exhausted (c198). Idempotent: existing dirs are a no-op.
+	// Empty Workdir keeps legacy behavior unchanged.
+	if opts.Workdir != "" {
+		if err := os.MkdirAll(opts.Workdir, 0o755); err != nil {
+			return nil, fmt.Errorf("agent.Boot: ensure workdir %q: %w", opts.Workdir, err)
+		}
+	}
+
 	ws, err := workspaceCreate(deps.WorkspacesRoot, sessID, opts)
 	if err != nil {
 		return nil, err

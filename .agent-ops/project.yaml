@@ -1,0 +1,65 @@
+project:
+  id: nanite
+  display_name: Nanite
+  status: active
+  purpose: |
+    CLI agent framework and subprocess-MCP plugin host. Nanite is an agent
+    runtime — it boots agent sessions into any project with the right
+    context and executes directly (tools, CLI, PTY, subprocess plugins) the
+    way Claude Code does. Ships as a Go backend with an embedded React +
+    shadcn frontend plus the `nanite`/`nanite-agent`/`nanite-eval` binaries.
+    A single-user desktop app; composes as a peer with Torque for durable,
+    queued, and scheduled work.
+catalog:
+  torque_project_id: null            # not found in repo or local catalogs; verify against Torque
+  cerberus_project_id: nanite        # ~/.cerberus/apps/nanite
+  tether_catalog_project: nanite     # ~/.tether/catalog/projects/nanite.yaml
+locations:
+  repo: ~/dev/hollis-labs/apps/nanite
+  agent_os_tracking: ~/dev/agent-os/workspaces/execution/nanite
+  state_dir: ~/.nanite
+  catalog: null                      # plugin catalog is remote (plugins.nanite.hollislabs.dev/catalog.yaml), not a local dir
+  artifacts: ~/.cerberus/apps/nanite
+build:
+  authority: cerberus
+  resource: nanite-api-service
+  command: cerberus_resource_deploy nanite-api-service && cerberus_resource_reload nanite-api-service
+deployment:
+  type: launchd
+  service_name: nanite-api-service
+  binary: ~/.cerberus/apps/nanite/nanite-api-service/bin/nanite-api-service
+docs:
+  readme: README.md
+  architecture: docs/architecture/ARCHITECTURE.md
+  adrs: adr/
+  roadmap: null                      # no docs/roadmap.md; see docs/hardening-phase-plan.md + planning/nanite-release-prep/
+roadmap:
+  current_phase: 'Phase 3 release-prep / Agent Platform epic (architecture-sequence chain landed 2026-04-28)'
+  pointer: null
+usage_examples:
+  - intent: Build the production binary
+    command: make build
+    note: No devmode tag — keeps catalog + per-plugin signature verification unconditional.
+  - intent: Run a local dev server
+    command: go build ./cmd/nanite/ && ./nanite serve -port 8090 -db ./nanite.db -dev
+    note: Local binary is separate from the deployed Cerberus artifact.
+  - intent: Deploy a code change to the running service
+    command: cerberus_resource_deploy nanite-api-service && cerberus_resource_reload nanite-api-service
+    note: reload is the explicit cutover step; deploy alone may leave the old pid running.
+  - intent: Run tests and lint
+    command: make test && make lint
+    note: test runs with -race; lint chains go vet + golangci-lint + staticcheck + errcheck + govulncheck.
+  - intent: Boot a project agent for Nanite work
+    command: Boot nanite-plugin-dev
+    note: Agents defined in .nanite/config.yaml — also nanite-backend, nanite-frontend, nanite-planner, nanite-reviewer.
+scopes:
+  - nanite.backend.main
+  - nanite.frontend.main
+related_projects:
+  - plugin-sdk
+  - go-envelopes
+  - tesseract
+  - torque
+  - hadron
+  - cerberus
+  - tether

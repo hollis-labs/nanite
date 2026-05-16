@@ -21,16 +21,19 @@ interface ListCardProps {
 }
 
 export function ListCard({ data, onSendMessage }: ListCardProps) {
+  // `items` is required by the type, but a partially-loaded envelope can
+  // arrive without it — normalize so the card degrades gracefully.
+  const items = data.items ?? []
   return (
     <Envelope>
       <EnvelopeHeader
         icon={List}
         label={data.ordered ? 'Ordered list' : 'List'}
-        meta={`${data.items.length} item${data.items.length === 1 ? '' : 's'}`}
+        meta={`${items.length} item${items.length === 1 ? '' : 's'}`}
       />
       <EnvelopeBody title={data.title}>
         <div className="space-y-2">
-          {data.items.map((item, i) => (
+          {items.map((item, i) => (
             <div key={`item-${i}`} className="flex items-start gap-3">
               <span className="mt-0.5 w-5 shrink-0 text-right font-mono text-[11px] text-fg-muted">
                 {data.ordered ? `${i + 1}.` : '\u2022'}

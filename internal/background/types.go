@@ -2,6 +2,12 @@
 // (CW-20260420-0016): async, non-session-bound dispatch for work that
 // should not block the originating session.
 //
+// This is a background COMMAND/PROCESS runner, not an agent dispatcher.
+// The MVP backend (PTYBackend, D2) runs each job's JobRequest.Task as a
+// detached `/bin/sh -c` invocation. A future agent-dispatch backend
+// (D3, agent-mux) is anticipated behind the Backend interface but is
+// not wired today — see the decision pins below.
+//
 // Architectural placement (three-way contrast with sibling primitives):
 //
 //   - peer_query (P5)         : sync,   in-session.        Lightest.
@@ -88,13 +94,18 @@ const (
 
 // JobRequest is the caller-supplied input to Submit.
 type JobRequest struct {
-	// Agent is the agent slug (e.g. role) the backend boots to handle
-	// the task. The Backend implementation owns how this maps to a
-	// concrete process invocation.
+	// Agent is currently UNUSED — no backend reads it. It is NOT an
+	// agent-dispatch hook: the PTYBackend (the only backend today)
+	// runs Task as a shell command and ignores Agent entirely. The
+	// field is retained for API/wire compatibility and as an optional
+	// labelling hint for callers; wiring an agent-dispatch backend
+	// (D3, agent-mux) is a separate, currently-unimplemented ticket.
+	// Setting this field does not change how a job runs.
 	Agent string
-	// Task is the prompt / instruction text the spawned process is
-	// given. Opaque to this package; the Backend wires it into its
-	// process invocation.
+	// Task is the shell command line the backend executes. The
+	// PTYBackend runs it via `/bin/sh -c <Task>` (see pty.go,
+	// defaultCommandFactory) and captures stdout+stderr. It is a
+	// command string, not an agent prompt.
 	Task string
 	// Budget bounds the job. Zero fields fall back to package defaults
 	// (see Defaults above).

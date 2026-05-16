@@ -748,19 +748,20 @@ func selfToolDefinitions() []Tool {
 		// --- Background job (P9 BackgroundJob, CW-20260420-0016) ---
 		{
 			Name: "background_job",
-			Description: "Dispatch a long-running task as an async, non-session-bound background job. Returns a job_id immediately; the result lands as an inbox notification on the originating session when the job completes.\n\n" +
+			Description: "Run a long-running shell command as an async, non-session-bound background job. Returns a job_id immediately; the result lands as an inbox notification on the originating session when the job completes.\n\n" +
+				"**This is a background COMMAND runner, not an agent dispatcher.** The `task` string is executed verbatim via `/bin/sh -c` — it is a shell command line, not an agent prompt. To delegate work to an agent, use subagent_spawn or task_execute instead.\n\n" +
 				"**Contrast with sibling primitives — pick the right one:**\n" +
 				"- **peer_query** (sync, in-session): a single quick question to a peer agent; you wait for the reply inline. Lightest.\n" +
 				"- **subagent_spawn** (sync/async, in-session): a delegated subtask whose lifecycle is tied to this session. Medium.\n" +
-				"- **background_job** (async, NON-session-bound): heavy or long-running work that should not block this session. Reply arrives via the messaging inbox when done — possibly after this turn ends.\n\n" +
-				"**When to use:** Codebase crawls, multi-file research, transcript analysis, or anything you'd otherwise abandon partway through because the calling turn ends. Only fires when the P3 ScopeTier classifier says ExecutionPattern=background — pass that pattern explicitly.\n\n" +
-				"**Required context:** task (the prompt the spawned process runs), originating_session_id, originating_agent_id. agent (role slug) and budget are optional (defaults: 30 min wall-clock, 1 MiB output cap).\n\n" +
-				"**Output shape:** {job_id}. The completion envelope (channel=inbox, kind=notification, from_agent_id=background-job) carries a structured JobResult JSON in payload_json with status (succeeded/failed/cancelled), output, error, started_at, completed_at. Poll message_inbox after the turn or chain via background_status.",
+				"- **background_job** (async, NON-session-bound): a heavy or long-running shell command that should not block this session. Reply arrives via the messaging inbox when done — possibly after this turn ends.\n\n" +
+				"**When to use:** Long-running build/test/crawl scripts, batch data processing, or any shell command you'd otherwise abandon partway through because the calling turn ends. Only fires when the P3 ScopeTier classifier says ExecutionPattern=background — pass that pattern explicitly.\n\n" +
+				"**Required context:** task (the shell command to run), originating_session_id, originating_agent_id. budget is optional (defaults: 30 min wall-clock, 1 MiB output cap); agent is optional and currently unused (no backend reads it).\n\n" +
+				"**Output shape:** {job_id}. The completion envelope (channel=inbox, kind=notification, from_agent_id=background-job) carries a structured JobResult JSON in payload_json with status (succeeded/failed/cancelled), output (captured stdout+stderr), error, started_at, completed_at. Poll message_inbox after the turn or chain via background_status.",
 			InputSchema: map[string]any{
 				"type": "object",
 				"properties": map[string]any{
-					"task":                   map[string]any{"type": "string", "description": "The prompt / instruction the background process executes."},
-					"agent":                  map[string]any{"type": "string", "description": "Optional agent slug for the dispatched job. Backend-defined."},
+					"task":                   map[string]any{"type": "string", "description": "The shell command line to run. Executed verbatim via /bin/sh -c; stdout+stderr are captured."},
+					"agent":                  map[string]any{"type": "string", "description": "Optional free-text label hint. Currently unused — no backend reads it; it does NOT select an agent or change how the command runs."},
 					"originating_session_id": map[string]any{"type": "string", "description": "Session that submitted the job; the completion envelope is delivered here."},
 					"originating_agent_id":   map[string]any{"type": "string", "description": "Agent that submitted the job; conventionally the to_agent on the completion envelope."},
 					"wall_clock_seconds":     map[string]any{"type": "integer", "description": "Optional wall-clock cap. 0 uses default (1800s)."},

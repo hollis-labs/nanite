@@ -1,9 +1,37 @@
 package agent
 
 import (
+	"encoding/json"
+
 	agentsessions "github.com/hollis-labs/go-agent-sessions/agentsessions"
 	"github.com/hollis-labs/go-providers/provider"
 )
+
+// streamingStdioUserFrame wraps raw text as a single NDJSON object in the
+// shape Anthropic's claude "Streaming Input Mode" expects on stdin:
+//
+//	{"type":"user","message":{"role":"user","content":"<text>"}}
+//
+// CW-20260516-0007: the streaming-stdio runtime writes SendInput bytes
+// (and the boot-prompt-on-stdin payload) to the child verbatim, only
+// appending '\n'. claude with `-p --input-format stream-json` parses
+// every stdin line as JSON — un-framed markdown/text crashes its input
+// parser within ~500ms (c207/c208: `SyntaxError: JSON Parse error`).
+//
+// Returns JSON-encoded bytes WITHOUT a trailing newline; the runtime's
+// SendInput appends one. json.Marshal handles content escaping, so any
+// text (multi-line boot prompts, quotes, control chars) is safe.
+func streamingStdioUserFrame(text string) ([]byte, error) {
+	type userMsg struct {
+		Role    string `json:"role"`
+		Content string `json:"content"`
+	}
+	type frame struct {
+		Type    string  `json:"type"`
+		Message userMsg `json:"message"`
+	}
+	return json.Marshal(frame{Type: "user", Message: userMsg{Role: "user", Content: text}})
+}
 
 // shouldUsePTY decides between PTY allocation and regular stdio pipes
 // for the long-lived runtime. The function name now slightly outlives

@@ -350,7 +350,14 @@ func (s *chatServiceImpl) regenerateBootDirSlots(bootDir string, agent *store.Ag
 		return errors.New("regenerateBootDirSlots: nil agent profile")
 	}
 	claudePath := filepath.Join(bootDir, "CLAUDE.md")
-	if err := fsutil.AtomicWriteFile(claudePath, []byte(runtimeagent.BuildCLAUDEMD(agent.Name, agent.Description)), 0o644); err != nil {
+	// CW-20260516-0007: the regenerated CLAUDE.md carries the agent
+	// profile's system prompt so claude (which auto-loads CLAUDE.md)
+	// keeps its operating instructions across a mid-session slot
+	// refresh. The runtime-side role/mode framing applied at initial
+	// Boot (resolveBootPrompt) is not recomposed here — regen is a
+	// lighter-weight refresh and the chat service does not carry the
+	// runtime Options; agent.SystemPrompt is the authoritative base.
+	if err := fsutil.AtomicWriteFile(claudePath, []byte(runtimeagent.BuildCLAUDEMD(agent.Name, agent.Description, agent.SystemPrompt)), 0o644); err != nil {
 		return fmt.Errorf("regen CLAUDE.md: %w", err)
 	}
 	contextPath := filepath.Join(bootDir, ".sandbox", "agent-context.md")

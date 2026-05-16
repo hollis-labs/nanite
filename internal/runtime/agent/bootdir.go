@@ -72,11 +72,17 @@ func composeBootdirParams(deps *Dependencies, opts Options, profile *store.Agent
 	}
 	layout := bootdirLayoutFor(effectiveProvider(opts, profile))
 	params := SetupParams{
-		SessionID:    sessID,
-		RunID:        opts.RunID,
+		SessionID: sessID,
+		RunID:     opts.RunID,
 		AgentProfile: profile,
-		Mode:         opts.Mode,
-		SystemPrompt: composeSystemPrompt(opts.Role, profile, opts.Mode),
+		Mode:      opts.Mode,
+		// CW-20260516-0007: resolveBootPrompt (not bare composeSystemPrompt)
+		// so SetupParams.SystemPrompt carries the AUTHORITATIVE boot prompt
+		// — it honors Options.BootPromptOverride, which bootprofile-driven
+		// launches set to a catalog-authored prompt. claudeLayout plants
+		// this into CLAUDE.md; for non-bootprofile sessions resolveBootPrompt
+		// is identical to the prior composeSystemPrompt result.
+		SystemPrompt: resolveBootPrompt(profile, opts),
 		BootContent:  composeBootContent(opts),
 		ProjectDir:   opts.Workdir,
 		MCPConfig:    mcp,

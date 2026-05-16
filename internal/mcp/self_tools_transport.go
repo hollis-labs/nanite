@@ -1588,8 +1588,16 @@ func (st *SelfToolsTransport) callSpawnSubagent(ctx context.Context, args map[st
 
 	ctx, cancel := context.WithTimeout(ctx, messageCallTimeout)
 	defer cancel()
+	// Caller identity is authoritative from the ctx, not the LLM-supplied
+	// parent_session_id arg — consistent with the recursion cap above. A
+	// forged arg must not be able to attach the run row / reply to a
+	// different session. The arg is a fallback only for ctx-less paths.
+	parentSessionID := strArg(args, "parent_session_id", "")
+	if ctxSID := SessionIDFromContext(ctx); ctxSID != "" {
+		parentSessionID = ctxSID
+	}
 	req := subagent.SpawnRequest{
-		ParentSessionID: strArg(args, "parent_session_id", ""),
+		ParentSessionID: parentSessionID,
 		ParentAgentID:   strArg(args, "parent_agent_id", ""),
 		Role:            strArg(args, "role", ""),
 		Prompt:          strArg(args, "prompt", ""),

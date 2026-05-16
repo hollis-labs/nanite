@@ -91,8 +91,9 @@ type EventLogger interface {
 
 // ParentageChecker reports whether a session is itself a spawned
 // subagent (has a parent). *store.Store satisfies it via
-// IsSubagentSession. Container-injected so the subagent package does
-// not take a hard dep on the full Store.
+// IsSubagentSession. Defined as a narrow interface (rather than taking
+// *store.Store directly) so the recursion cap can be unit-tested with a
+// fake and is not coupled to the concrete *store.Store type.
 //
 // Used by the recursion-depth cap (CW-20260516-0066): a caller that is
 // itself a subagent is rejected before it can spawn another.

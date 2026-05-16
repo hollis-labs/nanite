@@ -11,6 +11,7 @@ import (
 	"github.com/hollis-labs/nanite/internal/dispatch"
 	"github.com/hollis-labs/nanite/internal/grounding"
 	"github.com/hollis-labs/nanite/internal/reflex"
+	"github.com/hollis-labs/nanite/internal/subagent"
 )
 
 // callExecuteTask handles task_execute — the Chat agent's
@@ -60,7 +61,14 @@ func (st *SelfToolsTransport) callExecuteTask(ctx context.Context, args map[stri
 		wrapper = dispatch.DefaultEnvelopeWrapper{}
 	}
 
+	// Caller identity is authoritative from the ctx (stamped by the service
+	// layer), not the LLM-supplied session_id arg — the recursion cap above
+	// already trusts ctx, and the dispatch's parent session must be the same
+	// identity. The arg is a fallback only for ctx-less paths (tests).
 	sessionID := strArg(args, "session_id", "")
+	if ctxSID := SessionIDFromContext(ctx); ctxSID != "" {
+		sessionID = ctxSID
+	}
 	message := strArg(args, "message", "")
 	if sessionID == "" {
 		return errorResult("session_id is required"), nil
@@ -239,8 +247,9 @@ func (st *SelfToolsTransport) callExecuteTask(ctx context.Context, args map[stri
 
 // subagentRecursionBlockedMsg is the error surfaced to a parented agent
 // that attempts a session-spawning dispatch (subagent_spawn / task_execute).
-// CW-20260516-0066.
-const subagentRecursionBlockedMsg = "subagent recursion blocked: only a root agent may spawn subagents; this agent has a parent — do the work yourself"
+// Derived from subagent.ErrRecursionBlocked so the MCP layer and the
+// subagent service always surface one identical message. CW-20260516-0066.
+var subagentRecursionBlockedMsg = subagent.ErrRecursionBlocked.Error()
 
 // recursionBlocked reports whether the caller of a session-spawning tool
 // is itself a subagent (has a parent). It is the MCP-layer enforcement

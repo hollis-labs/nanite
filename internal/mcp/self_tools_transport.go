@@ -1596,9 +1596,19 @@ func (st *SelfToolsTransport) callSpawnSubagent(ctx context.Context, args map[st
 	if ctxSID := SessionIDFromContext(ctx); ctxSID != "" {
 		parentSessionID = ctxSID
 	}
+	// CW-20260516-0058: ParentAgentID gates the reply-delivery block in
+	// subagent.Service.execute — an empty value skips inbox/chat reply
+	// delivery entirely, so async/api subagent_spawn replies never land.
+	// The LLM never reliably supplies the parent_agent_id tool arg, so
+	// default it to the caller-profile agent id stamped on ctx; the
+	// explicit arg stays an override for the rare case the model sets it.
+	parentAgentID := strArg(args, "parent_agent_id", "")
+	if parentAgentID == "" {
+		_, parentAgentID = CallerProfileFromContext(ctx)
+	}
 	req := subagent.SpawnRequest{
 		ParentSessionID: parentSessionID,
-		ParentAgentID:   strArg(args, "parent_agent_id", ""),
+		ParentAgentID:   parentAgentID,
 		Role:            strArg(args, "role", ""),
 		Prompt:          strArg(args, "prompt", ""),
 		Mode:            strArg(args, "mode", "sync"),

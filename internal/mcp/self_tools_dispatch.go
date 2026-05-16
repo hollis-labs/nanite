@@ -220,9 +220,20 @@ func (st *SelfToolsTransport) callExecuteTask(ctx context.Context, args map[stri
 	// TrustNormal (approval required — existing safe default).
 	wsID, apID := CallerProfileFromContext(ctx)
 
+	// CW-20260516-0058: ParentAgentID drives the subagent reply-delivery
+	// block in subagent.Service.execute (an empty value skips inbox/chat
+	// reply delivery entirely for async/api modes). The LLM never reliably
+	// supplies the parent_agent_id tool arg, so default it to the
+	// caller-profile agent id stamped on ctx; the explicit arg, when the
+	// model does provide one, stays an override.
+	parentAgentID := strArg(args, "parent_agent_id", "")
+	if parentAgentID == "" {
+		parentAgentID = apID
+	}
+
 	envelope, err := dispatch.ExecuteTask(ctx, st.Dispatch, wrapper, dispatch.ExecuteTaskArgs{
 		SessionID:      sessionID,
-		ParentAgentID:  strArg(args, "parent_agent_id", ""),
+		ParentAgentID:  parentAgentID,
 		Message:        dispatchMessage,
 		Provider:       strArg(args, "provider", ""),
 		TimeoutSeconds: intArg(args, "timeout_seconds", 0),

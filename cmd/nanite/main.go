@@ -58,13 +58,15 @@ import (
 func main() {
 	if len(os.Args) < 2 {
 		fmt.Fprintf(os.Stderr, "usage: %s <command>\n", brand.BinaryName)
-		fmt.Fprintln(os.Stderr, "commands: serve, plugin, mcp, message, admin, version (framework-injection moved to `nanite-agent init`)")
+		fmt.Fprintln(os.Stderr, "commands: serve, launch, plugin, mcp, message, admin, version (framework-injection moved to `nanite-agent init`)")
 		os.Exit(1)
 	}
 
 	switch os.Args[1] {
 	case "serve":
 		cmdServe(os.Args[2:])
+	case "launch":
+		cmdLaunch(os.Args[2:])
 	case "plugin":
 		cmdPlugin(os.Args[2:])
 	case "mcp":

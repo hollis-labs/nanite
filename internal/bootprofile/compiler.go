@@ -93,14 +93,15 @@ type LaunchSpec struct {
 // skill knobs each deferred type actually needs — so future extraction
 // can stabilize Requirement independently of the SlotSource schema.
 type Requirement struct {
-	Slot           string `json:"slot"`
-	Type           string `json:"type"`
-	Path           string `json:"path,omitempty"`
-	Run            string `json:"run,omitempty"`
-	Timeout        string `json:"timeout,omitempty"`
-	URL            string `json:"url,omitempty"`
-	ResponseFormat string `json:"response_format,omitempty"`
-	Limit          int    `json:"limit,omitempty"`
+	Slot           string   `json:"slot"`
+	Type           string   `json:"type"`
+	Path           string   `json:"path,omitempty"`
+	Run            string   `json:"run,omitempty"`
+	Timeout        string   `json:"timeout,omitempty"`
+	URL            string   `json:"url,omitempty"`
+	ResponseFormat string   `json:"response_format,omitempty"`
+	Limit          int      `json:"limit,omitempty"`
+	Roots          []string `json:"roots,omitempty"`
 }
 
 // Compile produces a LaunchSpec from a Profile + Launch + Vars. The

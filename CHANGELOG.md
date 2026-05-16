@@ -24,3 +24,31 @@ lives in the git log.
   for `~/.config`. The `~/.nanite/` directory is preserved for non-config
   files (skills, roles, agents, plugin data) and is unaffected by this
   change. Project-level `./nanite.yaml` is unchanged.
+
+### Added
+
+- **Standalone agent launcher — `nanite launch <profile>`** (Phase 6,
+  CW-20260515-0027/0028). Starts a Nanite-managed CLI agent (Claude /
+  Codex / OpenCode) directly from a shared launch profile, with no chat
+  server, no browser dropdown, and no Tether MCP in the loop.
+  `--dry-run` compiles + resolves + validates a profile without a store
+  or a provider binary (a cheap CI gate); `--no-wait` returns once the
+  agent process is started. The launch persists an `agent_runtime` row
+  with `meta.launch_source = "standalone-launcher"` so it is
+  introspectable and orphan-sweepable exactly like a chat-spawned
+  session. See `docs/standalone-launcher.md` and
+  `docs/phase6-shared-launch-adoption.md`.
+
+### Changed
+
+- **Boot-profile compiler and provider bootdirs now ride shared
+  `go-agent-launch` / `go-agent-context` primitives** (Phase 6,
+  CW-20260515-0024/0025/0026). The mechanical slot file/inline IO,
+  bootdir file-set planting (path-safety gate + overlay ordering), and
+  the deferred `cmd`/`http`/`role_summary`/`skill_index` slot resolution
+  now delegate to the shared `agentcontext` resolvers and the shared
+  `agentlaunch.InjectionSpec` write loop. Boot prompts and planted
+  bootdir content are byte-identical to pre-Phase-6 — this is an
+  internal convergence, not a user-facing behavior change. New direct
+  dependencies: `go-agent-launch v0.1.0`, `go-agent-context v0.1.0`;
+  `go-agent-sessions` bumped `v0.9.2 → v0.9.4` (transitive, compatible).

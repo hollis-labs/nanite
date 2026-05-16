@@ -2,6 +2,8 @@ package bootprofile
 
 import (
 	"errors"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -26,59 +28,180 @@ func TestResolveRequirements_NilSpecIsNoop(t *testing.T) {
 	}
 }
 
-// TestResolveRequirements_StubsCMDSource is the load-bearing test
-// for the scope decision: CW-20260514-0048 explicitly defers cmd/
-// http/role_summary/skill_index resolvers, so any spec that uses
-// them surfaces a clean ErrRequirementUnsupported with the slot
-// name + source type. This separates "operator authored a slot we
-// haven't wired" from "compile produced a broken spec".
-func TestResolveRequirements_StubsCMDSource(t *testing.T) {
+// TestResolveRequirements_UnknownTypeStillErrors pins that a
+// Requirement carrying a Type with no shared resolver still fails
+// fast with ErrRequirementUnsupported. CW-20260515-0026 wired the
+// four known deferred kinds (cmd/http/role_summary/skill_index)
+// through the shared provider, but the unknown-type guard remains so
+// a malformed catalog entry surfaces clearly.
+func TestResolveRequirements_UnknownTypeStillErrors(t *testing.T) {
 	spec := &LaunchSpec{
 		ProfileID: "p",
 		Requirements: []Requirement{
-			{Slot: "recap", Type: "cmd", Run: "git log"},
+			{Slot: "recap", Type: "telepathy"},
 		},
 	}
 	err := ResolveRequirements(spec)
 	if err == nil {
-		t.Fatal("ResolveRequirements(cmd slot) = nil, want error")
+		t.Fatal("ResolveRequirements(unknown type) = nil, want error")
 	}
 	if !errors.Is(err, ErrRequirementUnsupported) {
 		t.Fatalf("err = %v, want errors.Is ErrRequirementUnsupported", err)
 	}
-	// The error message must name the slot AND the source type so
-	// the operator can find the bad YAML quickly.
 	msg := err.Error()
-	for _, want := range []string{"p", "recap", "cmd"} {
+	for _, want := range []string{"p", "recap", "telepathy"} {
 		if !strings.Contains(msg, want) {
 			t.Errorf("err message %q missing %q", msg, want)
 		}
 	}
 }
 
-// TestResolveRequirements_StubsAllDeferredTypes verifies the four
-// deferred source types each surface the stub error individually.
-// Parameterized so a future ticket can replace a single case with
-// a real resolver implementation without breaking the others.
-func TestResolveRequirements_StubsAllDeferredTypes(t *testing.T) {
-	cases := []struct {
-		typ string
-	}{
-		{"cmd"},
-		{"http"},
-		{"role_summary"},
-		{"skill_index"},
+// TestResolveRequirements_CmdSlotResolves pins that a cmd Requirement
+// now resolves through the shared CmdResolver: stdout is folded into
+// spec.Slots and the prompt re-rendered. CW-20260515-0026.
+func TestResolveRequirements_CmdSlotResolves(t *testing.T) {
+	spec := &LaunchSpec{
+		ProfileID: "p",
+		UILabel:   "P",
+		Identity:  Identity{LineageAlias: "p"},
+		Slots:     map[string]string{},
+		Requirements: []Requirement{
+			{Slot: "recap", Type: "cmd", Run: "printf 'hello-recap'"},
+		},
 	}
-	for _, c := range cases {
-		t.Run(c.typ, func(t *testing.T) {
-			spec := &LaunchSpec{
-				ProfileID:    "p",
-				Requirements: []Requirement{{Slot: "s", Type: c.typ}},
-			}
-			err := ResolveRequirements(spec)
-			if !errors.Is(err, ErrRequirementUnsupported) {
-				t.Fatalf("type %q err = %v, want ErrRequirementUnsupported", c.typ, err)
-			}
-		})
+	if err := ResolveRequirements(spec); err != nil {
+		t.Fatalf("ResolveRequirements(cmd) = %v, want nil", err)
+	}
+	if len(spec.Requirements) != 0 {
+		t.Fatalf("Requirements not drained: %+v", spec.Requirements)
+	}
+	if got := spec.Slots["recap"]; got != "hello-recap" {
+		t.Fatalf("recap slot = %q, want %q", got, "hello-recap")
+	}
+	if !strings.Contains(spec.BootPrompt, "hello-recap") {
+		t.Fatalf("BootPrompt missing resolved cmd output: %q", spec.BootPrompt)
+	}
+}
+
+// TestResolveRequirements_CmdFailureSurfaces pins that a cmd that
+// exits non-zero surfaces as a pointed error naming the slot, rather
+// than silently landing an empty section.
+func TestResolveRequirements_CmdFailureSurfaces(t *testing.T) {
+	spec := &LaunchSpec{
+		ProfileID: "p",
+		Slots:     map[string]string{},
+		Requirements: []Requirement{
+			{Slot: "recap", Type: "cmd", Run: "exit 3"},
+		},
+	}
+	err := ResolveRequirements(spec)
+	if err == nil {
+		t.Fatal("ResolveRequirements(failing cmd) = nil, want error")
+	}
+	if !strings.Contains(err.Error(), "recap") {
+		t.Fatalf("err %q should name the failing slot", err)
+	}
+}
+
+// TestResolveRequirements_RoleSummaryResolves pins the role_summary
+// kind: the role markdown file body is folded into spec.Slots.
+func TestResolveRequirements_RoleSummaryResolves(t *testing.T) {
+	dir := t.TempDir()
+	rolePath := filepath.Join(dir, "worker.md")
+	body := "# Backend\n\nYou are a backend engineer.\n"
+	if err := os.WriteFile(rolePath, []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	spec := &LaunchSpec{
+		ProfileID: "p",
+		UILabel:   "P",
+		Identity:  Identity{LineageAlias: "p"},
+		Slots:     map[string]string{},
+		Requirements: []Requirement{
+			{Slot: "agent", Type: "role_summary", Path: rolePath},
+		},
+	}
+	if err := ResolveRequirements(spec); err != nil {
+		t.Fatalf("ResolveRequirements(role_summary) = %v, want nil", err)
+	}
+	if !strings.Contains(spec.Slots["agent"], "backend engineer") {
+		t.Fatalf("agent slot missing role body: %q", spec.Slots["agent"])
+	}
+}
+
+// TestResolveResolverWorkdir pins the workdir resolution fix (Copilot
+// round-1 #5): the cmd / relative-file resolvers must not be handed a
+// launch workdir that does not exist yet — agent.Boot creates it later,
+// but requirement resolution runs before Boot.
+func TestResolveResolverWorkdir(t *testing.T) {
+	existing := t.TempDir()
+
+	// An existing directory is used verbatim — no regression.
+	if got, err := resolveResolverWorkdir(existing); err != nil || got != existing {
+		t.Fatalf("resolveResolverWorkdir(existing) = (%q, %v), want (%q, nil)", got, err, existing)
+	}
+
+	// Empty workdir maps to "" (resolver default = process CWD).
+	if got, err := resolveResolverWorkdir(""); err != nil || got != "" {
+		t.Fatalf("resolveResolverWorkdir(\"\") = (%q, %v), want (\"\", nil)", got, err)
+	}
+
+	// A not-yet-created workdir falls back to "" rather than a missing
+	// path — agent.Boot will create the real one before the agent spawns.
+	missing := filepath.Join(existing, "not", "created", "yet")
+	if got, err := resolveResolverWorkdir(missing); err != nil || got != "" {
+		t.Fatalf("resolveResolverWorkdir(missing) = (%q, %v), want (\"\", nil)", got, err)
+	}
+}
+
+// TestResolveRequirements_CmdResolvesWithMissingWorkdir proves a cmd
+// Requirement still resolves when spec.Workdir points at a directory
+// that does not exist yet (the common case for catalog profiles whose
+// launch workdir agent.Boot creates later). Pre-fix the resolver would
+// have run `exec` in a missing CWD and failed; post-fix it falls back to
+// the process CWD.
+func TestResolveRequirements_CmdResolvesWithMissingWorkdir(t *testing.T) {
+	missingWorkdir := filepath.Join(t.TempDir(), "boot-creates-this-later")
+	spec := &LaunchSpec{
+		ProfileID: "p",
+		UILabel:   "P",
+		Identity:  Identity{LineageAlias: "p"},
+		Workdir:   missingWorkdir,
+		Slots:     map[string]string{},
+		Requirements: []Requirement{
+			{Slot: "recap", Type: "cmd", Run: "printf 'workdir-ok'"},
+		},
+	}
+	if err := ResolveRequirements(spec); err != nil {
+		t.Fatalf("ResolveRequirements(missing workdir) = %v, want nil", err)
+	}
+	if got := spec.Slots["recap"]; got != "workdir-ok" {
+		t.Fatalf("recap slot = %q, want %q", got, "workdir-ok")
+	}
+}
+
+// TestResolveRequirements_SkillIndexResolves pins the skill_index
+// kind: discovered skills under a caller-supplied root are rendered
+// into the slot. The root is an explicit Requirement.Roots entry.
+func TestResolveRequirements_SkillIndexResolves(t *testing.T) {
+	dir := t.TempDir()
+	skillMD := "---\nname: adr\ndescription: Capture an architectural decision\ntriggers:\n  - /adr\n---\nbody\n"
+	if err := os.WriteFile(filepath.Join(dir, "adr.md"), []byte(skillMD), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	spec := &LaunchSpec{
+		ProfileID: "p",
+		UILabel:   "P",
+		Identity:  Identity{LineageAlias: "p"},
+		Slots:     map[string]string{},
+		Requirements: []Requirement{
+			{Slot: "skills", Type: "skill_index", Roots: []string{dir}},
+		},
+	}
+	if err := ResolveRequirements(spec); err != nil {
+		t.Fatalf("ResolveRequirements(skill_index) = %v, want nil", err)
+	}
+	if !strings.Contains(spec.Slots["skills"], "/adr") {
+		t.Fatalf("skills slot missing discovered skill: %q", spec.Slots["skills"])
 	}
 }

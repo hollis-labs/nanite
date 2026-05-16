@@ -3,6 +3,7 @@ package bootprofile
 import (
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 )
@@ -170,7 +171,7 @@ func TestResolveSlot_DeferredTypesProduceRequirements(t *testing.T) {
 			if req == nil {
 				t.Fatal("expected a Requirement")
 			}
-			if *req != tc.expect {
+			if !reflect.DeepEqual(*req, tc.expect) {
 				t.Fatalf("got %+v, want %+v", *req, tc.expect)
 			}
 		})
@@ -228,7 +229,7 @@ func TestResolvePath_AbsoluteWithEmptyRootOK(t *testing.T) {
 // propagates through resolveStatic. Before PR #169 round 1 this
 // case silently rebased onto cwd.
 func TestResolveStatic_RelativeWithEmptyRootErrors(t *testing.T) {
-	_, err := resolveStatic(SlotSource{Type: "static", Path: "rules.md"}, "")
+	_, err := resolveStatic("rules", SlotSource{Type: "static", Path: "rules.md"}, "")
 	if err == nil {
 		t.Fatal("expected error for static slot with empty catalog root")
 	}

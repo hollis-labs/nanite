@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/hollis-labs/nanite/internal/dispatch"
 	"github.com/hollis-labs/nanite/internal/store"
 	"github.com/hollis-labs/nanite/internal/subagent"
 )
@@ -585,6 +586,157 @@ func TestSyncSubagentEnvelope_RecoverSummaryError_EmitsInternalNotEmptyReply(t *
 	if envelope.Error.Kind != subagent.ErrorKindInternal {
 		t.Errorf("error.kind = %q, want %q (backend faults route to internal)", envelope.Error.Kind, subagent.ErrorKindInternal)
 	}
+}
+
+// markSessionAsSubagent inserts a subagent_runs row whose
+// child_session_id is childSessionID, so Store.IsSubagentSession
+// reports childSessionID as a parented session. Mirrors the state the
+// subagent runner leaves behind once it spawns a child chat session.
+func markSessionAsSubagent(t *testing.T, st *SelfToolsTransport, childSessionID string) {
+	t.Helper()
+	_, err := st.Store.DB.Exec(
+		`INSERT INTO subagent_runs
+		   (id, parent_session_id, child_session_id, role, prompt, mode,
+		    status, inputs_json, result_json, error, timeout_seconds,
+		    created_at, started_at, completed_at, parent_agent_id,
+		    envelope_instance_id, approved_at, approved_by, rejected_at,
+		    rejection_reason, provider)
+		 VALUES (?, ?, ?, 'worker', 'p', 'sync', 'running', '{}', '', '',
+		         300, '2026-05-16T00:00:00Z', '2026-05-16T00:00:00Z', '',
+		         'parent-agent', '', '', '', '', '', '')`,
+		"run-"+childSessionID, "root-parent", childSessionID,
+	)
+	if err != nil {
+		t.Fatalf("mark session as subagent: %v", err)
+	}
+}
+
+// TestCallSpawnSubagent_RecursionCap_RejectsParentedCaller is the
+// CW-20260516-0066 MCP-layer regression test for subagent_spawn: a
+// caller whose ctx session id is itself a subagent must be rejected
+// with a denied envelope; a root caller is allowed. The caller identity
+// is taken from the ctx (WithSessionID), not the LLM-supplied
+// parent_session_id arg.
+func TestCallSpawnSubagent_RecursionCap_RejectsParentedCaller(t *testing.T) {
+	st := newSubagentTestTransport(t, subagent.EchoRunner{})
+	st.Subagent.SetParentageChecker(st.Store)
+	markSessionAsSubagent(t, st, "sess-child")
+
+	// Root caller — ctx carries a session id with no parent. Async mode
+	// so the ack envelope reports success=true without depending on the
+	// EchoRunner persisting recoverable assistant text (sync mode would
+	// route through ErrorKindEmptyReply, unrelated to the recursion cap).
+	rootCtx := WithSessionID(context.Background(), "sess-root")
+	res, err := st.callSpawnSubagent(rootCtx, map[string]any{
+		"parent_session_id": "sess-root",
+		"parent_agent_id":   "primary",
+		"role":              "researcher",
+		"prompt":            "do the task",
+		"mode":              subagent.ModeAsync,
+	})
+	if err != nil {
+		t.Fatalf("callSpawnSubagent (root): %v", err)
+	}
+	env := parseEnvelopeFromResult(t, res)
+	if !env.Success {
+		t.Fatalf("root spawn rejected unexpectedly: %+v", env)
+	}
+	if env.Result != nil && env.Result.RunID != "" {
+		waitForRunTerminal(t, st, env.Result.RunID)
+	}
+
+	// Subagent caller — ctx session id "sess-child" has a parent.
+	childCtx := WithSessionID(context.Background(), "sess-child")
+	res, err = st.callSpawnSubagent(childCtx, map[string]any{
+		"parent_session_id": "sess-child",
+		"parent_agent_id":   "worker",
+		"role":              "researcher",
+		"prompt":            "re-dispatch the task",
+		"mode":              subagent.ModeSync,
+	})
+	if err != nil {
+		t.Fatalf("callSpawnSubagent (child): %v", err)
+	}
+	if !res.IsError {
+		t.Error("expected IsError=true on recursion-blocked spawn")
+	}
+	env = parseEnvelopeFromResult(t, res)
+	if env.Success {
+		t.Fatalf("subagent spawn was allowed; recursion cap not enforced: %+v", env)
+	}
+	if env.Error == nil || env.Error.Kind != subagent.ErrorKindDenied {
+		t.Errorf("error.kind = %v, want %q", env.Error, subagent.ErrorKindDenied)
+	}
+	if env.Error != nil && !strings.Contains(env.Error.Message, "recursion blocked") {
+		t.Errorf("error.message = %q, want recursion-blocked text", env.Error.Message)
+	}
+}
+
+// TestCallSpawnSubagent_RecursionCap_IgnoresForgedArg verifies a
+// subagent cannot dodge the cap by passing a forged parent_session_id
+// arg — the check uses the authoritative ctx session id.
+func TestCallSpawnSubagent_RecursionCap_IgnoresForgedArg(t *testing.T) {
+	st := newSubagentTestTransport(t, subagent.EchoRunner{})
+	st.Subagent.SetParentageChecker(st.Store)
+	markSessionAsSubagent(t, st, "sess-child")
+
+	// ctx says the real caller is the parented "sess-child", but the
+	// LLM-supplied arg lies and claims to be a root session.
+	childCtx := WithSessionID(context.Background(), "sess-child")
+	res, err := st.callSpawnSubagent(childCtx, map[string]any{
+		"parent_session_id": "sess-root-forged",
+		"parent_agent_id":   "worker",
+		"role":              "researcher",
+		"prompt":            "evade the cap",
+		"mode":              subagent.ModeSync,
+	})
+	if err != nil {
+		t.Fatalf("callSpawnSubagent: %v", err)
+	}
+	env := parseEnvelopeFromResult(t, res)
+	if env.Success {
+		t.Fatal("forged parent_session_id evaded the recursion cap")
+	}
+}
+
+// TestCallExecuteTask_RecursionCap_RejectsParentedCaller is the
+// CW-20260516-0066 MCP-layer regression test for task_execute: a caller
+// whose ctx session id is itself a subagent must be rejected with an
+// error result before any dispatch work.
+func TestCallExecuteTask_RecursionCap_RejectsParentedCaller(t *testing.T) {
+	st := newSubagentTestTransport(t, subagent.EchoRunner{})
+	st.Subagent.SetParentageChecker(st.Store)
+	// task_execute needs a dispatch spawner; the recursion check fires
+	// before dispatch so a nil-safe stub is enough — but the cap must
+	// reject before Dispatch is even consulted. Wire a spawner that
+	// fails the test if invoked.
+	st.Dispatch = &recursionGuardSpawner{t: t}
+	markSessionAsSubagent(t, st, "sess-child")
+
+	childCtx := WithSessionID(context.Background(), "sess-child")
+	res, err := st.callExecuteTask(childCtx, map[string]any{
+		"session_id": "sess-child",
+		"message":    "re-dispatch the task",
+	})
+	if err != nil {
+		t.Fatalf("callExecuteTask: %v", err)
+	}
+	if !res.IsError {
+		t.Error("expected IsError=true on recursion-blocked task_execute")
+	}
+	text := res.Content[0].Text
+	if !strings.Contains(text, "recursion blocked") {
+		t.Errorf("result text = %q, want recursion-blocked message", text)
+	}
+}
+
+// recursionGuardSpawner fails the test if Spawn is invoked — proves the
+// recursion cap rejects before the dispatch spawner is consulted.
+type recursionGuardSpawner struct{ t *testing.T }
+
+func (s *recursionGuardSpawner) Spawn(context.Context, dispatch.SpawnRequest) (*dispatch.SpawnResult, error) {
+	s.t.Error("dispatch spawner invoked despite recursion cap rejection")
+	return nil, errors.New("spawner should not be reached")
 }
 
 // parseEnvelopeFromResult marshals the ToolResult's text body as a

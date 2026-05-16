@@ -1569,8 +1569,33 @@ func (st *SelfToolsTransport) callSpawnSubagent(ctx context.Context, args map[st
 			"subagent service not configured", nil)
 		return envelopeResult(env), nil
 	}
+
+	// CW-20260516-0066: hard subagent recursion-depth cap. subagent_spawn
+	// creates a new tracked child session — only a depth-0 progenitor (a
+	// root / user-facing session with no parent) may invoke it. If the
+	// caller's session is itself a subagent, reject before any run row is
+	// created. The caller identity comes from the ctx, not the
+	// LLM-supplied parent_session_id arg. Kind=denied so the parent reads
+	// this as a deliberate trust refusal, not an internal fault.
+	if blocked, err := st.recursionBlocked(ctx); err != nil {
+		env := subagent.NewFailureEnvelope("", subagent.ErrorKindInternal, err.Error(), nil)
+		return envelopeResult(env), nil
+	} else if blocked {
+		env := subagent.NewFailureEnvelope("", subagent.ErrorKindDenied,
+			subagentRecursionBlockedMsg, nil)
+		return envelopeResult(env), nil
+	}
+
 	ctx, cancel := context.WithTimeout(ctx, messageCallTimeout)
 	defer cancel()
+	// Caller identity is authoritative from the ctx, not the LLM-supplied
+	// parent_session_id arg — consistent with the recursion cap above. A
+	// forged arg must not be able to attach the run row / reply to a
+	// different session. The arg is a fallback only for ctx-less paths.
+	parentSessionID := strArg(args, "parent_session_id", "")
+	if ctxSID := SessionIDFromContext(ctx); ctxSID != "" {
+		parentSessionID = ctxSID
+	}
 	// CW-20260516-0058: ParentAgentID gates the reply-delivery block in
 	// subagent.Service.execute — an empty value skips inbox/chat reply
 	// delivery entirely, so async/api subagent_spawn replies never land.
@@ -1582,7 +1607,7 @@ func (st *SelfToolsTransport) callSpawnSubagent(ctx context.Context, args map[st
 		_, parentAgentID = CallerProfileFromContext(ctx)
 	}
 	req := subagent.SpawnRequest{
-		ParentSessionID: strArg(args, "parent_session_id", ""),
+		ParentSessionID: parentSessionID,
 		ParentAgentID:   parentAgentID,
 		Role:            strArg(args, "role", ""),
 		Prompt:          strArg(args, "prompt", ""),

@@ -42,3 +42,36 @@ func (s *Store) ActiveSubagentRunForParent(parentSessionID string) (id, role, ch
 	}
 	return id, role, childSessionID, true, nil
 }
+
+// IsSubagentSession reports whether sessionID is itself a spawned
+// subagent — i.e. it appears as the child_session_id of some
+// subagent_runs row. This is the authoritative "does this session have
+// a parent?" signal: the subagent runner stamps child_session_id back
+// onto the run row once it creates the child chat session
+// (persistChildSessionID), so a non-empty match means sessionID was
+// created by a spawn.
+//
+// Used by the subagent recursion-depth cap (CW-20260516-0066): only a
+// depth-0 progenitor (a session with NO parent) may spawn
+// session-creating subagents. A session that is itself a subagent must
+// have its spawn requests rejected.
+//
+// An empty sessionID returns (false, nil) — a missing caller identity
+// is treated as "no parent" so direct/test invocations are not blocked
+// by the cap (the cap fails open on an unknown caller; the spawn still
+// passes through trust + approval gating).
+func (s *Store) IsSubagentSession(sessionID string) (bool, error) {
+	if sessionID == "" {
+		return false, nil
+	}
+	const q = `SELECT 1 FROM subagent_runs WHERE child_session_id = ? LIMIT 1`
+	var dummy int
+	err := s.DB.QueryRow(q, sessionID).Scan(&dummy)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return false, nil
+		}
+		return false, fmt.Errorf("is subagent session %s: %w", sessionID, err)
+	}
+	return true, nil
+}

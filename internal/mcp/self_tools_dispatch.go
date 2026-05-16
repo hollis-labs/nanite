@@ -11,6 +11,7 @@ import (
 	"github.com/hollis-labs/nanite/internal/dispatch"
 	"github.com/hollis-labs/nanite/internal/grounding"
 	"github.com/hollis-labs/nanite/internal/reflex"
+	"github.com/hollis-labs/nanite/internal/subagent"
 )
 
 // callExecuteTask handles task_execute — the Chat agent's
@@ -38,6 +39,20 @@ func (st *SelfToolsTransport) callExecuteTask(ctx context.Context, args map[stri
 	if st.Dispatch == nil {
 		return errorResult("dispatch is not configured (subagent service unavailable)"), nil
 	}
+
+	// CW-20260516-0066: hard subagent recursion-depth cap. task_execute
+	// is a session-spawning dispatch primitive — it creates a new tracked
+	// child session. Only a depth-0 progenitor (a root / user-facing
+	// session with no parent) may invoke it. If the caller's session is
+	// itself a subagent, reject before any dispatch work. The caller's
+	// session id is taken from the ctx (stamped by the service layer in
+	// executeToolBatch), NOT the LLM-supplied session_id arg, so a
+	// subagent cannot evade the cap by passing a different id.
+	if blocked, err := st.recursionBlocked(ctx); err != nil {
+		return errorResult(err.Error()), nil
+	} else if blocked {
+		return errorResult(subagentRecursionBlockedMsg), nil
+	}
 	wrapper := st.DispatchWrapper
 	if wrapper == nil {
 		// Default to the package-provided wrapper so production wiring
@@ -46,7 +61,14 @@ func (st *SelfToolsTransport) callExecuteTask(ctx context.Context, args map[stri
 		wrapper = dispatch.DefaultEnvelopeWrapper{}
 	}
 
+	// Caller identity is authoritative from the ctx (stamped by the service
+	// layer), not the LLM-supplied session_id arg — the recursion cap above
+	// already trusts ctx, and the dispatch's parent session must be the same
+	// identity. The arg is a fallback only for ctx-less paths (tests).
 	sessionID := strArg(args, "session_id", "")
+	if ctxSID := SessionIDFromContext(ctx); ctxSID != "" {
+		sessionID = ctxSID
+	}
 	message := strArg(args, "message", "")
 	if sessionID == "" {
 		return errorResult("session_id is required"), nil
@@ -232,6 +254,47 @@ func (st *SelfToolsTransport) callExecuteTask(ctx context.Context, args map[stri
 		return errorResult(fmt.Sprintf("dispatch: marshal envelope: %v", err)), nil
 	}
 	return textResult(string(envJSON)), nil
+}
+
+// subagentRecursionBlockedMsg is the error surfaced to a parented agent
+// that attempts a session-spawning dispatch (subagent_spawn / task_execute).
+// Derived from subagent.ErrRecursionBlocked so the MCP layer and the
+// subagent service always surface one identical message. CW-20260516-0066.
+var subagentRecursionBlockedMsg = subagent.ErrRecursionBlocked.Error()
+
+// recursionBlocked reports whether the caller of a session-spawning tool
+// is itself a subagent (has a parent). It is the MCP-layer enforcement
+// point of the recursion-depth cap (CW-20260516-0066): a hard cap at
+// depth 1 — root agents may spawn workers; workers may not spawn.
+//
+// The caller's session id is read from the ctx (mcp.SessionIDFromContext),
+// which the service layer stamps in executeToolBatch from the
+// authoritative session record — NOT from an LLM-supplied tool arg, so a
+// subagent cannot dodge the cap by passing a forged session_id.
+//
+// Returns:
+//   - (false, nil) when the caller is a root session, the session id is
+//     unknown (bare/test ctx — fail open, the spawn still hits trust +
+//     approval gating), or the store is not wired.
+//   - (true, nil)  when the caller's session is a subagent — reject.
+//   - (false, err) on a real DB error — caller must reject (fail closed).
+func (st *SelfToolsTransport) recursionBlocked(ctx context.Context) (bool, error) {
+	if st.Store == nil {
+		return false, nil
+	}
+	callerSessionID := SessionIDFromContext(ctx)
+	if callerSessionID == "" {
+		// No authoritative caller identity (direct invocation / test).
+		// Fail open here — the subagent.Service guard is the backstop.
+		return false, nil
+	}
+	isChild, err := st.Store.IsSubagentSession(callerSessionID)
+	if err != nil {
+		// Fail closed: an unverifiable parentage means we refuse rather
+		// than risk an unbounded recursive spawn chain.
+		return false, fmt.Errorf("subagent recursion check failed: %v", err)
+	}
+	return isChild, nil
 }
 
 // modeFromDispatchVia maps a reflex DispatchVia hint to the mode string

@@ -945,6 +945,10 @@ func NewContainer(cfg ContainerConfig) (*Container, error) {
 	// H1 (CW-20260421-0014): wire trust resolver + audit event logger.
 	subagentSvc.SetTrustResolver(cfg.Store)
 	subagentSvc.SetEventLogger(cfg.Store)
+	// CW-20260516-0066: wire the recursion-depth cap. A caller that is
+	// itself a subagent (appears as a child_session_id) is rejected
+	// before it can spawn another — hard cap at depth 1.
+	subagentSvc.SetParentageChecker(cfg.Store)
 
 	// CW-20260512-0002 (b)+(c): subagent reaper — background goroutine
 	// sweeps subagent_runs for timed-out and orphan rows so a hung

@@ -3,9 +3,8 @@ package agent
 import (
 	"fmt"
 	"os"
-	"path/filepath"
 
-	"github.com/hollis-labs/nanite/internal/fsutil"
+	"github.com/hollis-labs/go-agent-launch/agentlaunch"
 	"github.com/hollis-labs/nanite/internal/store"
 )
 
@@ -22,6 +21,11 @@ import (
 //	└── .mcp.json                    # nanite MCP subprocess descriptor
 //
 // Spawn cwd: <bootDir>; project access: claude --add-dir <projectDir>.
+//
+// CW-20260515-0025: the bootdir file-set is now declared as an
+// agentlaunch.InjectionSpec and written through the shared planting
+// routine (plantInjectionSpec) — see bootdir_plant.go for why Nanite
+// uses the shared InjectionSpec primitives rather than providerplant.Plant.
 type claudeLayout struct{}
 
 const claudeSettingsJSONStub = `{
@@ -29,6 +33,28 @@ const claudeSettingsJSONStub = `{
   "approvedTools": []
 }
 `
+
+// claudeInjectionSpec assembles the full claude bootdir file-set as a
+// shared agentlaunch.InjectionSpec. Provider files (CLAUDE.md,
+// .claude/settings.json) and the Nanite app-extras (.sandbox/* docs,
+// boot.md) ride as NativeFiles; .mcp.json rides as a BootDirOverlay
+// entry so it plants last (overlay-wins-last, per the providerplant
+// ordering contract).
+func claudeInjectionSpec(params SetupParams) (agentlaunch.InjectionSpec, error) {
+	native := []agentlaunch.NativeFile{
+		nativeFileRaw("CLAUDE.md",
+			BuildCLAUDEMD(params.AgentProfile.Name, params.AgentProfile.Description), 0o644),
+		bootMDNativeFile(params),
+		nativeFileRaw(".claude/settings.json", claudeSettingsJSONStub, 0o644),
+	}
+	native = append(native, sandboxNativeFiles(params)...)
+
+	overlay, err := mcpOverlay(params)
+	if err != nil {
+		return agentlaunch.InjectionSpec{}, err
+	}
+	return agentlaunch.InjectionSpec{NativeFiles: native, BootDirOverlay: overlay}, nil
+}
 
 func (l claudeLayout) Setup(params SetupParams) (string, error) {
 	bootDir, err := makeBootDir("claude", params)
@@ -45,48 +71,19 @@ func (l claudeLayout) Setup(params SetupParams) (string, error) {
 }
 
 // Populate writes the claude boot-dir shape into bootDir. Idempotent —
-// every file is replaced via fsutil.AtomicWriteFile; mkdir calls use
-// MkdirAll so a partially-populated dir converges. Used by both Setup
-// (post-mkdir) and the recovery BootDirOps adapter (against an existing
-// dir).
+// every file is replaced via the shared planting routine (atomic
+// temp-file + rename, no read of prior state); mkdir calls use MkdirAll
+// so a partially-populated dir converges. Used by both Setup (post-mkdir)
+// and the recovery BootDirOps adapter (against an existing dir).
 func (claudeLayout) Populate(bootDir string, params SetupParams) error {
 	if params.AgentProfile == nil {
 		return fmt.Errorf("agent: claudeLayout.Populate: AgentProfile is required")
 	}
-
-	if err := fsutil.AtomicWriteFile(
-		filepath.Join(bootDir, "CLAUDE.md"),
-		[]byte(BuildCLAUDEMD(params.AgentProfile.Name, params.AgentProfile.Description)),
-		0o644,
-	); err != nil {
-		return fmt.Errorf("agent: write CLAUDE.md: %w", err)
-	}
-
-	if err := plantBootMD(bootDir, params); err != nil {
+	spec, err := claudeInjectionSpec(params)
+	if err != nil {
 		return err
 	}
-
-	if err := plantSandboxFiles(bootDir, params); err != nil {
-		return err
-	}
-
-	claudeDir := filepath.Join(bootDir, ".claude")
-	if err := os.MkdirAll(claudeDir, 0o755); err != nil {
-		return fmt.Errorf("agent: mkdir .claude/: %w", err)
-	}
-	if err := fsutil.AtomicWriteFile(
-		filepath.Join(claudeDir, "settings.json"),
-		[]byte(claudeSettingsJSONStub),
-		0o644,
-	); err != nil {
-		return fmt.Errorf("agent: write .claude/settings.json: %w", err)
-	}
-
-	if err := writeMCPJSON(bootDir, params.MCPConfig, params.SessionID); err != nil {
-		return err
-	}
-
-	return nil
+	return plantInjectionSpec(bootDir, spec)
 }
 
 // RegenerateSystemPromptSlot rewrites only CLAUDE.md, leaving the rest
@@ -96,14 +93,12 @@ func (claudeLayout) RegenerateSystemPromptSlot(bootDir string, params SetupParam
 	if params.AgentProfile == nil {
 		return fmt.Errorf("agent: claudeLayout.RegenerateSystemPromptSlot: AgentProfile is required")
 	}
-	if err := fsutil.AtomicWriteFile(
-		filepath.Join(bootDir, "CLAUDE.md"),
-		[]byte(BuildCLAUDEMD(params.AgentProfile.Name, params.AgentProfile.Description)),
-		0o644,
-	); err != nil {
-		return fmt.Errorf("agent: regenerate CLAUDE.md: %w", err)
-	}
-	return nil
+	return plantInjectionSpec(bootDir, agentlaunch.InjectionSpec{
+		NativeFiles: []agentlaunch.NativeFile{
+			nativeFileRaw("CLAUDE.md",
+				BuildCLAUDEMD(params.AgentProfile.Name, params.AgentProfile.Description), 0o644),
+		},
+	})
 }
 
 func (claudeLayout) AmendEnv(base map[string]string, _ string) map[string]string { return base }

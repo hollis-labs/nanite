@@ -3,10 +3,9 @@ package agent
 import (
 	"fmt"
 	"os"
-	"path/filepath"
 
+	"github.com/hollis-labs/go-agent-launch/agentlaunch"
 	"github.com/hollis-labs/go-providers/provider"
-	"github.com/hollis-labs/nanite/internal/fsutil"
 	"github.com/hollis-labs/nanite/internal/store"
 )
 
@@ -20,7 +19,40 @@ import (
 //	└── .mcp.json
 //
 // Spawn cwd: <bootDir>; project access via codex's --cd flag.
+//
+// CW-20260515-0025: the bootdir file-set is declared as an
+// agentlaunch.InjectionSpec and written via plantInjectionSpec — see
+// bootdir_plant.go.
 type codexLayout struct{}
+
+// codexAgentsMD renders the AGENTS.md system-prompt body. Codex's
+// system-prompt-bearing slot is AGENTS.md (the cwd-loaded file analogous
+// to claude's CLAUDE.md). The body shape comes from go-providers'
+// provider.AgentsMD renderer.
+func codexAgentsMD(params SetupParams) string {
+	return provider.AgentsMD(provider.AgentInfo{
+		Name:         params.AgentProfile.Name,
+		Role:         "", // codex flow doesn't carry a separate role taxonomy yet
+		Description:  params.AgentProfile.Description,
+		SystemPrompt: params.SystemPrompt,
+	}, "")
+}
+
+// codexInjectionSpec assembles the full codex bootdir file-set as a
+// shared agentlaunch.InjectionSpec.
+func codexInjectionSpec(params SetupParams) (agentlaunch.InjectionSpec, error) {
+	native := []agentlaunch.NativeFile{
+		nativeFileRaw("AGENTS.md", codexAgentsMD(params), 0o644),
+		bootMDNativeFile(params),
+	}
+	native = append(native, sandboxNativeFiles(params)...)
+
+	overlay, err := mcpOverlay(params)
+	if err != nil {
+		return agentlaunch.InjectionSpec{}, err
+	}
+	return agentlaunch.InjectionSpec{NativeFiles: native, BootDirOverlay: overlay}, nil
+}
 
 func (l codexLayout) Setup(params SetupParams) (string, error) {
 	bootDir, err := makeBootDir("codex", params)
@@ -35,51 +67,28 @@ func (l codexLayout) Setup(params SetupParams) (string, error) {
 }
 
 // Populate writes the codex boot-dir shape into bootDir. Idempotent.
-func (l codexLayout) Populate(bootDir string, params SetupParams) error {
+func (codexLayout) Populate(bootDir string, params SetupParams) error {
 	if params.AgentProfile == nil {
 		return fmt.Errorf("agent: codexLayout.Populate: AgentProfile is required")
 	}
-
-	if err := l.RegenerateSystemPromptSlot(bootDir, params); err != nil {
+	spec, err := codexInjectionSpec(params)
+	if err != nil {
 		return err
 	}
-
-	if err := plantBootMD(bootDir, params); err != nil {
-		return err
-	}
-
-	if err := plantSandboxFiles(bootDir, params); err != nil {
-		return err
-	}
-
-	if err := writeMCPJSON(bootDir, params.MCPConfig, params.SessionID); err != nil {
-		return err
-	}
-
-	return nil
+	return plantInjectionSpec(bootDir, spec)
 }
 
 // RegenerateSystemPromptSlot rewrites only AGENTS.md, leaving the rest
-// of the sandbox dir intact. Codex's system-prompt-bearing slot is
-// AGENTS.md (the cwd-loaded file analogous to claude's CLAUDE.md).
+// of the sandbox dir intact.
 func (codexLayout) RegenerateSystemPromptSlot(bootDir string, params SetupParams) error {
 	if params.AgentProfile == nil {
 		return fmt.Errorf("agent: codexLayout.RegenerateSystemPromptSlot: AgentProfile is required")
 	}
-	agentsBody := provider.AgentsMD(provider.AgentInfo{
-		Name:         params.AgentProfile.Name,
-		Role:         "", // codex flow doesn't carry a separate role taxonomy yet
-		Description:  params.AgentProfile.Description,
-		SystemPrompt: params.SystemPrompt,
-	}, "")
-	if err := fsutil.AtomicWriteFile(
-		filepath.Join(bootDir, "AGENTS.md"),
-		[]byte(agentsBody),
-		0o644,
-	); err != nil {
-		return fmt.Errorf("agent: regenerate AGENTS.md: %w", err)
-	}
-	return nil
+	return plantInjectionSpec(bootDir, agentlaunch.InjectionSpec{
+		NativeFiles: []agentlaunch.NativeFile{
+			nativeFileRaw("AGENTS.md", codexAgentsMD(params), 0o644),
+		},
+	})
 }
 
 func (codexLayout) AmendEnv(base map[string]string, _ string) map[string]string { return base }

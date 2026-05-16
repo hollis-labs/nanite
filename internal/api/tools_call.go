@@ -1,10 +1,20 @@
 package api
 
 import (
+	"log/slog"
+	"net"
 	"net/http"
+	"time"
 
 	"github.com/hollis-labs/nanite/internal/mcp"
 )
+
+// selfToolCallWriteDeadline extends the per-response write deadline for the
+// tool-call route. A forwarded self-tool can be a synchronous dispatch
+// (task_execute) that legitimately runs up to the subagent default of 300s,
+// well past the server-global 60s WriteTimeout — without this the response
+// write fails after the connection has already been timed out.
+const selfToolCallWriteDeadline = 10 * time.Minute
 
 // selfToolCallRequest is the body POST /api/tools/call accepts.
 type selfToolCallRequest struct {
@@ -31,12 +41,27 @@ type selfToolCallRequest struct {
 // live. dev_* filesystem tools stay subprocess-local and never reach this
 // endpoint.
 //
-// The whole API listens on loopback, so this endpoint inherits the same
-// trust boundary as every other route — no separate auth is added.
+// Trust boundary: the endpoint runs arbitrary self-tools, so it is
+// restricted to loopback callers — the `nanite mcp` subprocess always
+// reaches it via http://127.0.0.1. The HTTP server can bind non-loopback
+// interfaces, so this in-handler check is the actual boundary. The route is
+// also exempt from basicAuthMiddleware: the loopback gate is the trust
+// boundary for this internal-only path, so the subprocess needs no
+// credentials planted into its boot dir.
 func (a *API) handleSelfToolCall(w http.ResponseWriter, r *http.Request) {
+	if !isLoopbackRequest(r) {
+		a.errorResp(w, http.StatusForbidden, "tool-call endpoint is loopback-only")
+		return
+	}
 	if a.selfTools == nil {
 		a.errorResp(w, http.StatusServiceUnavailable, "self-tools transport not available")
 		return
+	}
+
+	// Extend the write deadline before dispatch — CallTool can block for a
+	// long-running tool, and the response is written only after it returns.
+	if err := http.NewResponseController(w).SetWriteDeadline(time.Now().Add(selfToolCallWriteDeadline)); err != nil {
+		slog.Warn("tools/call: could not extend write deadline", "err", err)
 	}
 
 	var req selfToolCallRequest
@@ -60,4 +85,16 @@ func (a *API) handleSelfToolCall(w http.ResponseWriter, r *http.Request) {
 	// return 200 and let the caller surface the error content. Only a
 	// transport failure above yields a non-200.
 	a.jsonResp(w, http.StatusOK, result)
+}
+
+// isLoopbackRequest reports whether the request's TCP peer is a loopback
+// address. The HTTP server speaks plain TCP with no proxy in front, so
+// r.RemoteAddr is the real peer.
+func isLoopbackRequest(r *http.Request) bool {
+	host, _, err := net.SplitHostPort(r.RemoteAddr)
+	if err != nil {
+		host = r.RemoteAddr
+	}
+	ip := net.ParseIP(host)
+	return ip != nil && ip.IsLoopback()
 }

@@ -43,9 +43,28 @@ func postToolCall(t *testing.T, a *API, body any) *httptest.ResponseRecorder {
 		t.Fatalf("marshal body: %v", err)
 	}
 	req := httptest.NewRequest(http.MethodPost, "/api/tools/call", bytes.NewReader(raw))
+	// The endpoint is loopback-only; httptest.NewRequest defaults RemoteAddr
+	// to a non-loopback test address, so pin it to loopback here.
+	req.RemoteAddr = "127.0.0.1:54321"
 	rec := httptest.NewRecorder()
 	a.handleSelfToolCall(rec, req)
 	return rec
+}
+
+// TestHandleSelfToolCall_RejectsNonLoopback pins that a non-loopback caller
+// is refused — the endpoint runs arbitrary self-tools and is internal-only.
+func TestHandleSelfToolCall_RejectsNonLoopback(t *testing.T) {
+	a, s := newToolCallTestAPI(t)
+	a.SetSelfTools(mcp.NewSelfToolsTransport(s))
+
+	req := httptest.NewRequest(http.MethodPost, "/api/tools/call", bytes.NewReader([]byte(`{"name":"todo_create"}`)))
+	req.RemoteAddr = "203.0.113.7:40000" // non-loopback
+	rec := httptest.NewRecorder()
+	a.handleSelfToolCall(rec, req)
+
+	if rec.Code != http.StatusForbidden {
+		t.Errorf("status = %d, want 403 for a non-loopback caller", rec.Code)
+	}
 }
 
 // TestHandleSelfToolCall_Unavailable pins that the endpoint 503s when no

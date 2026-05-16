@@ -185,7 +185,16 @@ func bootMDNativeFile(params SetupParams) agentlaunch.NativeFile {
 // (BinaryPath required when DBPath is set) so a misconfigured boot fails
 // fast rather than planting a broken descriptor.
 func mcpOverlay(params SetupParams) (map[string]string, error) {
-	body, err := renderMCPJSON(params.MCPConfig, params.SessionID)
+	cfg := params.MCPConfig
+	// The live-harness self-tools proxy (NANITE_API_URL) is a chat-agent
+	// affordance only. Subagent / background / one-shot launches follow the
+	// standard boot and dispatch self-tools locally against their own store,
+	// so strip the API URL for them — renderMCPJSON then omits the env.
+	// ModeResume is kept proxied: it re-boots a crash-recovered chat agent.
+	if cfg.APIBaseURL != "" && params.Mode != ModeLongLived && params.Mode != ModeResume {
+		cfg.APIBaseURL = ""
+	}
+	body, err := renderMCPJSON(cfg, params.SessionID)
 	if err != nil {
 		return nil, err
 	}

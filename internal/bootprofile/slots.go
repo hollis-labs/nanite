@@ -73,16 +73,30 @@ func Substitute(src string, vars Vars) (string, error) {
 //
 // All file paths are resolved relative to catalogRoot when not absolute
 // and not ~-prefixed, matching Tether's bootgen behavior.
+//
+// CW-20260515-0024: the mechanical file/inline IO is delegated to the
+// shared go-agent-context resolvers via agentcontext_adapter.go. The
+// `text` slot routes through the shared inline resolver and a
+// single-file `static` slot routes through the shared static_file
+// resolver. Nanite-specific behavior — strict `{{var}}` substitution,
+// the `### filename` directory concat format, and the deferred
+// Requirement model — stays in this file.
 func resolveSlot(name string, src SlotSource, catalogRoot string, vars Vars) (string, *Requirement, error) {
 	switch src.Type {
 	case "text":
-		content, err := Substitute(src.Content, vars)
+		// Mechanical inline-content resolution via the shared resolver;
+		// Nanite's strict {{var}} substitution is applied on top.
+		raw, err := resolveInlineViaShared(name, src.Content)
+		if err != nil {
+			return "", nil, fmt.Errorf("slot %q: %w", name, err)
+		}
+		content, err := Substitute(raw, vars)
 		if err != nil {
 			return "", nil, fmt.Errorf("slot %q: %w", name, err)
 		}
 		return content, nil, nil
 	case "static":
-		content, err := resolveStatic(src, catalogRoot)
+		content, err := resolveStatic(name, src, catalogRoot)
 		if err != nil {
 			return "", nil, fmt.Errorf("slot %q: %w", name, err)
 		}
@@ -110,7 +124,16 @@ func resolveSlot(name string, src SlotSource, catalogRoot string, vars Vars) (st
 // compatibility — glob defaults to "*.md", Limit caps the match count,
 // and matches are concatenated with the "### filename" + "---" pattern
 // so the resulting markdown is readable when injected into a slot.
-func resolveStatic(src SlotSource, catalogRoot string) (string, error) {
+//
+// CW-20260515-0024: the single-file branch delegates the os.ReadFile +
+// tilde/relative path resolution to the shared go-agent-context
+// static_file resolver. Nanite still owns the empty-catalog-root guard
+// (a stricter, reproducibility-driven rule the shared resolver does not
+// enforce) and the directory-glob `### filename` concat format (an
+// app-specific layout pinned by Nanite tests and downstream prompt
+// rendering — the shared static_dir resolver emits a plain "\n\n" join
+// without the per-file headings).
+func resolveStatic(slotName string, src SlotSource, catalogRoot string) (string, error) {
 	if src.Path == "" {
 		return "", fmt.Errorf("static slot missing 'path' field")
 	}
@@ -123,11 +146,12 @@ func resolveStatic(src SlotSource, catalogRoot string) (string, error) {
 		return "", fmt.Errorf("stat %s: %w", path, err)
 	}
 	if !info.IsDir() {
-		b, err := os.ReadFile(path) //nolint:gosec // catalog-sourced path
-		if err != nil {
-			return "", fmt.Errorf("read %s: %w", path, err)
-		}
-		return string(b), nil
+		// Single-file read via the shared static_file resolver. The
+		// path is already absolute here (resolvePath expanded ~ and
+		// rebased relatives onto catalogRoot), so the shared resolver's
+		// own path handling is a no-op pass-through and the read
+		// semantics are identical to the previous os.ReadFile.
+		return resolveStaticFileViaShared(slotName, path, catalogRoot)
 	}
 	glob := src.Glob
 	if glob == "" {

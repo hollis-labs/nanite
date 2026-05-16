@@ -16,8 +16,10 @@ require (
 require (
 	github.com/anthropics/anthropic-sdk-go v1.41.0
 	github.com/google/jsonschema-go v0.4.2
-	github.com/hollis-labs/go-agent-sessions v0.9.2
+	github.com/hollis-labs/go-agent-sessions v0.9.4
 	github.com/hollis-labs/go-agentmux-client v0.1.0
+	github.com/hollis-labs/go-agent-context v0.1.0
+	github.com/hollis-labs/go-agent-launch v0.1.0
 	github.com/hollis-labs/go-envelopes v0.1.0
 	github.com/hollis-labs/go-modelsdev v0.0.0-00010101000000-000000000000
 	github.com/hollis-labs/go-otel v0.0.2

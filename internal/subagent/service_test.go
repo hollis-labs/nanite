@@ -916,3 +916,58 @@ func TestSpawn_ProviderOverride_PropagatesIntoRun(t *testing.T) {
 		t.Errorf("Run.Provider = %q, want empty (no override)", run2.Provider)
 	}
 }
+
+// emptyEnvelopeRunner mimics a runner whose child emitted no structured
+// envelope: drainCapture / drainBootSession seed the envelope buffer with
+// "{}" and BootRunner's PTY surface never overwrites it. The runner still
+// produces a meaningful Summary. Regression fixture for CW-20260516-0060.
+type emptyEnvelopeRunner struct{ summary string }
+
+func (r emptyEnvelopeRunner) Run(_ context.Context, _ *Run) (*Result, error) {
+	return &Result{Summary: r.summary, ResultJSON: "{}"}, nil
+}
+
+// TestSpawn_EmptyEnvelope_PersistsSummaryNotEmptyObject is the CW-20260516-0060
+// regression: when the runner hands back ResultJSON == "{}" (no structured
+// envelope), the persisted run row must capture the summary in a structured
+// object rather than storing a bare {}.
+func TestSpawn_EmptyEnvelope_PersistsSummaryNotEmptyObject(t *testing.T) {
+	db, _ := newTestDB(t)
+	svc := NewService(db, emptyEnvelopeRunner{summary: "did the work"}, &stubPoster{}, nil, stubSettings{})
+
+	runID, err := svc.Spawn(context.Background(), SpawnRequest{
+		ParentSessionID: "sess-1",
+		ParentAgentID:   "primary-agent",
+		Role:            "file-backend",
+		Prompt:          "do the work",
+		Mode:            ModeSync,
+	})
+	if err != nil {
+		t.Fatalf("spawn: %v", err)
+	}
+	run, err := svc.Status(context.Background(), runID)
+	if err != nil {
+		t.Fatalf("status: %v", err)
+	}
+	if run.ResultJSON == "" || run.ResultJSON == "{}" {
+		t.Fatalf("ResultJSON = %q, want a non-empty structured object", run.ResultJSON)
+	}
+	var decoded struct {
+		Summary string `json:"summary"`
+	}
+	if err := json.Unmarshal([]byte(run.ResultJSON), &decoded); err != nil {
+		t.Fatalf("ResultJSON is not valid JSON (%q): %v", run.ResultJSON, err)
+	}
+	if decoded.Summary != "did the work" {
+		t.Errorf("ResultJSON summary = %q, want %q", decoded.Summary, "did the work")
+	}
+}
+
+// TestStructuredResultJSON_PreservesRealEnvelope verifies the fallback does
+// not clobber a genuine structured payload the runner produced.
+func TestStructuredResultJSON_PreservesRealEnvelope(t *testing.T) {
+	got := structuredResultJSON(&Result{Summary: "ignored", ResultJSON: `{"ok":true}`})
+	if got != `{"ok":true}` {
+		t.Errorf("structuredResultJSON = %q, want real envelope preserved", got)
+	}
+}

@@ -4,7 +4,6 @@ package service
 // boot-profile decode + compile + stash pipeline.
 
 import (
-	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -54,16 +53,38 @@ args:
   - --add-dir
   - /tmp/test-spec-workdir
 `)
+	// The deferred profile pairs with deferred-launch (no workdir) so
+	// its cmd slot runs in the process cwd — which always exists — and
+	// the slot resolves cleanly through the shared go-agent-context
+	// CmdResolver (CW-20260515-0026).
 	mustWrite("boot-profiles/deferred.yaml",
 		`id: deferred
 display_name: "Deferred"
-launch: test-launch
+launch: deferred-launch
 identity:
   lineage_alias: deferred
 slots:
   recap:
     type: cmd
-    run: "git log -1"
+    run: "printf deferred-recap-body"
+`)
+	mustWrite("launches/deferred-launch.yaml",
+		`id: deferred-launch
+provider: pty-claude
+ui_label: "Deferred (Claude PTY)"
+`)
+	// badcmd uses a cmd slot that exits non-zero — exercises the
+	// resolver-failure path through resolveBootProfile.
+	mustWrite("boot-profiles/badcmd.yaml",
+		`id: badcmd
+display_name: "Bad Cmd"
+launch: deferred-launch
+identity:
+  lineage_alias: badcmd
+slots:
+  recap:
+    type: cmd
+    run: "exit 7"
 `)
 	return root
 }
@@ -186,14 +207,13 @@ func TestResolveBootProfile_StashesSpec(t *testing.T) {
 	}
 }
 
-// TestResolveBootProfile_RequirementsStub is the explicit
-// "scope" pin: a profile that uses a deferred slot source
-// (cmd/http/role_summary/skill_index) surfaces a clean
-// ErrRequirementUnsupported error rather than a half-rendered spec.
-// CW-20260514-0048 deliberately defers real resolvers; a future
-// ticket can replace this expectation when it lands an
-// implementation.
-func TestResolveBootProfile_RequirementsStub(t *testing.T) {
+// TestResolveBootProfile_DeferredRequirementResolves pins the
+// CW-20260515-0026 behavior: a profile that uses a deferred slot
+// source (cmd here) now resolves the slot through the shared
+// go-agent-context provider rather than erroring with
+// ErrRequirementUnsupported. The resolved cmd stdout lands in the
+// compiled spec's slot map and the Requirement list is drained.
+func TestResolveBootProfile_DeferredRequirementResolves(t *testing.T) {
 	root := writeCatalogForResolveTest(t)
 	reg, _ := bootprofile.NewRegistry(root)
 	if reg == nil {
@@ -204,18 +224,44 @@ func TestResolveBootProfile_RequirementsStub(t *testing.T) {
 	_, spec, err := s.resolveBootProfile("sess",
 		"bootprofile:deferred",
 		&store.Session{}, &store.AgentProfile{Slug: "x"})
+	if err != nil {
+		t.Fatalf("resolveBootProfile(deferred) err = %v, want nil", err)
+	}
+	if spec == nil {
+		t.Fatal("spec should be non-nil after requirement resolution")
+	}
+	if len(spec.Requirements) != 0 {
+		t.Errorf("Requirements not drained: %+v", spec.Requirements)
+	}
+	if got := spec.Slots["recap"]; got != "deferred-recap-body" {
+		t.Errorf("recap slot = %q, want %q", got, "deferred-recap-body")
+	}
+	if !strings.Contains(spec.BootPrompt, "deferred-recap-body") {
+		t.Errorf("BootPrompt missing resolved cmd output: %q", spec.BootPrompt)
+	}
+}
+
+// TestResolveBootProfile_DeferredRequirementFailureSurfaces pins that
+// a resolver-level failure (a cmd that exits non-zero) surfaces as a
+// pointed error naming the slot, and the spec is nil — a half-resolved
+// boot prompt is worse than a clean stop.
+func TestResolveBootProfile_DeferredRequirementFailureSurfaces(t *testing.T) {
+	root := writeCatalogForResolveTest(t)
+	reg, _ := bootprofile.NewRegistry(root)
+	if reg == nil {
+		t.Fatal("NewRegistry returned nil")
+	}
+	s := &chatServiceImpl{bootProfiles: reg}
+
+	_, spec, err := s.resolveBootProfile("sess",
+		"bootprofile:badcmd",
+		&store.Session{}, &store.AgentProfile{Slug: "x"})
 	if err == nil {
-		t.Fatal("expected requirement-stub error for cmd source")
+		t.Fatal("expected resolver-failure error for failing cmd source")
 	}
-	if !errors.Is(err, bootprofile.ErrRequirementUnsupported) {
-		t.Fatalf("err = %v, want ErrRequirementUnsupported", err)
-	}
-	// Error message must name the slot, profile id, source type so
-	// the operator gets a pointed diagnostic.
-	msg := err.Error()
-	for _, want := range []string{"deferred", "recap", "cmd"} {
-		if !strings.Contains(msg, want) {
-			t.Errorf("err message %q missing %q", msg, want)
+	for _, want := range []string{"badcmd", "recap"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("err message %q missing %q", err.Error(), want)
 		}
 	}
 	if spec != nil {

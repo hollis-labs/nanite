@@ -98,7 +98,16 @@ type SlotSource struct {
 	Glob string `yaml:"glob,omitempty"`
 
 	// Limit caps the number of files when Glob matches several.
+	// For type="skill_index" it caps the number of skills emitted.
 	Limit int `yaml:"limit,omitempty"`
+
+	// Roots is the optional explicit discovery-root list for
+	// type="skill_index". Each entry may be absolute or ~-prefixed.
+	// Empty falls back to the launch-time resolver's default skill
+	// roots (project .nanite/skills, ~/.nanite/skills, project
+	// .claude/skills). Surfaced on the Requirement so the shared
+	// skill_index resolver can walk them.
+	Roots []string `yaml:"roots,omitempty"`
 
 	// Cmd source fields (surface only — not executed by the compiler).
 	Run     string `yaml:"run,omitempty"`

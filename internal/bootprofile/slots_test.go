@@ -3,6 +3,7 @@ package bootprofile
 import (
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 )
@@ -170,7 +171,7 @@ func TestResolveSlot_DeferredTypesProduceRequirements(t *testing.T) {
 			if req == nil {
 				t.Fatal("expected a Requirement")
 			}
-			if *req != tc.expect {
+			if !reflect.DeepEqual(*req, tc.expect) {
 				t.Fatalf("got %+v, want %+v", *req, tc.expect)
 			}
 		})

@@ -231,6 +231,9 @@ func requirementFromSlot(name string, src SlotSource) *Requirement {
 		r.Path = src.Path
 	case "skill_index":
 		r.Limit = src.Limit
+		if len(src.Roots) > 0 {
+			r.Roots = append([]string(nil), src.Roots...)
+		}
 	}
 	return r
 }

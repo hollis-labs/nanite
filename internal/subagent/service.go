@@ -627,10 +627,7 @@ func (svc *Service) execute(ctx context.Context, run *Run, parentAgentID string)
 	} else {
 		run.Status = StatusCompleted
 		if result != nil {
-			run.ResultJSON = result.ResultJSON
-			if run.ResultJSON == "" {
-				run.ResultJSON = "{}"
-			}
+			run.ResultJSON = structuredResultJSON(result)
 		}
 	}
 	run.CompletedAt = now
@@ -694,6 +691,29 @@ func (svc *Service) execute(ctx context.Context, run *Run, parentAgentID string)
 	}); err != nil {
 		slog.Warn("subagent: reply delivery", "err", err, "run_id", run.ID)
 	}
+}
+
+// structuredResultJSON resolves the JSON persisted to subagent_runs.result_json.
+//
+// CW-20260516-0060: a runner whose child emits no structured envelope hands
+// back Result.ResultJSON == "{}" (drainCapture/drainBootSession seed the
+// envelope buffer with "{}" and only overwrite it on a plugin_envelope /
+// stream_end payload — and BootRunner's PTY surface emits none today). The
+// old code persisted that "{}" verbatim, so the run row carried no trace of
+// the subagent's actual output. When the runner produced a real structured
+// payload it is used verbatim; otherwise the summary is wrapped into a
+// structured object so the row is never an empty {}.
+func structuredResultJSON(result *Result) string {
+	if rj := result.ResultJSON; rj != "" && rj != "{}" {
+		return rj
+	}
+	payload, err := json.Marshal(struct {
+		Summary string `json:"summary"`
+	}{Summary: result.Summary})
+	if err != nil {
+		return "{}"
+	}
+	return string(payload)
 }
 
 // insertRun persists a freshly-created run.

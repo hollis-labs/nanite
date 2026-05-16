@@ -605,3 +605,67 @@ func parseEnvelopeFromResult(t *testing.T, res *ToolResult) subagent.ResultEnvel
 	}
 	return env
 }
+
+// TestCallSpawnSubagent_ParentAgentIDFromCallerProfile is the
+// CW-20260516-0058 regression: when the LLM omits the parent_agent_id
+// tool arg (the common case), the spawned run must inherit the caller
+// agent id stamped on ctx by WithCallerProfile. Without it, ParentAgentID
+// is empty and subagent.Service.execute skips reply delivery entirely for
+// async/api modes.
+func TestCallSpawnSubagent_ParentAgentIDFromCallerProfile(t *testing.T) {
+	st := newSubagentTestTransport(t, subagent.EchoRunner{})
+	ctx := WithCallerProfile(context.Background(), "ws-1", "agent-from-ctx")
+
+	res, err := st.callSpawnSubagent(ctx, map[string]any{
+		"parent_session_id": "sess-1",
+		// parent_agent_id intentionally omitted — the model rarely supplies it.
+		"role":   "researcher",
+		"prompt": "look at things",
+		"mode":   subagent.ModeAsync,
+	})
+	if err != nil {
+		t.Fatalf("callSpawnSubagent: %v", err)
+	}
+	env := parseEnvelopeFromResult(t, res)
+	if env.Result == nil || env.Result.RunID == "" {
+		t.Fatalf("expected a run_id, got envelope %+v", env)
+	}
+	run, err := st.Subagent.Status(context.Background(), env.Result.RunID)
+	if err != nil {
+		t.Fatalf("Status: %v", err)
+	}
+	if run.ParentAgentID != "agent-from-ctx" {
+		t.Errorf("ParentAgentID = %q, want %q (caller-profile fallback)", run.ParentAgentID, "agent-from-ctx")
+	}
+	waitForRunTerminal(t, st, env.Result.RunID)
+}
+
+// TestCallSpawnSubagent_ExplicitParentAgentIDOverridesCtx confirms the
+// explicit parent_agent_id arg still wins over the ctx fallback.
+func TestCallSpawnSubagent_ExplicitParentAgentIDOverridesCtx(t *testing.T) {
+	st := newSubagentTestTransport(t, subagent.EchoRunner{})
+	ctx := WithCallerProfile(context.Background(), "ws-1", "agent-from-ctx")
+
+	res, err := st.callSpawnSubagent(ctx, map[string]any{
+		"parent_session_id": "sess-1",
+		"parent_agent_id":   "explicit-agent",
+		"role":              "researcher",
+		"prompt":            "look at things",
+		"mode":              subagent.ModeAsync,
+	})
+	if err != nil {
+		t.Fatalf("callSpawnSubagent: %v", err)
+	}
+	env := parseEnvelopeFromResult(t, res)
+	if env.Result == nil || env.Result.RunID == "" {
+		t.Fatalf("expected a run_id, got envelope %+v", env)
+	}
+	run, err := st.Subagent.Status(context.Background(), env.Result.RunID)
+	if err != nil {
+		t.Fatalf("Status: %v", err)
+	}
+	if run.ParentAgentID != "explicit-agent" {
+		t.Errorf("ParentAgentID = %q, want %q (explicit arg override)", run.ParentAgentID, "explicit-agent")
+	}
+	waitForRunTerminal(t, st, env.Result.RunID)
+}

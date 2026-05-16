@@ -8,7 +8,7 @@ import (
 	"fmt"
 	"log/slog"
 
-	conduitMemory "github.com/hollis-labs/vanta-conduit/memory"
+	conduitMemory "github.com/hollis-labs/tesseract/memory"
 )
 
 // Memory represents a memory item to store or recalled from Vanta Conduit.

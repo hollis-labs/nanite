@@ -1,6 +1,6 @@
 module github.com/hollis-labs/nanite
 
-go 1.26.1
+go 1.26.2
 
 require (
 	github.com/creack/pty v1.1.24 // indirect
@@ -16,17 +16,16 @@ require (
 require (
 	github.com/anthropics/anthropic-sdk-go v1.41.0
 	github.com/google/jsonschema-go v0.4.2
-	github.com/hollis-labs/go-agent-sessions v0.9.4
-	github.com/hollis-labs/go-agentmux-client v0.1.0
 	github.com/hollis-labs/go-agent-context v0.1.0
 	github.com/hollis-labs/go-agent-launch v0.1.0
-	github.com/hollis-labs/go-envelopes v0.1.0
-	github.com/hollis-labs/go-modelsdev v0.0.0-00010101000000-000000000000
-	github.com/hollis-labs/go-otel v0.0.2
+	github.com/hollis-labs/go-agent-sessions v0.9.4
+	github.com/hollis-labs/go-agentmux-client v0.3.0
+	github.com/hollis-labs/go-envelopes v0.1.1
+	github.com/hollis-labs/go-modelsdev v0.2.0
+	github.com/hollis-labs/go-otel v0.1.0
 	github.com/hollis-labs/go-providers v0.17.1
-	github.com/hollis-labs/go-sandbox v0.2.0
-	github.com/hollis-labs/go-toolbroker v0.1.0
-	github.com/hollis-labs/vanta-conduit v0.6.1
+	github.com/hollis-labs/go-sandbox v0.2.1
+	github.com/hollis-labs/go-toolbroker v0.2.0
 	github.com/modelcontextprotocol/go-sdk v1.5.0
 	github.com/oklog/ulid/v2 v2.1.1
 	github.com/openai/openai-go v1.12.0
@@ -39,8 +38,9 @@ require (
 	github.com/cenkalti/backoff/v5 v5.0.3 // indirect
 	github.com/dlclark/regexp2 v1.11.4 // indirect
 	github.com/grpc-ecosystem/grpc-gateway/v2 v2.28.0 // indirect
+	github.com/hollis-labs/go-messaging v0.2.1 // indirect
 	github.com/hollis-labs/go-queue v0.1.2 // indirect
-	github.com/hollis-labs/go-runner v0.4.0 // indirect
+	github.com/hollis-labs/go-runner v0.5.0 // indirect
 	github.com/invopop/jsonschema v0.13.0 // indirect
 	github.com/mailru/easyjson v0.7.7 // indirect
 	github.com/segmentio/asm v1.1.3 // indirect
@@ -83,9 +83,9 @@ require (
 	go.opentelemetry.io/auto/sdk v1.2.1 // indirect
 	go.opentelemetry.io/otel/metric v1.43.0 // indirect
 	go.opentelemetry.io/otel/sdk v1.41.0
-	golang.org/x/net v0.52.0 // indirect
-	golang.org/x/sys v0.43.0 // indirect
-	golang.org/x/text v0.35.0
+	golang.org/x/net v0.54.0 // indirect
+	golang.org/x/sys v0.44.0 // indirect
+	golang.org/x/text v0.37.0
 	google.golang.org/protobuf v1.36.11 // indirect
 	modernc.org/libc v1.72.0 // indirect
 	modernc.org/mathutil v1.7.1 // indirect
@@ -97,9 +97,10 @@ replace github.com/hollis-labs/go-modelsdev => ../../libs/go-modelsdev
 replace github.com/chrispian/agent-mux => /Users/chrispian/dev/hollis-labs/apps/agent-mux
 
 require (
-	github.com/hollis-labs/go-agent-broker v0.2.0
-	github.com/hollis-labs/go-embed-contracts v0.1.0
-	github.com/hollis-labs/go-llm-contracts v0.1.0
-	github.com/hollis-labs/go-llm-types v0.1.0
+	github.com/hollis-labs/go-agent-broker v0.2.1
+	github.com/hollis-labs/go-embed-contracts v0.1.1
+	github.com/hollis-labs/go-llm-contracts v0.2.0
+	github.com/hollis-labs/go-llm-types v0.2.0
 	github.com/hollis-labs/go-sqlite v0.1.0
+	github.com/hollis-labs/tesseract v0.7.0
 )

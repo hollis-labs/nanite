@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 
+	"github.com/hollis-labs/nanite/internal/mcp"
 	"github.com/hollis-labs/nanite/internal/service"
 )
 
@@ -14,12 +15,24 @@ type API struct {
 	// to service.DefaultEmbedderSelectDeps. Tests override via
 	// SetEmbedderSelectDeps.
 	embedderSelectDeps service.EmbedderSelectDeps
+	// selfTools is the fully-wired in-process self-tools transport. Set via
+	// SetSelfTools from main.go. Backs POST /api/tools/call, which a
+	// CLI-launched chat agent's `nanite mcp` subprocess forwards to so it
+	// dispatches through the live harness. nil = the endpoint 503s.
+	selfTools *mcp.SelfToolsTransport
 }
 
 // New creates a new API instance from a service container.
 func New(svc *service.Container) *API {
 	deps := service.DefaultEmbedderSelectDeps()
 	return &API{Services: svc, embedderSelectDeps: deps}
+}
+
+// SetSelfTools wires the fully-wired in-process self-tools transport that
+// backs POST /api/tools/call. Called once from main.go after the transport's
+// post-construction dependencies are installed.
+func (a *API) SetSelfTools(st *mcp.SelfToolsTransport) {
+	a.selfTools = st
 }
 
 // SetEmbedderSelectDeps overrides the injected embedder-selection deps.
@@ -175,6 +188,7 @@ func (a *API) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("PUT /api/tools/load-preferences", a.handleUpdateToolLoadPreferences)
 	mux.HandleFunc("POST /api/tools/select", a.handleSelectTools)
 	mux.HandleFunc("POST /api/tools/refresh", a.handleRefreshTools)
+	mux.HandleFunc("POST /api/tools/call", a.handleSelfToolCall)
 	mux.HandleFunc("GET /api/broker/decisions", a.handleListBrokerDecisions)
 	mux.HandleFunc("GET /api/agents/{id}/tools", a.handleListAgentTools)
 

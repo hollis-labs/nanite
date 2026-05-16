@@ -18,7 +18,7 @@ import (
 // (skills, agents, workflows, envelope helpers) and developer filesystem
 // tools to external processes like Claude CLI via the MCP stdio protocol.
 type Server struct {
-	self      *condmcp.SelfToolsTransport
+	self      toolTransport
 	dev       *condmcp.DevToolsTransport
 	sessionID string
 }
@@ -31,13 +31,28 @@ type Server struct {
 // confine `dev_read(artifact_id=...)` lookups against Context Broker
 // stash pointers (SP-20260512-0008 W2C, CW-20260512-0110). Pass "" to
 // disable artifact resolution from this stdio server (path-only mode).
-func New(s *store.Store, sessionID string, allowedPaths []string, artifactsRoot string) *Server {
+//
+// apiURL, when non-empty, is the base URL of a live nanite API server. The
+// `self` transport then forwards self-tool calls there (POST
+// /api/tools/call) so a CLI-launched chat agent dispatches through the
+// fully-wired in-process harness instead of this subprocess's bare store.
+// Empty keeps the prior local-dispatch behavior. The `dev` filesystem
+// tools always run locally regardless.
+func New(s *store.Store, sessionID string, allowedPaths []string, artifactsRoot, apiURL string) *Server {
 	dev := condmcp.NewDevToolsTransport(allowedPaths)
 	if artifactsRoot != "" {
 		dev = dev.WithArtifactResolver(condmcp.NewStoreArtifactResolver(s), artifactsRoot)
 	}
+
+	var self toolTransport
+	if apiURL != "" {
+		self = newSelfToolProxy(s, apiURL, sessionID)
+	} else {
+		self = condmcp.NewSelfToolsTransport(s)
+	}
+
 	return &Server{
-		self:      condmcp.NewSelfToolsTransport(s),
+		self:      self,
 		dev:       dev,
 		sessionID: sessionID,
 	}

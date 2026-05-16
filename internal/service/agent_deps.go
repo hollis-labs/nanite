@@ -40,6 +40,12 @@ type AgentDepsConfig struct {
 	DBPath          string
 	SandboxBaseProf sandbox.Profile
 
+	// APIBaseURL is the base URL of the live nanite API server, threaded
+	// into the boot dir's .mcp.json so a CLI-launched chat agent's
+	// `nanite mcp` subprocess forwards self-tool calls back to the
+	// running harness. Empty = subprocess runs self-tools locally.
+	APIBaseURL string
+
 	// MCP, when non-nil, wires the recovery broker's MCP-transport
 	// remediation adapter (recovery.MCPControl). The adapter forwards
 	// RestartTransport to mcp.Manager.RestartStdioTransports so the broker
@@ -178,6 +184,7 @@ func BuildAgentDependencies(cfg AgentDepsConfig) (AgentDepsBundle, error) {
 			BinaryPath: binPath,
 			DBPath:     dbPath,
 			ServerID:   brand.ID,
+			APIBaseURL: cfg.APIBaseURL,
 		},
 		WorkspacesRoot:     workspacesRoot,
 		Telemetry:          telemetry,

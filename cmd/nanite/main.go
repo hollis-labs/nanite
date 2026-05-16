@@ -325,6 +325,7 @@ func cmdServe(args []string) {
 		ToolClient:      tb,
 		Plugins:         pluginHost,
 		AppConfig:       appCfg,
+		APIBaseURL:      fmt.Sprintf("http://127.0.0.1:%d", *port),
 		Activity:        activity,
 		OutputFilter:    outputFilters,
 		UtilityProvider: utilityProvider,
@@ -454,6 +455,10 @@ func cmdServe(args []string) {
 
 	// Create API layer.
 	a := api.New(container)
+	// Back POST /api/tools/call with the fully-wired self-tools transport
+	// so a CLI-launched chat agent's `nanite mcp` subprocess can forward
+	// self-tool calls into this running harness.
+	a.SetSelfTools(selfTools)
 
 	// Register existing custom actions as slash commands.
 	if actions, err := s.ListCustomActions(); err == nil {
@@ -1046,7 +1051,12 @@ func cmdMCPServe(args []string) {
 	if artifactsRoot == "" {
 		artifactsRoot = "data/artifacts"
 	}
-	srv := mcpserver.New(s, *sessionID, allowedPaths, artifactsRoot)
+	// NANITE_API_URL is planted into the boot dir's .mcp.json by a
+	// CLI-launch composition root. When present, self-tool calls forward
+	// to that live harness instead of dispatching against this
+	// subprocess's bare store (Option A — see internal/api/tools_call.go).
+	apiURL := os.Getenv("NANITE_API_URL")
+	srv := mcpserver.New(s, *sessionID, allowedPaths, artifactsRoot, apiURL)
 	if err := srv.Run(ctx); err != nil {
 		fmt.Fprintf(os.Stderr, "%s mcp: %v\n", brand.BinaryName, err)
 		os.Exit(1)

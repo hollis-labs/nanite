@@ -52,6 +52,26 @@ func resolveBootPrompt(profile *store.AgentProfile, opts Options) string {
 	return composeSystemPrompt(opts.Role, profile, opts.Mode)
 }
 
+// ResolveSystemPrompt is the exported entry point for recomputing a
+// session's boot prompt OUTSIDE agent.Boot — it applies the same
+// resolution resolveBootPrompt does (override wins verbatim; otherwise
+// role/profile/mode-composed), but takes the inputs loose rather than
+// bundled in an Options.
+//
+// CW-20260516-0007 round 1: the chat service's mid-session CLAUDE.md
+// regeneration (regenerateBootDirSlots) uses this so a slot refresh
+// re-plants the SAME system prompt the initial Boot planted — role and
+// mode framing AND a bootprofile LaunchSpec's BootPromptOverride
+// included. Previously the regen path wrote only the agent profile's
+// bare SystemPrompt, silently thinning a bootprofile session's
+// operating instructions on the first mid-run slot change.
+func ResolveSystemPrompt(role string, profile *store.AgentProfile, mode Mode, bootPromptOverride string) string {
+	if bootPromptOverride != "" {
+		return bootPromptOverride
+	}
+	return composeSystemPrompt(role, profile, mode)
+}
+
 // roleFraming returns the role-specific prefix for the system prompt. Empty
 // for unrecognized roles (the agent profile's SystemPrompt covers the
 // default case).

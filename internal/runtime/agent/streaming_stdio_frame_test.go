@@ -158,3 +158,44 @@ func TestComposeBootdirParams_SystemPromptHonorsOverride(t *testing.T) {
 		}
 	})
 }
+
+// TestResolveSystemPrompt pins the exported helper the chat service's
+// mid-session CLAUDE.md regeneration uses (CW-20260516-0007 round 1).
+// It must apply the same override-wins-else-compose rule as the
+// unexported resolveBootPrompt — otherwise a slot regen would re-plant
+// a different prompt than Boot did.
+func TestResolveSystemPrompt(t *testing.T) {
+	profile := &store.AgentProfile{
+		ID:           "p1",
+		Name:         "Test",
+		SystemPrompt: "profile-level system prompt",
+	}
+
+	t.Run("override wins verbatim", func(t *testing.T) {
+		got := ResolveSystemPrompt("executor", profile, ModeLongLived, "CATALOG OVERRIDE")
+		if got != "CATALOG OVERRIDE" {
+			t.Errorf("ResolveSystemPrompt = %q, want the verbatim override", got)
+		}
+	})
+
+	t.Run("empty override composes role + profile", func(t *testing.T) {
+		got := ResolveSystemPrompt("executor", profile, ModeLongLived, "")
+		if !strings.Contains(got, "profile-level system prompt") {
+			t.Errorf("ResolveSystemPrompt = %q, want it to include the profile system prompt", got)
+		}
+		if !strings.Contains(got, "executor") {
+			t.Errorf("ResolveSystemPrompt = %q, want it to include the executor role framing", got)
+		}
+	})
+
+	t.Run("parity with resolveBootPrompt", func(t *testing.T) {
+		// The exported helper and the unexported Options-based hook must
+		// produce identical output for the same inputs.
+		opts := Options{Role: "reviewer", Mode: ModeLongLived}
+		viaOpts := resolveBootPrompt(profile, opts)
+		viaExport := ResolveSystemPrompt("reviewer", profile, ModeLongLived, "")
+		if viaOpts != viaExport {
+			t.Errorf("export drift:\n resolveBootPrompt   = %q\n ResolveSystemPrompt = %q", viaOpts, viaExport)
+		}
+	})
+}

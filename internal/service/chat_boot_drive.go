@@ -136,7 +136,7 @@ func (s *chatServiceImpl) driveBootSession(
 		// 3. Refresh the boot dir when System / Agent / Mode / Rules
 		// slots have shifted. UserContext changes per turn by design and
 		// flows via SendInput; we don't regen CLAUDE.md for it.
-		if err := s.regenerateBootDirSlots(sess.BootDir, agent, mode); err != nil {
+		if err := s.regenerateBootDirSlots(sessionID, sess.BootDir, agent, mode); err != nil {
 			slog.Warn("driveBootSession: slot regen failed",
 				"session_id", sessionID, "err", err)
 		} else {
@@ -342,7 +342,7 @@ func (s *chatServiceImpl) observeSessionForRecovery(sess *runtimeagent.Session, 
 // regenerateBootDirSlots rewrites the boot dir's CLAUDE.md and
 // .sandbox/agent-context.md atomically. Called when slotsChangedFor returns
 // true mid-session. Phase 4c.5.
-func (s *chatServiceImpl) regenerateBootDirSlots(bootDir string, agent *store.AgentProfile, mode *store.AgentMode) error {
+func (s *chatServiceImpl) regenerateBootDirSlots(sessionID, bootDir string, agent *store.AgentProfile, mode *store.AgentMode) error {
 	if bootDir == "" {
 		return errors.New("regenerateBootDirSlots: empty bootDir")
 	}
@@ -350,14 +350,22 @@ func (s *chatServiceImpl) regenerateBootDirSlots(bootDir string, agent *store.Ag
 		return errors.New("regenerateBootDirSlots: nil agent profile")
 	}
 	claudePath := filepath.Join(bootDir, "CLAUDE.md")
-	// CW-20260516-0007: the regenerated CLAUDE.md carries the agent
-	// profile's system prompt so claude (which auto-loads CLAUDE.md)
-	// keeps its operating instructions across a mid-session slot
-	// refresh. The runtime-side role/mode framing applied at initial
-	// Boot (resolveBootPrompt) is not recomposed here — regen is a
-	// lighter-weight refresh and the chat service does not carry the
-	// runtime Options; agent.SystemPrompt is the authoritative base.
-	if err := fsutil.AtomicWriteFile(claudePath, []byte(runtimeagent.BuildCLAUDEMD(agent.Name, agent.Description, agent.SystemPrompt)), 0o644); err != nil {
+	// CW-20260516-0007 round 1: recompute the SAME resolved boot prompt
+	// the initial Boot planted, so a mid-session slot refresh doesn't
+	// silently thin a bootprofile session's operating instructions.
+	// resolveBootPrompt's inputs: role (from agent/mode), the runtime
+	// Mode (ModeLongLived for every chat session — the only caller),
+	// and a bootprofile LaunchSpec's BootPrompt as the override. The
+	// LaunchSpec is the per-session stash keyed by sessionID; nil for
+	// non-bootprofile sessions, where ResolveSystemPrompt falls back to
+	// the role/mode-composed prompt.
+	role := bootSessionRole(agent, mode)
+	bootPromptOverride := ""
+	if ls := s.launchSpecFor(sessionID); ls != nil {
+		bootPromptOverride = ls.BootPrompt
+	}
+	systemPrompt := runtimeagent.ResolveSystemPrompt(role, agent, runtimeagent.ModeLongLived, bootPromptOverride)
+	if err := fsutil.AtomicWriteFile(claudePath, []byte(runtimeagent.BuildCLAUDEMD(agent.Name, agent.Description, systemPrompt)), 0o644); err != nil {
 		return fmt.Errorf("regen CLAUDE.md: %w", err)
 	}
 	contextPath := filepath.Join(bootDir, ".sandbox", "agent-context.md")

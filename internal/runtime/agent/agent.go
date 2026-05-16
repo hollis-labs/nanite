@@ -460,10 +460,11 @@ func Boot(ctx context.Context, deps *Dependencies, opts Options) (*Session, erro
 	}
 
 	bootPrompt := layout.BootPrompt(profile, opts)
+	bootMode := layout.BootMode()
 	firstTurnPayload := []byte(firstTurn)
 
 	// CW-20260516-0007: the streaming-stdio runtime treats the child's
-	// stdin strictly as NDJSON. Two adjustments for that runtime:
+	// stdin strictly as NDJSON. Three adjustments for that runtime:
 	//
 	//  1. Suppress the raw boot-prompt-on-stdin write. claudeLayout's
 	//     BootMode is "stdin" (correct for the PTY TUI), which makes the
@@ -473,10 +474,22 @@ func Boot(ctx context.Context, deps *Dependencies, opts Options) (*Session, erro
 	//     composeBootdirParams → resolveBootPrompt → claudeLayout), which
 	//     claude auto-discovers from its cwd — so dropping the stdin
 	//     write loses nothing.
-	//  2. NDJSON-frame FirstTurnPayload so AutoFireFirstTurn modes
+	//  2. Force BootMode to "" so the boot-prompt-on-stdin path is
+	//     suppressed structurally, not just by the empty BootPrompt.
+	//     Today agentsessions gates the spawn-time write on
+	//     `BootMode=="stdin" && BootPrompt!=""`, so an empty BootPrompt
+	//     already skips it — but relying on that internal AND-guard is
+	//     fragile (round-1 review): a future agentsessions change could
+	//     write an empty "\n" line, itself invalid NDJSON. Clearing
+	//     BootMode removes the ambiguity. The Start path's
+	//     AutoFireFirstTurn check `!(BootMode=="stdin" && BootPrompt!="")`
+	//     still evaluates true with BootMode="", so FirstTurnPayload
+	//     delivery is unaffected.
+	//  3. NDJSON-frame FirstTurnPayload so AutoFireFirstTurn modes
 	//     (one-shot / subagent / background) deliver a parseable kickoff.
 	if shouldUseStreamingStdio(providerName, opts.Mode) {
 		bootPrompt = ""
+		bootMode = ""
 		if framed, ferr := streamingStdioUserFrame(firstTurn); ferr == nil {
 			firstTurnPayload = framed
 		}
@@ -487,7 +500,7 @@ func Boot(ctx context.Context, deps *Dependencies, opts Options) (*Session, erro
 		WorkspaceDir:      ws.Root,
 		LogPath:           ws.LogPath,
 		BootPrompt:        bootPrompt,
-		BootMode:          layout.BootMode(),
+		BootMode:          bootMode,
 		Env:               envMapToSlice(envMap),
 		Profile:           sandboxProfile,
 		SessionIDPreset:   sessionIDPreset,

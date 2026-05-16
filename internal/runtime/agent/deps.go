@@ -186,6 +186,15 @@ type MCPConfig struct {
 	// ServerID identifies the planted MCP server entry. Defaults to
 	// brand.ID when empty.
 	ServerID string
+
+	// APIBaseURL, when set, is the base URL of the live nanite API server
+	// (e.g. "http://127.0.0.1:8090"). It is planted into the boot dir's
+	// .mcp.json as the NANITE_API_URL env var so the spawned `nanite mcp`
+	// subprocess forwards self-tool calls to the running harness instead
+	// of dispatching them against its own bare store. Empty leaves the
+	// subprocess in local-only mode (store-backed self-tools, no live
+	// services).
+	APIBaseURL string
 }
 
 // Telemetry is the observability sink. The production composition root

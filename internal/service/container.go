@@ -205,6 +205,13 @@ type ContainerConfig struct {
 	Plugins    *plugin.Host
 	AppConfig  *config.AppConfig
 
+	// APIBaseURL is the base URL the local HTTP API server listens on
+	// (e.g. "http://127.0.0.1:8090"). Threaded into the agent-runtime
+	// boot dir so a CLI-launched chat agent's `nanite mcp` subprocess
+	// forwards self-tool calls back to this running harness. Empty leaves
+	// CLI launches in local-only self-tool mode.
+	APIBaseURL string
+
 	// Optional subsystems — nil-safe.
 	Activity     *chat.ActivityEmitter
 	OutputFilter *filter.Chain
@@ -774,6 +781,7 @@ func NewContainer(cfg ContainerConfig) (*Container, error) {
 		DBPath:      cfg.Store.DBPath(),
 		MCP:         cfg.MCP,
 		Providers:   cfg.Providers,
+		APIBaseURL:  cfg.APIBaseURL,
 	})
 	if agentDepsErr != nil {
 		stopCatalog()

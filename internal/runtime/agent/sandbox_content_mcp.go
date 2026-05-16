@@ -35,12 +35,21 @@ func renderMCPJSON(cfg MCPConfig, sessionID string) (string, error) {
 		args = append(args, "--session", sessionID)
 	}
 
+	// When the composition root knows the live API server's address, plant
+	// it as NANITE_API_URL so the subprocess forwards self-tool calls to
+	// the running harness (Option A — CLI-launch chat agents reach the
+	// fully-wired in-process self-tools instead of a bare store).
+	env := map[string]any{}
+	if cfg.APIBaseURL != "" {
+		env["NANITE_API_URL"] = cfg.APIBaseURL
+	}
+
 	mcpConfig := map[string]any{
 		"mcpServers": map[string]any{
 			serverID: map[string]any{
 				"command": cfg.BinaryPath,
 				"args":    args,
-				"env":     map[string]any{},
+				"env":     env,
 			},
 		},
 	}

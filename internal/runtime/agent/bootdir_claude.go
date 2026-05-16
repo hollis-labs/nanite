@@ -43,7 +43,7 @@ const claudeSettingsJSONStub = `{
 func claudeInjectionSpec(params SetupParams) (agentlaunch.InjectionSpec, error) {
 	native := []agentlaunch.NativeFile{
 		nativeFileRaw("CLAUDE.md",
-			BuildCLAUDEMD(params.AgentProfile.Name, params.AgentProfile.Description), 0o644),
+			BuildCLAUDEMD(params.AgentProfile.Name, params.AgentProfile.Description, params.SystemPrompt), 0o644),
 		bootMDNativeFile(params),
 		nativeFileRaw(".claude/settings.json", claudeSettingsJSONStub, 0o644),
 	}
@@ -96,7 +96,7 @@ func (claudeLayout) RegenerateSystemPromptSlot(bootDir string, params SetupParam
 	return plantInjectionSpec(bootDir, agentlaunch.InjectionSpec{
 		NativeFiles: []agentlaunch.NativeFile{
 			nativeFileRaw("CLAUDE.md",
-				BuildCLAUDEMD(params.AgentProfile.Name, params.AgentProfile.Description), 0o644),
+				BuildCLAUDEMD(params.AgentProfile.Name, params.AgentProfile.Description, params.SystemPrompt), 0o644),
 		},
 	})
 }

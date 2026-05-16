@@ -218,7 +218,7 @@ func TestRegenerateBootDirSlots_WritesAtomically(t *testing.T) {
 	agent := &store.AgentProfile{Name: "test-agent", Description: "for tests"}
 	mode := &store.AgentMode{Name: "code", PromptAddendum: "be precise"}
 
-	if err := s.regenerateBootDirSlots(bootDir, agent, mode); err != nil {
+	if err := s.regenerateBootDirSlots("sess-regen", bootDir, agent, mode); err != nil {
 		t.Fatalf("regenerateBootDirSlots: %v", err)
 	}
 
@@ -244,7 +244,7 @@ func TestRegenerateBootDirSlots_WritesAtomically(t *testing.T) {
 // the working directory.
 func TestRegenerateBootDirSlots_RejectsEmptyBootDir(t *testing.T) {
 	s := &chatServiceImpl{}
-	if err := s.regenerateBootDirSlots("", &store.AgentProfile{Name: "x"}, nil); err == nil {
+	if err := s.regenerateBootDirSlots("sess-x", "", &store.AgentProfile{Name: "x"}, nil); err == nil {
 		t.Fatal("expected error for empty bootDir")
 	}
 }
@@ -258,7 +258,7 @@ func TestRegenerateBootDirSlots_RejectsNilAgent(t *testing.T) {
 	if err := os.MkdirAll(filepath.Join(bootDir, ".sandbox"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.regenerateBootDirSlots(bootDir, nil, nil); err == nil {
+	if err := s.regenerateBootDirSlots("sess-x", bootDir, nil, nil); err == nil {
 		t.Fatal("expected error for nil agent")
 	}
 }

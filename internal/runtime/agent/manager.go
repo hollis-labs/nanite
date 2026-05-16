@@ -10,9 +10,24 @@ import (
 // SendInput delivers a user message into the live runtime. ModeLongLived
 // chat sessions call this per turn; ModeOneShot / ModeSubagent /
 // ModeBackground typically deliver via AutoFireFirstTurn during Boot.
+//
+// CW-20260516-0007: for streaming-stdio sessions (claude long-lived and
+// every other Claude mode) the payload is NDJSON-framed as a claude
+// "Streaming Input Mode" user message before it reaches the runtime.
+// The runtime writes SendInput bytes to the child's stdin verbatim
+// (+'\n'); claude parses each line as JSON, so raw text would crash
+// its input parser (c207/c208). Non-streaming runtimes (PTY, codex/
+// opencode subprocess-per-turn) receive the payload unchanged.
 func (s *Session) SendInput(payload []byte) error {
 	if s == nil || s.deps == nil || s.deps.SessionsManager == nil {
 		return errors.New("agent.Session.SendInput: session not initialized")
+	}
+	if shouldUseStreamingStdio(s.Provider, s.Mode) {
+		framed, err := streamingStdioUserFrame(string(payload))
+		if err != nil {
+			return fmt.Errorf("agent.Session.SendInput: frame streaming-stdio payload: %w", err)
+		}
+		payload = framed
 	}
 	return s.deps.SessionsManager.SendInput(s.ID, payload)
 }

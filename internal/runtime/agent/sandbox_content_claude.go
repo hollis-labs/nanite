@@ -9,15 +9,30 @@ import (
 )
 
 // BuildCLAUDEMD returns the CLAUDE.md body planted in claude-provider boot
-// dirs and refreshed on slot change in Phase 4c. Mirrors the existing
-// adapter-claude implementation verbatim; the duplicate at
-// internal/plugin/builtin/adapter-claude/plugin.go is removed in Phase 4c.
-func BuildCLAUDEMD(agentName, agentDescription string) string {
+// dirs and refreshed on slot change in Phase 4c.
+//
+// CW-20260516-0007: systemPrompt carries the resolved boot prompt (role
+// identity + mode framing + profile system prompt, or a bootprofile's
+// authored prompt). claude auto-discovers CLAUDE.md from its cwd (the
+// boot dir) on every non-`--bare` invocation, so embedding the system
+// prompt here is how the streaming-stdio runtime delivers it — that
+// runtime reads stdin strictly as NDJSON, so the old boot-prompt-on-
+// stdin path (fine for the PTY TUI) corrupted claude's input parser
+// and crashed the session (c207/c208). Empty systemPrompt omits the
+// section, preserving the prior CLAUDE.md shape for any caller that
+// doesn't have a prompt on hand.
+func BuildCLAUDEMD(agentName, agentDescription, systemPrompt string) string {
 	var b strings.Builder
 
 	fmt.Fprintf(&b, "# Nanite Agent — %s\n\n", agentName)
 	if agentDescription != "" {
 		fmt.Fprintf(&b, "%s\n\n", agentDescription)
+	}
+
+	if sp := strings.TrimSpace(systemPrompt); sp != "" {
+		b.WriteString("## Operating Instructions\n\n")
+		b.WriteString(sp)
+		b.WriteString("\n\n")
 	}
 
 	b.WriteString(claudeMDBody)

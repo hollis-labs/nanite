@@ -80,6 +80,10 @@ function formatTimestamp(iso: string): string {
 }
 
 export function ReportCard({ data, onSendMessage }: ReportCardProps) {
+  // `metrics` is required by the type, but a partially-loaded envelope
+  // (e.g. a failed pointer resolve) can arrive without it — normalize so
+  // the card degrades gracefully instead of crashing the renderer.
+  const metrics = data.metrics ?? []
   const hasActions = data.actions && data.actions.length > 0
 
   return (
@@ -90,9 +94,9 @@ export function ReportCard({ data, onSendMessage }: ReportCardProps) {
         meta={data.generated_at ? `Generated ${formatTimestamp(data.generated_at)}` : undefined}
       />
 
-      {data.metrics.length > 0 && (
+      {metrics.length > 0 && (
         <div className="grid grid-cols-2 divide-x divide-y divide-border-subtle">
-          {data.metrics.map((metric, i) => (
+          {metrics.map((metric, i) => (
             <MetricTile key={`metric-${i}`} metric={metric} />
           ))}
         </div>

@@ -35,19 +35,22 @@ function formatTimestamp(iso: string): string {
 }
 
 export function TimelineCard({ data }: TimelineCardProps) {
+  // `events` is required by the type, but a partially-loaded envelope can
+  // arrive without it — normalize so the card degrades gracefully.
+  const events = data.events ?? []
   return (
     <Envelope>
       <EnvelopeHeader
         icon={Clock}
         label="Timeline"
-        meta={`${data.events.length} event${data.events.length === 1 ? '' : 's'}`}
+        meta={`${events.length} event${events.length === 1 ? '' : 's'}`}
       />
       <EnvelopeBody title={data.title}>
         <div className="relative">
-          {data.events.map((event, i) => {
+          {events.map((event, i) => {
             const status = event.status || 'pending'
             const dotColor = STATUS_DOT[status] ?? STATUS_DOT.pending
-            const isLast = i === data.events.length - 1
+            const isLast = i === events.length - 1
 
             return (
               <div key={`event-${i}`} className="relative flex gap-3 pb-4 last:pb-0">

@@ -32,7 +32,13 @@ export function TableCard({ data }: TableCardProps) {
     }
   }
 
-  const sortedRows = [...data.rows]
+  // `columns`/`rows` are required by the type, but a partially-loaded
+  // envelope can arrive without them — normalize so the card degrades
+  // gracefully instead of crashing the renderer.
+  const columns = data.columns ?? []
+  const rows = data.rows ?? []
+
+  const sortedRows = [...rows]
   if (sortKey) {
     sortedRows.sort((a, b) => {
       const av = a[sortKey]
@@ -53,13 +59,13 @@ export function TableCard({ data }: TableCardProps) {
       <EnvelopeHeader
         icon={TableIcon}
         label={data.title || 'Table'}
-        meta={`${data.rows.length} row${data.rows.length === 1 ? '' : 's'}`}
+        meta={`${rows.length} row${rows.length === 1 ? '' : 's'}`}
       />
       <div className="overflow-x-auto">
         <table className="w-full text-[13px]">
           <thead>
             <tr className="border-b border-border-subtle">
-              {data.columns.map((col) => (
+              {columns.map((col) => (
                 <th
                   key={col.key}
                   className="px-4 py-2 text-left font-mono text-[10px] font-semibold uppercase tracking-wide text-fg-muted"
@@ -97,7 +103,7 @@ export function TableCard({ data }: TableCardProps) {
                 key={`row-${ri}`}
                 className="border-b border-border-subtle last:border-0"
               >
-                {data.columns.map((col) => (
+                {columns.map((col) => (
                   <td key={col.key} className="px-4 py-2 text-fg-secondary">
                     {String(row[col.key] ?? '')}
                   </td>

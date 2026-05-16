@@ -129,6 +129,57 @@ func TestResolveRequirements_RoleSummaryResolves(t *testing.T) {
 	}
 }
 
+// TestResolveResolverWorkdir pins the workdir resolution fix (Copilot
+// round-1 #5): the cmd / relative-file resolvers must not be handed a
+// launch workdir that does not exist yet — agent.Boot creates it later,
+// but requirement resolution runs before Boot.
+func TestResolveResolverWorkdir(t *testing.T) {
+	existing := t.TempDir()
+
+	// An existing directory is used verbatim — no regression.
+	if got, err := resolveResolverWorkdir(existing); err != nil || got != existing {
+		t.Fatalf("resolveResolverWorkdir(existing) = (%q, %v), want (%q, nil)", got, err, existing)
+	}
+
+	// Empty workdir maps to "" (resolver default = process CWD).
+	if got, err := resolveResolverWorkdir(""); err != nil || got != "" {
+		t.Fatalf("resolveResolverWorkdir(\"\") = (%q, %v), want (\"\", nil)", got, err)
+	}
+
+	// A not-yet-created workdir falls back to "" rather than a missing
+	// path — agent.Boot will create the real one before the agent spawns.
+	missing := filepath.Join(existing, "not", "created", "yet")
+	if got, err := resolveResolverWorkdir(missing); err != nil || got != "" {
+		t.Fatalf("resolveResolverWorkdir(missing) = (%q, %v), want (\"\", nil)", got, err)
+	}
+}
+
+// TestResolveRequirements_CmdResolvesWithMissingWorkdir proves a cmd
+// Requirement still resolves when spec.Workdir points at a directory
+// that does not exist yet (the common case for catalog profiles whose
+// launch workdir agent.Boot creates later). Pre-fix the resolver would
+// have run `exec` in a missing CWD and failed; post-fix it falls back to
+// the process CWD.
+func TestResolveRequirements_CmdResolvesWithMissingWorkdir(t *testing.T) {
+	missingWorkdir := filepath.Join(t.TempDir(), "boot-creates-this-later")
+	spec := &LaunchSpec{
+		ProfileID: "p",
+		UILabel:   "P",
+		Identity:  Identity{LineageAlias: "p"},
+		Workdir:   missingWorkdir,
+		Slots:     map[string]string{},
+		Requirements: []Requirement{
+			{Slot: "recap", Type: "cmd", Run: "printf 'workdir-ok'"},
+		},
+	}
+	if err := ResolveRequirements(spec); err != nil {
+		t.Fatalf("ResolveRequirements(missing workdir) = %v, want nil", err)
+	}
+	if got := spec.Slots["recap"]; got != "workdir-ok" {
+		t.Fatalf("recap slot = %q, want %q", got, "workdir-ok")
+	}
+}
+
 // TestResolveRequirements_SkillIndexResolves pins the skill_index
 // kind: discovered skills under a caller-supplied root are rendered
 // into the slot. The root is an explicit Requirement.Roots entry.

@@ -70,6 +70,49 @@ slots:
 	return root
 }
 
+// writeCmdSentinelCatalog materializes a catalog whose profile carries a
+// deferred `cmd` slot whose command `touch`es a sentinel file. A test
+// can then assert whether requirement resolution ran by checking for the
+// sentinel's existence. withLaunch controls whether the profile is
+// launchable (has a provider) — false makes it prompt-only.
+//
+// Returns the catalog root and the sentinel path the cmd would create.
+func writeCmdSentinelCatalog(t *testing.T, withLaunch bool) (root, sentinel string) {
+	t.Helper()
+	root = t.TempDir()
+	sentinel = filepath.Join(root, "cmd-resolver-ran.sentinel")
+	mustMkdir(t, filepath.Join(root, "boot-profiles"))
+	mustMkdir(t, filepath.Join(root, "launches"))
+
+	launchLine := ""
+	if withLaunch {
+		launchLine = "launch: sentinel-launch\n"
+	}
+	profile := `id: sentinel-profile
+display_name: "Sentinel Profile"
+` + launchLine + `identity:
+  lineage_alias: sentinel-test
+  role: backend
+  project: nanite
+slots:
+  agent:
+    type: cmd
+    run: "touch ` + sentinel + `"
+`
+	mustWrite(t, filepath.Join(root, "boot-profiles", "sentinel-profile.yaml"), profile)
+
+	if withLaunch {
+		launch := `id: sentinel-launch
+provider: claude
+workdir: ` + filepath.Join(root, "work") + `
+ui_label: "Sentinel"
+boot_mode: ""
+`
+		mustWrite(t, filepath.Join(root, "launches", "sentinel-launch.yaml"), launch)
+	}
+	return root, sentinel
+}
+
 func mustMkdir(t *testing.T, dir string) {
 	t.Helper()
 	if err := os.MkdirAll(dir, 0o755); err != nil {
@@ -228,6 +271,50 @@ func TestLaunch_NoAdapters(t *testing.T) {
 	})
 	if err == nil {
 		t.Fatal("Launch: expected error when CLIAdapters is empty")
+	}
+}
+
+// TestPlan_NoProviderPrecheckSkipsResolvers proves the side-effect-free
+// precheck (Copilot round-1 #2): a prompt-only profile carrying a
+// deferred `cmd` slot must be rejected BEFORE the cmd resolver runs, so
+// `nanite launch --dry-run` on a non-launchable profile performs no side
+// effects. The cmd would `touch` a sentinel; the sentinel must NOT exist.
+func TestPlan_NoProviderPrecheckSkipsResolvers(t *testing.T) {
+	root, sentinel := writeCmdSentinelCatalog(t, false /* prompt-only */)
+
+	_, _, err := Plan(context.Background(), Config{
+		CatalogPath: root,
+		Profile:     "sentinel-profile",
+	})
+	if err == nil {
+		t.Fatal("Plan: expected rejection for prompt-only profile, got nil")
+	}
+	if !errors.Is(err, agentlaunch.ErrMissingProviderID) {
+		t.Errorf("Plan error = %v, want wrap of ErrMissingProviderID", err)
+	}
+	if _, statErr := os.Stat(sentinel); statErr == nil {
+		t.Error("cmd resolver ran (sentinel created) — precheck must reject BEFORE deferred resolution")
+	}
+}
+
+// TestLaunch_NoAdaptersPrecheckSkipsResolvers proves the side-effect-free
+// launch precheck (Copilot round-1 #3): Launch must reject a missing
+// CLIAdapters BEFORE Plan runs the deferred cmd/http resolvers. The
+// launchable profile carries a `cmd` slot; with no adapters supplied the
+// sentinel must NOT be created.
+func TestLaunch_NoAdaptersPrecheckSkipsResolvers(t *testing.T) {
+	root, sentinel := writeCmdSentinelCatalog(t, true /* launchable */)
+
+	_, err := Launch(context.Background(), Config{
+		CatalogPath: root,
+		Profile:     "sentinel-profile",
+		// CLIAdapters deliberately empty.
+	})
+	if err == nil {
+		t.Fatal("Launch: expected error when CLIAdapters is empty")
+	}
+	if _, statErr := os.Stat(sentinel); statErr == nil {
+		t.Error("cmd resolver ran (sentinel created) — Launch must reject missing adapters BEFORE Plan/resolution")
 	}
 }
 

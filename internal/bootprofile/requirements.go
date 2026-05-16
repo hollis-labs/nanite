@@ -4,6 +4,11 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
+	"strings"
+
+	"github.com/hollis-labs/nanite/internal/permission"
 )
 
 // ErrRequirementUnsupported is returned by ResolveRequirements when a
@@ -89,7 +94,20 @@ func ResolveRequirementsContext(ctx context.Context, spec *LaunchSpec) error {
 		}
 	}
 
-	resolved, err := assembleRequirements(ctx, spec.Requirements, spec.Workdir)
+	// Resolve the CWD the cmd / relative-file resolvers run in. spec.Workdir
+	// is the profile's *launch* workdir, which agent.Boot expands (leading
+	// "~") and mkdir-p's later — but requirement resolution runs BEFORE
+	// Boot, so a not-yet-created workdir would make cmd resolvers fail
+	// (exec in a missing dir) or relative file resolvers miss. Mirror
+	// agent.Boot's tilde expansion here, then fall back to a valid
+	// existing directory when the expanded workdir does not yet exist so
+	// resolution does not depend on a dir Boot has not created.
+	resolverWorkdir, err := resolveResolverWorkdir(spec.Workdir)
+	if err != nil {
+		return fmt.Errorf("boot profile %q requirement resolution: resolve workdir: %w", spec.ProfileID, err)
+	}
+
+	resolved, err := assembleRequirements(ctx, spec.Requirements, resolverWorkdir)
 	if err != nil {
 		return fmt.Errorf("boot profile %q requirement resolution: %w", spec.ProfileID, err)
 	}
@@ -110,4 +128,53 @@ func ResolveRequirementsContext(ctx context.Context, spec *LaunchSpec) error {
 	spec.Requirements = spec.Requirements[:0]
 	spec.BootPrompt = renderDefaultPrompt(spec)
 	return nil
+}
+
+// resolveResolverWorkdir maps a profile's launch workdir onto a directory
+// the cmd / relative-file requirement resolvers can actually run in.
+//
+// agent.Boot expands a leading "~" and `MkdirAll`s the launch workdir,
+// but requirement resolution happens BEFORE Boot — so a profile whose
+// launch workdir does not exist yet (the common case for catalog
+// profiles that point at a fresh workspace dir Boot creates) cannot be
+// the resolver CWD.
+//
+// Behavior, designed to NOT regress a profile whose workdir already
+// exists:
+//
+//   - empty workdir → "" (the resolvers' own default — process CWD).
+//   - leading "~" → expanded via permission.HomeDir() (HOME-less-safe),
+//     mirroring agent.Boot's expandUserHome.
+//   - expanded path exists + is a directory → used verbatim.
+//   - expanded path does not exist (or is not a directory) → fall back
+//     to "" so the resolvers run in the process CWD rather than a
+//     missing dir. agent.Boot still creates the real workdir before the
+//     agent process spawns; only the pre-Boot resolvers use this
+//     fallback.
+func resolveResolverWorkdir(workdir string) (string, error) {
+	workdir = strings.TrimSpace(workdir)
+	if workdir == "" {
+		return "", nil
+	}
+
+	expanded := workdir
+	if workdir == "~" || strings.HasPrefix(workdir, "~/") {
+		home, err := permission.HomeDir()
+		if err != nil {
+			return "", fmt.Errorf("expand workdir %q: %w", workdir, err)
+		}
+		if workdir == "~" {
+			expanded = home
+		} else {
+			expanded = filepath.Join(home, workdir[2:])
+		}
+	}
+
+	if info, err := os.Stat(expanded); err == nil && info.IsDir() {
+		return expanded, nil
+	}
+	// Not-yet-created (or non-directory) launch workdir: agent.Boot will
+	// create it later. Until then, run the resolvers in the process CWD
+	// rather than a path that does not exist.
+	return "", nil
 }

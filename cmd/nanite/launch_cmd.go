@@ -2,10 +2,12 @@ package main
 
 import (
 	"context"
+	"errors"
 	"flag"
 	"fmt"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 
 	"github.com/hollis-labs/nanite/internal/brand"
@@ -45,14 +47,33 @@ func cmdLaunch(args []string) {
 		fmt.Fprintln(os.Stderr, "\nflags:")
 		fs.PrintDefaults()
 	}
-	if err := fs.Parse(args); err != nil {
-		os.Exit(1)
-	}
-	if fs.NArg() < 1 {
+	// The stdlib flag package stops parsing at the FIRST non-flag arg, so
+	// `nanite launch claude-smoke --dry-run` would leave --dry-run
+	// unparsed and silently do a REAL launch. Split the single positional
+	// <profile-id> out of the arg list first, then parse the remaining
+	// (all-flag) args — this makes flags honored regardless of position
+	// relative to the profile id.
+	profileID, flagArgs, err := splitLaunchArgs(args)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "launch: %v\n", err)
 		fs.Usage()
 		os.Exit(1)
 	}
-	profileID := fs.Arg(0)
+	if err := fs.Parse(flagArgs); err != nil {
+		os.Exit(1)
+	}
+	// fs.Parse consumes only flags; any leftover positional is an
+	// unexpected extra arg (a second profile id, a typo). Reject it
+	// rather than silently ignoring it.
+	if fs.NArg() > 0 {
+		fmt.Fprintf(os.Stderr, "launch: unexpected argument(s): %v\n", fs.Args())
+		fs.Usage()
+		os.Exit(1)
+	}
+	if profileID == "" {
+		fs.Usage()
+		os.Exit(1)
+	}
 
 	// Resolve the catalog root: explicit --catalog flag wins, else the
 	// agentrc config's boot_profile_catalog_path (the same field the
@@ -129,5 +150,68 @@ func cmdLaunch(args []string) {
 	fmt.Printf("  workspace dir: %s\n", res.WorkspaceDir)
 	if *noWait {
 		fmt.Println("  (--no-wait: agent process started; not blocking on exit)")
+	}
+}
+
+// launchValueFlags is the set of `nanite launch` flags that consume a
+// following value when written in the separated form (`--catalog dir`).
+// splitLaunchArgs needs this to skip a flag's value when scanning for
+// the positional <profile-id>. Bool flags (--dry-run, --no-wait, --dev)
+// never consume a following token, so they are deliberately absent.
+var launchValueFlags = map[string]bool{
+	"catalog": true,
+	"db":      true,
+}
+
+// splitLaunchArgs separates the single positional <profile-id> from the
+// flag arguments in a `nanite launch` arg list, so flags are honored no
+// matter where they sit relative to the profile id. Returns the profile
+// id and the flag-only arg slice.
+//
+// It recognizes both `--flag` and `-flag`, and both the `--flag=value`
+// and `--flag value` forms. A bare `--` ends flag scanning; everything
+// after it is positional. More than one positional arg is an error
+// (rejected here so the caller does not silently ignore extras).
+func splitLaunchArgs(args []string) (profileID string, flagArgs []string, err error) {
+	positionals := make([]string, 0, 1)
+	flagArgs = make([]string, 0, len(args))
+	sawDoubleDash := false
+
+	for i := 0; i < len(args); i++ {
+		a := args[i]
+		if sawDoubleDash {
+			positionals = append(positionals, a)
+			continue
+		}
+		if a == "--" {
+			sawDoubleDash = true
+			continue
+		}
+		if a == "-" || !strings.HasPrefix(a, "-") {
+			positionals = append(positionals, a)
+			continue
+		}
+		// It's a flag token. Keep it.
+		flagArgs = append(flagArgs, a)
+		// `--flag=value` carries its own value — nothing to consume.
+		if strings.Contains(a, "=") {
+			continue
+		}
+		// `--flag value`: if this is a value-taking flag, the next token
+		// is its value, not a positional — pull it along.
+		name := strings.TrimLeft(a, "-")
+		if launchValueFlags[name] && i+1 < len(args) {
+			flagArgs = append(flagArgs, args[i+1])
+			i++
+		}
+	}
+
+	switch len(positionals) {
+	case 0:
+		return "", flagArgs, errors.New("missing <profile-id>")
+	case 1:
+		return positionals[0], flagArgs, nil
+	default:
+		return "", flagArgs, fmt.Errorf("expected exactly one <profile-id>, got %v", positionals)
 	}
 }

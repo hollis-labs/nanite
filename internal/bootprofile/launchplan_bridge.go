@@ -148,8 +148,13 @@ type LaunchPlanOptions struct {
 //
 // CW-0027: this is the convergence point. The standalone launcher takes
 // a Nanite-compiled LaunchSpec, calls ToLaunchPlan with its own
-// lifecycle defaults, then drives launcher.Compile / launcher.Prepare /
-// providerplant.Plant on the result.
+// lifecycle defaults, and runs plan.Validate() to exercise the
+// shared-plan contract. It deliberately does NOT drive launcher.Compile /
+// launcher.Prepare / providerplant.Plant on the result — Nanite keeps
+// its own bootdir renderers (agent.Boot plants the bootdir with
+// Nanite-correct content), so the plan is built + validated only, never
+// planted. See the "Relationship to providerplant" section in
+// internal/launcher and docs/standalone-launcher.md for the rationale.
 func (s *LaunchSpec) ToLaunchPlan(opts LaunchPlanOptions) agentlaunch.LaunchPlan {
 	inline := s.ToBootProfileInline()
 	return agentlaunch.LaunchPlan{

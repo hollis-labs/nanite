@@ -51,7 +51,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"os"
 	"path/filepath"
 	"strings"
 
@@ -61,6 +60,7 @@ import (
 
 	"github.com/hollis-labs/nanite/internal/bootprofile"
 	"github.com/hollis-labs/nanite/internal/brand"
+	"github.com/hollis-labs/nanite/internal/permission"
 	runtimeagent "github.com/hollis-labs/nanite/internal/runtime/agent"
 	"github.com/hollis-labs/nanite/internal/store"
 )
@@ -175,7 +175,21 @@ func Plan(ctx context.Context, cfg Config) (*bootprofile.LaunchSpec, agentlaunch
 		return nil, agentlaunch.LaunchPlan{}, fmt.Errorf("launcher: compile profile %q: %w", cfg.Profile, err)
 	}
 
-	// 3. Drain deferred-slot Requirements (cmd / http / role_summary /
+	// 3. Side-effect-free precheck. ResolveRequirementsContext (step 4)
+	//    runs cmd/http deferred resolvers — those execute commands and
+	//    make network calls. A prompt-only profile (no launch provider)
+	//    can never produce a valid LaunchPlan, so reject it HERE, before
+	//    any resolver fires, instead of letting plan.Validate catch it
+	//    after the side effects already ran. The compiler normalizes a
+	//    launchable profile's provider to a non-empty bare name; an empty
+	//    Provider is exactly the agentlaunch.ErrMissingProviderID case.
+	if strings.TrimSpace(spec.Provider) == "" {
+		return nil, agentlaunch.LaunchPlan{}, fmt.Errorf(
+			"launcher: profile %q is prompt-only (no launch provider) and cannot be started: %w",
+			cfg.Profile, agentlaunch.ErrMissingProviderID)
+	}
+
+	// 4. Drain deferred-slot Requirements (cmd / http / role_summary /
 	//    skill_index) BEFORE projecting to a LaunchPlan — an unresolved
 	//    spec has an empty BootPrompt, so the inline boot profile would
 	//    carry an empty boot body (CW-0026 handoff §7).
@@ -183,7 +197,7 @@ func Plan(ctx context.Context, cfg Config) (*bootprofile.LaunchSpec, agentlaunch
 		return nil, agentlaunch.LaunchPlan{}, fmt.Errorf("launcher: resolve requirements: %w", err)
 	}
 
-	// 4. Project onto the shared agentlaunch.LaunchPlan via the CW-0024
+	// 5. Project onto the shared agentlaunch.LaunchPlan via the CW-0024
 	//    bridge and validate it. This is the shared-plan convergence
 	//    gate: matrix provider×runtime lookup, path expansion, and the
 	//    sentinel-error contract all run here. Nanite still owns the
@@ -209,12 +223,18 @@ func Plan(ctx context.Context, cfg Config) (*bootprofile.LaunchSpec, agentlaunch
 // The returned Result carries the session id, the boot/workspace dirs,
 // the validated shared plan, and the compiled spec.
 func Launch(ctx context.Context, cfg Config) (*Result, error) {
+	// Side-effect-free launch precheck. Plan runs deferred cmd/http
+	// resolvers (commands + network calls); validate the cheap launch
+	// prerequisites FIRST so a caller missing adapters fails fast without
+	// triggering catalog-authored side effects. This pairs with the
+	// no-provider precheck inside Plan — both reject before resolution.
+	if len(cfg.CLIAdapters) == 0 {
+		return nil, errors.New("launcher: CLIAdapters is required to start a launch")
+	}
+
 	spec, plan, err := Plan(ctx, cfg)
 	if err != nil {
 		return nil, err
-	}
-	if len(cfg.CLIAdapters) == 0 {
-		return nil, errors.New("launcher: CLIAdapters is required to start a launch")
 	}
 
 	deps, err := buildDeps(cfg)
@@ -383,11 +403,20 @@ func buildDeps(cfg Config) (*runtimeagent.Dependencies, error) {
 	// same so a plain `nanite launch <profile>` (which does not set
 	// Config.WorkspacesRoot) lands its persistent workspace under the
 	// canonical ~/.nanite/workspaces, matching a chat-spawned session.
+	//
+	// Round-1 review: use permission.HomeDir() (not os.UserHomeDir()) so
+	// the fallback still resolves in a HOME-less launchd-style env — bare
+	// os.UserHomeDir() would fail there, leave workspacesRoot empty, and
+	// the launch would die later with a confusing "WorkspacesRoot is
+	// required". A genuine double-probe failure returns an explicit error
+	// here instead.
 	workspacesRoot := cfg.WorkspacesRoot
 	if workspacesRoot == "" {
-		if home, err := os.UserHomeDir(); err == nil {
-			workspacesRoot = filepath.Join(home, "."+brand.ID, "workspaces")
+		home, err := permission.HomeDir()
+		if err != nil {
+			return nil, fmt.Errorf("launcher: resolve default workspaces root: %w", err)
 		}
+		workspacesRoot = filepath.Join(home, "."+brand.ID, "workspaces")
 	}
 
 	deps := &runtimeagent.Dependencies{

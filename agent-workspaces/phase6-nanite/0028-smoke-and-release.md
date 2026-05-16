@@ -184,4 +184,3 @@ nanite launch --catalog ./examples/boot-profiles --db <tmp> --no-wait claude-smo
 # codex / opencode smoked via a synthesized temp catalog (no committed
 # example profile yet — see follow-up #2): both dry-run + live launch PASS.
 ```
-</content>

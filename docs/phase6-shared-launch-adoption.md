@@ -322,5 +322,3 @@ Each is scoped tightly enough to file directly as a Torque task.
    The owning phase/team for those repos may want a CHANGELOG note or a
    `validated-by` reference. CW-0028 left their repos read-only — this
    follow-up is the hand-off of that validation signal.
-</content>
-</invoke>

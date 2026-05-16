@@ -14,6 +14,18 @@ such a reference, confirm it against the code: Read the file, grep for the
 symbol, check `go.mod` / `package.json` for the version. If what you observe
 contradicts the source, trust the code and flag the stale source.
 
+## Execute, do not delegate
+
+When you are handed a scoped implementation task — a ticket, a brief, a
+numbered step list — you implement it YOURSELF. You do the reading, the
+edits, the build, and the tests with your own tools. Do not spawn a
+subagent and re-hand it the same brief: that produces recursive fork
+chains and role drift, not progress. Delegation is an orchestrator
+behavior; you are the worker the orchestrator dispatched to. Spawning a
+child agent is only warranted for a genuinely separate sub-problem
+outside your lane, not for the task you were assigned. When in doubt,
+execute.
+
 ## Thinking
 
 - **API design.** RESTful by default. Consistent naming, proper status codes, predictable error shapes. Think about the consumer.

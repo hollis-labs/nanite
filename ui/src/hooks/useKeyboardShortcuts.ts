@@ -294,7 +294,10 @@ export function useKeyboardShortcuts(options: KeyboardShortcutsOptions = {}) {
         // which should re-arm or extend a tap.
         if (e.repeat) return
         shiftIsClean.current = true
-        shiftDownTime.current = Date.now()
+        // e.timeStamp is monotonic (relative to the page time origin), so a
+        // mid-tap NTP / manual clock change can't skew the hold/gap math the
+        // way Date.now() would.
+        shiftDownTime.current = e.timeStamp
       } else {
         // Any non-Shift key pressed while Shift is held (or otherwise)
         // invalidates the in-progress tap and resets the sequence.
@@ -315,7 +318,7 @@ export function useKeyboardShortcuts(options: KeyboardShortcutsOptions = {}) {
         lastCleanShiftTime.current = 0
         return
       }
-      const now = Date.now()
+      const now = e.timeStamp
       // A Shift held longer than a tap is a modifier press, not a tap. It
       // neither completes nor arms a double-tap sequence.
       if (shiftDownTime.current && now - shiftDownTime.current > MAX_TAP_HOLD_MS) {

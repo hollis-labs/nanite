@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"testing"
 
-	conduit "github.com/hollis-labs/vanta-conduit"
-	conduitMemory "github.com/hollis-labs/vanta-conduit/memory"
+	conduit "github.com/hollis-labs/tesseract"
+	conduitMemory "github.com/hollis-labs/tesseract/memory"
 )
 
 // newTestConduit creates a real embedded Conduit instance backed by a temp dir.

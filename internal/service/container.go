@@ -13,7 +13,7 @@ import (
 
 	agentbroker "github.com/hollis-labs/go-agent-broker/broker"
 	llmtypes "github.com/hollis-labs/go-llm-types"
-	conduit "github.com/hollis-labs/vanta-conduit"
+	conduit "github.com/hollis-labs/tesseract"
 
 	embedcontracts "github.com/hollis-labs/go-embed-contracts"
 	"github.com/hollis-labs/go-modelsdev/modelsdev"

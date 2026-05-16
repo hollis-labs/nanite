@@ -1,6 +1,12 @@
 // Package memory provides persistent memory storage, recall, and extraction
-// backed by an embedded Vanta Conduit memory store. Memories survive session
+// backed by an embedded Tesseract memory store. Memories survive session
 // boundaries and are surfaced during context assembly via the MemorySource.
+//
+// Tesseract is the current name of the store formerly published as
+// github.com/hollis-labs/vanta-conduit (renamed at module v0.7.0). Its
+// Go package is still `package conduit` / `package memory`, so the
+// `conduitMemory` import alias and "Conduit-format" terminology below
+// remain accurate.
 package memory
 
 import (
@@ -8,10 +14,10 @@ import (
 	"fmt"
 	"log/slog"
 
-	conduitMemory "github.com/hollis-labs/vanta-conduit/memory"
+	conduitMemory "github.com/hollis-labs/tesseract/memory"
 )
 
-// Memory represents a memory item to store or recalled from Vanta Conduit.
+// Memory represents a memory item to store or recalled from Tesseract.
 type Memory struct {
 	Namespace  string   `json:"namespace"`
 	MemoryKey  string   `json:"memory_key"`
@@ -40,7 +46,7 @@ type RecallOpts struct {
 	Tags          []string // filter by tags
 }
 
-// Service provides memory storage and recall via an embedded Vanta Conduit memory store.
+// Service provides memory storage and recall via an embedded Tesseract memory store.
 type Service struct {
 	store *conduitMemory.Store
 }
@@ -110,11 +116,12 @@ func (s *Service) Recall(ctx context.Context, opts RecallOpts) ([]Memory, error)
 	case "similarity":
 		ranking = conduitMemory.RankingSimilarity
 	case "relevance":
-		// Vanta v0.4.0 ships RankingRelevance in internal/memory but forgot
-		// to re-export the constant in the public memory package. The string
-		// literal is the stable wire value and Conduit's internal switch
-		// compares by string. Replace with conduitMemory.RankingRelevance
-		// once Vanta publishes the export (BLG-worthy patch release).
+		// Tesseract (through v0.7.0) ships RankingRelevance in
+		// internal/memory but does not re-export the constant in the
+		// public memory package. The string literal is the stable wire
+		// value and the store's internal switch compares by string.
+		// Replace with conduitMemory.RankingRelevance once Tesseract
+		// publishes the export (BLG-worthy patch release).
 		ranking = conduitMemory.Ranking("relevance")
 	case "":
 		// leave as "" — Conduit resolves to relevance (when Query != "") or activation.

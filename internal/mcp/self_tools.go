@@ -754,7 +754,7 @@ func selfToolDefinitions() []Tool {
 				"- **peer_query** (sync, in-session): a single quick question to a peer agent; you wait for the reply inline. Lightest.\n" +
 				"- **subagent_spawn** (sync/async, in-session): a delegated subtask whose lifecycle is tied to this session. Medium.\n" +
 				"- **background_job** (async, NON-session-bound): a heavy or long-running shell command that should not block this session. Reply arrives via the messaging inbox when done — possibly after this turn ends.\n\n" +
-				"**When to use:** Long-running build/test/crawl scripts, batch data processing, or any shell command you'd otherwise abandon partway through because the calling turn ends. Only fires when the P3 ScopeTier classifier says ExecutionPattern=background — pass that pattern explicitly.\n\n" +
+				"**When to use:** Long-running build/test/crawl scripts, batch data processing, or any shell command you'd otherwise abandon partway through because the calling turn ends.\n\n" +
 				"**Required context:** task (the shell command to run), originating_session_id, originating_agent_id. budget is optional (defaults: 30 min wall-clock, 1 MiB output cap); agent is optional and currently unused (no backend reads it).\n\n" +
 				"**Output shape:** {job_id}. The completion envelope (channel=inbox, kind=notification, from_agent_id=background-job) carries a structured JobResult JSON in payload_json with status (succeeded/failed/cancelled), output (captured stdout+stderr), error, started_at, completed_at. Poll message_inbox after the turn or chain via background_status.",
 			InputSchema: map[string]any{

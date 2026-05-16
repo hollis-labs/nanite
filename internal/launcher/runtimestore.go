@@ -1,6 +1,7 @@
 package launcher
 
 import (
+	"encoding/json"
 	"errors"
 	"sync"
 
@@ -124,6 +125,17 @@ func (s *storeRuntimeStore) CreateRuntimeRow(row *runtimeagent.RuntimeRow) error
 	if row.ParentSessionID != nil {
 		parent = *row.ParentSessionID
 	}
+	// Persist the provenance metadata (bootOptionsFor stamps
+	// launch_source = "standalone-launcher"). store.AgentRuntimeRow
+	// carries it as a JSON string; an empty/unmarshalable map falls
+	// through to the store's "{}" default. Without this the standalone
+	// launch_source stamp is silently dropped on store-backed launches.
+	metaJSON := ""
+	if len(row.Meta) > 0 {
+		if b, err := json.Marshal(row.Meta); err == nil {
+			metaJSON = string(b)
+		}
+	}
 	return s.store.CreateAgentRuntimeRow(&store.AgentRuntimeRow{
 		ID:              row.ID,
 		AgentProfile:    row.AgentProfile,
@@ -133,6 +145,7 @@ func (s *storeRuntimeStore) CreateRuntimeRow(row *runtimeagent.RuntimeRow) error
 		State:           row.State,
 		PID:             row.PID,
 		ParentSessionID: parent,
+		MetaJSON:        metaJSON,
 		StartedAt:       row.StartedAt,
 	})
 }

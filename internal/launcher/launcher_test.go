@@ -253,3 +253,35 @@ func TestBootOptionsFor(t *testing.T) {
 		t.Errorf("opts.SessionMeta[launch_source] = %v, want standalone-launcher", opts.SessionMeta["launch_source"])
 	}
 }
+
+// TestBuildDeps_WorkspacesRootFallback verifies buildDeps resolves an
+// empty Config.WorkspacesRoot to ~/.nanite/workspaces — agent.Boot's
+// workspaceCreate hard-errors on an empty root, so the launcher must
+// default it (CW-20260515-0028 live-launch acceptance gap fix).
+func TestBuildDeps_WorkspacesRootFallback(t *testing.T) {
+	deps, err := buildDeps(Config{})
+	if err != nil {
+		t.Fatalf("buildDeps: %v", err)
+	}
+	if deps.WorkspacesRoot == "" {
+		t.Fatal("buildDeps: WorkspacesRoot should be defaulted, not empty")
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		t.Skipf("no home dir: %v", err)
+	}
+	want := filepath.Join(home, ".nanite", "workspaces")
+	if deps.WorkspacesRoot != want {
+		t.Errorf("buildDeps WorkspacesRoot = %q, want %q", deps.WorkspacesRoot, want)
+	}
+
+	// An explicit WorkspacesRoot is honored verbatim.
+	explicit := t.TempDir()
+	deps2, err := buildDeps(Config{WorkspacesRoot: explicit})
+	if err != nil {
+		t.Fatalf("buildDeps (explicit): %v", err)
+	}
+	if deps2.WorkspacesRoot != explicit {
+		t.Errorf("buildDeps WorkspacesRoot = %q, want explicit %q", deps2.WorkspacesRoot, explicit)
+	}
+}

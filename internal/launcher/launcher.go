@@ -51,6 +51,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
 	"path/filepath"
 	"strings"
 
@@ -59,6 +60,7 @@ import (
 	"github.com/hollis-labs/go-providers/provider"
 
 	"github.com/hollis-labs/nanite/internal/bootprofile"
+	"github.com/hollis-labs/nanite/internal/brand"
 	runtimeagent "github.com/hollis-labs/nanite/internal/runtime/agent"
 	"github.com/hollis-labs/nanite/internal/store"
 )
@@ -87,8 +89,11 @@ type Config struct {
 	// cmd/nanite builds these via initProviders.
 	CLIAdapters []provider.CLIAdapter
 
-	// WorkspacesRoot is the persistent workspace base dir. Empty lets
-	// agent.Boot fall back to its default (~/.nanite/workspaces).
+	// WorkspacesRoot is the persistent workspace base dir. Empty makes
+	// buildDeps fall back to the canonical ~/.nanite/workspaces — the
+	// same default service.BuildAgentDependencies applies for chat
+	// sessions. (agent.Boot itself does NOT default; it hard-errors on an
+	// empty root, so the launcher resolves it before handing deps over.)
 	WorkspacesRoot string
 
 	// BinaryPath is the absolute path to the nanite binary, used to
@@ -372,6 +377,19 @@ func buildDeps(cfg Config) (*runtimeagent.Dependencies, error) {
 		return nil
 	}
 
+	// WorkspacesRoot fallback. agent.Boot's workspaceCreate hard-errors on
+	// an empty root — it does NOT default. The chat path resolves this in
+	// service.BuildAgentDependencies; the standalone launcher must do the
+	// same so a plain `nanite launch <profile>` (which does not set
+	// Config.WorkspacesRoot) lands its persistent workspace under the
+	// canonical ~/.nanite/workspaces, matching a chat-spawned session.
+	workspacesRoot := cfg.WorkspacesRoot
+	if workspacesRoot == "" {
+		if home, err := os.UserHomeDir(); err == nil {
+			workspacesRoot = filepath.Join(home, "."+brand.ID, "workspaces")
+		}
+	}
+
 	deps := &runtimeagent.Dependencies{
 		Agents:          &defaultProfiles{store: cfg.Store},
 		SessionsManager: manager,
@@ -381,7 +399,7 @@ func buildDeps(cfg Config) (*runtimeagent.Dependencies, error) {
 			BinaryPath: cfg.BinaryPath,
 			DBPath:     cfg.DBPath,
 		},
-		WorkspacesRoot: cfg.WorkspacesRoot,
+		WorkspacesRoot: workspacesRoot,
 	}
 	return deps, nil
 }

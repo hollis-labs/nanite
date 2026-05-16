@@ -262,21 +262,83 @@ export function useKeyboardShortcuts(options: KeyboardShortcutsOptions = {}) {
     activeSessionId,
   ])
 
-  // Double-shift to open search
-  const lastShiftTime = useRef(0)
+  // Double-shift to open search.
+  //
+  // A tap only counts if ALL of these hold:
+  //  1. "Clean": Shift was pressed+released with NO other key pressed while it
+  //     was held. Shift held for a capital letter (Shift+<letter>) is normal
+  //     typing and must NOT count toward the sequence.
+  //  2. "Brief": Shift was held for less than a tap's worth of time. Holding
+  //     Shift as a modifier (selecting text, capitalizing) is not a tap.
+  //  3. The two taps land within a tight window of each other.
+  // Auto-repeat keydowns are ignored. Together these stop the search overlay
+  // from misfiring during ordinary typing.
+  const lastCleanShiftTime = useRef(0)
+  // Set true on Shift keydown, cleared if any other key is pressed before
+  // Shift is released. Only a still-clean Shift on keyup counts as a tap.
+  const shiftIsClean = useRef(false)
+  // Timestamp of the most recent Shift keydown — used to reject a Shift that
+  // was *held* (a modifier press) rather than briefly *tapped*.
+  const shiftDownTime = useRef(0)
   useEffect(() => {
-    function handleShiftShift(e: KeyboardEvent) {
-      if (e.key !== 'Shift' || e.metaKey || e.ctrlKey || e.altKey) return
-      const now = Date.now()
-      if (now - lastShiftTime.current < 400) {
-        e.preventDefault()
-        openSearch?.()
-        lastShiftTime.current = 0
+    // A deliberate double-tap is snappy: two quick press-releases. Keep the
+    // gap window tight so ordinary Shift use while typing can't bridge it.
+    const DOUBLE_TAP_MS = 250
+    // A genuine tap is brief. Holding Shift longer than this means the user
+    // is using it as a modifier (capitalizing, selecting text), not tapping.
+    const MAX_TAP_HOLD_MS = 250
+
+    function handleKeyDown(e: KeyboardEvent) {
+      if (e.key === 'Shift') {
+        // Ignore auto-repeat: a held Shift fires repeated keydowns, none of
+        // which should re-arm or extend a tap.
+        if (e.repeat) return
+        shiftIsClean.current = true
+        // e.timeStamp is monotonic (relative to the page time origin), so a
+        // mid-tap NTP / manual clock change can't skew the hold/gap math the
+        // way Date.now() would.
+        shiftDownTime.current = e.timeStamp
       } else {
-        lastShiftTime.current = now
+        // Any non-Shift key pressed while Shift is held (or otherwise)
+        // invalidates the in-progress tap and resets the sequence.
+        shiftIsClean.current = false
+        lastCleanShiftTime.current = 0
       }
     }
-    window.addEventListener('keydown', handleShiftShift)
-    return () => window.removeEventListener('keydown', handleShiftShift)
+
+    function handleKeyUp(e: KeyboardEvent) {
+      if (e.key !== 'Shift') return
+      // Only a Shift released without any intervening key counts.
+      if (!shiftIsClean.current) {
+        lastCleanShiftTime.current = 0
+        return
+      }
+      shiftIsClean.current = false
+      if (e.metaKey || e.ctrlKey || e.altKey) {
+        lastCleanShiftTime.current = 0
+        return
+      }
+      const now = e.timeStamp
+      // A Shift held longer than a tap is a modifier press, not a tap. It
+      // neither completes nor arms a double-tap sequence.
+      if (shiftDownTime.current && now - shiftDownTime.current > MAX_TAP_HOLD_MS) {
+        lastCleanShiftTime.current = 0
+        return
+      }
+      if (lastCleanShiftTime.current && now - lastCleanShiftTime.current < DOUBLE_TAP_MS) {
+        e.preventDefault()
+        openSearch?.()
+        lastCleanShiftTime.current = 0
+      } else {
+        lastCleanShiftTime.current = now
+      }
+    }
+
+    window.addEventListener('keydown', handleKeyDown)
+    window.addEventListener('keyup', handleKeyUp)
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown)
+      window.removeEventListener('keyup', handleKeyUp)
+    }
   }, [openSearch])
 }

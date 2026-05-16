@@ -33,6 +33,15 @@ const spawnFanoutCap = 3
 var (
 	ErrNotPending      = errors.New("subagent: run is not in requested state")
 	ErrApprovalExpired = errors.New("subagent: approval has expired")
+
+	// ErrRecursionBlocked is returned by Spawn when the caller is itself
+	// a subagent (has a parent). The recursion-depth cap (CW-20260516-0066)
+	// is a hard cap at depth 1: only a depth-0 progenitor — a root /
+	// user-facing session with NO parent — may spawn session-creating
+	// subagents. A worker that received a task must do the work itself
+	// instead of re-dispatching it to a fresh child. This prevents the
+	// fork-bomb chains observed on 2026-05-16 (session c226).
+	ErrRecursionBlocked = errors.New("subagent recursion blocked: only a root agent may spawn subagents; this agent has a parent — do the work yourself")
 )
 
 // Runner executes the subagent's work and returns a structured
@@ -80,6 +89,17 @@ type EventLogger interface {
 	LogEvent(sessionID, eventType, category, detail, metadata string)
 }
 
+// ParentageChecker reports whether a session is itself a spawned
+// subagent (has a parent). *store.Store satisfies it via
+// IsSubagentSession. Container-injected so the subagent package does
+// not take a hard dep on the full Store.
+//
+// Used by the recursion-depth cap (CW-20260516-0066): a caller that is
+// itself a subagent is rejected before it can spawn another.
+type ParentageChecker interface {
+	IsSubagentSession(sessionID string) (bool, error)
+}
+
 // Service coordinates the spawn → run → complete → reply flow.
 // Safe for concurrent use.
 type Service struct {
@@ -91,6 +111,7 @@ type Service struct {
 	streamSink   SubagentStreamSink
 	trustResolver TrustResolverIface
 	eventLogger  EventLogger
+	parentage    ParentageChecker
 
 	// cancelers holds a per-run context.CancelFunc keyed by runID so
 	// Cancel(runID) can propagate cancellation into the in-flight
@@ -134,6 +155,12 @@ func (svc *Service) SetTrustResolver(r TrustResolverIface) { svc.trustResolver =
 // SetEventLogger wires the audit event logger. Call before any Spawn.
 // When nil, trust_dispatch audit rows are skipped (non-fatal).
 func (svc *Service) SetEventLogger(l EventLogger) { svc.eventLogger = l }
+
+// SetParentageChecker wires the recursion-depth cap's parentage check.
+// Call before any Spawn. When nil, the depth cap is disabled — Spawn
+// behaves as before (no parentage enforcement). Production wiring
+// always sets this so the cap is in force; tests opt in explicitly.
+func (svc *Service) SetParentageChecker(p ParentageChecker) { svc.parentage = p }
 
 // SetStreamSink wires (or unwires) the G-5 status-event sink. Pass nil
 // to disable emission. Safe to call before any Spawn.
@@ -196,6 +223,41 @@ func (svc *Service) Spawn(ctx context.Context, req SpawnRequest) (string, error)
 	default:
 		return "", fmt.Errorf("subagent: invalid mode %q", mode)
 	}
+	// CW-20260516-0066: hard subagent recursion-depth cap. Only a
+	// depth-0 progenitor (a root / user-facing session with no parent)
+	// may spawn a session-creating subagent. If the caller's session is
+	// itself a subagent — i.e. it appears as a child_session_id on some
+	// subagent_runs row — reject the spawn outright. This is checked
+	// BEFORE any DB write so a rejected recursive spawn leaves no
+	// orphaned run row. When no ParentageChecker is wired the cap is
+	// disabled (tests / direct invocations); production always wires it.
+	if svc.parentage != nil {
+		isChild, perr := svc.parentage.IsSubagentSession(req.ParentSessionID)
+		if perr != nil {
+			// Fail closed: if we cannot determine parentage we refuse the
+			// spawn rather than risk an unbounded recursive chain. A spawn
+			// that genuinely needed to happen will be retried by the root.
+			return "", fmt.Errorf("subagent recursion check failed: %w", perr)
+		}
+		if isChild {
+			if svc.eventLogger != nil {
+				meta, _ := json.Marshal(map[string]any{
+					"parent_session_id": req.ParentSessionID,
+					"role":              req.Role,
+					"mode":              mode,
+				})
+				svc.eventLogger.LogEvent(
+					req.ParentSessionID,
+					"subagent_recursion_blocked",
+					"trust",
+					fmt.Sprintf("rejected spawn of role=%s: caller is itself a subagent", req.Role),
+					string(meta),
+				)
+			}
+			return "", ErrRecursionBlocked
+		}
+	}
+
 	timeout := req.TimeoutSeconds
 	if timeout <= 0 {
 		timeout = DefaultTimeoutSeconds

@@ -44,7 +44,8 @@ type EnvelopeError struct {
 }
 
 // registeredTypes is the set of envelope types the frontend can render.
-// Populated at startup from config/envelopes.yaml via InitCoreTypes;
+// Populated at startup from the external github.com/hollis-labs/go-envelopes
+// module (via envelopes.LoadCore) and passed to InitCoreTypes;
 // plugins add entries at runtime via RegisterEnvelopeType.
 // Protected by registeredTypesMu for concurrent access.
 var (
@@ -71,7 +72,8 @@ func UnregisterEnvelopeType(envelopeType string) {
 }
 
 // InitCoreTypes populates the registry with core envelope types loaded from
-// the config/envelopes.yaml manifest. Called once at startup before plugins load.
+// the external github.com/hollis-labs/go-envelopes module's embedded manifest
+// (via envelopes.LoadCore). Called once at startup before plugins load.
 func InitCoreTypes(types []string) {
 	registeredTypesMu.Lock()
 	for _, t := range types {

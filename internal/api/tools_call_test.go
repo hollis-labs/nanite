@@ -111,6 +111,66 @@ func TestHandleSelfToolCall_DispatchesUnknownTool(t *testing.T) {
 	}
 }
 
+// recordingPanelSink captures BroadcastPanelSignal calls so a test can assert
+// that a panel tool forwarded through /api/tools/call reached a wired sink.
+type recordingPanelSink struct {
+	sessionID  string
+	signalType string
+	payload    string
+	calls      int
+}
+
+func (r *recordingPanelSink) BroadcastPanelSignal(sessionID, signalType, payload string) int {
+	r.sessionID = sessionID
+	r.signalType = signalType
+	r.payload = payload
+	r.calls++
+	return 1
+}
+
+// TestHandleSelfToolCall_PanelOpenReachesWiredSink is the CW-20260516-0044
+// regression: a CLI-launched chat agent's `nanite mcp` subprocess forwards
+// panel_open through POST /api/tools/call. This pins that the endpoint
+// dispatches against a SelfToolsTransport with PanelSignalSink wired and the
+// session_id stamped, so the panel_signal IS broadcast (the prior gap was the
+// subprocess's bare transport having no sink — the proxy closes it by routing
+// to this fully-wired transport).
+func TestHandleSelfToolCall_PanelOpenReachesWiredSink(t *testing.T) {
+	a, s := newToolCallTestAPI(t)
+	st := mcp.NewSelfToolsTransport(s)
+	sink := &recordingPanelSink{}
+	st.PanelSignalSink = sink
+	a.SetSelfTools(st)
+
+	rec := postToolCall(t, a, map[string]any{
+		"session_id": "sess-cli-launch",
+		"name":       "panel_open",
+		"args":       map[string]any{"panel_id": "work"},
+	})
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200\nbody=%s", rec.Code, rec.Body.String())
+	}
+	var res mcp.ToolResult
+	if err := json.Unmarshal(rec.Body.Bytes(), &res); err != nil {
+		t.Fatalf("decode result: %v\nbody=%s", err, rec.Body.String())
+	}
+	if res.IsError {
+		t.Fatalf("panel_open should succeed, got %#v", res.Content)
+	}
+	if sink.calls != 1 {
+		t.Fatalf("PanelSignalSink got %d broadcasts, want 1", sink.calls)
+	}
+	if sink.sessionID != "sess-cli-launch" {
+		t.Errorf("broadcast session_id = %q, want sess-cli-launch (endpoint must stamp it)", sink.sessionID)
+	}
+	if sink.signalType != "panel_signal" {
+		t.Errorf("broadcast signalType = %q, want panel_signal", sink.signalType)
+	}
+	if !strings.Contains(sink.payload, `"action":"open"`) || !strings.Contains(sink.payload, `"panel_id":"work"`) {
+		t.Errorf("broadcast payload = %q, want open/work signal", sink.payload)
+	}
+}
+
 // TestHandleSelfToolCall_StampsSessionAndDispatches pins the end-to-end
 // path: the endpoint stamps the request's session_id onto the dispatch
 // context, and a session-scoped todo_create (which needs both a wired

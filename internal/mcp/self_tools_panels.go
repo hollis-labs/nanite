@@ -180,6 +180,22 @@ func (st *SelfToolsTransport) resolvePanelAccess(ctx context.Context, panelID st
 // not active) this is a quiet no-op — the agent's tool result still carries
 // the {opened: true} confirmation so a transcript replay can reconstruct the
 // intent from the tool call alone.
+//
+// CLI-launch delivery note (CW-20260516-0044). For a CLI-launched chat agent
+// the panel tool runs inside the `nanite mcp` subprocess, which forwards the
+// call to the live harness via POST /api/tools/call (see
+// internal/mcpserver/self_proxy.go). That endpoint dispatches against the
+// fully-wired SelfToolsTransport — PanelSignalSink IS set — so this method
+// does broadcast the signal. BroadcastSessionStreamEvent then fans it only to
+// *active message streams registered for the session*. A GUI observing a
+// CLI-launched agent currently has no such stream: the FE (ui/src/hooks/
+// useChat.ts) opens an /api/stream/{messageID} SSE connection only for turns
+// the GUI itself initiates (sendMessage / retryStream), never for a turn
+// driven by an external CLI harness. Until that GUI-observation stream exists,
+// panel_signal events for CLI-launch agents are broadcast but land on zero
+// subscribers. This is a missing cross-harness delivery seam, NOT a defect in
+// the panel tools — fixing it belongs with the CLI-launch GUI-observation
+// infrastructure, not here.
 func (st *SelfToolsTransport) emitPanelSignal(ctx context.Context, args map[string]any, sig PanelSignal) {
 	if st.PanelSignalSink == nil {
 		return

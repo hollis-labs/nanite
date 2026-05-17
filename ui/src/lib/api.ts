@@ -257,6 +257,37 @@ export const api = {
   },
 
   /**
+   * CW-20260516-0057: reboot a single session's runtime agent. The next
+   * user turn cold-boots a fresh agent process + boot dir from the current
+   * binary; other sessions are untouched. Use it to pick up a freshly
+   * deployed binary / boot-dir change, or to recover one wedged agent,
+   * without the coarse all-sessions restart of nanite-api-service.
+   *
+   * BE: POST /api/sessions/{id}/agent/reboot (no body).
+   *   - 200 {status:"rebooted"}        → live agent stopped; next turn boots fresh.
+   *   - 200 {status:"no_active_agent"} → nothing to stop; next turn boots fresh anyway.
+   *   - 409 → a turn is in flight for the session; retry once it settles.
+   *   - other → network / config error.
+   */
+  rebootSessionAgent: async (
+    sessionId: string,
+  ): Promise<"rebooted" | "no_active_agent" | "busy" | "error"> => {
+    try {
+      const res = await fetch(`${API_BASE}/sessions/${sessionId}/agent/reboot`, {
+        method: "POST",
+      });
+      if (res.ok) {
+        const body = (await res.json().catch(() => null)) as { status?: string } | null;
+        return body?.status === "no_active_agent" ? "no_active_agent" : "rebooted";
+      }
+      if (res.status === 409) return "busy";
+      return "error";
+    } catch {
+      return "error";
+    }
+  },
+
+  /**
    * Phase 9 (CW-20260510-0017 / W2A): cancel an in-flight recovery
    * broker retry. The `token` is the wrap-level `cancel_token` lifted
    * verbatim from the recovery info-card envelope.

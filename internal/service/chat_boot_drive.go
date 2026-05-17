@@ -292,6 +292,27 @@ func (s *chatServiceImpl) observeSessionForRecovery(sess *runtimeagent.Session, 
 	// at daemon shutdown so the goroutine never leaks past process exit.
 	err := sess.Wait(context.Background())
 
+	// CW-20260516-0057: intentional per-session reboot. RebootSessionAgent
+	// stopped this runtime on purpose and flagged it before calling Stop.
+	// Treat the exit as deliberate regardless of how Stop surfaced it — a
+	// SIGTERM/SIGKILL exit can present as an *agentsessions.ExitError —
+	// and do NOT route it to the recovery broker as a crash. The next
+	// user turn cold-boots a fresh agent via driveBootSession.
+	if _, rebooting := s.rebootingSessions.LoadAndDelete(sessionID); rebooting {
+		// CompareAndDelete so a replacement a concurrent turn already
+		// stored is not clobbered. The aux maps are session-id keyed and
+		// a fresh boot re-stores them, so a plain Delete is safe there.
+		s.activeSessions.CompareAndDelete(sessionID, sess)
+		s.activeSessionSlots.Delete(sessionID)
+		s.toolPartitionStates.Delete(sessionID)
+		if broker, ok := s.agentDeps.Recovery.(*recovery.Broker); ok {
+			broker.ClearSession(sessionID)
+		}
+		slog.Info("recovery: session exited via intentional reboot — skipping broker",
+			"session_id", sessionID)
+		return
+	}
+
 	// Extract structured exit info. errors.As walks the chain; nil
 	// (clean exit) returns false and we skip the broker hook.
 	var xe *agentsessions.ExitError

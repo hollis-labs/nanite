@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/hollis-labs/nanite/internal/chat"
+	"github.com/hollis-labs/nanite/internal/service"
 )
 
 // chatCancelStub implements service.ChatService for the cancel-endpoint
@@ -42,6 +43,9 @@ func (s *chatCancelStub) GetStream(string) (<-chan chat.StreamEvent, bool) {
 }
 func (s *chatCancelStub) CancelActiveGeneration(sessionID string) bool {
 	return s.cancelFn(sessionID)
+}
+func (s *chatCancelStub) RebootSessionAgent(context.Context, string) (service.RebootResult, error) {
+	panic("RebootSessionAgent not used in cancel-endpoint tests")
 }
 func (s *chatCancelStub) Shutdown() {}
 

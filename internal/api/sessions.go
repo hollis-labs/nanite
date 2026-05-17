@@ -452,6 +452,49 @@ func (a *API) handleSetSessionAutoSwitch(w http.ResponseWriter, r *http.Request)
 // slot_changed envelope is fanned out to any active chat stream so the UI
 // can surface what just changed. The legacy 2000-char concat path and the
 // destructive `messages.is_compacted` writes are gone.
+// handleRebootSessionAgent reboots a single chat session's runtime agent
+// (CW-20260516-0057). POST /api/sessions/{id}/agent/reboot.
+//
+// The next user turn cold-boots a fresh agent process + boot dir from the
+// current binary; other sessions are untouched. Use it to pick up a freshly
+// deployed binary or boot-dir change, or to recover one wedged agent,
+// without the coarse all-sessions restart of nanite-api-service.
+//
+// Responses:
+//   - 200 {rebooted, status} — reboot done, or status="no_active_agent"
+//     when there was no live agent to stop (next turn boots fresh anyway).
+//   - 404 — unknown session id.
+//   - 409 — a turn is in flight for the session; retry once it settles.
+func (a *API) handleRebootSessionAgent(w http.ResponseWriter, r *http.Request) {
+	sessionID := r.PathValue("id")
+	ctx := r.Context()
+
+	if _, err := a.Services.Sessions.Get(ctx, sessionID); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			a.errorResp(w, http.StatusNotFound, "session not found")
+		} else {
+			a.errorResp(w, http.StatusInternalServerError, err.Error())
+		}
+		return
+	}
+
+	if a.Services.Chat == nil {
+		a.errorResp(w, http.StatusServiceUnavailable, "chat service not wired")
+		return
+	}
+
+	result, err := a.Services.Chat.RebootSessionAgent(ctx, sessionID)
+	if err != nil {
+		if errors.Is(err, service.ErrSessionBusy) {
+			a.errorResp(w, http.StatusConflict, err.Error())
+			return
+		}
+		a.errorResp(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	a.jsonResp(w, http.StatusOK, result)
+}
+
 func (a *API) handleCompactSession(w http.ResponseWriter, r *http.Request) {
 	sessionID := r.PathValue("id")
 	ctx := r.Context()

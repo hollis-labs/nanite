@@ -4,8 +4,10 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
+	"strings"
 	"time"
 
+	"github.com/hollis-labs/nanite/internal/chat"
 	"github.com/hollis-labs/nanite/internal/mcp"
 )
 
@@ -81,10 +83,69 @@ func (a *API) handleSelfToolCall(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// CW-20260517-0041: same-turn card flush for CLI-launched agents.
+	//
+	// card_show emits its envelope as a <!--ENVELOPE_DATA:...--> marker in
+	// the tool result text (self_tools_transport.go:callShowCard). For an
+	// in-process HTTP chat turn the chat-loop's tool executor captures that
+	// marker (chat_generate.go:captureEnvelopeData) and broadcasts a
+	// plugin_envelope SSE event before stream_end. A CLI-launched agent runs
+	// card_show in its own process and reaches this proxy endpoint instead,
+	// so nanite's chat-loop never sees the marker — the card reaches the GUI
+	// only if the CLI agent happens to echo the marker into a later turn's
+	// text, which is why it rendered a turn late. Broadcast the envelope
+	// here so the card lands on the per-message SSE stream within the turn
+	// that produced it. Mirrors the immediate-broadcast contract the
+	// panel_open self-tool already honors (emitPanelSignal).
+	if !result.IsError && req.Name == "card_show" && req.SessionID != "" && a.Services != nil && a.Services.Streams != nil {
+		if envJSON := extractEnvelopeMarker(result); envJSON != "" {
+			a.Services.Streams.BroadcastSessionStreamEvent(req.SessionID, chat.StreamEvent{
+				Type:     "plugin_envelope",
+				Envelope: envJSON,
+			})
+		}
+	}
+
 	// A tool-level error (result.IsError) is still a successful dispatch —
 	// return 200 and let the caller surface the error content. Only a
 	// transport failure above yields a non-200.
 	a.jsonResp(w, http.StatusOK, result)
+}
+
+// envelopeMarkerOpen / envelopeMarkerClose delimit the structured-UI payload
+// card_show embeds in its tool result text. extractEnvelopeMarker pulls the
+// JSON payload back out so the CLI-launch proxy can broadcast it as a
+// plugin_envelope SSE event (same delimiters as captureEnvelopeData in the
+// service package — kept as a local string scan to avoid an import widening).
+const (
+	envelopeMarkerOpen  = "<!--ENVELOPE_DATA:"
+	envelopeMarkerClose = ":ENVELOPE_DATA-->"
+)
+
+// extractEnvelopeMarker returns the JSON envelope payload embedded in a
+// card_show tool result, or "" when no marker is present. The payload is the
+// {kind, version, type, data, ...} wire shape buildShowEnvelope produces —
+// already a valid Envelope for the FE's plugin_envelope handler.
+func extractEnvelopeMarker(result *mcp.ToolResult) string {
+	if result == nil {
+		return ""
+	}
+	for _, block := range result.Content {
+		if block.Type != "text" || block.Text == "" {
+			continue
+		}
+		start := strings.Index(block.Text, envelopeMarkerOpen)
+		if start < 0 {
+			continue
+		}
+		tail := block.Text[start+len(envelopeMarkerOpen):]
+		end := strings.Index(tail, envelopeMarkerClose)
+		if end < 0 {
+			continue
+		}
+		return tail[:end]
+	}
+	return ""
 }
 
 // isLoopbackRequest reports whether the request's TCP peer is a loopback

@@ -16,6 +16,7 @@ import { useState, useRef } from 'react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { ResponseStatus } from '@/lib/envelope-response'
+import type { Envelope as EnvelopeType } from '@/lib/types'
 import {
   Envelope,
   EnvelopeBody,
@@ -40,17 +41,36 @@ export interface ElicitationPromptData {
 }
 
 interface ElicitationPromptCardProps {
-  data: ElicitationPromptData
+  envelope: EnvelopeType
   onRespond?: EnvelopeResponder
+}
+
+type ElicitationState = 'pending' | 'accepted' | 'declined' | 'cancelled'
+
+/**
+ * Hydrate the card state from a persisted response so it keeps its resolved
+ * state after a page reload. `respond()` echoes the chosen `action` into
+ * `data.action` ('accept' | 'decline' | 'cancel'). CW-20260517-0006.
+ */
+function hydrateState(prior: EnvelopeType['prior_response']): ElicitationState {
+  if (!prior) return 'pending'
+  const action = prior.data?.action
+  if (action === 'decline') return 'declined'
+  if (action === 'cancel') return 'cancelled'
+  return 'accepted'
 }
 
 // ---------------------------------------------------------------------------
 // Component
 // ---------------------------------------------------------------------------
 
-export function ElicitationPromptCard({ data, onRespond }: ElicitationPromptCardProps) {
-  const [state, setState] = useState<'pending' | 'accepted' | 'declined' | 'cancelled'>('pending')
-  const [inputValue, setInputValue] = useState('')
+export function ElicitationPromptCard({ envelope, onRespond }: ElicitationPromptCardProps) {
+  const data = (envelope.data ?? {}) as unknown as ElicitationPromptData
+  const prior = envelope.prior_response
+  const [state, setState] = useState<ElicitationState>(() => hydrateState(prior))
+  const [inputValue, setInputValue] = useState<string>(() =>
+    typeof prior?.data?.content === 'string' ? prior.data.content : '',
+  )
   const [submitError, setSubmitError] = useState<string | null>(null)
   const inputRef = useRef<HTMLInputElement>(null)
 

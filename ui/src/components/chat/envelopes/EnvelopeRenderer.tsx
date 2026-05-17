@@ -125,7 +125,15 @@ export function EnvelopeRenderer({
     return (
       <div className="space-y-3">
         {envelope.proposals?.map((proposal, i) => (
-          <ProposalCard key={`proposal-${i}`} proposal={proposal} />
+          // ProposalCard takes the envelope wrapper (props: "envelope") so it
+          // can read `prior_response`. The legacy path may carry several
+          // proposals but only one wrap-level `prior_response`; attach it to
+          // the first card only — the single-response model has no per-index
+          // prior. CW-20260517-0006.
+          <ProposalCard
+            key={`proposal-${i}`}
+            envelope={{ ...envelope, data: proposal as unknown as Envelope["data"], proposals: [proposal], ...(i === 0 ? {} : { prior_response: undefined }) }}
+          />
         ))}
 
         {envelope.questions && envelope.questions.length > 0 && (
@@ -137,7 +145,7 @@ export function EnvelopeRenderer({
         )}
 
         {envelope.approval && (
-          <ApprovalCard approval={envelope.approval} {...(envelope.id ? { onRespond } : {})} />
+          <ApprovalCard envelope={envelope} {...(envelope.id ? { onRespond } : {})} />
         )}
       </div>
     );
@@ -170,7 +178,18 @@ export function EnvelopeRenderer({
           : registryEntry.props === "envelope"
             ? { envelope }
             : envelope.data
-              ? { data: envelope.data }
+              ? // Default `{ data }` shape. Dynamically-registered plugin
+                // envelopes always land here (the dynamic registry carries no
+                // `props` discriminator). Surface `prior_response` alongside
+                // `data` so plugin cards can hydrate a persisted response
+                // after a reload — it rides at envelope wrap level, a sibling
+                // of `data`, so it is otherwise unreachable from a `data` prop.
+                // CW-20260517-0006.
+                {
+                  data: envelope.prior_response
+                    ? { ...envelope.data, prior_response: envelope.prior_response }
+                    : envelope.data,
+                }
               : null;
 
     if (componentProps) {

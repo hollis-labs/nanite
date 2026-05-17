@@ -2,6 +2,7 @@ import { ChevronDown, ChevronRight, ShieldAlert, ShieldCheck, ShieldX } from 'lu
 import { useState } from 'react'
 import { Button } from '@/components/ui/button'
 import { ResponseStatus } from '@/lib/envelope-response'
+import type { Envelope as EnvelopeType } from '@/lib/types'
 import type { EnvelopeResponder } from './EnvelopeRenderer'
 import { Envelope, EnvelopeHeader, EnvelopeFooter } from './primitives/Envelope'
 import { StatusPill, type StatusTone } from './primitives/StatusPill'
@@ -18,8 +19,20 @@ export type SubagentSpawnApprovalData = {
 }
 
 interface SubagentSpawnApprovalCardProps {
-  data: SubagentSpawnApprovalData
+  envelope: EnvelopeType
   onRespond?: EnvelopeResponder
+}
+
+/**
+ * Hydrate the decision from a persisted response so the card keeps its
+ * resolved state after a page reload. `submit()` sends Submitted on approve
+ * and Cancelled on reject. CW-20260517-0006.
+ */
+function hydrateDecided(
+  prior: EnvelopeType['prior_response'],
+): 'approved' | 'rejected' | null {
+  if (!prior) return null
+  return prior.status === ResponseStatus.Cancelled ? 'rejected' : 'approved'
 }
 
 const RISK_CONFIG: Record<
@@ -33,8 +46,14 @@ const RISK_CONFIG: Record<
 
 const PROMPT_TRUNCATE_LEN = 200
 
-export function SubagentSpawnApprovalCard({ data, onRespond }: SubagentSpawnApprovalCardProps) {
-  const [decided, setDecided] = useState<'approved' | 'rejected' | null>(null)
+export function SubagentSpawnApprovalCard({
+  envelope,
+  onRespond,
+}: SubagentSpawnApprovalCardProps) {
+  const data = (envelope.data ?? {}) as unknown as SubagentSpawnApprovalData
+  const [decided, setDecided] = useState<'approved' | 'rejected' | null>(() =>
+    hydrateDecided(envelope.prior_response),
+  )
   const [submitting, setSubmitting] = useState(false)
   const [reason, setReason] = useState('')
   const [showFullPrompt, setShowFullPrompt] = useState(false)

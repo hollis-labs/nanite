@@ -1,19 +1,37 @@
 import { useState } from 'react'
 import { Check, X } from 'lucide-react'
 import { Button } from '@/components/ui/button'
-import type { Proposal } from '@/lib/types'
+import { ResponseStatus } from '@/lib/envelope-response'
+import type { Proposal, Envelope as EnvelopeType } from '@/lib/types'
 import { Envelope, EnvelopeHeader, EnvelopeFooter } from './primitives/Envelope'
 import { StatusPill } from './primitives/StatusPill'
 
 interface ProposalCardProps {
-  proposal: Proposal
+  envelope: EnvelopeType
 }
 
 const FIELD_INPUT =
   'w-full rounded-[6px] border border-border-subtle bg-surface px-2.5 py-1.5 text-[13px] text-fg outline-none transition-colors focus:border-primary disabled:cursor-not-allowed disabled:opacity-50'
 
-export function ProposalCard({ proposal }: ProposalCardProps) {
-  const [state, setState] = useState<'pending' | 'applied' | 'dismissed'>('pending')
+/**
+ * Hydrate the proposal state from a persisted response so the card does not
+ * reset to 'pending' after a page reload. CW-20260517-0006.
+ */
+function hydrateState(
+  prior: EnvelopeType['prior_response'],
+): 'pending' | 'applied' | 'dismissed' {
+  if (!prior) return 'pending'
+  return prior.status === ResponseStatus.Cancelled ? 'dismissed' : 'applied'
+}
+
+export function ProposalCard({ envelope }: ProposalCardProps) {
+  const proposal: Proposal =
+    (envelope.data as Proposal | undefined) ??
+    envelope.proposals?.[0] ??
+    ({ type: '', payload: {} } as Proposal)
+  const [state, setState] = useState<'pending' | 'applied' | 'dismissed'>(() =>
+    hydrateState(envelope.prior_response),
+  )
   const [fields, setFields] = useState<Record<string, unknown>>({ ...proposal.payload })
 
   const handleApply = () => {

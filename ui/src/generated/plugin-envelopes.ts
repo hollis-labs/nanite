@@ -53,7 +53,7 @@ const CORE_ENTRIES: Record<string, EnvelopeRegistryEntry> = {
       })),
     ),
     source: "core",
-    props: "approval",
+    props: "envelope",
   },
   "proposal-card": {
     component: lazy(() =>
@@ -62,7 +62,7 @@ const CORE_ENTRIES: Record<string, EnvelopeRegistryEntry> = {
       })),
     ),
     source: "core",
-    props: "proposal",
+    props: "envelope",
   },
   "todo-list": {
     component: lazy(() =>
@@ -119,6 +119,7 @@ const CORE_ENTRIES: Record<string, EnvelopeRegistryEntry> = {
       })),
     ),
     source: "core",
+    props: "envelope",
   },
   "table-card": {
     component: lazy(() =>
@@ -159,6 +160,7 @@ const CORE_ENTRIES: Record<string, EnvelopeRegistryEntry> = {
       })),
     ),
     source: "core",
+    props: "envelope",
   },
   "chat-loop-terminated": {
     component: lazy(() =>
@@ -183,6 +185,7 @@ const CORE_ENTRIES: Record<string, EnvelopeRegistryEntry> = {
       })),
     ),
     source: "core",
+    props: "envelope",
   },
 };
 

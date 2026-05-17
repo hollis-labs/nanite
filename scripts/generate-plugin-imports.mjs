@@ -27,11 +27,24 @@ const CHECK_MODE = process.argv.includes('--check');
 // Local host-side overrides for core envelope entries whose frontend mapping
 // intentionally leads the manifest. This keeps generated output stable without
 // requiring edits in the shared go-envelopes repo for host-only renderers.
+//
+// CW-20260517-0006: the interactive cards below override `props` to
+// `"envelope"` so EnvelopeRenderer hands them the whole envelope wrapper.
+// They need it to read `envelope.prior_response` and hydrate a persisted
+// decision after a page reload — the discriminated `approval` / `proposal`
+// props strip the wrapper, hiding `prior_response`. This is a host-side
+// rendering concern, so the override leads the shared manifest here rather
+// than requiring an edit in the go-envelopes repo.
 const CORE_OVERRIDES = {
   'chat-loop-budget-soft-warning': {
     component: 'components/chat/envelopes/ChatLoopBudgetSoftWarningCard',
     export: 'ChatLoopBudgetSoftWarningCard',
   },
+  'approval-card': { props: 'envelope' },
+  'proposal-card': { props: 'envelope' },
+  'confirmation-card': { props: 'envelope' },
+  'subagent-spawn-approval': { props: 'envelope' },
+  'elicitation-prompt': { props: 'envelope' },
 };
 
 // --- Minimal YAML parser (handles the flat list-of-objects subset we need) ---

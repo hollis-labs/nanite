@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { Ticket, Loader2, CheckCircle, AlertCircle, Download, Info } from 'lucide-react'
 import { Button } from '@/components/ui/button'
+import type { ResponseV1 } from '@/lib/envelope-response'
 import { buildTicketDataMarker, buildTicketMessage } from './ticket-utils'
 import { Envelope, EnvelopeHeader, EnvelopeFooter } from './primitives/Envelope'
 import { StatusPill, type StatusTone } from './primitives/StatusPill'
@@ -14,6 +15,22 @@ interface TicketFormData {
     steps_tried?: string
   }
   categories: string[]
+  /**
+   * Injected by EnvelopeRenderer at envelope wrap level when the card was
+   * already answered — present so plugin cards (which always receive the
+   * `data` prop) can hydrate a persisted response. CW-20260517-0006.
+   *
+   * TODO(CW-20260517-0006): TicketFormCard does NOT use the typed-response
+   * path (`onRespond` / POST /api/envelopes/{id}/respond) — it POSTs straight
+   * to /api/plugins/tickets and reports via the legacy `onSendMessage`. The
+   * backend therefore never persists a `prior_response` for this card, so the
+   * success view (which needs the ticket-creation result) cannot be fully
+   * rehydrated after a reload. Below we hydrate the editable form fields when
+   * a `prior_response` IS present (forward-compat). Full success-state
+   * hydration requires migrating the card to the typed-response path AND
+   * persisting the ticket result in the response payload — out of scope here.
+   */
+  prior_response?: ResponseV1
 }
 
 interface TicketFormCardProps {
@@ -33,12 +50,31 @@ const PRIORITY_TONE: Record<string, StatusTone> = {
 const INPUT_CLS =
   'w-full rounded-[6px] border border-border-subtle bg-surface px-2.5 py-1.5 text-[13px] text-fg outline-none transition-colors placeholder:text-fg-faint focus:border-primary disabled:opacity-50'
 
+/** Read a string field from a persisted response payload. CW-20260517-0006. */
+function priorStr(prior: ResponseV1 | undefined, key: string): string | undefined {
+  const v = prior?.data?.[key]
+  return typeof v === 'string' ? v : undefined
+}
+
 export function TicketFormCard({ data, onSendMessage }: TicketFormCardProps) {
-  const [title, setTitle] = useState(data.prefilled?.title || '')
-  const [category, setCategory] = useState(data.prefilled?.category || '')
-  const [priority, setPriority] = useState(data.prefilled?.priority || 'medium')
-  const [description, setDescription] = useState(data.prefilled?.description || '')
-  const [stepsTried, setStepsTried] = useState(data.prefilled?.steps_tried || '')
+  // Hydrate from a persisted response when present, else fall back to the
+  // agent-supplied prefill. See the TODO on TicketFormData.prior_response.
+  const prior = data.prior_response
+  const [title, setTitle] = useState(
+    priorStr(prior, 'title') ?? data.prefilled?.title ?? '',
+  )
+  const [category, setCategory] = useState(
+    priorStr(prior, 'category') ?? data.prefilled?.category ?? '',
+  )
+  const [priority, setPriority] = useState(
+    priorStr(prior, 'priority') ?? data.prefilled?.priority ?? 'medium',
+  )
+  const [description, setDescription] = useState(
+    priorStr(prior, 'description') ?? data.prefilled?.description ?? '',
+  )
+  const [stepsTried, setStepsTried] = useState(
+    priorStr(prior, 'steps_tried') ?? data.prefilled?.steps_tried ?? '',
+  )
   const [formState, setFormState] = useState<FormState>('idle')
   const [errorMsg, setErrorMsg] = useState('')
   const [ticketId, setTicketId] = useState('')

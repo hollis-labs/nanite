@@ -14,6 +14,7 @@ import (
 //	<bootDir>/
 //	├── AGENTS.md                    # codex auto-loads from cwd (provider.AgentsMD shape)
 //	├── boot.md
+//	├── config.toml                  # provider config: approval_policy + sandbox_mode (sourced from go-providers BootDirSpec)
 //	├── .sandbox/agent-context.md
 //	├── .sandbox/envelope-schema.md
 //	└── .mcp.json
@@ -23,6 +24,18 @@ import (
 // CW-20260515-0025: the bootdir file-set is declared as an
 // agentlaunch.InjectionSpec and written via plantInjectionSpec — see
 // bootdir_plant.go.
+//
+// S5 Phase B: config.toml is now planted (it was previously missing
+// entirely). Codex's load-bearing config lives in $CODEX_HOME/config.toml;
+// with no config.toml a headless codex falls back to its interactive
+// approval default and BLOCKS FOREVER waiting for an approval no one can
+// give (live bug: codex-via-dispatch hangs). The file is sourced from
+// go-providers' CodexAdapter.BootDirSpec so it carries approval_policy +
+// sandbox_mode. See bootdir_provider_config.go for the policy choice.
+//
+// NOTE: codex isolates per-task config via CODEX_HOME pointing at the
+// boot dir — see AmendEnv below. Without that env amendment codex reads
+// ~/.codex/config.toml and the planted config.toml is never consulted.
 type codexLayout struct{}
 
 // codexAgentsMD renders the AGENTS.md system-prompt body. Codex's
@@ -40,10 +53,27 @@ func codexAgentsMD(params SetupParams) string {
 
 // codexInjectionSpec assembles the full codex bootdir file-set as a
 // shared agentlaunch.InjectionSpec.
+//
+// config.toml and auth.json are provider CONFIG files sourced from
+// go-providers' CodexAdapter.BootDirSpec (not hand-rolled). config.toml
+// carries approval_policy + sandbox_mode — the fix for the headless-codex
+// approval deadlock; auth.json carries the user's codex auth, planted
+// because CODEX_HOME (set by AmendEnv) redirects codex's auth lookup into
+// the boot dir. See bootdir_provider_config.go.
 func codexInjectionSpec(params SetupParams) (agentlaunch.InjectionSpec, error) {
+	configTOML, err := codexConfigTOMLContent()
+	if err != nil {
+		return agentlaunch.InjectionSpec{}, err
+	}
+	authJSON, err := codexAuthJSONContent()
+	if err != nil {
+		return agentlaunch.InjectionSpec{}, err
+	}
 	native := []agentlaunch.NativeFile{
 		nativeFileRaw("AGENTS.md", codexAgentsMD(params), 0o644),
 		bootMDNativeFile(params),
+		nativeFileRaw("config.toml", configTOML, codexConfigFileMode),
+		nativeFileRaw("auth.json", authJSON, codexConfigFileMode),
 	}
 	native = append(native, sandboxNativeFiles(params)...)
 
@@ -91,7 +121,28 @@ func (codexLayout) RegenerateSystemPromptSlot(bootDir string, params SetupParams
 	})
 }
 
-func (codexLayout) AmendEnv(base map[string]string, _ string) map[string]string { return base }
+// AmendEnv sets CODEX_HOME=<bootDir>. Codex reads its config (config.toml)
+// and auth (auth.json) from $CODEX_HOME; pointing it at the boot dir makes
+// the planted config.toml the one codex actually consults — without this
+// codex would merge ~/.codex/config.toml instead and the planted
+// approval_policy / sandbox_mode (the headless-deadlock fix) would never
+// take effect. codexInjectionSpec plants auth.json alongside so the
+// redirected auth lookup still resolves. Mirrors opencodeLayout.AmendEnv's
+// OPENCODE_CONFIG_DIR=<bootDir> pattern.
+//
+// An empty bootDir leaves base unchanged (defensive — Setup/Populate
+// always pass a real path).
+func (codexLayout) AmendEnv(base map[string]string, bootDir string) map[string]string {
+	if bootDir == "" {
+		return base
+	}
+	out := make(map[string]string, len(base)+1)
+	for k, v := range base {
+		out[k] = v
+	}
+	out["CODEX_HOME"] = bootDir
+	return out
+}
 
 func (codexLayout) SpawnWorkdir(bootDir, _ string) string { return bootDir }
 

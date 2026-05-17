@@ -17,7 +17,7 @@ import (
 //	│   ├── agent-context.md         # nanite agent identity + tool catalog reminders
 //	│   └── envelope-schema.md       # SSE envelope schema reference
 //	├── .claude/
-//	│   └── settings.json            # {mcpServers: {}, approvedTools: []} stub (no global ~/.claude.json bleed)
+//	│   └── settings.json            # provider config: permissions.defaultMode (sourced from go-providers BootDirSpec)
 //	└── .mcp.json                    # nanite MCP subprocess descriptor
 //
 // Spawn cwd: <bootDir>; project access: claude --add-dir <projectDir>.
@@ -26,26 +26,35 @@ import (
 // agentlaunch.InjectionSpec and written through the shared planting
 // routine (plantInjectionSpec) — see bootdir_plant.go for why Nanite
 // uses the shared InjectionSpec primitives rather than providerplant.Plant.
+//
+// S5 Phase B: .claude/settings.json is no longer a hand-rolled
+// {mcpServers,approvedTools} stub — it is sourced from go-providers'
+// ClaudeAdapter.BootDirSpec so it carries permissions.defaultMode (the
+// CLI-vendor-owned permission knob). A headless claude with no
+// permissions.defaultMode silently denies tool calls it cannot get
+// approval for; "acceptEdits" lets file edits proceed. See
+// bootdir_provider_config.go for the rationale and the mode choice. The
+// legacy approvedTools/mcpServers keys are dropped — current Claude Code
+// ignores both.
 type claudeLayout struct{}
 
-const claudeSettingsJSONStub = `{
-  "mcpServers": {},
-  "approvedTools": []
-}
-`
-
 // claudeInjectionSpec assembles the full claude bootdir file-set as a
-// shared agentlaunch.InjectionSpec. Provider files (CLAUDE.md,
-// .claude/settings.json) and the Nanite app-extras (.sandbox/* docs,
-// boot.md) ride as NativeFiles; .mcp.json rides as a BootDirOverlay
-// entry so it plants last (overlay-wins-last, per the providerplant
-// ordering contract).
+// shared agentlaunch.InjectionSpec. The Nanite-owned CONTENT files
+// (CLAUDE.md, .sandbox/* docs, boot.md) ride as NativeFiles; the provider
+// CONFIG file .claude/settings.json also rides as a NativeFile but its
+// content is sourced from go-providers (claudeProviderConfigContent), not
+// hand-rolled; .mcp.json rides as a BootDirOverlay entry so it plants
+// last (overlay-wins-last, per the providerplant ordering contract).
 func claudeInjectionSpec(params SetupParams) (agentlaunch.InjectionSpec, error) {
+	settings, err := claudeProviderConfigContent()
+	if err != nil {
+		return agentlaunch.InjectionSpec{}, err
+	}
 	native := []agentlaunch.NativeFile{
 		nativeFileRaw("CLAUDE.md",
 			BuildCLAUDEMD(params.AgentProfile.Name, params.AgentProfile.Description, params.SystemPrompt), 0o644),
 		bootMDNativeFile(params),
-		nativeFileRaw(".claude/settings.json", claudeSettingsJSONStub, 0o644),
+		nativeFileRaw(".claude/settings.json", settings, 0o644),
 	}
 	native = append(native, sandboxNativeFiles(params)...)
 

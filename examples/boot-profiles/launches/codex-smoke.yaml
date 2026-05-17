@@ -1,0 +1,30 @@
+id: codex-smoke
+# `codex` is the bare adapter name for the Codex CLI adapter. The Codex
+# adapter spawns `codex exec` (single-turn subprocess) — the headless,
+# no-TTY shape Nanite's subordinate dispatch uses. bootprofile.Compile
+# keeps the bare provider name verbatim on LaunchSpec.Provider.
+provider: codex
+
+workdir: /tmp/nanite-codex-smoke-workdir
+
+ui_label: "Codex CLI (smoke)"
+
+# Env values overlay the host env at agent.Boot time (precedence is
+# host < profile < Options.Env, so spec values beat host env).
+env:
+  NANITE_SMOKE: "1"
+
+# Args are appended to opts.ExtraArgs and spliced after the codex adapter's
+# default BuildArgs (`exec <prompt> --json`).
+#
+# --skip-git-repo-check is REQUIRED for a headless Nanite codex launch.
+# Nanite spawns codex with cwd = the ephemeral boot dir (codexLayout.
+# SpawnWorkdir returns the boot dir), which is never a git working tree.
+# `codex exec` refuses to run outside a trusted git repo unless this flag
+# is passed — without it the headless child exits 1 within ~150ms at the
+# git-trust pre-flight, before the approval-policy config ever matters.
+args:
+  - --skip-git-repo-check
+
+# boot_mode is optional; empty falls through to the adapter default.
+boot_mode: ""

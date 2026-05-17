@@ -54,7 +54,7 @@ func TestClaudeLayout_Setup_FileShape(t *testing.T) {
 		{"boot.md", "role: tester"},
 		{".sandbox/agent-context.md", "Test Agent"},
 		{".sandbox/envelope-schema.md", "Nanite Envelope Schema"},
-		{".claude/settings.json", "mcpServers"},
+		{".claude/settings.json", "defaultMode"},
 		{".mcp.json", "/usr/local/bin/nanite-test"},
 		{".mcp.json", "sess-1"},
 		{".mcp.json", "nanite-test"},
@@ -99,10 +99,14 @@ func TestClaudeLayout_Setup_RequiresAgentProfile(t *testing.T) {
 	}
 }
 
-// TestClaudeLayout_SettingsJSON_Stub verifies the stub keeps mcpServers
-// and approvedTools empty so no global ~/.claude.json bleed reaches the
-// child.
-func TestClaudeLayout_SettingsJSON_Stub(t *testing.T) {
+// TestClaudeLayout_SettingsJSON_PermissionMode verifies the planted
+// .claude/settings.json carries permissions.defaultMode (the headless
+// permission knob sourced from go-providers' ClaudeAdapter.BootDirSpec).
+// A headless `claude -p ...` with no defaultMode silently denies tool
+// calls it cannot get approval for; "acceptEdits" lets file edits
+// proceed. The legacy approvedTools/mcpServers keys are intentionally
+// gone — current Claude Code ignores both.
+func TestClaudeLayout_SettingsJSON_PermissionMode(t *testing.T) {
 	profile := &store.AgentProfile{Name: "settings", Slug: "settings"}
 	bootDir, err := claudeLayout{}.Setup(SetupParams{SessionID: "s1", AgentProfile: profile})
 	if err != nil {
@@ -115,17 +119,16 @@ func TestClaudeLayout_SettingsJSON_Stub(t *testing.T) {
 		t.Fatalf("read settings.json: %v", err)
 	}
 	var parsed struct {
-		MCPServers    map[string]any `json:"mcpServers"`
-		ApprovedTools []any          `json:"approvedTools"`
+		Permissions struct {
+			DefaultMode string `json:"defaultMode"`
+		} `json:"permissions"`
 	}
 	if err := json.Unmarshal(body, &parsed); err != nil {
 		t.Fatalf("parse settings.json: %v", err)
 	}
-	if len(parsed.MCPServers) != 0 {
-		t.Errorf("mcpServers should be empty, got %v", parsed.MCPServers)
-	}
-	if len(parsed.ApprovedTools) != 0 {
-		t.Errorf("approvedTools should be empty, got %v", parsed.ApprovedTools)
+	if parsed.Permissions.DefaultMode != claudeDefaultPermissionMode {
+		t.Errorf("permissions.defaultMode = %q, want %q\n--- body ---\n%s",
+			parsed.Permissions.DefaultMode, claudeDefaultPermissionMode, string(body))
 	}
 }
 

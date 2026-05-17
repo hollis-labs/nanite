@@ -30,6 +30,7 @@ import (
 	llmtypes "github.com/hollis-labs/go-llm-types"
 	"github.com/hollis-labs/go-providers/provider"
 	"github.com/hollis-labs/go-toolbroker/broker"
+	"github.com/hollis-labs/nanite/internal/agentregistry"
 	"github.com/hollis-labs/nanite/internal/api"
 	"github.com/hollis-labs/nanite/internal/chat"
 	"github.com/hollis-labs/nanite/internal/filter"
@@ -317,6 +318,25 @@ func cmdServe(args []string) {
 	// boundary between the two wire sites.
 	agentBrokerInstance := agentbroker.New()
 
+	// --- S5 Phase C/F: shared directory registry ---
+	//
+	// Build the shared registry-primary registrar (FileBackedRegistrar +
+	// DegradingRegistrar + LastKnownGoodCache) over the boot-profile
+	// catalog root ONCE, here, BEFORE NewContainer. The SAME instance is
+	// threaded into:
+	//
+	//   - ContainerConfig.AgentRegistry — so the GUI chat boot-profile
+	//     launch path (driveBootSession) resolves its runtime binding
+	//     registry-primary via launchplan.Build (Phase F);
+	//   - the standalone `nanite launch` subcommand builds its own (it is
+	//     a separate process), but uses the identical agentregistry.Build
+	//     + launchplan.Build seam.
+	//
+	// agent-source registration (the D2 resolver handle) runs after the
+	// HTTP port is known — see further below. agentregistry.Build does
+	// pure local filesystem I/O and never fails the process (D1).
+	agentRegistry := agentregistry.Build(resolveBootProfileCatalogPath(cfg), "", slog.Default())
+
 	// --- Service container: single wiring point ---
 	container, err := service.NewContainer(service.ContainerConfig{
 		Store:           s,
@@ -344,6 +364,10 @@ func cmdServe(args []string) {
 		// (no drift between what the agent reads and what the gate
 		// enforces).
 		DevToolsAllowedPaths: resolveDevToolsAllowedPaths(cfg),
+		// S5 Phase F: thread the shared directory registrar so the GUI
+		// chat boot-profile launch path resolves registry-primary via
+		// launchplan.Build — the same seam the standalone launcher uses.
+		AgentRegistry: agentRegistry,
 		// CW-20260514-0047: thread the configured boot-profile catalog
 		// path so the service container builds an in-memory registry of
 		// compiled LaunchSpec entries. ResolvedBootProfileCatalogPath
@@ -459,6 +483,24 @@ func cmdServe(args []string) {
 	// so a CLI-launched chat agent's `nanite mcp` subprocess can forward
 	// self-tool calls into this running harness.
 	a.SetSelfTools(selfTools)
+
+	// --- S5 Phase C: agent-source handle registration ---
+	//
+	// agentRegistry was built earlier (before NewContainer) so the SAME
+	// instance is shared by the chat service and this registration. Here
+	// we register Nanite as an `agent-source` resolver HANDLE pointing
+	// back at the loopback /api/tools/call endpoint (operation
+	// agent_source_resolve). The directory holds the handle only — never
+	// agent bodies (D2). A registration failure is logged and does NOT
+	// crash startup: the registry is never mandatory (D1).
+	loopbackToolsURL := fmt.Sprintf("http://127.0.0.1:%d/api/tools/call", *port)
+	handleDir := filepath.Join(os.TempDir(), brand.ID+"-agent-source")
+	if home, herr := os.UserHomeDir(); herr == nil {
+		handleDir = filepath.Join(home, "."+brand.ID, "registry")
+	}
+	if err := agentregistry.RegisterAgentSource(agentRegistry, loopbackToolsURL, handleDir, slog.Default()); err != nil {
+		slog.Warn("agent-source registration failed; continuing without directory handle", "err", err)
+	}
 
 	// Register existing custom actions as slash commands.
 	if actions, err := s.ListCustomActions(); err == nil {

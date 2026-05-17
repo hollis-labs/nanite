@@ -169,6 +169,10 @@ func selfToolDefinitions() []Tool {
 				"required": []string{"id"},
 			},
 		},
+		// C1 (S5 platform-reshape) — agent-source resolver endpoint.
+		// Other launch consumers call back through this after discovering
+		// Nanite's `agent-source` handle in the directory registry.
+		agentSourceResolveToolDefinition(),
 		// Cross-app navigation tools — control Engine GUI via SSE
 		{
 			Name:        "engine_navigate",

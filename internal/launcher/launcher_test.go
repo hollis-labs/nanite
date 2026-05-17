@@ -11,6 +11,8 @@ import (
 	"github.com/hollis-labs/go-agent-launch/agentlaunch"
 	llmtypes "github.com/hollis-labs/go-llm-types"
 	"github.com/hollis-labs/go-providers/provider"
+
+	"github.com/hollis-labs/nanite/internal/agentregistry"
 )
 
 // writeCatalog materializes a minimal boot-profile catalog under root and
@@ -162,8 +164,10 @@ func TestPlan_CompilesAndValidates(t *testing.T) {
 	if plan.BootProfile.Inline == nil {
 		t.Fatal("plan.BootProfile.Inline is nil — boot profile should be carried inline")
 	}
-	if plan.BootProfile.Inline.BootPrompt != spec.BootPrompt {
-		t.Error("inline boot prompt does not match compiled spec boot prompt")
+	// PlanFromLaunch carries the rendered boot body as BootContent (the
+	// per-task kickoff body), not BootPrompt.
+	if plan.BootProfile.Inline.BootContent != spec.BootPrompt {
+		t.Error("inline boot content does not match compiled spec boot prompt")
 	}
 }
 
@@ -371,4 +375,145 @@ func TestBuildDeps_WorkspacesRootFallback(t *testing.T) {
 	if deps2.WorkspacesRoot != explicit {
 		t.Errorf("buildDeps WorkspacesRoot = %q, want explicit %q", deps2.WorkspacesRoot, explicit)
 	}
+}
+
+// TestD1_OfflineStandaloneLaunch is the S5 design-lock D1 regression: the
+// standalone launcher's Plan path must work with NO Tether process and NO
+// provider registry in the loop — a fully offline launch.
+//
+// D1 (EP-20260516-0001 S5 cutover): `nanite launch` is a self-contained
+// operator entry point. It loads a catalog off disk, compiles the profile
+// through the bootprofile compiler, and projects + validates a shared
+// agentlaunch.LaunchPlan — none of which may depend on a running Tether
+// orchestrator, an HTTP registry, or a network round-trip. Plan() is the
+// no-side-effects half of the pipeline (see launcher.go's Plan doc), so a
+// pure-offline assertion is cleanly doable as a NORMAL (non-smoke) test —
+// it needs no real provider CLI and spawns no subprocess. This is the
+// design-lock pin: if a future change makes Plan reach out to a registry
+// or a Tether endpoint, this test breaks.
+//
+// The test deliberately uses a catalog whose only slots are `text`
+// (compile-time, no resolver) so Plan performs ZERO side effects at all —
+// no command execution, no file statics, no network. The full Plan
+// pipeline (LoadCatalog → CompileFromCatalog → ResolveRequirements →
+// ToLaunchPlan → Validate) runs entirely against the local filesystem.
+func TestD1_OfflineStandaloneLaunch(t *testing.T) {
+	root := writeCatalog(t, "claude")
+
+	// Plan runs the entire compile + project + validate pipeline. No
+	// Config.Store, no CLIAdapters, no BinaryPath/DBPath — there is
+	// nothing here that could reach a Tether process or a registry.
+	spec, plan, err := Plan(context.Background(), Config{
+		CatalogPath: root,
+		Profile:     "test-profile",
+	})
+	if err != nil {
+		t.Fatalf("D1: offline Plan failed: %v", err)
+	}
+
+	// The compiled spec must be fully resolved offline — a launchable
+	// provider and a rendered boot prompt, with no deferred Requirements
+	// left to drain (the text-only catalog resolves entirely at compile
+	// time, so the offline path produces a complete, boot-ready spec).
+	if spec.Provider != "claude" {
+		t.Errorf("D1: spec.Provider = %q, want claude", spec.Provider)
+	}
+	if spec.BootPrompt == "" {
+		t.Error("D1: spec.BootPrompt is empty — the offline compile produced no boot prompt")
+	}
+	if len(spec.Requirements) != 0 {
+		t.Errorf("D1: spec.Requirements = %v, want empty — a text-only catalog must resolve fully offline", spec.Requirements)
+	}
+
+	// The shared LaunchPlan must validate offline. Validate is the
+	// shared-plan convergence gate (provider×runtime matrix lookup, path
+	// expansion, sentinel errors) — all of it pure, no Tether, no network.
+	if err := plan.Validate(); err != nil {
+		t.Errorf("D1: offline LaunchPlan.Validate failed: %v", err)
+	}
+	if plan.BootProfile.Inline == nil {
+		t.Fatal("D1: plan.BootProfile.Inline is nil — the offline plan carries no inline boot profile")
+	}
+	if plan.BootProfile.Inline.BootContent != spec.BootPrompt {
+		t.Error("D1: inline boot content diverged from the compiled spec on the offline path")
+	}
+}
+
+// TestC2_RegistryPrimaryPlanThroughPlanFromLaunch is the C2 acceptance
+// check: a launch resolved with a wired registry must drive the shipped
+// agentlaunch.PlanFromLaunch bridge and produce a Validate()-clean
+// LaunchPlan.
+//
+// The registry here has no providers/ entries, so the runtime binding
+// degrades to the spec/profile fallback — but the plan still flows
+// through PlanFromLaunch (NOT the retired hand-rolled ToLaunchPlan).
+func TestC2_RegistryPrimaryPlanThroughPlanFromLaunch(t *testing.T) {
+	root := writeCatalog(t, "claude")
+	reg := agentregistry.Build(root, "", nil)
+
+	spec, plan, err := Plan(context.Background(), Config{
+		CatalogPath: root,
+		Profile:     "test-profile",
+		Registry:    reg,
+	})
+	if err != nil {
+		t.Fatalf("C2: registry-primary Plan failed: %v", err)
+	}
+	if err := plan.Validate(); err != nil {
+		t.Errorf("C2: PlanFromLaunch plan failed Validate: %v", err)
+	}
+	if plan.Provider.ID != "claude" {
+		t.Errorf("C2: plan.Provider.ID = %q, want claude", plan.Provider.ID)
+	}
+	if plan.Runtime != agentlaunch.RuntimeStreamingStdio {
+		t.Errorf("C2: plan.Runtime = %q, want streaming-stdio", plan.Runtime)
+	}
+	// PlanFromLaunch carries the rendered boot body inline as BootContent.
+	if plan.BootProfile.Inline == nil || plan.BootProfile.Inline.BootContent != spec.BootPrompt {
+		t.Error("C2: PlanFromLaunch plan does not carry the rendered boot body inline")
+	}
+	// §4.2 — the agent identity is resolved caller-side onto the plan.
+	if plan.Agent.ID == "" {
+		t.Error("C2: plan.Agent.ID is empty — agent identity must be caller-resolved")
+	}
+	// PlanFromLaunch stamps launch provenance onto Metadata.Annotations.
+	if plan.Metadata.Annotations["agentlaunch.launch_spec"] == "" {
+		t.Error("C2: plan metadata missing the PlanFromLaunch launch_spec annotation")
+	}
+}
+
+// TestC2_RegistryDownDegradesToFileBacked is the D1 regression for C2:
+// registry-primary launch resolution must DEGRADE cleanly to the
+// file-backed / spec fallback when the registry is unavailable. The
+// launch still produces a valid plan; it never hard-fails on a down
+// registry.
+func TestC2_RegistryDownDegradesToFileBacked(t *testing.T) {
+	root := writeCatalog(t, "claude")
+	// A registry whose inner registrar is permanently down, fronted by a
+	// DegradingRegistrar with an empty cache — every query is a cache
+	// miss, the D1 degrade-to-fallback condition.
+	reg := agentregistry.NewForTest(downRegistrarStub{}, root)
+
+	spec, plan, err := Plan(context.Background(), Config{
+		CatalogPath: root,
+		Profile:     "test-profile",
+		Registry:    reg,
+	})
+	if err != nil {
+		t.Fatalf("D1/C2: launch with a down registry hard-failed (must degrade): %v", err)
+	}
+	if err := plan.Validate(); err != nil {
+		t.Errorf("D1/C2: degraded plan failed Validate: %v", err)
+	}
+	if plan.Provider.ID != spec.Provider {
+		t.Errorf("D1/C2: degraded plan provider = %q, want spec fallback %q", plan.Provider.ID, spec.Provider)
+	}
+}
+
+// downRegistrarStub is a Registrar whose every call fails — it
+// simulates an unreachable directory for the C2 D1 degrade test.
+type downRegistrarStub struct{}
+
+func (downRegistrarStub) Handle(agentlaunch.RegistryEnvelope) (agentlaunch.RegistryResponse, error) {
+	return agentlaunch.RegistryResponse{}, errors.New("directory unreachable")
 }

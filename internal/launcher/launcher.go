@@ -26,8 +26,8 @@
 //	bootprofile.LoadCatalog          load the on-disk catalog
 //	bootprofile.CompileFromCatalog   compile profile+launch → LaunchSpec
 //	bootprofile.ResolveRequirements  drain deferred cmd/http/role/skill slots
-//	LaunchSpec.ToLaunchPlan          project onto shared agentlaunch.LaunchPlan
-//	  + plan.Validate                shared-plan gate (CW-0024 convergence)
+//	buildLaunchPlan                  resolve runtime binding registry-primary
+//	  → agentlaunch.PlanFromLaunch   assemble + Validate the shared plan (S5)
 //	agent.Boot                       Nanite runtime start (shared bootdir planting)
 //
 // # Relationship to providerplant
@@ -51,6 +51,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"path/filepath"
 	"strings"
 
@@ -58,6 +59,7 @@ import (
 	agentsessions "github.com/hollis-labs/go-agent-sessions/agentsessions"
 	"github.com/hollis-labs/go-providers/provider"
 
+	"github.com/hollis-labs/nanite/internal/agentregistry"
 	"github.com/hollis-labs/nanite/internal/bootprofile"
 	"github.com/hollis-labs/nanite/internal/brand"
 	"github.com/hollis-labs/nanite/internal/permission"
@@ -118,6 +120,15 @@ type Config struct {
 	// started. The CLI subcommand sets this true so `nanite launch`
 	// behaves like a foreground command.
 	Wait bool
+
+	// Registry is the shared go-agent-launch directory registrar
+	// (FileBackedRegistrar + DegradingRegistrar + LastKnownGoodCache).
+	// When set, runtime-binding resolution is registry-primary with an
+	// explicit, observable fallback to the spec/profile default (D1 +
+	// §4.1). When nil — the standalone offline path — resolution is
+	// fully file/spec-default and the launch still works (D1: the
+	// registry is NEVER mandatory on the launch hot path).
+	Registry *agentregistry.Registry
 }
 
 // Result is what a successful Launch returns.
@@ -197,14 +208,15 @@ func Plan(ctx context.Context, cfg Config) (*bootprofile.LaunchSpec, agentlaunch
 		return nil, agentlaunch.LaunchPlan{}, fmt.Errorf("launcher: resolve requirements: %w", err)
 	}
 
-	// 5. Project onto the shared agentlaunch.LaunchPlan via the CW-0024
-	//    bridge and validate it. This is the shared-plan convergence
-	//    gate: matrix provider×runtime lookup, path expansion, and the
-	//    sentinel-error contract all run here. Nanite still owns the
-	//    actual spawn (step in Launch), but the standalone path proves
-	//    the launch is a well-formed shared plan first.
-	plan := spec.ToLaunchPlan(planOptionsFor(spec))
-	if err := plan.Validate(); err != nil {
+	// 5. Assemble the shared agentlaunch.LaunchPlan via the shipped
+	//    agentlaunch.PlanFromLaunch bridge (S5 Phase C — replaces the
+	//    retired hand-rolled ToLaunchPlan). buildLaunchPlan resolves the
+	//    runtime binding registry-primary with an explicit file/spec
+	//    fallback (D1 + §4.1), resolves the agent identity caller-side
+	//    (§4.2), and runs PlanFromLaunch — which itself Validate()s the
+	//    assembled plan. This is the shared-plan convergence gate.
+	plan, err := buildLaunchPlan(spec, cfg.Registry, slog.Default())
+	if err != nil {
 		if errors.Is(err, agentlaunch.ErrMissingProviderID) {
 			return nil, agentlaunch.LaunchPlan{}, fmt.Errorf(
 				"launcher: profile %q is prompt-only (no launch provider) and cannot be started: %w",
@@ -269,54 +281,6 @@ func Launch(ctx context.Context, cfg Config) (*Result, error) {
 		}
 	}
 	return res, nil
-}
-
-// planOptionsFor supplies the lifecycle knobs the shared LaunchPlan
-// needs that a Nanite boot-profile catalog does not itself express. The
-// standalone launcher owns these defaults (the CW-0024 bridge
-// deliberately requires the caller to be explicit):
-//
-//   - Runtime  — StreamingStdio: the long-lived NDJSON-over-stdio shape
-//     Nanite registers for claude (factory.shouldUseStreamingStdio).
-//     The matrix accepts this for every known provider; codex/opencode
-//     still spawn subprocess-per-turn inside Nanite's runtime, but the
-//     plan-level runtime kind only has to be matrix-legal.
-//   - WorkspaceMode — Persistent: the standalone launcher does not
-//     allocate a throwaway workspace; agent.Boot reserves a long-lived
-//     workspace dir under WorkspacesRoot. Persistent is the matrix-legal
-//     token closest to that "created if absent, preserved" behavior.
-//   - Mode — Interactive: a `nanite launch` invocation is an operator
-//     running a long-lived, attach-enabled agent in front of them.
-//
-// ProjectID / AgentID come from the profile identity so the validated
-// plan is self-describing.
-func planOptionsFor(spec *bootprofile.LaunchSpec) bootprofile.LaunchPlanOptions {
-	projectID := "nanite"
-	if spec != nil && spec.Identity.Project != "" {
-		projectID = spec.Identity.Project
-	}
-	agentID := ""
-	if spec != nil {
-		agentID = spec.Identity.LineageAlias
-		if agentID == "" {
-			agentID = spec.ProfileID
-		}
-	}
-	return bootprofile.LaunchPlanOptions{
-		ProjectID:     projectID,
-		AgentID:       agentID,
-		AgentName:     specUILabel(spec),
-		Runtime:       agentlaunch.RuntimeStreamingStdio,
-		WorkspaceMode: agentlaunch.WorkspacePersistent,
-		Mode:          agentlaunch.LaunchInteractive,
-	}
-}
-
-func specUILabel(spec *bootprofile.LaunchSpec) string {
-	if spec == nil {
-		return ""
-	}
-	return spec.UILabel
 }
 
 // bootOptionsFor projects a compiled LaunchSpec onto agent.Options for a

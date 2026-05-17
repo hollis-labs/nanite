@@ -303,6 +303,8 @@ func (st *SelfToolsTransport) CallTool(ctx context.Context, name string, args ma
 		return st.callListAgents(args)
 	case "agent_update":
 		return st.callUpdateAgent(args)
+	case agentSourceResolveToolName:
+		return st.callAgentSourceResolve(args)
 	case "engine_navigate":
 		return st.callNavigateEngine(args)
 	case "engine_refresh":

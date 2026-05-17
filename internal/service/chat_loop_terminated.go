@@ -58,10 +58,8 @@ func (s *chatServiceImpl) emitChatLoopTerminated(
 		slog.Warn("chat-service: marshal chat-loop-terminated payload", "session", sessionID, "err", err)
 		return
 	}
-	streamWrap, err := json.Marshal(map[string]any{
-		"id":   "", // stream-only; no DB row
-		"type": chatLoopTerminatedEnvelopeType,
-		"data": json.RawMessage(data),
+	streamWrap, err := buildPluginEnvelopeWrap("", chatLoopTerminatedEnvelopeType, data, EnvelopeRouting{
+		DisplayClass: EnvelopeDisplayClassAlert,
 	})
 	if err != nil {
 		slog.Warn("chat-service: marshal chat-loop-terminated wrap", "session", sessionID, "err", err)

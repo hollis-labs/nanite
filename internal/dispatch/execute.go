@@ -20,12 +20,12 @@ import (
 // Field names match chat.Envelope so JSON marshalling round-trips
 // cleanly between the two types.
 type Envelope struct {
-	Kind     string         `json:"kind"`
-	Version  int            `json:"version"`
-	Type     string         `json:"type"`
-	ID       string         `json:"id,omitempty"`
-	Title    string         `json:"title,omitempty"`
-	Subtitle string         `json:"subtitle,omitempty"`
+	Kind     string `json:"kind"`
+	Version  int    `json:"version"`
+	Type     string `json:"type"`
+	ID       string `json:"id,omitempty"`
+	Title    string `json:"title,omitempty"`
+	Subtitle string `json:"subtitle,omitempty"`
 	// Target is the optional drawer ID hint propagated from card_show
 	// (J8 v1 — CW-20260426-0006). Mirrors chat.Envelope.Target so the
 	// executor's emit path can stamp the same field the show_card tool
@@ -41,8 +41,11 @@ type Envelope struct {
 	RenderTargetBlocked string `json:"render_target_blocked,omitempty"`
 	// Mode is the optional workspace-mode hint propagated from card_show
 	// (J8 v1 — CW-20260426-0006). Mirrors chat.Envelope.Mode.
-	Mode string         `json:"mode,omitempty"`
-	Data map[string]any `json:"data,omitempty"`
+	Mode string `json:"mode,omitempty"`
+	// DisplayClass mirrors chat.Envelope.DisplayClass for executor-emitted
+	// plugin-envelope lane classification.
+	DisplayClass string         `json:"display_class,omitempty"`
+	Data         map[string]any `json:"data,omitempty"`
 }
 
 // ExecuteTaskArgs carries the input to the executeTask dispatch primitive.

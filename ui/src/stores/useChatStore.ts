@@ -91,6 +91,7 @@ interface ChatStore {
 
   // ── Plugin envelopes ──
   addPluginEnvelope: (sessionID: string, item: PluginEnvelopeItem) => void;
+  setPluginEnvelopes: (sessionID: string, items: PluginEnvelopeItem[]) => void;
   clearPluginEnvelopes: (sessionID: string) => void;
   pruneEnvelopeRetention: (retentionMinutes: number) => void;
 
@@ -405,6 +406,13 @@ export const useChatStore = create<ChatStore>((set) => ({
         }),
       };
     }),
+  setPluginEnvelopes: (sessionID, items) =>
+    set((state) => ({
+      sessions: applyToSession(state.sessions, sessionID, {
+        pluginEnvelopes: items.slice(-50),
+        pluginEnvelopesLastActivity: Date.now(),
+      }),
+    })),
   clearPluginEnvelopes: (sessionID) =>
     set((state) => ({
       sessions: applyToSession(state.sessions, sessionID, {

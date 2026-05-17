@@ -24,6 +24,16 @@ const MANIFEST_PATH = resolve(ROOT, '..', '..', 'libs', 'go-envelopes', 'manifes
 
 const CHECK_MODE = process.argv.includes('--check');
 
+// Local host-side overrides for core envelope entries whose frontend mapping
+// intentionally leads the manifest. This keeps generated output stable without
+// requiring edits in the shared go-envelopes repo for host-only renderers.
+const CORE_OVERRIDES = {
+  'chat-loop-budget-soft-warning': {
+    component: 'components/chat/envelopes/ChatLoopBudgetSoftWarningCard',
+    export: 'ChatLoopBudgetSoftWarningCard',
+  },
+};
+
 // --- Minimal YAML parser (handles the flat list-of-objects subset we need) ---
 
 function parseYamlList(content, sectionKey) {
@@ -223,7 +233,10 @@ function main() {
   }
 
   const manifestContent = readFileSync(MANIFEST_PATH, 'utf-8');
-  const coreEntries = parseYamlList(manifestContent, 'core');
+  const coreEntries = parseYamlList(manifestContent, 'core').map((entry) => ({
+    ...entry,
+    ...(CORE_OVERRIDES[entry.type] ?? {}),
+  }));
 
   const validationErrors = validateManifest(coreEntries);
   if (validationErrors.length > 0) {

@@ -31,7 +31,7 @@ func TestBuildPluginEnvelopeWrap_OmitsEmptyRouting(t *testing.T) {
 	if _, ok := got["data"]; !ok {
 		t.Error("data missing from wrap")
 	}
-	for _, k := range []string{"target", "render_target", "render_target_blocked", "mode"} {
+	for _, k := range []string{"target", "render_target", "render_target_blocked", "mode", "display_class"} {
 		if _, ok := got[k]; ok {
 			t.Errorf("empty routing field %q should be omitted, got %v", k, got[k])
 		}
@@ -52,6 +52,7 @@ func TestBuildPluginEnvelopeWrap_IncludesNonEmptyRouting(t *testing.T) {
 		RenderTarget:        "bottom_chat_drawer",
 		RenderTargetBlocked: "",
 		Mode:                "planning",
+		DisplayClass:        EnvelopeDisplayClassContent,
 	})
 	if err != nil {
 		t.Fatalf("buildPluginEnvelopeWrap: %v", err)
@@ -68,6 +69,9 @@ func TestBuildPluginEnvelopeWrap_IncludesNonEmptyRouting(t *testing.T) {
 	}
 	if got["mode"] != "planning" {
 		t.Errorf("mode = %v, want planning", got["mode"])
+	}
+	if got["display_class"] != "content" {
+		t.Errorf("display_class = %v, want content", got["display_class"])
 	}
 	// Empty render_target_blocked still elided when zero-valued.
 	if _, ok := got["render_target_blocked"]; ok {

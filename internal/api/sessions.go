@@ -670,3 +670,41 @@ func (a *API) handleListSessionMessages(w http.ResponseWriter, r *http.Request) 
 	page.Messages = injectEnvelopePriorResponses(page.Messages, lookup)
 	a.jsonResp(w, http.StatusOK, page)
 }
+
+func (a *API) handleListSessionPluginEnvelopes(w http.ResponseWriter, r *http.Request) {
+	sessionID := r.PathValue("id")
+	insts, err := a.Services.Store.ListEnvelopeInstancesBySession(sessionID)
+	if err != nil {
+		a.errorResp(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	out := make([]chat.Envelope, 0, len(insts))
+	for _, inst := range insts {
+		if inst.RespondedAt != nil {
+			continue
+		}
+		if inst.EnvelopeType != "subagent-spawn-approval" && inst.EnvelopeType != "elicitation-prompt" {
+			continue
+		}
+		var data map[string]any
+		if err := json.Unmarshal([]byte(inst.EnvelopeJSON), &data); err != nil {
+			slog.Warn("api: skip malformed plugin-envelope rehydrate row",
+				"session_id", sessionID,
+				"envelope_id", inst.ID,
+				"type", inst.EnvelopeType,
+				"err", err,
+			)
+			continue
+		}
+		out = append(out, chat.Envelope{
+			Kind:         "envelope",
+			Version:      1,
+			Type:         inst.EnvelopeType,
+			ID:           inst.ID,
+			Data:         data,
+			DisplayClass: string(service.EnvelopeDisplayClassActionRequired),
+		})
+	}
+	a.jsonResp(w, http.StatusOK, out)
+}

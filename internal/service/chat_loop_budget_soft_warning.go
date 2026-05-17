@@ -68,10 +68,8 @@ func (s *chatServiceImpl) emitChatLoopBudgetSoftWarning(
 		slog.Warn("chat-service: marshal chat-loop-budget-soft-warning payload", "session", sessionID, "err", err)
 		return
 	}
-	streamWrap, err := json.Marshal(map[string]any{
-		"id":   "", // stream-only; no DB row
-		"type": chatLoopBudgetSoftWarningEnvelopeType,
-		"data": json.RawMessage(data),
+	streamWrap, err := buildPluginEnvelopeWrap("", chatLoopBudgetSoftWarningEnvelopeType, data, EnvelopeRouting{
+		DisplayClass: EnvelopeDisplayClassAlert,
 	})
 	if err != nil {
 		slog.Warn("chat-service: marshal chat-loop-budget-soft-warning wrap", "session", sessionID, "err", err)

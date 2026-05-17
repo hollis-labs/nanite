@@ -4,6 +4,7 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } fr
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { useSettings } from "@/hooks/useSettings";
 import { api } from "@/lib/api";
+import { shouldRenderStandalonePluginEnvelope } from "@/lib/envelope-lane";
 import type { AgentMode, Message } from "@/lib/types";
 import { useAppStore } from "@/stores/useAppStore";
 import {
@@ -454,7 +455,7 @@ export function ChatTranscript({
          * (rev 01KR89NWKFY52QW17R8PPC8V5S). Skip-when-render_target branch routes
          * to drawer/panel inbox via panel-signal.ts (not the chat thread). */}
         {pluginEnvelopes.map((item) =>
-          item.envelope.render_target && !item.envelope.render_target_blocked ? null : (
+          shouldRenderStandalonePluginEnvelope(item.envelope) ? (
             <div key={item.id} data-plugin-envelope-id={item.id} data-plugin-id={item.pluginId}>
               <EnvelopeRenderer
                 envelope={item.envelope}
@@ -462,7 +463,7 @@ export function ChatTranscript({
                 userMessageCount={userMessageCount}
               />
             </div>
-          ),
+          ) : null,
         )}
 
         {isStreaming && toolWarnings.length > 0 && <ToolWarningBanner warnings={toolWarnings} />}

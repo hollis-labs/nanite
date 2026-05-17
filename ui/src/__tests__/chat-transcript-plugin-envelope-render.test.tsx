@@ -115,11 +115,7 @@ function renderTranscript(): ReturnType<typeof render> {
     <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
   );
   return render(
-    <ChatTranscript
-      messages={STUB_MESSAGES}
-      isStreaming={false}
-      streamingContent=""
-    />,
+    <ChatTranscript messages={STUB_MESSAGES} isStreaming={false} streamingContent="" />,
     { wrapper: Wrapper },
   );
 }
@@ -163,9 +159,7 @@ describe("ChatTranscript — plugin_envelope inline render", () => {
     // chat_loop_terminated, recovery_envelope_sink, ApprovalEmitterImpl,
     // chat_loop_budget_soft_warning, and the plugin subprocess Deliver
     // path all emit today.
-    useChatStore
-      .getState()
-      .addPluginEnvelope(SESSION_ID, makeItem(makeEnvelope()));
+    useChatStore.getState().addPluginEnvelope(SESSION_ID, makeItem(makeEnvelope()));
 
     const { container } = renderTranscript();
 
@@ -200,20 +194,36 @@ describe("ChatTranscript — plugin_envelope inline render", () => {
 
     const wrappers = container.querySelectorAll("[data-plugin-envelope-id]");
     expect(wrappers).toHaveLength(1);
-    expect(wrappers[0]?.getAttribute("data-plugin-envelope-id")).toBe(
-      "penv-blocked",
-    );
+    expect(wrappers[0]?.getAttribute("data-plugin-envelope-id")).toBe("penv-blocked");
   });
 
   it("does NOT render inline when render_target is set and not blocked (panel route)", () => {
     // The skip branch: `chat_route_dispatch.go:200` and others set
     // render_target via DefaultRenderTarget. ChatTranscript must NOT
     // render those inline — the drawer/panel slot owns them.
+    useChatStore
+      .getState()
+      .addPluginEnvelope(
+        SESSION_ID,
+        makeItem(makeEnvelope({ render_target: "bottom_chat_drawer" }), "penv-routed"),
+      );
+
+    const { container } = renderTranscript();
+
+    const wrappers = container.querySelectorAll("[data-plugin-envelope-id]");
+    expect(wrappers).toHaveLength(0);
+  });
+
+  it("does NOT render inline when the explicit lane class is content", () => {
     useChatStore.getState().addPluginEnvelope(
       SESSION_ID,
       makeItem(
-        makeEnvelope({ render_target: "bottom_chat_drawer" }),
-        "penv-routed",
+        makeEnvelope({
+          type: "report-card",
+          display_class: "content",
+          data: { title: "Metrics", metrics: [] },
+        }),
+        "penv-content",
       ),
     );
 
@@ -227,14 +237,8 @@ describe("ChatTranscript — plugin_envelope inline render", () => {
     // Lock the loop semantics: every store entry without render_target
     // should produce exactly one inline wrapper, in arrival order.
     const store = useChatStore.getState();
-    store.addPluginEnvelope(
-      SESSION_ID,
-      makeItem(makeEnvelope({ id: "env-A" }), "penv-A"),
-    );
-    store.addPluginEnvelope(
-      SESSION_ID,
-      makeItem(makeEnvelope({ id: "env-B" }), "penv-B"),
-    );
+    store.addPluginEnvelope(SESSION_ID, makeItem(makeEnvelope({ id: "env-A" }), "penv-A"));
+    store.addPluginEnvelope(SESSION_ID, makeItem(makeEnvelope({ id: "env-B" }), "penv-B"));
 
     const { container } = renderTranscript();
 

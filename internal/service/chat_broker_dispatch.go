@@ -338,7 +338,7 @@ func (s *chatServiceImpl) attemptBrokerDispatch(
 		}
 		ch <- chat.StreamEvent{
 			Type:     "plugin_envelope",
-			Envelope: res.Output,
+			Envelope: stampEnvelopeDisplayClass(res.Output, EnvelopeDisplayClassContent),
 		}
 		out.EmittedEnvelope = true
 	}

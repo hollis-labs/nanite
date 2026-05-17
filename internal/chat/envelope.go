@@ -100,12 +100,12 @@ func ValidateEnvelope(env Envelope, raw string) *EnvelopeError {
 
 // Envelope represents a structured envelope block embedded in assistant messages.
 type Envelope struct {
-	Kind      string         `json:"kind"`
-	Version   int            `json:"version"`
-	Type      string         `json:"type"`                // standard, nanite, custom
-	ID        string         `json:"id,omitempty"`        // set by backend after CreateEnvelopeInstance
-	Title     string         `json:"title,omitempty"`
-	Subtitle  string         `json:"subtitle,omitempty"`
+	Kind     string `json:"kind"`
+	Version  int    `json:"version"`
+	Type     string `json:"type"`         // standard, nanite, custom
+	ID       string `json:"id,omitempty"` // set by backend after CreateEnvelopeInstance
+	Title    string `json:"title,omitempty"`
+	Subtitle string `json:"subtitle,omitempty"`
 	// Target is a visibility hint — the optional panel ID to OPEN when this
 	// envelope arrives (J8 v1 — CW-20260426-0006). It does NOT control where
 	// the envelope renders; it only signals "open this drawer". Known v1
@@ -113,7 +113,7 @@ type Envelope struct {
 	// drawers may introduce additional IDs. Omit to skip the visibility
 	// signal entirely. Independent of RenderTarget — both can be set so an
 	// envelope can render in one slot while opening a separate drawer.
-	Target    string         `json:"target,omitempty"`
+	Target string `json:"target,omitempty"`
 	// RenderTarget is the placement hint — the optional panel ID where the
 	// envelope should RENDER (A2 — CW-20260428-0008). When set and the FE
 	// dismiss-machine permits, the FE pushes the envelope into the named
@@ -138,16 +138,20 @@ type Envelope struct {
 	// → opens [work, workflows]. Empty/unknown modes are no-ops on the FE.
 	// Mode is independent of Target — both can be set on the same envelope so
 	// a card can route to one drawer while signaling a broader workspace mode.
-	Mode      string         `json:"mode,omitempty"`
-	Proposals []Proposal     `json:"proposals,omitempty"`
-	Questions []Question     `json:"questions,omitempty"`
-	Status    *Status        `json:"status,omitempty"`
-	Data      map[string]any `json:"data,omitempty"`      // custom payload for plugin envelopes
+	Mode string `json:"mode,omitempty"`
+	// DisplayClass classifies whether the standalone plugin-envelope lane may
+	// render this card. "content" stays attached to its turn/drawer; "alert"
+	// and "action-required" are eligible for the transcript-level lane.
+	DisplayClass string         `json:"display_class,omitempty"`
+	Proposals    []Proposal     `json:"proposals,omitempty"`
+	Questions    []Question     `json:"questions,omitempty"`
+	Status       *Status        `json:"status,omitempty"`
+	Data         map[string]any `json:"data,omitempty"` // custom payload for plugin envelopes
 }
 
 // Proposal represents a proposed action within an envelope.
 type Proposal struct {
-	Type    string         `json:"type"`             // create_task, update_sprint, etc.
+	Type    string         `json:"type"` // create_task, update_sprint, etc.
 	Payload map[string]any `json:"payload"`
 	Schema  map[string]any `json:"schema,omitempty"`
 }
@@ -155,7 +159,7 @@ type Proposal struct {
 // Question represents an interactive question within an envelope.
 type Question struct {
 	Prompt       string   `json:"prompt"`
-	Type         string   `json:"type"`              // text, textarea, select, radio, checkbox
+	Type         string   `json:"type"` // text, textarea, select, radio, checkbox
 	Options      []string `json:"options,omitempty"`
 	Required     bool     `json:"required"`
 	Default      string   `json:"default,omitempty"`

@@ -36,6 +36,7 @@ type EnvelopeRouting struct {
 	RenderTarget        string
 	RenderTargetBlocked string
 	Mode                string
+	DisplayClass        EnvelopeDisplayClass
 }
 
 // Emit persists an EnvelopeInstance and pushes a "plugin_envelope" StreamEvent
@@ -57,7 +58,9 @@ func (e *ApprovalEmitterImpl) Emit(ctx context.Context, sessionID, envelopeType 
 		return "", fmt.Errorf("create envelope instance: %w", err)
 	}
 
-	streamWrap, err := buildPluginEnvelopeWrap(inst.ID, envelopeType, payload, EnvelopeRouting{})
+	streamWrap, err := buildPluginEnvelopeWrap(inst.ID, envelopeType, payload, EnvelopeRouting{
+		DisplayClass: EnvelopeDisplayClassActionRequired,
+	})
 	if err != nil {
 		return "", fmt.Errorf("marshal stream wrap: %w", err)
 	}
@@ -71,11 +74,11 @@ func (e *ApprovalEmitterImpl) Emit(ctx context.Context, sessionID, envelopeType 
 }
 
 // buildPluginEnvelopeWrap produces the {id, type, data, target, render_target,
-// mode, render_target_blocked} wire shape consumed by useChat's plugin_envelope
-// handler. Routing fields come from the caller (not from inside `payload`,
-// which is the envelope's `data` blob — routing lives at envelope-level, not
-// inside `data`). Empty routing fields are omitted so consumers can rely on
-// presence to signal intent.
+// mode, render_target_blocked, display_class} wire shape consumed by useChat's
+// plugin_envelope handler. Routing fields come from the caller (not from inside
+// `payload`, which is the envelope's `data` blob — routing lives at
+// envelope-level, not inside `data`). Empty optional fields are omitted so
+// consumers can rely on presence to signal intent.
 //
 // Used by ApprovalEmitterImpl.Emit (always zero-valued routing) and by
 // chat_generate.go's broadcastShowCardEnvelopeEvents (passes parsed routing
@@ -99,6 +102,9 @@ func buildPluginEnvelopeWrap(id, envelopeType string, payload []byte, routing En
 	}
 	if routing.Mode != "" {
 		wrap["mode"] = routing.Mode
+	}
+	if routing.DisplayClass != "" {
+		wrap["display_class"] = string(routing.DisplayClass)
 	}
 	return json.Marshal(wrap)
 }

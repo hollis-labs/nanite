@@ -20,6 +20,7 @@ import (
 	"github.com/hollis-labs/go-providers/provider"
 	"github.com/hollis-labs/nanite/internal/agent"
 	"github.com/hollis-labs/nanite/internal/agent/builtin"
+	"github.com/hollis-labs/nanite/internal/agentregistry"
 	"github.com/hollis-labs/nanite/internal/background"
 	"github.com/hollis-labs/nanite/internal/bootprofile"
 	"github.com/hollis-labs/nanite/internal/chat"
@@ -266,6 +267,16 @@ type ContainerConfig struct {
 	// baseline READ roots the agent operates against. Empty / nil leaves
 	// the "workspace allow-list" section out of the rendered summary.
 	DevToolsAllowedPaths []string
+
+	// AgentRegistry is the shared go-agent-launch directory registrar
+	// (S5 Phase C — agentregistry.Build). main.go builds ONE instance and
+	// threads the SAME pointer here so the GUI chat launch path
+	// (driveBootSession) resolves its runtime binding registry-primary
+	// through the same registrar the standalone launcher uses — Phase F
+	// converges the two launch paths on one seam. nil-safe: when absent
+	// the chat boot-profile path resolves fully file/spec-default and
+	// still boots (D1 — the registry is never mandatory).
+	AgentRegistry *agentregistry.Registry
 }
 
 func newRuntimeAdapterRegistry() *agent.AdapterRegistry {
@@ -884,6 +895,11 @@ func NewContainer(cfg ContainerConfig) (*Container, error) {
 		// registry is empty and `bootprofile:` ids never appear
 		// in session rows in the first place.
 		BootProfiles: bootProfileRegistry,
+		// S5 Phase F: thread the shared directory registrar so the GUI
+		// chat boot-profile launch path (driveBootSession) resolves its
+		// runtime binding registry-primary via launchplan.Build — the
+		// SAME seam the standalone launcher uses. nil-safe (D1).
+		AgentRegistry: cfg.AgentRegistry,
 	})
 
 	// G-3 + G-5: subagent service with the real chat-engine-backed runner.

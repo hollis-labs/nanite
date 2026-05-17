@@ -129,12 +129,15 @@ func (s *chatServiceImpl) recoveryPreBootHook(opts *runtimeagent.Options) error 
 		return fmt.Errorf("recovery resume: profile %q requirements: %w", profileID, err)
 	}
 
-	// Overlay onto Options. applyLaunchSpecToBootOpts is the same helper
-	// the normal-boot path uses, so the merge semantics stay identical
-	// across "first boot" and "recovery relaunch" — that consistency is
-	// what makes the resume-vs-normal-start split structural rather
-	// than ad-hoc.
-	applyLaunchSpecToBootOpts(opts, spec)
+	// Overlay onto Options. applyLaunchSpecAsPlanToBootOpts is the same
+	// helper the normal-boot path uses (S5 Phase F) — it routes the
+	// compiled spec through the shared launchplan.Build seam (registry-
+	// primary runtime-binding resolution with an observable file/spec
+	// fallback) and projects the validated LaunchPlan onto Options. Using
+	// the SAME helper keeps the merge semantics identical across "first
+	// boot" and "recovery relaunch", which is what makes the resume-vs-
+	// normal-start split structural rather than ad-hoc.
+	s.applyLaunchSpecAsPlanToBootOpts(opts, spec)
 
 	// Re-stash so a follow-up driveBootSession turn (after the
 	// broker's adopt hook lands the replacement into activeSessions)
@@ -155,9 +158,10 @@ func (s *chatServiceImpl) recoveryPreBootHook(opts *runtimeagent.Options) error 
 	//   opts.ResumeFromCheckpoint = <stored checkpoint id>
 	//
 	// here. The "never on normal launch" guarantee stays intact because
-	// applyLaunchSpecToBootOpts (used by driveBootSession's first-boot
-	// path) does not touch these fields, and the only structural entry
-	// to this hook is the recovery broker's DispatchRetry.
+	// applyLaunchSpecAsPlanToBootOpts (used by driveBootSession's
+	// first-boot path) does not touch these fields, and the only
+	// structural entry to this hook is the recovery broker's
+	// DispatchRetry.
 
 	slog.Info("recovery: boot-profile relaunch resolved against current catalog",
 		"session_id", opts.SessionID,

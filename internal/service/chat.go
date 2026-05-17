@@ -14,6 +14,7 @@ import (
 	llmcontracts "github.com/hollis-labs/go-llm-contracts"
 	"github.com/hollis-labs/go-providers/provider"
 	"github.com/hollis-labs/nanite/internal/agent"
+	"github.com/hollis-labs/nanite/internal/agentregistry"
 	"github.com/hollis-labs/nanite/internal/bootprofile"
 	"github.com/hollis-labs/nanite/internal/chat"
 	"github.com/hollis-labs/nanite/internal/config"
@@ -231,6 +232,17 @@ type ChatServiceConfig struct {
 	// through as the legacy "no llmcontracts.Provider registered" fatal
 	// branch — the same shape as a misconfigured CLI provider today.
 	BootProfiles *bootprofile.Registry
+
+	// AgentRegistry is the shared go-agent-launch directory registrar
+	// (FileBackedRegistrar + DegradingRegistrar + LastKnownGoodCache),
+	// the SAME instance the standalone launcher uses (S5 Phase F). When
+	// set, driveBootSession's boot-profile path resolves its runtime
+	// binding registry-primary via launchplan.Build with an explicit,
+	// observable file/spec fallback (D1 + §4.1). nil-safe: when absent —
+	// tests, or a registry-less bootstrap — the chat boot-profile path
+	// resolves fully file/spec-default and still boots (D1: the registry
+	// is NEVER mandatory on the launch hot path).
+	AgentRegistry *agentregistry.Registry
 }
 
 // chatServiceImpl is the concrete ChatService implementation.
@@ -380,6 +392,12 @@ type chatServiceImpl struct {
 	// (IsCLIProvider is narrow by design).
 	bootProfiles *bootprofile.Registry
 
+	// agentRegistry is the shared directory registrar (S5 Phase F). When
+	// set, driveBootSession's boot-profile path resolves its runtime
+	// binding registry-primary through launchplan.Build. nil-safe — see
+	// ChatServiceConfig.AgentRegistry.
+	agentRegistry *agentregistry.Registry
+
 	// activeSessionLaunchSpecs stamps the compiled LaunchSpec for sessions
 	// whose chat provider is a boot-profile id. driveBootSession reads it
 	// at boot time to thread per-profile env/args/workdir/boot-prompt into
@@ -458,6 +476,7 @@ func NewChatService(cfg ChatServiceConfig) ChatService {
 		envelopeRenderExecutor: cfg.EnvelopeRenderExecutor,
 		agentBroker:            cfg.AgentBroker,
 		bootProfiles:           cfg.BootProfiles,
+		agentRegistry:          cfg.AgentRegistry,
 	}
 	// CW-20260512-0121 (SP-20260512-0011): wire the single dispatcher
 	// door. The Dispatcher delegates to chatServiceImpl.generateResponse

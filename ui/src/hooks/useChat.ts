@@ -26,6 +26,8 @@ import {
 import { useLayoutStore } from "@/stores/useLayoutStore";
 
 const PAGE_SIZE = 50;
+const STALLED_STREAM_IDLE_MS = 4000;
+const STALLED_STREAM_POLL_MS = 1000;
 
 /** SSE event type constants — single source of truth for stream event names */
 const SSE = {
@@ -103,6 +105,8 @@ export function useChat(sessionId: string | null) {
   } | null>(null);
   const [loadingOlder, setLoadingOlder] = useState(false);
   const eventSourceRef = useRef<EventSource | null>(null);
+  const lastStreamActivityAtRef = useRef(0);
+  const reconcileInFlightRef = useRef(false);
 
   // CW-20260418-0100: ring-buffer cursor for SSE reconnect. The backend
   // stamps every stream event with a monotonic event_id; we track the
@@ -143,6 +147,83 @@ export function useChat(sessionId: string | null) {
     }
   }, []);
 
+  const markStreamActivity = useCallback(() => {
+    lastStreamActivityAtRef.current = Date.now();
+  }, []);
+
+  const loadLatestMessages = useCallback(async () => {
+    if (!sessionId) {
+      return { messages: [] as Message[], total: 0, oldestOffset: 0 };
+    }
+
+    const firstPage = await api.getMessagePage(sessionId, PAGE_SIZE);
+    if (!firstPage.has_more) {
+      return {
+        messages: firstPage.messages ?? [],
+        total: firstPage.total,
+        oldestOffset: 0,
+      };
+    }
+
+    const lastOffset = Math.max(0, firstPage.total - PAGE_SIZE);
+    const lastPage = await api.getMessagePage(sessionId, PAGE_SIZE, lastOffset);
+    return {
+      messages: lastPage.messages ?? [],
+      total: lastPage.total,
+      oldestOffset: lastOffset,
+    };
+  }, [sessionId]);
+
+  const reconcileStreamingState = useCallback(
+    async (assistantMessageID: string) => {
+      if (!sessionId || reconcileInFlightRef.current) return;
+
+      reconcileInFlightRef.current = true;
+      try {
+        const latest = await loadLatestMessages();
+        if (!latest.messages.some((msg) => msg.id === assistantMessageID)) {
+          return;
+        }
+
+        setMessages((prev) => {
+          const merged = new Map<string, Message>();
+          for (const msg of prev) merged.set(msg.id, msg);
+          for (const msg of latest.messages) merged.set(msg.id, msg);
+          return Array.from(merged.values()).sort((a, b) => a.created_at.localeCompare(b.created_at));
+        });
+        setPaginationState({ total: latest.total, oldestOffset: latest.oldestOffset });
+
+        const standaloneEnvelopes = await api.getSessionPluginEnvelopes(sessionId);
+        store().setPluginEnvelopes(
+          sessionId,
+          standaloneEnvelopes.map((envelope, index) => ({
+            id: `rehydrated-${envelope.id ?? index}`,
+            pluginId: "",
+            envelope,
+            receivedAt: Date.now(),
+          })),
+        );
+
+        store().clearStreaming(sessionId);
+        store().clearChatErrors(sessionId);
+        clearPersistedErrorState(sessionId);
+        currentMessageIdRef.current = null;
+        if (eventSourceRef.current) {
+          eventSourceRef.current.close();
+          eventSourceRef.current = null;
+        }
+
+        void queryClient.invalidateQueries({ queryKey: ["session-usage", sessionId] });
+        void queryClient.invalidateQueries({ queryKey: ["session", sessionId] });
+      } catch (err) {
+        console.warn("[useChat] stalled-stream reconcile failed:", err);
+      } finally {
+        reconcileInFlightRef.current = false;
+      }
+    },
+    [loadLatestMessages, queryClient, sessionId],
+  );
+
   const loadMessages = useCallback(async () => {
     if (!sessionId) {
       setMessages([]);
@@ -150,25 +231,12 @@ export function useChat(sessionId: string | null) {
       return;
     }
     try {
-      // First request to get total count and first page.
-      const firstPage = await api.getMessagePage(sessionId, PAGE_SIZE);
-
-      let backendMessages: Message[];
-      if (!firstPage.has_more) {
-        // All messages fit in one page — use them directly.
-        backendMessages = firstPage.messages ?? [];
-        setPaginationState({ total: firstPage.total, oldestOffset: 0 });
-      } else {
-        // More messages exist — load the LAST page (most recent).
-        const lastOffset = Math.max(0, firstPage.total - PAGE_SIZE);
-        const lastPage = await api.getMessagePage(sessionId, PAGE_SIZE, lastOffset);
-        backendMessages = lastPage.messages ?? [];
-        setPaginationState({ total: lastPage.total, oldestOffset: lastOffset });
-      }
+      const latest = await loadLatestMessages();
 
       // Clear any leftover banner errors from the previous session.
       store().clearChatErrors(sessionId);
-      setMessages(backendMessages);
+      setMessages(latest.messages);
+      setPaginationState({ total: latest.total, oldestOffset: latest.oldestOffset });
 
       const standaloneEnvelopes = await api.getSessionPluginEnvelopes(sessionId);
       store().setPluginEnvelopes(
@@ -183,7 +251,7 @@ export function useChat(sessionId: string | null) {
     } catch (err) {
       console.error("Failed to load messages:", err);
     }
-  }, [sessionId]);
+  }, [loadLatestMessages, sessionId]);
 
   const loadOlderMessages = useCallback(async () => {
     if (!sessionId || !paginationState || paginationState.oldestOffset <= 0 || loadingOlder) return;
@@ -245,6 +313,19 @@ export function useChat(sessionId: string | null) {
       store().setTextOnlyMode(sessionId, false);
     }
   }, [loadMessages, sessionId, queryClient]);
+
+  useEffect(() => {
+    if (!sessionId || !isStreaming) return;
+    const timer = window.setInterval(() => {
+      const assistantMessageID = currentMessageIdRef.current;
+      if (!assistantMessageID) return;
+      if (Date.now() - lastStreamActivityAtRef.current < STALLED_STREAM_IDLE_MS) {
+        return;
+      }
+      void reconcileStreamingState(assistantMessageID);
+    }, STALLED_STREAM_POLL_MS);
+    return () => window.clearInterval(timer);
+  }, [isStreaming, reconcileStreamingState, sessionId]);
 
   // Pending-jump consumer. Subscribes reactively to `pendingJump` so it fires
   // for BOTH cross-session jumps (sessionId also changes) and same-session
@@ -340,11 +421,13 @@ export function useChat(sessionId: string | null) {
         // future reconnect path can re-subscribe with ?from=<lastEventId>.
         currentMessageIdRef.current = message_id;
         lastEventIdRef.current = 0;
+        markStreamActivity();
         const es = new EventSource(`/api/stream/${message_id}`);
         eventSourceRef.current = es;
         let accumulated = "";
 
         es.addEventListener(SSE.DELTA, (e: MessageEvent) => {
+          markStreamActivity();
           recordEventId(e.data as string);
           const data: StreamEvent = JSON.parse(e.data as string);
           if (data.content) {
@@ -370,6 +453,7 @@ export function useChat(sessionId: string | null) {
         });
 
         es.addEventListener(SSE.REPLACE_CONTENT, (e: MessageEvent) => {
+          markStreamActivity();
           recordEventId(e.data as string);
           const data: StreamEvent = JSON.parse(e.data as string);
           if (data.content != null) {
@@ -380,6 +464,7 @@ export function useChat(sessionId: string | null) {
         });
 
         es.addEventListener(SSE.TOOL_CALL, (e: MessageEvent) => {
+          markStreamActivity();
           recordEventId(e.data as string);
           const data = JSON.parse(e.data as string) as StreamEvent & {
             tool_id?: string;
@@ -403,6 +488,7 @@ export function useChat(sessionId: string | null) {
         });
 
         es.addEventListener(SSE.TOOL_RESULT, (e: MessageEvent) => {
+          markStreamActivity();
           recordEventId(e.data as string);
           const data = JSON.parse(e.data as string) as StreamEvent & { tool_id?: string };
           const toolId = data.tool_id || data.message_id;
@@ -415,6 +501,7 @@ export function useChat(sessionId: string | null) {
         });
 
         es.addEventListener(SSE.TOOL_WARNING, (e: MessageEvent) => {
+          markStreamActivity();
           recordEventId(e.data as string);
           const data: StreamEvent = JSON.parse(e.data as string);
           if (data.data) {
@@ -432,6 +519,7 @@ export function useChat(sessionId: string | null) {
         });
 
         es.addEventListener(SSE.PLUGIN_ENVELOPE, (e: MessageEvent) => {
+          markStreamActivity();
           recordEventId(e.data as string);
           try {
             const evt: StreamEvent = JSON.parse(e.data as string);
@@ -459,6 +547,7 @@ export function useChat(sessionId: string | null) {
         });
 
         es.addEventListener(SSE.PANEL_SIGNAL, (e: MessageEvent) => {
+          markStreamActivity();
           recordEventId(e.data as string);
           try {
             const evt: StreamEvent = JSON.parse(e.data as string);
@@ -482,6 +571,7 @@ export function useChat(sessionId: string | null) {
           // B2 (CW-20260428-0010): non-binding classifier signal. We stage
           // the payload in the chat store for B3 to consume; B2 itself
           // performs no UI action beyond a dev-mode debug log.
+          markStreamActivity();
           recordEventId(e.data as string);
           try {
             const evt: StreamEvent = JSON.parse(e.data as string);
@@ -497,6 +587,7 @@ export function useChat(sessionId: string | null) {
         });
 
         es.addEventListener(SSE.APPROVAL_REQUEST, (e: MessageEvent) => {
+          markStreamActivity();
           recordEventId(e.data as string);
           try {
             const evt: StreamEvent = JSON.parse(e.data as string);
@@ -513,6 +604,7 @@ export function useChat(sessionId: string | null) {
         });
 
         es.addEventListener(SSE.STATUS, (e: MessageEvent) => {
+          markStreamActivity();
           recordEventId(e.data as string);
           const data: StreamEvent = JSON.parse(e.data as string);
           if (data.content) {
@@ -521,11 +613,13 @@ export function useChat(sessionId: string | null) {
         });
 
         es.addEventListener(SSE.CIRCUIT_OPEN, () => {
+          markStreamActivity();
           store().setCircuitOpen(sessionId, true);
           // Do NOT close the EventSource — keep it open for potential retry.
         });
 
         es.addEventListener(SSE.SESSION_TAKEOVER, () => {
+          markStreamActivity();
           // Another tab opened this session — stop streaming and show banner.
           console.warn("[useChat] Session takeover — another tab is now active");
           store().setSessionTakeover(sessionId, true);
@@ -544,12 +638,14 @@ export function useChat(sessionId: string | null) {
             setMessages((prev) => [...prev, partialMsg]);
           }
           store().clearStreaming(sessionId);
+          currentMessageIdRef.current = null;
           es.close();
           eventSourceRef.current = null;
           // Do NOT reconnect — that would cause a takeover loop.
         });
 
         es.addEventListener(SSE.STREAM_END, (e: MessageEvent) => {
+          markStreamActivity();
           recordEventId(e.data as string);
           const data: StreamEvent = JSON.parse(e.data as string);
           // Add the complete assistant message
@@ -573,6 +669,7 @@ export function useChat(sessionId: string | null) {
           store().clearStreaming(sessionId);
           store().clearChatErrors(sessionId);
           clearPersistedErrorState(sessionId);
+          currentMessageIdRef.current = null;
           es.close();
           eventSourceRef.current = null;
 
@@ -582,6 +679,7 @@ export function useChat(sessionId: string | null) {
         });
 
         es.addEventListener(SSE.ERROR, (e: MessageEvent) => {
+          markStreamActivity();
           recordEventId(e.data as string);
           // Custom SSE error event from the backend (has data).
           if (e.data) {
@@ -631,6 +729,7 @@ export function useChat(sessionId: string | null) {
           });
 
           store().clearStreaming(sessionId);
+          currentMessageIdRef.current = null;
           es.close();
           eventSourceRef.current = null;
         });
@@ -654,6 +753,7 @@ export function useChat(sessionId: string | null) {
               setMessages((prev) => [...prev, assistantMsg]);
             }
             store().clearStreaming(sessionId);
+            currentMessageIdRef.current = null;
             es.close();
             eventSourceRef.current = null;
           }
@@ -661,9 +761,10 @@ export function useChat(sessionId: string | null) {
       } catch (err) {
         console.error("Send failed:", err);
         store().clearStreaming(sessionId);
+        currentMessageIdRef.current = null;
       }
     },
-    [sessionId, queryClient],
+    [markStreamActivity, queryClient, sessionId],
   );
 
   const stopStreaming = useCallback(() => {
@@ -671,6 +772,7 @@ export function useChat(sessionId: string | null) {
       eventSourceRef.current.close();
       eventSourceRef.current = null;
     }
+    currentMessageIdRef.current = null;
     if (sessionId) {
       store().clearStreaming(sessionId);
       // CW-20260512-0006: tell the BE to cancel the in-flight LLM
@@ -703,11 +805,13 @@ export function useChat(sessionId: string | null) {
       // CW-20260418-0100: fresh message id ⇒ reset cursor.
       currentMessageIdRef.current = message_id;
       lastEventIdRef.current = 0;
+      markStreamActivity();
       const es = new EventSource(`/api/stream/${message_id}`);
       eventSourceRef.current = es;
       store().setStreaming(sessionId, true);
 
       es.addEventListener(SSE.DELTA, (e: MessageEvent) => {
+        markStreamActivity();
         recordEventId(e.data as string);
         const data: StreamEvent = JSON.parse(e.data as string);
         if (data.content) {
@@ -717,6 +821,7 @@ export function useChat(sessionId: string | null) {
       });
 
       es.addEventListener(SSE.REPLACE_CONTENT, (e: MessageEvent) => {
+        markStreamActivity();
         recordEventId(e.data as string);
         const data: StreamEvent = JSON.parse(e.data as string);
         if (data.content != null) {
@@ -726,6 +831,7 @@ export function useChat(sessionId: string | null) {
       });
 
       es.addEventListener(SSE.STREAM_END, (e: MessageEvent) => {
+        markStreamActivity();
         recordEventId(e.data as string);
         const data: StreamEvent = JSON.parse(e.data as string);
         const slice = useChatStore.getState().sessions.get(sessionId);
@@ -741,24 +847,29 @@ export function useChat(sessionId: string | null) {
         };
         setMessages((prev) => [...prev, assistantMsg]);
         store().clearStreaming(sessionId);
+        currentMessageIdRef.current = null;
         es.close();
         eventSourceRef.current = null;
       });
 
       es.addEventListener(SSE.CIRCUIT_OPEN, () => {
+        markStreamActivity();
         store().setCircuitOpen(sessionId, true);
       });
 
       es.addEventListener(SSE.SESSION_TAKEOVER, () => {
+        markStreamActivity();
         console.warn("[useChat] Session takeover during retry — another tab is now active");
         store().setSessionTakeover(sessionId, true);
         store().clearStreaming(sessionId);
+        currentMessageIdRef.current = null;
         es.close();
         eventSourceRef.current = null;
       });
 
       es.addEventListener(SSE.ERROR, () => {
         store().clearStreaming(sessionId);
+        currentMessageIdRef.current = null;
         es.close();
         eventSourceRef.current = null;
       });
@@ -766,6 +877,7 @@ export function useChat(sessionId: string | null) {
       es.onerror = () => {
         if (eventSourceRef.current) {
           store().clearStreaming(sessionId);
+          currentMessageIdRef.current = null;
           es.close();
           eventSourceRef.current = null;
         }
@@ -777,8 +889,9 @@ export function useChat(sessionId: string | null) {
         eventSourceRef.current = null;
       }
       store().clearStreaming(sessionId);
+      currentMessageIdRef.current = null;
     }
-  }, [sessionId]);
+  }, [markStreamActivity, sessionId]);
 
   const dismissCircuit = useCallback(() => {
     if (!sessionId) return;
@@ -787,6 +900,7 @@ export function useChat(sessionId: string | null) {
       eventSourceRef.current.close();
       eventSourceRef.current = null;
     }
+    currentMessageIdRef.current = null;
     // Save partial content with interruption note.
     const slice = useChatStore.getState().sessions.get(sessionId);
     const partial = slice?.streamingContent ?? "";

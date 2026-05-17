@@ -19,3 +19,4 @@ export {
 export type { EnvelopeTone } from './Envelope'
 export { StatusPill } from './StatusPill'
 export type { StatusTone } from './StatusPill'
+export { DevBadge, DevModeEnvelopeWrapper } from './DevBadge'

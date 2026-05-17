@@ -198,7 +198,7 @@ func (s *chatServiceImpl) attemptRouteDispatch(
 	if ch != nil {
 		ch <- chat.StreamEvent{
 			Type:     "plugin_envelope",
-			Envelope: string(envBytes),
+			Envelope: stampEnvelopeDisplayClass(string(envBytes), EnvelopeDisplayClassContent),
 		}
 		outcome.EmittedEnvelope = true
 	}

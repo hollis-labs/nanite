@@ -87,6 +87,58 @@ func (s *Store) GetEnvelopeInstance(id string) (*EnvelopeInstance, error) {
 	return &inst, nil
 }
 
+// ListEnvelopeInstancesBySession returns every envelope instance for a session,
+// ordered by emitted_at ASC.
+func (s *Store) ListEnvelopeInstancesBySession(sessionID string) ([]EnvelopeInstance, error) {
+	rows, err := s.DB.Query(
+		`SELECT id, session_id, envelope_type, envelope_json, emitted_at,
+		        responded_at, response_status, response_json
+		   FROM envelope_instances
+		  WHERE session_id = ?
+		  ORDER BY emitted_at ASC`,
+		sessionID,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("list envelope instances by session: %w", err)
+	}
+	defer rows.Close()
+
+	var out []EnvelopeInstance
+	for rows.Next() {
+		var inst EnvelopeInstance
+		var emittedAt string
+		var respondedAt, responseStatus, responseJSON sql.NullString
+		if err := rows.Scan(
+			&inst.ID, &inst.SessionID, &inst.EnvelopeType, &inst.EnvelopeJSON,
+			&emittedAt, &respondedAt, &responseStatus, &responseJSON,
+		); err != nil {
+			return nil, fmt.Errorf("scan envelope instance: %w", err)
+		}
+		inst.EmittedAt, err = time.Parse(time.RFC3339Nano, emittedAt)
+		if err != nil {
+			return nil, fmt.Errorf("parse emitted_at for envelope %s: %w", inst.ID, err)
+		}
+		if respondedAt.Valid {
+			t, perr := time.Parse(time.RFC3339Nano, respondedAt.String)
+			if perr != nil {
+				return nil, fmt.Errorf("parse responded_at for envelope %s: %w", inst.ID, perr)
+			}
+			inst.RespondedAt = &t
+		}
+		if responseStatus.Valid {
+			inst.ResponseStatus = responseStatus.String
+		}
+		if responseJSON.Valid {
+			inst.ResponseJSON = responseJSON.String
+		}
+		out = append(out, inst)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate envelope instances: %w", err)
+	}
+	return out, nil
+}
+
 // ClaimEnvelopeForResponse atomically reserves an envelope instance for
 // response handling by setting responded_at to now and response_status to
 // "handling" iff the row is not already claimed. Returns

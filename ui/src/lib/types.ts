@@ -401,28 +401,28 @@ export interface UserSettings {
     email?: string;
     timezone?: string;
     language?: string;
-    theme_preference?: 'system' | 'light' | 'dark';
+    theme_preference?: "system" | "light" | "dark";
     user_context?: string;
   };
   // Memory embedding (S2a). Server validates provider against a 5-item enum.
   embedding_provider: string;
   embedding_model: string;
-  embedding_mode: 'disabled' | 'explicit';
+  embedding_mode: "disabled" | "explicit";
   // Computed server-side; not persisted. Reflects live credential / reachability.
-  embedding_status?: 'active' | 'disabled' | 'missing_credentials' | 'unreachable';
+  embedding_status?: "active" | "disabled" | "missing_credentials" | "unreachable";
   // B3 (CW-20260428-0011): user-level preference for auto-applying classifier
   // mode suggestions. "" = unset (triggers first-use prompt).
-  mode_auto_switch_pref?: '' | 'always' | 'ask' | 'never';
+  mode_auto_switch_pref?: "" | "always" | "ask" | "never";
 }
 
 // B3 (CW-20260428-0011): per-session override for auto-mode-switching.
 // Stored only in the FE chat store (not persisted) — resets on full reload.
-export type ModeAutoSwitchOverride = 'on' | 'off';
+export type ModeAutoSwitchOverride = "on" | "off";
 
 // B3 (CW-20260428-0011): the resolved effective behavior for a session,
 // computed from the global pref + per-session override. Returned by
 // useChatStore.getAutoSwitchEffective.
-export type ModeAutoSwitchEffective = 'auto' | 'ask' | 'off' | 'firstUse';
+export type ModeAutoSwitchEffective = "auto" | "ask" | "off" | "firstUse";
 
 export interface EmbeddingProviderInfo {
   id: string;
@@ -531,7 +531,7 @@ export interface InspectorSlotSnapshot {
   cache_key?: string;
   sensitive: boolean;
   content: string;
-  traffic_light: 'green' | 'yellow' | 'red';
+  traffic_light: "green" | "yellow" | "red";
 }
 
 export interface InspectorLLMMessageRecord {
@@ -608,6 +608,7 @@ export interface Envelope {
   id?: string;
   title?: string; // agent-defined card title
   subtitle?: string; // agent-defined subheading
+  display_class?: "content" | "alert" | "action-required";
   prior_response?: ResponseV1; // set by backend if already answered
   proposals?: Proposal[];
   questions?: Question[];
@@ -704,7 +705,12 @@ export interface EnvelopeApprovalRequest {
 // session_id and agent_id on each end of the tuple. Channel +
 // kind + payload_json came in S7 T3/T4.
 
-export type AgentMessageType = "message" | "help_request" | "directive" | "status_update" | "handoff";
+export type AgentMessageType =
+  | "message"
+  | "help_request"
+  | "directive"
+  | "status_update"
+  | "handoff";
 export type AgentMessageStatus = "unread" | "read" | "acknowledged" | "resolved";
 export type AgentMessageChannel = "chat" | "inbox" | "alert";
 export type AgentMessageKind = "request" | "reply" | "notification" | "handoff";
@@ -794,35 +800,35 @@ export interface Artifact {
 // --- Documents (J10, CW-20260426-0008) ---
 
 export interface Document {
-  id: string
-  session_id: string
-  name: string
-  mime_type: string
-  content: string
-  size_bytes: number
+  id: string;
+  session_id: string;
+  name: string;
+  mime_type: string;
+  content: string;
+  size_bytes: number;
   /** Include document in agent context */
-  included: boolean
+  included: boolean;
   /** true = send full content; false = send pointer (name + summary) */
-  full_content: boolean
-  summary: string
-  created_at: string
-  updated_at: string
+  full_content: boolean;
+  summary: string;
+  created_at: string;
+  updated_at: string;
 }
 
 // --- Pinned content (J11, CW-20260426-0009; D1, CW-20260428-0014) ---
 
-export type AgentStateScope = 'turn' | 'session' | 'project'
+export type AgentStateScope = "turn" | "session" | "project";
 
 export interface PinnedContent {
-  id: string
-  session_id?: string | null
-  scope: AgentStateScope
+  id: string;
+  session_id?: string | null;
+  scope: AgentStateScope;
   /** Project ID — populated when scope='project'. */
-  project_id?: string
-  content: string
-  agent_id: string
-  created_at: string
-  updated_at: string
+  project_id?: string;
+  content: string;
+  agent_id: string;
+  created_at: string;
+  updated_at: string;
 }
 
 // --- Bottom drawer pinned cards (C1, CW-20260428-0012) ---
@@ -836,23 +842,23 @@ export interface PinnedContent {
 // reload even when the source row has been GC'd.
 
 export type DrawerCardType =
-  | 'markdown'
-  | 'diff'
-  | 'image'
-  | 'scratchpad'
-  | 'artifact-mini'
-  | 'agent-envelope'
-  | (string & {})
+  | "markdown"
+  | "diff"
+  | "image"
+  | "scratchpad"
+  | "artifact-mini"
+  | "agent-envelope"
+  | (string & {});
 
 export interface DrawerPinnedCard {
-  id: string
-  session_id: string
-  card_type: DrawerCardType
-  content_ref: string
-  title: string
-  payload: string
-  position: number
-  created_at: string
+  id: string;
+  session_id: string;
+  card_type: DrawerCardType;
+  content_ref: string;
+  title: string;
+  payload: string;
+  position: number;
+  created_at: string;
 }
 
 /**
@@ -866,37 +872,37 @@ export interface DrawerPinnedCard {
  */
 export interface DynamicCardTab {
   /** Stable ID. Format: `card:<uuid>`. */
-  id: string
+  id: string;
   /** Display label. Derived from envelope.title when present;
    *  fallback = envelope-type display name + short timestamp. */
-  label: string
+  label: string;
   /** The full envelope payload — render via EnvelopeRenderer. */
-  payload: Envelope
+  payload: Envelope;
   /** Agent-emitted defaults true. When true, the tab promotes to active
    *  on the next drawer-open. Manual user selection overrides until the
    *  next focused-true arrival. */
-  focused: boolean
+  focused: boolean;
   /** When true, has been promoted to a DB-backed pinned card via the
    *  existing API. Transient tabs default false. */
-  pinned: boolean
+  pinned: boolean;
   /** Epoch ms. Used for stable sort order in the tab strip. */
-  createdAt: number
+  createdAt: number;
 }
 
 // --- Reminders (J11, CW-20260426-0009; D1, CW-20260428-0014) ---
 
 export interface Reminder {
-  id: string
-  session_id: string
-  scope: AgentStateScope
+  id: string;
+  session_id: string;
+  scope: AgentStateScope;
   /** Project ID — populated when scope='project'. */
-  project_id?: string
-  text: string
+  project_id?: string;
+  text: string;
   /** Raw JSON trigger blob — see internal/reminders.Trigger. */
-  trigger_json: string
-  fired_at?: string | null
-  created_at: string
-  updated_at: string
+  trigger_json: string;
+  fired_at?: string | null;
+  created_at: string;
+  updated_at: string;
 }
 
 // --- Tool Call Display ---
@@ -1012,80 +1018,80 @@ export interface FragmentsBacklogItem {
 
 // --- Todos & Plans ---
 
-export type TodoStatus = 'pending' | 'in_progress' | 'done' | 'blocked'
-export type TodoPriority = 'low' | 'medium' | 'high' | 'critical'
-export type PlanStatus = 'proposed' | 'approved' | 'in_progress' | 'complete' | 'abandoned'
-export type PlanStepStatus = 'pending' | 'in_progress' | 'done' | 'skipped'
+export type TodoStatus = "pending" | "in_progress" | "done" | "blocked";
+export type TodoPriority = "low" | "medium" | "high" | "critical";
+export type PlanStatus = "proposed" | "approved" | "in_progress" | "complete" | "abandoned";
+export type PlanStepStatus = "pending" | "in_progress" | "done" | "skipped";
 
 export interface Todo {
-  id: string
+  id: string;
   /** D1 (CW-20260428-0014): workspace dropped, turn added. */
-  scope: AgentStateScope
-  scope_id: string
+  scope: AgentStateScope;
+  scope_id: string;
   /** Project pointer — populated when scope='project'. */
-  project_id?: string
-  parent_id?: string
-  title: string
-  description: string
-  status: TodoStatus
-  priority: TodoPriority
-  labels: string[]
-  metadata: Record<string, unknown>
-  created_by: string
-  created_at: string
-  updated_at: string
+  project_id?: string;
+  parent_id?: string;
+  title: string;
+  description: string;
+  status: TodoStatus;
+  priority: TodoPriority;
+  labels: string[];
+  metadata: Record<string, unknown>;
+  created_by: string;
+  created_at: string;
+  updated_at: string;
 }
 
 export interface TodoFilter {
-  scope?: string
-  scope_id?: string
+  scope?: string;
+  scope_id?: string;
   /** D1 — convenience filter on project_id directly. */
-  project_id?: string
-  status?: TodoStatus
-  priority?: TodoPriority
-  parent_id?: string
-  labels?: string[]
+  project_id?: string;
+  status?: TodoStatus;
+  priority?: TodoPriority;
+  parent_id?: string;
+  labels?: string[];
 }
 
 export interface PlanStep {
-  id: string
-  title: string
-  status: PlanStepStatus
-  todo_id?: string
-  depends_on: string[]
-  acceptance?: string
-  notes?: string
+  id: string;
+  title: string;
+  status: PlanStepStatus;
+  todo_id?: string;
+  depends_on: string[];
+  acceptance?: string;
+  notes?: string;
 }
 
 export interface Plan {
-  id: string
-  scope: 'workspace' | 'project' | 'session'
-  scope_id: string
-  title: string
-  description: string
-  status: PlanStatus
-  steps: PlanStep[]
-  metadata: Record<string, unknown>
-  created_by: string
-  created_at: string
-  updated_at: string
+  id: string;
+  scope: "workspace" | "project" | "session";
+  scope_id: string;
+  title: string;
+  description: string;
+  status: PlanStatus;
+  steps: PlanStep[];
+  metadata: Record<string, unknown>;
+  created_by: string;
+  created_at: string;
+  updated_at: string;
 }
 
 export interface PlanFilter {
-  scope?: string
-  scope_id?: string
-  status?: PlanStatus
+  scope?: string;
+  scope_id?: string;
+  status?: PlanStatus;
 }
 
 export interface WorkDiff {
-  todos_checked: string[]
-  todos_unchecked: Array<{ id: string; reason?: string }>
-  todos_added: string[]
-  todos_reordered: boolean
-  plan_steps_checked: Array<{ plan_id: string; step_id: string }>
-  plan_steps_unchecked: Array<{ plan_id: string; step_id: string; reason?: string }>
-  plans_approved: string[]
-  plans_rejected: string[]
+  todos_checked: string[];
+  todos_unchecked: Array<{ id: string; reason?: string }>;
+  todos_added: string[];
+  todos_reordered: boolean;
+  plan_steps_checked: Array<{ plan_id: string; step_id: string }>;
+  plan_steps_unchecked: Array<{ plan_id: string; step_id: string; reason?: string }>;
+  plans_approved: string[];
+  plans_rejected: string[];
 }
 
 // --- Workers (background orchestration) ---
@@ -1299,11 +1305,11 @@ export interface Skill {
   input_schema: string;
   is_builtin: boolean;
   settings: string;
-  prompt?: string;   // markdown body; present for file-based skills
+  prompt?: string; // markdown body; present for file-based skills
   created_at: string;
   updated_at: string;
   // J7 ingestion metadata.
-  source?: string;        // "builtin", "user", "project", "plugin", "claude"
+  source?: string; // "builtin", "user", "project", "plugin", "claude"
   imported_at?: string;
   origin_system?: string;
   format?: string;

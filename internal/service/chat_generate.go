@@ -1769,6 +1769,7 @@ func (s *chatServiceImpl) generateResponse(ctx context.Context, sessionID, assis
 			RenderTarget:        env.RenderTarget,
 			RenderTargetBlocked: env.RenderTargetBlocked,
 			Mode:                env.Mode,
+			DisplayClass:        EnvelopeDisplayClassContent,
 		})
 		if err != nil {
 			slog.Warn("chat-service: marshal plugin_envelope wrap", "type", env.Type, "err", err)

@@ -38,6 +38,7 @@ import type {
   SessionAgent,
   SessionUsageSummary,
   SessionWithMessages,
+  Envelope,
   Skill,
   SlashCommandDef,
   ToolDefinition,
@@ -83,8 +84,8 @@ const API_BASE = "/api";
  */
 export class DrawerPinCapError extends Error {
   constructor() {
-    super("Drawer pin cap exceeded")
-    this.name = "DrawerPinCapError"
+    super("Drawer pin cap exceeded");
+    this.name = "DrawerPinCapError";
   }
 }
 
@@ -92,44 +93,64 @@ export class DrawerPinCapError extends Error {
 // These helpers parse them into typed forms for the UI and stringify on write.
 
 function hydrateTodo(raw: Record<string, unknown>): Todo {
-  const todo = raw as unknown as Todo
-  if (typeof todo.labels === 'string') {
-    try { todo.labels = JSON.parse(todo.labels as unknown as string) } catch { todo.labels = [] }
+  const todo = raw as unknown as Todo;
+  if (typeof todo.labels === "string") {
+    try {
+      todo.labels = JSON.parse(todo.labels as unknown as string);
+    } catch {
+      todo.labels = [];
+    }
   }
-  if (!Array.isArray(todo.labels)) todo.labels = []
-  if (typeof todo.metadata === 'string') {
-    try { todo.metadata = JSON.parse(todo.metadata as unknown as string) } catch { todo.metadata = {} }
+  if (!Array.isArray(todo.labels)) todo.labels = [];
+  if (typeof todo.metadata === "string") {
+    try {
+      todo.metadata = JSON.parse(todo.metadata as unknown as string);
+    } catch {
+      todo.metadata = {};
+    }
   }
-  if (typeof todo.metadata !== 'object' || todo.metadata === null) todo.metadata = {}
-  return todo
+  if (typeof todo.metadata !== "object" || todo.metadata === null) todo.metadata = {};
+  return todo;
 }
 
 function hydratePlan(raw: Record<string, unknown>): Plan {
-  const plan = raw as unknown as Plan
-  if (typeof plan.steps === 'string') {
-    try { plan.steps = JSON.parse(plan.steps as unknown as string) } catch { plan.steps = [] }
+  const plan = raw as unknown as Plan;
+  if (typeof plan.steps === "string") {
+    try {
+      plan.steps = JSON.parse(plan.steps as unknown as string);
+    } catch {
+      plan.steps = [];
+    }
   }
-  if (!Array.isArray(plan.steps)) plan.steps = []
-  if (typeof plan.metadata === 'string') {
-    try { plan.metadata = JSON.parse(plan.metadata as unknown as string) } catch { plan.metadata = {} }
+  if (!Array.isArray(plan.steps)) plan.steps = [];
+  if (typeof plan.metadata === "string") {
+    try {
+      plan.metadata = JSON.parse(plan.metadata as unknown as string);
+    } catch {
+      plan.metadata = {};
+    }
   }
-  if (typeof plan.metadata !== 'object' || plan.metadata === null) plan.metadata = {}
-  return plan
+  if (typeof plan.metadata !== "object" || plan.metadata === null) plan.metadata = {};
+  return plan;
 }
 
 // Serialize structured fields back to JSON strings for the Go backend.
 function serializeTodoUpdates(updates: Record<string, unknown>): Record<string, unknown> {
-  const out = { ...updates }
-  if (out.labels !== undefined && typeof out.labels !== 'string') out.labels = JSON.stringify(out.labels)
-  if (out.metadata !== undefined && typeof out.metadata !== 'string') out.metadata = JSON.stringify(out.metadata)
-  return out
+  const out = { ...updates };
+  if (out.labels !== undefined && typeof out.labels !== "string")
+    out.labels = JSON.stringify(out.labels);
+  if (out.metadata !== undefined && typeof out.metadata !== "string")
+    out.metadata = JSON.stringify(out.metadata);
+  return out;
 }
 
 function serializePlanPayload(data: Record<string, unknown>): Record<string, unknown> {
-  const out = { ...data }
-  if (out.steps !== undefined && typeof out.steps !== 'string') out.steps = JSON.stringify(out.steps)
-  if (out.metadata !== undefined && typeof out.metadata !== 'string') out.metadata = JSON.stringify(out.metadata)
-  return out
+  const out = { ...data };
+  if (out.steps !== undefined && typeof out.steps !== "string")
+    out.steps = JSON.stringify(out.steps);
+  if (out.metadata !== undefined && typeof out.metadata !== "string")
+    out.metadata = JSON.stringify(out.metadata);
+  return out;
 }
 
 export const api = {
@@ -241,9 +262,7 @@ export const api = {
    * the LLM stream + tool work instead of just closing the SSE
    * client-side (which would leave the BE generating wasted tokens).
    */
-  cancelChatStream: async (
-    sessionId: string,
-  ): Promise<"cancelled" | "idle" | "error"> => {
+  cancelChatStream: async (sessionId: string): Promise<"cancelled" | "idle" | "error"> => {
     try {
       const res = await fetch(`${API_BASE}/sessions/${sessionId}/chat/cancel`, {
         method: "POST",
@@ -347,6 +366,12 @@ export const api = {
     });
     const res = await fetch(`${API_BASE}/sessions/${sessionId}/messages?${params}`);
     if (!res.ok) throw new Error(`Failed to get messages around: ${res.status}`);
+    return res.json();
+  },
+
+  getSessionPluginEnvelopes: async (sessionId: string): Promise<Envelope[]> => {
+    const res = await fetch(`${API_BASE}/sessions/${sessionId}/plugin-envelopes`);
+    if (!res.ok) throw new Error(`Failed to get session plugin envelopes: ${res.status}`);
     return res.json();
   },
 
@@ -605,9 +630,9 @@ export const api = {
 
   // Documents (J10, CW-20260426-0008)
   listDocuments: async (sessionId: string): Promise<Document[]> => {
-    const res = await fetch(`${API_BASE}/sessions/${sessionId}/documents`)
-    if (!res.ok) throw new Error(`Failed to list documents: ${res.status}`)
-    return res.json()
+    const res = await fetch(`${API_BASE}/sessions/${sessionId}/documents`);
+    if (!res.ok) throw new Error(`Failed to list documents: ${res.status}`);
+    return res.json();
   },
 
   createDocument: async (
@@ -615,12 +640,12 @@ export const api = {
     doc: { name: string; content: string; mime_type?: string; summary?: string },
   ): Promise<Document> => {
     const res = await fetch(`${API_BASE}/sessions/${sessionId}/documents`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ ...doc, included: false, full_content: false }),
-    })
-    if (!res.ok) throw new Error(`Failed to create document: ${res.status}`)
-    return res.json()
+    });
+    if (!res.ok) throw new Error(`Failed to create document: ${res.status}`);
+    return res.json();
   },
 
   updateDocument: async (
@@ -628,55 +653,55 @@ export const api = {
     update: { included?: boolean; full_content?: boolean; summary?: string },
   ): Promise<Document> => {
     const res = await fetch(`${API_BASE}/documents/${id}`, {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
       body: JSON.stringify(update),
-    })
-    if (!res.ok) throw new Error(`Failed to update document: ${res.status}`)
-    return res.json()
+    });
+    if (!res.ok) throw new Error(`Failed to update document: ${res.status}`);
+    return res.json();
   },
 
   deleteDocument: async (id: string): Promise<void> => {
-    const res = await fetch(`${API_BASE}/documents/${id}`, { method: 'DELETE' })
-    if (!res.ok) throw new Error(`Failed to delete document: ${res.status}`)
+    const res = await fetch(`${API_BASE}/documents/${id}`, { method: "DELETE" });
+    if (!res.ok) throw new Error(`Failed to delete document: ${res.status}`);
   },
 
   // Session context prompt (J10, CW-20260426-0008)
   getSessionContextPrompt: async (sessionId: string): Promise<string> => {
-    const res = await fetch(`${API_BASE}/sessions/${sessionId}/context-prompt`)
-    if (!res.ok) throw new Error(`Failed to get context prompt: ${res.status}`)
-    const data = await res.json()
-    return data.prompt ?? ''
+    const res = await fetch(`${API_BASE}/sessions/${sessionId}/context-prompt`);
+    if (!res.ok) throw new Error(`Failed to get context prompt: ${res.status}`);
+    const data = await res.json();
+    return data.prompt ?? "";
   },
 
   setSessionContextPrompt: async (sessionId: string, prompt: string): Promise<void> => {
     const res = await fetch(`${API_BASE}/sessions/${sessionId}/context-prompt`, {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ prompt }),
-    })
-    if (!res.ok) throw new Error(`Failed to set context prompt: ${res.status}`)
+    });
+    if (!res.ok) throw new Error(`Failed to set context prompt: ${res.status}`);
   },
 
   // Pinned content (J11, CW-20260426-0009; D1/D2, CW-20260428-0014/0015)
   listPins: async (sessionId: string): Promise<PinnedContent[]> => {
-    const res = await fetch(`${API_BASE}/sessions/${sessionId}/pins`)
-    if (!res.ok) throw new Error(`Failed to list pins: ${res.status}`)
-    return res.json()
+    const res = await fetch(`${API_BASE}/sessions/${sessionId}/pins`);
+    if (!res.ok) throw new Error(`Failed to list pins: ${res.status}`);
+    return res.json();
   },
 
   deletePin: async (id: string): Promise<void> => {
-    const res = await fetch(`${API_BASE}/pins/${id}`, { method: 'DELETE' })
-    if (!res.ok) throw new Error(`Failed to delete pin: ${res.status}`)
+    const res = await fetch(`${API_BASE}/pins/${id}`, { method: "DELETE" });
+    if (!res.ok) throw new Error(`Failed to delete pin: ${res.status}`);
   },
 
   // Bottom-drawer pinned cards (C1, CW-20260428-0012)
   // Returns 409 when the 10-pin cap is exceeded — surfaced as DrawerPinCapError
   // so callers can render the "10-tab limit; unpin one first" toast.
   listDrawerCards: async (sessionId: string): Promise<DrawerPinnedCard[]> => {
-    const res = await fetch(`${API_BASE}/sessions/${sessionId}/drawer-cards`)
-    if (!res.ok) throw new Error(`Failed to list drawer cards: ${res.status}`)
-    return res.json()
+    const res = await fetch(`${API_BASE}/sessions/${sessionId}/drawer-cards`);
+    if (!res.ok) throw new Error(`Failed to list drawer cards: ${res.status}`);
+    return res.json();
   },
 
   pinDrawerCard: async (
@@ -684,59 +709,63 @@ export const api = {
     card: { card_type: DrawerCardType; content_ref?: string; title?: string; payload?: string },
   ): Promise<DrawerPinnedCard> => {
     const res = await fetch(`${API_BASE}/sessions/${sessionId}/drawer-cards`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
       body: JSON.stringify(card),
-    })
+    });
     if (res.status === 409) {
-      throw new DrawerPinCapError()
+      throw new DrawerPinCapError();
     }
-    if (!res.ok) throw new Error(`Failed to pin drawer card: ${res.status}`)
-    return res.json()
+    if (!res.ok) throw new Error(`Failed to pin drawer card: ${res.status}`);
+    return res.json();
   },
 
   unpinDrawerCard: async (id: string): Promise<void> => {
-    const res = await fetch(`${API_BASE}/drawer-cards/${id}`, { method: 'DELETE' })
-    if (!res.ok) throw new Error(`Failed to unpin drawer card: ${res.status}`)
+    const res = await fetch(`${API_BASE}/drawer-cards/${id}`, { method: "DELETE" });
+    if (!res.ok) throw new Error(`Failed to unpin drawer card: ${res.status}`);
   },
 
   /** D2 — promote/demote a pin between session and project scope. */
   updatePinScope: async (id: string, scope: AgentStateScope, projectId?: string): Promise<void> => {
     const res = await fetch(`${API_BASE}/pins/${id}/scope`, {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ scope, project_id: projectId ?? '' }),
-    })
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ scope, project_id: projectId ?? "" }),
+    });
     if (!res.ok) {
-      const err = await res.json().catch(() => ({ error: `Request failed: ${res.status}` }))
-      throw new Error(err.error || `Failed to update pin scope: ${res.status}`)
+      const err = await res.json().catch(() => ({ error: `Request failed: ${res.status}` }));
+      throw new Error(err.error || `Failed to update pin scope: ${res.status}`);
     }
   },
 
   // Reminders (D1/D2, CW-20260428-0014/0015)
   listReminders: async (sessionId: string): Promise<Reminder[]> => {
-    const res = await fetch(`${API_BASE}/sessions/${sessionId}/reminders`)
-    if (!res.ok) throw new Error(`Failed to list reminders: ${res.status}`)
-    return res.json()
+    const res = await fetch(`${API_BASE}/sessions/${sessionId}/reminders`);
+    if (!res.ok) throw new Error(`Failed to list reminders: ${res.status}`);
+    return res.json();
   },
 
   deleteReminder: async (id: string): Promise<void> => {
-    const res = await fetch(`${API_BASE}/reminders/${id}`, { method: 'DELETE' })
-    if (!res.ok) throw new Error(`Failed to delete reminder: ${res.status}`)
+    const res = await fetch(`${API_BASE}/reminders/${id}`, { method: "DELETE" });
+    if (!res.ok) throw new Error(`Failed to delete reminder: ${res.status}`);
   },
 
   /** D2 — promote/demote a reminder between session and project scope. */
-  updateReminderScope: async (id: string, scope: AgentStateScope, projectId?: string): Promise<Reminder> => {
+  updateReminderScope: async (
+    id: string,
+    scope: AgentStateScope,
+    projectId?: string,
+  ): Promise<Reminder> => {
     const res = await fetch(`${API_BASE}/reminders/${id}/scope`, {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ scope, project_id: projectId ?? '' }),
-    })
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ scope, project_id: projectId ?? "" }),
+    });
     if (!res.ok) {
-      const err = await res.json().catch(() => ({ error: `Request failed: ${res.status}` }))
-      throw new Error(err.error || `Failed to update reminder scope: ${res.status}`)
+      const err = await res.json().catch(() => ({ error: `Request failed: ${res.status}` }));
+      throw new Error(err.error || `Failed to update reminder scope: ${res.status}`);
     }
-    return res.json()
+    return res.json();
   },
 
   // Compact
@@ -831,14 +860,14 @@ export const api = {
   },
 
   // B3 (CW-20260428-0011): mode auto-switch preference. Empty string = unset.
-  getModeAutoSwitchPref: async (): Promise<{ pref: '' | 'always' | 'ask' | 'never' }> => {
+  getModeAutoSwitchPref: async (): Promise<{ pref: "" | "always" | "ask" | "never" }> => {
     const res = await fetch(`${API_BASE}/settings/mode-auto-switch`);
     if (!res.ok) throw new Error(`Failed to get mode auto-switch pref: ${res.status}`);
     return res.json();
   },
 
   setModeAutoSwitchPref: async (
-    pref: '' | 'always' | 'ask' | 'never',
+    pref: "" | "always" | "ask" | "never",
   ): Promise<{ pref: string }> => {
     const res = await fetch(`${API_BASE}/settings/mode-auto-switch`, {
       method: "PATCH",
@@ -1241,7 +1270,9 @@ export const api = {
   },
 
   // Engine (Sprint Planning)
-  getFragmentsSprints: async (projectId?: string): Promise<{ items: FragmentsSprint[]; count: number }> => {
+  getFragmentsSprints: async (
+    projectId?: string,
+  ): Promise<{ items: FragmentsSprint[]; count: number }> => {
     const params = projectId ? `?project_id=${encodeURIComponent(projectId)}` : "";
     const res = await fetch(`${API_BASE}/plugins/engine/sprints${params}`);
     if (!res.ok) throw new Error(`Failed to list sprints: ${res.status}`);
@@ -1273,11 +1304,14 @@ export const api = {
   },
 
   transitionFragmentsTask: async (id: string, status: string): Promise<unknown> => {
-    const res = await fetch(`${API_BASE}/plugins/engine/tasks/${encodeURIComponent(id)}/transition`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ status }),
-    });
+    const res = await fetch(
+      `${API_BASE}/plugins/engine/tasks/${encodeURIComponent(id)}/transition`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ status }),
+      },
+    );
     if (!res.ok) throw new Error(`Failed to transition task: ${res.status}`);
     return res.json();
   },
@@ -1303,63 +1337,65 @@ export const api = {
   // --- Todos ---
 
   listTodos: async (filter?: TodoFilter): Promise<Todo[]> => {
-    const params = new URLSearchParams()
-    if (filter?.scope) params.set('scope', filter.scope)
-    if (filter?.scope_id) params.set('scope_id', filter.scope_id)
-    if (filter?.status) params.set('status', filter.status)
-    if (filter?.priority) params.set('priority', filter.priority)
-    if (filter?.parent_id) params.set('parent_id', filter.parent_id)
-    if (filter?.labels?.length) params.set('labels', filter.labels.join(','))
-    const qs = params.toString()
-    const res = await fetch(`${API_BASE}/todos${qs ? `?${qs}` : ''}`)
-    if (!res.ok) throw new Error(`Failed to list todos: ${res.status}`)
-    const todos = await res.json()
-    return todos.map(hydrateTodo)
+    const params = new URLSearchParams();
+    if (filter?.scope) params.set("scope", filter.scope);
+    if (filter?.scope_id) params.set("scope_id", filter.scope_id);
+    if (filter?.status) params.set("status", filter.status);
+    if (filter?.priority) params.set("priority", filter.priority);
+    if (filter?.parent_id) params.set("parent_id", filter.parent_id);
+    if (filter?.labels?.length) params.set("labels", filter.labels.join(","));
+    const qs = params.toString();
+    const res = await fetch(`${API_BASE}/todos${qs ? `?${qs}` : ""}`);
+    if (!res.ok) throw new Error(`Failed to list todos: ${res.status}`);
+    const todos = await res.json();
+    return todos.map(hydrateTodo);
   },
 
   createTodo: async (data: {
-    title: string
-    scope: string
-    scope_id?: string
-    priority?: string
-    description?: string
+    title: string;
+    scope: string;
+    scope_id?: string;
+    priority?: string;
+    description?: string;
   }): Promise<Todo> => {
     const res = await fetch(`${API_BASE}/todos`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
       body: JSON.stringify(data),
-    })
+    });
     if (!res.ok) {
-      const err = await res.json().catch(() => ({ error: `Request failed: ${res.status}` }))
-      throw new Error(err.error || `Failed to create todo: ${res.status}`)
+      const err = await res.json().catch(() => ({ error: `Request failed: ${res.status}` }));
+      throw new Error(err.error || `Failed to create todo: ${res.status}`);
     }
-    return hydrateTodo(await res.json())
+    return hydrateTodo(await res.json());
   },
 
   getTodo: async (id: string): Promise<Todo> => {
-    const res = await fetch(`${API_BASE}/todos/${encodeURIComponent(id)}`)
-    if (!res.ok) throw new Error(`Failed to get todo: ${res.status}`)
-    return hydrateTodo(await res.json())
+    const res = await fetch(`${API_BASE}/todos/${encodeURIComponent(id)}`);
+    if (!res.ok) throw new Error(`Failed to get todo: ${res.status}`);
+    return hydrateTodo(await res.json());
   },
 
   updateTodo: async (
     id: string,
-    updates: Partial<Pick<Todo, 'title' | 'description' | 'status' | 'priority' | 'labels' | 'metadata'>>,
+    updates: Partial<
+      Pick<Todo, "title" | "description" | "status" | "priority" | "labels" | "metadata">
+    >,
   ): Promise<Todo> => {
     const res = await fetch(`${API_BASE}/todos/${encodeURIComponent(id)}`, {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
       body: JSON.stringify(serializeTodoUpdates(updates as Record<string, unknown>)),
-    })
-    if (!res.ok) throw new Error(`Failed to update todo: ${res.status}`)
-    return hydrateTodo(await res.json())
+    });
+    if (!res.ok) throw new Error(`Failed to update todo: ${res.status}`);
+    return hydrateTodo(await res.json());
   },
 
   deleteTodo: async (id: string): Promise<void> => {
     const res = await fetch(`${API_BASE}/todos/${encodeURIComponent(id)}`, {
-      method: 'DELETE',
-    })
-    if (!res.ok) throw new Error(`Failed to delete todo: ${res.status}`)
+      method: "DELETE",
+    });
+    if (!res.ok) throw new Error(`Failed to delete todo: ${res.status}`);
   },
 
   /** D2 — promote/demote a todo between session and project scope. */
@@ -1370,123 +1406,123 @@ export const api = {
     projectId?: string,
   ): Promise<Todo> => {
     const res = await fetch(`${API_BASE}/todos/${encodeURIComponent(id)}/scope`, {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ scope, scope_id: scopeId, project_id: projectId ?? '' }),
-    })
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ scope, scope_id: scopeId, project_id: projectId ?? "" }),
+    });
     if (!res.ok) {
-      const err = await res.json().catch(() => ({ error: `Request failed: ${res.status}` }))
-      throw new Error(err.error || `Failed to update todo scope: ${res.status}`)
+      const err = await res.json().catch(() => ({ error: `Request failed: ${res.status}` }));
+      throw new Error(err.error || `Failed to update todo scope: ${res.status}`);
     }
-    return hydrateTodo(await res.json())
+    return hydrateTodo(await res.json());
   },
 
   listTodoChildren: async (id: string): Promise<Todo[]> => {
-    const res = await fetch(`${API_BASE}/todos/${encodeURIComponent(id)}/children`)
-    if (!res.ok) throw new Error(`Failed to list todo children: ${res.status}`)
-    const todos = await res.json()
-    return todos.map(hydrateTodo)
+    const res = await fetch(`${API_BASE}/todos/${encodeURIComponent(id)}/children`);
+    if (!res.ok) throw new Error(`Failed to list todo children: ${res.status}`);
+    const todos = await res.json();
+    return todos.map(hydrateTodo);
   },
 
   // --- Plans ---
 
   listPlans: async (filter?: PlanFilter): Promise<Plan[]> => {
-    const params = new URLSearchParams()
-    if (filter?.scope) params.set('scope', filter.scope)
-    if (filter?.scope_id) params.set('scope_id', filter.scope_id)
-    if (filter?.status) params.set('status', filter.status)
-    const qs = params.toString()
-    const res = await fetch(`${API_BASE}/plans${qs ? `?${qs}` : ''}`)
-    if (!res.ok) throw new Error(`Failed to list plans: ${res.status}`)
-    const plans = await res.json()
-    return plans.map(hydratePlan)
+    const params = new URLSearchParams();
+    if (filter?.scope) params.set("scope", filter.scope);
+    if (filter?.scope_id) params.set("scope_id", filter.scope_id);
+    if (filter?.status) params.set("status", filter.status);
+    const qs = params.toString();
+    const res = await fetch(`${API_BASE}/plans${qs ? `?${qs}` : ""}`);
+    if (!res.ok) throw new Error(`Failed to list plans: ${res.status}`);
+    const plans = await res.json();
+    return plans.map(hydratePlan);
   },
 
   createPlan: async (data: {
-    title: string
-    scope: string
-    scope_id?: string
-    description?: string
-    steps?: PlanStep[]
+    title: string;
+    scope: string;
+    scope_id?: string;
+    description?: string;
+    steps?: PlanStep[];
   }): Promise<Plan> => {
     const res = await fetch(`${API_BASE}/plans`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
       body: JSON.stringify(serializePlanPayload(data as Record<string, unknown>)),
-    })
+    });
     if (!res.ok) {
-      const err = await res.json().catch(() => ({ error: `Request failed: ${res.status}` }))
-      throw new Error(err.error || `Failed to create plan: ${res.status}`)
+      const err = await res.json().catch(() => ({ error: `Request failed: ${res.status}` }));
+      throw new Error(err.error || `Failed to create plan: ${res.status}`);
     }
-    return hydratePlan(await res.json())
+    return hydratePlan(await res.json());
   },
 
   getPlan: async (id: string): Promise<Plan> => {
-    const res = await fetch(`${API_BASE}/plans/${encodeURIComponent(id)}`)
-    if (!res.ok) throw new Error(`Failed to get plan: ${res.status}`)
-    return hydratePlan(await res.json())
+    const res = await fetch(`${API_BASE}/plans/${encodeURIComponent(id)}`);
+    if (!res.ok) throw new Error(`Failed to get plan: ${res.status}`);
+    return hydratePlan(await res.json());
   },
 
   updatePlan: async (
     id: string,
-    updates: Partial<Pick<Plan, 'title' | 'description' | 'status' | 'steps' | 'metadata'>>,
+    updates: Partial<Pick<Plan, "title" | "description" | "status" | "steps" | "metadata">>,
   ): Promise<Plan> => {
     const res = await fetch(`${API_BASE}/plans/${encodeURIComponent(id)}`, {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
       body: JSON.stringify(serializePlanPayload(updates as Record<string, unknown>)),
-    })
-    if (!res.ok) throw new Error(`Failed to update plan: ${res.status}`)
-    return hydratePlan(await res.json())
+    });
+    if (!res.ok) throw new Error(`Failed to update plan: ${res.status}`);
+    return hydratePlan(await res.json());
   },
 
   updatePlanStep: async (
     planId: string,
     stepId: string,
-    updates: Partial<Pick<PlanStep, 'title' | 'status' | 'notes'>>,
+    updates: Partial<Pick<PlanStep, "title" | "status" | "notes">>,
   ): Promise<Plan> => {
     const res = await fetch(
       `${API_BASE}/plans/${encodeURIComponent(planId)}/steps/${encodeURIComponent(stepId)}`,
       {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify(updates),
       },
-    )
-    if (!res.ok) throw new Error(`Failed to update plan step: ${res.status}`)
-    return hydratePlan(await res.json())
+    );
+    if (!res.ok) throw new Error(`Failed to update plan step: ${res.status}`);
+    return hydratePlan(await res.json());
   },
 
   deletePlan: async (id: string): Promise<void> => {
     const res = await fetch(`${API_BASE}/plans/${encodeURIComponent(id)}`, {
-      method: 'DELETE',
-    })
-    if (!res.ok) throw new Error(`Failed to delete plan: ${res.status}`)
+      method: "DELETE",
+    });
+    if (!res.ok) throw new Error(`Failed to delete plan: ${res.status}`);
   },
 
   approvePlan: async (id: string, createTodos = true): Promise<Plan> => {
     const res = await fetch(`${API_BASE}/plans/${encodeURIComponent(id)}/approve`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ create_todos: createTodos }),
-    })
+    });
     if (!res.ok) {
-      const err = await res.json().catch(() => ({ error: `Request failed: ${res.status}` }))
-      throw new Error(err.error || `Failed to approve plan: ${res.status}`)
+      const err = await res.json().catch(() => ({ error: `Request failed: ${res.status}` }));
+      throw new Error(err.error || `Failed to approve plan: ${res.status}`);
     }
-    return hydratePlan(await res.json())
+    return hydratePlan(await res.json());
   },
 
   // --- Work Sync ---
 
   syncWorkChanges: async (diff: WorkDiff): Promise<{ ok: boolean }> => {
     const res = await fetch(`${API_BASE}/work/sync`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
       body: JSON.stringify(diff),
-    })
-    if (!res.ok) throw new Error(`Failed to sync work changes: ${res.status}`)
-    return res.json()
+    });
+    if (!res.ok) throw new Error(`Failed to sync work changes: ${res.status}`);
+    return res.json();
   },
 
   // Workers
@@ -1602,7 +1638,15 @@ export const api = {
     if (!res.ok) throw new Error(`Failed to refresh catalog: ${res.status}`);
   },
 
-  catalogInstall: async (name: string): Promise<{ status: string; plugin: string; version: string; source: string; message: string }> => {
+  catalogInstall: async (
+    name: string,
+  ): Promise<{
+    status: string;
+    plugin: string;
+    version: string;
+    source: string;
+    message: string;
+  }> => {
     const res = await fetch(`${API_BASE}/plugins/catalog/install`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -1634,7 +1678,10 @@ export const api = {
     return res.json();
   },
 
-  updateCatalogSource: async (id: string, data: { name?: string; url?: string; enabled?: boolean; priority?: number }): Promise<void> => {
+  updateCatalogSource: async (
+    id: string,
+    data: { name?: string; url?: string; enabled?: boolean; priority?: number },
+  ): Promise<void> => {
     const res = await fetch(`${API_BASE}/plugins/catalog/sources/${id}`, {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
@@ -1717,11 +1764,7 @@ export const api = {
     return res.json();
   },
 
-  ackAgentMessage: async (
-    id: string,
-    sessionId: string,
-    agentId: string,
-  ): Promise<void> => {
+  ackAgentMessage: async (id: string, sessionId: string, agentId: string): Promise<void> => {
     const res = await fetch(`${API_BASE}/messaging/${encodeURIComponent(id)}/ack`, {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
@@ -1730,11 +1773,7 @@ export const api = {
     if (!res.ok) throw new Error(`Failed to acknowledge agent message: ${res.status}`);
   },
 
-  resolveAgentMessage: async (
-    id: string,
-    sessionId: string,
-    agentId: string,
-  ): Promise<void> => {
+  resolveAgentMessage: async (id: string, sessionId: string, agentId: string): Promise<void> => {
     const res = await fetch(`${API_BASE}/messaging/${encodeURIComponent(id)}/resolve`, {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
@@ -1942,7 +1981,10 @@ export const api = {
     return res.json();
   },
 
-  setShellMode: async (sessionId: string, mode: import("./types").ShellMode): Promise<{ mode: import("./types").ShellMode }> => {
+  setShellMode: async (
+    sessionId: string,
+    mode: import("./types").ShellMode,
+  ): Promise<{ mode: import("./types").ShellMode }> => {
     const res = await fetch(`${API_BASE}/sessions/${sessionId}/shell-mode`, {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
@@ -2000,7 +2042,9 @@ export const api = {
   // --- vNext: Broker Decisions ---
 
   getBrokerDecisions: async (sessionId: string, limit = 50): Promise<BrokerDecision[]> => {
-    const res = await fetch(`${API_BASE}/broker/decisions?session_id=${encodeURIComponent(sessionId)}&limit=${limit}`);
+    const res = await fetch(
+      `${API_BASE}/broker/decisions?session_id=${encodeURIComponent(sessionId)}&limit=${limit}`,
+    );
     if (!res.ok) throw new Error(`Failed to get broker decisions: ${res.status}`);
     return res.json();
   },
@@ -2014,7 +2058,10 @@ export const api = {
   },
 
   // Workflow Runs
-  listWorkflowRuns: async (params?: { status?: string; pipeline_id?: string }): Promise<WorkflowRun[]> => {
+  listWorkflowRuns: async (params?: {
+    status?: string;
+    pipeline_id?: string;
+  }): Promise<WorkflowRun[]> => {
     const qs = new URLSearchParams();
     if (params?.status) qs.set("status", params.status);
     if (params?.pipeline_id) qs.set("pipeline_id", params.pipeline_id);
@@ -2040,7 +2087,12 @@ export const api = {
 
   // Memories
   listMemories: async (params?: {
-    scope?: string; status?: string; q?: string; tags?: string; limit?: number; offset?: number;
+    scope?: string;
+    status?: string;
+    q?: string;
+    tags?: string;
+    limit?: number;
+    offset?: number;
   }): Promise<MemoryListResponse> => {
     const qs = new URLSearchParams();
     if (params?.scope) qs.set("scope", params.scope);
@@ -2082,7 +2134,9 @@ export const api = {
   },
 
   deleteMemory: async (key: string): Promise<{ deleted: boolean }> => {
-    const res = await fetch(`${API_BASE}/memories/${encodeURIComponent(key)}`, { method: "DELETE" });
+    const res = await fetch(`${API_BASE}/memories/${encodeURIComponent(key)}`, {
+      method: "DELETE",
+    });
     if (!res.ok) throw new Error(`Failed to delete memory: ${res.status}`);
     return res.json();
   },
@@ -2142,10 +2196,7 @@ export const api = {
   },
 
   // Inspector (I1, CW-20260426-0004)
-  getInspectorTurns: async (
-    sessionId: string,
-    limit = 20,
-  ): Promise<InspectorTurnsResponse> => {
+  getInspectorTurns: async (sessionId: string, limit = 20): Promise<InspectorTurnsResponse> => {
     const res = await fetch(
       `${API_BASE}/inspector/sessions/${encodeURIComponent(sessionId)}/turns?limit=${limit}`,
     );
@@ -2153,10 +2204,7 @@ export const api = {
     return res.json();
   },
 
-  getInspectorTurn: async (
-    sessionId: string,
-    turnId: string,
-  ): Promise<InspectorTurnSnapshot> => {
+  getInspectorTurn: async (sessionId: string, turnId: string): Promise<InspectorTurnSnapshot> => {
     const res = await fetch(
       `${API_BASE}/inspector/sessions/${encodeURIComponent(sessionId)}/turns/${encodeURIComponent(turnId)}`,
     );

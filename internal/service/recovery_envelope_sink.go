@@ -164,16 +164,17 @@ func projectRecoveryEnvelope(env recovery.Envelope) (string, []byte, error) {
 	}
 }
 
-// buildRecoveryEnvelopeWrap produces the {id, type, data, cancel_token?}
-// wire shape consumed by useChat's plugin_envelope handler. id is "" —
-// recovery envelopes are stream-only signals (no DB row, no respond
-// endpoint). cancel_token is omitted when empty so the FE can rely on
+// buildRecoveryEnvelopeWrap produces the {id, type, data, display_class,
+// cancel_token?} wire shape consumed by useChat's plugin_envelope handler.
+// id is "" — recovery envelopes are stream-only signals (no DB row, no
+// respond endpoint). cancel_token is omitted when empty so the FE can rely on
 // presence to drive [Cancel retry] visibility.
 func buildRecoveryEnvelopeWrap(envelopeType string, payload []byte, cancelToken string) ([]byte, error) {
 	wrap := map[string]any{
-		"id":   "", // stream-only; no DB row
-		"type": envelopeType,
-		"data": json.RawMessage(payload),
+		"id":            "", // stream-only; no DB row
+		"type":          envelopeType,
+		"data":          json.RawMessage(payload),
+		"display_class": string(EnvelopeDisplayClassAlert),
 	}
 	if cancelToken != "" {
 		wrap[recoveryInfoCardCancelToken] = cancelToken

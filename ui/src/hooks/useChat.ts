@@ -1,6 +1,7 @@
 import { useQueryClient } from "@tanstack/react-query";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { api } from "@/lib/api";
+import { shouldRenderStandalonePluginEnvelope } from "@/lib/envelope-lane";
 import { applyEnvelopePanelEffects, applyPanelSignal } from "@/lib/panel-signal";
 import type {
   ApprovalRequest,
@@ -168,6 +169,17 @@ export function useChat(sessionId: string | null) {
       // Clear any leftover banner errors from the previous session.
       store().clearChatErrors(sessionId);
       setMessages(backendMessages);
+
+      const standaloneEnvelopes = await api.getSessionPluginEnvelopes(sessionId);
+      store().setPluginEnvelopes(
+        sessionId,
+        standaloneEnvelopes.map((envelope, index) => ({
+          id: `rehydrated-${envelope.id ?? index}`,
+          pluginId: "",
+          envelope,
+          receivedAt: Date.now(),
+        })),
+      );
     } catch (err) {
       console.error("Failed to load messages:", err);
     }
@@ -431,7 +443,9 @@ export function useChat(sessionId: string | null) {
               envelope,
               receivedAt: Date.now(),
             };
-            store().addPluginEnvelope(sessionId, item);
+            if (shouldRenderStandalonePluginEnvelope(envelope)) {
+              store().addPluginEnvelope(sessionId, item);
+            }
             // J8 v1 — declarative drawer routing. When the envelope carries a
             // target field, route the open/render through the layout store with
             // source='agent' so the dismiss machine gates correctly.

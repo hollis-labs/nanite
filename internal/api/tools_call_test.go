@@ -9,8 +9,10 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/hollis-labs/go-providers/provider"
+	"github.com/hollis-labs/nanite/internal/envelope"
 	"github.com/hollis-labs/nanite/internal/mcp"
 	"github.com/hollis-labs/nanite/internal/service"
 	"github.com/hollis-labs/nanite/internal/store"
@@ -168,6 +170,107 @@ func TestHandleSelfToolCall_PanelOpenReachesWiredSink(t *testing.T) {
 	}
 	if !strings.Contains(sink.payload, `"action":"open"`) || !strings.Contains(sink.payload, `"panel_id":"work"`) {
 		t.Errorf("broadcast payload = %q, want open/work signal", sink.payload)
+	}
+}
+
+// TestExtractEnvelopeMarker pins the marker-scan helper: it pulls the JSON
+// payload out of a card_show tool result's <!--ENVELOPE_DATA:...--> marker
+// and returns "" when no marker is present.
+func TestExtractEnvelopeMarker(t *testing.T) {
+	cases := []struct {
+		name string
+		res  *mcp.ToolResult
+		want string
+	}{
+		{"nil", nil, ""},
+		{"no marker", &mcp.ToolResult{Content: []mcp.ToolContent{{Type: "text", Text: "plain result"}}}, ""},
+		{
+			"with marker",
+			&mcp.ToolResult{Content: []mcp.ToolContent{{Type: "text",
+				Text: "metric-card\n<!--ENVELOPE_DATA:{\"type\":\"metric-card\"}:ENVELOPE_DATA-->"}}},
+			`{"type":"metric-card"}`,
+		},
+		{
+			"marker in a later block",
+			&mcp.ToolResult{Content: []mcp.ToolContent{
+				{Type: "text", Text: "no marker here"},
+				{Type: "text", Text: "<!--ENVELOPE_DATA:{\"k\":1}:ENVELOPE_DATA-->"},
+			}},
+			`{"k":1}`,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := extractEnvelopeMarker(tc.res); got != tc.want {
+				t.Errorf("extractEnvelopeMarker = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+// TestHandleSelfToolCall_CardShowBroadcastsEnvelope is the CW-20260517-0041
+// regression: a CLI-launched agent runs card_show in its own process and
+// forwards the call through POST /api/tools/call. The endpoint must broadcast
+// the resulting envelope as a plugin_envelope SSE event on the session's
+// active per-message stream WITHIN the turn, rather than leaving it to be
+// surfaced a turn late once the CLI agent echoes the marker into its text.
+func TestHandleSelfToolCall_CardShowBroadcastsEnvelope(t *testing.T) {
+	// card_show validates `data` against the per-type schema, which needs the
+	// shared envelope registry installed (the production composition root
+	// does this at startup).
+	envelope.SetupForTesting()
+
+	a, s := newToolCallTestAPI(t)
+	a.SetSelfTools(mcp.NewSelfToolsTransport(s))
+
+	const sessionID = "sess-cli-cardshow"
+	const msgID = "msg-cli-cardshow"
+
+	// Stand up a per-message stream + subscriber the same way a GUI-initiated
+	// turn does — this is the stream BroadcastSessionStreamEvent fans onto.
+	a.Services.Streams.CreateStream(msgID, sessionID)
+	sub, _, ok := a.Services.Streams.Subscribe(msgID, 0)
+	if !ok {
+		t.Fatal("Subscribe: stream not found")
+	}
+
+	rec := postToolCall(t, a, map[string]any{
+		"session_id": sessionID,
+		"name":       "card_show",
+		"args": map[string]any{
+			"type": "metric-card",
+			"data": map[string]any{
+				"label": "Response Time",
+				"value": "142",
+				"unit":  "ms",
+			},
+		},
+	})
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200\nbody=%s", rec.Code, rec.Body.String())
+	}
+	var res mcp.ToolResult
+	if err := json.Unmarshal(rec.Body.Bytes(), &res); err != nil {
+		t.Fatalf("decode result: %v\nbody=%s", err, rec.Body.String())
+	}
+	if res.IsError {
+		t.Fatalf("card_show should succeed, got %#v", res.Content)
+	}
+
+	// The plugin_envelope event must land on the stream within the turn —
+	// no turn boundary, no reconcile timer. The pump goroutine forwards
+	// asynchronously, so allow a short bound rather than asserting on a
+	// bare non-blocking read.
+	select {
+	case evt := <-sub:
+		if evt.Type != "plugin_envelope" {
+			t.Fatalf("stream event type = %q, want plugin_envelope", evt.Type)
+		}
+		if !strings.Contains(evt.Envelope, `"metric-card"`) {
+			t.Errorf("broadcast envelope = %q, want a metric-card payload", evt.Envelope)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("no plugin_envelope event on the stream — card would render late")
 	}
 }
 

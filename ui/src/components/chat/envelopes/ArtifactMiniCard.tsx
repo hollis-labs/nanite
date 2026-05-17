@@ -69,12 +69,16 @@ export function ArtifactMiniCard({ data }: ArtifactMiniCardProps) {
   }
 
   const sizeLabel = formatSize(data.size_bytes)
+  // `name` is required by the type, but a present-but-empty envelope can
+  // arrive without it — normalize so the card degrades gracefully (the
+  // `!data` guard above only covers a wholly-absent payload).
+  const name = data.name ?? 'Untitled artifact'
 
   return (
     <div className="flex items-start gap-3 p-3 border border-border rounded-md bg-bg-elevated/50">
       <Package className="w-5 h-5 text-fg-muted shrink-0 mt-0.5" />
       <div className="flex-1 min-w-0">
-        <p className="text-sm text-fg truncate font-medium">{data.name}</p>
+        <p className="text-sm text-fg truncate font-medium">{name}</p>
         <div className="flex items-center gap-2 mt-0.5 text-xs text-fg-faint">
           {data.mime_type && <span>{data.mime_type}</span>}
           {sizeLabel && <span>{sizeLabel}</span>}
@@ -85,10 +89,10 @@ export function ArtifactMiniCard({ data }: ArtifactMiniCardProps) {
         {downloadUrl && (
           <a
             href={downloadUrl}
-            download={data.name}
+            download={name}
             onClick={handleDownloadClick}
             className="flex items-center gap-1 px-2 py-1 rounded text-xs text-primary hover:text-primary-hover hover:bg-surface transition-colors"
-            aria-label={`Download ${data.name}`}
+            aria-label={`Download ${name}`}
           >
             <Download className="w-3.5 h-3.5" />
             Download

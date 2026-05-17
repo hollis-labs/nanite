@@ -101,9 +101,12 @@ export function PlanReviewCard({ data, onSendMessage }: PlanReviewCardProps) {
   const [acted, setActed] = useState(false)
 
   const currentStatus = plan?.status ?? data.status
+  // `steps` is required by the type, but a partially-loaded envelope can
+  // arrive without it — normalize before `.map` so the card degrades
+  // gracefully instead of throwing.
   const steps =
     plan?.steps ??
-    data.steps.map((s) => ({ ...s, status: 'pending' as const, depends_on: [] as string[] }))
+    (data.steps ?? []).map((s) => ({ ...s, status: 'pending' as const, depends_on: [] as string[] }))
   const doneCount = steps.filter((s) => s.status === 'done').length
   const totalCount = steps.length
   const progressPct = totalCount > 0 ? (doneCount / totalCount) * 100 : 0

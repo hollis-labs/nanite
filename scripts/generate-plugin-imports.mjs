@@ -45,6 +45,20 @@ const CORE_OVERRIDES = {
   'confirmation-card': { props: 'envelope' },
   'subagent-spawn-approval': { props: 'envelope' },
   'elicitation-prompt': { props: 'envelope' },
+  // CW-20260517-0007 (Issue 8): question-form has no component in the shared
+  // go-envelopes manifest, so InterviewCard previously rendered only via
+  // EnvelopeRenderer.renderLegacyFallback's `envelope.questions` branch. A
+  // host-side first-class registry entry decouples it from the legacy path.
+  // `props: "envelope"` hands InterviewCard the whole envelope wrapper —
+  // it reads `envelope.questions` / `envelope.prior_response` and needs
+  // `userMessageCount`, both wired by EnvelopeRenderer for envelope-shaped
+  // cards. This is a host-only rendering concern, so the override leads the
+  // shared manifest rather than requiring an edit in the go-envelopes repo.
+  'question-form': {
+    component: 'components/chat/envelopes/InterviewCard',
+    export: 'InterviewCard',
+    props: 'envelope',
+  },
 };
 
 // --- Minimal YAML parser (handles the flat list-of-objects subset we need) ---

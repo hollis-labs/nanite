@@ -1,0 +1,14 @@
+[
+  {
+    "title": "Resolve a Nanite agent by slug into a launch-ready spec",
+    "args": {
+      "agent": "recon-agent"
+    }
+  },
+  {
+    "title": "Resolve an agent by its profile id",
+    "args": {
+      "agent": "agt_01H8XK2P9QZ"
+    }
+  }
+]

@@ -5,11 +5,13 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"log/slog"
 	"os"
 	"os/signal"
 	"strings"
 	"syscall"
 
+	"github.com/hollis-labs/nanite/internal/agentregistry"
 	"github.com/hollis-labs/nanite/internal/brand"
 	"github.com/hollis-labs/nanite/internal/config"
 	"github.com/hollis-labs/nanite/internal/launcher"
@@ -92,6 +94,15 @@ func cmdLaunch(args []string) {
 	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer cancel()
 
+	// Build the shared registry-primary registrar over the catalog root
+	// (FileBackedRegistrar + DegradingRegistrar + LastKnownGoodCache).
+	// runtime-binding resolution is registry-primary; on a registry-down
+	// / no-binding condition it degrades to the spec/profile default
+	// (D1 — the registry is never mandatory; the standalone launcher
+	// still launches fully offline). A nil registry would also work;
+	// passing one exercises the registry-primary path.
+	reg := agentregistry.Build(catalogPath, "", slog.Default())
+
 	// --dry-run: compile + resolve + validate only. No store, no
 	// adapters, no runtime — a pure compile-level check an operator (or
 	// CI) can run to confirm a profile is launchable.
@@ -99,6 +110,7 @@ func cmdLaunch(args []string) {
 		spec, plan, err := launcher.Plan(ctx, launcher.Config{
 			CatalogPath: catalogPath,
 			Profile:     profileID,
+			Registry:    reg,
 		})
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "launch --dry-run: %v\n", err)
@@ -139,6 +151,7 @@ func cmdLaunch(args []string) {
 		DBPath:      s.DBPath(),
 		Store:       s,
 		Wait:        !*noWait,
+		Registry:    reg,
 	})
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "launch: %v\n", err)

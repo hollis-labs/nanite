@@ -30,6 +30,7 @@ import (
 	llmtypes "github.com/hollis-labs/go-llm-types"
 	"github.com/hollis-labs/go-providers/provider"
 	"github.com/hollis-labs/go-toolbroker/broker"
+	"github.com/hollis-labs/nanite/internal/agentregistry"
 	"github.com/hollis-labs/nanite/internal/api"
 	"github.com/hollis-labs/nanite/internal/chat"
 	"github.com/hollis-labs/nanite/internal/filter"
@@ -459,6 +460,25 @@ func cmdServe(args []string) {
 	// so a CLI-launched chat agent's `nanite mcp` subprocess can forward
 	// self-tool calls into this running harness.
 	a.SetSelfTools(selfTools)
+
+	// --- S5 Phase C: directory registry + agent-source handle ---
+	//
+	// Build the shared registry-primary registrar (FileBackedRegistrar +
+	// DegradingRegistrar + LastKnownGoodCache) over the boot-profile
+	// catalog root, then register Nanite as an `agent-source` resolver
+	// HANDLE pointing back at the loopback /api/tools/call endpoint
+	// (operation agent_source_resolve). The directory holds the handle
+	// only — never agent bodies (D2). A registration failure is logged
+	// and does NOT crash startup: the registry is never mandatory (D1).
+	agentRegistry := agentregistry.Build(resolveBootProfileCatalogPath(cfg), "", slog.Default())
+	loopbackToolsURL := fmt.Sprintf("http://127.0.0.1:%d/api/tools/call", *port)
+	handleDir := filepath.Join(os.TempDir(), brand.ID+"-agent-source")
+	if home, herr := os.UserHomeDir(); herr == nil {
+		handleDir = filepath.Join(home, "."+brand.ID, "registry")
+	}
+	if err := agentregistry.RegisterAgentSource(agentRegistry, loopbackToolsURL, handleDir, slog.Default()); err != nil {
+		slog.Warn("agent-source registration failed; continuing without directory handle", "err", err)
+	}
 
 	// Register existing custom actions as slash commands.
 	if actions, err := s.ListCustomActions(); err == nil {

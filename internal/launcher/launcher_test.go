@@ -11,6 +11,8 @@ import (
 	"github.com/hollis-labs/go-agent-launch/agentlaunch"
 	llmtypes "github.com/hollis-labs/go-llm-types"
 	"github.com/hollis-labs/go-providers/provider"
+
+	"github.com/hollis-labs/nanite/internal/agentregistry"
 )
 
 // writeCatalog materializes a minimal boot-profile catalog under root and
@@ -162,8 +164,10 @@ func TestPlan_CompilesAndValidates(t *testing.T) {
 	if plan.BootProfile.Inline == nil {
 		t.Fatal("plan.BootProfile.Inline is nil — boot profile should be carried inline")
 	}
-	if plan.BootProfile.Inline.BootPrompt != spec.BootPrompt {
-		t.Error("inline boot prompt does not match compiled spec boot prompt")
+	// PlanFromLaunch carries the rendered boot body as BootContent (the
+	// per-task kickoff body), not BootPrompt.
+	if plan.BootProfile.Inline.BootContent != spec.BootPrompt {
+		t.Error("inline boot content does not match compiled spec boot prompt")
 	}
 }
 
@@ -430,7 +434,86 @@ func TestD1_OfflineStandaloneLaunch(t *testing.T) {
 	if plan.BootProfile.Inline == nil {
 		t.Fatal("D1: plan.BootProfile.Inline is nil — the offline plan carries no inline boot profile")
 	}
-	if plan.BootProfile.Inline.BootPrompt != spec.BootPrompt {
-		t.Error("D1: inline boot prompt diverged from the compiled spec on the offline path")
+	if plan.BootProfile.Inline.BootContent != spec.BootPrompt {
+		t.Error("D1: inline boot content diverged from the compiled spec on the offline path")
 	}
+}
+
+// TestC2_RegistryPrimaryPlanThroughPlanFromLaunch is the C2 acceptance
+// check: a launch resolved with a wired registry must drive the shipped
+// agentlaunch.PlanFromLaunch bridge and produce a Validate()-clean
+// LaunchPlan.
+//
+// The registry here has no providers/ entries, so the runtime binding
+// degrades to the spec/profile fallback — but the plan still flows
+// through PlanFromLaunch (NOT the retired hand-rolled ToLaunchPlan).
+func TestC2_RegistryPrimaryPlanThroughPlanFromLaunch(t *testing.T) {
+	root := writeCatalog(t, "claude")
+	reg := agentregistry.Build(root, "", nil)
+
+	spec, plan, err := Plan(context.Background(), Config{
+		CatalogPath: root,
+		Profile:     "test-profile",
+		Registry:    reg,
+	})
+	if err != nil {
+		t.Fatalf("C2: registry-primary Plan failed: %v", err)
+	}
+	if err := plan.Validate(); err != nil {
+		t.Errorf("C2: PlanFromLaunch plan failed Validate: %v", err)
+	}
+	if plan.Provider.ID != "claude" {
+		t.Errorf("C2: plan.Provider.ID = %q, want claude", plan.Provider.ID)
+	}
+	if plan.Runtime != agentlaunch.RuntimeStreamingStdio {
+		t.Errorf("C2: plan.Runtime = %q, want streaming-stdio", plan.Runtime)
+	}
+	// PlanFromLaunch carries the rendered boot body inline as BootContent.
+	if plan.BootProfile.Inline == nil || plan.BootProfile.Inline.BootContent != spec.BootPrompt {
+		t.Error("C2: PlanFromLaunch plan does not carry the rendered boot body inline")
+	}
+	// §4.2 — the agent identity is resolved caller-side onto the plan.
+	if plan.Agent.ID == "" {
+		t.Error("C2: plan.Agent.ID is empty — agent identity must be caller-resolved")
+	}
+	// PlanFromLaunch stamps launch provenance onto Metadata.Annotations.
+	if plan.Metadata.Annotations["agentlaunch.launch_spec"] == "" {
+		t.Error("C2: plan metadata missing the PlanFromLaunch launch_spec annotation")
+	}
+}
+
+// TestC2_RegistryDownDegradesToFileBacked is the D1 regression for C2:
+// registry-primary launch resolution must DEGRADE cleanly to the
+// file-backed / spec fallback when the registry is unavailable. The
+// launch still produces a valid plan; it never hard-fails on a down
+// registry.
+func TestC2_RegistryDownDegradesToFileBacked(t *testing.T) {
+	root := writeCatalog(t, "claude")
+	// A registry whose inner registrar is permanently down, fronted by a
+	// DegradingRegistrar with an empty cache — every query is a cache
+	// miss, the D1 degrade-to-fallback condition.
+	reg := agentregistry.NewForTest(downRegistrarStub{}, root)
+
+	spec, plan, err := Plan(context.Background(), Config{
+		CatalogPath: root,
+		Profile:     "test-profile",
+		Registry:    reg,
+	})
+	if err != nil {
+		t.Fatalf("D1/C2: launch with a down registry hard-failed (must degrade): %v", err)
+	}
+	if err := plan.Validate(); err != nil {
+		t.Errorf("D1/C2: degraded plan failed Validate: %v", err)
+	}
+	if plan.Provider.ID != spec.Provider {
+		t.Errorf("D1/C2: degraded plan provider = %q, want spec fallback %q", plan.Provider.ID, spec.Provider)
+	}
+}
+
+// downRegistrarStub is a Registrar whose every call fails — it
+// simulates an unreachable directory for the C2 D1 degrade test.
+type downRegistrarStub struct{}
+
+func (downRegistrarStub) Handle(agentlaunch.RegistryEnvelope) (agentlaunch.RegistryResponse, error) {
+	return agentlaunch.RegistryResponse{}, errors.New("directory unreachable")
 }

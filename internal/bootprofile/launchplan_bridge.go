@@ -141,20 +141,17 @@ type LaunchPlanOptions struct {
 // already compiled the prompt — there is no need to round-trip back
 // through a catalog path.
 //
-// The returned plan is NOT pre-validated; callers should run
-// plan.Validate() and handle the sentinel errors. The bridge leaves
-// validation to the caller so a caller assembling several plans can
-// batch the checks.
+// RETIRED FROM THE PRODUCTION PATH (S5 platform-reshape, Phase C). The
+// standalone launcher no longer hand-assembles a LaunchPlan here: it now
+// drives the shipped agentlaunch.PlanFromLaunch bridge (see
+// internal/launcher/planbridge.go), which resolves the runtime binding
+// registry-primary and Validate()s the assembled plan itself. ToLaunchPlan
+// is retained ONLY so its pinned tests (launchplan_bridge_test.go) stay
+// green — bootprofile.LaunchSpec remains the stable Nanite view. Do NOT
+// reach for ToLaunchPlan in new code; use launcher.buildLaunchPlan.
 //
-// CW-0027: this is the convergence point. The standalone launcher takes
-// a Nanite-compiled LaunchSpec, calls ToLaunchPlan with its own
-// lifecycle defaults, and runs plan.Validate() to exercise the
-// shared-plan contract. It deliberately does NOT drive launcher.Compile /
-// launcher.Prepare / providerplant.Plant on the result — Nanite keeps
-// its own bootdir renderers (agent.Boot plants the bootdir with
-// Nanite-correct content), so the plan is built + validated only, never
-// planted. See the "Relationship to providerplant" section in
-// internal/launcher and docs/standalone-launcher.md for the rationale.
+// The returned plan is NOT pre-validated; callers should run
+// plan.Validate() and handle the sentinel errors.
 func (s *LaunchSpec) ToLaunchPlan(opts LaunchPlanOptions) agentlaunch.LaunchPlan {
 	inline := s.ToBootProfileInline()
 	return agentlaunch.LaunchPlan{

@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Bot, ChevronDown, Copy, GitFork, MoreHorizontal, Sparkles, Users } from "lucide-react";
+import { Bot, ChevronDown, Copy, GitFork, MoreHorizontal, RotateCcw, Sparkles, Users } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { SourceBadge } from "@/components/agents/SourceBadge";
 import { Tooltip } from "@/components/ui/tooltip";
@@ -145,6 +145,22 @@ export function ChatHeader() {
       void queryClient.invalidateQueries({ queryKey: ["sessions"] });
       setActiveSession(newSession.id);
       setMoreOpen(false);
+    },
+  });
+
+  // CW-20260516-0057: reboot just this session's runtime agent so the next
+  // turn cold-boots a fresh agent process + boot dir from the current
+  // binary. The DB transcript is untouched. The menu stays open on a
+  // rejected reboot ("busy"/"error") so the inline outcome is visible.
+  const rebootMutation = useMutation({
+    mutationFn: () => {
+      if (!activeSessionId) throw new Error("No active session");
+      return api.rebootSessionAgent(activeSessionId);
+    },
+    onSuccess: (result) => {
+      if (result === "rebooted" || result === "no_active_agent") {
+        setMoreOpen(false);
+      }
     },
   });
 
@@ -364,6 +380,23 @@ export function ChatHeader() {
                   <GitFork className="h-3 w-3 text-fg-muted" />
                   Fork (with history)
                 </button>
+                <button
+                  type="button"
+                  onClick={() => rebootMutation.mutate()}
+                  disabled={rebootMutation.isPending || !activeSessionId}
+                  title="Stop this session's agent so the next turn boots a fresh one from the current binary"
+                  className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs text-fg-secondary transition-colors hover:bg-surface hover:text-fg"
+                >
+                  <RotateCcw className="h-3 w-3 text-fg-muted" />
+                  {rebootMutation.isPending ? "Rebooting agent…" : "Reboot agent"}
+                </button>
+                {(rebootMutation.data === "busy" || rebootMutation.data === "error") && (
+                  <div className="px-3 pb-1 text-[10px] text-fg-muted">
+                    {rebootMutation.data === "busy"
+                      ? "A turn is in progress — try again when it finishes."
+                      : "Reboot failed — check the service."}
+                  </div>
+                )}
                 {pluginActions.length > 0 && (
                   <>
                     <div className="my-1 h-px bg-divider" />

@@ -77,6 +77,12 @@ type ChatService interface {
 	// 5-minute parent wall-clock deadline is gone.
 	CancelActiveGeneration(sessionID string) bool
 
+	// RebootSessionAgent tears down one session's live runtime agent so the
+	// next user turn cold-boots a fresh agent (new boot dir from the current
+	// binary) without touching other sessions. Returns ErrSessionBusy when a
+	// turn is in flight for the session. CW-20260516-0057.
+	RebootSessionAgent(ctx context.Context, sessionID string) (RebootResult, error)
+
 	// Shutdown kills all tracked CLI processes.
 	Shutdown()
 }
@@ -345,6 +351,14 @@ type chatServiceImpl struct {
 	// don't bounce them back to lazy and thrash the Tools-slot CacheKey.
 	// G-HOT-SWAP-DEAD activation.
 	toolPartitionStates sync.Map
+
+	// rebootingSessions flags chat session ids whose runtime agent is being
+	// torn down on purpose by RebootSessionAgent (CW-20260516-0057). The
+	// Wait-observer (observeSessionForRecovery) consults this set so a
+	// deliberate reboot exit is not misclassified as a crash and routed to
+	// the recovery broker. Values are struct{}; entries are cleared by the
+	// observer via LoadAndDelete. Keyed by chat session id.
+	rebootingSessions sync.Map
 
 	// envelopeRenderExecutor is the B3 in-process executor pilot,
 	// dispatched by chat_generate.go's route seam when the B2

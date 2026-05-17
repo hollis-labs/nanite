@@ -2,14 +2,25 @@ import { ShieldAlert, ShieldCheck, ShieldX, type LucideIcon } from 'lucide-react
 import { useState } from 'react'
 import { Button } from '@/components/ui/button'
 import { ResponseStatus } from '@/lib/envelope-response'
-import type { EnvelopeApprovalRequest } from '@/lib/types'
+import type { EnvelopeApprovalRequest, Envelope as EnvelopeType } from '@/lib/types'
 import { Envelope, EnvelopeHeader, EnvelopeBody, EnvelopeFooter } from './primitives/Envelope'
 import { StatusPill, type StatusTone } from './primitives/StatusPill'
 import type { EnvelopeResponder } from './EnvelopeRenderer'
 
 interface ApprovalCardProps {
-  approval: EnvelopeApprovalRequest
+  envelope: EnvelopeType
   onRespond?: EnvelopeResponder
+}
+
+/**
+ * Hydrate the decision from a persisted response. The backend injects
+ * `prior_response` into the envelope when the card was already answered;
+ * `respond()` writes `data.approved` (boolean). CW-20260517-0006.
+ */
+function hydrateDecision(prior: EnvelopeType['prior_response']): 'pending' | 'approved' | 'rejected' {
+  if (!prior) return 'pending'
+  if (prior.status === ResponseStatus.Cancelled) return 'rejected'
+  return prior.data?.approved === false ? 'rejected' : 'approved'
 }
 
 const RISK_META: Record<
@@ -21,9 +32,13 @@ const RISK_META: Record<
   high:   { tone: 'danger',  icon: ShieldX,     label: 'High risk' },
 }
 
-export function ApprovalCard({ approval, onRespond }: ApprovalCardProps) {
-  const [decision, setDecision] =
-    useState<'pending' | 'approved' | 'rejected'>('pending')
+export function ApprovalCard({ envelope, onRespond }: ApprovalCardProps) {
+  const approval: EnvelopeApprovalRequest =
+    (envelope.approval ?? (envelope.data as EnvelopeApprovalRequest | undefined)) ??
+    ({ description: '' } as EnvelopeApprovalRequest)
+  const [decision, setDecision] = useState<'pending' | 'approved' | 'rejected'>(() =>
+    hydrateDecision(envelope.prior_response),
+  )
   const [submitError, setSubmitError] = useState<string | null>(null)
 
   const risk = approval.risk_level || 'low'

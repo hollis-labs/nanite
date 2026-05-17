@@ -1,6 +1,9 @@
 import { useState } from 'react'
 import { AlertTriangle, CheckCircle, XCircle } from 'lucide-react'
 import { Button } from '@/components/ui/button'
+import { ResponseStatus } from '@/lib/envelope-response'
+import type { Envelope as EnvelopeType } from '@/lib/types'
+import type { EnvelopeResponder } from '../EnvelopeRenderer'
 import { Envelope, EnvelopeHeader, EnvelopeFooter } from './Envelope'
 import { StatusPill } from './StatusPill'
 
@@ -13,12 +16,31 @@ interface ConfirmationCardData {
 }
 
 interface ConfirmationCardProps {
-  data: ConfirmationCardData
+  envelope: EnvelopeType
+  onRespond?: EnvelopeResponder
+  /**
+   * @deprecated legacy untyped path. Kept only as a fallback for envelopes
+   * with no `id` (pre-Phase-3 emits) where `onRespond` is not wired.
+   */
   onSendMessage?: (content: string) => void
 }
 
-export function ConfirmationCard({ data, onSendMessage }: ConfirmationCardProps) {
-  const [decision, setDecision] = useState<'pending' | 'confirmed' | 'cancelled'>('pending')
+/**
+ * Hydrate the decision from a persisted response so the card keeps its
+ * resolved state after a page reload. CW-20260517-0006.
+ */
+function hydrateDecision(
+  prior: EnvelopeType['prior_response'],
+): 'pending' | 'confirmed' | 'cancelled' {
+  if (!prior) return 'pending'
+  return prior.status === ResponseStatus.Cancelled ? 'cancelled' : 'confirmed'
+}
+
+export function ConfirmationCard({ envelope, onRespond, onSendMessage }: ConfirmationCardProps) {
+  const data = (envelope.data ?? {}) as unknown as ConfirmationCardData
+  const [decision, setDecision] = useState<'pending' | 'confirmed' | 'cancelled'>(() =>
+    hydrateDecision(envelope.prior_response),
+  )
 
   const risk = data.risk || 'low'
   const confirmLabel = data.confirm_label || 'Confirm'
@@ -26,12 +48,26 @@ export function ConfirmationCard({ data, onSendMessage }: ConfirmationCardProps)
 
   const handleConfirm = () => {
     setDecision('confirmed')
-    onSendMessage?.(`confirm:${data.title}`)
+    if (onRespond) {
+      void onRespond({ status: ResponseStatus.Submitted, data: { confirmed: true } }).catch(() => {
+        setDecision('pending')
+      })
+    } else {
+      // Legacy fallback — only reached when the envelope has no id.
+      onSendMessage?.(`confirm:${data.title}`)
+    }
   }
 
   const handleCancel = () => {
     setDecision('cancelled')
-    onSendMessage?.(`cancel:${data.title}`)
+    if (onRespond) {
+      void onRespond({ status: ResponseStatus.Cancelled, data: { confirmed: false } }).catch(() => {
+        setDecision('pending')
+      })
+    } else {
+      // Legacy fallback — only reached when the envelope has no id.
+      onSendMessage?.(`cancel:${data.title}`)
+    }
   }
 
   if (decision === 'confirmed') {

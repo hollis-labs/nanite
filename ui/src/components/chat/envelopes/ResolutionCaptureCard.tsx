@@ -1,7 +1,7 @@
 import { CheckCircle, Lightbulb, MinusCircle } from 'lucide-react'
 import { useState } from 'react'
 import { Button } from '@/components/ui/button'
-import { ResponseStatus } from '@/lib/envelope-response'
+import { ResponseStatus, type ResponseV1 } from '@/lib/envelope-response'
 import type { EnvelopeResponder } from './EnvelopeRenderer'
 import { Envelope, EnvelopeHeader, EnvelopeFooter } from './primitives/Envelope'
 
@@ -9,6 +9,12 @@ interface ResolutionCaptureData {
   ticket_id?: string
   issue_summary?: string
   categories: string[]
+  /**
+   * Injected by EnvelopeRenderer at envelope wrap level when the card was
+   * already answered — present so plugin cards (which always receive the
+   * `data` prop) can hydrate a persisted response. CW-20260517-0006.
+   */
+  prior_response?: ResponseV1
 }
 
 interface ResolutionCaptureCardProps {
@@ -18,6 +24,17 @@ interface ResolutionCaptureCardProps {
 }
 
 type CardState = 'idle' | 'submitted' | 'skipped'
+
+/** Hydrate the card state from a persisted response. CW-20260517-0006. */
+function hydrateState(prior: ResponseV1 | undefined): CardState {
+  if (!prior) return 'idle'
+  return prior.status === ResponseStatus.Cancelled ? 'skipped' : 'submitted'
+}
+
+function priorStr(prior: ResponseV1 | undefined, key: string): string {
+  const v = prior?.data?.[key]
+  return typeof v === 'string' ? v : ''
+}
 
 const TIME_OPTIONS = ['< 15 min', '15-30 min', '30-60 min', '1-2 hours', '2+ hours']
 
@@ -29,12 +46,18 @@ export function ResolutionCaptureCard({
   onSendMessage,
   onRespond,
 }: ResolutionCaptureCardProps) {
-  const [cardState, setCardState] = useState<CardState>('idle')
-  const [whatFixedIt, setWhatFixedIt] = useState('')
-  const [category, setCategory] = useState('')
-  const [timeSpent, setTimeSpent] = useState('')
-  const [relatedKB, setRelatedKB] = useState('')
-  const [createArticle, setCreateArticle] = useState(true)
+  const prior = data.prior_response
+  const [cardState, setCardState] = useState<CardState>(() => hydrateState(prior))
+  const [whatFixedIt, setWhatFixedIt] = useState(() => priorStr(prior, 'what_fixed_it'))
+  const [category, setCategory] = useState(() => priorStr(prior, 'category'))
+  const [timeSpent, setTimeSpent] = useState(() => priorStr(prior, 'time_spent'))
+  const [relatedKB, setRelatedKB] = useState(() => {
+    const kb = prior?.data?.related_kb
+    return Array.isArray(kb) ? kb.join(', ') : ''
+  })
+  const [createArticle, setCreateArticle] = useState(() =>
+    typeof prior?.data?.create_kb_article === 'boolean' ? prior.data.create_kb_article : true,
+  )
   const [submitError, setSubmitError] = useState<string | null>(null)
 
   const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {

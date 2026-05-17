@@ -11,12 +11,15 @@ Envelopes are structured UI cards injected into chat. The system has a
 backend side and a frontend side kept in sync by a manifest. Current state
 verified against the repo:
 
-- **Manifest (source of truth):** the `go-envelopes` library —
-  `libs/go-envelopes/manifest/envelopes.yaml`. The project CLAUDE.md still
-  references `config/envelopes.yaml`; that is **stale** — `internal/chat/envelope.go`
-  comments still say "config/envelopes.yaml" but the build loads core types
-  from the go-envelopes lib via `envelopes.LoadCore`. The Go comments are
-  also stale and should be corrected during the sprint.
+- **Manifest (source of truth):** the **external** `go-envelopes` Go module
+  — `github.com/hollis-labs/go-envelopes` (see `go.mod`), manifest at
+  `manifest/envelopes.yaml` *within that module*. It is NOT vendored in this
+  repo (`libs/go-envelopes/` does not exist); the build loads core types from
+  the module via `envelopes.LoadCore`. The project CLAUDE.md still references
+  `config/envelopes.yaml` and `internal/chat/envelope.go` comments say the
+  same; that is **stale** — both should be corrected during the sprint.
+  Changing the manifest itself means a change to the `go-envelopes` module
+  plus a dependency bump here, not an in-repo edit.
 - **Backend:** `internal/chat/envelope.go` (registry + `ValidateEnvelope`),
   `internal/envelope/validator.go` (`PassiveRenderableTypes` allow-list +
   per-type schema validation), `internal/chat/structured.go` (`EnvelopeRef`
@@ -250,7 +253,8 @@ producers feeding the block. If it ever reaches the FE it hits
 `renderUnreachableFallback` ("Unsupported envelope").
 - Files: `internal/service/chat_loop_budget_soft_warning.go`,
   `ui/src/components/chat/ChatTranscript.tsx` (LOAD-BEARING comment),
-  `libs/go-envelopes/manifest/envelopes.yaml`.
+  the `go-envelopes` module manifest (`manifest/envelopes.yaml`, external —
+  see Intro).
 - Fix direction: decide intent — either ship a small FE component (signal
   strip) or confirm the producer never emits to the FE block and correct the
   stale comment / manifest note.
@@ -268,6 +272,7 @@ through `EnvelopeRenderer.renderLegacyFallback` (the `envelope.questions`
 branch). A future cleanup of the legacy-fallback path would silently break
 the only interactive card that currently hydrates correctly.
 - Files: `ui/src/components/chat/envelopes/EnvelopeRenderer.tsx`,
-  `libs/go-envelopes/manifest/envelopes.yaml`.
+  the `go-envelopes` module manifest (`manifest/envelopes.yaml`, external —
+  see Intro; a true core-type addition needs a module change + dep bump).
 - Fix direction: give `question-form` a first-class registry entry with
   `props: "envelope"` so it no longer depends on the legacy branch.

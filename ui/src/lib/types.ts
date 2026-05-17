@@ -667,6 +667,17 @@ export interface Envelope {
    * may consolidate with `EnvelopeRouting` per W1D's follow-up note.
    */
   cancel_token?: string;
+  /**
+   * CW-20260517-0008 — wrap-level marker for envelopes that are ONLY emitted
+   * when developer mode is enabled (today: `chat-loop-budget-soft-warning`,
+   * gated behind `devModeEnabled()` in the backend). When true, the FE renders
+   * a small "DEV" badge so operators recognize the card as dev-mode telemetry
+   * rather than a real alert. Lives at wrap level (sibling of id/type/data),
+   * stamped by `buildPluginEnvelopeWrap`. Omitted (falsy) for normal
+   * envelopes. Intentionally type-agnostic — any future dev-only envelope
+   * type gets the badge for free.
+   */
+  dev_mode_only?: boolean;
 }
 
 export interface Proposal {

@@ -68,8 +68,12 @@ func (s *chatServiceImpl) emitChatLoopBudgetSoftWarning(
 		slog.Warn("chat-service: marshal chat-loop-budget-soft-warning payload", "session", sessionID, "err", err)
 		return
 	}
+	// DevModeOnly: this envelope's SSE emission is gated behind devModeEnabled()
+	// above — it is dev-mode telemetry, not a real operator alert. The marker
+	// rides at wrap level so the FE renders a "DEV" badge (CW-20260517-0008).
 	streamWrap, err := buildPluginEnvelopeWrap("", chatLoopBudgetSoftWarningEnvelopeType, data, EnvelopeRouting{
 		DisplayClass: EnvelopeDisplayClassAlert,
+		DevModeOnly:  true,
 	})
 	if err != nil {
 		slog.Warn("chat-service: marshal chat-loop-budget-soft-warning wrap", "session", sessionID, "err", err)

@@ -372,3 +372,65 @@ func TestBuildDeps_WorkspacesRootFallback(t *testing.T) {
 		t.Errorf("buildDeps WorkspacesRoot = %q, want explicit %q", deps2.WorkspacesRoot, explicit)
 	}
 }
+
+// TestD1_OfflineStandaloneLaunch is the S5 design-lock D1 regression: the
+// standalone launcher's Plan path must work with NO Tether process and NO
+// provider registry in the loop — a fully offline launch.
+//
+// D1 (EP-20260516-0001 S5 cutover): `nanite launch` is a self-contained
+// operator entry point. It loads a catalog off disk, compiles the profile
+// through the bootprofile compiler, and projects + validates a shared
+// agentlaunch.LaunchPlan — none of which may depend on a running Tether
+// orchestrator, an HTTP registry, or a network round-trip. Plan() is the
+// no-side-effects half of the pipeline (see launcher.go's Plan doc), so a
+// pure-offline assertion is cleanly doable as a NORMAL (non-smoke) test —
+// it needs no real provider CLI and spawns no subprocess. This is the
+// design-lock pin: if a future change makes Plan reach out to a registry
+// or a Tether endpoint, this test breaks.
+//
+// The test deliberately uses a catalog whose only slots are `text`
+// (compile-time, no resolver) so Plan performs ZERO side effects at all —
+// no command execution, no file statics, no network. The full Plan
+// pipeline (LoadCatalog → CompileFromCatalog → ResolveRequirements →
+// ToLaunchPlan → Validate) runs entirely against the local filesystem.
+func TestD1_OfflineStandaloneLaunch(t *testing.T) {
+	root := writeCatalog(t, "claude")
+
+	// Plan runs the entire compile + project + validate pipeline. No
+	// Config.Store, no CLIAdapters, no BinaryPath/DBPath — there is
+	// nothing here that could reach a Tether process or a registry.
+	spec, plan, err := Plan(context.Background(), Config{
+		CatalogPath: root,
+		Profile:     "test-profile",
+	})
+	if err != nil {
+		t.Fatalf("D1: offline Plan failed: %v", err)
+	}
+
+	// The compiled spec must be fully resolved offline — a launchable
+	// provider and a rendered boot prompt, with no deferred Requirements
+	// left to drain (the text-only catalog resolves entirely at compile
+	// time, so the offline path produces a complete, boot-ready spec).
+	if spec.Provider != "claude" {
+		t.Errorf("D1: spec.Provider = %q, want claude", spec.Provider)
+	}
+	if spec.BootPrompt == "" {
+		t.Error("D1: spec.BootPrompt is empty — the offline compile produced no boot prompt")
+	}
+	if len(spec.Requirements) != 0 {
+		t.Errorf("D1: spec.Requirements = %v, want empty — a text-only catalog must resolve fully offline", spec.Requirements)
+	}
+
+	// The shared LaunchPlan must validate offline. Validate is the
+	// shared-plan convergence gate (provider×runtime matrix lookup, path
+	// expansion, sentinel errors) — all of it pure, no Tether, no network.
+	if err := plan.Validate(); err != nil {
+		t.Errorf("D1: offline LaunchPlan.Validate failed: %v", err)
+	}
+	if plan.BootProfile.Inline == nil {
+		t.Fatal("D1: plan.BootProfile.Inline is nil — the offline plan carries no inline boot profile")
+	}
+	if plan.BootProfile.Inline.BootPrompt != spec.BootPrompt {
+		t.Error("D1: inline boot prompt diverged from the compiled spec on the offline path")
+	}
+}

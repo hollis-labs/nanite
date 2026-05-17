@@ -830,6 +830,32 @@ export function useChat(sessionId: string | null) {
         }
       });
 
+      // J8 v1 (CW-20260426-0006) — a retried turn can still call
+      // panel_open / panel_close / signal_mode. Without this listener the
+      // panel_signal SSE event emitted during the retry is silently dropped
+      // and the panel never opens (the same class of cross-stream gap as
+      // CW-20260516-0044). Mirror the primary stream handler's parsing.
+      es.addEventListener(SSE.PANEL_SIGNAL, (e: MessageEvent) => {
+        markStreamActivity();
+        recordEventId(e.data as string);
+        try {
+          const evt: StreamEvent = JSON.parse(e.data as string);
+          if (!evt.envelope) return;
+          const sig = JSON.parse(evt.envelope) as {
+            action: "open" | "close" | "mode";
+            panel_id?: string;
+            mode?: string;
+            source?: "agent" | "user";
+          };
+          applyPanelSignal(sig);
+          if (import.meta.env?.DEV) {
+            console.debug("[useChat] panel_signal (retry)", sig);
+          }
+        } catch (err) {
+          console.warn("[useChat] Failed to parse panel_signal event:", e.data, err);
+        }
+      });
+
       es.addEventListener(SSE.STREAM_END, (e: MessageEvent) => {
         markStreamActivity();
         recordEventId(e.data as string);

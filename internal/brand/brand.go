@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+
+	"github.com/hollis-labs/go-apppaths/paths"
 )
 
 const (
@@ -50,6 +52,12 @@ func Env(suffix string) string {
 // ~/.nanite). The directory is not created — callers that need the path
 // to exist should os.MkdirAll it with the permissions appropriate to
 // their use case.
+//
+// SCOPE NOTE (CW-20260517-0061): UserHomeDir still points at the legacy
+// ~/.nanite dotdir. The go-apppaths migration deliberately scoped to the DB
+// and plugin-data/plugin-cache dirs only; the wholesale ~/.nanite evacuation
+// (skills, roles, sandboxes, workspaces, registry/, ...) has ~19 callers and
+// is a much larger blast radius — tracked as a follow-up under CW-20260517-0058.
 func UserHomeDir() (string, error) {
 	home, err := os.UserHomeDir()
 	if err != nil {
@@ -58,26 +66,42 @@ func UserHomeDir() (string, error) {
 	return filepath.Join(home, "."+ID), nil
 }
 
-// PluginDataDir returns the absolute, persistent per-plugin data root
-// under the user's brand directory (e.g. ~/.nanite/plugin-data/<id>).
-// The directory is not created by this call; subprocess init code
-// os.MkdirAll's it before sending the path to a plugin.
-func PluginDataDir(pluginID string) (string, error) {
-	base, err := UserHomeDir()
-	if err != nil {
-		return "", err
-	}
-	return filepath.Join(base, "plugin-data", pluginID), nil
+// pluginLayout resolves the go-apppaths XDG layout for the plugin-dir
+// helpers. ID is the go-apppaths appName — the single source of truth (the
+// internal/config.ResolveLayout resolver wraps the same call; brand cannot
+// import internal/config without an import cycle, so it resolves directly).
+// WithoutMaterialize keeps these pure path computations: the subprocess init
+// code os.MkdirAll's the per-plugin dir before handing it to a plugin.
+func pluginLayout() (paths.Layout, error) {
+	return paths.Resolve(ID, paths.WithoutMaterialize())
 }
 
-// PluginCacheDir returns the absolute, ephemeral per-plugin cache root
-// under the user's brand directory (e.g. ~/.nanite/plugin-cache/<id>).
+// PluginDataDir returns the absolute, persistent per-plugin data root under
+// the go-apppaths XDG data root (e.g. ~/.local/share/nanite/plugin-data/<id>).
 // The directory is not created by this call; subprocess init code
 // os.MkdirAll's it before sending the path to a plugin.
-func PluginCacheDir(pluginID string) (string, error) {
-	base, err := UserHomeDir()
+//
+// CW-20260517-0061: repointed off the legacy ~/.nanite dotdir onto the
+// go-apppaths DataDir.
+func PluginDataDir(pluginID string) (string, error) {
+	layout, err := pluginLayout()
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("brand: resolve plugin-data layout: %w", err)
 	}
-	return filepath.Join(base, "plugin-cache", pluginID), nil
+	return filepath.Join(layout.DataDir(), "plugin-data", pluginID), nil
+}
+
+// PluginCacheDir returns the absolute, ephemeral per-plugin cache root under
+// the go-apppaths XDG cache root (e.g. ~/.cache/nanite/plugin-cache/<id>).
+// The directory is not created by this call; subprocess init code
+// os.MkdirAll's it before sending the path to a plugin.
+//
+// CW-20260517-0061: repointed off the legacy ~/.nanite dotdir onto the
+// go-apppaths CacheDir.
+func PluginCacheDir(pluginID string) (string, error) {
+	layout, err := pluginLayout()
+	if err != nil {
+		return "", fmt.Errorf("brand: resolve plugin-cache layout: %w", err)
+	}
+	return filepath.Join(layout.CacheDir(), "plugin-cache", pluginID), nil
 }

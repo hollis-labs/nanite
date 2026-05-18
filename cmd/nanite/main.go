@@ -59,7 +59,7 @@ import (
 func main() {
 	if len(os.Args) < 2 {
 		fmt.Fprintf(os.Stderr, "usage: %s <command>\n", brand.BinaryName)
-		fmt.Fprintln(os.Stderr, "commands: serve, launch, plugin, mcp, message, admin, version (framework-injection moved to `nanite-agent init`)")
+		fmt.Fprintln(os.Stderr, "commands: serve, launch, plugin, mcp, message, admin, path, version (framework-injection moved to `nanite-agent init`)")
 		os.Exit(1)
 	}
 
@@ -78,6 +78,8 @@ func main() {
 		cmdMessage(os.Args[2:])
 	case "admin":
 		cmdAdmin(os.Args[2:])
+	case "path":
+		cmdPath(os.Args[2:])
 	case "version", "--version", "-v":
 		fmt.Println(brand.BinaryName + " " + version.Full())
 	default:
@@ -89,9 +91,28 @@ func main() {
 func cmdServe(args []string) {
 	fs := flag.NewFlagSet("serve", flag.ExitOnError)
 	port := fs.Int("port", 8090, "HTTP listen port")
-	dbPath := fs.String("db", "./"+brand.DefaultDBName, "SQLite database path")
+	// --db default is empty: an unset flag resolves the database path via
+	// go-apppaths (CW-20260517-0061). A non-empty flag becomes an explicit
+	// WithDBOverride. The retired "./nanite.db" CWD-relative default is the
+	// data-loss failure mode this migration removes.
+	dbFlag := fs.String("db", "", "SQLite database path (default: go-apppaths XDG layout — run `nanite path`)")
 	dev := fs.Bool("dev", false, "Development mode (skip embedded SPA)")
 	fs.Parse(args)
+
+	resolvedDB := resolveDBPathWith(*dbFlag)
+	dbPath := &resolvedDB
+
+	// Resolve the go-apppaths layout once for the daemon's DB-sibling
+	// directories (CW-20260517-0061). coordination/ and worktrees/ are
+	// runtime STATE, so they anchor on StateDir — explicitly, NOT on
+	// filepath.Dir(dbPath). Pre-migration they rode filepath.Dir(*dbPath)
+	// (CWD); letting them silently follow the DB into the XDG data root
+	// would be the same data-placement bug this migration removes.
+	serveLayout, serveLayoutErr := config.ResolveLayout()
+	if serveLayoutErr != nil {
+		slog.Error("resolve app layout", "err", serveLayoutErr)
+		os.Exit(1)
+	}
 
 	// Load app-level config first so the logging handler and OTel init
 	// both observe the same settings. A missing or malformed config
@@ -282,7 +303,9 @@ func cmdServe(args []string) {
 	slog.Info("plugin host initialized")
 
 	// --- Coordination store (Badger KV for multi-agent state) ---
-	coordDir := filepath.Join(filepath.Dir(*dbPath), "coordination")
+	// Anchored on the go-apppaths StateDir (CW-20260517-0061) — runtime
+	// state, not data, and explicitly NOT derived from filepath.Dir(dbPath).
+	coordDir := filepath.Join(serveLayout.StateDir(), "coordination")
 	coordStore, coordErr := coordination.NewBadgerStore(coordDir)
 	if coordErr != nil {
 		slog.Warn("coordination store failed to open, multi-agent features disabled", "err", coordErr)
@@ -299,7 +322,10 @@ func cmdServe(args []string) {
 	}
 
 	// --- Worktree manager (git worktree isolation for workers) ---
-	wtBaseDir := filepath.Join(filepath.Dir(*dbPath), "worktrees")
+	// Anchored on the go-apppaths StateDir (CW-20260517-0061) — git
+	// worktrees are ephemeral runtime state, explicitly NOT derived from
+	// filepath.Dir(dbPath).
+	wtBaseDir := filepath.Join(serveLayout.StateDir(), "worktrees")
 	wtMgr, wtErr := worktree.NewManager(wtBaseDir)
 	if wtErr != nil {
 		slog.Warn("worktree manager init failed, worktree isolation disabled", "err", wtErr)
@@ -540,7 +566,7 @@ func cmdServe(args []string) {
 	srv := server.New(s, a, *port, *dev, pluginHost, appCfg.HTTP)
 
 	// Discover, load plugins, and re-discover MCP tools.
-	pluginsDir := discoverAndLoadPlugins(pluginHost, *dbPath, mcpManager, s)
+	pluginsDir := discoverAndLoadPlugins(pluginHost, mcpManager, s)
 	srv.SetPluginsDir(pluginsDir)
 
 	if err := srv.ListenAndServe(); err != nil {
@@ -901,11 +927,13 @@ func startBackgroundWorkers(lc *lifecycle.Manager, container *service.Container)
 
 // discoverAndLoadPlugins finds plugins on disk, loads them and builtins,
 // then re-runs MCP auto-discovery for any new servers plugins registered.
-func discoverAndLoadPlugins(pluginHost *plugin.Host, dbPath string, mcpManager *mcp.Manager, s *store.Store) string {
-	pluginsDir := filepath.Join(filepath.Dir(dbPath), "plugins")
-	if envDir := os.Getenv(brand.Env("PLUGINS_DIR")); envDir != "" {
-		pluginsDir = envDir
-	}
+//
+// CW-20260517-0061: pluginsDir is resolved by the shared resolvePluginsDir()
+// helper (NANITE_PLUGINS_DIR override, else the repo-shipped ./plugins). It is
+// no longer derived from filepath.Dir(dbPath) — plugins/ is a repo-shipped
+// directory and must not follow the DB into the go-apppaths data root.
+func discoverAndLoadPlugins(pluginHost *plugin.Host, mcpManager *mcp.Manager, s *store.Store) string {
+	pluginsDir := resolvePluginsDir()
 	if discovered, discErr := plugin.DiscoverPlugins(pluginsDir); discErr != nil {
 		slog.Warn("plugin discovery failed", "err", discErr)
 	} else {
@@ -1058,9 +1086,14 @@ func cmdMCP(args []string) {
 // spawns this as a subprocess and communicates via JSON-RPC on stdin/stdout.
 func cmdMCPServe(args []string) {
 	fs := flag.NewFlagSet("mcp", flag.ExitOnError)
-	dbPath := fs.String("db", "./"+brand.DefaultDBName, "SQLite database path")
+	// --db default is empty: an unset flag resolves via go-apppaths
+	// (CW-20260517-0061). A non-empty flag becomes an explicit WithDBOverride.
+	dbFlag := fs.String("db", "", "SQLite database path (default: go-apppaths XDG layout — run `nanite path`)")
 	sessionID := fs.String("session", "", "Session ID")
 	fs.Parse(args)
+
+	dbPathStr := resolveDBPathWith(*dbFlag)
+	dbPath := &dbPathStr
 
 	s, err := store.New(context.Background(), *dbPath)
 	if err != nil {

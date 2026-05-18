@@ -307,12 +307,22 @@ func TestRingBuffer(t *testing.T) {
 
 // TestBuildInitParams verifies that the host-side InitParams assembly
 // populates the v0.1.2 DataDir/CacheDir/LogLevel fields with absolute
-// paths rooted under the user's brand directory and creates those
-// directories on disk. HOME is redirected to a t.TempDir to keep the
-// test hermetic.
+// paths rooted under the go-apppaths XDG layout and creates those
+// directories on disk.
+//
+// CW-20260517-0061: plugin-data/plugin-cache moved off the legacy ~/.nanite
+// dotdir onto the go-apppaths DataDir/CacheDir roots. The test pins all four
+// $XDG_*_HOME roots into a temp dir so go-apppaths resolution is hermetic and
+// never touches the developer's real ~/.local/share/nanite.
 func TestBuildInitParams(t *testing.T) {
-	tmpHome := t.TempDir()
-	t.Setenv("HOME", tmpHome)
+	base := t.TempDir()
+	xdgData := filepath.Join(base, "data")
+	xdgCache := filepath.Join(base, "cache")
+	t.Setenv("HOME", base)
+	t.Setenv("XDG_DATA_HOME", xdgData)
+	t.Setenv("XDG_STATE_HOME", filepath.Join(base, "state"))
+	t.Setenv("XDG_CACHE_HOME", xdgCache)
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(base, "config"))
 
 	cfg := map[string]string{"k": "v"}
 	ip, err := buildInitParams("/plugins/example", "example", cfg)
@@ -337,8 +347,8 @@ func TestBuildInitParams(t *testing.T) {
 	default:
 		t.Errorf("LogLevel = %q, want one of debug/info/warn/error", ip.LogLevel)
 	}
-	wantData := filepath.Join(tmpHome, ".nanite", "plugin-data", "example")
-	wantCache := filepath.Join(tmpHome, ".nanite", "plugin-cache", "example")
+	wantData := filepath.Join(xdgData, "nanite", "plugin-data", "example")
+	wantCache := filepath.Join(xdgCache, "nanite", "plugin-cache", "example")
 	if ip.DataDir != wantData {
 		t.Errorf("DataDir = %q, want %q", ip.DataDir, wantData)
 	}

@@ -48,12 +48,14 @@ func cmdAdmin(args []string) {
 		os.Exit(1)
 	}
 
-	dbPath := "./" + brand.DefaultDBName
+	// An unset --db resolves via go-apppaths (CW-20260517-0061).
+	dbFlag := ""
 	remaining := args
 	if len(args) >= 2 && args[0] == "--db" {
-		dbPath = args[1]
+		dbFlag = args[1]
 		remaining = args[2:]
 	}
+	dbPath := resolveDBPathWith(dbFlag)
 	if len(remaining) < 1 {
 		usage(os.Stderr)
 		os.Exit(1)

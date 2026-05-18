@@ -72,6 +72,17 @@ type Dependencies struct {
 	// (default ~/.nanite/workspaces).
 	WorkspacesRoot string
 
+	// CLIWritableRoots is the allow-list of directories a CLI-launch
+	// agent (codex / claude) may write to beyond its throwaway boot
+	// dir. The composition root populates it from the nanite
+	// dev_tools_allowed_paths config setting; composeBootdirParams
+	// copies it into SetupParams so the boot-dir layouts can thread it
+	// into the planted provider config (codex [sandbox_workspace_write]
+	// writable_roots, claude permissions.additionalDirectories).
+	// Empty leaves CLI agents confined to their boot dir cwd
+	// (CW-20260518-0075).
+	CLIWritableRoots []string
+
 	// Telemetry receives PTY restart and lifecycle observability events.
 	Telemetry Telemetry
 

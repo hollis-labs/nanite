@@ -677,8 +677,10 @@ func initProviders(devMode bool) (*provider.Registry, []provider.CLIAdapter) {
 	return registry, cliAdapters
 }
 
-// resolveDevToolsAllowedPaths returns the effective allow-list for the dev_*
-// MCP tools.
+// resolveDevToolsAllowedPaths returns the effective directory allow-list.
+// It scopes the dev_* MCP tools AND, since CW-20260518-0075, the CLI-launch
+// boot dirs (codex [sandbox_workspace_write] writable_roots, claude
+// permissions.additionalDirectories) — both consume the value returned here.
 //
 // Trust-agent redesign (CW-20260430-0009):
 //

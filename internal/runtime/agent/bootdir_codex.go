@@ -61,7 +61,7 @@ func codexAgentsMD(params SetupParams) string {
 // because CODEX_HOME (set by AmendEnv) redirects codex's auth lookup into
 // the boot dir. See bootdir_provider_config.go.
 func codexInjectionSpec(params SetupParams) (agentlaunch.InjectionSpec, error) {
-	configTOML, err := codexConfigTOMLContent()
+	configTOML, err := codexConfigTOMLContent(params.CLIWritableRoots)
 	if err != nil {
 		return agentlaunch.InjectionSpec{}, err
 	}

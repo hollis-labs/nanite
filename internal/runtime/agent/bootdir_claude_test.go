@@ -132,6 +132,67 @@ func TestClaudeLayout_SettingsJSON_PermissionMode(t *testing.T) {
 	}
 }
 
+// TestClaudeLayout_SettingsJSON_AdditionalDirectories pins that
+// SetupParams.CLIWritableRoots threads into the planted
+// .claude/settings.json as permissions.additionalDirectories, and that
+// an empty list omits the key (CW-20260518-0075).
+func TestClaudeLayout_SettingsJSON_AdditionalDirectories(t *testing.T) {
+	profile := &store.AgentProfile{Name: "settings-ad", Slug: "settings-ad"}
+
+	bootDir, err := claudeLayout{}.Setup(SetupParams{
+		SessionID:        "s-ad",
+		AgentProfile:     profile,
+		CLIWritableRoots: []string{"/Users/x/dev", "/tmp/work"},
+	})
+	if err != nil {
+		t.Fatalf("Setup: %v", err)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(bootDir) })
+
+	body, err := os.ReadFile(filepath.Join(bootDir, ".claude/settings.json"))
+	if err != nil {
+		t.Fatalf("read settings.json: %v", err)
+	}
+	var parsed struct {
+		Permissions struct {
+			DefaultMode           string   `json:"defaultMode"`
+			AdditionalDirectories []string `json:"additionalDirectories"`
+		} `json:"permissions"`
+	}
+	if err := json.Unmarshal(body, &parsed); err != nil {
+		t.Fatalf("parse settings.json: %v", err)
+	}
+	want := []string{"/Users/x/dev", "/tmp/work"}
+	if len(parsed.Permissions.AdditionalDirectories) != len(want) {
+		t.Fatalf("additionalDirectories = %v, want %v\n--- body ---\n%s",
+			parsed.Permissions.AdditionalDirectories, want, string(body))
+	}
+	for i, w := range want {
+		if parsed.Permissions.AdditionalDirectories[i] != w {
+			t.Errorf("additionalDirectories[%d] = %q, want %q", i,
+				parsed.Permissions.AdditionalDirectories[i], w)
+		}
+	}
+	// defaultMode still planted alongside.
+	if parsed.Permissions.DefaultMode != claudeDefaultPermissionMode {
+		t.Errorf("permissions.defaultMode = %q, want %q", parsed.Permissions.DefaultMode, claudeDefaultPermissionMode)
+	}
+
+	// Empty CLIWritableRoots → no additionalDirectories key.
+	bareDir, err := claudeLayout{}.Setup(SetupParams{SessionID: "s-ad-bare", AgentProfile: profile})
+	if err != nil {
+		t.Fatalf("Setup bare: %v", err)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(bareDir) })
+	bareBody, err := os.ReadFile(filepath.Join(bareDir, ".claude/settings.json"))
+	if err != nil {
+		t.Fatalf("read bare settings.json: %v", err)
+	}
+	if strings.Contains(string(bareBody), "additionalDirectories") {
+		t.Errorf("empty CLIWritableRoots must not emit additionalDirectories\n--- body ---\n%s", bareBody)
+	}
+}
+
 // TestClaudeLayout_BootProperties confirms the layout's static metadata
 // matches the long-lived PTY contract.
 func TestClaudeLayout_BootProperties(t *testing.T) {

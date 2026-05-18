@@ -84,12 +84,12 @@ func cmdLaunch(args []string) {
 
 	// Resolve the catalog root: explicit --catalog flag wins, else the
 	// agentrc config's boot_profile_catalog_path (the same field the
-	// chat dropdown registry consumes).
+	// chat dropdown registry consumes). Config is also the source of the
+	// CLI writable-roots allow-list threaded into the launch below.
+	launchCfg, _ := config.Load()
 	catalogPath := *catalog
-	if catalogPath == "" {
-		if cfg, _ := config.Load(); cfg != nil {
-			catalogPath = cfg.ResolvedBootProfileCatalogPath()
-		}
+	if catalogPath == "" && launchCfg != nil {
+		catalogPath = launchCfg.ResolvedBootProfileCatalogPath()
 	}
 	if catalogPath == "" {
 		fmt.Fprintln(os.Stderr, "launch: no catalog configured — pass --catalog <dir> or set boot_profile_catalog_path in agentrc")
@@ -149,14 +149,15 @@ func cmdLaunch(args []string) {
 	}
 
 	res, err := launcher.Launch(ctx, launcher.Config{
-		CatalogPath: catalogPath,
-		Profile:     profileID,
-		CLIAdapters: cliAdapters,
-		BinaryPath:  binPath,
-		DBPath:      s.DBPath(),
-		Store:       s,
-		Wait:        !*noWait,
-		Registry:    reg,
+		CatalogPath:      catalogPath,
+		Profile:          profileID,
+		CLIAdapters:      cliAdapters,
+		BinaryPath:       binPath,
+		DBPath:           s.DBPath(),
+		Store:            s,
+		Wait:             !*noWait,
+		Registry:         reg,
+		CLIWritableRoots: resolveDevToolsAllowedPaths(launchCfg),
 	})
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "launch: %v\n", err)

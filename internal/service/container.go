@@ -471,8 +471,36 @@ func NewContainer(cfg ContainerConfig) (*Container, error) {
 	var embeddingStatus string
 	var embeddingProviderID, embeddingModel string
 	{
+		// CW-20260517-0061: Tesseract migrated to go-apppaths
+		// (CW-20260517-0066) — its context.db moved to
+		// ~/.local/share/tesseract/workspaces/default/main.db and its
+		// records/ tree to ~/.local/state/tesseract/records. nanite resolves
+		// those migrated paths directly via paths.Resolve("tesseract") and
+		// passes them through the additive conduit.Config.DBPath/RecordsDir
+		// override fields (added in the same Tesseract PR), so the embedded
+		// memory store points at the migrated DB without relying on the
+		// Phase 2 ~/.tesseract → XDG compat symlink.
+		//
+		// RootDir is still required by conduit.Config; it stays at the legacy
+		// ~/.conduit dotdir purely as the base the library would derive from
+		// when DBPath/RecordsDir are unset — here both ARE set, so RootDir is
+		// inert for path derivation. (Pre-migration, RootDir-relative
+		// derivation also pointed at the now-retired ~/.conduit/data/records,
+		// which is exactly why the explicit override matters.) The ~/.conduit
+		// dotdir evacuation is a separate follow-up.
 		homeDir, _ := os.UserHomeDir()
 		conduitRoot := filepath.Join(homeDir, ".conduit")
+
+		var conduitDBPath, conduitRecordsDir string
+		if tessLayout, tessLayoutErr := config.ResolveTesseractLayout(); tessLayoutErr != nil {
+			slog.Warn("service container: resolve tesseract layout failed; embedded memory falls back to RootDir derivation",
+				"err", tessLayoutErr)
+		} else {
+			conduitDBPath = tessLayout.MainDB()
+			conduitRecordsDir = filepath.Join(tessLayout.StateDir(), "records")
+			slog.Info("service container: tesseract memory paths resolved (go-apppaths)",
+				"db", conduitDBPath, "records", conduitRecordsDir)
+		}
 
 		// Embedder selection: resolve from user settings via selectEmbedder.
 		// No configured embedder = no-op (similarity recall unavailable).
@@ -513,7 +541,9 @@ func NewContainer(cfg ContainerConfig) (*Container, error) {
 
 		var conduitErr error
 		conduitInstance, conduitErr = conduit.Open(context.Background(), conduit.Config{
-			RootDir: conduitRoot,
+			RootDir:    conduitRoot,
+			DBPath:     conduitDBPath,     // migrated tesseract context.db (empty → RootDir derivation)
+			RecordsDir: conduitRecordsDir, // migrated tesseract records/ (empty → RootDir derivation)
 		}, conduitOpts...)
 		if conduitErr != nil {
 			slog.Warn("service container: failed to open Conduit", "err", conduitErr)

@@ -33,6 +33,7 @@ require (
 )
 
 require (
+	github.com/adrg/xdg v0.5.3 // indirect
 	github.com/bahlo/generic-list-go v0.2.0 // indirect
 	github.com/buger/jsonparser v1.1.2 // indirect
 	github.com/cenkalti/backoff/v5 v5.0.3 // indirect
@@ -98,9 +99,10 @@ replace github.com/chrispian/agent-mux => /Users/chrispian/dev/hollis-labs/apps/
 
 require (
 	github.com/hollis-labs/go-agent-broker v0.2.1
+	github.com/hollis-labs/go-apppaths v0.1.0
 	github.com/hollis-labs/go-embed-contracts v0.1.1
 	github.com/hollis-labs/go-llm-contracts v0.2.0
 	github.com/hollis-labs/go-llm-types v0.2.0
 	github.com/hollis-labs/go-sqlite v0.1.0
-	github.com/hollis-labs/tesseract v0.7.0
+	github.com/hollis-labs/tesseract v0.7.1-0.20260518032333-bbce958849ac
 )

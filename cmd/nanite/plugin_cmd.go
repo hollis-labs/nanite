@@ -10,9 +10,11 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/hollis-labs/go-apppaths/paths"
 	fplugin "github.com/hollis-labs/plugin-sdk"
 
 	"github.com/hollis-labs/nanite/internal/brand"
+	"github.com/hollis-labs/nanite/internal/config"
 	"github.com/hollis-labs/nanite/internal/plugin"
 	"github.com/hollis-labs/nanite/internal/plugin/scaffold"
 	"github.com/hollis-labs/nanite/internal/slogx"
@@ -132,11 +134,52 @@ func resolvePluginsDir() string {
 	return "./plugins"
 }
 
+// resolveDBPath returns the path to nanite's main SQLite database, resolved
+// via go-apppaths (CW-20260517-0061). It is the shared resolver behind every
+// `cmd/nanite` entry point — the six former `./` + brand.DefaultDBName
+// CWD-relative defaults all funnel through resolveDBPathWith.
+//
+// resolveDBPath takes no explicit --db flag; callers that have one pass it to
+// resolveDBPathWith directly.
 func resolveDBPath() string {
-	if d := os.Getenv(brand.Env("DB")); d != "" {
-		return d
+	return resolveDBPathWith("")
+}
+
+// resolveDBPathWith resolves the main database path, honoring (in precedence
+// order):
+//
+//  1. the explicit --db flag value (flagDB), when non-empty;
+//  2. the NANITE_DB legacy env var — a compat alias kept so existing shell
+//     profiles / scripts / the rollback plan do not silently break;
+//  3. go-apppaths native resolution, which itself honors NANITE_DB_PATH and
+//     NANITE_WORKSPACE before falling back to the XDG default
+//     ~/.local/share/nanite/workspaces/default/main.db.
+//
+// NANITE_DB vs NANITE_DB_PATH: go-apppaths reads <APP>_DB_PATH natively, i.e.
+// NANITE_DB_PATH. The legacy var was NANITE_DB; it is mapped here through
+// WithDBOverride so both work. NANITE_DB_PATH is the canonical going-forward
+// name; NANITE_DB is the deprecated alias.
+//
+// On a resolution error the process exits — a daemon that cannot resolve its
+// DB path must not silently open one at the wrong location (the data-loss
+// failure mode this migration removes).
+func resolveDBPathWith(flagDB string) string {
+	var opts []paths.Option
+	switch {
+	case flagDB != "":
+		opts = append(opts, paths.WithDBOverride(flagDB))
+	case os.Getenv(brand.Env("DB")) != "":
+		// Legacy NANITE_DB compat alias. NANITE_DB_PATH (read natively by
+		// go-apppaths) takes precedence if both are set, since it is wired
+		// inside paths.Resolve and only applies here when no flag/alias wins.
+		opts = append(opts, paths.WithDBOverride(os.Getenv(brand.Env("DB"))))
 	}
-	return "./" + brand.DefaultDBName
+	layout, err := config.ResolveLayout(opts...)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "%s: resolve database path: %v\n", brand.BinaryName, err)
+		os.Exit(1)
+	}
+	return layout.MainDB()
 }
 
 // triggerRestart attempts to restart the service via cerberus.

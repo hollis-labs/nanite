@@ -39,7 +39,9 @@ import (
 func cmdLaunch(args []string) {
 	fs := flag.NewFlagSet("launch", flag.ExitOnError)
 	catalog := fs.String("catalog", "", "boot-profile catalog root (default: config boot_profile_catalog_path)")
-	dbPath := fs.String("db", "./"+brand.DefaultDBName, "SQLite database path (used to persist the runtime row + plant .mcp.json)")
+	// --db default is empty: an unset flag resolves via go-apppaths
+	// (CW-20260517-0061). A non-empty flag becomes an explicit WithDBOverride.
+	dbFlag := fs.String("db", "", "SQLite database path (default: go-apppaths XDG layout — run `nanite path`)")
 	dryRun := fs.Bool("dry-run", false, "compile + resolve + validate the launch plan, then exit without starting the agent")
 	noWait := fs.Bool("no-wait", false, "return as soon as the agent process is started instead of blocking until it exits")
 	dev := fs.Bool("dev", false, "development mode (use dev provider adapters with permissions skipped)")
@@ -76,6 +78,9 @@ func cmdLaunch(args []string) {
 		fs.Usage()
 		os.Exit(1)
 	}
+
+	resolvedDB := resolveDBPathWith(*dbFlag)
+	dbPath := &resolvedDB
 
 	// Resolve the catalog root: explicit --catalog flag wins, else the
 	// agentrc config's boot_profile_catalog_path (the same field the

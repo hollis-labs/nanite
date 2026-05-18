@@ -46,7 +46,7 @@ type claudeLayout struct{}
 // hand-rolled; .mcp.json rides as a BootDirOverlay entry so it plants
 // last (overlay-wins-last, per the providerplant ordering contract).
 func claudeInjectionSpec(params SetupParams) (agentlaunch.InjectionSpec, error) {
-	settings, err := claudeProviderConfigContent()
+	settings, err := claudeProviderConfigContent(params.CLIWritableRoots)
 	if err != nil {
 		return agentlaunch.InjectionSpec{}, err
 	}

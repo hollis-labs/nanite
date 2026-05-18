@@ -28,16 +28,26 @@ type Config struct {
 	WritePaths     []string                 `yaml:"write_paths"`
 	ProtectedPaths []string                 `yaml:"protected_paths"`
 	// DevToolsAllowedPaths is the user-configurable allow-list of filesystem
-	// roots that the dev_* MCP tools (dev_read, dev_glob, dev_grep, dev_write,
-	// dev_edit, dev_bash) may access. Entries support a leading ~/ for the
-	// user's home directory and are tilde-expanded at load time.
+	// roots agents may access. It governs two surfaces:
 	//
-	// When unset (nil) the runtime falls back to a hardcoded default list of
-	// common project locations (see cmd/nanite/main.go). When set, the user's
-	// list REPLACES the defaults — set explicitly to widen or narrow the
-	// scope. The path-safety escape check (internal/pathsafe) still runs on
-	// every call regardless of how the allow-list was sourced; this knob
-	// only widens which roots qualify, it never disables traversal protection.
+	//   - the in-process dev_* MCP tools (dev_read, dev_glob, dev_grep,
+	//     dev_write, dev_edit, dev_bash) — the path-safety escape check;
+	//   - CLI-launch boot dirs (CW-20260518-0075) — threaded into the
+	//     planted provider config as codex's [sandbox_workspace_write]
+	//     writable_roots and claude's permissions.additionalDirectories,
+	//     so a codex/claude CLI agent can write beyond its throwaway boot
+	//     dir cwd.
+	//
+	// Entries support a leading ~/ for the user's home directory and are
+	// tilde-expanded at load time.
+	//
+	// When unset (nil) the runtime falls back to the project root if one is
+	// configured (see cmd/nanite/main.go resolveDevToolsAllowedPaths). When
+	// set, the user's list REPLACES the default — set explicitly to widen or
+	// narrow the scope. The path-safety escape check (internal/pathsafe)
+	// still runs on every dev_* call regardless of how the allow-list was
+	// sourced; this knob only widens which roots qualify, it never disables
+	// traversal protection.
 	DevToolsAllowedPaths []string                 `yaml:"dev_tools_allowed_paths"`
 	// BootProfileCatalogPath is the on-disk root that
 	// internal/bootprofile.LoadCatalog reads when surfacing boot-profile-

@@ -23,7 +23,7 @@ require (
 	github.com/hollis-labs/go-envelopes v0.1.1
 	github.com/hollis-labs/go-modelsdev v0.2.0
 	github.com/hollis-labs/go-otel v0.1.0
-	github.com/hollis-labs/go-providers v0.21.0
+	github.com/hollis-labs/go-providers v0.22.0
 	github.com/hollis-labs/go-sandbox v0.2.1
 	github.com/hollis-labs/go-toolbroker v0.2.0
 	github.com/modelcontextprotocol/go-sdk v1.5.0

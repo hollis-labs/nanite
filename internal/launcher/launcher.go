@@ -103,6 +103,15 @@ type Config struct {
 	// disables MCP planting (still a valid launch).
 	BinaryPath string
 
+	// CLIWritableRoots is the directory allow-list the launched CLI
+	// agent (codex / claude) may write to beyond its boot dir. Threaded
+	// onto Dependencies.CLIWritableRoots so the boot-dir layout widens
+	// the planted provider config (codex [sandbox_workspace_write],
+	// claude permissions.additionalDirectories). Sourced from the nanite
+	// dev_tools_allowed_paths config setting (CW-20260518-0075). Empty
+	// leaves the launched agent confined to its boot dir cwd.
+	CLIWritableRoots []string
+
 	// DBPath is the store DB the planted MCP subprocess descriptor
 	// points at. Empty disables MCP planting.
 	DBPath string
@@ -392,7 +401,8 @@ func buildDeps(cfg Config) (*runtimeagent.Dependencies, error) {
 			BinaryPath: cfg.BinaryPath,
 			DBPath:     cfg.DBPath,
 		},
-		WorkspacesRoot: workspacesRoot,
+		WorkspacesRoot:   workspacesRoot,
+		CLIWritableRoots: cfg.CLIWritableRoots,
 	}
 	return deps, nil
 }

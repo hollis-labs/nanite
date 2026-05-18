@@ -105,6 +105,52 @@ func TestCodexLayout_ConfigTOML_ApprovalPolicy(t *testing.T) {
 	}
 }
 
+// TestCodexLayout_ConfigTOML_WritableRoots pins that SetupParams.CLIWritableRoots
+// threads into the planted config.toml as a [sandbox_workspace_write]
+// writable_roots table, and that an empty list omits the table entirely
+// (CW-20260518-0075).
+func TestCodexLayout_ConfigTOML_WritableRoots(t *testing.T) {
+	profile := &store.AgentProfile{Name: "codex-wr", Slug: "codex-wr"}
+
+	bootDir, err := codexLayout{}.Setup(SetupParams{
+		SessionID:        "s-wr",
+		AgentProfile:     profile,
+		CLIWritableRoots: []string{"/Users/x/dev", "/tmp/work"},
+	})
+	if err != nil {
+		t.Fatalf("Setup: %v", err)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(bootDir) })
+
+	body, err := os.ReadFile(filepath.Join(bootDir, "config.toml"))
+	if err != nil {
+		t.Fatalf("read config.toml: %v", err)
+	}
+	got := string(body)
+	for _, want := range []string{
+		"[sandbox_workspace_write]",
+		`writable_roots = ["/Users/x/dev", "/tmp/work"]`,
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("config.toml missing %q\n--- body ---\n%s", want, got)
+		}
+	}
+
+	// Empty CLIWritableRoots → no [sandbox_workspace_write] table.
+	bareDir, err := codexLayout{}.Setup(SetupParams{SessionID: "s-wr-bare", AgentProfile: profile})
+	if err != nil {
+		t.Fatalf("Setup bare: %v", err)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(bareDir) })
+	bareBody, err := os.ReadFile(filepath.Join(bareDir, "config.toml"))
+	if err != nil {
+		t.Fatalf("read bare config.toml: %v", err)
+	}
+	if strings.Contains(string(bareBody), "sandbox_workspace_write") {
+		t.Errorf("empty CLIWritableRoots must not emit the table\n--- body ---\n%s", bareBody)
+	}
+}
+
 // TestCodexLayout_AmendEnv_CodexHome verifies AmendEnv sets
 // CODEX_HOME=<bootDir>. Codex reads config.toml + auth.json from
 // $CODEX_HOME; without this env pointer the planted config.toml is never

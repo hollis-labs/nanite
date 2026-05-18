@@ -815,14 +815,15 @@ func NewContainer(cfg ContainerConfig) (*Container, error) {
 		}
 	}
 	agentDepsBundle, agentDepsErr := BuildAgentDependencies(AgentDepsConfig{
-		Store:       cfg.Store,
-		PathGrants:  pathGrants,
-		Streams:     streams,
-		CLIAdapters: cliAdapters,
-		DBPath:      cfg.Store.DBPath(),
-		MCP:         cfg.MCP,
-		Providers:   cfg.Providers,
-		APIBaseURL:  cfg.APIBaseURL,
+		Store:            cfg.Store,
+		PathGrants:       pathGrants,
+		Streams:          streams,
+		CLIAdapters:      cliAdapters,
+		DBPath:           cfg.Store.DBPath(),
+		MCP:              cfg.MCP,
+		Providers:        cfg.Providers,
+		APIBaseURL:       cfg.APIBaseURL,
+		CLIWritableRoots: cfg.DevToolsAllowedPaths,
 	})
 	if agentDepsErr != nil {
 		stopCatalog()

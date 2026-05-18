@@ -40,6 +40,15 @@ type AgentDepsConfig struct {
 	DBPath          string
 	SandboxBaseProf sandbox.Profile
 
+	// CLIWritableRoots is the directory allow-list a CLI-launch agent
+	// (codex / claude) may write to beyond its boot dir. Threaded onto
+	// Dependencies.CLIWritableRoots so the boot-dir layouts widen the
+	// planted provider config (codex [sandbox_workspace_write], claude
+	// permissions.additionalDirectories). Sourced from the same
+	// dev_tools_allowed_paths config setting that scopes the in-process
+	// dev_* tools (CW-20260518-0075).
+	CLIWritableRoots []string
+
 	// APIBaseURL is the base URL of the live nanite API server, threaded
 	// into the boot dir's .mcp.json so a CLI-launched chat agent's
 	// `nanite mcp` subprocess forwards self-tool calls back to the
@@ -187,6 +196,7 @@ func BuildAgentDependencies(cfg AgentDepsConfig) (AgentDepsBundle, error) {
 			APIBaseURL: cfg.APIBaseURL,
 		},
 		WorkspacesRoot:     workspacesRoot,
+		CLIWritableRoots:   cfg.CLIWritableRoots,
 		Telemetry:          telemetry,
 		SandboxBaseProfile: cfg.SandboxBaseProf,
 	}

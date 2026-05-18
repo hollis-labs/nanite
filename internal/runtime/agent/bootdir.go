@@ -87,6 +87,9 @@ func composeBootdirParams(deps *Dependencies, opts Options, profile *store.Agent
 		ProjectDir:   opts.Workdir,
 		MCPConfig:    mcp,
 	}
+	if deps != nil {
+		params.CLIWritableRoots = deps.CLIWritableRoots
+	}
 	return layout, params
 }
 
@@ -136,6 +139,15 @@ type SetupParams struct {
 	// per-session args ("mcp --db <db> --session <sessID>"). Zero-value
 	// MCPConfig disables MCP planting.
 	MCPConfig MCPConfig
+
+	// CLIWritableRoots is the allow-list of directories a CLI-launch
+	// agent (codex / claude) may write to beyond its throwaway boot dir.
+	// It threads into the planted provider config: codex's
+	// [sandbox_workspace_write] writable_roots and claude's
+	// permissions.additionalDirectories. Sourced from the nanite
+	// dev_tools_allowed_paths config setting (CW-20260518-0075). Empty
+	// leaves the agent confined to its boot dir cwd.
+	CLIWritableRoots []string
 }
 
 // bootdirLayoutFor returns the Layout for the named provider. Unsupported

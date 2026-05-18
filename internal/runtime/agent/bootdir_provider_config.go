@@ -88,17 +88,26 @@ import (
 // with empty ApprovalPolicy / SandboxMode so go-providers' headless-safe
 // resolveCodexExecPolicy defaults ("never" / "workspace-write") apply.
 //
+// writableRoots, when non-empty, sets CodexAdapter.WritableRoots so the
+// planted config.toml carries a [sandbox_workspace_write] table widening
+// the codex sandbox beyond the throwaway boot dir cwd. Under the default
+// "workspace-write" SandboxMode codex confines writes to its cwd; without
+// these roots a CLI-launch agent asked to write a real project path is
+// silently confined to its boot dir (CW-20260518-0075). The list is
+// sourced from the same nanite config setting (dev_tools_allowed_paths)
+// that scopes the in-process dev_* tools — see resolveDevToolsAllowedPaths.
+// Empty → no table is emitted and the config.toml is unchanged.
+//
 // PlantContext.MCPLoopbackURL is left empty deliberately. Nanite's MCP
 // transport is subprocess-spawn-based — the planted .mcp.json names the
 // nanite binary as a stdio child; there is no HTTP loopback URL to emit
-// into an [mcp_servers.loopback] block. The rendered config.toml
-// therefore carries ONLY the approval_policy / sandbox_mode header, which
-// is the load-bearing fix for the headless-codex deadlock. Wiring codex's
-// MCP discovery (codex reads MCP servers from config.toml, NOT from the
-// Nanite .mcp.json sidecar) is a separate, out-of-scope follow-up — see
-// the report.
-func codexConfigTOMLContent() (string, error) {
+// into an [mcp_servers.loopback] block. Wiring codex's MCP discovery
+// (codex reads MCP servers from config.toml, NOT from the Nanite
+// .mcp.json sidecar) is a separate, out-of-scope follow-up — see the
+// report.
+func codexConfigTOMLContent(writableRoots []string) (string, error) {
 	adapter := provider.NewCodexAdapter()
+	adapter.WritableRoots = writableRoots
 	return renderProviderConfigFile(adapter, "config.toml", provider.PlantContext{})
 }
 
@@ -151,11 +160,21 @@ const claudeDefaultPermissionMode = "acceptEdits"
 // go-providers' ClaudeAdapter.BootDirSpec(), planting
 // permissions.defaultMode = claudeDefaultPermissionMode.
 //
+// additionalDirectories, when non-empty, sets
+// ClaudeAdapter.AdditionalDirectories so the planted settings.json
+// carries permissions.additionalDirectories — the directories claude
+// may access beyond its boot dir cwd. This is claude's analogue of the
+// codex WritableRoots widening; both are sourced from the same nanite
+// config setting (dev_tools_allowed_paths) so a CLI-launch agent's
+// file-write scope is consistent across providers (CW-20260518-0075).
+// Empty → no additionalDirectories key is emitted.
+//
 // PlantContext.BootDir is left empty so the render stays pure (no
 // ~/.claude.json trust seed — see file header).
-func claudeProviderConfigContent() (string, error) {
+func claudeProviderConfigContent(additionalDirectories []string) (string, error) {
 	adapter := provider.NewClaudeAdapter()
 	adapter.PermissionMode = claudeDefaultPermissionMode
+	adapter.AdditionalDirectories = additionalDirectories
 	return renderProviderConfigFile(adapter, ".claude/settings.json", provider.PlantContext{})
 }
 

@@ -1033,7 +1033,12 @@ func NewContainer(cfg ContainerConfig) (*Container, error) {
 	// then catches mid-run deaths on the configured interval.
 	runtimeReaperCtx, stopRuntimeReaper := context.WithCancel(context.Background())
 	runtimeReaper := runtimeagent.NewRuntimeReaper(agentDeps, runtimeagent.RuntimeReaperOptions{})
-	startupReconciled, startupSweepErr := runtimeReaper.SweepOnce(context.Background())
+	// PR #213 review: bound the startup sweep to runtimeReaperCtx (so Shutdown
+	// during container build can cancel it) and to a 30s wall clock (so a
+	// stuck SQLite query cannot block boot indefinitely).
+	startupSweepCtx, cancelStartupSweep := context.WithTimeout(runtimeReaperCtx, 30*time.Second)
+	startupReconciled, startupSweepErr := runtimeReaper.SweepOnce(startupSweepCtx)
+	cancelStartupSweep()
 	if startupSweepErr != nil {
 		slog.Warn("service container: agent_runtime startup sweep failed",
 			"err", startupSweepErr,

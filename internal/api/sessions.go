@@ -149,7 +149,7 @@ func (a *API) handleGetSession(w http.ResponseWriter, r *http.Request) {
 	a.jsonResp(w, http.StatusOK, map[string]any{
 		"session":          sess,
 		"messages":         messages,
-		"interrupted_turn": a.detectInterruptedTurn(id, sess, messages),
+		"interrupted_turn": a.detectInterruptedTurn(id, sess),
 	})
 }
 
@@ -176,8 +176,17 @@ func (a *API) handleGetSession(w http.ResponseWriter, r *http.Request) {
 //
 // Returns nil when the session is not in an interrupted state — the FE treats a
 // null/absent field as "no interruption".
-func (a *API) detectInterruptedTurn(sessionID string, sess *store.Session, messages []store.Message) map[string]any {
-	if sess == nil || len(messages) == 0 {
+//
+// PR #213 review hardening: this helper used to take the caller's messages
+// slice and inspect `messages[len-1]`, which assumed the slice was the
+// chronological tail. The current `handleGetSession` always passes the
+// latest 50 (`ListMessages(id, 50)` is `ORDER BY created_at DESC LIMIT 50`
+// reversed to ASC, so messages[-1] is in fact the absolute-latest message),
+// but `ListMessagesPaginated` exists and a future endpoint passing a
+// non-tail window would silently mis-trigger. Querying the store directly
+// for the latest message eliminates the caller-slice dependency entirely.
+func (a *API) detectInterruptedTurn(sessionID string, sess *store.Session) map[string]any {
+	if sess == nil {
 		return nil
 	}
 	// Only active sessions can have an in-flight turn; paused/archived ones
@@ -185,7 +194,15 @@ func (a *API) detectInterruptedTurn(sessionID string, sess *store.Session, messa
 	if sess.Status != "active" {
 		return nil
 	}
-	last := messages[len(messages)-1]
+	// Probe the store directly for the chronologically-last message rather
+	// than relying on a caller-supplied slice (ListMessages returns DESC then
+	// reverses to ASC; with limit=1 the single returned element is the
+	// absolute-latest row).
+	tail, err := a.Services.Store.ListMessages(sessionID, 1)
+	if err != nil || len(tail) == 0 {
+		return nil
+	}
+	last := tail[len(tail)-1]
 	if last.Role != "user" {
 		return nil
 	}

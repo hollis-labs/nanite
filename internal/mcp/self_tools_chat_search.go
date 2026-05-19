@@ -169,30 +169,49 @@ func (st *SelfToolsTransport) callChatSearch(ctx context.Context, args map[strin
 	//   2. explicit `session_id` arg — back-compat alias for `target`
 	//   3. session id from ctx — same-session search (default)
 	targetArg := strArg(args, "target", "")
+	// `isLegacyAlias` preserves the pre-PR-#213 permissive semantics of the
+	// `session_id` arg: it used to be a raw passthrough — `sessionID = sid`
+	// with no DB validation — so callers passing a deleted/archived id (or
+	// any opaque string) got an empty result, not an error. The new `target`
+	// arg is explicit and strict; only the legacy alias keeps the old
+	// permissive fall-through.
+	isLegacyAlias := false
 	if targetArg == "" {
-		targetArg = strArg(args, "session_id", "")
+		if sid := strArg(args, "session_id", ""); sid != "" {
+			targetArg = sid
+			isLegacyAlias = true
+		}
 	}
 
 	var (
-		targetSess  *store.Session
-		crossMode   bool
-		sessionID   string
+		targetSess *store.Session
+		crossMode  bool
+		sessionID  string
 	)
 	if targetArg != "" {
 		sess, errRes := resolveChatTarget(st, targetArg)
 		if errRes != nil {
-			return errRes, nil
-		}
-		if errRes := enforceWorkspaceScope(ctx, sess); errRes != nil {
-			return errRes, nil
-		}
-		targetSess = sess
-		sessionID = sess.ID
-		// Only treat as cross-session when the resolved target differs from
-		// the caller's current session — same-id `target` arg keeps the legacy
-		// shape (no per-snippet session_id field).
-		if ctxSess := SessionIDFromContext(ctx); ctxSess != "" && ctxSess != sess.ID {
-			crossMode = true
+			if !isLegacyAlias {
+				// `target` is the strict, explicit arg — surface resolution errors.
+				return errRes, nil
+			}
+			// Back-compat: `session_id` legacy alias falls through to using
+			// the raw string as the search scope (matches the pre-PR-#213
+			// behavior). The workspace gate cannot apply when we don't have
+			// a Session row to consult — same as before.
+			sessionID = targetArg
+		} else {
+			if errRes := enforceWorkspaceScope(ctx, sess); errRes != nil {
+				return errRes, nil
+			}
+			targetSess = sess
+			sessionID = sess.ID
+			// Only treat as cross-session when the resolved target differs from
+			// the caller's current session — same-id `target` arg keeps the legacy
+			// shape (no per-snippet session_id field).
+			if ctxSess := SessionIDFromContext(ctx); ctxSess != "" && ctxSess != sess.ID {
+				crossMode = true
+			}
 		}
 	} else {
 		sessionID = SessionIDFromContext(ctx)

@@ -116,19 +116,21 @@ func (s *chatServiceImpl) preCheckTools(
 			var blockedResult string
 			isCountCap := ls.isToolExhausted(tu.Name) && !ls.blockedTools[tu.Name]
 			if isCountCap {
-				cap := ls.limits.defaultPerToolCap
-				if max, ok := ls.limits.perToolMax[tu.Name]; ok && max > 0 {
-					cap = max
+				// PR #213 review: renamed local `cap`/`max` so they don't
+				// shadow Go's builtins (`cap()` and `max()` / Go 1.21+).
+				perTurnCap := ls.limits.defaultPerToolCap
+				if toolMax, ok := ls.limits.perToolMax[tu.Name]; ok && toolMax > 0 {
+					perTurnCap = toolMax
 				}
 				blockedResult = fmt.Sprintf(
 					"Tool %q hit its per-turn backstop (%d of %d calls used this turn). "+
 						"This is the absolute-limit failsafe, not a runaway signal — the loop, error, and same-result detectors did not trip, so the calls you made were intentional. "+
 						"Stop calling %q for the rest of this turn. "+
 						"Tell the user what you completed (e.g. \"X of Y done, Z remaining\") and offer to finish the rest in a follow-up turn so the per-turn counter resets.",
-					tu.Name, ls.toolCallCounts[tu.Name], cap, tu.Name,
+					tu.Name, ls.toolCallCounts[tu.Name], perTurnCap, tu.Name,
 				)
 				slog.Warn("chat-service: tool SKIPPED (per-turn backstop)",
-					"tool", tu.Name, "calls", ls.toolCallCounts[tu.Name], "cap", cap)
+					"tool", tu.Name, "calls", ls.toolCallCounts[tu.Name], "cap", perTurnCap)
 			} else {
 				blockedResult = fmt.Sprintf(
 					"Tool %q isn't available for the rest of this turn — it returned the same result repeatedly, so the harness is holding further calls to protect your context budget. "+

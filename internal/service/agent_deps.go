@@ -199,6 +199,13 @@ func BuildAgentDependencies(cfg AgentDepsConfig) (AgentDepsBundle, error) {
 		CLIWritableRoots:   cfg.CLIWritableRoots,
 		Telemetry:          telemetry,
 		SandboxBaseProfile: cfg.SandboxBaseProf,
+		// CW-20260518-0085: orphan sweep + periodic reaper consult the
+		// in-process session registry to distinguish "process gone but
+		// session still alive in this nanite" from "stale row left over
+		// from a pre-restart session." Wired against the same Manager
+		// the rest of agent_deps composes — same source of truth as
+		// SessionsManager above.
+		LiveSessions: managerLiveSessions{manager: manager},
 	}
 
 	// BootDir adapter — satisfies recovery.BootDirOps by re-running the
@@ -518,6 +525,7 @@ func (s *agentRuntimeStore) ListRunningRows() ([]*runtimeagent.RuntimeRow, error
 			PID:             r.PID,
 			ParentSessionID: parent,
 			StartedAt:       r.StartedAt,
+			UpdatedAt:       r.UpdatedAt,
 			Meta:            r.MetaMap(),
 		})
 	}
@@ -553,6 +561,30 @@ type agentRuntimeStateSink struct {
 
 func (s *agentRuntimeStateSink) UpdateSessionState(id string, state agentsessions.State, pid int, exit *int) error {
 	return s.store.SetAgentRuntimeState(id, string(state), pid)
+}
+
+// --- LiveSessions adapter ---
+
+// managerLiveSessions satisfies runtimeagent.LiveSessionChecker against
+// the in-process agentsessions.Manager. SweepOrphans uses it to
+// distinguish a pid=0 row whose session is still live in *this* nanite
+// process from one left over from a pre-restart process.
+//
+// CW-20260518-0085: codex / opencode adapters never persist a non-zero
+// pid into agent_runtime, so signal-0 liveness can't speak for them.
+// Manager.Get is authoritative for the current process — empty registry
+// means every persisted pid=0 row is by definition orphaned (and the
+// staleness grace keeps mid-launch rows safe).
+type managerLiveSessions struct {
+	manager *agentsessions.Manager
+}
+
+func (m managerLiveSessions) IsLive(runtimeID string) bool {
+	if m.manager == nil {
+		return false
+	}
+	_, ok := m.manager.Get(runtimeID)
+	return ok
 }
 
 // --- EventSink adapter ---

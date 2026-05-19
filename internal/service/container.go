@@ -194,6 +194,15 @@ type Container struct {
 	// depth — Reaper.Stop alone is enough, but the cancel func unblocks
 	// any in-flight ExecContext on shutdown).
 	stopSubagentReaper context.CancelFunc
+
+	// runtimeReaper sweeps agent_runtime for rows whose underlying
+	// process has died — both pre-restart leftovers (one-shot startup
+	// sweep) and mid-run process deaths (periodic). Started during
+	// container build; stopped during Shutdown before the DB closes.
+	// CW-20260518-0085.
+	runtimeReaper *runtimeagent.RuntimeReaper
+	// stopRuntimeReaper cancels the runtime reaper's bound context.
+	stopRuntimeReaper context.CancelFunc
 }
 
 // ContainerConfig holds all the external dependencies needed to construct
@@ -1010,6 +1019,36 @@ func NewContainer(cfg ContainerConfig) (*Container, error) {
 		"orphan_grace", subagent.DefaultReaperOrphanGrace.String(),
 	)
 
+	// CW-20260518-0085: agent_runtime orphan reaper — pairs with the
+	// subagent reaper but operates on the agent_runtime table (where
+	// agent.Boot persists per-spawn lifecycle rows). Without this:
+	//   - After a service restart, every pre-restart row stays
+	//     state=running with a now-dead pid forever (FE indicator from
+	//     CW-20260518-0084 only catches sessions with message history;
+	//     runtime-only subagent rows go untouched).
+	//   - If a long-lived process dies mid-run without persisting a
+	//     terminal state, the row hangs around in state=running too.
+	// Startup sweep runs synchronously to reconcile pre-restart rows
+	// before the chat layer starts serving requests; periodic reaper
+	// then catches mid-run deaths on the configured interval.
+	runtimeReaperCtx, stopRuntimeReaper := context.WithCancel(context.Background())
+	runtimeReaper := runtimeagent.NewRuntimeReaper(agentDeps, runtimeagent.RuntimeReaperOptions{})
+	startupReconciled, startupSweepErr := runtimeReaper.SweepOnce(context.Background())
+	if startupSweepErr != nil {
+		slog.Warn("service container: agent_runtime startup sweep failed",
+			"err", startupSweepErr,
+		)
+	} else {
+		slog.Info("service container: agent_runtime startup sweep complete",
+			"reconciled", startupReconciled,
+		)
+	}
+	runtimeReaper.Start(runtimeReaperCtx)
+	slog.Info("service container: agent_runtime reaper started",
+		"interval", runtimeagent.DefaultRuntimeReaperInterval.String(),
+		"pid_zero_grace", runtimeagent.DefaultRuntimeReaperPidZeroGrace.String(),
+	)
+
 	// G-4: register the subagent-spawn-approval typed response handler so
 	// POST /api/envelopes/:id/respond dispatches to Approve/Reject.
 	chat.RegisterResponseHandler("subagent-spawn-approval", chat.NewSubagentApprovalHandler(subagentSvc))
@@ -1173,6 +1212,8 @@ func NewContainer(cfg ContainerConfig) (*Container, error) {
 		stopModelCatalog:    stopCatalog,
 		subagentReaper:      subagentReaper,
 		stopSubagentReaper:  stopReaper,
+		runtimeReaper:       runtimeReaper,
+		stopRuntimeReaper:   stopRuntimeReaper,
 	}, nil
 }
 
@@ -1226,6 +1267,14 @@ func (c *Container) Shutdown() {
 	}
 	if c.subagentReaper != nil {
 		c.subagentReaper.Stop()
+	}
+
+	// CW-20260518-0085: same sequencing for the agent_runtime reaper.
+	if c.stopRuntimeReaper != nil {
+		c.stopRuntimeReaper()
+	}
+	if c.runtimeReaper != nil {
+		c.runtimeReaper.Stop()
 	}
 
 	if c.Workers != nil {

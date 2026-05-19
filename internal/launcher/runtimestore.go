@@ -196,6 +196,7 @@ func (s *storeRuntimeStore) ListRunningRows() ([]*runtimeagent.RuntimeRow, error
 			PID:             r.PID,
 			ParentSessionID: parent,
 			StartedAt:       r.StartedAt,
+			UpdatedAt:       r.UpdatedAt,
 		})
 	}
 	return out, nil

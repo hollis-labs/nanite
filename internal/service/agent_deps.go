@@ -818,6 +818,18 @@ func (b *agentEventBridge) typedCallback(sessionID string) provider.EventsCallba
 				ToolID:  evt.ID,
 				Detail:  toolDetailFromArgs(evt.Args),
 			})
+			// CW-20260519-0051: surface a one-line info-card envelope when
+			// the CLI agent invokes a structured-input built-in (e.g.
+			// AskUserQuestion) whose host-side round-trip isn't wired for
+			// CLI-launch sessions. The tool_call SSE above keeps the
+			// inspector/devtools view of the call; this emission gives the
+			// operator a visible signal that answers won't round-trip, so
+			// the previously-silent empty-answer failure mode stops.
+			// typedCallback fires only for CLI runtimes, so the gate is
+			// the tool-name match (not a separate provider check).
+			if isCLIStructuredInputUnsupported(evt.Name) {
+				b.emitCLIStructuredInputFallback(sessionID, evt.Name, evt.ID)
+			}
 		case events.ToolResult:
 			b.streams.BroadcastSessionStreamEvent(sessionID, chat.StreamEvent{
 				EventID: b.nextEventID(),

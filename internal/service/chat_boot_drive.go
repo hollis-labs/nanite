@@ -34,15 +34,30 @@ import (
 //     since the last turn, regenerate CLAUDE.md / agent-context.md in the
 //     boot dir and SendInput a re-read instruction so the agent reloads
 //     context.
-//  3. Compose the per-turn UserContext payload (reminder injections + user
-//     message) and SendInput.
-//  4. Construct a per-turn turnCh, bind it on the agentEventBridge so the
+//  3. Construct a per-turn turnCh, bind it on the agentEventBridge so the
 //     runtime's EventFanout routes events here instead of broadcasting SSE.
 //     Spawn a watcher goroutine that unbinds + closes turnCh on ctx cancel.
+//  4. Compose the per-turn UserContext payload (reminder injections + user
+//     message) and SendInput it — in a goroutine so the turn's events
+//     stream into turnCh while the harness consumes them.
 //
 // The chat-harness loop consumes the returned chan via its existing
 // for-range-provCh streamLoop. Done / Error events close turnCh via the
 // bridge's close-once guard, terminating the streamLoop.
+//
+// CW-20260518-0074: the router MUST be bound before SendInput, and
+// SendInput MUST run asynchronously. The subprocess-per-turn adapter
+// runtime (codex / opencode `exec` mode) makes SendInput synchronous —
+// runner.Run spawns the CLI, drives the whole turn, and fires every
+// EventFanout event (deltas + EventDone) before SendInput returns. If the
+// router were bound only after SendInput (as Phase 4c.4 did, when only the
+// long-lived streaming-stdio claude path existed and SendInput returned
+// immediately), every event of a codex turn would be emitted with no
+// router bound — fanned out as SSE (so the GUI still renders the reply
+// live) but never delivered to turnCh. The harness streamLoop would then
+// accumulate nothing and persist an empty `{"v":1,"text":""}` messages
+// row, so the reply vanishes on reload. Binding first + sending async
+// closes that gap for both runtime shapes.
 //
 // Iteration > 0 is not supported for CLI sessions (claude handles tools
 // internally → no tool_use blocks return through provCh → loop exits after
@@ -153,15 +168,17 @@ func (s *chatServiceImpl) driveBootSession(
 		}
 	}
 
-	// 4. Compose + deliver the per-turn payload.
-	payload := composeUserPayload(slotResult, userContent)
-	if err := sess.SendInput([]byte(payload)); err != nil {
-		return nil, fmt.Errorf("driveBootSession: send input: %w", err)
-	}
-
-	// 5. Bind the per-turn router. The bridge writes runtime events into
-	// turnCh until Done / Error flow through (close-once via the bridge)
-	// or until the watcher goroutine below clears the router on ctx cancel.
+	// 4. Bind the per-turn router BEFORE SendInput. The bridge writes
+	// runtime events into turnCh until Done / Error flow through
+	// (close-once via the bridge) or until the watcher goroutine below
+	// clears the router on ctx cancel.
+	//
+	// CW-20260518-0074: ordering is load-bearing. SendInput is
+	// synchronous for the subprocess-per-turn adapter runtime (codex /
+	// opencode `exec`): runner.Run spawns the CLI and fires every
+	// EventFanout event — including EventDone — before SendInput returns.
+	// The router must already be bound or those events route to SSE
+	// instead of turnCh and the harness persists an empty assistant row.
 	turnCh := make(chan llmtypes.StreamEvent, 64)
 	s.agentEventBridge.SetPerSessionRouter(sessionID, turnCh)
 
@@ -170,6 +187,38 @@ func (s *chatServiceImpl) driveBootSession(
 		// Unbind + close. SetPerSessionRouter(nil) is idempotent against
 		// the bridge's own close-on-Done path.
 		s.agentEventBridge.SetPerSessionRouter(sessionID, nil)
+	}()
+
+	// 5. Compose + deliver the per-turn payload asynchronously. SendInput
+	// blocks for the entire turn on the subprocess-per-turn runtime, so
+	// running it here would deadlock driveBootSession against its own
+	// caller (the harness streamLoop only starts draining turnCh after
+	// this function returns). The streaming-stdio runtime returns from
+	// SendInput immediately; running it in a goroutine is harmless there.
+	//
+	// A SendInput failure is surfaced into turnCh as an EventError so the
+	// harness streamLoop classifies + persists it on the normal error
+	// path; we then clear the router so the channel is closed and the
+	// loop terminates (the bridge only auto-closes on a runtime-emitted
+	// Done/Error, which never arrives when SendInput itself failed).
+	payload := composeUserPayload(slotResult, userContent)
+	go func() {
+		if err := sess.SendInput([]byte(payload)); err != nil {
+			slog.Warn("driveBootSession: send input failed",
+				"session_id", sessionID, "err", err)
+			if v, ok := s.agentEventBridge.routers.Load(sessionID); ok {
+				if r, rOK := v.(*sessionRouter); rOK && !r.closed.Load() {
+					select {
+					case r.ch <- llmtypes.StreamEvent{
+						Type:  llmtypes.EventError,
+						Error: fmt.Sprintf("driveBootSession: send input: %v", err),
+					}:
+					default:
+					}
+				}
+			}
+			s.agentEventBridge.SetPerSessionRouter(sessionID, nil)
+		}
 	}()
 
 	return turnCh, nil

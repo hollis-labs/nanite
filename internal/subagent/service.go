@@ -18,9 +18,26 @@ import (
 	"github.com/hollis-labs/nanite/internal/store"
 )
 
-// DefaultTimeoutSeconds bounds a runner when the caller doesn't set
-// a timeout. 5 minutes matches the plan's §T9 spawn-request default.
-const DefaultTimeoutSeconds = 300
+// DefaultTimeoutSeconds is the wall-clock BACKSTOP for a runner when
+// the caller doesn't set a timeout.
+//
+// CW-20260519-0073: this is no longer the *governing* bound on a
+// subagent run. The fixed 300s wall clock that this constant used to
+// supply measured *elapsed time* — it guillotined a productive worker
+// on its 22nd tool iteration exactly as readily as it caught a hung
+// planner. The governing signal is now an *inactivity* timeout
+// enforced inside the child chat loop (shouldStop Layer 2, scoped to
+// subagent dispatch via subagentIdleTimeoutSeconds): a run that keeps
+// emitting events resets its liveness clock and runs as long as the
+// work needs; only genuine silence trips it. See the audit at
+// CW-20260519-0072 §P0 for the Torque-parity rationale.
+//
+// 1800s (30 min) is deliberately generous: it is a pure backstop for
+// the pathological case where the child loop somehow neither makes
+// progress nor trips its own inactivity terminator. A realistic,
+// per-role / env-configurable budget knob is CW-20260517-0036 — NOT
+// this ticket; this value is just a sane floor.
+const DefaultTimeoutSeconds = 1800
 
 // spawnFanoutCap is the maximum number of Spawn invocations that may
 // have their runner executing concurrently. FIFO ordering is preserved
@@ -668,6 +685,17 @@ func (svc *Service) executeWithSlot(ctx context.Context, run *Run, parentAgentID
 // state and post the reply. Dropping those because the caller gave
 // up would leave the run stuck in 'running' and silently drop the
 // subagent's work.
+//
+// CW-20260519-0073: the `context.WithTimeout` below is now a
+// generous wall-clock BACKSTOP (DefaultTimeoutSeconds = 1800s), not
+// the governing bound. The real liveness signal is the child chat
+// loop's inactivity terminator (shouldStop Layer 2, scoped to
+// subagent dispatch). The old fixed 300s deadline measured elapsed
+// time and cancelled productive-but-slow runs mid-stream; the
+// inactivity timeout measures *silence* instead, so a worker that
+// keeps emitting events is never reaped. This backstop only fires
+// for the pathological case where the child loop neither progresses
+// nor trips its own inactivity terminator.
 func (svc *Service) execute(ctx context.Context, run *Run, parentAgentID string) {
 	runCtx, cancel := context.WithTimeout(ctx, time.Duration(run.TimeoutSeconds)*time.Second)
 	defer cancel()

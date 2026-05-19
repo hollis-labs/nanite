@@ -337,7 +337,8 @@ func TestCancel_PerRunContextCancellation(t *testing.T) {
 
 	// The core assertion: Cancel must propagate into the runner's ctx so
 	// the goroutine actually exits. Without per-run cancel plumbing this
-	// would time out (runner stays blocked until execute's 300s WithTimeout).
+	// would block until execute's generous wall-clock backstop
+	// (DefaultTimeoutSeconds, CW-20260519-0073) fired.
 	select {
 	case <-runner.done:
 	case <-time.After(500 * time.Millisecond):

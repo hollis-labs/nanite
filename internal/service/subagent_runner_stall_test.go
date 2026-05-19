@@ -41,14 +41,23 @@ func TestDrainCapture_FastFailsOnErrorEvent(t *testing.T) {
 // inactivity timeout. When the provider stream stalls silently — an
 // opening delta, then no further events and no channel close (c242: "the
 // child agent emitted only an opening line") — drainCapture blocks
-// indefinitely. In production the ONLY thing that ends the block is the
-// run-level ctx deadline (subagent.Service.execute applies
-// context.WithTimeout(ctx, timeout_seconds), default 300s), which is why a
-// stalled subagent run consumes the entire timeout instead of fast-failing.
+// indefinitely.
 //
-// If a future change adds a provider-stream inactivity timeout (see
-// docs/cw-20260516-0061-300s-hang-findings.md), this test must be updated
-// to assert the new bounded return instead of an indefinite block.
+// CW-20260519-0073 update: the run-level ctx deadline that bounds this
+// block is no longer a fixed 300s wall clock. The subagent run's
+// governing liveness signal is now the child chat loop's *inactivity*
+// timeout (shouldStop Layer 2, scoped to subagent dispatch via
+// subagentIdleTimeoutSeconds — 300s of silence). The chat loop emits a
+// clean TerminationIdleTimeout envelope when no activity is observed for
+// that window; subagent.Service.execute still applies a generous
+// context.WithTimeout (DefaultTimeoutSeconds = 1800s) as a pure
+// backstop. drainCapture itself is unchanged — it has no internal
+// inactivity bound; that bound lives in the chat loop upstream of it.
+//
+// If a future change adds a provider-stream inactivity timeout inside
+// drainCapture (see docs/cw-20260516-0061-300s-hang-findings.md), this
+// test must be updated to assert the new bounded return instead of an
+// indefinite block.
 func TestDrainCapture_NoIdleTimeout_OnSilentStall(t *testing.T) {
 	ch := make(chan chat.StreamEvent, 8)
 	ch <- chat.StreamEvent{Type: "delta", Content: "opening line"}

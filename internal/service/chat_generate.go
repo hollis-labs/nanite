@@ -642,7 +642,13 @@ func (s *chatServiceImpl) generateResponse(ctx context.Context, sessionID, assis
 
 	// P3 (CW-20260420-0013): pre-loop classification. Runs once per
 	// generation; downstream consumers read via loopState.Classification().
-	ls := newLoopState(constraints, toolNames, debugMode)
+	// CW-20260519-0073: the dispatch caller selects the loop's
+	// inactivity-timeout window. A subagent dispatch uses the
+	// Torque-parity liveness window (subagentIdleTimeoutSeconds) — the
+	// fixed 300s wall-clock deadline that used to bound subagent runs
+	// has been removed, so the chat loop's idle-timeout terminator is
+	// now the governing liveness signal.
+	ls := newLoopState(constraints, toolNames, debugMode, dispatcher.CallerTypeFromContext(ctx))
 	// P3 (CW-20260420-0013): pre-loop classification. Downstream consumers
 	// read via loopState.Classification().
 	classifyAndAttach(ls, sessionID, userContent, toolNames)

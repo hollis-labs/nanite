@@ -800,6 +800,20 @@ func (svc *Service) execute(ctx context.Context, run *Run, parentAgentID string)
 	if runErr != nil {
 		run.Status = StatusFailed
 		run.Error = runErr.Error()
+		// CW-20260519-0071 (audit §P2): partial-result capture on the
+		// failure branch. A subagent guillotined mid-productive-work
+		// (wall-clock backstop cancels the provider stream) has often
+		// done real file-writing work; the runner now returns that
+		// partial Result *alongside* the error. Persist result_json so
+		// the run row carries a structured trace of what the killed
+		// run accomplished instead of leaving result_json at its
+		// insert-time default. The error itself is untouched above —
+		// status stays `failed`; this is additive capture, not error
+		// suppression. result == nil (genuinely empty failure, or a
+		// runner that returns nil on error) leaves result_json as-is.
+		if result != nil {
+			run.ResultJSON = structuredResultJSON(result)
+		}
 	} else {
 		run.Status = StatusCompleted
 		if result != nil {

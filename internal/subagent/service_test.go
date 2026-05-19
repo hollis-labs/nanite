@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -262,6 +263,62 @@ func TestSpawn_FailedRunner_SetsStatusFailed(t *testing.T) {
 	}
 	if run.Error == "" {
 		t.Error("Error field unexpectedly empty")
+	}
+}
+
+// partialFailRunner mirrors the CW-20260519-0071 productive-but-cut
+// case: the runner returns a non-nil *Result (the partial work it
+// captured) ALONGSIDE a non-nil error. ChatRunner.Run does exactly
+// this on the deadline/stream-error path.
+type partialFailRunner struct{}
+
+func (partialFailRunner) Run(_ context.Context, _ *Run) (*Result, error) {
+	return &Result{
+			Summary:    "wrote 2 of 5 files before deadline",
+			ResultJSON: `{"partial":true,"summary":"wrote 2 of 5 files before deadline","tools":{"calls":2,"results_success":2,"results_error":0}}`,
+		},
+		errors.New("http chat stream error / cause:http_stream")
+}
+
+// TestSpawn_FailedRunner_PersistsPartialResultJSON is the acceptance
+// test for CW-20260519-0071 (audit §P2). A subagent guillotined
+// mid-productive-work returns a partial Result alongside its error;
+// execute must stamp StatusFailed (the error is intact) AND persist
+// result_json from that partial trace instead of leaving it at the
+// insert-time default. Orphaned side-effects now have a record.
+func TestSpawn_FailedRunner_PersistsPartialResultJSON(t *testing.T) {
+	db, _ := newTestDB(t)
+	poster := &stubPoster{}
+	svc := NewService(db, partialFailRunner{}, poster, nil, stubSettings{})
+
+	id, err := svc.Spawn(context.Background(), SpawnRequest{
+		ParentSessionID: "sess-1",
+		ParentAgentID:   "file-backend",
+		Role:            "file-summarizer",
+		Prompt:          "implement the feature",
+		Mode:            ModeSync,
+	})
+	if err != nil {
+		t.Fatalf("Spawn: %v", err)
+	}
+	run, err := svc.Status(context.Background(), id)
+	if err != nil {
+		t.Fatalf("Status: %v", err)
+	}
+	// Error path is intact — status stays failed.
+	if run.Status != StatusFailed {
+		t.Errorf("Status = %q, want %q", run.Status, StatusFailed)
+	}
+	if run.Error == "" {
+		t.Error("Error field unexpectedly empty")
+	}
+	// Partial-result capture: result_json must carry the partial trace,
+	// not the insert-time default.
+	if run.ResultJSON == "" || run.ResultJSON == "{}" {
+		t.Errorf("ResultJSON = %q; want partial trace persisted on failure branch", run.ResultJSON)
+	}
+	if !strings.Contains(run.ResultJSON, `"partial":true`) {
+		t.Errorf("ResultJSON = %q; want partial-capture marker", run.ResultJSON)
 	}
 }
 

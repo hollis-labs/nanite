@@ -272,14 +272,21 @@ func TestDetectFabrication_SkipsWhenSummaryEmpty(t *testing.T) {
 
 // TestChatRunner_FabricationSuspectedFailsRun is the integration-level
 // acceptance test for CW-20260512-0095. A subagent task whose tool calls
-// all fail but still produces non-empty assistant text must surface as
-// (nil, errSubagentFabricationSuspected) so subagent.Service.execute
+// all fail but still produces non-empty assistant text must surface a
+// non-nil errSubagentFabricationSuspected so subagent.Service.execute
 // flips the row to status=failed.
 //
 // This is the runtime backstop for the c160 evidence — the universal
 // Refusal rules (CW-20260512-0100) teach the model to return failure
 // rather than fabricate, but if the model fabricates anyway, this
 // detector converts the turn into a failure the parent can read.
+//
+// CW-20260519-0071: the runner now ALSO returns a partial *subagent.Result
+// alongside the fabrication error (additive partial-result capture). The
+// error is unchanged and still drives status=failed; the partial result
+// carries the suspect text + tool counts so an operator inspecting the
+// row sees what the child produced. This test pins both: the error is
+// intact AND the partial result is captured.
 func TestChatRunner_FabricationSuspectedFailsRun(t *testing.T) {
 	// Emit a stream mirroring the c160 researcher: two tool calls, both
 	// IsError, followed by a long polished assistant reply.
@@ -320,8 +327,19 @@ func TestChatRunner_FabricationSuspectedFailsRun(t *testing.T) {
 	if !errors.Is(err, errSubagentFabricationSuspected) {
 		t.Errorf("error = %v; want wrapped errSubagentFabricationSuspected", err)
 	}
-	if result != nil {
-		t.Errorf("result = %+v; want nil on fabrication-suspected (so service maps to status=failed)", result)
+	// CW-20260519-0071: partial-result capture. The error above already
+	// maps the run to status=failed; the runner additionally returns a
+	// partial result so result_json records the suspect text + tool
+	// counts. The fabrication path saw 2 failed tool calls, so a partial
+	// result is expected.
+	if result == nil {
+		t.Fatal("result = nil; want non-nil partial result on fabrication-suspected (CW-20260519-0071 capture)")
+	}
+	if !contains(result.ResultJSON, `"partial":true`) {
+		t.Errorf("result.ResultJSON = %q; want partial-capture marker", result.ResultJSON)
+	}
+	if !contains(result.ResultJSON, `"calls":2`) {
+		t.Errorf("result.ResultJSON = %q; want tool-call count captured", result.ResultJSON)
 	}
 }
 
@@ -567,6 +585,92 @@ func TestChatRunner_DrainsSummaryAndEnvelope(t *testing.T) {
 	}
 	if userMsg.Content != "summarize" {
 		t.Errorf("user message Content = %q, want %q", userMsg.Content, "summarize")
+	}
+}
+
+// TestChatRunner_CapturesPartialResultOnStreamError is the acceptance
+// test for CW-20260519-0071 (audit §P2). A productive subagent that did
+// real tool-iteration work and then had its in-flight provider stream
+// cancelled by the run-budget deadline must not have its accumulated
+// work discarded. The runner now returns the partial *subagent.Result
+// (summary + envelope + tool counts) ALONGSIDE the stream error, so
+// subagent.execute can persist result_json on the StatusFailed branch
+// instead of leaving it at the insert-time default.
+func TestChatRunner_CapturesPartialResultOnStreamError(t *testing.T) {
+	// Stream mirrors a worker cut mid-productive-work: several real
+	// file-writing tool roundtrips, partial assistant text, then the
+	// deadline cancels the stream → error event (no stream_end).
+	fake := &fakeChatService{events: []chat.StreamEvent{
+		{Type: "tool_call", Tool: "dev_write", ToolID: "tu_1"},
+		{Type: "tool_result", Tool: "dev_write", ToolID: "tu_1", Summary: "wrote internal/foo.go", IsError: false},
+		{Type: "tool_call", Tool: "dev_write", ToolID: "tu_2"},
+		{Type: "tool_result", Tool: "dev_write", ToolID: "tu_2", Summary: "wrote internal/bar.go", IsError: false},
+		{Type: "plugin_envelope", Envelope: `{"files_written":2}`},
+		{Type: "delta", Content: "I have implemented the first two files and am "},
+		{Type: "error", Error: "http chat stream error / cause:http_stream"},
+	}}
+
+	st := &recordingSessionStore{
+		parents: map[string]*store.Session{
+			"sess-parent": {ID: "sess-parent", WorkspaceID: "ws-1"},
+		},
+	}
+	runner := &ChatRunner{
+		agents: &stubAgentReaderForRunner{agents: map[string]*store.AgentProfile{
+			"worker": {ID: "ag-worker", DefaultProvider: "anthropic", DefaultModel: "claude-sonnet-4-6"},
+		}},
+		store:     st,
+		invoker:   fake,
+		persistFn: func(_ context.Context, _, _ string) error { return nil },
+	}
+
+	run := &subagent.Run{
+		ID: "run-cut", Role: "worker", ParentSessionID: "sess-parent", Prompt: "implement the feature",
+	}
+	result, err := runner.Run(context.Background(), run)
+
+	// The error must be intact — capture is additive, not suppression.
+	if err == nil {
+		t.Fatal("expected stream error from runner.Run; got nil")
+	}
+	if !errors.Is(err, errStreamFailure) {
+		t.Errorf("error = %v; want wrapped errStreamFailure", err)
+	}
+	// The partial result must be returned alongside the error.
+	if result == nil {
+		t.Fatal("result = nil; want non-nil partial result (CW-20260519-0071)")
+	}
+	if result.Summary != "I have implemented the first two files and am " {
+		t.Errorf("partial Summary = %q; want the accumulated assistant text", result.Summary)
+	}
+	if !contains(result.ResultJSON, `"partial":true`) {
+		t.Errorf("result.ResultJSON = %q; want partial-capture marker", result.ResultJSON)
+	}
+	if !contains(result.ResultJSON, `"files_written":2`) {
+		t.Errorf("result.ResultJSON = %q; want captured envelope", result.ResultJSON)
+	}
+	if !contains(result.ResultJSON, `"calls":2`) || !contains(result.ResultJSON, `"results_success":2`) {
+		t.Errorf("result.ResultJSON = %q; want tool counts (calls=2, results_success=2)", result.ResultJSON)
+	}
+}
+
+// TestPartialResult_NilWhenNothingAccumulated pins the negative side:
+// a genuinely empty failure (no text, no envelope, no tool activity)
+// yields a nil partial result so subagent.execute leaves result_json
+// at its insert-time default rather than persisting an empty trace.
+func TestPartialResult_NilWhenNothingAccumulated(t *testing.T) {
+	if got := partialResult("", "{}", toolUsageCounts{}); got != nil {
+		t.Errorf("partialResult(empty) = %+v; want nil", got)
+	}
+	if got := partialResult("  \n ", "{}", toolUsageCounts{}); got != nil {
+		t.Errorf("partialResult(whitespace-only) = %+v; want nil", got)
+	}
+	// Any one signal present → non-nil capture.
+	if got := partialResult("some text", "{}", toolUsageCounts{}); got == nil {
+		t.Error("partialResult(text) = nil; want non-nil")
+	}
+	if got := partialResult("", "{}", toolUsageCounts{calls: 1}); got == nil {
+		t.Error("partialResult(tool activity) = nil; want non-nil")
 	}
 }
 

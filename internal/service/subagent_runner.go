@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -191,6 +192,75 @@ func detectFabrication(summary string, counts toolUsageCounts) error {
 	return fmt.Errorf("%w: tool_calls=%d, tool_results_error=%d, tool_results_success=%d, assistant_text_chars=%d",
 		errSubagentFabricationSuspected,
 		counts.calls, counts.resultsError, counts.resultsSuccess, len(summary))
+}
+
+// partialResult assembles a *subagent.Result from whatever drainCapture
+// accumulated before the run ended in error (CW-20260519-0071, audit §P2).
+//
+// The error path used to discard the accumulated `summary`/`envelope`/
+// `counts` entirely — `if runErr != nil { return nil, runErr }` — so a
+// subagent guillotined mid-productive-work (e.g. cut by the wall-clock
+// backstop after writing real files) left no structured trace of what it
+// got done. subagent_runs.status was `failed` and result_json sat at its
+// insert-time default. This helper lets ChatRunner.Run return the partial
+// result *alongside* the error so subagent.execute can persist it on the
+// StatusFailed branch.
+//
+// The ResultJSON it produces is a structured "partial" envelope that
+// records: which envelope (if any) the child emitted, the accumulated
+// assistant text, and the tool-usage counts (how many tool calls were
+// made and how many succeeded/failed — a proxy for "how much real work
+// happened before the cut"). It deliberately does NOT carry the error
+// itself: capture is additive, the error stays intact on its own path.
+//
+// Returns nil when nothing was accumulated (no summary, no envelope, no
+// tool activity) — there is no partial work worth persisting, and a nil
+// result keeps subagent.execute's existing "leave result_json at default"
+// behavior for genuinely empty failures.
+func partialResult(summary, envelope string, counts toolUsageCounts) *subagent.Result {
+	hasEnvelope := envelope != "" && envelope != "{}"
+	hasActivity := counts.calls > 0 || counts.resultsSuccess > 0 || counts.resultsError > 0
+	if strings.TrimSpace(summary) == "" && !hasEnvelope && !hasActivity {
+		return nil
+	}
+
+	// envelopeRaw is the child's structured envelope JSON (last-wins from
+	// drainCapture). Embedded as a raw message so a real envelope is not
+	// double-encoded; falls back to {} when none was emitted.
+	envelopeRaw := json.RawMessage("{}")
+	if hasEnvelope && json.Valid([]byte(envelope)) {
+		envelopeRaw = json.RawMessage(envelope)
+	}
+
+	payload, err := json.Marshal(struct {
+		Partial  bool            `json:"partial"`
+		Summary  string          `json:"summary"`
+		Envelope json.RawMessage `json:"envelope"`
+		Tools    struct {
+			Calls          int `json:"calls"`
+			ResultsSuccess int `json:"results_success"`
+			ResultsError   int `json:"results_error"`
+		} `json:"tools"`
+	}{
+		Partial:  true,
+		Summary:  summary,
+		Envelope: envelopeRaw,
+		Tools: struct {
+			Calls          int `json:"calls"`
+			ResultsSuccess int `json:"results_success"`
+			ResultsError   int `json:"results_error"`
+		}{
+			Calls:          counts.calls,
+			ResultsSuccess: counts.resultsSuccess,
+			ResultsError:   counts.resultsError,
+		},
+	})
+	if err != nil {
+		// Marshalling a fixed-shape struct of strings/ints/RawMessage
+		// effectively cannot fail; fall back to summary-only capture.
+		return &subagent.Result{Summary: summary}
+	}
+	return &subagent.Result{Summary: summary, ResultJSON: string(payload)}
 }
 
 // errRoleResolveFailed is the sentinel for when GetAgentBySlug fails.
@@ -446,6 +516,33 @@ func (r *ChatRunner) Run(ctx context.Context, run *subagent.Run) (*subagent.Resu
 
 	summary, envelope, counts, runErr := drainCapture(captureCh)
 	if runErr != nil {
+		// CW-20260519-0071 (audit §P2): partial-result capture. A
+		// subagent guillotined mid-productive-work (deadline cancels
+		// the in-flight provider stream → drainCapture returns
+		// errStreamFailure) has often done many real tool iterations
+		// — files written, etc. Returning (nil, runErr) here discarded
+		// the accumulated summary/envelope/counts, so the run row had
+		// status=failed and result_json at its insert-time default:
+		// orphaned side-effects with no record of what got done.
+		//
+		// Return the partial result ALONGSIDE the error. The error is
+		// unchanged — subagent.execute still stamps StatusFailed — but
+		// it can now also persist result_json from this partial trace.
+		// partialResult returns nil when nothing was accumulated, which
+		// preserves the prior "leave result_json at default" behavior
+		// for genuinely empty failures.
+		if partial := partialResult(summary, envelope, counts); partial != nil {
+			slog.Info("subagent: capturing partial result on error path",
+				"run_id", run.ID,
+				"child_session_id", childID,
+				"role", run.Role,
+				"tool_calls", counts.calls,
+				"tool_results_success", counts.resultsSuccess,
+				"tool_results_error", counts.resultsError,
+				"assistant_text_chars", len(summary),
+			)
+			return partial, runErr
+		}
 		return nil, runErr
 	}
 
@@ -467,6 +564,14 @@ func (r *ChatRunner) Run(ctx context.Context, run *subagent.Run) (*subagent.Resu
 			"tool_results_success", counts.resultsSuccess,
 			"assistant_text_chars", len(summary),
 		)
+		// CW-20260519-0071: capture the partial trace here too. The
+		// run is still failed (fabErr unchanged), but persisting the
+		// suspect text + tool counts in result_json lets an operator
+		// inspecting subagent_runs see exactly what the child produced
+		// and which tools it attempted before the detector tripped.
+		if partial := partialResult(summary, envelope, counts); partial != nil {
+			return partial, fabErr
+		}
 		return nil, fabErr
 	}
 

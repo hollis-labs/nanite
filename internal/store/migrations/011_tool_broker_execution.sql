@@ -5,7 +5,14 @@
 -- that replaces naïve truncation of large tool results.
 
 -- UserSettings columns for execution-path tuning.
-ALTER TABLE user_settings ADD COLUMN tool_per_turn_cap INTEGER NOT NULL DEFAULT 10;
+-- CW-20260519-0115 raised this default from 10 to 150 (high backstop).
+-- Pattern-based runaway detection (consecutive_fail_cap, runaway_fail_cap,
+-- detectStuckLoop, idle_timeout) does the catching now -- the count cap
+-- is only an absolute "this tool is in a tight infinite loop" failsafe.
+-- Existing databases get updated by the UPDATE in migration 066 (ADD
+-- COLUMN is idempotent and skipped on re-run, so this default only
+-- applies to fresh databases).
+ALTER TABLE user_settings ADD COLUMN tool_per_turn_cap INTEGER NOT NULL DEFAULT 150;
 ALTER TABLE user_settings ADD COLUMN tool_result_cache_ttl_seconds INTEGER NOT NULL DEFAULT 3600;
 -- CW-20260419-0018 (UAT c17) lowered this default from 65536 to 2048 after
 -- a 89 KiB clockwork_task_list result bypassed the cache-pointer gate and

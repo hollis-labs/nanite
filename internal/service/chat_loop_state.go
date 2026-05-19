@@ -143,7 +143,24 @@ type iterationLimits struct {
 	runawayFailCap    int
 	idleTimeout       time.Duration
 	perToolMax        map[string]int // tool name → max iterations (0 = no limit)
-	defaultPerToolCap int            // global per-tool cap from UserSettings (0 = no cap)
+	// defaultPerToolCap is a HIGH BACKSTOP on calls to any single tool
+	// per turn — NOT a runaway detector. CW-20260519-0115: raised from
+	// 10 → 150 after session c267 was blocked at 10 of 13
+	// operator-requested torque_task_create calls. Count is a poor
+	// runaway signal; the actual catch is done by pattern detectors —
+	//   - consecutiveFailures → runawayFailCap (hard terminate at 10
+	//     consecutive tool failures)
+	//   - detectStuckLoop (chat_generate.go) — same-result-repeated
+	//     detector that blocks the tool after 2 identical results
+	//   - idleTimeout — wall-clock no-progress
+	// 0 = no cap (the chat-loop in-memory default — only set when a
+	// store-backed UserSettings.ToolPerTurnCap is read). The
+	// store-side default is 150 (migration 011 / 066). Operators who
+	// hit even the 150 backstop are almost certainly in a real
+	// infinite-tool-call loop the pattern detectors should have caught
+	// first — investigate as a pattern-detector gap, not a cap value
+	// to bump.
+	defaultPerToolCap int
 }
 
 // loopState consolidates all mutable state for the generateResponse loop.

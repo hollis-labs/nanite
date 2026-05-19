@@ -7,10 +7,30 @@ import (
 	"strings"
 )
 
-// DefaultMaxCallsPerTurn is the default limit on tool calls per LLM turn.
+// DefaultMaxCallsPerTurn is the default limit on tool calls per LLM turn
+// surfaced through ToolPermissions.
+//
+// CW-20260519-0115 audit finding: this field is set on every parsed
+// ToolPermissions value (here, in ParsePermissions, and in the
+// broker.go fallback paths) but the runtime currently HAS NO ENFORCEMENT
+// site that reads it as a count cap. The actual per-tool count
+// enforcement lives in internal/service/chat_loop_state.go
+// (defaultPerToolCap, sourced from UserSettings.ToolPerTurnCap;
+// default 150, a high backstop). This constant is retained for
+// back-compat with serialised ToolPermissions blobs (agent
+// frontmatter, stored profiles) and for the agent-config layer that
+// still accepts a `max_calls_per_turn:` YAML key, but until an
+// enforcement site is wired (or the field is removed), the value here
+// is decorative. Treat it as "if we ever enforce this, this is the
+// number" — it should track the active enforcement cap so the two
+// don't drift if the enforcement site is added back.
 const DefaultMaxCallsPerTurn = 25
 
 // ToolPermissions defines allow/deny rules for an agent's tool access.
+//
+// MaxCallsPerTurn is currently NOT enforced at runtime — see the
+// DefaultMaxCallsPerTurn doc above for the audit finding. The
+// enforcement-bearing per-tool cap lives in loopState.limits.defaultPerToolCap.
 type ToolPermissions struct {
 	AllowList          []string `json:"allow_list,omitempty"`
 	DenyList           []string `json:"deny_list,omitempty"`

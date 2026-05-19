@@ -73,6 +73,26 @@ var errStreamFailure = errors.New("subagent: child chat loop emitted error event
 // claims when the subagent's tools never actually succeeded.
 var errSubagentFabricationSuspected = errors.New("subagent: fabrication suspected — tools attempted but none succeeded, yet assistant produced non-empty text")
 
+// errZeroOutput is the sentinel returned by ChatRunner.Run when the child
+// turn drained cleanly (no error event) but produced *nothing* — no
+// assistant text, no tool calls, and no envelope (CW-20260519-0067, audit
+// §P5). This is the "planner subagent hangs the full timeout with zero
+// output" pathology: the child loop's goroutine exited and closed the
+// capture channel without ever emitting a delta, a tool_call, an envelope,
+// or an error event. drainCapture returns (summary="", envelope="{}",
+// counts={}, err=nil), and before this gate ChatRunner.Run applied the
+// polite "completed without text response" fallback and returned a nil
+// error — so subagent.execute stamped StatusCompleted on a run that did
+// absolutely nothing for the entire budget.
+//
+// The output-presence gate (zeroOutputRun) converts that into this
+// sentinel. It is joined with subagent.ErrStalled so the existing
+// CW-20260519-0074 run-outcome classifier (classifyRunOutcome) routes it
+// to StatusStalled — a run that went silent and never produced a
+// deliverable is, by construction, stalled. No new status is invented:
+// the 0074 taxonomy already has the right vocabulary.
+var errZeroOutput = errors.New("subagent: child run produced no text, no tool calls, and no envelope")
+
 // toolUsageCounts tallies tool_call and tool_result events partitioned by
 // IsError so the fabrication-suspected detector can decide whether to mark
 // a child run failed. Internal to drainCapture's contract.
@@ -293,6 +313,32 @@ func partialResult(summary, envelope string, counts toolUsageCounts) *subagent.R
 		return &subagent.Result{Summary: summary}
 	}
 	return &subagent.Result{Summary: summary, ResultJSON: string(payload)}
+}
+
+// zeroOutputRun reports whether a *successfully drained* child turn (no
+// error event) produced no usable output at all: no assistant text, no
+// tool calls, and no structured envelope (CW-20260519-0067, audit §P5).
+//
+// This is the output-presence gate. It is deliberately a lightweight
+// presence check, not a semantic deliverable validator — it asks only
+// "did the child emit anything?", not "is what it emitted any good?".
+//
+// The genuine "completed with a real but text-light result" case is NOT
+// a zero-output run and must still land as StatusCompleted:
+//   - a child that made tool calls (counts.calls > 0) did real work even
+//     if it emitted no closing prose;
+//   - a child that produced a structured envelope (envelope != "{}")
+//     delivered a card/result even with empty assistant text.
+//
+// Only the all-three-empty case — silent for the whole budget — trips
+// the gate. The summary check trims whitespace so a child that emitted
+// only blank deltas is still treated as silent.
+func zeroOutputRun(summary, envelope string, counts toolUsageCounts) bool {
+	hasText := strings.TrimSpace(summary) != ""
+	hasEnvelope := envelope != "" && envelope != "{}"
+	hasToolActivity := counts.calls > 0 ||
+		counts.resultsSuccess > 0 || counts.resultsError > 0
+	return !hasText && !hasEnvelope && !hasToolActivity
 }
 
 // errRoleResolveFailed is the sentinel for when GetAgentBySlug fails.
@@ -607,7 +653,43 @@ func (r *ChatRunner) Run(ctx context.Context, run *subagent.Run) (*subagent.Resu
 		return nil, fabErr
 	}
 
+	// CW-20260519-0067 (audit §P5): output-presence gate. drainCapture
+	// returned a nil error, but "no error event" is NOT the same as "the
+	// child produced a usable result". The pathological case — a planner
+	// subagent that hangs the full budget, emits no deltas, makes zero
+	// tool calls, and produces no envelope, then has its child loop exit
+	// and close the capture channel without an error event — drains
+	// cleanly as (summary="", envelope="{}", counts={}, err=nil). Before
+	// this gate that sailed through the polite "completed without text
+	// response" fallback below and subagent.execute stamped
+	// StatusCompleted: a 300s no-op recorded as a success (a telemetry
+	// bug — the parent agent reads status to decide whether to trust the
+	// run).
+	//
+	// Gate it: a run that emitted no text AND no tool calls AND no
+	// envelope is not a completion. Return errZeroOutput joined with
+	// subagent.ErrStalled — the run went silent — so the existing
+	// CW-20260519-0074 classifyRunOutcome routes it to StatusStalled. No
+	// new status is invented; the 0074 taxonomy already has the word for
+	// "the run went silent and never produced a deliverable".
+	//
+	// A genuine text-light success is explicitly NOT gated: a child that
+	// made tool calls or emitted an envelope (zeroOutputRun returns false)
+	// still falls through to the empty-summary fallback and StatusCompleted.
+	if zeroOutputRun(summary, envelope, counts) {
+		slog.Warn("subagent: zero-output run gated — no text, no tool calls, no envelope",
+			"run_id", run.ID,
+			"child_session_id", childID,
+			"role", run.Role,
+		)
+		return nil, errors.Join(errZeroOutput, subagent.ErrStalled)
+	}
+
 	if summary == "" {
+		// A text-light but non-empty run (made tool calls and/or emitted
+		// an envelope) reaches here: zeroOutputRun returned false. The
+		// child did real work but produced no closing prose — surface a
+		// neutral summary and keep StatusCompleted.
 		summary = fmt.Sprintf("subagent %s completed without text response", run.Role)
 	}
 	return &subagent.Result{Summary: summary, ResultJSON: envelope}, nil

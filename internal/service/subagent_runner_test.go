@@ -834,3 +834,138 @@ func TestChatRunner_ProviderOverride_UsesOverrideWhenSet(t *testing.T) {
 		t.Errorf("child session Provider = %q, want %q (override)", st.created[0].Provider, "pty-claude")
 	}
 }
+
+// --- CW-20260519-0067: output-presence gate (audit §P5) ---------------------
+
+// TestZeroOutputRun_PresenceCheck pins the gate's presence predicate. A
+// run that emitted no text AND no tool calls AND no envelope is a
+// zero-output run; any single signal present clears the gate.
+func TestZeroOutputRun_PresenceCheck(t *testing.T) {
+	// All-empty: the pathological hung-planner shape — trips the gate.
+	if !zeroOutputRun("", "{}", toolUsageCounts{}) {
+		t.Error("zeroOutputRun(empty) = false; want true (hung-planner shape)")
+	}
+	// Whitespace-only deltas are still silence.
+	if !zeroOutputRun("  \n\t ", "{}", toolUsageCounts{}) {
+		t.Error("zeroOutputRun(whitespace) = false; want true")
+	}
+	// Real assistant text → not zero-output.
+	if zeroOutputRun("here is the answer", "{}", toolUsageCounts{}) {
+		t.Error("zeroOutputRun(text) = true; want false")
+	}
+	// Tool calls but no prose → text-light success, NOT a stall.
+	if zeroOutputRun("", "{}", toolUsageCounts{calls: 1}) {
+		t.Error("zeroOutputRun(tool calls) = true; want false (text-light success)")
+	}
+	// A successful tool roundtrip alone clears the gate.
+	if zeroOutputRun("", "{}", toolUsageCounts{resultsSuccess: 1}) {
+		t.Error("zeroOutputRun(tool success) = true; want false")
+	}
+	// A failed tool roundtrip is still activity — the child tried.
+	if zeroOutputRun("", "{}", toolUsageCounts{resultsError: 1}) {
+		t.Error("zeroOutputRun(tool error) = true; want false")
+	}
+	// A structured envelope is a delivered result even with no prose.
+	if zeroOutputRun("", `{"open_tasks":3}`, toolUsageCounts{}) {
+		t.Error("zeroOutputRun(envelope) = true; want false (envelope is a deliverable)")
+	}
+}
+
+// TestChatRunner_ZeroOutputRunGatedAsStalled is the CW-20260519-0067
+// acceptance test. A child turn that drains cleanly (channel closes
+// without an error event) having emitted nothing — no delta, no
+// tool_call, no envelope — must NOT be returned as a success. Before the
+// gate this produced (&Result{Summary:"...completed without text
+// response"}, nil) and subagent.execute stamped StatusCompleted on a run
+// that did nothing for the full budget. The gate now returns
+// errZeroOutput joined with subagent.ErrStalled so classifyRunOutcome
+// routes it to StatusStalled.
+func TestChatRunner_ZeroOutputRunGatedAsStalled(t *testing.T) {
+	// The hung-planner shape: the child loop exits and closes the capture
+	// channel WITHOUT a stream_end and WITHOUT an error event. drainCapture
+	// treats a channel closed without stream_end as a clean drain, so
+	// runErr is nil — exactly the path the gate must catch.
+	fake := &fakeChatService{events: []chat.StreamEvent{}}
+
+	st := &recordingSessionStore{
+		parents: map[string]*store.Session{
+			"sess-parent": {ID: "sess-parent", WorkspaceID: "ws-1"},
+		},
+	}
+	runner := &ChatRunner{
+		agents: &stubAgentReaderForRunner{agents: map[string]*store.AgentProfile{
+			"planner": {ID: "ag-planner", DefaultProvider: "anthropic", DefaultModel: "claude-sonnet-4-6"},
+		}},
+		store:     st,
+		invoker:   fake,
+		persistFn: func(_ context.Context, _, _ string) error { return nil },
+	}
+
+	run := &subagent.Run{
+		ID: "run-hung", Role: "planner", ParentSessionID: "sess-parent", Prompt: "plan the work",
+	}
+	result, err := runner.Run(context.Background(), run)
+
+	if err == nil {
+		t.Fatal("expected zero-output run to be gated as an error; got nil (would be stamped completed)")
+	}
+	if !errors.Is(err, errZeroOutput) {
+		t.Errorf("error = %v; want wrapped errZeroOutput", err)
+	}
+	// Joined with ErrStalled so the CW-20260519-0074 classifier routes
+	// the run to StatusStalled rather than StatusCompleted.
+	if !errors.Is(err, subagent.ErrStalled) {
+		t.Errorf("error = %v; want joined subagent.ErrStalled (→ classifyRunOutcome StatusStalled)", err)
+	}
+	// No partial result — a zero-output run has nothing worth persisting.
+	if result != nil {
+		t.Errorf("result = %+v; want nil for a zero-output run", result)
+	}
+}
+
+// TestChatRunner_TextLightSuccessNotGated pins the negative side of the
+// gate: a child that produced no closing prose but DID make a tool call
+// is a genuine (text-light) completion and must still return a nil error
+// → StatusCompleted. The output-presence gate must not punish a quiet
+// but productive run.
+func TestChatRunner_TextLightSuccessNotGated(t *testing.T) {
+	// Tool roundtrip, an envelope, no delta — a real result, no prose.
+	fake := &fakeChatService{events: []chat.StreamEvent{
+		{Type: "tool_call", Tool: "dev_write", ToolID: "tu_1"},
+		{Type: "tool_result", Tool: "dev_write", ToolID: "tu_1", Summary: "wrote file", IsError: false},
+		{Type: "plugin_envelope", Envelope: `{"files_written":1}`},
+		{Type: "stream_end"},
+	}}
+
+	st := &recordingSessionStore{
+		parents: map[string]*store.Session{
+			"sess-parent": {ID: "sess-parent", WorkspaceID: "ws-1"},
+		},
+	}
+	runner := &ChatRunner{
+		agents: &stubAgentReaderForRunner{agents: map[string]*store.AgentProfile{
+			"worker": {ID: "ag-worker", DefaultProvider: "anthropic", DefaultModel: "claude-sonnet-4-6"},
+		}},
+		store:     st,
+		invoker:   fake,
+		persistFn: func(_ context.Context, _, _ string) error { return nil },
+	}
+
+	run := &subagent.Run{
+		ID: "run-quiet", Role: "worker", ParentSessionID: "sess-parent", Prompt: "implement",
+	}
+	result, err := runner.Run(context.Background(), run)
+	if err != nil {
+		t.Fatalf("text-light productive run gated unexpectedly: %v", err)
+	}
+	if result == nil {
+		t.Fatal("result = nil; want a completed result for a text-light productive run")
+	}
+	// The empty-summary fallback still applies — but as a success, not a stall.
+	if !contains(result.Summary, "completed without text response") {
+		t.Errorf("Summary = %q; want the text-light completion fallback", result.Summary)
+	}
+	if result.ResultJSON != `{"files_written":1}` {
+		t.Errorf("ResultJSON = %q; want the captured envelope", result.ResultJSON)
+	}
+}

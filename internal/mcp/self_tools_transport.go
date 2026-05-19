@@ -409,6 +409,15 @@ func (st *SelfToolsTransport) CallTool(ctx context.Context, name string, args ma
 		return st.callHandoffStash(ctx, args)
 	case "handoff_pointers_expand":
 		return st.callHandoffPointersExpand(ctx, args)
+	case "scratchpad_write", "scratchpad_read", "scratchpad_clear":
+		// scratchpad_* are per-turn tools backed by the in-process chat
+		// loop's loopState. They are dispatched by the chat-loop executor,
+		// not this transport — so reaching them here means a caller without
+		// a turn loop (the CLI-launch self-tools proxy, which has no
+		// nanite-side loopState). Return an actionable error instead of a
+		// bare "unknown tool" so the agent understands the tool is real but
+		// out of scope for this dispatch path.
+		return errorResult(fmt.Sprintf("%s is a per-turn tool backed by in-process chat-loop state; it is not available to CLI-launch sessions, which have no nanite-side turn loop. Use Vanta memory tools for state that must persist beyond a single call.", name)), nil
 	default:
 		return errorResult(fmt.Sprintf("unknown tool: %s", name)), nil
 	}
@@ -1481,9 +1490,15 @@ func (st *SelfToolsTransport) callHandoffRequest(ctx context.Context, args map[s
 	}
 	ctx, cancel := context.WithTimeout(ctx, messageCallTimeout)
 	defer cancel()
+	// Session id is harness-assigned: prefer the dispatch context over an
+	// agent-supplied arg, which a CLI-launch agent cannot reliably know.
+	sessionID := SessionIDFromContext(ctx)
+	if sessionID == "" {
+		sessionID = strArg(args, "session_id", "")
+	}
 	id, err := st.Messaging.RequestHandoff(
 		ctx,
-		strArg(args, "session_id", ""),
+		sessionID,
 		strArg(args, "from_agent_id", ""),
 		strArg(args, "to_agent_id", ""),
 		strArg(args, "requested_by", ""),

@@ -858,6 +858,17 @@ func (svc *Service) execute(ctx context.Context, run *Run, parentAgentID string)
 	}
 	svc.emitStatus(run, terminalPreview)
 
+	// CW-20260519-0066: subagent → parent envelope hop. A subagent that
+	// produced a structured envelope (a plan-review / approval / proposal
+	// card) had it stranded on the child session's message row — it never
+	// reached the parent session's transcript or the operator's GUI, so
+	// the operator could not see or act on the card. Lift any envelope(s)
+	// the child emitted onto the PARENT session's stream + persist them as
+	// EnvelopeInstance rows on the parent, mirroring the G-4 approval-card
+	// path (Emit = CreateEnvelopeInstance + plugin_envelope broadcast).
+	// Zero envelopes = no-op; one or many are each re-emitted.
+	svc.liftResultEnvelopes(finalCtx, run, result)
+
 	if svc.poster == nil || parentAgentID == "" {
 		return
 	}
@@ -1015,6 +1026,129 @@ func structuredResultJSON(result *Result) string {
 		return "{}"
 	}
 	return string(payload)
+}
+
+// liftedEnvelope is a single structured envelope recovered from a
+// completed subagent's Result, reduced to the (type, data) pair the
+// ApprovalEmitter.Emit contract needs. Emit wraps `data` as the
+// envelope's `data` blob and stamps the type; the child's outer
+// kind/version envelope frame is dropped because Emit rebuilds it.
+type liftedEnvelope struct {
+	Type string
+	Data json.RawMessage
+}
+
+// extractLiftableEnvelopes pulls every structured envelope out of a
+// subagent Result's ResultJSON so execute() can re-emit them onto the
+// parent session (CW-20260519-0066).
+//
+// Two ResultJSON shapes are recognized — the runner produces different
+// shapes on the success vs partial-capture paths:
+//
+//   - Success path (subagent_runner.go ChatRunner.Run): ResultJSON is the
+//     child's terminal envelope JSON verbatim, i.e. the envelope wire
+//     shape {"kind":"envelope","version":1,"type":"plan-review",
+//     "data":{...}}. drainCapture accumulates it last-wins, so there is
+//     at most one envelope on this path.
+//   - Partial-capture path (CW-20260519-0071 partialResult): ResultJSON is
+//     {"partial":true,"summary":...,"envelope":{...},"tools":{...}} — the
+//     child's envelope nested under the `envelope` key. A subagent cut
+//     mid-task may still have emitted a review/approval card worth
+//     surfacing, so this path is lifted too.
+//
+// Returns nil for a nil result, an empty/`{}` ResultJSON, a parse
+// failure, or an envelope blob with no `type` (a structured result that
+// is not an envelope — e.g. structuredResultJSON's {"summary":...}
+// wrapper). The function never errors: a malformed child envelope is a
+// dropped card, not a failed run.
+func extractLiftableEnvelopes(result *Result) []liftedEnvelope {
+	if result == nil {
+		return nil
+	}
+	raw := strings.TrimSpace(result.ResultJSON)
+	if raw == "" || raw == "{}" {
+		return nil
+	}
+
+	// Decode loosely: both recognized shapes are JSON objects. A
+	// partial-capture blob carries `partial:true` + a nested `envelope`;
+	// a success-path blob is the envelope itself (kind/type/data).
+	var obj struct {
+		Partial  bool            `json:"partial"`
+		Envelope json.RawMessage `json:"envelope"`
+		Type     string          `json:"type"`
+		Data     json.RawMessage `json:"data"`
+	}
+	if err := json.Unmarshal([]byte(raw), &obj); err != nil {
+		slog.Warn("subagent: result envelope not valid JSON; not lifted to parent",
+			"err", err)
+		return nil
+	}
+
+	// Partial-capture shape: the child's envelope is nested. Recurse on
+	// the nested blob so the same type/data extraction applies.
+	if obj.Partial && len(obj.Envelope) > 0 {
+		nested := strings.TrimSpace(string(obj.Envelope))
+		if nested == "" || nested == "{}" {
+			return nil
+		}
+		return extractLiftableEnvelopes(&Result{ResultJSON: nested})
+	}
+
+	// Success-path shape: the blob IS the envelope. A blob with no `type`
+	// is some other structured result (e.g. the {"summary":...} wrapper)
+	// — there is no card to surface.
+	if obj.Type == "" {
+		return nil
+	}
+	data := obj.Data
+	if len(data) == 0 {
+		data = json.RawMessage("{}")
+	}
+	return []liftedEnvelope{{Type: obj.Type, Data: data}}
+}
+
+// liftResultEnvelopes re-emits every structured envelope a completed
+// subagent produced onto the PARENT session's stream + persists each as
+// an EnvelopeInstance row on the parent (CW-20260519-0066).
+//
+// Before this hop existed, a subagent-produced plan-review / approval /
+// proposal card was persisted only on the subagent's own message row and
+// never reached the parent transcript or the operator's GUI — the
+// operator could not see or act on the card. svc.approver.Emit is the
+// same persist+broadcast primitive G-4 uses for spawn-approval cards
+// (CreateEnvelopeInstance + a plugin_envelope StreamEvent), so the lifted
+// envelope renders on BOTH the live SSE stream and the persisted/reload
+// path.
+//
+// Zero envelopes (the common case) is a silent no-op. One or many are
+// each emitted in order. A nil approver (tests / minimal wiring) skips
+// emission. An Emit failure is logged and the remaining envelopes are
+// still attempted — a dropped card must not abort the run's bookkeeping.
+func (svc *Service) liftResultEnvelopes(ctx context.Context, run *Run, result *Result) {
+	if svc.approver == nil || run.ParentSessionID == "" {
+		return
+	}
+	envs := extractLiftableEnvelopes(result)
+	if len(envs) == 0 {
+		return
+	}
+	for _, env := range envs {
+		id, err := svc.approver.Emit(ctx, run.ParentSessionID, env.Type, env.Data)
+		if err != nil {
+			slog.Warn("subagent: lift child envelope to parent failed",
+				"err", err, "run_id", run.ID,
+				"parent_session_id", run.ParentSessionID,
+				"envelope_type", env.Type)
+			continue
+		}
+		slog.Info("subagent: lifted child envelope to parent session",
+			"run_id", run.ID,
+			"child_session_id", run.ChildSessionID,
+			"parent_session_id", run.ParentSessionID,
+			"envelope_type", env.Type,
+			"envelope_instance_id", id)
+	}
 }
 
 // insertRun persists a freshly-created run.

@@ -137,6 +137,18 @@ func drainCapture(ch <-chan chat.StreamEvent) (summary string, envelope string, 
 			if msg == "" {
 				msg = "stream error event with no message"
 			}
+			// CW-20260519-0074 — run status taxonomy. The provider-stream
+			// inactivity watchdog (CW-20260517-0036) emits its terminal
+			// error event with a structured `cause:"stalled"` detail
+			// (chat_generate.go:1530). Join subagent.ErrStalled so the
+			// run-outcome classifier in subagent.execute can errors.Is it
+			// and stamp StatusStalled instead of the generic StatusFailed.
+			// A genuine provider error / crash carries no `stalled` cause
+			// and so does not get the sentinel.
+			if isStalledErrorEvent(evt) {
+				return sb.String(), envelope, counts,
+					errors.Join(errStreamFailure, subagent.ErrStalled, errors.New(msg))
+			}
 			return sb.String(), envelope, counts, errors.Join(errStreamFailure, errors.New(msg))
 		case "stream_end":
 			// Production generateResponse attaches the final aggregated
@@ -154,6 +166,26 @@ func drainCapture(ch <-chan chat.StreamEvent) (summary string, envelope string, 
 
 	// Channel closed without stream_end — treat as a clean drain.
 	return sb.String(), envelope, counts, nil
+}
+
+// isStalledErrorEvent reports whether a stream error event was produced
+// by the provider-stream inactivity watchdog (CW-20260517-0036) rather
+// than by a provider-emitted error or a crash. The watchdog tags its
+// ErrorEvent's structured details with `cause:"stalled"`
+// (chat_generate.go:1530); a genuine provider error carries no such
+// detail. Drives the StatusStalled-vs-StatusFailed split in the
+// CW-20260519-0074 run-outcome classifier.
+//
+// The check is defensive: it tolerates a nil StructuredError (the event
+// constructor always sets one for the stalled path, but a future event
+// shape change shouldn't panic the drain) and a missing/non-string
+// `cause`.
+func isStalledErrorEvent(evt chat.StreamEvent) bool {
+	if evt.StructuredError == nil {
+		return false
+	}
+	cause, ok := evt.StructuredError.Details["cause"].(string)
+	return ok && cause == "stalled"
 }
 
 // detectFabrication returns a non-nil error when the drained turn matches

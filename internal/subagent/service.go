@@ -128,6 +128,16 @@ var (
 	// instead of re-dispatching it to a fresh child. This prevents the
 	// fork-bomb chains observed on 2026-05-16 (session c226).
 	ErrRecursionBlocked = errors.New("subagent recursion blocked: only a root agent may spawn subagents; this agent has a parent — do the work yourself")
+
+	// ErrStalled is the cross-package classification signal for a run
+	// that ended because the provider-stream inactivity watchdog fired
+	// (CW-20260517-0036) — the provider held the stream open but emitted
+	// nothing for the full inactivity window. The Runner wraps this into
+	// the error it returns (via errors.Join) when it sees the structured
+	// `cause:"stalled"` error event, so `execute`'s outcome classifier
+	// can errors.Is it and stamp StatusStalled rather than the generic
+	// StatusFailed. Genuine provider errors and crashes do NOT carry it.
+	ErrStalled = errors.New("subagent: run stalled — provider stream inactivity timeout")
 )
 
 // Runner executes the subagent's work and returns a structured
@@ -798,17 +808,23 @@ func (svc *Service) execute(ctx context.Context, run *Run, parentAgentID string)
 
 	now := time.Now().UTC().Format(time.RFC3339Nano)
 	if runErr != nil {
-		run.Status = StatusFailed
+		// CW-20260519-0074 (audit §P3) — run status taxonomy. The error
+		// branch no longer collapses every non-success into `failed`.
+		// classifyRunOutcome inspects the error and the progress signal
+		// (tool-call count, carried in the partial Result's result_json)
+		// to pick between `stalled`, `over_budget`, and `failed`.
+		run.Status = classifyRunOutcome(runErr, result, runCtx)
 		run.Error = runErr.Error()
 		// CW-20260519-0071 (audit §P2): partial-result capture on the
-		// failure branch. A subagent guillotined mid-productive-work
+		// non-success branch. A subagent guillotined mid-productive-work
 		// (wall-clock backstop cancels the provider stream) has often
 		// done real file-writing work; the runner now returns that
 		// partial Result *alongside* the error. Persist result_json so
 		// the run row carries a structured trace of what the killed
 		// run accomplished instead of leaving result_json at its
 		// insert-time default. The error itself is untouched above —
-		// status stays `failed`; this is additive capture, not error
+		// the status now carries a diagnostic signal but the error
+		// string is still recorded; this is additive capture, not error
 		// suppression. result == nil (genuinely empty failure, or a
 		// runner that returns nil on error) leaves result_json as-is.
 		if result != nil {
@@ -857,7 +873,10 @@ func (svc *Service) execute(ctx context.Context, run *Run, parentAgentID string)
 		summary = result.Summary
 	}
 	if runErr != nil {
-		summary = fmt.Sprintf("subagent %s failed: %v", run.ID, runErr)
+		// CW-20260519-0074: report the classified outcome, not a blanket
+		// "failed" — run.Status was set by classifyRunOutcome above and
+		// distinguishes over_budget / stalled from a genuine failure.
+		summary = fmt.Sprintf("subagent %s ended (%s): %v", run.ID, run.Status, runErr)
 	}
 	resultPayload := run.ResultJSON
 	if resultPayload == "" {
@@ -881,6 +900,98 @@ func (svc *Service) execute(ctx context.Context, run *Run, parentAgentID string)
 	}); err != nil {
 		slog.Warn("subagent: reply delivery", "err", err, "run_id", run.ID)
 	}
+}
+
+// classifyRunOutcome maps a non-nil runner error to a terminal run
+// status (CW-20260519-0074, audit §P3). Before this change `execute`
+// had exactly one error branch — any non-nil runErr → StatusFailed —
+// so a context.DeadlineExceeded on a *productive* run was recorded
+// identically to a genuine crash and the status carried no diagnostic
+// signal. The taxonomy now splits the non-success outcomes:
+//
+//   - StatusStalled — the provider-stream inactivity watchdog fired
+//     (CW-20260517-0036): the Runner wraps subagent.ErrStalled into the
+//     error. A stall is by definition "no progress", so it is also the
+//     bucket for a wall-clock backstop that fired with zero tool calls
+//     (the pathological "child loop neither progressed nor tripped its
+//     own inactivity terminator" case from the audit §2.2).
+//   - StatusOverBudget — the wall-clock backstop deadline / cancellation
+//     fired (runCtx.Err() != nil) AND the run was making progress
+//     (non-zero tool calls in the partial result). This is NOT a
+//     failure: it must not burn a retry budget or fire on_fail (mirrors
+//     Torque's `canceled`-vs-`failed` split).
+//   - StatusFailed — everything else: a genuine provider error, a crash,
+//     or the fabrication-detector trip.
+//
+// runCtx is the run's context — its Err() distinguishes "the backstop
+// deadline cut a live run" from "the runner returned an error on its
+// own". result is the partial Result the Runner returns alongside the
+// error (CW-20260519-0071); it carries the tool-call count used as the
+// progress signal. Either argument may be nil.
+func classifyRunOutcome(runErr error, result *Result, runCtx context.Context) string {
+	if runErr == nil {
+		// Defensive: callers only invoke this on the error branch.
+		return StatusCompleted
+	}
+
+	progressed := runMadeProgress(result)
+
+	// A stalled stream is, by construction, "no progress" — the provider
+	// emitted nothing for the whole inactivity window. Classify it
+	// stalled regardless of any tool calls made in earlier iterations:
+	// the run still ended because it went silent.
+	if errors.Is(runErr, ErrStalled) {
+		return StatusStalled
+	}
+
+	// The wall-clock backstop fired (or the run was cancelled): the run
+	// context is done. A run that made real progress before the deadline
+	// is over_budget, not failed — it should not burn retry budget. A
+	// deadline that fired with zero progress is a silent/stuck run with
+	// no productive trace: classify it stalled (it never made progress
+	// and never tripped its own inactivity terminator).
+	if runCtx != nil && runCtx.Err() != nil {
+		if progressed {
+			return StatusOverBudget
+		}
+		return StatusStalled
+	}
+
+	// No stall sentinel, run context still live: a genuine provider
+	// error, a crash, or the fabrication-detector trip. `failed` is now
+	// reserved for exactly these.
+	return StatusFailed
+}
+
+// runMadeProgress reports whether a partial Result shows the run did
+// real work before it ended — the progress signal for classifyRunOutcome.
+//
+// The signal source is the partial result_json the Runner assembles on
+// the error path (CW-20260519-0071): a `{"partial":true,...,"tools":
+// {"calls":N,"results_success":N,"results_error":N}}` blob. A non-zero
+// tool-call (or tool-result) count means the child ran productive
+// iterations. This avoids re-plumbing the counts through a dedicated
+// channel — the partial result already carries them.
+//
+// Returns false when result is nil, has no result_json, or the blob
+// records no tool activity.
+func runMadeProgress(result *Result) bool {
+	if result == nil || result.ResultJSON == "" {
+		return false
+	}
+	var parsed struct {
+		Tools struct {
+			Calls          int `json:"calls"`
+			ResultsSuccess int `json:"results_success"`
+			ResultsError   int `json:"results_error"`
+		} `json:"tools"`
+	}
+	if err := json.Unmarshal([]byte(result.ResultJSON), &parsed); err != nil {
+		return false
+	}
+	return parsed.Tools.Calls > 0 ||
+		parsed.Tools.ResultsSuccess > 0 ||
+		parsed.Tools.ResultsError > 0
 }
 
 // structuredResultJSON resolves the JSON persisted to subagent_runs.result_json.

@@ -51,13 +51,21 @@ func TestDrainCapture_FastFailsOnErrorEvent(t *testing.T) {
 // clean TerminationIdleTimeout envelope when no activity is observed for
 // that window; subagent.Service.execute still applies a generous
 // context.WithTimeout (DefaultTimeoutSeconds = 1800s) as a pure
-// backstop. drainCapture itself is unchanged — it has no internal
-// inactivity bound; that bound lives in the chat loop upstream of it.
+// backstop.
 //
-// If a future change adds a provider-stream inactivity timeout inside
-// drainCapture (see docs/cw-20260516-0061-300s-hang-findings.md), this
-// test must be updated to assert the new bounded return instead of an
-// indefinite block.
+// CW-20260517-0036 update: the within-stream silent-stall gap that
+// CW-20260519-0073 explicitly left open is now closed — but NOT inside
+// drainCapture. drainCapture is a pure parsing function with no timer
+// and is deliberately left that way. The provider-stream inactivity
+// timeout lives one layer up, in generateResponse's `streamLoop` (a
+// select with a resettable timer over the provider event channel): a
+// silently stalled provider stream is now cancelled there, which closes
+// the capture channel, which is what unblocks drainCapture. So this
+// characterization still holds for the isolated-channel scenario it
+// constructs — drainCapture in isolation, with no upstream stream loop
+// feeding it, genuinely has no inactivity bound. The real production
+// stall is bounded upstream; this test pins that drainCapture itself is
+// not the layer that bounds it.
 func TestDrainCapture_NoIdleTimeout_OnSilentStall(t *testing.T) {
 	ch := make(chan chat.StreamEvent, 8)
 	ch <- chat.StreamEvent{Type: "delta", Content: "opening line"}

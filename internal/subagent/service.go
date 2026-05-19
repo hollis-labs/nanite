@@ -7,6 +7,9 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"os"
+	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -19,7 +22,9 @@ import (
 )
 
 // DefaultTimeoutSeconds is the wall-clock BACKSTOP for a runner when
-// the caller doesn't set a timeout.
+// the caller doesn't set a timeout and no operator override is in
+// effect (see resolveDefaultTimeoutSeconds / the
+// NANITE_SUBAGENT_DEFAULT_TIMEOUT_SECONDS env var).
 //
 // CW-20260519-0073: this is no longer the *governing* bound on a
 // subagent run. The fixed 300s wall clock that this constant used to
@@ -34,10 +39,74 @@ import (
 //
 // 1800s (30 min) is deliberately generous: it is a pure backstop for
 // the pathological case where the child loop somehow neither makes
-// progress nor trips its own inactivity terminator. A realistic,
-// per-role / env-configurable budget knob is CW-20260517-0036 — NOT
-// this ticket; this value is just a sane floor.
+// progress nor trips its own inactivity terminator.
+//
+// CW-20260517-0036: this constant is the *floor for an unconfigured
+// deployment* only. An operator raises (or lowers) the backstop budget
+// via NANITE_SUBAGENT_DEFAULT_TIMEOUT_SECONDS without recompiling —
+// resolveDefaultTimeoutSeconds() reads it on every Spawn. Per-role
+// control of the *governing* inactivity window already exists via the
+// agent profile's constraints JSON (`idle_timeout_seconds`, parsed into
+// chat.AgentConstraints and consumed by resolveIterationLimits); a
+// per-role override of this wall-clock backstop would require wiring an
+// agent-profile resolver into Spawn and is deliberately left out of
+// this ticket as a larger refactor.
 const DefaultTimeoutSeconds = 1800
+
+// Subagent-run timeout validation range. Mirrors Torque's
+// taskTimeoutOverride bounds (internal/runtime/agent/timeout.go:13-14):
+// a value outside [60s, 7200s] is rejected and the caller falls back to
+// the next priority tier. 60s is below any realistic agent orientation
+// budget; 7200s (2h) is a generous ceiling for a single heavy run.
+const (
+	minTimeoutSeconds = 60
+	maxTimeoutSeconds = 7200
+)
+
+// defaultTimeoutEnvVar is the operator knob for the wall-clock backstop
+// budget applied to a subagent run that does not carry an explicit
+// per-call timeout. Mirrors Torque's profile/env tiering. A value
+// outside [minTimeoutSeconds, maxTimeoutSeconds] is ignored with a
+// warning so a typo can't silently disable the backstop.
+const defaultTimeoutEnvVar = "NANITE_SUBAGENT_DEFAULT_TIMEOUT_SECONDS"
+
+// timeoutInRange reports whether secs is a usable subagent-run timeout.
+func timeoutInRange(secs int) bool {
+	return secs >= minTimeoutSeconds && secs <= maxTimeoutSeconds
+}
+
+// resolveDefaultTimeoutSeconds picks the wall-clock backstop budget for
+// a subagent run that did not supply an explicit per-call timeout, in
+// priority order (mirrors Torque resolveTimeout, timeout.go:35-43):
+//
+//  1. NANITE_SUBAGENT_DEFAULT_TIMEOUT_SECONDS when set and within
+//     [minTimeoutSeconds, maxTimeoutSeconds]
+//  2. DefaultTimeoutSeconds (the compiled-in 1800s floor)
+//
+// An explicit, in-range req.TimeoutSeconds still takes precedence over
+// both — that check stays in Spawn, ahead of this call. An env value
+// that is unparseable or out of range is ignored (with a warning) so a
+// misconfiguration falls back safely rather than disabling the backstop.
+func resolveDefaultTimeoutSeconds() int {
+	raw := strings.TrimSpace(os.Getenv(defaultTimeoutEnvVar))
+	if raw == "" {
+		return DefaultTimeoutSeconds
+	}
+	secs, err := strconv.Atoi(raw)
+	if err != nil {
+		slog.Warn("subagent: ignoring non-integer timeout override env var",
+			"env", defaultTimeoutEnvVar, "value", raw, "fallback_seconds", DefaultTimeoutSeconds)
+		return DefaultTimeoutSeconds
+	}
+	if !timeoutInRange(secs) {
+		slog.Warn("subagent: ignoring out-of-range timeout override env var",
+			"env", defaultTimeoutEnvVar, "value", secs,
+			"min", minTimeoutSeconds, "max", maxTimeoutSeconds,
+			"fallback_seconds", DefaultTimeoutSeconds)
+		return DefaultTimeoutSeconds
+	}
+	return secs
+}
 
 // spawnFanoutCap is the maximum number of Spawn invocations that may
 // have their runner executing concurrently. FIFO ordering is preserved
@@ -276,9 +345,25 @@ func (svc *Service) Spawn(ctx context.Context, req SpawnRequest) (string, error)
 		}
 	}
 
+	// CW-20260517-0036 — resolve the wall-clock backstop budget in
+	// priority order (mirrors Torque resolveTimeout):
+	//   1. an explicit, in-range req.TimeoutSeconds (the per-call tool
+	//      arg) — kept first so an operator/author override always wins;
+	//   2. NANITE_SUBAGENT_DEFAULT_TIMEOUT_SECONDS (env) when in range;
+	//   3. the compiled-in DefaultTimeoutSeconds floor.
+	// An explicit per-call value outside [60s, 7200s] is rejected and
+	// the run falls through to the env/default tier — a fat-fingered
+	// `timeout_seconds: 5` can't disable the backstop, and a runaway
+	// `timeout_seconds: 999999` can't extend it past the 2h ceiling.
 	timeout := req.TimeoutSeconds
+	if timeout > 0 && !timeoutInRange(timeout) {
+		slog.Warn("subagent: explicit timeout_seconds out of range; falling back to resolved default",
+			"requested_seconds", timeout, "min", minTimeoutSeconds, "max", maxTimeoutSeconds,
+			"role", req.Role)
+		timeout = 0
+	}
 	if timeout <= 0 {
-		timeout = DefaultTimeoutSeconds
+		timeout = resolveDefaultTimeoutSeconds()
 	}
 	inputs := req.InputsJSON
 	if inputs == "" {

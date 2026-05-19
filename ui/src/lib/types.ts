@@ -48,8 +48,26 @@ export interface Session {
   auto_switch_override?: boolean | null;
 }
 
+/**
+ * CW-20260518-0084 — interrupted-turn signal returned alongside a session GET.
+ * Non-null only when the session has an in-flight turn whose backend agent is
+ * gone (e.g. a service restart killed it mid-generation). The FE uses this to
+ * replace an endless "generating" spinner with a clear interrupted state.
+ */
+export interface InterruptedTurn {
+  interrupted: boolean;
+  /** Machine-readable cause — currently always "service_restart". */
+  reason: string;
+  /** Message id of the unanswered user turn that was interrupted. */
+  last_message_id: string;
+  /** created_at of that message. */
+  last_activity_at: string;
+}
+
 export interface SessionWithMessages extends Session {
   messages: Message[];
+  /** Present only when the backend detected an interrupted in-flight turn. */
+  interrupted_turn?: InterruptedTurn | null;
 }
 
 export interface MessagePage {

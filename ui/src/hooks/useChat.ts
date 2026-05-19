@@ -18,6 +18,7 @@ import type {
 import {
   useChatStore,
   useCircuitOpen,
+  useInterruptedTurn,
   useIsStreaming,
   useSessionTakeover,
   useStatusMessage,
@@ -124,6 +125,7 @@ export function useChat(sessionId: string | null) {
   const statusMessage = useStatusMessage(sessionId);
   const circuitOpen = useCircuitOpen(sessionId);
   const sessionTakeover = useSessionTakeover(sessionId);
+  const interruptedTurn = useInterruptedTurn(sessionId);
 
   // Store actions are stable — read via getState() inside callbacks to avoid
   // bloating dependency arrays. This helper gives typed access to all actions.
@@ -182,6 +184,28 @@ export function useChat(sessionId: string | null) {
       try {
         const latest = await loadLatestMessages();
         if (!latest.messages.some((msg) => msg.id === assistantMessageID)) {
+          // The assistant message never landed. Two cases:
+          //   - The turn is genuinely still generating somewhere — leave the
+          //     spinner up, the poll loop will retry.
+          //   - CW-20260518-0084: a service restart killed the turn's backend
+          //     agent. The backend reports `interrupted_turn` on the session
+          //     GET when there is no live stream and the last persisted
+          //     message is an unanswered user turn. In that case, stop the
+          //     endless spinner and surface the interrupted indicator.
+          try {
+            const session = await api.getSession(sessionId);
+            if (session.interrupted_turn?.interrupted === true) {
+              store().setInterruptedTurn(sessionId, true);
+              store().clearStreaming(sessionId);
+              currentMessageIdRef.current = null;
+              if (eventSourceRef.current) {
+                eventSourceRef.current.close();
+                eventSourceRef.current = null;
+              }
+            }
+          } catch (err) {
+            console.warn("[useChat] interrupted-turn reconcile probe failed:", err);
+          }
           return;
         }
 
@@ -237,6 +261,22 @@ export function useChat(sessionId: string | null) {
       store().clearChatErrors(sessionId);
       setMessages(latest.messages);
       setPaginationState({ total: latest.total, oldestOffset: latest.oldestOffset });
+
+      // CW-20260518-0084: on (re)load, ask the backend whether this session
+      // has an in-flight turn whose agent is gone — e.g. a deploy/reload
+      // killed it mid-generation. The session GET reports `interrupted_turn`
+      // when the last persisted message is an unanswered user turn and no
+      // live stream exists. We only raise the indicator when the FE is not
+      // itself actively streaming this session (a live stream is the genuine
+      // in-flight case, not an interruption).
+      try {
+        const session = await api.getSession(sessionId);
+        const interrupted = session.interrupted_turn?.interrupted === true;
+        const streamingNow = useChatStore.getState().sessions.get(sessionId)?.isStreaming === true;
+        store().setInterruptedTurn(sessionId, interrupted && !streamingNow);
+      } catch (err) {
+        console.warn("[useChat] interrupted-turn probe failed:", err);
+      }
 
       const standaloneEnvelopes = await api.getSessionPluginEnvelopes(sessionId);
       store().setPluginEnvelopes(
@@ -919,6 +959,14 @@ export function useChat(sessionId: string | null) {
     }
   }, [markStreamActivity, sessionId]);
 
+  // CW-20260518-0084: manual dismissal of the interrupted-turn banner. The
+  // banner also clears automatically when the user sends a new message
+  // (setStreaming(true) resets the flag — that's the send-to-resume path).
+  const dismissInterruptedTurn = useCallback(() => {
+    if (!sessionId) return;
+    store().setInterruptedTurn(sessionId, false);
+  }, [sessionId]);
+
   const dismissCircuit = useCallback(() => {
     if (!sessionId) return;
     store().setCircuitOpen(sessionId, false);
@@ -953,11 +1001,13 @@ export function useChat(sessionId: string | null) {
     statusMessage,
     circuitOpen,
     sessionTakeover,
+    interruptedTurn,
     sendMessage,
     loadMessages,
     stopStreaming,
     retryStream,
     dismissCircuit,
+    dismissInterruptedTurn,
     loadOlderMessages,
     hasOlderMessages,
     loadingOlder,

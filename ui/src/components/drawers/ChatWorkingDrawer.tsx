@@ -56,16 +56,23 @@ export interface ChatWorkingDrawerProps {
    *  (if closed) and renders a Banner overlay over the body content. */
   sessionTakeover?: boolean
   circuitOpen?: boolean
+  /** CW-20260518-0084 — true when a service restart killed the in-flight
+   *  turn's backend agent. Surfaced as a banner so the GUI stops showing an
+   *  endless "generating" spinner with no explanation. */
+  interruptedTurn?: boolean
   /** Action handlers. */
   onRetry?: () => void
   onDismissCircuit?: () => void
+  onDismissInterruptedTurn?: () => void
 }
 
 export function ChatWorkingDrawer({
   sessionTakeover = false,
   circuitOpen = false,
+  interruptedTurn = false,
   onRetry,
   onDismissCircuit,
+  onDismissInterruptedTurn,
 }: ChatWorkingDrawerProps = {}) {
   const drawer = useLayoutStore((s) => s.chatWorkingDrawer)
   const setDrawer = useLayoutStore((s) => s.setChatWorkingDrawer)
@@ -130,7 +137,7 @@ export function ChatWorkingDrawer({
   // When any alert becomes active, snapshot the drawer's open state so we can
   // restore it on dismissal: if the drawer was closed when the alert fired,
   // close it again when the alert clears; if it was already open, leave it.
-  const alertActive = sessionTakeover || circuitOpen
+  const alertActive = sessionTakeover || circuitOpen || interruptedTurn
   const wasOpenBeforeAlertRef = useRef<boolean | null>(null)
 
   // Pull-tab drag mechanics. The drag-handle row is always visible; users
@@ -175,7 +182,7 @@ export function ChatWorkingDrawer({
     }
   }, [alertActive, drawer.open, setDrawer])
 
-  // Resolve which alert renders. Priority: takeover > circuit.
+  // Resolve which alert renders. Priority: takeover > circuit > interrupted.
   const bannerProps: BannerProps | null = sessionTakeover
     ? {
         tone: 'info',
@@ -193,7 +200,19 @@ export function ChatWorkingDrawer({
             ...(onDismissCircuit ? [{ label: 'Dismiss', onClick: onDismissCircuit, dismiss: true }] : []),
           ],
         }
-      : null
+      : interruptedTurn
+        ? {
+            // CW-20260518-0084 — the in-flight turn's backend agent is gone
+            // (a deploy/reload restarted the service mid-generation). Replace
+            // the endless spinner with an explicit, actionable state.
+            tone: 'warning',
+            title: 'Session interrupted (service restarted)',
+            body: 'The agent generating this turn was stopped when the service restarted. Send a message to resume — a fresh agent will be started.',
+            actions: onDismissInterruptedTurn
+              ? [{ label: 'Dismiss', onClick: onDismissInterruptedTurn, dismiss: true }]
+              : [],
+          }
+        : null
 
   const showChatToast = useChatStore((s) => s.showChatToast)
   const onPinToggle = useCallback(async (id: string) => {

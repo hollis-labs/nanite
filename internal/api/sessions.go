@@ -147,9 +147,59 @@ func (a *API) handleGetSession(w http.ResponseWriter, r *http.Request) {
 	messages = injectEnvelopePriorResponses(messages, lookup)
 
 	a.jsonResp(w, http.StatusOK, map[string]any{
-		"session":  sess,
-		"messages": messages,
+		"session":          sess,
+		"messages":         messages,
+		"interrupted_turn": a.detectInterruptedTurn(id, sess, messages),
 	})
+}
+
+// detectInterruptedTurn reports whether the session has an in-flight turn whose
+// backend agent is gone — the case where a service restart (deploy/reload)
+// killed a turn mid-generation, leaving the GUI spinning forever with no
+// indication anything went wrong (CW-20260518-0084).
+//
+// The signal is intentionally minimal and derived from existing state:
+//
+//   - The session's last persisted message is a `user` message. A completed
+//     turn always ends with an `assistant` (or `tool`) row; a turn that started
+//     but never produced a reply leaves the user message dangling.
+//   - The process holds NO live in-memory stream for the session. During normal
+//     generation the StreamManager always has a live stream for the message
+//     being generated, so this is false for genuinely in-flight turns. After a
+//     restart the StreamManager is a fresh empty instance, so a turn that was
+//     generating at restart time reads as having no live stream.
+//
+// Both conditions together mean "a turn was dispatched, no reply landed, and
+// nothing in this process is producing one" — i.e. the agent process is gone.
+// Reconciling the dead agent_runtime rows is a separate task (CW-20260518-0085);
+// this only surfaces the state so the FE can stop the endless spinner.
+//
+// Returns nil when the session is not in an interrupted state — the FE treats a
+// null/absent field as "no interruption".
+func (a *API) detectInterruptedTurn(sessionID string, sess *store.Session, messages []store.Message) map[string]any {
+	if sess == nil || len(messages) == 0 {
+		return nil
+	}
+	// Only active sessions can have an in-flight turn; paused/archived ones
+	// were deliberately put to rest.
+	if sess.Status != "active" {
+		return nil
+	}
+	last := messages[len(messages)-1]
+	if last.Role != "user" {
+		return nil
+	}
+	// A live stream means this process is genuinely generating the reply —
+	// not interrupted.
+	if a.Services.Streams != nil && a.Services.Streams.HasLiveStreamForSession(sessionID) {
+		return nil
+	}
+	return map[string]any{
+		"interrupted":      true,
+		"reason":           "service_restart",
+		"last_message_id":  last.ID,
+		"last_activity_at": last.CreatedAt,
+	}
 }
 
 func (a *API) handleUpdateSession(w http.ResponseWriter, r *http.Request) {

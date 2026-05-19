@@ -9,12 +9,14 @@ const {
   mockGetSessionPluginEnvelopes,
   mockGetMessagesAround,
   mockCancelChatStream,
+  mockGetSession,
 } = vi.hoisted(() => ({
   mockSendMessage: vi.fn(),
   mockGetMessagePage: vi.fn(),
   mockGetSessionPluginEnvelopes: vi.fn(),
   mockGetMessagesAround: vi.fn(),
   mockCancelChatStream: vi.fn(),
+  mockGetSession: vi.fn(),
 }));
 
 vi.hoisted(() => {
@@ -43,6 +45,7 @@ vi.mock("@/lib/api", () => ({
     getSessionPluginEnvelopes: mockGetSessionPluginEnvelopes,
     getMessagesAround: mockGetMessagesAround,
     cancelChatStream: mockCancelChatStream,
+    getSession: mockGetSession,
   },
 }));
 
@@ -135,6 +138,8 @@ beforeEach(() => {
   mockSendMessage.mockResolvedValue({ message_id: ASSISTANT_ID, stream_url: `/api/stream/${ASSISTANT_ID}` });
   mockGetMessagesAround.mockResolvedValue({ messages: [], total: 0, has_more: false });
   mockCancelChatStream.mockResolvedValue(undefined);
+  // Default: backend reports no interrupted turn.
+  mockGetSession.mockResolvedValue({ id: SESSION_ID, messages: [], interrupted_turn: null });
 });
 
 afterEach(() => {
@@ -193,5 +198,47 @@ describe("useChat stalled-stream reconciliation", () => {
     expect(latestHook?.messages.map((msg) => msg.id)).toContain(ASSISTANT_ID);
     expect(useChatStore.getState().sessions.get(SESSION_ID)?.pluginEnvelopes).toHaveLength(1);
     expect(mockGetSessionPluginEnvelopes).toHaveBeenCalledTimes(2);
+  });
+
+  // CW-20260518-0084 — a service restart kills the in-flight turn's agent.
+  // The assistant message never lands, so the stalled-stream reconcile finds
+  // nothing to finalize. Instead of spinning forever, the reconcile probes
+  // the session GET, sees `interrupted_turn`, and raises the indicator.
+  it("surfaces interruptedTurn when a quiet stream never produces an assistant message and the backend reports a restart-killed turn", async () => {
+    // The reconcile probe (getMessagePage) keeps returning no assistant message.
+    mockGetMessagePage.mockResolvedValue({ messages: [], total: 1, has_more: false });
+    mockGetSessionPluginEnvelopes.mockResolvedValue([]);
+    // Backend session GET reports the interrupted turn.
+    mockGetSession.mockResolvedValue({
+      id: SESSION_ID,
+      messages: [],
+      interrupted_turn: {
+        interrupted: true,
+        reason: "service_restart",
+        last_message_id: "msg-user-1",
+        last_activity_at: "2026-05-18T12:00:00Z",
+      },
+    });
+
+    renderHarness();
+    await flushAsync();
+
+    await act(async () => {
+      await latestHook?.sendMessage("hello");
+    });
+
+    expect(useChatStore.getState().sessions.get(SESSION_ID)?.isStreaming).toBe(true);
+
+    await act(async () => {
+      vi.advanceTimersByTime(5000);
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    const slice = useChatStore.getState().sessions.get(SESSION_ID);
+    expect(slice?.interruptedTurn).toBe(true);
+    expect(slice?.isStreaming).toBe(false);
+    expect(FakeEventSource.instances[0]?.closed).toBe(true);
   });
 });

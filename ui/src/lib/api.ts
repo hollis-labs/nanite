@@ -171,7 +171,13 @@ export const api = {
     // were silently reading `undefined` before this fix (PR #93 Copilot
     // feedback).
     const raw = await res.json();
-    return { ...(raw.session ?? {}), messages: raw.messages ?? [] };
+    return {
+      ...(raw.session ?? {}),
+      messages: raw.messages ?? [],
+      // CW-20260518-0084: carry the interrupted-turn signal through the
+      // flatten so consumers can detect a restart-killed in-flight turn.
+      interrupted_turn: raw.interrupted_turn ?? null,
+    };
   },
 
   createSession: async (data: {

@@ -380,6 +380,8 @@ func (st *SelfToolsTransport) CallTool(ctx context.Context, name string, args ma
 		return st.callDispatchExecutor(ctx, args)
 	case "chat_search":
 		return st.callChatSearch(ctx, args)
+	case "chat_get":
+		return st.callChatGet(ctx, args)
 	case "python_run":
 		return st.callRunPython(ctx, args)
 	case "panel_open":

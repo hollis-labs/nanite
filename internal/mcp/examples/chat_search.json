@@ -11,5 +11,13 @@
       "limit": 10
     },
     "notes": "Only searches THIS session — not Vanta, not external sources."
+  },
+  {
+    "title": "Search a SIBLING chat by short code (cross-session)",
+    "args": {
+      "query": "artifact-42",
+      "target": "c248"
+    },
+    "notes": "Workspace-scoped: targets in other workspaces are rejected. Each snippet carries session_id/short_code/session_title; the envelope sets cross_session: true."
   }
 ]

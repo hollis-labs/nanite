@@ -1,0 +1,20 @@
+[
+  {
+    "title": "Read a sibling chat by short code",
+    "args": { "target": "c248" },
+    "notes": "Use to pull context from a recovered/crashed session or an earlier related chat. Workspace-scoped: targets in other workspaces are rejected."
+  },
+  {
+    "title": "Paginate a large chat",
+    "args": { "target": "c248", "limit": 100, "offset": 200 },
+    "notes": "Default limit 50, max 500. has_more in the response tells you when to fetch the next page."
+  },
+  {
+    "title": "Read a chat by session UUID, skipping summary blobs",
+    "args": {
+      "session_id": "01926a0e-c248-7000-8000-abcdefabcdef",
+      "include_compacted": false
+    },
+    "notes": "include_compacted=false returns only active (non-summarised) messages."
+  }
+]

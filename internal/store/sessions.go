@@ -379,6 +379,56 @@ func (s *Store) ArchiveSession(id string) error {
 	return nil
 }
 
+// GetSessionByShortCode returns a single session by its short_code
+// (`c<NNN>`). The lookup is case-sensitive on the underlying column —
+// short codes are always lowercase `c<digits>` — but callers should normalise
+// upstream (e.g. strip a leading `#`, lowercase) before invoking this helper.
+// Returns sql.ErrNoRows when no row matches; the caller is expected to wrap
+// the error for the surface they're presenting.
+//
+// CW-20260519-0063 (cross-session chat read self-tool).
+func (s *Store) GetSessionByShortCode(code string) (*Session, error) {
+	var sess Session
+	var currentModeID sql.NullString
+	var autoSwitchOverride sql.NullBool
+	var intent sql.NullString
+	err := s.DB.QueryRow(
+		`SELECT id, short_code, COALESCE(title,''), COALESCE(custom_name,''),
+		        COALESCE(workspace_id,''), COALESCE(project_id,''),
+		        COALESCE(context_type,''), COALESCE(context_id,''),
+		        COALESCE(provider,''), COALESCE(model,''),
+		        status, is_pinned, sort_order, message_count,
+		        COALESCE(tags,'[]'), COALESCE(metadata,'{}'),
+		        last_activity, created_at, updated_at,
+		        current_mode_id, auto_switch_override, intent
+		 FROM sessions WHERE short_code = ?`, code,
+	).Scan(
+		&sess.ID, &sess.ShortCode, &sess.Title, &sess.CustomName,
+		&sess.WorkspaceID, &sess.ProjectID,
+		&sess.ContextType, &sess.ContextID,
+		&sess.Provider, &sess.Model,
+		&sess.Status, &sess.IsPinned, &sess.SortOrder, &sess.MessageCount,
+		&sess.Tags, &sess.Metadata, &sess.LastActivity, &sess.CreatedAt, &sess.UpdatedAt,
+		&currentModeID, &autoSwitchOverride, &intent,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("get session by short_code %s: %w", code, err)
+	}
+	if currentModeID.Valid && currentModeID.String != "" {
+		v := currentModeID.String
+		sess.CurrentModeID = &v
+	}
+	if autoSwitchOverride.Valid {
+		v := autoSwitchOverride.Bool
+		sess.AutoSwitchOverride = &v
+	}
+	if intent.Valid && intent.String != "" {
+		v := intent.String
+		sess.Intent = &v
+	}
+	return &sess, nil
+}
+
 // NextShortCode returns the next available short code (c1, c2, ...).
 func (s *Store) NextShortCode() (string, error) {
 	var raw sql.NullString

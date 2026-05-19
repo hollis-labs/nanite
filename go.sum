@@ -77,8 +77,6 @@ github.com/hollis-labs/go-messaging v0.2.1 h1:n/6dz7UekLmYutdPpf7Pf9Fnyt7AHoGQ8M
 github.com/hollis-labs/go-messaging v0.2.1/go.mod h1:S2AmpqvwDbVqCsOSBJ+u3HKDchnya2KTcBTAhoUp2Ro=
 github.com/hollis-labs/go-otel v0.1.0 h1:ZnPqACswZpm5KXqj8cjx/0biha2RNAg/5PNUrNxnLYQ=
 github.com/hollis-labs/go-otel v0.1.0/go.mod h1:8NJAVRWRhDV5ECrWCdQAqofKvO5nNXnavVgP4I60lGI=
-github.com/hollis-labs/go-providers v0.21.0 h1:HmM5jz5JbdVJSbiyEkIf7wWJ6OlvGWvp03uDKowKUAw=
-github.com/hollis-labs/go-providers v0.21.0/go.mod h1:Y0WQHyW7gIj0ooxyvq2uDqnEHAyOOqVhB2miNiajZ2Q=
 github.com/hollis-labs/go-providers v0.22.0 h1:6n75Ux+bOW10+/DV0z37xAMOHa7CgawG1Gy7HyQqSlo=
 github.com/hollis-labs/go-providers v0.22.0/go.mod h1:Y0WQHyW7gIj0ooxyvq2uDqnEHAyOOqVhB2miNiajZ2Q=
 github.com/hollis-labs/go-queue v0.1.2 h1:FT0te+K0gLM3wvhnZc+nGBIcSW5ebgkhPw4ja/bJl68=

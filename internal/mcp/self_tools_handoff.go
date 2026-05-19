@@ -36,7 +36,7 @@ func handoffStashToolDefinition() Tool {
 			"properties": map[string]any{
 				"session_id": map[string]any{
 					"type":        "string",
-					"description": "Session ID this handoff belongs to. Use the current session ID.",
+					"description": "Optional. The harness resolves the current session automatically — leave this unset. Only set it to target a different session.",
 				},
 				"session_intent": map[string]any{
 					"type":        "string",
@@ -65,7 +65,7 @@ func handoffStashToolDefinition() Tool {
 					"description": "Up to 5 pointers to harness-cached artifacts (label + purpose + optional cache_key).",
 				},
 			},
-			"required": []string{"session_id", "session_intent", "next_step_anchor"},
+			"required": []string{"session_intent", "next_step_anchor"},
 		},
 	}
 }
@@ -84,14 +84,14 @@ func handoffPointersExpandToolDefinition() Tool {
 			"properties": map[string]any{
 				"session_id": map[string]any{
 					"type":        "string",
-					"description": "Session ID the cache_key belongs to.",
+					"description": "Optional. The harness resolves the current session automatically — leave this unset. Only set it to target a different session.",
 				},
 				"cache_key": map[string]any{
 					"type":        "string",
 					"description": "The cache_key returned by a prior handoff_stash call.",
 				},
 			},
-			"required": []string{"session_id", "cache_key"},
+			"required": []string{"cache_key"},
 		},
 	}
 }
@@ -100,8 +100,17 @@ func handoffPointersExpandToolDefinition() Tool {
 // against ctxpkg.ValidateHandoff (caps, required fields, total budget),
 // persists it as a Glass-4 envelope in handoff_stashes, and returns
 // `{cache_key, validated}` for the agent to record.
-func (st *SelfToolsTransport) callHandoffStash(_ context.Context, args map[string]any) (*ToolResult, error) {
-	sessionID := strArg(args, "session_id", "")
+func (st *SelfToolsTransport) callHandoffStash(ctx context.Context, args map[string]any) (*ToolResult, error) {
+	// The session id is harness-assigned: the dispatch context carries the
+	// authoritative session (stamped via mcp.WithSessionID by the in-process
+	// chat loop AND by the CLI-launch self-tool proxy). Prefer it over any
+	// agent-supplied arg — a CLI-launch agent cannot reliably know its own
+	// nanite session id (the SessionStart hook label is a different
+	// identifier), and a supplied value can be wrong or forged.
+	sessionID := SessionIDFromContext(ctx)
+	if sessionID == "" {
+		sessionID = strArg(args, "session_id", "")
+	}
 	if sessionID == "" {
 		return errorResult("session_id is required"), nil
 	}
@@ -167,8 +176,12 @@ func (st *SelfToolsTransport) callHandoffStash(_ context.Context, args map[strin
 
 // callHandoffPointersExpand dispatches handoff_pointers_expand.
 // Returns the full HandoffPayload bytes for the (session_id, cache_key) pair.
-func (st *SelfToolsTransport) callHandoffPointersExpand(_ context.Context, args map[string]any) (*ToolResult, error) {
-	sessionID := strArg(args, "session_id", "")
+func (st *SelfToolsTransport) callHandoffPointersExpand(ctx context.Context, args map[string]any) (*ToolResult, error) {
+	// Session id is harness-assigned — see callHandoffStash.
+	sessionID := SessionIDFromContext(ctx)
+	if sessionID == "" {
+		sessionID = strArg(args, "session_id", "")
+	}
 	cacheKey := strArg(args, "cache_key", "")
 	if sessionID == "" {
 		return errorResult("session_id is required"), nil

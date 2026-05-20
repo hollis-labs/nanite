@@ -516,19 +516,36 @@ func (r *ChatRunner) persistChildSessionID(ctx context.Context, runID, childID s
 // role to an agent profile, creates a child session (bound to the agent),
 // persists the child session ID, then drives generateResponse in a
 // goroutine and drains the resulting stream into a Result.
+//
+// CW-20260519-0075 (audit §P6) — checkpoint/resume + retry. When the
+// caller hands us a Run whose ChildSessionID is already populated (this
+// is a retry / resume attempt produced by execute's loop), skip the
+// createChildSession + persistChildSessionID + lineage-registration work
+// and reuse the prior session. The child's existing message history is
+// the resume substrate: a fresh user message is appended below and
+// generateResponse picks up the full conversation, so the LLM continues
+// where it left off rather than restarting from scratch. This is the
+// "checkpoint a productive over_budget run and resume it" half of the
+// audit.
 func (r *ChatRunner) Run(ctx context.Context, run *subagent.Run) (*subagent.Result, error) {
 	agent, err := r.resolveRole(run.Role)
 	if err != nil {
 		return nil, err
 	}
-	childID, err := r.createChildSession(ctx, run, agent)
-	if err != nil {
-		return nil, err
+	isResume := run.ChildSessionID != ""
+	var childID string
+	if isResume {
+		childID = run.ChildSessionID
+	} else {
+		childID, err = r.createChildSession(ctx, run, agent)
+		if err != nil {
+			return nil, err
+		}
+		if err := r.persistChild(ctx, run.ID, childID); err != nil {
+			return nil, err
+		}
+		run.ChildSessionID = childID
 	}
-	if err := r.persistChild(ctx, run.ID, childID); err != nil {
-		return nil, err
-	}
-	run.ChildSessionID = childID
 
 	// Path-grant lineage: stamp (worker → parent) so the worker session's
 	// dev_* lookups can fall through to grants the user explicitly issued
@@ -537,6 +554,13 @@ func (r *ChatRunner) Run(ctx context.Context, run *subagent.Run) (*subagent.Resu
 	// isolated; this only widens the session-scoped explicit-mention
 	// grant store, which is naturally scoped to the conversation thread.
 	// Cleared via defer so the entry's lifetime is exactly the worker's.
+	//
+	// CW-20260519-0075: on a retry/resume the lineage is re-registered
+	// for the same childID (RegisterLineage is keyed by childID, so a
+	// second call overwrites the same entry harmlessly). The defer still
+	// clears at the end of this attempt, but execute's loop re-enters
+	// Run for the next attempt and re-registers — no leak, no stale
+	// pointer.
 	r.pathGrants.RegisterLineage(childID, run.ParentSessionID)
 	defer r.pathGrants.ClearLineage(childID)
 
@@ -576,11 +600,24 @@ func (r *ChatRunner) Run(ctx context.Context, run *subagent.Run) (*subagent.Resu
 	// filters, and auto-title. Without this row the provider sees an
 	// empty conversation and ignores run.Prompt. Mirrors the pattern
 	// in chat.go:234 (HandleMessage) and delegation.go:109.
+	//
+	// CW-20260519-0075 (audit §P6): on a retry/resume attempt the child
+	// session already carries the prior turn's messages. Posting the
+	// original Prompt verbatim would replay an unrelated turn the LLM
+	// just saw — confusing and wasteful. Instead append a short
+	// continuation directive that tells the model to keep going from
+	// where it left off (the prior turn's assistant text is still in
+	// the history, so context is intact). This is the "checkpoint and
+	// resume" continuation prompt.
+	userPrompt := run.Prompt
+	if isResume {
+		userPrompt = resumeContinuationPrompt(run)
+	}
 	userMsg := &store.Message{
 		ID:        uuid.New().String(),
 		SessionID: childID,
 		Role:      "user",
-		Content:   run.Prompt,
+		Content:   userPrompt,
 	}
 	if err := r.store.CreateMessage(userMsg); err != nil {
 		return nil, fmt.Errorf("create user message: %w", err)
@@ -590,7 +627,7 @@ func (r *ChatRunner) Run(ctx context.Context, run *subagent.Run) (*subagent.Resu
 	// defer (or the fake's equivalent), so drainCapture exits naturally.
 	assistantMsgID := uuid.New().String()
 	captureCh := make(chan chat.StreamEvent, 64)
-	go r.invokeChat(ctx, childID, assistantMsgID, run.Prompt, captureCh)
+	go r.invokeChat(ctx, childID, assistantMsgID, userPrompt, captureCh)
 
 	summary, envelope, counts, runErr := drainCapture(captureCh)
 	if runErr != nil {
@@ -693,6 +730,48 @@ func (r *ChatRunner) Run(ctx context.Context, run *subagent.Run) (*subagent.Resu
 		summary = fmt.Sprintf("subagent %s completed without text response", run.Role)
 	}
 	return &subagent.Result{Summary: summary, ResultJSON: envelope}, nil
+}
+
+// resumeContinuationPrompt produces the user-turn text appended to the
+// child session at the start of a retry / resume attempt
+// (CW-20260519-0075, audit §P6). The prior attempt's prompt + assistant
+// text + tool transcript are already in the child's message history;
+// posting the original prompt verbatim would have the LLM repeat its
+// prior reasoning. A continuation directive instead asks the model to
+// pick up where it left off.
+//
+// The directive is intentionally short and shape-stable so callers
+// (tests, observers) can match against it. It branches on the prior
+// terminal state recorded in AttemptsJSON so an over_budget resume and
+// a failed/stalled retry get slightly different copy:
+//   - over_budget → "continue the prior work; the wall clock cut you off"
+//   - stalled     → "the provider stream went silent; try again"
+//   - failed      → "the prior attempt errored; recover and continue"
+//   - default     → generic continuation
+//
+// The original prompt is included verbatim as a reminder so the model
+// can re-anchor if its working state has been compacted out of the
+// usable context window.
+func resumeContinuationPrompt(run *subagent.Run) string {
+	last := ""
+	if run.AttemptsJSON != "" && run.AttemptsJSON != "[]" {
+		var attempts []struct {
+			Status string `json:"status"`
+		}
+		if err := json.Unmarshal([]byte(run.AttemptsJSON), &attempts); err == nil && len(attempts) > 0 {
+			last = attempts[len(attempts)-1].Status
+		}
+	}
+	prefix := "[continuation] The prior attempt did not finish; resume from where you left off."
+	switch last {
+	case subagent.StatusOverBudget:
+		prefix = "[continuation] Your prior attempt hit the wall-clock backstop while still making progress. Pick up the work from where you left off and aim to finish in this turn."
+	case subagent.StatusStalled:
+		prefix = "[continuation] Your prior attempt stalled (the provider stream went silent). Recover and continue the original task."
+	case subagent.StatusFailed:
+		prefix = "[continuation] Your prior attempt failed mid-way. Recover from the error and continue the original task."
+	}
+	return fmt.Sprintf("%s\n\nOriginal request was: %s", prefix, run.Prompt)
 }
 
 // truncatePrompt shortens s to at most n bytes, appending an ellipsis

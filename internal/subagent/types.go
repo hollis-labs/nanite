@@ -89,6 +89,86 @@ func IsTerminalStatus(s string) bool {
 	}
 }
 
+// On-failure routing policy applied by execute's retry loop
+// (CW-20260519-0075, audit §P6). Mirrors Torque's task.OnFail routing in
+// internal/runtime/scheduler/lifecycle.go:189-279 (retry / block /
+// escalate). At the subagent layer:
+//
+//   - OnFailRetry    loop in-place on a retriable terminal outcome until
+//                    retry_count reaches max_retries.
+//   - OnFailBlock    terminate immediately on failure; leave the row in
+//                    the failed/stalled state for the parent task / caller
+//                    to handle (no further attempts).
+//   - OnFailEscalate behaves identically to block at the subagent layer
+//                    today — escalation is a parent-task lifecycle concern
+//                    and the inline subagent runner has no escalation
+//                    surface to invoke. The value is accepted so a parent
+//                    task / dispatcher can pass through its own OnFail
+//                    without coercion, and the future escalation hook can
+//                    branch on this value without a schema change.
+//
+// over_budget is always a candidate for resume regardless of OnFail
+// policy: it is by construction "the run made progress but hit the
+// wall-clock backstop" (Torque's canceled vs failed split, see
+// scheduler.go:668-701). Stopping a productive run that just hit a clock
+// is not a failure to route on. The cap is still max_retries — an
+// over_budget resume that itself goes over budget eventually terminates.
+const (
+	OnFailRetry    = "retry"
+	OnFailBlock    = "block"
+	OnFailEscalate = "escalate"
+)
+
+// DefaultMaxRetries is the cap on retry attempts when SpawnRequest does
+// not specify one. Mirrors Torque's default (internal/service/task.go:274
+// — orDefaultInt(input.MaxRetries, 3)). retry_count is the number of
+// *additional* attempts past the first; a MaxRetries=3 chain runs up to
+// 4 times before terminating (one initial + 3 retries).
+const DefaultMaxRetries = 3
+
+// DefaultOnFail is the routing policy applied when SpawnRequest does not
+// set one. Mirrors Torque's default OnFail (retry) for kind=agent tasks.
+const DefaultOnFail = OnFailRetry
+
+// IsValidOnFail reports whether s is a recognized on_fail value. The DB
+// CHECK constraint enforces the same set; this helper is the source of
+// truth at the Spawn boundary so an invalid request is rejected before
+// any DB write rather than failing on INSERT.
+func IsValidOnFail(s string) bool {
+	switch s {
+	case OnFailRetry, OnFailBlock, OnFailEscalate:
+		return true
+	default:
+		return false
+	}
+}
+
+// IsRetriableStatus reports whether a terminal status represents an
+// outcome that may be retried. Used by execute's retry loop to gate the
+// decision whether to attempt another iteration:
+//
+//   - over_budget: yes — by construction the run was productive; resume
+//     mode reuses the child session so the next attempt continues the
+//     conversation.
+//   - stalled:     yes — a stalled provider stream may recover on a
+//     fresh stream. Retry restarts the provider call against the same
+//     child session (the chat history carries over).
+//   - failed:      yes for transient/unknown failures. The fabrication
+//     detector trip and approval-rejection are pre-filtered by the
+//     classifier in execute (see retryableFailureError).
+//
+// completed, cancelled, rejected are never retried: completed is a
+// success, the other two are operator decisions that must not be
+// overridden by the retry loop.
+func IsRetriableStatus(s string) bool {
+	switch s {
+	case StatusOverBudget, StatusStalled, StatusFailed:
+		return true
+	default:
+		return false
+	}
+}
+
 // SpawnRequest is the caller-supplied input for a spawn.
 type SpawnRequest struct {
 	// ParentSessionID is the session the spawning agent is in. The
@@ -125,6 +205,19 @@ type SpawnRequest struct {
 	// AgentProfileID is the DB ID of the agent profile being spawned.
 	// Required for trust resolution. Empty string falls back to TrustNormal.
 	AgentProfileID string
+
+	// MaxRetries caps the number of *additional* attempts past the first
+	// when the run terminates in a retriable state (CW-20260519-0075, audit
+	// §P6). Zero means "use DefaultMaxRetries". A negative value is
+	// normalized to zero (no retries — single-shot). Mirrors Torque's
+	// MaxRetries default tier (internal/service/task.go:274).
+	MaxRetries int
+
+	// OnFail is the routing policy applied to a genuine failure outcome.
+	// Empty string means "use DefaultOnFail" (retry). See OnFail* constants
+	// for the recognized values. An unrecognized value is rejected by
+	// Spawn before any DB write.
+	OnFail string
 }
 
 // Run represents a single spawn lifecycle row persisted in
@@ -157,6 +250,32 @@ type Run struct {
 	// Empty string means the child session used the agent profile's
 	// DefaultProvider. Non-empty is the override that was applied.
 	Provider string `json:"provider,omitempty"`
+
+	// CW-20260519-0075 (audit §P6) — checkpoint/resume + retry lifecycle.
+
+	// RetryCount is the number of *additional* attempts past the first.
+	// 0 = "the row reflects a single attempt, no retry happened".
+	// Bumped by execute's loop when a retriable outcome triggers another
+	// iteration; capped at MaxRetries.
+	RetryCount int `json:"retry_count"`
+
+	// MaxRetries is the per-run cap on retries (Torque parity). When
+	// RetryCount reaches MaxRetries the chain terminates regardless of
+	// OnFail policy.
+	MaxRetries int `json:"max_retries"`
+
+	// OnFail is the routing policy on a genuine failure outcome
+	// (`retry` / `block` / `escalate`). Mirrors Torque's task.OnFail. See
+	// the OnFail* constants for semantics.
+	OnFail string `json:"on_fail"`
+
+	// AttemptsJSON is a JSON array recording per-attempt audit detail for
+	// every iteration EXCEPT the final one (whose status/error/result_json
+	// live in the top-level columns). Each entry is a
+	// `{"status","error","result_json","started_at","completed_at"}`
+	// object — same shape as the run row's terminal fields. Empty array
+	// (the default) means "this row reflects the only attempt".
+	AttemptsJSON string `json:"attempts_json"`
 }
 
 // Result is the output a Runner returns on successful completion.

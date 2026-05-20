@@ -380,6 +380,27 @@ func (svc *Service) Spawn(ctx context.Context, req SpawnRequest) (string, error)
 		inputs = "{}"
 	}
 
+	// CW-20260519-0075 — checkpoint/resume + retry lifecycle (audit §P6).
+	// Resolve the retry budget + on_fail policy in priority order:
+	//   1. explicit per-call value when valid
+	//   2. compiled-in defaults (DefaultMaxRetries = 3, DefaultOnFail = retry)
+	// An explicit negative MaxRetries is normalized to zero (single-shot).
+	// An unrecognized OnFail is rejected outright — fat-fingering a routing
+	// policy must not silently default to retry.
+	maxRetries := req.MaxRetries
+	if maxRetries < 0 {
+		maxRetries = 0
+	} else if maxRetries == 0 {
+		maxRetries = DefaultMaxRetries
+	}
+	onFail := req.OnFail
+	if onFail == "" {
+		onFail = DefaultOnFail
+	}
+	if !IsValidOnFail(onFail) {
+		return "", fmt.Errorf("subagent: invalid on_fail %q (want retry|block|escalate)", onFail)
+	}
+
 	run := &Run{
 		ID:              uuid.New().String(),
 		ParentSessionID: req.ParentSessionID,
@@ -391,6 +412,9 @@ func (svc *Service) Spawn(ctx context.Context, req SpawnRequest) (string, error)
 		TimeoutSeconds:  timeout,
 		Provider:        req.Provider,
 		CreatedAt:       time.Now().UTC().Format(time.RFC3339Nano),
+		MaxRetries:      maxRetries,
+		OnFail:          onFail,
+		AttemptsJSON:    "[]",
 	}
 
 	// H1 trust resolution: consult the workspace-scoped trust tier before
@@ -781,20 +805,29 @@ func (svc *Service) executeWithSlot(ctx context.Context, run *Run, parentAgentID
 // up would leave the run stuck in 'running' and silently drop the
 // subagent's work.
 //
-// CW-20260519-0073: the `context.WithTimeout` below is now a
-// generous wall-clock BACKSTOP (DefaultTimeoutSeconds = 1800s), not
-// the governing bound. The real liveness signal is the child chat
-// loop's inactivity terminator (shouldStop Layer 2, scoped to
-// subagent dispatch). The old fixed 300s deadline measured elapsed
-// time and cancelled productive-but-slow runs mid-stream; the
-// inactivity timeout measures *silence* instead, so a worker that
-// keeps emitting events is never reaped. This backstop only fires
-// for the pathological case where the child loop neither progresses
-// nor trips its own inactivity terminator.
+// CW-20260519-0073: the `context.WithTimeout` inside the attempt
+// loop is now a generous wall-clock BACKSTOP
+// (DefaultTimeoutSeconds = 1800s), not the governing bound. The
+// real liveness signal is the child chat loop's inactivity
+// terminator (shouldStop Layer 2, scoped to subagent dispatch).
+//
+// CW-20260519-0075 (audit §P6) — checkpoint/resume + retry lifecycle.
+// execute is now a retry loop: on a retriable terminal outcome
+// (over_budget / stalled / failed-with-OnFail=retry) and a remaining
+// retry budget the prior attempt's state is folded into AttemptsJSON
+// and the runner is invoked again. The child session is preserved
+// across attempts so the chat path's message history carries forward
+// (the runner skips createChildSession when ChildSessionID is set);
+// an over_budget resume picks up the conversation rather than discards
+// it. fabrication-suspected, cancelled, rejected, and any state that
+// IsRetriableStatus rejects are never retried regardless of OnFail.
+// max_retries (default 3) caps the chain length. Each attempt gets a
+// fresh wall-clock budget — execute does not amortize the backstop
+// across retries (a wedged provider on attempt 1 should not eat
+// attempt 2's budget). Cancellation observed mid-chain bails out
+// without further retries (the loop checks ctx + the persisted status
+// before each iteration).
 func (svc *Service) execute(ctx context.Context, run *Run, parentAgentID string) {
-	runCtx, cancel := context.WithTimeout(ctx, time.Duration(run.TimeoutSeconds)*time.Second)
-	defer cancel()
-
 	// Clear the per-run cancel registration on exit so a late Cancel
 	// call after terminal state is a cheap no-op (no stale func held,
 	// no double-invocation).
@@ -804,39 +837,83 @@ func (svc *Service) execute(ctx context.Context, run *Run, parentAgentID string)
 		svc.cancelMu.Unlock()
 	}()
 
-	result, runErr := svc.runner.Run(runCtx, run)
+	var (
+		result *Result
+		runErr error
+	)
+	for {
+		// Each attempt gets its own bounded run context. The runner's
+		// inactivity timeout governs liveness inside this window
+		// (CW-20260519-0073).
+		runCtx, cancel := context.WithTimeout(ctx, time.Duration(run.TimeoutSeconds)*time.Second)
+		result, runErr = svc.runner.Run(runCtx, run)
 
-	now := time.Now().UTC().Format(time.RFC3339Nano)
-	if runErr != nil {
-		// CW-20260519-0074 (audit §P3) — run status taxonomy. The error
-		// branch no longer collapses every non-success into `failed`.
-		// classifyRunOutcome inspects the error and the progress signal
-		// (tool-call count, carried in the partial Result's result_json)
-		// to pick between `stalled`, `over_budget`, and `failed`.
-		run.Status = classifyRunOutcome(runErr, result, runCtx)
-		run.Error = runErr.Error()
-		// CW-20260519-0071 (audit §P2): partial-result capture on the
-		// non-success branch. A subagent guillotined mid-productive-work
-		// (wall-clock backstop cancels the provider stream) has often
-		// done real file-writing work; the runner now returns that
-		// partial Result *alongside* the error. Persist result_json so
-		// the run row carries a structured trace of what the killed
-		// run accomplished instead of leaving result_json at its
-		// insert-time default. The error itself is untouched above —
-		// the status now carries a diagnostic signal but the error
-		// string is still recorded; this is additive capture, not error
-		// suppression. result == nil (genuinely empty failure, or a
-		// runner that returns nil on error) leaves result_json as-is.
-		if result != nil {
-			run.ResultJSON = structuredResultJSON(result)
+		now := time.Now().UTC().Format(time.RFC3339Nano)
+		if runErr != nil {
+			// classifyRunOutcome MUST see runCtx with its real
+			// post-runner Err() — that's how it tells "wall-clock
+			// backstop fired" from "runner returned an error of its
+			// own". Cancelling runCtx before this call would falsely
+			// always report ctx.Err()==Canceled and the classifier
+			// would misroute a genuine runner error to stalled /
+			// over_budget.
+			run.Status = classifyRunOutcome(runErr, result, runCtx)
+			run.Error = runErr.Error()
+			if result != nil {
+				run.ResultJSON = structuredResultJSON(result)
+			}
+		} else {
+			run.Status = StatusCompleted
+			run.Error = ""
+			if result != nil {
+				run.ResultJSON = structuredResultJSON(result)
+			}
 		}
-	} else {
-		run.Status = StatusCompleted
-		if result != nil {
-			run.ResultJSON = structuredResultJSON(result)
+		// Now safe to release the per-attempt context — classification
+		// has already captured what it needed from runCtx.
+		cancel()
+		run.CompletedAt = now
+
+		// Retry-or-finalize decision.
+		if !svc.shouldRetry(ctx, run, runErr) {
+			break
 		}
+
+		// Fold the just-finished attempt into AttemptsJSON so the audit
+		// trail preserves every iteration's outcome. The top-level
+		// columns will be overwritten by the next attempt — capture
+		// happens BEFORE that overwrite.
+		run.AttemptsJSON = appendAttempt(run.AttemptsJSON, attemptRecord{
+			Status:      run.Status,
+			Error:       run.Error,
+			ResultJSON:  run.ResultJSON,
+			StartedAt:   run.StartedAt,
+			CompletedAt: run.CompletedAt,
+		})
+		run.RetryCount++
+		// Persist progress so a process crash mid-chain still leaves
+		// the row coherent (status reverts to running, attempts_json
+		// + retry_count carry the prior history). The next attempt
+		// will overwrite the terminal fields.
+		if err := svc.persistRetryCheckpoint(ctx, run); err != nil {
+			slog.Warn("subagent: persist retry checkpoint", "err", err, "run_id", run.ID,
+				"retry_count", run.RetryCount)
+		}
+		// Reset the attempt-local fields so the next iteration writes
+		// fresh state instead of carrying the prior attempt's residue.
+		run.Status = StatusRunning
+		run.Error = ""
+		run.ResultJSON = "{}"
+		run.CompletedAt = ""
+
+		slog.Info("subagent: retrying run",
+			"run_id", run.ID,
+			"role", run.Role,
+			"retry_count", run.RetryCount,
+			"max_retries", run.MaxRetries,
+			"reason_status", lastAttemptStatus(run.AttemptsJSON),
+		)
 	}
-	run.CompletedAt = now
 
 	// Finalize + reply under their own bounded background ctx so a
 	// canceled parent request (sync mode) still gets the
@@ -1153,6 +1230,10 @@ func (svc *Service) liftResultEnvelopes(ctx context.Context, run *Run, result *R
 
 // insertRun persists a freshly-created run.
 func (svc *Service) insertRun(ctx context.Context, r *Run) error {
+	attempts := r.AttemptsJSON
+	if attempts == "" {
+		attempts = "[]"
+	}
 	_, err := svc.db.ExecContext(ctx,
 		`INSERT INTO subagent_runs (id, parent_session_id, child_session_id, role, prompt,
 		                            mode, status, inputs_json, result_json, error,
@@ -1160,8 +1241,9 @@ func (svc *Service) insertRun(ctx context.Context, r *Run) error {
 		                            parent_agent_id, envelope_instance_id,
 		                            approved_at, approved_by,
 		                            rejected_at, rejection_reason,
-		                            provider)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		                            provider,
+		                            retry_count, max_retries, on_fail, attempts_json)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		r.ID, r.ParentSessionID, r.ChildSessionID, r.Role, r.Prompt,
 		r.Mode, r.Status, r.InputsJSON, r.ResultJSON, r.Error,
 		r.TimeoutSeconds, r.CreatedAt, r.StartedAt, r.CompletedAt,
@@ -1169,6 +1251,7 @@ func (svc *Service) insertRun(ctx context.Context, r *Run) error {
 		r.ApprovedAt, r.ApprovedBy,
 		r.RejectedAt, r.RejectionReason,
 		r.Provider,
+		r.RetryCount, r.MaxRetries, r.OnFail, attempts,
 	)
 	return err
 }
@@ -1179,12 +1262,23 @@ func (svc *Service) insertRun(ctx context.Context, r *Run) error {
 // that was cancelled mid-flight would have its cancellation
 // overwritten by the completed/failed terminal state this function
 // wants to write.
+//
+// CW-20260519-0075: also persists retry_count + attempts_json so the
+// chain audit trail survives the final UPDATE. AttemptsJSON is
+// recorded incrementally by persistRetryCheckpoint between attempts;
+// this just makes sure the final row reflects the full history.
 func (svc *Service) finalizeRun(ctx context.Context, r *Run) error {
+	attempts := r.AttemptsJSON
+	if attempts == "" {
+		attempts = "[]"
+	}
 	res, err := svc.db.ExecContext(ctx,
 		`UPDATE subagent_runs
-		   SET status = ?, result_json = ?, error = ?, completed_at = ?
+		   SET status = ?, result_json = ?, error = ?, completed_at = ?,
+		       retry_count = ?, attempts_json = ?
 		 WHERE id = ? AND status IN (?, ?, ?)`,
 		r.Status, r.ResultJSON, r.Error, r.CompletedAt,
+		r.RetryCount, attempts,
 		r.ID, StatusRunning, StatusRequested, StatusApproved,
 	)
 	if err != nil {
@@ -1214,12 +1308,175 @@ func (svc *Service) finalizeRun(ctx context.Context, r *Run) error {
 	return nil
 }
 
+// shouldRetry decides whether execute's loop should run another
+// iteration (CW-20260519-0075, audit §P6). The retry decision is
+// gated by:
+//
+//   - the outcome's retriability (IsRetriableStatus + on_fail policy)
+//   - remaining budget (retry_count < max_retries)
+//   - a concurrent Cancel observed via either ctx or the persisted
+//     row status (a Cancel issued between attempts must NOT trigger
+//     another retry — that would resurrect a cancelled run).
+//
+// Unretriable outcomes never retry regardless of budget:
+//   - fabrication-suspected (the LLM produced unreliable text;
+//     re-running won't reliably fix that)
+//   - cancelled, rejected (operator decisions)
+//
+// over_budget always retries within budget regardless of on_fail —
+// it is not a routing-on-fail case, it is a "productive run hit the
+// wall clock" case that the audit explicitly wants resumed rather
+// than discarded. on_fail=block / escalate only suppresses retry for
+// the failed / stalled buckets.
+func (svc *Service) shouldRetry(ctx context.Context, run *Run, runErr error) bool {
+	// Cancellation observed via ctx (parent cancelled the run): bail
+	// without retrying. The runner's own ctx already cancelled; the
+	// row should land in its final state.
+	if ctx != nil && ctx.Err() != nil {
+		return false
+	}
+
+	if run.RetryCount >= run.MaxRetries {
+		return false
+	}
+
+	if !IsRetriableStatus(run.Status) {
+		return false
+	}
+
+	// Fabrication-suspected: never auto-retry. The fabrication detector
+	// trips precisely when the model produced ungrounded text; re-running
+	// is not a fix and may compound the problem. The error wraps the
+	// sentinel via errors.Is on the runner side, but the package boundary
+	// here cannot import the runner's sentinel — encode the test as a
+	// substring match on the canonical error prefix the runner emits
+	// (subagent_runner.go errSubagentFabricationSuspected). The substring
+	// is stable across the runner; if it changes a test catches the drift.
+	if runErr != nil && strings.Contains(runErr.Error(), "fabrication suspected") {
+		return false
+	}
+
+	// on_fail routing applies to the failed/stalled buckets. over_budget
+	// is the resume case and is always retriable within budget.
+	if run.Status == StatusFailed || run.Status == StatusStalled {
+		switch run.OnFail {
+		case OnFailBlock, OnFailEscalate:
+			return false
+		}
+	}
+
+	// Concurrent Cancel: re-read the row's status before committing to
+	// another attempt. A Cancel that landed between attempts updates the
+	// row to cancelled; we must observe that and abort the chain rather
+	// than the next runner.Run resurrecting it. Use a short-bounded
+	// background ctx so a cancelled parent ctx doesn't prevent the read.
+	checkCtx, checkCancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer checkCancel()
+	var persistedStatus string
+	if err := svc.db.QueryRowContext(checkCtx,
+		`SELECT status FROM subagent_runs WHERE id = ?`, run.ID,
+	).Scan(&persistedStatus); err == nil {
+		if persistedStatus == StatusCancelled || persistedStatus == StatusRejected {
+			return false
+		}
+	}
+	// On a DB error, conservatively allow the retry — the next attempt's
+	// finalize will still observe the cancel via finalizeRun's guarded
+	// UPDATE. The whole row check is defense-in-depth.
+
+	return true
+}
+
+// attemptRecord is the per-attempt audit detail folded into Run.AttemptsJSON
+// before each retry. Mirrors the run row's terminal-field shape so
+// dashboards can render an attempt the same way as a final row. Only the
+// fields that change attempt-to-attempt are recorded; static fields
+// (role, prompt, mode, etc.) live once on the row.
+type attemptRecord struct {
+	Status      string `json:"status"`
+	Error       string `json:"error,omitempty"`
+	ResultJSON  string `json:"result_json,omitempty"`
+	StartedAt   string `json:"started_at,omitempty"`
+	CompletedAt string `json:"completed_at,omitempty"`
+}
+
+// appendAttempt parses the existing AttemptsJSON array, appends the new
+// entry, and returns the marshalled result. A malformed prior value is
+// recovered to an empty array (a single corrupt attempts column must not
+// poison the rest of the chain — the loss is one entry of audit, not
+// run correctness). Returns "[]" on a marshal failure (effectively
+// impossible for a fixed-shape struct of strings).
+func appendAttempt(prior string, rec attemptRecord) string {
+	var attempts []attemptRecord
+	if prior != "" && prior != "[]" {
+		if err := json.Unmarshal([]byte(prior), &attempts); err != nil {
+			slog.Warn("subagent: attempts_json malformed; rebuilding from this attempt",
+				"prior_len", len(prior), "err", err)
+			attempts = nil
+		}
+	}
+	attempts = append(attempts, rec)
+	out, err := json.Marshal(attempts)
+	if err != nil {
+		return "[]"
+	}
+	return string(out)
+}
+
+// lastAttemptStatus reads the last entry's status from an AttemptsJSON
+// blob for structured logging. Returns the empty string on any parse
+// problem — the log line is informational and must not fail the run.
+func lastAttemptStatus(attemptsJSON string) string {
+	if attemptsJSON == "" || attemptsJSON == "[]" {
+		return ""
+	}
+	var attempts []attemptRecord
+	if err := json.Unmarshal([]byte(attemptsJSON), &attempts); err != nil {
+		return ""
+	}
+	if len(attempts) == 0 {
+		return ""
+	}
+	return attempts[len(attempts)-1].Status
+}
+
+// persistRetryCheckpoint writes the in-between-attempts state to the row
+// so a process crash mid-chain leaves coherent persistence: the row
+// status reverts to `running` (so the reaper can still sweep it),
+// retry_count + attempts_json carry the prior history, and the result/
+// error/completed_at columns are reset so the next attempt's UPDATE
+// (via finalizeRun) writes fresh state. Uses a 5s timeout on a fresh
+// background ctx so a cancelled parent doesn't prevent the write.
+//
+// This persistence is best-effort: a failure here is logged but does not
+// abort the retry chain. The in-memory Run state is the source of truth
+// inside execute's loop; the DB row is the eventual surface that a
+// crash-recovery read would consult.
+func (svc *Service) persistRetryCheckpoint(parentCtx context.Context, run *Run) error {
+	attempts := run.AttemptsJSON
+	if attempts == "" {
+		attempts = "[]"
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	_, err := svc.db.ExecContext(ctx,
+		`UPDATE subagent_runs
+		   SET status = ?, retry_count = ?, attempts_json = ?,
+		       error = '', result_json = '{}', completed_at = ''
+		 WHERE id = ? AND status NOT IN (?, ?)`,
+		StatusRunning, run.RetryCount, attempts,
+		run.ID, StatusCancelled, StatusRejected,
+	)
+	return err
+}
+
 // selectSQL is the canonical SELECT clause for subagent_runs rows.
 const selectSQL = `SELECT id, parent_session_id, child_session_id, role, prompt,
 	mode, status, inputs_json, result_json, error,
 	timeout_seconds, created_at, started_at, completed_at,
 	parent_agent_id, envelope_instance_id, approved_at, approved_by,
-	rejected_at, rejection_reason, provider
+	rejected_at, rejection_reason, provider,
+	retry_count, max_retries, on_fail, attempts_json
 	FROM subagent_runs`
 
 func scanRun(row interface{ Scan(...any) error }) (*Run, error) {
@@ -1232,6 +1489,7 @@ func scanRun(row interface{ Scan(...any) error }) (*Run, error) {
 		&r.ApprovedAt, &r.ApprovedBy,
 		&r.RejectedAt, &r.RejectionReason,
 		&r.Provider,
+		&r.RetryCount, &r.MaxRetries, &r.OnFail, &r.AttemptsJSON,
 	); err != nil {
 		return nil, err
 	}

@@ -138,7 +138,63 @@ var (
 	// can errors.Is it and stamp StatusStalled rather than the generic
 	// StatusFailed. Genuine provider errors and crashes do NOT carry it.
 	ErrStalled = errors.New("subagent: run stalled — provider stream inactivity timeout")
+
+	// ErrNoProfileForRole is returned by Spawn when role resolution
+	// cannot find an agent_profiles row for the requested slug
+	// (CW-20260519-0123). The c271 evidence pattern — an LLM calling
+	// subagent_spawn with a role name like "system-architect" that has
+	// no registered profile — used to fall through to the orphan path:
+	// a row was inserted with status=running, the runner errored, the
+	// reaper marked it `failed` 60s later with "timeout: orphan, no
+	// child session". The fail-fast gate at the Spawn boundary catches
+	// this BEFORE any DB row is inserted, before a timer is started,
+	// and before the caller's ctx can deadline.
+	ErrNoProfileForRole = errors.New("subagent: no agent profile registered for role")
+
+	// ErrRoleNotExecutable is returned by Spawn when the resolved
+	// profile carries can_execute=false AND the role slug is not in
+	// the text-only producer whitelist (CW-20260519-0123). The c256
+	// evidence pattern — a planner subagent with no tool surface that
+	// hung 300s with zero output — used to fall through to the runner,
+	// where the chat capture closed without `stream_end` and the
+	// drainCapture loop returned empty. The fail-fast gate rejects
+	// these at the Spawn boundary so the parent sees a clear config
+	// error instead of a silent stall.
+	//
+	// The whitelist (textOnlyRoleSlugs) is for roles that are
+	// deliberately can_execute=false because their dispatch surface
+	// (e.g. PeerQuery / hint selection) is text-in / text-out by
+	// design and does not need the executable tool path.
+	ErrRoleNotExecutable = errors.New("subagent: agent profile is not executable and not in the text-only role whitelist")
 )
+
+// textOnlyRoleSlugs enumerates can_execute=false role slugs that are
+// nevertheless valid subagent-spawn targets (CW-20260519-0123). These
+// roles produce text-only output through a dispatch surface that
+// doesn't require an executable tool path — typically PeerQuery /
+// classification / hint selection.
+//
+// Currently:
+//   - hint-selector: think-block v2 affordance selector (CW-20260420-0022),
+//     dispatched via the chat hint dispatch adapter; payload is JSON in,
+//     JSON list out.
+//
+// Adding a role here is a deliberate signal: the role is intentionally
+// non-executable AND someone explicitly dispatches it. Other
+// can_execute=false profiles (analyst, planner, researcher) are NOT in
+// this list — analyst is shape-compatible but not directly dispatched
+// via subagent_spawn; planner's hang is the exact pathology this
+// ticket retires; researcher carries a real read tool allow_list and
+// is intended to evolve toward can_execute=true.
+var textOnlyRoleSlugs = map[string]struct{}{
+	"hint-selector": {},
+}
+
+// isTextOnlyRole reports whether slug is in textOnlyRoleSlugs.
+func isTextOnlyRole(slug string) bool {
+	_, ok := textOnlyRoleSlugs[slug]
+	return ok
+}
 
 // Runner executes the subagent's work and returns a structured
 // Result. Implementations own the actual chat-engine invocation,
@@ -197,6 +253,26 @@ type ParentageChecker interface {
 	IsSubagentSession(sessionID string) (bool, error)
 }
 
+// ProfileResolver is the narrow surface the Spawn fail-fast gate uses
+// to validate a role → profile at the Spawn boundary
+// (CW-20260519-0123). *store.Store satisfies it via GetAgentBySlug.
+//
+// Defined as a narrow interface (rather than depending on *store.Store
+// directly) so the gate can be unit-tested with a fake — the c271
+// "no profile for role" pattern and the c256 "can_execute=false"
+// pattern both want explicit test coverage without a real SQLite-
+// backed agent_profiles table.
+//
+// Implementations MUST return an error wrapping sql.ErrNoRows when no
+// profile exists for slug; the gate uses errors.Is(err, sql.ErrNoRows)
+// to distinguish "missing profile" (return ErrNoProfileForRole) from
+// "lookup failed" (return the underlying error). *store.Store's
+// GetAgentBySlug already wraps with %w so this contract holds in
+// production.
+type ProfileResolver interface {
+	GetAgentBySlug(slug string) (*store.AgentProfile, error)
+}
+
 // Service coordinates the spawn → run → complete → reply flow.
 // Safe for concurrent use.
 type Service struct {
@@ -209,6 +285,7 @@ type Service struct {
 	trustResolver TrustResolverIface
 	eventLogger  EventLogger
 	parentage    ParentageChecker
+	profiles     ProfileResolver
 
 	// cancelers holds a per-run context.CancelFunc keyed by runID so
 	// Cancel(runID) can propagate cancellation into the in-flight
@@ -258,6 +335,17 @@ func (svc *Service) SetEventLogger(l EventLogger) { svc.eventLogger = l }
 // behaves as before (no parentage enforcement). Production wiring
 // always sets this so the cap is in force; tests opt in explicitly.
 func (svc *Service) SetParentageChecker(p ParentageChecker) { svc.parentage = p }
+
+// SetProfileResolver wires the Spawn-boundary fail-fast gate
+// (CW-20260519-0123). Call before any Spawn. When nil, the gate is
+// disabled — Spawn does NOT validate role → profile and the prior
+// behavior (rely on the runner's fallback / orphan reaper) is
+// preserved. Production wiring always sets this so unknown roles and
+// can_execute=false-outside-whitelist roles fail fast with a
+// structured config error; tests opt in explicitly so existing
+// service_test.go cases that pass synthetic roles like
+// "file-summarizer" continue to drive an EchoRunner end-to-end.
+func (svc *Service) SetProfileResolver(p ProfileResolver) { svc.profiles = p }
 
 // SetStreamSink wires (or unwires) the G-5 status-event sink. Pass nil
 // to disable emission. Safe to call before any Spawn.
@@ -320,6 +408,57 @@ func (svc *Service) Spawn(ctx context.Context, req SpawnRequest) (string, error)
 	default:
 		return "", fmt.Errorf("subagent: invalid mode %q", mode)
 	}
+
+	// CW-20260519-0123: fail-fast role → profile resolution at the Spawn
+	// boundary. Two distinct pathologies retired here:
+	//
+	//   - No-profile (c271, e.g. role="system-architect"): the LLM
+	//     supplies a role name with no registered agent_profiles row.
+	//     Before this gate, Spawn inserted a row with status=running,
+	//     handed the runner an unresolvable slug, and the orphan reaper
+	//     marked the row `failed` 60s later with "timeout: orphan, no
+	//     child session" — the parent's spawn call returned "context
+	//     deadline exceeded" after the wait, with zero structured signal
+	//     about the cause.
+	//   - Non-executable (c256, e.g. role="planner"): the profile exists
+	//     but has can_execute=false, no tool surface. The runner drove a
+	//     chat turn against it; the capture closed without `stream_end`
+	//     and drainCapture returned empty. Wave-1 made this fail FAST as
+	//     `stalled` (CW-20260519-0067), but the dispatch still misroutes.
+	//
+	// Gate semantics:
+	//   - Profile missing: return ErrNoProfileForRole + role context. No
+	//     DB write, no timer, no orphan row.
+	//   - Profile present + CanExecute=false + slug NOT in
+	//     textOnlyRoleSlugs (currently {"hint-selector"}): return
+	//     ErrRoleNotExecutable. The whitelist preserves the legitimate
+	//     PeerQuery dispatch path.
+	//   - Resolver not wired (svc.profiles == nil): skip the gate
+	//     entirely. Tests opt in via SetProfileResolver; production
+	//     container always wires it.
+	//
+	// Errors wrap the sentinels so callers can errors.Is them; the MCP
+	// transport layer (callSpawnSubagent) maps them to ErrorKindConfig
+	// so the parent envelope distinguishes config faults from internal
+	// failures.
+	if svc.profiles != nil {
+		profile, lookupErr := svc.profiles.GetAgentBySlug(req.Role)
+		switch {
+		case lookupErr == nil:
+			if !profile.CanExecute && !isTextOnlyRole(req.Role) {
+				return "", fmt.Errorf("%w: %q (slug=%q, can_execute=false, not in text-only whitelist)",
+					ErrRoleNotExecutable, req.Role, profile.Slug)
+			}
+		case errors.Is(lookupErr, sql.ErrNoRows):
+			return "", fmt.Errorf("%w %q", ErrNoProfileForRole, req.Role)
+		default:
+			// Lookup itself failed (DB transient / closed / etc.). Surface
+			// the underlying error rather than masking it as a config issue
+			// — the caller's retry policy may differ for transient faults.
+			return "", fmt.Errorf("subagent: resolve role %q: %w", req.Role, lookupErr)
+		}
+	}
+
 	// CW-20260516-0066: hard subagent recursion-depth cap. Only a
 	// depth-0 progenitor (a root / user-facing session with no parent)
 	// may spawn a session-creating subagent. If the caller's session is

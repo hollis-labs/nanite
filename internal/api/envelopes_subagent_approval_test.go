@@ -29,8 +29,12 @@ func TestEnvelopeResponse_SubagentApproval_Approve(t *testing.T) {
 		t.Fatalf("seed user_settings: %v", err)
 	}
 	// Seed an agent with slug "r" so the ChatRunner can resolve the role.
+	// CW-20260519-0123: CanExecute=true so the Spawn-boundary fail-fast
+	// gate admits the role (can_execute=false profiles outside the
+	// text-only whitelist are now rejected at the boundary).
 	if err := a.Services.Store.CreateAgent(&store.AgentProfile{
 		ID: "agent-r", Name: "R", Slug: "r", SystemPrompt: "test",
+		CanExecute: true,
 	}); err != nil {
 		t.Fatalf("CreateAgent: %v", err)
 	}
@@ -95,6 +99,15 @@ func TestEnvelopeResponse_SubagentApproval_Reject(t *testing.T) {
 	}
 	if _, err := a.Services.Store.DB.Exec(`INSERT OR IGNORE INTO user_settings (id) VALUES (1)`); err != nil {
 		t.Fatalf("seed user_settings: %v", err)
+	}
+	// CW-20260519-0123: the Spawn-boundary fail-fast gate requires a
+	// registered profile with CanExecute=true. Seed the same "r" agent
+	// the Approve test uses (different workspace, fresh DB per test).
+	if err := a.Services.Store.CreateAgent(&store.AgentProfile{
+		ID: "agent-r", Name: "R", Slug: "r", SystemPrompt: "test",
+		CanExecute: true,
+	}); err != nil {
+		t.Fatalf("CreateAgent: %v", err)
 	}
 
 	svc := a.Services.Subagent

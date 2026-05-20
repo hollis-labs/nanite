@@ -82,11 +82,13 @@ func TestBuiltinReflexes_Count(t *testing.T) {
 // it falls through to dispatch.AssignRole's default (WorkerRoleSlug or
 // PlannerRoleSlug), both of which are seeded.
 //
-// Keep this set in sync with the agent profiles shipped in config/agents/
-// (worker.yaml, planner.yaml) plus any built-in profile registered via
-// internal/agent/builtin/. Adding a new dispatchable profile slug here
-// without also adding the agent profile file will break dispatch at
-// runtime — see internal/service/subagent_runner.go::resolveRole.
+// Keep this set in sync with the builtin agent profiles under
+// internal/agent/builtin/profiles/ — the file source-of-truth ingested
+// at boot by AutoIngestAgents. Adding a new dispatchable profile slug
+// here without also adding the agent profile file will break dispatch
+// at runtime — see internal/service/subagent_runner.go::resolveRole
+// (and the fail-fast Spawn gate from CW-20260519-0123, which also
+// rejects unknown roles at the spawn boundary).
 var dispatchableProfileSlugs = map[string]bool{
 	"":        true, // empty → AssignRole default (worker or planner)
 	"worker":  true,
@@ -100,8 +102,8 @@ var dispatchableProfileSlugs = map[string]bool{
 // broker treats reflex matches as the highest-priority routing rule.
 //
 // If you need a new Profile slug here, first add the agent profile file
-// under config/agents/ (or internal/agent/builtin/) AND extend
-// dispatchableProfileSlugs above.
+// under internal/agent/builtin/profiles/ AND extend dispatchableProfileSlugs
+// above.
 func TestBuiltinReflexes_ProfileResolves(t *testing.T) {
 	for _, r := range reflex.BuiltinReflexes() {
 		if !dispatchableProfileSlugs[r.ResolvesTo.Profile] {

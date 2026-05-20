@@ -36,7 +36,10 @@ func (r Role) String() string {
 func (r Role) IsValid() bool { return r >= RoleChat && r <= RolePlanner }
 
 // WorkerRoleSlug is the agent slug spawned for Worker-role dispatch.
-// Matches the agent profile shipped in config/agents/worker.yaml.
+// Backed by internal/agent/builtin/profiles/worker.md (the file
+// source-of-truth ingested at boot by AutoIngestAgents). The previous
+// config/agents/worker.yaml file was dead config and was removed in
+// CW-20260519-0123.
 const WorkerRoleSlug = "worker"
 
 // PlannerRoleSlug is the agent slug spawned for Planner-role dispatch.

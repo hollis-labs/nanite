@@ -29,7 +29,10 @@ import (
 )
 
 // HintSelectorSlug is the agent profile slug for the hint-selector peer.
-// Matches config/agents/hint-selector.yaml.
+// Backed by internal/agent/builtin/profiles/hint-selector.md (the file
+// source-of-truth ingested at boot by AutoIngestAgents). The previous
+// config/agents/hint-selector.yaml file was dead config and was
+// removed in CW-20260519-0123.
 const HintSelectorSlug = "hint-selector"
 
 // HintSelectOpts carries the per-request context used by v2 dynamic hint

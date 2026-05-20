@@ -105,6 +105,18 @@ const (
 	// but provided nothing actionable. Treated as success=false so
 	// the parent does not narrate a non-existent reply.
 	ErrorKindEmptyReply = "empty_reply"
+
+	// ErrorKindConfig indicates the spawn was rejected at the Spawn
+	// boundary because of a configuration fault — the role has no
+	// registered agent profile, or the resolved profile is
+	// can_execute=false and not in the text-only role whitelist
+	// (CW-20260519-0123). Distinct from ErrorKindDenied (deliberate
+	// trust refusal) and ErrorKindInternal (runtime fault): a config
+	// error is fixable by registering the missing profile or routing
+	// to a known role. The error.context carries `role` and (where
+	// applicable) `reason` so the parent can surface or retry with a
+	// known role.
+	ErrorKindConfig = "config"
 )
 
 // NewSuccessEnvelope builds a Success=true envelope. summary may be

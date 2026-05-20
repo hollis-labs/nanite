@@ -1005,6 +1005,11 @@ func NewContainer(cfg ContainerConfig) (*Container, error) {
 	// itself a subagent (appears as a child_session_id) is rejected
 	// before it can spawn another — hard cap at depth 1.
 	subagentSvc.SetParentageChecker(cfg.Store)
+	// CW-20260519-0123: wire the Spawn-boundary fail-fast gate. Unknown
+	// roles (no profile) and can_execute=false-outside-whitelist roles
+	// are rejected with a structured config error instead of falling
+	// through to the orphan reaper / inactivity stall path.
+	subagentSvc.SetProfileResolver(cfg.Store)
 
 	// CW-20260512-0002 (b)+(c): subagent reaper — background goroutine
 	// sweeps subagent_runs for timed-out and orphan rows so a hung

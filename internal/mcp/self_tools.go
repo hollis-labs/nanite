@@ -893,18 +893,22 @@ the current turn for subsequent writes.
 				"required": []string{"key"},
 			},
 		},
-		// --- chat_search self-tool (P8B, CW-20260420-0026) ---
+		// --- chat_search self-tool (P8B, CW-20260420-0026; cross-session CW-20260519-0063) ---
 		{
 			Name: "chat_search",
-			Description: "Search your own past conversation, including parts that were summarized away during compaction. " +
+			Description: "Search a chat's conversation, including parts that were summarized away during compaction. " +
 				"Use this when the post-compaction disclosure prompt mentions an elided detail you need.\n\n" +
-				"**When to use:** When you need to find something from earlier in this session — a specific decision, " +
+				"**When to use:** When you need to find something from earlier in THIS session — a specific decision, " +
 				"a value, a file path, or any detail the user mentioned — including content that may have been " +
-				"compacted into a summary.\n\n" +
+				"compacted into a summary. Pass `target` (short code like `c248` / `#c248`, or session UUID) to " +
+				"search a SIBLING chat instead — e.g. recovering context from a crashed session or an earlier related chat.\n\n" +
 				"**Anti-pattern:** Do NOT use for general knowledge questions or external research — this only searches " +
-				"THIS session's history. Use Vanta or web search for those.\n\n" +
+				"chat history. Use Vanta or web search for those.\n\n" +
+				"**Scope boundary:** cross-session reads stay within your workspace. Targets in other workspaces are rejected.\n\n" +
 				"**Output shape:** Returns up to N snippets, each with: turn_id, role (user/assistant), excerpt with " +
-				"query highlighted, source (active|summary), compaction_event_id (if from a summary).",
+				"query highlighted, source (active|summary), compaction_event_id (if from a summary). When `target` " +
+				"refers to a different session, each snippet also carries session_id / short_code / session_title and " +
+				"the response envelope sets `cross_session: true`.",
 			InputSchema: map[string]any{
 				"type": "object",
 				"properties": map[string]any{
@@ -921,8 +925,58 @@ the current turn for subsequent writes.
 						"type":        "integer",
 						"description": "Max snippets to return (default 20, max 100)",
 					},
+					"target": map[string]any{
+						"type":        "string",
+						"description": "Optional. Short code (c248 / #c248) or session UUID to search a DIFFERENT chat than the current session. Workspace-scoped: cross-workspace targets are rejected. Omit to search the current session.",
+					},
 				},
 				"required": []string{"query"},
+			},
+		},
+		// --- chat_get self-tool (CW-20260519-0063) ---
+		{
+			Name: "chat_get",
+			Description: "Read the messages of a chat by short code (`c248`, `#c248`) or session UUID. " +
+				"Use to pull context from a sibling/earlier chat — for example, a recovered/cold-booted agent " +
+				"reading a crashed session's transcript, or an auditor reviewing another chat.\n\n" +
+				"**When to use:** When the user references another chat by its short code, or when you need raw " +
+				"transcript context that `chat_search`'s snippet view doesn't give you. Pair with `chat_search` " +
+				"(`target: c248`) when you need to FIND a specific point and then this tool to READ around it.\n\n" +
+				"**When NOT to use:** For the CURRENT session's history, prefer `chat_search` (cheaper) or rely on " +
+				"the system prompt's compaction disclosure. Do not use this to read chats you have no contextual " +
+				"reason to inspect — chat content is privileged.\n\n" +
+				"**Scope boundary:** read-only, workspace-scoped. Targets in other workspaces are rejected.\n\n" +
+				"**Output shape:** `{session_id, short_code, title, workspace_id, total, offset, limit, has_more, count, messages: [{id, role, text, is_compacted, created_at}, ...]}`. " +
+				"Messages are chronological (created_at ASC). Use `limit`/`offset` to paginate large chats; default limit 50, max 500.",
+			InputSchema: map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"target": map[string]any{
+						"type":        "string",
+						"description": "Short code (c248 / #c248) or session UUID. Required. Aliases: `short_code`, `session_id`.",
+					},
+					"short_code": map[string]any{
+						"type":        "string",
+						"description": "Alias for target — pass either, not both.",
+					},
+					"session_id": map[string]any{
+						"type":        "string",
+						"description": "Alias for target — pass either, not both.",
+					},
+					"limit": map[string]any{
+						"type":        "integer",
+						"description": "Page size (default 50, max 500). Chats can be large — paginate.",
+					},
+					"offset": map[string]any{
+						"type":        "integer",
+						"description": "Offset into the chronological message stream (default 0).",
+					},
+					"include_compacted": map[string]any{
+						"type":        "boolean",
+						"description": "Include summary blobs from compacted spans (default true).",
+					},
+				},
+				"required": []string{},
 			},
 		},
 		// --- Panel control (J8 v1, CW-20260426-0006) ---

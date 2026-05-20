@@ -272,14 +272,21 @@ func TestDetectFabrication_SkipsWhenSummaryEmpty(t *testing.T) {
 
 // TestChatRunner_FabricationSuspectedFailsRun is the integration-level
 // acceptance test for CW-20260512-0095. A subagent task whose tool calls
-// all fail but still produces non-empty assistant text must surface as
-// (nil, errSubagentFabricationSuspected) so subagent.Service.execute
+// all fail but still produces non-empty assistant text must surface a
+// non-nil errSubagentFabricationSuspected so subagent.Service.execute
 // flips the row to status=failed.
 //
 // This is the runtime backstop for the c160 evidence — the universal
 // Refusal rules (CW-20260512-0100) teach the model to return failure
 // rather than fabricate, but if the model fabricates anyway, this
 // detector converts the turn into a failure the parent can read.
+//
+// CW-20260519-0071: the runner now ALSO returns a partial *subagent.Result
+// alongside the fabrication error (additive partial-result capture). The
+// error is unchanged and still drives status=failed; the partial result
+// carries the suspect text + tool counts so an operator inspecting the
+// row sees what the child produced. This test pins both: the error is
+// intact AND the partial result is captured.
 func TestChatRunner_FabricationSuspectedFailsRun(t *testing.T) {
 	// Emit a stream mirroring the c160 researcher: two tool calls, both
 	// IsError, followed by a long polished assistant reply.
@@ -320,8 +327,19 @@ func TestChatRunner_FabricationSuspectedFailsRun(t *testing.T) {
 	if !errors.Is(err, errSubagentFabricationSuspected) {
 		t.Errorf("error = %v; want wrapped errSubagentFabricationSuspected", err)
 	}
-	if result != nil {
-		t.Errorf("result = %+v; want nil on fabrication-suspected (so service maps to status=failed)", result)
+	// CW-20260519-0071: partial-result capture. The error above already
+	// maps the run to status=failed; the runner additionally returns a
+	// partial result so result_json records the suspect text + tool
+	// counts. The fabrication path saw 2 failed tool calls, so a partial
+	// result is expected.
+	if result == nil {
+		t.Fatal("result = nil; want non-nil partial result on fabrication-suspected (CW-20260519-0071 capture)")
+	}
+	if !contains(result.ResultJSON, `"partial":true`) {
+		t.Errorf("result.ResultJSON = %q; want partial-capture marker", result.ResultJSON)
+	}
+	if !contains(result.ResultJSON, `"calls":2`) {
+		t.Errorf("result.ResultJSON = %q; want tool-call count captured", result.ResultJSON)
 	}
 }
 
@@ -570,6 +588,92 @@ func TestChatRunner_DrainsSummaryAndEnvelope(t *testing.T) {
 	}
 }
 
+// TestChatRunner_CapturesPartialResultOnStreamError is the acceptance
+// test for CW-20260519-0071 (audit §P2). A productive subagent that did
+// real tool-iteration work and then had its in-flight provider stream
+// cancelled by the run-budget deadline must not have its accumulated
+// work discarded. The runner now returns the partial *subagent.Result
+// (summary + envelope + tool counts) ALONGSIDE the stream error, so
+// subagent.execute can persist result_json on the StatusFailed branch
+// instead of leaving it at the insert-time default.
+func TestChatRunner_CapturesPartialResultOnStreamError(t *testing.T) {
+	// Stream mirrors a worker cut mid-productive-work: several real
+	// file-writing tool roundtrips, partial assistant text, then the
+	// deadline cancels the stream → error event (no stream_end).
+	fake := &fakeChatService{events: []chat.StreamEvent{
+		{Type: "tool_call", Tool: "dev_write", ToolID: "tu_1"},
+		{Type: "tool_result", Tool: "dev_write", ToolID: "tu_1", Summary: "wrote internal/foo.go", IsError: false},
+		{Type: "tool_call", Tool: "dev_write", ToolID: "tu_2"},
+		{Type: "tool_result", Tool: "dev_write", ToolID: "tu_2", Summary: "wrote internal/bar.go", IsError: false},
+		{Type: "plugin_envelope", Envelope: `{"files_written":2}`},
+		{Type: "delta", Content: "I have implemented the first two files and am "},
+		{Type: "error", Error: "http chat stream error / cause:http_stream"},
+	}}
+
+	st := &recordingSessionStore{
+		parents: map[string]*store.Session{
+			"sess-parent": {ID: "sess-parent", WorkspaceID: "ws-1"},
+		},
+	}
+	runner := &ChatRunner{
+		agents: &stubAgentReaderForRunner{agents: map[string]*store.AgentProfile{
+			"worker": {ID: "ag-worker", DefaultProvider: "anthropic", DefaultModel: "claude-sonnet-4-6"},
+		}},
+		store:     st,
+		invoker:   fake,
+		persistFn: func(_ context.Context, _, _ string) error { return nil },
+	}
+
+	run := &subagent.Run{
+		ID: "run-cut", Role: "worker", ParentSessionID: "sess-parent", Prompt: "implement the feature",
+	}
+	result, err := runner.Run(context.Background(), run)
+
+	// The error must be intact — capture is additive, not suppression.
+	if err == nil {
+		t.Fatal("expected stream error from runner.Run; got nil")
+	}
+	if !errors.Is(err, errStreamFailure) {
+		t.Errorf("error = %v; want wrapped errStreamFailure", err)
+	}
+	// The partial result must be returned alongside the error.
+	if result == nil {
+		t.Fatal("result = nil; want non-nil partial result (CW-20260519-0071)")
+	}
+	if result.Summary != "I have implemented the first two files and am " {
+		t.Errorf("partial Summary = %q; want the accumulated assistant text", result.Summary)
+	}
+	if !contains(result.ResultJSON, `"partial":true`) {
+		t.Errorf("result.ResultJSON = %q; want partial-capture marker", result.ResultJSON)
+	}
+	if !contains(result.ResultJSON, `"files_written":2`) {
+		t.Errorf("result.ResultJSON = %q; want captured envelope", result.ResultJSON)
+	}
+	if !contains(result.ResultJSON, `"calls":2`) || !contains(result.ResultJSON, `"results_success":2`) {
+		t.Errorf("result.ResultJSON = %q; want tool counts (calls=2, results_success=2)", result.ResultJSON)
+	}
+}
+
+// TestPartialResult_NilWhenNothingAccumulated pins the negative side:
+// a genuinely empty failure (no text, no envelope, no tool activity)
+// yields a nil partial result so subagent.execute leaves result_json
+// at its insert-time default rather than persisting an empty trace.
+func TestPartialResult_NilWhenNothingAccumulated(t *testing.T) {
+	if got := partialResult("", "{}", toolUsageCounts{}); got != nil {
+		t.Errorf("partialResult(empty) = %+v; want nil", got)
+	}
+	if got := partialResult("  \n ", "{}", toolUsageCounts{}); got != nil {
+		t.Errorf("partialResult(whitespace-only) = %+v; want nil", got)
+	}
+	// Any one signal present → non-nil capture.
+	if got := partialResult("some text", "{}", toolUsageCounts{}); got == nil {
+		t.Error("partialResult(text) = nil; want non-nil")
+	}
+	if got := partialResult("", "{}", toolUsageCounts{calls: 1}); got == nil {
+		t.Error("partialResult(tool activity) = nil; want non-nil")
+	}
+}
+
 // TestChatRunner_UserMessageCreationError verifies that a failure to
 // persist the user message aborts Run before invoking the chat loop —
 // otherwise the provider would see an empty conversation and silently
@@ -728,5 +832,140 @@ func TestChatRunner_ProviderOverride_UsesOverrideWhenSet(t *testing.T) {
 	}
 	if st.created[0].Provider != "pty-claude" {
 		t.Errorf("child session Provider = %q, want %q (override)", st.created[0].Provider, "pty-claude")
+	}
+}
+
+// --- CW-20260519-0067: output-presence gate (audit §P5) ---------------------
+
+// TestZeroOutputRun_PresenceCheck pins the gate's presence predicate. A
+// run that emitted no text AND no tool calls AND no envelope is a
+// zero-output run; any single signal present clears the gate.
+func TestZeroOutputRun_PresenceCheck(t *testing.T) {
+	// All-empty: the pathological hung-planner shape — trips the gate.
+	if !zeroOutputRun("", "{}", toolUsageCounts{}) {
+		t.Error("zeroOutputRun(empty) = false; want true (hung-planner shape)")
+	}
+	// Whitespace-only deltas are still silence.
+	if !zeroOutputRun("  \n\t ", "{}", toolUsageCounts{}) {
+		t.Error("zeroOutputRun(whitespace) = false; want true")
+	}
+	// Real assistant text → not zero-output.
+	if zeroOutputRun("here is the answer", "{}", toolUsageCounts{}) {
+		t.Error("zeroOutputRun(text) = true; want false")
+	}
+	// Tool calls but no prose → text-light success, NOT a stall.
+	if zeroOutputRun("", "{}", toolUsageCounts{calls: 1}) {
+		t.Error("zeroOutputRun(tool calls) = true; want false (text-light success)")
+	}
+	// A successful tool roundtrip alone clears the gate.
+	if zeroOutputRun("", "{}", toolUsageCounts{resultsSuccess: 1}) {
+		t.Error("zeroOutputRun(tool success) = true; want false")
+	}
+	// A failed tool roundtrip is still activity — the child tried.
+	if zeroOutputRun("", "{}", toolUsageCounts{resultsError: 1}) {
+		t.Error("zeroOutputRun(tool error) = true; want false")
+	}
+	// A structured envelope is a delivered result even with no prose.
+	if zeroOutputRun("", `{"open_tasks":3}`, toolUsageCounts{}) {
+		t.Error("zeroOutputRun(envelope) = true; want false (envelope is a deliverable)")
+	}
+}
+
+// TestChatRunner_ZeroOutputRunGatedAsStalled is the CW-20260519-0067
+// acceptance test. A child turn that drains cleanly (channel closes
+// without an error event) having emitted nothing — no delta, no
+// tool_call, no envelope — must NOT be returned as a success. Before the
+// gate this produced (&Result{Summary:"...completed without text
+// response"}, nil) and subagent.execute stamped StatusCompleted on a run
+// that did nothing for the full budget. The gate now returns
+// errZeroOutput joined with subagent.ErrStalled so classifyRunOutcome
+// routes it to StatusStalled.
+func TestChatRunner_ZeroOutputRunGatedAsStalled(t *testing.T) {
+	// The hung-planner shape: the child loop exits and closes the capture
+	// channel WITHOUT a stream_end and WITHOUT an error event. drainCapture
+	// treats a channel closed without stream_end as a clean drain, so
+	// runErr is nil — exactly the path the gate must catch.
+	fake := &fakeChatService{events: []chat.StreamEvent{}}
+
+	st := &recordingSessionStore{
+		parents: map[string]*store.Session{
+			"sess-parent": {ID: "sess-parent", WorkspaceID: "ws-1"},
+		},
+	}
+	runner := &ChatRunner{
+		agents: &stubAgentReaderForRunner{agents: map[string]*store.AgentProfile{
+			"planner": {ID: "ag-planner", DefaultProvider: "anthropic", DefaultModel: "claude-sonnet-4-6"},
+		}},
+		store:     st,
+		invoker:   fake,
+		persistFn: func(_ context.Context, _, _ string) error { return nil },
+	}
+
+	run := &subagent.Run{
+		ID: "run-hung", Role: "planner", ParentSessionID: "sess-parent", Prompt: "plan the work",
+	}
+	result, err := runner.Run(context.Background(), run)
+
+	if err == nil {
+		t.Fatal("expected zero-output run to be gated as an error; got nil (would be stamped completed)")
+	}
+	if !errors.Is(err, errZeroOutput) {
+		t.Errorf("error = %v; want wrapped errZeroOutput", err)
+	}
+	// Joined with ErrStalled so the CW-20260519-0074 classifier routes
+	// the run to StatusStalled rather than StatusCompleted.
+	if !errors.Is(err, subagent.ErrStalled) {
+		t.Errorf("error = %v; want joined subagent.ErrStalled (→ classifyRunOutcome StatusStalled)", err)
+	}
+	// No partial result — a zero-output run has nothing worth persisting.
+	if result != nil {
+		t.Errorf("result = %+v; want nil for a zero-output run", result)
+	}
+}
+
+// TestChatRunner_TextLightSuccessNotGated pins the negative side of the
+// gate: a child that produced no closing prose but DID make a tool call
+// is a genuine (text-light) completion and must still return a nil error
+// → StatusCompleted. The output-presence gate must not punish a quiet
+// but productive run.
+func TestChatRunner_TextLightSuccessNotGated(t *testing.T) {
+	// Tool roundtrip, an envelope, no delta — a real result, no prose.
+	fake := &fakeChatService{events: []chat.StreamEvent{
+		{Type: "tool_call", Tool: "dev_write", ToolID: "tu_1"},
+		{Type: "tool_result", Tool: "dev_write", ToolID: "tu_1", Summary: "wrote file", IsError: false},
+		{Type: "plugin_envelope", Envelope: `{"files_written":1}`},
+		{Type: "stream_end"},
+	}}
+
+	st := &recordingSessionStore{
+		parents: map[string]*store.Session{
+			"sess-parent": {ID: "sess-parent", WorkspaceID: "ws-1"},
+		},
+	}
+	runner := &ChatRunner{
+		agents: &stubAgentReaderForRunner{agents: map[string]*store.AgentProfile{
+			"worker": {ID: "ag-worker", DefaultProvider: "anthropic", DefaultModel: "claude-sonnet-4-6"},
+		}},
+		store:     st,
+		invoker:   fake,
+		persistFn: func(_ context.Context, _, _ string) error { return nil },
+	}
+
+	run := &subagent.Run{
+		ID: "run-quiet", Role: "worker", ParentSessionID: "sess-parent", Prompt: "implement",
+	}
+	result, err := runner.Run(context.Background(), run)
+	if err != nil {
+		t.Fatalf("text-light productive run gated unexpectedly: %v", err)
+	}
+	if result == nil {
+		t.Fatal("result = nil; want a completed result for a text-light productive run")
+	}
+	// The empty-summary fallback still applies — but as a success, not a stall.
+	if !contains(result.Summary, "completed without text response") {
+		t.Errorf("Summary = %q; want the text-light completion fallback", result.Summary)
+	}
+	if result.ResultJSON != `{"files_written":1}` {
+		t.Errorf("ResultJSON = %q; want the captured envelope", result.ResultJSON)
 	}
 }

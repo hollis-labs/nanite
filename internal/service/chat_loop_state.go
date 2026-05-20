@@ -8,6 +8,7 @@ import (
 
 	"github.com/hollis-labs/nanite/internal/chat"
 	"github.com/hollis-labs/nanite/internal/classify"
+	"github.com/hollis-labs/nanite/internal/dispatcher"
 	"github.com/hollis-labs/nanite/internal/effort"
 	"github.com/hollis-labs/nanite/internal/store"
 )
@@ -76,6 +77,19 @@ const (
 	// breaker trips.
 	defaultRunawayFailCap     = 10
 	defaultIdleTimeoutSeconds = 900 // 15 minutes
+	// subagentIdleTimeoutSeconds is the inactivity (liveness) window for a
+	// subagent dispatch — CW-20260519-0073. A subagent run is no longer
+	// bounded by a fixed wall-clock deadline; the governing signal is now
+	// *silence*. The chat loop's idle-timeout terminator (shouldStop Layer
+	// 2) resets `lastActivity` on every tool call / delta, so a worker that
+	// keeps emitting events runs as long as the work needs and only a
+	// genuinely stalled run (no activity for this window) trips the
+	// terminator. 300s matches Torque's `TORQUE_SCHED_STALE` stale-worker
+	// window (the audit's P0 recommendation). The 900s interactive default
+	// above is unchanged — this scoped value only governs subagent runs,
+	// where the fixed 300s wall clock previously made the idle timeout
+	// structurally unreachable.
+	subagentIdleTimeoutSeconds = 300
 	// CW-20260419-0012 (quick fix): 3 → 6. 3 was an arbitrary
 	// conservative floor; empirically the agent needs 3 passes for
 	// intent-warmup and another 2-3 for follow-on exploration within
@@ -129,7 +143,24 @@ type iterationLimits struct {
 	runawayFailCap    int
 	idleTimeout       time.Duration
 	perToolMax        map[string]int // tool name → max iterations (0 = no limit)
-	defaultPerToolCap int            // global per-tool cap from UserSettings (0 = no cap)
+	// defaultPerToolCap is a HIGH BACKSTOP on calls to any single tool
+	// per turn — NOT a runaway detector. CW-20260519-0115: raised from
+	// 10 → 150 after session c267 was blocked at 10 of 13
+	// operator-requested torque_task_create calls. Count is a poor
+	// runaway signal; the actual catch is done by pattern detectors —
+	//   - consecutiveFailures → runawayFailCap (hard terminate at 10
+	//     consecutive tool failures)
+	//   - detectStuckLoop (chat_generate.go) — same-result-repeated
+	//     detector that blocks the tool after 2 identical results
+	//   - idleTimeout — wall-clock no-progress
+	// 0 = no cap (the chat-loop in-memory default — only set when a
+	// store-backed UserSettings.ToolPerTurnCap is read). The
+	// store-side default is 150 (migration 011 / 066). Operators who
+	// hit even the 150 backstop are almost certainly in a real
+	// infinite-tool-call loop the pattern detectors should have caught
+	// first — investigate as a pattern-detector gap, not a cap value
+	// to bump.
+	defaultPerToolCap int
 }
 
 // loopState consolidates all mutable state for the generateResponse loop.
@@ -269,8 +300,16 @@ const (
 	scratchpadMaxTotalBytes = 64 * 1024 // 64 KiB total per turn
 )
 
-// newLoopState creates a loopState with resolved limits from agent constraints.
-func newLoopState(constraints chat.AgentConstraints, tools []string, debugMode bool) *loopState {
+// newLoopState creates a loopState with resolved limits from agent
+// constraints. The optional caller arg is the dispatch source (chat /
+// subagent / background) — it selects the inactivity-timeout window: a
+// subagent dispatch uses subagentIdleTimeoutSeconds (Torque-parity
+// liveness window) instead of the 900s interactive default, since the
+// fixed 300s wall clock that previously bounded subagent runs has been
+// replaced by this inactivity signal (CW-20260519-0073). It is
+// variadic so the many test call sites that don't exercise dispatch
+// scoping can omit it (treated as CallerChat — the 900s default).
+func newLoopState(constraints chat.AgentConstraints, tools []string, debugMode bool, caller ...dispatcher.CallerType) *loopState {
 	ls := &loopState{
 		lastToolResults:      make(map[string]string),
 		toolRepeatCount:      make(map[string]int),
@@ -295,19 +334,30 @@ func newLoopState(constraints chat.AgentConstraints, tools []string, debugMode b
 	// were removed. `MaxTurns` is the only remaining agent-author-
 	// visible turn-count knob; the runaway-fail-cap and idle-timeout
 	// remain the chat-loop's own breakers.
-	ls.limits = resolveIterationLimits(constraints)
+	ls.limits = resolveIterationLimits(constraints, caller...)
 
 	return ls
 }
 
-// resolveIterationLimits computes effective limits from agent constraints and defaults.
-func resolveIterationLimits(c chat.AgentConstraints) iterationLimits {
+// resolveIterationLimits computes effective limits from agent
+// constraints and defaults. The optional caller arg selects the
+// inactivity-timeout window: CallerSubagent uses
+// subagentIdleTimeoutSeconds so a subagent run is bounded by *silence*
+// rather than the fixed wall clock that CW-20260519-0073 removed;
+// every other caller (and the omitted/empty case) keeps the 900s
+// interactive default. An explicit `IdleTimeoutSeconds` agent
+// constraint still overrides whichever default applies.
+func resolveIterationLimits(c chat.AgentConstraints, caller ...dispatcher.CallerType) iterationLimits {
+	idleTimeoutSeconds := defaultIdleTimeoutSeconds
+	if len(caller) > 0 && caller[0] == dispatcher.CallerSubagent {
+		idleTimeoutSeconds = subagentIdleTimeoutSeconds
+	}
 	lim := iterationLimits{
 		maxTurns:           defaultMaxTurns,
 		hardCeiling:        defaultHardCeiling,
 		consecutiveFailCap: defaultConsecutiveFailCap,
 		runawayFailCap:     defaultRunawayFailCap,
-		idleTimeout:        time.Duration(defaultIdleTimeoutSeconds) * time.Second,
+		idleTimeout:        time.Duration(idleTimeoutSeconds) * time.Second,
 		perToolMax:         make(map[string]int),
 	}
 

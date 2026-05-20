@@ -315,3 +315,84 @@ func TestDriveBootSession_IterationGreaterThanZero(t *testing.T) {
 		t.Fatal("expected immediately-closed chan for iteration > 0")
 	}
 }
+
+// TestAgentEventBridge_SynchronousTurnReachesTurnCh is the CW-20260518-0074
+// regression. The subprocess-per-turn adapter runtime (codex / opencode
+// `exec`) makes SendInput synchronous: every EventFanout event — deltas
+// AND the terminal EventDone — fires before SendInput returns. The fixed
+// driveBootSession binds the per-session router BEFORE SendInput, so when
+// the whole turn's event burst lands the router is already in place and
+// the harness streamLoop accumulates the streamed text. This test models
+// that timing: router bound, then the full burst, and asserts every delta
+// plus the close reach turnCh (the bytes the harness persists to the
+// messages row). Under the pre-fix ordering the router was bound only
+// after SendInput returned, so the burst was lost to turnCh and the
+// assistant row persisted empty.
+func TestAgentEventBridge_SynchronousTurnReachesTurnCh(t *testing.T) {
+	bridge := &agentEventBridge{streams: NewStreamManager()}
+	in := bridge.fanout("sess-codex")
+
+	// Router bound first — the fixed ordering.
+	turnCh := make(chan llmtypes.StreamEvent, 8)
+	bridge.SetPerSessionRouter("sess-codex", turnCh)
+
+	// The entire turn's event burst, exactly as a synchronous codex
+	// SendInput would emit it before returning.
+	in <- llmtypes.StreamEvent{Type: llmtypes.EventDelta, Content: "part one "}
+	in <- llmtypes.StreamEvent{Type: llmtypes.EventDelta, Content: "part two"}
+	in <- llmtypes.StreamEvent{Type: llmtypes.EventDone}
+
+	var got string
+	for {
+		select {
+		case ev, ok := <-turnCh:
+			if !ok {
+				if got != "part one part two" {
+					t.Fatalf("accumulated text %q — streamed deltas were lost before close", got)
+				}
+				close(in)
+				return
+			}
+			if ev.Type == llmtypes.EventDelta {
+				got += ev.Content
+			}
+		case <-time.After(time.Second):
+			t.Fatalf("timed out; accumulated %q", got)
+		}
+	}
+}
+
+// TestAgentEventBridge_NoRouterLosesTurnToSSE pins the failure mode the
+// fix closes: when the synchronous turn's events are emitted with NO
+// router bound (the pre-fix ordering — router bound only after SendInput
+// returned), they fall through to the SSE-broadcast path and never reach
+// turnCh. A turnCh bound afterward observes nothing — which is exactly
+// why the persisted assistant row was empty.
+func TestAgentEventBridge_NoRouterLosesTurnToSSE(t *testing.T) {
+	bridge := &agentEventBridge{streams: NewStreamManager()}
+	in := bridge.fanout("sess-codex-2")
+
+	// Burst with no router bound — emulates the pre-fix ordering.
+	in <- llmtypes.StreamEvent{Type: llmtypes.EventDelta, Content: "lost text"}
+	in <- llmtypes.StreamEvent{Type: llmtypes.EventDone}
+	// Let the fanout goroutine drain the burst down the SSE path.
+	time.Sleep(20 * time.Millisecond)
+
+	// Router bound only now — the turn is already over.
+	turnCh := make(chan llmtypes.StreamEvent, 4)
+	bridge.SetPerSessionRouter("sess-codex-2", turnCh)
+
+	select {
+	case ev, ok := <-turnCh:
+		if ok {
+			t.Fatalf("turnCh received %+v — burst should have been lost to SSE", ev)
+		}
+	case <-time.After(50 * time.Millisecond):
+		// Expected: turnCh stays empty and open; the harness streamLoop
+		// would block here until the inactivity watchdog. This is the
+		// bug the fix prevents by binding the router first.
+	}
+
+	bridge.SetPerSessionRouter("sess-codex-2", nil)
+	close(in)
+}

@@ -25,11 +25,13 @@ export function ChatMain({ onEditorReady }: ChatMainProps) {
     statusMessage,
     circuitOpen,
     sessionTakeover,
+    interruptedTurn,
     sendMessage,
     loadMessages,
     stopStreaming,
     retryStream,
     dismissCircuit,
+    dismissInterruptedTurn,
     loadOlderMessages,
     hasOlderMessages,
     loadingOlder,
@@ -62,8 +64,10 @@ export function ChatMain({ onEditorReady }: ChatMainProps) {
         <ChatWorkingDrawer
           sessionTakeover={sessionTakeover}
           circuitOpen={circuitOpen}
+          interruptedTurn={interruptedTurn}
           onRetry={() => void retryStream()}
           onDismissCircuit={dismissCircuit}
+          onDismissInterruptedTurn={dismissInterruptedTurn}
         />
         <div className="max-w-3xl w-full mx-auto px-4 pb-1 shrink-0 relative">
           <ChatComposer

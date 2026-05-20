@@ -8,6 +8,7 @@ import (
 
 	llmtypes "github.com/hollis-labs/go-llm-types"
 	"github.com/hollis-labs/nanite/internal/chat"
+	"github.com/hollis-labs/nanite/internal/dispatcher"
 )
 
 func TestLoopState_ResolvedMaxTurns(t *testing.T) {
@@ -242,6 +243,44 @@ func TestLoopState_ResolveIterationLimits_ClampsRunawayCap(t *testing.T) {
 	if lim.runawayFailCap < lim.consecutiveFailCap {
 		t.Errorf("runawayFailCap=%d should have been clamped up to >= consecutiveFailCap=%d",
 			lim.runawayFailCap, lim.consecutiveFailCap)
+	}
+}
+
+// TestResolveIterationLimits_SubagentInactivityWindow pins CW-20260519-0073:
+// a subagent dispatch resolves a tighter inactivity (liveness) timeout —
+// subagentIdleTimeoutSeconds (Torque-parity, 300s of *silence*) — while
+// every other caller and the omitted-caller case keep the 900s
+// interactive default. The fixed 300s wall clock that used to bound
+// subagent runs has been removed; this inactivity window is now the
+// governing liveness signal.
+func TestResolveIterationLimits_SubagentInactivityWindow(t *testing.T) {
+	want := time.Duration(subagentIdleTimeoutSeconds) * time.Second
+	wantDefault := time.Duration(defaultIdleTimeoutSeconds) * time.Second
+
+	// Subagent dispatch: tight inactivity window.
+	limSub := resolveIterationLimits(chat.AgentConstraints{}, dispatcher.CallerSubagent)
+	if limSub.idleTimeout != want {
+		t.Errorf("subagent idleTimeout = %s, want %s", limSub.idleTimeout, want)
+	}
+
+	// Chat dispatch: unchanged interactive default.
+	limChat := resolveIterationLimits(chat.AgentConstraints{}, dispatcher.CallerChat)
+	if limChat.idleTimeout != wantDefault {
+		t.Errorf("chat idleTimeout = %s, want %s", limChat.idleTimeout, wantDefault)
+	}
+
+	// Omitted caller: defaults to the interactive window (back-compat
+	// for the many test call sites that don't pass a caller).
+	limOmitted := resolveIterationLimits(chat.AgentConstraints{})
+	if limOmitted.idleTimeout != wantDefault {
+		t.Errorf("omitted-caller idleTimeout = %s, want %s", limOmitted.idleTimeout, wantDefault)
+	}
+
+	// An explicit agent constraint still overrides the subagent default.
+	limOverride := resolveIterationLimits(
+		chat.AgentConstraints{IdleTimeoutSeconds: 42}, dispatcher.CallerSubagent)
+	if limOverride.idleTimeout != 42*time.Second {
+		t.Errorf("explicit-constraint idleTimeout = %s, want 42s", limOverride.idleTimeout)
 	}
 }
 

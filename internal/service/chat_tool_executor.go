@@ -94,11 +94,51 @@ func (s *chatServiceImpl) preCheckTools(
 		}
 
 		// Check blocked tools.
+		//
+		// Two distinct paths land here. We surface them as distinct messages
+		// to the LLM so it gets accurate guidance:
+		//
+		//   1. blockedTools[tu.Name] = true → the same-result-repeated
+		//      detector (detectStuckLoop) tripped after 2 identical results.
+		//      This IS a runaway signal; the LLM should pivot, not retry.
+		//
+		//   2. isToolExhausted(tu.Name) → the high backstop count cap
+		//      (defaultPerToolCap, default 150 per CW-20260519-0115) was
+		//      reached. With 150 as the floor, this almost always means
+		//      the operator asked for a lot of work and the work is real;
+		//      the agent should report what it did and offer to continue
+		//      in a follow-up turn. The "X of Y, N remaining" shape comes
+		//      from the agent's natural-language summary; the harness
+		//      surfaces the count + cap so the agent has the data to
+		//      build that summary.
 		if ls.blockedTools[tu.Name] || ls.isToolExhausted(tu.Name) {
 			ls.recordToolCall(tu.Name, false)
-			blockedResult := fmt.Sprintf("Tool %q isn't available for the rest of this turn — it returned the same result repeatedly (or hit its per-turn cap), so the harness is holding further calls to protect your context budget. "+
-				"If you need the data it produced, it's already in the conversation above. If you need something different, try a related tool, change the arguments meaningfully, or summarize what you have for the user.", tu.Name)
-			slog.Warn("chat-service: tool SKIPPED (blocked)", "tool", tu.Name)
+			var blockedResult string
+			isCountCap := ls.isToolExhausted(tu.Name) && !ls.blockedTools[tu.Name]
+			if isCountCap {
+				// PR #213 review: renamed local `cap`/`max` so they don't
+				// shadow Go's builtins (`cap()` and `max()` / Go 1.21+).
+				perTurnCap := ls.limits.defaultPerToolCap
+				if toolMax, ok := ls.limits.perToolMax[tu.Name]; ok && toolMax > 0 {
+					perTurnCap = toolMax
+				}
+				blockedResult = fmt.Sprintf(
+					"Tool %q hit its per-turn backstop (%d of %d calls used this turn). "+
+						"This is the absolute-limit failsafe, not a runaway signal — the loop, error, and same-result detectors did not trip, so the calls you made were intentional. "+
+						"Stop calling %q for the rest of this turn. "+
+						"Tell the user what you completed (e.g. \"X of Y done, Z remaining\") and offer to finish the rest in a follow-up turn so the per-turn counter resets.",
+					tu.Name, ls.toolCallCounts[tu.Name], perTurnCap, tu.Name,
+				)
+				slog.Warn("chat-service: tool SKIPPED (per-turn backstop)",
+					"tool", tu.Name, "calls", ls.toolCallCounts[tu.Name], "cap", perTurnCap)
+			} else {
+				blockedResult = fmt.Sprintf(
+					"Tool %q isn't available for the rest of this turn — it returned the same result repeatedly, so the harness is holding further calls to protect your context budget. "+
+						"If you need the data it produced, it's already in the conversation above. If you need something different, try a related tool, change the arguments meaningfully, or summarize what you have for the user.",
+					tu.Name,
+				)
+				slog.Warn("chat-service: tool SKIPPED (stuck-loop detector)", "tool", tu.Name)
+			}
 			ch <- chat.StreamEvent{Type: "tool_call", Tool: tu.Name, ToolID: tu.ID, Detail: toolCallDetail(tu.Name, tu.Input)}
 			ch <- chat.StreamEvent{Type: "tool_result", Tool: tu.Name, ToolID: tu.ID, Summary: blockedResult, IsError: true}
 			block := llmtypes.ContentBlock{

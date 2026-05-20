@@ -377,6 +377,29 @@ func (sm *StreamManager) GetSessionForMessage(messageID string) (string, bool) {
 	return val.(string), true
 }
 
+// HasLiveStreamForSession reports whether the process is currently holding an
+// in-memory message stream for sessionID — i.e. a turn that this process is
+// actively generating (or has just finished, still inside the post-completion
+// grace window). The reverse index is purged by removeSessionMessage once a
+// session's last stream is cleaned up.
+//
+// CW-20260518-0084: this is the discriminator the FE needs to tell a genuinely
+// in-flight turn apart from one whose backend agent was killed by a service
+// restart. After a restart the StreamManager is a fresh, empty instance, so
+// every prior turn reads as "no live stream" — which, combined with a session
+// whose last persisted message is a still-unanswered user turn, is the
+// "interrupted by restart" signal.
+func (sm *StreamManager) HasLiveStreamForSession(sessionID string) bool {
+	val, ok := sm.sessionToMsgs.Load(sessionID)
+	if !ok {
+		return false
+	}
+	ss := val.(*sessionStreams)
+	ss.mu.Lock()
+	defer ss.mu.Unlock()
+	return len(ss.ids) > 0
+}
+
 // --- SSE connection deduplication ---
 
 // RegisterSSE registers a new SSE connection for a session. If another

@@ -28,6 +28,15 @@ export interface ChatSessionState {
   circuitOpen: boolean;
   sessionTakeover: boolean;
   textOnlyMode: boolean;
+  /**
+   * CW-20260518-0084: true when an in-flight turn's backend agent is gone —
+   * a service restart (deploy/reload) killed the turn mid-generation. The
+   * backend reports this via the `interrupted_turn` field on the session GET
+   * response; the FE also raises it locally when a stalled stream fails to
+   * reconcile against any persisted assistant message. Cleared on the next
+   * user-message turn (send-to-resume).
+   */
+  interruptedTurn: boolean;
 
   // Errors / approvals / warnings
   chatErrors: ChatError[];
@@ -65,6 +74,7 @@ export function emptyChatSessionState(now: number = Date.now()): ChatSessionStat
     circuitOpen: false,
     sessionTakeover: false,
     textOnlyMode: false,
+    interruptedTurn: false,
     chatErrors: [],
     pendingApprovals: [],
     toolWarnings: [],

@@ -56,7 +56,13 @@ type UserSettings struct {
 	SummarizerModel     string  `json:"summarizer_model"`
 	CompactionStrategy  string  `json:"compaction_strategy"`
 	// Tool broker execution-path settings (Phase 3 S4a).
-	// ToolPerTurnCap is the max calls to any single tool per turn (default 10; 0 = no cap).
+	// ToolPerTurnCap is the max calls to any single tool per turn
+	// (default 150; 0 = no cap). CW-20260519-0115 raised this from 10
+	// after session c267 was blocked at 10 of 13 operator-requested
+	// torque_task_create calls — count is a poor runaway signal;
+	// pattern detectors (consecutive_fail_cap, runaway_fail_cap,
+	// detectStuckLoop same-result-repeated, idle_timeout) do the
+	// actual catching. This count is now a high backstop only.
 	ToolPerTurnCap            int `json:"tool_per_turn_cap"`
 	ToolResultCacheTTLSeconds int `json:"tool_result_cache_ttl_seconds"`
 	ToolResultSoftTruncBytes  int `json:"tool_result_soft_truncate_bytes"`
@@ -264,7 +270,9 @@ func (s *Store) UpdateUserSettings(us *UserSettings) error {
 	}
 	toolPerTurnCap := us.ToolPerTurnCap
 	if toolPerTurnCap < 0 {
-		toolPerTurnCap = 10
+		// CW-20260519-0115: raised from 10 → 150. See the ToolPerTurnCap
+		// field doc and migration 066 for the audit rationale.
+		toolPerTurnCap = 150
 	}
 	// 0 = no cap (disabled), positive = cap value.
 	toolResultCacheTTL := us.ToolResultCacheTTLSeconds

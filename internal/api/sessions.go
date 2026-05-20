@@ -147,9 +147,76 @@ func (a *API) handleGetSession(w http.ResponseWriter, r *http.Request) {
 	messages = injectEnvelopePriorResponses(messages, lookup)
 
 	a.jsonResp(w, http.StatusOK, map[string]any{
-		"session":  sess,
-		"messages": messages,
+		"session":          sess,
+		"messages":         messages,
+		"interrupted_turn": a.detectInterruptedTurn(id, sess),
 	})
+}
+
+// detectInterruptedTurn reports whether the session has an in-flight turn whose
+// backend agent is gone — the case where a service restart (deploy/reload)
+// killed a turn mid-generation, leaving the GUI spinning forever with no
+// indication anything went wrong (CW-20260518-0084).
+//
+// The signal is intentionally minimal and derived from existing state:
+//
+//   - The session's last persisted message is a `user` message. A completed
+//     turn always ends with an `assistant` (or `tool`) row; a turn that started
+//     but never produced a reply leaves the user message dangling.
+//   - The process holds NO live in-memory stream for the session. During normal
+//     generation the StreamManager always has a live stream for the message
+//     being generated, so this is false for genuinely in-flight turns. After a
+//     restart the StreamManager is a fresh empty instance, so a turn that was
+//     generating at restart time reads as having no live stream.
+//
+// Both conditions together mean "a turn was dispatched, no reply landed, and
+// nothing in this process is producing one" — i.e. the agent process is gone.
+// Reconciling the dead agent_runtime rows is a separate task (CW-20260518-0085);
+// this only surfaces the state so the FE can stop the endless spinner.
+//
+// Returns nil when the session is not in an interrupted state — the FE treats a
+// null/absent field as "no interruption".
+//
+// PR #213 review hardening: this helper used to take the caller's messages
+// slice and inspect `messages[len-1]`, which assumed the slice was the
+// chronological tail. The current `handleGetSession` always passes the
+// latest 50 (`ListMessages(id, 50)` is `ORDER BY created_at DESC LIMIT 50`
+// reversed to ASC, so messages[-1] is in fact the absolute-latest message),
+// but `ListMessagesPaginated` exists and a future endpoint passing a
+// non-tail window would silently mis-trigger. Querying the store directly
+// for the latest message eliminates the caller-slice dependency entirely.
+func (a *API) detectInterruptedTurn(sessionID string, sess *store.Session) map[string]any {
+	if sess == nil {
+		return nil
+	}
+	// Only active sessions can have an in-flight turn; paused/archived ones
+	// were deliberately put to rest.
+	if sess.Status != "active" {
+		return nil
+	}
+	// Probe the store directly for the chronologically-last message rather
+	// than relying on a caller-supplied slice (ListMessages returns DESC then
+	// reverses to ASC; with limit=1 the single returned element is the
+	// absolute-latest row).
+	tail, err := a.Services.Store.ListMessages(sessionID, 1)
+	if err != nil || len(tail) == 0 {
+		return nil
+	}
+	last := tail[len(tail)-1]
+	if last.Role != "user" {
+		return nil
+	}
+	// A live stream means this process is genuinely generating the reply —
+	// not interrupted.
+	if a.Services.Streams != nil && a.Services.Streams.HasLiveStreamForSession(sessionID) {
+		return nil
+	}
+	return map[string]any{
+		"interrupted":      true,
+		"reason":           "service_restart",
+		"last_message_id":  last.ID,
+		"last_activity_at": last.CreatedAt,
+	}
 }
 
 func (a *API) handleUpdateSession(w http.ResponseWriter, r *http.Request) {

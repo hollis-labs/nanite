@@ -37,21 +37,57 @@ const (
 
 // Run status constants. Lifecycle:
 //
-//	requested → approved → running → completed | failed | cancelled
+//	requested → approved → running → completed | failed | over_budget | stalled | cancelled
 //	requested → rejected
 //
 // `requested` is the initial state only when interactive approval
 // is pending (T9.2 scope). MVP paths skip straight to `running`
 // since approval is auto-granted for sync/async/api.
+//
+// CW-20260519-0074 — run status taxonomy (audit §P3). Before this
+// change `execute` had exactly one error branch: any non-nil runErr →
+// `failed`. A context.DeadlineExceeded on a *productive* run was
+// recorded identically to a genuine crash, so the run status carried
+// no diagnostic signal. The terminal error states now split:
+//
+//   - completed   — produced a usable result (the output-presence GATE
+//                   is the separate CW-20260519-0067; `completed` here
+//                   still means only "the runner returned no error").
+//   - over_budget — the wall-clock backstop fired but the run was
+//                   making progress (non-zero tool calls). NOT a
+//                   failure: it must not burn a retry budget or fire
+//                   on_fail (mirrors Torque's `canceled`-vs-`failed`
+//                   split, scheduler.go:668-701 / lifecycle.go:105-112).
+//   - stalled     — the provider-stream inactivity watchdog fired
+//                   (CW-20260517-0036) with no progress: the run went
+//                   silent.
+//   - failed      — reserved for genuine crashes and the
+//                   fabrication-detector trip.
 const (
-	StatusRequested = "requested"
-	StatusApproved  = "approved"
-	StatusRunning   = "running"
-	StatusCompleted = "completed"
-	StatusFailed    = "failed"
-	StatusCancelled = "cancelled"
-	StatusRejected  = "rejected"
+	StatusRequested  = "requested"
+	StatusApproved   = "approved"
+	StatusRunning    = "running"
+	StatusCompleted  = "completed"
+	StatusFailed     = "failed"
+	StatusOverBudget = "over_budget"
+	StatusStalled    = "stalled"
+	StatusCancelled  = "cancelled"
+	StatusRejected   = "rejected"
 )
+
+// IsTerminalStatus reports whether s is a terminal run state — one a
+// reaper / sweep / dispatch-wait should treat as "the run is done".
+// Centralizes the set so a future status addition is a one-line change
+// and no consumer silently misses a new terminal value.
+func IsTerminalStatus(s string) bool {
+	switch s {
+	case StatusCompleted, StatusFailed, StatusOverBudget,
+		StatusStalled, StatusCancelled, StatusRejected:
+		return true
+	default:
+		return false
+	}
+}
 
 // SpawnRequest is the caller-supplied input for a spawn.
 type SpawnRequest struct {

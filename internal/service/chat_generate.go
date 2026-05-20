@@ -642,7 +642,13 @@ func (s *chatServiceImpl) generateResponse(ctx context.Context, sessionID, assis
 
 	// P3 (CW-20260420-0013): pre-loop classification. Runs once per
 	// generation; downstream consumers read via loopState.Classification().
-	ls := newLoopState(constraints, toolNames, debugMode)
+	// CW-20260519-0073: the dispatch caller selects the loop's
+	// inactivity-timeout window. A subagent dispatch uses the
+	// Torque-parity liveness window (subagentIdleTimeoutSeconds) — the
+	// fixed 300s wall-clock deadline that used to bound subagent runs
+	// has been removed, so the chat loop's idle-timeout terminator is
+	// now the governing liveness signal.
+	ls := newLoopState(constraints, toolNames, debugMode, dispatcher.CallerTypeFromContext(ctx))
 	// P3 (CW-20260420-0013): pre-loop classification. Downstream consumers
 	// read via loopState.Classification().
 	classifyAndAttach(ls, sessionID, userContent, toolNames)
@@ -867,6 +873,20 @@ func (s *chatServiceImpl) generateResponse(ctx context.Context, sessionID, assis
 
 		// --- Provider call ---
 		provCtx, provSpan := feotel.StartSpan(ctx, "nanite.provider.call")
+		// CW-20260517-0036: a cancelable child of provCtx so the
+		// provider-stream inactivity watchdog (streamLoop below) can tear
+		// down a silently stalled HTTP stream from the inside. Cancelling
+		// it propagates context.Canceled into the provider adapter, which
+		// closes provCh — unblocking the consume loop. The `defer` is the
+		// catch-all that satisfies the lostcancel analyzer for every
+		// return path inside the loop; the streamLoop body ALSO cancels
+		// explicitly at iteration end so a stalled provider goroutine is
+		// torn down immediately rather than lingering until this function
+		// returns. Both calls are idempotent. Deferred cancels accumulate
+		// at most hardCeiling (200) per generation — bounded and cheap.
+		var provStreamCancel context.CancelFunc
+		provCtx, provStreamCancel = context.WithCancel(provCtx)
+		defer provStreamCancel()
 		provSpan.SetAttributes(
 			attribute.String("nanite.model", model),
 			attribute.Int("nanite.iteration", ls.iteration),
@@ -1055,6 +1075,11 @@ func (s *chatServiceImpl) generateResponse(ctx context.Context, sessionID, assis
 			})
 		}
 		if err != nil {
+			// CW-20260517-0036: StreamChat returned an error before any
+			// stream was established — release the per-iteration stream
+			// context. Idempotent; harmless if some branches below recover
+			// and `continue` (the next iteration allocates a fresh one).
+			provStreamCancel()
 			// T9 — provider-error recovery: detect a compaction-recoverable
 			// failure (context-window overflow OR rate-budget overflow), run
 			// the compaction pipeline synchronously, and retry once. Second
@@ -1265,8 +1290,60 @@ func (s *chatServiceImpl) generateResponse(ctx context.Context, sessionID, assis
 		provStreamStart := time.Now()
 		diagProvEventCount := 0
 
+		// CW-20260517-0036 — provider-stream inactivity watchdog.
+		//
+		// `for evt := range provCh` blocks indefinitely when the provider
+		// holds the stream open but emits nothing (a silent stall — c242).
+		// CW-20260519-0073's idle terminator (shouldStop Layer 2) only runs
+		// at the *top* of the next chat-loop iteration, which a stalled
+		// streamLoop never reaches; within a single stall the run was
+		// bounded only by the 1800s wall-clock backstop. This select-based
+		// loop bounds the *gap between provider events*: every event resets
+		// streamIdle; if no event arrives for the inactivity window the
+		// watchdog cancels provStreamCtx (closing provCh) and the run
+		// surfaces a structured `stalled` error.
+		//
+		// This CANNOT kill a legitimate long-running tool call: a tool call
+		// executes *between* iterations — after streamLoop closes for this
+		// iteration, inside executeToolBatch — so it never blocks this
+		// loop. The watchdog only measures silence on the provider channel
+		// itself, which is exactly the "provider produced nothing" signal.
+		// The window is ls.limits.idleTimeout, already caller-scoped by
+		// CW-20260519-0073 (300s for a subagent dispatch, 900s interactive),
+		// so we reuse the chat loop's existing liveness budget rather than
+		// inventing a parallel one.
+		streamInactivityWindow := ls.limits.idleTimeout
+		streamIdle := time.NewTimer(streamInactivityWindow)
+		streamStalled := false
+
 	streamLoop:
-		for evt := range provCh {
+		for {
+			var evt llmtypes.StreamEvent
+			var ok bool
+			select {
+			case evt, ok = <-provCh:
+				if !ok {
+					// Channel closed — normal end of stream.
+					break streamLoop
+				}
+				// An event arrived: the provider is alive. Reset the
+				// inactivity window. Stop-then-drain-then-reset is the
+				// race-free Timer reset idiom.
+				if !streamIdle.Stop() {
+					select {
+					case <-streamIdle.C:
+					default:
+					}
+				}
+				streamIdle.Reset(streamInactivityWindow)
+			case <-streamIdle.C:
+				// No provider event for the full inactivity window — a
+				// silent stall. Cancel the stream context so the adapter
+				// tears down the HTTP connection, then fall through to the
+				// post-loop `streamStalled` handler.
+				streamStalled = true
+				break streamLoop
+			}
 			diagProvEventCount++
 			switch evt.Type {
 			case "delta":
@@ -1354,6 +1431,11 @@ func (s *chatServiceImpl) generateResponse(ctx context.Context, sessionID, assis
 					}
 				}
 				errDetails := map[string]interface{}{"raw": evt.Error, "model": model}
+				// CW-20260517-0036 — the loop is about to exit on a
+				// mid-stream provider error; release the per-iteration
+				// stream context before any return path below.
+				streamIdle.Stop()
+				provStreamCancel()
 				if ctxpkg.IsContextOverflowMessage(evt.Error) && ls.compactRecoverableAttempts >= maxCompactRecoverableAttempts {
 					msg := "Context is still too large after compaction. Use `/clear` or split the request."
 					errDetails["recovery"] = "failed_after_retry"
@@ -1401,6 +1483,57 @@ func (s *chatServiceImpl) generateResponse(ctx context.Context, sessionID, assis
 			case "done":
 				// handled below
 			}
+		}
+
+		// CW-20260517-0036 — release the per-iteration stream resources.
+		// Stop the inactivity timer (it may still be armed when the loop
+		// exited on a closed channel or a labeled break), and cancel the
+		// stream context so a still-running provider goroutine is torn down
+		// rather than leaking to the next iteration.
+		streamIdle.Stop()
+		provStreamCancel()
+
+		// CW-20260517-0036 — provider-stream inactivity timeout fired.
+		// The provider held the channel open but produced no event for the
+		// full inactivity window: a silent stall. provStreamCancel() above
+		// has already torn down the HTTP stream. Surface this as a
+		// structured `stalled` error and end the turn — the same shape the
+		// mid-stream provider-error branch uses, with a distinct cause so
+		// operators (and subagent_runs.error) can tell a genuine stall from
+		// a provider-emitted error.
+		if streamStalled {
+			provSpan.SetStatus(codes.Error, "provider stream inactivity timeout")
+			provSpan.End()
+			stallErr := fmt.Errorf("provider stream stalled: no events for %s", streamInactivityWindow)
+			slog.Warn("chat-service: provider stream inactivity timeout — terminating stalled stream",
+				"session_id", sessionID, "iter", ls.iteration,
+				"inactivity_window", streamInactivityWindow.String(),
+				"events_seen", diagProvEventCount,
+				"caller", string(dispatcher.CallerTypeFromContext(ctx)))
+			s.store.LogEvent(sessionID, "provider_stream_stalled", "error",
+				fmt.Sprintf("iteration %d: no provider events for %s", ls.iteration, streamInactivityWindow),
+				fmt.Sprintf(`{"model":%q,"inactivity_window_s":%d,"events_seen":%d}`,
+					model, int(streamInactivityWindow.Seconds()), diagProvEventCount))
+			if s.events != nil {
+				s.events.EmitError(ctx, sessionID, "provider_stream_stalled", stallErr.Error())
+			}
+			// Subagent suppression: if a subagent is active, the parent FE
+			// shouldn't see the stall surface (mirrors the provider-error
+			// branches). The subagent run still fails — drainCapture sees
+			// the error event below.
+			if s.suppressSurfaceIfSubagentCaused(sessionID, "provider_stream_stalled", fullContent.String()) {
+				return
+			}
+			stallDetails := map[string]interface{}{
+				"raw":               stallErr.Error(),
+				"model":             model,
+				"cause":             "stalled",
+				"inactivity_window": streamInactivityWindow.String(),
+			}
+			ch <- chat.ErrorEnvelopeDelta(chat.ClassifyError(stallErr), "Provider stream stalled — no response", stallDetails)
+			ch <- chat.ErrorEvent(chat.ClassifyError(stallErr), "Provider stream stalled — no response", stallDetails)
+			s.persistPartialAssistantAndNotifyBroker(ctx, sessionID, assistantMsgID, agentID, fullContent.String(), providerName, agent.Slug, stallErr)
+			return
 		}
 
 		// CW-20260418-0043 diagnostic — provider stream closed.

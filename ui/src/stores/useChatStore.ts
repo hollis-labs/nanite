@@ -68,6 +68,8 @@ interface ChatStore {
   setCircuitOpen: (sessionID: string, open: boolean) => void;
   setSessionTakeover: (sessionID: string, taken: boolean) => void;
   setTextOnlyMode: (sessionID: string, enabled: boolean) => void;
+  /** CW-20260518-0084 — raise/clear the restart-killed-turn indicator. */
+  setInterruptedTurn: (sessionID: string, interrupted: boolean) => void;
 
   // ── Tool calls ──
   addToolCall: (sessionID: string, tc: ToolCall) => void;
@@ -226,7 +228,13 @@ export const useChatStore = create<ChatStore>((set) => ({
   // ── Streaming writers ──
   setStreaming: (sessionID, streaming) =>
     set((state) => ({
-      sessions: applyToSession(state.sessions, sessionID, { isStreaming: streaming }),
+      // CW-20260518-0084: starting a fresh turn is the "send-to-resume" action
+      // — it cold-boots a new agent, so any prior interrupted-turn indicator
+      // is now stale and must be cleared.
+      sessions: applyToSession(state.sessions, sessionID, {
+        isStreaming: streaming,
+        ...(streaming ? { interruptedTurn: false } : {}),
+      }),
     })),
 
   appendStreamContent: (sessionID, content) =>
@@ -297,6 +305,10 @@ export const useChatStore = create<ChatStore>((set) => ({
   setTextOnlyMode: (sessionID, enabled) =>
     set((state) => ({
       sessions: applyToSession(state.sessions, sessionID, { textOnlyMode: enabled }),
+    })),
+  setInterruptedTurn: (sessionID, interrupted) =>
+    set((state) => ({
+      sessions: applyToSession(state.sessions, sessionID, { interruptedTurn: interrupted }),
     })),
 
   // ── Tool calls ──
@@ -647,6 +659,9 @@ export function useCircuitOpen(sessionID?: string | null): boolean {
 }
 export function useSessionTakeover(sessionID?: string | null): boolean {
   return useActiveSliceField(sessionID, "sessionTakeover");
+}
+export function useInterruptedTurn(sessionID?: string | null): boolean {
+  return useActiveSliceField(sessionID, "interruptedTurn");
 }
 export function useTextOnlyMode(sessionID?: string | null): boolean {
   return useActiveSliceField(sessionID, "textOnlyMode");

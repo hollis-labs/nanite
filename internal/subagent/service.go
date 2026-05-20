@@ -7,6 +7,9 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"os"
+	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -18,9 +21,92 @@ import (
 	"github.com/hollis-labs/nanite/internal/store"
 )
 
-// DefaultTimeoutSeconds bounds a runner when the caller doesn't set
-// a timeout. 5 minutes matches the plan's §T9 spawn-request default.
-const DefaultTimeoutSeconds = 300
+// DefaultTimeoutSeconds is the wall-clock BACKSTOP for a runner when
+// the caller doesn't set a timeout and no operator override is in
+// effect (see resolveDefaultTimeoutSeconds / the
+// NANITE_SUBAGENT_DEFAULT_TIMEOUT_SECONDS env var).
+//
+// CW-20260519-0073: this is no longer the *governing* bound on a
+// subagent run. The fixed 300s wall clock that this constant used to
+// supply measured *elapsed time* — it guillotined a productive worker
+// on its 22nd tool iteration exactly as readily as it caught a hung
+// planner. The governing signal is now an *inactivity* timeout
+// enforced inside the child chat loop (shouldStop Layer 2, scoped to
+// subagent dispatch via subagentIdleTimeoutSeconds): a run that keeps
+// emitting events resets its liveness clock and runs as long as the
+// work needs; only genuine silence trips it. See the audit at
+// CW-20260519-0072 §P0 for the Torque-parity rationale.
+//
+// 1800s (30 min) is deliberately generous: it is a pure backstop for
+// the pathological case where the child loop somehow neither makes
+// progress nor trips its own inactivity terminator.
+//
+// CW-20260517-0036: this constant is the *floor for an unconfigured
+// deployment* only. An operator raises (or lowers) the backstop budget
+// via NANITE_SUBAGENT_DEFAULT_TIMEOUT_SECONDS without recompiling —
+// resolveDefaultTimeoutSeconds() reads it on every Spawn. Per-role
+// control of the *governing* inactivity window already exists via the
+// agent profile's constraints JSON (`idle_timeout_seconds`, parsed into
+// chat.AgentConstraints and consumed by resolveIterationLimits); a
+// per-role override of this wall-clock backstop would require wiring an
+// agent-profile resolver into Spawn and is deliberately left out of
+// this ticket as a larger refactor.
+const DefaultTimeoutSeconds = 1800
+
+// Subagent-run timeout validation range. Mirrors Torque's
+// taskTimeoutOverride bounds (internal/runtime/agent/timeout.go:13-14):
+// a value outside [60s, 7200s] is rejected and the caller falls back to
+// the next priority tier. 60s is below any realistic agent orientation
+// budget; 7200s (2h) is a generous ceiling for a single heavy run.
+const (
+	minTimeoutSeconds = 60
+	maxTimeoutSeconds = 7200
+)
+
+// defaultTimeoutEnvVar is the operator knob for the wall-clock backstop
+// budget applied to a subagent run that does not carry an explicit
+// per-call timeout. Mirrors Torque's profile/env tiering. A value
+// outside [minTimeoutSeconds, maxTimeoutSeconds] is ignored with a
+// warning so a typo can't silently disable the backstop.
+const defaultTimeoutEnvVar = "NANITE_SUBAGENT_DEFAULT_TIMEOUT_SECONDS"
+
+// timeoutInRange reports whether secs is a usable subagent-run timeout.
+func timeoutInRange(secs int) bool {
+	return secs >= minTimeoutSeconds && secs <= maxTimeoutSeconds
+}
+
+// resolveDefaultTimeoutSeconds picks the wall-clock backstop budget for
+// a subagent run that did not supply an explicit per-call timeout, in
+// priority order (mirrors Torque resolveTimeout, timeout.go:35-43):
+//
+//  1. NANITE_SUBAGENT_DEFAULT_TIMEOUT_SECONDS when set and within
+//     [minTimeoutSeconds, maxTimeoutSeconds]
+//  2. DefaultTimeoutSeconds (the compiled-in 1800s floor)
+//
+// An explicit, in-range req.TimeoutSeconds still takes precedence over
+// both — that check stays in Spawn, ahead of this call. An env value
+// that is unparseable or out of range is ignored (with a warning) so a
+// misconfiguration falls back safely rather than disabling the backstop.
+func resolveDefaultTimeoutSeconds() int {
+	raw := strings.TrimSpace(os.Getenv(defaultTimeoutEnvVar))
+	if raw == "" {
+		return DefaultTimeoutSeconds
+	}
+	secs, err := strconv.Atoi(raw)
+	if err != nil {
+		slog.Warn("subagent: ignoring non-integer timeout override env var",
+			"env", defaultTimeoutEnvVar, "value", raw, "fallback_seconds", DefaultTimeoutSeconds)
+		return DefaultTimeoutSeconds
+	}
+	if !timeoutInRange(secs) {
+		slog.Warn("subagent: ignoring out-of-range timeout override env var",
+			"env", defaultTimeoutEnvVar, "value", secs,
+			"min", minTimeoutSeconds, "max", maxTimeoutSeconds,
+			"fallback_seconds", DefaultTimeoutSeconds)
+		return DefaultTimeoutSeconds
+	}
+	return secs
+}
 
 // spawnFanoutCap is the maximum number of Spawn invocations that may
 // have their runner executing concurrently. FIFO ordering is preserved
@@ -42,6 +128,16 @@ var (
 	// instead of re-dispatching it to a fresh child. This prevents the
 	// fork-bomb chains observed on 2026-05-16 (session c226).
 	ErrRecursionBlocked = errors.New("subagent recursion blocked: only a root agent may spawn subagents; this agent has a parent — do the work yourself")
+
+	// ErrStalled is the cross-package classification signal for a run
+	// that ended because the provider-stream inactivity watchdog fired
+	// (CW-20260517-0036) — the provider held the stream open but emitted
+	// nothing for the full inactivity window. The Runner wraps this into
+	// the error it returns (via errors.Join) when it sees the structured
+	// `cause:"stalled"` error event, so `execute`'s outcome classifier
+	// can errors.Is it and stamp StatusStalled rather than the generic
+	// StatusFailed. Genuine provider errors and crashes do NOT carry it.
+	ErrStalled = errors.New("subagent: run stalled — provider stream inactivity timeout")
 )
 
 // Runner executes the subagent's work and returns a structured
@@ -259,9 +355,25 @@ func (svc *Service) Spawn(ctx context.Context, req SpawnRequest) (string, error)
 		}
 	}
 
+	// CW-20260517-0036 — resolve the wall-clock backstop budget in
+	// priority order (mirrors Torque resolveTimeout):
+	//   1. an explicit, in-range req.TimeoutSeconds (the per-call tool
+	//      arg) — kept first so an operator/author override always wins;
+	//   2. NANITE_SUBAGENT_DEFAULT_TIMEOUT_SECONDS (env) when in range;
+	//   3. the compiled-in DefaultTimeoutSeconds floor.
+	// An explicit per-call value outside [60s, 7200s] is rejected and
+	// the run falls through to the env/default tier — a fat-fingered
+	// `timeout_seconds: 5` can't disable the backstop, and a runaway
+	// `timeout_seconds: 999999` can't extend it past the 2h ceiling.
 	timeout := req.TimeoutSeconds
+	if timeout > 0 && !timeoutInRange(timeout) {
+		slog.Warn("subagent: explicit timeout_seconds out of range; falling back to resolved default",
+			"requested_seconds", timeout, "min", minTimeoutSeconds, "max", maxTimeoutSeconds,
+			"role", req.Role)
+		timeout = 0
+	}
 	if timeout <= 0 {
-		timeout = DefaultTimeoutSeconds
+		timeout = resolveDefaultTimeoutSeconds()
 	}
 	inputs := req.InputsJSON
 	if inputs == "" {
@@ -668,6 +780,17 @@ func (svc *Service) executeWithSlot(ctx context.Context, run *Run, parentAgentID
 // state and post the reply. Dropping those because the caller gave
 // up would leave the run stuck in 'running' and silently drop the
 // subagent's work.
+//
+// CW-20260519-0073: the `context.WithTimeout` below is now a
+// generous wall-clock BACKSTOP (DefaultTimeoutSeconds = 1800s), not
+// the governing bound. The real liveness signal is the child chat
+// loop's inactivity terminator (shouldStop Layer 2, scoped to
+// subagent dispatch). The old fixed 300s deadline measured elapsed
+// time and cancelled productive-but-slow runs mid-stream; the
+// inactivity timeout measures *silence* instead, so a worker that
+// keeps emitting events is never reaped. This backstop only fires
+// for the pathological case where the child loop neither progresses
+// nor trips its own inactivity terminator.
 func (svc *Service) execute(ctx context.Context, run *Run, parentAgentID string) {
 	runCtx, cancel := context.WithTimeout(ctx, time.Duration(run.TimeoutSeconds)*time.Second)
 	defer cancel()
@@ -685,8 +808,28 @@ func (svc *Service) execute(ctx context.Context, run *Run, parentAgentID string)
 
 	now := time.Now().UTC().Format(time.RFC3339Nano)
 	if runErr != nil {
-		run.Status = StatusFailed
+		// CW-20260519-0074 (audit §P3) — run status taxonomy. The error
+		// branch no longer collapses every non-success into `failed`.
+		// classifyRunOutcome inspects the error and the progress signal
+		// (tool-call count, carried in the partial Result's result_json)
+		// to pick between `stalled`, `over_budget`, and `failed`.
+		run.Status = classifyRunOutcome(runErr, result, runCtx)
 		run.Error = runErr.Error()
+		// CW-20260519-0071 (audit §P2): partial-result capture on the
+		// non-success branch. A subagent guillotined mid-productive-work
+		// (wall-clock backstop cancels the provider stream) has often
+		// done real file-writing work; the runner now returns that
+		// partial Result *alongside* the error. Persist result_json so
+		// the run row carries a structured trace of what the killed
+		// run accomplished instead of leaving result_json at its
+		// insert-time default. The error itself is untouched above —
+		// the status now carries a diagnostic signal but the error
+		// string is still recorded; this is additive capture, not error
+		// suppression. result == nil (genuinely empty failure, or a
+		// runner that returns nil on error) leaves result_json as-is.
+		if result != nil {
+			run.ResultJSON = structuredResultJSON(result)
+		}
 	} else {
 		run.Status = StatusCompleted
 		if result != nil {
@@ -715,6 +858,17 @@ func (svc *Service) execute(ctx context.Context, run *Run, parentAgentID string)
 	}
 	svc.emitStatus(run, terminalPreview)
 
+	// CW-20260519-0066: subagent → parent envelope hop. A subagent that
+	// produced a structured envelope (a plan-review / approval / proposal
+	// card) had it stranded on the child session's message row — it never
+	// reached the parent session's transcript or the operator's GUI, so
+	// the operator could not see or act on the card. Lift any envelope(s)
+	// the child emitted onto the PARENT session's stream + persist them as
+	// EnvelopeInstance rows on the parent, mirroring the G-4 approval-card
+	// path (Emit = CreateEnvelopeInstance + plugin_envelope broadcast).
+	// Zero envelopes = no-op; one or many are each re-emitted.
+	svc.liftResultEnvelopes(finalCtx, run, result)
+
 	if svc.poster == nil || parentAgentID == "" {
 		return
 	}
@@ -730,7 +884,10 @@ func (svc *Service) execute(ctx context.Context, run *Run, parentAgentID string)
 		summary = result.Summary
 	}
 	if runErr != nil {
-		summary = fmt.Sprintf("subagent %s failed: %v", run.ID, runErr)
+		// CW-20260519-0074: report the classified outcome, not a blanket
+		// "failed" — run.Status was set by classifyRunOutcome above and
+		// distinguishes over_budget / stalled from a genuine failure.
+		summary = fmt.Sprintf("subagent %s ended (%s): %v", run.ID, run.Status, runErr)
 	}
 	resultPayload := run.ResultJSON
 	if resultPayload == "" {
@@ -756,6 +913,98 @@ func (svc *Service) execute(ctx context.Context, run *Run, parentAgentID string)
 	}
 }
 
+// classifyRunOutcome maps a non-nil runner error to a terminal run
+// status (CW-20260519-0074, audit §P3). Before this change `execute`
+// had exactly one error branch — any non-nil runErr → StatusFailed —
+// so a context.DeadlineExceeded on a *productive* run was recorded
+// identically to a genuine crash and the status carried no diagnostic
+// signal. The taxonomy now splits the non-success outcomes:
+//
+//   - StatusStalled — the provider-stream inactivity watchdog fired
+//     (CW-20260517-0036): the Runner wraps subagent.ErrStalled into the
+//     error. A stall is by definition "no progress", so it is also the
+//     bucket for a wall-clock backstop that fired with zero tool calls
+//     (the pathological "child loop neither progressed nor tripped its
+//     own inactivity terminator" case from the audit §2.2).
+//   - StatusOverBudget — the wall-clock backstop deadline / cancellation
+//     fired (runCtx.Err() != nil) AND the run was making progress
+//     (non-zero tool calls in the partial result). This is NOT a
+//     failure: it must not burn a retry budget or fire on_fail (mirrors
+//     Torque's `canceled`-vs-`failed` split).
+//   - StatusFailed — everything else: a genuine provider error, a crash,
+//     or the fabrication-detector trip.
+//
+// runCtx is the run's context — its Err() distinguishes "the backstop
+// deadline cut a live run" from "the runner returned an error on its
+// own". result is the partial Result the Runner returns alongside the
+// error (CW-20260519-0071); it carries the tool-call count used as the
+// progress signal. Either argument may be nil.
+func classifyRunOutcome(runErr error, result *Result, runCtx context.Context) string {
+	if runErr == nil {
+		// Defensive: callers only invoke this on the error branch.
+		return StatusCompleted
+	}
+
+	progressed := runMadeProgress(result)
+
+	// A stalled stream is, by construction, "no progress" — the provider
+	// emitted nothing for the whole inactivity window. Classify it
+	// stalled regardless of any tool calls made in earlier iterations:
+	// the run still ended because it went silent.
+	if errors.Is(runErr, ErrStalled) {
+		return StatusStalled
+	}
+
+	// The wall-clock backstop fired (or the run was cancelled): the run
+	// context is done. A run that made real progress before the deadline
+	// is over_budget, not failed — it should not burn retry budget. A
+	// deadline that fired with zero progress is a silent/stuck run with
+	// no productive trace: classify it stalled (it never made progress
+	// and never tripped its own inactivity terminator).
+	if runCtx != nil && runCtx.Err() != nil {
+		if progressed {
+			return StatusOverBudget
+		}
+		return StatusStalled
+	}
+
+	// No stall sentinel, run context still live: a genuine provider
+	// error, a crash, or the fabrication-detector trip. `failed` is now
+	// reserved for exactly these.
+	return StatusFailed
+}
+
+// runMadeProgress reports whether a partial Result shows the run did
+// real work before it ended — the progress signal for classifyRunOutcome.
+//
+// The signal source is the partial result_json the Runner assembles on
+// the error path (CW-20260519-0071): a `{"partial":true,...,"tools":
+// {"calls":N,"results_success":N,"results_error":N}}` blob. A non-zero
+// tool-call (or tool-result) count means the child ran productive
+// iterations. This avoids re-plumbing the counts through a dedicated
+// channel — the partial result already carries them.
+//
+// Returns false when result is nil, has no result_json, or the blob
+// records no tool activity.
+func runMadeProgress(result *Result) bool {
+	if result == nil || result.ResultJSON == "" {
+		return false
+	}
+	var parsed struct {
+		Tools struct {
+			Calls          int `json:"calls"`
+			ResultsSuccess int `json:"results_success"`
+			ResultsError   int `json:"results_error"`
+		} `json:"tools"`
+	}
+	if err := json.Unmarshal([]byte(result.ResultJSON), &parsed); err != nil {
+		return false
+	}
+	return parsed.Tools.Calls > 0 ||
+		parsed.Tools.ResultsSuccess > 0 ||
+		parsed.Tools.ResultsError > 0
+}
+
 // structuredResultJSON resolves the JSON persisted to subagent_runs.result_json.
 //
 // CW-20260516-0060: a runner whose child emits no structured envelope hands
@@ -777,6 +1026,129 @@ func structuredResultJSON(result *Result) string {
 		return "{}"
 	}
 	return string(payload)
+}
+
+// liftedEnvelope is a single structured envelope recovered from a
+// completed subagent's Result, reduced to the (type, data) pair the
+// ApprovalEmitter.Emit contract needs. Emit wraps `data` as the
+// envelope's `data` blob and stamps the type; the child's outer
+// kind/version envelope frame is dropped because Emit rebuilds it.
+type liftedEnvelope struct {
+	Type string
+	Data json.RawMessage
+}
+
+// extractLiftableEnvelopes pulls every structured envelope out of a
+// subagent Result's ResultJSON so execute() can re-emit them onto the
+// parent session (CW-20260519-0066).
+//
+// Two ResultJSON shapes are recognized — the runner produces different
+// shapes on the success vs partial-capture paths:
+//
+//   - Success path (subagent_runner.go ChatRunner.Run): ResultJSON is the
+//     child's terminal envelope JSON verbatim, i.e. the envelope wire
+//     shape {"kind":"envelope","version":1,"type":"plan-review",
+//     "data":{...}}. drainCapture accumulates it last-wins, so there is
+//     at most one envelope on this path.
+//   - Partial-capture path (CW-20260519-0071 partialResult): ResultJSON is
+//     {"partial":true,"summary":...,"envelope":{...},"tools":{...}} — the
+//     child's envelope nested under the `envelope` key. A subagent cut
+//     mid-task may still have emitted a review/approval card worth
+//     surfacing, so this path is lifted too.
+//
+// Returns nil for a nil result, an empty/`{}` ResultJSON, a parse
+// failure, or an envelope blob with no `type` (a structured result that
+// is not an envelope — e.g. structuredResultJSON's {"summary":...}
+// wrapper). The function never errors: a malformed child envelope is a
+// dropped card, not a failed run.
+func extractLiftableEnvelopes(result *Result) []liftedEnvelope {
+	if result == nil {
+		return nil
+	}
+	raw := strings.TrimSpace(result.ResultJSON)
+	if raw == "" || raw == "{}" {
+		return nil
+	}
+
+	// Decode loosely: both recognized shapes are JSON objects. A
+	// partial-capture blob carries `partial:true` + a nested `envelope`;
+	// a success-path blob is the envelope itself (kind/type/data).
+	var obj struct {
+		Partial  bool            `json:"partial"`
+		Envelope json.RawMessage `json:"envelope"`
+		Type     string          `json:"type"`
+		Data     json.RawMessage `json:"data"`
+	}
+	if err := json.Unmarshal([]byte(raw), &obj); err != nil {
+		slog.Warn("subagent: result envelope not valid JSON; not lifted to parent",
+			"err", err)
+		return nil
+	}
+
+	// Partial-capture shape: the child's envelope is nested. Recurse on
+	// the nested blob so the same type/data extraction applies.
+	if obj.Partial && len(obj.Envelope) > 0 {
+		nested := strings.TrimSpace(string(obj.Envelope))
+		if nested == "" || nested == "{}" {
+			return nil
+		}
+		return extractLiftableEnvelopes(&Result{ResultJSON: nested})
+	}
+
+	// Success-path shape: the blob IS the envelope. A blob with no `type`
+	// is some other structured result (e.g. the {"summary":...} wrapper)
+	// — there is no card to surface.
+	if obj.Type == "" {
+		return nil
+	}
+	data := obj.Data
+	if len(data) == 0 {
+		data = json.RawMessage("{}")
+	}
+	return []liftedEnvelope{{Type: obj.Type, Data: data}}
+}
+
+// liftResultEnvelopes re-emits every structured envelope a completed
+// subagent produced onto the PARENT session's stream + persists each as
+// an EnvelopeInstance row on the parent (CW-20260519-0066).
+//
+// Before this hop existed, a subagent-produced plan-review / approval /
+// proposal card was persisted only on the subagent's own message row and
+// never reached the parent transcript or the operator's GUI — the
+// operator could not see or act on the card. svc.approver.Emit is the
+// same persist+broadcast primitive G-4 uses for spawn-approval cards
+// (CreateEnvelopeInstance + a plugin_envelope StreamEvent), so the lifted
+// envelope renders on BOTH the live SSE stream and the persisted/reload
+// path.
+//
+// Zero envelopes (the common case) is a silent no-op. One or many are
+// each emitted in order. A nil approver (tests / minimal wiring) skips
+// emission. An Emit failure is logged and the remaining envelopes are
+// still attempted — a dropped card must not abort the run's bookkeeping.
+func (svc *Service) liftResultEnvelopes(ctx context.Context, run *Run, result *Result) {
+	if svc.approver == nil || run.ParentSessionID == "" {
+		return
+	}
+	envs := extractLiftableEnvelopes(result)
+	if len(envs) == 0 {
+		return
+	}
+	for _, env := range envs {
+		id, err := svc.approver.Emit(ctx, run.ParentSessionID, env.Type, env.Data)
+		if err != nil {
+			slog.Warn("subagent: lift child envelope to parent failed",
+				"err", err, "run_id", run.ID,
+				"parent_session_id", run.ParentSessionID,
+				"envelope_type", env.Type)
+			continue
+		}
+		slog.Info("subagent: lifted child envelope to parent session",
+			"run_id", run.ID,
+			"child_session_id", run.ChildSessionID,
+			"parent_session_id", run.ParentSessionID,
+			"envelope_type", env.Type,
+			"envelope_instance_id", id)
+	}
 }
 
 // insertRun persists a freshly-created run.

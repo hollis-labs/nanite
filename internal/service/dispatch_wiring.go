@@ -99,6 +99,17 @@ func (d *dispatchSpawner) Spawn(ctx context.Context, req dispatch.SpawnRequest) 
 		}, nil
 	case subagent.StatusFailed:
 		return nil, fmt.Errorf("dispatch: subagent failed: %s", run.Error)
+	case subagent.StatusOverBudget:
+		// CW-20260519-0074: the wall-clock backstop cut a productive run.
+		// It is not a crash, but it did not finish either — surface it as
+		// a dispatch error so the caller does not treat a partial result
+		// as a complete one. The partial trace is in run.ResultJSON.
+		return nil, fmt.Errorf("dispatch: subagent exceeded its run budget (over_budget): %s", run.Error)
+	case subagent.StatusStalled:
+		// CW-20260519-0074: the provider stream went silent. Distinct
+		// error text so the caller / operator can tell a stall from a
+		// crash without inspecting run.Error.
+		return nil, fmt.Errorf("dispatch: subagent stalled (no provider activity): %s", run.Error)
 	case subagent.StatusCancelled:
 		return nil, fmt.Errorf("dispatch: subagent cancelled")
 	case subagent.StatusRejected:

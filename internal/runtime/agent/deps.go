@@ -86,6 +86,15 @@ type Dependencies struct {
 	// Telemetry receives PTY restart and lifecycle observability events.
 	Telemetry Telemetry
 
+	// LiveSessions, when non-nil, lets SweepOrphans probe the in-process
+	// session registry for runtime IDs whose persisted PID is 0 (codex-
+	// style adapters never report a pid). Production wires this against
+	// agentsessions.Manager.Get; tests pass a fake. Optional — nil leaves
+	// SweepOrphans falling back to updated_at staleness alone, which
+	// still reconciles pre-restart pid=0 rows once they age past the
+	// grace window.
+	LiveSessions LiveSessionChecker
+
 	// Recovery, when non-nil, observes lib-level restart attempts and
 	// terminal session exits. Implemented by the in-process recovery
 	// broker (internal/runtime/agent/recovery). Optional — nil leaves
@@ -163,6 +172,12 @@ type RuntimeStore interface {
 // store.Session (which tracks chat sessions) because not every Boot is a
 // chat session: ModeBackground tasks, scheduler-dispatched executors, and
 // nested subagents all create runtime rows without owning a chat row.
+//
+// UpdatedAt is the last persistence-side modification timestamp. SweepOrphans
+// uses it as the staleness signal for rows where PID == 0 — codex-style
+// runtimes never persist a pid, so signal-0 liveness can't speak for them;
+// the in-memory session-liveness probe + an `updated_at` age threshold do
+// the work instead.
 type RuntimeRow struct {
 	ID              string
 	AgentProfile    string
@@ -173,6 +188,7 @@ type RuntimeRow struct {
 	PID             int
 	ParentSessionID *string
 	StartedAt       time.Time
+	UpdatedAt       time.Time
 	Meta            map[string]any
 }
 

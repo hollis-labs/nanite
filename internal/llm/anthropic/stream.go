@@ -52,12 +52,16 @@ func (c *Client) StreamChat(ctx context.Context, in llmtypes.ChatRequest) (<-cha
 		return nil, errors.New("circuit breaker open: provider rate limited after multiple retries")
 	}
 
-	// Rate-limit pre-flight + pacing.
+	// Rate-limit pre-flight + pacing. Cache hints are sourced per call via
+	// effectiveCacheHints(in) so concurrent sessions on the same Client
+	// don't race on the deprecated shared c.cacheHints field
+	// (FU-13 / CW-20260520-0054).
 	if c.RateTracker != nil {
 		estimatedTokens := len(payload) / 4
 		cacheableBytes := 0
-		if len(c.cacheHints) > 0 {
-			cacheableBytes = computeCacheablePrefixBytes(payload, c.cacheHints)
+		hints := c.effectiveCacheHints(in)
+		if len(hints) > 0 {
+			cacheableBytes = computeCacheablePrefixBytes(payload, hints)
 			estimatedTokens -= cacheableBytes / 4
 			if estimatedTokens < 0 {
 				estimatedTokens = 0

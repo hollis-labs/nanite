@@ -1,15 +1,22 @@
 // Package anthropic is nanite's wrapper around the official anthropic-sdk-go
 // for chat completions. It satisfies llmcontracts.Provider (StreamChat,
 // Complete, Capabilities), llmcontracts.RateLimited (RateLimitTPM),
-// llmcontracts.CacheableProvider (SetCacheHints), and llmcontracts.Cacheable
-// (EstimateCacheablePrefix), preserving the public surface the deleted
-// go-providers/provider/anthropic.go exposed to nanite call-sites.
+// llmcontracts.CacheableProvider (SetCacheHints, deprecated), and
+// llmcontracts.Cacheable (EstimateCacheablePrefix), preserving the public
+// surface the deleted go-providers/provider/anthropic.go exposed to nanite
+// call-sites.
 //
 // The wrapper relocates header parsing from a hand-rolled HTTP middleware
 // into option.WithMiddleware (SDK-blessed), drives the existing
 // llmcontracts.TokenRateTracker + CircuitBreaker (the "three load-bearing
 // seams" identified in CW-20260508-0009), and translates 429 →
 // ErrRequestExceedsRateBudget for the existing pre-flight gate.
+//
+// Cache-hint sourcing (FU-13 / CW-20260520-0054): hints are read per call
+// from llmtypes.ChatRequest.CacheHints. The deprecated SetCacheHints setter
+// stays as a fallback for unmigrated callers; effectiveCacheHints prefers
+// req.CacheHints when populated, so concurrent sessions on the same Client
+// no longer race on the shared c.cacheHints field.
 package anthropic
 
 import (
@@ -60,6 +67,11 @@ type Client struct {
 	CircuitBreaker *llmcontracts.CircuitBreaker
 	OnStatus       StatusCallback // optional; called during pacing waits
 	OnCircuitOpen  func()         // called when the circuit breaker trips
+	// cacheHints holds hints set via SetCacheHints. Deprecated: prefer
+	// llmtypes.ChatRequest.CacheHints on each call. Retained as a fallback
+	// for callers that have not migrated; effectiveCacheHints reads
+	// req.CacheHints first and only falls back to this shared field when
+	// the per-call slot is empty. See FU-13 / CW-20260520-0054.
 	cacheHints     []llmcontracts.CacheHint
 	// calibrated reports whether at least one provider response has supplied
 	// an x-ratelimit-limit-input-tokens header. RateLimitTPM consults this
@@ -126,17 +138,42 @@ func (c *Client) rebuildSDK() {
 	c.sdk = sdk.NewClient(opts...)
 }
 
-// SetCacheHints implements llmcontracts.CacheableProvider. It stores the
-// hints so that subsequent calls to buildSystem / buildTools / buildMessages
-// apply CacheControlEphemeralParam markers accordingly.
+// SetCacheHints implements llmcontracts.CacheableProvider. Stores hints on
+// the shared singleton.
+//
+// Deprecated: this is the legacy path that races under concurrent callers
+// — session A's hints can be overwritten by session B between the
+// SetCacheHints call and the request build, producing requests without
+// cache_control markers and the cache-miss-echo signature
+// (cache_read=0 with input_tokens<10) tracked under FU-13. New code MUST
+// populate llmtypes.ChatRequest.CacheHints on each ChatRequest instead;
+// effectiveCacheHints prefers req.CacheHints over this shared field.
+// Retained on the Client to keep the llmcontracts.CacheableProvider
+// interface implementable and to leave legacy call-sites compiling until
+// they migrate.
 func (c *Client) SetCacheHints(hints []llmcontracts.CacheHint) {
 	c.cacheHints = hints
 }
 
-// hasCacheHint reports whether the stored hints include one matching the
-// given position.
-func (c *Client) hasCacheHint(position string) bool {
-	for _, h := range c.cacheHints {
+// effectiveCacheHints returns the cache hints that govern a single call.
+// Prefers req.CacheHints (per-call, race-free) over c.cacheHints (shared
+// singleton populated by the deprecated SetCacheHints). When a caller
+// populates the per-call slot, the shared field is ignored entirely so
+// concurrent sessions on the same Client cannot leak hints across calls.
+// When both are empty the result is nil and the cache pipeline is no-op.
+func (c *Client) effectiveCacheHints(req llmtypes.ChatRequest) []llmcontracts.CacheHint {
+	if len(req.CacheHints) > 0 {
+		return req.CacheHints
+	}
+	return c.cacheHints
+}
+
+// hasCacheHintIn reports whether hints include one matching the given
+// position. Pure helper so both the per-call (effectiveCacheHints) and
+// legacy-fallback (c.cacheHints via hasCacheHint) paths share one
+// implementation.
+func hasCacheHintIn(hints []llmcontracts.CacheHint, position string) bool {
+	for _, h := range hints {
 		if h.Position == position {
 			return true
 		}
@@ -144,16 +181,31 @@ func (c *Client) hasCacheHint(position string) bool {
 	return false
 }
 
-// recentMessageCacheCount returns the number of "recent_message" hints,
-// which controls how many trailing user messages get cache_control markers.
-func (c *Client) recentMessageCacheCount() int {
+// recentMessageCacheCountIn returns the number of "recent_message" hints
+// in hints, which controls how many trailing user messages get
+// cache_control markers.
+func recentMessageCacheCountIn(hints []llmcontracts.CacheHint) int {
 	count := 0
-	for _, h := range c.cacheHints {
+	for _, h := range hints {
 		if h.Position == "recent_message" {
 			count++
 		}
 	}
 	return count
+}
+
+// hasCacheHint is the backward-compat wrapper used by the legacy
+// SetCacheHints path. Reads c.cacheHints directly; new code reads hints
+// per call via hasCacheHintIn(effectiveCacheHints(req), position).
+func (c *Client) hasCacheHint(position string) bool {
+	return hasCacheHintIn(c.cacheHints, position)
+}
+
+// recentMessageCacheCount is the backward-compat wrapper used by the
+// legacy SetCacheHints path. Reads c.cacheHints directly; new code reads
+// hints per call via recentMessageCacheCountIn(effectiveCacheHints(req)).
+func (c *Client) recentMessageCacheCount() int {
+	return recentMessageCacheCountIn(c.cacheHints)
 }
 
 // RateLimitTPM implements llmcontracts.RateLimited. Returns 0 before the

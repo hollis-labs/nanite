@@ -55,6 +55,12 @@ func TestCallSpawnSubagent_FailFast_NoProfile_EmitsConfigEnvelope(t *testing.T) 
 	if env.Error.Context == nil || env.Error.Context["role"] != "system-architect" {
 		t.Errorf("error.context.role = %v; expected role echoed for parent retry", env.Error.Context)
 	}
+	// PR #214 review fix item 5: error.context.reason carries the
+	// stable ConfigReason* discriminator so downstream consumers branch
+	// without parsing the message string.
+	if env.Error.Context == nil || env.Error.Context["reason"] != subagent.ConfigReasonNoProfile {
+		t.Errorf("error.context.reason = %v; want %q", env.Error.Context["reason"], subagent.ConfigReasonNoProfile)
+	}
 }
 
 // TestCallSpawnSubagent_FailFast_NotExecutable_EmitsConfigEnvelope is
@@ -93,6 +99,12 @@ func TestCallSpawnSubagent_FailFast_NotExecutable_EmitsConfigEnvelope(t *testing
 	}
 	if env.Error.Kind != subagent.ErrorKindConfig {
 		t.Errorf("error.kind = %q, want %q", env.Error.Kind, subagent.ErrorKindConfig)
+	}
+	// PR #214 review fix item 5: not-executable maps to a distinct
+	// ConfigReason discriminator from no-profile so the parent can
+	// branch (e.g. "register tool surface" vs "register the profile").
+	if env.Error.Context == nil || env.Error.Context["reason"] != subagent.ConfigReasonNotExecutable {
+		t.Errorf("error.context.reason = %v; want %q", env.Error.Context["reason"], subagent.ConfigReasonNotExecutable)
 	}
 }
 

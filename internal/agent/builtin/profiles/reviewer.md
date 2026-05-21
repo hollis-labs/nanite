@@ -15,10 +15,19 @@ icon: shield-check
 # at SlotUniversal by internal/chat/universal_rules.go. This file
 # carries the Reviewer role identity ONLY.
 #
-# Read-only role: no `permissionMode: yolo`. Per the prompt-framing
-# already in place ("do not modify code unless explicitly asked"), the
-# reviewer audits work product; it does not commit fixes. Tool
-# surface is the read-only set — matches Researcher / Code-Auditor.
+# Read-only role. Per the prompt-framing already in place ("do not
+# modify code unless explicitly asked"), the reviewer audits work
+# product; it does not commit fixes. Tool surface matches
+# Researcher / Code-Auditor.
+#
+# Permission shape (PR #214 review fix): `permissionMode: yolo` is
+# required for ToProfile() to set can_execute=true, which the
+# CW-20260519-0123 fail-fast gate at the Spawn boundary requires to
+# admit the role. The actual safety enforcement is the read-only
+# `toolPermissions.allow_list` below — only the read primitives the
+# role needs (glob, grep, read) plus the meta-tools (describe,
+# validate, lesson_capture). No write/bash/exec affordance is granted;
+# the broker's allow-list is the security boundary, not permissionMode.
 #
 # Relationship to code-auditor: reviewer is acceptance-criteria-
 # driven (the parent supplies the criteria, often as PR description
@@ -29,6 +38,7 @@ icon: shield-check
 # PROMPT-SYNC: when this body changes, re-flow into migration
 # 060_internal_profiles_file_sot.sql.
 model: claude-sonnet-4-20250514
+permissionMode: yolo
 toolPermissions:
   allow_list:
     - "dev_read"

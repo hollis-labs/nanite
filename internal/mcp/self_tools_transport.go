@@ -1648,17 +1648,26 @@ func (st *SelfToolsTransport) callSpawnSubagent(ctx context.Context, args map[st
 		//     profile or routing to a known role — distinct from an
 		//     internal fault so the parent can act.
 		//   - internal: everything else (catch-all)
+		//
+		// For config-kind envelopes, populate `reason` (PR #214 review
+		// fix item 5) with the stable ConfigReason* discriminator so
+		// downstream consumers don't have to parse the message string
+		// to branch on no-profile vs not-executable.
 		kind := subagent.ErrorKindInternal
+		ctx := map[string]any{"role": req.Role}
 		switch {
 		case errors.Is(err, dispatch.ErrUntrustedRole):
 			kind = subagent.ErrorKindDenied
-		case errors.Is(err, subagent.ErrNoProfileForRole),
-			errors.Is(err, subagent.ErrRoleNotExecutable):
+		case errors.Is(err, subagent.ErrNoProfileForRole):
 			kind = subagent.ErrorKindConfig
+			ctx["reason"] = subagent.ConfigReasonNoProfile
+		case errors.Is(err, subagent.ErrRoleNotExecutable):
+			kind = subagent.ErrorKindConfig
+			ctx["reason"] = subagent.ConfigReasonNotExecutable
 		}
 		env := subagent.NewFailureEnvelope("", kind,
 			fmt.Sprintf("spawn subagent: %v", err),
-			map[string]any{"role": req.Role})
+			ctx)
 		return envelopeResult(env), nil
 	}
 	if req.Mode == "" || req.Mode == subagent.ModeSync {

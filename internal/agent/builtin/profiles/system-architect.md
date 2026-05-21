@@ -15,16 +15,25 @@ icon: layers
 # at SlotUniversal by internal/chat/universal_rules.go. This file
 # carries the System-Architect role identity ONLY.
 #
-# Read + reason role: no `permissionMode: yolo`. The system architect
-# explores the workspace, reads source, and proposes designs — it
-# does NOT execute writes. Code edits, migrations, and tool execution
-# belong to the Worker / file-backend profiles. Tool surface is
-# scoped to the read primitives the role needs: glob, grep, read.
+# Read + reason role. The system architect explores the workspace,
+# reads source, and proposes designs — it does NOT execute writes.
+# Code edits, migrations, and tool execution belong to the Worker /
+# file-backend profiles.
+#
+# Permission shape (PR #214 review fix): `permissionMode: yolo` is
+# required for ToProfile() to set can_execute=true, which the
+# CW-20260519-0123 fail-fast gate at the Spawn boundary requires to
+# admit the role. The actual safety enforcement is the read-only
+# `toolPermissions.allow_list` below — only the read primitives the
+# role needs (glob, grep, read) plus the meta-tools (describe,
+# validate, lesson_capture). No write/bash/exec affordance is granted;
+# the broker's allow-list is the security boundary, not permissionMode.
 #
 # PROMPT-SYNC: when this body changes, re-flow into migration
 # 060_internal_profiles_file_sot.sql so the in-place UPDATE for
 # already-deployed databases picks up the new content.
 model: claude-sonnet-4-20250514
+permissionMode: yolo
 toolPermissions:
   allow_list:
     - "dev_read"

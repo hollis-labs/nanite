@@ -10,11 +10,20 @@ import (
 // Service.AuditUnknownRoles.
 //
 // Distinct rows are reported per role slug; for each slug the audit
-// reports the total run count and the breakdown of failure reasons
-// the fail-fast gate is intended to retire — the orphan-reaper signal
-// (CW-20260519-0073: "timeout: orphan, no child session") and the
-// post-gate config-error signal (CW-20260519-0123: the new sentinels
-// in service.go).
+// reports the total run count and the breakdown of failure reasons.
+//
+// Scope (PR #214 review fix item 4): post-fail-fast-gate the audit is
+// effectively an ORPHAN-ONLY signal. The CW-20260519-0123 gate at the
+// Spawn boundary returns ErrNoProfileForRole / ErrRoleNotExecutable
+// BEFORE any subagent_runs row is inserted — so in the steady state,
+// config-error spawns produce zero rows and therefore zero audit
+// entries. The `ConfigFailures` counter survives in the schema and
+// query for backward compat with historical rows written before the
+// gate landed (or in the future, if a deployment ever persists a
+// config-fault row pre-runner; the query is the catch). The
+// operator-facing meaning is now: this audit surfaces orphans the
+// reaper marked failed — registering a profile for the named role (or
+// flipping its can_execute) retires future appearances.
 //
 // `HasProfile` is the lookup result against ProfileResolver — the
 // operator-facing signal. When false, the audit suggests the role
@@ -34,17 +43,22 @@ type RoleAuditEntry struct {
 
 // AuditUnknownRoles scans subagent_runs and returns one RoleAuditEntry
 // per distinct role slug whose runs include at least one failure of
-// the kind the fail-fast gate is meant to retire (orphan-reaped or
-// config-error). Surfaces roles requested-but-unregistered to the
-// operator (CW-20260519-0123 scope item 3).
+// the kind the fail-fast gate is meant to retire. Surfaces roles
+// requested-but-unregistered to the operator (CW-20260519-0123 scope
+// item 3).
 //
-// The query is bounded by status=failed AND
-// (error LIKE '%orphan%' OR error LIKE '%no profile%' OR error LIKE
-// '%not executable%') so it only reports rows that this ticket's gate
-// changes the disposition of. A role slug whose only runs succeeded
-// (or failed for unrelated reasons) does NOT appear — the audit is a
-// diagnostic for the missing-profile / non-executable pattern, not a
-// general failure report.
+// Scope (PR #214 review fix item 4): the post-gate steady-state shape
+// of this audit is ORPHAN-ONLY. ErrNoProfileForRole /
+// ErrRoleNotExecutable now return from Spawn BEFORE inserting a
+// subagent_runs row, so config-fault spawns produce no rows for this
+// query to scan. The "no agent profile registered" / "not executable"
+// LIKE clauses still match in the query so historical rows written
+// pre-gate (e.g. databases that ran on a build between c271 reproduction
+// and the gate landing) and any future code path that persists a
+// pre-runner config-fault row still appear in the report. In the
+// steady state, this audit's signal is "orphans the reaper marked
+// failed"; the operator action is the same as before (register the
+// missing profile or route the parent to a known slug).
 //
 // When svc.profiles is wired, each returned entry's HasProfile and
 // ProfileCanExec fields are populated by a per-slug GetAgentBySlug

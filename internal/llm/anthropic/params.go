@@ -232,8 +232,13 @@ func contentBlocksFromMessage(m llmtypes.ChatMessage, applyCache bool) []sdk.Con
 // buildMessageParams constructs the SDK MessageNewParams for a ChatRequest,
 // applying cache_control + thinking_config when configured. Used by both
 // the streaming and non-streaming paths so request shape stays consistent.
+//
+// Cache hints come from effectiveCacheHints(in): per-call in.CacheHints
+// wins, falling back to the deprecated c.cacheHints only when the caller
+// has not migrated. This keeps concurrent sessions on a shared Client
+// from racing on the singleton field (FU-13 / CW-20260520-0054).
 func (c *Client) buildMessageParams(in llmtypes.ChatRequest, model string, interleavedThinking bool, reasoningCfg llmcontracts.ReasoningConfig) sdk.MessageNewParams {
-	plan := c.planCacheMarkers(in)
+	plan := planCacheMarkersWithHints(in, c.effectiveCacheHints(in))
 	params := sdk.MessageNewParams{
 		Model:     model,
 		MaxTokens: resolveMaxTokens(in),
@@ -294,12 +299,14 @@ func extractSchemaRequired(schema map[string]any) []string {
 // MessageNewParams the wrapper would send, marshals it, and returns the
 // offset of the last cache_control marker / 4 (token approximation).
 //
-// This stays in lock-step with the rate-budget pre-flight in StreamChat —
-// both consume the same payload bytes and the same heuristic, just expressed
-// in different units. Future readers changing one should change the other
-// together.
+// Hints are sourced via effectiveCacheHints(in) — per-call in.CacheHints
+// takes precedence over the deprecated c.cacheHints. Future readers
+// changing the heuristic should keep this in lock-step with the
+// rate-budget pre-flight in StreamChat; both must consume the same
+// payload bytes and same hint source.
 func (c *Client) EstimateCacheablePrefix(ctx context.Context, in llmtypes.ChatRequest) int {
-	if len(c.cacheHints) == 0 {
+	hints := c.effectiveCacheHints(in)
+	if len(hints) == 0 {
 		return 0
 	}
 	model := resolveModel(in)
@@ -310,7 +317,7 @@ func (c *Client) EstimateCacheablePrefix(ctx context.Context, in llmtypes.ChatRe
 	if err != nil {
 		return 0
 	}
-	return computeCacheablePrefixBytes(payload, c.cacheHints) / 4
+	return computeCacheablePrefixBytes(payload, hints) / 4
 }
 
 // computeCacheablePrefixBytes approximates the byte size of the cached

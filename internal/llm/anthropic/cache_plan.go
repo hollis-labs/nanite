@@ -1,8 +1,9 @@
 package anthropic
 
 import (
-	ctxpkg "github.com/hollis-labs/nanite/internal/context"
+	llmcontracts "github.com/hollis-labs/go-llm-contracts"
 	llmtypes "github.com/hollis-labs/go-llm-types"
+	ctxpkg "github.com/hollis-labs/nanite/internal/context"
 )
 
 // maxCacheControlMarkers is Anthropic's per-request cap on cache_control
@@ -84,11 +85,25 @@ var stablePrefixSlotPriority = []string{
 // either because no stable prefix slots are present, the "system" hint
 // is absent (slot section is anchored to the system context), or the
 // 4-marker cap consumed every slot marker.
+//
+// planCacheMarkers is the backward-compat wrapper used by the legacy
+// SetCacheHints path. It reads hints from c.cacheHints (the deprecated
+// shared singleton). New code should call planCacheMarkersWithHints
+// directly, sourcing hints from effectiveCacheHints(req) so concurrent
+// callers cannot race on the shared field (FU-13 / CW-20260520-0054).
 func (c *Client) planCacheMarkers(req llmtypes.ChatRequest) cachePlan {
+	return planCacheMarkersWithHints(req, c.cacheHints)
+}
+
+// planCacheMarkersWithHints is the race-free variant: hints come in
+// explicitly per call rather than being read from c.cacheHints. Identical
+// budget enforcement and priority order as planCacheMarkers — see that
+// doc for the contract.
+func planCacheMarkersWithHints(req llmtypes.ChatRequest, hints []llmcontracts.CacheHint) cachePlan {
 	plan := cachePlan{
-		System:         c.hasCacheHint("system"),
-		Tools:          c.hasCacheHint("tools"),
-		RecentMessages: c.recentMessageCacheCount(),
+		System:         hasCacheHintIn(hints, "system"),
+		Tools:          hasCacheHintIn(hints, "tools"),
+		RecentMessages: recentMessageCacheCountIn(hints),
 	}
 	// Slot markers require the "system" hint to be active — the slot
 	// section is part of the system context; marking the slot boundary

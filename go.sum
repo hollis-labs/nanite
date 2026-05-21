@@ -69,10 +69,10 @@ github.com/hollis-labs/go-embed-contracts v0.1.1 h1:PGpgBvFpNwz7dHLRWJ3ewlbOLzsg
 github.com/hollis-labs/go-embed-contracts v0.1.1/go.mod h1:3sLCY4JVhL1oFwqjCBOuC4J5xnJCvpUrlkHvMDRWndo=
 github.com/hollis-labs/go-envelopes v0.1.1 h1:YxCG4rOdCucGfhdEYoMtqnlQYu3cTFxA/THcjJFPpm4=
 github.com/hollis-labs/go-envelopes v0.1.1/go.mod h1:v45Dt4l4kYVuUf2oTcxXYh1bBRXSND+Bi6CAM/OxwKY=
-github.com/hollis-labs/go-llm-contracts v0.2.0 h1:ypBqpsU2PkndUYaiw5+NLz86sZpD/bdo26JTXePfE2c=
-github.com/hollis-labs/go-llm-contracts v0.2.0/go.mod h1:msDaHCBEemyTbXhk0Q8lm5doK79aWK5VR/hdzjWgqbU=
-github.com/hollis-labs/go-llm-types v0.2.0 h1:xh0e5//SgIWAdN6PXqvl7r/y1dfdIcFRILQirx7y/GE=
-github.com/hollis-labs/go-llm-types v0.2.0/go.mod h1:BP8FMqmTWvi2vQ7dNybTGJ+FFzXS4gMMhAjyTHlNq84=
+github.com/hollis-labs/go-llm-contracts v0.3.0 h1:qVKulEixvxf5iJmUMzDfRoL00gfS6/r0TmAJ1zNX0Dc=
+github.com/hollis-labs/go-llm-contracts v0.3.0/go.mod h1:VIbzjZk7U+NCYuHdfa++ZwcaYI09om5xVxYTGd6cuw8=
+github.com/hollis-labs/go-llm-types v0.3.0 h1:QR4RX0F1zX0fYBh7sDVxnsFxmQ/vjlvc7bC6FWx+8s0=
+github.com/hollis-labs/go-llm-types v0.3.0/go.mod h1:BP8FMqmTWvi2vQ7dNybTGJ+FFzXS4gMMhAjyTHlNq84=
 github.com/hollis-labs/go-messaging v0.2.1 h1:n/6dz7UekLmYutdPpf7Pf9Fnyt7AHoGQ8M+b49zF5F4=
 github.com/hollis-labs/go-messaging v0.2.1/go.mod h1:S2AmpqvwDbVqCsOSBJ+u3HKDchnya2KTcBTAhoUp2Ro=
 github.com/hollis-labs/go-otel v0.1.0 h1:ZnPqACswZpm5KXqj8cjx/0biha2RNAg/5PNUrNxnLYQ=

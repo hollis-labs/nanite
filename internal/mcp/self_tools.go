@@ -750,6 +750,16 @@ func selfToolDefinitions() []Tool {
 				"required": []string{"run_id"},
 			},
 		},
+		{
+			Name: "subagent_role_audit",
+			Description: "Report which role slugs have produced orphan-reaped or config-error subagent runs (CW-20260519-0123). The audit groups by role and counts orphan, config, and other failures; each row also reports whether the role currently has a registered agent profile and whether that profile is can_execute=true.\n\n" +
+				"**When to use:** When debugging recurring subagent_spawn failures, deciding which Phase-6 standing roles to create, or auditing whether an LLM has been calling subagent_spawn with role names that have no registered profile.\n\n" +
+				"**Output shape:** {entries: [{role, total_runs, orphan_failures, config_failures, other_failures, has_profile, profile_can_execute, in_text_only_whitelist}, ...]}.",
+			InputSchema: map[string]any{
+				"type":       "object",
+				"properties": map[string]any{},
+			},
+		},
 		// --- Background job (P9 BackgroundJob, CW-20260420-0016) ---
 		{
 			Name: "background_job",

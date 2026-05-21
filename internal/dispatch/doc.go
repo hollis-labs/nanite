@@ -40,7 +40,7 @@
 // This package does NOT own:
 //   - ScopeTier classification logic (internal/classify).
 //   - Envelope construction or rendering (internal/chat).
-//   - Worker/Planner role definitions (config/agents).
+//   - Worker/Planner role definitions (internal/agent/builtin/profiles).
 //   - Subagent spawn machinery (internal/subagent).
 //
 // # References

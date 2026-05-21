@@ -35,6 +35,13 @@ func TestInternalProfiles_LoadsAllExpectedSlugs(t *testing.T) {
 		// project_nanite_phase_2_scope.)
 		"analyst", "backend", "background-job", "file-backend",
 		"researcher",
+		// CW-20260519-0123: Phase-6 standing roles. Added so
+		// subagent_spawn with role={system-architect,code-auditor,
+		// reviewer} resolves through the fail-fast gate at the Spawn
+		// boundary instead of falling to the orphan-reaper path.
+		// "reviewer" promotes the prompt-framing-only role in
+		// internal/runtime/agent/prompt.go to a registered profile.
+		"code-auditor", "reviewer", "system-architect",
 	}
 	sort.Strings(want)
 	if len(got) != len(want) {

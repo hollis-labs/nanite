@@ -83,9 +83,14 @@ const (
 	ErrorKindTimeout = "timeout"
 
 	// ErrorKindDenied indicates the spawn was refused before the
-	// runner started. Reasons include trust resolution returning
-	// TrustUntrusted, approval rejection, approval timeout, or
-	// missing role / profile.
+	// runner started for a deliberate trust / policy reason: trust
+	// resolution returning TrustUntrusted, approval rejection, or
+	// approval timeout. Distinct from ErrorKindConfig (missing /
+	// non-executable profile) — denied is "the gate said no", config
+	// is "the gate could not resolve a runnable agent for this role".
+	// (Pre-PR-#214 this comment also listed "missing role / profile"
+	// as a denied reason; the fail-fast gate moved that to
+	// ErrorKindConfig, so the reference was stale.)
 	ErrorKindDenied = "denied"
 
 	// ErrorKindCancelled indicates the run was cancelled
@@ -105,6 +110,37 @@ const (
 	// but provided nothing actionable. Treated as success=false so
 	// the parent does not narrate a non-existent reply.
 	ErrorKindEmptyReply = "empty_reply"
+
+	// ErrorKindConfig indicates the spawn was rejected at the Spawn
+	// boundary because of a configuration fault — the role has no
+	// registered agent profile, or the resolved profile is
+	// can_execute=false and not in the text-only role whitelist
+	// (CW-20260519-0123). Distinct from ErrorKindDenied (deliberate
+	// trust refusal) and ErrorKindInternal (runtime fault): a config
+	// error is fixable by registering the missing profile or routing
+	// to a known role. The error.context carries `role` and `reason`
+	// — see ConfigReason* constants below for the stable discriminator
+	// values — so the parent can surface or retry with a known role.
+	ErrorKindConfig = "config"
+)
+
+// ConfigReason* are the stable discriminator values for a config-fault
+// envelope's `error.context.reason` field (PR #214 review fix item 5).
+// Populated by the MCP transport when mapping ErrNoProfileForRole /
+// ErrRoleNotExecutable from the fail-fast gate into the envelope. Used
+// by parents and operator tooling that needs to branch on the exact
+// config fault without parsing the message string.
+const (
+	// ConfigReasonNoProfile signals the requested role has no
+	// agent_profiles row (the c271 pattern). Operator action: register
+	// the profile or route the parent to a known slug.
+	ConfigReasonNoProfile = "no_profile"
+
+	// ConfigReasonNotExecutable signals the role resolved to a profile
+	// row but can_execute=false and the slug is not in the text-only
+	// whitelist (the c256 pattern). Operator action: register tool
+	// surface or whitelist the slug.
+	ConfigReasonNotExecutable = "not_executable"
 )
 
 // NewSuccessEnvelope builds a Success=true envelope. summary may be

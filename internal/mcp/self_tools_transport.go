@@ -367,6 +367,8 @@ func (st *SelfToolsTransport) CallTool(ctx context.Context, name string, args ma
 		return st.callSubagentStatus(ctx, args)
 	case "subagent_cancel":
 		return st.callSubagentCancel(ctx, args)
+	case "subagent_role_audit":
+		return st.callSubagentRoleAudit(ctx, args)
 	case "background_job":
 		return st.callBackgroundJob(ctx, args)
 	case "background_status":
@@ -1638,16 +1640,34 @@ func (st *SelfToolsTransport) callSpawnSubagent(ctx context.Context, args map[st
 	id, err := st.Subagent.Spawn(ctx, req)
 	if err != nil {
 		// Spawn-stage failures (validation, untrusted role, missing
-		// fields, settings load) — no run row exists. Kind=denied for
-		// the untrusted-role case so the parent can distinguish a
-		// trust refusal from an internal error.
+		// fields, settings load) — no run row exists. Kind selection:
+		//   - denied: deliberate trust refusal (untrusted role tier)
+		//   - config: role has no registered profile, or profile is
+		//     can_execute=false and not in the text-only whitelist
+		//     (CW-20260519-0123). Fixable by registering the missing
+		//     profile or routing to a known role — distinct from an
+		//     internal fault so the parent can act.
+		//   - internal: everything else (catch-all)
+		//
+		// For config-kind envelopes, populate `reason` (PR #214 review
+		// fix item 5) with the stable ConfigReason* discriminator so
+		// downstream consumers don't have to parse the message string
+		// to branch on no-profile vs not-executable.
 		kind := subagent.ErrorKindInternal
-		if errors.Is(err, dispatch.ErrUntrustedRole) {
+		ctx := map[string]any{"role": req.Role}
+		switch {
+		case errors.Is(err, dispatch.ErrUntrustedRole):
 			kind = subagent.ErrorKindDenied
+		case errors.Is(err, subagent.ErrNoProfileForRole):
+			kind = subagent.ErrorKindConfig
+			ctx["reason"] = subagent.ConfigReasonNoProfile
+		case errors.Is(err, subagent.ErrRoleNotExecutable):
+			kind = subagent.ErrorKindConfig
+			ctx["reason"] = subagent.ConfigReasonNotExecutable
 		}
 		env := subagent.NewFailureEnvelope("", kind,
 			fmt.Sprintf("spawn subagent: %v", err),
-			map[string]any{"role": req.Role})
+			ctx)
 		return envelopeResult(env), nil
 	}
 	if req.Mode == "" || req.Mode == subagent.ModeSync {
@@ -1945,6 +1965,36 @@ func (st *SelfToolsTransport) callSubagentCancel(ctx context.Context, args map[s
 		return errorResult(fmt.Sprintf("subagent cancel: %v", err)), nil
 	}
 	return textResult("cancelled"), nil
+}
+
+// callSubagentRoleAudit returns a structured report of role slugs that
+// produced orphan-reaped or config-error subagent runs
+// (CW-20260519-0123 scope item 3). The report drives the
+// fail-fast → audit → create operator workflow: roles appearing here
+// without a registered profile are candidates for Phase-6 profile
+// creation; roles appearing with a profile but with
+// can_execute=false are candidates for either the text-only
+// whitelist or tool-surface addition.
+func (st *SelfToolsTransport) callSubagentRoleAudit(ctx context.Context, _ map[string]any) (*ToolResult, error) {
+	if st.Subagent == nil {
+		return errorResult("subagent service not configured"), nil
+	}
+	ctx, cancel := context.WithTimeout(ctx, messageCallTimeout)
+	defer cancel()
+	entries, err := st.Subagent.AuditUnknownRoles(ctx)
+	if err != nil {
+		return errorResult(fmt.Sprintf("subagent role audit: %v", err)), nil
+	}
+	// Normalize a nil slice to an empty array so the JSON shape is
+	// stable for callers (entries=[] rather than entries=null).
+	if entries == nil {
+		entries = []subagent.RoleAuditEntry{}
+	}
+	payload, err := json.Marshal(map[string]any{"entries": entries})
+	if err != nil {
+		return errorResult(fmt.Sprintf("subagent role audit marshal: %v", err)), nil
+	}
+	return textResult(string(payload)), nil
 }
 
 // --- background-job handlers (CW-20260420-0016) ---

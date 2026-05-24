@@ -187,6 +187,7 @@ func (a *API) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/harness/v1/sessions/{id}/turns", a.handleHarnessV1SendTurn)
 	mux.HandleFunc("POST /api/harness/v1/sessions/{id}/cancel", a.handleHarnessV1CancelTurn)
 	mux.HandleFunc("GET /api/harness/v1/sessions/{id}/events", a.handleHarnessV1SessionEvents)
+	mux.HandleFunc("POST /api/harness/v1/sessions/{id}/approvals/{requestId}", a.handleRespondApproval)
 	mux.HandleFunc("GET /api/harness/v1/durable-agents", a.handleHarnessV1ListDurableAgents)
 	mux.HandleFunc("GET /api/harness/v1/durable-agents/{id}", a.handleHarnessV1GetDurableAgent)
 	mux.HandleFunc("POST /api/harness/v1/durable-agents/{id}/start", a.handleHarnessV1DurableStart)

@@ -15,6 +15,15 @@ type AppConfig struct {
 	HTTP      HTTPConfig      `yaml:"http"`
 	OTel      OTelConfig      `yaml:"otel"`
 	Logging   LoggingConfig   `yaml:"logging"`
+	Recipes   RecipesConfig   `yaml:"recipes"`
+}
+
+// RecipesConfig controls durable-agent recipe catalog loading.
+type RecipesConfig struct {
+	// CatalogPaths is an ordered list of local recipe catalog files or
+	// directories. Configured recipes override built-ins by ID; duplicate
+	// IDs across configured catalogs are rejected at startup.
+	CatalogPaths []string `yaml:"catalog_paths"`
 }
 
 // LoggingConfig controls the structured logging handler installed by

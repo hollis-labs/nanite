@@ -20,12 +20,21 @@ type API struct {
 	// CLI-launched chat agent's `nanite mcp` subprocess forwards to so it
 	// dispatches through the live harness. nil = the endpoint 503s.
 	selfTools *mcp.SelfToolsTransport
+	// agentBuilder freezes the no-write Agent Builder draft/review seam.
+	// The default implementation is deterministic so tests never require a
+	// live runtime. A future live agent path can be injected here without
+	// changing the API contract.
+	agentBuilder agentBuilderAdvisor
 }
 
 // New creates a new API instance from a service container.
 func New(svc *service.Container) *API {
 	deps := service.DefaultEmbedderSelectDeps()
-	return &API{Services: svc, embedderSelectDeps: deps}
+	return &API{
+		Services:           svc,
+		embedderSelectDeps: deps,
+		agentBuilder:       deterministicAgentBuilderAdvisor{},
+	}
 }
 
 // SetSelfTools wires the fully-wired in-process self-tools transport that
@@ -63,6 +72,7 @@ func (a *API) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("PUT /api/sessions/{id}", a.handleUpdateSession)
 	mux.HandleFunc("DELETE /api/sessions/{id}", a.handleDeleteSession)
 	mux.HandleFunc("POST /api/sessions/{id}/fork", a.handleForkSession)
+	mux.HandleFunc("GET /api/sessions/{id}/details", a.handleGetSessionDetails)
 	mux.HandleFunc("GET /api/sessions/{id}/messages", a.handleListSessionMessages)
 	mux.HandleFunc("GET /api/sessions/{id}/plugin-envelopes", a.handleListSessionPluginEnvelopes)
 
@@ -93,6 +103,31 @@ func (a *API) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/agents", a.handleCreateAgent)
 	mux.HandleFunc("GET /api/agents/{id}", a.handleGetAgent)
 	mux.HandleFunc("PUT /api/agents/{id}", a.handleUpdateAgent)
+	mux.HandleFunc("GET /api/agents/{id}/known-tools", a.handleListAgentKnownTools)
+	mux.HandleFunc("POST /api/agents/{id}/known-tools", a.handleCreateAgentKnownTool)
+	mux.HandleFunc("GET /api/agents/{id}/known-tools/{toolName}", a.handleGetAgentKnownTool)
+	mux.HandleFunc("PUT /api/agents/{id}/known-tools/{toolName}", a.handleUpdateAgentKnownTool)
+	mux.HandleFunc("DELETE /api/agents/{id}/known-tools/{toolName}", a.handleDeleteAgentKnownTool)
+	mux.HandleFunc("GET /api/agents/{id}/known-skills", a.handleListAgentKnownSkills)
+	mux.HandleFunc("POST /api/agents/{id}/known-skills", a.handleCreateAgentKnownSkill)
+	mux.HandleFunc("GET /api/agents/{id}/known-skills/{skillName}", a.handleGetAgentKnownSkill)
+	mux.HandleFunc("PUT /api/agents/{id}/known-skills/{skillName}", a.handleUpdateAgentKnownSkill)
+	mux.HandleFunc("DELETE /api/agents/{id}/known-skills/{skillName}", a.handleDeleteAgentKnownSkill)
+	mux.HandleFunc("GET /api/agents/{id}/procedures", a.handleListAgentProcedures)
+	mux.HandleFunc("POST /api/agents/{id}/procedures", a.handleCreateAgentProcedure)
+	mux.HandleFunc("GET /api/agents/{id}/procedures/{name}", a.handleGetAgentProcedure)
+	mux.HandleFunc("PUT /api/agents/{id}/procedures/{name}", a.handleUpdateAgentProcedure)
+	mux.HandleFunc("DELETE /api/agents/{id}/procedures/{name}", a.handleDeleteAgentProcedure)
+	mux.HandleFunc("GET /api/agents/{id}/knowledge-seeds", a.handleListAgentKnowledgeSeeds)
+	mux.HandleFunc("POST /api/agents/{id}/knowledge-seeds", a.handleCreateAgentKnowledgeSeed)
+	mux.HandleFunc("GET /api/agents/{id}/knowledge-seeds/{seedKey}", a.handleGetAgentKnowledgeSeed)
+	mux.HandleFunc("PUT /api/agents/{id}/knowledge-seeds/{seedKey}", a.handleUpdateAgentKnowledgeSeed)
+	mux.HandleFunc("DELETE /api/agents/{id}/knowledge-seeds/{seedKey}", a.handleDeleteAgentKnowledgeSeed)
+	mux.HandleFunc("POST /api/agents/{id}/knowledge-seeds/{seedKey}/mark-applied", a.handleMarkAgentKnowledgeSeedApplied)
+	mux.HandleFunc("GET /api/agents/{id}/boot-plan", a.handleGetAgentBootPlan)
+	mux.HandleFunc("PUT /api/agents/{id}/boot-plan", a.handlePutAgentBootPlan)
+	mux.HandleFunc("DELETE /api/agents/{id}/boot-plan", a.handleDeleteAgentBootPlan)
+	mux.HandleFunc("POST /api/agents/{id}/boot-plan/dry-run", a.handleDryRunAgentBootPlan)
 	mux.HandleFunc("GET /api/agents/{id}/modes", a.handleListAgentModes)
 	mux.HandleFunc("POST /api/agents/{id}/modes", a.handleCreateAgentMode)
 	mux.HandleFunc("GET /api/agents/{id}/projects", a.handleListAgentProjects)
@@ -101,6 +136,54 @@ func (a *API) RegisterRoutes(mux *http.ServeMux) {
 
 	// Session compaction
 	mux.HandleFunc("POST /api/sessions/{id}/compact", a.handleCompactSession)
+
+	// Durable agent instances. Lifecycle request endpoints record intent;
+	// explicit start/resume endpoints resolve launch policy into sessions.
+	mux.HandleFunc("GET /api/durable-agents", a.handleListDurableAgents)
+	mux.HandleFunc("POST /api/durable-agents", a.handleCreateDurableAgent)
+	mux.HandleFunc("GET /api/durable-agents/{id}", a.handleGetDurableAgent)
+	mux.HandleFunc("PATCH /api/durable-agents/{id}", a.handleUpdateDurableAgent)
+	mux.HandleFunc("POST /api/durable-agents/{id}/archive", a.handleArchiveDurableAgent)
+	mux.HandleFunc("GET /api/durable-agents/{id}/events", a.handleListDurableAgentEvents)
+	mux.HandleFunc("GET /api/durable-agents/{id}/launch-plan", a.handleDurableAgentLaunchPlan)
+	mux.HandleFunc("POST /api/durable-agents/{id}/start", a.handleDurableAgentStart)
+	mux.HandleFunc("POST /api/durable-agents/{id}/resume", a.handleDurableAgentResume)
+	mux.HandleFunc("POST /api/durable-agents/{id}/start-request", a.handleDurableAgentStartRequest)
+	mux.HandleFunc("POST /api/durable-agents/{id}/stop-request", a.handleDurableAgentStopRequest)
+	mux.HandleFunc("POST /api/durable-agents/{id}/pause-request", a.handleDurableAgentPauseRequest)
+	mux.HandleFunc("POST /api/durable-agents/{id}/resume-request", a.handleDurableAgentResumeRequest)
+	mux.HandleFunc("GET /api/durable-agents/{id}/sessions", a.handleListDurableAgentSessions)
+	mux.HandleFunc("POST /api/durable-agents/{id}/sessions", a.handleAttachDurableAgentSession)
+	mux.HandleFunc("POST /api/durable-agents/{id}/wake", a.handleDurableAgentWake)
+	mux.HandleFunc("GET /api/durable-agents/{id}/schedules", a.handleListDurableAgentSchedules)
+	mux.HandleFunc("POST /api/durable-agents/{id}/schedules/{scheduleId}/pause", a.handlePauseDurableAgentSchedule)
+	mux.HandleFunc("POST /api/durable-agents/{id}/schedules/{scheduleId}/resume", a.handleResumeDurableAgentSchedule)
+	mux.HandleFunc("GET /api/durable-agent-wake/due", a.handleListDurableAgentDueWake)
+	mux.HandleFunc("POST /api/durable-agent-wake/run-due", a.handleRunDurableAgentDueWake)
+
+	// Durable agent recipes and builder.
+	mux.HandleFunc("GET /api/durable-agent-recipes", a.handleListDurableAgentRecipes)
+	mux.HandleFunc("GET /api/durable-agent-recipes/{id}", a.handleGetDurableAgentRecipe)
+	mux.HandleFunc("POST /api/durable-agent-recipes/{id}/dry-run", a.handleDryRunDurableAgentRecipe)
+	mux.HandleFunc("POST /api/durable-agent-recipes/{id}/apply", a.handleApplyDurableAgentRecipe)
+	mux.HandleFunc("POST /api/agent-builder/dry-run", a.handleAgentBuilderDryRun)
+	mux.HandleFunc("POST /api/agent-builder/draft", a.handleAgentBuilderDraft)
+	mux.HandleFunc("POST /api/agent-builder/review", a.handleAgentBuilderReview)
+
+	// Frontend-readiness and external harness control plane.
+	mux.HandleFunc("GET /api/start-surface/capabilities", a.handleStartSurfaceCapabilities)
+	mux.HandleFunc("GET /api/harness/v1/initialize", a.handleHarnessV1Initialize)
+	mux.HandleFunc("GET /api/harness/v1/capabilities", a.handleHarnessV1Capabilities)
+	mux.HandleFunc("POST /api/harness/v1/sessions", a.handleHarnessV1CreateSession)
+	mux.HandleFunc("GET /api/harness/v1/sessions/{id}", a.handleHarnessV1GetSession)
+	mux.HandleFunc("POST /api/harness/v1/sessions/{id}/turns", a.handleHarnessV1SendTurn)
+	mux.HandleFunc("POST /api/harness/v1/sessions/{id}/cancel", a.handleHarnessV1CancelTurn)
+	mux.HandleFunc("GET /api/harness/v1/sessions/{id}/events", a.handleHarnessV1SessionEvents)
+	mux.HandleFunc("GET /api/harness/v1/durable-agents", a.handleHarnessV1ListDurableAgents)
+	mux.HandleFunc("GET /api/harness/v1/durable-agents/{id}", a.handleHarnessV1GetDurableAgent)
+	mux.HandleFunc("POST /api/harness/v1/durable-agents/{id}/start", a.handleHarnessV1DurableStart)
+	mux.HandleFunc("POST /api/harness/v1/durable-agents/{id}/resume", a.handleHarnessV1DurableResume)
+	mux.HandleFunc("POST /api/harness/v1/durable-agents/{id}/wake", a.handleHarnessV1DurableWake)
 
 	// Bookmarks
 	mux.HandleFunc("GET /api/sessions/{id}/bookmarks", a.handleListBookmarks)

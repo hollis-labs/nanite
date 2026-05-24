@@ -8,6 +8,7 @@ import (
 
 	"github.com/hollis-labs/nanite/internal/chat"
 	"github.com/hollis-labs/nanite/internal/effort"
+	"github.com/hollis-labs/nanite/internal/service"
 )
 
 func (a *API) handleSendMessage(w http.ResponseWriter, r *http.Request) {
@@ -30,6 +31,9 @@ func (a *API) handleSendMessage(w http.ResponseWriter, r *http.Request) {
 		e = effort.Default
 	}
 	ctx := effort.WithContext(r.Context(), e)
+	if req.CycleKind != "" {
+		ctx = service.WithAgentCycleKindForAPI(ctx, req.CycleKind)
+	}
 
 	msgID, err := a.Services.Chat.HandleMessage(ctx, req.SessionID, req.Content)
 	if err != nil {
@@ -153,7 +157,10 @@ func (a *API) handleRetryStream(w http.ResponseWriter, r *http.Request) {
 
 func (a *API) handleStream(w http.ResponseWriter, r *http.Request) {
 	messageID := r.PathValue("messageID")
+	a.streamMessageEvents(w, r, messageID, "")
+}
 
+func (a *API) streamMessageEvents(w http.ResponseWriter, r *http.Request, messageID, expectedSessionID string) {
 	// CW-20260418-0100 / CW-20260419-0014: resume cursor has two sources:
 	//   1. ?from=<uint64> query param — explicit, app-controlled.
 	//   2. Last-Event-ID header — sent automatically by browser EventSource
@@ -190,6 +197,17 @@ func (a *API) handleStream(w http.ResponseWriter, r *http.Request) {
 	// streamClosed just tells us the generation finished before we connected;
 	// behavior is identical either way — the channel carries replay events
 	// (if any) and then EOFs. The for/select below handles both paths.
+	if expectedSessionID != "" {
+		msg, err := a.Services.Store.GetMessage(messageID)
+		if err != nil {
+			a.errorResp(w, http.StatusNotFound, "message not found")
+			return
+		}
+		if msg.SessionID != expectedSessionID {
+			a.errorResp(w, http.StatusNotFound, "message not found for session")
+			return
+		}
+	}
 	ch, _, ok := a.Services.Streams.Subscribe(messageID, fromEventID)
 	if !ok {
 		a.errorResp(w, http.StatusNotFound, "stream not found")

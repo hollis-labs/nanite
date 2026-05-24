@@ -1,5 +1,10 @@
 package api
 
+import (
+	"github.com/hollis-labs/nanite/internal/service"
+	"github.com/hollis-labs/nanite/internal/store"
+)
+
 // Request types for API handlers.
 // Organized by resource. Each type replaces an anonymous struct
 // that was previously defined inline in a handler function.
@@ -63,6 +68,9 @@ type SessionAutoSwitchResponse struct {
 type SendMessageRequest struct {
 	SessionID string `json:"session_id"`
 	Content   string `json:"content"`
+	// CycleKind annotates durable-agent lifecycle turns. Empty/default is
+	// "request"; monitor drivers use "tick"; notify-and-wake uses "wake".
+	CycleKind string `json:"cycle_kind,omitempty"`
 	// Effort biases the token budget multiplier and reasoning-block enablement
 	// for this turn. Valid values: "low", "normal" (default), "high", "max".
 	// Empty string or omitted → "normal". Unknown values are ignored (treated as normal).
@@ -155,6 +163,322 @@ type CreateAgentModeRequest struct {
 	PromptAddendum string `json:"prompt_addendum"`
 	ToolOverrides  string `json:"tool_overrides"`
 	Settings       string `json:"settings"`
+}
+
+type AgentKnownToolUpsertRequest struct {
+	AgentID    string `json:"agent_id"`
+	ToolName   string `json:"tool_name"`
+	Pinned     bool   `json:"pinned"`
+	SortOrder  int64  `json:"sort_order"`
+	TTLSeconds int64  `json:"ttl_seconds"`
+	Reason     string `json:"reason"`
+}
+
+type AgentKnownSkillUpsertRequest struct {
+	AgentID    string `json:"agent_id"`
+	SkillName  string `json:"skill_name"`
+	Pinned     bool   `json:"pinned"`
+	TTLSeconds int64  `json:"ttl_seconds"`
+	Reason     string `json:"reason"`
+}
+
+type AgentProcedureUpsertRequest struct {
+	AgentID string `json:"agent_id"`
+	Name    string `json:"name"`
+	Body    string `json:"body"`
+	Scope   string `json:"scope"`
+}
+
+type AgentKnowledgeSeedUpsertRequest struct {
+	AgentID   string   `json:"agent_id"`
+	SeedKey   string   `json:"seed_key"`
+	Namespace string   `json:"namespace"`
+	Body      string   `json:"body"`
+	TagsJSON  string   `json:"tags_json"`
+	Tags      []string `json:"tags"`
+}
+
+type AgentBootPlanDryRunRequest struct {
+	Plan *store.AgentBootPlanDocument `json:"plan,omitempty"`
+}
+
+type AgentBootPlanPlantOperation struct {
+	ItemID                 string   `json:"item_id"`
+	Name                   string   `json:"name"`
+	Timing                 []string `json:"timing"`
+	TargetRelPath          string   `json:"target_rel_path"`
+	EntryKind              string   `json:"entry_kind"`
+	SourceKind             string   `json:"source_kind"`
+	OverwritePolicy        string   `json:"overwrite_policy"`
+	FailurePolicy          string   `json:"failure_policy"`
+	Enabled                bool     `json:"enabled"`
+	Secret                 bool     `json:"secret"`
+	SourcePath             string   `json:"source_path,omitempty"`
+	SourcePathRedacted     bool     `json:"source_path_redacted,omitempty"`
+	ContentPreview         string   `json:"content_preview,omitempty"`
+	ContentPreviewRedacted bool     `json:"content_preview_redacted,omitempty"`
+	Notes                  []string `json:"notes,omitempty"`
+}
+
+type AgentBootPlanCallbackOperation struct {
+	CallbackID       string   `json:"callback_id"`
+	Name             string   `json:"name"`
+	Timing           string   `json:"timing"`
+	CallbackType     string   `json:"callback_type"`
+	TimeoutSeconds   int      `json:"timeout_seconds"`
+	FailurePolicy    string   `json:"failure_policy"`
+	Enabled          bool     `json:"enabled"`
+	PayloadPreview   string   `json:"payload_preview,omitempty"`
+	EnvRedacted      bool     `json:"env_redacted,omitempty"`
+	PermissionsNotes []string `json:"permissions_notes,omitempty"`
+	Notes            []string `json:"notes,omitempty"`
+}
+
+type AgentBootPlanDryRunResponse struct {
+	Valid            bool                             `json:"valid"`
+	Errors           []string                         `json:"errors"`
+	Warnings         []string                         `json:"warnings"`
+	NormalizedPlan   store.AgentBootPlanDocument      `json:"normalized_plan"`
+	PlantOperations  []AgentBootPlanPlantOperation    `json:"plant_operations"`
+	CallbackOrder    []AgentBootPlanCallbackOperation `json:"callback_order"`
+	UnsupportedNotes []string                         `json:"unsupported_notes"`
+}
+
+type AgentBuilderProfileInput struct {
+	ID                      string `json:"id"`
+	Name                    string `json:"name"`
+	Slug                    string `json:"slug"`
+	Avatar                  string `json:"avatar"`
+	Icon                    string `json:"icon"`
+	SystemPrompt            string `json:"system_prompt"`
+	Description             string `json:"description"`
+	DefaultModel            string `json:"default_model"`
+	MCPServers              string `json:"mcp_servers"`
+	ToolPermissions         string `json:"tool_permissions"`
+	Settings                string `json:"settings"`
+	Tools                   string `json:"tools"`
+	Directories             string `json:"directories"`
+	Constraints             string `json:"constraints"`
+	Tags                    string `json:"tags"`
+	Status                  string `json:"status"`
+	Source                  string `json:"source"`
+	SourceRef               string `json:"source_ref"`
+	ParentDispatchAllowlist string `json:"parent_dispatch_allowlist"`
+	RoleTools               string `json:"role_tools"`
+	RoleSkills              string `json:"role_skills"`
+	ContextPolicy           string `json:"context_policy"`
+	ActivationMode          string `json:"activation_mode"`
+	Class                   string `json:"class"`
+	DefaultState            string `json:"default_state"`
+	CanExecute              *bool  `json:"can_execute,omitempty"`
+	Durable                 *bool  `json:"durable,omitempty"`
+}
+
+type AgentBuilderCapabilitiesInput struct {
+	AssignedSkillIDs   []string                          `json:"assigned_skill_ids"`
+	AssignedSkillSlugs []string                          `json:"assigned_skill_slugs"`
+	PromptTemplateIDs  []string                          `json:"prompt_template_ids"`
+	KnownTools         []AgentKnownToolUpsertRequest     `json:"known_tools"`
+	KnownSkills        []AgentKnownSkillUpsertRequest    `json:"known_skills"`
+	Procedures         []AgentProcedureUpsertRequest     `json:"procedures"`
+	KnowledgeSeeds     []AgentKnowledgeSeedUpsertRequest `json:"knowledge_seeds"`
+	ReflexSuggestions  []string                          `json:"reflex_suggestions"`
+}
+
+type AgentBuilderDurableInstanceInput struct {
+	Create         bool              `json:"create"`
+	RecipeID       string            `json:"recipe_id"`
+	LifecycleClass string            `json:"lifecycle_class"`
+	Provider       string            `json:"provider"`
+	Model          string            `json:"model"`
+	RuntimeKind    string            `json:"runtime_kind"`
+	WorkRoot       string            `json:"work_root"`
+	WorkspaceID    string            `json:"workspace_id"`
+	ProjectID      string            `json:"project_id"`
+	Start          bool              `json:"start"`
+	Metadata       map[string]string `json:"metadata"`
+}
+
+type AgentBuilderOperatorNotificationInput struct {
+	TargetKind   string `json:"target_kind"`
+	TargetID     string `json:"target_id"`
+	IncludeLinks bool   `json:"include_links"`
+}
+
+type AgentBuilderCapabilityOperation struct {
+	Area   string `json:"area"`
+	Action string `json:"action"`
+	Target string `json:"target"`
+	Count  int    `json:"count"`
+	Detail string `json:"detail,omitempty"`
+}
+
+type AgentBuilderLaunchPlanPreview struct {
+	LifecycleClass     string                         `json:"lifecycle_class"`
+	SessionPolicy      string                         `json:"session_policy"`
+	AttachmentRelation string                         `json:"attachment_relation"`
+	Provider           string                         `json:"provider"`
+	Model              string                         `json:"model"`
+	RuntimeKind        string                         `json:"runtime_kind"`
+	WorkRoot           string                         `json:"work_root"`
+	WouldCreateSession bool                           `json:"would_create_session"`
+	WakePayload        DurableAgentWakePayloadRequest `json:"wake_payload"`
+}
+
+type AgentBuilderNotificationResource struct {
+	ID   string `json:"id"`
+	Name string `json:"name"`
+	Slug string `json:"slug"`
+}
+
+type AgentBuilderDeepLink struct {
+	Kind  string `json:"kind"`
+	Path  string `json:"path"`
+	Label string `json:"label"`
+}
+
+type AgentBuilderReadyNotificationPreview struct {
+	TargetKind      string                           `json:"target_kind"`
+	TargetID        string                           `json:"target_id"`
+	Profile         AgentBuilderNotificationResource `json:"profile"`
+	DurableInstance AgentBuilderNotificationResource `json:"durable_instance"`
+	Session         AgentBuilderNotificationResource `json:"session"`
+	Links           []AgentBuilderDeepLink           `json:"links"`
+	Warnings        []string                         `json:"warnings"`
+	FollowUps       []string                         `json:"followups"`
+}
+
+type AgentBuilderDryRunRequest struct {
+	SchemaVersion        int                                   `json:"schema_version"`
+	Mode                 string                                `json:"mode"`
+	Profile              AgentBuilderProfileInput              `json:"profile"`
+	Capabilities         AgentBuilderCapabilitiesInput         `json:"capabilities"`
+	BootPlan             *store.AgentBootPlanDocument          `json:"boot_plan,omitempty"`
+	DurableInstance      AgentBuilderDurableInstanceInput      `json:"durable_instance"`
+	OperatorNotification AgentBuilderOperatorNotificationInput `json:"operator_notification"`
+}
+
+type AgentBuilderDryRunResponse struct {
+	SchemaVersion            int                                  `json:"schema_version"`
+	Valid                    bool                                 `json:"valid"`
+	Errors                   []string                             `json:"errors"`
+	Warnings                 []string                             `json:"warnings"`
+	UnsupportedFields        []string                             `json:"unsupported_fields"`
+	NormalizedProfilePayload AgentBuilderProfileInput             `json:"normalized_profile_payload"`
+	CapabilityOperations     []AgentBuilderCapabilityOperation    `json:"capability_operations"`
+	BootPlanPreview          *AgentBootPlanDryRunResponse         `json:"boot_plan_preview,omitempty"`
+	DurableRecipePlan        *service.DurableAgentRecipePlan      `json:"durable_recipe_plan,omitempty"`
+	LaunchPlanPreview        *AgentBuilderLaunchPlanPreview       `json:"launch_plan_preview,omitempty"`
+	NotificationPreview      AgentBuilderReadyNotificationPreview `json:"notification_preview"`
+}
+
+type AgentBuilderDraftRequest struct {
+	SchemaVersion           int    `json:"schema_version"`
+	IntakeText              string `json:"intake_text"`
+	Name                    string `json:"name"`
+	Slug                    string `json:"slug"`
+	Description             string `json:"description"`
+	ProjectContext          string `json:"project_context"`
+	WorkRoot                string `json:"work_root"`
+	PreferredProvider       string `json:"preferred_provider"`
+	PreferredModel          string `json:"preferred_model"`
+	PreferredRuntimeKind    string `json:"preferred_runtime_kind"`
+	RequestedLifecycleClass string `json:"requested_lifecycle_class"`
+}
+
+type AgentBuilderDraftEnvelope struct {
+	Mode                 string                                `json:"mode"`
+	Profile              AgentBuilderProfileInput              `json:"profile"`
+	Capabilities         AgentBuilderCapabilitiesInput         `json:"capabilities"`
+	BootPlan             *store.AgentBootPlanDocument          `json:"boot_plan,omitempty"`
+	DurableInstance      AgentBuilderDurableInstanceInput      `json:"durable_instance"`
+	OperatorNotification AgentBuilderOperatorNotificationInput `json:"operator_notification"`
+}
+
+type AgentBuilderDraftResponse struct {
+	SchemaVersion       int                       `json:"schema_version"`
+	Draft               AgentBuilderDraftEnvelope `json:"draft"`
+	Questions           []string                  `json:"questions"`
+	Warnings            []string                  `json:"warnings"`
+	UnsupportedRequests []string                  `json:"unsupported_requests"`
+	Confidence          float64                   `json:"confidence"`
+}
+
+type AgentBuilderReviewRequest struct {
+	SchemaVersion        int                       `json:"schema_version"`
+	CurrentDraft         AgentBuilderDraftEnvelope `json:"current_draft"`
+	PreviousBuilderNotes []string                  `json:"previous_builder_notes"`
+}
+
+type AgentBuilderPatchOperation struct {
+	Op    string `json:"op"`
+	Path  string `json:"path"`
+	Value string `json:"value,omitempty"`
+	Note  string `json:"note,omitempty"`
+}
+
+type AgentBuilderReviewResponse struct {
+	SchemaVersion            int                          `json:"schema_version"`
+	Accepted                 bool                         `json:"accepted"`
+	Questions                []string                     `json:"questions"`
+	Warnings                 []string                     `json:"warnings"`
+	SuggestedPatchOperations []AgentBuilderPatchOperation `json:"suggested_patch_operations"`
+	MaxRoundsRecommended     int                          `json:"max_rounds_recommended"`
+}
+
+type CreateDurableAgentRequest struct {
+	ID               string `json:"id"`
+	Name             string `json:"name"`
+	Slug             string `json:"slug"`
+	ProfileID        string `json:"profile_id"`
+	LifecycleClass   string `json:"lifecycle_class"`
+	Provider         string `json:"provider"`
+	Model            string `json:"model"`
+	RuntimeKind      string `json:"runtime_kind"`
+	LaunchSourceType string `json:"launch_source_type"`
+	LaunchSourceID   string `json:"launch_source_id"`
+	WorkRoot         string `json:"work_root"`
+	MetadataJSON     string `json:"metadata_json"`
+}
+
+type UpdateDurableAgentRequest struct {
+	Name         *string `json:"name"`
+	Slug         *string `json:"slug"`
+	WorkRoot     *string `json:"work_root"`
+	MetadataJSON *string `json:"metadata_json"`
+}
+
+type AttachDurableAgentSessionRequest struct {
+	SessionID string `json:"session_id"`
+	Relation  string `json:"relation"`
+}
+
+type DurableAgentWakePayloadRequest struct {
+	Reason   string            `json:"reason"`
+	Prompt   string            `json:"prompt,omitempty"`
+	Facts    map[string]string `json:"facts,omitempty"`
+	Metadata map[string]string `json:"metadata,omitempty"`
+}
+
+type DurableAgentStartRequest struct {
+	WorkspaceID string                         `json:"workspace_id"`
+	ProjectID   string                         `json:"project_id"`
+	WakePayload DurableAgentWakePayloadRequest `json:"wake_payload"`
+}
+
+type DurableAgentRecipeRequest struct {
+	Name        string                         `json:"name"`
+	Slug        string                         `json:"slug"`
+	ProfileID   string                         `json:"profile_id"`
+	Provider    string                         `json:"provider"`
+	Model       string                         `json:"model"`
+	RuntimeKind string                         `json:"runtime_kind"`
+	WorkRoot    string                         `json:"work_root"`
+	WorkspaceID string                         `json:"workspace_id"`
+	ProjectID   string                         `json:"project_id"`
+	WakePayload DurableAgentWakePayloadRequest `json:"wake_payload"`
+	Metadata    map[string]string              `json:"metadata"`
+	Start       bool                           `json:"start"`
 }
 
 // --- Artifacts ---

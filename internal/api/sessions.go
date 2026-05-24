@@ -243,6 +243,18 @@ func (a *API) handleUpdateSession(w http.ResponseWriter, r *http.Request) {
 	if req.IsPinned != nil {
 		existing.IsPinned = *req.IsPinned
 	}
+	if req.Provider != nil || req.Model != nil {
+		if msgs, err := a.Services.Store.ListMessages(id, 1); err == nil && len(msgs) > 0 {
+			if req.Provider != nil && *req.Provider != existing.Provider {
+				a.errorResp(w, http.StatusBadRequest, "provider cannot be changed after the session has messages")
+				return
+			}
+			if req.Model != nil && *req.Model != existing.Model {
+				a.errorResp(w, http.StatusBadRequest, "model cannot be changed after the session has messages")
+				return
+			}
+		}
+	}
 	if req.Model != nil {
 		existing.Model = *req.Model
 	}

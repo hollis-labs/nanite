@@ -401,6 +401,9 @@ func cmdServe(args []string) {
 		// case the registry constructor produces an inert (empty)
 		// Registry and the dropdown surfaces only DB-seeded providers.
 		BootProfileCatalogPath: resolveBootProfileCatalogPath(cfg),
+		// Durable-agent recipe catalog files/dirs merge with built-ins at
+		// startup through the app config seam used for product tunables.
+		DurableAgentRecipeCatalogPaths: appCfg.Recipes.CatalogPaths,
 	})
 	if err != nil {
 		slogx.Fatal("failed to create service container", "err", err)

@@ -111,10 +111,13 @@ type Container struct {
 	EmbeddingModel    string
 
 	// Multi-agent orchestration.
-	Coord     coordination.CoordStore
-	Tasks     task.Service
-	Workers   *worker.Manager
-	Worktrees worktree.Manager
+	Coord               coordination.CoordStore
+	DurableAgents       DurableAgentService
+	DurableWake         DurableAgentWakeService
+	DurableAgentRecipes DurableAgentRecipeService
+	Tasks               task.Service
+	Workers             *worker.Manager
+	Worktrees           worktree.Manager
 
 	// Subsystems exposed for API handlers that need direct access.
 	// These will shrink as more domain services are added.
@@ -268,6 +271,11 @@ type ContainerConfig struct {
 	// already-tilde-expanded by the caller (cmd/nanite/main.go calls
 	// config.ResolvedBootProfileCatalogPath before threading it here).
 	BootProfileCatalogPath string
+
+	// DurableAgentRecipeCatalogPaths is the ordered set of local recipe
+	// catalog files or directories loaded at startup. Configured recipes
+	// override built-ins by ID; duplicate configured IDs are rejected.
+	DurableAgentRecipeCatalogPaths []string
 
 	// DevToolsAllowedPaths is the binary-scoped allow-list configured via
 	// nanite.yaml `dev_tools_allowed_paths` (see cmd/nanite/main.go
@@ -1082,6 +1090,14 @@ func NewContainer(cfg ContainerConfig) (*Container, error) {
 	chat.RegisterResponseHandler("elicitation-prompt", chat.NewElicitationResponseHandler(elicitSvc))
 	slog.Info("service container: elicitation service enabled (G4, CW-20260420-0018)")
 
+	durableAgents := NewDurableAgentServiceWithRuntime(cfg.Store, NewChatDurableAgentRuntimeController(chatSvc))
+	durableWake := NewDurableAgentWakeService(cfg.Store, durableAgents)
+	durableAgentRecipes, err := NewDurableAgentRecipeService(durableAgents, cfg.DurableAgentRecipeCatalogPaths...)
+	if err != nil {
+		stopCatalog()
+		return nil, fmt.Errorf("service container: durable agent recipes: %w", err)
+	}
+
 	// F5 follow-up (CW-20260420-0022): wire the HintDispatcher adapter
 	// into ContextClient so NANITE_THINK_BLOCK_V2_ENABLED=true actually
 	// fires v2 dynamic hints in production. Without this assignment the
@@ -1197,6 +1213,9 @@ func NewContainer(cfg ContainerConfig) (*Container, error) {
 		EmbeddingProvider:   embeddingProviderID,
 		EmbeddingModel:      embeddingModel,
 		Coord:               cfg.CoordStore,
+		DurableAgents:       durableAgents,
+		DurableWake:         durableWake,
+		DurableAgentRecipes: durableAgentRecipes,
 		Tasks:               tasks,
 		Workers:             workers,
 		Worktrees:           cfg.Worktrees,

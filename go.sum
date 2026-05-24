@@ -61,6 +61,8 @@ github.com/hollis-labs/go-agent-launch v0.3.5 h1:YNffpuMtA/n0l1gaBSQxgtoyIFlBRTE
 github.com/hollis-labs/go-agent-launch v0.3.5/go.mod h1:LKS9xKT+zyckf42FMbUqfcLl7OwqEBEz/MgOXDc2aVs=
 github.com/hollis-labs/go-agent-launch v0.4.0 h1:D7w0gZmqNDK2e5lUSPNzBUqc2zz/oklX1ZzLMLYrrTQ=
 github.com/hollis-labs/go-agent-launch v0.4.0/go.mod h1:9StiZRxBlpB7qemEf6jdD9rg5qmNrpYIvSC99iWUpwo=
+github.com/hollis-labs/go-agent-runtime v0.5.0 h1:FIT3qpk7aojKyax84dt2UzDBmoqxBLp5OWba09ehXgg=
+github.com/hollis-labs/go-agent-runtime v0.5.0/go.mod h1:a+M2U6LUokHRAhQx+eJJhksQZy3iku1eeYG0n82K0Ik=
 github.com/hollis-labs/go-agent-sessions v0.9.5 h1:fGNtF4Ewtu20Wq1YUwwMu32ZjrTg3yBl9Cm02PnF+AE=
 github.com/hollis-labs/go-agent-sessions v0.9.5/go.mod h1:43q5MrOpmLhPviKG9/s4VX0hq4+XPv+dOqiBtI++6Po=
 github.com/hollis-labs/go-agent-sessions v0.10.0 h1:8Mtywo+miEIiINxttljJqffOsHI3j46KLbnFkbqaQj0=

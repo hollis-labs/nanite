@@ -6,6 +6,8 @@ import (
 	"errors"
 	"fmt"
 	"time"
+
+	"github.com/oklog/ulid/v2"
 )
 
 // AgentRuntimeRow is the persisted lifecycle row internal/runtime/agent.Boot
@@ -23,6 +25,7 @@ type AgentRuntimeRow struct {
 	ID                string
 	AgentProfile      string
 	Provider          string
+	RuntimeKind       string
 	Mode              string
 	Workdir           string
 	State             string
@@ -50,7 +53,7 @@ type AgentRuntimeCheckpoint struct {
 // rather than a corrupt-store error.
 var ErrAgentRuntimeCheckpointNotFound = errors.New("agent_runtime_checkpoint not found")
 
-const agentRuntimeColumns = `id, agent_profile, provider, mode, workdir, state, pid,
+const agentRuntimeColumns = `id, agent_profile, provider, runtime_kind, mode, workdir, state, pid,
     parent_session_id, provider_session_id, meta_json, failure_reason, started_at, updated_at`
 
 // CreateAgentRuntimeRow persists a launching-state row for a Boot call.
@@ -71,13 +74,17 @@ func (s *Store) CreateAgentRuntimeRow(row *AgentRuntimeRow) error {
 	if row.MetaJSON == "" {
 		row.MetaJSON = "{}"
 	}
+	if row.RuntimeKind == "" {
+		row.RuntimeKind = "unknown"
+	}
 
 	_, err := s.DB.Exec(
 		`INSERT INTO agent_runtime (`+agentRuntimeColumns+`)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		 ON CONFLICT(id) DO UPDATE SET
 		     agent_profile = excluded.agent_profile,
 		     provider = excluded.provider,
+		     runtime_kind = excluded.runtime_kind,
 		     mode = excluded.mode,
 		     workdir = excluded.workdir,
 		     state = excluded.state,
@@ -87,7 +94,7 @@ func (s *Store) CreateAgentRuntimeRow(row *AgentRuntimeRow) error {
 		     meta_json = excluded.meta_json,
 		     failure_reason = excluded.failure_reason,
 		     updated_at = excluded.updated_at`,
-		row.ID, row.AgentProfile, row.Provider, row.Mode, row.Workdir,
+		row.ID, row.AgentProfile, row.Provider, row.RuntimeKind, row.Mode, row.Workdir,
 		row.State, row.PID, row.ParentSessionID, row.ProviderSessionID,
 		row.MetaJSON, row.FailureReason,
 		row.StartedAt.UTC().Format(time.RFC3339Nano),
@@ -176,6 +183,72 @@ func (s *Store) ListRunningAgentRuntimeRows() ([]*AgentRuntimeRow, error) {
 	return out, rows.Err()
 }
 
+func (s *Store) ListAgentRuntimeRowsForSession(sessionID string) ([]*AgentRuntimeRow, error) {
+	rows, err := s.DB.Query(
+		`SELECT `+agentRuntimeColumns+` FROM agent_runtime
+		 WHERE parent_session_id = ? ORDER BY started_at DESC`, sessionID,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("list agent_runtime for session %s: %w", sessionID, err)
+	}
+	defer rows.Close()
+
+	var out []*AgentRuntimeRow
+	for rows.Next() {
+		row, err := scanAgentRuntimeRow(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, row)
+	}
+	return out, rows.Err()
+}
+
+// SaveAgentRuntimeCheckpoint captures a checkpoint row for a runtime by
+// snapshotting the provider_session_id currently sitting on the
+// agent_runtime row. It returns the generated checkpoint id.
+//
+// SPIKE HACK — CW-20260519-0046 (DAR Track C, Task 4). The migration
+// comment on agent_runtime_checkpoints says the table stays empty "until a
+// Manager-level Checkpoint API lands in go-agent-sessions". The spike
+// deliberately bypasses that: the durable context is already Claude's own
+// `--resume <session-id>` conversation, and provider_session_id is captured
+// live via the OnSessionID callback (SetAgentRuntimeProviderSessionID). A
+// checkpoint therefore reduces to snapshotting that id into a row that
+// ModeResume can later resolve via GetAgentRuntimeCheckpoint — no
+// context (re)serialization, and no new lib API.
+//
+// A caller that checkpoints before the first turn has produced a session
+// id will write an empty provider_session_id; that is a degenerate (not
+// resumable) checkpoint, not an error — the caller is expected to drive at
+// least one turn first (see spike-task-breakdown.md §5 "capture timing").
+func (s *Store) SaveAgentRuntimeCheckpoint(runtimeID string) (string, error) {
+	if runtimeID == "" {
+		return "", errors.New("SaveAgentRuntimeCheckpoint: empty runtimeID")
+	}
+	var providerSessionID string
+	err := s.DB.QueryRow(
+		`SELECT provider_session_id FROM agent_runtime WHERE id = ?`, runtimeID,
+	).Scan(&providerSessionID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", fmt.Errorf("SaveAgentRuntimeCheckpoint: unknown runtime %s", runtimeID)
+	}
+	if err != nil {
+		return "", fmt.Errorf("SaveAgentRuntimeCheckpoint: read runtime %s: %w", runtimeID, err)
+	}
+	checkpointID := ulid.Make().String()
+	_, err = s.DB.Exec(
+		`INSERT INTO agent_runtime_checkpoints (id, runtime_id, provider_session_id, captured_at)
+		 VALUES (?, ?, ?, ?)`,
+		checkpointID, runtimeID, providerSessionID,
+		time.Now().UTC().Format(time.RFC3339Nano),
+	)
+	if err != nil {
+		return "", fmt.Errorf("SaveAgentRuntimeCheckpoint: insert checkpoint for %s: %w", runtimeID, err)
+	}
+	return checkpointID, nil
+}
+
 // GetAgentRuntimeCheckpoint loads the resume payload for a checkpoint id.
 // Returns ErrAgentRuntimeCheckpointNotFound when the id is unknown.
 func (s *Store) GetAgentRuntimeCheckpoint(id string) (*AgentRuntimeCheckpoint, error) {
@@ -198,6 +271,37 @@ func (s *Store) GetAgentRuntimeCheckpoint(id string) (*AgentRuntimeCheckpoint, e
 	return cp, nil
 }
 
+// GetCheckpointBootDir resolves the boot dir (= the originating
+// agent_runtime.workdir) of the run a checkpoint was captured from.
+//
+// SPIKE HACK — CW-20260519-0047 (DAR Track C, Task 5). `claude --resume`
+// locates a saved conversation by the CLI's project dir, which is its
+// spawn cwd. For a claude launch, agent_runtime.workdir IS the boot dir
+// (claudeLayout.SpawnWorkdir returns it). A ModeResume launch must
+// therefore re-pin its boot dir to this path or `claude --resume` fails
+// with "No conversation found". Returns the workdir for the checkpoint's
+// originating runtime; ErrAgentRuntimeCheckpointNotFound when the
+// checkpoint id is unknown.
+func (s *Store) GetCheckpointBootDir(checkpointID string) (string, error) {
+	if checkpointID == "" {
+		return "", errors.New("GetCheckpointBootDir: empty checkpointID")
+	}
+	var workdir string
+	err := s.DB.QueryRow(
+		`SELECT r.workdir
+		   FROM agent_runtime_checkpoints c
+		   JOIN agent_runtime r ON r.id = c.runtime_id
+		  WHERE c.id = ?`, checkpointID,
+	).Scan(&workdir)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", ErrAgentRuntimeCheckpointNotFound
+	}
+	if err != nil {
+		return "", fmt.Errorf("GetCheckpointBootDir %s: %w", checkpointID, err)
+	}
+	return workdir, nil
+}
+
 // scanAgentRuntimeRow projects a row into AgentRuntimeRow. Times are parsed
 // as RFC3339Nano; malformed timestamps fall back to zero rather than
 // failing the whole sweep.
@@ -205,7 +309,7 @@ func scanAgentRuntimeRow(scanner interface{ Scan(...any) error }) (*AgentRuntime
 	r := &AgentRuntimeRow{}
 	var startedAt, updatedAt string
 	err := scanner.Scan(
-		&r.ID, &r.AgentProfile, &r.Provider, &r.Mode, &r.Workdir, &r.State, &r.PID,
+		&r.ID, &r.AgentProfile, &r.Provider, &r.RuntimeKind, &r.Mode, &r.Workdir, &r.State, &r.PID,
 		&r.ParentSessionID, &r.ProviderSessionID, &r.MetaJSON, &r.FailureReason,
 		&startedAt, &updatedAt,
 	)

@@ -1,0 +1,19 @@
+-- 079_agent_runtime_kind.sql
+-- Phase 0 runtime-kind stabilization.
+--
+-- Keep provider IDs and legacy aliases untouched, but persist the normalized
+-- execution substrate so callers can inspect runtime state without decoding
+-- overloaded provider strings.
+
+ALTER TABLE agent_runtime
+    ADD COLUMN runtime_kind TEXT NOT NULL DEFAULT 'unknown';
+
+UPDATE agent_runtime
+   SET runtime_kind = CASE
+       WHEN provider IN ('claude', 'claude-code', 'claudecode', 'pty', 'pty-claude', 'sub-claude')
+           THEN 'streaming-stdio'
+       WHEN provider IN ('codex', 'pty-codex', 'sub-codex', 'opencode', 'pty-opencode', 'sub-opencode')
+           THEN 'subprocess'
+       ELSE 'unknown'
+   END
+ WHERE runtime_kind = '' OR runtime_kind = 'unknown';

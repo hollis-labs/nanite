@@ -2,6 +2,7 @@ package store
 
 import (
 	"database/sql"
+	"encoding/json"
 	"fmt"
 	"strconv"
 	"strings"
@@ -12,25 +13,28 @@ import (
 
 // Session represents a chat session.
 type Session struct {
-	ID           string `json:"id"`
-	ShortCode    string `json:"short_code"`
-	Title        string `json:"title"`
-	CustomName   string `json:"custom_name"`
-	WorkspaceID  string `json:"workspace_id"`
-	ProjectID    string `json:"project_id"`
-	ContextType  string `json:"context_type"`
-	ContextID    string `json:"context_id"`
-	Provider     string `json:"provider"`
-	Model        string `json:"model"`
-	Status       string `json:"status"` // active, paused, archived
-	IsPinned     bool   `json:"is_pinned"`
-	SortOrder    int    `json:"sort_order"`
-	MessageCount int    `json:"message_count"`
-	Tags         string `json:"tags"` // JSON array of strings, e.g. '["go","refactor"]'
-	Metadata     string `json:"metadata"`
-	LastActivity string `json:"last_activity"`
-	CreatedAt    string `json:"created_at"`
-	UpdatedAt    string `json:"updated_at"`
+	ID           string  `json:"id"`
+	ShortCode    string  `json:"short_code"`
+	Title        string  `json:"title"`
+	CustomName   string  `json:"custom_name"`
+	WorkspaceID  string  `json:"workspace_id"`
+	ProjectID    string  `json:"project_id"`
+	ContextType  string  `json:"context_type"`
+	ContextID    string  `json:"context_id"`
+	Provider     string  `json:"provider"`
+	Model        string  `json:"model"`
+	Status       string  `json:"status"` // active, paused, archived
+	IsPinned     bool    `json:"is_pinned"`
+	SortOrder    int     `json:"sort_order"`
+	MessageCount int     `json:"message_count"`
+	Tags         string  `json:"tags"` // JSON array of strings, e.g. '["go","refactor"]'
+	Metadata     string  `json:"metadata"`
+	LastActivity string  `json:"last_activity"`
+	CreatedAt    string  `json:"created_at"`
+	UpdatedAt    string  `json:"updated_at"`
+	HaltedAt     *string `json:"halted_at,omitempty"`
+	HaltedReason *string `json:"halted_reason,omitempty"`
+	RuntimeState *string `json:"runtime_state,omitempty"`
 	// CurrentModeID is the session-level mode pointer (B1, CW-20260428-0009).
 	// Nil/empty = fall back to agent-assigned mode (back-compat with the
 	// legacy AgentMode pipeline). Resolves into a *Mode via GetSessionMode.
@@ -50,6 +54,12 @@ type Session struct {
 	// dedicated GetSessionIntent helper is still available for callers that
 	// only need the column without loading the full Session struct.
 	Intent *string `json:"intent,omitempty"`
+	// Sidebar relationship metadata, computed from subagent_runs for list/detail
+	// consumers. Normal top-level sessions return null values.
+	ParentSessionID *string `json:"parent_session_id"`
+	RootSessionID   *string `json:"root_session_id"`
+	Relation        *string `json:"relation"`
+	Depth           *int    `json:"depth"`
 }
 
 // Message represents a chat message.
@@ -74,20 +84,71 @@ func (s *Store) ListSessions(workspaceID string, includeArchived ...bool) ([]Ses
 		inclArchived = includeArchived[0]
 	}
 
-	query := `SELECT id, short_code, COALESCE(title,''), COALESCE(custom_name,''),
-		        COALESCE(workspace_id,''), COALESCE(project_id,''),
-		        COALESCE(context_type,''), COALESCE(context_id,''),
-		        COALESCE(provider,''), COALESCE(model,''),
-		        status, is_pinned, sort_order, message_count,
-		        COALESCE(tags,'[]'), COALESCE(metadata,'{}'),
-		        last_activity, created_at, updated_at,
-		        current_mode_id, auto_switch_override, intent
-		 FROM sessions
-		 WHERE workspace_id = ?`
+	query := `WITH RECURSIVE
+		 latest_subagent_edges AS (
+		   SELECT sr.parent_session_id, sr.child_session_id
+		     FROM subagent_runs sr
+		    WHERE sr.child_session_id != ''
+		      AND NOT EXISTS (
+		        SELECT 1
+		          FROM subagent_runs newer
+		         WHERE newer.child_session_id = sr.child_session_id
+		           AND newer.child_session_id != ''
+		           AND (
+		             newer.created_at > sr.created_at OR
+		             (newer.created_at = sr.created_at AND newer.id > sr.id)
+		           )
+		      )
+		 ),
+		 subagent_lineage(child_session_id, parent_session_id, root_session_id, depth, path) AS (
+		   SELECT child_session_id, parent_session_id, parent_session_id, 1,
+		          child_session_id || ',' || parent_session_id
+		     FROM latest_subagent_edges
+		   UNION ALL
+		   SELECT lineage.child_session_id, edge.parent_session_id, edge.parent_session_id,
+		          lineage.depth + 1, lineage.path || ',' || edge.parent_session_id
+		     FROM subagent_lineage lineage
+		     JOIN latest_subagent_edges edge ON edge.child_session_id = lineage.root_session_id
+		    WHERE instr(lineage.path, edge.parent_session_id) = 0
+		      AND lineage.depth < 16
+		 ),
+		 session_relationships AS (
+		   SELECT lineage.child_session_id,
+		          direct.parent_session_id,
+		          lineage.root_session_id,
+		          'subagent' AS relation,
+		          lineage.depth
+		     FROM subagent_lineage lineage
+		     JOIN latest_subagent_edges direct ON direct.child_session_id = lineage.child_session_id
+		     LEFT JOIN subagent_lineage deeper
+		       ON deeper.child_session_id = lineage.child_session_id
+		      AND deeper.depth > lineage.depth
+		    WHERE deeper.child_session_id IS NULL
+		 )
+		SELECT sess.id, sess.short_code, COALESCE(sess.title,''), COALESCE(sess.custom_name,''),
+		       COALESCE(sess.workspace_id,''), COALESCE(sess.project_id,''),
+		       COALESCE(sess.context_type,''), COALESCE(sess.context_id,''),
+		       COALESCE(sess.provider,''), COALESCE(sess.model,''),
+		       sess.status, sess.is_pinned, sess.sort_order, sess.message_count,
+		       COALESCE(sess.tags,'[]'), COALESCE(sess.metadata,'{}'),
+		       sess.last_activity, sess.created_at, sess.updated_at,
+		       sess.halted_at, sess.halted_reason,
+		       (
+		           SELECT ar.state
+		             FROM agent_runtime ar
+		            WHERE ar.parent_session_id = sess.id
+		            ORDER BY ar.started_at DESC
+		            LIMIT 1
+		       ) AS runtime_state,
+		       sess.current_mode_id, sess.auto_switch_override, sess.intent,
+		       rel.parent_session_id, rel.root_session_id, rel.relation, rel.depth
+		  FROM sessions sess
+		  LEFT JOIN session_relationships rel ON rel.child_session_id = sess.id
+		 WHERE sess.workspace_id = ?`
 	if !inclArchived {
-		query += ` AND status != 'archived'`
+		query += ` AND sess.status != 'archived'`
 	}
-	query += ` ORDER BY last_activity DESC`
+	query += ` ORDER BY sess.last_activity DESC`
 
 	rows, err := s.DB.Query(query, workspaceID)
 	if err != nil {
@@ -101,6 +162,13 @@ func (s *Store) ListSessions(workspaceID string, includeArchived ...bool) ([]Ses
 		var currentModeID sql.NullString
 		var autoSwitchOverride sql.NullBool
 		var intent sql.NullString
+		var haltedAt sql.NullString
+		var haltedReason sql.NullString
+		var runtimeState sql.NullString
+		var parentSessionID sql.NullString
+		var rootSessionID sql.NullString
+		var relation sql.NullString
+		var depth sql.NullInt64
 		if err := rows.Scan(
 			&sess.ID, &sess.ShortCode, &sess.Title, &sess.CustomName,
 			&sess.WorkspaceID, &sess.ProjectID,
@@ -108,22 +176,13 @@ func (s *Store) ListSessions(workspaceID string, includeArchived ...bool) ([]Ses
 			&sess.Provider, &sess.Model,
 			&sess.Status, &sess.IsPinned, &sess.SortOrder, &sess.MessageCount,
 			&sess.Tags, &sess.Metadata, &sess.LastActivity, &sess.CreatedAt, &sess.UpdatedAt,
+			&haltedAt, &haltedReason, &runtimeState,
 			&currentModeID, &autoSwitchOverride, &intent,
+			&parentSessionID, &rootSessionID, &relation, &depth,
 		); err != nil {
 			return nil, fmt.Errorf("scan session: %w", err)
 		}
-		if currentModeID.Valid && currentModeID.String != "" {
-			v := currentModeID.String
-			sess.CurrentModeID = &v
-		}
-		if autoSwitchOverride.Valid {
-			v := autoSwitchOverride.Bool
-			sess.AutoSwitchOverride = &v
-		}
-		if intent.Valid && intent.String != "" {
-			v := intent.String
-			sess.Intent = &v
-		}
+		hydrateSessionOptionalFields(&sess, currentModeID, autoSwitchOverride, intent, haltedAt, haltedReason, runtimeState, parentSessionID, rootSessionID, relation, depth)
 		out = append(out, sess)
 	}
 	return out, rows.Err()
@@ -135,16 +194,75 @@ func (s *Store) GetSession(id string) (*Session, error) {
 	var currentModeID sql.NullString
 	var autoSwitchOverride sql.NullBool
 	var intent sql.NullString
+	var haltedAt sql.NullString
+	var haltedReason sql.NullString
+	var runtimeState sql.NullString
+	var parentSessionID sql.NullString
+	var rootSessionID sql.NullString
+	var relation sql.NullString
+	var depth sql.NullInt64
 	err := s.DB.QueryRow(
-		`SELECT id, short_code, COALESCE(title,''), COALESCE(custom_name,''),
-		        COALESCE(workspace_id,''), COALESCE(project_id,''),
-		        COALESCE(context_type,''), COALESCE(context_id,''),
-		        COALESCE(provider,''), COALESCE(model,''),
-		        status, is_pinned, sort_order, message_count,
-		        COALESCE(tags,'[]'), COALESCE(metadata,'{}'),
-		        last_activity, created_at, updated_at,
-		        current_mode_id, auto_switch_override, intent
-		 FROM sessions WHERE id = ?`, id,
+		`WITH RECURSIVE
+		 latest_subagent_edges AS (
+		   SELECT sr.parent_session_id, sr.child_session_id
+		     FROM subagent_runs sr
+		    WHERE sr.child_session_id != ''
+		      AND NOT EXISTS (
+		        SELECT 1
+		          FROM subagent_runs newer
+		         WHERE newer.child_session_id = sr.child_session_id
+		           AND newer.child_session_id != ''
+		           AND (
+		             newer.created_at > sr.created_at OR
+		             (newer.created_at = sr.created_at AND newer.id > sr.id)
+		           )
+		      )
+		 ),
+		 subagent_lineage(child_session_id, parent_session_id, root_session_id, depth, path) AS (
+		   SELECT child_session_id, parent_session_id, parent_session_id, 1,
+		          child_session_id || ',' || parent_session_id
+		     FROM latest_subagent_edges
+		   UNION ALL
+		   SELECT lineage.child_session_id, edge.parent_session_id, edge.parent_session_id,
+		          lineage.depth + 1, lineage.path || ',' || edge.parent_session_id
+		     FROM subagent_lineage lineage
+		     JOIN latest_subagent_edges edge ON edge.child_session_id = lineage.root_session_id
+		    WHERE instr(lineage.path, edge.parent_session_id) = 0
+		      AND lineage.depth < 16
+		 ),
+		 session_relationships AS (
+		   SELECT lineage.child_session_id,
+		          direct.parent_session_id,
+		          lineage.root_session_id,
+		          'subagent' AS relation,
+		          lineage.depth
+		     FROM subagent_lineage lineage
+		     JOIN latest_subagent_edges direct ON direct.child_session_id = lineage.child_session_id
+		     LEFT JOIN subagent_lineage deeper
+		       ON deeper.child_session_id = lineage.child_session_id
+		      AND deeper.depth > lineage.depth
+		    WHERE deeper.child_session_id IS NULL
+		 )
+		SELECT sess.id, sess.short_code, COALESCE(sess.title,''), COALESCE(sess.custom_name,''),
+		       COALESCE(sess.workspace_id,''), COALESCE(sess.project_id,''),
+		       COALESCE(sess.context_type,''), COALESCE(sess.context_id,''),
+		       COALESCE(sess.provider,''), COALESCE(sess.model,''),
+		       sess.status, sess.is_pinned, sess.sort_order, sess.message_count,
+		       COALESCE(sess.tags,'[]'), COALESCE(sess.metadata,'{}'),
+		       sess.last_activity, sess.created_at, sess.updated_at,
+		       sess.halted_at, sess.halted_reason,
+		       (
+		           SELECT ar.state
+		             FROM agent_runtime ar
+		            WHERE ar.parent_session_id = sess.id
+		            ORDER BY ar.started_at DESC
+		            LIMIT 1
+		       ) AS runtime_state,
+		       sess.current_mode_id, sess.auto_switch_override, sess.intent,
+		       rel.parent_session_id, rel.root_session_id, rel.relation, rel.depth
+		  FROM sessions sess
+		  LEFT JOIN session_relationships rel ON rel.child_session_id = sess.id
+		 WHERE sess.id = ?`, id,
 	).Scan(
 		&sess.ID, &sess.ShortCode, &sess.Title, &sess.CustomName,
 		&sess.WorkspaceID, &sess.ProjectID,
@@ -152,11 +270,18 @@ func (s *Store) GetSession(id string) (*Session, error) {
 		&sess.Provider, &sess.Model,
 		&sess.Status, &sess.IsPinned, &sess.SortOrder, &sess.MessageCount,
 		&sess.Tags, &sess.Metadata, &sess.LastActivity, &sess.CreatedAt, &sess.UpdatedAt,
+		&haltedAt, &haltedReason, &runtimeState,
 		&currentModeID, &autoSwitchOverride, &intent,
+		&parentSessionID, &rootSessionID, &relation, &depth,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("get session %s: %w", id, err)
 	}
+	hydrateSessionOptionalFields(&sess, currentModeID, autoSwitchOverride, intent, haltedAt, haltedReason, runtimeState, parentSessionID, rootSessionID, relation, depth)
+	return &sess, nil
+}
+
+func hydrateSessionOptionalFields(sess *Session, currentModeID sql.NullString, autoSwitchOverride sql.NullBool, intent sql.NullString, haltedAt sql.NullString, haltedReason sql.NullString, runtimeState sql.NullString, parentSessionID sql.NullString, rootSessionID sql.NullString, relation sql.NullString, depth sql.NullInt64) {
 	if currentModeID.Valid && currentModeID.String != "" {
 		v := currentModeID.String
 		sess.CurrentModeID = &v
@@ -169,7 +294,34 @@ func (s *Store) GetSession(id string) (*Session, error) {
 		v := intent.String
 		sess.Intent = &v
 	}
-	return &sess, nil
+	if haltedAt.Valid && haltedAt.String != "" {
+		v := haltedAt.String
+		sess.HaltedAt = &v
+	}
+	if haltedReason.Valid && haltedReason.String != "" {
+		v := haltedReason.String
+		sess.HaltedReason = &v
+	}
+	if runtimeState.Valid && runtimeState.String != "" {
+		v := runtimeState.String
+		sess.RuntimeState = &v
+	}
+	if parentSessionID.Valid && parentSessionID.String != "" {
+		v := parentSessionID.String
+		sess.ParentSessionID = &v
+	}
+	if rootSessionID.Valid && rootSessionID.String != "" {
+		v := rootSessionID.String
+		sess.RootSessionID = &v
+	}
+	if relation.Valid && relation.String != "" {
+		v := relation.String
+		sess.Relation = &v
+	}
+	if depth.Valid {
+		v := int(depth.Int64)
+		sess.Depth = &v
+	}
 }
 
 // SetSessionAutoSwitchOverride sets (or clears) the per-session auto-switch
@@ -703,13 +855,14 @@ func (s *Store) ForkSession(sourceID string, overrides *Session, copyMessages bo
 
 	// Build new session from source, applying overrides.
 	newSess := &Session{
-		WorkspaceID: src.WorkspaceID,
-		ProjectID:   src.ProjectID,
-		Provider:    src.Provider,
-		Model:       src.Model,
-		Tags:        src.Tags,
-		ContextType: src.ContextType,
-		ContextID:   src.ContextID,
+		WorkspaceID:   src.WorkspaceID,
+		ProjectID:     src.ProjectID,
+		Provider:      src.Provider,
+		Model:         src.Model,
+		Tags:          src.Tags,
+		ContextType:   src.ContextType,
+		ContextID:     src.ContextID,
+		CurrentModeID: src.CurrentModeID,
 	}
 
 	// Apply overrides.
@@ -719,6 +872,9 @@ func (s *Store) ForkSession(sourceID string, overrides *Session, copyMessages bo
 		}
 		if overrides.Model != "" {
 			newSess.Model = overrides.Model
+		}
+		if overrides.CurrentModeID != nil {
+			newSess.CurrentModeID = overrides.CurrentModeID
 		}
 	}
 
@@ -768,9 +924,7 @@ func (s *Store) ForkSession(sourceID string, overrides *Session, copyMessages bo
 	if newSess.Status == "" {
 		newSess.Status = "active"
 	}
-	if newSess.Metadata == "" {
-		newSess.Metadata = "{}"
-	}
+	newSess.Metadata = forkSessionMetadata(src.Metadata, sourceID, copyMessages)
 
 	tx, err := s.DB.Begin()
 	if err != nil {
@@ -784,14 +938,14 @@ func (s *Store) ForkSession(sourceID string, overrides *Session, copyMessages bo
 		`INSERT INTO sessions (id, short_code, title, custom_name, workspace_id, project_id,
 		                       context_type, context_id, provider, model,
 		                       status, is_pinned, sort_order, message_count,
-		                       metadata, last_activity, created_at, updated_at)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?)`,
+		                       tags, metadata, current_mode_id, last_activity, created_at, updated_at)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?, ?)`,
 		newSess.ID, newSess.ShortCode, nullIfEmpty(newSess.Title), nullIfEmpty(newSess.CustomName),
 		nullIfEmpty(newSess.WorkspaceID), nullIfEmpty(newSess.ProjectID),
 		nullIfEmpty(newSess.ContextType), nullIfEmpty(newSess.ContextID),
 		nullIfEmpty(newSess.Provider), nullIfEmpty(newSess.Model),
 		newSess.Status, newSess.IsPinned, newSess.SortOrder,
-		newSess.Metadata, now, now, now,
+		newSess.Tags, newSess.Metadata, nullableStringPtr(newSess.CurrentModeID), now, now, now,
 	); err != nil {
 		return nil, fmt.Errorf("create forked session: %w", err)
 	}
@@ -840,6 +994,26 @@ func (s *Store) ForkSession(sourceID string, overrides *Session, copyMessages bo
 	newSess.CreatedAt = now
 	newSess.UpdatedAt = now
 	return newSess, nil
+}
+
+func forkSessionMetadata(sourceMetadata string, sourceID string, copyMessages bool) string {
+	metadata := map[string]any{}
+	if strings.TrimSpace(sourceMetadata) != "" {
+		_ = json.Unmarshal([]byte(sourceMetadata), &metadata)
+	}
+	if metadata == nil {
+		metadata = map[string]any{}
+	}
+	metadata["copied_from_session_id"] = sourceID
+	metadata["fork_kind"] = "restart"
+	if copyMessages {
+		metadata["fork_kind"] = "fork"
+	}
+	out, err := json.Marshal(metadata)
+	if err != nil {
+		return `{"copied_from_session_id":` + strconv.Quote(sourceID) + `}`
+	}
+	return string(out)
 }
 
 // CopyMessages copies all messages from one session to another, assigning new IDs.
@@ -995,4 +1169,11 @@ func nullIfEmpty(val string) interface{} {
 		return nil
 	}
 	return val
+}
+
+func nullableStringPtr(value *string) interface{} {
+	if value == nil || *value == "" {
+		return nil
+	}
+	return *value
 }

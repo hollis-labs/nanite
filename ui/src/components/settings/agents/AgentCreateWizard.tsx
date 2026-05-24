@@ -9,14 +9,14 @@ import {
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { DynamicIcon, IconPicker } from "@/components/ui/icon-picker";
-import type { AgentProfile } from "@/lib/types";
+import type { CreateAgentProfileRequest } from "@/lib/types";
 
 // ─── Types ──────────────────────────────────────────────────────────
 
 interface AgentCreateWizardProps {
   modelOptions: { id: string; label: string }[];
   defaultModel: string;
-  onSubmit: (data: Omit<AgentProfile, "id" | "created_at" | "updated_at" | "agent_hash" | "version">) => void;
+  onSubmit: (data: CreateAgentProfileRequest) => void;
   onCancel: () => void;
   isPending?: boolean;
   /** Called with the new agent's ID after creation succeeds */

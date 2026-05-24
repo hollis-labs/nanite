@@ -18,6 +18,7 @@ interface LeftRailProps {
   workspaceHeader: ReactNode;
   onNewChat: () => void;
   onSearch: () => void;
+  newChatLabel?: string;
   newChatDisabled?: boolean;
   newChatPending?: boolean;
   emptyState?: ReactNode;
@@ -36,10 +37,14 @@ interface LeftRailSectionHeaderProps {
 interface LeftRailSessionRowProps {
   title: string;
   timeLabel: string;
+  kindIcon?: ReactNode;
+  kindLabel?: string;
+  metadataLabel?: string;
   active?: boolean;
   archived?: boolean;
   statusIndicator?: ReactNode;
   pluginBadges?: ReactNode;
+  nestingDepth?: number;
   onClick: () => void;
   onTogglePin: () => void;
   onToggleArchive: () => void;
@@ -63,6 +68,7 @@ export function LeftRail({
   workspaceHeader,
   onNewChat,
   onSearch,
+  newChatLabel = "New chat",
   newChatDisabled = false,
   newChatPending = false,
   emptyState,
@@ -104,7 +110,7 @@ export function LeftRail({
                   ) : (
                     <Plus className="size-3.5" strokeWidth={2.1} />
                   )}
-                  <span>New chat</span>
+                  <span>{newChatLabel}</span>
                   <span className="rounded-[4px] bg-primary-foreground/18 px-1.5 py-px font-mono text-[10px] font-medium tracking-wide text-primary-foreground/90">
                     ⌘N
                   </span>
@@ -156,10 +162,14 @@ export function LeftRailSectionHeader({ icon, label, count }: LeftRailSectionHea
 export function LeftRailSessionRow({
   title,
   timeLabel,
+  kindIcon,
+  kindLabel,
+  metadataLabel,
   active = false,
   archived = false,
   statusIndicator,
   pluginBadges,
+  nestingDepth = 0,
   onClick,
   onTogglePin,
   onToggleArchive,
@@ -169,7 +179,10 @@ export function LeftRailSessionRow({
   onCommitEdit,
   onCancelEdit,
 }: LeftRailSessionRowProps) {
+  const nested = nestingDepth > 0;
+
   return (
+    // biome-ignore lint/a11y/useSemanticElements: this row contains nested action buttons, so the wrapper cannot be a button.
     <div
       role="button"
       tabIndex={0}
@@ -185,21 +198,42 @@ export function LeftRailSessionRow({
         }
       }}
       className={cn(
-        "group relative block w-full py-1.5 pl-7 pr-14 text-left transition-colors",
+        "group relative block w-full py-1.5 pr-14 text-left transition-colors",
+        nested ? "pl-16" : "pl-10",
         archived && "opacity-55",
       )}
     >
       {active && <span className="absolute inset-y-0 left-0 w-0.5 bg-primary" />}
-      {statusIndicator && <span className="absolute top-2.5 left-2">{statusIndicator}</span>}
+      {nested && (
+        <span
+          aria-hidden="true"
+          className="absolute left-8 top-0 h-5 w-4 rounded-bl-[5px] border-b border-l border-border-subtle"
+        />
+      )}
+      <span
+        role="img"
+        className={cn(
+          "absolute top-2.5 flex items-center gap-1 transition-opacity group-hover:opacity-0",
+          nested ? "left-10" : "left-2",
+        )}
+        aria-label={kindLabel}
+        title={kindLabel}
+      >
+        {statusIndicator}
+        {kindIcon ? <span className="text-fg-muted">{kindIcon}</span> : null}
+      </span>
 
-      {!editing && !statusIndicator && (
+      {!editing && (
         <button
           type="button"
           onClick={(event) => {
             event.stopPropagation();
             onStartEdit();
           }}
-          className="absolute top-1/2 left-2 flex size-4 -translate-y-1/2 items-center justify-center rounded-[4px] text-fg-muted opacity-0 transition-opacity hover:bg-surface hover:text-fg group-hover:opacity-100"
+          className={cn(
+            "absolute top-1/2 flex size-4 -translate-y-1/2 items-center justify-center rounded-[4px] text-fg-muted opacity-0 transition-opacity hover:bg-surface hover:text-fg group-hover:opacity-100",
+            nested ? "left-10" : "left-2",
+          )}
           aria-label="Rename chat"
         >
           <Pencil className="size-3" strokeWidth={2} />
@@ -209,18 +243,25 @@ export function LeftRailSessionRow({
       {editing ? (
         <SessionRowInlineEdit initial={title} onCommit={onCommitEdit} onCancel={onCancelEdit} />
       ) : (
-        <div className="flex items-baseline">
-          <span
-            className={cn(
-              "min-w-0 flex-1 truncate text-[12.5px] leading-[1.35] text-fg-secondary",
-              active && "font-semibold text-fg",
-            )}
-          >
-            {title}
-          </span>
-          <span className="ml-2 shrink-0 font-mono text-[10px] text-fg-faint transition-opacity group-hover:opacity-0">
-            {timeLabel}
-          </span>
+        <div className="min-w-0">
+          <div className="flex items-baseline">
+            <span
+              className={cn(
+                "min-w-0 flex-1 truncate text-[12.5px] leading-[1.35] text-fg-secondary",
+                active && "font-semibold text-fg",
+              )}
+            >
+              {title}
+            </span>
+            <span className="ml-2 shrink-0 font-mono text-[10px] text-fg-faint transition-opacity group-hover:opacity-0">
+              {timeLabel}
+            </span>
+          </div>
+          {metadataLabel && (
+            <div className="mt-0.5 truncate font-mono text-[10px] leading-none text-fg-faint">
+              {metadataLabel}
+            </div>
+          )}
         </div>
       )}
 

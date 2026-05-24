@@ -2,6 +2,7 @@ import {
   Activity,
   Bot,
   Brain,
+  Boxes,
   ChevronRight,
   Cpu,
   FileCode2,
@@ -31,6 +32,7 @@ import { getSlotComponent } from "@/lib/plugin-slot-lookup";
 import { useNavigationStore } from "@/stores/useNavigationStore";
 import { ActionsPanel } from "./ActionsPanel";
 import { AgentProfileManager } from "./AgentProfileManager";
+import { DurableAgentAdminPanel } from "./DurableAgentAdminPanel";
 import { MemoryPanel } from "./MemoryPanel";
 
 const AppearancePanel = lazy(() =>
@@ -77,6 +79,7 @@ const BASE_NAV_GROUPS: NavGroup[] = [
     items: [
       { id: "providers", label: "Providers", icon: Cpu },
       { id: "agents", label: "Agents", icon: Bot },
+      { id: "durable-agents", label: "Durable Agents", icon: Boxes },
       { id: "skills", label: "Skills", icon: Sparkles },
       // "System Prompts" is injected here when developer_mode=true (see SettingsPage)
       { id: "memory", label: "Memory", icon: Brain },
@@ -208,6 +211,8 @@ export default function SettingsPage() {
         return <ActionsPanel />;
       case "agents":
         return <AgentProfileManager />;
+      case "durable-agents":
+        return <DurableAgentAdminPanel />;
       case "skills":
         return <SkillsBrowser />;
       case "system-prompts":

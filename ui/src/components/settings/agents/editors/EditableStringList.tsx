@@ -17,6 +17,8 @@ interface EditableStringListProps {
   emptyText?: string;
   /** If true, renders paths with directory styling */
   pathStyle?: boolean;
+  /** Disables add/edit/remove controls */
+  disabled?: boolean;
 }
 
 export function EditableStringList({
@@ -27,6 +29,7 @@ export function EditableStringList({
   placeholder = "Add item...",
   emptyText = "None configured",
   pathStyle = false,
+  disabled = false,
 }: EditableStringListProps) {
   const [editingIndex, setEditingIndex] = useState<number | null>(null);
   const [editValue, setEditValue] = useState("");
@@ -83,9 +86,10 @@ export function EditableStringList({
   );
 
   const startEditing = useCallback((index: number, currentValue: string) => {
+    if (disabled) return;
     setEditingIndex(index);
     setEditValue(currentValue);
-  }, []);
+  }, [disabled]);
 
   return (
     <div className="space-y-2">
@@ -97,9 +101,11 @@ export function EditableStringList({
             size="sm"
             className="h-6 gap-1 text-[11px] text-fg-muted hover:text-fg"
             onClick={() => {
+              if (disabled) return;
               setIsAdding(true);
               setTimeout(() => addInputRef.current?.focus(), 0);
             }}
+            disabled={disabled}
           >
             <Plus className="w-3 h-3" />
             Add
@@ -127,11 +133,12 @@ export function EditableStringList({
                   if (e.key === "Enter") handleEditSave(index);
                   if (e.key === "Escape") setEditingIndex(null);
                 }}
+                disabled={disabled}
                 className="flex-1 min-w-0 bg-transparent text-xs text-fg font-mono outline-none border-b border-border-subtle focus:border-primary py-0.5"
               />
             ) : (
               <span
-                className="flex-1 min-w-0 text-xs font-mono text-fg-secondary truncate cursor-text"
+                className={`flex-1 min-w-0 text-xs font-mono text-fg-secondary truncate ${disabled ? "cursor-default" : "cursor-text"}`}
                 onClick={() => startEditing(index, item)}
               >
                 {pathStyle ? <PathDisplay path={item} /> : item}
@@ -139,6 +146,7 @@ export function EditableStringList({
             )}
             <button
               onClick={() => handleRemove(index)}
+              disabled={disabled}
               className="p-0.5 rounded opacity-0 group-hover:opacity-100 text-fg-faint hover:text-primary transition-all"
             >
               <X className="w-3 h-3" />
@@ -163,6 +171,7 @@ export function EditableStringList({
                 setAddValue("");
               }
             }}
+            disabled={disabled}
             placeholder={placeholder}
             className="flex-1 min-w-0 bg-transparent text-xs text-fg font-mono outline-none border-b border-border-subtle focus:border-primary py-0.5 placeholder:text-fg-faint"
           />
@@ -172,7 +181,7 @@ export function EditableStringList({
               size="icon"
               className="w-5 h-5 text-fg-muted hover:text-fg"
               onClick={handleAdd}
-              disabled={!addValue.trim()}
+              disabled={disabled || !addValue.trim()}
             >
               <Plus className="w-3 h-3" />
             </Button>
@@ -184,6 +193,7 @@ export function EditableStringList({
                 setIsAdding(false);
                 setAddValue("");
               }}
+              disabled={disabled}
             >
               <X className="w-3 h-3" />
             </Button>

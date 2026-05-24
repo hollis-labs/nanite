@@ -1,28 +1,95 @@
+import type { PluginRegistryResponse } from "./plugin-loader";
 import type {
+  AgentKnowledgeSeed,
+  AgentSchedule,
+  AgentBuilderDraftRequest,
+  AgentBuilderDraftResponse,
+  AgentBuilderDryRunRequest,
+  AgentBuilderDryRunResponse,
+  AgentBuilderReviewRequest,
+  AgentBuilderReviewResponse,
+  AgentBootPlanDocument,
+  AgentBootPlanDryRunResponse,
+  AgentKnowledgeSeedUpsertRequest,
+  AgentKnownSkill,
+  AgentKnownSkillUpsertRequest,
+  AgentKnownTool,
+  AgentKnownToolUpsertRequest,
   AgentMessage,
   AgentMessageChannel,
   AgentMessageKind,
   AgentModeProfile,
   AgentProfile,
+  AgentProcedure,
+  AgentProcedureUpsertRequest,
+  AgentReflexRow,
+  AgentStateScope,
   ApprovalDecision,
   ApprovalScope,
   Artifact,
+  AttachDurableAgentSessionRequest,
   Bookmark,
   BrokerDecision,
   CatalogBrowseEntry,
   CatalogSource,
   CLIDetectionResult,
   ContextBreakdown,
+  CreateAgentReflexRequest,
+  CreateAgentProfileRequest,
+  CreateDurableAgentRequest,
   CustomAction,
   DiscoveryDiff,
+  Document,
+  DrawerCardType,
+  DrawerPinnedCard,
+  DurableAgentEvent,
+  DurableAgentInstance,
+  DurableAgentLaunchPlan,
+  DurableAgentLaunchResult,
+  DurableAgentRecipe,
+  DurableAgentRecipeApplyResult,
+  DurableAgentRecipePlan,
+  DurableAgentRecipeRequest,
+  DurableAgentSessionAttachmentState,
+  DurableAgentStartRequest,
+  DurableAgentWakeDueItem,
+  DurableAgentWakeResult,
+  DurableAgentWakeRunResult,
+  Envelope,
   ExecutionMetrics,
+  ForkSessionRequest,
+  FragmentsBacklogItem,
+  FragmentsSprint,
+  FragmentsTask,
   GlobalUsageSummary,
+  HarnessCapabilitiesResponse,
+  HarnessCancelResponse,
+  HarnessCreateSessionRequest,
+  HarnessInitializeResponse,
+  HarnessSessionResponse,
+  HarnessTurnRequest,
+  HarnessTurnResponse,
+  InspectorTurnSnapshot,
+  InspectorTurnsResponse,
   MCPServerConfig,
+  Memory,
+  MemoryCreateRequest,
+  MemoryListResponse,
+  MemoryUpdateRequest,
   Message,
   MessagePage,
   Mode,
   ModelRecord,
   PermissionMode,
+  PinnedContent,
+  Plan,
+  PlanFilter,
+  PlanStep,
+  PendingReflexApproveRequest,
+  PendingReflexRejectRequest,
+  PendingReflexRejectResponse,
+  PendingReflexRow,
+  PatchAgentReflexRequest,
   PluginConfig,
   PluginInfo,
   PluginKeybinding,
@@ -32,47 +99,34 @@ import type {
   PromptTemplate,
   ProviderConfig,
   ProviderStatus,
+  Reminder,
   SearchResult,
   ServerInfo,
   Session,
   SessionAgent,
+  SessionDetailsResponse,
   SessionUsageSummary,
   SessionWithMessages,
-  Envelope,
   Skill,
   SlashCommandDef,
+  StartSurfaceCapabilitiesResponse,
+  Todo,
+  TodoFilter,
   ToolDefinition,
   ToolSelection,
   UISlotEntry,
+  UpdateDurableAgentRequest,
+  UpdateAgentProfileRequest,
   UserSettings,
   UtilityCallSummary,
-  FragmentsBacklogItem,
-  FragmentsSprint,
-  FragmentsTask,
-  Todo,
-  TodoFilter,
-  Plan,
-  PlanFilter,
-  PlanStep,
+  ValidateReflexRequest,
+  ValidateReflexResponse,
   WorkDiff,
   Worker,
-  Workspace,
   WorkflowRun,
-  Memory,
-  MemoryListResponse,
-  MemoryCreateRequest,
-  MemoryUpdateRequest,
+  Workspace,
   WorkspaceRoleTrustOverride,
-  InspectorTurnsResponse,
-  InspectorTurnSnapshot,
-  Document,
-  PinnedContent,
-  DrawerPinnedCard,
-  DrawerCardType,
-  Reminder,
-  AgentStateScope,
 } from "./types";
-import type { PluginRegistryResponse } from "./plugin-loader";
 
 const API_BASE = "/api";
 
@@ -109,7 +163,8 @@ function hydrateTodo(raw: Record<string, unknown>): Todo {
       todo.metadata = {};
     }
   }
-  if (typeof todo.metadata !== "object" || todo.metadata === null) todo.metadata = {};
+  if (typeof todo.metadata !== "object" || todo.metadata === null)
+    todo.metadata = {};
   return todo;
 }
 
@@ -130,12 +185,15 @@ function hydratePlan(raw: Record<string, unknown>): Plan {
       plan.metadata = {};
     }
   }
-  if (typeof plan.metadata !== "object" || plan.metadata === null) plan.metadata = {};
+  if (typeof plan.metadata !== "object" || plan.metadata === null)
+    plan.metadata = {};
   return plan;
 }
 
 // Serialize structured fields back to JSON strings for the Go backend.
-function serializeTodoUpdates(updates: Record<string, unknown>): Record<string, unknown> {
+function serializeTodoUpdates(
+  updates: Record<string, unknown>,
+): Record<string, unknown> {
   const out = { ...updates };
   if (out.labels !== undefined && typeof out.labels !== "string")
     out.labels = JSON.stringify(out.labels);
@@ -144,7 +202,9 @@ function serializeTodoUpdates(updates: Record<string, unknown>): Record<string, 
   return out;
 }
 
-function serializePlanPayload(data: Record<string, unknown>): Record<string, unknown> {
+function serializePlanPayload(
+  data: Record<string, unknown>,
+): Record<string, unknown> {
   const out = { ...data };
   if (out.steps !== undefined && typeof out.steps !== "string")
     out.steps = JSON.stringify(out.steps);
@@ -154,6 +214,136 @@ function serializePlanPayload(data: Record<string, unknown>): Record<string, unk
 }
 
 export const api = {
+  getHarnessInitialize: async (): Promise<HarnessInitializeResponse> => {
+    const res = await fetch(`${API_BASE}/harness/v1/initialize`);
+    if (!res.ok)
+      throw new Error(`Failed to get harness initialize: ${res.status}`);
+    return res.json();
+  },
+
+  getHarnessCapabilities: async (): Promise<HarnessCapabilitiesResponse> => {
+    const res = await fetch(`${API_BASE}/harness/v1/capabilities`);
+    if (!res.ok)
+      throw new Error(`Failed to get harness capabilities: ${res.status}`);
+    return res.json();
+  },
+
+  createHarnessSession: async (
+    data: HarnessCreateSessionRequest,
+  ): Promise<HarnessSessionResponse> => {
+    const res = await fetch(`${API_BASE}/harness/v1/sessions`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(data),
+    });
+    if (!res.ok)
+      throw new Error(`Failed to create harness session: ${res.status}`);
+    return res.json();
+  },
+
+  getHarnessSession: async (id: string): Promise<HarnessSessionResponse> => {
+    const res = await fetch(`${API_BASE}/harness/v1/sessions/${encodeURIComponent(id)}`);
+    if (!res.ok)
+      throw new Error(`Failed to get harness session: ${res.status}`);
+    return res.json();
+  },
+
+  sendHarnessTurn: async (
+    id: string,
+    data: HarnessTurnRequest,
+  ): Promise<HarnessTurnResponse> => {
+    const res = await fetch(
+      `${API_BASE}/harness/v1/sessions/${encodeURIComponent(id)}/turns`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(data),
+      },
+    );
+    if (!res.ok) throw new Error(`Failed to send harness turn: ${res.status}`);
+    return res.json();
+  },
+
+  cancelHarnessTurn: async (id: string): Promise<HarnessCancelResponse> => {
+    const res = await fetch(
+      `${API_BASE}/harness/v1/sessions/${encodeURIComponent(id)}/cancel`,
+      { method: "POST" },
+    );
+    if (!res.ok)
+      throw new Error(`Failed to cancel harness turn: ${res.status}`);
+    return res.json();
+  },
+
+  listHarnessDurableAgents: async (
+    includeArchived = false,
+  ): Promise<DurableAgentInstance[]> => {
+    const query = includeArchived ? "?include_archived=true" : "";
+    const res = await fetch(`${API_BASE}/harness/v1/durable-agents${query}`);
+    if (!res.ok)
+      throw new Error(`Failed to list harness durable agents: ${res.status}`);
+    return res.json();
+  },
+
+  getHarnessDurableAgent: async (id: string): Promise<DurableAgentInstance> => {
+    const res = await fetch(
+      `${API_BASE}/harness/v1/durable-agents/${encodeURIComponent(id)}`,
+    );
+    if (!res.ok)
+      throw new Error(`Failed to get harness durable agent: ${res.status}`);
+    return res.json();
+  },
+
+  startHarnessDurableAgent: async (
+    id: string,
+    data: DurableAgentStartRequest,
+  ): Promise<DurableAgentLaunchResult> => {
+    const res = await fetch(
+      `${API_BASE}/harness/v1/durable-agents/${encodeURIComponent(id)}/start`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(data),
+      },
+    );
+    if (!res.ok)
+      throw new Error(`Failed to start harness durable agent: ${res.status}`);
+    return res.json();
+  },
+
+  resumeHarnessDurableAgent: async (
+    id: string,
+    data: DurableAgentStartRequest,
+  ): Promise<DurableAgentLaunchResult> => {
+    const res = await fetch(
+      `${API_BASE}/harness/v1/durable-agents/${encodeURIComponent(id)}/resume`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(data),
+      },
+    );
+    if (!res.ok)
+      throw new Error(`Failed to resume harness durable agent: ${res.status}`);
+    return res.json();
+  },
+
+  wakeHarnessDurableAgent: async (
+    id: string,
+    data: DurableAgentStartRequest,
+  ): Promise<DurableAgentWakeResult> => {
+    const res = await fetch(
+      `${API_BASE}/harness/v1/durable-agents/${encodeURIComponent(id)}/wake`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(data),
+      },
+    );
+    if (!res.ok)
+      throw new Error(`Failed to wake harness durable agent: ${res.status}`);
+    return res.json();
+  },
+
   // Sessions
   listSessions: async (workspaceId?: string): Promise<Session[]> => {
     const params = workspaceId ? `?workspace_id=${workspaceId}` : "";
@@ -180,6 +370,15 @@ export const api = {
     };
   },
 
+  getSessionDetails: async (id: string): Promise<SessionDetailsResponse> => {
+    const res = await fetch(
+      `${API_BASE}/sessions/${encodeURIComponent(id)}/details`,
+    );
+    if (!res.ok)
+      throw new Error(`Failed to get session details: ${res.status}`);
+    return res.json();
+  },
+
   createSession: async (data: {
     workspace_id: string;
     project_id?: string;
@@ -196,7 +395,10 @@ export const api = {
     return res.json();
   },
 
-  updateSession: async (id: string, data: Partial<Session>): Promise<Session> => {
+  updateSession: async (
+    id: string,
+    data: Partial<Session>,
+  ): Promise<Session> => {
     const res = await fetch(`${API_BASE}/sessions/${id}`, {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
@@ -208,7 +410,7 @@ export const api = {
 
   forkSession: async (
     id: string,
-    data: { include_messages: boolean; provider?: string; model?: string },
+    data: ForkSessionRequest,
   ): Promise<Session> => {
     const res = await fetch(`${API_BASE}/sessions/${id}/fork`, {
       method: "POST",
@@ -216,7 +418,8 @@ export const api = {
       body: JSON.stringify(data),
     });
     if (!res.ok) throw new Error(`Failed to fork session: ${res.status}`);
-    return res.json();
+    const body = await res.json();
+    return body.session ?? body;
   },
 
   deleteSession: async (id: string): Promise<void> => {
@@ -241,7 +444,9 @@ export const api = {
     return res.json();
   },
 
-  retryStream: async (sessionId: string): Promise<{ message_id: string; stream_url: string }> => {
+  retryStream: async (
+    sessionId: string,
+  ): Promise<{ message_id: string; stream_url: string }> => {
     const res = await fetch(`${API_BASE}/sessions/${sessionId}/retry`, {
       method: "POST",
     });
@@ -268,7 +473,9 @@ export const api = {
    * the LLM stream + tool work instead of just closing the SSE
    * client-side (which would leave the BE generating wasted tokens).
    */
-  cancelChatStream: async (sessionId: string): Promise<"cancelled" | "idle" | "error"> => {
+  cancelChatStream: async (
+    sessionId: string,
+  ): Promise<"cancelled" | "idle" | "error"> => {
     try {
       const res = await fetch(`${API_BASE}/sessions/${sessionId}/chat/cancel`, {
         method: "POST",
@@ -298,12 +505,19 @@ export const api = {
     sessionId: string,
   ): Promise<"rebooted" | "no_active_agent" | "busy" | "error"> => {
     try {
-      const res = await fetch(`${API_BASE}/sessions/${sessionId}/agent/reboot`, {
-        method: "POST",
-      });
+      const res = await fetch(
+        `${API_BASE}/sessions/${sessionId}/agent/reboot`,
+        {
+          method: "POST",
+        },
+      );
       if (res.ok) {
-        const body = (await res.json().catch(() => null)) as { status?: string } | null;
-        return body?.status === "no_active_agent" ? "no_active_agent" : "rebooted";
+        const body = (await res.json().catch(() => null)) as {
+          status?: string;
+        } | null;
+        return body?.status === "no_active_agent"
+          ? "no_active_agent"
+          : "rebooted";
       }
       if (res.status === 409) return "busy";
       return "error";
@@ -332,18 +546,23 @@ export const api = {
     sessionId: string,
     token: string,
   ): Promise<"cancelled" | "stale" | "error"> => {
-    const res = await fetch(`${API_BASE}/sessions/${sessionId}/recovery/cancel`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ token }),
-    });
+    const res = await fetch(
+      `${API_BASE}/sessions/${sessionId}/recovery/cancel`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ token }),
+      },
+    );
     if (res.ok) return "cancelled";
     if (res.status === 404) return "stale";
     return "error";
   },
 
   getMessages: async (sessionId: string, limit = 50): Promise<Message[]> => {
-    const res = await fetch(`${API_BASE}/sessions/${sessionId}/messages?limit=${limit}`);
+    const res = await fetch(
+      `${API_BASE}/sessions/${sessionId}/messages?limit=${limit}`,
+    );
     if (!res.ok) throw new Error(`Failed to get messages: ${res.status}`);
     const page = (await res.json()) as MessagePage | Message[];
     // Backend now returns MessagePage; handle both shapes for safety.
@@ -351,10 +570,16 @@ export const api = {
     return page.messages;
   },
 
-  getMessagePage: async (sessionId: string, limit = 50, offset?: number): Promise<MessagePage> => {
+  getMessagePage: async (
+    sessionId: string,
+    limit = 50,
+    offset?: number,
+  ): Promise<MessagePage> => {
     const params = new URLSearchParams({ limit: String(limit) });
     if (offset !== undefined) params.set("offset", String(offset));
-    const res = await fetch(`${API_BASE}/sessions/${sessionId}/messages?${params}`);
+    const res = await fetch(
+      `${API_BASE}/sessions/${sessionId}/messages?${params}`,
+    );
     if (!res.ok) throw new Error(`Failed to get messages: ${res.status}`);
     return res.json();
   },
@@ -370,14 +595,20 @@ export const api = {
       before: String(before),
       after: String(after),
     });
-    const res = await fetch(`${API_BASE}/sessions/${sessionId}/messages?${params}`);
-    if (!res.ok) throw new Error(`Failed to get messages around: ${res.status}`);
+    const res = await fetch(
+      `${API_BASE}/sessions/${sessionId}/messages?${params}`,
+    );
+    if (!res.ok)
+      throw new Error(`Failed to get messages around: ${res.status}`);
     return res.json();
   },
 
   getSessionPluginEnvelopes: async (sessionId: string): Promise<Envelope[]> => {
-    const res = await fetch(`${API_BASE}/sessions/${sessionId}/plugin-envelopes`);
-    if (!res.ok) throw new Error(`Failed to get session plugin envelopes: ${res.status}`);
+    const res = await fetch(
+      `${API_BASE}/sessions/${sessionId}/plugin-envelopes`,
+    );
+    if (!res.ok)
+      throw new Error(`Failed to get session plugin envelopes: ${res.status}`);
     return res.json();
   },
 
@@ -399,7 +630,9 @@ export const api = {
       body: JSON.stringify(data),
     });
     if (!res.ok) {
-      const err = await res.json().catch(() => ({ error: `Request failed: ${res.status}` }));
+      const err = await res
+        .json()
+        .catch(() => ({ error: `Request failed: ${res.status}` }));
       throw new Error(err.error || `Failed to create workspace: ${res.status}`);
     }
     return res.json();
@@ -421,7 +654,9 @@ export const api = {
       body: JSON.stringify(data),
     });
     if (!res.ok) {
-      const err = await res.json().catch(() => ({ error: `Request failed: ${res.status}` }));
+      const err = await res
+        .json()
+        .catch(() => ({ error: `Request failed: ${res.status}` }));
       throw new Error(err.error || `Failed to create project: ${res.status}`);
     }
     return res.json();
@@ -442,25 +677,540 @@ export const api = {
     return res.json();
   },
 
+  listAgentKnownTools: async (agentId: string): Promise<AgentKnownTool[]> => {
+    const res = await fetch(
+      `${API_BASE}/agents/${encodeURIComponent(agentId)}/known-tools`,
+    );
+    if (!res.ok)
+      throw new Error(`Failed to list agent known tools: ${res.status}`);
+    return res.json();
+  },
+
+  getAgentKnownTool: async (
+    agentId: string,
+    toolName: string,
+  ): Promise<AgentKnownTool> => {
+    const res = await fetch(
+      `${API_BASE}/agents/${encodeURIComponent(agentId)}/known-tools/${encodeURIComponent(toolName)}`,
+    );
+    if (!res.ok)
+      throw new Error(`Failed to get agent known tool: ${res.status}`);
+    return res.json();
+  },
+
+  createAgentKnownTool: async (
+    agentId: string,
+    data: AgentKnownToolUpsertRequest,
+  ): Promise<AgentKnownTool> => {
+    const res = await fetch(
+      `${API_BASE}/agents/${encodeURIComponent(agentId)}/known-tools`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(data),
+      },
+    );
+    if (!res.ok)
+      throw new Error(`Failed to create agent known tool: ${res.status}`);
+    return res.json();
+  },
+
+  updateAgentKnownTool: async (
+    agentId: string,
+    toolName: string,
+    data: AgentKnownToolUpsertRequest,
+  ): Promise<AgentKnownTool> => {
+    const res = await fetch(
+      `${API_BASE}/agents/${encodeURIComponent(agentId)}/known-tools/${encodeURIComponent(toolName)}`,
+      {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(data),
+      },
+    );
+    if (!res.ok)
+      throw new Error(`Failed to update agent known tool: ${res.status}`);
+    return res.json();
+  },
+
+  deleteAgentKnownTool: async (
+    agentId: string,
+    toolName: string,
+  ): Promise<{ status: string }> => {
+    const res = await fetch(
+      `${API_BASE}/agents/${encodeURIComponent(agentId)}/known-tools/${encodeURIComponent(toolName)}`,
+      {
+        method: "DELETE",
+      },
+    );
+    if (!res.ok)
+      throw new Error(`Failed to delete agent known tool: ${res.status}`);
+    return res.json();
+  },
+
+  listAgentKnownSkills: async (agentId: string): Promise<AgentKnownSkill[]> => {
+    const res = await fetch(
+      `${API_BASE}/agents/${encodeURIComponent(agentId)}/known-skills`,
+    );
+    if (!res.ok)
+      throw new Error(`Failed to list agent known skills: ${res.status}`);
+    return res.json();
+  },
+
+  getAgentBootPlan: async (agentId: string): Promise<AgentBootPlanDocument> => {
+    const res = await fetch(
+      `${API_BASE}/agents/${encodeURIComponent(agentId)}/boot-plan`,
+    );
+    if (!res.ok)
+      throw new Error(`Failed to get agent boot plan: ${res.status}`);
+    return res.json();
+  },
+
+  updateAgentBootPlan: async (
+    agentId: string,
+    data: AgentBootPlanDocument,
+  ): Promise<AgentBootPlanDocument> => {
+    const res = await fetch(
+      `${API_BASE}/agents/${encodeURIComponent(agentId)}/boot-plan`,
+      {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(data),
+      },
+    );
+    if (!res.ok)
+      throw new Error(`Failed to update agent boot plan: ${res.status}`);
+    return res.json();
+  },
+
+  deleteAgentBootPlan: async (agentId: string): Promise<{ status: string }> => {
+    const res = await fetch(
+      `${API_BASE}/agents/${encodeURIComponent(agentId)}/boot-plan`,
+      {
+        method: "DELETE",
+      },
+    );
+    if (!res.ok)
+      throw new Error(`Failed to delete agent boot plan: ${res.status}`);
+    return res.json();
+  },
+
+  dryRunAgentBootPlan: async (
+    agentId: string,
+    data?: AgentBootPlanDocument,
+  ): Promise<AgentBootPlanDryRunResponse> => {
+    const res = await fetch(
+      `${API_BASE}/agents/${encodeURIComponent(agentId)}/boot-plan/dry-run`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: data ? JSON.stringify(data) : undefined,
+      },
+    );
+    if (!res.ok)
+      throw new Error(`Failed to dry-run agent boot plan: ${res.status}`);
+    return res.json();
+  },
+
+  getAgentKnownSkill: async (
+    agentId: string,
+    skillName: string,
+  ): Promise<AgentKnownSkill> => {
+    const res = await fetch(
+      `${API_BASE}/agents/${encodeURIComponent(agentId)}/known-skills/${encodeURIComponent(skillName)}`,
+    );
+    if (!res.ok)
+      throw new Error(`Failed to get agent known skill: ${res.status}`);
+    return res.json();
+  },
+
+  createAgentKnownSkill: async (
+    agentId: string,
+    data: AgentKnownSkillUpsertRequest,
+  ): Promise<AgentKnownSkill> => {
+    const res = await fetch(
+      `${API_BASE}/agents/${encodeURIComponent(agentId)}/known-skills`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(data),
+      },
+    );
+    if (!res.ok)
+      throw new Error(`Failed to create agent known skill: ${res.status}`);
+    return res.json();
+  },
+
+  updateAgentKnownSkill: async (
+    agentId: string,
+    skillName: string,
+    data: AgentKnownSkillUpsertRequest,
+  ): Promise<AgentKnownSkill> => {
+    const res = await fetch(
+      `${API_BASE}/agents/${encodeURIComponent(agentId)}/known-skills/${encodeURIComponent(skillName)}`,
+      {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(data),
+      },
+    );
+    if (!res.ok)
+      throw new Error(`Failed to update agent known skill: ${res.status}`);
+    return res.json();
+  },
+
+  deleteAgentKnownSkill: async (
+    agentId: string,
+    skillName: string,
+  ): Promise<{ status: string }> => {
+    const res = await fetch(
+      `${API_BASE}/agents/${encodeURIComponent(agentId)}/known-skills/${encodeURIComponent(skillName)}`,
+      {
+        method: "DELETE",
+      },
+    );
+    if (!res.ok)
+      throw new Error(`Failed to delete agent known skill: ${res.status}`);
+    return res.json();
+  },
+
+  listAgentProcedures: async (agentId: string): Promise<AgentProcedure[]> => {
+    const res = await fetch(
+      `${API_BASE}/agents/${encodeURIComponent(agentId)}/procedures`,
+    );
+    if (!res.ok)
+      throw new Error(`Failed to list agent procedures: ${res.status}`);
+    return res.json();
+  },
+
+  getAgentProcedure: async (
+    agentId: string,
+    name: string,
+  ): Promise<AgentProcedure> => {
+    const res = await fetch(
+      `${API_BASE}/agents/${encodeURIComponent(agentId)}/procedures/${encodeURIComponent(name)}`,
+    );
+    if (!res.ok)
+      throw new Error(`Failed to get agent procedure: ${res.status}`);
+    return res.json();
+  },
+
+  createAgentProcedure: async (
+    agentId: string,
+    data: AgentProcedureUpsertRequest,
+  ): Promise<AgentProcedure> => {
+    const res = await fetch(
+      `${API_BASE}/agents/${encodeURIComponent(agentId)}/procedures`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(data),
+      },
+    );
+    if (!res.ok)
+      throw new Error(`Failed to create agent procedure: ${res.status}`);
+    return res.json();
+  },
+
+  updateAgentProcedure: async (
+    agentId: string,
+    name: string,
+    data: AgentProcedureUpsertRequest,
+  ): Promise<AgentProcedure> => {
+    const res = await fetch(
+      `${API_BASE}/agents/${encodeURIComponent(agentId)}/procedures/${encodeURIComponent(name)}`,
+      {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(data),
+      },
+    );
+    if (!res.ok)
+      throw new Error(`Failed to update agent procedure: ${res.status}`);
+    return res.json();
+  },
+
+  deleteAgentProcedure: async (
+    agentId: string,
+    name: string,
+  ): Promise<{ status: string }> => {
+    const res = await fetch(
+      `${API_BASE}/agents/${encodeURIComponent(agentId)}/procedures/${encodeURIComponent(name)}`,
+      {
+        method: "DELETE",
+      },
+    );
+    if (!res.ok)
+      throw new Error(`Failed to delete agent procedure: ${res.status}`);
+    return res.json();
+  },
+
+  listAgentKnowledgeSeeds: async (
+    agentId: string,
+  ): Promise<AgentKnowledgeSeed[]> => {
+    const res = await fetch(
+      `${API_BASE}/agents/${encodeURIComponent(agentId)}/knowledge-seeds`,
+    );
+    if (!res.ok)
+      throw new Error(`Failed to list agent knowledge seeds: ${res.status}`);
+    return res.json();
+  },
+
+  getAgentKnowledgeSeed: async (
+    agentId: string,
+    seedKey: string,
+  ): Promise<AgentKnowledgeSeed> => {
+    const res = await fetch(
+      `${API_BASE}/agents/${encodeURIComponent(agentId)}/knowledge-seeds/${encodeURIComponent(seedKey)}`,
+    );
+    if (!res.ok)
+      throw new Error(`Failed to get agent knowledge seed: ${res.status}`);
+    return res.json();
+  },
+
+  createAgentKnowledgeSeed: async (
+    agentId: string,
+    data: AgentKnowledgeSeedUpsertRequest,
+  ): Promise<AgentKnowledgeSeed> => {
+    const res = await fetch(
+      `${API_BASE}/agents/${encodeURIComponent(agentId)}/knowledge-seeds`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(data),
+      },
+    );
+    if (!res.ok)
+      throw new Error(`Failed to create agent knowledge seed: ${res.status}`);
+    return res.json();
+  },
+
+  updateAgentKnowledgeSeed: async (
+    agentId: string,
+    seedKey: string,
+    data: AgentKnowledgeSeedUpsertRequest,
+  ): Promise<AgentKnowledgeSeed> => {
+    const res = await fetch(
+      `${API_BASE}/agents/${encodeURIComponent(agentId)}/knowledge-seeds/${encodeURIComponent(seedKey)}`,
+      {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(data),
+      },
+    );
+    if (!res.ok)
+      throw new Error(`Failed to update agent knowledge seed: ${res.status}`);
+    return res.json();
+  },
+
+  deleteAgentKnowledgeSeed: async (
+    agentId: string,
+    seedKey: string,
+  ): Promise<{ status: string }> => {
+    const res = await fetch(
+      `${API_BASE}/agents/${encodeURIComponent(agentId)}/knowledge-seeds/${encodeURIComponent(seedKey)}`,
+      {
+        method: "DELETE",
+      },
+    );
+    if (!res.ok)
+      throw new Error(`Failed to delete agent knowledge seed: ${res.status}`);
+    return res.json();
+  },
+
+  markAgentKnowledgeSeedApplied: async (
+    agentId: string,
+    seedKey: string,
+  ): Promise<AgentKnowledgeSeed> => {
+    const res = await fetch(
+      `${API_BASE}/agents/${encodeURIComponent(agentId)}/knowledge-seeds/${encodeURIComponent(seedKey)}/mark-applied`,
+      {
+        method: "POST",
+      },
+    );
+    if (!res.ok)
+      throw new Error(
+        `Failed to mark agent knowledge seed applied: ${res.status}`,
+      );
+    return res.json();
+  },
+
+  listAgentReflexes: async (agentId: string): Promise<AgentReflexRow[]> => {
+    const res = await fetch(
+      `${API_BASE}/agents/${encodeURIComponent(agentId)}/reflexes`,
+    );
+    if (!res.ok)
+      throw new Error(`Failed to list agent reflexes: ${res.status}`);
+    return res.json();
+  },
+
+  createAgentReflex: async (
+    agentId: string,
+    data: CreateAgentReflexRequest,
+  ): Promise<AgentReflexRow> => {
+    const res = await fetch(
+      `${API_BASE}/agents/${encodeURIComponent(agentId)}/reflexes`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(data),
+      },
+    );
+    if (!res.ok)
+      throw new Error(`Failed to create agent reflex: ${res.status}`);
+    return res.json();
+  },
+
+  patchAgentReflex: async (
+    agentId: string,
+    reflexId: string,
+    data: PatchAgentReflexRequest,
+  ): Promise<AgentReflexRow> => {
+    const res = await fetch(
+      `${API_BASE}/agents/${encodeURIComponent(agentId)}/reflexes/${encodeURIComponent(reflexId)}`,
+      {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(data),
+      },
+    );
+    if (!res.ok)
+      throw new Error(`Failed to update agent reflex: ${res.status}`);
+    return res.json();
+  },
+
+  deleteAgentReflex: async (
+    agentId: string,
+    reflexId: string,
+  ): Promise<{ id: string; status: string }> => {
+    const res = await fetch(
+      `${API_BASE}/agents/${encodeURIComponent(agentId)}/reflexes/${encodeURIComponent(reflexId)}`,
+      {
+        method: "DELETE",
+      },
+    );
+    if (!res.ok)
+      throw new Error(`Failed to delete agent reflex: ${res.status}`);
+    return res.json();
+  },
+
+  validateReflex: async (
+    data: ValidateReflexRequest,
+  ): Promise<ValidateReflexResponse> => {
+    const res = await fetch(`${API_BASE}/reflexes/validate`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(data),
+    });
+    if (!res.ok) throw new Error(`Failed to validate reflex: ${res.status}`);
+    return res.json();
+  },
+
+  listPendingReflexes: async (status?: string): Promise<PendingReflexRow[]> => {
+    const qs = status ? `?status=${encodeURIComponent(status)}` : "";
+    const res = await fetch(`${API_BASE}/pending/reflexes${qs}`);
+    if (!res.ok)
+      throw new Error(`Failed to list pending reflexes: ${res.status}`);
+    return res.json();
+  },
+
+  approvePendingReflex: async (
+    pendingId: string,
+    data: PendingReflexApproveRequest = {},
+  ): Promise<AgentReflexRow> => {
+    const res = await fetch(
+      `${API_BASE}/pending/reflexes/${encodeURIComponent(pendingId)}/approve`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(data),
+      },
+    );
+    if (!res.ok)
+      throw new Error(`Failed to approve pending reflex: ${res.status}`);
+    return res.json();
+  },
+
+  rejectPendingReflex: async (
+    pendingId: string,
+    data: PendingReflexRejectRequest = {},
+  ): Promise<PendingReflexRejectResponse> => {
+    const res = await fetch(
+      `${API_BASE}/pending/reflexes/${encodeURIComponent(pendingId)}/reject`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(data),
+      },
+    );
+    if (!res.ok)
+      throw new Error(`Failed to reject pending reflex: ${res.status}`);
+    return res.json();
+  },
+
   createAgentProfile: async (
-    data: Omit<AgentProfile, "id" | "created_at" | "updated_at" | "agent_hash" | "version">,
+    data: CreateAgentProfileRequest,
   ): Promise<AgentProfile> => {
     const res = await fetch(`${API_BASE}/agents`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(data),
     });
-    if (!res.ok) throw new Error(`Failed to create agent profile: ${res.status}`);
+    if (!res.ok)
+      throw new Error(`Failed to create agent profile: ${res.status}`);
     return res.json();
   },
 
-  updateAgentProfile: async (id: string, data: Partial<AgentProfile>): Promise<AgentProfile> => {
+  updateAgentProfile: async (
+    id: string,
+    data: UpdateAgentProfileRequest,
+  ): Promise<AgentProfile> => {
     const res = await fetch(`${API_BASE}/agents/${id}`, {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(data),
     });
-    if (!res.ok) throw new Error(`Failed to update agent profile: ${res.status}`);
+    if (!res.ok)
+      throw new Error(`Failed to update agent profile: ${res.status}`);
+    return res.json();
+  },
+
+  agentBuilderDryRun: async (
+    data: AgentBuilderDryRunRequest,
+  ): Promise<AgentBuilderDryRunResponse> => {
+    const res = await fetch(`${API_BASE}/agent-builder/dry-run`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(data),
+    });
+    if (!res.ok)
+      throw new Error(`Failed to dry-run agent builder request: ${res.status}`);
+    return res.json();
+  },
+
+  agentBuilderDraft: async (
+    data: AgentBuilderDraftRequest,
+  ): Promise<AgentBuilderDraftResponse> => {
+    const res = await fetch(`${API_BASE}/agent-builder/draft`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(data),
+    });
+    if (!res.ok)
+      throw new Error(`Failed to draft agent builder config: ${res.status}`);
+    return res.json();
+  },
+
+  agentBuilderReview: async (
+    data: AgentBuilderReviewRequest,
+  ): Promise<AgentBuilderReviewResponse> => {
+    const res = await fetch(`${API_BASE}/agent-builder/review`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(data),
+    });
+    if (!res.ok)
+      throw new Error(`Failed to review agent builder config: ${res.status}`);
     return res.json();
   },
 
@@ -469,6 +1219,337 @@ export const api = {
   //   const res = await fetch(`${API_BASE}/agents/${id}`, { method: 'DELETE' })
   //   if (!res.ok) throw new Error(`Failed to delete agent profile: ${res.status}`)
   // },
+
+  // Start surface and durable-agent control plane
+  getStartSurfaceCapabilities:
+    async (): Promise<StartSurfaceCapabilitiesResponse> => {
+      const res = await fetch(`${API_BASE}/start-surface/capabilities`);
+      if (!res.ok)
+        throw new Error(
+          `Failed to get start surface capabilities: ${res.status}`,
+        );
+      return res.json();
+    },
+
+  listDurableAgents: async (
+    includeArchived = false,
+  ): Promise<DurableAgentInstance[]> => {
+    const qs = includeArchived ? "?include_archived=true" : "";
+    const res = await fetch(`${API_BASE}/durable-agents${qs}`);
+    if (!res.ok)
+      throw new Error(`Failed to list durable agents: ${res.status}`);
+    return res.json();
+  },
+
+  getDurableAgent: async (id: string): Promise<DurableAgentInstance> => {
+    const res = await fetch(
+      `${API_BASE}/durable-agents/${encodeURIComponent(id)}`,
+    );
+    if (!res.ok) throw new Error(`Failed to get durable agent: ${res.status}`);
+    return res.json();
+  },
+
+  listDurableAgentEvents: async (
+    id: string,
+    limit?: number,
+  ): Promise<DurableAgentEvent[]> => {
+    const qs = limit ? `?limit=${encodeURIComponent(String(limit))}` : "";
+    const res = await fetch(
+      `${API_BASE}/durable-agents/${encodeURIComponent(id)}/events${qs}`,
+    );
+    if (!res.ok)
+      throw new Error(`Failed to list durable agent events: ${res.status}`);
+    return res.json();
+  },
+
+  createDurableAgent: async (
+    data: CreateDurableAgentRequest,
+  ): Promise<DurableAgentInstance> => {
+    const res = await fetch(`${API_BASE}/durable-agents`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(data),
+    });
+    if (!res.ok)
+      throw new Error(`Failed to create durable agent: ${res.status}`);
+    return res.json();
+  },
+
+  updateDurableAgent: async (
+    id: string,
+    data: UpdateDurableAgentRequest,
+  ): Promise<DurableAgentInstance> => {
+    const res = await fetch(
+      `${API_BASE}/durable-agents/${encodeURIComponent(id)}`,
+      {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(data),
+      },
+    );
+    if (!res.ok)
+      throw new Error(`Failed to update durable agent: ${res.status}`);
+    return res.json();
+  },
+
+  archiveDurableAgent: async (id: string): Promise<DurableAgentInstance> => {
+    const res = await fetch(
+      `${API_BASE}/durable-agents/${encodeURIComponent(id)}/archive`,
+      {
+        method: "POST",
+      },
+    );
+    if (!res.ok)
+      throw new Error(`Failed to archive durable agent: ${res.status}`);
+    return res.json();
+  },
+
+  requestDurableAgentStart: async (
+    id: string,
+  ): Promise<DurableAgentInstance> => {
+    const res = await fetch(
+      `${API_BASE}/durable-agents/${encodeURIComponent(id)}/start-request`,
+      {
+        method: "POST",
+      },
+    );
+    if (!res.ok)
+      throw new Error(`Failed to request durable agent start: ${res.status}`);
+    return res.json();
+  },
+
+  requestDurableAgentStop: async (
+    id: string,
+  ): Promise<DurableAgentInstance> => {
+    const res = await fetch(
+      `${API_BASE}/durable-agents/${encodeURIComponent(id)}/stop-request`,
+      {
+        method: "POST",
+      },
+    );
+    if (!res.ok)
+      throw new Error(`Failed to request durable agent stop: ${res.status}`);
+    return res.json();
+  },
+
+  requestDurableAgentPause: async (
+    id: string,
+  ): Promise<DurableAgentInstance> => {
+    const res = await fetch(
+      `${API_BASE}/durable-agents/${encodeURIComponent(id)}/pause-request`,
+      {
+        method: "POST",
+      },
+    );
+    if (!res.ok)
+      throw new Error(`Failed to request durable agent pause: ${res.status}`);
+    return res.json();
+  },
+
+  requestDurableAgentResume: async (
+    id: string,
+  ): Promise<DurableAgentInstance> => {
+    const res = await fetch(
+      `${API_BASE}/durable-agents/${encodeURIComponent(id)}/resume-request`,
+      {
+        method: "POST",
+      },
+    );
+    if (!res.ok)
+      throw new Error(`Failed to request durable agent resume: ${res.status}`);
+    return res.json();
+  },
+
+  getDurableAgentLaunchPlan: async (
+    id: string,
+  ): Promise<DurableAgentLaunchPlan> => {
+    const res = await fetch(
+      `${API_BASE}/durable-agents/${encodeURIComponent(id)}/launch-plan`,
+    );
+    if (!res.ok)
+      throw new Error(`Failed to get durable agent launch plan: ${res.status}`);
+    return res.json();
+  },
+
+  startDurableAgent: async (
+    id: string,
+    data: DurableAgentStartRequest,
+  ): Promise<DurableAgentLaunchResult> => {
+    const res = await fetch(
+      `${API_BASE}/durable-agents/${encodeURIComponent(id)}/start`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(data),
+      },
+    );
+    if (!res.ok)
+      throw new Error(`Failed to start durable agent: ${res.status}`);
+    return res.json();
+  },
+
+  resumeDurableAgent: async (
+    id: string,
+    data: DurableAgentStartRequest,
+  ): Promise<DurableAgentLaunchResult> => {
+    const res = await fetch(
+      `${API_BASE}/durable-agents/${encodeURIComponent(id)}/resume`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(data),
+      },
+    );
+    if (!res.ok)
+      throw new Error(`Failed to resume durable agent: ${res.status}`);
+    return res.json();
+  },
+
+  listDurableAgentSessions: async (
+    id: string,
+  ): Promise<DurableAgentSessionAttachmentState[]> => {
+    const res = await fetch(
+      `${API_BASE}/durable-agents/${encodeURIComponent(id)}/sessions`,
+    );
+    if (!res.ok)
+      throw new Error(`Failed to list durable agent sessions: ${res.status}`);
+    return res.json();
+  },
+
+  listDurableAgentSchedules: async (id: string): Promise<AgentSchedule[]> => {
+    const res = await fetch(
+      `${API_BASE}/durable-agents/${encodeURIComponent(id)}/schedules`,
+    );
+    if (!res.ok)
+      throw new Error(`Failed to list durable agent schedules: ${res.status}`);
+    return res.json();
+  },
+
+  pauseDurableAgentSchedule: async (
+    id: string,
+    scheduleId: string,
+  ): Promise<void> => {
+    const res = await fetch(
+      `${API_BASE}/durable-agents/${encodeURIComponent(id)}/schedules/${encodeURIComponent(scheduleId)}/pause`,
+      { method: "POST" },
+    );
+    if (!res.ok)
+      throw new Error(`Failed to pause durable agent schedule: ${res.status}`);
+  },
+
+  resumeDurableAgentSchedule: async (
+    id: string,
+    scheduleId: string,
+  ): Promise<void> => {
+    const res = await fetch(
+      `${API_BASE}/durable-agents/${encodeURIComponent(id)}/schedules/${encodeURIComponent(scheduleId)}/resume`,
+      { method: "POST" },
+    );
+    if (!res.ok)
+      throw new Error(`Failed to resume durable agent schedule: ${res.status}`);
+  },
+
+  wakeDurableAgent: async (
+    id: string,
+    data: DurableAgentStartRequest,
+  ): Promise<DurableAgentWakeResult> => {
+    const res = await fetch(
+      `${API_BASE}/durable-agents/${encodeURIComponent(id)}/wake`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(data),
+      },
+    );
+    if (!res.ok) throw new Error(`Failed to wake durable agent: ${res.status}`);
+    return res.json();
+  },
+
+  listDurableAgentDueWake: async (): Promise<DurableAgentWakeDueItem[]> => {
+    const res = await fetch(`${API_BASE}/durable-agent-wake/due`);
+    if (!res.ok)
+      throw new Error(`Failed to list due durable wakes: ${res.status}`);
+    return res.json();
+  },
+
+  runDurableAgentDueWake: async (
+    dryRun = false,
+  ): Promise<DurableAgentWakeRunResult> => {
+    const res = await fetch(`${API_BASE}/durable-agent-wake/run-due`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ dry_run: dryRun }),
+    });
+    if (!res.ok)
+      throw new Error(`Failed to run due durable wakes: ${res.status}`);
+    return res.json();
+  },
+
+  attachDurableAgentSession: async (
+    id: string,
+    data: AttachDurableAgentSessionRequest,
+  ): Promise<void> => {
+    const res = await fetch(
+      `${API_BASE}/durable-agents/${encodeURIComponent(id)}/sessions`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(data),
+      },
+    );
+    if (!res.ok)
+      throw new Error(`Failed to attach durable agent session: ${res.status}`);
+  },
+
+  listDurableAgentRecipes: async (): Promise<DurableAgentRecipe[]> => {
+    const res = await fetch(`${API_BASE}/durable-agent-recipes`);
+    if (!res.ok)
+      throw new Error(`Failed to list durable agent recipes: ${res.status}`);
+    return res.json();
+  },
+
+  getDurableAgentRecipe: async (id: string): Promise<DurableAgentRecipe> => {
+    const res = await fetch(
+      `${API_BASE}/durable-agent-recipes/${encodeURIComponent(id)}`,
+    );
+    if (!res.ok)
+      throw new Error(`Failed to get durable agent recipe: ${res.status}`);
+    return res.json();
+  },
+
+  dryRunDurableAgentRecipe: async (
+    id: string,
+    data: DurableAgentRecipeRequest,
+  ): Promise<DurableAgentRecipePlan> => {
+    const res = await fetch(
+      `${API_BASE}/durable-agent-recipes/${encodeURIComponent(id)}/dry-run`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(data),
+      },
+    );
+    if (!res.ok)
+      throw new Error(`Failed to dry-run durable agent recipe: ${res.status}`);
+    return res.json();
+  },
+
+  applyDurableAgentRecipe: async (
+    id: string,
+    data: DurableAgentRecipeRequest,
+  ): Promise<DurableAgentRecipeApplyResult> => {
+    const res = await fetch(
+      `${API_BASE}/durable-agent-recipes/${encodeURIComponent(id)}/apply`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(data),
+      },
+    );
+    if (!res.ok)
+      throw new Error(`Failed to apply durable agent recipe: ${res.status}`);
+    return res.json();
+  },
 
   // Agent Modes
   listAgentModes: async (agentId: string): Promise<AgentModeProfile[]> => {
@@ -543,7 +1624,8 @@ export const api = {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ override }),
     });
-    if (!res.ok) throw new Error(`Failed to set session auto-switch: ${res.status}`);
+    if (!res.ok)
+      throw new Error(`Failed to set session auto-switch: ${res.status}`);
     return res.json();
   },
 
@@ -586,7 +1668,10 @@ export const api = {
     return res.json();
   },
 
-  toggleBookmark: async (messageId: string, sessionId: string): Promise<void> => {
+  toggleBookmark: async (
+    messageId: string,
+    sessionId: string,
+  ): Promise<void> => {
     await fetch(`${API_BASE}/messages/${messageId}/bookmark`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -595,7 +1680,9 @@ export const api = {
   },
 
   autotitleBookmark: async (bookmarkId: string): Promise<{ title: string }> => {
-    const res = await fetch(`${API_BASE}/bookmarks/${bookmarkId}/autotitle`, { method: "POST" });
+    const res = await fetch(`${API_BASE}/bookmarks/${bookmarkId}/autotitle`, {
+      method: "POST",
+    });
     if (!res.ok) throw new Error(`Failed to autotitle bookmark: ${res.status}`);
     return res.json();
   },
@@ -618,7 +1705,8 @@ export const api = {
       ? `?exclude_session_id=${encodeURIComponent(excludeSessionId)}`
       : "";
     const res = await fetch(`${API_BASE}/projects/${projectId}/artifacts${qs}`);
-    if (!res.ok) throw new Error(`Failed to list project artifacts: ${res.status}`);
+    if (!res.ok)
+      throw new Error(`Failed to list project artifacts: ${res.status}`);
     return res.json();
   },
 
@@ -643,7 +1731,12 @@ export const api = {
 
   createDocument: async (
     sessionId: string,
-    doc: { name: string; content: string; mime_type?: string; summary?: string },
+    doc: {
+      name: string;
+      content: string;
+      mime_type?: string;
+      summary?: string;
+    },
   ): Promise<Document> => {
     const res = await fetch(`${API_BASE}/sessions/${sessionId}/documents`, {
       method: "POST",
@@ -668,7 +1761,9 @@ export const api = {
   },
 
   deleteDocument: async (id: string): Promise<void> => {
-    const res = await fetch(`${API_BASE}/documents/${id}`, { method: "DELETE" });
+    const res = await fetch(`${API_BASE}/documents/${id}`, {
+      method: "DELETE",
+    });
     if (!res.ok) throw new Error(`Failed to delete document: ${res.status}`);
   },
 
@@ -680,12 +1775,18 @@ export const api = {
     return data.prompt ?? "";
   },
 
-  setSessionContextPrompt: async (sessionId: string, prompt: string): Promise<void> => {
-    const res = await fetch(`${API_BASE}/sessions/${sessionId}/context-prompt`, {
-      method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ prompt }),
-    });
+  setSessionContextPrompt: async (
+    sessionId: string,
+    prompt: string,
+  ): Promise<void> => {
+    const res = await fetch(
+      `${API_BASE}/sessions/${sessionId}/context-prompt`,
+      {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ prompt }),
+      },
+    );
     if (!res.ok) throw new Error(`Failed to set context prompt: ${res.status}`);
   },
 
@@ -712,7 +1813,12 @@ export const api = {
 
   pinDrawerCard: async (
     sessionId: string,
-    card: { card_type: DrawerCardType; content_ref?: string; title?: string; payload?: string },
+    card: {
+      card_type: DrawerCardType;
+      content_ref?: string;
+      title?: string;
+      payload?: string;
+    },
   ): Promise<DrawerPinnedCard> => {
     const res = await fetch(`${API_BASE}/sessions/${sessionId}/drawer-cards`, {
       method: "POST",
@@ -727,19 +1833,27 @@ export const api = {
   },
 
   unpinDrawerCard: async (id: string): Promise<void> => {
-    const res = await fetch(`${API_BASE}/drawer-cards/${id}`, { method: "DELETE" });
+    const res = await fetch(`${API_BASE}/drawer-cards/${id}`, {
+      method: "DELETE",
+    });
     if (!res.ok) throw new Error(`Failed to unpin drawer card: ${res.status}`);
   },
 
   /** D2 — promote/demote a pin between session and project scope. */
-  updatePinScope: async (id: string, scope: AgentStateScope, projectId?: string): Promise<void> => {
+  updatePinScope: async (
+    id: string,
+    scope: AgentStateScope,
+    projectId?: string,
+  ): Promise<void> => {
     const res = await fetch(`${API_BASE}/pins/${id}/scope`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ scope, project_id: projectId ?? "" }),
     });
     if (!res.ok) {
-      const err = await res.json().catch(() => ({ error: `Request failed: ${res.status}` }));
+      const err = await res
+        .json()
+        .catch(() => ({ error: `Request failed: ${res.status}` }));
       throw new Error(err.error || `Failed to update pin scope: ${res.status}`);
     }
   },
@@ -752,7 +1866,9 @@ export const api = {
   },
 
   deleteReminder: async (id: string): Promise<void> => {
-    const res = await fetch(`${API_BASE}/reminders/${id}`, { method: "DELETE" });
+    const res = await fetch(`${API_BASE}/reminders/${id}`, {
+      method: "DELETE",
+    });
     if (!res.ok) throw new Error(`Failed to delete reminder: ${res.status}`);
   },
 
@@ -768,8 +1884,12 @@ export const api = {
       body: JSON.stringify({ scope, project_id: projectId ?? "" }),
     });
     if (!res.ok) {
-      const err = await res.json().catch(() => ({ error: `Request failed: ${res.status}` }));
-      throw new Error(err.error || `Failed to update reminder scope: ${res.status}`);
+      const err = await res
+        .json()
+        .catch(() => ({ error: `Request failed: ${res.status}` }));
+      throw new Error(
+        err.error || `Failed to update reminder scope: ${res.status}`,
+      );
     }
     return res.json();
   },
@@ -790,7 +1910,8 @@ export const api = {
   },
   listProviderStatuses: async (): Promise<ProviderStatus[]> => {
     const res = await fetch(`${API_BASE}/providers/status`);
-    if (!res.ok) throw new Error(`Failed to list provider statuses: ${res.status}`);
+    if (!res.ok)
+      throw new Error(`Failed to list provider statuses: ${res.status}`);
     return res.json();
   },
   updateProvider: async (
@@ -818,12 +1939,16 @@ export const api = {
     return res.json();
   },
   testProviderConnection: async (id: string): Promise<{ ok: boolean }> => {
-    const res = await fetch(`${API_BASE}/providers/${id}/test`, { method: "POST" });
+    const res = await fetch(`${API_BASE}/providers/${id}/test`, {
+      method: "POST",
+    });
     // Gracefully handle missing endpoint — if the backend doesn't have a test
     // route yet, treat a successful key save as sufficient
     if (res.status === 404) return { ok: true };
     if (!res.ok) {
-      const err = await res.json().catch(() => ({ error: `Test failed: ${res.status}` }));
+      const err = await res
+        .json()
+        .catch(() => ({ error: `Test failed: ${res.status}` }));
       throw new Error(err.error || `Connection test failed: ${res.status}`);
     }
     return res.json();
@@ -848,7 +1973,9 @@ export const api = {
     return res.json();
   },
 
-  updateSettings: async (data: Partial<UserSettings>): Promise<UserSettings> => {
+  updateSettings: async (
+    data: Partial<UserSettings>,
+  ): Promise<UserSettings> => {
     const res = await fetch(`${API_BASE}/settings`, {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
@@ -858,17 +1985,23 @@ export const api = {
     return res.json();
   },
 
-  listEmbeddingProviders: async (): Promise<import("./types").EmbeddingProviderInfo[]> => {
+  listEmbeddingProviders: async (): Promise<
+    import("./types").EmbeddingProviderInfo[]
+  > => {
     const res = await fetch(`${API_BASE}/settings/embedding/providers`);
-    if (!res.ok) throw new Error(`Failed to list embedding providers: ${res.status}`);
+    if (!res.ok)
+      throw new Error(`Failed to list embedding providers: ${res.status}`);
     const body = await res.json();
     return body.providers ?? [];
   },
 
   // B3 (CW-20260428-0011): mode auto-switch preference. Empty string = unset.
-  getModeAutoSwitchPref: async (): Promise<{ pref: "" | "always" | "ask" | "never" }> => {
+  getModeAutoSwitchPref: async (): Promise<{
+    pref: "" | "always" | "ask" | "never";
+  }> => {
     const res = await fetch(`${API_BASE}/settings/mode-auto-switch`);
-    if (!res.ok) throw new Error(`Failed to get mode auto-switch pref: ${res.status}`);
+    if (!res.ok)
+      throw new Error(`Failed to get mode auto-switch pref: ${res.status}`);
     return res.json();
   },
 
@@ -880,14 +2013,16 @@ export const api = {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ pref }),
     });
-    if (!res.ok) throw new Error(`Failed to set mode auto-switch pref: ${res.status}`);
+    if (!res.ok)
+      throw new Error(`Failed to set mode auto-switch pref: ${res.status}`);
     return res.json();
   },
 
   // Session Agents
   listSessionAgents: async (sessionId: string): Promise<SessionAgent[]> => {
     const res = await fetch(`${API_BASE}/sessions/${sessionId}/agents`);
-    if (!res.ok) throw new Error(`Failed to list session agents: ${res.status}`);
+    if (!res.ok)
+      throw new Error(`Failed to list session agents: ${res.status}`);
     return res.json();
   },
 
@@ -901,15 +2036,23 @@ export const api = {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ agent_id: agentId, role }),
     });
-    if (!res.ok) throw new Error(`Failed to add agent to session: ${res.status}`);
+    if (!res.ok)
+      throw new Error(`Failed to add agent to session: ${res.status}`);
     return res.json();
   },
 
-  removeSessionAgent: async (sessionId: string, agentId: string): Promise<void> => {
-    const res = await fetch(`${API_BASE}/sessions/${sessionId}/agents/${agentId}`, {
-      method: "DELETE",
-    });
-    if (!res.ok) throw new Error(`Failed to remove agent from session: ${res.status}`);
+  removeSessionAgent: async (
+    sessionId: string,
+    agentId: string,
+  ): Promise<void> => {
+    const res = await fetch(
+      `${API_BASE}/sessions/${sessionId}/agents/${agentId}`,
+      {
+        method: "DELETE",
+      },
+    );
+    if (!res.ok)
+      throw new Error(`Failed to remove agent from session: ${res.status}`);
   },
 
   // Token Usage
@@ -926,33 +2069,40 @@ export const api = {
   },
 
   getContextBreakdown: async (sessionId: string): Promise<ContextBreakdown> => {
-    const res = await fetch(`${API_BASE}/sessions/${sessionId}/context-breakdown`);
-    if (!res.ok) throw new Error(`Failed to get context breakdown: ${res.status}`);
+    const res = await fetch(
+      `${API_BASE}/sessions/${sessionId}/context-breakdown`,
+    );
+    if (!res.ok)
+      throw new Error(`Failed to get context breakdown: ${res.status}`);
     return res.json();
   },
 
   // Execution Metrics
   getSessionMetrics: async (sessionId: string): Promise<ExecutionMetrics[]> => {
     const res = await fetch(`${API_BASE}/sessions/${sessionId}/metrics`);
-    if (!res.ok) throw new Error(`Failed to get session metrics: ${res.status}`);
+    if (!res.ok)
+      throw new Error(`Failed to get session metrics: ${res.status}`);
     return res.json();
   },
 
   getRecentExecutions: async (limit = 50): Promise<ExecutionMetrics[]> => {
     const res = await fetch(`${API_BASE}/metrics/executions?limit=${limit}`);
-    if (!res.ok) throw new Error(`Failed to get recent executions: ${res.status}`);
+    if (!res.ok)
+      throw new Error(`Failed to get recent executions: ${res.status}`);
     return res.json();
   },
 
   getUtilityCallSummary: async (): Promise<UtilityCallSummary[]> => {
     const res = await fetch(`${API_BASE}/metrics/utility`);
-    if (!res.ok) throw new Error(`Failed to get utility call summary: ${res.status}`);
+    if (!res.ok)
+      throw new Error(`Failed to get utility call summary: ${res.status}`);
     return res.json();
   },
 
   getUtilityCallLog: async (limit = 50): Promise<ExecutionMetrics[]> => {
     const res = await fetch(`${API_BASE}/metrics/utility/log?limit=${limit}`);
-    if (!res.ok) throw new Error(`Failed to get utility call log: ${res.status}`);
+    if (!res.ok)
+      throw new Error(`Failed to get utility call log: ${res.status}`);
     return res.json();
   },
 
@@ -964,8 +2114,11 @@ export const api = {
   },
 
   killStaleProcesses: async (): Promise<{ killed: number }> => {
-    const res = await fetch(`${API_BASE}/processes/kill-stale`, { method: "POST" });
-    if (!res.ok) throw new Error(`Failed to kill stale processes: ${res.status}`);
+    const res = await fetch(`${API_BASE}/processes/kill-stale`, {
+      method: "POST",
+    });
+    if (!res.ok)
+      throw new Error(`Failed to kill stale processes: ${res.status}`);
     return res.json();
   },
 
@@ -996,7 +2149,9 @@ export const api = {
 
   updateSkill: async (
     id: string,
-    data: Partial<Omit<Skill, "id" | "created_at" | "updated_at" | "is_builtin">>,
+    data: Partial<
+      Omit<Skill, "id" | "created_at" | "updated_at" | "is_builtin">
+    >,
   ): Promise<Skill> => {
     const res = await fetch(`${API_BASE}/skills/${id}`, {
       method: "PUT",
@@ -1051,64 +2206,82 @@ export const api = {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(data),
     });
-    if (!res.ok) throw new Error(`Failed to assign skill to agent: ${res.status}`);
+    if (!res.ok)
+      throw new Error(`Failed to assign skill to agent: ${res.status}`);
     return res.json();
   },
 
-  removeSkillFromAgent: async (agentId: string, skillId: string): Promise<void> => {
+  removeSkillFromAgent: async (
+    agentId: string,
+    skillId: string,
+  ): Promise<void> => {
     const res = await fetch(`${API_BASE}/agents/${agentId}/skills/${skillId}`, {
       method: "DELETE",
     });
-    if (!res.ok) throw new Error(`Failed to remove skill from agent: ${res.status}`);
+    if (!res.ok)
+      throw new Error(`Failed to remove skill from agent: ${res.status}`);
   },
 
   // Prompt Templates
   listPromptTemplates: async (): Promise<PromptTemplate[]> => {
     const res = await fetch(`${API_BASE}/prompt-templates`);
-    if (!res.ok) throw new Error(`Failed to list prompt templates: ${res.status}`);
+    if (!res.ok)
+      throw new Error(`Failed to list prompt templates: ${res.status}`);
     return res.json();
   },
 
   getPromptTemplate: async (id: string): Promise<PromptTemplate> => {
     const res = await fetch(`${API_BASE}/prompt-templates/${id}`);
-    if (!res.ok) throw new Error(`Failed to get prompt template: ${res.status}`);
+    if (!res.ok)
+      throw new Error(`Failed to get prompt template: ${res.status}`);
     return res.json();
   },
 
   createPromptTemplate: async (
-    data: Omit<PromptTemplate, "id" | "created_at" | "updated_at" | "is_builtin">,
+    data: Omit<
+      PromptTemplate,
+      "id" | "created_at" | "updated_at" | "is_builtin"
+    >,
   ): Promise<PromptTemplate> => {
     const res = await fetch(`${API_BASE}/prompt-templates`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(data),
     });
-    if (!res.ok) throw new Error(`Failed to create prompt template: ${res.status}`);
+    if (!res.ok)
+      throw new Error(`Failed to create prompt template: ${res.status}`);
     return res.json();
   },
 
   updatePromptTemplate: async (
     id: string,
-    data: Partial<Omit<PromptTemplate, "id" | "created_at" | "updated_at" | "is_builtin">>,
+    data: Partial<
+      Omit<PromptTemplate, "id" | "created_at" | "updated_at" | "is_builtin">
+    >,
   ): Promise<PromptTemplate> => {
     const res = await fetch(`${API_BASE}/prompt-templates/${id}`, {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(data),
     });
-    if (!res.ok) throw new Error(`Failed to update prompt template: ${res.status}`);
+    if (!res.ok)
+      throw new Error(`Failed to update prompt template: ${res.status}`);
     return res.json();
   },
 
   deletePromptTemplate: async (id: string): Promise<void> => {
-    const res = await fetch(`${API_BASE}/prompt-templates/${id}`, { method: "DELETE" });
-    if (!res.ok) throw new Error(`Failed to delete prompt template: ${res.status}`);
+    const res = await fetch(`${API_BASE}/prompt-templates/${id}`, {
+      method: "DELETE",
+    });
+    if (!res.ok)
+      throw new Error(`Failed to delete prompt template: ${res.status}`);
   },
 
   // Agent Templates (returns PromptTemplate[], not a join-table type)
   listAgentTemplates: async (agentId: string): Promise<PromptTemplate[]> => {
     const res = await fetch(`${API_BASE}/agents/${agentId}/prompt-templates`);
-    if (!res.ok) throw new Error(`Failed to list agent templates: ${res.status}`);
+    if (!res.ok)
+      throw new Error(`Failed to list agent templates: ${res.status}`);
     return res.json();
   },
 
@@ -1121,15 +2294,23 @@ export const api = {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(data),
     });
-    if (!res.ok) throw new Error(`Failed to assign template to agent: ${res.status}`);
+    if (!res.ok)
+      throw new Error(`Failed to assign template to agent: ${res.status}`);
     return res.json();
   },
 
-  removeTemplateFromAgent: async (agentId: string, templateId: string): Promise<void> => {
-    const res = await fetch(`${API_BASE}/agents/${agentId}/prompt-templates/${templateId}`, {
-      method: "DELETE",
-    });
-    if (!res.ok) throw new Error(`Failed to remove template from agent: ${res.status}`);
+  removeTemplateFromAgent: async (
+    agentId: string,
+    templateId: string,
+  ): Promise<void> => {
+    const res = await fetch(
+      `${API_BASE}/agents/${agentId}/prompt-templates/${templateId}`,
+      {
+        method: "DELETE",
+      },
+    );
+    if (!res.ok)
+      throw new Error(`Failed to remove template from agent: ${res.status}`);
   },
 
   // Engine Backlog
@@ -1146,8 +2327,12 @@ export const api = {
       body: JSON.stringify(data),
     });
     if (!res.ok) {
-      const err = await res.json().catch(() => ({ error: `Request failed: ${res.status}` }));
-      throw new Error(err.error || `Failed to create backlog item: ${res.status}`);
+      const err = await res
+        .json()
+        .catch(() => ({ error: `Request failed: ${res.status}` }));
+      throw new Error(
+        err.error || `Failed to create backlog item: ${res.status}`,
+      );
     }
     return res.json();
   },
@@ -1199,7 +2384,9 @@ export const api = {
       body: JSON.stringify(config),
     });
     if (!res.ok) {
-      const err = await res.json().catch(() => ({ error: `Request failed: ${res.status}` }));
+      const err = await res
+        .json()
+        .catch(() => ({ error: `Request failed: ${res.status}` }));
       throw new Error(err.error || `Failed to add MCP server: ${res.status}`);
     }
     return res.json();
@@ -1209,48 +2396,69 @@ export const api = {
     name: string,
     config: Partial<MCPServerConfig>,
   ): Promise<MCPServerConfig> => {
-    const res = await fetch(`${API_BASE}/mcp-servers/${encodeURIComponent(name)}`, {
-      method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(config),
-    });
+    const res = await fetch(
+      `${API_BASE}/mcp-servers/${encodeURIComponent(name)}`,
+      {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(config),
+      },
+    );
     if (!res.ok) {
-      const err = await res.json().catch(() => ({ error: `Request failed: ${res.status}` }));
-      throw new Error(err.error || `Failed to update MCP server: ${res.status}`);
+      const err = await res
+        .json()
+        .catch(() => ({ error: `Request failed: ${res.status}` }));
+      throw new Error(
+        err.error || `Failed to update MCP server: ${res.status}`,
+      );
     }
     return res.json();
   },
 
   deleteMCPServer: async (name: string): Promise<void> => {
-    const res = await fetch(`${API_BASE}/mcp-servers/${encodeURIComponent(name)}`, {
-      method: "DELETE",
-    });
+    const res = await fetch(
+      `${API_BASE}/mcp-servers/${encodeURIComponent(name)}`,
+      {
+        method: "DELETE",
+      },
+    );
     if (!res.ok) throw new Error(`Failed to delete MCP server: ${res.status}`);
   },
 
-  importMCPServers: async (json: string): Promise<{ created: string[]; skipped: string[] }> => {
+  importMCPServers: async (
+    json: string,
+  ): Promise<{ created: string[]; skipped: string[] }> => {
     const res = await fetch(`${API_BASE}/mcp-servers/import`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: json,
     });
     if (!res.ok) {
-      const err = await res.json().catch(() => ({ error: `Request failed: ${res.status}` }));
-      throw new Error(err.error || `Failed to import MCP servers: ${res.status}`);
+      const err = await res
+        .json()
+        .catch(() => ({ error: `Request failed: ${res.status}` }));
+      throw new Error(
+        err.error || `Failed to import MCP servers: ${res.status}`,
+      );
     }
     return res.json();
   },
 
   // Tool Load Preferences
-  fetchAllToolsWithLoadType: async (): Promise<import("./types").ToolLoadItem[]> => {
+  fetchAllToolsWithLoadType: async (): Promise<
+    import("./types").ToolLoadItem[]
+  > => {
     const res = await fetch(`${API_BASE}/tools/all`);
     if (!res.ok) throw new Error(`Failed to fetch tools: ${res.status}`);
     return res.json();
   },
 
-  fetchToolLoadPreferences: async (): Promise<import("./types").ToolLoadPreferences> => {
+  fetchToolLoadPreferences: async (): Promise<
+    import("./types").ToolLoadPreferences
+  > => {
     const res = await fetch(`${API_BASE}/tools/load-preferences`);
-    if (!res.ok) throw new Error(`Failed to fetch load preferences: ${res.status}`);
+    if (!res.ok)
+      throw new Error(`Failed to fetch load preferences: ${res.status}`);
     return res.json();
   },
 
@@ -1263,8 +2471,12 @@ export const api = {
       body: JSON.stringify(updates),
     });
     if (!res.ok) {
-      const err = await res.json().catch(() => ({ error: `Request failed: ${res.status}` }));
-      throw new Error(err.error || `Failed to update load preferences: ${res.status}`);
+      const err = await res
+        .json()
+        .catch(() => ({ error: `Request failed: ${res.status}` }));
+      throw new Error(
+        err.error || `Failed to update load preferences: ${res.status}`,
+      );
     }
     return res.json();
   },
@@ -1279,7 +2491,9 @@ export const api = {
   getFragmentsSprints: async (
     projectId?: string,
   ): Promise<{ items: FragmentsSprint[]; count: number }> => {
-    const params = projectId ? `?project_id=${encodeURIComponent(projectId)}` : "";
+    const params = projectId
+      ? `?project_id=${encodeURIComponent(projectId)}`
+      : "";
     const res = await fetch(`${API_BASE}/plugins/engine/sprints${params}`);
     if (!res.ok) throw new Error(`Failed to list sprints: ${res.status}`);
     return res.json();
@@ -1295,7 +2509,9 @@ export const api = {
     if (status) params.set("status", status);
     if (projectId) params.set("project_id", projectId);
     const qs = params.toString();
-    const res = await fetch(`${API_BASE}/plugins/engine/tasks${qs ? `?${qs}` : ""}`);
+    const res = await fetch(
+      `${API_BASE}/plugins/engine/tasks${qs ? `?${qs}` : ""}`,
+    );
     if (!res.ok) throw new Error(`Failed to list tasks: ${res.status}`);
     return res.json();
   },
@@ -1303,13 +2519,18 @@ export const api = {
   getFragmentsBacklog: async (
     projectId?: string,
   ): Promise<{ items: FragmentsBacklogItem[]; count: number }> => {
-    const params = projectId ? `?project_id=${encodeURIComponent(projectId)}` : "";
+    const params = projectId
+      ? `?project_id=${encodeURIComponent(projectId)}`
+      : "";
     const res = await fetch(`${API_BASE}/plugins/engine/backlog${params}`);
     if (!res.ok) throw new Error(`Failed to list backlog: ${res.status}`);
     return res.json();
   },
 
-  transitionFragmentsTask: async (id: string, status: string): Promise<unknown> => {
+  transitionFragmentsTask: async (
+    id: string,
+    status: string,
+  ): Promise<unknown> => {
     const res = await fetch(
       `${API_BASE}/plugins/engine/tasks/${encodeURIComponent(id)}/transition`,
       {
@@ -1322,20 +2543,30 @@ export const api = {
     return res.json();
   },
 
-  promoteBacklogItem: async (id: string, sprintId: string): Promise<unknown> => {
-    const res = await fetch(`${API_BASE}/volon/backlog/${encodeURIComponent(id)}/promote`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ sprint_id: sprintId }),
-    });
-    if (!res.ok) throw new Error(`Failed to promote backlog item: ${res.status}`);
+  promoteBacklogItem: async (
+    id: string,
+    sprintId: string,
+  ): Promise<unknown> => {
+    const res = await fetch(
+      `${API_BASE}/volon/backlog/${encodeURIComponent(id)}/promote`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ sprint_id: sprintId }),
+      },
+    );
+    if (!res.ok)
+      throw new Error(`Failed to promote backlog item: ${res.status}`);
     return res.json();
   },
 
   deleteFragmentsTask: async (id: string): Promise<unknown> => {
-    const res = await fetch(`${API_BASE}/plugins/engine/tasks/${encodeURIComponent(id)}`, {
-      method: "DELETE",
-    });
+    const res = await fetch(
+      `${API_BASE}/plugins/engine/tasks/${encodeURIComponent(id)}`,
+      {
+        method: "DELETE",
+      },
+    );
     if (!res.ok) throw new Error(`Failed to delete task: ${res.status}`);
     return res.json();
   },
@@ -1370,7 +2601,9 @@ export const api = {
       body: JSON.stringify(data),
     });
     if (!res.ok) {
-      const err = await res.json().catch(() => ({ error: `Request failed: ${res.status}` }));
+      const err = await res
+        .json()
+        .catch(() => ({ error: `Request failed: ${res.status}` }));
       throw new Error(err.error || `Failed to create todo: ${res.status}`);
     }
     return hydrateTodo(await res.json());
@@ -1385,13 +2618,18 @@ export const api = {
   updateTodo: async (
     id: string,
     updates: Partial<
-      Pick<Todo, "title" | "description" | "status" | "priority" | "labels" | "metadata">
+      Pick<
+        Todo,
+        "title" | "description" | "status" | "priority" | "labels" | "metadata"
+      >
     >,
   ): Promise<Todo> => {
     const res = await fetch(`${API_BASE}/todos/${encodeURIComponent(id)}`, {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(serializeTodoUpdates(updates as Record<string, unknown>)),
+      body: JSON.stringify(
+        serializeTodoUpdates(updates as Record<string, unknown>),
+      ),
     });
     if (!res.ok) throw new Error(`Failed to update todo: ${res.status}`);
     return hydrateTodo(await res.json());
@@ -1411,20 +2649,33 @@ export const api = {
     scopeId: string,
     projectId?: string,
   ): Promise<Todo> => {
-    const res = await fetch(`${API_BASE}/todos/${encodeURIComponent(id)}/scope`, {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ scope, scope_id: scopeId, project_id: projectId ?? "" }),
-    });
+    const res = await fetch(
+      `${API_BASE}/todos/${encodeURIComponent(id)}/scope`,
+      {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          scope,
+          scope_id: scopeId,
+          project_id: projectId ?? "",
+        }),
+      },
+    );
     if (!res.ok) {
-      const err = await res.json().catch(() => ({ error: `Request failed: ${res.status}` }));
-      throw new Error(err.error || `Failed to update todo scope: ${res.status}`);
+      const err = await res
+        .json()
+        .catch(() => ({ error: `Request failed: ${res.status}` }));
+      throw new Error(
+        err.error || `Failed to update todo scope: ${res.status}`,
+      );
     }
     return hydrateTodo(await res.json());
   },
 
   listTodoChildren: async (id: string): Promise<Todo[]> => {
-    const res = await fetch(`${API_BASE}/todos/${encodeURIComponent(id)}/children`);
+    const res = await fetch(
+      `${API_BASE}/todos/${encodeURIComponent(id)}/children`,
+    );
     if (!res.ok) throw new Error(`Failed to list todo children: ${res.status}`);
     const todos = await res.json();
     return todos.map(hydrateTodo);
@@ -1454,10 +2705,14 @@ export const api = {
     const res = await fetch(`${API_BASE}/plans`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(serializePlanPayload(data as Record<string, unknown>)),
+      body: JSON.stringify(
+        serializePlanPayload(data as Record<string, unknown>),
+      ),
     });
     if (!res.ok) {
-      const err = await res.json().catch(() => ({ error: `Request failed: ${res.status}` }));
+      const err = await res
+        .json()
+        .catch(() => ({ error: `Request failed: ${res.status}` }));
       throw new Error(err.error || `Failed to create plan: ${res.status}`);
     }
     return hydratePlan(await res.json());
@@ -1471,12 +2726,16 @@ export const api = {
 
   updatePlan: async (
     id: string,
-    updates: Partial<Pick<Plan, "title" | "description" | "status" | "steps" | "metadata">>,
+    updates: Partial<
+      Pick<Plan, "title" | "description" | "status" | "steps" | "metadata">
+    >,
   ): Promise<Plan> => {
     const res = await fetch(`${API_BASE}/plans/${encodeURIComponent(id)}`, {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(serializePlanPayload(updates as Record<string, unknown>)),
+      body: JSON.stringify(
+        serializePlanPayload(updates as Record<string, unknown>),
+      ),
     });
     if (!res.ok) throw new Error(`Failed to update plan: ${res.status}`);
     return hydratePlan(await res.json());
@@ -1507,13 +2766,18 @@ export const api = {
   },
 
   approvePlan: async (id: string, createTodos = true): Promise<Plan> => {
-    const res = await fetch(`${API_BASE}/plans/${encodeURIComponent(id)}/approve`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ create_todos: createTodos }),
-    });
+    const res = await fetch(
+      `${API_BASE}/plans/${encodeURIComponent(id)}/approve`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ create_todos: createTodos }),
+      },
+    );
     if (!res.ok) {
-      const err = await res.json().catch(() => ({ error: `Request failed: ${res.status}` }));
+      const err = await res
+        .json()
+        .catch(() => ({ error: `Request failed: ${res.status}` }));
       throw new Error(err.error || `Failed to approve plan: ${res.status}`);
     }
     return hydratePlan(await res.json());
@@ -1539,9 +2803,12 @@ export const api = {
   },
 
   cancelWorker: async (id: string): Promise<{ status: string }> => {
-    const res = await fetch(`${API_BASE}/workers/${encodeURIComponent(id)}/cancel`, {
-      method: "POST",
-    });
+    const res = await fetch(
+      `${API_BASE}/workers/${encodeURIComponent(id)}/cancel`,
+      {
+        method: "POST",
+      },
+    );
     if (!res.ok) throw new Error(`Failed to cancel worker: ${res.status}`);
     return res.json();
   },
@@ -1555,7 +2822,8 @@ export const api = {
 
   fetchPluginRegistry: async (): Promise<PluginRegistryResponse> => {
     const res = await fetch(`${API_BASE}/plugins/registry`);
-    if (!res.ok) throw new Error(`Failed to fetch plugin registry: ${res.status}`);
+    if (!res.ok)
+      throw new Error(`Failed to fetch plugin registry: ${res.status}`);
     return res.json();
   },
 
@@ -1596,7 +2864,9 @@ export const api = {
   },
 
   getPluginConfig: async (pluginId: string): Promise<PluginConfig> => {
-    const res = await fetch(`${API_BASE}/plugin-config/${encodeURIComponent(pluginId)}`);
+    const res = await fetch(
+      `${API_BASE}/plugin-config/${encodeURIComponent(pluginId)}`,
+    );
     if (!res.ok) throw new Error(`Failed to get plugin config: ${res.status}`);
     return res.json();
   },
@@ -1618,12 +2888,16 @@ export const api = {
     pluginId: string,
     settings: Record<string, unknown>,
   ): Promise<PluginConfig> => {
-    const res = await fetch(`${API_BASE}/plugin-config/${encodeURIComponent(pluginId)}`, {
-      method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(settings),
-    });
-    if (!res.ok) throw new Error(`Failed to update plugin config: ${res.status}`);
+    const res = await fetch(
+      `${API_BASE}/plugin-config/${encodeURIComponent(pluginId)}`,
+      {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(settings),
+      },
+    );
+    if (!res.ok)
+      throw new Error(`Failed to update plugin config: ${res.status}`);
     return res.json();
   },
 
@@ -1634,13 +2908,17 @@ export const api = {
     if (!res.ok) throw new Error(`Failed to browse catalog: ${res.status}`);
     const ct = res.headers.get("content-type") ?? "";
     if (!ct.includes("application/json")) {
-      throw new Error("Catalog API not available — backend may need a rebuild (cerberus_rebuild)");
+      throw new Error(
+        "Catalog API not available — backend may need a rebuild (cerberus_rebuild)",
+      );
     }
     return res.json();
   },
 
   refreshCatalog: async (): Promise<void> => {
-    const res = await fetch(`${API_BASE}/plugins/catalog/refresh`, { method: "POST" });
+    const res = await fetch(`${API_BASE}/plugins/catalog/refresh`, {
+      method: "POST",
+    });
     if (!res.ok) throw new Error(`Failed to refresh catalog: ${res.status}`);
   },
 
@@ -1659,7 +2937,9 @@ export const api = {
       body: JSON.stringify({ name }),
     });
     if (!res.ok) {
-      const err = await res.json().catch(() => ({ error: `Install failed: ${res.status}` }));
+      const err = await res
+        .json()
+        .catch(() => ({ error: `Install failed: ${res.status}` }));
       throw new Error(err.error || `Install failed: ${res.status}`);
     }
     return res.json();
@@ -1667,18 +2947,25 @@ export const api = {
 
   listCatalogSources: async (): Promise<CatalogSource[]> => {
     const res = await fetch(`${API_BASE}/plugins/catalog/sources`);
-    if (!res.ok) throw new Error(`Failed to list catalog sources: ${res.status}`);
+    if (!res.ok)
+      throw new Error(`Failed to list catalog sources: ${res.status}`);
     return res.json();
   },
 
-  addCatalogSource: async (name: string, url: string, priority: number): Promise<CatalogSource> => {
+  addCatalogSource: async (
+    name: string,
+    url: string,
+    priority: number,
+  ): Promise<CatalogSource> => {
     const res = await fetch(`${API_BASE}/plugins/catalog/sources`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ name, url, priority }),
     });
     if (!res.ok) {
-      const err = await res.json().catch(() => ({ error: `Add source failed: ${res.status}` }));
+      const err = await res
+        .json()
+        .catch(() => ({ error: `Add source failed: ${res.status}` }));
       throw new Error(err.error || `Add source failed: ${res.status}`);
     }
     return res.json();
@@ -1693,12 +2980,16 @@ export const api = {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(data),
     });
-    if (!res.ok) throw new Error(`Failed to update catalog source: ${res.status}`);
+    if (!res.ok)
+      throw new Error(`Failed to update catalog source: ${res.status}`);
   },
 
   deleteCatalogSource: async (id: string): Promise<void> => {
-    const res = await fetch(`${API_BASE}/plugins/catalog/sources/${id}`, { method: "DELETE" });
-    if (!res.ok) throw new Error(`Failed to delete catalog source: ${res.status}`);
+    const res = await fetch(`${API_BASE}/plugins/catalog/sources/${id}`, {
+      method: "DELETE",
+    });
+    if (!res.ok)
+      throw new Error(`Failed to delete catalog source: ${res.status}`);
   },
 
   setCatalogSourceKey: async (id: string, publicKey: string): Promise<void> => {
@@ -1723,12 +3014,16 @@ export const api = {
     agentId: string,
     filter?: { status?: string; channel?: string; kind?: string },
   ): Promise<AgentMessage[]> => {
-    const params = new URLSearchParams({ session_id: sessionId, agent_id: agentId });
+    const params = new URLSearchParams({
+      session_id: sessionId,
+      agent_id: agentId,
+    });
     if (filter?.status) params.set("status", filter.status);
     if (filter?.channel) params.set("channel", filter.channel);
     if (filter?.kind) params.set("kind", filter.kind);
     const res = await fetch(`${API_BASE}/messaging/inbox?${params}`);
-    if (!res.ok) throw new Error(`Failed to get messaging inbox: ${res.status}`);
+    if (!res.ok)
+      throw new Error(`Failed to get messaging inbox: ${res.status}`);
     return res.json();
   },
 
@@ -1737,7 +3032,10 @@ export const api = {
     sessionId: string,
     agentId: string,
   ): Promise<AgentMessage[]> => {
-    const params = new URLSearchParams({ session_id: sessionId, agent_id: agentId });
+    const params = new URLSearchParams({
+      session_id: sessionId,
+      agent_id: agentId,
+    });
     const res = await fetch(
       `${API_BASE}/messaging/threads/${encodeURIComponent(threadId)}?${params}`,
     );
@@ -1770,29 +3068,48 @@ export const api = {
     return res.json();
   },
 
-  ackAgentMessage: async (id: string, sessionId: string, agentId: string): Promise<void> => {
-    const res = await fetch(`${API_BASE}/messaging/${encodeURIComponent(id)}/ack`, {
-      method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ session_id: sessionId, agent_id: agentId }),
-    });
-    if (!res.ok) throw new Error(`Failed to acknowledge agent message: ${res.status}`);
+  ackAgentMessage: async (
+    id: string,
+    sessionId: string,
+    agentId: string,
+  ): Promise<void> => {
+    const res = await fetch(
+      `${API_BASE}/messaging/${encodeURIComponent(id)}/ack`,
+      {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ session_id: sessionId, agent_id: agentId }),
+      },
+    );
+    if (!res.ok)
+      throw new Error(`Failed to acknowledge agent message: ${res.status}`);
   },
 
-  resolveAgentMessage: async (id: string, sessionId: string, agentId: string): Promise<void> => {
-    const res = await fetch(`${API_BASE}/messaging/${encodeURIComponent(id)}/resolve`, {
-      method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ session_id: sessionId, agent_id: agentId }),
-    });
-    if (!res.ok) throw new Error(`Failed to resolve agent message: ${res.status}`);
+  resolveAgentMessage: async (
+    id: string,
+    sessionId: string,
+    agentId: string,
+  ): Promise<void> => {
+    const res = await fetch(
+      `${API_BASE}/messaging/${encodeURIComponent(id)}/resolve`,
+      {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ session_id: sessionId, agent_id: agentId }),
+      },
+    );
+    if (!res.ok)
+      throw new Error(`Failed to resolve agent message: ${res.status}`);
   },
 
   getAgentMessageUnreadCount: async (
     sessionId: string,
     agentId: string,
   ): Promise<{ count: number }> => {
-    const params = new URLSearchParams({ session_id: sessionId, agent_id: agentId });
+    const params = new URLSearchParams({
+      session_id: sessionId,
+      agent_id: agentId,
+    });
     const res = await fetch(`${API_BASE}/messaging/unread?${params}`);
     if (!res.ok) throw new Error(`Failed to get unread count: ${res.status}`);
     return res.json();
@@ -1819,11 +3136,15 @@ export const api = {
   // Agent Projects (many-to-many)
   listAgentProjects: async (agentId: string): Promise<Project[]> => {
     const res = await fetch(`${API_BASE}/agents/${agentId}/projects`);
-    if (!res.ok) throw new Error(`Failed to list agent projects: ${res.status}`);
+    if (!res.ok)
+      throw new Error(`Failed to list agent projects: ${res.status}`);
     return res.json();
   },
 
-  addAgentProject: async (agentId: string, projectId: string): Promise<Project[]> => {
+  addAgentProject: async (
+    agentId: string,
+    projectId: string,
+  ): Promise<Project[]> => {
     const res = await fetch(`${API_BASE}/agents/${agentId}/projects`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -1833,29 +3154,43 @@ export const api = {
     return res.json();
   },
 
-  removeAgentProject: async (agentId: string, projectId: string): Promise<void> => {
-    const res = await fetch(`${API_BASE}/agents/${agentId}/projects/${projectId}`, {
-      method: "DELETE",
-    });
-    if (!res.ok) throw new Error(`Failed to remove agent project: ${res.status}`);
+  removeAgentProject: async (
+    agentId: string,
+    projectId: string,
+  ): Promise<void> => {
+    const res = await fetch(
+      `${API_BASE}/agents/${agentId}/projects/${projectId}`,
+      {
+        method: "DELETE",
+      },
+    );
+    if (!res.ok)
+      throw new Error(`Failed to remove agent project: ${res.status}`);
   },
 
   // Workspace & Project Management
-  updateWorkspace: async (id: string, data: Partial<Workspace>): Promise<Workspace> => {
+  updateWorkspace: async (
+    id: string,
+    data: Partial<Workspace>,
+  ): Promise<Workspace> => {
     const res = await fetch(`${API_BASE}/workspaces/${id}`, {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(data),
     });
     if (!res.ok) {
-      const err = await res.json().catch(() => ({ error: `Request failed: ${res.status}` }));
+      const err = await res
+        .json()
+        .catch(() => ({ error: `Request failed: ${res.status}` }));
       throw new Error(err.error || `Failed to update workspace: ${res.status}`);
     }
     return res.json();
   },
 
   deleteWorkspace: async (id: string): Promise<void> => {
-    const res = await fetch(`${API_BASE}/workspaces/${id}`, { method: "DELETE" });
+    const res = await fetch(`${API_BASE}/workspaces/${id}`, {
+      method: "DELETE",
+    });
     if (!res.ok) throw new Error(`Failed to delete workspace: ${res.status}`);
   },
 
@@ -1864,27 +3199,41 @@ export const api = {
     projectId: string,
     data: Partial<Project>,
   ): Promise<Project> => {
-    const res = await fetch(`${API_BASE}/workspaces/${workspaceId}/projects/${projectId}`, {
-      method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(data),
-    });
+    const res = await fetch(
+      `${API_BASE}/workspaces/${workspaceId}/projects/${projectId}`,
+      {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(data),
+      },
+    );
     if (!res.ok) {
-      const err = await res.json().catch(() => ({ error: `Request failed: ${res.status}` }));
+      const err = await res
+        .json()
+        .catch(() => ({ error: `Request failed: ${res.status}` }));
       throw new Error(err.error || `Failed to update project: ${res.status}`);
     }
     return res.json();
   },
 
-  deleteProject: async (workspaceId: string, projectId: string): Promise<void> => {
-    const res = await fetch(`${API_BASE}/workspaces/${workspaceId}/projects/${projectId}`, {
-      method: "DELETE",
-    });
+  deleteProject: async (
+    workspaceId: string,
+    projectId: string,
+  ): Promise<void> => {
+    const res = await fetch(
+      `${API_BASE}/workspaces/${workspaceId}/projects/${projectId}`,
+      {
+        method: "DELETE",
+      },
+    );
     if (!res.ok) throw new Error(`Failed to delete project: ${res.status}`);
   },
 
   // Custom Actions
-  listActions: async (): Promise<{ actions: CustomAction[]; count: number }> => {
+  listActions: async (): Promise<{
+    actions: CustomAction[];
+    count: number;
+  }> => {
     const res = await fetch(`${API_BASE}/actions`);
     if (!res.ok) throw new Error(`Failed to list actions: ${res.status}`);
     return res.json();
@@ -1908,7 +3257,10 @@ export const api = {
     return res.json();
   },
 
-  updateAction: async (id: string, data: Partial<CustomAction>): Promise<CustomAction> => {
+  updateAction: async (
+    id: string,
+    data: Partial<CustomAction>,
+  ): Promise<CustomAction> => {
     const res = await fetch(`${API_BASE}/actions/${id}`, {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
@@ -1926,7 +3278,12 @@ export const api = {
   executeAction: async (
     id: string,
     sessionId: string,
-  ): Promise<{ action: string; command: string; session_id: string; action_id: string }> => {
+  ): Promise<{
+    action: string;
+    command: string;
+    session_id: string;
+    action_id: string;
+  }> => {
     const res = await fetch(`${API_BASE}/actions/${id}/execute`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -1954,34 +3311,44 @@ export const api = {
     decision: ApprovalDecision,
     scope?: ApprovalScope,
   ): Promise<{ status: string }> => {
-    const res = await fetch(`${API_BASE}/sessions/${sessionId}/approvals/${requestId}`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ decision, scope }),
-    });
-    if (!res.ok) throw new Error(`Failed to respond to approval: ${res.status}`);
+    const res = await fetch(
+      `${API_BASE}/sessions/${sessionId}/approvals/${requestId}`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ decision, scope }),
+      },
+    );
+    if (!res.ok)
+      throw new Error(`Failed to respond to approval: ${res.status}`);
     return res.json();
   },
 
   getPermissionMode: async (): Promise<{ mode: PermissionMode }> => {
     const res = await fetch(`${API_BASE}/permissions/mode`);
-    if (!res.ok) throw new Error(`Failed to get permission mode: ${res.status}`);
+    if (!res.ok)
+      throw new Error(`Failed to get permission mode: ${res.status}`);
     return res.json();
   },
 
-  setPermissionMode: async (mode: PermissionMode): Promise<{ mode: PermissionMode }> => {
+  setPermissionMode: async (
+    mode: PermissionMode,
+  ): Promise<{ mode: PermissionMode }> => {
     const res = await fetch(`${API_BASE}/permissions/mode`, {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ mode }),
     });
-    if (!res.ok) throw new Error(`Failed to set permission mode: ${res.status}`);
+    if (!res.ok)
+      throw new Error(`Failed to set permission mode: ${res.status}`);
     return res.json();
   },
 
   // --- Shell Execution ---
 
-  getShellMode: async (sessionId: string): Promise<{ mode: import("./types").ShellMode }> => {
+  getShellMode: async (
+    sessionId: string,
+  ): Promise<{ mode: import("./types").ShellMode }> => {
     const res = await fetch(`${API_BASE}/sessions/${sessionId}/shell-mode`);
     if (!res.ok) throw new Error(`Failed to get shell mode: ${res.status}`);
     return res.json();
@@ -2020,7 +3387,9 @@ export const api = {
       body: JSON.stringify({ command, approved }),
     });
     if (!res.ok) {
-      const err = await res.json().catch(() => ({ error: `HTTP ${res.status}` }));
+      const err = await res
+        .json()
+        .catch(() => ({ error: `HTTP ${res.status}` }));
       throw new Error(err.error || `Shell exec failed: ${res.status}`);
     }
     return res.json();
@@ -2033,13 +3402,18 @@ export const api = {
     const res = await fetch(
       `${API_BASE}/sessions/${sessionId}/shell-check?command=${encodeURIComponent(command)}`,
     );
-    if (!res.ok) throw new Error(`Failed to check shell command: ${res.status}`);
+    if (!res.ok)
+      throw new Error(`Failed to check shell command: ${res.status}`);
     return res.json();
   },
 
   getShellInfo: async (
     sessionId: string,
-  ): Promise<{ work_dir: string; git_branch?: string; git_status?: string }> => {
+  ): Promise<{
+    work_dir: string;
+    git_branch?: string;
+    git_status?: string;
+  }> => {
     const res = await fetch(`${API_BASE}/sessions/${sessionId}/shell-info`);
     if (!res.ok) throw new Error(`Failed to get shell info: ${res.status}`);
     return res.json();
@@ -2047,19 +3421,26 @@ export const api = {
 
   // --- vNext: Broker Decisions ---
 
-  getBrokerDecisions: async (sessionId: string, limit = 50): Promise<BrokerDecision[]> => {
+  getBrokerDecisions: async (
+    sessionId: string,
+    limit = 50,
+  ): Promise<BrokerDecision[]> => {
     const res = await fetch(
       `${API_BASE}/broker/decisions?session_id=${encodeURIComponent(sessionId)}&limit=${limit}`,
     );
-    if (!res.ok) throw new Error(`Failed to get broker decisions: ${res.status}`);
+    if (!res.ok)
+      throw new Error(`Failed to get broker decisions: ${res.status}`);
     return res.json();
   },
 
   // --- vNext: Execution Metrics (with debug snapshots) ---
 
-  getExecutionMetrics: async (sessionId: string): Promise<ExecutionMetrics[]> => {
+  getExecutionMetrics: async (
+    sessionId: string,
+  ): Promise<ExecutionMetrics[]> => {
     const res = await fetch(`${API_BASE}/sessions/${sessionId}/metrics`);
-    if (!res.ok) throw new Error(`Failed to get execution metrics: ${res.status}`);
+    if (!res.ok)
+      throw new Error(`Failed to get execution metrics: ${res.status}`);
     return res.json();
   },
 
@@ -2072,22 +3453,30 @@ export const api = {
     if (params?.status) qs.set("status", params.status);
     if (params?.pipeline_id) qs.set("pipeline_id", params.pipeline_id);
     const query = qs.toString();
-    const res = await fetch(`${API_BASE}/workflows/runs${query ? `?${query}` : ""}`);
+    const res = await fetch(
+      `${API_BASE}/workflows/runs${query ? `?${query}` : ""}`,
+    );
     if (!res.ok) throw new Error(`Failed to list workflow runs: ${res.status}`);
     return res.json();
   },
 
   getWorkflowRun: async (runId: string): Promise<WorkflowRun> => {
-    const res = await fetch(`${API_BASE}/workflows/runs/${encodeURIComponent(runId)}`);
+    const res = await fetch(
+      `${API_BASE}/workflows/runs/${encodeURIComponent(runId)}`,
+    );
     if (!res.ok) throw new Error(`Failed to get workflow run: ${res.status}`);
     return res.json();
   },
 
   cancelWorkflowRun: async (runId: string): Promise<{ status: string }> => {
-    const res = await fetch(`${API_BASE}/workflows/runs/${encodeURIComponent(runId)}/cancel`, {
-      method: "POST",
-    });
-    if (!res.ok) throw new Error(`Failed to cancel workflow run: ${res.status}`);
+    const res = await fetch(
+      `${API_BASE}/workflows/runs/${encodeURIComponent(runId)}/cancel`,
+      {
+        method: "POST",
+      },
+    );
+    if (!res.ok)
+      throw new Error(`Failed to cancel workflow run: ${res.status}`);
     return res.json();
   },
 
@@ -2120,20 +3509,27 @@ export const api = {
       body: JSON.stringify(data),
     });
     if (!res.ok) {
-      const err = await res.json().catch(() => ({ error: `Request failed: ${res.status}` }));
+      const err = await res
+        .json()
+        .catch(() => ({ error: `Request failed: ${res.status}` }));
       throw new Error(err.error || `Failed to create memory: ${res.status}`);
     }
     return res.json();
   },
 
-  updateMemory: async (key: string, data: MemoryUpdateRequest): Promise<Memory> => {
+  updateMemory: async (
+    key: string,
+    data: MemoryUpdateRequest,
+  ): Promise<Memory> => {
     const res = await fetch(`${API_BASE}/memories/${encodeURIComponent(key)}`, {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(data),
     });
     if (!res.ok) {
-      const err = await res.json().catch(() => ({ error: `Request failed: ${res.status}` }));
+      const err = await res
+        .json()
+        .catch(() => ({ error: `Request failed: ${res.status}` }));
       throw new Error(err.error || `Failed to update memory: ${res.status}`);
     }
     return res.json();
@@ -2148,14 +3544,21 @@ export const api = {
   },
 
   updateMemoryStatus: async (key: string, status: string): Promise<Memory> => {
-    const res = await fetch(`${API_BASE}/memories/${encodeURIComponent(key)}/status`, {
-      method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ status }),
-    });
+    const res = await fetch(
+      `${API_BASE}/memories/${encodeURIComponent(key)}/status`,
+      {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ status }),
+      },
+    );
     if (!res.ok) {
-      const err = await res.json().catch(() => ({ error: `Request failed: ${res.status}` }));
-      throw new Error(err.error || `Failed to update memory status: ${res.status}`);
+      const err = await res
+        .json()
+        .catch(() => ({ error: `Request failed: ${res.status}` }));
+      throw new Error(
+        err.error || `Failed to update memory status: ${res.status}`,
+      );
     }
     return res.json();
   },
@@ -2164,8 +3567,13 @@ export const api = {
   // GET /api/workspaces/{workspace_id}/roles
   listWorkspaceRoleTrust: async (
     workspaceID: string,
-  ): Promise<{ workspace_id: string; trust_overrides: WorkspaceRoleTrustOverride[] }> => {
-    const res = await fetch(`${API_BASE}/workspaces/${encodeURIComponent(workspaceID)}/roles`);
+  ): Promise<{
+    workspace_id: string;
+    trust_overrides: WorkspaceRoleTrustOverride[];
+  }> => {
+    const res = await fetch(
+      `${API_BASE}/workspaces/${encodeURIComponent(workspaceID)}/roles`,
+    );
     if (!res.ok) throw new Error(`Failed to list role trust: ${res.status}`);
     return res.json();
   },
@@ -2175,7 +3583,11 @@ export const api = {
     workspaceID: string,
     agentProfileID: string,
     tier: "untrusted" | "normal" | "trusted",
-  ): Promise<{ workspace_id: string; agent_profile_id: string; trust_tier: string }> => {
+  ): Promise<{
+    workspace_id: string;
+    agent_profile_id: string;
+    trust_tier: string;
+  }> => {
     const res = await fetch(
       `${API_BASE}/workspaces/${encodeURIComponent(workspaceID)}/roles/${encodeURIComponent(agentProfileID)}/trust`,
       {
@@ -2202,15 +3614,22 @@ export const api = {
   },
 
   // Inspector (I1, CW-20260426-0004)
-  getInspectorTurns: async (sessionId: string, limit = 20): Promise<InspectorTurnsResponse> => {
+  getInspectorTurns: async (
+    sessionId: string,
+    limit = 20,
+  ): Promise<InspectorTurnsResponse> => {
     const res = await fetch(
       `${API_BASE}/inspector/sessions/${encodeURIComponent(sessionId)}/turns?limit=${limit}`,
     );
-    if (!res.ok) throw new Error(`Failed to get inspector turns: ${res.status}`);
+    if (!res.ok)
+      throw new Error(`Failed to get inspector turns: ${res.status}`);
     return res.json();
   },
 
-  getInspectorTurn: async (sessionId: string, turnId: string): Promise<InspectorTurnSnapshot> => {
+  getInspectorTurn: async (
+    sessionId: string,
+    turnId: string,
+  ): Promise<InspectorTurnSnapshot> => {
     const res = await fetch(
       `${API_BASE}/inspector/sessions/${encodeURIComponent(sessionId)}/turns/${encodeURIComponent(turnId)}`,
     );

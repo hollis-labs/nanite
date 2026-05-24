@@ -32,7 +32,7 @@ import { useModels, useSettings } from "@/hooks/useSettings";
 import { api } from "@/lib/api";
 import type { AgentModeProfile, AgentProfile } from "@/lib/types";
 import { useAppStore } from "@/stores/useAppStore";
-import { AgentCreateWizard } from "./agents/AgentCreateWizard";
+import { AgentBuilderWizard } from "./agents/AgentBuilderWizard";
 import { AgentDetailView } from "./agents/AgentDetailView";
 
 type AgentProfileManagerProps = {};
@@ -108,15 +108,6 @@ export function AgentProfileManager({}: AgentProfileManagerProps) {
     queryKey: ["agent-projects", selectedAgent],
     queryFn: () => api.listAgentProjects(selectedAgent!),
     enabled: !!selectedAgent,
-  });
-
-  const createMutation = useMutation({
-    mutationFn: api.createAgentProfile,
-    onSuccess: (newAgent) => {
-      void queryClient.invalidateQueries({ queryKey: ["agent-profiles"] });
-      setShowCreateForm(false);
-      setSelectedAgent(newAgent.id);
-    },
   });
 
   const updateMutation = useMutation({
@@ -467,12 +458,14 @@ export function AgentProfileManager({}: AgentProfileManagerProps) {
   // Create Wizard
   if (showCreateForm) {
     return (
-      <AgentCreateWizard
+      <AgentBuilderWizard
         modelOptions={modelOptions}
         defaultModel={defaultModel}
-        onSubmit={(data) => createMutation.mutate(data)}
         onCancel={() => setShowCreateForm(false)}
-        isPending={createMutation.isPending}
+        onCreated={(agentId) => {
+          setShowCreateForm(false);
+          setSelectedAgent(agentId);
+        }}
       />
     );
   }

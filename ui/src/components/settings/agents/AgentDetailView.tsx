@@ -9,10 +9,10 @@ import {
   Loader2,
   Plus,
   Settings,
-  Terminal,
   User,
   Wrench,
   X,
+  Zap,
 } from "lucide-react";
 import { useCallback, useState } from "react";
 import { SourceBadge } from "@/components/agents/SourceBadge";
@@ -30,9 +30,10 @@ import type {
 } from "@/lib/types";
 import { ConstraintsEditor } from "./editors/ConstraintsEditor";
 import { EditableStringList } from "./editors/EditableStringList";
-import { McpServerList } from "./editors/McpServerList";
 import { SystemPromptEditor } from "./editors/SystemPromptEditor";
-import { ToolPermissionsEditor } from "./editors/ToolPermissionsEditor";
+import { AgentBootPlanPanel } from "./AgentBootPlanPanel";
+import { AgentCapabilitiesPanel } from "./AgentCapabilitiesPanel";
+import { AgentReflexesPanel } from "./AgentReflexesPanel";
 
 // ─── Props ──────────────────────────────────────────────────────────
 
@@ -91,8 +92,6 @@ export function AgentDetailView({
   const [editField, setEditField] = useState<string | null>(null);
   const [editValue, setEditValue] = useState("");
   const [showModeForm, setShowModeForm] = useState(false);
-  const [showSkillPicker, setShowSkillPicker] = useState(false);
-  const [showTemplatePicker, setShowTemplatePicker] = useState(false);
   const [showProjectPicker, setShowProjectPicker] = useState(false);
 
   // CW-20260512-0111: internal-source agents are file source of truth
@@ -289,8 +288,14 @@ export function AgentDetailView({
           <TabsTrigger value="prompt" className="gap-1.5 text-xs">
             <FileText className="w-3.5 h-3.5" /> Prompt
           </TabsTrigger>
-          <TabsTrigger value="tooling" className="gap-1.5 text-xs">
-            <Wrench className="w-3.5 h-3.5" /> Tooling
+          <TabsTrigger value="capabilities" className="gap-1.5 text-xs">
+            <Wrench className="w-3.5 h-3.5" /> Capabilities
+          </TabsTrigger>
+          <TabsTrigger value="boot" className="gap-1.5 text-xs">
+            <FolderKanban className="w-3.5 h-3.5" /> Boot
+          </TabsTrigger>
+          <TabsTrigger value="reflexes" className="gap-1.5 text-xs">
+            <Zap className="w-3.5 h-3.5" /> Reflexes
           </TabsTrigger>
           <TabsTrigger value="scope" className="gap-1.5 text-xs">
             <FolderOpen className="w-3.5 h-3.5" /> Scope
@@ -298,9 +303,6 @@ export function AgentDetailView({
           <TabsTrigger value="modes" className="gap-1.5 text-xs">
             <Code2 className="w-3.5 h-3.5" /> Modes
             {modes.length > 0 && <span className="text-[10px] text-fg-faint">({modes.length})</span>}
-          </TabsTrigger>
-          <TabsTrigger value="connections" className="gap-1.5 text-xs">
-            <Terminal className="w-3.5 h-3.5" /> Connections
           </TabsTrigger>
         </TabsList>
 
@@ -414,98 +416,30 @@ export function AgentDetailView({
             </div>
           </Card>
 
-          {/* Prompt Templates */}
-          <Card>
-            <CardHeader>
-              <FileText className="w-4 h-4" />
-              <span>Prompt Templates ({agentTemplates.length})</span>
-              <div className="flex-1" />
-              <Button
-                onClick={() => setShowTemplatePicker(true)}
-                size="sm"
-                variant="ghost"
-                className="h-6 gap-1 text-[11px] text-fg-muted hover:text-fg"
-                disabled={isReadOnly || availableTemplates.length === 0}
-              >
-                <Plus className="w-3 h-3" />
-                Assign
-              </Button>
-            </CardHeader>
-            <div className="px-4 pb-4 space-y-1.5">
-              {agentTemplates.length === 0 && !showTemplatePicker && (
-                <p className="text-xs text-fg-muted py-2">No prompt templates assigned</p>
-              )}
-              {[...agentTemplates]
-                .sort((a, b) => b.priority - a.priority)
-                .map((tmpl) => (
-                  <div key={tmpl.id} className="group flex items-center gap-2 px-2 py-1.5 rounded-md hover:bg-surface/40 transition-colors">
-                    <div className={`w-2 h-2 rounded-full shrink-0 ${getScopeBadgeColor(tmpl.scope)}`} />
-                    <span className="text-xs font-medium text-fg flex-1 truncate">{tmpl.name}</span>
-                    <span className="text-[10px] text-fg-faint capitalize">{tmpl.scope}</span>
-                    <span className="text-[10px] text-fg-faint tabular-nums">P{tmpl.priority}</span>
-                    <button
-                      onClick={() => onRemoveTemplate(tmpl.id)}
-                      disabled={isReadOnly}
-                      className="p-0.5 rounded opacity-0 group-hover:opacity-100 text-fg-faint hover:text-primary transition-all disabled:opacity-0 disabled:cursor-not-allowed"
-                    >
-                      <X className="w-3 h-3" />
-                    </button>
-                  </div>
-                ))}
-
-              {/* Template picker */}
-              {showTemplatePicker && (
-                <PickerList
-                  title="Available Templates"
-                  items={availableTemplates.sort((a, b) => b.priority - a.priority)}
-                  renderItem={(t) => (
-                    <div className="flex items-center gap-2 flex-1 min-w-0">
-                      <div className={`w-2 h-2 rounded-full shrink-0 ${getScopeBadgeColor(t.scope)}`} />
-                      <span className="text-xs text-fg truncate">{t.name}</span>
-                      <span className="text-[10px] text-fg-faint capitalize">{t.scope}</span>
-                    </div>
-                  )}
-                  onSelect={(t) => onAssignTemplate(t.id)}
-                  onClose={() => setShowTemplatePicker(false)}
-                />
-              )}
-            </div>
-          </Card>
         </TabsContent>
 
-        {/* ── Tooling Tab ────────────────────────────────────────── */}
-        <TabsContent value="tooling" className="pt-4 space-y-4">
-          <Card>
-            <div className="p-4">
-              <EditableStringList
-                value={agent.tools}
-                onChange={(v) => updateField("tools", v)}
-                icon={Wrench}
-                label="Tools Allowlist"
-                placeholder="mcp__server__tool_name or glob pattern"
-                emptyText="No allowlist — all tools permitted"
-                pathStyle={false}
-              />
-            </div>
-          </Card>
+        <TabsContent value="capabilities" className="pt-4">
+          <AgentCapabilitiesPanel
+            agent={agent}
+            isReadOnly={isReadOnly}
+            agentSkills={agentSkills}
+            availableSkills={availableSkills}
+            onAssignSkill={onAssignSkill}
+            onRemoveSkill={onRemoveSkill}
+            agentTemplates={agentTemplates}
+            availableTemplates={availableTemplates}
+            onAssignTemplate={onAssignTemplate}
+            onRemoveTemplate={onRemoveTemplate}
+            onUpdateAgent={onUpdateAgent}
+          />
+        </TabsContent>
 
-          <Card>
-            <div className="p-4">
-              <ToolPermissionsEditor
-                value={agent.tool_permissions}
-                onChange={(v) => updateField("tool_permissions", v)}
-              />
-            </div>
-          </Card>
+        <TabsContent value="boot" className="pt-4">
+          <AgentBootPlanPanel agent={agent} isReadOnly={isReadOnly} />
+        </TabsContent>
 
-          <Card>
-            <div className="p-4">
-              <McpServerList
-                value={agent.mcp_servers}
-                onChange={(v) => updateField("mcp_servers", v)}
-              />
-            </div>
-          </Card>
+        <TabsContent value="reflexes" className="pt-4">
+          <AgentReflexesPanel agentId={agent.id} isReadOnly={isReadOnly} />
         </TabsContent>
 
         {/* ── Scope Tab ──────────────────────────────────────────── */}
@@ -520,6 +454,7 @@ export function AgentDetailView({
                 placeholder="/path/to/directory/"
                 emptyText="No directory restrictions"
                 pathStyle
+                disabled={isReadOnly}
               />
             </div>
           </Card>
@@ -652,62 +587,6 @@ export function AgentDetailView({
           )}
         </TabsContent>
 
-        {/* ── Connections Tab (Skills + Templates overview) ──────── */}
-        <TabsContent value="connections" className="pt-4 space-y-4">
-          {/* Skills */}
-          <Card>
-            <CardHeader>
-              <Wrench className="w-4 h-4" />
-              <span>Skills ({agentSkills.length})</span>
-              <div className="flex-1" />
-              <Button
-                onClick={() => setShowSkillPicker(true)}
-                size="sm"
-                variant="ghost"
-                className="h-6 gap-1 text-[11px] text-fg-muted hover:text-fg"
-                disabled={isReadOnly || availableSkills.length === 0}
-              >
-                <Plus className="w-3 h-3" />
-                Assign
-              </Button>
-            </CardHeader>
-            <div className="px-4 pb-4 space-y-1.5">
-              {agentSkills.length === 0 && !showSkillPicker && (
-                <p className="text-xs text-fg-muted py-2">No skills assigned</p>
-              )}
-              {agentSkills.map((skill) => (
-                <div key={skill.id} className="group flex items-center gap-2 px-2 py-1.5 rounded-md hover:bg-surface/40 transition-colors">
-                  <Wrench className="w-3.5 h-3.5 text-fg-muted shrink-0" />
-                  <span className="text-xs font-medium text-fg flex-1 truncate">{skill.name}</span>
-                  <span className="text-[10px] text-fg-faint bg-surface/60 rounded px-1.5 py-0.5">{skill.category}</span>
-                  <button
-                    onClick={() => onRemoveSkill(skill.id)}
-                    disabled={isReadOnly}
-                    className="p-0.5 rounded opacity-0 group-hover:opacity-100 text-fg-faint hover:text-primary transition-all disabled:opacity-0 disabled:cursor-not-allowed"
-                  >
-                    <X className="w-3 h-3" />
-                  </button>
-                </div>
-              ))}
-
-              {showSkillPicker && (
-                <PickerList
-                  title="Available Skills"
-                  items={availableSkills}
-                  renderItem={(s) => (
-                    <div className="flex items-center gap-2 flex-1 min-w-0">
-                      <Wrench className="w-3.5 h-3.5 text-fg-muted shrink-0" />
-                      <span className="text-xs text-fg truncate">{s.name}</span>
-                      <span className="text-[10px] text-fg-faint bg-surface/60 rounded px-1.5 py-0.5">{s.category}</span>
-                    </div>
-                  )}
-                  onSelect={(s) => onAssignSkill(s.id)}
-                  onClose={() => setShowSkillPicker(false)}
-                />
-              )}
-            </div>
-          </Card>
-        </TabsContent>
       </Tabs>
     </div>
   );
@@ -738,16 +617,6 @@ function MetaRow({ label, value }: { label: string; value: string }) {
       <span className="text-xs text-fg-secondary">{value}</span>
     </div>
   );
-}
-
-function getScopeBadgeColor(scope: string) {
-  switch (scope) {
-    case "system": return "bg-blue-500";
-    case "mode": return "bg-green-500";
-    case "skill": return "bg-yellow-500";
-    case "context": return "bg-primary";
-    default: return "bg-gray-500";
-  }
 }
 
 function PickerList<T extends { id: string }>({

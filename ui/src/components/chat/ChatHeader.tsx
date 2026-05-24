@@ -1,16 +1,33 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Bot, ChevronDown, Copy, GitFork, MoreHorizontal, RotateCcw, Sparkles, Users } from "lucide-react";
+import {
+  Bot,
+  ChevronDown,
+  Copy,
+  GitFork,
+  Info,
+  MoreHorizontal,
+  RotateCcw,
+  Sparkles,
+  Users,
+} from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { SourceBadge } from "@/components/agents/SourceBadge";
+import { StartSurfaceDialog } from "@/components/sidebar/StartSurfaceDialog";
 import { Tooltip } from "@/components/ui/tooltip";
 import { usePluginSlots } from "@/hooks/usePluginSlots";
 import { api } from "@/lib/api";
 import { resolveIcon } from "@/lib/icons";
-import type { UISlotEntry } from "@/lib/types";
+import type {
+  ForkSessionRequest,
+  SessionDetailsResponse,
+  StartSurfacePrefill,
+  UISlotEntry,
+} from "@/lib/types";
 import { useAppStore } from "@/stores/useAppStore";
 import { useActiveModel, useIsStreaming } from "@/stores/useChatStore";
 import { useLayoutStore } from "@/stores/useLayoutStore";
 import { AgentRoster } from "./AgentRoster";
+import { SessionDetailsPanel } from "./SessionDetailsPanel";
 
 function formatTokens(n: number): string {
   if (n >= 1000) return `${Math.round(n / 1000)}K`;
@@ -28,18 +45,27 @@ export function ChatHeader() {
   const [modeDropOpen, setModeDropOpen] = useState(false);
   const [moreOpen, setMoreOpen] = useState(false);
   const [rosterOpen, setRosterOpen] = useState(false);
+  const [detailsOpen, setDetailsOpen] = useState(false);
+  const [startOpen, setStartOpen] = useState(false);
+  const [startPrefill, setStartPrefill] = useState<StartSurfacePrefill | null>(null);
   const agentDropRef = useRef<HTMLDivElement>(null);
   const modeDropRef = useRef<HTMLDivElement>(null);
   const moreRef = useRef<HTMLDivElement>(null);
 
   const { data: session } = useQuery({
     queryKey: ["session", activeSessionId],
-    queryFn: () => api.getSession(activeSessionId!),
+    queryFn: () => {
+      if (!activeSessionId) throw new Error("active session is required");
+      return api.getSession(activeSessionId);
+    },
     enabled: !!activeSessionId,
   });
   const { data: sessionAgents = [] } = useQuery({
     queryKey: ["session-agents", activeSessionId],
-    queryFn: () => api.listSessionAgents(activeSessionId!),
+    queryFn: () => {
+      if (!activeSessionId) throw new Error("active session is required");
+      return api.listSessionAgents(activeSessionId);
+    },
     enabled: !!activeSessionId,
   });
   const { data: tools = [] } = useQuery({
@@ -49,7 +75,10 @@ export function ChatHeader() {
   });
   const { data: breakdown } = useQuery({
     queryKey: ["context-breakdown", activeSessionId],
-    queryFn: () => api.getContextBreakdown(activeSessionId!),
+    queryFn: () => {
+      if (!activeSessionId) throw new Error("active session is required");
+      return api.getContextBreakdown(activeSessionId);
+    },
     enabled: !!activeSessionId,
     refetchInterval: isStreaming ? 10_000 : 60_000,
     staleTime: 30_000,
@@ -70,7 +99,10 @@ export function ChatHeader() {
   });
   const { data: sessionMode } = useQuery({
     queryKey: ["session-mode", activeSessionId],
-    queryFn: () => api.getSessionMode(activeSessionId!),
+    queryFn: () => {
+      if (!activeSessionId) throw new Error("active session is required");
+      return api.getSessionMode(activeSessionId);
+    },
     enabled: !!activeSessionId,
   });
 
@@ -137,16 +169,51 @@ export function ChatHeader() {
 
   const setActiveSession = useAppStore((s) => s.setActiveSession);
   const forkMutation = useMutation({
-    mutationFn: (includeMessages: boolean) => {
+    mutationFn: (request: ForkSessionRequest) => {
       if (!activeSessionId) throw new Error("No active session");
-      return api.forkSession(activeSessionId, { include_messages: includeMessages });
+      return api.forkSession(activeSessionId, request);
     },
     onSuccess: (newSession) => {
       void queryClient.invalidateQueries({ queryKey: ["sessions"] });
+      void queryClient.invalidateQueries({ queryKey: ["session", newSession.id] });
       setActiveSession(newSession.id);
       setMoreOpen(false);
+      setDetailsOpen(false);
     },
   });
+
+  const forkSession = useCallback(
+    (details: SessionDetailsResponse, includeMessages: boolean) => {
+      forkMutation.mutate({
+        include_messages: includeMessages,
+        provider: details.session.provider || undefined,
+        model: details.session.model || undefined,
+        mode_id: details.mode?.id || undefined,
+      });
+    },
+    [forkMutation],
+  );
+
+  const openStartFromDetails = useCallback((details: SessionDetailsResponse) => {
+    const durableID = details.current_durable_agent?.id || "";
+    setStartPrefill({
+      path: durableID
+        ? "durable"
+        : details.session.provider?.startsWith("bootprofile:")
+          ? "harness"
+          : "chat",
+      provider: details.session.provider || undefined,
+      model: details.session.model || undefined,
+      agent_id: details.primary_agent?.id || undefined,
+      boot_profile_id: details.session.provider?.startsWith("bootprofile:")
+        ? details.session.provider
+        : undefined,
+      durable_agent_id: durableID || undefined,
+    });
+    setDetailsOpen(false);
+    setMoreOpen(false);
+    setStartOpen(true);
+  }, []);
 
   // CW-20260516-0057: reboot just this session's runtime agent so the next
   // turn cold-boots a fresh agent process + boot dir from the current
@@ -308,7 +375,7 @@ export function ChatHeader() {
               {headerChipsVisible && metaParts.length > 0 && (
                 <div className="flex items-center gap-[10px] font-mono text-[11px] text-fg-muted">
                   {metaParts.map((part, i) => (
-                    <span key={i} className="flex items-center gap-[10px]">
+                    <span key={part} className="flex items-center gap-[10px]">
                       {i > 0 && <span className="opacity-40">·</span>}
                       {part}
                     </span>
@@ -334,6 +401,7 @@ export function ChatHeader() {
             <Tooltip content="More options" side="bottom">
               <button
                 type="button"
+                aria-label="More options"
                 onClick={() => setMoreOpen((o) => !o)}
                 className="flex h-7 w-7 items-center justify-center rounded-[6px] text-fg-muted transition-colors hover:bg-surface hover:text-fg"
               >
@@ -364,21 +432,65 @@ export function ChatHeader() {
                 </div>
                 <button
                   type="button"
-                  onClick={() => forkMutation.mutate(false)}
-                  disabled={forkMutation.isPending || !activeSessionId}
-                  className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs text-fg-secondary transition-colors hover:bg-surface hover:text-fg"
+                  onClick={() => {
+                    setDetailsOpen(true);
+                    setMoreOpen(false);
+                  }}
+                  disabled={!activeSessionId}
+                  className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs text-fg-secondary transition-colors hover:bg-surface hover:text-fg disabled:opacity-50"
                 >
-                  <Copy className="h-3 w-3 text-fg-muted" />
-                  Clone (empty)
+                  <Info className="h-3 w-3 text-fg-muted" />
+                  Session details
                 </button>
                 <button
                   type="button"
-                  onClick={() => forkMutation.mutate(true)}
+                  onClick={() =>
+                    forkMutation.mutate({
+                      include_messages: false,
+                      provider: session?.provider || undefined,
+                      model: session?.model || undefined,
+                    })
+                  }
+                  disabled={forkMutation.isPending || !activeSessionId}
+                  className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs text-fg-secondary transition-colors hover:bg-surface hover:text-fg"
+                >
+                  <RotateCcw className="h-3 w-3 text-fg-muted" />
+                  Restart as new session
+                </button>
+                <button
+                  type="button"
+                  onClick={() =>
+                    forkMutation.mutate({
+                      include_messages: true,
+                      provider: session?.provider || undefined,
+                      model: session?.model || undefined,
+                    })
+                  }
                   disabled={forkMutation.isPending || !activeSessionId}
                   className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs text-fg-secondary transition-colors hover:bg-surface hover:text-fg"
                 >
                   <GitFork className="h-3 w-3 text-fg-muted" />
                   Fork (with history)
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setStartPrefill({
+                      path: session?.provider?.startsWith("bootprofile:") ? "harness" : "chat",
+                      provider: session?.provider || undefined,
+                      model: session?.model || undefined,
+                      boot_profile_id: session?.provider?.startsWith("bootprofile:")
+                        ? session.provider
+                        : undefined,
+                    });
+                    setStartOpen(true);
+                    setMoreOpen(false);
+                  }}
+                  disabled={!activeSessionId}
+                  className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs text-fg-secondary transition-colors hover:bg-surface hover:text-fg"
+                >
+                  <Copy className="h-3 w-3 text-fg-muted" />
+                  Open Start from here
                 </button>
                 <button
                   type="button"
@@ -428,6 +540,24 @@ export function ChatHeader() {
       {rosterOpen && activeSessionId && (
         <AgentRoster sessionId={activeSessionId} onClose={() => setRosterOpen(false)} />
       )}
+      <SessionDetailsPanel
+        sessionId={activeSessionId}
+        open={detailsOpen}
+        onOpenChange={setDetailsOpen}
+        onFork={forkSession}
+        onRestart={(details) => forkSession(details, false)}
+        onOpenStartFromHere={openStartFromDetails}
+      />
+      <StartSurfaceDialog
+        open={startOpen}
+        onOpenChange={setStartOpen}
+        workspaceId={session?.workspace_id || null}
+        projectId={session?.project_id || null}
+        defaultProvider={session?.provider}
+        defaultModel={session?.model}
+        prefill={startPrefill}
+        onSessionStarted={setActiveSession}
+      />
     </header>
   );
 }

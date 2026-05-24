@@ -12,9 +12,15 @@ interface ToolPermissionsEditorProps {
   value: string;
   /** Called with new JSON string on change */
   onChange: (json: string) => void;
+  /** Disables add/remove controls */
+  disabled?: boolean;
 }
 
-export function ToolPermissionsEditor({ value, onChange }: ToolPermissionsEditorProps) {
+export function ToolPermissionsEditor({
+  value,
+  onChange,
+  disabled = false,
+}: ToolPermissionsEditorProps) {
   const perms: ToolPermissions = (() => {
     try {
       const parsed = JSON.parse(value || "{}");
@@ -74,6 +80,7 @@ export function ToolPermissionsEditor({ value, onChange }: ToolPermissionsEditor
         icon={Shield}
         items={allowList}
         accentClass="text-success"
+        disabled={disabled}
         onAdd={(p) => handleAdd("allow", p)}
         onRemove={(i) => handleRemove("allow", i)}
       />
@@ -83,6 +90,7 @@ export function ToolPermissionsEditor({ value, onChange }: ToolPermissionsEditor
         icon={ShieldOff}
         items={denyList}
         accentClass="text-primary"
+        disabled={disabled}
         onAdd={(p) => handleAdd("deny", p)}
         onRemove={(i) => handleRemove("deny", i)}
       />
@@ -95,6 +103,7 @@ function PermissionSection({
   icon: Icon,
   items,
   accentClass,
+  disabled,
   onAdd,
   onRemove,
 }: {
@@ -102,6 +111,7 @@ function PermissionSection({
   icon: typeof Shield;
   items: string[];
   accentClass: string;
+  disabled: boolean;
   onAdd: (pattern: string) => void;
   onRemove: (index: number) => void;
 }) {
@@ -133,9 +143,11 @@ function PermissionSection({
             size="sm"
             className="h-5 gap-1 text-[10px] text-fg-faint hover:text-fg px-1.5"
             onClick={() => {
+              if (disabled) return;
               setIsAdding(true);
               setTimeout(() => inputRef.current?.focus(), 0);
             }}
+            disabled={disabled}
           >
             <Plus className="w-2.5 h-2.5" />
             Add
@@ -155,6 +167,7 @@ function PermissionSection({
           </span>
           <button
             onClick={() => onRemove(index)}
+            disabled={disabled}
             className="p-0.5 rounded opacity-0 group-hover:opacity-100 text-fg-faint hover:text-primary transition-all"
           >
             <X className="w-3 h-3" />
@@ -177,6 +190,7 @@ function PermissionSection({
                 setAddValue("");
               }
             }}
+            disabled={disabled}
             placeholder="mcp__server__tool_name or *"
             className="flex-1 min-w-0 bg-transparent text-xs text-fg font-mono outline-none border-b border-border-subtle focus:border-primary py-0.5 placeholder:text-fg-faint"
           />
@@ -188,6 +202,7 @@ function PermissionSection({
               setIsAdding(false);
               setAddValue("");
             }}
+            disabled={disabled}
           >
             <X className="w-3 h-3" />
           </Button>

@@ -1,0 +1,336 @@
+package api
+
+import (
+	"encoding/json"
+	"errors"
+	"fmt"
+	"net/http"
+
+	"github.com/hollis-labs/nanite/internal/store"
+)
+
+func (a *API) handleListPendingReflexes(w http.ResponseWriter, r *http.Request) {
+	rows, err := a.Services.Store.ListPendingReflexes(r.Context(), r.URL.Query().Get("status"))
+	if err != nil {
+		a.errorResp(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	a.jsonResp(w, http.StatusOK, rows)
+}
+
+func (a *API) handleApprovePendingReflex(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		ReviewedBy string `json:"reviewed_by"`
+	}
+	_ = a.decode(r, &req)
+	reflex, err := a.Services.Store.ApprovePendingReflex(r.Context(), r.PathValue("id"), req.ReviewedBy)
+	if err != nil {
+		if errors.Is(err, store.ErrPendingReflexNotFound) {
+			a.errorResp(w, http.StatusNotFound, "pending reflex not found")
+			return
+		}
+		a.errorResp(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	a.jsonResp(w, http.StatusOK, reflex)
+}
+
+func (a *API) handleRejectPendingReflex(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	var req struct {
+		ReviewedBy string `json:"reviewed_by"`
+		Reason     string `json:"reason"`
+	}
+	_ = a.decode(r, &req)
+	if err := a.Services.Store.RejectPendingReflex(r.Context(), id, req.ReviewedBy, req.Reason); err != nil {
+		if errors.Is(err, store.ErrPendingReflexNotFound) {
+			a.errorResp(w, http.StatusNotFound, "pending reflex not found or already reviewed")
+			return
+		}
+		a.errorResp(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	a.jsonResp(w, http.StatusOK, map[string]any{"id": id, "status": store.PendingReflexStatusRejected})
+}
+
+func (a *API) handleListAgentReflexes(w http.ResponseWriter, r *http.Request) {
+	agent, ok := a.requireAgent(w, r)
+	if !ok {
+		return
+	}
+	rows, err := a.Services.Store.ListAgentReflexesForAgent(r.Context(), agent.ID, agent.Class)
+	if err != nil {
+		a.errorResp(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	a.jsonResp(w, http.StatusOK, rows)
+}
+
+func (a *API) handleCreateAgentReflex(w http.ResponseWriter, r *http.Request) {
+	agent, ok := a.requireMutableAgent(w, r)
+	if !ok {
+		return
+	}
+	var req struct {
+		Name        string `json:"name"`
+		TriggerKind string `json:"trigger_kind"`
+		TriggerSpec string `json:"trigger_spec"`
+		ActionKind  string `json:"action_kind"`
+		ActionSpec  string `json:"action_spec"`
+		Priority    int64  `json:"priority"`
+	}
+	if err := a.decode(r, &req); err != nil {
+		a.errorResp(w, http.StatusBadRequest, "invalid JSON body")
+		return
+	}
+	row := store.AgentReflex{
+		AgentID:     agent.ID,
+		Name:        req.Name,
+		TriggerKind: req.TriggerKind,
+		TriggerSpec: req.TriggerSpec,
+		ActionKind:  req.ActionKind,
+		ActionSpec:  req.ActionSpec,
+		Priority:    req.Priority,
+		CreatedBy:   "operator",
+	}
+	if errs := validateReflexDefinition(row); len(errs) > 0 {
+		a.jsonResp(w, http.StatusBadRequest, map[string]any{"valid": false, "errors": errs})
+		return
+	}
+	id, err := a.Services.Store.InsertAgentReflex(r.Context(), row)
+	if err != nil {
+		a.errorResp(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	created, err := a.Services.Store.GetAgentReflex(r.Context(), id)
+	if err != nil {
+		a.errorResp(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	a.jsonResp(w, http.StatusCreated, created)
+}
+
+func (a *API) handlePatchAgentReflex(w http.ResponseWriter, r *http.Request) {
+	agent, ok := a.requireMutableAgent(w, r)
+	if !ok {
+		return
+	}
+	reflexID := r.PathValue("reflexId")
+	current, err := a.Services.Store.GetAgentReflex(r.Context(), reflexID)
+	if err != nil {
+		if errors.Is(err, store.ErrAgentReflexNotFound) {
+			a.errorResp(w, http.StatusNotFound, "reflex not found")
+			return
+		}
+		a.errorResp(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if current.AgentID != agent.ID {
+		a.errorResp(w, http.StatusBadRequest, "cannot patch inherited or different-agent reflex through this endpoint")
+		return
+	}
+	var req struct {
+		Name        *string `json:"name"`
+		TriggerKind *string `json:"trigger_kind"`
+		TriggerSpec *string `json:"trigger_spec"`
+		ActionKind  *string `json:"action_kind"`
+		ActionSpec  *string `json:"action_spec"`
+		Status      *string `json:"status"`
+		Priority    *int64  `json:"priority"`
+		FiredCount  *int64  `json:"fired_count"`
+		LastFiredAt *string `json:"last_fired_at"`
+	}
+	if err := a.decode(r, &req); err != nil {
+		a.errorResp(w, http.StatusBadRequest, "invalid JSON body")
+		return
+	}
+	updated := *current
+	if req.Name != nil {
+		updated.Name = *req.Name
+	}
+	if req.TriggerKind != nil {
+		updated.TriggerKind = *req.TriggerKind
+	}
+	if req.TriggerSpec != nil {
+		updated.TriggerSpec = *req.TriggerSpec
+	}
+	if req.ActionKind != nil {
+		updated.ActionKind = *req.ActionKind
+	}
+	if req.ActionSpec != nil {
+		updated.ActionSpec = *req.ActionSpec
+	}
+	if req.Status != nil {
+		updated.Status = *req.Status
+	}
+	if req.Priority != nil {
+		updated.Priority = *req.Priority
+	}
+	if req.FiredCount != nil {
+		updated.FiredCount = *req.FiredCount
+	}
+	if req.LastFiredAt != nil {
+		updated.LastFiredAt = *req.LastFiredAt
+	}
+	if errs := validateReflexDefinition(updated); len(errs) > 0 {
+		a.jsonResp(w, http.StatusBadRequest, map[string]any{"valid": false, "errors": errs})
+		return
+	}
+	if err := a.Services.Store.UpdateAgentReflex(r.Context(), updated); err != nil {
+		if errors.Is(err, store.ErrAgentReflexNotFound) {
+			a.errorResp(w, http.StatusNotFound, "reflex not found")
+			return
+		}
+		a.errorResp(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	reflex, err := a.Services.Store.GetAgentReflex(r.Context(), reflexID)
+	if err != nil {
+		a.errorResp(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	a.jsonResp(w, http.StatusOK, reflex)
+}
+
+func (a *API) handleDeleteAgentReflex(w http.ResponseWriter, r *http.Request) {
+	agent, ok := a.requireMutableAgent(w, r)
+	if !ok {
+		return
+	}
+	reflexID := r.PathValue("reflexId")
+	reflex, err := a.Services.Store.GetAgentReflex(r.Context(), reflexID)
+	if err != nil {
+		if errors.Is(err, store.ErrAgentReflexNotFound) {
+			a.errorResp(w, http.StatusNotFound, "reflex not found")
+			return
+		}
+		a.errorResp(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if reflex.AgentID != agent.ID {
+		a.errorResp(w, http.StatusBadRequest, "cannot delete inherited or different-agent reflex through this endpoint")
+		return
+	}
+	if err := a.Services.Store.DeleteAgentReflex(r.Context(), reflexID); err != nil {
+		a.errorResp(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	a.jsonResp(w, http.StatusOK, map[string]any{"id": reflexID, "status": "deleted"})
+}
+
+func (a *API) handleValidateReflex(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		TriggerKind string         `json:"trigger_kind"`
+		TriggerSpec string         `json:"trigger_spec"`
+		ActionKind  string         `json:"action_kind"`
+		ActionSpec  string         `json:"action_spec"`
+		State       map[string]any `json:"state"`
+	}
+	if err := a.decode(r, &req); err != nil {
+		a.errorResp(w, http.StatusBadRequest, "invalid JSON body")
+		return
+	}
+	row := store.AgentReflex{
+		Name:        "validation",
+		TriggerKind: req.TriggerKind,
+		TriggerSpec: req.TriggerSpec,
+		ActionKind:  req.ActionKind,
+		ActionSpec:  req.ActionSpec,
+		Status:      store.ReflexStatusActive,
+	}
+	errs := validateReflexDefinition(row)
+	a.jsonResp(w, http.StatusOK, map[string]any{
+		"valid":        len(errs) == 0,
+		"errors":       errs,
+		"fired":        len(errs) == 0 && evaluatesSimpleReflex(req.TriggerSpec, req.State),
+		"state_source": stateSource(req.State),
+		"state_summary": map[string]any{
+			"messages": messageCount(req.State),
+		},
+	})
+}
+
+func validateReflexDefinition(row store.AgentReflex) []string {
+	var errs []string
+	if row.Name == "" {
+		errs = append(errs, "name is required")
+	}
+	switch row.TriggerKind {
+	case store.ReflexTriggerPredicate, store.ReflexTriggerEvent, store.ReflexTriggerInterval:
+	default:
+		errs = append(errs, fmt.Sprintf("invalid trigger_kind %q", row.TriggerKind))
+	}
+	if row.TriggerSpec == "" {
+		errs = append(errs, "trigger_spec is required")
+	} else {
+		var spec map[string]any
+		if err := json.Unmarshal([]byte(row.TriggerSpec), &spec); err != nil {
+			errs = append(errs, "trigger_spec: invalid JSON: "+err.Error())
+		}
+	}
+	switch row.ActionKind {
+	case store.ReflexActionInjectReminder, store.ReflexActionForceToolChoice,
+		store.ReflexActionSendMessage, store.ReflexActionHaltSession, store.ReflexActionAddSchedule:
+	default:
+		errs = append(errs, fmt.Sprintf("invalid action_kind %q", row.ActionKind))
+	}
+	if row.ActionSpec == "" {
+		errs = append(errs, "action_spec is required")
+	} else {
+		var spec map[string]any
+		if err := json.Unmarshal([]byte(row.ActionSpec), &spec); err != nil {
+			errs = append(errs, "action_spec: invalid JSON: "+err.Error())
+		}
+	}
+	switch row.Status {
+	case "", store.ReflexStatusActive, store.ReflexStatusPaused, store.ReflexStatusExpired:
+	default:
+		errs = append(errs, fmt.Sprintf("invalid status %q", row.Status))
+	}
+	return errs
+}
+
+func evaluatesSimpleReflex(triggerSpec string, state map[string]any) bool {
+	var spec struct {
+		Kind   string  `json:"kind"`
+		Window int     `json:"window"`
+		Op     string  `json:"op"`
+		Value  float64 `json:"value"`
+	}
+	if err := json.Unmarshal([]byte(triggerSpec), &spec); err != nil {
+		return false
+	}
+	if spec.Kind != "tool_calls_window" || spec.Op != "=" || spec.Window <= 0 {
+		return false
+	}
+	messages, ok := state["messages"].([]any)
+	if !ok || len(messages) < spec.Window {
+		return false
+	}
+	start := len(messages) - spec.Window
+	for _, raw := range messages[start:] {
+		msg, ok := raw.(map[string]any)
+		if !ok {
+			return false
+		}
+		if msg["tool_calls"] != spec.Value {
+			return false
+		}
+	}
+	return true
+}
+
+func stateSource(state map[string]any) string {
+	if len(state) > 0 {
+		return "request"
+	}
+	return "empty"
+}
+
+func messageCount(state map[string]any) int {
+	messages, ok := state["messages"].([]any)
+	if !ok {
+		return 0
+	}
+	return len(messages)
+}

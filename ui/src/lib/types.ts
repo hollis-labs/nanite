@@ -38,6 +38,14 @@ export interface Session {
   tags: string;
   last_activity: string;
   created_at: string;
+  metadata?: string;
+  halted_at?: string | null;
+  halted_reason?: string | null;
+  runtime_state?: string | null;
+  parent_session_id?: string | null;
+  root_session_id?: string | null;
+  relation?: string | null;
+  depth?: number | null;
   // B1 (CW-20260428-0009): session-level mode pointer.
   // Null = fall back to agent-assigned legacy AgentMode.
   current_mode_id?: string | null;
@@ -46,6 +54,612 @@ export interface Session {
   // force ON for this session (does NOT bypass first-use prompt); false =
   // force OFF (suppress all auto-switches even when user pref permits).
   auto_switch_override?: boolean | null;
+}
+
+export const DURABLE_AGENT_LIFECYCLE_CLASSES = [
+  "advisor",
+  "process",
+  "template",
+  "harness",
+] as const;
+export type DurableAgentLifecycleClass =
+  (typeof DURABLE_AGENT_LIFECYCLE_CLASSES)[number];
+
+export const DURABLE_AGENT_STATUSES = [
+  "sleeping",
+  "starting",
+  "active",
+  "paused",
+  "stopped",
+  "start_requested",
+  "stop_requested",
+  "resume_requested",
+  "failed",
+  "archived",
+] as const;
+export type DurableAgentStatus = (typeof DURABLE_AGENT_STATUSES)[number];
+
+export const DURABLE_AGENT_LAUNCH_SOURCES = [
+  "api_chat",
+  "cli_harness",
+  "boot_profile",
+  "durable_advisor",
+  "process_tick",
+  "task_template_run",
+] as const;
+export type DurableAgentLaunchSource =
+  (typeof DURABLE_AGENT_LAUNCH_SOURCES)[number];
+
+export const DURABLE_AGENT_ATTACHMENT_RELATIONS = [
+  "primary",
+  "wake",
+  "run",
+  "harness",
+  "owned",
+  "attached",
+  "spawned",
+] as const;
+export type DurableAgentAttachmentRelation =
+  (typeof DURABLE_AGENT_ATTACHMENT_RELATIONS)[number];
+
+export const RUNTIME_KINDS = [
+  "api",
+  "streaming-stdio",
+  "subprocess",
+  "jsonrpc-stdio",
+  "serve-http",
+  "pty",
+  "pty-debug",
+] as const;
+export type RuntimeKind = (typeof RUNTIME_KINDS)[number];
+
+export const DURABLE_AGENT_RECIPE_KINDS = [
+  "project_advisor",
+  "managed_cli_harness",
+  "process_monitor",
+  "template_worker",
+] as const;
+export type DurableAgentRecipeKind =
+  (typeof DURABLE_AGENT_RECIPE_KINDS)[number];
+
+export const DURABLE_AGENT_RECIPE_INPUT_TYPES = [
+  "string",
+  "textarea",
+  "boolean",
+  "select",
+  "path",
+  "profile",
+  "provider",
+  "model",
+  "runtime_kind",
+] as const;
+export type DurableAgentRecipeInputType =
+  (typeof DURABLE_AGENT_RECIPE_INPUT_TYPES)[number];
+
+export const DURABLE_AGENT_WAKE_REASONS = [
+  "manual",
+  "lifecycle_start",
+  "lifecycle_resume",
+  "process_tick",
+  "scheduled_wake",
+  "external_message",
+] as const;
+export type DurableAgentWakeReason =
+  (typeof DURABLE_AGENT_WAKE_REASONS)[number];
+
+export const DURABLE_AGENT_SESSION_POLICIES = [
+  "reuse_latest_or_create",
+  "fresh_per_wake",
+  "fresh_one_shot",
+  "reuse_managed",
+] as const;
+export type DurableAgentSessionPolicy =
+  (typeof DURABLE_AGENT_SESSION_POLICIES)[number];
+
+export const DURABLE_AGENT_EVENT_TYPES = [
+  "created",
+  "updated",
+  "archived",
+  "session_attached",
+  "start_requested",
+  "start_succeeded",
+  "start_failed",
+  "resume_requested",
+  "resume_succeeded",
+  "resume_failed",
+  "pause_requested",
+  "pause_succeeded",
+  "stop_requested",
+  "runtime_stop_succeeded",
+  "stop_succeeded",
+  "stop_failed",
+  "wake_requested",
+  "wake_started",
+  "wake_skipped",
+  "wake_failed",
+  "wake_completed",
+] as const;
+export type DurableAgentEventType = (typeof DURABLE_AGENT_EVENT_TYPES)[number];
+
+export const DURABLE_AGENT_EVENT_SOURCES = ["api", "runtime"] as const;
+export type DurableAgentEventSource =
+  (typeof DURABLE_AGENT_EVENT_SOURCES)[number];
+
+export type SessionBootSource =
+  | "api_default"
+  | "legacy_cli"
+  | "boot_profile"
+  | "durable_agent"
+  | "unknown";
+
+export type ImmutableStartField =
+  | "provider"
+  | "model"
+  | "runtime_kind"
+  | "boot_profile"
+  | "recipe"
+  | "lifecycle_class"
+  | "work_root";
+
+export interface EnumOption<T extends string = string> {
+  value: T;
+  label: string;
+  description?: string;
+  legacy?: boolean;
+}
+
+export interface RuntimeKindOption extends EnumOption<RuntimeKind> {
+  managed_automation: boolean;
+  product_supported: boolean;
+}
+
+export interface BootProfileOption {
+  id: string;
+  label: string;
+  provider: string;
+  work_root?: string;
+}
+
+export interface WorkRootHint {
+  id: string;
+  label: string;
+  path?: string;
+  description?: string;
+}
+
+export interface DurableAgentWakePayload {
+  reason: DurableAgentWakeReason | string;
+  prompt?: string;
+  facts?: Record<string, string>;
+  metadata?: Record<string, string>;
+}
+
+export interface DurableAgentInstance {
+  id: string;
+  name: string;
+  slug: string;
+  profile_id: string;
+  lifecycle_class: DurableAgentLifecycleClass | string;
+  provider: string;
+  model: string;
+  runtime_kind: RuntimeKind | string;
+  launch_source_type: DurableAgentLaunchSource | string;
+  launch_source_id: string;
+  work_root: string;
+  status: DurableAgentStatus | string;
+  current_session_id: string;
+  failure_reason: string;
+  metadata_json: string;
+  created_at: string;
+  updated_at: string;
+  archived_at?: string | null;
+}
+
+export interface CreateDurableAgentRequest {
+  id?: string;
+  name: string;
+  slug: string;
+  profile_id: string;
+  lifecycle_class?: DurableAgentLifecycleClass | string;
+  provider?: string;
+  model?: string;
+  runtime_kind?: RuntimeKind | string;
+  launch_source_type?: DurableAgentLaunchSource | string;
+  launch_source_id?: string;
+  work_root?: string;
+  metadata_json?: string;
+}
+
+export type UpdateDurableAgentRequest = Partial<
+  Pick<DurableAgentInstance, "name" | "slug" | "work_root" | "metadata_json">
+>;
+
+export interface DurableAgentSessionAttachment {
+  instance_id: string;
+  session_id: string;
+  relation: DurableAgentAttachmentRelation | string;
+  attached_at: string;
+  detached_at?: string | null;
+}
+
+export interface DurableAgentSessionAttachmentState
+  extends DurableAgentSessionAttachment {
+  session_status: string;
+  provider: string;
+  model: string;
+  runtime_state: string;
+  runtime_failure_reason?: string;
+  halted_at?: string | null;
+  halted_reason?: string | null;
+}
+
+export interface DurableAgentEvent {
+  id: string;
+  instance_id: string;
+  event_type: DurableAgentEventType | string;
+  status_before: DurableAgentStatus | string;
+  status_after: DurableAgentStatus | string;
+  session_id: string;
+  source: DurableAgentEventSource | string;
+  message: string;
+  metadata_json: string;
+  created_at: string;
+}
+
+export interface AttachDurableAgentSessionRequest {
+  session_id: string;
+  relation: DurableAgentAttachmentRelation | string;
+}
+
+export interface DurableAgentLaunchPlan {
+  instance_id: string;
+  lifecycle_class: DurableAgentLifecycleClass | string;
+  session_policy: DurableAgentSessionPolicy | string;
+  launch_source_type: DurableAgentLaunchSource | string;
+  provider: string;
+  model: string;
+  runtime_kind: RuntimeKind | string;
+  work_root: string;
+  attachment_relation: DurableAgentAttachmentRelation | string;
+  wake_payload: DurableAgentWakePayload;
+}
+
+export interface DurableAgentStartRequest {
+  workspace_id?: string;
+  project_id?: string;
+  wake_payload?: DurableAgentWakePayload;
+}
+
+export interface DurableAgentLaunchResult {
+  instance: DurableAgentInstance;
+  policy: DurableAgentLaunchPlan;
+  session?: Session;
+  created_session: boolean;
+  reused_session: boolean;
+}
+
+export interface AgentSchedule {
+  id: string;
+  agent_id: string;
+  session_id: string;
+  name: string;
+  schedule_kind: string;
+  schedule_spec: string;
+  body: string;
+  priority: number;
+  status: string;
+  expires_at: string;
+  fired_count: number;
+  last_fired_at: string;
+  created_at: string;
+  created_by: string;
+}
+
+export interface DurableAgentWakeDueItem {
+  instance_id: string;
+  instance_name: string;
+  lifecycle_class: string;
+  current_session_id: string;
+  schedule: AgentSchedule;
+  wake_reason: string;
+  due: boolean;
+  skip_reason?: string;
+  workspace_id?: string;
+  project_id?: string;
+}
+
+export interface DurableAgentWakeResult {
+  instance_id: string;
+  schedule_id?: string;
+  wake_reason: string;
+  skipped: boolean;
+  skip_reason?: string;
+  launch_result?: DurableAgentLaunchResult;
+  failure_reason?: string;
+}
+
+export interface DurableAgentWakeRunResult {
+  now: string;
+  dry_run: boolean;
+  results: DurableAgentWakeResult[];
+}
+
+export interface RecipeInjectionPlan {
+  id: string;
+  kind: string;
+  target: string;
+  description: string;
+  secret: boolean;
+}
+
+export interface DurableAgentRecipeInputOption {
+  value: string;
+  label: string;
+}
+
+export interface DurableAgentRecipeInput {
+  id: string;
+  label: string;
+  description?: string;
+  help?: string;
+  type: DurableAgentRecipeInputType | string;
+  required?: boolean;
+  default?: unknown;
+  placeholder?: string;
+  options?: DurableAgentRecipeInputOption[];
+  secret?: boolean;
+  maps_to?: string;
+}
+
+export interface DurableAgentRecipe {
+  id: string;
+  schema_version: number;
+  kind: DurableAgentRecipeKind | string;
+  name: string;
+  description: string;
+  lifecycle_class: DurableAgentLifecycleClass | string;
+  profile_id?: string;
+  profile_rule?: string;
+  provider: string;
+  model: string;
+  runtime_kind: RuntimeKind | string;
+  launch_source_type: DurableAgentLaunchSource | string;
+  launch_source_id?: string;
+  work_root?: string;
+  wake_defaults: DurableAgentWakePayload;
+  metadata?: Record<string, string>;
+  tags?: string[];
+  injections?: RecipeInjectionPlan[];
+  inputs?: DurableAgentRecipeInput[];
+}
+
+export interface DurableAgentRecipeRequest {
+  name?: string;
+  slug?: string;
+  profile_id?: string;
+  provider?: string;
+  model?: string;
+  runtime_kind?: RuntimeKind | string;
+  work_root?: string;
+  workspace_id?: string;
+  project_id?: string;
+  wake_payload?: DurableAgentWakePayload;
+  metadata?: Record<string, string>;
+  start?: boolean;
+}
+
+export interface DurableAgentRecipePlan {
+  recipe_id: string;
+  recipe_schema_version: number;
+  instance: DurableAgentInstance;
+  launch_policy: DurableAgentLaunchPlan;
+  wake_payload: DurableAgentWakePayload;
+  session_policy: DurableAgentSessionPolicy | string;
+  would_create_session: boolean;
+  would_reuse_session: boolean;
+  missing_requirements?: string[];
+  unsupported?: string[];
+  injections?: RecipeInjectionPlan[];
+  ready: boolean;
+}
+
+export interface DurableAgentRecipeApplyResult {
+  plan: DurableAgentRecipePlan;
+  instance: DurableAgentInstance;
+  launch_result?: DurableAgentLaunchResult;
+}
+
+export interface StartSurfaceCapabilitiesResponse {
+  schema_version: number;
+  lifecycle_classes: EnumOption<DurableAgentLifecycleClass>[];
+  durable_statuses: EnumOption<DurableAgentStatus>[];
+  launch_sources: EnumOption<DurableAgentLaunchSource>[];
+  attachment_relations: EnumOption<DurableAgentAttachmentRelation>[];
+  runtime_kinds: RuntimeKindOption[];
+  recipe_kinds: EnumOption<DurableAgentRecipeKind>[];
+  wake_reasons: EnumOption<DurableAgentWakeReason>[];
+  session_policies: EnumOption<DurableAgentSessionPolicy>[];
+  recipes: DurableAgentRecipe[];
+  durable_agents: DurableAgentInstance[];
+  profiles: AgentProfile[];
+  providers: ProviderConfig[];
+  models: ModelRecord[];
+  boot_profiles: BootProfileOption[];
+  work_root_hints: WorkRootHint[];
+}
+
+export interface SessionRuntimeDetail {
+  state: "none" | "starting" | "running" | "stopped" | "failed" | string;
+  runtime_id?: string;
+  runtime_kind?: RuntimeKind | string;
+  provider?: string;
+  mode?: string;
+  pid?: number;
+  boot_dir?: string;
+  workspace_dir?: string;
+  provider_session_id?: string;
+  failure_reason?: string;
+  started_at?: string;
+  updated_at?: string;
+}
+
+export interface CheckpointDetail {
+  status: string;
+}
+
+export interface SessionHaltDetail {
+  is_halted: boolean;
+  halted_at?: string;
+  halted_reason?: string;
+}
+
+export interface SessionDetailsResponse {
+  session: Session;
+  mode?: Mode | null;
+  primary_agent?: AgentProfile | null;
+  durable_attachments: DurableAgentSessionAttachmentState[];
+  current_durable_agent?: DurableAgentInstance | null;
+  activity_state: string;
+  last_activity_at?: string;
+  last_useful_activity_at?: string;
+  halt: SessionHaltDetail;
+  usage?: SessionUsageSummary | null;
+  recent_durable_events: DurableAgentEvent[];
+  runtime: SessionRuntimeDetail;
+  boot_source: SessionBootSource | string;
+  immutable_start_fields: (ImmutableStartField | string)[];
+  checkpoint: CheckpointDetail;
+}
+
+export interface HarnessPermissionSupport {
+  support_level: string;
+  approval_response_route?: string;
+  notes?: string[];
+}
+
+export interface HarnessRouteHints {
+  capabilities: string;
+  sessions: string;
+  session_events: string;
+  session_cancel: string;
+  session_approvals: string;
+  durable_agents: string;
+  durable_agent_start: string;
+  durable_agent_wake: string;
+}
+
+export interface HarnessInitializeResponse {
+  schema_version: number;
+  protocol_version: string;
+  route_prefix: string;
+  app: {
+    id: string;
+    name: string;
+    version: string;
+  };
+  operations: string[];
+  stream_transports: string[];
+  supported_event_types: string[];
+  permission_requests: HarnessPermissionSupport;
+  route_hints: HarnessRouteHints;
+  unsupported: string[];
+}
+
+export interface HarnessFieldSupport {
+  supported: string[];
+  unsupported: string[];
+}
+
+export interface HarnessCapabilitiesResponse {
+  schema_version: number;
+  protocol_version: string;
+  route_prefix: string;
+  app: {
+    id: string;
+    name: string;
+    version: string;
+  };
+  operations: string[];
+  stream_transports: string[];
+  runtime_kinds: RuntimeKindOption[];
+  lifecycle_classes: EnumOption<DurableAgentLifecycleClass>[];
+  durable_statuses: EnumOption<DurableAgentStatus>[];
+  attachment_relations: EnumOption<DurableAgentAttachmentRelation>[];
+  wake_reasons: EnumOption<DurableAgentWakeReason>[];
+  session_activity_states: EnumOption[];
+  supported_event_types: EnumOption[];
+  session_create_fields: HarnessFieldSupport;
+  turn_send_fields: HarnessFieldSupport;
+  permission_requests: HarnessPermissionSupport;
+  route_hints: HarnessRouteHints;
+}
+
+export interface HarnessSessionRoutes {
+  self: string;
+  events: string;
+  cancel: string;
+  approvals: string;
+}
+
+export interface HarnessSessionResponse {
+  session: Session;
+  details: SessionDetailsResponse;
+  stream_transport: string;
+  route_hints: HarnessSessionRoutes;
+}
+
+export interface HarnessCreateSessionRequest {
+  workspace_id: string;
+  project_id?: string;
+  provider?: string;
+  model?: string;
+  agent_id?: string;
+  title?: string;
+  metadata?: Record<string, unknown>;
+  mode_id?: string;
+  runtime_kind?: string;
+  work_root?: string;
+  boot_profile_id?: string;
+  durable_agent_id?: string;
+}
+
+export interface HarnessTurnRequest {
+  content: string;
+  cycle_kind?: string;
+  effort?: string;
+}
+
+export interface HarnessTurnResponse {
+  session_id: string;
+  message_id: string;
+  stream_url: string;
+  raw_stream_url: string;
+  event_transport: string;
+  initial_activity_state: string;
+}
+
+export interface HarnessCancelResponse {
+  session_id: string;
+  status: "cancelled" | "idle" | string;
+}
+
+export interface StartSurfacePrefill {
+  path?: "chat" | "harness" | "durable" | "recipe";
+  provider?: string;
+  model?: string;
+  agent_id?: string;
+  boot_profile_id?: string;
+  durable_agent_id?: string;
+  durable_prompt?: string;
+}
+
+export interface ForkSessionRequest {
+  include_messages?: boolean;
+  copy_context?: boolean;
+  provider?: string;
+  model?: string;
+  mode_id?: string;
+  initial_prompt?: string;
 }
 
 /**
@@ -134,6 +748,591 @@ export interface AgentProfile {
   status: string;
   source: string;
   source_ref: string;
+  parent_dispatch_allowlist?: string;
+  role_tools?: string;
+  role_skills?: string;
+  context_policy?: string;
+  durable?: boolean;
+  urn?: string;
+  urn_aliases?: string;
+  activation_mode?: string;
+  class?: string;
+  default_state?: string;
+}
+
+export type CreateAgentProfileRequest = Pick<
+  AgentProfile,
+  "name" | "slug" | "system_prompt"
+> &
+  Partial<
+    Pick<
+      AgentProfile,
+      | "avatar"
+      | "icon"
+      | "description"
+      | "modes"
+      | "default_model"
+      | "mcp_servers"
+      | "tool_permissions"
+      | "can_execute"
+      | "settings"
+      | "tools"
+      | "directories"
+      | "constraints"
+      | "tags"
+      | "status"
+      | "source"
+      | "source_ref"
+      | "parent_dispatch_allowlist"
+      | "role_tools"
+      | "role_skills"
+      | "context_policy"
+      | "durable"
+      | "activation_mode"
+      | "class"
+      | "default_state"
+    >
+  >;
+
+export type UpdateAgentProfileRequest = Partial<
+  Pick<
+    AgentProfile,
+    | "name"
+    | "slug"
+    | "avatar"
+    | "icon"
+    | "system_prompt"
+    | "description"
+    | "modes"
+    | "default_model"
+    | "mcp_servers"
+    | "tool_permissions"
+    | "can_execute"
+    | "settings"
+    | "tools"
+    | "directories"
+    | "constraints"
+    | "tags"
+    | "status"
+    | "parent_dispatch_allowlist"
+    | "role_tools"
+    | "role_skills"
+    | "context_policy"
+    | "durable"
+    | "activation_mode"
+    | "class"
+    | "default_state"
+  >
+>;
+
+export interface AgentBuilderProfileInput {
+  id?: string;
+  name: string;
+  slug: string;
+  avatar?: string;
+  icon?: string;
+  system_prompt: string;
+  description?: string;
+  default_model?: string;
+  mcp_servers?: string;
+  tool_permissions?: string;
+  settings?: string;
+  tools?: string;
+  directories?: string;
+  constraints?: string;
+  tags?: string;
+  status?: string;
+  source?: string;
+  source_ref?: string;
+  parent_dispatch_allowlist?: string;
+  role_tools?: string;
+  role_skills?: string;
+  context_policy?: string;
+  activation_mode?: string;
+  class?: string;
+  default_state?: string;
+  can_execute?: boolean;
+  durable?: boolean;
+}
+
+export interface AgentBuilderCapabilitiesInput {
+  assigned_skill_ids?: string[];
+  assigned_skill_slugs?: string[];
+  prompt_template_ids?: string[];
+  known_tools?: AgentKnownToolUpsertRequest[];
+  known_skills?: AgentKnownSkillUpsertRequest[];
+  procedures?: AgentProcedureUpsertRequest[];
+  knowledge_seeds?: AgentKnowledgeSeedUpsertRequest[];
+  reflex_suggestions?: string[];
+}
+
+export interface AgentBuilderDurableInstanceInput {
+  create?: boolean;
+  recipe_id?: string;
+  lifecycle_class?: DurableAgentLifecycleClass | string;
+  provider?: string;
+  model?: string;
+  runtime_kind?: RuntimeKind | string;
+  work_root?: string;
+  workspace_id?: string;
+  project_id?: string;
+  start?: boolean;
+  metadata?: Record<string, string>;
+}
+
+export interface AgentBuilderOperatorNotificationInput {
+  target_kind?: string;
+  target_id?: string;
+  include_links?: boolean;
+}
+
+export interface AgentBuilderCapabilityOperation {
+  area: string;
+  action: string;
+  target: string;
+  count: number;
+  detail?: string;
+}
+
+export interface AgentBuilderLaunchPlanPreview {
+  lifecycle_class: DurableAgentLifecycleClass | string;
+  session_policy: DurableAgentSessionPolicy | string;
+  attachment_relation: DurableAgentAttachmentRelation | string;
+  provider: string;
+  model: string;
+  runtime_kind: RuntimeKind | string;
+  work_root: string;
+  would_create_session: boolean;
+  wake_payload: DurableAgentWakePayload;
+}
+
+export interface AgentBuilderNotificationResource {
+  id: string;
+  name: string;
+  slug: string;
+}
+
+export interface AgentBuilderDeepLink {
+  kind: string;
+  path: string;
+  label: string;
+}
+
+export interface AgentBuilderReadyNotificationPreview {
+  target_kind: string;
+  target_id: string;
+  profile: AgentBuilderNotificationResource;
+  durable_instance: AgentBuilderNotificationResource;
+  session: AgentBuilderNotificationResource;
+  links: AgentBuilderDeepLink[];
+  warnings: string[];
+  followups: string[];
+}
+
+export interface AgentBuilderDryRunRequest {
+  schema_version: number;
+  mode: "create_profile" | "create_profile_and_instance" | "update_profile";
+  profile: AgentBuilderProfileInput;
+  capabilities?: AgentBuilderCapabilitiesInput;
+  boot_plan?: AgentBootPlanDocument;
+  durable_instance?: AgentBuilderDurableInstanceInput;
+  operator_notification?: AgentBuilderOperatorNotificationInput;
+}
+
+export interface AgentBuilderDryRunResponse {
+  schema_version: number;
+  valid: boolean;
+  errors: string[];
+  warnings: string[];
+  unsupported_fields: string[];
+  normalized_profile_payload: AgentBuilderProfileInput;
+  capability_operations: AgentBuilderCapabilityOperation[];
+  boot_plan_preview?: AgentBootPlanDryRunResponse;
+  durable_recipe_plan?: DurableAgentRecipePlan;
+  launch_plan_preview?: AgentBuilderLaunchPlanPreview;
+  notification_preview: AgentBuilderReadyNotificationPreview;
+}
+
+export interface AgentBuilderDraft {
+  mode:
+    | "create_profile"
+    | "create_profile_and_instance"
+    | "update_profile"
+    | string;
+  profile: AgentBuilderProfileInput;
+  capabilities: AgentBuilderCapabilitiesInput;
+  boot_plan?: AgentBootPlanDocument;
+  durable_instance: AgentBuilderDurableInstanceInput;
+  operator_notification: AgentBuilderOperatorNotificationInput;
+}
+
+export interface AgentBuilderDraftRequest {
+  schema_version: number;
+  intake_text: string;
+  name?: string;
+  slug?: string;
+  description?: string;
+  project_context?: string;
+  work_root?: string;
+  preferred_provider?: string;
+  preferred_model?: string;
+  preferred_runtime_kind?: RuntimeKind | string;
+  requested_lifecycle_class?: DurableAgentLifecycleClass | string;
+}
+
+export interface AgentBuilderDraftResponse {
+  schema_version: number;
+  draft: AgentBuilderDraft;
+  questions: string[];
+  warnings: string[];
+  unsupported_requests: string[];
+  confidence: number;
+}
+
+export interface AgentBuilderReviewRequest {
+  schema_version: number;
+  current_draft: AgentBuilderDraft;
+  previous_builder_notes?: string[];
+}
+
+export interface AgentBuilderPatchOperation {
+  op: string;
+  path: string;
+  value?: string;
+  note?: string;
+}
+
+export interface AgentBuilderReviewResponse {
+  schema_version: number;
+  accepted: boolean;
+  questions: string[];
+  warnings: string[];
+  suggested_patch_operations: AgentBuilderPatchOperation[];
+  max_rounds_recommended: number;
+}
+
+export type AgentReflexStatus = "active" | "paused" | "expired" | string;
+export type AgentReflexTriggerKind =
+  | "predicate"
+  | "event"
+  | "interval"
+  | string;
+export type AgentReflexActionKind =
+  | "inject_reminder"
+  | "halt_session"
+  | "force_tool_choice"
+  | "send_message"
+  | "add_schedule"
+  | string;
+
+export interface AgentReflexRowBase {
+  id: string;
+  name: string;
+  trigger_kind: AgentReflexTriggerKind;
+  trigger_spec: string;
+  action_kind: AgentReflexActionKind;
+  action_spec: string;
+  status: AgentReflexStatus;
+  priority: number;
+  fired_count: number;
+  last_fired_at: string;
+  created_at: string;
+  created_by: string;
+}
+
+export interface InheritedAgentReflexRow extends AgentReflexRowBase {
+  agent_id: "";
+  class_tag: string;
+}
+
+export interface ScopedAgentReflexRow extends AgentReflexRowBase {
+  agent_id: string;
+  class_tag: string;
+}
+
+export type AgentReflexRow = InheritedAgentReflexRow | ScopedAgentReflexRow;
+
+export interface PendingReflexRow {
+  id: string;
+  proposed_by: string;
+  proposed_at: string;
+  target_agent_id: string;
+  name: string;
+  trigger_kind: AgentReflexTriggerKind;
+  trigger_spec: string;
+  action_kind: AgentReflexActionKind;
+  action_spec: string;
+  rationale: string;
+  status: "pending" | "approved" | "rejected" | string;
+  reviewed_at: string;
+  reviewed_by: string;
+}
+
+export interface CreateAgentReflexRequest {
+  name: string;
+  trigger_kind: AgentReflexTriggerKind;
+  trigger_spec: string;
+  action_kind: AgentReflexActionKind;
+  action_spec: string;
+  priority: number;
+}
+
+export interface PatchAgentReflexRequest {
+  name?: string;
+  trigger_kind?: AgentReflexTriggerKind;
+  trigger_spec?: string;
+  action_kind?: AgentReflexActionKind;
+  action_spec?: string;
+  status?: AgentReflexStatus;
+  priority?: number;
+  fired_count?: number;
+  last_fired_at?: string;
+}
+
+export interface ValidateReflexRequest {
+  trigger_kind: AgentReflexTriggerKind;
+  trigger_spec: string;
+  action_kind: AgentReflexActionKind;
+  action_spec: string;
+  session_id?: string;
+  agent_id?: string;
+  agent_class?: string;
+  state?: Record<string, unknown>;
+}
+
+export interface ValidateReflexResponse {
+  valid: boolean;
+  errors: string[];
+  fired: boolean;
+  state_source: "empty" | "request" | "store" | string;
+  state_summary: {
+    session_id?: string;
+    agent_id?: string;
+    agent_class?: string;
+    messages: number;
+    user_messages: number;
+    events: number;
+    mail_unread_count: number;
+    tick_n: number;
+    prefix_tokens: number;
+  };
+}
+
+export interface PendingReflexApproveRequest {
+  reviewed_by?: string;
+}
+
+export interface PendingReflexRejectRequest {
+  reviewed_by?: string;
+  reason?: string;
+}
+
+export interface PendingReflexRejectResponse {
+  id: string;
+  status: "rejected" | string;
+}
+
+export interface AgentKnownTool {
+  agent_id: string;
+  tool_name: string;
+  pinned: boolean;
+  sort_order: number;
+  activation_count: number;
+  last_used_at: string;
+  added_at: string;
+  ttl_seconds: number;
+  reason: string;
+}
+
+export interface AgentKnownSkill {
+  agent_id: string;
+  skill_name: string;
+  pinned: boolean;
+  activation_count: number;
+  last_used_at: string;
+  added_at: string;
+  ttl_seconds: number;
+  reason: string;
+}
+
+export interface AgentProcedure {
+  agent_id: string;
+  name: string;
+  body: string;
+  scope: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface AgentKnowledgeSeed {
+  agent_id: string;
+  seed_key: string;
+  namespace: string;
+  body: string;
+  tags_json: string;
+  applied_at: string;
+  created_at: string;
+}
+
+export interface AgentKnownToolUpsertRequest {
+  agent_id?: string;
+  tool_name?: string;
+  pinned: boolean;
+  sort_order: number;
+  ttl_seconds: number;
+  reason: string;
+}
+
+export interface AgentKnownSkillUpsertRequest {
+  agent_id?: string;
+  skill_name?: string;
+  pinned: boolean;
+  ttl_seconds: number;
+  reason: string;
+}
+
+export interface AgentProcedureUpsertRequest {
+  agent_id?: string;
+  name?: string;
+  body: string;
+  scope?: string;
+}
+
+export interface AgentKnowledgeSeedUpsertRequest {
+  agent_id?: string;
+  seed_key?: string;
+  namespace: string;
+  body: string;
+  tags_json?: string;
+  tags?: string[];
+}
+
+export interface AgentBootGeneratorSpec {
+  kind: string;
+  params?: Record<string, string>;
+}
+
+export interface AgentBootPlantItem {
+  id: string;
+  name: string;
+  source_kind:
+    | "path_file"
+    | "path_dir"
+    | "literal_file"
+    | "literal_dir"
+    | "generated"
+    | string;
+  source_path?: string;
+  content?: string;
+  generator?: AgentBootGeneratorSpec;
+  target_rel_path: string;
+  entry_kind: "file" | "directory" | string;
+  timing: Array<
+    "create" | "start" | "resume" | "every_boot" | "recovery_replant" | string
+  >;
+  secret: boolean;
+  overwrite_policy:
+    | "never"
+    | "if_missing"
+    | "always"
+    | "if_hash_differs"
+    | string;
+  failure_policy: "fail_boot" | "warn" | "skip" | string;
+  enabled: boolean;
+  metadata?: Record<string, string>;
+}
+
+export interface AgentBootCommandSpec {
+  argv: string[];
+  workdir?: string;
+}
+
+export interface AgentBootRequestSpec {
+  method?: string;
+  url?: string;
+  path?: string;
+  headers?: Record<string, string>;
+  body?: string;
+}
+
+export interface AgentBootCallback {
+  id: string;
+  name: string;
+  timing:
+    | "before_boot"
+    | "after_boot"
+    | "before_first_turn"
+    | "on_resume"
+    | "on_recovery"
+    | string;
+  callback_type:
+    | "command"
+    | "tool_call"
+    | "message_injection"
+    | "http_request"
+    | "local_api"
+    | string;
+  command?: AgentBootCommandSpec;
+  tool_name?: string;
+  tool_input?: Record<string, unknown>;
+  message?: string;
+  request?: AgentBootRequestSpec;
+  permissions?: Record<string, unknown>;
+  timeout_seconds: number;
+  env?: Record<string, string>;
+  failure_policy: "fail_boot" | "warn" | "retry_once" | "ignore" | string;
+  enabled: boolean;
+}
+
+export interface AgentBootPlanDocument {
+  agent_id: string;
+  schema_version: number;
+  plant_items: AgentBootPlantItem[];
+  callbacks: AgentBootCallback[];
+  created_at: string;
+  updated_at: string;
+}
+
+export interface AgentBootPlanPlantOperation {
+  item_id: string;
+  name: string;
+  timing: string[];
+  target_rel_path: string;
+  entry_kind: string;
+  source_kind: string;
+  overwrite_policy: string;
+  failure_policy: string;
+  enabled: boolean;
+  secret: boolean;
+  source_path?: string;
+  source_path_redacted?: boolean;
+  content_preview?: string;
+  content_preview_redacted?: boolean;
+  notes?: string[];
+}
+
+export interface AgentBootPlanCallbackOperation {
+  callback_id: string;
+  name: string;
+  timing: string;
+  callback_type: string;
+  timeout_seconds: number;
+  failure_policy: string;
+  enabled: boolean;
+  payload_preview?: string;
+  env_redacted?: boolean;
+  permissions_notes?: string[];
+  notes?: string[];
+}
+
+export interface AgentBootPlanDryRunResponse {
+  valid: boolean;
+  errors: string[];
+  warnings: string[];
+  normalized_plan: AgentBootPlanDocument;
+  plant_operations: AgentBootPlanPlantOperation[];
+  callback_order: AgentBootPlanCallbackOperation[];
+  unsupported_notes: string[];
 }
 
 export interface AgentModeProfile {
@@ -162,7 +1361,11 @@ export interface Mode {
 
 // --- Chat Errors ---
 
-export type ChatErrorCode = "rate_limit" | "tool_error" | "provider_error" | "internal_error";
+export type ChatErrorCode =
+  | "rate_limit"
+  | "tool_error"
+  | "provider_error"
+  | "internal_error";
 
 export interface ChatError {
   id: string;
@@ -358,7 +1561,12 @@ export interface ProcessHealthResponse {
 
 // --- Agent Modes ---
 
-export const AGENT_MODES = ["default", "architect", "planner", "writer"] as const;
+export const AGENT_MODES = [
+  "default",
+  "architect",
+  "planner",
+  "writer",
+] as const;
 export type AgentMode = (typeof AGENT_MODES)[number];
 
 export const MODE_COLORS: Record<AgentMode, string> = {
@@ -427,7 +1635,11 @@ export interface UserSettings {
   embedding_model: string;
   embedding_mode: "disabled" | "explicit";
   // Computed server-side; not persisted. Reflects live credential / reachability.
-  embedding_status?: "active" | "disabled" | "missing_credentials" | "unreachable";
+  embedding_status?:
+    | "active"
+    | "disabled"
+    | "missing_credentials"
+    | "unreachable";
   // B3 (CW-20260428-0011): user-level preference for auto-applying classifier
   // mode suggestions. "" = unset (triggers first-use prompt).
   mode_auto_switch_pref?: "" | "always" | "ask" | "never";
@@ -603,7 +1815,7 @@ export interface InspectorTurnSnapshot {
   broker_decisions: InspectorBrokerDecision[];
   tool_calls: InspectorToolCallRecord[];
   scope_tier?: string;
-  strategy?: { reflex_match_id?: string; max_turns: number; reasoning?: string };
+  strategy?: { max_turns: number; reasoning?: string };
   playbook?: { name: string; steps?: string[] };
   memory_hits?: { source: string; content: string; score?: number }[];
   loop_status?: { detected: boolean; reason?: string };
@@ -740,7 +1952,11 @@ export type AgentMessageType =
   | "directive"
   | "status_update"
   | "handoff";
-export type AgentMessageStatus = "unread" | "read" | "acknowledged" | "resolved";
+export type AgentMessageStatus =
+  | "unread"
+  | "read"
+  | "acknowledged"
+  | "resolved";
 export type AgentMessageChannel = "chat" | "inbox" | "alert";
 export type AgentMessageKind = "request" | "reply" | "notification" | "handoff";
 
@@ -1049,7 +2265,12 @@ export interface FragmentsBacklogItem {
 
 export type TodoStatus = "pending" | "in_progress" | "done" | "blocked";
 export type TodoPriority = "low" | "medium" | "high" | "critical";
-export type PlanStatus = "proposed" | "approved" | "in_progress" | "complete" | "abandoned";
+export type PlanStatus =
+  | "proposed"
+  | "approved"
+  | "in_progress"
+  | "complete"
+  | "abandoned";
 export type PlanStepStatus = "pending" | "in_progress" | "done" | "skipped";
 
 export interface Todo {
@@ -1118,7 +2339,11 @@ export interface WorkDiff {
   todos_added: string[];
   todos_reordered: boolean;
   plan_steps_checked: Array<{ plan_id: string; step_id: string }>;
-  plan_steps_unchecked: Array<{ plan_id: string; step_id: string; reason?: string }>;
+  plan_steps_unchecked: Array<{
+    plan_id: string;
+    step_id: string;
+    reason?: string;
+  }>;
   plans_approved: string[];
   plans_rejected: string[];
 }
@@ -1126,7 +2351,12 @@ export interface WorkDiff {
 // --- Workers (background orchestration) ---
 
 export type WorkerType = "full" | "light";
-export type WorkerStatus = "spawning" | "running" | "completed" | "failed" | "cancelled";
+export type WorkerStatus =
+  | "spawning"
+  | "running"
+  | "completed"
+  | "failed"
+  | "cancelled";
 
 export interface Worker {
   id: string;
@@ -1382,8 +2612,19 @@ export interface PipelineInfo {
   step_count: number;
 }
 
-export type RunStatus = "pending" | "running" | "completed" | "failed" | "cancelled";
-export type StepStatus = "pending" | "running" | "completed" | "failed" | "skipped" | "cancelled";
+export type RunStatus =
+  | "pending"
+  | "running"
+  | "completed"
+  | "failed"
+  | "cancelled";
+export type StepStatus =
+  | "pending"
+  | "running"
+  | "completed"
+  | "failed"
+  | "skipped"
+  | "cancelled";
 
 export interface StepState {
   step_id: string;
@@ -1422,7 +2663,12 @@ export interface WorkflowRun {
 
 // --- Memory ---
 
-export type MemoryOrigin = "user" | "feedback" | "project" | "reference" | "observation";
+export type MemoryOrigin =
+  | "user"
+  | "feedback"
+  | "project"
+  | "reference"
+  | "observation";
 export type MemoryStatus = "draft" | "reviewed" | "canonical" | "deprecated";
 export type MemoryScope = "session" | "project" | "user";
 

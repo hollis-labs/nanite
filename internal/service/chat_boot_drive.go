@@ -131,6 +131,19 @@ func (s *chatServiceImpl) driveBootSession(
 		if launchSpec := s.launchSpecFor(sessionID); launchSpec != nil {
 			s.applyLaunchSpecAsPlanToBootOpts(&bootOpts, launchSpec)
 		}
+		// CW-20260525-0001 Slice 3: resume the provider's prior session after a
+		// host restart. Read the captured provider_session_id BEFORE Boot —
+		// CreateRuntimeRow upserts the row and clears the column. When present,
+		// Claude resumes its real session (full context); the Slice 1 recovery
+		// pack still plants as a safety net in case resume silently no-ops.
+		if s.store != nil {
+			if pid, perr := s.store.AgentRuntimeProviderSessionID(sessionID); perr != nil {
+				slog.Warn("driveBootSession: provider-session lookup failed", "session_id", sessionID, "err", perr)
+			} else if pid != "" {
+				bootOpts.ResumeProviderSessionID = pid
+				slog.Info("driveBootSession: resuming provider session after cold boot", "session_id", sessionID)
+			}
+		}
 		booted, err := runtimeagent.Boot(ctx, s.agentDeps, bootOpts)
 		if err != nil {
 			return nil, fmt.Errorf("driveBootSession: boot: %w", err)

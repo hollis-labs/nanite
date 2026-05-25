@@ -104,6 +104,14 @@ type Options struct {
 	// stored session checkpoint.
 	ResumeFromCheckpoint string
 
+	// ResumeProviderSessionID, when non-empty, resumes the provider's prior
+	// session (e.g. Claude `--resume <id>`) on this boot WITHOUT switching
+	// lifecycle modes — so a long-lived CLI chat session can resume its real
+	// provider context after a host restart while keeping the streaming
+	// supervisor. Takes precedence over the ModeResume/checkpoint path.
+	// CW-20260525-0001 Slice 3. Empty preserves prior behavior.
+	ResumeProviderSessionID string
+
 	// OneShotPrompt is the kickoff payload for ModeOneShot. When empty,
 	// composeKickoff supplies a role-aware default.
 	OneShotPrompt string
@@ -403,7 +411,12 @@ func Boot(ctx context.Context, deps *Dependencies, opts Options) (*Session, erro
 	}
 
 	var sessionIDPreset string
-	if opts.Mode == ModeResume && opts.ResumeFromCheckpoint != "" {
+	switch {
+	case opts.ResumeProviderSessionID != "":
+		// CW-20260525-0001 Slice 3: direct provider-session resume on a
+		// long-lived boot (no mode switch — keeps the streaming supervisor).
+		sessionIDPreset = opts.ResumeProviderSessionID
+	case opts.Mode == ModeResume && opts.ResumeFromCheckpoint != "":
 		cp, err := deps.Store.GetCheckpoint(opts.ResumeFromCheckpoint)
 		if err != nil {
 			_ = deps.Store.MarkRuntimeFailed(sessID, err.Error())

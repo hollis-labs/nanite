@@ -139,6 +139,10 @@ type minimalStore struct {
 	stubSubagentRunsReader
 }
 
+// AgentRuntimeProviderSessionID satisfies the Store interface for the test
+// fakes (minimalStore + its embedders). Returns no captured session by default.
+func (m *minimalStore) AgentRuntimeProviderSessionID(string) (string, error) { return "", nil }
+
 // stubSubagentRunsReader returns no active subagent for any session by
 // default. Tests that need to exercise the suppression branch (CW-20260512-0002 d)
 // embed a custom reader instead.

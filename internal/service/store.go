@@ -330,6 +330,11 @@ type Store interface {
 	ReminderStore
 	PinnedContentStore
 	SubagentRunsReader
+
+	// AgentRuntimeProviderSessionID returns the captured provider session id
+	// for a chat session's runtime row, or "" when none. CW-20260525-0001
+	// Slice 3 — resume a CLI provider session after a host restart.
+	AgentRuntimeProviderSessionID(id string) (string, error)
 }
 
 // Compile-time verification that *store.Store satisfies the composite interface.

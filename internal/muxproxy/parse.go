@@ -5,7 +5,7 @@ package muxproxy
 import (
 	"strings"
 
-	"github.com/chrispian/Tether/pkg/claudestream"
+	"github.com/chrispian/agent-mux/pkg/claudestream"
 )
 
 // parseAll decodes every claudestream.Event produced by a single

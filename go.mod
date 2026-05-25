@@ -3,6 +3,7 @@ module github.com/hollis-labs/nanite
 go 1.26.2
 
 require (
+	github.com/chrispian/agent-mux v0.0.0
 	github.com/creack/pty v1.1.24 // indirect
 	github.com/dgraph-io/badger/v4 v4.9.1
 	github.com/google/uuid v1.6.0
@@ -14,7 +15,7 @@ require (
 )
 
 require (
-	github.com/anthropics/anthropic-sdk-go v1.41.0
+	github.com/anthropics/anthropic-sdk-go v1.45.0
 	github.com/google/jsonschema-go v0.4.2
 	github.com/hollis-labs/go-agent-context v0.1.0
 	github.com/hollis-labs/go-agent-launch v0.4.0
@@ -24,8 +25,8 @@ require (
 	github.com/hollis-labs/go-otel v0.1.0
 	github.com/hollis-labs/go-providers v0.23.0
 	github.com/hollis-labs/go-sandbox v0.2.1
+	github.com/hollis-labs/go-tether-client v0.1.0
 	github.com/hollis-labs/go-toolbroker v0.2.0
-	github.com/hollis-labs/go-tether-client v0.0.0
 	github.com/modelcontextprotocol/go-sdk v1.5.0
 	github.com/oklog/ulid/v2 v2.1.1
 	github.com/openai/openai-go v1.12.0
@@ -40,14 +41,13 @@ require (
 	github.com/cenkalti/backoff/v5 v5.0.3 // indirect
 	github.com/dlclark/regexp2 v1.11.4 // indirect
 	github.com/grpc-ecosystem/grpc-gateway/v2 v2.28.0 // indirect
-	github.com/hollis-labs/go-agent-runtime v0.5.0 // indirect
 	github.com/hollis-labs/go-queue v0.1.2 // indirect
 	github.com/hollis-labs/go-runner v0.5.0 // indirect
 	github.com/invopop/jsonschema v0.13.0 // indirect
 	github.com/mailru/easyjson v0.7.7 // indirect
 	github.com/segmentio/asm v1.1.3 // indirect
 	github.com/segmentio/encoding v0.5.4 // indirect
-	github.com/standard-webhooks/standard-webhooks/libraries v0.0.0-20260427160145-3afa6683f8b2 // indirect
+	github.com/standard-webhooks/standard-webhooks/libraries v0.0.1 // indirect
 	github.com/tidwall/gjson v1.18.0 // indirect
 	github.com/tidwall/match v1.1.1 // indirect
 	github.com/tidwall/pretty v1.2.1 // indirect
@@ -95,12 +95,11 @@ require (
 
 replace github.com/hollis-labs/go-modelsdev => ../../libs/go-modelsdev
 
-replace github.com/hollis-labs/go-tether-client => ../../libs/go-tether-client
-
 replace github.com/chrispian/agent-mux => /Users/chrispian/dev/hollis-labs/apps/agent-mux
 
 require (
 	github.com/hollis-labs/go-agent-broker v0.2.1
+	github.com/hollis-labs/go-agent-runtime v0.5.0
 	github.com/hollis-labs/go-apppaths v0.1.0
 	github.com/hollis-labs/go-embed-contracts v0.1.1
 	github.com/hollis-labs/go-llm-contracts v0.3.0

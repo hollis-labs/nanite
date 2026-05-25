@@ -11,7 +11,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/chrispian/Tether/pkg/claudestream"
+	"github.com/chrispian/agent-mux/pkg/claudestream"
 	agentmux "github.com/hollis-labs/go-tether-client"
 	"github.com/hollis-labs/nanite/internal/mcp"
 	"github.com/hollis-labs/nanite/internal/muxproxy"
@@ -29,7 +29,6 @@ type muxClient interface {
 	SendInput(ctx context.Context, sessionID string, data []byte) error
 	StopSession(ctx context.Context, sessionID string) error
 }
-
 
 // MuxProxy is the chat-session-facing service layer.
 type MuxProxy struct {

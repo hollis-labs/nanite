@@ -9,8 +9,8 @@ import (
 	"context"
 	"encoding/json"
 
-	agentmux "github.com/hollis-labs/go-tether-client"
 	llmtypes "github.com/hollis-labs/go-llm-types"
+	agentmux "github.com/hollis-labs/go-tether-client"
 	"github.com/hollis-labs/nanite/internal/dispatch"
 )
 

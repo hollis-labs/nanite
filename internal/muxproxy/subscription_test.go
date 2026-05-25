@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	agentmux "github.com/hollis-labs/go-agentmux-client"
+	agentmux "github.com/hollis-labs/go-tether-client"
 )
 
 // fakeStream satisfies the streamSource interface. For the POC we

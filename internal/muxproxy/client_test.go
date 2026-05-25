@@ -7,7 +7,7 @@ import (
 )
 
 func TestDaemonEndpoint(t *testing.T) {
-	if daemonEndpoint != "unix:~/.agent-mux/run/muxd.sock" {
+	if daemonEndpoint != "unix:~/.tether/run/muxd.sock" {
 		t.Fatalf("unexpected daemonEndpoint %q", daemonEndpoint)
 	}
 }

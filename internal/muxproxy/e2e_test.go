@@ -8,10 +8,10 @@ import (
 	"testing"
 	"time"
 
-	agentmux "github.com/hollis-labs/go-agentmux-client"
+	agentmux "github.com/hollis-labs/go-tether-client"
 )
 
-// TestE2E_LaunchSendStop exercises the real agent-mux daemon. Skipped
+// TestE2E_LaunchSendStop exercises the real tether daemon. Skipped
 // unless built with -tags=e2e_mux AND AGENTMUX_LAUNCH_ID is set to a
 // claudestream-kind launch that the daemon knows about.
 // POC — CW-20260420-0047.

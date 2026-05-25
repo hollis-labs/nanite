@@ -12,7 +12,7 @@ func ToolDefinitions() []llmtypes.ToolDefinition {
 	return []llmtypes.ToolDefinition{
 		{
 			Name:        "mux_list_launches",
-			Description: "List available agent-mux launches (subordinate agent templates). Returns {launches:[{id,project,agent,provider}]}.",
+			Description: "List available tether launches (subordinate agent templates). Returns {launches:[{id,project,agent,provider}]}.",
 			InputSchema: map[string]any{
 				"type":       "object",
 				"properties": map[string]any{},

@@ -19,13 +19,13 @@ require (
 	github.com/hollis-labs/go-agent-context v0.1.0
 	github.com/hollis-labs/go-agent-launch v0.4.0
 	github.com/hollis-labs/go-agent-sessions v0.10.0
-	github.com/hollis-labs/go-agentmux-client v0.3.0
 	github.com/hollis-labs/go-envelopes v0.1.1
 	github.com/hollis-labs/go-modelsdev v0.2.0
 	github.com/hollis-labs/go-otel v0.1.0
 	github.com/hollis-labs/go-providers v0.23.0
 	github.com/hollis-labs/go-sandbox v0.2.1
 	github.com/hollis-labs/go-toolbroker v0.2.0
+	github.com/hollis-labs/go-tether-client v0.0.0
 	github.com/modelcontextprotocol/go-sdk v1.5.0
 	github.com/oklog/ulid/v2 v2.1.1
 	github.com/openai/openai-go v1.12.0
@@ -94,6 +94,8 @@ require (
 )
 
 replace github.com/hollis-labs/go-modelsdev => ../../libs/go-modelsdev
+
+replace github.com/hollis-labs/go-tether-client => ../../libs/go-tether-client
 
 replace github.com/chrispian/agent-mux => /Users/chrispian/dev/hollis-labs/apps/agent-mux
 

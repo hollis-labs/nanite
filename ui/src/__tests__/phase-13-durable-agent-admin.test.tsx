@@ -312,7 +312,7 @@ describe("DurableAgentAdminPanel", () => {
     expect(
       screen.getAllByText("Anthropic / claude-sonnet-4").length,
     ).toBeGreaterThan(0);
-    expect(screen.getByText("session-1")).toBeTruthy();
+    expect(screen.getAllByText("session-1").length).toBeGreaterThan(0);
     expect(screen.getByText(/1 wake item/i)).toBeTruthy();
     expect(await screen.findByText("Start Failed")).toBeTruthy();
     expect(screen.getByText("Runtime exited before ready.")).toBeTruthy();

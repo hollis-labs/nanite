@@ -61,6 +61,7 @@ export function DurableAgentAdminPanel() {
     queryFn: () => api.listDurableAgents(includeArchived),
   });
   const agents = agentsQuery.data ?? [];
+  const effectiveSelectedId = selectedId ?? agents[0]?.id ?? null;
 
   useEffect(() => {
     if (!selectedId && agents.length > 0) setSelectedId(agents[0].id);
@@ -79,7 +80,8 @@ export function DurableAgentAdminPanel() {
     }
   }, [agents.length, agentsQuery.isError, agentsQuery.isLoading]);
 
-  const selectedAgent = agents.find((agent) => agent.id === selectedId) ?? null;
+  const selectedAgent =
+    agents.find((agent) => agent.id === effectiveSelectedId) ?? null;
 
   const refreshAgents = () => {
     void queryClient.invalidateQueries({ queryKey: ["durable-agents"] });
@@ -167,7 +169,7 @@ export function DurableAgentAdminPanel() {
                   type="button"
                   onClick={() => setSelectedId(agent.id)}
                   className={`w-full rounded-[7px] border px-3 py-2 text-left transition-colors ${
-                    selectedId === agent.id
+                    effectiveSelectedId === agent.id
                       ? "border-brand/40 bg-surface text-fg"
                       : "border-transparent text-fg-secondary hover:bg-surface hover:text-fg"
                   }`}

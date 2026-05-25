@@ -94,6 +94,7 @@ func reflexForceIsHard(spec map[string]interface{}) bool {
 	return false
 }
 
+
 func appendUserContext(slotResult *SlotAssemblyResult, content string) {
 	if slotResult == nil || slotResult.Window == nil || strings.TrimSpace(content) == "" {
 		return

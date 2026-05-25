@@ -10,8 +10,8 @@ import (
 	"log/slog"
 	"sync"
 
-	"github.com/chrispian/agent-mux/pkg/claudestream"
-	agentmux "github.com/hollis-labs/go-agentmux-client"
+	"github.com/chrispian/Tether/pkg/claudestream"
+	agentmux "github.com/hollis-labs/go-tether-client"
 )
 
 // streamSource is the subset of *agentmux.Client the Manager consumes.
@@ -19,7 +19,7 @@ import (
 //
 // StreamEvents is retained for backwards compatibility with existing
 // tests but is no longer used at runtime — claudestream CLI events
-// ride the /sessions/{id}/attach stream (ADR 0017 in agent-mux), not
+// ride the /sessions/{id}/attach stream (ADR 0017 in Tether), not
 // the daemon event bus. Production dispatch uses AttachSession.
 type streamSource interface {
 	StreamEvents(ctx context.Context, opts agentmux.StreamEventsOptions) (<-chan agentmux.StreamEvent, <-chan error)

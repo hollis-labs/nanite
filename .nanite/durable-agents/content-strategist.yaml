@@ -1,0 +1,11 @@
+name: Content Strategist
+slug: content-strategist
+profile_slug: content-strategist
+lifecycle_class: advisor
+provider: anthropic
+model: claude-sonnet-4
+runtime_kind: api
+launch_source_type: durable_advisor
+metadata:
+  scope: glyph-content-ops
+  base_url: http://localhost:8080

@@ -355,6 +355,24 @@ export function useChat(sessionId: string | null) {
   }, [loadMessages, sessionId, queryClient]);
 
   useEffect(() => {
+    return () => {
+      if (eventSourceRef.current) {
+        eventSourceRef.current.close();
+        eventSourceRef.current = null;
+      }
+      currentMessageIdRef.current = null;
+      // Closing the EventSource on session switch / unmount stops delivery of
+      // this session's stream events — including the terminal 'done'. Without
+      // reconciling, the session strands in a "Thinking…" indicator after
+      // navigation. Clear its streaming state (the FE is no longer listening;
+      // returning re-establishes the stream and re-sets the flag if still live).
+      if (sessionId) {
+        store().clearStreaming(sessionId);
+      }
+    };
+  }, [sessionId]);
+
+  useEffect(() => {
     if (!sessionId || !isStreaming) return;
     const timer = window.setInterval(() => {
       const assistantMessageID = currentMessageIdRef.current;
@@ -577,7 +595,7 @@ export function useChat(sessionId: string | null) {
             // J8 v1 — declarative drawer routing. When the envelope carries a
             // target field, route the open/render through the layout store with
             // source='agent' so the dismiss machine gates correctly.
-            applyEnvelopePanelEffects(envelope);
+            applyEnvelopePanelEffects(envelope, sessionId);
             if (import.meta.env?.DEV) {
               console.debug("[useChat] plugin_envelope", item);
             }
@@ -598,7 +616,7 @@ export function useChat(sessionId: string | null) {
               mode?: string;
               source?: "agent" | "user";
             };
-            applyPanelSignal(sig);
+            applyPanelSignal(sig, sessionId);
             if (import.meta.env?.DEV) {
               console.debug("[useChat] panel_signal", sig);
             }
@@ -887,7 +905,7 @@ export function useChat(sessionId: string | null) {
             mode?: string;
             source?: "agent" | "user";
           };
-          applyPanelSignal(sig);
+          applyPanelSignal(sig, sessionId);
           if (import.meta.env?.DEV) {
             console.debug("[useChat] panel_signal (retry)", sig);
           }

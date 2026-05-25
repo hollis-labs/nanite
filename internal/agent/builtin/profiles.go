@@ -34,7 +34,7 @@ import (
 // before the cleanup migration runs.
 const SourceInternal = "internal"
 
-//go:embed profiles/*.md
+//go:embed profiles/*.md profiles/procedures
 var internalProfilesFS embed.FS
 
 // InternalProfiles returns the parsed internal agent definitions embedded
@@ -79,6 +79,19 @@ func InternalProfiles() ([]*agent.Definition, error) {
 		// file omits the slug, the parse error surfaces immediately.
 		def.Source = SourceInternal
 		def.SourceRef = "embedded:" + rel
+		for i := range def.Procedures {
+			p := &def.Procedures[i]
+			if p.BodyFile == "" {
+				continue
+			}
+			bodyPath := path.Join("profiles", p.BodyFile)
+			body, err := internalProfilesFS.ReadFile(bodyPath)
+			if err != nil {
+				return nil, fmt.Errorf("builtin: read procedure %s for %s: %w", p.BodyFile, def.Slug, err)
+			}
+			p.Body = string(body)
+			p.BodyFile = ""
+		}
 		defs = append(defs, def)
 	}
 

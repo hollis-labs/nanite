@@ -6,14 +6,12 @@ import (
 	"testing"
 
 	"github.com/hollis-labs/nanite/internal/agent"
-	"github.com/hollis-labs/nanite/internal/toolclient"
 )
 
 // TestInternalProfiles_LoadsAllExpectedSlugs asserts the embedded profiles/
-// directory carries exactly the four canonical internal profile slugs
-// expected by the Wave 2 cleanup migration (CW-20260512-0112). If a new
-// internal profile is added, update this list AND the migration's keep-set
-// in lockstep.
+// directory carries the full internal profile set Nanite is expected to
+// ingest at boot. If a new internal profile is added, update this list so
+// the test remains an explicit inventory pin.
 func TestInternalProfiles_LoadsAllExpectedSlugs(t *testing.T) {
 	defs, err := InternalProfiles()
 	if err != nil {
@@ -26,22 +24,17 @@ func TestInternalProfiles_LoadsAllExpectedSlugs(t *testing.T) {
 	sort.Strings(got)
 
 	want := []string{
-		// Wave 1 (CW-20260512-0111):
+		// Harness primitives (the Chat/Planner/Worker core + infra):
 		"default", "hint-selector", "planner", "worker",
-		// Wave 4 (CW-20260512-0113): five role profiles authored to close
-		// the slug-existence gap after Wave 2's eject of source!='internal'.
-		// (A `fragments-engine` profile was drafted then dropped in review
-		// round 1 per Phase 2 / Track A — user memory
-		// project_nanite_phase_2_scope.)
-		"analyst", "backend", "background-job", "file-backend",
-		"researcher",
-		// CW-20260519-0123: Phase-6 standing roles. Added so
-		// subagent_spawn with role={system-architect,code-auditor,
-		// reviewer} resolves through the fail-fast gate at the Spawn
-		// boundary instead of falling to the orphan-reaper path.
-		// "reviewer" promotes the prompt-framing-only role in
-		// internal/runtime/agent/prompt.go to a registered profile.
-		"code-auditor", "reviewer", "system-architect",
+		// Worker-family roles still referenced by the harness (dispatch /
+		// prompt framing). Phase 2 migrated the zero-ref product/tooling
+		// agents (analyst, code-auditor, file-backend, agent-builder,
+		// agridd-project-manager, proxima, torque-supervisor,
+		// torque-task-writer) out to the managed config layer
+		// (.nanite/agents/) where they are operator-editable.
+		"backend", "background-job", "researcher",
+		// Standing roles resolved via subagent_spawn / prompt framing.
+		"reviewer", "system-architect",
 	}
 	sort.Strings(want)
 	if len(got) != len(want) {
@@ -142,8 +135,7 @@ func TestInternalProfiles_FrontmatterKeys(t *testing.T) {
 	// and inherits the harness default.
 	for _, slug := range []string{
 		"worker", "planner", "hint-selector",
-		"researcher", "analyst", "file-backend", "backend",
-		"background-job",
+		"researcher", "backend", "background-job",
 	} {
 		def := findBySlug(t, defs, slug)
 		if def.Model == "" {
@@ -216,16 +208,6 @@ func TestInternalProfiles_RoleIdentitySmoke(t *testing.T) {
 			canExecuteWant: false,
 		},
 		{
-			slug:           "analyst",
-			tokens:         []string{"classifier", "schema", "low_confidence"},
-			canExecuteWant: false,
-		},
-		{
-			slug:           "file-backend",
-			tokens:         []string{"file-tier I/O", "Migrations are immutable", "Targeted edits"},
-			canExecuteWant: true,
-		},
-		{
 			slug:           "backend",
 			tokens:         []string{"Go server-side", "go test -race", "Migrations are append-only"},
 			canExecuteWant: true,
@@ -270,57 +252,12 @@ func TestInternalProfiles_RoleBodiesExcludeUniversalRules(t *testing.T) {
 		"Use what tools return",
 		"Count, do not estimate",
 	}
-	for _, slug := range []string{"researcher", "analyst", "file-backend", "backend", "background-job", "planner"} {
+	for _, slug := range []string{"researcher", "backend", "background-job", "planner"} {
 		def := findBySlug(t, defs, slug)
 		for _, sentinel := range universalSentinels {
 			if strings.Contains(def.SystemPrompt, sentinel) {
 				t.Errorf("slug=%s: body duplicates universal sentinel %q — universal_rules.go owns this", slug, sentinel)
 			}
-		}
-	}
-}
-
-// TestInternalProfiles_AnalystDeniesAllTools asserts the file SOT for the
-// analyst no-tools contract: parsing analyst.md must yield a ToolPermissions
-// shape that, when evaluated under toolclient.ToolPermissions.CheckPermission,
-// denies a known canonical tool.
-//
-// PR #161 review round 2 (Copilot item E): empty allow_list is PERMISSIVE
-// under toolclient.CheckPermission (falls through to `return true` when no
-// deny list matches), so a no-tools classifier needs an explicit
-// `deny_list: ["*"]`. The wildcard matches every tool name via the
-// prefix-glob in toolclient.MatchPattern.
-//
-// This guards the file SOT independently of the migration seed —
-// AutoIngestAgents replaces the row body with this file's contents on every
-// Nanite restart, so a regression here would silently re-permit every tool
-// even if migration 062 stayed correct on disk.
-func TestInternalProfiles_AnalystDeniesAllTools(t *testing.T) {
-	defs, err := InternalProfiles()
-	if err != nil {
-		t.Fatalf("InternalProfiles: %v", err)
-	}
-	def := findBySlug(t, defs, "analyst")
-	if def.ToolPermissions == nil {
-		t.Fatal("analyst ToolPermissions is nil — frontmatter must declare an explicit deny-all (no-tools contract)")
-	}
-	// Convert agent.AgentToolPermissions → toolclient.ToolPermissions
-	// (identical field shape; safe direct copy). The same struct lives in
-	// two packages because agent frontmatter parsing must not depend on
-	// toolclient.
-	tp := toolclient.ToolPermissions{
-		AllowList:          def.ToolPermissions.AllowList,
-		DenyList:           def.ToolPermissions.DenyList,
-		MaxCallsPerTurn:    def.ToolPermissions.MaxCallsPerTurn,
-		AllowDelegation:    def.ToolPermissions.AllowDelegation,
-		AllowCodeExecution: def.ToolPermissions.AllowCodeExecution,
-	}
-	// dev_read is the canonical anchor — any tool name would match "*"
-	// via the prefix-glob in toolclient.MatchPattern, but dev_read is a
-	// stable, documented tool name used by the researcher profile.
-	for _, tool := range []string{"dev_read", "dev_write", "task_execute", "shell_exec"} {
-		if tp.CheckPermission(tool) {
-			t.Errorf("analyst CheckPermission(%q) = true, want false (no-tools contract — empty allow_list is PERMISSIVE; explicit deny_list:[\"*\"] is required)", tool)
 		}
 	}
 }

@@ -148,6 +148,7 @@ func (a *API) handleGetAllProviderStatuses(w http.ResponseWriter, r *http.Reques
 		a.errorResp(w, http.StatusInternalServerError, err.Error())
 		return
 	}
+	providers = visibleProviderRows(providers)
 
 	type providerStatus struct {
 		store.ProviderConfig

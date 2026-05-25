@@ -47,9 +47,18 @@ func TestStartSurfaceCapabilities(t *testing.T) {
 		!containsEnum(body.AttachmentRelations, store.DurableAgentSessionRelationWake) {
 		t.Fatalf("missing canonical enums: %+v %+v", body.LifecycleClasses, body.AttachmentRelations)
 	}
-	if len(body.DurableAgents) != 1 || body.DurableAgents[0].ID != inst.ID {
+	if !containsDurableAgent(body.DurableAgents, inst.ID) {
 		t.Fatalf("durable agents = %+v", body.DurableAgents)
 	}
+}
+
+func containsDurableAgent(items []store.DurableAgentInstance, id string) bool {
+	for _, item := range items {
+		if item.ID == id {
+			return true
+		}
+	}
+	return false
 }
 
 func TestSessionDetailsContract(t *testing.T) {

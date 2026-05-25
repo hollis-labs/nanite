@@ -206,6 +206,8 @@ export function DurableAgentAdminPanel() {
 function DurableAgentDetail({ agent }: { agent: DurableAgentInstance | null }) {
   const queryClient = useQueryClient();
   const setActiveSession = useAppStore((state) => state.setActiveSession);
+  const activeWorkspaceId = useAppStore((state) => state.activeWorkspaceId);
+  const activeProjectId = useAppStore((state) => state.activeProjectId);
   const setCurrentPage = useLayoutStore((state) => state.setCurrentPage);
   const agentID = agent?.id ?? "";
 
@@ -251,6 +253,10 @@ function DurableAgentDetail({ agent }: { agent: DurableAgentInstance | null }) {
   const onLifecycleSuccess = (
     result: DurableAgentInstance | DurableAgentLaunchResult,
   ) => {
+    void queryClient.invalidateQueries({
+      queryKey: ["sessions", activeWorkspaceId],
+    });
+    void queryClient.invalidateQueries({ queryKey: ["sessions"] });
     void queryClient.invalidateQueries({ queryKey: ["durable-agents"] });
     void queryClient.invalidateQueries({
       queryKey: ["durable-agent", agentID],
@@ -262,16 +268,37 @@ function DurableAgentDetail({ agent }: { agent: DurableAgentInstance | null }) {
       queryKey: ["durable-agent-events", agentID],
     });
     if ("session" in result && result.session?.id) {
+      void queryClient.invalidateQueries({
+        queryKey: ["session", result.session.id],
+      });
       openSession(result.session.id);
     }
   };
 
   const startMutation = useMutation({
-    mutationFn: () => api.startDurableAgent(agentID, {}),
+    mutationFn: () => {
+      if (!activeWorkspaceId) {
+        throw new Error("Choose a workspace before starting a durable agent.");
+      }
+      return api.startDurableAgent(agentID, {
+        workspace_id: activeWorkspaceId,
+        project_id: activeProjectId ?? undefined,
+        wake_payload: { reason: "manual" },
+      });
+    },
     onSuccess: onLifecycleSuccess,
   });
   const resumeMutation = useMutation({
-    mutationFn: () => api.resumeDurableAgent(agentID, {}),
+    mutationFn: () => {
+      if (!activeWorkspaceId) {
+        throw new Error("Choose a workspace before resuming a durable agent.");
+      }
+      return api.resumeDurableAgent(agentID, {
+        workspace_id: activeWorkspaceId,
+        project_id: activeProjectId ?? undefined,
+        wake_payload: { reason: "lifecycle_resume" },
+      });
+    },
     onSuccess: onLifecycleSuccess,
   });
   const pauseMutation = useMutation({
@@ -323,6 +350,13 @@ function DurableAgentDetail({ agent }: { agent: DurableAgentInstance | null }) {
     stopMutation.isPending ||
     archiveMutation.isPending ||
     wakeMutation.isPending;
+  const lifecycleError =
+    getErrorMessage(startMutation.error) ??
+    getErrorMessage(resumeMutation.error) ??
+    getErrorMessage(pauseMutation.error) ??
+    getErrorMessage(stopMutation.error) ??
+    getErrorMessage(archiveMutation.error) ??
+    getErrorMessage(wakeMutation.error);
 
   return (
     <section className="min-w-0 rounded-[8px] border border-border-subtle bg-bg-elevated">
@@ -403,6 +437,7 @@ function DurableAgentDetail({ agent }: { agent: DurableAgentInstance | null }) {
           )}
         </div>
       </div>
+      {lifecycleError ? <InlineError message={lifecycleError} /> : null}
 
       <div className="space-y-4 p-4">
         <InfoSection title="Overview">
@@ -567,7 +602,7 @@ function CreateFromRecipeCard({
   });
   const profilesQuery = useQuery({
     queryKey: ["agents"],
-    queryFn: api.listAgents,
+    queryFn: () => api.listAgents(),
   });
   const recipes = recipesQuery.data ?? [];
   const selectedRecipe =
@@ -1354,6 +1389,25 @@ function EmptyState({ children }: { children: ReactNode }) {
       {children}
     </div>
   );
+}
+
+function InlineError({ message }: { message: string }) {
+  return (
+    <div
+      role="alert"
+      className="mx-4 mt-4 rounded-[6px] border border-danger/30 bg-danger/5 px-3 py-2 text-[12px] text-danger"
+    >
+      {message}
+    </div>
+  );
+}
+
+function getErrorMessage(error: unknown): string | null {
+  if (!error) return null;
+  if (error instanceof Error && error.message.trim() !== "") {
+    return error.message;
+  }
+  return "Request failed.";
 }
 
 function formatTime(value: string): string {

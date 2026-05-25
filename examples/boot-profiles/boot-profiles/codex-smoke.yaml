@@ -1,5 +1,5 @@
 id: codex-smoke
-display_name: "Codex CLI (smoke)"
+display_name: "Codex (cli)"
 launch: codex-smoke
 
 identity:
@@ -13,7 +13,7 @@ identity:
 # Inline vars get merged into the substitution map (caller-supplied vars win
 # on key collision). Mirrors claude-smoke.yaml.
 vars:
-  agent_label: "Smoke Codex Backend"
+  agent_label: "Codex"
 
 # Slots populated entirely from `text` and `static` sources — both resolve at
 # compile time, so this profile boots without a deferred-resolver path.

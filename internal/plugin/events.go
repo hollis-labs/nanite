@@ -656,3 +656,32 @@ func (h *Host) EmitPreHook(eventType, sessionID string, data map[string]interfac
 	}
 	return false
 }
+
+// Reflex engine events (FU-30). Emitted by internal/agent/reflexes.Engine
+// when a reflex fires / an action is staged, for plugin + frontend
+// observability. The full reflex payload (agent, reflex name, action kind,
+// trigger evidence) rides under EventData.ActionData ("action_data").
+const (
+	EventReflexFired        = "reflex.fired"
+	EventReflexActionStaged = "reflex.action_staged"
+)
+
+// EmitReflexFired notifies observers that a reflex's trigger matched.
+func (h *Host) EmitReflexFired(sessionID string, data map[string]any) {
+	h.emitReflexEvent(EventReflexFired, sessionID, data)
+}
+
+// EmitReflexActionStaged notifies observers that a reflex action was applied
+// to the turn (e.g. an injected reminder or forced tool choice).
+func (h *Host) EmitReflexActionStaged(sessionID string, data map[string]any) {
+	h.emitReflexEvent(EventReflexActionStaged, sessionID, data)
+}
+
+func (h *Host) emitReflexEvent(eventType, sessionID string, data map[string]any) {
+	agentID, _ := data["agent_id"].(string)
+	h.EmitEvent(NewEvent(eventType, brand.ID, EventData{
+		SessionID:  sessionID,
+		AgentID:    agentID,
+		ActionData: data,
+	}))
+}

@@ -3,6 +3,7 @@ package api
 import (
 	"errors"
 	"net/http"
+	"strings"
 
 	"github.com/hollis-labs/nanite/internal/service"
 )
@@ -53,27 +54,45 @@ func (a *API) handleApplyDurableAgentRecipe(w http.ResponseWriter, r *http.Reque
 		a.errorResp(w, http.StatusBadRequest, "invalid JSON: "+err.Error())
 		return
 	}
-	result, err := a.Services.DurableAgentRecipes.Apply(r.Context(), r.PathValue("id"), durableAgentRecipeRequestToService(req))
+	serviceReq := durableAgentRecipeRequestToService(req)
+	plan, err := a.Services.DurableAgentRecipes.DryRun(r.Context(), r.PathValue("id"), serviceReq)
 	if errors.Is(err, service.ErrDurableAgentRecipeNotFound) {
 		a.errorResp(w, http.StatusNotFound, "durable agent recipe not found")
-		return
-	}
-	if errors.Is(err, service.ErrDurableAgentRecipeMissingInputs) {
-		a.errorResp(w, http.StatusBadRequest, err.Error())
-		return
-	}
-	if errors.Is(err, service.ErrDurableAgentRecipeApplyNotReady) ||
-		errors.Is(err, service.ErrDurableAgentWorkspaceRequired) {
-		a.errorResp(w, http.StatusConflict, err.Error())
-		return
-	}
-	if errors.Is(err, service.ErrDurableAgentUnsupportedLaunchPlan) {
-		a.errorResp(w, http.StatusUnprocessableEntity, err.Error())
 		return
 	}
 	if err != nil {
 		a.errorResp(w, http.StatusBadRequest, err.Error())
 		return
+	}
+	if len(plan.MissingRequirements) > 0 {
+		a.errorResp(w, http.StatusBadRequest, service.ErrDurableAgentRecipeMissingInputs.Error()+": "+strings.Join(plan.MissingRequirements, ", "))
+		return
+	}
+	if len(plan.Unsupported) > 0 {
+		a.errorResp(w, http.StatusConflict, service.ErrDurableAgentRecipeApplyNotReady.Error()+": "+strings.Join(plan.Unsupported, ", "))
+		return
+	}
+	inst, err := a.saveManagedDurableInstance(&plan.Instance, false)
+	if err != nil {
+		a.errorResp(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	result := &service.DurableAgentRecipeApplyResult{
+		Plan:     *plan,
+		Instance: inst,
+	}
+	if serviceReq.Start {
+		launch, err := a.Services.DurableAgents.Start(r.Context(), inst.ID, service.DurableAgentStartRequest{
+			WorkspaceID: serviceReq.WorkspaceID,
+			ProjectID:   serviceReq.ProjectID,
+			WakePayload: plan.WakePayload,
+		})
+		if err != nil {
+			a.errorResp(w, http.StatusConflict, err.Error())
+			return
+		}
+		result.Instance = launch.Instance
+		result.LaunchResult = launch
 	}
 	a.jsonResp(w, http.StatusCreated, result)
 }

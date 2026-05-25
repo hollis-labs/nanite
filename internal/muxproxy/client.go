@@ -12,14 +12,14 @@ import (
 	"sync"
 	"time"
 
-	agentmux "github.com/hollis-labs/go-agentmux-client"
+	agentmux "github.com/hollis-labs/go-tether-client"
 )
 
 // daemonEndpoint is hardcoded for the POC. Any consumer promoting this
 // package beyond throwaway must replace with config-schema/env-var.
-const daemonEndpoint = "unix:~/.agent-mux/run/muxd.sock"
+const daemonEndpoint = "unix:~/.tether/run/muxd.sock"
 
-// launchTimeout bounds individual HTTP calls to muxd. go-agentmux-client
+// launchTimeout bounds individual HTTP calls to muxd. go-tether-client
 // v0.1.0 defaults to 5s which is too tight for LaunchSession — spinning
 // up the claude CLI subprocess routinely exceeds that. Set long enough
 // to cover realistic subprocess startup on a cold machine.
@@ -34,7 +34,7 @@ var (
 	clientVal  *agentmux.Client
 )
 
-// Client returns the singleton agent-mux daemon client. First call
+// Client returns the singleton tether daemon client. First call
 // constructs the client; subsequent calls return the cached value.
 // Uses a custom http.Client with an extended timeout because the
 // stock client's 5s default is too short for real-world claudestream

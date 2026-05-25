@@ -97,6 +97,12 @@ func (s *chatServiceImpl) driveBootSession(
 		}
 	}
 
+	// CW-20260525-0001: capture cold-boot BEFORE the boot block reassigns
+	// sess. A cold boot with prior persisted history means the host restarted
+	// (or the runtime was evicted) — the first post-restart payload gets a
+	// recovery pack so the fresh agent resumes from recovered context.
+	coldBooted := sess == nil
+
 	// 2. Boot when absent.
 	if sess == nil {
 		profileSlug := ""
@@ -201,7 +207,7 @@ func (s *chatServiceImpl) driveBootSession(
 	// path; we then clear the router so the channel is closed and the
 	// loop terminates (the bridge only auto-closes on a runtime-emitted
 	// Done/Error, which never arrives when SendInput itself failed).
-	payload := composeUserPayload(slotResult, userContent)
+	payload := s.composeBootPayload(sessionID, session, agent, sess.BootDir, slotResult, userContent, coldBooted)
 	go func() {
 		if err := sess.SendInput([]byte(payload)); err != nil {
 			slog.Warn("driveBootSession: send input failed",

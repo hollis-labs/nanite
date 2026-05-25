@@ -82,7 +82,7 @@ to `internal/muxproxy/` or `cmd/nanite/mux_wiring_devmode.go`.
 
 The **mux orchestrator** is a built-in chat agent profile that lets a front (chat)
 session spawn and coordinate N subordinate CLI agents running under
-[agent-mux](https://github.com/hollis-labs/go-agentmux-client).
+[Tether](https://github.com/hollis-labs/go-tether-client).
 
 It is compiled in only when `-tags devmode` is set. Default users (production binary)
 see no change — the profile, transport, and all four tool strings are absent.
@@ -103,7 +103,7 @@ profile-based tool allowlist) is tracked in CW-20260421-0001.
 
 | Tool | Description |
 |---|---|
-| `mux_list_launches` | List available agent-mux launches (subordinate templates). |
+| `mux_list_launches` | List available tether launches (subordinate templates). |
 | `mux_launch` | Start a subordinate claudestream agent from a launch ID. Returns `session_id`. |
 | `mux_send` | Send text to a subordinate and block until it finishes the turn. Returns transcript + tool_uses. |
 | `mux_stop` | Stop a subordinate session. Optional — cleanup runs on chat-session exit. |

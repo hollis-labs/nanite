@@ -14,7 +14,7 @@ import { api } from "@/lib/api";
 import { resolveIcon } from "@/lib/icons";
 import type { SlashCommandDef } from "@/lib/types";
 import { useAppStore } from "@/stores/useAppStore";
-import { useChatStore } from "@/stores/useChatStore";
+import { useChatStore, useComposerDraft } from "@/stores/useChatStore";
 import { useLayoutStore } from "@/stores/useLayoutStore";
 import { useShellStore } from "@/stores/useShellStore";
 import { useWorkStore } from "@/stores/useWorkStore";
@@ -118,7 +118,12 @@ export function ChatComposer({
     (s) => s.setPendingShellCommand,
   );
   const appendShellOutput = useShellStore((s) => s.appendShellOutput);
-  const pendingShellCommand = useShellStore((s) => s.pendingShellCommand);
+  const pendingShellCommand = useShellStore((s) =>
+    activeSessionId ? (s.sessions[activeSessionId]?.pendingShellCommand ?? null) : null,
+  );
+  const composerDraft = useComposerDraft(activeSessionId);
+  const setComposerDraft = useChatStore((s) => s.setComposerDraft);
+  const clearComposerDraft = useChatStore((s) => s.clearComposerDraft);
   const workToast = useWorkStore((s) => s.toastMessage);
   const dismissWorkToast = useWorkStore((s) => s.dismissToast);
   // B3 (CW-20260428-0011): chat-scoped toast (e.g. mode auto-switch confirmation).
@@ -218,7 +223,7 @@ export function ChatComposer({
           useLayoutStore.getState().setChatWorkingDrawer({
             open: true,
             activeTab: "scratchpad",
-          });
+          }, activeSessionId ?? undefined);
           return;
         }
         default: {
@@ -391,8 +396,18 @@ export function ChatComposer({
 
   useEffect(() => {
     if (!editor) return;
+    const current = editor.getText();
+    if (current === composerDraft) return;
+    editor.commands.setContent(composerDraft);
+    setIsShellInput(composerDraft.startsWith("!") && composerDraft.length >= 1);
+    setHasContent(composerDraft.trim().length > 0);
+  }, [activeSessionId, composerDraft, editor]);
+
+  useEffect(() => {
+    if (!editor) return;
     const handler = () => {
       const text = editor.getText();
+      if (activeSessionId) setComposerDraft(activeSessionId, text);
       setIsShellInput(text.startsWith("!") && text.length >= 1);
       // Reactively track whether the editor has any content so the send
       // button's enabled/disabled state updates as the user types. (Without
@@ -404,7 +419,7 @@ export function ChatComposer({
     return () => {
       editor.off("update", handler);
     };
-  }, [editor]);
+  }, [activeSessionId, editor, setComposerDraft]);
 
   useEffect(() => {
     if (editor && onEditorReady)
@@ -429,35 +444,35 @@ export function ChatComposer({
   const executeShellCommand = useCallback(
     async (command: string, approved: boolean) => {
       if (!activeSessionId) return;
-      setShellRunning(true);
+      setShellRunning(activeSessionId, true);
       try {
         const result = await api.shellExec(activeSessionId, command, approved);
         if (result.requires_approval) {
           // pendingShellCommand surfaces the in-composer approval
           // strip AND seeds Terminal-1's "what just queued" footer.
-          setPendingShellCommand(command);
+          setPendingShellCommand(activeSessionId, command);
           return;
         }
-        setPendingShellCommand(null);
+        setPendingShellCommand(activeSessionId, null);
         // Commit the (single-shot) shell-exec result to the Terminal-1
         // tab buffer. shellExec is a one-shot fetch — there is no
         // streamed-chunk path today, so we append the full output and
         // an exit-code footer at completion.
-        appendShellOutput(`$ ${command}\n`);
+        appendShellOutput(activeSessionId, `$ ${command}\n`);
         if (result.output) {
-          appendShellOutput(result.output);
-          if (!result.output.endsWith("\n")) appendShellOutput("\n");
+          appendShellOutput(activeSessionId, result.output);
+          if (!result.output.endsWith("\n")) appendShellOutput(activeSessionId, "\n");
         }
         if (typeof result.exit_code === "number") {
-          appendShellOutput(`[exit ${result.exit_code}]\n`);
+          appendShellOutput(activeSessionId, `[exit ${result.exit_code}]\n`);
         }
         reloadMessages?.();
       } catch (err) {
         console.error("Shell exec failed:", err);
-        appendShellOutput(`[error] ${(err as Error).message}\n`);
-        setPendingShellCommand(null);
+        appendShellOutput(activeSessionId, `[error] ${(err as Error).message}\n`);
+        setPendingShellCommand(activeSessionId, null);
       } finally {
-        setShellRunning(false);
+        setShellRunning(activeSessionId, false);
         setIsShellInput(false);
       }
     },
@@ -481,10 +496,13 @@ export function ChatComposer({
     if (pendingShellCommand) void executeShellCommand(pendingShellCommand, true);
   }, [pendingShellCommand, executeShellCommand]);
 
-  const handleShellDeny = useCallback(() => setPendingShellCommand(null), []);
+  const handleShellDeny = useCallback(() => {
+    if (activeSessionId) setPendingShellCommand(activeSessionId, null);
+  }, [activeSessionId, setPendingShellCommand]);
 
   const handleSend = useCallback(() => {
     if (!editor) return;
+    if (!activeSessionId) return;
     const text = editor.getText().trim();
     if (!text) return;
     pushHistory(text);
@@ -492,6 +510,7 @@ export function ChatComposer({
       const command = text.slice(1).trim();
       if (command) {
         editor.commands.clearContent();
+        clearComposerDraft(activeSessionId);
         void handleShellExec(command);
         return;
       }
@@ -509,6 +528,7 @@ export function ChatComposer({
       const cmdArgs = spaceIdx === -1 ? "" : withoutSlash.slice(spaceIdx + 1).trim();
       if (cmdName) {
         editor.commands.clearContent();
+        clearComposerDraft(activeSessionId);
         void handleCommandRef.current(
           { name: cmdName, description: "", category: "", source: "builtin" },
           cmdArgs,
@@ -519,7 +539,8 @@ export function ChatComposer({
     void flushIfDirty();
     onSend(text);
     editor.commands.clearContent();
-  }, [editor, onSend, handleShellExec, flushIfDirty]);
+    clearComposerDraft(activeSessionId);
+  }, [activeSessionId, clearComposerDraft, editor, onSend, handleShellExec, flushIfDirty]);
 
   handleSendRef.current = handleSend;
 

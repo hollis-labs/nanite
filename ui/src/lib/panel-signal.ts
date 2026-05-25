@@ -37,19 +37,19 @@ export interface PanelSignalPayload {
  * Per the J8 contract, source defaults to 'agent' for stream-event payloads
  * (the user-side path always goes through direct UI interactions, not SSE).
  */
-export function applyPanelSignal(sig: PanelSignalPayload): void {
+export function applyPanelSignal(sig: PanelSignalPayload, sessionId?: string): void {
   const source = sig.source ?? "agent";
   const layout = useLayoutStore.getState();
 
   switch (sig.action) {
     case "open": {
       if (!sig.panel_id) return;
-      openPanelById(sig.panel_id, source);
+      openPanelById(sig.panel_id, source, sessionId);
       break;
     }
     case "close": {
       if (!sig.panel_id) return;
-      closePanelById(sig.panel_id, source);
+      closePanelById(sig.panel_id, source, sessionId);
       break;
     }
     case "mode": {
@@ -57,7 +57,7 @@ export function applyPanelSignal(sig: PanelSignalPayload): void {
       const preset = resolvePanelMode(sig.mode);
       if (!preset) return; // unknown mode → silent no-op (forward-compat).
       for (const id of preset) {
-        openPanelById(id, source);
+        openPanelById(id, source, sessionId);
       }
       break;
     }
@@ -87,18 +87,18 @@ export function applyPanelSignal(sig: PanelSignalPayload): void {
  * persisted into the chat store as a normal PluginEnvelopeItem; this helper
  * only deals with panel side effects.
  */
-export function applyEnvelopePanelEffects(envelope: Envelope): void {
+export function applyEnvelopePanelEffects(envelope: Envelope, sessionId?: string): void {
   if (envelope.target) {
-    openPanelById(envelope.target, "agent");
+    openPanelById(envelope.target, "agent", sessionId);
   }
   if (envelope.render_target) {
-    routeEnvelopeToPanel(envelope.render_target, envelope);
+    routeEnvelopeToPanel(envelope.render_target, envelope, sessionId);
   }
   if (envelope.mode) {
     const preset = resolvePanelMode(envelope.mode);
     if (preset) {
       for (const id of preset) {
-        openPanelById(id, "agent");
+        openPanelById(id, "agent", sessionId);
       }
     }
   }
@@ -111,10 +111,10 @@ export function applyEnvelopePanelEffects(envelope: Envelope): void {
  * still push the envelope into the slot so a subsequent user-open lands on
  * the freshest content (Q5 — drawer-owned policy).
  */
-function routeEnvelopeToPanel(panelId: string, envelope: Envelope): void {
+function routeEnvelopeToPanel(panelId: string, envelope: Envelope, sessionId?: string): void {
   const store = useLayoutStore.getState();
-  store.pushPanelEnvelope(panelId, envelope);
-  openPanelById(panelId, "agent");
+  store.pushPanelEnvelope(panelId, envelope, sessionId);
+  openPanelById(panelId, "agent", sessionId);
 }
 
 /**
@@ -130,19 +130,19 @@ function routeEnvelopeToPanel(panelId: string, envelope: Envelope): void {
  * `source` arg is kept on the public signature so the right-rail dismiss
  * gate still works for non-bottom-drawer panels.
  */
-function openPanelById(id: string, source: "agent" | "user"): void {
+function openPanelById(id: string, source: "agent" | "user", sessionId?: string): void {
   const store = useLayoutStore.getState();
   if (id === "bottom_chat_drawer") {
-    store.setChatWorkingDrawer({ open: true });
+    store.setChatWorkingDrawer({ open: true }, sessionId);
     return;
   }
   store.setPanelOpen(id, source);
 }
 
-function closePanelById(id: string, source: "agent" | "user"): void {
+function closePanelById(id: string, source: "agent" | "user", sessionId?: string): void {
   const store = useLayoutStore.getState();
   if (id === "bottom_chat_drawer") {
-    store.setChatWorkingDrawer({ open: false });
+    store.setChatWorkingDrawer({ open: false }, sessionId);
     return;
   }
   // Right-rail close: respect the user-overrides-agent rule. An agent close

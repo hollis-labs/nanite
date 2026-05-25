@@ -110,7 +110,7 @@ func TestBootProfileSmoke_CatalogLoadsAndCompiles(t *testing.T) {
 	// The rendered prompt must carry both the substituted profile-inline
 	// var (proves substitution fired) and the static-slot body (proves
 	// disk read fired).
-	if !strings.Contains(spec.BootPrompt, "Smoke Backend") {
+	if !strings.Contains(spec.BootPrompt, "Claude Code") {
 		t.Errorf("BootPrompt missing substituted agent_label (profile.vars); got:\n%s", spec.BootPrompt)
 	}
 	if !strings.Contains(spec.BootPrompt, "Stay focused on the smoke task") {
@@ -222,7 +222,7 @@ func TestBootProfileSmoke_ResolveAndApplyPipeline(t *testing.T) {
 	// The rendered prompt carries both the profile-inline var
 	// (substituted by the compiler) AND the static rules.md body
 	// (read from disk relative to the catalog root).
-	if !strings.Contains(bootOpts.BootPromptOverride, "Smoke Backend") {
+	if !strings.Contains(bootOpts.BootPromptOverride, "Claude Code") {
 		t.Errorf("BootPromptOverride missing agent_label substitution; got:\n%s", bootOpts.BootPromptOverride)
 	}
 	if !strings.Contains(bootOpts.BootPromptOverride, "Stay focused on the smoke task") {
@@ -269,8 +269,8 @@ func TestBootProfileSmoke_RegistryListSurface(t *testing.T) {
 	if found == nil {
 		t.Fatalf("claude-smoke missing from Registry.List(); got %d entries", len(specs))
 	}
-	if found.UILabel != "Claude CLI (smoke)" {
-		t.Errorf("UILabel = %q, want %q (launch.ui_label takes precedence)", found.UILabel, "Claude CLI (smoke)")
+	if found.UILabel != "Claude Code (cli)" {
+		t.Errorf("UILabel = %q, want %q (launch.ui_label takes precedence)", found.UILabel, "Claude Code (cli)")
 	}
 }
 

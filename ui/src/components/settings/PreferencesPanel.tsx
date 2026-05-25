@@ -144,7 +144,7 @@ export function PreferencesPanel() {
   const { data: models } = useModels()
   const { data: agents } = useQuery({
     queryKey: ['agents'],
-    queryFn: api.listAgents,
+    queryFn: () => api.listAgents(),
     staleTime: 5 * 60 * 1000,
     placeholderData: keepPreviousData,
   })

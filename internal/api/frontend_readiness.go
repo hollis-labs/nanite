@@ -328,6 +328,7 @@ func (a *API) providersForStartSurface() ([]store.ProviderConfig, error) {
 	if err != nil {
 		return nil, err
 	}
+	providers = visibleProviderRows(providers)
 	if reg := a.Services.BootProfiles; reg != nil {
 		for _, spec := range reg.List() {
 			if spec.Provider != "" {
@@ -343,6 +344,7 @@ func (a *API) modelsForStartSurface() ([]store.Model, error) {
 	if err != nil {
 		return nil, err
 	}
+	models = visibleModelRows(models)
 	if reg := a.Services.BootProfiles; reg != nil {
 		for _, spec := range reg.List() {
 			if spec.Provider != "" {

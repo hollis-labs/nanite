@@ -57,7 +57,20 @@ function capabilities(
     durable_statuses: [],
     launch_sources: [],
     attachment_relations: [],
-    runtime_kinds: [],
+    runtime_kinds: [
+      {
+        value: "api",
+        label: "API",
+        managed_automation: false,
+        product_supported: true,
+      },
+      {
+        value: "subprocess",
+        label: "Subprocess",
+        managed_automation: true,
+        product_supported: true,
+      },
+    ],
     recipe_kinds: [],
     wake_reasons: [],
     session_policies: [],
@@ -172,7 +185,14 @@ function capabilities(
         work_root: "/tmp/work",
       },
     ],
-    work_root_hints: [],
+    work_root_hints: [
+      {
+        id: "project-root",
+        label: "Project root",
+        path: "/tmp/work",
+        description: "Current project root",
+      },
+    ],
     ...overrides,
   };
 }
@@ -414,6 +434,62 @@ describe("Phase 11 Start surface", () => {
     await waitFor(() => {
       expect(apply).toHaveBeenCalled();
       expect(onSessionStarted).toHaveBeenCalledWith("session-recipe");
+    });
+  });
+
+  it("uses dropdowns and selectable path hints on the recipe form", async () => {
+    mockCapabilities();
+    const dryRun = vi.spyOn(api, "dryRunDurableAgentRecipe").mockResolvedValue({
+      recipe_id: "project-advisor",
+      recipe_schema_version: 1,
+      instance: durableFixture(),
+      launch_policy: {
+        instance_id: "durable-1",
+        lifecycle_class: "advisor",
+        session_policy: "reuse_latest_or_create",
+        launch_source_type: "durable_advisor",
+        provider: "anthropic",
+        model: "claude-sonnet-4",
+        runtime_kind: "subprocess",
+        work_root: "/tmp/work",
+        attachment_relation: "primary",
+        wake_payload: { reason: "manual" },
+      },
+      wake_payload: { reason: "manual" },
+      session_policy: "reuse_latest_or_create",
+      would_create_session: true,
+      would_reuse_session: false,
+      ready: true,
+    } as DurableAgentRecipePlan);
+
+    renderWithClient(
+      <StartSurfaceDialog
+        open
+        onOpenChange={() => undefined}
+        workspaceId="workspace-1"
+        projectId={null}
+        onSessionStarted={() => undefined}
+      />,
+    );
+
+    await screen.findByText("Chat with a model");
+    fireEvent.click(screen.getByRole("button", { name: "Recipe" }));
+    fireEvent.change(screen.getByLabelText("Recipe runtime kind"), {
+      target: { value: "subprocess" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Project root" }));
+    fireEvent.click(screen.getByRole("button", { name: /dry run/i }));
+
+    await waitFor(() => {
+      expect(dryRun).toHaveBeenCalledWith(
+        "project-advisor",
+        expect.objectContaining({
+          provider: "anthropic",
+          model: "claude-sonnet-4",
+          runtime_kind: "subprocess",
+          work_root: "/tmp/work",
+        }),
+      );
     });
   });
 });

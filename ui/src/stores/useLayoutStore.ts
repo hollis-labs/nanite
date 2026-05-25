@@ -1,5 +1,5 @@
 import { create } from 'zustand'
-import { persist } from 'zustand/middleware'
+import { createJSONStorage, persist } from 'zustand/middleware'
 import type { Envelope, DynamicCardTab } from '@/lib/types'
 
 type Theme = 'dark' | 'light' | 'system'
@@ -10,6 +10,11 @@ type ChatDrawerState = {
   open: boolean
   height: number
   activeTab: string
+}
+
+type ChatWorkingDrawerSessionState = {
+  drawer: ChatDrawerState
+  cardTabs: DynamicCardTab[]
 }
 
 /**
@@ -110,9 +115,9 @@ interface LayoutState {
   panelEnvelopes: Record<string, Envelope[]>
   /** Push an envelope into a panel's inbox slot. Caller is responsible for
    *  dismiss-machine gating; this just stores. */
-  pushPanelEnvelope: (panelId: string, envelope: Envelope) => void
+  pushPanelEnvelope: (panelId: string, envelope: Envelope, sessionId?: string) => void
   /** Clear all envelopes routed to a single panel (drawer-owned policy). */
-  clearPanelEnvelopes: (panelId: string) => void
+  clearPanelEnvelopes: (panelId: string, sessionId?: string) => void
 
   // C1 (CW-20260428-0012) — chat working drawer default-tab preference.
   // Seeds chatWorkingDrawer.activeTab on rehydrate. Defaults to 'scratchpad'
@@ -124,16 +129,17 @@ interface LayoutState {
   // Chat surface redesign 2026-05-01
   chatPrimaryDrawer: ChatDrawerState
   chatWorkingDrawer: ChatDrawerState
+  chatWorkingDrawerSessions: Record<string, ChatWorkingDrawerSessionState>
   /** FE-only state for transient card-tabs in ChatWorkingDrawer.
    *  Populated from panelEnvelopes['bottom_chat_drawer'] reactively
    *  and augmented with focused/pinned/createdAt metadata. */
   chatWorkingDrawerCardTabs: DynamicCardTab[]
 
   setChatPrimaryDrawer: (patch: Partial<ChatDrawerState>) => void
-  setChatWorkingDrawer: (patch: Partial<ChatDrawerState>) => void
-  appendChatWorkingDrawerCardTab: (tab: DynamicCardTab) => void
-  removeChatWorkingDrawerCardTab: (id: string) => void
-  focusChatWorkingDrawerCardTab: (id: string) => void
+  setChatWorkingDrawer: (patch: Partial<ChatDrawerState>, sessionId?: string) => void
+  appendChatWorkingDrawerCardTab: (tab: DynamicCardTab, sessionId?: string) => void
+  removeChatWorkingDrawerCardTab: (id: string, sessionId?: string) => void
+  focusChatWorkingDrawerCardTab: (id: string, sessionId?: string) => void
 }
 
 function resolveTheme(theme: Theme): 'dark' | 'light' {
@@ -148,6 +154,44 @@ function applyThemeClass(theme: Theme) {
   const resolved = resolveTheme(theme)
   root.classList.remove('dark', 'light')
   root.classList.add(resolved)
+}
+
+function safeLocalStorageGet(key: string): string | null {
+  if (typeof localStorage === 'undefined') return null
+  try {
+    return localStorage.getItem(key)
+  } catch {
+    return null
+  }
+}
+
+function safeLocalStorageSet(key: string, value: string) {
+  if (typeof localStorage === 'undefined') return
+  try {
+    localStorage.setItem(key, value)
+  } catch {
+    // Ignore storage failures in non-browser / restricted contexts.
+  }
+}
+
+function safeLocalStorageRemove(key: string) {
+  if (typeof localStorage === 'undefined') return
+  try {
+    localStorage.removeItem(key)
+  } catch {
+    // Ignore storage failures in non-browser / restricted contexts.
+  }
+}
+
+function panelEnvelopeKey(panelId: string, sessionId?: string): string {
+  return sessionId && panelId === 'bottom_chat_drawer' ? `${panelId}:${sessionId}` : panelId
+}
+
+function emptyWorkingDrawerSession(defaultTab = 'scratchpad'): ChatWorkingDrawerSessionState {
+  return {
+    drawer: { open: false, height: 200, activeTab: defaultTab },
+    cardTabs: [],
+  }
 }
 
 export const useLayoutStore = create<LayoutState>()(
@@ -289,16 +333,20 @@ export const useLayoutStore = create<LayoutState>()(
 
       // A2 v1 panel-envelope inbox (CW-20260428-0008).
       panelEnvelopes: {} as Record<string, Envelope[]>,
-      pushPanelEnvelope: (panelId, envelope) =>
-        set((s) => ({
-          panelEnvelopes: {
-            ...s.panelEnvelopes,
-            [panelId]: [...(s.panelEnvelopes[panelId] ?? []), envelope],
-          },
-        })),
-      clearPanelEnvelopes: (panelId) =>
+      pushPanelEnvelope: (panelId, envelope, sessionId) =>
         set((s) => {
-          const { [panelId]: _drop, ...rest } = s.panelEnvelopes
+          const key = panelEnvelopeKey(panelId, sessionId)
+          return {
+            panelEnvelopes: {
+              ...s.panelEnvelopes,
+              [key]: [...(s.panelEnvelopes[key] ?? []), envelope],
+            },
+          }
+        }),
+      clearPanelEnvelopes: (panelId, sessionId) =>
+        set((s) => {
+          const key = panelEnvelopeKey(panelId, sessionId)
+          const { [key]: _drop, ...rest } = s.panelEnvelopes
           return { panelEnvelopes: rest }
         }),
 
@@ -309,24 +357,69 @@ export const useLayoutStore = create<LayoutState>()(
       // Chat surface redesign 2026-05-01 — new drawer regions.
       chatPrimaryDrawer: { open: false, height: 280, activeTab: 'documents' },
       chatWorkingDrawer: { open: false, height: 200, activeTab: 'scratchpad' },
+      chatWorkingDrawerSessions: {},
       chatWorkingDrawerCardTabs: [],
 
       setChatPrimaryDrawer: (patch) =>
         set((s) => ({ chatPrimaryDrawer: { ...s.chatPrimaryDrawer, ...patch } })),
-      setChatWorkingDrawer: (patch) =>
-        set((s) => ({ chatWorkingDrawer: { ...s.chatWorkingDrawer, ...patch } })),
-      appendChatWorkingDrawerCardTab: (tab) =>
-        set((s) => ({
-          chatWorkingDrawerCardTabs: [...s.chatWorkingDrawerCardTabs, tab],
-          // Newly arriving focused cards become the active tab.
-          chatWorkingDrawer: tab.focused
-            ? { ...s.chatWorkingDrawer, activeTab: tab.id }
-            : s.chatWorkingDrawer,
-        })),
-      removeChatWorkingDrawerCardTab: (id) =>
+      setChatWorkingDrawer: (patch, sessionId) =>
         set((s) => {
+          if (!sessionId) {
+            return { chatWorkingDrawer: { ...s.chatWorkingDrawer, ...patch } }
+          }
+          const current = s.chatWorkingDrawerSessions[sessionId] ?? emptyWorkingDrawerSession(s.defaultDrawerTab)
+          return {
+            chatWorkingDrawerSessions: {
+              ...s.chatWorkingDrawerSessions,
+              [sessionId]: {
+                ...current,
+                drawer: { ...current.drawer, ...patch },
+              },
+            },
+          }
+        }),
+      appendChatWorkingDrawerCardTab: (tab, sessionId) =>
+        set((s) => {
+          if (!sessionId) {
+            return {
+              chatWorkingDrawerCardTabs: [...s.chatWorkingDrawerCardTabs, tab],
+              chatWorkingDrawer: tab.focused
+                ? { ...s.chatWorkingDrawer, activeTab: tab.id }
+                : s.chatWorkingDrawer,
+            }
+          }
+          const current = s.chatWorkingDrawerSessions[sessionId] ?? emptyWorkingDrawerSession(s.defaultDrawerTab)
+          return {
+            chatWorkingDrawerSessions: {
+              ...s.chatWorkingDrawerSessions,
+              [sessionId]: {
+                drawer: tab.focused
+                  ? { ...current.drawer, activeTab: tab.id }
+                  : current.drawer,
+                cardTabs: [...current.cardTabs, tab],
+              },
+            },
+          }
+        }),
+      removeChatWorkingDrawerCardTab: (id, sessionId) =>
+        set((s) => {
+          if (sessionId) {
+            const current = s.chatWorkingDrawerSessions[sessionId] ?? emptyWorkingDrawerSession(s.defaultDrawerTab)
+            const next = current.cardTabs.filter((t) => t.id !== id)
+            const activeWas = current.drawer.activeTab === id
+            return {
+              chatWorkingDrawerSessions: {
+                ...s.chatWorkingDrawerSessions,
+                [sessionId]: {
+                  drawer: activeWas
+                    ? { ...current.drawer, activeTab: s.defaultDrawerTab || 'scratchpad' }
+                    : current.drawer,
+                  cardTabs: next,
+                },
+              },
+            }
+          }
           const next = s.chatWorkingDrawerCardTabs.filter((t) => t.id !== id)
-          // If the active tab was removed, fall back to the last fixed tab.
           const activeWas = s.chatWorkingDrawer.activeTab === id
           return {
             chatWorkingDrawerCardTabs: next,
@@ -335,31 +428,49 @@ export const useLayoutStore = create<LayoutState>()(
               : s.chatWorkingDrawer,
           }
         }),
-      focusChatWorkingDrawerCardTab: (id) =>
-        set((s) => ({
-          chatWorkingDrawer: { ...s.chatWorkingDrawer, activeTab: id },
-        })),
+      focusChatWorkingDrawerCardTab: (id, sessionId) =>
+        set((s) => {
+          if (!sessionId) {
+            return { chatWorkingDrawer: { ...s.chatWorkingDrawer, activeTab: id } }
+          }
+          const current = s.chatWorkingDrawerSessions[sessionId] ?? emptyWorkingDrawerSession(s.defaultDrawerTab)
+          return {
+            chatWorkingDrawerSessions: {
+              ...s.chatWorkingDrawerSessions,
+              [sessionId]: {
+                ...current,
+                drawer: { ...current.drawer, activeTab: id },
+              },
+            },
+          }
+        }),
     }),
     {
       name: 'nanite-layout',
+      storage: createJSONStorage(() => ({
+        getItem: (key) => safeLocalStorageGet(key),
+        setItem: (key, value) => safeLocalStorageSet(key, value),
+        removeItem: (key) => safeLocalStorageRemove(key),
+      })),
       // Transient state must NOT be written to localStorage. partialize
       // returns the subset that gets persisted; everything else stays
       // in-memory only and is reset to its initializer on each session.
       partialize: (state) => {
-        const { panelEnvelopes, chatWorkingDrawerCardTabs, memoryModalOpen, ...persisted } = state
+        const { panelEnvelopes, chatWorkingDrawerCardTabs, chatWorkingDrawerSessions, memoryModalOpen, ...persisted } = state
         // Reference-suppression: the destructure intentionally drops these
         // keys; explicitly read them so TS doesn't flag them as unused.
         void panelEnvelopes
         void chatWorkingDrawerCardTabs
+        void chatWorkingDrawerSessions
         void memoryModalOpen
         return persisted
       },
       migrate: () => {
         // One-time migration from conduit-layout to nanite-layout
-        const old = localStorage.getItem('conduit-layout')
-        if (old && !localStorage.getItem('nanite-layout')) {
-          localStorage.setItem('nanite-layout', old)
-          localStorage.removeItem('conduit-layout')
+        const old = safeLocalStorageGet('conduit-layout')
+        if (old && !safeLocalStorageGet('nanite-layout')) {
+          safeLocalStorageSet('nanite-layout', old)
+          safeLocalStorageRemove('conduit-layout')
         }
       },
       onRehydrateStorage: () => (state) => {
@@ -376,6 +487,7 @@ export const useLayoutStore = create<LayoutState>()(
           // Transient card-tabs do not survive reload (FE-only state).
           // Pinned cards still survive via the DB-backed POST /drawer-cards path.
           state.chatWorkingDrawerCardTabs = []
+          state.chatWorkingDrawerSessions = {}
           // C1: seed the working drawer's active tab from the user's
           // defaultDrawerTab preference. Card tabs are transient and reset
           // above, so we never restore an active card-tab id here.

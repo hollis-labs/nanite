@@ -87,7 +87,7 @@ export function ChatHeader() {
   const configVersion = useAppStore((s) => s.configVersion);
   const { data: allAgents = [] } = useQuery({
     queryKey: ["agents", configVersion],
-    queryFn: api.listAgents,
+    queryFn: () => api.listAgents(),
   });
 
   // B1 (CW-20260428-0009): session-level Mode chip + dropdown.

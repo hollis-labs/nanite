@@ -49,6 +49,9 @@ export interface ChatSessionState {
   activeModel: string;
   activeEffort: string;
 
+  // Composer
+  composerDraft: string;
+
   // Already session-keyed; folded into the slice for shape consistency
   toolCalls: ToolCall[];
   pluginEnvelopes: PluginEnvelopeItem[];
@@ -82,6 +85,7 @@ export function emptyChatSessionState(now: number = Date.now()): ChatSessionStat
     activeMode: DEFAULT_ACTIVE_MODE,
     activeModel: DEFAULT_ACTIVE_MODEL,
     activeEffort: DEFAULT_ACTIVE_EFFORT,
+    composerDraft: "",
     toolCalls: [],
     pluginEnvelopes: [],
     toolCallsLastActivity: now,

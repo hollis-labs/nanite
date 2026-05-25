@@ -324,6 +324,12 @@ describe("DurableAgentAdminPanel", () => {
   it("wires lifecycle actions and opens returned start session", async () => {
     const agent = durableAgent();
     mockBaseApi(agent);
+    useAppStore.setState({
+      activeWorkspaceId: "workspace-1",
+      activeProjectId: "project-1",
+      activeSessionId: null,
+      configVersion: 0,
+    });
     const eventsSpy = vi.mocked(api.listDurableAgentEvents);
     const startSpy = vi.spyOn(api, "startDurableAgent").mockResolvedValue({
       instance: durableAgent({
@@ -357,7 +363,13 @@ describe("DurableAgentAdminPanel", () => {
     fireEvent.click(
       await screen.findByRole("button", { name: "Start durable agent" }),
     );
-    await waitFor(() => expect(startSpy).toHaveBeenCalledWith("durable-1", {}));
+    await waitFor(() =>
+      expect(startSpy).toHaveBeenCalledWith("durable-1", {
+        workspace_id: "workspace-1",
+        project_id: "project-1",
+        wake_payload: { reason: "manual" },
+      }),
+    );
     await waitFor(() => expect(eventsSpy.mock.calls.length).toBeGreaterThan(1));
     await waitFor(() =>
       expect(useAppStore.getState().activeSessionId).toBe("session-2"),
@@ -369,7 +381,11 @@ describe("DurableAgentAdminPanel", () => {
       screen.getByRole("button", { name: "Resume durable agent" }),
     );
     await waitFor(() =>
-      expect(resumeSpy).toHaveBeenCalledWith("durable-1", {}),
+      expect(resumeSpy).toHaveBeenCalledWith("durable-1", {
+        workspace_id: "workspace-1",
+        project_id: "project-1",
+        wake_payload: { reason: "lifecycle_resume" },
+      }),
     );
 
     fireEvent.click(
@@ -386,6 +402,45 @@ describe("DurableAgentAdminPanel", () => {
       screen.getByRole("button", { name: "Archive durable agent" }),
     );
     await waitFor(() => expect(archiveSpy).toHaveBeenCalledWith("durable-1"));
+  });
+
+  it("renders lifecycle mutation errors inline", async () => {
+    useAppStore.setState({
+      activeWorkspaceId: "workspace-1",
+      activeProjectId: "project-1",
+      activeSessionId: null,
+      configVersion: 0,
+    });
+    mockBaseApi(durableAgent({ current_session_id: "" }));
+    vi.spyOn(api, "resumeDurableAgent").mockRejectedValue(
+      new Error("durable agent has no resumable attached session"),
+    );
+
+    renderWithClient(<DurableAgentAdminPanel />);
+
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Resume durable agent" }),
+    );
+
+    expect(
+      await screen.findByText("durable agent has no resumable attached session"),
+    ).toBeTruthy();
+  });
+
+  it("requires an active workspace before start", async () => {
+    mockBaseApi();
+    const startSpy = vi.spyOn(api, "startDurableAgent");
+
+    renderWithClient(<DurableAgentAdminPanel />);
+
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Start durable agent" }),
+    );
+
+    expect(
+      await screen.findByText("Choose a workspace before starting a durable agent."),
+    ).toBeTruthy();
+    expect(startSpy).not.toHaveBeenCalled();
   });
 
   it("opens attached sessions from the sessions table", async () => {

@@ -36,7 +36,7 @@ func TestListProviders_NoBootCatalog_OnlyDBRows(t *testing.T) {
 	if err := json.NewDecoder(w.Body).Decode(&got); err != nil {
 		t.Fatalf("decode: %v", err)
 	}
-	// Seeded rows (anthropic + pty-*) populated via SeedProviders.
+	// Seeded API rows populated via SeedProviders.
 	// Confirm none of them carry a boot-profile-namespaced provider
 	// type — that's the "no behavior change when no catalog
 	// configured" acceptance criterion. Coexistence is covered in
@@ -68,29 +68,24 @@ func TestListProviders_BootCatalogConfigured_CoexistsWithDBRows(t *testing.T) {
 		t.Fatalf("decode: %v", err)
 	}
 
-	// Coexistence: at least one DB-seeded API provider AND at least
-	// one DB-seeded CLI provider AND the boot-profile provider must
-	// all appear together. Boot-profile entries are additive, not a
-	// replacement; we pin each tier so a future regression that
-	// drops one accidentally would surface here.
-	//
-	// Seed.go canonical CLI rows use bare provider_type values like
-	// "pty" (Claude CLI), "pty-codex", etc. The dropdown-side
-	// "pty-claude" alias is a NormalizeCLIProvider concern (0045)
-	// and is intentionally NOT a DB row.
-	var sawPtyCLI, sawBootBackend, sawAnthropic bool
+	// Coexistence: DB-seeded API providers and boot-profile providers
+	// must appear together. PTY/CLI DB providers are intentionally
+	// hidden from user-facing provider lists; CLI launches are exposed
+	// via boot profiles instead.
+	var sawHiddenPTY, sawBootBackend, sawAnthropic bool
 	for _, p := range got {
+		if isHiddenPTYProviderType(p.ProviderType) {
+			sawHiddenPTY = true
+		}
 		switch p.ProviderType {
-		case "pty":
-			sawPtyCLI = true
 		case "anthropic":
 			sawAnthropic = true
 		case bootprofile.EncodeProviderID("nanite.backend.main"):
 			sawBootBackend = true
 		}
 	}
-	if !sawPtyCLI {
-		t.Error("seeded Claude CLI (pty) row missing — boot-profile entries must be additive, not replace DB rows")
+	if sawHiddenPTY {
+		t.Error("hidden PTY provider leaked into /api/providers")
 	}
 	if !sawAnthropic {
 		t.Error("seeded anthropic row missing")
@@ -114,23 +109,20 @@ func TestListModels_BootCatalogConfigured_SurfacesProfileModelRow(t *testing.T) 
 		t.Fatalf("decode: %v", err)
 	}
 	encoded := bootprofile.EncodeProviderID("nanite.backend.main")
-	var sawBootModel, sawCLIModel bool
+	var sawBootModel, sawHiddenPTYModel bool
 	for _, m := range got {
 		if m.ModelID == encoded && m.ProviderType == encoded {
 			sawBootModel = true
 		}
-		// claude-cli is the canonical seeded CLI model (see
-		// store.Seed); its presence proves coexistence at the
-		// model layer, not just the provider layer.
-		if m.ModelID == "claude-cli" {
-			sawCLIModel = true
+		if isHiddenPTYProviderType(m.ProviderType) || isHiddenPTYProviderType(m.ProviderID) {
+			sawHiddenPTYModel = true
 		}
 	}
 	if !sawBootModel {
 		t.Error("boot-profile model row missing for nanite.backend.main")
 	}
-	if !sawCLIModel {
-		t.Error("seeded claude-cli model missing — boot-profile entries must coexist with the CLI seed rows")
+	if sawHiddenPTYModel {
+		t.Error("hidden PTY model leaked into /api/models")
 	}
 }
 
@@ -182,13 +174,13 @@ func TestListProviders_BootProfileLabelIncludesDisambiguator(t *testing.T) {
 		// The fixture's profile carries display_name="Nanite —
 		// Backend" and launch.ui_label="Nanite (Claude PTY)".
 		// bootprofile.Compile prefers ui_label, so the dropdown
-		// row should derive from that. The suffix " (boot profile)"
-		// must be present so the operator can tell the row apart
-		// from any same-named DB row.
+		// row should derive from that directly. CLI launches are now
+		// user-facing concepts, so the label should not carry an
+		// implementation suffix.
 		if p.Name == "" {
 			t.Error("boot-profile provider name is empty")
 		}
-		if want := "Nanite (Claude PTY) (boot profile)"; p.Name != want {
+		if want := "Nanite (Claude PTY)"; p.Name != want {
 			t.Errorf("provider name = %q, want %q", p.Name, want)
 		}
 		return

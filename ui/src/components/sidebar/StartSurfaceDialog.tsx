@@ -96,6 +96,12 @@ export function StartSurfaceDialog({
     () => filterModelsForProvider(caps?.models ?? [], provider),
     [caps, provider],
   );
+  const recipeProviders = useMemo(() => filterChatProviders(caps), [caps]);
+  const recipeModels = useMemo(
+    () => filterModelsForProvider(caps?.models ?? [], recipeProvider),
+    [caps, recipeProvider],
+  );
+  const recipeRuntimeKinds = caps?.runtime_kinds ?? [];
 
   useEffect(() => {
     if (!open || !prefill) return;
@@ -138,10 +144,24 @@ export function StartSurfaceDialog({
     const recipe = selectedRecipe(caps, recipeId);
     if (!recipe) return;
     setRecipeInputValues(initialRecipeInputValues(recipe));
-    setRecipeProvider((current) => current || recipe.provider || "");
-    setRecipeModel((current) => current || recipe.model || "");
-    setRecipeRuntimeKind((current) => current || String(recipe.runtime_kind || ""));
-  }, [caps, recipeId]);
+    setRecipeProvider((current) => current || recipe.provider || recipeProviders[0]?.id || "");
+    setRecipeRuntimeKind(
+      (current) => current || String(recipe.runtime_kind || recipeRuntimeKinds[0]?.value || ""),
+    );
+  }, [caps, recipeId, recipeProviders, recipeRuntimeKinds]);
+
+  useEffect(() => {
+    if (!caps || !recipeProvider) return;
+    const models = filterModelsForProvider(caps.models, recipeProvider);
+    setRecipeModel((current) => {
+      if (current && models.some((candidate) => candidate.model_id === current)) return current;
+      const recipeDefault = selectedRecipe(caps, recipeId)?.model;
+      if (recipeDefault && models.some((candidate) => candidate.model_id === recipeDefault)) {
+        return recipeDefault;
+      }
+      return models[0]?.model_id || "";
+    });
+  }, [caps, recipeId, recipeProvider]);
 
   useEffect(() => {
     if (!caps || !provider) return;
@@ -294,8 +314,8 @@ export function StartSurfaceDialog({
           </DialogDescription>
         </DialogHeader>
 
-        <div className="grid min-h-[420px] grid-cols-[148px_minmax(0,1fr)]">
-          <div className="border-r border-border-subtle bg-bg px-2 py-3">
+        <div className="grid min-h-[420px] min-w-0 grid-cols-[148px_minmax(0,1fr)]">
+          <div className="min-h-0 border-r border-border-subtle bg-bg px-2 py-3">
             {PATHS.map((item) => {
               const Icon = item.icon;
               return (
@@ -320,7 +340,7 @@ export function StartSurfaceDialog({
             })}
           </div>
 
-          <div className="min-w-0 overflow-y-auto px-5 py-4">
+          <div className="no-scrollbar min-h-0 min-w-0 overflow-y-auto px-5 py-4">
             {capabilities.isLoading ? (
               <div className="text-[12px] text-fg-muted">Loading start options...</div>
             ) : capabilities.isError ? (
@@ -367,6 +387,9 @@ export function StartSurfaceDialog({
                 {path === "recipe" && (
                   <RecipeStartPane
                     capabilities={caps}
+                    providers={recipeProviders}
+                    models={recipeModels}
+                    runtimeKinds={recipeRuntimeKinds}
                     recipeId={recipeId}
                     profileId={recipeProfileId}
                     name={recipeName}
@@ -612,6 +635,9 @@ function DurableStartPane({
 
 function RecipeStartPane({
   capabilities,
+  providers,
+  models,
+  runtimeKinds,
   recipeId,
   profileId,
   name,
@@ -638,6 +664,9 @@ function RecipeStartPane({
   pending,
 }: {
   capabilities?: StartSurfaceCapabilitiesResponse;
+  providers: ProviderConfig[];
+  models: ModelRecord[];
+  runtimeKinds: StartSurfaceCapabilitiesResponse["runtime_kinds"];
   recipeId: string;
   profileId: string;
   name: string;
@@ -665,6 +694,7 @@ function RecipeStartPane({
 }) {
   const recipes = capabilities?.recipes ?? [];
   const profiles = capabilities?.profiles ?? [];
+  const workRootHints = capabilities?.work_root_hints ?? [];
   const recipe = selectedRecipe(capabilities, recipeId);
 
   return (
@@ -721,31 +751,66 @@ function RecipeStartPane({
       </Field>
       <div className="grid grid-cols-3 gap-3">
         <Field label="Provider">
-          <Input
+          <NativeSelect
+            aria-label="Recipe provider"
             value={provider}
-            onChange={(event) => setProvider(event.target.value)}
-            placeholder={recipe?.provider || "anthropic"}
-          />
+            onChange={setProvider}
+            disabled={providers.length === 0}
+          >
+            {provider && !providers.some((item) => item.id === provider) ? (
+              <option value={provider}>{provider}</option>
+            ) : null}
+            {providers.length === 0 ? <option value="">No providers available</option> : null}
+            {providers.map((item) => (
+              <option key={item.id} value={item.id}>
+                {item.name || item.id}
+              </option>
+            ))}
+          </NativeSelect>
         </Field>
         <Field label="Model">
-          <Input
+          <NativeSelect
+            aria-label="Recipe model"
             value={model}
-            onChange={(event) => setModel(event.target.value)}
-            placeholder={String(recipe?.model || "")}
-          />
+            onChange={setModel}
+            disabled={models.length === 0}
+          >
+            {model && !models.some((item) => item.model_id === model) ? (
+              <option value={model}>{model}</option>
+            ) : null}
+            {models.length === 0 ? <option value="">No models available</option> : null}
+            {models.map((item) => (
+              <option key={item.id} value={item.model_id}>
+                {item.display_name || item.model_id}
+              </option>
+            ))}
+          </NativeSelect>
         </Field>
         <Field label="Runtime kind">
-          <Input
+          <NativeSelect
+            aria-label="Recipe runtime kind"
             value={runtimeKind}
-            onChange={(event) => setRuntimeKind(event.target.value)}
-            placeholder={String(recipe?.runtime_kind || "api")}
-          />
+            onChange={setRuntimeKind}
+            disabled={runtimeKinds.length === 0}
+          >
+            {runtimeKind && !runtimeKinds.some((item) => item.value === runtimeKind) ? (
+              <option value={runtimeKind}>{runtimeKind}</option>
+            ) : null}
+            {runtimeKinds.length === 0 ? <option value="">No runtime kinds available</option> : null}
+            {runtimeKinds.map((item) => (
+              <option key={item.value} value={item.value}>
+                {item.label || item.value}
+              </option>
+            ))}
+          </NativeSelect>
         </Field>
       </div>
       <Field label="Work root">
-        <Input
+        <PathInput
+          ariaLabel="Recipe work root"
           value={workRoot}
-          onChange={(event) => setWorkRoot(event.target.value)}
+          onChange={setWorkRoot}
+          hints={workRootHints}
           placeholder="Optional working directory"
         />
       </Field>
@@ -810,6 +875,56 @@ function RecipeStartPane({
         </div>
       )}
     </section>
+  );
+}
+
+function PathInput({
+  value,
+  onChange,
+  hints,
+  placeholder,
+  ariaLabel,
+}: {
+  value: string;
+  onChange: (value: string) => void;
+  hints: StartSurfaceCapabilitiesResponse["work_root_hints"];
+  placeholder?: string;
+  ariaLabel: string;
+}) {
+  const datalistId = "start-surface-work-root-hints";
+  return (
+    <>
+      <Input
+        list={hints.length > 0 ? datalistId : undefined}
+        aria-label={ariaLabel}
+        value={value}
+        onChange={(event) => onChange(event.target.value)}
+        placeholder={placeholder}
+      />
+      {hints.length > 0 ? (
+        <datalist id={datalistId}>
+          {hints.map((hint) => (
+            <option key={hint.id} value={hint.path || ""}>
+              {hint.label}
+            </option>
+          ))}
+        </datalist>
+      ) : null}
+      {hints.length > 0 ? (
+        <div className="mt-2 flex flex-wrap gap-1.5">
+          {hints.map((hint) => (
+            <button
+              key={hint.id}
+              type="button"
+              onClick={() => onChange(hint.path || "")}
+              className="rounded-[6px] border border-border-subtle bg-bg px-2 py-1 text-[11px] text-fg-muted transition-colors hover:bg-surface hover:text-fg-secondary"
+            >
+              {hint.label}
+            </button>
+          ))}
+        </div>
+      ) : null}
+    </>
   );
 }
 

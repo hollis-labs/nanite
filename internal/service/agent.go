@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"sync"
 
 	"github.com/hollis-labs/nanite/internal/agent"
 	"github.com/hollis-labs/nanite/internal/agent/override"
@@ -44,8 +45,26 @@ type agentServiceImpl struct {
 	writers   AgentWriter
 	settings  SettingsStore
 	events    EventEmitter
-	fileDefs  []*agent.Definition // file-based agent definitions, priority-ordered
 	overrides OverrideReader
+
+	// mu guards fileDefs. The slice was historically immutable after
+	// construction, but the managed-agent write contract reloads a single
+	// def in place after a GUI/API/CLI edit so changes are visible without a
+	// restart (AgentConfigService → ReloadFileAgent / RemoveFileAgent).
+	mu       sync.RWMutex
+	fileDefs []*agent.Definition // file-based agent definitions, priority-ordered
+}
+
+// AgentRegistryReloader lets the managed-agent write path refresh the live
+// in-memory registry after a file/DB write so reads reflect the change
+// without a restart. Implemented by agentServiceImpl.
+type AgentRegistryReloader interface {
+	// ReloadFileAgent replaces (or appends) the in-memory definition for
+	// def.Slug with def. def is expected to already carry its resolved
+	// Source/SourceRef/ID.
+	ReloadFileAgent(def *agent.Definition)
+	// RemoveFileAgent drops the in-memory definition for slug, if present.
+	RemoveFileAgent(slug string)
 }
 
 // AgentServiceConfig holds dependencies for constructing an AgentService.
@@ -71,34 +90,41 @@ func NewAgentService(cfg AgentServiceConfig) AgentService {
 }
 
 func (s *agentServiceImpl) Get(_ context.Context, id string) (*store.AgentProfile, error) {
-	// Check file-based agents first.
+	// Legacy "file-<slug>" identity: resolve through the in-memory def so the
+	// deterministic runtime identity keeps working.
 	if agent.IsFileBasedID(id) {
 		slug := agent.SlugFromFileID(id)
-		for _, d := range s.fileDefs {
-			if d.Slug == slug {
-				p := d.ToProfile()
-				return p, nil
-			}
+		if d := s.findDefBySlug(slug); d != nil {
+			return d.ToProfile(), nil
 		}
+	}
+	// Stamped managed agents carry a real UUID == their DB row PK; an
+	// in-memory def (if loaded) wins so GUI/CLI edits reloaded into the
+	// registry are visible without a restart, otherwise fall through to DB.
+	if d := s.findDefByID(id); d != nil {
+		return d.ToProfile(), nil
 	}
 	return s.agents.GetAgent(id)
 }
 
 func (s *agentServiceImpl) GetBySlug(_ context.Context, slug string) (*store.AgentProfile, error) {
 	// File-based agents take priority.
-	for _, d := range s.fileDefs {
-		if d.Slug == slug {
-			return d.ToProfile(), nil
-		}
+	if d := s.findDefBySlug(slug); d != nil {
+		return d.ToProfile(), nil
 	}
 	return s.agents.GetAgentBySlug(slug)
 }
 
 func (s *agentServiceImpl) List(_ context.Context) ([]store.AgentProfile, error) {
-	// Start with file-based agents.
-	seen := make(map[string]bool, len(s.fileDefs))
+	// Start with file-based agents (snapshot under lock).
+	s.mu.RLock()
+	defs := make([]*agent.Definition, len(s.fileDefs))
+	copy(defs, s.fileDefs)
+	s.mu.RUnlock()
+
+	seen := make(map[string]bool, len(defs))
 	var result []store.AgentProfile
-	for _, d := range s.fileDefs {
+	for _, d := range defs {
 		result = append(result, *d.ToProfile())
 		seen[d.Slug] = true
 	}
@@ -116,6 +142,69 @@ func (s *agentServiceImpl) List(_ context.Context) ([]store.AgentProfile, error)
 	return result, nil
 }
 
+// findDefBySlug returns the in-memory definition for slug, or nil.
+func (s *agentServiceImpl) findDefBySlug(slug string) *agent.Definition {
+	if slug == "" {
+		return nil
+	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	for _, d := range s.fileDefs {
+		if d.Slug == slug {
+			return d
+		}
+	}
+	return nil
+}
+
+// findDefByID returns the in-memory definition whose canonical identity
+// matches id (the stamped UUID for managed agents), or nil.
+func (s *agentServiceImpl) findDefByID(id string) *agent.Definition {
+	if id == "" {
+		return nil
+	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	for _, d := range s.fileDefs {
+		if d.CanonicalID() == id {
+			return d
+		}
+	}
+	return nil
+}
+
+// ReloadFileAgent implements AgentRegistryReloader.
+func (s *agentServiceImpl) ReloadFileAgent(def *agent.Definition) {
+	if def == nil || def.Slug == "" {
+		return
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for i, d := range s.fileDefs {
+		if d.Slug == def.Slug {
+			s.fileDefs[i] = def
+			return
+		}
+	}
+	s.fileDefs = append(s.fileDefs, def)
+}
+
+// RemoveFileAgent implements AgentRegistryReloader.
+func (s *agentServiceImpl) RemoveFileAgent(slug string) {
+	if slug == "" {
+		return
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	out := s.fileDefs[:0]
+	for _, d := range s.fileDefs {
+		if d.Slug != slug {
+			out = append(out, d)
+		}
+	}
+	s.fileDefs = out
+}
+
 func (s *agentServiceImpl) Create(_ context.Context, agent *store.AgentProfile) error {
 	return s.writers.CreateAgent(agent)
 }
@@ -130,12 +219,14 @@ func (s *agentServiceImpl) Delete(_ context.Context, id string) error {
 
 func (s *agentServiceImpl) ListModes(_ context.Context, agentID string) ([]store.AgentMode, error) {
 	if agent.IsFileBasedID(agentID) {
-		slug := agent.SlugFromFileID(agentID)
-		for _, d := range s.fileDefs {
-			if d.Slug == slug {
-				return d.ToModes(), nil
-			}
+		if d := s.findDefBySlug(agent.SlugFromFileID(agentID)); d != nil {
+			return d.ToModes(), nil
 		}
+	}
+	// Stamped managed agents carry a UUID id; modes live in the file def, not
+	// the DB. Prefer the def's inline modes, fall back to DB-stored modes.
+	if d := s.findDefByID(agentID); d != nil {
+		return d.ToModes(), nil
 	}
 	return s.agents.ListAgentModes(agentID)
 }
@@ -230,18 +321,19 @@ func (s *agentServiceImpl) resolveBinding(sessionID string) (agentID, modeName s
 
 // resolveMode loads a mode for an agent, checking file-based definitions first.
 func (s *agentServiceImpl) resolveMode(_ context.Context, agentID, modeName string) (*store.AgentMode, error) {
+	var def *agent.Definition
 	if agent.IsFileBasedID(agentID) {
-		slug := agent.SlugFromFileID(agentID)
-		for _, d := range s.fileDefs {
-			if d.Slug == slug {
-				for _, m := range d.ToModes() {
-					if m.Slug == modeName {
-						return &m, nil
-					}
-				}
-				return nil, fmt.Errorf("mode %q not found for file agent %q", modeName, slug)
+		def = s.findDefBySlug(agent.SlugFromFileID(agentID))
+	} else {
+		def = s.findDefByID(agentID)
+	}
+	if def != nil {
+		for _, m := range def.ToModes() {
+			if m.Slug == modeName {
+				return &m, nil
 			}
 		}
+		return nil, fmt.Errorf("mode %q not found for file agent %q", modeName, def.Slug)
 	}
 	return s.agents.GetAgentMode(agentID, modeName)
 }

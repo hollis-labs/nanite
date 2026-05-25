@@ -1,0 +1,11 @@
+name: Ideation Partner
+slug: ideation-partner
+profile_slug: ideation-partner
+lifecycle_class: advisor
+provider: anthropic
+model: claude-sonnet-4
+runtime_kind: api
+launch_source_type: durable_advisor
+metadata:
+  scope: portfolio
+  owner: hollis-labs

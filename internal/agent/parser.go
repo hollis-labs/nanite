@@ -15,6 +15,15 @@ import (
 // after the closing --- becomes SystemPrompt.
 type Definition struct {
 	// Identity
+	// ID is the durable agent identity stamped into the managed file's
+	// frontmatter (`id:`). When present it is the canonical primary key the
+	// DB projection and all FK children (reflexes, known tools/skills,
+	// procedures, boot plans) key off — so the slug can change freely
+	// without orphaning anything. Empty for embedded internal profiles and
+	// freshly hand-dropped/imported files; the boot reconcile pass mints or
+	// adopts a UUID and writes it back to writable managed files. See
+	// internal/service AgentConfigService + ingest reconciliation.
+	ID          string   `yaml:"id,omitempty"`
 	Name        string   `yaml:"name"`
 	Slug        string   `yaml:"slug"`
 	Description string   `yaml:"description"`
@@ -51,12 +60,41 @@ type Definition struct {
 	// Added by CW-20260512-0107 (SP-20260512-0008 W2A).
 	ParentDispatchAllowlist []string `yaml:"parentDispatchAllowlist,omitempty"`
 
+	// RoleTools — pre-seed list of tool names for agent_known_tools.
+	RoleTools []string `yaml:"roleTools,omitempty"`
+
+	// RoleSkills — pre-seed list of skill slugs for agent_known_skills.
+	RoleSkills []string `yaml:"roleSkills,omitempty"`
+
+	// ContextPolicy declares how the agent's live context should cycle.
+	// It is intentionally open-shaped so project-managed agents can carry
+	// richer policy keys without a Go release for each new field.
+	ContextPolicy map[string]any `yaml:"contextPolicy,omitempty"`
+
+	// Durable marks the profile as durable/file-managed intent.
+	Durable bool `yaml:"durable,omitempty"`
+
+	// ActivationMode, Class, and DefaultState mirror the multi-agent columns.
+	ActivationMode string `yaml:"activationMode,omitempty"`
+	Class          string `yaml:"class,omitempty"`
+	DefaultState   string `yaml:"defaultState,omitempty"`
+
+	// Procedures declares file-SOT procedures to upsert during ingest.
+	Procedures []ProcedureDefinition `yaml:"procedures,omitempty"`
+
 	// SystemPrompt is the markdown body below the YAML frontmatter.
 	SystemPrompt string `yaml:"-"`
 
 	// Metadata set by the loader, not parsed from file.
 	Source    string `yaml:"-"` // "builtin", "cli", "project", "user", "plugin", "nanite", "claude"
 	SourceRef string `yaml:"-"` // file path or "embedded:default.md"
+}
+
+type ProcedureDefinition struct {
+	Name     string `yaml:"name"`
+	Body     string `yaml:"body,omitempty"`
+	BodyFile string `yaml:"body_file,omitempty"`
+	Scope    string `yaml:"scope,omitempty"`
 }
 
 // ModeDefinition is an inline mode within an agent file.
@@ -143,7 +181,24 @@ func ParseMDFile(path string) (*Definition, error) {
 	}
 
 	def.SourceRef = path
+	resolveProcedureBodyFiles(def, filepath.Dir(path), os.ReadFile)
 	return def, nil
+}
+
+func resolveProcedureBodyFiles(def *Definition, baseDir string, readFile func(string) ([]byte, error)) {
+	for i := range def.Procedures {
+		p := &def.Procedures[i]
+		if p.BodyFile == "" {
+			continue
+		}
+		bodyPath := filepath.Join(baseDir, p.BodyFile)
+		body, err := readFile(bodyPath)
+		if err != nil {
+			continue
+		}
+		p.Body = string(body)
+		p.BodyFile = ""
+	}
 }
 
 // SlugFromFilename derives a slug from a markdown filename.

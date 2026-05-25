@@ -116,7 +116,7 @@ export function AgentBootPlanPanel({
     <div className="space-y-4">
       {isReadOnly ? (
         <div className="rounded-[10px] border border-border-subtle bg-surface/30 px-3 py-3 text-xs text-fg-muted">
-          This agent is file-backed and read-only. You can inspect the boot plan but mutations stay disabled.
+          This agent is read-only here. You can inspect the boot plan but mutations stay disabled.
         </div>
       ) : null}
 

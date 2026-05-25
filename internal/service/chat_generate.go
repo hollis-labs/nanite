@@ -556,6 +556,13 @@ func (s *chatServiceImpl) generateResponse(ctx context.Context, sessionID, assis
 		}
 	}
 
+	// FU-30: evaluate DB-backed agent reflexes for this turn and inject any
+	// staged actions (e.g. inject_reminder) into SlotUserContext. nil-safe via
+	// the engine guard inside evaluateAndInjectReflexes.
+	if actions := s.evaluateAndInjectReflexes(ctx, session, agent, slotResult); len(actions) > 0 {
+		systemPrompt = slotResult.SystemPrompt
+	}
+
 	// I1 (CW-20260426-0004): inspector — allocate a turn ID and record slots.
 	// turnID is carried forward through the rest of generateResponse so
 	// broker/tool producers can append to the same snapshot.

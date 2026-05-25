@@ -426,7 +426,7 @@ describe("Phase 26 boot plan UI", () => {
     renderWithClient(<AgentBootPlanPanel agent={agent({ source: "internal" })} isReadOnly />);
 
     expect(await screen.findByText("Task Brief")).toBeTruthy();
-    expect(screen.getByText(/file-backed and read-only/i)).toBeTruthy();
+    expect(screen.getByText(/read-only here/i)).toBeTruthy();
     expect((screen.getByRole("button", { name: "Save Boot Plan" }) as HTMLButtonElement).disabled).toBe(true);
     expect((screen.getByRole("button", { name: "Add plant item" }) as HTMLButtonElement).disabled).toBe(true);
   });

@@ -7,7 +7,7 @@ provider: codex
 
 workdir: /tmp/nanite-codex-smoke-workdir
 
-ui_label: "Codex CLI (smoke)"
+ui_label: "Codex (cli)"
 
 # Env values overlay the host env at agent.Boot time (precedence is
 # host < profile < Options.Env, so spec values beat host env).

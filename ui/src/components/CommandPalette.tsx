@@ -63,7 +63,7 @@ export function CommandPalette({ open, onOpenChange, onNewSession }: CommandPale
 
   const { data: agents = [] } = useQuery({
     queryKey: ['agents'],
-    queryFn: api.listAgents,
+    queryFn: () => api.listAgents(),
     enabled: open && subPage === 'agents',
   })
 

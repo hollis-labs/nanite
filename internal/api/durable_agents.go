@@ -1,6 +1,7 @@
 package api
 
 import (
+	"encoding/json"
 	"errors"
 	"net/http"
 	"strconv"
@@ -34,11 +35,45 @@ func (a *API) handleCreateDurableAgent(w http.ResponseWriter, r *http.Request) {
 		WorkRoot:         req.WorkRoot,
 		MetadataJSON:     req.MetadataJSON,
 	}
-	if err := a.Services.DurableAgents.Create(r.Context(), inst); err != nil {
+	saved, err := a.saveManagedDurableInstance(inst, false)
+	if err != nil {
 		a.errorResp(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	a.jsonResp(w, http.StatusCreated, inst)
+	a.jsonResp(w, http.StatusCreated, saved)
+}
+
+func (a *API) saveManagedDurableInstance(inst *store.DurableAgentInstance, archived bool) (*store.DurableAgentInstance, error) {
+	profile, err := a.Services.Store.GetAgent(inst.ProfileID)
+	if err != nil {
+		return nil, err
+	}
+	cfg := service.ManagedDurableAgentConfig{
+		Name:             inst.Name,
+		Slug:             inst.Slug,
+		ProfileSlug:      profile.Slug,
+		LifecycleClass:   inst.LifecycleClass,
+		Provider:         inst.Provider,
+		Model:            inst.Model,
+		RuntimeKind:      inst.RuntimeKind,
+		LaunchSourceType: inst.LaunchSourceType,
+		LaunchSourceID:   inst.LaunchSourceID,
+		WorkRoot:         inst.WorkRoot,
+		Metadata:         durableMetadataMap(inst.MetadataJSON),
+		Archived:         archived,
+	}
+	return service.SaveManagedDurableAgentConfig(a.Services.Store, a.Services.ManagedConfigRoot, cfg)
+}
+
+func durableMetadataMap(raw string) map[string]string {
+	if raw == "" {
+		return nil
+	}
+	var out map[string]string
+	if err := json.Unmarshal([]byte(raw), &out); err != nil {
+		return nil
+	}
+	return out
 }
 
 func (a *API) handleListDurableAgents(w http.ResponseWriter, r *http.Request) {
@@ -70,25 +105,7 @@ func (a *API) handleUpdateDurableAgent(w http.ResponseWriter, r *http.Request) {
 		a.errorResp(w, http.StatusBadRequest, "invalid JSON: "+err.Error())
 		return
 	}
-	inst, err := a.Services.DurableAgents.Update(r.Context(), r.PathValue("id"), store.DurableAgentInstanceUpdate{
-		Name:         req.Name,
-		Slug:         req.Slug,
-		WorkRoot:     req.WorkRoot,
-		MetadataJSON: req.MetadataJSON,
-	})
-	if errors.Is(err, store.ErrDurableAgentInstanceNotFound) {
-		a.errorResp(w, http.StatusNotFound, "durable agent not found")
-		return
-	}
-	if err != nil {
-		a.errorResp(w, http.StatusBadRequest, err.Error())
-		return
-	}
-	a.jsonResp(w, http.StatusOK, inst)
-}
-
-func (a *API) handleArchiveDurableAgent(w http.ResponseWriter, r *http.Request) {
-	inst, err := a.Services.DurableAgents.Archive(r.Context(), r.PathValue("id"))
+	existing, err := a.Services.DurableAgents.Get(r.Context(), r.PathValue("id"))
 	if errors.Is(err, store.ErrDurableAgentInstanceNotFound) {
 		a.errorResp(w, http.StatusNotFound, "durable agent not found")
 		return
@@ -97,7 +114,46 @@ func (a *API) handleArchiveDurableAgent(w http.ResponseWriter, r *http.Request) 
 		a.errorResp(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	a.jsonResp(w, http.StatusOK, inst)
+	if req.Name != nil {
+		existing.Name = *req.Name
+	}
+	if req.Slug != nil {
+		existing.Slug = *req.Slug
+	}
+	if req.WorkRoot != nil {
+		existing.WorkRoot = *req.WorkRoot
+	}
+	if req.MetadataJSON != nil {
+		existing.MetadataJSON = *req.MetadataJSON
+	}
+	saved, err := a.saveManagedDurableInstance(existing, false)
+	if errors.Is(err, store.ErrDurableAgentInstanceNotFound) {
+		a.errorResp(w, http.StatusNotFound, "durable agent not found")
+		return
+	}
+	if err != nil {
+		a.errorResp(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	a.jsonResp(w, http.StatusOK, saved)
+}
+
+func (a *API) handleArchiveDurableAgent(w http.ResponseWriter, r *http.Request) {
+	existing, err := a.Services.DurableAgents.Get(r.Context(), r.PathValue("id"))
+	if errors.Is(err, store.ErrDurableAgentInstanceNotFound) {
+		a.errorResp(w, http.StatusNotFound, "durable agent not found")
+		return
+	}
+	if err != nil {
+		a.errorResp(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	archived, err := a.saveManagedDurableInstance(existing, true)
+	if err != nil {
+		a.errorResp(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	a.jsonResp(w, http.StatusOK, archived)
 }
 
 func (a *API) handleListDurableAgentEvents(w http.ResponseWriter, r *http.Request) {

@@ -203,4 +203,10 @@ const (
 	FilterAssistantResponse = "assistant_response" // string → string
 	FilterContextWindow     = "context_window"     // []llmtypes.ChatMessage → []llmtypes.ChatMessage
 	FilterEnvelopeData      = "envelope_data"      // map[string]interface{} → map[string]interface{}
+	// Reflex engine filters (FU-30): plugins may rewrite the collected
+	// reflex state before evaluation and the staged action before it is
+	// applied. Consumed by internal/agent/reflexes.Engine via the host's
+	// ApplyFilter. nil/unfiltered passthrough is the default.
+	FilterReflexState  = "reflex_state"  // reflexes.State → reflexes.State
+	FilterReflexAction = "reflex_action" // reflexes.AppliedAction → reflexes.AppliedAction
 )

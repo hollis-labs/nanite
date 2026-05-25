@@ -5,7 +5,7 @@ package service
 import (
 	"context"
 
-	agentmux "github.com/hollis-labs/go-agentmux-client"
+	agentmux "github.com/hollis-labs/go-tether-client"
 	"github.com/hollis-labs/nanite/internal/muxproxy"
 )
 

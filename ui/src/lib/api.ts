@@ -78,6 +78,8 @@ import type {
   MemoryUpdateRequest,
   Message,
   MessagePage,
+  MetaHarness,
+  MetaHarnessInput,
   Mode,
   ModelRecord,
   PermissionMode,
@@ -211,6 +213,21 @@ function serializePlanPayload(
   if (out.metadata !== undefined && typeof out.metadata !== "string")
     out.metadata = JSON.stringify(out.metadata);
   return out;
+}
+
+async function readAPIError(
+  res: Response,
+  fallback: string,
+): Promise<Error> {
+  try {
+    const err = (await res.json()) as { error?: string };
+    if (typeof err.error === "string" && err.error.trim() !== "") {
+      return new Error(err.error);
+    }
+  } catch {
+    // Fall through to the fallback message when the response is not JSON.
+  }
+  return new Error(fallback);
 }
 
 export const api = {
@@ -663,8 +680,15 @@ export const api = {
   },
 
   // Agents — endpoint returns full AgentProfile shape
-  listAgents: async (): Promise<AgentProfile[]> => {
-    const res = await fetch(`${API_BASE}/agents`);
+  // Pass manageable=true ONLY for the Admin>Agents management list; it appends
+  // ?manageable=1 which EXCLUDES internal harness agents. The default (no arg)
+  // hits /api/agents unchanged so chat pickers/roster/header stay full-list.
+  listAgents: async (manageable?: boolean): Promise<AgentProfile[]> => {
+    // Strict === true so an accidental truthy arg (e.g. a React Query context
+    // object from a bare `queryFn: api.listAgents`) never flips a full-list
+    // consumer onto the manageable (internal-excluded) list.
+    const qs = manageable === true ? "?manageable=1" : "";
+    const res = await fetch(`${API_BASE}/agents${qs}`);
     if (!res.ok) throw new Error(`Failed to list agents: ${res.status}`);
     return res.json();
   },
@@ -1161,9 +1185,11 @@ export const api = {
     return res.json();
   },
 
+  // `data` is sent as the JSON body as-is. Callers may include an optional
+  // `revision` optimistic-concurrency token; a stale/changed file → 409.
   updateAgentProfile: async (
     id: string,
-    data: UpdateAgentProfileRequest,
+    data: UpdateAgentProfileRequest & { revision?: string },
   ): Promise<AgentProfile> => {
     const res = await fetch(`${API_BASE}/agents/${id}`, {
       method: "PUT",
@@ -1171,7 +1197,10 @@ export const api = {
       body: JSON.stringify(data),
     });
     if (!res.ok)
-      throw new Error(`Failed to update agent profile: ${res.status}`);
+      throw await readAPIError(
+        res,
+        `Failed to update agent profile: ${res.status}`,
+      );
     return res.json();
   },
 
@@ -1214,11 +1243,34 @@ export const api = {
     return res.json();
   },
 
-  // Note: DELETE agent endpoint not implemented in backend yet
-  // deleteAgentProfile: async (id: string): Promise<void> => {
-  //   const res = await fetch(`${API_BASE}/agents/${id}`, { method: 'DELETE' })
-  //   if (!res.ok) throw new Error(`Failed to delete agent profile: ${res.status}`)
-  // },
+  // Delete a managed agent (file + DB + children). Non-managed agents → 409
+  // with an `agent_not_managed` body; surface the BE message to the user.
+  deleteAgentProfile: async (
+    id: string,
+  ): Promise<{ status: string; slug?: string }> => {
+    const res = await fetch(`${API_BASE}/agents/${id}`, { method: "DELETE" });
+    if (!res.ok)
+      throw await readAPIError(
+        res,
+        `Failed to delete agent profile: ${res.status}`,
+      );
+    return res.json();
+  },
+
+  // Fork a read-only (plugin/external) agent into an editable managed copy with
+  // a NEW slug (`<slug>-copy`) and identity. Already-managed → 409.
+  copyAgentToManaged: async (id: string): Promise<AgentProfile> => {
+    const res = await fetch(
+      `${API_BASE}/agents/${encodeURIComponent(id)}/copy-to-managed`,
+      { method: "POST" },
+    );
+    if (!res.ok)
+      throw await readAPIError(
+        res,
+        `Failed to copy agent to managed: ${res.status}`,
+      );
+    return res.json();
+  },
 
   // Start surface and durable-agent control plane
   getStartSurfaceCapabilities:
@@ -1314,7 +1366,10 @@ export const api = {
       },
     );
     if (!res.ok)
-      throw new Error(`Failed to request durable agent start: ${res.status}`);
+      throw await readAPIError(
+        res,
+        `Failed to request durable agent start: ${res.status}`,
+      );
     return res.json();
   },
 
@@ -1328,7 +1383,10 @@ export const api = {
       },
     );
     if (!res.ok)
-      throw new Error(`Failed to request durable agent stop: ${res.status}`);
+      throw await readAPIError(
+        res,
+        `Failed to request durable agent stop: ${res.status}`,
+      );
     return res.json();
   },
 
@@ -1342,7 +1400,10 @@ export const api = {
       },
     );
     if (!res.ok)
-      throw new Error(`Failed to request durable agent pause: ${res.status}`);
+      throw await readAPIError(
+        res,
+        `Failed to request durable agent pause: ${res.status}`,
+      );
     return res.json();
   },
 
@@ -1356,7 +1417,10 @@ export const api = {
       },
     );
     if (!res.ok)
-      throw new Error(`Failed to request durable agent resume: ${res.status}`);
+      throw await readAPIError(
+        res,
+        `Failed to request durable agent resume: ${res.status}`,
+      );
     return res.json();
   },
 
@@ -1384,7 +1448,10 @@ export const api = {
       },
     );
     if (!res.ok)
-      throw new Error(`Failed to start durable agent: ${res.status}`);
+      throw await readAPIError(
+        res,
+        `Failed to start durable agent: ${res.status}`,
+      );
     return res.json();
   },
 
@@ -1401,7 +1468,10 @@ export const api = {
       },
     );
     if (!res.ok)
-      throw new Error(`Failed to resume durable agent: ${res.status}`);
+      throw await readAPIError(
+        res,
+        `Failed to resume durable agent: ${res.status}`,
+      );
     return res.json();
   },
 
@@ -1907,6 +1977,42 @@ export const api = {
     const res = await fetch(`${API_BASE}/providers`);
     if (!res.ok) throw new Error(`Failed to list providers: ${res.status}`);
     return res.json();
+  },
+  listMetaHarnesses: async (): Promise<MetaHarness[]> => {
+    const res = await fetch(`${API_BASE}/meta-harnesses`);
+    if (!res.ok)
+      throw await readAPIError(res, `Failed to list meta harnesses: ${res.status}`);
+    return res.json();
+  },
+  createMetaHarness: async (data: MetaHarnessInput): Promise<MetaHarness> => {
+    const res = await fetch(`${API_BASE}/meta-harnesses`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(data),
+    });
+    if (!res.ok)
+      throw await readAPIError(res, `Failed to create meta harness: ${res.status}`);
+    return res.json();
+  },
+  updateMetaHarness: async (
+    id: string,
+    data: MetaHarnessInput,
+  ): Promise<MetaHarness> => {
+    const res = await fetch(`${API_BASE}/meta-harnesses/${encodeURIComponent(id)}`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(data),
+    });
+    if (!res.ok)
+      throw await readAPIError(res, `Failed to update meta harness: ${res.status}`);
+    return res.json();
+  },
+  deleteMetaHarness: async (id: string): Promise<void> => {
+    const res = await fetch(`${API_BASE}/meta-harnesses/${encodeURIComponent(id)}`, {
+      method: "DELETE",
+    });
+    if (!res.ok)
+      throw await readAPIError(res, `Failed to delete meta harness: ${res.status}`);
   },
   listProviderStatuses: async (): Promise<ProviderStatus[]> => {
     const res = await fetch(`${API_BASE}/providers/status`);

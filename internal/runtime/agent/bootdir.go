@@ -3,6 +3,8 @@ package agent
 import (
 	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
 
 	"github.com/hollis-labs/nanite/internal/store"
 )
@@ -72,10 +74,10 @@ func composeBootdirParams(deps *Dependencies, opts Options, profile *store.Agent
 	}
 	layout := bootdirLayoutFor(effectiveProvider(opts, profile))
 	params := SetupParams{
-		SessionID: sessID,
-		RunID:     opts.RunID,
+		SessionID:    sessID,
+		RunID:        opts.RunID,
 		AgentProfile: profile,
-		Mode:      opts.Mode,
+		Mode:         opts.Mode,
 		// CW-20260516-0007: resolveBootPrompt (not bare composeSystemPrompt)
 		// so SetupParams.SystemPrompt carries the AUTHORITATIVE boot prompt
 		// — it honors Options.BootPromptOverride, which bootprofile-driven
@@ -88,9 +90,59 @@ func composeBootdirParams(deps *Dependencies, opts Options, profile *store.Agent
 		MCPConfig:    mcp,
 	}
 	if deps != nil {
-		params.CLIWritableRoots = deps.CLIWritableRoots
+		params.CLIWritableRoots = effectiveCLIWritableRoots(deps, sessID)
 	}
 	return layout, params
+}
+
+func effectiveCLIWritableRoots(deps *Dependencies, sessionID string) []string {
+	if deps == nil {
+		return nil
+	}
+
+	seen := make(map[string]struct{})
+	out := make([]string, 0, len(deps.CLIWritableRoots))
+	add := func(path string) {
+		if path == "" {
+			return
+		}
+		clean := filepath.Clean(path)
+		if clean == "." || clean == "" {
+			return
+		}
+		if _, dup := seen[clean]; dup {
+			return
+		}
+		seen[clean] = struct{}{}
+		out = append(out, clean)
+	}
+
+	for _, root := range deps.CLIWritableRoots {
+		add(root)
+	}
+
+	if deps.PathGrants == nil || sessionID == "" {
+		return out
+	}
+
+	for _, grant := range deps.PathGrants.ListGrants(sessionID) {
+		add(grantAsWritableRoot(grant))
+	}
+	for _, grant := range deps.PathGrants.ListLineageGrants(sessionID) {
+		add(grantAsWritableRoot(grant))
+	}
+	return out
+}
+
+func grantAsWritableRoot(grant string) string {
+	if grant == "" {
+		return ""
+	}
+	clean := filepath.Clean(grant)
+	if info, err := os.Stat(clean); err == nil && info.IsDir() {
+		return clean
+	}
+	return filepath.Dir(clean)
 }
 
 // ResolveBootdirParams is the composition-root entry point recovery's

@@ -124,6 +124,13 @@ type CreateAgentRequest struct {
 	// task_execute's per-call description by the Tool Broker Describe
 	// hook. Default '[]' (no dispatch).
 	ParentDispatchAllowlist string `json:"parent_dispatch_allowlist"`
+	RoleTools               string `json:"role_tools"`
+	RoleSkills              string `json:"role_skills"`
+	ContextPolicy           string `json:"context_policy"`
+	Durable                 bool   `json:"durable"`
+	ActivationMode          string `json:"activation_mode"`
+	Class                   string `json:"class"`
+	DefaultState            string `json:"default_state"`
 }
 
 type UpdateAgentRequest struct {
@@ -146,6 +153,35 @@ type UpdateAgentRequest struct {
 	Icon            *string `json:"icon"`
 	// CW-20260512-0107 — see CreateAgentRequest.
 	ParentDispatchAllowlist *string `json:"parent_dispatch_allowlist"`
+	RoleTools               *string `json:"role_tools"`
+	RoleSkills              *string `json:"role_skills"`
+	ContextPolicy           *string `json:"context_policy"`
+	Durable                 *bool   `json:"durable"`
+	ActivationMode          *string `json:"activation_mode"`
+	Class                   *string `json:"class"`
+	DefaultState            *string `json:"default_state"`
+	// Revision is the optimistic-concurrency token the client loaded with the
+	// agent (the managed file's content hash). When set, the update is
+	// rejected with 409 if the on-disk file changed underneath. Empty skips
+	// the guard (back-compat).
+	Revision string `json:"revision"`
+}
+
+// AgentProfileView wraps a store.AgentProfile with the computed management
+// metadata the GUI needs to decide editability and run the optimistic-
+// concurrency guard. The embedded profile flattens into the same JSON shape
+// existing consumers expect; the extra fields are additive.
+type AgentProfileView struct {
+	store.AgentProfile
+	// ManageClass is one of: managed, internal, plugin, external.
+	ManageClass string `json:"manage_class"`
+	// Editable reports whether this agent can be edited/deleted in place.
+	Editable bool `json:"editable"`
+	// CopyToManaged reports whether a read-only agent can be forked into the
+	// managed layer ("make editable").
+	CopyToManaged bool `json:"copy_to_managed"`
+	// Revision is the current optimistic-concurrency token (file hash).
+	Revision string `json:"revision"`
 }
 
 type AddSessionAgentRequest struct {

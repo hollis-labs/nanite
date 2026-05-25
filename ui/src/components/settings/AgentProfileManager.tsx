@@ -48,9 +48,12 @@ export function AgentProfileManager({}: AgentProfileManagerProps) {
   const defaultModel = userSettings?.default_model || "";
   const modelOptions = (modelRecords ?? []).map((m) => ({ id: m.model_id, label: m.display_name }));
 
+  const [actionError, setActionError] = useState<string | null>(null);
+
   const { data: agents = [], isLoading } = useQuery({
     queryKey: ["agent-profiles"],
-    queryFn: api.listAgents,
+    // Admin>Agents management list: hide internal harness agents.
+    queryFn: () => api.listAgents(true),
   });
 
   // Collect all unique tags across agents for autocomplete
@@ -114,19 +117,32 @@ export function AgentProfileManager({}: AgentProfileManagerProps) {
     mutationFn: ({ id, data }: { id: string; data: Partial<AgentProfile> }) =>
       api.updateAgentProfile(id, data),
     onSuccess: () => {
+      setActionError(null);
       void queryClient.invalidateQueries({ queryKey: ["agent-profiles"] });
       void queryClient.invalidateQueries({ queryKey: ["agent-detail", selectedAgent] });
     },
+    onError: (error) => setActionError(errorMessage(error)),
   });
 
-  // const deleteMutation = useMutation({  // DELETE not implemented in backend
-  //   mutationFn: api.deleteAgentProfile,
-  //   onSuccess: () => {
-  //     void queryClient.invalidateQueries({ queryKey: ['agent-profiles'] })
-  //     setSelectedAgent(null)
-  //     setShowDeleteConfirm(null)
-  //   },
-  // })
+  const deleteMutation = useMutation({
+    mutationFn: (id: string) => api.deleteAgentProfile(id),
+    onSuccess: () => {
+      setActionError(null);
+      void queryClient.invalidateQueries({ queryKey: ["agent-profiles"] });
+      setSelectedAgent(null);
+    },
+    onError: (error) => setActionError(errorMessage(error)),
+  });
+
+  const copyToManagedMutation = useMutation({
+    mutationFn: (id: string) => api.copyAgentToManaged(id),
+    onSuccess: (created) => {
+      setActionError(null);
+      void queryClient.invalidateQueries({ queryKey: ["agent-profiles"] });
+      setSelectedAgent(created.id);
+    },
+    onError: (error) => setActionError(errorMessage(error)),
+  });
 
   const createModeMutation = useMutation({
     mutationFn: ({
@@ -480,7 +496,16 @@ export function AgentProfileManager({}: AgentProfileManagerProps) {
         modes={modes}
         modelOptions={modelOptions}
         allKnownTags={allKnownTags}
-        onUpdateAgent={(data) => updateMutation.mutate({ id: agent.id, data })}
+        actionError={actionError}
+        onUpdateAgent={(data) =>
+          updateMutation.mutate({
+            id: agent.id,
+            // Thread the optimistic-concurrency token: a stale/changed file → 409.
+            data: { ...data, revision: agent.revision },
+          })
+        }
+        onDeleteAgent={() => deleteMutation.mutate(agent.id)}
+        onCopyToManaged={() => copyToManagedMutation.mutate(agent.id)}
         onCreateMode={(data) => createModeMutation.mutate({ agentId: agent.id, data })}
         isCreatingMode={createModeMutation.isPending}
         agentSkills={agentSkills}
@@ -501,4 +526,8 @@ export function AgentProfileManager({}: AgentProfileManagerProps) {
   }
 
   return null;
+}
+
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : "Request failed.";
 }

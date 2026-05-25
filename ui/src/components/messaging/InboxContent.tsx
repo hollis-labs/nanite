@@ -67,7 +67,7 @@ export function InboxContent({ agentId }: InboxContentProps) {
 
   const { data: agents = [] } = useQuery({
     queryKey: ['agents'],
-    queryFn: api.listAgents,
+    queryFn: () => api.listAgents(),
   })
 
   const agentNameMap = new Map<string, string>()

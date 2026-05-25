@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 
 	"github.com/hollis-labs/go-agent-runtime/runtimekind"
 	"github.com/hollis-labs/nanite/internal/store"
@@ -109,6 +110,7 @@ type DurableAgentStore interface {
 	CreateDurableAgentEvent(event *store.DurableAgentEvent) error
 	ListDurableAgentEvents(instanceID string, limit int) ([]store.DurableAgentEvent, error)
 	GetAgent(id string) (*store.AgentProfile, error)
+	ListAgents() ([]store.AgentProfile, error)
 	GetSession(id string) (*store.Session, error)
 	CreateSession(sess *store.Session) error
 	EnsureSessionAgent(sessionID, agentID, mode string, isPrimary bool) error
@@ -146,7 +148,115 @@ func (s *durableAgentService) Get(_ context.Context, id string) (*store.DurableA
 }
 
 func (s *durableAgentService) List(_ context.Context, includeArchived bool) ([]store.DurableAgentInstance, error) {
+	if err := s.reconcileProfileBackedInstances(); err != nil {
+		return nil, err
+	}
 	return s.store.ListDurableAgentInstances(includeArchived)
+}
+
+func (s *durableAgentService) reconcileProfileBackedInstances() error {
+	profiles, err := s.store.ListAgents()
+	if err != nil {
+		return err
+	}
+	instances, err := s.store.ListDurableAgentInstances(true)
+	if err != nil {
+		return err
+	}
+
+	byProfileID := make(map[string]struct{}, len(instances))
+	bySlug := make(map[string]struct{}, len(instances))
+	for _, inst := range instances {
+		byProfileID[inst.ProfileID] = struct{}{}
+		bySlug[inst.Slug] = struct{}{}
+	}
+
+	for _, profile := range profiles {
+		if !profileIsDurableCandidate(profile) {
+			continue
+		}
+		if _, ok := byProfileID[profile.ID]; ok {
+			continue
+		}
+		if _, ok := bySlug[profile.Slug]; ok {
+			continue
+		}
+		inst := durableAgentInstanceFromProfile(profile)
+		if err := s.store.CreateDurableAgentInstance(inst); err != nil {
+			return fmt.Errorf("reconcile durable agent instance for profile %s: %w", profile.ID, err)
+		}
+		byProfileID[profile.ID] = struct{}{}
+		bySlug[profile.Slug] = struct{}{}
+	}
+	return nil
+}
+
+func profileIsDurableCandidate(profile store.AgentProfile) bool {
+	if profile.Status != "" && profile.Status != "active" {
+		return false
+	}
+	if profile.Durable {
+		return true
+	}
+	if strings.TrimSpace(profile.Tags) == "" {
+		return false
+	}
+	var tags []string
+	if err := json.Unmarshal([]byte(profile.Tags), &tags); err != nil {
+		return strings.Contains(profile.Tags, `"durable-agent"`)
+	}
+	for _, tag := range tags {
+		if tag == "durable-agent" {
+			return true
+		}
+	}
+	return false
+}
+
+func durableAgentInstanceFromProfile(profile store.AgentProfile) *store.DurableAgentInstance {
+	lifecycleClass := profile.Class
+	switch lifecycleClass {
+	case store.DurableAgentClassAdvisor, store.DurableAgentClassProcess, store.DurableAgentClassTemplate:
+	default:
+		lifecycleClass = store.DurableAgentClassAdvisor
+	}
+
+	launchSourceType := store.DurableAgentLaunchDurableAdvisor
+	switch lifecycleClass {
+	case store.DurableAgentClassProcess:
+		launchSourceType = store.DurableAgentLaunchProcessTick
+	case store.DurableAgentClassTemplate:
+		launchSourceType = store.DurableAgentLaunchTaskTemplateRun
+	}
+
+	status := profile.DefaultState
+	switch status {
+	case store.DurableAgentStatusSleeping, store.DurableAgentStatusActive:
+	default:
+		status = store.DurableAgentStatusSleeping
+	}
+
+	return &store.DurableAgentInstance{
+		ID:               "legacy-profile-" + profile.ID,
+		Name:             profile.Name,
+		Slug:             profile.Slug,
+		ProfileID:        profile.ID,
+		LifecycleClass:   lifecycleClass,
+		Provider:         defaultString(profile.DefaultProvider, "anthropic"),
+		Model:            defaultString(profile.DefaultModel, "claude-sonnet-4"),
+		RuntimeKind:      string(runtimekind.API),
+		LaunchSourceType: launchSourceType,
+		LaunchSourceID:   profile.ID,
+		Status:           status,
+		MetadataJSON:     `{"seeded_from":"agent_profiles","legacy_profile":true,"reconciled":true}`,
+	}
+}
+
+func defaultString(value, fallback string) string {
+	if strings.TrimSpace(value) == "" {
+		return fallback
+	}
+	return value
 }
 
 func (s *durableAgentService) Update(_ context.Context, id string, upd store.DurableAgentInstanceUpdate) (*store.DurableAgentInstance, error) {
@@ -553,11 +663,19 @@ func (s *durableAgentService) selectOrCreateLaunchSession(inst *store.DurableAge
 		return nil, false, ErrDurableAgentWorkspaceRequired
 	}
 	metadata, _ := json.Marshal(map[string]string{"durable_agent_instance_id": inst.ID})
+	sessionTitle := strings.TrimSpace(inst.Name)
+	if sessionTitle == "" {
+		sessionTitle = strings.TrimSpace(inst.Slug)
+	}
+	if sessionTitle == "" {
+		sessionTitle = inst.ID
+	}
 	sess := &store.Session{
 		WorkspaceID: req.WorkspaceID,
 		ProjectID:   req.ProjectID,
 		Provider:    inst.Provider,
 		Model:       inst.Model,
+		Title:       sessionTitle,
 		ContextType: "durable_agent",
 		ContextID:   inst.ID,
 		Metadata:    string(metadata),

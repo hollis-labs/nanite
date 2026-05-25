@@ -17,7 +17,7 @@ type testDirAdapter struct {
 	priority int
 }
 
-func (a *testDirAdapter) Name() string { return a.name }
+func (a *testDirAdapter) Name() string  { return a.name }
 func (a *testDirAdapter) Priority() int { return a.priority }
 
 func (a *testDirAdapter) Discover(projectDir string) ([]Definition, error) {
@@ -68,7 +68,7 @@ func TestDiscover_PriorityOrder(t *testing.T) {
 	// Write a unique agent at lower priority.
 	writeAgentFile(t, filepath.Join(root, ".agentrc", "agents"), "research.md", "research")
 
-	defs, err := Discover(DiscoverOptions{WorkingDir: root, Adapters: newTestAdapterRegistry()})
+	defs, err := Discover(DiscoverOptions{WorkingDir: root, HomeDir: t.TempDir(), Adapters: newTestAdapterRegistry()})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -104,6 +104,7 @@ func TestDiscover_CLIAgent(t *testing.T) {
 	defs, err := Discover(DiscoverOptions{
 		CLIAgentPath: cliPath,
 		WorkingDir:   root,
+		HomeDir:      t.TempDir(),
 	})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -131,6 +132,7 @@ func TestDiscover_PluginAgents(t *testing.T) {
 
 	defs, err := Discover(DiscoverOptions{
 		WorkingDir: root,
+		HomeDir:    t.TempDir(),
 		PluginsDir: pluginsDir,
 	})
 	if err != nil {
@@ -146,7 +148,7 @@ func TestDiscover_MissingDirs(t *testing.T) {
 	root := t.TempDir()
 
 	// No agent directories exist — should return empty, no error.
-	defs, err := Discover(DiscoverOptions{WorkingDir: root})
+	defs, err := Discover(DiscoverOptions{WorkingDir: root, HomeDir: t.TempDir()})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -175,7 +177,7 @@ func TestDiscover_SkipsInvalidFiles(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	defs, err := Discover(DiscoverOptions{WorkingDir: root})
+	defs, err := Discover(DiscoverOptions{WorkingDir: root, HomeDir: t.TempDir()})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -189,7 +191,7 @@ func TestDiscover_ClaudeCodeAgents(t *testing.T) {
 	root := t.TempDir()
 	writeAgentFile(t, filepath.Join(root, ".claude", "agents"), "helper.md", "helper")
 
-	defs, err := Discover(DiscoverOptions{WorkingDir: root, Adapters: newTestAdapterRegistry()})
+	defs, err := Discover(DiscoverOptions{WorkingDir: root, HomeDir: t.TempDir(), Adapters: newTestAdapterRegistry()})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -212,6 +214,7 @@ func TestDiscover_SlugDedup(t *testing.T) {
 
 	defs, err := Discover(DiscoverOptions{
 		WorkingDir: root,
+		HomeDir:    t.TempDir(),
 		PluginsDir: pluginsDir,
 		Adapters:   newTestAdapterRegistry(),
 	})

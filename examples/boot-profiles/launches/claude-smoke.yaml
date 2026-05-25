@@ -8,7 +8,7 @@ provider: pty-claude
 
 workdir: /tmp/nanite-smoke-workdir
 
-ui_label: "Claude CLI (smoke)"
+ui_label: "Claude Code (cli)"
 
 # Env values overlay the host env at agent.Boot time (precedence is
 # host < profile < Options.Env, so spec values beat host env).

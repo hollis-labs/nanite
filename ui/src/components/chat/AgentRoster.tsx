@@ -43,7 +43,7 @@ export function AgentRoster({ sessionId, onClose }: AgentRosterProps) {
 
   const { data: allProfiles = [] } = useQuery({
     queryKey: ['agents', configVersion],
-    queryFn: api.listAgents,
+    queryFn: () => api.listAgents(),
   })
 
   const removeMutation = useMutation({

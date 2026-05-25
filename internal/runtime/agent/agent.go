@@ -332,15 +332,28 @@ func Boot(ctx context.Context, deps *Dependencies, opts Options) (*Session, erro
 		return nil, err
 	}
 
+	// PathGrants lineage for nested subagents. nil-safe: ModeSubagent
+	// validation already enforced ParentSessionID non-empty.
+	hadLineage := false
+	if opts.Mode == ModeSubagent && deps.PathGrants != nil {
+		deps.PathGrants.RegisterLineage(sessID, opts.ParentSessionID)
+		hadLineage = true
+	}
 	layout, params := composeBootdirParams(deps, opts, profile, sessID)
 	bootDir, err := layout.Setup(params)
 	if err != nil {
+		if hadLineage && deps.PathGrants != nil {
+			deps.PathGrants.ClearLineage(sessID)
+		}
 		return nil, fmt.Errorf("agent.Boot: bootdir setup: %w", err)
 	}
 
 	// Anything past this point that fails must clean the boot dir to avoid
 	// leaking $TMPDIR entries.
 	cleanup := func(failure error) (*Session, error) {
+		if hadLineage && deps.PathGrants != nil {
+			deps.PathGrants.ClearLineage(sessID)
+		}
 		_ = os.RemoveAll(bootDir)
 		return nil, failure
 	}
@@ -365,14 +378,6 @@ func Boot(ctx context.Context, deps *Dependencies, opts Options) (*Session, erro
 		return cleanup(fmt.Errorf("agent.Boot: build runtime: %w", err))
 	}
 
-	// PathGrants lineage for nested subagents. nil-safe: ModeSubagent
-	// validation already enforced ParentSessionID non-empty.
-	hadLineage := false
-	if opts.Mode == ModeSubagent && deps.PathGrants != nil {
-		deps.PathGrants.RegisterLineage(sessID, opts.ParentSessionID)
-		hadLineage = true
-	}
-
 	parentPtr := (*string)(nil)
 	if opts.ParentSessionID != "" {
 		parentPtr = &opts.ParentSessionID
@@ -393,9 +398,6 @@ func Boot(ctx context.Context, deps *Dependencies, opts Options) (*Session, erro
 			StartedAt:       time.Now(),
 			Meta:            opts.SessionMeta,
 		}); err != nil {
-			if hadLineage && deps.PathGrants != nil {
-				deps.PathGrants.ClearLineage(sessID)
-			}
 			return cleanup(fmt.Errorf("agent.Boot: persist runtime row: %w", err))
 		}
 	}
@@ -404,9 +406,6 @@ func Boot(ctx context.Context, deps *Dependencies, opts Options) (*Session, erro
 	if opts.Mode == ModeResume && opts.ResumeFromCheckpoint != "" {
 		cp, err := deps.Store.GetCheckpoint(opts.ResumeFromCheckpoint)
 		if err != nil {
-			if hadLineage && deps.PathGrants != nil {
-				deps.PathGrants.ClearLineage(sessID)
-			}
 			_ = deps.Store.MarkRuntimeFailed(sessID, err.Error())
 			return cleanup(fmt.Errorf("agent.Boot: load checkpoint: %w", err))
 		}

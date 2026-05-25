@@ -13,6 +13,7 @@ import {
   Puzzle,
   SlidersHorizontal,
   Sparkles,
+  SquareTerminal,
   User,
   Wrench,
 } from "lucide-react";
@@ -51,6 +52,7 @@ import { WidgetManager } from "./WidgetManager";
 import { WorkspaceProjectManager } from "./WorkspaceProjectManager";
 import { ProfilePanel } from "./ProfilePanel";
 import { PanelManager } from "./PanelManager";
+import { MetaHarnessManager } from "./MetaHarnessManager";
 
 interface NavItem {
   id: string;
@@ -78,6 +80,7 @@ const BASE_NAV_GROUPS: NavGroup[] = [
     label: "AI",
     items: [
       { id: "providers", label: "Providers", icon: Cpu },
+      { id: "harnesses", label: "Harnesses", icon: SquareTerminal },
       { id: "agents", label: "Agents", icon: Bot },
       { id: "durable-agents", label: "Durable Agents", icon: Boxes },
       { id: "skills", label: "Skills", icon: Sparkles },
@@ -205,6 +208,8 @@ export default function SettingsPage() {
         );
       case "providers":
         return <ProviderManager />;
+      case "harnesses":
+        return <MetaHarnessManager />;
       case "shortcuts":
         return <ShortcutsPanel />;
       case "actions":

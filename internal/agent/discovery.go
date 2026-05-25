@@ -14,6 +14,9 @@ type DiscoverOptions struct {
 
 	// WorkingDir is the project root for .nanite/agents/, .claude/agents/.
 	WorkingDir string
+	// HomeDir overrides os.UserHomeDir() for user-level ~/.nanite/agents/
+	// discovery. Empty uses the real user home.
+	HomeDir string
 
 	// PluginsDir is the root plugins directory for plugin-provided agents.
 	PluginsDir string
@@ -56,7 +59,13 @@ func Discover(opts DiscoverOptions) ([]*Definition, error) {
 	}
 
 	// Priority 3: ~/.nanite/agents/ (user).
-	if home, err := os.UserHomeDir(); err == nil {
+	home := opts.HomeDir
+	if home == "" {
+		if resolved, err := os.UserHomeDir(); err == nil {
+			home = resolved
+		}
+	}
+	if home != "" {
 		for _, def := range discoverDir(filepath.Join(home, ".nanite", "agents"), "user") {
 			add(def)
 		}

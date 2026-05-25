@@ -49,11 +49,9 @@ func TestEnsureHomeDirs_Idempotent(t *testing.T) {
 //  2. An agent file is dropped into the user-level directory.
 //  3. Discover loads the file and returns the parsed definition.
 //
-// HomeDir is not a DiscoverOptions field in agent.Discover — the function
-// calls os.UserHomeDir() directly. This test therefore passes the agent file
-// via the WorkingDir path (.nanite/agents/) which maps to the project tier.
-// The user-tier discovery path is exercised by TestEnsureHomeDirs_CreatesDir
-// + the real container startup call; see loader.go comment for J7 handoff.
+// Discover uses the caller-supplied HomeDir override when present, so tests
+// can stay hermetic and avoid loading the operator's real ~/.nanite/agents.
+// This test still exercises the project-tier drop flow via WorkingDir.
 func TestDropAndLoad_EndToEnd(t *testing.T) {
 	root := t.TempDir()
 
@@ -79,7 +77,7 @@ You are a research assistant. Investigate topics thoroughly.
 	}
 
 	// Step 3: discover — WorkingDir set to temp root.
-	defs, err := Discover(DiscoverOptions{WorkingDir: root})
+	defs, err := Discover(DiscoverOptions{WorkingDir: root, HomeDir: t.TempDir()})
 	if err != nil {
 		t.Fatalf("Discover: %v", err)
 	}

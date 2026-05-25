@@ -318,8 +318,8 @@ func TestAgentCapabilitiesAPI_InternalAgentMutationsConflict(t *testing.T) {
 	if w.Code != http.StatusConflict {
 		t.Fatalf("internal mutation status = %d, want 409; body=%s", w.Code, w.Body.String())
 	}
-	if !strings.Contains(w.Body.String(), "file source of truth") {
-		t.Fatalf("internal mutation message missing file-SOT hint: %s", w.Body.String())
+	if !strings.Contains(w.Body.String(), `"manage_class":"internal"`) {
+		t.Fatalf("internal mutation response missing manage_class=internal: %s", w.Body.String())
 	}
 }
 

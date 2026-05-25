@@ -141,7 +141,7 @@ export function RoleTrustPanel() {
   // Fetch all agent profiles.
   const { data: agents = [], isLoading: agentsLoading } = useQuery({
     queryKey: ["agent-profiles"],
-    queryFn: api.listAgents,
+    queryFn: () => api.listAgents(),
   });
 
   // Fetch workspace trust overrides for this workspace.

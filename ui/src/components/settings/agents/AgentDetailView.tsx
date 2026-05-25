@@ -7,8 +7,10 @@ import {
   FolderKanban,
   FolderOpen,
   Loader2,
+  Lock,
   Plus,
   Settings,
+  Trash2,
   User,
   Wrench,
   X,
@@ -17,6 +19,16 @@ import {
 import { useCallback, useState } from "react";
 import { SourceBadge } from "@/components/agents/SourceBadge";
 import { StatusDot } from "@/components/agents/StatusDot";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { Button } from "@/components/ui/button";
 import { DynamicIcon, IconPicker } from "@/components/ui/icon-picker";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -42,8 +54,12 @@ export interface AgentDetailViewProps {
   modes: AgentModeProfile[];
   modelOptions: { id: string; label: string }[];
   allKnownTags: string[];
+  // Surfaced 409 / conflict messages from the parent's mutations.
+  actionError?: string | null;
   // Mutations
   onUpdateAgent: (data: Partial<AgentProfile>) => void;
+  onCopyToManaged?: () => void;
+  onDeleteAgent?: () => void;
   onCreateMode: (data: Omit<AgentModeProfile, "id" | "agent_id">) => void;
   isCreatingMode?: boolean;
   // Skills
@@ -72,7 +88,10 @@ export function AgentDetailView({
   modes,
   modelOptions,
   allKnownTags,
+  actionError,
   onUpdateAgent,
+  onCopyToManaged,
+  onDeleteAgent,
   onCreateMode,
   isCreatingMode,
   agentSkills,
@@ -93,13 +112,14 @@ export function AgentDetailView({
   const [editValue, setEditValue] = useState("");
   const [showModeForm, setShowModeForm] = useState(false);
   const [showProjectPicker, setShowProjectPicker] = useState(false);
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
 
-  // CW-20260512-0111: internal-source agents are file source of truth
-  // (internal/agent/builtin/profiles/*.md). Edits via API are rejected by
-  // the server (PUT /api/agents/{id} returns 409), so disable inline-edit
-  // hover, switches, and pickers when source='internal'. The "edit the
-  // file" affordance below the header gives the operator the actual path.
-  const isReadOnly = agent.source === "internal";
+  // Editability is driven entirely by the backend `editable` flag (true only
+  // for manage_class === "managed"). Default to editable when the flag is
+  // absent so DB-only agents without the contract still work.
+  const isReadOnly = agent.editable === false;
+  // Plugin/external agents can be forked into an editable managed copy.
+  const canCopyToManaged = agent.copy_to_managed === true;
 
   const updateField = useCallback(
     (field: string, value: string | boolean) => {
@@ -248,34 +268,58 @@ export function AgentDetailView({
             <p className="text-xs text-fg-muted font-mono truncate">{agent.slug}</p>
           </div>
         </div>
+        {/* Delete is only available for managed/editable agents. */}
+        {!isReadOnly && onDeleteAgent && (
+          <Button
+            variant="ghost"
+            size="sm"
+            className="gap-1.5 text-danger hover:text-danger shrink-0"
+            onClick={() => setShowDeleteConfirm(true)}
+          >
+            <Trash2 className="w-3.5 h-3.5" />
+            Delete
+          </Button>
+        )}
       </div>
 
-      {/* ── Read-only banner for internal-source agents (CW-20260512-0111) ── */}
-      {isReadOnly && (
+      {/* ── Conflict / action error surfaced from the parent's mutations ── */}
+      {actionError && (
+        <div className="rounded-md border border-danger/40 bg-danger/10 px-3 py-2.5 text-xs text-danger">
+          {actionError}
+        </div>
+      )}
+
+      {/* ── Read-only banner — editability driven by backend `editable` flag ── */}
+      {isReadOnly && canCopyToManaged && (
         <div className="flex items-start gap-3 rounded-md border border-border-subtle bg-surface/60 px-3 py-2.5">
-          <FileText className="w-4 h-4 mt-0.5 shrink-0 text-fg-secondary" />
+          <Lock className="w-4 h-4 mt-0.5 shrink-0 text-fg-secondary" />
           <div className="text-xs text-fg-secondary leading-relaxed flex-1 min-w-0">
-            <div className="font-medium text-fg">Internal profile — file source of truth</div>
+            <div className="font-medium text-fg">This agent is read-only</div>
             <div className="mt-1 text-fg-muted">
-              This profile is hydrated at boot from{" "}
-              <code className="font-mono bg-bg-elevated px-1 py-0.5 rounded">
-                {agent.source_ref || "internal/agent/builtin/profiles/" + agent.slug + ".md"}
-              </code>
-              . API edits are rejected — edit the file and restart Nanite to roll changes.
+              Make an editable copy in your managed config to customize it.
             </div>
           </div>
-          {agent.source_ref && (
-            <button
+          {onCopyToManaged && (
+            <Button
               type="button"
-              onClick={() => {
-                navigator.clipboard?.writeText(agent.source_ref);
-              }}
-              className="text-xs text-fg-muted hover:text-fg shrink-0 px-2 py-1 rounded hover:bg-surface transition-colors"
-              title="Copy file path"
+              size="sm"
+              variant="secondary"
+              className="gap-1.5 shrink-0"
+              onClick={onCopyToManaged}
             >
               <Copy className="w-3.5 h-3.5" />
-            </button>
+              Make editable
+            </Button>
           )}
+        </div>
+      )}
+
+      {isReadOnly && !canCopyToManaged && (
+        <div className="flex items-start gap-3 rounded-md border border-border-subtle bg-surface/60 px-3 py-2.5">
+          <Lock className="w-4 h-4 mt-0.5 shrink-0 text-fg-secondary" />
+          <div className="text-xs text-fg-muted leading-relaxed flex-1 min-w-0">
+            This agent is managed by Nanite and isn't editable here.
+          </div>
         </div>
       )}
 
@@ -588,6 +632,31 @@ export function AgentDetailView({
         </TabsContent>
 
       </Tabs>
+
+      {/* ── Delete confirmation (managed/editable agents only) ─────────── */}
+      <AlertDialog open={showDeleteConfirm} onOpenChange={setShowDeleteConfirm}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Permanently delete {agent.name}?</AlertDialogTitle>
+            <AlertDialogDescription>
+              This removes the agent file and all its reflexes, tools, and
+              skills. This cannot be undone.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              variant="destructive"
+              onClick={() => {
+                setShowDeleteConfirm(false);
+                onDeleteAgent?.();
+              }}
+            >
+              Delete agent
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }

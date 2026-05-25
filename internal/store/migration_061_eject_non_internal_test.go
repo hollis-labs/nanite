@@ -7,9 +7,11 @@ import (
 )
 
 // TestMigration061_EjectsNonInternalProfiles is the acceptance smoke for
-// CW-20260512-0112 Wave 2: every agent_profiles row whose source != 'internal'
-// is wiped, and the canonical internal rows seeded by migration 060 (plus any
-// additional source='internal' rows) survive.
+// CW-20260512-0112 Wave 2 originally wiped every agent_profiles row whose
+// source != 'internal'. Now that project-managed file-backed profiles under
+// .nanite/agents/*.md are durable config source-of-truth, migration 061 keeps
+// both source='internal' and source='project' rows while ejecting every other
+// ambiguous source.
 //
 // Test shape:
 //   1. Open a fresh DB. Migrations 001-061 run in order; migration 060 seeds
@@ -20,16 +22,15 @@ import (
 //      fixtures land) so this test stays robust as future migrations seed
 //      additional internal profiles (e.g. CW-20260512-0113 / W4 will add
 //      ~7 more internal profile rows).
-//   3. INSERT fixture rows with non-internal sources (auto, nanite, user,
-//      claude) plus an additional source='internal' row (to confirm that
-//      MULTIPLE internal rows are preserved, not just the canonical set).
+//   3. INSERT fixture rows with mixed sources (auto, nanite, user, claude)
+//      plus one additional source='internal' row and two source='project'
+//      rows to confirm that both keep-list classes survive.
 //   4. Re-execute the migration 061 DELETE against the now-populated DB to
 //      simulate what happens on the next boot.
-//   5. Assert: total row count == baselineCount + 1 (the extra internal
-//      fixture survives, the 6 non-internal fixtures get wiped), every
-//      surviving row has source='internal', the canonical slugs and the
-//      extra-internal fixture are present, and none of the non-internal
-//      fixture slugs survive.
+//   5. Assert: total row count == baselineCount + 3 (the extra internal
+//      fixture plus the 2 project fixtures survive, the remaining 4
+//      ambiguous fixtures get wiped), every surviving row has source in the
+//      keep-list, and the expected slugs survive.
 func TestMigration061_EjectsNonInternalProfiles(t *testing.T) {
 	tempDir := t.TempDir()
 	dbPath := filepath.Join(tempDir, "fresh.db")
@@ -64,9 +65,8 @@ func TestMigration061_EjectsNonInternalProfiles(t *testing.T) {
 		}
 	}
 
-	// Insert fixture rows representing the four classes the live DB carries
-	// pre-W2 (auto stubs, nanite project agents, user-authored UI rows,
-	// claude-imported rows) plus an additional source='internal' row.
+	// Insert fixture rows representing ambiguous legacy sources plus the two
+	// keep-list classes (internal and project-managed file-backed).
 	// Only minimal columns are populated — table defaults handle the rest.
 	fixtures := []struct {
 		id, name, slug, body, source string
@@ -74,9 +74,9 @@ func TestMigration061_EjectsNonInternalProfiles(t *testing.T) {
 		{"fix-auto-1", "Analyst", "analyst-fix", "", "auto"},
 		{"fix-auto-2", "Backend Stub", "backend-fix", "", "auto"},
 		{"fix-nanite-1", "Nanite Backend", "nanite-backend-fix", "project agent body", "nanite"},
-		{"fix-nanite-2", "Nanite Frontend", "nanite-frontend-fix", "project agent body", "nanite"},
+		{"fix-project-1", "Project Advisor", "project-advisor-fix", "project agent body", "project"},
+		{"fix-project-2", "Project Writer", "project-writer-fix", "project agent body", "project"},
 		{"fix-user-1", "User Agent", "user-fix", "user-authored body", "user"},
-		{"fix-claude-1", "Claude Agent", "claude-fix", "claude body", "claude"},
 		{"fix-internal-extra", "Extra Internal", "extra-internal-fix", "extra internal body", "internal"},
 	}
 	const fixtureCount = 7
@@ -102,18 +102,18 @@ func TestMigration061_EjectsNonInternalProfiles(t *testing.T) {
 	// boot — migration 061 re-runs on every Nanite start, and on the boot
 	// after fixtures appear (e.g. from the dispatcher writing rows during
 	// a previous session) the DELETE wipes the non-internal subset.
-	if _, err := s.DB.Exec(`DELETE FROM agent_profiles WHERE source != 'internal'`); err != nil {
+	if _, err := s.DB.Exec(`DELETE FROM agent_profiles WHERE source NOT IN ('internal', 'project')`); err != nil {
 		t.Fatalf("simulate migration 061 DELETE: %v", err)
 	}
 
-	// Post-DELETE: baseline + 1 additional internal fixture survives; the
-	// 6 non-internal fixtures got wiped. Every row's source must be 'internal'.
+	// Post-DELETE: baseline + 1 additional internal fixture + 2 project
+	// fixtures survive; the remaining 4 ambiguous fixtures got wiped.
 	var post int
 	if err := s.DB.QueryRow(`SELECT COUNT(*) FROM agent_profiles`).Scan(&post); err != nil {
 		t.Fatalf("post-count: %v", err)
 	}
-	if post != baselineCount+1 {
-		t.Errorf("post-DELETE row count = %d, want %d (baseline %d + 1 extra-internal fixture)", post, baselineCount+1, baselineCount)
+	if post != baselineCount+3 {
+		t.Errorf("post-DELETE row count = %d, want %d (baseline %d + 3 keep-list fixtures)", post, baselineCount+3, baselineCount)
 	}
 
 	rows, err := s.DB.Query(`SELECT slug, source FROM agent_profiles`)
@@ -127,8 +127,8 @@ func TestMigration061_EjectsNonInternalProfiles(t *testing.T) {
 		if err := rows.Scan(&slug, &source); err != nil {
 			t.Fatalf("scan: %v", err)
 		}
-		if source != "internal" {
-			t.Errorf("surviving row slug=%q has source=%q, want 'internal'", slug, source)
+		if source != "internal" && source != "project" {
+			t.Errorf("surviving row slug=%q has source=%q, want keep-list source", slug, source)
 		}
 		gotSlugs[slug] = true
 	}
@@ -136,16 +136,24 @@ func TestMigration061_EjectsNonInternalProfiles(t *testing.T) {
 		t.Fatalf("rows.Err: %v", err)
 	}
 
-	// Required presence: canonical internal slugs + the extra-internal fixture.
-	wantPresent := []string{"default", "worker", "planner", "hint-selector", "extra-internal-fix"}
+	// Required presence: canonical internal slugs + the explicit keep-list fixtures.
+	wantPresent := []string{
+		"default",
+		"worker",
+		"planner",
+		"hint-selector",
+		"extra-internal-fix",
+		"project-advisor-fix",
+		"project-writer-fix",
+	}
 	for _, slug := range wantPresent {
 		if !gotSlugs[slug] {
 			t.Errorf("expected surviving slug %q missing from result", slug)
 		}
 	}
 
-	// Required absence: every non-internal fixture slug must have been wiped.
-	wantAbsent := []string{"analyst-fix", "backend-fix", "nanite-backend-fix", "nanite-frontend-fix", "user-fix", "claude-fix"}
+	// Required absence: every ambiguous-source fixture slug must have been wiped.
+	wantAbsent := []string{"analyst-fix", "backend-fix", "nanite-backend-fix", "user-fix"}
 	for _, slug := range wantAbsent {
 		if gotSlugs[slug] {
 			t.Errorf("non-internal fixture slug %q survived DELETE; expected wipe", slug)
@@ -153,7 +161,7 @@ func TestMigration061_EjectsNonInternalProfiles(t *testing.T) {
 	}
 
 	// Re-run the DELETE: idempotency check. A second pass must be a no-op.
-	if _, err := s.DB.Exec(`DELETE FROM agent_profiles WHERE source != 'internal'`); err != nil {
+	if _, err := s.DB.Exec(`DELETE FROM agent_profiles WHERE source NOT IN ('internal', 'project')`); err != nil {
 		t.Fatalf("re-run DELETE: %v", err)
 	}
 	var post2 int

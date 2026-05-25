@@ -3,6 +3,7 @@ package agent
 import (
 	"encoding/json"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/hollis-labs/nanite/internal/store"
@@ -23,6 +24,20 @@ func SlugFromFileID(id string) string {
 	return id[len(fileIDPrefix):]
 }
 
+// CanonicalID returns the identity used for the DB projection row and all
+// FK children. A managed file stamped with a UUID (`id:` frontmatter) owns
+// that UUID; embedded/unstamped definitions fall back to the deterministic
+// "file-<slug>" runtime identity that the harness hard-codes in several
+// places (e.g. the file-default chat-role-harness template binding). Keeping
+// unstamped agents on "file-<slug>" is deliberate — only managed-writable
+// files get a real UUID written back.
+func (d *Definition) CanonicalID() string {
+	if id := strings.TrimSpace(d.ID); id != "" {
+		return id
+	}
+	return fileIDPrefix + d.Slug
+}
+
 // ToProfile converts a Definition to a store.AgentProfile.
 // JSON array fields are marshaled from typed Go slices.
 // The ID is deterministic: "file-{slug}".
@@ -30,7 +45,7 @@ func (d *Definition) ToProfile() *store.AgentProfile {
 	now := time.Now().UTC().Format(time.RFC3339)
 
 	p := &store.AgentProfile{
-		ID:           fileIDPrefix + d.Slug,
+		ID:           d.CanonicalID(),
 		Name:         d.Name,
 		Slug:         d.Slug,
 		Avatar:       d.Avatar,
@@ -92,6 +107,26 @@ func (d *Definition) ToProfile() *store.AgentProfile {
 	// Describe hook. Default '[]' (no dispatch) matches the migration
 	// 059 column default for legacy / non-parent profiles.
 	p.ParentDispatchAllowlist = marshalSlice(d.ParentDispatchAllowlist)
+
+	p.RoleTools = marshalSlice(d.RoleTools)
+	p.RoleSkills = marshalSlice(d.RoleSkills)
+
+	if len(d.ContextPolicy) > 0 {
+		p.ContextPolicy = marshalJSONOr(d.ContextPolicy, "{}")
+	} else {
+		p.ContextPolicy = "{}"
+	}
+
+	p.Durable = d.Durable
+	if d.ActivationMode != "" {
+		p.ActivationMode = d.ActivationMode
+	}
+	if d.Class != "" {
+		p.Class = d.Class
+	}
+	if d.DefaultState != "" {
+		p.DefaultState = d.DefaultState
+	}
 
 	p.Settings = "{}"
 	return p

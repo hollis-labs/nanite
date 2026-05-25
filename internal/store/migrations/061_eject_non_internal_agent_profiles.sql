@@ -12,10 +12,11 @@
 -- the literal interpretation: wipe everything that does NOT carry the
 -- file-SOT marker.
 --
--- Project agents (source='nanite', sourced from .nanite/config.yaml) and
--- empty auto-stubs (source='auto') rehydrate via the adapter pipeline on the
--- next Nanite boot when applicable. User-authored UI rows do not — the user
--- re-creates as needed. This is the pre-launch posture
+-- Project-managed file-backed profiles (source='project', sourced from
+-- .nanite/agents/*.md) are now durable config source-of-truth and MUST
+-- survive reboots. Empty auto-stubs (source='auto') and legacy/user-authored
+-- ambiguous rows still rehydrate or re-create as needed. This is the
+-- updated posture
 -- (feedback_no_compat_shims, feedback_plan_is_best_effort).
 --
 -- ## Dependency chain
@@ -38,12 +39,13 @@
 -- ## Idempotency
 --
 -- The DELETE is naturally idempotent — subsequent boots find zero non-
--- internal rows and the statement is a no-op. Safe to re-run on every
+-- keep-list rows and the statement is a no-op. Safe to re-run on every
 -- migration pass.
 
 BEGIN;
 
-DELETE FROM agent_profiles WHERE source != 'internal';
+DELETE FROM agent_profiles
+ WHERE source NOT IN ('internal', 'project');
 
 COMMIT;
 

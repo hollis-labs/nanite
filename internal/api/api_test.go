@@ -17,7 +17,8 @@ import (
 
 func newTestAPI(t *testing.T) (*API, *http.ServeMux) {
 	t.Helper()
-	dbPath := filepath.Join(t.TempDir(), "test.db")
+	root := t.TempDir()
+	dbPath := filepath.Join(root, "test.db")
 	s, err := store.New(context.Background(), dbPath)
 	if err != nil {
 		t.Fatalf("store.New: %v", err)
@@ -25,8 +26,10 @@ func newTestAPI(t *testing.T) (*API, *http.ServeMux) {
 	t.Cleanup(func() { s.Close() })
 
 	svc, err := service.NewContainer(service.ContainerConfig{
-		Store:     s,
-		Providers: provider.NewRegistry(),
+		Store:             s,
+		Providers:         provider.NewRegistry(),
+		WorkingDir:        root,
+		ManagedConfigRoot: filepath.Join(root, ".nanite"),
 	})
 	if err != nil {
 		t.Fatalf("service.NewContainer: %v", err)

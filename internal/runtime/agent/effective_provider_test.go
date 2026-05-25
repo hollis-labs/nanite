@@ -1,8 +1,10 @@
 package agent
 
 import (
+	"path/filepath"
 	"testing"
 
+	"github.com/hollis-labs/nanite/internal/permission"
 	"github.com/hollis-labs/nanite/internal/store"
 )
 
@@ -133,4 +135,79 @@ func TestComposeBootdirParams_LegacyProfileProviderStillWorks(t *testing.T) {
 	if _, ok := layout.(codexLayout); !ok {
 		t.Fatalf("composeBootdirParams returned %T, want codexLayout (legacy profile-driven dispatch must keep working)", layout)
 	}
+}
+
+func TestComposeBootdirParams_IncludesSessionPathGrantsInCLIWritableRoots(t *testing.T) {
+	sessionID := "sess-grants"
+	projectRoot := t.TempDir()
+	explicitDir := t.TempDir()
+	explicitFile := filepath.Join(explicitDir, "notes.md")
+	grants := permission.NewPathGrants()
+	grants.RegisterFromUserMessage(sessionID, explicitFile)
+
+	layout, params := composeBootdirParams(&Dependencies{
+		CLIWritableRoots: []string{projectRoot},
+		PathGrants:       grants,
+	}, Options{SessionID: sessionID}, &store.AgentProfile{DefaultProvider: "codex"}, sessionID)
+
+	if _, ok := layout.(codexLayout); !ok {
+		t.Fatalf("composeBootdirParams returned %T, want codexLayout", layout)
+	}
+
+	want := map[string]bool{
+		projectRoot: true,
+		explicitDir: true,
+	}
+	if len(params.CLIWritableRoots) != len(want) {
+		t.Fatalf("CLIWritableRoots = %v, want %v", params.CLIWritableRoots, keys(want))
+	}
+	for _, root := range params.CLIWritableRoots {
+		if !want[root] {
+			t.Fatalf("unexpected CLIWritableRoot %q (roots=%v)", root, params.CLIWritableRoots)
+		}
+		delete(want, root)
+	}
+	if len(want) != 0 {
+		t.Fatalf("missing CLIWritableRoots %v (roots=%v)", keys(want), params.CLIWritableRoots)
+	}
+}
+
+func TestComposeBootdirParams_IncludesLineagePathGrantsInCLIWritableRoots(t *testing.T) {
+	parentID := "sess-parent"
+	childID := "sess-child"
+	parentDir := t.TempDir()
+	childDir := t.TempDir()
+	grants := permission.NewPathGrants()
+	grants.RegisterFromUserMessage(parentID, filepath.Join(parentDir, "design.md"))
+	grants.RegisterFromUserMessage(childID, filepath.Join(childDir, "todo.md"))
+	grants.RegisterLineage(childID, parentID)
+
+	_, params := composeBootdirParams(&Dependencies{
+		PathGrants: grants,
+	}, Options{SessionID: childID}, &store.AgentProfile{DefaultProvider: "claude"}, childID)
+
+	want := map[string]bool{
+		parentDir: true,
+		childDir:  true,
+	}
+	if len(params.CLIWritableRoots) != len(want) {
+		t.Fatalf("CLIWritableRoots = %v, want %v", params.CLIWritableRoots, keys(want))
+	}
+	for _, root := range params.CLIWritableRoots {
+		if !want[root] {
+			t.Fatalf("unexpected CLIWritableRoot %q (roots=%v)", root, params.CLIWritableRoots)
+		}
+		delete(want, root)
+	}
+	if len(want) != 0 {
+		t.Fatalf("missing CLIWritableRoots %v (roots=%v)", keys(want), params.CLIWritableRoots)
+	}
+}
+
+func keys(m map[string]bool) []string {
+	out := make([]string, 0, len(m))
+	for k := range m {
+		out = append(out, k)
+	}
+	return out
 }

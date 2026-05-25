@@ -80,6 +80,59 @@ func TestDurableAgentServiceLifecycleRequests(t *testing.T) {
 	}
 }
 
+func TestDurableAgentList_ReconcilesTaggedProfilesIntoInstances(t *testing.T) {
+	st := newDurableAgentServiceTestStore(t)
+	profile := &store.AgentProfile{
+		Name:         "Tagged Durable Agent",
+		Slug:         "tagged-durable-agent",
+		SystemPrompt: "x",
+		Tags:         `["durable-agent","advisor"]`,
+		Class:        store.DurableAgentClassAdvisor,
+		DefaultState: store.DurableAgentStatusSleeping,
+	}
+	if err := st.CreateAgent(profile); err != nil {
+		t.Fatalf("CreateAgent: %v", err)
+	}
+
+	svc := NewDurableAgentService(st)
+	instances, err := svc.List(context.Background(), false)
+	if err != nil {
+		t.Fatalf("List: %v", err)
+	}
+	if len(instances) != 1 {
+		t.Fatalf("instances len = %d, want 1: %+v", len(instances), instances)
+	}
+	if instances[0].ProfileID != profile.ID || instances[0].Slug != profile.Slug {
+		t.Fatalf("instance = %+v, want profile_id=%s slug=%s", instances[0], profile.ID, profile.Slug)
+	}
+	if instances[0].LaunchSourceType != store.DurableAgentLaunchDurableAdvisor {
+		t.Fatalf("launch_source_type = %q, want %q", instances[0].LaunchSourceType, store.DurableAgentLaunchDurableAdvisor)
+	}
+}
+
+func TestDurableAgentList_DoesNotPromoteNonDurableProfiles(t *testing.T) {
+	st := newDurableAgentServiceTestStore(t)
+	profile := &store.AgentProfile{
+		Name:         "Regular Agent",
+		Slug:         "regular-agent",
+		SystemPrompt: "x",
+		Tags:         `["advisor"]`,
+		Class:        store.DurableAgentClassAdvisor,
+	}
+	if err := st.CreateAgent(profile); err != nil {
+		t.Fatalf("CreateAgent: %v", err)
+	}
+
+	svc := NewDurableAgentService(st)
+	instances, err := svc.List(context.Background(), false)
+	if err != nil {
+		t.Fatalf("List: %v", err)
+	}
+	if len(instances) != 0 {
+		t.Fatalf("instances = %+v, want empty", instances)
+	}
+}
+
 func TestDurableAgentLaunchPolicyByLifecycleClass(t *testing.T) {
 	cases := []struct {
 		class    string
@@ -136,6 +189,9 @@ func TestDurableAgentStartCreatesOrReusesSession(t *testing.T) {
 	}
 	if first.Instance.Status != store.DurableAgentStatusActive || first.Instance.CurrentSessionID != first.Session.ID {
 		t.Fatalf("first instance state = %+v session=%+v", first.Instance, first.Session)
+	}
+	if first.Session.Title != "Start Instance" {
+		t.Fatalf("first session title = %q, want durable agent name", first.Session.Title)
 	}
 	rels, err := svc.ListSessions(context.Background(), inst.ID)
 	if err != nil {
@@ -197,6 +253,9 @@ func TestDurableAgentProcessStartCreatesFreshWakeSession(t *testing.T) {
 	}
 	if first.Session.ID == second.Session.ID || second.Policy.AttachmentRelation != store.DurableAgentSessionRelationWake {
 		t.Fatalf("process starts did not create fresh wake sessions: first=%+v second=%+v", first, second)
+	}
+	if first.Session.Title != "Process Instance" || second.Session.Title != "Process Instance" {
+		t.Fatalf("process session titles = %q / %q, want durable agent name", first.Session.Title, second.Session.Title)
 	}
 }
 

@@ -74,14 +74,29 @@ export function ChatWorkingDrawer({
   onDismissCircuit,
   onDismissInterruptedTurn,
 }: ChatWorkingDrawerProps = {}) {
-  const drawer = useLayoutStore((s) => s.chatWorkingDrawer)
-  const setDrawer = useLayoutStore((s) => s.setChatWorkingDrawer)
-  const cardTabs = useLayoutStore((s) => s.chatWorkingDrawerCardTabs)
+  const activeSessionId = useAppStore((s) => s.activeSessionId)
+  const defaultDrawerTab = useLayoutStore((s) => s.defaultDrawerTab)
+  const sessionDrawerState = useLayoutStore((s) =>
+    activeSessionId ? s.chatWorkingDrawerSessions[activeSessionId] : undefined,
+  )
+  const drawer = sessionDrawerState?.drawer ?? {
+    open: false,
+    height: 200,
+    activeTab: defaultDrawerTab || 'scratchpad',
+  }
+  const setDrawerBase = useLayoutStore((s) => s.setChatWorkingDrawer)
+  const setDrawer = useCallback(
+    (patch: Partial<typeof drawer>) => {
+      if (!activeSessionId) return
+      setDrawerBase(patch, activeSessionId)
+    },
+    [activeSessionId, setDrawerBase],
+  )
+  const cardTabs = sessionDrawerState?.cardTabs ?? []
   const appendCardTab = useLayoutStore((s) => s.appendChatWorkingDrawerCardTab)
   const removeCardTab = useLayoutStore((s) => s.removeChatWorkingDrawerCardTab)
   const panelEnvelopes = useLayoutStore((s) => s.panelEnvelopes)
   const clearPanelEnvelopes = useLayoutStore((s) => s.clearPanelEnvelopes)
-  const activeSessionId = useAppStore((s) => s.activeSessionId)
   const queryClient = useQueryClient()
   const { data: settings } = useSettings()
   const developerMode = settings?.developer_mode ?? false
@@ -89,7 +104,8 @@ export function ChatWorkingDrawer({
   // Reactive: when a new envelope arrives in panelEnvelopes['bottom_chat_drawer'],
   // append it as a DynamicCardTab and clear the inbox slot.
   useEffect(() => {
-    const incoming = panelEnvelopes['bottom_chat_drawer'] ?? []
+    if (!activeSessionId) return
+    const incoming = panelEnvelopes[`bottom_chat_drawer:${activeSessionId}`] ?? []
     if (incoming.length === 0) return
     for (const env of incoming) {
       // `focused` isn't a declared field on Envelope but the routing layer
@@ -103,10 +119,10 @@ export function ChatWorkingDrawer({
         pinned: false,
         createdAt: Date.now(),
       }
-      appendCardTab(tab)
+      appendCardTab(tab, activeSessionId)
     }
-    clearPanelEnvelopes('bottom_chat_drawer')
-  }, [panelEnvelopes, appendCardTab, clearPanelEnvelopes])
+    clearPanelEnvelopes('bottom_chat_drawer', activeSessionId)
+  }, [activeSessionId, panelEnvelopes, appendCardTab, clearPanelEnvelopes])
 
   const visibleFixedTabs = developerMode
     ? FIXED_TABS
@@ -145,10 +161,12 @@ export function ChatWorkingDrawer({
   // closes the drawer and snaps height back to a reasonable default.
   // While an alert overlay is active, the drag is locked so the drawer stays
   // at the size it had when the alert opened.
-  const dragRef = useRef<{ y: number; height: number } | null>(null)
+  const dragRef = useRef<{ pointerId: number; y: number; height: number } | null>(null)
   const onPointerDown = (e: React.PointerEvent) => {
     if (alertActive) return
-    dragRef.current = { y: e.clientY, height: drawer.height || 200 }
+    if (e.button !== 0) return
+    e.preventDefault()
+    dragRef.current = { pointerId: e.pointerId, y: e.clientY, height: drawer.height || 200 }
     e.currentTarget.setPointerCapture(e.pointerId)
     if (!drawer.open) setDrawer({ open: true })
   }
@@ -156,15 +174,31 @@ export function ChatWorkingDrawer({
     if (alertActive) return
     const d = dragRef.current
     if (!d) return
+    if (d.pointerId !== e.pointerId) return
+    if ((e.buttons & 1) !== 1) {
+      dragRef.current = null
+      if (e.currentTarget.hasPointerCapture(e.pointerId)) {
+        e.currentTarget.releasePointerCapture(e.pointerId)
+      }
+      return
+    }
     const next = Math.max(0, d.height - (e.clientY - d.y))
     setDrawer({ height: next })
   }
   const onPointerUp = (e: React.PointerEvent) => {
-    if (!dragRef.current) return
+    const d = dragRef.current
+    if (!d || d.pointerId !== e.pointerId) return
     dragRef.current = null
-    e.currentTarget.releasePointerCapture(e.pointerId)
+    if (e.currentTarget.hasPointerCapture(e.pointerId)) {
+      e.currentTarget.releasePointerCapture(e.pointerId)
+    }
     if (alertActive) return
     if (drawer.height < 24) setDrawer({ open: false, height: 200 })
+  }
+  const onLostPointerCapture = (e: React.PointerEvent) => {
+    if (dragRef.current?.pointerId === e.pointerId) {
+      dragRef.current = null
+    }
   }
   const onDoubleClick = () => {
     if (alertActive) return
@@ -222,7 +256,7 @@ export function ChatWorkingDrawer({
       const dbId = id.slice(5)
       try {
         await api.unpinDrawerCard(dbId)
-        removeCardTab(id)
+        removeCardTab(id, activeSessionId)
       } catch (err) {
         console.error('Unpin failed:', err)
         showChatToast('Failed to unpin card', 'info')
@@ -240,7 +274,7 @@ export function ChatWorkingDrawer({
           payload: JSON.stringify(tab.payload),
         })
         queryClient.invalidateQueries({ queryKey: ['drawer-cards', activeSessionId] })
-        removeCardTab(id)
+        removeCardTab(id, activeSessionId)
       } catch (err) {
         if (err instanceof DrawerPinCapError) {
           showChatToast(`Pinned-card cap reached (${CHAT_DRAWER_PIN_CAP}). Unpin one to free a slot.`, 'info')
@@ -280,6 +314,7 @@ export function ChatWorkingDrawer({
             onPointerMove={onPointerMove}
             onPointerUp={onPointerUp}
             onPointerCancel={onPointerUp}
+            onLostPointerCapture={onLostPointerCapture}
             onDoubleClick={onDoubleClick}
             role="separator"
             aria-orientation="horizontal"
@@ -342,7 +377,7 @@ export function ChatWorkingDrawer({
                         {t.closeable && (
                           <button
                             type="button"
-                            onClick={() => removeCardTab(t.id)}
+                            onClick={() => removeCardTab(t.id, activeSessionId)}
                             className="opacity-0 group-hover:opacity-100 transition-opacity shrink-0"
                             aria-label="Close tab"
                           >
@@ -414,32 +449,44 @@ function envelopeFallbackLabel(env: Envelope): string {
 const SCRATCH_STORAGE_KEY = 'nanite:scratchpad'
 
 function ScratchpadTab() {
+  const activeSessionId = useAppStore((s) => s.activeSessionId)
+  const storageKey = activeSessionId
+    ? `${SCRATCH_STORAGE_KEY}:${activeSessionId}`
+    : SCRATCH_STORAGE_KEY
   const [content, setContent] = useState<string>(() => {
     try {
-      return localStorage.getItem(SCRATCH_STORAGE_KEY) ?? ''
+      return localStorage.getItem(storageKey) ?? ''
     } catch {
       return ''
     }
   })
 
+  useEffect(() => {
+    try {
+      setContent(localStorage.getItem(storageKey) ?? '')
+    } catch {
+      setContent('')
+    }
+  }, [storageKey])
+
   const handleChange = useCallback((e: React.ChangeEvent<HTMLTextAreaElement>) => {
     const val = e.target.value
     setContent(val)
     try {
-      localStorage.setItem(SCRATCH_STORAGE_KEY, val)
+      localStorage.setItem(storageKey, val)
     } catch {
       // Storage unavailable — in-memory only.
     }
-  }, [])
+  }, [storageKey])
 
   const handleClear = useCallback(() => {
     setContent('')
     try {
-      localStorage.removeItem(SCRATCH_STORAGE_KEY)
+      localStorage.removeItem(storageKey)
     } catch {
       /* ignore */
     }
-  }, [])
+  }, [storageKey])
 
   return (
     <div className="flex flex-col h-full">
@@ -473,8 +520,12 @@ function ScratchpadTab() {
 // read-only, monospace, auto-scroll-to-bottom.
 
 function Terminal1Tab() {
-  const chunks = useShellStore((s) => s.shellChunks)
-  const running = useShellStore((s) => s.shellRunning)
+  const activeSessionId = useAppStore((s) => s.activeSessionId)
+  const terminalState = useShellStore((s) =>
+    activeSessionId ? s.sessions[activeSessionId] : undefined,
+  )
+  const chunks = terminalState?.shellChunks ?? []
+  const running = terminalState?.shellRunning ?? false
   const output = useMemo(() => chunks.join(''), [chunks])
   const ref = useRef<HTMLPreElement>(null)
   useEffect(() => {
@@ -594,4 +645,3 @@ function SessionContextTab() {
     </div>
   )
 }
-

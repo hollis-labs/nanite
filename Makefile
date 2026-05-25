@@ -32,6 +32,9 @@ check-envelopes:
 
 build-ui:
 	cd ui && npm run build
+	rm -rf internal/server/ui_dist
+	mkdir -p internal/server/ui_dist
+	cp -R ui/dist/. internal/server/ui_dist/
 
 # Development
 dev:

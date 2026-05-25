@@ -67,11 +67,11 @@ func TestHandleCreateAgent_RejectsInternalSource(t *testing.T) {
 	}
 }
 
-// TestHandleUpdateAgent_InternalSourceRefFallback is the regression pin
-// for PR-152 review round 1 (item E): when an internal-source agent has
-// an empty SourceRef, the 409 message must still surface a usable file
-// hint derived from the slug, not "edit  and restart Nanite".
-func TestHandleUpdateAgent_InternalSourceRefFallback(t *testing.T) {
+// TestHandleUpdateAgent_InternalRejectedAsHarnessOwned pins the new editability
+// gate: embedded internal harness profiles are not editable via the API and
+// must be rejected with a structured 409 (manage_class=internal, no
+// copy-to-managed dead-end), regardless of whether SourceRef is populated.
+func TestHandleUpdateAgent_InternalRejectedAsHarnessOwned(t *testing.T) {
 	a, mux := newTestAPI(t)
 
 	// Seed an internal-source row with deliberately empty source_ref.
@@ -97,13 +97,11 @@ func TestHandleUpdateAgent_InternalSourceRefFallback(t *testing.T) {
 		t.Fatalf("PUT /api/agents/{id} on internal source: expected 409, got %d; body: %s", w.Code, w.Body.String())
 	}
 	msg := w.Body.String()
-	// Must mention the fallback path interpolating the slug. Must NOT
-	// degenerate to "edit  and restart Nanite" (two spaces) which would
-	// indicate the empty SourceRef was concatenated raw.
-	if strings.Contains(msg, "edit  and") {
-		t.Errorf("error message degenerated when SourceRef is empty: %s", msg)
+	if !strings.Contains(msg, `"manage_class":"internal"`) {
+		t.Errorf("error response missing manage_class=internal: %s", msg)
 	}
-	if !strings.Contains(msg, "internal/agent/builtin/profiles/test-internal-empty-ref.md") {
-		t.Errorf("error message missing slug-derived fallback path: %s", msg)
+	// Internal agents are harness-owned: no copy-to-managed dead-end offered.
+	if !strings.Contains(msg, `"copy_to_managed":false`) {
+		t.Errorf("internal agent should not offer copy-to-managed: %s", msg)
 	}
 }

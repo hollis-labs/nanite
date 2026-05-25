@@ -661,7 +661,7 @@ func (a *API) requireAgent(w http.ResponseWriter, r *http.Request) (*store.Agent
 		a.errorResp(w, http.StatusBadRequest, "agent id is required")
 		return nil, false
 	}
-	agent, err := a.Services.Store.GetAgent(id)
+	agent, err := a.Services.Agents.Get(r.Context(), id)
 	if err != nil {
 		a.errorResp(w, http.StatusNotFound, "agent not found")
 		return nil, false
@@ -669,17 +669,19 @@ func (a *API) requireAgent(w http.ResponseWriter, r *http.Request) (*store.Agent
 	return agent, true
 }
 
+// requireMutableAgent resolves the agent and enforces the managed-editability
+// gate used by all capability/reflex write endpoints. Managed file-backed
+// agents are now fully writable in place (their reflexes, known tools/skills,
+// procedures, and knowledge seeds persist against the DB projection keyed by
+// the agent's stamped UUID). Embedded internal and plugin/vendor agents are
+// rejected with a copy-to-managed affordance rather than a dead-end.
 func (a *API) requireMutableAgent(w http.ResponseWriter, r *http.Request) (*store.AgentProfile, bool) {
 	agent, ok := a.requireAgent(w, r)
 	if !ok {
 		return nil, false
 	}
-	if agent.Source == "internal" {
-		ref := agent.SourceRef
-		if ref == "" {
-			ref = "internal/agent/builtin/profiles/" + agent.Slug + ".md"
-		}
-		a.errorResp(w, http.StatusConflict, "agent is internal (file source of truth); edit "+ref+" and restart Nanite")
+	if class := a.Services.AgentConfig.Classify(agent); !class.Editable() {
+		a.writeNotManaged(w, agent, class)
 		return nil, false
 	}
 	return agent, true

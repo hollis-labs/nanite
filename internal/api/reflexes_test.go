@@ -52,6 +52,25 @@ func TestReflexesAPI_CreatePatchDeleteAgentReflex(t *testing.T) {
 	}
 }
 
+func TestReflexesAPI_ListSupportsFileBackedAgent(t *testing.T) {
+	_, mux := newTestAPI(t)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/agents/file-default/reflexes", nil)
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("list file-backed reflexes = %d body=%s", w.Code, w.Body.String())
+	}
+
+	var rows []store.AgentReflex
+	if err := json.NewDecoder(w.Body).Decode(&rows); err != nil {
+		t.Fatalf("decode reflexes: %v", err)
+	}
+	if rows == nil {
+		t.Fatal("expected JSON array, got null")
+	}
+}
+
 func TestReflexesAPI_PendingReviewAndValidate(t *testing.T) {
 	a, mux := newTestAPI(t)
 	pendingID, err := a.Services.Store.InsertPendingReflex(context.Background(), store.PendingReflex{

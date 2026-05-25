@@ -11,13 +11,21 @@
 
 import { afterEach, describe, expect, it } from "vitest";
 import { useLayoutStore } from "@/stores/useLayoutStore";
+import { useShellStore } from "@/stores/useShellStore";
 import { CHAT_DRAWER_PIN_CAP } from "@/lib/constants";
-import type { Envelope } from "@/lib/types";
+import type { DynamicCardTab, Envelope } from "@/lib/types";
 
 afterEach(() => {
   useLayoutStore.setState({
     panelEnvelopes: {},
     defaultDrawerTab: "scratchpad",
+    chatWorkingDrawerSessions: {},
+  });
+  useShellStore.setState({
+    sessions: {},
+    shellChunks: [],
+    shellRunning: false,
+    pendingShellCommand: null,
   });
 });
 
@@ -69,6 +77,68 @@ describe("panelEnvelopes (transient slot)", () => {
     store.pushPanelEnvelope("bottom_chat_drawer", stubEnvelope("e1"));
     store.clearPanelEnvelopes("bottom_chat_drawer");
     expect(useLayoutStore.getState().panelEnvelopes["bottom_chat_drawer"]).toBeUndefined();
+  });
+
+  it("bottom drawer envelopes can be scoped by session", () => {
+    const store = useLayoutStore.getState();
+    store.pushPanelEnvelope("bottom_chat_drawer", stubEnvelope("a1"), "session-a");
+    store.pushPanelEnvelope("bottom_chat_drawer", stubEnvelope("b1"), "session-b");
+
+    expect(useLayoutStore.getState().panelEnvelopes["bottom_chat_drawer:session-a"]?.[0]?.id).toBe("a1");
+    expect(useLayoutStore.getState().panelEnvelopes["bottom_chat_drawer:session-b"]?.[0]?.id).toBe("b1");
+
+    store.clearPanelEnvelopes("bottom_chat_drawer", "session-a");
+    expect(useLayoutStore.getState().panelEnvelopes["bottom_chat_drawer:session-a"]).toBeUndefined();
+    expect(useLayoutStore.getState().panelEnvelopes["bottom_chat_drawer:session-b"]?.[0]?.id).toBe("b1");
+  });
+});
+
+describe("chat working drawer session state", () => {
+  const tab = (id: string): DynamicCardTab => ({
+    id,
+    label: id,
+    payload: {
+      kind: "envelope",
+      version: 1,
+      type: "info-card",
+      id,
+    },
+    focused: true,
+    pinned: false,
+    createdAt: Date.now(),
+  });
+
+  it("keeps drawer active tab and card tabs per session", () => {
+    const store = useLayoutStore.getState();
+    store.setChatWorkingDrawer({ open: true, activeTab: "artifacts" }, "session-a");
+    store.appendChatWorkingDrawerCardTab(tab("card:a"), "session-a");
+    store.setChatWorkingDrawer({ open: false, activeTab: "scratchpad" }, "session-b");
+
+    const state = useLayoutStore.getState().chatWorkingDrawerSessions;
+    expect(state["session-a"]?.drawer.open).toBe(true);
+    expect(state["session-a"]?.drawer.activeTab).toBe("card:a");
+    expect(state["session-a"]?.cardTabs).toHaveLength(1);
+    expect(state["session-b"]?.drawer.open).toBe(false);
+    expect(state["session-b"]?.drawer.activeTab).toBe("scratchpad");
+    expect(state["session-b"]?.cardTabs).toHaveLength(0);
+  });
+});
+
+describe("Terminal-1 session state", () => {
+  it("keeps output and pending command per session", () => {
+    const store = useShellStore.getState();
+    store.appendShellOutput("session-a", "a output\n");
+    store.appendShellOutput("session-b", "b output\n");
+    store.setPendingShellCommand("session-b", "pwd");
+    store.setShellRunning("session-a", true);
+
+    const state = useShellStore.getState().sessions;
+    expect(state["session-a"]?.shellChunks.join("")).toBe("a output\n");
+    expect(state["session-a"]?.shellRunning).toBe(true);
+    expect(state["session-a"]?.pendingShellCommand).toBeNull();
+    expect(state["session-b"]?.shellChunks.join("")).toBe("b output\n");
+    expect(state["session-b"]?.pendingShellCommand).toBe("pwd");
+    expect(state["session-b"]?.shellRunning).toBe(false);
   });
 });
 

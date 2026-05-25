@@ -4,7 +4,9 @@
 -- The migration runner has no schema ledger, so this file is written to be
 -- rerunnable. SQLite cannot widen CHECK constraints in place, so the two
 -- durable-agent tables are rebuilt with the Phase 6 status and relation
--- vocabulary. Comments avoid semicolons because splitSQL is semicolon based.
+-- vocabulary. Later reruns may already contain the Phase 7 "stopped" status,
+-- so the rebuilt CHECK must tolerate that value too. Comments avoid semicolons
+-- because splitSQL is semicolon based.
 
 PRAGMA foreign_keys = OFF;
 
@@ -28,7 +30,7 @@ CREATE TABLE IF NOT EXISTS durable_agent_instances_new (
     launch_source_id   TEXT NOT NULL DEFAULT '',
     work_root          TEXT NOT NULL DEFAULT '',
     status             TEXT NOT NULL DEFAULT 'sleeping'
-        CHECK(status IN ('sleeping','starting','active','paused','start_requested','stop_requested','resume_requested','failed','archived')),
+        CHECK(status IN ('sleeping','starting','active','paused','stopped','start_requested','stop_requested','resume_requested','failed','archived')),
     current_session_id TEXT NOT NULL DEFAULT '',
     failure_reason     TEXT NOT NULL DEFAULT '',
     metadata_json      TEXT NOT NULL DEFAULT '{}',

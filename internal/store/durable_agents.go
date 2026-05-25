@@ -192,6 +192,20 @@ func (s *Store) GetDurableAgentInstance(id string) (*DurableAgentInstance, error
 	return &inst, nil
 }
 
+func (s *Store) GetDurableAgentInstanceBySlug(slug string) (*DurableAgentInstance, error) {
+	var inst DurableAgentInstance
+	err := scanDurableAgentInstance(s.DB.QueryRow(
+		`SELECT `+durableAgentInstanceColumns+` FROM durable_agent_instances WHERE slug = ?`, slug,
+	), &inst)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, ErrDurableAgentInstanceNotFound
+	}
+	if err != nil {
+		return nil, fmt.Errorf("get durable_agent_instances by slug %s: %w", slug, err)
+	}
+	return &inst, nil
+}
+
 func (s *Store) ListDurableAgentInstances(includeArchived bool) ([]DurableAgentInstance, error) {
 	where := "WHERE status != 'archived'"
 	if includeArchived {
@@ -250,6 +264,74 @@ func (s *Store) UpdateDurableAgentInstance(id string, upd DurableAgentInstanceUp
 		return nil, fmt.Errorf("update durable_agent_instances %s: %w", id, err)
 	}
 	return s.GetDurableAgentInstance(id)
+}
+
+func (s *Store) SyncDurableAgentInstanceConfig(inst *DurableAgentInstance) (*DurableAgentInstance, error) {
+	if inst == nil {
+		return nil, errors.New("SyncDurableAgentInstanceConfig: nil instance")
+	}
+	existing, err := s.GetDurableAgentInstanceBySlug(inst.Slug)
+	if err == nil && existing != nil {
+		if _, err := s.GetAgent(inst.ProfileID); err != nil {
+			return nil, fmt.Errorf("SyncDurableAgentInstanceConfig: profile %s: %w", inst.ProfileID, err)
+		}
+		if inst.ID == "" {
+			inst.ID = existing.ID
+		}
+		if inst.Status == "" {
+			inst.Status = existing.Status
+		}
+		if inst.Status != DurableAgentStatusArchived {
+			inst.CurrentSessionID = existing.CurrentSessionID
+			inst.FailureReason = existing.FailureReason
+			inst.ArchivedAt = existing.ArchivedAt
+		}
+		if inst.CreatedAt.IsZero() {
+			inst.CreatedAt = existing.CreatedAt
+		}
+		inst.UpdatedAt = time.Now().UTC()
+		if inst.Status == DurableAgentStatusArchived && inst.ArchivedAt == nil {
+			now := inst.UpdatedAt
+			inst.ArchivedAt = &now
+		}
+		if err := validateDurableAgentInstance(inst); err != nil {
+			return nil, err
+		}
+		_, err := s.DB.Exec(
+			`UPDATE durable_agent_instances
+			    SET name = ?, slug = ?, profile_id = ?, lifecycle_class = ?, provider = ?, model = ?,
+			        runtime_kind = ?, launch_source_type = ?, launch_source_id = ?, work_root = ?,
+			        status = ?, current_session_id = ?, failure_reason = ?, metadata_json = ?,
+			        updated_at = ?, archived_at = ?
+			  WHERE id = ?`,
+			inst.Name, inst.Slug, inst.ProfileID, inst.LifecycleClass, inst.Provider, inst.Model,
+			inst.RuntimeKind, inst.LaunchSourceType, inst.LaunchSourceID, inst.WorkRoot,
+			inst.Status, inst.CurrentSessionID, inst.FailureReason, inst.MetadataJSON,
+			inst.UpdatedAt.UTC().Format(time.RFC3339Nano), formatOptionalTime(inst.ArchivedAt),
+			existing.ID,
+		)
+		if err != nil {
+			return nil, fmt.Errorf("sync durable_agent_instances %s: %w", existing.ID, err)
+		}
+		return s.GetDurableAgentInstance(existing.ID)
+	}
+	if errors.Is(err, ErrDurableAgentInstanceNotFound) {
+		if inst.Status == "" {
+			if inst.ArchivedAt != nil {
+				inst.Status = DurableAgentStatusArchived
+			} else {
+				inst.Status = DurableAgentStatusSleeping
+			}
+		}
+		if err := s.CreateDurableAgentInstance(inst); err != nil {
+			return nil, err
+		}
+		return s.GetDurableAgentInstance(inst.ID)
+	}
+	if err != nil {
+		return nil, err
+	}
+	return existing, nil
 }
 
 func (s *Store) SetDurableAgentInstanceStatus(id, status string) (*DurableAgentInstance, error) {

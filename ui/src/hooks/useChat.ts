@@ -355,6 +355,16 @@ export function useChat(sessionId: string | null) {
   }, [loadMessages, sessionId, queryClient]);
 
   useEffect(() => {
+    return () => {
+      if (eventSourceRef.current) {
+        eventSourceRef.current.close();
+        eventSourceRef.current = null;
+      }
+      currentMessageIdRef.current = null;
+    };
+  }, [sessionId]);
+
+  useEffect(() => {
     if (!sessionId || !isStreaming) return;
     const timer = window.setInterval(() => {
       const assistantMessageID = currentMessageIdRef.current;

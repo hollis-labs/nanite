@@ -227,6 +227,42 @@ export interface WorkRootHint {
   description?: string;
 }
 
+export interface MetaHarness {
+  id: string;
+  display_name: string;
+  launch: string;
+  ui_label: string;
+  provider: string;
+  provider_alias?: string;
+  workdir: string;
+  boot_mode?: string;
+  args: string[];
+  env: Record<string, string>;
+  role?: string;
+  project?: string;
+  work_root?: string;
+  tracking_root?: string;
+  mcp_servers: string[];
+  profile_path: string;
+  launch_path: string;
+}
+
+export interface MetaHarnessInput {
+  id?: string;
+  display_name?: string;
+  ui_label?: string;
+  provider?: string;
+  workdir?: string;
+  boot_mode?: string;
+  args?: string[];
+  env?: Record<string, string>;
+  role?: string;
+  project?: string;
+  work_root?: string;
+  tracking_root?: string;
+  mcp_servers?: string[];
+}
+
 export interface DurableAgentWakePayload {
   reason: DurableAgentWakeReason | string;
   prompt?: string;
@@ -758,6 +794,17 @@ export interface AgentProfile {
   activation_mode?: string;
   class?: string;
   default_state?: string;
+  // Managed file-backed editability contract (additive backend fields).
+  // manage_class: one of "managed" | "internal" | "plugin" | "external".
+  // editable: true only when manage_class === "managed" — single source of
+  //   truth for whether the GUI may edit/delete in place.
+  // copy_to_managed: true for plugin/external (offer "Make editable" fork);
+  //   false for internal and managed.
+  // revision: optimistic-concurrency token (file content hash); may be "".
+  manage_class?: string;
+  editable?: boolean;
+  copy_to_managed?: boolean;
+  revision?: string;
 }
 
 export type CreateAgentProfileRequest = Pick<

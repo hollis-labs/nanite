@@ -1,11 +1,14 @@
 package api
 
 import (
+	"errors"
 	"log/slog"
 	"net/http"
 
+	agentpkg "github.com/hollis-labs/nanite/internal/agent"
 	"github.com/hollis-labs/nanite/internal/agentvalidation"
 	"github.com/hollis-labs/nanite/internal/safego"
+	"github.com/hollis-labs/nanite/internal/service"
 	"github.com/hollis-labs/nanite/internal/store"
 )
 
@@ -15,7 +18,41 @@ func (a *API) handleListAgents(w http.ResponseWriter, r *http.Request) {
 		a.errorResp(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	a.jsonResp(w, http.StatusOK, agents)
+	// The management surface (Admin > Agents) passes ?manageable=1 to exclude
+	// embedded internal harness primitives, which are not user content. Other
+	// consumers (chat picker, roster, command palette) get the full list so
+	// the canonical Chat/Planner/Worker agents remain selectable.
+	manageableOnly := r.URL.Query().Get("manageable") == "1" || r.URL.Query().Get("manageable") == "true"
+	views := make([]AgentProfileView, 0, len(agents))
+	for i := range agents {
+		view := a.agentView(agents[i])
+		if manageableOnly && view.ManageClass == string(agentpkg.ManageClassInternal) {
+			continue
+		}
+		views = append(views, view)
+	}
+	a.jsonResp(w, http.StatusOK, views)
+}
+
+// agentView decorates a stored profile with management metadata (class,
+// editability, file revision) for the GUI. nil-safe when AgentConfig is unset
+// (lightweight test setups) — it falls back to source-only classification.
+func (a *API) agentView(p store.AgentProfile) AgentProfileView {
+	var class agentpkg.ManageClass
+	revision := ""
+	if a.Services != nil && a.Services.AgentConfig != nil {
+		class = a.Services.AgentConfig.Classify(&p)
+		revision = a.Services.AgentConfig.Revision(&p)
+	} else {
+		class = agentpkg.Classification{}.Classify(p.Source, p.SourceRef)
+	}
+	return AgentProfileView{
+		AgentProfile:  p,
+		ManageClass:   string(class),
+		Editable:      class.Editable(),
+		CopyToManaged: class.CopyToManagedAllowed(),
+		Revision:      revision,
+	}
 }
 
 func (a *API) handleCreateAgent(w http.ResponseWriter, r *http.Request) {
@@ -66,6 +103,13 @@ func (a *API) handleCreateAgent(w http.ResponseWriter, r *http.Request) {
 		SourceRef:               req.SourceRef,
 		Icon:                    req.Icon,
 		ParentDispatchAllowlist: req.ParentDispatchAllowlist,
+		RoleTools:               req.RoleTools,
+		RoleSkills:              req.RoleSkills,
+		ContextPolicy:           req.ContextPolicy,
+		Durable:                 req.Durable,
+		ActivationMode:          req.ActivationMode,
+		Class:                   req.Class,
+		DefaultState:            req.DefaultState,
 	}
 	// Validate agent config before persisting.
 	if vr := agentvalidation.ValidateAgentConfig(agent); !vr.OK() {
@@ -81,11 +125,17 @@ func (a *API) handleCreateAgent(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	if err := a.Services.Store.CreateAgent(agent); err != nil {
+	res, err := a.Services.AgentConfig.Create(agent, nil)
+	if err != nil {
+		if errors.Is(err, service.ErrManagedSlugExists) {
+			a.errorResp(w, http.StatusConflict, err.Error())
+			return
+		}
 		a.errorResp(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	a.jsonResp(w, http.StatusCreated, agent)
+	view := a.agentView(*res.Profile)
+	a.jsonResp(w, http.StatusCreated, view)
 }
 
 func (a *API) handleGetAgent(w http.ResponseWriter, r *http.Request) {
@@ -103,7 +153,7 @@ func (a *API) handleGetAgent(w http.ResponseWriter, r *http.Request) {
 	}
 
 	a.jsonResp(w, http.StatusOK, map[string]any{
-		"agent": ag,
+		"agent": a.agentView(*ag),
 		"modes": modes,
 	})
 }
@@ -111,29 +161,27 @@ func (a *API) handleGetAgent(w http.ResponseWriter, r *http.Request) {
 func (a *API) handleUpdateAgent(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 
-	existing, err := a.Services.Store.GetAgent(id)
+	// Resolve through the AgentService so both stamped managed agents (real
+	// UUID) and legacy "file-<slug>" identities resolve, and the in-memory
+	// def's SourceRef/Source drive classification.
+	existing, err := a.Services.Agents.Get(r.Context(), id)
 	if err != nil {
 		a.errorResp(w, http.StatusNotFound, "agent not found")
 		return
 	}
 
-	// CW-20260512-0111: internal profiles are file source-of-truth (boot
-	// sync replaces the row body from internal/agent/builtin/profiles/*.md).
-	// API edits would be overwritten on the next restart, so reject them at
-	// the surface. The UI surfaces this with a read-only affordance + the
-	// `source_ref` path so operators know to edit the file.
-	if existing.Source == "internal" {
-		// Fallback when SourceRef is unexpectedly empty (legacy rows that
-		// pre-date migration 060's source_ref normalization, or any future
-		// gap): point at the canonical file path keyed off slug so the
-		// operator still has a usable hint.
-		ref := existing.SourceRef
-		if ref == "" {
-			ref = "internal/agent/builtin/profiles/" + existing.Slug + ".md"
-		}
-		a.errorResp(w, http.StatusConflict, "agent is internal (file source of truth); edit "+ref+" and restart Nanite")
+	// Editability gate. Managed file-backed agents are writable in place;
+	// embedded internal and plugin/vendor agents are not — but instead of a
+	// dead-end we tell the client whether a copy-to-managed path is offered.
+	if class := a.Services.AgentConfig.Classify(existing); !class.Editable() {
+		a.writeNotManaged(w, existing, class)
 		return
 	}
+
+	// Snapshot the pre-edit profile so the write service has the original
+	// identity (ID), file path (SourceRef), and provenance to drive the
+	// in-place rewrite, rename, and optimistic-concurrency baseline.
+	original := *existing
 
 	var req UpdateAgentRequest
 	if err := a.decode(r, &req); err != nil {
@@ -195,6 +243,27 @@ func (a *API) handleUpdateAgent(w http.ResponseWriter, r *http.Request) {
 	if req.ParentDispatchAllowlist != nil {
 		existing.ParentDispatchAllowlist = *req.ParentDispatchAllowlist
 	}
+	if req.RoleTools != nil {
+		existing.RoleTools = *req.RoleTools
+	}
+	if req.RoleSkills != nil {
+		existing.RoleSkills = *req.RoleSkills
+	}
+	if req.ContextPolicy != nil {
+		existing.ContextPolicy = *req.ContextPolicy
+	}
+	if req.Durable != nil {
+		existing.Durable = *req.Durable
+	}
+	if req.ActivationMode != nil {
+		existing.ActivationMode = *req.ActivationMode
+	}
+	if req.Class != nil {
+		existing.Class = *req.Class
+	}
+	if req.DefaultState != nil {
+		existing.DefaultState = *req.DefaultState
+	}
 
 	// Validate agent config before persisting.
 	if vr := agentvalidation.ValidateAgentConfig(existing); !vr.OK() {
@@ -210,11 +279,101 @@ func (a *API) handleUpdateAgent(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	if err := a.Services.Store.UpdateAgent(existing); err != nil {
+	// Preserve the file's procedures across a profile edit — they are managed
+	// through the dedicated capability endpoints, not the profile body.
+	var procedures []agentpkg.ProcedureDefinition
+	if original.SourceRef != "" {
+		if def, err := agentpkg.ParseMDFile(original.SourceRef); err == nil {
+			procedures = def.Procedures
+		}
+	}
+	res, err := a.Services.AgentConfig.Update(&original, existing, procedures, req.Revision)
+	if err != nil {
+		switch {
+		case errors.Is(err, service.ErrAgentRevisionConflict):
+			a.errorResp(w, http.StatusConflict, err.Error())
+		case errors.Is(err, service.ErrAgentNotManaged):
+			a.writeNotManaged(w, &original, a.Services.AgentConfig.Classify(&original))
+		default:
+			a.errorResp(w, http.StatusInternalServerError, err.Error())
+		}
+		return
+	}
+	a.jsonResp(w, http.StatusOK, a.agentView(*res.Profile))
+}
+
+// writeNotManaged emits the standard 409 response for an attempt to mutate a
+// read-only agent, telling the client the management class, the file ref, and
+// whether a copy-to-managed ("make editable") path is offered instead of a
+// dead-end.
+func (a *API) writeNotManaged(w http.ResponseWriter, ag *store.AgentProfile, class agentpkg.ManageClass) {
+	msg := "agent is not a writable managed config"
+	switch class {
+	case agentpkg.ManageClassInternal:
+		msg = "agent is an embedded internal harness profile and is managed by Nanite, not editable here"
+	case agentpkg.ManageClassPlugin:
+		msg = "agent is plugin/vendor-provided (read-only); copy it to the managed layer to edit"
+	case agentpkg.ManageClassExternal:
+		msg = "agent is not in a writable managed location (read-only); copy it to the managed layer to edit"
+	}
+	a.jsonResp(w, http.StatusConflict, map[string]any{
+		"error":           "agent_not_managed",
+		"message":         msg,
+		"manage_class":    string(class),
+		"copy_to_managed": class.CopyToManagedAllowed(),
+		"source_ref":      ag.SourceRef,
+		"slug":            ag.Slug,
+	})
+}
+
+// handleDeleteAgent removes a managed file-backed agent: the file, the DB
+// projection (and its FK children), and the live registry entry. Read-only
+// sources (internal/plugin/external) are rejected. The GUI gates this behind
+// an irreversible-confirmation dialog.
+func (a *API) handleDeleteAgent(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	existing, err := a.Services.Agents.Get(r.Context(), id)
+	if err != nil {
+		a.errorResp(w, http.StatusNotFound, "agent not found")
+		return
+	}
+	if class := a.Services.AgentConfig.Classify(existing); !class.Editable() {
+		a.writeNotManaged(w, existing, class)
+		return
+	}
+	if err := a.Services.AgentConfig.Delete(existing); err != nil {
+		if errors.Is(err, service.ErrAgentNotManaged) {
+			a.writeNotManaged(w, existing, a.Services.AgentConfig.Classify(existing))
+			return
+		}
 		a.errorResp(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	a.jsonResp(w, http.StatusOK, existing)
+	a.jsonResp(w, http.StatusOK, map[string]string{"status": "deleted", "slug": existing.Slug})
+}
+
+// handleCopyAgentToManaged forks a read-only agent (plugin/vendor/external)
+// into a fresh editable managed config with a new identity ("make editable").
+func (a *API) handleCopyAgentToManaged(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	source, err := a.Services.Agents.Get(r.Context(), id)
+	if err != nil {
+		a.errorResp(w, http.StatusNotFound, "agent not found")
+		return
+	}
+	res, err := a.Services.AgentConfig.CopyToManaged(source, nil)
+	if err != nil {
+		switch {
+		case errors.Is(err, service.ErrAgentAlreadyManaged):
+			a.errorResp(w, http.StatusConflict, err.Error())
+		case errors.Is(err, service.ErrManagedSlugExists):
+			a.errorResp(w, http.StatusConflict, err.Error())
+		default:
+			a.errorResp(w, http.StatusInternalServerError, err.Error())
+		}
+		return
+	}
+	a.jsonResp(w, http.StatusCreated, a.agentView(*res.Profile))
 }
 
 func (a *API) handleListAgentModes(w http.ResponseWriter, r *http.Request) {

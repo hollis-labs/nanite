@@ -46,6 +46,24 @@ export function getAutoSwitchEffective(
   return "ask";
 }
 
+function safeLocalStorageGet(key: string): string | null {
+  if (typeof localStorage === "undefined") return null;
+  try {
+    return localStorage.getItem(key);
+  } catch {
+    return null;
+  }
+}
+
+function safeLocalStorageSet(key: string, value: string) {
+  if (typeof localStorage === "undefined") return;
+  try {
+    localStorage.setItem(key, value);
+  } catch {
+    // Ignore storage failures in non-browser / restricted contexts.
+  }
+}
+
 interface ChatStore {
   /** Per-session state slices (G-FE-SINGLETON). */
   sessions: Map<string, ChatSessionState>;
@@ -110,6 +128,10 @@ interface ChatStore {
   setActiveMode: (sessionID: string, mode: AgentMode) => void;
   setActiveModel: (sessionID: string, model: string) => void;
   setActiveEffort: (sessionID: string, effort: string) => void;
+
+  // ── Composer ──
+  setComposerDraft: (sessionID: string, draft: string) => void;
+  clearComposerDraft: (sessionID: string) => void;
 
   // ── Genuinely cross-session state (stays global) ──
   /** Tool-call display preference. User-level pref with optional per-session override (localStorage-backed). */
@@ -495,33 +517,33 @@ export const useChatStore = create<ChatStore>((set) => ({
       sessions: applyToSession(state.sessions, sessionID, { activeEffort: effort }),
     })),
 
+  // ── Composer ──
+  setComposerDraft: (sessionID, draft) =>
+    set((state) => ({
+      sessions: applyToSession(state.sessions, sessionID, { composerDraft: draft }),
+    })),
+  clearComposerDraft: (sessionID) =>
+    set((state) => ({
+      sessions: applyToSession(state.sessions, sessionID, { composerDraft: "" }),
+    })),
+
   // ── Tool-call display preference (cross-session) ──
   toolCallDisplayMode:
-    (typeof window !== "undefined"
-      ? (localStorage.getItem("nanite:toolCallDisplayMode") as ToolCallDisplayMode)
-      : null) || "minimal",
+    (safeLocalStorageGet("nanite:toolCallDisplayMode") as ToolCallDisplayMode | null) || "minimal",
   setToolCallDisplayMode: (mode) => {
-    if (typeof window !== "undefined") {
-      localStorage.setItem("nanite:toolCallDisplayMode", mode);
-    }
+    safeLocalStorageSet("nanite:toolCallDisplayMode", mode);
     set({ toolCallDisplayMode: mode });
   },
   loadToolCallDisplayMode: (sessionID) => {
-    if (!sessionID || typeof window === "undefined") return;
-    const sessionMode = localStorage.getItem(
-      `nanite:tcMode:${sessionID}`,
-    ) as ToolCallDisplayMode | null;
-    const globalMode = localStorage.getItem(
-      "nanite:toolCallDisplayMode",
-    ) as ToolCallDisplayMode | null;
+    if (!sessionID) return;
+    const sessionMode = safeLocalStorageGet(`nanite:tcMode:${sessionID}`) as ToolCallDisplayMode | null;
+    const globalMode = safeLocalStorageGet("nanite:toolCallDisplayMode") as ToolCallDisplayMode | null;
     set({ toolCallDisplayMode: sessionMode || globalMode || "minimal" });
   },
   saveToolCallDisplayMode: (sessionID, mode) => {
-    if (typeof window !== "undefined") {
-      localStorage.setItem("nanite:toolCallDisplayMode", mode);
-      if (sessionID) {
-        localStorage.setItem(`nanite:tcMode:${sessionID}`, mode);
-      }
+    safeLocalStorageSet("nanite:toolCallDisplayMode", mode);
+    if (sessionID) {
+      safeLocalStorageSet(`nanite:tcMode:${sessionID}`, mode);
     }
     set({ toolCallDisplayMode: mode });
   },
@@ -686,6 +708,9 @@ export function useActiveModel(sessionID?: string | null): string {
 }
 export function useActiveEffort(sessionID?: string | null): string {
   return useActiveSliceField(sessionID, "activeEffort");
+}
+export function useComposerDraft(sessionID?: string | null): string {
+  return useActiveSliceField(sessionID, "composerDraft");
 }
 export function useToolCalls(sessionID?: string | null): ToolCall[] {
   return useActiveSliceField(sessionID, "toolCalls");

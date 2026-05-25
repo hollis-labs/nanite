@@ -20,7 +20,7 @@ export function AgentPicker({ sessionId, existingAgentIds, onClose }: AgentPicke
 
   const { data: agents = [], isLoading } = useQuery({
     queryKey: ['agents', configVersion],
-    queryFn: api.listAgents,
+    queryFn: () => api.listAgents(),
   })
 
   const addMutation = useMutation({

@@ -1,5 +1,5 @@
 id: claude-smoke
-display_name: "Claude CLI (smoke)"
+display_name: "Claude Code (cli)"
 launch: claude-smoke
 
 identity:
@@ -13,7 +13,7 @@ identity:
 # Inline vars get merged into the substitution map (caller-supplied vars win
 # on key collision). Catalog authors use this for stable per-profile knobs.
 vars:
-  agent_label: "Smoke Backend"
+  agent_label: "Claude Code"
 
 # Slots populated entirely from `text` and `static` sources — both resolve at
 # compile time, so this profile boots without a deferred-resolver path.

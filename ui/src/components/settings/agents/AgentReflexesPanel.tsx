@@ -248,7 +248,7 @@ export function AgentReflexesPanel({
       >
         {isReadOnly ? (
           <div className="rounded-md border border-border-subtle bg-surface/50 px-3 py-2 text-xs text-fg-muted">
-            This profile is file-backed. Reflex management is disabled in this surface.
+            This agent is read-only here.
           </div>
         ) : null}
         {reflexesQuery.isLoading ? <PanelMessage>Loading reflexes...</PanelMessage> : null}

@@ -65,8 +65,11 @@ import (
 type Container struct {
 	Sessions  SessionService
 	Agents    AgentService
-	Skills    SkillService
-	Tools     ToolService
+	// AgentConfig is the shared write path for managed file-backed agent
+	// configs (GUI/API/CLI/MCP all route mutations through it).
+	AgentConfig *AgentConfigService
+	Skills      SkillService
+	Tools       ToolService
 	Chat      ChatService
 	Context   ContextService
 	Streams   *StreamManager
@@ -131,6 +134,12 @@ type Container struct {
 	// need it (artifact storage root, http caps, etc.). May be nil in
 	// lightweight test setups — handlers must nil-check.
 	AppConfig *config.AppConfig
+	// WorkingDir is the project root for project-scoped discovery and
+	// operator-managed config writes.
+	WorkingDir string
+	// ManagedConfigRoot is the on-disk config root used for file-backed
+	// operator-managed agents and durable manifests.
+	ManagedConfigRoot string
 
 	// Utility provider/model for lightweight calls (autotitle, etc.).
 	UtilityProvider string
@@ -164,6 +173,10 @@ type Container struct {
 	// now, an out-of-band reload entry point is exposed for future
 	// callers and exercised in registry_test.go.
 	BootProfiles *bootprofile.Registry
+	// BootProfileCatalogPath is the configured on-disk catalog root used by
+	// BootProfiles. Exposed so admin handlers can edit the same file-backed
+	// source of truth and reload the registry.
+	BootProfileCatalogPath string
 
 	// Recovery is the in-process subagent recovery broker (Phase 8/9).
 	// Exposed on the container so API handlers can route FE-driven
@@ -217,6 +230,10 @@ type ContainerConfig struct {
 	ToolClient *toolclient.ToolClient
 	Plugins    *plugin.Host
 	AppConfig  *config.AppConfig
+	WorkingDir string
+	// ManagedConfigRoot overrides the default project-local config root
+	// used for operator-managed agents and durable manifests.
+	ManagedConfigRoot string
 
 	// APIBaseURL is the base URL the local HTTP API server listens on
 	// (e.g. "http://127.0.0.1:8090"). Threaded into the agent-runtime
@@ -314,6 +331,14 @@ func NewContainer(cfg ContainerConfig) (*Container, error) {
 	if cfg.Providers == nil {
 		return nil, fmt.Errorf("service.NewContainer: Providers is required")
 	}
+	workingDir := cfg.WorkingDir
+	if workingDir == "" {
+		workingDir = "."
+	}
+	managedConfigRoot := cfg.ManagedConfigRoot
+	if managedConfigRoot == "" {
+		managedConfigRoot = filepath.Join(workingDir, ".nanite")
+	}
 
 	// --- Foundation (Wave 0) ---
 
@@ -347,7 +372,7 @@ func NewContainer(cfg ContainerConfig) (*Container, error) {
 
 	// Discover file-based agent definitions from all priority locations.
 	agentDefs, err := agent.Discover(agent.DiscoverOptions{
-		WorkingDir: ".",
+		WorkingDir: workingDir,
 		PluginsDir: "plugins",
 		Adapters:   adapterRegistry,
 	})
@@ -381,6 +406,22 @@ func NewContainer(cfg ContainerConfig) (*Container, error) {
 	}
 	slog.Info("service container: discovered file-based agents", "count", len(agentDefs))
 
+	// Source classification roots: the project managed config root and the
+	// user nanite data dir are writable-in-place; embedded internal and
+	// plugin/vendor agents are read-only. Shared by the boot reconcile pass,
+	// the AgentConfigService write contract, and the API editability gate.
+	userDataDir := ""
+	if home, herr := os.UserHomeDir(); herr == nil && home != "" {
+		userDataDir = filepath.Join(home, ".nanite")
+	}
+	agentClassification := agent.NewClassification(managedConfigRoot, userDataDir)
+
+	// Boot reconcile: durably stamp a UUID identity into writable managed
+	// agent files (adopt the existing projection's id, else mint), so the
+	// subsequent ingest uses it as the DB row PK and FK children resolve.
+	// Idempotent — already-stamped files are skipped. Runs before ingest.
+	ReconcileManagedAgentIDs(cfg.Store, agentDefs, agentClassification)
+
 	// J7 (CW-20260421-0011): auto-ingest discovered agent definitions into DB.
 	// File → parse → DB upsert. H1 trust: user/plugin sources → untrusted tier.
 	// Built-in definitions (Source != "user"/"plugin") retain 'normal' tier.
@@ -397,6 +438,16 @@ func NewContainer(cfg ContainerConfig) (*Container, error) {
 		FileAgents: agentDefs,
 		Overrides:  cfg.Store,
 	})
+
+	// Shared managed-agent write service. GUI/API/CLI/MCP route all managed
+	// config mutations through this one path (validate → atomic file write →
+	// DB upsert/reindex → live registry reload → event). nil-safe reloader:
+	// the concrete agentServiceImpl implements AgentRegistryReloader.
+	var agentReloader AgentRegistryReloader
+	if r, ok := agents.(AgentRegistryReloader); ok {
+		agentReloader = r
+	}
+	agentConfig := NewAgentConfigService(cfg.Store, agentClassification, managedConfigRoot, agentReloader, nil)
 
 	// Wire the toolclient's file-agent permission resolver. File-based agents
 	// have synthetic IDs ("file-<slug>") and live on disk, not in
@@ -1097,6 +1148,10 @@ func NewContainer(cfg ContainerConfig) (*Container, error) {
 		stopCatalog()
 		return nil, fmt.Errorf("service container: durable agent recipes: %w", err)
 	}
+	if err := SyncManagedDurableAgentConfigs(cfg.Store, managedConfigRoot); err != nil {
+		stopCatalog()
+		return nil, fmt.Errorf("service container: sync managed durable agents: %w", err)
+	}
 
 	// F5 follow-up (CW-20260420-0022): wire the HintDispatcher adapter
 	// into ContextClient so NANITE_THINK_BLOCK_V2_ENABLED=true actually
@@ -1190,59 +1245,63 @@ func NewContainer(cfg ContainerConfig) (*Container, error) {
 	slog.Info("service container: all services wired")
 
 	return &Container{
-		Sessions:            sessions,
-		Agents:              agents,
-		Skills:              skills,
-		Tools:               tools,
-		Chat:                chatSvc,
-		Context:             ctxService,
-		Streams:             streams,
-		Events:              events,
-		Providers:           cfg.Providers,
-		Commands:            commands,
-		Plugins:             cfg.Plugins,
-		MCP:                 cfg.MCP,
-		Messaging:           messagingSvc,
-		Subagent:            subagentSvc,
-		Background:          backgroundSvc,
-		Elicitation:         elicitSvc,
-		Todos:               todos,
-		Conduit:             conduitInstance,
-		Memory:              memorySvc,
-		EmbeddingStatus:     embeddingStatus,
-		EmbeddingProvider:   embeddingProviderID,
-		EmbeddingModel:      embeddingModel,
-		Coord:               cfg.CoordStore,
-		DurableAgents:       durableAgents,
-		DurableWake:         durableWake,
-		DurableAgentRecipes: durableAgentRecipes,
-		Tasks:               tasks,
-		Workers:             workers,
-		Worktrees:           cfg.Worktrees,
-		Store:               cfg.Store,
-		ToolClient:          cfg.ToolClient,
-		ProcessTracker:      processTracker,
-		Orchestrator:        orchestrator,
-		Activity:            cfg.Activity,
-		UtilityProvider:     cfg.UtilityProvider,
-		UtilityModel:        cfg.UtilityModel,
-		ModelSelector:       modelSelector,
-		Permissions:         permissions,
-		PathGrants:          pathGrants,
-		AdapterRegistry:     adapterRegistry,
-		BootProfiles:        bootProfileRegistry,
-		Recovery:            recoveryBrokerOrNil(agentDeps),
-		Inspector:           inspectorSvc,
-		LoopDetector:        loopDetector,
-		ReminderEngine:      reminderEngine,
-		RunStore:            runStore,
-		WorkflowBroadcaster: workflowBroadcaster,
-		AppConfig:           cfg.AppConfig,
-		stopModelCatalog:    stopCatalog,
-		subagentReaper:      subagentReaper,
-		stopSubagentReaper:  stopReaper,
-		runtimeReaper:       runtimeReaper,
-		stopRuntimeReaper:   stopRuntimeReaper,
+		Sessions:               sessions,
+		Agents:                 agents,
+		Skills:                 skills,
+		Tools:                  tools,
+		Chat:                   chatSvc,
+		Context:                ctxService,
+		Streams:                streams,
+		Events:                 events,
+		Providers:              cfg.Providers,
+		Commands:               commands,
+		Plugins:                cfg.Plugins,
+		MCP:                    cfg.MCP,
+		Messaging:              messagingSvc,
+		Subagent:               subagentSvc,
+		Background:             backgroundSvc,
+		Elicitation:            elicitSvc,
+		Todos:                  todos,
+		Conduit:                conduitInstance,
+		Memory:                 memorySvc,
+		EmbeddingStatus:        embeddingStatus,
+		EmbeddingProvider:      embeddingProviderID,
+		EmbeddingModel:         embeddingModel,
+		Coord:                  cfg.CoordStore,
+		DurableAgents:          durableAgents,
+		DurableWake:            durableWake,
+		DurableAgentRecipes:    durableAgentRecipes,
+		Tasks:                  tasks,
+		Workers:                workers,
+		Worktrees:              cfg.Worktrees,
+		Store:                  cfg.Store,
+		ToolClient:             cfg.ToolClient,
+		ProcessTracker:         processTracker,
+		Orchestrator:           orchestrator,
+		Activity:               cfg.Activity,
+		UtilityProvider:        cfg.UtilityProvider,
+		UtilityModel:           cfg.UtilityModel,
+		ModelSelector:          modelSelector,
+		Permissions:            permissions,
+		PathGrants:             pathGrants,
+		AdapterRegistry:        adapterRegistry,
+		BootProfiles:           bootProfileRegistry,
+		BootProfileCatalogPath: cfg.BootProfileCatalogPath,
+		Recovery:               recoveryBrokerOrNil(agentDeps),
+		Inspector:              inspectorSvc,
+		LoopDetector:           loopDetector,
+		ReminderEngine:         reminderEngine,
+		RunStore:               runStore,
+		WorkflowBroadcaster:    workflowBroadcaster,
+		AppConfig:              cfg.AppConfig,
+		WorkingDir:             workingDir,
+		ManagedConfigRoot:      managedConfigRoot,
+		AgentConfig:            agentConfig,
+		stopModelCatalog:       stopCatalog,
+		subagentReaper:         subagentReaper,
+		stopSubagentReaper:     stopReaper,
+		runtimeReaper:          runtimeReaper,
+		stopRuntimeReaper:      stopRuntimeReaper,
 	}, nil
 }
 

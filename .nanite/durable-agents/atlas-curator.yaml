@@ -1,0 +1,13 @@
+name: Atlas Curator
+slug: atlas-curator
+profile_slug: atlas-curator
+lifecycle_class: process
+provider: anthropic
+model: claude-sonnet-4
+runtime_kind: api
+launch_source_type: process_tick
+metadata:
+  scope: portfolio
+  owner: hollis-labs
+  schedule: nightly
+  primary_inputs: hadron_packets,fragments_docs,fragments_git,tesseract,torque

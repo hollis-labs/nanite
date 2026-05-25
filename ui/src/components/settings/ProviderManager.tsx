@@ -1,8 +1,8 @@
 import { useState, useCallback, useMemo } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import {
-  Eye, EyeOff, RefreshCw, AlertTriangle, X, Search,
-  CircleCheck, Terminal, Globe, FolderSearch, Loader2,
+  Eye, EyeOff, AlertTriangle, X, Search,
+  CircleCheck, Globe, Loader2,
   ArrowUpDown,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
@@ -515,12 +515,10 @@ const SORT_OPTIONS: { value: SortOption; label: string }[] = [
 
 // --- Filter types ---
 type StatusFilter = 'all' | 'active' | 'inactive'
-type ProviderTab = 'http' | 'pty'
 
 // --- Main Component ---
 
 export function ProviderManager() {
-  const [activeTab, setActiveTab] = useState<ProviderTab>('http')
   const [search, setSearch] = useState('')
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('all')
   const [sortBy, setSortBy] = useState<SortOption>('status')
@@ -532,34 +530,22 @@ export function ProviderManager() {
     staleTime: 30_000,
   })
 
-  const { data: cliDetection, refetch: refetchCLI, isFetching: detectingCLI } = useQuery({
-    queryKey: ['cli-detection'],
-    queryFn: api.detectCLI,
-    staleTime: 60_000,
-  })
-
   const isCLIProvider = useCallback(
     (providerType: string) => providerType.startsWith('pty-') || providerType === 'pty',
     [],
   )
 
-  const getDetection = useCallback(
-    (providerType: string) => cliDetection?.find((d) => d.provider_type === providerType),
-    [cliDetection],
-  )
-
   const apiProviders = providers?.filter((p) => !isCLIProvider(p.provider_type)) ?? []
-  const cliProviders = providers?.filter((p) => isCLIProvider(p.provider_type)) ?? []
 
   const isConfigured = useCallback((p: ProviderStatus) => {
     if (isCLIProvider(p.provider_type)) {
-      return getDetection(p.provider_type)?.detected ?? false
+      return false
     }
     return p.has_api_key || p.provider_type === 'ollama'
-  }, [isCLIProvider, getDetection])
+  }, [isCLIProvider])
 
   const filteredProviders = useMemo(() => {
-    let list = activeTab === 'http' ? apiProviders : cliProviders
+    let list = apiProviders
 
     if (search) {
       const q = search.toLowerCase()
@@ -585,7 +571,7 @@ export function ProviderManager() {
     }
 
     return list
-  }, [activeTab, apiProviders, cliProviders, search, statusFilter, sortBy, isConfigured])
+  }, [apiProviders, search, statusFilter, sortBy, isConfigured])
 
   const filterButtons: { value: StatusFilter; label: string }[] = [
     { value: 'all', label: 'All' },
@@ -600,48 +586,15 @@ export function ProviderManager() {
         {/* Tabs */}
         <div className="flex items-center gap-1 bg-surface/50 rounded-lg p-0.5">
           <button
-            onClick={() => setActiveTab('http')}
             className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm font-medium transition-colors ${
-              activeTab === 'http'
-                ? 'bg-bg-elevated text-fg shadow-sm'
-                : 'text-fg-muted hover:text-fg-secondary'
+              'bg-bg-elevated text-fg shadow-sm'
             }`}
           >
             <Globe className="w-3.5 h-3.5" />
             HTTP
             <span className="text-[11px] text-fg-faint tabular-nums">{apiProviders.length}</span>
           </button>
-          <button
-            onClick={() => setActiveTab('pty')}
-            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm font-medium transition-colors ${
-              activeTab === 'pty'
-                ? 'bg-bg-elevated text-fg shadow-sm'
-                : 'text-fg-muted hover:text-fg-secondary'
-            }`}
-          >
-            <Terminal className="w-3.5 h-3.5" />
-            PTY
-            <span className="text-[11px] text-fg-faint tabular-nums">{cliProviders.length}</span>
-          </button>
         </div>
-
-        {/* Re-detect (PTY tab only) */}
-        {activeTab === 'pty' && (
-          <Button
-            variant="ghost"
-            size="sm"
-            className="text-xs text-fg-secondary hover:text-fg"
-            onClick={() => refetchCLI()}
-            disabled={detectingCLI}
-          >
-            {detectingCLI ? (
-              <RefreshCw className="w-3 h-3 animate-spin mr-1" />
-            ) : (
-              <FolderSearch className="w-3.5 h-3.5 mr-1" />
-            )}
-            Re-detect
-          </Button>
-        )}
 
         <div className="flex-1" />
 
@@ -738,7 +691,7 @@ export function ProviderManager() {
           <ProviderCard
             key={p.id}
             provider={p}
-            detection={isCLIProvider(p.provider_type) ? getDetection(p.provider_type) : undefined}
+            detection={undefined}
             isCLI={isCLIProvider(p.provider_type)}
           />
         ))}

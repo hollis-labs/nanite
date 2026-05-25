@@ -2,6 +2,7 @@ package api
 
 import (
 	"net/http"
+	"strings"
 
 	"github.com/hollis-labs/nanite/internal/bootprofile"
 	"github.com/hollis-labs/nanite/internal/store"
@@ -30,6 +31,7 @@ func (a *API) handleListProviders(w http.ResponseWriter, r *http.Request) {
 		a.errorResp(w, http.StatusInternalServerError, err.Error())
 		return
 	}
+	providers = visibleProviderRows(providers)
 
 	if reg := a.Services.BootProfiles; reg != nil {
 		for _, spec := range reg.List() {
@@ -65,6 +67,7 @@ func (a *API) handleListModels(w http.ResponseWriter, r *http.Request) {
 		a.errorResp(w, http.StatusInternalServerError, err.Error())
 		return
 	}
+	models = visibleModelRows(models)
 
 	if reg := a.Services.BootProfiles; reg != nil {
 		for _, spec := range reg.List() {
@@ -125,25 +128,45 @@ func bootProfileModelRow(spec *bootprofile.LaunchSpec) store.Model {
 // bootProfileProviderLabel is the human-readable name surfaced on the
 // provider row. UILabel is the canonical operator-facing label
 // (launch.ui_label → profile.display_name → profile.id, decided in
-// bootprofile.Compile). We append " (boot profile)" so an operator
-// scanning the providers panel can immediately distinguish boot-
-// profile-backed rows from the DB-seeded ones — there's no separate
-// affordance in the existing FE chrome.
+// bootprofile.Compile).
 func bootProfileProviderLabel(spec *bootprofile.LaunchSpec) string {
 	if spec.UILabel == "" {
-		return spec.ProfileID + " (boot profile)"
+		return spec.ProfileID
 	}
-	return spec.UILabel + " (boot profile)"
+	return spec.UILabel
 }
 
 // bootProfileModelLabel is the dropdown text used inside the model
-// group. Same suffix policy as the provider label — duplication is
-// intentional because each row renders in a different chrome (provider
-// settings panel vs. composer model dropdown) and we don't want either
-// surface to silently drop the boot-profile disambiguator.
+// group.
 func bootProfileModelLabel(spec *bootprofile.LaunchSpec) string {
 	if spec.UILabel == "" {
-		return spec.ProfileID + " (boot profile)"
+		return spec.ProfileID
 	}
-	return spec.UILabel + " (boot profile)"
+	return spec.UILabel
+}
+
+func visibleProviderRows(providers []store.ProviderConfig) []store.ProviderConfig {
+	out := providers[:0]
+	for _, p := range providers {
+		if isHiddenPTYProviderType(p.ProviderType) {
+			continue
+		}
+		out = append(out, p)
+	}
+	return out
+}
+
+func visibleModelRows(models []store.Model) []store.Model {
+	out := models[:0]
+	for _, m := range models {
+		if isHiddenPTYProviderType(m.ProviderType) {
+			continue
+		}
+		out = append(out, m)
+	}
+	return out
+}
+
+func isHiddenPTYProviderType(providerType string) bool {
+	return providerType == "pty" || strings.HasPrefix(providerType, "pty-")
 }

@@ -233,6 +233,20 @@ describe("useChatStore cross-session isolation (G-FE-SINGLETON repro)", () => {
     expect(b?.activeEffort).toBe("low");
   });
 
+  it("composer drafts are independent per session", () => {
+    const store = useChatStore.getState();
+    store.setComposerDraft(SESSION_A, "draft for A");
+    store.setComposerDraft(SESSION_B, "draft for B");
+
+    expect(useChatStore.getState().sessions.get(SESSION_A)?.composerDraft).toBe("draft for A");
+    expect(useChatStore.getState().sessions.get(SESSION_B)?.composerDraft).toBe("draft for B");
+
+    store.clearComposerDraft(SESSION_A);
+
+    expect(useChatStore.getState().sessions.get(SESSION_A)?.composerDraft).toBe("");
+    expect(useChatStore.getState().sessions.get(SESSION_B)?.composerDraft).toBe("draft for B");
+  });
+
   it("repros the original symptom: switching mid-stream from A to B leaves B clean", () => {
     // 1. User sends in session A. The hook fires the same sequence the SSE
     //    handlers fire today.

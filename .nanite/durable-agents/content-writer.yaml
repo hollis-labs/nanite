@@ -1,0 +1,11 @@
+name: Content Writer
+slug: content-writer
+profile_slug: content-writer
+lifecycle_class: template
+provider: anthropic
+model: claude-sonnet-4
+runtime_kind: api
+launch_source_type: task_template_run
+metadata:
+  scope: glyph-brief-or-draft
+  one_piece_per_run: "true"

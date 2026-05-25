@@ -37,6 +37,25 @@ func TestAgentBootPlanGetReturnsEmptyDefault(t *testing.T) {
 	}
 }
 
+func TestAgentBootPlanGetSupportsFileBackedAgent(t *testing.T) {
+	_, mux := newTestAPI(t)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/agents/file-default/boot-plan", nil)
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("GET file-backed boot-plan: got %d body=%s", w.Code, w.Body.String())
+	}
+	var doc store.AgentBootPlanDocument
+	if err := json.NewDecoder(w.Body).Decode(&doc); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if doc.AgentID != "file-default" || doc.SchemaVersion != store.AgentBootPlanSchemaVersion1 {
+		t.Fatalf("unexpected empty doc: %+v", doc)
+	}
+}
+
 func TestAgentBootPlanPutGetDelete(t *testing.T) {
 	a, mux := newTestAPI(t)
 	agent := &store.AgentProfile{Name: "Bootful", Slug: "bootful", SystemPrompt: "x"}

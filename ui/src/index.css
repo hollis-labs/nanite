@@ -288,6 +288,18 @@ body {
   font-family: var(--font-mono-family);
 }
 
+/* Hide scrollbars globally while preserving scrolling. */
+* {
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+
+*::-webkit-scrollbar {
+  display: none;
+  width: 0;
+  height: 0;
+}
+
 /* Custom scrollbar for chat transcript and scroll areas */
 .chat-scroll {
   scrollbar-gutter: stable;
@@ -358,6 +370,20 @@ body {
 }
 .light .provider-scroll {
   scrollbar-color: rgba(0, 0, 0, 0.12) transparent;
+}
+
+/* Keep every scrollable surface chrome-free; earlier themed rules are legacy. */
+.chat-scroll,
+.provider-scroll {
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+
+.chat-scroll::-webkit-scrollbar,
+.provider-scroll::-webkit-scrollbar {
+  display: none;
+  width: 0;
+  height: 0;
 }
 
 /* ─── Light mode highlight.js (GitHub Light) ─── */

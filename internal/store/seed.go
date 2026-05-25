@@ -198,19 +198,11 @@ type providerRow struct {
 //
 // Step 6.5 (SP-20260508-0001) reduced the API-provider catalog to
 // Anthropic + OpenAI; the gemini/mistral/azure-openai/openrouter/openzen/
-// ollama API rows have been removed. PTY-style entries (CLI binary
-// adapters) are unrelated and retained.
+// ollama API rows have been removed. CLI launches are surfaced through
+// boot-profile harness entries, not raw PTY provider rows.
 var seededProviders = []providerRow{
 	{"anthropic-001", "Anthropic", "anthropic"},
 	{"openai-001", "OpenAI", "openai"},
-	{"pty-001", "Claude CLI (PTY)", "pty"},
-	{"pty-codex-001", "Codex CLI (PTY)", "pty-codex"},
-	{"pty-gemini-001", "Gemini CLI (PTY)", "pty-gemini"},
-	{"pty-copilot-001", "GitHub Copilot CLI (PTY)", "pty-copilot"},
-	{"pty-aider-001", "Aider CLI (PTY)", "pty-aider"},
-	{"pty-junie-001", "Junie CLI (PTY)", "pty-junie"},
-	{"pty-kiro-001", "Kiro CLI (PTY)", "pty-kiro"},
-	{"pty-qwen-001", "Qwen CLI (PTY)", "pty-qwen"},
 }
 
 // providerIDForType resolves a registry provider_type to the DB row id. Used
@@ -250,7 +242,7 @@ func (s *Store) SeedProviders() error {
 	for _, m := range seeded {
 		providerID := providerIDForType(m.Provider)
 		if providerID == "" {
-			return fmt.Errorf("seed: no provider row for provider_type %q (model %q)", m.Provider, m.ID)
+			continue
 		}
 		if _, err := tx.Exec(
 			`INSERT OR IGNORE INTO models (id, provider_id, model_id, display_name, context_window, max_output, supports_tools)
@@ -264,4 +256,3 @@ func (s *Store) SeedProviders() error {
 	slog.Info("seed: upserted providers and models", "providers", len(providers), "models", len(seeded))
 	return tx.Commit()
 }
-

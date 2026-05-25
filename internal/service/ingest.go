@@ -11,6 +11,7 @@ package service
 // DB is where the runtime reads from.
 
 import (
+	"context"
 	"fmt"
 	"log/slog"
 	"time"
@@ -41,6 +42,13 @@ func AutoIngestAgents(st *store.Store, defs []*agentpkg.Definition) int {
 		count++
 	}
 	return count
+}
+
+func IngestAgentDefinition(st *store.Store, def *agentpkg.Definition) error {
+	if def == nil || def.Slug == "" {
+		return fmt.Errorf("definition slug is required")
+	}
+	return upsertAgentDef(st, def)
 }
 
 // AutoIngestSkills upserts all discovered skill definitions into the DB.
@@ -83,16 +91,32 @@ func upsertAgentDef(st *store.Store, def *agentpkg.Definition) error {
 	profile.OriginSystem = "nanite"
 	profile.Format = "markdown"
 
-	existing, err := st.GetAgentBySlug(def.Slug)
-	if err != nil {
-		// GetAgentBySlug wraps sql.ErrNoRows as an error string; treat as not-found.
-		existing = nil
+	// Identity resolution. A managed file stamped with a UUID (`id:`) owns a
+	// stable identity that survives slug renames — look it up by ID first so a
+	// renamed file updates the existing row (and its FK children) instead of
+	// colliding on a fresh insert. Fall back to slug for unstamped/internal
+	// definitions, whose runtime identity stays "file-<slug>".
+	var existing *store.AgentProfile
+	if def.ID != "" && !agentpkg.IsFileBasedID(def.ID) {
+		if row, err := st.GetAgent(def.ID); err == nil {
+			existing = row
+		}
+	}
+	if existing == nil {
+		if row, err := st.GetAgentBySlug(def.Slug); err == nil {
+			existing = row
+		}
 	}
 
 	if existing == nil {
-		// Strip the deterministic file-ID prefix — DB rows get real UUIDs.
-		// CreateAgent will assign a new UUID if ID is empty.
-		profile.ID = ""
+		// Unstamped/internal definitions (CanonicalID == "file-<slug>") get a
+		// minted DB UUID while the harness keeps using the deterministic
+		// "file-<slug>" runtime identity. A managed file stamped with a real
+		// UUID uses that UUID as the DB row PK so reflex/known-tool/boot-plan
+		// FKs resolve correctly.
+		if agentpkg.IsFileBasedID(profile.ID) {
+			profile.ID = ""
+		}
 		profile.Kind = "internal"
 		profile.CapabilitiesJSON = "[]"
 		profile.LimitsJSON = "{}"
@@ -130,7 +154,84 @@ func upsertAgentDef(st *store.Store, def *agentpkg.Definition) error {
 	); err != nil {
 		return fmt.Errorf("set trust tier: %w", err)
 	}
+
+	if len(def.Procedures) > 0 {
+		row, err := st.GetAgentBySlug(def.Slug)
+		if err == nil && row != nil {
+			seedProcedures(context.Background(), st, row.ID, def.Procedures)
+		}
+	}
+	if len(def.RoleSkills) > 0 {
+		row, err := st.GetAgentBySlug(def.Slug)
+		if err == nil && row != nil {
+			seedRoleSkills(context.Background(), st, row.ID, def.RoleSkills)
+		}
+	}
+	if len(def.RoleTools) > 0 {
+		row, err := st.GetAgentBySlug(def.Slug)
+		if err == nil && row != nil {
+			seedRoleToolsFromIngest(context.Background(), st, row.ID, def.RoleTools)
+		}
+	}
 	return nil
+}
+
+func seedRoleToolsFromIngest(ctx context.Context, st *store.Store, agentID string, tools []string) {
+	for i, name := range tools {
+		if name == "" {
+			continue
+		}
+		if err := st.InsertAgentKnownTool(ctx, store.AgentKnownTool{
+			AgentID:   agentID,
+			ToolName:  name,
+			Pinned:    true,
+			SortOrder: int64(i + 1),
+			Reason:    "role_seed",
+		}); err != nil {
+			slog.Warn("service: seed role tool (ingest)", "agent_id", agentID, "tool", name, "err", err)
+		}
+	}
+}
+
+func seedProcedures(ctx context.Context, st *store.Store, agentID string, procs []agentpkg.ProcedureDefinition) {
+	for _, p := range procs {
+		if p.Name == "" {
+			slog.Warn("service: skip procedure with empty name", "agent_id", agentID)
+			continue
+		}
+		if p.Body == "" {
+			slog.Warn("service: skip procedure with empty body", "agent_id", agentID, "procedure", p.Name)
+			continue
+		}
+		scope := p.Scope
+		if scope == "" {
+			scope = "agent"
+		}
+		if err := st.InsertAgentProcedure(ctx, store.AgentProcedure{
+			AgentID: agentID,
+			Name:    p.Name,
+			Body:    p.Body,
+			Scope:   scope,
+		}); err != nil {
+			slog.Warn("service: seed procedure", "agent_id", agentID, "procedure", p.Name, "err", err)
+		}
+	}
+}
+
+func seedRoleSkills(ctx context.Context, st *store.Store, agentID string, slugs []string) {
+	for _, slug := range slugs {
+		if slug == "" {
+			continue
+		}
+		if err := st.InsertAgentKnownSkill(ctx, store.AgentKnownSkill{
+			AgentID:   agentID,
+			SkillName: slug,
+			Pinned:    true,
+			Reason:    "role_seed",
+		}); err != nil {
+			slog.Warn("service: seed role skill", "agent_id", agentID, "skill_name", slug, "err", err)
+		}
+	}
 }
 
 // upsertSkillDef inserts or updates one skills row from a Definition.

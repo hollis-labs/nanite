@@ -2,20 +2,94 @@ package store
 
 import (
 	"context"
+	"fmt"
+	"io"
+	"os"
 	"path/filepath"
+	"sync"
 	"testing"
+
+	"github.com/hollis-labs/go-sqlite/sqlitekit"
+)
+
+var (
+	testStoreTemplateOnce sync.Once
+	testStoreTemplatePath string
+	testStoreTemplateErr  error
 )
 
 // newTestStore creates an in-memory Store for testing.
 func newTestStore(t *testing.T) *Store {
 	t.Helper()
 	dbPath := filepath.Join(t.TempDir(), "test.db")
-	s, err := New(context.Background(), dbPath)
-	if err != nil {
-		t.Fatalf("newTestStore: %v", err)
+	templatePath := testStoreTemplate(t)
+	if err := copyFile(dbPath, templatePath); err != nil {
+		t.Fatalf("copy test store template: %v", err)
 	}
+	absPath, err := filepath.Abs(dbPath)
+	if err != nil {
+		t.Fatalf("resolve test db path: %v", err)
+	}
+	db, err := sqlitekit.OpenSingle(context.Background(), absPath, sqlitekit.OpenOptions{
+		Options:         sqlitekit.WriterOptions(),
+		CreateParentDir: true,
+	})
+	if err != nil {
+		t.Fatalf("open test store: %v", err)
+	}
+	s := &Store{DB: db, dbPath: absPath}
 	t.Cleanup(func() { s.Close() })
 	return s
+}
+
+func testStoreTemplate(t *testing.T) string {
+	t.Helper()
+	testStoreTemplateOnce.Do(func() {
+		dir, err := os.MkdirTemp("", "nanite-store-template-*")
+		if err != nil {
+			testStoreTemplateErr = err
+			return
+		}
+		testStoreTemplatePath = filepath.Join(dir, "template.db")
+		s, err := New(context.Background(), testStoreTemplatePath)
+		if err != nil {
+			testStoreTemplateErr = err
+			return
+		}
+		if err := s.Close(); err != nil {
+			testStoreTemplateErr = err
+			return
+		}
+	})
+	if testStoreTemplateErr != nil {
+		t.Fatalf("create test store template: %v", testStoreTemplateErr)
+	}
+	return testStoreTemplatePath
+}
+
+func copyFile(dst, src string) error {
+	in, err := os.Open(src)
+	if err != nil {
+		return err
+	}
+	defer in.Close()
+	out, err := os.Create(dst)
+	if err != nil {
+		return err
+	}
+	if _, err := io.Copy(out, in); err != nil {
+		_ = out.Close()
+		return err
+	}
+	if err := out.Close(); err != nil {
+		return err
+	}
+	if info, err := os.Stat(src); err == nil {
+		if err := os.Chmod(dst, info.Mode()); err != nil {
+			return fmt.Errorf("chmod copied file: %w", err)
+		}
+	}
+	return nil
 }
 
 func TestNew(t *testing.T) {

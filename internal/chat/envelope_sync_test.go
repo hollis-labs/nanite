@@ -1,13 +1,14 @@
 package chat
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"runtime"
 	"strings"
 	"testing"
 
-	"gopkg.in/yaml.v3"
+	envelopes "github.com/hollis-labs/go-envelopes"
 )
 
 // TestEnvelopeRegistrySync verifies that every core envelope type declared
@@ -21,23 +22,9 @@ func TestEnvelopeRegistrySync(t *testing.T) {
 	}
 	projectRoot := filepath.Join(filepath.Dir(thisFile), "..", "..")
 
-	// Load the envelope manifest from the lib (source of truth).
-	manifestPath := filepath.Join(projectRoot, "..", "go-envelopes", "manifest", "envelopes.yaml")
-	manifestData, err := os.ReadFile(manifestPath)
+	registry, err := envelopes.LoadCore(context.Background())
 	if err != nil {
-		t.Fatalf("failed to read envelope manifest: %v", err)
-	}
-
-	type entry struct {
-		Type      string `yaml:"type"`
-		Component string `yaml:"component"`
-	}
-	type manifest struct {
-		Core []entry `yaml:"core"`
-	}
-	var m manifest
-	if err := yaml.Unmarshal(manifestData, &m); err != nil {
-		t.Fatalf("failed to parse envelope manifest: %v", err)
+		t.Fatalf("failed to load core envelope registry: %v", err)
 	}
 
 	// Load the generated frontend registry.
@@ -50,13 +37,14 @@ func TestEnvelopeRegistrySync(t *testing.T) {
 
 	// Check that every manifest entry with a component appears in the TS registry.
 	var missing []string
-	for _, e := range m.Core {
-		if e.Component == "" {
+	for _, spec := range registry.All() {
+		component, _ := spec.UIMetadata["component"].(string)
+		if component == "" {
 			continue // backend-only type, no frontend component expected
 		}
-		needle := `"` + e.Type + `"`
+		needle := `"` + spec.Name + `"`
 		if !strings.Contains(registryContent, needle) {
-			missing = append(missing, e.Type)
+			missing = append(missing, spec.Name)
 		}
 	}
 

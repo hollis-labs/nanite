@@ -288,102 +288,49 @@ body {
   font-family: var(--font-mono-family);
 }
 
-/* Hide scrollbars globally while preserving scrolling. */
+/* ─── Scrollbars ───
+   Hidden globally by default; opt in per-element with `.show-scrollbar`.
+   Scrolling still works everywhere — only the chrome is suppressed unless a
+   surface explicitly re-enables it. (Single reset + opt-in, replacing the old
+   themed-by-default rules that were already being force-hidden anyway.) */
 * {
-  scrollbar-width: none;
-  -ms-overflow-style: none;
+  scrollbar-width: none;       /* Firefox */
+  -ms-overflow-style: none;    /* IE / old Edge */
 }
-
 *::-webkit-scrollbar {
-  display: none;
+  display: none;               /* WebKit */
   width: 0;
   height: 0;
 }
 
-/* Custom scrollbar for chat transcript and scroll areas */
-.chat-scroll {
-  scrollbar-gutter: stable;
-}
-.chat-scroll::-webkit-scrollbar {
-  width: 6px;
-}
-.chat-scroll::-webkit-scrollbar-track {
-  background: transparent;
-}
-.chat-scroll::-webkit-scrollbar-thumb {
-  background: rgba(255, 255, 255, 0.15);
-  border-radius: 3px;
-}
-.chat-scroll::-webkit-scrollbar-thumb:hover {
-  background: rgba(255, 255, 255, 0.25);
-}
-/* Firefox */
-.chat-scroll {
+/* Opt-in: add `show-scrollbar` to any element that should render a themed bar. */
+.show-scrollbar {
   scrollbar-width: thin;
   scrollbar-color: rgba(255, 255, 255, 0.15) transparent;
 }
-
-/* Light mode scrollbars */
-.light .chat-scroll::-webkit-scrollbar-thumb {
-  background: rgba(0, 0, 0, 0.15);
+.show-scrollbar::-webkit-scrollbar {
+  display: block;
+  width: 6px;
+  height: 6px;
 }
-.light .chat-scroll::-webkit-scrollbar-thumb:hover {
-  background: rgba(0, 0, 0, 0.25);
-}
-.light .chat-scroll {
-  scrollbar-color: rgba(0, 0, 0, 0.15) transparent;
-}
-
-/* Hide scrollbar while keeping scroll functionality — must come after chat-scroll rules */
-.no-scrollbar {
-  scrollbar-width: none;
-  -ms-overflow-style: none;
-}
-.no-scrollbar::-webkit-scrollbar {
-  display: none;
-}
-
-/* Themed horizontal scroll for compact fields (provider cards, etc.) */
-.provider-scroll::-webkit-scrollbar {
-  height: 3px;
-}
-.provider-scroll::-webkit-scrollbar-track {
+.show-scrollbar::-webkit-scrollbar-track {
   background: transparent;
 }
-.provider-scroll::-webkit-scrollbar-thumb {
-  background: rgba(255, 255, 255, 0.12);
-  border-radius: 2px;
+.show-scrollbar::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.15);
+  border-radius: 3px;
 }
-.provider-scroll::-webkit-scrollbar-thumb:hover {
+.show-scrollbar::-webkit-scrollbar-thumb:hover {
   background: rgba(255, 255, 255, 0.25);
 }
-.provider-scroll {
-  scrollbar-width: thin;
-  scrollbar-color: rgba(255, 255, 255, 0.12) transparent;
+.light .show-scrollbar {
+  scrollbar-color: rgba(0, 0, 0, 0.15) transparent;
 }
-
-.light .provider-scroll::-webkit-scrollbar-thumb {
-  background: rgba(0, 0, 0, 0.12);
+.light .show-scrollbar::-webkit-scrollbar-thumb {
+  background: rgba(0, 0, 0, 0.15);
 }
-.light .provider-scroll::-webkit-scrollbar-thumb:hover {
+.light .show-scrollbar::-webkit-scrollbar-thumb:hover {
   background: rgba(0, 0, 0, 0.25);
-}
-.light .provider-scroll {
-  scrollbar-color: rgba(0, 0, 0, 0.12) transparent;
-}
-
-/* Keep every scrollable surface chrome-free; earlier themed rules are legacy. */
-.chat-scroll,
-.provider-scroll {
-  scrollbar-width: none;
-  -ms-overflow-style: none;
-}
-
-.chat-scroll::-webkit-scrollbar,
-.provider-scroll::-webkit-scrollbar {
-  display: none;
-  width: 0;
-  height: 0;
 }
 
 /* ─── Light mode highlight.js (GitHub Light) ─── */

@@ -452,6 +452,16 @@ func (s *Store) DeleteAgent(slug string) error {
 		"DELETE FROM agent_schedules WHERE agent_id = ?",
 		"DELETE FROM agent_reflexes WHERE agent_id = ?",
 		"DELETE FROM agent_boot_plans WHERE agent_id = ?",
+		// pending_reflexes.target_agent_id references the profile (migration
+		// 074, no cascade) — clear it or the final delete fails under
+		// foreign_keys=ON. (pending_reflexes has no agent_id column.)
+		"DELETE FROM pending_reflexes WHERE target_agent_id = ?",
+		// durable_agent_instances.profile_id references the profile
+		// (migration 080, no cascade; 081/082 only add columns). Removing the
+		// instances cascades their instance_id children (sessions, events).
+		// Deleting the managed profile is a permanent operator action, so its
+		// durable instances go with it.
+		"DELETE FROM durable_agent_instances WHERE profile_id = ?",
 	}
 	for _, q := range cleanups {
 		if _, err := tx.Exec(q, agent.ID); err != nil {

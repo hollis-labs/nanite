@@ -239,6 +239,7 @@ func (s *Store) SeedProviders() error {
 		}
 	}
 
+	modelsSeeded := 0
 	for _, m := range seeded {
 		providerID := providerIDForType(m.Provider)
 		if providerID == "" {
@@ -251,8 +252,9 @@ func (s *Store) SeedProviders() error {
 		); err != nil {
 			return fmt.Errorf("upsert model %s: %w", m.ID, err)
 		}
+		modelsSeeded++
 	}
 
-	slog.Info("seed: upserted providers and models", "providers", len(providers), "models", len(seeded))
+	slog.Info("seed: upserted providers and models", "providers", len(providers), "models", modelsSeeded)
 	return tx.Commit()
 }

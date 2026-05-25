@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -20,6 +21,7 @@ import (
 	"github.com/hollis-labs/go-providers/provider"
 	"github.com/hollis-labs/nanite/internal/agent"
 	"github.com/hollis-labs/nanite/internal/agent/builtin"
+	"github.com/hollis-labs/nanite/internal/agent/reflexes"
 	"github.com/hollis-labs/nanite/internal/agentregistry"
 	"github.com/hollis-labs/nanite/internal/background"
 	"github.com/hollis-labs/nanite/internal/bootprofile"
@@ -868,6 +870,33 @@ func NewContainer(cfg ContainerConfig) (*Container, error) {
 	reminderEngine := reminders.NewEngine(cfg.Store)
 	slog.Info("service container: reminder engine enabled (J11, CW-20260426-0009)")
 
+	// FU-30 reflex engine. Built before the chat service so per-turn
+	// generation can evaluate DB-backed agent reflexes and inject just-in-time
+	// reminders / forced tool choices. Plugin hooks (nil-safe) let plugins
+	// rewrite reflex state/actions; the Halt executor marks the session
+	// halted + logs the event when a reflex resolves to halt_session.
+	reflexEngine := reflexes.NewEngine(cfg.Store, slog.Default())
+	if cfg.Plugins != nil {
+		reflexEngine.SetPluginHooks(cfg.Plugins)
+	}
+	reflexEngine.Executor.Halt = func(ctx context.Context, sessionID, reason string, evidence map[string]interface{}) error {
+		if err := cfg.Store.MarkSessionHalted(sessionID, reason); err != nil {
+			return err
+		}
+		metaBlob, _ := json.Marshal(map[string]interface{}{
+			"detector": "reflex",
+			"reason":   reason,
+			"evidence": evidence,
+		})
+		cfg.Store.LogEvent(sessionID, "session_halted", "reflex", "reflex-fired halt", string(metaBlob))
+		return nil
+	}
+	if n, err := reflexes.SeedBaseReflexes(context.Background(), cfg.Store, slog.Default()); err != nil {
+		slog.Warn("service container: reflex base-seed", "err", err)
+	} else if n > 0 {
+		slog.Info("service container: seeded base reflexes", "count", n)
+	}
+
 	// Phase 4c.1 (CW-20260508-0002): construct *agent.Dependencies +
 	// agentsessions.Manager once, after the core deps (store, pathGrants,
 	// streams) exist. Threaded through ChatServiceConfig so HandleMessage
@@ -966,6 +995,7 @@ func NewContainer(cfg ContainerConfig) (*Container, error) {
 		LoopDetector: loopDetector,
 		// J11 (CW-20260426-0009): reminder engine — always-on.
 		ReminderEngine: reminderEngine,
+		ReflexEngine:   reflexEngine,
 		// Phase 4c.1 (CW-20260508-0002): agent-runtime composition root.
 		AgentDeps:            agentDeps,
 		AgentSessionsManager: agentManager,

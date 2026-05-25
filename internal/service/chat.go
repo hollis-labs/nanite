@@ -15,6 +15,7 @@ import (
 	"github.com/hollis-labs/go-providers/provider"
 	"github.com/hollis-labs/nanite/internal/agent"
 	"github.com/hollis-labs/nanite/internal/agentregistry"
+	"github.com/hollis-labs/nanite/internal/agent/reflexes"
 	"github.com/hollis-labs/nanite/internal/bootprofile"
 	"github.com/hollis-labs/nanite/internal/chat"
 	"github.com/hollis-labs/nanite/internal/config"
@@ -166,6 +167,11 @@ type ChatServiceConfig struct {
 	// (J11, CW-20260426-0009). nil-safe: when nil reminder eval is skipped.
 	ReminderEngine *reminders.Engine
 
+	// ReflexEngine is the FU-30 DB-backed agent reflex engine. nil-safe: when
+	// nil, per-turn reflex evaluation is skipped. Evaluates agent_reflexes,
+	// applies inject_reminder / force_tool_choice / halt actions per turn.
+	ReflexEngine *reflexes.Engine
+
 	// AgentDeps is the agent-runtime composition root (Phase 4c.1 of the
 	// agent-boot adoption). Threaded through here so HandleMessage can
 	// gate the long-lived PTY path on the session's CLIAdapter capabilities
@@ -307,6 +313,10 @@ type chatServiceImpl struct {
 	// reminderEngine is the deterministic trigger engine for agent-set reminders
 	// (J11, CW-20260426-0009). nil-safe: when nil reminder eval is skipped.
 	reminderEngine *reminders.Engine
+
+	// reflexEngine evaluates DB-backed agent reflexes per turn (FU-30) and
+	// returns staged actions injected into the turn. nil-safe.
+	reflexEngine *reflexes.Engine
 
 	// lifecycle tracks async generateResponse goroutines so Shutdown can
 	// cancel them and wait for them to drain rather than orphan them.
@@ -469,6 +479,7 @@ func NewChatService(cfg ChatServiceConfig) ChatService {
 		inspector:           cfg.Inspector,
 		loopDetector:        cfg.LoopDetector,
 		reminderEngine:      cfg.ReminderEngine,
+		reflexEngine:        cfg.ReflexEngine,
 		agentDeps:           cfg.AgentDeps,
 		agentSessionsManager: cfg.AgentSessionsManager,
 		agentEventBridge:    cfg.AgentEventBridge,

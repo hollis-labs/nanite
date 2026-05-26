@@ -37,6 +37,7 @@ import (
 	"github.com/hollis-labs/nanite/internal/lifecycle"
 	nllmanthropic "github.com/hollis-labs/nanite/internal/llm/anthropic"
 	nllmopenai "github.com/hollis-labs/nanite/internal/llm/openai"
+	nllmtether "github.com/hollis-labs/nanite/internal/llm/tether"
 	"github.com/hollis-labs/nanite/internal/mcp"
 	"github.com/hollis-labs/nanite/internal/mcpserver"
 	"github.com/hollis-labs/nanite/internal/muxproxy"
@@ -631,6 +632,16 @@ func initProviders(devMode bool) (*provider.Registry, []provider.CLIAdapter) {
 		} else {
 			missingAPI = append(missingAPI, spec.name)
 		}
+	}
+
+	// Tether AI proxy provider. Registered when the local Tether daemon socket
+	// is present (auth is the socket, not a keychain key) — so Tether routes
+	// are selectable as another API provider for testing the proxy. The
+	// adapter speaks go-tether-client's /ai/chat[/stream] protocol.
+	if sock := nllmtether.DefaultSocketPath(); nllmtether.SocketAvailable(sock) {
+		registry.Register("tether", nllmtether.New(sock))
+		registeredAPI = append(registeredAPI, "tether")
+		slog.Info("provider registered (tether daemon socket)", "provider", "tether", "socket", sock)
 	}
 
 	if len(missingAPI) > 0 && len(registeredAPI) == 0 {

@@ -4,7 +4,7 @@ import (
 	"testing"
 	"time"
 
-	agentsessions "github.com/hollis-labs/go-agent-sessions/agentsessions"
+	agentsessions "github.com/hollis-labs/agentkit/agentsessions"
 )
 
 // TestEnumStringers covers the enum String() methods so they don't drift

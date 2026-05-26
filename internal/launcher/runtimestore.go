@@ -5,7 +5,7 @@ import (
 	"errors"
 	"sync"
 
-	agentsessions "github.com/hollis-labs/go-agent-sessions/agentsessions"
+	agentsessions "github.com/hollis-labs/agentkit/agentsessions"
 	runtimeagent "github.com/hollis-labs/nanite/internal/runtime/agent"
 	"github.com/hollis-labs/nanite/internal/store"
 )

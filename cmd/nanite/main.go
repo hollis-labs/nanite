@@ -54,7 +54,7 @@ import (
 	"github.com/hollis-labs/nanite/internal/version"
 	"github.com/hollis-labs/nanite/pkg/models"
 
-	agentbroker "github.com/hollis-labs/go-agent-broker/broker"
+	agentbroker "github.com/hollis-labs/agentkit/broker"
 )
 
 func main() {

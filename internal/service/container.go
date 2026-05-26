@@ -12,7 +12,7 @@ import (
 	"sync"
 	"time"
 
-	agentbroker "github.com/hollis-labs/go-agent-broker/broker"
+	agentbroker "github.com/hollis-labs/agentkit/broker"
 	llmtypes "github.com/hollis-labs/go-llm-types"
 	conduit "github.com/hollis-labs/tesseract"
 

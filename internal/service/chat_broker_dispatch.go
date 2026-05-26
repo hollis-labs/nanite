@@ -37,7 +37,7 @@ import (
 	"fmt"
 	"log/slog"
 
-	agentbroker "github.com/hollis-labs/go-agent-broker/broker"
+	agentbroker "github.com/hollis-labs/agentkit/broker"
 	"github.com/hollis-labs/nanite/internal/chat"
 	"github.com/hollis-labs/nanite/internal/classify"
 	"github.com/hollis-labs/nanite/internal/reflex"

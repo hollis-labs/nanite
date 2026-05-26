@@ -38,7 +38,7 @@ import (
 	"log/slog"
 	"strings"
 
-	"github.com/hollis-labs/go-agent-launch/agentlaunch"
+	"github.com/hollis-labs/agentkit/agentlaunch"
 )
 
 // inertFileRoot is the placeholder RegistryRegistrar.FileRoot stamped on

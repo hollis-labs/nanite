@@ -6,7 +6,7 @@ import (
 	"errors"
 	"testing"
 
-	agentbroker "github.com/hollis-labs/go-agent-broker/broker"
+	agentbroker "github.com/hollis-labs/agentkit/broker"
 	llmtypes "github.com/hollis-labs/go-llm-types"
 	"github.com/hollis-labs/nanite/internal/chat"
 	"github.com/hollis-labs/nanite/internal/classify"

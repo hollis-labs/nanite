@@ -9,8 +9,8 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	agentbroker "github.com/hollis-labs/go-agent-broker/broker"
-	agentsessions "github.com/hollis-labs/go-agent-sessions/agentsessions"
+	agentbroker "github.com/hollis-labs/agentkit/broker"
+	agentsessions "github.com/hollis-labs/agentkit/agentsessions"
 	llmcontracts "github.com/hollis-labs/go-llm-contracts"
 	"github.com/hollis-labs/go-modelsdev/modelsdev"
 	"github.com/hollis-labs/go-providers/provider"
@@ -221,7 +221,7 @@ type ChatServiceConfig struct {
 	// the chat-loop entry to decide whether the turn should dispatch to
 	// a worker/planner subagent OR be handled by the chat agent
 	// directly. The deterministic v1 impl is `broker.New()` from
-	// github.com/hollis-labs/go-agent-broker/broker (v0.2.0+).
+	// github.com/hollis-labs/agentkit/broker (agentkit v0.3.0+).
 	//
 	// nil-safe: when absent, the call-site is a pass-through and every
 	// turn falls through to the chat-direct LLM loop. Production wiring

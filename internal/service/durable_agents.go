@@ -7,7 +7,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/hollis-labs/go-agent-runtime/runtimekind"
+	"github.com/hollis-labs/agentkit/agentruntime/runtimekind"
 	"github.com/hollis-labs/nanite/internal/store"
 )
 

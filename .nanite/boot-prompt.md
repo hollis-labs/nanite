@@ -1,31 +1,31 @@
-# Session Boot — 2026-05-26 (post-PR-219 wrap)
+# Session Boot — 2026-05-26 (post-CW-0001 dropdown hybrid)
 
 > **Memory + knowledge:** Vanta-primary (`vanta-primary-since: 2026-04-19`). Recall Vanta first (`memory_recall`/`conduit_lookup`), file-based is legacy fallback. Writes → Vanta only via `capture-to-vanta`. See `~/.claude/CLAUDE.md` for full contract.
 
 ## Where We Left Off
 
-PR #219 (chore: migrate `go-agent-*` modules to `agentkit v0.3.0`) merged + branch deleted. Local synced. Also pushed `agentkit@5b8aaad` (CHANGELOG go-runner v0.6.0 → v0.5.0).
+Two tickets landed back-to-back: `CW-20260526-0002` (recovery broker dropped provider on CLI exits — fix at `5450cb2`) and `CW-20260526-0001` (registry-backed dropdown via the hybrid catalog at `42b7da7`). Local main is **2 commits ahead of origin/main** (both unpushed). Also reconciled `SP-20260518-0013` sprint state: 14 of 17 tasks confirmed shipped via PR #213 + PR #215; `0064` (MEMORY.md plant) and `0068` (subagent progress narration) reopened to `todo` for verification — no in-code marker found.
 
 ## Current State
 
-- **Local main** `9c74927` ≡ `origin/main` (clean, synced).
-- **agentkit v0.3.0** is now the single source for `agentcontext`, `agentlaunch`, `agentsessions`, `agentruntime`, `broker`. Selectors unchanged from the absorbed `go-agent-*` versions; no API adaptations were needed.
-- **Capability roadmaps shipped:** backend runtime, frontend UX, capability admin, Phase 6 shared launch, beta P0.
-- **Active sprint:** `SP-20260518-0013` harness hardening — 17 tasks. Wave 1 (heartbeat `0073`, budget `0036`, output `0071`/`0068`, status taxonomy) is the load-bearing thread.
+- **Local main** `42b7da7` (2 ahead of origin/main).
+- **agentkit v0.3.0** is the single source for `agentcontext`/`agentlaunch`/`agentsessions`/`agentruntime`/`broker`.
+- **Provider dropdown** is now registry-backed via `internal/providercatalog`. New API providers surface in the dropdown from `initProviders` alone; DB `seededProviders` survives only as a backing seed for model FK integrity + nil-catalog fallback. Models still come from DB / `pkg/models.AllSeeded()`.
+- **Sprint SP-20260518-0013** — 4 tasks remain open: `0064` + `0068` (reopened pending verification), `0116` (bulk create — backlog), `0117` (intent-routed-tools spike — backlog, design call needed).
 
 ## Next Actions
 
-1. **`CW-20260526-0002` — recovery broker's retry-dispatch loses provider on CLI exits.**
-   - Likely seam: `observeSessionForRecovery` builds the meta bag without `MetaKeyProvider` (the HTTP path sets it correctly).
-   - Audit `internal/runtime/agent/recovery/orchestration.go` for how `MetaKeyProvider` threads into `agent.Boot`.
-   - Suggested test: simulate CLI terminal exit, assert the dispatched retry boots with the original provider.
-   - Fix is small but plumbs through the broker boundary — expect the meta-bag change to span two packages.
-2. After 0002, pick the next thread:
-   - **Wave 1 of the harness sprint** (start with heartbeat `0073`), OR
-   - **`CW-20260526-0001`** — registry-backed vs DB-seeded provider dropdown (design decision, parked, needs your call).
+1. **Push** `5450cb2` + `42b7da7` to `origin/main` when ready.
+2. Pick one of the open sprint items:
+   - **`CW-20260519-0064`** — verify MEMORY.md plant is/isn't in claude boot dirs; implement or close with evidence.
+   - **`CW-20260519-0068`** — verify subagent progress narration is/isn't visible in a long multi-subagent turn; implement or close.
+   - **`CW-20260519-0116`** — bulk create/update across MCP/API/CLI (collapse N-call fan-out).
+   - **`CW-20260519-0117`** — intent-routed tools + batch primitive (design spike — needs operator direction first).
 
 ## Key Context
 
 - **Deploy via Cerberus.** `cerberus_resource_deploy nanite-api-service` then `cerberus_resource_reload nanite-api-service`. If reload reports "launchd not loaded" use `cerberus_resource_apply` instead. Run `make build-ui` before deploy when UI changed.
 - **Squash-merge gotcha** (created PR #218 originally): commits pushed to a branch *after* its squash-merge lands never reach main. Open a follow-up PR — don't assume the branch is "done."
-- **Import paths to use going forward:** `github.com/hollis-labs/agentkit/{agentcontext,agentlaunch,agentsessions,agentruntime/runtimekind,broker}`. The standalone `go-agent-*` modules are no longer in `go.mod`.
+- **Import paths going forward:** `github.com/hollis-labs/agentkit/{agentcontext,agentlaunch,agentsessions,agentruntime/runtimekind,broker}`. The standalone `go-agent-*` modules are no longer in `go.mod`.
+- **Provider catalog (CW-20260526-0001).** To add a new API provider, edit `cmd/nanite/main.go:initProviders` — the `apiProvSpec` literal supplies registry registration AND dropdown catalog entry in one place. The catalog is consumed in `internal/api/providers.go:handleListProviders`; the merge order is catalog → DB fallback → boot-profile. `internal/store/seed.go:seededProviders` survives as a backing seed for model FK integrity, NOT as the dropdown source of truth.
+- **Sprint-state heuristic** (learned 2026-05-26): a Torque row with `status=done` + a "WOUND DOWN" BlockedReason means "removed from the dispatch queue, work shipped." But if PR #213's commit body doesn't list the CW id AND `grep -rn <CW-ID>` returns no hits, the row may have been administratively closed — verify before trusting.

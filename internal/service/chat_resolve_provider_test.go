@@ -61,6 +61,32 @@ func TestResolveProvider_CLISessionProvider_ShortCircuits(t *testing.T) {
 	}
 }
 
+func TestResolveProvider_StoredProviderID_UsesRuntimeProviderType(t *testing.T) {
+	st := mustNewStoreForResolveTest(t)
+	if _, err := st.DB.Exec(
+		`INSERT INTO providers (id, name, provider_type, is_enabled, settings) VALUES (?, ?, ?, ?, ?)`,
+		"tether-001", "Tether", "tether", true, "{}",
+	); err != nil {
+		t.Fatalf("insert provider row: %v", err)
+	}
+
+	reg := newRegistryWithAnthropicStub()
+	reg.Register("tether", stubLLMProvider{})
+
+	s := &chatServiceImpl{
+		providers: reg,
+		store:     st,
+	}
+
+	name, prov := s.resolveProvider("sess-1", "tether-001", "", "auto")
+	if name != "tether" {
+		t.Fatalf("resolveProvider returned name=%q, want %q (stored provider ids must map to runtime provider_type before fallback)", name, "tether")
+	}
+	if prov == nil {
+		t.Fatal("resolveProvider returned nil prov for mapped tether provider; want registered runtime provider")
+	}
+}
+
 func TestResolveProvider_CLIAgentProvider_ShortCircuits(t *testing.T) {
 	s := &chatServiceImpl{
 		providers: newRegistryWithAnthropicStub(),
@@ -215,7 +241,9 @@ type stubLLMProvider struct{}
 func (stubLLMProvider) StreamChat(context.Context, llmtypes.ChatRequest) (<-chan llmtypes.StreamEvent, error) {
 	return nil, nil
 }
-func (stubLLMProvider) Complete(context.Context, llmtypes.ChatRequest) (string, error) { return "", nil }
+func (stubLLMProvider) Complete(context.Context, llmtypes.ChatRequest) (string, error) {
+	return "", nil
+}
 func (stubLLMProvider) Capabilities() llmtypes.ProviderCapabilities {
 	return llmtypes.ProviderCapabilities{}
 }

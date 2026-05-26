@@ -12,10 +12,11 @@ import (
 	agentbroker "github.com/hollis-labs/go-agent-broker/broker"
 	agentsessions "github.com/hollis-labs/go-agent-sessions/agentsessions"
 	llmcontracts "github.com/hollis-labs/go-llm-contracts"
+	"github.com/hollis-labs/go-modelsdev/modelsdev"
 	"github.com/hollis-labs/go-providers/provider"
 	"github.com/hollis-labs/nanite/internal/agent"
-	"github.com/hollis-labs/nanite/internal/agentregistry"
 	"github.com/hollis-labs/nanite/internal/agent/reflexes"
+	"github.com/hollis-labs/nanite/internal/agentregistry"
 	"github.com/hollis-labs/nanite/internal/bootprofile"
 	"github.com/hollis-labs/nanite/internal/chat"
 	"github.com/hollis-labs/nanite/internal/config"
@@ -31,7 +32,6 @@ import (
 	runtimeagent "github.com/hollis-labs/nanite/internal/runtime/agent"
 	"github.com/hollis-labs/nanite/internal/safego"
 	"github.com/hollis-labs/nanite/internal/store"
-	"github.com/hollis-labs/go-modelsdev/modelsdev"
 	"github.com/hollis-labs/nanite/internal/task"
 	"github.com/hollis-labs/nanite/internal/tool"
 	"github.com/hollis-labs/nanite/internal/worker"
@@ -107,11 +107,11 @@ type ChatServiceConfig struct {
 	Store     Store // full store for low-level operations (usage, events, messages)
 
 	// Optional subsystems — nil-safe.
-	Orchestrator *chat.Orchestrator
-	AppConfig    *config.AppConfig
-	OutputFilter *filter.Chain
-	Commands     *chat.CommandRegistry
-	PluginHost   PluginEventSink // for pre-hooks
+	Orchestrator   *chat.Orchestrator
+	AppConfig      *config.AppConfig
+	OutputFilter   *filter.Chain
+	Commands       *chat.CommandRegistry
+	PluginHost     PluginEventSink // for pre-hooks
 	ProcessTracker *chat.ProcessTracker
 
 	// SessionEventWriter writes lifecycle rows to session_events for
@@ -268,20 +268,20 @@ type chatServiceImpl struct {
 	providers *provider.Registry
 	store     Store
 
-	orchestrator        *chat.Orchestrator
-	appConfig           *config.AppConfig
-	outputFilter        *filter.Chain
-	commands            *chat.CommandRegistry
-	pluginHost          PluginEventSink
-	processTracker      *chat.ProcessTracker
-	tasks               task.Service
-	workers             *worker.Manager
-	sessionEventWriter  SessionEventWriter
+	orchestrator       *chat.Orchestrator
+	appConfig          *config.AppConfig
+	outputFilter       *filter.Chain
+	commands           *chat.CommandRegistry
+	pluginHost         PluginEventSink
+	processTracker     *chat.ProcessTracker
+	tasks              task.Service
+	workers            *worker.Manager
+	sessionEventWriter SessionEventWriter
 
 	utilityProvider string
 	utilityModel    string
-	permissions    *permission.Engine
-	pathGrants     *permission.PathGrants
+	permissions     *permission.Engine
+	pathGrants      *permission.PathGrants
 
 	embeddingStatus   string
 	embeddingProvider string
@@ -459,25 +459,25 @@ func NewChatService(cfg ChatServiceConfig) ChatService {
 		um = models.DefaultChatModel()
 	}
 	impl := &chatServiceImpl{
-		sessions:       cfg.Sessions,
-		agents:         cfg.Agents,
-		tools:          cfg.Tools,
-		streams:        cfg.Streams,
-		context:        cfg.Context,
-		events:         cfg.Events,
-		providers:      cfg.Providers,
-		store:          cfg.Store,
-		orchestrator:   cfg.Orchestrator,
-		appConfig:      cfg.AppConfig,
-		outputFilter:   cfg.OutputFilter,
-		commands:       cfg.Commands,
-		pluginHost:     cfg.PluginHost,
-		processTracker: cfg.ProcessTracker,
-		tasks:               cfg.Tasks,
-		utilityProvider:     up,
-		utilityModel:        um,
-		permissions:         cfg.Permissions,
-		pathGrants:          cfg.PathGrants,
+		sessions:                cfg.Sessions,
+		agents:                  cfg.Agents,
+		tools:                   cfg.Tools,
+		streams:                 cfg.Streams,
+		context:                 cfg.Context,
+		events:                  cfg.Events,
+		providers:               cfg.Providers,
+		store:                   cfg.Store,
+		orchestrator:            cfg.Orchestrator,
+		appConfig:               cfg.AppConfig,
+		outputFilter:            cfg.OutputFilter,
+		commands:                cfg.Commands,
+		pluginHost:              cfg.PluginHost,
+		processTracker:          cfg.ProcessTracker,
+		tasks:                   cfg.Tasks,
+		utilityProvider:         up,
+		utilityModel:            um,
+		permissions:             cfg.Permissions,
+		pathGrants:              cfg.PathGrants,
 		embeddingStatus:         cfg.EmbeddingStatus,
 		embeddingProvider:       cfg.EmbeddingProvider,
 		embeddingWarnedSessions: make(map[string]struct{}),
@@ -488,20 +488,20 @@ func NewChatService(cfg ChatServiceConfig) ChatService {
 		adapterRegistry:         cfg.AdapterRegistry,
 		lifecycle:               lifecycle.NewManager("service.chat"),
 		activeGen:               make(map[string]*inFlightGen),
-		sessionEventWriter:  cfg.SessionEventWriter,
-		strategyLogger:      cfg.StrategyLogger,
-		inspector:           cfg.Inspector,
-		loopDetector:        cfg.LoopDetector,
-		reminderEngine:      cfg.ReminderEngine,
-		reflexEngine:        cfg.ReflexEngine,
-		agentDeps:           cfg.AgentDeps,
-		agentSessionsManager: cfg.AgentSessionsManager,
-		agentEventBridge:    cfg.AgentEventBridge,
-		agentBootDirAdapter: cfg.AgentBootDirAdapter,
-		envelopeRenderExecutor: cfg.EnvelopeRenderExecutor,
-		agentBroker:            cfg.AgentBroker,
-		bootProfiles:           cfg.BootProfiles,
-		agentRegistry:          cfg.AgentRegistry,
+		sessionEventWriter:      cfg.SessionEventWriter,
+		strategyLogger:          cfg.StrategyLogger,
+		inspector:               cfg.Inspector,
+		loopDetector:            cfg.LoopDetector,
+		reminderEngine:          cfg.ReminderEngine,
+		reflexEngine:            cfg.ReflexEngine,
+		agentDeps:               cfg.AgentDeps,
+		agentSessionsManager:    cfg.AgentSessionsManager,
+		agentEventBridge:        cfg.AgentEventBridge,
+		agentBootDirAdapter:     cfg.AgentBootDirAdapter,
+		envelopeRenderExecutor:  cfg.EnvelopeRenderExecutor,
+		agentBroker:             cfg.AgentBroker,
+		bootProfiles:            cfg.BootProfiles,
+		agentRegistry:           cfg.AgentRegistry,
 	}
 	// CW-20260512-0121 (SP-20260512-0011): wire the single dispatcher
 	// door. The Dispatcher delegates to chatServiceImpl.generateResponse
@@ -946,13 +946,18 @@ func (s *chatServiceImpl) resolveProvider(sessionID, sessionProvider, agentProvi
 	}
 
 	if sessionProvider != "" {
-		if p, ok := s.providers.Get(sessionProvider); ok {
-			return sessionProvider, p
+		runtimeProvider := sessionProvider
+		if stored, err := s.store.GetProvider(sessionProvider); err == nil && stored != nil && stored.ProviderType != "" {
+			runtimeProvider = stored.ProviderType
 		}
-		if chat.IsCLIProvider(sessionProvider) {
-			return sessionProvider, nil
+		if p, ok := s.providers.Get(runtimeProvider); ok {
+			return runtimeProvider, p
 		}
-		slog.Warn("chat-service: session provider not registered, falling through", "provider", sessionProvider)
+		if chat.IsCLIProvider(runtimeProvider) {
+			return runtimeProvider, nil
+		}
+		slog.Warn("chat-service: session provider not registered, falling through",
+			"provider", sessionProvider, "runtime_provider", runtimeProvider)
 	}
 
 	if agentProvider != "" {
@@ -1071,4 +1076,3 @@ func (s *chatServiceImpl) classifyNilProvider(providerName string) nilProviderRo
 	}
 	return nilProviderRouteCLI
 }
-

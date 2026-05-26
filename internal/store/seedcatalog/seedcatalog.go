@@ -1,25 +1,40 @@
 // Package seedcatalog is the compile-time source of provider/model seed
-// defaults consumed by store.Seed and store.SeedProviders.
+// defaults — the values shipped with the binary, used to populate the
+// providers/models tables on first install and as the absolute routing
+// floor for code that cannot ask the DB.
 //
-// SCOPE — strictly seed-only.
+// SCOPE — known consumers (kept deliberately small):
 //
-// Runtime "what default model should this session/agent use?" resolution
-// MUST go through the resolver (internal/service/modeldefaults), which
-// walks user_settings → providers.default_model. Operators change defaults
-// via the DB without a recompile. Nothing in this package should be read
-// from a runtime hot path.
+//  1. internal/store/seed.go and store.SeedProviders — populate
+//     providers.default_model and the primary anthropic provider row on
+//     install / first boot.
+//  2. internal/store/defaults.go — fills the provider hint when neither
+//     the caller nor user_settings.default_provider supplies one, so the
+//     per-provider default_model lookup has something to key on.
+//  3. internal/chat/engine.go (InferProvider) — terminal routing floor
+//     for unknown model strings.
+//
+// SCOPE — what does NOT belong here:
+//
+// "What default model/provider should this session use?" — that's an
+// operator preference. It goes through store.ResolveProviderAndModel,
+// which walks explicit args → user_settings → providers.default_model.
+// Operators change those without a recompile; the seedcatalog values
+// are the bootstrap floor below them.
+//
+// Note on enforcement: Go does not provide an import-graph mechanism to
+// prevent a sub-package from being imported elsewhere. The "small list of
+// known consumers" above is a convention, not a compile-time rule. If a
+// new consumer appears, ask: "is this code looking for an operator-
+// configurable default?" If yes, route it through the resolver instead.
 //
 // Background: CW-20260526-0003 (the bare-alias `claude-sonnet-4` 404)
 // surfaced that pkg/models exported a `DefaultChatModelID` constant that
-// the runtime fallback chains terminated on. Multiple chains, all dead-
-// ending at the same Go literal, meant a stale value silently masked
-// misconfiguration. The literals were physically relocated here so the
-// import graph enforces the seed-only boundary: only internal/store/* may
-// import seedcatalog, and runtime code that wants a default must call the
-// resolver.
-//
-// If you find yourself importing this package from outside internal/store,
-// you almost certainly want the resolver instead.
+// every runtime fallback chain terminated on. Multiple chains converging
+// on the same Go literal meant a stale value silently masked
+// misconfiguration. The literals were physically relocated here to make
+// the seed-vs-runtime distinction obvious by file location, and the
+// runtime defaults were re-routed through the resolver.
 package seedcatalog
 
 // DefaultChatModelID is the canonical wire-level model identifier seeded

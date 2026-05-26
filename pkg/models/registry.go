@@ -60,9 +60,12 @@ type Model struct {
 
 // Default-model and default-provider constants were removed from this
 // package in CW-20260526-0003. Runtime callers MUST resolve defaults
-// through internal/service/modeldefaults.Resolver, which walks
-// user_settings → providers.default_model → seed values. Seeders read
-// the compile-time defaults from internal/store/seedcatalog.
+// through store.ResolveProviderAndModel (or the service-layer
+// DefaultResolver interface that exposes it), which walks
+// explicit args → user_settings.default_{provider,model} →
+// providers.default_model. Seeders read the compile-time defaults from
+// internal/store/seedcatalog, which is also the routing-floor for
+// chat.InferProvider when no other heuristic identifies a provider.
 //
 // Background: a single Go literal terminating every "what model?"
 // fallback chain hid the bare-alias `claude-sonnet-4` 404 bug — the bad

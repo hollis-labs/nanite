@@ -237,10 +237,14 @@ func NormalizeCLIProvider(name string) string {
 // Note: this is a ROUTING decision (which provider should handle this
 // model string?), not a USER-DEFAULT decision (which model should we
 // pick when none was selected?). User defaults flow through
-// store.ResolveProviderAndModel — see CW-20260526-0003. The seedcatalog
-// fallback here is a deployment-time constant, intentionally distinct
-// from operator-configurable defaults; nothing relies on this returning
-// a model that actually exists at the resolved provider.
+// store.ResolveProviderAndModel — see CW-20260526-0003.
+//
+// The seedcatalog dependency at step 4 is intentional and documented
+// alongside the package: seedcatalog is the SSOT for compile-time
+// floors consumed by both the seeder and a few routing-floor sites
+// like this one. Nothing relies on this returning a model that actually
+// exists at the resolved provider — the floor is just "if we had to
+// pick *some* provider, pick the same one the seeder uses."
 func InferProvider(model string) string {
 	if p := models.ProviderFor(model); p != "" {
 		return p

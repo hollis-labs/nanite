@@ -4,6 +4,8 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+
+	"github.com/hollis-labs/nanite/internal/store/seedcatalog"
 )
 
 // ErrNoDefaultModel is returned by ResolveProviderAndModel and
@@ -41,24 +43,34 @@ func (s *Store) DefaultModelForProvider(providerType string) (string, error) {
 	return model, nil
 }
 
-// ResolveProviderAndModel is the single source of truth for "what
-// provider + model should this call use?" Walks:
+// ResolveProviderAndModel is the SSOT for "what provider + model should
+// this call use?" Returns (provider, model, err).
 //
-//  1. Explicit args (caller-supplied, e.g. session.Model + session.Provider
-//     or agent.DefaultProvider + agent.DefaultModel).
-//  2. user_settings.default_provider / default_model.
+// Walks for provider (permissive — never errors):
+//
+//  1. explicitProvider (caller-supplied).
+//  2. user_settings.default_provider.
+//  3. seedcatalog.DefaultProviderType (compile-time routing floor).
+//
+// Walks for model (errors if dry):
+//
+//  1. explicitModel (caller-supplied).
+//  2. user_settings.default_model.
 //  3. providers.default_model for the resolved provider_type.
 //
-// Returns ErrNoDefaultModel (wrapped) if no chain element supplies a
-// model. Provider resolution is more permissive — if every chain element
-// is empty the function returns an error rather than picking a routing
-// floor, because the caller's intent ("use the default provider") is
-// indistinguishable from "operator forgot to configure one."
+// Returns ErrNoDefaultModel (wrapped) only when no chain element supplies
+// a model. The provider return is best-effort: callers that perform their
+// own provider routing (e.g. chat_generate's resolveProvider →
+// chat.InferProvider) can override it based on the model string.
 //
 // CW-20260526-0003: introduced to replace the scattered
 // `session.Model → agent.DefaultModel → models.DefaultChatModel()` chain
 // that silently dead-ended on a Go literal. Operators now change defaults
-// via user_settings or providers.default_model with no recompile.
+// via user_settings or providers.default_model with no recompile. The
+// permissive-provider shape was added in response to PR #220 review —
+// hard-erroring on missing provider broke fresh installs (empty
+// user_settings) and the "session has model, downstream infers provider"
+// path.
 func (s *Store) ResolveProviderAndModel(explicitProvider, explicitModel string) (string, string, error) {
 	provider := explicitProvider
 	model := explicitModel
@@ -76,8 +88,11 @@ func (s *Store) ResolveProviderAndModel(explicitProvider, explicitModel string) 
 		}
 	}
 
+	// Provider falls back to the seed routing floor so a fresh install
+	// (empty user_settings.default_provider, no operator config yet) still
+	// returns a usable hint for the per-provider default_model lookup.
 	if provider == "" {
-		return "", "", fmt.Errorf("%w: no provider configured (set user_settings.default_provider)", ErrNoDefaultModel)
+		provider = seedcatalog.DefaultProviderType
 	}
 
 	if model == "" {

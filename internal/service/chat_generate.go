@@ -240,25 +240,37 @@ func (s *chatServiceImpl) generateResponse(ctx context.Context, sessionID, assis
 		workspace, _ = s.store.GetWorkspace(session.WorkspaceID)
 	}
 
-	// --- Resolve provider + model ---
-	// CW-20260526-0003: resolution walks session → agent → user_settings →
-	// providers.default_model via store.ResolveProviderAndModel. The
-	// previous chain dead-ended on a Go literal which silently masked
-	// misconfiguration (the bare-alias `claude-sonnet-4` 404 bug).
-	explicitProvider := session.Provider
-	if explicitProvider == "" {
-		explicitProvider = agent.DefaultProvider
+	// --- Resolve model ---
+	// CW-20260526-0003: model resolution walks session → agent →
+	// store.ResolveProviderAndModel (user_settings.default_model →
+	// providers.default_model). The previous chain dead-ended on a Go
+	// literal which silently masked misconfiguration (the bare-alias
+	// `claude-sonnet-4` 404 bug).
+	//
+	// Provider routing is handled separately by resolveProvider /
+	// chat.InferProvider below — we only invoke the resolver when model
+	// is empty, and we use the model-derived provider as a hint for the
+	// per-provider default_model lookup (the resolver returns it for
+	// free). Calling the resolver when an explicit model is already
+	// present would risk masking provider routing the downstream knows
+	// better than we do.
+	model := session.Model
+	if model == "" && agent.DefaultModel != "" {
+		model = agent.DefaultModel
 	}
-	explicitModel := session.Model
-	if explicitModel == "" {
-		explicitModel = agent.DefaultModel
-	}
-	_, model, resolveErr := s.store.ResolveProviderAndModel(explicitProvider, explicitModel)
-	if resolveErr != nil {
-		ch <- chat.ErrorEvent(chat.ErrorCodeProviderError,
-			"No default model configured. Set providers.default_model or user_settings.default_model.",
-			map[string]interface{}{"raw": resolveErr.Error()})
-		return
+	if model == "" {
+		explicitProvider := session.Provider
+		if explicitProvider == "" {
+			explicitProvider = agent.DefaultProvider
+		}
+		_, resolved, resolveErr := s.store.ResolveProviderAndModel(explicitProvider, "")
+		if resolveErr != nil {
+			ch <- chat.ErrorEvent(chat.ErrorCodeProviderError,
+				"No default model configured. Set providers.default_model or user_settings.default_model.",
+				map[string]interface{}{"raw": resolveErr.Error()})
+			return
+		}
+		model = resolved
 	}
 
 	// --- Resolve provider ---

@@ -35,11 +35,20 @@ func nameToSlug(name string) string {
 // meaning "use whatever the system default is at request time" — which
 // the chat-engine resolver then re-evaluates per call.
 func NewAgentBuilder(s *store.Store) *Builder {
-	defaultHint, _, _ := s.ResolveProviderAndModel("", "")
-	if defaultHint == "" {
-		defaultHint = "(set user_settings.default_model)"
+	// Resolver returns (provider, model, err) — we use the model for the
+	// UX hint. PR #220 review note: a previous draft showed the provider
+	// here, which was wrong.
+	resolvedProvider, resolvedModel, resolveErr := s.ResolveProviderAndModel("", "")
+	var modelHint string
+	switch {
+	case resolveErr == nil && resolvedModel != "":
+		modelHint = resolvedModel
+	case resolvedProvider != "":
+		modelHint = fmt.Sprintf("(set providers.default_model for %s)", resolvedProvider)
+	default:
+		modelHint = "(set user_settings.default_model or providers.default_model)"
 	}
-	modelPrompt := fmt.Sprintf("Default model (leave blank to inherit system default %s):", defaultHint)
+	modelPrompt := fmt.Sprintf("Default model (leave blank to inherit system default %s):", modelHint)
 	return &Builder{
 		Name:        "agent",
 		Description: "Create a new agent profile with a name, system prompt, model, and description.",

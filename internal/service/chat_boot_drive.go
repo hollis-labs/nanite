@@ -10,8 +10,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/hollis-labs/go-agent-launch/agentlaunch"
-	agentsessions "github.com/hollis-labs/go-agent-sessions/agentsessions"
+	"github.com/hollis-labs/agentkit/agentlaunch"
+	agentsessions "github.com/hollis-labs/agentkit/agentsessions"
 	llmtypes "github.com/hollis-labs/go-llm-types"
 	"github.com/hollis-labs/nanite/internal/bootprofile"
 	"github.com/hollis-labs/nanite/internal/chat"

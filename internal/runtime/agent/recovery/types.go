@@ -3,7 +3,7 @@ package recovery
 import (
 	"time"
 
-	agentsessions "github.com/hollis-labs/go-agent-sessions/agentsessions"
+	agentsessions "github.com/hollis-labs/agentkit/agentsessions"
 )
 
 // FailureEvent is the broker's input. Aggregates the lib-side ExitError

@@ -25,7 +25,7 @@ import "fmt"
 // AgentBrokerDecision is one row in the agent_broker_decisions table.
 //
 // Columns mirror the broker.Input + broker.Decision pair from
-// github.com/hollis-labs/go-agent-broker/broker so a call site can populate
+// github.com/hollis-labs/agentkit/broker so a call site can populate
 // the struct directly from those values without an intermediate mapping
 // layer.
 type AgentBrokerDecision struct {

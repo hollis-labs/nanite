@@ -11,7 +11,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/hollis-labs/go-agent-broker/broker"
+	"github.com/hollis-labs/agentkit/broker"
 	"github.com/hollis-labs/nanite/internal/background"
 	"github.com/hollis-labs/nanite/internal/builders"
 	"github.com/hollis-labs/nanite/internal/classify"

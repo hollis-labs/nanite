@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"time"
 
-	agentsessions "github.com/hollis-labs/go-agent-sessions/agentsessions"
+	agentsessions "github.com/hollis-labs/agentkit/agentsessions"
 )
 
 // Standard meta keys the chat composition root populates on the

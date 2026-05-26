@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	agentsessions "github.com/hollis-labs/go-agent-sessions/agentsessions"
+	agentsessions "github.com/hollis-labs/agentkit/agentsessions"
 )
 
 // TestRenderUserMessageActionRouting pins the (Action -> Kind) routing.

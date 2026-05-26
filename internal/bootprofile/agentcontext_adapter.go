@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/hollis-labs/go-agent-context/agentcontext"
-	"github.com/hollis-labs/go-agent-context/agentcontext/resolvers"
+	"github.com/hollis-labs/agentkit/agentcontext"
+	"github.com/hollis-labs/agentkit/agentcontext/resolvers"
 )
 
 // agentcontext_adapter.go is the bridge between Nanite's boot-profile

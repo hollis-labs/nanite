@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	agentsessions "github.com/hollis-labs/go-agent-sessions/agentsessions"
+	agentsessions "github.com/hollis-labs/agentkit/agentsessions"
 )
 
 // TestClassifyTable exercises every rule in the classifier's documented

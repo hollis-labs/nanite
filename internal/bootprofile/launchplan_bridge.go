@@ -1,7 +1,7 @@
 package bootprofile
 
 import (
-	"github.com/hollis-labs/go-agent-launch/agentlaunch"
+	"github.com/hollis-labs/agentkit/agentlaunch"
 )
 
 // launchplan_bridge.go converts a compiled Nanite LaunchSpec into the

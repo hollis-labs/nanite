@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"strings"
 
-	agentsessions "github.com/hollis-labs/go-agent-sessions/agentsessions"
+	agentsessions "github.com/hollis-labs/agentkit/agentsessions"
 )
 
 // Envelope kinds the broker emits. Reused from the existing chat

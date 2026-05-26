@@ -5,7 +5,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/hollis-labs/go-agent-runtime/runtimekind"
+	"github.com/hollis-labs/agentkit/agentruntime/runtimekind"
 	"github.com/hollis-labs/nanite/internal/bootprofile"
 	"github.com/hollis-labs/nanite/internal/service"
 	"github.com/hollis-labs/nanite/internal/store"

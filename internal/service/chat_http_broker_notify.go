@@ -8,7 +8,7 @@ import (
 	"net/url"
 	"strings"
 
-	agentsessions "github.com/hollis-labs/go-agent-sessions/agentsessions"
+	agentsessions "github.com/hollis-labs/agentkit/agentsessions"
 	llmcontracts "github.com/hollis-labs/go-llm-contracts"
 	runtimeagent "github.com/hollis-labs/nanite/internal/runtime/agent"
 	"github.com/hollis-labs/nanite/internal/runtime/agent/recovery"

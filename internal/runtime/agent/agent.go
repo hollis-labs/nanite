@@ -10,7 +10,7 @@ import (
 	"strings"
 	"time"
 
-	agentsessions "github.com/hollis-labs/go-agent-sessions/agentsessions"
+	agentsessions "github.com/hollis-labs/agentkit/agentsessions"
 	"github.com/hollis-labs/nanite/internal/store"
 	"github.com/oklog/ulid/v2"
 )

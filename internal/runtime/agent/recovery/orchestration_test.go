@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	agentsessions "github.com/hollis-labs/go-agent-sessions/agentsessions"
+	agentsessions "github.com/hollis-labs/agentkit/agentsessions"
 )
 
 // fakeEnvelope captures emitted envelopes per session so tests can

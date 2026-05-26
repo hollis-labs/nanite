@@ -231,6 +231,19 @@ export function ChatHeader() {
     },
   });
 
+  // CW-20260525-0001 Slice 2: recover this session — evict the runtime so the
+  // next turn cold-boots WITH recovery (recovery pack + provider resume),
+  // resuming prior context. Distinct from Reboot (which boots fresh).
+  const recoverMutation = useMutation({
+    mutationFn: () => {
+      if (!activeSessionId) throw new Error("No active session");
+      return api.recoverSession(activeSessionId);
+    },
+    onSuccess: (result) => {
+      if (result === "recovered") setMoreOpen(false);
+    },
+  });
+
   const pluginActions = usePluginSlots("chat-header-action");
   const handlePluginAction = useCallback(
     (entry: UISlotEntry) => {
@@ -507,6 +520,28 @@ export function ChatHeader() {
                     {rebootMutation.data === "busy"
                       ? "A turn is in progress — try again when it finishes."
                       : "Reboot failed — check the service."}
+                  </div>
+                )}
+                <button
+                  type="button"
+                  onClick={() => recoverMutation.mutate()}
+                  disabled={recoverMutation.isPending || !activeSessionId}
+                  title="Resume this session after a restart — the next message reloads prior context (recovery pack + provider resume)"
+                  className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs text-fg-secondary transition-colors hover:bg-surface hover:text-fg"
+                >
+                  <RotateCcw className="h-3 w-3 text-fg-muted" />
+                  {recoverMutation.isPending ? "Recovering…" : "Recover session"}
+                </button>
+                {recoverMutation.data === "recovered" && (
+                  <div className="px-3 pb-1 text-[10px] text-fg-muted">
+                    Recovery armed — your next message will resume prior context.
+                  </div>
+                )}
+                {(recoverMutation.data === "busy" || recoverMutation.data === "error") && (
+                  <div className="px-3 pb-1 text-[10px] text-fg-muted">
+                    {recoverMutation.data === "busy"
+                      ? "A turn is in progress — try again when it finishes."
+                      : "Recover failed — check the service."}
                   </div>
                 )}
                 {pluginActions.length > 0 && (

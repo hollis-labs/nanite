@@ -18,6 +18,7 @@ services used by the built-in React UI.
 | `GET /api/harness/v1/sessions/{id}` | Load one session plus observability details |
 | `POST /api/harness/v1/sessions/{id}/turns` | Send a turn through the normal product turn path |
 | `POST /api/harness/v1/sessions/{id}/cancel` | Cancel the active turn for the session |
+| `POST /api/harness/v1/sessions/{id}/recover` | Arm session recovery; next turn cold-boots with prior context |
 | `GET /api/harness/v1/sessions/{id}/events?message_id=...` | SSE stream for one turn/message |
 | `POST /api/harness/v1/sessions/{id}/approvals/{requestId}` | Respond to a tool approval request |
 | `GET /api/harness/v1/durable-agents` | List durable agents |
@@ -109,6 +110,25 @@ Response statuses:
 - `cancelled` — an active generation was cancelled
 - `idle` — there was no active generation to cancel
 
+## Recover
+
+`POST /api/harness/v1/sessions/{id}/recover`
+
+Evicts the session's live runtime (if any) so the next turn cold-boots into
+auto-recovery — a recovery pack of prior context is planted, and provider-side
+resume is used when a captured `provider_session_id` exists. This is the
+harness-v1 surface of `POST /api/sessions/{id}/recover`; it does **not** arm the
+fresh-boot flag, so unlike a clean reboot the next turn resumes prior context
+instead of starting clean.
+
+Response fields:
+
+- `recovered` — whether a live runtime was found and evicted
+- `status` — `rebooted` (a runtime was evicted) or `no_active_agent` (none was
+  tracked; the next turn still cold-boots into recovery)
+
+An in-flight turn returns `409 Conflict` rather than interrupting it.
+
 ## Permission Support
 
 This namespace does not add a new permission engine. It exposes the current
@@ -125,6 +145,14 @@ The harness namespace does not reinterpret durable lifecycle behavior.
 - `start` maps to the existing durable-agent start service
 - `resume` maps to the existing durable-agent resume service
 - `wake` maps to the explicit wake service
+
+`resume` is recovery-aware (CW-20260525-0001 Slice 5): after reattaching the
+latest session it arms session recovery (the same path as `sessions/{id}/recover`),
+so the next turn cold-boots with prior context instead of reattaching the row and
+answering blind on a normal cold turn. The `resume_succeeded` durable event
+records `recovery_armed` in its metadata. For API-backed sessions (no tracked
+runtime) this is a no-op and the next turn rebuilds context from messages as
+usual.
 
 Wake keeps the current conservative semantics:
 

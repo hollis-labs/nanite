@@ -73,6 +73,12 @@ func TestHarnessV1InitializeAndCapabilities(t *testing.T) {
 	if !containsString(initResp.SupportedEventTypes, "approval_request") {
 		t.Fatalf("supported events = %+v", initResp.SupportedEventTypes)
 	}
+	if !containsString(initResp.Operations, "sessions.recover") {
+		t.Fatalf("operations should advertise sessions.recover: %+v", initResp.Operations)
+	}
+	if initResp.RouteHints.SessionRecover == "" {
+		t.Fatalf("route hints should include session_recover: %+v", initResp.RouteHints)
+	}
 
 	req = httptest.NewRequest(http.MethodGet, "/api/harness/v1/capabilities", nil)
 	w = httptest.NewRecorder()
@@ -349,6 +355,39 @@ func TestHarnessV1DurableWrappers(t *testing.T) {
 	}
 	if wakeResult.Skipped || wakeResult.LaunchResult == nil || wakeResult.LaunchResult.Session == nil {
 		t.Fatalf("wake result = %+v", wakeResult)
+	}
+}
+
+// TestHarnessV1RecoverSession verifies the harness-v1 recover route (Slice 5):
+// it arms session recovery and 404s an unknown session.
+func TestHarnessV1RecoverSession(t *testing.T) {
+	a, mux := newTestAPI(t)
+	sess := &store.Session{Provider: "anthropic", Model: "claude-sonnet-4", Status: "active"}
+	if err := a.Services.Store.CreateSession(sess); err != nil {
+		t.Fatalf("CreateSession: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/api/harness/v1/sessions/"+sess.ID+"/recover", nil)
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("recover = %d body=%s", w.Code, w.Body.String())
+	}
+	var resp harnessV1RecoverResponse
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode recover: %v", err)
+	}
+	// No live runtime in a fresh test process → recovery is a no-op that still
+	// leaves the next turn to cold-boot into auto-recovery.
+	if resp.SessionID != sess.ID || resp.Recovered || resp.Status != "no_active_agent" {
+		t.Fatalf("recover response = %+v", resp)
+	}
+
+	req = httptest.NewRequest(http.MethodPost, "/api/harness/v1/sessions/does-not-exist/recover", nil)
+	w = httptest.NewRecorder()
+	mux.ServeHTTP(w, req)
+	if w.Code != http.StatusNotFound {
+		t.Fatalf("recover unknown session = %d body=%s", w.Code, w.Body.String())
 	}
 }
 

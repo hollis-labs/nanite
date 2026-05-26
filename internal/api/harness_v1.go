@@ -2,6 +2,7 @@ package api
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"strings"
@@ -32,6 +33,7 @@ type harnessV1RouteHints struct {
 	Sessions          string `json:"sessions"`
 	SessionEvents     string `json:"session_events"`
 	SessionCancel     string `json:"session_cancel"`
+	SessionRecover    string `json:"session_recover"`
 	SessionApprovals  string `json:"session_approvals"`
 	DurableAgents     string `json:"durable_agents"`
 	DurableAgentStart string `json:"durable_agent_start"`
@@ -102,6 +104,7 @@ type harnessV1SessionRoutes struct {
 	Self      string `json:"self"`
 	Events    string `json:"events"`
 	Cancel    string `json:"cancel"`
+	Recover   string `json:"recover"`
 	Approvals string `json:"approvals"`
 }
 
@@ -123,6 +126,13 @@ type harnessV1TurnResponse struct {
 type harnessV1CancelResponse struct {
 	SessionID string `json:"session_id"`
 	Status    string `json:"status"`
+}
+
+type harnessV1RecoverResponse struct {
+	SessionID string `json:"session_id"`
+	Recovered bool   `json:"recovered"`
+	Status    string `json:"status"`
+	Note      string `json:"note"`
 }
 
 func (a *API) handleHarnessV1Initialize(w http.ResponseWriter, r *http.Request) {
@@ -344,6 +354,37 @@ func (a *API) handleHarnessV1CancelTurn(w http.ResponseWriter, r *http.Request) 
 	})
 }
 
+// handleHarnessV1RecoverSession evicts the session's live runtime so the next
+// turn cold-boots into auto-recovery (recovery pack + provider resume) — the
+// harness-v1 surface of POST /api/sessions/{id}/recover. CW-20260525-0001
+// Slice 5.
+func (a *API) handleHarnessV1RecoverSession(w http.ResponseWriter, r *http.Request) {
+	sessionID := r.PathValue("id")
+	if _, err := a.Services.Store.GetSession(sessionID); err != nil {
+		a.errorResp(w, http.StatusNotFound, "session not found")
+		return
+	}
+	if a.Services.Chat == nil {
+		a.errorResp(w, http.StatusServiceUnavailable, "chat service not wired")
+		return
+	}
+	result, err := a.Services.Chat.RecoverSession(r.Context(), sessionID)
+	if err != nil {
+		if errors.Is(err, service.ErrSessionBusy) {
+			a.errorResp(w, http.StatusConflict, err.Error())
+			return
+		}
+		a.errorResp(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	a.jsonResp(w, http.StatusOK, harnessV1RecoverResponse{
+		SessionID: sessionID,
+		Recovered: result.Rebooted,
+		Status:    result.Status,
+		Note:      "recovery armed — the next message will resume prior context",
+	})
+}
+
 func (a *API) handleHarnessV1SessionEvents(w http.ResponseWriter, r *http.Request) {
 	sessionID := r.PathValue("id")
 	messageID := strings.TrimSpace(r.URL.Query().Get("message_id"))
@@ -435,6 +476,7 @@ func harnessV1Operations() []string {
 		"sessions.get",
 		"sessions.turns.create",
 		"sessions.turns.cancel",
+		"sessions.recover",
 		"sessions.events.stream",
 		"sessions.approvals.respond",
 		"durable_agents.list",
@@ -451,6 +493,7 @@ func harnessV1Routes() harnessV1RouteHints {
 		Sessions:          harnessV1RoutePrefix + "/sessions",
 		SessionEvents:     harnessV1RoutePrefix + "/sessions/{id}/events?message_id={message_id}",
 		SessionCancel:     harnessV1RoutePrefix + "/sessions/{id}/cancel",
+		SessionRecover:    harnessV1RoutePrefix + "/sessions/{id}/recover",
 		SessionApprovals:  harnessV1RoutePrefix + "/sessions/{id}/approvals/{requestId}",
 		DurableAgents:     harnessV1RoutePrefix + "/durable-agents",
 		DurableAgentStart: harnessV1RoutePrefix + "/durable-agents/{id}/start",
@@ -517,6 +560,7 @@ func harnessV1SessionRoutesForSession(sessionID string) harnessV1SessionRoutes {
 		Self:      fmt.Sprintf("%s/sessions/%s", harnessV1RoutePrefix, sessionID),
 		Events:    fmt.Sprintf("%s/sessions/%s/events?message_id={message_id}", harnessV1RoutePrefix, sessionID),
 		Cancel:    fmt.Sprintf("%s/sessions/%s/cancel", harnessV1RoutePrefix, sessionID),
+		Recover:   fmt.Sprintf("%s/sessions/%s/recover", harnessV1RoutePrefix, sessionID),
 		Approvals: fmt.Sprintf("%s/sessions/%s/approvals/{requestId}", harnessV1RoutePrefix, sessionID),
 	}
 }

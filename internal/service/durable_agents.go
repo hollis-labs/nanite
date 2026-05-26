@@ -68,9 +68,15 @@ type DurableAgentLaunchResult struct {
 // chat/runtime lifecycle operations. StopSession currently maps to the chat
 // runtime teardown used by per-session reboot: stop the live process if one is
 // tracked, evict it, and let any future turn cold-boot through driveBootSession.
+//
+// RecoverSession evicts the runtime WITHOUT arming the fresh-boot flag, so the
+// next turn cold-boots into auto-recovery (recovery pack + provider resume)
+// rather than a clean slate — the durable counterpart to an explicit Recover
+// (CW-20260525-0001 Slice 5).
 type DurableAgentRuntimeController interface {
 	StopSession(ctx context.Context, sessionID string) error
 	RebootSession(ctx context.Context, sessionID string) error
+	RecoverSession(ctx context.Context, sessionID string) error
 	CancelSession(ctx context.Context, sessionID string) error
 }
 
@@ -365,7 +371,7 @@ func (s *durableAgentService) Start(_ context.Context, id string, req DurableAge
 	}, nil
 }
 
-func (s *durableAgentService) Resume(_ context.Context, id string, req DurableAgentStartRequest) (*DurableAgentLaunchResult, error) {
+func (s *durableAgentService) Resume(ctx context.Context, id string, req DurableAgentStartRequest) (*DurableAgentLaunchResult, error) {
 	before, err := s.store.GetDurableAgentInstance(id)
 	if err != nil {
 		return nil, err
@@ -408,6 +414,25 @@ func (s *durableAgentService) Resume(_ context.Context, id string, req DurableAg
 		return nil, err
 	}
 	s.recordSessionAttachedEvent(inst, session.ID, policy.AttachmentRelation)
+
+	// CW-20260525-0001 Slice 5 — recovery-aware resume. Evict any live/stale
+	// runtime for the reattached session WITHOUT arming the fresh-boot flag so
+	// the next turn cold-boots into auto-recovery (recovery pack + provider
+	// resume). This lets the durable agent resume with prior context instead of
+	// just reattaching the row and waiting for a normal cold turn to answer
+	// blind. Best-effort: a recovery hiccup must not fail an otherwise
+	// successful resume. For API-backed sessions (no tracked runtime) this is a
+	// no-op and the next turn rebuilds context from messages as usual.
+	recoveryMeta := map[string]string{}
+	if s.runtime != nil {
+		if recErr := s.runtime.RecoverSession(ctx, session.ID); recErr != nil {
+			recoveryMeta["recovery_armed"] = "false"
+			recoveryMeta["recovery_error"] = recErr.Error()
+		} else {
+			recoveryMeta["recovery_armed"] = "true"
+		}
+	}
+
 	active, err := s.store.SetDurableAgentInstanceLaunchState(id, store.DurableAgentStatusActive, session.ID, "")
 	if err != nil {
 		return nil, err
@@ -418,6 +443,7 @@ func (s *durableAgentService) Resume(_ context.Context, id string, req DurableAg
 		StatusBefore: inst.Status,
 		StatusAfter:  active.Status,
 		SessionID:    session.ID,
+		MetadataJSON: durableAgentEventMetadata(recoveryMeta),
 	})
 	return &DurableAgentLaunchResult{
 		Instance:      active,

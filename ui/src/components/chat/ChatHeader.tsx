@@ -240,7 +240,10 @@ export function ChatHeader() {
       return api.recoverSession(activeSessionId);
     },
     onSuccess: (result) => {
-      if (result === "recovered") setMoreOpen(false);
+      if (result === "recovered") {
+        setMoreOpen(false);
+        setDetailsOpen(false);
+      }
     },
   });
 
@@ -581,6 +584,7 @@ export function ChatHeader() {
         onOpenChange={setDetailsOpen}
         onFork={forkSession}
         onRestart={(details) => forkSession(details, false)}
+        onRecover={() => recoverMutation.mutate()}
         onOpenStartFromHere={openStartFromDetails}
       />
       <StartSurfaceDialog

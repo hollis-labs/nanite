@@ -416,4 +416,27 @@ describe("SessionDetailsPanel", () => {
       expect(useAppStore.getState().activeSessionId).toBe("session-restarted");
     });
   });
+
+  it("recovers the active session from the details panel", async () => {
+    const response = details();
+    mockHeaderApi(response);
+    const recoverSession = vi
+      .spyOn(api, "recoverSession")
+      .mockResolvedValue("recovered");
+    useAppStore.getState().setActiveSession("session-1");
+
+    renderWithClient(<ChatHeader />);
+
+    fireEvent.click(screen.getByRole("button", { name: "More options" }));
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Session details" }),
+    );
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Recover session" }),
+    );
+
+    await waitFor(() => {
+      expect(recoverSession).toHaveBeenCalledWith("session-1");
+    });
+  });
 });

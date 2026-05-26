@@ -37,7 +37,7 @@ import (
 // concrete *ClaudeAdapter type.
 func TestInitProviders_ClaudeAdapterIsStreamingStdioShape(t *testing.T) {
 	t.Run("non-dev", func(t *testing.T) {
-		_, cliAdapters := initProviders(false)
+		_, cliAdapters, _ := initProviders(false)
 		claude := findAdapter(t, cliAdapters, "claude")
 
 		args := claude.BuildArgs("", "", "")
@@ -49,7 +49,7 @@ func TestInitProviders_ClaudeAdapterIsStreamingStdioShape(t *testing.T) {
 	})
 
 	t.Run("dev", func(t *testing.T) {
-		_, cliAdapters := initProviders(true)
+		_, cliAdapters, _ := initProviders(true)
 		claude := findAdapter(t, cliAdapters, "claude")
 
 		args := claude.BuildArgs("", "", "")

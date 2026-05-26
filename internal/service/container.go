@@ -39,6 +39,7 @@ import (
 	"github.com/hollis-labs/nanite/internal/messaging"
 	"github.com/hollis-labs/nanite/internal/permission"
 	"github.com/hollis-labs/nanite/internal/plugin"
+	"github.com/hollis-labs/nanite/internal/providercatalog"
 	adapterclaude "github.com/hollis-labs/nanite/internal/plugin/builtin/adapter-claude"
 	adaptercodex "github.com/hollis-labs/nanite/internal/plugin/builtin/adapter-codex"
 	adaptergemini "github.com/hollis-labs/nanite/internal/plugin/builtin/adapter-gemini"
@@ -180,6 +181,15 @@ type Container struct {
 	// source of truth and reload the registry.
 	BootProfileCatalogPath string
 
+	// ProviderCatalog is the registry-backed provider/model dropdown
+	// catalog (CW-20260526-0001). One entry per provider successfully
+	// registered in cmd/nanite/main.go:initProviders. The API layer
+	// enumerates this when serving /api/providers, replacing the
+	// hand-maintained DB seed as the dropdown's source of truth.
+	// nil-safe — when nil, handleListProviders degrades to the DB-only
+	// shape so tests that don't wire a catalog still pass.
+	ProviderCatalog *providercatalog.Catalog
+
 	// Recovery is the in-process subagent recovery broker (Phase 8/9).
 	// Exposed on the container so API handlers can route FE-driven
 	// cancel_retry requests back to Broker.Cancel(sessionID, token).
@@ -290,6 +300,11 @@ type ContainerConfig struct {
 	// already-tilde-expanded by the caller (cmd/nanite/main.go calls
 	// config.ResolvedBootProfileCatalogPath before threading it here).
 	BootProfileCatalogPath string
+
+	// ProviderCatalog is the registry-backed dropdown catalog
+	// (CW-20260526-0001). nil-safe — when nil, handleListProviders falls
+	// back to the DB-only shape so tests without explicit wiring work.
+	ProviderCatalog *providercatalog.Catalog
 
 	// DurableAgentRecipeCatalogPaths is the ordered set of local recipe
 	// catalog files or directories loaded at startup. Configured recipes
@@ -1317,6 +1332,7 @@ func NewContainer(cfg ContainerConfig) (*Container, error) {
 		AdapterRegistry:        adapterRegistry,
 		BootProfiles:           bootProfileRegistry,
 		BootProfileCatalogPath: cfg.BootProfileCatalogPath,
+		ProviderCatalog:        cfg.ProviderCatalog,
 		Recovery:               recoveryBrokerOrNil(agentDeps),
 		Inspector:              inspectorSvc,
 		LoopDetector:           loopDetector,

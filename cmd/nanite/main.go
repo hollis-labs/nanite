@@ -22,6 +22,7 @@ import (
 	"github.com/hollis-labs/nanite/internal/envelope"
 	envelope_render "github.com/hollis-labs/nanite/internal/executor/envelope_render"
 	"github.com/hollis-labs/nanite/internal/learnings"
+	"github.com/hollis-labs/nanite/internal/providercatalog"
 	naniteotel "github.com/hollis-labs/nanite/internal/otel"
 	"github.com/hollis-labs/nanite/internal/reflex"
 	"github.com/hollis-labs/nanite/internal/worktree"
@@ -251,7 +252,7 @@ func cmdServe(args []string) {
 	plugin.SetEnvelopeValidatorDevModeFunc(func() bool { return envelopeValidatorDevMode })
 
 	// Set up provider registry (API keys, CLI adapters).
-	registry, cliAdapters := initProviders(envelopeValidatorDevMode)
+	registry, cliAdapters, providerCatalog := initProviders(envelopeValidatorDevMode)
 
 	slog.Info("app config loaded",
 		"cli_active_throttle_seconds", appCfg.Presence.CLIActiveThrottleSeconds,
@@ -381,6 +382,7 @@ func cmdServe(args []string) {
 		CoordStore:      coord,
 		Worktrees:       wtMgr,
 		CLIAdapters:     cliAdapters,
+		ProviderCatalog: providerCatalog,
 		AgentBroker:     agentBrokerInstance,
 		// CW-20260512-0118 (SP-20260512-0010 W2): thread the dev-tools
 		// allow-list onto the ContextClient so the per-session
@@ -584,20 +586,26 @@ func cmdServe(args []string) {
 // DevPTY constructor which sets SkipPermissions=true in the adapter itself —
 // CW-20260515-0003 dropped the legacy skipPermsAdapter wrapper that used to
 // append --dangerously-skip-permissions externally.
-func initProviders(devMode bool) (*provider.Registry, []provider.CLIAdapter) {
+func initProviders(devMode bool) (*provider.Registry, []provider.CLIAdapter, *providercatalog.Catalog) {
 	registry := provider.NewRegistry()
+	catalog := providercatalog.New()
 
 	resolveKey := func(providerID string) string {
 		return secrets.Get(secrets.ProviderKeyName(providerID))
 	}
 
+	// CW-20260526-0001: apiProvSpec carries the catalog metadata
+	// (displayName, provID) inline with the registry registration so the
+	// dropdown auto-surfaces every successfully-registered provider. A new
+	// API provider is one literal here instead of (a) initProviders +
+	// (b) seededProviders + (c) AllSeeded.
 	type apiProvSpec struct {
-		name, provID string
-		create       func() llmcontracts.Provider
-		setKey       func(llmcontracts.Provider, string)
+		name, displayName, provID string
+		create                    func() llmcontracts.Provider
+		setKey                    func(llmcontracts.Provider, string)
 	}
 	apiProviders := []apiProvSpec{
-		{"anthropic", "anthropic-001",
+		{"anthropic", "Anthropic", "anthropic-001",
 			func() llmcontracts.Provider {
 				ap := nllmanthropic.New()
 				if v := os.Getenv("NANITE_PROVIDER_RATE_BUDGET_TPM"); v != "" {
@@ -610,7 +618,7 @@ func initProviders(devMode bool) (*provider.Registry, []provider.CLIAdapter) {
 				return ap
 			},
 			func(p llmcontracts.Provider, k string) { p.(*nllmanthropic.Client).SetAPIKey(k) }},
-		{"openai", "openai-001",
+		{"openai", "OpenAI", "openai-001",
 			// CW-20260508-0012: SDK-backed wrapper (replaces deleted
 			// go-providers HTTP openai client). Implements
 			// llmcontracts.Provider; no rate-budget plumbing per spike
@@ -627,6 +635,11 @@ func initProviders(devMode bool) (*provider.Registry, []provider.CLIAdapter) {
 			p := spec.create()
 			spec.setKey(p, key)
 			registry.Register(spec.name, p)
+			catalog.Add(providercatalog.Entry{
+				Name:        spec.name,
+				DisplayName: spec.displayName,
+				RowID:       spec.provID,
+			})
 			slog.Info("provider registered (key from keychain)", "provider", spec.name)
 			registeredAPI = append(registeredAPI, spec.name)
 		} else {
@@ -640,6 +653,11 @@ func initProviders(devMode bool) (*provider.Registry, []provider.CLIAdapter) {
 	// adapter speaks go-tether-client's /ai/chat[/stream] protocol.
 	if sock := nllmtether.DefaultSocketPath(); nllmtether.SocketAvailable(sock) {
 		registry.Register("tether", nllmtether.New(sock))
+		catalog.Add(providercatalog.Entry{
+			Name:        "tether",
+			DisplayName: "Tether",
+			RowID:       "tether-001",
+		})
 		registeredAPI = append(registeredAPI, "tether")
 		slog.Info("provider registered (tether daemon socket)", "provider", "tether", "socket", sock)
 	}
@@ -688,7 +706,7 @@ func initProviders(devMode bool) (*provider.Registry, []provider.CLIAdapter) {
 		provider.NewOpencodeAdapter(),
 	}
 
-	return registry, cliAdapters
+	return registry, cliAdapters, catalog
 }
 
 // resolveDevToolsAllowedPaths returns the effective directory allow-list.

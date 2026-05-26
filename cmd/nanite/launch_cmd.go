@@ -141,7 +141,7 @@ func cmdLaunch(args []string) {
 	// Reuse the exact provider-adapter construction the `serve` path
 	// uses (initProviders) so a standalone launch dispatches to the same
 	// claude/codex/opencode adapters with the same StreamingStdio shape.
-	_, cliAdapters := initProviders(*dev)
+	_, cliAdapters, _ := initProviders(*dev)
 
 	binPath := ""
 	if exe, exeErr := os.Executable(); exeErr == nil {

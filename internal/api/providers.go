@@ -5,33 +5,39 @@ import (
 	"strings"
 
 	"github.com/hollis-labs/nanite/internal/bootprofile"
+	"github.com/hollis-labs/nanite/internal/providercatalog"
 	"github.com/hollis-labs/nanite/internal/store"
 )
 
-// handleListProviders returns the DB-seeded provider rows merged with
-// boot-profile-backed entries from the Container's BootProfiles registry
-// (CW-20260514-0047). Boot-profile entries use the stable encoded ID
-// `bootprofile:<profile_id>` as both their row id and their provider_type
-// so the dropdown can round-trip the selection back through
-// `session.Provider` unchanged.
+// handleListProviders returns the provider-dropdown rows merged from
+// three sources, in order:
 //
-// Coexistence rule: DB-seeded rows (Anthropic, the pty-* CLI rows, etc.)
-// are emitted unchanged. Boot-profile entries are additive — even if a
-// profile happens to use `provider_alias: claude`, the DB Anthropic row
-// AND the boot-profile row are both surfaced with distinct IDs. The FE
-// dropdown groups by provider_id, so two rows with different IDs render
-// as two visually-distinct dropdown groups.
+//  1. Container.ProviderCatalog (CW-20260526-0001) — one row per
+//     provider successfully registered in initProviders. This is the
+//     authoritative source for API providers; registering a new engine
+//     provider auto-surfaces it without a parallel DB seed.
+//  2. Store.ListProviders() — DB-seeded rows whose name is NOT in the
+//     catalog. Pre-hybrid backstop so a freshly-built DB or a future
+//     operator-managed row still surfaces.
+//  3. Container.BootProfiles (CW-20260514-0047) — file-backed launch
+//     profiles, emitted with their stable encoded id.
 //
-// Empty / nil registry leaves the response identical to the pre-feature
-// shape; this satisfies the "no catalog → no behavior change" acceptance
-// criterion.
+// Boot-profile entries use the encoded id `bootprofile:<profile_id>` as
+// both their row id and their provider_type so the dropdown can
+// round-trip the selection back through `session.Provider` unchanged.
+//
+// nil-safe — when ProviderCatalog is nil (tests that don't wire it)
+// the response degrades to the pre-hybrid shape (DB + boot-profile),
+// keeping the test suite stable.
 func (a *API) handleListProviders(w http.ResponseWriter, r *http.Request) {
-	providers, err := a.Services.Store.ListProviders()
+	dbProviders, err := a.Services.Store.ListProviders()
 	if err != nil {
 		a.errorResp(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	providers = visibleProviderRows(providers)
+	dbProviders = visibleProviderRows(dbProviders)
+
+	providers := mergeCatalogAndDBProviders(a.Services.ProviderCatalog, dbProviders)
 
 	if reg := a.Services.BootProfiles; reg != nil {
 		for _, spec := range reg.List() {
@@ -48,6 +54,53 @@ func (a *API) handleListProviders(w http.ResponseWriter, r *http.Request) {
 	}
 
 	a.jsonResp(w, http.StatusOK, providers)
+}
+
+// mergeCatalogAndDBProviders is the hybrid merge: catalog wins over DB
+// when both carry the same provider_type, DB rows for un-cataloged
+// names fall through unchanged. catalog=nil collapses to the pre-hybrid
+// pass-through. Order: catalog rows first (registration order),
+// then DB rows with provider_types not present in the catalog.
+//
+// Exposed (lowercase, package-internal) so the per-source tests can
+// exercise the merge without an HTTP roundtrip.
+func mergeCatalogAndDBProviders(catalog *providercatalog.Catalog, dbProviders []store.ProviderConfig) []store.ProviderConfig {
+	if catalog == nil {
+		return dbProviders
+	}
+	entries := catalog.List()
+	if len(entries) == 0 {
+		return dbProviders
+	}
+
+	covered := make(map[string]struct{}, len(entries))
+	out := make([]store.ProviderConfig, 0, len(entries)+len(dbProviders))
+	for _, e := range entries {
+		out = append(out, catalogProviderRow(e))
+		covered[e.Name] = struct{}{}
+	}
+	for _, p := range dbProviders {
+		if _, ok := covered[p.ProviderType]; ok {
+			continue
+		}
+		out = append(out, p)
+	}
+	return out
+}
+
+// catalogProviderRow synthesizes a store.ProviderConfig from a catalog
+// Entry. The shape mirrors what SeedProviders persists for the same
+// provider so the FE consumer (and any code that joined on the DB row)
+// sees the same fields. is_enabled defaults to true — the catalog
+// records "this provider is wired and reachable"; an operator-driven
+// disable knob would need a different layer.
+func catalogProviderRow(e providercatalog.Entry) store.ProviderConfig {
+	return store.ProviderConfig{
+		ID:           e.RowID,
+		Name:         e.DisplayName,
+		ProviderType: e.Name,
+		IsEnabled:    true,
+	}
 }
 
 // handleListModels returns the DB-seeded model rows merged with one

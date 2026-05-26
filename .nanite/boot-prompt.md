@@ -1,24 +1,31 @@
-# Session Boot Prompt — Nanite
+# Session Boot — 2026-05-26 (post-PR-219 wrap)
 
-> **Session state for remote-booted agents lives in `agent-workspaces/boot/nanite/boot-prompt.md`**, not here. This file is a quick-reference fallback for agents booted directly in this repo.
+> **Memory + knowledge:** Vanta-primary (`vanta-primary-since: 2026-04-19`). Recall Vanta first (`memory_recall`/`conduit_lookup`), file-based is legacy fallback. Writes → Vanta only via `capture-to-vanta`. See `~/.claude/CLAUDE.md` for full contract.
 
-## Current state
+## Where We Left Off
 
-- **Phase D beta gate** in progress (CW-20260424-0007). See `handoff-phase-d-beta-gate-2026-04-25.md`.
-- Scenario 3 ✓. Scenarios 1 (subagent dev tools) and 2 (PTY file access) still failing.
-- **Phase 3 — Core Features** in progress. Phase 2 (plugin system) closed 2026-04-14.
-- **`main` tip:** `1f3d7eb` — S4a merged (PR #50).
-- **Completed sessions:** S5 (envelope), S2a (memory), S3a (context pipeline), S4a (tool broker).
-- **Next candidates:** S3b (tool cache hotswap), S4b (trust boundary hardening).
+PR #219 (chore: migrate `go-agent-*` modules to `agentkit v0.3.0`) merged + branch deleted. Local synced. Also pushed `agentkit@5b8aaad` (CHANGELOG go-runner v0.6.0 → v0.5.0).
 
-## For full session context
+## Current State
 
-Read `agent-workspaces/boot/nanite/boot-prompt.md` — it has the complete session status table, worktree state, guardrails, and backlog discipline.
+- **Local main** `9c74927` ≡ `origin/main` (clean, synced).
+- **agentkit v0.3.0** is now the single source for `agentcontext`, `agentlaunch`, `agentsessions`, `agentruntime`, `broker`. Selectors unchanged from the absorbed `go-agent-*` versions; no API adaptations were needed.
+- **Capability roadmaps shipped:** backend runtime, frontend UX, capability admin, Phase 6 shared launch, beta P0.
+- **Active sprint:** `SP-20260518-0013` harness hardening — 17 tasks. Wave 1 (heartbeat `0073`, budget `0036`, output `0071`/`0068`, status taxonomy) is the load-bearing thread.
 
-## Quick reference
+## Next Actions
 
-- Build: `go build ./cmd/nanite/` · `go test ./...`
-- Deploy: always use Cerberus (`cerberus_rebuild nanite-api`)
-- Migrations: DDL only, `internal/store/migrations/`. Latest: 012.
-- Phase 3 plans: `agent-workspaces/planning/nanite-release-prep/plans/phase-3-*.md`
-- Audits: `docs/audits/`
+1. **`CW-20260526-0002` — recovery broker's retry-dispatch loses provider on CLI exits.**
+   - Likely seam: `observeSessionForRecovery` builds the meta bag without `MetaKeyProvider` (the HTTP path sets it correctly).
+   - Audit `internal/runtime/agent/recovery/orchestration.go` for how `MetaKeyProvider` threads into `agent.Boot`.
+   - Suggested test: simulate CLI terminal exit, assert the dispatched retry boots with the original provider.
+   - Fix is small but plumbs through the broker boundary — expect the meta-bag change to span two packages.
+2. After 0002, pick the next thread:
+   - **Wave 1 of the harness sprint** (start with heartbeat `0073`), OR
+   - **`CW-20260526-0001`** — registry-backed vs DB-seeded provider dropdown (design decision, parked, needs your call).
+
+## Key Context
+
+- **Deploy via Cerberus.** `cerberus_resource_deploy nanite-api-service` then `cerberus_resource_reload nanite-api-service`. If reload reports "launchd not loaded" use `cerberus_resource_apply` instead. Run `make build-ui` before deploy when UI changed.
+- **Squash-merge gotcha** (created PR #218 originally): commits pushed to a branch *after* its squash-merge lands never reach main. Open a follow-up PR — don't assume the branch is "done."
+- **Import paths to use going forward:** `github.com/hollis-labs/agentkit/{agentcontext,agentlaunch,agentsessions,agentruntime/runtimekind,broker}`. The standalone `go-agent-*` modules are no longer in `go.mod`.

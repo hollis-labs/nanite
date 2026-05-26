@@ -659,7 +659,7 @@ func (a *API) handleCompactSession(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	summarizer := service.BuildSummarizer(a.Services.Providers, settings)
+	summarizer := service.BuildSummarizer(a.Services.Providers, a.Services.Store, settings)
 	mode := service.ClassifyCompactionMode(agent)
 	pipeline := &ctxpkg.CompactionPipeline{
 		Window:               result.Window,

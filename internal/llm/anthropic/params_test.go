@@ -422,12 +422,20 @@ func TestExtractSchemaRequired_AnySlice(t *testing.T) {
 	}
 }
 
-func TestResolveModel_FallsBack(t *testing.T) {
-	if got := resolveModel(llmtypes.ChatRequest{Model: "explicit"}); got != "explicit" {
+func TestResolveModel(t *testing.T) {
+	// Explicit model is preserved.
+	got, err := resolveModel(llmtypes.ChatRequest{Model: "explicit"})
+	if err != nil {
+		t.Fatalf("explicit model errored: %v", err)
+	}
+	if got != "explicit" {
 		t.Fatalf("explicit model not preserved: %q", got)
 	}
-	if got := resolveModel(llmtypes.ChatRequest{}); got != DefaultModel {
-		t.Fatalf("expected default model, got %q", got)
+
+	// CW-20260526-0003: empty model now errors rather than silently
+	// defaulting. Upstream callers must resolve via the store.
+	if _, err := resolveModel(llmtypes.ChatRequest{}); err == nil {
+		t.Fatalf("expected ErrModelRequired for empty model, got nil")
 	}
 }
 

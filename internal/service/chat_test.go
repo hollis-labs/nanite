@@ -421,6 +421,10 @@ func (stubProviderStore) ListModels() ([]store.Model, error)                { re
 func (stubProviderStore) UpdateProvider(string, store.ProviderUpdate) error { return nil }
 func (stubProviderStore) SetProviderAPIKey(string, string) error            { return nil }
 func (stubProviderStore) HasProviderAPIKey(string) (bool, error)            { return false, nil }
+func (stubProviderStore) DefaultModelForProvider(string) (string, error)    { return "", nil }
+func (stubProviderStore) ResolveProviderAndModel(explicitProvider, explicitModel string) (string, string, error) {
+	return explicitProvider, explicitModel, nil
+}
 
 type stubTodoStore struct{}
 

@@ -22,7 +22,10 @@ func (c *Client) Complete(ctx context.Context, in llmtypes.ChatRequest) (string,
 		return "", errors.New("ANTHROPIC_API_KEY not set")
 	}
 
-	model := resolveModel(in)
+	model, err := resolveModel(in)
+	if err != nil {
+		return "", err
+	}
 	reasoningCfg := llmcontracts.ReasoningConfigFromContext(ctx)
 	interleavedThinking := shouldEnableInterleavedThinking(reasoningCfg, model)
 	params := c.buildMessageParams(in, model, interleavedThinking, reasoningCfg)

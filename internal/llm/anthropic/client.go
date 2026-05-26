@@ -20,6 +20,7 @@
 package anthropic
 
 import (
+	"errors"
 	"net/http"
 	"strings"
 	"sync/atomic"
@@ -44,8 +45,13 @@ const DefaultRateLimitTPM = 50000
 // failures. Mirrors the value used by the deleted adapter.
 const DefaultBreakerThreshold = 3
 
-// DefaultModel is the model used when ChatRequest.Model is empty.
-const DefaultModel = "claude-sonnet-4-5"
+// ErrModelRequired is returned by StreamChat / Complete when the caller
+// supplies an empty ChatRequest.Model. CW-20260526-0003 removed the
+// in-package default fallback — every caller must resolve a model via
+// store.ResolveProviderAndModel before invoking the SDK. A silent
+// default here was load-bearing in the original bug (a stale bare alias
+// hit Anthropic and returned 404).
+var ErrModelRequired = errors.New("anthropic: ChatRequest.Model is required (resolve via store.ResolveProviderAndModel)")
 
 // InterleavedThinkingBetaHeader is the beta header value that enables
 // interleaved thinking (thinking_delta blocks). Supported on Claude
@@ -296,13 +302,15 @@ func shouldEnableInterleavedThinking(cfg llmcontracts.ReasoningConfig, model str
 		modelSupportsInterleavedThinking(model)
 }
 
-// resolveModel returns the model to use for a request, falling back to
-// DefaultModel when the request omits one.
-func resolveModel(req llmtypes.ChatRequest) string {
-	if req.Model != "" {
-		return req.Model
+// resolveModel returns the model to use for a request. CW-20260526-0003
+// removed the in-package default fallback — callers must resolve a model
+// via store.ResolveProviderAndModel before invoking StreamChat / Complete.
+// An empty Model now produces ErrModelRequired at the SDK boundary.
+func resolveModel(req llmtypes.ChatRequest) (string, error) {
+	if req.Model == "" {
+		return "", ErrModelRequired
 	}
-	return DefaultModel
+	return req.Model, nil
 }
 
 // resolveMaxTokens returns the max_tokens to use for a request, falling

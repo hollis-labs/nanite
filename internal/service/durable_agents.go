@@ -242,27 +242,27 @@ func durableAgentInstanceFromProfile(profile store.AgentProfile) *store.DurableA
 		status = store.DurableAgentStatusSleeping
 	}
 
+	// CW-20260526-0003: Provider/Model are left as the profile's literal
+	// values (which may be empty). Resolution to the runtime default
+	// happens at request time via store.ResolveProviderAndModel — keeping
+	// instance rows empty when the profile is empty means a later operator
+	// edit to user_settings or providers.default_model is honored without
+	// re-seeding the instance. The previous bare-literal fallbacks here
+	// were the source of the `claude-sonnet-4` 404 bug.
 	return &store.DurableAgentInstance{
 		ID:               "legacy-profile-" + profile.ID,
 		Name:             profile.Name,
 		Slug:             profile.Slug,
 		ProfileID:        profile.ID,
 		LifecycleClass:   lifecycleClass,
-		Provider:         defaultString(profile.DefaultProvider, "anthropic"),
-		Model:            defaultString(profile.DefaultModel, "claude-sonnet-4"),
+		Provider:         profile.DefaultProvider,
+		Model:            profile.DefaultModel,
 		RuntimeKind:      string(runtimekind.API),
 		LaunchSourceType: launchSourceType,
 		LaunchSourceID:   profile.ID,
 		Status:           status,
 		MetadataJSON:     `{"seeded_from":"agent_profiles","legacy_profile":true,"reconciled":true}`,
 	}
-}
-
-func defaultString(value, fallback string) string {
-	if strings.TrimSpace(value) == "" {
-		return fallback
-	}
-	return value
 }
 
 func (s *durableAgentService) Update(_ context.Context, id string, upd store.DurableAgentInstanceUpdate) (*store.DurableAgentInstance, error) {

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/hollis-labs/nanite/internal/store/seedcatalog"
 	"github.com/hollis-labs/nanite/internal/toolclient"
 	"github.com/hollis-labs/nanite/pkg/models"
 )
@@ -228,14 +229,18 @@ func NormalizeCLIProvider(name string) string {
 // InferProvider maps a model name to a provider when the session has no
 // explicit provider set. Resolution order:
 //
-//  1. Exact lookup in the canonical registry (pkg/models). This covers
-//     every seeded model including o4-mini, gemini-*, mistral-*, codestral,
-//     and gateway-prefixed IDs — none of which the old prefix-based switch
-//     handled correctly.
+//  1. Exact lookup in the canonical registry (pkg/models).
 //  2. Gateway-prefix helper for bare prefixed IDs not yet registered.
-//  3. DefaultProvider (anthropic) as the terminal fallback.
+//  3. Prefix-routing fallbacks for unregistered OpenAI/Ollama families.
+//  4. seedcatalog.DefaultProviderType as the routing floor.
 //
-// See audit 2026-04-11 finding 02 for the misroutes this replaces.
+// Note: this is a ROUTING decision (which provider should handle this
+// model string?), not a USER-DEFAULT decision (which model should we
+// pick when none was selected?). User defaults flow through
+// store.ResolveProviderAndModel — see CW-20260526-0003. The seedcatalog
+// fallback here is a deployment-time constant, intentionally distinct
+// from operator-configurable defaults; nothing relies on this returning
+// a model that actually exists at the resolved provider.
 func InferProvider(model string) string {
 	if p := models.ProviderFor(model); p != "" {
 		return p
@@ -260,7 +265,7 @@ func InferProvider(model string) string {
 		strings.Contains(model, ":"): // "model:tag" is an ollama-ism
 		return "ollama"
 	}
-	return models.DefaultProvider()
+	return seedcatalog.DefaultProviderType
 }
 
 // TruncateStr truncates a string to maxLen, appending "..." if truncated.

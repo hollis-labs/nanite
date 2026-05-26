@@ -396,7 +396,7 @@ func TestAgentBuilder_DefaultModel(t *testing.T) {
 		{"name", "Default Model Agent"},
 		{"slug", ""}, // auto-generate
 		{"system_prompt", "A test prompt."},
-		{"model", ""}, // should default to claude-sonnet-4-20250514
+		{"model", ""}, // CW-20260526-0003: blank persists "" so the chat-engine resolver fills it per call
 		{"description", ""},
 	}
 
@@ -415,8 +415,8 @@ func TestAgentBuilder_DefaultModel(t *testing.T) {
 	if err != nil {
 		t.Fatalf("get agent: %v", err)
 	}
-	if agent.DefaultModel != "claude-sonnet-4-20250514" {
-		t.Errorf("expected default model, got %s", agent.DefaultModel)
+	if agent.DefaultModel != "" {
+		t.Errorf("expected blank DefaultModel (inherits system default at request time), got %q", agent.DefaultModel)
 	}
 }
 

@@ -34,7 +34,10 @@ func (c *Client) StreamChat(ctx context.Context, in llmtypes.ChatRequest) (<-cha
 		return nil, errors.New("ANTHROPIC_API_KEY not set")
 	}
 
-	model := resolveModel(in)
+	model, err := resolveModel(in)
+	if err != nil {
+		return nil, err
+	}
 	reasoningCfg := llmcontracts.ReasoningConfigFromContext(ctx)
 	interleavedThinking := shouldEnableInterleavedThinking(reasoningCfg, model)
 	params := c.buildMessageParams(in, model, interleavedThinking, reasoningCfg)
@@ -42,9 +45,9 @@ func (c *Client) StreamChat(ctx context.Context, in llmtypes.ChatRequest) (<-cha
 	// Marshal the params once so the rate-budget pre-flight estimate uses
 	// the exact bytes the SDK will send. Same heuristic as the deleted
 	// adapter: payload bytes / 4 minus the cacheable prefix.
-	payload, err := json.Marshal(params)
-	if err != nil {
-		return nil, fmt.Errorf("anthropic: marshal request: %w", err)
+	payload, marshalErr := json.Marshal(params)
+	if marshalErr != nil {
+		return nil, fmt.Errorf("anthropic: marshal request: %w", marshalErr)
 	}
 
 	// Circuit breaker pre-check: same gate the deleted adapter applied.

@@ -53,7 +53,6 @@ import (
 	"github.com/hollis-labs/nanite/internal/toolclient"
 	"github.com/hollis-labs/nanite/internal/truncate"
 	"github.com/hollis-labs/nanite/internal/version"
-	"github.com/hollis-labs/nanite/pkg/models"
 
 	agentbroker "github.com/hollis-labs/agentkit/broker"
 )
@@ -272,17 +271,22 @@ func cmdServe(args []string) {
 	// Set up activity emitter (Volon GUI events).
 	activity := chat.NewActivityEmitter("")
 
-	// Resolve utility provider/model from DB → env → defaults.
+	// Resolve utility provider/model. user_settings.utility_* first, then
+	// the default-resolver (user_settings.default_* → providers.default_
+	// model). CW-20260526-0003: empty result on resolver error is accepted
+	// here so the harness boots with utility wiring degraded rather than
+	// crashing — the chat-service config still validates each utility call
+	// site individually.
 	utilityProvider, utilityModel := "", ""
 	if settings, err := s.GetUserSettings(); err == nil {
 		utilityProvider = settings.UtilityProvider
 		utilityModel = settings.UtilityModel
 	}
-	if utilityProvider == "" {
-		utilityProvider = models.DefaultProvider()
-	}
-	if utilityModel == "" {
-		utilityModel = models.DefaultChatModel()
+	if utilityProvider == "" || utilityModel == "" {
+		if rp, rm, err := s.ResolveProviderAndModel(utilityProvider, utilityModel); err == nil {
+			utilityProvider = rp
+			utilityModel = rm
+		}
 	}
 
 	// CLI process concurrency limit.

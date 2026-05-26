@@ -6,7 +6,6 @@ import (
 	"strings"
 
 	"github.com/hollis-labs/nanite/internal/store"
-	"github.com/hollis-labs/nanite/pkg/models"
 )
 
 // slugRegexp validates URL-safe slugs: lowercase letters, digits, and hyphens.
@@ -28,7 +27,19 @@ func nameToSlug(name string) string {
 }
 
 // NewAgentBuilder returns a Builder that creates AgentProfile records.
+//
+// The default-model UX hint and post-blank fill go through the resolver
+// (CW-20260526-0003), so the prompt always reflects the operator's
+// current default (user_settings → providers.default_model) rather than
+// a compiled-in literal. A blank submission persists "" on the profile,
+// meaning "use whatever the system default is at request time" — which
+// the chat-engine resolver then re-evaluates per call.
 func NewAgentBuilder(s *store.Store) *Builder {
+	defaultHint, _, _ := s.ResolveProviderAndModel("", "")
+	if defaultHint == "" {
+		defaultHint = "(set user_settings.default_model)"
+	}
+	modelPrompt := fmt.Sprintf("Default model (leave blank to inherit system default %s):", defaultHint)
 	return &Builder{
 		Name:        "agent",
 		Description: "Create a new agent profile with a name, system prompt, model, and description.",
@@ -58,10 +69,9 @@ func NewAgentBuilder(s *store.Store) *Builder {
 				Required: true,
 			},
 			{
-				Name:    "model",
-				Prompt:  fmt.Sprintf("Default model (leave blank for %s):", models.DefaultChatModel()),
-				Field:   "model",
-				Default: models.DefaultChatModel(),
+				Name:   "model",
+				Prompt: modelPrompt,
+				Field:  "model",
 			},
 			{
 				Name:   "description",
@@ -79,10 +89,9 @@ func NewAgentBuilder(s *store.Store) *Builder {
 				return nil, fmt.Errorf("could not generate a valid slug from name %q", name)
 			}
 
+			// Empty DefaultModel is intentional — the chat-engine resolver
+			// fills it per request from user_settings/providers.
 			model := strings.TrimSpace(inputs["model"])
-			if model == "" {
-				model = models.DefaultChatModel()
-			}
 
 			agent := &store.AgentProfile{
 				Name:         name,
@@ -96,9 +105,13 @@ func NewAgentBuilder(s *store.Store) *Builder {
 				return nil, fmt.Errorf("create agent: %w", err)
 			}
 
+			modelDesc := agent.DefaultModel
+			if modelDesc == "" {
+				modelDesc = "inherits system default"
+			}
 			return &BuildResult{
 				Resource: agent,
-				Summary:  fmt.Sprintf("Agent %q created (slug: %s, model: %s)", agent.Name, agent.Slug, agent.DefaultModel),
+				Summary:  fmt.Sprintf("Agent %q created (slug: %s, model: %s)", agent.Name, agent.Slug, modelDesc),
 			}, nil
 		},
 	}

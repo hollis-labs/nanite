@@ -245,9 +245,15 @@ func (s *Store) SeedProviders() error {
 	}
 
 	modelsSeeded := 0
+	skippedByProvider := map[string]int{}
 	for _, m := range seeded {
 		providerID := providerIDForType(m.Provider)
 		if providerID == "" {
+			// Catalog has a model whose provider isn't in our seeded set
+			// (e.g. an upstream catalog version added gemini before the seed
+			// caught up). Skip silently per-model but surface once per
+			// provider so config drift is visible in logs.
+			skippedByProvider[m.Provider]++
 			continue
 		}
 		if _, err := tx.Exec(
@@ -258,6 +264,9 @@ func (s *Store) SeedProviders() error {
 			return fmt.Errorf("upsert model %s: %w", m.ID, err)
 		}
 		modelsSeeded++
+	}
+	for provType, count := range skippedByProvider {
+		slog.Warn("seed: skipped models with unseeded provider_type", "provider_type", provType, "count", count)
 	}
 
 	// Tether AI proxy: one selectable "auto-route" model so Tether appears in
@@ -270,6 +279,7 @@ func (s *Store) SeedProviders() error {
 	); err != nil {
 		return fmt.Errorf("upsert tether model: %w", err)
 	}
+	modelsSeeded++
 
 	slog.Info("seed: upserted providers and models", "providers", len(providers), "models", modelsSeeded)
 	return tx.Commit()

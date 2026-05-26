@@ -95,6 +95,8 @@ github.com/hollis-labs/plugin-sdk v0.3.0 h1:xlFWssODdGkrInZv36ocSkDruYarMo2Rvvq6
 github.com/hollis-labs/plugin-sdk v0.3.0/go.mod h1:+FcTow9tco3OoINjc5LSCkm8RZzWSLNG1tTCzLSQuHs=
 github.com/hollis-labs/tesseract v0.7.1-0.20260518032333-bbce958849ac h1:8Rdg30uF5AqRKg2N9zj+R34NQ8yMcdGZbAQr3jsy/EI=
 github.com/hollis-labs/tesseract v0.7.1-0.20260518032333-bbce958849ac/go.mod h1:azvm+/zZGQFGTxYLx8Wn3VEHsWxyjcbqZPk3+WxNMao=
+github.com/hollis-labs/tether v0.3.0 h1:hbAP6fsClK5ywTNue0dh4eIxtrz2sMCsJ0Y66b0WiZw=
+github.com/hollis-labs/tether v0.3.0/go.mod h1:WrWfNDd8YNrk7kilhwayrXiEBcwx0wcvTjPEoaXCabY=
 github.com/invopop/jsonschema v0.13.0 h1:KvpoAJWEjR3uD9Kbm2HWJmqsEaHt8lBUpd0qHcIi21E=
 github.com/invopop/jsonschema v0.13.0/go.mod h1:ffZ5Km5SWWRAIN6wbDXItl95euhFz2uON45H2qjYt+0=
 github.com/josharian/intern v1.0.0/go.mod h1:5DoeVV0s6jJacbCEi61lwdGj/aVlrQvzHFFd8Hwg//Y=

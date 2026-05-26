@@ -10,7 +10,7 @@ import (
 	"log/slog"
 	"sync"
 
-	"github.com/chrispian/agent-mux/pkg/claudestream"
+	"github.com/hollis-labs/tether/pkg/claudestream"
 	agentmux "github.com/hollis-labs/go-tether-client"
 )
 

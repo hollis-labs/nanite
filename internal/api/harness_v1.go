@@ -1,6 +1,7 @@
 package api
 
 import (
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -361,7 +362,11 @@ func (a *API) handleHarnessV1CancelTurn(w http.ResponseWriter, r *http.Request) 
 func (a *API) handleHarnessV1RecoverSession(w http.ResponseWriter, r *http.Request) {
 	sessionID := r.PathValue("id")
 	if _, err := a.Services.Store.GetSession(sessionID); err != nil {
-		a.errorResp(w, http.StatusNotFound, "session not found")
+		if errors.Is(err, sql.ErrNoRows) {
+			a.errorResp(w, http.StatusNotFound, "session not found")
+			return
+		}
+		a.errorResp(w, http.StatusInternalServerError, err.Error())
 		return
 	}
 	if a.Services.Chat == nil {

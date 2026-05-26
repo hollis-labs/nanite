@@ -5,7 +5,7 @@ package muxproxy
 import (
 	"testing"
 
-	"github.com/chrispian/agent-mux/pkg/claudestream"
+	"github.com/hollis-labs/tether/pkg/claudestream"
 )
 
 func TestParseOne_Delta(t *testing.T) {

@@ -3,7 +3,6 @@ module github.com/hollis-labs/nanite
 go 1.26.2
 
 require (
-	github.com/chrispian/agent-mux v0.0.0
 	github.com/creack/pty v1.1.24 // indirect
 	github.com/dgraph-io/badger/v4 v4.9.1
 	github.com/google/uuid v1.6.0
@@ -95,8 +94,6 @@ require (
 
 replace github.com/hollis-labs/go-modelsdev => ../../libs/go-modelsdev
 
-replace github.com/chrispian/agent-mux => /Users/chrispian/dev/hollis-labs/apps/agent-mux
-
 require (
 	github.com/hollis-labs/go-agent-broker v0.2.1
 	github.com/hollis-labs/go-agent-runtime v0.5.0
@@ -107,4 +104,5 @@ require (
 	github.com/hollis-labs/go-messaging v0.2.1
 	github.com/hollis-labs/go-sqlite v0.1.0
 	github.com/hollis-labs/tesseract v0.7.1-0.20260518032333-bbce958849ac
+	github.com/hollis-labs/tether v0.3.0
 )

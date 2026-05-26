@@ -3,7 +3,7 @@ slug: ideation-partner
 profile_slug: ideation-partner
 lifecycle_class: advisor
 provider: anthropic
-model: claude-sonnet-4
+model: claude-sonnet-4-20250514
 runtime_kind: api
 launch_source_type: durable_advisor
 metadata:

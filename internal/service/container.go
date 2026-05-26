@@ -1231,14 +1231,18 @@ func NewContainer(cfg ContainerConfig) (*Container, error) {
 
 	// Memory extraction hooks + agent tools.
 	if memorySvc != nil && cfg.Plugins != nil {
-		// Build a utility call function for memory extraction.
+		// Utility call provider/model resolves through the store so
+		// user_settings → providers.default_model is honored
+		// (CW-20260526-0003). If the chain is dry, the utilityCall stays
+		// nil below and memory extraction falls through silently — same
+		// behavior the unregistered-provider branch already produces.
 		utilityProvider := cfg.UtilityProvider
-		if utilityProvider == "" {
-			utilityProvider = models.DefaultProvider()
-		}
 		utilityModel := cfg.UtilityModel
-		if utilityModel == "" {
-			utilityModel = models.DefaultChatModel()
+		if utilityProvider == "" || utilityModel == "" {
+			if rp, rm, err := cfg.Store.ResolveProviderAndModel(utilityProvider, utilityModel); err == nil {
+				utilityProvider = rp
+				utilityModel = rm
+			}
 		}
 
 		var utilityCall memory.UtilityCallFunc

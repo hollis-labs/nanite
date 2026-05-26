@@ -32,7 +32,6 @@ import (
 	"github.com/hollis-labs/nanite/internal/sandbox"
 	"github.com/hollis-labs/nanite/internal/store"
 	"github.com/hollis-labs/nanite/internal/toolclient"
-	"github.com/hollis-labs/nanite/pkg/models"
 )
 
 // noToolsWarningPrefix is prepended to the per-turn system prefix when the
@@ -242,12 +241,36 @@ func (s *chatServiceImpl) generateResponse(ctx context.Context, sessionID, assis
 	}
 
 	// --- Resolve model ---
+	// CW-20260526-0003: model resolution walks session → agent →
+	// store.ResolveProviderAndModel (user_settings.default_model →
+	// providers.default_model). The previous chain dead-ended on a Go
+	// literal which silently masked misconfiguration (the bare-alias
+	// `claude-sonnet-4` 404 bug).
+	//
+	// Provider routing is handled separately by resolveProvider /
+	// chat.InferProvider below — we only invoke the resolver when model
+	// is empty, and we use the model-derived provider as a hint for the
+	// per-provider default_model lookup (the resolver returns it for
+	// free). Calling the resolver when an explicit model is already
+	// present would risk masking provider routing the downstream knows
+	// better than we do.
 	model := session.Model
 	if model == "" && agent.DefaultModel != "" {
 		model = agent.DefaultModel
 	}
 	if model == "" {
-		model = models.DefaultChatModel()
+		explicitProvider := session.Provider
+		if explicitProvider == "" {
+			explicitProvider = agent.DefaultProvider
+		}
+		_, resolved, resolveErr := s.store.ResolveProviderAndModel(explicitProvider, "")
+		if resolveErr != nil {
+			ch <- chat.ErrorEvent(chat.ErrorCodeProviderError,
+				"No default model configured. Set providers.default_model or user_settings.default_model.",
+				map[string]interface{}{"raw": resolveErr.Error()})
+			return
+		}
+		model = resolved
 	}
 
 	// --- Resolve provider ---
@@ -2669,7 +2692,7 @@ func (s *chatServiceImpl) enforceBudgetOrCompact(
 
 // buildSummarizer is the chat-service-bound form of BuildSummarizer.
 func (s *chatServiceImpl) buildSummarizer(settings *store.UserSettings) ctxpkg.Summarizer {
-	return BuildSummarizer(s.providers, settings)
+	return BuildSummarizer(s.providers, s.store, settings)
 }
 
 // storeStashWriter bridges HandoffStashStore to ctxpkg.StashWriter (P7, CW-20260420-0024).
@@ -2738,22 +2761,29 @@ func NewCompactionEventReader(s CompactionEventStore) ctxpkg.CompactionEventRead
 }
 
 // BuildSummarizer resolves the provider+model used to summarize compacted
-// conversation spans. UserSettings can override; an empty/missing override
-// falls back to the configured default chat provider so summarization always
-// uses a known reachable model. Returns nil when the chosen provider is not
-// registered — Stage 2 of the compaction pipeline is nil-safe and skips.
-func BuildSummarizer(registry *provider.Registry, settings *store.UserSettings) ctxpkg.Summarizer {
+// conversation spans. UserSettings.summarizer_* take precedence; gaps are
+// filled by the default-resolver (user_settings.default_* → providers.
+// default_model). Returns nil when the chosen provider is not registered
+// OR when the resolver chain is dry — Stage 2 of the compaction pipeline
+// is nil-safe and skips. CW-20260526-0003 removed the Go-literal terminal
+// fallback; an operator who hasn't configured a default sees compaction
+// skip (with a log line) instead of routing to a stale hardcoded model.
+func BuildSummarizer(registry *provider.Registry, resolver DefaultResolver, settings *store.UserSettings) ctxpkg.Summarizer {
 	provName := ""
 	model := ""
 	if settings != nil {
 		provName = settings.SummarizerProvider
 		model = settings.SummarizerModel
 	}
-	if provName == "" {
-		provName = models.DefaultProvider()
+	if (provName == "" || model == "") && resolver != nil {
+		if rp, rm, err := resolver.ResolveProviderAndModel(provName, model); err == nil {
+			provName = rp
+			model = rm
+		}
 	}
-	if model == "" {
-		model = models.DefaultChatModel()
+	if provName == "" || model == "" {
+		slog.Warn("summarizer provider/model not configured; compaction Stage 2 will skip")
+		return nil
 	}
 	if registry == nil {
 		return nil

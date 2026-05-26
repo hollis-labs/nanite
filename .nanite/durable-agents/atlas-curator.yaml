@@ -3,7 +3,7 @@ slug: atlas-curator
 profile_slug: atlas-curator
 lifecycle_class: process
 provider: anthropic
-model: claude-sonnet-4
+model: claude-sonnet-4-20250514
 runtime_kind: api
 launch_source_type: process_tick
 metadata:

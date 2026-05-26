@@ -3,7 +3,7 @@ slug: content-writer
 profile_slug: content-writer
 lifecycle_class: template
 provider: anthropic
-model: claude-sonnet-4
+model: claude-sonnet-4-20250514
 runtime_kind: api
 launch_source_type: task_template_run
 metadata:

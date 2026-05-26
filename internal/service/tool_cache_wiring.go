@@ -8,7 +8,6 @@ import (
 	"github.com/hollis-labs/go-providers/provider"
 	"github.com/hollis-labs/nanite/internal/store"
 	"github.com/hollis-labs/nanite/internal/tool/intent"
-	"github.com/hollis-labs/nanite/pkg/models"
 )
 
 // toolCacheOverrideStore is an ephemeral, per-process map of session ID →
@@ -66,15 +65,19 @@ func buildToolIntentClassifier(reg *provider.Registry, s *store.Store) intent.Cl
 	if provName == "" {
 		provName = us.SummarizerProvider
 	}
-	if provName == "" {
-		provName = models.DefaultProvider()
-	}
 	model := us.ToolClassifierModel
 	if model == "" {
 		model = us.SummarizerModel
 	}
-	if model == "" {
-		model = models.DefaultChatModel()
+	// Resolver fills any remaining gap from user_settings →
+	// providers.default_model (CW-20260526-0003). Empty result on error
+	// is intentional — the registry lookup below treats unknown providers
+	// as "no LLM classifier," and the broker-only path still works.
+	if provName == "" || model == "" {
+		if rp, rm, err := s.ResolveProviderAndModel(provName, model); err == nil {
+			provName = rp
+			model = rm
+		}
 	}
 
 	var llm intent.Classifier
@@ -118,7 +121,12 @@ func buildRepairConfig(reg *provider.Registry, s *store.Store, utilityProvider s
 		return nil
 	}
 
-	// Provider resolution.
+	// Provider resolution. NANITE_REPAIR_PROVIDER → caller's
+	// utility provider → user_settings.utility_provider →
+	// resolver (user_settings.default_provider → providers.default_model
+	// keyed provider). CW-20260526-0003: terminal Go-literal fallback
+	// removed; if the chain is dry, the repair pipeline declines rather
+	// than guessing.
 	provName := os.Getenv("NANITE_REPAIR_PROVIDER")
 	if provName == "" {
 		provName = utilityProvider
@@ -127,13 +135,16 @@ func buildRepairConfig(reg *provider.Registry, s *store.Store, utilityProvider s
 		if us, err := s.GetUserSettings(); err == nil && us != nil {
 			if us.UtilityProvider != "" {
 				provName = us.UtilityProvider
-			} else if us.DefaultProvider != "" {
-				provName = us.DefaultProvider
 			}
 		}
 	}
+	if provName == "" && s != nil {
+		if rp, _, err := s.ResolveProviderAndModel("", ""); err == nil {
+			provName = rp
+		}
+	}
 	if provName == "" {
-		provName = models.DefaultProvider()
+		return nil
 	}
 
 	prov, ok := reg.Get(provName)

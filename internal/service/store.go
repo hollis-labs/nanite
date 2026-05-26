@@ -240,6 +240,16 @@ type PlanStore interface {
 	DeletePlan(id string) error
 }
 
+// DefaultResolver is the minimal interface exposed by store.Store for
+// "what provider+model should this call use?" resolution. Service
+// helpers that need only the resolver (e.g. BuildSummarizer) accept this
+// interface instead of the full Store so they remain easy to fake in
+// tests. CW-20260526-0003.
+type DefaultResolver interface {
+	ResolveProviderAndModel(explicitProvider, explicitModel string) (string, string, error)
+	DefaultModelForProvider(providerType string) (string, error)
+}
+
 // ProviderStore provides access to provider and model configuration.
 type ProviderStore interface {
 	ListProviders() ([]store.ProviderConfig, error)
@@ -248,6 +258,18 @@ type ProviderStore interface {
 	UpdateProvider(id string, u store.ProviderUpdate) error
 	SetProviderAPIKey(id, apiKey string) error
 	HasProviderAPIKey(id string) (bool, error)
+
+	// DefaultModelForProvider returns providers.default_model for the
+	// given provider_type, or an ErrNoDefaultModel-wrapped error when
+	// no row supplies one (CW-20260526-0003).
+	DefaultModelForProvider(providerType string) (string, error)
+
+	// ResolveProviderAndModel walks explicit args →
+	// user_settings.default_{provider,model} → providers.default_model
+	// for the resolved provider_type, returning ErrNoDefaultModel when
+	// the chain is dry (CW-20260526-0003). This is the SSOT for
+	// "what provider+model should this call use?"
+	ResolveProviderAndModel(explicitProvider, explicitModel string) (string, string, error)
 }
 
 // HandoffStashStore covers session handoff stash persistence + retrieval

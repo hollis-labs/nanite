@@ -146,10 +146,14 @@ func TestGetUsageSummaryEmpty(t *testing.T) {
 }
 
 func TestEstimateCostUnknownModel(t *testing.T) {
-	// Unknown models should fall back to Sonnet pricing.
+	// CW-20260526-0003: pkg/models.Pricing no longer silently substitutes
+	// the default chat model's pricing when the looked-up model is
+	// unregistered — that fallback masked rotting model IDs (and was
+	// nominally part of the bug class that produced the bare-alias 404).
+	// Unknown models now record cost=0 so cost monitors can flag the
+	// unknown ID and the operator can update the catalog.
 	cost := estimateCost("unknown-model", 1_000_000, 1_000_000)
-	// Expected: 1M * 3.0/1M + 1M * 15.0/1M = 3.0 + 15.0 = 18.0
-	if math.Abs(cost-18.0) > 0.001 {
-		t.Errorf("expected cost=18.0 for unknown model, got %f", cost)
+	if math.Abs(cost) > 0.001 {
+		t.Errorf("expected cost=0 for unknown model, got %f", cost)
 	}
 }

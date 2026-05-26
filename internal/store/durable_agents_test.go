@@ -246,7 +246,12 @@ func TestMigration084SeedsLegacyDurableAgentProfiles(t *testing.T) {
 	if seeded == nil {
 		t.Fatalf("seeded instance not found in %+v", list)
 	}
-	if seeded.ProfileID != profile.ID || seeded.Provider != "anthropic" || seeded.Model != "claude-sonnet-4" {
+	// CW-20260526-0003: migration 084 no longer stamps Provider/Model
+	// fallbacks when the profile leaves them blank — runtime resolution
+	// via ResolveProviderAndModel walks user_settings → providers.default_
+	// model at request time. The profile in this test has empty
+	// DefaultProvider/DefaultModel, so the seeded row carries empties too.
+	if seeded.ProfileID != profile.ID || seeded.Provider != "" || seeded.Model != "" {
 		t.Fatalf("seeded instance = %+v", seeded)
 	}
 	for _, inst := range list {

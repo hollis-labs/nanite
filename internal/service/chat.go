@@ -35,7 +35,6 @@ import (
 	"github.com/hollis-labs/nanite/internal/task"
 	"github.com/hollis-labs/nanite/internal/tool"
 	"github.com/hollis-labs/nanite/internal/worker"
-	"github.com/hollis-labs/nanite/pkg/models"
 )
 
 // chatShutdownMaxWait bounds how long chatServiceImpl.Shutdown waits for
@@ -450,13 +449,17 @@ type inFlightGen struct {
 
 // NewChatService creates a ChatService from its dependencies.
 func NewChatService(cfg ChatServiceConfig) ChatService {
+	// Utility provider/model default to the system default when not
+	// configured. Resolution goes through the store so user_settings and
+	// providers.default_model are honored (CW-20260526-0003). If the chain
+	// is dry, leave both empty — utility callers handle the missing case.
 	up := cfg.UtilityProvider
-	if up == "" {
-		up = models.DefaultProvider()
-	}
 	um := cfg.UtilityModel
-	if um == "" {
-		um = models.DefaultChatModel()
+	if (up == "" || um == "") && cfg.Store != nil {
+		if resolvedProv, resolvedModel, err := cfg.Store.ResolveProviderAndModel(up, um); err == nil {
+			up = resolvedProv
+			um = resolvedModel
+		}
 	}
 	impl := &chatServiceImpl{
 		sessions:                cfg.Sessions,

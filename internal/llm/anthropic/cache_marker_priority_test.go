@@ -98,7 +98,11 @@ func TestCacheMarkerPriority_NeverOnDynamicContent(t *testing.T) {
 func TestCacheablePrefixTokens_NotRegressedTurnOverTurn(t *testing.T) {
 	// Synthesize a representative request. Universal + System at the
 	// stable prefix, then an Agent slot (unchanged but non-priority).
+	// Model is required after CW-20260526-0003 (EstimateCacheablePrefix
+	// returns 0 when the request omits a model — same shape the SDK
+	// boundary now enforces). Use the canonical Sonnet wire id.
 	req := llmtypes.ChatRequest{
+		Model:        "claude-sonnet-4-20250514",
 		SystemPrompt: "per-turn dynamic prefix",
 		SlotBlocks: []llmtypes.SlotBlock{
 			{Name: ctxpkg.SlotUniversal, Content: strings.Repeat("universal-rules-block-content. ", 8), Changed: false},
@@ -125,7 +129,7 @@ func TestCacheablePrefixTokens_NotRegressedTurnOverTurn(t *testing.T) {
 	// case.
 
 	baselinePlan := cachePlan{System: true}
-	baselineParams := baselineClient.buildMessageParams(req, DefaultModel, false, llmcontracts.ReasoningConfig{})
+	baselineParams := baselineClient.buildMessageParams(req, "claude-sonnet-4-20250514", false, llmcontracts.ReasoningConfig{})
 	// Overwrite System with our hand-built version that omits slot markers.
 	baselineParams.System = baselineClient.buildSystemBlocks(req, baselinePlan)
 	baselinePayload := mustMarshal(t, baselineParams)
@@ -173,6 +177,8 @@ func TestCacheablePrefixTokens_DeterministicAcrossInvocations(t *testing.T) {
 	c := New()
 	c.SetCacheHints(llmcontracts.DefaultCacheStrategy())
 	req := llmtypes.ChatRequest{
+		// Model required after CW-20260526-0003 — see sibling test.
+		Model:        "claude-sonnet-4-20250514",
 		SystemPrompt: "per-turn prefix",
 		SlotBlocks: []llmtypes.SlotBlock{
 			{Name: ctxpkg.SlotUniversal, Content: "universal-rules", Changed: false},

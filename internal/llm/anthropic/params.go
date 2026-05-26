@@ -309,7 +309,14 @@ func (c *Client) EstimateCacheablePrefix(ctx context.Context, in llmtypes.ChatRe
 	if len(hints) == 0 {
 		return 0
 	}
-	model := resolveModel(in)
+	model, err := resolveModel(in)
+	if err != nil {
+		// EstimateCacheablePrefix is a heuristic — caller can't surface
+		// an error, so an unresolvable model just yields 0 (no cached
+		// prefix estimate). The real StreamChat / Complete call will
+		// surface ErrModelRequired loudly.
+		return 0
+	}
 	reasoningCfg := llmcontracts.ReasoningConfigFromContext(ctx)
 	interleavedThinking := shouldEnableInterleavedThinking(reasoningCfg, model)
 	params := c.buildMessageParams(in, model, interleavedThinking, reasoningCfg)

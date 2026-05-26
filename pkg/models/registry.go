@@ -58,20 +58,19 @@ type Model struct {
 	IsLegacy bool
 }
 
-// Defaults for system-level fallbacks. Every hardcoded
-// "claude-sonnet-4-20250514" literal in the codebase should either use these
-// constants or reference a row in the registry via ModelByID.
-const (
-	DefaultChatModelID   = "claude-sonnet-4-20250514"
-	DefaultProviderType  = "anthropic"
-	DefaultEmbeddingModel = "text-embedding-3-small"
-)
-
-// DefaultChatModel returns the canonical fallback chat model ID.
-func DefaultChatModel() string { return DefaultChatModelID }
-
-// DefaultProvider returns the canonical fallback provider type.
-func DefaultProvider() string { return DefaultProviderType }
+// Default-model and default-provider constants were removed from this
+// package in CW-20260526-0003. Runtime callers MUST resolve defaults
+// through store.ResolveProviderAndModel (or the service-layer
+// DefaultResolver interface that exposes it), which walks
+// explicit args → user_settings.default_{provider,model} →
+// providers.default_model. Seeders read the compile-time defaults from
+// internal/store/seedcatalog, which is also the routing-floor for
+// chat.InferProvider when no other heuristic identifies a provider.
+//
+// Background: a single Go literal terminating every "what model?"
+// fallback chain hid the bare-alias `claude-sonnet-4` 404 bug — the bad
+// value was set once and silently propagated to every callsite. The
+// fallbacks now live in the DB so operators can fix without a recompile.
 
 // ProviderCapabilityDefaults is the adapter-wide capability set a provider
 // advertises when no per-model override is available. These are "upper bound"
@@ -407,14 +406,13 @@ func ProviderFor(modelID string) string {
 	return ""
 }
 
-// Pricing returns (inputPerM, outputPerM) USD for a model ID. Falls back to
-// DefaultChatModel pricing when unknown so usage records remain numeric.
+// Pricing returns (inputPerM, outputPerM) USD for a model ID. Returns
+// (0, 0) for unregistered models — callers that record usage should
+// surface unknown models so the registry/catalog can be updated rather
+// than silently substitute pricing from an unrelated default model.
 func Pricing(modelID string) (float64, float64) {
 	if m, ok := ByModelID(modelID); ok {
 		return m.InputPricePerM, m.OutputPricePerM
-	}
-	if def, ok := ByModelID(DefaultChatModelID); ok {
-		return def.InputPricePerM, def.OutputPricePerM
 	}
 	return 0, 0
 }

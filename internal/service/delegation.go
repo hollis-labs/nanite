@@ -17,7 +17,6 @@ import (
 	"github.com/hollis-labs/nanite/internal/store"
 	"github.com/hollis-labs/nanite/internal/task"
 	"github.com/hollis-labs/nanite/internal/worker"
-	"github.com/hollis-labs/nanite/pkg/models"
 )
 
 // DelegateTask implements ChatService. It spawns a worker session, sends the
@@ -54,7 +53,14 @@ func (s *chatServiceImpl) DelegateTask(ctx context.Context, req chat.DelegationR
 		model = parentSession.Model
 	}
 	if model == "" {
-		model = models.DefaultChatModel()
+		// CW-20260526-0003: resolver walks user_settings →
+		// providers.default_model. Worker sessions inherit the system
+		// default if neither the request nor the parent set one.
+		if _, rm, err := s.store.ResolveProviderAndModel("", ""); err == nil {
+			model = rm
+		} else {
+			return nil, fmt.Errorf("delegation: %w", err)
+		}
 	}
 	workspaceID := req.WorkspaceID
 	if workspaceID == "" {

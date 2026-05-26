@@ -36,8 +36,13 @@ SELECT
         WHEN class IN ('advisor', 'process', 'template') THEN class
         ELSE 'advisor'
     END,
-    COALESCE(NULLIF(default_provider, ''), 'anthropic'),
-    COALESCE(NULLIF(default_model, ''), 'claude-sonnet-4'),
+    -- CW-20260526-0003: Provider/Model left blank when the profile doesn't
+    -- set one. Chat-time resolution via store.ResolveProviderAndModel walks
+    -- user_settings → providers.default_model so a later operator edit is
+    -- honored without re-seeding. The previous bare 'claude-sonnet-4'
+    -- fallback below produced 404s at Anthropic (the bare alias is invalid).
+    COALESCE(NULLIF(default_provider, ''), ''),
+    COALESCE(NULLIF(default_model, ''), ''),
     'api',
     CASE
         WHEN class = 'process' THEN 'process_tick'

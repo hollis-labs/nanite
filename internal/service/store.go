@@ -335,6 +335,13 @@ type Store interface {
 	// for a chat session's runtime row, or "" when none. CW-20260525-0001
 	// Slice 3 — resume a CLI provider session after a host restart.
 	AgentRuntimeProviderSessionID(id string) (string, error)
+
+	// SetAgentRuntimeProviderSessionID overwrites (or clears with "") the
+	// captured provider_session_id on a chat session's runtime row.
+	// CW-20260525-0001 Slice 3 follow-up — used by stale-resume detection
+	// to clear an expired id after a fast-exit-after-resume so the next
+	// turn cold-boots without --resume.
+	SetAgentRuntimeProviderSessionID(id, providerSessionID string) error
 }
 
 // Compile-time verification that *store.Store satisfies the composite interface.

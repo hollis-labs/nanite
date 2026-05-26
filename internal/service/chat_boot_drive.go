@@ -23,6 +23,13 @@ import (
 	"github.com/hollis-labs/nanite/internal/store"
 )
 
+// staleResumeFastExitWindow is how soon after a --resume cold-boot a runtime
+// exit must occur for the recovery path to treat it as a stale provider session
+// id (and clear the stored id so the next turn cold-boots without --resume).
+// Healthy mid-conversation exits well past this window keep their resume id.
+// CW-20260525-0001 Slice 3 follow-up.
+const staleResumeFastExitWindow = 5 * time.Second
+
 // driveBootSession is the long-lived-PTY counterpart to provider.StreamChat
 // for CLI agents. Called from chat_generate.go's per-iteration provider call
 // site when chat.IsCLIProvider(providerName) is true.
@@ -141,11 +148,13 @@ func (s *chatServiceImpl) driveBootSession(
 		// Claude resumes its real session (full context); the Slice 1 recovery
 		// pack still plants as a safety net in case resume silently no-ops.
 		// Skipped for an intentional fresh reboot (recoverThisBoot=false).
+		usedResume := false
 		if recoverThisBoot && s.store != nil {
 			if pid, perr := s.store.AgentRuntimeProviderSessionID(sessionID); perr != nil {
 				slog.Warn("driveBootSession: provider-session lookup failed", "session_id", sessionID, "err", perr)
 			} else if pid != "" {
 				bootOpts.ResumeProviderSessionID = pid
+				usedResume = true
 				slog.Info("driveBootSession: resuming provider session after cold boot", "session_id", sessionID)
 			}
 		}
@@ -176,7 +185,7 @@ func (s *chatServiceImpl) driveBootSession(
 		bootedSession := booted
 		bootedProfile := profileSlug
 		bootedWorkdir := workdir
-		go s.observeSessionForRecovery(bootedSession, sessionID, bootedProfile, bootedWorkdir, bootedAt)
+		go s.observeSessionForRecovery(bootedSession, sessionID, bootedProfile, bootedWorkdir, bootedAt, usedResume)
 	} else if s.slotsChangedFor(sessionID, slotResult) {
 		// 3. Refresh the boot dir when System / Agent / Mode / Rules
 		// slots have shifted. UserContext changes per turn by design and
@@ -349,8 +358,10 @@ func (s *chatServiceImpl) adoptReplacementSession(sessionID string, sess *runtim
 	// Re-arm the Wait observer for the replacement. The broker may
 	// dispatch additional retries up to its hard cap; without a fresh
 	// observer the second terminal exit would not surface to the
-	// broker.
-	go s.observeSessionForRecovery(sess, sessionID, "", "", time.Now())
+	// broker. Replacement boots dispatched by the broker do not carry the
+	// caller's resume context, so usedResume=false here — stale-resume
+	// clearing only applies to the initial driveBootSession path.
+	go s.observeSessionForRecovery(sess, sessionID, "", "", time.Now(), false)
 }
 
 // observeSessionForRecovery is the Wait-observer goroutine that watches
@@ -362,7 +373,7 @@ func (s *chatServiceImpl) adoptReplacementSession(sessionID string, sess *runtim
 // consumes — agent profile, workdir, session age. Future iterations
 // extend this to include stderr tail, sandbox state, MCP transport
 // health (the BootDir/MCP/Credentials adapter wiring).
-func (s *chatServiceImpl) observeSessionForRecovery(sess *runtimeagent.Session, sessionID, agentProfile, workdir string, bootedAt time.Time) {
+func (s *chatServiceImpl) observeSessionForRecovery(sess *runtimeagent.Session, sessionID, agentProfile, workdir string, bootedAt time.Time, usedResume bool) {
 	if sess == nil || s.agentDeps == nil || s.agentDeps.Recovery == nil {
 		return
 	}
@@ -407,6 +418,26 @@ func (s *chatServiceImpl) observeSessionForRecovery(sess *runtimeagent.Session, 
 			broker.ClearSession(sessionID)
 		}
 		return
+	}
+
+	// CW-20260525-0001 Slice 3 follow-up: stale-resume detection. A boot that
+	// used --resume and died within a few seconds is overwhelmingly likely to
+	// have been rejected by the provider for a stale/unknown session id (the
+	// stored provider_session_id outlived its provider-side session). Clear
+	// the stale id here so the NEXT user turn cold-boots without --resume —
+	// the recovery pack still plants host-side context. The 5s window keeps
+	// healthy mid-conversation errors from losing their valid resume id.
+	if usedResume && s.store != nil && time.Since(bootedAt) < staleResumeFastExitWindow {
+		if clearErr := s.store.SetAgentRuntimeProviderSessionID(sessionID, ""); clearErr != nil {
+			slog.Warn("recovery: clear stale provider_session_id failed",
+				"session_id", sessionID, "err", clearErr)
+		} else {
+			slog.Warn("recovery: resumed boot died fast — cleared stored provider_session_id so the next turn cold-boots without --resume",
+				"session_id", sessionID,
+				"age_ms", time.Since(bootedAt).Milliseconds(),
+				"cause", xe.Cause,
+				"code", xe.Code)
+		}
 	}
 
 	meta := map[string]any{

@@ -140,9 +140,15 @@ func buildRequest(req llmtypes.ChatRequest, streaming bool) tetherclient.ChatReq
 	for _, m := range req.Messages {
 		input = append(input, textMessage(m.Role, m.Content))
 	}
+	// "auto" (the seeded default model) means "let Tether route by its own
+	// policy" — send no model hint. A concrete model passes through as a hint.
+	modelHint := req.Model
+	if modelHint == "auto" {
+		modelHint = ""
+	}
 	return tetherclient.ChatRequest{Request: tetherclient.AIRequest{
 		Operation:       "chat",
-		ModelHint:       req.Model,
+		ModelHint:       modelHint,
 		Streaming:       streaming,
 		MaxOutputTokens: req.MaxTokens,
 		CallerID:        callerID,

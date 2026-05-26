@@ -44,6 +44,12 @@ func TestBuildRequest(t *testing.T) {
 	if none.Request.Streaming {
 		t.Errorf("streaming should be false for Complete")
 	}
+
+	// model "auto" → no model hint (Tether routes by its own policy).
+	auto := buildRequest(llmtypes.ChatRequest{Model: "auto", Messages: []llmtypes.ChatMessage{{Role: "user", Content: "q"}}}, true)
+	if auto.Request.ModelHint != "" {
+		t.Errorf("model=auto should send empty ModelHint, got %q", auto.Request.ModelHint)
+	}
 }
 
 func TestExtractText(t *testing.T) {

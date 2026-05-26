@@ -119,6 +119,11 @@ func (a *API) handleForkSession(w http.ResponseWriter, r *http.Request) {
 		Provider: req.Provider,
 		Model:    req.Model,
 	}
+	// An explicit mode_id overrides the source session's mode on the fork;
+	// empty falls through to the store default (inherit source's current_mode_id).
+	if req.ModeID != "" {
+		overrides.CurrentModeID = &req.ModeID
+	}
 
 	newSess, err := a.Services.Store.ForkSession(sourceID, overrides, req.IncludeMessages)
 	if err != nil {

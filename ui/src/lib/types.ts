@@ -691,11 +691,9 @@ export interface StartSurfacePrefill {
 
 export interface ForkSessionRequest {
   include_messages?: boolean;
-  copy_context?: boolean;
   provider?: string;
   model?: string;
   mode_id?: string;
-  initial_prompt?: string;
 }
 
 /**

@@ -48,6 +48,34 @@ export function ChatHeader() {
   const [detailsOpen, setDetailsOpen] = useState(false);
   const [startOpen, setStartOpen] = useState(false);
   const [startPrefill, setStartPrefill] = useState<StartSurfacePrefill | null>(null);
+  // Transient confirmation surface for actions whose trigger UI closes on
+  // success (e.g. Recover session). Lives outside the menu/panel so it stays
+  // visible regardless of where the action was invoked from. Auto-dismisses.
+  const [transientNote, setTransientNote] = useState<
+    { kind: "info" | "warn" | "error"; text: string } | null
+  >(null);
+  const transientNoteTimerRef = useRef<number | null>(null);
+  const showTransientNote = useCallback(
+    (note: { kind: "info" | "warn" | "error"; text: string }, ttlMs = 5000) => {
+      if (transientNoteTimerRef.current !== null) {
+        window.clearTimeout(transientNoteTimerRef.current);
+      }
+      setTransientNote(note);
+      transientNoteTimerRef.current = window.setTimeout(() => {
+        setTransientNote(null);
+        transientNoteTimerRef.current = null;
+      }, ttlMs);
+    },
+    [],
+  );
+  useEffect(
+    () => () => {
+      if (transientNoteTimerRef.current !== null) {
+        window.clearTimeout(transientNoteTimerRef.current);
+      }
+    },
+    [],
+  );
   const agentDropRef = useRef<HTMLDivElement>(null);
   const modeDropRef = useRef<HTMLDivElement>(null);
   const moreRef = useRef<HTMLDivElement>(null);
@@ -243,6 +271,20 @@ export function ChatHeader() {
       if (result === "recovered") {
         setMoreOpen(false);
         setDetailsOpen(false);
+        showTransientNote({
+          kind: "info",
+          text: "Recovery armed — your next message will resume prior context.",
+        });
+      } else if (result === "busy") {
+        showTransientNote({
+          kind: "warn",
+          text: "A turn is in progress — try Recover again when it finishes.",
+        });
+      } else {
+        showTransientNote({
+          kind: "error",
+          text: "Recover failed — check the service.",
+        });
       }
     },
   });
@@ -282,6 +324,22 @@ export function ChatHeader() {
   if (toolCount > 0) metaParts.push(`${toolCount} tools`);
 
   return (
+    <>
+    {transientNote && (
+      <div
+        role="status"
+        aria-live="polite"
+        className={`fixed top-[60px] left-1/2 -translate-x-1/2 z-50 max-w-[480px] rounded-md border px-3 py-1.5 text-[11px] shadow-md transition-opacity ${
+          transientNote.kind === "info"
+            ? "border-divider bg-surface text-fg"
+            : transientNote.kind === "warn"
+              ? "border-warning bg-surface text-warning"
+              : "border-danger bg-surface text-danger"
+        }`}
+      >
+        {transientNote.text}
+      </div>
+    )}
     <header className="flex h-[52px] shrink-0 border-b border-divider">
       <div className="max-w-3xl w-full mx-auto flex items-center justify-between px-[18px]">
         {/* ── Left ── */}
@@ -535,18 +593,10 @@ export function ChatHeader() {
                   <RotateCcw className="h-3 w-3 text-fg-muted" />
                   {recoverMutation.isPending ? "Recovering…" : "Recover session"}
                 </button>
-                {recoverMutation.data === "recovered" && (
-                  <div className="px-3 pb-1 text-[10px] text-fg-muted">
-                    Recovery armed — your next message will resume prior context.
-                  </div>
-                )}
-                {(recoverMutation.data === "busy" || recoverMutation.data === "error") && (
-                  <div className="px-3 pb-1 text-[10px] text-fg-muted">
-                    {recoverMutation.data === "busy"
-                      ? "A turn is in progress — try again when it finishes."
-                      : "Recover failed — check the service."}
-                  </div>
-                )}
+                {/* Success/busy/error feedback for Recover is surfaced via the
+                    transient note at the top of the header (rendered outside
+                    this dropdown), so it stays visible after the menu auto-
+                    closes on success. */}
                 {pluginActions.length > 0 && (
                   <>
                     <div className="my-1 h-px bg-divider" />
@@ -598,5 +648,6 @@ export function ChatHeader() {
         onSessionStarted={setActiveSession}
       />
     </header>
+    </>
   );
 }

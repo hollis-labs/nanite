@@ -396,3 +396,45 @@ func TestAgentEventBridge_NoRouterLosesTurnToSSE(t *testing.T) {
 	bridge.SetPerSessionRouter("sess-codex-2", nil)
 	close(in)
 }
+
+// TestBuildSessionExitMeta_PreservesProvider — CW-20260526-0002. The
+// Wait-observer's meta bag must carry MetaKeyProvider so the broker's
+// DispatchRetry boots the replacement on the same runner as the failed
+// session. The HTTP-stream path always set this; the CLI exit path
+// dropped it (regression: a `claude` crash silently re-booted on the
+// agent profile's DefaultProvider, masking provider-specific bugs).
+func TestBuildSessionExitMeta_PreservesProvider(t *testing.T) {
+	meta := buildSessionExitMeta("claude-sonnet", "claude", "/work/dir", 42*time.Second)
+
+	if got := meta["provider"]; got != "claude" {
+		t.Errorf("provider: got %v, want claude", got)
+	}
+	if got := meta["agent_profile"]; got != "claude-sonnet" {
+		t.Errorf("agent_profile: got %v, want claude-sonnet", got)
+	}
+	if got := meta["workdir"]; got != "/work/dir" {
+		t.Errorf("workdir: got %v, want /work/dir", got)
+	}
+	if got := meta["mode"]; got != "long_lived" {
+		t.Errorf("mode: got %v, want long_lived", got)
+	}
+	if got, ok := meta["session_age"].(time.Duration); !ok || got != 42*time.Second {
+		t.Errorf("session_age: got %v (%T), want 42s", meta["session_age"], meta["session_age"])
+	}
+}
+
+// TestBuildSessionExitMeta_EmptyProviderPropagates — defensive: when the
+// boot completed without a resolved provider (test stubs, mock configs),
+// the meta bag carries the empty string rather than omitting the key.
+// FailureEvent's metaString helper treats both as "no provider", and the
+// broker's DispatchRetry falls back to the agent profile DefaultProvider.
+func TestBuildSessionExitMeta_EmptyProviderPropagates(t *testing.T) {
+	meta := buildSessionExitMeta("", "", "", 0)
+
+	if _, ok := meta["provider"]; !ok {
+		t.Error("provider key missing — broker classifier scans the key, not the value")
+	}
+	if got := meta["provider"]; got != "" {
+		t.Errorf("provider: got %v, want empty string", got)
+	}
+}

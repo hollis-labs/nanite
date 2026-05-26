@@ -90,6 +90,12 @@ func TestDispatchRetryPreservesLineage(t *testing.T) {
 	if got.Mode != agent.ModeLongLived {
 		t.Errorf("Mode: got %v, want ModeLongLived", got.Mode)
 	}
+	// CW-20260526-0002: provider is load-bearing on the replacement Boot
+	// so a CLI exit on `claude` retries on `claude`, not the default
+	// provider implied by the agent profile.
+	if got.Provider != "claude" {
+		t.Errorf("Provider: got %q, want claude", got.Provider)
+	}
 
 	// Store transition must precede the Boot call. With our fake the
 	// only signal we have is that both happened; ordering is implicit

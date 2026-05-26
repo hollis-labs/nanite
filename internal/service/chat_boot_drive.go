@@ -184,8 +184,9 @@ func (s *chatServiceImpl) driveBootSession(
 		bootedAt := time.Now()
 		bootedSession := booted
 		bootedProfile := profileSlug
+		bootedProvider := bootOpts.Provider
 		bootedWorkdir := workdir
-		go s.observeSessionForRecovery(bootedSession, sessionID, bootedProfile, bootedWorkdir, bootedAt, usedResume)
+		go s.observeSessionForRecovery(bootedSession, sessionID, bootedProfile, bootedProvider, bootedWorkdir, bootedAt, usedResume)
 	} else if s.slotsChangedFor(sessionID, slotResult) {
 		// 3. Refresh the boot dir when System / Agent / Mode / Rules
 		// slots have shifted. UserContext changes per turn by design and
@@ -361,7 +362,19 @@ func (s *chatServiceImpl) adoptReplacementSession(sessionID string, sess *runtim
 	// broker. Replacement boots dispatched by the broker do not carry the
 	// caller's resume context, so usedResume=false here — stale-resume
 	// clearing only applies to the initial driveBootSession path.
-	go s.observeSessionForRecovery(sess, sessionID, "", "", time.Now(), false)
+	// CW-20260526-0002: thread the original boot's provider so the next
+	// terminal exit's meta bag carries it through to a downstream
+	// DispatchRetry. The bootdir adapter is the surviving record of the
+	// initial boot's Options; nil-safe lookup returns "" which the broker
+	// then degrades on (default provider) — same as the pre-fix shape, so
+	// no regression for tests / configs without the adapter wired.
+	replacementProvider := ""
+	if s.agentBootDirAdapter != nil {
+		if entry, ok := s.agentBootDirAdapter.lookup(sessionID); ok {
+			replacementProvider = entry.opts.Provider
+		}
+	}
+	go s.observeSessionForRecovery(sess, sessionID, "", replacementProvider, "", time.Now(), false)
 }
 
 // observeSessionForRecovery is the Wait-observer goroutine that watches
@@ -370,10 +383,15 @@ func (s *chatServiceImpl) adoptReplacementSession(sessionID string, sess *runtim
 // session at boot time; exits when the session terminates.
 //
 // The meta bag carries chat-side context the broker's classifier
-// consumes — agent profile, workdir, session age. Future iterations
-// extend this to include stderr tail, sandbox state, MCP transport
-// health (the BootDir/MCP/Credentials adapter wiring).
-func (s *chatServiceImpl) observeSessionForRecovery(sess *runtimeagent.Session, sessionID, agentProfile, workdir string, bootedAt time.Time, usedResume bool) {
+// consumes — agent profile, provider, workdir, session age. Future
+// iterations extend this to include stderr tail, sandbox state, MCP
+// transport health (the BootDir/MCP/Credentials adapter wiring).
+// CW-20260526-0002: provider is load-bearing — DispatchRetry threads
+// ev.Provider into agent.Options so the replacement boots on the same
+// runner. An empty provider here would silently re-select the agent
+// profile's DefaultProvider, masking provider-specific bugs across
+// the retry boundary.
+func (s *chatServiceImpl) observeSessionForRecovery(sess *runtimeagent.Session, sessionID, agentProfile, provider, workdir string, bootedAt time.Time, usedResume bool) {
 	if sess == nil || s.agentDeps == nil || s.agentDeps.Recovery == nil {
 		return
 	}
@@ -440,12 +458,7 @@ func (s *chatServiceImpl) observeSessionForRecovery(sess *runtimeagent.Session, 
 		}
 	}
 
-	meta := map[string]any{
-		recovery.MetaKeyAgentProfile: agentProfile,
-		recovery.MetaKeyWorkdir:      workdir,
-		recovery.MetaKeyMode:         "long_lived",
-		recovery.MetaKeySessionAge:   time.Since(bootedAt),
-	}
+	meta := buildSessionExitMeta(agentProfile, provider, workdir, time.Since(bootedAt))
 
 	slog.Warn("recovery: session exited with error — invoking broker",
 		"session_id", sessionID,
@@ -468,6 +481,21 @@ func (s *chatServiceImpl) observeSessionForRecovery(sess *runtimeagent.Session, 
 	s.toolPartitionStates.Delete(sessionID)
 
 	s.agentDeps.Recovery.OnSessionExit(sessionID, xe, meta)
+}
+
+// buildSessionExitMeta is the pure meta-bag composer the Wait-observer
+// hands to the recovery broker on a terminal exit. Extracted so the
+// composition (especially MetaKeyProvider — CW-20260526-0002) is
+// exercised by a direct unit test without needing a real
+// *runtimeagent.Session to Wait on.
+func buildSessionExitMeta(agentProfile, provider, workdir string, sessionAge time.Duration) map[string]any {
+	return map[string]any{
+		recovery.MetaKeyAgentProfile: agentProfile,
+		recovery.MetaKeyProvider:     provider,
+		recovery.MetaKeyWorkdir:      workdir,
+		recovery.MetaKeyMode:         "long_lived",
+		recovery.MetaKeySessionAge:   sessionAge,
+	}
 }
 
 // regenerateBootDirSlots rewrites the boot dir's CLAUDE.md and

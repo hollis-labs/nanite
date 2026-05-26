@@ -342,6 +342,7 @@ func (b *Broker) DispatchRetry(ctx context.Context, ev *FailureEvent) (*agent.Se
 		AgentProfile:    ev.AgentProfile,
 		ParentSessionID: ev.LineageOf,
 		Workdir:         ev.Workdir,
+		Provider:        ev.Provider,
 	})
 }
 

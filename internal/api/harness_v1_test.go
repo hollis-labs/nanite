@@ -46,6 +46,9 @@ func (s *harnessChatStub) CancelActiveGeneration(sessionID string) bool {
 func (s *harnessChatStub) RebootSessionAgent(context.Context, string) (service.RebootResult, error) {
 	panic("RebootSessionAgent not used in harness tests")
 }
+func (s *harnessChatStub) RecoverSession(context.Context, string) (service.RebootResult, error) {
+	panic("RecoverSession not used in harness tests")
+}
 func (s *harnessChatStub) Shutdown() {}
 
 func TestHarnessV1InitializeAndCapabilities(t *testing.T) {

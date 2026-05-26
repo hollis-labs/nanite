@@ -268,6 +268,7 @@ func (a *API) RegisterRoutes(mux *http.ServeMux) {
 	// Per-session agent lifecycle — reboot one session's runtime agent
 	// without restarting the whole service (CW-20260516-0057).
 	mux.HandleFunc("POST /api/sessions/{id}/agent/reboot", a.handleRebootSessionAgent)
+	mux.HandleFunc("POST /api/sessions/{id}/recover", a.handleRecoverSession)
 
 	// Delegation
 	mux.HandleFunc("POST /api/sessions/{id}/delegate", a.handleDelegateTask)

@@ -85,6 +85,12 @@ type ChatService interface {
 	// turn is in flight for the session. CW-20260516-0057.
 	RebootSessionAgent(ctx context.Context, sessionID string) (RebootResult, error)
 
+	// RecoverSession evicts the live runtime like a reboot, but the next turn
+	// cold-boots into auto-recovery (recovery pack + provider resume) instead
+	// of a clean fresh boot. CW-20260525-0001 Slice 2. Returns ErrSessionBusy
+	// when a turn is in flight.
+	RecoverSession(ctx context.Context, sessionID string) (RebootResult, error)
+
 	// Shutdown kills all tracked CLI processes.
 	Shutdown()
 }
@@ -344,6 +350,14 @@ type chatServiceImpl struct {
 	// session boots the runtime; subsequent calls SendInput on the existing
 	// session. Map values are *runtimeagent.Session.
 	activeSessions sync.Map
+
+	// freshBootSessions is a one-shot, in-memory set of session ids whose
+	// NEXT cold-boot must skip auto-recovery (no recovery pack, no provider
+	// resume) — i.e. an intentional "Reboot agent" stays a clean fresh boot.
+	// CW-20260525-0001: because it's in-memory, a daemon restart loses the
+	// flag, so an involuntary restart still auto-recovers; only an in-process
+	// reboot suppresses it. driveBootSession LoadAndDeletes it (one-shot).
+	freshBootSessions sync.Map
 
 	// agentEventBridge owns per-session router state. driveBootSession
 	// (Phase 4c.4) binds a per-turn turnCh via SetPerSessionRouter so the

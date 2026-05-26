@@ -574,6 +574,46 @@ func (a *API) handleRebootSessionAgent(w http.ResponseWriter, r *http.Request) {
 	a.jsonResp(w, http.StatusOK, result)
 }
 
+// handleRecoverSession evicts the session's live runtime so the next turn
+// cold-boots into auto-recovery (recovery pack + provider resume) — the
+// explicit user-triggered counterpart to the daemon-restart auto path, and
+// distinct from a clean Reboot. CW-20260525-0001 Slice 2.
+// POST /api/sessions/{id}/recover.
+func (a *API) handleRecoverSession(w http.ResponseWriter, r *http.Request) {
+	sessionID := r.PathValue("id")
+	ctx := r.Context()
+
+	if _, err := a.Services.Sessions.Get(ctx, sessionID); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			a.errorResp(w, http.StatusNotFound, "session not found")
+		} else {
+			a.errorResp(w, http.StatusInternalServerError, err.Error())
+		}
+		return
+	}
+
+	if a.Services.Chat == nil {
+		a.errorResp(w, http.StatusServiceUnavailable, "chat service not wired")
+		return
+	}
+
+	result, err := a.Services.Chat.RecoverSession(ctx, sessionID)
+	if err != nil {
+		if errors.Is(err, service.ErrSessionBusy) {
+			a.errorResp(w, http.StatusConflict, err.Error())
+			return
+		}
+		a.errorResp(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	// The next turn plants the recovery pack / resumes the provider session.
+	a.jsonResp(w, http.StatusOK, map[string]any{
+		"recovered": result.Rebooted,
+		"status":    result.Status,
+		"note":      "recovery armed — the next message will resume prior context",
+	})
+}
+
 func (a *API) handleCompactSession(w http.ResponseWriter, r *http.Request) {
 	sessionID := r.PathValue("id")
 	ctx := r.Context()

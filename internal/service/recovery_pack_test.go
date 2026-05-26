@@ -10,6 +10,28 @@ import (
 	"github.com/hollis-labs/nanite/internal/store"
 )
 
+func TestShouldRecoverColdBoot(t *testing.T) {
+	s := &chatServiceImpl{}
+
+	// Not a cold boot → never recover.
+	if s.shouldRecoverColdBoot("sess", false) {
+		t.Error("non-cold boot should not recover")
+	}
+	// Cold boot, no fresh flag → recover (daemon restart / Recover()).
+	if !s.shouldRecoverColdBoot("sess", true) {
+		t.Error("cold boot without fresh flag should recover")
+	}
+	// Intentional reboot armed the one-shot flag → suppress recovery once...
+	s.freshBootSessions.Store("sess", struct{}{})
+	if s.shouldRecoverColdBoot("sess", true) {
+		t.Error("fresh-flagged cold boot should NOT recover")
+	}
+	// ...and the flag is consumed (one-shot): the next cold boot recovers again.
+	if !s.shouldRecoverColdBoot("sess", true) {
+		t.Error("fresh flag should be one-shot — next cold boot recovers")
+	}
+}
+
 func TestShouldBuildRecoveryPack(t *testing.T) {
 	cases := []struct {
 		cold  bool

@@ -70,8 +70,23 @@ type RebootResult struct {
 // the flag and treats the resulting process exit as deliberate rather than
 // dispatching a crash replacement.
 func (s *chatServiceImpl) RebootSessionAgent(ctx context.Context, sessionID string) (RebootResult, error) {
+	return s.rebootRuntime(ctx, sessionID, true)
+}
+
+// RecoverSession evicts the session's live runtime WITHOUT arming the
+// fresh-boot flag, so the next turn cold-boots into auto-recovery (recovery
+// pack + provider resume). CW-20260525-0001 Slice 2 — explicit user-triggered
+// recovery, distinct from a clean Reboot.
+func (s *chatServiceImpl) RecoverSession(ctx context.Context, sessionID string) (RebootResult, error) {
+	return s.rebootRuntime(ctx, sessionID, false)
+}
+
+// rebootRuntime stops + evicts the session's live runtime so the next turn
+// cold-boots. When fresh is true the next boot skips auto-recovery (a clean
+// Reboot); when false the next boot recovers (Recover).
+func (s *chatServiceImpl) rebootRuntime(ctx context.Context, sessionID string, fresh bool) (RebootResult, error) {
 	if sessionID == "" {
-		return RebootResult{}, errors.New("RebootSessionAgent: empty session id")
+		return RebootResult{}, errors.New("rebootRuntime: empty session id")
 	}
 
 	// Reject under an in-flight turn — see the in-flight decision above.
@@ -119,8 +134,16 @@ func (s *chatServiceImpl) RebootSessionAgent(ctx context.Context, sessionID stri
 	s.activeSessionSlots.Delete(sessionID)
 	s.toolPartitionStates.Delete(sessionID)
 
-	slog.Info("reboot: session agent stopped; next turn will cold-boot fresh",
-		"session_id", sessionID)
+	// CW-20260525-0001: a clean reboot must stay fresh — arm the one-shot flag
+	// so the next cold-boot skips auto-recovery (pack + provider resume).
+	// Recover (fresh=false) leaves it unset so the next turn recovers; a daemon
+	// restart never sets it either, so it also recovers.
+	if fresh {
+		s.freshBootSessions.Store(sessionID, struct{}{})
+	}
+
+	slog.Info("reboot: session agent stopped; next turn will cold-boot",
+		"session_id", sessionID, "fresh", fresh)
 	return RebootResult{Rebooted: true, Status: "rebooted"}, nil
 }
 

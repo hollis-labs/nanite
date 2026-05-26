@@ -102,6 +102,10 @@ func (s *chatServiceImpl) driveBootSession(
 	// (or the runtime was evicted) — the first post-restart payload gets a
 	// recovery pack so the fresh agent resumes from recovered context.
 	coldBooted := sess == nil
+	// A cold boot auto-recovers UNLESS an intentional reboot armed the
+	// one-shot fresh-boot flag (consumed here). Recover() and daemon restarts
+	// leave the flag unset, so they recover.
+	recoverThisBoot := s.shouldRecoverColdBoot(sessionID, coldBooted)
 
 	// 2. Boot when absent.
 	if sess == nil {
@@ -136,7 +140,8 @@ func (s *chatServiceImpl) driveBootSession(
 		// CreateRuntimeRow upserts the row and clears the column. When present,
 		// Claude resumes its real session (full context); the Slice 1 recovery
 		// pack still plants as a safety net in case resume silently no-ops.
-		if s.store != nil {
+		// Skipped for an intentional fresh reboot (recoverThisBoot=false).
+		if recoverThisBoot && s.store != nil {
 			if pid, perr := s.store.AgentRuntimeProviderSessionID(sessionID); perr != nil {
 				slog.Warn("driveBootSession: provider-session lookup failed", "session_id", sessionID, "err", perr)
 			} else if pid != "" {
@@ -220,7 +225,7 @@ func (s *chatServiceImpl) driveBootSession(
 	// path; we then clear the router so the channel is closed and the
 	// loop terminates (the bridge only auto-closes on a runtime-emitted
 	// Done/Error, which never arrives when SendInput itself failed).
-	payload := s.composeBootPayload(sessionID, session, agent, sess.BootDir, slotResult, userContent, coldBooted)
+	payload := s.composeBootPayload(sessionID, session, agent, sess.BootDir, slotResult, userContent, recoverThisBoot)
 	go func() {
 		if err := sess.SendInput([]byte(payload)); err != nil {
 			slog.Warn("driveBootSession: send input failed",

@@ -36,6 +36,20 @@ const (
 	recoveryPackFileName = "recovery.md"
 )
 
+// shouldRecoverColdBoot decides whether a cold boot should auto-recover. A cold
+// boot recovers UNLESS an intentional reboot armed the one-shot fresh-boot flag
+// (consumed here, so it only suppresses the very next boot). Non-cold boots and
+// fresh reboots do not recover. CW-20260525-0001 Slice 2.
+func (s *chatServiceImpl) shouldRecoverColdBoot(sessionID string, coldBooted bool) bool {
+	if !coldBooted {
+		return false
+	}
+	if _, fresh := s.freshBootSessions.LoadAndDelete(sessionID); fresh {
+		return false
+	}
+	return true
+}
+
 // shouldBuildRecoveryPack reports whether a cold-booted CLI session warrants a
 // recovery pack: it cold-booted (no live runtime — the host restarted or the
 // runtime was evicted) AND it has prior persisted turns. A brand-new session's
@@ -176,11 +190,12 @@ func (s *chatServiceImpl) buildSessionRecoveryPrefix(sessionID string, session *
 }
 
 // composeBootPayload builds the per-turn payload for the boot-driven CLI path.
-// On a cold boot (post-restart) with prior history it prepends a recovery pack
-// ahead of the normal user payload; otherwise it is the normal payload.
-func (s *chatServiceImpl) composeBootPayload(sessionID string, session *store.Session, agent *store.AgentProfile, bootDir string, slotResult *SlotAssemblyResult, userContent string, coldBooted bool) string {
+// When shouldRecover is true (a post-restart cold boot, not an intentional
+// fresh reboot) and prior history exists, it prepends a recovery pack ahead of
+// the normal user payload; otherwise it is the normal payload.
+func (s *chatServiceImpl) composeBootPayload(sessionID string, session *store.Session, agent *store.AgentProfile, bootDir string, slotResult *SlotAssemblyResult, userContent string, shouldRecover bool) string {
 	base := composeUserPayload(slotResult, userContent)
-	if !coldBooted {
+	if !shouldRecover {
 		return base
 	}
 	prefix := s.buildSessionRecoveryPrefix(sessionID, session, agent, bootDir, userContent)

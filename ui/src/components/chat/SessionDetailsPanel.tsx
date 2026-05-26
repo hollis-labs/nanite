@@ -7,6 +7,7 @@ import {
   GitFork,
   HardDrive,
   Layers,
+  LifeBuoy,
   LockKeyhole,
   type LucideIcon,
   Play,
@@ -38,6 +39,7 @@ interface SessionDetailsPanelProps {
   onOpenChange: (open: boolean) => void;
   onFork?: (details: SessionDetailsResponse, includeMessages: boolean) => void;
   onRestart?: (details: SessionDetailsResponse) => void;
+  onRecover?: (details: SessionDetailsResponse) => void;
   onOpenStartFromHere?: (details: SessionDetailsResponse) => void;
 }
 
@@ -47,6 +49,7 @@ export function SessionDetailsPanel({
   onOpenChange,
   onFork,
   onRestart,
+  onRecover,
   onOpenStartFromHere,
 }: SessionDetailsPanelProps) {
   const detailsQuery = useQuery({
@@ -86,6 +89,7 @@ export function SessionDetailsPanel({
               details={details}
               onFork={onFork}
               onRestart={onRestart}
+              onRecover={onRecover}
               onOpenStartFromHere={onOpenStartFromHere}
             />
           )}
@@ -99,11 +103,13 @@ function SessionDetailsBody({
   details,
   onFork,
   onRestart,
+  onRecover,
   onOpenStartFromHere,
 }: {
   details: SessionDetailsResponse;
   onFork?: (details: SessionDetailsResponse, includeMessages: boolean) => void;
   onRestart?: (details: SessionDetailsResponse) => void;
+  onRecover?: (details: SessionDetailsResponse) => void;
   onOpenStartFromHere?: (details: SessionDetailsResponse) => void;
 }) {
   const { session } = details;
@@ -358,6 +364,18 @@ function SessionDetailsBody({
             >
               <RotateCcw className="size-3.5" />
               Restart as new session
+            </Button>
+            <Button
+              type="button"
+              size="sm"
+              variant="secondary"
+              onClick={() => onRecover?.(details)}
+              disabled={!onRecover}
+              className="gap-1.5"
+              title="Resume this session after a restart — the next message reloads prior context (recovery pack + provider resume)"
+            >
+              <LifeBuoy className="size-3.5" />
+              Recover session
             </Button>
             <Button
               type="button"

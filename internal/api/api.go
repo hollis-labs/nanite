@@ -192,6 +192,7 @@ func (a *API) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/harness/v1/sessions/{id}", a.handleHarnessV1GetSession)
 	mux.HandleFunc("POST /api/harness/v1/sessions/{id}/turns", a.handleHarnessV1SendTurn)
 	mux.HandleFunc("POST /api/harness/v1/sessions/{id}/cancel", a.handleHarnessV1CancelTurn)
+	mux.HandleFunc("POST /api/harness/v1/sessions/{id}/recover", a.handleHarnessV1RecoverSession)
 	mux.HandleFunc("GET /api/harness/v1/sessions/{id}/events", a.handleHarnessV1SessionEvents)
 	mux.HandleFunc("POST /api/harness/v1/sessions/{id}/approvals/{requestId}", a.handleRespondApproval)
 	mux.HandleFunc("GET /api/harness/v1/durable-agents", a.handleHarnessV1ListDurableAgents)
@@ -268,6 +269,7 @@ func (a *API) RegisterRoutes(mux *http.ServeMux) {
 	// Per-session agent lifecycle — reboot one session's runtime agent
 	// without restarting the whole service (CW-20260516-0057).
 	mux.HandleFunc("POST /api/sessions/{id}/agent/reboot", a.handleRebootSessionAgent)
+	mux.HandleFunc("POST /api/sessions/{id}/recover", a.handleRecoverSession)
 
 	// Delegation
 	mux.HandleFunc("POST /api/sessions/{id}/delegate", a.handleDelegateTask)

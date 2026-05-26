@@ -132,6 +132,26 @@ func (s *Store) SetAgentRuntimeProviderSessionID(id, providerSessionID string) e
 	return nil
 }
 
+// AgentRuntimeProviderSessionID returns the provider_session_id captured on the
+// session's runtime row (keyed by id == chat session id), or "" when there is
+// no row or none captured. CW-20260525-0001 Slice 3 reads this to resume a CLI
+// provider session after a host restart: the agent_runtime row persists (the
+// reaper only marks it orphaned), so the captured provider session id survives.
+// MUST be read BEFORE re-boot — CreateRuntimeRow upserts and clears the column.
+func (s *Store) AgentRuntimeProviderSessionID(id string) (string, error) {
+	var providerSessionID string
+	err := s.DB.QueryRow(
+		`SELECT COALESCE(provider_session_id, '') FROM agent_runtime WHERE id = ?`, id,
+	).Scan(&providerSessionID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", nil
+	}
+	if err != nil {
+		return "", fmt.Errorf("get agent_runtime provider_session_id %s: %w", id, err)
+	}
+	return providerSessionID, nil
+}
+
 // SetAgentRuntimeState transitions the row's state column. Used by the
 // state-sink adapter wired into agentsessions.Manager — every lib-emitted
 // state event (launching → running → done|failed) lands here.

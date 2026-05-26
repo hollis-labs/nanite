@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/chrispian/Tether/pkg/claudestream"
+	"github.com/hollis-labs/tether/pkg/claudestream"
 	agentmux "github.com/hollis-labs/go-tether-client"
 	"github.com/hollis-labs/nanite/internal/muxproxy"
 )

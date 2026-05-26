@@ -4,14 +4,17 @@ import (
 	"context"
 	"errors"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/hollis-labs/nanite/internal/store"
 )
 
 type fakeDurableRuntimeController struct {
-	stopped []string
-	err     error
+	stopped    []string
+	recovered  []string
+	err        error
+	recoverErr error
 }
 
 func (f *fakeDurableRuntimeController) StopSession(_ context.Context, sessionID string) error {
@@ -21,6 +24,11 @@ func (f *fakeDurableRuntimeController) StopSession(_ context.Context, sessionID 
 
 func (f *fakeDurableRuntimeController) RebootSession(context.Context, string) error {
 	return nil
+}
+
+func (f *fakeDurableRuntimeController) RecoverSession(_ context.Context, sessionID string) error {
+	f.recovered = append(f.recovered, sessionID)
+	return f.recoverErr
 }
 
 func (f *fakeDurableRuntimeController) CancelSession(context.Context, string) error {
@@ -291,6 +299,69 @@ func TestDurableAgentResumeNoResumableSession(t *testing.T) {
 	}
 	if !durableAgentEventsContain(events, store.DurableAgentEventResumeFailed) || events[0].Message == "" {
 		t.Fatalf("resume failure event missing: %+v", events)
+	}
+}
+
+// TestDurableAgentResumeArmsRecovery verifies CW-20260525-0001 Slice 5: a
+// durable resume reattaches the latest session AND evicts its runtime via the
+// recovery path so the next turn cold-boots with prior context, rather than
+// just reattaching the row and waiting for a normal cold turn.
+func TestDurableAgentResumeArmsRecovery(t *testing.T) {
+	st := newDurableAgentServiceTestStore(t)
+	profile := &store.AgentProfile{Name: "Resume Recover Agent", Slug: "resume-recover-agent", SystemPrompt: "x"}
+	if err := st.CreateAgent(profile); err != nil {
+		t.Fatalf("CreateAgent: %v", err)
+	}
+	if err := st.CreateWorkspace(&store.Workspace{ID: "workspace-a", Name: "Workspace A"}); err != nil {
+		t.Fatalf("CreateWorkspace: %v", err)
+	}
+	runtime := &fakeDurableRuntimeController{}
+	svc := NewDurableAgentServiceWithRuntime(st, runtime)
+	inst := &store.DurableAgentInstance{
+		Name:             "Resume Recover Instance",
+		Slug:             "resume-recover-instance",
+		ProfileID:        profile.ID,
+		LifecycleClass:   store.DurableAgentClassAdvisor,
+		Provider:         "anthropic",
+		Model:            "model-a",
+		RuntimeKind:      "api",
+		LaunchSourceType: store.DurableAgentLaunchDurableAdvisor,
+	}
+	if err := svc.Create(context.Background(), inst); err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	started, err := svc.Start(context.Background(), inst.ID, DurableAgentStartRequest{WorkspaceID: "workspace-a"})
+	if err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+
+	resumed, err := svc.Resume(context.Background(), inst.ID, DurableAgentStartRequest{})
+	if err != nil {
+		t.Fatalf("Resume: %v", err)
+	}
+	if !resumed.ReusedSession || resumed.Session.ID != started.Session.ID {
+		t.Fatalf("resume should reuse the started session: %+v", resumed)
+	}
+	if len(runtime.recovered) != 1 || runtime.recovered[0] != started.Session.ID {
+		t.Fatalf("runtime recovered = %+v, want [%s]", runtime.recovered, started.Session.ID)
+	}
+
+	events, err := svc.ListEvents(context.Background(), inst.ID, 20)
+	if err != nil {
+		t.Fatalf("ListEvents: %v", err)
+	}
+	var succeeded *store.DurableAgentEvent
+	for i := range events {
+		if events[i].EventType == store.DurableAgentEventResumeSucceeded {
+			succeeded = &events[i]
+			break
+		}
+	}
+	if succeeded == nil {
+		t.Fatalf("resume succeeded event missing: %+v", events)
+	}
+	if !strings.Contains(succeeded.MetadataJSON, `"recovery_armed":"true"`) {
+		t.Fatalf("resume succeeded metadata should record recovery_armed=true, got %q", succeeded.MetadataJSON)
 	}
 }
 

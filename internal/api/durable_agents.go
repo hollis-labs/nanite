@@ -3,6 +3,7 @@ package api
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"strconv"
 
@@ -48,6 +49,10 @@ func (a *API) saveManagedDurableInstance(inst *store.DurableAgentInstance, archi
 	if err != nil {
 		return nil, err
 	}
+	metadata, err := durableMetadataMap(inst.MetadataJSON)
+	if err != nil {
+		return nil, err
+	}
 	cfg := service.ManagedDurableAgentConfig{
 		Name:             inst.Name,
 		Slug:             inst.Slug,
@@ -59,21 +64,25 @@ func (a *API) saveManagedDurableInstance(inst *store.DurableAgentInstance, archi
 		LaunchSourceType: inst.LaunchSourceType,
 		LaunchSourceID:   inst.LaunchSourceID,
 		WorkRoot:         inst.WorkRoot,
-		Metadata:         durableMetadataMap(inst.MetadataJSON),
+		Metadata:         metadata,
 		Archived:         archived,
 	}
 	return service.SaveManagedDurableAgentConfig(a.Services.Store, a.Services.ManagedConfigRoot, cfg)
 }
 
-func durableMetadataMap(raw string) map[string]string {
+// durableMetadataMap parses the persisted metadata_json blob into the
+// {[string]string} shape ManagedDurableAgentConfig expects. Invalid JSON or
+// non-string values surface as an error so callers can return 400 instead of
+// silently discarding operator input.
+func durableMetadataMap(raw string) (map[string]string, error) {
 	if raw == "" {
-		return nil
+		return nil, nil
 	}
 	var out map[string]string
 	if err := json.Unmarshal([]byte(raw), &out); err != nil {
-		return nil
+		return nil, fmt.Errorf("metadata_json must be a JSON object with string values: %w", err)
 	}
-	return out
+	return out, nil
 }
 
 func (a *API) handleListDurableAgents(w http.ResponseWriter, r *http.Request) {

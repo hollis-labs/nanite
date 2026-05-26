@@ -47,6 +47,9 @@ func (s *chatCancelStub) CancelActiveGeneration(sessionID string) bool {
 func (s *chatCancelStub) RebootSessionAgent(context.Context, string) (service.RebootResult, error) {
 	panic("RebootSessionAgent not used in cancel-endpoint tests")
 }
+func (s *chatCancelStub) RecoverSession(context.Context, string) (service.RebootResult, error) {
+	panic("RecoverSession not used in cancel-endpoint tests")
+}
 func (s *chatCancelStub) Shutdown() {}
 
 // TestChatCancelEndpoint_HappyPath verifies that POST

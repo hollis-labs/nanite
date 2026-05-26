@@ -544,6 +544,27 @@ export const api = {
   },
 
   /**
+   * CW-20260525-0001 Slice 2: recover a session. Evicts the live runtime so the
+   * next turn cold-boots into auto-recovery (recovery pack + provider resume),
+   * resuming prior context — distinct from rebootSessionAgent (which boots
+   * fresh). BE: POST /api/sessions/{id}/recover (no body).
+   */
+  recoverSession: async (
+    sessionId: string,
+  ): Promise<"recovered" | "busy" | "error"> => {
+    try {
+      const res = await fetch(`${API_BASE}/sessions/${sessionId}/recover`, {
+        method: "POST",
+      });
+      if (res.ok) return "recovered";
+      if (res.status === 409) return "busy";
+      return "error";
+    } catch {
+      return "error";
+    }
+  },
+
+  /**
    * Phase 9 (CW-20260510-0017 / W2A): cancel an in-flight recovery
    * broker retry. The `token` is the wrap-level `cancel_token` lifted
    * verbatim from the recovery info-card envelope.

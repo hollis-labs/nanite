@@ -23,6 +23,10 @@ type ForkSessionRequest struct {
 	IncludeMessages bool   `json:"include_messages"`
 	Provider        string `json:"provider"`
 	Model           string `json:"model"`
+	// ModeID points the forked session at a specific mode. The GUI sends the
+	// source session's resolved mode on every fork/restart so the fork inherits
+	// it; empty leaves the store's default (copy the source's current_mode_id).
+	ModeID string `json:"mode_id"`
 }
 
 type UpdateSessionRequest struct {

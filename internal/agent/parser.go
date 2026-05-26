@@ -181,11 +181,13 @@ func ParseMDFile(path string) (*Definition, error) {
 	}
 
 	def.SourceRef = path
-	resolveProcedureBodyFiles(def, filepath.Dir(path), os.ReadFile)
+	if err := resolveProcedureBodyFiles(def, filepath.Dir(path), os.ReadFile); err != nil {
+		return nil, fmt.Errorf("agent: parse %s: %w", path, err)
+	}
 	return def, nil
 }
 
-func resolveProcedureBodyFiles(def *Definition, baseDir string, readFile func(string) ([]byte, error)) {
+func resolveProcedureBodyFiles(def *Definition, baseDir string, readFile func(string) ([]byte, error)) error {
 	for i := range def.Procedures {
 		p := &def.Procedures[i]
 		if p.BodyFile == "" {
@@ -194,11 +196,12 @@ func resolveProcedureBodyFiles(def *Definition, baseDir string, readFile func(st
 		bodyPath := filepath.Join(baseDir, p.BodyFile)
 		body, err := readFile(bodyPath)
 		if err != nil {
-			continue
+			return fmt.Errorf("procedure %q body_file %s: %w", p.Name, p.BodyFile, err)
 		}
 		p.Body = string(body)
 		p.BodyFile = ""
 	}
+	return nil
 }
 
 // SlugFromFilename derives a slug from a markdown filename.

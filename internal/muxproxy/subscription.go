@@ -10,7 +10,7 @@ import (
 	"log/slog"
 	"sync"
 
-	"github.com/chrispian/Tether/pkg/claudestream"
+	"github.com/hollis-labs/tether/pkg/claudestream"
 	agentmux "github.com/hollis-labs/go-tether-client"
 )
 
@@ -62,7 +62,7 @@ type Manager struct {
 	mu        sync.RWMutex
 	chanFor   map[string]chan claudestream.Event
 	nickFor   map[string]string
-	chatOwner map[string]string  // subordinate session ID → chat session ID
+	chatOwner map[string]string             // subordinate session ID → chat session ID
 	cancelFor map[string]context.CancelFunc // per-session attach-goroutine cancel
 }
 

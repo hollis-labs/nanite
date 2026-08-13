@@ -960,6 +960,32 @@ func (s *chatServiceImpl) CloseAgentSession(ctx context.Context, sessionID strin
 // route the turn to driveBootSession. Without these guards, a CLI
 // session silently inherits the HTTP fallback (Anthropic) and the API
 // rejects the CLI model id with a 404 (c195 regression).
+
+// tryProviderCandidate checks one candidate provider name during
+// resolveProvider's fallback walk. A registry hit returns (name, provider,
+// true); a registry miss on a CLI-shaped name returns (name, nil, true) so
+// the caller can route to the CLI boot path; any other miss logs warnMsg
+// and returns ("", nil, false) so the caller falls through to the next
+// candidate. requested is the originally-requested provider (for the
+// session or agent step); when the resolved name differs from it, a
+// provider.fallback plugin event is emitted before returning.
+func (s *chatServiceImpl) tryProviderCandidate(sessionID, requested, name, warnMsg string) (string, llmcontracts.Provider, bool) {
+	if p, ok := s.providers.Get(name); ok {
+		if requested != "" && requested != name && s.pluginHost != nil {
+			s.pluginHost.EmitProviderFallback(sessionID, requested, name)
+		}
+		return name, p, true
+	}
+	if chat.IsCLIProvider(name) {
+		if requested != "" && requested != name && s.pluginHost != nil {
+			s.pluginHost.EmitProviderFallback(sessionID, requested, name)
+		}
+		return name, nil, true
+	}
+	slog.Warn(warnMsg, "provider", name)
+	return "", nil, false
+}
+
 func (s *chatServiceImpl) resolveProvider(sessionID, sessionProvider, agentProvider, model string) (string, llmcontracts.Provider) {
 	// Track the first requested provider so we can emit a fallback event
 	// when a later candidate is selected instead.
@@ -984,53 +1010,25 @@ func (s *chatServiceImpl) resolveProvider(sessionID, sessionProvider, agentProvi
 	}
 
 	if agentProvider != "" {
-		if p, ok := s.providers.Get(agentProvider); ok {
-			if requested != "" && requested != agentProvider && s.pluginHost != nil {
-				s.pluginHost.EmitProviderFallback(sessionID, requested, agentProvider)
-			}
-			return agentProvider, p
+		if name, p, ok := s.tryProviderCandidate(sessionID, requested, agentProvider,
+			"chat-service: agent provider not registered, falling through"); ok {
+			return name, p
 		}
-		if chat.IsCLIProvider(agentProvider) {
-			if requested != "" && requested != agentProvider && s.pluginHost != nil {
-				s.pluginHost.EmitProviderFallback(sessionID, requested, agentProvider)
-			}
-			return agentProvider, nil
-		}
-		slog.Warn("chat-service: agent provider not registered, falling through", "provider", agentProvider)
 	}
 
 	if us, err := s.store.GetUserSettings(); err == nil {
 		if us.DefaultProvider != "" {
-			defaultProvider := us.DefaultProvider
-			if p, ok := s.providers.Get(defaultProvider); ok {
-				if requested != "" && requested != defaultProvider && s.pluginHost != nil {
-					s.pluginHost.EmitProviderFallback(sessionID, requested, defaultProvider)
-				}
-				return defaultProvider, p
+			if name, p, ok := s.tryProviderCandidate(sessionID, requested, us.DefaultProvider,
+				"chat-service: user_settings.default_provider not registered, falling through"); ok {
+				return name, p
 			}
-			if chat.IsCLIProvider(defaultProvider) {
-				if requested != "" && requested != defaultProvider && s.pluginHost != nil {
-					s.pluginHost.EmitProviderFallback(sessionID, requested, defaultProvider)
-				}
-				return defaultProvider, nil
-			}
-			slog.Warn("chat-service: user_settings.default_provider not registered, falling through", "provider", defaultProvider)
 		}
 
 		for _, name := range us.ProviderFallbackChain {
-			if p, ok := s.providers.Get(name); ok {
-				if requested != "" && requested != name && s.pluginHost != nil {
-					s.pluginHost.EmitProviderFallback(sessionID, requested, name)
-				}
-				return name, p
+			if resolvedName, p, ok := s.tryProviderCandidate(sessionID, requested, name,
+				"chat-service: fallback-chain provider not registered, skipping"); ok {
+				return resolvedName, p
 			}
-			if chat.IsCLIProvider(name) {
-				if requested != "" && requested != name && s.pluginHost != nil {
-					s.pluginHost.EmitProviderFallback(sessionID, requested, name)
-				}
-				return name, nil
-			}
-			slog.Warn("chat-service: fallback-chain provider not registered, skipping", "provider", name)
 		}
 	}
 

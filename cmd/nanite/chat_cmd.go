@@ -10,7 +10,6 @@ import (
 	"os"
 	"os/signal"
 	"strings"
-	"syscall"
 
 	"github.com/hollis-labs/nanite/internal/chat"
 	"github.com/hollis-labs/nanite/internal/store"
@@ -84,11 +83,16 @@ func cmdChat(args []string) {
 		// Scope signal handling to just this turn: Ctrl-C cancels the
 		// in-flight turn (Python/Node REPL convention), not the process.
 		// Once stop() runs, a Ctrl-C at the idle "> " prompt reverts to the
-		// default OS disposition (process exits).
-		turnCtx, stop := signal.NotifyContext(ctx, os.Interrupt, syscall.SIGTERM)
+		// default OS disposition (process exits). SIGTERM is deliberately
+		// NOT included here — a service manager sending SIGTERM expects the
+		// process to terminate, not have it swallowed as a turn-cancel and
+		// have the REPL keep running.
+		turnCtx, stop := signal.NotifyContext(ctx, os.Interrupt)
 		err := runChatTurn(turnCtx, client, sess.ID, line)
 		stop()
-		if err != nil {
+		if err != nil && !errors.Is(err, errSessionTakeover) {
+			// errSessionTakeover already printed its own distinct message
+			// inside runChatTurn; avoid reporting the same condition twice.
 			fmt.Fprintf(os.Stderr, "chat: %v\n", err)
 		}
 	}

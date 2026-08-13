@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -199,8 +200,19 @@ func TestHarnessClient_StreamEvents_SurfacesScanError(t *testing.T) {
 		// (bufio.MaxScanTokenSize<<9) max buffer, with no terminating
 		// newline, forces its internal bufio.Scanner to fail with
 		// bufio.ErrTooLong once it can no longer grow its token buffer.
+		// Streamed in fixed-size chunks — rather than building one big
+		// string via concatenation — to keep peak test memory low.
+		io.WriteString(w, "data: ")
 		oversize := (bufio.MaxScanTokenSize << 9) + 1024
-		fmt.Fprint(w, "data: "+strings.Repeat("x", oversize))
+		const chunkSize = 64 * 1024
+		chunk := strings.Repeat("x", chunkSize)
+		for written := 0; written < oversize; written += chunkSize {
+			n := chunkSize
+			if remaining := oversize - written; remaining < chunkSize {
+				n = remaining
+			}
+			io.WriteString(w, chunk[:n])
+		}
 		flusher.Flush()
 	})
 	srv := httptest.NewServer(mux)

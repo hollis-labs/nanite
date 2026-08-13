@@ -3,6 +3,7 @@ package main
 import (
 	"bufio"
 	"context"
+	"encoding/json"
 	"flag"
 	"fmt"
 	"os"
@@ -89,7 +90,7 @@ func runChatTurn(ctx context.Context, client *harnessClient, sessionID, content 
 	if err != nil {
 		return err
 	}
-	events, err := client.StreamEvents(ctx, sessionID, turn.MessageID)
+	events, err := client.StreamEvents(ctx, turn.StreamURL)
 	if err != nil {
 		return err
 	}
@@ -110,7 +111,19 @@ func runChatTurn(ctx context.Context, client *harnessClient, sessionID, content 
 			}
 			fmt.Printf("[tool %s] %s\n", status, evt.Summary)
 		case "approval_request":
-			fmt.Printf("\n[approval requested] respond via the GUI, or POST /api/harness/v1/sessions/%s/approvals/{requestId}\n", sessionID)
+			// Data is a JSON payload {request_id, tool, input, reason} —
+			// see internal/service/chat_tool_executor.go's approvalData.
+			var payload struct {
+				RequestID string `json:"request_id"`
+				Tool      string `json:"tool"`
+				Reason    string `json:"reason"`
+			}
+			if jsonErr := json.Unmarshal([]byte(evt.Data), &payload); jsonErr != nil || payload.RequestID == "" {
+				fmt.Println("\n[approval requested] respond via the GUI — could not parse the request id from the event payload")
+				continue
+			}
+			fmt.Printf("\n[approval requested] tool=%s reason=%q — respond via the GUI, or POST /api/harness/v1/sessions/%s/approvals/%s\n",
+				payload.Tool, payload.Reason, sessionID, payload.RequestID)
 		case "plugin_envelope":
 			fmt.Printf("\n[envelope: %s]\n", evt.PluginID)
 		case "error":

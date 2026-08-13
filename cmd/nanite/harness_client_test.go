@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -142,7 +143,7 @@ func TestHarnessClient_SendTurnAndStreamEvents(t *testing.T) {
 		t.Fatalf("unexpected message id: %q", turn.MessageID)
 	}
 
-	events, err := client.StreamEvents(ctx, "sess-1", turn.MessageID)
+	events, err := client.StreamEvents(ctx, turn.StreamURL)
 	if err != nil {
 		t.Fatalf("StreamEvents: %v", err)
 	}
@@ -175,6 +176,53 @@ done:
 		if got[i] != want[i] {
 			t.Fatalf("event[%d] = %q, want %q", i, got[i], want[i])
 		}
+	}
+}
+
+// TestHarnessClient_StreamEvents_SurfacesScanError pins a Copilot PR#221
+// review finding: a scan failure (network read error, or here
+// bufio.ErrTooLong from a token exceeding the scanner's max buffer)
+// otherwise terminated the parsing goroutine silently — the channel just
+// closed with no hint why. It must now surface as a synthetic "error"
+// stream event instead.
+func TestHarnessClient_StreamEvents_SurfacesScanError(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("GET /events", func(w http.ResponseWriter, r *http.Request) {
+		flusher, ok := w.(http.Flusher)
+		if !ok {
+			t.Fatal("test server response writer does not support flushing")
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.WriteHeader(http.StatusOK)
+		// A single line far longer than the scanner's 1MB max buffer with
+		// no terminating newline forces bufio.Scanner to fail with
+		// bufio.ErrTooLong once it can no longer grow its token buffer.
+		fmt.Fprint(w, "data: "+strings.Repeat("x", 2*1024*1024))
+		flusher.Flush()
+	})
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+
+	client := newHarnessClient(srv.URL)
+	events, err := client.StreamEvents(context.Background(), "/events")
+	if err != nil {
+		t.Fatalf("StreamEvents: %v", err)
+	}
+
+	deadline := time.After(5 * time.Second)
+	select {
+	case evt, ok := <-events:
+		if !ok {
+			t.Fatal("channel closed with no error event; scanner.Err() was silently dropped")
+		}
+		if evt.Type != "error" {
+			t.Fatalf("got event type %q, want %q", evt.Type, "error")
+		}
+		if evt.Error == "" {
+			t.Fatal("error event has an empty Error field")
+		}
+	case <-deadline:
+		t.Fatal("timed out waiting for the error event")
 	}
 }
 

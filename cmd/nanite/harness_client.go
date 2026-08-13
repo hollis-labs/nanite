@@ -163,12 +163,18 @@ func (c *harnessClient) Cancel(ctx context.Context, sessionID string) (*harnessC
 	return &resp, nil
 }
 
-// StreamEvents opens the SSE stream for one turn (message_id) and parses
-// events onto the returned channel, closing it when the stream ends (a
-// stream_end event, server EOF, or ctx cancellation). The caller must drain
-// the channel to avoid leaking the underlying goroutine/response body.
-func (c *harnessClient) StreamEvents(ctx context.Context, sessionID, messageID string) (<-chan chat.StreamEvent, error) {
-	path := fmt.Sprintf("/api/harness/v1/sessions/%s/events?message_id=%s", sessionID, messageID)
+// StreamEvents opens the SSE stream at path — the harness-v1 turn
+// response's stream_url (e.g. "/api/harness/v1/sessions/{id}/events?
+// message_id={id}") — and parses events onto the returned channel, closing
+// it when the stream ends (a stream_end event, server EOF/error, or ctx
+// cancellation). The caller must drain the channel to avoid leaking the
+// underlying goroutine/response body.
+//
+// Takes the server-provided path rather than reconstructing it from
+// sessionID/messageID: harness-v1 owns its own route shape, and a client
+// that re-derives the URL duplicates that routing knowledge and breaks
+// silently if the server ever changes it.
+func (c *harnessClient) StreamEvents(ctx context.Context, path string) (<-chan chat.StreamEvent, error) {
 	req, err := c.newRequest(ctx, http.MethodGet, path, nil)
 	if err != nil {
 		return nil, err
@@ -227,6 +233,18 @@ func (c *harnessClient) StreamEvents(ctx context.Context, sessionID, messageID s
 			if ctx.Err() != nil {
 				return
 			}
+		}
+		if scanErr := scanner.Err(); scanErr != nil {
+			// A network read failure or bufio.ErrTooLong (a line exceeded
+			// the scanner's max buffer) otherwise terminates this goroutine
+			// silently — the channel just closes with no hint why. Surface
+			// it as a synthetic error event so the caller can diagnose it
+			// instead of seeing an unexplained stream end.
+			select {
+			case out <- chat.StreamEvent{Type: "error", Error: fmt.Sprintf("event stream read failed: %v", scanErr)}:
+			case <-ctx.Done():
+			}
+			return
 		}
 		flush()
 	}()

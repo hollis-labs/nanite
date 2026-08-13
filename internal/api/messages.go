@@ -197,15 +197,35 @@ func (a *API) streamMessageEvents(w http.ResponseWriter, r *http.Request, messag
 	// streamClosed just tells us the generation finished before we connected;
 	// behavior is identical either way — the channel carries replay events
 	// (if any) and then EOFs. The for/select below handles both paths.
+	//
+	// Ownership check prefers the in-memory Streams registry over the
+	// Message store row: StreamManager.CreateStream registers msgToSession
+	// synchronously inside ChatService.HandleMessage, before it returns the
+	// message_id — but the assistant Message row itself is only persisted
+	// later, inside the async generateResponse goroutine. A caller that
+	// opens the events stream immediately after a turn response (the
+	// harness-v1 turn+events flow any non-browser client is expected to
+	// use) can therefore race the DB write and see a false "message not
+	// found" 404 even though the stream already exists and belongs to the
+	// caller's session. Falling back to the Message store only when the
+	// stream is no longer tracked in memory (evicted after completion)
+	// preserves the original behavior for late/reconnect lookups.
 	if expectedSessionID != "" {
-		msg, err := a.Services.Store.GetMessage(messageID)
-		if err != nil {
-			a.errorResp(w, http.StatusNotFound, "message not found")
-			return
-		}
-		if msg.SessionID != expectedSessionID {
-			a.errorResp(w, http.StatusNotFound, "message not found for session")
-			return
+		if sid, ok := a.Services.Streams.GetSessionForMessage(messageID); ok {
+			if sid != expectedSessionID {
+				a.errorResp(w, http.StatusNotFound, "message not found for session")
+				return
+			}
+		} else {
+			msg, err := a.Services.Store.GetMessage(messageID)
+			if err != nil {
+				a.errorResp(w, http.StatusNotFound, "message not found")
+				return
+			}
+			if msg.SessionID != expectedSessionID {
+				a.errorResp(w, http.StatusNotFound, "message not found for session")
+				return
+			}
 		}
 	}
 	ch, _, ok := a.Services.Streams.Subscribe(messageID, fromEventID)

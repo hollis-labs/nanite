@@ -38,6 +38,7 @@ func cmdChat(args []string) {
 	agentID := fs.String("agent", "", "agent_id for a new session")
 	sessionID := fs.String("session", "", "resume an existing session id instead of creating a new one")
 	title := fs.String("title", "", "title for a new session")
+	noAutostart := fs.Bool("no-autostart", false, "fail fast instead of auto-starting `nanite serve` if it isn't already running")
 	fs.Parse(args)
 
 	if *sessionID == "" && *workspace == "" {
@@ -45,8 +46,18 @@ func cmdChat(args []string) {
 		os.Exit(1)
 	}
 
-	client := newHarnessClient(*url)
 	ctx := context.Background()
+
+	resolvedURL := *url
+	if resolvedURL == "" {
+		resolvedURL = apiBaseURL()
+	}
+	if err := ensureServeRunning(ctx, resolvedURL, *noAutostart); err != nil {
+		fmt.Fprintf(os.Stderr, "chat: %v\n", err)
+		os.Exit(1)
+	}
+
+	client := newHarnessClient(*url)
 
 	sess, err := resolveChatSession(ctx, client, *sessionID, harnessCreateSessionRequest{
 		WorkspaceID: *workspace,

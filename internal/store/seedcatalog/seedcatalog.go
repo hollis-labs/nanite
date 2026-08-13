@@ -41,7 +41,14 @@ package seedcatalog
 // into providers.default_model for the Anthropic provider on first install
 // (and any future install where the column is empty). It is NOT consulted
 // by the chat-engine resolution chain at request time — see package doc.
-const DefaultChatModelID = "claude-sonnet-4-20250514"
+//
+// claude-sonnet-4-20250514 was retired by Anthropic sometime after
+// 2026-04-11 (confirmed current then per
+// docs/audits/2026-04-11-tokens-and-model-hardcoding/06-medium-seed-data-staleness.md)
+// and was returning a live 404 not_found_error as of 2026-08-13. Must stay
+// equal to the "claude-sonnet" row's ModelID in pkg/models/registry.go —
+// internal/store/seed.go looks this value up via models.ByModelID.
+const DefaultChatModelID = "claude-sonnet-4-5-20250929"
 
 // DefaultProviderType is the seeded provider_type used when no other
 // signal selects one. Used by:

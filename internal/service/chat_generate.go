@@ -1084,7 +1084,7 @@ func (s *chatServiceImpl) generateResponse(ctx context.Context, sessionID, assis
 		// provider.StreamChat per turn with the slot pipeline running as
 		// today.
 		if chat.IsCLIProvider(providerName) {
-			provCh, err = s.driveBootSession(provCtx, sessionID, session, agent, mode, slotResult, userContent, ls.iteration)
+			provCh, err = s.driveBootSession(provCtx, sessionID, session, agent, mode, slotResult, userContent, ls.iteration, providerName)
 		} else {
 			provCh, err = prov.StreamChat(provCtx, llmtypes.ChatRequest{
 				SystemPrompt: extraSystemPrefix,

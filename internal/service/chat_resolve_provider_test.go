@@ -32,6 +32,22 @@ package service
 // Without these guards, c195's failure mode (Anthropic 404 on
 // `model: claude-cli`) re-emerges the moment someone picks the Claude
 // CLI dropdown row, OR sets up a `["pty"]` fallback chain.
+//
+// CW-20260812-0001 investigation added two more pins after finding a
+// live production bug: user_settings.default_provider was never
+// consulted at all, so a session with no explicit provider fell straight
+// to ProviderFallbackChain — and a stale `["pty"]` entry left over from
+// before this app's API-first default won over a correctly-configured
+// default_provider="anthropic", silently routing ordinary API sessions
+// into a CLI boot attempt that crashed downstream with `bootdir for
+// provider ""`.
+//
+//  6. default_provider="anthropic", ProviderFallbackChain=["pty"] →
+//     ("anthropic", <non-nil>) — default_provider must win over a stale
+//     fallback-chain CLI alias, not the other way around.
+//  7. default_provider="pty" (itself CLI-shaped) → ("pty", nil) — the
+//     new step gets the same CLI short-circuit treatment as every other
+//     step in the chain.
 
 import (
 	"bytes"
@@ -133,6 +149,71 @@ func TestResolveProvider_FallbackChainCLI_ShortCircuits(t *testing.T) {
 	}
 }
 
+// TestResolveProvider_DefaultProviderWinsOverStaleFallbackChain pins the
+// live production bug found during the CW-20260812-0001 investigation:
+// user_settings.default_provider="anthropic" alongside a stale
+// user_settings.provider_fallback_chain=["pty"] must resolve to the
+// registered "anthropic" provider, not short-circuit on the fallback
+// chain's CLI alias. Reproduces the exact settings shape found on the
+// live instance (default_provider correctly configured, fallback_chain
+// left over from before this app's API-first default).
+func TestResolveProvider_DefaultProviderWinsOverStaleFallbackChain(t *testing.T) {
+	st := mustNewStoreForResolveTest(t)
+	us, err := st.GetUserSettings()
+	if err != nil {
+		t.Fatalf("GetUserSettings: %v", err)
+	}
+	us.DefaultProvider = "anthropic"
+	us.ProviderFallbackChain = []string{"pty"}
+	if err := st.UpdateUserSettings(us); err != nil {
+		t.Fatalf("UpdateUserSettings: %v", err)
+	}
+
+	s := &chatServiceImpl{
+		providers: newRegistryWithAnthropicStub(),
+		store:     st,
+	}
+
+	name, prov := s.resolveProvider("sess-1", "", "", "claude-sonnet-4-5-20250929")
+	if name != "anthropic" {
+		t.Fatalf("resolveProvider returned name=%q, want %q (default_provider must win over stale fallback-chain CLI alias)", name, "anthropic")
+	}
+	if prov == nil {
+		t.Fatalf("resolveProvider returned nil prov for a registered default_provider — must be non-nil")
+	}
+}
+
+// TestResolveProvider_DefaultProviderCLI_ShortCircuits confirms the new
+// default_provider step gets the same CLI short-circuit treatment as
+// every other step in the chain: if an operator deliberately sets
+// default_provider to a CLI alias, resolveProvider must return (name,
+// nil) so classifyNilProvider can route to driveBootSession, not fall
+// through to a registered HTTP provider.
+func TestResolveProvider_DefaultProviderCLI_ShortCircuits(t *testing.T) {
+	st := mustNewStoreForResolveTest(t)
+	us, err := st.GetUserSettings()
+	if err != nil {
+		t.Fatalf("GetUserSettings: %v", err)
+	}
+	us.DefaultProvider = "pty"
+	if err := st.UpdateUserSettings(us); err != nil {
+		t.Fatalf("UpdateUserSettings: %v", err)
+	}
+
+	s := &chatServiceImpl{
+		providers: newRegistryWithAnthropicStub(),
+		store:     st,
+	}
+
+	name, prov := s.resolveProvider("sess-1", "", "", "claude-sonnet-4-5-20250929")
+	if name != "pty" {
+		t.Fatalf("resolveProvider returned name=%q, want %q (CLI-shaped default_provider must short-circuit before anthropic stub)", name, "pty")
+	}
+	if prov != nil {
+		t.Fatalf("resolveProvider returned non-nil prov for CLI default_provider; must be nil")
+	}
+}
+
 func TestResolveProvider_InferredCLI_ShortCircuits(t *testing.T) {
 	// model="claude-cli" → InferProvider returns "pty". Registry has
 	// an "anthropic" provider but no "pty". Defense-in-depth: even if
@@ -191,6 +272,35 @@ func TestResolveProvider_FallbackChainNonCLIMiss_Warns(t *testing.T) {
 	}
 	if !strings.Contains(out, "openai") {
 		t.Fatalf("expected the missing provider name in the Warn, got: %s", out)
+	}
+}
+
+// TestResolveProvider_NothingConfigured_NoSilentDefault pins the removal
+// of resolveProvider's old unconditional "if all else fails, try
+// anthropic" catch-all (CW-20260812-0001, per an explicit product
+// decision: an unconfigured installation must error, not silently
+// default). With no session/agent/user_settings provider set anywhere,
+// and no provider registered at all (not even anthropic), resolveProvider
+// must return a nil Provider so the caller surfaces a configuration
+// error — it must NOT probe the registry for a hardcoded "anthropic" as
+// a last resort independent of what InferProvider actually derived.
+func TestResolveProvider_NothingConfigured_NoSilentDefault(t *testing.T) {
+	s := &chatServiceImpl{
+		providers: provider.NewRegistry(), // nothing registered, not even anthropic
+		store:     mustNewStoreForResolveTest(t),
+	}
+
+	name, prov := s.resolveProvider("sess-1", "", "", "claude-sonnet-4-5-20250929")
+	if prov != nil {
+		t.Fatalf("resolveProvider returned non-nil prov with an empty registry; must be nil so the caller errors")
+	}
+	if name != "anthropic" {
+		// InferProvider's own model-name routing floor is a separate,
+		// legitimate concern (see internal/chat/engine.go InferProvider
+		// doc) — resolveProvider still surfaces whatever InferProvider
+		// derived so callers can log/report it, it just must not turn an
+		// unregistered "anthropic" into a usable Provider.
+		t.Fatalf("resolveProvider returned name=%q, want %q (InferProvider's own routing floor)", name, "anthropic")
 	}
 }
 

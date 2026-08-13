@@ -123,8 +123,14 @@ var ProviderDefaults = map[string]ProviderCapabilityDefaults{
 var allModels = []Model{
 	// --- Anthropic ---
 	{
-		ID: "claude-sonnet", ModelID: "claude-sonnet-4-20250514",
-		DisplayName: "Claude Sonnet 4", Provider: "anthropic",
+		// claude-sonnet-4-20250514 was retired by Anthropic sometime after
+		// 2026-04-11 (see docs/audits/2026-04-11-tokens-and-model-hardcoding/
+		// 06-medium-seed-data-staleness.md, which spot-checked it as current
+		// at that date) — confirmed 2026-08-13 via a live 404 not_found_error
+		// from the Messages API. claude-sonnet-4-5-20250929 confirmed working
+		// end-to-end through this app against a real Anthropic key the same day.
+		ID: "claude-sonnet", ModelID: "claude-sonnet-4-5-20250929",
+		DisplayName: "Claude Sonnet 4.5", Provider: "anthropic",
 		ContextWindow: 200000, MaxOutput: 16000,
 		InputPricePerM: 3.0, OutputPricePerM: 15.0,
 		Capabilities: Capabilities{
@@ -220,6 +226,12 @@ var allModels = []Model{
 	// deleted in commit 376390c.
 
 	// --- Legacy pricing rows (not seeded; used for historical token_usage) ---
+	// claude-sonnet-4-20250514: retired by Anthropic after 2026-04-11 (see
+	// the "claude-sonnet" row above); kept here so cost estimation for
+	// pre-retirement token_usage rows referencing this exact model_id
+	// doesn't silently zero out.
+	{ModelID: "claude-sonnet-4-20250514", Provider: "anthropic",
+		InputPricePerM: 3.0, OutputPricePerM: 15.0, IsLegacy: true},
 	{ModelID: "claude-haiku-3-20250307", Provider: "anthropic",
 		InputPricePerM: 0.25, OutputPricePerM: 1.25, IsLegacy: true},
 	{ModelID: "claude-3-5-sonnet-20241022", Provider: "anthropic",

@@ -56,7 +56,7 @@ func (s *Store) Seed() error {
 		return fmt.Errorf("insert provider: %w", err)
 	}
 
-	// --- Model: Claude Sonnet 4 (default) ---
+	// --- Model: Claude Sonnet 4.5 (default) ---
 	// Pulled from the canonical registry so seed data can never drift from
 	// the pricing/capabilities map consumed by usage.go, cost_monitor, etc.
 	if def, ok := models.ByModelID(seedcatalog.DefaultChatModelID); ok {

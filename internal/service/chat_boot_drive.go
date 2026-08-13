@@ -79,6 +79,7 @@ func (s *chatServiceImpl) driveBootSession(
 	slotResult *SlotAssemblyResult,
 	userContent string,
 	iteration int,
+	providerName string,
 ) (<-chan llmtypes.StreamEvent, error) {
 	if s.agentDeps == nil || s.agentEventBridge == nil {
 		return nil, errors.New("driveBootSession: agent runtime not wired (AgentDeps / AgentEventBridge nil)")
@@ -129,7 +130,7 @@ func (s *chatServiceImpl) driveBootSession(
 			Workdir:      workdir,
 			Role:         role,
 		}
-		applyLegacyCLIProviderToBootOpts(&bootOpts, session)
+		applyLegacyCLIProviderToBootOpts(&bootOpts, providerName)
 		// CW-20260514-0048 / S5 Phase F: when this session is backed by a
 		// compiled boot-profile LaunchSpec (provider was a
 		// "bootprofile:<id>" id that chat_generate.go decoded + stashed),
@@ -545,23 +546,32 @@ func bootSessionWorkdir(session *store.Session) string {
 	return ""
 }
 
-// applyLegacyCLIProviderToBootOpts threads a legacy CLI alias from
-// session.Provider ("pty" / "pty-claude" / "sub-claude" / etc.) into
-// bootOpts.Provider so agent.Boot's effectiveProvider has a non-empty
-// adapter name to dispatch on. CW-20260515-0005: without this, legacy
-// CLI sessions (the bare "Claude CLI" dropdown row, no bootprofile)
-// reached agent.Boot with bootOpts.Provider="" AND the file-default
-// agent profile's DefaultProvider="" → bootdirLayoutFor("") returned
-// unsupportedLayout → boot crashed with `bootdir for provider ""`
-// (c203 reproducer; identical surface to c195/c197).
+// applyLegacyCLIProviderToBootOpts threads a resolved CLI alias
+// ("pty" / "pty-claude" / "sub-claude" / etc.) into bootOpts.Provider so
+// agent.Boot's effectiveProvider has a non-empty adapter name to dispatch
+// on. CW-20260515-0005: without this, legacy CLI sessions (the bare
+// "Claude CLI" dropdown row, no bootprofile) reached agent.Boot with
+// bootOpts.Provider="" AND the file-default agent profile's
+// DefaultProvider="" → bootdirLayoutFor("") returned unsupportedLayout →
+// boot crashed with `bootdir for provider ""` (c203 reproducer; identical
+// surface to c195/c197).
+//
+// Takes the ALREADY-RESOLVED provider name from resolveProvider's return
+// value (chat.go), not the raw session.Provider column. CW-20260812-0001
+// investigation: the two can diverge whenever resolution falls through
+// past an empty session.Provider to a CLI-shaped candidate elsewhere in
+// the chain (a stale user_settings.ProviderFallbackChain entry, for
+// instance) — using the raw column here reproduced the exact
+// c195/c197/c203 crash class for that case, because the caller had
+// already decided "boot CLI" based on the resolved name while this
+// helper independently re-derived from a column that was still empty.
 //
 // chat.IsCLIProvider gates the assignment so bootprofile-shaped
-// session providers ("bootprofile:<id>") and HTTP shapes pass
-// through untouched — applyLaunchSpecToBootOpts stays the source of
-// truth for bootprofile sessions, and a session with a real HTTP
-// provider should never have reached driveBootSession in the first
-// place (the chat-resolve layer routes those through the
-// llmcontracts.Provider path).
+// names ("bootprofile:<id>") and HTTP shapes pass through untouched —
+// applyLaunchSpecToBootOpts stays the source of truth for bootprofile
+// sessions, and a resolved HTTP provider should never have reached
+// driveBootSession in the first place (the chat-resolve layer routes
+// those through the llmcontracts.Provider path).
 //
 // chat.NormalizeCLIProvider applies the canonical alias table:
 // "pty" → "claude", "pty-claude" → "claude", "sub-codex" → "codex",
@@ -569,20 +579,15 @@ func bootSessionWorkdir(session *store.Session) string {
 // normalizeProviderName (for the package-cycle reason documented
 // there); this caller routes through chat as the canonical source.
 //
-// Defensive on nil session and nil bootOpts: both no-op. The caller
-// (driveBootSession) passes session through without a pre-validating
-// nil guard — matching the surrounding pattern of bootSessionWorkdir
-// and applyLaunchSpecToBootOpts, where each helper owns its own nil
-// handling. Keeping the guards local also makes the helper safe to
-// test in isolation without setup boilerplate.
-func applyLegacyCLIProviderToBootOpts(bootOpts *runtimeagent.Options, session *store.Session) {
-	if bootOpts == nil || session == nil {
+// Defensive on nil bootOpts: no-op.
+func applyLegacyCLIProviderToBootOpts(bootOpts *runtimeagent.Options, providerName string) {
+	if bootOpts == nil {
 		return
 	}
-	if !chat.IsCLIProvider(session.Provider) {
+	if !chat.IsCLIProvider(providerName) {
 		return
 	}
-	bootOpts.Provider = chat.NormalizeCLIProvider(session.Provider)
+	bootOpts.Provider = chat.NormalizeCLIProvider(providerName)
 }
 
 // applyLaunchSpecToBootOpts overlays a compiled bootprofile.LaunchSpec

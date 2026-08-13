@@ -183,11 +183,11 @@ func (s *chatServiceImpl) preCheckTools(
 			case permission.DecisionAsk:
 				// Emit approval request and block until user responds.
 				req := s.permissions.RequestApproval(sessionID, tu.Name, tu.Input, permResult.Reason)
-				approvalData, _ := json.Marshal(map[string]any{
-					"request_id": req.ID,
-					"tool":       tu.Name,
-					"input":      tu.Input,
-					"reason":     permResult.Reason,
+				approvalData, _ := json.Marshal(chat.ApprovalRequestPayload{
+					RequestID: req.ID,
+					Tool:      tu.Name,
+					Input:     tu.Input,
+					Reason:    permResult.Reason,
 				})
 				ch <- chat.StreamEvent{Type: "approval_request", Data: string(approvalData)}
 

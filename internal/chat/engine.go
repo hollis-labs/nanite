@@ -81,6 +81,14 @@ type ToolWarningPayload struct {
 	Level             string `json:"level"` // "warning" or "critical"
 }
 
+// ApprovalRequestPayload is the JSON payload for approval_request SSE events.
+type ApprovalRequestPayload struct {
+	RequestID string         `json:"request_id"`
+	Tool      string         `json:"tool"`
+	Input     map[string]any `json:"input,omitempty"`
+	Reason    string         `json:"reason"`
+}
+
 // Delta phase constants for StreamEvent.Phase (F4 / CW-20260419-0029).
 //
 // Narration is inter-iteration prose the LLM emits while calling tools

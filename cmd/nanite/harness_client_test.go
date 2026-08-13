@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bufio"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -181,7 +182,7 @@ done:
 
 // TestHarnessClient_StreamEvents_SurfacesScanError pins a Copilot PR#221
 // review finding: a scan failure (network read error, or here
-// bufio.ErrTooLong from a token exceeding the scanner's max buffer)
+// bufio.ErrTooLong from a token exceeding the decoder's max buffer)
 // otherwise terminated the parsing goroutine silently — the channel just
 // closed with no hint why. It must now surface as a synthetic "error"
 // stream event instead.
@@ -194,10 +195,12 @@ func TestHarnessClient_StreamEvents_SurfacesScanError(t *testing.T) {
 		}
 		w.Header().Set("Content-Type", "text/event-stream")
 		w.WriteHeader(http.StatusOK)
-		// A single line far longer than the scanner's 1MB max buffer with
-		// no terminating newline forces bufio.Scanner to fail with
+		// A single line longer than ssestream.Decoder's ~32MB
+		// (bufio.MaxScanTokenSize<<9) max buffer, with no terminating
+		// newline, forces its internal bufio.Scanner to fail with
 		// bufio.ErrTooLong once it can no longer grow its token buffer.
-		fmt.Fprint(w, "data: "+strings.Repeat("x", 2*1024*1024))
+		oversize := (bufio.MaxScanTokenSize << 9) + 1024
+		fmt.Fprint(w, "data: "+strings.Repeat("x", oversize))
 		flusher.Flush()
 	})
 	srv := httptest.NewServer(mux)
@@ -223,6 +226,57 @@ func TestHarnessClient_StreamEvents_SurfacesScanError(t *testing.T) {
 		}
 	case <-deadline:
 		t.Fatal("timed out waiting for the error event")
+	}
+}
+
+// TestHarnessClient_StreamEvents_SurfacesMalformedEvent pins CW-20260813-0004
+// item 2: a json.Unmarshal failure on a data: payload must surface as a
+// synthetic "error" stream event — mirroring how a decoder read failure
+// already surfaces — rather than being silently dropped. The stream must
+// keep going afterward so a single malformed frame doesn't kill the turn.
+func TestHarnessClient_StreamEvents_SurfacesMalformedEvent(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("GET /events", func(w http.ResponseWriter, r *http.Request) {
+		flusher, ok := w.(http.Flusher)
+		if !ok {
+			t.Fatal("test server response writer does not support flushing")
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.WriteHeader(http.StatusOK)
+		fmt.Fprint(w, "data: not valid json\n\n")
+		fmt.Fprint(w, `data: {"type":"delta","content":"still here"}`+"\n\n")
+		flusher.Flush()
+	})
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+
+	client := newHarnessClient(srv.URL)
+	events, err := client.StreamEvents(context.Background(), "/events")
+	if err != nil {
+		t.Fatalf("StreamEvents: %v", err)
+	}
+
+	deadline := time.After(5 * time.Second)
+	var got []string
+	for len(got) < 2 {
+		select {
+		case evt, ok := <-events:
+			if !ok {
+				t.Fatalf("channel closed early after %v events", got)
+			}
+			got = append(got, evt.Type)
+			if evt.Type == "error" && evt.Error == "" {
+				t.Fatal("error event has an empty Error field")
+			}
+		case <-deadline:
+			t.Fatalf("timed out waiting for events, got %v so far", got)
+		}
+	}
+	want := []string{"error", "delta"}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("event[%d] = %q, want %q (got %v)", i, got[i], want[i], got)
+		}
 	}
 }
 

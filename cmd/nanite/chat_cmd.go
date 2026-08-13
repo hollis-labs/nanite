@@ -4,13 +4,22 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"os"
+	"os/signal"
 	"strings"
+	"syscall"
 
+	"github.com/hollis-labs/nanite/internal/chat"
 	"github.com/hollis-labs/nanite/internal/store"
 )
+
+// errSessionTakeover is the sentinel error runChatTurn returns when a
+// session_takeover event cuts a turn short — the caller must not treat this
+// the same as a normal completion.
+var errSessionTakeover = errors.New("session taken over by another client")
 
 // cmdChat is the entry point for `nanite chat` — a CLI client of Nanite's
 // own harness, driven over the existing GUI-agnostic /api/harness/v1
@@ -57,7 +66,11 @@ func cmdChat(args []string) {
 	for {
 		fmt.Print("> ")
 		if !scanner.Scan() {
-			fmt.Println()
+			if scanErr := scanner.Err(); scanErr != nil {
+				fmt.Fprintf(os.Stderr, "input error: %v\n", scanErr)
+			} else {
+				fmt.Println()
+			}
 			return
 		}
 		line := strings.TrimSpace(scanner.Text())
@@ -67,7 +80,15 @@ func cmdChat(args []string) {
 		if line == "/quit" || line == "/exit" {
 			return
 		}
-		if err := runChatTurn(ctx, client, sess.ID, line); err != nil {
+
+		// Scope signal handling to just this turn: Ctrl-C cancels the
+		// in-flight turn (Python/Node REPL convention), not the process.
+		// Once stop() runs, a Ctrl-C at the idle "> " prompt reverts to the
+		// default OS disposition (process exits).
+		turnCtx, stop := signal.NotifyContext(ctx, os.Interrupt, syscall.SIGTERM)
+		err := runChatTurn(turnCtx, client, sess.ID, line)
+		stop()
+		if err != nil {
 			fmt.Fprintf(os.Stderr, "chat: %v\n", err)
 		}
 	}
@@ -94,43 +115,55 @@ func runChatTurn(ctx context.Context, client *harnessClient, sessionID, content 
 	if err != nil {
 		return err
 	}
-	for evt := range events {
-		switch evt.Type {
-		case "delta":
-			fmt.Print(evt.Content)
-		case "tool_call":
-			label := evt.Tool
-			if evt.Detail != "" {
-				label += ": " + evt.Detail
+	for {
+		select {
+		case <-ctx.Done():
+			// The turn-scoped ctx (see cmdChat) was cancelled — a Ctrl-C
+			// during this turn. Tell the server to stop generating, then
+			// return; StreamEvents' own goroutine notices the same ctx and
+			// exits on its own, so no explicit drain is needed here.
+			if _, cancelErr := client.Cancel(context.Background(), sessionID); cancelErr != nil {
+				fmt.Fprintf(os.Stderr, "chat: cancel failed: %v\n", cancelErr)
 			}
-			fmt.Printf("\n[tool] %s\n", label)
-		case "tool_result":
-			status := "ok"
-			if evt.IsError {
-				status = "error"
+			fmt.Print("\nturn cancelled\n")
+			return nil
+		case evt, ok := <-events:
+			if !ok {
+				return nil
 			}
-			fmt.Printf("[tool %s] %s\n", status, evt.Summary)
-		case "approval_request":
-			// Data is a JSON payload {request_id, tool, input, reason} —
-			// see internal/service/chat_tool_executor.go's approvalData.
-			var payload struct {
-				RequestID string `json:"request_id"`
-				Tool      string `json:"tool"`
-				Reason    string `json:"reason"`
+			switch evt.Type {
+			case "delta":
+				fmt.Print(evt.Content)
+			case "tool_call":
+				label := evt.Tool
+				if evt.Detail != "" {
+					label += ": " + evt.Detail
+				}
+				fmt.Printf("\n[tool] %s\n", label)
+			case "tool_result":
+				status := "ok"
+				if evt.IsError {
+					status = "error"
+				}
+				fmt.Printf("[tool %s] %s\n", status, evt.Summary)
+			case "approval_request":
+				var payload chat.ApprovalRequestPayload
+				if jsonErr := json.Unmarshal([]byte(evt.Data), &payload); jsonErr != nil || payload.RequestID == "" {
+					fmt.Println("\n[approval requested] respond via the GUI — could not parse the request id from the event payload")
+					continue
+				}
+				fmt.Printf("\n[approval requested] tool=%s reason=%q — respond via the GUI, or POST /api/harness/v1/sessions/%s/approvals/%s\n",
+					payload.Tool, payload.Reason, sessionID, payload.RequestID)
+			case "plugin_envelope":
+				fmt.Printf("\n[envelope: %s]\n", evt.PluginID)
+			case "session_takeover":
+				fmt.Print("\n[session taken over by another client — this turn was interrupted]\n")
+				return errSessionTakeover
+			case "error":
+				fmt.Printf("\n[error] %s\n", evt.Error)
+			case "stream_end":
+				fmt.Println()
 			}
-			if jsonErr := json.Unmarshal([]byte(evt.Data), &payload); jsonErr != nil || payload.RequestID == "" {
-				fmt.Println("\n[approval requested] respond via the GUI — could not parse the request id from the event payload")
-				continue
-			}
-			fmt.Printf("\n[approval requested] tool=%s reason=%q — respond via the GUI, or POST /api/harness/v1/sessions/%s/approvals/%s\n",
-				payload.Tool, payload.Reason, sessionID, payload.RequestID)
-		case "plugin_envelope":
-			fmt.Printf("\n[envelope: %s]\n", evt.PluginID)
-		case "error":
-			fmt.Printf("\n[error] %s\n", evt.Error)
-		case "stream_end":
-			fmt.Println()
 		}
 	}
-	return nil
 }

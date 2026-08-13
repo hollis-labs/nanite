@@ -1,7 +1,6 @@
 package main
 
 import (
-	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
@@ -12,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/anthropics/anthropic-sdk-go/packages/ssestream"
 	"github.com/hollis-labs/nanite/internal/brand"
 	"github.com/hollis-labs/nanite/internal/chat"
 	"github.com/hollis-labs/nanite/internal/store"
@@ -194,59 +194,59 @@ func (c *harnessClient) StreamEvents(ctx context.Context, path string) (<-chan c
 	out := make(chan chat.StreamEvent, 16)
 	go func() {
 		defer close(out)
-		defer resp.Body.Close()
 
-		scanner := bufio.NewScanner(resp.Body)
-		scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
-		var dataLines []string
-		flush := func() bool {
-			if len(dataLines) == 0 {
-				return true
-			}
-			payload := strings.Join(dataLines, "\n")
-			dataLines = nil
-			var evt chat.StreamEvent
-			if err := json.Unmarshal([]byte(payload), &evt); err != nil {
-				return true
-			}
+		// ssestream.Decoder is generic SSE-framing code (event:/data:/id:
+		// line handling, 32MB max line vs. the old hand-rolled 1MB cap) with
+		// no Anthropic-payload assumptions — this client still relies solely
+		// on the "type" field embedded in each data: JSON payload, exactly
+		// as before. Decoder.Close() closes resp.Body, so no separate defer
+		// is needed for that.
+		decoder := ssestream.NewDecoder(resp)
+		defer func() { _ = decoder.Close() }()
+
+		// emitError surfaces a synthetic "error" StreamEvent so a decode or
+		// read failure is diagnosable instead of looking like a silently
+		// truncated stream. Returns false if ctx was cancelled before the
+		// send could go through, signaling the caller should stop.
+		emitError := func(msg string) bool {
 			select {
-			case out <- evt:
+			case out <- chat.StreamEvent{Type: "error", Error: msg}:
+				return true
 			case <-ctx.Done():
 				return false
 			}
-			return evt.Type != "stream_end"
 		}
-		for scanner.Scan() {
-			line := scanner.Text()
-			if line == "" {
-				if !flush() {
+
+		for decoder.Next() {
+			if ctx.Err() != nil {
+				return
+			}
+			data := decoder.Event().Data
+			if len(data) == 0 {
+				continue
+			}
+			var evt chat.StreamEvent
+			if err := json.Unmarshal(data, &evt); err != nil {
+				if !emitError(fmt.Sprintf("malformed event received: %v", err)) {
 					return
 				}
 				continue
 			}
-			if rest, ok := strings.CutPrefix(line, "data:"); ok {
-				dataLines = append(dataLines, strings.TrimPrefix(rest, " "))
+			select {
+			case out <- evt:
+			case <-ctx.Done():
+				return
 			}
-			// event:/id:/comment lines carry no information this client
-			// needs beyond what's already in the data: JSON payload's own
-			// "type" field.
-			if ctx.Err() != nil {
+			if evt.Type == "stream_end" {
 				return
 			}
 		}
-		if scanErr := scanner.Err(); scanErr != nil {
+		if decErr := decoder.Err(); decErr != nil {
 			// A network read failure or bufio.ErrTooLong (a line exceeded
-			// the scanner's max buffer) otherwise terminates this goroutine
-			// silently — the channel just closes with no hint why. Surface
-			// it as a synthetic error event so the caller can diagnose it
-			// instead of seeing an unexplained stream end.
-			select {
-			case out <- chat.StreamEvent{Type: "error", Error: fmt.Sprintf("event stream read failed: %v", scanErr)}:
-			case <-ctx.Done():
-			}
-			return
+			// the decoder's max buffer) otherwise terminates this goroutine
+			// silently — the channel just closes with no hint why.
+			emitError(fmt.Sprintf("event stream read failed: %v", decErr))
 		}
-		flush()
 	}()
 	return out, nil
 }

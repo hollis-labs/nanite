@@ -925,9 +925,29 @@ func (s *chatServiceImpl) CloseAgentSession(ctx context.Context, sessionID strin
 // resolveProvider walks the provider fallback chain. Resolution order:
 //  1. sessionProvider (explicit per-session)
 //  2. agentProvider (agent profile default)
-//  3. User's fallback chain (from user_settings)
-//  4. chat.InferProvider(model) — map model name to provider
-//  5. System default ("anthropic")
+//  3. user_settings.default_provider (operator SSOT preference)
+//  4. user_settings.ProviderFallbackChain (resilience list)
+//  5. chat.InferProvider(model) — map model name to provider
+//
+// CW-20260812-0001 investigation: step 3 was missing entirely before this
+// fix. user_settings.default_provider was never consulted here — it's a
+// separate resolver used only for the *model* dimension elsewhere (see
+// store.ResolveProviderAndModel in chat_generate.go). A session with no
+// explicit provider fell straight through to step 4
+// (ProviderFallbackChain), so a stale/legacy CLI-shaped entry left there
+// from before this app's API-first default (e.g. "pty") won over the
+// operator's real default_provider setting — silently routing ordinary
+// API sessions into a CLI boot attempt that then crashed downstream
+// (bootdir for provider "" — see applyLegacyCLIProviderToBootOpts).
+//
+// The unconditional "if all else fails, try anthropic" catch-all that
+// used to follow step 5 has been removed: a fully unconfigured
+// installation (no provider anywhere in the chain, and no model-name
+// match) now surfaces a clear configuration error instead of silently
+// defaulting — the (name, nil) + non-CLI-shaped terminal case below
+// already makes chat_generate.go's classifyNilProvider return
+// nilProviderRouteFatal, which the caller turns into "Provider %q not
+// available — check configuration and restart the server."
 //
 // When a preferred provider is unavailable and the chain falls through,
 // a provider.fallback plugin event is emitted.
@@ -979,7 +999,24 @@ func (s *chatServiceImpl) resolveProvider(sessionID, sessionProvider, agentProvi
 		slog.Warn("chat-service: agent provider not registered, falling through", "provider", agentProvider)
 	}
 
-	if us, err := s.store.GetUserSettings(); err == nil && len(us.ProviderFallbackChain) > 0 {
+	if us, err := s.store.GetUserSettings(); err == nil {
+		if us.DefaultProvider != "" {
+			defaultProvider := us.DefaultProvider
+			if p, ok := s.providers.Get(defaultProvider); ok {
+				if requested != "" && requested != defaultProvider && s.pluginHost != nil {
+					s.pluginHost.EmitProviderFallback(sessionID, requested, defaultProvider)
+				}
+				return defaultProvider, p
+			}
+			if chat.IsCLIProvider(defaultProvider) {
+				if requested != "" && requested != defaultProvider && s.pluginHost != nil {
+					s.pluginHost.EmitProviderFallback(sessionID, requested, defaultProvider)
+				}
+				return defaultProvider, nil
+			}
+			slog.Warn("chat-service: user_settings.default_provider not registered, falling through", "provider", defaultProvider)
+		}
+
 		for _, name := range us.ProviderFallbackChain {
 			if p, ok := s.providers.Get(name); ok {
 				if requested != "" && requested != name && s.pluginHost != nil {
@@ -1015,15 +1052,12 @@ func (s *chatServiceImpl) resolveProvider(sessionID, sessionProvider, agentProvi
 		return inferred, nil
 	}
 
-	if p, ok := s.providers.Get("anthropic"); ok {
-		if requested != "" && requested != "anthropic" && s.pluginHost != nil {
-			safego.Go(context.Background(), "service.chat.emit.provider-fallback-anthropic", func() {
-				s.pluginHost.EmitProviderFallback(sessionID, requested, "anthropic")
-			})
-		}
-		return "anthropic", p
-	}
-
+	// No unconditional "try anthropic" catch-all: an installation with
+	// nothing configured anywhere in the chain must surface a
+	// configuration error, not a silent default. The caller
+	// (chat_generate.go's classifyNilProvider) turns this terminal
+	// non-CLI-shaped (name, nil) into "Provider %q not available — check
+	// configuration and restart the server."
 	return inferred, nil
 }
 

@@ -291,7 +291,7 @@ func TestBootSessionRole_ModeBeatsAgent(t *testing.T) {
 // surfaces a clear error rather than panicking on nil dereference.
 func TestDriveBootSession_RejectsMissingDeps(t *testing.T) {
 	s := &chatServiceImpl{}
-	_, err := s.driveBootSession(context.Background(), "sess", &store.Session{}, &store.AgentProfile{Slug: "x"}, nil, nil, "hello", 0)
+	_, err := s.driveBootSession(context.Background(), "sess", &store.Session{}, &store.AgentProfile{Slug: "x"}, nil, nil, "hello", 0, "")
 	if err == nil {
 		t.Fatal("expected error when agent runtime not wired")
 	}
@@ -307,7 +307,7 @@ func TestDriveBootSession_IterationGreaterThanZero(t *testing.T) {
 		agentDeps:        &runtimeagent.Dependencies{},
 		agentEventBridge: &agentEventBridge{streams: NewStreamManager()},
 	}
-	ch, err := s.driveBootSession(context.Background(), "sess", &store.Session{}, &store.AgentProfile{Slug: "x"}, nil, nil, "ignored", 1)
+	ch, err := s.driveBootSession(context.Background(), "sess", &store.Session{}, &store.AgentProfile{Slug: "x"}, nil, nil, "ignored", 1, "")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}

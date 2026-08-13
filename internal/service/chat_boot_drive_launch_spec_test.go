@@ -12,7 +12,6 @@ import (
 
 	"github.com/hollis-labs/nanite/internal/bootprofile"
 	runtimeagent "github.com/hollis-labs/nanite/internal/runtime/agent"
-	"github.com/hollis-labs/nanite/internal/store"
 )
 
 // TestApplyLaunchSpec_Nil verifies both nil-receiver cases are no-ops
@@ -199,33 +198,33 @@ func TestApplyLaunchSpec_NoResumeFieldTouched(t *testing.T) {
 }
 
 // TestApplyLegacyCLIProvider_PinsAliasTable pins the c203 regression
-// (CW-20260515-0005). The bare "Claude CLI" dropdown row sends
-// session.Provider="pty" (or "pty-claude" depending on dropdown
-// shape). Pre-fix, no LaunchSpec was stashed for these sessions →
+// (CW-20260515-0005). The bare "Claude CLI" dropdown row resolves a
+// providerName of "pty" (or "pty-claude" depending on dropdown shape).
+// Pre-fix, no LaunchSpec was stashed for these sessions →
 // applyLaunchSpecToBootOpts no-op'd → bootOpts.Provider stayed empty
 // → agent.Boot's effectiveProvider fell back to the file-default
 // profile's DefaultProvider="" → bootdirLayoutFor("") returned
 // unsupportedLayout → `bootdir for provider ""` crash.
 //
-// The helper now normalizes any CLI alias on session.Provider and
-// writes it into bootOpts.Provider. The post-fix contract:
+// The helper now normalizes any CLI alias on the resolved providerName
+// and writes it into bootOpts.Provider. The post-fix contract:
 //
-//	session.Provider "pty"              → bootOpts.Provider "claude"
-//	session.Provider "pty-claude"       → bootOpts.Provider "claude"
-//	session.Provider "pty-codex"        → bootOpts.Provider "codex"
-//	session.Provider "sub-claude"       → bootOpts.Provider "claude"
-//	session.Provider "bootprofile:<id>" → bootOpts.Provider unchanged
-//	                                      (applyLaunchSpec is SoT)
-//	session.Provider "anthropic"        → bootOpts.Provider unchanged
-//	                                      (HTTP shapes never reach here
-//	                                      in production, but the
-//	                                      guard keeps the helper safe)
-//	session = nil                       → no-op
-//	bootOpts = nil                      → no-op
+//	providerName "pty"              → bootOpts.Provider "claude"
+//	providerName "pty-claude"       → bootOpts.Provider "claude"
+//	providerName "pty-codex"        → bootOpts.Provider "codex"
+//	providerName "sub-claude"       → bootOpts.Provider "claude"
+//	providerName "bootprofile:<id>" → bootOpts.Provider unchanged
+//	                                  (applyLaunchSpec is SoT)
+//	providerName "anthropic"        → bootOpts.Provider unchanged
+//	                                  (HTTP shapes never reach here
+//	                                  in production, but the
+//	                                  guard keeps the helper safe)
+//	providerName ""                 → no-op
+//	bootOpts = nil                  → no-op
 func TestApplyLegacyCLIProvider_PinsAliasTable(t *testing.T) {
 	t.Run("legacy pty → claude", func(t *testing.T) {
 		opts := &runtimeagent.Options{}
-		applyLegacyCLIProviderToBootOpts(opts, &store.Session{Provider: "pty"})
+		applyLegacyCLIProviderToBootOpts(opts, "pty")
 		if opts.Provider != "claude" {
 			t.Errorf("Provider = %q, want claude (c203 regression)", opts.Provider)
 		}
@@ -233,7 +232,7 @@ func TestApplyLegacyCLIProvider_PinsAliasTable(t *testing.T) {
 
 	t.Run("dropdown pty-claude → claude", func(t *testing.T) {
 		opts := &runtimeagent.Options{}
-		applyLegacyCLIProviderToBootOpts(opts, &store.Session{Provider: "pty-claude"})
+		applyLegacyCLIProviderToBootOpts(opts, "pty-claude")
 		if opts.Provider != "claude" {
 			t.Errorf("Provider = %q, want claude", opts.Provider)
 		}
@@ -241,7 +240,7 @@ func TestApplyLegacyCLIProvider_PinsAliasTable(t *testing.T) {
 
 	t.Run("pty-codex → codex", func(t *testing.T) {
 		opts := &runtimeagent.Options{}
-		applyLegacyCLIProviderToBootOpts(opts, &store.Session{Provider: "pty-codex"})
+		applyLegacyCLIProviderToBootOpts(opts, "pty-codex")
 		if opts.Provider != "codex" {
 			t.Errorf("Provider = %q, want codex", opts.Provider)
 		}
@@ -249,7 +248,7 @@ func TestApplyLegacyCLIProvider_PinsAliasTable(t *testing.T) {
 
 	t.Run("sub-claude → claude", func(t *testing.T) {
 		opts := &runtimeagent.Options{}
-		applyLegacyCLIProviderToBootOpts(opts, &store.Session{Provider: "sub-claude"})
+		applyLegacyCLIProviderToBootOpts(opts, "sub-claude")
 		if opts.Provider != "claude" {
 			t.Errorf("Provider = %q, want claude", opts.Provider)
 		}
@@ -257,7 +256,7 @@ func TestApplyLegacyCLIProvider_PinsAliasTable(t *testing.T) {
 
 	t.Run("bootprofile id untouched", func(t *testing.T) {
 		opts := &runtimeagent.Options{}
-		applyLegacyCLIProviderToBootOpts(opts, &store.Session{Provider: "bootprofile:claude-smoke"})
+		applyLegacyCLIProviderToBootOpts(opts, "bootprofile:claude-smoke")
 		if opts.Provider != "" {
 			t.Errorf("Provider = %q, want empty (bootprofile path owned by applyLaunchSpec)", opts.Provider)
 		}
@@ -265,18 +264,18 @@ func TestApplyLegacyCLIProvider_PinsAliasTable(t *testing.T) {
 
 	t.Run("non-CLI shape untouched", func(t *testing.T) {
 		opts := &runtimeagent.Options{Provider: "should-not-change"}
-		applyLegacyCLIProviderToBootOpts(opts, &store.Session{Provider: "anthropic"})
+		applyLegacyCLIProviderToBootOpts(opts, "anthropic")
 		if opts.Provider != "should-not-change" {
 			t.Errorf("Provider = %q, want %q (non-CLI shape must NOT be normalized here)",
 				opts.Provider, "should-not-change")
 		}
 	})
 
-	t.Run("nil session is no-op", func(t *testing.T) {
+	t.Run("empty provider name is no-op", func(t *testing.T) {
 		opts := &runtimeagent.Options{Provider: "caller-set"}
-		applyLegacyCLIProviderToBootOpts(opts, nil)
+		applyLegacyCLIProviderToBootOpts(opts, "")
 		if opts.Provider != "caller-set" {
-			t.Errorf("Provider = %q, want unchanged on nil session", opts.Provider)
+			t.Errorf("Provider = %q, want unchanged on empty providerName", opts.Provider)
 		}
 	})
 
@@ -286,7 +285,7 @@ func TestApplyLegacyCLIProvider_PinsAliasTable(t *testing.T) {
 				t.Fatalf("applyLegacyCLIProviderToBootOpts panicked on nil opts: %v", r)
 			}
 		}()
-		applyLegacyCLIProviderToBootOpts(nil, &store.Session{Provider: "pty"})
+		applyLegacyCLIProviderToBootOpts(nil, "pty")
 	})
 }
 
@@ -298,7 +297,7 @@ func TestApplyLegacyCLIProvider_PinsAliasTable(t *testing.T) {
 // share the alias from a misconfigured dropdown).
 func TestApplyLegacyCLIProvider_AppliesBeforeLaunchSpec(t *testing.T) {
 	opts := &runtimeagent.Options{}
-	applyLegacyCLIProviderToBootOpts(opts, &store.Session{Provider: "pty"})
+	applyLegacyCLIProviderToBootOpts(opts, "pty")
 	if opts.Provider != "claude" {
 		t.Fatalf("Provider after legacy normalize = %q, want claude", opts.Provider)
 	}

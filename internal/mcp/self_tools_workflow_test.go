@@ -256,12 +256,69 @@ func TestCallWorkflowVerifyStep_MissingMode(t *testing.T) {
 	st.WorkflowExecutor = &fakeStepExecutor{}
 
 	res, err := st.CallTool(context.Background(), "workflow_verify_step", map[string]any{
-		"subject": map[string]any{"output": "x"},
+		"subject": map[string]any{"output": "x", "is_error": false},
 	})
 	if err != nil {
 		t.Fatalf("CallTool returned err: %v", err)
 	}
 	if !res.IsError {
 		t.Fatalf("expected IsError=true when mode is missing, got %+v", res)
+	}
+}
+
+// TestCallWorkflowVerifyStep_MissingSubject verifies a wholly absent
+// subject is rejected before ever reaching the executor — a missing
+// subject must not silently decode to a zero-value VerifySubject
+// (StepKind:"", Output:"", IsError:false), which would let mode=engine
+// checks like no_error incorrectly pass.
+func TestCallWorkflowVerifyStep_MissingSubject(t *testing.T) {
+	st := newSelfTools(t)
+	fake := &fakeStepExecutor{}
+	st.WorkflowExecutor = fake
+
+	res, err := st.CallTool(context.Background(), "workflow_verify_step", map[string]any{
+		"mode":         "engine",
+		"engine_check": "no_error",
+	})
+	if err != nil {
+		t.Fatalf("CallTool returned err: %v", err)
+	}
+	if !res.IsError {
+		t.Fatalf("expected IsError=true when subject is missing, got %+v", res)
+	}
+	if fake.verReq.Mode != "" {
+		t.Fatalf("expected the executor to never be called, but it was: %+v", fake.verReq)
+	}
+}
+
+// TestCallWorkflowVerifyStep_MissingSubjectIsError verifies that an
+// omitted subject.is_error is rejected (fail closed) rather than
+// silently decoding to Go's bool zero value (false), which would let
+// mode=engine/engine_check=no_error incorrectly pass a subject whose
+// error status the caller never actually reported.
+func TestCallWorkflowVerifyStep_MissingSubjectIsError(t *testing.T) {
+	st := newSelfTools(t)
+	fake := &fakeStepExecutor{
+		verRes: agentworkflow.VerifyResult{Passed: true, Reason: "should never be reached"},
+	}
+	st.WorkflowExecutor = fake
+
+	res, err := st.CallTool(context.Background(), "workflow_verify_step", map[string]any{
+		"mode":         "engine",
+		"engine_check": "no_error",
+		"subject": map[string]any{
+			"step_kind": "tool",
+			"output":    "some output",
+			// is_error deliberately omitted
+		},
+	})
+	if err != nil {
+		t.Fatalf("CallTool returned err: %v", err)
+	}
+	if !res.IsError {
+		t.Fatalf("expected IsError=true when subject.is_error is omitted, got %+v", res)
+	}
+	if fake.verReq.Mode != "" {
+		t.Fatalf("expected the executor to never be called, but it was: %+v", fake.verReq)
 	}
 }

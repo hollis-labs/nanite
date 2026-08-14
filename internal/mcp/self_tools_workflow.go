@@ -135,7 +135,15 @@ func workflowVerifyStepToolDefinition() Tool {
 							},
 						},
 					},
-					"required": []string{"output"},
+					// is_error is required, not just documented: Verify's
+					// entire job is distinguishing a passing subject from a
+					// failing one, and an omitted flag decoding to Go's
+					// bool zero value (false) would silently make a failed
+					// subject look like it passed (e.g. engine_check=
+					// no_error incorrectly passing). callWorkflowVerifyStep
+					// also enforces this server-side against the raw args,
+					// not just via this schema.
+					"required": []string{"output", "is_error"},
 				},
 			},
 			"required": []string{"mode", "subject"},
@@ -217,6 +225,22 @@ func (st *SelfToolsTransport) callWorkflowExecuteToolStep(ctx context.Context, a
 func (st *SelfToolsTransport) callWorkflowVerifyStep(ctx context.Context, args map[string]any) (*ToolResult, error) {
 	if st.WorkflowExecutor == nil {
 		return errorResult("workflow executor is not configured"), nil
+	}
+
+	// Fail closed on a missing subject.is_error against the RAW args map,
+	// before decodeStepArgs's JSON round-trip silently fills it in as
+	// Go's bool zero value (false). A caller-omitted is_error must not
+	// be indistinguishable from an explicit is_error=false — Verify's
+	// whole job is telling those apart (e.g. engine_check=no_error must
+	// not incorrectly pass a subject whose error status was never
+	// reported). The InputSchema also marks it required; this is
+	// defense in depth against a caller that doesn't validate schemas.
+	subject, ok := args["subject"].(map[string]any)
+	if !ok {
+		return errorResult("subject is required: {step_kind, output, is_error, tool_calls}"), nil
+	}
+	if _, present := subject["is_error"]; !present {
+		return errorResult("subject.is_error is required (true or false) — it must not be omitted"), nil
 	}
 
 	var req agentworkflow.VerifyRequest

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -192,6 +193,93 @@ time.sleep(5)
 	}
 	if !result.TimedOut {
 		t.Fatalf("expected Result.TimedOut=true, got %+v", result)
+	}
+}
+
+// mustExitError runs a shell command that exits non-zero and returns the
+// resulting *exec.ExitError, for constructing realistic runErr values in
+// table tests without depending on a specific interpreter.
+func mustExitError(t *testing.T, code int) error {
+	t.Helper()
+	err := exec.Command("sh", "-c", fmt.Sprintf("exit %d", code)).Run()
+	if err == nil {
+		t.Fatalf("expected a non-zero exit, got nil error")
+	}
+	return err
+}
+
+// TestClassifyRunResult covers Launch's post-run decision logic in
+// isolation — in particular the caller-cancellation race Copilot flagged
+// in review: a subprocess that already exited cleanly (runErr == nil)
+// must report success even if the caller's ambient parentCtx happens to
+// be cancelled (for reasons unrelated to this subprocess) at the same
+// moment, rather than surfacing a spurious launch-level error over an
+// otherwise-valid Result.
+func TestClassifyRunResult(t *testing.T) {
+	cases := []struct {
+		name         string
+		runErr       error
+		runCtxErr    error
+		parentCtxErr error
+		wantTimedOut bool
+		wantErr      bool
+	}{
+		{
+			name:    "clean exit, no cancellation anywhere",
+			runErr:  nil,
+			wantErr: false,
+		},
+		{
+			// The exact race from review: the subprocess already
+			// finished successfully, but the caller's own ambient
+			// context happens to be cancelled at the same instant for
+			// unrelated reasons. Must NOT be reported as a failure.
+			name:         "clean exit despite a concurrently-cancelled parent ctx",
+			runErr:       nil,
+			parentCtxErr: context.Canceled,
+			wantErr:      false,
+		},
+		{
+			name:      "clean exit despite an expired run ctx deadline",
+			runErr:    nil,
+			runCtxErr: context.DeadlineExceeded,
+			wantErr:   false,
+		},
+		{
+			name:         "run ctx deadline exceeded with a real run error",
+			runErr:       mustExitError(t, 1),
+			runCtxErr:    context.DeadlineExceeded,
+			wantTimedOut: true,
+			wantErr:      true,
+		},
+		{
+			name:         "parent ctx cancelled with a real run error",
+			runErr:       mustExitError(t, 1),
+			parentCtxErr: context.Canceled,
+			wantErr:      true,
+		},
+		{
+			name:    "plain non-zero exit, no cancellation",
+			runErr:  mustExitError(t, 7),
+			wantErr: false,
+		},
+		{
+			name:    "spawn failure (not an *exec.ExitError)",
+			runErr:  errors.New("fork/exec: no such file or directory"),
+			wantErr: true,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			timedOut, err := classifyRunResult(tc.runErr, tc.runCtxErr, tc.parentCtxErr, "script.py", time.Second)
+			if timedOut != tc.wantTimedOut {
+				t.Errorf("timedOut = %v, want %v", timedOut, tc.wantTimedOut)
+			}
+			if (err != nil) != tc.wantErr {
+				t.Errorf("err = %v, wantErr = %v", err, tc.wantErr)
+			}
+		})
 	}
 }
 

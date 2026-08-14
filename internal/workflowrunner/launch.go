@@ -212,27 +212,47 @@ func Launch(ctx context.Context, cfg Config, input agentworkflow.WorkflowInput) 
 		InputPath:       inputPath,
 	}
 
-	if errors.Is(runCtx.Err(), context.DeadlineExceeded) {
-		result.TimedOut = true
-		return result, fmt.Errorf("workflowrunner: %s exceeded timeout %s", cfg.ScriptPath, timeout)
+	timedOut, err := classifyRunResult(runErr, runCtx.Err(), ctx.Err(), cfg.ScriptPath, timeout)
+	result.TimedOut = timedOut
+	if err == nil {
+		var exitErr *exec.ExitError
+		if errors.As(runErr, &exitErr) {
+			result.ExitCode = exitErr.ExitCode()
+		}
 	}
-	if ctx.Err() != nil {
-		return result, ctx.Err()
-	}
+	return result, err
+}
 
+// classifyRunResult turns a completed cmd.Run() outcome plus both
+// context's error state into Launch's (timedOut, error) return —
+// factored out as a pure function so the caller-cancellation race below
+// is deterministically unit-testable without real subprocess timing.
+//
+// runErr == nil is checked FIRST and short-circuits to success
+// regardless of runCtx/parentCtx state at that exact moment: ctx is
+// caller-owned and may be cancelled for reasons entirely unrelated to
+// this subprocess's lifecycle (e.g. the caller's own overall deadline
+// firing at the same instant this process happens to finish). Treating
+// that as a launch failure would report a spurious error over a Result
+// that is otherwise entirely valid — only a runErr that cmd.Run() itself
+// attributes to cancellation should be surfaced as one.
+func classifyRunResult(runErr, runCtxErr, parentCtxErr error, scriptPath string, timeout time.Duration) (timedOut bool, err error) {
+	if runErr == nil {
+		return false, nil
+	}
+	if errors.Is(runCtxErr, context.DeadlineExceeded) {
+		return true, fmt.Errorf("workflowrunner: %s exceeded timeout %s", scriptPath, timeout)
+	}
+	if parentCtxErr != nil {
+		return false, parentCtxErr
+	}
 	var exitErr *exec.ExitError
-	switch {
-	case runErr == nil:
-		result.ExitCode = 0
-	case errors.As(runErr, &exitErr):
-		result.ExitCode = exitErr.ExitCode()
-	default:
-		// Spawn failure (binary not found, permission denied, etc.) — a
-		// launch-level failure, not a process result to interpret.
-		return result, fmt.Errorf("workflowrunner: run %s: %w", cfg.ScriptPath, runErr)
+	if errors.As(runErr, &exitErr) {
+		return false, nil
 	}
-
-	return result, nil
+	// Spawn failure (binary not found, permission denied, etc.) — a
+	// launch-level failure, not a process result to interpret.
+	return false, fmt.Errorf("workflowrunner: run %s: %w", scriptPath, runErr)
 }
 
 // renderMCPJSON mirrors internal/runtime/agent's renderMCPJSON — the

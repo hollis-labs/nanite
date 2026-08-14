@@ -19,12 +19,8 @@ import (
 )
 
 // ContextService assembles system prompts, message history, and performs
-// post-turn pruning. Supports both legacy (flat string) and slot-based
-// context assembly.
+// post-turn pruning via slot-based context assembly.
 type ContextService interface {
-	// AssembleContext is the legacy path: returns a flat system prompt and messages.
-	AssembleContext(ctx context.Context, session *store.Session, agent *store.AgentProfile, mode *store.AgentMode, workspace *store.Workspace) (systemPrompt string, messages []llmtypes.ChatMessage, err error)
-
 	// AssembleSlots returns slot blocks for provider adapters that can exploit
 	// slot boundaries (e.g., Anthropic cache_control). The tools slice is
 	// stringified into the Tools slot (S3b will replace with a cache pointer).
@@ -184,17 +180,11 @@ func NewContextService(cfg ContextServiceConfig) ContextService {
 	}
 }
 
-// AssembleContext is the legacy path — delegates directly to ContextClient.
-func (s *contextServiceImpl) AssembleContext(ctx context.Context, session *store.Session, agent *store.AgentProfile, mode *store.AgentMode, workspace *store.Workspace) (string, []llmtypes.ChatMessage, error) {
-	return s.client.AssembleContext(ctx, session, agent, mode, workspace)
-}
-
 // AssembleSlots builds a slot-based context window. Each named slot is sourced
 // independently from raw inputs (agent profile, workspace, ContextBroker,
 // session messages, selected tools) so provider adapters that exploit slot
 // boundaries (e.g., Anthropic cache_control) can mark unchanged slots as
-// cacheable. The legacy AssembleContext path remains available for callers
-// that haven't migrated.
+// cacheable.
 //
 // When the S3b tool-cache pipeline is active (ToolCacheEnabled=true and the
 // stash + classifier deps are wired), the Tools slot carries a compact

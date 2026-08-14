@@ -42,13 +42,13 @@ func TestEnvelopeRespond_E2E_TranscriptThreadedIntoContext(t *testing.T) {
 
 	// Next-turn simulation: assemble context as the LLM adapter would.
 	client := chat.NewContextClient(a.Services.Store)
-	_, messages, err := client.AssembleContext(context.Background(), sess, agent, &store.AgentMode{}, nil)
+	sources, err := client.AssembleSlotSources(context.Background(), sess, agent, &store.AgentMode{}, nil, nil)
 	if err != nil {
-		t.Fatalf("AssembleContext: %v", err)
+		t.Fatalf("AssembleSlotSources: %v", err)
 	}
 
 	var found bool
-	for _, m := range messages {
+	for _, m := range sources.Messages {
 		if m.Role == "user" && startsWith(m.Content, "[envelope:collect_feedback status:submitted]") {
 			found = true
 			// answers must be preserved through default handler passthrough.
@@ -59,7 +59,7 @@ func TestEnvelopeRespond_E2E_TranscriptThreadedIntoContext(t *testing.T) {
 		}
 	}
 	if !found {
-		t.Fatalf("envelope_response not found in assembled context; messages=%+v", messages)
+		t.Fatalf("envelope_response not found in assembled context; messages=%+v", sources.Messages)
 	}
 }
 
@@ -93,12 +93,12 @@ func TestEnvelopeRespond_E2E_SilentHandlerNotInContext(t *testing.T) {
 	}
 
 	client := chat.NewContextClient(a.Services.Store)
-	_, messages, err := client.AssembleContext(context.Background(), sess, agent, &store.AgentMode{}, nil)
+	sources, err := client.AssembleSlotSources(context.Background(), sess, agent, &store.AgentMode{}, nil, nil)
 	if err != nil {
-		t.Fatalf("AssembleContext: %v", err)
+		t.Fatalf("AssembleSlotSources: %v", err)
 	}
-	if len(messages) != 0 {
-		t.Fatalf("silent handler leaked into context: %+v", messages)
+	if len(sources.Messages) != 0 {
+		t.Fatalf("silent handler leaked into context: %+v", sources.Messages)
 	}
 
 	// Response still persisted on the instance.

@@ -29,9 +29,6 @@ func (s *chatCancelStub) RetryLastMessage(context.Context, string) (string, erro
 func (s *chatCancelStub) SendAgentMessage(context.Context, string, string, string) (string, error) {
 	panic("SendAgentMessage not used in cancel-endpoint tests")
 }
-func (s *chatCancelStub) RecomposeSystemPrompt(context.Context, string, string, string) (string, error) {
-	panic("RecomposeSystemPrompt not used in cancel-endpoint tests")
-}
 func (s *chatCancelStub) DelegateTask(context.Context, chat.DelegationRequest) (*chat.DelegationResult, error) {
 	panic("DelegateTask not used in cancel-endpoint tests")
 }

@@ -175,7 +175,12 @@ func runChatTurn(ctx context.Context, client *harnessClient, sessionID, content 
 				fmt.Print("\n[session taken over by another client — this turn was interrupted]\n")
 				return errSessionTakeover
 			case "error":
-				fmt.Printf("\n[error] %s\n", evt.Error)
+				// By the time an "error" event reaches here, StreamEvents has
+				// already opened the connection (CW-20260813-0008's retry
+				// only covers connection establishment, not this point
+				// onward), so this is never retried — resuming is the user's
+				// job, not the client's.
+				fmt.Printf("\n[error] %s\nresume this conversation with `nanite chat --session %s`\n", evt.Error, sessionID)
 			case "stream_end":
 				fmt.Println()
 			}

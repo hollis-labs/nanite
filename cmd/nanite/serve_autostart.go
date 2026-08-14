@@ -161,18 +161,21 @@ func pollHealthUntilReady(ctx context.Context, baseURL string, timeout time.Dura
 		if !time.Now().Before(deadline) {
 			return fmt.Errorf("timed out after %s waiting for nanite serve to become healthy at %s", timeout, baseURL)
 		}
+		timer := time.NewTimer(delay)
 		select {
 		case <-ctx.Done():
+			timer.Stop()
 			return ctx.Err()
 		case err := <-exitCh:
 			// exitCh is nil when there is no spawned child to watch (the
 			// "loser" of the spawn race) — a nil-channel receive never
 			// fires, so this case is simply inert in that path.
+			timer.Stop()
 			if err != nil {
 				return fmt.Errorf("nanite serve exited before becoming healthy: %w", err)
 			}
 			return errors.New("nanite serve exited before becoming healthy")
-		case <-time.After(delay):
+		case <-timer.C:
 		}
 		delay = nextBackoffDelay(delay, autostartPollInitialDelay, autostartPollMaxDelay)
 	}

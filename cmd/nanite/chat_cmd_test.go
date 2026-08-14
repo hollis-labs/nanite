@@ -169,6 +169,11 @@ func TestRunChatTurn_ErrorAfterStreamingSuggestsResume(t *testing.T) {
 	if err != nil {
 		t.Fatalf("os.Pipe: %v", err)
 	}
+	t.Cleanup(func() {
+		os.Stdout = stdout
+		w.Close()
+		r.Close()
+	})
 	os.Stdout = w
 	runErr := runChatTurn(context.Background(), client, "sess-1", "hi")
 	w.Close()

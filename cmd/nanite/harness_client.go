@@ -63,10 +63,12 @@ func retryConnect[T any](ctx context.Context, attempt func() (T, error)) (T, err
 	for i := 0; i < harnessConnectMaxAttempts; i++ {
 		if i > 0 {
 			delay = nextBackoffDelay(delay, harnessConnectInitialDelay, harnessConnectMaxDelay)
+			timer := time.NewTimer(delay)
 			select {
 			case <-ctx.Done():
+				timer.Stop()
 				return zero, ctx.Err()
-			case <-time.After(delay):
+			case <-timer.C:
 			}
 		}
 		result, err := attempt()

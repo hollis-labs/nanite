@@ -8,3 +8,23 @@ langchain-mcp-adapters
 crewai
 crewai-tools
 mcpadapt
+
+# google_adk_runner.py (CW-20260814-0007)
+# google-adk's own mcp integration (google.adk.tools.mcp_tool) is gated
+# behind the "mcp" extra — a bare `pip install google-adk mcp` resolves an
+# unconstrained (too-new) mcp version incompatible with it.
+google-adk[mcp]
+
+# autogen_runner.py (CW-20260814-0007)
+# autogen-ext[mcp] only floors mcp>=1.11.0 (no ceiling) — an unconstrained
+# install resolves the latest mcp, which has since made breaking changes
+# (mcp.shared.context.RequestContext removed) that autogen-ext 0.7.x's own
+# MCP actor still imports. Pin to the newest 1.x release until autogen-ext
+# raises its floor.
+autogen-agentchat
+autogen-ext[mcp]
+mcp==1.29.0
+
+# langchain_runner.py (CW-20260814-0007)
+langchain-core
+langchain-mcp-adapters

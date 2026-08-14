@@ -108,6 +108,70 @@ func resolveDefaultTimeoutSeconds() int {
 	return secs
 }
 
+// DefaultHeartbeatSeconds is the cadence of "still running" progress
+// pings emitted while a subagent's runner call is in flight
+// (CW-20260519-0068). Without this, a run sits silent on the parent's
+// SSE stream between the initial "running" dispatch event (Spawn,
+// G-5) and the eventual terminal event — for a run approaching the
+// 30-minute backstop that silence is indistinguishable from a hang.
+// 30s is chosen to be well inside a human's patience for "is this
+// still alive" while staying far below chat-turn-refresh noise
+// thresholds.
+const DefaultHeartbeatSeconds = 30
+
+// Heartbeat cadence validation range and operator override. Mirrors the
+// timeout knob's env-tiering shape above. A raw value of exactly "0"
+// disables heartbeats outright (some deployments may prefer silence);
+// anything else outside [minHeartbeatSeconds, maxHeartbeatSeconds] is
+// rejected with a warning and falls back to DefaultHeartbeatSeconds so a
+// typo can't accidentally spam (too low) or silence (too high) the
+// signal.
+const (
+	minHeartbeatSeconds = 1
+	maxHeartbeatSeconds = 300
+)
+
+// heartbeatSecondsEnvVar is the operator knob for the heartbeat cadence.
+const heartbeatSecondsEnvVar = "NANITE_SUBAGENT_HEARTBEAT_SECONDS"
+
+// heartbeatIntervalInRange reports whether secs is a usable heartbeat
+// cadence (0 is handled separately by the caller as "disabled").
+func heartbeatIntervalInRange(secs int) bool {
+	return secs >= minHeartbeatSeconds && secs <= maxHeartbeatSeconds
+}
+
+// resolveHeartbeatInterval picks the "still running" ping cadence for a
+// subagent run, in priority order:
+//
+//  1. NANITE_SUBAGENT_HEARTBEAT_SECONDS == "0" → heartbeats disabled
+//     (returns 0).
+//  2. NANITE_SUBAGENT_HEARTBEAT_SECONDS set to another in-range value →
+//     that value.
+//  3. unset, unparseable, or out of range → DefaultHeartbeatSeconds.
+func resolveHeartbeatInterval() time.Duration {
+	raw := strings.TrimSpace(os.Getenv(heartbeatSecondsEnvVar))
+	if raw == "" {
+		return DefaultHeartbeatSeconds * time.Second
+	}
+	secs, err := strconv.Atoi(raw)
+	if err != nil {
+		slog.Warn("subagent: ignoring non-integer heartbeat override env var",
+			"env", heartbeatSecondsEnvVar, "value", raw, "fallback_seconds", DefaultHeartbeatSeconds)
+		return DefaultHeartbeatSeconds * time.Second
+	}
+	if secs == 0 {
+		return 0
+	}
+	if !heartbeatIntervalInRange(secs) {
+		slog.Warn("subagent: ignoring out-of-range heartbeat override env var",
+			"env", heartbeatSecondsEnvVar, "value", secs,
+			"min", minHeartbeatSeconds, "max", maxHeartbeatSeconds,
+			"fallback_seconds", DefaultHeartbeatSeconds)
+		return DefaultHeartbeatSeconds * time.Second
+	}
+	return time.Duration(secs) * time.Second
+}
+
 // spawnFanoutCap is the maximum number of Spawn invocations that may
 // have their runner executing concurrently. FIFO ordering is preserved
 // by the buffered-channel semaphore below.
@@ -373,6 +437,73 @@ func (svc *Service) emitStatus(run *Run, summaryPreview string) {
 		return
 	}
 	svc.streamSink.SubagentStatusChanged(run.ParentSessionID, payload)
+}
+
+// emitHeartbeat marshals a non-terminal "still running" progress ping
+// for run and hands it to the sink (CW-20260519-0068). It is
+// distinguished from emitStatus's dispatch/terminal transitions by
+// heartbeat:true so a consumer renders it as an in-place update rather
+// than a new status transition.
+//
+// Only fields that startHeartbeat's caller guarantees are stable for
+// the lifetime of the in-flight runner.Run call are read here (id,
+// role, parent_session_id, retry_count, max_retries) — run.ChildSessionID
+// is deliberately excluded because both Runner implementations
+// (ChatRunner, BootRunner) write it from the runner's own goroutine
+// partway through Run; reading it here without synchronization would
+// race that write.
+func (svc *Service) emitHeartbeat(run *Run, elapsed time.Duration) {
+	if svc.streamSink == nil {
+		return
+	}
+	payload, err := json.Marshal(map[string]any{
+		"run_id":          run.ID,
+		"role":            run.Role,
+		"status":          StatusRunning,
+		"heartbeat":       true,
+		"elapsed_seconds": int(elapsed.Seconds()),
+		"attempt":         run.RetryCount + 1,
+		"max_retries":     run.MaxRetries,
+	})
+	if err != nil {
+		slog.Warn("subagent: marshal heartbeat payload", "err", err, "run_id", run.ID)
+		return
+	}
+	svc.streamSink.SubagentStatusChanged(run.ParentSessionID, payload)
+}
+
+// startHeartbeat launches a background ticker that calls emitHeartbeat
+// for run every resolveHeartbeatInterval() until either the returned
+// stop func is called or runCtx is done, whichever comes first.
+//
+// Callers MUST call the returned stop func exactly once, immediately
+// after the guarded runner.Run call returns and before mutating any run
+// field the heartbeat reads — otherwise a late tick can race those
+// writes. A nil streamSink or a resolved interval of 0 (heartbeats
+// disabled) makes this a no-op that still returns a safe stop func.
+func (svc *Service) startHeartbeat(runCtx context.Context, run *Run) (stop func()) {
+	interval := resolveHeartbeatInterval()
+	if interval <= 0 || svc.streamSink == nil {
+		return func() {}
+	}
+	stopCh := make(chan struct{})
+	started := time.Now()
+	safego.Go(runCtx, "subagent.heartbeat", func() {
+		ticker := time.NewTicker(interval)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-stopCh:
+				return
+			case <-runCtx.Done():
+				return
+			case <-ticker.C:
+				svc.emitHeartbeat(run, time.Since(started))
+			}
+		}
+	})
+	var once sync.Once
+	return func() { once.Do(func() { close(stopCh) }) }
 }
 
 // Spawn inserts a subagent_runs row and (for sync/api/async MVP
@@ -985,7 +1116,9 @@ func (svc *Service) execute(ctx context.Context, run *Run, parentAgentID string)
 		// inactivity timeout governs liveness inside this window
 		// (CW-20260519-0073).
 		runCtx, cancel := context.WithTimeout(ctx, time.Duration(run.TimeoutSeconds)*time.Second)
+		stopHeartbeat := svc.startHeartbeat(runCtx, run)
 		result, runErr = svc.runner.Run(runCtx, run)
+		stopHeartbeat()
 
 		now := time.Now().UTC().Format(time.RFC3339Nano)
 		if runErr != nil {

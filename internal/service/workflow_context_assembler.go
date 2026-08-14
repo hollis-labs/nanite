@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"fmt"
+	"log/slog"
 
 	llmtypes "github.com/hollis-labs/go-llm-types"
 
@@ -104,6 +105,8 @@ func (a *contextServiceWorkflowAssembler) resolveSessionMode(session *store.Sess
 	}
 	m, err := a.store.GetMode(*session.CurrentModeID)
 	if err != nil {
+		slog.Warn("workflow: GetMode failed for session-mode pointer",
+			"session_id", session.ID, "mode_id", *session.CurrentModeID, "err", err)
 		return nil
 	}
 	return m

@@ -135,3 +135,51 @@ func TestWorkflowContextAssembler_AssembleContext_NoSessionBinding_NoModeAddendu
 		t.Fatalf("AssembleContext: %v", err)
 	}
 }
+
+// TestWorkflowContextAssembler_AssembleContext_IncludesSessionLevelModeAddendum
+// covers resolveSessionMode — the session.CurrentModeID → store.Mode lookup
+// this CW-20260814-0004 added alongside resolveMode's pre-existing
+// agent-mode lookup. AssembleSlots takes the two independently (sessionMode
+// feeds the Mode slot; resolveMode's AgentMode still feeds the Agent slot),
+// so this needs its own coverage distinct from the AgentMode tests above.
+func TestWorkflowContextAssembler_AssembleContext_IncludesSessionLevelModeAddendum(t *testing.T) {
+	s, sessions, agents, ctxSvc := newWorkflowContextAssemblerTestDeps(t)
+
+	agentProfile := &store.AgentProfile{
+		ID:           "agent-session-mode-1",
+		Name:         "SessionModeAgent",
+		Slug:         "session-mode-agent",
+		SystemPrompt: "You are a test agent.",
+		Status:       "active",
+	}
+	if err := s.CreateAgent(agentProfile); err != nil {
+		t.Fatalf("CreateAgent: %v", err)
+	}
+
+	sessionMode := &store.Mode{
+		ID:             "mode-session-level-1",
+		Slug:           "session-level",
+		Name:           "Session Level",
+		PromptAddendum: "SENTINEL_SESSION_MODE_ADDENDUM",
+	}
+	if err := s.CreateMode(sessionMode); err != nil {
+		t.Fatalf("CreateMode: %v", err)
+	}
+
+	sess := &store.Session{ID: "sess-session-mode-1", Title: "test"}
+	if err := s.CreateSession(sess); err != nil {
+		t.Fatalf("CreateSession: %v", err)
+	}
+	if err := s.SetSessionMode(sess.ID, sessionMode.ID); err != nil {
+		t.Fatalf("SetSessionMode: %v", err)
+	}
+
+	asm := NewWorkflowContextAssembler(sessions, agents, s, ctxSvc)
+	systemPrompt, _, err := asm.AssembleContext(context.Background(), sess.ID, agentProfile.ID)
+	if err != nil {
+		t.Fatalf("AssembleContext: %v", err)
+	}
+	if !strings.Contains(systemPrompt, "SENTINEL_SESSION_MODE_ADDENDUM") {
+		t.Fatalf("expected assembled system prompt to include the session-level mode's PromptAddendum, got: %q", systemPrompt)
+	}
+}

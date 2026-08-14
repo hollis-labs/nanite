@@ -59,17 +59,28 @@ const (
 	ToolAllowlistEnvVar = "NANITE_MCP_TOOL_ALLOWLIST"
 )
 
-// CallbackToolNames are the only self-tools a workflow-runner subprocess
+// callbackToolNames are the only self-tools a workflow-runner subprocess
 // is ever allowed to reach: the three MCP callbacks
 // (internal/mcp/self_tools_workflow.go) an external workflow engine uses
-// to run real work through this harness. Exported so callers that
-// construct a workflow-runner-scoped MCP connection outside this package
-// (tests, the mcpserver allowlist wiring) share the exact same list
-// rather than re-deriving it.
-var CallbackToolNames = []string{
+// to run real work through this harness. Unexported and read only through
+// CallbackToolNames() — a package-level exported slice would let any
+// importer mutate (append to / overwrite) this package's own baseline and
+// silently widen the allowlist out from under it.
+var callbackToolNames = []string{
 	"workflow_execute_llm_step",
 	"workflow_execute_tool_step",
 	"workflow_verify_step",
+}
+
+// CallbackToolNames returns a fresh copy of the workflow-runner tool
+// allowlist. Callers that construct a workflow-runner-scoped MCP
+// connection outside this package (tests, the mcpserver allowlist wiring)
+// should call this rather than re-deriving the list; the returned slice is
+// always a copy, so mutating it cannot affect this package's baseline.
+func CallbackToolNames() []string {
+	names := make([]string, len(callbackToolNames))
+	copy(names, callbackToolNames)
+	return names
 }
 
 // Config configures one workflow-runner launch. PythonPath, ScriptPath,
@@ -306,7 +317,7 @@ func renderMCPJSON(cfg Config) (string, error) {
 		// Always set, not gated on any Config field: a workflow-runner
 		// subprocess must never see the full self-tool catalog, even
 		// when APIBaseURL is empty (pure launch-mechanics tests/callers).
-		ToolAllowlistEnvVar: strings.Join(CallbackToolNames, ","),
+		ToolAllowlistEnvVar: strings.Join(CallbackToolNames(), ","),
 	}
 	if cfg.APIBaseURL != "" {
 		env["NANITE_API_URL"] = cfg.APIBaseURL

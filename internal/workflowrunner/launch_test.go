@@ -114,7 +114,7 @@ print(json.dumps({"input": payload, "mcp": mcp_cfg}))
 	if nanite.Env["NANITE_API_URL"] != cfg.APIBaseURL {
 		t.Fatalf("NANITE_API_URL not planted: %+v", nanite.Env)
 	}
-	if got, want := nanite.Env[ToolAllowlistEnvVar], strings.Join(CallbackToolNames, ","); got != want {
+	if got, want := nanite.Env[ToolAllowlistEnvVar], strings.Join(CallbackToolNames(), ","); got != want {
 		t.Fatalf("%s = %v, want %q", ToolAllowlistEnvVar, got, want)
 	}
 
@@ -323,7 +323,7 @@ func TestRenderMCPJSON_PlantsToolAllowlist(t *testing.T) {
 	}
 
 	got := nanite.Env[ToolAllowlistEnvVar]
-	want := strings.Join(CallbackToolNames, ",")
+	want := strings.Join(CallbackToolNames(), ",")
 	if got != want {
 		t.Fatalf("%s = %q, want %q", ToolAllowlistEnvVar, got, want)
 	}

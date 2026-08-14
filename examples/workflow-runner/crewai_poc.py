@@ -121,7 +121,7 @@ class DeterministicToolCallLLM(BaseLLM):
         )
 
 
-def build_crew(tools_by_name: dict[str, Any], workflow_input: dict[str, Any]):
+def build_crew(tools_by_name: dict[str, Any]):
     tool_result_holder: dict[str, str] = {}
 
     provider = os.environ.get("NANITE_TEST_PROVIDER", "anthropic")
@@ -249,9 +249,7 @@ def main() -> int:
             print(f"missing required MCP tools: {missing}", file=sys.stderr)
             return 1
 
-        crew, tool_task, llm_task, verify_task = build_crew(
-            tools_by_name, workflow_input
-        )
+        crew, tool_task, llm_task, verify_task = build_crew(tools_by_name)
         crew.kickoff(inputs=workflow_input.get("params", {}))
 
     tool_result = json.loads(tool_task.output.raw)

@@ -114,6 +114,9 @@ print(json.dumps({"input": payload, "mcp": mcp_cfg}))
 	if nanite.Env["NANITE_API_URL"] != cfg.APIBaseURL {
 		t.Fatalf("NANITE_API_URL not planted: %+v", nanite.Env)
 	}
+	if got, want := nanite.Env[ToolAllowlistEnvVar], strings.Join(CallbackToolNames, ","); got != want {
+		t.Fatalf("%s = %v, want %q", ToolAllowlistEnvVar, got, want)
+	}
 
 	// KeepWorkDir=true — the planted files should still be on disk.
 	if _, err := os.Stat(filepath.Join(result.WorkDir, ".mcp.json")); err != nil {
@@ -280,6 +283,54 @@ func TestClassifyRunResult(t *testing.T) {
 				t.Errorf("err = %v, wantErr = %v", err, tc.wantErr)
 			}
 		})
+	}
+}
+
+// TestRenderMCPJSON_PlantsToolAllowlist verifies the .mcp.json this package
+// hands a workflow-runner subprocess always carries
+// NANITE_MCP_TOOL_ALLOWLIST restricted to exactly the three workflow
+// callback tools — regardless of whether APIBaseURL is set — so `nanite
+// mcp` (cmd/nanite/main.go's cmdMCPServe) has the signal it needs to scope
+// the self-tool catalog down (CW-20260814-0006). The registration-time
+// enforcement itself lives in internal/mcpserver; this test only proves
+// the launch config side plants the right value.
+func TestRenderMCPJSON_PlantsToolAllowlist(t *testing.T) {
+	cfg := Config{
+		NaniteBinaryPath: "/usr/bin/true",
+		DBPath:           filepath.Join(t.TempDir(), "test.db"),
+		SessionID:        "sess-test",
+		// APIBaseURL deliberately left empty — the allowlist must be
+		// planted unconditionally, not only alongside NANITE_API_URL.
+	}
+
+	raw, err := renderMCPJSON(cfg)
+	if err != nil {
+		t.Fatalf("renderMCPJSON: %v", err)
+	}
+
+	var out struct {
+		MCPServers map[string]struct {
+			Env map[string]string `json:"env"`
+		} `json:"mcpServers"`
+	}
+	if err := json.Unmarshal([]byte(raw), &out); err != nil {
+		t.Fatalf("mcp.json not valid JSON: %v", err)
+	}
+
+	nanite, ok := out.MCPServers[DefaultMCPServerID]
+	if !ok {
+		t.Fatalf(".mcp.json missing %q server entry: %+v", DefaultMCPServerID, out.MCPServers)
+	}
+
+	got := nanite.Env[ToolAllowlistEnvVar]
+	want := strings.Join(CallbackToolNames, ",")
+	if got != want {
+		t.Fatalf("%s = %q, want %q", ToolAllowlistEnvVar, got, want)
+	}
+	for _, name := range []string{"workflow_execute_llm_step", "workflow_execute_tool_step", "workflow_verify_step"} {
+		if !strings.Contains(got, name) {
+			t.Errorf("allowlist %q missing expected tool %q", got, name)
+		}
 	}
 }
 

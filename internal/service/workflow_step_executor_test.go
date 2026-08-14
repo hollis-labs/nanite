@@ -76,6 +76,30 @@ func (f *fakeProviderResolver) Get(name string) (llmcontracts.Provider, bool) {
 
 var _ WorkflowProviderResolver = (*fakeProviderResolver)(nil)
 
+// contextAssemblerCall records one AssembleContext invocation.
+type contextAssemblerCall struct {
+	SessionID string
+	AgentID   string
+}
+
+// fakeContextAssembler is a scriptable WorkflowContextAssembler test double.
+type fakeContextAssembler struct {
+	systemPrompt string
+	messages     []llmtypes.ChatMessage
+	err          error
+	calls        []contextAssemblerCall
+}
+
+func (f *fakeContextAssembler) AssembleContext(_ context.Context, sessionID, agentID string) (string, []llmtypes.ChatMessage, error) {
+	f.calls = append(f.calls, contextAssemblerCall{SessionID: sessionID, AgentID: agentID})
+	if f.err != nil {
+		return "", nil, f.err
+	}
+	return f.systemPrompt, f.messages, nil
+}
+
+var _ WorkflowContextAssembler = (*fakeContextAssembler)(nil)
+
 // scriptedProvider replays a queue of StreamChat responses (one per call)
 // and records every request it was given, so tests can assert exactly
 // which tools were offered to the model.
@@ -126,7 +150,7 @@ func TestExecuteToolStep_CallsToolServiceDirectly_NeverInvokesProvider(t *testin
 	resolver := &fakeProviderResolver{providers: map[string]llmcontracts.Provider{
 		"anthropic": &scriptedProvider{},
 	}}
-	exec := NewWorkflowStepExecutor(tools, resolver)
+	exec := NewWorkflowStepExecutor(tools, resolver, nil)
 
 	result, err := exec.ExecuteToolStep(context.Background(), agentworkflow.ToolStepRequest{
 		AgentID: "agent-1",
@@ -158,7 +182,7 @@ func TestExecuteToolStep_PropagatesToolServiceError(t *testing.T) {
 			return nil, fmt.Errorf("transport down")
 		},
 	}
-	exec := NewWorkflowStepExecutor(tools, &fakeProviderResolver{})
+	exec := NewWorkflowStepExecutor(tools, &fakeProviderResolver{}, nil)
 
 	_, err := exec.ExecuteToolStep(context.Background(), agentworkflow.ToolStepRequest{
 		AgentID: "agent-1",
@@ -170,7 +194,7 @@ func TestExecuteToolStep_PropagatesToolServiceError(t *testing.T) {
 }
 
 func TestExecuteToolStep_RequiresToolName(t *testing.T) {
-	exec := NewWorkflowStepExecutor(&fakeWorkflowToolService{}, &fakeProviderResolver{})
+	exec := NewWorkflowStepExecutor(&fakeWorkflowToolService{}, &fakeProviderResolver{}, nil)
 	if _, err := exec.ExecuteToolStep(context.Background(), agentworkflow.ToolStepRequest{AgentID: "a"}); err == nil {
 		t.Fatal("expected error for empty tool name")
 	}
@@ -193,7 +217,7 @@ func TestExecuteLLMStep_OnlyOffersRequestedToolSurface(t *testing.T) {
 		{{Type: llmtypes.EventDelta, Content: "done"}, {Type: llmtypes.EventUsage, Usage: &llmtypes.Usage{StopReason: "end_turn"}}},
 	}}
 	resolver := &fakeProviderResolver{providers: map[string]llmcontracts.Provider{"anthropic": prov}}
-	exec := NewWorkflowStepExecutor(tools, resolver)
+	exec := NewWorkflowStepExecutor(tools, resolver, nil)
 
 	// The agent profile's default surface would include both tools; this
 	// step's request narrows it to exactly one. The agent profile's
@@ -222,7 +246,7 @@ func TestExecuteLLMStep_UnknownToolInSurface_ErrorsBeforeCallingProvider(t *test
 	resolver := &fakeProviderResolver{providers: map[string]llmcontracts.Provider{
 		"anthropic": prov,
 	}}
-	exec := NewWorkflowStepExecutor(tools, resolver)
+	exec := NewWorkflowStepExecutor(tools, resolver, nil)
 
 	_, err := exec.ExecuteLLMStep(context.Background(), agentworkflow.LLMStepRequest{
 		AgentID:  "agent-1",
@@ -253,7 +277,7 @@ func TestExecuteLLMStep_ToolCallLoop_ExecutesViaToolServiceAndFeedsResultBack(t 
 		{{Type: llmtypes.EventDelta, Content: "Task T-1 is real."}, {Type: llmtypes.EventUsage, Usage: &llmtypes.Usage{StopReason: "end_turn"}}},
 	}}
 	resolver := &fakeProviderResolver{providers: map[string]llmcontracts.Provider{"anthropic": prov}}
-	exec := NewWorkflowStepExecutor(tools, resolver)
+	exec := NewWorkflowStepExecutor(tools, resolver, nil)
 
 	result, err := exec.ExecuteLLMStep(context.Background(), agentworkflow.LLMStepRequest{
 		AgentID:  "agent-1",
@@ -290,7 +314,7 @@ func TestExecuteLLMStep_RejectsToolUseOutsideSurface(t *testing.T) {
 		{{Type: llmtypes.EventDelta, Content: "done"}, {Type: llmtypes.EventUsage, Usage: &llmtypes.Usage{StopReason: "end_turn"}}},
 	}}
 	resolver := &fakeProviderResolver{providers: map[string]llmcontracts.Provider{"anthropic": prov}}
-	exec := NewWorkflowStepExecutor(tools, resolver)
+	exec := NewWorkflowStepExecutor(tools, resolver, nil)
 
 	result, err := exec.ExecuteLLMStep(context.Background(), agentworkflow.LLMStepRequest{
 		AgentID:  "agent-1",
@@ -320,7 +344,7 @@ func TestExecuteLLMStep_ExceedsMaxToolIterations(t *testing.T) {
 	}
 	prov := &scriptedProvider{responses: responses}
 	resolver := &fakeProviderResolver{providers: map[string]llmcontracts.Provider{"anthropic": prov}}
-	exec := NewWorkflowStepExecutor(tools, resolver)
+	exec := NewWorkflowStepExecutor(tools, resolver, nil)
 
 	_, err := exec.ExecuteLLMStep(context.Background(), agentworkflow.LLMStepRequest{
 		AgentID:           "agent-1",
@@ -336,7 +360,7 @@ func TestExecuteLLMStep_ExceedsMaxToolIterations(t *testing.T) {
 // --- Verify: mode engine ---
 
 func TestVerify_ModeEngine_ToolCalled_Pass(t *testing.T) {
-	exec := NewWorkflowStepExecutor(&fakeWorkflowToolService{}, &fakeProviderResolver{})
+	exec := NewWorkflowStepExecutor(&fakeWorkflowToolService{}, &fakeProviderResolver{}, nil)
 
 	result, err := exec.Verify(context.Background(), agentworkflow.VerifyRequest{
 		SubjectStepID: "fetch",
@@ -358,7 +382,7 @@ func TestVerify_ModeEngine_ToolCalled_Pass(t *testing.T) {
 }
 
 func TestVerify_ModeEngine_ToolCalled_FailsWhenToolMissing(t *testing.T) {
-	exec := NewWorkflowStepExecutor(&fakeWorkflowToolService{}, &fakeProviderResolver{})
+	exec := NewWorkflowStepExecutor(&fakeWorkflowToolService{}, &fakeProviderResolver{}, nil)
 
 	result, err := exec.Verify(context.Background(), agentworkflow.VerifyRequest{
 		VerifySpec: agentworkflow.VerifySpec{
@@ -382,7 +406,7 @@ func TestVerify_ModeEngine_ToolCalled_FailsWhenToolMissing(t *testing.T) {
 }
 
 func TestVerify_ModeEngine_UnknownCheck_Errors(t *testing.T) {
-	exec := NewWorkflowStepExecutor(&fakeWorkflowToolService{}, &fakeProviderResolver{})
+	exec := NewWorkflowStepExecutor(&fakeWorkflowToolService{}, &fakeProviderResolver{}, nil)
 
 	_, err := exec.Verify(context.Background(), agentworkflow.VerifyRequest{
 		VerifySpec: agentworkflow.VerifySpec{Mode: agentworkflow.VerifyModeEngine, EngineCheck: "does_not_exist"},
@@ -400,7 +424,7 @@ func TestVerify_ModeAgent_NestedLLMStep_ParsesPassVerdict(t *testing.T) {
 		{{Type: llmtypes.EventDelta, Content: "PASS looks correct"}, {Type: llmtypes.EventUsage, Usage: &llmtypes.Usage{StopReason: "end_turn"}}},
 	}}
 	resolver := &fakeProviderResolver{providers: map[string]llmcontracts.Provider{"anthropic": prov}}
-	exec := NewWorkflowStepExecutor(tools, resolver)
+	exec := NewWorkflowStepExecutor(tools, resolver, nil)
 
 	result, err := exec.Verify(context.Background(), agentworkflow.VerifyRequest{
 		SubjectStepID: "fetch",
@@ -434,7 +458,7 @@ func TestVerify_ModeAgent_ReviewerSystemPromptRejectsEmbeddedInstructions(t *tes
 		{{Type: llmtypes.EventDelta, Content: "PASS"}, {Type: llmtypes.EventUsage, Usage: &llmtypes.Usage{StopReason: "end_turn"}}},
 	}}
 	resolver := &fakeProviderResolver{providers: map[string]llmcontracts.Provider{"anthropic": prov}}
-	exec := NewWorkflowStepExecutor(&fakeWorkflowToolService{}, resolver)
+	exec := NewWorkflowStepExecutor(&fakeWorkflowToolService{}, resolver, nil)
 
 	// The subject's own output is untrusted data (the design doc's whole
 	// point: don't trust what a step says about itself). A subject that
@@ -461,7 +485,7 @@ func TestVerify_ModeAgent_NestedLLMStep_ParsesFailVerdict(t *testing.T) {
 		{{Type: llmtypes.EventDelta, Content: "FAIL fabricated, no tool calls"}, {Type: llmtypes.EventUsage, Usage: &llmtypes.Usage{StopReason: "end_turn"}}},
 	}}
 	resolver := &fakeProviderResolver{providers: map[string]llmcontracts.Provider{"anthropic": prov}}
-	exec := NewWorkflowStepExecutor(&fakeWorkflowToolService{}, resolver)
+	exec := NewWorkflowStepExecutor(&fakeWorkflowToolService{}, resolver, nil)
 
 	result, err := exec.Verify(context.Background(), agentworkflow.VerifyRequest{
 		VerifySpec: agentworkflow.VerifySpec{Mode: agentworkflow.VerifyModeAgent, ReviewerProvider: "anthropic"},
@@ -479,7 +503,7 @@ func TestVerify_ModeAgent_AmbiguousVerdict_FailsClosed(t *testing.T) {
 		{{Type: llmtypes.EventDelta, Content: "I'm not sure, maybe?"}, {Type: llmtypes.EventUsage, Usage: &llmtypes.Usage{StopReason: "end_turn"}}},
 	}}
 	resolver := &fakeProviderResolver{providers: map[string]llmcontracts.Provider{"anthropic": prov}}
-	exec := NewWorkflowStepExecutor(&fakeWorkflowToolService{}, resolver)
+	exec := NewWorkflowStepExecutor(&fakeWorkflowToolService{}, resolver, nil)
 
 	result, err := exec.Verify(context.Background(), agentworkflow.VerifyRequest{
 		VerifySpec: agentworkflow.VerifySpec{Mode: agentworkflow.VerifyModeAgent, ReviewerProvider: "anthropic"},
@@ -493,9 +517,126 @@ func TestVerify_ModeAgent_AmbiguousVerdict_FailsClosed(t *testing.T) {
 }
 
 func TestVerify_UnknownMode_Errors(t *testing.T) {
-	exec := NewWorkflowStepExecutor(&fakeWorkflowToolService{}, &fakeProviderResolver{})
+	exec := NewWorkflowStepExecutor(&fakeWorkflowToolService{}, &fakeProviderResolver{}, nil)
 	_, err := exec.Verify(context.Background(), agentworkflow.VerifyRequest{VerifySpec: agentworkflow.VerifySpec{Mode: "bogus"}})
 	if err == nil {
 		t.Fatal("expected error for unknown verify mode")
+	}
+}
+
+// --- ExecuteLLMStep: EnableContextAssembly opt-in (CW-20260814-0001) ---
+
+func TestExecuteLLMStep_ContextAssemblyDisabledByDefault_NoAssemblerCall(t *testing.T) {
+	prov := &scriptedProvider{responses: [][]llmtypes.StreamEvent{
+		{{Type: llmtypes.EventDelta, Content: "done"}, {Type: llmtypes.EventUsage, Usage: &llmtypes.Usage{StopReason: "end_turn"}}},
+	}}
+	resolver := &fakeProviderResolver{providers: map[string]llmcontracts.Provider{"anthropic": prov}}
+	asm := &fakeContextAssembler{systemPrompt: "should never be used"}
+	exec := NewWorkflowStepExecutor(&fakeWorkflowToolService{}, resolver, asm)
+
+	_, err := exec.ExecuteLLMStep(context.Background(), agentworkflow.LLMStepRequest{
+		AgentID:      "agent-1",
+		SessionID:    "session-1",
+		Provider:     "anthropic",
+		SystemPrompt: "step instructions",
+		Messages:     []llmtypes.ChatMessage{{Role: "user", Content: "hi"}},
+		// EnableContextAssembly left false — default behavior.
+	})
+	if err != nil {
+		t.Fatalf("ExecuteLLMStep returned error: %v", err)
+	}
+	if len(asm.calls) != 0 {
+		t.Fatalf("assembler must not be called when EnableContextAssembly is false, got %d calls", len(asm.calls))
+	}
+	if prov.gotReqs[0].SystemPrompt != "step instructions" {
+		t.Fatalf("expected verbatim SystemPrompt, got %q", prov.gotReqs[0].SystemPrompt)
+	}
+}
+
+func TestExecuteLLMStep_EnableContextAssembly_MergesAssembledContextAheadOfRequest(t *testing.T) {
+	prov := &scriptedProvider{responses: [][]llmtypes.StreamEvent{
+		{{Type: llmtypes.EventDelta, Content: "done"}, {Type: llmtypes.EventUsage, Usage: &llmtypes.Usage{StopReason: "end_turn"}}},
+	}}
+	resolver := &fakeProviderResolver{providers: map[string]llmcontracts.Provider{"anthropic": prov}}
+	asm := &fakeContextAssembler{
+		systemPrompt: "assembled agent+mode+memory context",
+		messages:     []llmtypes.ChatMessage{{Role: "user", Content: "earlier turn"}, {Role: "assistant", Content: "earlier reply"}},
+	}
+	exec := NewWorkflowStepExecutor(&fakeWorkflowToolService{}, resolver, asm)
+
+	_, err := exec.ExecuteLLMStep(context.Background(), agentworkflow.LLMStepRequest{
+		AgentID:               "agent-1",
+		SessionID:             "session-1",
+		Provider:              "anthropic",
+		SystemPrompt:          "step-specific instructions",
+		Messages:              []llmtypes.ChatMessage{{Role: "user", Content: "do the step"}},
+		EnableContextAssembly: true,
+	})
+	if err != nil {
+		t.Fatalf("ExecuteLLMStep returned error: %v", err)
+	}
+	if len(asm.calls) != 1 || asm.calls[0].SessionID != "session-1" || asm.calls[0].AgentID != "agent-1" {
+		t.Fatalf("expected exactly 1 AssembleContext call scoped to session-1/agent-1, got %+v", asm.calls)
+	}
+
+	gotPrompt := prov.gotReqs[0].SystemPrompt
+	wantPrompt := "assembled agent+mode+memory context\n\nstep-specific instructions"
+	if gotPrompt != wantPrompt {
+		t.Fatalf("system prompt not merged as expected:\n got: %q\nwant: %q", gotPrompt, wantPrompt)
+	}
+
+	gotMsgs := prov.gotReqs[0].Messages
+	if len(gotMsgs) != 3 || gotMsgs[0].Content != "earlier turn" || gotMsgs[1].Content != "earlier reply" || gotMsgs[2].Content != "do the step" {
+		t.Fatalf("messages not merged as expected (assembled history first, step turn last): %+v", gotMsgs)
+	}
+}
+
+func TestExecuteLLMStep_EnableContextAssembly_RequiresSessionAndAgentID(t *testing.T) {
+	asm := &fakeContextAssembler{}
+	resolver := &fakeProviderResolver{providers: map[string]llmcontracts.Provider{"anthropic": &scriptedProvider{}}}
+	exec := NewWorkflowStepExecutor(&fakeWorkflowToolService{}, resolver, asm)
+
+	_, err := exec.ExecuteLLMStep(context.Background(), agentworkflow.LLMStepRequest{
+		AgentID:               "agent-1",
+		Provider:              "anthropic",
+		EnableContextAssembly: true,
+		// SessionID deliberately omitted.
+	})
+	if err == nil || !strings.Contains(err.Error(), "SessionID") {
+		t.Fatalf("expected an error naming the missing SessionID, got %v", err)
+	}
+	if len(asm.calls) != 0 {
+		t.Fatalf("assembler must not be called when the request is missing required IDs, got %d calls", len(asm.calls))
+	}
+}
+
+func TestExecuteLLMStep_EnableContextAssembly_NoAssemblerConfigured_Errors(t *testing.T) {
+	resolver := &fakeProviderResolver{providers: map[string]llmcontracts.Provider{"anthropic": &scriptedProvider{}}}
+	exec := NewWorkflowStepExecutor(&fakeWorkflowToolService{}, resolver, nil)
+
+	_, err := exec.ExecuteLLMStep(context.Background(), agentworkflow.LLMStepRequest{
+		AgentID:               "agent-1",
+		SessionID:             "session-1",
+		Provider:              "anthropic",
+		EnableContextAssembly: true,
+	})
+	if err == nil || !strings.Contains(err.Error(), "WorkflowContextAssembler") {
+		t.Fatalf("expected an error naming the missing assembler, got %v", err)
+	}
+}
+
+func TestExecuteLLMStep_EnableContextAssembly_PropagatesAssemblerError(t *testing.T) {
+	asm := &fakeContextAssembler{err: fmt.Errorf("session not found")}
+	resolver := &fakeProviderResolver{providers: map[string]llmcontracts.Provider{"anthropic": &scriptedProvider{}}}
+	exec := NewWorkflowStepExecutor(&fakeWorkflowToolService{}, resolver, asm)
+
+	_, err := exec.ExecuteLLMStep(context.Background(), agentworkflow.LLMStepRequest{
+		AgentID:               "agent-1",
+		SessionID:             "session-1",
+		Provider:              "anthropic",
+		EnableContextAssembly: true,
+	})
+	if err == nil || !strings.Contains(err.Error(), "session not found") {
+		t.Fatalf("expected the assembler's error to propagate, got %v", err)
 	}
 }

@@ -79,15 +79,18 @@ var workflowEngineChecks = map[string]workflowEngineCheck{
 // agentworkflow.StepExecutor. Every WorkflowEngine — built-in or external —
 // calls through this; it is never reimplemented per consumer.
 type workflowStepExecutor struct {
-	tools     ToolService
-	providers WorkflowProviderResolver
+	tools      ToolService
+	providers  WorkflowProviderResolver
+	contextAsm WorkflowContextAssembler
 }
 
 // NewWorkflowStepExecutor constructs the StepExecutor implementation.
 // tools and providers are required — both are checked at call time so a
 // wiring bug surfaces as a typed error rather than a nil-pointer panic.
-func NewWorkflowStepExecutor(tools ToolService, providers WorkflowProviderResolver) agentworkflow.StepExecutor {
-	return &workflowStepExecutor{tools: tools, providers: providers}
+// contextAsm is optional: nil disables LLMStepRequest.EnableContextAssembly
+// (ExecuteLLMStep errors if a request opts in with no assembler configured).
+func NewWorkflowStepExecutor(tools ToolService, providers WorkflowProviderResolver, contextAsm WorkflowContextAssembler) agentworkflow.StepExecutor {
+	return &workflowStepExecutor{tools: tools, providers: providers, contextAsm: contextAsm}
 }
 
 var _ agentworkflow.StepExecutor = (*workflowStepExecutor)(nil)
@@ -114,7 +117,9 @@ func (e *workflowStepExecutor) ExecuteToolStep(ctx context.Context, req agentwor
 // ExecuteLLMStep runs one capability-restricted agent turn through the
 // harness's provider/tool-broker/permission-engine machinery. The tool
 // surface offered to the model is exactly req.Tools — there is no fallback
-// to a broader default.
+// to a broader default. Session history, agent/mode/workspace prompt
+// content, and Tesseract memory recall are only pulled in when the request
+// opts in via EnableContextAssembly (see resolveTurnContext).
 func (e *workflowStepExecutor) ExecuteLLMStep(ctx context.Context, req agentworkflow.LLMStepRequest) (agentworkflow.LLMStepResult, error) {
 	if e.tools == nil {
 		return agentworkflow.LLMStepResult{}, fmt.Errorf("workflow: llm step executor has no ToolService configured")
@@ -128,6 +133,11 @@ func (e *workflowStepExecutor) ExecuteLLMStep(ctx context.Context, req agentwork
 	prov, ok := e.providers.Get(req.Provider)
 	if !ok {
 		return agentworkflow.LLMStepResult{}, fmt.Errorf("workflow: unknown provider %q", req.Provider)
+	}
+
+	systemPrompt, baseMessages, err := e.resolveTurnContext(ctx, req)
+	if err != nil {
+		return agentworkflow.LLMStepResult{}, err
 	}
 
 	toolDefs, err := e.resolveToolDefinitions(req.Tools)
@@ -144,7 +154,7 @@ func (e *workflowStepExecutor) ExecuteLLMStep(ctx context.Context, req agentwork
 		maxIter = DefaultMaxToolIterations
 	}
 
-	messages := append([]llmtypes.ChatMessage(nil), req.Messages...)
+	messages := append([]llmtypes.ChatMessage(nil), baseMessages...)
 	var toolCalls []agentworkflow.ToolCallRecord
 	var lastUsage *llmtypes.Usage
 
@@ -155,7 +165,7 @@ func (e *workflowStepExecutor) ExecuteLLMStep(ctx context.Context, req agentwork
 
 		chatReq := llmtypes.ChatRequest{
 			Model:        req.Model,
-			SystemPrompt: req.SystemPrompt,
+			SystemPrompt: systemPrompt,
 			Messages:     messages,
 			Tools:        toolDefs,
 		}
@@ -241,6 +251,50 @@ func (e *workflowStepExecutor) ExecuteLLMStep(ctx context.Context, req agentwork
 		}
 		messages = append(messages, llmtypes.ChatMessage{Role: "user", ContentBlocks: resultBlocks})
 	}
+}
+
+// resolveTurnContext returns the effective system prompt and base message
+// history for req. By default (EnableContextAssembly == false) it returns
+// req.SystemPrompt/req.Messages verbatim — the pre-existing behavior every
+// caller gets unless it explicitly opts in.
+//
+// When EnableContextAssembly is true, it resolves req.SessionID/req.AgentID
+// through the injected WorkflowContextAssembler — the harness's existing
+// ContextService-based context assembly (session history, agent/mode/
+// workspace prompt content, Tesseract memory recall via
+// contextbroker.MemorySource) — and layers the request's own
+// SystemPrompt/Messages on top: the assembled system prompt leads,
+// req.SystemPrompt (the step's own instructions) follows; assembled
+// session history leads, req.Messages (the step's own turn) follows.
+func (e *workflowStepExecutor) resolveTurnContext(ctx context.Context, req agentworkflow.LLMStepRequest) (string, []llmtypes.ChatMessage, error) {
+	if !req.EnableContextAssembly {
+		return req.SystemPrompt, req.Messages, nil
+	}
+	if e.contextAsm == nil {
+		return "", nil, fmt.Errorf("workflow: llm step requested EnableContextAssembly but no WorkflowContextAssembler is configured")
+	}
+	if req.SessionID == "" || req.AgentID == "" {
+		return "", nil, fmt.Errorf("workflow: EnableContextAssembly requires both SessionID and AgentID")
+	}
+
+	assembledPrompt, assembledMessages, err := e.contextAsm.AssembleContext(ctx, req.SessionID, req.AgentID)
+	if err != nil {
+		return "", nil, fmt.Errorf("workflow: context assembly failed: %w", err)
+	}
+
+	systemPrompt := assembledPrompt
+	if req.SystemPrompt != "" {
+		if systemPrompt != "" {
+			systemPrompt += "\n\n"
+		}
+		systemPrompt += req.SystemPrompt
+	}
+
+	messages := make([]llmtypes.ChatMessage, 0, len(assembledMessages)+len(req.Messages))
+	messages = append(messages, assembledMessages...)
+	messages = append(messages, req.Messages...)
+
+	return systemPrompt, messages, nil
 }
 
 // resolveToolDefinitions builds the exact ToolDefinition list for names —

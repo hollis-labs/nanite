@@ -22,8 +22,8 @@ import (
 	"github.com/hollis-labs/nanite/internal/envelope"
 	envelope_render "github.com/hollis-labs/nanite/internal/executor/envelope_render"
 	"github.com/hollis-labs/nanite/internal/learnings"
-	"github.com/hollis-labs/nanite/internal/providercatalog"
 	naniteotel "github.com/hollis-labs/nanite/internal/otel"
+	"github.com/hollis-labs/nanite/internal/providercatalog"
 	"github.com/hollis-labs/nanite/internal/reflex"
 	"github.com/hollis-labs/nanite/internal/worktree"
 
@@ -421,6 +421,14 @@ func cmdServe(args []string) {
 	// G5: wire mux Manager's StreamPublisher — devmode-only, no-op in production.
 	// Run goroutine is started after daemonLifecycle is constructed below.
 	wireMuxPublisher(muxMgr, container.Streams)
+
+	// CW-20260813-0011: wire the StepExecutor implementation
+	// (CW-20260813-0009) behind the workflow_execute_llm_step /
+	// workflow_execute_tool_step / workflow_verify_step MCP callback
+	// tools. container.Tools already satisfies service.ToolService;
+	// registry (built by initProviders) already satisfies
+	// service.WorkflowProviderResolver — no new adapters needed.
+	selfTools.WorkflowExecutor = service.NewWorkflowStepExecutor(container.Tools, registry)
 
 	// Wire todo/plan store into the self-tools transport.
 	selfTools.TodoStore = s

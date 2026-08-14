@@ -173,6 +173,13 @@ func selfToolDefinitions() []Tool {
 		// Other launch consumers call back through this after discovering
 		// Nanite's `agent-source` handle in the directory registry.
 		agentSourceResolveToolDefinition(),
+		// Agent Workflows MCP callback surface — external engines
+		// (LangGraph, CrewAI) and the built-in engine reach the single
+		// StepExecutor implementation through these three thin wrappers
+		// (CW-20260813-0011).
+		workflowExecuteLLMStepToolDefinition(),
+		workflowExecuteToolStepToolDefinition(),
+		workflowVerifyStepToolDefinition(),
 		// Cross-app navigation tools — control Engine GUI via SSE
 		{
 			Name:        "engine_navigate",

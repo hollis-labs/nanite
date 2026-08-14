@@ -50,10 +50,10 @@ const (
 // than trusting a step's self-reported text — the design doc's motivating
 // example (an agent fabricating a Torque fetch instead of calling it).
 type ToolCallRecord struct {
-	Tool    string
-	Input   map[string]any
-	Output  string
-	IsError bool
+	Tool    string         `json:"tool"`
+	Input   map[string]any `json:"input"`
+	Output  string         `json:"output"`
+	IsError bool           `json:"is_error"`
 }
 
 // LLMStepRequest is the input to StepExecutor.ExecuteLLMStep — one
@@ -63,8 +63,8 @@ type LLMStepRequest struct {
 	// and for a future engine's persistence layer (out of scope here —
 	// StepExecutor itself is stateless). Optional; ExecuteLLMStep does not
 	// require them to function.
-	WorkflowRunID string
-	StepID        string
+	WorkflowRunID string `json:"workflow_run_id,omitempty"`
+	StepID        string `json:"step_id,omitempty"`
 
 	// SessionID, when non-empty, scopes this call to an existing session
 	// for telemetry/audit correlation. ExecuteLLMStep does not create,
@@ -72,118 +72,118 @@ type LLMStepRequest struct {
 	// full ContextService-based context assembly / memory recall) is the
 	// caller's responsibility, consistent with this ticket's "no DB
 	// schema / persistence" scope.
-	SessionID string
+	SessionID string `json:"session_id,omitempty"`
 
 	// AgentID identifies the calling identity for permission checks
 	// (passed straight through to ToolService.Execute, which applies the
 	// existing permission engine) and tool-metadata lookups.
-	AgentID string
+	AgentID string `json:"agent_id,omitempty"`
 
 	// Provider and Model select which LLM backend executes the turn.
-	Provider string
-	Model    string
+	Provider string `json:"provider"`
+	Model    string `json:"model"`
 
 	// SystemPrompt and Messages are the fully-assembled turn context.
 	// Composing memory recall / prior-step results into these is the
 	// caller's job — ExecuteLLMStep does not assemble context itself.
-	SystemPrompt string
-	Messages     []llmtypes.ChatMessage
+	SystemPrompt string                 `json:"system_prompt,omitempty"`
+	Messages     []llmtypes.ChatMessage `json:"messages"`
 
 	// Tools is the capability-restricted tool surface: the exact set of
 	// tool names this step's LLM turn may call. ExecuteLLMStep resolves
 	// definitions for exactly these names and offers no others — there is
 	// no fallback to an agent profile's broader default. Empty means no
 	// tools are offered.
-	Tools []string
+	Tools []string `json:"tools,omitempty"`
 
 	// MaxToolIterations bounds the tool-call loop. 0 uses
 	// DefaultMaxToolIterations.
-	MaxToolIterations int
+	MaxToolIterations int `json:"max_tool_iterations,omitempty"`
 }
 
 // LLMStepResult is the output of one ExecuteLLMStep call.
 type LLMStepResult struct {
-	Text       string
-	ToolCalls  []ToolCallRecord
-	Usage      *llmtypes.Usage
-	StopReason string
+	Text       string           `json:"text"`
+	ToolCalls  []ToolCallRecord `json:"tool_calls,omitempty"`
+	Usage      *llmtypes.Usage  `json:"usage,omitempty"`
+	StopReason string           `json:"stop_reason,omitempty"`
 }
 
 // ToolStepRequest is the input to StepExecutor.ExecuteToolStep — a single
 // engine-owned tool call that never touches model inference.
 type ToolStepRequest struct {
-	WorkflowRunID string
-	StepID        string
+	WorkflowRunID string `json:"workflow_run_id,omitempty"`
+	StepID        string `json:"step_id,omitempty"`
 
 	// AgentID identifies the calling identity for permission checks.
-	AgentID string
+	AgentID string `json:"agent_id,omitempty"`
 
-	Tool string
-	Args map[string]any
+	Tool string         `json:"tool"`
+	Args map[string]any `json:"args,omitempty"`
 }
 
 // ToolStepResult is the literal (success or error) result of one
 // ExecuteToolStep call.
 type ToolStepResult struct {
-	Output  string
-	IsError bool
+	Output  string `json:"output"`
+	IsError bool   `json:"is_error"`
 }
 
 // VerifySpec is the static, author-time verify configuration attached to
 // an llm/tool StepDefinition. An engine combines it with the step's actual
 // runtime output to build a VerifyRequest.
 type VerifySpec struct {
-	Mode VerifyMode
+	Mode VerifyMode `json:"mode"`
 
 	// EngineCheck names a registered deterministic check (mode: engine).
 	// The set of valid names is intentionally not enumerated here (design
 	// doc explicit non-goal: don't anticipate every check kind up front —
 	// start narrow, grow as real workflows need more). Verify errors on
 	// an unrecognized name.
-	EngineCheck  string
-	EngineParams map[string]any
+	EngineCheck  string         `json:"engine_check,omitempty"`
+	EngineParams map[string]any `json:"engine_params,omitempty"`
 
 	// Reviewer* configure the independent second llm step Verify spawns
 	// when Mode == VerifyModeAgent — literally a nested ExecuteLLMStep
 	// call, not separate logic (design doc).
-	ReviewerPrompt    string
-	ReviewerAgentID   string
-	ReviewerProvider  string
-	ReviewerModel     string
-	ReviewerTools     []string
-	ReviewerSessionID string
+	ReviewerPrompt    string   `json:"reviewer_prompt,omitempty"`
+	ReviewerAgentID   string   `json:"reviewer_agent_id,omitempty"`
+	ReviewerProvider  string   `json:"reviewer_provider,omitempty"`
+	ReviewerModel     string   `json:"reviewer_model,omitempty"`
+	ReviewerTools     []string `json:"reviewer_tools,omitempty"`
+	ReviewerSessionID string   `json:"reviewer_session_id,omitempty"`
 }
 
 // VerifySubject is what's being verified: a prior step's literal runtime
 // output, passed to both engine checks and the agent-reviewer prompt.
 type VerifySubject struct {
-	StepKind  StepKind
-	Output    string
-	IsError   bool
-	ToolCalls []ToolCallRecord
+	StepKind  StepKind         `json:"step_kind,omitempty"`
+	Output    string           `json:"output"`
+	IsError   bool             `json:"is_error"`
+	ToolCalls []ToolCallRecord `json:"tool_calls,omitempty"`
 }
 
 // VerifyRequest is the input to StepExecutor.Verify.
 type VerifyRequest struct {
-	WorkflowRunID string
+	WorkflowRunID string `json:"workflow_run_id,omitempty"`
 	// StepID is the verify step's own identity, for logging/audit.
-	StepID string
+	StepID string `json:"step_id,omitempty"`
 	// SubjectStepID is the step whose output is being verified.
-	SubjectStepID string
+	SubjectStepID string `json:"subject_step_id,omitempty"`
 
 	VerifySpec
 
-	Subject VerifySubject
+	Subject VerifySubject `json:"subject"`
 }
 
 // VerifyResult is the outcome of one Verify call.
 type VerifyResult struct {
-	Passed bool
-	Reason string
+	Passed bool   `json:"passed"`
+	Reason string `json:"reason"`
 
 	// ReviewerResult is set when Mode == VerifyModeAgent — the raw nested
 	// ExecuteLLMStep result, kept for audit/debugging.
-	ReviewerResult *LLMStepResult
+	ReviewerResult *LLMStepResult `json:"reviewer_result,omitempty"`
 }
 
 // StepDefinition is one node in a WorkflowDefinition's DAG.
@@ -219,7 +219,7 @@ type WorkflowDefinition struct {
 // WorkflowInput is the caller-supplied input to a workflow run.
 type WorkflowInput struct {
 	// Params carries the run's initial arguments, keyed by name.
-	Params map[string]any
+	Params map[string]any `json:"params,omitempty"`
 }
 
 // StepResult is one step's literal, typed outcome within a WorkflowResult.

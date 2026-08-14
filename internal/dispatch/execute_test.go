@@ -382,6 +382,28 @@ func TestExecuteTask_WorkflowRoute_RequiresLauncher(t *testing.T) {
 	}
 }
 
+// TestExecuteTask_WorkflowRoute_RequiresWorkflowName guards against a
+// RoleWorkflow assignment reaching the launcher with no name to run —
+// reachable via RoleOverride (the test seam) without a paired
+// ReflexHints.WorkflowName, since RoleOverride only ever sets .Role.
+func TestExecuteTask_WorkflowRoute_RequiresWorkflowName(t *testing.T) {
+	spawner := &fakeSpawner{}
+	launcher := &fakeWorkflowLauncher{result: &SpawnResult{Summary: "should not be called"}}
+	wrapper := &recordingWrapper{}
+	args := ExecuteTaskArgs{
+		SessionID:    "s1",
+		Message:      "do the thing",
+		RoleOverride: RoleWorkflow,
+	}
+
+	if _, err := ExecuteTask(context.Background(), spawner, wrapper, launcher, args); !errors.Is(err, ErrWorkflowNameRequired) {
+		t.Errorf("err = %v, want ErrWorkflowNameRequired", err)
+	}
+	if launcher.called != 0 {
+		t.Errorf("launcher called %d times, want 0", launcher.called)
+	}
+}
+
 // TestExecuteTask_EmptyWorkspaceProfile_FallsThrough verifies that when no
 // WorkspaceID / AgentProfileID are set, the SpawnRequest carries empty
 // strings (which causes the subagent gate to fall back to TrustNormal).

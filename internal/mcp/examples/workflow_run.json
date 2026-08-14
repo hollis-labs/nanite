@@ -25,7 +25,7 @@
       "workflow_name": "does-not-exist"
     },
     "result": {
-      "error": "workflow: unknown workflow \"does-not-exist\""
+      "error": "dispatch workflow launch: workflow: unknown workflow \"does-not-exist\""
     },
     "notes": "use task_execute instead when unsure whether a workflow exists for this task."
   }

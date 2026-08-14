@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -12,6 +13,20 @@ import (
 	"github.com/hollis-labs/nanite/internal/agentworkflow"
 	"github.com/hollis-labs/nanite/internal/store"
 )
+
+// fakeFailingWorkflowEngine simulates an infra-level engine failure (e.g. a
+// persistence error before any run row exists) — BuiltinWorkflowEngine
+// returns a zero-value WorkflowResult in that case, which is what exercises
+// the metadata omitempty path.
+type fakeFailingWorkflowEngine struct{}
+
+func (fakeFailingWorkflowEngine) Name() string { return "fake-failing" }
+
+func (fakeFailingWorkflowEngine) Run(context.Context, agentworkflow.WorkflowDefinition, agentworkflow.WorkflowInput, agentworkflow.StepExecutor) (agentworkflow.WorkflowResult, error) {
+	return agentworkflow.WorkflowResult{}, fmt.Errorf("simulated infra failure")
+}
+
+var _ agentworkflow.WorkflowEngine = fakeFailingWorkflowEngine{}
 
 // singleToolStepWorkflow is a minimal, valid workflow definition — one
 // engine-owned tool step, no LLM involved — enough to exercise the full
@@ -221,5 +236,83 @@ func TestWorkflowLauncher_Launch_RespectsTimeout(t *testing.T) {
 	}
 	if insts[0].Status != store.DurableAgentStatusStopped {
 		t.Errorf("Status = %q, want stopped", insts[0].Status)
+	}
+}
+
+// TestWorkflowLauncher_Launch_StampsParentSessionIDInName proves
+// ParentSessionID is actually used, not just documented — a workflow-run
+// instance's Name should surface which session launched it so an operator
+// looking at concurrent runs can tell them apart.
+func TestWorkflowLauncher_Launch_StampsParentSessionIDInName(t *testing.T) {
+	st, profile := newWorkflowLaunchTestFixture(t)
+	registry := agentworkflow.NewRegistry(map[string]agentworkflow.WorkflowDefinition{
+		"noop-workflow": singleToolStepWorkflow("noop-workflow"),
+	})
+	engine := NewBuiltinWorkflowEngine(st)
+	exec := NewWorkflowStepExecutor(&fakeWorkflowToolService{}, &fakeProviderResolver{})
+	launcher := NewWorkflowLauncher(registry, engine, exec, NewDurableAgentService(st))
+
+	result, err := launcher.Launch(context.Background(), WorkflowLaunchRequest{
+		WorkflowName:    "noop-workflow",
+		WorkspaceID:     "ws-launch",
+		AgentProfileID:  profile.ID,
+		ParentSessionID: "sess-abc",
+	})
+	if err != nil {
+		t.Fatalf("Launch: %v", err)
+	}
+
+	inst, err := st.GetDurableAgentInstance(result.InstanceID)
+	if err != nil {
+		t.Fatalf("GetDurableAgentInstance: %v", err)
+	}
+	if !strings.Contains(inst.Name, "sess-abc") {
+		t.Errorf("Name = %q, want it to contain ParentSessionID sess-abc", inst.Name)
+	}
+}
+
+// TestWorkflowLauncher_Launch_EngineInfraError_OmitsEmptyRunID proves that
+// when the engine returns an infra-level error (a zero-value
+// WorkflowResult, no run was ever produced), the instance's persisted
+// metadata omits workflow_run_id entirely instead of stamping a misleading
+// empty string that would look like a valid-but-empty run link.
+func TestWorkflowLauncher_Launch_EngineInfraError_OmitsEmptyRunID(t *testing.T) {
+	st, profile := newWorkflowLaunchTestFixture(t)
+	registry := agentworkflow.NewRegistry(map[string]agentworkflow.WorkflowDefinition{
+		"noop-workflow": singleToolStepWorkflow("noop-workflow"),
+	})
+	exec := NewWorkflowStepExecutor(&fakeWorkflowToolService{}, &fakeProviderResolver{})
+	durable := NewDurableAgentService(st)
+	launcher := NewWorkflowLauncher(registry, fakeFailingWorkflowEngine{}, exec, durable)
+
+	_, err := launcher.Launch(context.Background(), WorkflowLaunchRequest{
+		WorkflowName:   "noop-workflow",
+		WorkspaceID:    "ws-launch",
+		AgentProfileID: profile.ID,
+	})
+	if err == nil || !strings.Contains(err.Error(), "simulated infra failure") {
+		t.Fatalf("err = %v, want simulated infra failure", err)
+	}
+
+	insts, err := st.ListDurableAgentInstances(false)
+	if err != nil {
+		t.Fatalf("ListDurableAgentInstances: %v", err)
+	}
+	if len(insts) != 1 {
+		t.Fatalf("len(insts) = %d, want 1", len(insts))
+	}
+	if insts[0].Status != store.DurableAgentStatusStopped {
+		t.Errorf("Status = %q, want stopped", insts[0].Status)
+	}
+
+	var meta map[string]any
+	if err := json.Unmarshal([]byte(insts[0].MetadataJSON), &meta); err != nil {
+		t.Fatalf("unmarshal metadata_json %q: %v", insts[0].MetadataJSON, err)
+	}
+	if _, present := meta["workflow_run_id"]; present {
+		t.Errorf("metadata = %v, want workflow_run_id omitted on infra failure", meta)
+	}
+	if meta["workflow_name"] != "noop-workflow" {
+		t.Errorf("metadata workflow_name = %v, want noop-workflow", meta["workflow_name"])
 	}
 }

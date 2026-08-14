@@ -143,6 +143,13 @@ type WorkflowLauncher interface {
 // RoleWorkflow but no WorkflowLauncher is configured. Indicates a wiring bug.
 var ErrNoWorkflowLauncher = errors.New("dispatch: no workflow launcher configured")
 
+// ErrWorkflowNameRequired is returned by ExecuteTask when a task is routed
+// to RoleWorkflow (via RoleOverride or a future caller) without a
+// WorkflowName. AssignRole itself never produces this combination — only a
+// ReflexHints.WorkflowName override sets both Role and WorkflowName
+// together — so this indicates a caller bypassed that pairing.
+var ErrWorkflowNameRequired = errors.New("dispatch: workflow name is required for RoleWorkflow")
+
 // SpawnRequest mirrors the shape subagent.Service.Spawn accepts. Defined
 // here as a narrow value type so the dispatch package does not import
 // internal/subagent — the wiring layer (internal/service) translates to
@@ -299,6 +306,9 @@ func ExecuteTask(ctx context.Context, spawner Spawner, wrapper EnvelopeWrapper, 
 	if assignment.Role == RoleWorkflow {
 		if launcher == nil {
 			return Envelope{}, ErrNoWorkflowLauncher
+		}
+		if assignment.WorkflowName == "" {
+			return Envelope{}, ErrWorkflowNameRequired
 		}
 		result, err = launcher.Launch(ctx, WorkflowLaunchRequest{
 			WorkflowName:    assignment.WorkflowName,

@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log/slog"
 	"regexp"
@@ -115,8 +116,12 @@ func (l *WorkflowLauncher) Launch(ctx context.Context, req WorkflowLaunchRequest
 		return nil, fmt.Errorf("workflow: agent_profile_id is required (durable_agent_instances.profile_id is a required FK)")
 	}
 
+	instName := fmt.Sprintf("workflow: %s", wf.Name)
+	if req.ParentSessionID != "" {
+		instName = fmt.Sprintf("workflow: %s (session %s)", wf.Name, req.ParentSessionID)
+	}
 	inst := &store.DurableAgentInstance{
-		Name:             fmt.Sprintf("workflow: %s", wf.Name),
+		Name:             instName,
 		Slug:             workflowInstanceSlug(wf.Name),
 		ProfileID:        req.AgentProfileID,
 		LifecycleClass:   store.DurableAgentClassTemplate,
@@ -147,11 +152,22 @@ func (l *WorkflowLauncher) Launch(ctx context.Context, req WorkflowLaunchRequest
 
 	// Finalize the instance's lifecycle regardless of runErr — an
 	// infra-level engine failure still leaves an instance that must not be
-	// left dangling in "active".
-	metaJSON := fmt.Sprintf(`{"workflow_name":%q,"workflow_run_id":%q}`, wf.Name, result.RunID)
-	if _, updErr := l.durable.Update(ctx, inst.ID, store.DurableAgentInstanceUpdate{MetadataJSON: &metaJSON}); updErr != nil {
-		slog.Warn("workflow: stash workflow_run_id on instance metadata failed",
-			"instance_id", inst.ID, "run_id", result.RunID, "err", updErr)
+	// left dangling in "active". BuiltinWorkflowEngine returns a zero-value
+	// WorkflowResult on an infra error, so RunID is omitted (not stamped as
+	// a misleading empty string) when there was no real run to link to.
+	metaBytes, marshalErr := json.Marshal(workflowInstanceMetadata{
+		WorkflowName:  wf.Name,
+		WorkflowRunID: result.RunID,
+	})
+	if marshalErr != nil {
+		slog.Warn("workflow: marshal instance metadata failed",
+			"instance_id", inst.ID, "run_id", result.RunID, "err", marshalErr)
+	} else {
+		metaJSON := string(metaBytes)
+		if _, updErr := l.durable.Update(ctx, inst.ID, store.DurableAgentInstanceUpdate{MetadataJSON: &metaJSON}); updErr != nil {
+			slog.Warn("workflow: stash workflow_run_id on instance metadata failed",
+				"instance_id", inst.ID, "run_id", result.RunID, "err", updErr)
+		}
 	}
 	if _, stopErr := l.durable.RequestStop(ctx, inst.ID); stopErr != nil {
 		slog.Warn("workflow: request-stop after run completion failed",
@@ -170,6 +186,15 @@ func (l *WorkflowLauncher) Launch(ctx context.Context, req WorkflowLaunchRequest
 		StepResults:  result.StepResults,
 		Error:        result.Error,
 	}, nil
+}
+
+// workflowInstanceMetadata is the shape stashed into a workflow-run
+// durable_agent_instance's metadata_json. WorkflowRunID is omitted (not
+// present as an empty string) when the engine never produced a run — an
+// infra-level failure before/during Run() leaves no run to link to.
+type workflowInstanceMetadata struct {
+	WorkflowName  string `json:"workflow_name"`
+	WorkflowRunID string `json:"workflow_run_id,omitempty"`
 }
 
 var workflowSlugUnsafe = regexp.MustCompile(`[^a-z0-9]+`)

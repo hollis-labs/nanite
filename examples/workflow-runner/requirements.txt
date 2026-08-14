@@ -4,3 +4,10 @@ mcp
 # langgraph_poc.py (CW-20260813-0012)
 langgraph
 langchain-mcp-adapters
+
+# crewai_poc.py (CW-20260813-0013)
+# Needs Python 3.10-3.13 — crewai's numpy/chromadb dependency chain has no
+# prebuilt wheels for very new interpreters yet (e.g. 3.14 at time of writing).
+crewai
+crewai-tools
+mcpadapt

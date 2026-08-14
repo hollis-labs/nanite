@@ -8,14 +8,15 @@ import (
 )
 
 // embeddedScripts bakes the production external-engine runner scripts
-// (langgraph_runner.py, crewai_runner.py) plus their requirements.txt
+// (langgraph_runner.py, crewai_runner.py, google_adk_runner.py,
+// autogen_runner.py, langchain_runner.py) plus their requirements.txt
 // straight into the nanite binary. A Cerberus-deployed binary ships alone
 // — there is no guarantee a repo checkout sits next to it — so ScriptPath
 // can't point at a source-tree-relative path in production; embedding plus
 // MaterializeScripts below is what makes these scripts locatable no matter
-// how the binary got onto the host (CW-20260814-0003).
+// how the binary got onto the host (CW-20260814-0003, CW-20260814-0007).
 //
-//go:embed scripts/langgraph_runner.py scripts/crewai_runner.py scripts/requirements.txt
+//go:embed scripts/langgraph_runner.py scripts/crewai_runner.py scripts/google_adk_runner.py scripts/autogen_runner.py scripts/langchain_runner.py scripts/requirements.txt
 var embeddedScripts embed.FS
 
 // MaterializeScripts writes every embedded script under scripts/ to dir

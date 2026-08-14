@@ -14,7 +14,14 @@ func TestMaterializeScripts_WritesEmbeddedFiles(t *testing.T) {
 		t.Fatalf("MaterializeScripts: %v", err)
 	}
 
-	for _, name := range []string{"langgraph_runner.py", "crewai_runner.py", "requirements.txt"} {
+	for _, name := range []string{
+		"langgraph_runner.py",
+		"crewai_runner.py",
+		"google_adk_runner.py",
+		"autogen_runner.py",
+		"langchain_runner.py",
+		"requirements.txt",
+	} {
 		path, ok := paths[name]
 		if !ok {
 			t.Fatalf("paths missing %q: %+v", name, paths)

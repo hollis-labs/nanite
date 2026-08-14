@@ -487,6 +487,9 @@ func cmdServe(args []string) {
 		}{
 			{agentworkflow.EngineLangGraph, "langgraph_runner.py"},
 			{agentworkflow.EngineCrewAI, "crewai_runner.py"},
+			{agentworkflow.EngineGoogleADK, "google_adk_runner.py"},
+			{agentworkflow.EngineAutoGen, "autogen_runner.py"},
+			{agentworkflow.EngineLangChain, "langchain_runner.py"},
 		}
 		for _, spec := range externalEngineSpecs {
 			scriptPath, ok := scriptPaths[spec.scriptFile]

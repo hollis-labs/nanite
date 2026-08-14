@@ -254,6 +254,15 @@ const (
 	// EngineCrewAI runs the hand-authored CrewAI POC crew
 	// (CW-20260813-0013) via internal/workflowrunner.
 	EngineCrewAI = "crewai"
+	// EngineGoogleADK runs the hand-authored Google ADK runner
+	// (CW-20260814-0007) via internal/workflowrunner.
+	EngineGoogleADK = "google_adk"
+	// EngineAutoGen runs the hand-authored AutoGen runner
+	// (CW-20260814-0007) via internal/workflowrunner.
+	EngineAutoGen = "autogen"
+	// EngineLangChain runs the hand-authored LangChain runner
+	// (CW-20260814-0007) via internal/workflowrunner.
+	EngineLangChain = "langchain"
 )
 
 // WorkflowDefinition describes a workflow's steps and dependencies for a
@@ -262,8 +271,10 @@ type WorkflowDefinition struct {
 	Name string
 
 	// Engine selects which registered WorkflowEngine runs this definition
-	// — EngineBuiltin, EngineLangGraph, or EngineCrewAI. Empty defaults to
-	// EngineBuiltin, so every workflow defined before this field existed
+	// — EngineBuiltin, or one of the registered external engines
+	// (EngineLangGraph, EngineCrewAI, EngineGoogleADK, EngineAutoGen,
+	// EngineLangChain). Empty defaults to EngineBuiltin, so every workflow
+	// defined before this field existed
 	// is unaffected. A name with no matching registered engine is a
 	// launch-time error (WorkflowLauncher.Launch), not a load-time one —
 	// which engines are actually available is a per-process wiring

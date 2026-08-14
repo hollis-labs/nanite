@@ -1,0 +1,44 @@
+[
+  {
+    "title": "mode=engine — deterministic no_error check",
+    "args": {
+      "workflow_run_id": "wfr_01HZABC",
+      "step_id": "verify_fetch",
+      "subject_step_id": "fetch_ticket",
+      "mode": "engine",
+      "engine_check": "no_error",
+      "subject": {
+        "step_kind": "tool",
+        "output": "{\"ID\":\"CW-20260813-0011\",...}",
+        "is_error": false
+      }
+    },
+    "result": {
+      "passed": true,
+      "reason": "subject step did not return an error"
+    }
+  },
+  {
+    "title": "mode=agent — independent reviewer LLM step",
+    "args": {
+      "workflow_run_id": "wfr_01HZABC",
+      "step_id": "verify_summary",
+      "subject_step_id": "summarize",
+      "mode": "agent",
+      "reviewer_prompt": "Confirm the summary is a single sentence and does not fabricate facts not present in the source text.",
+      "reviewer_provider": "anthropic",
+      "reviewer_model": "claude-sonnet-5",
+      "subject": {
+        "step_kind": "llm",
+        "output": "The text describes...",
+        "is_error": false
+      }
+    },
+    "result": {
+      "passed": true,
+      "reason": "summary is a single sentence and matches the source",
+      "reviewer_result": { "text": "PASS summary is a single sentence and matches the source", "stop_reason": "end_turn" }
+    },
+    "notes": "an unparseable reviewer response fails closed (passed=false) rather than defaulting to pass."
+  }
+]

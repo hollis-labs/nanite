@@ -1,0 +1,16 @@
+[
+  {
+    "title": "Engine-owned tool call, no LLM involved",
+    "args": {
+      "workflow_run_id": "wfr_01HZABC",
+      "step_id": "fetch_ticket",
+      "tool": "torque_task_get",
+      "args": { "id": "CW-20260813-0011" }
+    },
+    "result": {
+      "output": "{\"ID\":\"CW-20260813-0011\",\"Status\":\"doing\",...}",
+      "is_error": false
+    },
+    "notes": "the call happens regardless of what any model would have decided; the literal result (success or error) is returned as-is."
+  }
+]

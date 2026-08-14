@@ -139,6 +139,16 @@ func (s *Server) makeTransportHandler(t toolTransport, name string) mcp.ToolHand
 		text = convertEnvelopeMarkers(text)
 		return &mcp.CallToolResult{
 			Content: []mcp.Content{&mcp.TextContent{Text: text}},
+			// result.IsError (set via errorResult() in every self/dev tool
+			// handler) must propagate onto the wire result — otherwise a
+			// caller reading CallToolResult.IsError (e.g. a real MCP
+			// client, not just this repo's own tests which read the text
+			// body) can never distinguish a handler-reported failure from
+			// a success. Found via CW-20260813-0011's end-to-end
+			// verification: workflow_verify_step's pass/fail is exactly
+			// this flag, so a caller silently seeing IsError=false on
+			// every failure defeats the tool's purpose.
+			IsError: result != nil && result.IsError,
 		}, nil
 	}
 }

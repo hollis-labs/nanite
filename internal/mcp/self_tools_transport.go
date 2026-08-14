@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/hollis-labs/agentkit/broker"
+	"github.com/hollis-labs/nanite/internal/agentworkflow"
 	"github.com/hollis-labs/nanite/internal/background"
 	"github.com/hollis-labs/nanite/internal/builders"
 	"github.com/hollis-labs/nanite/internal/classify"
@@ -239,6 +240,16 @@ type SelfToolsTransport struct {
 	// constructed by NewSelfToolsTransport so SnapshotSession works
 	// without explicit wiring.
 	RememberCounters *rememberSessionCounters
+
+	// WorkflowExecutor is the agentworkflow.StepExecutor implementation
+	// (internal/service/workflow_step_executor.go, CW-20260813-0009) that
+	// the workflow_execute_llm_step / workflow_execute_tool_step /
+	// workflow_verify_step self-tools delegate to — the MCP callback
+	// surface an external workflow engine (LangGraph, CrewAI) or the
+	// built-in engine uses to run real work through this same harness
+	// (CW-20260813-0011). Nil-safe — when unwired, the three tools return
+	// a clear errorResult.
+	WorkflowExecutor agentworkflow.StepExecutor
 }
 
 // notifyWorkChanged fires a work_changed presence broadcast if a broadcaster
@@ -305,6 +316,12 @@ func (st *SelfToolsTransport) CallTool(ctx context.Context, name string, args ma
 		return st.callUpdateAgent(args)
 	case agentSourceResolveToolName:
 		return st.callAgentSourceResolve(args)
+	case "workflow_execute_llm_step":
+		return st.callWorkflowExecuteLLMStep(ctx, args)
+	case "workflow_execute_tool_step":
+		return st.callWorkflowExecuteToolStep(ctx, args)
+	case "workflow_verify_step":
+		return st.callWorkflowVerifyStep(ctx, args)
 	case "engine_navigate":
 		return st.callNavigateEngine(args)
 	case "engine_refresh":

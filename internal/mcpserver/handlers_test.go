@@ -195,6 +195,35 @@ func TestMakeHandler_EmptyArguments(t *testing.T) {
 	}
 }
 
+// TestMakeHandler_PropagatesIsError verifies that a self-tool handler's
+// errorResult (IsError=true on the internal condmcp.ToolResult, with a
+// nil Go error return — the convention every self-tool handler uses)
+// propagates onto the wire CallToolResult.IsError. Found missing via
+// CW-20260813-0011's end-to-end verification: a real MCP client reading
+// CallToolResult.IsError (rather than sniffing the text body) could never
+// see a handler-reported failure, which defeats tools like
+// workflow_verify_step whose entire contract is pass/fail via that flag.
+func TestMakeHandler_PropagatesIsError(t *testing.T) {
+	srv := newTestServer(t)
+	// workflow_execute_llm_step's handler returns errorResult(...) when
+	// no WorkflowExecutor is wired — deterministic and needs no other
+	// service wiring, unlike most other self-tool error paths.
+	h := srv.makeHandler("workflow_execute_llm_step")
+
+	req := &mcp.CallToolRequest{
+		Params: &mcp.CallToolParamsRaw{
+			Arguments: json.RawMessage(`{"provider":"anthropic","model":"claude-sonnet-5","messages":[{"role":"user","content":"hi"}]}`),
+		},
+	}
+	result, err := h(context.Background(), req)
+	if err != nil {
+		t.Fatalf("handler returned transport error: %v", err)
+	}
+	if result == nil || !result.IsError {
+		t.Fatalf("expected IsError=true on the wire result, got %+v", result)
+	}
+}
+
 // TestMakeHandler_EnvelopeConversion verifies that envelope markers in the
 // underlying tool's text output are converted to nanite-envelope fenced
 // blocks before being returned to the SDK caller.

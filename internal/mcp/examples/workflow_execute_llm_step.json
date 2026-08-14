@@ -1,0 +1,41 @@
+[
+  {
+    "title": "Capability-restricted worker turn with no tools",
+    "args": {
+      "workflow_run_id": "wfr_01HZABC",
+      "step_id": "summarize",
+      "provider": "anthropic",
+      "model": "claude-sonnet-5",
+      "system_prompt": "Summarize the given text in one sentence.",
+      "messages": [
+        { "role": "user", "content": "Long paragraph of text to summarize..." }
+      ]
+    },
+    "result": {
+      "text": "The text describes...",
+      "stop_reason": "end_turn"
+    },
+    "notes": "tools omitted means no tools are offered — there is no fallback to a broader default."
+  },
+  {
+    "title": "Worker turn with a narrow, capability-restricted tool surface",
+    "args": {
+      "workflow_run_id": "wfr_01HZABC",
+      "step_id": "fetch_ticket",
+      "provider": "anthropic",
+      "model": "claude-sonnet-5",
+      "messages": [
+        { "role": "user", "content": "Fetch Torque task CW-20260813-0011 and report its status." }
+      ],
+      "tools": ["torque_task_get"]
+    },
+    "result": {
+      "text": "CW-20260813-0011 is in status \"doing\".",
+      "tool_calls": [
+        { "tool": "torque_task_get", "input": { "id": "CW-20260813-0011" }, "output": "{...}", "is_error": false }
+      ],
+      "stop_reason": "end_turn"
+    },
+    "notes": "the model can only call torque_task_get — any other tool_use is rejected as a defense-in-depth backstop."
+  }
+]

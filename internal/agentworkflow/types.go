@@ -28,13 +28,20 @@ const (
 	VerifyModeAgent VerifyMode = "agent"
 )
 
-// RunStatus is a completed workflow run's terminal status.
+// RunStatus is a workflow run's terminal-for-this-call status. A run isn't
+// always fully resolved when a WorkflowEngine.Run (or Resume) call returns —
+// RunStatusWaiting covers the built-in engine's gate pause (design doc:
+// "gate steps persist a pending/waiting state and block that branch of the
+// DAG until externally resolved").
 type RunStatus string
 
 const (
 	RunStatusCompleted RunStatus = "completed"
 	RunStatusFailed    RunStatus = "failed"
 	RunStatusCancelled RunStatus = "cancelled"
+	// RunStatusWaiting means the run made all the progress it currently
+	// can — every remaining step is blocked behind an unresolved gate.
+	RunStatusWaiting RunStatus = "waiting_on_gate"
 )
 
 // ToolCallRecord is one literal tool invocation made during an llm step's

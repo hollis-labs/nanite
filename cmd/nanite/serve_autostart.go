@@ -83,7 +83,11 @@ func ensureServeRunning(ctx context.Context, baseURL string, noAutostart bool) e
 	if err != nil {
 		return fmt.Errorf("auto-start: open lock file %s: %w", lockPath, err)
 	}
-	defer lockFile.Close()
+	defer func() {
+		if closeErr := lockFile.Close(); closeErr != nil {
+			fmt.Fprintf(os.Stderr, "auto-start: close lock file %s: %v\n", lockPath, closeErr)
+		}
+	}()
 
 	fd := int(lockFile.Fd())
 	var exitCh chan error
@@ -206,14 +210,24 @@ func spawnServe(port int, logPath string) (chan error, error) {
 	cmd.SysProcAttr = detachedProcAttr()
 
 	if err := cmd.Start(); err != nil {
-		logFile.Close()
+		if closeErr := logFile.Close(); closeErr != nil {
+			return nil, fmt.Errorf("start nanite serve (%s): %w (also failed to close log file: %v)", exe, err, closeErr)
+		}
 		return nil, fmt.Errorf("start nanite serve (%s): %w", exe, err)
 	}
 
 	exitCh := make(chan error, 1)
 	go func() {
-		defer logFile.Close()
-		exitCh <- cmd.Wait()
+		// waitErr alone drives exitCh's contract with pollHealthUntilReady
+		// (any receive means the child exited). A log-file close failure is
+		// unrelated to whether the child is still alive, so it's reported
+		// separately rather than folded into exitCh, which would otherwise
+		// read as a false "server exited" signal.
+		waitErr := cmd.Wait()
+		if closeErr := logFile.Close(); closeErr != nil {
+			fmt.Fprintf(os.Stderr, "auto-start: close serve log %s: %v\n", logPath, closeErr)
+		}
+		exitCh <- waitErr
 	}()
 	return exitCh, nil
 }

@@ -88,7 +88,18 @@ func AssignRoleWithReflex(
 // reflexMatchToAssignment converts a ReflexMatch to a dispatch.RoleAssignment.
 // The reflex's Role string maps to dispatch.Role; the profile slug becomes the
 // AgentSlug; DispatchVia maps to the Mode string.
+//
+// A non-empty ResolvesTo.WorkflowName takes precedence over Role/Profile,
+// mirroring dispatch.ExecuteTask's own precedence (execute.go): a matched
+// workflow reflex bypasses the Worker/Planner mapping entirely.
 func reflexMatchToAssignment(m ReflexMatch) dispatch.RoleAssignment {
+	if wf := m.Reflex.ResolvesTo.WorkflowName; wf != "" {
+		return dispatch.RoleAssignment{
+			Role:         dispatch.RoleWorkflow,
+			WorkflowName: wf,
+		}
+	}
+
 	role := roleFromString(m.Reflex.ResolvesTo.Role)
 
 	slug := m.Reflex.ResolvesTo.Profile

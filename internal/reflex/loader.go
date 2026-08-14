@@ -34,9 +34,10 @@ type TriggersYAML struct {
 
 // ResolutionYAML is the YAML-loadable form of Resolution.
 type ResolutionYAML struct {
-	Pattern string `yaml:"pattern"`
-	Role    string `yaml:"role"`
-	Profile string `yaml:"profile"`
+	Pattern      string `yaml:"pattern"`
+	Role         string `yaml:"role"`
+	Profile      string `yaml:"profile"`
+	WorkflowName string `yaml:"workflow_name"`
 }
 
 // SideEffectsYAML is the YAML-loadable form of SideEffects.
@@ -121,9 +122,10 @@ func reflexFromYAML(ry ReflexYAML) (Reflex, error) {
 			ExecutionPatternHint: execPattern,
 		},
 		ResolvesTo: Resolution{
-			Pattern: ry.ResolvesTo.Pattern,
-			Role:    ry.ResolvesTo.Role,
-			Profile: ry.ResolvesTo.Profile,
+			Pattern:      ry.ResolvesTo.Pattern,
+			Role:         ry.ResolvesTo.Role,
+			Profile:      ry.ResolvesTo.Profile,
+			WorkflowName: ry.ResolvesTo.WorkflowName,
 		},
 		SideEffects: SideEffects{
 			ModeSignal:  ry.SideEffects.ModeSignal,

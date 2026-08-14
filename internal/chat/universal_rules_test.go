@@ -43,6 +43,13 @@ func TestUniversalRulesBlock_NonEmpty(t *testing.T) {
 		// child's last assistant text as authoritative (c160 turn-18 class).
 		{"refusal-subagent-envelope", "Acknowledge subagent failure", "c160 turn-18: parent narrates fake success"},
 		{"refusal-subagent-envelope-flag", "success flag is the source of truth", "envelope contract: do not narrate success on success=false"},
+		// CW-20260519-0068: silent multi-minute turn problem (session c256,
+		// turn 6b55d90a — 14+ min, 4 subagent dispatches, zero chat output).
+		// This is the prompt-level narration half of the fix; the
+		// harness-level half is subagent.Service's heartbeat ping
+		// (internal/subagent/service.go).
+		{"narration-long-waits", "Narrate long waits", "CW-20260519-0068: silent multi-minute turn"},
+		{"narration-still-working", "still working on X", "CW-20260519-0068: heartbeat guidance for long silent stretches"},
 	}
 
 	for _, r := range required {

@@ -75,6 +75,23 @@
 // is the wire-side contract; this rule is the parent-side reading
 // discipline that closes the c160 turn-18 "parent narrates fake success"
 // failure class.
+//
+// The Narration subsection was added by CW-20260519-0068 (silent
+// multi-minute turn problem: session c256, turn 6b55d90a ran 14+ minutes
+// across 4 subagent dispatches with zero chat output). This is the
+// prompt-level half of the fix; the harness-level half is the periodic
+// "still running" ping subagent.Service.startHeartbeat emits to the
+// parent's SSE stream while a subagent's runner call is in flight
+// (internal/subagent/service.go). Landing the rule here — rather than in
+// roleFraming/modeFraming (internal/runtime/agent/prompt.go) — means it
+// reaches every dispatch surface uniformly: GUI/API turns via the Context
+// Broker's SlotUniversal, and CLI-launched turns via the same slot
+// assembly feeding CLAUDE.md regeneration (see
+// docs/architecture/chat-system/05-external-agent-execution.md). The CLI
+// blind spot (nanite's own iteration loop sits at iter 0 for CLI
+// providers and cannot observe in-process tool calls, chat_boot_drive.go)
+// is exactly the case this rule targets: the LLM's own narration text is
+// the only signal available for that surface.
 package chat
 
 // universalRulesBlock is the content shared by every agent (chat, worker,
@@ -111,7 +128,11 @@ const universalRulesBlock = `## Universal rules (apply to every agent)
 ### Verification
 
 - For destructive or externally-visible actions (deletes, pushes, posts, emails), confirm with the user first.
-- When you delegate to a subagent or peer, treat the reply as a draft to verify — not as authoritative. The peer has the same training-data risk you do.`
+- When you delegate to a subagent or peer, treat the reply as a draft to verify — not as authoritative. The peer has the same training-data risk you do.
+
+### Narration
+
+- **Narrate long waits.** Before subagent_spawn or a slow tool call, say in one line what you are doing; report the outcome when it returns. On a long silent stretch, add a brief "still working on X" update.`
 
 // UniversalRulesBlock returns the universal rules content emitted at the
 // head of every dispatch via SlotUniversal (position 0 in SlotOrder).

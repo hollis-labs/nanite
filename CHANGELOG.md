@@ -27,6 +27,22 @@ lives in the git log.
 
 ### Added
 
+- **Subagent progress heartbeats + narration guidance** (CW-20260519-0068).
+  A long-running subagent dispatch (`subagent_spawn`, sync mode) previously
+  went silent on the parent session's SSE stream between the initial
+  "running" dispatch event and the eventual terminal event — for a run
+  approaching the 30-minute backstop that silence looked identical to a
+  hang. `subagent.Service` now emits a periodic `subagent_run_status_changed`
+  heartbeat (`heartbeat: true`, `elapsed_seconds`, `attempt`) while a
+  runner call is in flight; cadence defaults to 30s and is tunable via
+  `NANITE_SUBAGENT_HEARTBEAT_SECONDS` (`0` disables). The universal rules
+  block (every agent's system prompt) also gained a Narration section
+  instructing agents to state what they're dispatching before a slow tool
+  call, report the outcome when it returns, and post a brief "still
+  working on X" update on long silent stretches — the prompt-level half of
+  the fix for CLI-launched sessions, where nanite's own harness loop
+  cannot observe in-process tool calls.
+
 - **Standalone agent launcher — `nanite launch <profile>`** (Phase 6,
   CW-20260515-0027/0028). Starts a Nanite-managed CLI agent (Claude /
   Codex / OpenCode) directly from a shared launch profile, with no chat

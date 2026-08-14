@@ -20,11 +20,12 @@ type WorkflowContextAssembler interface {
 
 // contextServiceWorkflowAssembler is the production WorkflowContextAssembler.
 // It resolves the store rows a workflow step only carries IDs for (session,
-// agent, workspace — the same resolution generateResponse performs via
-// SessionService.Get / AgentService.Get / store.GetWorkspace) and delegates
-// the actual assembly to the existing ContextService.AssembleContext. Memory
-// recall is not a separate step here — contextbroker.MemorySource is one of
-// the ContextBroker's default sources, so it rides inside AssembleContext's
+// agent, mode, workspace — mirroring the resolution generateResponse
+// performs via SessionService.Get / AgentService.Get / store.GetWorkspace,
+// plus a read-only mode lookup — see resolveMode) and delegates the actual
+// assembly to the existing ContextService.AssembleContext. Memory recall is
+// not a separate step here — contextbroker.MemorySource is one of the
+// ContextBroker's default sources, so it rides inside AssembleContext's
 // enrichment automatically.
 type contextServiceWorkflowAssembler struct {
 	sessions SessionService
@@ -60,5 +61,40 @@ func (a *contextServiceWorkflowAssembler) AssembleContext(ctx context.Context, s
 		workspace, _ = a.store.GetWorkspace(session.WorkspaceID)
 	}
 
-	return a.context.AssembleContext(ctx, session, agent, nil, workspace)
+	mode := a.resolveMode(ctx, sessionID, agentID)
+
+	return a.context.AssembleContext(ctx, session, agent, mode, workspace)
+}
+
+// resolveMode looks up the session's bound mode (session_agents.mode) via
+// the read-only store.GetSessionPrimaryAgent — deliberately not
+// AgentService.ResolveForSession, which auto-assigns a default agent to an
+// unbound session as a side effect; a workflow step's context-assembly
+// lookup must not silently rebind a chat session's primary agent.
+//
+// The resolved mode is only applied when the session's primary-agent
+// binding's AgentID matches this call's agentID — a workflow step can name
+// an agent identity that differs from the session's chat binding, and
+// there's no principled way to know which of that other agent's modes
+// should apply, so the safe default is no mode (matching pre-opt-in
+// behavior) rather than guessing.
+//
+// Any lookup failure (no binding row, mode slug not found on the agent)
+// degrades to nil — mode-addendum content is enrichment, not identity; the
+// turn still proceeds on the agent's base prompt.
+func (a *contextServiceWorkflowAssembler) resolveMode(ctx context.Context, sessionID, agentID string) *store.AgentMode {
+	sa, err := a.store.GetSessionPrimaryAgent(sessionID)
+	if err != nil || sa == nil || sa.AgentID != agentID || sa.Mode == "" {
+		return nil
+	}
+	modes, err := a.agents.ListModes(ctx, agentID)
+	if err != nil {
+		return nil
+	}
+	for i := range modes {
+		if modes[i].Slug == sa.Mode {
+			return &modes[i]
+		}
+	}
+	return nil
 }

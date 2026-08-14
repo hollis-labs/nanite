@@ -237,10 +237,44 @@ type StepDefinition struct {
 	Verify *VerifySpec
 }
 
+// Engine name constants — the values a WorkflowDefinition.Engine field
+// selects and a WorkflowEngine.Name() returns, shared so both sides of the
+// selection stay in sync (design doc, "How external engines integrate").
+const (
+	// EngineBuiltin is the DAG-executing in-process engine (design doc,
+	// "Built-in engine"). WorkflowDefinition.Engine defaults to this when
+	// left empty.
+	EngineBuiltin = "builtin"
+	// EngineLangGraph runs the hand-authored LangGraph POC graph
+	// (CW-20260813-0012) via internal/workflowrunner.
+	EngineLangGraph = "langgraph"
+	// EngineCrewAI runs the hand-authored CrewAI POC crew
+	// (CW-20260813-0013) via internal/workflowrunner.
+	EngineCrewAI = "crewai"
+)
+
 // WorkflowDefinition describes a workflow's steps and dependencies for a
 // WorkflowEngine to sequence. DAG only, no cycles (design doc scope).
 type WorkflowDefinition struct {
-	Name  string
+	Name string
+
+	// Engine selects which registered WorkflowEngine runs this definition
+	// — EngineBuiltin, EngineLangGraph, or EngineCrewAI. Empty defaults to
+	// EngineBuiltin, so every workflow defined before this field existed
+	// is unaffected. A name with no matching registered engine is a
+	// launch-time error (WorkflowLauncher.Launch), not a load-time one —
+	// which engines are actually available is a per-process wiring
+	// concern (e.g. no Python on PATH), not a property of the definition
+	// itself.
+	//
+	// When Engine names an external engine, Steps is NOT consumed by that
+	// engine — the DAG shape for LangGraph/CrewAI lives in the hand-
+	// authored Python graph/crew itself (design doc, POC scope: "not
+	// building a compiler" from this format to theirs). Steps must still
+	// be non-empty to satisfy Validate; author it as documentation of
+	// intent for a human reading the definition.
+	Engine string
+
 	Steps []StepDefinition
 }
 
@@ -248,6 +282,17 @@ type WorkflowDefinition struct {
 type WorkflowInput struct {
 	// Params carries the run's initial arguments, keyed by name.
 	Params map[string]any `json:"params,omitempty"`
+
+	// SessionID, when set, is threaded through to an external engine's
+	// spawned MCP subprocess (workflowrunner.Config.SessionID) so its
+	// callback tool calls carry the same session the launching
+	// WorkflowLauncher.Launch created for this run's durable-agent
+	// instance — audit/telemetry correlation, mirroring how CLI-launched
+	// agents scope their MCP server. Set by WorkflowLauncher, not by
+	// callers of Launch directly. BuiltinWorkflowEngine does not read
+	// this field: a built-in step's session_id comes from its own
+	// author-time Config, not from here.
+	SessionID string `json:"session_id,omitempty"`
 }
 
 // StepResult is one step's literal, typed outcome within a WorkflowResult.

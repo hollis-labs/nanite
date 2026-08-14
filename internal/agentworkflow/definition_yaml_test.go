@@ -181,3 +181,45 @@ steps:
 		t.Fatalf("error = %v, want duplicate mention", err)
 	}
 }
+
+// TestParseDefinitionYAML_Engine_Empty proves an unset engine field decodes
+// to "" rather than some accidental non-empty zero value — WorkflowLauncher.
+// Launch relies on "" meaning "use EngineBuiltin".
+func TestParseDefinitionYAML_Engine_Empty(t *testing.T) {
+	data := []byte(`
+name: no-engine-field
+steps:
+  - id: a
+    kind: tool
+    config:
+      tool: noop
+`)
+	wf, err := ParseDefinitionYAML(data)
+	if err != nil {
+		t.Fatalf("ParseDefinitionYAML: %v", err)
+	}
+	if wf.Engine != "" {
+		t.Fatalf("Engine = %q, want empty", wf.Engine)
+	}
+}
+
+// TestParseDefinitionYAML_Engine_External proves an explicit engine: value
+// (e.g. "langgraph") round-trips onto WorkflowDefinition.Engine.
+func TestParseDefinitionYAML_Engine_External(t *testing.T) {
+	data := []byte(`
+name: langgraph-workflow
+engine: langgraph
+steps:
+  - id: a
+    kind: tool
+    config:
+      tool: noop
+`)
+	wf, err := ParseDefinitionYAML(data)
+	if err != nil {
+		t.Fatalf("ParseDefinitionYAML: %v", err)
+	}
+	if wf.Engine != EngineLangGraph {
+		t.Fatalf("Engine = %q, want %q", wf.Engine, EngineLangGraph)
+	}
+}

@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"sort"
+	"strings"
 
 	"github.com/hollis-labs/nanite/internal/dispatch"
 	"github.com/hollis-labs/nanite/internal/store"
@@ -157,4 +159,70 @@ func extractAssistantText(content string) string {
 		return ""
 	}
 	return payload.Text
+}
+
+// dispatchWorkflowLauncher adapts *WorkflowLauncher (the durable-agent
+// integrated built-in-engine runner) to the dispatch.WorkflowLauncher
+// shape, mirroring how dispatchSpawner adapts subagent.Service. Returns
+// the SAME dispatch.SpawnResult shape Spawner.Spawn does — EnvelopeJSON is
+// deliberately left empty so DefaultEnvelopeWrapper synthesizes a
+// report-card from Summary, the same fallback Worker/Planner uses when no
+// structured envelope was emitted, rather than hand-rolling a table-card
+// payload whose data shape hasn't been verified against the frontend
+// component.
+type dispatchWorkflowLauncher struct {
+	launcher *WorkflowLauncher
+}
+
+// NewDispatchWorkflowLauncher wraps a *WorkflowLauncher in the
+// dispatch.WorkflowLauncher shape.
+func NewDispatchWorkflowLauncher(launcher *WorkflowLauncher) dispatch.WorkflowLauncher {
+	return &dispatchWorkflowLauncher{launcher: launcher}
+}
+
+// Launch implements dispatch.WorkflowLauncher.
+func (d *dispatchWorkflowLauncher) Launch(ctx context.Context, req dispatch.WorkflowLaunchRequest) (*dispatch.SpawnResult, error) {
+	if d == nil || d.launcher == nil {
+		return nil, fmt.Errorf("dispatch: workflow launcher not configured")
+	}
+	result, err := d.launcher.Launch(ctx, WorkflowLaunchRequest{
+		WorkflowName:    req.WorkflowName,
+		Params:          req.Params,
+		WorkspaceID:     req.WorkspaceID,
+		AgentProfileID:  req.AgentProfileID,
+		ParentSessionID: req.ParentSessionID,
+		TimeoutSeconds:  req.TimeoutSeconds,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("dispatch workflow launch: %w", err)
+	}
+	return &dispatch.SpawnResult{Summary: summarizeWorkflowRun(result)}, nil
+}
+
+// summarizeWorkflowRun builds the human-readable Summary
+// DefaultEnvelopeWrapper folds into a report-card envelope for a
+// RoleWorkflow dispatch result.
+func summarizeWorkflowRun(result *WorkflowLaunchResult) string {
+	if result == nil {
+		return ""
+	}
+	var b strings.Builder
+	fmt.Fprintf(&b, "Workflow %q run %s: %s.\n", result.WorkflowName, result.RunID, result.Status)
+	if result.Error != "" {
+		fmt.Fprintf(&b, "Error: %s\n", result.Error)
+	}
+	stepIDs := make([]string, 0, len(result.StepResults))
+	for id := range result.StepResults {
+		stepIDs = append(stepIDs, id)
+	}
+	sort.Strings(stepIDs)
+	for _, id := range stepIDs {
+		sr := result.StepResults[id]
+		status := "ok"
+		if sr.IsError {
+			status = "failed"
+		}
+		fmt.Fprintf(&b, "- %s (%s): %s\n", id, status, sr.Output)
+	}
+	return b.String()
 }

@@ -1,0 +1,32 @@
+[
+  {
+    "title": "Run a registered workflow instead of spawning a freeform agent",
+    "args": {
+      "session_id": "session-abc",
+      "workflow_name": "onboard-user",
+      "params": { "user_email": "new.hire@example.com" }
+    },
+    "result": {
+      "kind": "envelope",
+      "version": 1,
+      "type": "report-card",
+      "title": "Workflow result",
+      "data": {
+        "role": "workflow",
+        "summary": "Workflow \"onboard-user\" run 01J8Z...: completed.\n- create_account (ok): account created\n- send_welcome_email (ok): email sent"
+      }
+    },
+    "notes": "workflow_name must already be registered in the workflow-definitions directory — this tool does not create workflows, only runs them. The call blocks until the run reaches a terminal state (completed, failed, or waiting_on_gate)."
+  },
+  {
+    "title": "Unknown workflow name",
+    "args": {
+      "session_id": "session-abc",
+      "workflow_name": "does-not-exist"
+    },
+    "result": {
+      "error": "dispatch workflow launch: workflow: unknown workflow \"does-not-exist\""
+    },
+    "notes": "use task_execute instead when unsure whether a workflow exists for this task."
+  }
+]

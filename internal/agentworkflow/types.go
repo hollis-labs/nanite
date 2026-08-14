@@ -237,6 +237,11 @@ type StepResult struct {
 
 // WorkflowResult is a completed workflow run's terminal outcome.
 type WorkflowResult struct {
+	// RunID identifies the persisted workflow_runs row (built-in engine
+	// only — external engines that don't persist a run row leave this
+	// empty). Lets a caller link the run back to whatever launched it
+	// (CW-20260813-0014: a template-class durable-agent instance).
+	RunID  string
 	Status RunStatus
 	// StepResults holds each step's result keyed by step ID.
 	StepResults map[string]StepResult

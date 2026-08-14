@@ -16,6 +16,15 @@ const (
 	RoleWorker
 	// RolePlanner is a dispatched planning agent. Breaks down a task.
 	RolePlanner
+	// RoleWorkflow routes to a named, defined workflow run instead of
+	// spawning a freeform Worker/Planner agent (design doc, "Integration
+	// with the rest of Nanite" — CW-20260813-0014). AssignRole itself never
+	// returns this; it is only ever set by a ReflexHints.WorkflowName
+	// override in ExecuteTask (see execute.go) or an explicit
+	// ExecuteTaskArgs.RoleOverride, so the (tier, pattern) → Worker/Planner
+	// mapping below stays unchanged for every task that isn't explicitly
+	// routed to a workflow.
+	RoleWorkflow
 )
 
 // String returns the canonical lower-case role name.
@@ -27,13 +36,15 @@ func (r Role) String() string {
 		return "worker"
 	case RolePlanner:
 		return "planner"
+	case RoleWorkflow:
+		return "workflow"
 	default:
 		return "invalid"
 	}
 }
 
 // IsValid reports whether r is a known role.
-func (r Role) IsValid() bool { return r >= RoleChat && r <= RolePlanner }
+func (r Role) IsValid() bool { return r >= RoleChat && r <= RoleWorkflow }
 
 // WorkerRoleSlug is the agent slug spawned for Worker-role dispatch.
 // Backed by internal/agent/builtin/profiles/worker.md (the file
@@ -63,6 +74,11 @@ type RoleAssignment struct {
 	// for background; the dispatch primitive applies its own override based
 	// on caller intent.
 	Mode string
+	// WorkflowName is set only when Role == RoleWorkflow (via a
+	// ReflexHints.WorkflowName override or RoleOverride, never by
+	// AssignRole's own mapping). Names the registered workflow definition
+	// ExecuteTask hands to the WorkflowLauncher instead of Spawner.
+	WorkflowName string
 }
 
 // AssignRole maps a (ScopeTier, ExecutionPattern) classification to a

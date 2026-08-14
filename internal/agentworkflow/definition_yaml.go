@@ -16,8 +16,9 @@ import (
 // types are already the shape a WorkflowEngine consumes.
 
 type yamlWorkflowDefinition struct {
-	Name  string     `yaml:"name"`
-	Steps []yamlStep `yaml:"steps"`
+	Name   string     `yaml:"name"`
+	Engine string     `yaml:"engine"`
+	Steps  []yamlStep `yaml:"steps"`
 }
 
 type yamlStep struct {
@@ -66,7 +67,7 @@ func ParseDefinitionYAML(data []byte) (WorkflowDefinition, error) {
 		return WorkflowDefinition{}, fmt.Errorf("agentworkflow: parse yaml: %w", err)
 	}
 
-	wf := WorkflowDefinition{Name: raw.Name}
+	wf := WorkflowDefinition{Name: raw.Name, Engine: raw.Engine}
 	for _, ys := range raw.Steps {
 		step := StepDefinition{
 			ID:        ys.ID,

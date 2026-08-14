@@ -1,5 +1,15 @@
 #!/usr/bin/env python3
-"""LangGraph POC validating the MCP callback mechanism (CW-20260813-0012).
+"""LangGraph production runner for Nanite's Agent Workflows "langgraph"
+engine (CW-20260814-0003). Originally authored as the LangGraph POC
+validating the MCP callback mechanism (CW-20260813-0012) and promoted
+here unchanged — a WorkflowDefinition with Engine: "langgraph"
+(agentworkflow.EngineLangGraph) runs exactly this hand-authored graph;
+there is still no compiler from Nanite's own workflow-definition format to
+LangGraph's (design doc, "POC scope" — that stays a non-goal). Embedded
+into the nanite binary via internal/workflowrunner's go:embed and
+materialized to disk at startup (internal/workflowrunner.MaterializeScripts)
+so a Cerberus-deployed binary — which ships alone, with no guarantee a repo
+checkout sits alongside it — can still locate it.
 
 A small, hand-authored LangGraph graph — built directly with LangGraph's own
 node/edge/state API, not compiled from any Nanite-side workflow schema (design
@@ -8,8 +18,7 @@ callback tools (workflow_execute_tool_step, workflow_execute_llm_step,
 workflow_verify_step) through langchain-mcp-adapters instead of calling a
 model client directly, proving an external framework's own native graph can
 route all real work back through Nanite's harness — the callback mechanism
-CW-20260813-0011 built. This is a POC: small and demonstrative, not
-production-shaped.
+CW-20260813-0011 built.
 
 Graph shape (one node per step kind, per the design doc's three-kind
 vocabulary):
@@ -23,7 +32,7 @@ vocabulary):
   - verify_step (the `verify` modifier, mode=engine): workflow_verify_step
     checking the tool step's literal output — deterministic, no LLM.
 
-Usage:    python3 langgraph_poc.py <input.json path>
+Usage:    python3 langgraph_runner.py <input.json path>
 Requires: pip install -r requirements.txt
 
 Mirrors smoke_test.py's environment overrides and its scoping note on
@@ -127,7 +136,7 @@ def build_graph(tools_by_name: dict[str, Any]):
 
 async def main() -> int:
     if len(sys.argv) < 2:
-        print("usage: langgraph_poc.py <input.json path>", file=sys.stderr)
+        print("usage: langgraph_runner.py <input.json path>", file=sys.stderr)
         return 2
 
     input_path = sys.argv[1]

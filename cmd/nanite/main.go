@@ -36,6 +36,7 @@ import (
 	"github.com/hollis-labs/nanite/internal/api"
 	"github.com/hollis-labs/nanite/internal/chat"
 	"github.com/hollis-labs/nanite/internal/filter"
+	"github.com/hollis-labs/nanite/internal/launcher"
 	"github.com/hollis-labs/nanite/internal/lifecycle"
 	nllmanthropic "github.com/hollis-labs/nanite/internal/llm/anthropic"
 	nllmopenai "github.com/hollis-labs/nanite/internal/llm/openai"
@@ -54,6 +55,7 @@ import (
 	"github.com/hollis-labs/nanite/internal/toolclient"
 	"github.com/hollis-labs/nanite/internal/truncate"
 	"github.com/hollis-labs/nanite/internal/version"
+	"github.com/hollis-labs/nanite/internal/workflowrunner"
 
 	agentbroker "github.com/hollis-labs/agentkit/broker"
 )
@@ -373,6 +375,10 @@ func cmdServe(args []string) {
 	agentRegistry := agentregistry.Build(resolveBootProfileCatalogPath(cfg), "", slog.Default())
 
 	// --- Service container: single wiring point ---
+	// apiBaseURL also backs the external workflow-engine wiring below
+	// (CW-20260814-0003) — the same "point a subprocess at this live
+	// harness" address CLI-launched agents use.
+	apiBaseURL := fmt.Sprintf("http://127.0.0.1:%d", *port)
 	container, err := service.NewContainer(service.ContainerConfig{
 		Store:           s,
 		Providers:       registry,
@@ -380,7 +386,7 @@ func cmdServe(args []string) {
 		ToolClient:      tb,
 		Plugins:         pluginHost,
 		AppConfig:       appCfg,
-		APIBaseURL:      fmt.Sprintf("http://127.0.0.1:%d", *port),
+		APIBaseURL:      apiBaseURL,
 		Activity:        activity,
 		OutputFilter:    outputFilters,
 		UtilityProvider: utilityProvider,
@@ -452,7 +458,61 @@ func cmdServe(args []string) {
 	slog.Info("workflow definitions registry loaded",
 		"path", resolveWorkflowDefinitionsPath(cfg), "count", len(workflowDefinitionsRegistry.Names()))
 	workflowEngine := service.NewBuiltinWorkflowEngine(container.Store)
-	workflowLauncher := service.NewWorkflowLauncher(workflowDefinitionsRegistry, workflowEngine, workflowStepExecutor, container.DurableAgents)
+	workflowEngines := map[string]agentworkflow.WorkflowEngine{agentworkflow.EngineBuiltin: workflowEngine}
+
+	// CW-20260814-0003: wire the external-engine invocation path — a
+	// WorkflowDefinition with Engine: "langgraph"/"crewai" now reaches a
+	// real subprocess via internal/workflowrunner.Launch instead of being
+	// unregistered/unreachable. The runner scripts are embedded into this
+	// binary (internal/workflowrunner's go:embed) and materialized under
+	// the app's state dir so a Cerberus-deployed binary — which ships
+	// alone, no repo checkout alongside it — can still locate them.
+	// Materialization failure disables only the external engines (logged,
+	// not fatal): the built-in engine and every workflow that doesn't
+	// name an external engine are unaffected.
+	workflowScriptsDir := filepath.Join(serveLayout.StateDir(), "workflow-runner-scripts")
+	if scriptPaths, wsErr := workflowrunner.MaterializeScripts(workflowScriptsDir); wsErr != nil {
+		slog.Warn("workflow-runner: failed to materialize external-engine scripts, langgraph/crewai engines unavailable",
+			"dir", workflowScriptsDir, "err", wsErr)
+	} else {
+		externalBinPath := ""
+		if exe, exeErr := os.Executable(); exeErr == nil {
+			externalBinPath = launcher.ResolveBinaryPath(exe)
+		} else {
+			slog.Warn("workflow-runner: os.Executable failed, langgraph/crewai engines unavailable", "err", exeErr)
+		}
+		externalEngineSpecs := []struct {
+			name       string
+			scriptFile string
+		}{
+			{agentworkflow.EngineLangGraph, "langgraph_runner.py"},
+			{agentworkflow.EngineCrewAI, "crewai_runner.py"},
+		}
+		for _, spec := range externalEngineSpecs {
+			scriptPath, ok := scriptPaths[spec.scriptFile]
+			if !ok {
+				continue
+			}
+			extEngine, extErr := service.NewExternalWorkflowEngine(service.ExternalWorkflowEngineConfig{
+				EngineName:       spec.name,
+				PythonPath:       "python3",
+				ScriptPath:       scriptPath,
+				NaniteBinaryPath: externalBinPath,
+				DBPath:           *dbPath,
+				APIBaseURL:       apiBaseURL,
+			})
+			if extErr != nil {
+				slog.Warn("workflow-runner: failed to construct external engine, disabled",
+					"engine", spec.name, "err", extErr)
+				continue
+			}
+			workflowEngines[spec.name] = extEngine
+		}
+		slog.Info("workflow-runner: external engines registered",
+			"dir", workflowScriptsDir, "engines", len(workflowEngines)-1)
+	}
+
+	workflowLauncher := service.NewWorkflowLauncher(workflowDefinitionsRegistry, workflowEngines, workflowStepExecutor, container.DurableAgents)
 	selfTools.WorkflowLauncher = service.NewDispatchWorkflowLauncher(workflowLauncher)
 
 	// Wire todo/plan store into the self-tools transport.

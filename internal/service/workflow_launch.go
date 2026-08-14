@@ -82,16 +82,22 @@ type WorkflowLaunchResult struct {
 // returned WorkflowResult).
 type WorkflowLauncher struct {
 	registry *agentworkflow.Registry
-	engine   agentworkflow.WorkflowEngine
-	exec     agentworkflow.StepExecutor
-	durable  DurableAgentService
+	// engines is keyed by each WorkflowEngine's own Name() — the identity
+	// a WorkflowDefinition.Engine field selects against (CW-20260814-0003:
+	// engine selection so LangGraph/CrewAI are reachable alongside the
+	// built-in engine, not just it).
+	engines map[string]agentworkflow.WorkflowEngine
+	exec    agentworkflow.StepExecutor
+	durable DurableAgentService
 }
 
-// NewWorkflowLauncher constructs a WorkflowLauncher. All four dependencies
-// are required — checked at call time so a wiring bug surfaces as a typed
-// error rather than a nil-pointer panic.
-func NewWorkflowLauncher(registry *agentworkflow.Registry, engine agentworkflow.WorkflowEngine, exec agentworkflow.StepExecutor, durable DurableAgentService) *WorkflowLauncher {
-	return &WorkflowLauncher{registry: registry, engine: engine, exec: exec, durable: durable}
+// NewWorkflowLauncher constructs a WorkflowLauncher. registry, exec, and
+// durable are required; engines must contain at least one entry keyed
+// under agentworkflow.EngineBuiltin — checked at call time so a wiring bug
+// surfaces as a typed error rather than a nil-pointer panic or a
+// launch-time "unknown engine" surprise for the common case.
+func NewWorkflowLauncher(registry *agentworkflow.Registry, engines map[string]agentworkflow.WorkflowEngine, exec agentworkflow.StepExecutor, durable DurableAgentService) *WorkflowLauncher {
+	return &WorkflowLauncher{registry: registry, engines: engines, exec: exec, durable: durable}
 }
 
 // Launch looks up req.WorkflowName, boots a template-class durable-agent
@@ -99,7 +105,13 @@ func NewWorkflowLauncher(registry *agentworkflow.Registry, engine agentworkflow.
 // instance's lifecycle (stopped, with the run id stashed in metadata_json)
 // regardless of whether the run itself succeeded.
 func (l *WorkflowLauncher) Launch(ctx context.Context, req WorkflowLaunchRequest) (*WorkflowLaunchResult, error) {
-	if l == nil || l.registry == nil || l.engine == nil || l.exec == nil || l.durable == nil {
+	// l.engines[EngineBuiltin] == nil catches both an empty/nil map and a
+	// map that omits (or nils out) the one entry every empty-Engine
+	// workflow resolves to — the doc comment on NewWorkflowLauncher
+	// promises this is checked at call time, so it's checked here rather
+	// than left to surface as a confusing per-launch "unknown engine"
+	// error, or a nil-interface panic on engine.Run below.
+	if l == nil || l.registry == nil || l.engines[agentworkflow.EngineBuiltin] == nil || l.exec == nil || l.durable == nil {
 		return nil, fmt.Errorf("workflow: launcher not fully configured")
 	}
 	if req.WorkflowName == "" {
@@ -108,6 +120,18 @@ func (l *WorkflowLauncher) Launch(ctx context.Context, req WorkflowLaunchRequest
 	wf, ok := l.registry.Get(req.WorkflowName)
 	if !ok {
 		return nil, fmt.Errorf("workflow: unknown workflow %q", req.WorkflowName)
+	}
+	engineName := wf.Engine
+	if engineName == "" {
+		engineName = agentworkflow.EngineBuiltin
+	}
+	// engine == nil (not just !ok) also rejects a map entry deliberately
+	// or accidentally set to a nil WorkflowEngine value for a
+	// non-builtin engine name — the same panic-on-Run risk the builtin
+	// check above guards against, generalized to every engine.
+	engine, ok := l.engines[engineName]
+	if !ok || engine == nil {
+		return nil, fmt.Errorf("workflow: workflow %q targets engine %q, which is not registered on this launcher", wf.Name, engineName)
 	}
 	if req.WorkspaceID == "" {
 		return nil, ErrDurableAgentWorkspaceRequired
@@ -133,12 +157,21 @@ func (l *WorkflowLauncher) Launch(ctx context.Context, req WorkflowLaunchRequest
 		return nil, fmt.Errorf("workflow: create durable agent instance: %w", err)
 	}
 
-	if _, err := l.durable.Start(ctx, inst.ID, DurableAgentStartRequest{
+	startResult, err := l.durable.Start(ctx, inst.ID, DurableAgentStartRequest{
 		WorkspaceID: req.WorkspaceID,
 		ProjectID:   req.ProjectID,
 		WakePayload: DurableAgentWakePayload{Reason: DurableAgentWakeManual},
-	}); err != nil {
+	})
+	if err != nil {
 		return nil, fmt.Errorf("workflow: start durable agent instance %s: %w", inst.ID, err)
+	}
+	// Threaded into WorkflowInput.SessionID below so an external engine's
+	// spawned MCP subprocess scopes its callback tool calls to this run's
+	// own session — audit correlation, mirroring CLI-launched agents.
+	// BuiltinWorkflowEngine does not read WorkflowInput.SessionID.
+	sessionID := ""
+	if startResult != nil && startResult.Session != nil {
+		sessionID = startResult.Session.ID
 	}
 
 	timeout := DefaultWorkflowLaunchTimeout
@@ -148,7 +181,7 @@ func (l *WorkflowLauncher) Launch(ctx context.Context, req WorkflowLaunchRequest
 	runCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
-	result, runErr := l.engine.Run(runCtx, wf, agentworkflow.WorkflowInput{Params: req.Params}, l.exec)
+	result, runErr := engine.Run(runCtx, wf, agentworkflow.WorkflowInput{Params: req.Params, SessionID: sessionID}, l.exec)
 
 	// Finalize the instance's lifecycle regardless of runErr — an
 	// infra-level engine failure still leaves an instance that must not be

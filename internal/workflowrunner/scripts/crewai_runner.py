@@ -1,5 +1,15 @@
 #!/usr/bin/env python3
-"""CrewAI POC validating the MCP callback mechanism (CW-20260813-0013).
+"""CrewAI production runner for Nanite's Agent Workflows "crewai" engine
+(CW-20260814-0003). Originally authored as the CrewAI POC validating the
+MCP callback mechanism (CW-20260813-0013) and promoted here unchanged — a
+WorkflowDefinition with Engine: "crewai" (agentworkflow.EngineCrewAI) runs
+exactly this hand-authored crew; there is still no compiler from Nanite's
+own workflow-definition format to CrewAI's (design doc, "POC scope" —
+that stays a non-goal). Embedded into the nanite binary via
+internal/workflowrunner's go:embed and materialized to disk at startup
+(internal/workflowrunner.MaterializeScripts) so a Cerberus-deployed binary
+— which ships alone, with no guarantee a repo checkout sits alongside it —
+can still locate it.
 
 A small, hand-authored CrewAI crew — built directly with CrewAI's own
 Agent/Task/Process authoring API, not compiled from any Nanite-side workflow
@@ -40,7 +50,7 @@ POC's shape for parity):
   - verify_task (the `verify` modifier, mode=engine): workflow_verify_step
     checking the tool task's literal output — deterministic, no LLM.
 
-Usage:    python3 crewai_poc.py <input.json path>
+Usage:    python3 crewai_runner.py <input.json path>
 Requires: pip install -r requirements.txt (Python 3.10-3.13; crewai's
           numpy/chromadb dependency chain has no prebuilt wheels for very
           new interpreters yet)
@@ -217,7 +227,7 @@ def build_crew(tools_by_name: dict[str, Any]):
 
 def main() -> int:
     if len(sys.argv) < 2:
-        print("usage: crewai_poc.py <input.json path>", file=sys.stderr)
+        print("usage: crewai_runner.py <input.json path>", file=sys.stderr)
         return 2
 
     input_path = sys.argv[1]

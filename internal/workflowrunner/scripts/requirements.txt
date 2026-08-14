@@ -1,0 +1,10 @@
+# langgraph_runner.py (CW-20260813-0012, promoted to production CW-20260814-0003)
+langgraph
+langchain-mcp-adapters
+
+# crewai_runner.py (CW-20260813-0013, promoted to production CW-20260814-0003)
+# Needs Python 3.10-3.13 — crewai's numpy/chromadb dependency chain has no
+# prebuilt wheels for very new interpreters yet (e.g. 3.14 at time of writing).
+crewai
+crewai-tools
+mcpadapt

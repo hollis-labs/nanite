@@ -191,6 +191,7 @@ func (d *dispatchWorkflowLauncher) Launch(ctx context.Context, req dispatch.Work
 		WorkspaceID:     req.WorkspaceID,
 		AgentProfileID:  req.AgentProfileID,
 		ParentSessionID: req.ParentSessionID,
+		TimeoutSeconds:  req.TimeoutSeconds,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("dispatch workflow launch: %w", err)

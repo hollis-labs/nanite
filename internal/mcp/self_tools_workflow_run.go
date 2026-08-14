@@ -36,7 +36,7 @@ func workflowRunToolDefinition() Tool {
 					"type":        "object",
 					"description": "Initial arguments for the run, available to step configs via {{input.<key>}} template references.",
 				},
-				"timeout_seconds": map[string]any{"type": "integer", "description": "Wall-time cap for the run. 0 uses the launcher default."},
+				"timeout_seconds": map[string]any{"type": "integer", "description": "Wall-time cap for the run. 0 uses the launcher default (1800s)."},
 			},
 			"required": []string{"workflow_name"},
 		},

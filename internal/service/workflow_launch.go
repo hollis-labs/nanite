@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"regexp"
 	"strings"
+	"time"
 
 	"github.com/hollis-labs/agentkit/agentruntime/runtimekind"
 	"github.com/oklog/ulid/v2"
@@ -13,6 +14,12 @@ import (
 	"github.com/hollis-labs/nanite/internal/agentworkflow"
 	"github.com/hollis-labs/nanite/internal/store"
 )
+
+// DefaultWorkflowLaunchTimeout bounds a workflow run's wall time when the
+// caller passes TimeoutSeconds <= 0. Matches internal/subagent's compiled-in
+// DefaultTimeoutSeconds (1800s) — a workflow run is the same class of
+// long-running, potentially-hung operation a chat turn is blocking on.
+const DefaultWorkflowLaunchTimeout = 1800 * time.Second
 
 // WorkflowLaunchRequest is the input to WorkflowLauncher.Launch.
 type WorkflowLaunchRequest struct {
@@ -39,6 +46,9 @@ type WorkflowLaunchRequest struct {
 	// ParentSessionID is the calling chat session, if any — informational,
 	// stamped into the created instance's Name for operator visibility.
 	ParentSessionID string
+	// TimeoutSeconds caps the run's wall time. <= 0 uses
+	// DefaultWorkflowLaunchTimeout.
+	TimeoutSeconds int
 }
 
 // WorkflowLaunchResult is a completed workflow run's outcome.
@@ -126,7 +136,14 @@ func (l *WorkflowLauncher) Launch(ctx context.Context, req WorkflowLaunchRequest
 		return nil, fmt.Errorf("workflow: start durable agent instance %s: %w", inst.ID, err)
 	}
 
-	result, runErr := l.engine.Run(ctx, wf, agentworkflow.WorkflowInput{Params: req.Params}, l.exec)
+	timeout := DefaultWorkflowLaunchTimeout
+	if req.TimeoutSeconds > 0 {
+		timeout = time.Duration(req.TimeoutSeconds) * time.Second
+	}
+	runCtx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+
+	result, runErr := l.engine.Run(runCtx, wf, agentworkflow.WorkflowInput{Params: req.Params}, l.exec)
 
 	// Finalize the instance's lifecycle regardless of runErr — an
 	// infra-level engine failure still leaves an instance that must not be

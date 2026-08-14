@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/hollis-labs/nanite/internal/agentworkflow"
 	"github.com/hollis-labs/nanite/internal/store"
@@ -159,5 +160,66 @@ func TestWorkflowLauncher_Launch_RequiresAgentProfileID(t *testing.T) {
 	})
 	if err == nil || !strings.Contains(err.Error(), "agent_profile_id") {
 		t.Fatalf("err = %v, want agent_profile_id required", err)
+	}
+}
+
+// TestWorkflowLauncher_Launch_RespectsTimeout proves TimeoutSeconds is
+// actually enforced against the engine run, not silently dropped — a step
+// that ignores its own deadline and only exits when ctx is cancelled must
+// still cause Launch to return promptly instead of blocking on the step
+// forever, and the durable-agent instance must still be finalized to
+// stopped rather than left dangling in "active".
+func TestWorkflowLauncher_Launch_RespectsTimeout(t *testing.T) {
+	st, profile := newWorkflowLaunchTestFixture(t)
+
+	registry := agentworkflow.NewRegistry(map[string]agentworkflow.WorkflowDefinition{
+		"slow-workflow": singleToolStepWorkflow("slow-workflow"),
+	})
+	engine := NewBuiltinWorkflowEngine(st)
+	tools := &fakeWorkflowToolService{
+		executeFunc: func(ctx context.Context, _, _ string, _ map[string]any) (*ToolResult, error) {
+			<-ctx.Done()
+			return nil, ctx.Err()
+		},
+	}
+	exec := NewWorkflowStepExecutor(tools, &fakeProviderResolver{})
+	durable := NewDurableAgentService(st)
+	launcher := NewWorkflowLauncher(registry, engine, exec, durable)
+
+	start := time.Now()
+	result, err := launcher.Launch(context.Background(), WorkflowLaunchRequest{
+		WorkflowName:   "slow-workflow",
+		WorkspaceID:    "ws-launch",
+		AgentProfileID: profile.ID,
+		TimeoutSeconds: 1,
+	})
+	elapsed := time.Since(start)
+
+	if elapsed > 10*time.Second {
+		t.Fatalf("Launch took %s, want it bounded by the 1s TimeoutSeconds", elapsed)
+	}
+	// A timed-out step is a normal (non-infra) run outcome — the engine
+	// reports it via WorkflowResult.Status, not a Go error.
+	if err != nil {
+		t.Fatalf("Launch: unexpected error %v", err)
+	}
+	if result == nil {
+		t.Fatal("result is nil, want a WorkflowLaunchResult with Status=failed")
+	}
+	if result.Status != agentworkflow.RunStatusFailed {
+		t.Errorf("Status = %q, want failed", result.Status)
+	}
+
+	// Even though the run failed, the instance must still be finalized —
+	// not left dangling in "active" because the step timed out.
+	insts, err := st.ListDurableAgentInstances(false)
+	if err != nil {
+		t.Fatalf("ListDurableAgentInstances: %v", err)
+	}
+	if len(insts) != 1 {
+		t.Fatalf("len(insts) = %d, want 1", len(insts))
+	}
+	if insts[0].Status != store.DurableAgentStatusStopped {
+		t.Errorf("Status = %q, want stopped", insts[0].Status)
 	}
 }

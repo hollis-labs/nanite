@@ -30,18 +30,23 @@ func workflowExecuteLLMStepToolDefinition() Tool {
 		Name: "workflow_execute_llm_step",
 		Description: "Run one capability-restricted agent turn through Nanite's harness (provider/tool-broker/permission-engine) on behalf of a workflow engine (LangGraph, CrewAI, or the built-in engine).\n\n" +
 			"**When to use:** From a workflow node/task that needs an LLM to do real work. The tool surface offered to the model is EXACTLY the `tools` you pass here — no fallback to a broader default (capability restriction is load-bearing, not an implementation detail).\n\n" +
-			"**Required context:** `provider`, `model`, and `messages` (array of {role, content} chat turns). Composing memory recall / prior-step results into `messages` is the caller's job — this tool does not assemble context itself.\n\n" +
+			"**Required context:** `provider`, `model`, and `messages` (array of {role, content} chat turns). Composing memory recall / prior-step results into `messages` is the caller's job by default — this tool does not assemble context itself unless `enable_context_assembly` is set.\n\n" +
+			"**Context assembly (opt-in):** set `enable_context_assembly` with both `session_id` and `agent_id` to layer the harness's session history, agent/mode/workspace prompt, and Tesseract memory recall ahead of `system_prompt`/`messages`. Off by default — most steps (narrow classification/extraction) don't need it and it adds latency/token cost.\n\n" +
 			"**Output shape:** {text, tool_calls: [{tool, input, output, is_error}], usage, stop_reason}.",
 		InputSchema: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
 				"workflow_run_id": map[string]any{"type": "string", "description": "Identifies the calling workflow run, for logging/audit. Optional."},
 				"step_id":         map[string]any{"type": "string", "description": "This step's own ID, for logging/audit. Optional."},
-				"session_id":      map[string]any{"type": "string", "description": "Existing session ID to scope this call to, for telemetry/audit correlation. Optional — does not create or persist a session."},
-				"agent_id":        map[string]any{"type": "string", "description": "Calling identity for permission checks and tool-metadata lookups. Optional."},
+				"session_id":      map[string]any{"type": "string", "description": "Existing session ID to scope this call to, for telemetry/audit correlation. Optional — does not create or persist a session. Required when enable_context_assembly is true."},
+				"agent_id":        map[string]any{"type": "string", "description": "Calling identity for permission checks and tool-metadata lookups. Optional. Required when enable_context_assembly is true."},
 				"provider":        map[string]any{"type": "string", "description": "LLM provider backend (e.g. 'anthropic', 'openai')."},
 				"model":           map[string]any{"type": "string", "description": "Model name."},
 				"system_prompt":   map[string]any{"type": "string", "description": "System prompt for the turn. Optional."},
+				"enable_context_assembly": map[string]any{
+					"type":        "boolean",
+					"description": "Opt into the harness's existing context-assembly + memory-recall pipeline, scoped by session_id/agent_id. Default false — the turn runs on system_prompt/messages alone.",
+				},
 				"messages": map[string]any{
 					"type":        "array",
 					"description": "The turn's chat messages, in order: [{role, content}, ...].",

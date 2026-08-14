@@ -429,7 +429,13 @@ func cmdServe(args []string) {
 	// tools. container.Tools already satisfies service.ToolService;
 	// registry (built by initProviders) already satisfies
 	// service.WorkflowProviderResolver — no new adapters needed.
-	workflowStepExecutor := service.NewWorkflowStepExecutor(container.Tools, registry)
+	//
+	// CW-20260814-0001: also wire a WorkflowContextAssembler so
+	// LLMStepRequest.EnableContextAssembly has something to resolve
+	// against — reuses container.Sessions/Agents/Store/Context exactly as
+	// generateResponse does, rather than a second context-assembly path.
+	workflowContextAssembler := service.NewWorkflowContextAssembler(container.Sessions, container.Agents, container.Store, container.Context)
+	workflowStepExecutor := service.NewWorkflowStepExecutor(container.Tools, registry, workflowContextAssembler)
 	selfTools.WorkflowExecutor = workflowStepExecutor
 
 	// CW-20260813-0014: wire the built-in engine (CW-20260813-0010) behind

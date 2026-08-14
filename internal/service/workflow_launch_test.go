@@ -71,7 +71,7 @@ func TestWorkflowLauncher_Launch_Success(t *testing.T) {
 		"noop-workflow": singleToolStepWorkflow("noop-workflow"),
 	})
 	engine := NewBuiltinWorkflowEngine(st)
-	exec := NewWorkflowStepExecutor(&fakeWorkflowToolService{}, &fakeProviderResolver{})
+	exec := NewWorkflowStepExecutor(&fakeWorkflowToolService{}, &fakeProviderResolver{}, nil)
 	durable := NewDurableAgentService(st)
 	launcher := NewWorkflowLauncher(registry, engine, exec, durable)
 
@@ -129,7 +129,7 @@ func TestWorkflowLauncher_Launch_UnknownWorkflow(t *testing.T) {
 	st, profile := newWorkflowLaunchTestFixture(t)
 	registry := agentworkflow.NewRegistry(nil)
 	engine := NewBuiltinWorkflowEngine(st)
-	exec := NewWorkflowStepExecutor(&fakeWorkflowToolService{}, &fakeProviderResolver{})
+	exec := NewWorkflowStepExecutor(&fakeWorkflowToolService{}, &fakeProviderResolver{}, nil)
 	launcher := NewWorkflowLauncher(registry, engine, exec, NewDurableAgentService(st))
 
 	_, err := launcher.Launch(context.Background(), WorkflowLaunchRequest{
@@ -148,7 +148,7 @@ func TestWorkflowLauncher_Launch_RequiresWorkspaceID(t *testing.T) {
 		"noop-workflow": singleToolStepWorkflow("noop-workflow"),
 	})
 	engine := NewBuiltinWorkflowEngine(st)
-	exec := NewWorkflowStepExecutor(&fakeWorkflowToolService{}, &fakeProviderResolver{})
+	exec := NewWorkflowStepExecutor(&fakeWorkflowToolService{}, &fakeProviderResolver{}, nil)
 	launcher := NewWorkflowLauncher(registry, engine, exec, NewDurableAgentService(st))
 
 	_, err := launcher.Launch(context.Background(), WorkflowLaunchRequest{
@@ -166,7 +166,7 @@ func TestWorkflowLauncher_Launch_RequiresAgentProfileID(t *testing.T) {
 		"noop-workflow": singleToolStepWorkflow("noop-workflow"),
 	})
 	engine := NewBuiltinWorkflowEngine(st)
-	exec := NewWorkflowStepExecutor(&fakeWorkflowToolService{}, &fakeProviderResolver{})
+	exec := NewWorkflowStepExecutor(&fakeWorkflowToolService{}, &fakeProviderResolver{}, nil)
 	launcher := NewWorkflowLauncher(registry, engine, exec, NewDurableAgentService(st))
 
 	_, err := launcher.Launch(context.Background(), WorkflowLaunchRequest{
@@ -197,7 +197,7 @@ func TestWorkflowLauncher_Launch_RespectsTimeout(t *testing.T) {
 			return nil, ctx.Err()
 		},
 	}
-	exec := NewWorkflowStepExecutor(tools, &fakeProviderResolver{})
+	exec := NewWorkflowStepExecutor(tools, &fakeProviderResolver{}, nil)
 	durable := NewDurableAgentService(st)
 	launcher := NewWorkflowLauncher(registry, engine, exec, durable)
 
@@ -249,7 +249,7 @@ func TestWorkflowLauncher_Launch_StampsParentSessionIDInName(t *testing.T) {
 		"noop-workflow": singleToolStepWorkflow("noop-workflow"),
 	})
 	engine := NewBuiltinWorkflowEngine(st)
-	exec := NewWorkflowStepExecutor(&fakeWorkflowToolService{}, &fakeProviderResolver{})
+	exec := NewWorkflowStepExecutor(&fakeWorkflowToolService{}, &fakeProviderResolver{}, nil)
 	launcher := NewWorkflowLauncher(registry, engine, exec, NewDurableAgentService(st))
 
 	result, err := launcher.Launch(context.Background(), WorkflowLaunchRequest{
@@ -281,7 +281,7 @@ func TestWorkflowLauncher_Launch_EngineInfraError_OmitsEmptyRunID(t *testing.T) 
 	registry := agentworkflow.NewRegistry(map[string]agentworkflow.WorkflowDefinition{
 		"noop-workflow": singleToolStepWorkflow("noop-workflow"),
 	})
-	exec := NewWorkflowStepExecutor(&fakeWorkflowToolService{}, &fakeProviderResolver{})
+	exec := NewWorkflowStepExecutor(&fakeWorkflowToolService{}, &fakeProviderResolver{}, nil)
 	durable := NewDurableAgentService(st)
 	launcher := NewWorkflowLauncher(registry, fakeFailingWorkflowEngine{}, exec, durable)
 

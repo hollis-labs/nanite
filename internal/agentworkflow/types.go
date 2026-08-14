@@ -67,27 +67,55 @@ type LLMStepRequest struct {
 	StepID        string `json:"step_id,omitempty"`
 
 	// SessionID, when non-empty, scopes this call to an existing session
-	// for telemetry/audit correlation. ExecuteLLMStep does not create,
-	// look up, or persist a session — provisioning one (if a caller wants
-	// full ContextService-based context assembly / memory recall) is the
-	// caller's responsibility, consistent with this ticket's "no DB
-	// schema / persistence" scope.
+	// for telemetry/audit correlation. When EnableContextAssembly is also
+	// set, SessionID additionally identifies the store.Session the
+	// harness resolves session history and memory-recall namespacing
+	// from — ExecuteLLMStep does not create or persist a session itself,
+	// only looks one up.
 	SessionID string `json:"session_id,omitempty"`
 
 	// AgentID identifies the calling identity for permission checks
 	// (passed straight through to ToolService.Execute, which applies the
-	// existing permission engine) and tool-metadata lookups.
+	// existing permission engine) and tool-metadata lookups. When
+	// EnableContextAssembly is also set, AgentID additionally identifies
+	// the store.AgentProfile whose system prompt / skills the harness
+	// composes into the assembled context.
 	AgentID string `json:"agent_id,omitempty"`
 
 	// Provider and Model select which LLM backend executes the turn.
 	Provider string `json:"provider"`
 	Model    string `json:"model"`
 
-	// SystemPrompt and Messages are the fully-assembled turn context.
-	// Composing memory recall / prior-step results into these is the
-	// caller's job — ExecuteLLMStep does not assemble context itself.
+	// SystemPrompt and Messages are this step's own turn content. By
+	// default they are the fully-assembled turn context as-is — composing
+	// memory recall / prior-step results into them is the caller's job,
+	// and ExecuteLLMStep does not assemble context itself.
+	//
+	// When EnableContextAssembly is true, they are layered on top of the
+	// harness-assembled context instead of used verbatim: the assembled
+	// system prompt leads (SystemPrompt follows as this step's own
+	// instructions), and the assembled session history leads (Messages
+	// follows as this step's own turn).
 	SystemPrompt string                 `json:"system_prompt,omitempty"`
 	Messages     []llmtypes.ChatMessage `json:"messages"`
+
+	// EnableContextAssembly opts this call into the harness's existing
+	// turn-context pipeline — ContextService.AssembleContext
+	// (internal/chat/context_client.go), which composes session history,
+	// agent/mode/workspace prompt content, and Tesseract memory recall
+	// (contextbroker.MemorySource, one of the ContextBroker's sources) —
+	// the same assembly a Chat/GUI/CLI turn gets. Reused via the existing
+	// code path, not reimplemented.
+	//
+	// Default false: every step runs exactly as before, using only
+	// SystemPrompt/Messages as supplied, with no session history and no
+	// memory recall. This is opt-in rather than default-on because not
+	// every step wants the added latency/token cost — a narrow
+	// classification or extraction step can skip it entirely, while a
+	// step that benefits from prior context or long-term facts can ask
+	// for it. Requires SessionID and AgentID; ExecuteLLMStep errors if
+	// either is empty or no WorkflowContextAssembler is configured.
+	EnableContextAssembly bool `json:"enable_context_assembly,omitempty"`
 
 	// Tools is the capability-restricted tool surface: the exact set of
 	// tool names this step's LLM turn may call. ExecuteLLMStep resolves

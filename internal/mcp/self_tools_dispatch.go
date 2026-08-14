@@ -231,7 +231,7 @@ func (st *SelfToolsTransport) callExecuteTask(ctx context.Context, args map[stri
 		parentAgentID = apID
 	}
 
-	envelope, err := dispatch.ExecuteTask(ctx, st.Dispatch, wrapper, dispatch.ExecuteTaskArgs{
+	envelope, err := dispatch.ExecuteTask(ctx, st.Dispatch, wrapper, st.WorkflowLauncher, dispatch.ExecuteTaskArgs{
 		SessionID:      sessionID,
 		ParentAgentID:  parentAgentID,
 		Message:        dispatchMessage,

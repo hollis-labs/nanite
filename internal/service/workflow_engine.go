@@ -267,7 +267,7 @@ func (e *BuiltinWorkflowEngine) finishRun(
 	for id, sr := range results {
 		stepResults[id] = sr
 	}
-	return agentworkflow.WorkflowResult{Status: status, StepResults: stepResults, Error: errMsg}, nil
+	return agentworkflow.WorkflowResult{RunID: runID, Status: status, StepResults: stepResults, Error: errMsg}, nil
 }
 
 // stepOutcomeKind distinguishes a step that reached a terminal result from

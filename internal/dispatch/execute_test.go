@@ -74,7 +74,7 @@ func TestExecuteTask_E2E_DispatchToWorker(t *testing.T) {
 		Message:       "fix the typo in README",
 	}
 
-	env, err := ExecuteTask(context.Background(), spawner, wrapper, args)
+	env, err := ExecuteTask(context.Background(), spawner, wrapper, nil, args)
 	if err != nil {
 		t.Fatalf("ExecuteTask returned error: %v", err)
 	}
@@ -126,7 +126,7 @@ func TestExecuteTask_E2E_OpenScopeRoutesToPlanner(t *testing.T) {
 		Message:   "build a complete authentication system with full implementation across the codebase",
 	}
 
-	if _, err := ExecuteTask(context.Background(), spawner, wrapper, args); err != nil {
+	if _, err := ExecuteTask(context.Background(), spawner, wrapper, nil, args); err != nil {
 		t.Fatalf("ExecuteTask returned error: %v", err)
 	}
 
@@ -151,7 +151,7 @@ func TestExecuteTask_BackgroundIsCoercedToSyncForCapture(t *testing.T) {
 		Message: "run the migration in the background",
 	}
 
-	if _, err := ExecuteTask(context.Background(), spawner, wrapper, args); err != nil {
+	if _, err := ExecuteTask(context.Background(), spawner, wrapper, nil, args); err != nil {
 		t.Fatalf("ExecuteTask returned error: %v", err)
 	}
 
@@ -180,7 +180,7 @@ func TestExecuteTask_ValidatesArgs(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			_, err := ExecuteTask(context.Background(), &fakeSpawner{}, &recordingWrapper{}, tc.args)
+			_, err := ExecuteTask(context.Background(), &fakeSpawner{}, &recordingWrapper{}, nil, tc.args)
 			if err == nil || !strings.Contains(err.Error(), tc.wantErr) {
 				t.Errorf("err = %v, want containing %q", err, tc.wantErr)
 			}
@@ -195,7 +195,7 @@ func TestExecuteTask_SpawnerErrorPropagates(t *testing.T) {
 	wrapper := &recordingWrapper{}
 	args := ExecuteTaskArgs{SessionID: "s1", Message: "do the thing"}
 
-	_, err := ExecuteTask(context.Background(), spawner, wrapper, args)
+	_, err := ExecuteTask(context.Background(), spawner, wrapper, nil, args)
 	if err == nil || !strings.Contains(err.Error(), "worker unavailable") {
 		t.Errorf("err = %v, want spawn-error wrapped", err)
 	}
@@ -205,10 +205,10 @@ func TestExecuteTask_SpawnerErrorPropagates(t *testing.T) {
 func TestExecuteTask_RequiresSpawnerAndWrapper(t *testing.T) {
 	args := ExecuteTaskArgs{SessionID: "s1", Message: "do the thing"}
 
-	if _, err := ExecuteTask(context.Background(), nil, &recordingWrapper{}, args); !errors.Is(err, ErrNoSpawner) {
+	if _, err := ExecuteTask(context.Background(), nil, &recordingWrapper{}, nil, args); !errors.Is(err, ErrNoSpawner) {
 		t.Errorf("nil spawner err = %v, want ErrNoSpawner", err)
 	}
-	if _, err := ExecuteTask(context.Background(), &fakeSpawner{}, nil, args); !errors.Is(err, ErrNoWrapper) {
+	if _, err := ExecuteTask(context.Background(), &fakeSpawner{}, nil, nil, args); !errors.Is(err, ErrNoWrapper) {
 		t.Errorf("nil wrapper err = %v, want ErrNoWrapper", err)
 	}
 }
@@ -287,7 +287,7 @@ func TestExecuteTask_WorkspaceAndProfileThreadedToSpawn(t *testing.T) {
 		AgentProfileID: "ap-worker-id",
 	}
 
-	if _, err := ExecuteTask(context.Background(), spawner, wrapper, args); err != nil {
+	if _, err := ExecuteTask(context.Background(), spawner, wrapper, nil, args); err != nil {
 		t.Fatalf("ExecuteTask error: %v", err)
 	}
 
@@ -296,6 +296,89 @@ func TestExecuteTask_WorkspaceAndProfileThreadedToSpawn(t *testing.T) {
 	}
 	if spawner.got.AgentProfileID != "ap-worker-id" {
 		t.Errorf("AgentProfileID = %q, want ap-worker-id", spawner.got.AgentProfileID)
+	}
+}
+
+// fakeWorkflowLauncher records what ExecuteTask asked it to launch and
+// returns a configurable SpawnResult, mirroring fakeSpawner.
+type fakeWorkflowLauncher struct {
+	got    WorkflowLaunchRequest
+	called int
+	result *SpawnResult
+	err    error
+}
+
+func (f *fakeWorkflowLauncher) Launch(_ context.Context, req WorkflowLaunchRequest) (*SpawnResult, error) {
+	f.called++
+	f.got = req
+	if f.err != nil {
+		return nil, f.err
+	}
+	return f.result, nil
+}
+
+// TestExecuteTask_ReflexWorkflowHint_RoutesToWorkflowLauncher asserts that
+// a ReflexHints.WorkflowName override bypasses AssignRole's Worker/Planner
+// mapping entirely and calls the WorkflowLauncher instead of Spawner —
+// CW-20260813-0014's "new outcome alongside spawning a bare Worker/Planner".
+func TestExecuteTask_ReflexWorkflowHint_RoutesToWorkflowLauncher(t *testing.T) {
+	spawner := &fakeSpawner{result: &SpawnResult{Summary: "should not be called"}}
+	launcher := &fakeWorkflowLauncher{
+		result: &SpawnResult{Summary: "workflow \"onboard-user\" run r1: completed."},
+	}
+	wrapper := &recordingWrapper{out: Envelope{Kind: "envelope", Version: 1, Type: "report-card"}}
+
+	args := ExecuteTaskArgs{
+		SessionID:      "sess-wf",
+		Message:        "onboard the new user",
+		WorkspaceID:    "ws-1",
+		AgentProfileID: "ap-1",
+		ReflexHints:    &ReflexHints{WorkflowName: "onboard-user"},
+	}
+
+	env, err := ExecuteTask(context.Background(), spawner, wrapper, launcher, args)
+	if err != nil {
+		t.Fatalf("ExecuteTask returned error: %v", err)
+	}
+	if env.Type != "report-card" {
+		t.Errorf("envelope type = %q, want report-card", env.Type)
+	}
+
+	if spawner.called != 0 {
+		t.Errorf("spawner called %d times, want 0 (workflow route must not spawn)", spawner.called)
+	}
+	if launcher.called != 1 {
+		t.Fatalf("launcher called %d times, want 1", launcher.called)
+	}
+	if launcher.got.WorkflowName != "onboard-user" {
+		t.Errorf("launched workflow = %q, want onboard-user", launcher.got.WorkflowName)
+	}
+	if launcher.got.WorkspaceID != "ws-1" || launcher.got.AgentProfileID != "ap-1" {
+		t.Errorf("launch req = %+v, want workspace/profile threaded through", launcher.got)
+	}
+	if launcher.got.ParentSessionID != "sess-wf" {
+		t.Errorf("launch req ParentSessionID = %q, want sess-wf", launcher.got.ParentSessionID)
+	}
+
+	if wrapper.gotRole != RoleWorkflow {
+		t.Errorf("wrapper role = %v, want RoleWorkflow", wrapper.gotRole)
+	}
+}
+
+// TestExecuteTask_WorkflowRoute_RequiresLauncher guards the wiring
+// contract for the workflow route, mirroring
+// TestExecuteTask_RequiresSpawnerAndWrapper.
+func TestExecuteTask_WorkflowRoute_RequiresLauncher(t *testing.T) {
+	spawner := &fakeSpawner{}
+	wrapper := &recordingWrapper{}
+	args := ExecuteTaskArgs{
+		SessionID:   "s1",
+		Message:     "do the thing",
+		ReflexHints: &ReflexHints{WorkflowName: "some-workflow"},
+	}
+
+	if _, err := ExecuteTask(context.Background(), spawner, wrapper, nil, args); !errors.Is(err, ErrNoWorkflowLauncher) {
+		t.Errorf("nil launcher err = %v, want ErrNoWorkflowLauncher", err)
 	}
 }
 
@@ -312,7 +395,7 @@ func TestExecuteTask_EmptyWorkspaceProfile_FallsThrough(t *testing.T) {
 		// WorkspaceID and AgentProfileID intentionally omitted.
 	}
 
-	if _, err := ExecuteTask(context.Background(), spawner, wrapper, args); err != nil {
+	if _, err := ExecuteTask(context.Background(), spawner, wrapper, nil, args); err != nil {
 		t.Fatalf("ExecuteTask error: %v", err)
 	}
 

@@ -32,6 +32,7 @@ import (
 	"github.com/hollis-labs/go-providers/provider"
 	"github.com/hollis-labs/go-toolbroker/broker"
 	"github.com/hollis-labs/nanite/internal/agentregistry"
+	"github.com/hollis-labs/nanite/internal/agentworkflow"
 	"github.com/hollis-labs/nanite/internal/api"
 	"github.com/hollis-labs/nanite/internal/chat"
 	"github.com/hollis-labs/nanite/internal/filter"
@@ -428,7 +429,25 @@ func cmdServe(args []string) {
 	// tools. container.Tools already satisfies service.ToolService;
 	// registry (built by initProviders) already satisfies
 	// service.WorkflowProviderResolver — no new adapters needed.
-	selfTools.WorkflowExecutor = service.NewWorkflowStepExecutor(container.Tools, registry)
+	workflowStepExecutor := service.NewWorkflowStepExecutor(container.Tools, registry)
+	selfTools.WorkflowExecutor = workflowStepExecutor
+
+	// CW-20260813-0014: wire the built-in engine (CW-20260813-0010) behind
+	// the workflow_run self-tool and dispatch's RoleWorkflow outcome. The
+	// same workflowStepExecutor instance above backs both the external-
+	// engine MCP callbacks and this in-process launch path — "engines
+	// only sequence, harness always executes" holds identically for both
+	// (design doc). workflowDefinitionsRegistry is empty+inert when
+	// workflow_definitions_path is unset.
+	workflowDefinitionsRegistry, err := agentworkflow.LoadRegistryDir(resolveWorkflowDefinitionsPath(cfg))
+	if err != nil {
+		slogx.Fatal("failed to load workflow definitions registry", "err", err)
+	}
+	slog.Info("workflow definitions registry loaded",
+		"path", resolveWorkflowDefinitionsPath(cfg), "count", len(workflowDefinitionsRegistry.Names()))
+	workflowEngine := service.NewBuiltinWorkflowEngine(container.Store)
+	workflowLauncher := service.NewWorkflowLauncher(workflowDefinitionsRegistry, workflowEngine, workflowStepExecutor, container.DurableAgents)
+	selfTools.WorkflowLauncher = service.NewDispatchWorkflowLauncher(workflowLauncher)
 
 	// Wire todo/plan store into the self-tools transport.
 	selfTools.TodoStore = s
@@ -771,6 +790,17 @@ func resolveBootProfileCatalogPath(cfg *config.Config) string {
 		return ""
 	}
 	return cfg.ResolvedBootProfileCatalogPath()
+}
+
+// resolveWorkflowDefinitionsPath resolves the configured workflow
+// definitions directory (CW-20260813-0014). Returns an empty string when
+// the field is unset, which agentworkflow.LoadRegistryDir interprets as
+// "no directory" — an empty, inert Registry.
+func resolveWorkflowDefinitionsPath(cfg *config.Config) string {
+	if cfg == nil {
+		return ""
+	}
+	return cfg.ResolvedWorkflowDefinitionsPath()
 }
 
 // devAllowedSource returns a short string describing where the dev tools

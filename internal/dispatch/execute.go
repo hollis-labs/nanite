@@ -104,9 +104,44 @@ type ReflexHints struct {
 	// Mode overrides the RoleAssignment.Mode when non-empty.
 	// Values: "sync", "async". Empty means use AssignRole's default.
 	Mode string
+	// WorkflowName, when non-empty, overrides the assignment to
+	// RoleWorkflow and names the registered workflow ExecuteTask should
+	// run instead of spawning a Worker/Planner (CW-20260813-0014). This is
+	// the only way AssignRole's Worker/Planner mapping is bypassed —
+	// reflexes decide when a task matches a rigid, repeatable process;
+	// AssignRole's own (tier, pattern) table is unchanged.
+	WorkflowName string
 	// ReflexID is the matched reflex's ID. Informational; used in telemetry.
 	ReflexID string
 }
+
+// WorkflowLaunchRequest carries the input to a WorkflowLauncher.Launch call.
+type WorkflowLaunchRequest struct {
+	// WorkflowName identifies the registered workflow definition to run.
+	WorkflowName string
+	// Params carries the run's initial arguments, forwarded to the
+	// workflow engine as agentworkflow.WorkflowInput.Params.
+	Params map[string]any
+
+	ParentSessionID string
+	ParentAgentID   string
+	WorkspaceID     string
+	AgentProfileID  string
+	TimeoutSeconds  int
+}
+
+// WorkflowLauncher is the narrow surface ExecuteTask uses to run a named
+// workflow instead of spawning a freeform Worker/Planner agent. The
+// wiring layer adapts the durable-agent-integrated launcher (CW-20260813-0014)
+// to this interface, returning the SAME SpawnResult shape Spawner.Spawn
+// does so EnvelopeWrapper.Wrap needs no workflow-specific branch.
+type WorkflowLauncher interface {
+	Launch(ctx context.Context, req WorkflowLaunchRequest) (*SpawnResult, error)
+}
+
+// ErrNoWorkflowLauncher is returned by ExecuteTask when a task is routed to
+// RoleWorkflow but no WorkflowLauncher is configured. Indicates a wiring bug.
+var ErrNoWorkflowLauncher = errors.New("dispatch: no workflow launcher configured")
 
 // SpawnRequest mirrors the shape subagent.Service.Spawn accepts. Defined
 // here as a narrow value type so the dispatch package does not import
@@ -172,9 +207,12 @@ var ErrNoWrapper = errors.New("dispatch: no envelope wrapper configured")
 // request needs to be handed to a Worker or Planner. The primitive:
 //
 //  1. Classifies the message into ScopeTier + ExecutionPattern.
-//  2. Maps the classification to a role + agent slug via AssignRole.
+//  2. Maps the classification to a role + agent slug via AssignRole. A
+//     matched reflex may instead route to RoleWorkflow, naming a
+//     registered workflow to run (CW-20260813-0014).
 //  3. Spawns the role agent with the resolved surface (the spawned
-//     profile owns its own permissions — Chat's surface does not leak).
+//     profile owns its own permissions — Chat's surface does not leak) —
+//     or, for RoleWorkflow, hands off to the WorkflowLauncher.
 //  4. Captures the role's output.
 //  5. Wraps the output in an envelope.
 //  6. Returns the envelope. Raw worker output never leaves this function
@@ -184,7 +222,7 @@ var ErrNoWrapper = errors.New("dispatch: no envelope wrapper configured")
 // On any failure the primitive returns an error; the caller is
 // responsible for surfacing the failure to the user (typically via an
 // error-report envelope).
-func ExecuteTask(ctx context.Context, spawner Spawner, wrapper EnvelopeWrapper, args ExecuteTaskArgs) (Envelope, error) {
+func ExecuteTask(ctx context.Context, spawner Spawner, wrapper EnvelopeWrapper, launcher WorkflowLauncher, args ExecuteTaskArgs) (Envelope, error) {
 	if spawner == nil {
 		return Envelope{}, ErrNoSpawner
 	}
@@ -227,6 +265,16 @@ func ExecuteTask(ctx context.Context, spawner Spawner, wrapper EnvelopeWrapper, 
 		if args.ReflexHints.Mode != "" {
 			assignment.Mode = args.ReflexHints.Mode
 		}
+		if args.ReflexHints.WorkflowName != "" {
+			// A matched workflow reflex bypasses AssignRole's Worker/Planner
+			// mapping entirely (design doc: "route a task to a named,
+			// defined workflow ... instead of always spawning a single
+			// freeform agent"). AssignRole's own table is untouched by
+			// this — only a reflex hint (or RoleOverride below) can select
+			// RoleWorkflow.
+			assignment.Role = RoleWorkflow
+			assignment.WorkflowName = args.ReflexHints.WorkflowName
+		}
 	}
 	if args.RoleOverride.IsValid() {
 		// Test seam — preserves the spawned slug from AssignRole so the
@@ -235,7 +283,9 @@ func ExecuteTask(ctx context.Context, spawner Spawner, wrapper EnvelopeWrapper, 
 		assignment.Role = args.RoleOverride
 	}
 
-	// 3. Spawn.
+	// 3. Spawn — or, when routed to RoleWorkflow, launch the named workflow
+	// instead. Both paths converge on the same *SpawnResult shape so step
+	// 4/5 (wrap in an envelope) needs no role-specific branch.
 	mode := assignment.Mode
 	// ExecuteTask must capture the result, so async dispatch is forced
 	// to sync at the seam. The classification-driven mode is preserved
@@ -244,17 +294,34 @@ func ExecuteTask(ctx context.Context, spawner Spawner, wrapper EnvelopeWrapper, 
 		mode = "sync"
 	}
 
-	result, err := spawner.Spawn(ctx, SpawnRequest{
-		ParentSessionID: args.SessionID,
-		ParentAgentID:   args.ParentAgentID,
-		Role:            assignment.AgentSlug,
-		Prompt:          args.Message,
-		Mode:            mode,
-		Provider:        args.Provider,
-		TimeoutSeconds:  args.TimeoutSeconds,
-		WorkspaceID:     args.WorkspaceID,
-		AgentProfileID:  args.AgentProfileID,
-	})
+	var result *SpawnResult
+	var err error
+	if assignment.Role == RoleWorkflow {
+		if launcher == nil {
+			return Envelope{}, ErrNoWorkflowLauncher
+		}
+		result, err = launcher.Launch(ctx, WorkflowLaunchRequest{
+			WorkflowName:    assignment.WorkflowName,
+			Params:          map[string]any{"message": args.Message},
+			ParentSessionID: args.SessionID,
+			ParentAgentID:   args.ParentAgentID,
+			WorkspaceID:     args.WorkspaceID,
+			AgentProfileID:  args.AgentProfileID,
+			TimeoutSeconds:  args.TimeoutSeconds,
+		})
+	} else {
+		result, err = spawner.Spawn(ctx, SpawnRequest{
+			ParentSessionID: args.SessionID,
+			ParentAgentID:   args.ParentAgentID,
+			Role:            assignment.AgentSlug,
+			Prompt:          args.Message,
+			Mode:            mode,
+			Provider:        args.Provider,
+			TimeoutSeconds:  args.TimeoutSeconds,
+			WorkspaceID:     args.WorkspaceID,
+			AgentProfileID:  args.AgentProfileID,
+		})
+	}
 	if err != nil {
 		return Envelope{}, fmt.Errorf("dispatch: spawn %s: %w", assignment.Role.String(), err)
 	}

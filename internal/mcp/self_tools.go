@@ -180,6 +180,11 @@ func selfToolDefinitions() []Tool {
 		workflowExecuteLLMStepToolDefinition(),
 		workflowExecuteToolStepToolDefinition(),
 		workflowVerifyStepToolDefinition(),
+		// workflow_run — the dispatch-facing outcome (CW-20260813-0014):
+		// run a named, defined workflow instead of spawning a bare
+		// Worker/Planner. Same WorkflowLauncher backs both this direct
+		// call and a reflex-routed task_execute dispatch.
+		workflowRunToolDefinition(),
 		// Cross-app navigation tools — control Engine GUI via SSE
 		{
 			Name:        "engine_navigate",

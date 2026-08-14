@@ -62,6 +62,16 @@ type Config struct {
 	// dropdown only shows DB-seeded rows. This satisfies the "no
 	// catalog → no behavior change" acceptance criterion.
 	BootProfileCatalogPath string                  `yaml:"boot_profile_catalog_path"`
+	// WorkflowDefinitionsPath is the on-disk directory internal/agentworkflow's
+	// registry loader reads at startup — one WorkflowDefinition per *.yaml
+	// file (CW-20260813-0014), keyed by the definition's Name field. The
+	// path may use a leading ~/ for the user's home directory; expansion
+	// happens in ResolvedWorkflowDefinitionsPath.
+	//
+	// When unset (empty string) the registry stays empty — workflow_run
+	// self-tool calls fail with "unknown workflow" but nothing else changes
+	// ("no catalog → no behavior change", matching BootProfileCatalogPath).
+	WorkflowDefinitionsPath string                 `yaml:"workflow_definitions_path"`
 	Executor       ExecutorConfig           `yaml:"executor"`
 	Defaults       DefaultsConfig           `yaml:"defaults"`
 	Projects       map[string]ProjectEntry  `yaml:"projects"`
@@ -203,6 +213,15 @@ func (c *Config) ResolvedBootProfileCatalogPath() string {
 	return expandHome(c.BootProfileCatalogPath)
 }
 
+// ResolvedWorkflowDefinitionsPath returns the configured
+// WorkflowDefinitionsPath with a leading ~/ tilde-expanded to the user's
+// home directory. Returns an empty string when the field is unset, which
+// the workflow-definitions registry treats as "no directory configured"
+// (empty registry).
+func (c *Config) ResolvedWorkflowDefinitionsPath() string {
+	return expandHome(c.WorkflowDefinitionsPath)
+}
+
 // ResolvedDevToolsAllowedPaths returns the configured DevToolsAllowedPaths
 // list with leading ~/ entries tilde-expanded to the user's home directory.
 // Empty entries are dropped. Returns nil only when the field was never
@@ -274,6 +293,9 @@ func merge(user, project *Config) *Config {
 	}
 	if project.BootProfileCatalogPath != "" {
 		out.BootProfileCatalogPath = project.BootProfileCatalogPath
+	}
+	if project.WorkflowDefinitionsPath != "" {
+		out.WorkflowDefinitionsPath = project.WorkflowDefinitionsPath
 	}
 	if project.HooksDir != "" {
 		out.HooksDir = project.HooksDir

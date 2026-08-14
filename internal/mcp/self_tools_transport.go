@@ -114,6 +114,12 @@ type SelfToolsTransport struct {
 	// Set post-construction; defaults to dispatch.DefaultEnvelopeWrapper{}
 	// when the transport detects a configured Dispatch with no wrapper.
 	DispatchWrapper dispatch.EnvelopeWrapper
+	// WorkflowLauncher runs a named, defined workflow — the RoleWorkflow
+	// dispatch outcome (CW-20260813-0014) — and backs both the
+	// workflow_run self-tool and a reflex-routed task_execute call. Set
+	// post-construction from the container; nil-safe (a RoleWorkflow
+	// route without one returns dispatch.ErrNoWorkflowLauncher).
+	WorkflowLauncher dispatch.WorkflowLauncher
 
 	// Broker is the agent-broker primitive consulted before dispatch
 	// (CW-20260502-0005 scaffold). The no-op `broker.NewModeBroker()` impl
@@ -322,6 +328,8 @@ func (st *SelfToolsTransport) CallTool(ctx context.Context, name string, args ma
 		return st.callWorkflowExecuteToolStep(ctx, args)
 	case "workflow_verify_step":
 		return st.callWorkflowVerifyStep(ctx, args)
+	case "workflow_run":
+		return st.callWorkflowRun(ctx, args)
 	case "engine_navigate":
 		return st.callNavigateEngine(args)
 	case "engine_refresh":

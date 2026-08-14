@@ -174,10 +174,7 @@ func pollHealthUntilReady(ctx context.Context, baseURL string, timeout time.Dura
 			return errors.New("nanite serve exited before becoming healthy")
 		case <-time.After(delay):
 		}
-		delay *= 2
-		if delay > autostartPollMaxDelay {
-			delay = autostartPollMaxDelay
-		}
+		delay = nextBackoffDelay(delay, autostartPollInitialDelay, autostartPollMaxDelay)
 	}
 }
 

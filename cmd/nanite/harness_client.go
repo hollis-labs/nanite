@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -16,6 +17,70 @@ import (
 	"github.com/hollis-labs/nanite/internal/chat"
 	"github.com/hollis-labs/nanite/internal/store"
 )
+
+// Bounds for harnessClient's connection-establishment retry. CW-20260813-0008.
+const (
+	harnessConnectMaxAttempts  = 4 // 1 initial try + 3 retries — bounded, never infinite
+	harnessConnectInitialDelay = 250 * time.Millisecond
+	harnessConnectMaxDelay     = 2 * time.Second
+)
+
+// connectError marks a failure to reach the harness-v1 server at all — the
+// request never produced an HTTP response (dial failure, timeout, connection
+// reset by a server restarting mid-session) — as distinct from a failure
+// after the server answered (a non-2xx status, an unparsable body). Only a
+// *connectError is eligible for retryConnect: a request that got a real
+// answer back must not be blindly retried, since the server may already
+// have acted on it.
+type connectError struct {
+	err error
+}
+
+func (e *connectError) Error() string { return e.err.Error() }
+func (e *connectError) Unwrap() error { return e.err }
+
+// retryConnect calls attempt up to harnessConnectMaxAttempts times, retrying
+// only on a *connectError, with bounded exponential backoff between
+// attempts. Any other error — including a definitive non-2xx response —
+// returns immediately without retrying.
+//
+// Scope is deliberately narrow to connection *establishment*: SendTurn's
+// initial POST and StreamEvents' initial GET are the only callers. Once
+// StreamEvents has returned its event channel, a turn is considered to be
+// actively streaming — a failure from that point on (a read error, a
+// malformed frame) must surface as a clear, non-retried error instead,
+// since retrying after partial output has reached the user risks duplicate
+// or re-run output. See StreamEvents' decode loop and runChatTurn in
+// chat_cmd.go, which advises the user to resume via `--session` instead.
+//
+// Shares its backoff arithmetic with the auto-start health poll
+// (CW-20260813-0007, pollHealthUntilReady) via nextBackoffDelay rather than
+// duplicating a second retry loop.
+func retryConnect[T any](ctx context.Context, attempt func() (T, error)) (T, error) {
+	var zero T
+	var lastErr error
+	var delay time.Duration
+	for i := 0; i < harnessConnectMaxAttempts; i++ {
+		if i > 0 {
+			delay = nextBackoffDelay(delay, harnessConnectInitialDelay, harnessConnectMaxDelay)
+			select {
+			case <-ctx.Done():
+				return zero, ctx.Err()
+			case <-time.After(delay):
+			}
+		}
+		result, err := attempt()
+		if err == nil {
+			return result, nil
+		}
+		var connErr *connectError
+		if !errors.As(err, &connErr) {
+			return zero, err
+		}
+		lastErr = err
+	}
+	return zero, lastErr
+}
 
 // harnessClient is a thin HTTP client for the /api/harness/v1 control-plane
 // API (internal/api/harness_v1.go) — the same GUI-agnostic surface the React
@@ -80,7 +145,7 @@ func (c *harnessClient) doJSON(ctx context.Context, method, path string, body, o
 	}
 	resp, err := c.http.Do(req)
 	if err != nil {
-		return fmt.Errorf("could not reach %s: %w (is `nanite serve` running?)", c.baseURL, err)
+		return &connectError{fmt.Errorf("could not reach %s: %w (is `nanite serve` running?)", c.baseURL, err)}
 	}
 	defer resp.Body.Close()
 	data, err := io.ReadAll(resp.Body)
@@ -147,9 +212,13 @@ func (c *harnessClient) GetSession(ctx context.Context, sessionID string) (*stor
 }
 
 func (c *harnessClient) SendTurn(ctx context.Context, sessionID, content string) (*harnessTurnResponse, error) {
-	var resp harnessTurnResponse
 	req := harnessTurnRequest{Content: content}
-	if err := c.doJSON(ctx, http.MethodPost, "/api/harness/v1/sessions/"+sessionID+"/turns", req, &resp); err != nil {
+	resp, err := retryConnect(ctx, func() (harnessTurnResponse, error) {
+		var resp harnessTurnResponse
+		err := c.doJSON(ctx, http.MethodPost, "/api/harness/v1/sessions/"+sessionID+"/turns", req, &resp)
+		return resp, err
+	})
+	if err != nil {
 		return nil, fmt.Errorf("send turn: %w", err)
 	}
 	return &resp, nil
@@ -175,15 +244,23 @@ func (c *harnessClient) Cancel(ctx context.Context, sessionID string) (*harnessC
 // that re-derives the URL duplicates that routing knowledge and breaks
 // silently if the server ever changes it.
 func (c *harnessClient) StreamEvents(ctx context.Context, path string) (<-chan chat.StreamEvent, error) {
-	req, err := c.newRequest(ctx, http.MethodGet, path, nil)
+	// Retries the request/response round trip only — connection
+	// establishment. Once resp is in hand, the decode goroutine below owns
+	// the rest of the turn and never retries; see retryConnect's doc comment.
+	resp, err := retryConnect(ctx, func() (*http.Response, error) {
+		req, err := c.newRequest(ctx, http.MethodGet, path, nil)
+		if err != nil {
+			return nil, err
+		}
+		req.Header.Set("Accept", "text/event-stream")
+		resp, err := c.http.Do(req)
+		if err != nil {
+			return nil, &connectError{fmt.Errorf("could not reach %s: %w (is `nanite serve` running?)", c.baseURL, err)}
+		}
+		return resp, nil
+	})
 	if err != nil {
 		return nil, err
-	}
-	req.Header.Set("Accept", "text/event-stream")
-
-	resp, err := c.http.Do(req)
-	if err != nil {
-		return nil, fmt.Errorf("could not reach %s: %w (is `nanite serve` running?)", c.baseURL, err)
 	}
 	if resp.StatusCode >= 400 {
 		data, _ := io.ReadAll(resp.Body)

@@ -4,16 +4,33 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/hollis-labs/nanite/internal/store"
 )
+
+// flakyTransport fails the first failCount RoundTrip calls with a network
+// error (simulating a connection blip or a server mid-restart) before
+// delegating to inner. CW-20260813-0008.
+type flakyTransport struct {
+	failCount int32
+	inner     http.RoundTripper
+}
+
+func (t *flakyTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	if atomic.AddInt32(&t.failCount, -1) >= 0 {
+		return nil, errors.New("simulated connection failure")
+	}
+	return t.inner.RoundTrip(req)
+}
 
 // newTestHarnessServer wires a minimal stand-in for internal/api/harness_v1.go's
 // routes, just enough to exercise harnessClient's request/response and SSE
@@ -319,5 +336,170 @@ func TestHarnessClient_BasicAuth(t *testing.T) {
 	}
 	if *lastAuth != "alice" {
 		t.Fatalf("expected request to carry basic auth user 'alice', got %q", *lastAuth)
+	}
+}
+
+// TestHarnessClient_SendTurn_RetriesOnConnectionFailure pins CW-20260813-0008:
+// a transient failure to reach the server on SendTurn's initial POST
+// (network blip, server restart mid-session) must be retried rather than
+// surfacing as a hard error on the first hiccup.
+func TestHarnessClient_SendTurn_RetriesOnConnectionFailure(t *testing.T) {
+	srv, _ := newTestHarnessServer(t)
+	defer srv.Close()
+
+	client := &harnessClient{
+		baseURL: srv.URL,
+		http:    &http.Client{Transport: &flakyTransport{failCount: 2, inner: http.DefaultTransport}},
+	}
+
+	turn, err := client.SendTurn(context.Background(), "sess-1", "hi")
+	if err != nil {
+		t.Fatalf("SendTurn: %v", err)
+	}
+	if turn.MessageID != "msg-1" {
+		t.Fatalf("unexpected message id: %q", turn.MessageID)
+	}
+}
+
+// TestHarnessClient_StreamEvents_RetriesConnectionOpen mirrors the SendTurn
+// case for StreamEvents' initial GET that opens the SSE connection.
+func TestHarnessClient_StreamEvents_RetriesConnectionOpen(t *testing.T) {
+	srv, _ := newTestHarnessServer(t)
+	defer srv.Close()
+
+	client := &harnessClient{
+		baseURL: srv.URL,
+		http:    &http.Client{Transport: &flakyTransport{failCount: 2, inner: http.DefaultTransport}},
+	}
+
+	events, err := client.StreamEvents(context.Background(), "/api/harness/v1/sessions/sess-1/events?message_id=msg-1")
+	if err != nil {
+		t.Fatalf("StreamEvents: %v", err)
+	}
+
+	var gotStreamEnd bool
+	deadline := time.After(5 * time.Second)
+	for !gotStreamEnd {
+		select {
+		case evt, ok := <-events:
+			if !ok {
+				t.Fatal("channel closed before stream_end")
+			}
+			if evt.Type == "stream_end" {
+				gotStreamEnd = true
+			}
+		case <-deadline:
+			t.Fatal("timed out waiting for stream_end")
+		}
+	}
+}
+
+// TestHarnessClient_SendTurn_GivesUpAfterMaxAttempts pins the "bounded
+// number of retries, not infinite" requirement: a connection that never
+// succeeds must fail with a clear error in bounded time, not hang.
+func TestHarnessClient_SendTurn_GivesUpAfterMaxAttempts(t *testing.T) {
+	client := &harnessClient{
+		baseURL: "http://127.0.0.1:1",
+		http:    &http.Client{Transport: &flakyTransport{failCount: 1000, inner: http.DefaultTransport}},
+	}
+
+	start := time.Now()
+	_, err := client.SendTurn(context.Background(), "sess-1", "hi")
+	if err == nil {
+		t.Fatal("SendTurn: expected an error after exhausting retries, got nil")
+	}
+	if elapsed := time.Since(start); elapsed > 5*time.Second {
+		t.Fatalf("SendTurn took %s to give up, want well under 5s", elapsed)
+	}
+}
+
+// TestHarnessClient_SendTurn_DoesNotRetryServerError pins the other half of
+// the CW-20260813-0008 distinction: a definitive response from the server
+// (even an error one) means the connection was established — it must not
+// be retried, since the server may have already acted on the request.
+func TestHarnessClient_SendTurn_DoesNotRetryServerError(t *testing.T) {
+	var calls int32
+	mux := http.NewServeMux()
+	mux.HandleFunc("POST /api/harness/v1/sessions/{id}/turns", func(w http.ResponseWriter, r *http.Request) {
+		atomic.AddInt32(&calls, 1)
+		http.Error(w, "boom", http.StatusInternalServerError)
+	})
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+
+	client := newHarnessClient(srv.URL)
+	if _, err := client.SendTurn(context.Background(), "sess-1", "hi"); err == nil {
+		t.Fatal("SendTurn: expected an error for a 500 response, got nil")
+	}
+	if got := atomic.LoadInt32(&calls); got != 1 {
+		t.Fatalf("server called %d times, want exactly 1 (a definitive server response must not be retried)", got)
+	}
+}
+
+// TestHarnessClient_StreamEvents_DoesNotRetryMidStreamFailure pins the core
+// distinction CW-20260813-0008 is about: once StreamEvents has opened the
+// connection and started delivering events, a failure (here, the server
+// dropping the connection mid-stream) must surface as a synthetic error
+// event, never as a reopened/retried connection.
+func TestHarnessClient_StreamEvents_DoesNotRetryMidStreamFailure(t *testing.T) {
+	var calls int32
+	mux := http.NewServeMux()
+	mux.HandleFunc("GET /events", func(w http.ResponseWriter, r *http.Request) {
+		atomic.AddInt32(&calls, 1)
+		flusher, ok := w.(http.Flusher)
+		if !ok {
+			t.Fatal("test server response writer does not support flushing")
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.WriteHeader(http.StatusOK)
+		fmt.Fprint(w, "data: {\"type\":\"delta\",\"content\":\"hi\"}\n\n")
+		flusher.Flush()
+
+		hj, ok := w.(http.Hijacker)
+		if !ok {
+			t.Fatal("test server response writer does not support hijacking")
+		}
+		conn, _, err := hj.Hijack()
+		if err != nil {
+			t.Fatalf("hijack: %v", err)
+		}
+		conn.Close()
+	})
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+
+	client := newHarnessClient(srv.URL)
+	events, err := client.StreamEvents(context.Background(), "/events")
+	if err != nil {
+		t.Fatalf("StreamEvents: %v", err)
+	}
+
+	var gotDelta, gotError bool
+	deadline := time.After(5 * time.Second)
+loop:
+	for {
+		select {
+		case evt, ok := <-events:
+			if !ok {
+				break loop
+			}
+			switch evt.Type {
+			case "delta":
+				gotDelta = true
+			case "error":
+				gotError = true
+			}
+		case <-deadline:
+			t.Fatal("timed out waiting for the stream to close")
+		}
+	}
+	if !gotDelta {
+		t.Fatal("expected at least one delta event before the connection dropped")
+	}
+	if !gotError {
+		t.Fatal("expected a synthetic error event for the mid-stream read failure")
+	}
+	if got := atomic.LoadInt32(&calls); got != 1 {
+		t.Fatalf("GET /events called %d times, want exactly 1 (mid-stream failures must not retry the connection)", got)
 	}
 }

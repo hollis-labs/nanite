@@ -1,12 +1,16 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -115,5 +119,74 @@ func TestRunChatTurn_SessionTakeover(t *testing.T) {
 	err := runChatTurn(context.Background(), client, "sess-1", "hi")
 	if !errors.Is(err, errSessionTakeover) {
 		t.Fatalf("runChatTurn error = %v, want errSessionTakeover", err)
+	}
+}
+
+// TestRunChatTurn_ErrorAfterStreamingSuggestsResume pins CW-20260813-0008:
+// a failure that happens after streaming has already delivered partial
+// output must not be retried — it must print resume guidance (`--session`)
+// instead, and the connection must have been opened exactly once.
+func TestRunChatTurn_ErrorAfterStreamingSuggestsResume(t *testing.T) {
+	var calls int32
+	mux := http.NewServeMux()
+	mux.HandleFunc("POST /api/harness/v1/sessions/{id}/turns", func(w http.ResponseWriter, r *http.Request) {
+		id := r.PathValue("id")
+		json.NewEncoder(w).Encode(harnessTurnResponse{
+			SessionID: id,
+			MessageID: "msg-1",
+			StreamURL: fmt.Sprintf("/api/harness/v1/sessions/%s/events?message_id=msg-1", id),
+		})
+	})
+	mux.HandleFunc("GET /api/harness/v1/sessions/{id}/events", func(w http.ResponseWriter, r *http.Request) {
+		atomic.AddInt32(&calls, 1)
+		flusher, ok := w.(http.Flusher)
+		if !ok {
+			t.Fatal("test server response writer does not support flushing")
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.WriteHeader(http.StatusOK)
+		fmt.Fprintf(w, "data: %s\n\n", `{"type":"delta","content":"partial"}`)
+		flusher.Flush()
+
+		hj, ok := w.(http.Hijacker)
+		if !ok {
+			t.Fatal("test server response writer does not support hijacking")
+		}
+		conn, _, err := hj.Hijack()
+		if err != nil {
+			t.Fatalf("hijack: %v", err)
+		}
+		conn.Close()
+	})
+
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+
+	client := newHarnessClient(srv.URL)
+
+	stdout := os.Stdout
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("os.Pipe: %v", err)
+	}
+	os.Stdout = w
+	runErr := runChatTurn(context.Background(), client, "sess-1", "hi")
+	w.Close()
+	os.Stdout = stdout
+
+	var buf bytes.Buffer
+	if _, copyErr := io.Copy(&buf, r); copyErr != nil {
+		t.Fatalf("read captured stdout: %v", copyErr)
+	}
+	output := buf.String()
+
+	if runErr != nil {
+		t.Fatalf("runChatTurn: %v", runErr)
+	}
+	if !strings.Contains(output, "nanite chat --session sess-1") {
+		t.Fatalf("expected resume guidance mentioning --session sess-1, got: %q", output)
+	}
+	if got := atomic.LoadInt32(&calls); got != 1 {
+		t.Fatalf("GET /events called %d times, want exactly 1 (a post-connection failure must not retry)", got)
 	}
 }

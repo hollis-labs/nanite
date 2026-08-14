@@ -124,11 +124,12 @@ func (st *SelfToolsTransport) callExecuteTask(ctx context.Context, args map[stri
 		})
 		if match, ok := reflex.Match(message, m1Tier, m1Pattern, st.ReflexSet); ok {
 			reflexHints = &dispatch.ReflexHints{
-				HintTier:    match.HintTier,
-				HintPattern: match.HintPattern,
-				AgentSlug:   match.Reflex.ResolvesTo.Profile,
-				Mode:        modeFromDispatchVia(match.Reflex.SideEffects.DispatchVia),
-				ReflexID:    match.Reflex.ID,
+				HintTier:     match.HintTier,
+				HintPattern:  match.HintPattern,
+				AgentSlug:    match.Reflex.ResolvesTo.Profile,
+				Mode:         modeFromDispatchVia(match.Reflex.SideEffects.DispatchVia),
+				WorkflowName: match.Reflex.ResolvesTo.WorkflowName,
+				ReflexID:     match.Reflex.ID,
 			}
 			// Log the match; errors are swallowed (never block dispatch).
 			if st.ReflexLogger != nil {

@@ -73,6 +73,18 @@ resolves_to:
   # (WorkerRoleSlug or PlannerRoleSlug). Omit to use AssignRole's default.
   # Maps to RoleAssignment.AgentSlug in internal/dispatch/role.go.
 
+  workflow_name: <string>
+  # Optional (CW-20260814-0002). When set, this reflex routes the matched
+  # task to a named, registered workflow run (docs/architecture/
+  # agent-workflows-design.md) instead of an ordinary Worker/Planner
+  # dispatch. Forwarded to dispatch.ReflexHints.WorkflowName, which is the
+  # only way dispatch.ExecuteTask bypasses AssignRole's (tier, pattern)
+  # mapping. When set, `pattern`/`role`/`profile` above are ignored —
+  # ExecuteTask forces role=workflow regardless of what they say. The
+  # named workflow must already be registered (loaded from the workflow
+  # definitions directory) or the run fails at launch time — reflexes do
+  # not validate workflow existence themselves. Omit for ordinary reflexes.
+
 side_effects:
   mode_signal: <string>
   # Optional. Emitted to the session mode bus. Consumers (UI, workflow layer)

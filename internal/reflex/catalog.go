@@ -45,6 +45,18 @@ type Resolution struct {
 	// dispatch.AssignRole default (WorkerRoleSlug or PlannerRoleSlug).
 	// Empty means use AssignRole's default.
 	Profile string
+
+	// WorkflowName, when non-empty, routes a match to a named, registered
+	// workflow run (design doc "Integration with the rest of Nanite" —
+	// CW-20260813-0014) instead of an ordinary Worker/Planner dispatch.
+	// The MCP layer (internal/mcp/self_tools_dispatch.go) forwards it
+	// verbatim to dispatch.ReflexHints.WorkflowName, which is the only way
+	// dispatch.ExecuteTask bypasses AssignRole's (tier, pattern) mapping
+	// (see internal/dispatch/execute.go). When set, Pattern/Role/Profile
+	// above are ignored — ExecuteTask forces Role=RoleWorkflow regardless
+	// of what they say. Empty (the default for every existing reflex)
+	// means this reflex resolves to a Worker/Planner dispatch as before.
+	WorkflowName string
 }
 
 // SideEffects are non-dispatch signals emitted when a reflex matches.

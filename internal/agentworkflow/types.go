@@ -100,12 +100,15 @@ type LLMStepRequest struct {
 	Messages     []llmtypes.ChatMessage `json:"messages"`
 
 	// EnableContextAssembly opts this call into the harness's existing
-	// turn-context pipeline — ContextService.AssembleContext
-	// (internal/chat/context_client.go), which composes session history,
-	// agent/mode/workspace prompt content, and Tesseract memory recall
+	// turn-context pipeline — ContextService.AssembleSlots
+	// (internal/service/context.go), the same slot-based assembly method
+	// Chat/GUI/CLI turns call (internal/service/chat_generate.go). It
+	// composes session history, agent/mode/workspace prompt content
+	// (including the Universal, Rules, Permissions, Workspace, and
+	// session-level Mode slots), and Tesseract memory recall
 	// (contextbroker.MemorySource, one of the ContextBroker's sources) —
-	// the same assembly a Chat/GUI/CLI turn gets. Reused via the existing
-	// code path, not reimplemented.
+	// genuine parity with the assembly a Chat/GUI/CLI turn gets, not a
+	// thinner subset. Reused via the existing code path, not reimplemented.
 	//
 	// Default false: every step runs exactly as before, using only
 	// SystemPrompt/Messages as supplied, with no session history and no

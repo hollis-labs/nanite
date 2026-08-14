@@ -86,109 +86,6 @@ func NewContextClient(s *store.Store) *ContextClient {
 	}
 }
 
-// AssembleContext builds the full context for a turn:
-// 1. System prompt (from prompt templates or legacy agent + mode + workspace)
-// 2. Recent messages (from session history)
-// 3. Enforce budget ceiling
-//
-// Legacy flat-prompt path. CW-20260512-0114: the universal-rules block is
-// no longer prepended here — the Context Broker emits it via SlotUniversal
-// in the slot-based AssembleSlots path. This path has no production
-// callers (RecomposeSystemPrompt has no current callers per the in-tree
-// note) and is queued for removal in a follow-up sprint. Re-applying the
-// block here would be a compat shim per feedback_no_compat_shims.
-//
-// SP-20260512-0008 W2B (CW-20260512-0106): the legacy path still routes the
-// skill list through the Skill Broker so behavior matches the slot path.
-// Messages are loaded once at the top and reused for intent derivation
-// (intentTail + deriveIntentFromMessages), avoiding a redundant
-// ListMessages(session.ID, 5) round trip on the hot path.
-func (cb *ContextClient) AssembleContext(ctx context.Context, session *store.Session, agent *store.AgentProfile, mode *store.AgentMode, workspace *store.Workspace) (string, []llmtypes.ChatMessage, error) {
-	_, span := feotel.StartSpan(ctx, "nanite.broker.assembleContext")
-	defer span.End()
-
-	span.SetAttributes(
-		attribute.String("nanite.session.id", session.ID),
-		attribute.String("nanite.agent.id", agent.ID),
-	)
-
-	// 1. Load messages from DB. Start with a generous limit. We pull this
-	// first so the intent-derivation step reuses the same window instead
-	// of issuing a redundant ListMessages(session.ID, 5) round trip.
-	messages, err := cb.Store.ListMessages(session.ID, 200)
-	if err != nil {
-		return "", nil, err
-	}
-
-	// 2. Build the system prompt using prompt templates.
-	// hintOpts enables v2 dynamic hint selection when the ContextClient has a
-	// HintDispatcher wired and NANITE_THINK_BLOCK_V2_ENABLED=true. nil means
-	// the assembler falls back to the v0/v1 static ThinkToolBlock path.
-	//
-	// SP-20260512-0008 W2B (CW-20260512-0106): legacy path also routes the
-	// skill list through the Skill Broker so behavior matches the slot path.
-	// Intent is derived from the already-loaded message window — same tail
-	// the 5-message-load variant would have scanned, but with zero extra DB
-	// round trips on the hot path.
-	legacyIntent := cb.deriveIntentFromMessages(session, agent, intentTail(messages, 5))
-	skillList := buildSkillListForSessionWithIntent(ctx, cb.Store, agent.ID, session.ID, legacyIntent, skillbroker.AgentIdentityFromProfile(agent))
-	var hintOpts *HintSelectOpts
-	if cb.HintDispatcher != nil {
-		hintOpts = &HintSelectOpts{
-			Ctx:        ctx,
-			Dispatcher: cb.HintDispatcher,
-		}
-	}
-	systemPrompt := assembleSystemPromptFromTemplates(cb.Store, agent, mode, workspace, skillList, session.ID, hintOpts)
-
-	// 2b. Enrich system prompt with universal context retrieval.
-	if cb.ContextBroker != nil {
-		systemPrompt = cb.enrichWithContextBroker(ctx, systemPrompt, session, agent)
-	}
-
-	// 3. Convert to provider messages.
-	chatMessages := make([]llmtypes.ChatMessage, len(messages))
-	for i, m := range messages {
-		role := m.Role
-		if role == "system" || role == "tool" || role == RoleEnvelopeResponse {
-			role = "user" // Anthropic API only accepts user/assistant
-		}
-		chatMessages[i] = llmtypes.ChatMessage{Role: role, Content: m.Content}
-	}
-
-	// 4. Estimate total tokens and enforce budget.
-	budgetPct := cb.BudgetPct
-	if budgetPct <= 0 {
-		budgetPct = DefaultBudgetPct
-	}
-	budget := int(float64(DefaultContextWindow) * budgetPct)
-
-	systemTokens := EstimateTokens(systemPrompt)
-	totalTokens := systemTokens
-	for _, cm := range chatMessages {
-		totalTokens += EstimateTokens(cm.Content)
-	}
-
-	// If over budget, drop oldest messages until under budget.
-	for totalTokens > budget && len(chatMessages) > 1 {
-		totalTokens -= EstimateTokens(chatMessages[0].Content)
-		chatMessages = chatMessages[1:]
-	}
-
-	span.SetAttributes(
-		attribute.Int("nanite.broker.system_tokens", systemTokens),
-		attribute.Int("nanite.broker.message_count", len(chatMessages)),
-		attribute.Int("nanite.broker.total_tokens", totalTokens),
-		attribute.Int("nanite.broker.budget", budget),
-	)
-
-	slog.Info("broker: assembled context",
-		"system_tokens", systemTokens, "messages", len(chatMessages),
-		"total_tokens", totalTokens, "budget", budget)
-
-	return systemPrompt, chatMessages, nil
-}
-
 // SlotSources carries the raw, per-slot strings sourced for slot-based
 // context assembly. The service layer composes these into a ContextWindow.
 // Tools content is filled by the service layer after tool selection.
@@ -630,23 +527,12 @@ func (cb *ContextClient) deriveIntent(session *store.Session, agent *store.Agent
 	return cb.deriveIntentFromMessages(session, agent, msgs)
 }
 
-// intentTail returns the trailing window of n messages from msgs (or fewer
-// if msgs is shorter). Used by AssembleContext to reuse its 200-message DB
-// load for intent derivation, mirroring deriveIntent's 5-message tail.
-func intentTail(msgs []store.Message, n int) []store.Message {
-	if n <= 0 || len(msgs) == 0 {
-		return nil
-	}
-	if len(msgs) <= n {
-		return msgs
-	}
-	return msgs[len(msgs)-n:]
-}
-
 // deriveIntentFromMessages is the no-DB variant of deriveIntent: callers
-// pass a pre-loaded message slice (e.g. the 200-message window already
-// fetched by AssembleContext) and the helper scans the tail for the most
-// recent user turn. Identical output to deriveIntent given the same tail.
+// pass a pre-loaded message slice and the helper scans the tail for the
+// most recent user turn. Identical output to deriveIntent given the same
+// tail. Currently only reached via deriveIntent itself; kept as a separate
+// no-DB entry point for any future hot-path caller that already holds a
+// sufficient message window and wants to avoid a redundant DB round trip.
 //
 // Tail-scan semantics match deriveIntent — newest-to-oldest, first user
 // message wins, no minimum length on the input slice. Empty input is fine
@@ -980,56 +866,6 @@ func EnforceTokenBudget(
 	// Step 4: Still over — refuse to send.
 	return messages, tools, breakdown, fmt.Errorf(
 		"context exceeds hard ceiling after all reductions: %d tokens > %d ceiling", total, ceiling)
-}
-
-// enrichWithContextBroker calls the universal ContextBroker to fetch
-// multi-source context and appends it to the system prompt.
-func (cb *ContextClient) enrichWithContextBroker(ctx context.Context, systemPrompt string, session *store.Session, agent *store.AgentProfile) string {
-	// Derive intent from the session's most recent user message.
-	intentType := contextbroker.IntentCustom
-	var keywords []string
-	var queryText string
-	messages, err := cb.Store.ListMessages(session.ID, 5)
-	if err == nil && len(messages) > 0 {
-		// Find last user message.
-		for i := len(messages) - 1; i >= 0; i-- {
-			if messages[i].Role == "user" {
-				_, keywords = ExtractIntent(messages[i].Content)
-				intentType = classifyContextIntent(messages[i].Content)
-				queryText = messages[i].Content
-				break
-			}
-		}
-	}
-
-	intent := contextbroker.Intent{
-		Type:      intentType,
-		Keywords:  keywords,
-		QueryText: queryText,
-		Scope:     session.ProjectID,
-		SessionID: session.ID,
-		AgentID:   agent.ID,
-	}
-
-	packet, err := cb.ContextBroker.Fetch(ctx, intent)
-	if err != nil {
-		slog.Warn("broker: context enrichment failed", "err", err)
-		return systemPrompt
-	}
-
-	if packet == nil || len(packet.Items) == 0 {
-		return systemPrompt
-	}
-
-	formatted := contextbroker.FormatPacket(packet)
-	if formatted == "" {
-		return systemPrompt
-	}
-
-	slog.Info("broker: enriched system prompt with context",
-		"items", packet.Manifest.ItemCount, "tokens", packet.TokenEstimate)
-
-	return systemPrompt + "\n\n" + formatted
 }
 
 // classifyContextIntent maps user message keywords to a ContextBroker intent type.

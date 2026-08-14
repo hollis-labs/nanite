@@ -56,10 +56,6 @@ type ChatService interface {
 	// triggering async generation in the target session.
 	SendAgentMessage(ctx context.Context, fromSessionID, toSessionID, content string) (messageID string, err error)
 
-	// RecomposeSystemPrompt rebuilds the system prompt for a session after
-	// an agent or mode change.
-	RecomposeSystemPrompt(ctx context.Context, sessionID, agentID, newMode string) (string, error)
-
 	// DelegateTask spawns a worker session, sends the task, waits for completion,
 	// and returns the result.
 	DelegateTask(ctx context.Context, req chat.DelegationRequest) (*chat.DelegationResult, error)
@@ -812,43 +808,6 @@ func (s *chatServiceImpl) SendAgentMessage(ctx context.Context, fromSessionID, t
 	s.launchGeneration("sendAgentMessage.generateResponse", toSessionID, assistantMsgID, content, ch)
 
 	return assistantMsgID, nil
-}
-
-// RecomposeSystemPrompt implements ChatService.
-func (s *chatServiceImpl) RecomposeSystemPrompt(ctx context.Context, sessionID, agentID, newMode string) (string, error) {
-	agent, err := s.agents.Get(ctx, agentID)
-	if err != nil {
-		return "", fmt.Errorf("get agent: %w", err)
-	}
-
-	mode := &store.AgentMode{}
-	if modes, mErr := s.agents.ListModes(ctx, agentID); mErr == nil {
-		for _, m := range modes {
-			if m.Slug == newMode {
-				mode = &m
-				break
-			}
-		}
-	}
-
-	session, err := s.sessions.Get(ctx, sessionID)
-	if err != nil {
-		return "", fmt.Errorf("get session: %w", err)
-	}
-
-	var workspace *store.Workspace
-	if session.WorkspaceID != "" {
-		workspace, _ = s.store.GetWorkspace(session.WorkspaceID)
-	}
-
-	// Delegate to the existing context assembly helpers in the chat package.
-	// assembleSystemPromptFromTemplates and buildSkillListForSession are in
-	// chat/context.go.
-	prompt, _, err := s.context.AssembleContext(ctx, session, agent, mode, workspace)
-	if err != nil {
-		return "", fmt.Errorf("assemble context: %w", err)
-	}
-	return prompt, nil
 }
 
 // GetStream implements ChatService.

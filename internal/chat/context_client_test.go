@@ -40,7 +40,13 @@ func TestEstimateTokens(t *testing.T) {
 	}
 }
 
-func TestAssembleContext(t *testing.T) {
+// TestAssembleSlotSources_AgentPromptAndModeAddendum covers the same
+// agent-prompt + mode-addendum + message-count parity the deleted
+// TestAssembleContext exercised against the removed legacy AssembleContext
+// path (CW-20260814-0005) — ported to the slot-based AssembleSlotSources so
+// the coverage survives against the code Chat/GUI/CLI turns and workflow
+// steps (via AssembleSlots) actually call.
+func TestAssembleSlotSources_AgentPromptAndModeAddendum(t *testing.T) {
 	cb, s := newTestBroker(t)
 
 	// Set up workspace, session, agent, mode.
@@ -72,73 +78,22 @@ func TestAssembleContext(t *testing.T) {
 		}
 	}
 
-	systemPrompt, messages, err := cb.AssembleContext(context.Background(), sess, agent, mode, workspace)
+	sources, err := cb.AssembleSlotSources(context.Background(), sess, agent, mode, workspace, nil)
 	if err != nil {
-		t.Fatalf("AssembleContext: %v", err)
+		t.Fatalf("AssembleSlotSources: %v", err)
 	}
 
-	if systemPrompt == "" {
-		t.Error("expected non-empty system prompt")
+	if sources.Agent == "" {
+		t.Error("expected non-empty agent slot content")
 	}
-	if !containsStr(systemPrompt, "You are a test agent.") {
-		t.Error("system prompt should contain agent prompt")
+	if !containsStr(sources.Agent, "You are a test agent.") {
+		t.Error("agent slot should contain agent prompt")
 	}
-	if !containsStr(systemPrompt, "Be concise.") {
-		t.Error("system prompt should contain mode addendum")
+	if !containsStr(sources.Agent, "Be concise.") {
+		t.Error("agent slot should contain mode addendum")
 	}
-	if len(messages) != 3 {
-		t.Errorf("expected 3 messages, got %d", len(messages))
-	}
-}
-
-func TestAssembleContextBudgetEnforcement(t *testing.T) {
-	cb, s := newTestBroker(t)
-
-	// Use a very tight budget.
-	cb.BudgetPct = 0.001 // 200000 * 0.001 = 200 tokens budget
-
-	if err := s.CreateWorkspace(&store.Workspace{ID: "ws1", Name: "Test"}); err != nil {
-		t.Fatalf("CreateWorkspace: %v", err)
-	}
-	sess := &store.Session{WorkspaceID: "ws1"}
-	if err := s.CreateSession(sess); err != nil {
-		t.Fatalf("CreateSession: %v", err)
-	}
-
-	agent := &store.AgentProfile{
-		Name:         "Test",
-		Slug:         "test-budget",
-		SystemPrompt: "Short prompt.",
-	}
-	if err := s.CreateAgent(agent); err != nil {
-		t.Fatalf("CreateAgent: %v", err)
-	}
-
-	// Create many long messages that exceed the budget.
-	for i := 0; i < 20; i++ {
-		msg := &store.Message{
-			SessionID: sess.ID,
-			Role:      "user",
-			Content:   strings.Repeat("Long message content. ", 50),
-		}
-		if err := s.CreateMessage(msg); err != nil {
-			t.Fatalf("CreateMessage: %v", err)
-		}
-	}
-
-	_, messages, err := cb.AssembleContext(context.Background(), sess, agent, &store.AgentMode{}, nil)
-	if err != nil {
-		t.Fatalf("AssembleContext: %v", err)
-	}
-
-	// With a tight budget, older messages should have been dropped.
-	if len(messages) >= 20 {
-		t.Errorf("expected budget enforcement to drop messages, but got all %d", len(messages))
-	}
-
-	// Should always keep at least 1 message.
-	if len(messages) < 1 {
-		t.Error("expected at least 1 message to remain after budget enforcement")
+	if len(sources.Messages) != 3 {
+		t.Errorf("expected 3 messages, got %d", len(sources.Messages))
 	}
 }
 

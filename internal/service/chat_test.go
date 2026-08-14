@@ -83,9 +83,6 @@ func (s *stubToolService) GetToolMeta(toolName string) (ToolMetaInfo, bool) {
 
 type stubContextService struct{}
 
-func (s *stubContextService) AssembleContext(_ context.Context, _ *store.Session, _ *store.AgentProfile, _ *store.AgentMode, _ *store.Workspace) (string, []llmtypes.ChatMessage, error) {
-	return "system prompt", nil, nil
-}
 func (s *stubContextService) PruneAfterTurn(_ context.Context, _ string) error { return nil }
 
 // --- tests ---

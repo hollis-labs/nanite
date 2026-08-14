@@ -20,10 +20,10 @@ type WorkflowEngine interface {
 // lives in internal/service as plain functions (see
 // workflow_step_executor.go), reusing the harness's existing tool broker
 // and permission engine rather than reimplementing them. Context assembly
-// and memory recall (the ContextService/Tesseract path Chat/GUI/CLI turns
-// get) are not wired in by default — ExecuteLLMStep can opt into them per
-// request via LLMStepRequest, but a step that doesn't ask for it runs
-// without prior session context or long-term memory. Capability
+// and memory recall (the ContextService.AssembleSlots/Tesseract path
+// Chat/GUI/CLI turns get) are not wired in by default — ExecuteLLMStep can
+// opt into them per request via LLMStepRequest, but a step that doesn't ask
+// for it runs without prior session context or long-term memory. Capability
 // restriction (an llm step gets exactly the tool surface its request
 // specifies, never an agent profile's broader default) and tool steps
 // never touching model inference are load-bearing invariants of this

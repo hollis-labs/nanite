@@ -28,9 +28,6 @@ func (s *harnessChatStub) RetryLastMessage(context.Context, string) (string, err
 func (s *harnessChatStub) SendAgentMessage(context.Context, string, string, string) (string, error) {
 	panic("SendAgentMessage not used in harness tests")
 }
-func (s *harnessChatStub) RecomposeSystemPrompt(context.Context, string, string, string) (string, error) {
-	panic("RecomposeSystemPrompt not used in harness tests")
-}
 func (s *harnessChatStub) DelegateTask(context.Context, chat.DelegationRequest) (*chat.DelegationResult, error) {
 	panic("DelegateTask not used in harness tests")
 }

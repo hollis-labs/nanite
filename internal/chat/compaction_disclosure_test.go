@@ -269,54 +269,11 @@ func TestRenderCompactionDisclosure_nullableFieldsRenderPlaceholders(t *testing.
 	}
 }
 
-// TestAssembleSystemPromptFromTemplates_appendsDisclosure is the end-to-end-ish
-// check: build a system prompt for a session that has a fresh compaction event
-// and assert the disclosure block appears in the assembled output.
-func TestAssembleSystemPromptFromTemplates_appendsDisclosure(t *testing.T) {
-	s := newTestStoreForChat(t)
-	if err := s.CreateWorkspace(&store.Workspace{ID: "ws", Name: "WS"}); err != nil {
-		t.Fatalf("CreateWorkspace: %v", err)
-	}
-	sess := &store.Session{WorkspaceID: "ws"}
-	if err := s.CreateSession(sess); err != nil {
-		t.Fatalf("CreateSession: %v", err)
-	}
-	agent := &store.AgentProfile{
-		Name:         "TestAgent",
-		Slug:         "test",
-		SystemPrompt: "You are a test agent.",
-	}
-	if err := s.CreateAgent(agent); err != nil {
-		t.Fatalf("CreateAgent: %v", err)
-	}
-	mode := &store.AgentMode{PromptAddendum: ""}
-	workspace := &store.Workspace{Name: "WS", Description: "Test"}
-
-	stash := "stash-xyz"
-	writeCompactionEventForTest(t, s, store.CompactionEvent{
-		SessionID:      sess.ID,
-		SummaryMode:    "plan",
-		HandoffStashID: &stash,
-	})
-
-	// With sessionID — disclosure should appear.
-	withDisc := assembleSystemPromptFromTemplates(s, agent, mode, workspace, "", sess.ID, nil)
-	if !strings.Contains(withDisc, "Compaction Notice (planning session)") {
-		t.Errorf("expected planning-mode disclosure in assembled prompt, got: %q", withDisc)
-	}
-	if !strings.Contains(withDisc, stash) {
-		t.Errorf("expected stash id %q in disclosure, got: %q", stash, withDisc)
-	}
-
-	// Without sessionID — no disclosure.
-	withoutDisc := assembleSystemPromptFromTemplates(s, agent, mode, workspace, "", "", nil)
-	if strings.Contains(withoutDisc, "Compaction Notice") {
-		t.Errorf("expected no disclosure when sessionID empty, got: %q", withoutDisc)
-	}
-}
-
-// TestAssembleAgentSlotContent_appendsDisclosure mirrors the above for the
-// slot-based assembly path.
+// TestAssembleAgentSlotContent_appendsDisclosure asserts the disclosure block
+// appears in the slot-based agent-slot assembly output for a session with a
+// fresh compaction event. The legacy-path equivalent of this test
+// (assembleSystemPromptFromTemplates) was removed along with that function
+// when the legacy AssembleContext path was deleted (CW-20260814-0005).
 func TestAssembleAgentSlotContent_appendsDisclosure(t *testing.T) {
 	s := newTestStoreForChat(t)
 	if err := s.CreateWorkspace(&store.Workspace{ID: "ws", Name: "WS"}); err != nil {

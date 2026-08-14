@@ -8,61 +8,6 @@ import (
 	"github.com/hollis-labs/nanite/internal/store"
 )
 
-func TestContextService_AssembleContext(t *testing.T) {
-	// Use a real ContextClient backed by an in-memory store.
-	s, err := store.New(context.Background(), t.TempDir()+"/test.db")
-	if err != nil {
-		t.Fatalf("store.New: %v", err)
-	}
-
-	client := chat.NewContextClient(s)
-	svc := NewContextService(ContextServiceConfig{Client: client})
-
-	// Create a session and a message so context assembly has something to load.
-	sess := &store.Session{ID: "ctx-sess-1", Title: "test"}
-	if err := s.CreateSession(sess); err != nil {
-		t.Fatalf("CreateSession: %v", err)
-	}
-	if err := s.CreateMessage(&store.Message{
-		ID:        "msg-1",
-		SessionID: "ctx-sess-1",
-		Role:      "user",
-		Content:   "hello world",
-	}); err != nil {
-		t.Fatalf("CreateMessage: %v", err)
-	}
-
-	agent := &store.AgentProfile{
-		ID:           "agent-ctx",
-		Name:         "CtxAgent",
-		Slug:         "ctx",
-		SystemPrompt: "You are a test agent.",
-		Status:       "active",
-	}
-
-	prompt, msgs, err := svc.AssembleContext(context.Background(), sess, agent, &store.AgentMode{}, nil)
-	if err != nil {
-		t.Fatalf("AssembleContext: %v", err)
-	}
-	if prompt == "" {
-		t.Error("expected non-empty system prompt")
-	}
-	if len(msgs) == 0 {
-		t.Error("expected at least one message")
-	}
-	// Verify the message content made it through.
-	found := false
-	for _, m := range msgs {
-		if m.Content == "hello world" && m.Role == "user" {
-			found = true
-			break
-		}
-	}
-	if !found {
-		t.Error("expected to find 'hello world' message in assembled context")
-	}
-}
-
 func TestContextService_PruneAfterTurn(t *testing.T) {
 	s, err := store.New(context.Background(), t.TempDir()+"/test.db")
 	if err != nil {

@@ -37,10 +37,10 @@
 //     cacheable prefix stable across agents that share the universal
 //     rules.
 //
-//   - The legacy `AssembleContext` flat-prompt path no longer prepends the
-//     universal block. The path has no production callers and is queued
-//     for removal in a follow-up sprint; per `feedback_no_compat_shims`,
-//     re-applying the block in a deprecated path would be a compat shim.
+//   - The legacy `AssembleContext` flat-prompt path (which never prepended
+//     the universal block) was removed entirely — it had zero production
+//     callers by the time CW-20260814-0005 audited it. AssembleSlotSources
+//     is now the only context-assembly path, legacy or otherwise.
 //
 // PROMPT-SYNC: CW-20260512-0100 / CW-20260427-0014 / CW-20260512-0114 / CW-20260512-0122.
 //

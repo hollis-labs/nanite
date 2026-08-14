@@ -121,3 +121,59 @@ func TestWorkflowLauncher_Launch_UnregisteredEngine_ClearError(t *testing.T) {
 		t.Error("builtin engine ran, want Launch to fail before reaching any engine")
 	}
 }
+
+// TestWorkflowLauncher_Launch_MissingBuiltinEngine_NotFullyConfiguredError
+// proves an engines set that omits agentworkflow.EngineBuiltin fails fast
+// with the same "not fully configured" error every other missing
+// dependency produces, rather than only surfacing once some later
+// empty-Engine workflow happens to launch (PR #233 review feedback).
+func TestWorkflowLauncher_Launch_MissingBuiltinEngine_NotFullyConfiguredError(t *testing.T) {
+	st, profile := newWorkflowLaunchTestFixture(t)
+	registry := agentworkflow.NewRegistry(map[string]agentworkflow.WorkflowDefinition{
+		"noop-workflow": singleToolStepWorkflow("noop-workflow"),
+	})
+	exec := NewWorkflowStepExecutor(&fakeWorkflowToolService{}, &fakeProviderResolver{}, nil)
+	langgraph := &recordingWorkflowEngine{name: agentworkflow.EngineLangGraph}
+	launcher := NewWorkflowLauncher(registry, map[string]agentworkflow.WorkflowEngine{
+		agentworkflow.EngineLangGraph: langgraph,
+	}, exec, NewDurableAgentService(st))
+
+	_, err := launcher.Launch(context.Background(), WorkflowLaunchRequest{
+		WorkflowName:   "noop-workflow",
+		WorkspaceID:    "ws-launch",
+		AgentProfileID: profile.ID,
+	})
+	if err == nil || !strings.Contains(err.Error(), "not fully configured") {
+		t.Fatalf("err = %v, want \"not fully configured\"", err)
+	}
+}
+
+// TestWorkflowLauncher_Launch_NilEngineValueInMap_ClearError proves a map
+// entry explicitly set to a nil WorkflowEngine value (as opposed to a
+// missing key) is rejected with the same clear error as an unregistered
+// engine, instead of reaching engine.Run and panicking on a nil-interface
+// method call (PR #233 review feedback).
+func TestWorkflowLauncher_Launch_NilEngineValueInMap_ClearError(t *testing.T) {
+	st, profile := newWorkflowLaunchTestFixture(t)
+	registry := agentworkflow.NewRegistry(map[string]agentworkflow.WorkflowDefinition{
+		"crewai-workflow": externalTargetedWorkflow("crewai-workflow", agentworkflow.EngineCrewAI),
+	})
+	builtin := &recordingWorkflowEngine{name: agentworkflow.EngineBuiltin}
+	exec := NewWorkflowStepExecutor(&fakeWorkflowToolService{}, &fakeProviderResolver{}, nil)
+	launcher := NewWorkflowLauncher(registry, map[string]agentworkflow.WorkflowEngine{
+		agentworkflow.EngineBuiltin: builtin,
+		agentworkflow.EngineCrewAI:  nil,
+	}, exec, NewDurableAgentService(st))
+
+	_, err := launcher.Launch(context.Background(), WorkflowLaunchRequest{
+		WorkflowName:   "crewai-workflow",
+		WorkspaceID:    "ws-launch",
+		AgentProfileID: profile.ID,
+	})
+	if err == nil {
+		t.Fatal("expected an error for a nil engine value, not a panic")
+	}
+	if !strings.Contains(err.Error(), "crewai") {
+		t.Fatalf("err = %v, want it to name the nil-valued engine %q", err, agentworkflow.EngineCrewAI)
+	}
+}

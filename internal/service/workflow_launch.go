@@ -105,7 +105,13 @@ func NewWorkflowLauncher(registry *agentworkflow.Registry, engines map[string]ag
 // instance's lifecycle (stopped, with the run id stashed in metadata_json)
 // regardless of whether the run itself succeeded.
 func (l *WorkflowLauncher) Launch(ctx context.Context, req WorkflowLaunchRequest) (*WorkflowLaunchResult, error) {
-	if l == nil || l.registry == nil || len(l.engines) == 0 || l.exec == nil || l.durable == nil {
+	// l.engines[EngineBuiltin] == nil catches both an empty/nil map and a
+	// map that omits (or nils out) the one entry every empty-Engine
+	// workflow resolves to — the doc comment on NewWorkflowLauncher
+	// promises this is checked at call time, so it's checked here rather
+	// than left to surface as a confusing per-launch "unknown engine"
+	// error, or a nil-interface panic on engine.Run below.
+	if l == nil || l.registry == nil || l.engines[agentworkflow.EngineBuiltin] == nil || l.exec == nil || l.durable == nil {
 		return nil, fmt.Errorf("workflow: launcher not fully configured")
 	}
 	if req.WorkflowName == "" {
@@ -119,8 +125,12 @@ func (l *WorkflowLauncher) Launch(ctx context.Context, req WorkflowLaunchRequest
 	if engineName == "" {
 		engineName = agentworkflow.EngineBuiltin
 	}
+	// engine == nil (not just !ok) also rejects a map entry deliberately
+	// or accidentally set to a nil WorkflowEngine value for a
+	// non-builtin engine name — the same panic-on-Run risk the builtin
+	// check above guards against, generalized to every engine.
 	engine, ok := l.engines[engineName]
-	if !ok {
+	if !ok || engine == nil {
 		return nil, fmt.Errorf("workflow: workflow %q targets engine %q, which is not registered on this launcher", wf.Name, engineName)
 	}
 	if req.WorkspaceID == "" {

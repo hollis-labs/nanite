@@ -478,6 +478,8 @@ func cmdServe(args []string) {
 		externalBinPath := ""
 		if exe, exeErr := os.Executable(); exeErr == nil {
 			externalBinPath = launcher.ResolveBinaryPath(exe)
+		} else {
+			slog.Warn("workflow-runner: os.Executable failed, langgraph/crewai engines unavailable", "err", exeErr)
 		}
 		externalEngineSpecs := []struct {
 			name       string

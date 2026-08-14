@@ -106,10 +106,10 @@ class DeterministicToolCallClient(ChatCompletionClient):
         self,
         messages,
         *,
-        tools=[],
+        tools=None,
         tool_choice="auto",
         json_output=None,
-        extra_create_args={},
+        extra_create_args=None,
         cancellation_token=None,
     ) -> CreateResult:
         call = FunctionCall(id="call_1", name=self._tool_name, arguments=json.dumps(self._build_arguments()))
@@ -119,10 +119,10 @@ class DeterministicToolCallClient(ChatCompletionClient):
         self,
         messages,
         *,
-        tools=[],
+        tools=None,
         tool_choice="auto",
         json_output=None,
-        extra_create_args={},
+        extra_create_args=None,
         cancellation_token=None,
     ):
         # Never invoked: every AssistantAgent below leaves model_client_stream

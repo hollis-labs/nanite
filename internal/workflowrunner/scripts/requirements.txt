@@ -26,5 +26,5 @@ autogen-ext[mcp]
 mcp==1.29.0
 
 # langchain_runner.py (CW-20260814-0007)
+# langchain-mcp-adapters already listed above for langgraph_runner.py.
 langchain-core
-langchain-mcp-adapters

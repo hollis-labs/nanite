@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -148,6 +149,37 @@ func TestBuiltinWorkflowEngine_LevelOrderAndTypedDataFlow(t *testing.T) {
 	}
 }
 
+func TestBuiltinWorkflowEngine_TemplateResolutionScopedToDependsOn(t *testing.T) {
+	// c depends only on b, but its config templates a reference to a's
+	// output. a completes in the same level as b (both level 0), so a's
+	// result IS present in the run's full results map by the time c
+	// executes — but c never declared a dependency on a, so the
+	// reference must still be rejected.
+	wf := agentworkflow.WorkflowDefinition{
+		Name: "undeclared-reference",
+		Steps: []agentworkflow.StepDefinition{
+			{ID: "a", Kind: agentworkflow.StepKindTool, Config: map[string]any{"tool": "fetch_a"}},
+			{ID: "b", Kind: agentworkflow.StepKindTool, Config: map[string]any{"tool": "fetch_b"}},
+			{
+				ID: "c", Kind: agentworkflow.StepKindTool, DependsOn: []string{"b"},
+				Config: map[string]any{"tool": "use", "args": map[string]any{"input": "{{ steps.a.output }}"}},
+			},
+		},
+	}
+	exec := &fakeStepExecutor{}
+	eng := NewBuiltinWorkflowEngine(newTestWorkflowStore(t))
+	result, err := eng.Run(context.Background(), wf, agentworkflow.WorkflowInput{}, exec)
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if !result.StepResults["c"].IsError {
+		t.Fatal("c references a step outside its depends_on and must fail, not silently resolve it")
+	}
+	if exec.toolCallCount("use") != 0 {
+		t.Fatal("c's tool must never have been called once config resolution failed")
+	}
+}
+
 func TestBuiltinWorkflowEngine_SkipPropagatesOnFailure(t *testing.T) {
 	wf := agentworkflow.WorkflowDefinition{
 		Name: "skip-chain",
@@ -269,6 +301,9 @@ func TestBuiltinWorkflowEngine_VerifyEngineModeFailsStep(t *testing.T) {
 	}
 	if len(exec.verifyCalls) != 1 {
 		t.Fatalf("len(verifyCalls) = %d, want 1", len(exec.verifyCalls))
+	}
+	if !strings.Contains(result.StepResults["a"].Output, "reviewer disagrees") {
+		t.Fatalf("Output = %q, want it to include the verify failure reason", result.StepResults["a"].Output)
 	}
 }
 

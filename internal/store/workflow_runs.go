@@ -81,14 +81,25 @@ func (s *Store) CreateWorkflowRun(row *WorkflowRunRow) error {
 
 // SetWorkflowRunStatus transitions a run to a new status (typically
 // terminal-for-this-call: completed/failed/cancelled/waiting_on_gate).
-// completedAt may be the zero time when the run isn't yet finished.
+// completedAt may be the zero time when the run isn't yet finished. Returns
+// ErrWorkflowRunNotFound when id doesn't match any row — matching this
+// codebase's dominant store convention of surfacing a no-op update as an
+// explicit error rather than succeeding silently, so a caller (the engine)
+// can never mistake "nothing updated" for "run finalized."
 func (s *Store) SetWorkflowRunStatus(id, status, errMsg string, completedAt time.Time) error {
-	_, err := s.DB.Exec(
+	res, err := s.DB.Exec(
 		`UPDATE workflow_runs SET status = ?, error = ?, completed_at = ?, updated_at = ? WHERE id = ?`,
 		status, errMsg, formatTimeRFC3339NanoOrEmpty(completedAt), formatTimeRFC3339Nano(time.Now().UTC()), id,
 	)
 	if err != nil {
 		return fmt.Errorf("set workflow_runs status %s: %w", id, err)
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("set workflow_runs status %s: rows affected: %w", id, err)
+	}
+	if n == 0 {
+		return ErrWorkflowRunNotFound
 	}
 	return nil
 }
@@ -178,8 +189,10 @@ func (s *Store) UpsertWorkflowRunStep(row *WorkflowRunStepRow) error {
 }
 
 // ListWorkflowRunSteps returns every step row for a run, in insertion
-// (started_at) order. Resume uses this to rebuild in-memory step results
-// from persisted state before continuing execution.
+// (rowid) order — not started_at, which is empty for steps that never
+// progressed past pending and so can't be used to order the full set.
+// Resume uses this to rebuild in-memory step results from persisted state
+// before continuing execution.
 func (s *Store) ListWorkflowRunSteps(runID string) ([]*WorkflowRunStepRow, error) {
 	rows, err := s.DB.Query(
 		`SELECT `+workflowRunStepColumns+` FROM workflow_run_steps WHERE workflow_run_id = ? ORDER BY rowid`,

@@ -3,6 +3,7 @@ package store
 import (
 	"errors"
 	"testing"
+	"time"
 )
 
 func TestWorkflowRun_CreateGetSetStatus(t *testing.T) {
@@ -39,6 +40,14 @@ func TestWorkflowRun_CreateGetSetStatus(t *testing.T) {
 	}
 	if row.CompletedAt.IsZero() {
 		t.Fatal("CompletedAt not set after SetWorkflowRunStatus")
+	}
+}
+
+func TestWorkflowRun_SetStatusUnknownIDReturnsNotFound(t *testing.T) {
+	s := newTestStore(t)
+	err := s.SetWorkflowRunStatus("missing", "completed", "", time.Time{})
+	if !errors.Is(err, ErrWorkflowRunNotFound) {
+		t.Fatalf("SetWorkflowRunStatus(missing) = %v, want ErrWorkflowRunNotFound", err)
 	}
 }
 

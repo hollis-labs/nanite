@@ -360,7 +360,7 @@ func (e *BuiltinWorkflowEngine) executeLLMOrTool(
 	input agentworkflow.WorkflowInput,
 	exec agentworkflow.StepExecutor,
 ) (agentworkflow.StepResult, *agentworkflow.VerifyResult) {
-	cfg, err := resolveStepConfig(step.Config, results, input)
+	cfg, err := resolveStepConfig(step.Config, dependencyResults(step.DependsOn, results), input)
 	if err != nil {
 		return agentworkflow.StepResult{StepID: step.ID, Kind: step.Kind, IsError: true, Output: fmt.Sprintf("config resolution: %v", err)}, nil
 	}
@@ -413,8 +413,26 @@ func (e *BuiltinWorkflowEngine) executeLLMOrTool(
 	sr.VerifyResult = &vres
 	if !vres.Passed {
 		sr.IsError = true
+		sr.Output += "\n\nverify failed: " + vres.Reason
 	}
 	return sr, &vres
+}
+
+// dependencyResults returns the subset of results the caller is entitled
+// to see for template resolution: exactly its declared DependsOn, not
+// every step that happens to have completed so far in the run. Without
+// this restriction a step could reference a step that completed earlier
+// due to topology but was never listed as a dependency — undeclared
+// coupling that contradicts resolveTemplateRef's own "must be listed in
+// depends_on" error message.
+func dependencyResults(dependsOn []string, results map[string]agentworkflow.StepResult) map[string]agentworkflow.StepResult {
+	scoped := make(map[string]agentworkflow.StepResult, len(dependsOn))
+	for _, id := range dependsOn {
+		if r, ok := results[id]; ok {
+			scoped[id] = r
+		}
+	}
+	return scoped
 }
 
 // depState classifies a step's readiness against its DependsOn.

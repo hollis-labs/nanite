@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"log/slog"
+	"strings"
 
 	"github.com/google/jsonschema-go/jsonschema"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
@@ -21,6 +22,18 @@ type Server struct {
 	self      toolTransport
 	dev       *condmcp.DevToolsTransport
 	sessionID string
+
+	// toolAllowlist, when non-nil, restricts registerTools to exactly
+	// these tool names — across BOTH the self and dev transports. A nil
+	// map (the default, CLI-launched coding agents) means unrestricted:
+	// every tool either transport reports is registered. Enforcement
+	// happens at registration time (registerTransportTools skips
+	// disallowed tools entirely rather than registering-then-hiding),
+	// so a disallowed name is never added to the underlying *mcp.Server
+	// — a CallTool for it fails at the MCP SDK's own dispatch layer
+	// ("unknown tool"), not via an application-level check we could get
+	// wrong (CW-20260814-0006).
+	toolAllowlist map[string]struct{}
 }
 
 // New creates a Nanite MCP server backed by the given store. allowedPaths
@@ -38,7 +51,13 @@ type Server struct {
 // fully-wired in-process harness instead of this subprocess's bare store.
 // Empty keeps the prior local-dispatch behavior. The `dev` filesystem
 // tools always run locally regardless.
-func New(s *store.Store, sessionID string, allowedPaths []string, artifactsRoot, apiURL string) *Server {
+//
+// toolAllowlist, when non-empty, restricts the tools this server ever
+// registers with the MCP SDK to exactly these names (across both the
+// self and dev transports) — see the Server.toolAllowlist field comment.
+// Pass nil/empty for the default, unrestricted catalog (CLI-launched
+// coding agents; CW-20260814-0006).
+func New(s *store.Store, sessionID string, allowedPaths []string, artifactsRoot, apiURL string, toolAllowlist []string) *Server {
 	dev := condmcp.NewDevToolsTransport(allowedPaths)
 	if artifactsRoot != "" {
 		dev = dev.WithArtifactResolver(condmcp.NewStoreArtifactResolver(s), artifactsRoot)
@@ -52,22 +71,54 @@ func New(s *store.Store, sessionID string, allowedPaths []string, artifactsRoot,
 	}
 
 	return &Server{
-		self:      self,
-		dev:       dev,
-		sessionID: sessionID,
+		self:          self,
+		dev:           dev,
+		sessionID:     sessionID,
+		toolAllowlist: buildToolAllowlist(toolAllowlist),
 	}
+}
+
+// buildToolAllowlist normalizes a raw tool-name list into a lookup set,
+// trimming whitespace and dropping empties. Returns nil (unrestricted)
+// when the input carries no usable names.
+func buildToolAllowlist(names []string) map[string]struct{} {
+	if len(names) == 0 {
+		return nil
+	}
+	set := make(map[string]struct{}, len(names))
+	for _, name := range names {
+		name = strings.TrimSpace(name)
+		if name == "" {
+			continue
+		}
+		set[name] = struct{}{}
+	}
+	if len(set) == 0 {
+		return nil
+	}
+	return set
 }
 
 // Run starts the MCP server on stdio (stdin/stdout). Blocks until the
 // client disconnects or ctx is cancelled.
 func (s *Server) Run(ctx context.Context) error {
+	srv := s.buildMCPServer()
+	slog.Info("mcpserver: starting stdio server", "session_id", s.sessionID)
+	return srv.Run(ctx, &mcp.StdioTransport{})
+}
+
+// buildMCPServer assembles the underlying MCP SDK server with tools
+// registered per registerTools, without binding it to any transport.
+// Factored out of Run so tests can connect it over an in-memory
+// transport (mcp.NewInMemoryTransports) and drive real ListTools/CallTool
+// requests instead of only inspecting what got registered.
+func (s *Server) buildMCPServer() *mcp.Server {
 	srv := mcp.NewServer(&mcp.Implementation{
 		Name:    brand.ID,
 		Version: version.Version,
 	}, nil)
 	s.registerTools(srv)
-	slog.Info("mcpserver: starting stdio server", "session_id", s.sessionID)
-	return srv.Run(ctx, &mcp.StdioTransport{})
+	return srv
 }
 
 // registerTools adds self-service and developer tool definitions to the MCP server.
@@ -81,18 +132,40 @@ type toolTransport interface {
 	CallTool(ctx context.Context, name string, args map[string]any) (*condmcp.ToolResult, error)
 }
 
+// toolAllowed reports whether name may be registered with the MCP SDK.
+// A nil allowlist (the default) means unrestricted.
+func (s *Server) toolAllowed(name string) bool {
+	if s.toolAllowlist == nil {
+		return true
+	}
+	_, ok := s.toolAllowlist[name]
+	return ok
+}
+
 func (s *Server) registerTransportTools(srv *mcp.Server, label string, t toolTransport) {
 	tools, err := t.ListTools(context.Background())
 	if err != nil {
 		slog.Error("mcpserver: failed to list tools", "transport", label, "err", err)
 		return
 	}
+	registered := 0
+	skipped := 0
 	for _, td := range tools {
+		if !s.toolAllowed(td.Name) {
+			// Deliberately never reaches srv.AddTool: the MCP SDK's own
+			// callTool rejects a request for a name it never registered
+			// ("unknown tool %q") before it can reach this transport's
+			// CallTool. Skipping registration IS the dispatch gate, not
+			// just a discovery-list filter (CW-20260814-0006).
+			skipped++
+			continue
+		}
 		tool := buildMCPTool(td)
 		name := td.Name
 		srv.AddTool(tool, s.makeTransportHandler(t, name))
+		registered++
 	}
-	slog.Info("mcpserver: registered tools", "transport", label, "count", len(tools))
+	slog.Info("mcpserver: registered tools", "transport", label, "count", registered, "skipped", skipped)
 }
 
 // buildMCPTool converts a Nanite Tool definition to an official SDK Tool.

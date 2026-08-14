@@ -1275,9 +1275,34 @@ func cmdMCPServe(args []string) {
 	// to that live harness instead of dispatching against this
 	// subprocess's bare store (Option A — see internal/api/tools_call.go).
 	apiURL := os.Getenv("NANITE_API_URL")
-	srv := mcpserver.New(s, *sessionID, allowedPaths, artifactsRoot, apiURL)
+	// NANITE_MCP_TOOL_ALLOWLIST is planted into .mcp.json by
+	// internal/workflowrunner's renderMCPJSON for a workflow-runner
+	// subprocess ONLY — CLI-launched coding agents' renderMCPJSON
+	// (internal/runtime/agent/sandbox_content_mcp.go) never sets it, so
+	// they see the unrestricted catalog exactly as before
+	// (CW-20260814-0006).
+	toolAllowlist := parseToolAllowlist(os.Getenv(workflowrunner.ToolAllowlistEnvVar))
+	srv := mcpserver.New(s, *sessionID, allowedPaths, artifactsRoot, apiURL, toolAllowlist)
 	if err := srv.Run(ctx); err != nil {
 		fmt.Fprintf(os.Stderr, "%s mcp: %v\n", brand.BinaryName, err)
 		os.Exit(1)
 	}
+}
+
+// parseToolAllowlist splits a comma-separated NANITE_MCP_TOOL_ALLOWLIST
+// value into tool names, trimming whitespace and dropping empties. Returns
+// nil (unrestricted) for an unset/blank env var.
+func parseToolAllowlist(raw string) []string {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return nil
+	}
+	parts := strings.Split(raw, ",")
+	names := make([]string, 0, len(parts))
+	for _, p := range parts {
+		if p = strings.TrimSpace(p); p != "" {
+			names = append(names, p)
+		}
+	}
+	return names
 }

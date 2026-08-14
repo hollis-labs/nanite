@@ -23,6 +23,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/hollis-labs/nanite/internal/agentworkflow"
@@ -42,7 +43,45 @@ const (
 	// DefaultMCPServerID names the entry under .mcp.json's "mcpServers"
 	// key when Config.MCPServerID is unset.
 	DefaultMCPServerID = "nanite"
+
+	// ToolAllowlistEnvVar is the env var planted into .mcp.json's
+	// per-server "env" block that `nanite mcp` (cmdMCPServe,
+	// cmd/nanite/main.go) reads to restrict the self-tool catalog it
+	// registers with the MCP SDK — both what a ListTools call reports
+	// AND what a CallTool dispatches to (CW-20260814-0006). Every
+	// workflow-runner launch sets this unconditionally: this package's
+	// entire purpose is spawning the external-engine callback
+	// subprocess, so there is no scenario where a wider catalog is
+	// correct here. CLI-launched coding agents (Claude/Codex/Opencode)
+	// go through a different renderMCPJSON
+	// (internal/runtime/agent/sandbox_content_mcp.go) that never sets
+	// this var, so they keep the full catalog untouched.
+	ToolAllowlistEnvVar = "NANITE_MCP_TOOL_ALLOWLIST"
 )
+
+// callbackToolNames are the only self-tools a workflow-runner subprocess
+// is ever allowed to reach: the three MCP callbacks
+// (internal/mcp/self_tools_workflow.go) an external workflow engine uses
+// to run real work through this harness. Unexported and read only through
+// CallbackToolNames() — a package-level exported slice would let any
+// importer mutate (append to / overwrite) this package's own baseline and
+// silently widen the allowlist out from under it.
+var callbackToolNames = []string{
+	"workflow_execute_llm_step",
+	"workflow_execute_tool_step",
+	"workflow_verify_step",
+}
+
+// CallbackToolNames returns a fresh copy of the workflow-runner tool
+// allowlist. Callers that construct a workflow-runner-scoped MCP
+// connection outside this package (tests, the mcpserver allowlist wiring)
+// should call this rather than re-deriving the list; the returned slice is
+// always a copy, so mutating it cannot affect this package's baseline.
+func CallbackToolNames() []string {
+	names := make([]string, len(callbackToolNames))
+	copy(names, callbackToolNames)
+	return names
+}
 
 // Config configures one workflow-runner launch. PythonPath, ScriptPath,
 // NaniteBinaryPath, and DBPath are required and never defaulted to a
@@ -274,7 +313,12 @@ func renderMCPJSON(cfg Config) (string, error) {
 		args = append(args, "--session", cfg.SessionID)
 	}
 
-	env := map[string]any{}
+	env := map[string]any{
+		// Always set, not gated on any Config field: a workflow-runner
+		// subprocess must never see the full self-tool catalog, even
+		// when APIBaseURL is empty (pure launch-mechanics tests/callers).
+		ToolAllowlistEnvVar: strings.Join(CallbackToolNames(), ","),
+	}
 	if cfg.APIBaseURL != "" {
 		env["NANITE_API_URL"] = cfg.APIBaseURL
 	}

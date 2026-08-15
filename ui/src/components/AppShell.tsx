@@ -82,7 +82,14 @@ export function AppShell() {
     queryFn: api.listWorkspaces,
   })
   useEffect(() => {
-    if (!activeWorkspaceId && workspaces.length > 0) {
+    if (workspaces.length === 0) return
+    // CW-20260815-0010: also self-heal a STALE persisted workspace id (e.g.
+    // localStorage still pointing at a workspace that was since removed by
+    // a consolidation), not just a missing one — otherwise the session
+    // list silently renders empty ("enabled: !!activeWorkspaceId" below
+    // still fetches, but for an id nothing matches) with no indication why.
+    const isValid = !!activeWorkspaceId && workspaces.some((w) => w.id === activeWorkspaceId)
+    if (!isValid) {
       setActiveWorkspace(workspaces[0].id)
     }
   }, [activeWorkspaceId, workspaces, setActiveWorkspace])

@@ -20,9 +20,16 @@ import (
 
 func (a *API) handleListSessions(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
-	workspaceID := q.Get("workspace_id")
+	// CW-20260815-0010: resolve to the sole real workspace when the param
+	// is missing or names a workspace that no longer exists, instead of
+	// erroring — see Store.ResolveWorkspaceID.
+	workspaceID, err := a.Services.Store.ResolveWorkspaceID(q.Get("workspace_id"))
+	if err != nil {
+		a.errorResp(w, http.StatusInternalServerError, err.Error())
+		return
+	}
 	if workspaceID == "" {
-		a.errorResp(w, http.StatusBadRequest, "workspace_id query parameter is required")
+		a.errorResp(w, http.StatusBadRequest, "workspace_id query parameter is required (multiple workspaces exist)")
 		return
 	}
 

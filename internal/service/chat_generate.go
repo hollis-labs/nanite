@@ -3626,18 +3626,28 @@ func (s *chatServiceImpl) earlyStopSynthesis(
 }
 
 // normalizeToolInputSchemas ensures every object-type node in each tool's
-// InputSchema has "additionalProperties": false, which the Anthropic API
-// requires.
+// InputSchema that enumerates its own "properties" also has
+// "additionalProperties": false — closing it against unexpected keys, which
+// several providers' strict tool-use validation expects.
+//
+// CW-20260815-0016: a "type": "object" node with NO "properties" key is a
+// free-form/pass-through container by construction (`mux_call.arguments`,
+// `card_show.data`, `dispatch_executor.data`, several `workflow_*` tools'
+// `args`/`params` — confirmed via a live-catalog audit). Closing such a node
+// makes it satisfiable ONLY by the empty object {} — whitelisting nothing
+// (no properties key) while admitting nothing (additionalProperties:false).
+// This previously collapsed at least `mux_call`'s "arguments" the same way,
+// contributing to the ARG_VALIDATION_FAILED failures a live Orchestrator
+// session hit on every `mux_call` attempt. normalizeSchemaNode below only
+// closes nodes that actually declare "properties"; property-less nodes are
+// left exactly as the tool's own schema specifies.
 //
 // CW-20260429-0017: each tool's InputSchema is deep-cloned BEFORE normalization
 // so the in-memory map shared with BuiltinToolRegistry / mcp.SelfToolProviderDefinitions
-// stays untouched. Without the clone, a deliberately-loose object node such as
-// `card_show.data` (declared `{type: object}` because per-type validation
-// lives in the show_card handler) would gain `additionalProperties: false` on
-// the FIRST chat call, after which every subsequent harness arg-validation pass
-// would reject any inner field as "additional properties not allowed at /data."
-// The provider-facing slice still carries the closed/normalized schema; the
-// canonical map stays loose.
+// stays untouched — a bare in-place mutation would corrupt the canonical
+// schema for every subsequent harness arg-validation pass (see
+// tool.go GetToolSchema, which reads that canonical map directly, not this
+// function's clone).
 func normalizeToolInputSchemas(tools []llmtypes.ToolDefinition) {
 	for i := range tools {
 		clone := cloneSchemaNode(tools[i].InputSchema)
@@ -3682,8 +3692,19 @@ func normalizeSchemaNode(node map[string]any) {
 		return
 	}
 	if typ, _ := node["type"].(string); typ == "object" {
-		if _, ok := node["additionalProperties"]; !ok {
-			node["additionalProperties"] = false
+		// Only close a node that actually enumerates its properties.
+		// CW-20260815-0016: a "type": "object" node with NO "properties"
+		// key is a free-form/pass-through container by construction (e.g.
+		// mux_call's "arguments", card_show's "data" — per-type validation
+		// lives in the handler, not the schema). Forcing
+		// additionalProperties: false on it whitelists nothing and admits
+		// nothing but the empty object {} — the node becomes unsatisfiable
+		// with any real content. Leave it alone; whatever the tool's own
+		// schema specifies (or doesn't) for additionalProperties stands.
+		if _, hasProps := node["properties"]; hasProps {
+			if _, ok := node["additionalProperties"]; !ok {
+				node["additionalProperties"] = false
+			}
 		}
 	}
 	if props, ok := node["properties"].(map[string]any); ok {

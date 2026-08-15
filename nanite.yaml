@@ -1,0 +1,12 @@
+# Project-level nanite configuration (internal/config.Config). Merges over
+# the user-level ~/.config/nanite/config.yaml — see internal/config/config.go
+# for the full schema and merge semantics.
+
+# CW-20260815-0008: point this workspace's local/dev server at the shipped
+# Worker -> Reviewer -> Gate example so agentworkflow.Registry actually
+# loads worker-reviewer-gate.yaml at startup (see docs/architecture/
+# agent-roles-design.md, "The Worker -> Reviewer -> Gate workflow"). Unset
+# elsewhere by design (BootProfileCatalogPath's "no catalog -> no behavior
+# change" convention) — this is an opt-in local/dev activation only, not a
+# change to the global default.
+workflow_definitions_path: ~/dev/hollis-labs/apps/nanite/examples/workflow-definitions

@@ -462,6 +462,60 @@ func builtinDurableAgentRecipes() []DurableAgentRecipe {
 			Tags: []string{"cli", "harness"},
 		},
 		{
+			// Profile pairing: operator selects the `task-planner` AgentProfile
+			// (.nanite/agents/task-planner.md) at apply-time — NOT the existing
+			// `planner` AgentProfile slug. That slug is reserved for the
+			// Phase-6 cognition-arc stub (internal/agent/builtin/profiles/planner.md,
+			// deliberately tool-less, resolved via dispatch.PlannerRoleSlug for
+			// reflex-routed decomposition) and is a different role entirely —
+			// reusing it here would silently overwrite that migration-tracked
+			// identity at boot-time upsert. `task-planner`'s roleTools grant
+			// full Torque task-lifecycle write access but exclude
+			// subagent_spawn/workflow_run (Planner produces the plan; it never
+			// dispatches it — that's the Orchestrator's job).
+			ID:               "planner",
+			SchemaVersion:    DurableAgentRecipeSchemaVersion,
+			Kind:             DurableAgentRecipeKindTemplateWorker,
+			Name:             "Planner",
+			Description:      "A one-shot sequencing pass: given a scoped goal or a design doc, produces a dependency-ordered set of Torque tasks with embedded boot prompts.",
+			LifecycleClass:   store.DurableAgentClassTemplate,
+			ProfileRule:      "operator_selected",
+			Provider:         "anthropic",
+			Model:            "",
+			RuntimeKind:      string(runtimekind.API),
+			LaunchSourceType: store.DurableAgentLaunchTaskTemplateRun,
+			WakeDefaults: DurableAgentWakePayload{
+				Reason: DurableAgentWakeLifecycleStart,
+				Facts: map[string]string{
+					"story": "planner",
+				},
+			},
+			Metadata: map[string]string{
+				"product_story":      "planner",
+				"run_shape":          "fresh_template_run",
+				"integration_status": "operator_managed",
+			},
+			Injections: []RecipeInjectionPlan{{
+				ID:          "plan-brief",
+				Kind:        "planned_native_file",
+				Target:      "tasks/plan-brief.md",
+				Description: "Future non-secret goal/design-doc brief planted for planner runs.",
+			}},
+			Inputs: []DurableAgentRecipeInput{
+				recipeStringInput("name", "Name", "durable_agent.name", true, "Planner"),
+				recipeStringInput("slug", "Slug", "durable_agent.slug", false, "planner"),
+				recipeProfileInput(true),
+				recipeProviderInput(false, "anthropic"),
+				recipeModelInput(false, ""),
+				recipeRuntimeKindInput(false, string(runtimekind.API)),
+				recipePathInput("work_root", "Work root", "durable_agent.work_root", false, "~/dev/project"),
+				recipeStringInput("torque_project_id", "Torque project ID", "metadata.torque_project_id", true, "PRJ-20260417-0002"),
+				recipeTextareaInput("goal_or_design_doc", "Goal or design doc", "wake_payload.prompt", true, "The scoped goal to sequence, or a pointer to an Architect's design doc (file path or Torque task ID) to turn into a dependency-ordered task set."),
+				recipeTextareaInput("boot_knowledge_hint", "Boot knowledge hint", "metadata.boot_knowledge_hint", false, "Preview-only non-secret notes about conventions, prior sprints, or related tasks this Planner should be aware of."),
+			},
+			Tags: []string{"template", "planner", "sequencing", "product"},
+		},
+		{
 			ID:               "process-monitor",
 			SchemaVersion:    DurableAgentRecipeSchemaVersion,
 			Kind:             DurableAgentRecipeKindProcessMonitor,

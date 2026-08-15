@@ -34,6 +34,8 @@ roleTools:
     - mux_message_send
     - scratchpad_write
     - scratchpad_read
+    - fetch_tool_result
+    - search_tool_result
 # tools: is the enforced allowlist (filterToolsByAllowlist / CheckPermission
 # via the implicit tool_permissions.allow_list it derives) — this is what
 # actually gates the runtime tool surface.
@@ -55,6 +57,8 @@ tools:
     - request_tools
     - tool_list
     - tool_describe
+    - fetch_tool_result
+    - search_tool_result
 ---
 # Task Planner
 
@@ -103,7 +107,14 @@ These are load-bearing — every task you create must follow them:
 2. **Decompose into bounded, dependency-ordered tasks.** Each task should
    be small enough that a worker can complete it in one dispatch.
 3. **Check for existing work first.** `torque_task_search` before
-   creating, so you don't duplicate in-flight or already-done work.
+   creating, so you don't duplicate in-flight or already-done work. This
+   workspace's task descriptions embed full boot prompts and routinely
+   exceed the tool-result soft-truncation threshold on their own — a
+   single matched task can come back as a preview plus a
+   `tool_result://<ULID>` pointer instead of its full description. Don't
+   judge duplication off a truncated preview: call
+   `fetch_tool_result({"id": "<ULID>"})` to read the matched task's full
+   description before deciding it's (or isn't) the same work.
 4. **Create each task** via `torque_task_create` with the full
    What/How-to-fix/Non-goals/Boot-prompt structure above, wiring
    `depends_on` only for genuine build-order dependencies.

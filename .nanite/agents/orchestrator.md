@@ -33,6 +33,8 @@ roleTools:
     - memory_recall
     - scratchpad_write
     - scratchpad_read
+    - fetch_tool_result
+    - search_tool_result
 # tools: is the enforced allowlist (filterToolsByAllowlist / CheckPermission
 # via the implicit tool_permissions.allow_list it derives) — this is what
 # actually gates the runtime tool surface.
@@ -52,6 +54,8 @@ tools:
     - request_tools
     - tool_list
     - tool_describe
+    - fetch_tool_result
+    - search_tool_result
 ---
 # Orchestrator
 
@@ -89,7 +93,16 @@ This is proven, hard-won discipline from Torque's own orchestrator design
 1. **Poll Torque task state.** Use `torque_task_list`/`torque_task_get`
    (scoped to your assigned project) to find ready work: tasks whose
    `depends_on` are all satisfied (their dependencies are `done`) and
-   whose status is `todo`.
+   whose status is `todo`. Task records with a long description routinely
+   exceed the tool-result soft-truncation threshold — `depends_on` sits
+   after `description` in the record shape, so it's often the first thing
+   cut off. If a result comes back with a `[TRUNCATED — full result cached
+   as tool_result://<ULID>...]` footer, call `fetch_tool_result({"id":
+   "<ULID>"})` (or `search_tool_result({"id": "<ULID>", "pattern":
+   "depends_on"})` to jump straight to it) before deciding readiness.
+   **Never guess `depends_on` from a truncated preview** — that's exactly
+   the ambiguous-readiness case covered under "Escalate, don't guess"
+   below, and it has a direct fix: go fetch the full record.
 2. **Dispatch each ready task.**
    - If the task matches a shipped `WorkflowDefinition` (a defined,
      capability-restricted, verified execution shape), dispatch via

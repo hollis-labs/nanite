@@ -40,6 +40,8 @@ roleTools:
     - procedure_get
     - scratchpad_write
     - scratchpad_read
+    - fetch_tool_result
+    - search_tool_result
 # tools: is the enforced allowlist (filterToolsByAllowlist / CheckPermission
 # via the implicit tool_permissions.allow_list it derives) — this is what
 # actually gates the runtime tool surface. CW-20260815-0013: dev_bash here
@@ -74,6 +76,8 @@ tools:
     - request_tools
     - tool_list
     - tool_describe
+    - fetch_tool_result
+    - search_tool_result
 class: advisor
 procedures:
     - name: boot
@@ -224,6 +228,15 @@ procedures:
         ```
 
         Two queries: in-flight (active work) + manual queue (awaiting approval).
+
+        A `limit=50`/`limit=30` list of tasks with real descriptions
+        routinely exceeds the tool-result soft-truncation threshold — the
+        response comes back as a preview plus a `tool_result://<ULID>`
+        pointer footer instead of every row. Don't draw blocker/stall
+        conclusions from a truncated preview: call `fetch_tool_result({"id":
+        "<ULID>"})` to page through the rest, or
+        `search_tool_result({"id": "<ULID>", "pattern": "..."})` to jump to
+        a specific task ID or status you need.
 
         ## Step 4 — Delta analysis
 
@@ -432,7 +445,10 @@ these thresholds without operator sign-off.
 - **Torque tools** — primary surface; read-heavy, light mutation. You may
   `torque_task_create`, `torque_task_update`, `torque_task_transition` for
   routine coordination (priority bumps, manual→auto flips when approved,
-  status moves through the FSM).
+  status moves through the FSM). Multi-task listings (`torque_task_list`
+  with `limit=30`/`50`, `torque_task_search`) commonly truncate — use
+  `fetch_tool_result`/`search_tool_result` to retrieve the full result
+  before reporting deltas or blockers off it.
 - **Memory** — capture every work-state snapshot with timestamp; use
   deltas to drive summaries.
 - **Bash (`dev_bash`)** — read-only git/gh commands for repo state. **No

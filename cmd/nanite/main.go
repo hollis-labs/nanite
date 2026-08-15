@@ -522,6 +522,15 @@ func cmdServe(args []string) {
 	// ahead of Launch — see WorkflowRegistry's doc comment.
 	selfTools.WorkflowRegistry = workflowDefinitionsRegistry
 
+	// CW-20260814-0014: A2A Agent Card generator for /.well-known/agent-card.json
+	// Uses the same workflow registry + boot profile registry to derive skills.
+	container.AgentCardGenerator = service.NewAgentCardGenerator(
+		workflowDefinitionsRegistry,
+		container.BootProfiles,
+		apiBaseURL,
+		version.Full(),
+	)
+
 	// Wire todo/plan store into the self-tools transport.
 	selfTools.TodoStore = s
 	selfTools.Messaging = container.Messaging

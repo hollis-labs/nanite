@@ -1,0 +1,9 @@
+[
+  {
+    "title": "Get the calling agent's own address",
+    "args": {},
+    "result": {
+      "address": "msg://agent/nanite/agt_7xp4w9zq2a"
+    }
+  }
+]

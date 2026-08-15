@@ -53,3 +53,11 @@ func (c chatDurableAgentRuntimeController) CancelSession(_ context.Context, sess
 	c.chat.CancelActiveGeneration(sessionID)
 	return nil
 }
+
+func (c chatDurableAgentRuntimeController) SendMessage(ctx context.Context, sessionID, content string) error {
+	if c.chat == nil {
+		return nil
+	}
+	_, err := c.chat.HandleMessage(ctx, sessionID, content)
+	return err
+}

@@ -10,11 +10,18 @@ import (
 	"github.com/hollis-labs/nanite/internal/store"
 )
 
+type fakeSentMessage struct {
+	sessionID string
+	content   string
+}
+
 type fakeDurableRuntimeController struct {
 	stopped    []string
 	recovered  []string
+	sent       []fakeSentMessage
 	err        error
 	recoverErr error
+	sendErr    error
 }
 
 func (f *fakeDurableRuntimeController) StopSession(_ context.Context, sessionID string) error {
@@ -33,6 +40,11 @@ func (f *fakeDurableRuntimeController) RecoverSession(_ context.Context, session
 
 func (f *fakeDurableRuntimeController) CancelSession(context.Context, string) error {
 	return nil
+}
+
+func (f *fakeDurableRuntimeController) SendMessage(_ context.Context, sessionID, content string) error {
+	f.sent = append(f.sent, fakeSentMessage{sessionID: sessionID, content: content})
+	return f.sendErr
 }
 
 func newDurableAgentServiceTestStore(t *testing.T) *store.Store {

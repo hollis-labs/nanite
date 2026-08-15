@@ -186,6 +186,12 @@ type AgentProfileView struct {
 	CopyToManaged bool `json:"copy_to_managed"`
 	// Revision is the current optimistic-concurrency token (file hash).
 	Revision string `json:"revision"`
+	// Persisted reports whether a real agent_profiles DB row backs this
+	// profile. False means the source file was discovered and parsed but
+	// failed to ingest into the database (see AutoIngestAgents / server
+	// startup logs) — the agent shows up here but isn't actually usable
+	// (e.g. durable-agent apply will fail to resolve it). CW-20260815-0009.
+	Persisted bool `json:"persisted"`
 }
 
 type AddSessionAgentRequest struct {

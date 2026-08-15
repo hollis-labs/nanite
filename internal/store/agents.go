@@ -113,8 +113,8 @@ type AgentProfile struct {
 
 	// FU-28 multi-agent foundation. URN is the opaque agt_<n> identity;
 	// URNAliases preserves legacy slug-form URNs for routing. Class is
-	// one of advisor/process/template; ActivationMode is singleton or
-	// instance; DefaultState is sleeping or active. Defaults track
+	// one of advisor/process/template/harness; ActivationMode is singleton
+	// or instance; DefaultState is sleeping or active. Defaults track
 	// migration 070. Enum-shape fields are enforced at the Go layer (see
 	// validateAgentMultiAgentFields) since SQLite ALTER TABLE ADD COLUMN
 	// can't carry an idempotent CHECK after the column exists.
@@ -134,9 +134,9 @@ func validateAgentMultiAgentFields(a *AgentProfile) error {
 		return fmt.Errorf("activation_mode %q invalid: must be 'singleton' or 'instance'", a.ActivationMode)
 	}
 	switch a.Class {
-	case "", "advisor", "process", "template":
+	case "", "advisor", "process", "template", "harness":
 	default:
-		return fmt.Errorf("class %q invalid: must be 'advisor', 'process', or 'template'", a.Class)
+		return fmt.Errorf("class %q invalid: must be 'advisor', 'process', 'template', or 'harness'", a.Class)
 	}
 	switch a.DefaultState {
 	case "", "sleeping", "active":

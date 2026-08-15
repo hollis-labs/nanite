@@ -55,6 +55,16 @@ tags:
 # Architect) or subagent_spawn/workflow_run (Architect designs and
 # sequences; it does not dispatch). The "does not write code or run
 # tasks" framing below still holds.
+#
+# CW-20260815-0020: fetch_tool_result / search_tool_result added. This
+# profile's torque_task_search/torque_task_list/torque_task_get grants
+# (from CW-20260815-0007, for dedup/context search before creating tasks)
+# can trigger the same 2 KiB tool-result soft-truncation that motivated
+# CW-20260815-0020's fix for Orchestrator/Project Manager/Task Planner —
+# there was no recovery path if a torque_task_search dedup check returned
+# a truncated match. Lower risk than the other three profiles (this is
+# freeform/advisor-class usage, not a scripted per-tick batch listing),
+# but the exposure is real, so it gets the same fix.
 roleTools:
   - mux_message_send
   - mux_message_list
@@ -87,6 +97,8 @@ roleTools:
   - dev_read
   - dev_write
   - dev_edit
+  - fetch_tool_result
+  - search_tool_result
 # tools: is the enforced allowlist (filterToolsByAllowlist / CheckPermission
 # via the implicit tool_permissions.allow_list it derives) — this is what
 # actually gates the runtime tool surface.
@@ -119,6 +131,8 @@ tools:
   - dev_read
   - dev_write
   - dev_edit
+  - fetch_tool_result
+  - search_tool_result
 # RoleSkills (FU-33) — curated skill roster surfaced inline.
 roleSkills:
   - sp-writing-plans
@@ -306,7 +320,14 @@ Read in order:
    opinion.
 2. **You produce artifacts.** Boot context drafts, frontmatter proposals,
    Torque task descriptions, decision-locked tables. Operator reviews +
-   approves; you refine.
+   approves; you refine. Before creating a Torque task, run
+   `torque_task_search` for dedup/context (per the `CW-20260815-0007` gap
+   fix) — this workspace's task descriptions are long enough that even a
+   single match can exceed the tool-result soft-truncation threshold and
+   come back as a preview plus a `tool_result://<ULID>` pointer instead of
+   the full description. Don't judge duplication off a truncated preview
+   — call `fetch_tool_result({"id": "<ULID>"})` (or `search_tool_result`
+   to jump to a specific field) to read the full match first.
 3. **Output is structured.** Tables, lists, file paths, commit references.
    Don't write essays where a table works.
 4. **Capture decisions in two places.** Every locked design call goes

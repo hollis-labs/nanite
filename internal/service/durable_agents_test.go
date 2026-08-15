@@ -130,6 +130,45 @@ func TestDurableAgentList_ReconcilesTaggedProfilesIntoInstances(t *testing.T) {
 	}
 }
 
+// TestDurableAgentList_ReconcilesHarnessProfileWithCorrectLifecycleClass is
+// a CW-20260815-0009 follow-up (Copilot review on PR #241): before that
+// ticket, class="harness" could never reach agent_profiles at all, so
+// durableAgentInstanceFromProfile's class switch never saw it and its
+// default-to-advisor branch was unreachable for harness profiles. Once
+// harness started ingesting, a harness-tagged durable candidate reconciled
+// here (e.g. via GET /api/durable-agents before its recipe is ever applied)
+// would silently downgrade to lifecycle_class="advisor". Assert it stays
+// "harness" with the api_chat launch source, not the advisor default.
+func TestDurableAgentList_ReconcilesHarnessProfileWithCorrectLifecycleClass(t *testing.T) {
+	st := newDurableAgentServiceTestStore(t)
+	profile := &store.AgentProfile{
+		Name:         "Harness Durable Agent",
+		Slug:         "harness-durable-agent",
+		SystemPrompt: "x",
+		Tags:         `["durable-agent","harness"]`,
+		Class:        store.DurableAgentClassHarness,
+		DefaultState: store.DurableAgentStatusSleeping,
+	}
+	if err := st.CreateAgent(profile); err != nil {
+		t.Fatalf("CreateAgent: %v", err)
+	}
+
+	svc := NewDurableAgentService(st)
+	instances, err := svc.List(context.Background(), false)
+	if err != nil {
+		t.Fatalf("List: %v", err)
+	}
+	if len(instances) != 1 {
+		t.Fatalf("instances len = %d, want 1: %+v", len(instances), instances)
+	}
+	if instances[0].LifecycleClass != store.DurableAgentClassHarness {
+		t.Fatalf("lifecycle_class = %q, want %q (must not silently downgrade to advisor)", instances[0].LifecycleClass, store.DurableAgentClassHarness)
+	}
+	if instances[0].LaunchSourceType != store.DurableAgentLaunchAPIChat {
+		t.Fatalf("launch_source_type = %q, want %q", instances[0].LaunchSourceType, store.DurableAgentLaunchAPIChat)
+	}
+}
+
 func TestDurableAgentList_DoesNotPromoteNonDurableProfiles(t *testing.T) {
 	st := newDurableAgentServiceTestStore(t)
 	profile := &store.AgentProfile{

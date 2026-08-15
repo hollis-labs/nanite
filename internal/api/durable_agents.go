@@ -55,7 +55,7 @@ func (a *API) saveManagedDurableInstance(inst *store.DurableAgentInstance, archi
 			// startup. The raw sql.ErrNoRows here used to be the only signal;
 			// name the real cause so it doesn't require DB-level investigation
 			// to diagnose again.
-			return nil, fmt.Errorf("agent profile %s not found in agent_profiles — its source file may have failed database ingestion; check server startup logs for \"auto-ingest agent\" errors", inst.ProfileID)
+			return nil, fmt.Errorf("agent profile %s not found in agent_profiles — its source file may have failed database ingestion; check server startup logs for \"auto-ingest agent\" errors: %w", inst.ProfileID, err)
 		}
 		return nil, err
 	}

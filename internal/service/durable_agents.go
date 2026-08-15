@@ -230,17 +230,27 @@ func profileIsDurableCandidate(profile store.AgentProfile) bool {
 func durableAgentInstanceFromProfile(profile store.AgentProfile) *store.DurableAgentInstance {
 	lifecycleClass := profile.Class
 	switch lifecycleClass {
-	case store.DurableAgentClassAdvisor, store.DurableAgentClassProcess, store.DurableAgentClassTemplate:
+	case store.DurableAgentClassAdvisor, store.DurableAgentClassProcess, store.DurableAgentClassTemplate, store.DurableAgentClassHarness:
 	default:
 		lifecycleClass = store.DurableAgentClassAdvisor
 	}
 
+	// CW-20260815-0009: agent_profiles.class started accepting "harness"
+	// after this profile-reconcile path was written, so a harness-class
+	// durable candidate (e.g. orchestrator.md) reconciled here — before its
+	// recipe is ever applied — used to silently fall into the default
+	// branch above and become lifecycle_class="advisor". A harness agent
+	// auto-reconciled here has no recipe-derived launch source yet, so
+	// api_chat (the same source an operator-driven recipe apply uses) is
+	// the closest honest default.
 	launchSourceType := store.DurableAgentLaunchDurableAdvisor
 	switch lifecycleClass {
 	case store.DurableAgentClassProcess:
 		launchSourceType = store.DurableAgentLaunchProcessTick
 	case store.DurableAgentClassTemplate:
 		launchSourceType = store.DurableAgentLaunchTaskTemplateRun
+	case store.DurableAgentClassHarness:
+		launchSourceType = store.DurableAgentLaunchAPIChat
 	}
 
 	status := profile.DefaultState

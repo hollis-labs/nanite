@@ -41,11 +41,13 @@ import (
 // ingest" is discoverable from logs alone — no DB query required.
 func AutoIngestAgents(st *store.Store, defs []*agentpkg.Definition) int {
 	count := 0
+	considered := 0 // defs actually attempted, excluding nil/empty-slug skips
 	var failures []string
 	for _, def := range defs {
 		if def == nil || def.Slug == "" {
 			continue
 		}
+		considered++
 		if err := upsertAgentDef(st, def); err != nil {
 			slog.Warn("service: auto-ingest agent", "slug", def.Slug, "err", err)
 			failures = append(failures, fmt.Sprintf("%s: %v", def.Slug, err))
@@ -55,7 +57,7 @@ func AutoIngestAgents(st *store.Store, defs []*agentpkg.Definition) int {
 	}
 	if len(failures) > 0 {
 		slog.Error("service: agent auto-ingest failed for one or more files — these agents are file-discoverable but have no working agent_profiles row until fixed and the service is restarted",
-			"failed", len(failures), "total", len(defs), "succeeded", count, "failures", failures)
+			"failed", len(failures), "considered", considered, "succeeded", count, "discovered", len(defs), "failures", failures)
 	}
 	return count
 }

@@ -235,6 +235,40 @@ func TestAutoIngestAgents_InvalidClassNotSilent(t *testing.T) {
 	}
 }
 
+// TestAutoIngestAgents_FailureLogCountsExcludeSkippedDefs is a
+// CW-20260815-0009 follow-up (Copilot review on PR #241): defs is filtered
+// (nil entries, empty slugs) before ingestion is even attempted, so the
+// aggregate failure log's counts must reflect only defs actually attempted
+// — otherwise failed+succeeded silently doesn't add up to the logged total.
+func TestAutoIngestAgents_FailureLogCountsExcludeSkippedDefs(t *testing.T) {
+	st := newIngestTestStore(t)
+
+	var logBuf bytes.Buffer
+	prevLogger := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(&logBuf, &slog.HandlerOptions{Level: slog.LevelWarn})))
+	t.Cleanup(func() { slog.SetDefault(prevLogger) })
+
+	defs := []*agentpkg.Definition{
+		nil,               // skipped, not attempted
+		{Slug: ""},        // skipped, not attempted
+		{Slug: "ok-agent", Name: "OK", SystemPrompt: "x", Source: "project"},
+		{Slug: "bad-agent", Name: "Bad", SystemPrompt: "x", Source: "project", Class: "not-a-real-class"},
+	}
+
+	n := AutoIngestAgents(st, defs)
+	if n != 1 {
+		t.Fatalf("expected 1 ingested agent, got %d", n)
+	}
+
+	logOutput := logBuf.String()
+	if !strings.Contains(logOutput, "considered=2") {
+		t.Errorf("expected considered=2 (the 2 skipped entries excluded from the 4 defs), got: %s", logOutput)
+	}
+	if !strings.Contains(logOutput, "failed=1") || !strings.Contains(logOutput, "succeeded=1") {
+		t.Errorf("expected failed=1 succeeded=1, got: %s", logOutput)
+	}
+}
+
 // TestAutoIngestAgents_H1TrustTierUserDropped verifies that Source="user" agents
 // get default_trust_tier="untrusted" (H1 rule, CW-20260421-0014).
 func TestAutoIngestAgents_H1TrustTierUserDropped(t *testing.T) {

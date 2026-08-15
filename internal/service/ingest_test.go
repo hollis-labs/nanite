@@ -137,7 +137,7 @@ func TestAutoIngestAgents_InsertNewAgent(t *testing.T) {
 		},
 	}
 
-	n := AutoIngestAgents(st, defs)
+	n := AutoIngestAgents(st, defs, nil)
 	if n != 1 {
 		t.Fatalf("expected 1 ingested agent, got %d", n)
 	}
@@ -178,7 +178,7 @@ func TestAutoIngestAgents_ClassHarness(t *testing.T) {
 		},
 	}
 
-	n := AutoIngestAgents(st, defs)
+	n := AutoIngestAgents(st, defs, nil)
 	if n != 1 {
 		t.Fatalf("expected 1 ingested agent, got %d", n)
 	}
@@ -218,7 +218,7 @@ func TestAutoIngestAgents_InvalidClassNotSilent(t *testing.T) {
 		},
 	}
 
-	n := AutoIngestAgents(st, defs)
+	n := AutoIngestAgents(st, defs, nil)
 	if n != 0 {
 		t.Fatalf("expected 0 ingested agents for a rejected class value, got %d", n)
 	}
@@ -249,13 +249,13 @@ func TestAutoIngestAgents_FailureLogCountsExcludeSkippedDefs(t *testing.T) {
 	t.Cleanup(func() { slog.SetDefault(prevLogger) })
 
 	defs := []*agentpkg.Definition{
-		nil,               // skipped, not attempted
-		{Slug: ""},        // skipped, not attempted
+		nil,        // skipped, not attempted
+		{Slug: ""}, // skipped, not attempted
 		{Slug: "ok-agent", Name: "OK", SystemPrompt: "x", Source: "project"},
 		{Slug: "bad-agent", Name: "Bad", SystemPrompt: "x", Source: "project", Class: "not-a-real-class"},
 	}
 
-	n := AutoIngestAgents(st, defs)
+	n := AutoIngestAgents(st, defs, nil)
 	if n != 1 {
 		t.Fatalf("expected 1 ingested agent, got %d", n)
 	}
@@ -266,6 +266,85 @@ func TestAutoIngestAgents_FailureLogCountsExcludeSkippedDefs(t *testing.T) {
 	}
 	if !strings.Contains(logOutput, "failed=1") || !strings.Contains(logOutput, "succeeded=1") {
 		t.Errorf("expected failed=1 succeeded=1, got: %s", logOutput)
+	}
+}
+
+// TestAutoIngestAgents_UnknownToolNameIsLoud is CW-20260815-0013's
+// visibility half: a profile declaring a tool name that isn't in the
+// registered catalog (a typo'd or renamed tool, e.g. bash_run instead of
+// dev_bash) must still ingest successfully (the profile row itself is
+// valid) but log loudly — an aggregate ERROR naming the slug and the
+// specific unknown name(s) — rather than silently no-op at selection time.
+func TestAutoIngestAgents_UnknownToolNameIsLoud(t *testing.T) {
+	st := newIngestTestStore(t)
+
+	var logBuf bytes.Buffer
+	prevLogger := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(&logBuf, &slog.HandlerOptions{Level: slog.LevelWarn})))
+	t.Cleanup(func() { slog.SetDefault(prevLogger) })
+
+	defs := []*agentpkg.Definition{
+		{
+			Slug:         "typo-agent",
+			Name:         "Typo Agent",
+			SystemPrompt: "x",
+			Source:       "project",
+			RoleTools:    []string{"dev_read", "bash_run"}, // dev_read real, bash_run not
+			Tools:        []string{"skill_get"},            // not real either
+		},
+	}
+
+	knownTools := map[string]bool{"dev_read": true, "dev_bash": true}
+	n := AutoIngestAgents(st, defs, knownTools)
+	if n != 1 {
+		t.Fatalf("expected the profile to still ingest despite the bad tool names, got n=%d", n)
+	}
+	if _, err := st.GetAgentBySlug("typo-agent"); err != nil {
+		t.Fatalf("expected agent_profiles row despite unknown tool names: %v", err)
+	}
+
+	logOutput := logBuf.String()
+	if !strings.Contains(logOutput, "level=ERROR") {
+		t.Errorf("expected an ERROR-level aggregate log for unknown tool references, got: %s", logOutput)
+	}
+	if !strings.Contains(logOutput, "typo-agent") {
+		t.Errorf("expected the log to name the affected slug, got: %s", logOutput)
+	}
+	if !strings.Contains(logOutput, "bash_run") || !strings.Contains(logOutput, "skill_get") {
+		t.Errorf("expected the log to name both unknown tools (bash_run, skill_get), got: %s", logOutput)
+	}
+	if strings.Contains(logOutput, `"dev_read"`) {
+		t.Errorf("dev_read is a real known tool and must not be flagged, got: %s", logOutput)
+	}
+}
+
+// TestAutoIngestAgents_NilKnownToolsSkipsValidation proves nil means "skip
+// the check" — not "nothing is known" (which would flag every declared
+// tool as unknown). Existing callers/tests that don't wire a tool catalog
+// must see unchanged behavior.
+func TestAutoIngestAgents_NilKnownToolsSkipsValidation(t *testing.T) {
+	st := newIngestTestStore(t)
+
+	var logBuf bytes.Buffer
+	prevLogger := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(&logBuf, &slog.HandlerOptions{Level: slog.LevelWarn})))
+	t.Cleanup(func() { slog.SetDefault(prevLogger) })
+
+	defs := []*agentpkg.Definition{
+		{
+			Slug:         "no-catalog-agent",
+			Name:         "No Catalog Agent",
+			SystemPrompt: "x",
+			Source:       "project",
+			RoleTools:    []string{"anything_at_all"},
+		},
+	}
+
+	if n := AutoIngestAgents(st, defs, nil); n != 1 {
+		t.Fatalf("expected 1 ingested agent, got %d", n)
+	}
+	if strings.Contains(logBuf.String(), "unregistered tool name") {
+		t.Errorf("expected no unknown-tool warning when knownTools is nil, got: %s", logBuf.String())
 	}
 }
 
@@ -282,7 +361,7 @@ func TestAutoIngestAgents_H1TrustTierUserDropped(t *testing.T) {
 			Source:       "user", // dropped into ~/.nanite/agents/
 		},
 	}
-	AutoIngestAgents(st, defs)
+	AutoIngestAgents(st, defs, nil)
 
 	var tier string
 	err := st.DB.QueryRow(
@@ -310,7 +389,7 @@ func TestAutoIngestAgents_H1TrustTierBuiltin(t *testing.T) {
 			Source:       "builtin",
 		},
 	}
-	AutoIngestAgents(st, defs)
+	AutoIngestAgents(st, defs, nil)
 
 	var tier string
 	err := st.DB.QueryRow(
@@ -338,7 +417,7 @@ func TestAutoIngestAgents_H1TrustTierPlugin(t *testing.T) {
 			Source:       "plugin",
 		},
 	}
-	AutoIngestAgents(st, defs)
+	AutoIngestAgents(st, defs, nil)
 
 	var tier string
 	err := st.DB.QueryRow(
@@ -364,11 +443,11 @@ func TestAutoIngestAgents_UpdateOnReingest(t *testing.T) {
 		SystemPrompt: "v1 prompt",
 		Source:       "user",
 	}
-	AutoIngestAgents(st, []*agentpkg.Definition{def})
+	AutoIngestAgents(st, []*agentpkg.Definition{def}, nil)
 
 	// Change the system prompt and re-ingest.
 	def.SystemPrompt = "v2 prompt — updated"
-	AutoIngestAgents(st, []*agentpkg.Definition{def})
+	AutoIngestAgents(st, []*agentpkg.Definition{def}, nil)
 
 	a, err := st.GetAgentBySlug("update-agent")
 	if err != nil {
@@ -421,7 +500,7 @@ func TestAutoIngestAgents_SourceFlipFromBuiltinToInternal(t *testing.T) {
 		Source:       "internal",
 		SourceRef:    "embedded:profiles/" + slug + ".md",
 	}
-	if n := AutoIngestAgents(st, []*agentpkg.Definition{def}); n != 1 {
+	if n := AutoIngestAgents(st, []*agentpkg.Definition{def}, nil); n != 1 {
 		t.Fatalf("AutoIngestAgents count: got %d, want 1", n)
 	}
 
@@ -457,7 +536,7 @@ func TestAutoIngestSkills_EmptyDefsIsNoOp(t *testing.T) {
 // returns 0 and doesn't error.
 func TestAutoIngestAgents_EmptyDefsIsNoOp(t *testing.T) {
 	st := newIngestTestStore(t)
-	n := AutoIngestAgents(st, nil)
+	n := AutoIngestAgents(st, nil, nil)
 	if n != 0 {
 		t.Errorf("expected 0 for nil input, got %d", n)
 	}

@@ -1,0 +1,12 @@
+[
+  {
+    "title": "Fetch this agent's own boot procedure",
+    "args": { "name": "boot" },
+    "notes": "Resolves the calling agent from context automatically — always returns YOUR OWN profile's procedure, never another agent's."
+  },
+  {
+    "title": "Fetch a per-tick checklist procedure",
+    "args": { "name": "checklist" },
+    "notes": "Use when your own boot instructions tell you to fetch a named procedure for the detailed body of a recurring step."
+  }
+]

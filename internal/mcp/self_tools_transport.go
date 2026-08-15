@@ -409,6 +409,8 @@ func (st *SelfToolsTransport) CallTool(ctx context.Context, name string, args ma
 		return st.callChatSearch(ctx, args)
 	case "chat_get":
 		return st.callChatGet(ctx, args)
+	case "procedure_get":
+		return st.callProcedureGet(ctx, args)
 	case "python_run":
 		return st.callRunPython(ctx, args)
 	case "panel_open":

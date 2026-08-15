@@ -169,12 +169,7 @@ func BuiltinReflexes() []Reflex {
 					"summarize the state",
 				},
 			},
-			// Profile left empty — no `researcher` agent profile exists yet
-			// (CW-20260509-0050 audit). Falls back to AssignRole's default
-			// (`worker`). Pattern field retains the semantic intent for
-			// telemetry; a dedicated researcher profile can be added in a
-			// later phase by setting Profile: "researcher".
-			ResolvesTo:  Resolution{Pattern: "researcher", Role: "worker"},
+			ResolvesTo:  Resolution{Pattern: "researcher", Role: "worker", Profile: "researcher"},
 			SideEffects: SideEffects{ModeSignal: "research", DispatchVia: "executeTask"},
 			Priority:    15,
 		},
@@ -191,10 +186,7 @@ func BuiltinReflexes() []Reflex {
 					"give me feedback on",
 				},
 			},
-			// Profile left empty — no `reviewer` agent profile exists yet
-			// (CW-20260509-0050 audit). Falls back to AssignRole's default
-			// (`worker`).
-			ResolvesTo:  Resolution{Pattern: "reviewer", Role: "worker"},
+			ResolvesTo:  Resolution{Pattern: "reviewer", Role: "worker", Profile: "reviewer"},
 			SideEffects: SideEffects{ModeSignal: "review"},
 			Priority:    15,
 		},
@@ -212,9 +204,11 @@ func BuiltinReflexes() []Reflex {
 					"write the changelog",
 				},
 			},
-			// Profile left empty — no `documentor` agent profile exists yet
-			// (CW-20260509-0050 audit). Falls back to AssignRole's default
-			// (`worker`).
+			// Profile left empty — still no `documentor` agent profile as of
+			// the CW-20260815-0002 re-audit (internal/agent/builtin/profiles/
+			// has no documentor.md, and no workspace-local .nanite/agents/
+			// file registers a matching slug). Falls back to AssignRole's
+			// default (`worker`). Set Profile: "documentor" once one ships.
 			ResolvesTo:  Resolution{Pattern: "documentor", Role: "worker"},
 			SideEffects: SideEffects{ModeSignal: "document", DispatchVia: "executeTask"},
 			Priority:    12,
@@ -234,9 +228,13 @@ func BuiltinReflexes() []Reflex {
 				},
 				ScopeTierHint: classify.TierMedium,
 			},
-			// Profile left empty — no `strategist` agent profile exists yet
-			// (CW-20260509-0050 audit). Falls back to AssignRole's default
-			// (`worker`).
+			// Profile left empty — still no `strategist` agent profile as of
+			// the CW-20260815-0002 re-audit. `.nanite/agents/content-strategist.md`
+			// exists but is a different, narrower role (Glyph editorial/content
+			// operations, not the general brainstorm/tradeoffs pattern this
+			// reflex targets) — not a match. Falls back to AssignRole's
+			// default (`worker`). Set Profile: "strategist" once a matching
+			// profile ships.
 			ResolvesTo:  Resolution{Pattern: "strategist", Role: "worker"},
 			SideEffects: SideEffects{ModeSignal: "planning"},
 			Priority:    10,

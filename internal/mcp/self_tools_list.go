@@ -3,6 +3,7 @@ package mcp
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"sort"
 	"strings"
 
@@ -55,6 +56,10 @@ func naniteToolListDefinition() Tool {
 					"type":        "string",
 					"description": "Optional case-insensitive substring filter applied to BOTH the tool name and its one-line summary. Empty/omitted returns the full inventory.",
 				},
+				"limit": map[string]any{
+					"type":        "integer",
+					"description": fmt.Sprintf("Optional cap on how many tools an unfiltered call returns. Defaults to %d — if the full inventory is larger, the response is soft-truncated with a hint to narrow via filter. Ignored when filter is set. Pass a higher value (or a value ≥ the true total) to see everything anyway.", defaultToolListLimit),
+				},
 			},
 		},
 	}
@@ -87,6 +92,15 @@ type ToolInventoryLookup interface {
 // chars is just enough to convey "what this tool does" — agents call
 // tool_describe for the rest.
 const summaryMaxBytes = 80
+
+// defaultToolListLimit is the soft threshold for an unfiltered tool_list
+// call (CW-20260815-0019). Discovery no longer caps how many tools a
+// connected server can advertise, so a single very large server (or a
+// handful of moderately large ones) can make the unfiltered inventory
+// itself large. This is a second-layer nudge, not an enforcement cap: past
+// this many entries, an unfiltered response is soft-truncated with a hint
+// to narrow via `filter` (or pass an explicit `limit` to see more/all).
+const defaultToolListLimit = 100
 
 // firstSentenceSummary extracts a short summary from a tool description.
 // Strategy: find the earliest of `. `, `.\n`, `\n\n`, `\n`, or end-of-
@@ -220,8 +234,21 @@ func (st *SelfToolsTransport) gatherInventory(_ context.Context) []inventoryEntr
 // `{tools, count}`. Empty match returns `count:0` and an empty list, NOT
 // an error — the agent reading the result decides whether to widen the
 // filter.
+//
+// Soft truncation (CW-20260815-0019): an UNFILTERED call whose match set
+// exceeds the effective limit (defaultToolListLimit, or the caller's
+// explicit `limit`) is truncated to that many entries, with `truncated`,
+// `total`, and a `hint` field added to the response nudging the agent to
+// narrow via `filter` — or raise `limit` to see more. This is advisory
+// only: an explicit `limit` at or above the true total returns everything.
+// A filtered call is never truncated — filtering is already the narrowing
+// step.
 func (st *SelfToolsTransport) callToolList(ctx context.Context, args map[string]any) (*ToolResult, error) {
 	filter := strings.ToLower(strings.TrimSpace(strArg(args, "filter", "")))
+	limit := intArgFull(args, "limit", defaultToolListLimit)
+	if limit <= 0 {
+		limit = defaultToolListLimit
+	}
 
 	inv := st.gatherInventory(ctx)
 	type entry struct {
@@ -242,9 +269,22 @@ func (st *SelfToolsTransport) callToolList(ctx context.Context, args map[string]
 	}
 
 	out := map[string]any{
-		"tools": tools,
 		"count": len(tools),
 	}
+	if filter == "" && len(tools) > limit {
+		total := len(tools)
+		out["tools"] = tools[:limit]
+		out["count"] = limit
+		out["total"] = total
+		out["truncated"] = true
+		out["hint"] = fmt.Sprintf(
+			"showing %d of %d tools — narrow with `filter` to see specific tools, or pass a higher `limit` to see more (or all %d).",
+			limit, total, total,
+		)
+	} else {
+		out["tools"] = tools
+	}
+
 	body, err := json.Marshal(out)
 	if err != nil {
 		// Marshalling a slice of two-string structs cannot realistically

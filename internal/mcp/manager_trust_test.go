@@ -52,8 +52,10 @@ func TestManager_AddServer_ThreadsTierLimitIntoTransport(t *testing.T) {
 	}
 }
 
-func TestManager_DiscoverTools_CapsToolCountAndFlagsWarnings(t *testing.T) {
-	// Third-party cap is 50. Advertise 60 tools → cap warning + 50 retained.
+func TestManager_DiscoverTools_DoesNotTruncateHighToolCount(t *testing.T) {
+	// Third-party advisory threshold is 50. Advertise 60 tools → advisory
+	// warning fires, but ALL 60 are still retained (CW-20260815-0019:
+	// discovery-time truncation removed, warning is advisory-only now).
 	tools := make([]Tool, 60)
 	for i := range tools {
 		tools[i] = Tool{Name: "tool_" + itoa(i), Description: "desc"}
@@ -68,19 +70,118 @@ func TestManager_DiscoverTools_CapsToolCountAndFlagsWarnings(t *testing.T) {
 	}
 
 	gotTools := mgr.GetAllTools()
-	if len(gotTools) != 50 {
-		t.Errorf("retained tool count: got %d want 50", len(gotTools))
+	if len(gotTools) != 60 {
+		t.Errorf("retained tool count: got %d want 60 (nothing should be truncated)", len(gotTools))
 	}
 
 	warnings := mgr.GetDiscoveryWarnings()
 	hadCap := false
 	for _, w := range warnings {
-		if w.Reason == WarnToolCountCapped {
+		if w.Reason == WarnToolCountHigh {
 			hadCap = true
 		}
 	}
 	if !hadCap {
-		t.Errorf("expected %s warning, got %+v", WarnToolCountCapped, warnings)
+		t.Errorf("expected %s warning, got %+v", WarnToolCountHigh, warnings)
+	}
+}
+
+// torqueCatalogToolNames is the real, live 93-tool name list advertised by
+// Torque's MCP server (verified against a live connection while fixing
+// CW-20260815-0019). Already alphabetically sorted to match tools/list
+// wire ordering. torque_task_delete sits at index 76 (position 77) and
+// torque_task_get immediately follows at index 77 (position 78) — the
+// exact adjacency that made the old MaxToolsPerServer slice at any cap
+// landing in [77,77] silently drop task_get/list/search/update while
+// task_delete survived, which is what the original incident reported.
+var torqueCatalogToolNames = []string{
+	"torque_artifact_create", "torque_artifact_delete", "torque_artifact_get", "torque_artifact_list",
+	"torque_broker_inbox", "torque_broker_request", "torque_broker_send",
+	"torque_collection_archive", "torque_collection_create", "torque_collection_get",
+	"torque_collection_inbox_add", "torque_collection_inbox_list", "torque_collection_list",
+	"torque_collection_task_add", "torque_collection_task_move", "torque_collection_task_remove",
+	"torque_collection_task_reorder", "torque_collection_tasks_list", "torque_collection_unarchive",
+	"torque_collection_update",
+	"torque_comment_add", "torque_comment_list", "torque_comment_search",
+	"torque_epic_create", "torque_epic_delete", "torque_epic_get", "torque_epic_list", "torque_epic_update",
+	"torque_health",
+	"torque_inbox_poll",
+	"torque_issue_create", "torque_issue_get", "torque_issue_list", "torque_issue_search", "torque_issue_update",
+	"torque_models_get", "torque_models_list",
+	"torque_plan_add_phase", "torque_plan_create", "torque_plan_get", "torque_plan_list_children",
+	"torque_plan_remove_phase", "torque_plan_start",
+	"torque_project_create", "torque_project_delete", "torque_project_list",
+	"torque_run_get", "torque_run_list",
+	"torque_scheduler_status", "torque_scheduler_toggle",
+	"torque_session_attach", "torque_session_checkpoint", "torque_session_create", "torque_session_get",
+	"torque_session_launch", "torque_session_list", "torque_session_resume", "torque_session_stop",
+	"torque_settings_get", "torque_settings_save",
+	"torque_sprint_approve", "torque_sprint_create", "torque_sprint_delete", "torque_sprint_get",
+	"torque_sprint_list", "torque_sprint_start", "torque_sprint_update",
+	"torque_task_bulk_transition", "torque_task_checkpoint_cancel", "torque_task_checkpoint_emit",
+	"torque_task_checkpoint_get", "torque_task_checkpoint_list", "torque_task_checkpoint_respond",
+	"torque_task_checkpoints_pending", "torque_task_create", "torque_task_create_from_template",
+	"torque_task_delete", "torque_task_get", "torque_task_list", "torque_task_search",
+	"torque_task_subtodo_add", "torque_task_subtodo_delete", "torque_task_subtodo_done",
+	"torque_task_subtodo_list", "torque_task_subtodo_update", "torque_task_transition", "torque_task_update",
+	"torque_template_archive", "torque_template_create", "torque_template_delete", "torque_template_get",
+	"torque_template_list", "torque_template_update",
+}
+
+// TestManager_DiscoverTools_TorqueCatalogFullyDiscovered is the
+// CW-20260815-0019 regression test for the actual reported incident: a
+// live Orchestrator session lost torque_task_get/list/update/search
+// because DiscoverTools sliced the (alphabetically sorted) tool list at
+// the tier's MaxToolsPerServer cap, and those four names sorted just past
+// torque_task_delete. Registered at TierThirdPartyHTTP — the strictest
+// tier (advisory threshold 50, well below all 93) — to prove the fix
+// holds even in the worst case: nothing is dropped regardless of tier,
+// and the four originally-missing task tools are back.
+func TestManager_DiscoverTools_TorqueCatalogFullyDiscovered(t *testing.T) {
+	tools := make([]Tool, len(torqueCatalogToolNames))
+	for i, name := range torqueCatalogToolNames {
+		tools[i] = Tool{Name: name, Description: "torque tool"}
+	}
+	if len(tools) != 93 {
+		t.Fatalf("fixture sanity: expected 93 torque tools, got %d", len(tools))
+	}
+
+	mgr := NewManager()
+	if err := mgr.AddServer("torque", &fakeTieredTransport{tools: tools}, TierThirdPartyHTTP); err != nil {
+		t.Fatalf("AddServer: %v", err)
+	}
+	if err := mgr.DiscoverTools(context.Background()); err != nil {
+		t.Fatalf("DiscoverTools: %v", err)
+	}
+
+	gotTools := mgr.GetAllTools()
+	if len(gotTools) != 93 {
+		t.Fatalf("discovered tool count: got %d want 93 — some tools were dropped", len(gotTools))
+	}
+
+	got := make(map[string]struct{}, len(gotTools))
+	for _, tt := range gotTools {
+		got[tt.Name] = struct{}{}
+	}
+	for _, want := range []string{"torque_task_get", "torque_task_list", "torque_task_update", "torque_task_search"} {
+		if _, ok := got[want]; !ok {
+			t.Errorf("regression: %s missing from discovered tools (the original incident's symptom)", want)
+		}
+	}
+	for _, name := range torqueCatalogToolNames {
+		if _, ok := got[name]; !ok {
+			t.Errorf("missing torque tool: %s", name)
+		}
+	}
+
+	var hadWarning bool
+	for _, w := range mgr.GetDiscoveryWarnings() {
+		if w.ServerName == "torque" && w.Reason == WarnToolCountHigh {
+			hadWarning = true
+		}
+	}
+	if !hadWarning {
+		t.Error("expected an advisory tool_count_high warning for a 93-tool server on the third-party tier (threshold 50)")
 	}
 }
 

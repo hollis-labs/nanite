@@ -25,6 +25,12 @@ const (
 // Limits holds the per-tier resource ceilings enforced at MCP discovery and
 // tool-execution time. Values are configurable at runtime via UserSettings;
 // these defaults ship in code and act as the conservative baseline.
+//
+// MaxToolsPerServer is advisory only (CW-20260815-0019): ValidateToolSet
+// still fires a DiscoveryWarning when a server's advertised tool count
+// crosses this threshold, but nothing is truncated as a result — an
+// operator decides whether an unusually large server is worth keeping
+// connected. The other four fields remain hard enforcement ceilings.
 type Limits struct {
 	MaxToolNameLen      int
 	MaxDescriptionLen   int
@@ -99,7 +105,7 @@ const (
 	WarnInvalidToolName     = "invalid_tool_name"
 	WarnDescriptionTooLong  = "description_too_long"
 	WarnSchemaSizeExceeded  = "schema_size_exceeded"
-	WarnToolCountCapped     = "tool_count_capped"
+	WarnToolCountHigh       = "tool_count_high"
 	WarnDuplicateToolName   = "duplicate_tool_name"
 	WarnInvalidBlockType    = "invalid_block_type"
 	WarnResultSizeExceeded  = "result_size_exceeded"
@@ -169,21 +175,23 @@ func ValidateToolMeta(tier TrustTier, tool Tool) []ValidationError {
 	return errs
 }
 
-// ValidateToolSet runs cross-tool discovery-time checks: count cap and
-// duplicate-name detection within the same server. Returns one
-// ValidationError per offending tool.
+// ValidateToolSet runs cross-tool discovery-time checks: tool-count
+// threshold and duplicate-name detection within the same server. Returns
+// one ValidationError per offending tool.
 //
-// Errors with Field=WarnToolCountCapped indicate the slice was too long;
-// Field=WarnDuplicateToolName flags every duplicate after the first.
+// Errors with Field=WarnToolCountHigh are advisory only (CW-20260815-0019)
+// — the server's advertised tool count crosses the tier threshold, but
+// nothing is dropped as a result; Field=WarnDuplicateToolName flags every
+// duplicate after the first.
 func ValidateToolSet(tier TrustTier, tools []Tool) []ValidationError {
 	limits := LimitsFor(tier)
 	var errs []ValidationError
 
 	if len(tools) > limits.MaxToolsPerServer {
 		errs = append(errs, ValidationError{
-			Field: WarnToolCountCapped,
+			Field: WarnToolCountHigh,
 			Value: "",
-			Reason: fmt.Sprintf("server advertises %d tools, cap is %d",
+			Reason: fmt.Sprintf("server advertises %d tools, above the %d advisory threshold for this tier — consider whether this server belongs in your active tool set",
 				len(tools), limits.MaxToolsPerServer),
 		})
 	}

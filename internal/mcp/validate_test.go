@@ -114,7 +114,9 @@ func TestValidateToolMeta_SchemaSize(t *testing.T) {
 }
 
 func TestValidateToolSet_CountAndDuplicates(t *testing.T) {
-	// 51 distinct tools at the third-party cap of 50 → cap warning.
+	// 51 distinct tools above the third-party advisory threshold of 50 →
+	// advisory warning (nothing is capped by ValidateToolSet itself; it
+	// only reports).
 	tools := make([]Tool, 51)
 	for i := range tools {
 		tools[i] = Tool{Name: "t" + itoa(i)}
@@ -122,12 +124,12 @@ func TestValidateToolSet_CountAndDuplicates(t *testing.T) {
 	errs := ValidateToolSet(TierThirdPartyHTTP, tools)
 	hadCap := false
 	for _, e := range errs {
-		if e.Field == WarnToolCountCapped {
+		if e.Field == WarnToolCountHigh {
 			hadCap = true
 		}
 	}
 	if !hadCap {
-		t.Errorf("expected %s warning, got %v", WarnToolCountCapped, errs)
+		t.Errorf("expected %s warning, got %v", WarnToolCountHigh, errs)
 	}
 
 	// Duplicate names within the slice should each emit one duplicate

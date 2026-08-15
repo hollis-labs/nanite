@@ -3,6 +3,7 @@ package mcp
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -494,6 +495,104 @@ func TestNaniteToolList_FullInventoryIncludesNonNanitePrefixed(t *testing.T) {
 	}
 	if !saw["web_fetch"] {
 		t.Error("tool_list must surface non-nanite_*-prefixed tools (web_fetch missing — runtime surface filter regression?)")
+	}
+}
+
+// TestNaniteToolList_SoftTruncatesLargeUnfilteredInventory is the
+// CW-20260815-0019 regression test for the second-layer safety net: now
+// that MCP discovery no longer truncates a large server's tool count,
+// tool_list's own unfiltered response has to nudge the agent toward
+// filtering instead of dumping everything. Wire an inventory well beyond
+// defaultToolListLimit and assert the unfiltered call soft-truncates with
+// a hint, while a filtered call and an explicit high `limit` both still
+// return everything.
+func TestNaniteToolList_SoftTruncatesLargeUnfilteredInventory(t *testing.T) {
+	st := newSelfTools(t)
+	const bigCount = defaultToolListLimit + 40
+	tools := make([]llmtypes.ToolDefinition, bigCount)
+	for i := 0; i < bigCount; i++ {
+		tools[i] = llmtypes.ToolDefinition{
+			Name:        fmt.Sprintf("bigserver_tool_%03d", i),
+			Description: "A tool from a very large connected server.",
+		}
+	}
+	st.Inventory = &stubInventoryLookup{tools: tools}
+
+	// Unfiltered: soft-truncated at defaultToolListLimit with a hint.
+	res, err := st.CallTool(context.Background(), "tool_list", map[string]any{})
+	if err != nil {
+		t.Fatalf("call: %v", err)
+	}
+	if res.IsError {
+		t.Fatalf("unexpected error: %s", res.Content[0].Text)
+	}
+	var out struct {
+		Tools []struct {
+			Name    string `json:"name"`
+			Summary string `json:"summary"`
+		} `json:"tools"`
+		Count     int    `json:"count"`
+		Total     int    `json:"total"`
+		Truncated bool   `json:"truncated"`
+		Hint      string `json:"hint"`
+	}
+	if err := json.Unmarshal([]byte(res.Content[0].Text), &out); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if !out.Truncated {
+		t.Fatal("expected truncated=true for an unfiltered call over the soft limit")
+	}
+	if out.Count != defaultToolListLimit || len(out.Tools) != defaultToolListLimit {
+		t.Errorf("expected %d tools returned, got count=%d len(tools)=%d", defaultToolListLimit, out.Count, len(out.Tools))
+	}
+	// total must reflect the full self-tools + stub inventory, not just the stub.
+	if out.Total < bigCount {
+		t.Errorf("expected total >= %d (stub inventory alone), got %d", bigCount, out.Total)
+	}
+	if out.Hint == "" {
+		t.Error("expected a non-empty hint nudging the agent toward filter/limit")
+	}
+
+	// Filtered: never truncated, even though the match set is still huge.
+	resFiltered, err := st.CallTool(context.Background(), "tool_list", map[string]any{
+		"filter": "bigserver",
+	})
+	if err != nil {
+		t.Fatalf("filtered call: %v", err)
+	}
+	var outFiltered struct {
+		Count     int  `json:"count"`
+		Truncated bool `json:"truncated"`
+	}
+	if err := json.Unmarshal([]byte(resFiltered.Content[0].Text), &outFiltered); err != nil {
+		t.Fatalf("decode filtered: %v", err)
+	}
+	if outFiltered.Truncated {
+		t.Error("a filtered call must never be soft-truncated")
+	}
+	if outFiltered.Count != bigCount {
+		t.Errorf("filtered call: expected %d matches, got %d", bigCount, outFiltered.Count)
+	}
+
+	// Explicit high limit: unfiltered call returns everything, no truncation.
+	resAll, err := st.CallTool(context.Background(), "tool_list", map[string]any{
+		"limit": bigCount + 1000,
+	})
+	if err != nil {
+		t.Fatalf("high-limit call: %v", err)
+	}
+	var outAll struct {
+		Count     int  `json:"count"`
+		Truncated bool `json:"truncated"`
+	}
+	if err := json.Unmarshal([]byte(resAll.Content[0].Text), &outAll); err != nil {
+		t.Fatalf("decode high-limit: %v", err)
+	}
+	if outAll.Truncated {
+		t.Error("an explicit limit at/above the true total must not be reported as truncated")
+	}
+	if outAll.Count < bigCount {
+		t.Errorf("expected explicit high limit to return everything, got count=%d", outAll.Count)
 	}
 }
 

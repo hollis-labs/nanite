@@ -280,9 +280,10 @@ func (m *Manager) tierForLocked(name string) TrustTier {
 // DiscoverTools queries all registered servers for their tools and runs the
 // per-tier validator pipeline (S4b T2). Tools failing per-tool validation
 // (ValidateToolMeta) are skipped with a DiscoveryWarning. Cross-tool checks
-// (ValidateToolSet — count cap, duplicate names) emit the same warnings;
-// when the count cap fires, only the first MaxToolsPerServer tools are
-// retained.
+// (ValidateToolSet — high tool count, duplicate names) emit the same
+// warnings, but nothing is dropped as a result: an operator decides whether
+// an unusually large server is worth keeping connected, Nanite doesn't
+// silently truncate it out from under the agent (CW-20260815-0019).
 func (m *Manager) DiscoverTools(ctx context.Context) error {
 	ctx, span := feotel.StartSpan(ctx, "nanite.mcp.discoverTools")
 	defer span.End()
@@ -307,7 +308,6 @@ func (m *Manager) DiscoverTools(ctx context.Context) error {
 	for _, name := range serverNames {
 		transport := m.servers[name]
 		tier := m.tierForLocked(name)
-		limits := LimitsFor(tier)
 
 		tools, err := transport.ListTools(ctx)
 		if err != nil {
@@ -315,19 +315,16 @@ func (m *Manager) DiscoverTools(ctx context.Context) error {
 			continue
 		}
 
-		// Cross-tool checks first so the count cap can be applied before we
-		// iterate. Each ValidationError → one DiscoveryWarning.
+		// Cross-tool checks: advisory only, nothing is dropped as a result.
+		// Each ValidationError → one DiscoveryWarning.
 		for _, ve := range ValidateToolSet(tier, tools) {
 			slog.Warn("mcp: discovery cross-tool check",
 				"server", name, "field", ve.Field, "reason", ve.Reason)
 			m.discoveryWarnings = append(m.discoveryWarnings, DiscoveryWarning{
 				ServerName: name,
-				ToolName:   ve.Value, // empty for count-cap; tool name for dup
+				ToolName:   ve.Value, // empty for high tool count; tool name for dup
 				Reason:     ve.Field,
 			})
-		}
-		if len(tools) > limits.MaxToolsPerServer {
-			tools = tools[:limits.MaxToolsPerServer]
 		}
 
 		advertised := len(tools)

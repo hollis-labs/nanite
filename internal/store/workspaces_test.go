@@ -139,6 +139,26 @@ func TestResolveWorkspaceID_AmbiguousMultipleWorkspacesRequiresExplicit(t *testi
 	}
 }
 
+// TestResolveWorkspaceID_RealDBErrorNotMasked is the PR #242 review fix:
+// a genuine DB/query failure while checking whether `requested` exists
+// must propagate to the caller, not be silently treated the same as
+// "unknown id, fall back to the single workspace." Simulated by closing
+// the underlying DB connection before calling — every query fails, and
+// none of those failures is sql.ErrNoRows.
+func TestResolveWorkspaceID_RealDBErrorNotMasked(t *testing.T) {
+	s := newTestStore(t)
+	if err := s.CreateWorkspace(&Workspace{ID: "default", Name: "Default"}); err != nil {
+		t.Fatalf("CreateWorkspace: %v", err)
+	}
+	if err := s.DB.Close(); err != nil {
+		t.Fatalf("close DB: %v", err)
+	}
+
+	if _, err := s.ResolveWorkspaceID("some-id"); err == nil {
+		t.Fatal("expected a real DB error to propagate from ResolveWorkspaceID, got nil")
+	}
+}
+
 func TestUpdateWorkspace(t *testing.T) {
 	s := newTestStore(t)
 

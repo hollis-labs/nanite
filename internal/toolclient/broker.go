@@ -255,11 +255,17 @@ func (tb *ToolClient) selectToolsUncapped(ctx context.Context, intent string, hi
 		intent = "general"
 	}
 
-	// Load rules with overrides if scoped.
-	if workspaceID != "" || agentID != "" {
-		rules := tb.Config.RulesFor(workspaceID, agentID)
-		tb.LocalBroker.LoadRules(rules)
-	}
+	// Load rules unconditionally — not just when workspaceID/agentID are
+	// scoped. LocalBroker.rules is shared, mutable state on one long-lived
+	// broker instance (guarded by its own mutex, not per-call); a
+	// conditional load here means a prior SCOPED call's override rules
+	// stay loaded and silently apply to a later UNSCOPED call that skips
+	// this block. RulesFor("", "") already returns exactly the base rules
+	// (no overrides applied) for the unscoped case, so calling it every
+	// time is both correct and simpler than trying to skip it. (Review
+	// finding on PR #242.)
+	rules := tb.Config.RulesFor(workspaceID, agentID)
+	tb.LocalBroker.LoadRules(rules)
 
 	result, err := tb.LocalBroker.SelectTools(ctx, intent, hints)
 	if err != nil {
@@ -271,7 +277,17 @@ func (tb *ToolClient) selectToolsUncapped(ctx context.Context, intent string, hi
 		slog.Error("toolclient: zero broker rules matched a well-formed intent — degrading to a minimal safe set instead of the full catalog; check Config.Rules is non-empty",
 			"workspace", workspaceID, "agent", agentID, "intent", intent,
 			"catalog_size", result.Total, "fallback_count", DefaultFallbackToolCount)
-		tools = tools[:DefaultFallbackToolCount]
+		// Bound by len(tools), not just result.Total: today the library
+		// only sets this exact Rationale when Tools holds every registered
+		// tool (so Total == len(Tools) always), but that's an internal
+		// invariant of the library's current implementation, not a
+		// guarantee this code should rely on for a slice bound. (Review
+		// finding on PR #242.)
+		fallbackCount := DefaultFallbackToolCount
+		if len(tools) < fallbackCount {
+			fallbackCount = len(tools)
+		}
+		tools = tools[:fallbackCount]
 	}
 
 	return tools, result.OverrideBlock, result.Total, nil

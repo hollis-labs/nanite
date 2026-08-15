@@ -1,6 +1,8 @@
 package store
 
 import (
+	"database/sql"
+	"errors"
 	"fmt"
 	"time"
 )
@@ -120,10 +122,19 @@ func (s *Store) DeleteWorkspace(id string) error {
 // Returns "" (not an error) when the caller genuinely must be explicit:
 // zero workspaces exist, or more than one does and requested didn't match
 // any of them.
+//
+// Only a not-found lookup on requested falls through to the single-
+// workspace fallback — any other error from the existence check (a real
+// DB/query failure) is returned to the caller as-is rather than masked
+// by silently trying the fallback path. (Review finding on PR #242.)
 func (s *Store) ResolveWorkspaceID(requested string) (string, error) {
 	if requested != "" {
-		if _, err := s.GetWorkspace(requested); err == nil {
+		_, err := s.GetWorkspace(requested)
+		if err == nil {
 			return requested, nil
+		}
+		if !errors.Is(err, sql.ErrNoRows) {
+			return "", err
 		}
 	}
 	workspaces, err := s.ListWorkspaces()

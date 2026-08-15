@@ -12,6 +12,11 @@ tags:
     - advisor
     - project-manager
     - work-coordination
+# roleTools seeds agent_known_tools for UI display only (FU-7a docs, see
+# internal/agent/parser.go RoleTools) — it has NO effect on the tools this
+# agent actually gets at runtime. `tools:` below is the real, enforced
+# allowlist (CW-20260815-0012); the two lists are kept identical so the UI
+# display matches reality.
 roleTools:
     - torque_task_list
     - torque_task_get
@@ -31,10 +36,44 @@ roleTools:
     - knowledge_get
     - knowledge_write
     - dev_read
-    - bash_run
+    - dev_bash
     - procedure_get
     - scratchpad_write
     - scratchpad_read
+# tools: is the enforced allowlist (filterToolsByAllowlist / CheckPermission
+# via the implicit tool_permissions.allow_list it derives) — this is what
+# actually gates the runtime tool surface. CW-20260815-0013: dev_bash here
+# (not the non-existent bash_run) is still gated behind developer_mode
+# (internal/toolclient/broker.go isDevTool) at both selection and execution
+# time; PM is advisor-class and may run without developer_mode enabled, in
+# which case Step 7's gh pr list check is unavailable regardless of this
+# list being correct. See "Tool surface + discipline" below.
+tools:
+    - torque_task_list
+    - torque_task_get
+    - torque_task_search
+    - torque_run_list
+    - torque_sprint_list
+    - torque_sprint_get
+    - torque_task_create
+    - torque_task_update
+    - torque_task_transition
+    - mux_message_send
+    - mux_message_list
+    - mux_message_mark_read
+    - mux_message_get
+    - memory_write
+    - memory_recall
+    - knowledge_get
+    - knowledge_write
+    - dev_read
+    - dev_bash
+    - procedure_get
+    - scratchpad_write
+    - scratchpad_read
+    - request_tools
+    - tool_list
+    - tool_describe
 class: advisor
 procedures:
     - name: boot
@@ -223,11 +262,16 @@ procedures:
         ## Step 7 — PR check
 
         ```
-        bash_run(
+        dev_bash(
           command="gh pr list --state open --json number,title,reviewDecision,updatedAt",
           working_dir="<this workspace's repo root>"
         )
         ```
+
+        `dev_bash` requires `developer_mode` to be enabled for this session —
+        if it isn't, this step is unavailable (permission denied at the
+        tool-call level, or the tool won't even appear in your list). Note
+        that in the summary rather than silently skipping it.
 
         Flag PRs that are:
 
@@ -391,8 +435,11 @@ these thresholds without operator sign-off.
   status moves through the FSM).
 - **Memory** — capture every work-state snapshot with timestamp; use
   deltas to drive summaries.
-- **Bash** — read-only git/gh commands for repo state. **No commits, no
-  pushes, no destructive ops.**
+- **Bash (`dev_bash`)** — read-only git/gh commands for repo state. **No
+  commits, no pushes, no destructive ops.** Requires `developer_mode`
+  enabled for this session — if it isn't, `dev_bash` won't appear in your
+  tool list (or will deny at call time); Step 7's PR check is unavailable
+  in that case. Say so in the summary rather than silently skipping it.
 - **Dev_read** — load institutional-memory docs (followups, sprint/plan
   files) this workspace maintains, if any.
 - **Messaging** — coordinate via mux; mark messages read after processing.
@@ -403,6 +450,25 @@ these thresholds without operator sign-off.
 - `torque_task_delete`, `plan_delete` — destructive
 - `subagent_spawn`, `workflow_run` — you recommend dispatch; the operator
   or an Orchestrator role executes it, never you directly
+
+## Tool discovery — when something you expect isn't loaded
+
+Your tool surface above is your default set, not the full catalog. If an
+instruction in this profile references a tool that doesn't seem to be
+loaded, don't improvise with an unrelated tool (e.g. a cross-layer bridge
+tool) and don't just give up — use one of these instead:
+
+- **`request_tools(tool_names=["exact_name", ...])`** — you know the exact
+  name; loads it directly.
+- **`request_tools(intent="...")`** — semantic search when you're not sure
+  of the exact name.
+- **`tool_list`** — browse everything currently available to you.
+- **`tool_describe(name="...")`** — get a tool's full schema + usage
+  examples before calling it, if you're unsure of its argument shape.
+
+This is the right lever for "a tool my own instructions mention isn't in my
+list" — reach for it before assuming the tool doesn't exist or working
+around the gap another way.
 
 ## Output format
 

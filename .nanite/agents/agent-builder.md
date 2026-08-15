@@ -18,11 +18,18 @@ tags:
     - meta
     - deployment-executor
     - substrate
+# CW-20260815-0013: every `bash_run` reference in this file (roleTools +
+# body procedures) was renamed to the real tool name `dev_bash` — same
+# systemic typo the project-manager.md/system-architect.md fixes in this
+# ticket addressed. `skill_get` (below) is NOT touched here — out of this
+# ticket's explicit scope; also non-existent, needs the same treatment
+# system-architect.md got (see that file's roleTools comment) whenever this
+# profile's skill usage is next revisited.
 roleTools:
     - dev_read
     - dev_write
     - dev_edit
-    - bash_run
+    - dev_bash
     - cerberus_resource_deploy
     - cerberus_resource_reload
     - cerberus_resource_status
@@ -210,7 +217,7 @@ procedures:
         Check if the agent slug already exists:
 
         ```bash
-        bash_run(command="sqlite3 ~/.agridd/agridd-serve.db 'SELECT id, source FROM agent_profiles WHERE slug=\"<slug>\";'")
+        dev_bash(command="sqlite3 ~/.agridd/agridd-serve.db 'SELECT id, source FROM agent_profiles WHERE slug=\"<slug>\";'")
         ```
 
         - **Row exists, source='internal'** — slug collision; reply `notice` to requester, do NOT overwrite
@@ -238,13 +245,13 @@ procedures:
         ## Step 6 — Run Phase 3: Build + test + deploy
 
         Per `build_agent` §Phase 3:
-        1. `bash_run(command="cd /Users/chrispian/dev/hollis-labs/apps/agridd && go build ./cmd/nanite/")` — verify build
-        2. `bash_run(command="cd /Users/chrispian/dev/hollis-labs/apps/agridd && go test ./internal/agent/builtin/...")` — verify slug + profile tests pass
-        3. **CHECK TIME**: `bash_run(command="date -u +%M")` — must be in safe window (02-13, 17-28, 32-43, or 47-58)
+        1. `dev_bash(command="cd /Users/chrispian/dev/hollis-labs/apps/agridd && go build ./cmd/nanite/")` — verify build
+        2. `dev_bash(command="cd /Users/chrispian/dev/hollis-labs/apps/agridd && go test ./internal/agent/builtin/...")` — verify slug + profile tests pass
+        3. **CHECK TIME**: `dev_bash(command="date -u +%M")` — must be in safe window (02-13, 17-28, 32-43, or 47-58)
         4. `cerberus_resource_deploy(resource_id="agridd-serve")` — rebuild + sync artifact
         5. `cerberus_resource_reload(resource_id="agridd-serve")` — cutover to new binary
         6. `cerberus_resource_status(resource_id="agridd-serve")` — verify pid changed, exit code 0
-        7. Verify ingest via bash_run sqlite query:
+        7. Verify ingest via dev_bash sqlite query:
            - `agent_profiles` row created (class, source='internal')
            - `agent_known_tools` seeded (count matches roleTools length, pinned=1, reason='role_seed', sort_order follows roleTools order)
            - `agent_known_skills` seeded (if roleSkills non-empty)
@@ -258,7 +265,7 @@ procedures:
         ## Step 7 — Run Phases 4-7: Session + priming + boot
 
         Per `build_agent` §§Phase 4-7:
-        - Create session via `bash_run` + curl POST /api/sessions
+        - Create session via `dev_bash` + curl POST /api/sessions
         - Set title via PUT /api/sessions/<id>
         - Send priming notice via mux_message_send
         - Send boot turn via curl POST /api/messages
@@ -383,7 +390,7 @@ procedures:
         mkdir -p internal/agent/builtin/profiles/procedures/<slug>
         ```
 
-        Via `bash_run`. Then write each procedure file via `dev_write`:
+        Via `dev_bash`. Then write each procedure file via `dev_write`:
 
         - `boot.md` — what to do on wake
         - `checklist.md` — per-tick / per-cycle work
@@ -457,7 +464,7 @@ procedures:
         ### 3.1 Local build verify
 
         ```
-        bash_run(
+        dev_bash(
           command="cd /Users/chrispian/dev/hollis-labs/apps/agridd && go build ./cmd/nanite/",
           working_dir="/Users/chrispian/dev/hollis-labs/apps/agridd"
         )
@@ -468,7 +475,7 @@ procedures:
         ### 3.2 Profile tests
 
         ```
-        bash_run(
+        dev_bash(
           command="cd /Users/chrispian/dev/hollis-labs/apps/agridd && go test ./internal/agent/builtin/... -count=1",
           working_dir="/Users/chrispian/dev/hollis-labs/apps/agridd"
         )
@@ -483,7 +490,7 @@ procedures:
         ### 3.3 Time check (Supervisor pass)
 
         ```
-        bash_run(command="date -u +%M")
+        dev_bash(command="date -u +%M")
         ```
 
         Current minute MUST be in safe window:
@@ -526,10 +533,10 @@ procedures:
         ### 3.7 Verify ingest
 
         ```bash
-        bash_run(command="sqlite3 ~/.agridd/agridd-serve.db \"SELECT id, slug, class, source FROM agent_profiles WHERE slug='<slug>';\"")
-        bash_run(command="sqlite3 ~/.agridd/agridd-serve.db \"SELECT COUNT(*) FROM agent_known_tools WHERE agent_id='<agent_id>';\"")
-        bash_run(command="sqlite3 ~/.agridd/agridd-serve.db \"SELECT name, length(body) FROM agent_procedures WHERE agent_id='<agent_id>' ORDER BY name;\"")
-        bash_run(command="ls -la ~/.agridd/data/<slug>/agent.db")
+        dev_bash(command="sqlite3 ~/.agridd/agridd-serve.db \"SELECT id, slug, class, source FROM agent_profiles WHERE slug='<slug>';\"")
+        dev_bash(command="sqlite3 ~/.agridd/agridd-serve.db \"SELECT COUNT(*) FROM agent_known_tools WHERE agent_id='<agent_id>';\"")
+        dev_bash(command="sqlite3 ~/.agridd/agridd-serve.db \"SELECT name, length(body) FROM agent_procedures WHERE agent_id='<agent_id>' ORDER BY name;\"")
+        dev_bash(command="ls -la ~/.agridd/data/<slug>/agent.db")
         ```
 
         Expect:
@@ -544,7 +551,7 @@ procedures:
         ## Phase 4 — Create session
 
         ```
-        bash_run(
+        dev_bash(
           command="curl -s -X POST http://127.0.0.1:8097/api/sessions -H 'Content-Type: application/json' -d '{\"workspace_id\":\"default\",\"agent_id\":\"<agent_id>\",\"provider\":\"anthropic\",\"model\":\"claude-opus-4-7\"}'"
         )
         ```
@@ -554,7 +561,7 @@ procedures:
         Then set the title:
 
         ```
-        bash_run(
+        dev_bash(
           command="curl -s -X PUT http://127.0.0.1:8097/api/sessions/<session_id> -H 'Content-Type: application/json' -d '{\"title\":\"<Profile Name> — <scope>\"}'"
         )
         ```
@@ -604,7 +611,7 @@ procedures:
         Send the wake-up turn to the new agent's session via POST /api/messages:
 
         ```
-        bash_run(
+        dev_bash(
           command="curl -s -X POST http://127.0.0.1:8097/api/messages -H 'Content-Type: application/json' -d '{\"session_id\":\"<session_id>\",\"content\":\"<boot turn content>\"}'"
         )
         ```
@@ -623,7 +630,7 @@ procedures:
         Poll:
 
         ```
-        bash_run(
+        dev_bash(
           command="sqlite3 ~/.agridd/agridd-serve.db \"SELECT id, role, datetime(created_at), length(content) FROM messages WHERE session_id='<session_id>' AND role='assistant' ORDER BY created_at DESC LIMIT 1;\""
         )
         ```
@@ -634,7 +641,7 @@ procedures:
         Also check the new agent's narrative_log (if they used narrative_write):
 
         ```
-        bash_run(
+        dev_bash(
           command="sqlite3 ~/.agridd/data/<slug>/agent.db \"SELECT event_type, summary FROM narrative_log ORDER BY created_at DESC LIMIT 5;\""
         )
         ```
@@ -702,7 +709,7 @@ procedures:
         If a phase fails partway through:
 
         - **Phase 1 (file-SOT)** — back out the file writes (delete the new
-          files via `bash_run`), surface to operator
+          files via `dev_bash`), surface to operator
         - **Phase 2 (Tesseract)** — leave the entries; they're harmless extras.
           Mark in narrative for future cleanup.
         - **Phase 3 (deploy)** — surface to keeper IMMEDIATELY. Don't retry

@@ -15,6 +15,11 @@ tags:
     - harness
     - orchestrator
     - dispatch
+# roleTools seeds agent_known_tools for UI display only (FU-7a docs, see
+# internal/agent/parser.go RoleTools) — it has NO effect on the tools this
+# agent actually gets at runtime. `tools:` below is the real, enforced
+# allowlist (CW-20260815-0012); the two lists are kept identical so the UI
+# display matches reality.
 roleTools:
     - torque_task_list
     - torque_task_get
@@ -28,6 +33,25 @@ roleTools:
     - memory_recall
     - scratchpad_write
     - scratchpad_read
+# tools: is the enforced allowlist (filterToolsByAllowlist / CheckPermission
+# via the implicit tool_permissions.allow_list it derives) — this is what
+# actually gates the runtime tool surface.
+tools:
+    - torque_task_list
+    - torque_task_get
+    - torque_task_update
+    - torque_task_search
+    - subagent_spawn
+    - subagent_cancel
+    - workflow_run
+    - dev_read
+    - memory_write
+    - memory_recall
+    - scratchpad_write
+    - scratchpad_read
+    - request_tools
+    - tool_list
+    - tool_describe
 ---
 # Orchestrator
 
@@ -117,6 +141,25 @@ file.
   the review yourself.
 - **The operator.** Scope, priority, and final approval on ambiguous
   calls belong to the operator. Escalate rather than guess.
+
+## Tool discovery — when something you expect isn't loaded
+
+Your tool surface above is your default set, not the full catalog. If an
+instruction in this profile references a tool that doesn't seem to be
+loaded, don't improvise with an unrelated tool (e.g. a cross-layer bridge
+tool) and don't just give up — use one of these instead:
+
+- **`request_tools(tool_names=["exact_name", ...])`** — you know the exact
+  name; loads it directly.
+- **`request_tools(intent="...")`** — semantic search when you're not sure
+  of the exact name.
+- **`tool_list`** — browse everything currently available to you.
+- **`tool_describe(name="...")`** — get a tool's full schema + usage
+  examples before calling it, if you're unsure of its argument shape.
+
+This is the right lever for "a tool my own instructions mention isn't in my
+list" — reach for it before assuming the tool doesn't exist or working
+around the gap another way.
 
 ## If a tool call fails
 

@@ -738,6 +738,55 @@ func builtinDurableAgentRecipes() []DurableAgentRecipe {
 			Tags: []string{"advisor", "relay", "concierge", "product"},
 		},
 		{
+			// Profile pairing: operator selects the existing `reviewer`
+			// AgentProfile (internal/agent/builtin/profiles/reviewer.md) at
+			// apply-time — reused, not duplicated, per the ticket's explicit
+			// ask. Distinct from `code-auditor`: reviewer is
+			// acceptance-criteria-driven (the parent supplies criteria),
+			// code-auditor is rubric-driven. Don't conflate the two.
+			ID:               "reviewer",
+			SchemaVersion:    DurableAgentRecipeSchemaVersion,
+			Kind:             DurableAgentRecipeKindTemplateWorker,
+			Name:             "Reviewer",
+			Description:      "A one-shot, freeform (non-workflow) acceptance-criteria review pass: audits a delivered work product against stated criteria and reports a structured verdict.",
+			LifecycleClass:   store.DurableAgentClassTemplate,
+			ProfileRule:      "operator_selected",
+			Provider:         "anthropic",
+			Model:            "",
+			RuntimeKind:      string(runtimekind.API),
+			LaunchSourceType: store.DurableAgentLaunchTaskTemplateRun,
+			WakeDefaults: DurableAgentWakePayload{
+				Reason: DurableAgentWakeLifecycleStart,
+				Facts: map[string]string{
+					"story": "reviewer",
+				},
+			},
+			Metadata: map[string]string{
+				"product_story":      "reviewer",
+				"run_shape":          "fresh_template_run",
+				"integration_status": "operator_managed",
+				"review_mode":        "acceptance_criteria_freeform",
+			},
+			Injections: []RecipeInjectionPlan{{
+				ID:          "review-brief",
+				Kind:        "planned_native_file",
+				Target:      "tasks/review-brief.md",
+				Description: "Future non-secret work-product pointer or acceptance-criteria brief planted for standalone reviewer runs.",
+			}},
+			Inputs: []DurableAgentRecipeInput{
+				recipeStringInput("name", "Name", "durable_agent.name", true, "Reviewer"),
+				recipeStringInput("slug", "Slug", "durable_agent.slug", false, "reviewer"),
+				recipeProfileInput(true),
+				recipeProviderInput(false, "anthropic"),
+				recipeModelInput(false, ""),
+				recipeRuntimeKindInput(false, string(runtimekind.API)),
+				recipePathInput("work_root", "Work root", "durable_agent.work_root", false, "~/dev/project"),
+				recipeStringInput("torque_task_id", "Torque task ID", "metadata.torque_task_id", true, "CW-20260815-0001"),
+				recipeTextareaInput("review_subject", "Review subject and acceptance criteria", "wake_payload.prompt", true, "What to review (the work product — diff, commit, PR, deliverable) and the acceptance criteria to check it against. A review without stated criteria is opinion dressed up as judgment."),
+			},
+			Tags: []string{"template", "reviewer", "acceptance-criteria", "product"},
+		},
+		{
 			ID:               "system-monitor",
 			SchemaVersion:    DurableAgentRecipeSchemaVersion,
 			Kind:             DurableAgentRecipeKindProcessMonitor,

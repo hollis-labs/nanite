@@ -36,6 +36,7 @@ func TestDurableAgentRecipeCatalogListGetDeterministic(t *testing.T) {
 		"project-advisor",
 		"project-manager",
 		"proxima-relay",
+		"reviewer",
 		"system-monitor",
 		"task-writer",
 		"template-worker",

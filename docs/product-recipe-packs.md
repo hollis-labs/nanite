@@ -30,6 +30,7 @@ These are the richer operator-facing recipes:
 - `planner`
 - `project-manager`
 - `proxima-relay`
+- `reviewer`
 - `system-monitor`
 - `task-writer`
 - `web-chat-agent`
@@ -43,6 +44,7 @@ These are the richer operator-facing recipes:
 | `architect-advisor` | `advisor` | `api` | System design / architecture partner |
 | `project-manager` | `advisor` | `api` | Work-coordination advisor: monitors task/dependency state, surfaces blockers, recommends dispatch timing |
 | `proxima-relay` | `advisor` | `api` | Operator-facing concierge / relay durable agent |
+| `reviewer` | `template` | `api` | One-shot, freeform acceptance-criteria review pass with checkpoint escalation |
 | `managed-cli-harness` | `harness` | `streaming-stdio` | Managed headless CLI durable session |
 | `orchestrator` | `harness` | `api` | Long-lived executive: polls Torque, dispatches ready work via workflow_run/subagent_spawn |
 | `planner` | `template` | `api` | One-shot sequencing pass: goal/design doc → dependency-ordered Torque tasks |

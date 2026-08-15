@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"regexp"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -593,7 +594,15 @@ func resolveTemplateRef(ref string, results map[string]agentworkflow.StepResult,
 		key := strings.TrimPrefix(ref, "input.")
 		val, ok := input.Params[key]
 		if !ok {
-			return "", fmt.Errorf("agentworkflow: reference to unknown input %q", key)
+			// CW-20260815-0022: workflow_run's pre-launch check
+			// (agentworkflow.RequiredInputs, internal/mcp/self_tools_workflow_run.go)
+			// catches this for the common case, but that check is
+			// best-effort and skipped when WorkflowRegistry isn't wired —
+			// this is the backstop, so name what WAS supplied to make the
+			// gap between "what params has" and "what this step needs"
+			// concrete rather than a bare unknown-key message.
+			return "", fmt.Errorf("agentworkflow: step references {{input.%s}}, but params has no %q key (params supplied: %v) — pass it via workflow_run(..., params: {%q: \"...\"})",
+				key, key, paramKeys(input.Params), key)
 		}
 		if s, ok := val.(string); ok {
 			return s, nil
@@ -602,6 +611,17 @@ func resolveTemplateRef(ref string, results map[string]agentworkflow.StepResult,
 	default:
 		return "", fmt.Errorf("agentworkflow: unrecognized template reference %q (expected steps.<id>.<field> or input.<key>)", ref)
 	}
+}
+
+// paramKeys returns m's keys, sorted, for use in an error message — a
+// deterministic "here's what you actually supplied" listing.
+func paramKeys(m map[string]any) []string {
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	return keys
 }
 
 func configString(cfg map[string]any, key string) string {

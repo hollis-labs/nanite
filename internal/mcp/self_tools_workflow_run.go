@@ -4,7 +4,9 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 
+	"github.com/hollis-labs/nanite/internal/agentworkflow"
 	"github.com/hollis-labs/nanite/internal/dispatch"
 )
 
@@ -54,6 +56,28 @@ func (st *SelfToolsTransport) callWorkflowRun(ctx context.Context, args map[stri
 	}
 	params, _ := args["params"].(map[string]any)
 
+	// CW-20260815-0022: fail fast with a concrete, actionable error when
+	// params is missing a key the named workflow's steps actually
+	// reference via {{input.<key>}} — rather than letting the run start
+	// and fail deep inside step-config resolution with the engine's
+	// generic "reference to unknown input" error. Best-effort (see
+	// agentworkflow.RequiredInputs's doc comment) and skipped entirely
+	// when WorkflowRegistry isn't wired.
+	if st.WorkflowRegistry != nil {
+		if def, ok := st.WorkflowRegistry.Get(name); ok {
+			if missing := missingRequiredInputs(def, params); len(missing) > 0 {
+				return errorResult(fmt.Sprintf(
+					"workflow_run: workflow %q requires input(s) not present in params: %s. Supply them, e.g. workflow_run(workflow_name: %q, params: {%s: \"...\"}).",
+					name, strings.Join(missing, ", "), name, missing[0],
+				)), nil
+			}
+		}
+		// A name absent from the registry is deliberately NOT rejected
+		// here — that's WorkflowLauncher.Launch's job (it knows about
+		// non-built-in-engine sources this registry doesn't), so let the
+		// call proceed and surface whatever error Launch produces.
+	}
+
 	// H1 trust resolution (CW-20260421-0014), same as task_execute:
 	// WorkspaceID/AgentProfileID come from the caller-profile ctx stamped
 	// by the service layer, not an LLM-suppliable arg. A workflow launch
@@ -92,4 +116,17 @@ func (st *SelfToolsTransport) callWorkflowRun(ctx context.Context, args map[stri
 		return errorResult(fmt.Sprintf("workflow_run: marshal envelope: %v", err)), nil
 	}
 	return textResult(string(envJSON)), nil
+}
+
+// missingRequiredInputs returns the subset of def's statically-referenced
+// {{input.<key>}} keys (agentworkflow.RequiredInputs) that params does not
+// supply, in the same first-seen order RequiredInputs returns them.
+func missingRequiredInputs(def agentworkflow.WorkflowDefinition, params map[string]any) []string {
+	var missing []string
+	for _, key := range agentworkflow.RequiredInputs(def) {
+		if _, ok := params[key]; !ok {
+			missing = append(missing, key)
+		}
+	}
+	return missing
 }

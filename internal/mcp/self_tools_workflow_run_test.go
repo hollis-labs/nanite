@@ -26,6 +26,7 @@ import (
 	"encoding/json"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"testing"
 
 	"github.com/hollis-labs/nanite/internal/agentworkflow"
@@ -157,5 +158,105 @@ func TestCallWorkflowRun_MissingWorkflowName_RejectsBeforeLaunch(t *testing.T) {
 	}
 	if launcher.calls != 0 {
 		t.Fatalf("WorkflowLauncher.Launch calls = %d, want 0", launcher.calls)
+	}
+}
+
+// TestCallWorkflowRun_MissingRequiredParam_RejectsBeforeLaunchWithClearError
+// is the regression pin for CW-20260815-0022: the real incident was the
+// Orchestrator calling workflow_run against worker-reviewer-gate without
+// params.task, which the engine only caught deep inside step-config
+// resolution with a generic "reference to unknown input" error. With
+// WorkflowRegistry wired, the same omission must now be rejected before
+// ever reaching the launcher, naming the missing key.
+func TestCallWorkflowRun_MissingRequiredParam_RejectsBeforeLaunchWithClearError(t *testing.T) {
+	dir := exampleWorkflowDefinitionsDir(t)
+	registry, err := agentworkflow.LoadRegistryDir(dir)
+	if err != nil {
+		t.Fatalf("LoadRegistryDir(%s) = %v, want nil", dir, err)
+	}
+
+	launcher := &stubWorkflowLauncher{result: &dispatch.SpawnResult{Summary: "should not be reached"}}
+	st := &SelfToolsTransport{WorkflowLauncher: launcher, WorkflowRegistry: registry}
+
+	ctx := WithCallerProfile(context.Background(), "ws-1", "profile-1")
+	res, err := st.callWorkflowRun(ctx, map[string]any{
+		"workflow_name": "worker-reviewer-gate",
+		// params.task deliberately omitted.
+	})
+	if err != nil {
+		t.Fatalf("callWorkflowRun: %v", err)
+	}
+	if !res.IsError {
+		t.Fatalf("expected an error result for a missing required param, got: %+v", res)
+	}
+	if launcher.calls != 0 {
+		t.Fatalf("WorkflowLauncher.Launch calls = %d, want 0 — must reject before dispatch, not rely on the engine failing deep in the run", launcher.calls)
+	}
+	if len(res.Content) != 1 || res.Content[0].Type != "text" {
+		t.Fatalf("res.Content = %+v, want a single text block", res.Content)
+	}
+	got := res.Content[0].Text
+	if !strings.Contains(got, "task") {
+		t.Errorf("error text = %q, want it to name the missing %q param", got, "task")
+	}
+	if !strings.Contains(got, "worker-reviewer-gate") {
+		t.Errorf("error text = %q, want it to name the workflow", got)
+	}
+}
+
+// TestCallWorkflowRun_RequiredParamSupplied_NoRegistryRegression proves the
+// registry-backed pre-check doesn't reject the same call
+// TestCallWorkflowRun_TrustResolutionAndEnvelopeWrap already proves
+// succeeds — this time with WorkflowRegistry wired too, since that's how
+// the container actually wires SelfToolsTransport in production.
+func TestCallWorkflowRun_RequiredParamSupplied_NoRegistryRegression(t *testing.T) {
+	dir := exampleWorkflowDefinitionsDir(t)
+	registry, err := agentworkflow.LoadRegistryDir(dir)
+	if err != nil {
+		t.Fatalf("LoadRegistryDir(%s) = %v, want nil", dir, err)
+	}
+
+	launcher := &stubWorkflowLauncher{result: &dispatch.SpawnResult{Summary: "ok"}}
+	st := &SelfToolsTransport{WorkflowLauncher: launcher, WorkflowRegistry: registry}
+
+	ctx := WithCallerProfile(context.Background(), "ws-1", "profile-1")
+	res, err := st.callWorkflowRun(ctx, map[string]any{
+		"workflow_name": "worker-reviewer-gate",
+		"params":        map[string]any{"task": "reverse the string \"abc\""},
+	})
+	if err != nil {
+		t.Fatalf("callWorkflowRun: %v", err)
+	}
+	if res.IsError {
+		t.Fatalf("expected success, got error: %+v", res)
+	}
+	if launcher.calls != 1 {
+		t.Fatalf("WorkflowLauncher.Launch calls = %d, want 1", launcher.calls)
+	}
+}
+
+// TestCallWorkflowRun_UnknownWorkflowName_StillReachesLauncher proves the
+// pre-check doesn't itself reject a workflow_name absent from the registry
+// — that's WorkflowLauncher.Launch's job (it may know about
+// non-built-in-engine sources this registry doesn't).
+func TestCallWorkflowRun_UnknownWorkflowName_StillReachesLauncher(t *testing.T) {
+	dir := exampleWorkflowDefinitionsDir(t)
+	registry, err := agentworkflow.LoadRegistryDir(dir)
+	if err != nil {
+		t.Fatalf("LoadRegistryDir(%s) = %v, want nil", dir, err)
+	}
+
+	launcher := &stubWorkflowLauncher{result: &dispatch.SpawnResult{Summary: "ok"}}
+	st := &SelfToolsTransport{WorkflowLauncher: launcher, WorkflowRegistry: registry}
+
+	ctx := WithCallerProfile(context.Background(), "ws-1", "profile-1")
+	_, err = st.callWorkflowRun(ctx, map[string]any{
+		"workflow_name": "does-not-exist",
+	})
+	if err != nil {
+		t.Fatalf("callWorkflowRun: %v", err)
+	}
+	if launcher.calls != 1 {
+		t.Fatalf("WorkflowLauncher.Launch calls = %d, want 1 — an unregistered name must still reach the launcher", launcher.calls)
 	}
 }

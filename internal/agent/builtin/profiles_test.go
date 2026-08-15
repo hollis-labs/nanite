@@ -118,28 +118,46 @@ func TestInternalProfiles_WorkerIdentity(t *testing.T) {
 
 // TestInternalProfiles_FrontmatterKeys is the regression pin for PR-152
 // review round 1 (item A): the parser recognizes `model:` and
-// `permissionMode:`, not `defaultModel:`. Without this assertion, a
-// typo like `defaultModel:` would silently produce empty Model on every
-// internal profile and the worker would lose can_execute=true (re-opening
-// the c160 fabrication risk because the worker can't actually execute
-// tools, so it would have to fabricate progress).
+// `permissionMode:`, not `defaultModel:`. A synthetic frontmatter block is
+// used (rather than reading the shipped profiles) because CW-20260815-0021
+// deliberately removed `model:` from every internal profile so they inherit
+// the system default via ResolveProviderAndModel instead of hardcoding a
+// model ID that eventually gets retired.
 func TestInternalProfiles_FrontmatterKeys(t *testing.T) {
+	def, err := agent.ParseMD([]byte(`---
+name: Synthetic
+slug: synthetic
+description: frontmatter-key regression fixture
+model: claude-test-model
+permissionMode: yolo
+---
+body
+`))
+	if err != nil {
+		t.Fatalf("ParseMD: %v", err)
+	}
+	if def.Model != "claude-test-model" {
+		t.Errorf("Model = %q, want %q — frontmatter key likely wrong (must be `model:`, not `defaultModel:`)", def.Model, "claude-test-model")
+	}
+	if def.PermissionMode != "yolo" {
+		t.Errorf("PermissionMode = %q, want %q", def.PermissionMode, "yolo")
+	}
+
 	defs, err := InternalProfiles()
 	if err != nil {
 		t.Fatalf("InternalProfiles: %v", err)
 	}
-	// Every internal profile that ships with a model must parse it.
-	// W1 set: worker, planner, hint-selector. W4 set (CW-20260512-0113):
-	// researcher, analyst, file-backend, backend, background-job — every
-	// Wave 4 role profile carries a `model:` field. Default carries none
-	// and inherits the harness default.
+	// CW-20260815-0021: none of the shipped internal profiles should
+	// hardcode a model — a blank Model is what lets the chat-engine
+	// resolver apply the system default at request time. A non-empty
+	// Model here means someone reintroduced the stale-model-ID bug.
 	for _, slug := range []string{
 		"worker", "planner", "hint-selector",
-		"researcher", "backend", "background-job",
+		"researcher", "backend", "background-job", "reviewer",
 	} {
 		def := findBySlug(t, defs, slug)
-		if def.Model == "" {
-			t.Errorf("slug=%s: Model is empty — frontmatter key likely wrong (must be `model:`, not `defaultModel:`)", slug)
+		if def.Model != "" {
+			t.Errorf("slug=%s: Model = %q, want empty — internal profiles must inherit the system default, not hardcode a model (CW-20260815-0021)", slug, def.Model)
 		}
 	}
 	// Worker must carry PermissionMode=yolo so ToProfile maps to

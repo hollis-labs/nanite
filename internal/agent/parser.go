@@ -32,6 +32,17 @@ type Definition struct {
 	Tags        []string `yaml:"tags"`
 
 	// Behavior
+	//
+	// Model: leave blank. A blank value means "inherit whatever the system
+	// default is at request time" — the chat-engine resolver
+	// (store.ResolveProviderAndModel, CW-20260526-0003) re-evaluates it on
+	// every call, walking explicit request → user_settings.default_model →
+	// providers.default_model. Hardcoding a specific model ID here bypasses
+	// that SSOT and *will* eventually 404 once the pinned model is retired
+	// (CW-20260815-0021 — ten profiles independently made this mistake).
+	// Only set Model when a profile has a genuine, deliberate reason to run
+	// on something other than the system default; AutoIngestAgents logs a
+	// loud warning for every profile that does.
 	Model          string           `yaml:"model"`
 	Tools          []string         `yaml:"tools"`
 	PermissionMode string           `yaml:"permissionMode"`

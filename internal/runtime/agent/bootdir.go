@@ -62,6 +62,32 @@ func LayoutFor(provider string) Layout {
 	return bootdirLayoutFor(provider)
 }
 
+// HasBootdirLayout reports whether provider (after CLI-alias
+// normalization) has a real, implemented bootdir Layout — claude, codex,
+// and opencode, the CLI/PTY-supervised runtimes agent.Boot can actually
+// materialize a boot dir for. Everything else, including every plain HTTP
+// API provider (anthropic, openai, gemini-api, openrouter, ...) and every
+// CLI tool without a Layout yet (gemini, copilot, aider, junie), resolves
+// to unsupportedLayout and would fail Setup with a "not yet implemented"
+// error.
+//
+// Exposed so a caller deciding whether to even attempt a CLI-boot
+// recovery/replacement session can skip it cleanly for a provider that
+// structurally can never succeed, rather than dispatching, hitting
+// unsupportedLayout.Setup's error, and having that read as a genuine
+// per-session recovery failure (CW-20260815-0024: this was happening on
+// every HTTP-provider chat-stream error, with the recovery broker's own
+// breadcrumbs recording a guaranteed "permanent failure" outcome that was
+// never actually assessable — there was nothing to retry).
+func HasBootdirLayout(provider string) bool {
+	switch normalizeProviderName(provider) {
+	case "claude", "claude-code", "claudecode", "codex", "opencode":
+		return true
+	default:
+		return false
+	}
+}
+
 // composeBootdirParams projects the inputs Boot already has on hand into
 // a (Layout, SetupParams) pair. Pulled out so composition-root adapters
 // (recovery.BootDirOps via ResolveBootdirParams) can rebuild the same

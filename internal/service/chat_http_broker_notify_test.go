@@ -9,6 +9,18 @@ package service
 // HTTP-stream error class (timeout / transport / http-5xx)" — this file
 // covers all four cause families (timeout, transport, rate-budget, generic)
 // plus the nil-recovery degraded path.
+//
+// CW-20260815-0024: notifyRecoveryBrokerForHTTPStreamError now skips the
+// broker call entirely for a provider with no implemented bootdir Layout
+// (agent.HasBootdirLayout) — every plain HTTP API provider (anthropic,
+// openai, gemini-api, openrouter, ...) always failed a subsequent
+// DispatchRetry/agent.Boot attempt structurally, producing a guaranteed
+// "permanent failure" breadcrumb with zero recovery value. The
+// classification-mapping tests below (*Class, *MetaBagFields) deliberately
+// use a bootable provider name (claude / codex / opencode) so they keep
+// exercising the broker-call wiring itself — that's what they test, not
+// the new gate. TestPersistPartialAssistantAndNotifyBroker_HTTPOnlyProvider_SkipsBroker
+// covers the gate directly.
 
 import (
 	"context"
@@ -109,7 +121,7 @@ func TestPersistPartialAssistantAndNotifyBroker_TimeoutClass(t *testing.T) {
 		context.Background(),
 		"sess-timeout", "msg-timeout", "agent-1",
 		"partial content",
-		"anthropic",
+		"claude",
 		"claude-sonnet",
 		context.DeadlineExceeded,
 	)
@@ -142,8 +154,8 @@ func TestPersistPartialAssistantAndNotifyBroker_TimeoutClass(t *testing.T) {
 	if got := c.meta[httpStreamMetaKeySource]; got != httpStreamMetaSource {
 		t.Errorf("source: got %v, want %q", got, httpStreamMetaSource)
 	}
-	if got := c.meta[recovery.MetaKeyProvider]; got != "anthropic" {
-		t.Errorf("provider: got %v, want anthropic", got)
+	if got := c.meta[recovery.MetaKeyProvider]; got != "claude" {
+		t.Errorf("provider: got %v, want claude", got)
 	}
 	if got := c.meta[recovery.MetaKeyMode]; got != canonicalHTTPChatMode {
 		t.Errorf("mode: got %v, want %q (canonical agent.Mode string consumed by broker.parseMode)", got, canonicalHTTPChatMode)
@@ -172,7 +184,7 @@ func TestPersistPartialAssistantAndNotifyBroker_TransportClass(t *testing.T) {
 		context.Background(),
 		"sess-transport", "msg-transport", "agent-1",
 		"",
-		"openai",
+		"codex",
 		"gpt-4",
 		opErr,
 	)
@@ -215,7 +227,7 @@ func TestPersistPartialAssistantAndNotifyBroker_HTTP5xxClass(t *testing.T) {
 		context.Background(),
 		"sess-5xx", "msg-5xx", "agent-1",
 		"some prior delta content",
-		"anthropic",
+		"claude",
 		"claude-sonnet",
 		streamErr,
 	)
@@ -252,8 +264,8 @@ func TestPersistPartialAssistantAndNotifyBroker_RateBudgetClass(t *testing.T) {
 		context.Background(),
 		"sess-rate", "msg-rate", "agent-1",
 		"",
-		"openrouter",
-		"openrouter-mix",
+		"opencode",
+		"opencode-mix",
 		llmcontracts.ErrRequestExceedsRateBudget,
 	)
 	rec.waitFor(t, 2*time.Second)
@@ -299,6 +311,73 @@ func TestPersistPartialAssistantAndNotifyBroker_NoRecoveryDegradesCleanly(t *tes
 			)
 			if cs.callCount != before+1 {
 				t.Errorf("expected partial-assistant persist; got delta %d", cs.callCount-before)
+			}
+		})
+	}
+}
+
+// TestPersistPartialAssistantAndNotifyBroker_HTTPOnlyProvider_SkipsBroker
+// is the regression pin for CW-20260815-0024: a plain HTTP API provider
+// (no implemented bootdir Layout) must NOT reach the recovery broker at
+// all — DispatchRetry would always fail at agent.Boot's bootdir setup for
+// these, producing nothing but a guaranteed "permanent failure" breadcrumb.
+// A CLI/PTY-backed provider (bootdir implemented) must still be notified —
+// this is the mechanism's real, intended use case and must not regress.
+func TestPersistPartialAssistantAndNotifyBroker_HTTPOnlyProvider_SkipsBroker(t *testing.T) {
+	cases := []struct {
+		provider   string
+		wantNotify bool
+	}{
+		{"anthropic", false},
+		{"openai", false},
+		{"gemini-api", false},
+		{"openrouter", false},
+		{"gemini", false},  // CLI tool name, but no Layout implemented yet
+		{"claude", true},
+		{"pty-claude", true}, // CLI alias — normalizes to "claude"
+		{"codex", true},
+		{"opencode", true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.provider, func(t *testing.T) {
+			cs := &capturingStore{}
+			rec := newRecordingRecoveryHooks()
+			svc := &chatServiceImpl{
+				store: cs,
+				agentDeps: &runtimeagent.Dependencies{
+					Recovery: rec,
+				},
+			}
+
+			if tc.wantNotify {
+				rec.expect(1)
+			}
+			svc.persistPartialAssistantAndNotifyBroker(
+				context.Background(),
+				"sess-gate", "msg-gate", "agent-1",
+				"content",
+				tc.provider,
+				"some-profile",
+				errors.New("boom"),
+			)
+			if tc.wantNotify {
+				rec.waitFor(t, 2*time.Second)
+			}
+
+			// Partial-assistant persistence must happen either way — the
+			// gate only affects the broker notification, not the message
+			// row.
+			if cs.callCount != 1 {
+				t.Errorf("expected partial-assistant persist regardless of gate; got %d CreateMessage calls", cs.callCount)
+			}
+
+			got := len(rec.snapshot())
+			want := 0
+			if tc.wantNotify {
+				want = 1
+			}
+			if got != want {
+				t.Errorf("provider %q: broker notify calls = %d, want %d", tc.provider, got, want)
 			}
 		})
 	}
@@ -376,7 +455,7 @@ func TestPersistPartialAssistantAndNotifyBroker_StandardMetaBagFields(t *testing
 		context.Background(),
 		"sess-meta", "msg-meta", "agent-uuid-abcdef",
 		"partial content",
-		"anthropic",
+		"claude",
 		"claude-sonnet",
 		errors.New("read tcp: connection reset by peer"),
 	)

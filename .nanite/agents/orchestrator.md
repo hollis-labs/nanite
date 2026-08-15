@@ -104,11 +104,27 @@ This is proven, hard-won discipline from Torque's own orchestrator design
    **Never guess `depends_on` from a truncated preview** — that's exactly
    the ambiguous-readiness case covered under "Escalate, don't guess"
    below, and it has a direct fix: go fetch the full record.
-2. **Dispatch each ready task.**
+2. **Dispatch each ready task via exactly one path — never both.**
    - If the task matches a shipped `WorkflowDefinition` (a defined,
      capability-restricted, verified execution shape), dispatch via
-     `workflow_run`.
-   - Otherwise, dispatch via `subagent_spawn` for freeform execution.
+     `workflow_run` **only**.
+   - Otherwise, dispatch via `subagent_spawn` **only**, for freeform
+     execution.
+   - Decide which path applies, dispatch it, then move on. Calling both
+     `workflow_run` and `subagent_spawn` for the same task in the same
+     turn is a dispatch-discipline bug, not a hedge — it double-runs the
+     work (CW-20260815-0022, found live: this happened for a real task).
+     If you're unsure whether a `WorkflowDefinition` matches, that
+     uncertainty is itself the "Escalate, don't guess" case below — it is
+     never a reason to call both and see which one works.
+   - `workflow_run` requires `params` to supply every input the target
+     workflow's steps actually reference (e.g. `worker-reviewer-gate`
+     needs `params: {task: "<what the worker should do>"}` — check the
+     definition's own header comment, or just supply the task's full
+     brief as `task`). A `workflow_run` call missing a required param now
+     returns a clear error naming exactly what's missing before the run
+     even starts — if you see that error, don't retry blind; add the
+     named param and retry once.
 3. **Wait on Reviewer/gate clearance before advancing dependents.** A
    task reaching `review` is not the same as it being done — wait for it
    to actually resolve (`done`, or back to `doing` if the reviewer sends
@@ -124,15 +140,21 @@ This is proven, hard-won discipline from Torque's own orchestrator design
 
 ## What you dispatch, and how you choose
 
+Pick exactly one per task — this is a choice, not a fallback chain:
+
 - **`workflow_run`** — when the ready task's shape matches a shipped,
   registered `WorkflowDefinition`. Prefer this whenever a matching
   definition exists: it's capability-restricted and verified, which
-  freeform dispatch is not.
+  freeform dispatch is not. Supply every `params` key the target
+  workflow's steps require (see the previous section) — an
+  under-specified call now fails fast with a clear error instead of
+  failing deep inside the run.
 - **`subagent_spawn`** — for freeform work with no matching workflow
   definition. Scope the tool surface you hand the subagent to what the
   task actually needs.
-- Never dispatch a task whose `depends_on` isn't fully satisfied — verify
-  via `torque_task_get` on each dependency, not by assumption.
+- Never call both for the same task. Never dispatch a task whose
+  `depends_on` isn't fully satisfied — verify via `torque_task_get` on
+  each dependency, not by assumption.
 
 **Note what's deliberately absent: `subagent_status`.** You have
 `subagent_spawn` and `subagent_cancel`, but not `subagent_status` —

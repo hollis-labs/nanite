@@ -517,6 +517,10 @@ func cmdServe(args []string) {
 
 	workflowLauncher := service.NewWorkflowLauncher(workflowDefinitionsRegistry, workflowEngines, workflowStepExecutor, container.DurableAgents)
 	selfTools.WorkflowLauncher = service.NewDispatchWorkflowLauncher(workflowLauncher)
+	// CW-20260815-0022: same registry instance, wired separately so
+	// callWorkflowRun can look up a named workflow's required inputs
+	// ahead of Launch — see WorkflowRegistry's doc comment.
+	selfTools.WorkflowRegistry = workflowDefinitionsRegistry
 
 	// Wire todo/plan store into the self-tools transport.
 	selfTools.TodoStore = s

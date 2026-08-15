@@ -974,6 +974,105 @@ func TestReject_NotPending(t *testing.T) {
 	}
 }
 
+// storeAgentResolver adapts *store.Store to messaging.AgentResolver so
+// tests can wire a REAL messaging.Service instead of stubPoster —
+// necessary for TestSpawn_ReplyDelivery_ExistingRoleSlug_NoAutoRegisterCollision,
+// which needs to exercise messaging's actual auto-register/slug-collision
+// path, not just assert the shape of what subagent handed it.
+type storeAgentResolver struct{ st *store.Store }
+
+func (r storeAgentResolver) Get(_ context.Context, id string) (*store.AgentProfile, error) {
+	return r.st.GetAgent(id)
+}
+
+// TestSpawn_ReplyDelivery_ExistingRoleSlug_NoAutoRegisterCollision is the
+// regression pin for CW-20260815-0023: reply delivery used to pass the bare
+// role string (e.g. "worker") as FromAgentID with RegisterAs="external".
+// Since every dispatchable role already has an agent_profiles row (Spawn's
+// own GetAgentBySlug gate requires it) whose real ID is never equal to its
+// slug, messaging's auto-register path would try to INSERT a brand-new row
+// with Slug=role and collide with the UNIQUE constraint on the existing
+// row — on every single reply, not just repeated ones. Spawns two children
+// with the SAME role in sequence (mirrors the ticket's ask) against a REAL
+// messaging.Service (not a stub) so the actual DB constraint is exercised.
+func TestSpawn_ReplyDelivery_ExistingRoleSlug_NoAutoRegisterCollision(t *testing.T) {
+	db, st := newTestDB(t)
+
+	// newTestDB runs the full migration set, which already seeds the
+	// real internal "worker" profile at id="blt-worker-001" (migration
+	// 060) — the exact real-world shape this bug depends on: a role
+	// whose agent_profiles.id is never equal to its slug. No manual seed
+	// needed/possible here (it would collide with the migration's row).
+	if err := st.CreateAgent(&store.AgentProfile{
+		ID:     "parent-1",
+		Slug:   "parent-1",
+		Name:   "Parent",
+		Kind:   "internal",
+		Status: "active",
+	}); err != nil {
+		t.Fatalf("seed parent profile: %v", err)
+	}
+
+	msgStore := messaging.NewSQLiteStore(db)
+	messagingSvc := messaging.NewService(msgStore, db, storeAgentResolver{st: st}, st)
+
+	svc := NewService(db, EchoRunner{}, messagingSvc, nil, stubSettings{})
+	svc.SetProfileResolver(st)
+
+	for i := 0; i < 2; i++ {
+		id, err := svc.Spawn(context.Background(), SpawnRequest{
+			ParentSessionID: "sess-1",
+			ParentAgentID:   "parent-1",
+			Role:            "worker",
+			Prompt:          "do work",
+			Mode:            ModeSync,
+		})
+		if err != nil {
+			t.Fatalf("Spawn #%d: %v", i, err)
+		}
+		run, err := svc.Status(context.Background(), id)
+		if err != nil {
+			t.Fatalf("Status #%d: %v", i, err)
+		}
+		if run.Status != StatusCompleted {
+			t.Fatalf("run #%d Status = %q, want %q (Error=%q)", i, run.Status, StatusCompleted, run.Error)
+		}
+
+		// The run completing does NOT prove the parent learned about it —
+		// reply-delivery failures are only slog.Warn'd, never surfaced back
+		// onto run.Status (that's the actual failure mode this ticket is
+		// about: "parent may never learn a dispatched child completed").
+		// So assert directly on delivery: the parent session must have
+		// exactly i+1 reply messages by now.
+		msgs, err := messagingSvc.RecentForSession(context.Background(), "sess-1", 10)
+		if err != nil {
+			t.Fatalf("RecentForSession #%d: %v", i, err)
+		}
+		replies := 0
+		for _, m := range msgs {
+			if m.Kind == messaging.KindReply {
+				replies++
+			}
+		}
+		if replies != i+1 {
+			t.Fatalf("reply #%d: parent has %d reply message(s) in sess-1, want %d — reply delivery failed (likely the agent_profiles.slug constraint)", i, replies, i+1)
+		}
+	}
+
+	// No phantom row with id="worker" should ever have been created by a
+	// (would-be) failed auto-register attempt.
+	if _, err := st.GetAgent("worker"); err == nil {
+		t.Error(`a spurious agent_profiles row with id="worker" was created — auto-register should never have been attempted for an already-known role`)
+	}
+	real, err := st.GetAgent("blt-worker-001")
+	if err != nil {
+		t.Fatalf("real worker profile missing: %v", err)
+	}
+	if real.Slug != "worker" {
+		t.Errorf("real worker profile slug = %q, want %q", real.Slug, "worker")
+	}
+}
+
 // TestSpawn_ProviderOverride_PropagatesIntoRun verifies that
 // SpawnRequest.Provider is copied to the persisted Run row and visible
 // via Status. Empty string (no override) also round-trips cleanly.

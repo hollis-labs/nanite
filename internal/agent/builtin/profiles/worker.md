@@ -15,7 +15,9 @@ icon: tool
 # explicit failure-affordance, or the c160 fabrication chain reopens.
 # Migrations 058 + 060 are the in-place UPDATE for already-deployed
 # databases. When this body changes, re-flow into migration 060.
-model: claude-sonnet-4-20250514
+#
+# No `model:` here on purpose — blank inherits the system default via
+# ResolveProviderAndModel (CW-20260526-0003). See CW-20260815-0021.
 permissionMode: yolo
 mcpServers:
   - engine

@@ -2,10 +2,13 @@ package service
 
 import (
 	"context"
+	"fmt"
 	"testing"
 
 	llmtypes "github.com/hollis-labs/go-llm-types"
+	"github.com/hollis-labs/go-toolbroker/broker"
 	"github.com/hollis-labs/nanite/internal/chat"
+	"github.com/hollis-labs/nanite/internal/mcp"
 	"github.com/hollis-labs/nanite/internal/store"
 	"github.com/hollis-labs/nanite/internal/toolclient"
 )
@@ -74,6 +77,69 @@ func TestToolService_SelectForAgent_NoTools(t *testing.T) {
 	}
 	if sel.Progressive {
 		t.Error("progressive should be false with no tools")
+	}
+}
+
+// TestSelectForAgent_LateAlphabetAllowlistedToolSurvivesCap is the
+// regression test for CW-20260815-0011: the root cause of a live
+// Orchestrator durable-agent session being unable to find torque_task_get
+// despite it being declared in the profile's own tools allowlist.
+//
+// MaxSelectedTools used to be applied INSIDE broker selection (SelectTools),
+// before the schema-v2 tools allowlist (filterToolsByAllowlist) ever ran —
+// a correctly-declared, correctly-permitted tool sitting past index 15 in
+// the broker's raw (unranked) registration order was truncated out before
+// its own allowlist got a chance to keep it. This test registers more
+// tools than the cap, with the wanted tool registered LAST, declares an
+// allowlist naming ONLY that tool, and asserts it survives — proving the
+// cap now runs after allowlist filtering (FinalizeToolSelection), not
+// before it.
+func TestSelectForAgent_LateAlphabetAllowlistedToolSurvivesCap(t *testing.T) {
+	tc := toolclient.New(mcp.NewManager(), nil, toolclient.DefaultConfig())
+
+	const wanted = "torque_task_get"
+	fillerCount := toolclient.MaxSelectedTools + 5
+	tools := make([]broker.ToolDefinition, 0, fillerCount+1)
+	for i := 0; i < fillerCount; i++ {
+		tools = append(tools, broker.ToolDefinition{
+			Name:        fmt.Sprintf("torque_filler_%03d", i),
+			Server:      "torque",
+			Description: "filler tool",
+		})
+	}
+	// Registered LAST — past MaxSelectedTools in the broker's raw
+	// (unranked) registration order, exactly the failure mode described in
+	// the ticket ("alphabetically late among Torque's ~93-98 native
+	// tools").
+	tools = append(tools, broker.ToolDefinition{Name: wanted, Server: "torque", Description: "Fetch a task"})
+	tc.RegisterTools(tools)
+
+	reader := newStubReader()
+	reader.addAgent(&store.AgentProfile{
+		ID:     "orchestrator-1",
+		Slug:   "orchestrator",
+		Status: "active",
+		Tools:  fmt.Sprintf(`["%s"]`, wanted),
+	})
+
+	svc := NewToolService(tc, nil, reader)
+	sel, err := svc.SelectForAgent(context.Background(), "session-1", "orchestrator-1", "get the task status", "", 0)
+	if err != nil {
+		t.Fatalf("SelectForAgent: %v", err)
+	}
+
+	found := false
+	for _, tdef := range sel.Tools {
+		if tdef.Name == wanted {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("expected allowlisted tool %q to survive selection despite being registered past MaxSelectedTools; got tools: %v",
+			wanted, toolNames(sel.Tools))
+	}
+	if len(sel.Tools) != 1 {
+		t.Errorf("expected exactly 1 tool (the allowlist), got %d: %v", len(sel.Tools), toolNames(sel.Tools))
 	}
 }
 

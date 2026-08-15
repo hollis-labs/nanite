@@ -541,7 +541,7 @@ func TestSelectToolsAsProvider_BrokerToolsDefaultNonStrict(t *testing.T) {
 	}
 	tb.RegisterTools(brokerTools)
 
-	result, err := tb.SelectToolsAsProvider(context.Background(), "task backlog", nil, "", "", 0)
+	result, err := tb.SelectToolsAsProvider(context.Background(), "task backlog", nil, "", "")
 	if err != nil {
 		t.Fatalf("SelectToolsAsProvider error: %v", err)
 	}

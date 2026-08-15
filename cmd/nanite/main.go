@@ -954,7 +954,15 @@ func initMCP(s *store.Store, cfg *config.Config, appCfg *config.AppConfig) (*mcp
 	registerVantaServer(mcpManager, cfg)
 
 	loadPersistedMCPServers(s, mcpManager)
-	mcpManager.Broker = broker.NewLocalBroker(nil, broker.DefaultRules())
+	// Both the MCPManager's broker and the ToolClient's Config must share
+	// the same ruleset (CW-20260815-0011): constructing them from two
+	// disconnected calls — one to the go-toolbroker library's own
+	// DefaultRules() here, one to toolclient.New(..., nil) below (which
+	// silently defaulted to library rules too) — meant Nanite's real
+	// ruleset (toolclient.DefaultConfig / NaniteDefaultRules) was never
+	// actually in effect for either broker instance.
+	toolCfg := toolclient.DefaultConfig()
+	mcpManager.Broker = broker.NewLocalBroker(nil, toolCfg.Rules)
 	if diff, err := mcpManager.AutoDiscover(context.Background(), s); err != nil {
 		slog.Warn("MCP auto-discovery failed", "err", err)
 	} else {
@@ -964,7 +972,7 @@ func initMCP(s *store.Store, cfg *config.Config, appCfg *config.AppConfig) (*mcp
 			"removed", len(diff.Removed))
 	}
 
-	tb := toolclient.New(mcpManager, s, nil)
+	tb := toolclient.New(mcpManager, s, toolCfg)
 	if mcpManager.Broker != nil {
 		tb.LocalBroker = mcpManager.Broker
 		slog.Info("toolclient: sharing MCPManager broker", "tool_summaries", len(mcpManager.Broker.AllTools()))

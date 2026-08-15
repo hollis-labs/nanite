@@ -77,7 +77,8 @@ Decide which tools the model sees this turn, render their descriptions with the 
 ## Current gaps
 
 - **G-CACHE-RACE** — telemetry `cacheable_prefix_tokens` and rate-budget pre-flight estimate can mis-report under concurrent sessions because `prov` is a singleton and `SetCacheHints`/`EstimateCacheablePrefix` mutate shared state. Affects gating, not catastrophic. See [10](10-context-window-management.md) + [gaps.md](gaps.md#g-cache-race).
-- **G-PROGRESSIVE-ALLOW-LIST** — interaction between `tools_allow_list` and progressive seed builtins isn't fully traced; possible mismatch where a tool surfaces in `selection.Catalog` but is filtered out at `SelectForAgent`. Needs verification before testing progressive discovery edge cases.
+- ~~**G-PROGRESSIVE-ALLOW-LIST**~~ — **Closed 2026-08-15 (CW-20260815-0011).** The traced mismatch: `SelectToolsAsProvider` applied `MaxSelectedTools` (a hard 15-tool cap) internally, before `SelectForAgent`'s own `tools_allow_list` (schema-v2 `filterToolsByAllowlist`) filter ever ran downstream — so a tool could be present in `selection.Catalog`'s underlying candidate set yet get capped away before the allow-list check saw it, independent of whether the allow-list would have kept it. Fixed by moving the cap + token-budget prune into `ToolClient.FinalizeToolSelection`, called by `SelectForAgent` only after permission AND allow-list filtering are both done. See ADR-001's 2026-08-15 update for the full root cause.
+- **G-STALE-TOOL-SURFACE-DOC** — this doc's "Tool surface today" table and the `mcp__*` naming in `## Logic gates` predate ADR-002's tool-name internalization: Nanite tools are agent-facing under uniform names (no `mcp__server__` prefix) and now include `torque_*`, `mux_*`, `tether_*`, and the broader connected-MCP catalog beyond Vanta. Flagged during the CW-20260815-0011 investigation; a full pass to bring this doc current is tracked separately, not done as part of that ticket.
 
 ## Test surface
 

@@ -54,3 +54,49 @@ Adding new MCP servers increased the total tool count beyond what fits in LLM co
 - Errors are user-actionable with debug details accessible via modal
 - Transient rate limits are handled automatically with user visibility
 - The broker's `intent="*"` path is blocked, forcing all callers to provide meaningful intent
+
+## Update — 2026-08-15 (CW-20260815-0011)
+
+D1's "the broker rejects wildcard intents and falls back to a minimal set"
+claim was only half true in practice. `isWildcardIntent` did correctly
+reject a literal `""`/`"*"` intent, but it never covered the far more
+common real case: Nanite ran with the go-toolbroker library's own bundled
+example ruleset (`hadron_*`/`volon_*`/`cortex_*` patterns, a different
+app's tool names), which never matched anything in Nanite's real registry
+(`torque_*`, `dev_*`, `memory_*`, the unprefixed self-tool names, ...). A
+well-formed, non-wildcard extracted intent that simply matched zero real
+rules fell straight through to go-toolbroker's *own* fallback —
+`SelectResult.Rationale == "no rules matched intent; returning all tools"`
+— returning the entire unranked catalog. That result was then further cut
+by a hard `MaxSelectedTools = 15` slice applied *before* permission and
+allowlist filtering ever ran, so a correctly-declared, correctly-permitted
+tool sitting past index 15 in registration order (confirmed for
+`torque_task_get` among Torque's ~90+ tools) never survived to reach its
+own allowlist check. This was root-caused as the reason a live Orchestrator
+durable-agent session could not find tools it had explicitly declared.
+
+Fixed in CW-20260815-0011:
+
+- `internal/toolclient/config.go` — `DefaultConfig()` now uses
+  `NaniteDefaultRules()`, a real (if minimal) Nanite-specific ruleset with
+  an explicit `Intent: "*"` catch-all `include` rule, instead of the
+  library's example config. This also closes the "no rules matched" gap
+  structurally: a rule now always applies, so go-toolbroker's own
+  zero-match fallback is no longer how Nanite gets its base candidate set
+  (a defense-in-depth guard against that fallback remains in
+  `selectToolsUncapped` for the degenerate case of an empty ruleset).
+- `internal/toolclient/broker.go` — `MaxSelectedTools` capping and
+  token-budget pruning were moved out of the broker-selection step
+  (`SelectToolsAsProvider`) and into a new `FinalizeToolSelection`, called
+  by `service/tool.go SelectForAgent` only after BOTH the
+  `tool_permissions` check and the schema-v2 `tools` allowlist have run.
+- `cmd/nanite/main.go` — the MCPManager's shared broker and the
+  `ToolClient`'s `Config` are now constructed from the same
+  `toolclient.DefaultConfig()` call, closing a second gap where the two
+  were built independently and neither actually went through Nanite's own
+  config abstraction.
+
+See `CW-20260815-0011` for the full investigation and
+`internal/service/tool_test.go`'s
+`TestSelectForAgent_LateAlphabetAllowlistedToolSurvivesCap` for the
+regression test.

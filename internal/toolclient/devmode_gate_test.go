@@ -101,7 +101,7 @@ func TestSelectToolsAsProvider_DevToolsExcludedWhenDevModeOff(t *testing.T) {
 		{Name: "todo_create", Description: "Create a todo"},
 	})
 
-	res, err := tb.SelectToolsAsProvider(context.Background(), "general", nil, "", "agent-1", 0)
+	res, err := tb.SelectToolsAsProvider(context.Background(), "general", nil, "", "agent-1")
 	if err != nil {
 		t.Fatalf("SelectToolsAsProvider: %v", err)
 	}
@@ -131,7 +131,7 @@ func TestSelectToolsAsProvider_DevToolsIncludedWhenDevModeOn(t *testing.T) {
 		{Name: "dev_read", Description: "Read files"},
 	})
 
-	res, err := tb.SelectToolsAsProvider(context.Background(), "general", nil, "", "agent-1", 0)
+	res, err := tb.SelectToolsAsProvider(context.Background(), "general", nil, "", "agent-1")
 	if err != nil {
 		t.Fatalf("SelectToolsAsProvider: %v", err)
 	}
@@ -171,7 +171,7 @@ func TestSelectToolsAsProvider_MCPDevToolsExcludedWhenDevModeOff(t *testing.T) {
 		t.Fatalf("DiscoverTools: %v", err)
 	}
 
-	res, err := tb.SelectToolsAsProvider(context.Background(), "general", nil, "", "agent-1", 0)
+	res, err := tb.SelectToolsAsProvider(context.Background(), "general", nil, "", "agent-1")
 	if err != nil {
 		t.Fatalf("SelectToolsAsProvider: %v", err)
 	}
@@ -309,7 +309,7 @@ func TestDevModeFallClosed_NoStoreNoFunc(t *testing.T) {
 	})
 
 	// When neither DeveloperModeFunc nor Store is set, dev tools must be absent.
-	res, err := tb.SelectToolsAsProvider(context.Background(), "general", nil, "", "agent-1", 0)
+	res, err := tb.SelectToolsAsProvider(context.Background(), "general", nil, "", "agent-1")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}

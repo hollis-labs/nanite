@@ -17,8 +17,11 @@ tags:
 # roleTools seeds agent_known_tools for UI display only (FU-7a docs, see
 # internal/agent/parser.go RoleTools) — it has NO effect on the tools this
 # agent actually gets at runtime. `tools:` below is the real, enforced
-# allowlist (CW-20260815-0012); the two lists are kept identical so the UI
-# display matches reality.
+# allowlist (CW-20260815-0012); roleTools mirrors tools minus the universal
+# meta/escape-hatch tools (request_tools/tool_list/tool_describe,
+# fetch_tool_result/search_tool_result — CW-20260815-0020) that every
+# profile's tools: carries but that aren't curated, role-specific
+# capabilities worth surfacing in the UI's known-tools list.
 roleTools:
     - torque_task_create
     - torque_task_update
@@ -34,8 +37,6 @@ roleTools:
     - mux_message_send
     - scratchpad_write
     - scratchpad_read
-    - fetch_tool_result
-    - search_tool_result
 # tools: is the enforced allowlist (filterToolsByAllowlist / CheckPermission
 # via the implicit tool_permissions.allow_list it derives) — this is what
 # actually gates the runtime tool surface.

@@ -337,6 +337,34 @@ type ProfileResolver interface {
 	GetAgentBySlug(slug string) (*store.AgentProfile, error)
 }
 
+// replyFromAgentID resolves the agent identity a subagent reply should be
+// sent from (CW-20260815-0023). run.Role (e.g. "worker") is a role name,
+// not the harness's agent-address format (a DB UUID or "file-<slug>") —
+// passing it straight through as FromAgentID with RegisterAs="external"
+// made messaging.Service.maybeAutoRegister try to INSERT a brand-new
+// agent_profiles row with Slug=role. That collides with the UNIQUE
+// constraint on agent_profiles.slug whenever a row already exists for that
+// role — which it always does, since Spawn's GetAgentBySlug(req.Role) gate
+// is exactly what validated the role exists in the first place; that row's
+// real ID (e.g. "blt-worker-001") is never the same string as its slug
+// ("worker"), so messaging's resolver lookup on the bare role misses and
+// falls through to the doomed insert.
+//
+// Resolving to the real row's ID here means messaging's resolver finds it
+// immediately and never attempts to auto-register — registerAs is empty
+// because it's now irrelevant (auto-register is skipped entirely). Falls
+// back to the bare role + "external" (the prior behavior) when no profile
+// resolver is wired, which only happens in tests that don't exercise this
+// path.
+func (svc *Service) replyFromAgentID(role string) (id string, registerAs string) {
+	if svc.profiles != nil {
+		if profile, err := svc.profiles.GetAgentBySlug(role); err == nil && profile.ID != "" {
+			return profile.ID, ""
+		}
+	}
+	return role, "external"
+}
+
 // Service coordinates the spawn → run → complete → reply flow.
 // Safe for concurrent use.
 type Service struct {
@@ -932,16 +960,17 @@ func (svc *Service) Reject(ctx context.Context, runID, reason string) error {
 		if reason != "" {
 			body = body + ": " + reason
 		}
+		fromAgentID, registerAs := svc.replyFromAgentID(run.Role)
 		_, _ = svc.poster.SendMessage(ctx, messaging.SendInput{
 			FromSessionID: run.ParentSessionID,
-			FromAgentID:   run.Role,
+			FromAgentID:   fromAgentID,
 			ToSessionID:   run.ParentSessionID,
 			ToAgentID:     run.ParentAgentID,
 			Channel:       messaging.ChannelChat,
 			Kind:          messaging.KindReply,
 			Body:          body,
 			Type:          messaging.TypeMessage,
-			RegisterAs:    "external",
+			RegisterAs:    registerAs,
 		})
 	}
 	return nil
@@ -1242,9 +1271,14 @@ func (svc *Service) execute(ctx context.Context, run *Run, parentAgentID string)
 	if resultPayload == "" {
 		resultPayload = "{}"
 	}
+	// CW-20260815-0023: resolve run.Role to its real agent_profiles.ID
+	// rather than passing the bare role string — see replyFromAgentID's
+	// doc comment for why that collided with the agent_profiles.slug
+	// UNIQUE constraint on every reply.
+	fromAgentID, registerAs := svc.replyFromAgentID(run.Role)
 	if _, err := svc.poster.SendMessage(finalCtx, messaging.SendInput{
 		FromSessionID: run.ParentSessionID,
-		FromAgentID:   run.Role, // the subagent is the sender
+		FromAgentID:   fromAgentID, // the subagent is the sender
 		ToSessionID:   run.ParentSessionID,
 		ToAgentID:     parentAgentID,
 		Channel:       replyChannel,
@@ -1252,11 +1286,7 @@ func (svc *Service) execute(ctx context.Context, run *Run, parentAgentID string)
 		Body:          summary,
 		PayloadJSON:   resultPayload,
 		Type:          messaging.TypeMessage,
-		// The subagent is likely newly-seen from messaging's
-		// perspective — stamp it as a CLI / internal auto-register
-		// candidate. Clean-break: we don't add a new provenance
-		// kind, 'external' is fine.
-		RegisterAs: "external",
+		RegisterAs:    registerAs,
 	}); err != nil {
 		slog.Warn("subagent: reply delivery", "err", err, "run_id", run.ID)
 	}

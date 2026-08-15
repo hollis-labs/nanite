@@ -450,6 +450,9 @@ func (st *SelfToolsTransport) CallTool(ctx context.Context, name string, args ma
 		return st.callHandoffStash(ctx, args)
 	case "handoff_pointers_expand":
 		return st.callHandoffPointersExpand(ctx, args)
+	// --- Self-discovery (A2A, CW-20260519-0069) ---
+	case "whoami":
+		return st.executeWhoami(ctx, args)
 	case "scratchpad_write", "scratchpad_read", "scratchpad_clear":
 		// scratchpad_* are per-turn tools backed by the in-process chat
 		// loop's loopState. They are dispatched by the chat-loop executor,

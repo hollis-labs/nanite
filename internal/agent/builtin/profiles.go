@@ -15,6 +15,9 @@
 // that downstream consumers (UI, broker, future Wave-2 cleanup migration)
 // can identify the file-sourced rows. The legacy "builtin" source value is
 // no longer used by this package.
+//
+// Model: leave the `model:` frontmatter field out of new profiles. See the
+// doc comment on agent.Definition.Model for why (CW-20260815-0021).
 package builtin
 
 import (

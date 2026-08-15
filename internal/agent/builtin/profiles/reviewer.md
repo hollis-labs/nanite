@@ -50,7 +50,9 @@ icon: shield-check
 #
 # PROMPT-SYNC: when this body changes, re-flow into migration
 # 060_internal_profiles_file_sot.sql.
-model: claude-sonnet-4-20250514
+#
+# No `model:` here on purpose — blank inherits the system default via
+# ResolveProviderAndModel (CW-20260526-0003). See CW-20260815-0021.
 permissionMode: yolo
 toolPermissions:
   allow_list:

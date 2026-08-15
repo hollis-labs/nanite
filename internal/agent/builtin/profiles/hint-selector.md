@@ -13,7 +13,9 @@ icon: zap
 # Tool surface: none (text-in / text-out only).
 #
 # PROMPT-SYNC: when this body changes, re-flow into migration 060.
-model: claude-haiku-4-20250514
+#
+# No `model:` here on purpose — blank inherits the system default via
+# ResolveProviderAndModel (CW-20260526-0003). See CW-20260815-0021.
 effort: low
 toolPermissions:
   allow_list: []

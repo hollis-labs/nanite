@@ -61,6 +61,7 @@ func AutoIngestAgents(st *store.Store, defs []*agentpkg.Definition, knownTools m
 	considered := 0 // defs actually attempted, excluding nil/empty-slug skips
 	var failures []string
 	var unknownToolRefs []string
+	var hardcodedModels []string
 	for _, def := range defs {
 		if def == nil || def.Slug == "" {
 			continue
@@ -79,6 +80,11 @@ func AutoIngestAgents(st *store.Store, defs []*agentpkg.Definition, knownTools m
 				unknownToolRefs = append(unknownToolRefs, fmt.Sprintf("%s: %v", def.Slug, bad))
 			}
 		}
+		if def.Model != "" {
+			slog.Warn("service: agent profile hardcodes a model, opting out of the system default (ResolveProviderAndModel, CW-20260526-0003) — this profile will silently break the day this model ID is retired (see CW-20260815-0021); leave `model:` blank unless there is a deliberate, documented reason to pin it",
+				"slug", def.Slug, "hardcoded_model", def.Model)
+			hardcodedModels = append(hardcodedModels, fmt.Sprintf("%s: %s", def.Slug, def.Model))
+		}
 	}
 	if len(failures) > 0 {
 		slog.Error("service: agent auto-ingest failed for one or more files — these agents are file-discoverable but have no working agent_profiles row until fixed and the service is restarted",
@@ -87,6 +93,10 @@ func AutoIngestAgents(st *store.Store, defs []*agentpkg.Definition, knownTools m
 	if len(unknownToolRefs) > 0 {
 		slog.Error("service: one or more agent profiles declare tool names that are not in the registered tool catalog — check for typos or renamed tools",
 			"profiles_affected", len(unknownToolRefs), "details", unknownToolRefs)
+	}
+	if len(hardcodedModels) > 0 {
+		slog.Warn("service: one or more agent profiles hardcode a model ID instead of inheriting the system default — each one is a future instance of CW-20260815-0021 waiting for its pinned model to be retired",
+			"profiles_affected", len(hardcodedModels), "details", hardcodedModels)
 	}
 	return count
 }

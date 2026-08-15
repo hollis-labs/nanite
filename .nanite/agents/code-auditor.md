@@ -4,7 +4,8 @@ name: Code Auditor
 slug: code-auditor
 description: Read-only audit agent — inspects a focused area of code against a stated rubric and reports findings as evidence-grounded observations
 icon: clipboard-check
-model: claude-sonnet-4-20250514
+# No `model:` here on purpose — blank inherits the system default via
+# ResolveProviderAndModel (CW-20260526-0003). See CW-20260815-0021.
 permissionMode: yolo
 toolPermissions:
     allow_list:

@@ -318,6 +318,55 @@ func TestAutoIngestAgents_UnknownToolNameIsLoud(t *testing.T) {
 	}
 }
 
+// TestAutoIngestAgents_HardcodedModelIsLoud is the regression pin for
+// CW-20260815-0021: a profile that hardcodes `model:` instead of leaving it
+// blank (to inherit the system default via ResolveProviderAndModel) must
+// still ingest normally, but produce a loud, discoverable warning naming the
+// offending slug and model — the guard against the bug recurring silently.
+func TestAutoIngestAgents_HardcodedModelIsLoud(t *testing.T) {
+	st := newIngestTestStore(t)
+
+	var logBuf bytes.Buffer
+	prevLogger := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(&logBuf, &slog.HandlerOptions{Level: slog.LevelWarn})))
+	t.Cleanup(func() { slog.SetDefault(prevLogger) })
+
+	defs := []*agentpkg.Definition{
+		{
+			Slug:         "pinned-agent",
+			Name:         "Pinned Agent",
+			SystemPrompt: "x",
+			Source:       "project",
+			Model:        "claude-sonnet-4-20250514",
+		},
+		{
+			Slug:         "default-agent",
+			Name:         "Default Agent",
+			SystemPrompt: "x",
+			Source:       "project",
+		},
+	}
+
+	n := AutoIngestAgents(st, defs, nil)
+	if n != 2 {
+		t.Fatalf("expected both profiles to ingest despite the hardcoded model, got n=%d", n)
+	}
+
+	logOutput := logBuf.String()
+	if !strings.Contains(logOutput, "level=WARN") {
+		t.Errorf("expected a WARN-level log for the hardcoded model, got: %s", logOutput)
+	}
+	if !strings.Contains(logOutput, "pinned-agent") {
+		t.Errorf("expected the log to name the affected slug, got: %s", logOutput)
+	}
+	if !strings.Contains(logOutput, "claude-sonnet-4-20250514") {
+		t.Errorf("expected the log to name the hardcoded model, got: %s", logOutput)
+	}
+	if strings.Contains(logOutput, "default-agent") {
+		t.Errorf("default-agent leaves model blank and must not be flagged, got: %s", logOutput)
+	}
+}
+
 // TestAutoIngestAgents_NilKnownToolsSkipsValidation proves nil means "skip
 // the check" — not "nothing is known" (which would flag every declared
 // tool as unknown). Existing callers/tests that don't wire a tool catalog

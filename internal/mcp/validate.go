@@ -176,13 +176,14 @@ func ValidateToolMeta(tier TrustTier, tool Tool) []ValidationError {
 }
 
 // ValidateToolSet runs cross-tool discovery-time checks: tool-count
-// threshold and duplicate-name detection within the same server. Returns
-// one ValidationError per offending tool.
+// threshold and duplicate-name detection within the same server.
 //
-// Errors with Field=WarnToolCountHigh are advisory only (CW-20260815-0019)
-// — the server's advertised tool count crosses the tier threshold, but
-// nothing is dropped as a result; Field=WarnDuplicateToolName flags every
-// duplicate after the first.
+// A high tool count produces at most one ValidationError for the whole
+// set (Field=WarnToolCountHigh, Value empty) — advisory only
+// (CW-20260815-0019): the server's advertised tool count crosses the tier
+// threshold, but nothing is dropped as a result. Duplicate names produce
+// one ValidationError per offending tool (Field=WarnDuplicateToolName),
+// one for every duplicate after the first occurrence of that name.
 func ValidateToolSet(tier TrustTier, tools []Tool) []ValidationError {
 	limits := LimitsFor(tier)
 	var errs []ValidationError

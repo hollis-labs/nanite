@@ -2,6 +2,7 @@ package tool
 
 import (
 	"database/sql"
+	"encoding/json"
 	"strings"
 	"testing"
 	"unicode/utf8"
@@ -332,5 +333,188 @@ func TestResultCache_TruncatesAtLineBoundary(t *testing.T) {
 	// must be consistent with our item alphabet.
 	if !utf8.ValidString(preview) {
 		t.Error("preview is not valid UTF-8")
+	}
+}
+
+// torqueTaskRecordFixture mirrors the field order of Torque's real
+// TaskRecord wire shape (a Go struct — encoding/json preserves declared
+// field order, unlike a map). Description sits well before DependsOn, so a
+// realistic task description reliably pushes DependsOn past the
+// soft-truncation cutoff — this is the exact shape that produced the
+// CW-20260815-0020 incident (a live Orchestrator got truncated
+// torque_task_get results with depends_on cut off, and had no
+// fetch_tool_result/search_tool_result grant to recover it).
+type torqueTaskRecordFixture struct {
+	ID          string            `json:"ID"`
+	Title       string            `json:"Title"`
+	Description string            `json:"Description"`
+	Status      string            `json:"Status"`
+	Priority    int               `json:"Priority"`
+	Manual      bool              `json:"Manual"`
+	Executor    string            `json:"Executor"`
+	Tools       nullStringFixture `json:"Tools"`
+	Permissions nullStringFixture `json:"Permissions"`
+	Environment nullStringFixture `json:"Environment"`
+	MaxRetries  int               `json:"MaxRetries"`
+	OnDone      string            `json:"OnDone"`
+	OnFail      string            `json:"OnFail"`
+	OnReview    string            `json:"OnReview"`
+	OnDoneMerge string            `json:"OnDoneMerge"`
+	DependsOn   nullStringFixture `json:"DependsOn"`
+	ProjectID   nullStringFixture `json:"ProjectID"`
+	CreatedAt   string            `json:"CreatedAt"`
+	UpdatedAt   string            `json:"UpdatedAt"`
+	Kind        string            `json:"Kind"`
+	Trust       string            `json:"Trust"`
+}
+
+type nullStringFixture struct {
+	String string `json:"String"`
+	Valid  bool   `json:"Valid"`
+}
+
+// CW-20260814-0015's real description text (one of the five original
+// CW-20260815-0020 incident tasks), fetched live via torque_task_get during
+// that investigation. Kept verbatim-in-spirit so the fixture's byte size is
+// representative of this workspace's actual task-authoring style (full
+// What/How-to-fix/Non-goals/Boot-prompt structure), not an arbitrary
+// strings.Repeat filler.
+const torqueTaskDescriptionFixture = `## What
+The core of A2A protocol adoption (CW-20260813-0002). Implements the design doc's "Task lifecycle and routing" and "Persistence" sections — this is the piece that makes the "A2A is a protocol adapter, not a new execution substrate" principle real: every Task is fulfilled by exactly one of Nanite's two existing execution paths, never a third parallel mechanism.
+
+## How to fix
+- New a2a_tasks table (+ migration): task ID, target kind (workflow | instance), target reference, caller-supplied message, durable_agent_instance_id (set once routing resolves), derived TaskState (cached, refreshed on read and on state-change triggers), push notification config (nullable, populated by the later push-notifications ticket), created/updated timestamps. This table is bookkeeping and translation only — it points at workflow_runs/durable_agent_instances, it does not duplicate their state.
+- TaskManager service implementation in internal/service (plain functions/methods, thin-wrapper-over-service-layer pattern, per internal/a2a's pure wire types from CW-20260814-0014). Two routing outcomes on submission:
+  - Target = workflow skill: call the existing WorkflowLauncher.Launch (Agent Workflows pillar) to start a new template-class durable-agent instance. Store the resulting durable_agent_instance_id.
+  - Target = existing instance address: call DurableWake.Wake() with Reason: DurableAgentWakeExternalMessage (making this enum value real for the first time) and WakePayload.Prompt set from the Task's message. This requires CW-20260814-0013 (Prompt injection fix) to have landed.
+- TaskState must be derived from the real execution status being tracked, never independently maintained.
+- Non-workflow-backed tasks get the coarser completion semantics the design doc specifies.
+
+## Non-goals
+- No input-required state — that's CW-20260814-0016, which depends on this one.
+- No JSON-RPC/HTTP transport — that's CW-20260814-0017, which depends on this one.
+- No push notification delivery — separate ticket, depends on this one and the transport ticket.
+
+## Boot prompt
+You're picking up the core routing ticket for A2A protocol adoption, in the Nanite repo. Before starting, confirm CW-20260814-0013 and CW-20260814-0014 are actually landed. Fetch this task's full description via torque_task_get for complete context, then read the design docs in full. Downstream tickets all depend on this one landing.`
+
+// TestResultCache_TruncatedTorqueTaskRecovery is the permanent regression
+// test for CW-20260815-0020. It replaces a one-time reproduction test that
+// was written, run, and deleted during that investigation — this is the
+// same approach (a real-shaped fixture, production thresholds) kept in the
+// suite so a future change to Torque's TaskRecord field order or to
+// DefaultSoftTruncBytes can't silently reintroduce the bug with nothing to
+// catch it.
+//
+// Uses production defaults throughout (DefaultSoftTruncBytes,
+// DefaultHardCapBytes, DefaultCacheTTLSeconds) — not a lowered test
+// threshold — so the test fails if those defaults ever change in a way
+// that stops a realistic task record from truncating.
+func TestResultCache_TruncatedTorqueTaskRecovery(t *testing.T) {
+	db, err := sql.Open("sqlite", ":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	_, err = db.Exec(`CREATE TABLE tool_result_cache (
+		id TEXT PRIMARY KEY,
+		session_id TEXT NOT NULL,
+		tool_name TEXT NOT NULL,
+		tool_call_id TEXT NOT NULL,
+		created_at TEXT NOT NULL,
+		expires_at TEXT NOT NULL,
+		byte_size INTEGER NOT NULL,
+		was_truncated INTEGER NOT NULL DEFAULT 0,
+		body TEXT
+	)`)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	cache := NewResultCache(db, ResultCacheConfig{
+		SoftTruncBytes:  DefaultSoftTruncBytes,
+		HardCapBytes:    DefaultHardCapBytes,
+		CacheTTLSeconds: DefaultCacheTTLSeconds,
+	})
+
+	record := torqueTaskRecordFixture{
+		ID:          "CW-20260814-0015",
+		Title:       "A2A: Task persistence + TaskManager — route Task submissions to Workflow launch or durable-agent wake",
+		Description: torqueTaskDescriptionFixture,
+		Status:      "todo",
+		Priority:    3,
+		Manual:      true,
+		Executor:    "cli",
+		MaxRetries:  3,
+		OnDone:      "review",
+		OnFail:      "retry",
+		OnReview:    "pause",
+		OnDoneMerge: "none",
+		DependsOn:   nullStringFixture{String: `["CW-20260814-0013","CW-20260814-0014"]`, Valid: true},
+		ProjectID:   nullStringFixture{String: "PRJ-20260417-0002", Valid: true},
+		CreatedAt:   "2026-08-14T23:31:34Z",
+		UpdatedAt:   "2026-08-14T23:31:34Z",
+		Kind:        "agent",
+		Trust:       "normal",
+	}
+	body, err := json.MarshalIndent(record, "", "  ")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(body) <= DefaultSoftTruncBytes {
+		t.Fatalf("fixture body is %d bytes, must exceed DefaultSoftTruncBytes (%d) for this test to be meaningful — the fixture no longer reproduces a realistic truncating call", len(body), DefaultSoftTruncBytes)
+	}
+
+	visible, cached, err := cache.StoreResult("sess-torque", "call-1", "torque_task_get", string(body))
+	if err != nil {
+		t.Fatalf("StoreResult: %v", err)
+	}
+	if !cached {
+		t.Fatal("expected the record to be cached (exceeds soft threshold)")
+	}
+	if !strings.Contains(visible, "tool_result://") {
+		t.Fatal("expected tool_result:// pointer footer in visible output")
+	}
+	if strings.Contains(visible, `"DependsOn"`) {
+		t.Fatal("DependsOn must NOT be visible in the truncated preview — if this fails, the fixture (or the field order it models) no longer reproduces the incident condition")
+	}
+
+	// Extract the ULID the same way an agent reads it off the footer.
+	idx := strings.Index(visible, "tool_result://")
+	rest := visible[idx+len("tool_result://"):]
+	end := strings.IndexAny(rest, " \n")
+	id := rest[:end]
+
+	// fetch_tool_result's underlying call.
+	full, totalSize, err := cache.Fetch("sess-torque", id, 0, 0)
+	if err != nil {
+		t.Fatalf("Fetch (fetch_tool_result): %v", err)
+	}
+	if totalSize != len(body) {
+		t.Fatalf("Fetch totalSize=%d, want %d", totalSize, len(body))
+	}
+	if !strings.Contains(full, `"DependsOn"`) {
+		t.Fatal("fetch_tool_result did not recover DependsOn — regression of the CW-20260815-0020 fix")
+	}
+	if !strings.Contains(full, "CW-20260814-0013") || !strings.Contains(full, "CW-20260814-0014") {
+		t.Fatal("fetch_tool_result recovered the DependsOn key but not its dependency IDs")
+	}
+
+	// search_tool_result's underlying call.
+	matches, err := cache.Search("sess-torque", id, "DependsOn", 5)
+	if err != nil {
+		t.Fatalf("Search (search_tool_result): %v", err)
+	}
+	if len(matches) == 0 {
+		t.Fatal("search_tool_result found no matches for DependsOn — regression of the CW-20260815-0020 fix")
+	}
+	found := false
+	for _, m := range matches {
+		if strings.Contains(m.Context, "CW-20260814-0013") {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatal("search_tool_result match context did not include the dependency ID")
 	}
 }

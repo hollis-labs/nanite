@@ -16,11 +16,17 @@ import (
 // wedged process cannot hang the reboot request indefinitely.
 const stopRebootGrace = 15 * time.Second
 
-// ErrSessionBusy is returned by RebootSessionAgent when a turn is still
-// streaming for the session. Rebooting under an in-flight turn would yank
-// the runtime out from under an active streamLoop; the caller should retry
-// once the turn settles, or cancel it first via the chat cancel endpoint.
-var ErrSessionBusy = errors.New("session has an in-flight turn; reboot rejected")
+// ErrSessionBusy is returned whenever an operation refuses to run while a
+// generateResponse turn is already in flight for the session, rather than
+// taking over or interrupting it:
+//   - RebootSessionAgent — rebooting under an in-flight turn would yank the
+//     runtime out from under an active streamLoop; the caller should retry
+//     once the turn settles, or cancel it first via the chat cancel endpoint.
+//   - TriggerHarnessTurn (CW-20260520-0001) — a harness-initiated turn must
+//     never silently cancel a real user turn; on ErrSessionBusy the caller
+//     just skips, relying on the turn-start injection (CW-20260512-0019) to
+//     deliver whatever it was reacting to once a turn does run.
+var ErrSessionBusy = errors.New("session has an in-flight turn")
 
 // RebootResult reports the outcome of a RebootSessionAgent call.
 type RebootResult struct {

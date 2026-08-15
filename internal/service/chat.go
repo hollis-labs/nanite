@@ -558,6 +558,29 @@ func (s *chatServiceImpl) deregisterGeneration(sessionID, msgID string) {
 	}
 }
 
+// registerGenerationIfIdle atomically registers a new in-flight generation
+// for sessionID ONLY if none is already registered — unlike
+// registerGeneration, it never takes over an existing slot. Returns false
+// (and registers nothing) if the session is already busy.
+//
+// This is the reject-if-busy counterpart to registerGeneration's
+// takeover semantics, used by TriggerHarnessTurn (CW-20260520-0001) to
+// close a TOCTOU race: a caller that first checks IsGenerating() and then
+// separately calls launchGeneration has a window between the two calls
+// where a real user turn can start — launchGeneration's takeover would
+// then silently cancel that user's in-flight generation. Folding the
+// check and the registration into one mutex-held step removes the
+// window entirely (PR #247 review).
+func (s *chatServiceImpl) registerGenerationIfIdle(sessionID, msgID string, cancel context.CancelFunc) bool {
+	s.activeGenMu.Lock()
+	defer s.activeGenMu.Unlock()
+	if cur := s.activeGen[sessionID]; cur != nil {
+		return false
+	}
+	s.activeGen[sessionID] = &inFlightGen{msgID: msgID, cancel: cancel}
+	return true
+}
+
 // CancelActiveGeneration cancels the in-flight generateResponse goroutine
 // registered for sessionID, if any. Returns true when a cancel was
 // dispatched (the goroutine will observe ctx.Err() on its next loop
@@ -609,6 +632,14 @@ func (s *chatServiceImpl) launchGeneration(name, sessionID, assistantMsgID, user
 		prev()
 	}
 
+	s.runGeneration(name, sessionID, assistantMsgID, userContent, ch, callerType, genCtx, cancel)
+}
+
+// runGeneration is the shared goroutine body launchGeneration (takeover)
+// and TriggerHarnessTurn's reject-if-busy path both dispatch through —
+// registration in the activeGen map has already happened by the time this
+// is called; this only owns running the turn and cleaning up afterward.
+func (s *chatServiceImpl) runGeneration(name, sessionID, assistantMsgID, userContent string, ch chan chat.StreamEvent, callerType dispatcher.CallerType, genCtx context.Context, cancel context.CancelFunc) {
 	s.lifecycle.Go(name, func(bgCtx context.Context) {
 		// Bridge lifecycle shutdown (bgCtx) into our takeover-ctx so
 		// generateResponse still aborts on process Shutdown.
@@ -840,6 +871,16 @@ func (s *chatServiceImpl) IsGenerating(sessionID string) bool {
 // rather than a modification of it — SendAgentMessage's signature has its
 // own callers (internal/api/messages.go) this must not disturb.
 //
+// Reject-if-busy, not takeover: the caller (subagentCompletionReactor)
+// already checks IsGenerating() before calling this, but that check and
+// this call are not atomic — a real user turn can start in between. Using
+// launchGeneration's takeover semantics here would let that race silently
+// cancel the user's in-flight generation (PR #247 review). Registering via
+// registerGenerationIfIdle BEFORE creating the message/stream closes the
+// window: on a losing race this returns ErrSessionBusy and creates
+// nothing, leaving the turn-start injection (CW-20260512-0019) as the
+// delivery guarantee once the user's turn — or the next one — runs.
+//
 // The created message and the CallerBackground caller-type stamp (rather
 // than CallerChat) are how a harness-triggered turn identifies itself
 // downstream — request_build telemetry, the idle-timeout window
@@ -851,6 +892,13 @@ func (s *chatServiceImpl) IsGenerating(sessionID string) bool {
 // row's Metadata JSON is prose-only ("source":"harness" is enough there
 // to keep it out of user-authored-message heuristics).
 func (s *chatServiceImpl) TriggerHarnessTurn(ctx context.Context, sessionID, reason, runID string) (string, error) {
+	assistantMsgID := uuid.New().String()
+	genCtx, cancel := context.WithCancel(context.Background())
+	if !s.registerGenerationIfIdle(sessionID, assistantMsgID, cancel) {
+		cancel()
+		return "", ErrSessionBusy
+	}
+
 	content := "A dispatched subagent has completed. Review the result below and summarize it for the user, noting any concerns."
 	msg := &store.Message{
 		ID:        uuid.New().String(),
@@ -860,13 +908,14 @@ func (s *chatServiceImpl) TriggerHarnessTurn(ctx context.Context, sessionID, rea
 		Metadata:  fmt.Sprintf(`{"source":"harness","triggered_by":%q,"run_id":%q}`, reason, runID),
 	}
 	if err := s.store.CreateMessage(msg); err != nil {
+		s.deregisterGeneration(sessionID, assistantMsgID)
+		cancel()
 		return "", fmt.Errorf("create harness-triggered message: %w", err)
 	}
 
-	assistantMsgID := uuid.New().String()
 	ch := s.streams.CreateStream(assistantMsgID, sessionID)
 
-	s.launchGeneration("triggerHarnessTurn.generateResponse", sessionID, assistantMsgID, content, ch, dispatcher.CallerBackground)
+	s.runGeneration("triggerHarnessTurn.generateResponse", sessionID, assistantMsgID, content, ch, dispatcher.CallerBackground, genCtx, cancel)
 
 	if s.sessionEventWriter != nil {
 		payload := fmt.Sprintf(`{"triggered_by":%q,"run_id":%q,"assistant_msg_id":%q}`, reason, runID, assistantMsgID)

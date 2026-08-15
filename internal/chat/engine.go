@@ -63,6 +63,22 @@ const (
 	SubagentPolicyBatch         = "batch"
 )
 
+// IsValidSubagentCompletionPolicy reports whether s is a recognized
+// subagent-completion policy value. Resolution call sites (session
+// metadata override, agent-profile constraints) must validate against
+// this before trusting an arbitrary string — an unrecognized value (typo,
+// stale config) should fall through to the next tier rather than silently
+// behave as render_and_wait with no signal that auto_summarize was
+// intended but never took effect (PR #247 review).
+func IsValidSubagentCompletionPolicy(s string) bool {
+	switch s {
+	case SubagentPolicyRenderAndWait, SubagentPolicyAutoSummarize, SubagentPolicyBatch:
+		return true
+	default:
+		return false
+	}
+}
+
 // ParseAgentConstraints parses the constraints JSON from an agent profile.
 // Returns zero-value struct on empty/invalid input (no constraints enforced).
 func ParseAgentConstraints(raw string) AgentConstraints {

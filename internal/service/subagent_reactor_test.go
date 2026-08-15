@@ -81,6 +81,44 @@ func TestResolveSubagentCompletionPolicy_GlobalDefaultWhenUnset(t *testing.T) {
 	}
 }
 
+// TestResolveSubagentCompletionPolicy_UnrecognizedSessionOverride_FallsThrough
+// is the regression test for PR #247's review comment: a typo'd or stale
+// session-level policy value must not be trusted verbatim — it should be
+// ignored (with a warning) and resolution should fall through to the
+// agent-profile default rather than silently disabling auto_summarize.
+func TestResolveSubagentCompletionPolicy_UnrecognizedSessionOverride_FallsThrough(t *testing.T) {
+	svc := &chatServiceImpl{
+		sessions: &stubSessionService{sessions: map[string]*store.Session{
+			"sess-1": {ID: "sess-1", Metadata: `{"subagent_completion_policy":"auto-summarise"}`}, // typo/variant, not a real value
+		}},
+		agents: &stubAgentService{agent: &store.AgentProfile{
+			Constraints: `{"subagent_completion_policy":"auto_summarize"}`,
+		}},
+	}
+	got := svc.resolveSubagentCompletionPolicy(context.Background(), "sess-1")
+	if got != chat.SubagentPolicyAutoSummarize {
+		t.Errorf("got %q, want fall-through to the valid agent-profile default %q", got, chat.SubagentPolicyAutoSummarize)
+	}
+}
+
+// TestResolveSubagentCompletionPolicy_UnrecognizedAtEveryTier_FallsBackToGlobalDefault
+// covers the case where every tier is unrecognized garbage — resolution
+// must land on the safe global default, never return the garbage string.
+func TestResolveSubagentCompletionPolicy_UnrecognizedAtEveryTier_FallsBackToGlobalDefault(t *testing.T) {
+	svc := &chatServiceImpl{
+		sessions: &stubSessionService{sessions: map[string]*store.Session{
+			"sess-1": {ID: "sess-1", Metadata: `{"subagent_completion_policy":"bogus"}`},
+		}},
+		agents: &stubAgentService{agent: &store.AgentProfile{
+			Constraints: `{"subagent_completion_policy":"also-bogus"}`,
+		}},
+	}
+	got := svc.resolveSubagentCompletionPolicy(context.Background(), "sess-1")
+	if got != chat.SubagentPolicyRenderAndWait {
+		t.Errorf("got %q, want global default %q", got, chat.SubagentPolicyRenderAndWait)
+	}
+}
+
 func TestResolveSubagentCompletionPolicy_UnknownSession_FallsBackSafely(t *testing.T) {
 	svc := &chatServiceImpl{
 		sessions: &stubSessionService{sessions: map[string]*store.Session{}}, // Get errors

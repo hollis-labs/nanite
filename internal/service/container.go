@@ -211,10 +211,6 @@ type Container struct {
 	// by sessionID inside the Engine.
 	ReminderEngine *reminders.Engine
 
-	// AgentCardGenerator builds A2A Agent Cards from workflow registry + boot profiles
-	// (CW-20260814-0014). Serves /.well-known/agent-card.json.
-	AgentCardGenerator *AgentCardGenerator
-
 	// stopModelCatalog cancels the model catalog background refresher.
 	stopModelCatalog context.CancelFunc
 

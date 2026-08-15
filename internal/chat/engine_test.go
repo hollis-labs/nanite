@@ -197,6 +197,27 @@ func TestParseAgentConstraints(t *testing.T) {
 	// Legacy keys are silently dropped by json.Unmarshal because they
 	// are no longer struct fields — surfaced via validation warnings
 	// at the API layer (internal/agentvalidation/validation.go).
+
+	c = ParseAgentConstraints(`{"subagent_completion_policy":"auto_summarize"}`)
+	if c.SubagentCompletionPolicy != SubagentPolicyAutoSummarize {
+		t.Errorf("SubagentCompletionPolicy = %q, want %q", c.SubagentCompletionPolicy, SubagentPolicyAutoSummarize)
+	}
+}
+
+func TestIsValidSubagentCompletionPolicy(t *testing.T) {
+	valid := []string{SubagentPolicyRenderAndWait, SubagentPolicyAutoSummarize, SubagentPolicyBatch}
+	for _, v := range valid {
+		if !IsValidSubagentCompletionPolicy(v) {
+			t.Errorf("IsValidSubagentCompletionPolicy(%q) = false, want true", v)
+		}
+	}
+
+	invalid := []string{"", "auto-summarize", "AUTO_SUMMARIZE", "bogus"}
+	for _, v := range invalid {
+		if IsValidSubagentCompletionPolicy(v) {
+			t.Errorf("IsValidSubagentCompletionPolicy(%q) = true, want false", v)
+		}
+	}
 }
 
 func containsStr(s, sub string) bool {

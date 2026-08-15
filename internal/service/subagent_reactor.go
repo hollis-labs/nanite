@@ -68,12 +68,22 @@ func (r *subagentCompletionReactor) ReactToCompletion(ctx context.Context, run *
 // failures (session/agent lookup errors) fall back to render_and_wait
 // rather than risk auto-triggering a turn on a session that couldn't be
 // fully resolved.
+//
+// Each tier is validated against chat.IsValidSubagentCompletionPolicy
+// before being trusted — an unrecognized value (typo, stale config) is
+// logged and treated as absent rather than returned verbatim, so a typo'd
+// "auto_summarise" doesn't silently disable the intended behavior with no
+// diagnostic trail (PR #247 review).
 func (s *chatServiceImpl) resolveSubagentCompletionPolicy(ctx context.Context, sessionID string) string {
 	if session, err := s.sessions.Get(ctx, sessionID); err == nil && session != nil && session.Metadata != "" {
 		var meta map[string]any
 		if json.Unmarshal([]byte(session.Metadata), &meta) == nil {
 			if v, ok := meta["subagent_completion_policy"].(string); ok && v != "" {
-				return v
+				if chat.IsValidSubagentCompletionPolicy(v) {
+					return v
+				}
+				slog.Warn("subagent-reactor: unrecognized session policy override, ignoring",
+					"session_id", sessionID, "value", v)
 			}
 		}
 	}
@@ -81,7 +91,11 @@ func (s *chatServiceImpl) resolveSubagentCompletionPolicy(ctx context.Context, s
 	if agent, _, err := s.agents.ResolveForSession(ctx, sessionID); err == nil && agent != nil {
 		constraints := chat.ParseAgentConstraints(agent.Constraints)
 		if constraints.SubagentCompletionPolicy != "" {
-			return constraints.SubagentCompletionPolicy
+			if chat.IsValidSubagentCompletionPolicy(constraints.SubagentCompletionPolicy) {
+				return constraints.SubagentCompletionPolicy
+			}
+			slog.Warn("subagent-reactor: unrecognized agent-profile policy default, ignoring",
+				"session_id", sessionID, "agent_id", agent.ID, "value", constraints.SubagentCompletionPolicy)
 		}
 	}
 

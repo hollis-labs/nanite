@@ -9,4 +9,4 @@
 # elsewhere by design (BootProfileCatalogPath's "no catalog -> no behavior
 # change" convention) — this is an opt-in local/dev activation only, not a
 # change to the global default.
-workflow_definitions_path: ~/dev/hollis-labs/apps/nanite/examples/workflow-definitions
+workflow_definitions_path: examples/workflow-definitions

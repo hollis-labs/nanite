@@ -25,11 +25,15 @@ func (s *Store) Seed() error {
 	defer tx.Rollback()
 
 	// --- Workspaces ---
+	// CW-20260815-0010: a fresh install seeds ONE workspace. The "personal"
+	// workspace used to be seeded alongside "default" — consolidated away
+	// (see migration 087) since multi-workspace GUI complexity is deferred
+	// by explicit project-owner decision, and Torque projects are the
+	// organizing concept going forward, not Nanite workspaces.
 	for _, w := range []struct {
 		id, name, desc string
 	}{
 		{"default", "Default", "Default workspace"},
-		{"personal", "Personal", "Personal planning and goals"},
 	} {
 		if _, err := tx.Exec(
 			"INSERT INTO workspaces (id, name, description) VALUES (?, ?, ?)",

@@ -276,6 +276,67 @@ func TestConfig_RulesFor_MergesOverrides(t *testing.T) {
 	}
 }
 
+// TestSelectTools_ScopedOverrideDoesNotLeakIntoUnscopedCall is the PR #242
+// review fix: LocalBroker.rules is shared, mutable state on one long-lived
+// broker instance. Rules were previously only reloaded when workspaceID/
+// agentID were non-empty, so an unscoped call immediately after a scoped
+// one silently kept running against the PRIOR call's override rules
+// instead of the base ruleset. Registers an agent override that excludes
+// one tool, confirms the scoped call excludes it, then confirms an
+// immediately-following unscoped call does NOT — proving the override
+// doesn't leak across calls.
+func TestSelectTools_ScopedOverrideDoesNotLeakIntoUnscopedCall(t *testing.T) {
+	cfg := DefaultConfig()
+	cfg.AgentOverrides["agent-x"] = []broker.Rule{
+		{
+			Name:     "exclude-tool-b",
+			Intent:   "*",
+			Priority: 100,
+			Match:    broker.Match{Patterns: []string{"tool_b"}},
+			Action:   broker.Action{Type: "exclude"},
+		},
+	}
+	tb := New(nil, nil, cfg)
+	tb.RegisterTools([]broker.ToolDefinition{
+		{Name: "tool_a", Server: "test", Description: "Tool A"},
+		{Name: "tool_b", Server: "test", Description: "Tool B"},
+	})
+
+	scoped, _, err := tb.SelectTools(context.Background(), "general", nil, "", "agent-x", 0)
+	if err != nil {
+		t.Fatalf("scoped SelectTools error: %v", err)
+	}
+	if containsToolDefNamed(scoped, "tool_b") {
+		t.Fatalf("scoped call for agent-x should exclude tool_b, got: %v", namesOfBroker(scoped))
+	}
+
+	unscoped, _, err := tb.SelectTools(context.Background(), "general", nil, "", "", 0)
+	if err != nil {
+		t.Fatalf("unscoped SelectTools error: %v", err)
+	}
+	if !containsToolDefNamed(unscoped, "tool_b") {
+		t.Fatalf("unscoped call must NOT inherit agent-x's exclude override — tool_b should be present, got: %v",
+			namesOfBroker(unscoped))
+	}
+}
+
+func containsToolDefNamed(tools []broker.ToolDefinition, name string) bool {
+	for _, t := range tools {
+		if t.Name == name {
+			return true
+		}
+	}
+	return false
+}
+
+func namesOfBroker(tools []broker.ToolDefinition) []string {
+	names := make([]string, len(tools))
+	for i, t := range tools {
+		names[i] = t.Name
+	}
+	return names
+}
+
 // --- mockTransport implements mcp.MCPTransport for testing ---
 
 type mockTransport struct {
@@ -541,7 +602,7 @@ func TestSelectToolsAsProvider_BrokerToolsDefaultNonStrict(t *testing.T) {
 	}
 	tb.RegisterTools(brokerTools)
 
-	result, err := tb.SelectToolsAsProvider(context.Background(), "task backlog", nil, "", "", 0)
+	result, err := tb.SelectToolsAsProvider(context.Background(), "task backlog", nil, "", "")
 	if err != nil {
 		t.Fatalf("SelectToolsAsProvider error: %v", err)
 	}

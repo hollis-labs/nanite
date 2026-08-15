@@ -228,54 +228,115 @@ func isWildcardIntent(intent string) bool {
 	return intent == "" || intent == "*"
 }
 
-// SelectTools returns tools filtered by intent and hints, capped at MaxSelectedTools,
-// together with the per-tool override block from the broker enricher.
-// Optionally scoped by workspace and agent for rule overrides.
-// If intent is "*" or empty, logs a warning and returns a minimal fallback set.
-//
-// windowSize is the per-session context window in tokens (from models.dev /
-// user settings). When windowSize <= 0 the broker falls back to
-// DefaultContextWindowTokens so behaviour on unknown models is preserved.
-func (tb *ToolClient) SelectTools(ctx context.Context, intent string, hints []string, workspaceID, agentID string, windowSize int) ([]broker.ToolDefinition, string, error) {
-	// Reject wildcard intent — fall back to a minimal safe set.
+// noRulesMatchedRationale is the go-toolbroker library's exact
+// SelectResult.Rationale string (broker/local.go) when zero rules matched a
+// well-formed intent and it fell back to returning the entire catalog,
+// unranked. With NaniteDefaultRules always installing a "*" catch-all rule,
+// this should be unreachable in production — every real Config.Rules has at
+// least one always-applicable rule. This check is defense-in-depth for the
+// degenerate case (e.g. Config.Rules misconfigured to empty), matching the
+// gap ADR-001 flagged: "returning everything" must never be the silent
+// default (CW-20260815-0011).
+const noRulesMatchedRationale = "no rules matched intent; returning all tools"
+
+// selectToolsUncapped runs the broker selection pass (rule application +
+// the zero-match fallback guard) WITHOUT applying MaxSelectedTools or the
+// token-budget prune. Callers that still need to run permission/allowlist
+// filtering on the result (SelectToolsAsProvider, and — one layer up —
+// service/tool.go's schema-v2 tools allowlist) must defer capping until
+// after that filtering, or a correctly-declared, correctly-permitted tool
+// can be truncated out before its own allowlist ever sees it (e.g. a
+// late-alphabet tool name among Torque's ~90+ registered tools). See
+// FinalizeToolSelection for the capping step this defers to.
+func (tb *ToolClient) selectToolsUncapped(ctx context.Context, intent string, hints []string, workspaceID, agentID string) (tools []broker.ToolDefinition, overrideBlock string, total int, err error) {
 	if isWildcardIntent(intent) {
-		slog.Warn("toolclient: wildcard/empty intent received — returning fallback set",
-			"workspace", workspaceID, "agent", agentID, "count", DefaultFallbackToolCount)
+		slog.Warn("toolclient: wildcard/empty intent received — substituting general intent",
+			"workspace", workspaceID, "agent", agentID)
 		intent = "general"
 	}
 
-	// Load rules with overrides if scoped.
-	if workspaceID != "" || agentID != "" {
-		rules := tb.Config.RulesFor(workspaceID, agentID)
-		tb.LocalBroker.LoadRules(rules)
-	}
+	// Load rules unconditionally — not just when workspaceID/agentID are
+	// scoped. LocalBroker.rules is shared, mutable state on one long-lived
+	// broker instance (guarded by its own mutex, not per-call); a
+	// conditional load here means a prior SCOPED call's override rules
+	// stay loaded and silently apply to a later UNSCOPED call that skips
+	// this block. RulesFor("", "") already returns exactly the base rules
+	// (no overrides applied) for the unscoped case, so calling it every
+	// time is both correct and simpler than trying to skip it. (Review
+	// finding on PR #242.)
+	rules := tb.Config.RulesFor(workspaceID, agentID)
+	tb.LocalBroker.LoadRules(rules)
 
 	result, err := tb.LocalBroker.SelectTools(ctx, intent, hints)
 	if err != nil {
-		return nil, "", fmt.Errorf("select tools: %w", err)
+		return nil, "", 0, fmt.Errorf("select tools: %w", err)
 	}
 
-	tools := result.Tools
-	if len(tools) > MaxSelectedTools {
-		tools = tools[:MaxSelectedTools]
+	tools = result.Tools
+	if result.Rationale == noRulesMatchedRationale && result.Total > DefaultFallbackToolCount {
+		slog.Error("toolclient: zero broker rules matched a well-formed intent — degrading to a minimal safe set instead of the full catalog; check Config.Rules is non-empty",
+			"workspace", workspaceID, "agent", agentID, "intent", intent,
+			"catalog_size", result.Total, "fallback_count", DefaultFallbackToolCount)
+		// Bound by len(tools), not just result.Total: today the library
+		// only sets this exact Rationale when Tools holds every registered
+		// tool (so Total == len(Tools) always), but that's an internal
+		// invariant of the library's current implementation, not a
+		// guarantee this code should rely on for a slice bound. (Review
+		// finding on PR #242.)
+		fallbackCount := DefaultFallbackToolCount
+		if len(tools) < fallbackCount {
+			fallbackCount = len(tools)
+		}
+		tools = tools[:fallbackCount]
 	}
 
-	// Apply token budget pruning using the per-session context window.
-	// windowSize <= 0 means the model is unknown — fall back to the static
-	// default so behaviour on unknown models is preserved (never a hard failure).
+	return tools, result.OverrideBlock, result.Total, nil
+}
+
+// toolTokenBudget computes the token budget for tool definitions from the
+// client's Config and the caller's per-session context window. windowSize
+// <= 0 means the model is unknown — falls back to DefaultContextWindowTokens
+// so behaviour on unknown models is preserved (never a hard failure).
+func (tb *ToolClient) toolTokenBudget(windowSize int) (budget, ctxWindow int) {
 	budgetPct := tb.Config.ToolTokenBudgetPct
 	if budgetPct <= 0 {
 		budgetPct = DefaultToolTokenBudgetPct
 	}
-	ctxWindow := windowSize
+	ctxWindow = windowSize
 	if ctxWindow <= 0 {
 		ctxWindow = tb.Config.ContextWindowTokens
 	}
 	if ctxWindow <= 0 {
 		ctxWindow = DefaultContextWindowTokens
 	}
-	tokenBudget := int(budgetPct * float64(ctxWindow))
+	return int(budgetPct * float64(ctxWindow)), ctxWindow
+}
 
+// SelectTools returns tools filtered by intent and hints, capped at MaxSelectedTools,
+// together with the per-tool override block from the broker enricher.
+// Optionally scoped by workspace and agent for rule overrides.
+//
+// This is the self-contained entry point (used by the /api/tools/select
+// preview endpoint and any caller with no further permission/allowlist
+// filtering step of its own) — it applies the cap and token-budget prune
+// internally. The live agent pipeline (service/tool.go SelectForAgent) goes
+// through SelectToolsAsProvider + FinalizeToolSelection instead, so capping
+// happens AFTER permission and allowlist filtering (CW-20260815-0011).
+//
+// windowSize is the per-session context window in tokens (from models.dev /
+// user settings). When windowSize <= 0 the broker falls back to
+// DefaultContextWindowTokens so behaviour on unknown models is preserved.
+func (tb *ToolClient) SelectTools(ctx context.Context, intent string, hints []string, workspaceID, agentID string, windowSize int) ([]broker.ToolDefinition, string, error) {
+	tools, overrideBlock, total, err := tb.selectToolsUncapped(ctx, intent, hints, workspaceID, agentID)
+	if err != nil {
+		return nil, "", err
+	}
+
+	if len(tools) > MaxSelectedTools {
+		tools = tools[:MaxSelectedTools]
+	}
+
+	tokenBudget, ctxWindow := tb.toolTokenBudget(windowSize)
 	beforeCount := len(tools)
 	tools = PruneToolsToTokenBudget(tools, tokenBudget)
 	if len(tools) < beforeCount {
@@ -284,12 +345,12 @@ func (tb *ToolClient) SelectTools(ctx context.Context, intent string, hints []st
 	}
 
 	slog.Info("toolclient: selected tools for intent",
-		"selected", len(tools), "total", result.Total, "intent", intent,
+		"selected", len(tools), "total", total, "intent", intent,
 		"workspace", workspaceID, "agent", agentID,
 		"tool_tokens", EstimateToolTokens(tools), "budget", tokenBudget,
 		"ctx_window", ctxWindow)
 
-	return tools, result.OverrideBlock, nil
+	return tools, overrideBlock, nil
 }
 
 // DevServerName is the MCP server name for developer tools (dev_bash, dev_read,
@@ -333,22 +394,29 @@ func (tb *ToolClient) developerModeEnabled() bool {
 }
 
 // SelectToolsAsProvider returns selected tools converted to llmtypes.ToolDefinition format,
-// together with the per-turn override block composed from per-tool Hints for
-// the FINAL tool set (post permission filtering). Built-in tools are always
-// prepended and do not count against selection limits. Enrichment compose
-// runs after permission filtering so the override block never mentions a
-// tool the LLM won't actually see.
+// together with the per-turn override block composed from per-tool Hints
+// (the override block is composed by the underlying broker library BEFORE
+// any permission/cap filtering runs — see go-toolbroker's
+// LocalBroker.composeOverrideBlock — so it may reference tools beyond what
+// survives filtering here; that mismatch predates this function and is not
+// addressed by CW-20260815-0011).
 //
-// windowSize is the per-session context window in tokens (from models.dev /
-// user settings). Pass 0 when the model is unknown — SelectTools will fall
-// back to DefaultContextWindowTokens so behaviour is preserved.
+// Deliberately uncapped (CW-20260815-0011): the MaxSelectedTools cut and
+// token-budget prune are NOT applied here. This function only runs the
+// tool_permissions-JSON permission check (CheckPermission); the caller
+// (service/tool.go SelectForAgent) still has its own schema-v2 tools
+// allowlist filter to run afterward. Capping before that second filter
+// could truncate out a tool the agent's own allowlist explicitly declares
+// and is permitted to use — see FinalizeToolSelection, which the caller
+// must invoke once ALL filtering (permissions + allowlist + chat-surface)
+// is done.
 //
 // Dev-tool gate: tools from the "dev" server (dev_bash, dev_read, dev_write,
 // dev_edit, dev_glob, dev_grep) are stripped from the returned set when
 // developer_mode is false in user_settings. This prevents the LLM from ever
 // seeing or requesting those tools in non-developer sessions.
-func (tb *ToolClient) SelectToolsAsProvider(ctx context.Context, intent string, hints []string, workspaceID, agentID string, windowSize int) (*SelectResult, error) {
-	tools, overrideBlock, err := tb.SelectTools(ctx, intent, hints, workspaceID, agentID, windowSize)
+func (tb *ToolClient) SelectToolsAsProvider(ctx context.Context, intent string, hints []string, workspaceID, agentID string) (*SelectResult, error) {
+	tools, overrideBlock, _, err := tb.selectToolsUncapped(ctx, intent, hints, workspaceID, agentID)
 	if err != nil {
 		return nil, err
 	}
@@ -671,5 +739,83 @@ func PruneToolsToTokenBudget(tools []broker.ToolDefinition, budgetTokens int) []
 		tools = tools[:len(tools)-1]
 	}
 
+	return tools
+}
+
+// EstimateToolDefTokens mirrors EstimateToolTokens for llmtypes.ToolDefinition
+// (the provider-shaped type used after builtin-prepend + permission
+// filtering, as opposed to broker.ToolDefinition used pre-conversion).
+func EstimateToolDefTokens(tools []llmtypes.ToolDefinition) int {
+	total := 0
+	for _, t := range tools {
+		data, err := json.Marshal(t)
+		if err != nil {
+			n := len(t.Name) + len(t.Description)
+			if n == 0 {
+				n = 4
+			}
+			total += n / 4
+			continue
+		}
+		n := len(data) / 4
+		if n == 0 {
+			n = 1
+		}
+		total += n
+	}
+	return total
+}
+
+// PruneToolDefsToTokenBudget mirrors PruneToolsToTokenBudget for
+// llmtypes.ToolDefinition. At least one tool is always retained.
+func PruneToolDefsToTokenBudget(tools []llmtypes.ToolDefinition, budgetTokens int) []llmtypes.ToolDefinition {
+	if len(tools) == 0 {
+		return tools
+	}
+
+	total := EstimateToolDefTokens(tools)
+	if total <= budgetTokens {
+		return tools
+	}
+
+	for len(tools) > 1 && total > budgetTokens {
+		last := tools[len(tools)-1]
+		data, _ := json.Marshal(last)
+		tokens := len(data) / 4
+		if tokens == 0 {
+			tokens = 1
+		}
+		total -= tokens
+		tools = tools[:len(tools)-1]
+	}
+
+	return tools
+}
+
+// FinalizeToolSelection applies the MaxSelectedTools cap and token-budget
+// prune to a tool list that has ALREADY been through permission and
+// allowlist filtering. This must run LAST in the agent tool-selection
+// pipeline (service/tool.go SelectForAgent, after filterToolsByAllowlist /
+// applyChatSurfaceFilter) — applying it earlier let an agent's own
+// correctly-declared, correctly-permitted tool be truncated out before its
+// own allowlist ever got a chance to keep it (CW-20260815-0011): e.g. a
+// late-alphabet tool name among Torque's ~90+ registered tools, sitting
+// past index 15 in the broker's unranked candidate order.
+//
+// windowSize is the per-session context window in tokens; <= 0 falls back
+// to DefaultContextWindowTokens, matching SelectTools' behaviour on unknown
+// models.
+func (tb *ToolClient) FinalizeToolSelection(tools []llmtypes.ToolDefinition, windowSize int) []llmtypes.ToolDefinition {
+	if len(tools) > MaxSelectedTools {
+		tools = tools[:MaxSelectedTools]
+	}
+
+	tokenBudget, _ := tb.toolTokenBudget(windowSize)
+	before := len(tools)
+	tools = PruneToolDefsToTokenBudget(tools, tokenBudget)
+	if len(tools) < before {
+		slog.Info("toolclient: pruned tools due to token budget (post-filter)",
+			"before", before, "after", len(tools), "budget", tokenBudget)
+	}
 	return tools
 }

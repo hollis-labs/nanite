@@ -39,12 +39,12 @@ import (
 	"github.com/hollis-labs/nanite/internal/messaging"
 	"github.com/hollis-labs/nanite/internal/permission"
 	"github.com/hollis-labs/nanite/internal/plugin"
-	"github.com/hollis-labs/nanite/internal/providercatalog"
 	adapterclaude "github.com/hollis-labs/nanite/internal/plugin/builtin/adapter-claude"
 	adaptercodex "github.com/hollis-labs/nanite/internal/plugin/builtin/adapter-codex"
 	adaptergemini "github.com/hollis-labs/nanite/internal/plugin/builtin/adapter-gemini"
 	nanitenative "github.com/hollis-labs/nanite/internal/plugin/builtin/adapter-nanite-native"
 	adapteropencode "github.com/hollis-labs/nanite/internal/plugin/builtin/adapter-opencode"
+	"github.com/hollis-labs/nanite/internal/providercatalog"
 	"github.com/hollis-labs/nanite/internal/reminders"
 	runtimeagent "github.com/hollis-labs/nanite/internal/runtime/agent"
 	"github.com/hollis-labs/nanite/internal/runtime/agent/recovery"
@@ -66,21 +66,21 @@ import (
 // Container holds all service instances and shared subsystems. It is the
 // single wiring point — created once in main.go and passed to the API layer.
 type Container struct {
-	Sessions  SessionService
-	Agents    AgentService
+	Sessions SessionService
+	Agents   AgentService
 	// AgentConfig is the shared write path for managed file-backed agent
 	// configs (GUI/API/CLI/MCP all route mutations through it).
 	AgentConfig *AgentConfigService
 	Skills      SkillService
 	Tools       ToolService
-	Chat      ChatService
-	Context   ContextService
-	Streams   *StreamManager
-	Events    EventEmitter
-	Providers *provider.Registry
-	Commands  *chat.CommandRegistry
-	Plugins   *plugin.Host
-	MCP       *mcp.Manager
+	Chat        ChatService
+	Context     ContextService
+	Streams     *StreamManager
+	Events      EventEmitter
+	Providers   *provider.Registry
+	Commands    *chat.CommandRegistry
+	Plugins     *plugin.Host
+	MCP         *mcp.Manager
 
 	// Messaging service — validates, persists, and fans out
 	// agent-to-agent messages plus handoff state transitions.
@@ -443,7 +443,22 @@ func NewContainer(cfg ContainerConfig) (*Container, error) {
 	// File → parse → DB upsert. H1 trust: user/plugin sources → untrusted tier.
 	// Built-in definitions (Source != "user"/"plugin") retain 'normal' tier.
 	// Errors per-def are logged non-fatal via AutoIngestAgents.
-	if n := AutoIngestAgents(cfg.Store, agentDefs); n > 0 {
+	//
+	// knownTools (CW-20260815-0013): built from the already-wired
+	// ToolClient (main.go's initMCP + MCP AutoDiscover both run before
+	// NewContainer is called) so AutoIngestAgents can flag a profile's
+	// roleTools:/tools: entries that don't match any registered tool name.
+	// nil when no ToolClient is wired — validation is skipped, not
+	// treated as "nothing is known" (which would flag every entry).
+	var knownTools map[string]bool
+	if cfg.ToolClient != nil {
+		catalog := cfg.ToolClient.ListTools()
+		knownTools = make(map[string]bool, len(catalog))
+		for _, t := range catalog {
+			knownTools[t.Name] = true
+		}
+	}
+	if n := AutoIngestAgents(cfg.Store, agentDefs, knownTools); n > 0 {
 		slog.Info("service container: auto-ingested agents into DB", "count", n)
 	}
 

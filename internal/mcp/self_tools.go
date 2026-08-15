@@ -1001,6 +1001,29 @@ the current turn for subsequent writes.
 				"required": []string{},
 			},
 		},
+		// --- procedure_get self-tool (CW-20260815-0014) ---
+		{
+			Name: "procedure_get",
+			Description: "Fetch a named procedure body seeded for the calling agent's own profile " +
+				"(the `procedures:` frontmatter on an agent profile file, written into the " +
+				"agent_procedures table at ingest time). Use when your own boot/instruction text tells " +
+				"you to fetch a named procedure — e.g. `procedure_get(name=\"boot\")` or " +
+				"`procedure_get(name=\"checklist\")` — for the detailed body a profile keeps out of its " +
+				"always-loaded instructions.\n\n" +
+				"**Scope:** resolves the calling agent from context automatically; the returned procedure " +
+				"is always the one seeded for YOUR OWN profile, not another agent's. Returns an error if no " +
+				"procedure with that name was seeded for you.",
+			InputSchema: map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"name": map[string]any{
+						"type":        "string",
+						"description": "Procedure name, e.g. \"boot\" or \"checklist\" — matches the `name:` under this profile's `procedures:` frontmatter.",
+					},
+				},
+				"required": []string{"name"},
+			},
+		},
 		// --- Panel control (J8 v1, CW-20260426-0006) ---
 		{
 			Name: "panel_open",

@@ -88,7 +88,7 @@ func TestSelectToolsAsProvider_BuiltinFilteredThroughPermissions(t *testing.T) {
 		{Name: "plan_create", Description: "Create a plan"},
 	})
 
-	res, err := tb.SelectToolsAsProvider(context.Background(), "general", nil, "", "agent-permissive", 0)
+	res, err := tb.SelectToolsAsProvider(context.Background(), "general", nil, "", "agent-permissive")
 	if err != nil {
 		t.Fatalf("SelectToolsAsProvider: %v", err)
 	}

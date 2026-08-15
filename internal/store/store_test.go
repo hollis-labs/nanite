@@ -136,12 +136,15 @@ func TestSeedIdempotent(t *testing.T) {
 		t.Fatalf("Seed() second call error: %v", err)
 	}
 
-	// Verify data is the same — should have exactly 2 workspaces from seed.
+	// Verify data is the same — should have exactly 1 workspace from seed.
+	// CW-20260815-0010: consolidated from 2 ("default" + "personal") to 1
+	// ("default" only) — multi-workspace GUI complexity deferred by
+	// explicit project-owner decision.
 	var count int
 	if err := s.DB.QueryRow("SELECT COUNT(*) FROM workspaces").Scan(&count); err != nil {
 		t.Fatalf("count workspaces: %v", err)
 	}
-	if count != 2 {
-		t.Errorf("expected 2 workspaces after idempotent seed, got %d", count)
+	if count != 1 {
+		t.Errorf("expected 1 workspace after idempotent seed, got %d", count)
 	}
 }

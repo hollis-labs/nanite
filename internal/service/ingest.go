@@ -39,10 +39,28 @@ import (
 // addition to that per-item Warn, emit one aggregate slog.Error naming every
 // failed slug + reason when any occur, so "N of M agent files failed to
 // ingest" is discoverable from logs alone — no DB query required.
-func AutoIngestAgents(st *store.Store, defs []*agentpkg.Definition) int {
+//
+// knownTools, when non-nil, is the set of currently-registered tool names
+// (builtins + live MCP discovery) used to validate every def.RoleTools /
+// def.Tools entry (CW-20260815-0013): a profile declaring a plausible-
+// looking but non-existent tool name (e.g. `bash_run` instead of `dev_bash`)
+// previously failed silently — the tool simply never showed up at selection
+// time, and the only way to discover why was a live agent failing and a
+// manual grep. Unknown names are collected and logged the same
+// loudly-aggregated way as ingest failures above; they do NOT fail the
+// ingest itself (the profile row is still valid; only the specific tool
+// reference is wrong) and passing nil skips this check entirely (tests that
+// don't care about it, or callers with no tool catalog available yet).
+// Caveat: some MCP servers (e.g. plugin-provided tools) register AFTER
+// AutoIngestAgents runs during startup (see discoverAndLoadPlugins in
+// cmd/nanite/main.go) — a name that's genuinely valid but supplied by a
+// not-yet-loaded plugin can show up here as a false positive. This is a
+// diagnostic warning, not a hard gate, so that tradeoff is acceptable.
+func AutoIngestAgents(st *store.Store, defs []*agentpkg.Definition, knownTools map[string]bool) int {
 	count := 0
 	considered := 0 // defs actually attempted, excluding nil/empty-slug skips
 	var failures []string
+	var unknownToolRefs []string
 	for _, def := range defs {
 		if def == nil || def.Slug == "" {
 			continue
@@ -54,12 +72,44 @@ func AutoIngestAgents(st *store.Store, defs []*agentpkg.Definition) int {
 			continue
 		}
 		count++
+		if knownTools != nil {
+			if bad := unknownDeclaredTools(def, knownTools); len(bad) > 0 {
+				slog.Warn("service: agent profile declares unregistered tool name(s) — these will silently never be selectable until fixed",
+					"slug", def.Slug, "unknown_tools", bad)
+				unknownToolRefs = append(unknownToolRefs, fmt.Sprintf("%s: %v", def.Slug, bad))
+			}
+		}
 	}
 	if len(failures) > 0 {
 		slog.Error("service: agent auto-ingest failed for one or more files — these agents are file-discoverable but have no working agent_profiles row until fixed and the service is restarted",
 			"failed", len(failures), "considered", considered, "succeeded", count, "discovered", len(defs), "failures", failures)
 	}
+	if len(unknownToolRefs) > 0 {
+		slog.Error("service: one or more agent profiles declare tool names that are not in the registered tool catalog — check for typos or renamed tools",
+			"profiles_affected", len(unknownToolRefs), "details", unknownToolRefs)
+	}
 	return count
+}
+
+// unknownDeclaredTools returns every entry in def.RoleTools and def.Tools
+// that is not a key in knownTools, deduplicated, in first-seen order.
+func unknownDeclaredTools(def *agentpkg.Definition, knownTools map[string]bool) []string {
+	seen := make(map[string]bool)
+	var bad []string
+	check := func(name string) {
+		if name == "" || seen[name] || knownTools[name] {
+			return
+		}
+		seen[name] = true
+		bad = append(bad, name)
+	}
+	for _, name := range def.RoleTools {
+		check(name)
+	}
+	for _, name := range def.Tools {
+		check(name)
+	}
+	return bad
 }
 
 func IngestAgentDefinition(st *store.Store, def *agentpkg.Definition) error {

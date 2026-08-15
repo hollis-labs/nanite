@@ -226,7 +226,7 @@ func (s *toolServiceImpl) SelectForAgent(ctx context.Context, sessionID, agentID
 	seen := map[string]bool{} // dedup: Anthropic API rejects duplicate tool names
 
 	if s.toolClient != nil {
-		res, err := s.toolClient.SelectToolsAsProvider(ctx, intent, hints, workspaceID, agentID, windowSize)
+		res, err := s.toolClient.SelectToolsAsProvider(ctx, intent, hints, workspaceID, agentID)
 		if err != nil {
 			slog.Warn("service/tool: broker selection failed — falling back to MCP manager", "err", err)
 		} else {
@@ -301,6 +301,14 @@ func (s *toolServiceImpl) SelectForAgent(ctx context.Context, sessionID, agentID
 				allTools = applyChatSurfaceFilter(allTools, dispatch.DefaultChatToolSurface())
 			}
 		}
+	}
+
+	// Cap + token-budget prune LAST, now that permission and allowlist
+	// filtering are both done (CW-20260815-0011). Applying MaxSelectedTools
+	// any earlier — inside broker selection, before this point — could
+	// truncate out a tool the agent's own allowlist above explicitly kept.
+	if s.toolClient != nil {
+		allTools = s.toolClient.FinalizeToolSelection(allTools, windowSize)
 	}
 
 	// Per-call description-render hook (CW-20260512-0105 / SP-20260512-0008

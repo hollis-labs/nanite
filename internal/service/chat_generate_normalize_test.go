@@ -53,15 +53,26 @@ func TestNormalizeToolInputSchemas_SourceMapInvariance(t *testing.T) {
 }
 
 // TestNormalizeToolInputSchemas_ProviderFacingNormalization verifies that the
-// clone landed in the tools slice DOES have additionalProperties:false injected
-// at every object node. This confirms the Anthropic strict-mode contract is
-// preserved while the source map stays loose.
+// clone landed in the tools slice DOES have additionalProperties:false
+// injected at every object node THAT ENUMERATES ITS OWN PROPERTIES. This
+// confirms the closing behavior is preserved for genuinely-fixed-shape
+// objects while the source map stays loose (clone, not in-place mutation).
+//
+// Prior to CW-20260815-0016 this test's `data` fixture had NO `properties`
+// key and still asserted additionalProperties:false — that was itself the
+// bug this ticket fixed (see
+// TestNormalizeToolInputSchemas_PropertyLessNodeNotClosed below): closing a
+// property-less node makes it accept only {}, not "closed against
+// surprises" as intended.
 func TestNormalizeToolInputSchemas_ProviderFacingNormalization(t *testing.T) {
 	root := map[string]any{
 		"type": "object",
 		"properties": map[string]any{
 			"data": map[string]any{
 				"type": "object",
+				"properties": map[string]any{
+					"title": map[string]any{"type": "string"},
+				},
 			},
 		},
 	}
@@ -93,7 +104,59 @@ func TestNormalizeToolInputSchemas_ProviderFacingNormalization(t *testing.T) {
 		t.Fatalf("normalized properties.data missing, got %T", props["data"])
 	}
 	if v, ok := dataChild["additionalProperties"]; !ok || v != false {
-		t.Fatalf("normalized properties.data: expected additionalProperties=false, got %v (ok=%v)", v, ok)
+		t.Fatalf("normalized properties.data (has its own properties): expected additionalProperties=false, got %v (ok=%v)", v, ok)
+	}
+}
+
+// TestNormalizeToolInputSchemas_PropertyLessNodeNotClosed is the
+// CW-20260815-0016 regression test. A "type":"object" node with NO
+// "properties" key is a free-form/pass-through container by construction
+// (mux_call's "arguments", card_show's "data", dispatch_executor's "data",
+// several workflow_* tools' "args"/"params" — confirmed via an audit of the
+// live self-tool/dev-tool catalog during this fix). Forcing
+// additionalProperties:false on such a node whitelists nothing (no
+// properties key) and admits nothing (additionalProperties:false) — the
+// node becomes satisfiable ONLY by the empty object {}. Before the fix,
+// this collapsed exactly the ARG_VALIDATION_FAILED failure mode observed
+// on a live Orchestrator session's mux_call attempts
+// ("/arguments: got string, want object" — even a well-formed object
+// argument had no valid shape left to match).
+func TestNormalizeToolInputSchemas_PropertyLessNodeNotClosed(t *testing.T) {
+	root := map[string]any{
+		"type": "object",
+		"properties": map[string]any{
+			"tool_name": map[string]any{"type": "string"},
+			"arguments": map[string]any{
+				"type":        "object",
+				"description": "Arguments object matching the tool's input schema",
+			},
+		},
+	}
+	tools := []llmtypes.ToolDefinition{
+		{Name: "mux_call", InputSchema: root},
+	}
+	normalizeToolInputSchemas(tools)
+
+	got := tools[0].InputSchema
+	props, ok := got["properties"].(map[string]any)
+	if !ok {
+		t.Fatalf("normalized root: properties map missing, got %T", got["properties"])
+	}
+	argsChild, ok := props["arguments"].(map[string]any)
+	if !ok {
+		t.Fatalf("normalized properties.arguments missing, got %T", props["arguments"])
+	}
+	if v, exists := argsChild["additionalProperties"]; exists {
+		t.Fatalf("property-less node was closed: additionalProperties=%v (expected key absent — "+
+			"this collapses the node to accepting only {})", v)
+	}
+	if _, hasProps := argsChild["properties"]; hasProps {
+		t.Fatal("property-less node unexpectedly gained a properties key from normalization")
+	}
+	// The enclosing root, which DOES enumerate its properties, must still
+	// be closed — this fix is scoped to property-less nodes only.
+	if v, ok := got["additionalProperties"]; !ok || v != false {
+		t.Fatalf("root (has properties) should still be closed: additionalProperties=%v (ok=%v)", v, ok)
 	}
 }
 

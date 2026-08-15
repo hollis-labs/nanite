@@ -1,6 +1,8 @@
 package store
 
 import (
+	"database/sql"
+	"errors"
 	"fmt"
 	"time"
 )
@@ -100,6 +102,49 @@ func (s *Store) DeleteWorkspace(id string) error {
 		return fmt.Errorf("delete workspace %s: %w", id, err)
 	}
 	return nil
+}
+
+// ResolveWorkspaceID returns requested if it names a real, existing
+// workspace. Otherwise (requested is empty, or doesn't match any row —
+// e.g. a stale client-side ID for a workspace that was since removed) it
+// falls back to the sole workspace, if exactly one exists.
+//
+// CW-20260815-0010: workspace-scoped list/query endpoints previously
+// required an explicit workspace_id and errored otherwise, which reads to
+// a caller (or a GUI silently treating the error as "no results") as
+// invisible/frozen data the moment the caller's workspace_id is missing or
+// stale — even though the real data was sitting right there under the
+// one real workspace. Since the project has consolidated to a single
+// workspace, "no id given, or an unrecognized one given, and there's only
+// one real workspace anyway" is not actually ambiguous — resolve it
+// instead of erroring.
+//
+// Returns "" (not an error) when the caller genuinely must be explicit:
+// zero workspaces exist, or more than one does and requested didn't match
+// any of them.
+//
+// Only a not-found lookup on requested falls through to the single-
+// workspace fallback — any other error from the existence check (a real
+// DB/query failure) is returned to the caller as-is rather than masked
+// by silently trying the fallback path. (Review finding on PR #242.)
+func (s *Store) ResolveWorkspaceID(requested string) (string, error) {
+	if requested != "" {
+		_, err := s.GetWorkspace(requested)
+		if err == nil {
+			return requested, nil
+		}
+		if !errors.Is(err, sql.ErrNoRows) {
+			return "", err
+		}
+	}
+	workspaces, err := s.ListWorkspaces()
+	if err != nil {
+		return "", err
+	}
+	if len(workspaces) == 1 {
+		return workspaces[0].ID, nil
+	}
+	return "", nil
 }
 
 // ListProjects returns all projects for a given workspace.

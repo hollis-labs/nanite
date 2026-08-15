@@ -120,6 +120,16 @@ type SelfToolsTransport struct {
 	// post-construction from the container; nil-safe (a RoleWorkflow
 	// route without one returns dispatch.ErrNoWorkflowLauncher).
 	WorkflowLauncher dispatch.WorkflowLauncher
+	// WorkflowRegistry is the same *agentworkflow.Registry instance the
+	// container wires into WorkflowLauncher, wired here separately so
+	// callWorkflowRun can look up a named workflow's required inputs
+	// (agentworkflow.RequiredInputs) and reject an under-specified call
+	// with a concrete, actionable error before ever reaching the launcher
+	// — rather than only after a step deep in the run fails to resolve a
+	// missing {{input.<key>}} reference (CW-20260815-0022). Nil-safe: when
+	// unset (e.g. tests that only stub WorkflowLauncher), the pre-check is
+	// skipped and behavior is unchanged from before this field existed.
+	WorkflowRegistry *agentworkflow.Registry
 
 	// Broker is the agent-broker primitive consulted before dispatch
 	// (CW-20260502-0005 scaffold). The no-op `broker.NewModeBroker()` impl

@@ -4,6 +4,7 @@ import (
 	"context"
 	"time"
 
+	"github.com/hollis-labs/nanite/internal/messaging"
 	"github.com/hollis-labs/nanite/internal/plugin"
 )
 
@@ -35,6 +36,15 @@ type EventEmitter interface {
 // call sites.
 type SessionEventWriter interface {
 	WriteSessionEvent(ctx context.Context, sessionID, eventType, channel, payloadJSON string)
+}
+
+// SubagentResultInbox is the narrow interface chat_generate.go uses to
+// pull pending kind=subagent_result agent_messages into turn context at
+// turn start (CW-20260512-0019). Satisfied by *messaging.Service.
+// Optional in ChatServiceConfig — nil-safe at the call site.
+type SubagentResultInbox interface {
+	Inbox(ctx context.Context, sessionID, agentID string, filter messaging.InboxFilter, callerSessionID, callerAgentID string) ([]messaging.Message, error)
+	Ack(ctx context.Context, sessionID, agentID, msgID string) error
 }
 
 // PluginEventSink is the subset of plugin.Host used for event emission.

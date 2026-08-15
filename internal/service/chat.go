@@ -9,8 +9,8 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	agentbroker "github.com/hollis-labs/agentkit/broker"
 	agentsessions "github.com/hollis-labs/agentkit/agentsessions"
+	agentbroker "github.com/hollis-labs/agentkit/broker"
 	llmcontracts "github.com/hollis-labs/go-llm-contracts"
 	"github.com/hollis-labs/go-modelsdev/modelsdev"
 	"github.com/hollis-labs/go-providers/provider"
@@ -26,6 +26,7 @@ import (
 	inspectsvc "github.com/hollis-labs/nanite/internal/inspector"
 	"github.com/hollis-labs/nanite/internal/lifecycle"
 	nllmanthropic "github.com/hollis-labs/nanite/internal/llm/anthropic"
+	"github.com/hollis-labs/nanite/internal/messaging"
 	"github.com/hollis-labs/nanite/internal/loopdetect"
 	"github.com/hollis-labs/nanite/internal/permission"
 	"github.com/hollis-labs/nanite/internal/reminders"
@@ -112,6 +113,12 @@ type ChatServiceConfig struct {
 	// SessionEventWriter writes lifecycle rows to session_events for
 	// diagnostic reconstruction. nil = PTY observability disabled.
 	SessionEventWriter SessionEventWriter
+
+	// SubagentInbox reads/acks kind=subagent_result agent_messages for
+	// the turn-start injection (CW-20260512-0019). nil = injection
+	// disabled (pending subagent results are still reachable via the
+	// message_inbox MCP tool, just not auto-surfaced at turn start).
+	SubagentInbox SubagentResultInbox
 
 	// Utility provider/model for autoTitle/autoTags.
 	UtilityProvider string
@@ -272,6 +279,7 @@ type chatServiceImpl struct {
 	tasks              task.Service
 	workers            *worker.Manager
 	sessionEventWriter SessionEventWriter
+	subagentInbox      SubagentResultInbox
 
 	utilityProvider string
 	utilityModel    string
@@ -488,6 +496,7 @@ func NewChatService(cfg ChatServiceConfig) ChatService {
 		lifecycle:               lifecycle.NewManager("service.chat"),
 		activeGen:               make(map[string]*inFlightGen),
 		sessionEventWriter:      cfg.SessionEventWriter,
+		subagentInbox:           cfg.SubagentInbox,
 		strategyLogger:          cfg.StrategyLogger,
 		inspector:               cfg.Inspector,
 		loopDetector:            cfg.LoopDetector,
@@ -549,6 +558,29 @@ func (s *chatServiceImpl) deregisterGeneration(sessionID, msgID string) {
 	}
 }
 
+// registerGenerationIfIdle atomically registers a new in-flight generation
+// for sessionID ONLY if none is already registered — unlike
+// registerGeneration, it never takes over an existing slot. Returns false
+// (and registers nothing) if the session is already busy.
+//
+// This is the reject-if-busy counterpart to registerGeneration's
+// takeover semantics, used by TriggerHarnessTurn (CW-20260520-0001) to
+// close a TOCTOU race: a caller that first checks IsGenerating() and then
+// separately calls launchGeneration has a window between the two calls
+// where a real user turn can start — launchGeneration's takeover would
+// then silently cancel that user's in-flight generation. Folding the
+// check and the registration into one mutex-held step removes the
+// window entirely (PR #247 review).
+func (s *chatServiceImpl) registerGenerationIfIdle(sessionID, msgID string, cancel context.CancelFunc) bool {
+	s.activeGenMu.Lock()
+	defer s.activeGenMu.Unlock()
+	if cur := s.activeGen[sessionID]; cur != nil {
+		return false
+	}
+	s.activeGen[sessionID] = &inFlightGen{msgID: msgID, cancel: cancel}
+	return true
+}
+
 // CancelActiveGeneration cancels the in-flight generateResponse goroutine
 // registered for sessionID, if any. Returns true when a cancel was
 // dispatched (the goroutine will observe ctx.Err() on its next loop
@@ -586,7 +618,7 @@ func (s *chatServiceImpl) CancelActiveGeneration(sessionID string) bool {
 // stream channel so the caller's stream-drain unblocks. launchGeneration
 // itself returns void and has already returned to the caller by the
 // time the goroutine runs — dispatcher errors never surface synchronously.
-func (s *chatServiceImpl) launchGeneration(name, sessionID, assistantMsgID, userContent string, ch chan chat.StreamEvent) {
+func (s *chatServiceImpl) launchGeneration(name, sessionID, assistantMsgID, userContent string, ch chan chat.StreamEvent, callerType dispatcher.CallerType) {
 	// Build cancel BEFORE launching so a near-simultaneous retry cannot
 	// register its own cancel before this one — the window would let the
 	// retry cancel itself. context.Background() is deliberate: lifecycle
@@ -600,6 +632,14 @@ func (s *chatServiceImpl) launchGeneration(name, sessionID, assistantMsgID, user
 		prev()
 	}
 
+	s.runGeneration(name, sessionID, assistantMsgID, userContent, ch, callerType, genCtx, cancel)
+}
+
+// runGeneration is the shared goroutine body launchGeneration (takeover)
+// and TriggerHarnessTurn's reject-if-busy path both dispatch through —
+// registration in the activeGen map has already happened by the time this
+// is called; this only owns running the turn and cleaning up afterward.
+func (s *chatServiceImpl) runGeneration(name, sessionID, assistantMsgID, userContent string, ch chan chat.StreamEvent, callerType dispatcher.CallerType, genCtx context.Context, cancel context.CancelFunc) {
 	s.lifecycle.Go(name, func(bgCtx context.Context) {
 		// Bridge lifecycle shutdown (bgCtx) into our takeover-ctx so
 		// generateResponse still aborts on process Shutdown.
@@ -624,7 +664,7 @@ func (s *chatServiceImpl) launchGeneration(name, sessionID, assistantMsgID, user
 			SessionID:      sessionID,
 			AssistantMsgID: assistantMsgID,
 			UserContent:    userContent,
-			CallerType:     dispatcher.CallerChat,
+			CallerType:     callerType,
 		}, ch); err != nil {
 			slog.Error("chat-service: dispatcher.Run rejected request",
 				"session_id", sessionID,
@@ -732,7 +772,7 @@ func (s *chatServiceImpl) HandleMessage(ctx context.Context, sessionID, content 
 	// provider rate-limit budget and look like stalls from the UI
 	// (CW-20260418-0043). The lifecycle manager's shutdown ctx is bridged
 	// inside launchGeneration so process Shutdown still drains cleanly.
-	s.launchGeneration("handleMessage.generateResponse", sessionID, assistantMsgID, content, ch)
+	s.launchGeneration("handleMessage.generateResponse", sessionID, assistantMsgID, content, ch, dispatcher.CallerChat)
 
 	return assistantMsgID, nil
 }
@@ -775,7 +815,7 @@ func (s *chatServiceImpl) RetryLastMessage(ctx context.Context, sessionID string
 	assistantMsgID := uuid.New().String()
 	ch := s.streams.CreateStream(assistantMsgID, sessionID)
 
-	s.launchGeneration("retryLastMessage.generateResponse", sessionID, assistantMsgID, userContent, ch)
+	s.launchGeneration("retryLastMessage.generateResponse", sessionID, assistantMsgID, userContent, ch, dispatcher.CallerChat)
 
 	return assistantMsgID, nil
 }
@@ -805,7 +845,82 @@ func (s *chatServiceImpl) SendAgentMessage(ctx context.Context, fromSessionID, t
 	assistantMsgID := uuid.New().String()
 	ch := s.streams.CreateStream(assistantMsgID, toSessionID)
 
-	s.launchGeneration("sendAgentMessage.generateResponse", toSessionID, assistantMsgID, content, ch)
+	s.launchGeneration("sendAgentMessage.generateResponse", toSessionID, assistantMsgID, content, ch, dispatcher.CallerChat)
+
+	return assistantMsgID, nil
+}
+
+// IsGenerating reports whether a generateResponse goroutine is currently
+// registered for sessionID. Exported read-only wrapper around
+// hasActiveGeneration (CW-20260520-0001) — the Layer-2 completion reactor
+// uses this to skip triggering a harness turn while the session already
+// has a turn in flight ("backoff-aware: do not trigger during an active
+// in-flight turn"). The turn-start injection (CW-20260512-0019) remains
+// the delivery guarantee for whatever turn is already running or comes
+// next.
+func (s *chatServiceImpl) IsGenerating(sessionID string) bool {
+	return s.hasActiveGeneration(sessionID)
+}
+
+// TriggerHarnessTurn enqueues a harness-initiated turn on sessionID — the
+// "react" half of CW-20260520-0001's emit→react model. Unlike
+// SendAgentMessage (a genuine agent-to-agent message), this synthesizes a
+// short instruction prompt; the actual subagent-result content reaches the
+// model via the CW-20260512-0019 turn-start injection, not via this
+// message body, so it isn't duplicated here. A sibling to SendAgentMessage
+// rather than a modification of it — SendAgentMessage's signature has its
+// own callers (internal/api/messages.go) this must not disturb.
+//
+// Reject-if-busy, not takeover: the caller (subagentCompletionReactor)
+// already checks IsGenerating() before calling this, but that check and
+// this call are not atomic — a real user turn can start in between. Using
+// launchGeneration's takeover semantics here would let that race silently
+// cancel the user's in-flight generation (PR #247 review). Registering via
+// registerGenerationIfIdle BEFORE creating the message/stream closes the
+// window: on a losing race this returns ErrSessionBusy and creates
+// nothing, leaving the turn-start injection (CW-20260512-0019) as the
+// delivery guarantee once the user's turn — or the next one — runs.
+//
+// The created message and the CallerBackground caller-type stamp (rather
+// than CallerChat) are how a harness-triggered turn identifies itself
+// downstream — request_build telemetry, the idle-timeout window
+// (chat_loop_state.go), and any future per-CallerType behavior all key off
+// this. A session_events row (EventHarnessTriggeredTurn) is also written
+// so audits can distinguish user-initiated from harness-initiated turns
+// (the ticket's "triggered_by provenance marker" acceptance criterion) —
+// the reason and runID travel in that row's payload since the message
+// row's Metadata JSON is prose-only ("source":"harness" is enough there
+// to keep it out of user-authored-message heuristics).
+func (s *chatServiceImpl) TriggerHarnessTurn(ctx context.Context, sessionID, reason, runID string) (string, error) {
+	assistantMsgID := uuid.New().String()
+	genCtx, cancel := context.WithCancel(context.Background())
+	if !s.registerGenerationIfIdle(sessionID, assistantMsgID, cancel) {
+		cancel()
+		return "", ErrSessionBusy
+	}
+
+	content := "A dispatched subagent has completed. Review the result below and summarize it for the user, noting any concerns."
+	msg := &store.Message{
+		ID:        uuid.New().String(),
+		SessionID: sessionID,
+		Role:      "user",
+		Content:   content,
+		Metadata:  fmt.Sprintf(`{"source":"harness","triggered_by":%q,"run_id":%q}`, reason, runID),
+	}
+	if err := s.store.CreateMessage(msg); err != nil {
+		s.deregisterGeneration(sessionID, assistantMsgID)
+		cancel()
+		return "", fmt.Errorf("create harness-triggered message: %w", err)
+	}
+
+	ch := s.streams.CreateStream(assistantMsgID, sessionID)
+
+	s.runGeneration("triggerHarnessTurn.generateResponse", sessionID, assistantMsgID, content, ch, dispatcher.CallerBackground, genCtx, cancel)
+
+	if s.sessionEventWriter != nil {
+		payload := fmt.Sprintf(`{"triggered_by":%q,"run_id":%q,"assistant_msg_id":%q}`, reason, runID, assistantMsgID)
+		s.sessionEventWriter.WriteSessionEvent(ctx, sessionID, messaging.EventHarnessTriggeredTurn, "", payload)
+	}
 
 	return assistantMsgID, nil
 }

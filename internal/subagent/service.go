@@ -368,16 +368,17 @@ func (svc *Service) replyFromAgentID(role string) (id string, registerAs string)
 // Service coordinates the spawn → run → complete → reply flow.
 // Safe for concurrent use.
 type Service struct {
-	db           *sql.DB
-	runner       Runner
-	poster       MessagePoster
-	approver     ApprovalEmitter
-	settings     SettingsReader
-	streamSink   SubagentStreamSink
+	db            *sql.DB
+	runner        Runner
+	poster        MessagePoster
+	approver      ApprovalEmitter
+	settings      SettingsReader
+	streamSink    SubagentStreamSink
+	reactor       CompletionReactor
 	trustResolver TrustResolverIface
-	eventLogger  EventLogger
-	parentage    ParentageChecker
-	profiles     ProfileResolver
+	eventLogger   EventLogger
+	parentage     ParentageChecker
+	profiles      ProfileResolver
 
 	// cancelers holds a per-run context.CancelFunc keyed by runID so
 	// Cancel(runID) can propagate cancellation into the in-flight
@@ -442,6 +443,12 @@ func (svc *Service) SetProfileResolver(p ProfileResolver) { svc.profiles = p }
 // SetStreamSink wires (or unwires) the G-5 status-event sink. Pass nil
 // to disable emission. Safe to call before any Spawn.
 func (svc *Service) SetStreamSink(s SubagentStreamSink) { svc.streamSink = s }
+
+// SetCompletionReactor wires (or unwires) the CW-20260520-0001 Layer-2
+// harness reaction hook. Pass nil to disable — completions still post
+// their subagent_result message, they just don't get a proactive
+// harness-triggered turn. Safe to call before any Spawn.
+func (svc *Service) SetCompletionReactor(r CompletionReactor) { svc.reactor = r }
 
 // emitStatus marshals the run's current state into a JSON payload and
 // hands it to the configured sink. summaryPreview is passed in because
@@ -1276,19 +1283,44 @@ func (svc *Service) execute(ctx context.Context, run *Run, parentAgentID string)
 	// doc comment for why that collided with the agent_profiles.slug
 	// UNIQUE constraint on every reply.
 	fromAgentID, registerAs := svc.replyFromAgentID(run.Role)
-	if _, err := svc.poster.SendMessage(finalCtx, messaging.SendInput{
+	// CW-20260512-0019: Kind=subagent_result (not the generic KindReply)
+	// so chat_generate.go's turn-start injection and the harness-reaction
+	// layer (CW-20260520-0001) can query for this specifically. Emitted
+	// unconditionally for every mode — sync/interactive completions
+	// already surface in the same turn's tool result, but a durable,
+	// queryable agent_messages row also prevents the c271 failure mode
+	// (a later turn re-deriving/hallucinating a completion it can no
+	// longer see in its own context window).
+	msg, err := svc.poster.SendMessage(finalCtx, messaging.SendInput{
 		FromSessionID: run.ParentSessionID,
 		FromAgentID:   fromAgentID, // the subagent is the sender
 		ToSessionID:   run.ParentSessionID,
 		ToAgentID:     parentAgentID,
 		Channel:       replyChannel,
-		Kind:          messaging.KindReply,
+		Kind:          messaging.KindSubagentResult,
 		Body:          summary,
 		PayloadJSON:   resultPayload,
 		Type:          messaging.TypeMessage,
 		RegisterAs:    registerAs,
-	}); err != nil {
+	})
+	if err != nil {
 		slog.Warn("subagent: reply delivery", "err", err, "run_id", run.ID)
+		return
+	}
+	// CW-20260520-0001 (Layer 2): let the harness react to this
+	// completion (e.g. proactively trigger a summarizing turn on the
+	// parent session per its configured policy). Only meaningful for
+	// modes where the parent's turn has already ended (async/api) — for
+	// sync/interactive the parent turn is still active, so the reactor's
+	// own busy-check naturally no-ops. Fire-and-forget in its own
+	// goroutine so a slow/misbehaving reactor never blocks finalizeRun's
+	// caller.
+	if svc.reactor != nil {
+		runCopy := run
+		msgID := msg.ID
+		safego.Go(context.Background(), "subagent.completion-reactor", func() {
+			svc.reactor.ReactToCompletion(context.Background(), runCopy, msgID)
+		})
 	}
 }
 

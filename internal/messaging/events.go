@@ -7,10 +7,10 @@
 //
 // For T8 the event types are:
 //
-//   message_sent      — recorded on the sender's session
-//   message_received  — recorded on the recipient's session
-//   message_acked     — recorded on the recipient's session on ack
-//   message_resolved  — recorded on the recipient's session on resolve
+//	message_sent      — recorded on the sender's session
+//	message_received  — recorded on the recipient's session
+//	message_acked     — recorded on the recipient's session on ack
+//	message_resolved  — recorded on the recipient's session on resolve
 //
 // Cross-session sends produce two rows (one per session). Same-
 // session sends still produce two rows — "you sent" and "you
@@ -50,6 +50,14 @@ const (
 	// table carries a queryable record of when and why compaction ran.
 	EventContextPreCompact  = "context_pre_compact"
 	EventContextPostCompact = "context_post_compact"
+
+	// EventHarnessTriggeredTurn (CW-20260520-0001, Layer 2) is written
+	// whenever the harness — not the user — enqueues a chat turn (e.g. an
+	// auto_summarize reaction to a subagent completion). Written by the
+	// chat-service layer via WriteSessionEvent; the payload carries the
+	// trigger reason so replay/audit tooling can distinguish
+	// harness-initiated from user-initiated turns.
+	EventHarnessTriggeredTurn = "harness_triggered_turn"
 )
 
 // SessionEvent is a single row in session_events, surfaced for

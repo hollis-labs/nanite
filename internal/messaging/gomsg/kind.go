@@ -9,22 +9,25 @@ import messaging "github.com/hollis-labs/go-messaging"
 //
 // Legacy → shared:
 //
-//	request      → request
-//	reply        → response
-//	notification → notice
-//	handoff      → handoff
+//	request          → request
+//	reply            → response
+//	notification     → notice
+//	handoff          → handoff
+//	subagent_result  → status_update
 //
-// The shared enum additionally has status_update and escalation, which
-// have no legacy Kind equivalent — the legacy model expressed those as
-// the row-level `type` column (status_update, help_request). FromGoKind
-// folds them back onto "notification" so a round-trip never produces an
-// invalid legacy Kind.
+// The shared enum additionally has escalation, which has no legacy Kind
+// equivalent — the legacy model expressed that as the row-level `type`
+// column (status_update, help_request). FromGoKind folds it back onto
+// "notification" so a round-trip never produces an invalid legacy Kind.
+// status_update round-trips onto subagent_result (CW-20260512-0019) —
+// it is the only legacy producer of that shared kind today.
 
 var legacyToGo = map[string]messaging.Kind{
-	"request":      messaging.MsgKindRequest,
-	"reply":        messaging.MsgKindResponse,
-	"notification": messaging.MsgKindNotice,
-	"handoff":      messaging.MsgKindHandoff,
+	"request":         messaging.MsgKindRequest,
+	"reply":           messaging.MsgKindResponse,
+	"notification":    messaging.MsgKindNotice,
+	"handoff":         messaging.MsgKindHandoff,
+	"subagent_result": messaging.MsgKindStatusUpdate,
 }
 
 var goToLegacy = map[messaging.Kind]string{
@@ -32,7 +35,7 @@ var goToLegacy = map[messaging.Kind]string{
 	messaging.MsgKindResponse:     "reply",
 	messaging.MsgKindNotice:       "notification",
 	messaging.MsgKindHandoff:      "handoff",
-	messaging.MsgKindStatusUpdate: "notification",
+	messaging.MsgKindStatusUpdate: "subagent_result",
 	messaging.MsgKindEscalation:   "notification",
 }
 

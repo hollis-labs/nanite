@@ -16,6 +16,7 @@ func TestKindMapping_Roundtrip(t *testing.T) {
 		{"reply", messaging.MsgKindResponse},
 		{"notification", messaging.MsgKindNotice},
 		{"handoff", messaging.MsgKindHandoff},
+		{"subagent_result", messaging.MsgKindStatusUpdate},
 	}
 	for _, c := range cases {
 		if got := gomsg.ToGoKind(c.legacy); got != c.shared {
@@ -33,10 +34,12 @@ func TestToGoKind_UnknownDefaultsToNotice(t *testing.T) {
 	}
 }
 
-func TestFromGoKind_SharedOnlyKindsFoldToNotification(t *testing.T) {
-	for _, k := range []messaging.Kind{messaging.MsgKindStatusUpdate, messaging.MsgKindEscalation} {
-		if got := gomsg.FromGoKind(k); got != "notification" {
-			t.Errorf("FromGoKind(%q) = %q, want notification", k, got)
-		}
+// TestFromGoKind_EscalationFoldsToNotification covers the one shared kind
+// that still has no legacy equivalent — status_update round-trips onto
+// subagent_result now (CW-20260512-0019) and is covered by
+// TestKindMapping_Roundtrip instead.
+func TestFromGoKind_EscalationFoldsToNotification(t *testing.T) {
+	if got := gomsg.FromGoKind(messaging.MsgKindEscalation); got != "notification" {
+		t.Errorf("FromGoKind(escalation) = %q, want notification", got)
 	}
 }

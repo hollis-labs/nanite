@@ -2,6 +2,7 @@ package agentworkflow
 
 import (
 	"reflect"
+	"sort"
 	"testing"
 )
 
@@ -107,5 +108,36 @@ func TestRequiredInputs_NoReferences_ReturnsEmpty(t *testing.T) {
 	}
 	if got := RequiredInputs(def); len(got) != 0 {
 		t.Errorf("RequiredInputs = %v, want empty", got)
+	}
+}
+
+// TestRequiredInputs_NonAlnumKeyShapes is the regression pin for the PR
+// #246 Copilot review finding: the engine's resolveTemplateRef
+// (internal/service/workflow_engine.go) does a bare
+// strings.TrimPrefix(ref, "input.") with no restriction on the key's
+// character set — a key can contain hyphens, dots, or anything else that
+// isn't "}". An earlier version of this scanner narrowed the key to
+// [a-zA-Z0-9_]+, which silently missed real references like
+// {{input.task-id}} — workflow_run would never catch a missing one of
+// these at the preflight stage, only after the run had already started.
+func TestRequiredInputs_NonAlnumKeyShapes(t *testing.T) {
+	def := WorkflowDefinition{
+		Steps: []StepDefinition{
+			{
+				ID: "a",
+				Config: map[string]any{
+					"hyphen": "{{input.task-id}}",
+					"dotted": "{{input.repo.branch}}",
+					"mixed":  "{{ input.some-key.with.dots_and_9 }}",
+				},
+			},
+		},
+	}
+	got := RequiredInputs(def)
+	want := []string{"repo.branch", "some-key.with.dots_and_9", "task-id"}
+	sortedGot := append([]string(nil), got...)
+	sort.Strings(sortedGot)
+	if !reflect.DeepEqual(sortedGot, want) {
+		t.Errorf("RequiredInputs = %v (sorted %v), want %v", got, sortedGot, want)
 	}
 }

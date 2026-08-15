@@ -3,16 +3,20 @@ package agentworkflow
 import (
 	"regexp"
 	"sort"
+	"strings"
 )
 
-// requiredInputRefPattern matches a {{input.<key>}} template reference the
-// same way the built-in engine's step-config resolver does (see
-// internal/service/workflow_engine.go's templateRefPattern + the
-// "input."-prefixed branch of resolveTemplateRef), narrowed to only the
-// input.<key> shape — a steps.<id>.<field> reference isn't a caller-
-// supplied param, so it's not "required input" in the sense this file cares
-// about.
-var requiredInputRefPattern = regexp.MustCompile(`\{\{\s*input\.([a-zA-Z0-9_]+)\s*\}\}`)
+// templateRefPattern mirrors internal/service/workflow_engine.go's pattern
+// of the same name byte-for-byte — captures everything between {{ }}
+// (anything but a closing brace), with no restriction on the captured
+// content. The engine's resolveTemplateRef then does a bare
+// strings.TrimPrefix(ref, "input.") with no further validation on the key
+// shape, so a key can contain hyphens, dots, or anything else that isn't
+// "}". An earlier version of this file narrowed the key to [a-zA-Z0-9_]+,
+// which silently missed real references like {{input.task-id}} — this
+// pattern + the prefix-strip below must stay in lock-step with the
+// engine's actual parsing, not a guessed-at subset of it.
+var templateRefPattern = regexp.MustCompile(`\{\{\s*([^}]+?)\s*\}\}`)
 
 // RequiredInputs statically scans every step's Config for {{input.<key>}}
 // template references and returns the referenced keys, deduplicated, in
@@ -45,12 +49,17 @@ func RequiredInputs(def WorkflowDefinition) []string {
 func scanConfigForInputRefs(v any, seen map[string]bool, keys *[]string) {
 	switch val := v.(type) {
 	case string:
-		for _, m := range requiredInputRefPattern.FindAllStringSubmatch(val, -1) {
-			key := m[1]
-			if !seen[key] {
-				seen[key] = true
-				*keys = append(*keys, key)
+		for _, m := range templateRefPattern.FindAllStringSubmatch(val, -1) {
+			ref := m[1]
+			if !strings.HasPrefix(ref, "input.") {
+				continue // e.g. steps.<id>.<field> — not a caller-supplied param
 			}
+			key := strings.TrimPrefix(ref, "input.")
+			if key == "" || seen[key] {
+				continue
+			}
+			seen[key] = true
+			*keys = append(*keys, key)
 		}
 	case map[string]any:
 		mkeys := make([]string, 0, len(val))

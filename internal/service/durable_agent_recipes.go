@@ -23,6 +23,7 @@ const (
 	DurableAgentRecipeKindManagedCLIHarness = "managed_cli_harness"
 	DurableAgentRecipeKindProcessMonitor    = "process_monitor"
 	DurableAgentRecipeKindTemplateWorker    = "template_worker"
+	DurableAgentRecipeKindOrchestrator      = "orchestrator"
 )
 
 var (
@@ -460,6 +461,55 @@ func builtinDurableAgentRecipes() []DurableAgentRecipe {
 				recipeTextareaInput("boot_plan_hint", "Boot plan hint", "metadata.boot_plan_hint", false, "Preview-only non-secret note about files, prompts, or setup the harness should eventually plant."),
 			},
 			Tags: []string{"cli", "harness"},
+		},
+		{
+			// Profile pairing: operator selects the `orchestrator` AgentProfile
+			// (.nanite/agents/orchestrator.md) at apply-time. Its roleTools are
+			// the one place in this whole role family that DOES include
+			// subagent_spawn/workflow_run — by design, this is the only role
+			// permitted to dispatch (Planner/PM/Reviewer must never get these).
+			ID:               "orchestrator",
+			SchemaVersion:    DurableAgentRecipeSchemaVersion,
+			Kind:             DurableAgentRecipeKindOrchestrator,
+			Name:             "Orchestrator",
+			Description:      "Long-lived executive: polls Torque task state and dispatches ready work via workflow_run/subagent_spawn, waiting on Reviewer/gate clearance before advancing dependents.",
+			LifecycleClass:   store.DurableAgentClassHarness,
+			ProfileRule:      "operator_selected",
+			Provider:         "anthropic",
+			Model:            "",
+			RuntimeKind:      string(runtimekind.API),
+			LaunchSourceType: store.DurableAgentLaunchAPIChat,
+			WakeDefaults: DurableAgentWakePayload{
+				Reason: DurableAgentWakeManual,
+				Facts: map[string]string{
+					"story": "orchestrator",
+				},
+			},
+			Metadata: map[string]string{
+				"product_story":      "orchestrator",
+				"exposure_surface":   "internal_chat_and_harness_v1",
+				"integration_status": "operator_managed",
+				"role_boundary":      "polls_torque_task_status_dispatches_via_workflow_run_or_subagent_spawn",
+			},
+			Injections: []RecipeInjectionPlan{{
+				ID:          "dispatch-scope-brief",
+				Kind:        "planned_context",
+				Target:      "wake_payload.facts",
+				Description: "Future Torque project/tag scope filter or workflow-mapping policy surfaced as non-secret wake facts.",
+			}},
+			Inputs: []DurableAgentRecipeInput{
+				recipeStringInput("name", "Name", "durable_agent.name", true, "Orchestrator"),
+				recipeStringInput("slug", "Slug", "durable_agent.slug", false, "orchestrator"),
+				recipeProfileInput(true),
+				recipeProviderInput(false, "anthropic"),
+				recipeModelInput(false, ""),
+				recipeRuntimeKindInput(false, string(runtimekind.API)),
+				recipePathInput("work_root", "Work root", "durable_agent.work_root", false, "~/dev/project"),
+				recipeStringInput("torque_project_id", "Torque project ID", "metadata.torque_project_id", true, "PRJ-20260417-0002"),
+				recipeTextareaInput("dispatch_scope_notes", "Dispatch scope notes", "metadata.dispatch_scope_notes", false, "Which tags/task shapes map to which shipped WorkflowDefinition (workflow_run) vs freeform dispatch (subagent_spawn); any project/tag filter to scope polling."),
+				recipeTextareaInput("wake_prompt", "Wake prompt", "wake_payload.prompt", false, "Optional kickoff instructions for the orchestrator (e.g. which project/plan to start walking)."),
+			},
+			Tags: []string{"harness", "orchestrator", "dispatch", "product"},
 		},
 		{
 			// Profile pairing: operator selects the `task-planner` AgentProfile

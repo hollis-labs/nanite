@@ -26,6 +26,7 @@ These remain backward compatible:
 These are the richer operator-facing recipes:
 
 - `architect-advisor`
+- `orchestrator`
 - `planner`
 - `project-manager`
 - `proxima-relay`
@@ -43,6 +44,7 @@ These are the richer operator-facing recipes:
 | `project-manager` | `advisor` | `api` | Work-coordination advisor: monitors task/dependency state, surfaces blockers, recommends dispatch timing |
 | `proxima-relay` | `advisor` | `api` | Operator-facing concierge / relay durable agent |
 | `managed-cli-harness` | `harness` | `streaming-stdio` | Managed headless CLI durable session |
+| `orchestrator` | `harness` | `api` | Long-lived executive: polls Torque, dispatches ready work via workflow_run/subagent_spawn |
 | `planner` | `template` | `api` | One-shot sequencing pass: goal/design doc → dependency-ordered Torque tasks |
 | `process-monitor` | `process` | `api` | Substrate process monitor with fresh wake sessions |
 | `system-monitor` | `process` | `api` | Product monitor with explicit wake-pass scheduling stance |

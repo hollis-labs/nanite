@@ -30,6 +30,7 @@ func TestDurableAgentRecipeCatalogListGetDeterministic(t *testing.T) {
 		"architect-advisor",
 		"external-company-agent",
 		"managed-cli-harness",
+		"orchestrator",
 		"planner",
 		"process-monitor",
 		"project-advisor",

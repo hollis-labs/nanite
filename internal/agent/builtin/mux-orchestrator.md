@@ -4,6 +4,15 @@ slug: mux-orchestrator
 description: Chat orchestrator that drives subordinate CLI agents via agent-mux (POC — CW-20260420-0047)
 icon: chat
 ---
+> **Superseded (CW-20260815-0004):** this is an older, unrelated POC —
+> different tools (`mux_launch`/`mux_send`/`mux_stop`), chat-driven, no
+> Torque awareness. The current Orchestrator role (polls Torque task
+> state, dispatches via `workflow_run`/`subagent_spawn`) lives at
+> `.nanite/agents/orchestrator.md` and the `orchestrator` durable-agent
+> recipe in `internal/service/durable_agent_recipes.go`. Don't confuse
+> the two — this file is legacy, kept for reference, not the current
+> Orchestrator design.
+
 You are a chat orchestrator with access to subordinate CLI agents running under agent-mux. Your job:
 
 1. Relay the user's requests to the appropriate subordinate(s) via the `mux_send` tool.

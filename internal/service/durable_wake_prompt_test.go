@@ -9,11 +9,11 @@ import (
 	"github.com/hollis-labs/nanite/internal/store"
 )
 
-// TestDurableAgentStartDeliversWakePromptAsFirstTurn covers CW-20260814-0013:
+// TestDurableAgentStartDeliversWakePromptAsUserTurn covers CW-20260814-0013:
 // DurableAgentWakePayload.Prompt must reach the launched session as a real
 // user turn (via the runtime controller's SendMessage), not just sit in
 // session metadata.
-func TestDurableAgentStartDeliversWakePromptAsFirstTurn(t *testing.T) {
+func TestDurableAgentStartDeliversWakePromptAsUserTurn(t *testing.T) {
 	st := newDurableAgentServiceTestStore(t)
 	profile := &store.AgentProfile{Name: "Wake Prompt Agent", Slug: "wake-prompt-agent", SystemPrompt: "x"}
 	if err := st.CreateAgent(profile); err != nil {
@@ -89,10 +89,11 @@ func TestDurableAgentStartWithEmptyPromptDoesNotDeliverMessage(t *testing.T) {
 	}
 }
 
-// TestDurableAgentResumeDeliversWakePromptAsFirstTurn covers the resume path:
-// a wake against an already-attached session must also deliver a non-empty
-// Prompt as a real turn on the reattached session.
-func TestDurableAgentResumeDeliversWakePromptAsFirstTurn(t *testing.T) {
+// TestDurableAgentResumeDeliversWakePromptAsUserTurn covers the resume path:
+// a wake against an already-attached (possibly non-empty) session must also
+// deliver a non-empty Prompt as a real turn on the reattached session — it
+// is not necessarily the session's first message overall.
+func TestDurableAgentResumeDeliversWakePromptAsUserTurn(t *testing.T) {
 	st := newDurableAgentServiceTestStore(t)
 	profile := &store.AgentProfile{Name: "Resume Prompt Agent", Slug: "resume-prompt-agent", SystemPrompt: "x"}
 	if err := st.CreateAgent(profile); err != nil {

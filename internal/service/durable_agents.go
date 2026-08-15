@@ -478,7 +478,7 @@ func (s *durableAgentService) deliverWakePrompt(ctx context.Context, sessionID, 
 		return
 	}
 	if err := s.runtime.SendMessage(ctx, sessionID, prompt); err != nil {
-		slog.Warn("durable agent wake: failed to deliver wake prompt as first turn",
+		slog.Warn("durable agent wake: failed to deliver wake prompt as a user turn",
 			"session_id", sessionID, "err", err)
 	}
 }

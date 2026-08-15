@@ -90,9 +90,11 @@ func TestBuiltinReflexes_Count(t *testing.T) {
 // (and the fail-fast Spawn gate from CW-20260519-0123, which also
 // rejects unknown roles at the spawn boundary).
 var dispatchableProfileSlugs = map[string]bool{
-	"":        true, // empty → AssignRole default (worker or planner)
-	"worker":  true,
-	"planner": true,
+	"":           true, // empty → AssignRole default (worker or planner)
+	"worker":     true,
+	"planner":    true,
+	"researcher": true,
+	"reviewer":   true,
 }
 
 // TestBuiltinReflexes_ProfileResolves guards against the broker-v1 failure

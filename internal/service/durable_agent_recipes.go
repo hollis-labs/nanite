@@ -23,6 +23,7 @@ const (
 	DurableAgentRecipeKindManagedCLIHarness = "managed_cli_harness"
 	DurableAgentRecipeKindProcessMonitor    = "process_monitor"
 	DurableAgentRecipeKindTemplateWorker    = "template_worker"
+	DurableAgentRecipeKindOrchestrator      = "orchestrator"
 )
 
 var (
@@ -462,6 +463,109 @@ func builtinDurableAgentRecipes() []DurableAgentRecipe {
 			Tags: []string{"cli", "harness"},
 		},
 		{
+			// Profile pairing: operator selects the `orchestrator` AgentProfile
+			// (.nanite/agents/orchestrator.md) at apply-time. Its roleTools are
+			// the one place in this whole role family that DOES include
+			// subagent_spawn/workflow_run — by design, this is the only role
+			// permitted to dispatch (Planner/PM/Reviewer must never get these).
+			ID:               "orchestrator",
+			SchemaVersion:    DurableAgentRecipeSchemaVersion,
+			Kind:             DurableAgentRecipeKindOrchestrator,
+			Name:             "Orchestrator",
+			Description:      "Long-lived executive: polls Torque task state and dispatches ready work via workflow_run/subagent_spawn, waiting on Reviewer/gate clearance before advancing dependents.",
+			LifecycleClass:   store.DurableAgentClassHarness,
+			ProfileRule:      "operator_selected",
+			Provider:         "anthropic",
+			Model:            "",
+			RuntimeKind:      string(runtimekind.API),
+			LaunchSourceType: store.DurableAgentLaunchAPIChat,
+			WakeDefaults: DurableAgentWakePayload{
+				Reason: DurableAgentWakeManual,
+				Facts: map[string]string{
+					"story": "orchestrator",
+				},
+			},
+			Metadata: map[string]string{
+				"product_story":      "orchestrator",
+				"exposure_surface":   "internal_chat_and_harness_v1",
+				"integration_status": "operator_managed",
+				"role_boundary":      "polls_torque_task_status_dispatches_via_workflow_run_or_subagent_spawn",
+			},
+			Injections: []RecipeInjectionPlan{{
+				ID:          "dispatch-scope-brief",
+				Kind:        "planned_context",
+				Target:      "wake_payload.facts",
+				Description: "Future Torque project/tag scope filter or workflow-mapping policy surfaced as non-secret wake facts.",
+			}},
+			Inputs: []DurableAgentRecipeInput{
+				recipeStringInput("name", "Name", "durable_agent.name", true, "Orchestrator"),
+				recipeStringInput("slug", "Slug", "durable_agent.slug", false, "orchestrator"),
+				recipeProfileInput(true),
+				recipeProviderInput(false, "anthropic"),
+				recipeModelInput(false, ""),
+				recipeRuntimeKindInput(false, string(runtimekind.API)),
+				recipePathInput("work_root", "Work root", "durable_agent.work_root", false, "~/dev/project"),
+				recipeStringInput("torque_project_id", "Torque project ID", "metadata.torque_project_id", true, "PRJ-20260417-0002"),
+				recipeTextareaInput("dispatch_scope_notes", "Dispatch scope notes", "metadata.dispatch_scope_notes", false, "Which tags/task shapes map to which shipped WorkflowDefinition (workflow_run) vs freeform dispatch (subagent_spawn); any project/tag filter to scope polling."),
+				recipeTextareaInput("wake_prompt", "Wake prompt", "wake_payload.prompt", false, "Optional kickoff instructions for the orchestrator (e.g. which project/plan to start walking)."),
+			},
+			Tags: []string{"harness", "orchestrator", "dispatch", "product"},
+		},
+		{
+			// Profile pairing: operator selects the `task-planner` AgentProfile
+			// (.nanite/agents/task-planner.md) at apply-time — NOT the existing
+			// `planner` AgentProfile slug. That slug is reserved for the
+			// Phase-6 cognition-arc stub (internal/agent/builtin/profiles/planner.md,
+			// deliberately tool-less, resolved via dispatch.PlannerRoleSlug for
+			// reflex-routed decomposition) and is a different role entirely —
+			// reusing it here would silently overwrite that migration-tracked
+			// identity at boot-time upsert. `task-planner`'s roleTools grant
+			// full Torque task-lifecycle write access but exclude
+			// subagent_spawn/workflow_run (Planner produces the plan; it never
+			// dispatches it — that's the Orchestrator's job).
+			ID:               "planner",
+			SchemaVersion:    DurableAgentRecipeSchemaVersion,
+			Kind:             DurableAgentRecipeKindTemplateWorker,
+			Name:             "Planner",
+			Description:      "A one-shot sequencing pass: given a scoped goal or a design doc, produces a dependency-ordered set of Torque tasks with embedded boot prompts.",
+			LifecycleClass:   store.DurableAgentClassTemplate,
+			ProfileRule:      "operator_selected",
+			Provider:         "anthropic",
+			Model:            "",
+			RuntimeKind:      string(runtimekind.API),
+			LaunchSourceType: store.DurableAgentLaunchTaskTemplateRun,
+			WakeDefaults: DurableAgentWakePayload{
+				Reason: DurableAgentWakeLifecycleStart,
+				Facts: map[string]string{
+					"story": "planner",
+				},
+			},
+			Metadata: map[string]string{
+				"product_story":      "planner",
+				"run_shape":          "fresh_template_run",
+				"integration_status": "operator_managed",
+			},
+			Injections: []RecipeInjectionPlan{{
+				ID:          "plan-brief",
+				Kind:        "planned_native_file",
+				Target:      "tasks/plan-brief.md",
+				Description: "Future non-secret goal/design-doc brief planted for planner runs.",
+			}},
+			Inputs: []DurableAgentRecipeInput{
+				recipeStringInput("name", "Name", "durable_agent.name", true, "Planner"),
+				recipeStringInput("slug", "Slug", "durable_agent.slug", false, "planner"),
+				recipeProfileInput(true),
+				recipeProviderInput(false, "anthropic"),
+				recipeModelInput(false, ""),
+				recipeRuntimeKindInput(false, string(runtimekind.API)),
+				recipePathInput("work_root", "Work root", "durable_agent.work_root", false, "~/dev/project"),
+				recipeStringInput("torque_project_id", "Torque project ID", "metadata.torque_project_id", true, "PRJ-20260417-0002"),
+				recipeTextareaInput("goal_or_design_doc", "Goal or design doc", "wake_payload.prompt", true, "The scoped goal to sequence, or a pointer to an Architect's design doc (file path or Torque task ID) to turn into a dependency-ordered task set."),
+				recipeTextareaInput("boot_knowledge_hint", "Boot knowledge hint", "metadata.boot_knowledge_hint", false, "Preview-only non-secret notes about conventions, prior sprints, or related tasks this Planner should be aware of."),
+			},
+			Tags: []string{"template", "planner", "sequencing", "product"},
+		},
+		{
 			ID:               "process-monitor",
 			SchemaVersion:    DurableAgentRecipeSchemaVersion,
 			Kind:             DurableAgentRecipeKindProcessMonitor,
@@ -536,6 +640,59 @@ func builtinDurableAgentRecipes() []DurableAgentRecipe {
 			Tags: []string{"advisor", "project"},
 		},
 		{
+			// Profile pairing: operator selects the `project-manager` AgentProfile
+			// (.nanite/agents/project-manager.md) at apply-time — its roleTools
+			// already excludes subagent_spawn/workflow_run, which must stay
+			// excluded (PM coordinates; it never dispatches). The older
+			// `agridd-project-manager` profile is the POC this was generalized
+			// from and is slated for retirement; new applies should use this one.
+			ID:               "project-manager",
+			SchemaVersion:    DurableAgentRecipeSchemaVersion,
+			Kind:             DurableAgentRecipeKindProjectAdvisor,
+			Name:             "Project Manager",
+			Description:      "A reusable work-coordination advisor that monitors task/dependency state, surfaces blockers and stalls, and recommends dispatch timing — coordinates, never executes or dispatches.",
+			LifecycleClass:   store.DurableAgentClassAdvisor,
+			ProfileRule:      "operator_selected",
+			Provider:         "anthropic",
+			Model:            "",
+			RuntimeKind:      string(runtimekind.API),
+			LaunchSourceType: store.DurableAgentLaunchDurableAdvisor,
+			WakeDefaults: DurableAgentWakePayload{
+				Reason: DurableAgentWakeManual,
+				Facts: map[string]string{
+					"story": "project_manager",
+				},
+			},
+			Metadata: map[string]string{
+				"product_story":      "project_manager",
+				"exposure_surface":   "internal_chat_and_harness_v1",
+				"integration_status": "operator_managed",
+				"role_boundary":      "coordinates_only_no_dispatch",
+			},
+			Injections: []RecipeInjectionPlan{{
+				ID:          "workstate-brief",
+				Kind:        "planned_context",
+				Target:      "wake_payload.facts",
+				Description: "Future Torque work-state snapshot or blocker summary surfaced as non-secret wake facts.",
+			}},
+			Inputs: []DurableAgentRecipeInput{
+				recipeStringInput("name", "Name", "durable_agent.name", true, "Project Manager"),
+				recipeStringInput("slug", "Slug", "durable_agent.slug", false, "project-manager"),
+				recipeProfileInput(true),
+				recipeProviderInput(false, "anthropic"),
+				recipeModelInput(false, ""),
+				recipeRuntimeKindInput(false, string(runtimekind.API)),
+				recipePathInput("work_root", "Work root", "durable_agent.work_root", false, "~/dev/project"),
+				recipeStringInput("project_scope", "Project scope", "metadata.project_scope", true, "nanite"),
+				recipeStringInput("torque_project_filter", "Torque project ID / filter", "metadata.torque_project_filter", false, "PRJ-20260417-0002"),
+				recipeStringInput("schedule_hint", "Schedule / cadence hint", "metadata.schedule_hint", false, "cron: 0 9,17 * * 1-5 (twice daily, weekdays)"),
+				recipeTextareaInput("escalation_notes", "Escalation notes", "metadata.escalation_notes", false, "Optional thresholds/recipients for blocker escalation, if different from defaults (doing >48h, review >24h, sprint budget <20%)."),
+				recipeTextareaInput("boot_knowledge_hint", "Boot knowledge hint", "metadata.boot_knowledge_hint", false, "Preview-only non-secret notes about institutional-memory docs (followups, sprint/plan files) this PM should read on first boot."),
+				recipeTextareaInput("wake_prompt", "Wake prompt", "wake_payload.prompt", false, "Optional kickoff instructions for the project manager."),
+			},
+			Tags: []string{"advisor", "project-manager", "work-coordination", "product"},
+		},
+		{
 			ID:               "proxima-relay",
 			SchemaVersion:    DurableAgentRecipeSchemaVersion,
 			Kind:             DurableAgentRecipeKindProjectAdvisor,
@@ -579,6 +736,55 @@ func builtinDurableAgentRecipes() []DurableAgentRecipe {
 				recipeTextareaInput("wake_prompt", "Wake prompt", "wake_payload.prompt", false, "Optional kickoff prompt for the relay/concierge agent."),
 			},
 			Tags: []string{"advisor", "relay", "concierge", "product"},
+		},
+		{
+			// Profile pairing: operator selects the existing `reviewer`
+			// AgentProfile (internal/agent/builtin/profiles/reviewer.md) at
+			// apply-time — reused, not duplicated, per the ticket's explicit
+			// ask. Distinct from `code-auditor`: reviewer is
+			// acceptance-criteria-driven (the parent supplies criteria),
+			// code-auditor is rubric-driven. Don't conflate the two.
+			ID:               "reviewer",
+			SchemaVersion:    DurableAgentRecipeSchemaVersion,
+			Kind:             DurableAgentRecipeKindTemplateWorker,
+			Name:             "Reviewer",
+			Description:      "A one-shot, freeform (non-workflow) acceptance-criteria review pass: audits a delivered work product against stated criteria and reports a structured verdict.",
+			LifecycleClass:   store.DurableAgentClassTemplate,
+			ProfileRule:      "operator_selected",
+			Provider:         "anthropic",
+			Model:            "",
+			RuntimeKind:      string(runtimekind.API),
+			LaunchSourceType: store.DurableAgentLaunchTaskTemplateRun,
+			WakeDefaults: DurableAgentWakePayload{
+				Reason: DurableAgentWakeLifecycleStart,
+				Facts: map[string]string{
+					"story": "reviewer",
+				},
+			},
+			Metadata: map[string]string{
+				"product_story":      "reviewer",
+				"run_shape":          "fresh_template_run",
+				"integration_status": "operator_managed",
+				"review_mode":        "acceptance_criteria_freeform",
+			},
+			Injections: []RecipeInjectionPlan{{
+				ID:          "review-brief",
+				Kind:        "planned_native_file",
+				Target:      "tasks/review-brief.md",
+				Description: "Future non-secret work-product pointer or acceptance-criteria brief planted for standalone reviewer runs.",
+			}},
+			Inputs: []DurableAgentRecipeInput{
+				recipeStringInput("name", "Name", "durable_agent.name", true, "Reviewer"),
+				recipeStringInput("slug", "Slug", "durable_agent.slug", false, "reviewer"),
+				recipeProfileInput(true),
+				recipeProviderInput(false, "anthropic"),
+				recipeModelInput(false, ""),
+				recipeRuntimeKindInput(false, string(runtimekind.API)),
+				recipePathInput("work_root", "Work root", "durable_agent.work_root", false, "~/dev/project"),
+				recipeStringInput("torque_task_id", "Torque task ID", "metadata.torque_task_id", true, "CW-20260815-0001"),
+				recipeTextareaInput("review_subject", "Review subject and acceptance criteria", "wake_payload.prompt", true, "What to review (the work product — diff, commit, PR, deliverable) and the acceptance criteria to check it against. A review without stated criteria is opinion dressed up as judgment."),
+			},
+			Tags: []string{"template", "reviewer", "acceptance-criteria", "product"},
 		},
 		{
 			ID:               "system-monitor",

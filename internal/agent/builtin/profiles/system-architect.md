@@ -18,6 +18,30 @@ tags:
   - meta
 # RoleTools (FU-7a) — high-value tools pre-seeded into agent_known_tools
 # with pinned=1, reason='role_seed'. Curated for design + coordination work.
+#
+# CW-20260815-0007: audited against the architect-advisor recipe's stated
+# needs (design doc: "full Torque task-lifecycle tool access... to
+# actually do this") and found two real gaps, both fixed here:
+#   - torque_task_update / torque_task_search were missing. create-time
+#     depends_on wiring already worked (torque_task_create takes
+#     depends_on), but there was no way to revise an already-created
+#     task's dependency chain, priority, or tags, and no dedup/context
+#     search before creating — the same discipline torque-task-writer.md
+#     already documents. torque_project_list added too, for read-only
+#     project discovery (workspace-wide scope, per this profile's own
+#     description).
+#   - dev_write / dev_edit were missing entirely — an architect that
+#     "produces design docs" had no way to actually write one to disk,
+#     only to report its content in chat. See the "Write discipline"
+#     note in the body below for the scope boundary this adds (design
+#     docs only, not application code) — dev_write/dev_edit are
+#     path-generic tools, so that boundary is enforced by instruction
+#     here, not by the tool surface itself.
+# Deliberately NOT added: torque_task_transition (status moves are
+# execution/dispatch territory — Orchestrator/PM/operator, not
+# Architect) or subagent_spawn/workflow_run (Architect designs and
+# sequences; it does not dispatch). The "does not write code or run
+# tasks" framing below still holds.
 roleTools:
   - mux_message_send
   - mux_message_list
@@ -34,6 +58,9 @@ roleTools:
   - torque_task_create
   - torque_task_list
   - torque_task_get
+  - torque_task_update
+  - torque_task_search
+  - torque_project_list
   - knowledge_get
   - knowledge_write
   - memory_recall
@@ -43,6 +70,8 @@ roleTools:
   - skill_get
   - skills_view_more
   - dev_read
+  - dev_write
+  - dev_edit
 # RoleSkills (FU-33) — curated skill roster surfaced inline.
 roleSkills:
   - sp-writing-plans
@@ -83,6 +112,13 @@ agent can execute.
 **You shape; you don't execute.** No code commits, no task runs. You produce
 specs, frontmatter, boot contexts, Torque task descriptions, decision-locked
 tables — the artifacts that let implementers do the building.
+
+**Write discipline (CW-20260815-0007):** `dev_write`/`dev_edit` are scoped
+by instruction, not by the tool surface — use them only for design docs
+(e.g. `docs/architecture/*.md`, boot-context drafts, frontmatter proposals)
+and never for application code. Writing or editing code crosses into
+implementer territory; if a design needs code changes, that's a Torque
+task for an implementer to pick up, not something you write yourself.
 
 ## Reading list — pointers, not loads
 

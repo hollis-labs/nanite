@@ -26,6 +26,7 @@ These remain backward compatible:
 These are the richer operator-facing recipes:
 
 - `architect-advisor`
+- `project-manager`
 - `proxima-relay`
 - `system-monitor`
 - `task-writer`
@@ -38,6 +39,7 @@ These are the richer operator-facing recipes:
 |---|---|---|---|
 | `project-advisor` | `advisor` | `api` | Reusable project/topic advisor durable agent |
 | `architect-advisor` | `advisor` | `api` | System design / architecture partner |
+| `project-manager` | `advisor` | `api` | Work-coordination advisor: monitors task/dependency state, surfaces blockers, recommends dispatch timing |
 | `proxima-relay` | `advisor` | `api` | Operator-facing concierge / relay durable agent |
 | `managed-cli-harness` | `harness` | `streaming-stdio` | Managed headless CLI durable session |
 | `process-monitor` | `process` | `api` | Substrate process monitor with fresh wake sessions |

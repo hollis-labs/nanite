@@ -32,6 +32,7 @@ func TestDurableAgentRecipeCatalogListGetDeterministic(t *testing.T) {
 		"managed-cli-harness",
 		"process-monitor",
 		"project-advisor",
+		"project-manager",
 		"proxima-relay",
 		"system-monitor",
 		"task-writer",

@@ -536,6 +536,57 @@ func builtinDurableAgentRecipes() []DurableAgentRecipe {
 			Tags: []string{"advisor", "project"},
 		},
 		{
+			// Profile pairing: operator selects the existing `agridd-project-manager`
+			// AgentProfile (.nanite/agents/agridd-project-manager.md) at apply-time —
+			// its roleTools already excludes subagent_spawn/workflow_run, which must
+			// stay excluded (PM coordinates; it never dispatches).
+			ID:               "project-manager",
+			SchemaVersion:    DurableAgentRecipeSchemaVersion,
+			Kind:             DurableAgentRecipeKindProjectAdvisor,
+			Name:             "Project Manager",
+			Description:      "A reusable work-coordination advisor that monitors task/dependency state, surfaces blockers and stalls, and recommends dispatch timing — coordinates, never executes or dispatches.",
+			LifecycleClass:   store.DurableAgentClassAdvisor,
+			ProfileRule:      "operator_selected",
+			Provider:         "anthropic",
+			Model:            "",
+			RuntimeKind:      string(runtimekind.API),
+			LaunchSourceType: store.DurableAgentLaunchDurableAdvisor,
+			WakeDefaults: DurableAgentWakePayload{
+				Reason: DurableAgentWakeManual,
+				Facts: map[string]string{
+					"story": "project_manager",
+				},
+			},
+			Metadata: map[string]string{
+				"product_story":      "project_manager",
+				"exposure_surface":   "internal_chat_and_harness_v1",
+				"integration_status": "operator_managed",
+				"role_boundary":      "coordinates_only_no_dispatch",
+			},
+			Injections: []RecipeInjectionPlan{{
+				ID:          "workstate-brief",
+				Kind:        "planned_context",
+				Target:      "wake_payload.facts",
+				Description: "Future Torque work-state snapshot or blocker summary surfaced as non-secret wake facts.",
+			}},
+			Inputs: []DurableAgentRecipeInput{
+				recipeStringInput("name", "Name", "durable_agent.name", true, "Project Manager"),
+				recipeStringInput("slug", "Slug", "durable_agent.slug", false, "project-manager"),
+				recipeProfileInput(true),
+				recipeProviderInput(false, "anthropic"),
+				recipeModelInput(false, ""),
+				recipeRuntimeKindInput(false, string(runtimekind.API)),
+				recipePathInput("work_root", "Work root", "durable_agent.work_root", false, "~/dev/project"),
+				recipeStringInput("project_scope", "Project scope", "metadata.project_scope", true, "nanite"),
+				recipeStringInput("torque_project_filter", "Torque project ID / filter", "metadata.torque_project_filter", false, "PRJ-20260417-0002"),
+				recipeStringInput("schedule_hint", "Schedule / cadence hint", "metadata.schedule_hint", false, "cron: 0 9,17 * * 1-5 (twice daily, weekdays)"),
+				recipeTextareaInput("escalation_notes", "Escalation notes", "metadata.escalation_notes", false, "Optional thresholds/recipients for blocker escalation, if different from defaults (doing >48h, review >24h, sprint budget <20%)."),
+				recipeTextareaInput("boot_knowledge_hint", "Boot knowledge hint", "metadata.boot_knowledge_hint", false, "Preview-only non-secret notes about institutional-memory docs (followups, sprint/plan files) this PM should read on first boot."),
+				recipeTextareaInput("wake_prompt", "Wake prompt", "wake_payload.prompt", false, "Optional kickoff instructions for the project manager."),
+			},
+			Tags: []string{"advisor", "project-manager", "work-coordination", "product"},
+		},
+		{
 			ID:               "proxima-relay",
 			SchemaVersion:    DurableAgentRecipeSchemaVersion,
 			Kind:             DurableAgentRecipeKindProjectAdvisor,

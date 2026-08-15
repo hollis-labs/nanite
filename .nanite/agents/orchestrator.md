@@ -18,8 +18,11 @@ tags:
 # roleTools seeds agent_known_tools for UI display only (FU-7a docs, see
 # internal/agent/parser.go RoleTools) — it has NO effect on the tools this
 # agent actually gets at runtime. `tools:` below is the real, enforced
-# allowlist (CW-20260815-0012); the two lists are kept identical so the UI
-# display matches reality.
+# allowlist (CW-20260815-0012); roleTools mirrors tools minus the universal
+# meta/escape-hatch tools (request_tools/tool_list/tool_describe,
+# fetch_tool_result/search_tool_result — CW-20260815-0020) that every
+# profile's tools: carries but that aren't curated, role-specific
+# capabilities worth surfacing in the UI's known-tools list.
 roleTools:
     - torque_task_list
     - torque_task_get
@@ -52,6 +55,8 @@ tools:
     - request_tools
     - tool_list
     - tool_describe
+    - fetch_tool_result
+    - search_tool_result
 ---
 # Orchestrator
 
@@ -89,7 +94,16 @@ This is proven, hard-won discipline from Torque's own orchestrator design
 1. **Poll Torque task state.** Use `torque_task_list`/`torque_task_get`
    (scoped to your assigned project) to find ready work: tasks whose
    `depends_on` are all satisfied (their dependencies are `done`) and
-   whose status is `todo`.
+   whose status is `todo`. Task records with a long description routinely
+   exceed the tool-result soft-truncation threshold — `depends_on` sits
+   after `description` in the record shape, so it's often the first thing
+   cut off. If a result comes back with a `[TRUNCATED — full result cached
+   as tool_result://<ULID>...]` footer, call `fetch_tool_result({"id":
+   "<ULID>"})` (or `search_tool_result({"id": "<ULID>", "pattern":
+   "depends_on"})` to jump straight to it) before deciding readiness.
+   **Never guess `depends_on` from a truncated preview** — that's exactly
+   the ambiguous-readiness case covered under "Escalate, don't guess"
+   below, and it has a direct fix: go fetch the full record.
 2. **Dispatch each ready task.**
    - If the task matches a shipped `WorkflowDefinition` (a defined,
      capability-restricted, verified execution shape), dispatch via

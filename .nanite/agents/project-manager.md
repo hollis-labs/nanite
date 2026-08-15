@@ -15,8 +15,11 @@ tags:
 # roleTools seeds agent_known_tools for UI display only (FU-7a docs, see
 # internal/agent/parser.go RoleTools) — it has NO effect on the tools this
 # agent actually gets at runtime. `tools:` below is the real, enforced
-# allowlist (CW-20260815-0012); the two lists are kept identical so the UI
-# display matches reality.
+# allowlist (CW-20260815-0012); roleTools mirrors tools minus the universal
+# meta/escape-hatch tools (request_tools/tool_list/tool_describe,
+# fetch_tool_result/search_tool_result — CW-20260815-0020) that every
+# profile's tools: carries but that aren't curated, role-specific
+# capabilities worth surfacing in the UI's known-tools list.
 roleTools:
     - torque_task_list
     - torque_task_get
@@ -74,6 +77,8 @@ tools:
     - request_tools
     - tool_list
     - tool_describe
+    - fetch_tool_result
+    - search_tool_result
 class: advisor
 procedures:
     - name: boot
@@ -224,6 +229,15 @@ procedures:
         ```
 
         Two queries: in-flight (active work) + manual queue (awaiting approval).
+
+        A `limit=50`/`limit=30` list of tasks with real descriptions
+        routinely exceeds the tool-result soft-truncation threshold — the
+        response comes back as a preview plus a `tool_result://<ULID>`
+        pointer footer instead of every row. Don't draw blocker/stall
+        conclusions from a truncated preview: call `fetch_tool_result({"id":
+        "<ULID>"})` to page through the rest, or
+        `search_tool_result({"id": "<ULID>", "pattern": "..."})` to jump to
+        a specific task ID or status you need.
 
         ## Step 4 — Delta analysis
 
@@ -432,7 +446,10 @@ these thresholds without operator sign-off.
 - **Torque tools** — primary surface; read-heavy, light mutation. You may
   `torque_task_create`, `torque_task_update`, `torque_task_transition` for
   routine coordination (priority bumps, manual→auto flips when approved,
-  status moves through the FSM).
+  status moves through the FSM). Multi-task listings (`torque_task_list`
+  with `limit=30`/`50`, `torque_task_search`) commonly truncate — use
+  `fetch_tool_result`/`search_tool_result` to retrieve the full result
+  before reporting deltas or blockers off it.
 - **Memory** — capture every work-state snapshot with timestamp; use
   deltas to drive summaries.
 - **Bash (`dev_bash`)** — read-only git/gh commands for repo state. **No

@@ -148,6 +148,25 @@ func (s *chatServiceImpl) notifyRecoveryBrokerForHTTPStreamError(
 		return
 	}
 
+	// CW-20260815-0024: the recovery broker's retry path (DispatchRetry)
+	// always attempts a fresh agent.Boot — which for a provider with no
+	// implemented bootdir Layout (every plain HTTP API provider: anthropic,
+	// openai, gemini-api, openrouter, ...) fails 100% of the time with
+	// "bootdir for provider %q is not yet implemented", regardless of the
+	// underlying stream error's classification. Notifying the broker for
+	// those sessions produced nothing but a guaranteed-permanent-failure
+	// breadcrumb and, worse, a misleading "retrying..." envelope that was
+	// never going to succeed — so skip the notification entirely rather
+	// than let it fail structurally on every single HTTP-provider stream
+	// error. CLI/PTY-backed sessions (claude, codex, opencode) still go
+	// through unchanged — this is the case the mechanism was built for.
+	if !runtimeagent.HasBootdirLayout(providerName) {
+		slog.Info("recovery: http chat stream error — skipping broker notify (no bootdir layout for this provider, recovery would be a guaranteed no-op)",
+			"session_id", sessionID,
+			"provider", providerName)
+		return
+	}
+
 	cause, errorClass := classifyHTTPStreamError(streamErr)
 
 	exit := &agentsessions.ExitError{

@@ -90,6 +90,55 @@ func TestBootdirLayoutFor_AcceptsCLIAliases(t *testing.T) {
 	}
 }
 
+// TestHasBootdirLayout_MatchesLayoutDispatch is the regression pin for
+// CW-20260815-0024: HasBootdirLayout must agree with bootdirLayoutFor —
+// true iff the provider resolves to a real Layout, not unsupportedLayout —
+// including CLI-alias normalization (pty-claude etc.) and the plain HTTP
+// API providers (anthropic, openai, ...) that were never meant to go
+// through the CLI-boot recovery path.
+func TestHasBootdirLayout_MatchesLayoutDispatch(t *testing.T) {
+	tests := []struct {
+		in   string
+		want bool
+	}{
+		{"claude", true},
+		{"claude-code", true},
+		{"claudecode", true},
+		{"codex", true},
+		{"opencode", true},
+		{"pty", true},
+		{"pty-claude", true},
+		{"pty-codex", true},
+		{"pty-opencode", true},
+		{"sub-claude", true},
+		{"sub-codex", true},
+		// Plain HTTP API providers — no CLI subprocess, no bootdir.
+		{"anthropic", false},
+		{"openai", false},
+		{"gemini-api", false},
+		{"openrouter", false},
+		// CLI tool names with no Layout implemented yet.
+		{"gemini", false},
+		{"copilot", false},
+		{"aider", false},
+		{"junie", false},
+		{"", false},
+	}
+	for _, tt := range tests {
+		got := HasBootdirLayout(tt.in)
+		if got != tt.want {
+			t.Errorf("HasBootdirLayout(%q) = %v, want %v", tt.in, got, tt.want)
+		}
+		// Cross-check against the real dispatch table so this can never
+		// silently drift from bootdirLayoutFor's actual behavior.
+		_, isUnsupported := bootdirLayoutFor(tt.in).(unsupportedLayout)
+		wantFromDispatch := !isUnsupported
+		if got != wantFromDispatch {
+			t.Errorf("HasBootdirLayout(%q) = %v, disagrees with bootdirLayoutFor's unsupportedLayout check (%v)", tt.in, got, wantFromDispatch)
+		}
+	}
+}
+
 // TestShouldUsePTY_AllProvidersFalse pins the c202 follow-up
 // (CW-20260515-0004). Before this change, claude + ModeLongLived
 // returned true → agentsessions allocated a PTY → claude TUI ran in

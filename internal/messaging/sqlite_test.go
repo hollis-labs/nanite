@@ -323,6 +323,7 @@ func TestSQLiteStore_Send_KindRoundTrip(t *testing.T) {
 		{KindReply, `{"answer":"noon","in_reply_to":"abc-123"}`},
 		{KindNotification, `{"summary":"build green"}`},
 		{KindHandoff, `{"target_agent":"file-frontend"}`},
+		{KindSubagentResult, `{"summary":"subagent finished"}`},
 	}
 	for _, tc := range cases {
 		t.Run(tc.kind, func(t *testing.T) {
@@ -391,6 +392,7 @@ func TestSQLiteStore_Inbox_FiltersByKind(t *testing.T) {
 		{KindReply, 1},
 		{KindNotification, 2},
 		{KindHandoff, 0},
+		{KindSubagentResult, 0},
 	}
 	for _, tc := range cases {
 		t.Run(tc.kind, func(t *testing.T) {
@@ -402,6 +404,42 @@ func TestSQLiteStore_Inbox_FiltersByKind(t *testing.T) {
 				t.Errorf("kind=%q: got %d, want %d", tc.kind, len(msgs), tc.want)
 			}
 		})
+	}
+}
+
+// TestSQLiteStore_Inbox_SubagentResultKind covers CW-20260512-0019: a
+// kind=subagent_result row is both insertable (past the widened CHECK
+// constraint) and retrievable via the kind filter, alongside unrelated
+// kinds that must not match.
+func TestSQLiteStore_Inbox_SubagentResultKind(t *testing.T) {
+	s, _ := newTestMessagingStore(t)
+	ctx := context.Background()
+
+	if _, err := s.Send(ctx, SendInput{
+		FromSessionID: "sess-1", FromAgentID: "file-researcher",
+		ToSessionID: "sess-1", ToAgentID: "file-a",
+		Kind: KindSubagentResult, Channel: ChannelInbox,
+		Body: "subagent file-researcher ended (completed)", PayloadJSON: `{"summary":"done"}`,
+	}); err != nil {
+		t.Fatalf("seed subagent_result: %v", err)
+	}
+	if _, err := s.Send(ctx, SendInput{
+		FromSessionID: "sess-1", FromAgentID: "file-b",
+		ToSessionID: "sess-1", ToAgentID: "file-a",
+		Kind: KindReply, Body: "unrelated reply",
+	}); err != nil {
+		t.Fatalf("seed reply: %v", err)
+	}
+
+	msgs, err := s.Inbox(ctx, "sess-1", "file-a", InboxFilter{Kind: KindSubagentResult})
+	if err != nil {
+		t.Fatalf("Inbox: %v", err)
+	}
+	if len(msgs) != 1 {
+		t.Fatalf("got %d subagent_result messages, want 1", len(msgs))
+	}
+	if msgs[0].FromAgentID != "file-researcher" {
+		t.Errorf("FromAgentID = %q, want %q", msgs[0].FromAgentID, "file-researcher")
 	}
 }
 

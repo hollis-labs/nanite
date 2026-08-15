@@ -12,7 +12,7 @@
 //     by the container so this package stays independent of the
 //     chat engine. A stub runner keeps the integration testable.
 //   - Reply delivery: on completion, a message is posted back to
-//     the parent via the messaging subsystem (kind=reply,
+//     the parent via the messaging subsystem (kind=subagent_result,
 //     channel=chat for sync, channel=inbox for async).
 //
 // Approval flow (D13) is DEFERRED to a follow-up commit — this
@@ -26,6 +26,8 @@
 // flagged in the run-lifecycle table (status=requested → approved)
 // but no approval envelope is emitted yet. That's T9.2.
 package subagent
+
+import "context"
 
 // Mode names the execution style for a spawn request.
 const (
@@ -51,18 +53,18 @@ const (
 // no diagnostic signal. The terminal error states now split:
 //
 //   - completed   — produced a usable result (the output-presence GATE
-//                   is the separate CW-20260519-0067; `completed` here
-//                   still means only "the runner returned no error").
+//     is the separate CW-20260519-0067; `completed` here
+//     still means only "the runner returned no error").
 //   - over_budget — the wall-clock backstop fired but the run was
-//                   making progress (non-zero tool calls). NOT a
-//                   failure: it must not burn a retry budget or fire
-//                   on_fail (mirrors Torque's `canceled`-vs-`failed`
-//                   split, scheduler.go:668-701 / lifecycle.go:105-112).
+//     making progress (non-zero tool calls). NOT a
+//     failure: it must not burn a retry budget or fire
+//     on_fail (mirrors Torque's `canceled`-vs-`failed`
+//     split, scheduler.go:668-701 / lifecycle.go:105-112).
 //   - stalled     — the provider-stream inactivity watchdog fired
-//                   (CW-20260517-0036) with no progress: the run went
-//                   silent.
+//     (CW-20260517-0036) with no progress: the run went
+//     silent.
 //   - failed      — reserved for genuine crashes and the
-//                   fabrication-detector trip.
+//     fabrication-detector trip.
 const (
 	StatusRequested  = "requested"
 	StatusApproved   = "approved"
@@ -95,17 +97,17 @@ func IsTerminalStatus(s string) bool {
 // escalate). At the subagent layer:
 //
 //   - OnFailRetry    loop in-place on a retriable terminal outcome until
-//                    retry_count reaches max_retries.
+//     retry_count reaches max_retries.
 //   - OnFailBlock    terminate immediately on failure; leave the row in
-//                    the failed/stalled state for the parent task / caller
-//                    to handle (no further attempts).
+//     the failed/stalled state for the parent task / caller
+//     to handle (no further attempts).
 //   - OnFailEscalate behaves identically to block at the subagent layer
-//                    today — escalation is a parent-task lifecycle concern
-//                    and the inline subagent runner has no escalation
-//                    surface to invoke. The value is accepted so a parent
-//                    task / dispatcher can pass through its own OnFail
-//                    without coercion, and the future escalation hook can
-//                    branch on this value without a schema change.
+//     today — escalation is a parent-task lifecycle concern
+//     and the inline subagent runner has no escalation
+//     surface to invoke. The value is accepted so a parent
+//     task / dispatcher can pass through its own OnFail
+//     without coercion, and the future escalation hook can
+//     branch on this value without a schema change.
 //
 // over_budget is always a candidate for resume regardless of OnFail
 // policy: it is by construction "the run made progress but hit the
@@ -291,4 +293,17 @@ type Result struct {
 // permitted (emission is a no-op when no sink is set).
 type SubagentStreamSink interface {
 	SubagentStatusChanged(parentSessionID string, payloadJSON []byte)
+}
+
+// CompletionReactor is notified after a subagent run's completion
+// message has been posted to the parent session's inbox
+// (CW-20260520-0001, Layer 2 — "harness reacts"). Implemented by
+// internal/service so it can consult ChatService's in-flight-generation
+// registry and, per the parent session's configured policy, proactively
+// trigger a harness-initiated turn. Defined here (not in internal/service)
+// to avoid an import cycle: internal/service constructs subagent.Service,
+// not the reverse. Wired via SetCompletionReactor; nil is permitted
+// (reaction is a no-op when no reactor is set).
+type CompletionReactor interface {
+	ReactToCompletion(ctx context.Context, run *Run, messageID string)
 }

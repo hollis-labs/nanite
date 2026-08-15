@@ -29,19 +29,39 @@ import (
 // bounding total wall time.
 type AgentConstraints struct {
 	// Phase 4 — Chat Loop Hardening.
-	MaxTurns           int `json:"max_turns"`              // 0=default(25), -1=unlimited, >0=value
-	HardCeiling        int `json:"hard_ceiling"`           // 0=default(100), absolute max turns
+	MaxTurns    int `json:"max_turns"`    // 0=default(25), -1=unlimited, >0=value
+	HardCeiling int `json:"hard_ceiling"` // 0=default(100), absolute max turns
 	// ConsecutiveFailCap is the soft-warning threshold. CW-20260417-0485:
 	// reaching this count no longer terminates the loop — it only drives the
 	// "critical"-level tool_warning SSE so the UI can warn the user that a
 	// runaway is imminent. See RunawayFailCap for the terminal cap.
-	ConsecutiveFailCap int `json:"consecutive_fail_cap"`   // 0=default(3), tool_warning turns critical after N consecutive failures
+	ConsecutiveFailCap int `json:"consecutive_fail_cap"` // 0=default(3), tool_warning turns critical after N consecutive failures
 	// RunawayFailCap is the hard circuit-breaker. When consecutive tool
 	// failures reach this count the loop emits a chat-loop-terminated
 	// envelope and exits. CW-20260417-0485.
-	RunawayFailCap     int `json:"runaway_fail_cap"`       // 0=default(10), hard terminate after N consecutive failures
-	IdleTimeoutSeconds int `json:"idle_timeout_seconds"`   // 0=default(900), seconds of inactivity before suspend
+	RunawayFailCap     int `json:"runaway_fail_cap"`     // 0=default(10), hard terminate after N consecutive failures
+	IdleTimeoutSeconds int `json:"idle_timeout_seconds"` // 0=default(900), seconds of inactivity before suspend
+
+	// SubagentCompletionPolicy (CW-20260520-0001) is this agent profile's
+	// default reaction to an async/api subagent completing after this
+	// session's turn has already ended: "" or "render_and_wait" (deliver
+	// via the turn-start injection only; do not proactively invoke the
+	// chat loop — default for interactive operator sessions),
+	// "auto_summarize" (proactively trigger a harness turn to summarize
+	// the result — default for orchestrator-shaped agent profiles), or
+	// "batch" (accepted; behaves as render_and_wait for v1 — buffering/
+	// idle-release semantics are a follow-up). A session can override this
+	// default via sessions.metadata["subagent_completion_policy"]; see
+	// internal/service's policy resolution helper.
+	SubagentCompletionPolicy string `json:"subagent_completion_policy"`
 }
+
+// Subagent-completion policy values (CW-20260520-0001).
+const (
+	SubagentPolicyRenderAndWait = "render_and_wait"
+	SubagentPolicyAutoSummarize = "auto_summarize"
+	SubagentPolicyBatch         = "batch"
+)
 
 // ParseAgentConstraints parses the constraints JSON from an agent profile.
 // Returns zero-value struct on empty/invalid input (no constraints enforced).
@@ -108,20 +128,20 @@ const (
 
 // StreamEvent is the event sent to SSE clients.
 type StreamEvent struct {
-	Type            string     `json:"type"`                        // stream_start, delta, replace_content, stream_end, error, tool_call, tool_result, status, circuit_open, session_takeover, tool_warning, plugin_envelope, message_received, subagent_run_status_changed, mode_suggestion, notify_pause
+	Type            string     `json:"type"` // stream_start, delta, replace_content, stream_end, error, tool_call, tool_result, status, circuit_open, session_takeover, tool_warning, plugin_envelope, message_received, subagent_run_status_changed, mode_suggestion, notify_pause
 	Content         string     `json:"content,omitempty"`
 	MessageID       string     `json:"message_id,omitempty"`
 	AgentID         string     `json:"agent_id,omitempty"`
 	Usage           *Usage     `json:"usage,omitempty"`
 	Error           string     `json:"error,omitempty"`
 	StructuredError *ChatError `json:"structured_error,omitempty"`
-	Tool            string     `json:"tool,omitempty"`              // tool name for tool_call/tool_result
-	ToolID          string     `json:"tool_id,omitempty"`           // tool_use_id
-	Summary         string     `json:"summary,omitempty"`           // tool result summary
-	Envelope        string     `json:"envelope,omitempty"`          // JSON envelope data for stream_end and plugin_envelope
-	PluginID        string     `json:"plugin_id,omitempty"`         // emitting plugin id for plugin_envelope
-	Data            string     `json:"data,omitempty"`              // JSON payload for tool_warning events
-	Detail          string     `json:"detail,omitempty"`            // Short label for tool_call (e.g., command, path)
+	Tool            string     `json:"tool,omitempty"`      // tool name for tool_call/tool_result
+	ToolID          string     `json:"tool_id,omitempty"`   // tool_use_id
+	Summary         string     `json:"summary,omitempty"`   // tool result summary
+	Envelope        string     `json:"envelope,omitempty"`  // JSON envelope data for stream_end and plugin_envelope
+	PluginID        string     `json:"plugin_id,omitempty"` // emitting plugin id for plugin_envelope
+	Data            string     `json:"data,omitempty"`      // JSON payload for tool_warning events
+	Detail          string     `json:"detail,omitempty"`    // Short label for tool_call (e.g., command, path)
 
 	// IsError flags a tool_result event whose underlying tool call did not
 	// succeed (errors, denials, blocks, validation failures, cancellations).

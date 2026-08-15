@@ -144,8 +144,11 @@ func TestSpawn_SyncEchoRunner_RoundTrip(t *testing.T) {
 	if in.ToSessionID != "sess-1" || in.ToAgentID != "file-backend" {
 		t.Errorf("reply addressing: to=(%q,%q)", in.ToSessionID, in.ToAgentID)
 	}
-	if in.Kind != messaging.KindReply {
-		t.Errorf("reply Kind = %q, want %q", in.Kind, messaging.KindReply)
+	// CW-20260512-0019: completion replies now carry Kind=subagent_result
+	// (not the generic KindReply) so downstream turn-start injection and
+	// the harness-reaction layer can filter for them specifically.
+	if in.Kind != messaging.KindSubagentResult {
+		t.Errorf("reply Kind = %q, want %q", in.Kind, messaging.KindSubagentResult)
 	}
 	if in.Channel != messaging.ChannelChat {
 		t.Errorf("sync mode reply Channel = %q, want %q", in.Channel, messaging.ChannelChat)
@@ -1048,14 +1051,16 @@ func TestSpawn_ReplyDelivery_ExistingRoleSlug_NoAutoRegisterCollision(t *testing
 		if err != nil {
 			t.Fatalf("RecentForSession #%d: %v", i, err)
 		}
+		// CW-20260512-0019: completion replies now carry
+		// Kind=subagent_result, not the generic KindReply.
 		replies := 0
 		for _, m := range msgs {
-			if m.Kind == messaging.KindReply {
+			if m.Kind == messaging.KindSubagentResult {
 				replies++
 			}
 		}
 		if replies != i+1 {
-			t.Fatalf("reply #%d: parent has %d reply message(s) in sess-1, want %d — reply delivery failed (likely the agent_profiles.slug constraint)", i, replies, i+1)
+			t.Fatalf("reply #%d: parent has %d subagent_result message(s) in sess-1, want %d — reply delivery failed (likely the agent_profiles.slug constraint)", i, replies, i+1)
 		}
 	}
 

@@ -586,6 +586,17 @@ func (s *chatServiceImpl) generateResponse(ctx context.Context, sessionID, assis
 		systemPrompt = slotResult.SystemPrompt
 	}
 
+	// CW-20260512-0019: surface pending subagent completions at turn
+	// start. Async/api subagent runs complete after the parent's turn
+	// has already ended, so their kind=subagent_result reply otherwise
+	// sits unread in the inbox until the agent thinks to poll for it
+	// (or never does — the c160/c271 failure mode). Injected only at
+	// turn start (never mid-turn) to avoid non-determinism from a
+	// subagent completing while this turn is still composing.
+	if pending := s.evaluateAndInjectSubagentResults(ctx, sessionID, agentID, slotResult); len(pending) > 0 {
+		systemPrompt = slotResult.SystemPrompt
+	}
+
 	// I1 (CW-20260426-0004): inspector — allocate a turn ID and record slots.
 	// turnID is carried forward through the rest of generateResponse so
 	// broker/tool producers can append to the same snapshot.

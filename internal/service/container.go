@@ -211,6 +211,10 @@ type Container struct {
 	// by sessionID inside the Engine.
 	ReminderEngine *reminders.Engine
 
+	// AgentCardGenerator builds A2A Agent Cards from workflow registry + boot profiles
+	// (CW-20260814-0014). Serves /.well-known/agent-card.json.
+	AgentCardGenerator *AgentCardGenerator
+
 	// stopModelCatalog cancels the model catalog background refresher.
 	stopModelCatalog context.CancelFunc
 
@@ -1013,6 +1017,7 @@ func NewContainer(cfg ContainerConfig) (*Container, error) {
 		ResultCache:        buildResultCache(cfg.Store),
 		ModelCatalog:       modelCatalog,
 		SessionEventWriter: messagingSvc,
+		SubagentInbox:      messagingSvc,
 		DBPath:             cfg.Store.DBPath(),
 		AdapterRegistry:    adapterRegistry,
 		// CW-20260419-0026 (E3): wire the strategy decision logger.
@@ -1117,6 +1122,11 @@ func NewContainer(cfg ContainerConfig) (*Container, error) {
 	approvalEmitter := NewApprovalEmitter(cfg.Store, streams)
 	subagentSvc := subagent.NewService(cfg.Store.DB, subagentRunner, messagingSvc, approvalEmitter, cfg.Store)
 	subagentSvc.SetStreamSink(&subagentStreamSink{streams: streams})
+	// CW-20260520-0001 (Layer 2): react to a subagent completion by
+	// possibly triggering a harness turn on the parent session per its
+	// configured policy. chatSvcImpl already exists by this point (built
+	// above for the ChatRunner wiring).
+	subagentSvc.SetCompletionReactor(&subagentCompletionReactor{chat: chatSvcImpl})
 	// H1 (CW-20260421-0014): wire trust resolver + audit event logger.
 	subagentSvc.SetTrustResolver(cfg.Store)
 	subagentSvc.SetEventLogger(cfg.Store)

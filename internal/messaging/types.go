@@ -9,6 +9,12 @@ const (
 	KindReply        = "reply"
 	KindNotification = "notification"
 	KindHandoff      = "handoff"
+	// KindSubagentResult marks a subagent completion/failure notification
+	// (CW-20260512-0019). Distinct from KindReply so the turn-start
+	// injection (chat_generate.go) and the harness-reaction layer
+	// (CW-20260520-0001) can filter for it specifically without
+	// false-positiving on ordinary agent replies.
+	KindSubagentResult = "subagent_result"
 )
 
 // Channel constants name the transport bucket a message travels on.
@@ -82,13 +88,13 @@ type SendInput struct {
 	// PayloadJSON carries kind-specific structured payload per S5's
 	// ResponseV1 shape. Empty defaults to "{}".
 	PayloadJSON string
-	Type     string
-	Subject  string
-	Body     string
-	ThreadID string
-	ReplyTo  string
-	Metadata string
-	Priority int
+	Type        string
+	Subject     string
+	Body        string
+	ThreadID    string
+	ReplyTo     string
+	Metadata    string
+	Priority    int
 	// RegisterAs controls T6 auto-register behavior when
 	// FromAgentID is not yet in agent_profiles. Empty (default)
 	// registers the caller as kind='external'; set to 'cli' to

@@ -1,6 +1,7 @@
 package api
 
 import (
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -47,6 +48,15 @@ func (a *API) handleCreateDurableAgent(w http.ResponseWriter, r *http.Request) {
 func (a *API) saveManagedDurableInstance(inst *store.DurableAgentInstance, archived bool) (*store.DurableAgentInstance, error) {
 	profile, err := a.Services.Store.GetAgent(inst.ProfileID)
 	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			// CW-20260815-0009: this profile ID resolves via file discovery
+			// (that's how a recipe/request got it in the first place) but has
+			// no agent_profiles row — the .md file failed AutoIngestAgents at
+			// startup. The raw sql.ErrNoRows here used to be the only signal;
+			// name the real cause so it doesn't require DB-level investigation
+			// to diagnose again.
+			return nil, fmt.Errorf("agent profile %s not found in agent_profiles — its source file may have failed database ingestion; check server startup logs for \"auto-ingest agent\" errors: %w", inst.ProfileID, err)
+		}
 		return nil, err
 	}
 	metadata, err := durableMetadataMap(inst.MetadataJSON)

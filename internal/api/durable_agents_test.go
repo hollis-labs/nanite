@@ -3,14 +3,39 @@ package api
 import (
 	"bytes"
 	"context"
+	"database/sql"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/hollis-labs/nanite/internal/service"
 	"github.com/hollis-labs/nanite/internal/store"
 )
+
+// TestSaveManagedDurableInstance_MissingProfileWrapsSQLNoRows is a
+// CW-20260815-0009 follow-up (Copilot review on PR #241): the actionable
+// error message added for a missing agent_profiles row must still wrap the
+// underlying sql.ErrNoRows via %w, not replace it with a bare string, so
+// errors.Is/diagnostics chains still work for callers.
+func TestSaveManagedDurableInstance_MissingProfileWrapsSQLNoRows(t *testing.T) {
+	a, _ := newTestAPI(t)
+
+	_, err := a.saveManagedDurableInstance(&store.DurableAgentInstance{
+		ProfileID: "does-not-exist",
+	}, false)
+	if err == nil {
+		t.Fatal("expected an error for a missing agent profile")
+	}
+	if !errors.Is(err, sql.ErrNoRows) {
+		t.Fatalf("expected errors.Is(err, sql.ErrNoRows) to hold, got: %v", err)
+	}
+	if !strings.Contains(err.Error(), "auto-ingest agent") {
+		t.Fatalf("expected an actionable message pointing at startup ingestion logs, got: %v", err)
+	}
+}
 
 func TestDurableAgentsAPI_CreateGetPatchArchive(t *testing.T) {
 	a, mux := newTestAPI(t)

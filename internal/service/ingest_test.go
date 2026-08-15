@@ -3,8 +3,11 @@ package service
 // J7 (CW-20260421-0011): tests for the skills/agents DB ingestion pipeline.
 
 import (
+	"bytes"
 	"context"
+	"log/slog"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	agentpkg "github.com/hollis-labs/nanite/internal/agent"
@@ -154,6 +157,115 @@ func TestAutoIngestAgents_InsertNewAgent(t *testing.T) {
 	}
 	if a.Format != "markdown" {
 		t.Errorf("Format: got %q, want %q", a.Format, "markdown")
+	}
+}
+
+// TestAutoIngestAgents_ClassHarness is the CW-20260815-0009 regression test:
+// a profile with class: harness (a real, used LifecycleClass value for
+// durable-agent instances — see store.DurableAgentClassHarness) must ingest
+// into agent_profiles like any other class value, not be silently dropped
+// by the store-layer enum validator.
+func TestAutoIngestAgents_ClassHarness(t *testing.T) {
+	st := newIngestTestStore(t)
+
+	defs := []*agentpkg.Definition{
+		{
+			Slug:         "orchestrator",
+			Name:         "Orchestrator",
+			SystemPrompt: "You dispatch.",
+			Source:       "project",
+			Class:        "harness",
+		},
+	}
+
+	n := AutoIngestAgents(st, defs)
+	if n != 1 {
+		t.Fatalf("expected 1 ingested agent, got %d", n)
+	}
+
+	a, err := st.GetAgentBySlug("orchestrator")
+	if err != nil {
+		t.Fatalf("GetAgentBySlug: %v", err)
+	}
+	if a == nil {
+		t.Fatal("expected an orchestrator row in agent_profiles, got none")
+	}
+	if a.Class != "harness" {
+		t.Errorf("Class: got %q, want %q", a.Class, "harness")
+	}
+}
+
+// TestAutoIngestAgents_InvalidClassNotSilent is the visibility half of
+// CW-20260815-0009: a deliberately unsupported class value must (a) fail to
+// ingest — no phantom agent_profiles row — and (b) be loud about it: an
+// aggregate startup-time ERROR log naming the failed slug, not just a
+// per-item Warn easy to miss in startup noise.
+func TestAutoIngestAgents_InvalidClassNotSilent(t *testing.T) {
+	st := newIngestTestStore(t)
+
+	var logBuf bytes.Buffer
+	prevLogger := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(&logBuf, &slog.HandlerOptions{Level: slog.LevelWarn})))
+	t.Cleanup(func() { slog.SetDefault(prevLogger) })
+
+	defs := []*agentpkg.Definition{
+		{
+			Slug:         "bogus-agent",
+			Name:         "Bogus Agent",
+			SystemPrompt: "x",
+			Source:       "project",
+			Class:        "not-a-real-class",
+		},
+	}
+
+	n := AutoIngestAgents(st, defs)
+	if n != 0 {
+		t.Fatalf("expected 0 ingested agents for a rejected class value, got %d", n)
+	}
+	if _, err := st.GetAgentBySlug("bogus-agent"); err == nil {
+		t.Fatal("expected no agent_profiles row for a rejected class value")
+	}
+
+	logOutput := logBuf.String()
+	if !strings.Contains(logOutput, "level=ERROR") {
+		t.Errorf("expected an ERROR-level aggregate ingestion-failure log, got: %s", logOutput)
+	}
+	if !strings.Contains(logOutput, "bogus-agent") {
+		t.Errorf("expected the failure log to name the failed slug, got: %s", logOutput)
+	}
+}
+
+// TestAutoIngestAgents_FailureLogCountsExcludeSkippedDefs is a
+// CW-20260815-0009 follow-up (Copilot review on PR #241): defs is filtered
+// (nil entries, empty slugs) before ingestion is even attempted, so the
+// aggregate failure log's counts must reflect only defs actually attempted
+// — otherwise failed+succeeded silently doesn't add up to the logged total.
+func TestAutoIngestAgents_FailureLogCountsExcludeSkippedDefs(t *testing.T) {
+	st := newIngestTestStore(t)
+
+	var logBuf bytes.Buffer
+	prevLogger := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(&logBuf, &slog.HandlerOptions{Level: slog.LevelWarn})))
+	t.Cleanup(func() { slog.SetDefault(prevLogger) })
+
+	defs := []*agentpkg.Definition{
+		nil,               // skipped, not attempted
+		{Slug: ""},        // skipped, not attempted
+		{Slug: "ok-agent", Name: "OK", SystemPrompt: "x", Source: "project"},
+		{Slug: "bad-agent", Name: "Bad", SystemPrompt: "x", Source: "project", Class: "not-a-real-class"},
+	}
+
+	n := AutoIngestAgents(st, defs)
+	if n != 1 {
+		t.Fatalf("expected 1 ingested agent, got %d", n)
+	}
+
+	logOutput := logBuf.String()
+	if !strings.Contains(logOutput, "considered=2") {
+		t.Errorf("expected considered=2 (the 2 skipped entries excluded from the 4 defs), got: %s", logOutput)
+	}
+	if !strings.Contains(logOutput, "failed=1") || !strings.Contains(logOutput, "succeeded=1") {
+		t.Errorf("expected failed=1 succeeded=1, got: %s", logOutput)
 	}
 }
 

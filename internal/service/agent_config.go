@@ -58,6 +58,16 @@ var (
 	// ErrAgentAlreadyManaged is returned by CopyToManaged when the source is
 	// already a writable managed agent.
 	ErrAgentAlreadyManaged = errors.New("agent is already a managed config")
+	// ErrAgentNotIngested is returned by CopyToManaged when the source file
+	// classifies as an already-managed config (Classify().Editable()) but has
+	// no backing agent_profiles row — i.e. AutoIngestAgents failed for this
+	// file at startup (CW-20260815-0009). Returning ErrAgentAlreadyManaged in
+	// that case would be a false positive: it tells the caller the profile is
+	// a working managed config when it isn't. A CopyToManaged clone would
+	// also inherit whatever field caused the original ingestion failure and
+	// hit the same error again, so this is surfaced directly instead of
+	// papering over it with a copy.
+	ErrAgentNotIngested = errors.New("agent profile file exists but failed database ingestion; check server startup logs for \"auto-ingest agent\" errors")
 	// ErrManagedSlugExists is returned when a create/copy target slug already
 	// has a managed file.
 	ErrManagedSlugExists = errors.New("a managed agent with this slug already exists")
@@ -76,6 +86,30 @@ func (s *AgentConfigService) Classify(p *store.AgentProfile) agent.ManageClass {
 		return agent.ManageClassExternal
 	}
 	return s.classification.Classify(p.Source, p.SourceRef)
+}
+
+// Persisted reports whether a real agent_profiles row backs p's identity.
+// File-based definitions (p.SourceRef set) are always resolvable here
+// because they were successfully parsed from disk to produce p in the first
+// place — that says nothing about whether AutoIngestAgents' subsequent DB
+// upsert also succeeded. A profile whose file parses fine but whose class/
+// other field fails store-layer validation is exactly this mismatch
+// (CW-20260815-0009): visible via file discovery, absent from the DB.
+// Looked up by slug (not p.ID) because unstamped/internal definitions carry
+// a deterministic "file-<slug>" runtime ID in memory while their DB row
+// gets a minted UUID — slug is the identity that's stable across both.
+func (s *AgentConfigService) Persisted(p *store.AgentProfile) bool {
+	if p == nil || strings.TrimSpace(p.Slug) == "" {
+		return false
+	}
+	row, err := s.store.GetAgentBySlug(p.Slug)
+	if err != nil || row == nil {
+		return false
+	}
+	if !agent.IsFileBasedID(p.ID) && row.ID != p.ID {
+		return false
+	}
+	return true
 }
 
 // Revision returns the optimistic-concurrency token (file-content hash) for a
@@ -197,6 +231,9 @@ func (s *AgentConfigService) CopyToManaged(source *store.AgentProfile, procedure
 		return nil, fmt.Errorf("source profile is required")
 	}
 	if s.Classify(source).Editable() {
+		if !s.Persisted(source) {
+			return nil, fmt.Errorf("%w (slug %q)", ErrAgentNotIngested, source.Slug)
+		}
 		return nil, ErrAgentAlreadyManaged
 	}
 	// Clone the field set; mint a new identity and managed provenance. The

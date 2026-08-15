@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -161,6 +162,60 @@ func TestAgentConfig_SlugRenamePreservesIdentityAndChildren(t *testing.T) {
 	reflexes, err := st.ListAgentReflexesForAgent(context.Background(), id, "")
 	if err != nil || len(reflexes) != 1 {
 		t.Fatalf("reflex child lost on rename: %d err=%v", len(reflexes), err)
+	}
+}
+
+// TestAgentConfig_CopyToManaged_NotIngestedSurfacesDistinctError is the
+// silent-failure-visibility half of CW-20260815-0009: a profile that
+// classifies as an already-managed config (Classify().Editable()) but has no
+// backing agent_profiles row — i.e. AutoIngestAgents failed for its source
+// file — must report ErrAgentNotIngested, not the misleading
+// ErrAgentAlreadyManaged that made this bug look like a false success.
+//
+// No SourceRef + a non-internal/non-plugin Source classifies as
+// ManageClassManaged per source_class.go's "DB-only operator agent" branch,
+// the same as it would for a real project file whose parse succeeded but
+// whose DB upsert didn't — so this stands in for that scenario without
+// needing a real file on disk.
+func TestAgentConfig_CopyToManaged_NotIngestedSurfacesDistinctError(t *testing.T) {
+	st := newConfigTestStore(t)
+	root := t.TempDir()
+	classification := agent.NewClassification(root, "")
+	svc := NewAgentConfigService(st, classification, root, nil, nil)
+
+	ghost := &store.AgentProfile{
+		ID:     "11111111-1111-1111-1111-111111111111",
+		Slug:   "ghost-agent",
+		Source: "project",
+		Name:   "Ghost",
+	}
+
+	_, err := svc.CopyToManaged(ghost, nil)
+	if !errors.Is(err, ErrAgentNotIngested) {
+		t.Fatalf("expected ErrAgentNotIngested, got %v", err)
+	}
+	if errors.Is(err, ErrAgentAlreadyManaged) {
+		t.Fatal("must not report ErrAgentAlreadyManaged for an unpersisted profile — that's the false-success bug")
+	}
+}
+
+// TestAgentConfig_CopyToManaged_AlreadyManagedWhenPersisted is the control
+// case: a profile that's genuinely persisted (real agent_profiles row) still
+// gets the ordinary ErrAgentAlreadyManaged, unaffected by the Persisted gate.
+func TestAgentConfig_CopyToManaged_AlreadyManagedWhenPersisted(t *testing.T) {
+	st := newConfigTestStore(t)
+	root := t.TempDir()
+	classification := agent.NewClassification(root, "")
+	svc := NewAgentConfigService(st, classification, root, nil, nil)
+
+	created, err := svc.Create(&store.AgentProfile{Name: "Atlas", Slug: "atlas", SystemPrompt: "x"}, nil)
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+
+	_, err = svc.CopyToManaged(created.Profile, nil)
+	if !errors.Is(err, ErrAgentAlreadyManaged) {
+		t.Fatalf("expected ErrAgentAlreadyManaged for a genuinely persisted managed profile, got %v", err)
 	}
 }
 

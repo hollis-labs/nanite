@@ -40,9 +40,11 @@ func (a *API) handleListAgents(w http.ResponseWriter, r *http.Request) {
 func (a *API) agentView(p store.AgentProfile) AgentProfileView {
 	var class agentpkg.ManageClass
 	revision := ""
+	persisted := true
 	if a.Services != nil && a.Services.AgentConfig != nil {
 		class = a.Services.AgentConfig.Classify(&p)
 		revision = a.Services.AgentConfig.Revision(&p)
+		persisted = a.Services.AgentConfig.Persisted(&p)
 	} else {
 		class = agentpkg.Classification{}.Classify(p.Source, p.SourceRef)
 	}
@@ -52,6 +54,7 @@ func (a *API) agentView(p store.AgentProfile) AgentProfileView {
 		Editable:      class.Editable(),
 		CopyToManaged: class.CopyToManagedAllowed(),
 		Revision:      revision,
+		Persisted:     persisted,
 	}
 }
 
@@ -366,6 +369,11 @@ func (a *API) handleCopyAgentToManaged(w http.ResponseWriter, r *http.Request) {
 		switch {
 		case errors.Is(err, service.ErrAgentAlreadyManaged):
 			a.errorResp(w, http.StatusConflict, err.Error())
+		case errors.Is(err, service.ErrAgentNotIngested):
+			// Distinct from ErrAgentAlreadyManaged: the file classifies as a
+			// managed config but has no backing agent_profiles row (ingestion
+			// failed at startup). 409 would misreport it as a working config.
+			a.errorResp(w, http.StatusInternalServerError, err.Error())
 		case errors.Is(err, service.ErrManagedSlugExists):
 			a.errorResp(w, http.StatusConflict, err.Error())
 		default:

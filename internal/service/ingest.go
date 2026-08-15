@@ -29,17 +29,35 @@ import (
 //   - def.Source == "user"   → default_trust_tier = "untrusted"
 //   - def.Source == "plugin" → default_trust_tier = "untrusted"
 //   - other sources          → default_trust_tier = "normal" (preserved)
+//
+// A per-definition failure leaves that agent visible via file discovery
+// (agentServiceImpl.List/Get read fileDefs directly) but with no backing
+// agent_profiles row — a real gap, not a cosmetic one: anything that needs
+// the DB row (durable-agent apply, copy-to-managed, FK children) breaks for
+// it. CW-20260815-0009 found exactly this happen with zero operator-visible
+// signal beyond a per-item slog.Warn easy to miss in startup noise. In
+// addition to that per-item Warn, emit one aggregate slog.Error naming every
+// failed slug + reason when any occur, so "N of M agent files failed to
+// ingest" is discoverable from logs alone — no DB query required.
 func AutoIngestAgents(st *store.Store, defs []*agentpkg.Definition) int {
 	count := 0
+	considered := 0 // defs actually attempted, excluding nil/empty-slug skips
+	var failures []string
 	for _, def := range defs {
 		if def == nil || def.Slug == "" {
 			continue
 		}
+		considered++
 		if err := upsertAgentDef(st, def); err != nil {
 			slog.Warn("service: auto-ingest agent", "slug", def.Slug, "err", err)
+			failures = append(failures, fmt.Sprintf("%s: %v", def.Slug, err))
 			continue
 		}
 		count++
+	}
+	if len(failures) > 0 {
+		slog.Error("service: agent auto-ingest failed for one or more files — these agents are file-discoverable but have no working agent_profiles row until fixed and the service is restarted",
+			"failed", len(failures), "considered", considered, "succeeded", count, "discovered", len(defs), "failures", failures)
 	}
 	return count
 }

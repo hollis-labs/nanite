@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"strings"
 
 	"github.com/hollis-labs/agentkit/agentruntime/runtimekind"
@@ -78,6 +79,13 @@ type DurableAgentRuntimeController interface {
 	RebootSession(ctx context.Context, sessionID string) error
 	RecoverSession(ctx context.Context, sessionID string) error
 	CancelSession(ctx context.Context, sessionID string) error
+
+	// SendMessage delivers content into a session as a real user turn via
+	// the existing chat first-turn path (ChatService.HandleMessage) —
+	// the same path a human's chat message takes. Used to inject
+	// DurableAgentWakePayload.Prompt so a wake's message content actually
+	// reaches the woken session instead of only feeding session metadata.
+	SendMessage(ctx context.Context, sessionID, content string) error
 }
 
 // DurableAgentService owns the durable-agent control-plane surface. Phase 6
@@ -311,7 +319,7 @@ func (s *durableAgentService) LaunchPlan(_ context.Context, id string, wake Dura
 	return durableAgentLaunchPolicyFor(inst, wake)
 }
 
-func (s *durableAgentService) Start(_ context.Context, id string, req DurableAgentStartRequest) (*DurableAgentLaunchResult, error) {
+func (s *durableAgentService) Start(ctx context.Context, id string, req DurableAgentStartRequest) (*DurableAgentLaunchResult, error) {
 	before, err := s.store.GetDurableAgentInstance(id)
 	if err != nil {
 		return nil, err
@@ -362,6 +370,7 @@ func (s *durableAgentService) Start(_ context.Context, id string, req DurableAge
 		SessionID:    session.ID,
 		MetadataJSON: durableAgentEventMetadata(map[string]string{"session_reused": fmt.Sprintf("%t", reused)}),
 	})
+	s.deliverWakePrompt(ctx, session.ID, wake.Prompt)
 	return &DurableAgentLaunchResult{
 		Instance:       active,
 		Policy:         policy,
@@ -445,12 +454,33 @@ func (s *durableAgentService) Resume(ctx context.Context, id string, req Durable
 		SessionID:    session.ID,
 		MetadataJSON: durableAgentEventMetadata(recoveryMeta),
 	})
+	s.deliverWakePrompt(ctx, session.ID, wake.Prompt)
 	return &DurableAgentLaunchResult{
 		Instance:      active,
 		Policy:        policy,
 		Session:       session,
 		ReusedSession: true,
 	}, nil
+}
+
+// deliverWakePrompt injects a non-empty DurableAgentWakePayload.Prompt into
+// the launched/resumed session as a real user turn via the runtime
+// controller's existing chat first-turn path, so the wake caller's message
+// content actually reaches the woken session instead of only feeding
+// session metadata. A no-op when Prompt is empty (today's manual-wake
+// behavior) or when no runtime controller is wired (e.g. in unit tests
+// constructed via NewDurableAgentService). Best-effort: a delivery failure
+// is logged, not surfaced, so it can't turn an otherwise-successful
+// start/resume into a failure.
+func (s *durableAgentService) deliverWakePrompt(ctx context.Context, sessionID, prompt string) {
+	prompt = strings.TrimSpace(prompt)
+	if prompt == "" || s.runtime == nil {
+		return
+	}
+	if err := s.runtime.SendMessage(ctx, sessionID, prompt); err != nil {
+		slog.Warn("durable agent wake: failed to deliver wake prompt as first turn",
+			"session_id", sessionID, "err", err)
+	}
 }
 
 func (s *durableAgentService) RequestStart(_ context.Context, id string) (*store.DurableAgentInstance, error) {

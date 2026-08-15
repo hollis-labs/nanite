@@ -1,0 +1,50 @@
+# Worker → Reviewer → Gate
+#
+# The core dogfooding shape from docs/architecture/agent-roles-design.md
+# ("The Worker → Reviewer → Gate workflow"): a Worker step (llm), checked
+# by an independent Reviewer via the verify: {mode: agent} modifier
+# (a nested, capability-restricted LLM call — not the same session, not
+# the same context), followed by a gate step for final human approval
+# before the work counts as done.
+#
+# Launch it:
+#   workflow_run(workflow_name: "worker-reviewer-gate", params: {task: "<what the worker should do>"})
+#
+# This ships as a real, loadable definition — the shape is production-
+# ready, but `prompt`/`reviewer_prompt`/`provider`/`model`/`tools` are
+# meant to be adapted per use case, not run verbatim as a turnkey task.
+# Note: reviewer_prompt is NOT template-resolved (only a step's `config`
+# is) — the reviewer already receives the worker's literal output via
+# the verify machinery, so the worker's own prompt/system_prompt is
+# instructed below to restate its task so the reviewer can check against it.
+name: worker-reviewer-gate
+steps:
+  - id: worker
+    kind: llm
+    config:
+      provider: anthropic
+      model: claude-sonnet-5
+      agent_id: worker
+      system_prompt: >-
+        You are a Worker completing one dispatched task. Begin your
+        response with a one-line restatement of the task you were given,
+        then do the work. An independent reviewer will check your output
+        against that restatement — don't claim more than you actually did.
+      prompt: "{{ input.task }}"
+    verify:
+      mode: agent
+      reviewer_provider: anthropic
+      reviewer_model: claude-sonnet-5
+      reviewer_agent_id: reviewer
+      reviewer_prompt: >-
+        Check the subject step's restated task against its own output.
+        PASS only if the output genuinely demonstrates completion of the
+        restated task — no invented results, no skipped steps, no
+        contradictions. FAIL if the task restatement is missing, vague,
+        or the output doesn't back it up.
+
+  - id: approve
+    kind: gate
+    depends_on: [worker]
+    config:
+      description: "Final human approval — worker output passed independent review; approve before it counts as done."

@@ -536,10 +536,12 @@ func builtinDurableAgentRecipes() []DurableAgentRecipe {
 			Tags: []string{"advisor", "project"},
 		},
 		{
-			// Profile pairing: operator selects the existing `agridd-project-manager`
-			// AgentProfile (.nanite/agents/agridd-project-manager.md) at apply-time —
-			// its roleTools already excludes subagent_spawn/workflow_run, which must
-			// stay excluded (PM coordinates; it never dispatches).
+			// Profile pairing: operator selects the `project-manager` AgentProfile
+			// (.nanite/agents/project-manager.md) at apply-time — its roleTools
+			// already excludes subagent_spawn/workflow_run, which must stay
+			// excluded (PM coordinates; it never dispatches). The older
+			// `agridd-project-manager` profile is the POC this was generalized
+			// from and is slated for retirement; new applies should use this one.
 			ID:               "project-manager",
 			SchemaVersion:    DurableAgentRecipeSchemaVersion,
 			Kind:             DurableAgentRecipeKindProjectAdvisor,

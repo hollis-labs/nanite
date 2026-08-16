@@ -352,6 +352,58 @@ The following inputs should trigger the indicated reflex. These are functional t
 
 ---
 
+## Conductor Reflex Set (user-level overrides, CW-20260816-0067)
+
+Deterministic routing for Conductor's directive vocabulary (`docs/architecture/conductor-console-design.md`, "Deterministic input middleware" section). Content only — the router/matcher itself was already live infrastructure before this set was authored.
+
+These four reflexes are **not** built-ins. They live as user-level YAML overrides at `~/.nanite/reflexes/*.yaml` (outside this repo, per the authoring guide's "start as user-level overrides for fast iteration" convention), each with `priority >= 65` — well above the `>= 50` floor documented in `docs/reflex-authoring.md`. This section documents them for reference; promote them into `internal/reflex/catalog.go` only once the rule set has stabilized against real usage.
+
+**Shared design choice:** all four leave `resolves_to.profile` empty and set `resolves_to.role: chat`. `profile` is the operationally load-bearing field — it becomes `ReflexHints.AgentSlug` in `internal/dispatch/execute.go`'s production path, and it's what `agentkit/broker.DeterministicBroker.Decide`'s Rule 1 checks (`ReflexAgentSlug != ""`) to force a synchronous subagent dispatch. Leaving it empty means a match never forces dispatch — the turn stays with the chat agent (Conductor), which performs the actual tool call (`memory_write`, `torque_task_create`, `torque_task_checkpoint_respond`, etc.) itself per its own system prompt. `role` is set to `chat` for schema correctness (the field `AssignRoleWithReflex`/`reflexFromString` reads) even though the current production dispatch path (`execute.go`) doesn't consult it — see `internal/reflex/dispatcher.go` for the (test-only, as of this writing) code path that does.
+
+### reflex: conductor-note-capture
+
+Covers: `"note for "`, `"note to self"`, `"capture a note for"`, `"add a note for"`, `"log a note for"`, `"log this note for"`, `"jot down a note for"`, `"jot this down for"`, `"remember this for"`, `"make a note for"`.
+
+Resolves to `pattern: chat`, `role: chat`, `mode_signal: document`, priority 85. Matches the design doc's "note for Nil" example and `.nanite/agents/conductor.md`'s "Capture" behavior (`memory_write`).
+
+### reflex: conductor-approval
+
+Covers: `"approve the checkpoint"`, `"approve this checkpoint"`, `"checkpoint approved"`, `"give it your approval"`, `"give the go-ahead"`, `"give the go ahead"`, `"you have the go-ahead"`, `"you have the go ahead"`, `"sign off on this"`, `"sign off on that"`, `"approve the sprint"`, `"reject the checkpoint"`, `"deny the checkpoint"`, `"send it back for changes"`, `"hold off on approving"`.
+
+Resolves to `pattern: chat`, `role: chat`, `mode_signal: review`, priority 80. Phrasing is deliberately scoped to checkpoint/sprint/sign-off language rather than bare "approve"/"review"/"ship it" — those are too collision-prone in a global reflex set, and "review"/"audit"/"check this" already belong to the built-in `reviewer-mention` for a different meaning (code review, not checkpoint approval).
+
+### reflex: conductor-research-drop
+
+Covers: `"drop the results in"`, `"drop results in"`, `"drop the findings in"`, `"drop findings in"`, `"put the results in"`, `"put the findings in"`, `"file the results as a task"`, `"file a task with the results"`, `"research it and file a task"`, `"look into it and open a task"`, `"research this and drop it in"`, `"research that and drop it in"`.
+
+Resolves to `pattern: chat`, `role: chat`, `mode_signal: research`, priority 75. This is the "research X, drop results in Y" non-linear ask from the design doc — its higher priority beats the built-in `researcher-mention` (priority 15, which resolves to a synchronous `researcher` worker dispatch) so the turn routes to Torque task creation instead, per `.nanite/agents/conductor.md`'s "How you delegate" bullet.
+
+### reflex: conductor-dispatch-project
+
+Covers: `"dispatch this to"`, `"dispatch that to"`, `"send this to project"`, `"send this over to"`, `"hand this off to"`, `"hand this over to"`, `"kick this over to"`, `"queue this for"`, `"queue this up for"`, `"queue that up for"`, `"queue it up for"`, `"add this to the queue for"`, `"assign this to"`, `"put this on the queue for"`, `"fire this off to"`.
+
+Resolves to `pattern: chat`, `role: chat`, `mode_signal: execute`, priority 65. Covers handing Conductor something meant for a specific project's Torque queue — echoing the design doc's live-session research quote: "I'll add them to my personal queue to fire off when other agents finish working."
+
+### Conductor reflex test cases
+
+Verified locally against the real `~/.nanite/reflexes/*.yaml` files (not synthetic fixtures) via a temporary manual test using `reflex.LoadUserReflexes("")` + `reflex.MergeReflexes(reflex.BuiltinReflexes(), user)` + `reflex.Match(...)`, then removed — not part of the committed suite.
+
+| Input | Expected Reflex | Notes |
+|---|---|---|
+| "note for Nil: check the mcp catalog before shipping" | `conductor-note-capture` | design-doc example phrasing |
+| "note for FE: use the new envelope type" | `conductor-note-capture` | project-addressed note |
+| "note to self, follow up on the reaper timer tomorrow" | `conductor-note-capture` | self-addressed note |
+| "research how other teams handle rate limiting, drop results in the fragments-engine task" | `conductor-research-drop` | beats built-in `researcher-mention` |
+| "look into the auth flow and drop the findings in torque" | `conductor-research-drop` | "findings" variant |
+| "dispatch this to fragments-engine when you get a chance" | `conductor-dispatch-project` | note: also contains "when you get a chance" (background-long-task trigger), but conductor-dispatch-project's priority 65 wins |
+| "queue this up for nil, they can pick it up later" | `conductor-dispatch-project` | |
+| "go ahead and approve the checkpoint for CW-20260816-0067" | `conductor-approval` | |
+| "sign off on this so the orchestrator can proceed" | `conductor-approval` | |
+| "reject the checkpoint, send it back for changes" | `conductor-approval` | matches on the first triggering phrase encountered by substring scan |
+| "implement the reflex matcher module" | `worker-execute` | sanity check — unrelated phrasing still hits the pre-existing built-in, unaffected by the new user overrides |
+
+---
+
 ## Integration Plan with Playbook Runtime (CW-20260419-0027)
 
 ### How the playbook runtime consumes reflexes

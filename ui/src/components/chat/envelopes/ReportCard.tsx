@@ -1,4 +1,4 @@
-import { BarChart3, ChevronRight } from 'lucide-react'
+import { BarChart3, ChevronRight, ExternalLink } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { MessageContent } from '../MessageContent'
 import { Envelope, EnvelopeHeader, EnvelopeFooter } from './primitives/Envelope'
@@ -17,12 +17,31 @@ interface ReportAction {
   id?: string
 }
 
+interface SessionLink {
+  label: string
+  url: string
+}
+
 interface ReportCardData {
   title: string
   generated_at?: string
   metrics: Metric[]
   summary?: string
   actions?: ReportAction[]
+  /**
+   * Optional link back to the full session/task/run this report distills
+   * (a Torque run, a mux cross-app session, a subagent completion). Renders
+   * as a real link — distinct from `actions`, which dispatch chat messages
+   * rather than navigate. See go-envelopes report-card.schema.json.
+   */
+  session_link?: SessionLink
+}
+
+// A session_link.url may be an http(s) URL (clickable) or an opaque
+// identifier/URI (e.g. a mux session id, "torque:T-123") when no direct
+// URL exists yet — those render as plain text instead of a dead link.
+function isHttpUrl(url: string): boolean {
+  return /^https?:\/\//i.test(url)
 }
 
 interface ReportCardProps {
@@ -85,6 +104,7 @@ export function ReportCard({ data, onSendMessage }: ReportCardProps) {
   // the card degrades gracefully instead of crashing the renderer.
   const metrics = data.metrics ?? []
   const hasActions = data.actions && data.actions.length > 0
+  const sessionLink = data.session_link?.url ? data.session_link : undefined
 
   return (
     <Envelope className="animate-in fade-in duration-300">
@@ -133,6 +153,29 @@ export function ReportCard({ data, onSendMessage }: ReportCardProps) {
                 </Button>
               ))}
             </>
+          )}
+        </EnvelopeFooter>
+      )}
+
+      {sessionLink && (
+        <EnvelopeFooter className="border-t border-border-subtle py-2">
+          {isHttpUrl(sessionLink.url) ? (
+            <a
+              href={sessionLink.url}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="flex items-center gap-1 text-[12px] text-primary hover:text-primary-hover hover:underline"
+            >
+              {sessionLink.label || 'View full session'}
+              <ExternalLink className="h-3 w-3" />
+            </a>
+          ) : (
+            <span className="flex items-center gap-1.5 text-[12px] text-fg-muted">
+              {sessionLink.label || 'Session'}
+              <code className="rounded bg-surface px-1 py-0.5 font-mono text-[11px] text-fg-secondary">
+                {sessionLink.url}
+              </code>
+            </span>
           )}
         </EnvelopeFooter>
       )}

@@ -255,20 +255,53 @@ watch:
 
 ## Output shape: distilled summary, never a transcript dump
 
-When you report on delegated work, use a **distilled summary + link to the
-full session**, via the existing `report-card`/`session-task` envelope
-types — these are shipped UI primitives, not new work you need to build.
-Concretely:
-- Say what happened and what it means, in a sentence or two.
-- Link to the underlying session/task so the user can go deep if they
-  want to, instead of pasting the transcript inline.
+When you report on delegated work, use `card_show(type="report-card", ...)`
+— a **distilled summary + link to the full session**, never a raw
+transcript dump. This is the verified, wired convention as of
+CW-20260816-0069:
+
+- **Use `report-card`, not `session-task`.** Both are mentioned in the
+  design doc, but `session-task` is backend-only today — it validates but
+  has no frontend renderer, so it would render as an "unsupported
+  envelope" stub. `report-card` is the live, fully-wired path (backend
+  validation + frontend card + `card_show` self-tool) — use it.
+- **Populate `data.session_link: {label, url}`** to give the user the
+  actual link back to the full session/task/run, e.g.
+  `{"label": "View full session", "url": "https://torque.internal/runs/4821"}`.
+  `url` can be a real http(s) link (renders as a clickable link) or an
+  opaque identifier when no direct URL exists yet — a mux session id, a
+  Torque task id like `torque:T-123` (renders as plain text instead of a
+  dead link). This field is distinct from `data.actions` (which dispatch a
+  follow-up chat message, not a navigation link).
+- **`report-card` requires grounding.** Pass a `sources` array citing the
+  `tool_use_id` of a real tool call you made *this turn* (e.g.
+  `torque_task_get`, `torque_run_get`, `mux_session_get`) — don't
+  fabricate metrics or a session_link from memory. If you don't have a
+  fresh tool result to ground the card, call one first (or fall back to a
+  plain-text reply) rather than rendering ungrounded.
+- Say what happened and what it means, in `data.summary` — a sentence or
+  two, not the transcript.
 - If a task or checkpoint needs a decision, say what decision and what the
   options are — don't just say "there's something pending."
 
-Wiring this end-to-end (which tool calls actually produce which envelope,
-verified against the live UI) is a separate follow-on task
-(CW-20260816-0069). Your job here is to hold the convention: summarize,
-link, never dump.
+Concrete example — relaying a completed per-project Orchestrator run:
+
+```
+torque_task_get(id: "T-123")  # ground the card in this turn's real result
+card_show(
+  type: "report-card",
+  data: {
+    title: "fragments-engine: migration task complete",
+    metrics: [{label: "Status", value: "done"}, {label: "Files changed", value: "6"}],
+    summary: "Orchestrator finished the schema-migration task cleanly — no blockers.",
+    session_link: {label: "View full session", url: "https://torque.internal/runs/4821"}
+  },
+  sources: "[{\"tool_use_id\": \"<id from the torque_task_get call above>\", \"tool_name\": \"torque_task_get\"}]"
+)
+```
+
+Full field reference and more examples:
+`tool_describe(name="card_show")`.
 
 ## How you delegate — pick the right target, every time
 
@@ -356,10 +389,6 @@ dependent tasks — don't improvise them:
   task.
 - **Audit-trail extension** (raw input vs. rewritten/dispatched text diff
   for later review) — separate task.
-- **Envelope wiring verification** end-to-end (which tool call produces
-  which `report-card`/`session-task` render, checked against the live UI)
-  — separate task (CW-20260816-0069); this profile only establishes the
-  convention.
 - **Nil/Fragments Engine integration specifics** — their note-capture MCP
   surface hasn't been explored yet; don't assume tool names or shapes for
   them beyond what's already in your allowlist.

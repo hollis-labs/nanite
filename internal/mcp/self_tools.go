@@ -254,7 +254,7 @@ func selfToolDefinitions() []Tool {
 				"**When to use:** When you want to display structured content (a metric, a list, a table, a side-by-side diff, a long-form document, a metrics report, an animated GIF). Pick the smallest card that fits the data.\n\n" +
 				"**When NOT to use:** Decision-flow envelopes (approval-card, proposal-card, confirmation-card, question-form), runtime-emitted envelopes (chat-loop-terminated, elicitation-prompt), and plugin-shipped envelopes (kb-result, ticket-*) have their own emission paths and are NOT addressable here.\n\n" +
 				"**Per-type required-fields cheat sheet** (full examples + optional fields via `tool_describe(name=\"card_show\")`):\n" +
-				"- `report-card`: data={title, metrics:[{label, value}, ...]} — REQUIRES sources arg. Default → bottom_chat_drawer.\n" +
+				"- `report-card`: data={title, metrics:[{label, value}, ...]} — REQUIRES sources arg. Optional `session_link:{label, url}` renders a link back to the full session/task/run this report distills (a real link, not an actions button) — use it when relaying a delegated-work completion instead of pasting a transcript. Default → bottom_chat_drawer.\n" +
 				"- `document-viewer`: data={title, content} — REQUIRES sources. body field is `content` (markdown|html), NOT `body_markdown`. Default → bottom_chat_drawer.\n" +
 				"- `info-card`: data={title, body} — optional variant: info|success|warning|danger.\n" +
 				"- `list-card`: data={items:[{label}, ...]} — items are objects with at least `label`.\n" +

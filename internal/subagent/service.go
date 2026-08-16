@@ -230,6 +230,15 @@ var (
 	// (e.g. PeerQuery / hint selection) is text-in / text-out by
 	// design and does not need the executable tool path.
 	ErrRoleNotExecutable = errors.New("subagent: agent profile is not executable and not in the text-only role whitelist")
+
+	// ErrSpawnFanoutCapReached is returned by Spawn when the caller's
+	// context deadline expires while waiting for an available slot in
+	// the 3-slot fan-out semaphore (CW-20260816-0001). Distinct from a
+	// genuine infrastructure timeout — this is a capacity signal: all
+	// slots are occupied by other running subagents. The caller can
+	// retry when a slot is freed, or the parent can sequence spawns
+	// to respect the cap.
+	ErrSpawnFanoutCapReached = errors.New("subagent: spawn fan-out capacity reached — all slots occupied")
 )
 
 // textOnlyRoleSlugs enumerates can_execute=false role slugs that are
@@ -1079,14 +1088,30 @@ func (svc *Service) Approve(ctx context.Context, runID string) error {
 }
 
 // acquireSpawnSlot blocks until a slot in the fan-out semaphore is
-// available or ctx is cancelled. Returns ctx.Err() if the wait is
-// interrupted, nil on successful acquisition.
+// available or ctx is cancelled. Returns ErrSpawnFanoutCapReached if
+// ctx.Done() fires while genuinely waiting for capacity (all 3 slots
+// occupied), ctx.Err() for other cancellation reasons, or nil on
+// successful acquisition.
 func (svc *Service) acquireSpawnSlot(ctx context.Context) error {
 	select {
 	case svc.spawnSem <- struct{}{}:
 		return nil
 	case <-ctx.Done():
-		return ctx.Err()
+		// Context cancelled while waiting. Distinguish between "timed
+		// out waiting for a slot" (at-capacity) vs "cancelled for
+		// another reason" by attempting a non-blocking acquisition.
+		// If the semaphore is full, we were genuinely at capacity.
+		select {
+		case svc.spawnSem <- struct{}{}:
+			// A slot became available between ctx.Done() and this check.
+			// Return it immediately and report the original cancellation.
+			<-svc.spawnSem
+			return ctx.Err()
+		default:
+			// Semaphore is still full — we timed out while waiting for
+			// capacity. Return the distinguishable error sentinel.
+			return ErrSpawnFanoutCapReached
+		}
 	}
 }
 

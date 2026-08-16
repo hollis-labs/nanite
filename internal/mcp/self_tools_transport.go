@@ -2,6 +2,7 @@ package mcp
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -1694,6 +1695,9 @@ func (st *SelfToolsTransport) callSpawnSubagent(ctx context.Context, args map[st
 		//     (CW-20260519-0123). Fixable by registering the missing
 		//     profile or routing to a known role — distinct from an
 		//     internal fault so the parent can act.
+		//   - at_capacity: fan-out semaphore full; caller's context
+		//     deadline expired while waiting for a slot
+		//     (CW-20260816-0001). Retryable when slots free up.
 		//   - internal: everything else (catch-all)
 		//
 		// For config-kind envelopes, populate `reason` (PR #214 review
@@ -1711,6 +1715,8 @@ func (st *SelfToolsTransport) callSpawnSubagent(ctx context.Context, args map[st
 		case errors.Is(err, subagent.ErrRoleNotExecutable):
 			kind = subagent.ErrorKindConfig
 			ctx["reason"] = subagent.ConfigReasonNotExecutable
+		case errors.Is(err, subagent.ErrSpawnFanoutCapReached):
+			kind = subagent.ErrorKindAtCapacity
 		}
 		env := subagent.NewFailureEnvelope("", kind,
 			fmt.Sprintf("spawn subagent: %v", err),
@@ -1739,33 +1745,126 @@ func (st *SelfToolsTransport) callSpawnSubagent(ctx context.Context, args map[st
 // recoverable text, EnvelopeFromRun maps that to ErrorKindEmptyReply
 // so the parent knows there is no reply to surface — the c160
 // turn-18 fabrication-class regression target.
+//
+// CW-20260816-0002: Spawn's ModeSync branch (Spawn's own switch,
+// several hundred lines above this file's boundary — see
+// internal/subagent/service.go) already blocks synchronously on
+// executeWithSlot and does not return the run_id to this function's
+// caller until the run is terminal. So by the time syncSubagentEnvelope
+// runs, the run is (bar a vanishingly rare race) already done — this
+// function's job is really just "fetch the terminal Run row and build
+// an envelope from it," not "wait for completion."
+//
+// The bug this fixes: the ctx passed in here is the SAME ctx used for
+// the (already-completed, possibly long) Spawn call above it. If that
+// ctx's deadline fired at any point during Spawn's block — entirely
+// plausible for a multi-minute run — it is already expired by the time
+// we get here, even though Spawn itself ignores it (executeWithSlot
+// runs on a background-derived ctx, not the caller's). Status(ctx, ...)
+// then fails immediately with "context deadline exceeded" despite the
+// answer sitting right there in the DB, and the caller incorrectly
+// narrates total failure for a run that actually succeeded.
+//
+// Fix: on a ctx-cancelled Status failure, retry once with a short,
+// fresh background context before giving up — cheap, and recovers the
+// common case where the real terminal result was simply blocked by an
+// unrelated expired ctx rather than genuinely still in progress. The
+// polling loop below is kept as defensive handling for the rare case
+// where Status is somehow reached before the run is terminal (e.g. a
+// future caller of this function that doesn't share Spawn's blocking
+// behavior) — it is not what the fix actually depends on.
 func (st *SelfToolsTransport) syncSubagentEnvelope(ctx context.Context, runID string) subagent.ResultEnvelope {
-	run, err := st.Subagent.Status(ctx, runID)
-	if err != nil {
-		return subagent.NewFailureEnvelope(runID, subagent.ErrorKindInternal,
-			fmt.Sprintf("status lookup failed: %v", err), nil)
+	const pollInterval = 500 * time.Millisecond
+	ticker := time.NewTicker(pollInterval)
+	defer ticker.Stop()
+
+	for {
+		run, err := st.Subagent.Status(ctx, runID)
+		if err != nil {
+			if errors.Is(err, sql.ErrNoRows) {
+				return subagent.NewFailureEnvelope(runID, subagent.ErrorKindInternal,
+					"subagent run not found after spawn", nil)
+			}
+			if ctx.Err() != nil {
+				// The caller's ctx is cancelled/expired — not necessarily
+				// because the run is still running. Re-check with a fresh
+				// context before concluding that; Spawn's own block means
+				// the row is very likely already terminal.
+				freshCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+				freshRun, freshErr := st.Subagent.Status(freshCtx, runID)
+				cancel()
+				if freshErr == nil && freshRun != nil && freshRun.Status != subagent.StatusRunning {
+					run, err = freshRun, nil
+				} else {
+					return subagent.NewFailureEnvelope(runID, subagent.ErrorKindTimeout,
+						fmt.Sprintf("sync wait expired (run may still be executing): %v", ctx.Err()),
+						map[string]any{
+							"run_id": runID,
+							"hint":   "call subagent_status to check final outcome",
+						})
+				}
+			} else {
+				// Genuine DB error (e.g., closed connection, corrupted row).
+				return subagent.NewFailureEnvelope(runID, subagent.ErrorKindInternal,
+					fmt.Sprintf("status lookup failed: %v", err), nil)
+			}
+		}
+		if run == nil {
+			return subagent.NewFailureEnvelope(runID, subagent.ErrorKindInternal,
+				"subagent run not found after spawn", nil)
+		}
+
+		// Ready for EnvelopeFromRun once the run is out of StatusRunning.
+		// This is deliberately broader than IsTerminalStatus: besides the
+		// terminal set (completed, failed, over_budget, stalled,
+		// cancelled, rejected), EnvelopeFromRun also has an explicit,
+		// load-bearing case for StatusRequested/StatusApproved — an
+		// approval-gated spawn acks success immediately rather than
+		// waiting for a human, and must not be treated as "still
+		// running" here (that regressed a real approval-gating test:
+		// waiting on ctx.Done() below would misreport a pending-approval
+		// spawn as ErrorKindTimeout instead of the intended ack).
+		if run.Status != subagent.StatusRunning {
+			summary, recoverErr := st.recoverSyncSummary(run)
+			if recoverErr != nil {
+				// Summary recovery failed due to an actual error (e.g. ListMessages
+				// returned a DB error, store closed). This is an internal failure,
+				// NOT an empty-reply case — routing through EnvelopeFromRun with
+				// summary="" would emit ErrorKindEmptyReply ("completed but
+				// returned no assistant text"), which is misleading when the real
+				// cause is a backend fault. Surface the underlying error so the
+				// parent's failure handling reflects the actual issue.
+				return subagent.NewFailureEnvelope(run.ID, subagent.ErrorKindInternal,
+					fmt.Sprintf("summary recovery failed: %v", recoverErr),
+					map[string]any{
+						"role":   run.Role,
+						"status": run.Status,
+					})
+			}
+			return subagent.EnvelopeFromRun(run, summary)
+		}
+
+		// Only StatusRunning reaches here (requested/approved and the
+		// terminal set are handled above). Wait for next poll or context
+		// cancellation.
+		select {
+		case <-ctx.Done():
+			// Context cancelled during wait. The run is still in progress
+			// (status = run.Status). Return ErrorKindTimeout with current
+			// status so the parent knows the run did not fail — it's just
+			// not done within the sync wait budget.
+			return subagent.NewFailureEnvelope(runID, subagent.ErrorKindTimeout,
+				fmt.Sprintf("sync wait cancelled (run status: %s, may still be executing): %v", run.Status, ctx.Err()),
+				map[string]any{
+					"run_id": runID,
+					"status": run.Status,
+					"hint":   "call subagent_status to check final outcome",
+				})
+		case <-ticker.C:
+			// Poll again.
+			continue
+		}
 	}
-	if run == nil {
-		return subagent.NewFailureEnvelope(runID, subagent.ErrorKindInternal,
-			"subagent run not found after spawn", nil)
-	}
-	summary, recoverErr := st.recoverSyncSummary(run)
-	if recoverErr != nil {
-		// Summary recovery failed due to an actual error (e.g. ListMessages
-		// returned a DB error, store closed). This is an internal failure,
-		// NOT an empty-reply case — routing through EnvelopeFromRun with
-		// summary="" would emit ErrorKindEmptyReply ("completed but
-		// returned no assistant text"), which is misleading when the real
-		// cause is a backend fault. Surface the underlying error so the
-		// parent's failure handling reflects the actual issue.
-		return subagent.NewFailureEnvelope(run.ID, subagent.ErrorKindInternal,
-			fmt.Sprintf("summary recovery failed: %v", recoverErr),
-			map[string]any{
-				"role":   run.Role,
-				"status": run.Status,
-			})
-	}
-	return subagent.EnvelopeFromRun(run, summary)
 }
 
 // recoverSyncSummary scans the child session's assistant messages for

@@ -162,3 +162,4 @@ go test ./internal/reflex/... -v -run TestLoader
 - `internal/reflex/dispatcher.go` — dispatch integration + MergeReflexes
 - `internal/reflex/loader.go` — YAML loader
 - `internal/store/migrations/032_playbook_match_log.sql` — match log table
+- `internal/store/migrations/093_playbook_match_log_raw_sent_text.sql` — adds `raw_input_text`/`sent_input_text` audit columns (CW-20260816-0068); populated only when a pre-dispatch rewrite changed the text

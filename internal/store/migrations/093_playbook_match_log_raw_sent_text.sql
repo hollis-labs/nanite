@@ -1,0 +1,31 @@
+-- CW-20260816-0068 — raw-input vs. sent-input audit trail for reflex-routed
+-- dispatch.
+--
+-- Adds two columns to playbook_match_log so that a reflex match logged for a
+-- turn whose dispatched text was rewritten before it reached the spawned
+-- agent (e.g. E2 grounding's "## Relevant memories" block prepend, or any
+-- future deterministic rewrite-for-clarity step) records both the user's
+-- raw input and the text actually sent/dispatched, for later audit and
+-- improvement of the routing rules.
+--
+-- This is a general reflex-logging capability, not Conductor-specific — any
+-- agent routed through the reflex system benefits.
+--
+-- Columns:
+--   raw_input_text   full raw user input as typed for the turn (untruncated).
+--   sent_input_text  full text actually sent/dispatched to the spawned agent
+--                     after any pre-dispatch rewrite.
+--
+-- Both columns are left as '' (empty string) when the raw and sent text are
+-- identical for a match — the common case, where no rewrite happened. This
+-- avoids duplicating the full message body into every logged row for no
+-- audit value. matched_input_excerpt already covers "what was typed" for
+-- unrewritten matches. store.LogReflexMatch (internal/store/reflex_log.go)
+-- is the writer that makes this raw==sent to '' collapse decision.
+--
+-- Plain ADD COLUMN (no CHECK constraint involved), so no table-rewrite
+-- dance is needed here — see migrations 065/067 for the rewrite pattern
+-- this deliberately avoids.
+
+ALTER TABLE playbook_match_log ADD COLUMN raw_input_text TEXT NOT NULL DEFAULT '';
+ALTER TABLE playbook_match_log ADD COLUMN sent_input_text TEXT NOT NULL DEFAULT '';

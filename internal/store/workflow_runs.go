@@ -35,6 +35,7 @@ type WorkflowRunStepRow struct {
 	ToolCallsJSON string
 	VerifyJSON    string
 	Error         string
+	GateInput     string // CW-20260814-0017: external input that resolves a gate step
 	StartedAt     time.Time
 	CompletedAt   time.Time
 	UpdatedAt     time.Time
@@ -131,7 +132,7 @@ func scanWorkflowRunRow(scanner interface{ Scan(...any) error }) (*WorkflowRunRo
 	return r, nil
 }
 
-const workflowRunStepColumns = `id, workflow_run_id, step_id, kind, status, output, is_error, tool_calls_json, verify_json, error, started_at, completed_at, updated_at`
+const workflowRunStepColumns = `id, workflow_run_id, step_id, kind, status, output, is_error, tool_calls_json, verify_json, error, gate_input, started_at, completed_at, updated_at`
 
 // workflowRunStepID builds the deterministic synthetic PK for a
 // (workflow_run_id, step_id) pair — stable and collision-free without
@@ -165,7 +166,7 @@ func (s *Store) UpsertWorkflowRunStep(row *WorkflowRunStepRow) error {
 
 	_, err := s.DB.Exec(
 		`INSERT INTO workflow_run_steps (`+workflowRunStepColumns+`)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		 ON CONFLICT(id) DO UPDATE SET
 		     kind = excluded.kind,
 		     status = excluded.status,
@@ -174,11 +175,12 @@ func (s *Store) UpsertWorkflowRunStep(row *WorkflowRunStepRow) error {
 		     tool_calls_json = excluded.tool_calls_json,
 		     verify_json = excluded.verify_json,
 		     error = excluded.error,
+		     gate_input = excluded.gate_input,
 		     started_at = CASE WHEN excluded.started_at = '' THEN workflow_run_steps.started_at ELSE excluded.started_at END,
 		     completed_at = excluded.completed_at,
 		     updated_at = excluded.updated_at`,
 		row.ID, row.WorkflowRunID, row.StepID, row.Kind, row.Status, row.Output, row.IsError,
-		row.ToolCallsJSON, row.VerifyJSON, row.Error,
+		row.ToolCallsJSON, row.VerifyJSON, row.Error, row.GateInput,
 		formatTimeRFC3339NanoOrEmpty(row.StartedAt), formatTimeRFC3339NanoOrEmpty(row.CompletedAt),
 		formatTimeRFC3339Nano(row.UpdatedAt),
 	)
@@ -219,7 +221,7 @@ func scanWorkflowRunStepRow(scanner interface{ Scan(...any) error }) (*WorkflowR
 	var startedAt, completedAt, updatedAt string
 	err := scanner.Scan(
 		&r.ID, &r.WorkflowRunID, &r.StepID, &r.Kind, &r.Status, &r.Output, &r.IsError,
-		&r.ToolCallsJSON, &r.VerifyJSON, &r.Error, &startedAt, &completedAt, &updatedAt,
+		&r.ToolCallsJSON, &r.VerifyJSON, &r.Error, &r.GateInput, &startedAt, &completedAt, &updatedAt,
 	)
 	if err != nil {
 		return nil, err
@@ -253,4 +255,70 @@ func parseTimeRFC3339Nano(s string) time.Time {
 		return time.Time{}
 	}
 	return t
+}
+
+// ResolveGate updates a waiting gate step with the provided input and marks it
+// completed. This is called when external input (e.g., from A2A task input)
+// resolves a paused gate, allowing the workflow to resume.
+// CW-20260814-0017: A2A gate ↔ input-required mapping.
+func (s *Store) ResolveGate(runID, stepID, input string) error {
+	if runID == "" || stepID == "" {
+		return errors.New("ResolveGate: runID and stepID are required")
+	}
+
+	id := workflowRunStepID(runID, stepID)
+	now := time.Now().UTC()
+
+	result, err := s.DB.Exec(
+		`UPDATE workflow_run_steps
+		 SET gate_input = ?,
+		     status = 'completed',
+		     output = ?,
+		     completed_at = ?,
+		     updated_at = ?
+		 WHERE id = ? AND kind = 'gate' AND status = 'waiting_on_gate'`,
+		input,
+		"Gate resolved: "+input, // Store input in output for visibility
+		formatTimeRFC3339Nano(now),
+		formatTimeRFC3339Nano(now),
+		id,
+	)
+	if err != nil {
+		return fmt.Errorf("resolve gate %s/%s: %w", runID, stepID, err)
+	}
+
+	rows, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("resolve gate %s/%s: check rows: %w", runID, stepID, err)
+	}
+	if rows == 0 {
+		return fmt.Errorf("resolve gate %s/%s: no waiting gate found", runID, stepID)
+	}
+
+	return nil
+}
+
+// GetWaitingGates returns all gate steps in waiting_on_gate status for a run.
+// CW-20260814-0017: used to surface gate context in A2A Task state.
+func (s *Store) GetWaitingGates(runID string) ([]*WorkflowRunStepRow, error) {
+	rows, err := s.DB.Query(
+		`SELECT `+workflowRunStepColumns+` FROM workflow_run_steps
+		 WHERE workflow_run_id = ? AND kind = 'gate' AND status = 'waiting_on_gate'
+		 ORDER BY rowid`,
+		runID,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("get waiting gates %s: %w", runID, err)
+	}
+	defer rows.Close()
+
+	var out []*WorkflowRunStepRow
+	for rows.Next() {
+		r, err := scanWorkflowRunStepRow(rows)
+		if err != nil {
+			return nil, fmt.Errorf("scan waiting gate %s: %w", runID, err)
+		}
+		out = append(out, r)
+	}
+	return out, rows.Err()
 }

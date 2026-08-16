@@ -531,6 +531,16 @@ func cmdServe(args []string) {
 		version.Full(),
 	)
 
+	// CW-20260814-0015, CW-20260814-0016: A2A TaskManager for JSON-RPC task methods.
+	// Routes Task submissions to workflow launch or durable-agent wake.
+	container.TaskManager = service.NewTaskManager(
+		s,
+		workflowLauncher,
+		container.DurableWake,
+		workflowDefinitionsRegistry,
+		slog.Default(),
+	)
+
 	// Wire todo/plan store into the self-tools transport.
 	selfTools.TodoStore = s
 	selfTools.Messaging = container.Messaging

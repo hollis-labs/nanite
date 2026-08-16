@@ -361,10 +361,12 @@ func (tm *TaskManager) deriveFromWorkflowRun(ctx context.Context, runID string) 
 	// Map workflow_runs.status to TaskState.
 	// Per design doc: "workflow run is running" → working,
 	// completed → completed, failed → failed.
-	// We also need to handle input-required for paused gates (future enhancement).
+	// CW-20260814-0017: waiting_on_gate → input-required.
 	switch run.Status {
 	case "running":
 		return a2a.TaskStateWorking
+	case "waiting_on_gate":
+		return a2a.TaskStateInputRequired
 	case "completed":
 		return a2a.TaskStateCompleted
 	case "failed":
@@ -470,4 +472,121 @@ func (tm *TaskManager) updateTaskStateFailed(taskID, errorMsg string) {
 			"error", err,
 		)
 	}
+}
+
+// ProvideTaskInput provides input to a task that is in input-required state.
+// For workflow-backed tasks, this resolves the paused gate and resumes the workflow.
+// For instance-backed tasks, this is a no-op (they don't have gates).
+// CW-20260814-0017: A2A gate ↔ input-required mapping.
+func (tm *TaskManager) ProvideTaskInput(ctx context.Context, taskID, input string) error {
+	task, err := tm.store.GetA2ATask(taskID)
+	if err != nil {
+		return fmt.Errorf("failed to get task: %w", err)
+	}
+	if task == nil {
+		return fmt.Errorf("task not found: %s", taskID)
+	}
+
+	// Only workflow-backed tasks can be in input-required state.
+	if !task.WorkflowRunID.Valid || task.WorkflowRunID.String == "" {
+		return fmt.Errorf("task %s is not workflow-backed; input-required is only for workflow gates", taskID)
+	}
+
+	runID := task.WorkflowRunID.String
+
+	// Get the waiting gate(s) for this workflow run.
+	gates, err := tm.store.GetWaitingGates(runID)
+	if err != nil {
+		return fmt.Errorf("failed to get waiting gates: %w", err)
+	}
+	if len(gates) == 0 {
+		return fmt.Errorf("no waiting gates found for workflow run %s", runID)
+	}
+
+	// For simplicity, resolve the first waiting gate. In the future, we could
+	// support targeting a specific gate by step_id or support multiple gates.
+	gate := gates[0]
+	tm.logger.Info("a2a: resolving gate",
+		"task_id", taskID,
+		"run_id", runID,
+		"step_id", gate.StepID,
+		"input", input,
+	)
+
+	if err := tm.store.ResolveGate(runID, gate.StepID, input); err != nil {
+		return fmt.Errorf("failed to resolve gate: %w", err)
+	}
+
+	// Resume the workflow run now that the gate is resolved.
+	if err := tm.resumeWorkflowRun(ctx, task); err != nil {
+		return fmt.Errorf("failed to resume workflow after gate resolution: %w", err)
+	}
+
+	tm.logger.Info("a2a: gate resolved and workflow resumed",
+		"task_id", taskID,
+		"run_id", runID,
+		"step_id", gate.StepID,
+	)
+
+	return nil
+}
+
+// resumeWorkflowRun resumes a paused workflow run after a gate has been resolved.
+func (tm *TaskManager) resumeWorkflowRun(ctx context.Context, task *store.A2ATask) error {
+	if !task.WorkflowRunID.Valid || task.WorkflowRunID.String == "" {
+		return fmt.Errorf("task has no workflow_run_id")
+	}
+
+	runID := task.WorkflowRunID.String
+	run, err := tm.store.GetWorkflowRun(runID)
+	if err != nil {
+		return fmt.Errorf("failed to get workflow run: %w", err)
+	}
+	if run == nil {
+		return fmt.Errorf("workflow run not found: %s", runID)
+	}
+
+	// Get the workflow definition.
+	wf, ok := tm.registry.Get(run.DefinitionName)
+	if !ok {
+		return fmt.Errorf("workflow definition not found: %s", run.DefinitionName)
+	}
+
+	// Get the built-in engine from the launcher. GetEngine returns the
+	// WorkflowEngine interface (Name/Run only) — Resume is a real method
+	// on the concrete *BuiltinWorkflowEngine, not part of that interface,
+	// since only the built-in engine supports gate steps at all (external
+	// engines' DAG shape lives in hand-authored Python, not this format).
+	engine, ok := tm.launcher.GetEngine(agentworkflow.EngineBuiltin)
+	if !ok {
+		return fmt.Errorf("built-in workflow engine not available")
+	}
+	builtinEngine, ok := engine.(*BuiltinWorkflowEngine)
+	if !ok {
+		return fmt.Errorf("workflow engine registered for %q does not support gate resume", agentworkflow.EngineBuiltin)
+	}
+
+	// Resume using the launcher's exec (the same StepExecutor that ran the
+	// original workflow).
+	result, err := builtinEngine.Resume(ctx, runID, wf, tm.launcher.GetStepExecutor())
+	if err != nil {
+		tm.logger.Error("a2a: workflow resume failed",
+			"task_id", task.ID,
+			"run_id", runID,
+			"error", err,
+		)
+		tm.updateTaskStateFailed(task.ID, fmt.Sprintf("workflow resume failed: %v", err))
+		return fmt.Errorf("workflow resume failed: %w", err)
+	}
+
+	tm.logger.Info("a2a: workflow resumed",
+		"task_id", task.ID,
+		"run_id", runID,
+		"status", result.Status,
+	)
+
+	// The task state will be re-derived on next GetTask call based on the
+	// workflow run's updated status.
+
+	return nil
 }

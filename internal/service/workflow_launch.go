@@ -54,12 +54,12 @@ type WorkflowLaunchRequest struct {
 
 // WorkflowLaunchResult is a completed workflow run's outcome.
 type WorkflowLaunchResult struct {
-	InstanceID  string
-	RunID       string
+	InstanceID   string
+	RunID        string
 	WorkflowName string
-	Status      agentworkflow.RunStatus
-	StepResults map[string]agentworkflow.StepResult
-	Error       string
+	Status       agentworkflow.RunStatus
+	StepResults  map[string]agentworkflow.StepResult
+	Error        string
 }
 
 // WorkflowLauncher maps a workflow run onto the existing template-class
@@ -98,6 +98,26 @@ type WorkflowLauncher struct {
 // launch-time "unknown engine" surprise for the common case.
 func NewWorkflowLauncher(registry *agentworkflow.Registry, engines map[string]agentworkflow.WorkflowEngine, exec agentworkflow.StepExecutor, durable DurableAgentService) *WorkflowLauncher {
 	return &WorkflowLauncher{registry: registry, engines: engines, exec: exec, durable: durable}
+}
+
+// GetEngine returns the workflow engine registered under the given name.
+// CW-20260814-0017: exposed for TaskManager to access the built-in engine
+// when resuming workflows after gate resolution.
+func (l *WorkflowLauncher) GetEngine(name string) (agentworkflow.WorkflowEngine, bool) {
+	if l == nil || l.engines == nil {
+		return nil, false
+	}
+	engine, ok := l.engines[name]
+	return engine, ok
+}
+
+// GetStepExecutor returns the StepExecutor the launcher uses for workflow runs.
+// CW-20260814-0017: exposed for TaskManager to use when resuming workflows.
+func (l *WorkflowLauncher) GetStepExecutor() agentworkflow.StepExecutor {
+	if l == nil {
+		return nil
+	}
+	return l.exec
 }
 
 // Launch looks up req.WorkflowName, boots a template-class durable-agent

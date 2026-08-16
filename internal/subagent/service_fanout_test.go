@@ -2,15 +2,18 @@ package subagent
 
 // service_fanout_test.go — G3 fan-out semaphore tests (CW-20260426-0003)
 //
-// Three cases:
+// Four cases:
 //  1. Under-cap parallelism: N=3 spawns complete in ≈ slowest single, not sum.
 //  2. At-cap with queueing: N=5 with cap=3; first 3 run concurrently, last 2
 //     queue; total ≈ 2× single duration.
 //  3. Context cancellation while queued: fill cap, then cancel a queued spawn;
 //     it returns cleanly without consuming a slot.
+//  4. Capacity error distinguishable: fill cap, then timeout a queued spawn;
+//     returns ErrSpawnFanoutCapReached (CW-20260816-0001), not bare ctx.Err().
 
 import (
 	"context"
+	"errors"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -315,3 +318,74 @@ func TestFanout_CancelWhileQueued(t *testing.T) {
 		}
 	}
 }
+
+// TestFanout_CapacityErrorDistinguishable saturates all 3 slots, then
+// dispatches a 4th spawn with a short timeout. Verifies that the error
+// returned is ErrSpawnFanoutCapReached (CW-20260816-0001), not a bare
+// context.DeadlineExceeded, so the MCP layer can map it to
+// error.kind="at_capacity" instead of a generic timeout.
+func TestFanout_CapacityErrorDistinguishable(t *testing.T) {
+	db, _ := newTestDB(t)
+	db.SetMaxOpenConns(1) // serialize SQLite writes
+	runner := newControlledRunner()
+	svc := NewService(db, runner, &stubPoster{}, nil, stubSettings{})
+
+	const cap3 = 3
+	ctx := context.Background()
+
+	// Fill all cap3 slots with long-running spawns.
+	fillCh := spawnAsync(t, svc, ctx, cap3)
+
+	// Wait until all cap3 runners are in-flight.
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		if runner.started.Load() == int64(cap3) {
+			break
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	if runner.started.Load() != int64(cap3) {
+		t.Fatalf("first %d runners did not start within deadline", cap3)
+	}
+
+	// Dispatch a 4th spawn with a short timeout while all slots are occupied.
+	timeoutCtx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	defer cancel()
+
+	_, err := svc.Spawn(timeoutCtx, SpawnRequest{
+		ParentSessionID: "sess-fanout",
+		ParentAgentID:   "parent-agent",
+		Role:            "worker-role",
+		Prompt:          "capacity-blocked",
+		Mode:            ModeAsync,
+	})
+
+	// Must return an error (all slots occupied, context timed out).
+	if err == nil {
+		t.Fatal("expected error from spawn when at capacity, got nil")
+	}
+
+	// The error must be the distinguishable ErrSpawnFanoutCapReached,
+	// not a bare context.DeadlineExceeded.
+	if !errors.Is(err, ErrSpawnFanoutCapReached) {
+		t.Errorf("expected errors.Is(err, ErrSpawnFanoutCapReached), got: %v", err)
+	}
+
+	// The 4th spawn must NOT have started the runner.
+	if runner.started.Load() != int64(cap3) {
+		t.Errorf("runner.started = %d, want %d — capacity-blocked spawn consumed a slot",
+			runner.started.Load(), cap3)
+	}
+
+	// Release the original cap3 and let them finish.
+	runner.release()
+
+	for range cap3 {
+		select {
+		case <-fillCh:
+		case <-time.After(3 * time.Second):
+			t.Fatal("original spawn did not return within 3s after release")
+		}
+	}
+}
+

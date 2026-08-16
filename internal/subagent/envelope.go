@@ -122,6 +122,15 @@ const (
 	// — see ConfigReason* constants below for the stable discriminator
 	// values — so the parent can surface or retry with a known role.
 	ErrorKindConfig = "config"
+
+	// ErrorKindAtCapacity is returned when the spawn fan-out semaphore
+	// is full (all 3 slots occupied) and the caller's context deadline
+	// expires while waiting for a slot (CW-20260816-0001). Distinct
+	// from ErrorKindTimeout (runner exceeded its execution limit) and
+	// ErrorKindCancelled (operator-driven). This signals resource
+	// exhaustion: the parent can retry later or sequence spawns to
+	// respect the cap.
+	ErrorKindAtCapacity = "at_capacity"
 )
 
 // ConfigReason* are the stable discriminator values for a config-fault

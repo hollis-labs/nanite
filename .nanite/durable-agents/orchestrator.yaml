@@ -8,7 +8,7 @@ runtime_kind: api
 launch_source_type: api_chat
 launch_source_id: orchestrator
 metadata:
-    dispatch_scope_notes: 'Scoped test run: A2A protocol adoption tasks CW-20260814-0014 through CW-20260814-0018 only. Do not pick up other ready tasks in this project.'
+    dispatch_scope_notes: 'Scoped test run: subagent-runner fixes CW-20260816-0001 and CW-20260816-0002 only. Both are dispatch-eligible (manual=false). Do not pick up other ready tasks in this project. Do not wait on the architect to update Torque status after a worker completes -- keep polling and dispatching autonomously; the architect handles review and status transitions.'
     exposure_surface: internal_chat_and_harness_v1
     integration_status: operator_managed
     product_story: orchestrator

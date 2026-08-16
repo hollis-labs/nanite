@@ -483,11 +483,43 @@ func (svc *Service) emitStatus(run *Run, summaryPreview string) {
 	svc.streamSink.SubagentStatusChanged(run.ParentSessionID, payload)
 }
 
+// stampActivity persists a fresh last_activity_at for runID so the
+// OUTER periodic reaper sweep (reaper.go SweepOnce) can tell a
+// genuinely silent run from one that's still making progress
+// (CW-20260816-0004). Guarded to status='running' — a heartbeat tick
+// that lands after the row already went terminal (a race with
+// finalizeRun) must not resurrect a stale 'running' read.
+//
+// Uses a short context derived from context.Background, not the
+// caller's runCtx: the write must still land even if runCtx is on the
+// verge of its own deadline, and it must not be cancelled by the same
+// timeout it exists to make survivable. Mirrors persistRetryCheckpoint's
+// context discipline.
+func (svc *Service) stampActivity(runID string) {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if _, err := svc.db.ExecContext(ctx,
+		`UPDATE subagent_runs SET last_activity_at = ? WHERE id = ? AND status = ?`,
+		time.Now().UTC().Format(time.RFC3339Nano), runID, StatusRunning,
+	); err != nil {
+		slog.Warn("subagent: stamp activity", "err", err, "run_id", runID)
+	}
+}
+
 // emitHeartbeat marshals a non-terminal "still running" progress ping
 // for run and hands it to the sink (CW-20260519-0068). It is
 // distinguished from emitStatus's dispatch/terminal transitions by
 // heartbeat:true so a consumer renders it as an in-place update rather
 // than a new status transition.
+//
+// Also stamps last_activity_at (CW-20260816-0004) — this ticker is
+// Nanite's only cheap, already-live activity signal for a subagent run
+// in flight, and the reaper now keys its inactivity branch off this
+// column instead of pure elapsed time from started_at. A run whose
+// streamSink is unwired (so this ticker never starts at all — see
+// startHeartbeat) leaves last_activity_at empty forever; the reaper's
+// COALESCE falls back to started_at in that case, i.e. the pre-fix
+// elapsed-time behavior, not a crash.
 //
 // Only fields that startHeartbeat's caller guarantees are stable for
 // the lifetime of the in-flight runner.Run call are read here (id,
@@ -497,6 +529,7 @@ func (svc *Service) emitStatus(run *Run, summaryPreview string) {
 // partway through Run; reading it here without synchronization would
 // race that write.
 func (svc *Service) emitHeartbeat(run *Run, elapsed time.Duration) {
+	svc.stampActivity(run.ID)
 	if svc.streamSink == nil {
 		return
 	}

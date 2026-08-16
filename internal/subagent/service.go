@@ -968,11 +968,15 @@ func (svc *Service) Reject(ctx context.Context, runID, reason string) error {
 			body = body + ": " + reason
 		}
 		fromAgentID, registerAs := svc.replyFromAgentID(run.Role)
+		// CW-20260815-0027: resolve run.ParentAgentID to its real
+		// agent_profiles.ID rather than passing a bare slug — see
+		// replyToAgentID's doc comment for why that fails ValidateAgentID.
+		toAgentID := svc.replyToAgentID(run.ParentAgentID)
 		_, _ = svc.poster.SendMessage(ctx, messaging.SendInput{
 			FromSessionID: run.ParentSessionID,
 			FromAgentID:   fromAgentID,
 			ToSessionID:   run.ParentSessionID,
-			ToAgentID:     run.ParentAgentID,
+			ToAgentID:     toAgentID,
 			Channel:       messaging.ChannelChat,
 			Kind:          messaging.KindReply,
 			Body:          body,
@@ -1283,6 +1287,10 @@ func (svc *Service) execute(ctx context.Context, run *Run, parentAgentID string)
 	// doc comment for why that collided with the agent_profiles.slug
 	// UNIQUE constraint on every reply.
 	fromAgentID, registerAs := svc.replyFromAgentID(run.Role)
+	// CW-20260815-0027: resolve parentAgentID to its real agent_profiles.ID
+	// rather than passing a bare slug — see replyToAgentID's doc comment
+	// for why that fails ValidateAgentID.
+	toAgentID := svc.replyToAgentID(parentAgentID)
 	// CW-20260512-0019: Kind=subagent_result (not the generic KindReply)
 	// so chat_generate.go's turn-start injection and the harness-reaction
 	// layer (CW-20260520-0001) can query for this specifically. Emitted
@@ -1295,7 +1303,7 @@ func (svc *Service) execute(ctx context.Context, run *Run, parentAgentID string)
 		FromSessionID: run.ParentSessionID,
 		FromAgentID:   fromAgentID, // the subagent is the sender
 		ToSessionID:   run.ParentSessionID,
-		ToAgentID:     parentAgentID,
+		ToAgentID:     toAgentID,
 		Channel:       replyChannel,
 		Kind:          messaging.KindSubagentResult,
 		Body:          summary,

@@ -241,7 +241,20 @@ func (a *API) handleHarnessV1CreateSession(w http.ResponseWriter, r *http.Reques
 		return
 	}
 	if req.AgentID != "" {
-		if err := a.Services.Store.EnsureSessionAgent(sess.ID, req.AgentID, "default", true); err != nil {
+		// CW-20260815-0026: Resolve agent ID/slug to canonical ID before binding.
+		// The CLI -agent flag may pass either an ID or slug; resolve it now so
+		// resolution failures surface as errors instead of silently falling back
+		// to the default agent during ResolveForSession.
+		resolvedAgent, err := a.Services.Agents.Get(r.Context(), req.AgentID)
+		if err != nil {
+			// Try by slug if Get by ID failed
+			resolvedAgent, err = a.Services.Agents.GetBySlug(r.Context(), req.AgentID)
+			if err != nil {
+				a.errorResp(w, http.StatusBadRequest, fmt.Sprintf("agent %q not found", req.AgentID))
+				return
+			}
+		}
+		if err := a.Services.Store.EnsureSessionAgent(sess.ID, resolvedAgent.ID, "default", true); err != nil {
 			a.errorResp(w, http.StatusBadRequest, err.Error())
 			return
 		}

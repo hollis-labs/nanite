@@ -15,6 +15,19 @@ tags:
     - harness
     - orchestrator
     - dispatch
+# subagentCompletionPolicy: auto_summarize (CW-20260520-0001, Layer 2) —
+# when a subagent this session dispatched (subagent_spawn/workflow_run)
+# completes after this session's own turn has already ended, proactively
+# trigger a new turn to react rather than sit idle until the operator
+# manually nudges. Without this, dispatched work completes silently until
+# something else pokes the session — found live 2026-08-16 during the A2A
+# dogfood run: every completion this session's turn-start injection could
+# see, it correctly surfaced, but nothing ever triggered a fresh turn to
+# read it. This is the entire reason a "harness" class exists — an
+# orchestrator that only reacts when a human happens to check in isn't
+# actually autonomous.
+constraints:
+    subagentCompletionPolicy: auto_summarize
 # roleTools seeds agent_known_tools for UI display only (FU-7a docs, see
 # internal/agent/parser.go RoleTools) — it has NO effect on the tools this
 # agent actually gets at runtime. `tools:` below is the real, enforced

@@ -124,12 +124,26 @@ type ModeDefinition struct {
 // restrictions on agents, timeouts, etc.") deleted in favor of the
 // subagent reaper as the authoritative hung-run safety net.
 //
-// The struct is intentionally retained as an empty type so existing
-// frontmatter that still declares a `constraints:` block parses
-// without error — unknown keys are tolerated by yaml.Unmarshal and
-// validation downgrades them to a warning (see
-// internal/agentvalidation/validation.go).
-type AgentConstraints struct{}
+// The struct was left empty after that removal — which meant every
+// field added to the real runtime-facing internal/chat.AgentConstraints
+// since (the Phase-4 chat-loop breakers, and CW-20260520-0001's
+// SubagentCompletionPolicy) was silently unreachable from a file-based
+// agent's frontmatter: yaml.Unmarshal tolerates the unknown keys, but
+// they parsed to nothing, so ToProfile() had nothing to carry into
+// store.AgentProfile.Constraints. Found 2026-08-16 investigating why the
+// Orchestrator role's auto_summarize policy could never take effect —
+// mirrors internal/chat.AgentConstraints's fields exactly (kept as a
+// separate, local type — not an import of internal/chat — matching this
+// file's existing pattern for AgentToolPermissions, which mirrors
+// toolclient.ToolPermissions locally to avoid a heavier dependency).
+type AgentConstraints struct {
+	MaxTurns                 int    `yaml:"maxTurns,omitempty" json:"max_turns,omitempty"`
+	HardCeiling              int    `yaml:"hardCeiling,omitempty" json:"hard_ceiling,omitempty"`
+	ConsecutiveFailCap       int    `yaml:"consecutiveFailCap,omitempty" json:"consecutive_fail_cap,omitempty"`
+	RunawayFailCap           int    `yaml:"runawayFailCap,omitempty" json:"runaway_fail_cap,omitempty"`
+	IdleTimeoutSeconds       int    `yaml:"idleTimeoutSeconds,omitempty" json:"idle_timeout_seconds,omitempty"`
+	SubagentCompletionPolicy string `yaml:"subagentCompletionPolicy,omitempty" json:"subagent_completion_policy,omitempty"`
+}
 
 // AgentToolPermissions mirrors toolclient.ToolPermissions in shape but is
 // declared here so agent frontmatter parsing does not depend on toolclient.

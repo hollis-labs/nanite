@@ -8,6 +8,7 @@ import (
 	"path"
 	"strings"
 
+	"github.com/hollis-labs/nanite/internal/chat"
 	"github.com/hollis-labs/nanite/internal/store"
 	"github.com/hollis-labs/nanite/internal/toolclient"
 )
@@ -115,32 +116,59 @@ func ValidateAgentConfig(agent *store.AgentProfile) ValidationResult {
 		}
 	}
 
-	// 7. Validate constraints (JSON object with positive numeric values).
+	// 7. Validate constraints (JSON object).
 	//
-	// CW-20260512-0123 (SP-20260512-0011 W3): the legacy keys
-	// `max_iterations`, `max_time_seconds`, and `retry_budget` were
-	// removed. Empty `{}` is the supported value; non-empty objects
-	// emit warnings (unknown keys) but are tolerated so existing
-	// agent_profiles rows don't fail validation during the cutover.
+	// CW-20260512-0123 (SP-20260512-0011 W3) removed the legacy
+	// `max_iterations` / `max_time_seconds` / `retry_budget` keys. This
+	// check used to then treat the ENTIRE constraints field as deprecated
+	// and require every remaining key to be a positive number — which
+	// silently broke every field added to internal/chat.AgentConstraints
+	// since (the Phase-4 chat-loop breakers, and CW-20260520-0001's
+	// SubagentCompletionPolicy): a real, non-deprecated key would fail
+	// this hard-numeric check and reject the whole update. Found
+	// 2026-08-16 investigating why no agent profile could ever be
+	// configured for the auto_summarize subagent-completion policy — the
+	// validator rejected the only supported way to set it.
+	//
+	// numericConstraintKeys mirrors internal/chat.AgentConstraints's
+	// integer fields exactly. stringConstraintKeys validates against a
+	// real enum where one exists (subagent_completion_policy). Any other
+	// key is still tolerated with a warning, not a hard error — matching
+	// the original cutover-era leniency for genuinely unknown/future keys.
 	if c := strings.TrimSpace(agent.Constraints); c != "" && c != "{}" {
 		var constraints map[string]any
 		if err := json.Unmarshal([]byte(c), &constraints); err != nil {
 			result.Errors = append(result.Errors, fmt.Sprintf("constraints is malformed JSON: %s", err.Error()))
-		} else if len(constraints) > 0 {
-			// One summary warning carries the long explanation; per-key
-			// warnings stay short so a busy constraints blob doesn't spam
-			// ValidationResult.Warnings.
-			result.Warnings = append(result.Warnings,
-				"constraints field is deprecated and ignored - per-call deadlines and retry budgets were removed by CW-20260512-0123 (SP-20260512-0011 W3)")
+		} else {
+			numericConstraintKeys := map[string]bool{
+				"max_turns": true, "hard_ceiling": true, "consecutive_fail_cap": true,
+				"runaway_fail_cap": true, "idle_timeout_seconds": true,
+			}
 			for k, v := range constraints {
-				result.Warnings = append(result.Warnings, fmt.Sprintf("constraints: unknown key %q - ignored", k))
-				switch n := v.(type) {
-				case float64:
-					if n <= 0 {
-						result.Errors = append(result.Errors, fmt.Sprintf("constraints.%s must be a positive number, got %v", k, n))
+				switch {
+				case k == "subagent_completion_policy":
+					s, ok := v.(string)
+					if !ok {
+						result.Errors = append(result.Errors, fmt.Sprintf("constraints.%s must be a string, got %T", k, v))
+					} else if s != "" && !chat.IsValidSubagentCompletionPolicy(s) {
+						result.Errors = append(result.Errors, fmt.Sprintf("constraints.%s: unrecognized value %q (want one of %q, %q, %q)",
+							k, s, chat.SubagentPolicyRenderAndWait, chat.SubagentPolicyAutoSummarize, chat.SubagentPolicyBatch))
+					}
+				case numericConstraintKeys[k]:
+					n, ok := v.(float64)
+					if !ok {
+						result.Errors = append(result.Errors, fmt.Sprintf("constraints.%s must be a number, got %T", k, v))
+					} else if k == "max_turns" {
+						// max_turns alone allows -1 (unlimited) alongside
+						// 0 (default) and any positive value.
+						if n < -1 {
+							result.Errors = append(result.Errors, fmt.Sprintf("constraints.%s must be -1 (unlimited), 0 (default), or positive, got %v", k, n))
+						}
+					} else if n < 0 {
+						result.Errors = append(result.Errors, fmt.Sprintf("constraints.%s must be a non-negative number, got %v", k, n))
 					}
 				default:
-					result.Errors = append(result.Errors, fmt.Sprintf("constraints.%s must be a number, got %T", k, v))
+					result.Warnings = append(result.Warnings, fmt.Sprintf("constraints: unknown key %q - ignored", k))
 				}
 			}
 		}

@@ -68,6 +68,42 @@ func TestService_SendMessage_WakesReactorForOrdinaryMessage(t *testing.T) {
 	}
 }
 
+// TestService_SendMessage_WakesReactorForRequestReplyHandoff closes a
+// test-coverage gap flagged in code review: SendMessage's wake-reactor
+// gate (svc.wake != nil && out.Kind != KindSubagentResult) fires by
+// default for every Kind except KindSubagentResult — not just
+// KindNotification, which was the only kind under direct test before this.
+// That's the actual fix for the poll-only gap this ticket targeted
+// (KindRequest/KindReply/KindHandoff sends should wake the recipient just
+// as much as a plain notification does), so this proves the gate's
+// behavior for those three kinds explicitly rather than leaving it
+// implied by the single-kind coverage above. Purely additive coverage —
+// does not change the gating behavior itself.
+func TestService_SendMessage_WakesReactorForRequestReplyHandoff(t *testing.T) {
+	for _, kind := range []string{KindRequest, KindReply, KindHandoff} {
+		t.Run(kind, func(t *testing.T) {
+			svc, _, _ := newTestService(t, "file-backend")
+			wake := &fakeWakeReactor{}
+			svc.SetWakeReactor(wake)
+
+			in := baseInput(UserSentinel, "file-backend")
+			in.Kind = kind
+			out, err := svc.SendMessage(context.Background(), in)
+			if err != nil {
+				t.Fatalf("SendMessage: %v", err)
+			}
+
+			wake.waitForCount(t, 1)
+			if wake.calls[0].ID != out.ID {
+				t.Errorf("reactor received message id %q, want %q", wake.calls[0].ID, out.ID)
+			}
+			if wake.calls[0].Kind != kind {
+				t.Errorf("reactor received kind %q, want %q", wake.calls[0].Kind, kind)
+			}
+		})
+	}
+}
+
 // TestService_SendMessage_SkipsWakeForSubagentResult is the double-wake
 // guard: kind=subagent_result already has its own dedicated wake path
 // (subagent.CompletionReactor). If SendMessage's generic WakeReactor

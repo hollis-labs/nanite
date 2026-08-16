@@ -101,15 +101,19 @@ hook additions + container/chat wiring. Everything store-side is already in plac
 
 1. Add plugin reflex filter constants (`plugin/filter.go`) + emit methods
    (`plugin/events.go`). Smallest, no dependents-break risk.
-2. Copy `internal/agent/reflexes/` (all 6 impl files + 4 tests) verbatim — imports
-   already resolve (`internal/store`, `internal/plugin`).
+2. Copy `internal/agent/reflexes/` (all 6 impl files + 4 tests) verbatim from
+   agridd into nanite's `internal/agent/driftguard/` — imports already
+   resolve (`internal/store`, `internal/plugin`). (Path updated 2026-08-16:
+   this backport landed and was subsequently renamed from
+   `internal/agent/reflexes` to `internal/agent/driftguard` on the nanite
+   side, CW-20260816-0062, to resolve a collision with `internal/reflex`.)
 3. Copy `internal/service/chat_reflexes.go`.
 4. Wire in `service/container.go`: build engine, set `Executor.Halt` →
    `store.MarkSessionHalted` + event log, `SetPluginHooks(cfg.Plugins)`,
    `SeedBaseReflexes`, thread `ReflexEngine` onto the chat-service config.
 5. Add `reflexEngine` field to chat service + the per-turn call site in
    `chat_generate.go`.
-6. Run `go test ./internal/agent/reflexes ./internal/service ./internal/store`.
+6. Run `go test ./internal/agent/driftguard ./internal/service ./internal/store`.
 
 **Size: M.** Mechanical (substrate exists), but touches three hot files
 (container.go, chat.go, chat_generate.go) so it needs careful placement +
@@ -275,8 +279,11 @@ intent. Suggested order:
    (Unclear #1). Assuming yes:
 2. **Plugin hooks** — add `FilterReflexState`/`FilterReflexAction` to
    `plugin/filter.go`; add `EmitReflex*` to `plugin/events.go`. *(S, no risk)*
-3. **Reflex engine package** — copy `internal/agent/reflexes/` (impl + tests).
-   Imports resolve against existing nanite `store`/`plugin`. *(M)*
+3. **Reflex engine package** — copy `internal/agent/reflexes/` (impl + tests)
+   into nanite's `internal/agent/driftguard/` (path updated 2026-08-16 per
+   CW-20260816-0062 — see the note in the "Recommended backport order for
+   the engine" section above). Imports resolve against existing nanite
+   `store`/`plugin`. *(M)*
 4. **Per-turn glue** — copy `internal/service/chat_reflexes.go`. *(S)*
 5. **Container + chat wiring** — engine construction, `Executor.Halt` →
    `MarkSessionHalted`+event, `SetPluginHooks`, `SeedBaseReflexes`, thread
@@ -286,7 +293,7 @@ intent. Suggested order:
    `store/agent_runtime_test.go`, `service/agent_cycles_test.go`. *(S)*
 7. **(operator decision)** Optionally bring `mcp/args_normalize.go` (Unclear #2)
    and/or the Torque-hardening reapers (Unclear #3).
-8. **Verify:** `go test -count=1 ./internal/agent/reflexes ./internal/service
+8. **Verify:** `go test -count=1 ./internal/agent/driftguard ./internal/service
    ./internal/store ./internal/plugin`.
 
 **Do NOT backport:** `monitor`, `probes`, `composer`, `relay`, `agentdb`,

@@ -46,6 +46,15 @@ func (s *stubSessionService) Search(_ context.Context, _ string, _ SearchOpts) (
 type stubAgentService struct {
 	agent *store.AgentProfile
 	mode  *store.AgentMode
+
+	// Call counters so tests can assert which resolution path a caller
+	// used — in particular, that resolveMessageWakePolicy uses the
+	// non-mutating ResolveForSessionReadOnly rather than ResolveForSession
+	// (CW code-review: the mutating variant auto-assigns a session_agents
+	// row / emits AgentAssigned as a side effect of what should be a pure
+	// policy read).
+	resolveForSessionCalls         int
+	resolveForSessionReadOnlyCalls int
 }
 
 func (s *stubAgentService) Get(_ context.Context, _ string) (*store.AgentProfile, error) {
@@ -59,6 +68,11 @@ func (s *stubAgentService) Create(_ context.Context, _ *store.AgentProfile) erro
 func (s *stubAgentService) Update(_ context.Context, _ *store.AgentProfile) error { return nil }
 func (s *stubAgentService) Delete(_ context.Context, _ string) error              { return nil }
 func (s *stubAgentService) ResolveForSession(_ context.Context, _ string) (*store.AgentProfile, *store.AgentMode, error) {
+	s.resolveForSessionCalls++
+	return s.agent, s.mode, nil
+}
+func (s *stubAgentService) ResolveForSessionReadOnly(_ context.Context, _ string) (*store.AgentProfile, *store.AgentMode, error) {
+	s.resolveForSessionReadOnlyCalls++
 	return s.agent, s.mode, nil
 }
 func (s *stubAgentService) ListModes(_ context.Context, _ string) ([]store.AgentMode, error) {

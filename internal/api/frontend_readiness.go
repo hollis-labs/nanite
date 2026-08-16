@@ -454,6 +454,7 @@ func recipeKindOptions() []enumOption {
 		{Value: service.DurableAgentRecipeKindProcessMonitor, Label: "Process monitor"},
 		{Value: service.DurableAgentRecipeKindTemplateWorker, Label: "Template worker"},
 		{Value: service.DurableAgentRecipeKindOrchestrator, Label: "Orchestrator"},
+		{Value: service.DurableAgentRecipeKindConductor, Label: "Conductor"},
 	}
 }
 

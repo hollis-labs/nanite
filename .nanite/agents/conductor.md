@@ -24,14 +24,7 @@ tags:
 # internal/service/messaging_reactor.go's resolveMessageWakePolicy — is
 # already `auto_summarize` (CW-20260816-0065's landed default), which is
 # exactly the "approvals/blockers interrupt" behavior this profile wants.
-# No per-profile override needed. Flagging for future readers: at the time
-# this profile was written, internal/agent/parser.go's local
-# AgentConstraints mirror struct does NOT have a MessageWakePolicy field
-# (only SubagentCompletionPolicy) — so a `constraints: messageWakePolicy:
-# ...` key in *any* profile's frontmatter is silently dropped today
-# (yaml.Unmarshal tolerates unknown keys). Not a blocker here since the
-# global default already matches, but a real gap if a future profile ever
-# needs a non-default override.
+# No per-profile override needed.
 #
 # roleTools seeds agent_known_tools for UI display only (FU-7a docs, see
 # internal/agent/parser.go RoleTools) — it has NO effect on the tools this
@@ -102,6 +95,10 @@ roleTools:
     # Durable notes/decisions (Vanta).
     - memory_write
     - memory_recall
+    # Output distillation (see "Output shape" below) — required for the
+    # report-card relay convention this profile's output contract depends
+    # on.
+    - card_show
     # Nil note capture (CW-20260816-0070). Real tool, confirmed by reading
     # apps/nil/cmd/nil-mcp/{tools.go,tool_schemas.go} directly (ADR-0005:
     # nil-mcp is a thin stdio proxy over Nil's local HTTP API). NOT YET
@@ -183,6 +180,7 @@ tools:
     - torque_sprint_approve
     - memory_write
     - memory_recall
+    - card_show
     - nil_create_item
     - message_send
     - message_inbox

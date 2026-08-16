@@ -22,6 +22,15 @@ type AgentService interface {
 	Update(ctx context.Context, agent *store.AgentProfile) error
 	Delete(ctx context.Context, id string) error
 	ResolveForSession(ctx context.Context, sessionID string) (agent *store.AgentProfile, mode *store.AgentMode, err error)
+	// ResolveForSessionReadOnly resolves the same effective agent+mode as
+	// ResolveForSession (session binding -> user-settings default ->
+	// hardcoded fallback) but never mutates session-agent-binding state:
+	// unlike ResolveForSession, it does not call EnsureSessionAgent or
+	// emit AgentAssigned when the session has no existing binding. Use
+	// this for read-only policy lookups (e.g. resolveMessageWakePolicy)
+	// that should not have the side effect of auto-binding a session to
+	// an agent merely because something checked its effective policy.
+	ResolveForSessionReadOnly(ctx context.Context, sessionID string) (agent *store.AgentProfile, mode *store.AgentMode, err error)
 	ListModes(ctx context.Context, agentID string) ([]store.AgentMode, error)
 }
 
@@ -242,6 +251,27 @@ func (s *agentServiceImpl) ListModes(_ context.Context, agentID string) ([]store
 //  6. Reject disabled agents.
 //  7. Load the agent mode (falling back to empty mode on miss).
 func (s *agentServiceImpl) ResolveForSession(ctx context.Context, sessionID string) (*store.AgentProfile, *store.AgentMode, error) {
+	return s.resolveForSession(ctx, sessionID, true)
+}
+
+// ResolveForSessionReadOnly implements AgentService's non-mutating sibling
+// to ResolveForSession — see that method's interface doc comment. Added in
+// response to a code-review finding: messaging_reactor.go's
+// resolveMessageWakePolicy was calling the mutating ResolveForSession from
+// a fire-and-forget goroutine on every eligible A2A SendMessage, so a
+// read-only "what policy applies here" check was silently auto-binding
+// unbound sessions to an agent (EnsureSessionAgent) and emitting
+// AgentAssigned as an unintended side effect. This variant runs the exact
+// same resolution chain but skips step 4 below entirely.
+func (s *agentServiceImpl) ResolveForSessionReadOnly(ctx context.Context, sessionID string) (*store.AgentProfile, *store.AgentMode, error) {
+	return s.resolveForSession(ctx, sessionID, false)
+}
+
+// resolveForSession is the shared implementation behind ResolveForSession
+// and ResolveForSessionReadOnly. allowAutoAssign gates step 4
+// (EnsureSessionAgent + EmitAgentAssigned) only — every other step in the
+// resolution chain runs identically regardless of its value.
+func (s *agentServiceImpl) resolveForSession(ctx context.Context, sessionID string, allowAutoAssign bool) (*store.AgentProfile, *store.AgentMode, error) {
 	agentID, modeName, autoAssigned := s.resolveBinding(sessionID)
 
 	// Load the agent profile. Check file-based agents first, then DB.
@@ -278,8 +308,9 @@ func (s *agentServiceImpl) ResolveForSession(ctx context.Context, sessionID stri
 		return nil, nil, fmt.Errorf("agent %q is disabled", resolved.Name)
 	}
 
-	// Auto-assign to session if we had to fall back.
-	if autoAssigned {
+	// Auto-assign to session if we had to fall back (only for the
+	// mutating variant — see resolveForSession's doc comment).
+	if autoAssigned && allowAutoAssign {
 		if err := s.writers.EnsureSessionAgent(sessionID, resolved.ID, modeName, true); err != nil {
 			slog.Warn("agent-service: failed to auto-assign agent", "agent", resolved.ID, "session_id", sessionID, "err", err)
 		}

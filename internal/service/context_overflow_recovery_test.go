@@ -16,9 +16,16 @@ import (
 // fakeEventEmitter captures EmitPreCompact and EmitPostCompact calls for
 // assertion. All other methods are no-ops.
 type fakeEventEmitter struct {
-	mu   sync.Mutex
-	pre  []fakeCompactEvent
-	post []fakeCompactEvent
+	mu            sync.Mutex
+	pre           []fakeCompactEvent
+	post          []fakeCompactEvent
+	agentAssigned []fakeAgentAssignedEvent
+}
+
+type fakeAgentAssignedEvent struct {
+	sessionID string
+	agentID   string
+	mode      string
 }
 
 type fakeCompactEvent struct {
@@ -41,7 +48,11 @@ func (f *fakeEventEmitter) EmitPostCompact(_ context.Context, sessionID string, 
 }
 func (f *fakeEventEmitter) EmitSessionStart(_ context.Context, _, _, _, _ string) {}
 func (f *fakeEventEmitter) EmitSessionEnd(_ context.Context, _ string)            {}
-func (f *fakeEventEmitter) EmitAgentAssigned(_ context.Context, _, _, _ string)   {}
+func (f *fakeEventEmitter) EmitAgentAssigned(_ context.Context, sessionID, agentID, mode string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.agentAssigned = append(f.agentAssigned, fakeAgentAssignedEvent{sessionID: sessionID, agentID: agentID, mode: mode})
+}
 func (f *fakeEventEmitter) EmitResponseComplete(_ context.Context, _, _, _ string, _, _ int) {
 }
 func (f *fakeEventEmitter) EmitToolCall(_ context.Context, _, _ string, _ bool, _ int) {}

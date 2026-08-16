@@ -83,6 +83,38 @@ func TestResolveMessageWakePolicy_UnrecognizedSessionOverride_FallsThrough(t *te
 	}
 }
 
+// TestResolveMessageWakePolicy_UsesReadOnlyAgentResolution is the
+// regression test for a code-review finding: resolveMessageWakePolicy runs
+// from a fire-and-forget goroutine on every eligible A2A SendMessage
+// (internal/messaging/service.go), so its agent-profile-default tier must
+// use the non-mutating ResolveForSessionReadOnly rather than
+// ResolveForSession — the latter auto-assigns a session_agents row and
+// emits AgentAssigned as a side effect for any session with no existing
+// binding, which a read-only "what policy applies here" check should
+// never trigger. See internal/service/agent_test.go's
+// TestAgentService_ResolveForSessionReadOnly_NoAutoAssign for the
+// corresponding proof at the AgentService implementation level.
+func TestResolveMessageWakePolicy_UsesReadOnlyAgentResolution(t *testing.T) {
+	agents := &stubAgentService{agent: &store.AgentProfile{
+		Constraints: `{"message_wake_policy":"render_and_wait"}`,
+	}}
+	svc := &chatServiceImpl{
+		sessions: &stubSessionService{sessions: map[string]*store.Session{
+			"sess-1": {ID: "sess-1"}, // no metadata override, forces the agent-profile tier
+		}},
+		agents: agents,
+	}
+
+	svc.resolveMessageWakePolicy(context.Background(), "sess-1")
+
+	if agents.resolveForSessionReadOnlyCalls != 1 {
+		t.Errorf("expected exactly 1 ResolveForSessionReadOnly call, got %d", agents.resolveForSessionReadOnlyCalls)
+	}
+	if agents.resolveForSessionCalls != 0 {
+		t.Errorf("resolveMessageWakePolicy must not use the mutating ResolveForSession (auto-assigns session_agents + emits AgentAssigned); got %d calls", agents.resolveForSessionCalls)
+	}
+}
+
 func TestResolveMessageWakePolicy_UnknownSession_FallsBackSafely(t *testing.T) {
 	svc := &chatServiceImpl{
 		sessions: &stubSessionService{sessions: map[string]*store.Session{}}, // Get errors

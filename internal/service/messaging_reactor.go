@@ -98,7 +98,16 @@ func (s *chatServiceImpl) resolveMessageWakePolicy(ctx context.Context, sessionI
 		}
 	}
 
-	if agent, _, err := s.agents.ResolveForSession(ctx, sessionID); err == nil && agent != nil {
+	// Read-only lookup deliberately: this is a fire-and-forget policy
+	// check that runs on every eligible SendMessage (see
+	// messaging.Service.SendMessage's call site), not an interactive
+	// turn establishing a real session-agent binding. ResolveForSession
+	// would auto-assign a session_agents row (EnsureSessionAgent) and
+	// emit AgentAssigned as a side effect for any unbound session it
+	// touches — ResolveForSessionReadOnly runs the identical resolution
+	// chain without that mutation. See internal/service/agent.go's doc
+	// comment on both methods for the full rationale.
+	if agent, _, err := s.agents.ResolveForSessionReadOnly(ctx, sessionID); err == nil && agent != nil {
 		constraints := chat.ParseAgentConstraints(agent.Constraints)
 		if constraints.MessageWakePolicy != "" {
 			if chat.IsValidSubagentCompletionPolicy(constraints.MessageWakePolicy) {

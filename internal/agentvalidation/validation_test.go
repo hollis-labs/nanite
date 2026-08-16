@@ -1,6 +1,7 @@
 package agentvalidation
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/hollis-labs/nanite/internal/store"
@@ -204,5 +205,107 @@ func TestPrefixGlobIsValid(t *testing.T) {
 	result := ValidateAgentConfig(agent)
 	if !result.OK() {
 		t.Fatalf("expected no errors for prefix globs, got: %v", result.Errors)
+	}
+}
+
+// TestConstraintsSubagentCompletionPolicy exercises the real, current
+// constraints schema — found broken 2026-08-16 when a direct PUT to set
+// auto_summarize on the Orchestrator profile was rejected: the validator
+// still treated the entire constraints object as deprecated/numbers-only,
+// years after CW-20260520-0001 added a real string field
+// (subagent_completion_policy) to internal/chat.AgentConstraints.
+func TestConstraintsSubagentCompletionPolicy(t *testing.T) {
+	tests := []struct {
+		name        string
+		constraints string
+		wantOK      bool
+		wantErrLike string
+	}{
+		{
+			name:        "auto_summarize is valid",
+			constraints: `{"subagent_completion_policy":"auto_summarize"}`,
+			wantOK:      true,
+		},
+		{
+			name:        "render_and_wait is valid",
+			constraints: `{"subagent_completion_policy":"render_and_wait"}`,
+			wantOK:      true,
+		},
+		{
+			name:        "batch is valid",
+			constraints: `{"subagent_completion_policy":"batch"}`,
+			wantOK:      true,
+		},
+		{
+			name:        "unrecognized value is rejected",
+			constraints: `{"subagent_completion_policy":"sometimes"}`,
+			wantOK:      false,
+			wantErrLike: "unrecognized value",
+		},
+		{
+			name:        "wrong type is rejected",
+			constraints: `{"subagent_completion_policy":42}`,
+			wantOK:      false,
+			wantErrLike: "must be a string",
+		},
+		{
+			name:        "numeric Phase-4 fields are valid",
+			constraints: `{"max_turns":50,"hard_ceiling":100,"consecutive_fail_cap":3,"runaway_fail_cap":10,"idle_timeout_seconds":900}`,
+			wantOK:      true,
+		},
+		{
+			name:        "max_turns allows -1 (unlimited)",
+			constraints: `{"max_turns":-1}`,
+			wantOK:      true,
+		},
+		{
+			name:        "max_turns rejects less than -1",
+			constraints: `{"max_turns":-2}`,
+			wantOK:      false,
+			wantErrLike: "must be -1",
+		},
+		{
+			name:        "hard_ceiling rejects negative",
+			constraints: `{"hard_ceiling":-5}`,
+			wantOK:      false,
+			wantErrLike: "must be a non-negative number",
+		},
+		{
+			name:        "wrong-typed numeric field is rejected",
+			constraints: `{"max_turns":"fifty"}`,
+			wantOK:      false,
+			wantErrLike: "must be a number",
+		},
+		{
+			name:        "genuinely unknown key is only a warning",
+			constraints: `{"some_future_key":"whatever"}`,
+			wantOK:      true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			agent := &store.AgentProfile{
+				Name:         "Test Agent",
+				Slug:         "test-agent",
+				SystemPrompt: "You are a test agent.",
+				Constraints:  tt.constraints,
+			}
+			result := ValidateAgentConfig(agent)
+			if result.OK() != tt.wantOK {
+				t.Fatalf("ValidateAgentConfig(%s).OK() = %v, want %v (errors: %v)", tt.constraints, result.OK(), tt.wantOK, result.Errors)
+			}
+			if !tt.wantOK {
+				found := false
+				for _, e := range result.Errors {
+					if strings.Contains(e, tt.wantErrLike) {
+						found = true
+					}
+				}
+				if !found {
+					t.Errorf("expected an error containing %q, got: %v", tt.wantErrLike, result.Errors)
+				}
+			}
+		})
 	}
 }

@@ -6,10 +6,6 @@ import (
 )
 
 func TestDefinition_ToProfile(t *testing.T) {
-	// CW-20260512-0123 (SP-20260512-0011 W3): the AgentConstraints
-	// struct is now empty — the heavy per-call deadline / retry
-	// restriction class was removed. The constraints column ends up
-	// as the empty-object marker "{}" for every converted profile.
 	def := &Definition{
 		Name:           "Code Agent",
 		Slug:           "code",
@@ -93,10 +89,10 @@ func TestDefinition_ToProfile(t *testing.T) {
 		t.Errorf("Modes = %v", modesSlugs)
 	}
 
-	// Check constraints — empty struct now serializes to "{}"
-	// (CW-20260512-0123 removed all AgentConstraints fields).
+	// An unset (zero-value) Constraints still serializes to "{}" — see
+	// TestDefinition_ToProfile_Constraints for the populated case.
 	if p.Constraints != "{}" {
-		t.Errorf("Constraints = %q, want %q (CW-20260512-0123)", p.Constraints, "{}")
+		t.Errorf("Constraints = %q, want %q", p.Constraints, "{}")
 	}
 
 	// Check tool permissions derived from tools.
@@ -106,6 +102,39 @@ func TestDefinition_ToProfile(t *testing.T) {
 	}
 	if tp["allow_list"] == nil {
 		t.Error("ToolPermissions missing allow_list")
+	}
+}
+
+// TestDefinition_ToProfile_Constraints verifies a populated `constraints:`
+// frontmatter block actually survives into store.AgentProfile.Constraints.
+// Found broken 2026-08-16: AgentConstraints was an empty struct (a
+// leftover from CW-20260512-0123 removing the old numeric-only fields),
+// so any real field added since -- including CW-20260520-0001's
+// SubagentCompletionPolicy -- silently parsed to nothing here, no matter
+// what a file's frontmatter declared.
+func TestDefinition_ToProfile_Constraints(t *testing.T) {
+	def := &Definition{
+		Name:         "Orchestrator-shaped",
+		Slug:         "orchestrator-shaped",
+		SystemPrompt: "You dispatch work.",
+		Source:       "project",
+		Constraints: AgentConstraints{
+			MaxTurns:                 50,
+			SubagentCompletionPolicy: "auto_summarize",
+		},
+	}
+
+	p := def.ToProfile()
+
+	var c map[string]any
+	if err := json.Unmarshal([]byte(p.Constraints), &c); err != nil {
+		t.Fatalf("Constraints JSON: %v (raw: %q)", err, p.Constraints)
+	}
+	if got, want := c["subagent_completion_policy"], "auto_summarize"; got != want {
+		t.Errorf("constraints.subagent_completion_policy = %v, want %q", got, want)
+	}
+	if got, want := c["max_turns"], float64(50); got != want {
+		t.Errorf("constraints.max_turns = %v, want %v", got, want)
 	}
 }
 

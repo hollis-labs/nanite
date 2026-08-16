@@ -20,8 +20,7 @@ import (
 
 // cmdLaunch is the standalone agent-launch entry point (CW-20260515-0027,
 // Phase 6). It starts a Nanite-managed CLI agent directly from a shared
-// launch profile — no chat server, no browser dropdown, no Tether MCP in
-// the loop.
+// launch profile — no chat server, no browser dropdown.
 //
 // Usage:
 //

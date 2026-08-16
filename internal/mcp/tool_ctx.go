@@ -40,11 +40,10 @@ func SessionIDFromContext(ctx context.Context) string {
 // callerProfileCtxKey carries the (workspace_id, agent_profile_id) pair of the
 // session whose tool execution is in flight. Used by:
 //
-//   - MuxTransportAdapter.CallTool → muxproxy.WithCallerCtx (H1 mux trust gate)
 //   - callExecuteTask → dispatch.SpawnRequest fields (H1 subagent trust gate)
 //
 // Stamped by the service layer in executeToolBatch alongside WithSessionID so
-// all three ctx-stamping conventions stay co-located at the same call site.
+// both ctx-stamping conventions stay co-located at the same call site.
 // H1 CW-20260421-0014.
 type callerProfileCtxKey struct{}
 

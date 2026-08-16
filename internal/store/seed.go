@@ -212,11 +212,6 @@ type providerRow struct {
 var seededProviders = []providerRow{
 	{"anthropic-001", "Anthropic", "anthropic"},
 	{"openai-001", "OpenAI", "openai"},
-	// Tether AI proxy. provType "tether" matches registry.Register("tether")
-	// in initProviders so a selected tether model resolves to the adapter.
-	// Surfaced in the provider/model dropdown via the seeded model row below;
-	// routes through the Tether daemon when it's up (errors if it's down).
-	{"tether-001", "Tether", "tether"},
 }
 
 // providerIDForType resolves a registry provider_type to the DB row id. Used
@@ -291,18 +286,6 @@ func (s *Store) SeedProviders() error {
 	for provType, count := range skippedByProvider {
 		slog.Warn("seed: skipped models with unseeded provider_type", "provider_type", provType, "count", count)
 	}
-
-	// Tether AI proxy: one selectable "auto-route" model so Tether appears in
-	// the provider/model dropdown. model_id "auto" tells the adapter to omit
-	// the model hint and let the Tether daemon route by its own policy.
-	if _, err := tx.Exec(
-		`INSERT OR IGNORE INTO models (id, provider_id, model_id, display_name, context_window, max_output, supports_tools)
-		 VALUES (?, ?, ?, ?, ?, ?, ?)`,
-		"tether-auto", "tether-001", "auto", "Tether (auto-route)", 200000, 8192, false,
-	); err != nil {
-		return fmt.Errorf("upsert tether model: %w", err)
-	}
-	modelsSeeded++
 
 	slog.Info("seed: upserted providers and models", "providers", len(providers), "models", modelsSeeded)
 	return tx.Commit()

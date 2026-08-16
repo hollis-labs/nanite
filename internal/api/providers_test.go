@@ -434,7 +434,6 @@ func TestListProviders_CatalogConfigured_SurfacesAllEntries(t *testing.T) {
 	cat := providercatalog.New()
 	cat.Add(providercatalog.Entry{Name: "anthropic", DisplayName: "Anthropic", RowID: "anthropic-001"})
 	cat.Add(providercatalog.Entry{Name: "openai", DisplayName: "OpenAI", RowID: "openai-001"})
-	cat.Add(providercatalog.Entry{Name: "tether", DisplayName: "Tether", RowID: "tether-001"})
 
 	svc, err := service.NewContainer(service.ContainerConfig{
 		Store:           s,
@@ -459,7 +458,7 @@ func TestListProviders_CatalogConfigured_SurfacesAllEntries(t *testing.T) {
 		t.Fatalf("decode: %v", err)
 	}
 
-	want := map[string]string{"anthropic": "Anthropic", "openai": "OpenAI", "tether": "Tether"}
+	want := map[string]string{"anthropic": "Anthropic", "openai": "OpenAI"}
 	seen := map[string]string{}
 	for _, p := range got {
 		if name, ok := want[p.ProviderType]; ok {

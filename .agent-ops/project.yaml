@@ -13,7 +13,6 @@ project:
 catalog:
   torque_project_id: null            # not found in repo or local catalogs; verify against Torque
   cerberus_project_id: nanite        # ~/.cerberus/apps/nanite
-  tether_catalog_project: nanite     # ~/.tether/catalog/projects/nanite.yaml
 locations:
   repo: ~/dev/hollis-labs/apps/nanite
   agent_os_tracking: ~/dev/agent-os/workspaces/execution/nanite
@@ -62,4 +61,3 @@ related_projects:
   - torque
   - hadron
   - cerberus
-  - tether

@@ -40,10 +40,8 @@ import (
 	"github.com/hollis-labs/nanite/internal/lifecycle"
 	nllmanthropic "github.com/hollis-labs/nanite/internal/llm/anthropic"
 	nllmopenai "github.com/hollis-labs/nanite/internal/llm/openai"
-	nllmtether "github.com/hollis-labs/nanite/internal/llm/tether"
 	"github.com/hollis-labs/nanite/internal/mcp"
 	"github.com/hollis-labs/nanite/internal/mcpserver"
-	"github.com/hollis-labs/nanite/internal/muxproxy"
 	"github.com/hollis-labs/nanite/internal/plugin"
 	_ "github.com/hollis-labs/nanite/internal/plugin/allplugins" // registers all built-in plugins
 	"github.com/hollis-labs/nanite/internal/safego"
@@ -271,7 +269,7 @@ func cmdServe(args []string) {
 	// nil if the agentrc loader failed; initMCP falls back to the hardcoded
 	// default allow-list in that case so dev tools still work for the
 	// running user.
-	mcpManager, tb, selfTools, muxMgr, muxSvc := initMCP(s, cfg, appCfg)
+	mcpManager, tb, selfTools := initMCP(s, cfg, appCfg)
 
 	// Set up activity emitter (Volon GUI events).
 	activity := chat.NewActivityEmitter("")
@@ -424,10 +422,6 @@ func cmdServe(args []string) {
 	if err != nil {
 		slogx.Fatal("failed to create service container", "err", err)
 	}
-
-	// G5: wire mux Manager's StreamPublisher — devmode-only, no-op in production.
-	// Run goroutine is started after daemonLifecycle is constructed below.
-	wireMuxPublisher(muxMgr, container.Streams)
 
 	// CW-20260813-0011: wire the StepExecutor implementation
 	// (CW-20260813-0009) behind the workflow_execute_llm_step /
@@ -673,9 +667,6 @@ func cmdServe(args []string) {
 	// container.Shutdown so daemons stop referencing container state.
 	daemonLifecycle := lifecycle.NewManager("cmd.nanite.daemons")
 
-	// G5: start mux Manager goroutine — devmode-only, no-op in production.
-	startMuxManager(daemonLifecycle, muxMgr, muxSvc)
-
 	// Shutdown handler. Uses context.Background() because cmdServe has no
 	// parent ctx at this scope; the goroutine lives until the process exits.
 	safego.Go(context.Background(), "cmd.nanite.signal-handler", func() {
@@ -770,21 +761,6 @@ func initProviders(devMode bool) (*provider.Registry, []provider.CLIAdapter, *pr
 		} else {
 			missingAPI = append(missingAPI, spec.name)
 		}
-	}
-
-	// Tether AI proxy provider. Registered when the local Tether daemon socket
-	// is present (auth is the socket, not a keychain key) — so Tether routes
-	// are selectable as another API provider for testing the proxy. The
-	// adapter speaks go-tether-client's /ai/chat[/stream] protocol.
-	if sock := nllmtether.DefaultSocketPath(); nllmtether.SocketAvailable(sock) {
-		registry.Register("tether", nllmtether.New(sock))
-		catalog.Add(providercatalog.Entry{
-			Name:        "tether",
-			DisplayName: "Tether",
-			RowID:       "tether-001",
-		})
-		registeredAPI = append(registeredAPI, "tether")
-		slog.Info("provider registered (tether daemon socket)", "provider", "tether", "socket", sock)
 	}
 
 	if len(missingAPI) > 0 && len(registeredAPI) == 0 {
@@ -909,15 +885,13 @@ func devAllowedSource(cfg *config.Config) string {
 }
 
 // initMCP sets up the MCP manager with built-in and user-configured servers,
-// runs auto-discovery, and creates the tool broker. Returns the mux Manager
-// and MuxProxy service so the caller can wire a StreamPublisher, start Run,
-// and call StopAll on shutdown. CW-20260420-0047.
+// runs auto-discovery, and creates the tool broker. CW-20260420-0047.
 //
 // The mux-orchestrator transport and tool registration is gated behind the
 // devmode build tag via registerMuxTransport (G5 — CW-20260421-0001).
 // In production builds registerMuxTransport is a no-op and no mux_* tools
 // appear in the tool surface.
-func initMCP(s *store.Store, cfg *config.Config, appCfg *config.AppConfig) (*mcp.Manager, *toolclient.ToolClient, *mcp.SelfToolsTransport, *muxproxy.Manager, *service.MuxProxy) {
+func initMCP(s *store.Store, cfg *config.Config, appCfg *config.AppConfig) (*mcp.Manager, *toolclient.ToolClient, *mcp.SelfToolsTransport) {
 	mcpManager := mcp.NewManager()
 
 	devAllowed := resolveDevToolsAllowedPaths(cfg)
@@ -1016,11 +990,6 @@ func initMCP(s *store.Store, cfg *config.Config, appCfg *config.AppConfig) (*mcp
 	mcp.RegisterSelfToolDescribers(tb.Describers)
 	slog.Info("registered self-tool describers", "count", tb.Describers.Count())
 
-	// G5 (CW-20260421-0001): mux transport + tool registration — devmode only.
-	// registerMuxTransport is a no-op in non-devmode builds; mux_* tools are
-	// absent from the production tool surface.
-	muxMgr, muxSvc := registerMuxTransport(mcpManager, tb, s)
-
 	// Register result-cache meta-tools (S4a). These let the LLM recall
 	// truncated tool results via fetch_tool_result / search_tool_result.
 	tb.Builtins.RegisterBuiltins("result-cache", []llmtypes.ToolDefinition{
@@ -1028,7 +997,7 @@ func initMCP(s *store.Store, cfg *config.Config, appCfg *config.AppConfig) (*mcp
 		toolclient.SearchToolResultMetaTool(),
 	})
 
-	return mcpManager, tb, selfTools, muxMgr, muxSvc
+	return mcpManager, tb, selfTools
 }
 
 // startBackgroundWorkers launches periodic goroutines for cleanup, snapshots,

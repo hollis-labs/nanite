@@ -925,6 +925,65 @@ func (s *chatServiceImpl) TriggerHarnessTurn(ctx context.Context, sessionID, rea
 	return assistantMsgID, nil
 }
 
+// TriggerMessageWake enqueues a harness-initiated turn on sessionID in
+// reaction to an inbound internal/messaging A2A message — the
+// CW-20260816-0065 sibling to TriggerHarnessTurn (subagent completions)
+// and SendAgentMessage (direct agent-to-agent sends), called by
+// messagingWakeReactor (messaging_reactor.go) rather than invented at a
+// new call site.
+//
+// Unlike TriggerHarnessTurn's synthetic "review the subagent result"
+// prompt — whose actual content reaches the model via the
+// kind=subagent_result turn-start injection (CW-20260512-0019), which
+// generic A2A messages are NOT eligible for (that injection filters
+// strictly on Kind) — this passes the arriving message's own body
+// directly as the turn's content, matching SendAgentMessage's
+// content-bearing approach. Without this, the recipient would wake to a
+// prompt referencing a message it has no way to see.
+//
+// Reject-if-busy, not takeover, for the same reason TriggerHarnessTurn
+// uses it (PR #247 review): an inbound peer message must never cancel a
+// real user turn already in flight. registerGenerationIfIdle closes the
+// TOCTOU window between messagingWakeReactor's IsGenerating pre-check
+// and this call. On a losing race this returns ErrSessionBusy and
+// creates nothing — the message is still durably in the recipient's
+// inbox (message_inbox/message_thread) either way, so nothing is lost,
+// only the proactive nudge is skipped.
+func (s *chatServiceImpl) TriggerMessageWake(ctx context.Context, sessionID string, msg *messaging.Message) (string, error) {
+	assistantMsgID := uuid.New().String()
+	genCtx, cancel := context.WithCancel(context.Background())
+	if !s.registerGenerationIfIdle(sessionID, assistantMsgID, cancel) {
+		cancel()
+		return "", ErrSessionBusy
+	}
+
+	content := fmt.Sprintf("New message from agent %q (session %s):\n\n%s", msg.FromAgentID, msg.FromSessionID, msg.Body)
+	newMsg := &store.Message{
+		ID:        uuid.New().String(),
+		SessionID: sessionID,
+		AgentID:   msg.FromAgentID,
+		Role:      "user",
+		Content:   content,
+		Metadata:  fmt.Sprintf(`{"source":"agent_message","from_session":%q,"from_agent":%q,"message_id":%q}`, msg.FromSessionID, msg.FromAgentID, msg.ID),
+	}
+	if err := s.store.CreateMessage(newMsg); err != nil {
+		s.deregisterGeneration(sessionID, assistantMsgID)
+		cancel()
+		return "", fmt.Errorf("create message-wake turn: %w", err)
+	}
+
+	ch := s.streams.CreateStream(assistantMsgID, sessionID)
+
+	s.runGeneration("triggerMessageWake.generateResponse", sessionID, assistantMsgID, content, ch, dispatcher.CallerBackground, genCtx, cancel)
+
+	if s.sessionEventWriter != nil {
+		payload := fmt.Sprintf(`{"triggered_by":"a2a_message","message_id":%q,"assistant_msg_id":%q}`, msg.ID, assistantMsgID)
+		s.sessionEventWriter.WriteSessionEvent(ctx, sessionID, messaging.EventHarnessTriggeredTurn, "", payload)
+	}
+
+	return assistantMsgID, nil
+}
+
 // GetStream implements ChatService.
 func (s *chatServiceImpl) GetStream(messageID string) (<-chan chat.StreamEvent, bool) {
 	return s.streams.GetStream(messageID)

@@ -1131,6 +1131,15 @@ func NewContainer(cfg ContainerConfig) (*Container, error) {
 	// configured policy. chatSvcImpl already exists by this point (built
 	// above for the ChatRunner wiring).
 	subagentSvc.SetCompletionReactor(&subagentCompletionReactor{chat: chatSvcImpl})
+	// CW-20260816-0065: react to a live A2A message send (message_send /
+	// nanite_a2a_send / the nanite a2a CLI / the message_send HTTP route —
+	// anything that reaches messaging.Service.SendMessage other than
+	// kind=subagent_result, which stays on the SetCompletionReactor path
+	// above) by possibly triggering a harness turn on the recipient
+	// session per its resolved message-wake policy. chatSvcImpl already
+	// exists by this point (built above for the ChatRunner wiring) — same
+	// ordering SetCompletionReactor relies on just above.
+	messagingSvc.SetWakeReactor(&messagingWakeReactor{chat: chatSvcImpl})
 	// H1 (CW-20260421-0014): wire trust resolver + audit event logger.
 	subagentSvc.SetTrustResolver(cfg.Store)
 	subagentSvc.SetEventLogger(cfg.Store)

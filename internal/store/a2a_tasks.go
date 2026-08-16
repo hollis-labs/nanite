@@ -117,6 +117,13 @@ func (s *Store) UpdateA2APushDelivery(delivery *A2APushDelivery) error {
 	return err
 }
 
+// DeleteA2APushDelivery deletes a push delivery record by ID.
+func (s *Store) DeleteA2APushDelivery(id string) error {
+	const q = `DELETE FROM a2a_push_deliveries WHERE id = ?`
+	_, err := s.DB.Exec(q, id)
+	return err
+}
+
 // CreateA2ATask inserts a new A2A task record.
 func (s *Store) CreateA2ATask(task *A2ATask) error {
 	now := time.Now()

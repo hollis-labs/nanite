@@ -1101,6 +1101,26 @@ func startBackgroundWorkers(lc *lifecycle.Manager, container *service.Container)
 			}
 		})
 	}
+
+	// Periodic A2A push notification delivery processor.
+	// CW-20260814-0018: Best-effort push delivery with bounded retries (max 3,
+	// exponential backoff). Deliveries are enqueued on TaskState transitions.
+	if container.TaskManager != nil {
+		lc.Go("a2a-push-delivery", func(ctx context.Context) {
+			ticker := time.NewTicker(30 * time.Second)
+			defer ticker.Stop()
+			for {
+				select {
+				case <-ctx.Done():
+					return
+				case <-ticker.C:
+					if err := container.TaskManager.PushNotifier().ProcessPendingDeliveries(ctx); err != nil {
+						slog.Warn("a2a push delivery: processing failed", "error", err)
+					}
+				}
+			}
+		})
+	}
 }
 
 // discoverAndLoadPlugins finds plugins on disk, loads them and builtins,

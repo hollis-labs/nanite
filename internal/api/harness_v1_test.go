@@ -388,6 +388,83 @@ func TestHarnessV1RecoverSession(t *testing.T) {
 	}
 }
 
+// TestHarnessV1CreateSessionAgentResolution verifies that -agent flag resolution
+// (CW-20260815-0026) works correctly for both slugs and IDs, and fails loudly
+// when the agent doesn't exist instead of silently falling back to default.
+func TestHarnessV1CreateSessionAgentResolution(t *testing.T) {
+	a, mux := newTestAPI(t)
+	if err := a.Services.Store.CreateWorkspace(&store.Workspace{ID: "ws-test", Name: "Test"}); err != nil {
+		t.Fatalf("CreateWorkspace: %v", err)
+	}
+
+	// Create a test agent with known ID and slug
+	agent := &store.AgentProfile{
+		Name:         "Test Agent",
+		Slug:         "test-agent",
+		SystemPrompt: "test prompt",
+	}
+	if err := a.Services.Store.CreateAgent(agent); err != nil {
+		t.Fatalf("CreateAgent: %v", err)
+	}
+
+	// Test 1: Resolution by ID should work
+	body, _ := json.Marshal(harnessV1CreateSessionRequest{
+		WorkspaceID: "ws-test",
+		AgentID:     agent.ID,
+	})
+	req := httptest.NewRequest(http.MethodPost, "/api/harness/v1/sessions", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, req)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("create session by ID: got %d, want %d; body=%s", w.Code, http.StatusCreated, w.Body.String())
+	}
+	var created1 harnessV1SessionResponse
+	if err := json.NewDecoder(w.Body).Decode(&created1); err != nil {
+		t.Fatalf("decode create by ID: %v", err)
+	}
+	if created1.Details.PrimaryAgent == nil || created1.Details.PrimaryAgent.ID != agent.ID {
+		t.Fatalf("session agent by ID: got %+v, want ID=%s", created1.Details.PrimaryAgent, agent.ID)
+	}
+
+	// Test 2: Resolution by slug should work
+	body, _ = json.Marshal(harnessV1CreateSessionRequest{
+		WorkspaceID: "ws-test",
+		AgentID:     "test-agent", // slug, not ID
+	})
+	req = httptest.NewRequest(http.MethodPost, "/api/harness/v1/sessions", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	w = httptest.NewRecorder()
+	mux.ServeHTTP(w, req)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("create session by slug: got %d, want %d; body=%s", w.Code, http.StatusCreated, w.Body.String())
+	}
+	var created2 harnessV1SessionResponse
+	if err := json.NewDecoder(w.Body).Decode(&created2); err != nil {
+		t.Fatalf("decode create by slug: %v", err)
+	}
+	if created2.Details.PrimaryAgent == nil || created2.Details.PrimaryAgent.ID != agent.ID {
+		t.Fatalf("session agent by slug: got %+v, want ID=%s", created2.Details.PrimaryAgent, agent.ID)
+	}
+
+	// Test 3: Nonexistent agent should fail loudly (not silently fall back)
+	body, _ = json.Marshal(harnessV1CreateSessionRequest{
+		WorkspaceID: "ws-test",
+		AgentID:     "does-not-exist",
+	})
+	req = httptest.NewRequest(http.MethodPost, "/api/harness/v1/sessions", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	w = httptest.NewRecorder()
+	mux.ServeHTTP(w, req)
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("create session with bogus agent: got %d, want %d; body=%s", w.Code, http.StatusBadRequest, w.Body.String())
+	}
+	bodyStr := w.Body.String()
+	if !strings.Contains(bodyStr, "does-not-exist") || !strings.Contains(bodyStr, "not found") {
+		t.Fatalf("error message should mention agent not found, got: %s", bodyStr)
+	}
+}
+
 func containsString(values []string, target string) bool {
 	for _, value := range values {
 		if value == target {

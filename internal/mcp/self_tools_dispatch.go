@@ -221,14 +221,17 @@ func (st *SelfToolsTransport) callExecuteTask(ctx context.Context, args map[stri
 	// TrustNormal (approval required — existing safe default).
 	wsID, apID := CallerProfileFromContext(ctx)
 
-	// CW-20260516-0058: ParentAgentID drives the subagent reply-delivery
-	// block in subagent.Service.execute (an empty value skips inbox/chat
-	// reply delivery entirely for async/api modes). The LLM never reliably
-	// supplies the parent_agent_id tool arg, so default it to the
-	// caller-profile agent id stamped on ctx; the explicit arg, when the
-	// model does provide one, stays an override.
+	// CW-20260516-0058 / CW-20260815 (emit-react postmortem): ParentAgentID
+	// drives the subagent reply-delivery block in subagent.Service.execute
+	// (an unresolvable value silently drops the completion reply — see the
+	// matching fix in self_tools_transport.go's subagent_spawn handler for
+	// the full incident writeup). The LLM cannot reliably know its own
+	// agent_profiles.ID and will confidently supply a wrong-but-plausible
+	// value (its own slug) rather than an empty one, which is worse than
+	// omitting it. Caller identity is authoritative from ctx; the arg is a
+	// fallback only for ctx-less paths, never an override.
 	parentAgentID := strArg(args, "parent_agent_id", "")
-	if parentAgentID == "" {
+	if apID != "" {
 		parentAgentID = apID
 	}
 

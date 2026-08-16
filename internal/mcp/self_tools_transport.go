@@ -1657,15 +1657,22 @@ func (st *SelfToolsTransport) callSpawnSubagent(ctx context.Context, args map[st
 	if ctxSID := SessionIDFromContext(ctx); ctxSID != "" {
 		parentSessionID = ctxSID
 	}
-	// CW-20260516-0058: ParentAgentID gates the reply-delivery block in
-	// subagent.Service.execute — an empty value skips inbox/chat reply
-	// delivery entirely, so async/api subagent_spawn replies never land.
-	// The LLM never reliably supplies the parent_agent_id tool arg, so
-	// default it to the caller-profile agent id stamped on ctx; the
-	// explicit arg stays an override for the rare case the model sets it.
+	// CW-20260516-0058 / CW-20260815 (emit-react postmortem): ParentAgentID
+	// gates the reply-delivery block in subagent.Service.execute — an empty
+	// or unresolvable value silently drops the completion reply (Layer 1 of
+	// the emit→react mechanism never fires, with only a slog.Warn to show
+	// for it). The LLM cannot reliably know its own agent_profiles.ID (it
+	// has no introspective access to it) and, when the tool schema asks for
+	// one anyway, will confidently supply a plausible-looking wrong value
+	// (its own slug/name, e.g. "orchestrator") rather than leave the field
+	// empty — which is worse than not supplying it, because that value then
+	// fails ValidateAgentID and the whole reply is dropped. Caller identity
+	// is authoritative from ctx, exactly like parentSessionID above; the
+	// arg is a fallback only for ctx-less paths (tests, etc.), never an
+	// override of a real ctx-derived identity.
 	parentAgentID := strArg(args, "parent_agent_id", "")
-	if parentAgentID == "" {
-		_, parentAgentID = CallerProfileFromContext(ctx)
+	if _, apID := CallerProfileFromContext(ctx); apID != "" {
+		parentAgentID = apID
 	}
 	req := subagent.SpawnRequest{
 		ParentSessionID: parentSessionID,

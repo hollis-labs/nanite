@@ -724,7 +724,7 @@ func selfToolDefinitions() []Tool {
 				"type": "object",
 				"properties": map[string]any{
 					"parent_session_id": map[string]any{"type": "string", "description": "Session the spawning agent is in; the reply lands here."},
-					"parent_agent_id":   map[string]any{"type": "string", "description": "Agent ID of the spawning (primary) agent."},
+					"parent_agent_id":   map[string]any{"type": "string", "description": "Agent ID of the spawning (primary) agent. You do not know your own real agent ID and should leave this empty — it is resolved automatically from your session; a guessed value (e.g. your own name/slug) is silently ignored."},
 					"role":              map[string]any{"type": "string", "description": "Role slug (e.g. 'file-backend') the subagent is booted with."},
 					"prompt":            map[string]any{"type": "string", "description": "The subagent's ENTIRE task. Compose a focused, self-contained brief for an implementer: state the specific task, the target files, and the acceptance criteria. NEVER pass the user's raw message or any orchestration/dispatch instructions — the subagent is a worker, not an orchestrator, and a forwarded orchestration message makes it spawn its own subagents."},
 					"mode":              map[string]any{"type": "string", "enum": []string{"sync", "async", "api"}, "description": "sync blocks; async returns immediately and replies via inbox; api returns immediately and replies via chat."},

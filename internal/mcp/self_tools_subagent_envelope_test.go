@@ -792,9 +792,16 @@ func TestCallSpawnSubagent_ParentAgentIDFromCallerProfile(t *testing.T) {
 	waitForRunTerminal(t, st, env.Result.RunID)
 }
 
-// TestCallSpawnSubagent_ExplicitParentAgentIDOverridesCtx confirms the
-// explicit parent_agent_id arg still wins over the ctx fallback.
-func TestCallSpawnSubagent_ExplicitParentAgentIDOverridesCtx(t *testing.T) {
+// TestCallSpawnSubagent_CtxParentAgentIDOverridesExplicitArg confirms the
+// ctx-derived caller identity wins over an explicit parent_agent_id arg,
+// mirroring parent_session_id's precedence just above. An LLM cannot
+// reliably know its own real agent_profiles.ID and, when it supplies one
+// anyway, tends to guess a plausible-but-wrong value (its own name/slug)
+// rather than leave the field empty -- which used to silently drop every
+// subagent completion reply (ValidateAgentID rejects the guessed value,
+// caught and logged, never surfaced to the caller). See the 2026-08-15
+// emit-react postmortem: real production incident, not a hypothetical.
+func TestCallSpawnSubagent_CtxParentAgentIDOverridesExplicitArg(t *testing.T) {
 	st := newSubagentTestTransport(t, subagent.EchoRunner{})
 	ctx := WithCallerProfile(context.Background(), "ws-1", "agent-from-ctx")
 
@@ -816,8 +823,38 @@ func TestCallSpawnSubagent_ExplicitParentAgentIDOverridesCtx(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Status: %v", err)
 	}
+	if run.ParentAgentID != "agent-from-ctx" {
+		t.Errorf("ParentAgentID = %q, want %q (ctx-derived identity is authoritative)", run.ParentAgentID, "agent-from-ctx")
+	}
+	waitForRunTerminal(t, st, env.Result.RunID)
+}
+
+// TestCallSpawnSubagent_ParentAgentIDArgUsedWhenNoCtx confirms the explicit
+// arg still works as a fallback for ctx-less callers (tests, direct API
+// invocations without the H1 trust-gate middleware in the path).
+func TestCallSpawnSubagent_ParentAgentIDArgUsedWhenNoCtx(t *testing.T) {
+	st := newSubagentTestTransport(t, subagent.EchoRunner{})
+
+	res, err := st.callSpawnSubagent(context.Background(), map[string]any{
+		"parent_session_id": "sess-1",
+		"parent_agent_id":   "explicit-agent",
+		"role":              "researcher",
+		"prompt":            "look at things",
+		"mode":              subagent.ModeAsync,
+	})
+	if err != nil {
+		t.Fatalf("callSpawnSubagent: %v", err)
+	}
+	env := parseEnvelopeFromResult(t, res)
+	if env.Result == nil || env.Result.RunID == "" {
+		t.Fatalf("expected a run_id, got envelope %+v", env)
+	}
+	run, err := st.Subagent.Status(context.Background(), env.Result.RunID)
+	if err != nil {
+		t.Fatalf("Status: %v", err)
+	}
 	if run.ParentAgentID != "explicit-agent" {
-		t.Errorf("ParentAgentID = %q, want %q (explicit arg override)", run.ParentAgentID, "explicit-agent")
+		t.Errorf("ParentAgentID = %q, want %q (arg fallback, no ctx identity available)", run.ParentAgentID, "explicit-agent")
 	}
 	waitForRunTerminal(t, st, env.Result.RunID)
 }

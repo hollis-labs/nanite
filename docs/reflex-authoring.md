@@ -5,6 +5,8 @@
 **Consumed by:** playbook runtime dispatcher (`internal/reflex/dispatcher.go`)
 **Reference:** `docs/agent-reflex-catalog.md` — canonical schema, v1 reflex set, test cases
 
+> **Not to be confused with:** `internal/agent/driftguard` (formerly `internal/agent/reflexes`), the unrelated FU-30 session-drift monitor. See the note in `docs/agent-reflex-catalog.md` — disambiguated in CW-20260816-0062.
+
 ---
 
 ## What is a reflex?

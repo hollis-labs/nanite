@@ -16,7 +16,7 @@ This design deliberately reuses existing, proven infrastructure. Nothing below n
 
 | Component | Status | Reference |
 |---|---|---|
-| Deterministic phrase-router | Live, wired into dispatch | `internal/reflex/` (matcher, dispatcher, catalog, loader) — feeds `dispatch.AssignRole` via `ReflexHints`. Naming collision vs. the unrelated `internal/agent/reflexes` FU-30 drift monitor tracked as `CW-20260816-0062`. |
+| Deterministic phrase-router | Live, wired into dispatch | `internal/reflex/` (matcher, dispatcher, catalog, loader) — feeds `dispatch.AssignRole` via `ReflexHints`. Naming collision vs. the unrelated FU-30 drift monitor resolved by `CW-20260816-0062`: the monitor now lives at `internal/agent/driftguard` (formerly `internal/agent/reflexes`). |
 | Task tracking + approvals | Live | Torque: `torque_task_checkpoint_*`, `torque_sprint_approve` already cover "agent approvals" — no new approval primitive needed. |
 | Per-project execution discipline | Live | `internal/service/durable_agent_recipes.go` — Orchestrator (`harness`, polls Torque task status, dispatches via `workflow_run`/`subagent_spawn`), Planner, Project Manager (advisory), Reviewer. Keeps one-worker-per-project sequencing without Conductor re-implementing it. |
 | Cross-app live coordination | Live | Tether/mux (`mcp__mux__*`): SSE event bus (`/events*`), `mux_message_notify` (best-effort wake of a live recipient session), `mux_events_wait` (bounded long-poll), `mux_session_*` (cross-app launch/monitor), `tether_registry_*`/`tether_group_*` (agent directory, group channels). Backed by a real ADR lineage (message-routing contract, federation, registry, group messaging) — actively maturing, not legacy. |

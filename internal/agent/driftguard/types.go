@@ -1,6 +1,15 @@
-// Package reflexes implements the FU-30 reflex engine — predicate
+// Package driftguard implements the FU-30 reflex engine — predicate
 // evaluation, action dispatch, and base-reflex seeding for the agridd
 // monitor loop.
+//
+// Naming note (CW-20260816-0062): this package was formerly
+// internal/agent/reflexes. It was renamed to disambiguate it from the
+// unrelated internal/reflex package (the deterministic phrase-match
+// router that feeds dispatch.AssignRole — see docs/agent-reflex-catalog.md
+// and docs/reflex-authoring.md). The domain vocabulary inside this
+// package ("reflex" as a stored predicate/action row, store.AgentReflex,
+// the agent_reflexes table, /api/agents/{id}/reflexes) is unchanged —
+// only the Go package identity moved.
 //
 // Architecture:
 //
@@ -32,7 +41,7 @@
 //
 // Reference: docs/durable-agents/notes/torque-supervisor-hardening-log.md
 // "Diagnostic reframing 2026-05-20" entry.
-package reflexes
+package driftguard
 
 import (
 	"github.com/hollis-labs/nanite/internal/store"

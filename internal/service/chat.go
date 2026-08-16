@@ -15,7 +15,7 @@ import (
 	"github.com/hollis-labs/go-modelsdev/modelsdev"
 	"github.com/hollis-labs/go-providers/provider"
 	"github.com/hollis-labs/nanite/internal/agent"
-	"github.com/hollis-labs/nanite/internal/agent/reflexes"
+	"github.com/hollis-labs/nanite/internal/agent/driftguard"
 	"github.com/hollis-labs/nanite/internal/agentregistry"
 	"github.com/hollis-labs/nanite/internal/bootprofile"
 	"github.com/hollis-labs/nanite/internal/chat"
@@ -178,7 +178,7 @@ type ChatServiceConfig struct {
 	// ReflexEngine is the FU-30 DB-backed agent reflex engine. nil-safe: when
 	// nil, per-turn reflex evaluation is skipped. Evaluates agent_reflexes,
 	// applies inject_reminder / force_tool_choice / halt actions per turn.
-	ReflexEngine *reflexes.Engine
+	ReflexEngine *driftguard.Engine
 
 	// AgentDeps is the agent-runtime composition root (Phase 4c.1 of the
 	// agent-boot adoption). Threaded through here so HandleMessage can
@@ -325,7 +325,7 @@ type chatServiceImpl struct {
 
 	// reflexEngine evaluates DB-backed agent reflexes per turn (FU-30) and
 	// returns staged actions injected into the turn. nil-safe.
-	reflexEngine *reflexes.Engine
+	reflexEngine *driftguard.Engine
 
 	// lifecycle tracks async generateResponse goroutines so Shutdown can
 	// cancel them and wait for them to drain rather than orphan them.

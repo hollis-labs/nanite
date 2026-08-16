@@ -5,6 +5,8 @@
 **Complements:** `docs/agent-pattern-catalog.md` (M2), `internal/dispatch/role.go` (AssignRole)
 **Consumed by:** playbook runtime (CW-20260419-0027) — not yet implemented
 
+> **Not to be confused with:** `internal/agent/driftguard` (formerly `internal/agent/reflexes`), the unrelated FU-30 session-drift monitor that watches durable-agent token/cache/tool-call signals for runaway-loop patterns. Same root term, no shared code or lifecycle — disambiguated in CW-20260816-0062.
+
 ---
 
 ## Introduction

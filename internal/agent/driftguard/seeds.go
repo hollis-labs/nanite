@@ -1,4 +1,4 @@
-package reflexes
+package driftguard
 
 import (
 	"context"

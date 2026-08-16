@@ -79,16 +79,12 @@ github.com/hollis-labs/go-sandbox v0.2.1 h1:0/JTCIl6S/XhRXPBRRlPR/zqQ2bNBlbR3Q2g
 github.com/hollis-labs/go-sandbox v0.2.1/go.mod h1:SY3Io7cTHnMahfN1zkQzHvVkcevXzus8mo9ZmtaaHPg=
 github.com/hollis-labs/go-sqlite v0.1.0 h1:0AQrOxfwHLSCCzuNo7h1LVoJXA2qJC6iZbS3uL5W6JE=
 github.com/hollis-labs/go-sqlite v0.1.0/go.mod h1:T1kbCABjw1annDB+7cwNoPyqL+WDfdmHn8xtKfuZ5LQ=
-github.com/hollis-labs/go-tether-client v0.1.0 h1:ZKKPLKM5PEtVSdEvzr89KACXbQ4+zDMMrW9uw6pKfFA=
-github.com/hollis-labs/go-tether-client v0.1.0/go.mod h1:YuwkZdXWcRn9LOgoR9HtDf9AP2Qoe/7F2uht5spvFYo=
 github.com/hollis-labs/go-toolbroker v0.2.0 h1:hbwAYoEEp1YHiVzW7STexNeXFCGGfD9ZJ5iexuxmL4g=
 github.com/hollis-labs/go-toolbroker v0.2.0/go.mod h1:cs9Wp9EPKI8IkgwFQhW+VAQUYPSPy2j+3LS4/BH3CVU=
 github.com/hollis-labs/plugin-sdk v0.3.0 h1:xlFWssODdGkrInZv36ocSkDruYarMo2Rvvq6CrCujHY=
 github.com/hollis-labs/plugin-sdk v0.3.0/go.mod h1:+FcTow9tco3OoINjc5LSCkm8RZzWSLNG1tTCzLSQuHs=
 github.com/hollis-labs/tesseract v0.7.1-0.20260518032333-bbce958849ac h1:8Rdg30uF5AqRKg2N9zj+R34NQ8yMcdGZbAQr3jsy/EI=
 github.com/hollis-labs/tesseract v0.7.1-0.20260518032333-bbce958849ac/go.mod h1:azvm+/zZGQFGTxYLx8Wn3VEHsWxyjcbqZPk3+WxNMao=
-github.com/hollis-labs/tether v0.3.0 h1:hbAP6fsClK5ywTNue0dh4eIxtrz2sMCsJ0Y66b0WiZw=
-github.com/hollis-labs/tether v0.3.0/go.mod h1:WrWfNDd8YNrk7kilhwayrXiEBcwx0wcvTjPEoaXCabY=
 github.com/invopop/jsonschema v0.13.0 h1:KvpoAJWEjR3uD9Kbm2HWJmqsEaHt8lBUpd0qHcIi21E=
 github.com/invopop/jsonschema v0.13.0/go.mod h1:ffZ5Km5SWWRAIN6wbDXItl95euhFz2uON45H2qjYt+0=
 github.com/josharian/intern v1.0.0/go.mod h1:5DoeVV0s6jJacbCEi61lwdGj/aVlrQvzHFFd8Hwg//Y=

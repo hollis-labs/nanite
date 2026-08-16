@@ -22,7 +22,6 @@ require (
 	github.com/hollis-labs/go-otel v0.1.0
 	github.com/hollis-labs/go-providers v0.23.0
 	github.com/hollis-labs/go-sandbox v0.2.1
-	github.com/hollis-labs/go-tether-client v0.1.0
 	github.com/hollis-labs/go-toolbroker v0.2.0
 	github.com/modelcontextprotocol/go-sdk v1.5.0
 	github.com/oklog/ulid/v2 v2.1.1
@@ -100,5 +99,4 @@ require (
 	github.com/hollis-labs/go-messaging v0.2.1
 	github.com/hollis-labs/go-sqlite v0.1.0
 	github.com/hollis-labs/tesseract v0.7.1-0.20260518032333-bbce958849ac
-	github.com/hollis-labs/tether v0.3.0
 )

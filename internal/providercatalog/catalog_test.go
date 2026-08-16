@@ -9,13 +9,12 @@ func TestCatalog_AddAndList(t *testing.T) {
 	c := New()
 	c.Add(Entry{Name: "anthropic", DisplayName: "Anthropic", RowID: "anthropic-001"})
 	c.Add(Entry{Name: "openai", DisplayName: "OpenAI", RowID: "openai-001"})
-	c.Add(Entry{Name: "tether", DisplayName: "Tether", RowID: "tether-001"})
 
 	got := c.List()
-	if len(got) != 3 {
-		t.Fatalf("List len: got %d, want 3", len(got))
+	if len(got) != 2 {
+		t.Fatalf("List len: got %d, want 2", len(got))
 	}
-	want := []string{"anthropic", "openai", "tether"}
+	want := []string{"anthropic", "openai"}
 	for i, e := range got {
 		if e.Name != want[i] {
 			t.Errorf("[%d] Name: got %q, want %q", i, e.Name, want[i])

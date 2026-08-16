@@ -215,6 +215,10 @@ type Container struct {
 	// (CW-20260814-0014). Serves /.well-known/agent-card.json.
 	AgentCardGenerator *AgentCardGenerator
 
+	// TaskManager routes A2A Task submissions to workflow/durable-agent execution
+	// (CW-20260814-0015). Backs the JSON-RPC task methods (submit/get/cancel).
+	TaskManager *TaskManager
+
 	// stopModelCatalog cancels the model catalog background refresher.
 	stopModelCatalog context.CancelFunc
 

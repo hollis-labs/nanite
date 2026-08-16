@@ -503,11 +503,13 @@ func (a *API) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/workspaces/{workspace_id}/roles/{agent_profile_id}/trust", a.handleSetWorkspaceRoleTrust)
 	mux.HandleFunc("DELETE /api/workspaces/{workspace_id}/roles/{agent_profile_id}/trust", a.handleDeleteWorkspaceRoleTrust)
 
-	// A2A Protocol (CW-20260814-0014)
+	// A2A Protocol (CW-20260814-0014, CW-20260814-0016)
 	// Agent Card discovery at /.well-known/agent-card.json
 	mux.HandleFunc("GET /.well-known/agent-card.json", a.handleAgentCard)
 	// Agent address self-discovery
 	mux.HandleFunc("GET /api/whoami", a.handleWhoami)
+	// JSON-RPC 2.0 endpoint for A2A Task methods (submit/get/cancel)
+	mux.HandleFunc("POST /api/a2a/jsonrpc", a.handleA2AJSONRPC)
 }
 
 // jsonResp writes a JSON response with the given status code.

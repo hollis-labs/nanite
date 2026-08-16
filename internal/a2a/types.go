@@ -152,6 +152,21 @@ type TaskCancelResponse struct {
 	State  TaskState `json:"state"`
 }
 
+// TaskProvideInputRequest is the JSON-RPC params for resolving a paused
+// gate on a workflow-backed Task in TaskStateInputRequired (CW-20260814-0017).
+type TaskProvideInputRequest struct {
+	TaskID string `json:"taskId"`
+	Input  string `json:"input"`
+}
+
+// TaskProvideInputResponse is the JSON-RPC result for a resolved gate —
+// the Task's state after resolution, re-derived from the resumed workflow
+// run's real status (never independently maintained).
+type TaskProvideInputResponse struct {
+	TaskID string    `json:"taskId"`
+	State  TaskState `json:"state"`
+}
+
 // PushNotificationConfig describes how to deliver state-change notifications.
 // Delivery is best-effort — no documented delivery guarantee in the spec.
 type PushNotificationConfig struct {

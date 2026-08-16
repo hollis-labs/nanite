@@ -126,13 +126,20 @@ func TestTaskManager_deriveFromWorkflowRun(t *testing.T) {
 			wantState: a2a.TaskStateFailed,
 		},
 		{
-			// "waiting_on_gate" is a real, schema-valid workflow_runs.status
-			// (see the CHECK constraint) that deriveFromWorkflowRun's switch
+			// CW-20260814-0017: paused gate maps to input-required, not the
+			// generic working fallback.
+			name:      "waiting_on_gate workflow maps to input-required",
+			runStatus: "waiting_on_gate",
+			wantState: a2a.TaskStateInputRequired,
+		},
+		{
+			// "cancelled" is a real, schema-valid workflow_runs.status (see
+			// the CHECK constraint) that deriveFromWorkflowRun's switch
 			// doesn't explicitly map -- exercises the same default-fallback
 			// branch a literal invalid string would, without violating the
 			// CHECK constraint the way "unknown" does.
 			name:      "unmapped-but-valid status defaults to working",
-			runStatus: "waiting_on_gate",
+			runStatus: "cancelled",
 			wantState: a2a.TaskStateWorking,
 		},
 	}

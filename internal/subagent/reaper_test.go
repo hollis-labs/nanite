@@ -26,7 +26,7 @@ func insertRunForReaper(t *testing.T, db *sql.DB, id string, fields map[string]a
 		"role":              "worker",
 		"prompt":            "test prompt",
 		"mode":              "sync",
-		"status":            "running",
+		"status":            StatusRunning,
 		"inputs_json":       "{}",
 		"result_json":       "{}",
 		"error":             "",
@@ -165,8 +165,8 @@ func TestReaper_TimeoutLeavesUnexpiredRowsAlone(t *testing.T) {
 		t.Errorf("Total reaps = %d, want 0", counts.Total())
 	}
 	status, _ := readRunStatusError(t, db, "run-fresh")
-	if status != "running" {
-		t.Errorf("status = %q, want \"running\"", status)
+	if status != StatusRunning {
+		t.Errorf("status = %q, want %q", status, StatusRunning)
 	}
 }
 
@@ -197,8 +197,8 @@ func TestReaper_ActivityResetPreventsInactivityReap(t *testing.T) {
 		t.Errorf("Total reaps = %d, want 0 — a run with a 5s-old heartbeat must survive past the old 30-minute mark (started_at was 40 minutes ago)", counts.Total())
 	}
 	status, errMsg := readRunStatusError(t, db, "run-still-active")
-	if status != "running" {
-		t.Errorf("status = %q, want \"running\" — genuinely active work must not be discarded", status)
+	if status != StatusRunning {
+		t.Errorf("status = %q, want %q — genuinely active work must not be discarded", status, StatusRunning)
 	}
 	if errMsg != "" {
 		t.Errorf("error = %q, want \"\"", errMsg)
@@ -351,8 +351,8 @@ func TestReaper_OrphanGraceFloorPreservesFreshRows(t *testing.T) {
 		t.Errorf("Total = %d, want 0 — row is inside orphan grace", counts.Total())
 	}
 	status, _ := readRunStatusError(t, db, "run-fresh-orphan")
-	if status != "running" {
-		t.Errorf("status = %q, want \"running\"", status)
+	if status != StatusRunning {
+		t.Errorf("status = %q, want %q", status, StatusRunning)
 	}
 }
 

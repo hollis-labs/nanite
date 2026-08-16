@@ -28,7 +28,7 @@ func TestDurableAgentRecipesAPI_ListGetDryRun(t *testing.T) {
 	if err := json.NewDecoder(w.Body).Decode(&recipes); err != nil {
 		t.Fatalf("decode recipes: %v", err)
 	}
-	if len(recipes) != 14 || recipes[0].ID != "architect-advisor" {
+	if len(recipes) != 15 || recipes[0].ID != "architect-advisor" {
 		t.Fatalf("recipes = %+v", recipes)
 	}
 	if len(recipes[0].Inputs) == 0 {

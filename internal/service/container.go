@@ -1140,6 +1140,17 @@ func NewContainer(cfg ContainerConfig) (*Container, error) {
 	// exists by this point (built above for the ChatRunner wiring) — same
 	// ordering SetCompletionReactor relies on just above.
 	messagingSvc.SetWakeReactor(&messagingWakeReactor{chat: chatSvcImpl})
+	// Copilot PR #258 review: wire the wake-reactor goroutine spawn onto
+	// a tracked *lifecycle.Manager instead of the untracked safego.Go
+	// default, so a burst of messages can't leave unbounded goroutines
+	// running past process shutdown. Reuses chatSvcImpl's own manager
+	// (same package, field access is intra-package) rather than
+	// constructing a second one — these goroutines call back into
+	// chatSvcImpl anyway, so draining them alongside chat's own
+	// generateResponse goroutines on Shutdown is the right scope, not a
+	// separate lifecycle. chatSvcImpl already exists by this point (same
+	// ordering constraint as SetWakeReactor immediately above).
+	messagingSvc.SetLifecycleManager(chatSvcImpl.lifecycle)
 	// H1 (CW-20260421-0014): wire trust resolver + audit event logger.
 	subagentSvc.SetTrustResolver(cfg.Store)
 	subagentSvc.SetEventLogger(cfg.Store)

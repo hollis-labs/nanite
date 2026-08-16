@@ -14,6 +14,7 @@ import (
 	"log/slog"
 	"strings"
 
+	"github.com/hollis-labs/nanite/internal/lifecycle"
 	"github.com/hollis-labs/nanite/internal/safego"
 	"github.com/hollis-labs/nanite/internal/store"
 )
@@ -64,9 +65,10 @@ type Service struct {
 	store     Store
 	db        *sql.DB
 	resolver  AgentResolver
-	registrar AgentRegistrar   // nil = auto-register disabled
-	sink      NotificationSink // nil = no SSE push
-	wake      WakeReactor      // nil = no live-wake side effect (CW-20260816-0065)
+	registrar AgentRegistrar     // nil = auto-register disabled
+	sink      NotificationSink   // nil = no SSE push
+	wake      WakeReactor        // nil = no live-wake side effect (CW-20260816-0065)
+	lifecycle *lifecycle.Manager // nil = fall back to untracked safego.Go (see SetLifecycleManager)
 	pub       *pubsub
 }
 
@@ -102,6 +104,19 @@ func (svc *Service) SetNotificationSink(s NotificationSink) {
 // and subagent.Service.SetCompletionReactor.
 func (svc *Service) SetWakeReactor(r WakeReactor) {
 	svc.wake = r
+}
+
+// SetLifecycleManager wires (or unwires) the tracked-goroutine Manager
+// used to spawn the wake-reactor side effect in SendMessage. Separate
+// from NewService for the same reason as SetWakeReactor/
+// SetNotificationSink: the container builds messaging.Service before
+// the chat service (whose *lifecycle.Manager this typically reuses —
+// see internal/service/container.go) exists. When unset, SendMessage
+// falls back to an untracked safego.Go spawn (still panic-safe, just
+// not drained on Shutdown) so tests and standalone Service construction
+// keep working without wiring a manager.
+func (svc *Service) SetLifecycleManager(m *lifecycle.Manager) {
+	svc.lifecycle = m
 }
 
 // SendMessage validates both ends of the address tuple, persists the
@@ -172,11 +187,31 @@ func (svc *Service) SendMessage(ctx context.Context, input SendInput) (*Message,
 	// reactor never blocks the SendMessage caller (self-tool call, HTTP
 	// handler, or background-job poster) and outlives a cancelled request
 	// ctx.
+	//
+	// msgCopy takes a shallow copy of *out before handing it to the
+	// goroutine: out is also returned to SendMessage's own caller, so
+	// without the copy the goroutine and the caller would share the same
+	// *Message pointer — a data race if the caller mutates/reuses it
+	// after SendMessage returns. A shallow copy is sufficient: the two
+	// *string fields (ReadAt/ResolvedAt) are set by separate post-send
+	// code paths (Ack/Resolve), not something the original caller races
+	// on here.
+	//
+	// Spawn goes through svc.lifecycle (a *lifecycle.Manager, tracked and
+	// drained on Shutdown) when wired; falls back to untracked-but-still-
+	// panic-safe safego.Go otherwise (e.g. tests that construct Service
+	// directly without SetLifecycleManager).
 	if svc.wake != nil && out.Kind != KindSubagentResult {
-		msg := out
-		safego.Go(context.Background(), "messaging.wake-reactor", func() {
-			svc.wake.ReactToMessage(context.Background(), msg)
-		})
+		msgCopy := *out
+		if svc.lifecycle != nil {
+			svc.lifecycle.Go("wake-reactor", func(ctx context.Context) {
+				svc.wake.ReactToMessage(ctx, &msgCopy)
+			})
+		} else {
+			safego.Go(context.Background(), "messaging.wake-reactor", func() {
+				svc.wake.ReactToMessage(context.Background(), &msgCopy)
+			})
+		}
 	}
 
 	return out, nil

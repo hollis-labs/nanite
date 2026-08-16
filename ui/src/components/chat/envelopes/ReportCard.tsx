@@ -18,7 +18,7 @@ interface ReportAction {
 }
 
 interface SessionLink {
-  label: string
+  label?: string
   url: string
 }
 

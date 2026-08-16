@@ -24,11 +24,12 @@ import (
 // third parallel execution substrate — every Task is fulfilled by exactly one
 // of Nanite's two existing execution paths.
 type TaskManager struct {
-	store    *store.Store
-	launcher *WorkflowLauncher
-	wake     DurableAgentWakeService
-	registry *agentworkflow.Registry
-	logger   *slog.Logger
+	store        *store.Store
+	launcher     *WorkflowLauncher
+	wake         DurableAgentWakeService
+	registry     *agentworkflow.Registry
+	pushNotifier *A2APushNotifier
+	logger       *slog.Logger
 }
 
 // NewTaskManager constructs a TaskManager. All parameters are required.
@@ -43,11 +44,12 @@ func NewTaskManager(
 		logger = slog.Default()
 	}
 	return &TaskManager{
-		store:    st,
-		launcher: launcher,
-		wake:     wake,
-		registry: registry,
-		logger:   logger,
+		store:        st,
+		launcher:     launcher,
+		wake:         wake,
+		registry:     registry,
+		pushNotifier: NewA2APushNotifier(st, logger),
+		logger:       logger,
 	}
 }
 
@@ -204,6 +206,7 @@ func (tm *TaskManager) submitWorkflowTask(ctx context.Context, task *store.A2ATa
 	}
 
 	// Update the a2a_tasks record with the resulting instance ID and run ID.
+	oldState := task.State
 	task.DurableAgentInstanceID = sql.NullString{String: result.InstanceID, Valid: true}
 	task.WorkflowRunID = sql.NullString{String: result.RunID, Valid: true}
 	task.State = a2a.TaskStateWorking
@@ -215,6 +218,12 @@ func (tm *TaskManager) submitWorkflowTask(ctx context.Context, task *store.A2ATa
 			"run_id", result.RunID,
 			"error", err,
 		)
+		return err
+	}
+
+	// Enqueue push notification if state changed and config is present.
+	if oldState != task.State && task.PushNotificationConfig.Valid {
+		tm.enqueuePushNotification(task.ID, task.State)
 	}
 
 	return nil
@@ -254,6 +263,7 @@ func (tm *TaskManager) submitInstanceTask(ctx context.Context, task *store.A2ATa
 	}
 
 	// Update the a2a_tasks record with the instance ID.
+	oldState := task.State
 	task.DurableAgentInstanceID = sql.NullString{String: instanceID, Valid: true}
 	task.State = a2a.TaskStateWorking
 
@@ -272,6 +282,12 @@ func (tm *TaskManager) submitInstanceTask(ctx context.Context, task *store.A2ATa
 			"instance_id", instanceID,
 			"error", err,
 		)
+		return err
+	}
+
+	// Enqueue push notification if state changed and config is present.
+	if oldState != task.State && task.PushNotificationConfig.Valid {
+		tm.enqueuePushNotification(task.ID, task.State)
 	}
 
 	return nil
@@ -291,7 +307,7 @@ func (tm *TaskManager) GetTask(ctx context.Context, taskID string) (*a2a.Task, e
 	// Derive the current state from the underlying execution.
 	derivedState := tm.deriveTaskState(ctx, storeTask)
 
-	// If the state has changed, update the store.
+	// If the state has changed, update the store and enqueue push notification.
 	if derivedState != storeTask.State {
 		tm.logger.Info("a2a: derived state differs from cached",
 			"task_id", taskID,
@@ -301,6 +317,9 @@ func (tm *TaskManager) GetTask(ctx context.Context, taskID string) (*a2a.Task, e
 		storeTask.State = derivedState
 		if err := tm.store.UpdateA2ATask(storeTask); err != nil {
 			tm.logger.Error("a2a: failed to update derived state", "task_id", taskID, "error", err)
+		} else if storeTask.PushNotificationConfig.Valid {
+			// Only enqueue push if the update succeeded
+			tm.enqueuePushNotification(taskID, derivedState)
 		}
 	}
 
@@ -463,6 +482,7 @@ func (tm *TaskManager) updateTaskStateFailed(taskID, errorMsg string) {
 		return
 	}
 
+	oldState := task.State
 	task.State = a2a.TaskStateFailed
 	task.Error = sql.NullString{String: errorMsg, Valid: true}
 
@@ -471,7 +491,31 @@ func (tm *TaskManager) updateTaskStateFailed(taskID, errorMsg string) {
 			"task_id", taskID,
 			"error", err,
 		)
+		return
 	}
+
+	// Enqueue push notification if state changed and config is present.
+	if oldState != task.State && task.PushNotificationConfig.Valid {
+		tm.enqueuePushNotification(taskID, task.State)
+	}
+}
+
+// enqueuePushNotification enqueues a push notification for the given task state
+// transition. This is best-effort — if it fails, we log but don't fail the
+// calling operation.
+func (tm *TaskManager) enqueuePushNotification(taskID string, state a2a.TaskState) {
+	if err := tm.pushNotifier.EnqueueDelivery(taskID, state); err != nil {
+		tm.logger.Warn("a2a: failed to enqueue push notification",
+			"task_id", taskID,
+			"state", state,
+			"error", err,
+		)
+	}
+}
+
+// PushNotifier returns the A2APushNotifier instance for background worker access.
+func (tm *TaskManager) PushNotifier() *A2APushNotifier {
+	return tm.pushNotifier
 }
 
 // ProvideTaskInput provides input to a task that is in input-required state.

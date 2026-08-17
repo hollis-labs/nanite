@@ -37,7 +37,7 @@ When Conductor relays a completed delegated session, expect a `report-card` (tit
 
 ## Deterministic reflex triggers
 
-Certain phrasings are matched deterministically (no LLM call) before the turn reaches Conductor's own reasoning, per `internal/reflex/` + the user-level overrides in `~/.nanite/reflexes/conductor-*.yaml`. These don't change *what* Conductor does (that's still driven by its system prompt) — they tag the turn for the UI's mode indicator and the raw-vs-sent audit log (`playbook_match_log`, `CW-20260816-0068`), and critically, they keep Conductor from being force-dispatched to a synchronous worker/planner subagent the way a bare phrase like "research X" normally would be.
+Certain phrasings are matched deterministically (no LLM call) before the turn reaches Conductor's own reasoning, per `internal/promptrouter/` + the user-level overrides in `~/.nanite/reflexes/conductor-*.yaml`. These don't change *what* Conductor does (that's still driven by its system prompt) — they tag the turn for the UI's mode indicator and the raw-vs-sent audit log (`playbook_match_log`, `CW-20260816-0068`), and critically, they keep Conductor from being force-dispatched to a synchronous worker/planner subagent the way a bare phrase like "research X" normally would be.
 
 | Trigger phrases (examples) | What it's for |
 |---|---|
@@ -46,7 +46,7 @@ Certain phrasings are matched deterministically (no LLM call) before the turn re
 | "drop the results in ...", "research this and drop it in ...", "file a task with the results" | Non-linear research-and-file — routes to `torque_task_create`, not an inline synchronous dispatch |
 | "dispatch this to ...", "queue this up for ...", "hand this off to ..." | Dispatch-to-project — routes to Torque task creation for the target project's `orchestrator` to pick up |
 
-Full phrase lists live in `~/.nanite/reflexes/conductor-*.yaml`; documented in `docs/agent-reflex-catalog.md`.
+Full phrase lists live in `~/.nanite/reflexes/conductor-*.yaml`; documented in `docs/promptrouter-catalog.md`.
 
 ## Note capture, by target
 
@@ -80,6 +80,6 @@ Full phrase lists live in `~/.nanite/reflexes/conductor-*.yaml`; documented in `
 
 - Architecture/design rationale: `docs/architecture/conductor-console-design.md`
 - Full operating contract (system prompt): `.nanite/agents/conductor.md`
-- Reflex phrase catalog conventions: `docs/agent-reflex-catalog.md`, `docs/reflex-authoring.md`
+- Reflex phrase catalog conventions: `docs/promptrouter-catalog.md`, `docs/promptrouter-authoring.md`
 - Torque epic: `EP-20260816-0004` (tasks `CW-20260816-0062`, `CW-20260816-0065` through `-0070`, currently in `review` pending manual close)
 - Follow-ups: `CW-20260816-0088` (resolver duplication), `CW-20260816-0089` (audit-log ambiguity), `CW-20260816-0090` (go-envelopes tagged release), `CW-20260816-0091` (Nil MCP registration)

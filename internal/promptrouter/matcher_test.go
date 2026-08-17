@@ -1,4 +1,4 @@
-package reflex_test
+package promptrouter_test
 
 import (
 	"os"
@@ -6,26 +6,26 @@ import (
 	"testing"
 
 	"github.com/hollis-labs/nanite/internal/classify"
-	"github.com/hollis-labs/nanite/internal/reflex"
+	"github.com/hollis-labs/nanite/internal/promptrouter"
 )
 
 // allBuiltins is the full builtin set, merged and sorted as the matcher expects.
-func allBuiltins(t *testing.T) []reflex.Reflex {
+func allBuiltins(t *testing.T) []promptrouter.Reflex {
 	t.Helper()
-	return reflex.BuiltinReflexes()
+	return promptrouter.BuiltinReflexes()
 }
 
 // ── 1. Every builtin fires on its documented example input ──────────────────
 
 func TestMatcher_BuiltinReflexes_ExampleInputs(t *testing.T) {
 	cases := []struct {
-		input       string
-		m1Tier      classify.ScopeTier
-		m1Pattern   classify.ExecutionPattern
+		input        string
+		m1Tier       classify.ScopeTier
+		m1Pattern    classify.ExecutionPattern
 		wantReflexID string
 	}{
 		{
-			// docs/agent-reflex-catalog.md test-case table row 1
+			// docs/promptrouter-catalog.md test-case table row 1
 			input:        "Let's plan out the migration strategy for the auth service",
 			m1Tier:       classify.TierOpen,
 			m1Pattern:    classify.PatternSubagent,
@@ -85,7 +85,7 @@ func TestMatcher_BuiltinReflexes_ExampleInputs(t *testing.T) {
 	reflexes := allBuiltins(t)
 	for _, tc := range cases {
 		t.Run(tc.wantReflexID, func(t *testing.T) {
-			got, ok := reflex.Match(tc.input, tc.m1Tier, tc.m1Pattern, reflexes)
+			got, ok := promptrouter.Match(tc.input, tc.m1Tier, tc.m1Pattern, reflexes)
 			if !ok {
 				t.Fatalf("Match(%q): no match, want %q", tc.input, tc.wantReflexID)
 			}
@@ -102,7 +102,7 @@ func TestMatcher_PriorityOrdering(t *testing.T) {
 	// "review and fix" should fire reviewer-mention (priority 15) not
 	// worker-execute (priority 10), because reviewer comes first.
 	input := "review and fix the authentication flow"
-	got, ok := reflex.Match(input, classify.TierSmall, classify.PatternInline, allBuiltins(t))
+	got, ok := promptrouter.Match(input, classify.TierSmall, classify.PatternInline, allBuiltins(t))
 	if !ok {
 		t.Fatalf("expected a match for %q, got none", input)
 	}
@@ -114,9 +114,9 @@ func TestMatcher_PriorityOrdering(t *testing.T) {
 // ── 3. Miss falls through ────────────────────────────────────────────────────
 
 func TestMatcher_Miss_ReturnsFalse(t *testing.T) {
-	// Totally unrelated input should not match any builtin reflex.
+	// Totally unrelated input should not match any builtin promptrouter.
 	input := "hello there"
-	_, ok := reflex.Match(input, classify.TierTrivial, classify.PatternInline, allBuiltins(t))
+	_, ok := promptrouter.Match(input, classify.TierTrivial, classify.PatternInline, allBuiltins(t))
 	if ok {
 		t.Errorf("Match(%q): expected no match, got one", input)
 	}
@@ -128,13 +128,13 @@ func TestMatcher_TierGuard_StrategistRequiresMedium(t *testing.T) {
 	// "brainstorm" with TierTrivial should NOT fire strategist-mention
 	// because scope_tier_hint=medium is not satisfied.
 	input := "brainstorm"
-	_, ok := reflex.Match(input, classify.TierTrivial, classify.PatternInline, allBuiltins(t))
+	_, ok := promptrouter.Match(input, classify.TierTrivial, classify.PatternInline, allBuiltins(t))
 	if ok {
 		t.Errorf("strategist-mention should not fire on TierTrivial input")
 	}
 
 	// Same input with TierMedium SHOULD fire.
-	got, ok := reflex.Match(input, classify.TierMedium, classify.PatternInline, allBuiltins(t))
+	got, ok := promptrouter.Match(input, classify.TierMedium, classify.PatternInline, allBuiltins(t))
 	if !ok {
 		t.Errorf("strategist-mention should fire on TierMedium input")
 	} else if got.Reflex.ID != "strategist-mention" {
@@ -153,13 +153,13 @@ func TestMatcher_PatternGuard_BackgroundLongTask(t *testing.T) {
 	input := "async please"
 
 	// With non-background pattern: should NOT match background-long-task.
-	_, ok := reflex.Match(input, classify.TierSmall, classify.PatternInline, allBuiltins(t))
+	_, ok := promptrouter.Match(input, classify.TierSmall, classify.PatternInline, allBuiltins(t))
 	if ok {
 		t.Errorf("background-long-task should not fire when m1Pattern != PatternBackground")
 	}
 
 	// With PatternBackground: should match.
-	got, ok := reflex.Match(input, classify.TierSmall, classify.PatternBackground, allBuiltins(t))
+	got, ok := promptrouter.Match(input, classify.TierSmall, classify.PatternBackground, allBuiltins(t))
 	if !ok {
 		t.Errorf("background-long-task should fire when m1Pattern == PatternBackground")
 	} else if got.Reflex.ID != "background-long-task" {
@@ -171,21 +171,21 @@ func TestMatcher_PatternGuard_BackgroundLongTask(t *testing.T) {
 
 func TestMatcher_UserOverride_BeatBuiltin(t *testing.T) {
 	// Synthetic user override with priority 60 (> max builtin 25).
-	userOverride := reflex.Reflex{
+	userOverride := promptrouter.Reflex{
 		ID: "my-custom-reflex",
-		Triggers: reflex.Triggers{
+		Triggers: promptrouter.Triggers{
 			UserPhraseAnyOf: []string{"research"},
 		},
-		ResolvesTo:  reflex.Resolution{Pattern: "planner", Role: "planner", Profile: "planner"},
-		SideEffects: reflex.SideEffects{ModeSignal: "planning"},
+		ResolvesTo:  promptrouter.Resolution{Pattern: "planner", Role: "planner", Profile: "planner"},
+		SideEffects: promptrouter.SideEffects{ModeSignal: "planning"},
 		Priority:    60,
 	}
 
-	merged := reflex.MergeReflexes(reflex.BuiltinReflexes(), []reflex.Reflex{userOverride})
+	merged := promptrouter.MergeReflexes(promptrouter.BuiltinReflexes(), []promptrouter.Reflex{userOverride})
 
 	// "research something" would normally fire researcher-mention (priority 15).
 	// With user override at priority 60, it should fire my-custom-reflex first.
-	got, ok := reflex.Match("research something", classify.TierSmall, classify.PatternInline, merged)
+	got, ok := promptrouter.Match("research something", classify.TierSmall, classify.PatternInline, merged)
 	if !ok {
 		t.Fatal("expected a match, got none")
 	}
@@ -197,17 +197,17 @@ func TestMatcher_UserOverride_BeatBuiltin(t *testing.T) {
 // ── 7. User override at priority < builtin does NOT beat builtin ─────────────
 
 func TestMatcher_UserOverride_LowPriorityLoses(t *testing.T) {
-	lowOverride := reflex.Reflex{
+	lowOverride := promptrouter.Reflex{
 		ID: "low-priority-override",
-		Triggers: reflex.Triggers{
+		Triggers: promptrouter.Triggers{
 			UserPhraseAnyOf: []string{"research"},
 		},
-		ResolvesTo: reflex.Resolution{Pattern: "worker", Role: "worker", Profile: "worker"},
+		ResolvesTo: promptrouter.Resolution{Pattern: "worker", Role: "worker", Profile: "worker"},
 		Priority:   5, // lower than researcher-mention (15)
 	}
 
-	merged := reflex.MergeReflexes(reflex.BuiltinReflexes(), []reflex.Reflex{lowOverride})
-	got, ok := reflex.Match("research something", classify.TierSmall, classify.PatternInline, merged)
+	merged := promptrouter.MergeReflexes(promptrouter.BuiltinReflexes(), []promptrouter.Reflex{lowOverride})
+	got, ok := promptrouter.Match("research something", classify.TierSmall, classify.PatternInline, merged)
 	if !ok {
 		t.Fatal("expected a match, got none")
 	}
@@ -219,11 +219,11 @@ func TestMatcher_UserOverride_LowPriorityLoses(t *testing.T) {
 // ── 8. Log row written on match ──────────────────────────────────────────────
 
 func TestDispatcher_LogRowWritten(t *testing.T) {
-	var captured []reflex.ReflexMatchEntry
+	var captured []promptrouter.ReflexMatchEntry
 	logger := &fakeLogger{capture: &captured}
 
-	merged := reflex.MergeReflexes(reflex.BuiltinReflexes(), nil)
-	reflex.AssignRoleWithReflex(
+	merged := promptrouter.MergeReflexes(promptrouter.BuiltinReflexes(), nil)
+	promptrouter.AssignRoleWithReflex(
 		"Implement the reflex matcher module",
 		classify.TierSmall,
 		classify.PatternInline,
@@ -254,11 +254,11 @@ func TestDispatcher_LogRowWritten(t *testing.T) {
 // ── 9. No log row on miss ────────────────────────────────────────────────────
 
 func TestDispatcher_NoLogOnMiss(t *testing.T) {
-	var captured []reflex.ReflexMatchEntry
+	var captured []promptrouter.ReflexMatchEntry
 	logger := &fakeLogger{capture: &captured}
 
-	merged := reflex.MergeReflexes(reflex.BuiltinReflexes(), nil)
-	reflex.AssignRoleWithReflex(
+	merged := promptrouter.MergeReflexes(promptrouter.BuiltinReflexes(), nil)
+	promptrouter.AssignRoleWithReflex(
 		"hello there",
 		classify.TierTrivial,
 		classify.PatternInline,
@@ -276,9 +276,9 @@ func TestDispatcher_NoLogOnMiss(t *testing.T) {
 // ── 10. Nil logger does not panic ────────────────────────────────────────────
 
 func TestDispatcher_NilLogger_NoPanic(t *testing.T) {
-	merged := reflex.MergeReflexes(reflex.BuiltinReflexes(), nil)
+	merged := promptrouter.MergeReflexes(promptrouter.BuiltinReflexes(), nil)
 	// Must not panic.
-	reflex.AssignRoleWithReflex(
+	promptrouter.AssignRoleWithReflex(
 		"Implement the reflex matcher module",
 		classify.TierSmall,
 		classify.PatternInline,
@@ -312,7 +312,7 @@ priority: 55
 		t.Fatalf("write test yaml: %v", err)
 	}
 
-	reflexes, err := reflex.LoadUserReflexes(dir)
+	reflexes, err := promptrouter.LoadUserReflexes(dir)
 	if err != nil {
 		t.Fatalf("LoadUserReflexes: %v", err)
 	}
@@ -335,7 +335,7 @@ priority: 55
 
 func TestLoader_MissingDir_NoError(t *testing.T) {
 	dir := filepath.Join(t.TempDir(), "does-not-exist")
-	reflexes, err := reflex.LoadUserReflexes(dir)
+	reflexes, err := promptrouter.LoadUserReflexes(dir)
 	if err != nil {
 		t.Fatalf("unexpected error for missing dir: %v", err)
 	}
@@ -347,7 +347,7 @@ func TestLoader_MissingDir_NoError(t *testing.T) {
 // ── 13. Empty input returns no match ─────────────────────────────────────────
 
 func TestMatcher_EmptyInput(t *testing.T) {
-	_, ok := reflex.Match("", classify.TierSmall, classify.PatternInline, allBuiltins(t))
+	_, ok := promptrouter.Match("", classify.TierSmall, classify.PatternInline, allBuiltins(t))
 	if ok {
 		t.Error("expected no match for empty input")
 	}
@@ -356,10 +356,10 @@ func TestMatcher_EmptyInput(t *testing.T) {
 // ── helpers ──────────────────────────────────────────────────────────────────
 
 type fakeLogger struct {
-	capture *[]reflex.ReflexMatchEntry
+	capture *[]promptrouter.ReflexMatchEntry
 }
 
-func (f *fakeLogger) LogReflexMatch(entry reflex.ReflexMatchEntry) error {
+func (f *fakeLogger) LogReflexMatch(entry promptrouter.ReflexMatchEntry) error {
 	*f.capture = append(*f.capture, entry)
 	return nil
 }

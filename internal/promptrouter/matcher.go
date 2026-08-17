@@ -1,4 +1,4 @@
-package reflex
+package promptrouter
 
 import (
 	"strings"
@@ -27,18 +27,18 @@ type ReflexMatch struct {
 // Match evaluates the registered reflex set against user input, returning the
 // first winning reflex and true, or zero value and false on a miss.
 //
-// Contract (from docs/agent-reflex-catalog.md § "Reflex matcher contract"):
+// Contract (from docs/promptrouter-catalog.md § "Reflex matcher contract"):
 //
-//	match(user_input, m1_tier, m1_pattern) → (Reflex, bool)
+//		match(user_input, m1_tier, m1_pattern) → (Reflex, bool)
 //
-//   - Normalize user_input: lower-case, collapse whitespace.
-//   - Iterate reflexes in descending priority order (already sorted in
-//     BuiltinReflexes; caller-supplied sets are sorted here).
-//   - For each reflex, check:
-//     1. user_phrase_any_of — any phrase is a substring of normalized input.
-//     2. scope_tier_hint — if set, m1_tier must be >= hint tier.
-//     3. execution_pattern_hint — if set, m1_pattern must match exactly.
-//   - Return the first (highest-priority) match.
+//	  - Normalize user_input: lower-case, collapse whitespace.
+//	  - Iterate reflexes in descending priority order (already sorted in
+//	    BuiltinReflexes; caller-supplied sets are sorted here).
+//	  - For each reflex, check:
+//	    1. user_phrase_any_of — any phrase is a substring of normalized input.
+//	    2. scope_tier_hint — if set, m1_tier must be >= hint tier.
+//	    3. execution_pattern_hint — if set, m1_pattern must match exactly.
+//	  - Return the first (highest-priority) match.
 //
 // reflexes must be sorted descending by Priority before calling (the return
 // value of BuiltinReflexes and LoadUserReflexes already are).

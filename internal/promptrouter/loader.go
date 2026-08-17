@@ -1,4 +1,4 @@
-package reflex
+package promptrouter
 
 import (
 	"fmt"
@@ -12,17 +12,17 @@ import (
 )
 
 // ReflexYAML is the YAML-loadable form of a Reflex. Field names mirror the
-// schema documented in docs/agent-reflex-catalog.md so authors can write
+// schema documented in docs/promptrouter-catalog.md so authors can write
 // overrides in the same shape as the canonical documentation.
 //
 // User override files live at ~/.nanite/reflexes/*.yaml.
 // Set priority >= 50 to reliably beat all built-in reflexes (max builtin: 25).
 type ReflexYAML struct {
-	ID       string       `yaml:"id"`
-	Triggers TriggersYAML `yaml:"triggers"`
-	ResolvesTo ResolutionYAML `yaml:"resolves_to"`
+	ID          string          `yaml:"id"`
+	Triggers    TriggersYAML    `yaml:"triggers"`
+	ResolvesTo  ResolutionYAML  `yaml:"resolves_to"`
 	SideEffects SideEffectsYAML `yaml:"side_effects"`
-	Priority int          `yaml:"priority"`
+	Priority    int             `yaml:"priority"`
 }
 
 // TriggersYAML is the YAML-loadable form of Triggers.
@@ -57,33 +57,33 @@ func LoadUserReflexes(dir string) ([]Reflex, error) {
 	if dir == "" {
 		home, err := os.UserHomeDir()
 		if err != nil {
-			return nil, fmt.Errorf("reflex: resolve home dir: %w", err)
+			return nil, fmt.Errorf("promptrouter: resolve home dir: %w", err)
 		}
 		dir = filepath.Join(home, ".nanite", "reflexes")
 	}
 
 	entries, err := filepath.Glob(filepath.Join(dir, "*.yaml"))
 	if err != nil {
-		return nil, fmt.Errorf("reflex: glob user reflexes: %w", err)
+		return nil, fmt.Errorf("promptrouter: glob user reflexes: %w", err)
 	}
 
 	var out []Reflex
 	for _, path := range entries {
 		data, err := os.ReadFile(path)
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "reflex: skip %s: read error: %v\n", path, err)
+			fmt.Fprintf(os.Stderr, "promptrouter: skip %s: read error: %v\n", path, err)
 			continue
 		}
 
 		var ry ReflexYAML
 		if err := yaml.Unmarshal(data, &ry); err != nil {
-			fmt.Fprintf(os.Stderr, "reflex: skip %s: parse error: %v\n", path, err)
+			fmt.Fprintf(os.Stderr, "promptrouter: skip %s: parse error: %v\n", path, err)
 			continue
 		}
 
 		r, err := reflexFromYAML(ry)
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "reflex: skip %s: schema error: %v\n", path, err)
+			fmt.Fprintf(os.Stderr, "promptrouter: skip %s: schema error: %v\n", path, err)
 			continue
 		}
 		out = append(out, r)

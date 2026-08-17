@@ -23,8 +23,8 @@ import (
 	envelope_render "github.com/hollis-labs/nanite/internal/executor/envelope_render"
 	"github.com/hollis-labs/nanite/internal/learnings"
 	naniteotel "github.com/hollis-labs/nanite/internal/otel"
+	"github.com/hollis-labs/nanite/internal/promptrouter"
 	"github.com/hollis-labs/nanite/internal/providercatalog"
-	"github.com/hollis-labs/nanite/internal/reflex"
 	"github.com/hollis-labs/nanite/internal/worktree"
 
 	llmcontracts "github.com/hollis-labs/go-llm-contracts"
@@ -922,11 +922,11 @@ func initMCP(s *store.Store, cfg *config.Config, appCfg *config.AppConfig) (*mcp
 	// E1 (CW-20260419-0027): wire reflex set + logger into the dispatch path.
 	// LoadUserReflexes returns nil on a missing dir (not an error); merge with
 	// builtins so user overrides with priority>=50 reliably beat built-ins.
-	userReflexes, err := reflex.LoadUserReflexes("")
+	userReflexes, err := promptrouter.LoadUserReflexes("")
 	if err != nil {
 		slog.Warn("reflex: failed to load user overrides", "err", err)
 	}
-	selfTools.ReflexSet = reflex.MergeReflexes(reflex.BuiltinReflexes(), userReflexes)
+	selfTools.ReflexSet = promptrouter.MergeReflexes(promptrouter.BuiltinReflexes(), userReflexes)
 	selfTools.ReflexLogger = s
 	// B1 (CW-20260429-0006): wire the manager as the cross-server schema
 	// registry so tool_validate can pre-flight check args for any

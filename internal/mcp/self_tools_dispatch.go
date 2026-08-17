@@ -10,7 +10,7 @@ import (
 	"github.com/hollis-labs/nanite/internal/classify"
 	"github.com/hollis-labs/nanite/internal/dispatch"
 	"github.com/hollis-labs/nanite/internal/grounding"
-	"github.com/hollis-labs/nanite/internal/reflex"
+	"github.com/hollis-labs/nanite/internal/promptrouter"
 	"github.com/hollis-labs/nanite/internal/subagent"
 )
 
@@ -122,7 +122,7 @@ func (st *SelfToolsTransport) callExecuteTask(ctx context.Context, args map[stri
 			Message:         message,
 			MessageTokenEst: len(message) / 4,
 		})
-		if match, ok := reflex.Match(message, m1Tier, m1Pattern, st.ReflexSet); ok {
+		if match, ok := promptrouter.Match(message, m1Tier, m1Pattern, st.ReflexSet); ok {
 			reflexHints = &dispatch.ReflexHints{
 				HintTier:     match.HintTier,
 				HintPattern:  match.HintPattern,
@@ -137,7 +137,7 @@ func (st *SelfToolsTransport) callExecuteTask(ctx context.Context, args map[stri
 				if len(excerpt) > 200 {
 					excerpt = excerpt[:200]
 				}
-				_ = st.ReflexLogger.LogReflexMatch(reflex.ReflexMatchEntry{
+				_ = st.ReflexLogger.LogReflexMatch(promptrouter.ReflexMatchEntry{
 					SessionID:           sessionID,
 					TurnID:              strArg(args, "turn_id", ""),
 					ReflexID:            match.Reflex.ID,

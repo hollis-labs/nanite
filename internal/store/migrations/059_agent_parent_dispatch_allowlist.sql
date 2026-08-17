@@ -36,7 +36,7 @@
 --   exists yet. This is intentional and matches the user framing: the
 --   *agent* picks an intent fit ("researcher" = "someone who can read
 --   this codebase") and the Agent Broker resolves to the actual profile.
---   The reflex catalog (`internal/reflex/catalog.go:165`) already routes
+--   The reflex catalog (`internal/promptrouter/catalog.go:165`) already routes
 --   `researcher-mention` -> `worker` as the fallback profile when no
 --   dedicated `researcher` profile exists. Surfacing "researcher" in the
 --   description preserves the intent-fit framing without forcing the

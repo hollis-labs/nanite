@@ -425,8 +425,8 @@ These are explicitly out of scope for this profile and tracked as separate,
 dependent tasks — don't improvise them:
 
 - **Deterministic phrase-routing rules** (note-capture triggers, dispatch
-  triggers, approval phrasing) — `internal/reflex/` extension, a separate
-  task.
+  triggers, approval phrasing) — `internal/promptrouter/` extension, a
+  separate task.
 - **Audit-trail extension** (raw input vs. rewritten/dispatched text diff
   for later review) — separate task.
 - **Fragments Engine note-capture.** Investigated (CW-20260816-0070): no

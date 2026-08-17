@@ -15,7 +15,7 @@ Cheap, deterministic upfront classification that nudges the loop toward an appro
 - `internal/classify/mode.go` — `ClassifyMode(userContent)` → `ModeClassification{Suggested, Confidence, Signals}`
 - `internal/dispatch/execute.go:182-201` — `AssignRole` mapping
 - `internal/service/chat_strategy.go` — `applyStrategyToLimits` (turns strategy into soft `MaxTurns`)
-- `internal/reflex/` — reflex matcher (rules-based hints upstream of `AssignRole`)
+- `internal/promptrouter/` — prompt router / reflex matcher (rules-based hints upstream of `AssignRole`)
 
 ## Layers
 
@@ -39,9 +39,9 @@ Used in [05](05-external-agent-execution.md)'s dispatch. Scope tiers: open-ended
 
 `applyStrategyToLimits` produces a `strategy.Strategy` with a soft `MaxTurns` hint. Feeds [04](04-chat-harness-and-loop-orchestration.md)'s `loopState`.
 
-### 4. Reflex matcher
+### 4. Reflex matcher (prompt router)
 
-`internal/reflex` runs rule-based pattern matchers on the user input upstream of `AssignRole`. Produces hints (ex: "this looks like a one-liner code question — bias to inline + tight budget"). Cheap, deterministic.
+`internal/promptrouter` runs rule-based pattern matchers on the user input upstream of `AssignRole`. Produces hints (ex: "this looks like a one-liner code question — bias to inline + tight budget"). Cheap, deterministic.
 
 ## `AssignRole` mapping
 

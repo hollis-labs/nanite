@@ -8,13 +8,14 @@
 // pending_reflexes DB tables, the store.AgentReflex/store.PendingReflex
 // types, and the /api/agents/{id}/reflexes API surface.
 //
-// Not to be confused with: internal/reflex (singular) — a completely
+// Not to be confused with: internal/promptrouter — a completely
 // different system, a deterministic phrase-match dispatch router that
 // feeds dispatch.AssignRole from user input before nanite_execute_task
 // runs. It shares no code, no lifecycle, and no runtime with this
-// package; the two only share a root word. See
-// docs/agent-reflex-catalog.md and docs/reflex-authoring.md for that
-// system's docs.
+// package. (It was previously named internal/reflex; it was renamed to
+// internal/promptrouter to remove the naming collision this comment used
+// to warn about.) See docs/promptrouter-catalog.md and
+// docs/promptrouter-authoring.md for that system's docs.
 //
 // Historical note: this package was briefly named driftguard
 // (CW-20260816-0062) in an attempt to resolve the naming collision

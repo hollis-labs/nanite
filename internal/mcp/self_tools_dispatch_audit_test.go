@@ -5,7 +5,7 @@ import (
 	"testing"
 
 	"github.com/hollis-labs/nanite/internal/dispatch"
-	"github.com/hollis-labs/nanite/internal/reflex"
+	"github.com/hollis-labs/nanite/internal/promptrouter"
 )
 
 // capturingReflexLogger records every ReflexMatchEntry passed to
@@ -13,10 +13,10 @@ import (
 // CW-20260816-0068 (raw-vs-sent audit trail) without standing up a real
 // *store.Store.
 type capturingReflexLogger struct {
-	captured []reflex.ReflexMatchEntry
+	captured []promptrouter.ReflexMatchEntry
 }
 
-func (l *capturingReflexLogger) LogReflexMatch(entry reflex.ReflexMatchEntry) error {
+func (l *capturingReflexLogger) LogReflexMatch(entry promptrouter.ReflexMatchEntry) error {
 	l.captured = append(l.captured, entry)
 	return nil
 }
@@ -37,7 +37,7 @@ func TestCallExecuteTask_ReflexMatch_LogsRawAndSentInputText(t *testing.T) {
 	logger := &capturingReflexLogger{}
 	st := &SelfToolsTransport{
 		Dispatch:     spawner,
-		ReflexSet:    reflex.BuiltinReflexes(),
+		ReflexSet:    promptrouter.BuiltinReflexes(),
 		ReflexLogger: logger,
 	}
 

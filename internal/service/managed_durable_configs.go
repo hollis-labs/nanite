@@ -211,14 +211,20 @@ func syncManagedDurableAgentConfig(st *store.Store, cfg ManagedDurableAgentConfi
 // InsertAgentSchedule is INSERT OR REPLACE — a naive re-insert on every
 // boot would silently reset fired_count/last_fired_at/created_at to zero
 // values each time, which would re-arm an already-fired one_shot schedule
-// and reset a cron schedule's due-ness reference point (wakeScheduleDue
-// falls back to created_at when last_fired_at is empty) to "now" on every
-// redeploy — defeating the whole point of persisting fire state. So this
+// and reset a cron schedule's due-ness reference point to "now" on every
+// redeploy (wakeScheduleDue falls back to last_fired_at, then created_at —
+// but created_at is stored in SQLite's native datetime('now') format, not
+// RFC3339, so that second fallback never actually parses for a freshly
+// inserted schedule; in practice a reset last_fired_at/created_at just
+// falls all the way through to wakeScheduleDue's own now-15min default,
+// which is exactly the "just fired" state a real reset would wrongly
+// produce) — defeating the whole point of persisting fire state. So this
 // preserves that trio from any existing row with the same ID, the same
 // discipline SyncDurableAgentInstanceConfig already uses for
-// CurrentSessionID/FailureReason/ArchivedAt above. It also preserves an
-// operator's manual 'paused' status rather than silently reactivating a
-// schedule they turned off through the admin surface.
+// CurrentSessionID/FailureReason/ArchivedAt above. It also preserves any
+// existing non-active status (paused, expired, ...) rather than silently
+// reactivating a schedule an operator turned off or that already expired
+// through the admin surface or a fired one_shot.
 func syncManagedDurableAgentSchedule(ctx context.Context, st *store.Store, profileID string, sch ManagedDurableAgentSchedule) error {
 	row := store.AgentSchedule{
 		ID:           managedDurableAgentScheduleID(profileID, sch.Name),
@@ -237,8 +243,8 @@ func syncManagedDurableAgentSchedule(ctx context.Context, st *store.Store, profi
 		row.FiredCount = existing.FiredCount
 		row.LastFiredAt = existing.LastFiredAt
 		row.CreatedAt = existing.CreatedAt
-		if existing.Status == store.ScheduleStatusPaused {
-			row.Status = store.ScheduleStatusPaused
+		if existing.Status != store.ScheduleStatusActive {
+			row.Status = existing.Status
 		}
 	case errors.Is(err, store.ErrAgentScheduleNotFound):
 		// First sync for this schedule — InsertAgentSchedule defaults

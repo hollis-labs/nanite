@@ -1,4 +1,4 @@
-package reflex_test
+package promptrouter_test
 
 import (
 	"os"
@@ -7,7 +7,7 @@ import (
 
 	"github.com/hollis-labs/nanite/internal/classify"
 	"github.com/hollis-labs/nanite/internal/dispatch"
-	"github.com/hollis-labs/nanite/internal/reflex"
+	"github.com/hollis-labs/nanite/internal/promptrouter"
 )
 
 // TestLoader_ValidYAML_WorkflowName is the CW-20260814-0002 companion to
@@ -28,7 +28,7 @@ priority: 60
 		t.Fatalf("write test yaml: %v", err)
 	}
 
-	reflexes, err := reflex.LoadUserReflexes(dir)
+	reflexes, err := promptrouter.LoadUserReflexes(dir)
 	if err != nil {
 		t.Fatalf("LoadUserReflexes: %v", err)
 	}
@@ -44,17 +44,17 @@ priority: 60
 // a matched reflex's WorkflowName unchanged — the matcher itself needs no
 // workflow-specific logic, it just returns the winning Reflex.
 func TestMatcher_WorkflowReflex_ResolvesToWorkflowName(t *testing.T) {
-	workflowReflex := reflex.Reflex{
+	workflowReflex := promptrouter.Reflex{
 		ID: "onboard-workflow",
-		Triggers: reflex.Triggers{
+		Triggers: promptrouter.Triggers{
 			UserPhraseAnyOf: []string{"onboard the new hire"},
 		},
-		ResolvesTo: reflex.Resolution{WorkflowName: "onboard-user"},
+		ResolvesTo: promptrouter.Resolution{WorkflowName: "onboard-user"},
 		Priority:   50,
 	}
-	merged := reflex.MergeReflexes(reflex.BuiltinReflexes(), []reflex.Reflex{workflowReflex})
+	merged := promptrouter.MergeReflexes(promptrouter.BuiltinReflexes(), []promptrouter.Reflex{workflowReflex})
 
-	got, ok := reflex.Match("please onboard the new hire today", classify.TierSmall, classify.PatternInline, merged)
+	got, ok := promptrouter.Match("please onboard the new hire today", classify.TierSmall, classify.PatternInline, merged)
 	if !ok {
 		t.Fatal("expected a match, got none")
 	}
@@ -72,18 +72,18 @@ func TestMatcher_WorkflowReflex_ResolvesToWorkflowName(t *testing.T) {
 // mirroring dispatch.ExecuteTask's own precedence (a non-empty WorkflowName
 // bypasses the ordinary Role/Profile mapping).
 func TestAssignRoleWithReflex_WorkflowName_ReturnsRoleWorkflow(t *testing.T) {
-	workflowReflex := reflex.Reflex{
+	workflowReflex := promptrouter.Reflex{
 		ID: "onboard-workflow",
-		Triggers: reflex.Triggers{
+		Triggers: promptrouter.Triggers{
 			UserPhraseAnyOf: []string{"onboard the new hire"},
 		},
 		// Role/Profile deliberately left set to prove WorkflowName wins.
-		ResolvesTo: reflex.Resolution{Role: "worker", Profile: "worker", WorkflowName: "onboard-user"},
+		ResolvesTo: promptrouter.Resolution{Role: "worker", Profile: "worker", WorkflowName: "onboard-user"},
 		Priority:   50,
 	}
-	merged := reflex.MergeReflexes(reflex.BuiltinReflexes(), []reflex.Reflex{workflowReflex})
+	merged := promptrouter.MergeReflexes(promptrouter.BuiltinReflexes(), []promptrouter.Reflex{workflowReflex})
 
-	assignment := reflex.AssignRoleWithReflex(
+	assignment := promptrouter.AssignRoleWithReflex(
 		"please onboard the new hire today",
 		classify.TierSmall,
 		classify.PatternInline,
@@ -104,8 +104,8 @@ func TestAssignRoleWithReflex_WorkflowName_ReturnsRoleWorkflow(t *testing.T) {
 // non-goal guard: an ordinary reflex match (no workflow_name) must not
 // populate WorkflowName or force RoleWorkflow.
 func TestAssignRoleWithReflex_NonWorkflowReflex_LeavesWorkflowNameEmpty(t *testing.T) {
-	merged := reflex.MergeReflexes(reflex.BuiltinReflexes(), nil)
-	assignment := reflex.AssignRoleWithReflex(
+	merged := promptrouter.MergeReflexes(promptrouter.BuiltinReflexes(), nil)
+	assignment := promptrouter.AssignRoleWithReflex(
 		"Implement the reflex matcher module",
 		classify.TierSmall,
 		classify.PatternInline,

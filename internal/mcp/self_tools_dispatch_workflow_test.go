@@ -5,7 +5,7 @@ import (
 	"testing"
 
 	"github.com/hollis-labs/nanite/internal/dispatch"
-	"github.com/hollis-labs/nanite/internal/reflex"
+	"github.com/hollis-labs/nanite/internal/promptrouter"
 )
 
 // stubWorkflowLauncher records the request it was launched with and
@@ -60,12 +60,12 @@ func (s *recordingSpawner) Spawn(context.Context, dispatch.SpawnRequest) (*dispa
 // production even though internal/dispatch/execute.go fully implements and
 // tests it (execute_test.go).
 func TestCallExecuteTask_ReflexWorkflowName_RoutesToWorkflowLauncher(t *testing.T) {
-	workflowReflex := reflex.Reflex{
+	workflowReflex := promptrouter.Reflex{
 		ID: "onboard-workflow",
-		Triggers: reflex.Triggers{
+		Triggers: promptrouter.Triggers{
 			UserPhraseAnyOf: []string{"onboard the new hire"},
 		},
-		ResolvesTo: reflex.Resolution{WorkflowName: "onboard-user"},
+		ResolvesTo: promptrouter.Resolution{WorkflowName: "onboard-user"},
 		Priority:   50,
 	}
 
@@ -73,7 +73,7 @@ func TestCallExecuteTask_ReflexWorkflowName_RoutesToWorkflowLauncher(t *testing.
 	st := &SelfToolsTransport{
 		Dispatch:         &noCallSpawner{t: t},
 		WorkflowLauncher: launcher,
-		ReflexSet:        []reflex.Reflex{workflowReflex},
+		ReflexSet:        []promptrouter.Reflex{workflowReflex},
 	}
 
 	res, err := st.callExecuteTask(context.Background(), map[string]any{
@@ -103,7 +103,7 @@ func TestCallExecuteTask_NonWorkflowReflex_LeavesWorkflowNameEmpty(t *testing.T)
 	spawner := &recordingSpawner{result: &dispatch.SpawnResult{Summary: "worker done"}}
 	st := &SelfToolsTransport{
 		Dispatch:  spawner,
-		ReflexSet: reflex.BuiltinReflexes(),
+		ReflexSet: promptrouter.BuiltinReflexes(),
 	}
 
 	res, err := st.callExecuteTask(context.Background(), map[string]any{

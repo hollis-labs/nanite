@@ -3,7 +3,7 @@ package store
 // FU-30 Phase 3 Stage 3.c — store accessors for agent_reflexes and
 // pending_reflexes. Reflexes absorb the FU-21 drift detectors and extend
 // to general predicate-AND/OR + event + interval triggers; see
-// internal/agent/driftguard for the evaluator + executor.
+// internal/agent/reflexes for the evaluator + executor.
 
 import (
 	"context"
@@ -330,6 +330,25 @@ func (s *Store) CountClassBaseReflexByName(ctx context.Context, classTag, name s
 	).Scan(&n)
 	if err != nil {
 		return 0, fmt.Errorf("count class-base reflexes: %w", err)
+	}
+	return n, nil
+}
+
+// CountAgentReflexByName returns the count of agent-scoped rows (a
+// specific agent_id, no class_tag) with the given agent_id and name.
+// The AgentID-scoped mirror of CountClassBaseReflexByName — used by
+// seeders that idempotently attach reflexes to one resolved agent
+// profile (e.g. CW-20260816-0023's Loom Curator/Weaver pilot pair)
+// rather than to a whole class.
+func (s *Store) CountAgentReflexByName(ctx context.Context, agentID, name string) (int, error) {
+	var n int
+	err := s.DB.QueryRowContext(ctx,
+		`SELECT COUNT(*) FROM agent_reflexes
+		   WHERE agent_id = ? AND name = ?`,
+		agentID, name,
+	).Scan(&n)
+	if err != nil {
+		return 0, fmt.Errorf("count agent reflexes: %w", err)
 	}
 	return n, nil
 }

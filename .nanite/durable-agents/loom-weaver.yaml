@@ -1,0 +1,11 @@
+name: Loom Weaver
+slug: loom-weaver
+profile_slug: loom-weaver
+lifecycle_class: advisor
+provider: anthropic
+model: claude-sonnet-4-20250514
+runtime_kind: api
+launch_source_type: durable_advisor
+metadata:
+  scope: nanite-wiki
+  owner: hollis-labs

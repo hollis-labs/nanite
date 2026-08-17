@@ -8,7 +8,7 @@
 -- source='internal'. That removed the auto-discovered stubs for
 -- `researcher`, `analyst`, `file-backend`, `backend`, and `background-job`
 -- — slugs that still have active code references
--- (e.g. internal/reflex/catalog.go:165 resolves `Pattern: "researcher"`,
+-- (e.g. internal/promptrouter/catalog.go:165 resolves `Pattern: "researcher"`,
 -- internal/background/service.go:61 stamps `from_agent_id="background-job"`
 -- on envelopes). Without this migration, those slugs would not exist in
 -- agent_profiles between W2 merge and W4 merge.

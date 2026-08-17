@@ -1,11 +1,11 @@
-# Agent Reflex Catalog
+# Prompt Router Catalog
 
 **Source ticket:** CW-20260426-0017 (M3 — agent reflex wiring)
 **Date:** 2026-04-26
 **Complements:** `docs/agent-pattern-catalog.md` (M2), `internal/dispatch/role.go` (AssignRole)
 **Consumed by:** playbook runtime (CW-20260419-0027) — not yet implemented
 
-> **Not to be confused with:** `internal/agent/driftguard` (formerly `internal/agent/reflexes`), the unrelated FU-30 session-drift monitor that watches durable-agent token/cache/tool-call signals for runaway-loop patterns. Same root term, no shared code or lifecycle — disambiguated in CW-20260816-0062.
+> **Not to be confused with:** `internal/promptrouter` is the phrase-match dispatch router this doc describes; `internal/agent/reflexes` (under `internal/agent/`) is an unrelated system — the FU-30 predicate/event/interval steering engine for durable agents. It watches session-state signals (token usage, cache behavior, tool calls) and stages actions like `inject_reminder`/`halt_session`. Different system, different code, different lifecycle. (`internal/promptrouter` was previously named `internal/reflex`, renamed specifically to remove any naming collision with `internal/agent/reflexes` — the two no longer share a root word. `internal/agent/reflexes` itself was briefly named `internal/agent/driftguard` per CW-20260816-0062, then renamed back.)
 
 ---
 
@@ -31,7 +31,7 @@ RoleAssignment{Role, AgentSlug, Mode}
 
 **How it composes with ScopeTier (M1):** The M1 classifier emits a ScopeTier based on structural signals (message token count, attachments, tool count). A reflex may *narrow* or *override* the M1 hint — for example, a "review / assess" phrase forces `pattern=subagent` and profile=reviewer regardless of what M1 scored for size. M1 remains the authority on token-budget shape; M3 reflexes are the authority on *behavioral role* selection.
 
-**How it composes with the playbook runtime (CW-20260419-0027):** Reflexes are the *content layer* the playbook runtime will consume. When the runtime lands, it loads the built-in reflex set (via `reflex.BuiltinReflexes()` or equivalent YAML), runs the matcher against each user turn, and forwards the winning reflex's hints to the dispatch layer. This catalog defines what those reflexes say; the runtime defines how to evaluate and prioritize them. See the Integration Plan section below.
+**How it composes with the playbook runtime (CW-20260419-0027):** Reflexes are the *content layer* the playbook runtime will consume. When the runtime lands, it loads the built-in reflex set (via `promptrouter.BuiltinReflexes()` or equivalent YAML), runs the matcher against each user turn, and forwards the winning reflex's hints to the dispatch layer. This catalog defines what those reflexes say; the runtime defines how to evaluate and prioritize them. See the Integration Plan section below.
 
 ---
 
@@ -356,9 +356,9 @@ The following inputs should trigger the indicated reflex. These are functional t
 
 Deterministic routing for Conductor's directive vocabulary (`docs/architecture/conductor-console-design.md`, "Deterministic input middleware" section). Content only — the router/matcher itself was already live infrastructure before this set was authored.
 
-These four reflexes are **not** built-ins. They live as user-level YAML overrides at `~/.nanite/reflexes/*.yaml` (outside this repo, per the authoring guide's "start as user-level overrides for fast iteration" convention), each with `priority >= 65` — well above the `>= 50` floor documented in `docs/reflex-authoring.md`. This section documents them for reference; promote them into `internal/reflex/catalog.go` only once the rule set has stabilized against real usage.
+These four reflexes are **not** built-ins. They live as user-level YAML overrides at `~/.nanite/reflexes/*.yaml` (outside this repo, per the authoring guide's "start as user-level overrides for fast iteration" convention), each with `priority >= 65` — well above the `>= 50` floor documented in `docs/promptrouter-authoring.md`. This section documents them for reference; promote them into `internal/promptrouter/catalog.go` only once the rule set has stabilized against real usage.
 
-**Shared design choice:** all four leave `resolves_to.profile` empty and set `resolves_to.role: chat`. `profile` is the operationally load-bearing field — it becomes `ReflexHints.AgentSlug` in `internal/dispatch/execute.go`'s production path, and it's what `agentkit/broker.DeterministicBroker.Decide`'s Rule 1 checks (`ReflexAgentSlug != ""`) to force a synchronous subagent dispatch. Leaving it empty means a match never forces dispatch — the turn stays with the chat agent (Conductor), which performs the actual tool call (`memory_write`, `torque_task_create`, `torque_task_checkpoint_respond`, etc.) itself per its own system prompt. `role` is set to `chat` for schema correctness (the field `AssignRoleWithReflex`/`reflexFromString` reads) even though the current production dispatch path (`execute.go`) doesn't consult it — see `internal/reflex/dispatcher.go` for the (test-only, as of this writing) code path that does.
+**Shared design choice:** all four leave `resolves_to.profile` empty and set `resolves_to.role: chat`. `profile` is the operationally load-bearing field — it becomes `ReflexHints.AgentSlug` in `internal/dispatch/execute.go`'s production path, and it's what `agentkit/broker.DeterministicBroker.Decide`'s Rule 1 checks (`ReflexAgentSlug != ""`) to force a synchronous subagent dispatch. Leaving it empty means a match never forces dispatch — the turn stays with the chat agent (Conductor), which performs the actual tool call (`memory_write`, `torque_task_create`, `torque_task_checkpoint_respond`, etc.) itself per its own system prompt. `role` is set to `chat` for schema correctness (the field `AssignRoleWithReflex`/`reflexFromString` reads) even though the current production dispatch path (`execute.go`) doesn't consult it — see `internal/promptrouter/dispatcher.go` for the (test-only, as of this writing) code path that does.
 
 ### reflex: conductor-note-capture
 
@@ -386,7 +386,7 @@ Resolves to `pattern: chat`, `role: chat`, `mode_signal: execute`, priority 65. 
 
 ### Conductor reflex test cases
 
-Verified locally against the real `~/.nanite/reflexes/*.yaml` files (not synthetic fixtures) via a temporary manual test using `reflex.LoadUserReflexes("")` + `reflex.MergeReflexes(reflex.BuiltinReflexes(), user)` + `reflex.Match(...)`, then removed — not part of the committed suite.
+Verified locally against the real `~/.nanite/reflexes/*.yaml` files (not synthetic fixtures) via a temporary manual test using `promptrouter.LoadUserReflexes("")` + `promptrouter.MergeReflexes(promptrouter.BuiltinReflexes(), user)` + `promptrouter.Match(...)`, then removed — not part of the committed suite.
 
 | Input | Expected Reflex | Notes |
 |---|---|---|
@@ -430,7 +430,7 @@ The matcher is a cheap rule evaluator, not an LLM call. This matches the CW-2026
 
 ### Loading
 
-- **Built-in reflexes:** `internal/reflex/builtin/*.yaml` files loaded at startup, or equivalently the `reflex.BuiltinReflexes()` Go function in `internal/reflex/catalog.go`. The playbook runtime calls one of these; the Go literal is preferred for type safety and zero-dependency loading.
+- **Built-in reflexes:** `internal/promptrouter/builtin/*.yaml` files loaded at startup, or equivalently the `promptrouter.BuiltinReflexes()` Go function in `internal/promptrouter/catalog.go`. The playbook runtime calls one of these; the Go literal is preferred for type safety and zero-dependency loading.
 - **User overrides:** `~/.nanite/reflexes/*.yaml`, loaded after built-ins. User overrides with `priority >= 50` reliably beat all built-ins. Same schema; same loader.
 - **DB sync:** Optional — the playbook runtime may sync loaded reflexes to a `reflexes` table (similar to `playbooks` table in CW-20260419-0027) for match logging and telemetry.
 
@@ -449,7 +449,7 @@ The downstream flow remains: `dispatch.AssignRole` → `RoleAssignment` → `nan
 ### Handoff to playbook runtime
 
 When the playbook runtime ships:
-1. It calls `reflex.BuiltinReflexes()` (or loads `internal/reflex/builtin/*.yaml`) at boot.
+1. It calls `promptrouter.BuiltinReflexes()` (or loads `internal/promptrouter/builtin/*.yaml`) at boot.
 2. It runs `match(input, tier, pattern)` at the start of each user turn.
 3. On a reflex hit: extract `resolves_to` and `side_effects`; emit ScopeTier/Pattern hints and mode signal; call the dispatch layer with the profile slug.
 4. On a miss: fall through to the full playbook match (CW-20260419-0027 playbook library), then to AssignRole defaults.

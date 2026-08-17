@@ -1,4 +1,4 @@
-package driftguard
+package reflexes
 
 import (
 	"encoding/json"
@@ -362,7 +362,7 @@ func TestEvaluator_UserRegexWindow(t *testing.T) {
 
 func TestEvaluator_EntityMentionWindow(t *testing.T) {
 	st := State{UserMessages: []MessageSignal{
-		{Role: "user", Content: "Can you check NAN-128 and docs/reflex-authoring.md?"},
+		{Role: "user", Content: "Can you check NAN-128 and docs/promptrouter-authoring.md?"},
 	}}
 	got, err := EvaluateTrigger("predicate", `{"kind":"entity_mention_window","entity":"task_id","scope":"user","window":1}`, st)
 	if err != nil {

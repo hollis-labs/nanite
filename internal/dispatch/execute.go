@@ -77,22 +77,23 @@ type ExecuteTaskArgs struct {
 	WorkspaceID    string
 	AgentProfileID string
 
-	// ReflexHints carries pre-computed hints from the reflex matcher
-	// (internal/reflex). When non-nil, the tier and pattern hints
+	// ReflexHints carries pre-computed hints from the prompt router matcher
+	// (internal/promptrouter). When non-nil, the tier and pattern hints
 	// override the classifier output before AssignRole is called; the
 	// AgentSlug hint, when non-empty, overrides the AssignRole default
-	// slug. The reflex layer is always upstream of AssignRole — reflexes
-	// produce hints; AssignRole consumes them.
+	// slug. The prompt router layer is always upstream of AssignRole —
+	// reflexes produce hints; AssignRole consumes them.
 	//
 	// nil means "no reflex matched; use classifier output as-is".
 	ReflexHints *ReflexHints
 }
 
 // ReflexHints carries the dispatch-layer projection of a reflex match result.
-// It avoids a direct import of internal/reflex from internal/dispatch (which
-// would create a cycle, since internal/reflex imports internal/dispatch).
-// The MCP layer (internal/mcp/self_tools_dispatch.go) constructs this struct
-// from a reflex.ReflexMatch and passes it through ExecuteTaskArgs.
+// It avoids a direct import of internal/promptrouter from internal/dispatch
+// (which would create a cycle, since internal/promptrouter imports
+// internal/dispatch). The MCP layer (internal/mcp/self_tools_dispatch.go)
+// constructs this struct from a promptrouter.ReflexMatch and passes it
+// through ExecuteTaskArgs.
 type ReflexHints struct {
 	// HintTier overrides the M1 classifier ScopeTier when non-zero.
 	HintTier classify.ScopeTier

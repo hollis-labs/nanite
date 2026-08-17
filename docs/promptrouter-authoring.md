@@ -1,11 +1,11 @@
 # Reflex Authoring Guide
 
-**Package:** `internal/reflex`
-**Content layer:** `internal/reflex/catalog.go` (built-ins), `~/.nanite/reflexes/*.yaml` (user overrides)
-**Consumed by:** playbook runtime dispatcher (`internal/reflex/dispatcher.go`)
-**Reference:** `docs/agent-reflex-catalog.md` — canonical schema, v1 reflex set, test cases
+**Package:** `internal/promptrouter`
+**Content layer:** `internal/promptrouter/catalog.go` (built-ins), `~/.nanite/reflexes/*.yaml` (user overrides)
+**Consumed by:** playbook runtime dispatcher (`internal/promptrouter/dispatcher.go`)
+**Reference:** `docs/promptrouter-catalog.md` — canonical schema, v1 reflex set, test cases
 
-> **Not to be confused with:** `internal/agent/driftguard` (formerly `internal/agent/reflexes`), the unrelated FU-30 session-drift monitor. See the note in `docs/agent-reflex-catalog.md` — disambiguated in CW-20260816-0062.
+> **Not to be confused with:** `internal/promptrouter` (this doc's subject) is the phrase-match dispatch router described below; `internal/agent/reflexes` is an unrelated system — the predicate/event/interval steering engine for durable agents. Different system, different code, different lifecycle. (`internal/promptrouter` was previously named `internal/reflex`; it was renamed specifically to remove any naming collision with `internal/agent/reflexes`, so the two no longer share a root word.) See the note in `docs/promptrouter-catalog.md`.
 
 ---
 
@@ -90,7 +90,7 @@ Tier ordering (smallest to largest): `trivial < small < medium < large < open`.
 ## Loader behavior
 
 On every startup, the harness:
-1. Loads built-in reflexes from `reflex.BuiltinReflexes()`.
+1. Loads built-in reflexes from `promptrouter.BuiltinReflexes()`.
 2. Globs `~/.nanite/reflexes/*.yaml` and parses each file.
 3. Merges both sets, sorted descending by priority.
 4. Wires the merged set into `SelfToolsTransport.ReflexSet`.
@@ -108,7 +108,7 @@ nanite_execute_task tool call
 callExecuteTask (internal/mcp/self_tools_dispatch.go)
     │
     ├── classify.Classify(message) → m1Tier, m1Pattern
-    ├── reflex.Match(message, m1Tier, m1Pattern, ReflexSet) → ReflexMatch, bool
+    ├── promptrouter.Match(message, m1Tier, m1Pattern, ReflexSet) → ReflexMatch, bool
     │       (phrase-match loop over merged reflex set)
     │
     ├── on match: build dispatch.ReflexHints; log to playbook_match_log
@@ -123,7 +123,7 @@ dispatch.ExecuteTask(ctx, spawner, wrapper, ExecuteTaskArgs{ReflexHints: ...})
 spawner.Spawn(...)
 ```
 
-The dispatcher (`internal/reflex/dispatcher.go`) also exposes `AssignRoleWithReflex` for callers that want a single-call integration without going through `ExecuteTask`.
+The dispatcher (`internal/promptrouter/dispatcher.go`) also exposes `AssignRoleWithReflex` for callers that want a single-call integration without going through `ExecuteTask`.
 
 ---
 
@@ -148,18 +148,18 @@ priority: 60
 EOF
 
 # Run the Go tests to confirm matcher picks it up.
-go test ./internal/reflex/... -v -run TestLoader
+go test ./internal/promptrouter/... -v -run TestLoader
 ```
 
 ---
 
 ## See also
 
-- `docs/agent-reflex-catalog.md` — canonical v1 reflex set with rationale
+- `docs/promptrouter-catalog.md` — canonical v1 reflex set with rationale
 - `docs/agent-pattern-catalog.md` — pattern slug definitions
-- `internal/reflex/catalog.go` — Go literal built-in set
-- `internal/reflex/matcher.go` — matcher implementation
-- `internal/reflex/dispatcher.go` — dispatch integration + MergeReflexes
-- `internal/reflex/loader.go` — YAML loader
+- `internal/promptrouter/catalog.go` — Go literal built-in set
+- `internal/promptrouter/matcher.go` — matcher implementation
+- `internal/promptrouter/dispatcher.go` — dispatch integration + MergeReflexes
+- `internal/promptrouter/loader.go` — YAML loader
 - `internal/store/migrations/032_playbook_match_log.sql` — match log table
 - `internal/store/migrations/093_playbook_match_log_raw_sent_text.sql` — adds `raw_input_text`/`sent_input_text` audit columns (CW-20260816-0068); populated only when a pre-dispatch rewrite changed the text

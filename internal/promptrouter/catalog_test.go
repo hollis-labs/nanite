@@ -1,9 +1,9 @@
-package reflex_test
+package promptrouter_test
 
 import (
 	"testing"
 
-	"github.com/hollis-labs/nanite/internal/reflex"
+	"github.com/hollis-labs/nanite/internal/promptrouter"
 )
 
 // knownPatterns are the valid pattern slugs from docs/agent-pattern-catalog.md.
@@ -31,7 +31,7 @@ var knownRoles = map[string]bool{
 //   - has at least one trigger phrase
 //   - has a unique ID within the set
 func TestBuiltinReflexes_Schema(t *testing.T) {
-	reflexes := reflex.BuiltinReflexes()
+	reflexes := promptrouter.BuiltinReflexes()
 	if len(reflexes) == 0 {
 		t.Fatal("BuiltinReflexes returned empty set")
 	}
@@ -60,7 +60,7 @@ func TestBuiltinReflexes_Schema(t *testing.T) {
 
 // TestBuiltinReflexes_Priority verifies that priorities are in range [0,100].
 func TestBuiltinReflexes_Priority(t *testing.T) {
-	for _, r := range reflex.BuiltinReflexes() {
+	for _, r := range promptrouter.BuiltinReflexes() {
 		if r.Priority < 0 || r.Priority > 100 {
 			t.Errorf("reflex %q: priority %d out of range [0,100]", r.ID, r.Priority)
 		}
@@ -71,7 +71,7 @@ func TestBuiltinReflexes_Priority(t *testing.T) {
 // built-in entries. Update this number when adding or removing entries.
 func TestBuiltinReflexes_Count(t *testing.T) {
 	const wantMin = 5
-	got := len(reflex.BuiltinReflexes())
+	got := len(promptrouter.BuiltinReflexes())
 	if got < wantMin {
 		t.Errorf("BuiltinReflexes: got %d entries, want at least %d", got, wantMin)
 	}
@@ -107,7 +107,7 @@ var dispatchableProfileSlugs = map[string]bool{
 // under internal/agent/builtin/profiles/ AND extend dispatchableProfileSlugs
 // above.
 func TestBuiltinReflexes_ProfileResolves(t *testing.T) {
-	for _, r := range reflex.BuiltinReflexes() {
+	for _, r := range promptrouter.BuiltinReflexes() {
 		if !dispatchableProfileSlugs[r.ResolvesTo.Profile] {
 			t.Errorf("reflex %q: Profile %q is not a seeded agent profile slug — "+
 				"dispatch will fail at runtime. Either ship the agent profile or "+

@@ -1,17 +1,30 @@
-// Package reflex defines the M3 agent reflex catalog: deterministic
-// mappings from user-input patterns to agent behavior selections.
+// Package promptrouter is the M3 deterministic phrase-match dispatch
+// router: it maps substrings of the user's raw prompt text to an agent
+// pattern/role/profile selection, upstream of dispatch.AssignRole. Pure
+// substring matching against the Reflex catalog defined here — no LLM
+// calls, no session-state evaluation.
 //
-// A reflex is consumed by the playbook runtime (CW-20260419-0027) which
-// is not yet implemented. This package exposes the content layer only —
-// the Reflex struct, the BuiltinReflexes set, and no matcher logic.
+// Previously named internal/reflex, renamed to remove any naming
+// collision with internal/agent/reflexes — an unrelated package (the
+// FU-30 predicate/event/interval steering engine for durable agents,
+// which evaluates session-state signals like token usage and tool calls
+// and stages actions such as inject_reminder/halt_session). Different
+// system, different code, different lifecycle; the two no longer share a
+// root word at all, which was the point of this rename.
+//
+// A Reflex is consumed by the playbook runtime (CW-20260419-0027) which
+// is not yet implemented. This package exposes the content layer —
+// the Reflex struct, the BuiltinReflexes set — plus the matcher
+// (matcher.go), dispatcher integration (dispatcher.go), and user-override
+// loader (loader.go).
 //
 // Integration path: when the playbook runtime lands it calls
 // BuiltinReflexes() at boot, runs its phrase-match loop, and forwards the
 // winning reflex's ScopeTier/ExecutionPattern hints to dispatch.AssignRole.
 //
-// See docs/agent-reflex-catalog.md for the full schema documentation and
+// See docs/promptrouter-catalog.md for the full schema documentation and
 // integration plan.
-package reflex
+package promptrouter
 
 import "github.com/hollis-labs/nanite/internal/classify"
 
@@ -98,7 +111,7 @@ type Reflex struct {
 // (from ~/.nanite/reflexes/) are merged after with user entries taking
 // precedence for equal or higher priority.
 //
-// Schema documentation: docs/agent-reflex-catalog.md
+// Schema documentation: docs/promptrouter-catalog.md
 // Pattern catalog:      docs/agent-pattern-catalog.md
 // Role constants:       internal/dispatch/role.go (RoleWorker, RolePlanner)
 // ScopeTier constants:  internal/classify/scope.go

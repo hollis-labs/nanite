@@ -21,7 +21,7 @@ import (
 	"github.com/hollis-labs/go-providers/provider"
 	"github.com/hollis-labs/nanite/internal/agent"
 	"github.com/hollis-labs/nanite/internal/agent/builtin"
-	"github.com/hollis-labs/nanite/internal/agent/driftguard"
+	"github.com/hollis-labs/nanite/internal/agent/reflexes"
 	"github.com/hollis-labs/nanite/internal/agentregistry"
 	"github.com/hollis-labs/nanite/internal/background"
 	"github.com/hollis-labs/nanite/internal/bootprofile"
@@ -913,7 +913,7 @@ func NewContainer(cfg ContainerConfig) (*Container, error) {
 	// reminders / forced tool choices. Plugin hooks (nil-safe) let plugins
 	// rewrite reflex state/actions; the Halt executor marks the session
 	// halted + logs the event when a reflex resolves to halt_session.
-	reflexEngine := driftguard.NewEngine(cfg.Store, slog.Default())
+	reflexEngine := reflexes.NewEngine(cfg.Store, slog.Default())
 	if cfg.Plugins != nil {
 		reflexEngine.SetPluginHooks(cfg.Plugins)
 	}
@@ -929,10 +929,24 @@ func NewContainer(cfg ContainerConfig) (*Container, error) {
 		cfg.Store.LogEvent(sessionID, "session_halted", "reflex", "reflex-fired halt", string(metaBlob))
 		return nil
 	}
-	if n, err := driftguard.SeedBaseReflexes(context.Background(), cfg.Store, slog.Default()); err != nil {
+	if n, err := reflexes.SeedBaseReflexes(context.Background(), cfg.Store, slog.Default()); err != nil {
 		slog.Warn("service container: reflex base-seed", "err", err)
 	} else if n > 0 {
 		slog.Info("service container: seeded base reflexes", "count", n)
+	}
+	// CW-20260816-0023: Loom Curator/Weaver pilot reflex pair
+	// (check_before_answer, capture_on_discovery). AgentID-scoped, so it
+	// must run after agent.Discover + ReconcileManagedAgentIDs +
+	// AutoIngestAgents (above, ~line 399-469) have resolved Curator's/
+	// Weaver's real agent_profiles.id from .nanite/agents/*.md — this is
+	// the same "earliest point the ID is known" boot spot
+	// syncManagedDurableAgentConfig uses for CW-20260816-0021's schedule
+	// seeding. A seed whose target isn't ingested yet is skipped with a
+	// warning (not fatal) and picked up on a later boot once it is.
+	if n, err := reflexes.SeedAgentReflexesBySlug(context.Background(), cfg.Store, reflexes.LoomPilotReflexSeeds(), slog.Default()); err != nil {
+		slog.Warn("service container: loom pilot reflex seed", "err", err)
+	} else if n > 0 {
+		slog.Info("service container: seeded loom pilot reflexes", "count", n)
 	}
 
 	// Phase 4c.1 (CW-20260508-0002): construct *agent.Dependencies +

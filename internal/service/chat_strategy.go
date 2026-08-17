@@ -6,7 +6,7 @@ import (
 
 	"github.com/hollis-labs/nanite/internal/classify"
 	"github.com/hollis-labs/nanite/internal/grounding"
-	"github.com/hollis-labs/nanite/internal/reflex"
+	"github.com/hollis-labs/nanite/internal/promptrouter"
 	"github.com/hollis-labs/nanite/internal/strategy"
 )
 
@@ -53,17 +53,17 @@ func planStrategyForTurn(
 	sessionID, turnID, userContent string,
 	scopeTier classify.ScopeTier,
 	executionPattern classify.ExecutionPattern,
-	reflexSet []reflex.Reflex,
+	reflexSet []promptrouter.Reflex,
 	groundingResult *grounding.GroundingResult,
 	logger strategyDecisionLogger,
 ) strategy.Strategy {
 	if reflexSet == nil {
-		reflexSet = reflex.BuiltinReflexes()
+		reflexSet = promptrouter.BuiltinReflexes()
 	}
 
 	// 1. Reflex match — best-effort. A miss is the common case.
 	var reflexSignal *strategy.ReflexSignal
-	if match, ok := reflex.Match(userContent, scopeTier, executionPattern, reflexSet); ok {
+	if match, ok := promptrouter.Match(userContent, scopeTier, executionPattern, reflexSet); ok {
 		reflexSignal = &strategy.ReflexSignal{
 			ReflexID:    match.Reflex.ID,
 			HintTier:    match.HintTier,

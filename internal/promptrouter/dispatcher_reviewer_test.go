@@ -1,11 +1,11 @@
-package reflex_test
+package promptrouter_test
 
 import (
 	"testing"
 
 	"github.com/hollis-labs/nanite/internal/classify"
 	"github.com/hollis-labs/nanite/internal/dispatch"
-	"github.com/hollis-labs/nanite/internal/reflex"
+	"github.com/hollis-labs/nanite/internal/promptrouter"
 )
 
 // TestAssignRoleWithReflex_ReviewerMention_ResolvesToReviewerProfile is the
@@ -14,8 +14,8 @@ import (
 // (internal/agent/builtin/profiles/reviewer.md), not silently fall back to
 // Worker the way the stale catalog entry used to.
 func TestAssignRoleWithReflex_ReviewerMention_ResolvesToReviewerProfile(t *testing.T) {
-	merged := reflex.MergeReflexes(reflex.BuiltinReflexes(), nil)
-	assignment := reflex.AssignRoleWithReflex(
+	merged := promptrouter.MergeReflexes(promptrouter.BuiltinReflexes(), nil)
+	assignment := promptrouter.AssignRoleWithReflex(
 		"review this",
 		classify.TierSmall,
 		classify.PatternInline,
@@ -37,8 +37,8 @@ func TestAssignRoleWithReflex_ReviewerMention_ResolvesToReviewerProfile(t *testi
 // gained a real profile (internal/agent/builtin/profiles/researcher.md) in
 // the same CW-20260815-0002 fix.
 func TestAssignRoleWithReflex_ResearcherMention_ResolvesToResearcherProfile(t *testing.T) {
-	merged := reflex.MergeReflexes(reflex.BuiltinReflexes(), nil)
-	assignment := reflex.AssignRoleWithReflex(
+	merged := promptrouter.MergeReflexes(promptrouter.BuiltinReflexes(), nil)
+	assignment := promptrouter.AssignRoleWithReflex(
 		"research the competitive landscape",
 		classify.TierSmall,
 		classify.PatternInline,

@@ -23,7 +23,7 @@ import (
 	"github.com/hollis-labs/nanite/internal/grounding"
 	"github.com/hollis-labs/nanite/internal/learnings"
 	"github.com/hollis-labs/nanite/internal/messaging"
-	"github.com/hollis-labs/nanite/internal/reflex"
+	"github.com/hollis-labs/nanite/internal/promptrouter"
 	"github.com/hollis-labs/nanite/internal/reminders"
 	"github.com/hollis-labs/nanite/internal/service/install"
 	"github.com/hollis-labs/nanite/internal/store"
@@ -156,11 +156,11 @@ type SelfToolsTransport struct {
 	// by the E1 reflex matcher (CW-20260419-0027). Set post-construction
 	// from the startup wiring (see internal/service or cmd/nanite). When
 	// nil, reflex matching is skipped and the dispatch path is unchanged.
-	ReflexSet []reflex.Reflex
+	ReflexSet []promptrouter.Reflex
 	// ReflexLogger persists reflex match events to playbook_match_log.
 	// Set post-construction; nil disables match logging (matching still
 	// runs and influences dispatch). *store.Store satisfies this interface.
-	ReflexLogger reflex.MatchLogger
+	ReflexLogger promptrouter.MatchLogger
 
 	// PythonPermChecker is the permission engine used by python_run
 	// to validate tool calls made from inside the Python sandbox.

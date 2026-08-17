@@ -6,7 +6,7 @@
 **Target (backport-to):** `/Users/chrispian/dev/hollis-labs/apps/nanite`
 **Authority rule:** Nanite mainline is authoritative. This audit does not propose
 reverting nanite-only work (subagent checkpoint/resume, file-SOT profile cleanup,
-managed-agent editability Phase 1/2, `meta_harnesses`, `internal/reflex` M3 catalog).
+managed-agent editability Phase 1/2, `meta_harnesses`, `internal/promptrouter` M3 catalog — named `internal/reflex` at audit time, since renamed).
 **Plan of record:** `agridd/docs/nanite-backport-plan.md`.
 
 ---
@@ -47,8 +47,9 @@ Whole agridd-only packages: `internal/agent/reflexes`, `internal/agent/skills`,
 importers in agridd.)
 
 Nanite-only packages confirming independent forward motion:
-`internal/reflex` (M3 input-pattern→role dispatch catalog — **different concept**,
-do not conflate with the reflex engine), `internal/subagent` (retry/audit/resume).
+`internal/promptrouter` (M3 input-pattern→role dispatch catalog, named
+`internal/reflex` at audit time — **different concept**, do not conflate with
+the reflex engine), `internal/subagent` (retry/audit/resume).
 
 ---
 
@@ -60,9 +61,11 @@ evaluation over a windowed session snapshot, action dispatch (inject_reminder /
 halt_session / force_tool_choice / add_schedule / send_message), and base-reflex
 seeding. It is invoked **per chat turn** (not by a background monitor loop).
 
-> ⚠️ Naming collision: nanite's `internal/reflex/` is an **unrelated** M3
-> "playbook" catalog that maps user-input phrases to dispatch roles. It is NOT
-> the engine. The engine belongs under `internal/agent/reflexes/`.
+> ⚠️ Naming collision (at audit time): nanite's `internal/reflex/` — since
+> renamed to `internal/promptrouter/` specifically to remove this collision —
+> is an **unrelated** M3 "playbook" catalog that maps user-input phrases to
+> dispatch roles. It is NOT the engine. The engine belongs under
+> `internal/agent/reflexes/`.
 
 ### Files to backport (the engine itself)
 
@@ -102,18 +105,22 @@ hook additions + container/chat wiring. Everything store-side is already in plac
 1. Add plugin reflex filter constants (`plugin/filter.go`) + emit methods
    (`plugin/events.go`). Smallest, no dependents-break risk.
 2. Copy `internal/agent/reflexes/` (all 6 impl files + 4 tests) verbatim from
-   agridd into nanite's `internal/agent/driftguard/` — imports already
-   resolve (`internal/store`, `internal/plugin`). (Path updated 2026-08-16:
-   this backport landed and was subsequently renamed from
-   `internal/agent/reflexes` to `internal/agent/driftguard` on the nanite
-   side, CW-20260816-0062, to resolve a collision with `internal/reflex`.)
+   agridd into nanite's `internal/agent/reflexes/` — imports already
+   resolve (`internal/store`, `internal/plugin`). (Naming note: this package
+   was briefly renamed to `internal/agent/driftguard` per CW-20260816-0062
+   to resolve a collision with `internal/reflex` (nanite's separate,
+   unrelated phrase-match dispatch router, since renamed to
+   `internal/promptrouter` to remove the collision entirely), then renamed
+   back to `internal/agent/reflexes` to match the surrounding domain
+   vocabulary — `agent_reflexes`/`pending_reflexes` tables,
+   `/api/agents/{id}/reflexes`.)
 3. Copy `internal/service/chat_reflexes.go`.
 4. Wire in `service/container.go`: build engine, set `Executor.Halt` →
    `store.MarkSessionHalted` + event log, `SetPluginHooks(cfg.Plugins)`,
    `SeedBaseReflexes`, thread `ReflexEngine` onto the chat-service config.
 5. Add `reflexEngine` field to chat service + the per-turn call site in
    `chat_generate.go`.
-6. Run `go test ./internal/agent/driftguard ./internal/service ./internal/store`.
+6. Run `go test ./internal/agent/reflexes ./internal/service ./internal/store`.
 
 **Size: M.** Mechanical (substrate exists), but touches three hot files
 (container.go, chat.go, chat_generate.go) so it needs careful placement +
@@ -198,13 +205,15 @@ already exists in nanite — backport them as added coverage (S), not as new fea
 
 ## Unclear — Needs Operator Decision
 
-1. **Reflex engine scope vs nanite's `internal/reflex` M3 catalog.** Are these
-   meant to coexist (engine = runtime durable-agent reflexes; M3 = input→role
-   dispatch), or did nanite intend `internal/reflex` to *replace* the engine?
-   The plan lists "per-agent capability CRUD… reflexes" under What Comes Over,
-   which implies the engine *is* in scope — but nanite shipped a same-named,
-   different-purpose package. **Recommend: backport the engine as
-   `internal/agent/reflexes/` (distinct path), leave `internal/reflex/` alone.**
+1. **Reflex engine scope vs nanite's `internal/reflex` M3 catalog (since
+   renamed to `internal/promptrouter`).** Are these meant to coexist
+   (engine = runtime durable-agent reflexes; M3 = input→role dispatch), or
+   did nanite intend `internal/reflex` to *replace* the engine? The plan
+   lists "per-agent capability CRUD… reflexes" under What Comes Over, which
+   implies the engine *is* in scope — but nanite shipped a same-named (at
+   the time), different-purpose package. **Recommend: backport the engine
+   as `internal/agent/reflexes/` (distinct path), leave
+   `internal/promptrouter/` alone.**
 
 2. **`internal/mcp/args_normalize.go`** — defensive tool-arg canonicalization,
    wired into agridd `mcp/manager.go`. Not in plan. Useful hardening, low risk.
@@ -275,14 +284,15 @@ which is why the offset begins at +3.
 The only product gap is the reflex engine; everything else excluded matches plan
 intent. Suggested order:
 
-1. **(operator decision)** Confirm reflex-engine scope vs `internal/reflex`
-   (Unclear #1). Assuming yes:
+1. **(operator decision)** Confirm reflex-engine scope vs `internal/promptrouter`
+   (formerly `internal/reflex`; Unclear #1). Assuming yes:
 2. **Plugin hooks** — add `FilterReflexState`/`FilterReflexAction` to
    `plugin/filter.go`; add `EmitReflex*` to `plugin/events.go`. *(S, no risk)*
 3. **Reflex engine package** — copy `internal/agent/reflexes/` (impl + tests)
-   into nanite's `internal/agent/driftguard/` (path updated 2026-08-16 per
-   CW-20260816-0062 — see the note in the "Recommended backport order for
-   the engine" section above). Imports resolve against existing nanite
+   into nanite's `internal/agent/reflexes/` (see the naming note in the
+   "Recommended backport order for the engine" section above — the package
+   was briefly renamed `internal/agent/driftguard` per CW-20260816-0062,
+   then renamed back). Imports resolve against existing nanite
    `store`/`plugin`. *(M)*
 4. **Per-turn glue** — copy `internal/service/chat_reflexes.go`. *(S)*
 5. **Container + chat wiring** — engine construction, `Executor.Halt` →
@@ -293,7 +303,7 @@ intent. Suggested order:
    `store/agent_runtime_test.go`, `service/agent_cycles_test.go`. *(S)*
 7. **(operator decision)** Optionally bring `mcp/args_normalize.go` (Unclear #2)
    and/or the Torque-hardening reapers (Unclear #3).
-8. **Verify:** `go test -count=1 ./internal/agent/driftguard ./internal/service
+8. **Verify:** `go test -count=1 ./internal/agent/reflexes ./internal/service
    ./internal/store ./internal/plugin`.
 
 **Do NOT backport:** `monitor`, `probes`, `composer`, `relay`, `agentdb`,

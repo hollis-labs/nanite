@@ -124,9 +124,9 @@ type PlanInput struct {
 	ScopeTier        classify.ScopeTier
 	ExecutionPattern classify.ExecutionPattern
 
-	// ReflexMatch is the matched reflex from internal/reflex, or nil.
+	// ReflexMatch is the matched reflex from internal/promptrouter, or nil.
 	// We keep the type indirect (an *opaque struct) to avoid an import
-	// cycle later if reflex grows; v1 only reads ID + ExecutionPattern
+	// cycle later if promptrouter grows; v1 only reads ID + ExecutionPattern
 	// hint.
 	ReflexMatch *ReflexSignal
 
@@ -137,9 +137,9 @@ type PlanInput struct {
 }
 
 // ReflexSignal is the strategy package's local view of a reflex match.
-// Populated by the caller from internal/reflex.ReflexMatch — kept
-// separate so the strategy package does not import reflex (it's a leaf
-// dependency consumer pattern).
+// Populated by the caller from internal/promptrouter.ReflexMatch — kept
+// separate so the strategy package does not import promptrouter (it's a
+// leaf dependency consumer pattern).
 type ReflexSignal struct {
 	// ReflexID is the matched reflex ID.
 	ReflexID string

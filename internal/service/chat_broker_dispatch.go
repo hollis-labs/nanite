@@ -40,7 +40,7 @@ import (
 	agentbroker "github.com/hollis-labs/agentkit/broker"
 	"github.com/hollis-labs/nanite/internal/chat"
 	"github.com/hollis-labs/nanite/internal/classify"
-	"github.com/hollis-labs/nanite/internal/reflex"
+	"github.com/hollis-labs/nanite/internal/promptrouter"
 	"github.com/hollis-labs/nanite/internal/store"
 )
 
@@ -353,8 +353,8 @@ func (s *chatServiceImpl) attemptBrokerDispatch(
 // rule set.
 //
 // The projection composes the same primitives the chat-loop strategy
-// path consumes (classify.ClassifyMode + classify.Classify + reflex.Match
-// over reflex.BuiltinReflexes). It does NOT consult a session-mode
+// path consumes (classify.ClassifyMode + classify.Classify + promptrouter.Match
+// over promptrouter.BuiltinReflexes). It does NOT consult a session-mode
 // pointer — SessionMode is the workspace persistent mode and the
 // deterministic v1 broker keys off the per-turn classified mode (see
 // CW-20260509-0045 implementer report §"Distinct Mode vs SessionMode").
@@ -397,12 +397,12 @@ func (s *chatServiceImpl) buildBrokerInput(userContent string, ls *loopState) ag
 	// builtin set here is sufficient for the broker's decision input;
 	// the dispatch CALL gets the merged set's enrichment.
 	tier, pattern := classifyForReflex(ls)
-	if match, ok := reflex.Match(userContent, tier, pattern, reflex.BuiltinReflexes()); ok {
+	if match, ok := promptrouter.Match(userContent, tier, pattern, promptrouter.BuiltinReflexes()); ok {
 		in.ReflexMatchID = match.Reflex.ID
 		in.ReflexAgentSlug = match.Reflex.ResolvesTo.Profile
 		in.ReflexConfidence = float64(match.Reflex.Priority) / 100.0
 		// Priority is documented as a 0-100 integer in
-		// docs/agent-reflex-catalog.md; projecting via /100 gives the
+		// docs/promptrouter-catalog.md; projecting via /100 gives the
 		// broker's [0, 1] confidence band a meaningful stand-in until
 		// reflex catalog entries grow per-match confidence (tracked
 		// follow-up in the v0.2.0 release notes — "Rule 5 confidence

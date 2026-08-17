@@ -1,0 +1,50 @@
+name: Loom Curator
+slug: loom-curator
+profile_slug: loom-curator
+lifecycle_class: process
+provider: anthropic
+model: claude-sonnet-4-20250514
+runtime_kind: api
+launch_source_type: process_tick
+metadata:
+  scope: nanite-wiki
+  owner: hollis-labs
+  # CW-20260816-0021: Curator now also has a real, DB-backed agent_schedules
+  # row (seeded from the structured `schedule:` block below by
+  # syncManagedDurableAgentConfig, internal/service/managed_durable_configs.go)
+  # in addition to the fire-and-forget wake-on-compile path (CW-20260816-0020).
+  # This `schedule` metadata value stays a descriptive label only — not
+  # machine-parsed, kept for operator-facing readability alongside Atlas
+  # Curator's equivalent `schedule: nightly` label.
+  schedule: wake-triggered-plus-nightly-lint-and-export-tick
+  primary_inputs: fragments_engine_callback,loom_compile_api,loom_bundle_conformance,loom_export_bundle
+
+# CW-20260816-0021: Curator's own periodic sweep of the `nanite` bundle —
+# structural lint (loom_bundle_conformance) then OKF export regeneration
+# (loom_export_bundle). Seeded as a real agent_schedules row (keyed by this
+# instance's resolved profile ID) by syncManagedDurableAgentConfig at boot;
+# picked up by the self-hosted wake tick (CW-20260816-0005,
+# durable-agent-wake-tick in cmd/nanite/main.go) every 2 minutes once due.
+#
+# Cadence: daily at 03:00, mirroring Atlas Curator's "nightly" precedent
+# (loom-architecture.md §7). The pilot is scoped to exactly one bundle
+# (§10) with no urgency driving a tighter interval — lint findings and a
+# stale OKF export directory are low-cost to leave until the next night,
+# and a once-daily cadence avoids re-flooding Fragments Engine's inbox
+# with the same below-threshold findings on every sync. 03:00 is chosen as
+# an off-hours slot unlikely to collide with active daytime use of the
+# wiki bundle or its OKF export.
+schedule:
+  name: lint-and-export
+  kind: cron
+  spec: "0 3 * * *"
+  body: |
+    Run your scheduled_lint_and_export procedure now: sweep the `nanite`
+    wiki bundle only (loom-architecture.md §10 — never touch any other
+    bundle). Call loom_bundle_conformance scoped to bundle=nanite for
+    structural lint. For any finding below the confidence threshold, do
+    not fix or drop it silently — route it into Fragments Engine's inbox
+    for review via relay_*/message_*, the same mechanism
+    write_or_stage_page already uses for staged pages. Then call
+    loom_export_bundle scoped to bundle=nanite to regenerate the bundle's
+    OKF export directory from current wiki_pages rows.

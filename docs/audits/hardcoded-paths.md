@@ -48,7 +48,7 @@
 | `internal/truncate/truncate.go:111` | `filepath.Join(home, ".nanite", "tool-output")` | `runtime-derived` | **Keep.** | |
 | `internal/toolclient/skills.go:235` | `filepath.Join(home, DefaultSkillsDir)` | `runtime-derived` | **Keep.** | |
 | `internal/tool/yaml_loader.go:57` | `filepath.Join(home, ".nanite", "tools")` | `runtime-derived` | **Keep.** | |
-| `internal/reflex/loader.go:61` | `filepath.Join(home, ".nanite", "reflexes")` | `runtime-derived` | **Keep.** | |
+| `internal/promptrouter/loader.go:61` | `filepath.Join(home, ".nanite", "reflexes")` | `runtime-derived` | **Keep.** | |
 | `internal/brand/brand.go:58` | `filepath.Join(home, "."+ID)` | `runtime-derived` | **Keep.** | Single source of truth for brand-namespaced home. |
 | `cmd/nanite/plugin_logs.go:21` | `filepath.Join(home, "plugin-logs", id+".stderr.log")` | `runtime-derived` | **Note.** Could move under `.nanite/plugin-logs` for namespacing, but out-of-scope for this ticket. | |
 | `cmd/nanite/plugin_install_flow.go:39,50` | `filepath.Join(home, "plugin-staging")`, `"plugin-catalog"` | `runtime-derived` | **Note.** Same observation — could move under `.nanite/`. Out-of-scope. | |

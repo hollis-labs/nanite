@@ -1,3 +1,10 @@
+-- migrate:skip-if-column-exists subagent_runs last_activity_at
+--
+-- CW-20260817: see migration 019's identical header for the full
+-- explanation. This migration also recreates subagent_runs from its own
+-- (2026-era) column set — once a database already has 092's
+-- last_activity_at column, this rebuild is fully superseded and skipped.
+--
 -- CW-20260519-0074 — subagent run status taxonomy.
 --
 -- Widens the subagent_runs.status CHECK constraint to admit the new

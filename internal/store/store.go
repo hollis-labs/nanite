@@ -95,8 +95,35 @@ func (s *Store) migrate() error {
 		if err != nil {
 			return fmt.Errorf("read migration %s: %w", f, err)
 		}
+		text := string(data)
 
-		statements := splitSQL(string(data))
+		// migrate:skip-if-column-exists lets a "recreate the table" migration
+		// (SQLite can't ALTER a CHECK constraint, so widening one means
+		// dropping/rebuilding the whole table — see migrations 019/065/067)
+		// skip itself once its target table has already moved past it.
+		// Without this, such a migration blindly rebuilds the table from its
+		// OWN historical, narrower column/CHECK set on every single boot (no
+		// schema_migrations table in this codebase — every file re-runs every
+		// time), silently dropping any column a later migration already added
+		// and resetting it to that later migration's default, and potentially
+		// hard-failing outright if live data already carries a status value
+		// only a later migration's CHECK permits (CW-20260817: subagent_runs
+		// crash-looped on a real 'stalled' row against migration 019's
+		// original 7-value CHECK once the reaper started using values 065
+		// added). On a genuinely fresh database the marker column doesn't
+		// exist yet, so this is a no-op and the migration runs exactly as
+		// before.
+		if table, column, ok := migrationSkipIfColumnDirective(text); ok {
+			exists, err := columnExists(ctx, conn, table, column)
+			if err != nil {
+				return fmt.Errorf("check skip-if-column-exists for %s: %w", f, err)
+			}
+			if exists {
+				continue
+			}
+		}
+
+		statements := splitSQL(text)
 		for _, stmt := range statements {
 			stmt = strings.TrimSpace(stmt)
 			if stmt == "" {
@@ -139,6 +166,62 @@ func (s *Store) migrate() error {
 		}
 	}
 	return nil
+}
+
+// migrateSkipIfColumnDirective is the leading-comment marker a migration
+// file can carry to opt into the skip-if-column-exists check in migrate().
+// Must be the file's first line, exactly: "-- migrate:skip-if-column-exists
+// <table> <column>".
+const migrateSkipIfColumnDirective = "-- migrate:skip-if-column-exists "
+
+// migrationSkipIfColumnDirective parses the directive described above from
+// a migration file's contents. Returns ok=false if the file doesn't start
+// with the marker.
+func migrationSkipIfColumnDirective(text string) (table, column string, ok bool) {
+	first, _, _ := strings.Cut(text, "\n")
+	first = strings.TrimSpace(first)
+	if !strings.HasPrefix(first, migrateSkipIfColumnDirective) {
+		return "", "", false
+	}
+	fields := strings.Fields(strings.TrimPrefix(first, migrateSkipIfColumnDirective))
+	if len(fields) != 2 {
+		return "", "", false
+	}
+	return fields[0], fields[1], true
+}
+
+// columnExists reports whether table has a column named column, via
+// PRAGMA table_info (SQLite has no parameterized form of PRAGMA, so table
+// is interpolated directly — it only ever comes from this package's own
+// embedded migration files today, but quoteIdentifier still escapes it as
+// a proper SQL identifier rather than trusting the caller, so this stays
+// safe if the directive is ever reused with a less-trusted table name).
+func columnExists(ctx context.Context, conn *sql.Conn, table, column string) (bool, error) {
+	rows, err := conn.QueryContext(ctx, fmt.Sprintf("PRAGMA table_info(%s)", quoteIdentifier(table)))
+	if err != nil {
+		return false, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var cid, notnull, pk int
+		var name, ctype string
+		var dflt sql.NullString
+		if err := rows.Scan(&cid, &name, &ctype, &notnull, &dflt, &pk); err != nil {
+			return false, err
+		}
+		if name == column {
+			return true, nil
+		}
+	}
+	return false, rows.Err()
+}
+
+// quoteIdentifier escapes name as a double-quoted SQL identifier (embedded
+// double quotes doubled, per standard SQL identifier-escaping), for use in
+// contexts like PRAGMA statements where SQLite offers no bind-parameter
+// form for identifiers.
+func quoteIdentifier(name string) string {
+	return `"` + strings.ReplaceAll(name, `"`, `""`) + `"`
 }
 
 // splitSQL splits a SQL script on semicolons while keeping BEGIN...END blocks

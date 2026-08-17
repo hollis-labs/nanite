@@ -192,10 +192,12 @@ func migrationSkipIfColumnDirective(text string) (table, column string, ok bool)
 
 // columnExists reports whether table has a column named column, via
 // PRAGMA table_info (SQLite has no parameterized form of PRAGMA, so table
-// is interpolated directly — safe here because it only ever comes from this
-// package's own embedded migration files, never external input).
+// is interpolated directly — it only ever comes from this package's own
+// embedded migration files today, but quoteIdentifier still escapes it as
+// a proper SQL identifier rather than trusting the caller, so this stays
+// safe if the directive is ever reused with a less-trusted table name).
 func columnExists(ctx context.Context, conn *sql.Conn, table, column string) (bool, error) {
-	rows, err := conn.QueryContext(ctx, fmt.Sprintf("PRAGMA table_info(%s)", table))
+	rows, err := conn.QueryContext(ctx, fmt.Sprintf("PRAGMA table_info(%s)", quoteIdentifier(table)))
 	if err != nil {
 		return false, err
 	}
@@ -212,6 +214,14 @@ func columnExists(ctx context.Context, conn *sql.Conn, table, column string) (bo
 		}
 	}
 	return false, rows.Err()
+}
+
+// quoteIdentifier escapes name as a double-quoted SQL identifier (embedded
+// double quotes doubled, per standard SQL identifier-escaping), for use in
+// contexts like PRAGMA statements where SQLite offers no bind-parameter
+// form for identifiers.
+func quoteIdentifier(name string) string {
+	return `"` + strings.ReplaceAll(name, `"`, `""`) + `"`
 }
 
 // splitSQL splits a SQL script on semicolons while keeping BEGIN...END blocks

@@ -25,6 +25,17 @@ const LegacyPrefix = "mcp__"
 // holds during and after the rename cutover.
 const SelfServerName = "self"
 
+// DevServerName, CodeServerName, and GeneralServerName are the other three
+// in-process builtin server names nanite registers at startup (cmd/nanite/
+// main.go, all at TierBuiltin), alongside SelfServerName. Together with
+// SelfServerName they form the closed set IsFirstPartyBuiltinServerName
+// checks against.
+const (
+	DevServerName     = "dev"
+	CodeServerName    = "code"
+	GeneralServerName = "general"
+)
+
 // UniformToolName returns the agent-facing name for a tool published by
 // an MCP server. The default rule is "strip the server" — a tool
 // "memory_write" on the "mux" server is exposed to the LLM as
@@ -100,4 +111,29 @@ func IsReservedSelfToolName(server, toolName string) bool {
 		return false
 	}
 	return server == SelfServerName
+}
+
+// IsFirstPartyBuiltinServerName reports whether server is one of nanite's
+// four hardcoded in-process builtin servers (self/dev/code/general — see
+// cmd/nanite/main.go). Unlike a tier-based check, this is a closed name
+// set deliberately independent of TrustTier: test fixtures and future
+// callers legitimately register arbitrary/hostile servers at TierBuiltin
+// to exercise plain collision behavior, so tier alone can't distinguish
+// "one of nanite's real builtins" from "some other server that happens to
+// carry that tier."
+//
+// Generalizes the self-only reserved-namespace defense
+// (IsReservedSelfToolName) to all four builtins: a proxied MCP server
+// built from the same internal scaffold as nanite (e.g. a sibling app
+// that also ships dev_bash/skill_list/etc under bare names) must never be
+// able to evict a first-party builtin tool from its bare uniform-name
+// slot just because it happens to sort alphabetically earlier. See
+// Manager.assignUniformNameLocked.
+func IsFirstPartyBuiltinServerName(server string) bool {
+	switch server {
+	case SelfServerName, DevServerName, CodeServerName, GeneralServerName:
+		return true
+	default:
+		return false
+	}
 }

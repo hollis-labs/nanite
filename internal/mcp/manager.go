@@ -51,7 +51,7 @@ type Manager struct {
 	servers           map[string]MCPTransport // name -> transport
 	serverTiers       map[string]TrustTier    // name -> trust tier
 	pluginServers     map[string][]string     // pluginID -> server names (reverse map for hot-unload)
-	tools             []toolEntry             // all discovered tools with server association
+	tools             []*toolEntry            // all discovered tools with server association (pointer slice: entries are mutated in place post-insertion by collision-rename, so a later append reallocating this slice must never orphan an outstanding uniformIndex pointer — see assignUniformNameLocked)
 	uniformIndex      map[string]*toolEntry   // uniform name → entry (owns the *toolEntry)
 	discoveryWarnings []DiscoveryWarning      // tools rejected during discovery
 	Broker            *broker.LocalBroker     // intent-aware tool broker
@@ -277,6 +277,7 @@ func (m *Manager) tierForLocked(name string) TrustTier {
 	return TierThirdPartyHTTP
 }
 
+
 // DiscoverTools queries all registered servers for their tools and runs the
 // per-tier validator pipeline (S4b T2). Tools failing per-tool validation
 // (ValidateToolMeta) are skipped with a DiscoveryWarning. Cross-tool checks
@@ -386,8 +387,17 @@ func (m *Manager) DiscoverTools(ctx context.Context) error {
 				uniformName: uniform,
 				tool:        t,
 			}
-			m.tools = append(m.tools, *entry)
-			m.uniformIndex[uniform] = &m.tools[len(m.tools)-1]
+			// Store the pointer itself (not a dereferenced copy re-addressed
+			// into the slice) — m.tools appends below can reallocate this
+			// slice's backing array at any later iteration, which would
+			// silently orphan a `&m.tools[i]`-style address taken earlier.
+			// Collision handling in assignUniformNameLocked mutates entries
+			// in place via their uniformIndex pointer (e.g.
+			// existing.uniformName = incumbentDisambig) well after
+			// insertion, so that pointer must stay valid for the entry's
+			// entire lifetime, not just until the next reallocation.
+			m.tools = append(m.tools, entry)
+			m.uniformIndex[uniform] = entry
 			accepted++
 			totalTools++
 		}
@@ -407,8 +417,7 @@ func (m *Manager) DiscoverTools(ctx context.Context) error {
 	// tool index is keyed by the uniform name the agent will see.
 	if m.Broker != nil {
 		var brokerTools []broker.ToolDefinition
-		for i := range m.tools {
-			entry := &m.tools[i]
+		for _, entry := range m.tools {
 			brokerTools = append(brokerTools, broker.ToolDefinition{
 				Name:        entry.uniformName,
 				Description: entry.tool.Description,
@@ -581,12 +590,13 @@ func (m *Manager) assignUniformNameLocked(serverName, toolName string) string {
 		return ""
 	}
 
-	// (1a) Reserved-namespace defense — newcomer is self.
-	// Self ALWAYS owns the bare slot for any name it publishes. A third-
-	// party that registered alphabetically earlier and grabbed the slot
-	// gets force-prefixed and rewritten in place.
-	if IsReservedSelfToolName(serverName, toolName) {
-		if existing, taken := m.uniformIndex[bare]; taken && existing.serverName != serverName {
+	// (1a) Reserved-namespace defense — newcomer is a first-party builtin
+	// (self/dev/code/general). Builtins ALWAYS own the bare slot for any
+	// name they publish. A non-builtin (proxied/third-party) server that
+	// registered alphabetically earlier and grabbed the slot gets
+	// force-prefixed and rewritten in place.
+	if IsReservedSelfToolName(serverName, toolName) || IsFirstPartyBuiltinServerName(serverName) {
+		if existing, taken := m.uniformIndex[bare]; taken && existing.serverName != serverName && !IsFirstPartyBuiltinServerName(existing.serverName) {
 			incumbentDisambig := DisambiguatedToolName(existing.serverName, existing.tool.Name)
 			if _, conflict := m.uniformIndex[incumbentDisambig]; conflict && existing.uniformName != incumbentDisambig {
 				// Incumbent's disambiguated slot is already taken by a
@@ -600,7 +610,7 @@ func (m *Manager) assignUniformNameLocked(serverName, toolName string) string {
 			delete(m.uniformIndex, bare)
 			existing.uniformName = incumbentDisambig
 			m.uniformIndex[incumbentDisambig] = existing
-			slog.Warn("mcp: self-server claims bare slot — incumbent third-party tool force-prefixed",
+			slog.Warn("mcp: first-party builtin claims bare slot — incumbent third-party tool force-prefixed",
 				"name", bare,
 				"incumbent_server", existing.serverName,
 				"incumbent_uniform", incumbentDisambig,
@@ -614,16 +624,17 @@ func (m *Manager) assignUniformNameLocked(serverName, toolName string) string {
 		return bare
 	}
 
-	// (1b) Reserved-namespace defense — newcomer is non-self and the bare
-	// slot is held by the self server. Force-prefix the newcomer; the
-	// self-tool keeps the bare slot it already owns.
+	// (1b) Reserved-namespace defense — newcomer is a non-builtin
+	// (proxied/third-party) server and the bare slot is held by a
+	// first-party builtin. Force-prefix the newcomer; the builtin tool
+	// keeps the bare slot it already owns.
 	if existing, taken := m.uniformIndex[bare]; taken &&
-		IsReservedSelfToolName(existing.serverName, existing.tool.Name) {
+		(IsReservedSelfToolName(existing.serverName, existing.tool.Name) || IsFirstPartyBuiltinServerName(existing.serverName)) {
 		disambig := DisambiguatedToolName(serverName, toolName)
 		if _, takenDisambig := m.uniformIndex[disambig]; takenDisambig {
 			return ""
 		}
-		slog.Warn("mcp: third-party tool collides with reserved self-tool namespace; force-prefixed",
+		slog.Warn("mcp: third-party tool collides with reserved builtin namespace; force-prefixed",
 			"server", serverName, "tool", toolName, "uniform", disambig)
 		return disambig
 	}
@@ -932,7 +943,7 @@ func (m *Manager) AutoDiscover(ctx context.Context, s *store.Store) (*DiscoveryD
 	// internalization). The originating server is captured on each entry
 	// for skill metadata (audit attribution).
 	m.mu.RLock()
-	currentTools := make(map[string]toolEntry, len(m.tools))
+	currentTools := make(map[string]*toolEntry, len(m.tools))
 	for _, entry := range m.tools {
 		currentTools[entry.uniformName] = entry
 	}

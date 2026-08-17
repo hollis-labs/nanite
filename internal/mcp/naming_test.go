@@ -2,6 +2,7 @@ package mcp
 
 import (
 	"context"
+	"fmt"
 	"testing"
 )
 
@@ -325,6 +326,118 @@ func TestManager_UniformIndex_PostRenameShadowDefense(t *testing.T) {
 		if IsReservedSelfToolName("evil", name) {
 			t.Errorf("IsReservedSelfToolName(evil, %q) = true, want false", name)
 		}
+	}
+}
+
+// TestManager_UniformIndex_NonSelfBuiltinReservedNamespace is the
+// CW-20260817 regression: a proxied MCP server built from the same
+// internal scaffold as nanite (e.g. Tether/mux fanning in an upstream
+// that also ships bare `dev_bash`/`dev_read`/etc, mirroring nanite's own
+// dev-tools server) sorts alphabetically BEFORE "dev" ("Agent Mux" < "dev"
+// in byte order) and, before this fix, would win the bare `dev_bash` slot
+// outright — silently evicting nanite's own first-party dev tool to
+// `dev_dev_bash`. IsReservedSelfToolName only ever protected the "self"
+// server; this test locks in that the same defense now covers "dev" (and
+// by the same mechanism, "code"/"general") via
+// IsFirstPartyBuiltinServerName. Verified through ExecuteTool (not just
+// ToolAttribution) so the assertion covers the actual call-routing path
+// Curator hit as "unknown MCP tool: dev_bash" in production.
+func TestManager_UniformIndex_NonSelfBuiltinReservedNamespace(t *testing.T) {
+	mgr := NewManager()
+	// "Agent Mux" sorts before "dev" (capital 'A' < lowercase 'd' in ASCII),
+	// so DiscoverTools processes it first — exactly the ordering that
+	// caused the production regression.
+	proxy := &fakeTieredTransport{
+		tools:      []Tool{{Name: "dev_bash"}},
+		resultText: "PROXY-fake-dev_bash",
+	}
+	if err := mgr.AddServer("Agent Mux", proxy, TierPluginStdio); err != nil {
+		t.Fatalf("AddServer Agent Mux: %v", err)
+	}
+	real := &fakeTieredTransport{
+		tools:      []Tool{{Name: "dev_bash"}},
+		resultText: "REAL-nanite-dev_bash",
+	}
+	if err := mgr.AddServer(DevServerName, real, TierBuiltin); err != nil {
+		t.Fatalf("AddServer dev: %v", err)
+	}
+	if err := mgr.DiscoverTools(context.Background()); err != nil {
+		t.Fatalf("DiscoverTools: %v", err)
+	}
+
+	// The bare slot must resolve to nanite's own "dev" server.
+	if srv, _, ok := mgr.ToolAttribution("dev_bash"); !ok || srv != DevServerName {
+		t.Errorf("bare 'dev_bash' attribution = (%q, ok=%v), want (%q, true)", srv, ok, DevServerName)
+	}
+	// The proxy's colliding copy must be force-prefixed, not dropped.
+	if srv, orig, ok := mgr.ToolAttribution("Agent Mux_dev_bash"); !ok || srv != "Agent Mux" || orig != "dev_bash" {
+		t.Errorf("'Agent Mux_dev_bash' attribution = (%q, %q, ok=%v), want (Agent Mux, dev_bash, true)", srv, orig, ok)
+	}
+
+	// Execution must route to nanite's own dev_bash, not the proxy's.
+	got, err := mgr.ExecuteTool(context.Background(), "dev_bash", nil)
+	if err != nil {
+		t.Fatalf("ExecuteTool(dev_bash): %v", err)
+	}
+	if got != "REAL-nanite-dev_bash" {
+		t.Errorf("ExecuteTool(dev_bash) = %q, want REAL-nanite-dev_bash (routed to the proxy instead of the builtin)", got)
+	}
+}
+
+// TestManager_UniformIndex_RenameSurvivesSliceGrowth is the CW-20260817
+// regression for the listing/broker-registration side of a collision
+// rename (as opposed to the execution-routing side covered by
+// TestManager_UniformIndex_NonSelfBuiltinReservedNamespace above). m.tools
+// used to be a []toolEntry VALUE slice: assignUniformNameLocked's
+// collision path mutates an incumbent entry in place through the
+// *toolEntry pointer stashed in uniformIndex at insertion time
+// (`existing.uniformName = incumbentDisambig`). If a later DiscoverTools
+// append triggers that slice to reallocate its backing array — which,
+// with hundreds of tools, is close to guaranteed for any entry touched
+// early in the loop — the mutation lands on the orphaned pre-growth
+// array, not the one m.tools now points to, so GetAllToolsUnfiltered
+// (and the broker registration loop, which iterates the same slice)
+// would report a duplicate, un-renamed "dev_bash" name instead of the
+// correct disambiguated "collider_dev_bash". This registers dozens of
+// filler tools after the colliding pair specifically to force at least
+// one reallocation past the collision point, then asserts the listing
+// view agrees with ToolAttribution/ExecuteTool.
+func TestManager_UniformIndex_RenameSurvivesSliceGrowth(t *testing.T) {
+	mgr := NewManager()
+	if err := mgr.AddServer("collider", &fakeTieredTransport{
+		tools: []Tool{{Name: "dev_bash"}},
+	}, TierPluginStdio); err != nil {
+		t.Fatalf("AddServer collider: %v", err)
+	}
+	if err := mgr.AddServer(DevServerName, &fakeTieredTransport{
+		tools: []Tool{{Name: "dev_bash"}},
+	}, TierBuiltin); err != nil {
+		t.Fatalf("AddServer dev: %v", err)
+	}
+	// "filler" sorts after "dev" and "collider" — its many tools are
+	// appended AFTER the colliding pair is resolved, forcing m.tools past
+	// several capacity-doubling reallocations.
+	fillerTools := make([]Tool, 0, 200)
+	for i := 0; i < 200; i++ {
+		fillerTools = append(fillerTools, Tool{Name: fmt.Sprintf("filler_tool_%03d", i)})
+	}
+	if err := mgr.AddServer("filler", &fakeTieredTransport{tools: fillerTools}, TierPluginStdio); err != nil {
+		t.Fatalf("AddServer filler: %v", err)
+	}
+	if err := mgr.DiscoverTools(context.Background()); err != nil {
+		t.Fatalf("DiscoverTools: %v", err)
+	}
+
+	names := make(map[string]int, 210)
+	for _, def := range mgr.GetAllToolsUnfiltered() {
+		names[def.Name]++
+	}
+
+	if n := names["dev_bash"]; n != 1 {
+		t.Errorf(`listing shows %d entries named "dev_bash", want exactly 1 (a stale un-renamed duplicate means the collision rename was lost on slice growth)`, n)
+	}
+	if n := names["collider_dev_bash"]; n != 1 {
+		t.Errorf(`listing shows %d entries named "collider_dev_bash", want exactly 1 (the disambiguated rename never reached the live listing view)`, n)
 	}
 }
 

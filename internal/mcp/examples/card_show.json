@@ -18,6 +18,27 @@
     "notes": "report-card REQUIRES the sources arg as a JSON-encoded string of grounding objects. Build the sources list from tool_use_ids in THIS turn — don't fabricate."
   },
   {
+    "title": "report-card with session_link (relaying a delegated-work completion — distilled summary + link, not a transcript dump)",
+    "args": {
+      "type": "report-card",
+      "data": {
+        "title": "fragments-engine: migration task complete",
+        "generated_at": "2026-08-16T18:20:00Z",
+        "metrics": [
+          { "label": "Status", "value": "done" },
+          { "label": "Files changed", "value": "6" }
+        ],
+        "summary": "Orchestrator finished the schema-migration task cleanly — no blockers. Backfill ran against the staging dataset without errors.",
+        "session_link": {
+          "label": "View full session",
+          "url": "https://torque.internal/runs/4821"
+        }
+      },
+      "sources": "[{\"tool_use_id\":\"toolu_03GHI\",\"tool_name\":\"torque_task_get\"}]"
+    },
+    "notes": "This is the shape Conductor uses when relaying a completed per-project Orchestrator run, a cross-app mux session, or a subagent completion: distilled metrics/summary, never the raw transcript. `session_link.url` may be an http(s) URL (renders as a clickable link) or an opaque id/URI like a mux session id or `torque:T-123` when no direct URL exists yet (renders as plain text). Ground `sources` in a real tool call from this turn (e.g. torque_task_get, mux_session_get) — same rule as any other report-card."
+  },
+  {
     "title": "document-viewer (long-form prose — REQUIRES sources)",
     "args": {
       "type": "document-viewer",

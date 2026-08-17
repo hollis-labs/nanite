@@ -27,6 +27,17 @@ type ReflexMatchEntry struct {
 	HintPattern         string // ExecutionPattern.String()
 	ProfileSlug         string
 	Mode                string // ModeSignal from SideEffects
+
+	// RawInputText and SentInputText (CW-20260816-0068) carry the full,
+	// untruncated raw-vs-dispatched text pair for the turn's audit trail.
+	// RawInputText is the user's raw input as typed; SentInputText is the
+	// text actually sent/dispatched to the spawned agent after any
+	// pre-dispatch rewrite (e.g. E2 grounding's memory-block prepend).
+	// Callers that perform no rewrite should set both to the same value —
+	// the writer (store.LogReflexMatch) collapses identical pairs to empty
+	// strings before persisting, so equal values never bloat the table.
+	RawInputText  string
+	SentInputText string
 }
 
 // AssignRoleWithReflex is the integration entry point for the playbook
@@ -79,6 +90,10 @@ func AssignRoleWithReflex(
 			HintPattern:         match.HintPattern.String(),
 			ProfileSlug:         match.Reflex.ResolvesTo.Profile,
 			Mode:                match.Reflex.SideEffects.ModeSignal,
+			// This entry point performs no pre-dispatch rewrite, so raw and
+			// sent text are identical — the writer collapses them to '' .
+			RawInputText:  rawInput,
+			SentInputText: rawInput,
 		})
 	}
 

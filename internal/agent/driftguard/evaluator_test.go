@@ -1,4 +1,4 @@
-package reflexes
+package driftguard
 
 import (
 	"encoding/json"

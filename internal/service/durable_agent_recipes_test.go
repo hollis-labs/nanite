@@ -28,6 +28,7 @@ func TestDurableAgentRecipeCatalogListGetDeterministic(t *testing.T) {
 	}
 	wantIDs := []string{
 		"architect-advisor",
+		"conductor",
 		"external-company-agent",
 		"managed-cli-harness",
 		"orchestrator",

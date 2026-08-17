@@ -21,7 +21,7 @@ import (
 	"github.com/hollis-labs/go-providers/provider"
 	"github.com/hollis-labs/nanite/internal/agent"
 	"github.com/hollis-labs/nanite/internal/agent/builtin"
-	"github.com/hollis-labs/nanite/internal/agent/reflexes"
+	"github.com/hollis-labs/nanite/internal/agent/driftguard"
 	"github.com/hollis-labs/nanite/internal/agentregistry"
 	"github.com/hollis-labs/nanite/internal/background"
 	"github.com/hollis-labs/nanite/internal/bootprofile"
@@ -913,7 +913,7 @@ func NewContainer(cfg ContainerConfig) (*Container, error) {
 	// reminders / forced tool choices. Plugin hooks (nil-safe) let plugins
 	// rewrite reflex state/actions; the Halt executor marks the session
 	// halted + logs the event when a reflex resolves to halt_session.
-	reflexEngine := reflexes.NewEngine(cfg.Store, slog.Default())
+	reflexEngine := driftguard.NewEngine(cfg.Store, slog.Default())
 	if cfg.Plugins != nil {
 		reflexEngine.SetPluginHooks(cfg.Plugins)
 	}
@@ -929,7 +929,7 @@ func NewContainer(cfg ContainerConfig) (*Container, error) {
 		cfg.Store.LogEvent(sessionID, "session_halted", "reflex", "reflex-fired halt", string(metaBlob))
 		return nil
 	}
-	if n, err := reflexes.SeedBaseReflexes(context.Background(), cfg.Store, slog.Default()); err != nil {
+	if n, err := driftguard.SeedBaseReflexes(context.Background(), cfg.Store, slog.Default()); err != nil {
 		slog.Warn("service container: reflex base-seed", "err", err)
 	} else if n > 0 {
 		slog.Info("service container: seeded base reflexes", "count", n)
@@ -1131,6 +1131,26 @@ func NewContainer(cfg ContainerConfig) (*Container, error) {
 	// configured policy. chatSvcImpl already exists by this point (built
 	// above for the ChatRunner wiring).
 	subagentSvc.SetCompletionReactor(&subagentCompletionReactor{chat: chatSvcImpl})
+	// CW-20260816-0065: react to a live A2A message send (message_send /
+	// nanite_a2a_send / the nanite a2a CLI / the message_send HTTP route —
+	// anything that reaches messaging.Service.SendMessage other than
+	// kind=subagent_result, which stays on the SetCompletionReactor path
+	// above) by possibly triggering a harness turn on the recipient
+	// session per its resolved message-wake policy. chatSvcImpl already
+	// exists by this point (built above for the ChatRunner wiring) — same
+	// ordering SetCompletionReactor relies on just above.
+	messagingSvc.SetWakeReactor(&messagingWakeReactor{chat: chatSvcImpl})
+	// Copilot PR #258 review: wire the wake-reactor goroutine spawn onto
+	// a tracked *lifecycle.Manager instead of the untracked safego.Go
+	// default, so a burst of messages can't leave unbounded goroutines
+	// running past process shutdown. Reuses chatSvcImpl's own manager
+	// (same package, field access is intra-package) rather than
+	// constructing a second one — these goroutines call back into
+	// chatSvcImpl anyway, so draining them alongside chat's own
+	// generateResponse goroutines on Shutdown is the right scope, not a
+	// separate lifecycle. chatSvcImpl already exists by this point (same
+	// ordering constraint as SetWakeReactor immediately above).
+	messagingSvc.SetLifecycleManager(chatSvcImpl.lifecycle)
 	// H1 (CW-20260421-0014): wire trust resolver + audit event logger.
 	subagentSvc.SetTrustResolver(cfg.Store)
 	subagentSvc.SetEventLogger(cfg.Store)

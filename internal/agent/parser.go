@@ -143,6 +143,14 @@ type AgentConstraints struct {
 	RunawayFailCap           int    `yaml:"runawayFailCap,omitempty" json:"runaway_fail_cap,omitempty"`
 	IdleTimeoutSeconds       int    `yaml:"idleTimeoutSeconds,omitempty" json:"idle_timeout_seconds,omitempty"`
 	SubagentCompletionPolicy string `yaml:"subagentCompletionPolicy,omitempty" json:"subagent_completion_policy,omitempty"`
+	// MessageWakePolicy (CW-20260816-0065) mirrors
+	// internal/chat.AgentConstraints.MessageWakePolicy — see that field's
+	// doc comment for the full value vocabulary and resolution path. This
+	// field was missing here until the code-review pass that added it
+	// (frontmatter `constraints: messageWakePolicy: ...` was silently
+	// dropped by yaml.Unmarshal before this fix, since ToProfile() only
+	// carries fields present on this local struct).
+	MessageWakePolicy string `yaml:"messageWakePolicy,omitempty" json:"message_wake_policy,omitempty"`
 }
 
 // AgentToolPermissions mirrors toolclient.ToolPermissions in shape but is

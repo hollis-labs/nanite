@@ -24,6 +24,14 @@ const (
 	DurableAgentRecipeKindProcessMonitor    = "process_monitor"
 	DurableAgentRecipeKindTemplateWorker    = "template_worker"
 	DurableAgentRecipeKindOrchestrator      = "orchestrator"
+	// DurableAgentRecipeKindConductor (CW-20260816-0066) is the chat-facing
+	// entry point: delegates down to per-project execution (Orchestrator/
+	// Torque) and out to cross-app coordination (Tether/mux). Deliberately
+	// distinct from DurableAgentRecipeKindOrchestrator — Conductor never
+	// calls subagent_spawn/workflow_run itself, so reusing the orchestrator
+	// kind would misrepresent its dispatch authority. See
+	// docs/architecture/conductor-console-design.md.
+	DurableAgentRecipeKindConductor = "conductor"
 )
 
 var (
@@ -367,6 +375,61 @@ func builtinDurableAgentRecipes() []DurableAgentRecipe {
 				recipeTextareaInput("wake_prompt", "Wake prompt", "wake_payload.prompt", false, "Optional kickoff instructions for the architecture advisor."),
 			},
 			Tags: []string{"advisor", "architecture", "product"},
+		},
+		{
+			// Profile pairing: operator selects the `conductor` AgentProfile
+			// (.nanite/agents/conductor.md) at apply-time. Conductor
+			// (CW-20260816-0066) is the chat-facing entry point across the
+			// user's concurrent projects — it delegates *down* to existing
+			// per-project execution (Orchestrator/Torque) and *out* to
+			// cross-app coordination (Tether/mux) rather than
+			// reimplementing either. It deliberately does NOT get
+			// subagent_spawn/workflow_run — those stay exclusive to the
+			// `orchestrator` recipe/profile above. Foundation task for
+			// CW-20260816-0067/-0068/-0069/-0070; see
+			// docs/architecture/conductor-console-design.md for the full
+			// design.
+			ID:               "conductor",
+			SchemaVersion:    DurableAgentRecipeSchemaVersion,
+			Kind:             DurableAgentRecipeKindConductor,
+			Name:             "Conductor",
+			Description:      "Chat-facing entry point across concurrent projects: delegates to per-project execution (Orchestrator/Torque) and cross-app coordination (Tether/mux), relays distilled status, captures durable notes, and surfaces approvals/blockers — never does the underlying work itself.",
+			LifecycleClass:   store.DurableAgentClassHarness,
+			ProfileRule:      "operator_selected",
+			Provider:         "anthropic",
+			Model:            "",
+			RuntimeKind:      string(runtimekind.API),
+			LaunchSourceType: store.DurableAgentLaunchAPIChat,
+			WakeDefaults: DurableAgentWakePayload{
+				Reason: DurableAgentWakeManual,
+				Facts: map[string]string{
+					"story": "conductor",
+				},
+			},
+			Metadata: map[string]string{
+				"product_story":      "conductor",
+				"exposure_surface":   "internal_chat_and_harness_v1",
+				"integration_status": "operator_managed",
+				"role_boundary":      "delegates_and_relays_never_dispatches_or_executes",
+			},
+			Injections: []RecipeInjectionPlan{{
+				ID:          "pending-digest-brief",
+				Kind:        "planned_context",
+				Target:      "wake_payload.facts",
+				Description: "Future pull-based pending-approvals/completions digest surfaced as non-secret wake facts when the operator asks 'what's pending?'.",
+			}},
+			Inputs: []DurableAgentRecipeInput{
+				recipeStringInput("name", "Name", "durable_agent.name", true, "Conductor"),
+				recipeStringInput("slug", "Slug", "durable_agent.slug", false, "conductor"),
+				recipeProfileInput(true),
+				recipeProviderInput(false, "anthropic"),
+				recipeModelInput(false, ""),
+				recipeRuntimeKindInput(false, string(runtimekind.API)),
+				recipePathInput("work_root", "Work root", "durable_agent.work_root", false, "~/dev"),
+				recipeTextareaInput("project_roster_notes", "Project roster notes", "metadata.project_roster_notes", false, "Which projects/apps Conductor tracks (Torque project IDs, Tether registry names) and any per-project routing notes."),
+				recipeTextareaInput("wake_prompt", "Wake prompt", "wake_payload.prompt", false, "Optional kickoff instructions for Conductor (e.g. which projects to check in on at first boot)."),
+			},
+			Tags: []string{"harness", "conductor", "concierge", "product"},
 		},
 		{
 			ID:               "external-company-agent",

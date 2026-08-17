@@ -232,6 +232,41 @@ func TestAgentService_ResolveForSession_SettingsDefault(t *testing.T) {
 	}
 }
 
+// TestAgentService_ResolveForSessionReadOnly_NoAutoAssign is the
+// regression test for the code-review finding on
+// internal/service/messaging_reactor.go's resolveMessageWakePolicy:
+// resolving the effective agent for an unbound session must not create a
+// session_agents row (EnsureSessionAgent) or emit AgentAssigned, unlike
+// ResolveForSession's deliberate auto-assign-on-first-touch behavior.
+func TestAgentService_ResolveForSessionReadOnly_NoAutoAssign(t *testing.T) {
+	reader := newStubReader()
+	agent := &store.AgentProfile{ID: "settings-agent", Name: "Settings", Slug: "settings", Status: "active"}
+	reader.addAgent(agent)
+
+	writer := &stubAgentWriter{}
+	events := &fakeEventEmitter{}
+	svc := NewAgentService(AgentServiceConfig{
+		Agents:   reader,
+		Writers:  writer,
+		Settings: &stubSettings{defaultAgent: "settings-agent"},
+		Events:   events,
+	})
+
+	got, _, err := svc.ResolveForSessionReadOnly(context.Background(), "unbound-sess")
+	if err != nil {
+		t.Fatalf("ResolveForSessionReadOnly: %v", err)
+	}
+	if got.ID != "settings-agent" {
+		t.Errorf("agent ID = %q, want %q (resolution chain must still run identically to ResolveForSession)", got.ID, "settings-agent")
+	}
+	if len(writer.ensured) != 0 {
+		t.Errorf("expected no EnsureSessionAgent call from the read-only path, got %v", writer.ensured)
+	}
+	if len(events.agentAssigned) != 0 {
+		t.Errorf("expected no AgentAssigned event from the read-only path, got %v", events.agentAssigned)
+	}
+}
+
 func TestAgentService_ResolveForSession_HardcodedFallback(t *testing.T) {
 	reader := newStubReader()
 	writer := &stubAgentWriter{}

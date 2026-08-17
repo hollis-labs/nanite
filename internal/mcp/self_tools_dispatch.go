@@ -148,6 +148,14 @@ func (st *SelfToolsTransport) callExecuteTask(ctx context.Context, args map[stri
 					HintPattern:         match.HintPattern.String(),
 					ProfileSlug:         match.Reflex.ResolvesTo.Profile,
 					Mode:                match.Reflex.SideEffects.ModeSignal,
+					// CW-20260816-0068: raw-vs-sent audit trail. message is
+					// the raw user input the reflex matcher ran against;
+					// dispatchMessage is what actually reaches the spawned
+					// agent (may be prepended with the E2 grounding block
+					// above, or any future rewrite-for-clarity step). The
+					// writer collapses identical pairs to avoid bloat.
+					RawInputText:  message,
+					SentInputText: dispatchMessage,
 				})
 			}
 		}

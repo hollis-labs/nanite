@@ -6,12 +6,12 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/hollis-labs/nanite/internal/agent/reflexes"
+	"github.com/hollis-labs/nanite/internal/agent/driftguard"
 	ctxpkg "github.com/hollis-labs/nanite/internal/context"
 	"github.com/hollis-labs/nanite/internal/store"
 )
 
-func (s *chatServiceImpl) evaluateAndInjectReflexes(ctx context.Context, session *store.Session, agent *store.AgentProfile, slotResult *SlotAssemblyResult) []reflexes.AppliedAction {
+func (s *chatServiceImpl) evaluateAndInjectReflexes(ctx context.Context, session *store.Session, agent *store.AgentProfile, slotResult *SlotAssemblyResult) []driftguard.AppliedAction {
 	if s.reflexEngine == nil || session == nil || agent == nil || slotResult == nil || slotResult.Window == nil {
 		return nil
 	}
@@ -43,7 +43,7 @@ func (s *chatServiceImpl) evaluateAndInjectReflexes(ctx context.Context, session
 	return applied.Actions
 }
 
-func formatReflexReminder(actions []reflexes.AppliedAction) string {
+func formatReflexReminder(actions []driftguard.AppliedAction) string {
 	var lines []string
 	for _, action := range actions {
 		switch action.ActionKind {

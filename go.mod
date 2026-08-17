@@ -91,6 +91,13 @@ require (
 
 replace github.com/hollis-labs/go-modelsdev => ../../libs/go-modelsdev
 
+// CW-20260816-0069: local dev against the go-envelopes schema addition
+// (report-card.session_link) below, mirroring the go-modelsdev precedent
+// above. Points at the sibling checkout in libs/go-envelopes, which has the
+// same change committed. Remove once go-envelopes cuts a release that
+// includes it and bump the `require` version instead.
+replace github.com/hollis-labs/go-envelopes => ../../libs/go-envelopes
+
 require (
 	github.com/hollis-labs/go-apppaths v0.1.0
 	github.com/hollis-labs/go-embed-contracts v0.1.1

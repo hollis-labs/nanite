@@ -657,7 +657,7 @@ func (h *Host) EmitPreHook(eventType, sessionID string, data map[string]interfac
 	return false
 }
 
-// Reflex engine events (FU-30). Emitted by internal/agent/reflexes.Engine
+// Reflex engine events (FU-30). Emitted by internal/agent/driftguard.Engine
 // when a reflex fires / an action is staged, for plugin + frontend
 // observability. The full reflex payload (agent, reflex name, action kind,
 // trigger evidence) rides under EventData.ActionData ("action_data").

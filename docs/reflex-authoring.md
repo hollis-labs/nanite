@@ -5,6 +5,8 @@
 **Consumed by:** playbook runtime dispatcher (`internal/reflex/dispatcher.go`)
 **Reference:** `docs/agent-reflex-catalog.md` — canonical schema, v1 reflex set, test cases
 
+> **Not to be confused with:** `internal/agent/driftguard` (formerly `internal/agent/reflexes`), the unrelated FU-30 session-drift monitor. See the note in `docs/agent-reflex-catalog.md` — disambiguated in CW-20260816-0062.
+
 ---
 
 ## What is a reflex?
@@ -160,3 +162,4 @@ go test ./internal/reflex/... -v -run TestLoader
 - `internal/reflex/dispatcher.go` — dispatch integration + MergeReflexes
 - `internal/reflex/loader.go` — YAML loader
 - `internal/store/migrations/032_playbook_match_log.sql` — match log table
+- `internal/store/migrations/093_playbook_match_log_raw_sent_text.sql` — adds `raw_input_text`/`sent_input_text` audit columns (CW-20260816-0068); populated only when a pre-dispatch rewrite changed the text

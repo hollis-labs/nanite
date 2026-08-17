@@ -54,6 +54,38 @@ type AgentConstraints struct {
 	// default via sessions.metadata["subagent_completion_policy"]; see
 	// internal/service's policy resolution helper.
 	SubagentCompletionPolicy string `json:"subagent_completion_policy"`
+
+	// MessageWakePolicy (CW-20260816-0065) is this agent profile's default
+	// reaction to a live agent-to-agent message (an
+	// internal/messaging.Service.SendMessage send whose Kind is not
+	// subagent_result — that kind has its own dedicated policy/path, see
+	// SubagentCompletionPolicy) arriving for this session: "" (unset) or
+	// "auto_summarize" (proactively trigger a harness turn carrying the
+	// message body so the recipient reacts immediately — the default),
+	// "render_and_wait" (leave the message in the inbox for the next
+	// organic turn or an explicit message_inbox/message_thread poll — no
+	// proactive wake), or "batch" (accepted; behaves as render_and_wait
+	// for v1, same as SubagentCompletionPolicy). A session can override
+	// this default via sessions.metadata["message_wake_policy"]; see
+	// internal/service's resolveMessageWakePolicy.
+	//
+	// Deliberately reuses the SubagentPolicy* value vocabulary and
+	// IsValidSubagentCompletionPolicy validator rather than a parallel
+	// set — same three states, different event source, and the two
+	// policies are independent operator choices (whether an agent wants
+	// its own dispatched subagents to auto-summarize vs. whether it wants
+	// to be woken by a peer's message) that happen to share a resolver
+	// shape, which is why this is its own field/key rather than reusing
+	// SubagentCompletionPolicy's session-metadata key outright.
+	//
+	// The global default is the opposite of SubagentCompletionPolicy's
+	// (render_and_wait): a subagent completion still reaches the model
+	// via the kind=subagent_result turn-start injection
+	// (CW-20260512-0019) even when render_and_wait suppresses the
+	// proactive trigger, but a generic A2A message has no equivalent
+	// fallback delivery path — render_and_wait as the default would just
+	// reproduce the poll-only gap CW-20260816-0065 exists to close.
+	MessageWakePolicy string `json:"message_wake_policy"`
 }
 
 // Subagent-completion policy values (CW-20260520-0001).

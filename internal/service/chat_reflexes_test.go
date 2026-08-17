@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/hollis-labs/nanite/internal/agent/reflexes"
+	"github.com/hollis-labs/nanite/internal/agent/driftguard"
 	"github.com/hollis-labs/nanite/internal/store"
 )
 
@@ -15,14 +15,14 @@ import (
 func TestFormatReflexReminder_ForceToolChoiceOptIn(t *testing.T) {
 	cases := []struct {
 		name      string
-		actions   []reflexes.AppliedAction
+		actions   []driftguard.AppliedAction
 		wantSub   []string // substrings that must appear
 		wantNone  []string // substrings that must NOT appear
 		wantEmpty bool
 	}{
 		{
 			name: "inject_reminder renders body",
-			actions: []reflexes.AppliedAction{{
+			actions: []driftguard.AppliedAction{{
 				ReflexName: "ground",
 				ActionKind: store.ReflexActionInjectReminder,
 				Spec:       map[string]interface{}{"body": "re-ground before claiming"},
@@ -31,7 +31,7 @@ func TestFormatReflexReminder_ForceToolChoiceOptIn(t *testing.T) {
 		},
 		{
 			name: "force_tool_choice default is soft preference",
-			actions: []reflexes.AppliedAction{{
+			actions: []driftguard.AppliedAction{{
 				ReflexName: "use-validate",
 				ActionKind: store.ReflexActionForceToolChoice,
 				Spec:       map[string]interface{}{"tool_name": "tool_validate"},
@@ -41,7 +41,7 @@ func TestFormatReflexReminder_ForceToolChoiceOptIn(t *testing.T) {
 		},
 		{
 			name: "force_tool_choice enforce=true is hard directive",
-			actions: []reflexes.AppliedAction{{
+			actions: []driftguard.AppliedAction{{
 				ReflexName: "must-validate",
 				ActionKind: store.ReflexActionForceToolChoice,
 				Spec:       map[string]interface{}{"tool_name": "tool_validate", "enforce": true},
@@ -51,7 +51,7 @@ func TestFormatReflexReminder_ForceToolChoiceOptIn(t *testing.T) {
 		},
 		{
 			name: "force_tool_choice mode=hard is hard directive",
-			actions: []reflexes.AppliedAction{{
+			actions: []driftguard.AppliedAction{{
 				ReflexName: "must-validate",
 				ActionKind: store.ReflexActionForceToolChoice,
 				Spec:       map[string]interface{}{"tool_name": "tool_validate", "mode": "hard"},
@@ -60,7 +60,7 @@ func TestFormatReflexReminder_ForceToolChoiceOptIn(t *testing.T) {
 		},
 		{
 			name: "force_tool_choice without tool_name is skipped",
-			actions: []reflexes.AppliedAction{{
+			actions: []driftguard.AppliedAction{{
 				ReflexName: "noop",
 				ActionKind: store.ReflexActionForceToolChoice,
 				Spec:       map[string]interface{}{},

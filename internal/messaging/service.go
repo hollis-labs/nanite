@@ -14,6 +14,8 @@ import (
 	"log/slog"
 	"strings"
 
+	"github.com/hollis-labs/nanite/internal/lifecycle"
+	"github.com/hollis-labs/nanite/internal/safego"
 	"github.com/hollis-labs/nanite/internal/store"
 )
 
@@ -38,12 +40,35 @@ type NotificationSink interface {
 	NotifyReceived(ctx context.Context, msg *Message)
 }
 
+// WakeReactor receives a live-wake hook on every successful SendMessage
+// whose Kind is eligible (see the SendMessage call site for the
+// KindSubagentResult exclusion). Implementations resolve the recipient
+// session's message-wake policy and, when eligible, invoke the same
+// live-wake machinery SendAgentMessage/TriggerHarnessTurn already use
+// (CW-20260816-0065) so the recipient session generates a new turn
+// instead of relying on the recipient polling message_inbox/
+// message_thread.
+//
+// Implemented by internal/service (chatServiceImpl owns the in-flight-
+// generation registry and session/agent resolution this needs, neither
+// of which internal/messaging has visibility into). Defined here — not
+// in internal/service — to avoid an import cycle: internal/service
+// constructs messaging.Service, not the reverse (same reasoning as
+// subagent.CompletionReactor). Wired via SetWakeReactor; nil is
+// permitted (reaction is a no-op when no reactor is set, same contract
+// as NotificationSink).
+type WakeReactor interface {
+	ReactToMessage(ctx context.Context, msg *Message)
+}
+
 type Service struct {
 	store     Store
 	db        *sql.DB
 	resolver  AgentResolver
-	registrar AgentRegistrar  // nil = auto-register disabled
-	sink      NotificationSink // nil = no SSE push
+	registrar AgentRegistrar     // nil = auto-register disabled
+	sink      NotificationSink   // nil = no SSE push
+	wake      WakeReactor        // nil = no live-wake side effect (CW-20260816-0065)
+	lifecycle *lifecycle.Manager // nil = fall back to untracked safego.Go (see SetLifecycleManager)
 	pub       *pubsub
 }
 
@@ -69,6 +94,29 @@ func NewService(s Store, db *sql.DB, r AgentResolver, reg AgentRegistrar) *Servi
 // every caller that doesn't care.
 func (svc *Service) SetNotificationSink(s NotificationSink) {
 	svc.sink = s
+}
+
+// SetWakeReactor wires (or unwires) the CW-20260816-0065 live-wake hook.
+// Separate from NewService so the container can wire it after
+// chatServiceImpl construction (the reactor needs the fully-built chat
+// service to reach its in-flight-generation registry) without threading
+// it through every caller that doesn't care — mirrors SetNotificationSink
+// and subagent.Service.SetCompletionReactor.
+func (svc *Service) SetWakeReactor(r WakeReactor) {
+	svc.wake = r
+}
+
+// SetLifecycleManager wires (or unwires) the tracked-goroutine Manager
+// used to spawn the wake-reactor side effect in SendMessage. Separate
+// from NewService for the same reason as SetWakeReactor/
+// SetNotificationSink: the container builds messaging.Service before
+// the chat service (whose *lifecycle.Manager this typically reuses —
+// see internal/service/container.go) exists. When unset, SendMessage
+// falls back to an untracked safego.Go spawn (still panic-safe, just
+// not drained on Shutdown) so tests and standalone Service construction
+// keep working without wiring a manager.
+func (svc *Service) SetLifecycleManager(m *lifecycle.Manager) {
+	svc.lifecycle = m
 }
 
 // SendMessage validates both ends of the address tuple, persists the
@@ -123,6 +171,49 @@ func (svc *Service) SendMessage(ctx context.Context, input SendInput) (*Message,
 	// T8: record send in the session event-log so context broker +
 	// replay tooling can reconstruct session history.
 	svc.writeSendEvents(ctx, out)
+
+	// CW-20260816-0065: react to the send by optionally triggering a live
+	// turn on the recipient session instead of leaving delivery to a
+	// poll. Skipped for Kind=KindSubagentResult — that specific kind
+	// already has its own dedicated wake path (subagent.CompletionReactor,
+	// invoked directly by internal/subagent/service.go right after its own
+	// SendMessage call, with its own busy-check and a completion-specific
+	// summarizing prompt fed by the kind=subagent_result turn-start
+	// injection). Reacting here too would double-trigger the same
+	// completion event through two different synthetic prompts racing
+	// registerGenerationIfIdle. Fire-and-forget in its own goroutine
+	// (mirrors internal/subagent/service.go's "subagent.completion-
+	// reactor" goroutine) with a background context so a slow/misbehaving
+	// reactor never blocks the SendMessage caller (self-tool call, HTTP
+	// handler, or background-job poster) and outlives a cancelled request
+	// ctx.
+	//
+	// msgCopy takes a shallow copy of *out before handing it to the
+	// goroutine: out is also returned to SendMessage's own caller, so
+	// without the copy the goroutine and the caller would share the same
+	// *Message pointer — a data race if the caller mutates/reuses it
+	// after SendMessage returns. A shallow copy is sufficient: the two
+	// *string fields (ReadAt/ResolvedAt) are set by separate post-send
+	// code paths (Ack/Resolve), not something the original caller races
+	// on here.
+	//
+	// Spawn goes through svc.lifecycle (a *lifecycle.Manager, tracked and
+	// drained on Shutdown) when wired; falls back to untracked-but-still-
+	// panic-safe safego.Go otherwise (e.g. tests that construct Service
+	// directly without SetLifecycleManager).
+	if svc.wake != nil && out.Kind != KindSubagentResult {
+		msgCopy := *out
+		if svc.lifecycle != nil {
+			svc.lifecycle.Go("wake-reactor", func(ctx context.Context) {
+				svc.wake.ReactToMessage(ctx, &msgCopy)
+			})
+		} else {
+			safego.Go(context.Background(), "messaging.wake-reactor", func() {
+				svc.wake.ReactToMessage(context.Background(), &msgCopy)
+			})
+		}
+	}
+
 	return out, nil
 }
 

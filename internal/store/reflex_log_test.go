@@ -114,6 +114,79 @@ func TestLogReflexMatch_MultipleRows(t *testing.T) {
 	}
 }
 
+// TestLogReflexMatch_RawSentTextDiffer_PersistsBoth is the CW-20260816-0068
+// happy path: when a pre-dispatch rewrite changed the text (e.g. E2
+// grounding's memory-block prepend), both the full raw and full sent text
+// must land in the row, untruncated, for later audit.
+func TestLogReflexMatch_RawSentTextDiffer_PersistsBoth(t *testing.T) {
+	s := newTestStore(t)
+
+	raw := "help me fix the flaky reaper test"
+	sent := "## Relevant memories\n- reaper tests flake on timer drift\nhelp me fix the flaky reaper test"
+
+	entry := reflex.ReflexMatchEntry{
+		SessionID:     "sess-audit-001",
+		ReflexID:      "worker-execute",
+		Source:        "reflex",
+		RawInputText:  raw,
+		SentInputText: sent,
+	}
+	if err := s.LogReflexMatch(entry); err != nil {
+		t.Fatalf("LogReflexMatch: %v", err)
+	}
+
+	rows, err := s.ListReflexMatchLog("sess-audit-001")
+	if err != nil {
+		t.Fatalf("ListReflexMatchLog: %v", err)
+	}
+	if len(rows) != 1 {
+		t.Fatalf("expected 1 row, got %d", len(rows))
+	}
+	r := rows[0]
+	if r.RawInputText != raw {
+		t.Errorf("RawInputText = %q, want %q", r.RawInputText, raw)
+	}
+	if r.SentInputText != sent {
+		t.Errorf("SentInputText = %q, want %q", r.SentInputText, sent)
+	}
+}
+
+// TestLogReflexMatch_RawSentTextIdentical_NotDuplicated guards the
+// CW-20260816-0068 bloat concern: when raw and sent text are identical (the
+// common case — no rewrite happened), the writer must NOT duplicate the
+// full message body into raw_input_text/sent_input_text. Both columns come
+// back empty.
+func TestLogReflexMatch_RawSentTextIdentical_NotDuplicated(t *testing.T) {
+	s := newTestStore(t)
+
+	same := "let's plan out the migration"
+	entry := reflex.ReflexMatchEntry{
+		SessionID:     "sess-audit-002",
+		ReflexID:      "planner-mention",
+		Source:        "reflex",
+		RawInputText:  same,
+		SentInputText: same,
+	}
+	if err := s.LogReflexMatch(entry); err != nil {
+		t.Fatalf("LogReflexMatch: %v", err)
+	}
+
+	rows, err := s.ListReflexMatchLog("sess-audit-002")
+	if err != nil {
+		t.Fatalf("ListReflexMatchLog: %v", err)
+	}
+	if len(rows) != 1 {
+		t.Fatalf("expected 1 row, got %d", len(rows))
+	}
+	r := rows[0]
+	if r.RawInputText != "" {
+		t.Errorf("RawInputText = %q, want empty (identical raw/sent should not be persisted)", r.RawInputText)
+	}
+	if r.SentInputText != "" {
+		t.Errorf("SentInputText = %q, want empty (identical raw/sent should not be persisted)", r.SentInputText)
+	}
+}
+
 func TestListReflexMatchLog_OtherSessionIsolated(t *testing.T) {
 	s := newTestStore(t)
 

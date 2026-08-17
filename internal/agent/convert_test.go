@@ -121,6 +121,7 @@ func TestDefinition_ToProfile_Constraints(t *testing.T) {
 		Constraints: AgentConstraints{
 			MaxTurns:                 50,
 			SubagentCompletionPolicy: "auto_summarize",
+			MessageWakePolicy:        "render_and_wait",
 		},
 	}
 
@@ -135,6 +136,14 @@ func TestDefinition_ToProfile_Constraints(t *testing.T) {
 	}
 	if got, want := c["max_turns"], float64(50); got != want {
 		t.Errorf("constraints.max_turns = %v, want %v", got, want)
+	}
+	// MessageWakePolicy (CW-20260816-0065) was missing from this struct
+	// until the code-review pass that added it — a `constraints:
+	// messageWakePolicy: ...` frontmatter key was silently dropped by
+	// yaml.Unmarshal before that fix. Verify it now survives into the
+	// marshaled JSON that internal/chat.ParseAgentConstraints reads back.
+	if got, want := c["message_wake_policy"], "render_and_wait"; got != want {
+		t.Errorf("constraints.message_wake_policy = %v, want %q", got, want)
 	}
 }
 

@@ -52,10 +52,6 @@ roles:
     file: meta/nanite-agent-manager.md
     type: meta
     description: Develop and maintain the Nanite agent framework
-  steward:
-    file: meta/steward.md
-    type: meta
-    description: Primary chat agent for agent-ops — context curation, memory hygiene, KB maintenance, inbox triage, idea capture, handoff discipline. Does NOT edit project code.
 
 # ─── Defaults ────────────────────────────────────────────
 # Skills and tools loaded for every agent, on top of agent-specific lists.

@@ -1,3 +1,22 @@
+-- migrate:skip-if-column-exists subagent_runs last_activity_at
+--
+-- CW-20260817: this migration recreates subagent_runs from ITS OWN
+-- historical, narrow column/CHECK set (SQLite can't ALTER a CHECK
+-- constraint). With no schema_migrations table, every migration file
+-- re-runs on every boot — so without the skip-if-column-exists directive
+-- above, this would blindly rebuild subagent_runs from this file's 2026-era
+-- shape on every single restart, dropping every column a later migration
+-- (025/065/067/092) already added and resetting it to that later
+-- migration's default, and hard-failing outright once any row carries a
+-- status value only a later migration's wider CHECK permits (this crashed
+-- the live daemon on a real 'stalled' row — status 019 has never heard of).
+-- last_activity_at is 092's column, the newest one as of this fix — once a
+-- database has it, everything this migration (019) would do has already
+-- been superseded by 025/065/067/092's own rebuilds, so it's safe to skip
+-- entirely. On a genuinely fresh database the column doesn't exist yet, so
+-- this is a no-op and the migration below runs exactly as originally
+-- written.
+--
 -- G-4 subagent approval envelope.
 --
 -- Adds: 'interactive' mode, 'rejected' status, parent_agent_id persistence,

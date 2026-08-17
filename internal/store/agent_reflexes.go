@@ -334,6 +334,25 @@ func (s *Store) CountClassBaseReflexByName(ctx context.Context, classTag, name s
 	return n, nil
 }
 
+// CountAgentReflexByName returns the count of agent-scoped rows (a
+// specific agent_id, no class_tag) with the given agent_id and name.
+// The AgentID-scoped mirror of CountClassBaseReflexByName — used by
+// seeders that idempotently attach reflexes to one resolved agent
+// profile (e.g. CW-20260816-0023's Loom Curator/Weaver pilot pair)
+// rather than to a whole class.
+func (s *Store) CountAgentReflexByName(ctx context.Context, agentID, name string) (int, error) {
+	var n int
+	err := s.DB.QueryRowContext(ctx,
+		`SELECT COUNT(*) FROM agent_reflexes
+		   WHERE agent_id = ? AND name = ?`,
+		agentID, name,
+	).Scan(&n)
+	if err != nil {
+		return 0, fmt.Errorf("count agent reflexes: %w", err)
+	}
+	return n, nil
+}
+
 // InsertPendingReflex inserts a new pending_reflexes row. If row.ID is
 // empty, a ULID is generated.
 func (s *Store) InsertPendingReflex(ctx context.Context, row PendingReflex) (string, error) {

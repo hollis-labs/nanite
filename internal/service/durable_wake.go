@@ -94,6 +94,10 @@ func (s *durableWakeService) ListDue(ctx context.Context, now time.Time) ([]Dura
 			return nil, err
 		}
 		scopeSession, _ := s.resolveWakeScope(&inst)
+		scopeWorkspaceID := ""
+		if scopeSession != nil {
+			scopeWorkspaceID = scopeSession.WorkspaceID
+		}
 		for _, schedule := range schedules {
 			due, err := wakeScheduleDue(schedule, now)
 			if err != nil || !due {
@@ -112,7 +116,11 @@ func (s *durableWakeService) ListDue(ctx context.Context, now time.Time) ([]Dura
 				item.WorkspaceID = scopeSession.WorkspaceID
 				item.ProjectID = scopeSession.ProjectID
 			}
-			if skipReason := wakeSkipReason(&inst, scopeSession); skipReason != "" {
+			// The scheduled-tick path (this one) has no external caller
+			// supplying a WorkspaceID, so the skip check here is scoped
+			// purely to prior-session state — unlike Wake() below, which
+			// also honors a caller-supplied WorkspaceID.
+			if skipReason := wakeSkipReason(&inst, scopeWorkspaceID); skipReason != "" {
 				item.SkipReason = skipReason
 			}
 			items = append(items, item)
@@ -183,7 +191,16 @@ func (s *durableWakeService) Wake(ctx context.Context, instanceID string, req Du
 		workspaceID = scopeSession.WorkspaceID
 		projectID = scopeSession.ProjectID
 	}
-	if reason := wakeSkipReason(inst, scopeSession); reason != "" {
+	// CW-20260816-0020 finding: a fresh durable-agent instance has no prior
+	// session, so scopeSession is always nil on its very first-ever wake.
+	// The skip check must honor an explicit caller-supplied WorkspaceID
+	// (already folded into workspaceID above) in that case, not just a
+	// pre-existing session's — otherwise the first callback/API wake of any
+	// newly-seeded process-class instance always skips with "workspace
+	// unavailable", even when the caller passed one. This generalizes past
+	// Loom Curator to any durable-agent instance woken for the first time
+	// with an explicit WorkspaceID.
+	if reason := wakeSkipReason(inst, workspaceID); reason != "" {
 		s.recordWakeEvent(inst.ID, store.DurableAgentEventWakeSkipped, inst.CurrentSessionID, reason, nil)
 		return &DurableAgentWakeResult{
 			InstanceID: inst.ID,
@@ -267,7 +284,13 @@ func wakeReasonForInstance(inst *store.DurableAgentInstance) string {
 	return DurableAgentWakeScheduled
 }
 
-func wakeSkipReason(inst *store.DurableAgentInstance, scopeSession *store.Session) string {
+// wakeSkipReason returns why a wake should be skipped, or "" to proceed.
+// workspaceID is the value that will actually be handed to
+// DurableAgentService.Start (a caller-supplied WorkspaceID, or one inherited
+// from a prior scoped session — see call sites) so this check reflects
+// reality: an instance with no prior session can still wake successfully if
+// the caller supplied a WorkspaceID explicitly.
+func wakeSkipReason(inst *store.DurableAgentInstance, workspaceID string) string {
 	if inst == nil {
 		return "instance missing"
 	}
@@ -281,7 +304,7 @@ func wakeSkipReason(inst *store.DurableAgentInstance, scopeSession *store.Sessio
 	case store.DurableAgentStatusActive, store.DurableAgentStatusStarting, store.DurableAgentStatusStartRequested, store.DurableAgentStatusResumeRequested:
 		return "wake already active"
 	}
-	if scopeSession == nil || scopeSession.WorkspaceID == "" {
+	if workspaceID == "" {
 		return "workspace unavailable"
 	}
 	return ""

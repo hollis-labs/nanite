@@ -1,0 +1,20 @@
+name: Loom Curator
+slug: loom-curator
+profile_slug: loom-curator
+lifecycle_class: process
+provider: anthropic
+model: claude-sonnet-4-20250514
+runtime_kind: api
+launch_source_type: process_tick
+metadata:
+  scope: nanite-wiki
+  owner: hollis-labs
+  # CW-20260816-0021 (separate task) is expected to add Curator's own
+  # scheduled lint+export tick via a real agent_schedules row (see
+  # internal/store/agent_schedules.go). This seed only wires the
+  # fire-and-forget wake-on-compile path (CW-20260816-0020, this task).
+  # `schedule` below is a descriptive label only — not machine-parsed (see
+  # managed_durable_configs.go) — so it does not block 0021 from adding a
+  # real schedule later.
+  schedule: wake-triggered-only-pending-lint-export-tick
+  primary_inputs: fragments_engine_callback,loom_compile_api

@@ -171,6 +171,18 @@ func (a *API) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/durable-agent-wake/due", a.handleListDurableAgentDueWake)
 	mux.HandleFunc("POST /api/durable-agent-wake/run-due", a.handleRunDurableAgentDueWake)
 
+	// CW-20260816-0020: Fragments Engine's `callback` destination (fifth
+	// destination type, loom-architecture.md §4) POSTs an opaque
+	// {generator, fragment:{...}} body here, fire-and-forget, whenever a
+	// fragment routes into the `nanite` wiki bundle. This is a
+	// purpose-built decode target rather than the generic
+	// /api/durable-agents/{id}/wake above (whose DurableAgentStartRequest
+	// shape does not match FE's payload at all — see handler doc comment)
+	// and it resolves Loom Curator's durable-agent instance by slug
+	// internally, so this URL stays fixed and version-controlled
+	// regardless of the instance's DB-minted UUID.
+	mux.HandleFunc("POST /api/loom/curator-wake", a.handleLoomCuratorWake)
+
 	// Durable agent recipes and builder.
 	mux.HandleFunc("GET /api/durable-agent-recipes", a.handleListDurableAgentRecipes)
 	mux.HandleFunc("GET /api/durable-agent-recipes/{id}", a.handleGetDurableAgentRecipe)

@@ -160,10 +160,23 @@ func (s *durableWakeService) RunDue(ctx context.Context, req DurableAgentWakeRun
 			out.Results = append(out.Results, result)
 			continue
 		}
+		// CW-20260816-0021 finding: AgentSchedule.Body's doc comment
+		// describes a "composer (FU-27)" that folds Body into a per-tick
+		// procedure body — no such composer exists anywhere in this
+		// codebase (GetDueSchedules, the API it implies, has zero
+		// production call sites; only tests use it). The only real,
+		// wired delivery mechanism from a scheduled agent_schedules row
+		// into the woken session is DurableAgentWakePayload.Prompt,
+		// which Start/Resume's deliverWakePrompt injects as a genuine
+		// user turn (durable_agents.go). Forwarding Body here is what
+		// makes a scheduled tick's instructions actually reach the
+		// agent — general fix, not Loom-specific: it benefits any
+		// class:process instance with a real schedule row, including
+		// Atlas Curator whenever it gets one.
 		wakeResult, err := s.Wake(ctx, item.InstanceID, DurableAgentWakeRequest{
 			WorkspaceID: item.WorkspaceID,
 			ProjectID:   item.ProjectID,
-			WakePayload: DurableAgentWakePayload{Reason: item.WakeReason},
+			WakePayload: DurableAgentWakePayload{Reason: item.WakeReason, Prompt: item.Schedule.Body},
 		})
 		if wakeResult != nil {
 			wakeResult.ScheduleID = item.Schedule.ID

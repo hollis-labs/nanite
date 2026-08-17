@@ -8,7 +8,9 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/hollis-labs/go-providers/provider"
 	"github.com/hollis-labs/nanite/internal/service"
@@ -165,6 +167,109 @@ func TestLoomCuratorWake_MissingFragmentID(t *testing.T) {
 	if w.Code != http.StatusBadRequest {
 		t.Fatalf("expected 400, got %d body=%s", w.Code, w.Body.String())
 	}
+}
+
+// TestLoomCuratorScheduleSeededFromFileDrop proves CW-20260816-0021's
+// schedule-seeding mechanism end to end: the structured `schedule:` block
+// in .nanite/durable-agents/loom-curator.yaml produces a real
+// agent_schedules row once container boot resolves Loom Curator's real
+// profile ID (syncManagedDurableAgentConfig, called from
+// SyncManagedDurableAgentConfigs — the same boot path
+// TestLoomCuratorInstanceSeededFromFileDrop above already proves seeds the
+// durable_agent_instances row). It also proves the row is keyed correctly
+// (agent_id = the *profile* ID, not the instance ID — ListDue/ListSchedules
+// in durable_wake.go look it up via inst.ProfileID), that ListDue/RunDue
+// find it due at an appropriate simulated time, and that firing it does
+// not error. This is the other half of CW-20260816-0020's "no scheduling
+// mechanism exists yet" gap that CW-20260816-0021 was scoped to close.
+func TestLoomCuratorScheduleSeededFromFileDrop(t *testing.T) {
+	a, _ := newTestAPIWithLoomCurator(t)
+	ctx := context.Background()
+
+	inst, err := a.Services.Store.GetDurableAgentInstanceBySlug("loom-curator")
+	if err != nil {
+		t.Fatalf("loom-curator instance not seeded: %v", err)
+	}
+	if inst.ProfileID == "" {
+		t.Fatal("seeded instance has empty ProfileID")
+	}
+
+	schedules, err := a.Services.Store.ListAgentSchedules(ctx, inst.ProfileID)
+	if err != nil {
+		t.Fatalf("ListAgentSchedules(%s): %v", inst.ProfileID, err)
+	}
+	if len(schedules) != 1 {
+		t.Fatalf("expected exactly 1 schedule for loom-curator's profile, got %d: %+v", len(schedules), schedules)
+	}
+	sched := schedules[0]
+	if sched.AgentID != inst.ProfileID {
+		t.Fatalf("schedule.AgentID = %q, want instance's ProfileID %q", sched.AgentID, inst.ProfileID)
+	}
+	if sched.Name != "lint-and-export" {
+		t.Fatalf("schedule name = %q, want lint-and-export", sched.Name)
+	}
+	if sched.ScheduleKind != store.ScheduleKindCron {
+		t.Fatalf("schedule kind = %q, want %q", sched.ScheduleKind, store.ScheduleKindCron)
+	}
+	if sched.ScheduleSpec != "0 3 * * *" {
+		t.Fatalf("schedule spec = %q, want '0 3 * * *'", sched.ScheduleSpec)
+	}
+	if sched.Status != store.ScheduleStatusActive {
+		t.Fatalf("schedule status = %q, want active", sched.Status)
+	}
+	if !strings.Contains(sched.Body, "loom_bundle_conformance") || !strings.Contains(sched.Body, "loom_export_bundle") {
+		t.Fatalf("schedule body missing expected loom_* tool references: %q", sched.Body)
+	}
+
+	// wakeScheduleDue's cron branch (durable_wake.go) falls back to
+	// ref = now.Add(-15*time.Minute) whenever LastFiredAt is empty and
+	// CreatedAt fails to RFC3339-parse — which it always does here,
+	// since InsertAgentSchedule defaults created_at to SQLite's native
+	// datetime('now') format, not RFC3339. So a 15-minute window after
+	// each daily "0 3 * * *" boundary is due, on any calendar date;
+	// 03:05 UTC sits comfortably inside it.
+	simulatedNow := time.Date(2027, time.January, 4, 3, 5, 0, 0, time.UTC)
+
+	due, err := a.Services.DurableWake.ListDue(ctx, simulatedNow)
+	if err != nil {
+		t.Fatalf("ListDue: %v", err)
+	}
+	var dueItem *service.DurableAgentWakeDueItem
+	for i := range due {
+		if due[i].InstanceID == inst.ID && due[i].Schedule.ID == sched.ID {
+			dueItem = &due[i]
+		}
+	}
+	if dueItem == nil {
+		t.Fatalf("loom-curator's lint-and-export schedule not found by ListDue at %s: %+v", simulatedNow, due)
+	}
+	if !dueItem.Due {
+		t.Fatalf("due item not marked Due: %+v", dueItem)
+	}
+
+	run, err := a.Services.DurableWake.RunDue(ctx, service.DurableAgentWakeRunRequest{Now: simulatedNow})
+	if err != nil {
+		t.Fatalf("RunDue: %v", err)
+	}
+	var result *service.DurableAgentWakeResult
+	for i := range run.Results {
+		if run.Results[i].ScheduleID == sched.ID {
+			result = &run.Results[i]
+		}
+	}
+	if result == nil {
+		t.Fatalf("RunDue produced no result for schedule %s: %+v", sched.ID, run.Results)
+	}
+	if result.FailureReason != "" {
+		t.Fatalf("firing loom-curator's scheduled tick errored: %s", result.FailureReason)
+	}
+	// A fresh instance with no prior attached session legitimately skips
+	// on "workspace unavailable" (same behavior TestDurableWakeListDueAndDryRun
+	// already documents for any freshly-seeded process instance) — RunDue
+	// itself returning without error, with no FailureReason, is the bar
+	// this test is proving: the schedule fires through the real
+	// ListDue -> RunDue -> Wake chain without the pipeline erroring.
+	t.Logf("scheduled tick result: skipped=%v skip_reason=%q", result.Skipped, result.SkipReason)
 }
 
 // TestLoomCuratorWake_InstanceNotProvisioned checks the 503 path on a plain

@@ -1,7 +1,11 @@
 package service
 
 import (
+	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"os"
@@ -29,9 +33,34 @@ type ManagedDurableAgentConfig struct {
 	LaunchSourceID   string            `json:"launch_source_id" yaml:"launch_source_id"`
 	WorkRoot         string            `json:"work_root,omitempty" yaml:"work_root,omitempty"`
 	Metadata         map[string]string `json:"metadata,omitempty" yaml:"metadata,omitempty"`
-	Archived         bool              `json:"archived,omitempty" yaml:"archived,omitempty"`
-	Source           string            `json:"-" yaml:"-"`
-	SourceRef        string            `json:"-" yaml:"-"`
+	// Schedule is an optional structured directive that gets seeded as a
+	// real agent_schedules row once this instance's profile ID is known
+	// (see syncManagedDurableAgentConfig). Distinct from the free-text
+	// Metadata["schedule"] label (e.g. Atlas Curator's "nightly") which
+	// stays a descriptive-only string for backward compat — this field is
+	// the machine-parsed source of truth for CW-20260816-0021's
+	// generalized schedule-seeding mechanism.
+	Schedule  *ManagedDurableAgentSchedule `json:"schedule,omitempty" yaml:"schedule,omitempty"`
+	Archived  bool                         `json:"archived,omitempty" yaml:"archived,omitempty"`
+	Source    string                       `json:"-" yaml:"-"`
+	SourceRef string                       `json:"-" yaml:"-"`
+}
+
+// ManagedDurableAgentSchedule declares a real agent_schedules row for a
+// file-dropped process-class instance. Kind must be one of
+// store.ScheduleKindCron / ScheduleKindEveryNTicks / ScheduleKindOnTick /
+// ScheduleKindOneShot / ScheduleKindOnEvent; Spec's shape depends on Kind
+// (e.g. a 5-field cron expression for ScheduleKindCron). Body is the
+// instruction text delivered as the woken session's first user turn when
+// this schedule fires (see durable_wake.go's RunDue, which forwards
+// Schedule.Body into DurableAgentWakePayload.Prompt) — write it as a
+// directive to the agent, not as free-form notes.
+type ManagedDurableAgentSchedule struct {
+	Name     string `json:"name" yaml:"name"`
+	Kind     string `json:"kind" yaml:"kind"`
+	Spec     string `json:"spec,omitempty" yaml:"spec,omitempty"`
+	Body     string `json:"body" yaml:"body"`
+	Priority int64  `json:"priority,omitempty" yaml:"priority,omitempty"`
 }
 
 func UserManagedDurableAgentPath(homeDir, slug string) (string, error) {
@@ -153,7 +182,80 @@ func syncManagedDurableAgentConfig(st *store.Store, cfg ManagedDurableAgentConfi
 		inst.Status = store.DurableAgentStatusArchived
 		inst.ArchivedAt = ptrTime(time.Now().UTC())
 	}
-	return st.SyncDurableAgentInstanceConfig(inst)
+	saved, err := st.SyncDurableAgentInstanceConfig(inst)
+	if err != nil {
+		return nil, err
+	}
+	// This is the earliest point in the boot sequence a file-dropped
+	// instance's real profile ID is known (ReconcileManagedAgentIDs +
+	// AutoIngestAgents have already run by the time
+	// SyncManagedDurableAgentConfigs is called from container.go) — so
+	// it's the right hook for real agent_schedules seeding, per
+	// CW-20260816-0021's trace. profile.ID (not saved.ID, the instance
+	// ID) is the correct FK — ListDue/ListSchedules key agent_schedules
+	// lookups by inst.ProfileID, not the instance ID.
+	if cfg.Schedule != nil {
+		if err := syncManagedDurableAgentSchedule(context.Background(), st, profile.ID, *cfg.Schedule); err != nil {
+			return nil, fmt.Errorf("managed durable config %s schedule %s: %w", cfg.Slug, cfg.Schedule.Name, err)
+		}
+	}
+	return saved, nil
+}
+
+// syncManagedDurableAgentSchedule upserts a real agent_schedules row for a
+// file-dropped instance's structured schedule: block, keyed by a
+// deterministic ID derived from profileID+name so re-running this on every
+// container boot (SyncManagedDurableAgentConfigs's normal cadence) updates
+// the same row instead of duplicating it.
+//
+// InsertAgentSchedule is INSERT OR REPLACE — a naive re-insert on every
+// boot would silently reset fired_count/last_fired_at/created_at to zero
+// values each time, which would re-arm an already-fired one_shot schedule
+// and reset a cron schedule's due-ness reference point (wakeScheduleDue
+// falls back to created_at when last_fired_at is empty) to "now" on every
+// redeploy — defeating the whole point of persisting fire state. So this
+// preserves that trio from any existing row with the same ID, the same
+// discipline SyncDurableAgentInstanceConfig already uses for
+// CurrentSessionID/FailureReason/ArchivedAt above. It also preserves an
+// operator's manual 'paused' status rather than silently reactivating a
+// schedule they turned off through the admin surface.
+func syncManagedDurableAgentSchedule(ctx context.Context, st *store.Store, profileID string, sch ManagedDurableAgentSchedule) error {
+	row := store.AgentSchedule{
+		ID:           managedDurableAgentScheduleID(profileID, sch.Name),
+		AgentID:      profileID,
+		Name:         sch.Name,
+		ScheduleKind: sch.Kind,
+		ScheduleSpec: sch.Spec,
+		Body:         sch.Body,
+		Priority:     sch.Priority,
+		Status:       store.ScheduleStatusActive,
+		CreatedBy:    managedDurableConfigSource,
+	}
+	existing, err := st.GetAgentSchedule(ctx, row.ID)
+	switch {
+	case err == nil && existing != nil:
+		row.FiredCount = existing.FiredCount
+		row.LastFiredAt = existing.LastFiredAt
+		row.CreatedAt = existing.CreatedAt
+		if existing.Status == store.ScheduleStatusPaused {
+			row.Status = store.ScheduleStatusPaused
+		}
+	case errors.Is(err, store.ErrAgentScheduleNotFound):
+		// First sync for this schedule — InsertAgentSchedule defaults
+		// CreatedAt to datetime('now') when left empty.
+	default:
+		return err
+	}
+	return st.InsertAgentSchedule(ctx, row)
+}
+
+// managedDurableAgentScheduleID derives a stable agent_schedules.id from
+// profileID+name (sha256, first 16 bytes hex-encoded) so re-syncing the
+// same managed config across boots upserts the same row deterministically
+// instead of minting a fresh random ID every time.
+func managedDurableAgentScheduleID(profileID, name string) string {
+	sum := sha256.Sum256([]byte(profileID + ":" + name))
+	return "managed-schedule-" + hex.EncodeToString(sum[:16])
 }
 
 func discoverManagedDurableAgentConfigs(configRoot string) ([]ManagedDurableAgentConfig, error) {

@@ -1,15 +1,28 @@
-// Package driftguard implements the FU-30 reflex engine — predicate
-// evaluation, action dispatch, and base-reflex seeding for the agridd
-// monitor loop.
+// Package reflexes implements the FU-30 reflex engine — predicate
+// evaluation, event and interval triggers, action dispatch, and
+// base-reflex seeding for durable agents. A reflex evaluates a
+// windowed snapshot of session-state signals and, when its trigger
+// fires, stages an action such as inject_reminder, halt_session,
+// send_message, force_tool_choice, or add_schedule. This matches the
+// domain vocabulary used everywhere else: the agent_reflexes and
+// pending_reflexes DB tables, the store.AgentReflex/store.PendingReflex
+// types, and the /api/agents/{id}/reflexes API surface.
 //
-// Naming note (CW-20260816-0062): this package was formerly
-// internal/agent/reflexes. It was renamed to disambiguate it from the
-// unrelated internal/reflex package (the deterministic phrase-match
-// router that feeds dispatch.AssignRole — see docs/agent-reflex-catalog.md
-// and docs/reflex-authoring.md). The domain vocabulary inside this
-// package ("reflex" as a stored predicate/action row, store.AgentReflex,
-// the agent_reflexes table, /api/agents/{id}/reflexes) is unchanged —
-// only the Go package identity moved.
+// Not to be confused with: internal/reflex (singular) — a completely
+// different system, a deterministic phrase-match dispatch router that
+// feeds dispatch.AssignRole from user input before nanite_execute_task
+// runs. It shares no code, no lifecycle, and no runtime with this
+// package; the two only share a root word. See
+// docs/agent-reflex-catalog.md and docs/reflex-authoring.md for that
+// system's docs.
+//
+// Historical note: this package was briefly named driftguard
+// (CW-20260816-0062) in an attempt to resolve the naming collision
+// above, then renamed back to reflexes because "driftguard" undersold
+// the package's scope (general predicate/event/interval evaluation,
+// not just drift detection) and broke from the surrounding domain
+// vocabulary. Old references to internal/agent/driftguard mean this
+// package.
 //
 // Architecture:
 //
@@ -41,7 +54,7 @@
 //
 // Reference: docs/durable-agents/notes/torque-supervisor-hardening-log.md
 // "Diagnostic reframing 2026-05-20" entry.
-package driftguard
+package reflexes
 
 import (
 	"github.com/hollis-labs/nanite/internal/store"

@@ -21,7 +21,7 @@ import (
 	"github.com/hollis-labs/go-providers/provider"
 	"github.com/hollis-labs/nanite/internal/agent"
 	"github.com/hollis-labs/nanite/internal/agent/builtin"
-	"github.com/hollis-labs/nanite/internal/agent/driftguard"
+	"github.com/hollis-labs/nanite/internal/agent/reflexes"
 	"github.com/hollis-labs/nanite/internal/agentregistry"
 	"github.com/hollis-labs/nanite/internal/background"
 	"github.com/hollis-labs/nanite/internal/bootprofile"
@@ -913,7 +913,7 @@ func NewContainer(cfg ContainerConfig) (*Container, error) {
 	// reminders / forced tool choices. Plugin hooks (nil-safe) let plugins
 	// rewrite reflex state/actions; the Halt executor marks the session
 	// halted + logs the event when a reflex resolves to halt_session.
-	reflexEngine := driftguard.NewEngine(cfg.Store, slog.Default())
+	reflexEngine := reflexes.NewEngine(cfg.Store, slog.Default())
 	if cfg.Plugins != nil {
 		reflexEngine.SetPluginHooks(cfg.Plugins)
 	}
@@ -929,7 +929,7 @@ func NewContainer(cfg ContainerConfig) (*Container, error) {
 		cfg.Store.LogEvent(sessionID, "session_halted", "reflex", "reflex-fired halt", string(metaBlob))
 		return nil
 	}
-	if n, err := driftguard.SeedBaseReflexes(context.Background(), cfg.Store, slog.Default()); err != nil {
+	if n, err := reflexes.SeedBaseReflexes(context.Background(), cfg.Store, slog.Default()); err != nil {
 		slog.Warn("service container: reflex base-seed", "err", err)
 	} else if n > 0 {
 		slog.Info("service container: seeded base reflexes", "count", n)

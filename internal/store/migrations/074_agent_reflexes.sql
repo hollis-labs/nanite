@@ -4,14 +4,14 @@
 -- agent's recent state evaluates true. Reflexes absorb the FU-21 drift
 -- detector (echo / cache-miss conjunctions) and extend the pattern to
 -- general predicate AND/OR over windowed signals plus event and interval
--- triggers. The monitor-loop driver calls driftguard.Engine.Evaluate per
+-- triggers. The monitor-loop driver calls reflexes.Engine.Evaluate per
 -- tick before delivering the tick to the agent.
 --
 -- agent_reflexes: live registered reflexes.
 --   agent_id IS NULL means a class-bound base reflex (seeded at startup
 --   per class). agent-specific overrides bind to a single agent_id.
 --   trigger_spec / action_spec are JSON blobs interpreted by the
---   evaluator and executor in internal/agent/driftguard.
+--   evaluator and executor in internal/agent/reflexes.
 --
 -- pending_reflexes: proposed-by-agent reflexes awaiting operator review.
 --   The agent_reflex_propose self-tool writes here. The operator review

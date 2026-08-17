@@ -25,7 +25,7 @@ const (
 	EventMessageSent     = "message.sent"
 	EventMessageReceived = "message.received"
 	// planned-v2: needed once message delete API handler is added
-	EventMessageDeleted = "message.deleted"
+	EventMessageDeleted      = "message.deleted"
 	EventMessageBookmarked   = "message.bookmarked"
 	EventMessageUnbookmarked = "message.unbookmarked"
 
@@ -85,7 +85,6 @@ const (
 	EventArtifactCreated = "artifact.created"
 	// planned-v2: needed once artifact delete API handler is added
 	EventArtifactDeleted = "artifact.deleted"
-
 )
 
 // Claude Code hook name aliases.
@@ -129,13 +128,13 @@ type EventData struct {
 	AgentVersion    string `json:"agent_version,omitempty"`
 
 	// Message events
-	MessageID      string      `json:"message_id,omitempty"`
-	Content        string      `json:"content,omitempty"`
-	Role           string      `json:"role,omitempty"`
-	TokensUsed     int         `json:"tokens_used,omitempty"`
-	ResponseTime   int64       `json:"response_time_ms,omitempty"`
-	EnvelopeType   string      `json:"envelope_type,omitempty"`
-	EnvelopeData   interface{} `json:"envelope_data,omitempty"`
+	MessageID    string      `json:"message_id,omitempty"`
+	Content      string      `json:"content,omitempty"`
+	Role         string      `json:"role,omitempty"`
+	TokensUsed   int         `json:"tokens_used,omitempty"`
+	ResponseTime int64       `json:"response_time_ms,omitempty"`
+	EnvelopeType string      `json:"envelope_type,omitempty"`
+	EnvelopeData interface{} `json:"envelope_data,omitempty"`
 
 	// Mode events
 	PreviousMode  string `json:"previous_mode,omitempty"`
@@ -657,7 +656,7 @@ func (h *Host) EmitPreHook(eventType, sessionID string, data map[string]interfac
 	return false
 }
 
-// Reflex engine events (FU-30). Emitted by internal/agent/driftguard.Engine
+// Reflex engine events (FU-30). Emitted by internal/agent/reflexes.Engine
 // when a reflex fires / an action is staged, for plugin + frontend
 // observability. The full reflex payload (agent, reflex name, action kind,
 // trigger evidence) rides under EventData.ActionData ("action_data").

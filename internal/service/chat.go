@@ -15,7 +15,7 @@ import (
 	"github.com/hollis-labs/go-modelsdev/modelsdev"
 	"github.com/hollis-labs/go-providers/provider"
 	"github.com/hollis-labs/nanite/internal/agent"
-	"github.com/hollis-labs/nanite/internal/agent/driftguard"
+	"github.com/hollis-labs/nanite/internal/agent/reflexes"
 	"github.com/hollis-labs/nanite/internal/agentregistry"
 	"github.com/hollis-labs/nanite/internal/bootprofile"
 	"github.com/hollis-labs/nanite/internal/chat"
@@ -26,8 +26,8 @@ import (
 	inspectsvc "github.com/hollis-labs/nanite/internal/inspector"
 	"github.com/hollis-labs/nanite/internal/lifecycle"
 	nllmanthropic "github.com/hollis-labs/nanite/internal/llm/anthropic"
-	"github.com/hollis-labs/nanite/internal/messaging"
 	"github.com/hollis-labs/nanite/internal/loopdetect"
+	"github.com/hollis-labs/nanite/internal/messaging"
 	"github.com/hollis-labs/nanite/internal/permission"
 	"github.com/hollis-labs/nanite/internal/reminders"
 	runtimeagent "github.com/hollis-labs/nanite/internal/runtime/agent"
@@ -178,7 +178,7 @@ type ChatServiceConfig struct {
 	// ReflexEngine is the FU-30 DB-backed agent reflex engine. nil-safe: when
 	// nil, per-turn reflex evaluation is skipped. Evaluates agent_reflexes,
 	// applies inject_reminder / force_tool_choice / halt actions per turn.
-	ReflexEngine *driftguard.Engine
+	ReflexEngine *reflexes.Engine
 
 	// AgentDeps is the agent-runtime composition root (Phase 4c.1 of the
 	// agent-boot adoption). Threaded through here so HandleMessage can
@@ -325,7 +325,7 @@ type chatServiceImpl struct {
 
 	// reflexEngine evaluates DB-backed agent reflexes per turn (FU-30) and
 	// returns staged actions injected into the turn. nil-safe.
-	reflexEngine *driftguard.Engine
+	reflexEngine *reflexes.Engine
 
 	// lifecycle tracks async generateResponse goroutines so Shutdown can
 	// cancel them and wait for them to drain rather than orphan them.

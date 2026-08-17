@@ -3,7 +3,7 @@ package store
 // FU-30 Phase 3 Stage 3.c — store accessors for agent_reflexes and
 // pending_reflexes. Reflexes absorb the FU-21 drift detectors and extend
 // to general predicate-AND/OR + event + interval triggers; see
-// internal/agent/driftguard for the evaluator + executor.
+// internal/agent/reflexes for the evaluator + executor.
 
 import (
 	"context"

@@ -124,9 +124,9 @@ Use Giphy and possibly oEmbed to dogfood plugin-defined reflexes.
 
 Current Nanite reflex pointers:
 
-- `internal/agent/driftguard/types.go`
-- `internal/agent/driftguard/seeds.go`
-- `internal/agent/driftguard/engine_plugin_test.go`
+- `internal/agent/reflexes/types.go`
+- `internal/agent/reflexes/seeds.go`
+- `internal/agent/reflexes/engine_plugin_test.go`
 - `internal/plugin/filter.go` contains `FilterReflexState` and `FilterReflexAction`
 
 There is plugin hook/filter integration, but no obvious plugin manifest surface for declaring reflexes.

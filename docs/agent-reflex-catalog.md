@@ -5,7 +5,7 @@
 **Complements:** `docs/agent-pattern-catalog.md` (M2), `internal/dispatch/role.go` (AssignRole)
 **Consumed by:** playbook runtime (CW-20260419-0027) — not yet implemented
 
-> **Not to be confused with:** `internal/agent/driftguard` (formerly `internal/agent/reflexes`), the unrelated FU-30 session-drift monitor that watches durable-agent token/cache/tool-call signals for runaway-loop patterns. Same root term, no shared code or lifecycle — disambiguated in CW-20260816-0062.
+> **Not to be confused with:** `internal/reflex` (singular) is the phrase-match dispatch router this doc describes; `internal/agent/reflexes` (plural, under `internal/agent/`) is the unrelated FU-30 predicate/event/interval steering engine for durable agents — it watches session-state signals (token usage, cache behavior, tool calls) and stages actions like `inject_reminder`/`halt_session`. Different system, different code, different lifecycle, similar name only. (It was briefly named `internal/agent/driftguard` per CW-20260816-0062, then renamed back.)
 
 ---
 

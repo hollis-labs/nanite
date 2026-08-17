@@ -213,3 +213,103 @@ func TestDurableWakeFailurePersistsFailureReason(t *testing.T) {
 		t.Fatalf("expected wake_skipped event, got %+v", events)
 	}
 }
+
+// TestDurableWakeProcessClassRewakeableWhileActive is the regression test for
+// the CW-20260817 finding: nothing anywhere transitions a durable-agent
+// instance back out of "active" once Start() sets it (no completion hook
+// from chat's async generation), so before this fix a process-class instance
+// (SessionPolicyFreshPerWake — a brand new session every wake, by design)
+// was wakeable exactly once, ever — every wake after the first was silently
+// skipped with "wake already active" forever, including CW-20260816-0021's
+// own daily scheduled tick. This proves a process-class instance already
+// sitting Active still wakes (and gets a genuinely fresh session, distinct
+// from whatever session it was "active" with before).
+func TestDurableWakeProcessClassRewakeableWhileActive(t *testing.T) {
+	st := newDurableAgentServiceTestStore(t)
+	ctx := context.Background()
+	profile := &store.AgentProfile{Name: "Rewake Agent", Slug: "rewake-agent", SystemPrompt: "x"}
+	if err := st.CreateAgent(profile); err != nil {
+		t.Fatalf("CreateAgent: %v", err)
+	}
+	if err := st.CreateWorkspace(&store.Workspace{ID: "workspace-rewake", Name: "Workspace Rewake"}); err != nil {
+		t.Fatalf("CreateWorkspace: %v", err)
+	}
+	priorSession := &store.Session{WorkspaceID: "workspace-rewake", Provider: "anthropic", Model: "model-a"}
+	if err := st.CreateSession(priorSession); err != nil {
+		t.Fatalf("CreateSession: %v", err)
+	}
+	inst := &store.DurableAgentInstance{
+		Name:             "Rewake Instance",
+		Slug:             "rewake-instance",
+		ProfileID:        profile.ID,
+		LifecycleClass:   store.DurableAgentClassProcess,
+		Provider:         "anthropic",
+		Model:            "model-a",
+		RuntimeKind:      "api",
+		Status:           store.DurableAgentStatusActive,
+		CurrentSessionID: priorSession.ID,
+	}
+	if err := st.CreateDurableAgentInstance(inst); err != nil {
+		t.Fatalf("CreateDurableAgentInstance: %v", err)
+	}
+	if err := st.AttachDurableAgentInstanceSession(inst.ID, priorSession.ID, store.DurableAgentSessionRelationWake); err != nil {
+		t.Fatalf("AttachDurableAgentInstanceSession: %v", err)
+	}
+
+	wakeSvc := NewDurableAgentWakeService(st, NewDurableAgentService(st))
+	result, err := wakeSvc.Wake(ctx, inst.ID, DurableAgentWakeRequest{
+		WorkspaceID: "workspace-rewake",
+		WakePayload: DurableAgentWakePayload{Reason: "callback:wiki_page"},
+	})
+	if err != nil {
+		t.Fatalf("Wake: unexpected error: %v", err)
+	}
+	if result.Skipped {
+		t.Fatalf("process-class wake skipped while instance was already active: %+v", result)
+	}
+	if result.LaunchResult == nil || result.LaunchResult.Session == nil {
+		t.Fatalf("wake result missing launch_result/session: %+v", result)
+	}
+	if result.LaunchResult.Session.ID == priorSession.ID {
+		t.Fatalf("expected a fresh session distinct from the prior active one, got the same session %s", priorSession.ID)
+	}
+}
+
+// TestDurableWakeAdvisorClassStillBlockedWhileActive confirms the fix above
+// is scoped to process-class only: an advisor-class instance (which reuses
+// one long-lived session — SessionPolicyReuseLatestOrCreate) must still skip
+// a wake while already active, since "active" there means "has a live
+// session to reuse", not "finished its one-shot work".
+func TestDurableWakeAdvisorClassStillBlockedWhileActive(t *testing.T) {
+	st := newDurableAgentServiceTestStore(t)
+	ctx := context.Background()
+	profile := &store.AgentProfile{Name: "Advisor Agent", Slug: "advisor-agent", SystemPrompt: "x"}
+	if err := st.CreateAgent(profile); err != nil {
+		t.Fatalf("CreateAgent: %v", err)
+	}
+	inst := &store.DurableAgentInstance{
+		Name:           "Advisor Instance",
+		Slug:           "advisor-instance",
+		ProfileID:      profile.ID,
+		LifecycleClass: store.DurableAgentClassAdvisor,
+		Provider:       "anthropic",
+		Model:          "model-a",
+		RuntimeKind:    "api",
+		Status:         store.DurableAgentStatusActive,
+	}
+	if err := st.CreateDurableAgentInstance(inst); err != nil {
+		t.Fatalf("CreateDurableAgentInstance: %v", err)
+	}
+
+	wakeSvc := NewDurableAgentWakeService(st, NewDurableAgentService(st))
+	result, err := wakeSvc.Wake(ctx, inst.ID, DurableAgentWakeRequest{
+		WorkspaceID: "workspace-does-not-exist",
+		WakePayload: DurableAgentWakePayload{Reason: DurableAgentWakeManual},
+	})
+	if err != nil {
+		t.Fatalf("Wake: unexpected error: %v", err)
+	}
+	if !result.Skipped || result.SkipReason != "wake already active" {
+		t.Fatalf("expected advisor-class wake to stay blocked while active, got %+v", result)
+	}
+}

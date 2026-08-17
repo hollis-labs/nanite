@@ -3,7 +3,18 @@ slug: loom-curator
 profile_slug: loom-curator
 lifecycle_class: process
 provider: anthropic
-model: claude-sonnet-4-20250514
+# CW-20260817: left blank (not pinned) on purpose — store.ResolveProviderAnd
+# model.go resolves an empty instance Model to the current runtime default
+# at request time. This file previously pinned "claude-sonnet-4-20250514",
+# a snapshot the Anthropic API has since removed (verified live: every wake
+# turn 404'd with "model: claude-sonnet-4-20250514" until this was cleared).
+# This is the exact anti-pattern durable_agents.go's CW-20260526-0003 comment
+# already warns about ("previous bare-literal fallbacks here were the source
+# of the `claude-sonnet-4` 404 bug") — orchestrator.yaml already leaves this
+# blank for the same reason. Every other .nanite/durable-agents/*.yaml still
+# pins the same stale snapshot; out of scope here (Loom Curator only) but
+# worth a follow-up sweep.
+model: ""
 runtime_kind: api
 launch_source_type: process_tick
 metadata:

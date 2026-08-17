@@ -1090,6 +1090,41 @@ func startBackgroundWorkers(lc *lifecycle.Manager, container *service.Container)
 			}
 		})
 	}
+
+	// Periodic durable-agent wake tick.
+	// CW-20260816-0005: RunDue fires class:process durable agent instances
+	// (e.g. Atlas Curator's nightly schedule) whose agent_schedules entry is
+	// due. It previously had no internal ticker and depended entirely on an
+	// external caller hitting POST /api/durable-agent-wake/run-due. RunDue is
+	// idempotent and cheap (a due-ness check per instance), so a 2-minute
+	// interval — matching stale-worker-reaper's cadence — gives schedules a
+	// tight enough resolution for both Atlas Curator today and Loom Curator's
+	// planned lint+export tick, without adding meaningful load.
+	lc.Go("durable-agent-wake-tick", func(ctx context.Context) {
+		ticker := time.NewTicker(2 * time.Minute)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				result, err := container.DurableWake.RunDue(ctx, service.DurableAgentWakeRunRequest{Now: time.Now()})
+				if err != nil {
+					slog.Warn("durable agent wake tick: run due failed", "error", err)
+					continue
+				}
+				woken := 0
+				for _, r := range result.Results {
+					if !r.Skipped {
+						woken++
+					}
+				}
+				if woken > 0 {
+					slog.Info("durable agent wake tick: woke durable agent instances", "count", woken)
+				}
+			}
+		}
+	})
 }
 
 // discoverAndLoadPlugins finds plugins on disk, loads them and builtins,

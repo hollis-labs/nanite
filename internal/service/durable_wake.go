@@ -303,6 +303,25 @@ func wakeReasonForInstance(inst *store.DurableAgentInstance) string {
 // from a prior scoped session — see call sites) so this check reflects
 // reality: an instance with no prior session can still wake successfully if
 // the caller supplied a WorkspaceID explicitly.
+//
+// CW-20260817 finding: nothing anywhere in this codebase ever transitions a
+// durable_agent_instances row back out of "active" once Start() sets it —
+// there is no completion hook from chat's async generation (launchGeneration,
+// chat.go) back into durable_agent_instances.status. For an
+// advisor/harness-class instance (SessionPolicyReuseLatestOrCreate /
+// ReuseManaged) that's fine: "active" genuinely means "has a live, reusable
+// session", which stays true indefinitely. But a process-class instance uses
+// SessionPolicyFreshPerWake (durableAgentLaunchPolicyFor) — every wake spins
+// up its own independent session, so there is no session-reuse collision for
+// "active" to be guarding against. Treating it as a permanent block meant
+// every process-class agent (Loom Curator, Atlas Curator, Torque Supervisor
+// — grep class: process under .nanite/agents/) was wakeable exactly once,
+// ever: the very first wake (callback or scheduled) set status to Active and
+// no later wake — including CW-20260816-0021's own daily scheduled tick —
+// could ever fire again. Only the genuinely in-flight launch states
+// (Starting/StartRequested/ResumeRequested, which Start() only holds for the
+// duration of the synchronous session-creation section) still guard against
+// a real concurrent-launch race.
 func wakeSkipReason(inst *store.DurableAgentInstance, workspaceID string) string {
 	if inst == nil {
 		return "instance missing"
@@ -314,7 +333,11 @@ func wakeSkipReason(inst *store.DurableAgentInstance, workspaceID string) string
 		return "instance paused"
 	case store.DurableAgentStatusStopped:
 		return "instance stopped"
-	case store.DurableAgentStatusActive, store.DurableAgentStatusStarting, store.DurableAgentStatusStartRequested, store.DurableAgentStatusResumeRequested:
+	case store.DurableAgentStatusActive:
+		if inst.LifecycleClass != store.DurableAgentClassProcess {
+			return "wake already active"
+		}
+	case store.DurableAgentStatusStarting, store.DurableAgentStatusStartRequested, store.DurableAgentStatusResumeRequested:
 		return "wake already active"
 	}
 	if workspaceID == "" {

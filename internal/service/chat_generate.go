@@ -2301,19 +2301,16 @@ func (s *chatServiceImpl) recoverFromContextOverflow(
 		return chatMessages, tools, false
 	}
 
-	// Glass-4 (CW-20260502-0015): for long-running sessions, ensure a
-	// self-authored Glass-4 handoff exists before compaction runs. Glass-4
-	// stash itself is written proactively by the agent's `handoff_stash`
-	// self-tool during normal turns, OR (fallback) at compaction time below
-	// before stages run.
+	// Glass-4 (CW-20260502-0015): universal for every session (28-cut-session-intent-classifier)
+	// — ensure a self-authored Glass-4 handoff exists before compaction runs.
+	// Glass-4 stash itself is written proactively by the agent's
+	// `handoff_stash` self-tool during normal turns, OR (fallback) at
+	// compaction time below before stages run.
 	sess, _ := s.store.GetSession(sessionID)
-	longRunning := IsLongRunning(sess)
 
-	if longRunning {
-		if _, err := s.ensureGlass4HandoffPreCompact(ctx, sess, chatMessages, ch); err != nil {
-			slog.Warn("chat-service: glass-4 pre-compaction handoff fallback failed (non-fatal)",
-				"session_id", sessionID, "err", err)
-		}
+	if _, err := s.ensureGlass4HandoffPreCompact(ctx, sess, chatMessages, ch); err != nil {
+		slog.Warn("chat-service: glass-4 pre-compaction handoff fallback failed (non-fatal)",
+			"session_id", sessionID, "err", err)
 	}
 
 	pipeline := &ctxpkg.CompactionPipeline{
@@ -2360,16 +2357,15 @@ func (s *chatServiceImpl) recoverFromContextOverflow(
 	chatMessages = pipeline.ConversationMessages
 	result.Messages = chatMessages
 
-	// Glass-4 (CW-20260502-0015): post-compaction handoff inject. Reads the
-	// latest Glass-4 envelope for this session and populates SlotHandoff
-	// (AutoInject=true). No-op for non-long-running sessions or sessions
-	// without a Glass-4 stash. Runs before Assemble() so SlotHandoff content
-	// is in the freshly-built block list.
-	if longRunning {
-		if _, err := InjectGlass4HandoffSlot(s.store, result.Window, sessionID, ch); err != nil {
-			slog.Warn("chat-service: glass-4 handoff inject failed (non-fatal)",
-				"session_id", sessionID, "err", err)
-		}
+	// Glass-4 (CW-20260502-0015): post-compaction handoff inject, universal
+	// for every session (28-cut-session-intent-classifier). Reads the latest
+	// Glass-4 envelope for this session and populates SlotHandoff
+	// (AutoInject=true). No-op for sessions without a Glass-4 stash. Runs
+	// before Assemble() so SlotHandoff content is in the freshly-built block
+	// list.
+	if _, err := InjectGlass4HandoffSlot(s.store, result.Window, sessionID, ch); err != nil {
+		slog.Warn("chat-service: glass-4 handoff inject failed (non-fatal)",
+			"session_id", sessionID, "err", err)
 	}
 
 	result.Blocks = result.Window.Assemble()
@@ -2559,17 +2555,14 @@ func (s *chatServiceImpl) enforceBudgetOrCompact(
 	settings, _ := s.store.GetUserSettings()
 	summarizer := s.buildSummarizer(settings)
 
-	// Glass-4 (CW-20260502-0015): ensure a self-authored Glass-4 handoff
-	// exists before this pre-loop compaction runs, for long-running
-	// sessions.
+	// Glass-4 (CW-20260502-0015): universal for every session
+	// (28-cut-session-intent-classifier) — ensure a self-authored Glass-4
+	// handoff exists before this pre-loop compaction runs.
 	sess, _ := s.store.GetSession(sessionID)
-	longRunning := IsLongRunning(sess)
 
-	if longRunning {
-		if _, err := s.ensureGlass4HandoffPreCompact(ctx, sess, chatMessages, ch); err != nil {
-			slog.Warn("chat-service: glass-4 pre-compaction handoff fallback failed (non-fatal)",
-				"session_id", sessionID, "err", err)
-		}
+	if _, err := s.ensureGlass4HandoffPreCompact(ctx, sess, chatMessages, ch); err != nil {
+		slog.Warn("chat-service: glass-4 pre-compaction handoff fallback failed (non-fatal)",
+			"session_id", sessionID, "err", err)
 	}
 
 	pipeline := &ctxpkg.CompactionPipeline{
@@ -2598,14 +2591,12 @@ func (s *chatServiceImpl) enforceBudgetOrCompact(
 	chatMessages = pipeline.ConversationMessages
 	result.Messages = chatMessages
 
-	// Glass-4 (CW-20260502-0015): post-compaction handoff inject — same
-	// flow as recoverFromContextOverflow. See InjectGlass4HandoffSlot for
-	// the no-op gates.
-	if longRunning {
-		if _, err := InjectGlass4HandoffSlot(s.store, result.Window, sessionID, ch); err != nil {
-			slog.Warn("chat-service: glass-4 handoff inject failed (non-fatal)",
-				"session_id", sessionID, "err", err)
-		}
+	// Glass-4 (CW-20260502-0015): post-compaction handoff inject, universal
+	// for every session — same flow as recoverFromContextOverflow. See
+	// InjectGlass4HandoffSlot for the no-op gates.
+	if _, err := InjectGlass4HandoffSlot(s.store, result.Window, sessionID, ch); err != nil {
+		slog.Warn("chat-service: glass-4 handoff inject failed (non-fatal)",
+			"session_id", sessionID, "err", err)
 	}
 
 	result.Blocks = result.Window.Assemble()

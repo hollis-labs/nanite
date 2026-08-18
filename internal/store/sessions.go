@@ -45,15 +45,6 @@ type Session struct {
 	// (does NOT bypass first-use prompt). false = force OFF (suppress all
 	// auto-switches even when user pref says always/ask).
 	AutoSwitchOverride *bool `json:"auto_switch_override,omitempty"`
-	// Intent is the session-intent classification (Glass-3, CW-20260502-0011;
-	// Glass-4, CW-20260502-0015). nil/"" = unclassified. Allowed values when
-	// set: "long-running", "per-turn", "ephemeral" — enforced by the CHECK
-	// constraint on sessions.intent and by SetSessionIntent. Populated by the
-	// Glass-4 classifier at session create. Read from sessions.intent column
-	// by GetSession and ListSessions; SetSessionIntent writes it. The
-	// dedicated GetSessionIntent helper is still available for callers that
-	// only need the column without loading the full Session struct.
-	Intent *string `json:"intent,omitempty"`
 	// Sidebar relationship metadata, computed from subagent_runs for list/detail
 	// consumers. Normal top-level sessions return null values.
 	ParentSessionID *string `json:"parent_session_id"`
@@ -140,7 +131,7 @@ func (s *Store) ListSessions(workspaceID string, includeArchived ...bool) ([]Ses
 		            ORDER BY ar.started_at DESC
 		            LIMIT 1
 		       ) AS runtime_state,
-		       sess.current_mode_id, sess.auto_switch_override, sess.intent,
+		       sess.current_mode_id, sess.auto_switch_override,
 		       rel.parent_session_id, rel.root_session_id, rel.relation, rel.depth
 		  FROM sessions sess
 		  LEFT JOIN session_relationships rel ON rel.child_session_id = sess.id
@@ -161,7 +152,6 @@ func (s *Store) ListSessions(workspaceID string, includeArchived ...bool) ([]Ses
 		var sess Session
 		var currentModeID sql.NullString
 		var autoSwitchOverride sql.NullBool
-		var intent sql.NullString
 		var haltedAt sql.NullString
 		var haltedReason sql.NullString
 		var runtimeState sql.NullString
@@ -177,12 +167,12 @@ func (s *Store) ListSessions(workspaceID string, includeArchived ...bool) ([]Ses
 			&sess.Status, &sess.IsPinned, &sess.SortOrder, &sess.MessageCount,
 			&sess.Tags, &sess.Metadata, &sess.LastActivity, &sess.CreatedAt, &sess.UpdatedAt,
 			&haltedAt, &haltedReason, &runtimeState,
-			&currentModeID, &autoSwitchOverride, &intent,
+			&currentModeID, &autoSwitchOverride,
 			&parentSessionID, &rootSessionID, &relation, &depth,
 		); err != nil {
 			return nil, fmt.Errorf("scan session: %w", err)
 		}
-		hydrateSessionOptionalFields(&sess, currentModeID, autoSwitchOverride, intent, haltedAt, haltedReason, runtimeState, parentSessionID, rootSessionID, relation, depth)
+		hydrateSessionOptionalFields(&sess, currentModeID, autoSwitchOverride, haltedAt, haltedReason, runtimeState, parentSessionID, rootSessionID, relation, depth)
 		out = append(out, sess)
 	}
 	return out, rows.Err()
@@ -193,7 +183,6 @@ func (s *Store) GetSession(id string) (*Session, error) {
 	var sess Session
 	var currentModeID sql.NullString
 	var autoSwitchOverride sql.NullBool
-	var intent sql.NullString
 	var haltedAt sql.NullString
 	var haltedReason sql.NullString
 	var runtimeState sql.NullString
@@ -258,7 +247,7 @@ func (s *Store) GetSession(id string) (*Session, error) {
 		            ORDER BY ar.started_at DESC
 		            LIMIT 1
 		       ) AS runtime_state,
-		       sess.current_mode_id, sess.auto_switch_override, sess.intent,
+		       sess.current_mode_id, sess.auto_switch_override,
 		       rel.parent_session_id, rel.root_session_id, rel.relation, rel.depth
 		  FROM sessions sess
 		  LEFT JOIN session_relationships rel ON rel.child_session_id = sess.id
@@ -271,17 +260,17 @@ func (s *Store) GetSession(id string) (*Session, error) {
 		&sess.Status, &sess.IsPinned, &sess.SortOrder, &sess.MessageCount,
 		&sess.Tags, &sess.Metadata, &sess.LastActivity, &sess.CreatedAt, &sess.UpdatedAt,
 		&haltedAt, &haltedReason, &runtimeState,
-		&currentModeID, &autoSwitchOverride, &intent,
+		&currentModeID, &autoSwitchOverride,
 		&parentSessionID, &rootSessionID, &relation, &depth,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("get session %s: %w", id, err)
 	}
-	hydrateSessionOptionalFields(&sess, currentModeID, autoSwitchOverride, intent, haltedAt, haltedReason, runtimeState, parentSessionID, rootSessionID, relation, depth)
+	hydrateSessionOptionalFields(&sess, currentModeID, autoSwitchOverride, haltedAt, haltedReason, runtimeState, parentSessionID, rootSessionID, relation, depth)
 	return &sess, nil
 }
 
-func hydrateSessionOptionalFields(sess *Session, currentModeID sql.NullString, autoSwitchOverride sql.NullBool, intent sql.NullString, haltedAt sql.NullString, haltedReason sql.NullString, runtimeState sql.NullString, parentSessionID sql.NullString, rootSessionID sql.NullString, relation sql.NullString, depth sql.NullInt64) {
+func hydrateSessionOptionalFields(sess *Session, currentModeID sql.NullString, autoSwitchOverride sql.NullBool, haltedAt sql.NullString, haltedReason sql.NullString, runtimeState sql.NullString, parentSessionID sql.NullString, rootSessionID sql.NullString, relation sql.NullString, depth sql.NullInt64) {
 	if currentModeID.Valid && currentModeID.String != "" {
 		v := currentModeID.String
 		sess.CurrentModeID = &v
@@ -289,10 +278,6 @@ func hydrateSessionOptionalFields(sess *Session, currentModeID sql.NullString, a
 	if autoSwitchOverride.Valid {
 		v := autoSwitchOverride.Bool
 		sess.AutoSwitchOverride = &v
-	}
-	if intent.Valid && intent.String != "" {
-		v := intent.String
-		sess.Intent = &v
 	}
 	if haltedAt.Valid && haltedAt.String != "" {
 		v := haltedAt.String
@@ -346,74 +331,6 @@ func (s *Store) SetSessionAutoSwitchOverride(id string, override *bool) error {
 	}
 	if n == 0 {
 		return fmt.Errorf("set session auto-switch override %s: session not found", id)
-	}
-	return nil
-}
-
-// SessionIntent enum values for sessions.intent (Glass-3, CW-20260502-0011).
-// NULL in the DB maps to "" in the helpers below; any non-empty value must
-// match one of these (mirrors the SQL CHECK constraint in migration 052).
-const (
-	SessionIntentLongRunning = "long-running"
-	SessionIntentPerTurn     = "per-turn"
-	SessionIntentEphemeral   = "ephemeral"
-)
-
-func validSessionIntent(v string) bool {
-	switch v {
-	case SessionIntentLongRunning, SessionIntentPerTurn, SessionIntentEphemeral:
-		return true
-	}
-	return false
-}
-
-// GetSessionIntent returns the auto-handoff classification for a session
-// (Glass-3, CW-20260502-0011). Returns "" when the column is NULL
-// (unclassified — Glass-4 has not yet run for this session, or never will).
-// Returns an error only on DB failure or unknown session ID.
-func (s *Store) GetSessionIntent(sessionID string) (string, error) {
-	var intent sql.NullString
-	err := s.DB.QueryRow(
-		`SELECT intent FROM sessions WHERE id = ?`, sessionID,
-	).Scan(&intent)
-	if err != nil {
-		return "", fmt.Errorf("get session intent %s: %w", sessionID, err)
-	}
-	if !intent.Valid {
-		return "", nil
-	}
-	return intent.String, nil
-}
-
-// SetSessionIntent writes the auto-handoff classification for a session
-// (Glass-3, CW-20260502-0011). Pass "" to clear (set NULL); pass one of
-// SessionIntent{LongRunning,PerTurn,Ephemeral} to set. Returns an error if
-// the value is non-empty and not in the enum, on DB failure, or when the
-// session does not exist.
-func (s *Store) SetSessionIntent(sessionID string, intent string) error {
-	if intent != "" && !validSessionIntent(intent) {
-		return fmt.Errorf("set session intent %s: invalid value %q (allowed: %q, %q, %q, or empty to clear)",
-			sessionID, intent,
-			SessionIntentLongRunning, SessionIntentPerTurn, SessionIntentEphemeral)
-	}
-	now := time.Now().UTC().Format(time.RFC3339)
-	var v interface{}
-	if intent != "" {
-		v = intent
-	}
-	res, err := s.DB.Exec(
-		`UPDATE sessions SET intent = ?, updated_at = ? WHERE id = ?`,
-		v, now, sessionID,
-	)
-	if err != nil {
-		return fmt.Errorf("set session intent %s: %w", sessionID, err)
-	}
-	n, err := res.RowsAffected()
-	if err != nil {
-		return fmt.Errorf("set session intent %s: rows affected: %w", sessionID, err)
-	}
-	if n == 0 {
-		return fmt.Errorf("set session intent %s: session not found", sessionID)
 	}
 	return nil
 }
@@ -543,7 +460,6 @@ func (s *Store) GetSessionByShortCode(code string) (*Session, error) {
 	var sess Session
 	var currentModeID sql.NullString
 	var autoSwitchOverride sql.NullBool
-	var intent sql.NullString
 	err := s.DB.QueryRow(
 		`SELECT id, short_code, COALESCE(title,''), COALESCE(custom_name,''),
 		        COALESCE(workspace_id,''), COALESCE(project_id,''),
@@ -552,7 +468,7 @@ func (s *Store) GetSessionByShortCode(code string) (*Session, error) {
 		        status, is_pinned, sort_order, message_count,
 		        COALESCE(tags,'[]'), COALESCE(metadata,'{}'),
 		        last_activity, created_at, updated_at,
-		        current_mode_id, auto_switch_override, intent
+		        current_mode_id, auto_switch_override
 		 FROM sessions WHERE short_code = ?`, code,
 	).Scan(
 		&sess.ID, &sess.ShortCode, &sess.Title, &sess.CustomName,
@@ -561,7 +477,7 @@ func (s *Store) GetSessionByShortCode(code string) (*Session, error) {
 		&sess.Provider, &sess.Model,
 		&sess.Status, &sess.IsPinned, &sess.SortOrder, &sess.MessageCount,
 		&sess.Tags, &sess.Metadata, &sess.LastActivity, &sess.CreatedAt, &sess.UpdatedAt,
-		&currentModeID, &autoSwitchOverride, &intent,
+		&currentModeID, &autoSwitchOverride,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("get session by short_code %s: %w", code, err)
@@ -573,10 +489,6 @@ func (s *Store) GetSessionByShortCode(code string) (*Session, error) {
 	if autoSwitchOverride.Valid {
 		v := autoSwitchOverride.Bool
 		sess.AutoSwitchOverride = &v
-	}
-	if intent.Valid && intent.String != "" {
-		v := intent.String
-		sess.Intent = &v
 	}
 	return &sess, nil
 }

@@ -186,9 +186,6 @@ func cmdServe(args []string) {
 	if err := s.SeedProviders(); err != nil {
 		slogx.Fatal("failed to seed providers", "err", err)
 	}
-	if err := s.SeedBuiltinTemplates(); err != nil {
-		slogx.Fatal("failed to seed templates", "err", err)
-	}
 	if err := s.SeedBuiltinPromptTemplates(); err != nil {
 		slogx.Fatal("failed to seed prompt templates", "err", err)
 	}

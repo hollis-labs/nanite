@@ -546,21 +546,6 @@ type SelectToolsRequest struct {
 	Hints  []string `json:"hints"`
 }
 
-// --- Templates ---
-
-type CreateTemplateRequest struct {
-	Name     string `json:"name"`
-	Template string `json:"template"`
-}
-
-type UpdateTemplateRequest struct {
-	Template string `json:"template"`
-}
-
-type ApplyTemplateRequest struct {
-	SessionID string `json:"session_id"`
-}
-
 // --- Prompt Templates ---
 
 type CreatePromptTemplateRequest struct {

@@ -377,11 +377,6 @@ func (stubTemplateStore) RemovePromptTemplateFromAgent(string, string) error { r
 func (stubTemplateStore) ComposePromptForAgent(string, map[string]string) (string, error) {
 	return "", nil
 }
-func (stubTemplateStore) ListTemplates() ([]store.Template, error)    { return nil, nil }
-func (stubTemplateStore) GetTemplate(string) (*store.Template, error) { return nil, nil }
-func (stubTemplateStore) CreateTemplate(*store.Template) error        { return nil }
-func (stubTemplateStore) UpdateTemplate(string, string) error         { return nil }
-func (stubTemplateStore) DeleteTemplate(string) error                 { return nil }
 
 type stubSkillStore struct{}
 

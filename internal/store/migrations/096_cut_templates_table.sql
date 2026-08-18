@@ -1,0 +1,47 @@
+-- Cut the `templates` table (output-formatting-snippet mechanism).
+--
+-- TASKS.md Phase 0 Cuts, item 30: real CRUD/REST surface (`/api/templates`,
+-- `/api/templates/{name}/apply`) but no confirmed real consumer (seed
+-- function never called, no frontend caller, no other Go call site).
+-- See TASKS/phase-0/30-cut-templates-table.md for the full audit.
+--
+-- Distinct from `prompt_templates`/`agent_prompt_templates` (system-prompt
+-- fragments, a separate table cut separately by 29-cut-prompt-templates) --
+-- `templates` is a standalone Go-text/template-style output-snippet table
+-- with no relationship to the prompt-composition system. Do not confuse
+-- the two while reading this file.
+--
+-- Migration 001's original `CREATE TABLE IF NOT EXISTS templates` statement
+-- is deliberately left untouched -- per this codebase's established
+-- convention (see e.g. 018_rename_a2a_messages.sql), there is no
+-- schema_migrations ledger yet, so every migration file re-runs in full on
+-- every boot. Migration 001 harmlessly re-creates the table (IF NOT
+-- EXISTS) each boot, and this migration -- sorting after it by filename --
+-- drops it again immediately afterward in the same boot's migration pass.
+--
+-- Note on this file's markers: it carries `+goose Up`/`+goose Down`
+-- comment markers below for forward compatibility with the goose-based
+-- migration runner (task 09-adopt-goose-migrations), but as of this
+-- writing this worktree's copy of internal/store/store.go still runs the
+-- pre-goose mechanism (plain top-to-bottom SQL execution split naively on
+-- literal semicolons, no ledger) -- see this task's Work Log for why.
+-- Under that runner these marker lines are inert SQL comments -- only the
+-- DROP statement below actually executes. Deliberately no down-migration
+-- SQL is included here: a real `CREATE TABLE templates (...)` recreate
+-- placed after the down marker would also execute unconditionally under
+-- the pre-goose runner immediately after the DROP above, on every boot,
+-- silently undoing this migration's entire purpose. Whoever reconciles
+-- this file against the real goose-adopted mainline should renumber it to
+-- the true next ledger version and may add a real, tested down migration
+-- at that point if desired.
+
+-- +goose Up
+DROP TABLE IF EXISTS templates;
+
+-- +goose Down
+-- No down migration: this pre-goose worktree has no schema_migrations
+-- ledger, so a real recreate statement here would execute unconditionally
+-- on every boot immediately after the Up section's DROP (see file header
+-- comment above) -- deliberately left as a no-op, consistent with how
+-- every other migration in this codebase is annotated once converted to
+-- goose.

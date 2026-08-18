@@ -43,7 +43,7 @@ Live tracker for `docs/engineering/TASKS.md`'s execution, per `docs/engineering/
 | 24-housekeeping-agent-profile-files | implemented | none | 1 |
 | 25-drop-unused-session-status-enum | not-started | 26 | 3 (parallel with chain, after pos. 4) |
 | 26-cut-session-compaction-summary-fields | not-started | (sequenced after 27, see below) | 3 (chain pos. 4) |
-| 27-cut-p7-scratchpad-snapshot | not-started | none | 3 (chain pos. 3) |
+| 27-cut-p7-scratchpad-snapshot | implemented | none | 3 (chain pos. 3) |
 | 28-cut-session-intent-classifier | not-started | (sequenced after 27, see below) | 3 (chain pos. 5) |
 | 29-cut-prompt-templates | not-started | none (see Context; sequenced after 21) | 3 (chain pos. 9) |
 | 30-cut-templates-table | implemented | none | 1 |

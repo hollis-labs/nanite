@@ -32,7 +32,6 @@ type CompactionResult struct {
 	Mode                 string // compaction mode used
 	StagesApplied        []string
 	RawMessages          []llmtypes.ChatMessage // original messages (for plugin extraction)
-	HandoffStashID       string                 // P7: stash_id written pre-compaction; empty if StashWriter nil
 	CoverageWindowStart  *string                // P8: turn_id marking span start (nullable)
 	CoverageWindowEnd    *string                // P8: turn_id marking span end (nullable)
 	EvictedCachePointers []string               // P8: cache pointers lost during compaction
@@ -59,11 +58,7 @@ type CompactionPipeline struct {
 	// ConversationMessages is the current message list. Stages may modify it.
 	ConversationMessages []llmtypes.ChatMessage
 
-	// P7 HandoffStash — optional pre-compaction stash write (CW-20260420-0024).
-	// If StashWriter is nil the stash step is skipped (backwards-compatible).
-	SessionID          string
-	StashWriter        StashWriter
-	ScratchpadSnapshot map[string]any
+	SessionID string
 
 	// P8 CompactionEventWriter — optional post-compaction metadata emission (CW-20260420-0027).
 	// If CompactionEventWriter is nil the metadata emission is skipped (backwards-compatible).
@@ -118,20 +113,6 @@ func (p *CompactionPipeline) RunForce(ctx context.Context) (*CompactionResult, e
 func (p *CompactionPipeline) runStages(ctx context.Context, recheckBetweenStages bool) (*CompactionResult, error) {
 	result := &CompactionResult{Mode: p.Mode}
 
-	// P7 HandoffStash: write stash before any summarization stage (D2, CW-20260420-0024).
-	if p.StashWriter != nil && p.SessionID != "" {
-		stashID := uuid.New().String()
-		payload := BuildPayloadFromScratchpad(p.ScratchpadSnapshot)
-		if err := p.StashWriter.WriteHandoffStash(ctx, p.SessionID, stashID, payload); err != nil {
-			slog.Warn("compaction: handoff stash write failed (non-fatal)",
-				"session_id", p.SessionID, "err", err)
-		} else {
-			result.HandoffStashID = stashID
-			slog.Info("compaction: handoff stash written",
-				"session_id", p.SessionID, "stash_id", stashID)
-		}
-	}
-
 	for _, ns := range DefaultStages() {
 		p.refreshConversationSlot()
 		if recheckBetweenStages && !p.Window.NeedsCompaction() {
@@ -163,9 +144,6 @@ func (p *CompactionPipeline) runStages(ctx context.Context, recheckBetweenStages
 			OriginalTokenCount:   result.OriginalTokenCount,
 			StagesApplied:        result.StagesApplied,
 			CreatedAt:            time.Now().UTC().Format(time.RFC3339),
-		}
-		if result.HandoffStashID != "" {
-			evt.HandoffStashID = &result.HandoffStashID
 		}
 		if err := p.CompactionEventWriter.WriteCompactionEvent(ctx, evt); err != nil {
 			slog.Warn("compaction: event emission failed (non-fatal)",

@@ -132,9 +132,9 @@ type iterationLimits struct {
 	consecutiveFailCap int
 	// runawayFailCap is the hard circuit-breaker. See defaultRunawayFailCap
 	// and the CW-20260417-0485 comment there for the rationale.
-	runawayFailCap    int
-	idleTimeout       time.Duration
-	perToolMax        map[string]int // tool name → max iterations (0 = no limit)
+	runawayFailCap int
+	idleTimeout    time.Duration
+	perToolMax     map[string]int // tool name → max iterations (0 = no limit)
 	// defaultPerToolCap is a HIGH BACKSTOP on calls to any single tool
 	// per turn — NOT a runaway detector. CW-20260519-0115: raised from
 	// 10 → 150 after session c267 was blocked at 10 of 13
@@ -659,17 +659,6 @@ func (ls *loopState) scratchpadClear(key string) bool {
 	}
 	delete(ls.scratchpad, key)
 	return true
-}
-
-// scratchpadSnapshot returns a shallow copy of the scratchpad for use in
-// compaction handoff stash payloads (P7, CW-20260420-0024). Callers must not
-// mutate the returned map after the snapshot is handed to the pipeline.
-func (ls *loopState) scratchpadSnapshot() map[string]any {
-	snap := make(map[string]any, len(ls.scratchpad))
-	for k, v := range ls.scratchpad {
-		snap[k] = v
-	}
-	return snap
 }
 
 // continueWith logs a continuation site and optionally captures a snapshot.

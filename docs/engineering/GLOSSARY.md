@@ -1,0 +1,61 @@
+# Glossary
+
+Canonical definitions for terms used throughout Nanite's engineering docs and code. This file exists specifically because this codebase has a documented history of naming collisions (the same word meaning two unrelated things in two subsystems) causing real bugs and real confusion — for humans and for agents working on the codebase. When in doubt about what a term means here, this file wins over inference from context or memory of an older doc.
+
+If you're an agent about to introduce new vocabulary, check this file first. If the term you want is already claimed by something else, don't reuse it — that's exactly the failure mode this file exists to prevent.
+
+---
+
+**Agent** — a composed identity: a `role` (persona/system prompt) bound to a `scope` (project/data-source reference) plus tool/skill/permission grants, resolved through a cascading override (role → agent → task, closest wins). Not a flat, standalone definition — see `architecture/01-agent-construction.md`. Distinct from a *Claude Code subagent* (the Task/Agent tool mechanism used to run sessions like this one) and from the unrelated `.nanite/config.yaml`/`~/.nanite/roles/` developer-persona-boot convention used for working *on* this codebase — neither of those participates in Nanite's own runtime agent system.
+
+**Role** — the reusable persona/behavior template an Agent is built from: name, system prompt, and optional defaults. Many Agents (different scopes) can share one Role.
+
+**Scope** — a reference from an Agent composition to something that already exists independently (a project, eventually a data source or dataset) — not a new facet catalog of its own. Answers "where/what does this agent apply to," not "who is it."
+
+**Consumer** — the ownership/tenancy tag on an Agent (`agents.consumer_id`). Identifies which external system an agent belongs to (e.g. Loom owns Curator) without giving that system its own isolated database instance. Distinct from **Instance** (below).
+
+**Instance** — a fully separate, isolated Nanite data directory/database (formerly and confusingly called "workspace" at the filesystem level, via `NANITE_WORKSPACE`). Full isolation, not a tenancy tag — a different tool for a different job than Consumer. Currently only ever has one value in practice; the in-app `workspaces` table (an unrelated, UI session-grouping concept that shared the same word) has been retired.
+
+**Runtime kind** — the typed field (`agents.runtime_kind`: `cli` | `api`) that decides whether an agent runs as a CLI-based subprocess or via a direct HTTP provider call. Replaces four scattered string-prefix-matching call sites that used to make this decision independently.
+
+**CLI-based subprocess** (never "PTY") — a long-lived (Claude, via `StreamingStdio` — NDJSON over stdin/stdout pipes) or per-turn (Codex, OpenCode) subprocess Nanite spawns and manages. **There is no real pseudo-terminal anywhere in the current runtime.** "PTY" is a naming fossil surviving in a few provider-name strings and function names (`shouldUsePTY`, `pty-*` provider aliases) that are being scrubbed. If you see "PTY" in an older doc or comment, mentally substitute "CLI-based subprocess."
+
+**Harness** — the shared turn-loop mechanics (`generateResponse`) every launched agent runs through regardless of entry point: context assembly, the provider round-trip, the tool-use loop, termination, persistence. One shared execution path — chat, subagent dispatch, and durable-agent wake all converge on it via a `CallerType`-tagged dispatcher.
+
+**Steering** — the layer that decides what an agent does moment to moment. Consolidating onto **Reflexes** as the single primitive (see below) — the older five-layer system (agent broker, strategy planner, tool broker, skill broker, plus reflexes) is being retired down to just reflexes plus the plain tool/skill catalogs underneath.
+
+**Reflexes** (`internal/agent/reflexes`) — the one real steering primitive going forward. A DB-backed, non-LLM predicate/event/interval rule engine: it watches session-state signals and, when a trigger fires, injects a reminder, nudges a tool choice, sends a message, adds a schedule, or halts a session. The model never decides whether a reflex fires. **Not** the same as **promptrouter** (below) — that confusion used to be real (the promptrouter package was literally named `internal/reflex` until it was renamed specifically to stop the collision).
+
+**promptrouter** (`internal/promptrouter`) — a deterministic phrase-match router, formerly (confusingly) named `internal/reflex`. Its phrase-matching job is being absorbed into Reflexes as a new trigger/action shape rather than staying a separate system.
+
+**Cards** (formerly "the envelope system," as a subsystem name) — the structured, interactive UI-card system agents use to present rich content to a user (tables, approvals, diffs, forms) instead of raw prose. **Envelope** stays scoped narrowly to the wire/transport shape (the JSON wrapper a Card rides inside); **Card** is the rendered UI system built on top of it. A Card may internally be composed of smaller elements — that's a legitimate place for composition vocabulary later, without colliding with the system-level name.
+
+**Envelope** — the wire-protocol wrapper (`kind`, `version`, `type`, `data`) a Card rides inside on its way from backend to frontend. Transport shape only — not the name of the UI system itself (see Cards).
+
+**A2A** (Agent2Agent) — the real, external, Linux Foundation open protocol (a2a-protocol.org) for cross-vendor/cross-framework agent interop — for callers with *zero* Nanite-specific knowledge. Distinct from and not a duplicate of MCP (below): MCP requires the caller to already know Nanite-specific tool names; A2A doesn't. Also distinct from Nanite's own internal agent-to-agent messaging (`agent_messages`, briefly and confusingly also once called "a2a" before an April rename — see `internal/messaging` below).
+
+**MCP** — the single external door for Nanite-aware external consumers (e.g. Loom). Chosen for industry standardization (one auth model, one discovery contract), not to avoid engineering cost.
+
+**`internal/messaging`** (`agent_messages` table) — Nanite's real, actively-used internal messaging primitive: tuple-addressed `(session_id, agent_id) → (session_id, agent_id)` messages, used for subagent replies, notifications, and human-agent communication. Not A2A (see above) despite an old, now-corrected naming collision.
+
+**Consumer** vs. **Instance** — see above; don't conflate. Consumer = who owns this agent (shared DB, lightweight tag). Instance = a fully separate database/data directory (full isolation, single-operator dev/test tool, not a tenancy mechanism).
+
+**Recovery** (`internal/recovery/*`, being consolidated into this namespace) — four genuinely distinct mechanisms answering different "what went wrong" questions: the **Recovery Broker** (in-process crash while the daemon is alive), the **Orphan/Runtime Reaper** (reconciling stale process state after a daemon restart), the **Recovery Pack** (replaying trailing context into a freshly cold-booted session), and **interrupted-turn detection** (a cheap, read-only frontend signal). Not redundant with each other — each covers a different failure shape.
+
+**Compaction** — the escalating, budget-driven pipeline that shrinks an over-budget conversation (drop enrichment → dedupe tool results → summarize oldest span → strip tool blocks). Distinct from a **Handoff** (below).
+
+**Glass-4 handoff** — the agent-self-authored continuity snapshot (`session_intent`, recent decisions, an anchor for the next step) written before compaction and re-injected after. Being made universal (every session, not just ones classified "long-running" — that classifier is being cut alongside this change).
+
+**Scratchpad** — an agent's own working-notes tool. Its value is the *act* of an agent externalizing its reasoning, not the content persisting afterward — being usually-empty is expected, not a defect. Not a continuity mechanism (that's Glass-4's job) — don't conflate the two.
+
+**Plugin** — code outside `internal/` that extends Nanite: either a compiled-in **builtin** (a Go struct in the binary) or a separate **subprocess** (JSON-RPC over stdio). Both describe what they register via a `plugin.yaml` manifest read by one shared host-side registration path, so builtin and subprocess plugins wire in identically.
+
+**Filters / Hooks** — the plugin extension points already reaching deep into the turn loop (`FilterUserMessage`, `FilterSystemPrompt`, `FilterContextWindow`, `FilterToolResult`, `FilterAssistantResponse`, `FilterEnvelopeData`) and reflexes (`FilterReflexState`, `FilterReflexAction`), plus lifecycle events (session archived, agent switched, artifact created, etc.). Functionally Nanite's middleware-equivalent for the chat-turn domain, just named differently than the HTTP layer's actual `net/http` middleware chain.
+
+**Middleware** — currently exists only at the HTTP-transport layer (`internal/server/server.go`'s real, standard `net/http` chain: recover → logging → CORS → auth → caller-identity → body-limit). Not currently plugin-extensible. Not a separate concept from Filters/Hooks — same underlying pattern (composable interceptors around a core operation), applied to a different layer.
+
+**Boot-profile catalog** — retired as a standalone system (its job was solved more cleanly by the Agent construction model). Two pieces carried forward as first-class mechanisms: the `cmd`/`http` dynamic-context-resolver capability, and the mandatory post-compaction re-read of a project's real `CLAUDE.md`/`AGENTS.md`.
+
+**Tether** — a sibling app in the operator's portfolio that originated both the boot-profile-catalog pattern (`bootgen`) and an earlier, pre-standardization A2A-host experiment. Cross-app portability with Tether is deliberately opt-in, not a structural default of Nanite's own operation.
+
+**"Workspace"** — historically ambiguous, now resolved: the in-app UI-grouping concept (a `workspaces` table) is retired. The filesystem-level multi-database concept is renamed **Instance** (see above) and scoped narrowly to dev/test isolation.

@@ -527,10 +527,13 @@ func cmdServe(args []string) {
 
 	// CW-20260814-0015, CW-20260814-0016: A2A TaskManager for JSON-RPC task methods.
 	// Routes Task submissions to workflow launch or durable-agent wake.
+	// container.DurableAgents is threaded through so CancelTask can reuse
+	// the existing RequestStop primitive for instance-target tasks.
 	container.TaskManager = service.NewTaskManager(
 		s,
 		workflowLauncher,
 		container.DurableWake,
+		container.DurableAgents,
 		workflowDefinitionsRegistry,
 		slog.Default(),
 	)

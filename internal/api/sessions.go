@@ -709,10 +709,6 @@ func (a *API) handleCompactSession(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	if err := a.Services.Store.UpdateSessionCompaction(sessionID, summary); err != nil {
-		a.errorResp(w, http.StatusInternalServerError, err.Error())
-		return
-	}
 	if a.Services.Events != nil {
 		a.Services.Events.EmitPostCompact(ctx, sessionID, tokensSaved, stages)
 	}

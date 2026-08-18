@@ -831,19 +831,6 @@ func (s *Store) UpdateMessageContent(id, content string, isCompacted bool) error
 	return nil
 }
 
-// UpdateSessionCompaction saves a compaction summary on a session.
-func (s *Store) UpdateSessionCompaction(id, summary string) error {
-	now := time.Now().UTC().Format(time.RFC3339)
-	_, err := s.DB.Exec(
-		`UPDATE sessions SET compaction_summary = ?, compacted_at = ?, updated_at = ? WHERE id = ?`,
-		summary, now, now, id,
-	)
-	if err != nil {
-		return fmt.Errorf("update session compaction %s: %w", id, err)
-	}
-	return nil
-}
-
 // ForkSession creates a new session based on a source session, copying agents
 // and optionally messages. The entire operation runs inside a single
 // transaction — if any step fails, no partial child session is left behind.

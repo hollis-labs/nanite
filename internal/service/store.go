@@ -31,7 +31,6 @@ type SessionWriter interface {
 	NextShortCode() (string, error)
 	CreateMessage(msg *store.Message) error
 	UpdateMessageContent(id, content string, isCompacted bool) error
-	UpdateSessionCompaction(id, summary string) error
 	ForkSession(sourceID string, overrides *store.Session, copyMessages bool) (*store.Session, error)
 	CopyMessages(sourceSessionID, targetSessionID string) error
 }

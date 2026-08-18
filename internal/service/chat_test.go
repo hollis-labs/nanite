@@ -242,7 +242,6 @@ func (stubSessionStore) ArchiveSession(string) error                     { retur
 func (stubSessionStore) NextShortCode() (string, error)                  { return "", nil }
 func (stubSessionStore) CreateMessage(*store.Message) error              { return nil }
 func (stubSessionStore) UpdateMessageContent(string, string, bool) error { return nil }
-func (stubSessionStore) UpdateSessionCompaction(string, string) error    { return nil }
 func (stubSessionStore) ForkSession(string, *store.Session, bool) (*store.Session, error) {
 	return nil, nil
 }

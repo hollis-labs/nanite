@@ -415,13 +415,6 @@ func (a *API) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/processes/health", a.handleProcessHealth)
 	mux.HandleFunc("POST /api/processes/kill-stale", a.handleKillStaleProcesses)
 
-	// Connector Triggers
-	mux.HandleFunc("GET /api/plugins/triggers", a.handleListTriggerRules)
-	mux.HandleFunc("POST /api/plugins/triggers", a.handleCreateTriggerRule)
-	mux.HandleFunc("GET /api/plugins/triggers/{id}", a.handleGetTriggerRule)
-	mux.HandleFunc("PUT /api/plugins/triggers/{id}", a.handleUpdateTriggerRule)
-	mux.HandleFunc("DELETE /api/plugins/triggers/{id}", a.handleDeleteTriggerRule)
-
 	// Connectors (health & status) — under /api/connectors to avoid conflict
 	// with the /api/plugins/{name}/ui/{file...} wildcard route.
 	mux.HandleFunc("GET /api/connectors", a.handleListConnectors)
@@ -429,14 +422,6 @@ func (a *API) RegisterRoutes(mux *http.ServeMux) {
 
 	// Keybindings (plugin-registered keyboard shortcuts)
 	mux.HandleFunc("GET /api/plugins/keybindings", a.handleListKeybindings)
-
-	// Custom Actions
-	mux.HandleFunc("GET /api/actions", a.handleListActions)
-	mux.HandleFunc("POST /api/actions", a.handleCreateAction)
-	mux.HandleFunc("GET /api/actions/{id}", a.handleGetAction)
-	mux.HandleFunc("PUT /api/actions/{id}", a.handleUpdateAction)
-	mux.HandleFunc("DELETE /api/actions/{id}", a.handleDeleteAction)
-	mux.HandleFunc("POST /api/actions/{id}/execute", a.handleExecuteAction)
 
 	// Workflow runs + SSE event stream
 	mux.HandleFunc("GET /api/workflows/runs", a.handleListWorkflowRuns)

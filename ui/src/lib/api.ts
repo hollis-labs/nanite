@@ -37,7 +37,6 @@ import type {
   CreateAgentReflexRequest,
   CreateAgentProfileRequest,
   CreateDurableAgentRequest,
-  CustomAction,
   DiscoveryDiff,
   Document,
   DrawerCardType,
@@ -3354,70 +3353,6 @@ export const api = {
       },
     );
     if (!res.ok) throw new Error(`Failed to delete project: ${res.status}`);
-  },
-
-  // Custom Actions
-  listActions: async (): Promise<{
-    actions: CustomAction[];
-    count: number;
-  }> => {
-    const res = await fetch(`${API_BASE}/actions`);
-    if (!res.ok) throw new Error(`Failed to list actions: ${res.status}`);
-    return res.json();
-  },
-
-  createAction: async (
-    data: Omit<CustomAction, "id" | "created_at" | "updated_at">,
-  ): Promise<CustomAction> => {
-    const res = await fetch(`${API_BASE}/actions`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(data),
-    });
-    if (!res.ok) throw new Error(`Failed to create action: ${res.status}`);
-    return res.json();
-  },
-
-  getAction: async (id: string): Promise<CustomAction> => {
-    const res = await fetch(`${API_BASE}/actions/${id}`);
-    if (!res.ok) throw new Error(`Failed to get action: ${res.status}`);
-    return res.json();
-  },
-
-  updateAction: async (
-    id: string,
-    data: Partial<CustomAction>,
-  ): Promise<CustomAction> => {
-    const res = await fetch(`${API_BASE}/actions/${id}`, {
-      method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(data),
-    });
-    if (!res.ok) throw new Error(`Failed to update action: ${res.status}`);
-    return res.json();
-  },
-
-  deleteAction: async (id: string): Promise<void> => {
-    const res = await fetch(`${API_BASE}/actions/${id}`, { method: "DELETE" });
-    if (!res.ok) throw new Error(`Failed to delete action: ${res.status}`);
-  },
-
-  executeAction: async (
-    id: string,
-    sessionId: string,
-  ): Promise<{
-    action: string;
-    command: string;
-    session_id: string;
-    action_id: string;
-  }> => {
-    const res = await fetch(`${API_BASE}/actions/${id}/execute`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ session_id: sessionId }),
-    });
-    if (!res.ok) throw new Error(`Failed to execute action: ${res.status}`);
-    return res.json();
   },
 
   // Plugin Keybindings

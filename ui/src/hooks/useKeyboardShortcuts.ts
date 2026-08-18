@@ -68,18 +68,6 @@ export function usePluginKeybindings() {
   })
 }
 
-/** Hook to fetch custom actions (for keybinding registration) */
-export function useActionKeybindings() {
-  return useQuery({
-    queryKey: ['actions'],
-    queryFn: async () => {
-      const data = await api.listActions()
-      return data.actions.filter((a) => a.enabled && a.keybinding)
-    },
-    staleTime: 60_000,
-  })
-}
-
 export function useKeyboardShortcuts(options: KeyboardShortcutsOptions = {}) {
   const toggleLeftSidebar = useLayoutStore((s) => s.toggleLeftSidebar)
   const toggleRightRail = useLayoutStore((s) => s.toggleRightRail)
@@ -93,9 +81,8 @@ export function useKeyboardShortcuts(options: KeyboardShortcutsOptions = {}) {
   const { data: userSettings } = useSettings()
   const { focusComposer, sessions = [], openCommandPalette, openSearch } = options
 
-  // Fetch plugin keybindings and action keybindings
+  // Fetch plugin keybindings
   const { data: pluginKeybindings } = usePluginKeybindings()
-  const { data: actionBindings } = useActionKeybindings()
 
   // Merge user-customized shortcuts with defaults.
   const bindings = useMemo(() => {
@@ -214,16 +201,6 @@ export function useKeyboardShortcuts(options: KeyboardShortcutsOptions = {}) {
         e.preventDefault()
         toggleHeaderChips()
       } else {
-        // Check custom action keybindings
-        if (actionBindings && activeSessionId) {
-          for (const action of actionBindings) {
-            if (matchesBinding(e, action.keybinding)) {
-              e.preventDefault()
-              void api.executeAction(action.id, activeSessionId)
-              return
-            }
-          }
-        }
         // Check plugin keybindings
         if (pluginKeybindings) {
           for (const kb of pluginKeybindings) {
@@ -257,7 +234,6 @@ export function useKeyboardShortcuts(options: KeyboardShortcutsOptions = {}) {
     currentPage,
     setCurrentPage,
     openCommandPalette,
-    actionBindings,
     pluginKeybindings,
     activeSessionId,
   ])

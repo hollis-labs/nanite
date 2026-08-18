@@ -126,7 +126,6 @@ type Host struct {
 	pluginMux          *MutablePluginMux                // mutable wrapper that owns all plugin-registered routes
 	routePatterns      map[string]bool                  // patterns already wired on core router (forwarder installed)
 	pendingRoutes      []pendingRoute                   // routes queued before router was set
-	triggers           *TriggerDispatcher               // event → connector dispatch
 	filters            *FilterRegistry                  // named filter chains
 	eventSubs          []chan plugin.Event              // SSE subscribers for event streaming
 	envelopes          map[string]EnvelopeRegistryEntry // envelope type → registry entry (B.4)
@@ -202,7 +201,6 @@ func NewHost(router *http.ServeMux, logger plugin.Logger) *Host {
 		ctx:                ctx,
 		ctxCancel:          cancel,
 	}
-	h.triggers = NewTriggerDispatcher(h)
 	h.filters = NewFilterRegistry()
 	return h
 }
@@ -239,7 +237,6 @@ func NewHostWithStore(store interface{}) *Host {
 		ctx:                ctx,
 		ctxCancel:          cancel,
 	}
-	h.triggers = NewTriggerDispatcher(h)
 	h.filters = NewFilterRegistry()
 	h.services["store"] = store
 	return h
@@ -848,7 +845,15 @@ func (h *Host) CheckAllConnectorHealth() []ConnectorStatus {
 }
 
 // recordConnectorFailure marks a connector as unhealthy after send retries
-// are exhausted. Called by TriggerDispatcher.
+// are exhausted.
+//
+// No current caller: this was invoked by the now-removed TriggerDispatcher
+// (internal/plugin/triggers.go, deleted alongside trigger_rules —
+// TASKS/phase-0/18b-cut-dead-messaging-and-plugin-tables.md). Left in place
+// because it belongs to the general connector-health subsystem
+// (connectorHealth/GetConnectorStatuses/CheckConnectorHealth), which is
+// still live via internal/api/connectors.go and out of this task's scope —
+// not something specific to trigger_rules.
 func (h *Host) recordConnectorFailure(name string) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
@@ -861,7 +866,8 @@ func (h *Host) recordConnectorFailure(name string) {
 	status.ConsecutiveFailures++
 }
 
-// recordConnectorSuccess marks a connector as healthy after a successful send.
+// recordConnectorSuccess marks a connector as healthy after a successful
+// send. Same "no current caller" note as recordConnectorFailure, above.
 func (h *Host) recordConnectorSuccess(name string) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
@@ -1556,8 +1562,8 @@ func (h *Host) UnloadPlugin(id string) error {
 	return nil
 }
 
-// EmitEvent emits an event to all registered hooks, then dispatches
-// matching trigger rules to connectors, and broadcasts to SSE subscribers.
+// EmitEvent emits an event to all registered hooks, then broadcasts to SSE
+// subscribers.
 func (h *Host) EmitEvent(event plugin.Event) {
 	// 1. Dispatch to registered event hooks.
 	h.mu.RLock()
@@ -1584,14 +1590,7 @@ func (h *Host) EmitEvent(event plugin.Event) {
 		wg.Wait()
 	}
 
-	// 2. Dispatch to trigger rules (event → connector bindings).
-	if h.triggers != nil {
-		safego.Go(h.ctx, "plugin.host.emit-event.triggers-dispatch", func() {
-			h.triggers.Dispatch(event)
-		})
-	}
-
-	// 3. Broadcast to SSE event stream subscribers.
+	// 2. Broadcast to SSE event stream subscribers.
 	h.broadcastEvent(event)
 }
 

@@ -198,27 +198,6 @@ type ModeStore interface {
 	DeleteMode(id string) error
 }
 
-// CustomActionStore provides access to custom actions.
-type CustomActionStore interface {
-	CreateCustomAction(action *store.CustomAction) error
-	GetCustomAction(id string) (*store.CustomAction, error)
-	UpdateCustomAction(action *store.CustomAction) error
-	DeleteCustomAction(id string) error
-	ListCustomActions() ([]store.CustomAction, error)
-	ListCustomActionsByTrigger(trigger string) ([]store.CustomAction, error)
-}
-
-// TriggerRuleStore provides access to trigger rules.
-type TriggerRuleStore interface {
-	CreateTriggerRule(rule *store.TriggerRule) error
-	GetTriggerRule(id string) (*store.TriggerRule, error)
-	UpdateTriggerRule(rule *store.TriggerRule) error
-	DeleteTriggerRule(id string) error
-	ListTriggerRules(pluginID string) ([]store.TriggerRule, error)
-	ListTriggerRulesByEvent(eventType string) ([]store.TriggerRule, error)
-	DeleteTriggerRulesByPlugin(pluginID string) error
-}
-
 // TodoStore provides CRUD access to internal todos.
 type TodoStore interface {
 	CreateTodo(t *store.Todo) error
@@ -341,8 +320,6 @@ type Store interface {
 	TemplateStore
 	SkillStore
 	ModeStore
-	CustomActionStore
-	TriggerRuleStore
 	ProviderStore
 	TodoStore
 	PlanStore

@@ -31,7 +31,6 @@ import { useSettings } from "@/hooks/useSettings";
 import { resolveIcon } from "@/lib/icons";
 import { getSlotComponent } from "@/lib/plugin-slot-lookup";
 import { useNavigationStore } from "@/stores/useNavigationStore";
-import { ActionsPanel } from "./ActionsPanel";
 import { AgentProfileManager } from "./AgentProfileManager";
 import { DurableAgentAdminPanel } from "./DurableAgentAdminPanel";
 import { MemoryPanel } from "./MemoryPanel";
@@ -92,8 +91,6 @@ const BASE_NAV_GROUPS: NavGroup[] = [
     label: "Projects",
     items: [
       { id: "workspaces", label: "Projects", icon: FolderKanban },
-      // hidden pending CW-20260421-0012 scope review (K5 / CW-20260421-0004)
-      // { id: "actions", label: "Actions", icon: Zap },
     ],
   },
   {
@@ -212,8 +209,6 @@ export default function SettingsPage() {
         return <MetaHarnessManager />;
       case "shortcuts":
         return <ShortcutsPanel />;
-      case "actions":
-        return <ActionsPanel />;
       case "agents":
         return <AgentProfileManager />;
       case "durable-agents":

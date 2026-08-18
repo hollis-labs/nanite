@@ -627,53 +627,6 @@ type UpdateProjectRequest struct {
 	SortOrder   *int    `json:"sort_order"`
 }
 
-// --- Triggers ---
-
-type CreateTriggerRuleRequest struct {
-	PluginID        string `json:"plugin_id"`
-	EventType       string `json:"event_type"`
-	ConnectorName   string `json:"connector_name"`
-	PayloadTemplate string `json:"payload_template"`
-	FilterExpr      string `json:"filter_expr"`
-	Enabled         *bool  `json:"enabled"`
-	Description     string `json:"description"`
-}
-
-type UpdateTriggerRuleRequest struct {
-	EventType       *string `json:"event_type"`
-	ConnectorName   *string `json:"connector_name"`
-	PayloadTemplate *string `json:"payload_template"`
-	FilterExpr      *string `json:"filter_expr"`
-	Enabled         *bool   `json:"enabled"`
-	Description     *string `json:"description"`
-}
-
-// --- Actions ---
-
-type CreateActionRequest struct {
-	Name         string `json:"name"`
-	Description  string `json:"description"`
-	Keybinding   string `json:"keybinding"`
-	Command      string `json:"command"`
-	SlashCommand string `json:"slash_command"`
-	AutoTriggers string `json:"auto_triggers"`
-	Enabled      *bool  `json:"enabled"`
-}
-
-type UpdateActionRequest struct {
-	Name         *string `json:"name"`
-	Description  *string `json:"description"`
-	Keybinding   *string `json:"keybinding"`
-	Command      *string `json:"command"`
-	SlashCommand *string `json:"slash_command"`
-	AutoTriggers *string `json:"auto_triggers"`
-	Enabled      *bool   `json:"enabled"`
-}
-
-type ExecuteActionRequest struct {
-	SessionID string `json:"session_id"`
-}
-
 // --- Skills ---
 
 type CreateSkillRequest struct {

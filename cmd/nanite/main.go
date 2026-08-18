@@ -653,15 +653,6 @@ func cmdServe(args []string) {
 		slog.Warn("agent-source registration failed; continuing without directory handle", "err", err)
 	}
 
-	// Register existing custom actions as slash commands.
-	if actions, err := s.ListCustomActions(); err == nil {
-		for _, action := range actions {
-			if action.SlashCommand != "" && action.Enabled {
-				a.RegisterActionCommand(&action)
-			}
-		}
-	}
-
 	// Lifecycle manager for long-running daemon goroutines (cleanup,
 	// snapshots, reapers). Owned by cmdServe; shut down on signal before
 	// container.Shutdown so daemons stop referencing container state.

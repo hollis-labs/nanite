@@ -137,8 +137,6 @@ type minimalStore struct {
 	stubTemplateStore
 	stubSkillStore
 	stubModeStore
-	stubCustomActionStore
-	stubTriggerRuleStore
 	stubProviderStore
 	stubTodoStore
 	stubPlanStore
@@ -395,29 +393,6 @@ func (stubModeStore) GetModeBySlug(string) (*store.Mode, error) { return nil, ni
 func (stubModeStore) ListModes() ([]store.Mode, error)          { return nil, nil }
 func (stubModeStore) UpdateMode(*store.Mode) error              { return nil }
 func (stubModeStore) DeleteMode(string) error                   { return nil }
-
-type stubCustomActionStore struct{}
-
-func (stubCustomActionStore) CreateCustomAction(*store.CustomAction) error        { return nil }
-func (stubCustomActionStore) GetCustomAction(string) (*store.CustomAction, error) { return nil, nil }
-func (stubCustomActionStore) UpdateCustomAction(*store.CustomAction) error        { return nil }
-func (stubCustomActionStore) DeleteCustomAction(string) error                     { return nil }
-func (stubCustomActionStore) ListCustomActions() ([]store.CustomAction, error)    { return nil, nil }
-func (stubCustomActionStore) ListCustomActionsByTrigger(string) ([]store.CustomAction, error) {
-	return nil, nil
-}
-
-type stubTriggerRuleStore struct{}
-
-func (stubTriggerRuleStore) CreateTriggerRule(*store.TriggerRule) error           { return nil }
-func (stubTriggerRuleStore) GetTriggerRule(string) (*store.TriggerRule, error)    { return nil, nil }
-func (stubTriggerRuleStore) UpdateTriggerRule(*store.TriggerRule) error           { return nil }
-func (stubTriggerRuleStore) DeleteTriggerRule(string) error                       { return nil }
-func (stubTriggerRuleStore) ListTriggerRules(string) ([]store.TriggerRule, error) { return nil, nil }
-func (stubTriggerRuleStore) ListTriggerRulesByEvent(string) ([]store.TriggerRule, error) {
-	return nil, nil
-}
-func (stubTriggerRuleStore) DeleteTriggerRulesByPlugin(string) error { return nil }
 
 type stubProviderStore struct{}
 

@@ -2404,27 +2404,6 @@ export interface Worker {
   created_at: string;
 }
 
-// --- Custom Actions ---
-
-export interface CustomAction {
-  id: string;
-  name: string;
-  description: string;
-  keybinding: string;
-  command: string;
-  slash_command: string;
-  auto_triggers: string; // JSON array: ["on_new_session", "on_agent_switch", "on_mode_change"]
-  enabled: boolean;
-  created_at: string;
-  updated_at: string;
-}
-
-export const AUTO_TRIGGER_OPTIONS = [
-  { value: "on_new_session", label: "New Session" },
-  { value: "on_agent_switch", label: "Agent Switch" },
-  { value: "on_mode_change", label: "Mode Change" },
-] as const;
-
 // --- Plugin Keybindings ---
 
 export interface PluginKeybinding {

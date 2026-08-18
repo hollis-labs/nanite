@@ -108,6 +108,19 @@ func TestMigrateSkipsRecreateOnceTableIsCurrent(t *testing.T) {
 // re-running s.migrate() (simulating a restart) leaves it completely
 // untouched, because goose's ledger already has migration 43 marked
 // applied and never attempts its rebuild SQL again.
+//
+// todos_legacy_d1 itself is now dropped by migration 095
+// (095_drop_legacy_rename_tables.sql,
+// TASKS/phase-0/19-cut-legacy-rename-tables.md), which every full
+// migration run applies — including newTestStore's initial boot, before
+// this test's own seed/re-migrate steps even happen. See
+// TestMigrateDropsLegacyRenameTables below for that coverage. This test's
+// own concern is narrower and still valid post-095: does a second
+// s.migrate() re-attempt 043's rebuild SQL against a live todos row that
+// only 043's widened CHECK permits. It does not — and correspondingly,
+// todos_legacy_d1 stays gone (dropped once, by 095, on the very first
+// boot) rather than staying present, which is the inverse of what this
+// test checked before 19 landed.
 func TestMigrateDoesNotReRecreateLegacyRenameMigrations(t *testing.T) {
 	s := newTestStore(t)
 
@@ -145,16 +158,104 @@ func TestMigrateDoesNotReRecreateLegacyRenameMigrations(t *testing.T) {
 		t.Errorf("priority: got %q, want %q", priority, "high")
 	}
 
-	// The legacy rename-artifact table stays exactly where
-	// 09-adopt-goose-migrations's task file requires it: present, not
-	// dropped, not renamed again (that's 19-cut-legacy-rename-tables's job,
-	// once it lands after this one).
+	// 19-cut-legacy-rename-tables has landed (migration 095): the legacy
+	// rename-artifact table is gone by the time newTestStore's initial boot
+	// finishes, and this second s.migrate() call must not resurrect it.
 	legacyExists, err := s.tableExists(context.Background(), "todos_legacy_d1")
 	if err != nil {
 		t.Fatalf("check todos_legacy_d1 exists: %v", err)
 	}
-	if !legacyExists {
-		t.Error("todos_legacy_d1 no longer exists — it must stay in place until 19-cut-legacy-rename-tables drops it")
+	if legacyExists {
+		t.Error("todos_legacy_d1 still exists — migration 095 (19-cut-legacy-rename-tables) should have dropped it on the first boot, and it must stay dropped across a re-migrate")
+	}
+}
+
+// TestMigrateDropsLegacyRenameTables is the concrete regression test for
+// 19-cut-legacy-rename-tables.md (TASKS/phase-0/19-cut-legacy-rename-tables.md):
+// migration 095 (095_drop_legacy_rename_tables.sql) drops
+// agent_messages_legacy_089 and todos_legacy_d1 — the two rename-artifact
+// tables 09-adopt-goose-migrations deliberately left in place (see this
+// file's other tests) once goose's real ledger made the swallowed-rename
+// idempotency trick those tables existed for structurally unnecessary.
+//
+// Confirms all of this task's Done-means criteria in one place:
+//   - both legacy tables are gone after a normal migration run (exercised
+//     via newTestStore, which always boots through every embedded
+//     migration, including 095, from an empty database)
+//   - the live agent_messages/todos tables are unaffected: same columns,
+//     same row counts (zero, on a fresh store) before and after
+//   - a second s.migrate() (simulating a restart) is a clean no-op — goose
+//     has nothing pending, and neither legacy table comes back
+func TestMigrateDropsLegacyRenameTables(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+
+	for _, table := range []string{"agent_messages_legacy_089", "todos_legacy_d1"} {
+		exists, err := s.tableExists(ctx, table)
+		if err != nil {
+			t.Fatalf("check %s exists: %v", table, err)
+		}
+		if exists {
+			t.Errorf("%s still exists after a fresh full migration run — migration 095 should have dropped it", table)
+		}
+	}
+
+	// Live tables must still be present and queryable with their real
+	// schema (same columns 090/043 defined for them) — dropping the legacy
+	// rename artifacts must not touch the tables they were renamed away
+	// from.
+	var agentMessagesCount, todosCount int
+	if err := s.DB.QueryRow(`SELECT count(*) FROM agent_messages`).Scan(&agentMessagesCount); err != nil {
+		t.Fatalf("live agent_messages table unusable after 095: %v", err)
+	}
+	if err := s.DB.QueryRow(`SELECT count(*) FROM todos`).Scan(&todosCount); err != nil {
+		t.Fatalf("live todos table unusable after 095: %v", err)
+	}
+	if agentMessagesCount != 0 {
+		t.Errorf("agent_messages row count: got %d, want 0 on a fresh store", agentMessagesCount)
+	}
+	if todosCount != 0 {
+		t.Errorf("todos row count: got %d, want 0 on a fresh store", todosCount)
+	}
+	// kind/channel columns only exist on the post-090 live agent_messages
+	// schema; project_id only exists on the post-043 live todos schema.
+	// Querying them confirms the live tables kept their real (not
+	// legacy-renamed) shape.
+	if _, err := s.DB.Exec(`INSERT INTO agent_messages (id, from_session_id, from_agent_id, to_session_id, to_agent_id, body, kind, channel) VALUES ('m1','s1','a1','s2','a2','hi','subagent_result','chat')`); err != nil {
+		t.Fatalf("insert into live agent_messages using post-090 columns: %v", err)
+	}
+	if _, err := s.DB.Exec(`INSERT INTO todos (id, scope, scope_id, project_id, title) VALUES ('t1','turn','sess-1','proj-1','a todo')`); err != nil {
+		t.Fatalf("insert into live todos using post-043 columns: %v", err)
+	}
+
+	assertGooseHasNothingPending(t, s)
+
+	if err := s.migrate(); err != nil {
+		t.Fatalf("re-migrate after legacy tables already dropped: %v", err)
+	}
+
+	for _, table := range []string{"agent_messages_legacy_089", "todos_legacy_d1"} {
+		exists, err := s.tableExists(ctx, table)
+		if err != nil {
+			t.Fatalf("check %s exists after re-migrate: %v", table, err)
+		}
+		if exists {
+			t.Errorf("%s exists after a re-migrate — migration 095 must not be reapplied/resurrect the table", table)
+		}
+	}
+
+	var m1Body, t1Title string
+	if err := s.DB.QueryRow(`SELECT body FROM agent_messages WHERE id = 'm1'`).Scan(&m1Body); err != nil {
+		t.Fatalf("seeded agent_messages row lost across re-migrate: %v", err)
+	}
+	if m1Body != "hi" {
+		t.Errorf("agent_messages row: got body %q, want %q", m1Body, "hi")
+	}
+	if err := s.DB.QueryRow(`SELECT title FROM todos WHERE id = 't1'`).Scan(&t1Title); err != nil {
+		t.Fatalf("seeded todos row lost across re-migrate: %v", err)
+	}
+	if t1Title != "a todo" {
+		t.Errorf("todos row: got title %q, want %q", t1Title, "a todo")
 	}
 }
 

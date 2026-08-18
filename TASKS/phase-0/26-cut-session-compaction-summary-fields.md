@@ -147,7 +147,7 @@ unrelated to the compaction_summary/compacted_at cut — noting it here for
 visibility since it surfaced during required manual verification, not
 because it's this task's responsibility to fix.
 
-**Commit:** see repo history for the commit implementing this task (message: "Phase 0 #26: cut sessions.compaction_summary/compacted_at + UpdateSessionCompaction").
+**Commit:** `3f6a5075` — "Phase 0 #26: cut sessions.compaction_summary/compacted_at + UpdateSessionCompaction"
 
 ## Review notes
 <Reviewer fills this in: pass/fail, what was checked, anything fixed and how.>

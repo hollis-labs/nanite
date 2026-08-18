@@ -30,7 +30,6 @@ type managedFileFrontmatter struct {
 	ToolPermissions         map[string]any        `yaml:"toolPermissions,omitempty"`
 	ParentDispatchAllowlist []string              `yaml:"parentDispatchAllowlist,omitempty"`
 	RoleTools               []string              `yaml:"roleTools,omitempty"`
-	RoleSkills              []string              `yaml:"roleSkills,omitempty"`
 	ContextPolicy           map[string]any        `yaml:"contextPolicy,omitempty"`
 	Durable                 bool                  `yaml:"durable,omitempty"`
 	ActivationMode          string                `yaml:"activationMode,omitempty"`
@@ -116,7 +115,6 @@ func WriteManagedAgentProfile(path string, profile *store.AgentProfile, procedur
 		ToolPermissions:         parseJSONObject(profile.ToolPermissions),
 		ParentDispatchAllowlist: parseJSONArray(profile.ParentDispatchAllowlist),
 		RoleTools:               parseJSONArray(profile.RoleTools),
-		RoleSkills:              parseJSONArray(profile.RoleSkills),
 		ContextPolicy:           parseJSONObject(profile.ContextPolicy),
 		Durable:                 profile.Durable,
 		ActivationMode:          profile.ActivationMode,

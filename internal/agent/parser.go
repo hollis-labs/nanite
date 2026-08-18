@@ -74,9 +74,6 @@ type Definition struct {
 	// RoleTools — pre-seed list of tool names for agent_known_tools.
 	RoleTools []string `yaml:"roleTools,omitempty"`
 
-	// RoleSkills — pre-seed list of skill slugs for agent_known_skills.
-	RoleSkills []string `yaml:"roleSkills,omitempty"`
-
 	// ContextPolicy declares how the agent's live context should cycle.
 	// It is intentionally open-shaped so project-managed agents can carry
 	// richer policy keys without a Go release for each new field.

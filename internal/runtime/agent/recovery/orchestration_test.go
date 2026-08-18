@@ -50,6 +50,7 @@ func TestOnSessionExitTransientRetrySuccess(t *testing.T) {
 	exit := &agentsessions.ExitError{Cause: agentsessions.CauseIdleTimeout}
 	b.OnSessionExit("sess-1", exit, map[string]any{
 		MetaKeyAgentProfile: "claude-sonnet",
+		MetaKeyProvider:     "claude",
 		MetaKeyMode:         "long_lived",
 		MetaKeyWorkdir:      "/proj",
 	})
@@ -106,6 +107,7 @@ func TestOnSessionExitConfigFixedFlow(t *testing.T) {
 	exit := &agentsessions.ExitError{Cause: agentsessions.CauseWatchdogKill}
 	b.OnSessionExit("sess-2", exit, map[string]any{
 		MetaKeyAgentProfile: "claude-sonnet",
+		MetaKeyProvider:     "claude",
 		MetaKeyMode:         "long_lived",
 	})
 
@@ -183,13 +185,14 @@ func TestOnSessionExitHardCapEscalates(t *testing.T) {
 	}, WithMaxRetries(2))
 
 	exit := &agentsessions.ExitError{Cause: agentsessions.CauseIdleTimeout}
+	cliProviderMeta := map[string]any{MetaKeyProvider: "claude"}
 
 	// 1st failure: Transient retry succeeds (attempt counter -> 1).
-	b.OnSessionExit("sess-cap", exit, nil)
+	b.OnSessionExit("sess-cap", exit, cliProviderMeta)
 	// 2nd failure: Transient retry succeeds (attempt counter -> 2).
-	b.OnSessionExit("sess-cap", exit, nil)
+	b.OnSessionExit("sess-cap", exit, cliProviderMeta)
 	// 3rd failure: hard cap (>2) -> Permanent without dispatch.
-	b.OnSessionExit("sess-cap", exit, nil)
+	b.OnSessionExit("sess-cap", exit, cliProviderMeta)
 
 	// Two retries should have dispatched (attempts 1 and 2);
 	// attempt 3 escalates without dispatch.
@@ -360,10 +363,11 @@ func TestClearSessionDropsState(t *testing.T) {
 	}, WithMaxRetries(5))
 
 	exit := &agentsessions.ExitError{Cause: agentsessions.CauseIdleTimeout}
-	b.OnSessionExit("sess-clear", exit, nil) // attempt=1
-	b.OnSessionExit("sess-clear", exit, nil) // attempt=2
+	cliProviderMeta := map[string]any{MetaKeyProvider: "claude"}
+	b.OnSessionExit("sess-clear", exit, cliProviderMeta) // attempt=1
+	b.OnSessionExit("sess-clear", exit, cliProviderMeta) // attempt=2
 	b.ClearSession("sess-clear")
-	b.OnSessionExit("sess-clear", exit, nil) // should reset to attempt=1
+	b.OnSessionExit("sess-clear", exit, cliProviderMeta) // should reset to attempt=1
 
 	if got := len(store.breadcrumbs); got != 3 {
 		t.Fatalf("breadcrumbs: got %d, want 3", got)

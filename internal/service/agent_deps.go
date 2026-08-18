@@ -246,6 +246,14 @@ func BuildAgentDependencies(cfg AgentDepsConfig) (AgentDepsBundle, error) {
 			streams: cfg.Streams,
 		},
 		Credentials: newRecoveryCredentialsAdapter(resolver, cfg.Providers),
+		// HTTPRetry is deliberately left unwired here (Phase 0 task 04):
+		// the real adapter closes over chatServiceImpl.RetryLastMessage,
+		// and chatServiceImpl doesn't exist yet at this point in
+		// composition-root construction (NewChatService runs after
+		// BuildAgentDependencies). The container wires it post-
+		// construction via broker.SetHTTPRetry, mirroring how
+		// SetReplacementSessionHook handles the identical ordering
+		// problem for the CLI replacement-session adoption hook.
 	}
 	if cfg.MCP != nil {
 		brokerDeps.MCP = &recoveryMCPAdapter{manager: cfg.MCP}
@@ -315,6 +323,49 @@ func (a *agentBootAdapter) Boot(ctx context.Context, opts runtimeagent.Options) 
 	}
 	opts.IsRelaunch = true
 	return runtimeagent.Boot(ctx, a.deps, opts)
+}
+
+// recoveryHTTPRetryAdapter satisfies recovery.HTTPRetry for HTTP-provider
+// (bootdir-free) chat sessions — Phase 0 task 04 / decision log §19's
+// real HTTP-provider retry path.
+//
+// Deliberately narrow (mirrors agentBootAdapter's shape): the adapter
+// holds only a bound method value, not the full ChatService interface,
+// per deps.go's "keep the interface as narrow as AgentBoot's" guidance.
+// retryLastMessage re-invokes the chat harness's existing "retry last
+// message" mechanism — the same one a user's manual [Retry] click uses
+// (chatServiceImpl.RetryLastMessage): reset the circuit breaker, find
+// the session's last user message, dispatch a fresh generateResponse
+// turn through the FULL harness (tools, slots, system prompt — no
+// stripped-down reconstruction). That's a deliberate reuse decision:
+// hand-rolling a second, narrower "resume this turn" code path here
+// would duplicate stream registration, message persistence, and
+// cancellation semantics RetryLastMessage already gets right, for no
+// real benefit.
+//
+// Constructed post-NewChatService and wired via Broker.SetHTTPRetry
+// (see BuildAgentDependencies's brokerDeps.HTTPRetry comment for why it
+// can't be wired at NewBroker time).
+type recoveryHTTPRetryAdapter struct {
+	retryLastMessage func(ctx context.Context, sessionID string) (messageID string, err error)
+}
+
+// newRecoveryHTTPRetryAdapter builds the adapter from a bound method
+// value (chatSvcImpl.RetryLastMessage in production; a scripted fake in
+// tests).
+func newRecoveryHTTPRetryAdapter(retryLastMessage func(ctx context.Context, sessionID string) (string, error)) *recoveryHTTPRetryAdapter {
+	return &recoveryHTTPRetryAdapter{retryLastMessage: retryLastMessage}
+}
+
+func (a *recoveryHTTPRetryAdapter) Retry(ctx context.Context, ev *recovery.FailureEvent) error {
+	if a == nil || a.retryLastMessage == nil {
+		return errors.New("recovery: http retry adapter not wired")
+	}
+	if ev == nil || ev.SessionID == "" {
+		return errors.New("recovery: http retry: missing session id")
+	}
+	_, err := a.retryLastMessage(ctx, ev.SessionID)
+	return err
 }
 
 // recoveryBrokerStore satisfies recovery.BrokerStore against the store

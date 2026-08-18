@@ -148,25 +148,26 @@ func (s *chatServiceImpl) notifyRecoveryBrokerForHTTPStreamError(
 		return
 	}
 
-	// CW-20260815-0024: the recovery broker's retry path (DispatchRetry)
-	// always attempts a fresh agent.Boot — which for a provider with no
-	// implemented bootdir Layout (every plain HTTP API provider: anthropic,
-	// openai, gemini-api, openrouter, ...) fails 100% of the time with
-	// "bootdir for provider %q is not yet implemented", regardless of the
-	// underlying stream error's classification. Notifying the broker for
-	// those sessions produced nothing but a guaranteed-permanent-failure
-	// breadcrumb and, worse, a misleading "retrying..." envelope that was
-	// never going to succeed — so skip the notification entirely rather
-	// than let it fail structurally on every single HTTP-provider stream
-	// error. CLI/PTY-backed sessions (claude, codex, opencode) still go
-	// through unchanged — this is the case the mechanism was built for.
-	if !runtimeagent.HasBootdirLayout(providerName) {
-		slog.Info("recovery: http chat stream error — skipping broker notify (no bootdir layout for this provider, recovery would be a guaranteed no-op)",
-			"session_id", sessionID,
-			"provider", providerName)
-		return
-	}
-
+	// CW-20260815-0024 originally skipped this notification outright for
+	// every HTTP-provider (no-bootdir-Layout) session: the only retry
+	// DispatchRetry could ever dispatch was a doomed agent.Boot call —
+	// see runtimeagent.HasBootdirLayout's doc comment — so notifying the
+	// broker produced nothing but a guaranteed-permanent-failure
+	// breadcrumb and a misleading "retrying..." envelope.
+	//
+	// Phase 0 task 04 (decision log §19) closes that structural gap:
+	// recovery.Broker.DispatchRetry itself now branches on
+	// runtimeagent.HasBootdirLayout(ev.Provider) and routes no-bootdir
+	// sessions to a real, bootdir-free HTTP retry path (recovery.HTTPRetry)
+	// instead of ever reaching AgentBoot.Boot for them. That guarantee —
+	// "never dispatch a doomed CLI-boot retry for a no-bootdir-layout
+	// provider" — now lives inside the broker, not at this call site, so
+	// it holds regardless of caller. The unconditional skip here is gone:
+	// HTTP-provider stream errors reach the broker like any other
+	// session's failure — classified, breadcrumbed, and (when
+	// appropriate) retried through the new path. CLI/PTY-backed sessions
+	// (claude, codex, opencode) are unaffected — they still resolve to
+	// the AgentBoot branch inside DispatchRetry exactly as before.
 	cause, errorClass := classifyHTTPStreamError(streamErr)
 
 	exit := &agentsessions.ExitError{

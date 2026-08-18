@@ -8,7 +8,7 @@ import (
 func TestMain(m *testing.M) {
 	// Seed the envelope registry with types used by tests.
 	// In production these are loaded from config/envelopes.yaml at startup.
-	InitCoreTypes([]string{"kb-result", "session-task", "document-viewer"})
+	InitCoreTypes([]string{"metric-card", "session-task", "document-viewer"})
 	os.Exit(m.Run())
 }
 
@@ -176,7 +176,7 @@ func TestParseEnvelopes_UnregisteredType(t *testing.T) {
 
 func TestParseEnvelopes_ValidNoErrors(t *testing.T) {
 	input := "```nanite-envelope\n" +
-		`{"kind":"action","version":1,"type":"kb-result","data":{"query":"test"}}` +
+		`{"kind":"action","version":1,"type":"metric-card","data":{"query":"test"}}` +
 		"\n```"
 	envelopes, _, errors := ParseEnvelopes(input)
 
@@ -194,7 +194,7 @@ func TestValidateEnvelope(t *testing.T) {
 		env    Envelope
 		reason string // empty means valid
 	}{
-		{"valid", Envelope{Kind: "action", Version: 1, Type: "kb-result"}, ""},
+		{"valid", Envelope{Kind: "action", Version: 1, Type: "metric-card"}, ""},
 		{"valid_standard", Envelope{Kind: "question", Version: 1, Type: "standard"}, "unregistered_type"},
 		{"missing_kind", Envelope{Version: 1, Type: "nanite"}, "missing_kind"},
 		{"missing_version", Envelope{Kind: "action", Type: "nanite"}, "missing_version"},

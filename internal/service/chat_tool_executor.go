@@ -697,7 +697,7 @@ func (s *chatServiceImpl) postProcessToolResults(
 			ch <- chat.StreamEvent{Type: "tool_warning", Data: string(warningJSON)}
 		} else {
 			// Capture envelope data from successful results.
-			ls.pendingEnvelopes = captureEnvelopeData(r.rawOutput, tu.Name, ls.pendingEnvelopes)
+			ls.pendingEnvelopes = captureEnvelopeData(r.rawOutput, ls.pendingEnvelopes)
 		}
 
 		// Detect stuck loops (modifies result text).

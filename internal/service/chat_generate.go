@@ -3144,18 +3144,18 @@ func (s *chatServiceImpl) detectStuckLoop(
 }
 
 // captureEnvelopeData extracts envelope data markers from a tool result.
-func captureEnvelopeData(result, toolName string, pending []string) []string {
+//
+// Used to carry the payload of a __search_kb tool call through
+// chat.BuildKBEnvelope into a kb-result card — the support-ticket-specific
+// caller was removed in Phase 0 (15c-cut-support-ticket) alongside the rest
+// of that plugin's frontend and backend footprint. The generic
+// ENVELOPE_DATA marker extraction below is shared infrastructure used by
+// card_show and other tools and stays in place.
+func captureEnvelopeData(result string, pending []string) []string {
 	if eStart := strings.Index(result, "<!--ENVELOPE_DATA:"); eStart >= 0 {
 		tail := result[eStart+len("<!--ENVELOPE_DATA:"):]
 		if eEnd := strings.Index(tail, ":ENVELOPE_DATA-->"); eEnd >= 0 {
-			payload := tail[:eEnd]
-			if strings.HasSuffix(toolName, "__search_kb") {
-				if env := chat.BuildKBEnvelope(payload); env != "" {
-					pending = append(pending, env)
-				}
-			} else {
-				pending = append(pending, payload)
-			}
+			pending = append(pending, tail[:eEnd])
 		}
 	}
 	return pending

@@ -808,7 +808,7 @@ func (st *SelfToolsTransport) callShowCard(ctx context.Context, args map[string]
 			"envelope type %q is not addressable through card_show. Allow-list (v1): %s. "+
 				"Decision-flow envelopes (approval-card, proposal-card, confirmation-card, question-form), "+
 				"runtime-emitted envelopes (chat-loop-terminated, elicitation-prompt, subagent-spawn-approval), "+
-				"and plugin-shipped envelopes (kb-result, ticket-*) have their own emission paths.",
+				"and plugin-shipped envelopes (giphy-modal) have their own emission paths.",
 			envType, strings.Join(envelope.PassiveRenderableTypes, ", "))), nil
 	}
 

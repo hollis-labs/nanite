@@ -217,12 +217,15 @@ func cmdServe(args []string) {
 	chat.InitCoreTypes(coreTypes)
 	slog.Info("envelope registry loaded", "count", len(coreTypes), "source", "go-envelopes v0.1.0")
 
-	// Register Nanite's five orphan schemas (kb-result, giphy-modal,
-	// resolution-capture, ticket-form, ticket-confirmation) under the
-	// nanite-legacy plugin id. Catalog cleanup is a separate task; this
-	// preserves prior behavior where ValidateEnvelopeData / card_show
-	// could resolve a schema for these types. Bare names also land in the
-	// chat allowlist so wire-format envelopes carrying them keep parsing.
+	// Register Nanite's remaining orphan schema (giphy-modal) under the
+	// nanite-legacy plugin id. (kb-result, resolution-capture, ticket-form,
+	// and ticket-confirmation were removed from OrphanTypes in Phase 0,
+	// 15c-cut-support-ticket, alongside the support-ticket plugin's
+	// frontend components and backend caller.) Catalog cleanup is a
+	// separate task; this preserves prior behavior where
+	// ValidateEnvelopeData / card_show could resolve a schema for the
+	// remaining orphan type. Bare names also land in the chat allowlist
+	// so wire-format envelopes carrying them keep parsing.
 	if n, err := envelope.RegisterOrphans(envReg); err != nil {
 		slog.Warn("envelope: partial orphan registration", "registered", n, "err", err)
 	} else {

@@ -53,9 +53,9 @@ var localePrinter = message.NewPrinter(language.English)
 // data", the system decides where it lands. Decision-flow envelopes
 // (approval-card, proposal-card, confirmation-card, question-form),
 // runtime-emitted envelopes (chat-loop-terminated, elicitation-prompt,
-// subagent-spawn-approval), and plugin-shipped envelopes (kb-result,
-// ticket-*) intentionally have their own emission paths and are not
-// addressable through show_card.
+// subagent-spawn-approval), and plugin-shipped envelopes (giphy-modal)
+// intentionally have their own emission paths and are not addressable
+// through show_card.
 //
 // Source of truth: SP-20260428-0001 / CW-20260428-0019 (Collab UI v1, A3).
 var PassiveRenderableTypes = []string{

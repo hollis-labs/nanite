@@ -75,12 +75,12 @@ func TestTier0Minimal(t *testing.T) {
 
 func TestTier1WithToolCallsAndEnvelopes(t *testing.T) {
 	toolCalls := []ToolCallRef{
-		{ID: "tc1", Name: "search_kb", Status: "success", HasEnvelope: true},
+		{ID: "tc1", Name: "card_show", Status: "success", HasEnvelope: true},
 		{ID: "tc2", Name: "create_task", Status: "error"},
 	}
-	envData, _ := json.Marshal(map[string]interface{}{"kind": "kb-result", "data": "test"})
+	envData, _ := json.Marshal(map[string]interface{}{"kind": "metric-card", "data": "test"})
 	envelopes := []EnvelopeRef{
-		{Type: "kb-result", Data: json.RawMessage(envData)},
+		{Type: "metric-card", Data: json.RawMessage(envData)},
 	}
 	msg := WrapResponse("response with tools", "tool", toolCalls, envelopes, true, true)
 	data := msg.MarshalContent()
@@ -98,8 +98,8 @@ func TestTier1WithToolCallsAndEnvelopes(t *testing.T) {
 		t.Fatalf("expected 2 tool_calls, got %v", parsed["tool_calls"])
 	}
 	first := tc[0].(map[string]interface{})
-	if first["name"] != "search_kb" {
-		t.Errorf("expected first tool name=search_kb, got %v", first["name"])
+	if first["name"] != "card_show" {
+		t.Errorf("expected first tool name=card_show, got %v", first["name"])
 	}
 	if first["has_envelope"] != true {
 		t.Errorf("expected has_envelope=true, got %v", first["has_envelope"])

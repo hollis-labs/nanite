@@ -175,50 +175,6 @@ type Status struct {
 	Progress float64 `json:"progress"`
 }
 
-// buildKBEnvelope transforms a search_kb JSON result into a nanite-envelope JSON string.
-// The search result is {"results":[...],"query":"...","total_results":N}.
-// The envelope wraps it as {"kind":"envelope","version":1,"type":"kb-result","data":{...}}.
-func BuildKBEnvelope(searchResult string) string {
-	// The search result may have a trailing [SYSTEM: ...] instruction — strip it.
-	jsonEnd := strings.LastIndex(searchResult, "}")
-	if jsonEnd < 0 {
-		return ""
-	}
-	jsonPart := searchResult[:jsonEnd+1]
-
-	// Parse the search result to sanitize body fields.
-	// Body content may contain triple backticks (markdown code fences)
-	// which break the nanite-envelope fence delimiter.
-	var parsed map[string]any
-	if err := json.Unmarshal([]byte(jsonPart), &parsed); err != nil {
-		return ""
-	}
-
-	// Sanitize body fields — replace ``` with ~~~ in article bodies
-	// so they don't break the envelope fence.
-	if results, ok := parsed["results"].([]any); ok {
-		for _, r := range results {
-			if article, ok := r.(map[string]any); ok {
-				if body, ok := article["body"].(string); ok {
-					article["body"] = strings.ReplaceAll(body, "```", "~~~")
-				}
-			}
-		}
-	}
-
-	env := map[string]any{
-		"kind":    "envelope",
-		"version": 1,
-		"type":    "kb-result",
-		"data":    parsed,
-	}
-	data, err := json.Marshal(env)
-	if err != nil {
-		return ""
-	}
-	return string(data)
-}
-
 // envelopePattern matches fenced code blocks with volon-envelope or nanite-envelope language tags.
 var envelopePattern = regexp.MustCompile("(?s)```(?:volon-envelope|nanite-envelope)\\s*\n(.*?)```")
 

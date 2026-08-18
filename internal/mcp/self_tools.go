@@ -252,7 +252,7 @@ func selfToolDefinitions() []Tool {
 			Name: "card_show",
 			Description: "Render a structured envelope card in chat or in a drawer. One generic surface for the v1 passive-renderable card types — replaces the older per-type giphy_show / document_show / report_show tools (CW-20260428-0019, A3).\n\n" +
 				"**When to use:** When you want to display structured content (a metric, a list, a table, a side-by-side diff, a long-form document, a metrics report, an animated GIF). Pick the smallest card that fits the data.\n\n" +
-				"**When NOT to use:** Decision-flow envelopes (approval-card, proposal-card, confirmation-card, question-form), runtime-emitted envelopes (chat-loop-terminated, elicitation-prompt), and plugin-shipped envelopes (kb-result, ticket-*) have their own emission paths and are NOT addressable here.\n\n" +
+				"**When NOT to use:** Decision-flow envelopes (approval-card, proposal-card, confirmation-card, question-form), runtime-emitted envelopes (chat-loop-terminated, elicitation-prompt), and plugin-shipped envelopes (giphy-modal) have their own emission paths and are NOT addressable here.\n\n" +
 				"**Per-type required-fields cheat sheet** (full examples + optional fields via `tool_describe(name=\"card_show\")`):\n" +
 				"- `report-card`: data={title, metrics:[{label, value}, ...]} — REQUIRES sources arg. Optional `session_link:{label, url}` renders a link back to the full session/task/run this report distills (a real link, not an actions button) — use it when relaying a delegated-work completion instead of pasting a transcript. Default → bottom_chat_drawer.\n" +
 				"- `document-viewer`: data={title, content} — REQUIRES sources. body field is `content` (markdown|html), NOT `body_markdown`. Default → bottom_chat_drawer.\n" +

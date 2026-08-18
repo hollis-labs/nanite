@@ -36,7 +36,7 @@ There are two envelope patterns:
 }
 ` + "```" + `
 
-Use kind="envelope" with a registered type for display cards (kb-result, giphy-modal, report-card, etc.). Use kind="question"/"action"/"approval" for interactive forms and proposals.
+Use kind="envelope" with a registered type for display cards (giphy-modal, report-card, metric-card, etc.). Use kind="question"/"action"/"approval" for interactive forms and proposals.
 
 ## Field Reference
 
@@ -85,10 +85,6 @@ causes the envelope to be silently dropped — no error, no warning.
 | giphy-modal | Giphy search/selection |
 | document-viewer | Document display card |
 | report-card | Summary/report display |
-| kb-result | Knowledge base search result |
-| ticket-confirmation | Support ticket confirmation |
-| ticket-form | Support ticket input form |
-| resolution-capture | Issue resolution capture |
 
 ## Examples
 

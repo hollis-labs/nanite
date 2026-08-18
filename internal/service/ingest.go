@@ -239,12 +239,6 @@ func upsertAgentDef(st *store.Store, def *agentpkg.Definition) error {
 			seedProcedures(context.Background(), st, row.ID, def.Procedures)
 		}
 	}
-	if len(def.RoleSkills) > 0 {
-		row, err := st.GetAgentBySlug(def.Slug)
-		if err == nil && row != nil {
-			seedRoleSkills(context.Background(), st, row.ID, def.RoleSkills)
-		}
-	}
 	if len(def.RoleTools) > 0 {
 		row, err := st.GetAgentBySlug(def.Slug)
 		if err == nil && row != nil {
@@ -292,22 +286,6 @@ func seedProcedures(ctx context.Context, st *store.Store, agentID string, procs 
 			Scope:   scope,
 		}); err != nil {
 			slog.Warn("service: seed procedure", "agent_id", agentID, "procedure", p.Name, "err", err)
-		}
-	}
-}
-
-func seedRoleSkills(ctx context.Context, st *store.Store, agentID string, slugs []string) {
-	for _, slug := range slugs {
-		if slug == "" {
-			continue
-		}
-		if err := st.InsertAgentKnownSkill(ctx, store.AgentKnownSkill{
-			AgentID:   agentID,
-			SkillName: slug,
-			Pinned:    true,
-			Reason:    "role_seed",
-		}); err != nil {
-			slog.Warn("service: seed role skill", "agent_id", agentID, "skill_name", slug, "err", err)
 		}
 	}
 }

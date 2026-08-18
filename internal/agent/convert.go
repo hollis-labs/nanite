@@ -109,7 +109,6 @@ func (d *Definition) ToProfile() *store.AgentProfile {
 	p.ParentDispatchAllowlist = marshalSlice(d.ParentDispatchAllowlist)
 
 	p.RoleTools = marshalSlice(d.RoleTools)
-	p.RoleSkills = marshalSlice(d.RoleSkills)
 
 	if len(d.ContextPolicy) > 0 {
 		p.ContextPolicy = marshalJSONOr(d.ContextPolicy, "{}")

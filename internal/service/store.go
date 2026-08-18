@@ -157,7 +157,7 @@ type ArtifactStore interface {
 	GetArtifact(id string) (*store.Artifact, error)
 }
 
-// TemplateStore provides access to prompt templates and output templates.
+// TemplateStore provides access to prompt templates.
 type TemplateStore interface {
 	// Prompt templates
 	ListPromptTemplates() ([]store.PromptTemplate, error)
@@ -170,12 +170,6 @@ type TemplateStore interface {
 	AssignPromptTemplateToAgent(agentID, templateID string) error
 	RemovePromptTemplateFromAgent(agentID, templateID string) error
 	ComposePromptForAgent(agentID string, variables map[string]string) (string, error)
-	// Output templates
-	ListTemplates() ([]store.Template, error)
-	GetTemplate(name string) (*store.Template, error)
-	CreateTemplate(t *store.Template) error
-	UpdateTemplate(name, templateText string) error
-	DeleteTemplate(name string) error
 }
 
 // SkillStore provides CRUD access to skills (independent of agent bindings).

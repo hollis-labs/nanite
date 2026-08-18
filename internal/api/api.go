@@ -386,14 +386,6 @@ func (a *API) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/handoffs/{id}/approve", a.handleHandoffApprove)
 	mux.HandleFunc("POST /api/handoffs/{id}/reject", a.handleHandoffReject)
 
-	// Output Templates
-	mux.HandleFunc("GET /api/templates", a.handleListTemplates)
-	mux.HandleFunc("POST /api/templates", a.handleCreateTemplate)
-	mux.HandleFunc("GET /api/templates/{name}", a.handleGetTemplate)
-	mux.HandleFunc("PUT /api/templates/{name}", a.handleUpdateTemplate)
-	mux.HandleFunc("DELETE /api/templates/{name}", a.handleDeleteTemplate)
-	mux.HandleFunc("POST /api/templates/{name}/apply", a.handleApplyTemplate)
-
 	// Search
 	mux.HandleFunc("GET /api/search", a.handleSearchMessages)
 

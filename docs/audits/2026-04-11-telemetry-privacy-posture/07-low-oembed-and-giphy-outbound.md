@@ -3,6 +3,7 @@
 **Scope:** Built-in plugins
 **Topic:** Outbound network — plugin features
 **Date:** 2026-04-11
+**Status, 2026-08-18:** Superseded. Both the oEmbed and Giphy plugin registrations have been cut from the codebase (`TASKS/phase-0/15a-cut-giphy.md`, `TASKS/phase-0/15b-cut-oembed.md`) — neither plugin ships or is registered any longer, so this finding no longer applies to current code. Left in place as an historical audit record; not updated in the index's severity/topic tables.
 
 ## Problem
 

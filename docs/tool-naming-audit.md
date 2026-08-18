@@ -431,7 +431,7 @@ Source files: `internal/mcp/self_tools.go`, `internal/mcp/self_tools_describe.go
 | `nanite_open_sprint_planning` (broker hint) | toolclient/tool_knowledge.go:355 | `sprint_planning_open` | no | rename |
 
 **Plugin-registered tools:** none currently use the `nanite_*` namespace — plugins
-register under their own server names (`giphy`, `oembed`, `support-ticket`). No
+register under their own server names (`giphy`, `support-ticket`). No
 cross-cutting plugin renames required.
 
 ### Collision matrix — `nanite_*` ↔ Vanta

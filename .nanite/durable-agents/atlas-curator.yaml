@@ -3,7 +3,12 @@ slug: atlas-curator
 profile_slug: atlas-curator
 lifecycle_class: process
 provider: anthropic
-model: claude-sonnet-4-20250514
+# Left blank on purpose (follow-up sweep to CW-20260817, see
+# loom-curator.yaml for the full rationale) — store.ResolveProviderAndModel
+# resolves an empty instance Model to the runtime default at request time.
+# The previous pinned "claude-sonnet-4-20250514" snapshot was retired by
+# Anthropic and every wake turn 404'd until cleared.
+model: ""
 runtime_kind: api
 launch_source_type: process_tick
 metadata:

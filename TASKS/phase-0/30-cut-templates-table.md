@@ -1,7 +1,7 @@
 # Cut `templates` table (output-formatting-snippet mechanism)
 
 **Phase:** 0
-**Status:** not-started
+**Status:** implemented
 **Depends on:** none
 **Touches:** `internal/store/templates.go` (delete entire file); `internal/api/templates.go` (delete entire file); `internal/api/api.go` (remove 6 route registrations, lines 390-395); `internal/service/store.go` (lines 174-178, remove 5 interface method declarations); a new migration dropping `templates`
 
@@ -46,7 +46,8 @@ The two tables, Go structs, files, and REST namespaces are completely separate �
 - Migration tested against a real backed-up database copy, not just an empty fixture.
 
 ## Work log
-<Worker fills this in as it goes: what was actually done, any deviation from plan and why, anything escalated.>
+
+**2026-08-18 — worker report:** Deleted `internal/store/templates.go`/`internal/api/templates.go`, 6 route registrations, 5 `TemplateStore` interface methods (left `prompt_templates`'s half untouched), orphaned request types, and the `SeedBuiltinTemplates()` boot call. Migration added as `094_cut_templates_table.sql` in the worker's worktree; renumbered to `096` by the Orchestrator at merge time to avoid colliding with tasks 09/19's `094`/`095`. Verified against a real copy of the production backup: zero collateral row-count loss, stable across a second boot. `go build`/`go vet` (1 pre-existing unrelated finding)/`go test` all pass. No escalations — cut executed exactly as scoped.
 
 ## Review notes
 <Reviewer fills this in: pass/fail, what was checked, anything fixed and how.>

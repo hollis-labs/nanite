@@ -1,7 +1,7 @@
 # Cut `question-form` (Cards)
 
 **Phase:** 0
-**Status:** not-started
+**Status:** implemented
 **Depends on:** none
 **Touches:** `libs/go-envelopes/manifest/envelopes.yaml` (line ~57, sibling repo — see Context for cross-repo handling), `internal/service/chat_generate.go` (~lines 1837-1842, the special-cased `CreateEnvelopeInstance` gate), `ui/src/components/chat/envelopes/InterviewCard.tsx` (delete), `ui/src/generated/plugin-envelopes.ts` (regenerate via `node scripts/generate-plugin-imports.mjs` after the manifest edit lands), `ui/src/components/chat/ChatMessage.tsx` (lines ~21, 26 — drift-fix references), `internal/mcp/self_tools.go` (lines ~255, 267 — doc-only mentions), `internal/mcp/self_tools_dispatch_executor.go` (line ~31 — doc-only), `internal/mcp/self_tools_transport.go` (line ~809 — doc-only), `internal/envelope/validator.go` (line ~54 — doc-only)
 
@@ -39,7 +39,8 @@ TASKS.md Phase 0 item 13: "`question-form` (Cards) — special-cased in one spec
 - `go build ./cmd/nanite/`, `go vet ./...`, `go test ./...`, and the frontend build all pass.
 
 ## Work log
-<Worker fills this in as it goes: what was actually done, any deviation from plan and why, anything escalated.>
+
+**2026-08-18 — worker report:** Sibling repo (`libs/go-envelopes`) edited and committed locally (`ea2978d`, not pushed): removed the `question-form` manifest entry, deleted the orphaned schema file, fixed a stale doc-comment example, dropped a `mustHave` assertion in `registry_test.go`, added a CHANGELOG entry. Nanite side: removed the `question-form`-special-cased `CreateEnvelopeInstance` block in `chat_generate.go` (confirmed safe — `approval-card`/`elicitation-prompt` persist via a separate, already-existing emitter path); deleted `InterviewCard.tsx` (462 lines, a complete component); cleaned up `EnvelopeRenderer.tsx`, `ChatMessage.tsx`, `ui/src/lib/types.ts`; removed the `CORE_OVERRIDES` entry and regenerated `plugin-envelopes.ts` (`--check` passes clean); fixed doc-only mentions in `internal/envelope/validator.go`, `internal/mcp/self_tools*.go`, and a golden example in `internal/mcp/examples/card_show.json`; updated test fixtures across `internal/envelope`, `internal/mcp`, `internal/api`. `go build`/`go vet` (1 pre-existing unrelated finding)/`go test` (fully green) all pass; `npm run build` and `npx vitest run` (188/188) both green. No escalations.
 
 ## Review notes
 <Reviewer fills this in: pass/fail, what was checked, anything fixed and how.>

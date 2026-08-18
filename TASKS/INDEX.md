@@ -13,41 +13,41 @@ Live tracker for `docs/engineering/TASKS.md`'s execution, per `docs/engineering/
 | Task | Status | Depends on | Wave |
 |---|---|---|---|
 | 01-fix-model-pinning | implemented | none | 1 |
-| 02-fix-request-start | not-started | none | 1 |
-| 03-fix-callertype-mistagging | not-started | none | 1 |
+| 02-fix-request-start | implemented | none | 1 |
+| 03-fix-callertype-mistagging | implemented | none | 1 |
 | 04-build-http-provider-retry | not-started | none | 1 |
-| 05-remove-ollama-routing | not-started | none | 1 |
+| 05-remove-ollama-routing | implemented | none | 1 |
 | 06-enable-tools-lazy-load | implemented | none | 1 |
-| 07-harden-builtin-server-check | not-started | none | 1 |
+| 07-harden-builtin-server-check | implemented | none | 1 |
 | 08-a2a-conformance | not-started | none | 1 |
 | 09-adopt-goose-migrations | implemented | none | 0 |
 | 10-seed-builtin-agent-profiles | implemented | none | 1 |
 | 11-cut-strategy-planner | not-started | none | 3 (chain pos. 1) |
 | 12-cut-agentconstraints-maxturns | not-started | 11 | 3 (chain pos. 2) |
-| 13-cut-question-form | not-started | none | 1 |
-| 14-cut-messaging-card-types | not-started | none | 1 |
+| 13-cut-question-form | implemented | none | 1 |
+| 14-cut-messaging-card-types | implemented | none | 1 |
 | 15a-cut-giphy | not-started | none | 1 |
 | 15b-cut-oembed | not-started | none | 1 |
 | 15c-cut-support-ticket | not-started | none (coordinate w/ 15a on `giphy-modal` card type) | 1 |
-| 16-cut-external-agent-import | not-started | none | 1 |
+| 16-cut-external-agent-import | implemented | none | 1 |
 | 17-cut-role-skills-legacy | not-started | 10 | 2 |
 | 18a-cut-dead-storage-and-config | not-started | none | 1 |
 | 18b-cut-dead-messaging-and-plugin-tables | not-started | none | 1 |
-| 19-cut-legacy-rename-tables | not-started | 09 | 1 |
+| 19-cut-legacy-rename-tables | implemented | 09 | 1 |
 | 20-retire-workspaces-and-instance-mechanism | not-started | 28 (orchestrator-added, see below) | 3 (chain pos. 8) |
 | 21-cut-modes | not-started | 28 (orchestrator-added); coordinate w/ 18a on `agents.go` | 3 (chain pos. 7) |
 | 22-remove-skill-and-tool-broker-abstractions | not-started | (sequenced after 29, see below) | 3 (chain pos. 10) |
 | 23-export-and-drop-decision-tables | not-started | 11, 22 | 3 (chain pos. 11) |
-| 24-housekeeping-agent-profile-files | not-started | none | 1 |
+| 24-housekeeping-agent-profile-files | implemented | none | 1 |
 | 25-drop-unused-session-status-enum | not-started | 26 | 3 (parallel with chain, after pos. 4) |
 | 26-cut-session-compaction-summary-fields | not-started | (sequenced after 27, see below) | 3 (chain pos. 4) |
 | 27-cut-p7-scratchpad-snapshot | not-started | none | 3 (chain pos. 3) |
 | 28-cut-session-intent-classifier | not-started | (sequenced after 27, see below) | 3 (chain pos. 5) |
 | 29-cut-prompt-templates | not-started | none (see Context; sequenced after 21) | 3 (chain pos. 9) |
-| 30-cut-templates-table | not-started | none | 1 |
+| 30-cut-templates-table | implemented | none | 1 |
 | 31-rename-pty-naming-scrub | not-started | (all of Phase 0, see below) | 4 |
 | 32-rename-recovery-namespace | not-started | 04 | 3 (chain pos. 6) |
-| 33-rename-volon-eradication | not-started | none | 1 |
+| 33-rename-volon-eradication | implemented | none | 1 |
 
 ## Parallelization plan
 

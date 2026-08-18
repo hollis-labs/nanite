@@ -541,6 +541,13 @@ func cmdServe(args []string) {
 	selfTools.Subagent = container.Subagent
 	selfTools.Background = container.Background
 	selfTools.Work = container.Streams
+	// Task 34: wire the shared managed-agent write path's classifier so
+	// agent_create/agent_update gate on ManageClass.Editable() the same
+	// way the REST API's requireMutableAgent does — container.AgentConfig
+	// already carries the real writable-managed-roots configuration
+	// (project .nanite / user nanite data dir), so this reuses it rather
+	// than re-deriving a second, possibly-diverging classification.
+	selfTools.AgentClassifier = container.AgentConfig
 	// G4 (CW-20260420-0018): wire elicitation service so write tools
 	// (e.g. message_send kind=directive) can request mid-call
 	// user confirmation via elicitation/create.

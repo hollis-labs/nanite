@@ -7,7 +7,6 @@ package adaptergemini
 import (
 	_ "embed"
 	"fmt"
-	"os"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -119,37 +118,18 @@ func (a *Adapter) Name() string { return "gemini" }
 // Priority returns the discovery order. Lower = checked first.
 func (a *Adapter) Priority() int { return 70 }
 
-// Discover reads {projectDir}/GEMINI.md and returns a single Definition if present.
-func (a *Adapter) Discover(projectDir string) ([]agent.Definition, error) {
-	geminiPath := filepath.Join(projectDir, "GEMINI.md")
-
-	data, err := os.ReadFile(geminiPath)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return nil, nil
-		}
-		return nil, fmt.Errorf("adapter-gemini: read GEMINI.md: %w", err)
-	}
-
-	def := agent.Definition{
-		Slug:         "gemini-default",
-		Source:       "gemini",
-		SystemPrompt: strings.TrimSpace(string(data)),
-	}
-
-	// Extract name from the first # heading.
-	for _, line := range strings.Split(string(data), "\n") {
-		line = strings.TrimSpace(line)
-		if strings.HasPrefix(line, "# ") {
-			def.Name = strings.TrimPrefix(line, "# ")
-			break
-		}
-	}
-	if def.Name == "" {
-		def.Name = "Gemini Agent"
-	}
-
-	return []agent.Definition{def}, nil
+// Discover is a no-op. External-format agent import (reading GEMINI.md and
+// synthesizing a Nanite agent.Definition from it) was cut in Phase 0 item 16
+// — see TASKS.md, docs/architecture-decision-log-2026-08-17.md §4/§6, and
+// docs/engineering/architecture/01-agent-construction.md's "What's cut"
+// section: Nanite agents are defined in Nanite's own schema, with no
+// replacement for importing external CLI-agent config formats.
+//
+// The signature stays so the agent.CLIAgentAdapter interface contract holds.
+// PopulateSandbox and SyncProjectRoot below (the opposite, export direction)
+// are unaffected and remain live.
+func (a *Adapter) Discover(_ string) ([]agent.Definition, error) {
+	return nil, nil
 }
 
 // PopulateSandbox writes GEMINI.md into the sandbox with agent identity and context.

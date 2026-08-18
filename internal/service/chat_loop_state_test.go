@@ -11,6 +11,13 @@ import (
 	"github.com/hollis-labs/nanite/internal/dispatcher"
 )
 
+// TestLoopState_ResolvedMaxTurns pins resolvedMaxTurns()'s remaining
+// behavior after Phase 0 item 12 (2026-08-18) removed
+// chat.AgentConstraints.MaxTurns entirely (it was soft/telemetry-only and
+// never gated shouldStop). maxTurns is no longer agent-configurable — it
+// stays at defaultMaxTurns (75) and is only ever clamped down by
+// HardCeiling. It survives purely as an inert diagnostic value (see
+// chat_generate_diag.go's diagLogLoopStart and TurnSnapshot.MaxTurns).
 func TestLoopState_ResolvedMaxTurns(t *testing.T) {
 	tests := []struct {
 		name        string
@@ -18,35 +25,10 @@ func TestLoopState_ResolvedMaxTurns(t *testing.T) {
 		want        int
 	}{
 		{
-			name:        "zero uses default 75",
+			name:        "zero constraints uses default 75",
 			constraints: chat.AgentConstraints{},
 			want:        75,
 		},
-		{
-			name:        "explicit max turns",
-			constraints: chat.AgentConstraints{MaxTurns: 50},
-			want:        50,
-		},
-		{
-			name:        "max turns clamped to hard ceiling",
-			constraints: chat.AgentConstraints{MaxTurns: 300},
-			want:        200, // default hard ceiling
-		},
-		{
-			name:        "unlimited uses hard ceiling",
-			constraints: chat.AgentConstraints{MaxTurns: -1},
-			want:        200,
-		},
-		{
-			name:        "unlimited with custom hard ceiling",
-			constraints: chat.AgentConstraints{MaxTurns: -1, HardCeiling: 500},
-			want:        500,
-		},
-		// CW-20260512-0123 (SP-20260512-0011 W3): the legacy
-		// `MaxIterations` agent-constraints field was removed —
-		// `MaxTurns` is now the only agent-author-visible turn-count
-		// knob, and the two legacy-fallback fixtures here were
-		// removed because the field they exercised no longer exists.
 		{
 			name:        "custom hard ceiling higher than default max turns",
 			constraints: chat.AgentConstraints{HardCeiling: 300},
@@ -56,11 +38,6 @@ func TestLoopState_ResolvedMaxTurns(t *testing.T) {
 			name:        "custom hard ceiling lower than default max turns",
 			constraints: chat.AgentConstraints{HardCeiling: 50},
 			want:        50, // default maxTurns clamped by tighter ceiling
-		},
-		{
-			name:        "hard ceiling lower than explicit max turns",
-			constraints: chat.AgentConstraints{MaxTurns: 80, HardCeiling: 60},
-			want:        60,
 		},
 	}
 
@@ -153,33 +130,20 @@ func TestLoopState_ShouldStop_CustomRunawayCap(t *testing.T) {
 	}
 }
 
-// TestLoopState_ShouldStop_MaxTurnsIsSoft (CW-20260504-0001) — max_turns
-// is no longer a hard terminator. Hitting it fires a one-shot soft warning
-// (see TestLoopState_CheckSoftMaxTurnsWarning) and the loop continues. Only
-// runaway/idle/hardCeiling/retry-budget actively terminate.
-func TestLoopState_ShouldStop_MaxTurnsIsSoft(t *testing.T) {
-	ls := newLoopState(chat.AgentConstraints{MaxTurns: 5}, nil, false)
-	ls.iteration = 5
-	stop, code, _ := ls.shouldStop()
-	if stop {
-		t.Errorf("shouldStop() at max_turns must NOT terminate after CW-20260504-0001 surgery; got stop=true code=%q", code)
-	}
-	// Sanity: the soft-warning helper fires once at the budget mark.
-	fire, mt := ls.checkSoftMaxTurnsWarning()
-	if !fire {
-		t.Errorf("checkSoftMaxTurnsWarning should fire at iteration == maxTurns")
-	}
-	if mt != 5 {
-		t.Errorf("soft warning maxTurns = %d, want 5", mt)
-	}
-}
+// CW-20260512-0123 (SP-20260512-0011 W3) / Phase 0 item 12 (2026-08-18):
+// TestLoopState_ShouldStop_MaxTurnsIsSoft and
+// TestLoopState_CheckSoftMaxTurnsWarning_OneShot were removed. Both
+// exercised chat.AgentConstraints.MaxTurns and checkSoftMaxTurnsWarning(),
+// which no longer exist — the soft, telemetry-only max_turns budget never
+// gated the loop and was cut alongside the strategy planner's own MaxTurns
+// (item 11). See TestLoopState_ShouldStop_MaxTurnsDiagnosticIsInert below
+// for what's left of the max_turns behavior surface.
 
-// TestLoopState_ShouldStop_HardCeiling — hardCeiling stays the absolute
-// turn-based terminator even after max_turns goes soft (CW-20260504-0001).
-// The strategy planner sets MaxTurns way above hardCeiling here to prove
-// that it's hardCeiling — not the (now-soft) maxTurns clamp — that fires.
+// TestLoopState_ShouldStop_HardCeiling — hardCeiling is the absolute
+// turn-based terminator. AgentConstraints no longer has a MaxTurns field
+// to interact with it (removed by Phase 0 item 12).
 func TestLoopState_ShouldStop_HardCeiling(t *testing.T) {
-	ls := newLoopState(chat.AgentConstraints{MaxTurns: 200, HardCeiling: 10}, nil, false)
+	ls := newLoopState(chat.AgentConstraints{HardCeiling: 10}, nil, false)
 	ls.iteration = 10
 	stop, code, _ := ls.shouldStop()
 	if !stop {
@@ -190,43 +154,18 @@ func TestLoopState_ShouldStop_HardCeiling(t *testing.T) {
 	}
 }
 
-// TestLoopState_ShouldStop_PastMaxTurnsBeforeCeiling — even when iteration
-// is well past the configured MaxTurns, the loop keeps running until
-// hardCeiling (or another active terminator). CW-20260504-0001.
-func TestLoopState_ShouldStop_PastMaxTurnsBeforeCeiling(t *testing.T) {
-	ls := newLoopState(chat.AgentConstraints{MaxTurns: 5, HardCeiling: 50}, nil, false)
-	ls.iteration = 25 // 5x past the soft budget
+// TestLoopState_ShouldStop_MaxTurnsDiagnosticIsInert — iterationLimits.maxTurns
+// / resolvedMaxTurns() survive Phase 0 item 12 purely as an inert diagnostic
+// value (no agent-facing way to set them anymore). This white-box test
+// forces a low maxTurns value directly and confirms shouldStop() still
+// ignores it entirely — only hardCeiling (or another real terminator) fires.
+func TestLoopState_ShouldStop_MaxTurnsDiagnosticIsInert(t *testing.T) {
+	ls := newLoopState(chat.AgentConstraints{HardCeiling: 50}, nil, false)
+	ls.limits.maxTurns = 5 // simulate a low diagnostic value; no longer agent-settable
+	ls.iteration = 25      // 5x past the diagnostic value, well below hardCeiling
 	stop, code, _ := ls.shouldStop()
 	if stop {
-		t.Errorf("shouldStop() at iter=25 (5x past MaxTurns=5, well below HardCeiling=50) must NOT terminate; got code=%q", code)
-	}
-}
-
-// TestLoopState_CheckSoftMaxTurnsWarning_OneShot — the warning fires
-// exactly once per generation at the budget mark, no matter how many times
-// it's polled. CW-20260504-0001.
-func TestLoopState_CheckSoftMaxTurnsWarning_OneShot(t *testing.T) {
-	ls := newLoopState(chat.AgentConstraints{MaxTurns: 3}, nil, false)
-	// Pre-budget: silent.
-	ls.iteration = 2
-	if fire, _ := ls.checkSoftMaxTurnsWarning(); fire {
-		t.Error("warning should not fire below maxTurns")
-	}
-	// At budget: fires.
-	ls.iteration = 3
-	fire, mt := ls.checkSoftMaxTurnsWarning()
-	if !fire {
-		t.Fatal("warning should fire at iteration == maxTurns")
-	}
-	if mt != 3 {
-		t.Errorf("warning maxTurns = %d, want 3", mt)
-	}
-	// Past budget: silent (one-shot latch).
-	for i := 4; i < 10; i++ {
-		ls.iteration = i
-		if fire, _ := ls.checkSoftMaxTurnsWarning(); fire {
-			t.Errorf("warning should fire only once; refired at iter=%d", i)
-		}
+		t.Errorf("shouldStop() at iter=25 (past inert maxTurns=5, below HardCeiling=50) must NOT terminate; got code=%q", code)
 	}
 }
 

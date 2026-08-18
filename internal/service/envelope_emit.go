@@ -38,9 +38,10 @@ type EnvelopeRouting struct {
 	Mode                string
 	DisplayClass        EnvelopeDisplayClass
 	// DevModeOnly marks an envelope that is only emitted when developer mode
-	// is enabled (e.g. chat-loop-budget-soft-warning). The FE renders a small
-	// "DEV" badge so operators recognize it as dev-mode telemetry rather than
-	// a real alert. Wire field `dev_mode_only`; omitted when false
+	// is enabled (the original example, chat-loop-budget-soft-warning, was
+	// removed by Phase 0 item 12, 2026-08-18). The FE renders a small "DEV"
+	// badge so operators recognize it as dev-mode telemetry rather than a
+	// real alert. Wire field `dev_mode_only`; omitted when false
 	// (CW-20260517-0008).
 	DevModeOnly bool
 }

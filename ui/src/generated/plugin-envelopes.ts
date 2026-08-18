@@ -170,14 +170,6 @@ const CORE_ENTRIES: Record<string, EnvelopeRegistryEntry> = {
     ),
     source: "core",
   },
-  "chat-loop-budget-soft-warning": {
-    component: lazy(() =>
-      import("@/components/chat/envelopes/ChatLoopBudgetSoftWarningCard").then((m) => ({
-        default: m.ChatLoopBudgetSoftWarningCard,
-      })),
-    ),
-    source: "core",
-  },
   "elicitation-prompt": {
     component: lazy(() =>
       import("@/components/chat/envelopes/ElicitationPromptCard").then((m) => ({

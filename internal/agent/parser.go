@@ -134,7 +134,6 @@ type ModeDefinition struct {
 // file's existing pattern for AgentToolPermissions, which mirrors
 // toolclient.ToolPermissions locally to avoid a heavier dependency).
 type AgentConstraints struct {
-	MaxTurns                 int    `yaml:"maxTurns,omitempty" json:"max_turns,omitempty"`
 	HardCeiling              int    `yaml:"hardCeiling,omitempty" json:"hard_ceiling,omitempty"`
 	ConsecutiveFailCap       int    `yaml:"consecutiveFailCap,omitempty" json:"consecutive_fail_cap,omitempty"`
 	RunawayFailCap           int    `yaml:"runawayFailCap,omitempty" json:"runaway_fail_cap,omitempty"`

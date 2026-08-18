@@ -250,19 +250,17 @@ func TestConstraintsSubagentCompletionPolicy(t *testing.T) {
 		},
 		{
 			name:        "numeric Phase-4 fields are valid",
-			constraints: `{"max_turns":50,"hard_ceiling":100,"consecutive_fail_cap":3,"runaway_fail_cap":10,"idle_timeout_seconds":900}`,
+			constraints: `{"hard_ceiling":100,"consecutive_fail_cap":3,"runaway_fail_cap":10,"idle_timeout_seconds":900}`,
 			wantOK:      true,
 		},
 		{
-			name:        "max_turns allows -1 (unlimited)",
-			constraints: `{"max_turns":-1}`,
+			// Phase 0 item 12 cut max_turns from the numeric-constraint schema
+			// (it was a soft, telemetry-only budget that never gated the loop).
+			// A profile still carrying a stale max_turns key from before the
+			// cut must warn, not hard-fail validation.
+			name:        "stale max_turns key is only a warning",
+			constraints: `{"max_turns":50}`,
 			wantOK:      true,
-		},
-		{
-			name:        "max_turns rejects less than -1",
-			constraints: `{"max_turns":-2}`,
-			wantOK:      false,
-			wantErrLike: "must be -1",
 		},
 		{
 			name:        "hard_ceiling rejects negative",
@@ -272,7 +270,7 @@ func TestConstraintsSubagentCompletionPolicy(t *testing.T) {
 		},
 		{
 			name:        "wrong-typed numeric field is rejected",
-			constraints: `{"max_turns":"fifty"}`,
+			constraints: `{"hard_ceiling":"fifty"}`,
 			wantOK:      false,
 			wantErrLike: "must be a number",
 		},

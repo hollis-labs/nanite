@@ -47,8 +47,10 @@ func TestAcceptance_AgentConstraints_HasNoMaxTimeSecondsField(t *testing.T) {
 	c := chat.ParseAgentConstraints(legacyJSON)
 
 	// Surviving Phase-4 chat-loop fields must remain zero-valued (none
-	// were set in the legacy JSON).
-	if c.MaxTurns != 0 || c.HardCeiling != 0 || c.RunawayFailCap != 0 ||
+	// were set in the legacy JSON). MaxTurns was itself removed by Phase
+	// 0 item 12 (2026-08-18, soft/telemetry-only, never gated the loop)
+	// so it's no longer part of this check.
+	if c.HardCeiling != 0 || c.RunawayFailCap != 0 ||
 		c.ConsecutiveFailCap != 0 || c.IdleTimeoutSeconds != 0 {
 		t.Errorf("legacy JSON populated surviving fields: %+v", c)
 	}
@@ -196,8 +198,9 @@ func TestAcceptance_LongRunningTurn_HasNoArtificialDeadline(t *testing.T) {
 	// 1-second deadline (via the removed MaxTimeSeconds field). The
 	// fact that this struct literal does not even mention
 	// MaxTimeSeconds is the W3 contract: the field no longer exists.
+	// (MaxTurns is likewise absent — Phase 0 item 12, 2026-08-18,
+	// removed it as soft/telemetry-only and never gating the loop.)
 	c := chat.AgentConstraints{
-		MaxTurns:           25,
 		HardCeiling:        100,
 		ConsecutiveFailCap: 3,
 		RunawayFailCap:     10,

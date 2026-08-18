@@ -21,15 +21,20 @@ import (
 // error class. See the W3 implementer report for the full restriction
 // survey.
 //
-// Surviving fields are the Phase-4 chat-loop runaway breakers (soft
-// max-turn warning, hard ceiling on iterations, consecutive/runaway
-// failure caps, and the chat-loop idle wall) which are different in
-// kind from a "this agent must finish by N seconds" deadline — they
-// catch local pathologies (tool storming, no progress) rather than
-// bounding total wall time.
+// Surviving fields are the Phase-4 chat-loop runaway breakers (hard
+// ceiling on iterations, consecutive/runaway failure caps, and the
+// chat-loop idle wall) which are different in kind from a "this agent
+// must finish by N seconds" deadline — they catch local pathologies
+// (tool storming, no progress) rather than bounding total wall time.
+//
+// CW-20260818 (Phase 0 item 12): MaxTurns (a soft, telemetry-only
+// budget that only fired a warning and never stopped the loop) was
+// removed here, alongside the strategy planner's own soft MaxTurns
+// (Phase 0 item 11). The real, hard stoppers below — RunawayFailCap,
+// HardCeiling, IdleTimeoutSeconds — plus the natural end_turn stop
+// signal are the surviving termination bounds.
 type AgentConstraints struct {
 	// Phase 4 — Chat Loop Hardening.
-	MaxTurns    int `json:"max_turns"`    // 0=default(25), -1=unlimited, >0=value
 	HardCeiling int `json:"hard_ceiling"` // 0=default(100), absolute max turns
 	// ConsecutiveFailCap is the soft-warning threshold. CW-20260417-0485:
 	// reaching this count no longer terminates the loop — it only drives the

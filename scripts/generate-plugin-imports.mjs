@@ -36,10 +36,6 @@ const CHECK_MODE = process.argv.includes('--check');
 // rendering concern, so the override leads the shared manifest here rather
 // than requiring an edit in the go-envelopes repo.
 const CORE_OVERRIDES = {
-  'chat-loop-budget-soft-warning': {
-    component: 'components/chat/envelopes/ChatLoopBudgetSoftWarningCard',
-    export: 'ChatLoopBudgetSoftWarningCard',
-  },
   'approval-card': { props: 'envelope' },
   'proposal-card': { props: 'envelope' },
   'confirmation-card': { props: 'envelope' },

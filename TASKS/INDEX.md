@@ -25,7 +25,7 @@ Live tracker for `docs/engineering/TASKS.md`'s execution, per `docs/engineering/
 | 09-adopt-goose-migrations | implemented | none | 0 |
 | 10-seed-builtin-agent-profiles | implemented | none | 1 |
 | 11-cut-strategy-planner | implemented | none | 3 (chain pos. 1) |
-| 12-cut-agentconstraints-maxturns | not-started | 11 | 3 (chain pos. 2) |
+| 12-cut-agentconstraints-maxturns | implemented | 11 | 3 (chain pos. 2) |
 | 13-cut-question-form | implemented | none | 1 |
 | 14-cut-messaging-card-types | implemented | none | 1 |
 | 15a-cut-giphy | implemented | none | 1 |

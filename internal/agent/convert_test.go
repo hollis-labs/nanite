@@ -119,7 +119,7 @@ func TestDefinition_ToProfile_Constraints(t *testing.T) {
 		SystemPrompt: "You dispatch work.",
 		Source:       "project",
 		Constraints: AgentConstraints{
-			MaxTurns:                 50,
+			HardCeiling:              150,
 			SubagentCompletionPolicy: "auto_summarize",
 			MessageWakePolicy:        "render_and_wait",
 		},
@@ -134,8 +134,12 @@ func TestDefinition_ToProfile_Constraints(t *testing.T) {
 	if got, want := c["subagent_completion_policy"], "auto_summarize"; got != want {
 		t.Errorf("constraints.subagent_completion_policy = %v, want %q", got, want)
 	}
-	if got, want := c["max_turns"], float64(50); got != want {
-		t.Errorf("constraints.max_turns = %v, want %v", got, want)
+	// Phase 0 item 12 (2026-08-18) removed MaxTurns from AgentConstraints
+	// (soft/telemetry-only, never gated the loop). hard_ceiling now stands
+	// in as the numeric-field regression check this test originally used
+	// max_turns for.
+	if got, want := c["hard_ceiling"], float64(150); got != want {
+		t.Errorf("constraints.hard_ceiling = %v, want %v", got, want)
 	}
 	// MessageWakePolicy (CW-20260816-0065) was missing from this struct
 	// until the code-review pass that added it — a `constraints:

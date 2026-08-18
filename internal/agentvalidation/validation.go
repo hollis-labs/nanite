@@ -141,7 +141,7 @@ func ValidateAgentConfig(agent *store.AgentProfile) ValidationResult {
 			result.Errors = append(result.Errors, fmt.Sprintf("constraints is malformed JSON: %s", err.Error()))
 		} else {
 			numericConstraintKeys := map[string]bool{
-				"max_turns": true, "hard_ceiling": true, "consecutive_fail_cap": true,
+				"hard_ceiling": true, "consecutive_fail_cap": true,
 				"runaway_fail_cap": true, "idle_timeout_seconds": true,
 			}
 			for k, v := range constraints {
@@ -158,12 +158,6 @@ func ValidateAgentConfig(agent *store.AgentProfile) ValidationResult {
 					n, ok := v.(float64)
 					if !ok {
 						result.Errors = append(result.Errors, fmt.Sprintf("constraints.%s must be a number, got %T", k, v))
-					} else if k == "max_turns" {
-						// max_turns alone allows -1 (unlimited) alongside
-						// 0 (default) and any positive value.
-						if n < -1 {
-							result.Errors = append(result.Errors, fmt.Sprintf("constraints.%s must be -1 (unlimited), 0 (default), or positive, got %v", k, n))
-						}
 					} else if n < 0 {
 						result.Errors = append(result.Errors, fmt.Sprintf("constraints.%s must be a non-negative number, got %v", k, n))
 					}

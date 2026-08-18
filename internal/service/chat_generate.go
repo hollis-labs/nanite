@@ -786,15 +786,6 @@ func (s *chatServiceImpl) generateResponse(ctx context.Context, sessionID, assis
 		diagCurrentIter = ls.iteration
 		diagLogIterStart(ctx, sessionID, assistantMsgID, ls.iteration, ch)
 
-		// CW-20260504-0001: soft max_turns budget signal — fires once per
-		// generation when iteration crosses the strategy planner's estimate.
-		// Always logged (telemetry / inspector replay); SSE event only when
-		// developer mode is on. The agent continues running — this is a
-		// signal, not a terminator.
-		if fire, maxTurns := ls.checkSoftMaxTurnsWarning(); fire {
-			s.emitChatLoopBudgetSoftWarning(sessionID, ls.iteration, maxTurns, ch)
-		}
-
 		// Check layered iteration limits.
 		if stop, code, reason := ls.shouldStop(); stop {
 			slog.Warn("chat-loop stopped", "reason", reason, "code", code, "session_id", sessionID, "agent", agent.ID, "iter", ls.iteration)
@@ -805,9 +796,11 @@ func (s *chatServiceImpl) generateResponse(ctx context.Context, sessionID, assis
 			// Synthesis deltas land in the stream before the terminated
 			// envelope so the user sees a coherent response rather than an
 			// abrupt cutoff. CW-20260504-0001: max_turns is no longer a
-			// terminator, so the strategy-review-on-max-turns branch and
-			// max-turns synthesis paths are gone (max_turns surfaces via
-			// the soft warning above instead).
+			// terminator; Phase 0 item 12 (2026-08-18) subsequently removed
+			// the soft max_turns warning signal entirely (it was
+			// telemetry-only and never gated the loop either), so the only
+			// synthesis trigger left is the runaway hard circuit-breaker
+			// below.
 			if code == TerminationRunawayToolFailures {
 				s.earlyStopSynthesis(ctx, prov, model, extraSystemPrefix, slotResult, chatMessages, ch, &fullContent, &finalContent)
 			}

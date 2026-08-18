@@ -389,8 +389,7 @@ func (s *chatServiceImpl) buildBrokerInput(userContent string, ls *loopState) ag
 		}
 	}
 
-	// Reflex matcher projection. Uses the BuiltinReflexes fallback
-	// (matching the chat-strategy convention from chat_strategy.go:61).
+	// Reflex matcher projection. Uses the BuiltinReflexes fallback.
 	// Production wiring layers user-loaded reflexes via SelfToolsTransport
 	// — that downstream set is consulted again in callExecuteTask after
 	// the broker's decision routes through task_execute. Running the

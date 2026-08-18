@@ -1,7 +1,7 @@
 # Cut the strategy planner, in full
 
 **Phase:** 0
-**Status:** not-started
+**Status:** implemented
 **Depends on:** none
 **Touches:** `internal/strategy/` (delete entire package: `types.go`, `plan.go`, `plan_test.go`, `review.go`, `review_test.go`, `logger.go`), `internal/store/strategy_log.go` + `internal/store/strategy_log_test.go` (delete), `internal/service/chat_strategy.go` + `internal/service/chat_strategy_test.go` (delete), `internal/service/chat_generate.go` (remove the E3 call site, ~lines 762–778), `internal/service/chat.go` (remove `StrategyLogger`/`strategyLogger` field + wiring, ~lines 160–164, 310–312, 500), `internal/service/container.go` (remove `StrategyLogger: cfg.Store` wiring, ~lines 1041–1044), `internal/inspector/types.go` (remove `StrategyRecord` type + `Strategy *StrategyRecord` field), `ui/src/lib/types.ts` (remove the `strategy?: { max_turns, reasoning }` field, ~line 1863), `ui/src/components/settings/inspector/InspectorPanel.tsx` (remove the "Strategy" panel block, ~lines 342–365)
 
@@ -59,7 +59,26 @@ The `d92d8cf` commit named in the original brief as "the reaper's activity-based
 - No remaining references anywhere in the repo to `internal/strategy`, `StrategyLogger`, `strategyDecisionLogger`, `planStrategyForTurn`, `applyStrategyToLimits`, or `StrategyRecord`.
 
 ## Work log
-<Worker fills this in as it goes: what was actually done, any deviation from plan and why, anything escalated.>
+
+Executed exactly per "What to do," steps 1–11. No escalations — reality matched the task file's pre-verified analysis throughout; no new doc/reality mismatches found beyond what's already documented in Context.
+
+1. Deleted `internal/strategy/` entirely via `git rm -r` (`types.go`, `plan.go`, `plan_test.go`, `review.go`, `review_test.go`, `logger.go`).
+2. Deleted `internal/store/strategy_log.go` and `internal/store/strategy_log_test.go` via `git rm`. Left `internal/store/migrations/034_strategy_decisions.sql` and the `strategy_decisions` table untouched, per instruction (item 23's job).
+3. Deleted `internal/service/chat_strategy.go` and `internal/service/chat_strategy_test.go` via `git rm` (in full — `planStrategyForTurn`, `applyStrategyToLimits`, `reviewExhaustedBudget`, `strategyHasUsableData`, `strategyClarifyingQuestion`, `strategy_pkg_ReviewAskToClarify`, `groundingSignalFromResult`, `strategyDecisionLogger`).
+4. `internal/service/chat_generate.go`: removed the E3 block (comment + `scopeTier, executionPattern := ls.Classification()` + `planStrategyForTurn(...)` + `applyStrategyToLimits(ls, turnStrategy)`), lines 762–778 as predicted. Confirmed via grep that the only other `scopeTier`/`executionPattern` binding in the file (~line 2816, inside `classifyAndAttach`) is untouched and unaffected — build/vet/test confirm no dangling reference. Left `checkSoftMaxTurnsWarning`/`emitChatLoopBudgetSoftWarning` (~lines 807–814, now shifted up by 17 lines) untouched, per instruction — that's item 12's cut.
+5. `internal/service/chat.go`: removed the `StrategyLogger strategyDecisionLogger` config field + doc comment (~160–164), the `strategyLogger strategyDecisionLogger` impl field + doc comment (~310–312), and the `strategyLogger: cfg.StrategyLogger,` constructor line (~500).
+6. `internal/service/container.go`: removed the `StrategyLogger: cfg.Store,` wiring + its `CW-20260419-0026 (E3)` comment (~1040–1043).
+7. `internal/inspector/types.go`: removed the `Strategy *StrategyRecord` field (~29–30) and the `StrategyRecord` type definition (~124–133). Confirmed via grep no other file constructs `StrategyRecord{}` or assigns `.Strategy =` — this was fully inert scaffolding.
+8. `ui/src/lib/types.ts`: removed `strategy?: { max_turns: number; reasoning?: string };` (line 1731, on `InspectorTurnSnapshot`).
+9. `ui/src/components/settings/inspector/InspectorPanel.tsx`: removed the entire `snap.strategy ? (...) : (...)` conditional (lines 342–365), including the `PanelCard title="Strategy"` populated branch and the `EmptyProducer label="Strategy — no signal yet, producer not wired."` fallback. `EmptyProducer` itself is still used by 6 other panels in the same file, so it stays defined — confirmed not orphaned.
+10. Ran `go build ./cmd/nanite/` (pass), `go vet ./...` (pre-existing unrelated warning only, see below), `go test ./...` (all packages pass), `cd ui && npm run build` (tsc + vite build pass, only pre-existing unrelated chunk-size-warning noise).
+11. Grepped the whole repo for `internal/strategy`, `chat_strategy`, `StrategyLogger`, `strategyDecisionLogger`, `planStrategyForTurn`, `StrategyRecord`, `applyStrategyToLimits` after the cut — zero hits in code. Found and fixed one stale prose-only reference: a comment in `internal/service/chat_broker_dispatch.go:393` cited "chat_strategy.go:61" as a convention example; reworded to remove the dangling file pointer (no functional change, comment-only).
+
+**Note on `go vet ./...` output:** vet reports 2 warnings in `internal/service/container.go` (`stopReaper`/`stopRuntimeReaper` "not used on all paths (possible context leak)", around what is now lines 1188/1208/1259 post-edit). Verified via a disposable `git worktree add` at HEAD (before this task's changes) that this warning is **pre-existing and unrelated** — same 2 warnings appear on HEAD at the pre-edit line numbers (1192/1212/1263, offset by exactly the 4 lines this task removed from `container.go`). Not touched or introduced by this task; out of scope to fix here.
+
+**Manual sanity check (Done-means bullet 2):** deployed via `cerberus_resource_deploy nanite-api-service` + `cerberus_resource_reload nanite-api-service` (new pid confirmed running, clean `nanite listening` log line, no errors). Created a scratch session via `POST /api/harness/v1/sessions` (agent `default`), sent a turn via `POST .../turns` ("Reply with exactly the word: OK"), and confirmed via the session's persisted message that the assistant replied "OK" and via server logs that the loop ran and exited cleanly: `chat-loop-diag: loop start` shows `max_turns:75` (i.e. from `AgentConstraints.MaxTurns`'s default — no longer touched by any strategy-planner 10/20/40 value), and `chat-loop-diag: loop exit` shows `reason:"done:stop_reason=end_turn"` after 1 iteration, no strategy-related log lines anywhere in the turn's trace. Deleted the scratch session afterward (`DELETE /api/sessions/{id}` → 200).
+
+Committed as `9e176e0f` on `main` (see commit message for exact file list).
 
 ## Review notes
 <Reviewer fills this in: pass/fail, what was checked, anything fixed and how.>

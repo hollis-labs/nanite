@@ -1037,10 +1037,6 @@ func NewContainer(cfg ContainerConfig) (*Container, error) {
 		SubagentInbox:      messagingSvc,
 		DBPath:             cfg.Store.DBPath(),
 		AdapterRegistry:    adapterRegistry,
-		// CW-20260419-0026 (E3): wire the strategy decision logger.
-		// *store.Store satisfies strategyDecisionLogger via
-		// internal/store/strategy_log.go.
-		StrategyLogger: cfg.Store,
 		// I1 (CW-20260426-0004): inspector — nil when developer_mode=false.
 		Inspector: inspectorSvc,
 		// I2 (CW-20260420-0029): loop detector — always-on.

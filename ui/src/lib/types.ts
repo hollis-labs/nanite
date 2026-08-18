@@ -1728,7 +1728,6 @@ export interface InspectorTurnSnapshot {
   broker_decisions: InspectorBrokerDecision[];
   tool_calls: InspectorToolCallRecord[];
   scope_tier?: string;
-  strategy?: { max_turns: number; reasoning?: string };
   playbook?: { name: string; steps?: string[] };
   memory_hits?: { source: string; content: string; score?: number }[];
   loop_status?: { detected: boolean; reason?: string };

@@ -339,30 +339,6 @@ function TurnDetail({
           <div className="space-y-2 text-[11px]">
             {/* F2 (CW-20260429-0002) — SlotMode + pending mode suggestion. */}
             <ModeSection sessionId={sessionId} slots={snap.slots ?? []} />
-            {snap.strategy ? (
-              (() => {
-                const reflexMatchId =
-                  typeof (snap.strategy as Record<string, unknown>).reflex_match_id === "string"
-                    ? String((snap.strategy as Record<string, unknown>).reflex_match_id)
-                    : "";
-                return (
-              <PanelCard title="Strategy">
-                <dl className="grid grid-cols-2 gap-1 text-[11px]">
-                  <dt className="text-fg-muted">Max turns</dt>
-                  <dd>{snap.strategy.max_turns}</dd>
-                  {reflexMatchId && (
-                    <>
-                      <dt className="text-fg-muted">Reflex</dt>
-                      <dd className="font-mono">{reflexMatchId}</dd>
-                    </>
-                  )}
-                </dl>
-              </PanelCard>
-                );
-              })()
-            ) : (
-              <EmptyProducer label="Strategy — no signal yet, producer not wired." />
-            )}
             {snap.loop_status ? (
               <PanelCard title="Loop Detection">
                 <p>

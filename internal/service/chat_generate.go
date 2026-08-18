@@ -759,24 +759,6 @@ func (s *chatServiceImpl) generateResponse(ctx context.Context, sessionID, assis
 		ls.limits.defaultPerToolCap = us.ToolPerTurnCap
 	}
 
-	// E3 (CW-20260419-0026, Phase 5): strategy planning. Reads the M1
-	// classification we just attached, runs the reflex matcher over the
-	// user input, and produces a Strategy with an initial turn budget.
-	// The budget replaces the hard-coded defaultMaxTurns ceiling for
-	// this turn (E4 absorption — CW-20260419-0020). Grounding is NOT
-	// consulted here in v1 (the recall step lives in mcp.callExecuteTask
-	// and only fires on subagent dispatch).
-	scopeTier, executionPattern := ls.Classification()
-	turnStrategy := planStrategyForTurn(
-		ctx,
-		sessionID, assistantMsgID, userContent,
-		scopeTier, executionPattern,
-		nil, /* reflexSet — falls back to BuiltinReflexes() */
-		nil, /* groundingResult — not consulted in v1 chat-loop strategy */
-		s.strategyLogger,
-	)
-	applyStrategyToLimits(ls, turnStrategy)
-
 	// CW-20260418-0043 diagnostic — log effective loop config on entry.
 	diagLogLoopStart(sessionID, assistantMsgID, agent.ID, ls, cap(ch))
 

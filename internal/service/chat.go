@@ -157,12 +157,6 @@ type ChatServiceConfig struct {
 	// writes are skipped.
 	AdapterRegistry *agent.AdapterRegistry
 
-	// StrategyLogger persists v1 strategy decisions to strategy_decisions
-	// (CW-20260419-0026, Phase 5 / E3). nil-safe: when absent, strategy
-	// planning still runs and applies its MaxTurns to the loop budget,
-	// but no row is written. *store.Store satisfies the interface.
-	StrategyLogger strategyDecisionLogger
-
 	// Inspector is the I1 per-turn dev-mode aggregator (CW-20260426-0004).
 	// nil-safe: when nil the inspector is disabled. Set when developer_mode=true.
 	Inspector *inspectsvc.Service
@@ -306,10 +300,6 @@ type chatServiceImpl struct {
 	dbPath string
 	// adapterRegistry is forwarded to sandbox.Populate on each CLI chat turn.
 	adapterRegistry *agent.AdapterRegistry
-
-	// strategyLogger persists v1 strategy decisions. nil-safe.
-	// (CW-20260419-0026, Phase 5 / E3.)
-	strategyLogger strategyDecisionLogger
 
 	// inspector is the I1 per-turn dev-mode aggregator (CW-20260426-0004).
 	// nil-safe: wired only when developer_mode=true.
@@ -497,7 +487,6 @@ func NewChatService(cfg ChatServiceConfig) ChatService {
 		activeGen:               make(map[string]*inFlightGen),
 		sessionEventWriter:      cfg.SessionEventWriter,
 		subagentInbox:           cfg.SubagentInbox,
-		strategyLogger:          cfg.StrategyLogger,
 		inspector:               cfg.Inspector,
 		loopDetector:            cfg.LoopDetector,
 		reminderEngine:          cfg.ReminderEngine,

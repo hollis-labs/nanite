@@ -125,8 +125,25 @@ func TestDurableAgentsAPI_LifecycleAndSessionAttachment(t *testing.T) {
 		t.Fatalf("CreateSession: %v", err)
 	}
 
-	req := httptest.NewRequest("POST", "/api/durable-agents/"+inst.ID+"/start-request", nil)
+	// Attach the session first, then exercise start-request: RequestStart
+	// (Phase 0 item 2 fix) now calls straight through to Start with an
+	// empty DurableAgentStartRequest{} (no workspace_id — same shape as
+	// RequestResume/Resume), so for it to actually launch (not just fail
+	// with "workspace_id required"), this instance's advisor-class
+	// ReuseLatestOrCreate policy needs an already-attached, reusable
+	// session to find — the realistic "sleeping instance with a prior
+	// session gets woken back up" scenario.
+	attachBody, _ := json.Marshal(AttachDurableAgentSessionRequest{SessionID: sess.ID, Relation: store.DurableAgentSessionRelationPrimary})
+	req := httptest.NewRequest("POST", "/api/durable-agents/"+inst.ID+"/sessions", bytes.NewReader(attachBody))
+	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, req)
+	if w.Code != http.StatusNoContent {
+		t.Fatalf("attach session = %d body=%s", w.Code, w.Body.String())
+	}
+
+	req = httptest.NewRequest("POST", "/api/durable-agents/"+inst.ID+"/start-request", nil)
+	w = httptest.NewRecorder()
 	mux.ServeHTTP(w, req)
 	if w.Code != http.StatusOK {
 		t.Fatalf("start request = %d body=%s", w.Code, w.Body.String())
@@ -135,17 +152,11 @@ func TestDurableAgentsAPI_LifecycleAndSessionAttachment(t *testing.T) {
 	if err := json.NewDecoder(w.Body).Decode(&started); err != nil {
 		t.Fatalf("decode start: %v", err)
 	}
-	if started.Status != store.DurableAgentStatusStartRequested {
-		t.Fatalf("status = %q", started.Status)
+	if started.Status != store.DurableAgentStatusActive {
+		t.Fatalf("status = %q, want active", started.Status)
 	}
-
-	attachBody, _ := json.Marshal(AttachDurableAgentSessionRequest{SessionID: sess.ID, Relation: store.DurableAgentSessionRelationPrimary})
-	req = httptest.NewRequest("POST", "/api/durable-agents/"+inst.ID+"/sessions", bytes.NewReader(attachBody))
-	req.Header.Set("Content-Type", "application/json")
-	w = httptest.NewRecorder()
-	mux.ServeHTTP(w, req)
-	if w.Code != http.StatusNoContent {
-		t.Fatalf("attach session = %d body=%s", w.Code, w.Body.String())
+	if started.CurrentSessionID != sess.ID {
+		t.Fatalf("current_session_id = %q, want %q", started.CurrentSessionID, sess.ID)
 	}
 
 	req = httptest.NewRequest("GET", "/api/durable-agents/"+inst.ID+"/sessions", nil)

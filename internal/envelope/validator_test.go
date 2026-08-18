@@ -115,7 +115,6 @@ func TestValidateEnvelopeData_TypeMismatchSuggestsArrayWrap(t *testing.T) {
 // allow-list and the schema set will surface here.
 func TestValidateEnvelopeData_AllPassiveRenderables_HappyPaths(t *testing.T) {
 	cases := map[string]map[string]any{
-		"giphy-modal":     {"gif_url": "https://example.com/x.gif", "title": "x", "source": "GIPHY", "query": "x"},
 		"document-viewer": {"title": "doc", "content": "hello"},
 		"report-card":     {"title": "x", "metrics": []any{map[string]any{"label": "y", "value": "z"}}},
 		"info-card":       {"title": "x", "body": "y"},

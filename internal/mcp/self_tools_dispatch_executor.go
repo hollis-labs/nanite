@@ -27,7 +27,7 @@ func dispatchExecutorToolDefinition() Tool {
 	return Tool{
 		Name: "dispatch_executor",
 		Description: "Hand off a multi-step structured intent to a specialized executor. Use when you need to render a typed envelope card and you have the data ready — the executor validates, repairs known shape mistakes, and returns the envelope plus a summary, so you don't run the describe/validate/emit loop yourself.\n\n" +
-			"**When to use:** Producing a v1 passive-renderable envelope (report-card, info-card, list-card, metric-card, progress-card, table-card, timeline-card, diff-card, document-viewer, giphy-modal, artifact-mini). The executor owns the multi-step recovery loop.\n\n" +
+			"**When to use:** Producing a v1 passive-renderable envelope (report-card, info-card, list-card, metric-card, progress-card, table-card, timeline-card, diff-card, document-viewer, artifact-mini). The executor owns the multi-step recovery loop.\n\n" +
 			"**When NOT to use:** Single conversational replies, decision-flow envelopes (approval-card, proposal-card, etc.), or one-off read tools — those stay chat-direct.\n\n" +
 			"**Required inputs:** intent (\"render_envelope\" today), target_envelope_type, user_request (verbatim), and either data (the resolved payload — fast path for the in-process pilot) or context_handles (forward-compat for future LLM-driven executors).\n\n" +
 			"**Grounded types:** report-card and document-viewer also require sources (each with tool_use_id or tool_name) — the executor refuses to render grounded cards without them. For demo / test / sketch requests, set synthetic_allowed=true and the executor will disclose the synthesis in its summary.\n\n" +

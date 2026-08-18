@@ -59,7 +59,6 @@ var localePrinter = message.NewPrinter(language.English)
 //
 // Source of truth: SP-20260428-0001 / CW-20260428-0019 (Collab UI v1, A3).
 var PassiveRenderableTypes = []string{
-	"giphy-modal",
 	"document-viewer",
 	"report-card",
 	"info-card",

@@ -127,7 +127,6 @@ func TestValidate_ShowCard_AdditionalPropsRejected(t *testing.T) {
 func TestValidate_ShowCard_AllPassiveRenderables(t *testing.T) {
 	st := newSelfTools(t)
 	cases := map[string]map[string]any{
-		"giphy-modal":     {"gif_url": "https://example.com/x.gif", "title": "x", "source": "GIPHY", "query": "x"},
 		"document-viewer": {"title": "doc", "content": "hello"},
 		"report-card":     {"title": "x", "metrics": []any{map[string]any{"label": "y", "value": "z"}}},
 		"info-card":       {"title": "x", "body": "y"},

@@ -36,12 +36,6 @@ func extractEnvelopeJSON(t *testing.T, body string) map[string]any {
 // package's contract tests so the tool boundary and the schema test stay in
 // agreement.
 var validShowCardPayloads = map[string]map[string]any{
-	"giphy-modal": {
-		"title":   "Great Job!",
-		"gif_url": "https://media.giphy.com/media/example/giphy.gif",
-		"source":  "GIPHY",
-		"query":   "celebration",
-	},
 	"document-viewer": {
 		"title":             "Architecture Overview",
 		"content":           "# Overview\nThis document describes...",

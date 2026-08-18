@@ -184,7 +184,6 @@ func SetEnvelopeTypeProvider(p func() []string) {
 // is the steady-state path). Acceptable for v1 — the drift test catches
 // any divergence in CI.
 var v1EnvelopeTypeBaseline = []string{
-	"giphy-modal",
 	"document-viewer",
 	"report-card",
 	"info-card",

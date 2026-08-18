@@ -251,7 +251,6 @@ These are registered by the Nanite process itself, not via external MCP HTTP/std
 | `nanite_update_agent` | self | agent mgmt | **keep** | `nanite_*` self-tool namespace |
 | `nanite_navigate_engine` | self | UI nav | **keep** | `nanite_*` self-tool namespace |
 | `nanite_refresh_engine` | self | UI nav | **keep** | `nanite_*` self-tool namespace |
-| `nanite_show_giphy` | self | UI | **keep** | `nanite_*` self-tool namespace |
 | `nanite_show_document` | self | UI | **keep** | `nanite_*` self-tool namespace |
 | `nanite_show_report` | self | UI | **keep** | `nanite_*` self-tool namespace |
 | `nanite_start_builder` | self | UI builder | **keep** | `nanite_*` self-tool namespace |
@@ -382,9 +381,7 @@ Source files: `internal/mcp/self_tools.go`, `internal/mcp/self_tools_describe.go
 | `nanite_update_agent` | self_tools.go:146 | `agent_update` | no | rename |
 | `nanite_navigate_engine` | self_tools.go:166 | `engine_navigate` | no | rename |
 | `nanite_refresh_engine` | self_tools.go:200 | `engine_refresh` | no | rename |
-| `nanite_giphy_search` | self_tools.go:208 | `giphy_search` | no | rename |
 | `nanite_show_card` | self_tools.go:227 | `card_show` | no | rename |
-| `nanite_show_giphy` | (legacy) | `giphy_show` | no | rename |
 | `nanite_show_document` | (legacy) | `document_show` | no | rename |
 | `nanite_show_report` | (legacy) | `report_show` | no | rename |
 | `nanite_start_builder` | self_tools.go:283 | `builder_start` | no | rename |
@@ -431,8 +428,10 @@ Source files: `internal/mcp/self_tools.go`, `internal/mcp/self_tools_describe.go
 | `nanite_open_sprint_planning` (broker hint) | toolclient/tool_knowledge.go:355 | `sprint_planning_open` | no | rename |
 
 **Plugin-registered tools:** none currently use the `nanite_*` namespace — plugins
-register under their own server names (`giphy`, `support-ticket`). No
-cross-cutting plugin renames required.
+register under their own server names (`support-ticket`). No
+cross-cutting plugin renames required. (The `giphy` and `oembed` plugin
+registrations were both cut in full — `TASKS/phase-0/15a-cut-giphy.md`,
+`TASKS/phase-0/15b-cut-oembed.md`.)
 
 ### Collision matrix — `nanite_*` ↔ Vanta
 

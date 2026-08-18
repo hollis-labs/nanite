@@ -230,28 +230,9 @@ func selfToolDefinitions() []Tool {
 			},
 		},
 		{
-			Name: "giphy_search",
-			Description: "Search GIPHY for an animated GIF and return its URL plus metadata. Pure data fetch — does NOT render anything in chat.\n\n" +
-				"**When to use:** When the user asks for a GIF or the conversation tone calls for a visual reaction. Call this first to fetch the URL, then chain into card_show to render.\n\n" +
-				"**Chaining pattern:**\n" +
-				"1. giphy_search(query: \"celebration\") → {gif_url, title, attribution, alt_text}\n" +
-				"2. card_show(type: \"giphy-modal\", data: {gif_url: <step 1>, title: <step 1 title>, source: <step 1 attribution>, query: \"celebration\"})\n\n" +
-				"**Demo mode:** When the server's GIPHY_API_KEY is unset, this returns one of a curated set of demo GIFs (deterministic per query). Useful for development; production should set the key.\n\n" +
-				"**Output shape:** Single object {gif_url, title, attribution, alt_text} for limit=1 (default). For limit>1: {results: [{...}, ...]}. " +
-				"Failures return a structured-error object instead: {error: \"http_error\"|\"no_results\"|\"parse_error\", details?, query}. IsError stays false on these — the call succeeded, the search did not. Branch on `error`.",
-			InputSchema: map[string]any{
-				"type": "object",
-				"properties": map[string]any{
-					"query": map[string]any{"type": "string", "description": "Search term (e.g. 'celebration', 'thumbs up', 'mind blown')"},
-					"limit": map[string]any{"type": "number", "description": "Max results (default 1, max 10). Limit=1 returns a single object; limit>1 returns {results: [...]}."},
-				},
-				"required": []string{"query"},
-			},
-		},
-		{
 			Name: "card_show",
-			Description: "Render a structured envelope card in chat or in a drawer. One generic surface for the v1 passive-renderable card types — replaces the older per-type giphy_show / document_show / report_show tools (CW-20260428-0019, A3).\n\n" +
-				"**When to use:** When you want to display structured content (a metric, a list, a table, a side-by-side diff, a long-form document, a metrics report, an animated GIF). Pick the smallest card that fits the data.\n\n" +
+			Description: "Render a structured envelope card in chat or in a drawer. One generic surface for the v1 passive-renderable card types — replaces the older per-type document_show / report_show tools (CW-20260428-0019, A3).\n\n" +
+				"**When to use:** When you want to display structured content (a metric, a list, a table, a side-by-side diff, a long-form document, a metrics report). Pick the smallest card that fits the data.\n\n" +
 				"**When NOT to use:** Decision-flow envelopes (approval-card, proposal-card, confirmation-card), runtime-emitted envelopes (chat-loop-terminated, elicitation-prompt), and plugin-shipped envelopes (kb-result, ticket-*) have their own emission paths and are NOT addressable here.\n\n" +
 				"**Per-type required-fields cheat sheet** (full examples + optional fields via `tool_describe(name=\"card_show\")`):\n" +
 				"- `report-card`: data={title, metrics:[{label, value}, ...]} — REQUIRES sources arg. Optional `session_link:{label, url}` renders a link back to the full session/task/run this report distills (a real link, not an actions button) — use it when relaying a delegated-work completion instead of pasting a transcript. Default → bottom_chat_drawer.\n" +
@@ -262,13 +243,11 @@ func selfToolDefinitions() []Tool {
 				"- `progress-card`: data={title, progress} — progress is 0–100; optional steps:[{label, done}, ...].\n" +
 				"- `table-card`: data={columns:[{key, label}, ...], rows:[{...}, ...]} — row keys match column keys.\n" +
 				"- `timeline-card`: data={events:[{timestamp, label}, ...]} — timestamp is ISO 8601; optional status: completed|active|pending.\n" +
-				"- `diff-card`: data={before:{label, content}, after:{label, content}} — optional format: text|code.\n" +
-				"- `giphy-modal`: data={gif_url, title, source, query} — typically chained from `giphy_search`.\n\n" +
+				"- `diff-card`: data={before:{label, content}, after:{label, content}} — optional format: text|code.\n\n" +
 				"**Unfamiliar type or first failure?** Call `tool_describe(name=\"card_show\")` for the full set of golden examples — one per v1 type with realistic values + optional fields populated, plus reference shapes for the decision-flow / backend-only types (session-task, error-report, approval-card, proposal-card, confirmation-card). The per-type schemas use `additionalProperties: false`, so unknown field names are rejected; the examples are the fastest way to anchor on the exact field set.\n\n" +
-				"**Fetch-then-render pattern:** External-data-into-card flows are two steps. First call the data tool, then pass its result into `card_show`. Example: `giphy_search(query=\"celebration\")` → `card_show(type=\"giphy-modal\", data={gif_url: <from step 1>, ...})`.\n\n" +
 				"**Grounding for `report-card` / `document-viewer`:** these prose-bearing types require a `sources` array — each source's `tool_use_id` must come from a tool call you actually made this turn. **When building the `sources` array, copy `tool_use_id` values verbatim from the `tool_result` blocks earlier in this turn** — do not retype, abbreviate, or pattern-match a plausible-looking id. **If you have no real tool_use_ids from this turn, return a plain-text reply describing what you couldn't fetch — do not render the card.** Inventing or reusing prior-turn `tool_use_id`s is rejected at the `card_show` boundary by a runtime validator that compares each `sources[i].tool_use_id` against this turn's known set; the error reads `source[i].tool_use_id \"…\" is not from this turn — known tool_use_ids: [...]`. Synthesizing metric values is allowed ONLY when the user explicitly invited a demo or sketch (\"sketch\", \"demo\", \"show me an example\"); the `tool_use_id`s must still come from real tool calls this turn. (CW-20260512-0100 R3: this rule moved here from the per-turn `nativeToolGuide` so agents see it in the authoritative location — right before invocation.)\n\n" +
 				"**Required context:** `type` from the v1 allow-list and `data` matching the per-type schema. The handler validates `data` against `internal/envelope/schemas/<type>.schema.json` at the boundary; payloads that miss required fields, wrong types, or carry unknown keys are rejected with a structured error citing the schema field that failed.\n\n" +
-				"**Render destination:** By default the card lands wherever the schema's `default_render_target` says — for the 10 passive renderables that's the bottom drawer. Pass `render_target` to override, or `render_target=\"\"` to force-inline. `target` (visibility — open this drawer) and `mode` (workspace preset) remain independent levers; both can travel with the envelope.",
+				"**Render destination:** By default the card lands wherever the schema's `default_render_target` says — for the 9 passive renderables that's the bottom drawer. Pass `render_target` to override, or `render_target=\"\"` to force-inline. `target` (visibility — open this drawer) and `mode` (workspace preset) remain independent levers; both can travel with the envelope.",
 			InputSchema: map[string]any{
 				"type": "object",
 				"properties": map[string]any{
@@ -276,7 +255,6 @@ func selfToolDefinitions() []Tool {
 						"type":        "string",
 						"description": "Envelope type from the v1 passive-renderable allow-list. Each value validates against its own per-type schema.",
 						"enum": []string{
-							"giphy-modal",
 							"document-viewer",
 							"report-card",
 							"info-card",

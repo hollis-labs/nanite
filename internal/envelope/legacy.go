@@ -53,9 +53,14 @@ const LegacyPluginID = "nanite-legacy"
 // OrphanTypes is the verbatim list of envelope types that ship a JSON
 // Schema in go-envelopes manifest/schemas/ but are absent from the
 // canonical YAML manifest. Order is preserved from the seed extraction.
+//
+// "giphy-modal" was removed from this list by TASKS/phase-0/15a-cut-giphy.md
+// (Phase 0 item 15) — the giphy self-tool and plugin were cut in full. The
+// go-envelopes lib still ships giphy-modal.schema.json (an external module,
+// out of this task's scope), so the schema file itself persists there, but
+// Nanite no longer registers it into the runtime registry.
 var OrphanTypes = []string{
 	"kb-result",
-	"giphy-modal",
 	"resolution-capture",
 	"ticket-form",
 	"ticket-confirmation",

@@ -349,8 +349,6 @@ func (st *SelfToolsTransport) CallTool(ctx context.Context, name string, args ma
 		return st.callShowCard(ctx, args)
 	case "tool_validate":
 		return st.callValidate(ctx, args)
-	case "giphy_search":
-		return st.callGiphySearch(args)
 	case "builder_start":
 		return st.callStartBuilder(args)
 	case "builder_step":
@@ -771,8 +769,7 @@ var groundedShowCardTypes = map[string]bool{
 
 // callShowCard is the generic envelope-emission tool for the v1 passive-
 // renderable allow-list (CW-20260428-0019, A3 — Collab UI v1). It replaces
-// the per-type giphy_show / document_show / report_show
-// tools that existed pre-A3.
+// the per-type document_show / report_show tools that existed pre-A3.
 //
 // The agent supplies the envelope `type` (any value in
 // envelope.PassiveRenderableTypes) plus a `data` object that this handler

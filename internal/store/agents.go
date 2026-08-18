@@ -439,19 +439,17 @@ func (s *Store) DeleteAgent(slug string) error {
 		"DELETE FROM agent_skills WHERE agent_id = ?",
 		"DELETE FROM agent_prompt_templates WHERE agent_id = ?",
 		"DELETE FROM agent_mode_assignments WHERE agent_id = ?",
-		// Per-agent capability/runtime children (migrations 068/070/074/078/085).
+		// Per-agent capability/runtime children (migrations 068/070/074/085).
 		// These declare FKs to agent_profiles(id); clean them explicitly so a
 		// managed-agent delete leaves no orphaned reflexes, known tools/skills,
-		// procedures, knowledge seeds, schedules, cycles, or boot plan.
+		// procedures, knowledge seeds, or schedules.
 		"DELETE FROM agent_known_tools WHERE agent_id = ?",
 		"DELETE FROM agent_known_skills WHERE agent_id = ?",
 		"DELETE FROM agent_procedures WHERE agent_id = ?",
 		"DELETE FROM agent_knowledge_seed WHERE agent_id = ?",
 		"DELETE FROM agent_log WHERE agent_id = ?",
-		"DELETE FROM agent_cycles WHERE agent_id = ?",
 		"DELETE FROM agent_schedules WHERE agent_id = ?",
 		"DELETE FROM agent_reflexes WHERE agent_id = ?",
-		"DELETE FROM agent_boot_plans WHERE agent_id = ?",
 		// pending_reflexes.target_agent_id references the profile (migration
 		// 074, no cascade) — clear it or the final delete fails under
 		// foreign_keys=ON. (pending_reflexes has no agent_id column.)

@@ -23,9 +23,6 @@ type AgentStateStore interface {
 	GetAgentKnownTool(ctx context.Context, agentID, toolName string) (*AgentKnownTool, error)
 	DeleteAgentKnownTool(ctx context.Context, agentID, toolName string) error
 	BumpActivation(ctx context.Context, agentID, toolName string) error
-	// ReapExpiredAgentKnownTools deletes non-pinned rows whose
-	// last_used_at + ttl_seconds has passed. Returns rows deleted.
-	ReapExpiredAgentKnownTools(ctx context.Context) (int64, error)
 
 	// agent_known_skills — identical shape to known tools, swapping the
 	// secondary key for skill_name.
@@ -33,9 +30,6 @@ type AgentStateStore interface {
 	ListAgentKnownSkills(ctx context.Context, agentID string) ([]AgentKnownSkill, error)
 	GetAgentKnownSkill(ctx context.Context, agentID, skillName string) (*AgentKnownSkill, error)
 	DeleteAgentKnownSkill(ctx context.Context, agentID, skillName string) error
-	// ReapExpiredAgentKnownSkills mirrors ReapExpiredAgentKnownTools for
-	// the agent_known_skills table.
-	ReapExpiredAgentKnownSkills(ctx context.Context) (int64, error)
 
 	// agent_procedures — named procedure bodies recorded per agent. Scope
 	// is "agent" today; "shared" and future scopes are valid column

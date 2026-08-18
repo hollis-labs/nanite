@@ -43,7 +43,6 @@ import type {
 import { ConstraintsEditor } from "./editors/ConstraintsEditor";
 import { EditableStringList } from "./editors/EditableStringList";
 import { SystemPromptEditor } from "./editors/SystemPromptEditor";
-import { AgentBootPlanPanel } from "./AgentBootPlanPanel";
 import { AgentCapabilitiesPanel } from "./AgentCapabilitiesPanel";
 import { AgentReflexesPanel } from "./AgentReflexesPanel";
 
@@ -335,9 +334,6 @@ export function AgentDetailView({
           <TabsTrigger value="capabilities" className="gap-1.5 text-xs">
             <Wrench className="w-3.5 h-3.5" /> Capabilities
           </TabsTrigger>
-          <TabsTrigger value="boot" className="gap-1.5 text-xs">
-            <FolderKanban className="w-3.5 h-3.5" /> Boot
-          </TabsTrigger>
           <TabsTrigger value="reflexes" className="gap-1.5 text-xs">
             <Zap className="w-3.5 h-3.5" /> Reflexes
           </TabsTrigger>
@@ -476,10 +472,6 @@ export function AgentDetailView({
             onRemoveTemplate={onRemoveTemplate}
             onUpdateAgent={onUpdateAgent}
           />
-        </TabsContent>
-
-        <TabsContent value="boot" className="pt-4">
-          <AgentBootPlanPanel agent={agent} isReadOnly={isReadOnly} />
         </TabsContent>
 
         <TabsContent value="reflexes" className="pt-4">

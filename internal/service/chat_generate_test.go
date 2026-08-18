@@ -127,12 +127,14 @@ func TestOverrideBlockReachesPrefix_EndToEnd(t *testing.T) {
 	if err != nil {
 		t.Fatalf("MarshalHints: %v", err)
 	}
-	if err := s.UpsertToolEnrichment(store.ToolEnrichment{
-		ToolName:  "example_tool",
-		HintsJSON: hintsJSON,
-		UpdatedAt: time.Now().UTC(),
-	}); err != nil {
-		t.Fatalf("UpsertToolEnrichment: %v", err)
+	// UpsertToolEnrichment was cut in 18a-cut-dead-storage-and-config (zero
+	// callers anywhere in the app); insert the row directly so this test can
+	// still exercise the live end-to-end GetToolEnrichment read path.
+	if _, err := s.DB.Exec(
+		`INSERT INTO tool_enrichments (tool_name, hints_json, updated_at) VALUES (?, ?, ?)`,
+		"example_tool", hintsJSON, time.Now().UTC().Format(time.RFC3339Nano),
+	); err != nil {
+		t.Fatalf("insert tool_enrichments: %v", err)
 	}
 
 	// 3. ToolClient wires the storeEnricher against the real store.

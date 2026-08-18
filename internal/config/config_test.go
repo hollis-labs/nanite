@@ -13,38 +13,17 @@ func TestLoadFrom_MergeProjectOverridesUser(t *testing.T) {
 	projectFile := filepath.Join(dir, "project.yaml")
 
 	userYAML := `
-version: 1
-defaults:
-  executor:
-    mode: direct
-    timeout_seconds: 600
-    max_agent_depth: 3
-  boot_profiles:
-    - worker
-projects:
-  alpha:
-    root: ~/alpha
-    description: Alpha project
-hooks_dir: ~/.agentrc/hooks/shared
+vanta:
+  url: http://localhost:6810/mcp
+  server_name: vanta
 `
 	projectYAML := `
-version: 1
 project:
   name: nanite
   root: ~/Projects-apps/nanite
 role: volon-managed
-boot_profiles:
-  - worker
-write_paths:
-  - internal/
-  - cmd/
-protected_paths:
-  - .agentrc/state/
-executor:
-  mode: direct
-  unsafe_mode: true
-  timeout_seconds: 900
-  max_agent_depth: 5
+vanta:
+  url: http://localhost:7000/mcp
 `
 	if err := os.WriteFile(userFile, []byte(userYAML), 0644); err != nil {
 		t.Fatal(err)
@@ -66,35 +45,13 @@ executor:
 		t.Errorf("Role = %q, want %q", cfg.Role, "volon-managed")
 	}
 
-	// Executor merged from project.
-	if cfg.Executor.TimeoutSeconds != 900 {
-		t.Errorf("Executor.TimeoutSeconds = %d, want 900", cfg.Executor.TimeoutSeconds)
+	// Vanta merges per-field: project overrides URL, user's ServerName
+	// (unset by project) is preserved.
+	if cfg.Vanta.URL != "http://localhost:7000/mcp" {
+		t.Errorf("Vanta.URL = %q, want %q (project overrides user)", cfg.Vanta.URL, "http://localhost:7000/mcp")
 	}
-	if cfg.Executor.MaxAgentDepth != 5 {
-		t.Errorf("Executor.MaxAgentDepth = %d, want 5", cfg.Executor.MaxAgentDepth)
-	}
-	if !cfg.Executor.UnsafeMode {
-		t.Error("Executor.UnsafeMode = false, want true")
-	}
-
-	// Slices from project replace user.
-	if len(cfg.WritePaths) != 2 {
-		t.Errorf("WritePaths len = %d, want 2", len(cfg.WritePaths))
-	}
-
-	// User-only fields preserved.
-	if cfg.HooksDir != "~/.agentrc/hooks/shared" {
-		t.Errorf("HooksDir = %q, want %q", cfg.HooksDir, "~/.agentrc/hooks/shared")
-	}
-
-	// User defaults preserved (project didn't set defaults).
-	if cfg.Defaults.Executor.TimeoutSeconds != 600 {
-		t.Errorf("Defaults.Executor.TimeoutSeconds = %d, want 600", cfg.Defaults.Executor.TimeoutSeconds)
-	}
-
-	// User projects preserved when project file has no projects map.
-	if _, ok := cfg.Projects["alpha"]; !ok {
-		t.Error("expected user project 'alpha' to be preserved")
+	if cfg.Vanta.ServerName != "vanta" {
+		t.Errorf("Vanta.ServerName = %q, want %q (user-only field preserved)", cfg.Vanta.ServerName, "vanta")
 	}
 }
 
@@ -107,8 +64,8 @@ func TestLoadFrom_MissingFiles(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LoadFrom with missing files: %v", err)
 	}
-	if cfg.Version != 0 {
-		t.Errorf("Version = %d, want 0 for empty config", cfg.Version)
+	if cfg.Role != "" {
+		t.Errorf("Role = %q, want empty for missing config", cfg.Role)
 	}
 }
 
@@ -197,8 +154,8 @@ func TestLoad_MissingUserConfigIsNonError(t *testing.T) {
 	if cfg == nil {
 		t.Fatal("Load returned nil config")
 	}
-	if cfg.Version != 0 {
-		t.Errorf("Version = %d, want 0 for empty config", cfg.Version)
+	if cfg.Role != "" {
+		t.Errorf("Role = %q, want empty for missing config", cfg.Role)
 	}
 }
 
@@ -213,7 +170,6 @@ func TestLoad_XDGUserConfigRead(t *testing.T) {
 		t.Fatalf("mkdir: %v", err)
 	}
 	userYAML := `
-version: 1
 role: xdg-test-role
 `
 	if err := os.WriteFile(filepath.Join(cfgDir, "config.yaml"), []byte(userYAML), 0644); err != nil {
@@ -239,46 +195,56 @@ role: xdg-test-role
 	}
 }
 
-func TestLoadFrom_ProjectMapMerge(t *testing.T) {
+// TestLoadFrom_StaleKeysSilentlyIgnored is the 18a-cut-dead-storage-and-config
+// acceptance check: nanite.yaml/config.yaml files that still set the fields
+// cut from Config (version, boot_profiles, write_paths, protected_paths,
+// executor, defaults, projects, hooks_dir) must not error on load —
+// gopkg.in/yaml.v3's default Unmarshal silently ignores keys with no
+// matching struct field (it only errors on unknown keys via the stricter
+// Decoder.KnownFields(true) path, which this package does not use).
+func TestLoadFrom_StaleKeysSilentlyIgnored(t *testing.T) {
 	dir := t.TempDir()
-
 	userFile := filepath.Join(dir, "user.yaml")
 	projectFile := filepath.Join(dir, "project.yaml")
 
-	userYAML := `
+	staleYAML := `
+version: 1
+role: still-works
+boot_profiles:
+  - worker
+write_paths:
+  - internal/
+protected_paths:
+  - .agentrc/state/
+executor:
+  mode: direct
+  unsafe_mode: true
+  timeout_seconds: 900
+  max_agent_depth: 5
+defaults:
+  executor:
+    mode: direct
+  boot_profiles:
+    - worker
 projects:
   alpha:
     root: ~/alpha
-    description: Alpha
-  beta:
-    root: ~/beta
-    description: Beta
+    description: Alpha project
+hooks_dir: ~/.agentrc/hooks/shared
 `
-	projectYAML := `
-projects:
-  beta:
-    root: ~/beta-override
-    description: Beta Override
-  gamma:
-    root: ~/gamma
-    description: Gamma
-`
-	os.WriteFile(userFile, []byte(userYAML), 0644)
-	os.WriteFile(projectFile, []byte(projectYAML), 0644)
+	if err := os.WriteFile(userFile, []byte(staleYAML), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(projectFile, []byte(staleYAML), 0644); err != nil {
+		t.Fatal(err)
+	}
 
 	cfg, err := LoadFrom(userFile, projectFile)
 	if err != nil {
-		t.Fatalf("LoadFrom: %v", err)
+		t.Fatalf("LoadFrom with stale (removed) YAML keys should not error, got: %v", err)
 	}
-
-	if cfg.Projects["alpha"].Root != "~/alpha" {
-		t.Error("user-only project 'alpha' should be preserved")
-	}
-	if cfg.Projects["beta"].Root != "~/beta-override" {
-		t.Errorf("beta.Root = %q, want ~/beta-override (project overrides user)", cfg.Projects["beta"].Root)
-	}
-	if cfg.Projects["gamma"].Root != "~/gamma" {
-		t.Error("project-only entry 'gamma' should be present")
+	if cfg.Role != "still-works" {
+		t.Errorf("Role = %q, want %q (a real field alongside stale keys must still load)", cfg.Role, "still-works")
 	}
 }
 
@@ -371,7 +337,7 @@ func TestResolvedDevToolsAllowedPaths(t *testing.T) {
 
 // TestLoadFrom_DevToolsAllowedPaths_Merge verifies that the project-level
 // dev_tools_allowed_paths list replaces the user-level list (not merge),
-// matching the existing override semantics for write_paths/protected_paths.
+// matching the existing override semantics.
 func TestLoadFrom_DevToolsAllowedPaths_Merge(t *testing.T) {
 	dir := t.TempDir()
 	userFile := filepath.Join(dir, "user.yaml")

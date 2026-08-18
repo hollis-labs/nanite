@@ -406,7 +406,6 @@ func newMessagingServiceForCLI(s *store.Store) (*messaging.Service, error) {
 		Settings:   s,
 		Events:     nil,
 		FileAgents: agentDefs,
-		Overrides:  s,
 	})
 	return messaging.NewService(messaging.NewSQLiteStore(s.DB), s.DB, agents, s), nil
 }

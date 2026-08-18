@@ -979,7 +979,6 @@ export interface AgentBuilderDryRunRequest {
   mode: "create_profile" | "create_profile_and_instance" | "update_profile";
   profile: AgentBuilderProfileInput;
   capabilities?: AgentBuilderCapabilitiesInput;
-  boot_plan?: AgentBootPlanDocument;
   durable_instance?: AgentBuilderDurableInstanceInput;
   operator_notification?: AgentBuilderOperatorNotificationInput;
 }
@@ -992,7 +991,6 @@ export interface AgentBuilderDryRunResponse {
   unsupported_fields: string[];
   normalized_profile_payload: AgentBuilderProfileInput;
   capability_operations: AgentBuilderCapabilityOperation[];
-  boot_plan_preview?: AgentBootPlanDryRunResponse;
   durable_recipe_plan?: DurableAgentRecipePlan;
   launch_plan_preview?: AgentBuilderLaunchPlanPreview;
   notification_preview: AgentBuilderReadyNotificationPreview;
@@ -1006,7 +1004,6 @@ export interface AgentBuilderDraft {
     | string;
   profile: AgentBuilderProfileInput;
   capabilities: AgentBuilderCapabilitiesInput;
-  boot_plan?: AgentBootPlanDocument;
   durable_instance: AgentBuilderDurableInstanceInput;
   operator_notification: AgentBuilderOperatorNotificationInput;
 }
@@ -1250,134 +1247,6 @@ export interface AgentKnowledgeSeedUpsertRequest {
   body: string;
   tags_json?: string;
   tags?: string[];
-}
-
-export interface AgentBootGeneratorSpec {
-  kind: string;
-  params?: Record<string, string>;
-}
-
-export interface AgentBootPlantItem {
-  id: string;
-  name: string;
-  source_kind:
-    | "path_file"
-    | "path_dir"
-    | "literal_file"
-    | "literal_dir"
-    | "generated"
-    | string;
-  source_path?: string;
-  content?: string;
-  generator?: AgentBootGeneratorSpec;
-  target_rel_path: string;
-  entry_kind: "file" | "directory" | string;
-  timing: Array<
-    "create" | "start" | "resume" | "every_boot" | "recovery_replant" | string
-  >;
-  secret: boolean;
-  overwrite_policy:
-    | "never"
-    | "if_missing"
-    | "always"
-    | "if_hash_differs"
-    | string;
-  failure_policy: "fail_boot" | "warn" | "skip" | string;
-  enabled: boolean;
-  metadata?: Record<string, string>;
-}
-
-export interface AgentBootCommandSpec {
-  argv: string[];
-  workdir?: string;
-}
-
-export interface AgentBootRequestSpec {
-  method?: string;
-  url?: string;
-  path?: string;
-  headers?: Record<string, string>;
-  body?: string;
-}
-
-export interface AgentBootCallback {
-  id: string;
-  name: string;
-  timing:
-    | "before_boot"
-    | "after_boot"
-    | "before_first_turn"
-    | "on_resume"
-    | "on_recovery"
-    | string;
-  callback_type:
-    | "command"
-    | "tool_call"
-    | "message_injection"
-    | "http_request"
-    | "local_api"
-    | string;
-  command?: AgentBootCommandSpec;
-  tool_name?: string;
-  tool_input?: Record<string, unknown>;
-  message?: string;
-  request?: AgentBootRequestSpec;
-  permissions?: Record<string, unknown>;
-  timeout_seconds: number;
-  env?: Record<string, string>;
-  failure_policy: "fail_boot" | "warn" | "retry_once" | "ignore" | string;
-  enabled: boolean;
-}
-
-export interface AgentBootPlanDocument {
-  agent_id: string;
-  schema_version: number;
-  plant_items: AgentBootPlantItem[];
-  callbacks: AgentBootCallback[];
-  created_at: string;
-  updated_at: string;
-}
-
-export interface AgentBootPlanPlantOperation {
-  item_id: string;
-  name: string;
-  timing: string[];
-  target_rel_path: string;
-  entry_kind: string;
-  source_kind: string;
-  overwrite_policy: string;
-  failure_policy: string;
-  enabled: boolean;
-  secret: boolean;
-  source_path?: string;
-  source_path_redacted?: boolean;
-  content_preview?: string;
-  content_preview_redacted?: boolean;
-  notes?: string[];
-}
-
-export interface AgentBootPlanCallbackOperation {
-  callback_id: string;
-  name: string;
-  timing: string;
-  callback_type: string;
-  timeout_seconds: number;
-  failure_policy: string;
-  enabled: boolean;
-  payload_preview?: string;
-  env_redacted?: boolean;
-  permissions_notes?: string[];
-  notes?: string[];
-}
-
-export interface AgentBootPlanDryRunResponse {
-  valid: boolean;
-  errors: string[];
-  warnings: string[];
-  normalized_plan: AgentBootPlanDocument;
-  plant_operations: AgentBootPlanPlantOperation[];
-  callback_order: AgentBootPlanCallbackOperation[];
-  unsupported_notes: string[];
 }
 
 export interface AgentModeProfile {
@@ -1709,7 +1578,6 @@ export interface ProviderConfig {
   id: string;
   name: string;
   provider_type: string;
-  base_url: string;
   is_enabled: boolean;
   settings: string;
   created_at: string;

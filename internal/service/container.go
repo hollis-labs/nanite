@@ -476,7 +476,6 @@ func NewContainer(cfg ContainerConfig) (*Container, error) {
 		Settings:   cfg.Store,
 		Events:     events,
 		FileAgents: agentDefs,
-		Overrides:  cfg.Store,
 	})
 
 	// Shared managed-agent write service. GUI/API/CLI/MCP route all managed

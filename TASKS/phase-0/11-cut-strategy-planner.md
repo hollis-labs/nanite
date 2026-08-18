@@ -78,7 +78,7 @@ Executed exactly per "What to do," steps 1–11. No escalations — reality matc
 
 **Manual sanity check (Done-means bullet 2):** deployed via `cerberus_resource_deploy nanite-api-service` + `cerberus_resource_reload nanite-api-service` (new pid confirmed running, clean `nanite listening` log line, no errors). Created a scratch session via `POST /api/harness/v1/sessions` (agent `default`), sent a turn via `POST .../turns` ("Reply with exactly the word: OK"), and confirmed via the session's persisted message that the assistant replied "OK" and via server logs that the loop ran and exited cleanly: `chat-loop-diag: loop start` shows `max_turns:75` (i.e. from `AgentConstraints.MaxTurns`'s default — no longer touched by any strategy-planner 10/20/40 value), and `chat-loop-diag: loop exit` shows `reason:"done:stop_reason=end_turn"` after 1 iteration, no strategy-related log lines anywhere in the turn's trace. Deleted the scratch session afterward (`DELETE /api/sessions/{id}` → 200).
 
-Committed as `9e176e0f` on `main` (see commit message for exact file list).
+Committed as `612408b3` on `main` (see commit message for exact file list).
 
 ## Review notes
 <Reviewer fills this in: pass/fail, what was checked, anything fixed and how.>

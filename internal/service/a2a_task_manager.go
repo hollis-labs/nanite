@@ -16,6 +16,20 @@ import (
 	"github.com/hollis-labs/nanite/internal/store"
 )
 
+// durableAgentCanceller is the minimal DurableAgentService surface
+// TaskManager.CancelTask needs for an 'instance'-target task: the existing
+// RequestStop stop primitive (internal/service/durable_agents.go), which
+// itself transitions durable_agent_instances.status and, if there's a live
+// session, calls into DurableAgentRuntimeController.StopSession — the same
+// machinery driven by every other instance-stop path in this codebase.
+// Narrowed to this one method (rather than embedding the full
+// DurableAgentService) so this routing layer's dependency footprint states
+// exactly what it uses, matching this file's existing narrow-interface
+// pattern (durableWakeStore, DurableAgentStore).
+type durableAgentCanceller interface {
+	RequestStop(ctx context.Context, id string) (*store.DurableAgentInstance, error)
+}
+
 // TaskManager routes A2A Task submissions to the appropriate execution path:
 // either WorkflowLauncher.Launch (for workflow skill targets) or
 // DurableWake.Wake (for existing instance targets).
@@ -24,12 +38,13 @@ import (
 // third parallel execution substrate — every Task is fulfilled by exactly one
 // of Nanite's two existing execution paths.
 type TaskManager struct {
-	store        *store.Store
-	launcher     *WorkflowLauncher
-	wake         DurableAgentWakeService
-	registry     *agentworkflow.Registry
-	pushNotifier *A2APushNotifier
-	logger       *slog.Logger
+	store         *store.Store
+	launcher      *WorkflowLauncher
+	wake          DurableAgentWakeService
+	durableAgents durableAgentCanceller
+	registry      *agentworkflow.Registry
+	pushNotifier  *A2APushNotifier
+	logger        *slog.Logger
 }
 
 // NewTaskManager constructs a TaskManager. All parameters are required.
@@ -37,6 +52,7 @@ func NewTaskManager(
 	st *store.Store,
 	launcher *WorkflowLauncher,
 	wake DurableAgentWakeService,
+	durableAgents durableAgentCanceller,
 	registry *agentworkflow.Registry,
 	logger *slog.Logger,
 ) *TaskManager {
@@ -44,12 +60,13 @@ func NewTaskManager(
 		logger = slog.Default()
 	}
 	return &TaskManager{
-		store:        st,
-		launcher:     launcher,
-		wake:         wake,
-		registry:     registry,
-		pushNotifier: NewA2APushNotifier(st, logger),
-		logger:       logger,
+		store:         st,
+		launcher:      launcher,
+		wake:          wake,
+		durableAgents: durableAgents,
+		registry:      registry,
+		pushNotifier:  NewA2APushNotifier(st, logger),
+		logger:        logger,
 	}
 }
 
@@ -330,6 +347,117 @@ func (tm *TaskManager) GetTask(ctx context.Context, taskID string) (*a2a.Task, e
 		Error:     storeTask.Error.String,
 		CreatedAt: storeTask.CreatedAt,
 		UpdatedAt: storeTask.UpdatedAt,
+	}, nil
+}
+
+// ErrWorkflowCancelUnsupported is returned by CancelTask for
+// target_kind = 'workflow' tasks. WorkflowLauncher.Launch runs the engine
+// synchronously, in-process, inside the original SubmitTask call — its
+// per-run context.CancelFunc is local and deferred, never stored in any
+// registry a later, separate CancelTask request could reach. There is no
+// real interrupt primitive to call yet (see
+// TASKS/phase-0/08-a2a-conformance.md's Work log and TASKS/ESCALATIONS.md
+// for the full investigation — this was escalated rather than half-built).
+var ErrWorkflowCancelUnsupported = errors.New("workflow task cancellation not supported: no interrupt primitive exists for in-flight workflow runs")
+
+// CancelTask cancels a Task, deriving the correct cancellation primitive
+// from the task's target_kind — the same two-substrate routing
+// SubmitTask/classifyTarget already use:
+//
+//   - target_kind = 'instance': reuses the existing stop primitive,
+//     DurableAgentService.RequestStop, rather than inventing new
+//     session-control machinery. RequestStop already transitions
+//     durable_agent_instances.status and calls into
+//     DurableAgentRuntimeController.StopSession for any live session.
+//   - target_kind = 'workflow': no real interrupt primitive exists today
+//     (see ErrWorkflowCancelUnsupported) — returns a typed error rather
+//     than silently no-op'ing or faking a 'canceled' state that doesn't
+//     reflect real execution.
+//
+// A task already in a terminal state (completed/failed/canceled/rejected)
+// is left alone: canceled is treated as an idempotent success (matches the
+// A2A spec's documented idempotent-cancel behavior), and the other
+// terminal states return an error rather than overwriting real completion
+// or failure information with a fake cancellation.
+func (tm *TaskManager) CancelTask(ctx context.Context, taskID string) (*a2a.Task, error) {
+	task, err := tm.store.GetA2ATask(taskID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get task: %w", err)
+	}
+	if task == nil {
+		return nil, fmt.Errorf("task not found: %s", taskID)
+	}
+
+	// Re-derive first — CancelTask must act on real current state, not a
+	// possibly-stale cached one (same principle GetTask already applies).
+	current := tm.deriveTaskState(ctx, task)
+	if current != task.State {
+		task.State = current
+		if err := tm.store.UpdateA2ATask(task); err != nil {
+			tm.logger.Error("a2a: failed to persist derived state before cancel", "task_id", taskID, "error", err)
+		}
+	}
+
+	switch current {
+	case a2a.TaskStateCanceled:
+		// Idempotent: already canceled, report success as-is.
+		return &a2a.Task{
+			ID:        task.ID,
+			State:     task.State,
+			Message:   task.Message,
+			Error:     task.Error.String,
+			CreatedAt: task.CreatedAt,
+			UpdatedAt: task.UpdatedAt,
+		}, nil
+	case a2a.TaskStateCompleted, a2a.TaskStateFailed, a2a.TaskStateRejected:
+		return nil, fmt.Errorf("task %s is already in terminal state %q, cannot cancel", taskID, current)
+	}
+
+	switch task.TargetKind {
+	case "instance":
+		if !task.DurableAgentInstanceID.Valid || task.DurableAgentInstanceID.String == "" {
+			return nil, fmt.Errorf("task %s has no attached instance to cancel", taskID)
+		}
+		if tm.durableAgents == nil {
+			return nil, fmt.Errorf("cancellation unavailable: no durable agent service configured")
+		}
+		tm.logger.Info("a2a: canceling instance-backed task",
+			"task_id", taskID,
+			"instance_id", task.DurableAgentInstanceID.String,
+		)
+		if _, err := tm.durableAgents.RequestStop(ctx, task.DurableAgentInstanceID.String); err != nil {
+			return nil, fmt.Errorf("failed to stop durable agent instance: %w", err)
+		}
+	case "workflow":
+		tm.logger.Warn("a2a: workflow task cancellation requested but unsupported",
+			"task_id", taskID,
+			"workflow_run_id", task.WorkflowRunID.String,
+		)
+		return nil, ErrWorkflowCancelUnsupported
+	default:
+		return nil, fmt.Errorf("unknown target_kind: %s", task.TargetKind)
+	}
+
+	oldState := task.State
+	task.State = a2a.TaskStateCanceled
+
+	if err := tm.store.UpdateA2ATask(task); err != nil {
+		return nil, fmt.Errorf("failed to update task state after cancel: %w", err)
+	}
+
+	if oldState != task.State && task.PushNotificationConfig.Valid {
+		tm.enqueuePushNotification(task.ID, task.State)
+	}
+
+	tm.logger.Info("a2a: task canceled", "task_id", taskID, "target_kind", task.TargetKind)
+
+	return &a2a.Task{
+		ID:        task.ID,
+		State:     task.State,
+		Message:   task.Message,
+		Error:     task.Error.String,
+		CreatedAt: task.CreatedAt,
+		UpdatedAt: task.UpdatedAt,
 	}, nil
 }
 

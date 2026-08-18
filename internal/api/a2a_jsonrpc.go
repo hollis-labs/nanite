@@ -2,6 +2,7 @@ package api
 
 import (
 	"encoding/json"
+	"errors"
 	"io"
 	"log/slog"
 	"net/http"
@@ -11,23 +12,43 @@ import (
 	"github.com/hollis-labs/nanite/internal/service"
 )
 
-// A2A JSON-RPC 2.0 method names. NOT independently spec-verified — the
-// original ticket (CW-20260814-0016) explicitly required checking these
-// against the live spec at a2a-protocol.org before implementing, the same
-// way Hadron's own A2A implementation is already known to be non-conformant
-// for skipping that step (apps/hadron/internal/a2a/handler.go, plain
-// REST-ish JSON, not real JSON-RPC). Two independent spec lookups during
-// review (2026-08-15) returned inconsistent method-name conventions
-// ("SendMessage"/"GetTask"/"CancelTask" vs "a2a/SendMessage" etc.), neither
-// matching what's used here — not authoritative enough to safely rename
-// against. No external A2A client consumes this endpoint yet, so the risk
-// is contained; treat this constant block as a known conformance gap to
-// close with a proper spec-verification pass before any real interop.
+// A2A JSON-RPC 2.0 method names — spec-verified 2026-08-18 (CW-20260814-0016
+// conformance close-out; see TASKS/phase-0/08-a2a-conformance.md's Work log
+// for the full citation trail). Source: the official A2A Protocol
+// specification, github.com/a2aproject/A2A, release tag v1.0.1 (published
+// 2026-05-26, the current latest stable release, mirrored at
+// https://a2a-protocol.org/latest/specification/):
+//   - docs/specification.md §5.3 "Method Mapping Reference" — the
+//     JSON-RPC-column values are bare PascalCase, no prefix/namespace:
+//     SendMessage, GetTask, CancelTask (also ListTasks, SubscribeToTask,
+//     the four TaskPushNotificationConfig methods, and
+//     GetExtendedAgentCard, none of which Nanite implements yet).
+//   - docs/specification.md §9.4 "Core Methods" gives literal example
+//     request bodies confirming the wire value directly, e.g.
+//     `"method": "SendMessage"` — not "a2a/SendMessage" or "message/send".
+//
+// Historical note on the earlier "two inconsistent lookups" (the comment
+// this replaced, from the 2026-08-15 review): pre-1.0 drafts (tag v0.3.0,
+// specification/json/a2a.json) used slash-style names (message/send,
+// tasks/get, tasks/cancel). v1.0.0 (released 2026-03-12, five months
+// before that review) renamed the whole method set to bare PascalCase "for
+// consistency and clarity" across the REST/gRPC/JSON-RPC bindings
+// (docs/whats-new-v1.md, "RENAMED" entries per method). The 2026-08-15
+// review's two "inconsistent" results were almost certainly one stale
+// pre-1.0 snapshot and one current one, not genuine live ambiguity — the
+// spec has been stable and singular on PascalCase since March 2026.
+//
+// methodProvideTaskInput has no spec equivalent and stays intentionally
+// non-spec-shaped: the spec's "Input Required State" section says a paused
+// task resumes via a new SendMessage carrying the same taskId/contextId,
+// not a dedicated method. This is a legitimate Nanite-specific extension
+// (CW-20260814-0017, resolving a paused workflow gate), not force-fit into
+// spec vocabulary.
 const (
-	methodTaskSubmit       = "a2a.task.submit"
-	methodTaskGet          = "a2a.task.get"
-	methodTaskCancel       = "a2a.task.cancel"
-	methodTaskProvideInput = "a2a.task.provideInput"
+	methodSendMessage      = "SendMessage"
+	methodGetTask          = "GetTask"
+	methodCancelTask       = "CancelTask"
+	methodProvideTaskInput = "a2a.task.provideInput"
 )
 
 // handleA2AJSONRPC is the single JSON-RPC 2.0 endpoint for all A2A Task methods.
@@ -63,20 +84,20 @@ func (a *API) handleA2AJSONRPC(w http.ResponseWriter, r *http.Request) {
 
 	// Route to method handler
 	switch req.Method {
-	case methodTaskSubmit:
+	case methodSendMessage:
 		a.handleTaskSubmit(w, r, &req)
-	case methodTaskGet:
+	case methodGetTask:
 		a.handleTaskGet(w, r, &req)
-	case methodTaskCancel:
+	case methodCancelTask:
 		a.handleTaskCancel(w, r, &req)
-	case methodTaskProvideInput:
+	case methodProvideTaskInput:
 		a.handleTaskProvideInput(w, r, &req)
 	default:
 		respondJSONRPCError(w, a2a.JSONRPCMethodNotFound, "Unknown method: "+req.Method, nil, req.ID)
 	}
 }
 
-// handleTaskSubmit processes a2a.task.submit requests.
+// handleTaskSubmit processes SendMessage requests.
 func (a *API) handleTaskSubmit(w http.ResponseWriter, r *http.Request, req *a2a.JSONRPCRequest) {
 	ctx := r.Context()
 
@@ -121,7 +142,7 @@ func (a *API) handleTaskSubmit(w http.ResponseWriter, r *http.Request, req *a2a.
 	respondJSONRPCSuccess(w, response, req.ID)
 }
 
-// handleTaskGet processes a2a.task.get requests.
+// handleTaskGet processes GetTask requests.
 func (a *API) handleTaskGet(w http.ResponseWriter, r *http.Request, req *a2a.JSONRPCRequest) {
 	ctx := r.Context()
 
@@ -154,8 +175,10 @@ func (a *API) handleTaskGet(w http.ResponseWriter, r *http.Request, req *a2a.JSO
 	respondJSONRPCSuccess(w, result, req.ID)
 }
 
-// handleTaskCancel processes a2a.task.cancel requests.
+// handleTaskCancel processes CancelTask requests.
 func (a *API) handleTaskCancel(w http.ResponseWriter, r *http.Request, req *a2a.JSONRPCRequest) {
+	ctx := r.Context()
+
 	// Parse params
 	var params a2a.TaskCancelRequest
 	if err := unmarshalParams(req.Params, &params); err != nil {
@@ -168,11 +191,18 @@ func (a *API) handleTaskCancel(w http.ResponseWriter, r *http.Request, req *a2a.
 		return
 	}
 
-	// Task cancellation is not yet implemented in the service layer.
-	// Return a JSON-RPC error indicating this is not supported.
-	// TODO(CW-20260814-0016): Implement TaskManager.CancelTask when workflow/durable-agent
-	// cancellation support is ready.
-	respondJSONRPCError(w, a2a.JSONRPCInternalError, "Task cancellation not yet implemented", nil, req.ID)
+	task, err := a.Services.TaskManager.CancelTask(ctx, params.TaskID)
+	if err != nil {
+		slog.Error("a2a: task cancel failed", "error", err, "taskId", params.TaskID)
+		code, msg := mapTaskErrorToJSONRPC(err)
+		respondJSONRPCError(w, code, msg, err.Error(), req.ID)
+		return
+	}
+
+	respondJSONRPCSuccess(w, a2a.TaskCancelResponse{
+		TaskID: task.ID,
+		State:  task.State,
+	}, req.ID)
 }
 
 // handleTaskProvideInput processes a2a.task.provideInput requests — the
@@ -237,10 +267,19 @@ func unmarshalParams(params any, dest any) error {
 
 // mapTaskErrorToJSONRPC maps service-layer errors to JSON-RPC error codes.
 func mapTaskErrorToJSONRPC(err error) (int, string) {
+	// service.ErrWorkflowCancelUnsupported is a sentinel — check with
+	// errors.Is before falling back to substring matching below.
+	if errors.Is(err, service.ErrWorkflowCancelUnsupported) {
+		return a2a.ErrTaskNotCancelable, "Task cancellation not supported for this target kind"
+	}
+
 	// Check for specific error types from service layer
 	errMsg := err.Error()
 
 	// Map common errors
+	if strings.Contains(errMsg, "already in terminal state") {
+		return a2a.ErrTaskNotCancelable, "Task cannot be canceled"
+	}
 	if strings.Contains(errMsg, "not found") || strings.Contains(errMsg, "does not exist") {
 		return a2a.ErrTaskNotFound, "Task not found"
 	}

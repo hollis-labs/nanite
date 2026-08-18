@@ -2,6 +2,8 @@ package service
 
 import (
 	"context"
+	"database/sql"
+	"errors"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -287,5 +289,238 @@ func TestTaskManager_deriveTaskState_no_execution_is_submitted(t *testing.T) {
 	gotState := tm.deriveTaskState(context.Background(), task)
 	if gotState != a2a.TaskStateSubmitted {
 		t.Errorf("deriveTaskState() for task with no execution = %v, want %v", gotState, a2a.TaskStateSubmitted)
+	}
+}
+
+// fakeDurableAgentCanceller is a minimal durableAgentCanceller test double
+// that records every RequestStop call it receives, so tests can assert
+// CancelTask actually invoked the reused stop primitive with the right
+// instance ID (not just that it returned success).
+type fakeDurableAgentCanceller struct {
+	calls []string
+	err   error
+}
+
+func (f *fakeDurableAgentCanceller) RequestStop(_ context.Context, id string) (*store.DurableAgentInstance, error) {
+	f.calls = append(f.calls, id)
+	if f.err != nil {
+		return nil, f.err
+	}
+	return &store.DurableAgentInstance{ID: id, Status: store.DurableAgentStatusStopped}, nil
+}
+
+// TestTaskManager_CancelTask_InstanceTarget_Success verifies the real
+// 'instance' target_kind execution path: CancelTask must call
+// durableAgentCanceller.RequestStop with the task's attached instance ID,
+// transition the task to 'canceled', and persist it.
+func TestTaskManager_CancelTask_InstanceTarget_Success(t *testing.T) {
+	st := newA2ATaskManagerTestStore(t)
+
+	profile := &store.AgentProfile{Name: "A2A Cancel Test Agent", Slug: "a2a-cancel-test-agent", SystemPrompt: "x"}
+	if err := st.CreateAgent(profile); err != nil {
+		t.Fatalf("CreateAgent: %v", err)
+	}
+	inst := &store.DurableAgentInstance{
+		ID:             "inst_cancel_test",
+		Name:           "cancel-test-instance",
+		Slug:           "cancel-test-instance",
+		LifecycleClass: store.DurableAgentClassProcess,
+		ProfileID:      profile.ID,
+		Status:         store.DurableAgentStatusActive,
+	}
+	if err := st.CreateDurableAgentInstance(inst); err != nil {
+		t.Fatalf("CreateDurableAgentInstance: %v", err)
+	}
+
+	task := &store.A2ATask{
+		ID:                     "task_cancel_instance",
+		TargetKind:             "instance",
+		TargetRef:              "msg://agent/nanite/" + inst.ID,
+		Message:                "test message",
+		State:                  a2a.TaskStateWorking,
+		DurableAgentInstanceID: sql.NullString{String: inst.ID, Valid: true},
+	}
+	if err := st.CreateA2ATask(task); err != nil {
+		t.Fatalf("CreateA2ATask: %v", err)
+	}
+
+	canceller := &fakeDurableAgentCanceller{}
+	tm := &TaskManager{
+		store:         st,
+		durableAgents: canceller,
+		pushNotifier:  NewA2APushNotifier(st, nil),
+		logger:        slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError})),
+	}
+
+	got, err := tm.CancelTask(context.Background(), task.ID)
+	if err != nil {
+		t.Fatalf("CancelTask() error = %v", err)
+	}
+	if got.State != a2a.TaskStateCanceled {
+		t.Errorf("CancelTask() state = %v, want %v", got.State, a2a.TaskStateCanceled)
+	}
+	if len(canceller.calls) != 1 || canceller.calls[0] != inst.ID {
+		t.Errorf("RequestStop calls = %v, want exactly one call with %q", canceller.calls, inst.ID)
+	}
+
+	// Verify persisted.
+	persisted, err := st.GetA2ATask(task.ID)
+	if err != nil {
+		t.Fatalf("GetA2ATask: %v", err)
+	}
+	if persisted.State != a2a.TaskStateCanceled {
+		t.Errorf("persisted task.State = %v, want %v", persisted.State, a2a.TaskStateCanceled)
+	}
+}
+
+// TestTaskManager_CancelTask_WorkflowTarget_Unsupported verifies the
+// escalated finding: workflow-backed tasks have no real interrupt
+// primitive today, so CancelTask must return ErrWorkflowCancelUnsupported
+// rather than silently no-op'ing or faking a 'canceled' state.
+func TestTaskManager_CancelTask_WorkflowTarget_Unsupported(t *testing.T) {
+	st := newA2ATaskManagerTestStore(t)
+
+	runID := "run_cancel_test"
+	if err := st.CreateWorkflowRun(&store.WorkflowRunRow{
+		ID:             runID,
+		DefinitionName: "test-workflow",
+		Status:         "running",
+	}); err != nil {
+		t.Fatalf("CreateWorkflowRun: %v", err)
+	}
+
+	task := &store.A2ATask{
+		ID:            "task_cancel_workflow",
+		TargetKind:    "workflow",
+		TargetRef:     "test-workflow",
+		Message:       "test message",
+		State:         a2a.TaskStateWorking,
+		WorkflowRunID: sql.NullString{String: runID, Valid: true},
+	}
+	if err := st.CreateA2ATask(task); err != nil {
+		t.Fatalf("CreateA2ATask: %v", err)
+	}
+
+	tm := &TaskManager{
+		store:  st,
+		logger: slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError})),
+	}
+
+	_, err := tm.CancelTask(context.Background(), task.ID)
+	if !errors.Is(err, ErrWorkflowCancelUnsupported) {
+		t.Fatalf("CancelTask() error = %v, want errors.Is match for ErrWorkflowCancelUnsupported", err)
+	}
+
+	// The task must not have been mutated into a fake 'canceled' state.
+	persisted, err := st.GetA2ATask(task.ID)
+	if err != nil {
+		t.Fatalf("GetA2ATask: %v", err)
+	}
+	if persisted.State == a2a.TaskStateCanceled {
+		t.Errorf("persisted task.State = %v, must not be canceled when cancellation is unsupported", persisted.State)
+	}
+}
+
+// TestTaskManager_CancelTask_TaskNotFound verifies a clear error for an
+// unknown task ID.
+func TestTaskManager_CancelTask_TaskNotFound(t *testing.T) {
+	st := newA2ATaskManagerTestStore(t)
+
+	tm := &TaskManager{
+		store:  st,
+		logger: slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError})),
+	}
+
+	_, err := tm.CancelTask(context.Background(), "does-not-exist")
+	if err == nil || !contains(err.Error(), "not found") {
+		t.Fatalf("CancelTask() error = %v, want an error containing %q", err, "not found")
+	}
+}
+
+// TestTaskManager_CancelTask_AlreadyCanceled_IsIdempotent verifies the
+// spec-documented idempotent-cancel behavior: canceling an
+// already-canceled task succeeds and reports 'canceled' again, without
+// calling the stop primitive a second time.
+func TestTaskManager_CancelTask_AlreadyCanceled_IsIdempotent(t *testing.T) {
+	st := newA2ATaskManagerTestStore(t)
+
+	task := &store.A2ATask{
+		ID:         "task_already_canceled",
+		TargetKind: "instance",
+		TargetRef:  "n/a",
+		Message:    "test message",
+		State:      a2a.TaskStateCanceled,
+	}
+	if err := st.CreateA2ATask(task); err != nil {
+		t.Fatalf("CreateA2ATask: %v", err)
+	}
+
+	canceller := &fakeDurableAgentCanceller{}
+	tm := &TaskManager{
+		store:         st,
+		durableAgents: canceller,
+		logger:        slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError})),
+	}
+
+	got, err := tm.CancelTask(context.Background(), task.ID)
+	if err != nil {
+		t.Fatalf("CancelTask() error = %v, want nil (idempotent success)", err)
+	}
+	if got.State != a2a.TaskStateCanceled {
+		t.Errorf("CancelTask() state = %v, want %v", got.State, a2a.TaskStateCanceled)
+	}
+	if len(canceller.calls) != 0 {
+		t.Errorf("RequestStop calls = %v, want none for an already-canceled task", canceller.calls)
+	}
+}
+
+// TestTaskManager_CancelTask_AlreadyCompleted_ReturnsError verifies a task
+// in a genuine terminal state (not 'canceled') is not silently
+// re-canceled — real completion/failure information must not be
+// overwritten by a fake cancellation.
+func TestTaskManager_CancelTask_AlreadyCompleted_ReturnsError(t *testing.T) {
+	st := newA2ATaskManagerTestStore(t)
+
+	profile := &store.AgentProfile{Name: "A2A Cancel Completed Agent", Slug: "a2a-cancel-completed-agent", SystemPrompt: "x"}
+	if err := st.CreateAgent(profile); err != nil {
+		t.Fatalf("CreateAgent: %v", err)
+	}
+	inst := &store.DurableAgentInstance{
+		ID:             "inst_already_completed",
+		Name:           "already-completed-instance",
+		Slug:           "already-completed-instance",
+		LifecycleClass: store.DurableAgentClassProcess,
+		ProfileID:      profile.ID,
+		Status:         store.DurableAgentStatusStopped, // "turn finished" -> derives to Completed
+	}
+	if err := st.CreateDurableAgentInstance(inst); err != nil {
+		t.Fatalf("CreateDurableAgentInstance: %v", err)
+	}
+
+	task := &store.A2ATask{
+		ID:                     "task_already_completed",
+		TargetKind:             "instance",
+		TargetRef:              "msg://agent/nanite/" + inst.ID,
+		Message:                "test message",
+		State:                  a2a.TaskStateWorking, // stale cached state
+		DurableAgentInstanceID: sql.NullString{String: inst.ID, Valid: true},
+	}
+	if err := st.CreateA2ATask(task); err != nil {
+		t.Fatalf("CreateA2ATask: %v", err)
+	}
+
+	canceller := &fakeDurableAgentCanceller{}
+	tm := &TaskManager{
+		store:         st,
+		durableAgents: canceller,
+		logger:        slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError})),
+	}
+
+	_, err := tm.CancelTask(context.Background(), task.ID)
+	if err == nil || !contains(err.Error(), "terminal state") {
+		t.Fatalf("CancelTask() error = %v, want an error containing %q", err, "terminal state")
+	}
+	if len(canceller.calls) != 0 {
+		t.Errorf("RequestStop calls = %v, want none for an already-terminal task", canceller.calls)
 	}
 }

@@ -27,7 +27,6 @@ type EffortValue = (typeof EFFORT_LEVELS)[number]["value"];
 const PROVIDER_ICONS: Record<string, string> = {
   anthropic: "A",
   openai: "O",
-  ollama: "Ol",
   gemini: "G",
   mistral: "M",
   "azure-openai": "Az",

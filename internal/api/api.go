@@ -46,7 +46,7 @@ func (a *API) SetSelfTools(st *mcp.SelfToolsTransport) {
 
 // SetEmbedderSelectDeps overrides the injected embedder-selection deps.
 // Intended for tests that need deterministic embedding_status without hitting
-// the live Ollama probe.
+// live secret lookup/env vars.
 func (a *API) SetEmbedderSelectDeps(deps service.EmbedderSelectDeps) {
 	a.embedderSelectDeps = deps
 }

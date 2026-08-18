@@ -32,10 +32,11 @@ func (a *API) handleGetSettings(w http.ResponseWriter, r *http.Request) {
 }
 
 // computeEmbeddingStatus re-runs the selection helper at response time so the
-// returned status reflects the current secret/reachability state, not a value
-// frozen at container build time. Uses the injected embedderSelectDeps, which
-// in production has a short (500ms) Ollama probe timeout to keep the settings
-// endpoint responsive.
+// returned status reflects the current secret state, not a value frozen at
+// container build time. Uses the injected embedderSelectDeps (production:
+// keychain + os.Getenv). SelectEmbedder no longer does any network
+// reachability probe — that was Ollama-era behavior retired alongside the
+// Ollama embedder (Step 6.5, SP-20260508-0001; see embedder_select.go).
 func (a *API) computeEmbeddingStatus(ctx context.Context, mode, provider, model string) string {
 	_, _, status := service.SelectEmbedder(ctx, service.EmbedderSettings{
 		Mode:     mode,

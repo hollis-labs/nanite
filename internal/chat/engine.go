@@ -307,7 +307,7 @@ func NormalizeCLIProvider(name string) string {
 //
 //  1. Exact lookup in the canonical registry (pkg/models).
 //  2. Gateway-prefix helper for bare prefixed IDs not yet registered.
-//  3. Prefix-routing fallbacks for unregistered OpenAI/Ollama families.
+//  3. Prefix-routing fallback for unregistered OpenAI families.
 //  4. seedcatalog.DefaultProviderType as the routing floor.
 //
 // Note: this is a ROUTING decision (which provider should handle this
@@ -328,22 +328,26 @@ func InferProvider(model string) string {
 	if p, ok := models.ProviderHasPrefix(model); ok {
 		return p
 	}
-	// Unregistered-model fallbacks. Keep OpenAI GPT family and
-	// Ollama-style local names routable until the registry is expanded or
-	// the operator registers the row explicitly. Mistral API models are
-	// intentionally not prefix-matched here (see audit 02): Mistral API
-	// IDs end with "-latest" and must be registered to resolve correctly.
+	// Unregistered-model fallback. Keep OpenAI GPT family routable until
+	// the registry is expanded or the operator registers the row
+	// explicitly. Mistral API models are intentionally not prefix-matched
+	// here (see audit 02): Mistral API IDs end with "-latest" and must be
+	// registered to resolve correctly.
+	//
+	// A prior "ollama"-returning branch here (matching llama*/gemma*/
+	// mistral-7b*/"model:tag" names) was removed 2026-08-18 (TASKS/phase-0/
+	// 05-remove-ollama-routing.md): it routed to a provider name that was
+	// never registered in cmd/nanite/main.go's initProviders — Step 6.5
+	// (SP-20260508-0001) had already deliberately dropped Ollama from the
+	// provider catalog (see internal/store/seed.go, pkg/models/registry.go).
+	// Model names matching that old pattern set now fall through to the
+	// DefaultProviderType floor below, same as any other unrecognized name.
 	switch {
 	case strings.HasPrefix(model, "gpt-"),
 		strings.HasPrefix(model, "o1-"),
 		strings.HasPrefix(model, "o3-"),
 		strings.HasPrefix(model, "o4-"):
 		return "openai"
-	case strings.HasPrefix(model, "llama"),
-		strings.HasPrefix(model, "gemma"),
-		strings.HasPrefix(model, "mistral-7b"),
-		strings.Contains(model, ":"): // "model:tag" is an ollama-ism
-		return "ollama"
 	}
 	return seedcatalog.DefaultProviderType
 }

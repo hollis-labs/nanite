@@ -32,7 +32,7 @@ Live tracker for `docs/engineering/TASKS.md`'s execution, per `docs/engineering/
 | 15b-cut-oembed | implemented | none | 1 |
 | 15c-cut-support-ticket | implemented | none (coordinate w/ 15a on `giphy-modal` card type) | 1 |
 | 16-cut-external-agent-import | implemented | none | 1 |
-| 17-cut-role-skills-legacy | not-started | 10 | 2 |
+| 17-cut-role-skills-legacy | implemented | 10 | 2 |
 | 18a-cut-dead-storage-and-config | implemented | none | 1 |
 | 18b-cut-dead-messaging-and-plugin-tables | implemented | none | 1 |
 | 19-cut-legacy-rename-tables | implemented | 09 | 1 |
@@ -50,6 +50,8 @@ Live tracker for `docs/engineering/TASKS.md`'s execution, per `docs/engineering/
 | 31-rename-pty-naming-scrub | not-started | (all of Phase 0, see below) | 4 |
 | 32-rename-recovery-namespace | not-started | 04 | 3 (chain pos. 6) |
 | 33-rename-volon-eradication | implemented | none | 1 |
+| 34-gate-agent-update-create-editable-check | implemented | none | 1 |
+| 35-fix-orphaned-indexes-agent-messages-todos | implemented | 19 | 1 |
 
 ## Parallelization plan
 

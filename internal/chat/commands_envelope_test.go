@@ -19,22 +19,22 @@ func TestRegisterPluginCommand_AppendsEnvelopeBlocks(t *testing.T) {
 	r := NewCommandRegistry()
 
 	cmd := nplugin.SlashCommandDef{
-		Name:        "giphy",
-		Description: "Search giphy",
+		Name:        "weather",
+		Description: "Look up the weather",
 		Category:    "tools",
 		Handler: func(ctx context.Context, sessionID, args string) (map[string]interface{}, error) {
 			return map[string]interface{}{
 				"action":  "message",
-				"content": "here is your gif",
+				"content": "here is your forecast",
 				"envelopes": []sdkplugin.EnvelopeOut{
-					{Type: "giphy-modal", Data: map[string]interface{}{"url": "https://gif"}},
+					{Type: "weather-card", Data: map[string]interface{}{"url": "https://example.com/forecast"}},
 				},
 			}, nil
 		},
 	}
-	r.RegisterPluginCommand(cmd, "giphy")
+	r.RegisterPluginCommand(cmd, "weather")
 
-	res, err := r.Execute(context.Background(), "giphy", "sess-1", "cats")
+	res, err := r.Execute(context.Background(), "weather", "sess-1", "sf")
 	if err != nil {
 		t.Fatalf("Execute: %v", err)
 	}
@@ -47,8 +47,8 @@ func TestRegisterPluginCommand_AppendsEnvelopeBlocks(t *testing.T) {
 
 	// Round-trip through ParseEnvelopes to confirm the downstream pipeline
 	// extracts the envelope cleanly — this is the B.12 acceptance criterion.
-	RegisterEnvelopeType("giphy-modal")
-	t.Cleanup(func() { UnregisterEnvelopeType("giphy-modal") })
+	RegisterEnvelopeType("weather-card")
+	t.Cleanup(func() { UnregisterEnvelopeType("weather-card") })
 	envelopes, _, errs := ParseEnvelopes(res.Content)
 	if len(errs) != 0 {
 		t.Fatalf("ParseEnvelopes errors: %+v", errs)
@@ -56,10 +56,10 @@ func TestRegisterPluginCommand_AppendsEnvelopeBlocks(t *testing.T) {
 	if len(envelopes) != 1 {
 		t.Fatalf("expected 1 envelope parsed, got %d", len(envelopes))
 	}
-	if envelopes[0].Type != "giphy-modal" {
+	if envelopes[0].Type != "weather-card" {
 		t.Fatalf("unexpected envelope type: %q", envelopes[0].Type)
 	}
-	if u, _ := envelopes[0].Data["url"].(string); u != "https://gif" {
+	if u, _ := envelopes[0].Data["url"].(string); u != "https://example.com/forecast" {
 		t.Fatalf("unexpected envelope data: %+v", envelopes[0].Data)
 	}
 }

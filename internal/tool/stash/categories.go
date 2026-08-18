@@ -82,9 +82,6 @@ var BuiltinCategories = map[string]string{
 	// the user-facing action.
 	"card_show": "core-io",
 
-	// GIPHY data fetch — pairs with card_show{type:"giphy-modal"}.
-	"giphy_search": "other",
-
 	// Small utilities — bucket under "other"; intent rules don't target them
 	// (and if the user asks for them by name, the explicit-signals layer
 	// handles it).

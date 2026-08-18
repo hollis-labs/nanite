@@ -39,12 +39,12 @@ func TestExtractText_NoTextBlocks(t *testing.T) {
 }
 
 func TestConvertEnvelopeMarkers(t *testing.T) {
-	input := `Found a GIF!
-<!--ENVELOPE_DATA:{"kind":"envelope","version":1,"type":"giphy-modal","data":{"title":"cat"}}:ENVELOPE_DATA-->`
+	input := `Here you go!
+<!--ENVELOPE_DATA:{"kind":"envelope","version":1,"type":"info-card","data":{"title":"cat"}}:ENVELOPE_DATA-->`
 
 	got := convertEnvelopeMarkers(input)
 
-	expected := "Found a GIF!\n\n\n```nanite-envelope\n{\"kind\":\"envelope\",\"version\":1,\"type\":\"giphy-modal\",\"data\":{\"title\":\"cat\"}}\n```"
+	expected := "Here you go!\n\n\n```nanite-envelope\n{\"kind\":\"envelope\",\"version\":1,\"type\":\"info-card\",\"data\":{\"title\":\"cat\"}}\n```"
 	if got != expected {
 		t.Errorf("got:\n%s\n\nexpected:\n%s", got, expected)
 	}

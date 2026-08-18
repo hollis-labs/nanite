@@ -33,7 +33,7 @@ Live tracker for `docs/engineering/TASKS.md`'s execution, per `docs/engineering/
 | 15c-cut-support-ticket | implemented | none (coordinate w/ 15a on `giphy-modal` card type) | 1 |
 | 16-cut-external-agent-import | implemented | none | 1 |
 | 17-cut-role-skills-legacy | not-started | 10 | 2 |
-| 18a-cut-dead-storage-and-config | in-progress | none | 1 |
+| 18a-cut-dead-storage-and-config | implemented | none | 1 |
 | 18b-cut-dead-messaging-and-plugin-tables | implemented | none | 1 |
 | 19-cut-legacy-rename-tables | implemented | 09 | 1 |
 | 20-retire-workspaces-and-instance-mechanism | not-started | 28 (orchestrator-added, see below) | 3 (chain pos. 8) |

@@ -1,7 +1,7 @@
 # Cut dead storage and config remnants (18a — non-messaging sub-parts)
 
 **Phase:** 0
-**Status:** not-started
+**Status:** implemented
 **Depends on:** none (independent of `09-adopt-goose-migrations` — these are plain `DROP TABLE`/code deletions, no rename-swallow idempotency concern like `19-cut-legacy-rename-tables`)
 **Touches:** `internal/store/agent_cycles.go` (delete file), `internal/store/tool_enrichments.go` (trim to read-only), `internal/store/agent_known_tools_reaper.go` (delete file), `internal/store/agent_state_store.go` (interface trim), `internal/api/agent_boot_plans.go` (delete file), `internal/api/agent_builder.go`, `internal/api/api.go` (route removal), `internal/api/types.go`, `internal/store/agent_boot_plans.go` (delete file), `internal/store/agents.go` (`DeleteAgent` cleanups slice — **shared with `21-cut-modes`, see Depends-on note below**), `internal/store/providers.go` (CRUD trim), `internal/api/provider_manage.go`, `ui/src/components/settings/agents/AgentBootPlanPanel.tsx` / `AgentBootPlanEditor.tsx` (delete), `ui/src/components/settings/agents/AgentDetailView.tsx` (remove "Boot" tab), `ui/src/components/settings/agents/AgentBuilderWizard.tsx`, `ui/src/lib/api.ts`, `ui/src/lib/types.ts`, `ui/src/__tests__/phase-26-agent-boot-plan.test.tsx` (delete), `internal/config/config.go` (field trim), `internal/config/config_test.go`, a new migration dropping `agent_cycles`, `agent_boot_plans`, `workflows`, `session_agent_overrides`, and the `providers.base_url`/`api_key` columns
 
@@ -106,7 +106,12 @@ Cut means: drop the table, `internal/store/session_overrides.go`, the `overrides
 - The `internal/plugin/builtin/sessionstats` package no longer exists in the binary; `POST /api/plugins/reload` and the plugin list no longer show `session-stats`.
 
 ## Work log
-<Worker fills this in as it goes: what was actually done, any deviation from plan and why, anything escalated.>
+
+**2026-08-18 — worker report:** All 10 "What to do" items completed. Notable scope expansions beyond the task's own Touches list (documented, per worker step 7, not escalated): `tool_enrichments.go` trim needed two more `UpsertToolEnrichment` call-site fixes the original grep missed (`enricher_test.go`, `chat_generate_test.go`); the `providers.base_url`/`api_key` cut also removed a live `BaseURLField` UI component in `ProviderManager.tsx` (same "real round-trip, zero effect" shape as `agent_boot_plans`) and fixed 7 `INSERT`-statement column-list references in `seed.go` that would have hard-failed on every boot once the columns were dropped. Verified against a real copy of the production backup: all 5 tables gone, both columns gone, everything else untouched and round-trips correctly. `go build`/`go vet`/`go test ./...` (Go) and `npm run build` (frontend) all pass clean after merge — independently re-verified by the Orchestrator, not just the worker's own report.
+
+**Process incident, fully investigated and closed (see `TASKS/ESCALATIONS.md`):** early in this task's session, the worker mistakenly ran `rm`/`rm -rf` against 13 files under the shared checkout path instead of its isolated worktree (an absolute-path mistake carried over from an earlier research phase). Caught within ~2 tool calls (a subsequent `Edit` attempt against the shared checkout was correctly refused by worktree isolation, surfacing the mistake). The worker restored all 13 files and self-verified via diff; the Orchestrator independently re-verified all 13 files against `git show HEAD:<path>` (not just the worker's own worktree copy) before merging, using `cmp -s`, and confirmed byte-for-byte identity for every file, plus a clean `go build` on the shared checkout throughout. No lasting damage. Full account logged as a new `TASKS/ESCALATIONS.md` entry, including a recommendation to make worktree-isolation path mistakes structurally harder to make in future dispatches.
+
+**Migration note:** this worktree branched before `09-adopt-goose-migrations` landed, so its migration was written in the pre-goose plain-SQL format, numbered `094` (already taken by 09's renumbering). The Orchestrator rewrote it as a real goose migration with a tested Down section (recreates the exact original schema for all five dropped tables + the two dropped columns) and renumbered it to `100`, the next available slot after 09/19/30/18b's `094`-`099`.
 
 ## Review notes
 <Reviewer fills this in: pass/fail, what was checked, anything fixed and how.>

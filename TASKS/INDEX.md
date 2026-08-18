@@ -12,20 +12,20 @@ Live tracker for `docs/engineering/TASKS.md`'s execution, per `docs/engineering/
 
 | Task | Status | Depends on | Wave |
 |---|---|---|---|
-| 01-fix-model-pinning | not-started | none | 1 |
+| 01-fix-model-pinning | implemented | none | 1 |
 | 02-fix-request-start | not-started | none | 1 |
 | 03-fix-callertype-mistagging | not-started | none | 1 |
 | 04-build-http-provider-retry | not-started | none | 1 |
 | 05-remove-ollama-routing | not-started | none | 1 |
-| 06-enable-tools-lazy-load | not-started | none | 1 |
+| 06-enable-tools-lazy-load | implemented | none | 1 |
 | 07-harden-builtin-server-check | not-started | none | 1 |
 | 08-a2a-conformance | not-started | none | 1 |
 | 09-adopt-goose-migrations | implemented | none | 0 |
-| 10-seed-builtin-agent-profiles | not-started | none | 1 |
+| 10-seed-builtin-agent-profiles | implemented | none | 1 |
 | 11-cut-strategy-planner | not-started | none | 3 (chain pos. 1) |
 | 12-cut-agentconstraints-maxturns | not-started | 11 | 3 (chain pos. 2) |
 | 13-cut-question-form | not-started | none | 1 |
-| 14-verify-messaging-card-types | not-started | none | 1 |
+| 14-cut-messaging-card-types | not-started | none | 1 |
 | 15a-cut-giphy | not-started | none | 1 |
 | 15b-cut-oembed | not-started | none | 1 |
 | 15c-cut-support-ticket | not-started | none (coordinate w/ 15a on `giphy-modal` card type) | 1 |

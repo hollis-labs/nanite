@@ -9,6 +9,10 @@ How Phase 0 onward (`TASKS.md`) actually gets executed: one Orchestrator session
 - **Reviewer subagent** — always a *fresh* dispatch, never the same context as the worker that did the implementation. Reviews against `docs/engineering/*` for alignment, correctness, and bugs. Fixes get dispatched as their own worker task, not patched inline by the reviewer.
 - **Human (operator)** — approves the plan before execution starts, is available for escalations, will also run independent Codex/Copilot review passes once real batches of work are ready. Worker and Reviewer subagents should know this last review layer exists — not so they relax, so they understand their job is "catch what you can, escalate what you're unsure of," not "be the only safety net."
 
+## Source of truth
+
+`docs/engineering/TASKS.md` is the decided, authoritative scope — every action item in it (cut / keep / build / rename) is settled, not a proposal up for re-evaluation. `docs/architecture-decision-log-2026-08-17.md` is the reasoning trail behind those decisions — read it for context, cite it in task files, but it is not itself authoritative and it is not internally perfect (it's a two-day chronological trail; some early framing was later corrected and the prose was never fully reconciled). When the decision log's stated rationale for an item turns out to be factually wrong about the code — the table isn't actually dead, the feature isn't actually a demo — `TASKS.md`'s action still stands. That is not a mismatch worth stopping for; see worker step 7.
+
 ## Phase A — Planning (do this first, then stop)
 
 1. Read `docs/engineering/TASKS.md`, every file in `docs/engineering/architecture/`, `docs/engineering/GLOSSARY.md`, and `docs/architecture-decision-log-2026-08-17.md` in full before planning anything.
@@ -37,7 +41,8 @@ Work straight through the plan without pausing for per-task approval. Post a sho
 4. Run the baseline check — `go build ./cmd/nanite/`, `go vet ./...`, `go test ./...` (or the frontend equivalent) — after *every* task, not just at phase boundaries. This is cheap and catches basic breakage before the next task (parallel or sequential) builds on a broken foundation. It is not the same as full validation (below) — it's the floor, not the finish line.
 5. If the task involves a schema migration, test it against a real copy of the backed-up database (`~/.local/share/nanite/workspaces/default/backups/`), not just an empty fixture.
 6. Document the work directly in its task file (see format) and mark status `implemented`.
-7. **If reality doesn't match what the docs/decision-log claim — stop, don't guess.** Escalate to the Orchestrator with exactly what was expected vs. what was actually found. This happened repeatedly during the design review itself (a doc's characterization of the code was simply wrong more than once) — it will happen again during execution. That's expected, not a failure; guessing past it is the actual mistake.
+7. **Distinguish the decision from its rationale.** `TASKS.md`'s stated action for this task (cut / keep / build / rename) is settled — it is not reopened by discovering the decision log's or an architecture doc's *reasoning* for it doesn't hold up. If the table isn't actually dead, the feature isn't actually a demo, the provider isn't actually removed — note the correction in this task's Work Log for the record and execute the action anyway. If the correction means the removal is bigger than expected (a live UI or test suite attached to what looked like a dead table), expand the task's scope to remove all of it — don't stop and ask whether to still do it.
+   **What actually warrants stopping:** the task file's own instruction is ambiguous about what action to take; you find something with zero coverage anywhere in `docs/engineering/*` (not even wrongly — genuinely never mentioned); or doing the task as written would directly contradict another still-active `TASKS.md` item (a real item-vs-item conflict, not a decision-log prose inconsistency). Even then, this project's standing policy is aggressive removal when genuinely undecided — default to cut, log it as a heads-up in `TASKS/ESCALATIONS.md`, and keep going, rather than blocking. Reserve an actual stop-and-wait escalation for cases touching something security/trust/data-integrity-sensitive, or where a wrong default guess would be genuinely hard to reverse.
 
 ### Validation checkpoints
 
@@ -53,9 +58,9 @@ At the end of each logical section (a subsystem, or a full phase per `TASKS.md`'
 
 ### Escalation
 
-Whenever a worker or reviewer hits: a doc/decision-log claim that doesn't match reality, a genuine architecture/design decision not already covered by `docs/engineering/*`, or real uncertainty about whether something is safe to proceed with — stop that task, report up to the Orchestrator with the specific mismatch or question. The Orchestrator brings it to the operator. **Keep a running log of every escalation and its resolution** (`TASKS/ESCALATIONS.md`) — if the same ambiguity would otherwise resurface in a later task, check this log first instead of re-escalating something already answered.
+Whenever a worker or reviewer hits a genuine unknown — `TASKS.md`'s own instruction is ambiguous about what to do, something has zero coverage anywhere in `docs/engineering/*`, or completing a task as written would directly contradict another still-active `TASKS.md` item — stop that task, report up to the Orchestrator with the specific question. **A decision-log or architecture-doc passage being factually wrong about the code is not, by itself, grounds to stop.** The decision it supports still stands; correct the record in the task's Work Log and execute (worker step 7 has the full rule, including the default-to-cut fallback for genuinely undocumented cases). The Orchestrator brings true escalations to the operator. **Keep a running log of every escalation and its resolution** (`TASKS/ESCALATIONS.md`) — if the same ambiguity would otherwise resurface in a later task, check this log first instead of re-escalating something already answered.
 
-This is an expected stop, not a failure mode. The whole point of the two-day design review this plan comes from was refusing to guess past exactly this kind of mismatch.
+This is an expected stop for a genuine unknown, not a checkpoint for re-verifying decisions that are already made. The two-day design review this plan comes from was about refusing to guess past a real mismatch between what a doc claimed and what the code does — it was not about leaving every decision open to relitigation for the rest of the project's life. Once `TASKS.md` says what to do, verifying *how big the job is* is real work; verifying *whether to still do it* is not, unless one of the three conditions above is actually true.
 
 ## Task file format
 
@@ -103,5 +108,6 @@ anything escalated.>
 ## Non-goals for the Orchestrator
 
 - Don't make new architecture decisions beyond what `docs/engineering/*` already settled. Ambiguity about *how* to implement something the docs don't specify is an escalation, not something to improvise past.
+- Don't reopen a `TASKS.md` action item because the decision log's stated rationale for it turns out to be inaccurate. Correct the rationale, keep the action — see **Source of truth** and worker step 7.
 - Don't hesitate to cut things per the standing dead-code policy because you're worried about losing them — git history has it, and the operator has already confirmed no live traffic depends on any of this during execution. Caution here just slows down decided work.
 - Don't skip the fresh-reviewer step because a worker seems confident. The whole reason for a *fresh* reviewer is that confidence and correctness aren't the same thing — this design review found real, confidently-stated claims that were simply wrong, more than once.

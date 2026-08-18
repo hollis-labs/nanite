@@ -1,7 +1,7 @@
 # Turn on NANITE_TOOLS_LAZY_LOAD by default
 
 **Phase:** 0
-**Status:** not-started
+**Status:** implemented
 **Depends on:** none
 **Touches:** `internal/chat/tool_partition.go` (`IsToolsLazyLoadEnabled`), `internal/chat/tool_partition_test.go` (`TestIsToolsLazyLoadEnabled_DefaultOff` and neighboring tests), `internal/service/chat_generate.go` (the lazy-load call site, no logic change expected but must be re-verified), `internal/service/chat_tools_lazyload.go` (partition-state helpers, read-only relevance)
 
@@ -47,7 +47,41 @@ This is a locked decision (it does not appear in the log's "Not yet decided / st
 - No change to `ToolEssentialCap`/`RecentToolWindow`/`ToolHysteresisFloor` unless the real-session check surfaced a concrete reason to (if it did, note it as a follow-up, don't silently tune inline).
 
 ## Work log
-<Worker fills this in as it goes: what was actually done, any deviation from plan and why, anything escalated.>
+
+**Implementation:**
+
+1. `internal/chat/tool_partition.go` — `IsToolsLazyLoadEnabled()` now returns `true` for unset/empty `NANITE_TOOLS_LAZY_LOAD`. The switch was inverted: it now matches the recognized falsy tokens (`"false"/"0"/"no"/"off"`, case-insensitive/trimmed) and returns `false` only for those; every other input (unset, empty, a recognized true token, or a genuinely unrecognized value) falls through to `return true`.
+2. Doc comment above the function rewritten to state the new default (ON), cite `docs/architecture-decision-log-2026-08-17.md` §12 and `docs/engineering/architecture/04-harness.md` ("Tool lazy-loading") as the source of the decision, and explain the "unknown -> safe default" fallback.
+3. **Ambiguity resolved (documented per EXECUTION-PROCESS.md worker step 7 discipline, even though this is a within-task-file ambiguity rather than a decision-log/code mismatch):** step 1 of "What to do" says to preserve the current test's "unknown -> safe default" treatment of a garbage value like `"random"` "rather than treating garbage input as an implicit enable," which read in isolation could be parsed as "random must keep disabling the feature." But the task's own "Done means" section is unambiguous: *"returns `true` when `NANITE_TOOLS_LAZY_LOAD` is unset/empty, and `false` only for recognized falsy values."* `"random"` is not a recognized falsy value, so per Done-means it must now return `true`. Reconciled reading: "safe default" tracks whatever the *current* default is (previously OFF, now ON) — under the old code, unset and "random" both fell through to the same `return false`, so "unknown -> safe default" and "unknown -> falsy" were indistinguishable; under the new code they're still the same fallthrough, just to `true`. Implemented to match Done-means (unrecognized non-empty value -> falls back to ON, the new safe default). Only the 4 recognized tokens are a real opt-out now.
+4. `internal/chat/tool_partition_test.go`:
+   - `TestIsToolsLazyLoadEnabled_DefaultOff` renamed to `TestIsToolsLazyLoadEnabled_DefaultOn`, asserts unset env -> ON.
+   - `TestIsToolsLazyLoadEnabled_TrueValues` left as-is (still passes unchanged — those values were always true and still are).
+   - `TestIsToolsLazyLoadEnabled_FalsyValues` narrowed to only the 4 recognized explicit-opt-out tokens (`false/0/no/off`, plus casing variants) — this is now the only way to disable the feature, per the task's own framing that this test "matters more than before, not less."
+   - Added `TestIsToolsLazyLoadEnabled_UnrecognizedValueFallsBackToSafeDefault` asserting `"random"/"maybe"/"2"` now enable (fall back to the new safe default), per the Done-means reconciliation in point 3 above.
+5. `internal/service/chat_generate.go` (~404-435, ~1070-1084) re-read per item 4 of "What to do": the `chat.IsToolsLazyLoadEnabled() && !selection.Progressive` gate, the partition-state load/store, the `request_tools` meta-tool idempotent-insertion, the `RenderToolLazyHint` call, and the `request_build` telemetry log (`tools_essential_count`/`tools_lazy_count`/`tools_lazy_load_active`) are all unconditional per-turn logic (not behind a "this rarely happens" branch, not gated by a different log level for the active case) — no code change needed here; confirmed no dead-code-looking branch was silently relying on lazy-load being off in practice. `internal/service/chat_tools_lazyload.go` (partition-state helpers) needed no change either — pure state plumbing, agnostic to the flag's default.
+6. No config/catalog/plist references to `NANITE_TOOLS_LAZY_LOAD` exist anywhere in the repo outside the 4 files above (grepped `*.yaml/*.yml/*.plist/*.env*/*.json` and all `*.go`) — confirmed this is a clean, single-source flip with nothing else to update.
+7. `ToolEssentialCap`/`RecentToolWindow`/`ToolHysteresisFloor` were **not** touched, per the task's explicit instruction — see the follow-up note below instead.
+
+**Real-session verification (Done-means item 5) — could not be performed in this automated worker context:**
+
+This worker runs as an isolated, non-interactive subagent in a git worktree with no live chat session, no guaranteed live LLM provider credentials, and no running `nanite-api-service` daemon to drive through `nanite chat` or the GUI. Per the task brief's own fallback instruction, I surveyed the repo for existing e2e/integration test infrastructure that could approximate this check:
+
+- `internal/chat/tool_partition_test.go` — unit-tests `PartitionTools` mechanics directly (cap-driven partition, 4-rule scoring, hysteresis, meta-tool exemption, `RenderToolLazyHint` format). No live LLM involved.
+- `internal/service/context_tools_lazyload_test.go` — tests the `AssembleSlots` seam: the lazy hint is appended to the Tools slot, the slot `CacheKey` shifts when the hint toggles/changes and stays stable when it repeats, and hint+S3b-pointer compose correctly. This is the closest existing coverage to "prompt-cache behavior isn't visibly worse," but it's a synthetic slot-assembly test, not a real multi-turn session with a real provider's cache-hit telemetry.
+- `internal/service/chat_request_tools_reflection_test.go` — unit-tests the `request_tools` handler's cap/reflection/halt logic directly (bypassing the LLM), not an agent actually choosing to call `request_tools` mid-turn against a live model.
+- No test in the repo spins up a real interactive chat turn against a live LLM provider (searched for `ANTHROPIC_API_KEY`/`OPENAI` usage in `*_test.go`; the only hits are unit tests asserting an error message when a key is missing, e.g. `internal/llm/anthropic/client_test.go:TestClient_StreamChat_RequiresAPIKey`) with an agent whose tool universe exceeds `ToolEssentialCap` (25).
+
+**Conclusion:** no existing e2e/integration infra in this repo exercises a real, tool-catalog-heavy agent turn end-to-end against a live provider. Per the task brief, this is recorded here rather than skipped silently: **the real-session verification in Done-means item 5 (lazy hint visible to the model, successful `request_tools` hydrate-then-invoke round trip, no stranded-tool "unknown tool" errors, and prompt-cache behavior) still needs to be performed by the operator during the Phase 0 validation checkpoint**, using a real agent/session wired to enough MCP servers/builtins to exceed the 25-tool essential cap. Mechanical correctness of the partition/hint/hysteresis/request_tools logic is covered by the unit and slot-assembly tests above, all of which pass.
+
+**Follow-up candidate (not actioned in this task, per the task's own instruction not to silently tune inline):** once the operator runs the real-session check above, if `ToolEssentialCap`/`RecentToolWindow`/`ToolHysteresisFloor` look miscalibrated for real agent tool universes, that should be filed as its own evidence-driven follow-up task rather than adjusted here.
+
+**Checks:**
+
+- `go build ./cmd/nanite/` — pass.
+- `go vet ./...` — pre-existing, unrelated failure only: `internal/service/container.go` (`stopReaper`/`stopRuntimeReaper` possible-context-leak lint), confirmed present on `main` before this change (untouched by this task's diff, which only touches `internal/chat/tool_partition.go` and `internal/chat/tool_partition_test.go`).
+- `go test ./...` — pre-existing, unrelated failures only: `internal/envelope` (`TestEnvelopeSchemas_AllTypesHaveSchemas`) and `internal/mcp` (`TestNaniteToolDescribe_ShowCardExamplesValidateAgainstSchemas`), both failing because a `question-form` envelope schema file is missing (an `internal/envelope`/`go-envelopes` issue unrelated to tool lazy-load). Confirmed pre-existing by `git stash`-ing this task's diff and re-running the same two tests on a clean `main` tree — identical failures. `go test ./internal/chat/...` passes cleanly (all `PartitionTools`/`IsToolsLazyLoadEnabled` tests, including the 3 rewritten/added ones). Every other package in `go test ./...` reports `ok`.
+
+**Escalations:** none. No genuine ambiguity in the task file's own instruction once cross-referenced against its "Done means" section (see point 3 above); no zero-coverage item; no item-vs-item TASKS.md contradiction; nothing security/trust/data-integrity-sensitive.
 
 ## Review notes
 <Reviewer fills this in: pass/fail, what was checked, anything fixed and how.>

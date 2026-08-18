@@ -219,8 +219,8 @@ func BuildKBEnvelope(searchResult string) string {
 	return string(data)
 }
 
-// envelopePattern matches fenced code blocks with volon-envelope or nanite-envelope language tags.
-var envelopePattern = regexp.MustCompile("(?s)```(?:volon-envelope|nanite-envelope)\\s*\n(.*?)```")
+// envelopePattern matches fenced code blocks with the nanite-envelope language tag.
+var envelopePattern = regexp.MustCompile("(?s)```nanite-envelope\\s*\n(.*?)```")
 
 // ParseEnvelopes extracts envelope blocks from assistant message content.
 // Returns the parsed envelopes, the remaining text with envelope blocks removed,

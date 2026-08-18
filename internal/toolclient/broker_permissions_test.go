@@ -128,14 +128,14 @@ func TestHandleRequestToolsForAgent_FiltersDeniedInnerNames(t *testing.T) {
 	// them under the "test" server name, so via the broker their uniform
 	// names are exactly the original names (ADR-002).
 	tools := []llmtypes.ToolDefinition{
-		{Name: "volon_task_create", Description: "Create a task"},
+		{Name: "example_task_create", Description: "Create a task"},
 		{Name: "dev_bash", Description: "Shell execution"},
 	}
 	tb := newTestBrokerWithTools(tools)
 
 	// (a) Permissive policy — all merged tools returned.
 	permitted, summary := tb.HandleRequestToolsForAgent("agent-1", map[string]any{
-		"tool_names": []any{"volon_task_create", "dev_bash"},
+		"tool_names": []any{"example_task_create", "dev_bash"},
 	})
 	if len(permitted) != 2 {
 		t.Errorf("expected 2 permitted tools under permissive policy, got %d (summary: %s)", len(permitted), summary)

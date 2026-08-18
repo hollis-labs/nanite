@@ -2670,23 +2670,6 @@ export const api = {
     return res.json();
   },
 
-  promoteBacklogItem: async (
-    id: string,
-    sprintId: string,
-  ): Promise<unknown> => {
-    const res = await fetch(
-      `${API_BASE}/volon/backlog/${encodeURIComponent(id)}/promote`,
-      {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ sprint_id: sprintId }),
-      },
-    );
-    if (!res.ok)
-      throw new Error(`Failed to promote backlog item: ${res.status}`);
-    return res.json();
-  },
-
   deleteFragmentsTask: async (id: string): Promise<unknown> => {
     const res = await fetch(
       `${API_BASE}/plugins/engine/tasks/${encodeURIComponent(id)}`,

@@ -32,7 +32,7 @@ version: 1
 project:
   name: nanite
   root: ~/Projects-apps/nanite
-role: volon-managed
+role: ops-managed
 boot_profiles:
   - worker
 write_paths:
@@ -62,8 +62,8 @@ executor:
 	if cfg.Project.Name != "nanite" {
 		t.Errorf("Project.Name = %q, want %q", cfg.Project.Name, "nanite")
 	}
-	if cfg.Role != "volon-managed" {
-		t.Errorf("Role = %q, want %q", cfg.Role, "volon-managed")
+	if cfg.Role != "ops-managed" {
+		t.Errorf("Role = %q, want %q", cfg.Role, "ops-managed")
 	}
 
 	// Executor merged from project.

@@ -23,8 +23,8 @@ func TestSelectTools_ReturnsTools(t *testing.T) {
 
 	// Register some tools.
 	tools := []broker.ToolDefinition{
-		{Name: "volon_task_create", Server: "volon", Description: "Create a task"},
-		{Name: "volon_task_list", Server: "volon", Description: "List tasks"},
+		{Name: "example_task_create", Server: "example", Description: "Create a task"},
+		{Name: "example_task_list", Server: "example", Description: "List tasks"},
 		{Name: "conduit_context_view", Server: "conduit", Description: "View context"},
 	}
 	tb.RegisterTools(tools)
@@ -378,8 +378,8 @@ func newTestBrokerWithTools(tools []llmtypes.ToolDefinition) *ToolClient {
 
 func TestSelectByIntent_FindsRelevantTools(t *testing.T) {
 	tools := []llmtypes.ToolDefinition{
-		{Name: "volon_task_create", Description: "Create a new task in the backlog"},
-		{Name: "volon_sprint_list", Description: "List all sprints"},
+		{Name: "example_task_create", Description: "Create a new task in the backlog"},
+		{Name: "example_sprint_list", Description: "List all sprints"},
 		{Name: "conduit_context_view", Description: "View a context packet"},
 		{Name: "hadron_pipeline_run", Description: "Run a build pipeline"},
 	}
@@ -395,13 +395,13 @@ func TestSelectByIntent_FindsRelevantTools(t *testing.T) {
 	// Uniform agent-facing name (ADR-002): no `mcp__test__` prefix.
 	found := false
 	for _, r := range result {
-		if r.Name == "volon_task_create" {
+		if r.Name == "example_task_create" {
 			found = true
 			break
 		}
 	}
 	if !found {
-		t.Errorf("expected volon_task_create in results, got %v", namesOf(result))
+		t.Errorf("expected example_task_create in results, got %v", namesOf(result))
 	}
 }
 
@@ -423,7 +423,7 @@ func TestSelectByIntent_RespectsMaxTools(t *testing.T) {
 
 func TestSelectByIntent_EmptyOnNoMatch(t *testing.T) {
 	tools := []llmtypes.ToolDefinition{
-		{Name: "volon_task_create", Description: "Create a new task"},
+		{Name: "example_task_create", Description: "Create a new task"},
 		{Name: "conduit_context_view", Description: "View a context packet"},
 	}
 	tb := newTestBrokerWithTools(tools)
@@ -437,7 +437,7 @@ func TestSelectByIntent_EmptyOnNoMatch(t *testing.T) {
 
 func TestSelectByIntent_EmptyIntent(t *testing.T) {
 	tools := []llmtypes.ToolDefinition{
-		{Name: "volon_task_create", Description: "Create a new task"},
+		{Name: "example_task_create", Description: "Create a new task"},
 	}
 	tb := newTestBrokerWithTools(tools)
 
@@ -459,7 +459,7 @@ func TestSelectByIntent_NoMCPManager(t *testing.T) {
 
 func TestScoreToolAgainstIntent(t *testing.T) {
 	tool := llmtypes.ToolDefinition{
-		Name:        "volon_task_create",
+		Name:        "example_task_create",
 		Description: "Create a new task in the backlog",
 	}
 
@@ -523,7 +523,7 @@ func TestRequestToolsMetaTool_HasCorrectSchema(t *testing.T) {
 
 func TestHandleRequestTools_ByIntent(t *testing.T) {
 	tools := []llmtypes.ToolDefinition{
-		{Name: "volon_task_create", Description: "Create a new task in the backlog"},
+		{Name: "example_task_create", Description: "Create a new task in the backlog"},
 		{Name: "hadron_pipeline_run", Description: "Run a build pipeline"},
 	}
 	tb := newTestBrokerWithTools(tools)
@@ -542,26 +542,26 @@ func TestHandleRequestTools_ByIntent(t *testing.T) {
 
 func TestHandleRequestTools_ByName(t *testing.T) {
 	tools := []llmtypes.ToolDefinition{
-		{Name: "volon_task_create", Description: "Create a task"},
+		{Name: "example_task_create", Description: "Create a task"},
 		{Name: "hadron_pipeline_run", Description: "Run a pipeline"},
 	}
 	tb := newTestBrokerWithTools(tools)
 
 	matched, _ := tb.HandleRequestTools(map[string]any{
-		"tool_names": []any{"volon_task_create"},
+		"tool_names": []any{"example_task_create"},
 	})
 
 	if len(matched) != 1 {
 		t.Fatalf("expected 1 tool matched by name, got %d", len(matched))
 	}
-	if matched[0].Name != "volon_task_create" {
-		t.Errorf("expected volon_task_create (uniform name post ADR-002), got %s", matched[0].Name)
+	if matched[0].Name != "example_task_create" {
+		t.Errorf("expected example_task_create (uniform name post ADR-002), got %s", matched[0].Name)
 	}
 }
 
 func TestHandleRequestTools_NoMatch(t *testing.T) {
 	tools := []llmtypes.ToolDefinition{
-		{Name: "volon_task_create", Description: "Create a task"},
+		{Name: "example_task_create", Description: "Create a task"},
 	}
 	tb := newTestBrokerWithTools(tools)
 
@@ -597,7 +597,7 @@ func TestSelectToolsAsProvider_BrokerToolsDefaultNonStrict(t *testing.T) {
 	// returns them. SelectToolsAsProvider converts broker.ToolDefinition →
 	// llmtypes.ToolDefinition and must leave Strict nil (default-off).
 	brokerTools := []broker.ToolDefinition{
-		{Name: "volon_task_create", Server: "volon", Description: "Create a task in the backlog"},
+		{Name: "example_task_create", Server: "example", Description: "Create a task in the backlog"},
 		{Name: "conduit_context_view", Server: "conduit", Description: "View a context packet"},
 	}
 	tb.RegisterTools(brokerTools)

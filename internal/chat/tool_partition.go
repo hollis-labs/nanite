@@ -305,17 +305,22 @@ func RenderToolLazyHint(lazy []llmtypes.ToolDefinition) string {
 	)
 }
 
-// IsToolsLazyLoadEnabled gates G-HOT-SWAP-DEAD activation. Default is OFF
-// per the locked decision: telemetry confirms savings before flipping ON.
-// Opt in with NANITE_TOOLS_LAZY_LOAD=true (or 1, yes, on). Any other
-// value (including unset) keeps the legacy "all tools inline" path.
+// IsToolsLazyLoadEnabled gates G-HOT-SWAP-DEAD activation. Default is ON
+// per docs/architecture-decision-log-2026-08-17.md §12 and
+// docs/engineering/architecture/04-harness.md ("Tool lazy-loading"): the
+// mechanism is fully built and tested, so it's enabled by default and
+// tuned based on real behavior rather than gated behind opt-in telemetry.
+// Recognized explicit opt-outs — "false"/"0"/"no"/"off" (case-insensitive,
+// trimmed) — still disable it. Any other non-empty value that isn't a
+// recognized true/false token (e.g. a typo) falls back to the safe
+// default of ON rather than being treated as an implicit disable.
 func IsToolsLazyLoadEnabled() bool {
 	v := strings.ToLower(strings.TrimSpace(os.Getenv("NANITE_TOOLS_LAZY_LOAD")))
 	switch v {
-	case "true", "1", "yes", "on":
-		return true
+	case "false", "0", "no", "off":
+		return false
 	}
-	return false
+	return true
 }
 
 // isMetaToolName checks the meta-tool exemption list. Mirrors

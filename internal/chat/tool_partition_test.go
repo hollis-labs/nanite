@@ -291,10 +291,10 @@ func TestRenderToolLazyHint_EmptyReturnsEmpty(t *testing.T) {
 	}
 }
 
-func TestIsToolsLazyLoadEnabled_DefaultOff(t *testing.T) {
+func TestIsToolsLazyLoadEnabled_DefaultOn(t *testing.T) {
 	t.Setenv("NANITE_TOOLS_LAZY_LOAD", "")
-	if IsToolsLazyLoadEnabled() {
-		t.Errorf("default should be OFF; got ON")
+	if !IsToolsLazyLoadEnabled() {
+		t.Errorf("default should be ON; got OFF")
 	}
 }
 
@@ -307,11 +307,28 @@ func TestIsToolsLazyLoadEnabled_TrueValues(t *testing.T) {
 	}
 }
 
+// TestIsToolsLazyLoadEnabled_FalsyValues asserts the explicit-opt-out
+// values disable the feature. This is now the *only* way to turn it off,
+// so it matters more than before, not less.
 func TestIsToolsLazyLoadEnabled_FalsyValues(t *testing.T) {
-	for _, v := range []string{"false", "0", "no", "off", "random"} {
+	for _, v := range []string{"false", "0", "no", "off", "FALSE", "Off"} {
 		t.Setenv("NANITE_TOOLS_LAZY_LOAD", v)
 		if IsToolsLazyLoadEnabled() {
 			t.Errorf("value %q should not enable; got enabled", v)
+		}
+	}
+}
+
+// TestIsToolsLazyLoadEnabled_UnrecognizedValueFallsBackToSafeDefault
+// asserts that a genuinely unrecognized non-empty value (e.g. a typo)
+// falls back to the current safe default (ON) rather than being treated
+// as an implicit disable — only the recognized falsy tokens above turn
+// the feature off.
+func TestIsToolsLazyLoadEnabled_UnrecognizedValueFallsBackToSafeDefault(t *testing.T) {
+	for _, v := range []string{"random", "maybe", "2"} {
+		t.Setenv("NANITE_TOOLS_LAZY_LOAD", v)
+		if !IsToolsLazyLoadEnabled() {
+			t.Errorf("unrecognized value %q should fall back to the safe (ON) default; got disabled", v)
 		}
 	}
 }

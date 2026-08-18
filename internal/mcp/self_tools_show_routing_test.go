@@ -191,15 +191,14 @@ func TestCallShowCard_AllPassiveRenderables_RoundTrip(t *testing.T) {
 func TestCallShowCard_RejectsTypeOutsideAllowList(t *testing.T) {
 	st := newSelfTools(t)
 	rejected := []string{
-		"approval-card",       // decision-flow
-		"proposal-card",       // decision-flow
-		"confirmation-card",   // decision-flow
-		"question-form",       // decision-flow
+		"approval-card",        // decision-flow
+		"proposal-card",        // decision-flow
+		"confirmation-card",    // decision-flow
 		"chat-loop-terminated", // runtime-emitted
-		"elicitation-prompt", // runtime-emitted
-		"kb-result",           // plugin-shipped
-		"ticket-form",         // plugin-shipped
-		"made-up-type",        // unknown
+		"elicitation-prompt",   // runtime-emitted
+		"kb-result",            // plugin-shipped
+		"ticket-form",          // plugin-shipped
+		"made-up-type",         // unknown
 	}
 	for _, envType := range rejected {
 		envType := envType

@@ -240,20 +240,6 @@
     "notes": "REFERENCE ONLY: proposal-card carries a draft action with editable fields. Emitted by the proposal pipeline, not card_show. The outer `type` is the proposal kind (e.g. create_task); the envelope `type` is `proposal-card`."
   },
   {
-    "title": "REFERENCE — question-form (interactive form envelope)",
-    "args": {
-      "type": "question-form",
-      "data": {
-        "questions": [
-          { "prompt": "What environment should we deploy to?", "type": "select", "options": ["staging", "canary", "production"], "required": true, "default": "staging" },
-          { "prompt": "Skip smoke tests?", "type": "radio", "options": ["yes", "no"], "required": true, "default": "no" },
-          { "prompt": "Release notes (optional)", "type": "textarea", "required": false }
-        ]
-      }
-    },
-    "notes": "REFERENCE ONLY: question-form is the InterviewCard envelope. Emitted by the interview pipeline, not card_show. Each question requires prompt + type + required. type enum: text|textarea|select|radio|checkbox."
-  },
-  {
     "title": "REFERENCE — confirmation-card (decision-flow envelope)",
     "args": {
       "type": "confirmation-card",

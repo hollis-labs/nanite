@@ -1886,7 +1886,6 @@ export interface Envelope {
   display_class?: "content" | "alert" | "action-required";
   prior_response?: ResponseV1; // set by backend if already answered
   proposals?: Proposal[];
-  questions?: Question[];
   approval?: EnvelopeApprovalRequest;
   status?: { phase: string; progress: number };
   data?: Record<string, unknown>;
@@ -1966,16 +1965,6 @@ export interface SchemaField {
   label?: string;
   options?: string[];
   required?: boolean;
-}
-
-export interface Question {
-  prompt: string;
-  type: "text" | "textarea" | "select" | "radio" | "checkbox";
-  options?: (string | { value: string; label: string; description?: string })[];
-  required: boolean;
-  default?: string;
-  description?: string; // paragraph shown in card display
-  display_style?: "compact" | "card"; // defaults to "compact"
 }
 
 export interface EnvelopeApprovalRequest {

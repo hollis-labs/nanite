@@ -22,7 +22,6 @@ var knownTypes = []string{
 	"error-report",
 	"approval-card",
 	"proposal-card",
-	"question-form",
 	// Phase 7 reusable primitives
 	"info-card",
 	"list-card",
@@ -94,12 +93,6 @@ var examplePayloads = map[string]string{
 			"title": {"type": "text", "label": "Title", "required": true},
 			"priority": {"type": "select", "label": "Priority", "options": ["P1", "P2", "P3"]}
 		}
-	}`,
-	"question-form": `{
-		"questions": [
-			{"prompt": "What is your name?", "type": "text", "required": true},
-			{"prompt": "Preferred language?", "type": "select", "options": ["Go", "TypeScript", "Python"], "required": false, "default": "Go"}
-		]
 	}`,
 	"info-card": `{
 		"title": "Deployment Complete",

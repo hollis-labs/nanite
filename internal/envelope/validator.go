@@ -51,7 +51,7 @@ var localePrinter = message.NewPrinter(language.English)
 // may emit through card_show. These are the cards that carry no
 // decision-flow / runtime state — the agent decides "use a card with this
 // data", the system decides where it lands. Decision-flow envelopes
-// (approval-card, proposal-card, confirmation-card, question-form),
+// (approval-card, proposal-card, confirmation-card),
 // runtime-emitted envelopes (chat-loop-terminated, elicitation-prompt,
 // subagent-spawn-approval), and plugin-shipped envelopes (kb-result,
 // ticket-*) intentionally have their own emission paths and are not

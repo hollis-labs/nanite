@@ -18,43 +18,6 @@ import { EnvelopeRenderer } from "./envelopes/EnvelopeRenderer";
 import { MessageContent } from "./MessageContent";
 import { ShellMessage } from "./ShellMessage";
 
-// normalizeEnvelope fixes known agent schema drift for question-form envelopes:
-//   - questions/title/subtitle nested in data → promoted to top level
-//   - question.label → question.prompt
-//   - question.display / question.displayStyle → question.display_style
-function normalizeEnvelope(env: Envelope): Envelope {
-  if (env.type !== "question-form") return env;
-
-  const data = env.data as Record<string, unknown> | undefined;
-
-  // Unnest questions (and title/subtitle) from data if agent put them there
-  let questions = env.questions;
-  let title = env.title;
-  let subtitle = env.subtitle;
-
-  if (data && Array.isArray(data.questions) && !questions?.length) {
-    questions = (data.questions as Record<string, unknown>[]).map(
-      normalizeQuestion,
-    ) as unknown as Envelope["questions"];
-    if (!title && typeof data.title === "string") title = data.title;
-    if (!subtitle && typeof data.subtitle === "string") subtitle = data.subtitle;
-  } else if (questions) {
-    questions = (questions as unknown as Record<string, unknown>[]).map(
-      normalizeQuestion,
-    ) as unknown as Envelope["questions"];
-  }
-
-  return { ...env, questions, title, subtitle };
-}
-
-function normalizeQuestion(q: Record<string, unknown>): Record<string, unknown> {
-  return {
-    ...q,
-    prompt: q.prompt ?? q.label ?? q.text ?? q.question ?? "",
-    display_style: q.display_style ?? q.display ?? q.displayStyle ?? undefined,
-  };
-}
-
 interface StructuredMessage {
   v: number;
   text: string;
@@ -240,7 +203,6 @@ export function ChatMessage({
       const merged: Envelope = { kind: arr[0].kind, version: arr[0].version, type: arr[0].type };
       for (const env of arr) {
         if (env.proposals) merged.proposals = [...(merged.proposals ?? []), ...env.proposals];
-        if (env.questions) merged.questions = [...(merged.questions ?? []), ...env.questions];
         if (env.approval && !merged.approval) merged.approval = env.approval;
         if (env.status && !merged.status) merged.status = env.status;
         if (env.data && !merged.data) {
@@ -256,9 +218,8 @@ export function ChatMessage({
       try {
         const raw =
           typeof message.envelope === "string" ? JSON.parse(message.envelope) : message.envelope;
-        if (Array.isArray(raw) && raw.length > 0) return mergeEnvelopes(raw.map(normalizeEnvelope));
-        if (raw && typeof raw === "object" && !Array.isArray(raw))
-          return normalizeEnvelope(raw as Envelope);
+        if (Array.isArray(raw) && raw.length > 0) return mergeEnvelopes(raw as Envelope[]);
+        if (raw && typeof raw === "object" && !Array.isArray(raw)) return raw as Envelope;
       } catch {
         /* ignore */
       }
@@ -271,7 +232,7 @@ export function ChatMessage({
       let match;
       while ((match = pattern.exec(message.content)) !== null) {
         try {
-          envelopes.push(normalizeEnvelope(JSON.parse(match[1].trim())));
+          envelopes.push(JSON.parse(match[1].trim()));
         } catch {
           /* incomplete JSON during streaming — skip */
         }

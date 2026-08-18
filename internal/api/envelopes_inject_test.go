@@ -13,14 +13,14 @@ func TestInjectEnvelopePriorResponses(t *testing.T) {
 	respondedAt := time.Now().UTC()
 	inst := &store.EnvelopeInstance{
 		ID:           "env-abc",
-		EnvelopeJSON: `{"kind":"envelope","version":1,"type":"question-form","id":"env-abc"}`,
+		EnvelopeJSON: `{"kind":"envelope","version":1,"type":"approval-card","id":"env-abc"}`,
 		RespondedAt:  &respondedAt,
-		ResponseJSON: `{"v":1,"kind":"question-form","id":"env-abc","status":"submitted"}`,
+		ResponseJSON: `{"v":1,"kind":"approval-card","id":"env-abc","status":"submitted"}`,
 	}
 
 	messages := []store.Message{
-		{Envelope: `{"kind":"envelope","version":1,"type":"question-form","id":"env-abc"}`},
-		{Envelope: `{"kind":"envelope","version":1,"type":"question-form","id":"env-xyz"}`}, // no response
+		{Envelope: `{"kind":"envelope","version":1,"type":"approval-card","id":"env-abc"}`},
+		{Envelope: `{"kind":"envelope","version":1,"type":"approval-card","id":"env-xyz"}`}, // no response
 		{Envelope: ``}, // no envelope
 	}
 

@@ -46,7 +46,7 @@ func TestListSessionPluginEnvelopes_RehydratesPendingStandaloneCards(t *testing.
 	ignored := &store.EnvelopeInstance{
 		ID:           "env-inline",
 		SessionID:    sess.ID,
-		EnvelopeType: "question-form",
+		EnvelopeType: "approval-card",
 		EnvelopeJSON: `{"prompt":"inline only"}`,
 	}
 	if err := a.Services.Store.CreateEnvelopeInstance(ignored); err != nil {

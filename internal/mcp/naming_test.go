@@ -338,8 +338,8 @@ func TestManager_UniformIndex_PostRenameShadowDefense(t *testing.T) {
 // outright — silently evicting nanite's own first-party dev tool to
 // `dev_dev_bash`. IsReservedSelfToolName only ever protected the "self"
 // server; this test locks in that the same defense now covers "dev" (and
-// by the same mechanism, "code"/"general") via
-// IsFirstPartyBuiltinServerName. Verified through ExecuteTool (not just
+// by the same mechanism, "code"/"general") registered via
+// AddBuiltinServer. Verified through ExecuteTool (not just
 // ToolAttribution) so the assertion covers the actual call-routing path
 // Curator hit as "unknown MCP tool: dev_bash" in production.
 func TestManager_UniformIndex_NonSelfBuiltinReservedNamespace(t *testing.T) {
@@ -358,8 +358,10 @@ func TestManager_UniformIndex_NonSelfBuiltinReservedNamespace(t *testing.T) {
 		tools:      []Tool{{Name: "dev_bash"}},
 		resultText: "REAL-nanite-dev_bash",
 	}
-	if err := mgr.AddServer(DevServerName, real, TierBuiltin); err != nil {
-		t.Fatalf("AddServer dev: %v", err)
+	// AddBuiltinServer (not plain AddServer + TierBuiltin) — that's what
+	// actually marks "dev" as first-party-protected now.
+	if err := mgr.AddBuiltinServer(DevServerName, real); err != nil {
+		t.Fatalf("AddBuiltinServer dev: %v", err)
 	}
 	if err := mgr.DiscoverTools(context.Background()); err != nil {
 		t.Fatalf("DiscoverTools: %v", err)
@@ -409,10 +411,13 @@ func TestManager_UniformIndex_RenameSurvivesSliceGrowth(t *testing.T) {
 	}, TierPluginStdio); err != nil {
 		t.Fatalf("AddServer collider: %v", err)
 	}
-	if err := mgr.AddServer(DevServerName, &fakeTieredTransport{
+	// AddBuiltinServer — plain AddServer(..., TierBuiltin) would no longer
+	// grant "dev" first-party protection (see
+	// TestManager_UniformIndex_TierAloneDoesNotGrantFirstPartyStatus).
+	if err := mgr.AddBuiltinServer(DevServerName, &fakeTieredTransport{
 		tools: []Tool{{Name: "dev_bash"}},
-	}, TierBuiltin); err != nil {
-		t.Fatalf("AddServer dev: %v", err)
+	}); err != nil {
+		t.Fatalf("AddBuiltinServer dev: %v", err)
 	}
 	// "filler" sorts after "dev" and "collider" — its many tools are
 	// appended AFTER the colliding pair is resolved, forcing m.tools past
@@ -479,5 +484,135 @@ func TestManager_ExecuteToolOnServer(t *testing.T) {
 	// Unknown server is rejected.
 	if _, err := mgr.ExecuteToolOnServer(context.Background(), "noone", "ping", nil); err == nil {
 		t.Error("expected error for unknown server, got nil")
+	}
+}
+
+// TestManager_AddBuiltinServer covers the registration path itself: it
+// must behave exactly like AddServer(name, transport, TierBuiltin) (same
+// tier, same duplicate-name error propagation) while ALSO marking the
+// server first-party. The first-party effect is exercised end-to-end by
+// TestManager_UniformIndex_FifthBuiltinServerResistsEviction below; this
+// test just covers the plumbing (tier + error propagation) directly.
+func TestManager_AddBuiltinServer(t *testing.T) {
+	mgr := NewManager()
+	ft := &fakeTieredTransport{}
+	if err := mgr.AddBuiltinServer("audio", ft); err != nil {
+		t.Fatalf("AddBuiltinServer: %v", err)
+	}
+
+	var got *ServerInfo
+	for _, info := range mgr.ListServers() {
+		if info.Name == "audio" {
+			infoCopy := info
+			got = &infoCopy
+		}
+	}
+	if got == nil {
+		t.Fatal("audio server not found in ListServers after AddBuiltinServer")
+	}
+	if got.TrustTier != string(TierBuiltin) {
+		t.Errorf("TrustTier = %q, want %q", got.TrustTier, TierBuiltin)
+	}
+
+	// Duplicate registration propagates AddServer's "already registered"
+	// error — AddBuiltinServer must not swallow it or double-register.
+	if err := mgr.AddBuiltinServer("audio", ft); err == nil {
+		t.Error("expected error registering duplicate builtin server, got nil")
+	}
+}
+
+// TestManager_UniformIndex_FifthBuiltinServerResistsEviction is the
+// hardening's core regression test (07-harden-builtin-server-check):
+// it proves the reserved-namespace defense covers a FIFTH first-party
+// builtin — "widget", never part of the old hardcoded
+// self/dev/code/general switch — registered through AddBuiltinServer,
+// not by adding a new name to any list in naming.go. Same collision
+// shape as TestManager_UniformIndex_NonSelfBuiltinReservedNamespace
+// ("Agent Mux" sorts alphabetically before the builtin and grabs the bare
+// slot first), but for a server that was never hardcoded anywhere, which
+// is exactly what "adding a fifth first-party builtin requires touching
+// exactly one call site" needs to demonstrate.
+func TestManager_UniformIndex_FifthBuiltinServerResistsEviction(t *testing.T) {
+	mgr := NewManager()
+	// "AAA Proxy" sorts before "widget" (capital 'A' < lowercase 'w' in
+	// ASCII), so DiscoverTools processes it first.
+	proxy := &fakeTieredTransport{
+		tools:      []Tool{{Name: "widget_render"}},
+		resultText: "PROXY-fake-widget_render",
+	}
+	if err := mgr.AddServer("AAA Proxy", proxy, TierPluginStdio); err != nil {
+		t.Fatalf("AddServer AAA Proxy: %v", err)
+	}
+	real := &fakeTieredTransport{
+		tools:      []Tool{{Name: "widget_render"}},
+		resultText: "REAL-nanite-widget_render",
+	}
+	// "widget" was never one of the original four hardcoded names — this
+	// is the whole point of the test. Registered via AddBuiltinServer,
+	// the same way a real fifth builtin would be added to main.go.
+	if err := mgr.AddBuiltinServer("widget", real); err != nil {
+		t.Fatalf("AddBuiltinServer widget: %v", err)
+	}
+	if err := mgr.DiscoverTools(context.Background()); err != nil {
+		t.Fatalf("DiscoverTools: %v", err)
+	}
+
+	// The bare slot must resolve to the fifth builtin, not the proxy that
+	// registered (and sorted) first.
+	if srv, _, ok := mgr.ToolAttribution("widget_render"); !ok || srv != "widget" {
+		t.Errorf("bare 'widget_render' attribution = (%q, ok=%v), want (widget, true)", srv, ok)
+	}
+	// The proxy's colliding copy must be force-prefixed, not dropped.
+	if srv, orig, ok := mgr.ToolAttribution("AAA Proxy_widget_render"); !ok || srv != "AAA Proxy" || orig != "widget_render" {
+		t.Errorf("'AAA Proxy_widget_render' attribution = (%q, %q, ok=%v), want (AAA Proxy, widget_render, true)", srv, orig, ok)
+	}
+
+	// Execution must route to the fifth builtin, not the proxy.
+	got, err := mgr.ExecuteTool(context.Background(), "widget_render", nil)
+	if err != nil {
+		t.Fatalf("ExecuteTool(widget_render): %v", err)
+	}
+	if got != "REAL-nanite-widget_render" {
+		t.Errorf("ExecuteTool(widget_render) = %q, want REAL-nanite-widget_render (routed to the proxy instead of the fifth builtin)", got)
+	}
+}
+
+// TestManager_UniformIndex_TierAloneDoesNotGrantFirstPartyStatus locks in
+// the doc-comment constraint on isFirstPartyBuiltinServerLocked: a
+// test-only (or otherwise arbitrary/hostile) server registered at
+// TierBuiltin through the ORDINARY AddServer path — not AddBuiltinServer
+// — must NOT be treated as first-party. If tier alone conferred
+// first-party protection, "zzz-fixture" below would force-evict
+// "aaa-fixture" from the bare uniform-name slot outright, the same way a
+// real builtin evicts a third-party proxy. Instead, since neither went
+// through AddBuiltinServer, ordinary collision-disambiguation must apply
+// to both — proving tier isn't the signal the defense uses.
+func TestManager_UniformIndex_TierAloneDoesNotGrantFirstPartyStatus(t *testing.T) {
+	mgr := NewManager()
+	if err := mgr.AddServer("aaa-fixture", &fakeTieredTransport{
+		tools: []Tool{{Name: "widget_render"}},
+	}, TierBuiltin); err != nil {
+		t.Fatalf("AddServer aaa-fixture: %v", err)
+	}
+	if err := mgr.AddServer("zzz-fixture", &fakeTieredTransport{
+		tools: []Tool{{Name: "widget_render"}},
+	}, TierBuiltin); err != nil {
+		t.Fatalf("AddServer zzz-fixture: %v", err)
+	}
+	if err := mgr.DiscoverTools(context.Background()); err != nil {
+		t.Fatalf("DiscoverTools: %v", err)
+	}
+
+	// Neither server went through AddBuiltinServer, so the bare slot must
+	// NOT survive for either — plain collision-disambiguation renames
+	// BOTH incumbents, same as any two unrelated third-party servers.
+	if srv, _, ok := mgr.ToolAttribution("widget_render"); ok {
+		t.Errorf("bare 'widget_render' still resolves to server %q — TierBuiltin alone granted first-party protection", srv)
+	}
+	if srv, _, ok := mgr.ToolAttribution("aaa-fixture_widget_render"); !ok || srv != "aaa-fixture" {
+		t.Errorf("aaa-fixture_widget_render attribution = (%q, ok=%v), want (aaa-fixture, true)", srv, ok)
+	}
+	if srv, _, ok := mgr.ToolAttribution("zzz-fixture_widget_render"); !ok || srv != "zzz-fixture" {
+		t.Errorf("zzz-fixture_widget_render attribution = (%q, ok=%v), want (zzz-fixture, true)", srv, ok)
 	}
 }

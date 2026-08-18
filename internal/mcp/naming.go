@@ -27,9 +27,11 @@ const SelfServerName = "self"
 
 // DevServerName, CodeServerName, and GeneralServerName are the other three
 // in-process builtin server names nanite registers at startup (cmd/nanite/
-// main.go, all at TierBuiltin), alongside SelfServerName. Together with
-// SelfServerName they form the closed set IsFirstPartyBuiltinServerName
-// checks against.
+// main.go), alongside SelfServerName. Together with SelfServerName these
+// are the names main.go's builtin-registration call sites pass to
+// Manager.AddBuiltinServer, which is what actually marks a server as
+// first-party (see Manager.isFirstPartyBuiltinServerLocked) — the names
+// themselves are no longer a closed set checked anywhere in this package.
 const (
 	DevServerName     = "dev"
 	CodeServerName    = "code"
@@ -113,27 +115,24 @@ func IsReservedSelfToolName(server, toolName string) bool {
 	return server == SelfServerName
 }
 
-// IsFirstPartyBuiltinServerName reports whether server is one of nanite's
-// four hardcoded in-process builtin servers (self/dev/code/general — see
-// cmd/nanite/main.go). Unlike a tier-based check, this is a closed name
-// set deliberately independent of TrustTier: test fixtures and future
-// callers legitimately register arbitrary/hostile servers at TierBuiltin
-// to exercise plain collision behavior, so tier alone can't distinguish
-// "one of nanite's real builtins" from "some other server that happens to
-// carry that tier."
+// First-party builtin protection (self/dev/code/general and any future
+// addition) used to live here as IsFirstPartyBuiltinServerName, a
+// hand-maintained 4-name switch statement kept in sync by hand against
+// the separate list of mcpManager.AddServer(...) calls in
+// cmd/nanite/main.go — the exact "two lists, nothing enforces they
+// match" shape that let commit 5144590's bug (a proxied server stealing
+// nanite's own dev_bash) happen in the first place, one level up.
 //
-// Generalizes the self-only reserved-namespace defense
-// (IsReservedSelfToolName) to all four builtins: a proxied MCP server
-// built from the same internal scaffold as nanite (e.g. a sibling app
-// that also ships dev_bash/skill_list/etc under bare names) must never be
-// able to evict a first-party builtin tool from its bare uniform-name
-// slot just because it happens to sort alphabetically earlier. See
+// It's replaced by Manager.isFirstPartyBuiltinServerLocked, backed by
+// Manager.firstPartyBuiltinNames — state populated ONLY by
+// Manager.AddBuiltinServer, the single call cmd/nanite/main.go's real
+// builtin registrations use. "Register a builtin" and "protect that
+// builtin's bare tool-name slot" are now the same action, so adding a
+// fifth first-party builtin requires touching exactly one call site.
+//
+// Deliberately still independent of TrustTier: test fixtures and future
+// callers legitimately register arbitrary/hostile servers at TierBuiltin
+// via the ordinary AddServer path to exercise plain collision behavior,
+// so tier alone can't distinguish "one of nanite's real builtins" from
+// "some other server that happens to carry that tier." See
 // Manager.assignUniformNameLocked.
-func IsFirstPartyBuiltinServerName(server string) bool {
-	switch server {
-	case SelfServerName, DevServerName, CodeServerName, GeneralServerName:
-		return true
-	default:
-		return false
-	}
-}

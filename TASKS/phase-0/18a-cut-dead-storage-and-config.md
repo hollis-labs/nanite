@@ -1,0 +1,112 @@
+# Cut dead storage and config remnants (18a — non-messaging sub-parts)
+
+**Phase:** 0
+**Status:** not-started
+**Depends on:** none (independent of `09-adopt-goose-migrations` — these are plain `DROP TABLE`/code deletions, no rename-swallow idempotency concern like `19-cut-legacy-rename-tables`)
+**Touches:** `internal/store/agent_cycles.go` (delete file), `internal/store/tool_enrichments.go` (trim to read-only), `internal/store/agent_known_tools_reaper.go` (delete file), `internal/store/agent_state_store.go` (interface trim), `internal/api/agent_boot_plans.go` (delete file), `internal/api/agent_builder.go`, `internal/api/api.go` (route removal), `internal/api/types.go`, `internal/store/agent_boot_plans.go` (delete file), `internal/store/agents.go` (`DeleteAgent` cleanups slice — **shared with `21-cut-modes`, see Depends-on note below**), `internal/store/providers.go` (CRUD trim), `internal/api/provider_manage.go`, `ui/src/components/settings/agents/AgentBootPlanPanel.tsx` / `AgentBootPlanEditor.tsx` (delete), `ui/src/components/settings/agents/AgentDetailView.tsx` (remove "Boot" tab), `ui/src/components/settings/agents/AgentBuilderWizard.tsx`, `ui/src/lib/api.ts`, `ui/src/lib/types.ts`, `ui/src/__tests__/phase-26-agent-boot-plan.test.tsx` (delete), `internal/config/config.go` (field trim), `internal/config/config_test.go`, a new migration dropping `agent_cycles`, `agent_boot_plans`, `workflows`, `session_agent_overrides`, and the `providers.base_url`/`api_key` columns
+
+## Context
+
+TASKS.md Phase 0 item 18 (partial — this file covers everything EXCEPT `internal/messaging/gomsg`, `agent_mailbox_view`, `trigger_rules`, `custom_actions`, which a separate task file covers): "`agent_cycles`, `tool_enrichments` write path, the unscheduled known-tools/skills TTL reaper, `agent_boot_plans`, `providers.base_url`/`api_key` columns, dead `internal/config.Config` fields, `workflows` table, `session_stats`, `session_agent_overrides` — verify each against current code before cutting, not just this list." Decision log §8 (standing dead-code policy) retroactively strengthens all of these into "cut," not "flag and revisit." Decision log §9a covers `providers.base_url`/`api_key`. Decision log §16 covers `workflows`/`session_stats`. Decision log §24 covers `session_agent_overrides`. Architecture doc `05-storage-and-migrations.md`'s "Confirmed dead, cut" section repeats `workflows`/`session_stats`.
+
+**Every sub-item below was independently re-verified against the current tree** (not just trusted from the docs) per `EXECUTION-PROCESS.md`'s "verify each against current code before cutting" instruction. Two sub-items came back with real, material corrections to the docs' characterization — read those two carefully, they change the shape of the cut.
+
+### `agent_cycles` — confirmed fully dead, cut as described
+
+Created by `internal/store/migrations/078_agent_context_policy_and_cycles.sql`. Full CRUD exists in `internal/store/agent_cycles.go` (`InsertAgentCycle`/`CompleteAgentCycle`/`GetAgentCycle`/`ListAgentCycles`), but `grep -rn "InsertAgentCycle\|CompleteAgentCycle\|GetAgentCycle\|ListAgentCycles" --include="*.go" .` outside that file returns **zero matches** — no service, API, CLI, or MCP self-tool ever calls any of the four methods. The only other reference is the delete-cascade line in `internal/store/agents.go`'s `DeleteAgent` cleanups (`"DELETE FROM agent_cycles WHERE agent_id = ?"`, line 451). Confirmed dead exactly as characterized.
+
+### `tool_enrichments` write path — confirmed dead, but the READ path is live (do not touch it)
+
+`internal/store/tool_enrichments.go` has `GetToolEnrichment`/`UpsertToolEnrichment`/`ListToolEnrichments`/`DeleteToolEnrichment`. Verified:
+- `GetToolEnrichment` **is called** — `internal/toolclient/enricher.go:35`, wired into the tool broker via `toolclient.New` → `broker.NewLocalBroker(..., broker.WithEnricher(NewStoreEnricher(s)))` (`internal/toolclient/broker.go:87-88`). This is live, in the hot path of every tool-catalog assembly.
+- `UpsertToolEnrichment`, `DeleteToolEnrichment`, and `ListToolEnrichments` have **zero callers anywhere** outside their own file — confirmed via repo-wide grep. No API route, no CLI command, nothing manages enrichment records; the table can never be populated by anything in the codebase today.
+
+TASKS.md's phrasing ("tool_enrichments write path") matches this exactly — cut `UpsertToolEnrichment`/`DeleteToolEnrichment`/`ListToolEnrichments`, **keep** `GetToolEnrichment`, the `tool_enrichments` table itself, and the `NewStoreEnricher` wiring. Do not touch `internal/toolclient/enricher.go` or `broker.go`.
+
+### The unscheduled known-tools/skills TTL reaper — confirmed dead, cut the reaper only (not the tables)
+
+`internal/store/agent_known_tools_reaper.go` defines `ReapExpiredAgentKnownTools`/`ReapExpiredAgentKnownSkills` (also declared on the `agent_state_store.go` interface). Repo-wide grep confirms these two methods are **never called** — no ticker, cron, background goroutine, or manual admin command invokes either. This matches TASKS.md's "unscheduled" framing precisely: the reaper logic was built but never wired to anything that runs it. **Cut the reaper functions and their interface declarations only** — the `agent_known_tools`/`agent_known_skills` tables themselves stay; they're actively read/written elsewhere (activation tracking, pinning) and are out of scope here.
+
+### `agent_boot_plans` — **decision log §7's characterization is wrong; this has a full, live, mounted UI. Escalation-worthy finding, verify before executing.**
+
+Decision log §7 says: *"`agent_boot_plans` (previously flagged as dead/unwired code, a judgment call) is now understood in this light too — it looks like an earlier, abandoned attempt at the same 'plant items into a boot dir' problem this catalog already solves differently. Reinforces treating it as safe to cut rather than revive."* This undersells what's actually in the tree by a lot:
+
+- **Backend**: `internal/store/agent_boot_plans.go` has a full `AgentBootPlanDocument`/`AgentBootPlantItem`/`AgentBootCallback` CRUD schema. `internal/api/agent_boot_plans.go` + 4 real, registered REST routes in `internal/api/api.go`: `GET/PUT/DELETE /api/agents/{id}/boot-plan`, `POST /api/agents/{id}/boot-plan/dry-run`. `internal/api/agent_builder.go` wires a `BootPlanPreview` into the agent-creation response.
+- **Frontend**: a full editor — `ui/src/components/settings/agents/AgentBootPlanPanel.tsx` (React Query wired to `api.getAgentBootPlan`/`updateAgentBootPlan`/`deleteAgentBootPlan`/`dryRunAgentBootPlan`) and `AgentBootPlanEditor.tsx`, mounted as a real, visible **"Boot" tab** in `AgentDetailView.tsx` (`TabsTrigger value="boot"`, not gated behind any dev-mode/feature flag). There is even a dedicated test, `ui/src/__tests__/phase-26-agent-boot-plan.test.tsx`, confirming this was built deliberately, not scaffolding left mid-flight.
+- **BUT**: `grep -rn "AgentBootPlanDocument\|GetAgentBootPlan\|agent_boot_plans"` outside the CRUD/API/store files themselves returns nothing in the actual agent-launch/boot-materialization code path (`internal/runtime/agent`, `internal/launcher`). **The data this UI lets an operator author is never consulted by anything that actually boots/launches an agent.** It's a complete, real, reachable round-trip (UI → REST → DB → REST → UI) to a value that has zero effect on any real agent launch.
+
+**Net verdict: still cut**, because "zero functional effect on any real agent boot" is the operative dead-code criterion here, matching decision log §7's underlying conclusion even though its "abandoned/unwired" framing understates the surface. But the cut is bigger than "drop a table" — it includes a live settings-page tab and its API client wiring. **Flag this finding when reporting section completion** — this is exactly the "reality doesn't match the doc" case `EXECUTION-PROCESS.md` asks workers to surface, even though the resolution (cut) doesn't change.
+
+### `providers.base_url`/`api_key` columns — confirmed exactly as decision log §9a describes
+
+`base_url TEXT`/`api_key TEXT` columns exist on `providers` (defined in `internal/store/migrations/001_schema.sql`). Full CRUD exists (`internal/store/providers.go`: `GetProvider`/`UpdateProvider` read/write `BaseURL`; `SetProviderAPIKey`/`HasProviderAPIKey` read/write the `api_key` column) and a frontend field (`ui/src/lib/types.ts:1712`, `ui/src/lib/api.ts:2046`). **Confirmed zero runtime effect on request construction**: `.BaseURL` and `.APIKey` are never read anywhere in `internal/llm/*` or `internal/provider/*` (the actual HTTP-request-building code). Even more thoroughly dead than the decision log implies: `internal/api/provider_manage.go`'s `handleSetProviderAPIKey` — the real, live REST endpoint (`POST /api/providers/{id}/api-key`) — **doesn't even call `store.SetProviderAPIKey`**; it writes straight to the OS keychain via `secrets.Set(...)`, completely bypassing the DB column. So `SetProviderAPIKey`/`HasProviderAPIKey` are themselves dead code with zero callers, on top of the columns being unread. Cut the columns and all four store methods (`UpdateProvider`'s `BaseURL` handling can stay if `UpdateProvider` has other real fields to update — check before trimming that one function specifically).
+
+### Dead `internal/config.Config` fields — field-by-field verification (decision log never named which fields; this is original verification)
+
+Neither the decision log nor `TASKS.md` names which `internal/config.Config` fields are dead — only that some are (§8's back-reference to "§7's dead `internal/config.Config` fields", but §7's own text doesn't enumerate them either). Verified every field by grepping for real (non-test, non-`config` package) read sites:
+
+| Field | Verdict | Evidence |
+|---|---|---|
+| `Version int` | **dead** | parsed/merged only; zero reads anywhere |
+| `Project.Name`/`Project.Root` | **keep** | `Project.Name` logged at boot; `Project.Root` read via `ProjectRoot()` in multiple places (`cmd/nanite/main.go`) |
+| `Role string` | **borderline — flag, don't guess** | read exactly once, `cmd/nanite/main.go:153`, only for a log line (`slog.Info("config loaded", ..., "role", cfg.Role, ...)`) — never branches on it or feeds it into agent resolution. Not zero-callers, but doesn't drive behavior either. Recommend leaving as-is (it's a real, if thin, read site) unless the worker independently confirms it's genuinely vestigial — don't cut on the same "zero callers" basis as the others below, the evidence is different in kind. |
+| `BootProfiles []string` | **dead** | zero reads outside `config` package — do not confuse with `Services.BootProfiles`/`container.BootProfiles`, an unrelated `*bootprofile.Registry` field on a different struct in `internal/service` |
+| `WritePaths []string` | **dead** | zero reads outside `config` package/tests |
+| `ProtectedPaths []string` | **dead** | zero reads outside `config` package/tests |
+| `DevToolsAllowedPaths []string` | **keep** | heavily used — `dev_*` MCP tool path-safety allowlist, CLI boot-dir writable-roots |
+| `BootProfileCatalogPath string` | **keep** | used via `ResolvedBootProfileCatalogPath()` |
+| `WorkflowDefinitionsPath string` | **keep** | used via `ResolvedWorkflowDefinitionsPath()` |
+| `Executor ExecutorConfig` (all 4 sub-fields) | **dead** | zero reads outside `config` package/tests |
+| `Defaults DefaultsConfig` (all sub-fields) | **dead** | zero reads outside `config` package/tests |
+| `Projects map[string]ProjectEntry` | **dead** | zero reads outside `config` package; `ProjectEntry` type itself has zero other references in the whole repo |
+| `HooksDir string` | **dead** | zero reads outside `config` package/tests |
+| `Vanta VantaConfig` (all 4 sub-fields) | **keep** | heavily used in `cmd/nanite/main.go` to register the Vanta MCP server |
+
+Cut: `Version`, `BootProfiles`, `WritePaths`, `ProtectedPaths`, `Executor`/`ExecutorConfig`, `Defaults`/`DefaultsConfig`, `Projects`/`ProjectEntry`, `HooksDir` — and their YAML tags, their entries in `merge()`, and their coverage in `internal/config/config_test.go`. Leave `Role` alone (see note above) unless you find something this pass missed — if in doubt, escalate rather than cut it silently.
+
+### `workflows` table — confirmed dead exactly as decision log §16 states
+
+Created in `internal/store/migrations/001_schema.sql`. Zero Go code reads or writes it (`grep -rn "\bFROM workflows\b\|INTO workflows\b\|UPDATE workflows\b"` — zero matches). The one other mention (`internal/store/migrations/087_consolidate_personal_workspace.sql`) is a comment, not DDL. `workflow_runs`/`workflow_run_steps` (24 real Go references) are the tables the actual workflow-execution feature uses — untouched by this cut.
+
+### `session_stats` — confirmed dead in effect, but with a bigger surface than "no live call site" implies
+
+Not in the migration ledger (confirmed — no `CREATE TABLE session_stats` in `internal/store/migrations/`). Instead, `internal/plugin/builtin/sessionstats/plugin.go` — a real, registered builtin plugin (`internal/plugin/allplugins/allplugins.go` imports it) — calls its own `p.store.InitSchema()` (`internal/plugin/builtin/sessionstats/handlers.go`) at `Load()` time, and registers **three real, reachable HTTP routes** via `host.RegisterUIComponent` with non-nil `Handler`s (confirmed the plugin host actually mounts these — `internal/plugin/host.go:468-471` registers `component.Handler` at `/api/plugins/ui/<component-id>` when non-nil): `/api/plugins/ui/session-stats-get`, `/api/plugins/ui/session-stats-update`, `/api/plugins/ui/session-stats-export`. **Confirmed zero frontend callers** — `grep -rn "session-stats"` and `grep -rn "ui/session-stats"` across `ui/src/` return nothing. So: the plugin is loaded, the schema is created, the routes are live and reachable — but literally nothing in the product (no UI, no CLI, no other plugin) ever calls them, so the table stays permanently empty. This matches decision log §16's "zero rows, no live call site" in **effect**, but "no live call site" undersells that there's a whole registered plugin + HTTP surface, not just an orphaned migration. Cut the entire `session-stats` builtin plugin (`internal/plugin/builtin/sessionstats/`), its import in `allplugins.go`, and the table.
+
+### `session_agent_overrides` — confirmed dead in effect, but the READ side is live-wired into every turn's agent resolution
+
+Created by `internal/store/migrations/004_session_agent_overrides.sql`. `internal/store/session_overrides.go` has `GetSessionOverrides`/`SetSessionOverrides`. Verified:
+- `SetSessionOverrides` — **zero callers anywhere** outside its own file. Nothing in the codebase ever writes a session override, so the table can never hold real data (matches decision log §24's "full CRUD, zero rows ever").
+- `GetSessionOverrides` — **is called**, in `internal/service/agent.go:288`, inside `resolveForSession` — the shared implementation behind `ResolveForSession`, which runs on **every chat turn** (`chat_generate.go:208`). Since the write side never fires, `overridesJSON` is always `"{}"` in practice and the override-cascade branch (lines 286-305 of `agent.go`) is a permanent no-op — but it is real, executing code in a hot path, not a dangling reference.
+
+Cut means: drop the table, `internal/store/session_overrides.go`, the `overrides`/`GetSessionOverrides` interface member and the whole `if s.overrides != nil { ... }` block in `internal/service/agent.go`'s `resolveForSession` (lines 286-305), and the `override.OverrideConfig`/`override.Resolve` cascade-merge call **only if** nothing else in that same cascade (session → agent-profile default → ...) still needs it — check `resolveBinding` and the rest of `resolveForSession` before assuming the whole `override` package import can go; other override-cascade layers (agent-profile-level, user-settings-level) may still use `override.Resolve` elsewhere and must be left intact.
+
+## What to do
+
+1. Delete `internal/store/agent_cycles.go`; remove the `"DELETE FROM agent_cycles WHERE agent_id = ?"` line from `internal/store/agents.go`'s `DeleteAgent` cleanups slice (~line 451). **Coordinate with `21-cut-modes`** — that task also edits this same slice (removing the `agent_modes`/`agent_mode_assignments` lines). Land one before the other, or accept a small merge conflict on this one slice; do not dispatch both as parallel worktree branches without flagging this to the Orchestrator.
+2. In `internal/store/tool_enrichments.go`: delete `UpsertToolEnrichment`, `DeleteToolEnrichment`, `ListToolEnrichments`. Keep `GetToolEnrichment` and the table.
+3. Delete `internal/store/agent_known_tools_reaper.go`; remove `ReapExpiredAgentKnownTools`/`ReapExpiredAgentKnownSkills` from the `agent_state_store.go` interface. Keep `agent_known_tools`/`agent_known_skills` tables.
+4. Delete `internal/api/agent_boot_plans.go`, `internal/store/agent_boot_plans.go`. Remove the 4 boot-plan routes from `internal/api/api.go`. Remove `BootPlan`/`BootPlanPreview` handling from `internal/api/agent_builder.go`. Remove the `"DELETE FROM agent_boot_plans WHERE agent_id = ?"` line from `agents.go`'s `DeleteAgent` cleanups. On the frontend: delete `AgentBootPlanPanel.tsx`, `AgentBootPlanEditor.tsx`, `ui/src/__tests__/phase-26-agent-boot-plan.test.tsx`; remove the "Boot" `TabsTrigger`/`TabsContent` pair from `AgentDetailView.tsx`; remove boot-plan references from `AgentBuilderWizard.tsx`, `ui/src/lib/api.ts`, `ui/src/lib/types.ts`.
+5. Drop `providers.base_url`/`api_key` columns (new migration). Remove `BaseURL`/`APIKey` handling from `internal/store/providers.go`'s CRUD (check `UpdateProvider` isn't left as a no-op function if `BaseURL` was its only field). Remove `SetProviderAPIKey`/`HasProviderAPIKey`. Confirm `internal/api/provider_manage.go`'s `handleSetProviderAPIKey`/`handleGetProviderStatus` (which use the OS-keychain `secrets` package, not these store methods) are untouched — they're the real, live mechanism and must keep working exactly as-is.
+6. Trim `internal/config/config.go` per the table above: remove `Version`, `BootProfiles`, `WritePaths`, `ProtectedPaths`, `Executor`/`ExecutorConfig`, `Defaults`/`DefaultsConfig`, `Projects`/`ProjectEntry`, `HooksDir` — fields, YAML tags, `merge()` branches, doc comments. Update `internal/config/config_test.go` accordingly. Leave `Role` untouched.
+7. Drop the `workflows` table (new migration). No Go code changes needed (nothing references it).
+8. Delete `internal/plugin/builtin/sessionstats/` entirely; remove its import from `internal/plugin/allplugins/allplugins.go`. The `session_stats` table is created by the plugin's own `InitSchema()`, not a ledger migration — deleting the plugin is sufficient, no migration needed (confirm no stray `CREATE TABLE session_stats` needs a cleanup `DROP TABLE IF EXISTS` for installations where the plugin already ran once — add one defensively since the table was created out-of-band).
+9. Delete `internal/store/session_overrides.go`, the `session_agent_overrides` table (new migration), the `overrides`/`GetSessionOverrides` member on whatever interface `agentServiceImpl.overrides` satisfies, and the `if s.overrides != nil { ... }` block in `internal/service/agent.go`'s `resolveForSession`. Verify (don't assume) whether `override.Resolve`/`override.OverrideConfig` are still used elsewhere in the same cascade before removing the import.
+10. Write one migration (or a small set) that drops: `agent_cycles`, `agent_boot_plans`, `workflows`, `session_agent_overrides`, `session_stats` (defensive `DROP TABLE IF EXISTS`), and the `providers.base_url`/`api_key` columns (SQLite column drop = the rename-recreate-copy dance per existing precedent in this codebase, e.g. `089`/`043` — see `19-cut-legacy-rename-tables` for the pattern, or use `ALTER TABLE ... DROP COLUMN` if the SQLite version in use supports it natively; check `internal/store/store.go` for how migrations currently handle this).
+
+## Done means
+
+- `go build ./cmd/nanite/`, `go vet ./...`, `go test ./...` pass.
+- `cd ui && npm run build` passes with the Boot-plan UI removed.
+- Fresh-boot migration run produces a DB with none of: `agent_cycles`, `agent_boot_plans`, `workflows`, `session_agent_overrides`, `session_stats` tables, and `providers` has no `base_url`/`api_key` columns.
+- Tested against a real copy of the backed-up database (`~/.local/share/nanite/workspaces/default/backups/`), not just an empty fixture.
+- `GetToolEnrichment`/`NewStoreEnricher` wiring still works — a tool-catalog assembly that previously consulted an enrichment record still does.
+- `ReapExpiredAgentKnownTools`/`ReapExpiredAgentKnownSkills` deletion doesn't affect any *other* code path that reads `pinned`/`last_used_at`/`ttl_seconds` on `agent_known_tools`/`agent_known_skills` (those columns/tables stay).
+- Agent settings page no longer shows a "Boot" tab; deleting an agent still succeeds (the `DeleteAgent` cleanups slice still runs cleanly after this task's line removals AND `21-cut-modes`'s line removals are both applied, in whichever order they land).
+- `internal/config.Config` no longer has `Version`/`BootProfiles`/`WritePaths`/`ProtectedPaths`/`Executor`/`Defaults`/`Projects`/`HooksDir`; `nanite.yaml`/`config.yaml` files that still set these keys don't error (unknown YAML keys are silently ignored by `gopkg.in/yaml.v3`'s default unmarshal behavior — confirm this, don't assume).
+- The `internal/plugin/builtin/sessionstats` package no longer exists in the binary; `POST /api/plugins/reload` and the plugin list no longer show `session-stats`.
+
+## Work log
+<Worker fills this in as it goes: what was actually done, any deviation from plan and why, anything escalated.>
+
+## Review notes
+<Reviewer fills this in: pass/fail, what was checked, anything fixed and how.>

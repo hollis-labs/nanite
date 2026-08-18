@@ -64,7 +64,6 @@ func (deterministicAgentBuilderAdvisor) Draft(_ context.Context, req AgentBuilde
 			Source:          "user",
 		},
 		Capabilities: AgentBuilderCapabilitiesInput{},
-		BootPlan:     nil,
 		DurableInstance: AgentBuilderDurableInstanceInput{
 			Create:         createInstance,
 			LifecycleClass: lifecycle,
@@ -225,15 +224,8 @@ func (a *API) agentBuilderDryRun(ctx context.Context, req AgentBuilderDryRunRequ
 	warnings = append(warnings, validation.Warnings...)
 
 	ops := capabilityOperations(req.Capabilities, req.Mode)
-	var bootPlanPreview *AgentBootPlanDryRunResponse
 	var recipePlan *service.DurableAgentRecipePlan
 	var launchPreview *AgentBuilderLaunchPlanPreview
-	if req.BootPlan != nil {
-		preview := dryRunAgentBootPlan(normalized.ID, req.BootPlan)
-		bootPlanPreview = &preview
-		errors = append(errors, preview.Errors...)
-		warnings = append(warnings, preview.Warnings...)
-	}
 
 	if req.Mode == agentBuilderModeCreateProfileAndInstance || req.DurableInstance.Create {
 		if req.DurableInstance.RecipeID != "" {
@@ -275,7 +267,6 @@ func (a *API) agentBuilderDryRun(ctx context.Context, req AgentBuilderDryRunRequ
 		UnsupportedFields:        dedupeStrings(unsupported),
 		NormalizedProfilePayload: normalized,
 		CapabilityOperations:     ops,
-		BootPlanPreview:          bootPlanPreview,
 		DurableRecipePlan:        recipePlan,
 		LaunchPlanPreview:        launchPreview,
 		NotificationPreview:      notification,

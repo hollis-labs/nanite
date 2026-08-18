@@ -101,7 +101,6 @@ function startSurface(): StartSurfaceCapabilitiesResponse {
         id: "anthropic",
         name: "Anthropic",
         provider_type: "api",
-        base_url: "",
         is_enabled: true,
         settings: "{}",
         created_at: "",

@@ -21,12 +21,13 @@ import (
 
 // Config is the top-level nanite configuration.
 type Config struct {
-	Version        int                      `yaml:"version"`
-	Project        ProjectConfig            `yaml:"project"`
-	Role           string                   `yaml:"role"`
-	BootProfiles   []string                 `yaml:"boot_profiles"`
-	WritePaths     []string                 `yaml:"write_paths"`
-	ProtectedPaths []string                 `yaml:"protected_paths"`
+	Project ProjectConfig `yaml:"project"`
+	// Role is read exactly once, at boot, for a log line only — it does not
+	// currently branch on anything or feed into agent resolution. Kept as-is
+	// (18a-cut-dead-storage-and-config's field-by-field verification flagged
+	// it as a real, if thin, read site — not zero-callers like the fields
+	// that were cut alongside it).
+	Role string `yaml:"role"`
 	// DevToolsAllowedPaths is the user-configurable allow-list of filesystem
 	// roots agents may access. It governs two surfaces:
 	//
@@ -48,7 +49,7 @@ type Config struct {
 	// still runs on every dev_* call regardless of how the allow-list was
 	// sourced; this knob only widens which roots qualify, it never disables
 	// traversal protection.
-	DevToolsAllowedPaths []string                 `yaml:"dev_tools_allowed_paths"`
+	DevToolsAllowedPaths []string `yaml:"dev_tools_allowed_paths"`
 	// BootProfileCatalogPath is the on-disk root that
 	// internal/bootprofile.LoadCatalog reads when surfacing boot-profile-
 	// backed entries in the provider/model dropdown (CW-20260514-0047)
@@ -61,7 +62,7 @@ type Config struct {
 	// the existing API/CLI provider behavior is unchanged and the
 	// dropdown only shows DB-seeded rows. This satisfies the "no
 	// catalog → no behavior change" acceptance criterion.
-	BootProfileCatalogPath string                  `yaml:"boot_profile_catalog_path"`
+	BootProfileCatalogPath string `yaml:"boot_profile_catalog_path"`
 	// WorkflowDefinitionsPath is the on-disk directory internal/agentworkflow's
 	// registry loader reads at startup — one WorkflowDefinition per *.yaml
 	// file (CW-20260813-0014), keyed by the definition's Name field. The
@@ -71,18 +72,14 @@ type Config struct {
 	// When unset (empty string) the registry stays empty — workflow_run
 	// self-tool calls fail with "unknown workflow" but nothing else changes
 	// ("no catalog → no behavior change", matching BootProfileCatalogPath).
-	WorkflowDefinitionsPath string                 `yaml:"workflow_definitions_path"`
-	Executor       ExecutorConfig           `yaml:"executor"`
-	Defaults       DefaultsConfig           `yaml:"defaults"`
-	Projects       map[string]ProjectEntry  `yaml:"projects"`
-	HooksDir       string                   `yaml:"hooks_dir"`
+	WorkflowDefinitionsPath string `yaml:"workflow_definitions_path"`
 	// Vanta is the optional Vanta MCP server configuration (CW-20260501-0005
 	// sub-ticket 2). When URL is non-empty, the chat harness registers a
 	// `vanta` MCP server at startup so the chat agent can reach
 	// memory_recall / memory_write / knowledge_* / context_* tools. Trust
 	// tier defaults to plugin_http per docs/mcp-trust-model.md (Vanta is
 	// the user's own infrastructure).
-	Vanta          VantaConfig              `yaml:"vanta"`
+	Vanta VantaConfig `yaml:"vanta"`
 }
 
 // VantaConfig holds Vanta MCP server connection details. Loaded from the
@@ -116,26 +113,6 @@ type VantaConfig struct {
 type ProjectConfig struct {
 	Name string `yaml:"name"`
 	Root string `yaml:"root"`
-}
-
-// ExecutorConfig controls agent execution behaviour.
-type ExecutorConfig struct {
-	Mode           string `yaml:"mode"`
-	UnsafeMode     bool   `yaml:"unsafe_mode"`
-	TimeoutSeconds int    `yaml:"timeout_seconds"`
-	MaxAgentDepth  int    `yaml:"max_agent_depth"`
-}
-
-// DefaultsConfig holds shared default settings from the user-level config.
-type DefaultsConfig struct {
-	Executor     ExecutorConfig `yaml:"executor"`
-	BootProfiles []string       `yaml:"boot_profiles"`
-}
-
-// ProjectEntry is one entry in the projects registry.
-type ProjectEntry struct {
-	Root        string `yaml:"root"`
-	Description string `yaml:"description"`
 }
 
 // Load reads and merges configuration. It first reads the user-level config
@@ -267,9 +244,6 @@ func readConfig(path string) (*Config, error) {
 func merge(user, project *Config) *Config {
 	out := *user // shallow copy of user as base
 
-	if project.Version != 0 {
-		out.Version = project.Version
-	}
 	if project.Project.Name != "" {
 		out.Project.Name = project.Project.Name
 	}
@@ -279,15 +253,6 @@ func merge(user, project *Config) *Config {
 	if project.Role != "" {
 		out.Role = project.Role
 	}
-	if project.BootProfiles != nil {
-		out.BootProfiles = project.BootProfiles
-	}
-	if project.WritePaths != nil {
-		out.WritePaths = project.WritePaths
-	}
-	if project.ProtectedPaths != nil {
-		out.ProtectedPaths = project.ProtectedPaths
-	}
 	if project.DevToolsAllowedPaths != nil {
 		out.DevToolsAllowedPaths = project.DevToolsAllowedPaths
 	}
@@ -296,9 +261,6 @@ func merge(user, project *Config) *Config {
 	}
 	if project.WorkflowDefinitionsPath != "" {
 		out.WorkflowDefinitionsPath = project.WorkflowDefinitionsPath
-	}
-	if project.HooksDir != "" {
-		out.HooksDir = project.HooksDir
 	}
 
 	// Vanta: per-field merge so a project file can override URL alone without
@@ -314,51 +276,6 @@ func merge(user, project *Config) *Config {
 	}
 	if project.Vanta.ServerName != "" {
 		out.Vanta.ServerName = project.Vanta.ServerName
-	}
-
-	// Executor: merge field-by-field so partial overrides work.
-	if project.Executor.Mode != "" {
-		out.Executor.Mode = project.Executor.Mode
-	}
-	if project.Executor.UnsafeMode {
-		out.Executor.UnsafeMode = project.Executor.UnsafeMode
-	}
-	if project.Executor.TimeoutSeconds != 0 {
-		out.Executor.TimeoutSeconds = project.Executor.TimeoutSeconds
-	}
-	if project.Executor.MaxAgentDepth != 0 {
-		out.Executor.MaxAgentDepth = project.Executor.MaxAgentDepth
-	}
-
-	// Defaults: project overrides if set.
-	if project.Defaults.BootProfiles != nil {
-		out.Defaults.BootProfiles = project.Defaults.BootProfiles
-	}
-	if project.Defaults.Executor.Mode != "" {
-		out.Defaults.Executor.Mode = project.Defaults.Executor.Mode
-	}
-	if project.Defaults.Executor.TimeoutSeconds != 0 {
-		out.Defaults.Executor.TimeoutSeconds = project.Defaults.Executor.TimeoutSeconds
-	}
-	if project.Defaults.Executor.MaxAgentDepth != 0 {
-		out.Defaults.Executor.MaxAgentDepth = project.Defaults.Executor.MaxAgentDepth
-	}
-
-	// Projects map: merge entries (project entries override user entries).
-	if project.Projects != nil {
-		if out.Projects == nil {
-			out.Projects = make(map[string]ProjectEntry)
-		}
-		// Copy user entries first (already in out via shallow copy, but maps
-		// are reference types so we need a real copy).
-		merged := make(map[string]ProjectEntry, len(out.Projects)+len(project.Projects))
-		for k, v := range user.Projects {
-			merged[k] = v
-		}
-		for k, v := range project.Projects {
-			merged[k] = v
-		}
-		out.Projects = merged
 	}
 
 	return &out

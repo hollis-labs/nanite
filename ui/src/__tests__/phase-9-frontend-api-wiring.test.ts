@@ -566,46 +566,6 @@ describe("phase 9 API route wiring", () => {
       undefined,
     ]);
 
-    const bootPlanBody = {
-      agent_id: "agent/1",
-      schema_version: 1,
-      plant_items: [],
-      callbacks: [],
-      created_at: "",
-      updated_at: "",
-    };
-    await api.getAgentBootPlan("agent/1");
-    expect(lastFetchCall(fetchMock)).toEqual([
-      "/api/agents/agent%2F1/boot-plan",
-      undefined,
-    ]);
-
-    await api.updateAgentBootPlan("agent/1", bootPlanBody);
-    expect(lastFetchCall(fetchMock)).toEqual([
-      "/api/agents/agent%2F1/boot-plan",
-      {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(bootPlanBody),
-      },
-    ]);
-
-    await api.deleteAgentBootPlan("agent/1");
-    expect(lastFetchCall(fetchMock)).toEqual([
-      "/api/agents/agent%2F1/boot-plan",
-      { method: "DELETE" },
-    ]);
-
-    await api.dryRunAgentBootPlan("agent/1", bootPlanBody);
-    expect(lastFetchCall(fetchMock)).toEqual([
-      "/api/agents/agent%2F1/boot-plan/dry-run",
-      {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(bootPlanBody),
-      },
-    ]);
-
     await api.getAgentKnownSkill("agent/1", "advisor");
     expect(lastFetchCall(fetchMock)).toEqual([
       "/api/agents/agent%2F1/known-skills/advisor",

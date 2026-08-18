@@ -229,8 +229,6 @@ type ProviderStore interface {
 	GetProvider(id string) (*store.ProviderConfig, error)
 	ListModels() ([]store.Model, error)
 	UpdateProvider(id string, u store.ProviderUpdate) error
-	SetProviderAPIKey(id, apiKey string) error
-	HasProviderAPIKey(id string) (bool, error)
 
 	// DefaultModelForProvider returns providers.default_model for the
 	// given provider_type, or an ErrNoDefaultModel-wrapped error when

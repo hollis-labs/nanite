@@ -28,7 +28,6 @@ import type {
   AgentKnowledgeSeedUpsertRequest,
   AgentKnownSkillUpsertRequest,
   AgentKnownToolUpsertRequest,
-  AgentBootPlanDocument,
   AgentProcedureUpsertRequest,
   AgentProfile,
   CreateAgentProfileRequest,
@@ -44,12 +43,6 @@ import type {
 import { useAppStore } from "@/stores/useAppStore";
 import { useLayoutStore } from "@/stores/useLayoutStore";
 import { AgentCreateWizard } from "./AgentCreateWizard";
-import {
-  AgentBootPlanEditor,
-  AgentBootPlanPreview,
-  createEmptyBootPlan,
-  hasBootPlanContent,
-} from "./AgentBootPlanEditor";
 import { EditableStringList } from "./editors/EditableStringList";
 
 type AgentBuilderWizardProps = {
@@ -647,12 +640,6 @@ export function AgentBuilderWizard({
                       body={JSON.stringify(dryRun.notification_preview, null, 2)}
                     />
                   </div>
-                  {dryRun.boot_plan_preview ? (
-                    <div className="mt-4">
-                      <div className="mb-3 text-sm font-medium text-fg">Boot Plan Preview</div>
-                      <AgentBootPlanPreview preview={dryRun.boot_plan_preview} />
-                    </div>
-                  ) : null}
                   <div className="mt-3 text-xs text-fg-muted">
                     Validation state: {dryRun.valid ? "ready to submit" : "fix errors before submit"}.
                   </div>
@@ -1100,19 +1087,6 @@ function DraftEditor({
             )}
           />
         </div>
-      </BuilderSection>
-
-      <BuilderSection title="Boot Plan">
-        <AgentBootPlanEditor
-          plan={draft.boot_plan ?? createEmptyBootPlan()}
-          compact
-          onChange={(boot_plan) =>
-            setDraft({
-              ...draft,
-              boot_plan,
-            })
-          }
-        />
       </BuilderSection>
 
       <BuilderSection title="Durable / Launch">
@@ -1594,7 +1568,6 @@ function mergeDraftWithIntake(draft: AgentBuilderDraft, intake: BuilderIntake): 
       target_id: "current-user",
       ...draft.operator_notification,
     },
-    boot_plan: draft.boot_plan ?? createEmptyBootPlan(),
   };
 }
 
@@ -1624,7 +1597,6 @@ function buildBlankDraftFromIntake(intake: BuilderIntake): AgentBuilderDraft {
       knowledge_seeds: [],
       reflex_suggestions: [],
     },
-    boot_plan: createEmptyBootPlan(),
     durable_instance: {
       create: intake.createDurable,
       recipe_id: intake.recipeId,
@@ -1651,7 +1623,6 @@ function buildDryRunRequest(draft: AgentBuilderDraft | null): AgentBuilderDryRun
     mode: draft.durable_instance.create ? "create_profile_and_instance" : "create_profile",
     profile: draft.profile,
     capabilities: draft.capabilities,
-    boot_plan: draft.boot_plan,
     durable_instance: draft.durable_instance,
     operator_notification: draft.operator_notification,
   };
@@ -1678,10 +1649,6 @@ async function submitDraft({
 
   let durableInstance: DurableAgentInstance | null = null;
   let launchResult: DurableAgentLaunchResult | null = null;
-  const bootPlan = resolveBootPlanForSubmit(profile.id, draft.boot_plan, dryRun.boot_plan_preview);
-  if (bootPlan) {
-    await api.updateAgentBootPlan(profile.id, bootPlan);
-  }
   if (draft.durable_instance.create) {
     if (draft.durable_instance.recipe_id) {
       const recipeRequest = {
@@ -1845,20 +1812,6 @@ function parseJSONStringArray(value?: string): string[] {
 
 function emptyToUndefined(value?: string) {
   return value && value.trim() !== "" ? value : undefined;
-}
-
-function resolveBootPlanForSubmit(
-  agentId: string,
-  draftBootPlan: AgentBootPlanDocument | undefined,
-  preview: AgentBuilderDryRunResponse["boot_plan_preview"] | undefined,
-) {
-  const source = preview?.valid ? preview.normalized_plan : draftBootPlan;
-  if (!source || !hasBootPlanContent(source)) return null;
-  return {
-    ...source,
-    agent_id: agentId,
-    schema_version: source.schema_version || 1,
-  };
 }
 
 function buildModelOptions(models: ModelRecord[], fallback: { id: string; label: string }[]) {

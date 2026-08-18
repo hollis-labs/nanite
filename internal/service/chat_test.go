@@ -400,8 +400,6 @@ func (stubProviderStore) ListProviders() ([]store.ProviderConfig, error)    { re
 func (stubProviderStore) GetProvider(string) (*store.ProviderConfig, error) { return nil, nil }
 func (stubProviderStore) ListModels() ([]store.Model, error)                { return nil, nil }
 func (stubProviderStore) UpdateProvider(string, store.ProviderUpdate) error { return nil }
-func (stubProviderStore) SetProviderAPIKey(string, string) error            { return nil }
-func (stubProviderStore) HasProviderAPIKey(string) (bool, error)            { return false, nil }
 func (stubProviderStore) DefaultModelForProvider(string) (string, error)    { return "", nil }
 func (stubProviderStore) ResolveProviderAndModel(explicitProvider, explicitModel string) (string, string, error) {
 	return explicitProvider, explicitModel, nil

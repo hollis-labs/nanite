@@ -244,52 +244,6 @@ type AgentKnowledgeSeedUpsertRequest struct {
 	Tags      []string `json:"tags"`
 }
 
-type AgentBootPlanDryRunRequest struct {
-	Plan *store.AgentBootPlanDocument `json:"plan,omitempty"`
-}
-
-type AgentBootPlanPlantOperation struct {
-	ItemID                 string   `json:"item_id"`
-	Name                   string   `json:"name"`
-	Timing                 []string `json:"timing"`
-	TargetRelPath          string   `json:"target_rel_path"`
-	EntryKind              string   `json:"entry_kind"`
-	SourceKind             string   `json:"source_kind"`
-	OverwritePolicy        string   `json:"overwrite_policy"`
-	FailurePolicy          string   `json:"failure_policy"`
-	Enabled                bool     `json:"enabled"`
-	Secret                 bool     `json:"secret"`
-	SourcePath             string   `json:"source_path,omitempty"`
-	SourcePathRedacted     bool     `json:"source_path_redacted,omitempty"`
-	ContentPreview         string   `json:"content_preview,omitempty"`
-	ContentPreviewRedacted bool     `json:"content_preview_redacted,omitempty"`
-	Notes                  []string `json:"notes,omitempty"`
-}
-
-type AgentBootPlanCallbackOperation struct {
-	CallbackID       string   `json:"callback_id"`
-	Name             string   `json:"name"`
-	Timing           string   `json:"timing"`
-	CallbackType     string   `json:"callback_type"`
-	TimeoutSeconds   int      `json:"timeout_seconds"`
-	FailurePolicy    string   `json:"failure_policy"`
-	Enabled          bool     `json:"enabled"`
-	PayloadPreview   string   `json:"payload_preview,omitempty"`
-	EnvRedacted      bool     `json:"env_redacted,omitempty"`
-	PermissionsNotes []string `json:"permissions_notes,omitempty"`
-	Notes            []string `json:"notes,omitempty"`
-}
-
-type AgentBootPlanDryRunResponse struct {
-	Valid            bool                             `json:"valid"`
-	Errors           []string                         `json:"errors"`
-	Warnings         []string                         `json:"warnings"`
-	NormalizedPlan   store.AgentBootPlanDocument      `json:"normalized_plan"`
-	PlantOperations  []AgentBootPlanPlantOperation    `json:"plant_operations"`
-	CallbackOrder    []AgentBootPlanCallbackOperation `json:"callback_order"`
-	UnsupportedNotes []string                         `json:"unsupported_notes"`
-}
-
 type AgentBuilderProfileInput struct {
 	ID                      string `json:"id"`
 	Name                    string `json:"name"`
@@ -399,7 +353,6 @@ type AgentBuilderDryRunRequest struct {
 	Mode                 string                                `json:"mode"`
 	Profile              AgentBuilderProfileInput              `json:"profile"`
 	Capabilities         AgentBuilderCapabilitiesInput         `json:"capabilities"`
-	BootPlan             *store.AgentBootPlanDocument          `json:"boot_plan,omitempty"`
 	DurableInstance      AgentBuilderDurableInstanceInput      `json:"durable_instance"`
 	OperatorNotification AgentBuilderOperatorNotificationInput `json:"operator_notification"`
 }
@@ -412,7 +365,6 @@ type AgentBuilderDryRunResponse struct {
 	UnsupportedFields        []string                             `json:"unsupported_fields"`
 	NormalizedProfilePayload AgentBuilderProfileInput             `json:"normalized_profile_payload"`
 	CapabilityOperations     []AgentBuilderCapabilityOperation    `json:"capability_operations"`
-	BootPlanPreview          *AgentBootPlanDryRunResponse         `json:"boot_plan_preview,omitempty"`
 	DurableRecipePlan        *service.DurableAgentRecipePlan      `json:"durable_recipe_plan,omitempty"`
 	LaunchPlanPreview        *AgentBuilderLaunchPlanPreview       `json:"launch_plan_preview,omitempty"`
 	NotificationPreview      AgentBuilderReadyNotificationPreview `json:"notification_preview"`
@@ -436,7 +388,6 @@ type AgentBuilderDraftEnvelope struct {
 	Mode                 string                                `json:"mode"`
 	Profile              AgentBuilderProfileInput              `json:"profile"`
 	Capabilities         AgentBuilderCapabilitiesInput         `json:"capabilities"`
-	BootPlan             *store.AgentBootPlanDocument          `json:"boot_plan,omitempty"`
 	DurableInstance      AgentBuilderDurableInstanceInput      `json:"durable_instance"`
 	OperatorNotification AgentBuilderOperatorNotificationInput `json:"operator_notification"`
 }

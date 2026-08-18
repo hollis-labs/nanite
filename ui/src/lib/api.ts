@@ -8,8 +8,6 @@ import type {
   AgentBuilderDryRunResponse,
   AgentBuilderReviewRequest,
   AgentBuilderReviewResponse,
-  AgentBootPlanDocument,
-  AgentBootPlanDryRunResponse,
   AgentKnowledgeSeedUpsertRequest,
   AgentKnownSkill,
   AgentKnownSkillUpsertRequest,
@@ -798,61 +796,6 @@ export const api = {
     );
     if (!res.ok)
       throw new Error(`Failed to list agent known skills: ${res.status}`);
-    return res.json();
-  },
-
-  getAgentBootPlan: async (agentId: string): Promise<AgentBootPlanDocument> => {
-    const res = await fetch(
-      `${API_BASE}/agents/${encodeURIComponent(agentId)}/boot-plan`,
-    );
-    if (!res.ok)
-      throw new Error(`Failed to get agent boot plan: ${res.status}`);
-    return res.json();
-  },
-
-  updateAgentBootPlan: async (
-    agentId: string,
-    data: AgentBootPlanDocument,
-  ): Promise<AgentBootPlanDocument> => {
-    const res = await fetch(
-      `${API_BASE}/agents/${encodeURIComponent(agentId)}/boot-plan`,
-      {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(data),
-      },
-    );
-    if (!res.ok)
-      throw new Error(`Failed to update agent boot plan: ${res.status}`);
-    return res.json();
-  },
-
-  deleteAgentBootPlan: async (agentId: string): Promise<{ status: string }> => {
-    const res = await fetch(
-      `${API_BASE}/agents/${encodeURIComponent(agentId)}/boot-plan`,
-      {
-        method: "DELETE",
-      },
-    );
-    if (!res.ok)
-      throw new Error(`Failed to delete agent boot plan: ${res.status}`);
-    return res.json();
-  },
-
-  dryRunAgentBootPlan: async (
-    agentId: string,
-    data?: AgentBootPlanDocument,
-  ): Promise<AgentBootPlanDryRunResponse> => {
-    const res = await fetch(
-      `${API_BASE}/agents/${encodeURIComponent(agentId)}/boot-plan/dry-run`,
-      {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: data ? JSON.stringify(data) : undefined,
-      },
-    );
-    if (!res.ok)
-      throw new Error(`Failed to dry-run agent boot plan: ${res.status}`);
     return res.json();
   },
 
@@ -2042,7 +1985,7 @@ export const api = {
   },
   updateProvider: async (
     id: string,
-    data: { is_enabled?: boolean; base_url?: string; settings?: string },
+    data: { is_enabled?: boolean; settings?: string },
   ): Promise<ProviderConfig> => {
     const res = await fetch(`${API_BASE}/providers/${id}`, {
       method: "PUT",

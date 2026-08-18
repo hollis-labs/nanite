@@ -42,62 +42,9 @@ func (s *Store) GetToolEnrichment(toolName string) (ToolEnrichment, error) {
 	return rec, nil
 }
 
-// UpsertToolEnrichment inserts or replaces the enrichment record for a tool.
-// Returns an error if ToolName is empty or UpdatedAt is zero — callers must
-// stamp UpdatedAt explicitly (the service layer is responsible for timestamping).
-func (s *Store) UpsertToolEnrichment(rec ToolEnrichment) error {
-	if rec.ToolName == "" {
-		return fmt.Errorf("upsert tool enrichment: tool_name is required")
-	}
-	if rec.HintsJSON == "" {
-		rec.HintsJSON = "{}"
-	}
-	if rec.UpdatedAt.IsZero() {
-		return fmt.Errorf("upsert tool enrichment: updated_at is required")
-	}
-	_, err := s.DB.Exec(
-		`INSERT INTO tool_enrichments (tool_name, hints_json, updated_at) VALUES (?, ?, ?)
-		 ON CONFLICT(tool_name) DO UPDATE SET hints_json = excluded.hints_json, updated_at = excluded.updated_at`,
-		rec.ToolName, rec.HintsJSON, rec.UpdatedAt.UTC().Format(time.RFC3339Nano),
-	)
-	if err != nil {
-		return fmt.Errorf("upsert tool enrichment: %w", err)
-	}
-	return nil
-}
-
-// ListToolEnrichments returns all enrichment records ordered by updated_at DESC.
-func (s *Store) ListToolEnrichments() ([]ToolEnrichment, error) {
-	rows, err := s.DB.Query(
-		`SELECT tool_name, hints_json, updated_at FROM tool_enrichments ORDER BY updated_at DESC`,
-	)
-	if err != nil {
-		return nil, fmt.Errorf("list tool enrichments: %w", err)
-	}
-	defer rows.Close()
-
-	var out []ToolEnrichment
-	for rows.Next() {
-		var rec ToolEnrichment
-		var updatedAtStr string
-		if err := rows.Scan(&rec.ToolName, &rec.HintsJSON, &updatedAtStr); err != nil {
-			return nil, fmt.Errorf("scan tool enrichment: %w", err)
-		}
-		t, err := time.Parse(time.RFC3339Nano, updatedAtStr)
-		if err != nil {
-			return nil, fmt.Errorf("parse updated_at for %s: %w", rec.ToolName, err)
-		}
-		rec.UpdatedAt = t
-		out = append(out, rec)
-	}
-	return out, rows.Err()
-}
-
-// DeleteToolEnrichment removes the enrichment record for a tool. No error if not present.
-func (s *Store) DeleteToolEnrichment(toolName string) error {
-	_, err := s.DB.Exec(`DELETE FROM tool_enrichments WHERE tool_name = ?`, toolName)
-	if err != nil {
-		return fmt.Errorf("delete tool enrichment: %w", err)
-	}
-	return nil
-}
+// Write-side CRUD (UpsertToolEnrichment/DeleteToolEnrichment/ListToolEnrichments)
+// was cut in 18a-cut-dead-storage-and-config: zero callers anywhere in the
+// codebase ever populated or managed tool_enrichments rows, so the table can
+// never hold real data through this app. GetToolEnrichment above stays — it's
+// wired into the tool broker's enrichment lookup (internal/toolclient/enricher.go)
+// and is live in the hot path of every tool-catalog assembly.

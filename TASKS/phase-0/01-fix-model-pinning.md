@@ -1,7 +1,7 @@
 # Fix model pinning in `.nanite/durable-agents/*.yaml`
 
 **Phase:** 0
-**Status:** not-started
+**Status:** implemented
 **Depends on:** none
 **Touches:** `.nanite/durable-agents/atlas-curator.yaml`, `.nanite/durable-agents/atlas-librarian.yaml`, `.nanite/durable-agents/content-strategist.yaml`, `.nanite/durable-agents/content-writer.yaml`, `.nanite/durable-agents/ideation-partner.yaml`, `.nanite/durable-agents/loom-weaver.yaml` (read-only reference: `.nanite/durable-agents/loom-curator.yaml`, `.nanite/durable-agents/orchestrator.yaml`, `pkg/models/registry.go`, `internal/service/durable_agents.go`)
 
@@ -64,7 +64,8 @@ If you find any evidence during implementation that one of these 6 agents is act
 - If a durable-agent smoke/reconciliation test reads these YAML files directly (check `internal/service/durable_agent_recipes_test.go` and similar), confirm it still passes with blank models.
 
 ## Work log
-<Worker fills this in as it goes: what was actually done, any deviation from plan and why, anything escalated.>
+
+**2026-08-18 — worker report:** Changed `model: claude-sonnet-4-20250514` → `model: ""` in all 6 target files, each with a short comment referencing the CW-20260817 fix and pointing to `loom-curator.yaml`. `loom-curator.yaml`/`orchestrator.yaml` left untouched. No evidence any of the 6 agents needs a pinned model on purpose. `go build`/`go vet`/`go test` all pass (pure data-file change, no code touched). No escalations.
 
 ## Review notes
 <Reviewer fills this in: pass/fail, what was checked, anything fixed and how.>

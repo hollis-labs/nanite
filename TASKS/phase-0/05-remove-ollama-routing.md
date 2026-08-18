@@ -1,7 +1,7 @@
 # Remove Ollama routing entirely
 
 **Phase:** 0
-**Status:** not-started
+**Status:** implemented
 **Depends on:** none
 **Touches:** `internal/chat/engine.go` (`InferProvider`, ~lines 324-349 — remove the `"ollama"` fallback branch), `internal/store/seed.go` (~line 210 — read-only reference, the historical removal comment this task completes), `pkg/models/registry.go` (`ProviderDefaults` map, `allModels` — confirm no dangling Ollama entries), any other remaining "ollama" reference found during implementation
 

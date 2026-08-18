@@ -1,7 +1,7 @@
 # Cut dead messaging/plugin remnants (18b — messaging + plugin sub-parts of item 18)
 
 **Phase:** 0
-**Status:** not-started
+**Status:** implemented
 **Depends on:** none
 **Touches:** `internal/messaging/gomsg/` (entire package — delete), a new migration dropping `messaging_envelopes`, `internal/store/migrations/064_messaging_envelopes.sql` (read-only reference), `internal/store/agent_mailbox_view.go`-equivalent (delete, if it exists as a separate file — verify exact location during implementation), a new migration dropping `agent_mailbox_view`, `internal/store/migrations/076_agent_mailbox_view.sql` (read-only reference), `internal/api/triggers.go`, `internal/api/actions.go`, `internal/api/api.go` (route removal — Part B only, pending verification), `internal/store/*.go` (trigger_rules/custom_actions store layer — Part B only, pending verification)
 
@@ -57,7 +57,8 @@ Decision log §38a: "`trigger_rules` (an early version of what became reflexes) 
 - Migration(s) tested against a real copy of the backed-up database, not just an empty fixture.
 
 ## Work log
-<Worker fills this in as it goes: what was actually done, any deviation from plan and why, anything escalated.>
+
+**2026-08-18 — worker report:** Part A: `internal/messaging/gomsg/` deleted in full, plus `envelope_bridge.go`/`_test.go` (a real gomsg dependent, itself dead — zero callers, scope expansion per worker step 7). `agent_mailbox_view` confirmed a table (not view) with zero Go references. Part B: deleted `internal/api/triggers.go`/`actions.go`, their routes/types, and the `trigger_rules`/`custom_actions` store layer. Found and removed two live things beyond the task's own Touches list: `internal/plugin/triggers.go`'s `TriggerDispatcher` (a real, wired-in event→connector dispatch engine called from every `Host.EmitEvent`) and `useKeyboardShortcuts.ts`'s `useActionKeybindings` (a live, app-wide-mounted `custom_actions` consumer independent of the Settings `ActionsPanel`). Three migrations added (goose format, real tested Down sections), renumbered by the Orchestrator from 095-097 to 097-099 to avoid colliding with tasks 19/30. Verified against a real copy of the production backup: all four tables dropped cleanly, sentinel row counts unchanged, integrity check clean. `go build`/`go vet`/`go test` all pass (only pre-existing unrelated findings). No blocking escalations.
 
 ## Review notes
 <Reviewer fills this in: pass/fail, what was checked, anything fixed and how.>

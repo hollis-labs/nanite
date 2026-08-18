@@ -1,7 +1,7 @@
 # Cut the support-ticket plugin and its frontend components
 
 **Phase:** 0
-**Status:** not-started
+**Status:** implemented
 **Depends on:** none
 **Touches:** `ui/src/components/**/TicketFormCard.tsx` (delete), `ui/src/components/**/TicketConfirmationCard.tsx` (delete), `ui/src/components/**/TicketInitFlow.tsx` (delete), `plugins/repos.yaml` (remove the support-ticket plugin entry, if registered there — verify exact registration mechanism at implementation time), the five orphan card types this plugin registers (`kb-result`, `giphy-modal`, `resolution-capture`, `ticket-form`, `ticket-confirmation` — see Context on which of these actually belong to support-ticket vs. giphy), `internal/chat/engine.go:1013` (the marker-parsing code `POST_DEMO_ISSUES.md` identifies — confirm whether this is support-ticket-specific or shared parsing infrastructure before touching it), doc references (see Context)
 
@@ -35,7 +35,8 @@ TASKS.md Phase 0 item 15 names support-ticket as a "confirmed demo" to cut. Deci
 - No remaining references to the support-ticket plugin or its components, confirmed by grep.
 
 ## Work log
-<Worker fills this in as it goes: what was actually done, any deviation from plan and why, anything escalated.>
+
+**2026-08-18 — worker report:** Deleted 6 orphaned frontend files (`TicketFormCard`, `TicketConfirmationCard`, `TicketInitFlow`, `ResolutionCaptureCard`, `KBResultCard`, `ticket-utils.ts` — zero importers before deletion). Removed `kb-result`/`ticket-form`/`ticket-confirmation`/`resolution-capture` from `envelope.OrphanTypes` (`giphy-modal` left for `15a`). Investigated `internal/chat/engine.go:1013` (file had been refactored to 421 lines since the doc reference was written) — deleted the support-ticket-specific `chat.BuildKBEnvelope` and the `__search_kb` branch in `captureEnvelopeData`, confirmed the generic `ENVELOPE_DATA` marker-parsing it lives in is shared infrastructure and left it untouched. `plugins/repos.yaml` never had a support-ticket entry (no-op). Deleted `docs/architecture/plugin-it-support.md`; trimmed references elsewhere; left `POST_DEMO_ISSUES.md` as historical record. `go build`/`go vet`/`go test` all pass (only pre-existing unrelated findings). No escalations.
 
 ## Review notes
 <Reviewer fills this in: pass/fail, what was checked, anything fixed and how.>

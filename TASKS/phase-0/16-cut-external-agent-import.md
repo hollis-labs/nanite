@@ -1,7 +1,7 @@
 # Cut the external-format agent-import tier
 
 **Phase:** 0
-**Status:** not-started
+**Status:** implemented
 **Depends on:** none
 **Touches:** `internal/plugin/builtin/adapter-claude/plugin.go` (`Adapter.Discover`), `internal/plugin/builtin/adapter-codex/plugin.go` (`Adapter.Discover`), `internal/plugin/builtin/adapter-gemini/plugin.go` (`Adapter.Discover`), `internal/plugin/builtin/adapter-opencode/plugin.go` (`Adapter.Discover`), and each adapter's `Discover`-specific test cases in `internal/plugin/builtin/adapter-{claude,codex,gemini,opencode}/plugin_test.go`; `internal/agent/discovery_test.go` (`TestDiscover_ClaudeCodeAgents`, and the `.claude/agents`/`.agentrc/agents` fixtures inside `TestDiscover_SlugDedup`).
 
@@ -66,7 +66,8 @@ For each of `adapter-claude`, `adapter-codex`, `adapter-gemini`, `adapter-openco
 - `go build ./cmd/nanite/`, `go vet ./...`, `go test ./...` all pass.
 
 ## Work log
-<Worker fills this in as it goes: what was actually done, any deviation from plan and why, anything escalated.>
+
+**2026-08-18 — worker report:** All four adapters' `Discover()` methods now unconditionally return `(nil, nil)`, with a doc comment citing the task/decision-log rationale. `PopulateSandbox`, `SyncProjectRoot`, `internal/agent/discovery.go`, and `internal/agent/adapter.go` verified byte-identical to `HEAD` — untouched. Added `TestDiscover_Noop` to each adapter's test file (none had prior `Discover` coverage). Verified `nanite-native`'s own `Discover` still works via a temporary (uncommitted) confirmation test. `go build`/`go vet`/`go test` all pass (only pre-existing unrelated findings). Hit a `git stash` collision mid-task (shared `refs/stash` across concurrent worktrees) — recovered fully, logged as a process-safety note in `TASKS/ESCALATIONS.md`. No blocking escalations.
 
 ## Review notes
 <Reviewer fills this in: pass/fail, what was checked, anything fixed and how.>

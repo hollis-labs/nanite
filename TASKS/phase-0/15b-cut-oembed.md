@@ -1,7 +1,7 @@
 # Cut the oembed plugin registration
 
 **Phase:** 0
-**Status:** not-started
+**Status:** implemented
 **Depends on:** none
 **Touches:** `plugins/repos.yaml` (remove the `oembed` "default" plugin entry), any oembed-related backend/frontend code registered through that plugin (locate at implementation time — see Context for why this wasn't fully traced during planning), doc references (see Context)
 
@@ -29,7 +29,8 @@ TASKS.md Phase 0 item 15 names oembed as a "confirmed demo" to cut, alongside gi
 - The Work Log records what the liveness check actually found (purely a registration-line removal, or real local code) — this is worth knowing even though it doesn't change the outcome.
 
 ## Work log
-<Worker fills this in as it goes: what was actually done, any deviation from plan and why, anything escalated.>
+
+**2026-08-18 — worker report:** Liveness check confirmed oembed is purely an external-repo registration with zero local implementation (no builtin package, no frontend component, no self-tool). Removed the `oembed` entry from `plugins/repos.yaml` and doc references (`CLAUDE.md`, `docs/tool-naming-audit.md`, the shared oembed/giphy audit doc — coordinated with `15a` on that shared file). `go build`/`go vet`/`go test` all pass. No escalations.
 
 ## Review notes
 <Reviewer fills this in: pass/fail, what was checked, anything fixed and how.>

@@ -1,7 +1,7 @@
 # Fix durable-agent wake `CallerType` mistagging (`CallerChat` → `CallerBackground`)
 
 **Phase:** 0
-**Status:** not-started
+**Status:** implemented
 **Depends on:** none
 **Touches:** `internal/service/chat.go` (`HandleMessage`, ~line 727-775), `internal/service/durable_agent_runtime_controller.go` (`SendMessage`, ~line 57-63), `internal/service/durable_agents.go` (`deliverWakePrompt`, ~line 485-494), `internal/dispatcher/dispatcher.go` (`CallerType` definitions, ~line 41-79 — read-only reference), `internal/api/harness_v1.go` (~line 339 — read-only, do not change), `internal/api/messages.go` (~line 38 — read-only, do not change)
 
@@ -57,7 +57,8 @@ Also check `internal/dispatcher/dispatcher.go`'s `Dispatcher.Run` (~line 176) �
 - If request-build slog attribution (mentioned in `dispatcher.go`'s doc comments as the mechanism proving identical structural shape across `CallerTypes`) is exercised by an existing test, confirm it now shows `background` for a wake-delivered turn.
 
 ## Work log
-<Worker fills this in as it goes: what was actually done, any deviation from plan and why, anything escalated.>
+
+**2026-08-18 — worker report:** Implemented shape 1 (context-carried caller type). `chatDurableAgentRuntimeController.SendMessage` stamps `dispatcher.WithCallerType(ctx, dispatcher.CallerBackground)` before calling `HandleMessage`; `HandleMessage` defaults to `CallerChat` but honors a stamped ctx value when present/valid. Verified the two real HTTP callers (`harness_v1.go`, `messages.go`) stamp nothing and still resolve to `CallerChat`. Added regression tests exercising the ctx-stamping directly and end-to-end through `Dispatcher.Run`. `go build`/`go vet` (1 pre-existing unrelated finding)/`go test` all pass. No escalations.
 
 ## Review notes
 <Reviewer fills this in: pass/fail, what was checked, anything fixed and how.>

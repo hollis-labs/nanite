@@ -1,7 +1,7 @@
 # Cut the four backend-only messaging card types
 
 **Phase:** 0
-**Status:** not-started
+**Status:** implemented
 **Depends on:** none
 **Touches:** `libs/go-envelopes/manifest/envelopes.yaml` (sibling repo, reached via a `go.mod` local `replace` directive — remove the `message-request`/`message-reply`/`message-notification`/`message-handoff` entries, ~lines 109-116), `internal/chat/envelope.go` (`InitCoreTypes` — confirm these four types disappear from the loaded set once the manifest entry is gone, no separate nanite-side registration expected), `ui/src/generated/plugin-envelopes.ts` (regenerate via `node scripts/generate-plugin-imports.mjs` after the manifest edit lands)
 

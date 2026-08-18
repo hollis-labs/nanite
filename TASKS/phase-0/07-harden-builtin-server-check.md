@@ -1,7 +1,7 @@
 # Harden IsFirstPartyBuiltinServerName against the next builtin server
 
 **Phase:** 0
-**Status:** not-started
+**Status:** implemented
 **Depends on:** none
 **Touches:** `internal/mcp/naming.go` (`IsFirstPartyBuiltinServerName`, `SelfServerName`/`DevServerName`/`CodeServerName`/`GeneralServerName` constants), `internal/mcp/manager.go` (`Manager` struct, `AddServer`/`AddStdioServer`/`AddHTTPServer`/`AddPluginServer`, `assignUniformNameLocked`), `cmd/nanite/main.go` (`initMCP`, the four builtin `mcpManager.AddServer(...)` calls), `internal/mcp/naming_test.go`, `internal/mcp/manager_trust_test.go`
 
@@ -55,7 +55,129 @@ Do not change `IsReservedSelfToolName` (`naming.go:91-114`) or the self-only res
 - `go build ./cmd/nanite/`, `go vet ./...`, `go test ./...` pass, including `internal/mcp/...`.
 
 ## Work log
-<Worker fills this in as it goes: what was actually done, any deviation from plan and why, anything escalated.>
+
+Implemented per "What to do." Replaced the hand-maintained 4-name switch
+(`IsFirstPartyBuiltinServerName`, `internal/mcp/naming.go:132-139` pre-change)
+with real registration-time state on `Manager`, so "register a builtin" and
+"protect that builtin's bare tool-name slot" are the same action.
+
+**Design chosen:** added `Manager.firstPartyBuiltinNames map[string]bool`
+(initialized in `NewManager`), populated ONLY by a new
+`Manager.AddBuiltinServer(name string, transport MCPTransport) error` —
+calls `AddServer(name, transport, TierBuiltin)` then marks `name` first-party
+under the lock; propagates any `AddServer` error (empty name, nil transport,
+duplicate registration) without touching the new map. A new
+`Manager.isFirstPartyBuiltinServerLocked(name string) bool` (caller holds
+`m.mu`) reads the map and replaces the 3 `IsFirstPartyBuiltinServerName(...)`
+call sites inside `assignUniformNameLocked`. `RemoveServer` now also deletes
+`firstPartyBuiltinNames[name]` so a removed-then-reused name doesn't retain
+stale first-party status.
+
+**Files changed:**
+- `internal/mcp/manager.go` — `Manager` struct field, `NewManager` init,
+  `AddBuiltinServer`, `isFirstPartyBuiltinServerLocked`, `RemoveServer`
+  cleanup, and the 3 `assignUniformNameLocked` call sites.
+- `internal/mcp/naming.go` — removed `IsFirstPartyBuiltinServerName`
+  entirely; left a pointer comment explaining the replacement and why;
+  updated the `DevServerName`/`CodeServerName`/`GeneralServerName` doc
+  comment (no longer "a closed set `IsFirstPartyBuiltinServerName` checks
+  against"). `IsReservedSelfToolName` and the const declarations themselves
+  are unchanged — see "IsReservedSelfToolName" note below.
+- `cmd/nanite/main.go` (`initMCP`) — all four builtin registrations (`dev`,
+  `general`, `code`, `self`) now call `mcpManager.AddBuiltinServer(...)`
+  instead of `mcpManager.AddServer(..., mcp.TierBuiltin)`. Also switched the
+  `dev`/`general`/`code` call sites from raw string literals to the
+  existing `mcp.DevServerName`/`mcp.GeneralServerName`/`mcp.CodeServerName`
+  constants (previously only `self` used its constant) — small consistency
+  fix, in scope since main.go's four registration call sites are explicitly
+  listed as touched.
+
+**Acceptance bar met:** a fifth first-party builtin now needs exactly one
+new `mcpManager.AddBuiltinServer("name", transport)` line in `main.go`'s
+`initMCP` — `naming.go` has no switch/list left to update. Proven by the new
+`TestManager_UniformIndex_FifthBuiltinServerResistsEviction`, which
+registers a server named "widget" (never part of the old four-name set)
+purely through `AddBuiltinServer` and confirms it resists eviction by an
+alphabetically-earlier colliding proxy — same collision shape as the
+existing "Agent Mux vs dev" regression, but for a name that was never
+hardcoded anywhere.
+
+**`IsReservedSelfToolName` — checked, NOT removed (per task instructions'
+explicit caution to verify, not assume).** Since `self` is now also
+registered via `AddBuiltinServer` in `main.go`, `self` is in
+`firstPartyBuiltinNames` too, which makes the
+`IsReservedSelfToolName(...) || m.isFirstPartyBuiltinServerLocked(...)`
+checks redundant for `self` specifically *in production*. Kept anyway
+because: (1) it's a pure, registration-path-independent identity check —
+it still protects `self` even if a future refactor accidentally registers
+the self-tools transport through plain `AddServer` instead of
+`AddBuiltinServer` (defense-in-depth against exactly the kind of
+registration-path slip this task hardens against elsewhere); (2) it's
+exercised directly by its own test (`TestIsReservedSelfToolName`) and by
+direct-call assertions inside `TestManager_UniformIndex_PostRenameShadowDefense`,
+independent of `Manager` state. Not fully redundant in the defense-in-depth
+sense, so left in place.
+
+**Existing tests updated (required, not scope creep):**
+`TestManager_UniformIndex_NonSelfBuiltinReservedNamespace` and
+`TestManager_UniformIndex_RenameSurvivesSliceGrowth` (both from commit
+5144590, both named in Done means as regression coverage that "still
+passes") registered `dev` via `mgr.AddServer(DevServerName, ..., TierBuiltin)`.
+Under the new design that no longer grants first-party status — only
+`AddBuiltinServer` does — so both were switched to
+`mgr.AddBuiltinServer(DevServerName, ...)` to keep exercising the same
+collision scenario the Done means requires. Checked every other test file in
+the repo that registers `dev`/`general`/`self` via plain
+`AddServer(..., TierBuiltin)` (`internal/mcp/restart_stdio_test.go`,
+`internal/toolclient/devmode_gate_test.go`,
+`internal/service/chat_path_grants_e2e_test.go`) — none exercise a collision
+scenario (no competing same-named server registered alongside), so none
+needed changes; confirmed by full `go test ./...` passing.
+
+**New tests added** (`internal/mcp/naming_test.go`), covering both Done
+means bullets plus plumbing:
+1. `TestManager_AddBuiltinServer` — tier assignment + duplicate-registration
+   error propagation.
+2. `TestManager_UniformIndex_FifthBuiltinServerResistsEviction` — Done means
+   bullet 3 ("a fifth builtin-style server resists eviction").
+3. `TestManager_UniformIndex_TierAloneDoesNotGrantFirstPartyStatus` — Done
+   means bullet 4 ("TierBuiltin alone is not sufficient" / the doc
+   comment's constraint). Registers two servers at `TierBuiltin` via the
+   ordinary `AddServer` path (neither via `AddBuiltinServer`) with a
+   colliding tool name; asserts ordinary collision-disambiguation applies
+   to both (neither force-evicts the other).
+
+**Correction to the record (EXECUTION-PROCESS worker step 7):** none
+needed. The task file's own account of the prior incident and the fix
+required (verified independently via `git show 5144590`) matches the code
+as found. This item doesn't trace to a numbered decision-log entry (the
+task file already flags this), so there's no decision-log rationale to
+correct either.
+
+**Escalations:** none. No genuine ambiguity, no zero-doc-coverage item, no
+item-vs-item TASKS.md contradiction. Handled the security-sensitive nature
+of this task (tool-name-collision defense) by being conservative — kept
+`IsReservedSelfToolName` as defense-in-depth rather than removing it on the
+theory that it's now redundant, and added an explicit test proving the
+"tier alone is insufficient" doc-comment constraint still holds rather than
+just asserting it.
+
+**Verification:**
+- `go build ./cmd/nanite/`: pass.
+- `go vet ./...`: 2 pre-existing failures in `internal/service/container.go`
+  (`stopReaper`/`stopRuntimeReaper` possibly-unused-on-some-paths) —
+  unrelated file, not touched by this task. `go vet ./internal/mcp/...
+  ./cmd/nanite/...` clean.
+- `go test ./...`: exactly 2 failing packages, `internal/envelope`
+  (`TestEnvelopeSchemas_AllTypesHaveSchemas`) and `internal/mcp`
+  (`TestNaniteToolDescribe_ShowCardExamplesValidateAgainstSchemas`), both
+  tracing to the same root cause (missing `question-form` envelope schema
+  file — appears related to the still-pending `13-cut-question-form` task).
+  Confirmed via `git stash` that both fail identically on the unmodified
+  baseline commit `df71e71` — pre-existing, unrelated to this change. Every
+  test this task touched or added passes, including the full
+  `internal/mcp` suite modulo that one pre-existing failure.
+- `gofmt -l` clean on all four touched files.
 
 ## Review notes
 <Reviewer fills this in: pass/fail, what was checked, anything fixed and how.>

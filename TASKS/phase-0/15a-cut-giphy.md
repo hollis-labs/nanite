@@ -1,7 +1,7 @@
 # Cut the giphy self-tool and plugin registration
 
 **Phase:** 0
-**Status:** not-started
+**Status:** implemented
 **Depends on:** none
 **Touches:** `internal/mcp/self_tools_giphy.go` (delete, incl. its test file), wherever this self-tool is registered into the MCP self-tool set (locate at implementation time), `plugins/repos.yaml` (remove the `giphy` "default" plugin entry), `CLAUDE.md`/other doc references (see Context)
 
@@ -29,7 +29,8 @@ TASKS.md Phase 0 item 15 names giphy as a "confirmed demo" to cut. Planning-pass
 - No remaining references to giphy anywhere in the codebase, confirmed by grep.
 
 ## Work log
-<Worker fills this in as it goes: what was actually done, any deviation from plan and why, anything escalated.>
+
+**2026-08-18 — worker report:** Deleted `internal/mcp/self_tools_giphy.go` (+ test, + `giphy_search.json` example) and every layer of `giphy-modal`'s reachability (tool registration, `card_show` enum/description, dispatch, describe, legacy/validator orphan-type lists, classify route baseline, stash categories). Removed the `giphy` entry from `plugins/repos.yaml`. Docs cleaned (`CLAUDE.md`, `docs/tool-naming-audit.md`, the shared oembed/giphy audit doc). Two heads-up escalations logged (not blocking): a second, unrelated cosmetic-GIF-garnish feature in error-report/recovery-envelope cards left in place (not named by any docs/engineering/* item), and `giphy-modal` deliberately kept in `contracts_test.go`'s schema-file tracking list (the external go-envelopes module still ships the schema file). `go build`/`go vet`/`go test` all pass (only pre-existing unrelated findings).
 
 ## Review notes
 <Reviewer fills this in: pass/fail, what was checked, anything fixed and how.>

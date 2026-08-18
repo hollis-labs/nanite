@@ -1,7 +1,7 @@
 # Convert builtin/seed agent profiles to one-time seed data
 
 **Phase:** 0
-**Status:** not-started
+**Status:** implemented
 **Depends on:** none
 **Touches:** `internal/service/ingest.go` (`AutoIngestAgents`, `upsertAgentDef`), `internal/agent/builtin/profiles.go` (`SourceInternal`, `InternalProfiles()` — read for context, no change expected), `internal/store/agents.go` (`UpdateAgent`, `CreateAgent` — read for what fields get overwritten), `agent_profiles` table (no schema change expected — task is explicitly bounded to NOT require the Phase 1 `roles`/`agents` schema split)
 
@@ -64,7 +64,154 @@ Two known-good shapes for this (pick one, or propose a better one if you find it
 - `go build ./cmd/nanite/`, `go vet ./...`, `go test ./...` pass, including `internal/service/...`.
 
 ## Work log
-<Worker fills this in as it goes: what was actually done, any deviation from plan and why, anything escalated.>
+
+**Reality-check investigation (done first, per the task file's own instruction).**
+
+Confirmed the boot-time overwrite mechanism exactly as described: `container.go`'s
+`NewContainer` appends `builtin.InternalProfiles()` (all stamped `Source="internal"`)
+to file-discovered `agentDefs`, then calls `AutoIngestAgents(cfg.Store, agentDefs,
+knownTools)` unconditionally on every boot (`internal/service/container.go:469`).
+Before this fix, `upsertAgentDef` (`internal/service/ingest.go`) called
+`st.UpdateAgent(profile)` unconditionally whenever an existing row was found by
+ID/slug, regardless of `source` — `UpdateAgent` (`internal/store/agents.go:486`)
+overwrites `system_prompt`, `description`, `tools`, `tool_permissions`,
+`mcp_servers`, `settings`, and every other content column. This half of the
+decision log's claim is fully verified and real.
+
+Tried to reproduce the literal "edit a builtin agent in the GUI, restart, watch it
+revert" scenario against current code (by reading the real handler code paths, not
+a live server round-trip — sufficient to answer reachability). Confirmed
+`internal/agent/source_class.go`'s `ManageClass.Classify` (added by commit
+`9898f13`, 2026-05-25) returns `ManageClassInternal` for `source=="internal"`,
+whose `Editable()` is `false`. `handleUpdateAgent`/`handleDeleteAgent`
+(`internal/api/agents.go:179`,`:343`) and `requireMutableAgent`
+(`internal/api/agent_capabilities.go:678`, gating all ~14 known-tool/known-skill/
+procedure/knowledge-seed mutation handlers) both check `class.Editable()` and
+reject non-managed sources with `writeNotManaged`. So the literal GUI-edit-form
+scenario does **not** appear reproducible through the ordinary GUI/API surface as
+of today — matches the task file's explanation #1 (the gate closed this vector on
+2026-05-25, three months before the decision log was written).
+
+However, the investigation found a **real write path the task file's own analysis
+missed** (its explanation #3, "some other write path not covered by
+AgentConfigService/requireMutableAgent"): `internal/mcp/self_tools_transport.go`'s
+`callUpdateAgent` (bound to the `agent_update` self-tool, `internal/mcp/
+self_tools.go:155`, no trust-tier or `ManageClass` gating anywhere in the file)
+calls `st.Store.GetAgent(id)` then `st.Store.UpdateAgent(a)` directly with zero
+editability check. Any agent session with the `agent_update` self-tool available
+can update a `source='internal'` profile's content directly, bypassing the
+editability gate entirely — and before this fix, the next boot's `AutoIngestAgents`
+would have silently reverted that edit. This is a live, currently-reachable version
+of the bug, just triggered via a self-tool call rather than the GUI's edit form.
+Logged as a new entry in `TASKS/ESCALATIONS.md` (2026-08-18, "Item 10:
+editability-gate reality check found a real bypass") per the task file's own
+invitation to escalate this class of finding; **not fixed here** — out of scope for
+this task (bounded to `internal/service/ingest.go`'s boot-time behavior, not the
+API/self-tool editability gate). Recommended follow-up: gate
+`callUpdateAgent`/`callCreateAgent` in `self_tools_transport.go` the same way
+`requireMutableAgent` does.
+
+**Implementation.**
+
+Fix lives entirely in `upsertAgentDef` (`internal/service/ingest.go`), no schema
+change, no Phase 1 roles/agents dependency:
+
+- Added `alreadySeededInternal bool`, computed right after identity resolution:
+  `existing != nil && existing.Source == builtin.SourceInternal` (the "more
+  explicit" shape from the task file's two known-good options — gated on the
+  **existing row's** source, not the incoming `def.Source`/`profile.Source`, per
+  the task file's own steer, since the slug-collision scenario in the Context
+  section means these could theoretically differ).
+- Inside the `existing != nil` branch, the previously-unconditional
+  `st.UpdateAgent(profile)` call is now skipped when `alreadySeededInternal` is
+  true. First-time creation (`existing == nil`) is untouched — new internal
+  profiles still seed normally. The builtin→internal migration flip
+  (`existing.Source == "builtin"`, not yet `"internal"`) also still content-syncs
+  on the boot where it first flips, because `alreadySeededInternal` is false at
+  that point — this preserves `TestAutoIngestAgents_SourceFlipFromBuiltinToInternal`
+  unchanged (verified: it passes as-is, no edit needed to encode new behavior,
+  since that test's existing row starts as `source='builtin'`, never `'internal'`,
+  at the point `upsertAgentDef` reads it).
+- Trust-tier reconciliation (`ingest.go`'s `UPDATE agent_profiles SET
+  default_trust_tier = ?`) is left unconditional, per the task file's instruction
+  — it's a narrower, source-driven field, not user-editable content.
+- Checked the two secondary seed paths per the task file's explicit ask:
+  - `seedProcedures` → `InsertAgentProcedure` (`internal/store/
+    agent_procedures.go`) does `ON CONFLICT(agent_id, name) DO UPDATE SET
+    body = excluded.body, scope = excluded.scope` — **not** idempotent-safe; it
+    re-stomps a procedure body from the file on every boot regardless of any DB
+    customization. Gated the same way as the main content sync.
+  - `seedRoleSkills` → `InsertAgentKnownSkill` (`internal/store/
+    agent_known_skills.go`) does an unqualified `INSERT OR REPLACE` — resets
+    `pinned`/`activation_count`/`added_at`/`last_used_at` to the seed call's
+    zero values every boot, which would silently revert a GUI unpin of a
+    role-seeded skill. Gated the same way.
+  - `seedRoleToolsFromIngest` → `InsertAgentKnownTool` (`internal/store/
+    agent_known_tools.go`) also does `INSERT OR REPLACE`, but left **ungated**
+    per the task file's own verification that this one is safe: confirmed
+    `BumpActivation` (same file) is a documented no-op (FU-14), so
+    `activation_count`/`last_used_at` never diverge from the zero values the
+    seed call writes; `pinned`/`sort_order`/`reason` are wholly file-derived.
+    Additive/reconciling by nature, not overwrite-prone.
+
+**Tests** (`internal/service/ingest_test.go`):
+
+- `TestAutoIngestAgents_InternalProfileNotReoverwritten` (new) — the primary
+  Done-means scenario: seed a fresh internal profile, directly mutate its DB row's
+  `system_prompt`/`description` (simulating a customization landing in the DB by
+  a path other than the file), re-run `AutoIngestAgents` with the same unchanged
+  def, assert the mutation survives. Also proves, in the same test, that a
+  genuinely new internal profile in the same batch still gets created normally
+  (freeze doesn't block first-time seeding) and that the already-seeded profile
+  stays frozen in that same mixed batch.
+- `TestAutoIngestAgents_InternalProfileProceduresAndRoleSkillsNotReoverwritten`
+  (new) — same shape, covering the `seedProcedures`/`seedRoleSkills` gate: mutates
+  a procedure body and unpins a role-seeded skill directly via the store, re-runs
+  `AutoIngestAgents`, asserts both customizations survive.
+- Extended `TestAutoIngestAgents_SourceFlipFromBuiltinToInternal` with a third
+  boot pass after the flip: mutates the now-`internal` row's content, re-ingests
+  with further-changed file content, asserts the mutation (not the file content)
+  survives — proves the freeze actually engages once a row has flipped to
+  `internal`, not just that the flip itself still content-syncs.
+- Existing `TestAutoIngestAgents_UpdateOnReingest` (source `"user"`) and the
+  original `TestAutoIngestAgents_SourceFlipFromBuiltinToInternal` assertions
+  needed **no changes** — verified by inspection and by running the full existing
+  `TestAutoIngestAgents_*` suite before and after: neither test exercises an
+  `existing.Source == "internal"` row at the point `upsertAgentDef` reads it, so
+  neither encoded the old always-overwrite behavior in a way this fix breaks.
+
+**Checks.**
+
+- `go build ./cmd/nanite/` — pass.
+- `go vet ./...` — pre-existing, unrelated failure in `internal/service/
+  container.go:1186`/`:1206`/`:1257` ("stopReaper"/"stopRuntimeReaper" possible
+  context leak) — confirmed present on `main` before this change (ran `go vet
+  ./internal/service/...` against the unmodified shared checkout, same two
+  findings), not introduced by this diff, and outside this task's Touches list.
+  No other vet findings.
+- `go test ./internal/service/ -run TestAutoIngestAgents -v -count=1` — all 15
+  tests pass (12 pre-existing + 3 new/extended).
+- `go test ./internal/service/... -count=1` (the full package, not just the
+  ingest tests) — pass, `ok github.com/hollis-labs/nanite/internal/service
+  128.215s` and `ok .../internal/service/install 3.832s`.
+- `go test ./... -count=1` — **not fully clean**, but the 2 failures are
+  pre-existing and unrelated to this task, confirmed by reproducing them
+  against the unmodified base commit (`git stash` of both changed files, rerun,
+  `git stash pop` to restore): `internal/envelope`'s
+  `TestEnvelopeSchemas_AllTypesHaveSchemas` and `internal/mcp`'s
+  `TestNaniteToolDescribe_ShowCardExamplesValidateAgainstSchemas` both fail with
+  `envelope type "question-form" has no schema file` / `no schema registered for
+  envelope type "question-form"` — this is `13-cut-question-form.md`'s
+  in-flight removal of the question-form envelope leaving the shared base
+  branch in a mid-flight state; zero relation to agent-profile ingestion (this
+  diff touches only `internal/service/ingest.go`/`ingest_test.go`). Every other
+  package passes, `internal/service`/`internal/service/install` included. Box
+  was also under heavy concurrent load from other parallel Phase 0 workers'
+  own `go test ./...` runs the whole time, hence the long wall-clock time.
+
+No schema change. No dependency introduced on Phase 1's roles/agents split.
+`TASKS/INDEX.md`'s row for `10-seed-builtin-agent-profiles` updated to
+`implemented`.
 
 ## Review notes
 <Reviewer fills this in: pass/fail, what was checked, anything fixed and how.>

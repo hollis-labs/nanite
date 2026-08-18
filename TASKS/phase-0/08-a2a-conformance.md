@@ -1,7 +1,7 @@
 # A2A conformance: real method names, real CancelTask, verify push delivery
 
 **Phase:** 0
-**Status:** not-started
+**Status:** implemented
 **Depends on:** none
 **Touches:** `internal/api/a2a_jsonrpc.go` (method-name constants, `handleTaskCancel`), `internal/service/a2a_task_manager.go` (`TaskManager` — needs a new `CancelTask` method), `internal/service/a2a_push_notifier.go` (`A2APushNotifier.ProcessPendingDeliveries` — verification only, see part (c)), `internal/service/durable_agents.go` (`RequestStop`, likely reuse target), `internal/service/durable_agent_runtime_controller.go` (`CancelSession`/`StopSession`, likely reuse target), `internal/store/a2a_tasks.go` and `internal/store/migrations/088_a2a_tasks.sql` (`A2ATask` schema — read for routing fields, no schema change expected), `internal/a2a/*` (protocol types — read/possibly extend)
 
@@ -103,7 +103,8 @@ This was added by commit `80ded64` ("A2A: push notification config + best-effort
 - `go build ./cmd/nanite/`, `go vet ./...`, `go test ./...` pass, including `internal/api/...` and `internal/service/...`.
 
 ## Work log
-<Worker fills this in as it goes: what was actually done, any deviation from plan and why, anything escalated.>
+
+**2026-08-18 — worker report:** (a) Did a real spec-verification pass — confirmed A2A v1.0.1's PascalCase method names (`SendMessage`/`GetTask`/`CancelTask`) against the actual spec (not just the unverified lead in the original code comment); renamed the constants (hard rename, no compat shim). `provideInput` confirmed a non-spec Nanite extension, kept as-is. (b) Implemented real `TaskManager.CancelTask` for `target_kind='instance'` (reuses `DurableAgentService.RequestStop`). `target_kind='workflow'` has no real interrupt primitive anywhere in the workflow launcher — escalated per the task's own pre-authorized fallback rather than half-building it; returns a typed `ErrWorkflowCancelUnsupported` (-32004). Logged in `TASKS/ESCALATIONS.md`. (c) Independently re-verified the push-notification ticker is real and live; extended test coverage through the real production call path, no gap found. `go build`/`go vet` (pre-existing unrelated findings only)/`go test` all pass. Docs corrected: `docs/engineering/architecture/07-inter-agent-messaging.md`, `docs/implementation/a2a-jsonrpc-transport.md`.
 
 ## Review notes
 <Reviewer fills this in: pass/fail, what was checked, anything fixed and how.>

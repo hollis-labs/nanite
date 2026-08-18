@@ -909,14 +909,19 @@ func initMCP(s *store.Store, cfg *config.Config, appCfg *config.AppConfig) (*mcp
 	devTools := mcp.NewDevToolsTransport(devAllowed).WithArtifactResolver(
 		mcp.NewStoreArtifactResolver(s), artifactsRoot,
 	)
-	if err := mcpManager.AddServer("dev", devTools, mcp.TierBuiltin); err != nil {
-		slog.Error("mcp: failed to register builtin server", "name", "dev", "err", err)
+	// Builtin registrations use AddBuiltinServer (not the plain AddServer
+	// + TierBuiltin pair) — it both registers the server and marks its
+	// name as first-party-protected in the same call, so a fifth builtin
+	// server only needs one new line here (internal/mcp/naming.go no
+	// longer carries a second, hand-maintained name list to keep in sync).
+	if err := mcpManager.AddBuiltinServer(mcp.DevServerName, devTools); err != nil {
+		slog.Error("mcp: failed to register builtin server", "name", mcp.DevServerName, "err", err)
 	}
-	if err := mcpManager.AddServer("general", mcp.NewGeneralToolsTransport(), mcp.TierBuiltin); err != nil {
-		slog.Error("mcp: failed to register builtin server", "name", "general", "err", err)
+	if err := mcpManager.AddBuiltinServer(mcp.GeneralServerName, mcp.NewGeneralToolsTransport()); err != nil {
+		slog.Error("mcp: failed to register builtin server", "name", mcp.GeneralServerName, "err", err)
 	}
-	if err := mcpManager.AddServer("code", mcp.NewCodeExecTransport(""), mcp.TierBuiltin); err != nil {
-		slog.Error("mcp: failed to register builtin server", "name", "code", "err", err)
+	if err := mcpManager.AddBuiltinServer(mcp.CodeServerName, mcp.NewCodeExecTransport("")); err != nil {
+		slog.Error("mcp: failed to register builtin server", "name", mcp.CodeServerName, "err", err)
 	}
 	selfTools := mcp.NewSelfToolsTransport(s)
 	// E1 (CW-20260419-0027): wire reflex set + logger into the dispatch path.
@@ -938,7 +943,7 @@ func initMCP(s *store.Store, cfg *config.Config, appCfg *config.AppConfig) (*mcp
 	// Without this, sibling-server tools are invisible to the discovery
 	// primitive.
 	selfTools.Inventory = mcpManager
-	if err := mcpManager.AddServer(mcp.SelfServerName, selfTools, mcp.TierBuiltin); err != nil {
+	if err := mcpManager.AddBuiltinServer(mcp.SelfServerName, selfTools); err != nil {
 		slog.Error("mcp: failed to register builtin server", "name", mcp.SelfServerName, "err", err)
 	}
 

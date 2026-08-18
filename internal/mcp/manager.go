@@ -48,15 +48,16 @@ type DiscoveryWarning struct {
 // pipelines still know which MCP backend a call hit, while the agent only
 // ever sees the uniform name.
 type Manager struct {
-	servers           map[string]MCPTransport // name -> transport
-	serverTiers       map[string]TrustTier    // name -> trust tier
-	pluginServers     map[string][]string     // pluginID -> server names (reverse map for hot-unload)
-	tools             []*toolEntry            // all discovered tools with server association (pointer slice: entries are mutated in place post-insertion by collision-rename, so a later append reallocating this slice must never orphan an outstanding uniformIndex pointer — see assignUniformNameLocked)
-	uniformIndex      map[string]*toolEntry   // uniform name → entry (owns the *toolEntry)
-	discoveryWarnings []DiscoveryWarning      // tools rejected during discovery
-	Broker            *broker.LocalBroker     // intent-aware tool broker
-	LoadChecker       ToolLoadChecker         // optional loadType filter
-	mu                sync.RWMutex
+	servers                map[string]MCPTransport // name -> transport
+	serverTiers            map[string]TrustTier    // name -> trust tier
+	firstPartyBuiltinNames map[string]bool         // name -> true, populated ONLY by AddBuiltinServer (see isFirstPartyBuiltinServerLocked)
+	pluginServers          map[string][]string     // pluginID -> server names (reverse map for hot-unload)
+	tools                  []*toolEntry            // all discovered tools with server association (pointer slice: entries are mutated in place post-insertion by collision-rename, so a later append reallocating this slice must never orphan an outstanding uniformIndex pointer — see assignUniformNameLocked)
+	uniformIndex           map[string]*toolEntry   // uniform name → entry (owns the *toolEntry)
+	discoveryWarnings      []DiscoveryWarning      // tools rejected during discovery
+	Broker                 *broker.LocalBroker     // intent-aware tool broker
+	LoadChecker            ToolLoadChecker         // optional loadType filter
+	mu                     sync.RWMutex
 }
 
 // toolEntry associates a tool with its originating server and the
@@ -70,10 +71,11 @@ type toolEntry struct {
 // NewManager creates a new MCP Manager.
 func NewManager() *Manager {
 	return &Manager{
-		servers:       make(map[string]MCPTransport),
-		serverTiers:   make(map[string]TrustTier),
-		pluginServers: make(map[string][]string),
-		uniformIndex:  make(map[string]*toolEntry),
+		servers:                make(map[string]MCPTransport),
+		serverTiers:            make(map[string]TrustTier),
+		firstPartyBuiltinNames: make(map[string]bool),
+		pluginServers:          make(map[string][]string),
+		uniformIndex:           make(map[string]*toolEntry),
 	}
 }
 
@@ -117,6 +119,40 @@ func (m *Manager) AddServer(name string, transport MCPTransport, tier TrustTier)
 	return nil
 }
 
+// AddBuiltinServer registers one of nanite's own first-party in-process
+// builtin servers (self/dev/code/general, and any future addition) at
+// TierBuiltin, AND marks name as protected by the reserved-namespace
+// defense in assignUniformNameLocked (see isFirstPartyBuiltinServerLocked).
+//
+// This is THE call cmd/nanite/main.go's real builtin-registration call
+// sites must use. Before this method existed, "register a builtin" (an
+// AddServer call in main.go) and "protect that builtin's bare tool-name
+// slot from eviction" (a case in a hand-maintained switch statement in
+// naming.go) were two separate actions a human had to remember to keep in
+// sync — the exact bug shape that let a proxied server silently steal
+// nanite's own dev_bash tool before commit 5144590. Registering through
+// AddBuiltinServer makes them the same action: adding a fifth first-party
+// builtin only requires one new call here, nothing else.
+//
+// Test fixtures that want a server at TierBuiltin WITHOUT first-party
+// protection — to exercise plain tier-based collision behavior, per the
+// doc comment on isFirstPartyBuiltinServerLocked — must keep calling
+// AddServer directly. That path deliberately does NOT populate
+// firstPartyBuiltinNames, so a same-named server registered that way is
+// never treated as first-party no matter what tier it carries.
+//
+// Propagates any error from AddServer (empty name, nil transport,
+// duplicate registration) without touching firstPartyBuiltinNames.
+func (m *Manager) AddBuiltinServer(name string, transport MCPTransport) error {
+	if err := m.AddServer(name, transport, TierBuiltin); err != nil {
+		return err
+	}
+	m.mu.Lock()
+	m.firstPartyBuiltinNames[name] = true
+	m.mu.Unlock()
+	return nil
+}
+
 // DiscoverServerTools returns tools from a specific named server without affecting the global tool list.
 func (m *Manager) DiscoverServerTools(ctx context.Context, serverName string) ([]Tool, error) {
 	m.mu.RLock()
@@ -145,6 +181,7 @@ func (m *Manager) RemoveServer(name string) {
 
 	delete(m.servers, name)
 	delete(m.serverTiers, name)
+	delete(m.firstPartyBuiltinNames, name)
 
 	// Remove tools that belonged to this server (in both the slice view
 	// and the uniform-name index).
@@ -277,6 +314,18 @@ func (m *Manager) tierForLocked(name string) TrustTier {
 	return TierThirdPartyHTTP
 }
 
+// isFirstPartyBuiltinServerLocked reports whether server was registered
+// through AddBuiltinServer — i.e. it is one of nanite's own in-process
+// builtin servers, not merely a server that happens to carry TierBuiltin.
+//
+// Deliberately independent of TrustTier: test fixtures and future callers
+// legitimately register arbitrary/hostile servers at TierBuiltin via the
+// ordinary AddServer path to exercise plain collision behavior, so tier
+// alone can't distinguish "one of nanite's real builtins" from "some
+// other server that happens to carry that tier." Caller must hold mu.
+func (m *Manager) isFirstPartyBuiltinServerLocked(name string) bool {
+	return m.firstPartyBuiltinNames[name]
+}
 
 // DiscoverTools queries all registered servers for their tools and runs the
 // per-tier validator pipeline (S4b T2). Tools failing per-tool validation
@@ -595,8 +644,8 @@ func (m *Manager) assignUniformNameLocked(serverName, toolName string) string {
 	// name they publish. A non-builtin (proxied/third-party) server that
 	// registered alphabetically earlier and grabbed the slot gets
 	// force-prefixed and rewritten in place.
-	if IsReservedSelfToolName(serverName, toolName) || IsFirstPartyBuiltinServerName(serverName) {
-		if existing, taken := m.uniformIndex[bare]; taken && existing.serverName != serverName && !IsFirstPartyBuiltinServerName(existing.serverName) {
+	if IsReservedSelfToolName(serverName, toolName) || m.isFirstPartyBuiltinServerLocked(serverName) {
+		if existing, taken := m.uniformIndex[bare]; taken && existing.serverName != serverName && !m.isFirstPartyBuiltinServerLocked(existing.serverName) {
 			incumbentDisambig := DisambiguatedToolName(existing.serverName, existing.tool.Name)
 			if _, conflict := m.uniformIndex[incumbentDisambig]; conflict && existing.uniformName != incumbentDisambig {
 				// Incumbent's disambiguated slot is already taken by a
@@ -629,7 +678,7 @@ func (m *Manager) assignUniformNameLocked(serverName, toolName string) string {
 	// first-party builtin. Force-prefix the newcomer; the builtin tool
 	// keeps the bare slot it already owns.
 	if existing, taken := m.uniformIndex[bare]; taken &&
-		(IsReservedSelfToolName(existing.serverName, existing.tool.Name) || IsFirstPartyBuiltinServerName(existing.serverName)) {
+		(IsReservedSelfToolName(existing.serverName, existing.tool.Name) || m.isFirstPartyBuiltinServerLocked(existing.serverName)) {
 		disambig := DisambiguatedToolName(serverName, toolName)
 		if _, takenDisambig := m.uniformIndex[disambig]; takenDisambig {
 			return ""

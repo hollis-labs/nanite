@@ -493,23 +493,19 @@ func (s *durableAgentService) deliverWakePrompt(ctx context.Context, sessionID, 
 	}
 }
 
-func (s *durableAgentService) RequestStart(_ context.Context, id string) (*store.DurableAgentInstance, error) {
-	before, err := s.store.GetDurableAgentInstance(id)
+func (s *durableAgentService) RequestStart(ctx context.Context, id string) (*store.DurableAgentInstance, error) {
+	result, err := s.Start(ctx, id, DurableAgentStartRequest{})
 	if err != nil {
+		if result != nil && result.Instance != nil {
+			return result.Instance, err
+		}
+		inst, getErr := s.store.GetDurableAgentInstance(id)
+		if getErr == nil {
+			return inst, err
+		}
 		return nil, err
 	}
-	inst, err := s.store.SetDurableAgentInstanceStatus(id, store.DurableAgentStatusStartRequested)
-	if err != nil {
-		return nil, err
-	}
-	s.recordEvent(&store.DurableAgentEvent{
-		InstanceID:   id,
-		EventType:    store.DurableAgentEventStartRequested,
-		StatusBefore: before.Status,
-		StatusAfter:  inst.Status,
-		SessionID:    inst.CurrentSessionID,
-	})
-	return inst, nil
+	return result.Instance, nil
 }
 
 func (s *durableAgentService) RequestStop(ctx context.Context, id string) (*store.DurableAgentInstance, error) {

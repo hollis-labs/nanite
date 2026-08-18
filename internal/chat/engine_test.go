@@ -68,9 +68,13 @@ func TestInferProvider(t *testing.T) {
 		{"gpt-4", "openai"},
 		{"o1-preview", "openai"},
 		{"o3-mini", "openai"},
-		{"llama3", "ollama"},
-		{"mistral-7b", "ollama"},
-		{"gemma-2b", "ollama"},
+		// Ollama routing was removed 2026-08-18 (TASKS/phase-0/
+		// 05-remove-ollama-routing.md) — it resolved to a provider that was
+		// never registered. These now fall through to the default floor.
+		{"llama3", "anthropic"},
+		{"mistral-7b", "anthropic"},
+		{"gemma-2b", "anthropic"},
+		{"custom-model:latest", "anthropic"},
 		{"claude-sonnet-4-20250514", "anthropic"},
 		{"", "anthropic"},
 	}

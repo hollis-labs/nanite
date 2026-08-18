@@ -108,7 +108,7 @@ export function MemoryPanel() {
             <div>
               <div className="text-sm text-fg">Provider</div>
               <div className="text-[11px] text-fg-muted mt-0.5">
-                Embeddings send memory text to the selected provider. Ollama is local.
+                Embeddings send memory text to the selected provider.
               </div>
             </div>
             <select

@@ -14,7 +14,6 @@ import type { ProviderStatus, CLIDetectionResult } from '@/lib/types'
 const PROVIDER_INITIALS: Record<string, string> = {
   anthropic: 'A',
   openai: 'O',
-  ollama: 'Ol',
   gemini: 'G',
   mistral: 'M',
   'azure-openai': 'Az',
@@ -32,7 +31,6 @@ const DEFAULT_BASE_URLS: Record<string, string> = {
   gemini: 'https://generativelanguage.googleapis.com',
   mistral: 'https://api.mistral.ai/v1',
   'azure-openai': '',
-  ollama: 'http://localhost:11434',
 }
 
 function ProviderIcon({ providerType, active }: { providerType: string; active: boolean }) {
@@ -376,10 +374,9 @@ function ProviderCard({
 }) {
   const queryClient = useQueryClient()
 
-  const isOllama = provider.provider_type === 'ollama'
   const canActivate = isCLI
     ? (detection?.detected ?? false)
-    : (provider.has_api_key || isOllama)
+    : provider.has_api_key
   const isActive = provider.is_enabled && canActivate
 
   const toggleMutation = useMutation({
@@ -432,8 +429,8 @@ function ProviderCard({
 
       {/* Detail footer */}
       <div className="border-t border-border-subtle px-3.5 py-2 bg-bg/40 flex items-center gap-3">
-        {/* Field 1: Key / Path / Host */}
-        {!isCLI && !isOllama && (
+        {/* Field 1: Key / Path */}
+        {!isCLI && (
           <div className="flex items-center gap-1.5 min-w-0">
             <KeyIcon />
             <APIKeyField provider={provider} />
@@ -449,19 +446,9 @@ function ProviderCard({
             />
           </div>
         )}
-        {isOllama && (
-          <div className="flex items-center gap-1.5 min-w-0">
-            <LinkIcon />
-            <BaseURLField
-              providerId={provider.id}
-              providerType={provider.provider_type}
-              currentURL={provider.base_url}
-            />
-          </div>
-        )}
 
         {/* Separator + Field 2 */}
-        {!isCLI && !isOllama && (
+        {!isCLI && (
           <>
             <div className="w-px h-3.5 bg-border shrink-0" />
             <div className="flex items-center gap-1.5 min-w-0">
@@ -541,7 +528,7 @@ export function ProviderManager() {
     if (isCLIProvider(p.provider_type)) {
       return false
     }
-    return p.has_api_key || p.provider_type === 'ollama'
+    return p.has_api_key
   }, [isCLIProvider])
 
   const filteredProviders = useMemo(() => {

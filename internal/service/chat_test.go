@@ -486,9 +486,10 @@ func TestInferProvider(t *testing.T) {
 		{"o1-preview", "openai"},
 		{"o3-mini", "openai"},
 		// Step 6.5 (SP-20260508-0001) removed the Mistral and Ollama API
-		// adapters; their registry rows are gone. Bare "llama3.1" /
-		// "mistral-large" inputs now fall through InferProvider's prefix
-		// fallthroughs (ollama-style) or the DefaultProvider terminal,
+		// adapters; their registry rows are gone. The dangling "ollama"
+		// routing branch itself was removed 2026-08-18 (TASKS/phase-0/
+		// 05-remove-ollama-routing.md). Bare "llama3.1" / "mistral-large"
+		// inputs now fall straight through to the DefaultProvider terminal,
 		// which is dead-letter behavior. Coverage retained for the
 		// surviving live cases only.
 		{"claude-sonnet-4-20250514", "anthropic"},

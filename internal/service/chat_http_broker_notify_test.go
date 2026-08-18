@@ -10,17 +10,23 @@ package service
 // covers all four cause families (timeout, transport, rate-budget, generic)
 // plus the nil-recovery degraded path.
 //
-// CW-20260815-0024: notifyRecoveryBrokerForHTTPStreamError now skips the
-// broker call entirely for a provider with no implemented bootdir Layout
-// (agent.HasBootdirLayout) — every plain HTTP API provider (anthropic,
-// openai, gemini-api, openrouter, ...) always failed a subsequent
-// DispatchRetry/agent.Boot attempt structurally, producing a guaranteed
-// "permanent failure" breadcrumb with zero recovery value. The
-// classification-mapping tests below (*Class, *MetaBagFields) deliberately
-// use a bootable provider name (claude / codex / opencode) so they keep
-// exercising the broker-call wiring itself — that's what they test, not
-// the new gate. TestPersistPartialAssistantAndNotifyBroker_HTTPOnlyProvider_SkipsBroker
-// covers the gate directly.
+// CW-20260815-0024 added an unconditional skip of the broker call for any
+// provider with no implemented bootdir Layout (agent.HasBootdirLayout) —
+// every plain HTTP API provider (anthropic, openai, gemini-api,
+// openrouter, ...) always failed a subsequent DispatchRetry/agent.Boot
+// attempt structurally, producing a guaranteed "permanent failure"
+// breadcrumb with zero recovery value.
+//
+// Phase 0 task 04 (decision log §19) replaced that stopgap with a real
+// bootdir-free HTTP retry path: recovery.Broker.DispatchRetry now
+// branches on HasBootdirLayout itself and never reaches AgentBoot.Boot
+// for a no-bootdir-layout provider, so the guard here is gone —
+// notifyRecoveryBrokerForHTTPStreamError notifies the broker
+// unconditionally again. TestPersistPartialAssistantAndNotifyBroker_NotifiesRegardlessOfBootdirLayout
+// covers this directly; the classification-mapping tests below (*Class,
+// *MetaBagFields) use a bootable provider name (claude / codex / opencode)
+// purely as an arbitrary stand-in — the notify call no longer depends on
+// provider shape at all.
 
 import (
 	"context"
@@ -316,30 +322,35 @@ func TestPersistPartialAssistantAndNotifyBroker_NoRecoveryDegradesCleanly(t *tes
 	}
 }
 
-// TestPersistPartialAssistantAndNotifyBroker_HTTPOnlyProvider_SkipsBroker
-// is the regression pin for CW-20260815-0024: a plain HTTP API provider
-// (no implemented bootdir Layout) must NOT reach the recovery broker at
-// all — DispatchRetry would always fail at agent.Boot's bootdir setup for
-// these, producing nothing but a guaranteed "permanent failure" breadcrumb.
-// A CLI/PTY-backed provider (bootdir implemented) must still be notified —
-// this is the mechanism's real, intended use case and must not regress.
-func TestPersistPartialAssistantAndNotifyBroker_HTTPOnlyProvider_SkipsBroker(t *testing.T) {
-	cases := []struct {
-		provider   string
-		wantNotify bool
-	}{
-		{"anthropic", false},
-		{"openai", false},
-		{"gemini-api", false},
-		{"openrouter", false},
-		{"gemini", false},  // CLI tool name, but no Layout implemented yet
-		{"claude", true},
-		{"pty-claude", true}, // CLI alias — normalizes to "claude"
-		{"codex", true},
-		{"opencode", true},
+// TestPersistPartialAssistantAndNotifyBroker_NotifiesRegardlessOfBootdirLayout
+// is the updated regression pin for CW-20260815-0024 / Phase 0 task 04
+// (decision log §19). The original guard here unconditionally skipped
+// broker notification for any provider with no implemented bootdir
+// Layout — DispatchRetry always attempted a doomed agent.Boot for those,
+// producing nothing but a guaranteed "permanent failure" breadcrumb.
+//
+// That guarantee ("never dispatch a doomed CLI-boot retry for a
+// no-bootdir-layout provider") now lives INSIDE recovery.Broker.DispatchRetry
+// itself (it branches on runtimeagent.HasBootdirLayout before ever
+// touching AgentBoot.Boot), not at this call site — so this helper no
+// longer needs its own skip-guard. Every provider, bootdir-layout or
+// not, now reaches the broker: HTTP-provider sessions get classified,
+// breadcrumbed, and routed to the new bootdir-free HTTP retry path
+// instead of being silently dropped with zero recovery attention.
+func TestPersistPartialAssistantAndNotifyBroker_NotifiesRegardlessOfBootdirLayout(t *testing.T) {
+	providers := []string{
+		"anthropic",
+		"openai",
+		"gemini-api",
+		"openrouter",
+		"gemini",  // CLI tool name, but no Layout implemented yet
+		"claude",
+		"pty-claude", // CLI alias — normalizes to "claude"
+		"codex",
+		"opencode",
 	}
-	for _, tc := range cases {
-		t.Run(tc.provider, func(t *testing.T) {
+	for _, providerName := range providers {
+		t.Run(providerName, func(t *testing.T) {
 			cs := &capturingStore{}
 			rec := newRecordingRecoveryHooks()
 			svc := &chatServiceImpl{
@@ -349,35 +360,24 @@ func TestPersistPartialAssistantAndNotifyBroker_HTTPOnlyProvider_SkipsBroker(t *
 				},
 			}
 
-			if tc.wantNotify {
-				rec.expect(1)
-			}
+			rec.expect(1)
 			svc.persistPartialAssistantAndNotifyBroker(
 				context.Background(),
 				"sess-gate", "msg-gate", "agent-1",
 				"content",
-				tc.provider,
+				providerName,
 				"some-profile",
 				errors.New("boom"),
 			)
-			if tc.wantNotify {
-				rec.waitFor(t, 2*time.Second)
-			}
+			rec.waitFor(t, 2*time.Second)
 
-			// Partial-assistant persistence must happen either way — the
-			// gate only affects the broker notification, not the message
-			// row.
+			// Partial-assistant persistence must happen either way.
 			if cs.callCount != 1 {
-				t.Errorf("expected partial-assistant persist regardless of gate; got %d CreateMessage calls", cs.callCount)
+				t.Errorf("expected partial-assistant persist; got %d CreateMessage calls", cs.callCount)
 			}
 
-			got := len(rec.snapshot())
-			want := 0
-			if tc.wantNotify {
-				want = 1
-			}
-			if got != want {
-				t.Errorf("provider %q: broker notify calls = %d, want %d", tc.provider, got, want)
+			if got := len(rec.snapshot()); got != 1 {
+				t.Errorf("provider %q: broker notify calls = %d, want 1", providerName, got)
 			}
 		})
 	}

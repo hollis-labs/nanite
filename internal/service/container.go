@@ -1116,6 +1116,13 @@ func NewContainer(cfg ContainerConfig) (*Container, error) {
 		broker.SetReplacementSessionHook(func(sessionID string, sess *runtimeagent.Session) {
 			chatSvcImpl.adoptReplacementSession(sessionID, sess)
 		})
+
+		// Phase 0 task 04 (decision log §19): wire the HTTP-provider
+		// (bootdir-free) retry hook now that chatSvcImpl exists. Same
+		// construction-order reason as the replacement-session hook
+		// above — the adapter closes over RetryLastMessage, which only
+		// exists once NewChatService has returned.
+		broker.SetHTTPRetry(newRecoveryHTTPRetryAdapter(chatSvcImpl.RetryLastMessage))
 	}
 
 	// CW-20260514-0049: install the boot-profile recovery pre-boot

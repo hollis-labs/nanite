@@ -40,6 +40,25 @@ type Dependencies struct {
 	// assertion.
 	Envelope EnvelopeSink
 
+	// HTTPRetry dispatches a bootdir-free retry for an HTTP-provider
+	// (anthropic/openai/... — any provider with no implemented bootdir
+	// Layout, per agent.HasBootdirLayout) chat session. DispatchRetry
+	// consults agent.HasBootdirLayout(ev.Provider) to choose this path
+	// over AgentBoot: HTTPRetry never touches AgentBoot.Boot, so the
+	// CW-20260815-0024 guarantee ("never dispatch a doomed CLI-boot
+	// retry for a no-bootdir-layout provider") holds structurally
+	// regardless of caller.
+	//
+	// Unlike AgentBoot, production wiring for this field is NOT supplied
+	// at NewBroker time — the concrete adapter closes over the chat
+	// service's RetryLastMessage, and chatServiceImpl is constructed
+	// AFTER BuildAgentDependencies (which constructs the broker). The
+	// composition root installs it post-construction via
+	// Broker.SetHTTPRetry, mirroring SetReplacementSessionHook's
+	// identical construction-order workaround. Tests may still set it
+	// directly in a Dependencies literal passed to NewBroker.
+	HTTPRetry HTTPRetry
+
 	// Logger is optional. Nil-safe — methods log via slog.Default()
 	// when this is unset.
 	Logger Logger
@@ -54,6 +73,28 @@ type AgentBoot interface {
 	// responsible for transitioning the runtime row from failed ->
 	// launching before this call, via Store.MarkRuntimeRelaunching.
 	Boot(ctx context.Context, opts agent.Options) (*agent.Session, error)
+}
+
+// HTTPRetry is the broker's hook for retrying an HTTP-provider chat turn
+// directly — no bootdir/agent.Boot involved. Production wiring
+// (internal/service.recoveryHTTPRetryAdapter) re-invokes the chat
+// harness's existing "retry last message" path (the same mechanism a
+// user's manual [Retry] click uses: reset the circuit breaker, find the
+// last user message, dispatch a fresh generateResponse turn through the
+// full harness) against the failed session. Deliberately narrow — like
+// AgentBoot, it exposes only what the broker needs (dispatch a retry for
+// a session), not the chat service's full surface.
+type HTTPRetry interface {
+	// Retry dispatches a fresh attempt at ev.SessionID's last turn by
+	// calling the resolved HTTP provider directly (no subprocess, no
+	// boot dir). Mirrors AgentBoot.Boot's "dispatch, don't await
+	// steady-state" contract: a nil error means the retry was launched
+	// successfully — the turn's own success/failure surfaces later via
+	// the session's SSE stream and, on a further failure, a fresh
+	// OnSessionExit observation (which is what drives the next backoff
+	// attempt, exactly as a CLI replacement session's own crash would
+	// re-enter OnSessionExit).
+	Retry(ctx context.Context, ev *FailureEvent) error
 }
 
 // BootDirOps is the sandbox-directory remediation contract.
@@ -170,6 +211,13 @@ type classifierState struct {
 // replacement session but no AgentBoot was provided in Dependencies.
 // Treated as a permanent failure.
 var errNoAgentBootWired = brokerErr("recovery: AgentBoot not wired in Dependencies")
+
+// errNoHTTPRetryWired surfaces when DispatchRetry routes a no-bootdir-
+// layout session to the HTTP retry path but no HTTPRetry was provided
+// (Dependencies literal in a test, or SetHTTPRetry never called in
+// production — e.g. a degraded boot). Treated as a permanent failure,
+// same as errNoAgentBootWired for the CLI path.
+var errNoHTTPRetryWired = brokerErr("recovery: HTTPRetry not wired in Dependencies")
 
 // brokerErr is a tiny error type used for sentinel errors inside the
 // recovery package. Avoids pulling in errors.New / fmt for the few

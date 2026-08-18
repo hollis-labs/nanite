@@ -328,6 +328,21 @@ func (b *Broker) DispatchRetry(ctx context.Context, ev *FailureEvent) (*agent.Se
 	if ev == nil {
 		return nil, errNilFailureEvent
 	}
+
+	// CW-Phase-0-04 (decision log §19): route no-bootdir-layout providers
+	// (every plain HTTP API provider — anthropic, openai, gemini-api,
+	// openrouter, ... — plus any CLI tool without an implemented Layout
+	// yet) to the bootdir-free HTTP retry path instead of AgentBoot.Boot.
+	// agent.HasBootdirLayout is the single existing, already-correct
+	// predicate for this decision — reused verbatim, not duplicated.
+	// This is now a structural guarantee: AgentBoot.Boot is unreachable
+	// for a no-bootdir-layout provider regardless of caller, closing the
+	// gap chat_http_broker_notify.go used to paper over with an
+	// unconditional skip-guard (CW-20260815-0024).
+	if !agent.HasBootdirLayout(ev.Provider) {
+		return nil, b.dispatchHTTPRetry(ctx, ev)
+	}
+
 	if b.deps.AgentBoot == nil {
 		return nil, errNoAgentBootWired
 	}
@@ -344,6 +359,107 @@ func (b *Broker) DispatchRetry(ctx context.Context, ev *FailureEvent) (*agent.Se
 		Workdir:         ev.Workdir,
 		Provider:        ev.Provider,
 	})
+}
+
+// dispatchHTTPRetry executes the bootdir-free HTTP-provider retry path:
+// bounded backoff, then a direct call into the composition-root-supplied
+// HTTPRetry hook. Unlike the CLI path there is no replacement
+// *agent.Session — HTTP-provider chat turns are per-call, not long-lived
+// processes — so DispatchRetry always returns a nil session for this
+// branch; Broker.notifyReplacement is nil-safe on that (no adoption
+// needed, there's no process to adopt).
+//
+// No Store.MarkRuntimeRelaunching call here (unlike the CLI branch):
+// HTTP-provider chat turns never create an agent_runtime row in the
+// first place (chat_generate.go only calls driveBootSession/agent.Boot
+// for chat.IsCLIProvider sessions), so there is no "failed -> launching"
+// row transition to make. Calling it anyway would be a harmless no-op
+// UPDATE matching zero rows, but omitting it keeps the branch honest
+// about what actually exists for this session shape.
+func (b *Broker) dispatchHTTPRetry(ctx context.Context, ev *FailureEvent) error {
+	retry := b.httpRetryDep()
+	if retry == nil {
+		return errNoHTTPRetryWired
+	}
+
+	// Backoff: decision log §19 is explicit that this must not be a
+	// naive immediate retry. Bounded exponential (1s, 2s, 4s, ...),
+	// capped at the broker's remediationTimeout so a single attempt
+	// can't stall the async orchestration goroutine indefinitely.
+	// ev.Attempt is 1-indexed (OnSessionExit increments before
+	// classification), so even the first HTTP retry waits one backoff
+	// step — a transient 5xx/dropped-connection is likelier to succeed
+	// a beat later than immediately, and the wait is short enough
+	// (1s floor) not to read as hung on top of the info-card that
+	// already fired.
+	if wait := httpRetryBackoff(ev.Attempt, b.remediationTimeout); wait > 0 {
+		timer := time.NewTimer(wait)
+		select {
+		case <-timer.C:
+		case <-ctx.Done():
+			timer.Stop()
+			return ctx.Err()
+		}
+	}
+
+	return retry.Retry(ctx, ev)
+}
+
+// httpRetryBackoff computes a bounded exponential backoff for the Nth
+// HTTP-provider retry attempt (1-indexed): 1s, 2s, 4s, 8s, ... capped at
+// ceiling (the broker's remediationTimeout — 10s by default). A
+// non-positive ceiling disables the cap defensively (returns the
+// uncapped step) rather than collapsing to a naive zero-wait retry,
+// though in practice remediationTimeout is never non-positive —
+// WithRemediationTimeout ignores non-positive overrides and the
+// constructor default is 10s.
+func httpRetryBackoff(attempt int, ceiling time.Duration) time.Duration {
+	if attempt < 1 {
+		attempt = 1
+	}
+	const base = 1 * time.Second
+	const maxDoublings = 10 // guards against absurd shift on a runaway attempt count
+	doublings := attempt - 1
+	if doublings > maxDoublings {
+		doublings = maxDoublings
+	}
+	d := base
+	for i := 0; i < doublings; i++ {
+		d *= 2
+	}
+	if ceiling > 0 && d > ceiling {
+		d = ceiling
+	}
+	return d
+}
+
+// httpRetryDep returns the currently-wired HTTPRetry hook. Guarded by
+// b.mu because — unlike every other Dependencies field, which is set
+// once at NewBroker time and never mutated — HTTPRetry may be set later
+// via SetHTTPRetry (see that method's doc for why). Mirrors how
+// notifyReplacement snapshots replacementHook under lock before use.
+func (b *Broker) httpRetryDep() HTTPRetry {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.deps.HTTPRetry
+}
+
+// SetHTTPRetry installs (or clears) the broker's HTTP-provider retry
+// hook post-construction. The chat composition root wires this after
+// NewChatService returns (mirroring SetReplacementSessionHook) because
+// the concrete adapter closes over chatServiceImpl.RetryLastMessage,
+// and BuildAgentDependencies constructs the broker BEFORE NewChatService
+// constructs the chat service — the same construction-order problem
+// SetReplacementSessionHook already solves for the replacement-session
+// adoption hook. nil clears the hook: DispatchRetry then degrades HTTP
+// retries to errNoHTTPRetryWired (escalates to Permanent), same failure
+// mode as an unwired AgentBoot on the CLI path.
+//
+// Safe for concurrent callers: guarded by b.mu, read via httpRetryDep.
+func (b *Broker) SetHTTPRetry(r HTTPRetry) {
+	b.mu.Lock()
+	b.deps.HTTPRetry = r
+	b.mu.Unlock()
 }
 
 // parseMode maps the string form of agent.Mode (as persisted on the

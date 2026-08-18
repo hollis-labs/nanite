@@ -137,7 +137,10 @@ func TestDispatchRetryDerivesMode(t *testing.T) {
 			boot := &fakeAgentBoot{}
 			b := NewBroker(Dependencies{AgentBoot: boot})
 
-			ev := &FailureEvent{SessionID: "s", Mode: tc.mode}
+			// Provider must resolve to a bootdir-layout provider (Phase 0
+			// task 04) or DispatchRetry routes to the HTTP retry branch
+			// instead of AgentBoot.
+			ev := &FailureEvent{SessionID: "s", Provider: "claude", Mode: tc.mode}
 			if _, err := b.DispatchRetry(context.Background(), ev); err != nil {
 				t.Fatalf("DispatchRetry: %v", err)
 			}
@@ -169,12 +172,31 @@ func TestDispatchRetryNilEvent(t *testing.T) {
 // classification can leave it nil.
 func TestDispatchRetryNoAgentBootWired(t *testing.T) {
 	b := NewBroker(Dependencies{}) // no AgentBoot
-	_, err := b.DispatchRetry(context.Background(), &FailureEvent{SessionID: "s"})
+	_, err := b.DispatchRetry(context.Background(), &FailureEvent{SessionID: "s", Provider: "claude"})
 	if err == nil {
 		t.Fatal("expected error for missing AgentBoot")
 	}
 	if !errors.Is(err, errNoAgentBootWired) {
 		t.Errorf("error = %v, want errNoAgentBootWired", err)
+	}
+}
+
+// TestDispatchRetryNoHTTPRetryWired — the HTTP-provider sibling of
+// TestDispatchRetryNoAgentBootWired: a no-bootdir-layout provider with
+// no HTTPRetry wired degrades to a clean error (not a panic, not a
+// silent no-op), and AgentBoot is never touched.
+func TestDispatchRetryNoHTTPRetryWired(t *testing.T) {
+	boot := &fakeAgentBoot{}
+	b := NewBroker(Dependencies{AgentBoot: boot}) // no HTTPRetry
+	_, err := b.DispatchRetry(context.Background(), &FailureEvent{SessionID: "s", Provider: "anthropic"})
+	if err == nil {
+		t.Fatal("expected error for missing HTTPRetry")
+	}
+	if !errors.Is(err, errNoHTTPRetryWired) {
+		t.Errorf("error = %v, want errNoHTTPRetryWired", err)
+	}
+	if len(boot.gotOpts) != 0 {
+		t.Errorf("AgentBoot.Boot must never be called for a no-bootdir-layout provider, got %d calls", len(boot.gotOpts))
 	}
 }
 
@@ -187,7 +209,7 @@ func TestDispatchRetryStoreErrAborts(t *testing.T) {
 	store := &fakeStore{relaunchErr: wantErr}
 	b := NewBroker(Dependencies{AgentBoot: boot, Store: store})
 
-	_, err := b.DispatchRetry(context.Background(), &FailureEvent{SessionID: "s"})
+	_, err := b.DispatchRetry(context.Background(), &FailureEvent{SessionID: "s", Provider: "claude"})
 	if !errors.Is(err, wantErr) {
 		t.Errorf("error = %v, want wrapping %v", err, wantErr)
 	}
@@ -203,7 +225,7 @@ func TestDispatchRetryNilStoreOK(t *testing.T) {
 	boot := &fakeAgentBoot{}
 	b := NewBroker(Dependencies{AgentBoot: boot}) // Store nil
 
-	_, err := b.DispatchRetry(context.Background(), &FailureEvent{SessionID: "s"})
+	_, err := b.DispatchRetry(context.Background(), &FailureEvent{SessionID: "s", Provider: "claude"})
 	if err != nil {
 		t.Fatalf("DispatchRetry should succeed with nil Store, got %v", err)
 	}
@@ -219,7 +241,7 @@ func TestDispatchRetryPropagatesBootErr(t *testing.T) {
 	boot := &fakeAgentBoot{retErr: wantErr}
 	b := NewBroker(Dependencies{AgentBoot: boot})
 
-	_, err := b.DispatchRetry(context.Background(), &FailureEvent{SessionID: "s"})
+	_, err := b.DispatchRetry(context.Background(), &FailureEvent{SessionID: "s", Provider: "claude"})
 	if !errors.Is(err, wantErr) {
 		t.Errorf("error = %v, want wrapping %v", err, wantErr)
 	}
@@ -253,7 +275,9 @@ func TestReplacementSessionHook_FiredOnSuccessfulDispatch(t *testing.T) {
 
 	// Trigger an OnSessionExit that lands in runTransientRetry — the
 	// idle_timeout cause maps to ClassTransient/RemediationNone.
-	b.OnSessionExit("sess-replace", makeIdleTimeoutExit(), nil)
+	// Provider must resolve to a bootdir-layout provider so DispatchRetry
+	// exercises the AgentBoot path under test.
+	b.OnSessionExit("sess-replace", makeIdleTimeoutExit(), map[string]any{MetaKeyProvider: "claude"})
 
 	if len(got) != 1 {
 		t.Fatalf("replacement hook: got %d calls, want 1", len(got))
@@ -283,7 +307,7 @@ func TestReplacementSessionHook_NotFiredOnDispatchFailure(t *testing.T) {
 		WithReplacementSessionHook(func(string, *agent.Session) { called++ }),
 	)
 
-	b.OnSessionExit("sess-fail", makeIdleTimeoutExit(), nil)
+	b.OnSessionExit("sess-fail", makeIdleTimeoutExit(), map[string]any{MetaKeyProvider: "claude"})
 
 	if called != 0 {
 		t.Errorf("replacement hook should not fire on dispatch failure; got %d calls", called)
@@ -303,23 +327,28 @@ func TestSetReplacementSessionHook_PostConstruction(t *testing.T) {
 		Envelope:  &nopEnvelope{},
 	})
 
+	// Provider must resolve to a bootdir-layout provider throughout so
+	// every OnSessionExit below exercises the AgentBoot success path
+	// (DispatchRetry must succeed for notifyReplacement to ever fire).
+	cliProviderMeta := map[string]any{MetaKeyProvider: "claude"}
+
 	// No hook set yet: dispatch fires but no callback runs.
 	called := 0
-	b.OnSessionExit("sess-pre", makeIdleTimeoutExit(), nil)
+	b.OnSessionExit("sess-pre", makeIdleTimeoutExit(), cliProviderMeta)
 	if called != 0 {
 		t.Errorf("baseline (no hook): callback fired %d times", called)
 	}
 
 	// Install hook post-construction; subsequent dispatches invoke it.
 	b.SetReplacementSessionHook(func(string, *agent.Session) { called++ })
-	b.OnSessionExit("sess-post", makeIdleTimeoutExit(), nil)
+	b.OnSessionExit("sess-post", makeIdleTimeoutExit(), cliProviderMeta)
 	if called != 1 {
 		t.Errorf("post-set hook: got %d calls, want 1", called)
 	}
 
 	// Clearing the hook (nil) restores the no-op behavior.
 	b.SetReplacementSessionHook(nil)
-	b.OnSessionExit("sess-cleared", makeIdleTimeoutExit(), nil)
+	b.OnSessionExit("sess-cleared", makeIdleTimeoutExit(), cliProviderMeta)
 	if called != 1 {
 		t.Errorf("cleared hook: should still be %d calls, got %d", 1, called)
 	}

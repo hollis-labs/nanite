@@ -427,11 +427,11 @@ Source files: `internal/mcp/self_tools.go`, `internal/mcp/self_tools_describe.go
 | `nanite_execute_task` | self_tools.go:1088 | `task_execute` | **YES** — Engine and Clockwork both have `*_task_*` families; bare `task_execute` is unclaimed but generic | rename to `task_execute` (single owner today; if Engine/Clockwork add an `_execute` verb later, runtime collision policy disambiguates) |
 | `nanite_open_sprint_planning` (broker hint) | toolclient/tool_knowledge.go:355 | `sprint_planning_open` | no | rename |
 
-**Plugin-registered tools:** none currently use the `nanite_*` namespace — plugins
-register under their own server names (`support-ticket`). No
-cross-cutting plugin renames required. (The `giphy` and `oembed` plugin
-registrations were both cut in full — `TASKS/phase-0/15a-cut-giphy.md`,
-`TASKS/phase-0/15b-cut-oembed.md`.)
+**Plugin-registered tools:** none currently use the `nanite_*` namespace. The three
+plugins previously registered under their own server names (`giphy`, `oembed`,
+`support-ticket`) were all cut in full — `TASKS/phase-0/15a-cut-giphy.md`,
+`TASKS/phase-0/15b-cut-oembed.md`, `TASKS/phase-0/15c-cut-support-ticket.md`. No
+cross-cutting plugin renames required.
 
 ### Collision matrix — `nanite_*` ↔ Vanta
 

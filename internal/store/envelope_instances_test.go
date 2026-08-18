@@ -30,8 +30,8 @@ func TestEnvelopeInstance_CreateAndGet(t *testing.T) {
 
 	inst := &EnvelopeInstance{
 		SessionID:    "sess-1",
-		EnvelopeType: "ticket-form",
-		EnvelopeJSON: `{"kind":"envelope","version":1,"type":"ticket-form"}`,
+		EnvelopeType: "metric-card",
+		EnvelopeJSON: `{"kind":"envelope","version":1,"type":"metric-card"}`,
 	}
 	if err := s.CreateEnvelopeInstance(inst); err != nil {
 		t.Fatalf("create: %v", err)
@@ -47,7 +47,7 @@ func TestEnvelopeInstance_CreateAndGet(t *testing.T) {
 	if err != nil {
 		t.Fatalf("get: %v", err)
 	}
-	if got.SessionID != "sess-1" || got.EnvelopeType != "ticket-form" {
+	if got.SessionID != "sess-1" || got.EnvelopeType != "metric-card" {
 		t.Fatalf("fields not preserved: %+v", got)
 	}
 	if got.RespondedAt != nil || got.ResponseStatus != "" || got.ResponseJSON != "" {

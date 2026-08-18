@@ -558,18 +558,18 @@ func TestDetectStuckLoop(t *testing.T) {
 
 func TestCaptureEnvelopeData(t *testing.T) {
 	// No envelope marker.
-	result := captureEnvelopeData("plain result", "tool_a", nil)
+	result := captureEnvelopeData("plain result", nil)
 	if len(result) != 0 {
 		t.Errorf("no marker: got %d envelopes", len(result))
 	}
 
 	// With envelope marker.
-	data := `some text <!--ENVELOPE_DATA:{"type":"kb-result"}:ENVELOPE_DATA--> more text`
-	result = captureEnvelopeData(data, "tool_a", nil)
+	data := `some text <!--ENVELOPE_DATA:{"type":"metric-card"}:ENVELOPE_DATA--> more text`
+	result = captureEnvelopeData(data, nil)
 	if len(result) != 1 {
 		t.Fatalf("with marker: got %d envelopes, want 1", len(result))
 	}
-	if result[0] != `{"type":"kb-result"}` {
+	if result[0] != `{"type":"metric-card"}` {
 		t.Errorf("envelope payload = %q", result[0])
 	}
 }

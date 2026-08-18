@@ -46,29 +46,29 @@ func SetupForTesting() *envelopes.Registry {
 // but were never carried into the YAML manifest because they predate the
 // catalog tightening. Until the catalog cleanup task lands and decides
 // promote-vs-delete for each, Nanite registers them at startup so
-// callers like card_show and chat.BuildKBEnvelope continue to
-// resolve schemas.
+// callers like card_show continue to resolve schemas for the types still
+// on this list.
 const LegacyPluginID = "nanite-legacy"
 
 // OrphanTypes is the verbatim list of envelope types that ship a JSON
 // Schema in go-envelopes manifest/schemas/ but are absent from the
 // canonical YAML manifest. Order is preserved from the seed extraction.
 //
-// "giphy-modal" was removed from this list by TASKS/phase-0/15a-cut-giphy.md
-// (Phase 0 item 15) — the giphy self-tool and plugin were cut in full. The
-// go-envelopes lib still ships giphy-modal.schema.json (an external module,
-// out of this task's scope), so the schema file itself persists there, but
-// Nanite no longer registers it into the runtime registry.
-var OrphanTypes = []string{
-	"kb-result",
-	"resolution-capture",
-	"ticket-form",
-	"ticket-confirmation",
-}
+// All five original entries have been removed by the Phase 0 plugin cuts:
+// "giphy-modal" by TASKS/phase-0/15a-cut-giphy.md, and "kb-result"/
+// "resolution-capture"/"ticket-form"/"ticket-confirmation" by
+// TASKS/phase-0/15c-cut-support-ticket.md. Their JSON schemas still live
+// in go-envelopes' manifest/schemas/ (an external module none of these
+// tasks own) and are covered by contracts_test.go's knownTypes list,
+// which intentionally tracks the schema-file set rather than this
+// runtime-registration list — do not resync the two. This list is now
+// empty; kept as a named var (not deleted) so a future orphan schema has
+// an obvious place to register.
+var OrphanTypes = []string{}
 
 // LegacyTypeName returns the namespaced registry name a bare orphan
-// resolves to under nanite-legacy.* (e.g. "kb-result" →
-// "nanite-legacy.kb-result"). Used by callers that still address the
+// resolves to under nanite-legacy.* (e.g. "giphy-modal" →
+// "nanite-legacy.giphy-modal"). Used by callers that still address the
 // schema by its historical bare name.
 func LegacyTypeName(bare string) string {
 	return LegacyPluginID + "." + bare

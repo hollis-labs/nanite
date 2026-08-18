@@ -271,7 +271,7 @@ func cmdServe(args []string) {
 	// running user.
 	mcpManager, tb, selfTools := initMCP(s, cfg, appCfg)
 
-	// Set up activity emitter (Volon GUI events).
+	// Set up activity emitter for external GUI event consumers.
 	activity := chat.NewActivityEmitter("")
 
 	// Resolve utility provider/model. user_settings.utility_* first, then

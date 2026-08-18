@@ -14,7 +14,7 @@ func TestMain(m *testing.M) {
 
 func TestParseEnvelopes(t *testing.T) {
 	input := "Here is my response.\n\n" +
-		"```volon-envelope\n" +
+		"```nanite-envelope\n" +
 		`{"kind":"action","version":1,"type":"standard","proposals":[{"type":"create_task","payload":{"title":"Do something"}}]}` +
 		"\n```\n\nMore text."
 
@@ -42,7 +42,7 @@ func TestParseEnvelopes(t *testing.T) {
 	}
 
 	// Verify the envelope block was removed from the clean text.
-	if containsStr(clean, "volon-envelope") {
+	if containsStr(clean, "nanite-envelope") {
 		t.Error("clean text should not contain envelope block")
 	}
 	if !containsStr(clean, "Here is my response.") {
@@ -50,6 +50,37 @@ func TestParseEnvelopes(t *testing.T) {
 	}
 	if !containsStr(clean, "More text.") {
 		t.Error("clean text should contain trailing text")
+	}
+}
+
+// TestParseEnvelopes_LegacyTagsNotRecognized confirms the "volon-envelope" and
+// "fragments-envelope" fence tags — earlier brand-history names in the
+// Fragments Engine -> Volon -> Nanite lineage — are no longer parsed as
+// envelopes. Only "nanite-envelope" is recognized (decision log §33;
+// docs/engineering/architecture/08-cards.md "Naming cleanup"). A block using
+// either legacy tag must be left as inert text, not extracted or flagged as
+// malformed.
+func TestParseEnvelopes_LegacyTagsNotRecognized(t *testing.T) {
+	tags := []string{"volon-envelope", "fragments-envelope"}
+	for _, tag := range tags {
+		t.Run(tag, func(t *testing.T) {
+			input := "Before.\n\n" +
+				"```" + tag + "\n" +
+				`{"kind":"action","version":1,"type":"standard"}` +
+				"\n```\n\nAfter."
+
+			envelopes, clean, errs := ParseEnvelopes(input)
+
+			if len(envelopes) != 0 {
+				t.Fatalf("expected 0 envelopes for %s tag, got %d", tag, len(envelopes))
+			}
+			if len(errs) != 0 {
+				t.Fatalf("expected 0 errors (block left inert, not treated as a malformed envelope), got %d", len(errs))
+			}
+			if clean != input {
+				t.Errorf("expected clean text to equal input unchanged (%s block left inert), got %q", tag, clean)
+			}
+		})
 	}
 }
 
@@ -86,10 +117,10 @@ func TestParseEnvelopesNoMatch(t *testing.T) {
 
 func TestParseEnvelopesMultiple(t *testing.T) {
 	input := "Text before.\n\n" +
-		"```volon-envelope\n" +
+		"```nanite-envelope\n" +
 		`{"kind":"action","version":1,"type":"standard"}` +
 		"\n```\n\nMiddle text.\n\n" +
-		"```volon-envelope\n" +
+		"```nanite-envelope\n" +
 		`{"kind":"status","version":1,"type":"standard","status":{"phase":"running","progress":0.5}}` +
 		"\n```\n\nEnd."
 

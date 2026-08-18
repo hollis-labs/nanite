@@ -51,9 +51,9 @@ type Config struct {
 // with, replacing the go-toolbroker library's bundled default-rules.yaml —
 // that file's own doc comment (broker.DefaultRules) calls it "a worked
 // example ... unlikely to be useful as-is in another consumer's
-// environment": it matches only hadron_*/volon_*/cortex_* tool-name
-// patterns and a fixed intent vocabulary (create_task, list_tasks, ...)
-// lifted from a different application. None of Nanite's real tools
+// environment": it matches only a handful of hardcoded tool-name prefixes
+// and a fixed intent vocabulary (create_task, list_tasks, ...) lifted
+// from a different application. None of Nanite's real tools
 // (torque_*, dev_*, memory_*, subagent_*, mux_*, the unprefixed self-tool
 // names, ...) ever matched, so every real selection fell through to the
 // library's own "no rules matched intent; returning all tools" fallback —

@@ -100,14 +100,14 @@ func TestCheckPermission_DenyTakesPrecedence(t *testing.T) {
 
 func TestCheckPermission_ExactMatch(t *testing.T) {
 	p := ToolPermissions{
-		AllowList:       []string{"volon_task_create"},
+		AllowList:       []string{"example_task_create"},
 		MaxCallsPerTurn: 25,
 	}
 
-	if !p.CheckPermission("volon_task_create") {
+	if !p.CheckPermission("example_task_create") {
 		t.Error("expected allow for exact match")
 	}
-	if p.CheckPermission("volon_task_delete") {
+	if p.CheckPermission("example_task_delete") {
 		t.Error("expected deny for non-matching exact pattern")
 	}
 }

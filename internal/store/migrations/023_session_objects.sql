@@ -1,3 +1,4 @@
+-- +goose Up
 -- CW-20260420-0012 — SessionObjects: session-scoped structured-payload store (P2 primitive)
 --
 -- Parallel to tool_result_cache (internal/tool/cache.go) but distinct because:
@@ -22,3 +23,13 @@ CREATE TABLE IF NOT EXISTS session_objects (
 -- (created_at DESC, id DESC) of ListSessionObjects in one index scan.
 CREATE INDEX IF NOT EXISTS idx_session_objects_session_created_id
     ON session_objects(session_id, created_at DESC, id DESC);
+
+-- +goose Down
+-- No down migration: this file predates goose adoption (see
+-- docs/engineering/architecture/05-storage-and-migrations.md, "Migrations:
+-- adopting a real ledger"). Every pre-cutover migration ships a
+-- deliberately empty Down section rather than a hand-derived rollback --
+-- reconstructing the exact pre-migration schema/data shape for 94 files
+-- retroactively isn't worth doing when the historical state it would
+-- recreate has no operational value. New migrations going forward are
+-- expected to carry a real, tested Down.

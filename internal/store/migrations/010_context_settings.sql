@@ -1,3 +1,4 @@
+-- +goose Up
 -- Phase 3 S3a (2026-04-15): user-configurable context-window + summarizer settings.
 --
 -- The slot-based context pipeline (internal/context) sizes the total budget
@@ -14,3 +15,13 @@ ALTER TABLE user_settings ADD COLUMN context_budget_pct REAL NOT NULL DEFAULT 0.
 ALTER TABLE user_settings ADD COLUMN summarizer_provider TEXT NOT NULL DEFAULT '';
 ALTER TABLE user_settings ADD COLUMN summarizer_model TEXT NOT NULL DEFAULT '';
 ALTER TABLE user_settings ADD COLUMN compaction_strategy TEXT NOT NULL DEFAULT 'default';
+
+-- +goose Down
+-- No down migration: this file predates goose adoption (see
+-- docs/engineering/architecture/05-storage-and-migrations.md, "Migrations:
+-- adopting a real ledger"). Every pre-cutover migration ships a
+-- deliberately empty Down section rather than a hand-derived rollback --
+-- reconstructing the exact pre-migration schema/data shape for 94 files
+-- retroactively isn't worth doing when the historical state it would
+-- recreate has no operational value. New migrations going forward are
+-- expected to carry a real, tested Down.

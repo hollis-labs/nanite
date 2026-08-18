@@ -162,10 +162,10 @@ func TestAgentBrokerDecision_Insert_NilRow(t *testing.T) {
 	}
 }
 
-// TestMigration057_TableExists confirms the migration ran on a fresh store
+// TestMigration058_TableExists confirms the migration ran on a fresh store
 // and the table + indexes are present. Belt-and-suspenders against a future
 // rename or accidental delete of the migration file.
-func TestMigration057_TableExists(t *testing.T) {
+func TestMigration058_TableExists(t *testing.T) {
 	s := newTestStore(t)
 
 	var tableName string
@@ -197,25 +197,28 @@ func TestMigration057_TableExists(t *testing.T) {
 	if err := s.DB.QueryRow(
 		`SELECT name FROM sqlite_master WHERE type='table' AND name='broker_decisions'`,
 	).Scan(&tableName); err != nil {
-		t.Errorf("pre-existing broker_decisions table missing — migration 057 must not displace it: %v", err)
+		t.Errorf("pre-existing broker_decisions table missing — migration 058 must not displace it: %v", err)
 	}
 }
 
-// TestMigration057_Idempotent re-runs migration 057 directly against an
-// already-migrated store and confirms it's a true no-op (matches the
-// codebase convention: migrations re-run on every boot, no
-// schema_migrations bookkeeping).
-func TestMigration057_Idempotent(t *testing.T) {
-	dbPath := filepath.Join(t.TempDir(), "migration057.db")
+// TestMigration058_Idempotent re-runs migration 058's own SQL directly
+// against an already-migrated store and confirms it's a true no-op. Goose's
+// real ledger (see docs/engineering/architecture/05-storage-and-migrations.md)
+// now guarantees this migration only ever runs once against any given
+// database, but the underlying SQL's own idempotency (CREATE TABLE IF NOT
+// EXISTS not truncating existing data) is still worth verifying directly —
+// e.g. for `goose redo`, or as a pattern check for future migrations.
+func TestMigration058_Idempotent(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "migration058.db")
 	s, err := New(context.Background(), dbPath)
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
 	defer s.Close()
 
-	mig, err := migrationsFS.ReadFile("migrations/057_agent_broker_decisions.sql")
+	mig, err := migrationsFS.ReadFile("migrations/058_agent_broker_decisions.sql")
 	if err != nil {
-		t.Fatalf("read migration 057: %v", err)
+		t.Fatalf("read migration 058: %v", err)
 	}
 
 	// Seed a row before the re-run so we can confirm the re-run preserves
@@ -232,10 +235,9 @@ func TestMigration057_Idempotent(t *testing.T) {
 		t.Fatalf("seed row before re-run: %v", err)
 	}
 
-	// Apply each statement in the migration directly. Mirrors the runner's
-	// splitSQL+Exec loop so a parse-time issue (e.g. an accidental
-	// semicolon in a comment) would surface here too.
-	stmts := splitSQL(string(mig))
+	// Apply each statement in the migration directly, independent of
+	// goose, to probe the SQL's own idempotency.
+	stmts := splitSQLStatementsForTest(t, string(mig))
 	for _, stmt := range stmts {
 		stmt = strings.TrimSpace(stmt)
 		if stmt == "" {

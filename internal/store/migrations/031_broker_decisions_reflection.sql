@@ -1,3 +1,4 @@
+-- +goose Up
 -- Phase 5 / D3 (CW-20260419-0011): reasoning-augmented broker.
 --
 -- Extend `broker_decisions` so every request_tools call (and every selection
@@ -25,3 +26,13 @@ ALTER TABLE broker_decisions ADD COLUMN reflection_query TEXT;
 -- Index on outcome lets future mining jobs (Phase 4 of the ticket, deferred)
 -- scan halted/reflected rows efficiently without a full table walk.
 CREATE INDEX IF NOT EXISTS idx_broker_decisions_outcome ON broker_decisions(outcome);
+
+-- +goose Down
+-- No down migration: this file predates goose adoption (see
+-- docs/engineering/architecture/05-storage-and-migrations.md, "Migrations:
+-- adopting a real ledger"). Every pre-cutover migration ships a
+-- deliberately empty Down section rather than a hand-derived rollback --
+-- reconstructing the exact pre-migration schema/data shape for 94 files
+-- retroactively isn't worth doing when the historical state it would
+-- recreate has no operational value. New migrations going forward are
+-- expected to carry a real, tested Down.

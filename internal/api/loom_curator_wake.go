@@ -81,7 +81,9 @@ const loomCuratorInstanceSlug = "loom-curator"
 
 // loomCuratorWakeWorkspaceID: Nanite consolidated to a single dogfood
 // workspace by explicit operator decision on 2026-08-15 (migration
-// 087_consolidate_personal_workspace.sql; the sole seeded row is
+// 088_consolidate_personal_workspace.sql, renumbered from 087_... by
+// 09-adopt-goose-migrations's duplicate-051-prefix resolution; the sole
+// seeded row is
 // store/seed.go's {"default", "Default", ...}). durableWakeService.Wake
 // skips a wake with "workspace unavailable" when no WorkspaceID is supplied
 // and the instance has no prior session to inherit one from — which is

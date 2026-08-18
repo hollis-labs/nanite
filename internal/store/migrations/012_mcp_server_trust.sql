@@ -1,3 +1,4 @@
+-- +goose Up
 -- Phase 3 S4b (2026-04-16): MCP server trust-tier + environment allowlist.
 --
 -- Closes audit findings 07 (no trust-boundary validation) and 10 (env-var
@@ -37,3 +38,13 @@ ALTER TABLE user_settings ADD COLUMN tool_classifier_provider TEXT NOT NULL DEFA
 ALTER TABLE user_settings ADD COLUMN tool_classifier_model TEXT NOT NULL DEFAULT '';
 ALTER TABLE user_settings ADD COLUMN tool_classifier_timeout_ms INTEGER NOT NULL DEFAULT 500;
 ALTER TABLE user_settings ADD COLUMN context_overflow_recovery INTEGER NOT NULL DEFAULT 1;
+
+-- +goose Down
+-- No down migration: this file predates goose adoption (see
+-- docs/engineering/architecture/05-storage-and-migrations.md, "Migrations:
+-- adopting a real ledger"). Every pre-cutover migration ships a
+-- deliberately empty Down section rather than a hand-derived rollback --
+-- reconstructing the exact pre-migration schema/data shape for 94 files
+-- retroactively isn't worth doing when the historical state it would
+-- recreate has no operational value. New migrations going forward are
+-- expected to carry a real, tested Down.

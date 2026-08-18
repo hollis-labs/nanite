@@ -51,7 +51,9 @@
 // subagent, background job. Changes to the block content take effect on
 // the next dispatch; no DB write or migration re-flow is required.
 //
-// Migration 058 (058_universal_rules_extract.sql) and the demoted body in
+// Migration 059 (059_universal_rules_extract.sql, renumbered from
+// 058_... by 09-adopt-goose-migrations's duplicate-051-prefix resolution)
+// and the demoted body in
 // internal/agent/builtin/profiles/default.md track the historic
 // chat-role-harness body, NOT the universal-rules block here. They are
 // frozen artifacts of the pre-CW-20260512-0100 extraction and are

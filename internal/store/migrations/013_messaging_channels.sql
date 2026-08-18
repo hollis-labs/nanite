@@ -1,3 +1,4 @@
+-- +goose Up
 -- S7 T3: Messaging channels.
 --
 -- Introduces a transport-bucket column on the messaging table.
@@ -19,3 +20,13 @@ ALTER TABLE a2a_messages ADD COLUMN channel TEXT NOT NULL DEFAULT 'chat'
 -- without-channel queries get index use.
 CREATE INDEX IF NOT EXISTS idx_a2a_messages_channel
   ON a2a_messages(to_session_id, to_agent_id, channel, status, created_at DESC);
+
+-- +goose Down
+-- No down migration: this file predates goose adoption (see
+-- docs/engineering/architecture/05-storage-and-migrations.md, "Migrations:
+-- adopting a real ledger"). Every pre-cutover migration ships a
+-- deliberately empty Down section rather than a hand-derived rollback --
+-- reconstructing the exact pre-migration schema/data shape for 94 files
+-- retroactively isn't worth doing when the historical state it would
+-- recreate has no operational value. New migrations going forward are
+-- expected to carry a real, tested Down.

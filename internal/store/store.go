@@ -7,10 +7,10 @@ import (
 	"fmt"
 	"io/fs"
 	"path/filepath"
-	"sort"
-	"strings"
 
 	"github.com/hollis-labs/go-sqlite/sqlitekit"
+	"github.com/pressly/goose/v3"
+	"github.com/pressly/goose/v3/database"
 	_ "modernc.org/sqlite"
 )
 
@@ -64,188 +64,132 @@ func (s *Store) Close() error {
 	return s.DB.Close()
 }
 
+// legacyMigrationCutoverVersion is the highest goose migration version that
+// corresponds to a file converted from Nanite's pre-goose migration
+// mechanism (see docs/engineering/architecture/05-storage-and-migrations.md,
+// "Migrations: adopting a real ledger"). It is a fixed historical boundary,
+// not "however many files are embedded right now" — every migration file
+// numbered 1..legacyMigrationCutoverVersion existed, unchanged in effect, at
+// the moment this codebase adopted goose, so every database that ran any
+// pre-goose build of this codebase has already applied all of them via the
+// old swallow-errors mechanism (every migration file re-ran, unconditionally,
+// on every boot). seedLegacyLedger uses this constant to seed goose's ledger
+// for such a database without re-executing their SQL. It must never be
+// changed after the fact — new migrations just get numbered above it and
+// goose applies them for real, the normal way.
+const legacyMigrationCutoverVersion = 94
+
+// migrate runs every pending migration via goose (github.com/pressly/goose/v3)
+// against the embedded migrations/ directory.
+//
+// This replaces a custom runner that had no schema_migrations-equivalent
+// ledger: every migration file re-executed in full on every single process
+// boot, with idempotency achieved by swallowing specific SQL errors
+// ("duplicate column", "no such column"/"no such table" on DDL statements,
+// ALTER TABLE ... RENAME TO failures) plus an opt-in
+// "migrate:skip-if-column-exists" directive for migrations that recreate a
+// table to widen a CHECK constraint (SQLite has no ALTER-CHECK). That
+// mechanism caused a real production crash-loop (CW-20260817): three
+// migrations (019/065/067) each rebuilt subagent_runs from their own,
+// mutually-unaware historical schema, and the fix at the time only guarded
+// those three, leaving the identical rename-recreate-copy pattern in
+// 043/089 unguarded. See docs/engineering/architecture/05-storage-and-migrations.md.
+//
+// Cutover for pre-existing databases: goose has no first-class documented
+// mechanism for adopting it against a database that already has its schema
+// applied outside goose's own ledger (checked goose's own docs site and
+// bundled README — there is no baseline/adopt command). The approach used
+// here — and the standard community workaround for this scenario — is to
+// seed goose's own version table directly via its public database.Store
+// API, marking every migration up to legacyMigrationCutoverVersion as
+// already applied without executing their SQL, so goose does not attempt to
+// redo work a pre-existing database already has. A genuinely fresh database
+// has neither a goose ledger nor any of Nanite's application tables, so it
+// skips seeding entirely and runs every migration for real, starting from
+// version 1.
 func (s *Store) migrate() error {
-	entries, err := fs.ReadDir(migrationsFS, "migrations")
-	if err != nil {
-		return fmt.Errorf("read migrations dir: %w", err)
-	}
-
-	// Sort alphabetically so numbered prefixes determine order.
-	sort.Slice(entries, func(i, j int) bool {
-		return entries[i].Name() < entries[j].Name()
-	})
-
-	var files []string
-	for _, e := range entries {
-		if e.IsDir() || !strings.HasSuffix(e.Name(), ".sql") {
-			continue
-		}
-		files = append(files, "migrations/"+e.Name())
-	}
-
 	ctx := context.Background()
-	conn, err := s.DB.Conn(ctx)
+
+	migrationsDir, err := fs.Sub(migrationsFS, "migrations")
 	if err != nil {
-		return fmt.Errorf("acquire migration conn: %w", err)
+		return fmt.Errorf("sub migrations fs: %w", err)
 	}
-	defer conn.Close()
 
-	for _, f := range files {
-		data, err := migrationsFS.ReadFile(f)
-		if err != nil {
-			return fmt.Errorf("read migration %s: %w", f, err)
+	preExisting, err := s.isPreGooseDatabase(ctx)
+	if err != nil {
+		return fmt.Errorf("detect pre-goose database: %w", err)
+	}
+	if preExisting {
+		if err := s.seedLegacyLedger(ctx); err != nil {
+			return fmt.Errorf("seed legacy migration ledger: %w", err)
 		}
-		text := string(data)
+	}
 
-		// migrate:skip-if-column-exists lets a "recreate the table" migration
-		// (SQLite can't ALTER a CHECK constraint, so widening one means
-		// dropping/rebuilding the whole table — see migrations 019/065/067)
-		// skip itself once its target table has already moved past it.
-		// Without this, such a migration blindly rebuilds the table from its
-		// OWN historical, narrower column/CHECK set on every single boot (no
-		// schema_migrations table in this codebase — every file re-runs every
-		// time), silently dropping any column a later migration already added
-		// and resetting it to that later migration's default, and potentially
-		// hard-failing outright if live data already carries a status value
-		// only a later migration's CHECK permits (CW-20260817: subagent_runs
-		// crash-looped on a real 'stalled' row against migration 019's
-		// original 7-value CHECK once the reaper started using values 065
-		// added). On a genuinely fresh database the marker column doesn't
-		// exist yet, so this is a no-op and the migration runs exactly as
-		// before.
-		if table, column, ok := migrationSkipIfColumnDirective(text); ok {
-			exists, err := columnExists(ctx, conn, table, column)
-			if err != nil {
-				return fmt.Errorf("check skip-if-column-exists for %s: %w", f, err)
-			}
-			if exists {
-				continue
-			}
-		}
-
-		statements := splitSQL(text)
-		for _, stmt := range statements {
-			stmt = strings.TrimSpace(stmt)
-			if stmt == "" {
-				continue
-			}
-			if _, err := conn.ExecContext(ctx, stmt); err != nil {
-				// SQLite ALTER TABLE ADD COLUMN fails with "duplicate column"
-				// if the column already exists; treat as idempotent.
-				if strings.Contains(err.Error(), "duplicate column") {
-					continue
-				}
-				// SQLite ALTER TABLE DROP COLUMN fails with "no such column"
-				// if the column was already dropped; treat as idempotent.
-				// CREATE INDEX can also reference a column that a later migration
-				// dropped (e.g. migration 001 creates idx_a2a_inbox on to_agent,
-				// which migration 005 drops). Both are DDL-level idempotency cases.
-				// Gate this on DDL-only statements so DML typos (SELECT, UPDATE,
-				// INSERT, DELETE) are never silently swallowed.
-				upper := strings.ToUpper(stmt)
-				isDDLIdempotent := strings.Contains(upper, "DROP COLUMN") ||
-					strings.Contains(upper, "CREATE INDEX")
-				if isDDLIdempotent && strings.Contains(err.Error(), "no such column") {
-					continue
-				}
-				// ALTER TABLE ... RENAME TO is idempotent if the rename already
-				// happened. Two error shapes indicate this:
-				//   - "no such table: <src>" — source already renamed away.
-				//   - "already another table ... <dst>" — destination exists.
-				// Swallow both so migrations can re-run on every boot cleanly
-				// (no schema_migrations table in this codebase).
-				if strings.Contains(upper, "ALTER TABLE") && strings.Contains(upper, "RENAME TO") {
-					msg := err.Error()
-					if strings.Contains(msg, "no such table") ||
-						strings.Contains(msg, "already another table") {
-						continue
-					}
-				}
-				return fmt.Errorf("exec migration statement: %w\nSQL: %s", err, stmt)
-			}
-		}
+	provider, err := goose.NewProvider(goose.DialectSQLite3, s.DB, migrationsDir, goose.WithVerbose(false))
+	if err != nil {
+		return fmt.Errorf("create goose provider: %w", err)
+	}
+	if _, err := provider.Up(ctx); err != nil {
+		return fmt.Errorf("goose up: %w", err)
 	}
 	return nil
 }
 
-// migrateSkipIfColumnDirective is the leading-comment marker a migration
-// file can carry to opt into the skip-if-column-exists check in migrate().
-// Must be the file's first line, exactly: "-- migrate:skip-if-column-exists
-// <table> <column>".
-const migrateSkipIfColumnDirective = "-- migrate:skip-if-column-exists "
-
-// migrationSkipIfColumnDirective parses the directive described above from
-// a migration file's contents. Returns ok=false if the file doesn't start
-// with the marker.
-func migrationSkipIfColumnDirective(text string) (table, column string, ok bool) {
-	first, _, _ := strings.Cut(text, "\n")
-	first = strings.TrimSpace(first)
-	if !strings.HasPrefix(first, migrateSkipIfColumnDirective) {
-		return "", "", false
-	}
-	fields := strings.Fields(strings.TrimPrefix(first, migrateSkipIfColumnDirective))
-	if len(fields) != 2 {
-		return "", "", false
-	}
-	return fields[0], fields[1], true
-}
-
-// columnExists reports whether table has a column named column, via
-// PRAGMA table_info (SQLite has no parameterized form of PRAGMA, so table
-// is interpolated directly — it only ever comes from this package's own
-// embedded migration files today, but quoteIdentifier still escapes it as
-// a proper SQL identifier rather than trusting the caller, so this stays
-// safe if the directive is ever reused with a less-trusted table name).
-func columnExists(ctx context.Context, conn *sql.Conn, table, column string) (bool, error) {
-	rows, err := conn.QueryContext(ctx, fmt.Sprintf("PRAGMA table_info(%s)", quoteIdentifier(table)))
+// isPreGooseDatabase reports whether this database already has Nanite's
+// application schema (created by the old, pre-goose migration runner)
+// without yet having a goose ledger of its own — i.e. this is an existing
+// deployment being cut over to goose for the first time, not a genuinely
+// fresh database and not a database that was already cut over on a prior
+// boot.
+func (s *Store) isPreGooseDatabase(ctx context.Context) (bool, error) {
+	gooseTable, err := s.tableExists(ctx, goose.DefaultTablename)
 	if err != nil {
 		return false, err
 	}
-	defer rows.Close()
-	for rows.Next() {
-		var cid, notnull, pk int
-		var name, ctype string
-		var dflt sql.NullString
-		if err := rows.Scan(&cid, &name, &ctype, &notnull, &dflt, &pk); err != nil {
-			return false, err
-		}
-		if name == column {
-			return true, nil
-		}
+	if gooseTable {
+		// Already has a goose ledger (either cut over on a prior boot, or
+		// created fresh under goose from the start) — nothing to seed.
+		return false, nil
 	}
-	return false, rows.Err()
+	// sessions is created by migration 001 and has never been dropped or
+	// renamed by any later migration — a reliable signal that this database
+	// already ran the old migration mechanism to completion, as opposed to
+	// a genuinely fresh, empty database.
+	return s.tableExists(ctx, "sessions")
 }
 
-// quoteIdentifier escapes name as a double-quoted SQL identifier (embedded
-// double quotes doubled, per standard SQL identifier-escaping), for use in
-// contexts like PRAGMA statements where SQLite offers no bind-parameter
-// form for identifiers.
-func quoteIdentifier(name string) string {
-	return `"` + strings.ReplaceAll(name, `"`, `""`) + `"`
+func (s *Store) tableExists(ctx context.Context, name string) (bool, error) {
+	var count int
+	err := s.DB.QueryRowContext(ctx,
+		`SELECT count(*) FROM sqlite_master WHERE type='table' AND name=?`, name,
+	).Scan(&count)
+	if err != nil {
+		return false, fmt.Errorf("check table %q: %w", name, err)
+	}
+	return count > 0, nil
 }
 
-// splitSQL splits a SQL script on semicolons while keeping BEGIN...END blocks
-// (used by triggers) intact as single statements.
-func splitSQL(sql string) []string {
-	var stmts []string
-	var buf strings.Builder
-	depth := 0
-	for _, raw := range strings.Split(sql, ";") {
-		upper := strings.ToUpper(strings.TrimSpace(raw))
-		// Track BEGIN/END nesting so semicolons inside triggers don't split.
-		depth += strings.Count(upper, "BEGIN") - strings.Count(upper, "END")
-		if buf.Len() > 0 {
-			buf.WriteByte(';')
-		}
-		buf.WriteString(raw)
-		if depth <= 0 {
-			stmts = append(stmts, buf.String())
-			buf.Reset()
-			depth = 0
+// seedLegacyLedger marks every migration from 1 through
+// legacyMigrationCutoverVersion as already applied, without executing their
+// SQL, using goose's own database.Store implementation so the seeded ledger
+// has exactly the shape goose itself would create (same table, same
+// bootstrap version-0 row that goose's lazy table-creation path would
+// otherwise insert).
+func (s *Store) seedLegacyLedger(ctx context.Context) error {
+	verStore, err := database.NewStore(database.DialectSQLite3, goose.DefaultTablename)
+	if err != nil {
+		return fmt.Errorf("create goose version store: %w", err)
+	}
+	if err := verStore.CreateVersionTable(ctx, s.DB); err != nil {
+		return fmt.Errorf("create goose version table: %w", err)
+	}
+	if err := verStore.Insert(ctx, s.DB, database.InsertRequest{Version: 0}); err != nil {
+		return fmt.Errorf("insert goose bootstrap version: %w", err)
+	}
+	for v := int64(1); v <= legacyMigrationCutoverVersion; v++ {
+		if err := verStore.Insert(ctx, s.DB, database.InsertRequest{Version: v}); err != nil {
+			return fmt.Errorf("seed legacy migration version %d as applied: %w", v, err)
 		}
 	}
-	if buf.Len() > 0 {
-		stmts = append(stmts, buf.String())
-	}
-	return stmts
+	return nil
 }

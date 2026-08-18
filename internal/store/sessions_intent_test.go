@@ -7,7 +7,8 @@ import (
 
 // Glass-3 (CW-20260502-0011, SP-20260502-0001) — round-trip + enum validation
 // for sessions.intent helpers. Mirrors the SQL CHECK constraint in migration
-// 052_session_intent.sql.
+// 053_session_intent.sql (renumbered from 052_... by 09-adopt-goose-migrations's
+// duplicate-051-prefix resolution).
 
 func TestSessionIntent_RoundTrip(t *testing.T) {
 	s := newTestStore(t)

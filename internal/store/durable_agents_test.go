@@ -183,7 +183,7 @@ func TestDurableAgentEventsCreateListOrdering(t *testing.T) {
 	}
 }
 
-func TestMigration080DurableAgentTablesExist(t *testing.T) {
+func TestMigration081DurableAgentTablesExist(t *testing.T) {
 	s := newTestStore(t)
 	for _, table := range []string{"durable_agent_instances", "durable_agent_instance_sessions", "durable_agent_events"} {
 		var name string
@@ -196,7 +196,7 @@ func TestMigration080DurableAgentTablesExist(t *testing.T) {
 	}
 }
 
-func TestMigration084SeedsLegacyDurableAgentProfiles(t *testing.T) {
+func TestMigration085SeedsLegacyDurableAgentProfiles(t *testing.T) {
 	s := newTestStore(t)
 	profile := &AgentProfile{
 		Name:            "Legacy Proxima",
@@ -221,15 +221,17 @@ func TestMigration084SeedsLegacyDurableAgentProfiles(t *testing.T) {
 		t.Fatalf("CreateAgent regular profile: %v", err)
 	}
 
-	migration, err := os.ReadFile("migrations/084_seed_legacy_durable_agent_instances.sql")
+	// Renumbered from 084_... to 085_... by 09-adopt-goose-migrations's
+	// duplicate-051-prefix resolution; content unchanged.
+	migration, err := os.ReadFile("migrations/085_seed_legacy_durable_agent_instances.sql")
 	if err != nil {
-		t.Fatalf("read migration 083: %v", err)
+		t.Fatalf("read migration 085: %v", err)
 	}
 	if _, err := s.DB.Exec(string(migration)); err != nil {
-		t.Fatalf("exec migration 083: %v", err)
+		t.Fatalf("exec migration 085: %v", err)
 	}
 	if _, err := s.DB.Exec(string(migration)); err != nil {
-		t.Fatalf("exec migration 083 second run: %v", err)
+		t.Fatalf("exec migration 085 second run: %v", err)
 	}
 
 	list, err := s.ListDurableAgentInstances(false)
@@ -246,7 +248,7 @@ func TestMigration084SeedsLegacyDurableAgentProfiles(t *testing.T) {
 	if seeded == nil {
 		t.Fatalf("seeded instance not found in %+v", list)
 	}
-	// CW-20260526-0003: migration 084 no longer stamps Provider/Model
+	// CW-20260526-0003: migration 085 no longer stamps Provider/Model
 	// fallbacks when the profile leaves them blank — runtime resolution
 	// via ResolveProviderAndModel walks user_settings → providers.default_
 	// model at request time. The profile in this test has empty

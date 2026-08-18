@@ -772,7 +772,26 @@ func (s *chatServiceImpl) HandleMessage(ctx context.Context, sessionID, content 
 	// provider rate-limit budget and look like stalls from the UI
 	// (CW-20260418-0043). The lifecycle manager's shutdown ctx is bridged
 	// inside launchGeneration so process Shutdown still drains cleanly.
-	s.launchGeneration("handleMessage.generateResponse", sessionID, assistantMsgID, content, ch, dispatcher.CallerChat)
+	//
+	// HandleMessage is shared by two real callers with two different
+	// correct CallerType values: internal/api/harness_v1.go and
+	// internal/api/messages.go (real end-user HTTP handlers — always
+	// CallerChat, and they stamp nothing on ctx) and
+	// chatDurableAgentRuntimeController.SendMessage (a durable agent's
+	// scheduled wake delivery — background work, not a user typing into
+	// chat, so it stamps dispatcher.CallerBackground onto ctx before
+	// calling in). Prefer whatever valid CallerType arrives on ctx and
+	// fall back to CallerChat — mirrors the existing ambient-ctx +
+	// documented-fallback convention chat_generate.go's request_build
+	// slog already uses for dispatcher.CallerTypeFromContext, except the
+	// fallback here must be a *valid* CallerType (not "unknown") because
+	// this value is actually dispatched, not just logged — Dispatcher.Run
+	// rejects an empty/invalid CallerType outright.
+	callerType := dispatcher.CallerChat
+	if ct := dispatcher.CallerTypeFromContext(ctx); ct.Valid() {
+		callerType = ct
+	}
+	s.launchGeneration("handleMessage.generateResponse", sessionID, assistantMsgID, content, ch, callerType)
 
 	return assistantMsgID, nil
 }

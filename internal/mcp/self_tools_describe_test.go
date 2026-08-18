@@ -264,7 +264,7 @@ func TestNaniteToolDescribe_ShowCardExamplesCoverAllCoreTypes(t *testing.T) {
 			seen[typ] = true
 		}
 	}
-	// The 15 core card types listed in CLAUDE.md §"Known envelope types"
+	// The 14 core card types listed in CLAUDE.md §"Known envelope types"
 	// (excluding plugin types and runtime-only envelopes). Each must
 	// have at least one golden example so the describe path can show
 	// the agent a working data shape.
@@ -276,7 +276,6 @@ func TestNaniteToolDescribe_ShowCardExamplesCoverAllCoreTypes(t *testing.T) {
 		"error-report",
 		"approval-card",
 		"proposal-card",
-		"question-form",
 		// Phase 7 primitives
 		"info-card",
 		"list-card",

@@ -1834,30 +1834,6 @@ func (s *chatServiceImpl) generateResponse(ctx context.Context, sessionID, assis
 		}
 	}
 
-	// For question-form envelopes emitted by the LLM, create EnvelopeInstance records
-	// so the response path (POST /api/envelopes/:id/respond) can receive answers and
-	// prior_response can be injected on reload. The id is written back into the struct
-	// before the envelopeJSON is saved, so the frontend gets an addressable envelope.
-	for i, env := range envelopes {
-		if env.Type != "question-form" || env.ID != "" {
-			continue
-		}
-		payload, perr := json.Marshal(env)
-		if perr != nil {
-			continue
-		}
-		inst := &store.EnvelopeInstance{
-			SessionID:    sessionID,
-			EnvelopeType: env.Type,
-			EnvelopeJSON: string(payload),
-		}
-		if cerr := s.store.CreateEnvelopeInstance(inst); cerr != nil {
-			slog.Warn("chat-service: failed to create envelope instance", "type", env.Type, "err", cerr)
-			continue
-		}
-		envelopes[i].ID = inst.ID
-	}
-
 	var envelopeJSON string
 	if len(envelopes) > 0 {
 		if data, err := json.Marshal(envelopes); err == nil {
@@ -1914,8 +1890,8 @@ func (s *chatServiceImpl) generateResponse(ctx context.Context, sessionID, assis
 	// Note: we do NOT call CreateEnvelopeInstance here. show_card envelopes
 	// are passive (no response routing) and are already persisted as part of
 	// the assistant message's `envelopes` field. Persistence stays the
-	// responsibility of interactive paths (approval / question-form /
-	// elicitation) where the row ID is needed for response endpoints.
+	// responsibility of interactive paths (approval / elicitation) where the
+	// row ID is needed for response endpoints.
 	for _, env := range envelopes {
 		if env.Target == "" && env.RenderTarget == "" && env.Mode == "" && env.RenderTargetBlocked == "" {
 			continue

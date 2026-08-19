@@ -88,10 +88,7 @@ var describeRelations = map[string]struct {
 	relatedSkills []string
 }{
 	"card_show": {
-		relatedTools: []string{"giphy_search", "panel_open"},
-	},
-	"giphy_search": {
-		relatedTools: []string{"card_show"},
+		relatedTools: []string{"panel_open"},
 	},
 	"todo_create": {
 		relatedTools: []string{"todo_update", "todo_list", "plan_create"},

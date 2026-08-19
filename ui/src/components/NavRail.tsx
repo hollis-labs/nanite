@@ -23,7 +23,6 @@ export function NavRail() {
   const [activeItem, setActiveItem] = useState<string>('chat')
   const pluginNavItems = usePluginSlots('nav-rail')
 
-  const activeWorkspaceId = useAppStore((s) => s.activeWorkspaceId)
   const setActiveSession = useAppStore((s) => s.setActiveSession)
   const currentPage = useLayoutStore((s) => s.currentPage)
   const setCurrentPage = useLayoutStore((s) => s.setCurrentPage)
@@ -33,7 +32,6 @@ export function NavRail() {
 
   const createSessionMutation = useMutation({
     mutationFn: () => api.createSession({
-      workspace_id: activeWorkspaceId!,
       provider: userSettings?.default_provider || undefined,
       model: userSettings?.default_model || undefined,
       agent_id: userSettings?.default_agent || undefined,
@@ -83,7 +81,7 @@ export function NavRail() {
                 }`}
                 onClick={() => {
                   if (id === 'new') {
-                    if (activeWorkspaceId) createSessionMutation.mutate()
+                    createSessionMutation.mutate()
                   } else if (id === 'search') {
                     window.dispatchEvent(new CustomEvent('open-search'))
                   } else if (id === 'settings') {

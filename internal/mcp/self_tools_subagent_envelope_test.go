@@ -766,7 +766,7 @@ func parseEnvelopeFromResult(t *testing.T, res *ToolResult) subagent.ResultEnvel
 // async/api modes.
 func TestCallSpawnSubagent_ParentAgentIDFromCallerProfile(t *testing.T) {
 	st := newSubagentTestTransport(t, subagent.EchoRunner{})
-	ctx := WithCallerProfile(context.Background(), "ws-1", "agent-from-ctx")
+	ctx := WithCallerProfile(context.Background(), "agent-from-ctx")
 
 	res, err := st.callSpawnSubagent(ctx, map[string]any{
 		"parent_session_id": "sess-1",
@@ -803,7 +803,7 @@ func TestCallSpawnSubagent_ParentAgentIDFromCallerProfile(t *testing.T) {
 // emit-react postmortem: real production incident, not a hypothetical.
 func TestCallSpawnSubagent_CtxParentAgentIDOverridesExplicitArg(t *testing.T) {
 	st := newSubagentTestTransport(t, subagent.EchoRunner{})
-	ctx := WithCallerProfile(context.Background(), "ws-1", "agent-from-ctx")
+	ctx := WithCallerProfile(context.Background(), "agent-from-ctx")
 
 	res, err := st.callSpawnSubagent(ctx, map[string]any{
 		"parent_session_id": "sess-1",

@@ -216,9 +216,8 @@ func TestRegenerateBootDirSlots_WritesAtomically(t *testing.T) {
 	}
 
 	agent := &store.AgentProfile{Name: "test-agent", Description: "for tests"}
-	mode := &store.AgentMode{Name: "code", PromptAddendum: "be precise"}
 
-	if err := s.regenerateBootDirSlots("sess-regen", bootDir, agent, mode); err != nil {
+	if err := s.regenerateBootDirSlots("sess-regen", bootDir, agent); err != nil {
 		t.Fatalf("regenerateBootDirSlots: %v", err)
 	}
 
@@ -244,7 +243,7 @@ func TestRegenerateBootDirSlots_WritesAtomically(t *testing.T) {
 // the working directory.
 func TestRegenerateBootDirSlots_RejectsEmptyBootDir(t *testing.T) {
 	s := &chatServiceImpl{}
-	if err := s.regenerateBootDirSlots("sess-x", "", &store.AgentProfile{Name: "x"}, nil); err == nil {
+	if err := s.regenerateBootDirSlots("sess-x", "", &store.AgentProfile{Name: "x"}); err == nil {
 		t.Fatal("expected error for empty bootDir")
 	}
 }
@@ -258,29 +257,31 @@ func TestRegenerateBootDirSlots_RejectsNilAgent(t *testing.T) {
 	if err := os.MkdirAll(filepath.Join(bootDir, ".sandbox"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.regenerateBootDirSlots("sess-x", bootDir, nil, nil); err == nil {
+	if err := s.regenerateBootDirSlots("sess-x", bootDir, nil); err == nil {
 		t.Fatal("expected error for nil agent")
 	}
 }
 
-// TestBootSessionRole_ModeBeatsAgent verifies the role derivation precedence:
-// mode slug wins, then agent slug, then empty.
-func TestBootSessionRole_ModeBeatsAgent(t *testing.T) {
+// TestBootSessionRole_AgentSlugOrEmpty verifies the role derivation:
+// agent slug, or empty when there's no agent / no slug.
+//
+// Phase 0 item 21 ("Cut Modes, in full") deleted store.AgentMode and the
+// mode-slug-wins-over-agent-slug precedence this test used to cover
+// (formerly TestBootSessionRole_ModeBeatsAgent) — bootSessionRole no
+// longer takes a mode argument.
+func TestBootSessionRole_AgentSlugOrEmpty(t *testing.T) {
 	cases := []struct {
 		name string
 		ap   *store.AgentProfile
-		mode *store.AgentMode
 		want string
 	}{
-		{"mode wins", &store.AgentProfile{Slug: "agent-x"}, &store.AgentMode{Slug: "mode-y"}, "mode-y"},
-		{"agent fallback", &store.AgentProfile{Slug: "agent-x"}, nil, "agent-x"},
-		{"empty mode skipped", &store.AgentProfile{Slug: "agent-x"}, &store.AgentMode{Slug: ""}, "agent-x"},
-		{"both empty", &store.AgentProfile{}, &store.AgentMode{}, ""},
-		{"both nil", nil, nil, ""},
+		{"agent slug", &store.AgentProfile{Slug: "agent-x"}, "agent-x"},
+		{"empty slug", &store.AgentProfile{}, ""},
+		{"nil agent", nil, ""},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			if got := bootSessionRole(tc.ap, tc.mode); got != tc.want {
+			if got := bootSessionRole(tc.ap); got != tc.want {
 				t.Fatalf("got %q, want %q", got, tc.want)
 			}
 		})
@@ -291,7 +292,7 @@ func TestBootSessionRole_ModeBeatsAgent(t *testing.T) {
 // surfaces a clear error rather than panicking on nil dereference.
 func TestDriveBootSession_RejectsMissingDeps(t *testing.T) {
 	s := &chatServiceImpl{}
-	_, err := s.driveBootSession(context.Background(), "sess", &store.Session{}, &store.AgentProfile{Slug: "x"}, nil, nil, "hello", 0, "")
+	_, err := s.driveBootSession(context.Background(), "sess", &store.Session{}, &store.AgentProfile{Slug: "x"}, nil, "hello", 0, "")
 	if err == nil {
 		t.Fatal("expected error when agent runtime not wired")
 	}
@@ -307,7 +308,7 @@ func TestDriveBootSession_IterationGreaterThanZero(t *testing.T) {
 		agentDeps:        &runtimeagent.Dependencies{},
 		agentEventBridge: &agentEventBridge{streams: NewStreamManager()},
 	}
-	ch, err := s.driveBootSession(context.Background(), "sess", &store.Session{}, &store.AgentProfile{Slug: "x"}, nil, nil, "ignored", 1, "")
+	ch, err := s.driveBootSession(context.Background(), "sess", &store.Session{}, &store.AgentProfile{Slug: "x"}, nil, "ignored", 1, "")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}

@@ -93,7 +93,7 @@ func TestAssembleSlotSources_UniversalRulesInSlotUniversal(t *testing.T) {
 	}
 
 	cb := &ContextClient{Store: st}
-	sources, err := cb.AssembleSlotSources(context.Background(), session, emptyProfile, nil, nil, nil)
+	sources, err := cb.AssembleSlotSources(context.Background(), session, emptyProfile)
 	if err != nil {
 		t.Fatalf("AssembleSlotSources: %v", err)
 	}
@@ -171,7 +171,7 @@ func TestAssembleSlotSources_UniversalSlotEmittedForSubagentDispatch(t *testing.
 	}
 
 	cb := &ContextClient{Store: st}
-	sources, err := cb.AssembleSlotSources(context.Background(), session, researcherProfile, nil, nil, nil)
+	sources, err := cb.AssembleSlotSources(context.Background(), session, researcherProfile)
 	if err != nil {
 		t.Fatalf("AssembleSlotSources: %v", err)
 	}

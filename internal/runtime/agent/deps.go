@@ -86,18 +86,18 @@ type Dependencies struct {
 	// Telemetry receives PTY restart and lifecycle observability events.
 	Telemetry Telemetry
 
-	// LiveSessions, when non-nil, lets SweepOrphans probe the in-process
+	// LiveSessions, when non-nil, lets orphansweep.SweepOrphans probe the in-process
 	// session registry for runtime IDs whose persisted PID is 0 (codex-
 	// style adapters never report a pid). Production wires this against
 	// agentsessions.Manager.Get; tests pass a fake. Optional — nil leaves
-	// SweepOrphans falling back to updated_at staleness alone, which
+	// orphansweep.SweepOrphans falling back to updated_at staleness alone, which
 	// still reconciles pre-restart pid=0 rows once they age past the
 	// grace window.
 	LiveSessions LiveSessionChecker
 
 	// Recovery, when non-nil, observes lib-level restart attempts and
 	// terminal session exits. Implemented by the in-process recovery
-	// broker (internal/runtime/agent/recovery). Optional — nil leaves
+	// broker (internal/recovery/broker). Optional — nil leaves
 	// the chat harness's existing per-turn recoverable-error handling
 	// as the only remediation path.
 	Recovery RecoveryHooks
@@ -107,9 +107,26 @@ type Dependencies struct {
 	SandboxBaseProfile sandbox.Profile
 }
 
+// LiveSessionChecker reports whether the in-process session registry has
+// an entry for runtimeID. Production wires this against
+// agentsessions.Manager.Get; tests pass a fake. Optional in Dependencies —
+// nil means orphansweep.SweepOrphans falls back to PID + updated_at
+// staleness only, which still catches the common post-restart case (a
+// fresh process has an empty registry, so every persisted row is "no live
+// session").
+//
+// Declared here (rather than in internal/recovery/orphansweep, which
+// implements the sweep logic that consumes it) because Dependencies.
+// LiveSessions references it directly — moving it out would force this
+// package to import orphansweep, which itself must import this package
+// for agent.Dependencies/agent.RuntimeRow, creating a cycle.
+type LiveSessionChecker interface {
+	IsLive(runtimeID string) bool
+}
+
 // RecoveryHooks is the in-process subagent recovery broker's hook
-// surface. Implemented by recovery.Broker; declared here so the agent
-// package can hold the contract without importing recovery (which
+// surface. Implemented by broker.Broker; declared here so the agent
+// package can hold the contract without importing broker (which
 // would create an import cycle).
 //
 // OnRestart is invoked from agent.Boot's SupervisorOptions.OnRestart
@@ -158,14 +175,25 @@ type RuntimeStore interface {
 	GetCheckpoint(checkpointID string) (*RuntimeCheckpoint, error)
 
 	// ListRunningRows returns the persisted lifecycle rows currently in
-	// state="launching" or state="running". Used by SweepOrphans at
+	// state="launching" or state="running". Used by orphansweep.SweepOrphans at
 	// daemon bootstrap to reconcile rows whose PID is no longer alive.
 	ListRunningRows() ([]*RuntimeRow, error)
 
 	// MarkRuntimeOrphaned transitions a runtime row to state="orphaned"
-	// with the supplied reason. SweepOrphans calls this for rows whose
+	// with the supplied reason. orphansweep.SweepOrphans calls this for rows whose
 	// persisted PID is no longer alive.
 	MarkRuntimeOrphaned(runtimeID, reason string) error
+
+	// LogEvent appends a row to the shared event_log postmortem trail.
+	// orphansweep.SweepOrphans calls this alongside MarkRuntimeOrphaned so
+	// every reconciliation leaves a queryable, reasoning-populated record
+	// (docs/engineering/architecture/06-session-lifecycle-and-recovery.md:
+	// "extend event_log logging to all four [recovery mechanisms]").
+	// sessionID is the runtime row's ID (equal to the chat session ID for
+	// ModeLongLived rows; a scoped subagent/background run ID otherwise —
+	// event_log.session_id carries no FK constraint, so this is always
+	// safe to write). metadata should be a JSON object, not a bare string.
+	LogEvent(sessionID, eventType, category, detail, metadata string)
 }
 
 // RuntimeRow is the lifecycle-tracking row Boot writes. Distinct from
@@ -173,7 +201,7 @@ type RuntimeStore interface {
 // chat session: ModeBackground tasks, scheduler-dispatched executors, and
 // nested subagents all create runtime rows without owning a chat row.
 //
-// UpdatedAt is the last persistence-side modification timestamp. SweepOrphans
+// UpdatedAt is the last persistence-side modification timestamp. orphansweep.SweepOrphans
 // uses it as the staleness signal for rows where PID == 0 — codex-style
 // runtimes never persist a pid, so signal-0 liveness can't speak for them;
 // the in-memory session-liveness probe + an `updated_at` age threshold do

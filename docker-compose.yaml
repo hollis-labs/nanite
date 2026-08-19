@@ -8,7 +8,6 @@ services:
     environment:
       - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
       - OPENAI_API_KEY=${OPENAI_API_KEY:-}
-      - OLLAMA_HOST=${OLLAMA_HOST:-}
       - NANITE_AUTH_USER=${NANITE_AUTH_USER:-}
       - NANITE_AUTH_PASSWORD=${NANITE_AUTH_PASSWORD:-}
     restart: unless-stopped

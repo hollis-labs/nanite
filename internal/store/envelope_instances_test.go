@@ -6,19 +6,13 @@ import (
 	"testing"
 )
 
-// seedEnvelopeTestSession inserts the workspace + session rows the
+// seedEnvelopeTestSession inserts the session row the
 // envelope_instances.session_id foreign key requires.
 func seedEnvelopeTestSession(t *testing.T, s *Store, sessionID string) {
 	t.Helper()
 	if _, err := s.DB.Exec(
-		`INSERT INTO workspaces (id, name, created_at) VALUES (?, ?, CURRENT_TIMESTAMP)`,
-		"ws-env-"+sessionID, "env",
-	); err != nil {
-		t.Fatalf("seed workspace: %v", err)
-	}
-	if _, err := s.DB.Exec(
-		`INSERT INTO sessions (id, workspace_id, title, short_code, created_at) VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)`,
-		sessionID, "ws-env-"+sessionID, "t", "sc-"+sessionID,
+		`INSERT INTO sessions (id, title, short_code, created_at) VALUES (?, ?, ?, CURRENT_TIMESTAMP)`,
+		sessionID, "t", "sc-"+sessionID,
 	); err != nil {
 		t.Fatalf("seed session: %v", err)
 	}
@@ -30,8 +24,8 @@ func TestEnvelopeInstance_CreateAndGet(t *testing.T) {
 
 	inst := &EnvelopeInstance{
 		SessionID:    "sess-1",
-		EnvelopeType: "ticket-form",
-		EnvelopeJSON: `{"kind":"envelope","version":1,"type":"ticket-form"}`,
+		EnvelopeType: "metric-card",
+		EnvelopeJSON: `{"kind":"envelope","version":1,"type":"metric-card"}`,
 	}
 	if err := s.CreateEnvelopeInstance(inst); err != nil {
 		t.Fatalf("create: %v", err)
@@ -47,7 +41,7 @@ func TestEnvelopeInstance_CreateAndGet(t *testing.T) {
 	if err != nil {
 		t.Fatalf("get: %v", err)
 	}
-	if got.SessionID != "sess-1" || got.EnvelopeType != "ticket-form" {
+	if got.SessionID != "sess-1" || got.EnvelopeType != "metric-card" {
 		t.Fatalf("fields not preserved: %+v", got)
 	}
 	if got.RespondedAt != nil || got.ResponseStatus != "" || got.ResponseJSON != "" {

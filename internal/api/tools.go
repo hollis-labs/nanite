@@ -2,7 +2,6 @@ package api
 
 import (
 	"net/http"
-	"strconv"
 
 	pluginpkg "github.com/hollis-labs/nanite/internal/plugin"
 )
@@ -64,7 +63,7 @@ func (a *API) handleSelectTools(w http.ResponseWriter, r *http.Request) {
 
 	// No per-session model context available at the API boundary — pass 0 so
 	// SelectTools falls back to DefaultContextWindowTokens.
-	tools, _, err := a.Services.ToolClient.SelectTools(r.Context(), req.Intent, req.Hints, "", "", 0)
+	tools, err := a.Services.ToolClient.SelectTools(r.Context(), req.Intent, req.Hints, "", "", 0)
 	if err != nil {
 		a.errorResp(w, http.StatusInternalServerError, err.Error())
 		return
@@ -90,8 +89,28 @@ func (a *API) handleRefreshTools(w http.ResponseWriter, r *http.Request) {
 	a.jsonResp(w, http.StatusOK, diff)
 }
 
-// handleListAgentTools returns tools available to a specific agent (filtered by permissions).
+// handleListAgentTools returns tools available to a specific agent, with an
+// `allowed` flag per tool.
 // GET /api/agents/{id}/tools
+//
+// The `allowed` computation mirrors internal/service/tool.go's
+// SelectForAgent/filterToolsByAgentTools and
+// internal/service/tool_execution_rules.go's
+// enforceExecutionRulesViaAgentTools (TASKS/phase-4/05, TASKS/phase-5/01):
+// agent_tools (+ the known_tools.always_included escape hatch) is the sole,
+// unconditional gate for every agentID --
+// TASKS/adhoc/02-remove-tool-permissions-collapse-to-agent-tools.md removed
+// the legacy tool_permissions/CheckPermission fallback that used to apply
+// here for an agentID with no real agent_profiles row (only ever a
+// file-based agent, eliminated by
+// TASKS/adhoc/01-eliminate-file-based-agent-runtime.md). A genuinely
+// unknown agentID now simply reads back zero agent_tools grants (fail
+// closed), not "everything allowed."
+//
+// This was the third and, per TASKS/phase-5/10's own audit, final
+// operator-facing read surface still reporting the stale pre-agent_tools
+// answer -- TASKS/phase-5/10-fix-list-agent-tools-endpoint-stale-
+// permissions-view.md's Work Log has the live-dogfeed gap that found it.
 func (a *API) handleListAgentTools(w http.ResponseWriter, r *http.Request) {
 	agentID := r.PathValue("id")
 
@@ -100,9 +119,7 @@ func (a *API) handleListAgentTools(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Get all tools and filter by agent permissions.
 	allTools := a.Services.ToolClient.ListTools()
-	perms := a.Services.ToolClient.GetPermissions(agentID)
 
 	type toolItem struct {
 		Name        string `json:"name"`
@@ -111,41 +128,36 @@ func (a *API) handleListAgentTools(w http.ResponseWriter, r *http.Request) {
 	}
 
 	items := make([]toolItem, 0, len(allTools))
+
+	granted := make(map[string]bool)
+	always := make(map[string]bool)
+	if a.Services.Store != nil {
+		if names, err := a.Services.Store.ListAgentToolNames(r.Context(), agentID); err == nil {
+			for _, n := range names {
+				granted[n] = true
+			}
+		}
+		// known_tools.always_included escape hatch (request_tools/
+		// tool_list/tool_describe) -- must read as allowed regardless of
+		// agent_tools grant membership, mirroring
+		// resolveAlwaysIncludedTools/enforceExecutionRulesViaAgentTools.
+		if rows, err := a.Services.Store.ListAlwaysIncludedKnownTools(r.Context()); err == nil {
+			for _, kt := range rows {
+				if kt.Status == "available" {
+					always[kt.Name] = true
+				}
+			}
+		}
+	}
 	for _, t := range allTools {
-		allowed := perms.CheckPermission(t.Name)
 		items = append(items, toolItem{
 			Name:        t.Name,
 			Description: t.Description,
-			Allowed:     allowed,
+			Allowed:     granted[t.Name] || always[t.Name],
 		})
 	}
 
 	a.jsonResp(w, http.StatusOK, items)
-}
-
-// handleListBrokerDecisions returns broker decision logs for a session.
-// GET /api/broker/decisions?session_id=X&limit=N
-func (a *API) handleListBrokerDecisions(w http.ResponseWriter, r *http.Request) {
-	sessionID := r.URL.Query().Get("session_id")
-	if sessionID == "" {
-		a.errorResp(w, http.StatusBadRequest, "session_id is required")
-		return
-	}
-
-	limit := 50
-	if ls := r.URL.Query().Get("limit"); ls != "" {
-		if n, err := strconv.Atoi(ls); err == nil && n > 0 {
-			limit = n
-		}
-	}
-
-	decisions, err := a.Services.Store.ListBrokerDecisions(sessionID, limit)
-	if err != nil {
-		a.errorResp(w, http.StatusInternalServerError, err.Error())
-		return
-	}
-
-	a.jsonResp(w, http.StatusOK, decisions)
 }
 
 // handleGetToolLoadPreferences returns the user's tool load type overrides.

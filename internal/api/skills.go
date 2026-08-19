@@ -177,8 +177,14 @@ func (a *API) handleAssignAgentSkill(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Verify agent exists.
-	if _, err := a.Services.Agents.Get(r.Context(), agentID); err != nil {
+	// Verify agent exists as a real agent_profiles DB row directly against
+	// the store (a.Services.Agents.Get is equivalent post-TASKS/adhoc/01-
+	// eliminate-file-based-agent-runtime.md -- it is a plain DB passthrough
+	// now too -- but this direct call is kept as the explicit, load-bearing
+	// check: agent_skills.agent_id carries a real FK to agent_profiles(id)
+	// (Phase 1 #05), so the existence check here must match what the FK
+	// actually enforces, independent of whatever AgentService does).
+	if _, err := a.Services.Store.GetAgent(agentID); err != nil {
 		a.errorResp(w, http.StatusNotFound, "agent not found")
 		return
 	}

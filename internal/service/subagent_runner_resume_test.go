@@ -33,7 +33,7 @@ func TestChatRunner_ResumeReusesChildSession(t *testing.T) {
 
 	st := &recordingSessionStore{
 		parents: map[string]*store.Session{
-			"sess-parent": {ID: "sess-parent", WorkspaceID: "ws-1"},
+			"sess-parent": {ID: "sess-parent"},
 		},
 	}
 	runner := &ChatRunner{
@@ -95,7 +95,7 @@ func TestChatRunner_ResumeAppendsContinuationPrompt(t *testing.T) {
 	}}
 
 	st := &recordingSessionStore{
-		parents: map[string]*store.Session{"sess-parent": {ID: "sess-parent", WorkspaceID: "ws-1"}},
+		parents: map[string]*store.Session{"sess-parent": {ID: "sess-parent"}},
 	}
 	runner := &ChatRunner{
 		agents: &stubAgentReaderForRunner{agents: map[string]*store.AgentProfile{
@@ -158,7 +158,7 @@ func TestChatRunner_FirstAttemptCreatesChildSession(t *testing.T) {
 		{Type: "stream_end"},
 	}}
 	st := &recordingSessionStore{
-		parents: map[string]*store.Session{"sess-parent": {ID: "sess-parent", WorkspaceID: "ws-1"}},
+		parents: map[string]*store.Session{"sess-parent": {ID: "sess-parent"}},
 	}
 	persistCalled := 0
 	runner := &ChatRunner{

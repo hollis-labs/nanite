@@ -68,9 +68,13 @@ func TestInferProvider(t *testing.T) {
 		{"gpt-4", "openai"},
 		{"o1-preview", "openai"},
 		{"o3-mini", "openai"},
-		{"llama3", "ollama"},
-		{"mistral-7b", "ollama"},
-		{"gemma-2b", "ollama"},
+		// Ollama routing was removed 2026-08-18 (TASKS/phase-0/
+		// 05-remove-ollama-routing.md) — it resolved to a provider that was
+		// never registered. These now fall through to the default floor.
+		{"llama3", "anthropic"},
+		{"mistral-7b", "anthropic"},
+		{"gemma-2b", "anthropic"},
+		{"custom-model:latest", "anthropic"},
 		{"claude-sonnet-4-20250514", "anthropic"},
 		{"", "anthropic"},
 	}
@@ -180,23 +184,23 @@ func TestParseAgentConstraints(t *testing.T) {
 	// CW-20260512-0123 (SP-20260512-0011 W3): legacy keys
 	// `max_iterations` / `max_time_seconds` / `retry_budget` are no
 	// longer fields on AgentConstraints; json.Unmarshal silently
-	// drops them. The remaining knobs are the Phase-4 chat-loop
-	// runaway breakers (max_turns, hard_ceiling, *_fail_cap, idle).
+	// drops them. Phase 0 item 12 (2026-08-18) removed `max_turns` too
+	// (soft/telemetry-only, never gated the loop). The remaining
+	// knobs are the Phase-4 chat-loop runaway breakers (hard_ceiling,
+	// *_fail_cap, idle).
 	c := ParseAgentConstraints("")
-	if c.MaxTurns != 0 {
-		t.Errorf("empty constraints: MaxTurns = %d, want 0", c.MaxTurns)
+	if c.HardCeiling != 0 {
+		t.Errorf("empty constraints: HardCeiling = %d, want 0", c.HardCeiling)
 	}
 
 	c = ParseAgentConstraints(`{"max_iterations":5,"max_turns":10,"max_time_seconds":300,"retry_budget":2,"hard_ceiling":500}`)
-	if c.MaxTurns != 10 {
-		t.Errorf("MaxTurns = %d, want 10", c.MaxTurns)
-	}
 	if c.HardCeiling != 500 {
 		t.Errorf("HardCeiling = %d, want 500", c.HardCeiling)
 	}
-	// Legacy keys are silently dropped by json.Unmarshal because they
-	// are no longer struct fields — surfaced via validation warnings
-	// at the API layer (internal/agentvalidation/validation.go).
+	// Legacy keys (including the now-removed max_turns) are silently
+	// dropped by json.Unmarshal because they are no longer struct
+	// fields — surfaced via validation warnings at the API layer
+	// (internal/agentvalidation/validation.go).
 
 	c = ParseAgentConstraints(`{"subagent_completion_policy":"auto_summarize"}`)
 	if c.SubagentCompletionPolicy != SubagentPolicyAutoSummarize {

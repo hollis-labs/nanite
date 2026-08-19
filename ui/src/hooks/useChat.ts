@@ -9,7 +9,6 @@ import type {
   ChatErrorCode,
   Envelope,
   Message,
-  ModeSuggestion,
   PluginEnvelopeItem,
   StreamEvent,
   ToolWarning,
@@ -46,8 +45,6 @@ const SSE = {
   PLUGIN_ENVELOPE: "plugin_envelope",
   /** J8 v1 (CW-20260426-0006) — agent-driven panel open/close/mode signals. */
   PANEL_SIGNAL: "panel_signal",
-  /** B2 (CW-20260428-0010) — non-binding mode-classifier suggestion. */
-  MODE_SUGGESTION: "mode_suggestion",
 } as const;
 
 function makeChatError(
@@ -622,25 +619,6 @@ export function useChat(sessionId: string | null) {
             }
           } catch (err) {
             console.warn("[useChat] Failed to parse panel_signal event:", e.data, err);
-          }
-        });
-
-        es.addEventListener(SSE.MODE_SUGGESTION, (e: MessageEvent) => {
-          // B2 (CW-20260428-0010): non-binding classifier signal. We stage
-          // the payload in the chat store for B3 to consume; B2 itself
-          // performs no UI action beyond a dev-mode debug log.
-          markStreamActivity();
-          recordEventId(e.data as string);
-          try {
-            const evt: StreamEvent = JSON.parse(e.data as string);
-            if (!evt.data) return;
-            const payload = JSON.parse(evt.data) as ModeSuggestion;
-            store().setPendingModeSuggestion(sessionId, payload);
-            if (import.meta.env?.DEV) {
-              console.debug("[useChat] mode_suggestion", payload);
-            }
-          } catch (err) {
-            console.warn("[useChat] Failed to parse mode_suggestion event:", e.data, err);
           }
         });
 

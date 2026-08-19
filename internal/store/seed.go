@@ -8,11 +8,18 @@ import (
 	"github.com/hollis-labs/nanite/pkg/models"
 )
 
-// Seed populates the database with initial data if the workspaces table is empty.
+// Seed populates the database with initial data if it hasn't been seeded yet.
+//
+// Phase 0 item 20 (retire workspaces,
+// TASKS/phase-0/20-retire-workspaces-and-instance-mechanism.md): the
+// idempotency gate used to be "is the workspaces table empty" — that
+// table is retired in full. user_settings is a genuine singleton (its
+// only row, id=1, is inserted unconditionally at the end of this same
+// seed transaction below), so its presence is the new gate.
 func (s *Store) Seed() error {
 	var count int
-	if err := s.DB.QueryRow("SELECT COUNT(*) FROM workspaces").Scan(&count); err != nil {
-		return fmt.Errorf("check workspaces: %w", err)
+	if err := s.DB.QueryRow("SELECT COUNT(*) FROM user_settings").Scan(&count); err != nil {
+		return fmt.Errorf("check user_settings: %w", err)
 	}
 	if count > 0 {
 		return nil // already seeded
@@ -24,25 +31,6 @@ func (s *Store) Seed() error {
 	}
 	defer tx.Rollback()
 
-	// --- Workspaces ---
-	// CW-20260815-0010: a fresh install seeds ONE workspace. The "personal"
-	// workspace used to be seeded alongside "default" — consolidated away
-	// (see migration 087) since multi-workspace GUI complexity is deferred
-	// by explicit project-owner decision, and Torque projects are the
-	// organizing concept going forward, not Nanite workspaces.
-	for _, w := range []struct {
-		id, name, desc string
-	}{
-		{"default", "Default", "Default workspace"},
-	} {
-		if _, err := tx.Exec(
-			"INSERT INTO workspaces (id, name, description) VALUES (?, ?, ?)",
-			w.id, w.name, w.desc,
-		); err != nil {
-			return fmt.Errorf("insert workspace %s: %w", w.id, err)
-		}
-	}
-
 	// Agents are now file-based (internal/agent/). No agent seeding needed.
 	// See internal/agent/builtin/default.md for the built-in default agent.
 
@@ -52,9 +40,9 @@ func (s *Store) Seed() error {
 	// from the providers row, not from a Go literal (CW-20260526-0003).
 	providerID := "anthropic-001"
 	if _, err := tx.Exec(
-		`INSERT INTO providers (id, name, provider_type, api_key, default_model)
-		 VALUES (?, ?, ?, ?, ?)`,
-		providerID, "Anthropic", seedcatalog.DefaultProviderType, "",
+		`INSERT INTO providers (id, name, provider_type, default_model)
+		 VALUES (?, ?, ?, ?)`,
+		providerID, "Anthropic", seedcatalog.DefaultProviderType,
 		seedcatalog.ProviderDefaultModels[seedcatalog.DefaultProviderType],
 	); err != nil {
 		return fmt.Errorf("insert provider: %w", err)
@@ -78,9 +66,9 @@ func (s *Store) Seed() error {
 	// Use INSERT OR IGNORE — migrations 010/011 may have already created these rows.
 	ptyProviderID := "pty-001"
 	if _, err := tx.Exec(
-		`INSERT OR IGNORE INTO providers (id, name, provider_type, api_key)
-		 VALUES (?, ?, ?, ?)`,
-		ptyProviderID, "Claude CLI (PTY)", "pty", "",
+		`INSERT OR IGNORE INTO providers (id, name, provider_type)
+		 VALUES (?, ?, ?)`,
+		ptyProviderID, "Claude CLI (PTY)", "pty",
 	); err != nil {
 		return fmt.Errorf("insert pty provider: %w", err)
 	}
@@ -98,9 +86,9 @@ func (s *Store) Seed() error {
 	// --- Provider: PTY (Codex CLI) ---
 	codexProviderID := "pty-codex-001"
 	if _, err := tx.Exec(
-		`INSERT OR IGNORE INTO providers (id, name, provider_type, api_key)
-		 VALUES (?, ?, ?, ?)`,
-		codexProviderID, "Codex CLI (PTY)", "pty-codex", "",
+		`INSERT OR IGNORE INTO providers (id, name, provider_type)
+		 VALUES (?, ?, ?)`,
+		codexProviderID, "Codex CLI (PTY)", "pty-codex",
 	); err != nil {
 		return fmt.Errorf("insert codex provider: %w", err)
 	}
@@ -117,9 +105,9 @@ func (s *Store) Seed() error {
 	// --- Provider: PTY (Gemini CLI) ---
 	geminiProviderID := "pty-gemini-001"
 	if _, err := tx.Exec(
-		`INSERT OR IGNORE INTO providers (id, name, provider_type, api_key)
-		 VALUES (?, ?, ?, ?)`,
-		geminiProviderID, "Gemini CLI (PTY)", "pty-gemini", "",
+		`INSERT OR IGNORE INTO providers (id, name, provider_type)
+		 VALUES (?, ?, ?)`,
+		geminiProviderID, "Gemini CLI (PTY)", "pty-gemini",
 	); err != nil {
 		return fmt.Errorf("insert gemini provider: %w", err)
 	}
@@ -136,9 +124,9 @@ func (s *Store) Seed() error {
 	// --- Provider: PTY (Copilot CLI) ---
 	copilotProviderID := "pty-copilot-001"
 	if _, err := tx.Exec(
-		`INSERT OR IGNORE INTO providers (id, name, provider_type, api_key)
-		 VALUES (?, ?, ?, ?)`,
-		copilotProviderID, "GitHub Copilot CLI (PTY)", "pty-copilot", "",
+		`INSERT OR IGNORE INTO providers (id, name, provider_type)
+		 VALUES (?, ?, ?)`,
+		copilotProviderID, "GitHub Copilot CLI (PTY)", "pty-copilot",
 	); err != nil {
 		return fmt.Errorf("insert copilot provider: %w", err)
 	}
@@ -155,9 +143,9 @@ func (s *Store) Seed() error {
 	// --- Provider: PTY (Aider CLI) ---
 	aiderProviderID := "pty-aider-001"
 	if _, err := tx.Exec(
-		`INSERT OR IGNORE INTO providers (id, name, provider_type, api_key)
-		 VALUES (?, ?, ?, ?)`,
-		aiderProviderID, "Aider CLI (PTY)", "pty-aider", "",
+		`INSERT OR IGNORE INTO providers (id, name, provider_type)
+		 VALUES (?, ?, ?)`,
+		aiderProviderID, "Aider CLI (PTY)", "pty-aider",
 	); err != nil {
 		return fmt.Errorf("insert aider provider: %w", err)
 	}
@@ -241,9 +229,9 @@ func (s *Store) SeedProviders() error {
 
 	for _, p := range providers {
 		if _, err := tx.Exec(
-			`INSERT OR IGNORE INTO providers (id, name, provider_type, api_key, default_model)
-			 VALUES (?, ?, ?, ?, ?)`,
-			p.id, p.name, p.provType, "", seedcatalog.ProviderDefaultModels[p.provType],
+			`INSERT OR IGNORE INTO providers (id, name, provider_type, default_model)
+			 VALUES (?, ?, ?, ?)`,
+			p.id, p.name, p.provType, seedcatalog.ProviderDefaultModels[p.provType],
 		); err != nil {
 			return fmt.Errorf("upsert provider %s: %w", p.id, err)
 		}

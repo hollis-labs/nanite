@@ -119,8 +119,8 @@ func TestListAgentsFilter(t *testing.T) {
 		}
 	}
 	makeOne("filt-a", "advisor", "singleton", "active")
-	makeOne("filt-b", "process", "instance", "active")
-	makeOne("filt-c", "advisor", "instance", "paused")
+	makeOne("filt-b", "process", "fresh-per-wake", "active")
+	makeOne("filt-c", "advisor", "fresh-per-wake", "paused")
 
 	// Class filter.
 	got, err := s.ListAgentsFilter("advisor", "", "", nil)
@@ -137,18 +137,18 @@ func TestListAgentsFilter(t *testing.T) {
 	}
 
 	// Activation_mode filter.
-	got, err = s.ListAgentsFilter("", "instance", "", nil)
+	got, err = s.ListAgentsFilter("", "fresh-per-wake", "", nil)
 	if err != nil {
 		t.Fatalf("filter mode: %v", err)
 	}
 	for _, a := range got {
-		if a.ActivationMode != "instance" {
-			t.Errorf("non-instance leaked: %s mode=%q", a.Slug, a.ActivationMode)
+		if a.ActivationMode != "fresh-per-wake" {
+			t.Errorf("non-fresh-per-wake leaked: %s mode=%q", a.Slug, a.ActivationMode)
 		}
 	}
 
-	// Combined: advisor + instance → only filt-c.
-	got, err = s.ListAgentsFilter("advisor", "instance", "", nil)
+	// Combined: advisor + fresh-per-wake → only filt-c.
+	got, err = s.ListAgentsFilter("advisor", "fresh-per-wake", "", nil)
 	if err != nil {
 		t.Fatalf("filter combo: %v", err)
 	}
@@ -157,12 +157,12 @@ func TestListAgentsFilter(t *testing.T) {
 		if a.Slug == "filt-c" {
 			foundC = true
 		}
-		if a.Class != "advisor" || a.ActivationMode != "instance" {
+		if a.Class != "advisor" || a.ActivationMode != "fresh-per-wake" {
 			t.Errorf("combo leak: %s class=%q mode=%q", a.Slug, a.Class, a.ActivationMode)
 		}
 	}
 	if !foundC {
-		t.Errorf("filt-c missing from advisor+instance result")
+		t.Errorf("filt-c missing from advisor+fresh-per-wake result")
 	}
 }
 

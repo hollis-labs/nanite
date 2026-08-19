@@ -14,18 +14,18 @@ var ErrCompactionEventNotFound = errors.New("compaction event not found")
 // CompactionEvent is a row in the compaction_events table. It records structured
 // metadata emitted by the compaction pipeline after successful stage execution.
 type CompactionEvent struct {
-	ID                    string   `json:"id"`
-	SessionID             string   `json:"session_id"`
-	CoverageWindowStart   *string  `json:"coverage_window_start"`
-	CoverageWindowEnd     *string  `json:"coverage_window_end"`
-	EvictedCachePointers  []string `json:"evicted_cache_pointers"`
-	PreservedSources      []string `json:"preserved_sources"`
-	SummaryMode           string   `json:"summary_mode"`
-	SummaryTokenCount     int      `json:"summary_token_count"`
-	OriginalTokenCount    int      `json:"original_token_count"`
-	HandoffStashID        *string  `json:"handoff_stash_id"`
-	StagesApplied         []string `json:"stages_applied"`
-	CreatedAt             string   `json:"created_at"`
+	ID                   string   `json:"id"`
+	SessionID            string   `json:"session_id"`
+	CoverageWindowStart  *string  `json:"coverage_window_start"`
+	CoverageWindowEnd    *string  `json:"coverage_window_end"`
+	EvictedCachePointers []string `json:"evicted_cache_pointers"`
+	PreservedSources     []string `json:"preserved_sources"`
+	SummaryMode          string   `json:"summary_mode"`
+	SummaryTokenCount    int      `json:"summary_token_count"`
+	OriginalTokenCount   int      `json:"original_token_count"`
+	HandoffStashID       *string  `json:"handoff_stash_id"`
+	StagesApplied        []string `json:"stages_applied"`
+	CreatedAt            string   `json:"created_at"`
 }
 
 // WriteCompactionEvent inserts a new compaction event record.

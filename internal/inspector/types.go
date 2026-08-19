@@ -26,8 +26,7 @@ type TurnSnapshot struct {
 	// Tool calls — full args, result, latency, cache state.
 	ToolCalls []ToolCallRecord `json:"tool_calls"`
 
-	// Strategy / Playbook / Memory — nil until producers wire up.
-	Strategy *StrategyRecord `json:"strategy,omitempty"`
+	// Playbook / Memory — nil until producers wire up.
 	Playbook *PlaybookRecord `json:"playbook,omitempty"`
 	MemoryHits []MemoryRecord `json:"memory_hits,omitempty"`
 
@@ -119,17 +118,6 @@ type ToolCallRecord struct {
 	LatencyMs int64  `json:"latency_ms"`
 	// CacheState is "hit", "miss", or "n/a".
 	CacheState string `json:"cache_state"`
-}
-
-// StrategyRecord holds the turn strategy snapshot (E3 / CW-20260419-0026).
-// Nil until the strategy producer wires up.
-type StrategyRecord struct {
-	// ReflexMatchID is the matched reflex identifier.
-	ReflexMatchID string `json:"reflex_match_id,omitempty"`
-	// MaxTurns is the resolved turn budget for this turn.
-	MaxTurns      int    `json:"max_turns"`
-	// Reasoning is a human-readable summary of the strategy decision.
-	Reasoning     string `json:"reasoning,omitempty"`
 }
 
 // PlaybookRecord holds the playbook consulted for this turn (E1/E2).

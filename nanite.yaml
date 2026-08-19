@@ -6,7 +6,7 @@
 # Worker -> Reviewer -> Gate example so agentworkflow.Registry actually
 # loads worker-reviewer-gate.yaml at startup (see docs/architecture/
 # agent-roles-design.md, "The Worker -> Reviewer -> Gate workflow"). Unset
-# elsewhere by design (BootProfileCatalogPath's "no catalog -> no behavior
-# change" convention) — this is an opt-in local/dev activation only, not a
-# change to the global default.
+# elsewhere by design ("no catalog -> no behavior change" convention) —
+# this is an opt-in local/dev activation only, not a change to the global
+# default.
 workflow_definitions_path: examples/workflow-definitions

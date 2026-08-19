@@ -40,20 +40,22 @@ func TestEstimateTokens(t *testing.T) {
 	}
 }
 
-// TestAssembleSlotSources_AgentPromptAndModeAddendum covers the same
-// agent-prompt + mode-addendum + message-count parity the deleted
-// TestAssembleContext exercised against the removed legacy AssembleContext
-// path (CW-20260814-0005) — ported to the slot-based AssembleSlotSources so
+// TestAssembleSlotSources_AgentPromptAndMessageCount covers the same
+// agent-prompt + message-count parity the deleted TestAssembleContext
+// exercised against the removed legacy AssembleContext path
+// (CW-20260814-0005) — ported to the slot-based AssembleSlotSources so
 // the coverage survives against the code Chat/GUI/CLI turns and workflow
 // steps (via AssembleSlots) actually call.
-func TestAssembleSlotSources_AgentPromptAndModeAddendum(t *testing.T) {
+//
+// Phase 0 item 21 ("Cut Modes, in full") deleted store.AgentMode and the
+// mode-addendum assertion this test used to carry (mode-addendum content
+// no longer exists — SlotMode is permanently empty/inert per INV4's
+// post-cut definition; see internal/context/INVARIANTS.md).
+func TestAssembleSlotSources_AgentPromptAndMessageCount(t *testing.T) {
 	cb, s := newTestBroker(t)
 
-	// Set up workspace, session, agent, mode.
-	if err := s.CreateWorkspace(&store.Workspace{ID: "ws1", Name: "Test"}); err != nil {
-		t.Fatalf("CreateWorkspace: %v", err)
-	}
-	sess := &store.Session{WorkspaceID: "ws1"}
+	// Set up session, agent.
+	sess := &store.Session{}
 	if err := s.CreateSession(sess); err != nil {
 		t.Fatalf("CreateSession: %v", err)
 	}
@@ -67,9 +69,6 @@ func TestAssembleSlotSources_AgentPromptAndModeAddendum(t *testing.T) {
 		t.Fatalf("CreateAgent: %v", err)
 	}
 
-	mode := &store.AgentMode{PromptAddendum: "Be concise."}
-	workspace := &store.Workspace{Name: "Test WS", Description: "Testing"}
-
 	// Add a few messages.
 	for i := 0; i < 3; i++ {
 		msg := &store.Message{SessionID: sess.ID, Role: "user", Content: "test message"}
@@ -78,7 +77,7 @@ func TestAssembleSlotSources_AgentPromptAndModeAddendum(t *testing.T) {
 		}
 	}
 
-	sources, err := cb.AssembleSlotSources(context.Background(), sess, agent, mode, workspace, nil)
+	sources, err := cb.AssembleSlotSources(context.Background(), sess, agent)
 	if err != nil {
 		t.Fatalf("AssembleSlotSources: %v", err)
 	}
@@ -89,8 +88,8 @@ func TestAssembleSlotSources_AgentPromptAndModeAddendum(t *testing.T) {
 	if !containsStr(sources.Agent, "You are a test agent.") {
 		t.Error("agent slot should contain agent prompt")
 	}
-	if !containsStr(sources.Agent, "Be concise.") {
-		t.Error("agent slot should contain mode addendum")
+	if sources.Mode != "" {
+		t.Errorf("SlotMode content should always be empty post-cut, got %q", sources.Mode)
 	}
 	if len(sources.Messages) != 3 {
 		t.Errorf("expected 3 messages, got %d", len(sources.Messages))

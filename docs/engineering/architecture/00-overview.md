@@ -25,11 +25,11 @@ These recur across every subsystem doc in this folder — they're not independen
 7. [Inter-Agent Messaging](07-inter-agent-messaging.md) — how agents communicate with each other and with the external A2A protocol.
 8. [Cards](08-cards.md) — the structured UI-card system (formerly "the envelope system").
 9. [Plugin System](09-plugin-system.md) — how Nanite gets extended without a core code change.
+10. [Reflex Action Taxonomy & Precedence](10-reflex-action-taxonomy.md) — how the six reflex job-types get resolved when they fire together (a [Steering](03-steering.md) detail doc).
 
 ## What's genuinely still open
 
-- **Whether durable agents should eventually run CLI-based instead of API-based.** The current two-substrate split (CLI-primary for interactive, API-harness narrowed to durable agents) is the working default, never actually tested empirically. The `runtime_kind` typed field (see [Agent Launching](02-agent-launching.md)) is designed to make this experiment cheap to run, not to pre-decide the answer.
-- Exact design of the reflex `dispatch_to_agent` action kind and how `promptrouter`'s catalog migrates into it — direction is set, specifics aren't (see [Steering](03-steering.md)).
+- ~~Whether durable agents should eventually run CLI-based instead of API-based.~~ **Resolved 2026-08-19**: keep both substrates. A dedicated review found the two paths much closer in behavior than originally assumed post-Phase-2-5, so there's no "which one wins" call to make. What remains is making the choice explicitly configurable: an app-level default (CLI), a system-wide override, and the existing per-agent override (`runtime_kind`, see [Agent Launching](02-agent-launching.md)) — `TASKS/phase-8/01-set-default-runtime-kind.md`.
 - GUI's start-surface reconciliation against the new construction model — deferred to the dedicated frontend pass.
 - A full archival pass on the docs this folder supersedes — see `../TASKS.md`.
 

@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/hollis-labs/nanite/internal/agent"
+	hostplugin "github.com/hollis-labs/nanite/internal/plugin"
 	"github.com/hollis-labs/nanite/internal/store"
 )
 
@@ -136,6 +137,59 @@ func TestDiscoverNoConfig(t *testing.T) {
 	}
 	if len(defs) != 0 {
 		t.Errorf("expected 0 definitions for empty dir, got %d", len(defs))
+	}
+}
+
+// TestDiscover_Noop guards TASKS/phase-2/06-cut-nanite-native-adapter-agent-sync.md:
+// even when a real .nanite/config.yaml agents: block is present (the exact
+// shape Discover used to compose into agent.Definitions for the
+// AutoIngestAgents pipeline), Discover must no longer produce anything.
+// Mirrors the precedent set by adapter-claude/codex/gemini/opencode's own
+// TestDiscover_Noop (TASKS/phase-0/16-cut-external-agent-import.md).
+func TestDiscover_Noop(t *testing.T) {
+	dir := t.TempDir()
+	naniteDir := filepath.Join(dir, ".nanite")
+	if err := os.MkdirAll(naniteDir, 0o755); err != nil {
+		t.Fatalf("MkdirAll: %v", err)
+	}
+	cfg := `
+nanite_version: "2.3.0"
+agents:
+  nanite-backend:
+    name: Nanite Backend
+    description: Go service development
+    roles: [backend]
+`
+	if err := os.WriteFile(filepath.Join(naniteDir, "config.yaml"), []byte(cfg), 0o644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+
+	a := New().Adapter()
+	defs, err := a.Discover(dir)
+	if err != nil {
+		t.Fatalf("Discover: %v", err)
+	}
+	if defs != nil {
+		t.Errorf("Discover should be a no-op (agent_profiles sync cut), got %v", defs)
+	}
+}
+
+// TestLoad_NoStoreSync guards TASKS/phase-2/06-cut-nanite-native-adapter-agent-sync.md:
+// Load must succeed without ever requiring the "store" service (proving the
+// old Plugin.Load()'s host.GetService("store") + store.UpsertAgentBySlug sync
+// path is gone, not merely made conditional). A host with a nil "store"
+// service would have made the old Load() fail its type assertion
+// (svc.(*store.Store)) and return an error; the new Load() never calls
+// GetService at all, so it succeeds regardless.
+func TestLoad_NoStoreSync(t *testing.T) {
+	p := New()
+	host := hostplugin.NewHostWithStore(nil)
+
+	if err := p.Load(host); err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if !p.Status().Loaded || !p.Status().Enabled {
+		t.Errorf("expected plugin to report Loaded+Enabled, got %+v", p.Status())
 	}
 }
 

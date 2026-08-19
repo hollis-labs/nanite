@@ -7,7 +7,7 @@ import (
 
 func TestSessionObject_PutAndGet(t *testing.T) {
 	s := newTestStore(t)
-	sess := makeTestSession(t, s, "workspace-1")
+	sess := makeTestSession(t, s)
 
 	obj, err := s.PutSessionObject(SessionObjectInput{
 		SessionID:   sess.ID,
@@ -44,7 +44,7 @@ func TestSessionObject_PutAndGet(t *testing.T) {
 
 func TestSessionObject_GetNotFound(t *testing.T) {
 	s := newTestStore(t)
-	sess := makeTestSession(t, s, "workspace-1")
+	sess := makeTestSession(t, s)
 
 	_, err := s.GetSessionObject(sess.ID, "01HQ0000000000000000000000")
 	if !errors.Is(err, ErrSessionObjectNotFound) {
@@ -56,8 +56,8 @@ func TestSessionObject_CrossSessionIsolation(t *testing.T) {
 	// D5: A session B lookup for an object created in session A must return
 	// ErrSessionObjectNotFound, NOT the A-scoped row.
 	s := newTestStore(t)
-	sessA := makeTestSession(t, s, "workspace-1")
-	sessB := makeTestSession(t, s, "workspace-1")
+	sessA := makeTestSession(t, s)
+	sessB := makeTestSession(t, s)
 
 	obj, err := s.PutSessionObject(SessionObjectInput{
 		SessionID: sessA.ID,
@@ -80,7 +80,7 @@ func TestSessionObject_CrossSessionIsolation(t *testing.T) {
 
 func TestSessionObject_SizeCapEnforced(t *testing.T) {
 	s := newTestStore(t)
-	sess := makeTestSession(t, s, "workspace-1")
+	sess := makeTestSession(t, s)
 
 	// Build a payload larger than DefaultSessionObjectMaxBytes.
 	big := make([]byte, DefaultSessionObjectMaxBytes+1)
@@ -100,7 +100,7 @@ func TestSessionObject_SizeCapEnforced(t *testing.T) {
 
 func TestSessionObject_List(t *testing.T) {
 	s := newTestStore(t)
-	sess := makeTestSession(t, s, "workspace-1")
+	sess := makeTestSession(t, s)
 
 	// Ordering determinism comes from the SQL tiebreak on `id DESC` — ULIDs
 	// are monotonic within a millisecond, so no sleep is needed between puts.
@@ -130,8 +130,8 @@ func TestSessionObject_List(t *testing.T) {
 
 func TestSessionObject_List_OtherSessionExcluded(t *testing.T) {
 	s := newTestStore(t)
-	sessA := makeTestSession(t, s, "workspace-1")
-	sessB := makeTestSession(t, s, "workspace-1")
+	sessA := makeTestSession(t, s)
+	sessB := makeTestSession(t, s)
 
 	if _, err := s.PutSessionObject(SessionObjectInput{SessionID: sessA.ID, Payload: `{}`}); err != nil {
 		t.Fatalf("put A: %v", err)
@@ -151,7 +151,7 @@ func TestSessionObject_List_OtherSessionExcluded(t *testing.T) {
 
 func TestSessionObject_EvictSessionObjects(t *testing.T) {
 	s := newTestStore(t)
-	sess := makeTestSession(t, s, "workspace-1")
+	sess := makeTestSession(t, s)
 
 	obj, err := s.PutSessionObject(SessionObjectInput{SessionID: sess.ID, Payload: `{}`})
 	if err != nil {
@@ -182,7 +182,7 @@ func TestSessionObject_PutSessionIDRequired(t *testing.T) {
 
 func TestSessionObject_PutPayloadRequired(t *testing.T) {
 	s := newTestStore(t)
-	sess := makeTestSession(t, s, "workspace-1")
+	sess := makeTestSession(t, s)
 	_, err := s.PutSessionObject(SessionObjectInput{SessionID: sess.ID, Payload: ""})
 	if err == nil {
 		t.Error("expected error on empty payload")
@@ -197,8 +197,8 @@ func TestSessionObject_EndToEnd_ArchiveEvictsAndCrossSessionFails(t *testing.T) 
 	//   4. Post-archive Get from A returns ErrSessionObjectNotFound.
 	s := newTestStore(t)
 
-	sessA := makeTestSession(t, s, "workspace-1")
-	sessB := makeTestSession(t, s, "workspace-1")
+	sessA := makeTestSession(t, s)
+	sessB := makeTestSession(t, s)
 
 	objA, err := s.PutSessionObject(SessionObjectInput{
 		SessionID:   sessA.ID,
@@ -239,16 +239,10 @@ func TestSessionObject_EndToEnd_ArchiveEvictsAndCrossSessionFails(t *testing.T) 
 }
 
 // makeTestSession helper — creates a real session row so FK constraints hold.
-// Delegates workspace seeding to seedWorkspace (idempotent), so multiple
-// sessions can share the same workspace without colliding on the workspace row.
-func makeTestSession(t *testing.T, s *Store, workspaceID string) *Session {
+func makeTestSession(t *testing.T, s *Store) *Session {
 	t.Helper()
-	if workspaceID != "" {
-		seedWorkspace(t, s, workspaceID)
-	}
 	sess := &Session{
-		WorkspaceID: workspaceID,
-		Status:      "active",
+		Status: "active",
 	}
 	if err := s.CreateSession(sess); err != nil {
 		t.Fatalf("CreateSession: %v", err)

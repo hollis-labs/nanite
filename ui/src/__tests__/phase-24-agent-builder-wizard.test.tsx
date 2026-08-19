@@ -11,7 +11,6 @@ import type {
   AgentBuilderReviewResponse,
   AgentProfile,
   DurableAgentInstance,
-  PromptTemplate,
   Skill,
   StartSurfaceCapabilitiesResponse,
 } from "@/lib/types";
@@ -28,7 +27,6 @@ vi.mock("@/hooks/useSettings", () => ({
 vi.mock("@/stores/useAppStore", () => ({
   useAppStore: (selector: (state: Record<string, unknown>) => unknown) =>
     selector({
-      activeWorkspaceId: "workspace-1",
       activeProjectId: "project-1",
       setActiveSession: vi.fn(),
     }),
@@ -101,7 +99,6 @@ function startSurface(): StartSurfaceCapabilitiesResponse {
         id: "anthropic",
         name: "Anthropic",
         provider_type: "api",
-        base_url: "",
         is_enabled: true,
         settings: "{}",
         created_at: "",
@@ -124,7 +121,6 @@ function startSurface(): StartSurfaceCapabilitiesResponse {
         provider_type: "api",
       },
     ],
-    boot_profiles: [],
     work_root_hints: [],
   };
 }
@@ -144,23 +140,6 @@ function skill(overrides: Partial<Skill> = {}): Skill {
     created_at: "",
     updated_at: "",
     source: "user",
-    ...overrides,
-  };
-}
-
-function template(overrides: Partial<PromptTemplate> = {}): PromptTemplate {
-  return {
-    id: "template-1",
-    name: "Escalation Guard",
-    slug: "escalation-guard",
-    scope: "system",
-    template: "Guard the escalation path.",
-    variables: "[]",
-    priority: 10,
-    icon: "",
-    is_builtin: false,
-    created_at: "",
-    updated_at: "",
     ...overrides,
   };
 }
@@ -276,7 +255,6 @@ function draftResponse(overrides: Partial<AgentBuilderDraftResponse> = {}): Agen
       },
       capabilities: {
         assigned_skill_ids: ["skill-1"],
-        prompt_template_ids: ["template-1"],
         known_tools: [],
         known_skills: [],
         procedures: [],
@@ -329,7 +307,6 @@ describe("Phase 24 agent builder wizard", () => {
     vi.spyOn(api, "listAgents").mockResolvedValue([]);
     vi.spyOn(api, "getStartSurfaceCapabilities").mockResolvedValue(startSurface());
     vi.spyOn(api, "listSkills").mockResolvedValue([]);
-    vi.spyOn(api, "listPromptTemplates").mockResolvedValue([]);
 
     renderWithClient(<AgentProfileManager />);
 
@@ -342,15 +319,11 @@ describe("Phase 24 agent builder wizard", () => {
   it("runs draft, review, dry-run, and deterministic submit without writing early", async () => {
     vi.spyOn(api, "getStartSurfaceCapabilities").mockResolvedValue(startSurface());
     vi.spyOn(api, "listSkills").mockResolvedValue([skill()]);
-    vi.spyOn(api, "listPromptTemplates").mockResolvedValue([template()]);
     const draftSpy = vi.spyOn(api, "agentBuilderDraft").mockResolvedValue(draftResponse());
     const reviewSpy = vi.spyOn(api, "agentBuilderReview").mockResolvedValue(reviewResponse());
     const dryRunSpy = vi.spyOn(api, "agentBuilderDryRun").mockResolvedValue(dryRunResponse());
     const createSpy = vi.spyOn(api, "createAgentProfile").mockResolvedValue(profile());
     const assignSkillSpy = vi.spyOn(api, "assignSkillToAgent").mockResolvedValue(skill());
-    const assignTemplateSpy = vi
-      .spyOn(api, "assignTemplateToAgent")
-      .mockResolvedValue(template());
 
     const onCreated = vi.fn();
     renderWithClient(
@@ -389,7 +362,6 @@ describe("Phase 24 agent builder wizard", () => {
 
     await waitFor(() => expect(createSpy).toHaveBeenCalledTimes(1));
     expect(assignSkillSpy).toHaveBeenCalledWith("agent-1", { skill_id: "skill-1" });
-    expect(assignTemplateSpy).toHaveBeenCalledWith("agent-1", { template_id: "template-1" });
     expect(draftSpy).toHaveBeenCalledTimes(1);
     expect(dryRunSpy).toHaveBeenCalledTimes(1);
     expect(onCreated).toHaveBeenCalledWith("agent-1");
@@ -399,7 +371,6 @@ describe("Phase 24 agent builder wizard", () => {
   it("defaults launch on and lets the operator disable launch before submit", async () => {
     vi.spyOn(api, "getStartSurfaceCapabilities").mockResolvedValue(startSurface());
     vi.spyOn(api, "listSkills").mockResolvedValue([]);
-    vi.spyOn(api, "listPromptTemplates").mockResolvedValue([]);
     vi.spyOn(api, "agentBuilderDraft").mockResolvedValue(
       draftResponse({
         draft: {
@@ -407,7 +378,6 @@ describe("Phase 24 agent builder wizard", () => {
           mode: "create_profile_and_instance",
           capabilities: {
             assigned_skill_ids: [],
-            prompt_template_ids: [],
             known_tools: [],
             known_skills: [],
             procedures: [],
@@ -465,7 +435,7 @@ describe("Phase 24 agent builder wizard", () => {
     const startDurableSpy = vi.spyOn(api, "startDurableAgent").mockResolvedValue({
       instance: {} as DurableAgentInstance,
       policy: {} as never,
-      session: { id: "session-1", title: "", custom_name: "", workspace_id: "", project_id: "", context_type: null, context_id: null, provider: "anthropic", model: "claude-sonnet-4", status: "active", is_pinned: false, sort_order: 0, message_count: 0, tags: "", last_activity: "", created_at: "" },
+      session: { id: "session-1", title: "", custom_name: "", project_id: "", context_type: null, context_id: null, provider: "anthropic", model: "claude-sonnet-4", status: "active", is_pinned: false, sort_order: 0, message_count: 0, tags: "", last_activity: "", created_at: "" },
     } as never);
 
     renderWithClient(

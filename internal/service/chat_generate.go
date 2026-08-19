@@ -56,14 +56,16 @@ type composeConfig struct {
 }
 
 // composeExtraSystemPrefix builds the per-turn system prompt prefix: optional
-// no-tools warning, optional progressive discovery catalog, the native tool
-// guide, and (when non-empty) the per-tool override block appended after the
-// native guide. Order is significant — tool-specific overrides ship AFTER the
-// general guide so they override conflicting general rules for the named tool.
+// no-tools warning, optional progressive discovery catalog, then the native
+// tool guide.
 //
-// overrideBlock is the markdown "## Tool Overrides" section composed by the
-// broker (via broker.ComposeOverrideBlock). Empty string skips the section.
-func composeExtraSystemPrefix(overrideBlock string, cfg composeConfig) string {
+// Phase 0 item 22: this used to also append a per-tool "## Tool Overrides"
+// markdown block (composed via go-toolbroker's enricher/WithEnricher) after
+// the native guide. Cut entirely per the operator's 2026-08-18 resolution —
+// no port-forward — because the tool_enrichments write path was already
+// dead (18a-cut-dead-storage-and-config), making the override block
+// structurally inert. See decision log §11.
+func composeExtraSystemPrefix(cfg composeConfig) string {
 	var b strings.Builder
 	if cfg.noTools {
 		b.WriteString(noToolsWarningPrefix)
@@ -73,10 +75,6 @@ func composeExtraSystemPrefix(overrideBlock string, cfg composeConfig) string {
 		b.WriteString("\n\n")
 	}
 	b.WriteString(strings.TrimLeft(nativeToolGuide, "\n"))
-	if overrideBlock != "" {
-		b.WriteString("\n\n")
-		b.WriteString(overrideBlock)
-	}
 	return b.String()
 }
 
@@ -205,7 +203,7 @@ func (s *chatServiceImpl) generateResponse(ctx context.Context, sessionID, assis
 	s.maybeEmitEmbeddingWarning(sessionID, ch)
 
 	// --- Resolve agent ---
-	agent, mode, err := s.agents.ResolveForSession(ctx, sessionID)
+	agent, err := s.agents.ResolveForSession(ctx, sessionID)
 	if err != nil {
 		ch <- chat.ErrorEvent(chat.ErrorCodeInternal, "Failed to resolve agent", map[string]interface{}{"raw": err.Error()})
 		return
@@ -233,12 +231,6 @@ func (s *chatServiceImpl) generateResponse(ctx context.Context, sessionID, assis
 	// bounded by the in-loop runaway-fail-cap + idle-timeout +
 	// hard-ceiling (see resolveIterationLimits in chat_loop_state.go).
 	constraints := chat.ParseAgentConstraints(agent.Constraints)
-
-	// --- Load workspace ---
-	var workspace *store.Workspace
-	if session.WorkspaceID != "" {
-		workspace, _ = s.store.GetWorkspace(session.WorkspaceID)
-	}
 
 	// --- Resolve model ---
 	// CW-20260526-0003: model resolution walks session → agent →
@@ -274,38 +266,28 @@ func (s *chatServiceImpl) generateResponse(ctx context.Context, sessionID, assis
 	}
 
 	// --- Resolve provider ---
-	//
-	// CW-20260514-0048: when session.Provider carries an encoded boot-profile
-	// id ("bootprofile:<profile_id>"), decode + compile a session-scoped
-	// LaunchSpec NOW so downstream resolveProvider / classifyNilProvider
-	// see the CLI-routable alias form ("pty-claude" etc.) instead of the
-	// bootprofile encoded id. IsCLIProvider stays narrow (only matches
-	// the existing "pty-*" / "sub-*" / "pty" shapes); the boot-profile id
-	// NEVER reaches the classifier. The compiled spec is stashed on
-	// s.activeSessionLaunchSpecs so driveBootSession can thread per-profile
-	// env / args / workdir / boot prompt into agent.Boot.
-	// PR #171 round 1: flatten the if-else (lint: indent-error-flow) —
-	// resolvedProvider is always the substituted value on the success
-	// path, so a fresh declaration after the error return is cleaner
-	// than seeding + reassigning.
-	resolvedProvider, _, bpErr := s.resolveBootProfile(sessionID, session.Provider, session, agent)
-	if bpErr != nil {
-		ch <- chat.ErrorEvent(chat.ErrorCodeProviderError,
-			bpErr.Error(),
-			map[string]interface{}{"raw": bpErr.Error()})
-		return
-	}
-	providerName, prov := s.resolveProvider(sessionID, resolvedProvider, agent.DefaultProvider, model)
+	providerName, prov := s.resolveProvider(sessionID, session.Provider, agent.DefaultProvider, model, agent.RuntimeKind)
 	if prov == nil {
 		// CW-20260514-0045: dropdown-selected CLI providers (e.g.
 		// "pty-claude", "pty-codex", "pty-opencode", legacy "pty") no
 		// longer register an llmcontracts.Provider — the bridges were
 		// removed when agent-sessions became the runtime path (Phase
 		// 4c.6, CW-20260508-0002). Resolution therefore returns
-		// (name, nil) for these, but the downstream CLI bypass below
-		// (chat.IsCLIProvider(providerName) branch) still routes them
-		// to driveBootSession.
-		switch s.classifyNilProvider(providerName) {
+		// (name, nil) for these, but classifyNilProvider below still
+		// routes a legitimate CLI turn (per agent.RuntimeKind, Phase 2
+		// item 01) to driveBootSession — see the per-iteration provider
+		// call site further down, which now branches on `prov == nil`
+		// (this decision, made exactly once here) rather than
+		// re-deriving CLI-ness from providerName's string shape.
+		//
+		// Phase 3 item 01 (TASKS/phase-3/01-collapse-resolveprovider-
+		// into-cascade.md): resolveProvider above now also threads
+		// agent.RuntimeKind through its own walk, so a runtime_kind='cli'
+		// agent can no longer silently resolve to a non-nil HTTP provider
+		// in the first place (the bug this task fixed) — classifyNilProvider
+		// here is now purely the nil-provider classification step, not
+		// the only place runtime_kind is consulted.
+		switch s.classifyNilProvider(agent.RuntimeKind, providerName) {
 		case nilProviderRouteCLI:
 			slog.Info("chat-service: CLI provider routed to agent runtime (no llmcontracts.Provider registered)",
 				"session_id", sessionID, "provider", providerName)
@@ -354,52 +336,47 @@ func (s *chatServiceImpl) generateResponse(ctx context.Context, sessionID, assis
 	// from the actual model window (e.g. 1M for Gemini) rather than the
 	// hardcoded 200K default. contextWindowSize returns 0 on miss, which causes
 	// the broker to fall back to DefaultContextWindowTokens (CW-20260426-0032).
-	selection, err := s.tools.SelectForAgent(ctx, sessionID, agentID, userContent, session.WorkspaceID, s.contextWindowSize(providerName, model))
+	// Phase 0 item 20 (retire workspaces): session.WorkspaceID no longer
+	// exists — SelectForAgent's workspaceID param (toolclient's
+	// Config.WorkspaceOverrides rule-merge hook) has no populated loader in
+	// production today, so this is a no-op change, not a feature removal.
+	selection, err := s.tools.SelectForAgent(ctx, sessionID, agentID, userContent, "", s.contextWindowSize(providerName, model))
 	if err != nil {
 		slog.Warn("chat-service: tool selection failed", "err", err)
 		selection = &ToolSelection{}
 	}
 	tools := selection.Tools
+
+	// Filter: tool_selection — a plugin may add, remove, or reshape the
+	// tool list offered to the model this turn. Applied here, immediately
+	// after SelectForAgent returns, rather than wiring pluginHost into
+	// toolServiceImpl.SelectForAgent itself — matching the exact pattern
+	// the other five chat_generate.go-resident filters already use
+	// (system_prompt / user_message / context_window / assistant_response /
+	// envelope_data all operate on the value about to be used, not on
+	// SelectForAgent's internal intermediate state). Consequence: a plugin
+	// sees the fully-resolved tool list (post agent_tools grant filter,
+	// post cap/token-budget prune, post always_included escape hatch, post
+	// progressive-discovery repackaging when active) — not the broker's
+	// raw pre-filter output. See
+	// TASKS/phase-4/06-add-filter-tool-selection.md's Work Log for the full
+	// insertion-point reasoning.
+	//
+	// Applied before normalizeToolInputSchemas (below) so a plugin-added
+	// tool's schema is normalized too, and before the tools-lazy-load
+	// essential/lazy partition and the no-tools warning check further down
+	// so both see the plugin-filtered list, not the pre-filter one.
+	fctx := pluginpkg.FilterContext{SessionID: sessionID, AgentID: agentID}
+	tools = applyToolSelectionFilter(s.pluginHost, tools, fctx)
+
 	normalizeToolInputSchemas(tools)
 
-	// B1 (CW-20260428-0009) + F1 (CW-20260429-0001): apply session-mode
-	// tool_overrides at the tool surface. B1 wired this for the deterministic
-	// (non-progressive) selection path; F1 extends the same filter to the
-	// progressive path's seed builtins AND its catalog summaries, and stores
-	// the resolved spec on loopState so handleRequestTools can apply the same
-	// rules to tools loaded mid-turn via request_tools.
-	//
-	// Resolution helper is store.ApplyToolOverrides (deny > allow, explicit >
-	// pattern); meta-tools are exempt so the agent's escape hatches stay
-	// reachable regardless of mode policy.
-	var modeOverrideSpec store.ToolOverrideSpec
-	if session.CurrentModeID != nil && *session.CurrentModeID != "" {
-		if sm, gerr := s.store.GetMode(*session.CurrentModeID); gerr == nil && sm != nil &&
-			sm.ToolOverrides != "" && sm.ToolOverrides != "{}" {
-			spec, perr := store.ParseToolOverrides(sm.ToolOverrides)
-			if perr != nil {
-				slog.Warn("chat-service: parse session-mode tool_overrides failed",
-					"session_id", sessionID, "mode_id", sm.ID, "err", perr)
-			} else {
-				modeOverrideSpec = spec
-			}
-		}
-	}
-	if !isEmptySpec(modeOverrideSpec) {
-		before := len(tools)
-		tools = applyModeToolOverridesToTools(tools, modeOverrideSpec)
-		if selection.Progressive && selection.Catalog != "" && s.tools != nil {
-			// Rebuild the catalog so denied tools aren't advertised to the
-			// LLM in the progressive system prefix. Source-of-truth is the
-			// same summary list used in tool.go (ListSummaries returns the
-			// full registered set; we filter, then rebuild).
-			filteredSummaries := applyModeToolOverridesToSummaries(s.tools.ListSummaries(), modeOverrideSpec)
-			selection.Catalog = chat.BuildToolCatalog(filteredSummaries)
-		}
-		slog.Debug("chat-service: session-mode tool_overrides applied",
-			"session_id", sessionID, "progressive", selection.Progressive,
-			"tools_before", before, "tools_after", len(tools))
-	}
+	// Phase 0 item 21 ("Cut Modes, in full") deleted the B1 (CW-20260428-0009)
+	// + F1 (CW-20260429-0001) session-mode tool_overrides block that used to
+	// live here — it resolved session.CurrentModeID -> s.store.GetMode and
+	// applied the mode's tool_overrides (deny > allow, explicit > pattern)
+	// to the tool surface. Both the session-mode pointer and store.GetMode
+	// are gone; there is no more per-session tool_overrides source.
 
 	// G-HOT-SWAP-DEAD activation. NANITE_TOOLS_LAZY_LOAD=true partitions the
 	// tool universe into "essential" (inline, full schemas) and "lazy"
@@ -412,7 +389,7 @@ func (s *chatServiceImpl) generateResponse(ctx context.Context, sessionID, assis
 	lazyLoadActive := false
 	if chat.IsToolsLazyLoadEnabled() && !selection.Progressive {
 		prevState := s.loadToolPartitionState(sessionID)
-		partition, newState := chat.PartitionTools(tools, modeOverrideSpec, nil, prevState, chat.ToolEssentialCap)
+		partition, newState := chat.PartitionTools(tools, nil, prevState, chat.ToolEssentialCap)
 		s.storeToolPartitionState(sessionID, newState)
 		if len(partition.Lazy) > 0 {
 			lazyLoadActive = true
@@ -453,13 +430,7 @@ func (s *chatServiceImpl) generateResponse(ctx context.Context, sessionID, assis
 		ch <- chat.StreamEvent{Type: "tool_warning", Data: string(warningJSON)}
 	}
 
-	// selection.OverrideBlock is composed upstream by ToolClient via
-	// go-toolbroker's ComposeOverrideBlock over the FINAL tool set (post
-	// permission filtering + token budget prune), so the block never mentions
-	// a tool the LLM won't see. Empty string when no enricher is configured
-	// or no selected tool has Hints — composeExtraSystemPrefix skips the
-	// section in that case.
-	extraSystemPrefix := composeExtraSystemPrefix(selection.OverrideBlock, composeConfig{
+	extraSystemPrefix := composeExtraSystemPrefix(composeConfig{
 		noTools:            noTools,
 		progressiveActive:  selection.Progressive,
 		progressiveCatalog: selection.Catalog,
@@ -470,7 +441,9 @@ func (s *chatServiceImpl) generateResponse(ctx context.Context, sessionID, assis
 	// (the only string-shaped portion of the system payload); slot content is
 	// not exposed to the filter. Plugins that need to mutate static system
 	// content should target the upcoming slot-aware filter (S4 backlog).
-	fctx := pluginpkg.FilterContext{SessionID: sessionID, AgentID: agentID}
+	// fctx was already declared above, right before the tool_selection
+	// filter — reused here and by every other pluginHost.ApplyFilter call
+	// site below.
 	if s.pluginHost != nil {
 		if filtered, err := s.pluginHost.ApplyFilter(pluginpkg.FilterSystemPrompt, extraSystemPrefix, fctx); err != nil {
 			slog.Warn("chat-service: system_prompt filter error", "err", err)
@@ -488,54 +461,19 @@ func (s *chatServiceImpl) generateResponse(ctx context.Context, sessionID, assis
 		}
 	}
 
-	// B1 (CW-20260428-0009): resolve session-level mode (chat/plan/work or
-	// any custom *store.Mode). Order: session.current_mode_id → nil (callers
-	// fall through to the legacy AgentMode pipeline already wired into the
-	// Agent slot). Resolution is best-effort — a missing/dangling FK or store
-	// error logs and proceeds with sessionMode=nil rather than failing the turn.
-	var sessionMode *store.Mode
-	if session.CurrentModeID != nil && *session.CurrentModeID != "" {
-		if m, gerr := s.store.GetMode(*session.CurrentModeID); gerr != nil {
-			slog.Warn("chat-service: GetMode failed for session-mode pointer",
-				"session_id", sessionID, "mode_id", *session.CurrentModeID, "err", gerr)
-		} else if m != nil {
-			sessionMode = m
-		}
-	}
-
-	// B2 (CW-20260428-0010): emit a non-binding mode_suggestion event when
-	// the deterministic classifier disagrees with the session's current mode
-	// at high confidence. This is informational only — B3 wires the
-	// confirm-card / auto-apply path on top. Placed before assembleTurnContext
-	// so the suggestion races ahead of any backend slot work and the FE can
-	// stage the prompt while context is still being built.
-	if cls := classify.ClassifyMode(userContent); cls.Suggested != "" && cls.Confidence >= 0.7 {
-		currentSlug := ""
-		if sessionMode != nil {
-			currentSlug = sessionMode.Slug
-		}
-		if currentSlug == "" && mode != nil {
-			currentSlug = mode.Slug
-		}
-		if cls.Suggested != currentSlug {
-			signals := make([]string, len(cls.Signals))
-			for i, sig := range cls.Signals {
-				signals[i] = string(sig)
-			}
-			payload := map[string]any{
-				"current":    currentSlug,
-				"suggested":  cls.Suggested,
-				"confidence": cls.Confidence,
-				"signals":    signals,
-			}
-			if data, err := json.Marshal(payload); err == nil {
-				ch <- chat.StreamEvent{Type: "mode_suggestion", Data: string(data)}
-			}
-		}
-	}
+	// Phase 0 item 21 ("Cut Modes, in full") deleted two blocks that used to
+	// live here:
+	//   - B1 (CW-20260428-0009)'s sessionMode resolution
+	//     (session.CurrentModeID -> s.store.GetMode).
+	//   - B2 (CW-20260428-0010)'s mode_suggestion SSE emit, which compared
+	//     classify.ClassifyMode(userContent) against the resolved session
+	//     mode and streamed a non-binding suggestion event.
+	// Both classify.ClassifyMode and store.GetMode/sessions.current_mode_id
+	// are gone. assembleTurnContext below no longer takes a sessionMode
+	// argument.
 
 	// --- Assemble context (slot-based) ---
-	slotResult, err := s.assembleTurnContext(ctx, session, agent, mode, workspace, tools, extraSystemPrefix, providerName, model, ch, sessionMode, toolsLazyHint)
+	slotResult, err := s.assembleTurnContext(ctx, session, agent, tools, extraSystemPrefix, providerName, model, ch, toolsLazyHint)
 	if err != nil {
 		return
 	}
@@ -648,7 +586,11 @@ func (s *chatServiceImpl) generateResponse(ctx context.Context, sessionID, assis
 	s.streams.BroadcastPresence(presenceStart)
 
 	if s.events != nil {
-		s.events.EmitSessionStart(ctx, sessionID, agent.ID, model, mode.Slug)
+		// Phase 0 item 21 ("Cut Modes, in full") deleted store.AgentMode —
+		// there is no more per-agent mode slug to report. "default" matches
+		// the literal already used at session.go's own EmitSessionStart call
+		// site for the same event.
+		s.events.EmitSessionStart(ctx, sessionID, agent.ID, model, "default")
 	}
 
 	// CW-20260420-0032: PTY observability — emit pty_turn_start so
@@ -702,32 +644,30 @@ func (s *chatServiceImpl) generateResponse(ctx context.Context, sessionID, assis
 	// producers can record to the same snapshot.
 	ls.inspectorTurnID = inspectorTurnID
 
-	// F1 (CW-20260429-0001): pass the resolved session-mode tool_overrides
-	// spec into the loop so handleRequestTools can scrub progressive-loaded
-	// tools before they reach the LLM. Empty spec is a passthrough.
-	ls.modeToolOverrides = modeOverrideSpec
-
 	// I1 (CW-20260426-0004): record scope tier to inspector (B2 already shipped).
 	if s.inspector != nil && inspectorTurnID != "" {
 		classifiedTier, _ := ls.Classification()
 		s.inspector.RecordScopeTier(sessionID, inspectorTurnID, classifiedTier.String())
 	}
 
-	// CW-20260509-0046: agent-broker dispatch decision (upstream seam).
-	// Consults s.agentBroker (deterministic v1 from go-agent-broker
-	// v0.2.0) BEFORE the chat-loop entry. On dispatch decisions
-	// (AgentProfile != ""), synthesizes a task_execute call so the
-	// resulting envelope reaches the FE as a plugin_envelope SSE event,
-	// matching the pattern attemptRouteDispatch uses for the B2 route
-	// hint. Every consultation appends to agent_broker_decisions
-	// (telemetry — read by v2 peer-agent escape-hatch decision and the
-	// CW-20260509-0049 admin CLI). Nil-safe when the broker isn't wired.
+	// Phase 4 item 02
+	// (TASKS/phase-4/02-dispatch-to-agent-reflex-action-kind-and-broker-migration.md):
+	// dispatch_to_agent reflex evaluation (upstream seam) — replaces the
+	// retired agent-broker call site (attemptBrokerDispatch/
+	// buildBrokerInput, formerly chat_broker_dispatch.go, deleted in
+	// full). Runs BEFORE the chat-loop entry: on a firing reflex,
+	// synthesizes a task_execute call so the resulting envelope reaches
+	// the FE as a plugin_envelope SSE event, matching the pattern
+	// attemptRouteDispatch uses for the B2 route hint. Nil-safe when the
+	// reflex engine isn't wired. See chat_reflex_dispatch.go's header
+	// comment for the Rule-1-feed / broker-subsumption design decision.
 	//
-	// Ordered BEFORE attemptRouteDispatch because the broker is the
-	// dispatch DECISION layer; the route hint and the existing reflex/
-	// grounding scaffold in callExecuteTask enrich the dispatch CALL.
-	// Boundary spelled out in chat_broker_dispatch.go.
-	s.attemptBrokerDispatch(ctx, sessionID, inspectorTurnID, userContent, agent.ID, ls, ch)
+	// Ordered BEFORE attemptRouteDispatch for the same reason the old
+	// broker call was: this is the dispatch DECISION layer; the route
+	// hint and the existing reflex/grounding scaffold in callExecuteTask
+	// (internal/mcp/self_tools_dispatch.go — a deliberately independent
+	// second consumer, untouched by this task) enrich the dispatch CALL.
+	s.attemptReflexDispatch(ctx, sessionID, inspectorTurnID, userContent, agent.ID, agent.Class, ls, ch)
 
 	// B2 (CW-20260429-0031): route-dispatch seam. When the classifier
 	// emits a non-chat-direct route AND the envelope-render executor is
@@ -759,24 +699,6 @@ func (s *chatServiceImpl) generateResponse(ctx context.Context, sessionID, assis
 		ls.limits.defaultPerToolCap = us.ToolPerTurnCap
 	}
 
-	// E3 (CW-20260419-0026, Phase 5): strategy planning. Reads the M1
-	// classification we just attached, runs the reflex matcher over the
-	// user input, and produces a Strategy with an initial turn budget.
-	// The budget replaces the hard-coded defaultMaxTurns ceiling for
-	// this turn (E4 absorption — CW-20260419-0020). Grounding is NOT
-	// consulted here in v1 (the recall step lives in mcp.callExecuteTask
-	// and only fires on subagent dispatch).
-	scopeTier, executionPattern := ls.Classification()
-	turnStrategy := planStrategyForTurn(
-		ctx,
-		sessionID, assistantMsgID, userContent,
-		scopeTier, executionPattern,
-		nil, /* reflexSet — falls back to BuiltinReflexes() */
-		nil, /* groundingResult — not consulted in v1 chat-loop strategy */
-		s.strategyLogger,
-	)
-	applyStrategyToLimits(ls, turnStrategy)
-
 	// CW-20260418-0043 diagnostic — log effective loop config on entry.
 	diagLogLoopStart(sessionID, assistantMsgID, agent.ID, ls, cap(ch))
 
@@ -804,15 +726,6 @@ func (s *chatServiceImpl) generateResponse(ctx context.Context, sessionID, assis
 		diagCurrentIter = ls.iteration
 		diagLogIterStart(ctx, sessionID, assistantMsgID, ls.iteration, ch)
 
-		// CW-20260504-0001: soft max_turns budget signal — fires once per
-		// generation when iteration crosses the strategy planner's estimate.
-		// Always logged (telemetry / inspector replay); SSE event only when
-		// developer mode is on. The agent continues running — this is a
-		// signal, not a terminator.
-		if fire, maxTurns := ls.checkSoftMaxTurnsWarning(); fire {
-			s.emitChatLoopBudgetSoftWarning(sessionID, ls.iteration, maxTurns, ch)
-		}
-
 		// Check layered iteration limits.
 		if stop, code, reason := ls.shouldStop(); stop {
 			slog.Warn("chat-loop stopped", "reason", reason, "code", code, "session_id", sessionID, "agent", agent.ID, "iter", ls.iteration)
@@ -823,9 +736,11 @@ func (s *chatServiceImpl) generateResponse(ctx context.Context, sessionID, assis
 			// Synthesis deltas land in the stream before the terminated
 			// envelope so the user sees a coherent response rather than an
 			// abrupt cutoff. CW-20260504-0001: max_turns is no longer a
-			// terminator, so the strategy-review-on-max-turns branch and
-			// max-turns synthesis paths are gone (max_turns surfaces via
-			// the soft warning above instead).
+			// terminator; Phase 0 item 12 (2026-08-18) subsequently removed
+			// the soft max_turns warning signal entirely (it was
+			// telemetry-only and never gated the loop either), so the only
+			// synthesis trigger left is the runaway hard circuit-breaker
+			// below.
 			if code == TerminationRunawayToolFailures {
 				s.earlyStopSynthesis(ctx, prov, model, extraSystemPrefix, slotResult, chatMessages, ch, &fullContent, &finalContent)
 			}
@@ -1094,8 +1009,19 @@ func (s *chatServiceImpl) generateResponse(ctx context.Context, sessionID, assis
 		// openrouter / openzen / azure-openai / ollama) keep going through
 		// provider.StreamChat per turn with the slot pipeline running as
 		// today.
-		if chat.IsCLIProvider(providerName) {
-			provCh, err = s.driveBootSession(provCtx, sessionID, session, agent, mode, slotResult, userContent, ls.iteration, providerName)
+		//
+		// Phase 2 item 01 (TASKS/phase-2/01-wire-runtime-kind-routing.md):
+		// this branches on `prov == nil` rather than re-checking
+		// chat.IsCLIProvider(providerName) — prov/providerName are fixed
+		// for the whole call (resolveProvider ran once, above, outside
+		// this loop) and classifyNilProvider already made the CLI-vs-API
+		// routing decision (primarily from agent.RuntimeKind) the one time
+		// it needed to be made. Re-deriving it here from the string a
+		// second time is exactly the "matched in N places, expected to
+		// stay in sync by convention" pattern architecture/
+		// 02-agent-launching.md's runtime_kind field replaces.
+		if prov == nil {
+			provCh, err = s.driveBootSession(provCtx, sessionID, session, agent, slotResult, userContent, ls.iteration, providerName)
 		} else {
 			provCh, err = prov.StreamChat(provCtx, llmtypes.ChatRequest{
 				SystemPrompt: extraSystemPrefix,
@@ -1134,8 +1060,7 @@ func (s *chatServiceImpl) generateResponse(ctx context.Context, sessionID, assis
 					recoveryReason = "rate_budget_exceeded at stream start"
 				}
 				ls.continueWith(ContinueRecovery, recoveryReason)
-				scratchSnap := ls.scratchpadSnapshot()
-				newMsgs, newTools, ok := s.recoverFromContextOverflow(ctx, sessionID, slotResult, agent, chatMessages, tools, ch, err.Error(), triggerKind, scratchSnap)
+				newMsgs, newTools, ok := s.recoverFromContextOverflow(ctx, sessionID, slotResult, agent, chatMessages, tools, ch, err.Error(), triggerKind)
 				if ok {
 					// Recovery produced stages — end the span cleanly (this
 					// wasn't a provider failure from the user's perspective),
@@ -1442,8 +1367,7 @@ func (s *chatServiceImpl) generateResponse(ctx context.Context, sessionID, assis
 				if ctxpkg.IsContextOverflowMessage(evt.Error) && ls.compactRecoverableAttempts < maxCompactRecoverableAttempts {
 					ls.compactRecoverableAttempts++
 					ls.continueWith(ContinueRecovery, "context_overflow mid-stream")
-					midSnap := ls.scratchpadSnapshot()
-					if newMsgs, newTools, ok := s.recoverFromContextOverflow(ctx, sessionID, slotResult, agent, chatMessages, tools, ch, evt.Error, compactTriggerContextOverflow, midSnap); ok {
+					if newMsgs, newTools, ok := s.recoverFromContextOverflow(ctx, sessionID, slotResult, agent, chatMessages, tools, ch, evt.Error, compactTriggerContextOverflow); ok {
 						// Mirror the stream-start recovery path: strip_tool_blocks
 						// drops tool-definition context, so post-compaction the
 						// LLM has to re-request tools. Reset the discovery-call
@@ -1684,7 +1608,6 @@ func (s *chatServiceImpl) generateResponse(ctx context.Context, sessionID, assis
 					resultBlocks, ls.toolCallRefs,
 					sessionID, &ls.reflectionFired,
 					ls.inspectorTurnID,
-					ls.modeToolOverrides,
 				)
 			} else {
 				regularTools = append(regularTools, tu)
@@ -1695,7 +1618,7 @@ func (s *chatServiceImpl) generateResponse(ctx context.Context, sessionID, assis
 		plans := s.preCheckTools(ctx, sessionID, agentID, regularTools, ls, ch, selection, tools)
 
 		// Execute tools: concurrent-safe in parallel, serial one at a time.
-		execResults := s.executeToolBatch(ctx, plans, ls, agentID, ch, sessionID, session.WorkspaceID)
+		execResults := s.executeToolBatch(ctx, plans, ls, agentID, ch, sessionID)
 
 		// Post-process: stuck loop detection, truncation, envelopes, artifacts.
 		// model is threaded through so truncate.OutputForModel can size the
@@ -1834,30 +1757,6 @@ func (s *chatServiceImpl) generateResponse(ctx context.Context, sessionID, assis
 		}
 	}
 
-	// For question-form envelopes emitted by the LLM, create EnvelopeInstance records
-	// so the response path (POST /api/envelopes/:id/respond) can receive answers and
-	// prior_response can be injected on reload. The id is written back into the struct
-	// before the envelopeJSON is saved, so the frontend gets an addressable envelope.
-	for i, env := range envelopes {
-		if env.Type != "question-form" || env.ID != "" {
-			continue
-		}
-		payload, perr := json.Marshal(env)
-		if perr != nil {
-			continue
-		}
-		inst := &store.EnvelopeInstance{
-			SessionID:    sessionID,
-			EnvelopeType: env.Type,
-			EnvelopeJSON: string(payload),
-		}
-		if cerr := s.store.CreateEnvelopeInstance(inst); cerr != nil {
-			slog.Warn("chat-service: failed to create envelope instance", "type", env.Type, "err", cerr)
-			continue
-		}
-		envelopes[i].ID = inst.ID
-	}
-
 	var envelopeJSON string
 	if len(envelopes) > 0 {
 		if data, err := json.Marshal(envelopes); err == nil {
@@ -1914,8 +1813,8 @@ func (s *chatServiceImpl) generateResponse(ctx context.Context, sessionID, assis
 	// Note: we do NOT call CreateEnvelopeInstance here. show_card envelopes
 	// are passive (no response routing) and are already persisted as part of
 	// the assistant message's `envelopes` field. Persistence stays the
-	// responsibility of interactive paths (approval / question-form /
-	// elicitation) where the row ID is needed for response endpoints.
+	// responsibility of interactive paths (approval / elicitation) where the
+	// row ID is needed for response endpoints.
 	for _, env := range envelopes {
 		if env.Target == "" && env.RenderTarget == "" && env.Mode == "" && env.RenderTargetBlocked == "" {
 			continue
@@ -2039,7 +1938,7 @@ func (s *chatServiceImpl) generateResponse(ctx context.Context, sessionID, assis
 	metrics := &store.ExecutionMetrics{
 		SessionID: sessionID, MessageID: assistantMsgID,
 		Provider: providerName, Adapter: adapterType, Model: model,
-		AgentID: agent.ID, AgentSlug: agent.Slug, Mode: mode.Slug,
+		AgentID: agent.ID, AgentSlug: agent.Slug,
 		DurationMs:      time.Since(startTime).Milliseconds(),
 		ContextMessages: len(chatMessages), ToolIterations: ls.iteration,
 		ToolCalls: len(ls.toolCallRefs),
@@ -2332,7 +2231,6 @@ func (s *chatServiceImpl) recoverFromContextOverflow(
 	ch chan chat.StreamEvent,
 	triggerMsg string,
 	triggerKind string,
-	scratchpadSnapshot map[string]any,
 ) ([]llmtypes.ChatMessage, []llmtypes.ToolDefinition, bool) {
 	if triggerKind == "" {
 		triggerKind = compactTriggerContextOverflow
@@ -2353,35 +2251,26 @@ func (s *chatServiceImpl) recoverFromContextOverflow(
 		return chatMessages, tools, false
 	}
 
-	// Glass-4 (CW-20260502-0015): for long-running sessions we suppress the
-	// P7 deterministic stash write so the latest handoff_stashes row stays
-	// the Glass-4 self-authored envelope. Per-turn / ephemeral / unclassified
-	// sessions still take the legacy P7 path. Glass-4 stash itself is written
-	// proactively by the agent's `handoff_stash` self-tool during normal
-	// turns, OR (fallback) at compaction time below before stages run.
+	// Glass-4 (CW-20260502-0015): universal for every session (28-cut-session-intent-classifier)
+	// — ensure a self-authored Glass-4 handoff exists before compaction runs.
+	// Glass-4 stash itself is written proactively by the agent's
+	// `handoff_stash` self-tool during normal turns, OR (fallback) at
+	// compaction time below before stages run.
 	sess, _ := s.store.GetSession(sessionID)
-	longRunning := IsLongRunning(sess)
 
-	if longRunning {
-		if _, err := s.ensureGlass4HandoffPreCompact(ctx, sess, chatMessages, ch); err != nil {
-			slog.Warn("chat-service: glass-4 pre-compaction handoff fallback failed (non-fatal)",
-				"session_id", sessionID, "err", err)
-		}
+	if _, err := s.ensureGlass4HandoffPreCompact(ctx, sess, chatMessages, ch); err != nil {
+		slog.Warn("chat-service: glass-4 pre-compaction handoff fallback failed (non-fatal)",
+			"session_id", sessionID, "err", err)
 	}
 
 	pipeline := &ctxpkg.CompactionPipeline{
-		Window:               result.Window,
-		Estimator:            ctxpkg.DefaultEstimator{},
-		Summarizer:           summarizer,
-		Mode:                 classifyModeFromAgentTags(agent),
-		ConversationMessages: chatMessages,
-		// P7 HandoffStash: snapshot scratchpad state pre-compaction. Skipped
-		// when Glass-4 owns this session's handoff (long-running).
-		SessionID:          sessionID,
-		ScratchpadSnapshot: scratchpadSnapshot,
-	}
-	if !longRunning {
-		pipeline.StashWriter = storeStashWriter{s: s.store}
+		Window:                result.Window,
+		Estimator:             ctxpkg.DefaultEstimator{},
+		Summarizer:            summarizer,
+		Mode:                  classifyModeFromAgentTags(agent),
+		ConversationMessages:  chatMessages,
+		SessionID:             sessionID,
+		CompactionEventWriter: NewCompactionEventWriter(s.store),
 	}
 
 	tokensBefore := result.Window.UsedTokens()
@@ -2419,16 +2308,15 @@ func (s *chatServiceImpl) recoverFromContextOverflow(
 	chatMessages = pipeline.ConversationMessages
 	result.Messages = chatMessages
 
-	// Glass-4 (CW-20260502-0015): post-compaction handoff inject. Reads the
-	// latest Glass-4 envelope for this session and populates SlotHandoff
-	// (AutoInject=true). No-op for non-long-running sessions or sessions
-	// without a Glass-4 stash. Runs before Assemble() so SlotHandoff content
-	// is in the freshly-built block list.
-	if longRunning {
-		if _, err := InjectGlass4HandoffSlot(s.store, result.Window, sessionID, ch); err != nil {
-			slog.Warn("chat-service: glass-4 handoff inject failed (non-fatal)",
-				"session_id", sessionID, "err", err)
-		}
+	// Glass-4 (CW-20260502-0015): post-compaction handoff inject, universal
+	// for every session (28-cut-session-intent-classifier). Reads the latest
+	// Glass-4 envelope for this session and populates SlotHandoff
+	// (AutoInject=true). No-op for sessions without a Glass-4 stash. Runs
+	// before Assemble() so SlotHandoff content is in the freshly-built block
+	// list.
+	if _, err := InjectGlass4HandoffSlot(s.store, result.Window, sessionID, ch); err != nil {
+		slog.Warn("chat-service: glass-4 handoff inject failed (non-fatal)",
+			"session_id", sessionID, "err", err)
 	}
 
 	result.Blocks = result.Window.Assemble()
@@ -2511,21 +2399,23 @@ func toolSlotChangeKindFor(s HydrationState) string {
 // ContextWindow for the compaction pipeline. On error it writes an error
 // event to the stream and returns; callers should just `return` on non-nil
 // err without emitting again.
+//
+// Phase 0 item 21 ("Cut Modes, in full") removed the `mode *store.AgentMode`
+// and `sessionMode *store.Mode` parameters this used to take. Phase 0 item
+// 20 (retire workspaces) removed the `workspace *store.Workspace` parameter
+// — the in-app `workspaces` table it sourced is retired in full.
 func (s *chatServiceImpl) assembleTurnContext(
 	ctx context.Context,
 	session *store.Session,
 	agent *store.AgentProfile,
-	mode *store.AgentMode,
-	workspace *store.Workspace,
 	tools []llmtypes.ToolDefinition,
 	extraSystemPrefix string,
 	providerName, model string,
 	ch chan chat.StreamEvent,
-	sessionMode *store.Mode,
 	toolsLazyHint string,
 ) (*SlotAssemblyResult, error) {
 	windowSize := s.contextWindowSize(providerName, model)
-	result, err := s.context.AssembleSlots(ctx, session, agent, mode, workspace, tools, extraSystemPrefix, windowSize, sessionMode, toolsLazyHint)
+	result, err := s.context.AssembleSlots(ctx, session, agent, tools, extraSystemPrefix, windowSize, toolsLazyHint)
 	if err != nil {
 		ch <- chat.ErrorEvent(chat.ErrorCodeInternal, "Failed to assemble context",
 			map[string]interface{}{"raw": err.Error()})
@@ -2618,34 +2508,24 @@ func (s *chatServiceImpl) enforceBudgetOrCompact(
 	settings, _ := s.store.GetUserSettings()
 	summarizer := s.buildSummarizer(settings)
 
-	// Glass-4 (CW-20260502-0015): same long-running suppression as the
-	// recovery path. The pre-loop gate sees no scratchpad, so the legacy
-	// P7 payload would be empty anyway — but keeping the discipline
-	// uniform across both compaction paths is what makes the post-compaction
-	// reader's "latest stash is the Glass-4 envelope" invariant hold.
+	// Glass-4 (CW-20260502-0015): universal for every session
+	// (28-cut-session-intent-classifier) — ensure a self-authored Glass-4
+	// handoff exists before this pre-loop compaction runs.
 	sess, _ := s.store.GetSession(sessionID)
-	longRunning := IsLongRunning(sess)
 
-	if longRunning {
-		if _, err := s.ensureGlass4HandoffPreCompact(ctx, sess, chatMessages, ch); err != nil {
-			slog.Warn("chat-service: glass-4 pre-compaction handoff fallback failed (non-fatal)",
-				"session_id", sessionID, "err", err)
-		}
+	if _, err := s.ensureGlass4HandoffPreCompact(ctx, sess, chatMessages, ch); err != nil {
+		slog.Warn("chat-service: glass-4 pre-compaction handoff fallback failed (non-fatal)",
+			"session_id", sessionID, "err", err)
 	}
 
 	pipeline := &ctxpkg.CompactionPipeline{
-		Window:               result.Window,
-		Estimator:            ctxpkg.DefaultEstimator{},
-		Summarizer:           summarizer,
-		Mode:                 classifyModeFromAgentTags(agent),
-		ConversationMessages: chatMessages,
-		// P7 HandoffStash: pre-loop compaction has no scratchpad yet.
-		// Skipped when Glass-4 owns this session's handoff (long-running).
-		SessionID:          sessionID,
-		ScratchpadSnapshot: map[string]any{},
-	}
-	if !longRunning {
-		pipeline.StashWriter = storeStashWriter{s: s.store}
+		Window:                result.Window,
+		Estimator:             ctxpkg.DefaultEstimator{},
+		Summarizer:            summarizer,
+		Mode:                  classifyModeFromAgentTags(agent),
+		ConversationMessages:  chatMessages,
+		SessionID:             sessionID,
+		CompactionEventWriter: NewCompactionEventWriter(s.store),
 	}
 
 	tokensBefore := result.Window.UsedTokens()
@@ -2665,14 +2545,12 @@ func (s *chatServiceImpl) enforceBudgetOrCompact(
 	chatMessages = pipeline.ConversationMessages
 	result.Messages = chatMessages
 
-	// Glass-4 (CW-20260502-0015): post-compaction handoff inject — same
-	// flow as recoverFromContextOverflow. See InjectGlass4HandoffSlot for
-	// the no-op gates.
-	if longRunning {
-		if _, err := InjectGlass4HandoffSlot(s.store, result.Window, sessionID, ch); err != nil {
-			slog.Warn("chat-service: glass-4 handoff inject failed (non-fatal)",
-				"session_id", sessionID, "err", err)
-		}
+	// Glass-4 (CW-20260502-0015): post-compaction handoff inject, universal
+	// for every session — same flow as recoverFromContextOverflow. See
+	// InjectGlass4HandoffSlot for the no-op gates.
+	if _, err := InjectGlass4HandoffSlot(s.store, result.Window, sessionID, ch); err != nil {
+		slog.Warn("chat-service: glass-4 handoff inject failed (non-fatal)",
+			"session_id", sessionID, "err", err)
 	}
 
 	result.Blocks = result.Window.Assemble()
@@ -2704,31 +2582,6 @@ func (s *chatServiceImpl) enforceBudgetOrCompact(
 // buildSummarizer is the chat-service-bound form of BuildSummarizer.
 func (s *chatServiceImpl) buildSummarizer(settings *store.UserSettings) ctxpkg.Summarizer {
 	return BuildSummarizer(s.providers, s.store, settings)
-}
-
-// storeStashWriter bridges HandoffStashStore to ctxpkg.StashWriter (P7, CW-20260420-0024).
-type storeStashWriter struct {
-	s HandoffStashStore
-}
-
-func (w storeStashWriter) WriteHandoffStash(ctx context.Context, sessionID, stashID string, payload ctxpkg.HandoffStashPayload) error {
-	data, err := json.Marshal(payload)
-	if err != nil {
-		return fmt.Errorf("marshal handoff stash payload: %w", err)
-	}
-	return w.s.UpsertHandoffStash(store.HandoffStash{
-		ID:        stashID,
-		SessionID: sessionID,
-		Payload:   string(data),
-		CreatedAt: time.Now().UTC().Format(time.RFC3339),
-	})
-}
-
-// NewStashWriter returns a ctxpkg.StashWriter backed by the given store.
-// Exported so api and other packages can share the same bridge without
-// importing the unexported storeStashWriter directly.
-func NewStashWriter(s HandoffStashStore) ctxpkg.StashWriter {
-	return storeStashWriter{s: s}
 }
 
 // storeCompactionEventReader bridges CompactionEventStore to
@@ -2769,6 +2622,46 @@ func (r storeCompactionEventReader) GetLatestCompactionEvent(ctx context.Context
 // without importing the unexported adapter directly.
 func NewCompactionEventReader(s CompactionEventStore) ctxpkg.CompactionEventReader {
 	return storeCompactionEventReader{s: s}
+}
+
+// storeCompactionEventWriter bridges CompactionEventStore to
+// ctxpkg.CompactionEventWriter (P8 CompactionContract — write side,
+// CW-20260420-0027). All three production CompactionPipeline{} construction
+// sites (internal/api/sessions.go's manual /compact endpoint,
+// assembleTurnContext's compact-recoverable path, and the pre-loop
+// enforceBudgetOrCompact gate) assign this adapter so the pipeline's
+// post-stage event emission (compaction.go's runStages) actually persists a
+// compaction_events row, which storeCompactionEventReader / the
+// CompactionContract disclosure (internal/chat/context.go) reads back on the
+// next turn. Mirrors storeCompactionEventReader's field-by-field translation
+// above, just in the opposite direction.
+type storeCompactionEventWriter struct {
+	s CompactionEventStore
+}
+
+func (w storeCompactionEventWriter) WriteCompactionEvent(ctx context.Context, event ctxpkg.CompactionEvent) error {
+	out := store.CompactionEvent{
+		ID:                   event.ID,
+		SessionID:            event.SessionID,
+		CoverageWindowStart:  event.CoverageWindowStart,
+		CoverageWindowEnd:    event.CoverageWindowEnd,
+		EvictedCachePointers: append([]string(nil), event.EvictedCachePointers...),
+		PreservedSources:     append([]string(nil), event.PreservedSources...),
+		SummaryMode:          event.SummaryMode,
+		SummaryTokenCount:    event.SummaryTokenCount,
+		OriginalTokenCount:   event.OriginalTokenCount,
+		HandoffStashID:       event.HandoffStashID,
+		StagesApplied:        append([]string(nil), event.StagesApplied...),
+		CreatedAt:            event.CreatedAt,
+	}
+	return w.s.WriteCompactionEvent(ctx, out)
+}
+
+// NewCompactionEventWriter returns a ctxpkg.CompactionEventWriter backed by the
+// given store. Exported so api / chat / context packages can share the bridge
+// without importing the unexported adapter directly.
+func NewCompactionEventWriter(s CompactionEventStore) ctxpkg.CompactionEventWriter {
+	return storeCompactionEventWriter{s: s}
 }
 
 // BuildSummarizer resolves the provider+model used to summarize compacted
@@ -2896,10 +2789,10 @@ func classifyModeFromAgentTags(agent *store.AgentProfile) string {
 //   - If the cap trips a SECOND time within the same turn (i.e. the LLM
 //     reflected once already and is still asking), we fall back to the
 //     pre-Phase-5 hard halt — we don't reflect repeatedly.
-//   - Every call is persisted to broker_decisions with intent + outcome +
-//     consecutive_empty + total_calls so future Phase 4 mining work has a
-//     ground-truth signal to learn from. (Phase 4 mining itself is
-//     deferred — see follow-ups.)
+//   - Every call is persisted to the inspector ring buffer with intent +
+//     outcome + consecutive_empty + total_calls (TASKS/phase-0/23-export-
+//     and-drop-decision-tables.md retired the SQL-backed broker_decisions
+//     table this used to also write to — see persistBrokerCallEx).
 func (s *chatServiceImpl) handleRequestTools(
 	ctx context.Context,
 	tu llmtypes.ToolUseBlock,
@@ -2914,13 +2807,13 @@ func (s *chatServiceImpl) handleRequestTools(
 	sessionID string,
 	reflectionFired *bool,
 	inspectorTurnID string, // I1 (CW-20260426-0004): "" when inspector is disabled
-	modeOverrideSpec store.ToolOverrideSpec, // F1 (CW-20260429-0001): scrub mode-denied tools loaded mid-turn
 ) ([]llmtypes.ContentBlock, []chat.ToolCallRef) {
 	ch <- chat.StreamEvent{Type: "tool_call", Tool: tu.Name, ToolID: tu.ID}
 	*totalCalls++
 
 	// Pull the LLM-supplied intent up front so it ends up in every
-	// broker_decisions row (selected, loaded, empty, halted, reflected).
+	// inspector broker-decision record (selected, loaded, empty, halted,
+	// reflected).
 	requestedIntent := ""
 	if tu.Input != nil {
 		if v, ok := tu.Input["intent"]; ok {
@@ -2992,18 +2885,6 @@ func (s *chatServiceImpl) handleRequestTools(
 
 	newTools, rtResult, _ := s.tools.HandleRequestTools(ctx, tu.Input)
 
-	// F1 (CW-20260429-0001): scrub mode-denied tools BEFORE they reach the
-	// LLM. Same resolution helper B1 wired at materialization (deny > allow,
-	// explicit > pattern); meta-tools are exempt. Empty spec is a passthrough.
-	if !isEmptySpec(modeOverrideSpec) {
-		filtered := applyModeToolOverridesToTools(newTools, modeOverrideSpec)
-		if len(filtered) != len(newTools) {
-			slog.Info("chat-service: request_tools filtered by session-mode tool_overrides",
-				"session_id", sessionID, "before", len(newTools), "after", len(filtered))
-		}
-		newTools = filtered
-	}
-
 	var loaded []string
 	for _, nt := range newTools {
 		if !loadedTools[nt.Name] {
@@ -3050,22 +2931,22 @@ func sortedKeys(m map[string]bool) []string {
 	return out
 }
 
-// persistBrokerCall records every request_tools meta-tool call into the
-// broker_decisions table AND the inspector ring buffer (when inspector is
-// wired). Best-effort: a failed write is logged but never gates the loop.
-// The chat service's store-backed BrokerDecisionLogger is only available via
-// toolServiceImpl; we route through that adapter so tests with a stub
-// ToolService don't have to provide a Store.
-func (s *chatServiceImpl) persistBrokerCall(
-	sessionID, intent, outcome string,
-	consecutiveEmpty, totalCalls, loadedCount int,
-	reflectionQuery string,
-) {
-	s.persistBrokerCallEx(sessionID, "", intent, outcome, consecutiveEmpty, totalCalls, loadedCount, reflectionQuery, nil, "")
-}
-
-// persistBrokerCallEx is the extended form used by handleRequestTools to also
-// record the broker decision into the inspector aggregator.
+// persistBrokerCallEx records one request_tools meta-tool call into the
+// inspector ring buffer (when inspector is wired). No-op when the
+// inspector is disabled, sessionID is empty, or no turn ID is available —
+// dev-mode telemetry only, never gates the loop.
+//
+// Historical note (TASKS/phase-0/23-export-and-drop-decision-tables.md):
+// this used to also persist every call into the `broker_decisions` SQL
+// table via toolServiceImpl's BrokerDecisionLogger/LogRequestToolsCall.
+// That table (and its writer) was retired in full as part of the same
+// task — its historical rows were exported to event_log
+// (event_type="broker_decision_export") before the table was dropped. The
+// inspector ring buffer is now the only live per-turn broker-decision
+// telemetry; the old SQL-backed debug panel (BrokerDecisionsPanel/Widget,
+// GET /api/broker/decisions) was removed alongside it — see
+// ui/src/components/settings/inspector/InspectorPanel.tsx for its
+// replacement.
 func (s *chatServiceImpl) persistBrokerCallEx(
 	sessionID, inspectorTurnID, intent, outcome string,
 	consecutiveEmpty, totalCalls, loadedCount int,
@@ -3073,42 +2954,23 @@ func (s *chatServiceImpl) persistBrokerCallEx(
 	selectedTools []string,
 	layerReached string,
 ) {
-	if sessionID == "" {
-		return
-	}
-	logger, ok := s.tools.(brokerCallPersister)
-	if !ok || logger == nil {
+	if sessionID == "" || s.inspector == nil || inspectorTurnID == "" {
 		return
 	}
 	if intent == "" {
 		intent = "(no intent supplied)"
 	}
-	logger.LogRequestToolsCall(
-		sessionID, intent, outcome,
-		consecutiveEmpty, totalCalls, loadedCount, reflectionQuery,
-	)
-	// I1 (CW-20260426-0004): additive — also emit to inspector.
-	if s.inspector != nil && inspectorTurnID != "" {
-		d := inspectsvc.BrokerDecision{
-			Intent:           intent,
-			Outcome:          outcome,
-			SelectedTools:    selectedTools,
-			LayerReached:     layerReached,
-			ConsecutiveEmpty: consecutiveEmpty,
-			TotalCalls:       totalCalls,
-			LoadedCount:      loadedCount,
-			ReflectionQuery:  reflectionQuery,
-		}
-		s.inspector.RecordBrokerDecision(sessionID, inspectorTurnID, d)
+	d := inspectsvc.BrokerDecision{
+		Intent:           intent,
+		Outcome:          outcome,
+		SelectedTools:    selectedTools,
+		LayerReached:     layerReached,
+		ConsecutiveEmpty: consecutiveEmpty,
+		TotalCalls:       totalCalls,
+		LoadedCount:      loadedCount,
+		ReflectionQuery:  reflectionQuery,
 	}
-}
-
-// brokerCallPersister is the narrow surface persistBrokerCall uses. It is
-// satisfied by toolServiceImpl (which holds a *store.Store via the
-// BrokerDecisionLogger setter); a stub ToolService that doesn't satisfy
-// this interface is silently a no-op for persistence.
-type brokerCallPersister interface {
-	LogRequestToolsCall(sessionID, intent, outcome string, consecutiveEmpty, totalCalls, loadedCount int, reflectionQuery string)
+	s.inspector.RecordBrokerDecision(sessionID, inspectorTurnID, d)
 }
 
 // detectStuckLoop checks for repeated identical tool results and returns
@@ -3144,18 +3006,18 @@ func (s *chatServiceImpl) detectStuckLoop(
 }
 
 // captureEnvelopeData extracts envelope data markers from a tool result.
-func captureEnvelopeData(result, toolName string, pending []string) []string {
+//
+// Used to carry the payload of a __search_kb tool call through
+// chat.BuildKBEnvelope into a kb-result card — the support-ticket-specific
+// caller was removed in Phase 0 (15c-cut-support-ticket) alongside the rest
+// of that plugin's frontend and backend footprint. The generic
+// ENVELOPE_DATA marker extraction below is shared infrastructure used by
+// card_show and other tools and stays in place.
+func captureEnvelopeData(result string, pending []string) []string {
 	if eStart := strings.Index(result, "<!--ENVELOPE_DATA:"); eStart >= 0 {
 		tail := result[eStart+len("<!--ENVELOPE_DATA:"):]
 		if eEnd := strings.Index(tail, ":ENVELOPE_DATA-->"); eEnd >= 0 {
-			payload := tail[:eEnd]
-			if strings.HasSuffix(toolName, "__search_kb") {
-				if env := chat.BuildKBEnvelope(payload); env != "" {
-					pending = append(pending, env)
-				}
-			} else {
-				pending = append(pending, payload)
-			}
+			pending = append(pending, tail[:eEnd])
 		}
 	}
 	return pending
@@ -3665,6 +3527,39 @@ func normalizeToolInputSchemas(tools []llmtypes.ToolDefinition) {
 		normalizeSchemaNode(clone)
 		tools[i].InputSchema = clone
 	}
+}
+
+// applyToolSelectionFilter runs the FilterToolSelection plugin filter chain
+// over the fully-resolved per-turn tool list, letting a plugin add, remove,
+// or reshape which tools are offered to the model this turn. See
+// TASKS/phase-4/06-add-filter-tool-selection.md.
+//
+// Extracted as its own function (mirroring composeExtraSystemPrefix and
+// applyChatSurfaceFilter's existing precedent in this package) so the exact
+// production call site is independently unit-testable without needing to
+// exercise the rest of generateResponse's provider/streaming machinery.
+//
+// nil-safe: a nil pluginHost (no plugin host wired) or a chain with zero
+// registered handlers returns tools unchanged. On a filter error, or when
+// the handler chain returns a value that doesn't type-assert back to
+// []llmtypes.ToolDefinition, the input tools are returned unchanged and the
+// error (if any) is logged — a misbehaving plugin filter must never crash
+// the turn or silently empty the tool surface.
+func applyToolSelectionFilter(pluginHost PluginEventSink, tools []llmtypes.ToolDefinition, fctx pluginpkg.FilterContext) []llmtypes.ToolDefinition {
+	if pluginHost == nil {
+		return tools
+	}
+	filtered, err := pluginHost.ApplyFilter(pluginpkg.FilterToolSelection, tools, fctx)
+	if err != nil {
+		slog.Warn("chat-service: tool_selection filter error", "err", err)
+		return tools
+	}
+	ft, ok := filtered.([]llmtypes.ToolDefinition)
+	if !ok {
+		slog.Warn("chat-service: tool_selection filter returned unexpected type — ignoring", "type", fmt.Sprintf("%T", filtered))
+		return tools
+	}
+	return ft
 }
 
 // cloneSchemaNode returns a deep copy of a JSON-Schema-shaped map. Maps and

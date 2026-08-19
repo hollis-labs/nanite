@@ -1,3 +1,4 @@
+-- +goose Up
 -- Nanite schema (squashed from 27 migrations, 2026-04-04).
 -- DDL only. All seed data lives in seed.go.
 
@@ -506,3 +507,13 @@ CREATE TABLE IF NOT EXISTS tasks (
 CREATE INDEX IF NOT EXISTS idx_tasks_session ON tasks(session_id);
 CREATE INDEX IF NOT EXISTS idx_tasks_parent ON tasks(parent_id);
 CREATE INDEX IF NOT EXISTS idx_tasks_status ON tasks(status);
+
+-- +goose Down
+-- No down migration: this file predates goose adoption (see
+-- docs/engineering/architecture/05-storage-and-migrations.md, "Migrations:
+-- adopting a real ledger"). Every pre-cutover migration ships a
+-- deliberately empty Down section rather than a hand-derived rollback --
+-- reconstructing the exact pre-migration schema/data shape for 94 files
+-- retroactively isn't worth doing when the historical state it would
+-- recreate has no operational value. New migrations going forward are
+-- expected to carry a real, tested Down.

@@ -28,14 +28,14 @@ func TestMigration019_ExistingRowsPreserved(t *testing.T) {
 
 	// Read it back and verify old cols preserved + new cols are empty string.
 	var (
-		id, parentSessionID, childSessionID   string
-		role, prompt, mode, status            string
-		inputsJSON, resultJSON, errCol        string
-		createdAt, startedAt, completedAt     string
-		parentAgentID, envelopeInstanceID     string
-		approvedAt, approvedBy                string
-		rejectedAt, rejectionReason           string
-		timeoutSeconds                        int
+		id, parentSessionID, childSessionID string
+		role, prompt, mode, status          string
+		inputsJSON, resultJSON, errCol      string
+		createdAt, startedAt, completedAt   string
+		parentAgentID, envelopeInstanceID   string
+		approvedAt, approvedBy              string
+		rejectedAt, rejectionReason         string
+		timeoutSeconds                      int
 	)
 	row := s.DB.QueryRow(`
 		SELECT id, parent_session_id, child_session_id, role, prompt, mode, status,
@@ -130,20 +130,26 @@ func TestMigration019_AcceptsNewEnumValues(t *testing.T) {
 	}
 }
 
-// TestMigration019_RerunPreservesBothUserSettingsColumns verifies the tail
-// ALTER TABLE statements survive an idempotent re-run. splitSQL emits each
-// ALTER as its own Exec (guaranteed by migration 019 ending its transaction
-// with `END;` — not `COMMIT;`, which the splitter would not treat as a
-// BEGIN-block closer, causing the two ALTERs to collapse into one multi-
-// statement Exec where a "duplicate column" error on the first can mask the
-// second under some driver semantics).
-//
-// Regression for Copilot review on PR #60, finding 3.
+// TestMigration019_RerunPreservesBothUserSettingsColumns is the regression
+// test for Copilot review on PR #60, finding 3: the old runner's splitSQL
+// could, under some conditions, collapse migration 019's two tail ALTER
+// TABLE statements into one multi-statement Exec, where a "duplicate
+// column" error on the first could mask the second under some driver
+// semantics. That specific failure mode can no longer occur at all — it
+// was a property of splitSQL's BEGIN/END depth-tracking, which store.go no
+// longer has (see 09-adopt-goose-migrations): goose's own SQL parser always
+// treats each semicolon-terminated line as its own statement, and its real
+// ledger means migration 019 doesn't even re-execute on a second boot in
+// the first place. This test now verifies the surviving, more general
+// property: calling s.migrate() again (whatever goose does under the hood
+// — here, nothing, since 019 is already applied) never corrupts these two
+// columns.
 func TestMigration019_RerunPreservesBothUserSettingsColumns(t *testing.T) {
 	s := newTestStore(t)
 
-	// Re-run migrate(), which will re-hit the ALTER TABLE ADD COLUMN lines
-	// and exercise the idempotent "duplicate column" path for each.
+	// Second migrate() call: goose sees migration 019 already applied and
+	// does nothing. The columns/values below must still be exactly what
+	// the first (real) application of 019 produced.
 	if err := s.migrate(); err != nil {
 		t.Fatalf("second migrate: %v", err)
 	}

@@ -2,6 +2,8 @@
 
 Structured, interactive UI content agents use to present rich data to a user instead of raw prose — tables, approvals, diffs, forms. Formerly called "the envelope system" as a subsystem name; **Envelope now stays scoped narrowly to the wire/transport wrapper**, Cards is the rendered UI system built on top of it. See `GLOSSARY.md`.
 
+**No frontend work in any backend phase, ever, full stop.** Everything in this doc describes the target *shape* of the Cards system, including its rendered/UI half — but the actual React/component implementation work belongs entirely to the separate, deferred frontend pass (see `00-overview.md`), never to Phase 5 or any other backend phase. Where this doc's content maps to a `TASKS.md` item, only that item's backend/schema/API half is in scope for the phase it's assigned to.
+
 ## Purpose, stated plainly
 
 This is meant to let the harness inject rich, structured, typed/validated data for a user to act on — without costing the agent turns to construct UI, and without bloating its own context with data that isn't conversationally useful. The canonical example: an agent triggers a deterministic data fetch (e.g. `torque_fetch_latest`), the harness renders the result as an interactive table the user can act on directly, and the structured response posts back via API — the agent's own context stays light regardless of how much data the table holds. Comparable in spirit to Microsoft Teams' Adaptive Cards; this implementation is considered a genuinely good one, worth continuing to invest in.

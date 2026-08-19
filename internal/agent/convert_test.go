@@ -19,19 +19,18 @@ func TestDefinition_ToProfile(t *testing.T) {
 		Tags:           []string{"backend"},
 		Directories:    []string{"./src"},
 		PermissionMode: "yolo",
-		Modes: []ModeDefinition{
-			{Slug: "default", Name: "Default", PromptAddendum: "Be helpful."},
-			{Slug: "architect", Name: "Architect", PromptAddendum: "Focus on design."},
-		},
-		SystemPrompt: "You are a code agent.",
-		Source:       "project",
-		SourceRef:    "/path/to/code.md",
+		SystemPrompt:   "You are a code agent.",
+		Source:         "project",
+		SourceRef:      "/path/to/code.md",
 	}
 
 	p := def.ToProfile()
 
-	if p.ID != "file-code" {
-		t.Errorf("ID = %q, want %q", p.ID, "file-code")
+	// The file-based agent runtime is eliminated (TASKS/adhoc/01) -- an
+	// unstamped Definition (no `id:` frontmatter) has no identity until the
+	// standard agent-creation path mints one.
+	if p.ID != "" {
+		t.Errorf("ID = %q, want empty (unstamped def has no ID until CreateAgent mints one)", p.ID)
 	}
 	if p.Name != "Code Agent" {
 		t.Errorf("Name = %q", p.Name)
@@ -80,13 +79,11 @@ func TestDefinition_ToProfile(t *testing.T) {
 		t.Errorf("MCPServers = %v", servers)
 	}
 
-	// Check modes column (slug array).
-	var modesSlugs []string
-	if err := json.Unmarshal([]byte(p.Modes), &modesSlugs); err != nil {
-		t.Fatalf("Modes JSON: %v", err)
-	}
-	if len(modesSlugs) != 2 || modesSlugs[0] != "default" {
-		t.Errorf("Modes = %v", modesSlugs)
+	// Phase 0 item 21 ("Cut Modes, in full") deleted Definition.Modes /
+	// ModeDefinition — the legacy agent_profiles.modes column is always
+	// "[]" now (see ToProfile's doc comment).
+	if p.Modes != "[]" {
+		t.Errorf("Modes = %q, want \"[]\" (Legacy Agent Mode was cut)", p.Modes)
 	}
 
 	// An unset (zero-value) Constraints still serializes to "{}" — see
@@ -95,13 +92,11 @@ func TestDefinition_ToProfile(t *testing.T) {
 		t.Errorf("Constraints = %q, want %q", p.Constraints, "{}")
 	}
 
-	// Check tool permissions derived from tools.
-	var tp map[string]any
-	if err := json.Unmarshal([]byte(p.ToolPermissions), &tp); err != nil {
-		t.Fatalf("ToolPermissions JSON: %v", err)
-	}
-	if tp["allow_list"] == nil {
-		t.Error("ToolPermissions missing allow_list")
+	// TASKS/adhoc/02-remove-tool-permissions-collapse-to-agent-tools.md:
+	// ToolPermissions is always written as an inert "{}" now, regardless of
+	// Tools -- it is no longer derived from anything.
+	if p.ToolPermissions != "{}" {
+		t.Errorf("ToolPermissions = %q, want %q", p.ToolPermissions, "{}")
 	}
 }
 
@@ -119,7 +114,7 @@ func TestDefinition_ToProfile_Constraints(t *testing.T) {
 		SystemPrompt: "You dispatch work.",
 		Source:       "project",
 		Constraints: AgentConstraints{
-			MaxTurns:                 50,
+			HardCeiling:              150,
 			SubagentCompletionPolicy: "auto_summarize",
 			MessageWakePolicy:        "render_and_wait",
 		},
@@ -134,8 +129,12 @@ func TestDefinition_ToProfile_Constraints(t *testing.T) {
 	if got, want := c["subagent_completion_policy"], "auto_summarize"; got != want {
 		t.Errorf("constraints.subagent_completion_policy = %v, want %q", got, want)
 	}
-	if got, want := c["max_turns"], float64(50); got != want {
-		t.Errorf("constraints.max_turns = %v, want %v", got, want)
+	// Phase 0 item 12 (2026-08-18) removed MaxTurns from AgentConstraints
+	// (soft/telemetry-only, never gated the loop). hard_ceiling now stands
+	// in as the numeric-field regression check this test originally used
+	// max_turns for.
+	if got, want := c["hard_ceiling"], float64(150); got != want {
+		t.Errorf("constraints.hard_ceiling = %v, want %v", got, want)
 	}
 	// MessageWakePolicy (CW-20260816-0065) was missing from this struct
 	// until the code-review pass that added it — a `constraints:
@@ -157,8 +156,8 @@ func TestDefinition_ToProfile_Minimal(t *testing.T) {
 
 	p := def.ToProfile()
 
-	if p.ID != "file-minimal" {
-		t.Errorf("ID = %q", p.ID)
+	if p.ID != "" {
+		t.Errorf("ID = %q, want empty (unstamped def has no ID until CreateAgent mints one)", p.ID)
 	}
 	if p.Tools != "[]" {
 		t.Errorf("Tools = %q, want %q", p.Tools, "[]")
@@ -177,66 +176,16 @@ func TestDefinition_ToProfile_Minimal(t *testing.T) {
 	}
 }
 
-func TestDefinition_ToModes(t *testing.T) {
-	def := &Definition{
-		Slug: "test",
-		Modes: []ModeDefinition{
-			{Slug: "default", Name: "Default", PromptAddendum: "Be helpful."},
-			{
-				Slug:           "architect",
-				Name:           "Architect",
-				PromptAddendum: "Design first.",
-				ToolOverrides:  map[string]any{"prefer": []string{"read", "grep"}},
-			},
-		},
-	}
+// Phase 0 item 21 ("Cut Modes, in full") deleted Definition.ToModes() along
+// with store.AgentMode / ModeDefinition — there is no more inline
+// agent-file mode concept to convert. TestDefinition_ToModes was removed
+// with it.
 
-	modes := def.ToModes()
-	if len(modes) != 2 {
-		t.Fatalf("got %d modes, want 2", len(modes))
-	}
-
-	if modes[0].ID != "file-test-default" {
-		t.Errorf("modes[0].ID = %q", modes[0].ID)
-	}
-	if modes[0].AgentID != "file-test" {
-		t.Errorf("modes[0].AgentID = %q", modes[0].AgentID)
-	}
-	if modes[0].PromptAddendum != "Be helpful." {
-		t.Errorf("modes[0].PromptAddendum = %q", modes[0].PromptAddendum)
-	}
-
-	if modes[1].Slug != "architect" {
-		t.Errorf("modes[1].Slug = %q", modes[1].Slug)
-	}
-	if modes[1].ToolOverrides == "{}" {
-		t.Error("modes[1].ToolOverrides should not be empty")
-	}
-}
-
-func TestIsFileBasedID(t *testing.T) {
-	tests := []struct {
-		id   string
-		want bool
-	}{
-		{"file-code", true},
-		{"file-default", true},
-		{"file-", false},
-		{"mentat-001", false},
-		{"", false},
-	}
-	for _, tt := range tests {
-		if got := IsFileBasedID(tt.id); got != tt.want {
-			t.Errorf("IsFileBasedID(%q) = %v, want %v", tt.id, got, tt.want)
-		}
-	}
-}
-
-func TestSlugFromFileID(t *testing.T) {
-	if got := SlugFromFileID("file-code"); got != "code" {
-		t.Errorf("SlugFromFileID(file-code) = %q", got)
-	}
-	if got := SlugFromFileID("mentat-001"); got != "" {
-		t.Errorf("SlugFromFileID(mentat-001) = %q, want empty", got)
-	}
-}
+// TestIsFileBasedID / TestOverlayDBFields / TestSlugFromFileID were removed
+// by TASKS/adhoc/01-eliminate-file-based-agent-runtime.md: the file-based
+// agent runtime (IsFileBasedID/SlugFromFileID/CanonicalID()'s "file-<slug>"
+// fallback, and the OverlayDBFields merge helper that existed solely to
+// patch DB-only columns onto a file-derived profile) no longer exists. See
+// TestDefinition_ToProfile / TestDefinition_ToProfile_Minimal above for the
+// replacement coverage (an unstamped Definition's ToProfile().ID is simply
+// empty now, not a synthetic alias).

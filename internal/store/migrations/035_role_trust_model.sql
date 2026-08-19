@@ -1,3 +1,4 @@
+-- +goose Up
 -- H1 (CW-20260421-0014): role trust model — 3-tier, workspace-scoped.
 -- Adds default_trust_tier to agent_profiles. Adds workspace_role_trust
 -- override table.
@@ -33,3 +34,13 @@ CREATE TABLE IF NOT EXISTS workspace_role_trust (
 
 CREATE INDEX IF NOT EXISTS idx_workspace_role_trust_workspace
   ON workspace_role_trust(workspace_id);
+
+-- +goose Down
+-- No down migration: this file predates goose adoption (see
+-- docs/engineering/architecture/05-storage-and-migrations.md, "Migrations:
+-- adopting a real ledger"). Every pre-cutover migration ships a
+-- deliberately empty Down section rather than a hand-derived rollback --
+-- reconstructing the exact pre-migration schema/data shape for 94 files
+-- retroactively isn't worth doing when the historical state it would
+-- recreate has no operational value. New migrations going forward are
+-- expected to carry a real, tested Down.

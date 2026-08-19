@@ -9,7 +9,7 @@ import (
 
 func TestHandoffStash_UpsertAndGet(t *testing.T) {
 	s := newTestStore(t)
-	sess := makeTestSession(t, s, "workspace-1")
+	sess := makeTestSession(t, s)
 
 	stash := HandoffStash{
 		ID:        uuid.New().String(),
@@ -39,7 +39,7 @@ func TestHandoffStash_UpsertAndGet(t *testing.T) {
 
 func TestHandoffStash_Upsert_UpdatesPayload(t *testing.T) {
 	s := newTestStore(t)
-	sess := makeTestSession(t, s, "workspace-1")
+	sess := makeTestSession(t, s)
 	id := uuid.New().String()
 
 	first := HandoffStash{ID: id, SessionID: sess.ID,
@@ -67,7 +67,7 @@ func TestHandoffStash_Upsert_UpdatesPayload(t *testing.T) {
 
 func TestHandoffStash_GetLatestStashForSession(t *testing.T) {
 	s := newTestStore(t)
-	sess := makeTestSession(t, s, "workspace-1")
+	sess := makeTestSession(t, s)
 
 	older := HandoffStash{ID: uuid.New().String(), SessionID: sess.ID,
 		Payload:   `{"decisions_locked":["older"],"open_questions":[],"active_file_refs":[],"active_ticket_ids":[],"should_reread":[]}`,

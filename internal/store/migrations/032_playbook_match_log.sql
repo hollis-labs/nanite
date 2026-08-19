@@ -1,3 +1,4 @@
+-- +goose Up
 -- Phase 5 / E1 (CW-20260419-0027): playbook system reflex matcher.
 --
 -- Adds the playbook_match_log table. Every user turn that fires a reflex
@@ -40,3 +41,13 @@ CREATE INDEX IF NOT EXISTS idx_playbook_match_log_session ON playbook_match_log(
 
 -- Index on reflex_id for reflex-level analytics
 CREATE INDEX IF NOT EXISTS idx_playbook_match_log_reflex ON playbook_match_log(reflex_id);
+
+-- +goose Down
+-- No down migration: this file predates goose adoption (see
+-- docs/engineering/architecture/05-storage-and-migrations.md, "Migrations:
+-- adopting a real ledger"). Every pre-cutover migration ships a
+-- deliberately empty Down section rather than a hand-derived rollback --
+-- reconstructing the exact pre-migration schema/data shape for 94 files
+-- retroactively isn't worth doing when the historical state it would
+-- recreate has no operational value. New migrations going forward are
+-- expected to carry a real, tested Down.

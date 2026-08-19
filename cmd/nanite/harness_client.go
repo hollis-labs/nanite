@@ -164,12 +164,11 @@ func (c *harnessClient) doJSON(ctx context.Context, method, path string, body, o
 }
 
 type harnessCreateSessionRequest struct {
-	WorkspaceID string `json:"workspace_id"`
-	ProjectID   string `json:"project_id,omitempty"`
-	Provider    string `json:"provider,omitempty"`
-	Model       string `json:"model,omitempty"`
-	AgentID     string `json:"agent_id,omitempty"`
-	Title       string `json:"title,omitempty"`
+	ProjectID string `json:"project_id,omitempty"`
+	Provider  string `json:"provider,omitempty"`
+	Model     string `json:"model,omitempty"`
+	AgentID   string `json:"agent_id,omitempty"`
+	Title     string `json:"title,omitempty"`
 }
 
 type harnessSessionResponse struct {

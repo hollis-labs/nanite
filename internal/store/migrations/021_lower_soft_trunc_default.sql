@@ -1,3 +1,4 @@
+-- +goose Up
 -- CW-20260419-0018 (UAT c17) lowered the tool-result soft-truncate
 -- default from 64 KiB to 2 KiB. Root cause: a 89 KiB clockwork_task_list
 -- result sailed through the cache-pointer gate because the per-user
@@ -16,3 +17,13 @@
 
 UPDATE user_settings SET tool_result_soft_truncate_bytes = 2048
     WHERE tool_result_soft_truncate_bytes = 65536;
+
+-- +goose Down
+-- No down migration: this file predates goose adoption (see
+-- docs/engineering/architecture/05-storage-and-migrations.md, "Migrations:
+-- adopting a real ledger"). Every pre-cutover migration ships a
+-- deliberately empty Down section rather than a hand-derived rollback --
+-- reconstructing the exact pre-migration schema/data shape for 94 files
+-- retroactively isn't worth doing when the historical state it would
+-- recreate has no operational value. New migrations going forward are
+-- expected to carry a real, tested Down.

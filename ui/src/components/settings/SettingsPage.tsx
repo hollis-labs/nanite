@@ -13,7 +13,6 @@ import {
   Puzzle,
   SlidersHorizontal,
   Sparkles,
-  SquareTerminal,
   User,
   Wrench,
 } from "lucide-react";
@@ -31,7 +30,6 @@ import { useSettings } from "@/hooks/useSettings";
 import { resolveIcon } from "@/lib/icons";
 import { getSlotComponent } from "@/lib/plugin-slot-lookup";
 import { useNavigationStore } from "@/stores/useNavigationStore";
-import { ActionsPanel } from "./ActionsPanel";
 import { AgentProfileManager } from "./AgentProfileManager";
 import { DurableAgentAdminPanel } from "./DurableAgentAdminPanel";
 import { MemoryPanel } from "./MemoryPanel";
@@ -49,10 +47,9 @@ import { ShortcutsPanel } from "./ShortcutsPanel";
 import { SkillsBrowser } from "./SkillsBrowser";
 import { ToolDashboard } from "./ToolDashboard";
 import { WidgetManager } from "./WidgetManager";
-import { WorkspaceProjectManager } from "./WorkspaceProjectManager";
+import { ProjectManager } from "./ProjectManager";
 import { ProfilePanel } from "./ProfilePanel";
 import { PanelManager } from "./PanelManager";
-import { MetaHarnessManager } from "./MetaHarnessManager";
 
 interface NavItem {
   id: string;
@@ -80,7 +77,6 @@ const BASE_NAV_GROUPS: NavGroup[] = [
     label: "AI",
     items: [
       { id: "providers", label: "Providers", icon: Cpu },
-      { id: "harnesses", label: "Harnesses", icon: SquareTerminal },
       { id: "agents", label: "Agents", icon: Bot },
       { id: "durable-agents", label: "Durable Agents", icon: Boxes },
       { id: "skills", label: "Skills", icon: Sparkles },
@@ -92,8 +88,6 @@ const BASE_NAV_GROUPS: NavGroup[] = [
     label: "Projects",
     items: [
       { id: "workspaces", label: "Projects", icon: FolderKanban },
-      // hidden pending CW-20260421-0012 scope review (K5 / CW-20260421-0004)
-      // { id: "actions", label: "Actions", icon: Zap },
     ],
   },
   {
@@ -208,12 +202,8 @@ export default function SettingsPage() {
         );
       case "providers":
         return <ProviderManager />;
-      case "harnesses":
-        return <MetaHarnessManager />;
       case "shortcuts":
         return <ShortcutsPanel />;
-      case "actions":
-        return <ActionsPanel />;
       case "agents":
         return <AgentProfileManager />;
       case "durable-agents":
@@ -231,7 +221,7 @@ export default function SettingsPage() {
       case "panels":
         return <PanelManager />;
       case "workspaces":
-        return <WorkspaceProjectManager />;
+        return <ProjectManager />;
       case "memory":
         return <MemoryPanel />;
       case "observability":

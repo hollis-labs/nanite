@@ -1,5 +1,4 @@
 import { useAppStore } from '@/stores/useAppStore'
-import { BrokerDecisionsPanel } from './BrokerDecisionsPanel'
 import { SlotInspectorPanel } from './SlotInspectorPanel'
 import { TurnSnapshotPanel } from './TurnSnapshotPanel'
 
@@ -20,7 +19,6 @@ export function DebugPanelsContainer() {
 
   return (
     <div className="space-y-2">
-      <BrokerDecisionsPanel sessionId={activeSessionId} />
       <SlotInspectorPanel sessionId={activeSessionId} />
       <TurnSnapshotPanel sessionId={activeSessionId} />
     </div>

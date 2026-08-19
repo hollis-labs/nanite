@@ -1,3 +1,4 @@
+-- +goose Up
 -- Phase 5 / E2 (CW-20260419-0028): Memory-as-grounding consultation log.
 --
 -- Adds two tables that record the pre-strategy memory recall step introduced
@@ -70,3 +71,13 @@ CREATE INDEX IF NOT EXISTS idx_grounding_outcomes_consultation
 -- Index on outcome_kind for acceptance-rate analytics.
 CREATE INDEX IF NOT EXISTS idx_grounding_outcomes_kind
     ON grounding_outcomes(outcome_kind);
+
+-- +goose Down
+-- No down migration: this file predates goose adoption (see
+-- docs/engineering/architecture/05-storage-and-migrations.md, "Migrations:
+-- adopting a real ledger"). Every pre-cutover migration ships a
+-- deliberately empty Down section rather than a hand-derived rollback --
+-- reconstructing the exact pre-migration schema/data shape for 94 files
+-- retroactively isn't worth doing when the historical state it would
+-- recreate has no operational value. New migrations going forward are
+-- expected to carry a real, tested Down.

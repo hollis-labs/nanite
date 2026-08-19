@@ -78,7 +78,6 @@ func (d *dispatchSpawner) Spawn(ctx context.Context, req dispatch.SpawnRequest) 
 		Mode:            mode,
 		Provider:        req.Provider,
 		TimeoutSeconds:  req.TimeoutSeconds,
-		WorkspaceID:     req.WorkspaceID,
 		AgentProfileID:  req.AgentProfileID,
 	})
 	if err != nil {
@@ -188,7 +187,6 @@ func (d *dispatchWorkflowLauncher) Launch(ctx context.Context, req dispatch.Work
 	result, err := d.launcher.Launch(ctx, WorkflowLaunchRequest{
 		WorkflowName:    req.WorkflowName,
 		Params:          req.Params,
-		WorkspaceID:     req.WorkspaceID,
 		AgentProfileID:  req.AgentProfileID,
 		ParentSessionID: req.ParentSessionID,
 		TimeoutSeconds:  req.TimeoutSeconds,

@@ -131,8 +131,10 @@ func (h *Host) ValidatePluginEnvelope(pluginID, envType string, data any) error 
 // through with a warning log and a "__nanite_validation_warning" marker
 // injected into Data so the UI layer can surface the fault during development.
 //
-// Core-generated envelopes (e.g. chat.BuildKBEnvelope) do NOT pass through
-// this function — they keep the advisory path in internal/chat/envelope.go.
+// Core-generated envelopes (e.g. from a tool's <!--ENVELOPE_DATA:...-->
+// marker, captured by captureEnvelopeData in internal/service/chat_generate.go)
+// do NOT pass through this function — they keep the advisory path in
+// internal/chat/envelope.go.
 func (h *Host) FilterPluginEnvelopes(pluginID string, envs []sdkplugin.EnvelopeOut) []sdkplugin.EnvelopeOut {
 	if len(envs) == 0 {
 		return envs

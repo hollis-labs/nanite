@@ -10,14 +10,11 @@ import (
 
 	"github.com/google/uuid"
 	agentsessions "github.com/hollis-labs/agentkit/agentsessions"
-	agentbroker "github.com/hollis-labs/agentkit/broker"
 	llmcontracts "github.com/hollis-labs/go-llm-contracts"
 	"github.com/hollis-labs/go-modelsdev/modelsdev"
 	"github.com/hollis-labs/go-providers/provider"
 	"github.com/hollis-labs/nanite/internal/agent"
 	"github.com/hollis-labs/nanite/internal/agent/reflexes"
-	"github.com/hollis-labs/nanite/internal/agentregistry"
-	"github.com/hollis-labs/nanite/internal/bootprofile"
 	"github.com/hollis-labs/nanite/internal/chat"
 	"github.com/hollis-labs/nanite/internal/config"
 	"github.com/hollis-labs/nanite/internal/dispatch"
@@ -157,12 +154,6 @@ type ChatServiceConfig struct {
 	// writes are skipped.
 	AdapterRegistry *agent.AdapterRegistry
 
-	// StrategyLogger persists v1 strategy decisions to strategy_decisions
-	// (CW-20260419-0026, Phase 5 / E3). nil-safe: when absent, strategy
-	// planning still runs and applies its MaxTurns to the loop budget,
-	// but no row is written. *store.Store satisfies the interface.
-	StrategyLogger strategyDecisionLogger
-
 	// Inspector is the I1 per-turn dev-mode aggregator (CW-20260426-0004).
 	// nil-safe: when nil the inspector is disabled. Set when developer_mode=true.
 	Inspector *inspectsvc.Service
@@ -217,46 +208,6 @@ type ChatServiceConfig struct {
 	// nil-safe: when absent, the route hint stays purely informative
 	// and every turn runs the chat-direct loop.
 	EnvelopeRenderExecutor dispatch.Executor
-
-	// AgentBroker is the upstream agent-router primitive
-	// (CW-20260509-0046, SP-20260429-0001 broker-v1). Consulted before
-	// the chat-loop entry to decide whether the turn should dispatch to
-	// a worker/planner subagent OR be handled by the chat agent
-	// directly. The deterministic v1 impl is `broker.New()` from
-	// github.com/hollis-labs/agentkit/broker (agentkit v0.3.0+).
-	//
-	// nil-safe: when absent, the call-site is a pass-through and every
-	// turn falls through to the chat-direct LLM loop. Production wiring
-	// in cmd/nanite/main.go installs the deterministic broker; tests
-	// can install a fake or leave nil.
-	//
-	// The broker is UPSTREAM of the existing reflex/grounding/
-	// inner-broker scaffold in self_tools_dispatch.go::callExecuteTask
-	// — that downstream layer enriches the dispatch CALL; this upstream
-	// broker is the dispatch DECISION. Both layers run; the boundary is
-	// load-bearing per `decisions.nanite.architecture.agent_broker_v1`.
-	AgentBroker agentbroker.Broker
-
-	// BootProfiles is the boot-profile registry (CW-20260514-0047 / 0048).
-	// chat_generate.go decodes `bootprofile:<id>` provider names, compiles a
-	// session-scoped LaunchSpec via CompileFor, drains requirements, and
-	// stashes the spec so driveBootSession can thread Env / Args / Workdir /
-	// BootPrompt into the runtime Boot call. nil-safe: when absent (no
-	// catalog configured / tests), `bootprofile:` provider names fall
-	// through as the legacy "no llmcontracts.Provider registered" fatal
-	// branch — the same shape as a misconfigured CLI provider today.
-	BootProfiles *bootprofile.Registry
-
-	// AgentRegistry is the shared go-agent-launch directory registrar
-	// (FileBackedRegistrar + DegradingRegistrar + LastKnownGoodCache),
-	// the SAME instance the standalone launcher uses (S5 Phase F). When
-	// set, driveBootSession's boot-profile path resolves its runtime
-	// binding registry-primary via launchplan.Build with an explicit,
-	// observable file/spec fallback (D1 + §4.1). nil-safe: when absent —
-	// tests, or a registry-less bootstrap — the chat boot-profile path
-	// resolves fully file/spec-default and still boots (D1: the registry
-	// is NEVER mandatory on the launch hot path).
-	AgentRegistry *agentregistry.Registry
 }
 
 // chatServiceImpl is the concrete ChatService implementation.
@@ -306,10 +257,6 @@ type chatServiceImpl struct {
 	dbPath string
 	// adapterRegistry is forwarded to sandbox.Populate on each CLI chat turn.
 	adapterRegistry *agent.AdapterRegistry
-
-	// strategyLogger persists v1 strategy decisions. nil-safe.
-	// (CW-20260419-0026, Phase 5 / E3.)
-	strategyLogger strategyDecisionLogger
 
 	// inspector is the I1 per-turn dev-mode aggregator (CW-20260426-0004).
 	// nil-safe: wired only when developer_mode=true.
@@ -405,32 +352,17 @@ type chatServiceImpl struct {
 	// the route is purely informative and the chat-direct loop runs.
 	envelopeRenderExecutor dispatch.Executor
 
-	// agentBroker is the upstream agent-router primitive
-	// (CW-20260509-0046). nil-safe — when absent the call site is a
-	// pass-through and every turn falls through to the chat-direct
-	// loop. See ChatServiceConfig.AgentBroker for the full contract.
-	agentBroker agentbroker.Broker
-
-	// bootProfiles is the boot-profile registry (CW-20260514-0048).
-	// Used by chat_generate.go to decode `bootprofile:` provider ids and
-	// compile a session-scoped LaunchSpec. nil-safe: when absent, the
-	// `bootprofile:` provider id falls through as a legacy fatal because
-	// classifyNilProvider(...) returns nilProviderRouteFatal for it
-	// (IsCLIProvider is narrow by design).
-	bootProfiles *bootprofile.Registry
-
-	// agentRegistry is the shared directory registrar (S5 Phase F). When
-	// set, driveBootSession's boot-profile path resolves its runtime
-	// binding registry-primary through launchplan.Build. nil-safe — see
-	// ChatServiceConfig.AgentRegistry.
-	agentRegistry *agentregistry.Registry
-
-	// activeSessionLaunchSpecs stamps the compiled LaunchSpec for sessions
-	// whose chat provider is a boot-profile id. driveBootSession reads it
-	// at boot time to thread per-profile env/args/workdir/boot-prompt into
-	// agent.Options. Map values are *bootprofile.LaunchSpec. Cleared in
-	// CloseAgentSession alongside the other per-session maps.
-	activeSessionLaunchSpecs sync.Map
+	// activeSessionContextBlocks stamps the resolved output of a
+	// session's agent's DB-configured cmd/http context resolvers (Phase
+	// 2 item 02, TASKS/phase-2/02-port-forward-dynamic-resolver.md),
+	// keyed by chat session id. Map values are map[string]string
+	// (slot name -> resolved content). Resolved once at initial cold
+	// boot (resolveAgentContextForBoot); regenerateBootDirSlots reads
+	// the stash so a mid-session CLAUDE.md regen doesn't drop the
+	// resolved content the way a bare re-derive from the agent profile
+	// would. Cleared in CloseAgentSession alongside the other
+	// per-session maps.
+	activeSessionContextBlocks sync.Map
 
 	// dispatcher is the single agent-dispatch door
 	// (CW-20260512-0121 / SP-20260512-0011). launchGeneration routes
@@ -497,7 +429,6 @@ func NewChatService(cfg ChatServiceConfig) ChatService {
 		activeGen:               make(map[string]*inFlightGen),
 		sessionEventWriter:      cfg.SessionEventWriter,
 		subagentInbox:           cfg.SubagentInbox,
-		strategyLogger:          cfg.StrategyLogger,
 		inspector:               cfg.Inspector,
 		loopDetector:            cfg.LoopDetector,
 		reminderEngine:          cfg.ReminderEngine,
@@ -507,9 +438,6 @@ func NewChatService(cfg ChatServiceConfig) ChatService {
 		agentEventBridge:        cfg.AgentEventBridge,
 		agentBootDirAdapter:     cfg.AgentBootDirAdapter,
 		envelopeRenderExecutor:  cfg.EnvelopeRenderExecutor,
-		agentBroker:             cfg.AgentBroker,
-		bootProfiles:            cfg.BootProfiles,
-		agentRegistry:           cfg.AgentRegistry,
 	}
 	// CW-20260512-0121 (SP-20260512-0011): wire the single dispatcher
 	// door. The Dispatcher delegates to chatServiceImpl.generateResponse
@@ -772,7 +700,26 @@ func (s *chatServiceImpl) HandleMessage(ctx context.Context, sessionID, content 
 	// provider rate-limit budget and look like stalls from the UI
 	// (CW-20260418-0043). The lifecycle manager's shutdown ctx is bridged
 	// inside launchGeneration so process Shutdown still drains cleanly.
-	s.launchGeneration("handleMessage.generateResponse", sessionID, assistantMsgID, content, ch, dispatcher.CallerChat)
+	//
+	// HandleMessage is shared by two real callers with two different
+	// correct CallerType values: internal/api/harness_v1.go and
+	// internal/api/messages.go (real end-user HTTP handlers — always
+	// CallerChat, and they stamp nothing on ctx) and
+	// chatDurableAgentRuntimeController.SendMessage (a durable agent's
+	// scheduled wake delivery — background work, not a user typing into
+	// chat, so it stamps dispatcher.CallerBackground onto ctx before
+	// calling in). Prefer whatever valid CallerType arrives on ctx and
+	// fall back to CallerChat — mirrors the existing ambient-ctx +
+	// documented-fallback convention chat_generate.go's request_build
+	// slog already uses for dispatcher.CallerTypeFromContext, except the
+	// fallback here must be a *valid* CallerType (not "unknown") because
+	// this value is actually dispatched, not just logged — Dispatcher.Run
+	// rejects an empty/invalid CallerType outright.
+	callerType := dispatcher.CallerChat
+	if ct := dispatcher.CallerTypeFromContext(ctx); ct.Valid() {
+		callerType = ct
+	}
+	s.launchGeneration("handleMessage.generateResponse", sessionID, assistantMsgID, content, ch, callerType)
 
 	return assistantMsgID, nil
 }
@@ -824,7 +771,7 @@ func (s *chatServiceImpl) RetryLastMessage(ctx context.Context, sessionID string
 func (s *chatServiceImpl) SendAgentMessage(ctx context.Context, fromSessionID, toSessionID, content string) (string, error) {
 	// Look up the sending agent.
 	fromAgentID := "unknown"
-	if agent, _, err := s.agents.ResolveForSession(ctx, fromSessionID); err == nil {
+	if agent, err := s.agents.ResolveForSession(ctx, fromSessionID); err == nil {
 		fromAgentID = agent.ID
 	}
 
@@ -1035,7 +982,7 @@ func (s *chatServiceImpl) CloseAgentSession(ctx context.Context, sessionID strin
 	}
 	s.activeSessionSlots.Delete(sessionID)
 	s.toolPartitionStates.Delete(sessionID)
-	s.activeSessionLaunchSpecs.Delete(sessionID)
+	s.activeSessionContextBlocks.Delete(sessionID)
 	if s.agentEventBridge != nil {
 		s.agentEventBridge.SetPerSessionRouter(sessionID, nil)
 	}
@@ -1055,14 +1002,62 @@ func (s *chatServiceImpl) CloseAgentSession(ctx context.Context, sessionID strin
 // Internal helpers
 // ---------------------------------------------------------------------------
 
-// resolveProvider walks the provider fallback chain. Resolution order:
-//  1. sessionProvider (explicit per-session)
-//  2. agentProvider (agent profile default)
-//  3. user_settings.default_provider (operator SSOT preference)
-//  4. user_settings.ProviderFallbackChain (resilience list)
-//  5. chat.InferProvider(model) — map model name to provider
+// resolveProvider reads the role->agent->task composition cascade's
+// already-resolved provider as its primary path (architecture/
+// 02-agent-launching.md: "Once an agents row has a real, cascade-resolved
+// model_id, provider/model resolution is 'read the already-resolved
+// value,' not a second independent walk"). agentProvider arrives here as
+// agent.DefaultProvider from chat_generate.go's
+// s.agents.ResolveForSession(...) call, which already ran
+// applyScalarCascade/ResolveAgentCascade (Phase 1 item 01) before
+// returning — reading it here is not a second, independent lookup, it's
+// consuming that cascade's output.
 //
-// CW-20260812-0001 investigation: step 3 was missing entirely before this
+// Phase 3 item 01 (this task, TASKS/phase-3/01-collapse-resolveprovider-
+// into-cascade.md) folded runtimeKind into the walk itself, closing a
+// real, confirmed bug found during Phase 2's close-out review: this
+// function used to have zero awareness of agent.RuntimeKind, so a
+// runtime_kind='cli' agent configured with a bare (non-"pty-"/"sub-"-
+// prefixed) default_provider — e.g. "claude" instead of the legacy
+// "pty-claude" alias shape — could walk all the way to a real, registered
+// HTTP provider (via user_settings.default_provider, the fallback chain,
+// or chat.InferProvider(model)) and never reach chat_generate.go's
+// classifyNilProvider at all, where runtime_kind is otherwise consulted.
+// The turn then silently routed through the HTTP/API path with no error.
+//
+// Fixed by making runtimeKind=="cli" authoritative and checked once, per
+// architecture/02-agent-launching.md's "CLI-vs-API routing is an explicit
+// typed field" design: as soon as the session-level or cascade-resolved
+// (agent-level) candidate is known to not already be CLI-shaped, a cli
+// runtime commits to a (name, nil) result right there and never walks
+// into steps 3/4/5 below — none of which have any way to produce a
+// CLI-safe result, since they only ever resolve names that are either
+// operator-configured HTTP providers or InferProvider's HTTP-provider
+// routing floor. See chat_resolve_provider_test.go's
+// TestResolveProvider_CLIRuntimeKind_BareDefaultProvider_NeverRoutesHTTP
+// for the literal reproduction of the pre-fix bug.
+//
+// Resolution order:
+//  1. sessionProvider (explicit per-session override — narrowest,
+//     task/invocation-shaped tier)
+//  2. agentProvider (cascade-resolved composition default — primary path
+//     once Phase 1's cascade is populated; today still "" for every
+//     pre-existing row, since none have role_id/model_id/a non-empty
+//     default_provider set — see this task's Work Log for the real-data
+//     check)
+//  3. user_settings.default_provider (operator-level installation-wide
+//     default — NOT part of the role->agent->task composition cascade;
+//     kept as a narrow, still-load-bearing fallback tier rather than
+//     declared dead, because every one of the 28 real rows in the
+//     production DB backup resolves through this step today. See Work
+//     Log for the full rationale.)
+//  4. user_settings.ProviderFallbackChain (resilience list, same tier as 3)
+//  5. chat.InferProvider(model) — the genuine "no resolvable composition
+//     anywhere" floor
+//
+// Steps 3-5 are UNREACHABLE whenever runtimeKind=="cli" — see above.
+//
+// CW-20260812-0001 investigation: step 3 was missing entirely before that
 // fix. user_settings.default_provider was never consulted here — it's a
 // separate resolver used only for the *model* dimension elsewhere (see
 // store.ResolveProviderAndModel in chat_generate.go). A session with no
@@ -1102,6 +1097,13 @@ func (s *chatServiceImpl) CloseAgentSession(ctx context.Context, sessionID strin
 // candidate. requested is the originally-requested provider (for the
 // session or agent step); when the resolved name differs from it, a
 // provider.fallback plugin event is emitted before returning.
+//
+// Only ever called from resolveProvider's steps 3/4 (operator-level
+// user_settings tiers) after this task's rewrite — those steps are
+// structurally unreachable once runtimeKind=="cli" is known (see
+// resolveProvider's doc comment), so this helper itself doesn't need its
+// own runtimeKind parameter: by the time it can run, the caller has
+// already confirmed the current turn is not CLI-authoritative.
 func (s *chatServiceImpl) tryProviderCandidate(sessionID, requested, name, warnMsg string) (string, llmcontracts.Provider, bool) {
 	if p, ok := s.providers.Get(name); ok {
 		if requested != "" && requested != name && s.pluginHost != nil {
@@ -1119,7 +1121,7 @@ func (s *chatServiceImpl) tryProviderCandidate(sessionID, requested, name, warnM
 	return "", nil, false
 }
 
-func (s *chatServiceImpl) resolveProvider(sessionID, sessionProvider, agentProvider, model string) (string, llmcontracts.Provider) {
+func (s *chatServiceImpl) resolveProvider(sessionID, sessionProvider, agentProvider, model, runtimeKind string) (string, llmcontracts.Provider) {
 	// Track the first requested provider so we can emit a fallback event
 	// when a later candidate is selected instead.
 	requested := sessionProvider
@@ -1127,28 +1129,89 @@ func (s *chatServiceImpl) resolveProvider(sessionID, sessionProvider, agentProvi
 		requested = agentProvider
 	}
 
+	// cliRuntime is authoritative once true: this turn's session-bound
+	// agent has agents.runtime_kind='cli' (architecture/
+	// 02-agent-launching.md's "CLI-vs-API routing is an explicit typed
+	// field" — one typed field, checked once, not re-derived from string
+	// shape at every step). See this function's doc comment for the real
+	// bug this closes.
+	cliRuntime := runtimeKind == "cli"
+
+	// --- Step 1: sessionProvider (explicit per-session override) ---
 	if sessionProvider != "" {
 		runtimeProvider := sessionProvider
 		if stored, err := s.store.GetProvider(sessionProvider); err == nil && stored != nil && stored.ProviderType != "" {
 			runtimeProvider = stored.ProviderType
 		}
-		if p, ok := s.providers.Get(runtimeProvider); ok {
-			return runtimeProvider, p
-		}
 		if chat.IsCLIProvider(runtimeProvider) {
 			return runtimeProvider, nil
 		}
-		slog.Warn("chat-service: session provider not registered, falling through",
-			"provider", sessionProvider, "runtime_provider", runtimeProvider)
+		if cliRuntime {
+			// A non-CLI-shaped explicit session provider must not win
+			// over an authoritatively-cli agent — probing the HTTP
+			// registry here would risk exactly the bug this task fixes.
+			// Fall through to the cascade-resolved (agent) tier instead
+			// of resolving a real HTTP provider for this session.
+			slog.Warn("chat-service: session provider is not CLI-shaped but agent runtime_kind is cli, ignoring in favor of the cascade-resolved provider",
+				"provider", sessionProvider, "runtime_provider", runtimeProvider)
+		} else if p, ok := s.providers.Get(runtimeProvider); ok {
+			return runtimeProvider, p
+		} else {
+			slog.Warn("chat-service: session provider not registered, falling through",
+				"provider", sessionProvider, "runtime_provider", runtimeProvider)
+		}
 	}
 
+	// --- Step 2: agentProvider (cascade-resolved composition default —
+	// primary path; see doc comment above) ---
 	if agentProvider != "" {
+		if chat.IsCLIProvider(agentProvider) {
+			if requested != "" && requested != agentProvider && s.pluginHost != nil {
+				s.pluginHost.EmitProviderFallback(sessionID, requested, agentProvider)
+			}
+			return agentProvider, nil
+		}
+		if cliRuntime {
+			// The real, confirmed bug this task fixes: a bare (non-
+			// "pty-"/"sub-"-prefixed) cascade-resolved default_provider
+			// on a runtime_kind='cli' agent must still route CLI, not
+			// fall through to tryProviderCandidate's registry probe
+			// below (which is exactly what silently produced a real
+			// HTTP provider before this fix).
+			return agentProvider, nil
+		}
 		if name, p, ok := s.tryProviderCandidate(sessionID, requested, agentProvider,
 			"chat-service: agent provider not registered, falling through"); ok {
 			return name, p
 		}
 	}
 
+	if cliRuntime {
+		// runtime_kind='cli' is still authoritative even when neither
+		// step above produced a CLI-shaped name (e.g. agentProvider=="",
+		// or it missed IsCLIProvider and got intercepted above). Commit
+		// to the CLI route here rather than falling through to the
+		// operator-level tiers below (3/4/5), none of which can ever
+		// resolve to a value safe to hand back as a non-CLI-shaped
+		// (name, nil): those tiers only ever produce HTTP-registered
+		// provider names.
+		name := agentProvider
+		if name == "" {
+			name = sessionProvider
+		}
+		return name, nil
+	}
+
+	// --- Steps 3/4: user_settings.default_provider / ProviderFallbackChain
+	// — operator-level, installation-wide floor. Not part of the
+	// role->agent->task composition cascade (roles/agent_profiles have no
+	// equivalent of this — it's a single global preference, not a
+	// per-role/per-agent value), but deliberately kept as a real,
+	// documented fallback rather than declared dead: see this task's Work
+	// Log for the real production-data check that every one of the 28
+	// existing agent rows resolves through this tier today (all have
+	// default_provider=""), so removing it would be a behavior change,
+	// not a resolution-mechanism swap. ---
 	if us, err := s.store.GetUserSettings(); err == nil {
 		if us.DefaultProvider != "" {
 			if name, p, ok := s.tryProviderCandidate(sessionID, requested, us.DefaultProvider,
@@ -1165,6 +1228,8 @@ func (s *chatServiceImpl) resolveProvider(sessionID, sessionProvider, agentProvi
 		}
 	}
 
+	// --- Step 5: chat.InferProvider(model) — the genuine "no resolvable
+	// composition anywhere" floor. ---
 	inferred := chat.InferProvider(model)
 	if p, ok := s.providers.Get(inferred); ok {
 		if requested != "" && requested != inferred && s.pluginHost != nil {
@@ -1219,23 +1284,52 @@ const (
 	nilProviderRouteCLINoAdapter
 )
 
-// classifyNilProvider returns the nilProviderRoute case for the resolved
-// provider name. Returns nilProviderRouteFatal when the name is not a
-// CLI alias (the original behavior). Returns nilProviderRouteCLI when the
-// name is a CLI alias AND the agent runtime has a registered adapter for
-// it. Returns nilProviderRouteCLINoAdapter when the name is a CLI alias
-// but no adapter is registered (misconfiguration).
+// classifyNilProvider returns the nilProviderRoute case for a resolved
+// (providerName, nil-provider) pair — i.e. the CLI bypass chat_generate.go
+// hits when resolveProvider comes back with no registered
+// llmcontracts.Provider. Returns nilProviderRouteFatal when CLI routing
+// isn't warranted (see below) — the original behavior. Returns
+// nilProviderRouteCLI when CLI routing IS warranted AND the agent runtime
+// has a registered adapter for the resolved name. Returns
+// nilProviderRouteCLINoAdapter when CLI routing is warranted but no
+// adapter is registered (misconfiguration).
+//
+// Phase 2 item 01 (TASKS/phase-2/01-wire-runtime-kind-routing.md): CLI
+// routing is decided primarily by runtimeKind — agent_profiles.runtime_kind
+// on the resolved session agent (architecture/02-agent-launching.md, "CLI-
+// vs-API routing is an explicit typed field"), not by re-deriving the
+// classification from providerName's "pty"/"sub-" prefix shape. The
+// chat.IsCLIProvider(providerName) check is still OR'd in, deliberately,
+// for one remaining case where runtimeKind is not yet the reliable single
+// source of truth: a file-discovered agent profile with no agent_profiles
+// DB row yet — Definition.ToProfile() has no frontmatter representation
+// for runtime_kind at all, so runtimeKind arrives here as "". Falling back
+// to the legacy provider-name classification reproduces prior behavior
+// exactly. TASKS/adhoc/01-eliminate-file-based-agent-runtime.md removed
+// the in-memory-registry resolution path that used to produce a "no DB row
+// yet" resolved session agent at all (every agent, including the 9
+// internal builtin profiles, is DB-backed by the time ResolveForSession
+// returns one) -- this OR is very likely fully dead now too, but left
+// untouched here since chat routing is outside this task's own scope; a
+// future cleanup pass can confirm and remove it.
+//
+// TASKS/phase-2/04-retire-boot-profile-catalog.md removed the second case
+// this OR used to cover — the boot-profile catalog's own
+// cliRoutableProvider, which synthesized a "pty-<adapter>" alias to force
+// CLI routing independent of the session's bound agent. That whole
+// mechanism (and its provider-id encoding) is gone; this OR now exists
+// solely for the file-discovered-agent case above.
 //
 // Adapter lookup goes through agentDeps.ProviderAdapter which already
 // applies the CW-20260514-0045 alias normalization (stripRegistryPrefix
 // → chat.NormalizeCLIProvider), so the caller passes the dropdown-shape
 // name verbatim.
-func (s *chatServiceImpl) classifyNilProvider(providerName string) nilProviderRoute {
-	if !chat.IsCLIProvider(providerName) {
+func (s *chatServiceImpl) classifyNilProvider(runtimeKind, providerName string) nilProviderRoute {
+	if runtimeKind != "cli" && !chat.IsCLIProvider(providerName) {
 		return nilProviderRouteFatal
 	}
 	if s.agentDeps == nil || s.agentDeps.ProviderAdapter == nil {
-		// CLI provider name but no runtime composition wired —
+		// CLI-routable but no runtime composition wired —
 		// behave as fatal so the operator sees the legacy error.
 		return nilProviderRouteFatal
 	}

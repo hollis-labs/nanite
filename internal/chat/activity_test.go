@@ -62,7 +62,7 @@ func TestActivityEmitter_SendsToEngine(t *testing.T) {
 	ctx := context.Background()
 
 	// Emit various events.
-	em.EmitSessionCreated(ctx, "sess-1", "ws-1")
+	em.EmitSessionCreated(ctx, "sess-1")
 	em.EmitSessionEnded(ctx, "sess-1")
 	em.EmitAgentAssigned(ctx, "sess-1", "agent-1", "default")
 	em.EmitToolCall(ctx, "sess-1", "grep", true, 500)
@@ -113,13 +113,13 @@ func TestActivityEmitter_GracefulOnServerError(t *testing.T) {
 
 	em := NewActivityEmitter(srv.URL)
 	// Should not panic when server returns 500.
-	em.EmitSessionCreated(context.Background(), "sess-1", "ws-1")
+	em.EmitSessionCreated(context.Background(), "sess-1")
 }
 
 func TestActivityEmitter_GracefulOnUnreachable(t *testing.T) {
 	em := NewActivityEmitter("http://127.0.0.1:1") // port 1 — guaranteed unreachable
 	// Should not panic, just log a warning.
-	em.EmitSessionCreated(context.Background(), "sess-1", "ws-1")
+	em.EmitSessionCreated(context.Background(), "sess-1")
 }
 
 func TestActivityEmitter_ViaEnvVar(t *testing.T) {

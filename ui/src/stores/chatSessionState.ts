@@ -1,7 +1,5 @@
 import type {
-  AgentMode,
   ChatError,
-  ModeSuggestion,
   PendingApproval,
   PluginEnvelopeItem,
   ToolCall,
@@ -42,10 +40,8 @@ export interface ChatSessionState {
   chatErrors: ChatError[];
   pendingApprovals: PendingApproval[];
   toolWarnings: ToolWarning[];
-  pendingModeSuggestion: ModeSuggestion | null;
 
   // Per-session dials
-  activeMode: AgentMode;
   activeModel: string;
   activeEffort: string;
 
@@ -62,7 +58,6 @@ export interface ChatSessionState {
   lastActivityAt: number;
 }
 
-export const DEFAULT_ACTIVE_MODE: AgentMode = "default";
 export const DEFAULT_ACTIVE_MODEL = "claude-sonnet-4-20250514";
 export const DEFAULT_ACTIVE_EFFORT = "normal";
 
@@ -81,8 +76,6 @@ export function emptyChatSessionState(now: number = Date.now()): ChatSessionStat
     chatErrors: [],
     pendingApprovals: [],
     toolWarnings: [],
-    pendingModeSuggestion: null,
-    activeMode: DEFAULT_ACTIVE_MODE,
     activeModel: DEFAULT_ACTIVE_MODEL,
     activeEffort: DEFAULT_ACTIVE_EFFORT,
     composerDraft: "",

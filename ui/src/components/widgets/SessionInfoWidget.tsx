@@ -32,7 +32,6 @@ function formatRelativeTime(dateStr: string): string {
 
 export function SessionInfoWidget() {
   const activeSessionId = useAppStore((s) => s.activeSessionId)
-  const activeWorkspaceId = useAppStore((s) => s.activeWorkspaceId)
 
   const { data: session } = useQuery({
     queryKey: ['session', activeSessionId],
@@ -41,9 +40,8 @@ export function SessionInfoWidget() {
   })
 
   const { data: projects = [] } = useQuery({
-    queryKey: ['projects', activeWorkspaceId],
-    queryFn: () => api.listProjects(activeWorkspaceId!),
-    enabled: !!activeWorkspaceId,
+    queryKey: ['projects'],
+    queryFn: () => api.listProjects(),
   })
 
   const { data: sessionAgents = [] } = useQuery({

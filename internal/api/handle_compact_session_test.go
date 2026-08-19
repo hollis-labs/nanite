@@ -20,14 +20,9 @@ func TestHandleCompactSession_RunsPipelineAndPersists(t *testing.T) {
 	a, mux := newTestAPI(t)
 
 	// Workspace + session setup.
-	ws := &store.Workspace{ID: "compact-ws", Name: "compact-ws"}
-	if err := a.Services.Store.CreateWorkspace(ws); err != nil {
-		t.Fatalf("CreateWorkspace: %v", err)
-	}
 	sess := &store.Session{
-		ID:          "compact-sess",
-		WorkspaceID: ws.ID,
-		Title:       "Compact Test",
+		ID:    "compact-sess",
+		Title: "Compact Test",
 	}
 	if err := a.Services.Store.CreateSession(sess); err != nil {
 		t.Fatalf("CreateSession: %v", err)

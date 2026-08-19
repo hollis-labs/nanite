@@ -9,11 +9,10 @@ import (
 
 func TestValidAgent(t *testing.T) {
 	agent := &store.AgentProfile{
-		Name:            "Test Agent",
-		Slug:            "test-agent",
-		SystemPrompt:    "You are a test agent.",
-		MCPServers:      `["conduit"]`,
-		ToolPermissions: `{"allow_list":["memory_*","context_*"]}`,
+		Name:         "Test Agent",
+		Slug:         "test-agent",
+		SystemPrompt: "You are a test agent.",
+		MCPServers:   `["conduit"]`,
 	}
 	result := ValidateAgentConfig(agent)
 	if !result.OK() {
@@ -24,92 +23,39 @@ func TestValidAgent(t *testing.T) {
 	}
 }
 
-func TestMalformedToolPermissionsJSON(t *testing.T) {
+// TestToolPermissionsNotValidated is the regression test for
+// TASKS/adhoc/02-remove-tool-permissions-collapse-to-agent-tools.md: the
+// tool_permissions column is inert everywhere now (agent_tools is the sole
+// tool-selection gate), so its content -- malformed JSON, an empty
+// allow_list, or bad glob syntax, all of which used to be blocking errors
+// or warnings here -- must no longer affect validation at all. This
+// replaces TestMalformedToolPermissionsJSON, TestEmptyAllowList,
+// TestNoMCPServersPermissivePermissions, TestInvalidGlobPattern,
+// TestEmptyPermissionsWithMCPServers, and TestDenyListWithInvalidGlob,
+// which asserted the opposite, pre-this-task behavior.
+func TestToolPermissionsNotValidated(t *testing.T) {
 	agent := &store.AgentProfile{
-		Name:            "Bad Agent",
-		Slug:            "bad-agent",
-		SystemPrompt:    "You are broken.",
-		ToolPermissions: `{"allow_list": [}`,
-	}
-	result := ValidateAgentConfig(agent)
-	if result.OK() {
-		t.Fatal("expected errors for malformed JSON, got none")
-	}
-	if len(result.Errors) != 1 {
-		t.Fatalf("expected 1 error, got %d: %v", len(result.Errors), result.Errors)
-	}
-}
-
-func TestEmptyAllowList(t *testing.T) {
-	agent := &store.AgentProfile{
-		Name:            "Empty Allow",
-		Slug:            "empty-allow",
-		SystemPrompt:    "You are restricted.",
-		MCPServers:      `["conduit"]`,
-		ToolPermissions: `{"allow_list":[]}`,
-	}
-	result := ValidateAgentConfig(agent)
-	if !result.OK() {
-		t.Fatalf("expected no errors, got: %v", result.Errors)
-	}
-	if len(result.Warnings) == 0 {
-		t.Fatal("expected warning about empty allow_list, got none")
-	}
-	found := false
-	for _, w := range result.Warnings {
-		if w == "allow_list is empty - this will deny all tools" {
-			found = true
-		}
-	}
-	if !found {
-		t.Fatalf("expected empty allow_list warning, got: %v", result.Warnings)
-	}
-}
-
-func TestNoMCPServersPermissivePermissions(t *testing.T) {
-	agent := &store.AgentProfile{
-		Name:            "No Tools",
-		Slug:            "no-tools",
-		SystemPrompt:    "You have nothing.",
+		Name:            "Anything Goes",
+		Slug:            "anything-goes",
+		SystemPrompt:    "You have garbage tool_permissions.",
 		MCPServers:      `[]`,
-		ToolPermissions: `{}`,
+		ToolPermissions: `{"allow_list": [}`, // malformed JSON
 	}
 	result := ValidateAgentConfig(agent)
 	if !result.OK() {
-		t.Fatalf("expected no errors, got: %v", result.Errors)
+		t.Fatalf("expected no errors (tool_permissions is no longer validated), got: %v", result.Errors)
 	}
-	found := false
-	for _, w := range result.Warnings {
-		if w == "agent has no MCP servers and permissive permissions - it will have no tools but unrestricted access" {
-			found = true
-		}
-	}
-	if !found {
-		t.Fatalf("expected MCP + permissive warning, got: %v", result.Warnings)
-	}
-}
-
-func TestInvalidGlobPattern(t *testing.T) {
-	agent := &store.AgentProfile{
-		Name:            "Bad Glob",
-		Slug:            "bad-glob",
-		SystemPrompt:    "You have bad patterns.",
-		MCPServers:      `["conduit"]`,
-		ToolPermissions: `{"allow_list":["memory_[invalid"]}`,
-	}
-	result := ValidateAgentConfig(agent)
-	if result.OK() {
-		t.Fatal("expected errors for invalid glob pattern, got none")
+	if len(result.Warnings) > 0 {
+		t.Fatalf("expected no warnings (tool_permissions is no longer validated), got: %v", result.Warnings)
 	}
 }
 
 func TestValidAgentWithAllowAndMCPServers(t *testing.T) {
 	agent := &store.AgentProfile{
-		Name:            "Full Agent",
-		Slug:            "full-agent",
-		SystemPrompt:    "You are a full agent.",
-		MCPServers:      `["conduit","engine"]`,
-		ToolPermissions: `{"allow_list":["memory_*","engine_*"],"max_calls_per_turn":10}`,
+		Name:         "Full Agent",
+		Slug:         "full-agent",
+		SystemPrompt: "You are a full agent.",
+		MCPServers:   `["conduit","engine"]`,
 	}
 	result := ValidateAgentConfig(agent)
 	if !result.OK() {
@@ -117,42 +63,6 @@ func TestValidAgentWithAllowAndMCPServers(t *testing.T) {
 	}
 	if len(result.Warnings) > 0 {
 		t.Fatalf("expected no warnings, got: %v", result.Warnings)
-	}
-}
-
-func TestEmptyPermissionsWithMCPServers(t *testing.T) {
-	// Agent with MCP servers but empty permissions — no warning expected
-	// (this is a valid permissive config — they have tools available)
-	agent := &store.AgentProfile{
-		Name:            "Permissive Agent",
-		Slug:            "permissive",
-		SystemPrompt:    "You are permissive.",
-		MCPServers:      `["conduit"]`,
-		ToolPermissions: `{}`,
-	}
-	result := ValidateAgentConfig(agent)
-	if !result.OK() {
-		t.Fatalf("expected no errors, got: %v", result.Errors)
-	}
-	// Should NOT warn — they have MCP servers
-	for _, w := range result.Warnings {
-		if w == "agent has no MCP servers and permissive permissions - it will have no tools but unrestricted access" {
-			t.Fatal("should not warn about permissive when MCP servers are present")
-		}
-	}
-}
-
-func TestDenyListWithInvalidGlob(t *testing.T) {
-	agent := &store.AgentProfile{
-		Name:            "Bad Deny",
-		Slug:            "bad-deny",
-		SystemPrompt:    "You have bad deny.",
-		MCPServers:      `["conduit"]`,
-		ToolPermissions: `{"deny_list":["memory_[bad"]}`,
-	}
-	result := ValidateAgentConfig(agent)
-	if result.OK() {
-		t.Fatal("expected errors for invalid glob in deny_list, got none")
 	}
 }
 
@@ -193,18 +103,38 @@ func TestParentDispatchAllowlist(t *testing.T) {
 	}
 }
 
+// TestPrefixGlobIsValid and TestToolsInvalidGlobPattern exercise
+// validateGlobPattern via the still-live v2 `tools` field (item 5 in
+// ValidateAgentConfig) -- the only remaining validated glob-pattern column
+// as of TASKS/adhoc/02-remove-tool-permissions-collapse-to-agent-tools.md
+// (tool_permissions' own glob validation was removed with the rest of that
+// column's enforcement machinery).
 func TestPrefixGlobIsValid(t *testing.T) {
 	// Patterns ending in * are prefix globs and should always be valid
 	agent := &store.AgentProfile{
-		Name:            "Prefix Glob",
-		Slug:            "prefix-glob",
-		SystemPrompt:    "You use prefix globs.",
-		MCPServers:      `["conduit"]`,
-		ToolPermissions: `{"allow_list":["memory_*","engine_task_*"]}`,
+		Name:         "Prefix Glob",
+		Slug:         "prefix-glob",
+		SystemPrompt: "You use prefix globs.",
+		MCPServers:   `["conduit"]`,
+		Tools:        `["memory_*","engine_task_*"]`,
 	}
 	result := ValidateAgentConfig(agent)
 	if !result.OK() {
 		t.Fatalf("expected no errors for prefix globs, got: %v", result.Errors)
+	}
+}
+
+func TestToolsInvalidGlobPattern(t *testing.T) {
+	agent := &store.AgentProfile{
+		Name:         "Bad Glob",
+		Slug:         "bad-glob",
+		SystemPrompt: "You have bad patterns.",
+		MCPServers:   `["conduit"]`,
+		Tools:        `["memory_[invalid"]`,
+	}
+	result := ValidateAgentConfig(agent)
+	if result.OK() {
+		t.Fatal("expected errors for invalid glob pattern in tools, got none")
 	}
 }
 
@@ -250,19 +180,17 @@ func TestConstraintsSubagentCompletionPolicy(t *testing.T) {
 		},
 		{
 			name:        "numeric Phase-4 fields are valid",
-			constraints: `{"max_turns":50,"hard_ceiling":100,"consecutive_fail_cap":3,"runaway_fail_cap":10,"idle_timeout_seconds":900}`,
+			constraints: `{"hard_ceiling":100,"consecutive_fail_cap":3,"runaway_fail_cap":10,"idle_timeout_seconds":900}`,
 			wantOK:      true,
 		},
 		{
-			name:        "max_turns allows -1 (unlimited)",
-			constraints: `{"max_turns":-1}`,
+			// Phase 0 item 12 cut max_turns from the numeric-constraint schema
+			// (it was a soft, telemetry-only budget that never gated the loop).
+			// A profile still carrying a stale max_turns key from before the
+			// cut must warn, not hard-fail validation.
+			name:        "stale max_turns key is only a warning",
+			constraints: `{"max_turns":50}`,
 			wantOK:      true,
-		},
-		{
-			name:        "max_turns rejects less than -1",
-			constraints: `{"max_turns":-2}`,
-			wantOK:      false,
-			wantErrLike: "must be -1",
 		},
 		{
 			name:        "hard_ceiling rejects negative",
@@ -272,7 +200,7 @@ func TestConstraintsSubagentCompletionPolicy(t *testing.T) {
 		},
 		{
 			name:        "wrong-typed numeric field is rejected",
-			constraints: `{"max_turns":"fifty"}`,
+			constraints: `{"hard_ceiling":"fifty"}`,
 			wantOK:      false,
 			wantErrLike: "must be a number",
 		},

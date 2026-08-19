@@ -31,7 +31,6 @@ function session(id: string, overrides: Partial<Session> = {}): Session {
     short_code: "c1",
     title: "Started",
     custom_name: "",
-    workspace_id: "workspace-1",
     project_id: "project-1",
     context_type: null,
     context_id: null,
@@ -144,17 +143,6 @@ function capabilities(
         id: "anthropic",
         name: "Anthropic",
         provider_type: "anthropic",
-        base_url: "",
-        is_enabled: true,
-        settings: "",
-        created_at: "",
-        updated_at: "",
-      },
-      {
-        id: "bootprofile:claude-smoke",
-        name: "Claude Smoke",
-        provider_type: "bootprofile:claude-smoke",
-        base_url: "",
         is_enabled: true,
         settings: "",
         created_at: "",
@@ -175,14 +163,6 @@ function capabilities(
         pricing: "",
         sort_order: 0,
         provider_type: "anthropic",
-      },
-    ],
-    boot_profiles: [
-      {
-        id: "bootprofile:claude-smoke",
-        label: "Claude Smoke",
-        provider: "pty-claude",
-        work_root: "/tmp/work",
       },
     ],
     work_root_hints: [
@@ -234,7 +214,6 @@ describe("Phase 11 Start surface", () => {
       <StartSurfaceDialog
         open
         onOpenChange={() => undefined}
-        workspaceId="workspace-1"
         projectId="project-1"
         defaultProvider="anthropic"
         defaultModel="claude-sonnet-4"
@@ -248,7 +227,6 @@ describe("Phase 11 Start surface", () => {
 
     await waitFor(() => {
       expect(createSession).toHaveBeenCalledWith({
-        workspace_id: "workspace-1",
         project_id: "project-1",
         provider: "anthropic",
         model: "claude-sonnet-4",
@@ -266,14 +244,12 @@ describe("Phase 11 Start surface", () => {
       profiles: null,
       providers: null,
       models: null,
-      boot_profiles: null,
     } as unknown as StartSurfaceCapabilitiesResponse);
 
     renderWithClient(
       <StartSurfaceDialog
         open
         onOpenChange={() => undefined}
-        workspaceId="workspace-1"
         projectId={null}
         onSessionStarted={() => undefined}
       />,
@@ -282,39 +258,6 @@ describe("Phase 11 Start surface", () => {
     await screen.findByText("Chat with a model");
     fireEvent.click(screen.getByRole("button", { name: "Recipe" }));
     expect(await screen.findByText("No recipes available")).toBeTruthy();
-  });
-
-  it("starts a boot-profile harness session", async () => {
-    mockCapabilities();
-    const createSession = vi
-      .spyOn(api, "createSession")
-      .mockResolvedValue(session("session-harness"));
-    const onSessionStarted = vi.fn();
-
-    renderWithClient(
-      <StartSurfaceDialog
-        open
-        onOpenChange={() => undefined}
-        workspaceId="workspace-1"
-        projectId={null}
-        onSessionStarted={onSessionStarted}
-      />,
-    );
-
-    await screen.findByText("Chat with a model");
-    fireEvent.click(screen.getByRole("button", { name: "Harness" }));
-    fireEvent.click(screen.getByRole("button", { name: /start harness/i }));
-
-    await waitFor(() => {
-      expect(createSession).toHaveBeenCalledWith({
-        workspace_id: "workspace-1",
-        project_id: undefined,
-        provider: "bootprofile:claude-smoke",
-        model: "bootprofile:claude-smoke",
-        agent_id: "profile-1",
-      });
-      expect(onSessionStarted).toHaveBeenCalledWith("session-harness");
-    });
   });
 
   it("starts and resumes durable agents", async () => {
@@ -346,7 +289,6 @@ describe("Phase 11 Start surface", () => {
       <StartSurfaceDialog
         open
         onOpenChange={() => undefined}
-        workspaceId="workspace-1"
         projectId={null}
         onSessionStarted={onSessionStarted}
       />,
@@ -415,7 +357,6 @@ describe("Phase 11 Start surface", () => {
       <StartSurfaceDialog
         open
         onOpenChange={() => undefined}
-        workspaceId="workspace-1"
         projectId={null}
         onSessionStarted={onSessionStarted}
       />,
@@ -466,7 +407,6 @@ describe("Phase 11 Start surface", () => {
       <StartSurfaceDialog
         open
         onOpenChange={() => undefined}
-        workspaceId="workspace-1"
         projectId={null}
         onSessionStarted={() => undefined}
       />,

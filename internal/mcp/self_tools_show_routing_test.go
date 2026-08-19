@@ -36,12 +36,6 @@ func extractEnvelopeJSON(t *testing.T, body string) map[string]any {
 // package's contract tests so the tool boundary and the schema test stay in
 // agreement.
 var validShowCardPayloads = map[string]map[string]any{
-	"giphy-modal": {
-		"title":   "Great Job!",
-		"gif_url": "https://media.giphy.com/media/example/giphy.gif",
-		"source":  "GIPHY",
-		"query":   "celebration",
-	},
 	"document-viewer": {
 		"title":             "Architecture Overview",
 		"content":           "# Overview\nThis document describes...",
@@ -191,15 +185,14 @@ func TestCallShowCard_AllPassiveRenderables_RoundTrip(t *testing.T) {
 func TestCallShowCard_RejectsTypeOutsideAllowList(t *testing.T) {
 	st := newSelfTools(t)
 	rejected := []string{
-		"approval-card",       // decision-flow
-		"proposal-card",       // decision-flow
-		"confirmation-card",   // decision-flow
-		"question-form",       // decision-flow
+		"approval-card",        // decision-flow
+		"proposal-card",        // decision-flow
+		"confirmation-card",    // decision-flow
 		"chat-loop-terminated", // runtime-emitted
-		"elicitation-prompt", // runtime-emitted
-		"kb-result",           // plugin-shipped
-		"ticket-form",         // plugin-shipped
-		"made-up-type",        // unknown
+		"elicitation-prompt",   // runtime-emitted
+		"kb-result",            // plugin-shipped
+		"ticket-form",          // plugin-shipped
+		"made-up-type",         // unknown
 	}
 	for _, envType := range rejected {
 		envType := envType

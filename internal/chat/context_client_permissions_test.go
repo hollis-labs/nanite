@@ -17,10 +17,7 @@ import (
 // surfaces. CW-20260512-0118 (SP-20260512-0010 W2).
 func TestAssembleSlotSources_PermissionsSlot_EmptyWhenNothingConfigured(t *testing.T) {
 	cb, s := newTestBroker(t)
-	if err := s.CreateWorkspace(&store.Workspace{ID: "ws1", Name: "Test"}); err != nil {
-		t.Fatalf("CreateWorkspace: %v", err)
-	}
-	sess := &store.Session{WorkspaceID: "ws1"}
+	sess := &store.Session{}
 	if err := s.CreateSession(sess); err != nil {
 		t.Fatalf("CreateSession: %v", err)
 	}
@@ -29,7 +26,7 @@ func TestAssembleSlotSources_PermissionsSlot_EmptyWhenNothingConfigured(t *testi
 		t.Fatalf("CreateAgent: %v", err)
 	}
 
-	sources, err := cb.AssembleSlotSources(context.Background(), sess, agent, nil, &store.Workspace{Name: "WS"}, nil)
+	sources, err := cb.AssembleSlotSources(context.Background(), sess, agent)
 	if err != nil {
 		t.Fatalf("AssembleSlotSources: %v", err)
 	}
@@ -49,10 +46,7 @@ func TestAssembleSlotSources_PermissionsSlot_BinaryAllowList(t *testing.T) {
 		"/Users/u/Projects-apps/agent-workspaces",
 	}
 
-	if err := s.CreateWorkspace(&store.Workspace{ID: "ws1", Name: "Test"}); err != nil {
-		t.Fatalf("CreateWorkspace: %v", err)
-	}
-	sess := &store.Session{WorkspaceID: "ws1"}
+	sess := &store.Session{}
 	if err := s.CreateSession(sess); err != nil {
 		t.Fatalf("CreateSession: %v", err)
 	}
@@ -65,7 +59,7 @@ func TestAssembleSlotSources_PermissionsSlot_BinaryAllowList(t *testing.T) {
 		t.Fatalf("CreateAgent: %v", err)
 	}
 
-	sources, err := cb.AssembleSlotSources(context.Background(), sess, agent, nil, &store.Workspace{Name: "WS"}, nil)
+	sources, err := cb.AssembleSlotSources(context.Background(), sess, agent)
 	if err != nil {
 		t.Fatalf("AssembleSlotSources: %v", err)
 	}
@@ -93,10 +87,7 @@ func TestAssembleSlotSources_PermissionsSlot_SubagentScope(t *testing.T) {
 	cb, s := newTestBroker(t)
 	cb.DevToolsAllowedPaths = []string{"/Users/u/Projects-apps/nanite"}
 
-	if err := s.CreateWorkspace(&store.Workspace{ID: "ws1", Name: "Test"}); err != nil {
-		t.Fatalf("CreateWorkspace: %v", err)
-	}
-	sess := &store.Session{WorkspaceID: "ws1"}
+	sess := &store.Session{}
 	if err := s.CreateSession(sess); err != nil {
 		t.Fatalf("CreateSession: %v", err)
 	}
@@ -105,7 +96,7 @@ func TestAssembleSlotSources_PermissionsSlot_SubagentScope(t *testing.T) {
 		t.Fatalf("CreateAgent: %v", err)
 	}
 
-	sources, err := cb.AssembleSlotSources(context.Background(), sess, agent, nil, &store.Workspace{Name: "WS"}, nil)
+	sources, err := cb.AssembleSlotSources(context.Background(), sess, agent)
 	if err != nil {
 		t.Fatalf("AssembleSlotSources: %v", err)
 	}
@@ -121,10 +112,7 @@ func TestAssembleSlotSources_PermissionsSlot_SessionGrants(t *testing.T) {
 	cb, s := newTestBroker(t)
 	cb.PathGrants = permission.NewPathGrants()
 
-	if err := s.CreateWorkspace(&store.Workspace{ID: "ws1", Name: "Test"}); err != nil {
-		t.Fatalf("CreateWorkspace: %v", err)
-	}
-	sess := &store.Session{WorkspaceID: "ws1"}
+	sess := &store.Session{}
 	if err := s.CreateSession(sess); err != nil {
 		t.Fatalf("CreateSession: %v", err)
 	}
@@ -139,7 +127,7 @@ func TestAssembleSlotSources_PermissionsSlot_SessionGrants(t *testing.T) {
 	// Stage an explicit grant on the session.
 	cb.PathGrants.RegisterFromUserMessage(sess.ID, "look at /tmp/explicit-grant/file.go")
 
-	sources, err := cb.AssembleSlotSources(context.Background(), sess, agent, nil, &store.Workspace{Name: "WS"}, nil)
+	sources, err := cb.AssembleSlotSources(context.Background(), sess, agent)
 	if err != nil {
 		t.Fatalf("AssembleSlotSources: %v", err)
 	}
@@ -160,14 +148,11 @@ func TestAssembleSlotSources_PermissionsSlot_LineageGrants(t *testing.T) {
 	cb, s := newTestBroker(t)
 	cb.PathGrants = permission.NewPathGrants()
 
-	if err := s.CreateWorkspace(&store.Workspace{ID: "ws1", Name: "Test"}); err != nil {
-		t.Fatalf("CreateWorkspace: %v", err)
-	}
-	parentSess := &store.Session{WorkspaceID: "ws1"}
+	parentSess := &store.Session{}
 	if err := s.CreateSession(parentSess); err != nil {
 		t.Fatalf("CreateSession parent: %v", err)
 	}
-	childSess := &store.Session{WorkspaceID: "ws1"}
+	childSess := &store.Session{}
 	if err := s.CreateSession(childSess); err != nil {
 		t.Fatalf("CreateSession child: %v", err)
 	}
@@ -181,7 +166,7 @@ func TestAssembleSlotSources_PermissionsSlot_LineageGrants(t *testing.T) {
 	cb.PathGrants.RegisterFromUserMessage(parentSess.ID, "research /tmp/parent-research-area/notes.md")
 	cb.PathGrants.RegisterLineage(childSess.ID, parentSess.ID)
 
-	sources, err := cb.AssembleSlotSources(context.Background(), childSess, agent, nil, &store.Workspace{Name: "WS"}, nil)
+	sources, err := cb.AssembleSlotSources(context.Background(), childSess, agent)
 	if err != nil {
 		t.Fatalf("AssembleSlotSources: %v", err)
 	}
@@ -221,14 +206,11 @@ func TestAssembleSlotSources_PermissionsSlot_c160_RegressionRepro(t *testing.T) 
 	// Researcher's workspace allow-list — nanite only, NOT Fragments Engine.
 	cb.DevToolsAllowedPaths = []string{"/Users/u/Projects-apps/nanite"}
 
-	if err := s.CreateWorkspace(&store.Workspace{ID: "ws1", Name: "Test"}); err != nil {
-		t.Fatalf("CreateWorkspace: %v", err)
-	}
-	parentSess := &store.Session{WorkspaceID: "ws1"}
+	parentSess := &store.Session{}
 	if err := s.CreateSession(parentSess); err != nil {
 		t.Fatalf("CreateSession parent: %v", err)
 	}
-	childSess := &store.Session{WorkspaceID: "ws1"}
+	childSess := &store.Session{}
 	if err := s.CreateSession(childSess); err != nil {
 		t.Fatalf("CreateSession child: %v", err)
 	}
@@ -243,7 +225,7 @@ func TestAssembleSlotSources_PermissionsSlot_c160_RegressionRepro(t *testing.T) 
 	cb.PathGrants.RegisterFromUserMessage(parentSess.ID, "research /Users/u/Projects-apps/nanite/internal/")
 	cb.PathGrants.RegisterLineage(childSess.ID, parentSess.ID)
 
-	sources, err := cb.AssembleSlotSources(context.Background(), childSess, researcher, nil, &store.Workspace{Name: "WS"}, nil)
+	sources, err := cb.AssembleSlotSources(context.Background(), childSess, researcher)
 	if err != nil {
 		t.Fatalf("AssembleSlotSources: %v", err)
 	}
@@ -300,10 +282,7 @@ func TestAssembleSlotSources_PermissionsSlot_W3ForwardedDeniesRendered(t *testin
 	cb, s := newTestBroker(t)
 	cb.PathGrants = permission.NewPathGrants()
 
-	if err := s.CreateWorkspace(&store.Workspace{ID: "ws1", Name: "Test"}); err != nil {
-		t.Fatalf("CreateWorkspace: %v", err)
-	}
-	childSess := &store.Session{WorkspaceID: "ws1"}
+	childSess := &store.Session{}
 	if err := s.CreateSession(childSess); err != nil {
 		t.Fatalf("CreateSession: %v", err)
 	}
@@ -331,7 +310,7 @@ func TestAssembleSlotSources_PermissionsSlot_W3ForwardedDeniesRendered(t *testin
 	}
 	cb.PathGrants.RegisterDerivedRules(childSess.ID, derived)
 
-	sources, err := cb.AssembleSlotSources(context.Background(), childSess, researcher, nil, &store.Workspace{Name: "WS"}, nil)
+	sources, err := cb.AssembleSlotSources(context.Background(), childSess, researcher)
 	if err != nil {
 		t.Fatalf("AssembleSlotSources: %v", err)
 	}
@@ -363,10 +342,7 @@ func TestAssembleSlotSources_PermissionsSlot_DeterministicAcrossTurns(t *testing
 	cb.DevToolsAllowedPaths = []string{"/a", "/b"}
 	cb.PathGrants = permission.NewPathGrants()
 
-	if err := s.CreateWorkspace(&store.Workspace{ID: "ws1", Name: "Test"}); err != nil {
-		t.Fatalf("CreateWorkspace: %v", err)
-	}
-	sess := &store.Session{WorkspaceID: "ws1"}
+	sess := &store.Session{}
 	if err := s.CreateSession(sess); err != nil {
 		t.Fatalf("CreateSession: %v", err)
 	}
@@ -378,11 +354,11 @@ func TestAssembleSlotSources_PermissionsSlot_DeterministicAcrossTurns(t *testing
 	}
 	cb.PathGrants.RegisterFromUserMessage(sess.ID, "look at /tmp/some/path.go")
 
-	a, err := cb.AssembleSlotSources(context.Background(), sess, agent, nil, &store.Workspace{Name: "WS"}, nil)
+	a, err := cb.AssembleSlotSources(context.Background(), sess, agent)
 	if err != nil {
 		t.Fatalf("AssembleSlotSources (a): %v", err)
 	}
-	b, err := cb.AssembleSlotSources(context.Background(), sess, agent, nil, &store.Workspace{Name: "WS"}, nil)
+	b, err := cb.AssembleSlotSources(context.Background(), sess, agent)
 	if err != nil {
 		t.Fatalf("AssembleSlotSources (b): %v", err)
 	}

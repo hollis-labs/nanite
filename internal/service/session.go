@@ -9,11 +9,10 @@ import (
 
 // CreateSessionOpts holds the parameters for creating a new session.
 type CreateSessionOpts struct {
-	WorkspaceID string
-	ProjectID   string
-	Model       string
-	Provider    string
-	AgentID     string // optional; falls back to settings default, then "file-default"
+	ProjectID string
+	Model     string
+	Provider  string
+	AgentID   string // optional; falls back to settings default, then the real "default" agent row
 }
 
 // ForkOpts holds the parameters for forking a session.
@@ -25,9 +24,8 @@ type ForkOpts struct {
 
 // SearchOpts holds optional filters for message search.
 type SearchOpts struct {
-	WorkspaceID string
-	ProjectID   string
-	Limit       int
+	ProjectID string
+	Limit     int
 }
 
 // SessionService encapsulates session lifecycle operations.
@@ -35,7 +33,7 @@ type SearchOpts struct {
 type SessionService interface {
 	Create(ctx context.Context, opts CreateSessionOpts) (*store.Session, error)
 	Get(ctx context.Context, id string) (*store.Session, error)
-	List(ctx context.Context, workspaceID string, includeArchived bool) ([]store.Session, error)
+	List(ctx context.Context, includeArchived bool) ([]store.Session, error)
 	Update(ctx context.Context, sess *store.Session) error
 	Archive(ctx context.Context, id string) error
 	Fork(ctx context.Context, sourceID string, opts ForkOpts) (*store.Session, error)
@@ -48,8 +46,15 @@ type sessionServiceImpl struct {
 	sessions SessionReader
 	writer   SessionWriter
 	agents   AgentWriter // for EnsureSessionAgent on create
-	settings SettingsStore
-	events   EventEmitter // may be nil
+	// agentReader resolves the real "default" agent row's ID on create when
+	// neither an explicit AgentID nor a user-settings default is available.
+	// TASKS/adhoc/01-eliminate-file-based-agent-runtime.md: added to stop
+	// this call site from falling back to the literal placeholder string
+	// "file-default" (session_agents.agent_id has no FK, so a bad value
+	// here was never caught at write time).
+	agentReader AgentReader
+	settings    SettingsStore
+	events      EventEmitter // may be nil
 
 	// onArchive is a best-effort hook fired after the writer.ArchiveSession
 	// succeeds. Phase 4c.8 (CW-20260508-0002): the chat service uses this
@@ -70,49 +75,61 @@ type SessionServiceDeps struct {
 	Sessions SessionReader
 	Writer   SessionWriter
 	Agents   AgentWriter
-	Settings SettingsStore
-	Events   EventEmitter // optional
+	// AgentReader backs Create's "default" agent fallback resolution — see
+	// sessionServiceImpl.agentReader's doc comment.
+	AgentReader AgentReader
+	Settings    SettingsStore
+	Events      EventEmitter // optional
 }
 
 // NewSessionService creates a new SessionService.
 func NewSessionService(deps SessionServiceDeps) SessionService {
 	return &sessionServiceImpl{
-		sessions: deps.Sessions,
-		writer:   deps.Writer,
-		agents:   deps.Agents,
-		settings: deps.Settings,
-		events:   deps.Events,
+		sessions:    deps.Sessions,
+		writer:      deps.Writer,
+		agents:      deps.Agents,
+		agentReader: deps.AgentReader,
+		settings:    deps.Settings,
+		events:      deps.Events,
 	}
 }
 
 func (s *sessionServiceImpl) Create(ctx context.Context, opts CreateSessionOpts) (*store.Session, error) {
-	if opts.WorkspaceID == "" {
-		return nil, fmt.Errorf("workspace_id is required")
-	}
-
 	sess := &store.Session{
-		WorkspaceID: opts.WorkspaceID,
-		ProjectID:   opts.ProjectID,
-		Model:       opts.Model,
-		Provider:    opts.Provider,
+		ProjectID: opts.ProjectID,
+		Model:     opts.Model,
+		Provider:  opts.Provider,
 	}
 	if err := s.writer.CreateSession(sess); err != nil {
 		return nil, fmt.Errorf("create session: %w", err)
 	}
 
-	// Resolve agent: explicit param → user settings default → fallback.
+	// Resolve agent: explicit param → user settings default → real
+	// "default" agent row. TASKS/adhoc/01-eliminate-file-based-agent-
+	// runtime.md: this used to fall back to the literal placeholder string
+	// "file-default", written straight into session_agents.agent_id (no FK
+	// on that column, so a bad value was never caught at write time).
 	agentID := opts.AgentID
 	if agentID == "" {
 		if settings, err := s.settings.GetUserSettings(); err == nil && settings.DefaultAgent != "" {
 			agentID = settings.DefaultAgent
 		}
 	}
-	if agentID == "" {
-		agentID = "file-default"
+	if agentID == "" && s.agentReader != nil {
+		if defaultAgent, err := s.agentReader.GetAgentBySlug("default"); err == nil && defaultAgent != nil {
+			agentID = defaultAgent.ID
+		}
 	}
 
-	// Assign the resolved agent as primary (best-effort).
-	_ = s.agents.EnsureSessionAgent(sess.ID, agentID, "default", true)
+	// Assign the resolved agent as primary (best-effort — matches the
+	// pre-existing contract of this write). Skip it entirely in the true
+	// edge case where even the "default" agent row can't be resolved (no
+	// such row exists at all) rather than write an empty/placeholder
+	// agent_id — the session itself is already created and stays usable
+	// without a primary-agent binding.
+	if agentID != "" {
+		_ = s.agents.EnsureSessionAgent(sess.ID, agentID, "default", true)
+	}
 
 	// Emit session start event.
 	if s.events != nil {
@@ -130,8 +147,8 @@ func (s *sessionServiceImpl) Get(_ context.Context, id string) (*store.Session, 
 	return sess, nil
 }
 
-func (s *sessionServiceImpl) List(_ context.Context, workspaceID string, includeArchived bool) ([]store.Session, error) {
-	return s.sessions.ListSessions(workspaceID, includeArchived)
+func (s *sessionServiceImpl) List(_ context.Context, includeArchived bool) ([]store.Session, error) {
+	return s.sessions.ListSessions(includeArchived)
 }
 
 func (s *sessionServiceImpl) Update(_ context.Context, sess *store.Session) error {
@@ -171,5 +188,5 @@ func (s *sessionServiceImpl) Search(_ context.Context, query string, opts Search
 	if limit <= 0 {
 		limit = 20
 	}
-	return s.sessions.SearchMessages(query, opts.WorkspaceID, opts.ProjectID, limit)
+	return s.sessions.SearchMessages(query, opts.ProjectID, limit)
 }

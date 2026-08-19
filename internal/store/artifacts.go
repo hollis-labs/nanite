@@ -16,19 +16,19 @@ const (
 
 // Artifact represents a file artifact attached to a session.
 type Artifact struct {
-	ID              string `json:"id"`
-	SessionID       string `json:"session_id"`
-	MessageID       string `json:"message_id"`
-	Name            string `json:"name"`
-	MimeType        string `json:"mime_type"`
-	SizeBytes       int64  `json:"size_bytes"`
-	StoragePath     string `json:"storage_path"`
-	Metadata        string `json:"metadata"`
-	Origin          string `json:"origin"`             // "auto", "placed", "uploaded"
+	ID               string `json:"id"`
+	SessionID        string `json:"session_id"`
+	MessageID        string `json:"message_id"`
+	Name             string `json:"name"`
+	MimeType         string `json:"mime_type"`
+	SizeBytes        int64  `json:"size_bytes"`
+	StoragePath      string `json:"storage_path"`
+	Metadata         string `json:"metadata"`
+	Origin           string `json:"origin"` // "auto", "placed", "uploaded"
 	SourceToolCallID string `json:"source_tool_call_id,omitempty"`
-	SourceAgentID   string `json:"source_agent_id,omitempty"`
-	SourcePluginID  string `json:"source_plugin_id,omitempty"`
-	CreatedAt       string `json:"created_at"`
+	SourceAgentID    string `json:"source_agent_id,omitempty"`
+	SourcePluginID   string `json:"source_plugin_id,omitempty"`
+	CreatedAt        string `json:"created_at"`
 }
 
 // ListArtifacts returns all artifacts for a session.

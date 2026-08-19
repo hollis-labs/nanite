@@ -28,7 +28,7 @@ func (s *stubSessionService) Get(_ context.Context, id string) (*store.Session, 
 	}
 	return nil, fmt.Errorf("session %s not found", id)
 }
-func (s *stubSessionService) List(_ context.Context, _ string, _ bool) ([]store.Session, error) {
+func (s *stubSessionService) List(_ context.Context, _ bool) ([]store.Session, error) {
 	return nil, nil
 }
 func (s *stubSessionService) Update(_ context.Context, _ *store.Session) error { return nil }
@@ -45,7 +45,6 @@ func (s *stubSessionService) Search(_ context.Context, _ string, _ SearchOpts) (
 
 type stubAgentService struct {
 	agent *store.AgentProfile
-	mode  *store.AgentMode
 
 	// Call counters so tests can assert which resolution path a caller
 	// used — in particular, that resolveMessageWakePolicy uses the
@@ -67,16 +66,13 @@ func (s *stubAgentService) List(_ context.Context) ([]store.AgentProfile, error)
 func (s *stubAgentService) Create(_ context.Context, _ *store.AgentProfile) error { return nil }
 func (s *stubAgentService) Update(_ context.Context, _ *store.AgentProfile) error { return nil }
 func (s *stubAgentService) Delete(_ context.Context, _ string) error              { return nil }
-func (s *stubAgentService) ResolveForSession(_ context.Context, _ string) (*store.AgentProfile, *store.AgentMode, error) {
+func (s *stubAgentService) ResolveForSession(_ context.Context, _ string) (*store.AgentProfile, error) {
 	s.resolveForSessionCalls++
-	return s.agent, s.mode, nil
+	return s.agent, nil
 }
-func (s *stubAgentService) ResolveForSessionReadOnly(_ context.Context, _ string) (*store.AgentProfile, *store.AgentMode, error) {
+func (s *stubAgentService) ResolveForSessionReadOnly(_ context.Context, _ string) (*store.AgentProfile, error) {
 	s.resolveForSessionReadOnlyCalls++
-	return s.agent, s.mode, nil
-}
-func (s *stubAgentService) ListModes(_ context.Context, _ string) ([]store.AgentMode, error) {
-	return nil, nil
+	return s.agent, nil
 }
 
 type stubToolService struct{}
@@ -91,7 +87,7 @@ func (s *stubToolService) HandleRequestTools(_ context.Context, _ map[string]any
 	return nil, "No tools", nil
 }
 func (s *stubToolService) ListSummaries() []toolclient.ToolSummary { return nil }
-func (s *stubToolService) GetToolMeta(toolName string) (ToolMetaInfo, bool) {
+func (s *stubToolService) GetToolMeta(_ context.Context, toolName string) (ToolMetaInfo, bool) {
 	return ToolMetaInfo{}, true
 }
 
@@ -131,14 +127,10 @@ type minimalStore struct {
 	stubAgentWriterStore
 	stubToolStore
 	stubUsageStore
-	stubWorkspaceStore
+	stubProjectStore
 	stubBookmarkStore
 	stubArtifactStore
-	stubTemplateStore
 	stubSkillStore
-	stubModeStore
-	stubCustomActionStore
-	stubTriggerRuleStore
 	stubProviderStore
 	stubTodoStore
 	stubPlanStore
@@ -158,6 +150,14 @@ func (m *minimalStore) AgentRuntimeProviderSessionID(string) (string, error) { r
 // fakes. No-op by default; tests that need to assert the clear path can
 // override on a per-test stub.
 func (m *minimalStore) SetAgentRuntimeProviderSessionID(string, string) error { return nil }
+
+// ListEnabledAgentContextResolvers satisfies the Store interface for the
+// test fakes (Phase 2 item 02,
+// TASKS/phase-2/02-port-forward-dynamic-resolver.md). Returns no
+// configured resolvers by default.
+func (m *minimalStore) ListEnabledAgentContextResolvers(context.Context, string) ([]store.AgentContextResolver, error) {
+	return nil, nil
+}
 
 // stubSubagentRunsReader returns no active subagent for any session by
 // default. Tests that need to exercise the suppression branch (CW-20260512-0002 d)
@@ -222,8 +222,8 @@ type stubSessionStore struct{}
 func (stubSessionStore) GetSession(string) (*store.Session, error) {
 	return nil, fmt.Errorf("not found")
 }
-func (stubSessionStore) ListSessions(string, ...bool) ([]store.Session, error) { return nil, nil }
-func (stubSessionStore) ListMessages(string, int) ([]store.Message, error)     { return nil, nil }
+func (stubSessionStore) ListSessions(...bool) ([]store.Session, error)     { return nil, nil }
+func (stubSessionStore) ListMessages(string, int) ([]store.Message, error) { return nil, nil }
 func (stubSessionStore) ListMessagesPaginated(string, int, int) (*store.MessagePage, error) {
 	return nil, nil
 }
@@ -233,7 +233,7 @@ func (stubSessionStore) ListMessagesAroundID(string, string, int, int) (*store.M
 func (stubSessionStore) GetMessage(string) (*store.Message, error) {
 	return nil, fmt.Errorf("not found")
 }
-func (stubSessionStore) SearchMessages(string, string, string, int) ([]store.SearchResult, error) {
+func (stubSessionStore) SearchMessages(string, string, int) ([]store.SearchResult, error) {
 	return nil, nil
 }
 func (stubSessionStore) CreateSession(*store.Session) error              { return nil }
@@ -244,7 +244,6 @@ func (stubSessionStore) ArchiveSession(string) error                     { retur
 func (stubSessionStore) NextShortCode() (string, error)                  { return "", nil }
 func (stubSessionStore) CreateMessage(*store.Message) error              { return nil }
 func (stubSessionStore) UpdateMessageContent(string, string, bool) error { return nil }
-func (stubSessionStore) UpdateSessionCompaction(string, string) error    { return nil }
 func (stubSessionStore) ForkSession(string, *store.Session, bool) (*store.Session, error) {
 	return nil, nil
 }
@@ -260,10 +259,6 @@ func (stubAgentReaderStore) GetAgentBySlug(string) (*store.AgentProfile, error) 
 }
 func (stubAgentReaderStore) ListAgents() ([]store.AgentProfile, error)               { return nil, nil }
 func (stubAgentReaderStore) ListAgentsBySource(string) ([]store.AgentProfile, error) { return nil, nil }
-func (stubAgentReaderStore) GetAgentMode(string, string) (*store.AgentMode, error) {
-	return nil, fmt.Errorf("not found")
-}
-func (stubAgentReaderStore) ListAgentModes(string) ([]store.AgentMode, error) { return nil, nil }
 func (stubAgentReaderStore) GetSessionPrimaryAgent(string) (*store.SessionAgent, error) {
 	return nil, fmt.Errorf("not found")
 }
@@ -271,7 +266,19 @@ func (stubAgentReaderStore) ListSessionAgents(string) ([]store.SessionAgent, err
 func (stubAgentReaderStore) ListAgentSkills(string) ([]store.Skill, error)          { return nil, nil }
 func (stubAgentReaderStore) ListAgentProjects(string) ([]store.Project, error)      { return nil, nil }
 func (stubAgentReaderStore) ListProjectAgents(string) ([]store.AgentProfile, error) { return nil, nil }
-func (stubAgentReaderStore) GetAgentAssignedModes(string) ([]store.Mode, error)     { return nil, nil }
+func (stubAgentReaderStore) GetRole(string) (*store.Role, error)                    { return nil, nil }
+
+// ListAgentToolNames and ListAlwaysIncludedKnownTools satisfy the Store
+// interface's Phase 5 item 01 additions (TASKS/phase-5/01-build-assignment-
+// api.md) for the test fakes. No agent_tools grants / always_included rows
+// by default -- tests that need to exercise enforceExecutionRulesViaAgentTools
+// construct a real *store.Store instead (see tool_execution_rules_test.go).
+func (stubAgentReaderStore) ListAgentToolNames(context.Context, string) ([]string, error) {
+	return nil, nil
+}
+func (stubAgentReaderStore) ListAlwaysIncludedKnownTools(context.Context) ([]store.KnownTool, error) {
+	return nil, nil
+}
 
 type stubAgentWriterStore struct{}
 
@@ -279,7 +286,6 @@ func (stubAgentWriterStore) CreateAgent(*store.AgentProfile) error              
 func (stubAgentWriterStore) UpdateAgent(*store.AgentProfile) error                 { return nil }
 func (stubAgentWriterStore) DeleteAgent(string) error                              { return nil }
 func (stubAgentWriterStore) UpsertAgentBySlug(*store.AgentProfile) error           { return nil }
-func (stubAgentWriterStore) CreateAgentMode(*store.AgentMode) error                { return nil }
 func (stubAgentWriterStore) EnsureSessionAgent(string, string, string, bool) error { return nil }
 func (stubAgentWriterStore) SetSessionAgentMode(string, string, string) error      { return nil }
 func (stubAgentWriterStore) DeleteSessionAgent(string, string) error               { return nil }
@@ -287,8 +293,6 @@ func (stubAgentWriterStore) AssignSkillToAgent(string, string, string) error    
 func (stubAgentWriterStore) RemoveSkillFromAgent(string, string) error             { return nil }
 func (stubAgentWriterStore) AddAgentProject(string, string) error                  { return nil }
 func (stubAgentWriterStore) RemoveAgentProject(string, string) error               { return nil }
-func (stubAgentWriterStore) AssignModeToAgent(string, string) error                { return nil }
-func (stubAgentWriterStore) UnassignModeFromAgent(string, string) error            { return nil }
 
 type stubToolStore struct{}
 
@@ -322,21 +326,15 @@ func (stubUsageStore) GetUtilityCallSummary() ([]store.UtilityCallSummary, error
 func (stubUsageStore) GetUtilityCallLog(int) ([]store.ExecutionMetrics, error)    { return nil, nil }
 func (stubUsageStore) LogEvent(string, string, string, string, string)            {}
 func (stubUsageStore) ListEvents(string, int) ([]store.EventLog, error)           { return nil, nil }
-func (stubUsageStore) CountSessionToolCalls(string) int                           { return 0 }
-func (stubUsageStore) InsertAgentBrokerDecision(*store.AgentBrokerDecision) error { return nil }
+func (stubUsageStore) CountSessionToolCalls(string) int { return 0 }
 
-type stubWorkspaceStore struct{}
+type stubProjectStore struct{}
 
-func (stubWorkspaceStore) ListWorkspaces() ([]store.Workspace, error)    { return nil, nil }
-func (stubWorkspaceStore) GetWorkspace(string) (*store.Workspace, error) { return nil, nil }
-func (stubWorkspaceStore) CreateWorkspace(*store.Workspace) error        { return nil }
-func (stubWorkspaceStore) UpdateWorkspace(*store.Workspace) error        { return nil }
-func (stubWorkspaceStore) DeleteWorkspace(string) error                  { return nil }
-func (stubWorkspaceStore) ListProjects(string) ([]store.Project, error)  { return nil, nil }
-func (stubWorkspaceStore) GetProject(string) (*store.Project, error)     { return nil, nil }
-func (stubWorkspaceStore) CreateProject(*store.Project) error            { return nil }
-func (stubWorkspaceStore) UpdateProject(*store.Project) error            { return nil }
-func (stubWorkspaceStore) DeleteProject(string) error                    { return nil }
+func (stubProjectStore) ListProjects() ([]store.Project, error)    { return nil, nil }
+func (stubProjectStore) GetProject(string) (*store.Project, error) { return nil, nil }
+func (stubProjectStore) CreateProject(*store.Project) error        { return nil }
+func (stubProjectStore) UpdateProject(*store.Project) error        { return nil }
+func (stubProjectStore) DeleteProject(string) error                { return nil }
 
 type stubBookmarkStore struct{}
 
@@ -359,30 +357,6 @@ func (stubArtifactStore) ListArtifactsByProject(string, string) ([]store.Artifac
 func (stubArtifactStore) CreateArtifact(*store.Artifact) error        { return nil }
 func (stubArtifactStore) GetArtifact(string) (*store.Artifact, error) { return nil, nil }
 
-type stubTemplateStore struct{}
-
-func (stubTemplateStore) ListPromptTemplates() ([]store.PromptTemplate, error)    { return nil, nil }
-func (stubTemplateStore) GetPromptTemplate(string) (*store.PromptTemplate, error) { return nil, nil }
-func (stubTemplateStore) GetPromptTemplateBySlug(string) (*store.PromptTemplate, error) {
-	return nil, nil
-}
-func (stubTemplateStore) CreatePromptTemplate(*store.PromptTemplate) error { return nil }
-func (stubTemplateStore) UpdatePromptTemplate(*store.PromptTemplate) error { return nil }
-func (stubTemplateStore) DeletePromptTemplate(string) error                { return nil }
-func (stubTemplateStore) ListPromptTemplatesForAgent(string) ([]store.PromptTemplate, error) {
-	return nil, nil
-}
-func (stubTemplateStore) AssignPromptTemplateToAgent(string, string) error   { return nil }
-func (stubTemplateStore) RemovePromptTemplateFromAgent(string, string) error { return nil }
-func (stubTemplateStore) ComposePromptForAgent(string, map[string]string) (string, error) {
-	return "", nil
-}
-func (stubTemplateStore) ListTemplates() ([]store.Template, error)    { return nil, nil }
-func (stubTemplateStore) GetTemplate(string) (*store.Template, error) { return nil, nil }
-func (stubTemplateStore) CreateTemplate(*store.Template) error        { return nil }
-func (stubTemplateStore) UpdateTemplate(string, string) error         { return nil }
-func (stubTemplateStore) DeleteTemplate(string) error                 { return nil }
-
 type stubSkillStore struct{}
 
 func (stubSkillStore) ListSkills() ([]store.Skill, error)          { return nil, nil }
@@ -392,46 +366,12 @@ func (stubSkillStore) CreateSkill(*store.Skill) error              { return nil 
 func (stubSkillStore) UpdateSkill(*store.Skill) error              { return nil }
 func (stubSkillStore) DeleteSkill(string) error                    { return nil }
 
-type stubModeStore struct{}
-
-func (stubModeStore) CreateMode(*store.Mode) error              { return nil }
-func (stubModeStore) GetMode(string) (*store.Mode, error)       { return nil, nil }
-func (stubModeStore) GetModeBySlug(string) (*store.Mode, error) { return nil, nil }
-func (stubModeStore) ListModes() ([]store.Mode, error)          { return nil, nil }
-func (stubModeStore) UpdateMode(*store.Mode) error              { return nil }
-func (stubModeStore) DeleteMode(string) error                   { return nil }
-
-type stubCustomActionStore struct{}
-
-func (stubCustomActionStore) CreateCustomAction(*store.CustomAction) error        { return nil }
-func (stubCustomActionStore) GetCustomAction(string) (*store.CustomAction, error) { return nil, nil }
-func (stubCustomActionStore) UpdateCustomAction(*store.CustomAction) error        { return nil }
-func (stubCustomActionStore) DeleteCustomAction(string) error                     { return nil }
-func (stubCustomActionStore) ListCustomActions() ([]store.CustomAction, error)    { return nil, nil }
-func (stubCustomActionStore) ListCustomActionsByTrigger(string) ([]store.CustomAction, error) {
-	return nil, nil
-}
-
-type stubTriggerRuleStore struct{}
-
-func (stubTriggerRuleStore) CreateTriggerRule(*store.TriggerRule) error           { return nil }
-func (stubTriggerRuleStore) GetTriggerRule(string) (*store.TriggerRule, error)    { return nil, nil }
-func (stubTriggerRuleStore) UpdateTriggerRule(*store.TriggerRule) error           { return nil }
-func (stubTriggerRuleStore) DeleteTriggerRule(string) error                       { return nil }
-func (stubTriggerRuleStore) ListTriggerRules(string) ([]store.TriggerRule, error) { return nil, nil }
-func (stubTriggerRuleStore) ListTriggerRulesByEvent(string) ([]store.TriggerRule, error) {
-	return nil, nil
-}
-func (stubTriggerRuleStore) DeleteTriggerRulesByPlugin(string) error { return nil }
-
 type stubProviderStore struct{}
 
 func (stubProviderStore) ListProviders() ([]store.ProviderConfig, error)    { return nil, nil }
 func (stubProviderStore) GetProvider(string) (*store.ProviderConfig, error) { return nil, nil }
 func (stubProviderStore) ListModels() ([]store.Model, error)                { return nil, nil }
 func (stubProviderStore) UpdateProvider(string, store.ProviderUpdate) error { return nil }
-func (stubProviderStore) SetProviderAPIKey(string, string) error            { return nil }
-func (stubProviderStore) HasProviderAPIKey(string) (bool, error)            { return false, nil }
 func (stubProviderStore) DefaultModelForProvider(string) (string, error)    { return "", nil }
 func (stubProviderStore) ResolveProviderAndModel(explicitProvider, explicitModel string) (string, string, error) {
 	return explicitProvider, explicitModel, nil
@@ -464,7 +404,7 @@ func TestChatService_ResolveProvider(t *testing.T) {
 		store:     testStore,
 	}
 
-	name, prov := impl.resolveProvider("test-session", "", "", "gpt-4o")
+	name, prov := impl.resolveProvider("test-session", "", "", "gpt-4o", "api")
 	// No provider registered, so prov should be nil and name should be inferred.
 	if prov != nil {
 		t.Error("expected nil provider when none registered")
@@ -486,9 +426,10 @@ func TestInferProvider(t *testing.T) {
 		{"o1-preview", "openai"},
 		{"o3-mini", "openai"},
 		// Step 6.5 (SP-20260508-0001) removed the Mistral and Ollama API
-		// adapters; their registry rows are gone. Bare "llama3.1" /
-		// "mistral-large" inputs now fall through InferProvider's prefix
-		// fallthroughs (ollama-style) or the DefaultProvider terminal,
+		// adapters; their registry rows are gone. The dangling "ollama"
+		// routing branch itself was removed 2026-08-18 (TASKS/phase-0/
+		// 05-remove-ollama-routing.md). Bare "llama3.1" / "mistral-large"
+		// inputs now fall straight through to the DefaultProvider terminal,
 		// which is dead-letter behavior. Coverage retained for the
 		// surviving live cases only.
 		{"claude-sonnet-4-20250514", "anthropic"},
@@ -562,18 +503,18 @@ func TestDetectStuckLoop(t *testing.T) {
 
 func TestCaptureEnvelopeData(t *testing.T) {
 	// No envelope marker.
-	result := captureEnvelopeData("plain result", "tool_a", nil)
+	result := captureEnvelopeData("plain result", nil)
 	if len(result) != 0 {
 		t.Errorf("no marker: got %d envelopes", len(result))
 	}
 
 	// With envelope marker.
-	data := `some text <!--ENVELOPE_DATA:{"type":"kb-result"}:ENVELOPE_DATA--> more text`
-	result = captureEnvelopeData(data, "tool_a", nil)
+	data := `some text <!--ENVELOPE_DATA:{"type":"metric-card"}:ENVELOPE_DATA--> more text`
+	result = captureEnvelopeData(data, nil)
 	if len(result) != 1 {
 		t.Fatalf("with marker: got %d envelopes, want 1", len(result))
 	}
-	if result[0] != `{"type":"kb-result"}` {
+	if result[0] != `{"type":"metric-card"}` {
 		t.Errorf("envelope payload = %q", result[0])
 	}
 }

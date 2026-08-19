@@ -31,7 +31,6 @@ func TestDefaultChatToolSurface_AllowsOtherTools(t *testing.T) {
 		"message_send",
 		"panel_open",
 		"dispatch_executor",
-		"giphy_search",
 	} {
 		if !surface.Filter(name) {
 			t.Errorf("DefaultChatToolSurface.Filter(%q) = false; want true (non-lens tool must pass)", name)

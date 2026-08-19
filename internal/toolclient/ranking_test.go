@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/hollis-labs/go-toolbroker/broker"
+	llmtypes "github.com/hollis-labs/go-llm-types"
 )
 
 // stubMemoryRecaller is a deterministic MemoryRecaller for tests. It returns
@@ -37,7 +37,7 @@ func (s *stubMemoryRecaller) RecordToolPattern(_ context.Context, sessionID, int
 }
 
 func TestRankTools_SkillsBeatKeyword(t *testing.T) {
-	tools := []broker.ToolDefinition{
+	tools := []llmtypes.ToolDefinition{
 		{Name: "dev_glob", Description: "find files matching a pattern"},
 		{Name: "dev_grep", Description: "regex search through files"},
 		{Name: "context_search", Description: "search context store for items"},
@@ -61,7 +61,7 @@ func TestRankTools_SkillsBeatKeyword(t *testing.T) {
 }
 
 func TestRankTools_MemoryAddsHit(t *testing.T) {
-	tools := []broker.ToolDefinition{
+	tools := []llmtypes.ToolDefinition{
 		{Name: "dev_read", Description: "read a file"},
 		{Name: "noise_tool", Description: "irrelevant"},
 	}
@@ -81,7 +81,7 @@ func TestRankTools_MemoryAddsHit(t *testing.T) {
 }
 
 func TestRankTools_SkillReferenceUnknownToolIgnored(t *testing.T) {
-	tools := []broker.ToolDefinition{
+	tools := []llmtypes.ToolDefinition{
 		{Name: "real_tool", Description: "a tool the broker knows"},
 	}
 	skills := []ToolPreferenceSkill{
@@ -110,16 +110,16 @@ func TestSelectWithSignals_TightBudgetBoundsSelection(t *testing.T) {
 	tb := New(nil, nil, cfg)
 
 	// Register many bulky tools so the budget actually bites.
-	defs := make([]broker.ToolDefinition, 30)
+	defs := make([]llmtypes.ToolDefinition, 30)
 	for i := range defs {
-		defs[i] = broker.ToolDefinition{
+		defs[i] = llmtypes.ToolDefinition{
 			Name:        sprintfName(i),
 			Description: strings.Repeat("padding ", 20), // ~30 tokens each
 		}
 	}
 	tb.RegisterTools(defs)
 
-	final, _, signals, err := tb.SelectWithSignals(
+	final, signals, err := tb.SelectWithSignals(
 		context.Background(),
 		"general", nil, "", "", 1000,
 		nil, nil, 0,
@@ -153,7 +153,7 @@ func TestSelectWithSignals_GenerousBudgetPadsExtra(t *testing.T) {
 	tb := New(nil, nil, cfg)
 
 	// Mix of tools — the skill below promotes 2 of these to the strict tier.
-	defs := []broker.ToolDefinition{
+	defs := []llmtypes.ToolDefinition{
 		{Name: "dev_glob", Description: "find files matching glob pattern"},
 		{Name: "dev_grep", Description: "search code with regex"},
 		{Name: "filler_one", Description: "unrelated tool one"},
@@ -169,7 +169,7 @@ func TestSelectWithSignals_GenerousBudgetPadsExtra(t *testing.T) {
 	}
 
 	// First: pad=0 → strict only (2 dev_* tools).
-	strict, _, _, err := tb.SelectWithSignals(
+	strict, _, err := tb.SelectWithSignals(
 		context.Background(),
 		"search code", nil, "", "", 200000,
 		skills, nil, 0,
@@ -182,7 +182,7 @@ func TestSelectWithSignals_GenerousBudgetPadsExtra(t *testing.T) {
 	}
 
 	// Second: pad=3 → strict + up to 3 zero-score extras.
-	padded, _, _, err := tb.SelectWithSignals(
+	padded, _, err := tb.SelectWithSignals(
 		context.Background(),
 		"search code", nil, "", "", 200000,
 		skills, nil, 3,

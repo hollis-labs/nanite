@@ -137,10 +137,45 @@ func (a *API) handleCreateAgent(w http.ResponseWriter, r *http.Request) {
 		a.errorResp(w, http.StatusInternalServerError, err.Error())
 		return
 	}
+
+	// role_id/consumer_id/model_id (Phase 5 item 01,
+	// TASKS/phase-5/01-build-assignment-api.md) are DB-only composition
+	// columns with zero frontmatter representation -- AgentConfigService.
+	// Create's managed-file write pipeline above cannot carry them (see
+	// store.UpdateAgentComposition's doc comment), so they're set via a
+	// direct, separate DB write once the profile row exists.
+	if req.RoleID != "" || req.ConsumerID != "" || req.ModelID != "" {
+		if err := a.Services.Store.UpdateAgentComposition(res.Profile.ID, ptrOrNilString(req.RoleID), ptrOrNilString(req.ConsumerID), ptrOrNilString(req.ModelID)); err != nil {
+			a.errorResp(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		if refreshed, err := a.Services.Store.GetAgent(res.Profile.ID); err == nil {
+			res.Profile = refreshed
+		}
+	}
+
 	view := a.agentView(*res.Profile)
 	a.jsonResp(w, http.StatusCreated, view)
 }
 
+// ptrOrNilString returns nil for an empty string, or a pointer to v
+// otherwise. Used for CreateAgentRequest's plain (non-pointer) RoleID/
+// ConsumerID/ModelID fields, whose "not provided" and "explicitly empty"
+// cases are indistinguishable on create (matching every other plain-string
+// field on that struct) -- an empty value here is simply "don't set this
+// column," not "clear an existing one" (there is nothing to clear yet on a
+// freshly created agent).
+func ptrOrNilString(v string) *string {
+	if v == "" {
+		return nil
+	}
+	return &v
+}
+
+// Phase 0 item 21 ("Cut Modes, in full") removed the "modes" key this
+// response used to carry (a.Services.Agents.ListModes — Legacy Agent Mode
+// is gone). The frontend's AgentProfileManager.tsx / AgentDetailView.tsx
+// "Modes" tab were updated in lock-step to stop expecting it.
 func (a *API) handleGetAgent(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 	ag, err := a.Services.Agents.Get(r.Context(), id)
@@ -149,24 +184,18 @@ func (a *API) handleGetAgent(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	modes, err := a.Services.Agents.ListModes(r.Context(), id)
-	if err != nil {
-		a.errorResp(w, http.StatusInternalServerError, err.Error())
-		return
-	}
-
 	a.jsonResp(w, http.StatusOK, map[string]any{
 		"agent": a.agentView(*ag),
-		"modes": modes,
 	})
 }
 
 func (a *API) handleUpdateAgent(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 
-	// Resolve through the AgentService so both stamped managed agents (real
-	// UUID) and legacy "file-<slug>" identities resolve, and the in-memory
-	// def's SourceRef/Source drive classification.
+	// Resolve through the AgentService (a plain DB lookup -- TASKS/adhoc/01-
+	// eliminate-file-based-agent-runtime.md removed the old legacy
+	// "file-<slug>" in-memory-definition resolution branch); the returned
+	// row's own Source/SourceRef drive classification below.
 	existing, err := a.Services.Agents.Get(r.Context(), id)
 	if err != nil {
 		a.errorResp(w, http.StatusNotFound, "agent not found")
@@ -302,6 +331,20 @@ func (a *API) handleUpdateAgent(w http.ResponseWriter, r *http.Request) {
 		}
 		return
 	}
+
+	// role_id/consumer_id/model_id -- see handleCreateAgent's matching
+	// comment. Pointer semantics here (nil = untouched, non-nil = set or
+	// clear) match every other partial-update field on UpdateAgentRequest.
+	if req.RoleID != nil || req.ConsumerID != nil || req.ModelID != nil {
+		if err := a.Services.Store.UpdateAgentComposition(res.Profile.ID, req.RoleID, req.ConsumerID, req.ModelID); err != nil {
+			a.errorResp(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		if refreshed, err := a.Services.Store.GetAgent(res.Profile.ID); err == nil {
+			res.Profile = refreshed
+		}
+	}
+
 	a.jsonResp(w, http.StatusOK, a.agentView(*res.Profile))
 }
 
@@ -382,16 +425,6 @@ func (a *API) handleCopyAgentToManaged(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	a.jsonResp(w, http.StatusCreated, a.agentView(*res.Profile))
-}
-
-func (a *API) handleListAgentModes(w http.ResponseWriter, r *http.Request) {
-	agentID := r.PathValue("id")
-	modes, err := a.Services.Store.ListAgentModes(agentID)
-	if err != nil {
-		a.errorResp(w, http.StatusInternalServerError, err.Error())
-		return
-	}
-	a.jsonResp(w, http.StatusOK, modes)
 }
 
 func (a *API) handleListSessionAgents(w http.ResponseWriter, r *http.Request) {
@@ -493,6 +526,15 @@ func (a *API) handleAddAgentProject(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Verify agent exists as a real agent_profiles DB row. Previously there
+	// was no check here at all -- agent_projects.agent_id now carries a real
+	// FK to agent_profiles(id) (Phase 1 #05), so reject up front rather than
+	// letting the INSERT fail deeper in the store layer.
+	if _, err := a.Services.Store.GetAgent(agentID); err != nil {
+		a.errorResp(w, http.StatusNotFound, "agent not found")
+		return
+	}
+
 	if err := a.Services.Store.AddAgentProject(agentID, req.ProjectID); err != nil {
 		a.errorResp(w, http.StatusInternalServerError, err.Error())
 		return
@@ -525,38 +567,4 @@ func (a *API) handleListProjectAgents(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	a.jsonResp(w, http.StatusOK, agents)
-}
-
-func (a *API) handleCreateAgentMode(w http.ResponseWriter, r *http.Request) {
-	agentID := r.PathValue("id")
-
-	// Verify agent exists.
-	if _, err := a.Services.Store.GetAgent(agentID); err != nil {
-		a.errorResp(w, http.StatusNotFound, "agent not found")
-		return
-	}
-
-	var req CreateAgentModeRequest
-	if err := a.decode(r, &req); err != nil {
-		a.errorResp(w, http.StatusBadRequest, "invalid JSON: "+err.Error())
-		return
-	}
-	if req.Slug == "" || req.Name == "" || req.PromptAddendum == "" {
-		a.errorResp(w, http.StatusBadRequest, "slug, name, and prompt_addendum are required")
-		return
-	}
-
-	mode := &store.AgentMode{
-		AgentID:        agentID,
-		Slug:           req.Slug,
-		Name:           req.Name,
-		PromptAddendum: req.PromptAddendum,
-		ToolOverrides:  req.ToolOverrides,
-		Settings:       req.Settings,
-	}
-	if err := a.Services.Store.CreateAgentMode(mode); err != nil {
-		a.errorResp(w, http.StatusInternalServerError, err.Error())
-		return
-	}
-	a.jsonResp(w, http.StatusCreated, mode)
 }

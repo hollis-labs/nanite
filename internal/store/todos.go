@@ -30,8 +30,8 @@ const (
 // of ScopeID so cross-session lookups do not need to pivot through `scope`.
 type Todo struct {
 	ID          string `json:"id"`
-	Scope       string `json:"scope"`     // turn, session, project
-	ScopeID     string `json:"scope_id"`  // session_id (turn/session) or project_id (project)
+	Scope       string `json:"scope"`    // turn, session, project
+	ScopeID     string `json:"scope_id"` // session_id (turn/session) or project_id (project)
 	ProjectID   string `json:"project_id,omitempty"`
 	ParentID    string `json:"parent_id"` // optional parent todo for nesting
 	Title       string `json:"title"`

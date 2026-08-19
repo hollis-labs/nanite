@@ -2,6 +2,8 @@ package store
 
 import (
 	"context"
+	"database/sql"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -109,13 +111,30 @@ func TestNew(t *testing.T) {
 	}
 
 	// Verify migrations ran by checking that tables exist.
-	tables := []string{"workspaces", "sessions", "messages", "agent_profiles", "agent_modes", "session_agents"}
+	//
+	// agent_modes was dropped by migration 104 (Phase 0 item 21, "Cut
+	// Modes, in full") — Legacy Agent Mode no longer has a backing table.
+	// Swapped in skills as a still-real post-104 table so this check
+	// still exercises "migrations ran to completion" rather than
+	// asserting a table that no longer exists. workspaces was dropped by
+	// migration 109 (Phase 0 item 20, retire workspaces) — projects
+	// (nested under it, now flat) is the still-real replacement check.
+	tables := []string{"projects", "sessions", "messages", "agent_profiles", "skills", "session_agents"}
 	for _, tbl := range tables {
 		var name string
 		err := s.DB.QueryRow("SELECT name FROM sqlite_master WHERE type='table' AND name=?", tbl).Scan(&name)
 		if err != nil {
 			t.Errorf("table %q not found after migration: %v", tbl, err)
 		}
+	}
+
+	// workspaces must be gone post-migration (migration 109).
+	var wsName string
+	err = s.DB.QueryRow("SELECT name FROM sqlite_master WHERE type='table' AND name='workspaces'").Scan(&wsName)
+	if err == nil {
+		t.Errorf("table \"workspaces\" still present after migration — expected it dropped by migration 109")
+	} else if !errors.Is(err, sql.ErrNoRows) {
+		t.Errorf("check workspaces absence: %v", err)
 	}
 
 	if err := s.Close(); err != nil {
@@ -136,15 +155,14 @@ func TestSeedIdempotent(t *testing.T) {
 		t.Fatalf("Seed() second call error: %v", err)
 	}
 
-	// Verify data is the same — should have exactly 1 workspace from seed.
-	// CW-20260815-0010: consolidated from 2 ("default" + "personal") to 1
-	// ("default" only) — multi-workspace GUI complexity deferred by
-	// explicit project-owner decision.
+	// Verify data is the same — should have exactly 1 user_settings row
+	// (the new idempotency gate; Phase 0 item 20 retired the workspaces
+	// table this check used to count).
 	var count int
-	if err := s.DB.QueryRow("SELECT COUNT(*) FROM workspaces").Scan(&count); err != nil {
-		t.Fatalf("count workspaces: %v", err)
+	if err := s.DB.QueryRow("SELECT COUNT(*) FROM user_settings").Scan(&count); err != nil {
+		t.Fatalf("count user_settings: %v", err)
 	}
 	if count != 1 {
-		t.Errorf("expected 1 workspace after idempotent seed, got %d", count)
+		t.Errorf("expected 1 user_settings row after idempotent seed, got %d", count)
 	}
 }

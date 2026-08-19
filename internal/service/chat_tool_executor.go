@@ -155,7 +155,7 @@ func (s *chatServiceImpl) preCheckTools(
 		// Permission check.
 		if s.permissions != nil {
 			meta := permission.ToolMeta{}
-			if toolInfo, ok := s.tools.GetToolMeta(tu.Name); ok {
+			if toolInfo, ok := s.tools.GetToolMeta(ctx, tu.Name); ok {
 				meta.IsReadOnly = toolInfo.IsReadOnly
 				meta.IsDestructive = toolInfo.IsDestructive
 			}
@@ -321,7 +321,7 @@ func (s *chatServiceImpl) preCheckTools(
 
 		// Tool passed pre-check — determine concurrency safety.
 		plan.status = toolPlanReady
-		if toolInfo, ok := s.tools.GetToolMeta(tu.Name); ok {
+		if toolInfo, ok := s.tools.GetToolMeta(ctx, tu.Name); ok {
 			plan.concurrent = toolInfo.IsConcurrencySafe
 		}
 		// Scratchpad tools access loopState directly with no mutex; always serial.
@@ -344,7 +344,6 @@ func (s *chatServiceImpl) executeToolBatch(
 	agentID string,
 	ch chan chat.StreamEvent,
 	sessionID string,
-	workspaceID string,
 ) []toolExecResult {
 	// CW-20260418 (c7 scope_id bug fix): stamp the current chat session
 	// onto ctx so downstream tool handlers — notably the MCP self-tools
@@ -361,11 +360,13 @@ func (s *chatServiceImpl) executeToolBatch(
 		ctx = permission.WithPathGrants(ctx, sessionID, s.pathGrants)
 	}
 
-	// H1 trust gate (CW-20260421-0014): stamp (workspace_id, agent_profile_id)
-	// so MuxTransportAdapter and self_tools_dispatch can derive the caller's
+	// H1 trust gate (CW-20260421-0014): stamp agent_profile_id so
+	// MuxTransportAdapter and self_tools_dispatch can derive the caller's
 	// trust tier without changing CallTool signatures. agentID IS the
-	// agent_profiles.id for the primary agent of this session.
-	ctx = mcp.WithCallerProfile(ctx, workspaceID, agentID)
+	// agent_profiles.id for the primary agent of this session. Phase 0 item
+	// 20 (retire workspaces): this used to also stamp workspace_id — the
+	// caller-profile ctx is now agent-only.
+	ctx = mcp.WithCallerProfile(ctx, agentID)
 
 	// CW-20260429-0024: stamp the union of (prior iterations' tool_use_ids
 	// from ls.toolCallRefs) and (this iteration's plan tool_use_ids) so the
@@ -697,7 +698,7 @@ func (s *chatServiceImpl) postProcessToolResults(
 			ch <- chat.StreamEvent{Type: "tool_warning", Data: string(warningJSON)}
 		} else {
 			// Capture envelope data from successful results.
-			ls.pendingEnvelopes = captureEnvelopeData(r.rawOutput, tu.Name, ls.pendingEnvelopes)
+			ls.pendingEnvelopes = captureEnvelopeData(r.rawOutput, ls.pendingEnvelopes)
 		}
 
 		// Detect stuck loops (modifies result text).

@@ -52,12 +52,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 vi.mock("@/lib/api", () => ({
   api: {
     getSettings: vi.fn().mockResolvedValue({
-      mode_auto_switch_pref: "never",
       recover_mode: false,
     }),
     listBookmarks: vi.fn().mockResolvedValue([]),
     toggleBookmark: vi.fn().mockResolvedValue({}),
-    setSessionMode: vi.fn().mockResolvedValue({}),
     // ChatMessage transitively pulls in usePluginSlots → api.listUISlots.
     // Stub it to keep the React Query layer quiet in test runs.
     listUISlots: vi.fn().mockResolvedValue({}),
@@ -129,7 +127,6 @@ beforeEach(() => {
     chatToast: null,
     pendingJump: null,
     scrollToMessageId: null,
-    autoSwitchSessionOverrides: {},
     activeStreams: new Map(),
     pendingTools: new Map(),
     cliActiveSessions: new Map(),
@@ -145,7 +142,6 @@ afterEach(() => {
     chatToast: null,
     pendingJump: null,
     scrollToMessageId: null,
-    autoSwitchSessionOverrides: {},
     activeStreams: new Map(),
     pendingTools: new Map(),
     cliActiveSessions: new Map(),

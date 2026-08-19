@@ -301,8 +301,41 @@ registers:
 
 | Field | Type | Required | Description |
 |---|---|---|---|
-| `id` | string | yes | Agent profile id. |
+| `id` | string | yes | Registration key (unique within the plugin; used for duplicate detection and log/error messages). |
 | `file` | string | yes | Relative path to the profile YAML. |
+
+`file` must be a YAML document in the role/agent composition shape (Phase 5 item 03 —
+`TASKS/phase-5/03-wire-registers-agent-profiles.md`; see
+`docs/engineering/architecture/01-agent-construction.md` for the underlying model). The old flat
+agent-profile shape is rejected with a clear error at plugin load time, not silently coerced.
+
+```yaml
+role:
+  slug: my-plugin-curator       # required
+  name: My Plugin Curator       # required
+  system_prompt: |               # required — the role's persona/system prompt
+    You are ...
+  class: process                 # optional: advisor | process | template | harness
+
+agent:
+  slug: my-plugin-curator-agent # required — the agent's own slug
+  name: My Plugin Curator        # required
+  description: ...                # optional
+  class: process                  # optional, defaults from role/'advisor'
+  activation_mode: fresh-per-wake # optional: singleton | fresh-per-wake | concurrent
+  runtime_kind: api                # optional: cli | api
+  default_model: ...               # optional
+  default_provider: ...            # optional
+  system_prompt_override: ...      # optional — rarely set; empty defers to role.system_prompt
+  tools: [tool_list]               # optional — known_tools.name values to grant (agent_tools)
+  skills: [my-skill-slug]          # optional — skills.slug values to assign (agent_skills)
+  consumer_slug: my-plugin         # optional — defaults to the plugin's own id
+```
+
+On plugin load, the `role:` block constructs/upserts a `roles` row and the `agent:` block
+constructs/upserts the corresponding `agent_profiles` composition row (plus its `agent_tools`/
+`agent_skills` grants), tagged with the plugin's canonical id for ownership tracking. Uninstalling
+or disabling the plugin removes everything it registered here.
 
 ### `ui` *(object, optional)*
 

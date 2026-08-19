@@ -10,7 +10,6 @@ import type {
   AgentKnownTool,
   AgentProcedure,
   AgentProfile,
-  PromptTemplate,
   Skill,
   ToolLoadItem,
 } from "@/lib/types";
@@ -77,23 +76,6 @@ function skill(overrides: Partial<Skill> = {}): Skill {
     created_at: "2026-05-24T00:00:00Z",
     updated_at: "2026-05-24T00:00:00Z",
     source: "user",
-    ...overrides,
-  };
-}
-
-function template(overrides: Partial<PromptTemplate> = {}): PromptTemplate {
-  return {
-    id: "template-1",
-    name: "Escalation Guard",
-    slug: "escalation-guard",
-    scope: "system",
-    template: "Stay grounded.",
-    variables: "[]",
-    priority: 20,
-    icon: "",
-    is_builtin: false,
-    created_at: "2026-05-24T00:00:00Z",
-    updated_at: "2026-05-24T00:00:00Z",
     ...overrides,
   };
 }
@@ -175,23 +157,15 @@ function renderPanel({
   profile = agent(),
   agentSkills = [],
   availableSkills = [],
-  agentTemplates = [],
-  availableTemplates = [],
   onAssignSkill = vi.fn(),
   onRemoveSkill = vi.fn(),
-  onAssignTemplate = vi.fn(),
-  onRemoveTemplate = vi.fn(),
   onUpdateAgent = vi.fn(),
 }: {
   profile?: AgentProfile;
   agentSkills?: Skill[];
   availableSkills?: Skill[];
-  agentTemplates?: PromptTemplate[];
-  availableTemplates?: PromptTemplate[];
   onAssignSkill?: ReturnType<typeof vi.fn>;
   onRemoveSkill?: ReturnType<typeof vi.fn>;
-  onAssignTemplate?: ReturnType<typeof vi.fn>;
-  onRemoveTemplate?: ReturnType<typeof vi.fn>;
   onUpdateAgent?: ReturnType<typeof vi.fn>;
 } = {}) {
   return {
@@ -203,50 +177,30 @@ function renderPanel({
         availableSkills={availableSkills}
         onAssignSkill={onAssignSkill}
         onRemoveSkill={onRemoveSkill}
-        agentTemplates={agentTemplates}
-        availableTemplates={availableTemplates}
-        onAssignTemplate={onAssignTemplate}
-        onRemoveTemplate={onRemoveTemplate}
         onUpdateAgent={onUpdateAgent}
       />,
     ),
     onAssignSkill,
     onRemoveSkill,
-    onAssignTemplate,
-    onRemoveTemplate,
     onUpdateAgent,
   };
 }
 
 describe("Phase 22 agent capability admin", () => {
-  it("renders sections and keeps skill/template assignment wiring intact", async () => {
+  it("renders sections and keeps skill assignment wiring intact", async () => {
     mockBaseQueries();
     const assignedSkill = skill();
     const availableSkill = skill({ id: "skill-2", name: "Repo Memory", category: "memory" });
-    const assignedTemplate = template();
-    const availableTemplate = template({
-      id: "template-2",
-      name: "Mode Reminder",
-      slug: "mode-reminder",
-      scope: "mode",
-      priority: 9,
-    });
     const view = renderPanel({
       agentSkills: [assignedSkill],
       availableSkills: [availableSkill],
-      agentTemplates: [assignedTemplate],
-      availableTemplates: [availableTemplate],
     });
 
     expect(await screen.findByText("Skills (1)")).toBeTruthy();
-    expect(screen.getByText("Prompt Templates (1)")).toBeTruthy();
     expect(screen.getByText("Known Tools (0)")).toBeTruthy();
     expect(screen.getByText("Knowledge Seeds (0)")).toBeTruthy();
     fireEvent.click(screen.getByLabelText("Remove skill Docs Search"));
     expect(view.onRemoveSkill).toHaveBeenCalledWith("skill-1");
-
-    fireEvent.click(screen.getByLabelText("Remove template Escalation Guard"));
-    expect(view.onRemoveTemplate).toHaveBeenCalledWith("template-1");
 
     fireEvent.click(screen.getAllByRole("button", { name: "Assign" })[0]);
     await screen.findByText("Available Skills");
@@ -256,15 +210,6 @@ describe("Phase 22 agent capability admin", () => {
       }),
     );
     expect(view.onAssignSkill).toHaveBeenCalledWith("skill-2");
-
-    fireEvent.click(screen.getAllByRole("button", { name: "Assign" })[1]);
-    await screen.findByText("Available Prompt Templates");
-    fireEvent.click(
-      within(
-        screen.getByText("Mode Reminder").parentElement?.parentElement as HTMLElement,
-      ).getByRole("button", { name: "Assign" }),
-    );
-    expect(view.onAssignTemplate).toHaveBeenCalledWith("template-2");
   });
 
   it("creates, updates, and deletes known tools", async () => {
@@ -472,8 +417,6 @@ describe("Phase 22 agent capability admin", () => {
       profile: agent({ source: "internal" }),
       agentSkills: [skill()],
       availableSkills: [skill({ id: "skill-2", name: "Repo Memory" })],
-      agentTemplates: [template()],
-      availableTemplates: [template({ id: "template-2", name: "Mode Reminder" })],
       onRemoveSkill: removeSkill,
       onUpdateAgent: updateAgent,
     });

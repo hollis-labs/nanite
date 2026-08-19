@@ -12,7 +12,6 @@ import (
 	"sync"
 	"time"
 
-	agentbroker "github.com/hollis-labs/agentkit/broker"
 	llmtypes "github.com/hollis-labs/go-llm-types"
 	conduit "github.com/hollis-labs/tesseract"
 
@@ -22,9 +21,7 @@ import (
 	"github.com/hollis-labs/nanite/internal/agent"
 	"github.com/hollis-labs/nanite/internal/agent/builtin"
 	"github.com/hollis-labs/nanite/internal/agent/reflexes"
-	"github.com/hollis-labs/nanite/internal/agentregistry"
 	"github.com/hollis-labs/nanite/internal/background"
-	"github.com/hollis-labs/nanite/internal/bootprofile"
 	"github.com/hollis-labs/nanite/internal/chat"
 	"github.com/hollis-labs/nanite/internal/config"
 	"github.com/hollis-labs/nanite/internal/contextbroker"
@@ -45,9 +42,10 @@ import (
 	nanitenative "github.com/hollis-labs/nanite/internal/plugin/builtin/adapter-nanite-native"
 	adapteropencode "github.com/hollis-labs/nanite/internal/plugin/builtin/adapter-opencode"
 	"github.com/hollis-labs/nanite/internal/providercatalog"
+	"github.com/hollis-labs/nanite/internal/recovery/broker"
+	"github.com/hollis-labs/nanite/internal/recovery/orphansweep"
 	"github.com/hollis-labs/nanite/internal/reminders"
 	runtimeagent "github.com/hollis-labs/nanite/internal/runtime/agent"
-	"github.com/hollis-labs/nanite/internal/runtime/agent/recovery"
 	"github.com/hollis-labs/nanite/internal/skill"
 	skillbuiltin "github.com/hollis-labs/nanite/internal/skill/builtin"
 	"github.com/hollis-labs/nanite/internal/store"
@@ -166,21 +164,6 @@ type Container struct {
 	// AdapterRegistry holds registered CLIAgentAdapters for discovery and sandbox ops.
 	AdapterRegistry *agent.AdapterRegistry
 
-	// BootProfiles is the boot-profile registry (CW-20260514-0047). Holds
-	// compiled LaunchSpec entries indexed by ProfileID and exposes List /
-	// Lookup for the dropdown surface and the chat runtime hookup
-	// (CW-20260514-0048). nil-safe — when no catalog path is configured
-	// the registry is empty and the dropdown response degrades to the
-	// pre-feature shape (DB-seeded rows only). The plugin lifecycle
-	// wiring that will call Registry.Reload() lives in 0049/0050; for
-	// now, an out-of-band reload entry point is exposed for future
-	// callers and exercised in registry_test.go.
-	BootProfiles *bootprofile.Registry
-	// BootProfileCatalogPath is the configured on-disk catalog root used by
-	// BootProfiles. Exposed so admin handlers can edit the same file-backed
-	// source of truth and reload the registry.
-	BootProfileCatalogPath string
-
 	// ProviderCatalog is the registry-backed provider/model dropdown
 	// catalog (CW-20260526-0001). One entry per provider successfully
 	// registered in cmd/nanite/main.go:initProviders. The API layer
@@ -193,10 +176,10 @@ type Container struct {
 	// Recovery is the in-process subagent recovery broker (Phase 8/9).
 	// Exposed on the container so API handlers can route FE-driven
 	// cancel_retry requests back to Broker.Cancel(sessionID, token).
-	// nil-safe: when the broker isn't a *recovery.Broker (test fakes
+	// nil-safe: when the broker isn't a *broker.Broker (test fakes
 	// inject mocks that satisfy agent.RecoveryHooks but not *Broker),
 	// the field is left nil and the cancel endpoint returns 503.
-	Recovery *recovery.Broker
+	Recovery *broker.Broker
 
 	// Inspector is the I1 per-turn dev-mode aggregator (CW-20260426-0004).
 	// nil when developer_mode is false.
@@ -236,7 +219,7 @@ type Container struct {
 	// sweep) and mid-run process deaths (periodic). Started during
 	// container build; stopped during Shutdown before the DB closes.
 	// CW-20260518-0085.
-	runtimeReaper *runtimeagent.RuntimeReaper
+	runtimeReaper *orphansweep.RuntimeReaper
 	// stopRuntimeReaper cancels the runtime reaper's bound context.
 	stopRuntimeReaper context.CancelFunc
 }
@@ -290,25 +273,6 @@ type ContainerConfig struct {
 	// at least claude/codex/opencode.
 	CLIAdapters []provider.CLIAdapter
 
-	// AgentBroker is the upstream agent-router primitive
-	// (CW-20260509-0046, SP-20260429-0001 broker-v1). The deterministic
-	// v1 impl is `broker.New()` from go-agent-broker v0.2.0. Threaded
-	// through here so chatServiceImpl can consult it at the call-site
-	// upstream of the chat-loop entry. nil-safe — when absent, the
-	// upstream call site is a pass-through and every turn falls
-	// through to the chat-direct LLM loop. main.go shares one broker
-	// instance with the downstream selfTools.Broker scaffold (both
-	// layers run; see chat_broker_dispatch.go for the boundary).
-	AgentBroker agentbroker.Broker
-
-	// BootProfileCatalogPath is the on-disk catalog root used to populate
-	// the boot-profile registry surfaced via Container.BootProfiles
-	// (CW-20260514-0047). Empty = registry stays empty / inert; existing
-	// dropdown behavior is unchanged. The string is expected to be
-	// already-tilde-expanded by the caller (cmd/nanite/main.go calls
-	// config.ResolvedBootProfileCatalogPath before threading it here).
-	BootProfileCatalogPath string
-
 	// ProviderCatalog is the registry-backed dropdown catalog
 	// (CW-20260526-0001). nil-safe — when nil, handleListProviders falls
 	// back to the DB-only shape so tests without explicit wiring work.
@@ -326,16 +290,6 @@ type ContainerConfig struct {
 	// baseline READ roots the agent operates against. Empty / nil leaves
 	// the "workspace allow-list" section out of the rendered summary.
 	DevToolsAllowedPaths []string
-
-	// AgentRegistry is the shared go-agent-launch directory registrar
-	// (S5 Phase C — agentregistry.Build). main.go builds ONE instance and
-	// threads the SAME pointer here so the GUI chat launch path
-	// (driveBootSession) resolves its runtime binding registry-primary
-	// through the same registrar the standalone launcher uses — Phase F
-	// converges the two launch paths on one seam. nil-safe: when absent
-	// the chat boot-profile path resolves fully file/spec-default and
-	// still boots (D1 — the registry is never mandatory).
-	AgentRegistry *agentregistry.Registry
 }
 
 func newRuntimeAdapterRegistry() *agent.AdapterRegistry {
@@ -377,11 +331,12 @@ func NewContainer(cfg ContainerConfig) (*Container, error) {
 	// --- Domain services (Wave 1) ---
 
 	sessions := NewSessionService(SessionServiceDeps{
-		Sessions: cfg.Store,
-		Writer:   cfg.Store,
-		Agents:   cfg.Store,
-		Settings: cfg.Store,
-		Events:   events,
+		Sessions:    cfg.Store,
+		Writer:      cfg.Store,
+		Agents:      cfg.Store,
+		AgentReader: cfg.Store,
+		Settings:    cfg.Store,
+		Events:      events,
 	})
 
 	// Adapter registry — adapters self-register via plugin loading.
@@ -395,10 +350,18 @@ func NewContainer(cfg ContainerConfig) (*Container, error) {
 		slog.Warn("service container: ensure agent home dirs", "err", err)
 	}
 
-	// Discover file-based agent definitions from all priority locations.
+	// Discover agent definitions from the remaining tiers (CLI --agent flag,
+	// currently unreachable, plus adapter-discovered). As of
+	// TASKS/phase-2/06-cut-nanite-native-adapter-agent-sync.md every
+	// registered CLIAgentAdapter (including nanite-native, the last one
+	// that used to produce real results here) has a no-op Discover() — see
+	// internal/agent/discovery.go's DiscoverOptions.Adapters doc comment
+	// for why adapterRegistry is still passed through (it's also used below
+	// for PopulateAllSandboxes/SyncAllProjectRoots). The project/user/plugin
+	// directory-scan tiers were cut in full by TASKS/phase-1/08 — no
+	// PluginsDir/HomeDir wiring is needed anymore.
 	agentDefs, err := agent.Discover(agent.DiscoverOptions{
 		WorkingDir: workingDir,
-		PluginsDir: "plugins",
 		Adapters:   adapterRegistry,
 	})
 	if err != nil {
@@ -461,46 +424,81 @@ func NewContainer(cfg ContainerConfig) (*Container, error) {
 	var knownTools map[string]bool
 	if cfg.ToolClient != nil {
 		catalog := cfg.ToolClient.ListTools()
+		// request_tools has no registration anywhere in the builtin/MCP
+		// catalog ToolClient.ListTools() draws from — it's a meta-tool
+		// synthesized ad hoc by SelectForAgent (progressive discovery and
+		// the always_included escape hatch, service/tool.go), with its
+		// own dedicated execution path (ToolService.HandleRequestTools),
+		// not routed through MCPManager/Builtins like an ordinary tool.
+		// Append it here so known_tools' live-sync (below) sees it as a
+		// real, permanently-available catalog entry instead of marking
+		// its migration-seeded always_included row 'unavailable' on the
+		// very first boot (TASKS/phase-4/05-wire-select-for-agent-to-
+		// read-agent-tools.md — caught by that task's own zero-grant
+		// escape-hatch test).
+		catalog = append(catalog, toolclient.RequestToolsMetaTool())
 		knownTools = make(map[string]bool, len(catalog))
 		for _, t := range catalog {
 			knownTools[t.Name] = true
 		}
+
+		// Phase 1 item 04 (TASKS/phase-1/04-add-known-tools-and-agent-tools-fk.md):
+		// live-sync the known_tools global catalog against this same
+		// builtins+MCP catalog, before AutoIngestAgents runs below (its
+		// seedRoleToolsFromIngest call needs known_tools rows to already
+		// exist so it can resolve roleTools: names to real grants).
+		syncResult := SyncKnownTools(context.Background(), cfg.Store, catalog, cfg.ToolClient.IsBuiltinTool)
+		slog.Info("service container: synced known_tools catalog",
+			"upserted", syncResult.Upserted, "marked_unavailable", syncResult.MarkedUnavailable)
 	}
 	if n := AutoIngestAgents(cfg.Store, agentDefs, knownTools); n > 0 {
 		slog.Info("service container: auto-ingested agents into DB", "count", n)
 	}
 
+	// Phase 1 item 04: one-time-per-agent carry-over of
+	// tools:/tool_permissions:/role_tools:' CURRENT values into real
+	// agent_tools grants. Runs after AutoIngestAgents so brand-new agents
+	// ingested this same boot are covered too; see
+	// BackfillAgentToolsFromLegacyColumns' doc comment for why this is
+	// guarded to run at most once per agent, ever.
+	if n, err := BackfillAgentToolsFromLegacyColumns(context.Background(), cfg.Store); err != nil {
+		slog.Warn("service container: backfill agent_tools from legacy columns", "err", err)
+	} else if n > 0 {
+		slog.Info("service container: backfilled agent_tools from legacy columns", "grants", n)
+	}
+
 	agents := NewAgentService(AgentServiceConfig{
-		Agents:     cfg.Store,
-		Writers:    cfg.Store,
-		Settings:   cfg.Store,
-		Events:     events,
-		FileAgents: agentDefs,
-		Overrides:  cfg.Store,
+		Agents:   cfg.Store,
+		Writers:  cfg.Store,
+		Settings: cfg.Store,
+		Events:   events,
 	})
 
 	// Shared managed-agent write service. GUI/API/CLI/MCP route all managed
-	// config mutations through this one path (validate → atomic file write →
-	// DB upsert/reindex → live registry reload → event). nil-safe reloader:
-	// the concrete agentServiceImpl implements AgentRegistryReloader.
-	var agentReloader AgentRegistryReloader
-	if r, ok := agents.(AgentRegistryReloader); ok {
-		agentReloader = r
-	}
-	agentConfig := NewAgentConfigService(cfg.Store, agentClassification, managedConfigRoot, agentReloader, nil)
+	// config mutations through this one path (validate → atomic file write
+	// → DB upsert/reindex → event). TASKS/adhoc/01-eliminate-file-based-
+	// agent-runtime.md dropped the live in-memory-registry reload step
+	// (AgentRegistryReloader/ReloadFileAgent/RemoveFileAgent) — agentServiceImpl
+	// now reads straight from the DB on every call, so the row writeManaged
+	// already upserted synchronously is immediately visible with no reload
+	// needed.
+	agentConfig := NewAgentConfigService(cfg.Store, agentClassification, managedConfigRoot, nil)
 
-	// Wire the toolclient's file-agent permission resolver. File-based agents
-	// have synthetic IDs ("file-<slug>") and live on disk, not in
-	// agent_profiles — a store-backed permission lookup would miss every
-	// time. Resolving through the AgentService lets a file agent's
-	// frontmatter (or implicit Tools allowlist) flow into the broker.
-	if cfg.ToolClient != nil {
-		cfg.ToolClient.PermissionResolver = newFileAgentPermissionResolver(agentDefs)
-	}
+	// agent_permissions.go (newFileAgentPermissionResolver) and
+	// ToolClient.PermissionResolver/GetPermissions/CheckPermission/
+	// ToolPermissions/ParsePermissions were deleted outright by
+	// TASKS/adhoc/02-remove-tool-permissions-collapse-to-agent-tools.md --
+	// no agent ID is ever "file-<slug>"-shaped anymore (TASKS/adhoc/01), so
+	// there was nothing left for that resolver to resolve, and every other
+	// tool_permissions consumer had a real agent_tools-backed replacement.
+	// agent_tools (+ the known_tools.always_included escape hatch) is now
+	// the sole tool-permission gate everywhere, including inside
+	// ToolClient.CallTool's own execution-time backstop.
 
-	// Messaging service. Uses the AgentService as its resolver so both
-	// DB-backed and file-based agents validate uniformly. Takes the
-	// SQLite-backed messaging Store plus the underlying *sql.DB so
+	// Messaging service. Uses the AgentService as its resolver -- every
+	// agent is DB-backed now (TASKS/adhoc/01-eliminate-file-based-agent-
+	// runtime.md). Takes the SQLite-backed messaging Store plus the
+	// underlying *sql.DB so
 	// handoff transactions (which span session_handoffs +
 	// session_agents) can run as a single txn.
 	msgStore := messaging.NewSQLiteStore(cfg.Store.DB)
@@ -519,11 +517,12 @@ func NewContainer(cfg ContainerConfig) (*Container, error) {
 		slog.Warn("service container: ensure skill home dirs", "err", err)
 	}
 
-	// Discover file-based skill definitions from all 5 priority locations.
-	skillDefs, err := skill.Discover(skill.DiscoverOptions{
-		WorkingDir: ".",
-		PluginsDir: "plugins",
-	})
+	// Discover skill definitions. TASKS/phase-1/08 cut every file-based
+	// discovery tier (project, user, .claude/skills/, plugin) in full;
+	// skill.Discover always returns empty now, kept as a call site for
+	// symmetry with agent discovery in case a real non-file source is added
+	// later.
+	skillDefs, err := skill.Discover(skill.DiscoverOptions{})
 	if err != nil {
 		slog.Warn("service container: skill discovery", "err", err)
 	}
@@ -664,7 +663,6 @@ func NewContainer(cfg ContainerConfig) (*Container, error) {
 	var agentReader AgentReader = cfg.Store
 	tools := NewToolService(cfg.ToolClient, cfg.MCP, agentReader)
 	if impl, ok := tools.(*toolServiceImpl); ok {
-		impl.SetDecisionLogger(cfg.Store)
 		// C2 (CW-20260429-0008): wire the LLM-augmented repair pipeline.
 		// The repair model is selectable via NANITE_REPAIR_MODEL; the
 		// provider is picked from the user's utility provider (which
@@ -731,31 +729,33 @@ func NewContainer(cfg ContainerConfig) (*Container, error) {
 	// for SlotWorkspace. The cache is process-lifetime, concurrency-safe,
 	// and keyed on (session_id, working_dir) with per-file mtime
 	// invalidation. The resolver maps a session to its on-disk
-	// working_dir via Store.GetProject (primary-key fetch) when both
-	// ProjectID and WorkspaceID are set; the WorkspaceID guard is kept
-	// to defend against cross-workspace project leaks if a stale session
-	// ID ever points at a project that's been moved.
+	// working_dir via Store.GetProject (primary-key fetch) when ProjectID
+	// is set. Phase 0 item 20 (retire workspaces): this used to also
+	// guard on session.WorkspaceID == project.WorkspaceID to defend
+	// against cross-workspace project leaks — both fields are gone now
+	// that `projects` is a flat table with no workspace nesting, so the
+	// guard is dropped along with them.
 	//
 	// This differs from internal/api/autocomplete.go::resolveRoot in
 	// that an empty ProjectID returns empty (and the slot ships empty
 	// via the assembly decider's skipped_no_content path) rather than
-	// falling back to the first project in the workspace + cwd.
-	// Autocomplete needs *some* root to scan for completion candidates,
-	// so its fallbacks are a UX safety net. SlotWorkspace explicitly
-	// represents "this session's project conventions" — falling back to
-	// cwd or an arbitrary sibling project would inject the wrong
-	// project's AGENTS.md into the prompt, which is worse than empty.
+	// falling back to the first project + cwd. Autocomplete needs *some*
+	// root to scan for completion candidates, so its fallbacks are a UX
+	// safety net. SlotWorkspace explicitly represents "this session's
+	// project conventions" — falling back to cwd or an arbitrary sibling
+	// project would inject the wrong project's AGENTS.md into the prompt,
+	// which is worse than empty.
 	contextClient.WorkspaceCache = workspace.NewCache()
 	contextClient.WorkingDirForSession = func(session *store.Session) (string, error) {
 		if session == nil {
 			return "", nil
 		}
-		if session.ProjectID == "" || session.WorkspaceID == "" {
+		if session.ProjectID == "" {
 			return "", nil
 		}
 		// Primary-key fetch instead of the full project list — this
 		// resolver fires on every AssembleSlotSources call (per turn),
-		// so an O(N) scan would scale poorly as a workspace grows.
+		// so an O(N) scan would scale poorly as the project list grows.
 		project, err := cfg.Store.GetProject(session.ProjectID)
 		if err != nil {
 			// "Project not found" is non-fatal for slot assembly: the
@@ -767,7 +767,7 @@ func NewContainer(cfg ContainerConfig) (*Container, error) {
 			}
 			return "", err
 		}
-		if project == nil || project.WorkspaceID != session.WorkspaceID || project.RepoPath == "" {
+		if project == nil || project.RepoPath == "" {
 			return "", nil
 		}
 		return project.RepoPath, nil
@@ -848,10 +848,6 @@ func NewContainer(cfg ContainerConfig) (*Container, error) {
 	// Command registry.
 	commands := chat.NewCommandRegistry()
 	commands.RegisterServerCommands(cfg.Store, cfg.Providers)
-	// B2 (CW-20260428-0010): bind /mode, /chat, /plan, /work to the store's
-	// session-mode setter. Must run after NewCommandRegistry so it overwrites
-	// the placeholder /mode entry created at construction time.
-	commands.RegisterModeCommands(cfg.Store)
 	RegisterToolCacheCommand(commands, overrideStore)
 
 	// Register file-based skills as slash commands.
@@ -880,12 +876,17 @@ func NewContainer(cfg ContainerConfig) (*Container, error) {
 	// Model catalog — fetches pricing and context-window data from models.dev.
 	// After each successful fetch the OnRefresh hook pushes the data into the
 	// pkg/models overlay so all callers of Pricing/MaxOutputFor/ContextWindowFor
-	// automatically see live values without threading the catalog through the stack.
+	// automatically see live values without threading the catalog through the
+	// stack, then materialises the same overlay values into the `models` DB
+	// table (store.SyncModelsFromRegistry) so agents.model_id has a real,
+	// current row to FK against — see Phase 1 #06.
 	catalogCtx, stopCatalog := context.WithCancel(context.Background())
-	modelCatalog := modelsdev.New(modelsdev.WithOnRefresh(syncCatalogToRegistry))
+	modelCatalog := modelsdev.New(modelsdev.WithOnRefresh(func(c *modelsdev.Client) {
+		syncCatalogToRegistry(c, cfg.Store)
+	}))
 	// Sync from disk cache immediately (warm cache path) so the registry is
 	// enriched before accepting traffic even when no network fetch is needed.
-	syncCatalogToRegistry(modelCatalog)
+	syncCatalogToRegistry(modelCatalog, cfg.Store)
 	modelCatalog.StartRefresher(catalogCtx)
 
 	// I1 (CW-20260426-0004): inspector service — dev-mode only.
@@ -986,30 +987,6 @@ func NewContainer(cfg ContainerConfig) (*Container, error) {
 		"adapters", len(cliAdapters),
 		"workspaces_root", agentDeps.WorkspacesRoot)
 
-	// CW-20260514-0047/0048: build the boot-profile registry from the
-	// configured catalog path. NewRegistry is nil-safe (empty path
-	// returns an empty Registry) so this call is unconditional; an
-	// unset catalog path leaves the dropdown / runtime hookup surfaces
-	// observing an empty List. Per-profile compile errors are logged
-	// here but do not abort container construction — the operator
-	// fixes the bad YAML and triggers a reload (Reload entry point on
-	// the registry; plugin wiring lands in CW-20260514-0049/0050).
-	//
-	// Hoisted above NewChatService so the registry can be threaded into
-	// ChatServiceConfig — driveBootSession needs CompileFor at boot time
-	// (CW-20260514-0048).
-	bootProfileRegistry, bootProfileErr := bootprofile.NewRegistry(cfg.BootProfileCatalogPath)
-	if bootProfileErr != nil {
-		slog.Warn("service container: boot-profile registry: partial load",
-			"catalog_path", cfg.BootProfileCatalogPath,
-			"err", bootProfileErr)
-	}
-	if bootProfileRegistry != nil && !bootProfileRegistry.IsEmpty() {
-		slog.Info("service container: boot-profile registry loaded",
-			"catalog_path", cfg.BootProfileCatalogPath,
-			"profiles", len(bootProfileRegistry.List()))
-	}
-
 	chatSvc := NewChatService(ChatServiceConfig{
 		Sessions:           sessions,
 		Agents:             agents,
@@ -1038,10 +1015,6 @@ func NewContainer(cfg ContainerConfig) (*Container, error) {
 		SubagentInbox:      messagingSvc,
 		DBPath:             cfg.Store.DBPath(),
 		AdapterRegistry:    adapterRegistry,
-		// CW-20260419-0026 (E3): wire the strategy decision logger.
-		// *store.Store satisfies strategyDecisionLogger via
-		// internal/store/strategy_log.go.
-		StrategyLogger: cfg.Store,
 		// I1 (CW-20260426-0004): inspector — nil when developer_mode=false.
 		Inspector: inspectorSvc,
 		// I2 (CW-20260420-0029): loop detector — always-on.
@@ -1063,25 +1036,6 @@ func NewContainer(cfg ContainerConfig) (*Container, error) {
 		// non-chat-direct routes. nil-safe — when omitted, the route
 		// classifier's hint stays purely informative.
 		EnvelopeRenderExecutor: envelope_render.New(),
-		// CW-20260509-0046: upstream agent-broker. main.go shares one
-		// broker instance with selfTools.Broker (downstream scaffold)
-		// — both layers consult the same deterministic v1 rule set,
-		// the upstream call decides whether dispatch happens, the
-		// downstream call audits the dispatch CALL into event_log.
-		// Concurrency-safe (DeterministicBroker is stateless).
-		AgentBroker: cfg.AgentBroker,
-		// CW-20260514-0048: the boot-profile registry is threaded
-		// here so chat_generate.go can decode "bootprofile:<id>"
-		// provider names + compile session-scoped LaunchSpecs.
-		// nil-safe — when the catalog isn't configured the
-		// registry is empty and `bootprofile:` ids never appear
-		// in session rows in the first place.
-		BootProfiles: bootProfileRegistry,
-		// S5 Phase F: thread the shared directory registrar so the GUI
-		// chat boot-profile launch path (driveBootSession) resolves its
-		// runtime binding registry-primary via launchplan.Build — the
-		// SAME seam the standalone launcher uses. nil-safe (D1).
-		AgentRegistry: cfg.AgentRegistry,
 	})
 
 	// G-3 + G-5: subagent service with the real chat-engine-backed runner.
@@ -1112,29 +1066,28 @@ func NewContainer(cfg ContainerConfig) (*Container, error) {
 	// (deleted from activeSessions during cleanup) and boots yet another
 	// session, orphaning the broker's retry. Best-effort: a non-Broker
 	// RecoveryHooks (mocks in tests) silently skips wiring.
-	if broker, ok := agentDeps.Recovery.(*recovery.Broker); ok {
+	if broker, ok := agentDeps.Recovery.(*broker.Broker); ok {
 		broker.SetReplacementSessionHook(func(sessionID string, sess *runtimeagent.Session) {
 			chatSvcImpl.adoptReplacementSession(sessionID, sess)
 		})
+
+		// Phase 0 task 04 (decision log §19): wire the HTTP-provider
+		// (bootdir-free) retry hook now that chatSvcImpl exists. Same
+		// construction-order reason as the replacement-session hook
+		// above — the adapter closes over RetryLastMessage, which only
+		// exists once NewChatService has returned.
+		broker.SetHTTPRetry(newRecoveryHTTPRetryAdapter(chatSvcImpl.RetryLastMessage))
 	}
 
-	// CW-20260514-0049: install the boot-profile recovery pre-boot
-	// hook on the agentBootAdapter so broker-dispatched relaunches
-	// that target a boot-profile-backed session re-resolve via
-	// Registry.CompileFor (fresh-catalog policy) and overlay the new
-	// LaunchSpec onto agent.Options BEFORE the relaunch fires. This
-	// is the ONLY code path through which the chat layer touches
-	// agent.Options en route to recovery; normal launches go through
-	// driveBootSession's call to runtimeagent.Boot directly. The
-	// resume-vs-normal-start split is therefore structural — the
-	// recovery hook is the single structural entry point for any
-	// future resume-ID threading. nil-safe: bundle.BootAdapter is
-	// unset in tests / standalone configs that don't wire the
-	// adapter.
-	if agentDepsBundle.BootAdapter != nil {
-		agentDepsBundle.BootAdapter.SetPreBootHook(chatSvcImpl.recoveryPreBootHook)
-	}
-
+	// TASKS/phase-2/04-retire-boot-profile-catalog.md: the boot-profile
+	// recovery pre-boot hook (chatSvcImpl.recoveryPreBootHook) that used
+	// to install here has been removed along with the whole boot-profile
+	// catalog — its entire body re-resolved a boot-profile-backed session
+	// via Registry.CompileFor, and every other session type already
+	// passed through unchanged. agentBootAdapter.SetPreBootHook remains a
+	// real, general extension point (see its doc comment in
+	// agent_deps.go) for a future resume-ID-threading use case; no
+	// current caller needs it installed.
 	legacyRunner := NewChatRunner(chatSvcImpl, agentReader, cfg.Store, cfg.Store.DB, pathGrants)
 	subagentRunner := NewBootRunner(agentDeps, agentBridge, agentReader, cfg.Store, cfg.Store.DB, pathGrants, legacyRunner)
 	approvalEmitter := NewApprovalEmitter(cfg.Store, streams)
@@ -1204,7 +1157,7 @@ func NewContainer(cfg ContainerConfig) (*Container, error) {
 	// before the chat layer starts serving requests; periodic reaper
 	// then catches mid-run deaths on the configured interval.
 	runtimeReaperCtx, stopRuntimeReaper := context.WithCancel(context.Background())
-	runtimeReaper := runtimeagent.NewRuntimeReaper(agentDeps, runtimeagent.RuntimeReaperOptions{})
+	runtimeReaper := orphansweep.NewRuntimeReaper(agentDeps, orphansweep.RuntimeReaperOptions{})
 	// PR #213 review: bound the startup sweep to runtimeReaperCtx (so Shutdown
 	// during container build can cancel it) and to a 30s wall clock (so a
 	// stuck SQLite query cannot block boot indefinitely).
@@ -1222,8 +1175,8 @@ func NewContainer(cfg ContainerConfig) (*Container, error) {
 	}
 	runtimeReaper.Start(runtimeReaperCtx)
 	slog.Info("service container: agent_runtime reaper started",
-		"interval", runtimeagent.DefaultRuntimeReaperInterval.String(),
-		"pid_zero_grace", runtimeagent.DefaultRuntimeReaperPidZeroGrace.String(),
+		"interval", orphansweep.DefaultRuntimeReaperInterval.String(),
+		"pid_zero_grace", orphansweep.DefaultRuntimeReaperPidZeroGrace.String(),
 	)
 
 	// G-4: register the subagent-spawn-approval typed response handler so
@@ -1397,8 +1350,6 @@ func NewContainer(cfg ContainerConfig) (*Container, error) {
 		Permissions:            permissions,
 		PathGrants:             pathGrants,
 		AdapterRegistry:        adapterRegistry,
-		BootProfiles:           bootProfileRegistry,
-		BootProfileCatalogPath: cfg.BootProfileCatalogPath,
 		ProviderCatalog:        cfg.ProviderCatalog,
 		Recovery:               recoveryBrokerOrNil(agentDeps),
 		Inspector:              inspectorSvc,
@@ -1536,11 +1487,42 @@ func buildResultCache(s *store.Store) *tool.ResultCache {
 	return tool.NewResultCache(s.DB, cfg)
 }
 
+// modelsDevProviderAllowlist restricts syncCatalogToRegistry's merge to the
+// models.dev provider keys Nanite's own provider adapters actually call
+// (see seededProviders in internal/store/seed.go). Verified against a real
+// models.dev disk cache (2026-08-17 fetch, 190 providers) while building
+// Phase 1 #06: models.dev's catalog is deliberately provider-agnostic
+// (ADR-001, docs/decisions/ADR-001-models-catalog-sync.md) and
+// modelsdev.CatalogInput's maps are keyed by bare model ID with no
+// provider dimension at all — several reseller/gateway providers
+// (confirmed real entries: qihang-ai, 302ai, jiekou, nano-gpt, helicone,
+// llmgateway, abacus) mirror "claude-sonnet-4-5-20250929" verbatim at
+// different (often discounted) pricing and context limits. Sorted
+// alphabetically after "anthropic", the last one processed silently wins
+// and clobbers the real vendor's numbers for every caller of
+// models.Pricing/MaxOutputFor/ContextWindowFor — and, since this task
+// added a DB-write path fed from the same overlay, the models table too.
+// ADR-001's provider-agnostic design is not being reopened here (still
+// Option C, still one shared merge); this only narrows which of
+// models.dev's ~190 providers are allowed to contribute to that merge.
+var modelsDevProviderAllowlist = map[string]bool{
+	"anthropic": true,
+	"openai":    true,
+}
+
 // syncCatalogToRegistry builds a CatalogInput from the models.dev client and
 // pushes it into the pkg/models overlay so all callers of Pricing,
 // MaxOutputFor, and ContextWindowFor see live values without the catalog being
-// threaded through the call stack.
-func syncCatalogToRegistry(c *modelsdev.Client) {
+// threaded through the call stack. It then upserts the same, now-current
+// values into the `models` DB table via st.SyncModelsFromRegistry so the
+// table isn't just fed once by the boot-time seed (Phase 1 #06 — see
+// internal/store/models.go for why this must run after SyncFromCatalog,
+// not independently of it).
+//
+// st may be nil in tests that construct a bare *modelsdev.Client without a
+// store; the DB-write half is skipped in that case and only the in-memory
+// overlay is updated.
+func syncCatalogToRegistry(c *modelsdev.Client, st *store.Store) {
 	refs := c.List()
 	if len(refs) == 0 {
 		return
@@ -1553,6 +1535,9 @@ func syncCatalogToRegistry(c *modelsdev.Client) {
 	}
 	for _, ref := range refs {
 		if ref.ID == "" {
+			continue
+		}
+		if !modelsDevProviderAllowlist[ref.ProviderID] {
 			continue
 		}
 		if ref.Limit.ContextWindow > 0 {
@@ -1569,17 +1554,26 @@ func syncCatalogToRegistry(c *modelsdev.Client) {
 		}
 	}
 	models.SyncFromCatalog(input)
+
+	if st == nil {
+		return
+	}
+	if n, err := st.SyncModelsFromRegistry(); err != nil {
+		slog.Warn("service container: models table sync from catalog failed", "err", err)
+	} else {
+		slog.Debug("service container: models table synced from catalog", "rows", n)
+	}
 }
 
-// recoveryBrokerOrNil resolves the *recovery.Broker on the agent
+// recoveryBrokerOrNil resolves the *broker.Broker on the agent
 // dependencies, or returns nil when the wired recovery hooks are not a
 // concrete *Broker (test fakes register interface-only mocks). The
 // API recovery-cancel endpoint is no-op when nil — there is nothing
 // to cancel against.
-func recoveryBrokerOrNil(deps *runtimeagent.Dependencies) *recovery.Broker {
+func recoveryBrokerOrNil(deps *runtimeagent.Dependencies) *broker.Broker {
 	if deps == nil {
 		return nil
 	}
-	broker, _ := deps.Recovery.(*recovery.Broker)
+	broker, _ := deps.Recovery.(*broker.Broker)
 	return broker
 }

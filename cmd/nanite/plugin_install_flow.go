@@ -96,8 +96,9 @@ type noopLoader struct{}
 func (noopLoader) Load(ctx context.Context, pluginID, pluginDir string) error { return nil }
 
 // buildInstaller wires the state machine for CLI use. The loader is a
-// no-op; triggerRestart() handles the running-service refresh after Run
-// returns successfully.
+// no-op; triggerActivation() handles the running-service refresh (hot-reload
+// for a subprocess plugin, triggerRestart() for a builtin) after Run returns
+// successfully.
 func buildInstaller(emit install.EventFunc) (*install.Installer, *catalog.KeyRing, *install.DirStaging) {
 	ring := catalog.NewKeyRing()
 	staging := &install.DirStaging{
@@ -296,6 +297,7 @@ func pluginUpdate(id string) {
 		fmt.Printf("\nUpdated %s: %s → %s\n", id, oldManifest.Version, newManifest.Version)
 	} else {
 		fmt.Printf("\nUpdated %s\n", id)
+		newManifest = nil
 	}
-	triggerRestart()
+	triggerActivation(id, newManifest)
 }

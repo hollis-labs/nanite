@@ -5,59 +5,33 @@ import (
 	"encoding/json"
 	"strings"
 	"testing"
+
+	"github.com/hollis-labs/nanite/internal/store"
 )
 
-// seedWorkspaceID inserts a workspace row with a chosen ID. Distinct from
-// seedWorkspaceOnce (which creates the shared `ws-test` row) — we need
-// multiple workspaces for the cross-workspace deny test.
-func seedWorkspaceID(t *testing.T, st *SelfToolsTransport, id string) {
+// seedSessionByID creates a session with a chosen ID and returns the
+// short_code the store assigned. Formerly seedSessionInWS — the workspace
+// dimension it varied is gone (Phase 0 item 20, retire workspaces).
+func seedSessionByID(t *testing.T, st *SelfToolsTransport, id string) string {
 	t.Helper()
-	_, err := st.Store.DB.Exec(
-		`INSERT OR IGNORE INTO workspaces (id, name, description, icon, sort_order, settings, created_at, updated_at)
-		 VALUES (?, ?, '', '', 0, '{}', datetime('now'), datetime('now'))`,
-		id, "ws "+id,
-	)
-	if err != nil {
-		t.Fatalf("seed workspace %s: %v", id, err)
+	sess := &store.Session{ID: id, Title: "Session " + id}
+	if err := st.Store.CreateSession(sess); err != nil {
+		t.Fatalf("seed session %s: %v", id, err)
 	}
+	return sess.ShortCode
 }
 
-// seedSessionInWS creates a session in a specific workspace and returns the
-// short_code the store assigned.
-func seedSessionInWS(t *testing.T, st *SelfToolsTransport, id, wsID string) string {
-	t.Helper()
-	seedWorkspaceID(t, st, wsID)
-	// Insert via raw SQL so we control the workspace id; CreateSession's
-	// helpers wrap nullIfEmpty around an empty string which would defeat the
-	// scope check. We still need a short_code, so allocate one via the
-	// store helper.
-	code, err := st.Store.NextShortCode()
-	if err != nil {
-		t.Fatalf("next short code: %v", err)
-	}
-	_, err = st.Store.DB.Exec(
-		`INSERT INTO sessions (id, short_code, workspace_id, title, status, metadata,
-		                       last_activity, created_at, updated_at)
-		 VALUES (?, ?, ?, ?, 'active', '{}', datetime('now'), datetime('now'), datetime('now'))`,
-		id, code, wsID, "Session "+id,
-	)
-	if err != nil {
-		t.Fatalf("seed session %s in ws %s: %v", id, wsID, err)
-	}
-	return code
-}
-
-// TestChatGet_BasicHappyPath: read a chat by short code from the same
-// workspace; messages come back in chronological order with text unwrapped.
+// TestChatGet_BasicHappyPath: read a chat by short code; messages come back
+// in chronological order with text unwrapped.
 func TestChatGet_BasicHappyPath(t *testing.T) {
 	s := newTestStore(t)
 	st := NewSelfToolsTransport(s)
 
-	code := seedSessionInWS(t, st, "sess-cg-1", "ws-test")
+	code := seedSessionByID(t, st, "sess-cg-1")
 	seedMessage(t, s, "sess-cg-1", "user", "first message", false)
 	seedMessage(t, s, "sess-cg-1", "assistant", `{"v":1,"text":"second wrapped","tier":"text"}`, false)
 
-	ctx := WithCallerProfile(context.Background(), "ws-test", "agent-A")
+	ctx := WithCallerProfile(context.Background(), "agent-A")
 	res, err := st.CallTool(ctx, "chat_get", map[string]any{"target": code})
 	if err != nil || res.IsError {
 		t.Fatalf("chat_get failed: %v / %+v", err, res)
@@ -92,10 +66,10 @@ func TestChatGet_ShortCodeNormalisation(t *testing.T) {
 	s := newTestStore(t)
 	st := NewSelfToolsTransport(s)
 
-	code := seedSessionInWS(t, st, "sess-norm", "ws-test")
+	code := seedSessionByID(t, st, "sess-norm")
 	seedMessage(t, s, "sess-norm", "user", "hello", false)
 
-	ctx := WithCallerProfile(context.Background(), "ws-test", "agent-A")
+	ctx := WithCallerProfile(context.Background(), "agent-A")
 	for _, variant := range []string{code, "#" + code, strings.ToUpper(code), "#" + strings.ToUpper(code)} {
 		res, err := st.CallTool(ctx, "chat_get", map[string]any{"target": variant})
 		if err != nil || res.IsError {
@@ -114,10 +88,10 @@ func TestChatGet_BySessionID(t *testing.T) {
 	s := newTestStore(t)
 	st := NewSelfToolsTransport(s)
 
-	_ = seedSessionInWS(t, st, "sess-uuid", "ws-test")
+	_ = seedSessionByID(t, st, "sess-uuid")
 	seedMessage(t, s, "sess-uuid", "user", "hi", false)
 
-	ctx := WithCallerProfile(context.Background(), "ws-test", "agent-A")
+	ctx := WithCallerProfile(context.Background(), "agent-A")
 	res, err := st.CallTool(ctx, "chat_get", map[string]any{"session_id": "sess-uuid"})
 	if err != nil || res.IsError {
 		t.Fatalf("chat_get by session_id failed: %v / %+v", err, res)
@@ -127,35 +101,12 @@ func TestChatGet_BySessionID(t *testing.T) {
 	}
 }
 
-// TestChatGet_CrossWorkspaceDenied: caller in ws-A cannot read a chat in ws-B.
-func TestChatGet_CrossWorkspaceDenied(t *testing.T) {
-	s := newTestStore(t)
-	st := NewSelfToolsTransport(s)
-
-	codeB := seedSessionInWS(t, st, "sess-ws-b", "ws-other")
-	seedMessage(t, s, "sess-ws-b", "user", "secret", false)
-
-	ctx := WithCallerProfile(context.Background(), "ws-test", "agent-A")
-	seedWorkspaceID(t, st, "ws-test")
-
-	res, err := st.CallTool(ctx, "chat_get", map[string]any{"target": codeB})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !res.IsError {
-		t.Fatalf("expected cross-workspace deny, got success: %s", res.Content[0].Text)
-	}
-	if !strings.Contains(res.Content[0].Text, "cross-workspace") {
-		t.Errorf("expected cross-workspace error message, got: %s", res.Content[0].Text)
-	}
-}
-
 // TestChatGet_UnknownShortCode: friendly error, not a stack trace.
 func TestChatGet_UnknownShortCode(t *testing.T) {
 	s := newTestStore(t)
 	st := NewSelfToolsTransport(s)
 
-	ctx := WithCallerProfile(context.Background(), "ws-test", "agent-A")
+	ctx := WithCallerProfile(context.Background(), "agent-A")
 	res, _ := st.CallTool(ctx, "chat_get", map[string]any{"target": "c9999"})
 	if !res.IsError {
 		t.Fatal("expected error for unknown short code")
@@ -179,12 +130,12 @@ func TestChatGet_Pagination(t *testing.T) {
 	s := newTestStore(t)
 	st := NewSelfToolsTransport(s)
 
-	code := seedSessionInWS(t, st, "sess-page", "ws-test")
+	code := seedSessionByID(t, st, "sess-page")
 	for i := 0; i < 5; i++ {
 		seedMessage(t, s, "sess-page", "user", "msg", false)
 	}
 
-	ctx := WithCallerProfile(context.Background(), "ws-test", "agent-A")
+	ctx := WithCallerProfile(context.Background(), "agent-A")
 	res, err := st.CallTool(ctx, "chat_get", map[string]any{
 		"target": code,
 		"limit":  2,
@@ -212,11 +163,11 @@ func TestChatGet_IncludeCompactedFalse(t *testing.T) {
 	s := newTestStore(t)
 	st := NewSelfToolsTransport(s)
 
-	code := seedSessionInWS(t, st, "sess-comp", "ws-test")
+	code := seedSessionByID(t, st, "sess-comp")
 	seedMessage(t, s, "sess-comp", "user", "active one", false)
 	seedMessage(t, s, "sess-comp", "assistant", "summary blob", true)
 
-	ctx := WithCallerProfile(context.Background(), "ws-test", "agent-A")
+	ctx := WithCallerProfile(context.Background(), "agent-A")
 	res, err := st.CallTool(ctx, "chat_get", map[string]any{
 		"target":            code,
 		"include_compacted": false,
@@ -232,35 +183,18 @@ func TestChatGet_IncludeCompactedFalse(t *testing.T) {
 	}
 }
 
-// TestChatGet_NoCallerWorkspace_AllowsRead: when ctx has no caller profile,
-// the gate is skipped (matches the H1 mux trust gate's empty-workspace
-// fallback). This is the test-path / CLI-launch self-tools case.
-func TestChatGet_NoCallerWorkspace_AllowsRead(t *testing.T) {
-	s := newTestStore(t)
-	st := NewSelfToolsTransport(s)
-
-	code := seedSessionInWS(t, st, "sess-no-caller", "ws-other")
-	seedMessage(t, s, "sess-no-caller", "user", "hi", false)
-
-	// No WithCallerProfile on ctx → gate skipped.
-	res, err := st.CallTool(context.Background(), "chat_get", map[string]any{"target": code})
-	if err != nil || res.IsError {
-		t.Fatalf("expected allow when caller workspace not stamped, got: %v / %+v", err, res)
-	}
-}
-
 // TestChatSearch_CrossSessionByShortCode: search a sibling chat by short code.
 func TestChatSearch_CrossSessionByShortCode(t *testing.T) {
 	s := newTestStore(t)
 	st := NewSelfToolsTransport(s)
 
 	// Caller's session (current).
-	seedSession(t, s, "sess-caller") // uses ws-test
+	seedSession(t, s, "sess-caller")
 	// Target sibling session.
-	targetCode := seedSessionInWS(t, st, "sess-target", "ws-test")
+	targetCode := seedSessionByID(t, st, "sess-target")
 	seedMessage(t, s, "sess-target", "user", "the artifact id is artifact-42", false)
 
-	ctx := WithSessionID(WithCallerProfile(context.Background(), "ws-test", "agent-A"), "sess-caller")
+	ctx := WithSessionID(WithCallerProfile(context.Background(), "agent-A"), "sess-caller")
 	res, err := st.CallTool(ctx, "chat_search", map[string]any{
 		"query":  "artifact-42",
 		"target": targetCode,
@@ -289,25 +223,6 @@ func TestChatSearch_CrossSessionByShortCode(t *testing.T) {
 	}
 }
 
-// TestChatSearch_CrossWorkspaceDenied: cross-workspace search denied.
-func TestChatSearch_CrossWorkspaceDenied(t *testing.T) {
-	s := newTestStore(t)
-	st := NewSelfToolsTransport(s)
-
-	seedSession(t, s, "sess-caller-ws")
-	codeB := seedSessionInWS(t, st, "sess-other-ws", "ws-elsewhere")
-	seedMessage(t, s, "sess-other-ws", "user", "sensitive bits", false)
-
-	ctx := WithSessionID(WithCallerProfile(context.Background(), "ws-test", "agent-A"), "sess-caller-ws")
-	res, _ := st.CallTool(ctx, "chat_search", map[string]any{
-		"query":  "sensitive",
-		"target": codeB,
-	})
-	if !res.IsError {
-		t.Fatalf("expected cross-workspace deny, got: %s", res.Content[0].Text)
-	}
-}
-
 // TestChatSearch_TargetSameSession_NoCrossFlag: passing a target that is the
 // same as the current session does NOT set cross_session=true (back-compat:
 // the snippet shape stays minimal).
@@ -315,10 +230,10 @@ func TestChatSearch_TargetSameSession_NoCrossFlag(t *testing.T) {
 	s := newTestStore(t)
 	st := NewSelfToolsTransport(s)
 
-	code := seedSessionInWS(t, st, "sess-self", "ws-test")
+	code := seedSessionByID(t, st, "sess-self")
 	seedMessage(t, s, "sess-self", "user", "needle in haystack", false)
 
-	ctx := WithSessionID(WithCallerProfile(context.Background(), "ws-test", "agent-A"), "sess-self")
+	ctx := WithSessionID(WithCallerProfile(context.Background(), "agent-A"), "sess-self")
 	res, err := st.CallTool(ctx, "chat_search", map[string]any{
 		"query":  "needle",
 		"target": code,
@@ -337,17 +252,17 @@ func TestChatSearch_TargetSameSession_NoCrossFlag(t *testing.T) {
 // pinned (UUIDs containing 'c' must NOT match; pure 'c' alone must not match).
 func TestIsShortCode(t *testing.T) {
 	cases := map[string]bool{
-		"c1":                                 true,
-		"c248":                               true,
-		"c0":                                 true,
-		"":                                   false,
-		"c":                                  false,
-		"C248":                               false, // caller normalises to lowercase
-		"#c248":                              false, // caller strips '#'
-		"abc":                                false,
-		"d248":                               false,
-		"c248x":                              false,
-		"c248-suffix":                        false,
+		"c1":                                   true,
+		"c248":                                 true,
+		"c0":                                   true,
+		"":                                     false,
+		"c":                                    false,
+		"C248":                                 false, // caller normalises to lowercase
+		"#c248":                                false, // caller strips '#'
+		"abc":                                  false,
+		"d248":                                 false,
+		"c248x":                                false,
+		"c248-suffix":                          false,
 		"01926a0e-c248-7000-8000-abcdefabcdef": false,
 	}
 	for input, want := range cases {

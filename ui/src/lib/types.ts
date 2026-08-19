@@ -1,16 +1,7 @@
 import type { ResponseV1 } from "@/lib/envelope-response";
 
-export interface Workspace {
-  id: string;
-  name: string;
-  description: string;
-  icon: string;
-  sort_order: number;
-}
-
 export interface Project {
   id: string;
-  workspace_id: string;
   name: string;
   description: string;
   repo_path: string;
@@ -25,7 +16,6 @@ export interface Session {
   short_code: string;
   title: string;
   custom_name: string;
-  workspace_id: string;
   project_id: string;
   context_type: string | null;
   context_id: string | null;
@@ -46,14 +36,6 @@ export interface Session {
   root_session_id?: string | null;
   relation?: string | null;
   depth?: number | null;
-  // B1 (CW-20260428-0009): session-level mode pointer.
-  // Null = fall back to agent-assigned legacy AgentMode.
-  current_mode_id?: string | null;
-  // F2 (CW-20260429-0002): per-session auto-mode-switch override. Tri-state
-  // — null/undefined inherits user_settings.mode_auto_switch_pref; true =
-  // force ON for this session (does NOT bypass first-use prompt); false =
-  // force OFF (suppress all auto-switches even when user pref permits).
-  auto_switch_override?: boolean | null;
 }
 
 export const DURABLE_AGENT_LIFECYCLE_CLASSES = [
@@ -188,7 +170,6 @@ export type DurableAgentEventSource =
 export type SessionBootSource =
   | "api_default"
   | "legacy_cli"
-  | "boot_profile"
   | "durable_agent"
   | "unknown";
 
@@ -196,7 +177,6 @@ export type ImmutableStartField =
   | "provider"
   | "model"
   | "runtime_kind"
-  | "boot_profile"
   | "recipe"
   | "lifecycle_class"
   | "work_root";
@@ -213,54 +193,11 @@ export interface RuntimeKindOption extends EnumOption<RuntimeKind> {
   product_supported: boolean;
 }
 
-export interface BootProfileOption {
-  id: string;
-  label: string;
-  provider: string;
-  work_root?: string;
-}
-
 export interface WorkRootHint {
   id: string;
   label: string;
   path?: string;
   description?: string;
-}
-
-export interface MetaHarness {
-  id: string;
-  display_name: string;
-  launch: string;
-  ui_label: string;
-  provider: string;
-  provider_alias?: string;
-  workdir: string;
-  boot_mode?: string;
-  args: string[];
-  env: Record<string, string>;
-  role?: string;
-  project?: string;
-  work_root?: string;
-  tracking_root?: string;
-  mcp_servers: string[];
-  profile_path: string;
-  launch_path: string;
-}
-
-export interface MetaHarnessInput {
-  id?: string;
-  display_name?: string;
-  ui_label?: string;
-  provider?: string;
-  workdir?: string;
-  boot_mode?: string;
-  args?: string[];
-  env?: Record<string, string>;
-  role?: string;
-  project?: string;
-  work_root?: string;
-  tracking_root?: string;
-  mcp_servers?: string[];
 }
 
 export interface DurableAgentWakePayload {
@@ -361,7 +298,6 @@ export interface DurableAgentLaunchPlan {
 }
 
 export interface DurableAgentStartRequest {
-  workspace_id?: string;
   project_id?: string;
   wake_payload?: DurableAgentWakePayload;
 }
@@ -400,7 +336,6 @@ export interface DurableAgentWakeDueItem {
   wake_reason: string;
   due: boolean;
   skip_reason?: string;
-  workspace_id?: string;
   project_id?: string;
 }
 
@@ -477,7 +412,6 @@ export interface DurableAgentRecipeRequest {
   model?: string;
   runtime_kind?: RuntimeKind | string;
   work_root?: string;
-  workspace_id?: string;
   project_id?: string;
   wake_payload?: DurableAgentWakePayload;
   metadata?: Record<string, string>;
@@ -520,7 +454,6 @@ export interface StartSurfaceCapabilitiesResponse {
   profiles: AgentProfile[];
   providers: ProviderConfig[];
   models: ModelRecord[];
-  boot_profiles: BootProfileOption[];
   work_root_hints: WorkRootHint[];
 }
 
@@ -551,7 +484,6 @@ export interface SessionHaltDetail {
 
 export interface SessionDetailsResponse {
   session: Session;
-  mode?: Mode | null;
   primary_agent?: AgentProfile | null;
   durable_attachments: DurableAgentSessionAttachmentState[];
   current_durable_agent?: DurableAgentInstance | null;
@@ -645,7 +577,6 @@ export interface HarnessSessionResponse {
 }
 
 export interface HarnessCreateSessionRequest {
-  workspace_id: string;
   project_id?: string;
   provider?: string;
   model?: string;
@@ -655,7 +586,6 @@ export interface HarnessCreateSessionRequest {
   mode_id?: string;
   runtime_kind?: string;
   work_root?: string;
-  boot_profile_id?: string;
   durable_agent_id?: string;
 }
 
@@ -680,11 +610,10 @@ export interface HarnessCancelResponse {
 }
 
 export interface StartSurfacePrefill {
-  path?: "chat" | "harness" | "durable" | "recipe";
+  path?: "chat" | "durable" | "recipe";
   provider?: string;
   model?: string;
   agent_id?: string;
-  boot_profile_id?: string;
   durable_agent_id?: string;
   durable_prompt?: string;
 }
@@ -903,7 +832,6 @@ export interface AgentBuilderProfileInput {
 export interface AgentBuilderCapabilitiesInput {
   assigned_skill_ids?: string[];
   assigned_skill_slugs?: string[];
-  prompt_template_ids?: string[];
   known_tools?: AgentKnownToolUpsertRequest[];
   known_skills?: AgentKnownSkillUpsertRequest[];
   procedures?: AgentProcedureUpsertRequest[];
@@ -919,7 +847,6 @@ export interface AgentBuilderDurableInstanceInput {
   model?: string;
   runtime_kind?: RuntimeKind | string;
   work_root?: string;
-  workspace_id?: string;
   project_id?: string;
   start?: boolean;
   metadata?: Record<string, string>;
@@ -979,7 +906,6 @@ export interface AgentBuilderDryRunRequest {
   mode: "create_profile" | "create_profile_and_instance" | "update_profile";
   profile: AgentBuilderProfileInput;
   capabilities?: AgentBuilderCapabilitiesInput;
-  boot_plan?: AgentBootPlanDocument;
   durable_instance?: AgentBuilderDurableInstanceInput;
   operator_notification?: AgentBuilderOperatorNotificationInput;
 }
@@ -992,7 +918,6 @@ export interface AgentBuilderDryRunResponse {
   unsupported_fields: string[];
   normalized_profile_payload: AgentBuilderProfileInput;
   capability_operations: AgentBuilderCapabilityOperation[];
-  boot_plan_preview?: AgentBootPlanDryRunResponse;
   durable_recipe_plan?: DurableAgentRecipePlan;
   launch_plan_preview?: AgentBuilderLaunchPlanPreview;
   notification_preview: AgentBuilderReadyNotificationPreview;
@@ -1006,7 +931,6 @@ export interface AgentBuilderDraft {
     | string;
   profile: AgentBuilderProfileInput;
   capabilities: AgentBuilderCapabilitiesInput;
-  boot_plan?: AgentBootPlanDocument;
   durable_instance: AgentBuilderDurableInstanceInput;
   operator_notification: AgentBuilderOperatorNotificationInput;
 }
@@ -1252,158 +1176,6 @@ export interface AgentKnowledgeSeedUpsertRequest {
   tags?: string[];
 }
 
-export interface AgentBootGeneratorSpec {
-  kind: string;
-  params?: Record<string, string>;
-}
-
-export interface AgentBootPlantItem {
-  id: string;
-  name: string;
-  source_kind:
-    | "path_file"
-    | "path_dir"
-    | "literal_file"
-    | "literal_dir"
-    | "generated"
-    | string;
-  source_path?: string;
-  content?: string;
-  generator?: AgentBootGeneratorSpec;
-  target_rel_path: string;
-  entry_kind: "file" | "directory" | string;
-  timing: Array<
-    "create" | "start" | "resume" | "every_boot" | "recovery_replant" | string
-  >;
-  secret: boolean;
-  overwrite_policy:
-    | "never"
-    | "if_missing"
-    | "always"
-    | "if_hash_differs"
-    | string;
-  failure_policy: "fail_boot" | "warn" | "skip" | string;
-  enabled: boolean;
-  metadata?: Record<string, string>;
-}
-
-export interface AgentBootCommandSpec {
-  argv: string[];
-  workdir?: string;
-}
-
-export interface AgentBootRequestSpec {
-  method?: string;
-  url?: string;
-  path?: string;
-  headers?: Record<string, string>;
-  body?: string;
-}
-
-export interface AgentBootCallback {
-  id: string;
-  name: string;
-  timing:
-    | "before_boot"
-    | "after_boot"
-    | "before_first_turn"
-    | "on_resume"
-    | "on_recovery"
-    | string;
-  callback_type:
-    | "command"
-    | "tool_call"
-    | "message_injection"
-    | "http_request"
-    | "local_api"
-    | string;
-  command?: AgentBootCommandSpec;
-  tool_name?: string;
-  tool_input?: Record<string, unknown>;
-  message?: string;
-  request?: AgentBootRequestSpec;
-  permissions?: Record<string, unknown>;
-  timeout_seconds: number;
-  env?: Record<string, string>;
-  failure_policy: "fail_boot" | "warn" | "retry_once" | "ignore" | string;
-  enabled: boolean;
-}
-
-export interface AgentBootPlanDocument {
-  agent_id: string;
-  schema_version: number;
-  plant_items: AgentBootPlantItem[];
-  callbacks: AgentBootCallback[];
-  created_at: string;
-  updated_at: string;
-}
-
-export interface AgentBootPlanPlantOperation {
-  item_id: string;
-  name: string;
-  timing: string[];
-  target_rel_path: string;
-  entry_kind: string;
-  source_kind: string;
-  overwrite_policy: string;
-  failure_policy: string;
-  enabled: boolean;
-  secret: boolean;
-  source_path?: string;
-  source_path_redacted?: boolean;
-  content_preview?: string;
-  content_preview_redacted?: boolean;
-  notes?: string[];
-}
-
-export interface AgentBootPlanCallbackOperation {
-  callback_id: string;
-  name: string;
-  timing: string;
-  callback_type: string;
-  timeout_seconds: number;
-  failure_policy: string;
-  enabled: boolean;
-  payload_preview?: string;
-  env_redacted?: boolean;
-  permissions_notes?: string[];
-  notes?: string[];
-}
-
-export interface AgentBootPlanDryRunResponse {
-  valid: boolean;
-  errors: string[];
-  warnings: string[];
-  normalized_plan: AgentBootPlanDocument;
-  plant_operations: AgentBootPlanPlantOperation[];
-  callback_order: AgentBootPlanCallbackOperation[];
-  unsupported_notes: string[];
-}
-
-export interface AgentModeProfile {
-  id: string;
-  agent_id: string;
-  slug: string;
-  name: string;
-  prompt_addendum: string;
-  tool_overrides: string;
-  settings: string;
-}
-
-// First-class reusable Mode (B1, CW-20260428-0009).
-// Mirrors store.Mode in internal/store/modes.go.
-export interface Mode {
-  id: string;
-  slug: string;
-  name: string;
-  prompt_addendum: string;
-  tool_overrides: string;
-  settings: string;
-  is_builtin: boolean;
-  created_at: string;
-  updated_at: string;
-}
-
 // --- Chat Errors ---
 
 export type ChatErrorCode =
@@ -1421,19 +1193,6 @@ export interface ChatError {
   dismissed?: boolean;
 }
 
-/**
- * B2 (CW-20260428-0010): non-binding mode-classifier signal emitted by the
- * backend when the deterministic classifier disagrees with the session's
- * current mode at high confidence. The FE stores this for B3 to consume
- * (confirm-card / auto-apply); B2 itself does not act on it.
- */
-export interface ModeSuggestion {
-  current: string;
-  suggested: string;
-  confidence: number;
-  signals: string[];
-}
-
 export interface StreamEvent {
   type:
     | "stream_start"
@@ -1448,8 +1207,7 @@ export interface StreamEvent {
     | "circuit_open"
     | "session_takeover"
     | "approval_request"
-    | "plugin_envelope"
-    | "mode_suggestion";
+    | "plugin_envelope";
   /**
    * Phase classifies delta events by their narrative role (F4 / CW-20260419-0029).
    * "narration" — inter-iteration prose emitted between tool_use blocks.
@@ -1604,23 +1362,6 @@ export interface ProcessHealthResponse {
   stale_threshold: string;
 }
 
-// --- Agent Modes ---
-
-export const AGENT_MODES = [
-  "default",
-  "architect",
-  "planner",
-  "writer",
-] as const;
-export type AgentMode = (typeof AGENT_MODES)[number];
-
-export const MODE_COLORS: Record<AgentMode, string> = {
-  default: "blue",
-  architect: "red",
-  planner: "green",
-  writer: "amber",
-};
-
 // --- Models ---
 
 export interface ModelOption {
@@ -1685,19 +1426,7 @@ export interface UserSettings {
     | "disabled"
     | "missing_credentials"
     | "unreachable";
-  // B3 (CW-20260428-0011): user-level preference for auto-applying classifier
-  // mode suggestions. "" = unset (triggers first-use prompt).
-  mode_auto_switch_pref?: "" | "always" | "ask" | "never";
 }
-
-// B3 (CW-20260428-0011): per-session override for auto-mode-switching.
-// Stored only in the FE chat store (not persisted) — resets on full reload.
-export type ModeAutoSwitchOverride = "on" | "off";
-
-// B3 (CW-20260428-0011): the resolved effective behavior for a session,
-// computed from the global pref + per-session override. Returned by
-// useChatStore.getAutoSwitchEffective.
-export type ModeAutoSwitchEffective = "auto" | "ask" | "off" | "firstUse";
 
 export interface EmbeddingProviderInfo {
   id: string;
@@ -1709,7 +1438,6 @@ export interface ProviderConfig {
   id: string;
   name: string;
   provider_type: string;
-  base_url: string;
   is_enabled: boolean;
   settings: string;
   created_at: string;
@@ -1764,18 +1492,6 @@ export interface PendingApproval extends ApprovalRequest {
     decision: ApprovalDecision;
     scope?: ApprovalScope;
   };
-}
-
-// --- Broker Decisions ---
-
-export interface BrokerDecision {
-  id: number;
-  session_id: string;
-  intent: string;
-  layer_reached: string;
-  selected_tools: string[];
-  signals: string;
-  created_at: string;
 }
 
 // --- Turn Snapshots ---
@@ -1860,7 +1576,6 @@ export interface InspectorTurnSnapshot {
   broker_decisions: InspectorBrokerDecision[];
   tool_calls: InspectorToolCallRecord[];
   scope_tier?: string;
-  strategy?: { max_turns: number; reasoning?: string };
   playbook?: { name: string; steps?: string[] };
   memory_hits?: { source: string; content: string; score?: number }[];
   loop_status?: { detected: boolean; reason?: string };
@@ -1886,7 +1601,6 @@ export interface Envelope {
   display_class?: "content" | "alert" | "action-required";
   prior_response?: ResponseV1; // set by backend if already answered
   proposals?: Proposal[];
-  questions?: Question[];
   approval?: EnvelopeApprovalRequest;
   status?: { phase: string; progress: number };
   data?: Record<string, unknown>;
@@ -1944,8 +1658,10 @@ export interface Envelope {
   cancel_token?: string;
   /**
    * CW-20260517-0008 — wrap-level marker for envelopes that are ONLY emitted
-   * when developer mode is enabled (today: `chat-loop-budget-soft-warning`,
-   * gated behind `devModeEnabled()` in the backend). When true, the FE renders
+   * when developer mode is enabled, gated behind `devModeEnabled()` in the
+   * backend (the original example, `chat-loop-budget-soft-warning`, was
+   * removed by Phase 0 item 12, 2026-08-18 — soft/telemetry-only, never
+   * gated the loop). When true, the FE renders
    * a small "DEV" badge so operators recognize the card as dev-mode telemetry
    * rather than a real alert. Lives at wrap level (sibling of id/type/data),
    * stamped by `buildPluginEnvelopeWrap`. Omitted (falsy) for normal
@@ -1966,16 +1682,6 @@ export interface SchemaField {
   label?: string;
   options?: string[];
   required?: boolean;
-}
-
-export interface Question {
-  prompt: string;
-  type: "text" | "textarea" | "select" | "radio" | "checkbox";
-  options?: (string | { value: string; label: string; description?: string })[];
-  required: boolean;
-  default?: string;
-  description?: string; // paragraph shown in card display
-  display_style?: "compact" | "card"; // defaults to "compact"
 }
 
 export interface EnvelopeApprovalRequest {
@@ -2415,27 +2121,6 @@ export interface Worker {
   created_at: string;
 }
 
-// --- Custom Actions ---
-
-export interface CustomAction {
-  id: string;
-  name: string;
-  description: string;
-  keybinding: string;
-  command: string;
-  slash_command: string;
-  auto_triggers: string; // JSON array: ["on_new_session", "on_agent_switch", "on_mode_change"]
-  enabled: boolean;
-  created_at: string;
-  updated_at: string;
-}
-
-export const AUTO_TRIGGER_OPTIONS = [
-  { value: "on_new_session", label: "New Session" },
-  { value: "on_agent_switch", label: "Agent Switch" },
-  { value: "on_mode_change", label: "Mode Change" },
-] as const;
-
 // --- Plugin Keybindings ---
 
 export interface PluginKeybinding {
@@ -2634,20 +2319,6 @@ export interface TemplateVariable {
   options?: string[];
 }
 
-export interface PromptTemplate {
-  id: string;
-  name: string;
-  slug: string;
-  scope: "system" | "mode" | "skill" | "context";
-  template: string;
-  variables: string;
-  priority: number;
-  icon: string;
-  is_builtin: boolean;
-  created_at: string;
-  updated_at: string;
-}
-
 // --- Workflow / Pipeline ---
 
 export interface PipelineInfo {
@@ -2758,14 +2429,8 @@ export interface MemoryUpdateRequest {
 
 // --- Role Trust (H1 CW-20260421-0014) ---
 
-export type TrustTier = "untrusted" | "normal" | "trusted";
-
-// WorkspaceRoleTrustOverride is a single row from workspace_role_trust
-// listing the explicit override for one agent profile in a workspace.
-export interface WorkspaceRoleTrustOverride {
-  workspace_id: string;
-  agent_profile_id: string;
-  trust_tier: TrustTier;
-  promoted_at: string;
-  promoted_by: string;
-}
+// TrustTier and WorkspaceRoleTrustOverride (H1, CW-20260421-0014) were
+// removed by Phase 0 item 20 (retire workspaces,
+// TASKS/phase-0/20-retire-workspaces-and-instance-mechanism.md):
+// workspace_role_trust and its REST surface are retired in full,
+// operator-confirmed 2026-08-18.

@@ -42,6 +42,19 @@ func streamingStdioUserFrame(text string) ([]byte, error) {
 // helper is retained as the single insertion point for any future
 // adapter that genuinely needs a PTY.
 //
+// Not a CLI-vs-API routing decision. By the time anything in this
+// package runs, the CLI-vs-API choice has already been made upstream
+// (Phase 2 item 01, TASKS/phase-2/01-wire-runtime-kind-routing.md —
+// primarily agent_profiles.runtime_kind, consulted in
+// service/chat_generate.go and service/chat.go's classifyNilProvider);
+// internal/runtime/agent is the CLI runtime, reached only once that
+// decision already routed here. shouldUsePTY's own true/false choice is
+// a narrower, still-open question within the CLI runtime itself (raw
+// terminal vs. NDJSON-over-stdio), currently always false — see
+// TASKS/phase-7/01-rename-pty-naming-scrub.md for that distinction's
+// full writeup and the eventual name this function should carry once
+// "PTY" is scrubbed.
+//
 // History (decisions.nanite.architecture.cli_pty_long_lived_default
 // rev 01KR2Y16TZJC8X88E6P497JBH3): the original design routed claude
 // long-lived through a PTY runtime expecting "per-tool SSE via

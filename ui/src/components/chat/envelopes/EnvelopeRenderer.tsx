@@ -15,7 +15,6 @@ import {
 } from "@/lib/plugin-loader";
 import type { Envelope } from "@/lib/types";
 import { ApprovalCard } from "./ApprovalCard";
-import { InterviewCard } from "./InterviewCard";
 import { PluginLoadErrorCard } from "./PluginLoadErrorCard";
 import { ProposalCard } from "./ProposalCard";
 import { DevModeEnvelopeWrapper } from "./primitives/DevBadge";
@@ -133,9 +132,7 @@ function renderEnvelopeContent({
 
   const renderLegacyFallback = () => {
     const hasLegacyContent =
-      (envelope.proposals?.length ?? 0) > 0 ||
-      (envelope.questions?.length ?? 0) > 0 ||
-      envelope.approval != null;
+      (envelope.proposals?.length ?? 0) > 0 || envelope.approval != null;
 
     if (!hasLegacyContent) {
       return null;
@@ -154,14 +151,6 @@ function renderEnvelopeContent({
             envelope={{ ...envelope, data: proposal as unknown as Envelope["data"], proposals: [proposal], ...(i === 0 ? {} : { prior_response: undefined }) }}
           />
         ))}
-
-        {envelope.questions && envelope.questions.length > 0 && (
-          <InterviewCard
-            envelope={envelope}
-            {...(envelope.id ? { onRespond } : {})}
-            userMessageCount={userMessageCount}
-          />
-        )}
 
         {envelope.approval && (
           <ApprovalCard envelope={envelope} {...(envelope.id ? { onRespond } : {})} />

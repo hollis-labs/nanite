@@ -102,7 +102,6 @@ export function ChatComposer({
 }: ChatComposerProps) {
   const activeSessionId = useAppStore((s) => s.activeSessionId);
   const setActiveSession = useAppStore((s) => s.setActiveSession);
-  const activeWorkspaceId = useAppStore((s) => s.activeWorkspaceId);
   const queryClient = useQueryClient();
   const {
     mode: shellMode,
@@ -169,7 +168,7 @@ export function ChatComposer({
     async (cmd: SlashCommand, cmdArgs = "") => {
       switch (cmd.name) {
         case "new": {
-          const session = await api.createSession({ workspace_id: activeWorkspaceId || "" });
+          const session = await api.createSession({});
           setActiveSession(session.id);
           void queryClient.invalidateQueries({ queryKey: ["sessions"] });
           return;
@@ -232,16 +231,6 @@ export function ChatComposer({
             const result = await api.executeCommand(cmd.name, activeSessionId, cmdArgs);
             if (result.action === "message") {
               reloadMessages?.();
-            } else if (
-              result.action === "client" &&
-              typeof result.content === "string" &&
-              result.content.startsWith("mode_switched:")
-            ) {
-              // B2 (CW-20260428-0010): /mode, /chat, /plan, /work succeeded.
-              // Invalidate session-mode + session queries so the chip and any
-              // session-derived UI refresh from the new current_mode_id.
-              void queryClient.invalidateQueries({ queryKey: ["session-mode", activeSessionId] });
-              void queryClient.invalidateQueries({ queryKey: ["session", activeSessionId] });
             } else if (result.action === "skill") {
               const parts = (result.content ?? "").trim().split(/\s+/);
               const slug = parts[0];
@@ -267,7 +256,7 @@ export function ChatComposer({
         }
       }
     },
-    [activeSessionId, activeWorkspaceId, setActiveSession, queryClient, onSend, reloadMessages],
+    [activeSessionId, setActiveSession, queryClient, onSend, reloadMessages],
   );
 
   const handleCommandRef = useRef(handleCommand);

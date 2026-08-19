@@ -46,23 +46,24 @@ func (a *API) SetSelfTools(st *mcp.SelfToolsTransport) {
 
 // SetEmbedderSelectDeps overrides the injected embedder-selection deps.
 // Intended for tests that need deterministic embedding_status without hitting
-// the live Ollama probe.
+// live secret lookup/env vars.
 func (a *API) SetEmbedderSelectDeps(deps service.EmbedderSelectDeps) {
 	a.embedderSelectDeps = deps
 }
 
 // RegisterRoutes wires all API routes onto the given ServeMux.
 func (a *API) RegisterRoutes(mux *http.ServeMux) {
-	// Workspaces
-	mux.HandleFunc("GET /api/workspaces", a.handleListWorkspaces)
-	mux.HandleFunc("POST /api/workspaces", a.handleCreateWorkspace)
-	mux.HandleFunc("GET /api/workspaces/{id}", a.handleGetWorkspace)
-	mux.HandleFunc("PUT /api/workspaces/{id}", a.handleUpdateWorkspace)
-	mux.HandleFunc("DELETE /api/workspaces/{id}", a.handleDeleteWorkspace)
-	mux.HandleFunc("GET /api/workspaces/{wid}/projects", a.handleListProjects)
-	mux.HandleFunc("POST /api/workspaces/{wid}/projects", a.handleCreateProject)
-	mux.HandleFunc("PUT /api/workspaces/{wid}/projects/{pid}", a.handleUpdateProject)
-	mux.HandleFunc("DELETE /api/workspaces/{wid}/projects/{pid}", a.handleDeleteProject)
+	// Projects. Phase 0 item 20 (retire workspaces,
+	// TASKS/phase-0/20-retire-workspaces-and-instance-mechanism.md): the
+	// in-app `workspaces` table and its 5 CRUD routes are retired in full.
+	// `projects` is flat now — no more /api/workspaces/{wid}/projects
+	// nesting. agent_projects and its routes below are untouched — that's
+	// the live Agent Construction scope mechanism, unrelated to the
+	// workspaces table despite sharing the `projects` table.
+	mux.HandleFunc("GET /api/projects", a.handleListProjects)
+	mux.HandleFunc("POST /api/projects", a.handleCreateProject)
+	mux.HandleFunc("PUT /api/projects/{pid}", a.handleUpdateProject)
+	mux.HandleFunc("DELETE /api/projects/{pid}", a.handleDeleteProject)
 	mux.HandleFunc("GET /api/projects/{id}/agents", a.handleListProjectAgents)
 
 	// Sessions
@@ -87,16 +88,6 @@ func (a *API) RegisterRoutes(mux *http.ServeMux) {
 
 	// Retry (circuit breaker reset + re-generate)
 	mux.HandleFunc("POST /api/sessions/{id}/retry", a.handleRetryStream)
-
-	// Session mode switching (legacy: agent-scoped AgentMode pipeline).
-	mux.HandleFunc("POST /api/sessions/{id}/mode", a.handleSwitchSessionMode)
-	// Session-level mode pointer (B1, CW-20260428-0009): first-class Mode
-	// resolved via sessions.current_mode_id → modes.id.
-	mux.HandleFunc("GET /api/sessions/{id}/mode", a.handleGetSessionMode)
-	mux.HandleFunc("PATCH /api/sessions/{id}/mode", a.handleSetSessionMode)
-	// F2 (CW-20260429-0002): per-session auto-mode-switch override. Tri-state
-	// — null = inherit user pref, true = force ON, false = force OFF.
-	mux.HandleFunc("PATCH /api/sessions/{id}/auto-switch", a.handleSetSessionAutoSwitch)
 
 	// Agents
 	mux.HandleFunc("GET /api/agents", a.handleListAgents)
@@ -126,10 +117,6 @@ func (a *API) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("PUT /api/agents/{id}/knowledge-seeds/{seedKey}", a.handleUpdateAgentKnowledgeSeed)
 	mux.HandleFunc("DELETE /api/agents/{id}/knowledge-seeds/{seedKey}", a.handleDeleteAgentKnowledgeSeed)
 	mux.HandleFunc("POST /api/agents/{id}/knowledge-seeds/{seedKey}/mark-applied", a.handleMarkAgentKnowledgeSeedApplied)
-	mux.HandleFunc("GET /api/agents/{id}/boot-plan", a.handleGetAgentBootPlan)
-	mux.HandleFunc("PUT /api/agents/{id}/boot-plan", a.handlePutAgentBootPlan)
-	mux.HandleFunc("DELETE /api/agents/{id}/boot-plan", a.handleDeleteAgentBootPlan)
-	mux.HandleFunc("POST /api/agents/{id}/boot-plan/dry-run", a.handleDryRunAgentBootPlan)
 	mux.HandleFunc("GET /api/agents/{id}/reflexes", a.handleListAgentReflexes)
 	mux.HandleFunc("POST /api/agents/{id}/reflexes", a.handleCreateAgentReflex)
 	mux.HandleFunc("PATCH /api/agents/{id}/reflexes/{reflexId}", a.handlePatchAgentReflex)
@@ -138,11 +125,16 @@ func (a *API) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/pending/reflexes", a.handleListPendingReflexes)
 	mux.HandleFunc("POST /api/pending/reflexes/{id}/approve", a.handleApprovePendingReflex)
 	mux.HandleFunc("POST /api/pending/reflexes/{id}/reject", a.handleRejectPendingReflex)
-	mux.HandleFunc("GET /api/agents/{id}/modes", a.handleListAgentModes)
-	mux.HandleFunc("POST /api/agents/{id}/modes", a.handleCreateAgentMode)
 	mux.HandleFunc("GET /api/agents/{id}/projects", a.handleListAgentProjects)
 	mux.HandleFunc("POST /api/agents/{id}/projects", a.handleAddAgentProject)
 	mux.HandleFunc("DELETE /api/agents/{id}/projects/{projectId}", a.handleRemoveAgentProject)
+	// Phase 2 item 02 (TASKS/phase-2/02-port-forward-dynamic-resolver.md):
+	// DB-CRUD surface for an agent's cmd/http dynamic context resolvers.
+	mux.HandleFunc("GET /api/agents/{id}/context-resolvers", a.handleListAgentContextResolvers)
+	mux.HandleFunc("POST /api/agents/{id}/context-resolvers", a.handleCreateAgentContextResolver)
+	mux.HandleFunc("GET /api/agents/{id}/context-resolvers/{resolverId}", a.handleGetAgentContextResolver)
+	mux.HandleFunc("PATCH /api/agents/{id}/context-resolvers/{resolverId}", a.handleUpdateAgentContextResolver)
+	mux.HandleFunc("DELETE /api/agents/{id}/context-resolvers/{resolverId}", a.handleDeleteAgentContextResolver)
 
 	// Session compaction
 	mux.HandleFunc("POST /api/sessions/{id}/compact", a.handleCompactSession)
@@ -194,10 +186,6 @@ func (a *API) RegisterRoutes(mux *http.ServeMux) {
 
 	// Frontend-readiness and external harness control plane.
 	mux.HandleFunc("GET /api/start-surface/capabilities", a.handleStartSurfaceCapabilities)
-	mux.HandleFunc("GET /api/meta-harnesses", a.handleListMetaHarnesses)
-	mux.HandleFunc("POST /api/meta-harnesses", a.handleCreateMetaHarness)
-	mux.HandleFunc("PUT /api/meta-harnesses/{id}", a.handleUpdateMetaHarness)
-	mux.HandleFunc("DELETE /api/meta-harnesses/{id}", a.handleDeleteMetaHarness)
 	mux.HandleFunc("GET /api/harness/v1/initialize", a.handleHarnessV1Initialize)
 	mux.HandleFunc("GET /api/harness/v1/capabilities", a.handleHarnessV1Capabilities)
 	mux.HandleFunc("POST /api/harness/v1/sessions", a.handleHarnessV1CreateSession)
@@ -306,8 +294,14 @@ func (a *API) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/tools/select", a.handleSelectTools)
 	mux.HandleFunc("POST /api/tools/refresh", a.handleRefreshTools)
 	mux.HandleFunc("POST /api/tools/call", a.handleSelfToolCall)
-	mux.HandleFunc("GET /api/broker/decisions", a.handleListBrokerDecisions)
 	mux.HandleFunc("GET /api/agents/{id}/tools", a.handleListAgentTools)
+	// agent_tools grant/revoke (Phase 5 item 01: TASKS/phase-5/01-build-
+	// assignment-api.md; the list endpoint above and the store-layer grant/
+	// revoke functions were built by Phase 1 item 04). The real FK-based
+	// replacement for tools:/toolPermissions:/roleTools: -- see
+	// internal/api/agent_tools.go's doc comment for the full context.
+	mux.HandleFunc("POST /api/agents/{id}/tools", a.handleGrantAgentTool)
+	mux.HandleFunc("DELETE /api/agents/{id}/tools/{toolId}", a.handleRevokeAgentTool)
 
 	// Permissions & Approvals
 	mux.HandleFunc("GET /api/permissions/mode", a.handleGetPermissionMode)
@@ -340,27 +334,25 @@ func (a *API) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/agents/{id}/skills", a.handleAssignAgentSkill)
 	mux.HandleFunc("DELETE /api/agents/{id}/skills/{skillId}", a.handleRemoveAgentSkill)
 
-	// Prompt Templates
-	mux.HandleFunc("GET /api/prompt-templates", a.handleListPromptTemplates)
-	mux.HandleFunc("POST /api/prompt-templates", a.handleCreatePromptTemplate)
-	mux.HandleFunc("GET /api/prompt-templates/{id}", a.handleGetPromptTemplate)
-	mux.HandleFunc("PUT /api/prompt-templates/{id}", a.handleUpdatePromptTemplate)
-	mux.HandleFunc("DELETE /api/prompt-templates/{id}", a.handleDeletePromptTemplate)
-	mux.HandleFunc("GET /api/agents/{id}/prompt-templates", a.handleListAgentPromptTemplates)
-	mux.HandleFunc("POST /api/agents/{id}/prompt-templates", a.handleAssignAgentPromptTemplate)
-	mux.HandleFunc("DELETE /api/agents/{id}/prompt-templates/{templateId}", a.handleRemoveAgentPromptTemplate)
+	// Roles (Phase 1 item 01: TASKS/phase-1/01-add-roles-table-and-cascade-
+	// resolution.md) -- the reusable persona/behavior template an Agent
+	// composition is built from. DB-authoritative from creation; no
+	// file-import route (contrast with Skills' fork-to-user).
+	mux.HandleFunc("GET /api/roles", a.handleListRoles)
+	mux.HandleFunc("POST /api/roles", a.handleCreateRole)
+	mux.HandleFunc("GET /api/roles/{id}", a.handleGetRole)
+	mux.HandleFunc("PUT /api/roles/{id}", a.handleUpdateRole)
+	mux.HandleFunc("DELETE /api/roles/{id}", a.handleDeleteRole)
 
-	// Modes (first-class reusable modes)
-	mux.HandleFunc("GET /api/modes", a.handleListModes)
-	mux.HandleFunc("POST /api/modes", a.handleCreateMode)
-	mux.HandleFunc("GET /api/modes/{id}", a.handleGetMode)
-	mux.HandleFunc("PUT /api/modes/{id}", a.handleUpdateMode)
-	mux.HandleFunc("DELETE /api/modes/{id}", a.handleDeleteMode)
-
-	// Agent ↔ Mode assignments (many-to-many)
-	mux.HandleFunc("GET /api/agents/{id}/assigned-modes", a.handleListAgentAssignedModes)
-	mux.HandleFunc("POST /api/agents/{id}/assigned-modes", a.handleAssignModeToAgent)
-	mux.HandleFunc("DELETE /api/agents/{id}/assigned-modes/{modeId}", a.handleUnassignModeFromAgent)
+	// Consumers (Phase 5 item 01: TASKS/phase-5/01-build-assignment-api.md;
+	// store-layer CRUD built by Phase 1 item 03, TASKS/phase-1/03-add-
+	// consumers-table.md, which deliberately deferred this REST layer) --
+	// the ownership/tenancy tag on an Agent composition (agents.consumer_id).
+	mux.HandleFunc("GET /api/consumers", a.handleListConsumers)
+	mux.HandleFunc("POST /api/consumers", a.handleCreateConsumer)
+	mux.HandleFunc("GET /api/consumers/{id}", a.handleGetConsumer)
+	mux.HandleFunc("PUT /api/consumers/{id}", a.handleUpdateConsumer)
+	mux.HandleFunc("DELETE /api/consumers/{id}", a.handleDeleteConsumer)
 
 	// MCP Servers (user-managed)
 	mux.HandleFunc("GET /api/mcp-servers", a.handleListMCPServers)
@@ -386,14 +378,6 @@ func (a *API) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/handoffs/{id}/approve", a.handleHandoffApprove)
 	mux.HandleFunc("POST /api/handoffs/{id}/reject", a.handleHandoffReject)
 
-	// Output Templates
-	mux.HandleFunc("GET /api/templates", a.handleListTemplates)
-	mux.HandleFunc("POST /api/templates", a.handleCreateTemplate)
-	mux.HandleFunc("GET /api/templates/{name}", a.handleGetTemplate)
-	mux.HandleFunc("PUT /api/templates/{name}", a.handleUpdateTemplate)
-	mux.HandleFunc("DELETE /api/templates/{name}", a.handleDeleteTemplate)
-	mux.HandleFunc("POST /api/templates/{name}/apply", a.handleApplyTemplate)
-
 	// Search
 	mux.HandleFunc("GET /api/search", a.handleSearchMessages)
 
@@ -401,10 +385,6 @@ func (a *API) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/settings", a.handleGetSettings)
 	mux.HandleFunc("PUT /api/settings", a.handleUpdateSettings)
 	mux.HandleFunc("GET /api/settings/embedding/providers", a.handleEmbeddingProviders)
-	// B3 (CW-20260428-0011): dedicated routes for mode auto-switch pref so
-	// the FE can read/update without round-tripping the full settings doc.
-	mux.HandleFunc("GET /api/settings/mode-auto-switch", a.handleGetModeAutoSwitch)
-	mux.HandleFunc("PATCH /api/settings/mode-auto-switch", a.handleSetModeAutoSwitch)
 
 	// Plugin Config (prefixed to avoid collision with plugin CRUD routes)
 	mux.HandleFunc("GET /api/plugin-config/{id}", a.handleGetPluginConfig)
@@ -415,13 +395,6 @@ func (a *API) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/processes/health", a.handleProcessHealth)
 	mux.HandleFunc("POST /api/processes/kill-stale", a.handleKillStaleProcesses)
 
-	// Connector Triggers
-	mux.HandleFunc("GET /api/plugins/triggers", a.handleListTriggerRules)
-	mux.HandleFunc("POST /api/plugins/triggers", a.handleCreateTriggerRule)
-	mux.HandleFunc("GET /api/plugins/triggers/{id}", a.handleGetTriggerRule)
-	mux.HandleFunc("PUT /api/plugins/triggers/{id}", a.handleUpdateTriggerRule)
-	mux.HandleFunc("DELETE /api/plugins/triggers/{id}", a.handleDeleteTriggerRule)
-
 	// Connectors (health & status) — under /api/connectors to avoid conflict
 	// with the /api/plugins/{name}/ui/{file...} wildcard route.
 	mux.HandleFunc("GET /api/connectors", a.handleListConnectors)
@@ -429,14 +402,6 @@ func (a *API) RegisterRoutes(mux *http.ServeMux) {
 
 	// Keybindings (plugin-registered keyboard shortcuts)
 	mux.HandleFunc("GET /api/plugins/keybindings", a.handleListKeybindings)
-
-	// Custom Actions
-	mux.HandleFunc("GET /api/actions", a.handleListActions)
-	mux.HandleFunc("POST /api/actions", a.handleCreateAction)
-	mux.HandleFunc("GET /api/actions/{id}", a.handleGetAction)
-	mux.HandleFunc("PUT /api/actions/{id}", a.handleUpdateAction)
-	mux.HandleFunc("DELETE /api/actions/{id}", a.handleDeleteAction)
-	mux.HandleFunc("POST /api/actions/{id}/execute", a.handleExecuteAction)
 
 	// Workflow runs + SSE event stream
 	mux.HandleFunc("GET /api/workflows/runs", a.handleListWorkflowRuns)
@@ -510,10 +475,10 @@ func (a *API) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/metrics/utility", a.handleGetUtilityCallSummary)
 	mux.HandleFunc("GET /api/metrics/utility/log", a.handleGetUtilityCallLog)
 
-	// Role Trust (H1, CW-20260421-0014)
-	mux.HandleFunc("GET /api/workspaces/{workspace_id}/roles", a.handleListWorkspaceRoleTrust)
-	mux.HandleFunc("POST /api/workspaces/{workspace_id}/roles/{agent_profile_id}/trust", a.handleSetWorkspaceRoleTrust)
-	mux.HandleFunc("DELETE /api/workspaces/{workspace_id}/roles/{agent_profile_id}/trust", a.handleDeleteWorkspaceRoleTrust)
+	// Role Trust (H1, CW-20260421-0014) REST surface retired in full
+	// alongside workspace_role_trust — Phase 0 item 20 (retire workspaces,
+	// operator-confirmed 2026-08-18). Trust resolution reverts to
+	// unconditional base-tier resolution (internal/store/trust.go).
 
 	// A2A Protocol (CW-20260814-0014, CW-20260814-0016)
 	// Agent Card discovery at /.well-known/agent-card.json

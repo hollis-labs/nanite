@@ -1,0 +1,72 @@
+-- +goose Up
+-- Migration 063 — Drop agent_profiles.default_mode
+--
+-- SP-20260512-0009 W5 (CW-20260512-0115) review round 1 cleanup.
+--
+-- Background
+-- ----------
+-- The column was added in migration 001 as a "preferred mode" hint for new
+-- sessions. W5's investigation (commit 28ba3c4) confirmed that NO production
+-- code path consumes the value at session creation, runtime, slot assembly,
+-- mode resolution, or dispatch. sessions.current_mode_id is the sole source
+-- of truth and the broker re-reads it on every turn. The column is written
+-- by agent/convert.go and store/agents.go INSERT/UPDATE and round-tripped
+-- by api/agents.go, but never read for behavior.
+--
+-- Per feedback_no_compat_shims (pre-launch, no consumers) we drop the
+-- column in the same PR that codifies the session-attribute contract. No
+-- aliases, no deprecation shim, no follow-up ticket — clean break.
+--
+-- This migration supersedes the Vanta follow-up
+-- followups_nanite_cw_0115_delete_default_mode_col captured in W5 round 0.
+--
+-- Reversibility
+-- -------------
+-- Irreversible by design. The column data is "default" for every internal
+-- profile row and was never load-bearing, so recovering it serves no
+-- purpose. If a future feature ever needs a profile-level mode hint, a
+-- fresh column with explicit read-side wiring is the correct shape, not a
+-- resurrection of this dead-code column.
+--
+-- Transaction shape (CW-20260514-0052 — fixed)
+-- --------------------------------------------
+-- Earlier shape wrapped the ALTER inside an explicit transaction so
+-- splitSQL emitted a single statement matching the style of migration 008.
+-- That shape was incompatible with the migrate runner's suppression of
+-- DROP-COLUMN "no such column" errors at store.go lines 117-122. On
+-- re-run the ALTER fails inside the open transaction, the runner
+-- suppresses the error and continues, but the closing statement never
+-- executes — the transaction stays open on the pinned migration
+-- connection. The next caller that tries to open a transaction
+-- (typically SeedProviders) then trips SQLite "cannot start a
+-- transaction within a transaction" and the process crash-loops on
+-- launchd.
+--
+-- A single ALTER does not need an explicit transaction — SQLite
+-- implicitly wraps each statement. Stripping the wrapper eliminates the
+-- leak surface while keeping the migration semantically identical.
+-- splitSQL emits one statement either way.
+--
+-- splitSQL notes
+-- --------------
+-- The runner splits the file on every semicolon regardless of context
+-- (it is not literal- or comment-aware), so keep semicolons out of the
+-- header prose. It ALSO scans for the SQL transaction-control keywords
+-- (the four-letter open and three-letter close, spelled here as B-E-G-I-N
+-- and E-N-D so this comment does not trip the scanner) as case-insensitive
+-- substrings across the whole chunk including comments — any prose word
+-- containing those letter sequences increments the depth counter and can
+-- merge a future second statement into the first. Avoid both tokens in
+-- the preamble.
+
+ALTER TABLE agent_profiles DROP COLUMN default_mode;
+
+-- +goose Down
+-- No down migration: this file predates goose adoption (see
+-- docs/engineering/architecture/05-storage-and-migrations.md, "Migrations:
+-- adopting a real ledger"). Every pre-cutover migration ships a
+-- deliberately empty Down section rather than a hand-derived rollback --
+-- reconstructing the exact pre-migration schema/data shape for 94 files
+-- retroactively isn't worth doing when the historical state it would
+-- recreate has no operational value. New migrations going forward are
+-- expected to carry a real, tested Down.

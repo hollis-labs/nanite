@@ -24,7 +24,6 @@ import type {
   AgentProcedure,
   AgentProcedureUpsertRequest,
   AgentProfile,
-  PromptTemplate,
   Skill,
   ToolLoadItem,
 } from "@/lib/types";
@@ -38,10 +37,6 @@ type CapabilitiesProps = {
   availableSkills: Skill[];
   onAssignSkill: (skillId: string) => void;
   onRemoveSkill: (skillId: string) => void;
-  agentTemplates: PromptTemplate[];
-  availableTemplates: PromptTemplate[];
-  onAssignTemplate: (templateId: string) => void;
-  onRemoveTemplate: (templateId: string) => void;
   onUpdateAgent: (data: Partial<AgentProfile>) => void;
 };
 
@@ -108,15 +103,10 @@ export function AgentCapabilitiesPanel({
   availableSkills,
   onAssignSkill,
   onRemoveSkill,
-  agentTemplates,
-  availableTemplates,
-  onAssignTemplate,
-  onRemoveTemplate,
   onUpdateAgent,
 }: CapabilitiesProps) {
   const queryClient = useQueryClient();
   const [showSkillPicker, setShowSkillPicker] = useState(false);
-  const [showTemplatePicker, setShowTemplatePicker] = useState(false);
   const [knownToolDraft, setKnownToolDraft] = useState<KnownToolEditorState | null>(null);
   const [editingKnownTool, setEditingKnownTool] = useState<string | null>(null);
   const [knownSkillDraft, setKnownSkillDraft] = useState<KnownSkillEditorState | null>(null);
@@ -348,73 +338,6 @@ export function AgentCapabilitiesPanel({
                   onClick={() => {
                     onAssignSkill(skill.id);
                     setShowSkillPicker(false);
-                  }}
-                  disabled={isReadOnly}
-                >
-                  Assign
-                </Button>
-              </>
-            )}
-          />
-        ) : null}
-      </SectionCard>
-
-      <SectionCard
-        title={`Prompt Templates (${agentTemplates.length})`}
-        description="Template assignment only. This does not edit the agent’s system prompt body."
-        action={
-          <Button
-            size="sm"
-            variant="ghost"
-            className="h-7 gap-1 text-xs"
-            onClick={() => setShowTemplatePicker((value) => !value)}
-            disabled={isReadOnly || availableTemplates.length === 0}
-          >
-            <Plus className="w-3.5 h-3.5" />
-            Assign
-          </Button>
-        }
-      >
-        {agentTemplates.length === 0 && !showTemplatePicker ? (
-          <PanelMessage>No prompt templates assigned yet.</PanelMessage>
-        ) : null}
-        <div className="space-y-1.5">
-          {[...agentTemplates]
-            .sort((a, b) => b.priority - a.priority)
-            .map((template) => (
-              <InlineRow
-                key={template.id}
-                label={template.name}
-                badges={[template.scope, `P${template.priority}`]}
-                detail={template.slug}
-                actionLabel={`Remove template ${template.name}`}
-                disabled={isReadOnly}
-                onRemove={() => onRemoveTemplate(template.id)}
-              />
-            ))}
-        </div>
-        {showTemplatePicker ? (
-          <PickerList
-            title="Available Prompt Templates"
-            items={[...availableTemplates].sort((a, b) => b.priority - a.priority)}
-            getKey={(template) => template.id}
-            emptyText="No unassigned templates available."
-            onClose={() => setShowTemplatePicker(false)}
-            renderItem={(template) => (
-              <>
-                <div className="min-w-0 flex-1">
-                  <div className="text-xs font-medium text-fg">{template.name}</div>
-                  <div className="text-[11px] text-fg-muted truncate">
-                    {template.scope} · priority {template.priority}
-                  </div>
-                </div>
-                <Button
-                  size="sm"
-                  variant="ghost"
-                  className="h-6 text-[11px]"
-                  onClick={() => {
-                    onAssignTemplate(template.id);
-                    setShowTemplatePicker(false);
                   }}
                   disabled={isReadOnly}
                 >

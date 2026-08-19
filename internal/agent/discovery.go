@@ -7,28 +7,58 @@ import (
 	"strings"
 )
 
-// DiscoverOptions configures agent file discovery.
+// DiscoverOptions configures agent discovery.
+//
+// TASKS/phase-1/08 ("Kill the file-reingest-on-boot pattern, in full"): files
+// are not agent storage going forward, except the compiled-in builtin/seed
+// profiles (loaded separately via internal/agent/builtin, not through this
+// function). The project (.nanite/agents/), user (~/.nanite/agents/), and
+// plugin (plugins/*/agents/*.md) directory-scan tiers that used to live here
+// were removed — a file dropped in any of those locations is no longer
+// discovered or auto-ingested into agent_profiles at boot.
 type DiscoverOptions struct {
-	// CLIAgentPath is a single agent file specified via --agent flag (priority 1).
+	// CLIAgentPath is a single agent file specified via --agent flag
+	// (highest priority when set). Investigated during this task's Round 2:
+	// no real CLI flag in cmd/nanite/ currently sets this field (the
+	// "--agent" flags that do exist take an agent ID/slug for selecting an
+	// existing agent, a different mechanism) — the tier is unreachable dead
+	// code in production today. Per this task's own default guidance
+	// ("leave it alone unless you find it's silently writing a persisted
+	// row the same way the cut tiers do"), it is left in place rather than
+	// removed: it never actually persists anything today because it is
+	// never invoked. See the task's Work Log Round 2 entry for the full
+	// investigation.
 	CLIAgentPath string
 
-	// WorkingDir is the project root for .nanite/agents/, .claude/agents/.
+	// WorkingDir is the project root passed through to adapter-based
+	// discovery (e.g. the nanite-native adapter's .nanite/config.yaml
+	// agents: block). No directory-scan tier of its own reads it directly
+	// anymore.
 	WorkingDir string
-	// HomeDir overrides os.UserHomeDir() for user-level ~/.nanite/agents/
-	// discovery. Empty uses the real user home.
-	HomeDir string
 
-	// PluginsDir is the root plugins directory for plugin-provided agents.
-	PluginsDir string
-
-	// Adapters is an optional AdapterRegistry for adapter-based discovery
-	// (replaces hardcoded .nanite/agents/ and .claude/agents/ tiers).
+	// Adapters is an optional AdapterRegistry for adapter-based discovery.
+	// External-ecosystem-format adapters (claude/codex/gemini/opencode)
+	// already have a no-op Discover() as of Phase 0's cut of external agent
+	// import (TASKS/phase-0/16). The nanite-native adapter's own Discover
+	// (.nanite/config.yaml's agents: block -> agent_profiles, the last
+	// remaining producer at this tier) was also cut to a no-op by
+	// TASKS/phase-2/06-cut-nanite-native-adapter-agent-sync.md — see
+	// docs/engineering/architecture/01-agent-construction.md's "What's cut"
+	// ("Files as agent storage, except builtin/seed content"). As of that
+	// task, every currently-registered CLIAgentAdapter.Discover() returns
+	// (nil, nil); this tier contributes nothing to agentDefs in practice.
+	// The loop below is left in place as a live extension point for the
+	// CLIAgentAdapter interface (a future plugin-provided adapter could
+	// still return real Definitions) and because the same AdapterRegistry
+	// instance is also used for the unrelated, still-live
+	// PopulateAllSandboxes/SyncAllProjectRoots directions — see
+	// internal/service/container.go's newRuntimeAdapterRegistry.
 	Adapters *AdapterRegistry
 }
 
-// Discover scans all 6 locations in priority order and returns parsed Definitions.
-// First slug wins — lower-priority locations do not override higher-priority ones.
-// Missing directories are silently skipped.
+// Discover returns parsed Definitions from every remaining discovery source
+// in priority order. First slug wins — a lower-priority source does not
+// override a higher-priority one already added.
 func Discover(opts DiscoverOptions) ([]*Definition, error) {
 	seen := make(map[string]bool)
 	var defs []*Definition
@@ -41,7 +71,9 @@ func Discover(opts DiscoverOptions) ([]*Definition, error) {
 		defs = append(defs, def)
 	}
 
-	// Priority 1: CLI --agent flag (single file).
+	// Priority 1: CLI --agent flag (single file). See DiscoverOptions'
+	// CLIAgentPath doc comment — currently unreachable in production, kept
+	// per this task's own default guidance.
 	if opts.CLIAgentPath != "" {
 		def, err := ParseMDFile(opts.CLIAgentPath)
 		if err != nil {
@@ -51,37 +83,12 @@ func Discover(opts DiscoverOptions) ([]*Definition, error) {
 		add(def)
 	}
 
-	// Priority 2: .nanite/agents/ (project).
-	if opts.WorkingDir != "" {
-		for _, def := range discoverDir(filepath.Join(opts.WorkingDir, ".nanite", "agents"), "project") {
-			add(def)
-		}
-	}
-
-	// Priority 3: ~/.nanite/agents/ (user).
-	home := opts.HomeDir
-	if home == "" {
-		if resolved, err := os.UserHomeDir(); err == nil {
-			home = resolved
-		}
-	}
-	if home != "" {
-		for _, def := range discoverDir(filepath.Join(home, ".nanite", "agents"), "user") {
-			add(def)
-		}
-	}
-
-	// Priority 4: plugins/*/agents/ (plugin-provided).
-	if opts.PluginsDir != "" {
-		discoverPluginAgents(opts.PluginsDir, func(def *Definition) {
-			add(def)
-		})
-	}
-
-	// Priority 5+: Adapter-discovered agents.
-	// Replaces the former hardcoded .agentrc/agents/ and .claude/agents/ tiers
-	// (priorities 5-6). Native .nanite/agents/ discovery (tiers 2-3 above)
-	// remains in core — adapters handle external ecosystem formats.
+	// Priority 2+: adapter-discovered agents. As of
+	// TASKS/phase-2/06-cut-nanite-native-adapter-agent-sync.md every
+	// registered CLIAgentAdapter's Discover() (including nanite-native's,
+	// the last one that used to produce real results here) returns
+	// (nil, nil) — this tier is currently always empty in practice. See
+	// DiscoverOptions.Adapters' doc comment above for why the loop stays.
 	if opts.Adapters != nil {
 		adapterDefs, err := opts.Adapters.DiscoverAll(opts.WorkingDir)
 		if err != nil {
@@ -96,8 +103,13 @@ func Discover(opts DiscoverOptions) ([]*Definition, error) {
 	return defs, nil
 }
 
-// discoverDir reads all *.md files from a directory, parses them, and sets Source.
-// Returns nil on missing or unreadable directories.
+// discoverDir reads all *.md files from a directory, parses them, and sets
+// Source. Returns nil on missing or unreadable directories.
+//
+// Retained for adapter-discovery tests that simulate a directory-scan tier
+// (see discovery_test.go's testDirAdapter) — no tier in Discover() itself
+// calls this directly anymore; the project/user/plugin directory scans that
+// used to call it were removed by TASKS/phase-1/08.
 func discoverDir(dir, source string) []*Definition {
 	entries, err := os.ReadDir(dir)
 	if err != nil {
@@ -119,22 +131,4 @@ func discoverDir(dir, source string) []*Definition {
 		defs = append(defs, def)
 	}
 	return defs
-}
-
-// discoverPluginAgents scans plugins/{name}/agents/*.md for plugin-provided agents.
-func discoverPluginAgents(pluginsDir string, add func(*Definition)) {
-	entries, err := os.ReadDir(pluginsDir)
-	if err != nil {
-		return // silent skip
-	}
-
-	for _, e := range entries {
-		if !e.IsDir() {
-			continue
-		}
-		agentsDir := filepath.Join(pluginsDir, e.Name(), "agents")
-		for _, def := range discoverDir(agentsDir, "plugin") {
-			add(def)
-		}
-	}
 }

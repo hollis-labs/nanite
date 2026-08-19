@@ -221,12 +221,12 @@ export function MessageContent({ content, role }: { content: string; role: 'user
   //      placeholder renders instead of the partial JSON.
   const { displayContent, hasPendingEnvelope } = useMemo(() => {
     let text = content
-      .replace(/```(?:volon-envelope|nanite-envelope|fragments-envelope)\s*\n[\s\S]*?```/g, '')
+      .replace(/```nanite-envelope\s*\n[\s\S]*?```/g, '')
       .replace(/<!--TICKET_DATA:[\s\S]*?:TICKET_DATA-->/g, '')
       .replace(/<!--ENVELOPE_DATA:[\s\S]*?:ENVELOPE_DATA-->/g, '')
 
     // After stripping closed fences, any remaining fence open-tag is incomplete.
-    const openFence = /```(?:volon-envelope|nanite-envelope|fragments-envelope)/.exec(text)
+    const openFence = /```nanite-envelope/.exec(text)
     const hasPendingEnvelope = openFence !== null
     if (openFence) {
       text = text.slice(0, openFence.index)

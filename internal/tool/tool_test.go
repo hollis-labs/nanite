@@ -211,12 +211,12 @@ func TestToolResult_Fields(t *testing.T) {
 		Output:       "result data",
 		IsError:      false,
 		Metadata:     map[string]string{"tokens": "42"},
-		EnvelopeType: "kb-result",
+		EnvelopeType: "metric-card",
 	}
 	if r.Output != "result data" {
 		t.Errorf("Output = %q", r.Output)
 	}
-	if r.EnvelopeType != "kb-result" {
+	if r.EnvelopeType != "metric-card" {
 		t.Errorf("EnvelopeType = %q", r.EnvelopeType)
 	}
 	if r.Metadata["tokens"] != "42" {

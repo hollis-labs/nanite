@@ -30,8 +30,7 @@ import { DynamicIcon } from "@/components/ui/icon-picker";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useModels, useSettings } from "@/hooks/useSettings";
 import { api } from "@/lib/api";
-import type { AgentModeProfile, AgentProfile } from "@/lib/types";
-import { useAppStore } from "@/stores/useAppStore";
+import type { AgentProfile } from "@/lib/types";
 import { AgentBuilderWizard } from "./agents/AgentBuilderWizard";
 import { AgentDetailView } from "./agents/AgentDetailView";
 
@@ -88,24 +87,11 @@ export function AgentProfileManager({}: AgentProfileManagerProps) {
     enabled: !!selectedAgent,
   });
 
-  const { data: allTemplates = [] } = useQuery({
-    queryKey: ["prompt-templates"],
-    queryFn: api.listPromptTemplates,
-    enabled: !!selectedAgent,
-  });
-
-  const { data: agentTemplates = [] } = useQuery({
-    queryKey: ["agent-templates", selectedAgent],
-    queryFn: () => api.listAgentTemplates(selectedAgent!),
-    enabled: !!selectedAgent,
-  });
-
   // Agent-Project many-to-many
-  const activeWorkspaceId = useAppStore((s) => s.activeWorkspaceId);
   const { data: allProjects = [] } = useQuery({
-    queryKey: ["projects", activeWorkspaceId],
-    queryFn: () => api.listProjects(activeWorkspaceId!),
-    enabled: !!selectedAgent && !!activeWorkspaceId,
+    queryKey: ["projects"],
+    queryFn: () => api.listProjects(),
+    enabled: !!selectedAgent,
   });
   const { data: agentProjects = [] } = useQuery({
     queryKey: ["agent-projects", selectedAgent],
@@ -144,19 +130,6 @@ export function AgentProfileManager({}: AgentProfileManagerProps) {
     onError: (error) => setActionError(errorMessage(error)),
   });
 
-  const createModeMutation = useMutation({
-    mutationFn: ({
-      agentId,
-      data,
-    }: {
-      agentId: string;
-      data: Omit<AgentModeProfile, "id" | "agent_id">;
-    }) => api.createAgentMode(agentId, data),
-    onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: ["agent-detail", selectedAgent] });
-    },
-  });
-
   const assignSkillMutation = useMutation({
     mutationFn: ({ agentId, skillId }: { agentId: string; skillId: string }) =>
       api.assignSkillToAgent(agentId, { skill_id: skillId }),
@@ -170,22 +143,6 @@ export function AgentProfileManager({}: AgentProfileManagerProps) {
       api.removeSkillFromAgent(agentId, skillId),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ["agent-skills", selectedAgent] });
-    },
-  });
-
-  const assignTemplateMutation = useMutation({
-    mutationFn: ({ agentId, templateId }: { agentId: string; templateId: string }) =>
-      api.assignTemplateToAgent(agentId, { template_id: templateId }),
-    onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: ["agent-templates", selectedAgent] });
-    },
-  });
-
-  const removeTemplateMutation = useMutation({
-    mutationFn: ({ agentId, templateId }: { agentId: string; templateId: string }) =>
-      api.removeTemplateFromAgent(agentId, templateId),
-    onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: ["agent-templates", selectedAgent] });
     },
   });
 
@@ -205,14 +162,6 @@ export function AgentProfileManager({}: AgentProfileManagerProps) {
     },
   });
 
-  // const deleteModeMutation = useMutation({  // DELETE not implemented in backend
-  //   mutationFn: ({ agentId, modeId }: { agentId: string; modeId: string }) =>
-  //     api.deleteAgentMode(agentId, modeId),
-  //   onSuccess: () => {
-  //     void queryClient.invalidateQueries({ queryKey: ['agent-detail', selectedAgent] })
-  //   },
-  // })
-
   const handleAssignSkill = useCallback(
     (skillId: string) => {
       if (!selectedAgent) return;
@@ -229,29 +178,8 @@ export function AgentProfileManager({}: AgentProfileManagerProps) {
     [selectedAgent, removeSkillMutation],
   );
 
-  const handleAssignTemplate = useCallback(
-    (templateId: string) => {
-      if (!selectedAgent) return;
-      assignTemplateMutation.mutate({ agentId: selectedAgent, templateId });
-    },
-    [selectedAgent, assignTemplateMutation],
-  );
-
-  const handleRemoveTemplate = useCallback(
-    (templateId: string) => {
-      if (!selectedAgent) return;
-      removeTemplateMutation.mutate({ agentId: selectedAgent, templateId });
-    },
-    [selectedAgent, removeTemplateMutation],
-  );
-
   // Get available skills (not yet assigned to this agent)
   const availableSkills = allSkills.filter((skill) => !agentSkills.some((s) => s.id === skill.id));
-
-  // Get available templates (not yet assigned to this agent)
-  const availableTemplates = allTemplates.filter(
-    (template) => !agentTemplates.some((t) => t.id === template.id),
-  );
 
   // Get available projects (not yet assigned to this agent)
   const availableProjects = allProjects.filter(
@@ -488,12 +416,11 @@ export function AgentProfileManager({}: AgentProfileManagerProps) {
 
   // Detail View
   if (selectedAgent && agentDetail) {
-    const { agent, modes } = agentDetail;
+    const { agent } = agentDetail;
 
     return (
       <AgentDetailView
         agent={agent}
-        modes={modes}
         modelOptions={modelOptions}
         allKnownTags={allKnownTags}
         actionError={actionError}
@@ -506,16 +433,10 @@ export function AgentProfileManager({}: AgentProfileManagerProps) {
         }
         onDeleteAgent={() => deleteMutation.mutate(agent.id)}
         onCopyToManaged={() => copyToManagedMutation.mutate(agent.id)}
-        onCreateMode={(data) => createModeMutation.mutate({ agentId: agent.id, data })}
-        isCreatingMode={createModeMutation.isPending}
         agentSkills={agentSkills}
         availableSkills={availableSkills}
         onAssignSkill={handleAssignSkill}
         onRemoveSkill={handleRemoveSkill}
-        agentTemplates={agentTemplates}
-        availableTemplates={availableTemplates}
-        onAssignTemplate={handleAssignTemplate}
-        onRemoveTemplate={handleRemoveTemplate}
         agentProjects={agentProjects}
         availableProjects={availableProjects}
         onAddProject={handleAddProject}

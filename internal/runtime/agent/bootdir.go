@@ -233,6 +233,13 @@ type SetupParams struct {
 // PlantedFiles only when the provider's BootDirSpec.Notes is empty per
 // go-providers v0.8.0 guidance.
 //
+// Not a CLI-vs-API routing decision — this only ever runs once the CLI
+// path has already been chosen upstream (Phase 2 item 01,
+// TASKS/phase-2/01-wire-runtime-kind-routing.md's runtime_kind field).
+// Its own dispatch answers a narrower, WHICH-CLI-adapter question
+// (claude vs. codex vs. opencode) that runtime_kind alone can't answer —
+// it genuinely needs the provider name string for that.
+//
 // CW-20260514-0045: prefixed CLI aliases ("pty", "pty-claude",
 // "pty-codex", "pty-opencode", "sub-<x>") normalize to their bare
 // adapter names before dispatch. This protects the bootdir layer when an
@@ -267,6 +274,11 @@ func bootdirLayoutFor(provider string) Layout {
 // dependency (runtime is below chat in the layering — chat imports
 // runtime, not the other way around). The two functions MUST stay in
 // lock-step; see chat.NormalizeCLIProvider for the canonical rule set.
+//
+// Post-decision string-shape helper only (Phase 2 item 01,
+// TASKS/phase-2/01-wire-runtime-kind-routing.md) — deriving the bare
+// adapter name once CLI routing is already known, not deciding CLI-vs-API
+// itself.
 func normalizeProviderName(name string) string {
 	switch {
 	case name == "pty":

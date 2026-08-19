@@ -1,3 +1,4 @@
+-- +goose Up
 -- 050_agent_runtime.sql
 -- Phase 4c.1 of agent-boot adoption (CW-20260508-0002).
 --
@@ -103,3 +104,13 @@ SET template = REPLACE(
 WHERE id = 'blt-chat-harness-001'
   AND template LIKE '%- Do not narrate your tool plan unless the user asked for it.%'
   AND template NOT LIKE '%Acknowledge failed tool calls%';
+
+-- +goose Down
+-- No down migration: this file predates goose adoption (see
+-- docs/engineering/architecture/05-storage-and-migrations.md, "Migrations:
+-- adopting a real ledger"). Every pre-cutover migration ships a
+-- deliberately empty Down section rather than a hand-derived rollback --
+-- reconstructing the exact pre-migration schema/data shape for 94 files
+-- retroactively isn't worth doing when the historical state it would
+-- recreate has no operational value. New migrations going forward are
+-- expected to carry a real, tested Down.

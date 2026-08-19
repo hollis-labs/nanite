@@ -40,7 +40,7 @@ contextPolicy:
     requires_source_refs_for_writes: true
     stale_after_days: 14
 durable: true
-activationMode: instance
+activationMode: fresh-per-wake
 class: process
 defaultState: active
 procedures:

@@ -55,14 +55,6 @@ type Definition struct {
 	Directories    []string         `yaml:"directories"`
 	Constraints    AgentConstraints `yaml:"constraints"`
 
-	// Modes (inline)
-	Modes []ModeDefinition `yaml:"modes"`
-
-	// ToolPermissions, when set, replaces the implicit allow_list derived from
-	// Tools. Lets file-based agents express deny rules, allow-list patterns,
-	// and call-budget caps without needing an agent_profiles row.
-	ToolPermissions *AgentToolPermissions `yaml:"toolPermissions,omitempty"`
-
 	// ParentDispatchAllowlist enumerates the role slugs this agent (as a
 	// parent) may dispatch via task_execute. Surfaced into task_execute's
 	// rendered description via the Tool Broker Describe hook
@@ -73,9 +65,6 @@ type Definition struct {
 
 	// RoleTools — pre-seed list of tool names for agent_known_tools.
 	RoleTools []string `yaml:"roleTools,omitempty"`
-
-	// RoleSkills — pre-seed list of skill slugs for agent_known_skills.
-	RoleSkills []string `yaml:"roleSkills,omitempty"`
 
 	// ContextPolicy declares how the agent's live context should cycle.
 	// It is intentionally open-shaped so project-managed agents can carry
@@ -108,14 +97,6 @@ type ProcedureDefinition struct {
 	Scope    string `yaml:"scope,omitempty"`
 }
 
-// ModeDefinition is an inline mode within an agent file.
-type ModeDefinition struct {
-	Slug           string         `yaml:"slug"`
-	Name           string         `yaml:"name"`
-	PromptAddendum string         `yaml:"promptAddendum"`
-	ToolOverrides  map[string]any `yaml:"toolOverrides"`
-}
-
 // AgentConstraints is the frontmatter slot for per-agent runtime
 // constraints. CW-20260512-0123 (SP-20260512-0011 W3) removed the
 // `maxIterations` / `maxTimeSeconds` / `retryBudget` keys from the
@@ -133,11 +114,8 @@ type ModeDefinition struct {
 // store.AgentProfile.Constraints. Found 2026-08-16 investigating why the
 // Orchestrator role's auto_summarize policy could never take effect —
 // mirrors internal/chat.AgentConstraints's fields exactly (kept as a
-// separate, local type — not an import of internal/chat — matching this
-// file's existing pattern for AgentToolPermissions, which mirrors
-// toolclient.ToolPermissions locally to avoid a heavier dependency).
+// separate, local type — not an import of internal/chat).
 type AgentConstraints struct {
-	MaxTurns                 int    `yaml:"maxTurns,omitempty" json:"max_turns,omitempty"`
 	HardCeiling              int    `yaml:"hardCeiling,omitempty" json:"hard_ceiling,omitempty"`
 	ConsecutiveFailCap       int    `yaml:"consecutiveFailCap,omitempty" json:"consecutive_fail_cap,omitempty"`
 	RunawayFailCap           int    `yaml:"runawayFailCap,omitempty" json:"runaway_fail_cap,omitempty"`
@@ -153,17 +131,13 @@ type AgentConstraints struct {
 	MessageWakePolicy string `yaml:"messageWakePolicy,omitempty" json:"message_wake_policy,omitempty"`
 }
 
-// AgentToolPermissions mirrors toolclient.ToolPermissions in shape but is
-// declared here so agent frontmatter parsing does not depend on toolclient.
-// YAML tags use canonical snake_case so frontmatter matches the JSON shape
-// stored in agent_profiles.tool_permissions.
-type AgentToolPermissions struct {
-	AllowList          []string `yaml:"allow_list" json:"allow_list,omitempty"`
-	DenyList           []string `yaml:"deny_list" json:"deny_list,omitempty"`
-	MaxCallsPerTurn    int      `yaml:"max_calls_per_turn" json:"max_calls_per_turn,omitempty"`
-	AllowDelegation    bool     `yaml:"allow_delegation" json:"allow_delegation,omitempty"`
-	AllowCodeExecution bool     `yaml:"allow_code_execution" json:"allow_code_execution,omitempty"`
-}
+// AgentToolPermissions (and the toolPermissions: frontmatter field that fed
+// it) was removed by TASKS/adhoc/02-remove-tool-permissions-collapse-to-
+// agent-tools.md: agent_tools is the sole tool-selection gate for every
+// agent now, so there is nothing left for a frontmatter allow/deny-list
+// override to express. Definition.ToProfile() always writes "{}" into
+// store.AgentProfile.ToolPermissions now — see that function's doc
+// comment.
 
 var frontmatterDelim = []byte("---")
 

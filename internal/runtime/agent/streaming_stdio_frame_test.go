@@ -143,8 +143,9 @@ func TestComposeBootdirParams_SystemPromptHonorsOverride(t *testing.T) {
 			BootPromptOverride: "CATALOG-AUTHORED BOOT PROMPT",
 		}
 		_, params := composeBootdirParams(nil, opts, profile, "sess-1")
-		if params.SystemPrompt != "CATALOG-AUTHORED BOOT PROMPT" {
-			t.Errorf("SetupParams.SystemPrompt = %q, want the BootPromptOverride (bootprofile path)", params.SystemPrompt)
+		want := "CATALOG-AUTHORED BOOT PROMPT\n\n" + mandatoryPostCompactionRereadInstruction
+		if params.SystemPrompt != want {
+			t.Errorf("SetupParams.SystemPrompt = %q, want %q (BootPromptOverride, bootprofile path, plus the mandatory post-compaction re-read instruction)", params.SystemPrompt, want)
 		}
 	})
 
@@ -171,20 +172,24 @@ func TestResolveSystemPrompt(t *testing.T) {
 		SystemPrompt: "profile-level system prompt",
 	}
 
-	t.Run("override wins verbatim", func(t *testing.T) {
-		got := ResolveSystemPrompt("executor", profile, ModeLongLived, "CATALOG OVERRIDE")
-		if got != "CATALOG OVERRIDE" {
-			t.Errorf("ResolveSystemPrompt = %q, want the verbatim override", got)
+	t.Run("override body wins verbatim, plus mandatory re-read appended", func(t *testing.T) {
+		got := ResolveSystemPrompt("executor", profile, ModeLongLived, "CATALOG OVERRIDE", nil)
+		want := "CATALOG OVERRIDE\n\n" + mandatoryPostCompactionRereadInstruction
+		if got != want {
+			t.Errorf("ResolveSystemPrompt = %q, want %q", got, want)
 		}
 	})
 
 	t.Run("empty override composes role + profile", func(t *testing.T) {
-		got := ResolveSystemPrompt("executor", profile, ModeLongLived, "")
+		got := ResolveSystemPrompt("executor", profile, ModeLongLived, "", nil)
 		if !strings.Contains(got, "profile-level system prompt") {
 			t.Errorf("ResolveSystemPrompt = %q, want it to include the profile system prompt", got)
 		}
 		if !strings.Contains(got, "executor") {
 			t.Errorf("ResolveSystemPrompt = %q, want it to include the executor role framing", got)
+		}
+		if !strings.Contains(got, mandatoryPostCompactionRereadInstruction) {
+			t.Errorf("ResolveSystemPrompt = %q, want the mandatory post-compaction re-read instruction (Phase 2 task 03)", got)
 		}
 	})
 
@@ -193,9 +198,25 @@ func TestResolveSystemPrompt(t *testing.T) {
 		// produce identical output for the same inputs.
 		opts := Options{Role: "reviewer", Mode: ModeLongLived}
 		viaOpts := resolveBootPrompt(profile, opts)
-		viaExport := ResolveSystemPrompt("reviewer", profile, ModeLongLived, "")
+		viaExport := ResolveSystemPrompt("reviewer", profile, ModeLongLived, "", nil)
 		if viaOpts != viaExport {
 			t.Errorf("export drift:\n resolveBootPrompt   = %q\n ResolveSystemPrompt = %q", viaOpts, viaExport)
+		}
+	})
+
+	t.Run("dynamic context blocks append after the base prompt", func(t *testing.T) {
+		got := ResolveSystemPrompt("executor", profile, ModeLongLived, "", map[string]string{
+			"weather": "72F and sunny",
+			"empty":   "   ",
+		})
+		if !strings.Contains(got, "profile-level system prompt") {
+			t.Errorf("ResolveSystemPrompt = %q, want it to still include the base prompt", got)
+		}
+		if !strings.Contains(got, "## Dynamic context: weather") || !strings.Contains(got, "72F and sunny") {
+			t.Errorf("ResolveSystemPrompt = %q, want the resolved dynamic-context block appended", got)
+		}
+		if strings.Contains(got, "## Dynamic context: empty") {
+			t.Errorf("ResolveSystemPrompt = %q, want a blank-content block omitted", got)
 		}
 	})
 }

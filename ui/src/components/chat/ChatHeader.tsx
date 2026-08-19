@@ -7,7 +7,6 @@ import {
   Info,
   MoreHorizontal,
   RotateCcw,
-  Sparkles,
   Users,
 } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
@@ -42,7 +41,6 @@ export function ChatHeader() {
   const queryClient = useQueryClient();
 
   const [agentDropOpen, setAgentDropOpen] = useState(false);
-  const [modeDropOpen, setModeDropOpen] = useState(false);
   const [moreOpen, setMoreOpen] = useState(false);
   const [rosterOpen, setRosterOpen] = useState(false);
   const [detailsOpen, setDetailsOpen] = useState(false);
@@ -77,7 +75,6 @@ export function ChatHeader() {
     [],
   );
   const agentDropRef = useRef<HTMLDivElement>(null);
-  const modeDropRef = useRef<HTMLDivElement>(null);
   const moreRef = useRef<HTMLDivElement>(null);
 
   const { data: session } = useQuery({
@@ -118,22 +115,6 @@ export function ChatHeader() {
     queryFn: () => api.listAgents(),
   });
 
-  // B1 (CW-20260428-0009): session-level Mode chip + dropdown.
-  // Backed by sessions.current_mode_id → modes.id; null = "chat" default.
-  const { data: allModes = [] } = useQuery({
-    queryKey: ["modes"],
-    queryFn: api.listModes,
-    staleTime: 60_000,
-  });
-  const { data: sessionMode } = useQuery({
-    queryKey: ["session-mode", activeSessionId],
-    queryFn: () => {
-      if (!activeSessionId) throw new Error("active session is required");
-      return api.getSessionMode(activeSessionId);
-    },
-    enabled: !!activeSessionId,
-  });
-
   const primaryAgent = sessionAgents.find((a) => a.role === "primary");
   const primaryAgentProfile = allAgents.find((a) => a.id === primaryAgent?.agent_id);
   const activeAgentName = primaryAgentProfile?.name || "Nanite";
@@ -155,28 +136,15 @@ export function ChatHeader() {
 
   // Close dropdowns on outside click
   useEffect(() => {
-    if (!agentDropOpen && !moreOpen && !modeDropOpen) return;
+    if (!agentDropOpen && !moreOpen) return;
     function onDown(e: MouseEvent) {
       if (agentDropRef.current && !agentDropRef.current.contains(e.target as Node))
         setAgentDropOpen(false);
-      if (modeDropRef.current && !modeDropRef.current.contains(e.target as Node))
-        setModeDropOpen(false);
       if (moreRef.current && !moreRef.current.contains(e.target as Node)) setMoreOpen(false);
     }
     document.addEventListener("mousedown", onDown);
     return () => document.removeEventListener("mousedown", onDown);
-  }, [agentDropOpen, moreOpen, modeDropOpen]);
-
-  const setSessionModeMutation = useMutation({
-    mutationFn: async (slug: string) => {
-      if (!activeSessionId) return null;
-      return api.setSessionMode(activeSessionId, { slug });
-    },
-    onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: ["session-mode", activeSessionId] });
-      void queryClient.invalidateQueries({ queryKey: ["session", activeSessionId] });
-    },
-  });
+  }, [agentDropOpen, moreOpen]);
 
   const switchAgentMutation = useMutation({
     mutationFn: async (agentId: string) => {
@@ -216,7 +184,6 @@ export function ChatHeader() {
         include_messages: includeMessages,
         provider: details.session.provider || undefined,
         model: details.session.model || undefined,
-        mode_id: details.mode?.id || undefined,
       });
     },
     [forkMutation],
@@ -225,17 +192,10 @@ export function ChatHeader() {
   const openStartFromDetails = useCallback((details: SessionDetailsResponse) => {
     const durableID = details.current_durable_agent?.id || "";
     setStartPrefill({
-      path: durableID
-        ? "durable"
-        : details.session.provider?.startsWith("bootprofile:")
-          ? "harness"
-          : "chat",
+      path: durableID ? "durable" : "chat",
       provider: details.session.provider || undefined,
       model: details.session.model || undefined,
       agent_id: details.primary_agent?.id || undefined,
-      boot_profile_id: details.session.provider?.startsWith("bootprofile:")
-        ? details.session.provider
-        : undefined,
       durable_agent_id: durableID || undefined,
     });
     setDetailsOpen(false);
@@ -353,7 +313,7 @@ export function ChatHeader() {
 
             {/* Two-row block */}
             <div className="flex min-w-0 flex-col gap-[2px]">
-              {/* Row 1: name picker + mode pill */}
+              {/* Row 1: name picker */}
               <div className="relative flex items-center gap-2" ref={agentDropRef}>
                 <button
                   type="button"
@@ -363,52 +323,6 @@ export function ChatHeader() {
                   <span className="text-[14px] font-semibold text-fg">{activeAgentName}</span>
                   <ChevronDown size={11} className="shrink-0 text-fg-muted" />
                 </button>
-                {/* Mode chip + dropdown (B1, CW-20260428-0009).
-                  Default to "chat" when no session-mode pointer is set. */}
-                <div className="relative" ref={modeDropRef}>
-                  <button
-                    type="button"
-                    onClick={() => setModeDropOpen((o) => !o)}
-                    disabled={!activeSessionId}
-                    className="flex items-center gap-1 rounded-[6px] border border-border-subtle bg-bg-elevated px-1.5 py-0.5 text-[10px] font-mono uppercase tracking-wide text-fg-secondary transition-colors hover:bg-surface hover:text-fg disabled:opacity-50"
-                  >
-                    <Sparkles size={9} className="shrink-0 text-fg-muted" />
-                    <span>{sessionMode?.slug ?? "chat"}</span>
-                    <ChevronDown size={9} className="shrink-0 text-fg-muted" />
-                  </button>
-                  {modeDropOpen && (
-                    <div className="absolute left-0 top-full z-50 mt-1 w-52 rounded-[10px] border border-border-subtle bg-bg-elevated py-1 shadow-2xl">
-                      <div className="px-3 py-1.5 font-mono text-[10px] font-semibold uppercase tracking-wide text-fg-muted">
-                        Switch mode
-                      </div>
-                      {allModes.map((mode) => {
-                        const isActive = sessionMode?.id === mode.id;
-                        return (
-                          <button
-                            key={mode.id}
-                            type="button"
-                            onClick={() => {
-                              setSessionModeMutation.mutate(mode.slug);
-                              setModeDropOpen(false);
-                            }}
-                            disabled={setSessionModeMutation.isPending}
-                            className={`flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs transition-colors ${
-                              isActive
-                                ? "bg-surface text-fg"
-                                : "text-fg-secondary hover:bg-surface hover:text-fg"
-                            }`}
-                          >
-                            <Sparkles className="h-3 w-3 shrink-0 text-fg-muted" />
-                            <span className="truncate">{mode.name}</span>
-                            <span className="ml-auto font-mono text-[10px] text-fg-muted">
-                              {mode.slug}
-                            </span>
-                          </button>
-                        );
-                      })}
-                    </div>
-                  )}
-                </div>
                 {primaryAgentProfile?.source && <SourceBadge source={primaryAgentProfile.source} />}
 
                 {/* Agent picker dropdown */}
@@ -550,12 +464,9 @@ export function ChatHeader() {
                   type="button"
                   onClick={() => {
                     setStartPrefill({
-                      path: session?.provider?.startsWith("bootprofile:") ? "harness" : "chat",
+                      path: "chat",
                       provider: session?.provider || undefined,
                       model: session?.model || undefined,
-                      boot_profile_id: session?.provider?.startsWith("bootprofile:")
-                        ? session.provider
-                        : undefined,
                     });
                     setStartOpen(true);
                     setMoreOpen(false);
@@ -640,7 +551,6 @@ export function ChatHeader() {
       <StartSurfaceDialog
         open={startOpen}
         onOpenChange={setStartOpen}
-        workspaceId={session?.workspace_id || null}
         projectId={session?.project_id || null}
         defaultProvider={session?.provider}
         defaultModel={session?.model}

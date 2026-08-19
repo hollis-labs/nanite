@@ -52,7 +52,7 @@ func (f *fakeWorkflowToolService) ListSummaries() []toolclient.ToolSummary {
 	return f.summaries
 }
 
-func (f *fakeWorkflowToolService) GetToolMeta(string) (ToolMetaInfo, bool) {
+func (f *fakeWorkflowToolService) GetToolMeta(context.Context, string) (ToolMetaInfo, bool) {
 	return ToolMetaInfo{}, true
 }
 

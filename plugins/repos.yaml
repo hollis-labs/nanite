@@ -31,16 +31,6 @@ plugins:
     type: core
 
   # ── Default ─────────────────────────────────────────────────
-  - name: giphy
-    repo: hollis-labs/nanite-plugin-giphy
-    description: "Giphy GIF search via !giphy command"
-    type: default
-
-  - name: oembed
-    repo: hollis-labs/nanite-plugin-oembed
-    description: "Rich URL previews for YouTube, Spotify, and oEmbed providers"
-    type: default
-
   - name: session-stats
     repo: hollis-labs/nanite-plugin-session-stats
     description: "Session statistics tracking and display"

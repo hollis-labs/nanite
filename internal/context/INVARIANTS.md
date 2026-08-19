@@ -113,33 +113,61 @@ plan); `internal/llm/anthropic/cache_plan.go::planCacheMarkers`
 
 ---
 
-## INV4 — Mode-aware content swap correctness
+## INV4 — Mode slot is permanently inert (post-cut)
 
-**Invariant.** Changing a session's `current_mode_id` (the
-session-scoped `*store.Mode` pointer) changes `SlotMode`'s CONTENT on
-the next dispatch. Its POSITION and IDENTITY in the plan remain
-unchanged. CW-20260512-0115 (SP-20260512-0009 W5) made mode a SESSION
-attribute (not an agent attribute); two sessions sharing one agent
-profile can run in different modes concurrently and see different
-SlotMode bodies.
+**Invariant.** `SlotMode` always carries EMPTY content and is always
+decided as `ActionSkip` / `ReasonTag: "skipped_no_content"` — the same
+path any other empty slot takes. Its POSITION and IDENTITY in
+`ctxpkg.SlotOrder` remain unchanged (INV1 still governs the sent
+shape). There is no more content-swap behavior to invariant-test:
+Phase 0 item 21 ("Cut Modes, in full" —
+`TASKS/phase-0/21-cut-modes.md`) deleted both Session Mode
+(`sessions.current_mode_id`, the `modes` table, `store.GetSessionMode`
+/ `SetSessionMode`) and Legacy Agent Mode (`agent_modes`,
+`store.AgentMode`) — the two mechanisms that used to feed this slot's
+content. `classify.ClassifyMode`, the per-turn classifier that used to
+suggest mode switches, was deleted in the same change.
 
-**Why it matters.** Mode is the user-facing knob for build/plan/read
-behavior. Mid-session mode swaps must reach the LLM on the very next
-turn without restart. Position stability ensures the cacheable prefix
-slots ahead of SlotMode (Universal, System) survive the swap.
+**Why this invariant changed, not just its enforcement.** This
+invariant used to read "changing a session's `current_mode_id` changes
+`SlotMode`'s CONTENT on the next dispatch" (CW-20260512-0115, SP-20260512-0009
+W5 — mode as a SESSION attribute). That contract is now vacuous by
+construction: there is no more `current_mode_id` to change. Per this
+doc's own "How to evolve the contract" step 1, the deliberate update
+here — rather than silent rot — is to assert the new, real behavior:
+SlotMode is permanently empty, not merely "currently always the same
+value because nothing sets it." `SlotMode` itself is **not** removed —
+`SlotOrder`, INV1 (stable sent shape), and INV3 (cache marker priority
+list) all reference it structurally, and removing the slot would ripple
+into those invariants and `internal/llm/anthropic/cache_plan.go`. That
+would be a separate, later decision, out of this task's scope.
 
-**Enforced by.** `invariantModeAwareContentSwap` in
-`internal/service/slot_invariants_test.go`, plus the existing
-load-bearing tests
-`Test_ModeIsSessionAttribute_SameAgentDifferentModes_DifferentSlotContent`,
-`Test_ModeChangeMidSession_NextDispatchReflectsNewMode`, and
-`Test_ModeChangeMidSession_CacheableSlotsUnchanged` in
-`internal/service/mode_session_attr_test.go`.
+**Why it matters.** A future regression that accidentally starts
+writing content into `SlotMode` again (e.g. repurposing the slot for
+something unrelated to modes) would silently reintroduce dynamic,
+per-turn content into a slot whose whole contract is now "always
+empty" — this invariant is the tripwire for that. Position stability
+still matters independently: the cacheable prefix slots ahead of
+SlotMode (Universal, System) must not shift.
 
-**Relied on by.** `internal/service/chat_generate.go` (reads
-`session.CurrentModeID` at top of every turn via `GetSessionMode`);
-`internal/chat/context_client.go::AssembleSlotSources` (renders
-`SlotMode` from the resolved `*store.Mode`).
+**Enforced by.** `invariantModeSlotInert` in
+`internal/service/slot_invariants_test.go` (replaces the retired
+`invariantModeAwareContentSwap`), exercised across every dispatch
+flavor by `TestSlotInvariants_AcrossDispatchTypes` and pinned with
+teeth by `TestSlotInvariants_DeliberateViolation_ModeSlotNotInert`.
+The three tests in `internal/service/mode_session_attr_test.go` that
+used to assert the mode-aware content swap
+(`Test_ModeIsSessionAttribute_SameAgentDifferentModes_DifferentSlotContent`,
+`Test_ModeChangeMidSession_NextDispatchReflectsNewMode`,
+`Test_ModeChangeMidSession_CacheableSlotsUnchanged`) were retired —
+see that file's header comment for the full rationale; its two shared
+helpers (`findSlotDecision`, `indexOfSlot`) survive for
+`slot_invariants_test.go`'s use.
+
+**Relied on by.** `internal/chat/context_client.go::AssembleSlotSources`
+(sources `SlotMode` as a hardcoded empty string — see that function's
+doc comment); `internal/service/context.go::AssembleSlots` (no longer
+takes `mode *store.AgentMode` / `sessionMode *store.Mode` parameters).
 
 ---
 

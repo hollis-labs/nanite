@@ -19,16 +19,7 @@ type UserSettings struct {
 	ToolDrawerRetention   int               `json:"tool_drawer_retention"`
 	DeveloperMode         bool              `json:"developer_mode"`
 	RecoverMode           bool              `json:"recover_mode"`
-	// ModeAutoSwitchPref is the user-level preference for auto-applying
-	// classifier mode suggestions (B3, CW-20260428-0011). Allowed:
-	//   ""       — unset, triggers first-use prompt
-	//   "always" — auto-apply suggestion + show toast
-	//   "ask"    — render compact 2-option confirm card
-	//   "never"  — discard suggestion silently
-	// The per-session chat-input toggle can override "always"/"ask" to
-	// "off" but cannot bypass the first-use prompt.
-	ModeAutoSwitchPref string `json:"mode_auto_switch_pref"`
-	ExtSettings        map[string]any `json:"ext_settings,omitempty"`
+	ExtSettings           map[string]any    `json:"ext_settings,omitempty"`
 	ToolLoadPreferences   map[string]string `json:"tool_load_preferences,omitempty"`
 	TaskBackend           string            `json:"task_backend"`
 	// AllowUnsignedPlugins permits installing plugin archives that lack a
@@ -123,7 +114,6 @@ func (s *Store) GetUserSettings() (*UserSettings, error) {
 	var contextOverflowRecovery bool
 	var subagentApprovalRequired bool
 	var subagentApprovalTimeoutSeconds int
-	var modeAutoSwitchPref string
 	var autoRepairPref string
 	err := s.DB.QueryRow(
 		`SELECT provider_fallback_chain, default_provider, default_model,
@@ -139,7 +129,7 @@ func (s *Store) GetUserSettings() (*UserSettings, error) {
 		        tool_classifier_provider, tool_classifier_model,
 		        tool_classifier_timeout_ms, context_overflow_recovery,
 		        subagent_approval_required, subagent_approval_timeout_seconds,
-		        mode_auto_switch_pref, auto_repair_pref
+		        auto_repair_pref
 		 FROM user_settings WHERE id = 1`,
 	).Scan(&chainJSON, &provider, &model,
 		&agent, &utilProvider, &utilModel, &toolMode, &settingsJSON,
@@ -153,36 +143,36 @@ func (s *Store) GetUserSettings() (*UserSettings, error) {
 		&toolClassifierProvider, &toolClassifierModel,
 		&toolClassifierTimeoutMS, &contextOverflowRecovery,
 		&subagentApprovalRequired, &subagentApprovalTimeoutSeconds,
-		&modeAutoSwitchPref, &autoRepairPref)
+		&autoRepairPref)
 	if err != nil {
 		return nil, fmt.Errorf("get user settings: %w", err)
 	}
 
 	us := &UserSettings{
-		DefaultProvider:      provider,
-		DefaultModel:         model,
-		DefaultAgent:         agent,
-		UtilityProvider:      utilProvider,
-		UtilityModel:         utilModel,
-		ToolCallDisplayMode:  toolMode,
-		ToolStreamBehavior:   toolStreamBehavior,
-		ToolDrawerRetention:  toolDrawerRetention,
-		DeveloperMode:        devMode,
-		RecoverMode:          recoverMode,
-		TaskBackend:          taskBackend,
-		AllowUnsignedPlugins: allowUnsigned,
-		EmbeddingProvider:    embeddingProvider,
-		EmbeddingModel:       embeddingModel,
-		EmbeddingMode:        embeddingMode,
-		ContextWindowTokens:  contextWindowTokens,
-		ContextBudgetPct:     contextBudgetPct,
-		SummarizerProvider:   summarizerProvider,
-		SummarizerModel:      summarizerModel,
-		CompactionStrategy:           compactionStrategy,
-		ToolPerTurnCap:               toolPerTurnCap,
-		ToolResultCacheTTLSeconds:    toolResultCacheTTL,
-		ToolResultSoftTruncBytes:     toolResultSoftTrunc,
-		ToolResultHardCapBytes:       toolResultHardCap,
+		DefaultProvider:                provider,
+		DefaultModel:                   model,
+		DefaultAgent:                   agent,
+		UtilityProvider:                utilProvider,
+		UtilityModel:                   utilModel,
+		ToolCallDisplayMode:            toolMode,
+		ToolStreamBehavior:             toolStreamBehavior,
+		ToolDrawerRetention:            toolDrawerRetention,
+		DeveloperMode:                  devMode,
+		RecoverMode:                    recoverMode,
+		TaskBackend:                    taskBackend,
+		AllowUnsignedPlugins:           allowUnsigned,
+		EmbeddingProvider:              embeddingProvider,
+		EmbeddingModel:                 embeddingModel,
+		EmbeddingMode:                  embeddingMode,
+		ContextWindowTokens:            contextWindowTokens,
+		ContextBudgetPct:               contextBudgetPct,
+		SummarizerProvider:             summarizerProvider,
+		SummarizerModel:                summarizerModel,
+		CompactionStrategy:             compactionStrategy,
+		ToolPerTurnCap:                 toolPerTurnCap,
+		ToolResultCacheTTLSeconds:      toolResultCacheTTL,
+		ToolResultSoftTruncBytes:       toolResultSoftTrunc,
+		ToolResultHardCapBytes:         toolResultHardCap,
 		ToolCacheEnabled:               toolCacheEnabled,
 		ToolClassifierMode:             toolClassifierMode,
 		ToolClassifierProvider:         toolClassifierProvider,
@@ -191,7 +181,6 @@ func (s *Store) GetUserSettings() (*UserSettings, error) {
 		ContextOverflowRecovery:        contextOverflowRecovery,
 		SubagentApprovalRequired:       subagentApprovalRequired,
 		SubagentApprovalTimeoutSeconds: subagentApprovalTimeoutSeconds,
-		ModeAutoSwitchPref:             modeAutoSwitchPref,
 		AutoRepairPref:                 autoRepairPref,
 	}
 	if chainJSON != "" && chainJSON != "[]" {
@@ -306,15 +295,6 @@ func (s *Store) UpdateUserSettings(us *UserSettings) error {
 	if toolClassifierTimeoutMS <= 0 {
 		toolClassifierTimeoutMS = 500
 	}
-	// B3 (CW-20260428-0011): validate mode_auto_switch_pref. Empty is the
-	// unset sentinel and is valid; otherwise must be one of the enum values.
-	modeAutoSwitchPref := us.ModeAutoSwitchPref
-	switch modeAutoSwitchPref {
-	case "", "always", "ask", "never":
-		// valid
-	default:
-		return fmt.Errorf("update user settings: unknown mode_auto_switch_pref %q (must be \"\", \"always\", \"ask\", or \"never\")", modeAutoSwitchPref)
-	}
 	// C2 (CW-20260429-0008): validate auto_repair_pref. Empty is the
 	// unset sentinel (treated as "always" by the runtime gate); otherwise
 	// must be "always" or "never".
@@ -362,7 +342,6 @@ func (s *Store) UpdateUserSettings(us *UserSettings) error {
 			context_overflow_recovery = ?,
 			subagent_approval_required = ?,
 			subagent_approval_timeout_seconds = ?,
-			mode_auto_switch_pref = ?,
 			auto_repair_pref = ?,
 			updated_at = ?
 		 WHERE id = 1`,
@@ -379,7 +358,6 @@ func (s *Store) UpdateUserSettings(us *UserSettings) error {
 		us.ToolClassifierProvider, us.ToolClassifierModel,
 		toolClassifierTimeoutMS, us.ContextOverflowRecovery,
 		us.SubagentApprovalRequired, us.SubagentApprovalTimeoutSeconds,
-		modeAutoSwitchPref,
 		autoRepairPref,
 		now,
 	)

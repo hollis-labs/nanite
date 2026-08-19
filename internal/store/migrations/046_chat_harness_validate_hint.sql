@@ -1,3 +1,4 @@
+-- +goose Up
 -- 046_chat_harness_validate_hint.sql
 -- A1 (CW-20260429-0005) + B1 (CW-20260429-0006): adds the discover-and-
 -- pre-flight self-introspection bullet to the seeded chat-role-harness
@@ -30,3 +31,13 @@ SET template = REPLACE(
 WHERE id = 'blt-chat-harness-001'
   AND template LIKE '%- **Parallelize independent calls.** If two lookups don''t depend on each other, request them in the same turn.%'
   AND template NOT LIKE '%tool_describe%';
+
+-- +goose Down
+-- No down migration: this file predates goose adoption (see
+-- docs/engineering/architecture/05-storage-and-migrations.md, "Migrations:
+-- adopting a real ledger"). Every pre-cutover migration ships a
+-- deliberately empty Down section rather than a hand-derived rollback --
+-- reconstructing the exact pre-migration schema/data shape for 94 files
+-- retroactively isn't worth doing when the historical state it would
+-- recreate has no operational value. New migrations going forward are
+-- expected to carry a real, tested Down.

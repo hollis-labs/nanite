@@ -1,21 +1,22 @@
--- migrate:skip-if-column-exists subagent_runs last_activity_at
---
+-- +goose Up
+-- +goose NO TRANSACTION
 -- CW-20260817: this migration recreates subagent_runs from ITS OWN
 -- historical, narrow column/CHECK set (SQLite can't ALTER a CHECK
--- constraint). With no schema_migrations table, every migration file
--- re-runs on every boot — so without the skip-if-column-exists directive
--- above, this would blindly rebuild subagent_runs from this file's 2026-era
--- shape on every single restart, dropping every column a later migration
--- (025/065/067/092) already added and resetting it to that later
--- migration's default, and hard-failing outright once any row carries a
--- status value only a later migration's wider CHECK permits (this crashed
--- the live daemon on a real 'stalled' row — status 019 has never heard of).
--- last_activity_at is 092's column, the newest one as of this fix — once a
--- database has it, everything this migration (019) would do has already
--- been superseded by 025/065/067/092's own rebuilds, so it's safe to skip
--- entirely. On a genuinely fresh database the column doesn't exist yet, so
--- this is a no-op and the migration below runs exactly as originally
--- written.
+-- constraint). Before goose adoption (see
+-- docs/engineering/architecture/05-storage-and-migrations.md), there was no
+-- schema_migrations table, so every migration file re-ran on every boot —
+-- this migration would blindly rebuild subagent_runs from this file's
+-- 2026-era shape on every single restart, dropping every column a later
+-- migration (025/065/067/092) already added and resetting it to that later
+-- migration's default, and hard-failing outright once any row carried a
+-- status value only a later migration's wider CHECK permits. That's exactly
+-- what crashed the live daemon on a real 'stalled' row — status 019 has
+-- never heard of. The fix at the time was a "migrate:skip-if-column-exists"
+-- directive, since retired: goose's real ledger tracks each migration
+-- version as applied exactly once, ever, so this file's rebuild SQL simply
+-- never executes again once it's run the first time — the structural
+-- condition that produced the crash-loop (a stale rebuild re-running
+-- against data shaped by later migrations) cannot recur.
 --
 -- G-4 subagent approval envelope.
 --
@@ -95,3 +96,13 @@ PRAGMA foreign_keys = ON;
 -- UserSettings additions (idempotent: runner skips duplicate column errors).
 ALTER TABLE user_settings ADD COLUMN subagent_approval_required INTEGER NOT NULL DEFAULT 1;
 ALTER TABLE user_settings ADD COLUMN subagent_approval_timeout_seconds INTEGER NOT NULL DEFAULT 86400;
+
+-- +goose Down
+-- No down migration: this file predates goose adoption (see
+-- docs/engineering/architecture/05-storage-and-migrations.md, "Migrations:
+-- adopting a real ledger"). Every pre-cutover migration ships a
+-- deliberately empty Down section rather than a hand-derived rollback --
+-- reconstructing the exact pre-migration schema/data shape for 94 files
+-- retroactively isn't worth doing when the historical state it would
+-- recreate has no operational value. New migrations going forward are
+-- expected to carry a real, tested Down.

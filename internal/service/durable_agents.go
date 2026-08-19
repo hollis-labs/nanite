@@ -13,7 +13,6 @@ import (
 )
 
 var (
-	ErrDurableAgentWorkspaceRequired     = errors.New("durable agent start requires workspace_id when creating a session")
 	ErrDurableAgentNoResumableSession    = errors.New("durable agent has no resumable attached session")
 	ErrDurableAgentUnsupportedLaunchPlan = errors.New("durable agent launch policy is unsupported")
 )
@@ -52,7 +51,6 @@ type DurableAgentLaunchPolicy struct {
 }
 
 type DurableAgentStartRequest struct {
-	WorkspaceID string
 	ProjectID   string
 	WakePayload DurableAgentWakePayload
 }
@@ -493,23 +491,19 @@ func (s *durableAgentService) deliverWakePrompt(ctx context.Context, sessionID, 
 	}
 }
 
-func (s *durableAgentService) RequestStart(_ context.Context, id string) (*store.DurableAgentInstance, error) {
-	before, err := s.store.GetDurableAgentInstance(id)
+func (s *durableAgentService) RequestStart(ctx context.Context, id string) (*store.DurableAgentInstance, error) {
+	result, err := s.Start(ctx, id, DurableAgentStartRequest{})
 	if err != nil {
+		if result != nil && result.Instance != nil {
+			return result.Instance, err
+		}
+		inst, getErr := s.store.GetDurableAgentInstance(id)
+		if getErr == nil {
+			return inst, err
+		}
 		return nil, err
 	}
-	inst, err := s.store.SetDurableAgentInstanceStatus(id, store.DurableAgentStatusStartRequested)
-	if err != nil {
-		return nil, err
-	}
-	s.recordEvent(&store.DurableAgentEvent{
-		InstanceID:   id,
-		EventType:    store.DurableAgentEventStartRequested,
-		StatusBefore: before.Status,
-		StatusAfter:  inst.Status,
-		SessionID:    inst.CurrentSessionID,
-	})
-	return inst, nil
+	return result.Instance, nil
 }
 
 func (s *durableAgentService) RequestStop(ctx context.Context, id string) (*store.DurableAgentInstance, error) {
@@ -725,9 +719,6 @@ func (s *durableAgentService) selectOrCreateLaunchSession(inst *store.DurableAge
 			return sess, true, nil
 		}
 	}
-	if req.WorkspaceID == "" {
-		return nil, false, ErrDurableAgentWorkspaceRequired
-	}
 	metadata, _ := json.Marshal(map[string]string{"durable_agent_instance_id": inst.ID})
 	sessionTitle := strings.TrimSpace(inst.Name)
 	if sessionTitle == "" {
@@ -737,7 +728,6 @@ func (s *durableAgentService) selectOrCreateLaunchSession(inst *store.DurableAge
 		sessionTitle = inst.ID
 	}
 	sess := &store.Session{
-		WorkspaceID: req.WorkspaceID,
 		ProjectID:   req.ProjectID,
 		Provider:    inst.Provider,
 		Model:       inst.Model,

@@ -18,7 +18,7 @@ Concrete, sequenced work implementing `architecture/*.md`. Full reasoning/verifi
 2. Fix `RequestStart` to call straight through to the real `Start()`, matching `RequestResume`.
 3. Fix durable-agent wake `CallerType` mistagging (`CallerChat` → `CallerBackground`). **Blocks** any future caller-type-aware steering narrowing.
 4. Build a real HTTP-provider recovery retry path, with flagging and backoff.
-5. Build `internal/llm/ollama` — a real, currently-used local provider that's currently broken, not dead code.
+5. ~~Build `internal/llm/ollama`~~ **Remove Ollama entirely.** Originally scoped as a build (a real, currently-used local provider believed to be broken). Reversed 2026-08-18: no code registers an `"ollama"` provider anywhere, no corroborating evidence of current local use was found, and `internal/store/seed.go` documents a prior deliberate removal (SP-20260508-0001). Delete `chat.InferProvider`'s dangling `"ollama"` model-name routing heuristic and any other remaining references. See `TASKS/ESCALATIONS.md`.
 6. Turn on `NANITE_TOOLS_LAZY_LOAD` by default; tune against real sessions.
 7. Harden `IsFirstPartyBuiltinServerName` — same bug shape as a prior incident, currently a hand-maintained 4-name switch.
 8. A2A conformance: real method names (`SendMessage`/`GetTask`/`CancelTask`, not `a2a.task.*`), a real `TaskManager.CancelTask` (currently no execution path exists), and a decision on `A2APushNotifier.ProcessPendingDeliveries` (real ticker, or explicit v1 scope-out).
@@ -31,7 +31,7 @@ Concrete, sequenced work implementing `architecture/*.md`. Full reasoning/verifi
 12. **`AgentConstraints.MaxTurns`**, and the `chat-loop-budget-soft-warning` signal that depends on it. Same reasoning as #11.
 13. **`question-form`** (Cards) — special-cased in one specific place in the turn loop; bounded deletion, no dependency on the Cards primitive-composition work.
 14. **The four backend-only messaging card types** (`message-request`/`reply`/`notification`/`handoff`) — no frontend component ever existed for them.
-15. **Giphy/oembed/support-ticket plugins and their orphan card types** (`kb-result`, `giphy-modal`, `resolution-capture`, `ticket-form`, `ticket-confirmation`) — confirmed demos. Bundle the CLAUDE.md/doc reference cleanup into the same change.
+15. **Giphy/oembed/support-ticket plugins and their orphan card types** (`kb-result`, `giphy-modal`, `resolution-capture`, `ticket-form`, `ticket-confirmation`) — cut in full. Corrected 2026-08-18: these are not demos as originally characterized — giphy is a dual-registered live first-party self-tool + plugin with real API calls, support-ticket has a real frontend with recently-fixed production bugs, oembed is a real registered default plugin. Cutting anyway — existing and working isn't the same as wanted; not in active use. See `TASKS/ESCALATIONS.md`. Bundle the CLAUDE.md/doc reference cleanup into the same change.
 16. **The external-format agent-import tier** (`.claude/agents/`, codex/gemini/opencode config import in `Discover()`) — no dependency on the new `roles`/`agents` schema.
 17. **`roleSkills:`/`agent_known_skills`-as-currently-used** — confirmed zero functional effect on prompt assembly today, so removing the frontmatter parsing and seeding code creates no functional gap; doesn't need to wait for the FK-based `agent_skills` replacement.
 18. **`internal/messaging/gomsg`**, `agent_cycles`, `tool_enrichments` write path, the unscheduled known-tools/skills TTL reaper, `agent_boot_plans`, `providers.base_url`/`api_key` columns, dead `internal/config.Config` fields, `workflows` table, `session_stats`, `agent_mailbox_view`, `trigger_rules`, `custom_actions`, `session_agent_overrides` — verify each against current code before cutting, not just this list. **Do not cut `session_handoffs`** (confirmed live, twice, by two independent checks).
@@ -50,19 +50,19 @@ Concrete, sequenced work implementing `architecture/*.md`. Full reasoning/verifi
 
 ### Renames
 
-25. **PTY naming scrub** (`shouldUsePTY`, `IsPTYProvider`, the `pty-*` provider-string convention) — the *name* can be fixed now, independent of `runtime_kind`'s full migration (still real Phase 2 work). Rename now; redesign the mechanism later.
-26. **`internal/recovery/*` namespace regrouping** (Recovery Broker, Orphan Sweep, Recovery Pack, interrupted-turn detection under one shared prefix) — mechanical package move, but touches live code that fires regularly. Real testing after the move, not a zero-risk rename.
-27. **"Volon" eradicated** from the codebase entirely, including the `volon-envelope` fence tag; **`fragments-envelope` dropped**. Backend and frontend both recognize `nanite-envelope` only.
+31. **PTY naming scrub** (`shouldUsePTY`, `IsPTYProvider`, the `pty-*` provider-string convention) — the *name* can be fixed now, independent of `runtime_kind`'s full migration (still real Phase 2 work). Rename now; redesign the mechanism later.
+32. **`internal/recovery/*` namespace regrouping** (Recovery Broker, Orphan Sweep, Recovery Pack, interrupted-turn detection under one shared prefix) — mechanical package move, but touches live code that fires regularly. Real testing after the move, not a zero-risk rename.
+33. **"Volon" eradicated** from the codebase entirely, including the `volon-envelope` fence tag, any `volon_*`/`volon_mcp`-namespaced tool references, and the `main.go` GUI comment; **`fragments-envelope` dropped**. Backend and frontend both recognize `nanite-envelope` only. No research into the external app's current real name is needed or wanted — strip the references outright.
 
 **Deliberately not included here**: renaming `promptrouter`'s "reflex" vocabulary (`BuiltinReflexes()`/`Reflex`) — since `promptrouter` itself is being absorbed into reflexes in Phase 3, renaming its internals now and migrating them shortly after is likely wasted motion. Do this renaming as part of the actual migration, not as standalone cleanup first.
 
-**Open question, not yet decided**: `prompt_templates` vs. `templates` — flagged as a confusing naming collision but never explicitly decided as a rename. Add to this sweep, or leave deferred?
+**Resolved 2026-08-18**: `prompt_templates` vs. `templates`'s naming collision needs no rename decision — both are cut entirely (items 29 and 30), so neither name exists after Phase 0 lands. See `TASKS/ESCALATIONS.md`.
 
 ---
 
 ## Phase 1 — Agent Construction (foundational)
 
-See `architecture/01-agent-construction.md` for the target schema. Migrations: `roles`, `agents` composition columns (`role_id`, `consumer_id`, `model_id`, `instance_mode`, `runtime_kind`), `consumers`, `known_tools`, `agent_tools`, `agent_dispatch_allowlist`, fix `agent_skills`'/`agent_projects`' missing FKs, fix the `models` table's `models.dev` sync target, add the reflex opt-out field. Kill the file-reingest-on-boot pattern generally. Build the assignment UI/API. Data-migrate every current `.nanite/agents/*.md` onto `roles`/`agents`.
+See `architecture/01-agent-construction.md` for the target schema. Migrations: `roles`, `agents` composition columns (`role_id`, `consumer_id`, `model_id`, `instance_mode`, `runtime_kind`), `consumers`, `known_tools`, `agent_tools`, `agent_dispatch_allowlist`, fix `agent_skills`'/`agent_projects`' missing FKs, fix the `models` table's `models.dev` sync target, add the reflex opt-out field. Kill the file-reingest-on-boot pattern generally. Build the assignment API — **backend only; no frontend work in any phase, ever, full stop.** UI for this is entirely out of scope here, part of the separate, deferred frontend pass. Data-migrate every current `.nanite/agents/*.md` onto `roles`/`agents`.
 
 ## Phase 2 — Agent Launching (depends on Phase 1's `runtime_kind` column)
 
@@ -79,8 +79,8 @@ Verify the reaper's real-world behavior before further idle-timeout tuning. Unif
 ## Phase 5 — Session Lifecycle, Messaging, Cards, Plugins
 
 - **Session lifecycle**: extend `event_log` postmortem logging to all four recovery mechanisms. Wire `compaction_events` (relocate the compaction-disclosure text off `prompt_templates` as part of this, per Phase 0 #29). Add TTL pruning to the scratchpad tool.
-- **Cards**: rebuild `todo-list`/`plan-review`/`subagent-spawn-approval` as compositions of the primitive set. Build the interactive-table-with-row-actions primitive (schema-validated actions, reusing the `approval-card` response-routing pattern). Build the context-replay exclusion (Card data excluded from replayed conversation history) — the highest-leverage single item in this phase. Fix CLI-agent boot content to source the type list dynamically instead of a hardcoded stale list.
-- **Plugins**: wire `registers.agent_profiles[]`. Build the real installed/enabled state model (WordPress-style, DB-backed, builtin+subprocess uniform). Close the CLI-install-vs-hot-reload asymmetry. Develop `registers.panels[]` and `registers.crud[]` (not urgent). Make the HTTP middleware chain plugin-extensible.
+- **Cards**: **no frontend work in any phase, ever, full stop** — the `todo-list`/`plan-review`/`subagent-spawn-approval` composition rebuilds and the interactive-table-with-row-actions primitive's React/component halves belong entirely to the separate, deferred frontend pass, not this phase. This phase's real scope here: the context-replay exclusion (Card data excluded from replayed conversation history, backend-only) — the highest-leverage single item in this phase — and fixing CLI-agent boot content to source the type list dynamically instead of a hardcoded stale list (backend-only). Any backend/schema support the interactive-table primitive needs (not its rendering) is in scope; its `.tsx` work is not.
+- **Plugins**: wire `registers.agent_profiles[]`. Build the real installed/enabled state model (WordPress-style, DB-backed, builtin+subprocess uniform). Close the CLI-install-vs-hot-reload asymmetry. Develop `registers.panels[]`'s registration/manifest/backend half and `registers.crud[]` (not urgent) — **`registers.panels[]`'s rendering half is frontend, deferred to the separate frontend pass, not this phase.** Make the HTTP middleware chain plugin-extensible.
 
 ## Phase 6 — The one open experiment, and documentation follow-through
 

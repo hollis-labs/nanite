@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"testing"
 
-	"github.com/hollis-labs/nanite/internal/agent"
 	"github.com/hollis-labs/nanite/internal/store"
 )
 
@@ -15,7 +14,7 @@ type stubAgentReader struct {
 	agents      map[string]*store.AgentProfile // keyed by ID
 	slugIndex   map[string]*store.AgentProfile // keyed by slug
 	sessionBind map[string]*store.SessionAgent // keyed by sessionID
-	modes       map[string][]store.AgentMode   // keyed by agentID
+	roles       map[string]*store.Role         // keyed by ID
 }
 
 func newStubReader() *stubAgentReader {
@@ -23,7 +22,7 @@ func newStubReader() *stubAgentReader {
 		agents:      make(map[string]*store.AgentProfile),
 		slugIndex:   make(map[string]*store.AgentProfile),
 		sessionBind: make(map[string]*store.SessionAgent),
-		modes:       make(map[string][]store.AgentMode),
+		roles:       make(map[string]*store.Role),
 	}
 }
 
@@ -32,6 +31,19 @@ func (s *stubAgentReader) addAgent(a *store.AgentProfile) {
 	if a.Slug != "" {
 		s.slugIndex[a.Slug] = a
 	}
+}
+
+func (s *stubAgentReader) addRole(r *store.Role) {
+	s.roles[r.ID] = r
+}
+
+// GetRole mirrors store.Store.GetRole's contract: (nil, nil) on a miss,
+// never an error for "not found".
+func (s *stubAgentReader) GetRole(id string) (*store.Role, error) {
+	if r, ok := s.roles[id]; ok {
+		return r, nil
+	}
+	return nil, nil
 }
 
 func (s *stubAgentReader) GetAgent(id string) (*store.AgentProfile, error) {
@@ -60,19 +72,6 @@ func (s *stubAgentReader) ListAgentsBySource(string) ([]store.AgentProfile, erro
 	return nil, nil
 }
 
-func (s *stubAgentReader) GetAgentMode(agentID, slug string) (*store.AgentMode, error) {
-	for _, m := range s.modes[agentID] {
-		if m.Slug == slug {
-			return &m, nil
-		}
-	}
-	return nil, fmt.Errorf("mode not found")
-}
-
-func (s *stubAgentReader) ListAgentModes(agentID string) ([]store.AgentMode, error) {
-	return s.modes[agentID], nil
-}
-
 func (s *stubAgentReader) GetSessionPrimaryAgent(sessionID string) (*store.SessionAgent, error) {
 	if sa, ok := s.sessionBind[sessionID]; ok {
 		return sa, nil
@@ -80,11 +79,10 @@ func (s *stubAgentReader) GetSessionPrimaryAgent(sessionID string) (*store.Sessi
 	return nil, fmt.Errorf("no primary agent")
 }
 
-func (s *stubAgentReader) ListSessionAgents(string) ([]store.SessionAgent, error)     { return nil, nil }
-func (s *stubAgentReader) ListAgentSkills(string) ([]store.Skill, error)              { return nil, nil }
-func (s *stubAgentReader) ListAgentProjects(string) ([]store.Project, error)           { return nil, nil }
-func (s *stubAgentReader) ListProjectAgents(string) ([]store.AgentProfile, error)     { return nil, nil }
-func (s *stubAgentReader) GetAgentAssignedModes(string) ([]store.Mode, error)         { return nil, nil }
+func (s *stubAgentReader) ListSessionAgents(string) ([]store.SessionAgent, error) { return nil, nil }
+func (s *stubAgentReader) ListAgentSkills(string) ([]store.Skill, error)          { return nil, nil }
+func (s *stubAgentReader) ListAgentProjects(string) ([]store.Project, error)      { return nil, nil }
+func (s *stubAgentReader) ListProjectAgents(string) ([]store.AgentProfile, error) { return nil, nil }
 
 type stubAgentWriter struct {
 	created []store.AgentProfile
@@ -96,19 +94,22 @@ func (s *stubAgentWriter) CreateAgent(a *store.AgentProfile) error {
 	s.created = append(s.created, *a)
 	return nil
 }
-func (s *stubAgentWriter) UpdateAgent(*store.AgentProfile) error                    { return nil }
-func (s *stubAgentWriter) DeleteAgent(slug string) error                            { s.deleted = append(s.deleted, slug); return nil }
-func (s *stubAgentWriter) UpsertAgentBySlug(*store.AgentProfile) error              { return nil }
-func (s *stubAgentWriter) CreateAgentMode(*store.AgentMode) error                   { return nil }
-func (s *stubAgentWriter) EnsureSessionAgent(sid, _, _ string, _ bool) error        { s.ensured = append(s.ensured, sid); return nil }
-func (s *stubAgentWriter) SetSessionAgentMode(string, string, string) error         { return nil }
-func (s *stubAgentWriter) DeleteSessionAgent(string, string) error                  { return nil }
-func (s *stubAgentWriter) AssignSkillToAgent(string, string, string) error          { return nil }
-func (s *stubAgentWriter) RemoveSkillFromAgent(string, string) error                { return nil }
-func (s *stubAgentWriter) AddAgentProject(string, string) error                     { return nil }
-func (s *stubAgentWriter) RemoveAgentProject(string, string) error                  { return nil }
-func (s *stubAgentWriter) AssignModeToAgent(string, string) error                   { return nil }
-func (s *stubAgentWriter) UnassignModeFromAgent(string, string) error               { return nil }
+func (s *stubAgentWriter) UpdateAgent(*store.AgentProfile) error { return nil }
+func (s *stubAgentWriter) DeleteAgent(slug string) error {
+	s.deleted = append(s.deleted, slug)
+	return nil
+}
+func (s *stubAgentWriter) UpsertAgentBySlug(*store.AgentProfile) error { return nil }
+func (s *stubAgentWriter) EnsureSessionAgent(sid, _, _ string, _ bool) error {
+	s.ensured = append(s.ensured, sid)
+	return nil
+}
+func (s *stubAgentWriter) SetSessionAgentMode(string, string, string) error { return nil }
+func (s *stubAgentWriter) DeleteSessionAgent(string, string) error          { return nil }
+func (s *stubAgentWriter) AssignSkillToAgent(string, string, string) error  { return nil }
+func (s *stubAgentWriter) RemoveSkillFromAgent(string, string) error        { return nil }
+func (s *stubAgentWriter) AddAgentProject(string, string) error             { return nil }
+func (s *stubAgentWriter) RemoveAgentProject(string, string) error          { return nil }
 
 type stubSettings struct {
 	defaultAgent string
@@ -117,13 +118,13 @@ type stubSettings struct {
 func (s *stubSettings) GetUserSettings() (*store.UserSettings, error) {
 	return &store.UserSettings{DefaultAgent: s.defaultAgent}, nil
 }
-func (s *stubSettings) UpdateUserSettings(*store.UserSettings) error                    { return nil }
-func (s *stubSettings) GetPluginSettings(string) (*store.PluginSettings, error)         { return nil, nil }
-func (s *stubSettings) UpsertPluginSettings(string, map[string]any) error               { return nil }
-func (s *stubSettings) UpsertPluginSchema(string, []store.ConfigField) error            { return nil }
-func (s *stubSettings) ListPluginSettings() ([]*store.PluginSettings, error)            { return nil, nil }
-func (s *stubSettings) UpdatePluginIcon(string, string) error                           { return nil }
-func (s *stubSettings) GetPluginSettingValue(string, string) (string, error)            { return "", nil }
+func (s *stubSettings) UpdateUserSettings(*store.UserSettings) error            { return nil }
+func (s *stubSettings) GetPluginSettings(string) (*store.PluginSettings, error) { return nil, nil }
+func (s *stubSettings) UpsertPluginSettings(string, map[string]any) error       { return nil }
+func (s *stubSettings) UpsertPluginSchema(string, []store.ConfigField) error    { return nil }
+func (s *stubSettings) ListPluginSettings() ([]*store.PluginSettings, error)    { return nil, nil }
+func (s *stubSettings) UpdatePluginIcon(string, string) error                   { return nil }
+func (s *stubSettings) GetPluginSettingValue(string, string) (string, error)    { return "", nil }
 
 // --- tests ---
 
@@ -175,15 +176,16 @@ func TestAgentService_CRUD(t *testing.T) {
 	}
 }
 
+// TestAgentService_ResolveForSession_BoundAgent used to also assert the
+// resolved Legacy AgentMode (mode.Slug == "code") — Phase 0 item 21 ("Cut
+// Modes, in full") deleted store.AgentMode and ResolveForSession's second
+// return value entirely, so this test now only covers agent resolution.
 func TestAgentService_ResolveForSession_BoundAgent(t *testing.T) {
 	reader := newStubReader()
 	agent := &store.AgentProfile{ID: "agent-1", Name: "Bound", Slug: "bound", Status: "active"}
 	reader.addAgent(agent)
 	reader.sessionBind["sess-1"] = &store.SessionAgent{
 		SessionID: "sess-1", AgentID: "agent-1", Mode: "code", IsPrimary: true,
-	}
-	reader.modes["agent-1"] = []store.AgentMode{
-		{ID: "m1", AgentID: "agent-1", Slug: "code", Name: "Code Mode"},
 	}
 
 	writer := &stubAgentWriter{}
@@ -192,15 +194,12 @@ func TestAgentService_ResolveForSession_BoundAgent(t *testing.T) {
 		Writers: writer,
 	})
 
-	got, mode, err := svc.ResolveForSession(context.Background(), "sess-1")
+	got, err := svc.ResolveForSession(context.Background(), "sess-1")
 	if err != nil {
 		t.Fatalf("ResolveForSession: %v", err)
 	}
 	if got.ID != "agent-1" {
 		t.Errorf("agent ID = %q, want %q", got.ID, "agent-1")
-	}
-	if mode.Slug != "code" {
-		t.Errorf("mode slug = %q, want %q", mode.Slug, "code")
 	}
 	// Should NOT auto-assign since a binding already existed.
 	if len(writer.ensured) != 0 {
@@ -220,7 +219,7 @@ func TestAgentService_ResolveForSession_SettingsDefault(t *testing.T) {
 		Settings: &stubSettings{defaultAgent: "settings-agent"},
 	})
 
-	got, _, err := svc.ResolveForSession(context.Background(), "unbound-sess")
+	got, err := svc.ResolveForSession(context.Background(), "unbound-sess")
 	if err != nil {
 		t.Fatalf("ResolveForSession: %v", err)
 	}
@@ -252,7 +251,7 @@ func TestAgentService_ResolveForSessionReadOnly_NoAutoAssign(t *testing.T) {
 		Events:   events,
 	})
 
-	got, _, err := svc.ResolveForSessionReadOnly(context.Background(), "unbound-sess")
+	got, err := svc.ResolveForSessionReadOnly(context.Background(), "unbound-sess")
 	if err != nil {
 		t.Fatalf("ResolveForSessionReadOnly: %v", err)
 	}
@@ -267,34 +266,43 @@ func TestAgentService_ResolveForSessionReadOnly_NoAutoAssign(t *testing.T) {
 	}
 }
 
+// TestAgentService_ResolveForSession_HardcodedFallback is the DB-only
+// replacement for the pre-TASKS/adhoc/01-eliminate-file-based-agent-
+// runtime.md version of this test (which supplied the built-in default
+// agent via the now-removed FileAgents in-memory registry and asserted the
+// synthetic "file-default" ID). The ultimate fallback is now a bare slug
+// ("default", defaultFallbackSlug) resolved purely through the DB reader:
+// resolveBinding returns that slug as the "agentID," s.Get(ctx, "default")
+// misses (no row's real ID is literally "default"), and resolveForSession's
+// own error-catching net falls through to GetBySlug(ctx, "default") —
+// which finds the real row.
 func TestAgentService_ResolveForSession_HardcodedFallback(t *testing.T) {
 	reader := newStubReader()
 	writer := &stubAgentWriter{}
 
-	// Provide the built-in default agent via FileAgents (the new fallback path).
-	defaultDef := &agent.Definition{
-		Name:         "Default",
-		Slug:         "default",
-		SystemPrompt: "You are a helpful assistant.",
-		Source:       "builtin",
-	}
+	// Real DB row with a real, non-slug-shaped ID -- mirrors any of the 9
+	// internal builtin profiles' actual agent_profiles.id post-ingest.
+	defaultAgent := &store.AgentProfile{ID: "agt-default-real-id", Name: "Default", Slug: "default", Status: "active"}
+	reader.addAgent(defaultAgent)
 
 	svc := NewAgentService(AgentServiceConfig{
-		Agents:     reader,
-		Writers:    writer,
-		Settings:   &stubSettings{defaultAgent: ""},
-		FileAgents: []*agent.Definition{defaultDef},
+		Agents:   reader,
+		Writers:  writer,
+		Settings: &stubSettings{defaultAgent: ""},
 	})
 
-	got, _, err := svc.ResolveForSession(context.Background(), "orphan-sess")
+	got, err := svc.ResolveForSession(context.Background(), "orphan-sess")
 	if err != nil {
 		t.Fatalf("ResolveForSession: %v", err)
 	}
-	if got.ID != "file-default" {
-		t.Errorf("agent ID = %q, want %q", got.ID, "file-default")
+	if got.ID != "agt-default-real-id" {
+		t.Errorf("agent ID = %q, want %q", got.ID, "agt-default-real-id")
 	}
 	if got.Slug != "default" {
 		t.Errorf("agent slug = %q, want %q", got.Slug, "default")
+	}
+	if len(writer.ensured) != 1 || writer.ensured[0] != "orphan-sess" {
+		t.Errorf("auto-assign expected for orphan-sess, got %v", writer.ensured)
 	}
 }
 
@@ -311,31 +319,25 @@ func TestAgentService_ResolveForSession_DisabledAgent(t *testing.T) {
 		Writers: &stubAgentWriter{},
 	})
 
-	_, _, err := svc.ResolveForSession(context.Background(), "sess-d")
+	_, err := svc.ResolveForSession(context.Background(), "sess-d")
 	if err == nil {
 		t.Fatal("expected error for disabled agent, got nil")
 	}
 }
 
-func TestAgentService_ResolveForSession_ModeFallback(t *testing.T) {
-	reader := newStubReader()
-	agent := &store.AgentProfile{ID: "a1", Name: "NoMode", Slug: "nomode", Status: "active"}
-	reader.addAgent(agent)
-	reader.sessionBind["sess-m"] = &store.SessionAgent{
-		SessionID: "sess-m", AgentID: "a1", Mode: "nonexistent", IsPrimary: true,
-	}
-	// No modes registered — should fall back to empty AgentMode.
+// Phase 0 item 21 ("Cut Modes, in full") deleted
+// TestAgentService_ResolveForSession_ModeFallback — it asserted
+// ResolveForSession fell back to an empty *store.AgentMode when the
+// session's bound mode slug didn't resolve. There is no more Legacy
+// AgentMode resolution step to fall back from.
 
-	svc := NewAgentService(AgentServiceConfig{
-		Agents:  reader,
-		Writers: &stubAgentWriter{},
-	})
-
-	_, mode, err := svc.ResolveForSession(context.Background(), "sess-m")
-	if err != nil {
-		t.Fatalf("ResolveForSession: %v", err)
-	}
-	if mode.Slug != "" {
-		t.Errorf("expected empty fallback mode, got slug %q", mode.Slug)
-	}
-}
+// TestAgentService_Get_FileBackedAgentOverlaysDBOnlyFields and
+// TestAgentService_Get_FileBackedAgentNoDBRowYet (TASKS/phase-1/12-fix-
+// agent-service-get-drops-new-db-only-columns.md's regression pins) were
+// removed by TASKS/adhoc/01-eliminate-file-based-agent-runtime.md: the
+// in-memory file-definition registry (FileAgents/fileDefs/resolveFileProfile/
+// agent.OverlayDBFields) they exercised no longer exists. Get/GetBySlug/List
+// are now plain passthroughs to the DB reader (see TestAgentService_CRUD
+// above) -- role_id/model_id/runtime_kind/consumer_id/activation_mode/
+// class/default_state are just ordinary columns on that same row now, with
+// no separate file-derived view to overlay them onto or diverge from.

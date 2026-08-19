@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Bot, MessageSquare, Play, SquareTerminal, Wand2 } from "lucide-react";
+import { Bot, MessageSquare, Play, Wand2 } from "lucide-react";
 import type React from "react";
 import { useEffect, useMemo, useState } from "react";
 import { Button } from "@/components/ui/button";
@@ -29,13 +29,12 @@ import type {
 } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
-type StartPath = "chat" | "harness" | "durable" | "recipe";
+type StartPath = "chat" | "durable" | "recipe";
 type DurableAction = "start" | "resume";
 
 interface StartSurfaceDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  workspaceId: string | null;
   projectId: string | null;
   defaultProvider?: string;
   defaultModel?: string;
@@ -46,7 +45,6 @@ interface StartSurfaceDialogProps {
 
 const PATHS: Array<{ id: StartPath; label: string; icon: typeof MessageSquare }> = [
   { id: "chat", label: "Chat", icon: MessageSquare },
-  { id: "harness", label: "Harness", icon: SquareTerminal },
   { id: "durable", label: "Durable", icon: Bot },
   { id: "recipe", label: "Recipe", icon: Wand2 },
 ];
@@ -54,7 +52,6 @@ const PATHS: Array<{ id: StartPath; label: string; icon: typeof MessageSquare }>
 export function StartSurfaceDialog({
   open,
   onOpenChange,
-  workspaceId,
   projectId,
   defaultProvider,
   defaultModel,
@@ -67,7 +64,6 @@ export function StartSurfaceDialog({
   const [provider, setProvider] = useState("");
   const [model, setModel] = useState("");
   const [agentId, setAgentId] = useState("");
-  const [bootProfileId, setBootProfileId] = useState("");
   const [durableAgentId, setDurableAgentId] = useState("");
   const [durableAction, setDurableAction] = useState<DurableAction>("start");
   const [durablePrompt, setDurablePrompt] = useState("");
@@ -112,7 +108,6 @@ export function StartSurfaceDialog({
       setAgentId(prefill.agent_id);
       setRecipeProfileId(prefill.agent_id);
     }
-    if (prefill.boot_profile_id) setBootProfileId(prefill.boot_profile_id);
     if (prefill.durable_agent_id) {
       setDurableAgentId(prefill.durable_agent_id);
       setPath("durable");
@@ -123,14 +118,12 @@ export function StartSurfaceDialog({
   useEffect(() => {
     if (!caps) return;
     const profiles = caps.profiles ?? [];
-    const bootProfiles = caps.boot_profiles ?? [];
     const durableAgents = caps.durable_agents ?? [];
     const recipes = caps.recipes ?? [];
     setProvider(
       (current) => current || prefill?.provider || defaultProvider || chatProviders[0]?.id || "",
     );
     setAgentId((current) => current || prefill?.agent_id || defaultAgent || profiles[0]?.id || "");
-    setBootProfileId((current) => current || prefill?.boot_profile_id || bootProfiles[0]?.id || "");
     setDurableAgentId(
       (current) => current || prefill?.durable_agent_id || durableAgents[0]?.id || "",
     );
@@ -184,32 +177,13 @@ export function StartSurfaceDialog({
   };
 
   const createChat = useMutation({
-    mutationFn: () => {
-      if (!workspaceId) throw new Error("Choose a workspace before starting.");
-      return api.createSession({
-        workspace_id: workspaceId,
+    mutationFn: () =>
+      api.createSession({
         project_id: projectId ?? undefined,
         provider: provider || undefined,
         model: model || undefined,
         agent_id: agentId || undefined,
-      });
-    },
-    onSuccess: (session) => complete(session.id),
-    onError: (err) => setError(errorMessage(err)),
-  });
-
-  const createHarness = useMutation({
-    mutationFn: () => {
-      if (!workspaceId) throw new Error("Choose a workspace before starting.");
-      if (!bootProfileId) throw new Error("No boot profile is selected.");
-      return api.createSession({
-        workspace_id: workspaceId,
-        project_id: projectId ?? undefined,
-        provider: bootProfileId,
-        model: bootProfileId,
-        agent_id: agentId || undefined,
-      });
-    },
+      }),
     onSuccess: (session) => complete(session.id),
     onError: (err) => setError(errorMessage(err)),
   });
@@ -218,7 +192,6 @@ export function StartSurfaceDialog({
     mutationFn: async () => {
       if (!durableAgentId) throw new Error("No durable agent is selected.");
       const body = {
-        workspace_id: workspaceId ?? undefined,
         project_id: projectId ?? undefined,
         wake_payload: {
           reason: durableAction === "resume" ? "lifecycle_resume" : "manual",
@@ -268,7 +241,6 @@ export function StartSurfaceDialog({
       model: recipeModel || undefined,
       runtime_kind: recipeRuntimeKind || undefined,
       work_root: recipeWorkRoot || undefined,
-      workspace_id: workspaceId ?? undefined,
       project_id: projectId ?? undefined,
       start: true,
       wake_payload: {
@@ -294,12 +266,10 @@ export function StartSurfaceDialog({
     recipeSlug,
     recipeWakePrompt,
     recipeWorkRoot,
-    workspaceId,
   ]);
 
   const pending =
     createChat.isPending ||
-    createHarness.isPending ||
     wakeDurable.isPending ||
     dryRunRecipe.isPending ||
     applyRecipe.isPending;
@@ -359,15 +329,6 @@ export function StartSurfaceDialog({
                     setModel={setModel}
                     setAgentId={setAgentId}
                     onStart={() => createChat.mutate()}
-                    pending={pending}
-                  />
-                )}
-                {path === "harness" && (
-                  <HarnessStartPane
-                    bootProfiles={caps?.boot_profiles ?? []}
-                    selected={bootProfileId}
-                    setSelected={setBootProfileId}
-                    onStart={() => createHarness.mutate()}
                     pending={pending}
                   />
                 )}
@@ -502,53 +463,6 @@ function ChatStartPane({
       <Button size="sm" onClick={onStart} disabled={pending || providers.length === 0}>
         <Play className="mr-1.5 size-3.5" />
         Start chat
-      </Button>
-    </section>
-  );
-}
-
-function HarnessStartPane({
-  bootProfiles,
-  selected,
-  setSelected,
-  onStart,
-  pending,
-}: {
-  bootProfiles: StartSurfaceCapabilitiesResponse["boot_profiles"];
-  selected: string;
-  setSelected: (value: string) => void;
-  onStart: () => void;
-  pending: boolean;
-}) {
-  return (
-    <section className="space-y-4">
-      <PaneHeader
-        title="Start local harness"
-        detail="Create a CLI or boot-profile-backed session."
-      />
-      <Field label="Boot profile">
-        <NativeSelect
-          aria-label="Boot profile"
-          value={selected}
-          onChange={setSelected}
-          disabled={bootProfiles.length === 0}
-        >
-          {bootProfiles.length === 0 ? <option value="">No boot profiles available</option> : null}
-          {bootProfiles.map((profile) => (
-            <option key={profile.id} value={profile.id}>
-              {profile.label}
-            </option>
-          ))}
-        </NativeSelect>
-      </Field>
-      {selected && (
-        <p className="rounded-[6px] border border-border-subtle bg-bg px-3 py-2 font-mono text-[11px] text-fg-muted">
-          provider={selected}
-        </p>
-      )}
-      <Button size="sm" onClick={onStart} disabled={pending || bootProfiles.length === 0}>
-        <SquareTerminal className="mr-1.5 size-3.5" />
-        Start harness
       </Button>
     </section>
   );
@@ -1062,13 +976,11 @@ function RecipeInputField({
 }
 
 function filterChatProviders(caps?: StartSurfaceCapabilitiesResponse): ProviderConfig[] {
-  return (caps?.providers ?? []).filter((provider) => !provider.id.startsWith("bootprofile:"));
+  return caps?.providers ?? [];
 }
 
 function filterModelsForProvider(models: ModelRecord[], provider: string): ModelRecord[] {
-  return models.filter(
-    (model) => model.provider_id === provider && !model.provider_id.startsWith("bootprofile:"),
-  );
+  return models.filter((model) => model.provider_id === provider);
 }
 
 function selectedRecipe(caps: StartSurfaceCapabilitiesResponse | undefined, id: string) {

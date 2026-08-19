@@ -7,7 +7,7 @@ import (
 // makeDocumentTestSession creates a minimal session for document tests.
 func makeDocumentTestSession(t *testing.T, s *Store) string {
 	t.Helper()
-	sess := makeTestSession(t, s, "ws-j10-docs")
+	sess := makeTestSession(t, s)
 	return sess.ID
 }
 

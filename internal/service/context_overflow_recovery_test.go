@@ -65,7 +65,6 @@ func (f *fakeEventEmitter) EmitContextBudgetExceeded(_ context.Context, _ string
 }
 func (f *fakeEventEmitter) EmitError(_ context.Context, _, _, _ string)                    {}
 func (f *fakeEventEmitter) EmitMessageReceived(_ context.Context, _, _, _ string, _ int64) {}
-func (f *fakeEventEmitter) EmitModeChanged(_ context.Context, _, _, _ string)              {}
 
 // TestRecoverFromContextOverflow_DisabledFlag covers the plan §T9 requirement
 // that UserSettings.ContextOverflowRecovery=false produces a no-op — callers
@@ -101,7 +100,6 @@ func TestRecoverFromContextOverflow_DisabledFlag(t *testing.T) {
 		nil,
 		nil, // nil stream channel — helper must tolerate
 		"prompt is too long", compactTriggerContextOverflow,
-		map[string]any{},
 	)
 	if ok {
 		t.Fatalf("recovery should be a no-op when flag is disabled; got ok=true")
@@ -138,7 +136,6 @@ func TestRecoverFromContextOverflow_NoSummarizerSkips(t *testing.T) {
 		nil,
 		nil,
 		"prompt is too long", compactTriggerContextOverflow,
-		map[string]any{},
 	)
 	if ok {
 		t.Fatalf("recovery should be skipped when no summarizer is available; got ok=true")
@@ -154,7 +151,6 @@ func TestRecoverFromContextOverflow_NilResult(t *testing.T) {
 		nil,
 		&store.AgentProfile{},
 		nil, nil, nil, "prompt is too long", compactTriggerContextOverflow,
-		map[string]any{},
 	)
 	if ok {
 		t.Fatal("nil result should not succeed")
@@ -205,7 +201,6 @@ func TestRecoverFromContextOverflow_WithEventsNilResult(t *testing.T) {
 		&store.AgentProfile{},
 		nil, nil, nil,
 		"prompt is too long", compactTriggerContextOverflow,
-		map[string]any{},
 	)
 	if ok {
 		t.Fatal("nil result should not succeed")

@@ -273,17 +273,16 @@ func TestDefaultEnvelopeWrapper_TreatsEmptyAsProse(t *testing.T) {
 	}
 }
 
-// TestExecuteTask_WorkspaceAndProfileThreadedToSpawn verifies that
-// ExecuteTaskArgs.WorkspaceID and .AgentProfileID are forwarded verbatim
-// to the SpawnRequest so the subagent trust gate can fire. H1 CW-20260421-0014.
-func TestExecuteTask_WorkspaceAndProfileThreadedToSpawn(t *testing.T) {
+// TestExecuteTask_ProfileThreadedToSpawn verifies that
+// ExecuteTaskArgs.AgentProfileID is forwarded verbatim to the SpawnRequest
+// so the subagent trust gate can fire. H1 CW-20260421-0014.
+func TestExecuteTask_ProfileThreadedToSpawn(t *testing.T) {
 	spawner := &fakeSpawner{result: &SpawnResult{Summary: "ok"}}
 	wrapper := &recordingWrapper{out: Envelope{Kind: "envelope", Version: 1, Type: "report-card"}}
 
 	args := ExecuteTaskArgs{
 		SessionID:      "sess-trust",
 		Message:        "do the thing",
-		WorkspaceID:    "ws-dogfood",
 		AgentProfileID: "ap-worker-id",
 	}
 
@@ -291,9 +290,6 @@ func TestExecuteTask_WorkspaceAndProfileThreadedToSpawn(t *testing.T) {
 		t.Fatalf("ExecuteTask error: %v", err)
 	}
 
-	if spawner.got.WorkspaceID != "ws-dogfood" {
-		t.Errorf("WorkspaceID = %q, want ws-dogfood", spawner.got.WorkspaceID)
-	}
 	if spawner.got.AgentProfileID != "ap-worker-id" {
 		t.Errorf("AgentProfileID = %q, want ap-worker-id", spawner.got.AgentProfileID)
 	}
@@ -331,7 +327,6 @@ func TestExecuteTask_ReflexWorkflowHint_RoutesToWorkflowLauncher(t *testing.T) {
 	args := ExecuteTaskArgs{
 		SessionID:      "sess-wf",
 		Message:        "onboard the new user",
-		WorkspaceID:    "ws-1",
 		AgentProfileID: "ap-1",
 		ReflexHints:    &ReflexHints{WorkflowName: "onboard-user"},
 	}
@@ -353,8 +348,8 @@ func TestExecuteTask_ReflexWorkflowHint_RoutesToWorkflowLauncher(t *testing.T) {
 	if launcher.got.WorkflowName != "onboard-user" {
 		t.Errorf("launched workflow = %q, want onboard-user", launcher.got.WorkflowName)
 	}
-	if launcher.got.WorkspaceID != "ws-1" || launcher.got.AgentProfileID != "ap-1" {
-		t.Errorf("launch req = %+v, want workspace/profile threaded through", launcher.got)
+	if launcher.got.AgentProfileID != "ap-1" {
+		t.Errorf("launch req = %+v, want profile threaded through", launcher.got)
 	}
 	if launcher.got.ParentSessionID != "sess-wf" {
 		t.Errorf("launch req ParentSessionID = %q, want sess-wf", launcher.got.ParentSessionID)
@@ -404,26 +399,23 @@ func TestExecuteTask_WorkflowRoute_RequiresWorkflowName(t *testing.T) {
 	}
 }
 
-// TestExecuteTask_EmptyWorkspaceProfile_FallsThrough verifies that when no
-// WorkspaceID / AgentProfileID are set, the SpawnRequest carries empty
-// strings (which causes the subagent gate to fall back to TrustNormal).
-func TestExecuteTask_EmptyWorkspaceProfile_FallsThrough(t *testing.T) {
+// TestExecuteTask_EmptyProfile_FallsThrough verifies that when no
+// AgentProfileID is set, the SpawnRequest carries an empty string (which
+// causes the subagent gate to fall back to TrustNormal).
+func TestExecuteTask_EmptyProfile_FallsThrough(t *testing.T) {
 	spawner := &fakeSpawner{result: &SpawnResult{Summary: "ok"}}
 	wrapper := &recordingWrapper{out: Envelope{Kind: "envelope", Version: 1, Type: "report-card"}}
 
 	args := ExecuteTaskArgs{
 		SessionID: "sess-no-trust",
 		Message:   "do the thing",
-		// WorkspaceID and AgentProfileID intentionally omitted.
+		// AgentProfileID intentionally omitted.
 	}
 
 	if _, err := ExecuteTask(context.Background(), spawner, wrapper, nil, args); err != nil {
 		t.Fatalf("ExecuteTask error: %v", err)
 	}
 
-	if spawner.got.WorkspaceID != "" {
-		t.Errorf("expected empty WorkspaceID fallback, got %q", spawner.got.WorkspaceID)
-	}
 	if spawner.got.AgentProfileID != "" {
 		t.Errorf("expected empty AgentProfileID fallback, got %q", spawner.got.AgentProfileID)
 	}

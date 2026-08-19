@@ -32,7 +32,7 @@ func (st *SelfToolsTransport) callProcedureGet(ctx context.Context, args map[str
 		return errorResult("name is required"), nil
 	}
 
-	_, agentID := CallerProfileFromContext(ctx)
+	agentID := CallerProfileFromContext(ctx)
 	if agentID == "" {
 		return errorResult("procedure_get: no calling agent in context"), nil
 	}

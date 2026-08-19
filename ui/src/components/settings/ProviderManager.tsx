@@ -14,7 +14,6 @@ import type { ProviderStatus, CLIDetectionResult } from '@/lib/types'
 const PROVIDER_INITIALS: Record<string, string> = {
   anthropic: 'A',
   openai: 'O',
-  ollama: 'Ol',
   gemini: 'G',
   mistral: 'M',
   'azure-openai': 'Az',
@@ -24,15 +23,6 @@ const PROVIDER_INITIALS: Record<string, string> = {
   'pty-gemini': 'G',
   'pty-copilot': 'Cp',
   'pty-aider': 'Ai',
-}
-
-const DEFAULT_BASE_URLS: Record<string, string> = {
-  anthropic: 'https://api.anthropic.com',
-  openai: 'https://api.openai.com/v1',
-  gemini: 'https://generativelanguage.googleapis.com',
-  mistral: 'https://api.mistral.ai/v1',
-  'azure-openai': '',
-  ollama: 'http://localhost:11434',
 }
 
 function ProviderIcon({ providerType, active }: { providerType: string; active: boolean }) {
@@ -54,14 +44,6 @@ function KeyIcon() {
   return (
     <svg className="w-3 h-3 text-fg-faint shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 7a2 2 0 012 2m4 0a6 6 0 01-7.743 5.743L11 17H9v2H7v2H4a1 1 0 01-1-1v-2.586a1 1 0 01.293-.707l5.964-5.964A6 6 0 1121 9z" />
-    </svg>
-  )
-}
-
-function LinkIcon() {
-  return (
-    <svg className="w-3 h-3 text-fg-faint shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1" />
     </svg>
   )
 }
@@ -305,64 +287,6 @@ function CLIPathField({
   )
 }
 
-// --- Base URL — click to edit ---
-
-function BaseURLField({ providerId, providerType, currentURL }: { providerId: string; providerType: string; currentURL: string }) {
-  const defaultURL = DEFAULT_BASE_URLS[providerType] ?? ''
-  const displayURL = currentURL || defaultURL
-  const [modalOpen, setModalOpen] = useState(false)
-  const [value, setValue] = useState(displayURL)
-  const queryClient = useQueryClient()
-
-  const mutation = useMutation({
-    mutationFn: (url: string) => api.updateProvider(providerId, { base_url: url }),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['provider-statuses'] })
-      setModalOpen(false)
-    },
-  })
-
-  const handleOpen = () => {
-    setValue(displayURL)
-    setModalOpen(true)
-  }
-
-  return (
-    <>
-      <button onClick={handleOpen} className="text-left group min-w-0">
-        <span className="text-[11px] text-fg-secondary font-mono truncate max-w-[200px] inline-block provider-scroll group-hover:text-fg transition-colors cursor-pointer">
-          {displayURL || 'Not set'}
-        </span>
-      </button>
-
-      <Modal title="Base URL" open={modalOpen} onClose={() => setModalOpen(false)}>
-        <div className="space-y-4">
-          <input
-            type="text"
-            value={value}
-            onChange={(e) => setValue(e.target.value)}
-            onKeyDown={(e) => { if (e.key === 'Enter') mutation.mutate(value) }}
-            placeholder={defaultURL || 'https://api.example.com'}
-            className="w-full bg-surface border border-border-subtle rounded-md px-3 py-2 text-sm text-fg font-mono focus:outline-none focus:ring-1 focus:ring-primary"
-            autoFocus
-          />
-          <div className="flex items-center justify-end gap-2">
-            <Button variant="ghost" size="sm" onClick={() => setModalOpen(false)}>Cancel</Button>
-            <Button
-              size="sm"
-              className="bg-primary hover:bg-primary-hover text-white"
-              onClick={() => mutation.mutate(value)}
-              disabled={mutation.isPending}
-            >
-              Save
-            </Button>
-          </div>
-        </div>
-      </Modal>
-    </>
-  )
-}
-
 // --- Unified Provider Card ---
 
 function ProviderCard({
@@ -376,10 +300,9 @@ function ProviderCard({
 }) {
   const queryClient = useQueryClient()
 
-  const isOllama = provider.provider_type === 'ollama'
   const canActivate = isCLI
     ? (detection?.detected ?? false)
-    : (provider.has_api_key || isOllama)
+    : provider.has_api_key
   const isActive = provider.is_enabled && canActivate
 
   const toggleMutation = useMutation({
@@ -432,8 +355,8 @@ function ProviderCard({
 
       {/* Detail footer */}
       <div className="border-t border-border-subtle px-3.5 py-2 bg-bg/40 flex items-center gap-3">
-        {/* Field 1: Key / Path / Host */}
-        {!isCLI && !isOllama && (
+        {/* Field 1: Key / Path */}
+        {!isCLI && (
           <div className="flex items-center gap-1.5 min-w-0">
             <KeyIcon />
             <APIKeyField provider={provider} />
@@ -448,27 +371,6 @@ function ProviderCard({
               detection={detection}
             />
           </div>
-        )}
-        {isOllama && (
-          <div className="flex items-center gap-1.5 min-w-0">
-            <LinkIcon />
-            <BaseURLField
-              providerId={provider.id}
-              providerType={provider.provider_type}
-              currentURL={provider.base_url}
-            />
-          </div>
-        )}
-
-        {/* Separator + Field 2 */}
-        {!isCLI && !isOllama && (
-          <>
-            <div className="w-px h-3.5 bg-border shrink-0" />
-            <div className="flex items-center gap-1.5 min-w-0">
-              <LinkIcon />
-              <BaseURLField providerId={provider.id} providerType={provider.provider_type} currentURL={provider.base_url} />
-            </div>
-          </>
         )}
         {isCLI && (
           <>
@@ -541,7 +443,7 @@ export function ProviderManager() {
     if (isCLIProvider(p.provider_type)) {
       return false
     }
-    return p.has_api_key || p.provider_type === 'ollama'
+    return p.has_api_key
   }, [isCLIProvider])
 
   const filteredProviders = useMemo(() => {

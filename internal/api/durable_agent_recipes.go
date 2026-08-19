@@ -83,7 +83,6 @@ func (a *API) handleApplyDurableAgentRecipe(w http.ResponseWriter, r *http.Reque
 	}
 	if serviceReq.Start {
 		launch, err := a.Services.DurableAgents.Start(r.Context(), inst.ID, service.DurableAgentStartRequest{
-			WorkspaceID: serviceReq.WorkspaceID,
 			ProjectID:   serviceReq.ProjectID,
 			WakePayload: plan.WakePayload,
 		})
@@ -106,7 +105,6 @@ func durableAgentRecipeRequestToService(req DurableAgentRecipeRequest) service.D
 		Model:       req.Model,
 		RuntimeKind: req.RuntimeKind,
 		WorkRoot:    req.WorkRoot,
-		WorkspaceID: req.WorkspaceID,
 		ProjectID:   req.ProjectID,
 		WakePayload: durableAgentWakePayloadFromRequest(req.WakePayload),
 		Metadata:    req.Metadata,

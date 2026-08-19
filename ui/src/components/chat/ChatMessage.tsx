@@ -10,50 +10,12 @@ import { usePluginAction } from "@/hooks/usePluginAction";
 import { usePluginSlots } from "@/hooks/usePluginSlots";
 import { useSettings } from "@/hooks/useSettings";
 import { resolveIcon } from "@/lib/icons";
-import type { AgentMode, Envelope, Message } from "@/lib/types";
-import { useActiveMode } from "@/stores/useChatStore";
+import type { Envelope, Message } from "@/lib/types";
 import { useLayoutStore } from "@/stores/useLayoutStore";
 import { ContentActions } from "./ContentActions";
 import { EnvelopeRenderer } from "./envelopes/EnvelopeRenderer";
 import { MessageContent } from "./MessageContent";
 import { ShellMessage } from "./ShellMessage";
-
-// normalizeEnvelope fixes known agent schema drift for question-form envelopes:
-//   - questions/title/subtitle nested in data → promoted to top level
-//   - question.label → question.prompt
-//   - question.display / question.displayStyle → question.display_style
-function normalizeEnvelope(env: Envelope): Envelope {
-  if (env.type !== "question-form") return env;
-
-  const data = env.data as Record<string, unknown> | undefined;
-
-  // Unnest questions (and title/subtitle) from data if agent put them there
-  let questions = env.questions;
-  let title = env.title;
-  let subtitle = env.subtitle;
-
-  if (data && Array.isArray(data.questions) && !questions?.length) {
-    questions = (data.questions as Record<string, unknown>[]).map(
-      normalizeQuestion,
-    ) as unknown as Envelope["questions"];
-    if (!title && typeof data.title === "string") title = data.title;
-    if (!subtitle && typeof data.subtitle === "string") subtitle = data.subtitle;
-  } else if (questions) {
-    questions = (questions as unknown as Record<string, unknown>[]).map(
-      normalizeQuestion,
-    ) as unknown as Envelope["questions"];
-  }
-
-  return { ...env, questions, title, subtitle };
-}
-
-function normalizeQuestion(q: Record<string, unknown>): Record<string, unknown> {
-  return {
-    ...q,
-    prompt: q.prompt ?? q.label ?? q.text ?? q.question ?? "",
-    display_style: q.display_style ?? q.display ?? q.displayStyle ?? undefined,
-  };
-}
 
 interface StructuredMessage {
   v: number;
@@ -97,19 +59,12 @@ function formatRelativeTime(dateStr: string): string {
   return date.toLocaleDateString();
 }
 
-const MODE_AVATAR_STYLES: Record<AgentMode, { bg: string; text: string }> = {
-  default: { bg: "bg-mode-default/15", text: "text-mode-default" },
-  architect: { bg: "bg-mode-architect/15", text: "text-mode-architect" },
-  planner: { bg: "bg-mode-planner/15", text: "text-mode-planner" },
-  writer: { bg: "bg-mode-writer/15", text: "text-mode-writer" },
-};
-
-const MODE_LABEL_STYLES: Record<AgentMode, string> = {
-  default: "text-mode-default",
-  architect: "text-mode-architect",
-  planner: "text-mode-planner",
-  writer: "text-mode-writer",
-};
+// Default (non-user) message avatar style. Phase 0 item 21 ("Cut Modes, in
+// full") removed the mode-indexed MODE_AVATAR_STYLES / MODE_LABEL_STYLES —
+// the per-session `activeMode` dial they were keyed on had no real backend
+// setter and always resolved to "default" in production; this is that
+// same "default" style, now a plain constant instead of a lookup table.
+const DEFAULT_AVATAR_STYLE = { bg: "bg-mode-default/15", text: "text-mode-default" };
 
 // Agent colors for multi-agent sessions — deterministic by agent_id.
 // These are identity markers (not semantic), so they stay as distinct hues.
@@ -149,7 +104,6 @@ export function ChatMessage({
   userMessageCount,
 }: ChatMessageProps) {
   const [hovered, setHovered] = useState(false);
-  const activeMode = useActiveMode();
   const { data: settings } = useSettings();
   const userAvatarUrl = (settings?.ext_settings?.avatar_url as string) || "";
   const userDisplayName = (settings?.ext_settings?.display_name as string) || "";
@@ -229,9 +183,7 @@ export function ChatMessage({
 
   const isShellExec = shellMeta !== null;
   const isUser = message.role === "user";
-  const avatarStyle = isUser
-    ? { bg: "bg-surface", text: "text-fg-secondary" }
-    : MODE_AVATAR_STYLES[activeMode];
+  const avatarStyle = isUser ? { bg: "bg-surface", text: "text-fg-secondary" } : DEFAULT_AVATAR_STYLE;
 
   // Parse envelope — from saved envelope field or from streaming content.
   const envelope = useMemo<Envelope | null>(() => {
@@ -240,7 +192,6 @@ export function ChatMessage({
       const merged: Envelope = { kind: arr[0].kind, version: arr[0].version, type: arr[0].type };
       for (const env of arr) {
         if (env.proposals) merged.proposals = [...(merged.proposals ?? []), ...env.proposals];
-        if (env.questions) merged.questions = [...(merged.questions ?? []), ...env.questions];
         if (env.approval && !merged.approval) merged.approval = env.approval;
         if (env.status && !merged.status) merged.status = env.status;
         if (env.data && !merged.data) {
@@ -256,9 +207,8 @@ export function ChatMessage({
       try {
         const raw =
           typeof message.envelope === "string" ? JSON.parse(message.envelope) : message.envelope;
-        if (Array.isArray(raw) && raw.length > 0) return mergeEnvelopes(raw.map(normalizeEnvelope));
-        if (raw && typeof raw === "object" && !Array.isArray(raw))
-          return normalizeEnvelope(raw as Envelope);
+        if (Array.isArray(raw) && raw.length > 0) return mergeEnvelopes(raw as Envelope[]);
+        if (raw && typeof raw === "object" && !Array.isArray(raw)) return raw as Envelope;
       } catch {
         /* ignore */
       }
@@ -266,12 +216,12 @@ export function ChatMessage({
 
     // 2. During streaming, extract from content (envelope field not set yet).
     if (message.content) {
-      const pattern = /```(?:volon-envelope|nanite-envelope|fragments-envelope)\s*\n([\s\S]*?)```/g;
+      const pattern = /```nanite-envelope\s*\n([\s\S]*?)```/g;
       const envelopes: Envelope[] = [];
       let match;
       while ((match = pattern.exec(message.content)) !== null) {
         try {
-          envelopes.push(normalizeEnvelope(JSON.parse(match[1].trim())));
+          envelopes.push(JSON.parse(match[1].trim()));
         } catch {
           /* incomplete JSON during streaming — skip */
         }
@@ -343,11 +293,6 @@ export function ChatMessage({
               className={`text-xs px-1.5 py-0.5 rounded-full ${AGENT_COLORS[agentColorIndex(message.agent_id)].badge}`}
             >
               agent
-            </span>
-          )}
-          {!isUser && activeMode !== "default" && (
-            <span className={`text-xs font-medium ${MODE_LABEL_STYLES[activeMode]}`}>
-              · {activeMode}
             </span>
           )}
           {hovered && (

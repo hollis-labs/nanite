@@ -66,6 +66,5 @@ func DefaultRegistry(s *store.Store) *Registry {
 	r := NewRegistry(s)
 	r.Register(NewAgentBuilder(s))
 	r.Register(NewSkillBuilder(s))
-	r.Register(NewPromptTemplateBuilder(s))
 	return r
 }

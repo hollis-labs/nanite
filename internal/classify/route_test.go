@@ -223,3 +223,30 @@ func TestV1EnvelopeTypeBaseline_NotEmpty(t *testing.T) {
 		t.Fatal("v1EnvelopeTypeBaseline is empty — would silently disable executor routing")
 	}
 }
+
+// TestPhraseHitWordBoundary pins phraseHit's word-boundary semantics.
+// Moved here from mode_test.go when mode.go was deleted (Phase 0 item 21
+// — Cut Modes, in full) since route.go's anyPhraseHit is now the only
+// consumer of phraseHit.
+func TestPhraseHitWordBoundary(t *testing.T) {
+	cases := []struct {
+		haystack string
+		phrase   string
+		want     bool
+	}{
+		{"plan a launch", "plan a", true},
+		{"i plan a launch", "plan a", true},
+		{"planet a", "plan a", false}, // 'plan' followed by 'e' — not a boundary
+		{"planning", "plan", false},   // 'plan' followed by 'n'
+		{"the plan, then", "plan", true},
+		{"unplanned", "plan", false}, // 'plan' preceded by 'n'
+		{"", "plan", false},
+		{"plan", "plan", true},
+	}
+	for _, tc := range cases {
+		got := phraseHit(tc.haystack, tc.phrase)
+		if got != tc.want {
+			t.Errorf("phraseHit(%q, %q) = %v, want %v", tc.haystack, tc.phrase, got, tc.want)
+		}
+	}
+}

@@ -1,4 +1,3 @@
-import { useQuery } from "@tanstack/react-query";
 import { ArrowBigUp, ChevronDown, Square } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
@@ -27,7 +26,6 @@ type EffortValue = (typeof EFFORT_LEVELS)[number]["value"];
 const PROVIDER_ICONS: Record<string, string> = {
   anthropic: "A",
   openai: "O",
-  ollama: "Ol",
   gemini: "G",
   mistral: "M",
   "azure-openai": "Az",
@@ -85,73 +83,6 @@ export function ComposerToolbar({
   const activeEffort = useActiveEffort() as EffortValue;
   const setActiveEffort = useChatStore((s) => s.setActiveEffort);
   const activeSessionId = useAppStore((s) => s.activeSessionId);
-  // B3 (CW-20260428-0011) + F2 (CW-20260429-0002): per-session auto-switch
-  // override toggle. Cycle order: inherit → off → on → inherit. "inherit"
-  // defers to the global mode_auto_switch_pref; "off" suppresses all
-  // auto-switches for this session even when the global pref is "always" or
-  // "ask"; "on" re-enables (does NOT bypass first-use). F2 persists this on
-  // sessions.auto_switch_override so it survives session reload.
-  const autoSwitchOverride = useChatStore((s) =>
-    activeSessionId ? s.autoSwitchSessionOverrides[activeSessionId] : undefined,
-  );
-  const setAutoSwitchOverride = useChatStore((s) => s.setAutoSwitchOverride);
-  // F2: load session row to seed the store on first render / session swap.
-  // We use the same query key the rest of the app uses so the cache is shared.
-  const { data: sessionForOverride } = useQuery({
-    queryKey: ["session", activeSessionId],
-    queryFn: () => api.getSession(activeSessionId!),
-    enabled: !!activeSessionId,
-  });
-  const persistedOverride = sessionForOverride?.auto_switch_override ?? null;
-  useEffect(() => {
-    if (!activeSessionId) return;
-    // Map persisted boolean | null → store enum.
-    if (persistedOverride === true) {
-      setAutoSwitchOverride(activeSessionId, "on");
-    } else if (persistedOverride === false) {
-      setAutoSwitchOverride(activeSessionId, "off");
-    } else {
-      setAutoSwitchOverride(activeSessionId, "inherit");
-    }
-    // Only re-run when the persisted value or the active session changes —
-    // setAutoSwitchOverride is stable from zustand.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeSessionId, persistedOverride]);
-  const cycleAutoSwitch = useCallback(() => {
-    if (!activeSessionId) return;
-    // Cycle: inherit → off → on → inherit.
-    let next: "inherit" | "off" | "on";
-    let payload: boolean | null;
-    if (autoSwitchOverride === undefined) {
-      next = "off";
-      payload = false;
-    } else if (autoSwitchOverride === "off") {
-      next = "on";
-      payload = true;
-    } else {
-      next = "inherit";
-      payload = null;
-    }
-    // Optimistic local update.
-    setAutoSwitchOverride(activeSessionId, next);
-    // Persist to the session row. Failure logs but doesn't roll back the
-    // optimistic update — the next session reload will re-seed from the row.
-    void api.setSessionAutoSwitch(activeSessionId, payload).catch((err) => {
-      console.error("[ComposerToolbar] failed to persist auto-switch override:", err);
-    });
-  }, [activeSessionId, autoSwitchOverride, setAutoSwitchOverride]);
-  const autoSwitchTitle =
-    autoSwitchOverride === "off"
-      ? "Auto-switch: OFF (per-session override). Click to set ON."
-      : autoSwitchOverride === "on"
-        ? "Auto-switch: ON (per-session override). Click to clear."
-        : "Auto-switch: inherit global pref. Click to override OFF for this session.";
-  const autoSwitchClass =
-    autoSwitchOverride === "on"
-      ? "text-primary"
-      : autoSwitchOverride === "off"
-        ? "text-fg-faint line-through decoration-fg-faint/50"
-        : "text-fg-faint/60";
   const [modelOpen, setModelOpen] = useState(false);
   const buttonRef = useRef<HTMLButtonElement>(null);
   const dropdownRef = useRef<HTMLDivElement>(null);
@@ -299,10 +230,6 @@ export function ComposerToolbar({
           onCycleShell={onCycleShell}
           shellTitle={shellTitle}
           shellClass={shellClass}
-          autoSwitchOverride={autoSwitchOverride}
-          onCycleAutoSwitch={cycleAutoSwitch}
-          autoSwitchTitle={autoSwitchTitle}
-          autoSwitchClass={autoSwitchClass}
           uploading={uploading}
           layoutOpen={layoutOpen}
           onToggleLayout={() => setLayoutOpen((o) => !o)}

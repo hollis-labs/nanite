@@ -40,13 +40,20 @@ func TestBuildPluginEnvelopeWrap_OmitsEmptyRouting(t *testing.T) {
 
 // TestBuildPluginEnvelopeWrap_EmitsDevModeOnly covers the wrap-level "DEV"
 // marker (CW-20260517-0008). Envelopes whose SSE emission is gated behind
-// developer mode (today: chat-loop-budget-soft-warning) set DevModeOnly so
-// the FE renders a "DEV" badge — operators recognize them as dev-mode
-// telemetry rather than real alerts. The flag rides at wrap level and is
-// elided when false.
+// developer mode set DevModeOnly so the FE renders a "DEV" badge —
+// operators recognize them as dev-mode telemetry rather than real alerts.
+// The flag rides at wrap level and is elided when false.
+//
+// Phase 0 item 12 (2026-08-18) removed the only production envelope that
+// exercised DevModeOnly (chat-loop-budget-soft-warning, a soft/telemetry-
+// only signal that never gated the loop). buildPluginEnvelopeWrap itself
+// takes the envelope type as a plain string and doesn't validate it
+// against the registry, so this test exercises the wrap-level DevModeOnly
+// code path directly with an arbitrary existing type name (report-card)
+// rather than asserting anything about a real dev-mode-gated envelope.
 func TestBuildPluginEnvelopeWrap_EmitsDevModeOnly(t *testing.T) {
-	payload := []byte(`{"max_turns":12,"iteration":15}`)
-	wrap, err := buildPluginEnvelopeWrap("", "chat-loop-budget-soft-warning", payload, EnvelopeRouting{
+	payload := []byte(`{"title":"Status","metric":12}`)
+	wrap, err := buildPluginEnvelopeWrap("", "report-card", payload, EnvelopeRouting{
 		DisplayClass: EnvelopeDisplayClassAlert,
 		DevModeOnly:  true,
 	})

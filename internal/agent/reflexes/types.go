@@ -8,14 +8,18 @@
 // pending_reflexes DB tables, the store.AgentReflex/store.PendingReflex
 // types, and the /api/agents/{id}/reflexes API surface.
 //
-// Not to be confused with: internal/promptrouter — a completely
-// different system, a deterministic phrase-match dispatch router that
-// feeds dispatch.AssignRole from user input before nanite_execute_task
-// runs. It shares no code, no lifecycle, and no runtime with this
-// package. (It was previously named internal/reflex; it was renamed to
-// internal/promptrouter to remove the naming collision this comment used
-// to warn about.) See docs/promptrouter-catalog.md and
-// docs/promptrouter-authoring.md for that system's docs.
+// Historical naming-collision note: this package was once confused with
+// internal/promptrouter — a since-retired deterministic phrase-match
+// dispatch router that fed dispatch.AssignRole from user input before
+// nanite_execute_task ran. It shared no code, no lifecycle, and no
+// runtime with this package. (It was previously named internal/reflex;
+// it was renamed to internal/promptrouter specifically to stop
+// colliding with this package's name.) TASKS/phase-4/
+// 03-migrate-promptrouter-to-reflexes.md retired internal/promptrouter
+// in full and migrated its phrase catalog onto this package's own
+// DB-backed dispatch_to_agent agent_reflexes rows (see seeds.go) — the
+// naming collision this note used to warn about no longer has two
+// live sides. "reflexes" is now unambiguous.
 //
 // Historical note: this package was briefly named driftguard
 // (CW-20260816-0062) in an attempt to resolve the naming collision
@@ -101,6 +105,24 @@ type State struct {
 	// PrefixTokens is the most recent input prefix size, used by the
 	// context_pressure predicate. 0 means unknown.
 	PrefixTokens int `json:"prefix_tokens"`
+	// ScopeTier / ExecutionPattern (Phase 4 item 02,
+	// TASKS/phase-4/02-dispatch-to-agent-reflex-action-kind-and-broker-migration.md)
+	// carry the CURRENT turn's pre-loop classify.ScopeTier /
+	// classify.ExecutionPattern signal (internal/classify), stringified
+	// via their own String() methods (e.g. "open", "subagent"). Unlike
+	// every other State field — built from persisted history by
+	// StateCollector — these two are populated directly by the caller
+	// from the in-flight turn's already-computed classification;
+	// StateCollector has no way to know a not-yet-decided turn's live
+	// classification (it only reads rows already committed to the
+	// store). Empty string when the caller has no classification to
+	// offer. Only internal/service/chat_reflex_dispatch.go's
+	// dispatch_to_agent evaluation populates these today — the general
+	// inject_reminder/halt_session/etc. evaluation pass
+	// (chat_reflexes.go's evaluateAndInjectReflexes, via
+	// StateCollector.Collect) does not.
+	ScopeTier        string `json:"scope_tier,omitempty"`
+	ExecutionPattern string `json:"execution_pattern,omitempty"`
 }
 
 // EventSignal is a thin projection of store.EventLogEntry for the

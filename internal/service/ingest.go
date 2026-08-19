@@ -9,9 +9,25 @@ package service
 // Auto-ingestion is called from NewContainer after Discover() returns.
 // It makes the DB the runtime source of truth: files are the import path,
 // DB is where the runtime reads from.
+//
+// TASKS/phase-1/08 ("Kill the file-reingest-on-boot pattern, in full"):
+// AutoIngestAgents/AutoIngestSkills run unconditionally on every boot, but
+// once a def has already been ingested into a DB row, that row's content is
+// frozen against further boot-time file-parse passes -- the file stays the
+// *first-ingest* path, not a standing sync. The one exception is a genuine
+// provenance transition (existing.Source != the incoming def's Source,
+// e.g. the historical builtin->internal migration flip, CW-20260512-0111)
+// -- that's a deliberate, one-time reclassification, not an ordinary
+// repeated boot, so it still content-syncs once. A real, deliberate
+// re-import (an agent edited through the managed-agent write path,
+// AgentConfigService.Update/writeManaged/SaveManagedAgentProfile, all of
+// which call IngestAgentDefinition directly, not through the boot-time
+// AutoIngestAgents pass) is unaffected by the freeze -- see upsertAgentDef's
+// bootPass parameter.
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"time"
@@ -67,7 +83,7 @@ func AutoIngestAgents(st *store.Store, defs []*agentpkg.Definition, knownTools m
 			continue
 		}
 		considered++
-		if err := upsertAgentDef(st, def); err != nil {
+		if err := upsertAgentDef(st, def, true /* bootPass: freeze already-ingested rows */); err != nil {
 			slog.Warn("service: auto-ingest agent", "slug", def.Slug, "err", err)
 			failures = append(failures, fmt.Sprintf("%s: %v", def.Slug, err))
 			continue
@@ -122,16 +138,28 @@ func unknownDeclaredTools(def *agentpkg.Definition, knownTools map[string]bool) 
 	return bad
 }
 
+// IngestAgentDefinition is the explicit, deliberate reimport path -- called
+// by AgentConfigService.writeManaged/SaveManagedAgentProfile immediately
+// after a managed agent's file is written, so the edit that was just made
+// takes effect in the DB right away. Unlike AutoIngestAgents' boot-time bulk
+// pass, this always content-syncs the row (bootPass=false) -- it is the one
+// legitimate "pull this file's content into the DB" action TASKS/phase-1/08
+// preserves, not the standing every-boot sync it kills.
 func IngestAgentDefinition(st *store.Store, def *agentpkg.Definition) error {
 	if def == nil || def.Slug == "" {
 		return fmt.Errorf("definition slug is required")
 	}
-	return upsertAgentDef(st, def)
+	return upsertAgentDef(st, def, false /* bootPass: explicit reimport always syncs */)
 }
 
 // AutoIngestSkills upserts all discovered skill definitions into the DB.
-// Called once at container startup. Errors per-definition are logged and
-// skipped; the function returns the count of successful ingestions.
+// Called once at container startup, and again every subsequent boot. Errors
+// per-definition are logged and skipped; the function returns the count of
+// successful ingestions.
+//
+// TASKS/phase-1/08: a skill row, once ingested under its current source, is
+// frozen against this boot-time pass -- see upsertSkillDef's freeze for the
+// exact rule (and the provenance-transition exception).
 func AutoIngestSkills(st *store.Store, defs []*skillpkg.Definition) int {
 	count := 0
 	for _, def := range defs {
@@ -149,7 +177,21 @@ func AutoIngestSkills(st *store.Store, defs []*skillpkg.Definition) int {
 
 // upsertAgentDef inserts or updates one agent_profiles row from a Definition.
 // Uses ToProfile() for field mapping; applies H1 trust tier; sets ingestion metadata.
-func upsertAgentDef(st *store.Store, def *agentpkg.Definition) error {
+//
+// bootPass distinguishes the two legitimate callers (TASKS/phase-1/08):
+//   - true  (AutoIngestAgents' boot-time bulk pass): once a row already
+//     exists under its current source, content sync (UpdateAgent, plus the
+//     secondary seedProcedures/seedRoleToolsFromIngest passes) is skipped --
+//     the DB is authoritative, the file is not re-synced on every process
+//     start. The one exception is a genuine provenance transition (the
+//     existing row's source differs from this def's source) -- that's a
+//     deliberate one-time reclassification (e.g. the historical
+//     builtin->internal migration flip), not an ordinary repeated boot, so
+//     it still syncs once.
+//   - false (IngestAgentDefinition's explicit reimport): always syncs,
+//     regardless of whether a row already exists -- this is the deliberate
+//     "the operator/API just edited this file, commit it" action.
+func upsertAgentDef(st *store.Store, def *agentpkg.Definition, bootPass bool) error {
 	now := time.Now().UTC().Format(time.RFC3339)
 
 	// H1 trust: user/plugin-dropped files are untrusted until promoted.
@@ -172,10 +214,11 @@ func upsertAgentDef(st *store.Store, def *agentpkg.Definition) error {
 	// Identity resolution. A managed file stamped with a UUID (`id:`) owns a
 	// stable identity that survives slug renames — look it up by ID first so a
 	// renamed file updates the existing row (and its FK children) instead of
-	// colliding on a fresh insert. Fall back to slug for unstamped/internal
-	// definitions, whose runtime identity stays "file-<slug>".
+	// colliding on a fresh insert. Fall back to slug for unstamped
+	// definitions (e.g. an internal builtin seed profile with no `id:`
+	// frontmatter, not yet ingested).
 	var existing *store.AgentProfile
-	if def.ID != "" && !agentpkg.IsFileBasedID(def.ID) {
+	if def.ID != "" {
 		if row, err := st.GetAgent(def.ID); err == nil {
 			existing = row
 		}
@@ -187,14 +230,15 @@ func upsertAgentDef(st *store.Store, def *agentpkg.Definition) error {
 	}
 
 	if existing == nil {
-		// Unstamped/internal definitions (CanonicalID == "file-<slug>") get a
-		// minted DB UUID while the harness keeps using the deterministic
-		// "file-<slug>" runtime identity. A managed file stamped with a real
-		// UUID uses that UUID as the DB row PK so reflex/known-tool/boot-plan
-		// FKs resolve correctly.
-		if agentpkg.IsFileBasedID(profile.ID) {
-			profile.ID = ""
-		}
+		// Unstamped definitions (def.ID == "", so profile.ID == "" too --
+		// see Definition.ToProfile) get a minted DB UUID here, through the
+		// exact same store.CreateAgent path any other newly created agent
+		// goes through (TASKS/adhoc/01-eliminate-file-based-agent-runtime.md
+		// -- this is now the one-time seed for the 9 internal builtin
+		// profiles: no more parallel "file-<slug>" runtime identity, no
+		// special-casing). A managed file stamped with a real UUID already
+		// carries it in profile.ID and CreateAgent uses it as-is, so
+		// reflex/known-tool/boot-plan FKs resolve correctly from creation.
 		profile.Kind = "internal"
 		profile.CapabilitiesJSON = "[]"
 		profile.LimitsJSON = "{}"
@@ -216,10 +260,48 @@ func upsertAgentDef(st *store.Store, def *agentpkg.Definition) error {
 		if profile.LimitsJSON == "" {
 			profile.LimitsJSON = existing.LimitsJSON
 		}
-		if err := st.UpdateAgent(profile); err != nil {
-			return fmt.Errorf("update: %w", err)
+		// role_id / consumer_id / model_id (Phase 1 items 02/03,
+		// architecture/01-agent-construction.md's composition model) have
+		// zero frontmatter representation -- def.ToProfile() always
+		// returns their empty zero-value for a file-backed definition.
+		// Without this, ANY reingest through this path -- every
+		// managed-agent edit via AgentConfigService.Create/Update,
+		// including ones with nothing to do with composition -- would
+		// silently wipe a value set through TASKS/phase-5/01-build-
+		// assignment-api.md's composition write path
+		// (store.UpdateAgentComposition) back to NULL the next time the
+		// agent's file was saved for an unrelated reason. Preserve the
+		// existing row's values here -- "DB wins" on the write side, same
+		// as the read side (agentServiceImpl.Get/GetBySlug/List just
+		// return the row as-is now; see TASKS/adhoc/01-eliminate-file-
+		// based-agent-runtime.md).
+		// runtime_kind is deliberately NOT included -- unlike these
+		// three, it already self-heals via applyMultiAgentDefaults'
+		// inferRuntimeKind(a.DefaultProvider) whenever a caller leaves it
+		// empty (called inside st.UpdateAgent below), which is the
+		// desired behavior: a provider change on reingest SHOULD
+		// re-derive cli/api classification, not freeze it.
+		profile.RoleID = existing.RoleID
+		profile.ConsumerID = existing.ConsumerID
+		profile.ModelID = existing.ModelID
+		// TASKS/phase-1/08: on a boot-time pass, a row that's already been
+		// ingested under its current source is frozen -- skip the content
+		// sync so a DB-side edit (however it landed) survives the next
+		// restart. sourceChanged (below) carves out the one legitimate
+		// exception: a genuine provenance transition still syncs once.
+		if !(bootPass && existing.Source == profile.Source) {
+			if err := st.UpdateAgent(profile); err != nil {
+				return fmt.Errorf("update: %w", err)
+			}
 		}
 	}
+	// freshContent is true when this call actually created the row or (on a
+	// boot pass) just completed a provenance-transition sync -- the two
+	// cases where the secondary seed passes below (procedures, role tools)
+	// should also run. It mirrors the UpdateAgent gate above so a frozen
+	// boot-time reingest doesn't re-stomp a GUI/API customization to either
+	// child table either.
+	freshContent := existing == nil || !bootPass || existing.Source != profile.Source
 
 	// Apply H1 trust tier. Always reconcile — if a file was promoted to trusted
 	// and then the source changed (e.g., file moved to ~/.nanite/agents/), re-ingest
@@ -233,19 +315,13 @@ func upsertAgentDef(st *store.Store, def *agentpkg.Definition) error {
 		return fmt.Errorf("set trust tier: %w", err)
 	}
 
-	if len(def.Procedures) > 0 {
+	if freshContent && len(def.Procedures) > 0 {
 		row, err := st.GetAgentBySlug(def.Slug)
 		if err == nil && row != nil {
 			seedProcedures(context.Background(), st, row.ID, def.Procedures)
 		}
 	}
-	if len(def.RoleSkills) > 0 {
-		row, err := st.GetAgentBySlug(def.Slug)
-		if err == nil && row != nil {
-			seedRoleSkills(context.Background(), st, row.ID, def.RoleSkills)
-		}
-	}
-	if len(def.RoleTools) > 0 {
+	if freshContent && len(def.RoleTools) > 0 {
 		row, err := st.GetAgentBySlug(def.Slug)
 		if err == nil && row != nil {
 			seedRoleToolsFromIngest(context.Background(), st, row.ID, def.RoleTools)
@@ -254,6 +330,26 @@ func upsertAgentDef(st *store.Store, def *agentpkg.Definition) error {
 	return nil
 }
 
+// seedRoleToolsFromIngest seeds two things from a def's roleTools:
+// frontmatter, per Phase 1 item 04
+// (TASKS/phase-1/04-add-known-tools-and-agent-tools-fk.md):
+//
+//  1. agent_known_tools (unchanged, pre-existing behavior) — a pinned roster
+//     row per name, reason='role_seed'. This is the live, per-agent
+//     roster/telemetry table with its own REST CRUD and GUI; still not
+//     touched by this task per its own Context section.
+//  2. agent_tools (new) — a real grant row per name that resolves against
+//     the known_tools catalog, granted_via='role_seed'. This is the
+//     upgrade: role_tools used to only ever seed the best-effort
+//     agent_known_tools roster ("NOT a contract the runtime enforces",
+//     migration 070's own doc comment) with zero effect on real tool
+//     selection. Now it also produces a real agent_tools grant, matching
+//     architecture/01-agent-construction.md's statement that agent_tools
+//     replaces roleTools: "entirely." A name with no matching known_tools
+//     row (not yet live-synced, or a genuine typo — see
+//     unknownDeclaredTools above) is skipped for (2) without failing the
+//     ingest; (1) still records it regardless, preserving today's
+//     tolerant behavior for that table.
 func seedRoleToolsFromIngest(ctx context.Context, st *store.Store, agentID string, tools []string) {
 	for i, name := range tools {
 		if name == "" {
@@ -267,6 +363,17 @@ func seedRoleToolsFromIngest(ctx context.Context, st *store.Store, agentID strin
 			Reason:    "role_seed",
 		}); err != nil {
 			slog.Warn("service: seed role tool (ingest)", "agent_id", agentID, "tool", name, "err", err)
+		}
+
+		known, err := st.GetKnownToolByName(ctx, name)
+		if err != nil {
+			if !errors.Is(err, store.ErrKnownToolNotFound) {
+				slog.Warn("service: seed role tool (ingest) — known_tools lookup", "agent_id", agentID, "tool", name, "err", err)
+			}
+			continue
+		}
+		if err := st.GrantAgentTool(ctx, agentID, known.ID, "role_seed"); err != nil {
+			slog.Warn("service: seed role tool (ingest) — agent_tools grant", "agent_id", agentID, "tool", name, "err", err)
 		}
 	}
 }
@@ -292,22 +399,6 @@ func seedProcedures(ctx context.Context, st *store.Store, agentID string, procs 
 			Scope:   scope,
 		}); err != nil {
 			slog.Warn("service: seed procedure", "agent_id", agentID, "procedure", p.Name, "err", err)
-		}
-	}
-}
-
-func seedRoleSkills(ctx context.Context, st *store.Store, agentID string, slugs []string) {
-	for _, slug := range slugs {
-		if slug == "" {
-			continue
-		}
-		if err := st.InsertAgentKnownSkill(ctx, store.AgentKnownSkill{
-			AgentID:   agentID,
-			SkillName: slug,
-			Pinned:    true,
-			Reason:    "role_seed",
-		}); err != nil {
-			slog.Warn("service: seed role skill", "agent_id", agentID, "skill_name", slug, "err", err)
 		}
 	}
 }
@@ -351,6 +442,22 @@ func upsertSkillDef(st *store.Store, def *skillpkg.Definition) error {
 		return nil
 	}
 
+	// TASKS/phase-1/08: once a row already exists under its current source,
+	// AutoIngestSkills' boot-time pass no longer content-syncs it -- the DB
+	// is authoritative, the file is not re-parsed-and-overwritten on every
+	// process start. upsertSkillDef has exactly one caller (AutoIngestSkills
+	// -- confirmed via grep; the REST CRUD path's handleUpdateSkill writes
+	// through st.UpdateSkill directly, never through this function), so
+	// unlike upsertAgentDef there is no separate "explicit reimport" caller
+	// to preserve a resync path for. The one exception is a genuine
+	// provenance transition (the row's source differs from this def's
+	// source) -- a deliberate one-time reclassification, not an ordinary
+	// repeated boot, so it still syncs once and bumps the version if the
+	// content also changed.
+	if existing.Source == source {
+		return nil
+	}
+
 	// Update existing row; bump version when content changes.
 	contentChanged := existing.Prompt != def.Prompt ||
 		existing.ToolBindings != sk.ToolBindings ||
@@ -379,27 +486,21 @@ func upsertSkillDef(st *store.Store, def *skillpkg.Definition) error {
 	return nil
 }
 
-// resolveSkillModeIDs translates a list of mode slugs to mode IDs by
-// querying the modes table. Unresolved slugs are dropped silently (logged
-// as a warning). Empty input → "[]" (back-compat: skill is available in
-// every mode). The result is the JSON-array string written to
-// skills.mode_ids.
-func resolveSkillModeIDs(st *store.Store, slugs []string) string {
-	if len(slugs) == 0 {
-		return "[]"
-	}
-	ids := make([]string, 0, len(slugs))
-	for _, slug := range slugs {
-		mode, err := st.GetModeBySlug(slug)
-		if err != nil {
-			slog.Warn("service: resolve skill mode slug", "slug", slug, "err", err)
-			continue
-		}
-		if mode == nil {
-			slog.Warn("service: skill mode slug not found", "slug", slug)
-			continue
-		}
-		ids = append(ids, mode.ID)
-	}
-	return store.MarshalSkillModeIDs(ids)
+// resolveSkillModeIDs marshals a skill definition's frontmatter `modes:`
+// slugs into the JSON-array string written to skills.mode_ids. Empty input
+// → "[]" (back-compat: skill is available in every mode).
+//
+// Phase 0 item 21 ("Cut Modes, in full") deleted the `modes` catalog table
+// and store.GetModeBySlug — this function used to resolve each slug against
+// that table and store the resolved row ID. There is no more catalog to
+// resolve against, so the slugs are stored directly as their own identity,
+// unresolved.
+//
+// Phase 0 item 22 (decision log §11): skills.mode_ids' other reader —
+// internal/skillbroker's mode-bound relevance bonus, which only ever
+// checked whether the column was non-empty, never a specific ID — is
+// retired along with the rest of the Skill Broker. This write path is
+// kept as-is; the column just has no active reader today.
+func resolveSkillModeIDs(_ *store.Store, slugs []string) string {
+	return store.MarshalSkillModeIDs(slugs)
 }

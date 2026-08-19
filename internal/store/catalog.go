@@ -12,7 +12,7 @@ type CatalogSource struct {
 	ID        string    `json:"id"`
 	Name      string    `json:"name"`
 	URL       string    `json:"url"`
-	Type      string    `json:"type"`       // "official" or "custom"
+	Type      string    `json:"type"` // "official" or "custom"
 	Enabled   bool      `json:"enabled"`
 	Priority  int       `json:"priority"`   // higher = wins on conflict
 	PublicKey string    `json:"public_key"` // hex-encoded Ed25519 public key for signature verification

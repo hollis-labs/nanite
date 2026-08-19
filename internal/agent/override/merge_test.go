@@ -97,8 +97,8 @@ func TestResolve_MapDeepMerge(t *testing.T) {
 	}
 	project := &override.OverrideConfig{
 		Settings: map[string]any{
-			"timeout": 60,    // replace
-			"verbose": true,  // add new
+			"timeout": 60,   // replace
+			"verbose": true, // add new
 		},
 	}
 
@@ -140,6 +140,50 @@ func TestResolveWithMap_WildcardThenAgentSpecific(t *testing.T) {
 	wantTools := map[string]bool{"bash": true, "read": true, "write": true}
 	if len(result.Tools) != len(wantTools) {
 		t.Errorf("expected %d tools, got %d: %v", len(wantTools), len(result.Tools), result.Tools)
+	}
+}
+
+// Test 8: SystemPrompt/Class scalars follow the same last-non-empty-writer-
+// wins rule as Model/Provider -- added for the role -> agent -> task
+// cascade (TASKS/phase-1/01-add-roles-table-and-cascade-resolution.md).
+func TestResolve_SystemPromptAndClassLastWriterWins(t *testing.T) {
+	base := override.OverrideConfig{
+		SystemPrompt: "role-level persona",
+		Class:        "advisor",
+	}
+	agent := &override.OverrideConfig{
+		SystemPrompt: "agent-level persona",
+	}
+	task := &override.OverrideConfig{
+		Class: "process",
+	}
+
+	result := override.Resolve(base, agent, task)
+
+	if result.SystemPrompt != "agent-level persona" {
+		t.Errorf("expected SystemPrompt %q, got %q", "agent-level persona", result.SystemPrompt)
+	}
+	if result.Class != "process" {
+		t.Errorf("expected Class %q, got %q", "process", result.Class)
+	}
+}
+
+// Test 9: SystemPrompt/Class zero-value skipped, mirroring Model/Provider's
+// zero-value-skip behavior.
+func TestResolve_SystemPromptAndClassZeroValueSkipped(t *testing.T) {
+	base := override.OverrideConfig{
+		SystemPrompt: "role-level persona",
+		Class:        "advisor",
+	}
+	agent := &override.OverrideConfig{}
+
+	result := override.Resolve(base, agent, nil)
+
+	if result.SystemPrompt != "role-level persona" {
+		t.Errorf("expected SystemPrompt %q to be preserved, got %q", "role-level persona", result.SystemPrompt)
+	}
+	if result.Class != "advisor" {
+		t.Errorf("expected Class %q to be preserved, got %q", "advisor", result.Class)
 	}
 }
 

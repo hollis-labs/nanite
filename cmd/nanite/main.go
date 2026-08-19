@@ -23,20 +23,16 @@ import (
 	envelope_render "github.com/hollis-labs/nanite/internal/executor/envelope_render"
 	"github.com/hollis-labs/nanite/internal/learnings"
 	naniteotel "github.com/hollis-labs/nanite/internal/otel"
-	"github.com/hollis-labs/nanite/internal/promptrouter"
 	"github.com/hollis-labs/nanite/internal/providercatalog"
 	"github.com/hollis-labs/nanite/internal/worktree"
 
 	llmcontracts "github.com/hollis-labs/go-llm-contracts"
 	llmtypes "github.com/hollis-labs/go-llm-types"
 	"github.com/hollis-labs/go-providers/provider"
-	"github.com/hollis-labs/go-toolbroker/broker"
-	"github.com/hollis-labs/nanite/internal/agentregistry"
 	"github.com/hollis-labs/nanite/internal/agentworkflow"
 	"github.com/hollis-labs/nanite/internal/api"
 	"github.com/hollis-labs/nanite/internal/chat"
 	"github.com/hollis-labs/nanite/internal/filter"
-	"github.com/hollis-labs/nanite/internal/launcher"
 	"github.com/hollis-labs/nanite/internal/lifecycle"
 	nllmanthropic "github.com/hollis-labs/nanite/internal/llm/anthropic"
 	nllmopenai "github.com/hollis-labs/nanite/internal/llm/openai"
@@ -61,15 +57,13 @@ import (
 func main() {
 	if len(os.Args) < 2 {
 		fmt.Fprintf(os.Stderr, "usage: %s <command>\n", brand.BinaryName)
-		fmt.Fprintln(os.Stderr, "commands: serve, launch, chat, plugin, mcp, message, admin, path, version (framework-injection moved to `nanite-agent init`)")
+		fmt.Fprintln(os.Stderr, "commands: serve, chat, plugin, mcp, message, admin, path, version (framework-injection moved to `nanite-agent init`)")
 		os.Exit(1)
 	}
 
 	switch os.Args[1] {
 	case "serve":
 		cmdServe(os.Args[2:])
-	case "launch":
-		cmdLaunch(os.Args[2:])
 	case "chat":
 		cmdChat(os.Args[2:])
 	case "plugin":
@@ -186,15 +180,6 @@ func cmdServe(args []string) {
 	if err := s.SeedProviders(); err != nil {
 		slogx.Fatal("failed to seed providers", "err", err)
 	}
-	if err := s.SeedBuiltinTemplates(); err != nil {
-		slogx.Fatal("failed to seed templates", "err", err)
-	}
-	if err := s.SeedBuiltinPromptTemplates(); err != nil {
-		slogx.Fatal("failed to seed prompt templates", "err", err)
-	}
-	if err := s.SeedBuiltinModes(); err != nil {
-		slogx.Fatal("failed to seed modes", "err", err)
-	}
 
 	// Load the canonical envelope catalog from go-envelopes (lib v0.1.0).
 	// The lib's embedded manifest replaces nanite/config/envelopes.yaml as the
@@ -217,12 +202,12 @@ func cmdServe(args []string) {
 	chat.InitCoreTypes(coreTypes)
 	slog.Info("envelope registry loaded", "count", len(coreTypes), "source", "go-envelopes v0.1.0")
 
-	// Register Nanite's five orphan schemas (kb-result, giphy-modal,
-	// resolution-capture, ticket-form, ticket-confirmation) under the
-	// nanite-legacy plugin id. Catalog cleanup is a separate task; this
-	// preserves prior behavior where ValidateEnvelopeData / card_show
-	// could resolve a schema for these types. Bare names also land in the
-	// chat allowlist so wire-format envelopes carrying them keep parsing.
+	// envelope.OrphanTypes is now empty — all five entries (giphy-modal;
+	// kb-result, resolution-capture, ticket-form, ticket-confirmation) were
+	// removed by the Phase 0 plugin cuts (15a-cut-giphy, 15c-cut-support-ticket).
+	// RegisterOrphans is a no-op today; left in place (not deleted) since a
+	// future orphan schema has an obvious place to register without
+	// reintroducing this call site.
 	if n, err := envelope.RegisterOrphans(envReg); err != nil {
 		slog.Warn("envelope: partial orphan registration", "registered", n, "err", err)
 	} else {
@@ -271,7 +256,7 @@ func cmdServe(args []string) {
 	// running user.
 	mcpManager, tb, selfTools := initMCP(s, cfg, appCfg)
 
-	// Set up activity emitter (Volon GUI events).
+	// Set up activity emitter for external GUI event consumers.
 	activity := chat.NewActivityEmitter("")
 
 	// Resolve utility provider/model. user_settings.utility_* first, then
@@ -304,6 +289,11 @@ func cmdServe(args []string) {
 	logger := plugin.NewLogger(brand.ID + "-plugin")
 	pluginHost := plugin.NewHost(nil, logger)
 	pluginHost.SetStore(s)
+	// Phase 5 item 02: share this same store instance with manage.go's
+	// package-level DisablePlugin/EnablePlugin/IsDisabled/PluginStatus so
+	// the running server and those functions read/write the same `plugins`
+	// state table instead of opening a second connection to the DB file.
+	plugin.SetPluginStateStore(s)
 	pluginHost.SetEnvelopeRegistry(envReg)
 	pluginHost.SetMCPRegistrar(mcpManager)
 	pluginHost.RegisterService("store", s)
@@ -343,34 +333,21 @@ func cmdServe(args []string) {
 		slog.Info("worktree manager initialized", "dir", wtBaseDir)
 	}
 
-	// CW-20260502-0005 / CW-20260509-0045 / CW-20260509-0046: agent-broker
-	// instance. Constructed BEFORE NewContainer so it can be threaded
-	// into ContainerConfig (chat-service upstream wire site) AND
-	// installed onto selfTools.Broker (downstream scaffold) below. One
-	// broker, two consumers — the deterministic v1 impl
-	// (`broker.New()`) is concurrency-safe (pure function over
-	// broker.Input). See chat_broker_dispatch.go for the load-bearing
-	// boundary between the two wire sites.
+	// CW-20260502-0005 / CW-20260509-0045: agent-broker instance.
+	// Phase 4 item 02
+	// (TASKS/phase-4/02-dispatch-to-agent-reflex-action-kind-and-broker-migration.md)
+	// retired the upstream chat-service consumer (formerly
+	// chat_broker_dispatch.go's attemptBrokerDispatch, which used to
+	// consult a copy of this instance via ContainerConfig.AgentBroker
+	// before the chat-loop entry — that upstream decision is now made
+	// by the dispatch_to_agent reflex action kind instead, see
+	// internal/service/chat_reflex_dispatch.go). This instance is kept
+	// solely for the one remaining consumer: selfTools.Broker below
+	// (internal/mcp/self_tools_dispatch.go's callExecuteTask — the
+	// deliberately-independent downstream scaffold that task explicitly
+	// left untouched). The deterministic v1 impl (`broker.New()`) is
+	// concurrency-safe (pure function over broker.Input).
 	agentBrokerInstance := agentbroker.New()
-
-	// --- S5 Phase C/F: shared directory registry ---
-	//
-	// Build the shared registry-primary registrar (FileBackedRegistrar +
-	// DegradingRegistrar + LastKnownGoodCache) over the boot-profile
-	// catalog root ONCE, here, BEFORE NewContainer. The SAME instance is
-	// threaded into:
-	//
-	//   - ContainerConfig.AgentRegistry — so the GUI chat boot-profile
-	//     launch path (driveBootSession) resolves its runtime binding
-	//     registry-primary via launchplan.Build (Phase F);
-	//   - the standalone `nanite launch` subcommand builds its own (it is
-	//     a separate process), but uses the identical agentregistry.Build
-	//     + launchplan.Build seam.
-	//
-	// agent-source registration (the D2 resolver handle) runs after the
-	// HTTP port is known — see further below. agentregistry.Build does
-	// pure local filesystem I/O and never fails the process (D1).
-	agentRegistry := agentregistry.Build(resolveBootProfileCatalogPath(cfg), "", slog.Default())
 
 	// --- Service container: single wiring point ---
 	// apiBaseURL also backs the external workflow-engine wiring below
@@ -394,7 +371,6 @@ func cmdServe(args []string) {
 		Worktrees:       wtMgr,
 		CLIAdapters:     cliAdapters,
 		ProviderCatalog: providerCatalog,
-		AgentBroker:     agentBrokerInstance,
 		// CW-20260512-0118 (SP-20260512-0010 W2): thread the dev-tools
 		// allow-list onto the ContextClient so the per-session
 		// SlotPermissions summary surfaces the baseline READ roots.
@@ -404,17 +380,6 @@ func cmdServe(args []string) {
 		// (no drift between what the agent reads and what the gate
 		// enforces).
 		DevToolsAllowedPaths: resolveDevToolsAllowedPaths(cfg),
-		// S5 Phase F: thread the shared directory registrar so the GUI
-		// chat boot-profile launch path resolves registry-primary via
-		// launchplan.Build — the same seam the standalone launcher uses.
-		AgentRegistry: agentRegistry,
-		// CW-20260514-0047: thread the configured boot-profile catalog
-		// path so the service container builds an in-memory registry of
-		// compiled LaunchSpec entries. ResolvedBootProfileCatalogPath
-		// returns an empty string when the field is unset, in which
-		// case the registry constructor produces an inert (empty)
-		// Registry and the dropdown surfaces only DB-seeded providers.
-		BootProfileCatalogPath: resolveBootProfileCatalogPath(cfg),
 		// Durable-agent recipe catalog files/dirs merge with built-ins at
 		// startup through the app config seam used for product tunables.
 		DurableAgentRecipeCatalogPaths: appCfg.Recipes.CatalogPaths,
@@ -471,7 +436,7 @@ func cmdServe(args []string) {
 	} else {
 		externalBinPath := ""
 		if exe, exeErr := os.Executable(); exeErr == nil {
-			externalBinPath = launcher.ResolveBinaryPath(exe)
+			externalBinPath = resolveBinaryPath(exe)
 		} else {
 			slog.Warn("workflow-runner: os.Executable failed, langgraph/crewai engines unavailable", "err", exeErr)
 		}
@@ -517,20 +482,24 @@ func cmdServe(args []string) {
 	selfTools.WorkflowRegistry = workflowDefinitionsRegistry
 
 	// CW-20260814-0014: A2A Agent Card generator for /.well-known/agent-card.json
-	// Uses the same workflow registry + boot profile registry to derive skills.
+	// Uses the workflow registry to derive skills. TASKS/phase-2/04-
+	// retire-boot-profile-catalog.md removed the boot-profile-catalog
+	// skill source this used to also thread through.
 	container.AgentCardGenerator = service.NewAgentCardGenerator(
 		workflowDefinitionsRegistry,
-		container.BootProfiles,
 		apiBaseURL,
 		version.Full(),
 	)
 
 	// CW-20260814-0015, CW-20260814-0016: A2A TaskManager for JSON-RPC task methods.
 	// Routes Task submissions to workflow launch or durable-agent wake.
+	// container.DurableAgents is threaded through so CancelTask can reuse
+	// the existing RequestStop primitive for instance-target tasks.
 	container.TaskManager = service.NewTaskManager(
 		s,
 		workflowLauncher,
 		container.DurableWake,
+		container.DurableAgents,
 		workflowDefinitionsRegistry,
 		slog.Default(),
 	)
@@ -541,6 +510,13 @@ func cmdServe(args []string) {
 	selfTools.Subagent = container.Subagent
 	selfTools.Background = container.Background
 	selfTools.Work = container.Streams
+	// Task 34: wire the shared managed-agent write path's classifier so
+	// agent_create/agent_update gate on ManageClass.Editable() the same
+	// way the REST API's requireMutableAgent does — container.AgentConfig
+	// already carries the real writable-managed-roots configuration
+	// (project .nanite / user nanite data dir), so this reuses it rather
+	// than re-deriving a second, possibly-diverging classification.
+	selfTools.AgentClassifier = container.AgentConfig
 	// G4 (CW-20260420-0018): wire elicitation service so write tools
 	// (e.g. message_send kind=directive) can request mid-call
 	// user confirmation via elicitation/create.
@@ -555,14 +531,14 @@ func cmdServe(args []string) {
 		// dispatch.DefaultEnvelopeWrapper when unset.
 	}
 
-	// CW-20260509-0046: install the upstream agent-broker instance on
-	// the SelfToolsTransport's downstream scaffold seam. The same
-	// instance was threaded into ContainerConfig.AgentBroker above —
-	// chatServiceImpl now consults the broker BEFORE the chat-loop
-	// entry (load-bearing decision); the downstream wire-up here
-	// preserves the CW-20260502-0005 audit-into-event_log behavior on
-	// the dispatch CALL (callExecuteTask). Sharing one broker is safe
-	// — DeterministicBroker is stateless / concurrency-safe.
+	// CW-20260509-0046 (narrowed by Phase 4 item 02 — see the
+	// agentBrokerInstance comment above): install the agent-broker
+	// instance on the SelfToolsTransport's downstream scaffold seam.
+	// This is now the ONLY live consumer of agentBrokerInstance — the
+	// upstream chat-service call site was retired. Preserves the
+	// CW-20260502-0005 audit-into-event_log behavior on the dispatch
+	// CALL (callExecuteTask); DeterministicBroker is stateless /
+	// concurrency-safe.
 	selfTools.Broker = agentBrokerInstance
 
 	// CW-20260429-0036 (B2 closing piece): wire the dispatch_executor
@@ -634,33 +610,6 @@ func cmdServe(args []string) {
 	// so a CLI-launched chat agent's `nanite mcp` subprocess can forward
 	// self-tool calls into this running harness.
 	a.SetSelfTools(selfTools)
-
-	// --- S5 Phase C: agent-source handle registration ---
-	//
-	// agentRegistry was built earlier (before NewContainer) so the SAME
-	// instance is shared by the chat service and this registration. Here
-	// we register Nanite as an `agent-source` resolver HANDLE pointing
-	// back at the loopback /api/tools/call endpoint (operation
-	// agent_source_resolve). The directory holds the handle only — never
-	// agent bodies (D2). A registration failure is logged and does NOT
-	// crash startup: the registry is never mandatory (D1).
-	loopbackToolsURL := fmt.Sprintf("http://127.0.0.1:%d/api/tools/call", *port)
-	handleDir := filepath.Join(os.TempDir(), brand.ID+"-agent-source")
-	if home, herr := os.UserHomeDir(); herr == nil {
-		handleDir = filepath.Join(home, "."+brand.ID, "registry")
-	}
-	if err := agentregistry.RegisterAgentSource(agentRegistry, loopbackToolsURL, handleDir, slog.Default()); err != nil {
-		slog.Warn("agent-source registration failed; continuing without directory handle", "err", err)
-	}
-
-	// Register existing custom actions as slash commands.
-	if actions, err := s.ListCustomActions(); err == nil {
-		for _, action := range actions {
-			if action.SlashCommand != "" && action.Enabled {
-				a.RegisterActionCommand(&action)
-			}
-		}
-	}
 
 	// Lifecycle manager for long-running daemon goroutines (cleanup,
 	// snapshots, reapers). Owned by cmdServe; shut down on signal before
@@ -845,21 +794,6 @@ func resolveDevToolsAllowedPaths(cfg *config.Config) []string {
 	return nil
 }
 
-// resolveBootProfileCatalogPath resolves the configured boot-profile
-// catalog root (CW-20260514-0047). Returns an empty string when the
-// field is unset, which the registry constructor interprets as
-// "no catalog" — the dropdown shows only DB-seeded providers and
-// behavior is identical to before this feature. Tilde expansion is
-// delegated to config.ResolvedBootProfileCatalogPath so the rules
-// stay consistent with how every other path-shaped config field is
-// handled.
-func resolveBootProfileCatalogPath(cfg *config.Config) string {
-	if cfg == nil {
-		return ""
-	}
-	return cfg.ResolvedBootProfileCatalogPath()
-}
-
 // resolveWorkflowDefinitionsPath resolves the configured workflow
 // definitions directory (CW-20260813-0014). Returns an empty string when
 // the field is unset, which agentworkflow.LoadRegistryDir interprets as
@@ -869,6 +803,25 @@ func resolveWorkflowDefinitionsPath(cfg *config.Config) string {
 		return ""
 	}
 	return cfg.ResolvedWorkflowDefinitionsPath()
+}
+
+// resolveBinaryPath resolves exe through any symlinks so an external
+// workflow-engine subprocess (langgraph/crewai/etc., invoked via
+// internal/workflowrunner) is pointed at the real binary path rather than
+// a symlink target. Falls back to exe verbatim when symlink resolution
+// fails. Formerly internal/launcher.ResolveBinaryPath — moved here as a
+// local helper when TASKS/phase-2/04-retire-boot-profile-catalog.md cut
+// internal/launcher in full (that package existed solely to serve the
+// boot-profile-catalog-driven `nanite launch` subcommand; this one
+// generic helper had a second, unrelated real caller here).
+func resolveBinaryPath(exe string) string {
+	if exe == "" {
+		return ""
+	}
+	if resolved, err := filepath.EvalSymlinks(exe); err == nil {
+		return resolved
+	}
+	return exe
 }
 
 // devAllowedSource returns a short string describing where the dev tools
@@ -909,24 +862,31 @@ func initMCP(s *store.Store, cfg *config.Config, appCfg *config.AppConfig) (*mcp
 	devTools := mcp.NewDevToolsTransport(devAllowed).WithArtifactResolver(
 		mcp.NewStoreArtifactResolver(s), artifactsRoot,
 	)
-	if err := mcpManager.AddServer("dev", devTools, mcp.TierBuiltin); err != nil {
-		slog.Error("mcp: failed to register builtin server", "name", "dev", "err", err)
+	// Builtin registrations use AddBuiltinServer (not the plain AddServer
+	// + TierBuiltin pair) — it both registers the server and marks its
+	// name as first-party-protected in the same call, so a fifth builtin
+	// server only needs one new line here (internal/mcp/naming.go no
+	// longer carries a second, hand-maintained name list to keep in sync).
+	if err := mcpManager.AddBuiltinServer(mcp.DevServerName, devTools); err != nil {
+		slog.Error("mcp: failed to register builtin server", "name", mcp.DevServerName, "err", err)
 	}
-	if err := mcpManager.AddServer("general", mcp.NewGeneralToolsTransport(), mcp.TierBuiltin); err != nil {
-		slog.Error("mcp: failed to register builtin server", "name", "general", "err", err)
+	if err := mcpManager.AddBuiltinServer(mcp.GeneralServerName, mcp.NewGeneralToolsTransport()); err != nil {
+		slog.Error("mcp: failed to register builtin server", "name", mcp.GeneralServerName, "err", err)
 	}
-	if err := mcpManager.AddServer("code", mcp.NewCodeExecTransport(""), mcp.TierBuiltin); err != nil {
-		slog.Error("mcp: failed to register builtin server", "name", "code", "err", err)
+	if err := mcpManager.AddBuiltinServer(mcp.CodeServerName, mcp.NewCodeExecTransport("")); err != nil {
+		slog.Error("mcp: failed to register builtin server", "name", mcp.CodeServerName, "err", err)
 	}
 	selfTools := mcp.NewSelfToolsTransport(s)
-	// E1 (CW-20260419-0027): wire reflex set + logger into the dispatch path.
-	// LoadUserReflexes returns nil on a missing dir (not an error); merge with
-	// builtins so user overrides with priority>=50 reliably beat built-ins.
-	userReflexes, err := promptrouter.LoadUserReflexes("")
-	if err != nil {
-		slog.Warn("reflex: failed to load user overrides", "err", err)
-	}
-	selfTools.ReflexSet = promptrouter.MergeReflexes(promptrouter.BuiltinReflexes(), userReflexes)
+	// E1 (CW-20260419-0027; migrated off internal/promptrouter by
+	// TASKS/phase-4/03-migrate-promptrouter-to-reflexes.md): wire the
+	// match-log writer into the dispatch path. The reflex catalog itself
+	// no longer needs a boot-time load-and-merge step — callExecuteTask
+	// reads live dispatch_to_agent agent_reflexes rows directly off
+	// selfTools.Store (already wired via NewSelfToolsTransport above),
+	// the same DB-authoritative source every other reflex uses. The
+	// former ~/.nanite/reflexes/*.yaml user-override convention is
+	// retired; operators use the same agent_reflexes CRUD path
+	// (internal/api/reflexes.go) as everyone else.
 	selfTools.ReflexLogger = s
 	// B1 (CW-20260429-0006): wire the manager as the cross-server schema
 	// registry so tool_validate can pre-flight check args for any
@@ -938,7 +898,7 @@ func initMCP(s *store.Store, cfg *config.Config, appCfg *config.AppConfig) (*mcp
 	// Without this, sibling-server tools are invisible to the discovery
 	// primitive.
 	selfTools.Inventory = mcpManager
-	if err := mcpManager.AddServer(mcp.SelfServerName, selfTools, mcp.TierBuiltin); err != nil {
+	if err := mcpManager.AddBuiltinServer(mcp.SelfServerName, selfTools); err != nil {
 		slog.Error("mcp: failed to register builtin server", "name", mcp.SelfServerName, "err", err)
 	}
 
@@ -951,15 +911,13 @@ func initMCP(s *store.Store, cfg *config.Config, appCfg *config.AppConfig) (*mcp
 	registerVantaServer(mcpManager, cfg)
 
 	loadPersistedMCPServers(s, mcpManager)
-	// Both the MCPManager's broker and the ToolClient's Config must share
-	// the same ruleset (CW-20260815-0011): constructing them from two
-	// disconnected calls — one to the go-toolbroker library's own
-	// DefaultRules() here, one to toolclient.New(..., nil) below (which
-	// silently defaulted to library rules too) — meant Nanite's real
-	// ruleset (toolclient.DefaultConfig / NaniteDefaultRules) was never
-	// actually in effect for either broker instance.
+	// Phase 0 item 22 (decision log §11): the go-toolbroker LocalBroker that
+	// used to sit between mcpManager and tb — populated here via
+	// mcpManager.Broker, then shared onto tb.LocalBroker below — is retired.
+	// mcpManager.GetAllTools() is now the single, direct source of
+	// MCP-discovered tools for tb's catalog (see ToolClient.catalogTools);
+	// no shared broker instance, no rule-based filtering to keep in sync.
 	toolCfg := toolclient.DefaultConfig()
-	mcpManager.Broker = broker.NewLocalBroker(nil, toolCfg.Rules)
 	if diff, err := mcpManager.AutoDiscover(context.Background(), s); err != nil {
 		slog.Warn("MCP auto-discovery failed", "err", err)
 	} else {
@@ -970,10 +928,6 @@ func initMCP(s *store.Store, cfg *config.Config, appCfg *config.AppConfig) (*mcp
 	}
 
 	tb := toolclient.New(mcpManager, s, toolCfg)
-	if mcpManager.Broker != nil {
-		tb.LocalBroker = mcpManager.Broker
-		slog.Info("toolclient: sharing MCPManager broker", "tool_summaries", len(mcpManager.Broker.AllTools()))
-	}
 	devToolDefs := mcp.DevToolProviderDefinitions()
 	tb.Builtins.RegisterBuiltins("dev", devToolDefs)
 	slog.Info("registered dev built-in tools", "count", len(devToolDefs))

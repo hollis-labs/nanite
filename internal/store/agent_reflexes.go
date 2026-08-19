@@ -37,6 +37,18 @@ const (
 	ReflexActionSendMessage     = "send_message"
 	ReflexActionHaltSession     = "halt_session"
 	ReflexActionAddSchedule     = "add_schedule"
+	// ReflexActionDispatchToAgent (Phase 4 item 02,
+	// TASKS/phase-4/02-dispatch-to-agent-reflex-action-kind-and-broker-migration.md)
+	// routes the current turn to a different agent profile — the reflex
+	// absorption of the retired agent-broker's real intent (architecture
+	// doc 03-steering.md, "Reflexes are the single steering primitive").
+	// action_spec shape: {"agent_slug": string (required), "confidence":
+	// number (optional, [0,1]), "reason": string (optional, defaults to
+	// "reflex:"+name)}. See internal/service/chat_reflex_dispatch.go for
+	// the executor call site and internal/agent/reflexes/evaluator.go's
+	// scope_tier/execution_pattern predicate kinds for the trigger shape
+	// the migrated Rule 5 seed uses.
+	ReflexActionDispatchToAgent = "dispatch_to_agent"
 
 	ReflexStatusActive  = "active"
 	ReflexStatusPaused  = "paused"
@@ -51,21 +63,31 @@ const (
 // empty: when so, ClassTag binds the reflex to every agent of that
 // class (base reflex seeds). Reflexes targeted at a specific agent set
 // agent_id non-empty and leave ClassTag empty.
+//
+// OptOutAllowed (Phase 1 item 07,
+// TASKS/phase-1/07-add-reflex-opt-out-field.md) distinguishes
+// "required, cannot opt out" (false) from "default-on, agent may opt
+// out" (true, the default for every pre-existing row). It is consulted
+// by ListAgentReflexesForAgent alongside the agent_reflex_opt_outs
+// table: false means the reflex applies unconditionally no matter what
+// agent_reflex_opt_outs contains; true means an opt-out row for
+// (agent_id, this reflex's id) suppresses it for that agent.
 type AgentReflex struct {
-	ID          string `json:"id"`
-	AgentID     string `json:"agent_id"`
-	ClassTag    string `json:"class_tag"`
-	Name        string `json:"name"`
-	TriggerKind string `json:"trigger_kind"`
-	TriggerSpec string `json:"trigger_spec"`
-	ActionKind  string `json:"action_kind"`
-	ActionSpec  string `json:"action_spec"`
-	Status      string `json:"status"`
-	Priority    int64  `json:"priority"`
-	FiredCount  int64  `json:"fired_count"`
-	LastFiredAt string `json:"last_fired_at"`
-	CreatedAt   string `json:"created_at"`
-	CreatedBy   string `json:"created_by"`
+	ID            string `json:"id"`
+	AgentID       string `json:"agent_id"`
+	ClassTag      string `json:"class_tag"`
+	Name          string `json:"name"`
+	TriggerKind   string `json:"trigger_kind"`
+	TriggerSpec   string `json:"trigger_spec"`
+	ActionKind    string `json:"action_kind"`
+	ActionSpec    string `json:"action_spec"`
+	Status        string `json:"status"`
+	Priority      int64  `json:"priority"`
+	FiredCount    int64  `json:"fired_count"`
+	LastFiredAt   string `json:"last_fired_at"`
+	CreatedAt     string `json:"created_at"`
+	CreatedBy     string `json:"created_by"`
+	OptOutAllowed bool   `json:"opt_out_allowed"`
 }
 
 // PendingReflex is one row in the pending_reflexes table. The
@@ -90,14 +112,14 @@ type PendingReflex struct {
 const agentReflexColumns = `id, COALESCE(agent_id,''), COALESCE(class_tag,''), name,
        trigger_kind, trigger_spec, action_kind, action_spec,
        status, priority, fired_count, COALESCE(last_fired_at,''),
-       created_at, created_by`
+       created_at, created_by, opt_out_allowed`
 
 func scanAgentReflex(scanner interface{ Scan(...any) error }, r *AgentReflex) error {
 	return scanner.Scan(
 		&r.ID, &r.AgentID, &r.ClassTag, &r.Name,
 		&r.TriggerKind, &r.TriggerSpec, &r.ActionKind, &r.ActionSpec,
 		&r.Status, &r.Priority, &r.FiredCount, &r.LastFiredAt,
-		&r.CreatedAt, &r.CreatedBy,
+		&r.CreatedAt, &r.CreatedBy, &r.OptOutAllowed,
 	)
 }
 
@@ -147,18 +169,18 @@ func (s *Store) InsertAgentReflex(ctx context.Context, row AgentReflex) (string,
 		`INSERT OR REPLACE INTO agent_reflexes
 		    (id, agent_id, class_tag, name, trigger_kind, trigger_spec,
 		     action_kind, action_spec, status, priority, fired_count,
-		     last_fired_at, created_at, created_by)
+		     last_fired_at, created_at, created_by, opt_out_allowed)
 		 VALUES (?, ?, ?, ?, ?, ?,
 		         ?, ?, ?, ?, ?,
 		         ?,
 		         COALESCE(NULLIF(?, ''), datetime('now')),
-		         ?)`,
+		         ?, ?)`,
 		row.ID, nullIfEmpty(row.AgentID), nullIfEmpty(row.ClassTag),
 		row.Name, row.TriggerKind, row.TriggerSpec,
 		row.ActionKind, row.ActionSpec, row.Status, row.Priority, row.FiredCount,
 		nullIfEmpty(row.LastFiredAt),
 		row.CreatedAt,
-		row.CreatedBy,
+		row.CreatedBy, row.OptOutAllowed,
 	)
 	if err != nil {
 		return "", fmt.Errorf("insert agent_reflexes: %w", err)
@@ -183,7 +205,11 @@ func (s *Store) GetAgentReflex(ctx context.Context, id string) (*AgentReflex, er
 
 // ListAgentReflexesForAgent returns the combined set of:
 //   - class-bound base reflexes whose class_tag matches classTag and
-//     agent_id IS NULL (the seeded defaults)
+//     agent_id IS NULL (the seeded defaults) — EXCEPT those the agent
+//     has opted out of via agent_reflex_opt_outs, and then only when
+//     the reflex's own opt_out_allowed is true. A reflex with
+//     opt_out_allowed=false always applies, regardless of any opt-out
+//     row (Phase 1 item 07's "required, cannot opt out" contract).
 //   - agent-specific overrides whose agent_id matches agentID
 //
 // Both filtered to status='active'. Results ordered by priority DESC
@@ -195,11 +221,20 @@ func (s *Store) ListAgentReflexesForAgent(ctx context.Context, agentID, classTag
 		 FROM agent_reflexes
 		 WHERE status = 'active'
 		   AND (
-		         (agent_id IS NULL AND class_tag = ?)
+		         (
+		           agent_id IS NULL AND class_tag = ?
+		           AND (
+		                 opt_out_allowed = 0
+		              OR NOT EXISTS (
+		                   SELECT 1 FROM agent_reflex_opt_outs o
+		                    WHERE o.agent_id = ? AND o.reflex_id = agent_reflexes.id
+		                 )
+		               )
+		         )
 		      OR agent_id = ?
 		       )
 		 ORDER BY priority DESC, created_at ASC`,
-		classTag, agentID,
+		classTag, agentID, agentID,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("list agent_reflexes: %w", err)
@@ -257,12 +292,13 @@ func (s *Store) UpdateAgentReflex(ctx context.Context, row AgentReflex) error {
 		        status = ?,
 		        priority = ?,
 		        fired_count = ?,
-		        last_fired_at = ?
+		        last_fired_at = ?,
+		        opt_out_allowed = ?
 		  WHERE id = ?`,
 		row.Name, row.TriggerKind, row.TriggerSpec,
 		row.ActionKind, row.ActionSpec,
 		row.Status, row.Priority, row.FiredCount,
-		nullIfEmpty(row.LastFiredAt), row.ID,
+		nullIfEmpty(row.LastFiredAt), row.OptOutAllowed, row.ID,
 	)
 	if err != nil {
 		return fmt.Errorf("update agent_reflexes: %w", err)
@@ -300,7 +336,11 @@ func (s *Store) BumpAgentReflexFired(ctx context.Context, id string, now time.Ti
 	return nil
 }
 
-// DeleteAgentReflex removes a row by id.
+// DeleteAgentReflex removes a row by id. Any agent_reflex_opt_outs rows
+// referencing it are removed automatically via ON DELETE CASCADE
+// (migration 115_agent_reflex_opt_out.sql) — no manual cleanup needed
+// here, unlike agent_reflexes.agent_id's own FK to agent_profiles,
+// which DeleteAgent still cleans up explicitly.
 func (s *Store) DeleteAgentReflex(ctx context.Context, id string) error {
 	res, err := s.DB.ExecContext(ctx,
 		`DELETE FROM agent_reflexes WHERE id = ?`, id,
@@ -316,6 +356,63 @@ func (s *Store) DeleteAgentReflex(ctx context.Context, id string) error {
 		return ErrAgentReflexNotFound
 	}
 	return nil
+}
+
+// SetAgentReflexOptOut records that agentID has opted out of reflexID —
+// the per-agent override mechanism Phase 1 item 07 built for
+// opt_out_allowed=true reflexes (TASKS/phase-1/07-add-reflex-opt-out-field.md).
+// Idempotent: re-opting-out an already-opted-out (agentID, reflexID)
+// pair is a no-op. Has no effect on a reflex whose opt_out_allowed is
+// false — ListAgentReflexesForAgent ignores this table entirely for
+// those rows, by design.
+func (s *Store) SetAgentReflexOptOut(ctx context.Context, agentID, reflexID string) error {
+	if agentID == "" || reflexID == "" {
+		return fmt.Errorf("set agent_reflex_opt_outs: agent_id and reflex_id are required")
+	}
+	_, err := s.DB.ExecContext(ctx,
+		`INSERT OR IGNORE INTO agent_reflex_opt_outs (agent_id, reflex_id) VALUES (?, ?)`,
+		agentID, reflexID,
+	)
+	if err != nil {
+		return fmt.Errorf("set agent_reflex_opt_outs: %w", err)
+	}
+	return nil
+}
+
+// ClearAgentReflexOptOut removes an opt-out marker, re-enabling the
+// reflex for that agent. A no-op (not an error) if no such marker
+// exists.
+func (s *Store) ClearAgentReflexOptOut(ctx context.Context, agentID, reflexID string) error {
+	_, err := s.DB.ExecContext(ctx,
+		`DELETE FROM agent_reflex_opt_outs WHERE agent_id = ? AND reflex_id = ?`,
+		agentID, reflexID,
+	)
+	if err != nil {
+		return fmt.Errorf("clear agent_reflex_opt_outs: %w", err)
+	}
+	return nil
+}
+
+// ListAgentReflexOptOuts returns the reflex ids agentID has opted out
+// of.
+func (s *Store) ListAgentReflexOptOuts(ctx context.Context, agentID string) ([]string, error) {
+	rows, err := s.DB.QueryContext(ctx,
+		`SELECT reflex_id FROM agent_reflex_opt_outs WHERE agent_id = ? ORDER BY created_at ASC`,
+		agentID,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("list agent_reflex_opt_outs: %w", err)
+	}
+	defer rows.Close()
+	out := make([]string, 0)
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, fmt.Errorf("scan agent_reflex_opt_outs: %w", err)
+		}
+		out = append(out, id)
+	}
+	return out, rows.Err()
 }
 
 // CountClassBaseReflexByName returns the count of class-base rows (no
@@ -450,7 +547,11 @@ func (s *Store) ListPendingReflexes(ctx context.Context, status string) ([]Pendi
 
 // ApprovePendingReflex flips the pending row to status='approved' and
 // inserts a new agent_reflexes row carrying the trigger/action spec.
-// Returns the newly inserted agent_reflexes row.
+// Returns the newly inserted agent_reflexes row. opt_out_allowed is not
+// in this INSERT's column list, so it takes the column's own DEFAULT
+// TRUE — correct here since agent-proposed reflexes approved through
+// this path are never the hand-picked safety-critical seeds Phase 1
+// item 07 marks non-opt-outable in seeds.go.
 func (s *Store) ApprovePendingReflex(ctx context.Context, id, reviewedBy string) (*AgentReflex, error) {
 	pending, err := s.GetPendingReflex(ctx, id)
 	if err != nil {

@@ -6,7 +6,6 @@ import (
 	"testing"
 
 	llmtypes "github.com/hollis-labs/go-llm-types"
-	"github.com/hollis-labs/go-toolbroker/broker"
 	"github.com/hollis-labs/nanite/internal/describer"
 	"github.com/hollis-labs/nanite/internal/mcp"
 	"github.com/hollis-labs/nanite/internal/store"
@@ -137,7 +136,7 @@ func TestSelectForAgent_EmptyAllowlistFallsBackToBaseline(t *testing.T) {
 // --- helpers ---
 
 // buildToolClientWithTaskExecute wires a toolclient with a stand-in
-// task_execute tool registered via the broker layer plus the production
+// task_execute tool registered directly on the catalog plus the production
 // describer registered through mcp.RegisterSelfToolDescribers. This lets
 // the service-layer test exercise the real describeTaskExecute renderer
 // without spinning up the full self-tool stack.
@@ -145,8 +144,8 @@ func buildToolClientWithTaskExecute(t *testing.T) *toolclient.ToolClient {
 	t.Helper()
 	cfg := toolclient.DefaultConfig()
 	tc := toolclient.New(nil, nil, cfg)
-	tc.RegisterTools([]broker.ToolDefinition{
-		{Name: "task_execute", Server: "self", Description: "Dispatch a task — placeholder, overwritten by Describer."},
+	tc.RegisterTools([]llmtypes.ToolDefinition{
+		{Name: "task_execute", Description: "Dispatch a task — placeholder, overwritten by Describer."},
 	})
 	// Wire the production describer set so describeTaskExecute is what
 	// renders on the SelectForAgent hot path.

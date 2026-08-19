@@ -32,8 +32,8 @@ func workflowRunToolDefinition() Tool {
 		InputSchema: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
-				"session_id":      map[string]any{"type": "string", "description": "The current session ID. Informational — stamped on the launched durable-agent instance for operator visibility."},
-				"workflow_name":   map[string]any{"type": "string", "description": "The registered workflow definition's name to run."},
+				"session_id":    map[string]any{"type": "string", "description": "The current session ID. Informational — stamped on the launched durable-agent instance for operator visibility."},
+				"workflow_name": map[string]any{"type": "string", "description": "The registered workflow definition's name to run."},
 				"params": map[string]any{
 					"type":        "object",
 					"description": "Initial arguments for the run, available to step configs via {{input.<key>}} template references.",
@@ -79,14 +79,12 @@ func (st *SelfToolsTransport) callWorkflowRun(ctx context.Context, args map[stri
 	}
 
 	// H1 trust resolution (CW-20260421-0014), same as task_execute:
-	// WorkspaceID/AgentProfileID come from the caller-profile ctx stamped
-	// by the service layer, not an LLM-suppliable arg. A workflow launch
-	// requires both — durable_agent_instances.profile_id is a NOT NULL FK
-	// and Start() requires a workspace to create a fresh session.
-	wsID, apID := CallerProfileFromContext(ctx)
-	if wsID == "" {
-		return errorResult("workflow_run: no resolvable workspace for this session"), nil
-	}
+	// AgentProfileID comes from the caller-profile ctx stamped by the
+	// service layer, not an LLM-suppliable arg. A workflow launch requires
+	// it — durable_agent_instances.profile_id is a NOT NULL FK. Phase 0
+	// item 20 (retire workspaces): Start() used to also require a
+	// workspace to create a fresh session; sessions.workspace_id is gone.
+	apID := CallerProfileFromContext(ctx)
 	if apID == "" {
 		return errorResult("workflow_run: no resolvable agent profile for this session"), nil
 	}
@@ -95,7 +93,6 @@ func (st *SelfToolsTransport) callWorkflowRun(ctx context.Context, args map[stri
 		WorkflowName:    name,
 		Params:          params,
 		ParentSessionID: strArg(args, "session_id", ""),
-		WorkspaceID:     wsID,
 		AgentProfileID:  apID,
 		TimeoutSeconds:  intArg(args, "timeout_seconds", 0),
 	})

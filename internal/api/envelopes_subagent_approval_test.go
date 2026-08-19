@@ -18,10 +18,7 @@ import (
 func TestEnvelopeResponse_SubagentApproval_Approve(t *testing.T) {
 	a, mux := newTestAPI(t)
 
-	if err := a.Services.Store.CreateWorkspace(&store.Workspace{ID: "ws-g4-a", Name: "g4a"}); err != nil {
-		t.Fatalf("CreateWorkspace: %v", err)
-	}
-	sess := &store.Session{WorkspaceID: "ws-g4-a"}
+	sess := &store.Session{}
 	if err := a.Services.Store.CreateSession(sess); err != nil {
 		t.Fatalf("CreateSession: %v", err)
 	}
@@ -90,10 +87,7 @@ func TestEnvelopeResponse_SubagentApproval_Approve(t *testing.T) {
 func TestEnvelopeResponse_SubagentApproval_Reject(t *testing.T) {
 	a, mux := newTestAPI(t)
 
-	if err := a.Services.Store.CreateWorkspace(&store.Workspace{ID: "ws-g4-r", Name: "g4r"}); err != nil {
-		t.Fatalf("CreateWorkspace: %v", err)
-	}
-	sess := &store.Session{WorkspaceID: "ws-g4-r"}
+	sess := &store.Session{}
 	if err := a.Services.Store.CreateSession(sess); err != nil {
 		t.Fatalf("CreateSession: %v", err)
 	}

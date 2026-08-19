@@ -19,7 +19,7 @@ import (
 //
 //	launching → running → done|failed|orphaned
 //
-// `orphaned` is set by SweepOrphans at daemon bootstrap when a persisted
+// `orphaned` is set by orphansweep.SweepOrphans at daemon bootstrap when a persisted
 // PID is no longer alive.
 type AgentRuntimeRow struct {
 	ID                string
@@ -167,7 +167,7 @@ func (s *Store) SetAgentRuntimeState(id, state string, pid int) error {
 }
 
 // MarkAgentRuntimeOrphaned transitions the row to state="orphaned" with reason.
-// SweepOrphans calls this at daemon bootstrap for rows whose persisted PID
+// orphansweep.SweepOrphans calls this at daemon bootstrap for rows whose persisted PID
 // is no longer alive.
 func (s *Store) MarkAgentRuntimeOrphaned(id, reason string) error {
 	_, err := s.DB.Exec(
@@ -181,7 +181,7 @@ func (s *Store) MarkAgentRuntimeOrphaned(id, reason string) error {
 }
 
 // ListRunningAgentRuntimeRows returns rows in launching/running state for
-// SweepOrphans reconciliation at daemon bootstrap.
+// orphansweep.SweepOrphans reconciliation at daemon bootstrap.
 func (s *Store) ListRunningAgentRuntimeRows() ([]*AgentRuntimeRow, error) {
 	rows, err := s.DB.Query(
 		`SELECT ` + agentRuntimeColumns + ` FROM agent_runtime

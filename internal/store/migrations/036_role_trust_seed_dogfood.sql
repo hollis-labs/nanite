@@ -1,3 +1,4 @@
+-- +goose Up
 -- H1 (CW-20260421-0014): retire migration 026's subagent_approval_required=0
 -- now that the per-role trust model replaces it. developer_mode=1 stays.
 --
@@ -21,3 +22,13 @@ SELECT w.id, ap.id, 'trusted', 'migration_036_dogfood_seed'
   CROSS JOIN agent_profiles ap
  WHERE ap.kind = 'internal'
    AND ap.slug IN ('worker','planner','hint-selector','mux-orchestrator');
+
+-- +goose Down
+-- No down migration: this file predates goose adoption (see
+-- docs/engineering/architecture/05-storage-and-migrations.md, "Migrations:
+-- adopting a real ledger"). Every pre-cutover migration ships a
+-- deliberately empty Down section rather than a hand-derived rollback --
+-- reconstructing the exact pre-migration schema/data shape for 94 files
+-- retroactively isn't worth doing when the historical state it would
+-- recreate has no operational value. New migrations going forward are
+-- expected to carry a real, tested Down.

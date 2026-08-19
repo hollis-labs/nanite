@@ -1,3 +1,4 @@
+-- +goose Up
 -- Phase 3 S4a (2026-04-15): tool broker execution-path validation.
 --
 -- Adds per-tool call cap + result cache settings to user_settings,
@@ -38,3 +39,13 @@ CREATE TABLE IF NOT EXISTS tool_result_cache (
 );
 CREATE INDEX IF NOT EXISTS idx_tool_result_cache_session ON tool_result_cache(session_id);
 CREATE INDEX IF NOT EXISTS idx_tool_result_cache_expires ON tool_result_cache(expires_at);
+
+-- +goose Down
+-- No down migration: this file predates goose adoption (see
+-- docs/engineering/architecture/05-storage-and-migrations.md, "Migrations:
+-- adopting a real ledger"). Every pre-cutover migration ships a
+-- deliberately empty Down section rather than a hand-derived rollback --
+-- reconstructing the exact pre-migration schema/data shape for 94 files
+-- retroactively isn't worth doing when the historical state it would
+-- recreate has no operational value. New migrations going forward are
+-- expected to carry a real, tested Down.

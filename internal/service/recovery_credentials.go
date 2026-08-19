@@ -10,17 +10,17 @@ import (
 	"github.com/hollis-labs/go-providers/provider"
 	nllmanthropic "github.com/hollis-labs/nanite/internal/llm/anthropic"
 	nllmopenai "github.com/hollis-labs/nanite/internal/llm/openai"
+	"github.com/hollis-labs/nanite/internal/recovery/broker"
 	runtimeagent "github.com/hollis-labs/nanite/internal/runtime/agent"
-	"github.com/hollis-labs/nanite/internal/runtime/agent/recovery"
 	"github.com/hollis-labs/nanite/internal/secrets"
 )
 
-// Compile-time assertion: the adapter satisfies recovery.CredentialOps.
+// Compile-time assertion: the adapter satisfies broker.CredentialOps.
 // This is the contract the broker invokes when handling
 // RemediationRefreshCredentials.
-var _ recovery.CredentialOps = (*recoveryCredentialsAdapter)(nil)
+var _ broker.CredentialOps = (*recoveryCredentialsAdapter)(nil)
 
-// recoveryCredentialsAdapter satisfies recovery.CredentialOps for the
+// recoveryCredentialsAdapter satisfies broker.CredentialOps for the
 // recovery broker. It is invoked when the classifier sees stderr matching
 // 401 / 403 / unauthorized for a failed agent session.
 //

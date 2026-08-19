@@ -19,10 +19,10 @@ type TestPlugin struct {
 	loaded      bool
 }
 
-func (p *TestPlugin) ID() string           { return p.id }
-func (p *TestPlugin) Name() string         { return p.name }
-func (p *TestPlugin) Version() string      { return p.version }
-func (p *TestPlugin) Description() string  { return p.description }
+func (p *TestPlugin) ID() string             { return p.id }
+func (p *TestPlugin) Name() string           { return p.name }
+func (p *TestPlugin) Version() string        { return p.version }
+func (p *TestPlugin) Description() string    { return p.description }
 func (p *TestPlugin) Dependencies() []string { return p.deps }
 
 func (p *TestPlugin) Load(host plugin.Host) error {
@@ -45,9 +45,9 @@ func (p *TestPlugin) Status() plugin.PluginStatus {
 
 // TestEventHook implements plugin.EventHook for testing
 type TestEventHook struct {
-	eventTypes   []string
-	lastEvent    plugin.Event
-	callCount    int
+	eventTypes []string
+	lastEvent  plugin.Event
+	callCount  int
 }
 
 func (h *TestEventHook) Handle(ctx context.Context, event plugin.Event) error {
@@ -281,7 +281,6 @@ func TestEventCatalog(t *testing.T) {
 		EventMessageSent,
 		EventMessageReceived,
 		EventMessageDeleted,
-		EventModeChanged,
 		EventScopeChanged,
 		EventToolCalled,
 		EventToolFailed,

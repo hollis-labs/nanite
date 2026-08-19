@@ -13,12 +13,12 @@ import (
 // SessionReader provides read access to sessions and messages.
 type SessionReader interface {
 	GetSession(id string) (*store.Session, error)
-	ListSessions(workspaceID string, includeArchived ...bool) ([]store.Session, error)
+	ListSessions(includeArchived ...bool) ([]store.Session, error)
 	ListMessages(sessionID string, limit int) ([]store.Message, error)
 	ListMessagesPaginated(sessionID string, limit, offset int) (*store.MessagePage, error)
 	ListMessagesAroundID(sessionID, messageID string, before, after int) (*store.MessagePage, error)
 	GetMessage(id string) (*store.Message, error)
-	SearchMessages(query, workspaceID, projectID string, limit int) ([]store.SearchResult, error)
+	SearchMessages(query, projectID string, limit int) ([]store.SearchResult, error)
 }
 
 // SessionWriter provides write access to sessions and messages.
@@ -31,25 +31,25 @@ type SessionWriter interface {
 	NextShortCode() (string, error)
 	CreateMessage(msg *store.Message) error
 	UpdateMessageContent(id, content string, isCompacted bool) error
-	UpdateSessionCompaction(id, summary string) error
 	ForkSession(sourceID string, overrides *store.Session, copyMessages bool) (*store.Session, error)
 	CopyMessages(sourceSessionID, targetSessionID string) error
 }
 
-// AgentReader provides read access to agents, modes, skills, and session-agent bindings.
+// AgentReader provides read access to agents, skills, and session-agent bindings.
 type AgentReader interface {
 	GetAgent(id string) (*store.AgentProfile, error)
 	GetAgentBySlug(slug string) (*store.AgentProfile, error)
 	ListAgents() ([]store.AgentProfile, error)
 	ListAgentsBySource(source string) ([]store.AgentProfile, error)
-	GetAgentMode(agentID, modeSlug string) (*store.AgentMode, error)
-	ListAgentModes(agentID string) ([]store.AgentMode, error)
 	GetSessionPrimaryAgent(sessionID string) (*store.SessionAgent, error)
 	ListSessionAgents(sessionID string) ([]store.SessionAgent, error)
 	ListAgentSkills(agentID string) ([]store.Skill, error)
 	ListAgentProjects(agentID string) ([]store.Project, error)
 	ListProjectAgents(projectID string) ([]store.AgentProfile, error)
-	GetAgentAssignedModes(agentID string) ([]store.Mode, error)
+	// GetRole backs roleForProfile's role -> agent -> task cascade lookup
+	// (02-add-agents-composition-columns.md). Returns (nil, nil) on a
+	// miss, matching store.Store.GetRole's own contract.
+	GetRole(id string) (*store.Role, error)
 }
 
 // AgentWriter provides write access to agents and session-agent bindings.
@@ -58,7 +58,6 @@ type AgentWriter interface {
 	UpdateAgent(a *store.AgentProfile) error
 	DeleteAgent(slug string) error
 	UpsertAgentBySlug(a *store.AgentProfile) error
-	CreateAgentMode(m *store.AgentMode) error
 	EnsureSessionAgent(sessionID, agentID, mode string, isPrimary bool) error
 	SetSessionAgentMode(sessionID, agentID, mode string) error
 	DeleteSessionAgent(sessionID, agentID string) error
@@ -66,8 +65,6 @@ type AgentWriter interface {
 	RemoveSkillFromAgent(agentID, skillID string) error
 	AddAgentProject(agentID, projectID string) error
 	RemoveAgentProject(agentID, projectID string) error
-	AssignModeToAgent(agentID, modeID string) error
-	UnassignModeFromAgent(agentID, modeID string) error
 }
 
 // ToolStore provides access to MCP server configs and the catalog.
@@ -98,14 +95,6 @@ type UsageStore interface {
 	LogEvent(sessionID, eventType, category, detail, metadata string)
 	ListEvents(category string, limit int) ([]store.EventLog, error)
 	CountSessionToolCalls(sessionID string) int
-
-	// InsertAgentBrokerDecision appends a row to agent_broker_decisions.
-	// CW-20260509-0046: the upstream agent-broker call site in
-	// chat_generate.go writes one row per turn (dispatch or chat-direct).
-	// Distinct from the tool-broker's broker_decisions log
-	// (BrokerDecisionLogger above) — naming history captured at
-	// internal/store/broker_decisions.go.
-	InsertAgentBrokerDecision(row *store.AgentBrokerDecision) error
 }
 
 // SettingsStore provides access to user settings and plugin settings.
@@ -120,14 +109,12 @@ type SettingsStore interface {
 	GetPluginSettingValue(pluginID, key string) (string, error)
 }
 
-// WorkspaceStore provides access to workspaces and projects.
-type WorkspaceStore interface {
-	ListWorkspaces() ([]store.Workspace, error)
-	GetWorkspace(id string) (*store.Workspace, error)
-	CreateWorkspace(w *store.Workspace) error
-	UpdateWorkspace(w *store.Workspace) error
-	DeleteWorkspace(id string) error
-	ListProjects(workspaceID string) ([]store.Project, error)
+// ProjectStore provides access to projects. Formerly WorkspaceStore —
+// renamed when the in-app `workspaces` table (and its nesting of projects
+// under a workspace_id) was retired in full (Phase 0 item 20,
+// TASKS/phase-0/20-retire-workspaces-and-instance-mechanism.md).
+type ProjectStore interface {
+	ListProjects() ([]store.Project, error)
 	GetProject(id string) (*store.Project, error)
 	CreateProject(p *store.Project) error
 	UpdateProject(p *store.Project) error
@@ -157,27 +144,6 @@ type ArtifactStore interface {
 	GetArtifact(id string) (*store.Artifact, error)
 }
 
-// TemplateStore provides access to prompt templates and output templates.
-type TemplateStore interface {
-	// Prompt templates
-	ListPromptTemplates() ([]store.PromptTemplate, error)
-	GetPromptTemplate(id string) (*store.PromptTemplate, error)
-	GetPromptTemplateBySlug(slug string) (*store.PromptTemplate, error)
-	CreatePromptTemplate(pt *store.PromptTemplate) error
-	UpdatePromptTemplate(pt *store.PromptTemplate) error
-	DeletePromptTemplate(id string) error
-	ListPromptTemplatesForAgent(agentID string) ([]store.PromptTemplate, error)
-	AssignPromptTemplateToAgent(agentID, templateID string) error
-	RemovePromptTemplateFromAgent(agentID, templateID string) error
-	ComposePromptForAgent(agentID string, variables map[string]string) (string, error)
-	// Output templates
-	ListTemplates() ([]store.Template, error)
-	GetTemplate(name string) (*store.Template, error)
-	CreateTemplate(t *store.Template) error
-	UpdateTemplate(name, templateText string) error
-	DeleteTemplate(name string) error
-}
-
 // SkillStore provides CRUD access to skills (independent of agent bindings).
 type SkillStore interface {
 	ListSkills() ([]store.Skill, error)
@@ -186,37 +152,6 @@ type SkillStore interface {
 	CreateSkill(sk *store.Skill) error
 	UpdateSkill(sk *store.Skill) error
 	DeleteSkill(id string) error
-}
-
-// ModeStore provides CRUD access to modes (independent of agent bindings).
-type ModeStore interface {
-	CreateMode(m *store.Mode) error
-	GetMode(id string) (*store.Mode, error)
-	GetModeBySlug(slug string) (*store.Mode, error)
-	ListModes() ([]store.Mode, error)
-	UpdateMode(m *store.Mode) error
-	DeleteMode(id string) error
-}
-
-// CustomActionStore provides access to custom actions.
-type CustomActionStore interface {
-	CreateCustomAction(action *store.CustomAction) error
-	GetCustomAction(id string) (*store.CustomAction, error)
-	UpdateCustomAction(action *store.CustomAction) error
-	DeleteCustomAction(id string) error
-	ListCustomActions() ([]store.CustomAction, error)
-	ListCustomActionsByTrigger(trigger string) ([]store.CustomAction, error)
-}
-
-// TriggerRuleStore provides access to trigger rules.
-type TriggerRuleStore interface {
-	CreateTriggerRule(rule *store.TriggerRule) error
-	GetTriggerRule(id string) (*store.TriggerRule, error)
-	UpdateTriggerRule(rule *store.TriggerRule) error
-	DeleteTriggerRule(id string) error
-	ListTriggerRules(pluginID string) ([]store.TriggerRule, error)
-	ListTriggerRulesByEvent(eventType string) ([]store.TriggerRule, error)
-	DeleteTriggerRulesByPlugin(pluginID string) error
 }
 
 // TodoStore provides CRUD access to internal todos.
@@ -256,8 +191,6 @@ type ProviderStore interface {
 	GetProvider(id string) (*store.ProviderConfig, error)
 	ListModels() ([]store.Model, error)
 	UpdateProvider(id string, u store.ProviderUpdate) error
-	SetProviderAPIKey(id, apiKey string) error
-	HasProviderAPIKey(id string) (bool, error)
 
 	// DefaultModelForProvider returns providers.default_model for the
 	// given provider_type, or an ErrNoDefaultModel-wrapped error when
@@ -335,14 +268,10 @@ type Store interface {
 	ToolStore
 	UsageStore
 	SettingsStore
-	WorkspaceStore
+	ProjectStore
 	BookmarkStore
 	ArtifactStore
-	TemplateStore
 	SkillStore
-	ModeStore
-	CustomActionStore
-	TriggerRuleStore
 	ProviderStore
 	TodoStore
 	PlanStore
@@ -364,6 +293,30 @@ type Store interface {
 	// to clear an expired id after a fast-exit-after-resume so the next
 	// turn cold-boots without --resume.
 	SetAgentRuntimeProviderSessionID(id, providerSessionID string) error
+
+	// ListEnabledAgentContextResolvers returns an agent's enabled
+	// cmd/http dynamic context resolvers (Phase 2 item 02,
+	// TASKS/phase-2/02-port-forward-dynamic-resolver.md). Used by
+	// chat_boot_drive.go's resolveAgentContextForBoot at launch time.
+	ListEnabledAgentContextResolvers(ctx context.Context, agentID string) ([]store.AgentContextResolver, error)
+
+	// ListAgentToolNames and ListAlwaysIncludedKnownTools (Phase 5 item 01,
+	// TASKS/phase-5/01-build-assignment-api.md) back
+	// chatServiceImpl.enforceExecutionRules' agent_tools-authoritative
+	// execution-time re-check -- mirroring filterToolsByAgentTools' and
+	// resolveAlwaysIncludedTools' selection-time reads (internal/service/
+	// tool.go, TASKS/phase-4/05) so a grant made via the agent_tools API
+	// isn't rejected one turn later purely because this separate re-check
+	// didn't know about the new table. Deliberately added directly here
+	// rather than to AgentReader/ToolStore above -- those narrower
+	// interfaces are also used by toolServiceImpl/agentServiceImpl via
+	// hand-rolled test doubles that have no reason to grow these two
+	// agent_tools-specific methods; scoping the addition to the one
+	// composite interface that actually needs them (Store, used by
+	// chatServiceImpl) keeps the blast radius to this interface's own
+	// fakes (chat_test.go's minimalStore).
+	ListAgentToolNames(ctx context.Context, agentID string) ([]string, error)
+	ListAlwaysIncludedKnownTools(ctx context.Context) ([]store.KnownTool, error)
 }
 
 // Compile-time verification that *store.Store satisfies the composite interface.

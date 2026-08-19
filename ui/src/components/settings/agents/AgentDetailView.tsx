@@ -1,12 +1,10 @@
 import {
   ChevronLeft,
-  Code2,
   Copy,
   Eye,
   FileText,
   FolderKanban,
   FolderOpen,
-  Loader2,
   Lock,
   Plus,
   Settings,
@@ -34,16 +32,13 @@ import { DynamicIcon, IconPicker } from "@/components/ui/icon-picker";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { TagInput } from "@/components/ui/tag-input";
 import type {
-  AgentModeProfile,
   AgentProfile,
   Project,
-  PromptTemplate,
   Skill,
 } from "@/lib/types";
 import { ConstraintsEditor } from "./editors/ConstraintsEditor";
 import { EditableStringList } from "./editors/EditableStringList";
 import { SystemPromptEditor } from "./editors/SystemPromptEditor";
-import { AgentBootPlanPanel } from "./AgentBootPlanPanel";
 import { AgentCapabilitiesPanel } from "./AgentCapabilitiesPanel";
 import { AgentReflexesPanel } from "./AgentReflexesPanel";
 
@@ -51,7 +46,6 @@ import { AgentReflexesPanel } from "./AgentReflexesPanel";
 
 export interface AgentDetailViewProps {
   agent: AgentProfile;
-  modes: AgentModeProfile[];
   modelOptions: { id: string; label: string }[];
   allKnownTags: string[];
   // Surfaced 409 / conflict messages from the parent's mutations.
@@ -60,18 +54,11 @@ export interface AgentDetailViewProps {
   onUpdateAgent: (data: Partial<AgentProfile>) => void;
   onCopyToManaged?: () => void;
   onDeleteAgent?: () => void;
-  onCreateMode: (data: Omit<AgentModeProfile, "id" | "agent_id">) => void;
-  isCreatingMode?: boolean;
   // Skills
   agentSkills: Skill[];
   availableSkills: Skill[];
   onAssignSkill: (skillId: string) => void;
   onRemoveSkill: (skillId: string) => void;
-  // Templates
-  agentTemplates: PromptTemplate[];
-  availableTemplates: PromptTemplate[];
-  onAssignTemplate: (templateId: string) => void;
-  onRemoveTemplate: (templateId: string) => void;
   // Projects
   agentProjects: Project[];
   availableProjects: Project[];
@@ -85,23 +72,16 @@ export interface AgentDetailViewProps {
 
 export function AgentDetailView({
   agent,
-  modes,
   modelOptions,
   allKnownTags,
   actionError,
   onUpdateAgent,
   onCopyToManaged,
   onDeleteAgent,
-  onCreateMode,
-  isCreatingMode,
   agentSkills,
   availableSkills,
   onAssignSkill,
   onRemoveSkill,
-  agentTemplates,
-  availableTemplates,
-  onAssignTemplate,
-  onRemoveTemplate,
   agentProjects,
   availableProjects,
   onAddProject,
@@ -110,7 +90,6 @@ export function AgentDetailView({
 }: AgentDetailViewProps) {
   const [editField, setEditField] = useState<string | null>(null);
   const [editValue, setEditValue] = useState("");
-  const [showModeForm, setShowModeForm] = useState(false);
   const [showProjectPicker, setShowProjectPicker] = useState(false);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
 
@@ -335,18 +314,11 @@ export function AgentDetailView({
           <TabsTrigger value="capabilities" className="gap-1.5 text-xs">
             <Wrench className="w-3.5 h-3.5" /> Capabilities
           </TabsTrigger>
-          <TabsTrigger value="boot" className="gap-1.5 text-xs">
-            <FolderKanban className="w-3.5 h-3.5" /> Boot
-          </TabsTrigger>
           <TabsTrigger value="reflexes" className="gap-1.5 text-xs">
             <Zap className="w-3.5 h-3.5" /> Reflexes
           </TabsTrigger>
           <TabsTrigger value="scope" className="gap-1.5 text-xs">
             <FolderOpen className="w-3.5 h-3.5" /> Scope
-          </TabsTrigger>
-          <TabsTrigger value="modes" className="gap-1.5 text-xs">
-            <Code2 className="w-3.5 h-3.5" /> Modes
-            {modes.length > 0 && <span className="text-[10px] text-fg-faint">({modes.length})</span>}
           </TabsTrigger>
         </TabsList>
 
@@ -470,16 +442,8 @@ export function AgentDetailView({
             availableSkills={availableSkills}
             onAssignSkill={onAssignSkill}
             onRemoveSkill={onRemoveSkill}
-            agentTemplates={agentTemplates}
-            availableTemplates={availableTemplates}
-            onAssignTemplate={onAssignTemplate}
-            onRemoveTemplate={onRemoveTemplate}
             onUpdateAgent={onUpdateAgent}
           />
-        </TabsContent>
-
-        <TabsContent value="boot" className="pt-4">
-          <AgentBootPlanPanel agent={agent} isReadOnly={isReadOnly} />
         </TabsContent>
 
         <TabsContent value="reflexes" className="pt-4">
@@ -569,66 +533,6 @@ export function AgentDetailView({
               )}
             </div>
           </Card>
-        </TabsContent>
-
-        {/* ── Modes Tab ──────────────────────────────────────────── */}
-        <TabsContent value="modes" className="pt-4 space-y-4">
-          <div className="flex items-center justify-between">
-            <p className="text-xs text-fg-muted">
-              Modes define alternate behaviors for this agent — each with its own prompt addendum and tool overrides.
-            </p>
-            <Button
-              onClick={() => setShowModeForm(true)}
-              size="sm"
-              variant="ghost"
-              className="h-7 gap-1 text-xs text-fg-muted hover:text-fg shrink-0"
-              disabled={isReadOnly}
-            >
-              <Plus className="w-3.5 h-3.5" />
-              Add Mode
-            </Button>
-          </div>
-
-          {modes.length === 0 && !showModeForm && (
-            <div className="text-center py-8">
-              <Code2 className="w-8 h-8 text-fg-faint mx-auto mb-2" />
-              <p className="text-xs text-fg-muted">No modes configured</p>
-            </div>
-          )}
-
-          <div className="space-y-2">
-            {modes.map((mode) => (
-              <Card key={mode.id}>
-                <div className="px-4 py-3">
-                  <div className="flex items-center gap-2">
-                    <Code2 className="w-3.5 h-3.5 text-fg-muted shrink-0" />
-                    <span className="text-sm font-medium text-fg">{mode.name}</span>
-                    <span className="text-[10px] font-mono text-fg-faint">{mode.slug}</span>
-                  </div>
-                  {mode.prompt_addendum && (
-                    <p className="text-xs text-fg-secondary mt-1.5 line-clamp-2 pl-5.5">{mode.prompt_addendum}</p>
-                  )}
-                </div>
-              </Card>
-            ))}
-          </div>
-
-          {/* Add Mode Form */}
-          {showModeForm && (
-            <Card>
-              <div className="p-4 space-y-3">
-                <span className="text-xs font-medium text-fg-secondary">New Mode</span>
-                <ModeForm
-                  onSubmit={(data) => {
-                    onCreateMode(data);
-                    setShowModeForm(false);
-                  }}
-                  onCancel={() => setShowModeForm(false)}
-                  isPending={isCreatingMode}
-                />
-              </div>
-            </Card>
-          )}
         </TabsContent>
 
       </Tabs>
@@ -725,72 +629,3 @@ function PickerList<T extends { id: string }>({
   );
 }
 
-function ModeForm({
-  onSubmit,
-  onCancel,
-  isPending,
-}: {
-  onSubmit: (data: Omit<AgentModeProfile, "id" | "agent_id">) => void;
-  onCancel: () => void;
-  isPending?: boolean;
-}) {
-  const [name, setName] = useState("");
-  const [slug, setSlug] = useState("");
-  const [promptAddendum, setPromptAddendum] = useState("");
-
-  const handleSubmit = () => {
-    if (!name.trim() || !slug.trim()) return;
-    onSubmit({
-      name: name.trim(),
-      slug: slug.trim(),
-      prompt_addendum: promptAddendum.trim(),
-      tool_overrides: "{}",
-      settings: "{}",
-    });
-  };
-
-  return (
-    <div className="space-y-2.5">
-      <div className="grid grid-cols-2 gap-3">
-        <div className="space-y-1">
-          <label className="text-[11px] text-fg-muted">Name</label>
-          <input
-            type="text"
-            value={name}
-            onChange={(e) => setName(e.target.value)}
-            placeholder="Mode name"
-            className="w-full px-2 py-1.5 bg-bg-elevated border border-border-subtle rounded-md text-xs text-fg focus:outline-none focus:border-primary"
-          />
-        </div>
-        <div className="space-y-1">
-          <label className="text-[11px] text-fg-muted">Slug</label>
-          <input
-            type="text"
-            value={slug}
-            onChange={(e) => setSlug(e.target.value)}
-            placeholder="mode-slug"
-            className="w-full px-2 py-1.5 bg-bg-elevated border border-border-subtle rounded-md text-xs text-fg font-mono focus:outline-none focus:border-primary"
-          />
-        </div>
-      </div>
-      <div className="space-y-1">
-        <label className="text-[11px] text-fg-muted">Prompt Addendum</label>
-        <textarea
-          value={promptAddendum}
-          onChange={(e) => setPromptAddendum(e.target.value)}
-          rows={3}
-          placeholder="Additional instructions for this mode..."
-          className="w-full px-2 py-1.5 bg-bg-elevated border border-border-subtle rounded-md text-xs text-fg font-mono focus:outline-none focus:border-primary resize-y"
-        />
-      </div>
-      <div className="flex items-center gap-2 pt-1">
-        <Button size="sm" className="h-6 text-[11px]" onClick={handleSubmit} disabled={isPending || !name.trim() || !slug.trim()}>
-          {isPending ? <Loader2 className="w-3 h-3 animate-spin" /> : "Add Mode"}
-        </Button>
-        <Button variant="ghost" size="sm" className="h-6 text-[11px]" onClick={onCancel}>
-          Cancel
-        </Button>
-      </div>
-    </div>
-  );
-}

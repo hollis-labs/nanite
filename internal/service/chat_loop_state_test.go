@@ -1,6 +1,7 @@
 package service
 
 import (
+	"context"
 	"fmt"
 	"strings"
 	"testing"
@@ -9,8 +10,16 @@ import (
 	llmtypes "github.com/hollis-labs/go-llm-types"
 	"github.com/hollis-labs/nanite/internal/chat"
 	"github.com/hollis-labs/nanite/internal/dispatcher"
+	"github.com/hollis-labs/nanite/internal/toolclient"
 )
 
+// TestLoopState_ResolvedMaxTurns pins resolvedMaxTurns()'s remaining
+// behavior after Phase 0 item 12 (2026-08-18) removed
+// chat.AgentConstraints.MaxTurns entirely (it was soft/telemetry-only and
+// never gated shouldStop). maxTurns is no longer agent-configurable — it
+// stays at defaultMaxTurns (75) and is only ever clamped down by
+// HardCeiling. It survives purely as an inert diagnostic value (see
+// chat_generate_diag.go's diagLogLoopStart and TurnSnapshot.MaxTurns).
 func TestLoopState_ResolvedMaxTurns(t *testing.T) {
 	tests := []struct {
 		name        string
@@ -18,35 +27,10 @@ func TestLoopState_ResolvedMaxTurns(t *testing.T) {
 		want        int
 	}{
 		{
-			name:        "zero uses default 75",
+			name:        "zero constraints uses default 75",
 			constraints: chat.AgentConstraints{},
 			want:        75,
 		},
-		{
-			name:        "explicit max turns",
-			constraints: chat.AgentConstraints{MaxTurns: 50},
-			want:        50,
-		},
-		{
-			name:        "max turns clamped to hard ceiling",
-			constraints: chat.AgentConstraints{MaxTurns: 300},
-			want:        200, // default hard ceiling
-		},
-		{
-			name:        "unlimited uses hard ceiling",
-			constraints: chat.AgentConstraints{MaxTurns: -1},
-			want:        200,
-		},
-		{
-			name:        "unlimited with custom hard ceiling",
-			constraints: chat.AgentConstraints{MaxTurns: -1, HardCeiling: 500},
-			want:        500,
-		},
-		// CW-20260512-0123 (SP-20260512-0011 W3): the legacy
-		// `MaxIterations` agent-constraints field was removed —
-		// `MaxTurns` is now the only agent-author-visible turn-count
-		// knob, and the two legacy-fallback fixtures here were
-		// removed because the field they exercised no longer exists.
 		{
 			name:        "custom hard ceiling higher than default max turns",
 			constraints: chat.AgentConstraints{HardCeiling: 300},
@@ -56,11 +40,6 @@ func TestLoopState_ResolvedMaxTurns(t *testing.T) {
 			name:        "custom hard ceiling lower than default max turns",
 			constraints: chat.AgentConstraints{HardCeiling: 50},
 			want:        50, // default maxTurns clamped by tighter ceiling
-		},
-		{
-			name:        "hard ceiling lower than explicit max turns",
-			constraints: chat.AgentConstraints{MaxTurns: 80, HardCeiling: 60},
-			want:        60,
 		},
 	}
 
@@ -153,33 +132,20 @@ func TestLoopState_ShouldStop_CustomRunawayCap(t *testing.T) {
 	}
 }
 
-// TestLoopState_ShouldStop_MaxTurnsIsSoft (CW-20260504-0001) — max_turns
-// is no longer a hard terminator. Hitting it fires a one-shot soft warning
-// (see TestLoopState_CheckSoftMaxTurnsWarning) and the loop continues. Only
-// runaway/idle/hardCeiling/retry-budget actively terminate.
-func TestLoopState_ShouldStop_MaxTurnsIsSoft(t *testing.T) {
-	ls := newLoopState(chat.AgentConstraints{MaxTurns: 5}, nil, false)
-	ls.iteration = 5
-	stop, code, _ := ls.shouldStop()
-	if stop {
-		t.Errorf("shouldStop() at max_turns must NOT terminate after CW-20260504-0001 surgery; got stop=true code=%q", code)
-	}
-	// Sanity: the soft-warning helper fires once at the budget mark.
-	fire, mt := ls.checkSoftMaxTurnsWarning()
-	if !fire {
-		t.Errorf("checkSoftMaxTurnsWarning should fire at iteration == maxTurns")
-	}
-	if mt != 5 {
-		t.Errorf("soft warning maxTurns = %d, want 5", mt)
-	}
-}
+// CW-20260512-0123 (SP-20260512-0011 W3) / Phase 0 item 12 (2026-08-18):
+// TestLoopState_ShouldStop_MaxTurnsIsSoft and
+// TestLoopState_CheckSoftMaxTurnsWarning_OneShot were removed. Both
+// exercised chat.AgentConstraints.MaxTurns and checkSoftMaxTurnsWarning(),
+// which no longer exist — the soft, telemetry-only max_turns budget never
+// gated the loop and was cut alongside the strategy planner's own MaxTurns
+// (item 11). See TestLoopState_ShouldStop_MaxTurnsDiagnosticIsInert below
+// for what's left of the max_turns behavior surface.
 
-// TestLoopState_ShouldStop_HardCeiling — hardCeiling stays the absolute
-// turn-based terminator even after max_turns goes soft (CW-20260504-0001).
-// The strategy planner sets MaxTurns way above hardCeiling here to prove
-// that it's hardCeiling — not the (now-soft) maxTurns clamp — that fires.
+// TestLoopState_ShouldStop_HardCeiling — hardCeiling is the absolute
+// turn-based terminator. AgentConstraints no longer has a MaxTurns field
+// to interact with it (removed by Phase 0 item 12).
 func TestLoopState_ShouldStop_HardCeiling(t *testing.T) {
-	ls := newLoopState(chat.AgentConstraints{MaxTurns: 200, HardCeiling: 10}, nil, false)
+	ls := newLoopState(chat.AgentConstraints{HardCeiling: 10}, nil, false)
 	ls.iteration = 10
 	stop, code, _ := ls.shouldStop()
 	if !stop {
@@ -190,43 +156,18 @@ func TestLoopState_ShouldStop_HardCeiling(t *testing.T) {
 	}
 }
 
-// TestLoopState_ShouldStop_PastMaxTurnsBeforeCeiling — even when iteration
-// is well past the configured MaxTurns, the loop keeps running until
-// hardCeiling (or another active terminator). CW-20260504-0001.
-func TestLoopState_ShouldStop_PastMaxTurnsBeforeCeiling(t *testing.T) {
-	ls := newLoopState(chat.AgentConstraints{MaxTurns: 5, HardCeiling: 50}, nil, false)
-	ls.iteration = 25 // 5x past the soft budget
+// TestLoopState_ShouldStop_MaxTurnsDiagnosticIsInert — iterationLimits.maxTurns
+// / resolvedMaxTurns() survive Phase 0 item 12 purely as an inert diagnostic
+// value (no agent-facing way to set them anymore). This white-box test
+// forces a low maxTurns value directly and confirms shouldStop() still
+// ignores it entirely — only hardCeiling (or another real terminator) fires.
+func TestLoopState_ShouldStop_MaxTurnsDiagnosticIsInert(t *testing.T) {
+	ls := newLoopState(chat.AgentConstraints{HardCeiling: 50}, nil, false)
+	ls.limits.maxTurns = 5 // simulate a low diagnostic value; no longer agent-settable
+	ls.iteration = 25      // 5x past the diagnostic value, well below hardCeiling
 	stop, code, _ := ls.shouldStop()
 	if stop {
-		t.Errorf("shouldStop() at iter=25 (5x past MaxTurns=5, well below HardCeiling=50) must NOT terminate; got code=%q", code)
-	}
-}
-
-// TestLoopState_CheckSoftMaxTurnsWarning_OneShot — the warning fires
-// exactly once per generation at the budget mark, no matter how many times
-// it's polled. CW-20260504-0001.
-func TestLoopState_CheckSoftMaxTurnsWarning_OneShot(t *testing.T) {
-	ls := newLoopState(chat.AgentConstraints{MaxTurns: 3}, nil, false)
-	// Pre-budget: silent.
-	ls.iteration = 2
-	if fire, _ := ls.checkSoftMaxTurnsWarning(); fire {
-		t.Error("warning should not fire below maxTurns")
-	}
-	// At budget: fires.
-	ls.iteration = 3
-	fire, mt := ls.checkSoftMaxTurnsWarning()
-	if !fire {
-		t.Fatal("warning should fire at iteration == maxTurns")
-	}
-	if mt != 3 {
-		t.Errorf("warning maxTurns = %d, want 3", mt)
-	}
-	// Past budget: silent (one-shot latch).
-	for i := 4; i < 10; i++ {
-		ls.iteration = i
-		if fire, _ := ls.checkSoftMaxTurnsWarning(); fire {
-			t.Errorf("warning should fire only once; refired at iter=%d", i)
-		}
+		t.Errorf("shouldStop() at iter=25 (past inert maxTurns=5, below HardCeiling=50) must NOT terminate; got code=%q", code)
 	}
 }
 
@@ -485,35 +426,95 @@ func TestNewLoopState_Defaults(t *testing.T) {
 	}
 }
 
+// TestToolMetaInfo_ConcurrencySafe is Phase 4 item 07's declared-metadata
+// mechanism, exercised end to end: SyncKnownTools backfills
+// known_tools.concurrency_safe from the curated table in
+// tool_concurrency_classification.go, then GetToolMeta reads it back. No
+// name-heuristic is involved anywhere in this path — several of the cases
+// below (base64_encode, message_inbox, tool_describe, search_tool_result)
+// are real tools the OLD suffix/substring heuristic misclassified as
+// unsafe; they're pinned here specifically so that regression can't recur
+// silently. See TASKS/phase-4/07-tool-concurrency-safety-classification.md's
+// Work Log for the full audit.
 func TestToolMetaInfo_ConcurrencySafe(t *testing.T) {
-	svc := &toolServiceImpl{}
+	st := newKnownToolsTestStore(t)
+	ctx := context.Background()
 
 	tests := []struct {
 		name     string
 		tool     string
 		wantSafe bool
 	}{
-		// Uniform agent-facing names per ADR-002 — no `mcp__server__` prefix.
 		{"read tool", "dev_read", true},
 		{"grep tool", "dev_grep", true},
 		{"glob tool", "dev_glob", true},
-		{"search tool", "context_search", true},
-		{"web fetch", "web_fetch", true},
-		{"web search", "web_search", true},
 		{"write tool", "dev_write", false},
 		{"edit tool", "dev_edit", false},
-		{"bash tool", "dev_bash", false},
-		{"delete tool", "engine_task_delete", false},
+		{"bash tool — input-dependent, conservative static default", "dev_bash", false},
+		{"web fetch", "web_fetch", true},
+		{"base64 encode — misclassified unsafe by the old name heuristic", "base64_encode", true},
+		{"url decode — misclassified unsafe by the old name heuristic", "url_decode", true},
+		{"math eval — misclassified unsafe by the old name heuristic", "math_eval", true},
+		{"install diff — dry-run stub, misclassified unsafe by the old name heuristic", "install_diff", true},
+		{"message inbox — misclassified unsafe by the old name heuristic", "message_inbox", true},
+		{"whoami — misclassified unsafe by the old name heuristic", "whoami", true},
+		{"tool describe — misclassified unsafe by the old name heuristic", "tool_describe", true},
+		{"tool validate — misclassified unsafe by the old name heuristic", "tool_validate", true},
+		{"fetch_tool_result — misclassified unsafe by the old name heuristic", "fetch_tool_result", true},
+		{"search_tool_result — 'search' is a PREFIX here, which the old suffix heuristic could never match", "search_tool_result", true},
+		{"skill delete — genuinely destructive, must stay unsafe", "skill_delete", false},
+		{"code execute — genuinely destructive, must stay unsafe", "code_execute", false},
 	}
+
+	catalog := make([]llmtypes.ToolDefinition, 0, len(tests))
+	for _, tt := range tests {
+		catalog = append(catalog, llmtypes.ToolDefinition{Name: tt.tool})
+	}
+	SyncKnownTools(ctx, st, catalog, func(string) bool { return true })
+
+	svc := &toolServiceImpl{toolClient: &toolclient.ToolClient{Store: st}}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			meta, _ := svc.GetToolMeta(tt.tool)
+			meta, ok := svc.GetToolMeta(ctx, tt.tool)
+			if !ok {
+				t.Fatalf("GetToolMeta(%q) ok = false, want true", tt.tool)
+			}
 			if meta.IsConcurrencySafe != tt.wantSafe {
 				t.Errorf("GetToolMeta(%q).IsConcurrencySafe = %v, want %v", tt.tool, meta.IsConcurrencySafe, tt.wantSafe)
 			}
 		})
 	}
+}
+
+// TestToolMetaInfo_ConcurrencySafe_UndeclaredFailsClosed covers both "no
+// store wired" (chiefly tests/callers that never attach one) and "tool has
+// no known_tools row / row not yet classified" — both must default to
+// false (fail closed), never a name guess.
+func TestToolMetaInfo_ConcurrencySafe_UndeclaredFailsClosed(t *testing.T) {
+	t.Run("no store wired", func(t *testing.T) {
+		svc := &toolServiceImpl{}
+		meta, ok := svc.GetToolMeta(context.Background(), "dev_read")
+		if !ok {
+			t.Fatal("GetToolMeta ok = false, want true")
+		}
+		if meta.IsConcurrencySafe {
+			t.Error("IsConcurrencySafe = true with no store wired, want false (fail closed)")
+		}
+	})
+
+	t.Run("unknown tool, never classified", func(t *testing.T) {
+		st := newKnownToolsTestStore(t)
+		ctx := context.Background()
+		svc := &toolServiceImpl{toolClient: &toolclient.ToolClient{Store: st}}
+		meta, ok := svc.GetToolMeta(ctx, "totally_unknown_mcp_tool_xyz")
+		if !ok {
+			t.Fatal("GetToolMeta ok = false, want true")
+		}
+		if meta.IsConcurrencySafe {
+			t.Error("IsConcurrencySafe = true for an unclassified tool, want false (fail closed)")
+		}
+	})
 }
 
 func TestNewLoopState_ScratchpadInitialized(t *testing.T) {

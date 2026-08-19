@@ -18,10 +18,7 @@ import (
 func TestEnvelopeRespond_E2E_TranscriptThreadedIntoContext(t *testing.T) {
 	a, mux := newTestAPI(t)
 
-	if err := a.Services.Store.CreateWorkspace(&store.Workspace{ID: "ws-e2e", Name: "e2e"}); err != nil {
-		t.Fatalf("CreateWorkspace: %v", err)
-	}
-	sess := &store.Session{WorkspaceID: "ws-e2e"}
+	sess := &store.Session{}
 	if err := a.Services.Store.CreateSession(sess); err != nil {
 		t.Fatalf("CreateSession: %v", err)
 	}
@@ -42,7 +39,7 @@ func TestEnvelopeRespond_E2E_TranscriptThreadedIntoContext(t *testing.T) {
 
 	// Next-turn simulation: assemble context as the LLM adapter would.
 	client := chat.NewContextClient(a.Services.Store)
-	sources, err := client.AssembleSlotSources(context.Background(), sess, agent, &store.AgentMode{}, nil, nil)
+	sources, err := client.AssembleSlotSources(context.Background(), sess, agent)
 	if err != nil {
 		t.Fatalf("AssembleSlotSources: %v", err)
 	}
@@ -68,10 +65,7 @@ func TestEnvelopeRespond_E2E_TranscriptThreadedIntoContext(t *testing.T) {
 func TestEnvelopeRespond_E2E_SilentHandlerNotInContext(t *testing.T) {
 	a, mux := newTestAPI(t)
 
-	if err := a.Services.Store.CreateWorkspace(&store.Workspace{ID: "ws-silent", Name: "s"}); err != nil {
-		t.Fatalf("CreateWorkspace: %v", err)
-	}
-	sess := &store.Session{WorkspaceID: "ws-silent"}
+	sess := &store.Session{}
 	if err := a.Services.Store.CreateSession(sess); err != nil {
 		t.Fatalf("CreateSession: %v", err)
 	}
@@ -93,7 +87,7 @@ func TestEnvelopeRespond_E2E_SilentHandlerNotInContext(t *testing.T) {
 	}
 
 	client := chat.NewContextClient(a.Services.Store)
-	sources, err := client.AssembleSlotSources(context.Background(), sess, agent, &store.AgentMode{}, nil, nil)
+	sources, err := client.AssembleSlotSources(context.Background(), sess, agent)
 	if err != nil {
 		t.Fatalf("AssembleSlotSources: %v", err)
 	}

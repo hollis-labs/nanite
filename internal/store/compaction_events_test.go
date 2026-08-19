@@ -63,22 +63,22 @@ func TestGetLatestCompactionEvent(t *testing.T) {
 
 	// Write two events
 	evt1 := CompactionEvent{
-		ID:                "evt-old",
-		SessionID:         sessionID,
-		SummaryMode:       "plan",
+		ID:                   "evt-old",
+		SessionID:            sessionID,
+		SummaryMode:          "plan",
 		EvictedCachePointers: []string{},
-		PreservedSources:  []string{},
-		StagesApplied:     []string{},
-		CreatedAt:         now.Add(-1 * time.Minute).Format(time.RFC3339),
+		PreservedSources:     []string{},
+		StagesApplied:        []string{},
+		CreatedAt:            now.Add(-1 * time.Minute).Format(time.RFC3339),
 	}
 	evt2 := CompactionEvent{
-		ID:                "evt-new",
-		SessionID:         sessionID,
-		SummaryMode:       "research",
+		ID:                   "evt-new",
+		SessionID:            sessionID,
+		SummaryMode:          "research",
 		EvictedCachePointers: []string{},
-		PreservedSources:  []string{},
-		StagesApplied:     []string{},
-		CreatedAt:         now.Format(time.RFC3339),
+		PreservedSources:     []string{},
+		StagesApplied:        []string{},
+		CreatedAt:            now.Format(time.RFC3339),
 	}
 
 	if err := s.WriteCompactionEvent(context.Background(), evt1); err != nil {

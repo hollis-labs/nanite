@@ -45,14 +45,41 @@ type AgentProfile struct {
 	DefaultModel    string `json:"default_model"`
 	DefaultProvider string `json:"default_provider"`
 	MCPServers      string `json:"mcp_servers"`
+	// ToolPermissions (allow_list/deny_list JSON) was DEPRECATED as of
+	// Phase 1 item 04 (TASKS/phase-1/04-add-known-tools-and-agent-tools-
+	// fk.md) in favor of the FK-based agent_tools join
+	// (internal/store/agent_tools.go), and its enforcement machinery
+	// (toolclient.ToolPermissions/CheckPermission/GetPermissions/
+	// ParsePermissions/PermissionResolver) was deleted outright by
+	// TASKS/adhoc/02-remove-tool-permissions-collapse-to-agent-tools.md:
+	// agent_tools (+ the known_tools.always_included escape hatch) is the
+	// sole tool-selection/execution gate everywhere now, including the
+	// deeper ToolClient.CallTool backstop that used to also read this
+	// column. The column is left in place (that task's schema decision —
+	// reversible, low-risk to defer) but is now permanently inert: nothing
+	// reads it for access control, and new agents always get "{}" here
+	// (internal/agent's Definition.ToProfile()). Pre-existing rows may
+	// still carry real historical JSON from before that task; it is dead
+	// data. Its CURRENT value at the time was carried into agent_tools for
+	// every existing agent by the earlier one-time backfill
+	// (internal/service/known_tools_backfill.go).
 	ToolPermissions string `json:"tool_permissions"`
 	CanExecute      bool   `json:"can_execute"`
 	Settings        string `json:"settings"`
 	CreatedAt       string `json:"created_at"`
 	UpdatedAt       string `json:"updated_at"`
 	// Schema v2 fields
-	AgentHash   string `json:"agent_hash"`
-	Version     int    `json:"version"`
+	AgentHash string `json:"agent_hash"`
+	Version   int    `json:"version"`
+	// Tools (schema-v2 allowlist of tool-name patterns) is DEPRECATED as of
+	// Phase 1 item 04 in favor of agent_tools, same as ToolPermissions
+	// above, but — unlike ToolPermissions — is NOT inert: it (unioned with
+	// RoleTools) is still the pattern-match input
+	// internal/service/known_tools_backfill.go's one-time-per-agent
+	// backfill reads to derive a brand-new agent's initial agent_tools
+	// grant set. Not read anywhere else (SelectForAgent/
+	// enforceExecutionRulesViaAgentTools consult agent_tools directly, not
+	// this column, once a grant exists).
 	Tools       string `json:"tools"`
 	Directories string `json:"directories"`
 	Constraints string `json:"constraints"`
@@ -90,6 +117,14 @@ type AgentProfile struct {
 	// this field, parses the JSON array, and inserts one agent_known_tools
 	// row per entry with pinned=1, reason='role_seed'. Empty "[]" means no
 	// seed. Added by FU-7a (migration 066).
+	//
+	// DEPRECATED as of Phase 1 item 04
+	// (TASKS/phase-1/04-add-known-tools-and-agent-tools-fk.md): its names
+	// now also produce real agent_tools grant rows (granted_via='role_seed',
+	// internal/service/ingest.go's seedRoleToolsFromIngest), on top of the
+	// agent_known_tools seeding described above, which is unchanged.
+	// Existing agents' current values were carried into agent_tools once
+	// by this task's backfill (internal/service/known_tools_backfill.go).
 	RoleTools string `json:"role_tools"`
 
 	// RoleSkills is a JSON array of skill slugs this agent should be
@@ -123,15 +158,72 @@ type AgentProfile struct {
 	ActivationMode string `json:"activation_mode"`
 	Class          string `json:"class"`
 	DefaultState   string `json:"default_state"`
+
+	// ConsumerID is a nullable FK to consumers(id) -- the ownership/tenancy
+	// tag identifying which external system this agent belongs to (e.g.
+	// Loom owns Curator). Empty string means internal/operator-owned, per
+	// decision log Section 4. See internal/store/consumers.go and
+	// docs/engineering/architecture/01-agent-construction.md. Added by
+	// migration 112 (TASKS/phase-1/03-add-consumers-table.md).
+	ConsumerID string `json:"consumer_id"`
+
+	// RoleID is a nullable FK to roles(id) -- the broadest layer of the
+	// role -> agent -> task cascade (see internal/service/role_cascade.go
+	// and architecture/01-agent-construction.md). Empty string means no
+	// role bound yet; nullable during transition per
+	// 02-add-agents-composition-columns.md's own text (existing rows have
+	// no role until 10-data-migrate-nanite-agents-md.md backfills one,
+	// which is out of Phase 1 scope). Added by migration 117.
+	RoleID string `json:"role_id"`
+
+	// ModelID is a nullable FK to models(id) -- a relational reference into
+	// the DB-authoritative models catalog (06-fix-models-table-sync-
+	// target.md), distinct from the pre-existing free-text
+	// DefaultModel/DefaultProvider scalars that already participate in the
+	// role->agent->task cascade. Empty string means no relational model
+	// bound yet. Added by migration 117.
+	ModelID string `json:"model_id"`
+
+	// RuntimeKind is 'cli' or 'api' -- see GLOSSARY.md's "Runtime kind"
+	// entry. Populated for every row (backfilled by migration 117 from
+	// each row's pre-existing default_provider via inferRuntimeKind,
+	// mirroring chat.IsCLIProvider; defaulted the same way for every row
+	// created afterward by applyMultiAgentDefaults) but deliberately not
+	// yet consulted anywhere for CLI-vs-API routing decisions -- wiring it
+	// as the actual routing switch is Phase 2's job, not this task's.
+	RuntimeKind string `json:"runtime_kind"`
+
+	// PluginID tags this row as created/owned by a plugin's
+	// registers.agent_profiles[] registration (Phase 5 item 03,
+	// TASKS/phase-5/03-wire-registers-agent-profiles.md) -- the plugin's
+	// canonical id (manifest.Identifier() / p.ID()), mirroring the
+	// artifacts.source_plugin_id precedent. Empty string means this row is
+	// operator/GUI-created (or predates Phase 5 item 03). Read by
+	// ListAgentsByPluginID and plugin.Host.UnloadPlugin's unload sweep so a
+	// plugin uninstall/unload correctly removes what it registered. Added
+	// by migration 122.
+	PluginID string `json:"plugin_id"`
 }
 
 // validateAgentMultiAgentFields enforces the enum constraints that
 // migration 070 deliberately did not encode at the column level. FU-28.
+//
+// activation_mode's valid set was widened from 'singleton'/'instance' to
+// 'singleton'/'fresh-per-wake'/'concurrent' by migration 117 (Phase 1 item
+// 02, TASKS/phase-1/02-add-agents-composition-columns.md) -- the real
+// design decision documented in that task's Work Log: extend this existing
+// column to the 3-value instance_mode shape architecture/
+// 01-agent-construction.md calls for, rather than add a second, competing
+// column, since exhaustive grep confirmed nothing anywhere read the old
+// 2-value column for behavior (durable_wake.go's wakeSkipReason -- the
+// intended real consumer -- switched on lifecycle_class instead). 'instance'
+// is retired as a valid value; every pre-existing row (and every
+// .nanite/agents/*.md file) was migrated to 'fresh-per-wake' in lockstep.
 func validateAgentMultiAgentFields(a *AgentProfile) error {
 	switch a.ActivationMode {
-	case "", "singleton", "instance":
+	case "", "singleton", "fresh-per-wake", "concurrent":
 	default:
-		return fmt.Errorf("activation_mode %q invalid: must be 'singleton' or 'instance'", a.ActivationMode)
+		return fmt.Errorf("activation_mode %q invalid: must be 'singleton', 'fresh-per-wake', or 'concurrent'", a.ActivationMode)
 	}
 	switch a.Class {
 	case "", "advisor", "process", "template", "harness":
@@ -143,22 +235,42 @@ func validateAgentMultiAgentFields(a *AgentProfile) error {
 	default:
 		return fmt.Errorf("default_state %q invalid: must be 'sleeping' or 'active'", a.DefaultState)
 	}
+	// runtime_kind also carries a real DB-level CHECK (migration 117,
+	// unlike the three enums above), but validating it here too gives API
+	// callers a clean Go error instead of a raw SQLite CHECK-constraint
+	// failure, matching this function's existing job for every other
+	// enum-shaped column on this row.
+	switch a.RuntimeKind {
+	case "", "cli", "api":
+	default:
+		return fmt.Errorf("runtime_kind %q invalid: must be 'cli' or 'api'", a.RuntimeKind)
+	}
 	return nil
 }
 
 // applyMultiAgentDefaults applies the FU-28 column defaults (activation_mode,
-// class, default_state, urn_aliases) and mints a URN if none is set.
-// When minting, the slug-form URN is pushed into urn_aliases so legacy
-// routing keeps resolving. FU-28.
+// class, default_state, urn_aliases, runtime_kind) and mints a URN if none
+// is set. When minting, the slug-form URN is pushed into urn_aliases so
+// legacy routing keeps resolving. FU-28; runtime_kind + the class-aware
+// activation_mode default added by migration 117 (Phase 1 item 02).
+//
+// Class is defaulted *before* ActivationMode here (reordered from this
+// function's original shape) because DefaultActivationModeForClass needs
+// a's final class value, not whatever it was before applyMultiAgentDefaults
+// ran -- a caller that sets Class="process" and leaves ActivationMode empty
+// must still land on 'fresh-per-wake', not 'singleton'.
 func applyMultiAgentDefaults(a *AgentProfile) {
-	if a.ActivationMode == "" {
-		a.ActivationMode = "singleton"
-	}
 	if a.Class == "" {
 		a.Class = "advisor"
 	}
+	if a.ActivationMode == "" {
+		a.ActivationMode = DefaultActivationModeForClass(a.Class)
+	}
 	if a.DefaultState == "" {
 		a.DefaultState = "sleeping"
+	}
+	if a.RuntimeKind == "" {
+		a.RuntimeKind = inferRuntimeKind(a.DefaultProvider)
 	}
 	if a.URNAliases == "" {
 		a.URNAliases = "[]"
@@ -190,6 +302,49 @@ func applyMultiAgentDefaults(a *AgentProfile) {
 	}
 }
 
+// DefaultActivationModeForClass returns the activation_mode value a newly
+// created composition should default to when the caller leaves it unset,
+// derived from class. Exported so internal/api/agent_builder.go's draft
+// advisor (which pre-fills a suggested ActivationMode for the operator to
+// review before create, rather than leaving it empty for
+// applyMultiAgentDefaults to fill in later) can share this exact mapping
+// instead of hardcoding its own -- avoiding a second, drifting source of
+// the same decision.
+//
+// process and template both default to 'fresh-per-wake': both use a
+// fresh/one-shot session policy with no reuse collision for "already
+// active" to guard against (durableAgentLaunchPolicyFor's
+// SessionPolicyFreshPerWake and SessionPolicyFreshOneShot, respectively --
+// see internal/service/durable_agents.go). advisor and harness (or
+// anything else, including empty/unrecognized values) default to
+// 'singleton', matching durable_wake.go's pre-migration-116 behavior for
+// every class other than process.
+func DefaultActivationModeForClass(class string) string {
+	switch class {
+	case "process", "template":
+		return "fresh-per-wake"
+	default:
+		return "singleton"
+	}
+}
+
+// inferRuntimeKind mirrors chat.IsCLIProvider's exact classification
+// (name == "pty" OR has prefix "pty-" OR has prefix "sub-" => cli, else
+// api) without importing internal/chat -- internal/chat already imports
+// internal/store, so the reverse import would cycle. Same "mirror without
+// an import cycle" convention this file already uses for
+// urnPrefix/generateAgentURN (see their doc comments above). Kept in
+// lockstep with chat.IsCLIProvider and this migration's SQL backfill
+// (117_agent_profiles_composition_columns.sql) by hand; chat/engine.go's
+// own doc comment lists every other site that same classification must not
+// drift from.
+func inferRuntimeKind(providerName string) string {
+	if providerName == "pty" || strings.HasPrefix(providerName, "pty-") || strings.HasPrefix(providerName, "sub-") {
+		return "cli"
+	}
+	return "api"
+}
+
 // agentColumns is the canonical SELECT column list for agent_profiles.
 const agentColumns = `id, name, slug, COALESCE(avatar,''), system_prompt, COALESCE(description,''),
         modes, COALESCE(default_model,''), COALESCE(default_provider,''),
@@ -205,7 +360,10 @@ const agentColumns = `id, name, slug, COALESCE(avatar,''), system_prompt, COALES
         COALESCE(durable,0),
         COALESCE(urn,''), COALESCE(urn_aliases,'[]'),
         COALESCE(activation_mode,'singleton'), COALESCE(class,'advisor'),
-        COALESCE(default_state,'sleeping')`
+        COALESCE(default_state,'sleeping'),
+        COALESCE(consumer_id,''),
+        COALESCE(role_id,''), COALESCE(model_id,''), COALESCE(runtime_kind,'api'),
+        COALESCE(plugin_id,'')`
 
 // scanAgent scans a row into an AgentProfile using the canonical column order.
 func scanAgent(scanner interface{ Scan(...any) error }, a *AgentProfile) error {
@@ -225,18 +383,10 @@ func scanAgent(scanner interface{ Scan(...any) error }, a *AgentProfile) error {
 		&a.URN, &a.URNAliases,
 		&a.ActivationMode, &a.Class,
 		&a.DefaultState,
+		&a.ConsumerID,
+		&a.RoleID, &a.ModelID, &a.RuntimeKind,
+		&a.PluginID,
 	)
-}
-
-// AgentMode represents a mode configuration for an agent.
-type AgentMode struct {
-	ID             string `json:"id"`
-	AgentID        string `json:"agent_id"`
-	Slug           string `json:"slug"`
-	Name           string `json:"name"`
-	PromptAddendum string `json:"prompt_addendum"`
-	ToolOverrides  string `json:"tool_overrides"`
-	Settings       string `json:"settings"`
 }
 
 // GetAgentBySlug returns an agent profile by its slug.
@@ -247,19 +397,6 @@ func (s *Store) GetAgentBySlug(slug string) (*AgentProfile, error) {
 		return nil, fmt.Errorf("get agent by slug %s: %w", slug, err)
 	}
 	return &a, nil
-}
-
-// GetAgentMode returns a specific mode for an agent.
-func (s *Store) GetAgentMode(agentID, modeSlug string) (*AgentMode, error) {
-	var m AgentMode
-	err := s.DB.QueryRow(
-		`SELECT id, agent_id, slug, name, prompt_addendum, tool_overrides, settings
-		 FROM agent_modes WHERE agent_id = ? AND slug = ?`, agentID, modeSlug,
-	).Scan(&m.ID, &m.AgentID, &m.Slug, &m.Name, &m.PromptAddendum, &m.ToolOverrides, &m.Settings)
-	if err != nil {
-		return nil, fmt.Errorf("get agent mode %s/%s: %w", agentID, modeSlug, err)
-	}
-	return &m, nil
 }
 
 // GetAgent returns an agent profile by ID.
@@ -386,8 +523,11 @@ func (s *Store) CreateAgent(a *AgentProfile) error {
 		                              context_policy,
 		                              durable,
 		                              urn, urn_aliases,
-		                              activation_mode, class, default_state)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		                              activation_mode, class, default_state,
+		                              consumer_id,
+		                              role_id, model_id, runtime_kind,
+		                              plugin_id)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		a.ID, a.Name, a.Slug, nullIfEmpty(a.Avatar), a.SystemPrompt, nullIfEmpty(a.Description),
 		a.Modes, nullIfEmpty(a.DefaultModel), a.DefaultProvider,
 		a.MCPServers, a.ToolPermissions, a.CanExecute, a.Settings,
@@ -403,6 +543,9 @@ func (s *Store) CreateAgent(a *AgentProfile) error {
 		a.Durable,
 		a.URN, a.URNAliases,
 		a.ActivationMode, a.Class, a.DefaultState,
+		nullIfEmpty(a.ConsumerID),
+		nullIfEmpty(a.RoleID), nullIfEmpty(a.ModelID), a.RuntimeKind,
+		nullIfEmpty(a.PluginID),
 	)
 	if err != nil {
 		return fmt.Errorf("create agent: %w", err)
@@ -413,14 +556,21 @@ func (s *Store) CreateAgent(a *AgentProfile) error {
 }
 
 // DeleteAgent removes an agent profile by slug, including related records
-// (modes, skills, session associations). Returns nil if the agent doesn't exist.
+// (skills, project links, session associations). Returns nil if the agent
+// doesn't exist.
 //
-// All deletes run inside a single transaction — no PRAGMA toggling. Junction
-// tables (agent_modes, agent_skills, agent_prompt_templates,
-// agent_mode_assignments, session_agents) intentionally have no FK back to
-// agent_profiles (they may reference file-based agents), so deleting them
-// explicitly is both correct and FK-safe. Messages have their agent_id
-// nullified to preserve user data.
+// All deletes run inside a single transaction — no PRAGMA toggling.
+// session_agents intentionally has no FK back to agent_profiles (it may
+// reference file-based agents), so deleting it explicitly is both correct
+// and FK-safe. agent_skills/agent_projects DO now carry a real
+// `agent_id ... REFERENCES agent_profiles(id) ON DELETE CASCADE` FK
+// (migration 113, Phase 1 #05) — the explicit cleanup lines below for both
+// are no longer required for correctness (the CASCADE would handle it on
+// its own), but are kept anyway for the same belt-and-suspenders reason the
+// per-agent capability/runtime children below are (they run before the
+// final agent_profiles delete regardless, so behavior is identical with or
+// without the CASCADE). Messages have their agent_id nullified to preserve
+// user data.
 func (s *Store) DeleteAgent(slug string) error {
 	agent, err := s.GetAgentBySlug(slug)
 	if err != nil {
@@ -435,23 +585,28 @@ func (s *Store) DeleteAgent(slug string) error {
 
 	cleanups := []string{
 		"DELETE FROM session_agents WHERE agent_id = ?",
-		"DELETE FROM agent_modes WHERE agent_id = ?",
 		"DELETE FROM agent_skills WHERE agent_id = ?",
-		"DELETE FROM agent_prompt_templates WHERE agent_id = ?",
-		"DELETE FROM agent_mode_assignments WHERE agent_id = ?",
-		// Per-agent capability/runtime children (migrations 068/070/074/078/085).
+		"DELETE FROM agent_projects WHERE agent_id = ?",
+		// Per-agent capability/runtime children (migrations 068/070/074/085).
 		// These declare FKs to agent_profiles(id); clean them explicitly so a
 		// managed-agent delete leaves no orphaned reflexes, known tools/skills,
-		// procedures, knowledge seeds, schedules, cycles, or boot plan.
+		// procedures, knowledge seeds, or schedules.
 		"DELETE FROM agent_known_tools WHERE agent_id = ?",
 		"DELETE FROM agent_known_skills WHERE agent_id = ?",
+		// Phase 1 item 04 (migration 116): agent_tools/
+		// agent_dispatch_tool_allowlist both already declare
+		// ON DELETE CASCADE agent_profiles(id) FKs, so these two lines are
+		// belt-and-suspenders, matching this list's existing style of
+		// explicitly clearing agent_skills/agent_projects even though
+		// migration 113 gave those real cascade FKs too.
+		"DELETE FROM agent_tools WHERE agent_id = ?",
+		"DELETE FROM agent_dispatch_tool_allowlist WHERE agent_id = ?",
+		"DELETE FROM agent_tools_legacy_backfill WHERE agent_id = ?",
 		"DELETE FROM agent_procedures WHERE agent_id = ?",
 		"DELETE FROM agent_knowledge_seed WHERE agent_id = ?",
 		"DELETE FROM agent_log WHERE agent_id = ?",
-		"DELETE FROM agent_cycles WHERE agent_id = ?",
 		"DELETE FROM agent_schedules WHERE agent_id = ?",
 		"DELETE FROM agent_reflexes WHERE agent_id = ?",
-		"DELETE FROM agent_boot_plans WHERE agent_id = ?",
 		// pending_reflexes.target_agent_id references the profile (migration
 		// 074, no cascade) — clear it or the final delete fails under
 		// foreign_keys=ON. (pending_reflexes has no agent_id column.)
@@ -542,7 +697,10 @@ func (s *Store) UpdateAgent(a *AgentProfile) error {
 		        context_policy = ?,
 		        durable = ?,
 		        urn = ?, urn_aliases = ?,
-		        activation_mode = ?, class = ?, default_state = ?
+		        activation_mode = ?, class = ?, default_state = ?,
+		        consumer_id = ?,
+		        role_id = ?, model_id = ?, runtime_kind = ?,
+		        plugin_id = ?
 		 WHERE id = ?`,
 		a.Name, a.Slug, nullIfEmpty(a.Avatar), a.SystemPrompt, nullIfEmpty(a.Description),
 		a.Modes, nullIfEmpty(a.DefaultModel), a.DefaultProvider,
@@ -558,6 +716,9 @@ func (s *Store) UpdateAgent(a *AgentProfile) error {
 		a.Durable,
 		a.URN, a.URNAliases,
 		a.ActivationMode, a.Class, a.DefaultState,
+		nullIfEmpty(a.ConsumerID),
+		nullIfEmpty(a.RoleID), nullIfEmpty(a.ModelID), a.RuntimeKind,
+		nullIfEmpty(a.PluginID),
 		a.ID,
 	)
 	if err != nil {
@@ -567,47 +728,56 @@ func (s *Store) UpdateAgent(a *AgentProfile) error {
 	return nil
 }
 
-// ListAgentModes returns all modes for a given agent.
-func (s *Store) ListAgentModes(agentID string) ([]AgentMode, error) {
-	rows, err := s.DB.Query(
-		`SELECT id, agent_id, slug, name, prompt_addendum, tool_overrides, settings
-		 FROM agent_modes WHERE agent_id = ? ORDER BY slug`, agentID,
-	)
+// UpdateAgentComposition directly sets an agent's DB-only composition
+// columns (role_id, consumer_id, model_id) -- see the RoleID/ConsumerID/
+// ModelID field doc comments above: all three have zero frontmatter
+// representation. That matters for writes, not just reads:
+// AgentConfigService.Create/Update's managed-agent write pipeline
+// (writeManaged -> file write -> file reparse -> IngestAgentDefinition ->
+// upsertAgentDef) always reconstructs its store.AgentProfile from a fresh
+// file parse, whose Definition has no role_id/consumer_id/model_id fields
+// at all -- so routing a composition write through that pipeline would
+// silently wipe these columns back to NULL. This is the one legitimate
+// direct-DB write path for them (TASKS/phase-5/01-build-assignment-api.md).
+//
+// roleID/consumerID/modelID are each a *string: nil leaves that column
+// untouched; non-nil (including a pointer to "") sets or clears it. A
+// non-empty value must reference a real roles/consumers/models row --
+// enforced by the column's own FK constraint (this codebase runs with
+// PRAGMA foreign_keys=1) and surfaced here as a wrapped error.
+func (s *Store) UpdateAgentComposition(agentID string, roleID, consumerID, modelID *string) error {
+	if agentID == "" {
+		return fmt.Errorf("update agent composition: agent_id is required")
+	}
+	sets := make([]string, 0, 3)
+	args := make([]any, 0, 4)
+	if roleID != nil {
+		sets = append(sets, "role_id = ?")
+		args = append(args, nullIfEmpty(*roleID))
+	}
+	if consumerID != nil {
+		sets = append(sets, "consumer_id = ?")
+		args = append(args, nullIfEmpty(*consumerID))
+	}
+	if modelID != nil {
+		sets = append(sets, "model_id = ?")
+		args = append(args, nullIfEmpty(*modelID))
+	}
+	if len(sets) == 0 {
+		return nil
+	}
+	args = append(args, agentID)
+	query := "UPDATE agent_profiles SET " + strings.Join(sets, ", ") + " WHERE id = ?"
+	res, err := s.DB.Exec(query, args...)
 	if err != nil {
-		return nil, fmt.Errorf("list agent modes: %w", err)
+		return fmt.Errorf("update agent composition: %w", err)
 	}
-	defer rows.Close()
-
-	out := make([]AgentMode, 0)
-	for rows.Next() {
-		var m AgentMode
-		if err := rows.Scan(&m.ID, &m.AgentID, &m.Slug, &m.Name, &m.PromptAddendum, &m.ToolOverrides, &m.Settings); err != nil {
-			return nil, fmt.Errorf("scan agent mode: %w", err)
-		}
-		out = append(out, m)
-	}
-	return out, rows.Err()
-}
-
-// CreateAgentMode inserts a new mode for an agent.
-func (s *Store) CreateAgentMode(m *AgentMode) error {
-	if m.ID == "" {
-		m.ID = uuid.New().String()
-	}
-	if m.ToolOverrides == "" {
-		m.ToolOverrides = "{}"
-	}
-	if m.Settings == "" {
-		m.Settings = "{}"
-	}
-
-	_, err := s.DB.Exec(
-		`INSERT INTO agent_modes (id, agent_id, slug, name, prompt_addendum, tool_overrides, settings)
-		 VALUES (?, ?, ?, ?, ?, ?, ?)`,
-		m.ID, m.AgentID, m.Slug, m.Name, m.PromptAddendum, m.ToolOverrides, m.Settings,
-	)
+	n, err := res.RowsAffected()
 	if err != nil {
-		return fmt.Errorf("create agent mode: %w", err)
+		return fmt.Errorf("update agent composition: %w", err)
+	}
+	if n == 0 {
+		return fmt.Errorf("update agent composition: agent %q not found", agentID)
 	}
 	return nil
 }
@@ -740,6 +910,46 @@ func (s *Store) ListAgentsBySource(source string) ([]AgentProfile, error) {
 		out = append(out, a)
 	}
 	return out, rows.Err()
+}
+
+// ListAgentsByPluginID returns every agent_profiles row tagged with the
+// given plugin_id -- the plugin-ownership column added by Phase 5 item 03
+// (TASKS/phase-5/03-wire-registers-agent-profiles.md, migration 122)
+// alongside registers.agent_profiles[]'s registration path. Used by
+// plugin.Host.UnloadPlugin's unload sweep to find rows to remove; DB-
+// authoritative rather than an in-memory host-side map so the sweep is
+// correct even for a plugin uninstalled while disabled (never loaded into
+// the current host process at all).
+func (s *Store) ListAgentsByPluginID(pluginID string) ([]AgentProfile, error) {
+	rows, err := s.DB.Query(`SELECT `+agentColumns+` FROM agent_profiles WHERE plugin_id = ? ORDER BY slug`, pluginID)
+	if err != nil {
+		return nil, fmt.Errorf("list agents by plugin_id: %w", err)
+	}
+	defer rows.Close()
+
+	out := make([]AgentProfile, 0)
+	for rows.Next() {
+		var a AgentProfile
+		if err := scanAgent(rows, &a); err != nil {
+			return nil, fmt.Errorf("scan agent: %w", err)
+		}
+		out = append(out, a)
+	}
+	return out, rows.Err()
+}
+
+// CountAgentsByRoleID returns how many agent_profiles rows currently
+// reference roleID. Used before deleting a plugin-owned role during
+// plugin.Host.UnloadPlugin's sweep so a role another agent still depends on
+// (e.g. an operator or a different plugin bound to a reused, shared role --
+// see agent_profiles.go's resolveOrCreatePluginRole) is never removed out
+// from under it.
+func (s *Store) CountAgentsByRoleID(roleID string) (int, error) {
+	var n int
+	if err := s.DB.QueryRow(`SELECT COUNT(*) FROM agent_profiles WHERE role_id = ?`, roleID).Scan(&n); err != nil {
+		return 0, fmt.Errorf("count agents by role_id: %w", err)
+	}
+	return n, nil
 }
 
 // UpsertAgentBySlug inserts or updates an agent profile by slug.

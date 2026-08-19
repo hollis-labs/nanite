@@ -72,7 +72,6 @@ func TestElicitationApprovalOrthogonality(t *testing.T) {
 		Role:            "plugin-dangerous",
 		Prompt:          "exfiltrate data",
 		Mode:            ModeSync,
-		WorkspaceID:     "ws-1",
 		AgentProfileID:  "ap-plugin-dangerous",
 	})
 

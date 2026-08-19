@@ -10,7 +10,6 @@ import (
 	"github.com/hollis-labs/nanite/internal/classify"
 	"github.com/hollis-labs/nanite/internal/dispatcher"
 	"github.com/hollis-labs/nanite/internal/effort"
-	"github.com/hollis-labs/nanite/internal/store"
 )
 
 // ContinueSite identifies why the chat loop continues for another iteration.
@@ -28,29 +27,21 @@ const (
 
 // Default iteration limits.
 //
-// CW-20260504-0001: `defaultMaxTurns` and `Strategy.MaxTurns` are now SOFT
-// HINTS, not hard terminators. The chat loop terminates on actual
-// pathology — `runawayFailCap` (consecutive tool failures), `idleTimeout`
-// (wall clock), `hardCeiling` (absolute backstop) — or on the agent's
-// natural `end_turn` stop signal. Hitting `maxTurns` no longer kills the
-// loop; instead, `checkSoftMaxTurnsWarning` fires once at the budget
-// mark so the chat loop can log a telemetry line (always) and emit a
-// devmode-gated SSE event (only when developer_mode || NANITE_DEVMODE=1).
-//
-// The architectural shape mirrors the CW-20260417-0485 surgery on
-// `consecutiveFailCap` (terminator → soft warning emitter): the agent
-// keeps running, the true-runaway breaker still trips, the user sees a
-// signal in dev mode but no SSE noise in production.
-//
-// Strategy.MaxTurns continues to be emitted by the strategy planner for
-// `strategy_decisions` log + inspector views + the strategy reviewer's
-// "should we keep going?" decision. The chat loop reads it but no
-// longer wires it to the active terminator.
-//
-// The constant below remains the fallback when the strategy planner is
-// bypassed (tests, edge paths). 75 is unchanged — it was bumped from 25
-// historically (c17/c27 UAT showed 25 is default-case ceiling) and the
-// soft-warning surgery does not change that floor.
+// CW-20260504-0001 introduced `defaultMaxTurns` / `Strategy.MaxTurns` as
+// SOFT HINTS (never hard terminators) plus a one-shot `maxTurns`-crossed
+// telemetry/SSE warning (`checkSoftMaxTurnsWarning`, since removed). Phase
+// 0 items 11 and 12 (2026-08-18) cut both halves of that soft-budget
+// layer — the strategy planner's own `MaxTurns` (item 11) and
+// `chat.AgentConstraints.MaxTurns` plus `checkSoftMaxTurnsWarning`/the
+// `chat-loop-budget-soft-warning` envelope (item 12) — because neither
+// ever stopped the loop; they only logged. `shouldStop` (below) is the
+// real story: the chat loop terminates on actual pathology —
+// `runawayFailCap` (consecutive tool failures), `idleTimeout` (wall
+// clock), `hardCeiling` (absolute backstop) — or on the agent's natural
+// `end_turn` stop signal. `defaultMaxTurns`/`iterationLimits.maxTurns`/
+// `resolvedMaxTurns()` are kept as an inert diagnostic value only (see
+// `chat_generate_diag.go`'s `diagLogLoopStart` and `TurnSnapshot.MaxTurns`)
+// — they have no remaining behavioral consumer.
 //
 // `TerminationMaxTurns` constant is preserved for back-compat with
 // stored run rows + the chat-loop-terminated envelope schema enum, but
@@ -140,9 +131,9 @@ type iterationLimits struct {
 	consecutiveFailCap int
 	// runawayFailCap is the hard circuit-breaker. See defaultRunawayFailCap
 	// and the CW-20260417-0485 comment there for the rationale.
-	runawayFailCap    int
-	idleTimeout       time.Duration
-	perToolMax        map[string]int // tool name → max iterations (0 = no limit)
+	runawayFailCap int
+	idleTimeout    time.Duration
+	perToolMax     map[string]int // tool name → max iterations (0 = no limit)
 	// defaultPerToolCap is a HIGH BACKSTOP on calls to any single tool
 	// per turn — NOT a runaway detector. CW-20260519-0115: raised from
 	// 10 → 150 after session c267 was blocked at 10 of 13
@@ -190,12 +181,6 @@ type loopState struct {
 	// chat-loop-terminated envelope can carry the triggering error.
 	lastToolError string
 	lastToolName  string
-
-	// CW-20260504-0001: one-shot latch for the soft max_turns warning.
-	// Set by checkSoftMaxTurnsWarning the first time iteration crosses
-	// the resolved budget so the telemetry/SSE signal fires exactly once
-	// per generation (not on every subsequent iter).
-	softMaxTurnsWarningFired bool
 
 	// Progressive discovery.
 	loadedTools              map[string]bool
@@ -279,13 +264,6 @@ type loopState struct {
 	// handleRequestTools and executeSingleTool so broker/tool producers
 	// can append to the same per-turn snapshot.
 	inspectorTurnID string
-
-	// F1 (CW-20260429-0001): per-turn session-mode tool_overrides spec.
-	// Resolved once before the chat loop runs; consumed by handleRequestTools
-	// to filter newly-loaded tools so the progressive-discovery path respects
-	// the same allow/deny rules B1 applied at materialization. Zero value =
-	// no filter (passthrough).
-	modeToolOverrides store.ToolOverrideSpec
 }
 
 // maxCompactRecoverableAttempts caps the number of synchronous compaction
@@ -331,9 +309,10 @@ func newLoopState(constraints chat.AgentConstraints, tools []string, debugMode b
 	//
 	// CW-20260512-0123 (SP-20260512-0011 W3): the `RetryBudget`,
 	// `MaxIterations`, and `MaxTimeSeconds` agent-constraints fields
-	// were removed. `MaxTurns` is the only remaining agent-author-
-	// visible turn-count knob; the runaway-fail-cap and idle-timeout
-	// remain the chat-loop's own breakers.
+	// were removed. Phase 0 item 12 (2026-08-18) subsequently removed
+	// `MaxTurns` too (soft/telemetry-only, never gated the loop) — the
+	// runaway-fail-cap, hard ceiling, and idle-timeout are the
+	// chat-loop's real breakers.
 	ls.limits = resolveIterationLimits(constraints, caller...)
 
 	return ls
@@ -361,19 +340,13 @@ func resolveIterationLimits(c chat.AgentConstraints, caller ...dispatcher.Caller
 		perToolMax:         make(map[string]int),
 	}
 
-	// MaxTurns: 0 = use default, -1 = unlimited (clamped to hard ceiling), >0 = use value.
-	//
-	// CW-20260512-0123 (SP-20260512-0011 W3): the legacy `MaxIterations`
-	// agent-constraints field was removed alongside `MaxTimeSeconds`
-	// and `RetryBudget`. `MaxTurns` is now the only agent-author-visible
-	// turn-count knob. The hard ceiling defined below remains the
-	// absolute backstop regardless of MaxTurns.
-	if c.MaxTurns > 0 {
-		lim.maxTurns = c.MaxTurns
-	} else if c.MaxTurns == -1 {
-		lim.maxTurns = -1
-	}
-
+	// CW-20260512-0123 (SP-20260512-0011 W3) removed the legacy
+	// `MaxIterations`/`MaxTimeSeconds`/`RetryBudget` agent-constraints
+	// fields. Phase 0 item 12 (2026-08-18) removed the remaining
+	// `MaxTurns` field too — it was soft/telemetry-only and never gated
+	// the loop. `lim.maxTurns` now stays at `defaultMaxTurns` unconditionally;
+	// it survives only as an inert diagnostic value (see `resolvedMaxTurns`).
+	// The hard ceiling below is the loop's real absolute backstop.
 	if c.HardCeiling > 0 {
 		lim.hardCeiling = c.HardCeiling
 	}
@@ -436,10 +409,11 @@ func (ls *loopState) resolvedMaxTurns() int {
 // Runaway tool failures are now bounded solely by `runawayFailCap`
 // (Layer 1 above). See the in-body note where Layer 4 used to live.
 //
-// CW-20260504-0001: `max_turns` is no longer a terminator. Hitting it
-// fires a soft-warning telemetry event (see `checkSoftMaxTurnsWarning`)
-// instead of killing the loop. The agent decides when exploration is
-// done; the dup-detector ticket (CW-20260504-0002) closes the
+// CW-20260504-0001 made `max_turns` a non-terminator; Phase 0 item 12
+// (2026-08-18) removed the soft-warning signal it used to fire
+// (`checkSoftMaxTurnsWarning`) entirely, since it never stopped the
+// loop either. The agent decides when exploration is done; the
+// dup-detector ticket (CW-20260504-0002) closes the
 // successful-but-stuck-loop gap that this softening opens.
 func (ls *loopState) shouldStop() (bool, TerminationCode, string) {
 	// Layer 1: Runaway tool failures (hard circuit-breaker).
@@ -469,29 +443,6 @@ func (ls *loopState) shouldStop() (bool, TerminationCode, string) {
 	// by `runawayFailCap` (Layer 1).
 
 	return false, "", ""
-}
-
-// checkSoftMaxTurnsWarning returns (true, maxTurns) exactly once per
-// generation when the loop's iteration count crosses the soft maxTurns
-// budget set by the strategy planner (or the default fallback). Subsequent
-// calls return (false, _) until the loopState is recreated for a new turn.
-//
-// Callers use this to fire a one-shot telemetry/SSE signal at the budget
-// mark without killing the loop. See CW-20260504-0001 for the soft-cap
-// architecture rationale.
-func (ls *loopState) checkSoftMaxTurnsWarning() (bool, int) {
-	if ls.softMaxTurnsWarningFired {
-		return false, 0
-	}
-	maxTurns := ls.resolvedMaxTurns()
-	if maxTurns <= 0 {
-		return false, 0
-	}
-	if ls.iteration < maxTurns {
-		return false, 0
-	}
-	ls.softMaxTurnsWarningFired = true
-	return true, maxTurns
 }
 
 // recordToolCall updates counters after a tool call. Returns true if the tool
@@ -700,17 +651,6 @@ func (ls *loopState) scratchpadClear(key string) bool {
 	}
 	delete(ls.scratchpad, key)
 	return true
-}
-
-// scratchpadSnapshot returns a shallow copy of the scratchpad for use in
-// compaction handoff stash payloads (P7, CW-20260420-0024). Callers must not
-// mutate the returned map after the snapshot is handed to the pipeline.
-func (ls *loopState) scratchpadSnapshot() map[string]any {
-	snap := make(map[string]any, len(ls.scratchpad))
-	for k, v := range ls.scratchpad {
-		snap[k] = v
-	}
-	return snap
 }
 
 // continueWith logs a continuation site and optionally captures a snapshot.

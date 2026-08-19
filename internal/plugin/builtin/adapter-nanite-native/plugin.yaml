@@ -2,7 +2,7 @@ schema_version: 1
 name: adapter-nanite-native
 id: adapter-nanite-native
 version: 0.2.0
-description: Syncs .nanite/ (or .agentrc/) agent definitions and provides CLIAgentAdapter + AgentComposer
+description: Provides CLIAgentAdapter (sandbox population) + AgentComposer for .nanite/ (agent_profiles sync removed, TASKS/phase-2/06)
 author: Nanite
 license: Apache-2.0
 protocol: 1

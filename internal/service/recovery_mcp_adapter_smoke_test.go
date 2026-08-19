@@ -9,17 +9,17 @@ import (
 	"time"
 
 	"github.com/hollis-labs/nanite/internal/mcp"
-	"github.com/hollis-labs/nanite/internal/runtime/agent/recovery"
+	"github.com/hollis-labs/nanite/internal/recovery/broker"
 )
 
 // TestRecoveryMCPAdapter_RealManager_NotWiredErrorClosed is the
 // integration smoke for the Phase 9 MCP wiring (CW-20260510-0015).
 //
-// Pre-Phase-9, recovery.Dependencies.MCP was nil and Broker.Remediate
-// surfaced the literal sentinel "recovery.Remediate: MCP not wired"
+// Pre-Phase-9, broker.Dependencies.MCP was nil and Broker.Remediate
+// surfaced the literal sentinel "broker.Remediate: MCP not wired"
 // for any RemediationRefreshMCPTransport classification. This test
 // constructs a real *mcp.Manager, wraps it in recoveryMCPAdapter, hands
-// the adapter to recovery.NewBroker, and drives Remediate with a
+// the adapter to broker.NewBroker, and drives Remediate with a
 // RemediationRefreshMCPTransport classification. The assertion: the
 // returned error is NOT the "MCP not wired" sentinel — proving the
 // wiring is in place. The remediation itself is a no-op against an
@@ -47,22 +47,22 @@ func TestRecoveryMCPAdapter_RealManager_NotWiredErrorClosed(t *testing.T) {
 		t.Fatalf("adapter.RestartTransport: unexpected err = %v", err)
 	}
 
-	// Drive recovery.Broker.Remediate end-to-end with a
+	// Drive broker.Broker.Remediate end-to-end with a
 	// RemediationRefreshMCPTransport classification. The broker dispatches
 	// into deps.MCP.RestartTransport which forwards into our adapter.
-	broker := recovery.NewBroker(recovery.Dependencies{
+	b := broker.NewBroker(broker.Dependencies{
 		MCP: adapter,
 	})
-	ev := &recovery.FailureEvent{SessionID: "sess-smoke"}
-	cls := recovery.Classification{
-		Class:       recovery.ClassConfigPermissions,
+	ev := &broker.FailureEvent{SessionID: "sess-smoke"}
+	cls := broker.Classification{
+		Class:       broker.ClassConfigPermissions,
 		Reason:      "MCP transport down — restart before retrying",
-		Remediation: recovery.RemediationRefreshMCPTransport,
+		Remediation: broker.RemediationRefreshMCPTransport,
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	err := broker.Remediate(ctx, ev, cls)
+	err := b.Remediate(ctx, ev, cls)
 	if err != nil {
 		// Critical: the legacy "MCP not wired" branch must not fire.
 		if strings.Contains(err.Error(), "MCP not wired") {
@@ -81,17 +81,17 @@ func TestRecoveryMCPAdapter_RealManager_PropagatesUnderlyingError(t *testing.T) 
 	stub := &fakeTransportRestarter{err: sentinel}
 	adapter := &recoveryMCPAdapter{manager: stub}
 
-	broker := recovery.NewBroker(recovery.Dependencies{
+	b := broker.NewBroker(broker.Dependencies{
 		MCP: adapter,
 	})
-	ev := &recovery.FailureEvent{SessionID: "sess-fail"}
-	cls := recovery.Classification{
-		Class:       recovery.ClassConfigPermissions,
+	ev := &broker.FailureEvent{SessionID: "sess-fail"}
+	cls := broker.Classification{
+		Class:       broker.ClassConfigPermissions,
 		Reason:      "MCP transport down — restart before retrying",
-		Remediation: recovery.RemediationRefreshMCPTransport,
+		Remediation: broker.RemediationRefreshMCPTransport,
 	}
 
-	err := broker.Remediate(context.Background(), ev, cls)
+	err := b.Remediate(context.Background(), ev, cls)
 	if err == nil {
 		t.Fatal("Remediate: expected propagated error, got nil")
 	}

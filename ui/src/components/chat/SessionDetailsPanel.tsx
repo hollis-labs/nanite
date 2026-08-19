@@ -147,7 +147,6 @@ function SessionDetailsBody({
             value={formatDateTime(details.last_useful_activity_at)}
             mono
           />
-          <Fact label="Workspace" value={session.workspace_id} mono />
           <Fact label="Project" value={session.project_id} mono />
         </FactGrid>
       </Section>
@@ -174,13 +173,8 @@ function SessionDetailsBody({
         </FactGrid>
       </Section>
 
-      <Section icon={Bot} title="Mode / persona">
+      <Section icon={Bot} title="Persona">
         <FactGrid>
-          <Fact
-            label="Current mode"
-            value={details.mode?.name || details.mode?.slug || "chat"}
-          />
-          <Fact label="Mode ID" value={details.mode?.id} mono />
           <Fact
             label="Primary agent"
             value={

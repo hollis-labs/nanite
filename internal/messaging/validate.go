@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/hollis-labs/nanite/internal/agent"
 	"github.com/hollis-labs/nanite/internal/store"
 )
 
@@ -16,8 +15,7 @@ const UserSentinel = "user"
 
 // AgentResolver resolves an agent ID to a profile. Its sole purpose
 // here is to let ValidateAgentID check whether an ID corresponds to a
-// real agent, whether that agent is a DB-backed profile or a
-// file-based definition.
+// real, DB-backed agent_profiles row.
 //
 // The parent package's service.AgentService satisfies this interface
 // structurally via its existing Get(ctx, id) method. The interface
@@ -42,8 +40,12 @@ type AgentRegistrar interface {
 
 // ValidateAgentID checks that an agent_id is one of:
 //   - the UserSentinel (always valid, resolver not consulted)
-//   - "file-<slug>" where <slug> references a known file agent
 //   - a DB UUID for a known AgentProfile
+//
+// TASKS/adhoc/01-eliminate-file-based-agent-runtime.md removed the
+// "file-<slug>" synthetic-ID branch this function used to special-case --
+// every real agent ID is a DB-backed agent_profiles row now, so a single
+// resolver lookup covers every non-sentinel case.
 //
 // Returns nil if valid, an error otherwise. The resolver is required
 // for everything except the user sentinel; passing nil with any other
@@ -58,13 +60,6 @@ func ValidateAgentID(ctx context.Context, r AgentResolver, agentID string) error
 	if r == nil {
 		return fmt.Errorf("cannot validate agent id %q without resolver", agentID)
 	}
-	if agent.IsFileBasedID(agentID) {
-		if _, err := r.Get(ctx, agentID); err != nil {
-			return fmt.Errorf("file agent not found: %s", agent.SlugFromFileID(agentID))
-		}
-		return nil
-	}
-	// Otherwise assume it's a DB profile ID (UUID).
 	if _, err := r.Get(ctx, agentID); err != nil {
 		return fmt.Errorf("agent not found: %s", agentID)
 	}

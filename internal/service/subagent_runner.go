@@ -482,11 +482,10 @@ func (r *ChatRunner) createChildSession(ctx context.Context, run *subagent.Run, 
 	}
 	childID := uuid.New().String()
 	if err := r.store.CreateSession(&store.Session{
-		ID:          childID,
-		WorkspaceID: parent.WorkspaceID,
-		Provider:    provider,
-		Model:       agent.DefaultModel,
-		Title:       fmt.Sprintf("subagent: %s — %s", run.Role, truncatePrompt(run.Prompt, 60)),
+		ID:       childID,
+		Provider: provider,
+		Model:    agent.DefaultModel,
+		Title:    fmt.Sprintf("subagent: %s — %s", run.Role, truncatePrompt(run.Prompt, 60)),
 	}); err != nil {
 		return "", fmt.Errorf("create child session: %w", err)
 	}
@@ -623,6 +622,21 @@ func (r *ChatRunner) Run(ctx context.Context, run *subagent.Run) (*subagent.Resu
 		return nil, fmt.Errorf("create user message: %w", err)
 	}
 
+	// Phase 4 task 04 (docs/engineering/architecture/04-harness.md,
+	// "Run-another-agent surfaces, unified"): build the shared,
+	// surface-agnostic AgentRunRequest describing this dispatch.
+	// invokeChat's own dispatcher.Request construction is unchanged
+	// (it has its own test-override surface, subagent_runner_test.go /
+	// _lineage_test.go) — runReq exists so this Run call's outcome can
+	// later be reported through the same shared shape delegation and
+	// durable wake use, without touching invokeChat's contract.
+	runReq := dispatcher.AgentRunRequest{
+		CallerType:      dispatcher.CallerSubagent,
+		Completion:      dispatcher.CompletionAsyncCapture,
+		TargetSessionID: childID,
+		Prompt:          userPrompt,
+	}
+
 	// Drive one assistant turn. invokeChat closes the channel via its
 	// defer (or the fake's equivalent), so drainCapture exits naturally.
 	assistantMsgID := uuid.New().String()
@@ -631,6 +645,29 @@ func (r *ChatRunner) Run(ctx context.Context, run *subagent.Run) (*subagent.Resu
 
 	summary, envelope, counts, runErr := drainCapture(captureCh)
 	if runErr != nil {
+		// Phase 4 task 04: derive (never drive) the shared
+		// AgentRunResult from drainCapture's already-computed tuple —
+		// LogOutcome is purely additive reporting; detectFabrication /
+		// zeroOutputRun / partialResult below are completely untouched
+		// and remain the sole source of truth for run.Status via
+		// subagent.execute's classifyRunOutcome.
+		outcome := dispatcher.AgentRunResult{
+			CallerType:         runReq.CallerType,
+			Completion:         runReq.Completion,
+			TargetSessionID:    childID,
+			Content:            summary,
+			Envelope:           envelope,
+			ToolCalls:          counts.calls,
+			ToolResultsSuccess: counts.resultsSuccess,
+			ToolResultsError:   counts.resultsError,
+			Status:             dispatcher.RunStatusFailed,
+			Err:                runErr,
+		}
+		if errors.Is(runErr, subagent.ErrStalled) {
+			outcome.Status = dispatcher.RunStatusStalled
+		}
+		dispatcher.LogOutcome(outcome)
+
 		// CW-20260519-0071 (audit §P2): partial-result capture. A
 		// subagent guillotined mid-productive-work (deadline cancels
 		// the in-flight provider stream → drainCapture returns
@@ -679,6 +716,20 @@ func (r *ChatRunner) Run(ctx context.Context, run *subagent.Run) (*subagent.Resu
 			"tool_results_success", counts.resultsSuccess,
 			"assistant_text_chars", len(summary),
 		)
+		// Phase 4 task 04: normalized reporting only — fabErr (and thus
+		// subagent_runs.status) is unchanged by this call.
+		dispatcher.LogOutcome(dispatcher.AgentRunResult{
+			CallerType:         runReq.CallerType,
+			Completion:         runReq.Completion,
+			TargetSessionID:    childID,
+			Content:            summary,
+			Envelope:           envelope,
+			ToolCalls:          counts.calls,
+			ToolResultsSuccess: counts.resultsSuccess,
+			ToolResultsError:   counts.resultsError,
+			Status:             dispatcher.RunStatusFabricationSuspected,
+			Err:                fabErr,
+		})
 		// CW-20260519-0071: capture the partial trace here too. The
 		// run is still failed (fabErr unchanged), but persisting the
 		// suspect text + tool counts in result_json lets an operator
@@ -719,6 +770,13 @@ func (r *ChatRunner) Run(ctx context.Context, run *subagent.Run) (*subagent.Resu
 			"child_session_id", childID,
 			"role", run.Role,
 		)
+		dispatcher.LogOutcome(dispatcher.AgentRunResult{
+			CallerType:      runReq.CallerType,
+			Completion:      runReq.Completion,
+			TargetSessionID: childID,
+			Status:          dispatcher.RunStatusStalled,
+			Err:             errZeroOutput,
+		})
 		return nil, errors.Join(errZeroOutput, subagent.ErrStalled)
 	}
 
@@ -729,6 +787,17 @@ func (r *ChatRunner) Run(ctx context.Context, run *subagent.Run) (*subagent.Resu
 		// neutral summary and keep StatusCompleted.
 		summary = fmt.Sprintf("subagent %s completed without text response", run.Role)
 	}
+	dispatcher.LogOutcome(dispatcher.AgentRunResult{
+		CallerType:         runReq.CallerType,
+		Completion:         runReq.Completion,
+		TargetSessionID:    childID,
+		Content:            summary,
+		Envelope:           envelope,
+		ToolCalls:          counts.calls,
+		ToolResultsSuccess: counts.resultsSuccess,
+		ToolResultsError:   counts.resultsError,
+		Status:             dispatcher.RunStatusCompleted,
+	})
 	return &subagent.Result{Summary: summary, ResultJSON: envelope}, nil
 }
 

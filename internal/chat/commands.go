@@ -7,8 +7,8 @@ import (
 	"strings"
 	"sync"
 
-	sdkplugin "github.com/hollis-labs/plugin-sdk"
 	nplugin "github.com/hollis-labs/nanite/internal/plugin"
+	sdkplugin "github.com/hollis-labs/plugin-sdk"
 )
 
 // CommandArg defines a single argument for a slash command (mirrors plugin.CommandArg).
@@ -25,8 +25,8 @@ type SlashCommand struct {
 	Name        string       `json:"name"`
 	Description string       `json:"description"`
 	Category    string       `json:"category"`
-	Source      string       `json:"source"`                         // "builtin" or plugin ID
-	Args        []CommandArg `json:"args,omitempty"`                 // structured argument schema
+	Source      string       `json:"source"`                        // "builtin" or plugin ID
+	Args        []CommandArg `json:"args,omitempty"`                // structured argument schema
 	Permission  string       `json:"required_permission,omitempty"` // permission gate
 }
 
@@ -72,23 +72,6 @@ func NewCommandRegistry() *CommandRegistry {
 		{SlashCommand{Name: "compact", Description: "Compact session context", Category: "session", Source: "builtin"}, nil},
 		{SlashCommand{Name: "agent", Description: "Switch primary agent", Category: "agent", Source: "builtin"}, nil},
 		{SlashCommand{Name: "model", Description: "Switch model", Category: "config", Source: "builtin"}, nil},
-		// /mode is registered without a handler at construction time; the
-		// concrete handler is bound by RegisterModeCommands once the store
-		// is available (B2 / CW-20260428-0010). The placeholder keeps the
-		// command discoverable in /help for environments that haven't yet
-		// wired the mode setter.
-		{SlashCommand{
-			Name:        "mode",
-			Description: "Switch session mode (chat, plan, work, …)",
-			Category:    "mode",
-			Source:      "builtin",
-			Args: []CommandArg{{
-				Name:        "slug",
-				Description: "Mode slug (chat, plan, work, …)",
-				Required:    true,
-				Type:        "string",
-			}},
-		}, nil},
 		{SlashCommand{Name: "memory", Description: "Browse and manage memories", Category: "tools", Source: "builtin"}, nil},
 		// J10 (CW-20260426-0008): scratchpad slash command + aliases.
 		// All three names are registered so the user can type any of them.

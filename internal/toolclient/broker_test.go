@@ -7,30 +7,23 @@ import (
 	"testing"
 
 	llmtypes "github.com/hollis-labs/go-llm-types"
-	"github.com/hollis-labs/go-toolbroker/broker"
 	"github.com/hollis-labs/nanite/internal/mcp"
 )
 
 func TestSelectTools_ReturnsTools(t *testing.T) {
-	cfg := &Config{
-		Rules:               broker.DefaultRules(),
-		WorkspaceOverrides:  make(map[string][]broker.Rule),
-		AgentOverrides:      make(map[string][]broker.Rule),
-		ToolTokenBudgetPct:  DefaultToolTokenBudgetPct,
-		ContextWindowTokens: DefaultContextWindowTokens,
-	}
+	cfg := DefaultConfig()
 	tb := New(nil, nil, cfg)
 
 	// Register some tools.
-	tools := []broker.ToolDefinition{
-		{Name: "volon_task_create", Server: "volon", Description: "Create a task"},
-		{Name: "volon_task_list", Server: "volon", Description: "List tasks"},
-		{Name: "conduit_context_view", Server: "conduit", Description: "View context"},
+	tools := []llmtypes.ToolDefinition{
+		{Name: "example_task_create", Description: "Create a task"},
+		{Name: "example_task_list", Description: "List tasks"},
+		{Name: "conduit_context_view", Description: "View context"},
 	}
 	tb.RegisterTools(tools)
 
 	// Select with wildcard intent. Pass 0 to exercise the DefaultContextWindowTokens fallback.
-	selected, _, err := tb.SelectTools(context.Background(), "*", nil, "", "", 0)
+	selected, err := tb.SelectTools(context.Background(), "*", nil, "", "", 0)
 	if err != nil {
 		t.Fatalf("SelectTools error: %v", err)
 	}
@@ -44,17 +37,16 @@ func TestSelectTools_CapsAtMax(t *testing.T) {
 	tb := New(nil, nil, cfg)
 
 	// Register more than MaxSelectedTools tools.
-	tools := make([]broker.ToolDefinition, MaxSelectedTools+5)
+	tools := make([]llmtypes.ToolDefinition, MaxSelectedTools+5)
 	for i := range tools {
-		tools[i] = broker.ToolDefinition{
+		tools[i] = llmtypes.ToolDefinition{
 			Name:        "tool_" + string(rune('a'+i)),
-			Server:      "test",
 			Description: "Test tool",
 		}
 	}
 	tb.RegisterTools(tools)
 
-	selected, _, err := tb.SelectTools(context.Background(), "*", nil, "", "", 0)
+	selected, err := tb.SelectTools(context.Background(), "*", nil, "", "", 0)
 	if err != nil {
 		t.Fatalf("SelectTools error: %v", err)
 	}
@@ -63,17 +55,10 @@ func TestSelectTools_CapsAtMax(t *testing.T) {
 	}
 }
 
-func TestDefaultConfig_HasRules(t *testing.T) {
-	cfg := DefaultConfig()
-	if len(cfg.Rules) == 0 {
-		t.Error("expected default config to have rules")
-	}
-}
-
 func TestEstimateToolTokens(t *testing.T) {
-	tools := []broker.ToolDefinition{
-		{Name: "tool_a", Server: "test", Description: "A short description"},
-		{Name: "tool_b", Server: "test", Description: "Another description for testing"},
+	tools := []llmtypes.ToolDefinition{
+		{Name: "tool_a", Description: "A short description"},
+		{Name: "tool_b", Description: "Another description for testing"},
 	}
 
 	tokens := EstimateToolTokens(tools)
@@ -82,8 +67,8 @@ func TestEstimateToolTokens(t *testing.T) {
 	}
 
 	// Tokens should increase with more tools.
-	moreTools := append(tools, broker.ToolDefinition{
-		Name: "tool_c", Server: "test", Description: "Yet another tool with a longer description for estimation",
+	moreTools := append(tools, llmtypes.ToolDefinition{
+		Name: "tool_c", Description: "Yet another tool with a longer description for estimation",
 	})
 	moreTokens := EstimateToolTokens(moreTools)
 	if moreTokens <= tokens {
@@ -92,9 +77,9 @@ func TestEstimateToolTokens(t *testing.T) {
 }
 
 func TestPruneToolsToTokenBudget_UnderBudget(t *testing.T) {
-	tools := []broker.ToolDefinition{
-		{Name: "tool_a", Server: "test", Description: "Short"},
-		{Name: "tool_b", Server: "test", Description: "Short"},
+	tools := []llmtypes.ToolDefinition{
+		{Name: "tool_a", Description: "Short"},
+		{Name: "tool_b", Description: "Short"},
 	}
 
 	// Give a very large budget — all tools should pass through.
@@ -105,12 +90,12 @@ func TestPruneToolsToTokenBudget_UnderBudget(t *testing.T) {
 }
 
 func TestPruneToolsToTokenBudget_OverBudget(t *testing.T) {
-	tools := []broker.ToolDefinition{
-		{Name: "tool_a", Server: "test", Description: "First tool"},
-		{Name: "tool_b", Server: "test", Description: "Second tool"},
-		{Name: "tool_c", Server: "test", Description: "Third tool"},
-		{Name: "tool_d", Server: "test", Description: "Fourth tool"},
-		{Name: "tool_e", Server: "test", Description: "Fifth tool"},
+	tools := []llmtypes.ToolDefinition{
+		{Name: "tool_a", Description: "First tool"},
+		{Name: "tool_b", Description: "Second tool"},
+		{Name: "tool_c", Description: "Third tool"},
+		{Name: "tool_d", Description: "Fourth tool"},
+		{Name: "tool_e", Description: "Fifth tool"},
 	}
 
 	// Set budget to only fit ~1 tool.
@@ -124,8 +109,8 @@ func TestPruneToolsToTokenBudget_OverBudget(t *testing.T) {
 }
 
 func TestPruneToolsToTokenBudget_KeepsAtLeastOne(t *testing.T) {
-	tools := []broker.ToolDefinition{
-		{Name: "big_tool", Server: "test", Description: "A very long description that should exceed any tiny budget we set for testing purposes to ensure at least one tool is always kept"},
+	tools := []llmtypes.ToolDefinition{
+		{Name: "big_tool", Description: "A very long description that should exceed any tiny budget we set for testing purposes to ensure at least one tool is always kept"},
 	}
 
 	// Budget of 1 token — still must keep at least 1 tool.
@@ -168,24 +153,23 @@ func TestSelectTools_GeminiWindowBudget(t *testing.T) {
 	// 10 tools = ~1250 tokens — well under both budgets. Use a description
 	// large enough that the difference is measurable.
 	longDesc := strings.Repeat("x", 800) // ~200 tokens each
-	tools := make([]broker.ToolDefinition, 10)
+	tools := make([]llmtypes.ToolDefinition, 10)
 	for i := range tools {
-		tools[i] = broker.ToolDefinition{
+		tools[i] = llmtypes.ToolDefinition{
 			Name:        fmt.Sprintf("heavy_tool_%d", i),
-			Server:      "test",
 			Description: longDesc,
 		}
 	}
 	tb.RegisterTools(tools)
 
 	// Select with a 200K window (default).
-	tools200k, _, err := tb.SelectTools(context.Background(), "*", nil, "", "", 200_000)
+	tools200k, err := tb.SelectTools(context.Background(), "*", nil, "", "", 200_000)
 	if err != nil {
 		t.Fatalf("SelectTools(200K): %v", err)
 	}
 
 	// Select with a 1M window (Gemini).
-	tools1m, _, err := tb.SelectTools(context.Background(), "*", nil, "", "", 1_000_000)
+	tools1m, err := tb.SelectTools(context.Background(), "*", nil, "", "", 1_000_000)
 	if err != nil {
 		t.Fatalf("SelectTools(1M): %v", err)
 	}
@@ -203,7 +187,7 @@ func TestSelectTools_GeminiWindowBudget(t *testing.T) {
 
 	// Also verify the 0 (unknown model) path falls back to DefaultContextWindowTokens
 	// and never returns an error.
-	toolsUnknown, _, err := tb.SelectTools(context.Background(), "*", nil, "", "", 0)
+	toolsUnknown, err := tb.SelectTools(context.Background(), "*", nil, "", "", 0)
 	if err != nil {
 		t.Fatalf("SelectTools(unknown model): %v", err)
 	}
@@ -253,88 +237,37 @@ func TestGetToolsByNames_NoMCPManager(t *testing.T) {
 	}
 }
 
-func TestConfig_RulesFor_MergesOverrides(t *testing.T) {
-	cfg := DefaultConfig()
-	baseCount := len(cfg.Rules)
-
-	cfg.WorkspaceOverrides["ws-1"] = []broker.Rule{
-		{Name: "ws-rule", Intent: "*", Action: broker.Action{Type: "include"}},
-	}
-	cfg.AgentOverrides["agent-1"] = []broker.Rule{
-		{Name: "agent-rule", Intent: "*", Action: broker.Action{Type: "exclude"}},
-	}
-
-	rules := cfg.RulesFor("ws-1", "agent-1")
-	if len(rules) != baseCount+2 {
-		t.Errorf("expected %d rules, got %d", baseCount+2, len(rules))
-	}
-
-	// Without overrides, should be base count.
-	rules2 := cfg.RulesFor("", "")
-	if len(rules2) != baseCount {
-		t.Errorf("expected %d rules without overrides, got %d", baseCount, len(rules2))
-	}
-}
-
-// TestSelectTools_ScopedOverrideDoesNotLeakIntoUnscopedCall is the PR #242
-// review fix: LocalBroker.rules is shared, mutable state on one long-lived
-// broker instance. Rules were previously only reloaded when workspaceID/
-// agentID were non-empty, so an unscoped call immediately after a scoped
-// one silently kept running against the PRIOR call's override rules
-// instead of the base ruleset. Registers an agent override that excludes
-// one tool, confirms the scoped call excludes it, then confirms an
-// immediately-following unscoped call does NOT — proving the override
-// doesn't leak across calls.
-func TestSelectTools_ScopedOverrideDoesNotLeakIntoUnscopedCall(t *testing.T) {
-	cfg := DefaultConfig()
-	cfg.AgentOverrides["agent-x"] = []broker.Rule{
-		{
-			Name:     "exclude-tool-b",
-			Intent:   "*",
-			Priority: 100,
-			Match:    broker.Match{Patterns: []string{"tool_b"}},
-			Action:   broker.Action{Type: "exclude"},
-		},
-	}
-	tb := New(nil, nil, cfg)
-	tb.RegisterTools([]broker.ToolDefinition{
-		{Name: "tool_a", Server: "test", Description: "Tool A"},
-		{Name: "tool_b", Server: "test", Description: "Tool B"},
+// TestSelectTools_AlwaysReturnsFullRegisteredCatalog pins the Phase 0 item 22
+// behavior (decision log §11): the go-toolbroker rule-matching layer this
+// used to exercise (Config.Rules / WorkspaceOverrides / AgentOverrides /
+// RulesFor) is retired — it was a permanent "*" catch-all in production, so
+// it never actually filtered anything. Selection now returns every
+// registered tool directly, unranked, regardless of workspace/agent
+// scoping. Real narrowing happens downstream: permissions, the schema-v2
+// allowlist, the chat-surface filter, developer_mode, and progressive
+// discovery.
+func TestSelectTools_AlwaysReturnsFullRegisteredCatalog(t *testing.T) {
+	tb := New(nil, nil, DefaultConfig())
+	tb.RegisterTools([]llmtypes.ToolDefinition{
+		{Name: "tool_a", Description: "Tool A"},
+		{Name: "tool_b", Description: "Tool B"},
 	})
 
-	scoped, _, err := tb.SelectTools(context.Background(), "general", nil, "", "agent-x", 0)
-	if err != nil {
-		t.Fatalf("scoped SelectTools error: %v", err)
-	}
-	if containsToolDefNamed(scoped, "tool_b") {
-		t.Fatalf("scoped call for agent-x should exclude tool_b, got: %v", namesOfBroker(scoped))
-	}
-
-	unscoped, _, err := tb.SelectTools(context.Background(), "general", nil, "", "", 0)
-	if err != nil {
-		t.Fatalf("unscoped SelectTools error: %v", err)
-	}
-	if !containsToolDefNamed(unscoped, "tool_b") {
-		t.Fatalf("unscoped call must NOT inherit agent-x's exclude override — tool_b should be present, got: %v",
-			namesOfBroker(unscoped))
-	}
-}
-
-func containsToolDefNamed(tools []broker.ToolDefinition, name string) bool {
-	for _, t := range tools {
-		if t.Name == name {
-			return true
+	for _, scope := range []struct{ ws, agent string }{
+		{"", ""},
+		{"ws-1", ""},
+		{"", "agent-1"},
+		{"ws-1", "agent-1"},
+	} {
+		selected, err := tb.SelectTools(context.Background(), "general", nil, scope.ws, scope.agent, 0)
+		if err != nil {
+			t.Fatalf("SelectTools(ws=%q, agent=%q): %v", scope.ws, scope.agent, err)
+		}
+		if len(selected) != 2 {
+			t.Errorf("SelectTools(ws=%q, agent=%q): expected both registered tools regardless of scope, got %d: %v",
+				scope.ws, scope.agent, len(selected), namesOf(selected))
 		}
 	}
-	return false
-}
-
-func namesOfBroker(tools []broker.ToolDefinition) []string {
-	names := make([]string, len(tools))
-	for i, t := range tools {
-		names[i] = t.Name
-	}
-	return names
 }
 
 // --- mockTransport implements mcp.MCPTransport for testing ---
@@ -378,8 +311,8 @@ func newTestBrokerWithTools(tools []llmtypes.ToolDefinition) *ToolClient {
 
 func TestSelectByIntent_FindsRelevantTools(t *testing.T) {
 	tools := []llmtypes.ToolDefinition{
-		{Name: "volon_task_create", Description: "Create a new task in the backlog"},
-		{Name: "volon_sprint_list", Description: "List all sprints"},
+		{Name: "example_task_create", Description: "Create a new task in the backlog"},
+		{Name: "example_sprint_list", Description: "List all sprints"},
 		{Name: "conduit_context_view", Description: "View a context packet"},
 		{Name: "hadron_pipeline_run", Description: "Run a build pipeline"},
 	}
@@ -395,13 +328,13 @@ func TestSelectByIntent_FindsRelevantTools(t *testing.T) {
 	// Uniform agent-facing name (ADR-002): no `mcp__test__` prefix.
 	found := false
 	for _, r := range result {
-		if r.Name == "volon_task_create" {
+		if r.Name == "example_task_create" {
 			found = true
 			break
 		}
 	}
 	if !found {
-		t.Errorf("expected volon_task_create in results, got %v", namesOf(result))
+		t.Errorf("expected example_task_create in results, got %v", namesOf(result))
 	}
 }
 
@@ -423,7 +356,7 @@ func TestSelectByIntent_RespectsMaxTools(t *testing.T) {
 
 func TestSelectByIntent_EmptyOnNoMatch(t *testing.T) {
 	tools := []llmtypes.ToolDefinition{
-		{Name: "volon_task_create", Description: "Create a new task"},
+		{Name: "example_task_create", Description: "Create a new task"},
 		{Name: "conduit_context_view", Description: "View a context packet"},
 	}
 	tb := newTestBrokerWithTools(tools)
@@ -437,7 +370,7 @@ func TestSelectByIntent_EmptyOnNoMatch(t *testing.T) {
 
 func TestSelectByIntent_EmptyIntent(t *testing.T) {
 	tools := []llmtypes.ToolDefinition{
-		{Name: "volon_task_create", Description: "Create a new task"},
+		{Name: "example_task_create", Description: "Create a new task"},
 	}
 	tb := newTestBrokerWithTools(tools)
 
@@ -459,7 +392,7 @@ func TestSelectByIntent_NoMCPManager(t *testing.T) {
 
 func TestScoreToolAgainstIntent(t *testing.T) {
 	tool := llmtypes.ToolDefinition{
-		Name:        "volon_task_create",
+		Name:        "example_task_create",
 		Description: "Create a new task in the backlog",
 	}
 
@@ -523,7 +456,7 @@ func TestRequestToolsMetaTool_HasCorrectSchema(t *testing.T) {
 
 func TestHandleRequestTools_ByIntent(t *testing.T) {
 	tools := []llmtypes.ToolDefinition{
-		{Name: "volon_task_create", Description: "Create a new task in the backlog"},
+		{Name: "example_task_create", Description: "Create a new task in the backlog"},
 		{Name: "hadron_pipeline_run", Description: "Run a build pipeline"},
 	}
 	tb := newTestBrokerWithTools(tools)
@@ -542,26 +475,26 @@ func TestHandleRequestTools_ByIntent(t *testing.T) {
 
 func TestHandleRequestTools_ByName(t *testing.T) {
 	tools := []llmtypes.ToolDefinition{
-		{Name: "volon_task_create", Description: "Create a task"},
+		{Name: "example_task_create", Description: "Create a task"},
 		{Name: "hadron_pipeline_run", Description: "Run a pipeline"},
 	}
 	tb := newTestBrokerWithTools(tools)
 
 	matched, _ := tb.HandleRequestTools(map[string]any{
-		"tool_names": []any{"volon_task_create"},
+		"tool_names": []any{"example_task_create"},
 	})
 
 	if len(matched) != 1 {
 		t.Fatalf("expected 1 tool matched by name, got %d", len(matched))
 	}
-	if matched[0].Name != "volon_task_create" {
-		t.Errorf("expected volon_task_create (uniform name post ADR-002), got %s", matched[0].Name)
+	if matched[0].Name != "example_task_create" {
+		t.Errorf("expected example_task_create (uniform name post ADR-002), got %s", matched[0].Name)
 	}
 }
 
 func TestHandleRequestTools_NoMatch(t *testing.T) {
 	tools := []llmtypes.ToolDefinition{
-		{Name: "volon_task_create", Description: "Create a task"},
+		{Name: "example_task_create", Description: "Create a task"},
 	}
 	tb := newTestBrokerWithTools(tools)
 
@@ -593,14 +526,13 @@ func TestSelectToolsAsProvider_BrokerToolsDefaultNonStrict(t *testing.T) {
 	cfg := DefaultConfig()
 	tb := New(nil, nil, cfg)
 
-	// Register tools directly with the LocalBroker so SelectToolsAsProvider
-	// returns them. SelectToolsAsProvider converts broker.ToolDefinition →
-	// llmtypes.ToolDefinition and must leave Strict nil (default-off).
-	brokerTools := []broker.ToolDefinition{
-		{Name: "volon_task_create", Server: "volon", Description: "Create a task in the backlog"},
-		{Name: "conduit_context_view", Server: "conduit", Description: "View a context packet"},
+	// Register tools directly on the catalog so SelectToolsAsProvider
+	// returns them. It must leave Strict nil (default-off) when converting.
+	registeredTools := []llmtypes.ToolDefinition{
+		{Name: "example_task_create", Description: "Create a task in the backlog"},
+		{Name: "conduit_context_view", Description: "View a context packet"},
 	}
-	tb.RegisterTools(brokerTools)
+	tb.RegisterTools(registeredTools)
 
 	result, err := tb.SelectToolsAsProvider(context.Background(), "task backlog", nil, "", "")
 	if err != nil {

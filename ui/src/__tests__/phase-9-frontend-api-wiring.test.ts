@@ -51,7 +51,6 @@ describe("phase 9 API route wiring", () => {
     ]);
 
     const createBody = {
-      workspace_id: "workspace-1",
       provider: "anthropic",
       model: "claude-sonnet-4",
       title: "External session",
@@ -102,7 +101,6 @@ describe("phase 9 API route wiring", () => {
     ]);
 
     const durableBody = {
-      workspace_id: "workspace-1",
       wake_payload: { reason: "manual" },
     };
     await api.startHarnessDurableAgent("agent/1", durableBody);
@@ -249,7 +247,6 @@ describe("phase 9 API route wiring", () => {
     ]);
 
     const startBody = {
-      workspace_id: "workspace-1",
       project_id: "project-1",
       wake_payload: { reason: "manual", prompt: "wake up" },
     };
@@ -566,46 +563,6 @@ describe("phase 9 API route wiring", () => {
       undefined,
     ]);
 
-    const bootPlanBody = {
-      agent_id: "agent/1",
-      schema_version: 1,
-      plant_items: [],
-      callbacks: [],
-      created_at: "",
-      updated_at: "",
-    };
-    await api.getAgentBootPlan("agent/1");
-    expect(lastFetchCall(fetchMock)).toEqual([
-      "/api/agents/agent%2F1/boot-plan",
-      undefined,
-    ]);
-
-    await api.updateAgentBootPlan("agent/1", bootPlanBody);
-    expect(lastFetchCall(fetchMock)).toEqual([
-      "/api/agents/agent%2F1/boot-plan",
-      {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(bootPlanBody),
-      },
-    ]);
-
-    await api.deleteAgentBootPlan("agent/1");
-    expect(lastFetchCall(fetchMock)).toEqual([
-      "/api/agents/agent%2F1/boot-plan",
-      { method: "DELETE" },
-    ]);
-
-    await api.dryRunAgentBootPlan("agent/1", bootPlanBody);
-    expect(lastFetchCall(fetchMock)).toEqual([
-      "/api/agents/agent%2F1/boot-plan/dry-run",
-      {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(bootPlanBody),
-      },
-    ]);
-
     await api.getAgentKnownSkill("agent/1", "advisor");
     expect(lastFetchCall(fetchMock)).toEqual([
       "/api/agents/agent%2F1/known-skills/advisor",
@@ -876,7 +833,6 @@ describe("phase 9 response shape fixtures", () => {
       profiles: [],
       providers: [],
       models: [],
-      boot_profiles: [],
       work_root_hints: [
         { id: "operator-provided", label: "Operator provided" },
       ],
@@ -888,7 +844,6 @@ describe("phase 9 response shape fixtures", () => {
         short_code: "c1",
         title: "Advisor",
         custom_name: "",
-        workspace_id: "workspace-1",
         project_id: "project-1",
         context_type: "durable_agent",
         context_id: durableAgent.id,

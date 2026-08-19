@@ -12,21 +12,20 @@ import (
 // --- Sessions ---
 
 type CreateSessionRequest struct {
-	WorkspaceID string `json:"workspace_id"`
-	ProjectID   string `json:"project_id"`
-	Model       string `json:"model"`
-	Provider    string `json:"provider"`
-	AgentID     string `json:"agent_id"`
+	ProjectID string `json:"project_id"`
+	Model     string `json:"model"`
+	Provider  string `json:"provider"`
+	AgentID   string `json:"agent_id"`
 }
 
+// Phase 0 item 21 ("Cut Modes, in full") removed this file's ModeID field
+// from ForkSessionRequest, plus SwitchSessionModeRequest, SetSessionModeRequest,
+// SetSessionAutoSwitchRequest, and SessionAutoSwitchResponse — Session Mode
+// and Legacy Agent Mode are both gone.
 type ForkSessionRequest struct {
 	IncludeMessages bool   `json:"include_messages"`
 	Provider        string `json:"provider"`
 	Model           string `json:"model"`
-	// ModeID points the forked session at a specific mode. The GUI sends the
-	// source session's resolved mode on every fork/restart so the fork inherits
-	// it; empty leaves the store's default (copy the source's current_mode_id).
-	ModeID string `json:"mode_id"`
 }
 
 type UpdateSessionRequest struct {
@@ -36,35 +35,6 @@ type UpdateSessionRequest struct {
 	Model      *string `json:"model"`
 	Provider   *string `json:"provider"`
 	Status     *string `json:"status"`
-}
-
-type SwitchSessionModeRequest struct {
-	Mode string `json:"mode"`
-}
-
-// SetSessionModeRequest is the body for PATCH /api/sessions/{id}/mode (B1,
-// CW-20260428-0009). Either Slug or ModeID may be supplied; if both are
-// empty the session-mode pointer is cleared (fall-through to legacy AgentMode).
-type SetSessionModeRequest struct {
-	Slug   string `json:"slug,omitempty"`
-	ModeID string `json:"mode_id,omitempty"`
-}
-
-// SetSessionAutoSwitchRequest is the body for
-// PATCH /api/sessions/{id}/auto-switch (F2, CW-20260429-0002). The Override
-// field is a tri-state pointer:
-//
-//	{"override": true}  → force ON for this session (does NOT bypass first-use)
-//	{"override": false} → force OFF for this session
-//	{"override": null}  → clear the per-session override (inherit user pref)
-type SetSessionAutoSwitchRequest struct {
-	Override *bool `json:"override"`
-}
-
-// SessionAutoSwitchResponse is the response shape for the auto-switch GET/PATCH
-// endpoints. Override mirrors the persisted column value (nil = inherit).
-type SessionAutoSwitchResponse struct {
-	Override *bool `json:"override"`
 }
 
 // --- Messages ---
@@ -135,6 +105,18 @@ type CreateAgentRequest struct {
 	ActivationMode          string `json:"activation_mode"`
 	Class                   string `json:"class"`
 	DefaultState            string `json:"default_state"`
+	// RoleID/ConsumerID/ModelID (Phase 5 item 01,
+	// TASKS/phase-5/01-build-assignment-api.md) -- the composition-model
+	// FKs architecture/01-agent-construction.md names (agents.role_id ->
+	// roles(id), agents.consumer_id -> consumers(id), agents.model_id ->
+	// models(id)). These are DB-only columns with zero frontmatter
+	// representation at all -- the handler
+	// writes them via store.UpdateAgentComposition, a direct-DB step
+	// separate from AgentConfigService.Create's file-based write, not
+	// through this struct's other fields' usual store.AgentProfile path.
+	RoleID     string `json:"role_id"`
+	ConsumerID string `json:"consumer_id"`
+	ModelID    string `json:"model_id"`
 }
 
 type UpdateAgentRequest struct {
@@ -164,6 +146,13 @@ type UpdateAgentRequest struct {
 	ActivationMode          *string `json:"activation_mode"`
 	Class                   *string `json:"class"`
 	DefaultState            *string `json:"default_state"`
+	// RoleID/ConsumerID/ModelID -- see CreateAgentRequest's doc comment.
+	// Pointer semantics match every other field on this partial-update
+	// struct: nil leaves the column untouched, a pointer to "" clears it
+	// (nulls the FK), a pointer to a non-empty value sets/reassigns it.
+	RoleID     *string `json:"role_id"`
+	ConsumerID *string `json:"consumer_id"`
+	ModelID    *string `json:"model_id"`
 	// Revision is the optimistic-concurrency token the client loaded with the
 	// agent (the managed file's content hash). When set, the update is
 	// rejected with 409 if the on-disk file changed underneath. Empty skips
@@ -203,14 +192,6 @@ type AddAgentProjectRequest struct {
 	ProjectID string `json:"project_id"`
 }
 
-type CreateAgentModeRequest struct {
-	Slug           string `json:"slug"`
-	Name           string `json:"name"`
-	PromptAddendum string `json:"prompt_addendum"`
-	ToolOverrides  string `json:"tool_overrides"`
-	Settings       string `json:"settings"`
-}
-
 type AgentKnownToolUpsertRequest struct {
 	AgentID    string `json:"agent_id"`
 	ToolName   string `json:"tool_name"`
@@ -242,52 +223,6 @@ type AgentKnowledgeSeedUpsertRequest struct {
 	Body      string   `json:"body"`
 	TagsJSON  string   `json:"tags_json"`
 	Tags      []string `json:"tags"`
-}
-
-type AgentBootPlanDryRunRequest struct {
-	Plan *store.AgentBootPlanDocument `json:"plan,omitempty"`
-}
-
-type AgentBootPlanPlantOperation struct {
-	ItemID                 string   `json:"item_id"`
-	Name                   string   `json:"name"`
-	Timing                 []string `json:"timing"`
-	TargetRelPath          string   `json:"target_rel_path"`
-	EntryKind              string   `json:"entry_kind"`
-	SourceKind             string   `json:"source_kind"`
-	OverwritePolicy        string   `json:"overwrite_policy"`
-	FailurePolicy          string   `json:"failure_policy"`
-	Enabled                bool     `json:"enabled"`
-	Secret                 bool     `json:"secret"`
-	SourcePath             string   `json:"source_path,omitempty"`
-	SourcePathRedacted     bool     `json:"source_path_redacted,omitempty"`
-	ContentPreview         string   `json:"content_preview,omitempty"`
-	ContentPreviewRedacted bool     `json:"content_preview_redacted,omitempty"`
-	Notes                  []string `json:"notes,omitempty"`
-}
-
-type AgentBootPlanCallbackOperation struct {
-	CallbackID       string   `json:"callback_id"`
-	Name             string   `json:"name"`
-	Timing           string   `json:"timing"`
-	CallbackType     string   `json:"callback_type"`
-	TimeoutSeconds   int      `json:"timeout_seconds"`
-	FailurePolicy    string   `json:"failure_policy"`
-	Enabled          bool     `json:"enabled"`
-	PayloadPreview   string   `json:"payload_preview,omitempty"`
-	EnvRedacted      bool     `json:"env_redacted,omitempty"`
-	PermissionsNotes []string `json:"permissions_notes,omitempty"`
-	Notes            []string `json:"notes,omitempty"`
-}
-
-type AgentBootPlanDryRunResponse struct {
-	Valid            bool                             `json:"valid"`
-	Errors           []string                         `json:"errors"`
-	Warnings         []string                         `json:"warnings"`
-	NormalizedPlan   store.AgentBootPlanDocument      `json:"normalized_plan"`
-	PlantOperations  []AgentBootPlanPlantOperation    `json:"plant_operations"`
-	CallbackOrder    []AgentBootPlanCallbackOperation `json:"callback_order"`
-	UnsupportedNotes []string                         `json:"unsupported_notes"`
 }
 
 type AgentBuilderProfileInput struct {
@@ -323,7 +258,6 @@ type AgentBuilderProfileInput struct {
 type AgentBuilderCapabilitiesInput struct {
 	AssignedSkillIDs   []string                          `json:"assigned_skill_ids"`
 	AssignedSkillSlugs []string                          `json:"assigned_skill_slugs"`
-	PromptTemplateIDs  []string                          `json:"prompt_template_ids"`
 	KnownTools         []AgentKnownToolUpsertRequest     `json:"known_tools"`
 	KnownSkills        []AgentKnownSkillUpsertRequest    `json:"known_skills"`
 	Procedures         []AgentProcedureUpsertRequest     `json:"procedures"`
@@ -339,7 +273,6 @@ type AgentBuilderDurableInstanceInput struct {
 	Model          string            `json:"model"`
 	RuntimeKind    string            `json:"runtime_kind"`
 	WorkRoot       string            `json:"work_root"`
-	WorkspaceID    string            `json:"workspace_id"`
 	ProjectID      string            `json:"project_id"`
 	Start          bool              `json:"start"`
 	Metadata       map[string]string `json:"metadata"`
@@ -399,7 +332,6 @@ type AgentBuilderDryRunRequest struct {
 	Mode                 string                                `json:"mode"`
 	Profile              AgentBuilderProfileInput              `json:"profile"`
 	Capabilities         AgentBuilderCapabilitiesInput         `json:"capabilities"`
-	BootPlan             *store.AgentBootPlanDocument          `json:"boot_plan,omitempty"`
 	DurableInstance      AgentBuilderDurableInstanceInput      `json:"durable_instance"`
 	OperatorNotification AgentBuilderOperatorNotificationInput `json:"operator_notification"`
 }
@@ -412,7 +344,6 @@ type AgentBuilderDryRunResponse struct {
 	UnsupportedFields        []string                             `json:"unsupported_fields"`
 	NormalizedProfilePayload AgentBuilderProfileInput             `json:"normalized_profile_payload"`
 	CapabilityOperations     []AgentBuilderCapabilityOperation    `json:"capability_operations"`
-	BootPlanPreview          *AgentBootPlanDryRunResponse         `json:"boot_plan_preview,omitempty"`
 	DurableRecipePlan        *service.DurableAgentRecipePlan      `json:"durable_recipe_plan,omitempty"`
 	LaunchPlanPreview        *AgentBuilderLaunchPlanPreview       `json:"launch_plan_preview,omitempty"`
 	NotificationPreview      AgentBuilderReadyNotificationPreview `json:"notification_preview"`
@@ -436,7 +367,6 @@ type AgentBuilderDraftEnvelope struct {
 	Mode                 string                                `json:"mode"`
 	Profile              AgentBuilderProfileInput              `json:"profile"`
 	Capabilities         AgentBuilderCapabilitiesInput         `json:"capabilities"`
-	BootPlan             *store.AgentBootPlanDocument          `json:"boot_plan,omitempty"`
 	DurableInstance      AgentBuilderDurableInstanceInput      `json:"durable_instance"`
 	OperatorNotification AgentBuilderOperatorNotificationInput `json:"operator_notification"`
 }
@@ -507,7 +437,6 @@ type DurableAgentWakePayloadRequest struct {
 }
 
 type DurableAgentStartRequest struct {
-	WorkspaceID string                         `json:"workspace_id"`
 	ProjectID   string                         `json:"project_id"`
 	WakePayload DurableAgentWakePayloadRequest `json:"wake_payload"`
 }
@@ -520,11 +449,106 @@ type DurableAgentRecipeRequest struct {
 	Model       string                         `json:"model"`
 	RuntimeKind string                         `json:"runtime_kind"`
 	WorkRoot    string                         `json:"work_root"`
-	WorkspaceID string                         `json:"workspace_id"`
 	ProjectID   string                         `json:"project_id"`
 	WakePayload DurableAgentWakePayloadRequest `json:"wake_payload"`
 	Metadata    map[string]string              `json:"metadata"`
 	Start       bool                           `json:"start"`
+}
+
+// --- Roles ---
+//
+// Phase 1 item 01 (TASKS/phase-1/01-add-roles-table-and-cascade-resolution.md).
+// See internal/store/roles.go for the Role struct these requests map onto.
+
+type CreateRoleRequest struct {
+	Slug               string `json:"slug"`
+	Name               string `json:"name"`
+	SystemPrompt       string `json:"system_prompt"`
+	DefaultClass       string `json:"default_class"`
+	DefaultModel       string `json:"default_model"`
+	DefaultProvider    string `json:"default_provider"`
+	DefaultTools       string `json:"default_tools"`
+	DefaultSkills      string `json:"default_skills"`
+	DefaultPermissions string `json:"default_permissions"`
+}
+
+type UpdateRoleRequest struct {
+	Slug               *string `json:"slug"`
+	Name               *string `json:"name"`
+	SystemPrompt       *string `json:"system_prompt"`
+	DefaultClass       *string `json:"default_class"`
+	DefaultModel       *string `json:"default_model"`
+	DefaultProvider    *string `json:"default_provider"`
+	DefaultTools       *string `json:"default_tools"`
+	DefaultSkills      *string `json:"default_skills"`
+	DefaultPermissions *string `json:"default_permissions"`
+}
+
+// --- Consumers ---
+//
+// Phase 5 item 01 (TASKS/phase-5/01-build-assignment-api.md). Phase 1 item
+// 03 (TASKS/phase-1/03-add-consumers-table.md) built the store-layer CRUD
+// (internal/store/consumers.go) and deliberately deferred the REST layer
+// here. See that file's store.Consumer struct these requests map onto, and
+// GLOSSARY.md's Consumer entry.
+
+type CreateConsumerRequest struct {
+	Slug string `json:"slug"`
+	Name string `json:"name"`
+}
+
+type UpdateConsumerRequest struct {
+	Slug *string `json:"slug"`
+	Name *string `json:"name"`
+}
+
+// --- Agent tools (grant/revoke) ---
+//
+// Phase 5 item 01 (TASKS/phase-5/01-build-assignment-api.md). Phase 1 item
+// 04 (TASKS/phase-1/04-add-known-tools-and-agent-tools-fk.md) built the
+// store-layer grant/revoke functions (internal/store/agent_tools.go) and a
+// list-only REST endpoint; this is the write side.
+
+// GrantAgentToolRequest grants a known_tools row (by ID) to the agent in
+// the URL path. GrantedVia is an optional provenance tag ("explicit" |
+// "role_seed" | "legacy_backfill" -- see agent_tools.granted_via's doc
+// comment); empty defaults to "explicit", matching store.GrantAgentTool's
+// own default.
+type GrantAgentToolRequest struct {
+	ToolID     string `json:"tool_id"`
+	GrantedVia string `json:"granted_via"`
+}
+
+// --- Agent context resolvers ---
+//
+// Phase 2 item 02 (TASKS/phase-2/02-port-forward-dynamic-resolver.md).
+// See internal/store/agent_context_resolvers.go for the
+// AgentContextResolver struct these requests map onto.
+
+type CreateAgentContextResolverRequest struct {
+	SlotName       string `json:"slot_name"`
+	Kind           string `json:"kind"`
+	Run            string `json:"run"`
+	CWD            string `json:"cwd"`
+	Timeout        string `json:"timeout"`
+	URL            string `json:"url"`
+	HeadersJSON    string `json:"headers_json"`
+	ResponseFormat string `json:"response_format"`
+	JSONPath       string `json:"json_path"`
+	Enabled        *bool  `json:"enabled"`
+}
+
+type UpdateAgentContextResolverRequest struct {
+	SlotName       *string `json:"slot_name"`
+	Kind           *string `json:"kind"`
+	Run            *string `json:"run"`
+	CWD            *string `json:"cwd"`
+	Timeout        *string `json:"timeout"`
+	URL            *string `json:"url"`
+	HeadersJSON    *string `json:"headers_json"`
+	ResponseFormat *string `json:"response_format"`
+	JSONPath       *string `json:"json_path"`
+	Enabled        *bool   `json:"enabled"`
 }
 
 // --- Artifacts ---
@@ -544,47 +568,6 @@ type PlaceArtifactRequest struct {
 type SelectToolsRequest struct {
 	Intent string   `json:"intent"`
 	Hints  []string `json:"hints"`
-}
-
-// --- Templates ---
-
-type CreateTemplateRequest struct {
-	Name     string `json:"name"`
-	Template string `json:"template"`
-}
-
-type UpdateTemplateRequest struct {
-	Template string `json:"template"`
-}
-
-type ApplyTemplateRequest struct {
-	SessionID string `json:"session_id"`
-}
-
-// --- Prompt Templates ---
-
-type CreatePromptTemplateRequest struct {
-	Name      string `json:"name"`
-	Slug      string `json:"slug"`
-	Scope     string `json:"scope"`
-	Template  string `json:"template"`
-	Variables string `json:"variables"`
-	Priority  int    `json:"priority"`
-	Icon      string `json:"icon"`
-}
-
-type UpdatePromptTemplateRequest struct {
-	Name      *string `json:"name"`
-	Slug      *string `json:"slug"`
-	Scope     *string `json:"scope"`
-	Template  *string `json:"template"`
-	Variables *string `json:"variables"`
-	Priority  *int    `json:"priority"`
-	Icon      *string `json:"icon"`
-}
-
-type AssignAgentPromptTemplateRequest struct {
-	TemplateID string `json:"template_id"`
 }
 
 // --- Bookmarks ---
@@ -612,20 +595,10 @@ type ShellExecRequest struct {
 	Approved bool   `json:"approved"`
 }
 
-// --- Workspaces ---
-
-type CreateWorkspaceRequest struct {
-	ID          string `json:"id"`
-	Name        string `json:"name"`
-	Description string `json:"description"`
-	Icon        string `json:"icon"`
-}
-
-type UpdateWorkspaceRequest struct {
-	Name        *string `json:"name"`
-	Description *string `json:"description"`
-	Icon        *string `json:"icon"`
-}
+// --- Projects ---
+// Phase 0 item 20 (retire workspaces): the in-app `workspaces` table (and
+// CreateWorkspaceRequest/UpdateWorkspaceRequest, its REST DTOs) is retired
+// in full. `projects` is flat now — no more workspace nesting.
 
 type CreateProjectRequest struct {
 	ID          string `json:"id"`
@@ -640,53 +613,6 @@ type UpdateProjectRequest struct {
 	RepoPath    *string `json:"repo_path"`
 	Settings    *string `json:"settings"`
 	SortOrder   *int    `json:"sort_order"`
-}
-
-// --- Triggers ---
-
-type CreateTriggerRuleRequest struct {
-	PluginID        string `json:"plugin_id"`
-	EventType       string `json:"event_type"`
-	ConnectorName   string `json:"connector_name"`
-	PayloadTemplate string `json:"payload_template"`
-	FilterExpr      string `json:"filter_expr"`
-	Enabled         *bool  `json:"enabled"`
-	Description     string `json:"description"`
-}
-
-type UpdateTriggerRuleRequest struct {
-	EventType       *string `json:"event_type"`
-	ConnectorName   *string `json:"connector_name"`
-	PayloadTemplate *string `json:"payload_template"`
-	FilterExpr      *string `json:"filter_expr"`
-	Enabled         *bool   `json:"enabled"`
-	Description     *string `json:"description"`
-}
-
-// --- Actions ---
-
-type CreateActionRequest struct {
-	Name         string `json:"name"`
-	Description  string `json:"description"`
-	Keybinding   string `json:"keybinding"`
-	Command      string `json:"command"`
-	SlashCommand string `json:"slash_command"`
-	AutoTriggers string `json:"auto_triggers"`
-	Enabled      *bool  `json:"enabled"`
-}
-
-type UpdateActionRequest struct {
-	Name         *string `json:"name"`
-	Description  *string `json:"description"`
-	Keybinding   *string `json:"keybinding"`
-	Command      *string `json:"command"`
-	SlashCommand *string `json:"slash_command"`
-	AutoTriggers *string `json:"auto_triggers"`
-	Enabled      *bool   `json:"enabled"`
-}
-
-type ExecuteActionRequest struct {
-	SessionID string `json:"session_id"`
 }
 
 // --- Skills ---
@@ -716,28 +642,6 @@ type UpdateSkillRequest struct {
 type AssignAgentSkillRequest struct {
 	SkillID string `json:"skill_id"`
 	Config  string `json:"config"`
-}
-
-// --- Modes ---
-
-type CreateModeRequest struct {
-	Name           string `json:"name"`
-	Slug           string `json:"slug"`
-	PromptAddendum string `json:"prompt_addendum"`
-	ToolOverrides  string `json:"tool_overrides"`
-	Settings       string `json:"settings"`
-}
-
-type UpdateModeRequest struct {
-	Name           *string `json:"name"`
-	Slug           *string `json:"slug"`
-	PromptAddendum *string `json:"prompt_addendum"`
-	ToolOverrides  *string `json:"tool_overrides"`
-	Settings       *string `json:"settings"`
-}
-
-type AssignModeToAgentRequest struct {
-	ModeID string `json:"mode_id"`
 }
 
 // --- Approvals ---
@@ -806,10 +710,3 @@ type SetProviderAPIKeyRequest struct {
 }
 
 // --- Trust (H1, CW-20260421-0014) ---
-
-// SetWorkspaceRoleTrustRequest is the body for
-// POST /api/workspaces/{workspace_id}/roles/{agent_profile_id}/trust.
-type SetWorkspaceRoleTrustRequest struct {
-	Tier       string `json:"tier"`        // "untrusted" | "normal" | "trusted"
-	PromotedBy string `json:"promoted_by"` // optional attribution string
-}

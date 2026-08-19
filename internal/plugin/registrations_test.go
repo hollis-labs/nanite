@@ -142,8 +142,14 @@ func TestApplyManifestRegistrations_DeferredCategoriesNoOp(t *testing.T) {
 	host := NewHost(http.NewServeMux(), NewLogger("test"))
 	p := &fakePlugin{id: "deferred-plug"}
 
-	// All categories that still require proxy scaffolding (B.5/B.6) should be
-	// logged and skipped rather than erroring.
+	// p is a builtin (fakePlugin, not *subprocess.SubprocessPlugin). Commands,
+	// Events, Crud, HttpRoutes, and McpServers are all subprocess-only
+	// registration paths — a builtin is expected to register those directly
+	// from its own Load(), so applyManifestRegistrations logs and no-ops for
+	// each rather than erroring. AgentProfiles remains genuinely deferred
+	// (no registration path exists yet for any plugin kind, builtin or
+	// subprocess) as of this test. See TestApplyManifestRegistrations_Crud_Subprocess
+	// below for the real (non-skipped) subprocess-plugin crud wiring path.
 	m := &PluginManifest{
 		Name: p.id,
 		Registers: ManifestRegisters{
@@ -157,6 +163,152 @@ func TestApplyManifestRegistrations_DeferredCategoriesNoOp(t *testing.T) {
 	}
 	if err := applyManifestRegistrations(host, m, p, ""); err != nil {
 		t.Fatalf("applyManifestRegistrations with deferred categories returned error: %v", err)
+	}
+}
+
+// TestApplyManifestRegistrations_Crud_Subprocess proves the registers.crud[]
+// manifest path end to end (Phase 5 item 05,
+// TASKS/phase-5/05-develop-registers-panels-and-crud.md): no real plugin
+// declares registers.crud[] yet, so this is the minimal test-plugin consumer
+// the task calls for. A subprocess plugin declares a "things" resource;
+// applyManifestRegistrations wires it into the host's generic CRUD router
+// (Host.RegisterCRUDHandler); the resulting REST routes are exercised through
+// the real *http.ServeMux (the same forwarder-to-pluginMux path production
+// traffic uses) and round-trip over JSON-RPC to an in-process mock "plugin"
+// that answers MethodCRUDList/Create/Read/Update/Delete — the same technique
+// TestNewSubprocessHTTPHandler above uses for http_routes.
+func TestApplyManifestRegistrations_Crud_Subprocess(t *testing.T) {
+	mux := http.NewServeMux()
+	host := NewHost(mux, NewLogger("test"))
+
+	hostToPluginR, hostToPluginW := io.Pipe()
+	pluginToHostR, pluginToHostW := io.Pipe()
+	t.Cleanup(func() {
+		hostToPluginW.Close()
+		pluginToHostW.Close()
+	})
+
+	// Minimal in-process "plugin": answers the five CRUD JSON-RPC methods
+	// with canned data instead of a real spawned subprocess.
+	go func() {
+		br := make([]byte, 0, 8192)
+		buf := make([]byte, 4096)
+		for {
+			n, err := hostToPluginR.Read(buf)
+			if n > 0 {
+				br = append(br, buf[:n]...)
+				for {
+					i := bytes.IndexByte(br, '\n')
+					if i < 0 {
+						break
+					}
+					line := br[:i]
+					br = br[i+1:]
+
+					var req struct {
+						ID     int64           `json:"id"`
+						Method string          `json:"method"`
+						Params json.RawMessage `json:"params"`
+					}
+					_ = json.Unmarshal(line, &req)
+
+					var params subprocess.CRUDParams
+					_ = json.Unmarshal(req.Params, &params)
+
+					var result interface{}
+					switch req.Method {
+					case subprocess.MethodCRUDList:
+						result = subprocess.CRUDListResult{
+							Items: []json.RawMessage{[]byte(`{"id":"1","name":"widget"}`)},
+						}
+					case subprocess.MethodCRUDCreate:
+						name, _ := params.Data["name"].(string)
+						result = subprocess.CRUDResult{Data: json.RawMessage(`{"id":"2","name":"` + name + `"}`)}
+					case subprocess.MethodCRUDRead:
+						result = subprocess.CRUDResult{Data: json.RawMessage(`{"id":"` + params.ID + `","name":"widget"}`)}
+					case subprocess.MethodCRUDUpdate:
+						result = subprocess.CRUDResult{Data: json.RawMessage(`{"id":"` + params.ID + `","name":"updated"}`)}
+					case subprocess.MethodCRUDDelete:
+						result = json.RawMessage(`null`)
+					default:
+						result = map[string]any{}
+					}
+
+					resp := map[string]any{
+						"jsonrpc": "2.0",
+						"id":      req.ID,
+						"result":  result,
+					}
+					out, _ := json.Marshal(resp)
+					out = append(out, '\n')
+					_, _ = pluginToHostW.Write(out)
+				}
+			}
+			if err != nil {
+				return
+			}
+		}
+	}()
+
+	transport := subprocess.NewTransport(pluginToHostR, hostToPluginW)
+	sp := subprocess.NewSubprocessPluginForTest("crud-plug", transport)
+
+	m := &PluginManifest{
+		Name: "crud-plug",
+		Registers: ManifestRegisters{
+			Crud: []CRUDRegistration{{Resource: "things", Methods: []string{"list", "create", "read", "update", "delete"}}},
+		},
+	}
+	if err := applyManifestRegistrations(host, m, sp, ""); err != nil {
+		t.Fatalf("applyManifestRegistrations: %v", err)
+	}
+
+	handlers := host.GetCRUDHandlers()
+	if _, ok := handlers["things"]; !ok {
+		t.Fatalf("expected a CRUD handler registered for resource %q, got %+v", "things", handlers)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	doReq := func(method, path, body string) *httptest.ResponseRecorder {
+		var r *http.Request
+		if body != "" {
+			r = httptest.NewRequest(method, path, strings.NewReader(body))
+		} else {
+			r = httptest.NewRequest(method, path, nil)
+		}
+		r = r.WithContext(ctx)
+		rec := httptest.NewRecorder()
+		mux.ServeHTTP(rec, r)
+		return rec
+	}
+
+	// List: GET /api/plugins/things -> MethodCRUDList.
+	if rec := doReq(http.MethodGet, "/api/plugins/things", ""); rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), "widget") {
+		t.Fatalf("list: status = %d, body = %s", rec.Code, rec.Body.String())
+	}
+
+	// Create: POST /api/plugins/things -> MethodCRUDCreate.
+	if rec := doReq(http.MethodPost, "/api/plugins/things", `{"name":"gadget"}`); rec.Code != http.StatusCreated || !strings.Contains(rec.Body.String(), "gadget") {
+		t.Fatalf("create: status = %d, body = %s", rec.Code, rec.Body.String())
+	}
+
+	// Read: GET /api/plugins/things/42 -> MethodCRUDRead. Also proves the
+	// double-mux forwarder (core *http.ServeMux -> host.pluginMux's inner
+	// *http.ServeMux) preserves Go 1.22 {id} path-value extraction.
+	if rec := doReq(http.MethodGet, "/api/plugins/things/42", ""); rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"42"`) {
+		t.Fatalf("read: status = %d, body = %s", rec.Code, rec.Body.String())
+	}
+
+	// Update: PUT /api/plugins/things/42 -> MethodCRUDUpdate.
+	if rec := doReq(http.MethodPut, "/api/plugins/things/42", `{"name":"changed"}`); rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), "updated") {
+		t.Fatalf("update: status = %d, body = %s", rec.Code, rec.Body.String())
+	}
+
+	// Delete: DELETE /api/plugins/things/42 -> MethodCRUDDelete.
+	if rec := doReq(http.MethodDelete, "/api/plugins/things/42", ""); rec.Code != http.StatusOK {
+		t.Fatalf("delete: status = %d, body = %s", rec.Code, rec.Body.String())
 	}
 }
 

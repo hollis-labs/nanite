@@ -27,7 +27,7 @@ import (
 // `generator` is FE's opaque destination-config tag, forwarded unmodified —
 // FE never interprets it. Nanite's existing generic wake endpoint,
 // POST /api/durable-agents/{id}/wake (durable_agent_wake.go), decodes the
-// body as DurableAgentStartRequest{WorkspaceID, ProjectID, WakePayload:
+// body as DurableAgentStartRequest{ProjectID, WakePayload:
 // {Reason, Prompt, Facts, Metadata map[string]string}} — `fragment` is a
 // nested object, so pointing FE's `target` straight at that endpoint would
 // arrive with an empty WakePayload and lose every field. This file is the
@@ -78,19 +78,6 @@ type LoomCuratorWakeRequest struct {
 // Curator's DB-minted instance UUID) is what lets this endpoint's URL stay
 // fixed and version-controlled across environments and DB resets.
 const loomCuratorInstanceSlug = "loom-curator"
-
-// loomCuratorWakeWorkspaceID: Nanite consolidated to a single dogfood
-// workspace by explicit operator decision on 2026-08-15 (migration
-// 087_consolidate_personal_workspace.sql; the sole seeded row is
-// store/seed.go's {"default", "Default", ...}). durableWakeService.Wake
-// skips a wake with "workspace unavailable" when no WorkspaceID is supplied
-// and the instance has no prior session to inherit one from — which is
-// exactly Curator's state on its very first-ever callback wake. Supplying
-// "default" explicitly here means the callback seam works from the first
-// call, not only after some undocumented manual bootstrap wake. This
-// literal is safe only because of the single-workspace consolidation above;
-// revisit if Nanite ever reintroduces multiple workspaces.
-const loomCuratorWakeWorkspaceID = "default"
 
 // handleLoomCuratorWake decodes FE's callback payload, resolves it to the
 // `loom-curator` durable_agent_instances row, and wakes it with the
@@ -143,7 +130,6 @@ func (a *API) handleLoomCuratorWake(w http.ResponseWriter, r *http.Request) {
 	}
 
 	result, err := a.Services.DurableWake.Wake(r.Context(), inst.ID, service.DurableAgentWakeRequest{
-		WorkspaceID: loomCuratorWakeWorkspaceID,
 		WakePayload: service.DurableAgentWakePayload{
 			Reason: reason,
 			Prompt: buildLoomCuratorWakePrompt(generator, req.Fragment),

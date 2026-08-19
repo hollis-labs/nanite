@@ -1,0 +1,38 @@
+-- +goose Up
+-- 072_agent_profiles_durable.sql
+-- FU-9 (CW-20260520-0041 Phase 3 Stage 3.0.1).
+--
+-- Adds a `durable` boolean to agent_profiles so operator-created agents
+-- can opt into surviving agridd-serve restarts. Migration 061 already
+-- wipes source != 'internal' rows on every boot (pre-launch clean-slate
+-- per CW-20260512-0112) and the predicate is now gated on durable = 0
+-- so a row whose creator explicitly chose persistence is preserved.
+--
+-- The Supervisor profile itself stays under the source='internal' path
+-- (DAR Orchestrator workaround 2026-05-19 UUID 862a3df2-...) so it is
+-- already preserved without needing durable=1. The new column gives
+-- API-created agents (POST /api/agents default source='user') a
+-- survival opt-in without forcing them onto the file-SOT pipeline.
+--
+-- Ordering note. The same ALTER also runs idempotently at the top of
+-- migration 061 so the modified 061 DELETE predicate can reference the
+-- column on the same boot where it is first introduced. The
+-- store/store.go migration runner swallows duplicate-column errors as
+-- a DDL-level idempotency case, so the double-declaration is safe.
+--
+-- The runner splits statements on the semicolon character (including
+-- inside comments per 066), so this file uses none. Plain ALTER without
+-- a BEGIN/COMMIT wrapper avoids leaving a transaction open if the
+-- duplicate-column branch fires on a subsequent boot.
+
+ALTER TABLE agent_profiles ADD COLUMN durable BOOLEAN NOT NULL DEFAULT 0;
+
+-- +goose Down
+-- No down migration: this file predates goose adoption (see
+-- docs/engineering/architecture/05-storage-and-migrations.md, "Migrations:
+-- adopting a real ledger"). Every pre-cutover migration ships a
+-- deliberately empty Down section rather than a hand-derived rollback --
+-- reconstructing the exact pre-migration schema/data shape for 94 files
+-- retroactively isn't worth doing when the historical state it would
+-- recreate has no operational value. New migrations going forward are
+-- expected to carry a real, tested Down.

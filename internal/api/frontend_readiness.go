@@ -6,7 +6,6 @@ import (
 	"time"
 
 	"github.com/hollis-labs/agentkit/agentruntime/runtimekind"
-	"github.com/hollis-labs/nanite/internal/bootprofile"
 	"github.com/hollis-labs/nanite/internal/service"
 	"github.com/hollis-labs/nanite/internal/store"
 )
@@ -26,7 +25,6 @@ type startSurfaceCapabilities struct {
 	Profiles            []store.AgentProfile         `json:"profiles"`
 	Providers           []store.ProviderConfig       `json:"providers"`
 	Models              []store.Model                `json:"models"`
-	BootProfiles        []bootProfileOption          `json:"boot_profiles"`
 	WorkRootHints       []workRootHint               `json:"work_root_hints"`
 }
 
@@ -45,13 +43,6 @@ type runtimeKindOption struct {
 	Description       string `json:"description,omitempty"`
 }
 
-type bootProfileOption struct {
-	ID       string `json:"id"`
-	Label    string `json:"label"`
-	Provider string `json:"provider"`
-	WorkRoot string `json:"work_root,omitempty"`
-}
-
 type workRootHint struct {
 	ID          string `json:"id"`
 	Label       string `json:"label"`
@@ -61,7 +52,6 @@ type workRootHint struct {
 
 type sessionDetailsResponse struct {
 	Session              *store.Session                           `json:"session"`
-	Mode                 *store.Mode                              `json:"mode,omitempty"`
 	PrimaryAgent         *store.AgentProfile                      `json:"primary_agent,omitempty"`
 	DurableAttachments   []store.DurableAgentInstanceSessionState `json:"durable_attachments"`
 	CurrentDurableAgent  *store.DurableAgentInstance              `json:"current_durable_agent,omitempty"`
@@ -143,7 +133,6 @@ func (a *API) handleStartSurfaceCapabilities(w http.ResponseWriter, r *http.Requ
 		Profiles:            nonNilSlice(profiles),
 		Providers:           nonNilSlice(providers),
 		Models:              nonNilSlice(models),
-		BootProfiles:        nonNilSlice(a.bootProfileOptions()),
 		WorkRootHints:       []workRootHint{{ID: "operator-provided", Label: "Operator provided", Description: "Frontend should prompt for a project or working directory when the recipe/start path needs one."}},
 	})
 }
@@ -179,14 +168,11 @@ func (a *API) sessionDetails(id string) (sessionDetailsResponse, error) {
 		Halt:                 sessionHaltDetail{IsHalted: false},
 		RecentDurableEvents:  []store.DurableAgentEvent{},
 		BootSource:           inferBootSource(sess),
-		ImmutableStartFields: []string{"provider", "model", "runtime_kind", "boot_profile", "recipe", "lifecycle_class", "work_root"},
+		ImmutableStartFields: []string{"provider", "model", "runtime_kind", "recipe", "lifecycle_class", "work_root"},
 		Checkpoint:           checkpointDetail{Status: "unknown"},
 	}
 	if halt, err := a.Services.Store.GetSessionHalt(id); err == nil && halt != nil {
 		details.Halt = haltDetailFromStore(halt)
-	}
-	if mode, err := a.Services.Store.GetSessionMode(id); err == nil {
-		details.Mode = mode
 	}
 	if primary, err := a.Services.Store.GetSessionPrimaryAgent(id); err == nil {
 		if agent, err := a.Services.Store.GetAgent(primary.AgentID); err == nil {
@@ -328,15 +314,7 @@ func (a *API) providersForStartSurface() ([]store.ProviderConfig, error) {
 	if err != nil {
 		return nil, err
 	}
-	providers = visibleProviderRows(providers)
-	if reg := a.Services.BootProfiles; reg != nil {
-		for _, spec := range reg.List() {
-			if spec.Provider != "" {
-				providers = append(providers, bootProfileProviderRow(spec))
-			}
-		}
-	}
-	return providers, nil
+	return visibleProviderRows(providers), nil
 }
 
 func (a *API) modelsForStartSurface() ([]store.Model, error) {
@@ -344,43 +322,19 @@ func (a *API) modelsForStartSurface() ([]store.Model, error) {
 	if err != nil {
 		return nil, err
 	}
-	models = visibleModelRows(models)
-	if reg := a.Services.BootProfiles; reg != nil {
-		for _, spec := range reg.List() {
-			if spec.Provider != "" {
-				models = append(models, bootProfileModelRow(spec))
-			}
-		}
-	}
-	return models, nil
+	return visibleModelRows(models), nil
 }
 
-func (a *API) bootProfileOptions() []bootProfileOption {
-	var out []bootProfileOption
-	if reg := a.Services.BootProfiles; reg != nil {
-		for _, spec := range reg.List() {
-			if spec.Provider == "" {
-				continue
-			}
-			id := bootprofile.EncodeProviderID(spec.ProfileID)
-			label := spec.UILabel
-			if label == "" {
-				label = spec.ProfileID
-			}
-			out = append(out, bootProfileOption{ID: id, Label: label, Provider: spec.Provider, WorkRoot: spec.Workdir})
-		}
-	}
-	return out
-}
-
+// inferBootSource classifies how a session's runtime was selected.
+// TASKS/phase-2/04-retire-boot-profile-catalog.md removed the
+// "boot_profile" case (bootprofile.IsProviderID(sess.Provider)) — the
+// encoded `bootprofile:<id>` provider-name convention no longer exists.
 func inferBootSource(sess *store.Session) string {
 	switch {
 	case sess == nil:
 		return "unknown"
 	case sess.ContextType == "durable_agent":
 		return "durable_agent"
-	case bootprofile.IsProviderID(sess.Provider):
-		return "boot_profile"
 	case strings.HasPrefix(sess.Provider, "pty-") || strings.HasPrefix(sess.Provider, "sub-") || sess.Provider == "codex" || sess.Provider == "opencode":
 		return "legacy_cli"
 	default:

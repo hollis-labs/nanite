@@ -1,3 +1,4 @@
+-- +goose Up
 -- Internal todo and plan system (workspace/project/session scoped).
 
 CREATE TABLE IF NOT EXISTS todos (
@@ -38,16 +39,35 @@ CREATE INDEX IF NOT EXISTS idx_plans_scope ON plans(scope, scope_id);
 CREATE INDEX IF NOT EXISTS idx_plans_status ON plans(status);
 
 -- Auto-update updated_at on row modification.
+--
+-- goose's default SQL parser splits statements on a trailing semicolon per
+-- line, which would otherwise chop this trigger's BEGIN...END body into
+-- fragments (see internal/pressly/goose's sqlparser). StatementBegin/End
+-- brackets the whole CREATE TRIGGER as one atomic statement.
+-- +goose StatementBegin
 CREATE TRIGGER IF NOT EXISTS trg_todos_updated_at
 AFTER UPDATE ON todos
 FOR EACH ROW
 BEGIN
     UPDATE todos SET updated_at = CURRENT_TIMESTAMP WHERE id = OLD.id;
 END;
+-- +goose StatementEnd
 
+-- +goose StatementBegin
 CREATE TRIGGER IF NOT EXISTS trg_plans_updated_at
 AFTER UPDATE ON plans
 FOR EACH ROW
 BEGIN
     UPDATE plans SET updated_at = CURRENT_TIMESTAMP WHERE id = OLD.id;
 END;
+-- +goose StatementEnd
+
+-- +goose Down
+-- No down migration: this file predates goose adoption (see
+-- docs/engineering/architecture/05-storage-and-migrations.md, "Migrations:
+-- adopting a real ledger"). Every pre-cutover migration ships a
+-- deliberately empty Down section rather than a hand-derived rollback --
+-- reconstructing the exact pre-migration schema/data shape for 94 files
+-- retroactively isn't worth doing when the historical state it would
+-- recreate has no operational value. New migrations going forward are
+-- expected to carry a real, tested Down.

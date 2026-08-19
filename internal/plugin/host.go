@@ -126,7 +126,6 @@ type Host struct {
 	pluginMux          *MutablePluginMux                // mutable wrapper that owns all plugin-registered routes
 	routePatterns      map[string]bool                  // patterns already wired on core router (forwarder installed)
 	pendingRoutes      []pendingRoute                   // routes queued before router was set
-	triggers           *TriggerDispatcher               // event → connector dispatch
 	filters            *FilterRegistry                  // named filter chains
 	eventSubs          []chan plugin.Event              // SSE subscribers for event streaming
 	envelopes          map[string]EnvelopeRegistryEntry // envelope type → registry entry (B.4)
@@ -202,7 +201,6 @@ func NewHost(router *http.ServeMux, logger plugin.Logger) *Host {
 		ctx:                ctx,
 		ctxCancel:          cancel,
 	}
-	h.triggers = NewTriggerDispatcher(h)
 	h.filters = NewFilterRegistry()
 	return h
 }
@@ -210,7 +208,18 @@ func NewHost(router *http.ServeMux, logger plugin.Logger) *Host {
 // NewHostWithStore creates a minimal plugin host with just a store service.
 // Used by CLI commands (e.g. nanite plugin uninstall) that need to run
 // plugin lifecycle methods without a full server.
-func NewHostWithStore(store interface{}) *Host {
+//
+// s is also assigned to h.store (not just h.services["store"]) -- Phase 5
+// item 03 (TASKS/phase-5/03-wire-registers-agent-profiles.md) added
+// SweepPluginAgentProfiles, which (like applyManifestRegistrations' enabled
+// gate before it) reads the typed h.store field, not the generic services
+// map. Before this task, nothing read h.store on a CLI-built host, so
+// leaving it unset was harmless; SweepPluginAgentProfiles is the first
+// thing that needs it populated here too. The parameter type was widened
+// from the previous `interface{}` to *store.Store for exactly this reason
+// -- every real call site already passed a *store.Store or nil, so this is
+// not a behavior change for any existing caller.
+func NewHostWithStore(s *store.Store) *Host {
 	ctx, cancel := context.WithCancel(context.Background())
 	h := &Host{
 		plugins:            make(map[string]plugin.Plugin),
@@ -239,9 +248,9 @@ func NewHostWithStore(store interface{}) *Host {
 		ctx:                ctx,
 		ctxCancel:          cancel,
 	}
-	h.triggers = NewTriggerDispatcher(h)
 	h.filters = NewFilterRegistry()
-	h.services["store"] = store
+	h.services["store"] = s
+	h.store = s
 	return h
 }
 
@@ -848,7 +857,15 @@ func (h *Host) CheckAllConnectorHealth() []ConnectorStatus {
 }
 
 // recordConnectorFailure marks a connector as unhealthy after send retries
-// are exhausted. Called by TriggerDispatcher.
+// are exhausted.
+//
+// No current caller: this was invoked by the now-removed TriggerDispatcher
+// (internal/plugin/triggers.go, deleted alongside trigger_rules —
+// TASKS/phase-0/18b-cut-dead-messaging-and-plugin-tables.md). Left in place
+// because it belongs to the general connector-health subsystem
+// (connectorHealth/GetConnectorStatuses/CheckConnectorHealth), which is
+// still live via internal/api/connectors.go and out of this task's scope —
+// not something specific to trigger_rules.
 func (h *Host) recordConnectorFailure(name string) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
@@ -861,7 +878,8 @@ func (h *Host) recordConnectorFailure(name string) {
 	status.ConsecutiveFailures++
 }
 
-// recordConnectorSuccess marks a connector as healthy after a successful send.
+// recordConnectorSuccess marks a connector as healthy after a successful
+// send. Same "no current caller" note as recordConnectorFailure, above.
 func (h *Host) recordConnectorSuccess(name string) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
@@ -1546,6 +1564,16 @@ func (h *Host) UnloadPlugin(id string) error {
 		}
 	}
 
+	// 18. Plugin-owned agent_profiles/roles (Phase 5 item 03 --
+	// TASKS/phase-5/03-wire-registers-agent-profiles.md). See
+	// SweepPluginAgentProfiles's doc comment (agent_profiles.go) for why
+	// this is a DB-authoritative sweep (not an in-memory host side-map like
+	// every category above) and why it's exported as its own method rather
+	// than inlined here -- cmd/nanite/plugin_cmd.go's CLI uninstall/disable
+	// commands need to run the exact same teardown without a live
+	// UnloadPlugin call to ride along with.
+	h.SweepPluginAgentProfiles(id)
+
 	h.logger.Info("unloaded plugin", "id", id)
 
 	// Emit plugin.uninstalled event (fire-and-forget). The registry version
@@ -1556,8 +1584,8 @@ func (h *Host) UnloadPlugin(id string) error {
 	return nil
 }
 
-// EmitEvent emits an event to all registered hooks, then dispatches
-// matching trigger rules to connectors, and broadcasts to SSE subscribers.
+// EmitEvent emits an event to all registered hooks, then broadcasts to SSE
+// subscribers.
 func (h *Host) EmitEvent(event plugin.Event) {
 	// 1. Dispatch to registered event hooks.
 	h.mu.RLock()
@@ -1584,14 +1612,7 @@ func (h *Host) EmitEvent(event plugin.Event) {
 		wg.Wait()
 	}
 
-	// 2. Dispatch to trigger rules (event → connector bindings).
-	if h.triggers != nil {
-		safego.Go(h.ctx, "plugin.host.emit-event.triggers-dispatch", func() {
-			h.triggers.Dispatch(event)
-		})
-	}
-
-	// 3. Broadcast to SSE event stream subscribers.
+	// 2. Broadcast to SSE event stream subscribers.
 	h.broadcastEvent(event)
 }
 

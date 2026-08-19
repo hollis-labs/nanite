@@ -1,7 +1,6 @@
 package api
 
 import (
-	"bytes"
 	"database/sql"
 	"encoding/json"
 	"errors"
@@ -13,6 +12,7 @@ import (
 	llmtypes "github.com/hollis-labs/go-llm-types"
 	"github.com/hollis-labs/nanite/internal/chat"
 	ctxpkg "github.com/hollis-labs/nanite/internal/context"
+	"github.com/hollis-labs/nanite/internal/recovery"
 	"github.com/hollis-labs/nanite/internal/safego"
 	"github.com/hollis-labs/nanite/internal/service"
 	"github.com/hollis-labs/nanite/internal/store"
@@ -20,22 +20,9 @@ import (
 
 func (a *API) handleListSessions(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
-	// CW-20260815-0010: resolve to the sole real workspace when the param
-	// is missing or names a workspace that no longer exists, instead of
-	// erroring — see Store.ResolveWorkspaceID.
-	workspaceID, err := a.Services.Store.ResolveWorkspaceID(q.Get("workspace_id"))
-	if err != nil {
-		a.errorResp(w, http.StatusInternalServerError, err.Error())
-		return
-	}
-	if workspaceID == "" {
-		a.errorResp(w, http.StatusBadRequest, "workspace_id query parameter is required (multiple workspaces exist)")
-		return
-	}
-
 	includeArchived := q.Get("include_archived") == "true"
 
-	sessions, err := a.Services.Store.ListSessions(workspaceID, includeArchived)
+	sessions, err := a.Services.Store.ListSessions(includeArchived)
 	if err != nil {
 		a.errorResp(w, http.StatusInternalServerError, err.Error())
 		return
@@ -49,23 +36,24 @@ func (a *API) handleCreateSession(w http.ResponseWriter, r *http.Request) {
 		a.errorResp(w, http.StatusBadRequest, "invalid JSON: "+err.Error())
 		return
 	}
-	if req.WorkspaceID == "" {
-		a.errorResp(w, http.StatusBadRequest, "workspace_id is required")
-		return
-	}
 
 	sess := &store.Session{
-		WorkspaceID: req.WorkspaceID,
-		ProjectID:   req.ProjectID,
-		Model:       req.Model,
-		Provider:    req.Provider,
+		ProjectID: req.ProjectID,
+		Model:     req.Model,
+		Provider:  req.Provider,
 	}
 	if err := a.Services.Store.CreateSession(sess); err != nil {
 		a.errorResp(w, http.StatusInternalServerError, err.Error())
 		return
 	}
 
-	// Resolve agent: request param → user settings default → file-default.
+	// Resolve agent: request param → user settings default → real "default"
+	// agent row. TASKS/adhoc/01-eliminate-file-based-agent-runtime.md: this
+	// used to fall back to the literal placeholder string "file-default",
+	// which got written straight into session_agents.agent_id (no FK on
+	// that column, so nothing caught it) — resolve the real agent_profiles
+	// row for the "default" slug instead, so only a genuine agent ID is
+	// ever written here.
 	agentID := req.AgentID
 	if agentID == "" {
 		if settings, err := a.Services.Store.GetUserSettings(); err == nil && settings.DefaultAgent != "" {
@@ -73,40 +61,30 @@ func (a *API) handleCreateSession(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	if agentID == "" {
-		agentID = "file-default"
-	}
-
-	// Assign the resolved agent as primary.
-	if err := a.Services.Store.EnsureSessionAgent(sess.ID, agentID, "default", true); err != nil {
-		// Log but don't fail — session was created successfully.
-		_ = err
-	}
-
-	// Glass-4 (CW-20260502-0015): classify session intent for auto-handoff.
-	// Deterministic-first per feedback.design_philosophy. Failure to classify
-	// is non-fatal (intent stays NULL — no handoff flow for this session).
-	if agent, err := a.Services.Store.GetAgent(agentID); err == nil {
-		var sessionMode *store.Mode
-		if m, err := a.Services.Store.GetSessionMode(sess.ID); err == nil {
-			sessionMode = m
+		if defaultAgent, err := a.Services.Store.GetAgentBySlug("default"); err == nil && defaultAgent != nil {
+			agentID = defaultAgent.ID
 		}
-		signals := service.SignalsFromSession(sess, agent, sessionMode)
-		intent := service.ClassifySessionIntent(r.Context(), signals)
-		if err := a.Services.Store.SetSessionIntent(sess.ID, intent); err != nil {
-			slog.Warn("api: session intent classify+set failed (non-fatal)",
-				"session_id", sess.ID, "intent", intent, "err", err)
-		} else {
-			slog.Info("api: session intent classified",
-				"session_id", sess.ID, "intent", intent, "score", service.ScoreIntent(signals))
-			intentVal := intent
-			sess.Intent = &intentVal
+	}
+
+	// Assign the resolved agent as primary (best-effort — matches the
+	// pre-existing "log but don't fail" contract of this write). Skip the
+	// write entirely in the true edge case where even the "default" agent
+	// row can't be resolved (no such row exists at all) rather than write
+	// an empty/placeholder agent_id — the session itself was already
+	// created successfully and stays usable without a primary-agent
+	// binding; ResolveForSession's own two-hop fallback handles an unbound
+	// session gracefully on read.
+	if agentID != "" {
+		if err := a.Services.Store.EnsureSessionAgent(sess.ID, agentID, "default", true); err != nil {
+			// Log but don't fail — session was created successfully.
+			_ = err
 		}
 	}
 
 	// Emit session creation event (fire-and-forget).
 	if a.Services.Activity != nil {
 		safego.Go(r.Context(), "api.sessions.activity.session-created", func() {
-			a.Services.Activity.EmitSessionCreated(r.Context(), sess.ID, sess.WorkspaceID)
+			a.Services.Activity.EmitSessionCreated(r.Context(), sess.ID)
 		})
 	}
 
@@ -125,11 +103,6 @@ func (a *API) handleForkSession(w http.ResponseWriter, r *http.Request) {
 	overrides := &store.Session{
 		Provider: req.Provider,
 		Model:    req.Model,
-	}
-	// An explicit mode_id overrides the source session's mode on the fork;
-	// empty falls through to the store default (inherit source's current_mode_id).
-	if req.ModeID != "" {
-		overrides.CurrentModeID = &req.ModeID
 	}
 
 	newSess, err := a.Services.Store.ForkSession(sourceID, overrides, req.IncludeMessages)
@@ -215,20 +188,58 @@ func (a *API) detectInterruptedTurn(sessionID string, sess *store.Session) map[s
 		return nil
 	}
 	last := tail[len(tail)-1]
-	if last.Role != "user" {
-		return nil
-	}
 	// A live stream means this process is genuinely generating the reply —
-	// not interrupted.
-	if a.Services.Streams != nil && a.Services.Streams.HasLiveStreamForSession(sessionID) {
-		return nil
+	// not interrupted. The pure "dangling user turn + no live stream" decision
+	// lives in internal/recovery (interrupted-turn detection, the fourth of
+	// the four recovery mechanisms); this method's job is just the store/
+	// stream lookups that feed it.
+	hasLiveStream := a.Services.Streams != nil && a.Services.Streams.HasLiveStreamForSession(sessionID)
+	result := recovery.DetectInterruptedTurn(last.Role, last.ID, last.CreatedAt, hasLiveStream)
+	if result != nil {
+		a.logInterruptedTurnDetected(sessionID, last, result)
 	}
-	return map[string]any{
-		"interrupted":      true,
-		"reason":           "service_restart",
-		"last_message_id":  last.ID,
-		"last_activity_at": last.CreatedAt,
+	return result
+}
+
+// interruptedTurnDetectedMeta is the structured event_log.metadata payload
+// for event_type="interrupted_turn_detected" — the session/turn context
+// that triggered the heuristic, not a bare event-type string. Mirrors the
+// shape convention chat_reflexes.go's "reflex_action" write established
+// (docs/engineering/architecture/06-session-lifecycle-and-recovery.md:
+// "extend event_log logging to all four [recovery mechanisms]").
+type interruptedTurnDetectedMeta struct {
+	SessionID       string `json:"session_id"`
+	LastMessageID   string `json:"last_message_id"`
+	LastMessageRole string `json:"last_message_role"`
+	LastActivityAt  string `json:"last_activity_at"`
+	Reason          string `json:"reason"`
+}
+
+// logInterruptedTurnDetected writes the event_log postmortem row for a real
+// interrupted-turn detection firing (a GET /sessions/{id} that finds a
+// dangling unanswered user turn with no live stream, per
+// DetectInterruptedTurn above). Best-effort — a.Services.Store.LogEvent
+// already swallows its own DB errors; this only degrades to a skipped
+// write if Store is nil (never true in production wiring).
+func (a *API) logInterruptedTurnDetected(sessionID string, last store.Message, result map[string]any) {
+	if a.Services.Store == nil {
+		return
 	}
+	reason, _ := result["reason"].(string)
+	meta := interruptedTurnDetectedMeta{
+		SessionID:       sessionID,
+		LastMessageID:   last.ID,
+		LastMessageRole: last.Role,
+		LastActivityAt:  last.CreatedAt,
+		Reason:          reason,
+	}
+	blob, err := json.Marshal(meta)
+	if err != nil {
+		blob = []byte("{}")
+	}
+	a.Services.Store.LogEvent(sessionID, "interrupted_turn_detected", "recovery",
+		fmt.Sprintf("interrupted turn detected: last message %s (%s) has no reply and no live stream", last.ID, last.Role),
+		string(blob))
 }
 
 func (a *API) handleUpdateSession(w http.ResponseWriter, r *http.Request) {
@@ -328,212 +339,6 @@ func (a *API) handleDeleteSession(w http.ResponseWriter, r *http.Request) {
 	}
 
 	a.jsonResp(w, http.StatusOK, map[string]string{"archived": id})
-}
-
-func (a *API) handleSwitchSessionMode(w http.ResponseWriter, r *http.Request) {
-	sessionID := r.PathValue("id")
-
-	var req SwitchSessionModeRequest
-	if err := a.decode(r, &req); err != nil {
-		a.errorResp(w, http.StatusBadRequest, "invalid JSON: "+err.Error())
-		return
-	}
-	if req.Mode == "" {
-		a.errorResp(w, http.StatusBadRequest, "mode is required")
-		return
-	}
-
-	// Get the primary agent for this session.
-	sa, err := a.Services.Store.GetSessionPrimaryAgent(sessionID)
-	if err != nil {
-		a.errorResp(w, http.StatusNotFound, "no primary agent for session")
-		return
-	}
-
-	// Verify the mode exists for this agent.
-	if _, err := a.Services.Store.GetAgentMode(sa.AgentID, req.Mode); err != nil {
-		a.errorResp(w, http.StatusBadRequest, "unknown mode: "+req.Mode)
-		return
-	}
-
-	previousMode := sa.Mode
-
-	// Update the mode.
-	if err := a.Services.Store.SetSessionAgentMode(sessionID, sa.AgentID, req.Mode); err != nil {
-		a.errorResp(w, http.StatusInternalServerError, err.Error())
-		return
-	}
-
-	// Emit plugin event: mode changed.
-	if a.Services.Plugins != nil {
-		safego.Go(r.Context(), "api.sessions.emit.mode-changed", func() {
-			a.Services.Plugins.EmitModeChanged(sessionID, previousMode, req.Mode)
-		})
-	}
-
-	// Return updated session info.
-	sess, err := a.Services.Store.GetSession(sessionID)
-	if err != nil {
-		a.errorResp(w, http.StatusInternalServerError, err.Error())
-		return
-	}
-
-	a.jsonResp(w, http.StatusOK, map[string]any{
-		"session": sess,
-		"mode":    req.Mode,
-	})
-}
-
-// handleGetSessionMode returns the resolved session-level *store.Mode (B1,
-// CW-20260428-0009). 200 with `null` body means the session has no
-// session-mode pointer set — the legacy agent-scoped AgentMode is the active
-// mode for that session's prompts.
-func (a *API) handleGetSessionMode(w http.ResponseWriter, r *http.Request) {
-	sessionID := r.PathValue("id")
-	mode, err := a.Services.Store.GetSessionMode(sessionID)
-	if err != nil {
-		a.errorResp(w, http.StatusInternalServerError, err.Error())
-		return
-	}
-	a.jsonResp(w, http.StatusOK, mode)
-}
-
-// handleSetSessionMode points a session at a specific mode by slug or mode_id
-// (B1, CW-20260428-0009). Empty body or {slug:"", mode_id:""} clears the
-// pointer. Returns the resolved mode (or null when cleared).
-func (a *API) handleSetSessionMode(w http.ResponseWriter, r *http.Request) {
-	sessionID := r.PathValue("id")
-
-	var req SetSessionModeRequest
-	if err := a.decode(r, &req); err != nil {
-		a.errorResp(w, http.StatusBadRequest, "invalid JSON: "+err.Error())
-		return
-	}
-
-	// Verify session exists up front so we don't silently no-op a clear on a
-	// missing session.
-	if _, err := a.Services.Store.GetSession(sessionID); err != nil {
-		a.errorResp(w, http.StatusNotFound, "session not found")
-		return
-	}
-
-	// Resolve target mode ID.
-	modeID := req.ModeID
-	if modeID == "" && req.Slug != "" {
-		m, err := a.Services.Store.GetModeBySlug(req.Slug)
-		if err != nil {
-			a.errorResp(w, http.StatusInternalServerError, err.Error())
-			return
-		}
-		if m == nil {
-			a.errorResp(w, http.StatusBadRequest, "unknown mode slug: "+req.Slug)
-			return
-		}
-		modeID = m.ID
-	}
-
-	if modeID == "" {
-		// Clear path.
-		if err := a.Services.Store.ClearSessionMode(sessionID); err != nil {
-			a.errorResp(w, http.StatusInternalServerError, err.Error())
-			return
-		}
-		// F1 (CW-20260429-0001): broadcast cross-tab so a second tab open on
-		// the same session updates its mode chip without manual refetch.
-		// Empty mode_id/mode_slug signal a clear (default chat mode).
-		if a.Services.Streams != nil {
-			a.Services.Streams.BroadcastSessionModeChanged(sessionID, "", "")
-		}
-		a.jsonResp(w, http.StatusOK, nil)
-		return
-	}
-
-	// Verify mode_id resolves before writing the FK.
-	if req.ModeID != "" {
-		m, err := a.Services.Store.GetMode(modeID)
-		if err != nil {
-			a.errorResp(w, http.StatusInternalServerError, err.Error())
-			return
-		}
-		if m == nil {
-			a.errorResp(w, http.StatusBadRequest, "unknown mode_id: "+modeID)
-			return
-		}
-	}
-
-	if err := a.Services.Store.SetSessionMode(sessionID, modeID); err != nil {
-		a.errorResp(w, http.StatusInternalServerError, err.Error())
-		return
-	}
-
-	resolved, err := a.Services.Store.GetSessionMode(sessionID)
-	if err != nil {
-		a.errorResp(w, http.StatusInternalServerError, err.Error())
-		return
-	}
-
-	// F1 (CW-20260429-0001): broadcast the resolved mode so other tabs on
-	// the same session pick up the change without polling. Reuses the
-	// presence pipe — same channel as session_archived / work_changed.
-	if a.Services.Streams != nil && resolved != nil {
-		a.Services.Streams.BroadcastSessionModeChanged(sessionID, resolved.ID, resolved.Slug)
-	}
-
-	a.jsonResp(w, http.StatusOK, resolved)
-}
-
-// handleSetSessionAutoSwitch sets the per-session auto-switch override for
-// classifier mode suggestions (F2, CW-20260429-0002).
-//
-//	PATCH /api/sessions/{id}/auto-switch
-//	{ "override": true | false | null }
-//
-// `null` clears the override (session inherits user_settings.mode_auto_switch_pref).
-// `true` forces ON for this session (does NOT bypass first-use prompt).
-// `false` forces OFF for this session.
-//
-// Returns the persisted override on the session row.
-func (a *API) handleSetSessionAutoSwitch(w http.ResponseWriter, r *http.Request) {
-	sessionID := r.PathValue("id")
-
-	// Verify session exists up front so we don't silently no-op on a missing
-	// session — same shape as handleSetSessionMode.
-	if _, err := a.Services.Store.GetSession(sessionID); err != nil {
-		a.errorResp(w, http.StatusNotFound, "session not found")
-		return
-	}
-
-	// `encoding/json` decodes both `{}` (field absent) and `{"override": null}`
-	// into a nil pointer, so a plain `*bool` field can't distinguish absent
-	// from null. Decode into a raw map first, require the `override` key, then
-	// unmarshal the value — clients that omit it get a 400 instead of a silent
-	// override-clear (PR #93 Copilot feedback).
-	var raw map[string]json.RawMessage
-	if err := a.decode(r, &raw); err != nil {
-		a.errorResp(w, http.StatusBadRequest, "invalid JSON: "+err.Error())
-		return
-	}
-	rawOverride, present := raw["override"]
-	if !present {
-		a.errorResp(w, http.StatusBadRequest, "override field is required (use null to clear)")
-		return
-	}
-	var override *bool
-	if !bytes.Equal(bytes.TrimSpace(rawOverride), []byte("null")) {
-		var b bool
-		if err := json.Unmarshal(rawOverride, &b); err != nil {
-			a.errorResp(w, http.StatusBadRequest, "override must be true, false, or null")
-			return
-		}
-		override = &b
-	}
-
-	if err := a.Services.Store.SetSessionAutoSwitchOverride(sessionID, override); err != nil {
-		a.errorResp(w, http.StatusInternalServerError, err.Error())
-		return
-	}
-
-	a.jsonResp(w, http.StatusOK, SessionAutoSwitchResponse{Override: override})
 }
 
 // handleCompactSession runs the slot-aware compaction pipeline against the
@@ -640,15 +445,10 @@ func (a *API) handleCompactSession(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	agent, _, err := a.Services.Agents.ResolveForSession(ctx, sessionID)
+	agent, err := a.Services.Agents.ResolveForSession(ctx, sessionID)
 	if err != nil {
 		a.errorResp(w, http.StatusInternalServerError, err.Error())
 		return
-	}
-
-	var workspace *store.Workspace
-	if session.WorkspaceID != "" {
-		workspace, _ = a.Services.Store.GetWorkspace(session.WorkspaceID)
 	}
 
 	settings, _ := a.Services.Store.GetUserSettings()
@@ -657,10 +457,7 @@ func (a *API) handleCompactSession(w http.ResponseWriter, r *http.Request) {
 		windowSize = settings.ContextWindowTokens
 	}
 
-	// B1 (CW-20260428-0009): manual /compact path doesn't need the session-
-	// mode addendum (compaction operates on the existing window, not on a
-	// new turn). Pass nil sessionMode — same as we pass nil AgentMode here.
-	result, err := a.Services.Context.AssembleSlots(ctx, session, agent, nil, workspace, []llmtypes.ToolDefinition{}, "", windowSize, nil, "")
+	result, err := a.Services.Context.AssembleSlots(ctx, session, agent, []llmtypes.ToolDefinition{}, "", windowSize, "")
 	if err != nil {
 		a.errorResp(w, http.StatusInternalServerError, err.Error())
 		return
@@ -669,15 +466,13 @@ func (a *API) handleCompactSession(w http.ResponseWriter, r *http.Request) {
 	summarizer := service.BuildSummarizer(a.Services.Providers, a.Services.Store, settings)
 	mode := service.ClassifyCompactionMode(agent)
 	pipeline := &ctxpkg.CompactionPipeline{
-		Window:               result.Window,
-		Estimator:            ctxpkg.DefaultEstimator{},
-		Summarizer:           summarizer,
-		Mode:                 mode,
-		ConversationMessages: result.Messages,
-		// P7 HandoffStash: no loopState in HTTP path; empty scratchpad snapshot.
-		SessionID:          sessionID,
-		StashWriter:        service.NewStashWriter(a.Services.Store),
-		ScratchpadSnapshot: map[string]any{},
+		Window:                result.Window,
+		Estimator:             ctxpkg.DefaultEstimator{},
+		Summarizer:            summarizer,
+		Mode:                  mode,
+		ConversationMessages:  result.Messages,
+		SessionID:             sessionID,
+		CompactionEventWriter: service.NewCompactionEventWriter(a.Services.Store),
 	}
 
 	tokensBefore := result.Window.UsedTokens()
@@ -712,10 +507,6 @@ func (a *API) handleCompactSession(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	if err := a.Services.Store.UpdateSessionCompaction(sessionID, summary); err != nil {
-		a.errorResp(w, http.StatusInternalServerError, err.Error())
-		return
-	}
 	if a.Services.Events != nil {
 		a.Services.Events.EmitPostCompact(ctx, sessionID, tokensSaved, stages)
 	}

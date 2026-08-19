@@ -58,13 +58,21 @@ func (deterministicAgentBuilderAdvisor) Draft(_ context.Context, req AgentBuilde
 			RoleTools:       "[]",
 			RoleSkills:      "[]",
 			ContextPolicy:   "{}",
-			ActivationMode:  "singleton",
-			Class:           lifecycle,
-			DefaultState:    "sleeping",
-			Source:          "user",
+			// store.DefaultActivationModeForClass, not a hardcoded
+			// "singleton" -- a lifecycle=process/template draft that
+			// always pre-filled "singleton" here would let an operator
+			// unknowingly submit a new durable agent straight into the
+			// CW-20260817 "wakeable exactly once" bug this task's
+			// migration 117 exists to close (see agents.go's
+			// DefaultActivationModeForClass doc comment). The free-text
+			// field in AgentBuilderWizard.tsx still lets the operator
+			// override this suggestion before submit.
+			ActivationMode: store.DefaultActivationModeForClass(lifecycle),
+			Class:          lifecycle,
+			DefaultState:   "sleeping",
+			Source:         "user",
 		},
 		Capabilities: AgentBuilderCapabilitiesInput{},
-		BootPlan:     nil,
 		DurableInstance: AgentBuilderDurableInstanceInput{
 			Create:         createInstance,
 			LifecycleClass: lifecycle,
@@ -225,15 +233,8 @@ func (a *API) agentBuilderDryRun(ctx context.Context, req AgentBuilderDryRunRequ
 	warnings = append(warnings, validation.Warnings...)
 
 	ops := capabilityOperations(req.Capabilities, req.Mode)
-	var bootPlanPreview *AgentBootPlanDryRunResponse
 	var recipePlan *service.DurableAgentRecipePlan
 	var launchPreview *AgentBuilderLaunchPlanPreview
-	if req.BootPlan != nil {
-		preview := dryRunAgentBootPlan(normalized.ID, req.BootPlan)
-		bootPlanPreview = &preview
-		errors = append(errors, preview.Errors...)
-		warnings = append(warnings, preview.Warnings...)
-	}
 
 	if req.Mode == agentBuilderModeCreateProfileAndInstance || req.DurableInstance.Create {
 		if req.DurableInstance.RecipeID != "" {
@@ -245,7 +246,6 @@ func (a *API) agentBuilderDryRun(ctx context.Context, req AgentBuilderDryRunRequ
 				Model:       req.DurableInstance.Model,
 				RuntimeKind: req.DurableInstance.RuntimeKind,
 				WorkRoot:    req.DurableInstance.WorkRoot,
-				WorkspaceID: req.DurableInstance.WorkspaceID,
 				ProjectID:   req.DurableInstance.ProjectID,
 				WakePayload: durableWakePayloadForDryRun(req),
 				Metadata:    req.DurableInstance.Metadata,
@@ -260,9 +260,6 @@ func (a *API) agentBuilderDryRun(ctx context.Context, req AgentBuilderDryRunRequ
 			}
 		} else {
 			launchPreview = buildAgentBuilderLaunchPlanPreview(req)
-			if req.DurableInstance.Start && strings.TrimSpace(req.DurableInstance.WorkspaceID) == "" {
-				errors = append(errors, "workspace_id is required when dry-run includes a launch/start preview")
-			}
 		}
 	}
 
@@ -275,7 +272,6 @@ func (a *API) agentBuilderDryRun(ctx context.Context, req AgentBuilderDryRunRequ
 		UnsupportedFields:        dedupeStrings(unsupported),
 		NormalizedProfilePayload: normalized,
 		CapabilityOperations:     ops,
-		BootPlanPreview:          bootPlanPreview,
 		DurableRecipePlan:        recipePlan,
 		LaunchPlanPreview:        launchPreview,
 		NotificationPreview:      notification,
@@ -510,14 +506,6 @@ func capabilityOperations(c AgentBuilderCapabilitiesInput, mode string) []AgentB
 	if n := len(c.AssignedSkillIDs) + len(c.AssignedSkillSlugs); n > 0 {
 		ops = append(ops, AgentBuilderCapabilityOperation{
 			Area:   "skills",
-			Action: "assign",
-			Target: mode,
-			Count:  n,
-		})
-	}
-	if n := len(c.PromptTemplateIDs); n > 0 {
-		ops = append(ops, AgentBuilderCapabilityOperation{
-			Area:   "prompt_templates",
 			Action: "assign",
 			Target: mode,
 			Count:  n,

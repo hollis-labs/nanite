@@ -63,7 +63,7 @@ func TestAssembleSlots_WorkspaceSlotShipsWalkUpContent(t *testing.T) {
 
 	agent := &store.AgentProfile{ID: "ws-agent", Slug: "ws", Status: "active", SystemPrompt: "p"}
 
-	result, err := svc.AssembleSlots(context.Background(), sess, agent, &store.AgentMode{}, nil, nil, "", 200000, nil, "")
+	result, err := svc.AssembleSlots(context.Background(), sess, agent, nil, "", 200000, "")
 	if err != nil {
 		t.Fatalf("AssembleSlots: %v", err)
 	}
@@ -116,7 +116,7 @@ func TestAssembleSlots_WorkspaceSlotEmptyWithoutCache(t *testing.T) {
 
 	agent := &store.AgentProfile{ID: "ws-agent", Slug: "ws", Status: "active", SystemPrompt: "p"}
 
-	result, err := svc.AssembleSlots(context.Background(), sess, agent, &store.AgentMode{}, nil, nil, "", 200000, nil, "")
+	result, err := svc.AssembleSlots(context.Background(), sess, agent, nil, "", 200000, "")
 	if err != nil {
 		t.Fatalf("AssembleSlots: %v", err)
 	}
@@ -169,7 +169,7 @@ func TestAssembleSlots_WorkspaceSlotRefreshedAfterMtimeChange(t *testing.T) {
 	agent := &store.AgentProfile{ID: "ws-agent", Slug: "ws", Status: "active", SystemPrompt: "p"}
 
 	// First call — fresh walk-up, picks up V1.
-	first, err := svc.AssembleSlots(context.Background(), sess, agent, &store.AgentMode{}, nil, nil, "", 200000, nil, "")
+	first, err := svc.AssembleSlots(context.Background(), sess, agent, nil, "", 200000, "")
 	if err != nil {
 		t.Fatalf("first AssembleSlots: %v", err)
 	}
@@ -189,7 +189,7 @@ func TestAssembleSlots_WorkspaceSlotRefreshedAfterMtimeChange(t *testing.T) {
 
 	// Second call (post-compaction equivalent — slot store rebuilt
 	// from scratch via AssembleSlotSources). Must observe V2.
-	second, err := svc.AssembleSlots(context.Background(), sess, agent, &store.AgentMode{}, nil, nil, "", 200000, nil, "")
+	second, err := svc.AssembleSlots(context.Background(), sess, agent, nil, "", 200000, "")
 	if err != nil {
 		t.Fatalf("second AssembleSlots: %v", err)
 	}

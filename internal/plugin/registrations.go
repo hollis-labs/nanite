@@ -2,6 +2,7 @@ package plugin
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"io"
 	"net/http"
@@ -212,16 +213,65 @@ func (h *Host) bumpRegistryVersionLocked() {
 //
 // Scope note (B.4 first-cut): categories that require a handler proxy built
 // on top of subprocess JSON-RPC or builtin in-process dispatch (commands,
-// events, crud, http_routes, mcp_servers) are logged as TODO and deferred
+// events, http_routes, mcp_servers) are logged as TODO and deferred
 // to B.5/B.6 which land the transport and unregister primitives these need.
 // Purely declarative categories (envelopes, slots, keybindings, components)
 // are fully wired here — that is enough to migrate bookmarks off direct
 // Register calls as the B.4 acceptance proof.
+//
+// crud (Phase 5 item 05, TASKS/phase-5/05-develop-registers-panels-and-crud.md)
+// is no longer deferred: registerManifestCrud below wires yaml-declared
+// registers.crud[] entries into Host.RegisterCRUDHandler using the
+// subprocess proxy (subprocess.NewCRUDHandler) that had already landed in an
+// earlier pass but was never reachable from this manifest path.
+// ApplyManifestRegistrations is the exported wrapper around
+// applyManifestRegistrations for callers outside this package (Phase 5 item
+// 11, TASKS/phase-5/11-fix-hot-reload-never-applies-manifest-registrations.md).
+//
+// Before this existed, applyManifestRegistrations had exactly two callers —
+// loader.go's LoadDiscovered and LoadRegisteredBuiltins, both reachable only
+// from cmd/nanite/main.go's boot-time discoverAndLoadPlugins. Every
+// API-driven plugin lifecycle action (internal/api/plugins.go's
+// runPluginLoadIntoHost, which backs install/enable/reload — including the
+// CLI's no-restart hot-reload default added by
+// TASKS/phase-5/04-close-cli-install-hot-reload-asymmetry.md) called
+// Host.LoadPlugin directly and returned, so registers.crud[] (task 05),
+// registers.agent_profiles[] (task 03), and every other registers.*
+// category never actually took effect on that path until a full process
+// restart. runPluginLoadIntoHost now calls this after Host.LoadPlugin
+// succeeds, passing the same already-parsed manifest/loaded plugin/
+// pluginDir loader.go's callers pass.
+func ApplyManifestRegistrations(host *Host, manifest *PluginManifest, p goplugin.Plugin, pluginDir string) error {
+	return applyManifestRegistrations(host, manifest, p, pluginDir)
+}
+
 func applyManifestRegistrations(host *Host, manifest *PluginManifest, p goplugin.Plugin, pluginDir string) error {
 	if manifest == nil {
 		return nil
 	}
 	pluginID := p.ID()
+
+	// Phase 5 item 02 (TASKS/phase-5/02-build-plugin-installed-enabled-state-
+	// model.md): defense-in-depth gate on the DB-backed `plugins` state
+	// table. LoadDiscovered/LoadRegisteredBuiltins (loader.go) already skip
+	// calling this function at all for a disabled plugin -- that's the
+	// primary gate, and the one that actually stops a subprocess plugin's
+	// process from spawning. This second check exists because
+	// applyManifestRegistrations is the single shared entrypoint every
+	// registration category (present and future -- see the doc comment
+	// above this function) funnels through: any caller that ever reaches
+	// this function directly, bypassing the loader, still can't wire up a
+	// disabled plugin's registrations. Fails open (proceeds normally) when
+	// no store is configured, matching every other read path in this file.
+	host.mu.RLock()
+	stateDB := host.store
+	host.mu.RUnlock()
+	if stateDB != nil {
+		if enabled, hasRow, err := stateDB.IsPluginEnabled(context.Background(), pluginID); err == nil && hasRow && !enabled {
+			host.logger.Info("plugin disabled — skipping manifest registrations", "plugin", pluginID)
+			return nil
+		}
+	}
 
 	// Record the manifest for the B.7 /api/plugins/registry endpoint. Done
 	// before registrations so the side-map reflects the plugin even if a
@@ -338,8 +388,9 @@ func applyManifestRegistrations(host *Host, manifest *PluginManifest, p goplugin
 		}
 	}
 	if len(reg.Crud) > 0 {
-		host.logger.Info("manifest crud: yaml-driven registration deferred to B.5/B.6 proxy work", "plugin", pluginID, "count", len(reg.Crud))
-		skipped += len(reg.Crud)
+		if err := registerManifestCrud(host, pluginID, reg.Crud, p); err != nil {
+			return err
+		}
 	}
 	if len(reg.HttpRoutes) > 0 {
 		if err := registerManifestHTTPRoutes(host, pluginID, reg.HttpRoutes, p); err != nil {
@@ -351,9 +402,15 @@ func applyManifestRegistrations(host *Host, manifest *PluginManifest, p goplugin
 			return err
 		}
 	}
+	// Phase 5 item 03 (TASKS/phase-5/03-wire-registers-agent-profiles.md):
+	// registers.agent_profiles[] is a real registration path now -- see
+	// agent_profiles.go for the parse/validate/upsert implementation and
+	// the new PluginAgentProfileDocument shape a plugin's `file:` must
+	// conform to (role/agent composition, not the old flat shape).
 	if len(reg.AgentProfiles) > 0 {
-		host.logger.Info("manifest agent_profiles: yaml-driven registration deferred (follow-up B.4 task)", "plugin", pluginID, "count", len(reg.AgentProfiles))
-		skipped += len(reg.AgentProfiles)
+		if err := registerManifestAgentProfiles(host, pluginID, reg.AgentProfiles, pluginDir); err != nil {
+			return err
+		}
 	}
 	// 6. Card rules (J5 — CW-20260421-0013). Compile and register each rule
 	// into the host's Stage 1 detection registry. Built-in rules have already
@@ -483,6 +540,55 @@ func registerManifestEvents(host *Host, pluginID string, entries []EventRegistra
 		if err := host.RegisterEventHook(entry.Types, hook); err != nil {
 			return fmt.Errorf("plugin %q: register event hook for %v: %w", pluginID, entry.Types, err)
 		}
+	}
+	return nil
+}
+
+// registerManifestCrud wires each manifest crud entry into the host's generic
+// CRUD resource-handler registry (Host.RegisterCRUDHandler), which auto-wires
+// a full REST route set at /api/plugins/{resource}/* — GET (list), POST
+// (create), GET/{id} (read), PUT/{id} (update), DELETE/{id} (delete); see
+// crud.go. For subprocess plugins each declared resource gets a CRUD handler
+// that proxies those five operations over JSON-RPC via the plugin's existing
+// transport (subprocess.NewCRUDHandler → MethodCRUDCreate/Read/Update/Delete/
+// List) — that wire-level proxy landed in an earlier pass (B.5/B.6) but was
+// never reachable from this manifest path until this task. Builtins that want
+// CRUD routes call host.RegisterCRUDHandler directly from their own Load —
+// this path only handles yaml-declared resources for subprocess plugins,
+// matching every other subprocess-only registration category in this file
+// (commands, events, http_routes, mcp_servers).
+//
+// entry.Methods is accepted by the manifest schema but not enforced here:
+// Host.RegisterCRUDHandler always wires the full five-route set — there is no
+// per-method opt-out in the host today. A plugin declaring methods: [list]
+// still gets all five routes wired; its own CRUDHandler implementation
+// (across the wire) is free to return an error for operations it doesn't
+// support. Narrowing which routes actually get registered per entry.Methods
+// is a reasonable follow-up if a real consumer needs it — no consumer exists
+// yet to motivate the extra complexity now.
+func registerManifestCrud(host *Host, pluginID string, entries []CRUDRegistration, p goplugin.Plugin) error {
+	sp, isSubprocess := p.(*subprocess.SubprocessPlugin)
+	if !isSubprocess {
+		host.logger.Info("manifest crud: builtin plugin — skipping (builtins register CRUD handlers directly)",
+			"plugin", pluginID, "count", len(entries))
+		return nil
+	}
+
+	transport := sp.Transport()
+	if transport == nil {
+		return fmt.Errorf("plugin %q: subprocess transport not ready for crud registration", pluginID)
+	}
+
+	for _, entry := range entries {
+		if entry.Resource == "" {
+			return fmt.Errorf("plugin %q: crud entry missing resource", pluginID)
+		}
+		handler := subprocess.NewCRUDHandler(entry.Resource, transport)
+		if err := host.RegisterCRUDHandler(entry.Resource, handler); err != nil {
+			return fmt.Errorf("plugin %q: register crud resource %q: %w", pluginID, entry.Resource, err)
+		}
+		host.logger.Info("registered plugin crud resource",
+			"plugin", pluginID, "resource", entry.Resource, "methods", entry.Methods)
 	}
 	return nil
 }

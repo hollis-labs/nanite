@@ -18,7 +18,7 @@ Nothing else carries forward. "Lineage" (built for Tesseract's version-diffing u
 
 **Provider registration (code) and provider/model metadata (DB) are two distinct concerns.** Registering a new HTTP provider (an SDK wrapper implementing `llmcontracts.Provider`) is inherently a code change. The `providers`/`models` DB tables are catalog/display metadata layered on top of already-registered providers; they can never make a new provider exist.
 
-**Ollama gets fixed for real, not cleaned up as dead code.** It's a real, currently-run local provider — `chat.InferProvider` already special-cases Ollama-shaped model names but routes to a provider that was never (re-)registered. Needs a proper `internal/llm/ollama` adapter and registration.
+**Ollama is removed, not built.** Reversed 2026-08-18 (`TASKS/phase-0/05-remove-ollama-routing.md`, `TASKS/ESCALATIONS.md`): the "currently-run local provider" framing above didn't hold up against the code — no `internal/llm/ollama` (or equivalent) exists anywhere in this repo or the sibling monorepo, and `internal/store/seed.go`/`pkg/models/registry.go` both document a prior, deliberate removal of Ollama from the provider catalog (Step 6.5, SP-20260508-0001). `chat.InferProvider`'s dangling `"ollama"`-returning branch — which routed to a provider name never registered in `initProviders` — has been deleted; matching model names now fall through to the function's default routing floor. See `docs/engineering/TASKS.md` item 5.
 
 **Provider reliability parity is accepted as best-effort.** Rate-limiting/circuit-breaking/prompt-caching are Anthropic-specific because that's what its SDK exposes. Nanite supports what each provider actually offers, on every provider it uses.
 
@@ -26,6 +26,8 @@ Nothing else carries forward. "Lineage" (built for Tesseract's version-diffing u
 
 ## CLI-vs-API routing is an explicit typed field
 
-`agents.runtime_kind` (`cli` | `api`) replaces a fragile four-site string-prefix convention (`chat.IsCLIProvider`/`NormalizeCLIProvider`, `shouldUsePTY`, `agent_deps.go`'s `stripRegistryPrefix`, plus the boot-profile catalog's own layered `pty-` prefix convention) that has caused real historical misrouting bugs. One typed field, checked once, not a string pattern matched in four places expected to stay in sync by convention.
+`agents.runtime_kind` (`cli` | `api`, nullable) replaces a fragile four-site string-prefix convention (`chat.IsCLIProvider`/`NormalizeCLIProvider`, `shouldUsePTY`, `agent_deps.go`'s `stripRegistryPrefix`, plus the boot-profile catalog's own layered `pty-` prefix convention) that has caused real historical misrouting bugs. One typed field, checked once, not a string pattern matched in four places expected to stay in sync by convention.
 
 Part of this work: fully scrub the remaining "PTY" naming — see `GLOSSARY.md`.
+
+**Both CLI and API substrates are being kept, not decided between.** A dedicated 2026-08-19 review found the two paths much closer in behavior than originally assumed. The remaining work is a three-tier default cascade: an app-level default (**CLI**), a system-wide override (`UserSettings.DefaultRuntimeKind`), and the existing per-agent override (`agent_profiles.runtime_kind`, nullable — NULL means "inherit"). Per-agent beats system-wide beats app default. See `TASKS/phase-8/01-set-default-runtime-kind.md`.

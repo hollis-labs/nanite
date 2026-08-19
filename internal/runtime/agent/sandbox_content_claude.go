@@ -59,14 +59,18 @@ by the UI — no error, no warning.
 
 ## Reference Files
 - ` + "`.sandbox/envelope-schema.md`" + ` — full envelope JSON schema, field docs, examples per type
-- ` + "`.sandbox/agent-context.md`" + ` — agent profile, current mode, capabilities
+- ` + "`.sandbox/agent-context.md`" + ` — agent profile, capabilities
 `
 
 // BuildAgentContext returns the .sandbox/agent-context.md body for the given
-// profile and (optional) mode. Exported so the chat service can regenerate
-// the file on slot change without re-reaching into the agent package
-// internals (Phase 4c slot-regeneration).
-func BuildAgentContext(ap *store.AgentProfile, mode *store.AgentMode) string {
+// profile. Exported so the chat service can regenerate the file on slot
+// change without re-reaching into the agent package internals (Phase 4c
+// slot-regeneration).
+//
+// Phase 0 item 21 ("Cut Modes, in full") removed the second (*store.AgentMode)
+// parameter this used to take — Legacy Agent Mode is gone, so there is no
+// more "current mode" section to render here.
+func BuildAgentContext(ap *store.AgentProfile) string {
 	var b strings.Builder
 
 	if ap == nil {
@@ -85,13 +89,6 @@ func BuildAgentContext(ap *store.AgentProfile, mode *store.AgentMode) string {
 	}
 	b.WriteString("\n")
 
-	if mode != nil && mode.Name != "" {
-		fmt.Fprintf(&b, "## Current Mode: %s\n\n", mode.Name)
-		if mode.PromptAddendum != "" {
-			fmt.Fprintf(&b, "%s\n\n", mode.PromptAddendum)
-		}
-	}
-
 	if ap.MCPServers != "" && ap.MCPServers != "[]" {
 		var servers []string
 		if err := json.Unmarshal([]byte(ap.MCPServers), &servers); err == nil && len(servers) > 0 {
@@ -103,9 +100,13 @@ func BuildAgentContext(ap *store.AgentProfile, mode *store.AgentMode) string {
 		}
 	}
 
-	if ap.ToolPermissions != "" && ap.ToolPermissions != "{}" {
-		fmt.Fprintf(&b, "## Tool Permissions\n\n%s\n\n", ap.ToolPermissions)
-	}
+	// A "## Tool Permissions" section rendering ap.ToolPermissions used to
+	// live here. TASKS/adhoc/02-remove-tool-permissions-collapse-to-agent-
+	// tools.md retired that column's enforcement entirely (agent_tools is
+	// the sole tool-selection gate now) -- surfacing its now-inert content
+	// to a launched agent as if it reflected real access control would be
+	// actively misleading, so the section is removed rather than kept as
+	// dead boot content.
 
 	if ap.Tools != "" && ap.Tools != "[]" {
 		var tools []string

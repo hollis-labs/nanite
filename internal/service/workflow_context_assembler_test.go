@@ -12,8 +12,7 @@ import (
 // newWorkflowContextAssemblerTestDeps stands up a real in-memory store plus
 // SessionService/AgentService/ContextService backed by it — mirroring how
 // container.go wires the same trio in production — so these tests exercise
-// the actual resolution path (including the mode lookup) rather than a
-// mocked stand-in.
+// the actual resolution path rather than a mocked stand-in.
 func newWorkflowContextAssemblerTestDeps(t *testing.T) (*store.Store, SessionService, AgentService, ContextService) {
 	t.Helper()
 	s, err := store.New(context.Background(), t.TempDir()+"/test.db")
@@ -21,10 +20,11 @@ func newWorkflowContextAssemblerTestDeps(t *testing.T) (*store.Store, SessionSer
 		t.Fatalf("store.New: %v", err)
 	}
 	sessions := NewSessionService(SessionServiceDeps{
-		Sessions: s,
-		Writer:   s,
-		Agents:   s,
-		Settings: s,
+		Sessions:    s,
+		Writer:      s,
+		Agents:      s,
+		AgentReader: s,
+		Settings:    s,
 	})
 	agents := NewAgentService(AgentServiceConfig{
 		Agents:   s,
@@ -35,37 +35,41 @@ func newWorkflowContextAssemblerTestDeps(t *testing.T) (*store.Store, SessionSer
 	return s, sessions, agents, ctxSvc
 }
 
-func TestWorkflowContextAssembler_AssembleContext_IncludesModeAddendumWhenAgentMatchesSessionBinding(t *testing.T) {
+// Phase 0 item 21 ("Cut Modes, in full") retired this file's four original
+// mode-addendum tests —
+// TestWorkflowContextAssembler_AssembleContext_IncludesModeAddendumWhenAgentMatchesSessionBinding,
+// TestWorkflowContextAssembler_AssembleContext_SkipsModeWhenBoundToADifferentAgent,
+// TestWorkflowContextAssembler_AssembleContext_NoSessionBinding_NoModeAddendum, and
+// TestWorkflowContextAssembler_AssembleContext_IncludesSessionLevelModeAddendum —
+// along with resolveMode / resolveSessionMode in workflow_context_assembler.go
+// (both deleted; see that file's updated doc comment). All four asserted
+// something about a mode's PromptAddendum reaching (or being correctly
+// excluded from) the assembled system prompt; Legacy Agent Mode and Session
+// Mode are both gone, so there is no more mode addendum to include or
+// exclude. TestWorkflowContextAssembler_AssembleContext_ResolvesAgentAndSession
+// below replaces them with coverage of what AssembleContext still does:
+// resolve the named session + agent and return a non-error system prompt
+// carrying the agent's own SystemPrompt.
+
+func TestWorkflowContextAssembler_AssembleContext_ResolvesAgentAndSession(t *testing.T) {
 	s, sessions, agents, ctxSvc := newWorkflowContextAssemblerTestDeps(t)
 
 	agentProfile := &store.AgentProfile{
-		ID:           "agent-mode-1",
-		Name:         "ModeAgent",
-		Slug:         "mode-agent",
-		SystemPrompt: "You are a test agent.",
+		ID:           "agent-workflow-1",
+		Name:         "WorkflowAgent",
+		Slug:         "workflow-agent",
+		SystemPrompt: "SENTINEL_AGENT_SYSTEM_PROMPT",
 		Status:       "active",
 	}
 	if err := s.CreateAgent(agentProfile); err != nil {
 		t.Fatalf("CreateAgent: %v", err)
 	}
-	agentMode := &store.AgentMode{
-		ID:             "mode-row-1",
-		AgentID:        agentProfile.ID,
-		Slug:           "focused",
-		Name:           "Focused",
-		PromptAddendum: "SENTINEL_MODE_ADDENDUM",
-	}
-	if err := s.CreateAgentMode(agentMode); err != nil {
-		t.Fatalf("CreateAgentMode: %v", err)
-	}
 
-	sess := &store.Session{ID: "sess-mode-1", Title: "test"}
+	sess := &store.Session{ID: "sess-workflow-1", Title: "test"}
 	if err := s.CreateSession(sess); err != nil {
 		t.Fatalf("CreateSession: %v", err)
 	}
-	// Bind the session's primary agent to agentProfile with the "focused"
-	// mode — the same session_agents row ResolveForSession would read.
-	if err := s.EnsureSessionAgent(sess.ID, agentProfile.ID, agentMode.Slug, true); err != nil {
+	if err := s.EnsureSessionAgent(sess.ID, agentProfile.ID, "default", true); err != nil {
 		t.Fatalf("EnsureSessionAgent: %v", err)
 	}
 
@@ -74,50 +78,15 @@ func TestWorkflowContextAssembler_AssembleContext_IncludesModeAddendumWhenAgentM
 	if err != nil {
 		t.Fatalf("AssembleContext: %v", err)
 	}
-	if !strings.Contains(systemPrompt, "SENTINEL_MODE_ADDENDUM") {
-		t.Fatalf("expected assembled system prompt to include the session-bound mode's PromptAddendum, got: %q", systemPrompt)
+	if !strings.Contains(systemPrompt, "SENTINEL_AGENT_SYSTEM_PROMPT") {
+		t.Fatalf("expected assembled system prompt to include the agent's SystemPrompt, got: %q", systemPrompt)
 	}
 }
 
-func TestWorkflowContextAssembler_AssembleContext_SkipsModeWhenBoundToADifferentAgent(t *testing.T) {
-	s, sessions, agents, ctxSvc := newWorkflowContextAssemblerTestDeps(t)
-
-	boundAgent := &store.AgentProfile{ID: "agent-bound", Name: "Bound", Slug: "bound", SystemPrompt: "bound agent", Status: "active"}
-	if err := s.CreateAgent(boundAgent); err != nil {
-		t.Fatalf("CreateAgent(bound): %v", err)
-	}
-	boundMode := &store.AgentMode{ID: "mode-bound", AgentID: boundAgent.ID, Slug: "focused", Name: "Focused", PromptAddendum: "SENTINEL_SHOULD_NOT_APPEAR"}
-	if err := s.CreateAgentMode(boundMode); err != nil {
-		t.Fatalf("CreateAgentMode(bound): %v", err)
-	}
-
-	otherAgent := &store.AgentProfile{ID: "agent-other", Name: "Other", Slug: "other", SystemPrompt: "other agent", Status: "active"}
-	if err := s.CreateAgent(otherAgent); err != nil {
-		t.Fatalf("CreateAgent(other): %v", err)
-	}
-
-	sess := &store.Session{ID: "sess-mode-2", Title: "test"}
-	if err := s.CreateSession(sess); err != nil {
-		t.Fatalf("CreateSession: %v", err)
-	}
-	// The session's primary agent is boundAgent, not otherAgent.
-	if err := s.EnsureSessionAgent(sess.ID, boundAgent.ID, boundMode.Slug, true); err != nil {
-		t.Fatalf("EnsureSessionAgent: %v", err)
-	}
-
-	asm := NewWorkflowContextAssembler(sessions, agents, s, ctxSvc)
-	// The workflow step asks for otherAgent's identity — a different agent
-	// than the session's chat binding.
-	systemPrompt, _, err := asm.AssembleContext(context.Background(), sess.ID, otherAgent.ID)
-	if err != nil {
-		t.Fatalf("AssembleContext: %v", err)
-	}
-	if strings.Contains(systemPrompt, "SENTINEL_SHOULD_NOT_APPEAR") {
-		t.Fatalf("must not apply a different agent's session-bound mode addendum, got: %q", systemPrompt)
-	}
-}
-
-func TestWorkflowContextAssembler_AssembleContext_NoSessionBinding_NoModeAddendum(t *testing.T) {
+// TestWorkflowContextAssembler_AssembleContext_NoSessionBinding confirms
+// AssembleContext still succeeds when the session has no primary-agent
+// binding (session_agents row) — unrelated to mode, still real coverage.
+func TestWorkflowContextAssembler_AssembleContext_NoSessionBinding(t *testing.T) {
 	s, sessions, agents, ctxSvc := newWorkflowContextAssemblerTestDeps(t)
 
 	agentProfile := &store.AgentProfile{ID: "agent-unbound", Name: "Unbound", Slug: "unbound", SystemPrompt: "unbound agent", Status: "active"}
@@ -133,53 +102,5 @@ func TestWorkflowContextAssembler_AssembleContext_NoSessionBinding_NoModeAddendu
 	asm := NewWorkflowContextAssembler(sessions, agents, s, ctxSvc)
 	if _, _, err := asm.AssembleContext(context.Background(), sess.ID, agentProfile.ID); err != nil {
 		t.Fatalf("AssembleContext: %v", err)
-	}
-}
-
-// TestWorkflowContextAssembler_AssembleContext_IncludesSessionLevelModeAddendum
-// covers resolveSessionMode — the session.CurrentModeID → store.Mode lookup
-// this CW-20260814-0004 added alongside resolveMode's pre-existing
-// agent-mode lookup. AssembleSlots takes the two independently (sessionMode
-// feeds the Mode slot; resolveMode's AgentMode still feeds the Agent slot),
-// so this needs its own coverage distinct from the AgentMode tests above.
-func TestWorkflowContextAssembler_AssembleContext_IncludesSessionLevelModeAddendum(t *testing.T) {
-	s, sessions, agents, ctxSvc := newWorkflowContextAssemblerTestDeps(t)
-
-	agentProfile := &store.AgentProfile{
-		ID:           "agent-session-mode-1",
-		Name:         "SessionModeAgent",
-		Slug:         "session-mode-agent",
-		SystemPrompt: "You are a test agent.",
-		Status:       "active",
-	}
-	if err := s.CreateAgent(agentProfile); err != nil {
-		t.Fatalf("CreateAgent: %v", err)
-	}
-
-	sessionMode := &store.Mode{
-		ID:             "mode-session-level-1",
-		Slug:           "session-level",
-		Name:           "Session Level",
-		PromptAddendum: "SENTINEL_SESSION_MODE_ADDENDUM",
-	}
-	if err := s.CreateMode(sessionMode); err != nil {
-		t.Fatalf("CreateMode: %v", err)
-	}
-
-	sess := &store.Session{ID: "sess-session-mode-1", Title: "test"}
-	if err := s.CreateSession(sess); err != nil {
-		t.Fatalf("CreateSession: %v", err)
-	}
-	if err := s.SetSessionMode(sess.ID, sessionMode.ID); err != nil {
-		t.Fatalf("SetSessionMode: %v", err)
-	}
-
-	asm := NewWorkflowContextAssembler(sessions, agents, s, ctxSvc)
-	systemPrompt, _, err := asm.AssembleContext(context.Background(), sess.ID, agentProfile.ID)
-	if err != nil {
-		t.Fatalf("AssembleContext: %v", err)
-	}
-	if !strings.Contains(systemPrompt, "SENTINEL_SESSION_MODE_ADDENDUM") {
-		t.Fatalf("expected assembled system prompt to include the session-level mode's PromptAddendum, got: %q", systemPrompt)
 	}
 }

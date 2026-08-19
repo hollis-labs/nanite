@@ -6,11 +6,12 @@ import { StatusPill } from './StatusPill'
  * DevBadge — a small "DEV" marker for dev-mode-only envelopes
  * (CW-20260517-0008).
  *
- * Some envelope types are only emitted when developer mode is enabled
- * (today: `chat-loop-budget-soft-warning`, gated behind `devModeEnabled()`
- * in the backend). To an operator these look like normal alerts and get
- * reported as bugs when they are just dev-mode telemetry. This badge marks
- * them at a glance.
+ * Some envelope types are only emitted when developer mode is enabled,
+ * gated behind `devModeEnabled()` in the backend (the original example,
+ * `chat-loop-budget-soft-warning`, was removed by Phase 0 item 12,
+ * 2026-08-18 — soft/telemetry-only, never gated the loop). To an operator
+ * these look like normal alerts and get reported as bugs when they are
+ * just dev-mode telemetry. This badge marks them at a glance.
  *
  * Type-agnostic: rendered by EnvelopeRenderer for ANY envelope carrying the
  * wrap-level `dev_mode_only` marker, regardless of which render path the

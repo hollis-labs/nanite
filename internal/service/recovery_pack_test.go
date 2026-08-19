@@ -1,6 +1,7 @@
 package service
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -29,71 +30,6 @@ func TestShouldRecoverColdBoot(t *testing.T) {
 	// ...and the flag is consumed (one-shot): the next cold boot recovers again.
 	if !s.shouldRecoverColdBoot("sess", true) {
 		t.Error("fresh flag should be one-shot — next cold boot recovers")
-	}
-}
-
-func TestShouldBuildRecoveryPack(t *testing.T) {
-	cases := []struct {
-		cold  bool
-		prior int
-		want  bool
-	}{
-		{true, 4, true},   // cold boot with history → recover
-		{true, 0, false},  // cold boot, no history (new session) → skip
-		{false, 4, false}, // live runtime → no recovery
-	}
-	for _, c := range cases {
-		if got := shouldBuildRecoveryPack(c.cold, c.prior); got != c.want {
-			t.Errorf("shouldBuildRecoveryPack(%v,%d)=%v want %v", c.cold, c.prior, got, c.want)
-		}
-	}
-}
-
-func TestMessagePlainText(t *testing.T) {
-	cases := []struct{ in, want string }{
-		{`{"v":1,"text":"hello there"}`, "hello there"},
-		{`{"v":1,"text":""}`, ""},
-		{"plain user text", "plain user text"},
-		{`{not json`, `{not json`},
-		{`{"text":"no version"}`, `{"text":"no version"}`}, // v missing → treat as plain
-	}
-	for _, c := range cases {
-		if got := messagePlainText(c.in); got != c.want {
-			t.Errorf("messagePlainText(%q)=%q want %q", c.in, got, c.want)
-		}
-	}
-}
-
-func TestExcludeCurrentTurn(t *testing.T) {
-	msgs := []store.Message{
-		{Role: "user", Content: "q1"},
-		{Role: "assistant", Content: `{"v":1,"text":"a1"}`},
-		{Role: "user", Content: "continue please"},
-	}
-	got := excludeCurrentTurn(msgs, "continue please")
-	if len(got) != 2 {
-		t.Fatalf("expected trailing current user turn dropped, got %d msgs", len(got))
-	}
-	// Non-matching trailing turn is kept.
-	if got2 := excludeCurrentTurn(msgs, "something else"); len(got2) != 3 {
-		t.Fatalf("non-matching userContent should keep all, got %d", len(got2))
-	}
-}
-
-func TestBuildRecoveryPack(t *testing.T) {
-	pack := buildRecoveryPack(recoveryPackInput{
-		Session:  &store.Session{Title: "Release prep", Provider: "claude", Model: "sonnet"},
-		Reason:   "host service restart",
-		History:  []store.Message{{Role: "user", Content: "do the thing"}, {Role: "assistant", Content: `{"v":1,"text":"options: 1,2,3"}`}},
-		PackPath: "/boot/recovery.md",
-	})
-	for _, sub := range []string{
-		"<recovered-session-context>", "RECOVERED CONTEXT", "Release prep",
-		"do the thing", "options: 1,2,3", "/boot/recovery.md", "</recovered-session-context>",
-	} {
-		if !strings.Contains(pack, sub) {
-			t.Errorf("pack missing %q:\n%s", sub, pack)
-		}
 	}
 }
 
@@ -149,6 +85,40 @@ func TestComposeBootPayload_ColdBootInjectsRecovery(t *testing.T) {
 	// Pointer file written.
 	if _, err := os.Stat(filepath.Join(bootDir, recoveryPackFileName)); err != nil {
 		t.Errorf("recovery.md pointer not written: %v", err)
+	}
+
+	// event_log postmortem: a real, enriched row lands via the same store
+	// the pack was built against — not a bare event-type marker.
+	events, err := st.ListEvents("recovery", 50)
+	if err != nil {
+		t.Fatalf("ListEvents: %v", err)
+	}
+	var plantedEvent *store.EventLog
+	for i := range events {
+		if events[i].EventType == "recovery_pack_planted" && events[i].SessionID == sess.ID {
+			plantedEvent = &events[i]
+			break
+		}
+	}
+	if plantedEvent == nil {
+		t.Fatalf("event_log missing recovery_pack_planted row for session %s; got %d recovery events", sess.ID, len(events))
+	}
+	var meta map[string]any
+	if err := json.Unmarshal([]byte(plantedEvent.Metadata), &meta); err != nil {
+		t.Fatalf("event_log metadata not JSON: %v\nblob: %s", err, plantedEvent.Metadata)
+	}
+	// 2 prior turns replayed (the "continue please" current turn is excluded).
+	if got, want := meta["messages_replayed"], float64(2); got != want {
+		t.Errorf("metadata.messages_replayed = %v, want %v", got, want)
+	}
+	if meta["source_session_id"] != sess.ID {
+		t.Errorf("metadata.source_session_id = %v, want %v", meta["source_session_id"], sess.ID)
+	}
+	if meta["reason"] == "" || meta["reason"] == nil {
+		t.Errorf("metadata.reason is empty, want a real reason string")
+	}
+	if meta["history_window_capped"] != false {
+		t.Errorf("metadata.history_window_capped = %v, want false (only 2 prior turns, well under the window)", meta["history_window_capped"])
 	}
 
 	// Live runtime (not cold) → no recovery pack.

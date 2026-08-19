@@ -8,8 +8,6 @@ import type {
   AgentBuilderDryRunResponse,
   AgentBuilderReviewRequest,
   AgentBuilderReviewResponse,
-  AgentBootPlanDocument,
-  AgentBootPlanDryRunResponse,
   AgentKnowledgeSeedUpsertRequest,
   AgentKnownSkill,
   AgentKnownSkillUpsertRequest,
@@ -18,7 +16,6 @@ import type {
   AgentMessage,
   AgentMessageChannel,
   AgentMessageKind,
-  AgentModeProfile,
   AgentProfile,
   AgentProcedure,
   AgentProcedureUpsertRequest,
@@ -29,7 +26,6 @@ import type {
   Artifact,
   AttachDurableAgentSessionRequest,
   Bookmark,
-  BrokerDecision,
   CatalogBrowseEntry,
   CatalogSource,
   CLIDetectionResult,
@@ -37,7 +33,6 @@ import type {
   CreateAgentReflexRequest,
   CreateAgentProfileRequest,
   CreateDurableAgentRequest,
-  CustomAction,
   DiscoveryDiff,
   Document,
   DrawerCardType,
@@ -78,9 +73,6 @@ import type {
   MemoryUpdateRequest,
   Message,
   MessagePage,
-  MetaHarness,
-  MetaHarnessInput,
-  Mode,
   ModelRecord,
   PermissionMode,
   PinnedContent,
@@ -98,7 +90,6 @@ import type {
   PluginUIComponent,
   ProcessHealthResponse,
   Project,
-  PromptTemplate,
   ProviderConfig,
   ProviderStatus,
   Reminder,
@@ -126,8 +117,6 @@ import type {
   WorkDiff,
   Worker,
   WorkflowRun,
-  Workspace,
-  WorkspaceRoleTrustOverride,
 } from "./types";
 
 const API_BASE = "/api";
@@ -362,9 +351,8 @@ export const api = {
   },
 
   // Sessions
-  listSessions: async (workspaceId?: string): Promise<Session[]> => {
-    const params = workspaceId ? `?workspace_id=${workspaceId}` : "";
-    const res = await fetch(`${API_BASE}/sessions${params}`);
+  listSessions: async (): Promise<Session[]> => {
+    const res = await fetch(`${API_BASE}/sessions`);
     if (!res.ok) throw new Error(`Failed to list sessions: ${res.status}`);
     return res.json();
   },
@@ -397,7 +385,6 @@ export const api = {
   },
 
   createSession: async (data: {
-    workspace_id: string;
     project_id?: string;
     provider?: string;
     model?: string;
@@ -650,43 +637,23 @@ export const api = {
     return res.json();
   },
 
-  // Workspaces
-  listWorkspaces: async (): Promise<Workspace[]> => {
-    const res = await fetch(`${API_BASE}/workspaces`);
-    if (!res.ok) throw new Error(`Failed to list workspaces: ${res.status}`);
-    return res.json();
-  },
-
-  createWorkspace: async (data: {
-    name: string;
-    description?: string;
-    icon?: string;
-  }): Promise<Workspace> => {
-    const res = await fetch(`${API_BASE}/workspaces`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(data),
-    });
-    if (!res.ok) {
-      const err = await res
-        .json()
-        .catch(() => ({ error: `Request failed: ${res.status}` }));
-      throw new Error(err.error || `Failed to create workspace: ${res.status}`);
-    }
-    return res.json();
-  },
-
-  listProjects: async (workspaceId: string): Promise<Project[]> => {
-    const res = await fetch(`${API_BASE}/workspaces/${workspaceId}/projects`);
+  // Projects. Phase 0 item 20 (retire workspaces,
+  // TASKS/phase-0/20-retire-workspaces-and-instance-mechanism.md): the
+  // in-app workspaces concept (listWorkspaces/createWorkspace/
+  // updateWorkspace/deleteWorkspace and the /api/workspaces/{wid}/projects
+  // nesting) is retired in full. Projects are flat now.
+  listProjects: async (): Promise<Project[]> => {
+    const res = await fetch(`${API_BASE}/projects`);
     if (!res.ok) throw new Error(`Failed to list projects: ${res.status}`);
     return res.json();
   },
 
-  createProject: async (
-    workspaceId: string,
-    data: { name: string; description?: string; repo_path?: string },
-  ): Promise<Project> => {
-    const res = await fetch(`${API_BASE}/workspaces/${workspaceId}/projects`, {
+  createProject: async (data: {
+    name: string;
+    description?: string;
+    repo_path?: string;
+  }): Promise<Project> => {
+    const res = await fetch(`${API_BASE}/projects`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(data),
@@ -714,9 +681,7 @@ export const api = {
     return res.json();
   },
 
-  getAgentProfile: async (
-    id: string,
-  ): Promise<{ agent: AgentProfile; modes: AgentModeProfile[] }> => {
+  getAgentProfile: async (id: string): Promise<{ agent: AgentProfile }> => {
     const res = await fetch(`${API_BASE}/agents/${id}`);
     if (!res.ok) throw new Error(`Failed to get agent profile: ${res.status}`);
     return res.json();
@@ -799,61 +764,6 @@ export const api = {
     );
     if (!res.ok)
       throw new Error(`Failed to list agent known skills: ${res.status}`);
-    return res.json();
-  },
-
-  getAgentBootPlan: async (agentId: string): Promise<AgentBootPlanDocument> => {
-    const res = await fetch(
-      `${API_BASE}/agents/${encodeURIComponent(agentId)}/boot-plan`,
-    );
-    if (!res.ok)
-      throw new Error(`Failed to get agent boot plan: ${res.status}`);
-    return res.json();
-  },
-
-  updateAgentBootPlan: async (
-    agentId: string,
-    data: AgentBootPlanDocument,
-  ): Promise<AgentBootPlanDocument> => {
-    const res = await fetch(
-      `${API_BASE}/agents/${encodeURIComponent(agentId)}/boot-plan`,
-      {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(data),
-      },
-    );
-    if (!res.ok)
-      throw new Error(`Failed to update agent boot plan: ${res.status}`);
-    return res.json();
-  },
-
-  deleteAgentBootPlan: async (agentId: string): Promise<{ status: string }> => {
-    const res = await fetch(
-      `${API_BASE}/agents/${encodeURIComponent(agentId)}/boot-plan`,
-      {
-        method: "DELETE",
-      },
-    );
-    if (!res.ok)
-      throw new Error(`Failed to delete agent boot plan: ${res.status}`);
-    return res.json();
-  },
-
-  dryRunAgentBootPlan: async (
-    agentId: string,
-    data?: AgentBootPlanDocument,
-  ): Promise<AgentBootPlanDryRunResponse> => {
-    const res = await fetch(
-      `${API_BASE}/agents/${encodeURIComponent(agentId)}/boot-plan/dry-run`,
-      {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: data ? JSON.stringify(data) : undefined,
-      },
-    );
-    if (!res.ok)
-      throw new Error(`Failed to dry-run agent boot plan: ${res.status}`);
     return res.json();
   },
 
@@ -1642,84 +1552,6 @@ export const api = {
     return res.json();
   },
 
-  // Agent Modes
-  listAgentModes: async (agentId: string): Promise<AgentModeProfile[]> => {
-    const res = await fetch(`${API_BASE}/agents/${agentId}/modes`);
-    if (!res.ok) throw new Error(`Failed to list agent modes: ${res.status}`);
-    return res.json();
-  },
-
-  createAgentMode: async (
-    agentId: string,
-    data: Omit<AgentModeProfile, "id" | "agent_id">,
-  ): Promise<AgentModeProfile> => {
-    const res = await fetch(`${API_BASE}/agents/${agentId}/modes`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(data),
-    });
-    if (!res.ok) throw new Error(`Failed to create agent mode: ${res.status}`);
-    return res.json();
-  },
-
-  // Note: DELETE mode endpoint not implemented in backend yet
-  // deleteAgentMode: async (agentId: string, modeId: string): Promise<void> => {
-  //   const res = await fetch(`${API_BASE}/agents/${agentId}/modes/${modeId}`, { method: 'DELETE' })
-  //   if (!res.ok) throw new Error(`Failed to delete agent mode: ${res.status}`)
-  // },
-
-  // Mode (legacy: agent-scoped AgentMode pipeline).
-  switchMode: async (sessionId: string, mode: string): Promise<void> => {
-    const res = await fetch(`${API_BASE}/sessions/${sessionId}/mode`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ mode }),
-    });
-    if (!res.ok) throw new Error(`Failed to switch mode: ${res.status}`);
-  },
-
-  // First-class reusable Modes (B1, CW-20260428-0009).
-  listModes: async (): Promise<Mode[]> => {
-    const res = await fetch(`${API_BASE}/modes`);
-    if (!res.ok) throw new Error(`Failed to list modes: ${res.status}`);
-    return res.json();
-  },
-
-  getSessionMode: async (sessionId: string): Promise<Mode | null> => {
-    const res = await fetch(`${API_BASE}/sessions/${sessionId}/mode`);
-    if (!res.ok) throw new Error(`Failed to get session mode: ${res.status}`);
-    return res.json();
-  },
-
-  setSessionMode: async (
-    sessionId: string,
-    body: { slug?: string; mode_id?: string } | null,
-  ): Promise<Mode | null> => {
-    const res = await fetch(`${API_BASE}/sessions/${sessionId}/mode`, {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(body ?? {}),
-    });
-    if (!res.ok) throw new Error(`Failed to set session mode: ${res.status}`);
-    return res.json();
-  },
-
-  // F2 (CW-20260429-0002): per-session auto-switch override.
-  // override === null clears the override (session inherits user pref).
-  setSessionAutoSwitch: async (
-    sessionId: string,
-    override: boolean | null,
-  ): Promise<{ override: boolean | null }> => {
-    const res = await fetch(`${API_BASE}/sessions/${sessionId}/auto-switch`, {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ override }),
-    });
-    if (!res.ok)
-      throw new Error(`Failed to set session auto-switch: ${res.status}`);
-    return res.json();
-  },
-
   // Slash Commands
   listCommands: async (): Promise<SlashCommandDef[]> => {
     const res = await fetch(`${API_BASE}/commands`);
@@ -1999,42 +1831,6 @@ export const api = {
     if (!res.ok) throw new Error(`Failed to list providers: ${res.status}`);
     return res.json();
   },
-  listMetaHarnesses: async (): Promise<MetaHarness[]> => {
-    const res = await fetch(`${API_BASE}/meta-harnesses`);
-    if (!res.ok)
-      throw await readAPIError(res, `Failed to list meta harnesses: ${res.status}`);
-    return res.json();
-  },
-  createMetaHarness: async (data: MetaHarnessInput): Promise<MetaHarness> => {
-    const res = await fetch(`${API_BASE}/meta-harnesses`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(data),
-    });
-    if (!res.ok)
-      throw await readAPIError(res, `Failed to create meta harness: ${res.status}`);
-    return res.json();
-  },
-  updateMetaHarness: async (
-    id: string,
-    data: MetaHarnessInput,
-  ): Promise<MetaHarness> => {
-    const res = await fetch(`${API_BASE}/meta-harnesses/${encodeURIComponent(id)}`, {
-      method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(data),
-    });
-    if (!res.ok)
-      throw await readAPIError(res, `Failed to update meta harness: ${res.status}`);
-    return res.json();
-  },
-  deleteMetaHarness: async (id: string): Promise<void> => {
-    const res = await fetch(`${API_BASE}/meta-harnesses/${encodeURIComponent(id)}`, {
-      method: "DELETE",
-    });
-    if (!res.ok)
-      throw await readAPIError(res, `Failed to delete meta harness: ${res.status}`);
-  },
   listProviderStatuses: async (): Promise<ProviderStatus[]> => {
     const res = await fetch(`${API_BASE}/providers/status`);
     if (!res.ok)
@@ -2043,7 +1839,7 @@ export const api = {
   },
   updateProvider: async (
     id: string,
-    data: { is_enabled?: boolean; base_url?: string; settings?: string },
+    data: { is_enabled?: boolean; settings?: string },
   ): Promise<ProviderConfig> => {
     const res = await fetch(`${API_BASE}/providers/${id}`, {
       method: "PUT",
@@ -2120,29 +1916,6 @@ export const api = {
       throw new Error(`Failed to list embedding providers: ${res.status}`);
     const body = await res.json();
     return body.providers ?? [];
-  },
-
-  // B3 (CW-20260428-0011): mode auto-switch preference. Empty string = unset.
-  getModeAutoSwitchPref: async (): Promise<{
-    pref: "" | "always" | "ask" | "never";
-  }> => {
-    const res = await fetch(`${API_BASE}/settings/mode-auto-switch`);
-    if (!res.ok)
-      throw new Error(`Failed to get mode auto-switch pref: ${res.status}`);
-    return res.json();
-  },
-
-  setModeAutoSwitchPref: async (
-    pref: "" | "always" | "ask" | "never",
-  ): Promise<{ pref: string }> => {
-    const res = await fetch(`${API_BASE}/settings/mode-auto-switch`, {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ pref }),
-    });
-    if (!res.ok)
-      throw new Error(`Failed to set mode auto-switch pref: ${res.status}`);
-    return res.json();
   },
 
   // Session Agents
@@ -2347,97 +2120,6 @@ export const api = {
     });
     if (!res.ok)
       throw new Error(`Failed to remove skill from agent: ${res.status}`);
-  },
-
-  // Prompt Templates
-  listPromptTemplates: async (): Promise<PromptTemplate[]> => {
-    const res = await fetch(`${API_BASE}/prompt-templates`);
-    if (!res.ok)
-      throw new Error(`Failed to list prompt templates: ${res.status}`);
-    return res.json();
-  },
-
-  getPromptTemplate: async (id: string): Promise<PromptTemplate> => {
-    const res = await fetch(`${API_BASE}/prompt-templates/${id}`);
-    if (!res.ok)
-      throw new Error(`Failed to get prompt template: ${res.status}`);
-    return res.json();
-  },
-
-  createPromptTemplate: async (
-    data: Omit<
-      PromptTemplate,
-      "id" | "created_at" | "updated_at" | "is_builtin"
-    >,
-  ): Promise<PromptTemplate> => {
-    const res = await fetch(`${API_BASE}/prompt-templates`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(data),
-    });
-    if (!res.ok)
-      throw new Error(`Failed to create prompt template: ${res.status}`);
-    return res.json();
-  },
-
-  updatePromptTemplate: async (
-    id: string,
-    data: Partial<
-      Omit<PromptTemplate, "id" | "created_at" | "updated_at" | "is_builtin">
-    >,
-  ): Promise<PromptTemplate> => {
-    const res = await fetch(`${API_BASE}/prompt-templates/${id}`, {
-      method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(data),
-    });
-    if (!res.ok)
-      throw new Error(`Failed to update prompt template: ${res.status}`);
-    return res.json();
-  },
-
-  deletePromptTemplate: async (id: string): Promise<void> => {
-    const res = await fetch(`${API_BASE}/prompt-templates/${id}`, {
-      method: "DELETE",
-    });
-    if (!res.ok)
-      throw new Error(`Failed to delete prompt template: ${res.status}`);
-  },
-
-  // Agent Templates (returns PromptTemplate[], not a join-table type)
-  listAgentTemplates: async (agentId: string): Promise<PromptTemplate[]> => {
-    const res = await fetch(`${API_BASE}/agents/${agentId}/prompt-templates`);
-    if (!res.ok)
-      throw new Error(`Failed to list agent templates: ${res.status}`);
-    return res.json();
-  },
-
-  assignTemplateToAgent: async (
-    agentId: string,
-    data: { template_id: string },
-  ): Promise<PromptTemplate> => {
-    const res = await fetch(`${API_BASE}/agents/${agentId}/prompt-templates`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(data),
-    });
-    if (!res.ok)
-      throw new Error(`Failed to assign template to agent: ${res.status}`);
-    return res.json();
-  },
-
-  removeTemplateFromAgent: async (
-    agentId: string,
-    templateId: string,
-  ): Promise<void> => {
-    const res = await fetch(
-      `${API_BASE}/agents/${agentId}/prompt-templates/${templateId}`,
-      {
-        method: "DELETE",
-      },
-    );
-    if (!res.ok)
-      throw new Error(`Failed to remove template from agent: ${res.status}`);
   },
 
   // Engine Backlog
@@ -2667,23 +2349,6 @@ export const api = {
       },
     );
     if (!res.ok) throw new Error(`Failed to transition task: ${res.status}`);
-    return res.json();
-  },
-
-  promoteBacklogItem: async (
-    id: string,
-    sprintId: string,
-  ): Promise<unknown> => {
-    const res = await fetch(
-      `${API_BASE}/volon/backlog/${encodeURIComponent(id)}/promote`,
-      {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ sprint_id: sprintId }),
-      },
-    );
-    if (!res.ok)
-      throw new Error(`Failed to promote backlog item: ${res.status}`);
     return res.json();
   },
 
@@ -3245,13 +2910,11 @@ export const api = {
   // Search
   searchMessages: async (
     query: string,
-    workspaceId: string,
     projectId?: string,
     limit = 20,
   ): Promise<SearchResult[]> => {
     const params = new URLSearchParams({
       q: query,
-      workspace_id: workspaceId,
       limit: String(limit),
     });
     if (projectId) params.set("project_id", projectId);
@@ -3295,45 +2958,18 @@ export const api = {
       throw new Error(`Failed to remove agent project: ${res.status}`);
   },
 
-  // Workspace & Project Management
-  updateWorkspace: async (
-    id: string,
-    data: Partial<Workspace>,
-  ): Promise<Workspace> => {
-    const res = await fetch(`${API_BASE}/workspaces/${id}`, {
+  // Project Management. Workspace CRUD (updateWorkspace/deleteWorkspace)
+  // is retired along with the workspaces table — see the Projects block
+  // above.
+  updateProject: async (
+    projectId: string,
+    data: Partial<Project>,
+  ): Promise<Project> => {
+    const res = await fetch(`${API_BASE}/projects/${projectId}`, {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(data),
     });
-    if (!res.ok) {
-      const err = await res
-        .json()
-        .catch(() => ({ error: `Request failed: ${res.status}` }));
-      throw new Error(err.error || `Failed to update workspace: ${res.status}`);
-    }
-    return res.json();
-  },
-
-  deleteWorkspace: async (id: string): Promise<void> => {
-    const res = await fetch(`${API_BASE}/workspaces/${id}`, {
-      method: "DELETE",
-    });
-    if (!res.ok) throw new Error(`Failed to delete workspace: ${res.status}`);
-  },
-
-  updateProject: async (
-    workspaceId: string,
-    projectId: string,
-    data: Partial<Project>,
-  ): Promise<Project> => {
-    const res = await fetch(
-      `${API_BASE}/workspaces/${workspaceId}/projects/${projectId}`,
-      {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(data),
-      },
-    );
     if (!res.ok) {
       const err = await res
         .json()
@@ -3343,81 +2979,11 @@ export const api = {
     return res.json();
   },
 
-  deleteProject: async (
-    workspaceId: string,
-    projectId: string,
-  ): Promise<void> => {
-    const res = await fetch(
-      `${API_BASE}/workspaces/${workspaceId}/projects/${projectId}`,
-      {
-        method: "DELETE",
-      },
-    );
+  deleteProject: async (projectId: string): Promise<void> => {
+    const res = await fetch(`${API_BASE}/projects/${projectId}`, {
+      method: "DELETE",
+    });
     if (!res.ok) throw new Error(`Failed to delete project: ${res.status}`);
-  },
-
-  // Custom Actions
-  listActions: async (): Promise<{
-    actions: CustomAction[];
-    count: number;
-  }> => {
-    const res = await fetch(`${API_BASE}/actions`);
-    if (!res.ok) throw new Error(`Failed to list actions: ${res.status}`);
-    return res.json();
-  },
-
-  createAction: async (
-    data: Omit<CustomAction, "id" | "created_at" | "updated_at">,
-  ): Promise<CustomAction> => {
-    const res = await fetch(`${API_BASE}/actions`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(data),
-    });
-    if (!res.ok) throw new Error(`Failed to create action: ${res.status}`);
-    return res.json();
-  },
-
-  getAction: async (id: string): Promise<CustomAction> => {
-    const res = await fetch(`${API_BASE}/actions/${id}`);
-    if (!res.ok) throw new Error(`Failed to get action: ${res.status}`);
-    return res.json();
-  },
-
-  updateAction: async (
-    id: string,
-    data: Partial<CustomAction>,
-  ): Promise<CustomAction> => {
-    const res = await fetch(`${API_BASE}/actions/${id}`, {
-      method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(data),
-    });
-    if (!res.ok) throw new Error(`Failed to update action: ${res.status}`);
-    return res.json();
-  },
-
-  deleteAction: async (id: string): Promise<void> => {
-    const res = await fetch(`${API_BASE}/actions/${id}`, { method: "DELETE" });
-    if (!res.ok) throw new Error(`Failed to delete action: ${res.status}`);
-  },
-
-  executeAction: async (
-    id: string,
-    sessionId: string,
-  ): Promise<{
-    action: string;
-    command: string;
-    session_id: string;
-    action_id: string;
-  }> => {
-    const res = await fetch(`${API_BASE}/actions/${id}/execute`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ session_id: sessionId }),
-    });
-    if (!res.ok) throw new Error(`Failed to execute action: ${res.status}`);
-    return res.json();
   },
 
   // Plugin Keybindings
@@ -3543,20 +3109,6 @@ export const api = {
   }> => {
     const res = await fetch(`${API_BASE}/sessions/${sessionId}/shell-info`);
     if (!res.ok) throw new Error(`Failed to get shell info: ${res.status}`);
-    return res.json();
-  },
-
-  // --- vNext: Broker Decisions ---
-
-  getBrokerDecisions: async (
-    sessionId: string,
-    limit = 50,
-  ): Promise<BrokerDecision[]> => {
-    const res = await fetch(
-      `${API_BASE}/broker/decisions?session_id=${encodeURIComponent(sessionId)}&limit=${limit}`,
-    );
-    if (!res.ok)
-      throw new Error(`Failed to get broker decisions: ${res.status}`);
     return res.json();
   },
 
@@ -3690,55 +3242,11 @@ export const api = {
     return res.json();
   },
 
-  // Role trust — H1 CW-20260421-0014
-  // GET /api/workspaces/{workspace_id}/roles
-  listWorkspaceRoleTrust: async (
-    workspaceID: string,
-  ): Promise<{
-    workspace_id: string;
-    trust_overrides: WorkspaceRoleTrustOverride[];
-  }> => {
-    const res = await fetch(
-      `${API_BASE}/workspaces/${encodeURIComponent(workspaceID)}/roles`,
-    );
-    if (!res.ok) throw new Error(`Failed to list role trust: ${res.status}`);
-    return res.json();
-  },
-
-  // POST /api/workspaces/{workspace_id}/roles/{agent_profile_id}/trust
-  setWorkspaceRoleTrust: async (
-    workspaceID: string,
-    agentProfileID: string,
-    tier: "untrusted" | "normal" | "trusted",
-  ): Promise<{
-    workspace_id: string;
-    agent_profile_id: string;
-    trust_tier: string;
-  }> => {
-    const res = await fetch(
-      `${API_BASE}/workspaces/${encodeURIComponent(workspaceID)}/roles/${encodeURIComponent(agentProfileID)}/trust`,
-      {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ tier, promoted_by: "ui" }),
-      },
-    );
-    if (!res.ok) throw new Error(`Failed to set role trust: ${res.status}`);
-    return res.json();
-  },
-
-  // DELETE /api/workspaces/{workspace_id}/roles/{agent_profile_id}/trust
-  deleteWorkspaceRoleTrust: async (
-    workspaceID: string,
-    agentProfileID: string,
-  ): Promise<{ status: string }> => {
-    const res = await fetch(
-      `${API_BASE}/workspaces/${encodeURIComponent(workspaceID)}/roles/${encodeURIComponent(agentProfileID)}/trust`,
-      { method: "DELETE" },
-    );
-    if (!res.ok) throw new Error(`Failed to delete role trust: ${res.status}`);
-    return res.json();
-  },
+  // Role trust (H1, CW-20260421-0014) REST surface retired in full
+  // alongside workspace_role_trust — Phase 0 item 20 (retire workspaces,
+  // operator-confirmed 2026-08-18). Trust resolution reverts to
+  // unconditional base-tier resolution; there is nothing left to manage
+  // from the client.
 
   // Inspector (I1, CW-20260426-0004)
   getInspectorTurns: async (

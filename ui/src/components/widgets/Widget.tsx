@@ -159,26 +159,3 @@ export function pctTone(pct: number): BarTone {
   return 'danger'
 }
 
-// ---------------------------------------------------------------------------
-// ModeChip — agent mode pill
-// ---------------------------------------------------------------------------
-
-type AgentMode = 'default' | 'architect' | 'planner' | 'writer'
-
-const MODE_CHIP: Record<AgentMode, { bg: string; text: string }> = {
-  default:   { bg: 'bg-surface',       text: 'text-fg-secondary' },
-  architect: { bg: 'bg-info-muted',    text: 'text-info' },
-  planner:   { bg: 'bg-primary-muted', text: 'text-primary' },
-  writer:    { bg: 'bg-warning-muted', text: 'text-warning' },
-}
-
-export function ModeChip({ mode }: { mode: string }) {
-  const style = MODE_CHIP[mode as AgentMode] ?? MODE_CHIP.default
-  return (
-    <span
-      className={`inline-flex items-center px-[7px] py-[2px] rounded-[4px] font-mono text-[10px] font-semibold uppercase tracking-[0.04em] ${style.bg} ${style.text}`}
-    >
-      {mode}
-    </span>
-  )
-}

@@ -15,11 +15,7 @@ import type { Project } from "@/lib/types";
 import { useAppStore } from "@/stores/useAppStore";
 import { NewProjectDialog } from "./NewProjectDialog";
 
-interface ScopeSelectorProps {
-  workspaceId: string;
-}
-
-export function ScopeSelector({ workspaceId }: ScopeSelectorProps) {
+export function ScopeSelector() {
   const [open, setOpen] = useState(false);
   const [showNewProject, setShowNewProject] = useState(false);
 
@@ -27,9 +23,8 @@ export function ScopeSelector({ workspaceId }: ScopeSelectorProps) {
   const setActiveProject = useAppStore((s) => s.setActiveProject);
 
   const { data: projects = [] } = useQuery({
-    queryKey: ["projects", workspaceId],
-    queryFn: () => api.listProjects(workspaceId),
-    enabled: !!workspaceId,
+    queryKey: ["projects"],
+    queryFn: () => api.listProjects(),
   });
 
   const selectedProject = projects.find((p: Project) => p.id === activeProjectId);

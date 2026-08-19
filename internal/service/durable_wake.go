@@ -2,10 +2,12 @@ package service
 
 import (
 	"context"
+	"errors"
 	"time"
 
 	"github.com/robfig/cron/v3"
 
+	"github.com/hollis-labs/nanite/internal/dispatcher"
 	"github.com/hollis-labs/nanite/internal/store"
 )
 
@@ -20,12 +22,10 @@ type DurableAgentWakeDueItem struct {
 	WakeReason       string              `json:"wake_reason"`
 	Due              bool                `json:"due"`
 	SkipReason       string              `json:"skip_reason,omitempty"`
-	WorkspaceID      string              `json:"workspace_id,omitempty"`
 	ProjectID        string              `json:"project_id,omitempty"`
 }
 
 type DurableAgentWakeRequest struct {
-	WorkspaceID string
 	ProjectID   string
 	WakePayload DurableAgentWakePayload
 }
@@ -68,6 +68,10 @@ type durableWakeStore interface {
 	ListDurableAgentInstanceSessions(instanceID string) ([]store.DurableAgentInstanceSession, error)
 	GetSession(id string) (*store.Session, error)
 	CreateDurableAgentEvent(event *store.DurableAgentEvent) error
+	// GetAgent backs activationModeForInstance's lookup of the
+	// composition-level activation_mode wakeSkipReason now reads (Phase 1
+	// item 02, TASKS/phase-1/02-add-agents-composition-columns.md).
+	GetAgent(id string) (*store.AgentProfile, error)
 }
 
 type durableWakeService struct {
@@ -94,10 +98,7 @@ func (s *durableWakeService) ListDue(ctx context.Context, now time.Time) ([]Dura
 			return nil, err
 		}
 		scopeSession, _ := s.resolveWakeScope(&inst)
-		scopeWorkspaceID := ""
-		if scopeSession != nil {
-			scopeWorkspaceID = scopeSession.WorkspaceID
-		}
+		activationMode := s.activationModeForInstance(&inst)
 		for _, schedule := range schedules {
 			due, err := wakeScheduleDue(schedule, now)
 			if err != nil || !due {
@@ -113,14 +114,9 @@ func (s *durableWakeService) ListDue(ctx context.Context, now time.Time) ([]Dura
 				Due:              true,
 			}
 			if scopeSession != nil {
-				item.WorkspaceID = scopeSession.WorkspaceID
 				item.ProjectID = scopeSession.ProjectID
 			}
-			// The scheduled-tick path (this one) has no external caller
-			// supplying a WorkspaceID, so the skip check here is scoped
-			// purely to prior-session state — unlike Wake() below, which
-			// also honors a caller-supplied WorkspaceID.
-			if skipReason := wakeSkipReason(&inst, scopeWorkspaceID); skipReason != "" {
+			if skipReason := wakeSkipReason(&inst, activationMode); skipReason != "" {
 				item.SkipReason = skipReason
 			}
 			items = append(items, item)
@@ -153,6 +149,20 @@ func (s *durableWakeService) RunDue(ctx context.Context, req DurableAgentWakeRun
 			result.Skipped = true
 			result.SkipReason = item.SkipReason
 			s.recordWakeEvent(item.InstanceID, store.DurableAgentEventWakeSkipped, "", item.SkipReason, map[string]string{"schedule_id": item.Schedule.ID})
+			// Phase 4 task 04: this skip short-circuits before ever
+			// calling Wake (a ListDue-precomputed skip, avoiding a
+			// wasted Wake call for a known-skippable item in a bulk
+			// sweep) — log the same shared outcome shape Wake itself
+			// reports below so a skip is visible under "agent-run:
+			// outcome" regardless of which of RunDue's two skip paths
+			// caught it.
+			dispatcher.LogOutcome(dispatcher.AgentRunResult{
+				CallerType:      dispatcher.CallerBackground,
+				Completion:      dispatcher.CompletionQueued,
+				TargetSessionID: item.CurrentSessionID,
+				Status:          dispatcher.RunStatusSkipped,
+				Err:             errors.New(item.SkipReason),
+			})
 			out.Results = append(out.Results, result)
 			continue
 		}
@@ -174,7 +184,6 @@ func (s *durableWakeService) RunDue(ctx context.Context, req DurableAgentWakeRun
 		// class:process instance with a real schedule row, including
 		// Atlas Curator whenever it gets one.
 		wakeResult, err := s.Wake(ctx, item.InstanceID, DurableAgentWakeRequest{
-			WorkspaceID: item.WorkspaceID,
 			ProjectID:   item.ProjectID,
 			WakePayload: DurableAgentWakePayload{Reason: item.WakeReason, Prompt: item.Schedule.Body},
 		})
@@ -192,29 +201,52 @@ func (s *durableWakeService) RunDue(ctx context.Context, req DurableAgentWakeRun
 	return out, nil
 }
 
+// Wake is durable-agent wake's real entry point (surface C of Phase 4
+// task 04's three run-another-agent surfaces). Unlike REST delegation
+// and LLM-triggered subagent dispatch, it fundamentally cannot
+// synchronously drain the dispatched turn — Start/Resume queue the
+// wake prompt via deliverWakePrompt and return once the turn is
+// merely queued, not once it finishes (chat.HandleMessage's
+// launchGeneration runs the actual turn in its own goroutine). Every
+// AgentRunResult this method reports therefore uses
+// dispatcher.CompletionQueued, and a successful wake is honestly
+// dispatcher.RunStatusQueued rather than borrowing
+// durable_agent_instances.status=Active (which means "has a live,
+// reusable session", not "this turn completed" — see wakeSkipReason's
+// doc comment for the documented gap around that distinction). This
+// is the "give the unified result type an honest, non-misleading
+// status" resolution Phase 4 task 04 calls for: representing "queued,
+// poll status separately" as the legitimate terminal shape for this
+// surface rather than attempting a full durable-agent lifecycle
+// completion-tracking redesign, which is out of this task's scope.
 func (s *durableWakeService) Wake(ctx context.Context, instanceID string, req DurableAgentWakeRequest) (*DurableAgentWakeResult, error) {
 	inst, err := s.store.GetDurableAgentInstance(instanceID)
 	if err != nil {
 		return nil, err
 	}
 	scopeSession, _ := s.resolveWakeScope(inst)
-	workspaceID := req.WorkspaceID
 	projectID := req.ProjectID
-	if workspaceID == "" && scopeSession != nil {
-		workspaceID = scopeSession.WorkspaceID
+	if projectID == "" && scopeSession != nil {
 		projectID = scopeSession.ProjectID
 	}
-	// CW-20260816-0020 finding: a fresh durable-agent instance has no prior
-	// session, so scopeSession is always nil on its very first-ever wake.
-	// The skip check must honor an explicit caller-supplied WorkspaceID
-	// (already folded into workspaceID above) in that case, not just a
-	// pre-existing session's — otherwise the first callback/API wake of any
-	// newly-seeded process-class instance always skips with "workspace
-	// unavailable", even when the caller passed one. This generalizes past
-	// Loom Curator to any durable-agent instance woken for the first time
-	// with an explicit WorkspaceID.
-	if reason := wakeSkipReason(inst, workspaceID); reason != "" {
+	// Phase 4 task 04: the shared AgentRunRequest for this surface.
+	// TargetSessionID is unknown until Start/Resume resolves (or
+	// reuses) a session below, so it's filled in on each AgentRunResult
+	// individually rather than carried on runReq itself.
+	runReq := dispatcher.AgentRunRequest{
+		CallerType: dispatcher.CallerBackground,
+		Completion: dispatcher.CompletionQueued,
+		Prompt:     req.WakePayload.Prompt,
+	}
+	if reason := wakeSkipReason(inst, s.activationModeForInstance(inst)); reason != "" {
 		s.recordWakeEvent(inst.ID, store.DurableAgentEventWakeSkipped, inst.CurrentSessionID, reason, nil)
+		dispatcher.LogOutcome(dispatcher.AgentRunResult{
+			CallerType:      runReq.CallerType,
+			Completion:      runReq.Completion,
+			TargetSessionID: inst.CurrentSessionID,
+			Status:          dispatcher.RunStatusSkipped,
+			Err:             errors.New(reason),
+		})
 		return &DurableAgentWakeResult{
 			InstanceID: inst.ID,
 			WakeReason: req.WakePayload.Reason,
@@ -229,19 +261,35 @@ func (s *durableWakeService) Wake(ctx context.Context, instanceID string, req Du
 	s.recordWakeEvent(inst.ID, store.DurableAgentEventWakeRequested, inst.CurrentSessionID, "", map[string]string{"reason": payload.Reason})
 	s.recordWakeEvent(inst.ID, store.DurableAgentEventWakeStarted, inst.CurrentSessionID, "", map[string]string{"reason": payload.Reason})
 	startReq := DurableAgentStartRequest{
-		WorkspaceID: workspaceID,
 		ProjectID:   projectID,
 		WakePayload: payload,
 	}
 	launchResult, err := s.durable.Start(ctx, inst.ID, startReq)
 	if err != nil {
 		s.recordWakeEvent(inst.ID, store.DurableAgentEventWakeFailed, inst.CurrentSessionID, err.Error(), map[string]string{"reason": payload.Reason})
+		dispatcher.LogOutcome(dispatcher.AgentRunResult{
+			CallerType:      runReq.CallerType,
+			Completion:      runReq.Completion,
+			TargetSessionID: inst.CurrentSessionID,
+			Status:          dispatcher.RunStatusFailed,
+			Err:             err,
+		})
 		return &DurableAgentWakeResult{
 			InstanceID:    inst.ID,
 			WakeReason:    payload.Reason,
 			FailureReason: err.Error(),
 		}, err
 	}
+	targetSessionID := inst.CurrentSessionID
+	if launchResult != nil && launchResult.Session != nil {
+		targetSessionID = launchResult.Session.ID
+	}
+	dispatcher.LogOutcome(dispatcher.AgentRunResult{
+		CallerType:      runReq.CallerType,
+		Completion:      runReq.Completion,
+		TargetSessionID: targetSessionID,
+		Status:          dispatcher.RunStatusQueued,
+	})
 	return &DurableAgentWakeResult{
 		InstanceID:   inst.ID,
 		WakeReason:   payload.Reason,
@@ -266,7 +314,7 @@ func (s *durableWakeService) UpdateScheduleStatus(ctx context.Context, instanceI
 
 func (s *durableWakeService) resolveWakeScope(inst *store.DurableAgentInstance) (*store.Session, error) {
 	if inst.CurrentSessionID != "" {
-		if sess, err := s.store.GetSession(inst.CurrentSessionID); err == nil && sess != nil && sess.WorkspaceID != "" {
+		if sess, err := s.store.GetSession(inst.CurrentSessionID); err == nil && sess != nil {
 			return sess, nil
 		}
 	}
@@ -279,7 +327,7 @@ func (s *durableWakeService) resolveWakeScope(inst *store.DurableAgentInstance) 
 			continue
 		}
 		sess, err := s.store.GetSession(rel.SessionID)
-		if err == nil && sess != nil && sess.WorkspaceID != "" {
+		if err == nil && sess != nil {
 			return sess, nil
 		}
 	}
@@ -297,32 +345,73 @@ func wakeReasonForInstance(inst *store.DurableAgentInstance) string {
 	return DurableAgentWakeScheduled
 }
 
+// activationModeForInstance resolves the agent_profiles.activation_mode
+// value for a durable-agent instance's bound composition (Phase 1 item 02,
+// TASKS/phase-1/02-add-agents-composition-columns.md — wakeSkipReason's
+// real, previously-nonexistent consumer for this column). Returns "" on any
+// lookup failure (nil instance, empty ProfileID, unknown profile, store
+// error) so wakeAllowsConcurrentActive's default case (block) applies —
+// the same conservative fallback GetRole/roleForProfile use elsewhere in
+// this task.
+func (s *durableWakeService) activationModeForInstance(inst *store.DurableAgentInstance) string {
+	if inst == nil || inst.ProfileID == "" {
+		return ""
+	}
+	profile, err := s.store.GetAgent(inst.ProfileID)
+	if err != nil || profile == nil {
+		return ""
+	}
+	return profile.ActivationMode
+}
+
+// wakeAllowsConcurrentActive reports whether the given agent_profiles.
+// activation_mode value permits waking an instance that's already Active.
+// Every value except the blocking default ("singleton", or an empty/
+// unrecognized value, which resolves to the same default) allows it.
+func wakeAllowsConcurrentActive(activationMode string) bool {
+	switch activationMode {
+	case "fresh-per-wake", "concurrent":
+		return true
+	default:
+		return false
+	}
+}
+
 // wakeSkipReason returns why a wake should be skipped, or "" to proceed.
-// workspaceID is the value that will actually be handed to
-// DurableAgentService.Start (a caller-supplied WorkspaceID, or one inherited
-// from a prior scoped session — see call sites) so this check reflects
-// reality: an instance with no prior session can still wake successfully if
-// the caller supplied a WorkspaceID explicitly.
+// activationMode is the bound composition's agent_profiles.activation_mode
+// (resolved by callers via activationModeForInstance) — the real, explicit
+// column Phase 1 item 02 added for exactly this decision, retiring the
+// hardcoded lifecycle_class special case this function used before.
+//
+// Phase 0 item 20 (retire workspaces): this used to also gate on a
+// workspaceID parameter — "workspace unavailable" when no workspace could
+// be resolved for the wake. sessions.workspace_id (and the requirement it
+// backed) is retired in full; a wake no longer needs a workspace to create
+// a session.
 //
 // CW-20260817 finding: nothing anywhere in this codebase ever transitions a
 // durable_agent_instances row back out of "active" once Start() sets it —
 // there is no completion hook from chat's async generation (launchGeneration,
-// chat.go) back into durable_agent_instances.status. For an
-// advisor/harness-class instance (SessionPolicyReuseLatestOrCreate /
-// ReuseManaged) that's fine: "active" genuinely means "has a live, reusable
-// session", which stays true indefinitely. But a process-class instance uses
-// SessionPolicyFreshPerWake (durableAgentLaunchPolicyFor) — every wake spins
-// up its own independent session, so there is no session-reuse collision for
+// chat.go) back into durable_agent_instances.status. For a 'singleton'
+// composition (SessionPolicyReuseLatestOrCreate / ReuseManaged) that's fine:
+// "active" genuinely means "has a live, reusable session", which stays true
+// indefinitely. But a 'fresh-per-wake'/'concurrent' composition spins up its
+// own independent session on every wake (SessionPolicyFreshPerWake for
+// process class, SessionPolicyFreshOneShot for template — see
+// durableAgentLaunchPolicyFor), so there is no session-reuse collision for
 // "active" to be guarding against. Treating it as a permanent block meant
-// every process-class agent (Loom Curator, Atlas Curator, Torque Supervisor
-// — grep class: process under .nanite/agents/) was wakeable exactly once,
-// ever: the very first wake (callback or scheduled) set status to Active and
-// no later wake — including CW-20260816-0021's own daily scheduled tick —
-// could ever fire again. Only the genuinely in-flight launch states
-// (Starting/StartRequested/ResumeRequested, which Start() only holds for the
-// duration of the synchronous session-creation section) still guard against
-// a real concurrent-launch race.
-func wakeSkipReason(inst *store.DurableAgentInstance, workspaceID string) string {
+// every such agent (Loom Curator, Atlas Curator, Torque Supervisor, and —
+// under the pre-migration-116 lifecycle_class-only check, which this
+// rewrite closes — content-writer/task-planner too, a latent instance of
+// the same bug the original CW-20260817 fix never covered since it only
+// exempted lifecycle_class == process) was wakeable exactly once, ever: the
+// very first wake (callback or scheduled) set status to Active and no later
+// wake — including CW-20260816-0021's own daily scheduled tick — could ever
+// fire again. Only the genuinely in-flight launch states (Starting/
+// StartRequested/ResumeRequested, which Start() only holds for the duration
+// of the synchronous session-creation section) still guard against a real
+// concurrent-launch race, unconditionally, regardless of activation_mode.
+func wakeSkipReason(inst *store.DurableAgentInstance, activationMode string) string {
 	if inst == nil {
 		return "instance missing"
 	}
@@ -334,14 +423,11 @@ func wakeSkipReason(inst *store.DurableAgentInstance, workspaceID string) string
 	case store.DurableAgentStatusStopped:
 		return "instance stopped"
 	case store.DurableAgentStatusActive:
-		if inst.LifecycleClass != store.DurableAgentClassProcess {
+		if !wakeAllowsConcurrentActive(activationMode) {
 			return "wake already active"
 		}
 	case store.DurableAgentStatusStarting, store.DurableAgentStatusStartRequested, store.DurableAgentStatusResumeRequested:
 		return "wake already active"
-	}
-	if workspaceID == "" {
-		return "workspace unavailable"
 	}
 	return ""
 }

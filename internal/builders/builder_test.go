@@ -194,93 +194,17 @@ func TestSkillBuilder_FullFlow(t *testing.T) {
 	}
 }
 
-func TestPromptTemplateBuilder_FullFlow(t *testing.T) {
-	s := newTestStore(t)
-	reg := DefaultRegistry(s)
-	sm := NewSessionManager()
-	sessionKey := "test-session-3"
-
-	// Start the prompt template builder.
-	out, err := HandleStartBuilder(reg, sm, sessionKey, map[string]any{
-		"builder_name": "prompt_template",
-	})
-	if err != nil {
-		t.Fatalf("start builder: %v", err)
-	}
-
-	var start StartBuilderResult
-	if err := json.Unmarshal([]byte(out), &start); err != nil {
-		t.Fatalf("unmarshal start: %v", err)
-	}
-	if start.Builder != "prompt_template" {
-		t.Errorf("expected builder=prompt_template, got %s", start.Builder)
-	}
-
-	// Step through.
-	steps := []struct {
-		step  string
-		value string
-	}{
-		{"name", "Safety Guardrails"},
-		{"scope", "system"},
-		{"template", "Always prioritize user safety. Never {{forbidden_action}}."},
-		{"variables", "forbidden_action"},
-		{"priority", "5"},
-	}
-
-	for i, st := range steps {
-		out, err := HandleBuilderStep(reg, sm, sessionKey, map[string]any{
-			"builder_name": "prompt_template",
-			"step_name":    st.step,
-			"value":        st.value,
-		})
-		if err != nil {
-			t.Fatalf("step %s: %v", st.step, err)
-		}
-
-		var result StepResult
-		if err := json.Unmarshal([]byte(out), &result); err != nil {
-			t.Fatalf("unmarshal step %s: %v", st.step, err)
-		}
-
-		if i < len(steps)-1 {
-			if result.Status != "next" {
-				t.Errorf("step %s: expected status=next, got %s", st.step, result.Status)
-			}
-		} else {
-			if result.Status != "complete" {
-				t.Errorf("step %s: expected status=complete, got %s (error: %s)", st.step, result.Status, result.Error)
-			}
-		}
-	}
-
-	// Verify prompt template was created.
-	pt, err := s.GetPromptTemplateBySlug("safety-guardrails")
-	if err != nil {
-		t.Fatalf("get prompt template by slug: %v", err)
-	}
-	if pt.Name != "Safety Guardrails" {
-		t.Errorf("expected name=Safety Guardrails, got %s", pt.Name)
-	}
-	if pt.Scope != "system" {
-		t.Errorf("expected scope=system, got %s", pt.Scope)
-	}
-	if pt.Priority != 5 {
-		t.Errorf("expected priority=5, got %d", pt.Priority)
-	}
-}
-
 func TestBuilderRegistry_ListBuilders(t *testing.T) {
 	s := newTestStore(t)
 	reg := DefaultRegistry(s)
 
 	names := reg.ListBuilders()
-	if len(names) != 3 {
-		t.Fatalf("expected 3 builders, got %d: %v", len(names), names)
+	if len(names) != 2 {
+		t.Fatalf("expected 2 builders, got %d: %v", len(names), names)
 	}
 
 	// Should be sorted alphabetically.
-	expected := []string{"agent", "prompt_template", "skill"}
+	expected := []string{"agent", "skill"}
 	for i, name := range names {
 		if name != expected[i] {
 			t.Errorf("builder[%d]: expected %s, got %s", i, expected[i], name)

@@ -58,33 +58,22 @@ func writeAgentFile(t *testing.T, dir, filename, slug string) {
 	}
 }
 
-func TestDiscover_PriorityOrder(t *testing.T) {
+func TestDiscover_AdapterPriorityOrder(t *testing.T) {
 	root := t.TempDir()
 
-	// Write agents at two priority levels with the same slug.
-	writeAgentFile(t, filepath.Join(root, ".nanite", "agents"), "code.md", "code")
-	writeAgentFile(t, filepath.Join(root, ".agentrc", "agents"), "code.md", "code")
-
-	// Write a unique agent at lower priority.
+	// Write a unique agent via an adapter tier.
 	writeAgentFile(t, filepath.Join(root, ".agentrc", "agents"), "research.md", "research")
 
-	defs, err := Discover(DiscoverOptions{WorkingDir: root, HomeDir: t.TempDir(), Adapters: newTestAdapterRegistry()})
+	defs, err := Discover(DiscoverOptions{WorkingDir: root, Adapters: newTestAdapterRegistry()})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	if len(defs) != 2 {
-		t.Fatalf("got %d definitions, want 2", len(defs))
+	if len(defs) != 1 {
+		t.Fatalf("got %d definitions, want 1", len(defs))
 	}
-
-	// "code" should come from project (.nanite/agents/), not agentrc.
-	if defs[0].Slug != "code" || defs[0].Source != "project" {
-		t.Errorf("defs[0]: slug=%q source=%q, want code/project", defs[0].Slug, defs[0].Source)
-	}
-
-	// "research" only exists in agentrc (discovered via adapter).
-	if defs[1].Slug != "research" || defs[1].Source != "agentrc" {
-		t.Errorf("defs[1]: slug=%q source=%q, want research/agentrc", defs[1].Slug, defs[1].Source)
+	if defs[0].Slug != "research" || defs[0].Source != "agentrc" {
+		t.Errorf("defs[0]: slug=%q source=%q, want research/agentrc", defs[0].Slug, defs[0].Source)
 	}
 }
 
@@ -98,13 +87,9 @@ func TestDiscover_CLIAgent(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// Also write a project agent with the same slug — CLI should win.
-	writeAgentFile(t, filepath.Join(root, ".nanite", "agents"), "custom.md", "custom")
-
 	defs, err := Discover(DiscoverOptions{
 		CLIAgentPath: cliPath,
 		WorkingDir:   root,
-		HomeDir:      t.TempDir(),
 	})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -124,23 +109,35 @@ func TestDiscover_CLIAgent(t *testing.T) {
 	}
 }
 
-func TestDiscover_PluginAgents(t *testing.T) {
+// TestDiscover_CLIAgentWinsOverAdapter proves the CLI single-file tier still
+// takes priority over an adapter-discovered definition with the same slug —
+// the CLI tier's priority-1 position is unchanged by this task, only the
+// removed project/user/plugin directory-scan tiers that used to sit below it
+// are gone.
+func TestDiscover_CLIAgentWinsOverAdapter(t *testing.T) {
 	root := t.TempDir()
-	pluginsDir := filepath.Join(root, "plugins")
 
-	writeAgentFile(t, filepath.Join(pluginsDir, "example-plugin", "agents"), "support.md", "support")
+	cliPath := filepath.Join(root, "custom.md")
+	content := "---\nname: Custom\nslug: custom\n---\nCLI agent.\n"
+	if err := os.WriteFile(cliPath, []byte(content), 0644); err != nil {
+		t.Fatal(err)
+	}
+	writeAgentFile(t, filepath.Join(root, ".agentrc", "agents"), "custom.md", "custom")
 
 	defs, err := Discover(DiscoverOptions{
-		WorkingDir: root,
-		HomeDir:    t.TempDir(),
-		PluginsDir: pluginsDir,
+		CLIAgentPath: cliPath,
+		WorkingDir:   root,
+		Adapters:     newTestAdapterRegistry(),
 	})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	if len(defs) != 1 || defs[0].Slug != "support" || defs[0].Source != "plugin" {
-		t.Errorf("got %v, want 1 agent with slug=support source=plugin", defs)
+	if len(defs) != 1 {
+		t.Fatalf("got %d definitions, want 1 (dedup)", len(defs))
+	}
+	if defs[0].Source != "cli" {
+		t.Errorf("source = %q, want %q (CLI tier is highest priority)", defs[0].Source, "cli")
 	}
 }
 
@@ -148,7 +145,7 @@ func TestDiscover_MissingDirs(t *testing.T) {
 	root := t.TempDir()
 
 	// No agent directories exist — should return empty, no error.
-	defs, err := Discover(DiscoverOptions{WorkingDir: root, HomeDir: t.TempDir()})
+	defs, err := Discover(DiscoverOptions{WorkingDir: root})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -157,9 +154,78 @@ func TestDiscover_MissingDirs(t *testing.T) {
 	}
 }
 
-func TestDiscover_SkipsInvalidFiles(t *testing.T) {
+func TestDiscover_ClaudeCodeAgents(t *testing.T) {
 	root := t.TempDir()
-	dir := filepath.Join(root, ".nanite", "agents")
+	writeAgentFile(t, filepath.Join(root, ".claude", "agents"), "helper.md", "helper")
+
+	defs, err := Discover(DiscoverOptions{WorkingDir: root, Adapters: newTestAdapterRegistry()})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if len(defs) != 1 || defs[0].Source != "claude" {
+		t.Errorf("got %v, want 1 agent with source=claude", defs)
+	}
+}
+
+func TestDiscover_SlugDedup(t *testing.T) {
+	root := t.TempDir()
+
+	// Same slug across both remaining adapter-discovered sources.
+	writeAgentFile(t, filepath.Join(root, ".agentrc", "agents"), "dupe.md", "dupe")
+	writeAgentFile(t, filepath.Join(root, ".claude", "agents"), "dupe.md", "dupe")
+
+	defs, err := Discover(DiscoverOptions{
+		WorkingDir: root,
+		Adapters:   newTestAdapterRegistry(),
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if len(defs) != 1 {
+		t.Fatalf("got %d definitions, want 1 (dedup)", len(defs))
+	}
+	if defs[0].Source != "agentrc" {
+		t.Errorf("source = %q, want %q (higher-priority adapter)", defs[0].Source, "agentrc")
+	}
+}
+
+// TestDiscover_ProjectUserPluginTiersRemoved is TASKS/phase-1/08's negative
+// verification: a file dropped into .nanite/agents/ (project),
+// ~/.nanite/agents/ (user), or plugins/*/agents/ (plugin) before Discover()
+// runs must NOT be picked up. These three directory-scan tiers, and
+// discoverPluginAgents, were removed in full — not merely stopped-calling
+// with empty args.
+func TestDiscover_ProjectUserPluginTiersRemoved(t *testing.T) {
+	root := t.TempDir()
+	home := t.TempDir()
+	pluginsDir := filepath.Join(root, "plugins")
+
+	writeAgentFile(t, filepath.Join(root, ".nanite", "agents"), "project-agent.md", "project-agent")
+	writeAgentFile(t, filepath.Join(home, ".nanite", "agents"), "user-agent.md", "user-agent")
+	writeAgentFile(t, filepath.Join(pluginsDir, "example-plugin", "agents"), "plugin-agent.md", "plugin-agent")
+
+	// DiscoverOptions no longer carries HomeDir/PluginsDir fields at all
+	// (removed alongside the tiers that read them) — WorkingDir is the only
+	// field left that could theoretically point at project-agent.md, and
+	// even it is not read by any directory-scan tier anymore.
+	defs, err := Discover(DiscoverOptions{WorkingDir: root})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(defs) != 0 {
+		t.Fatalf("got %d definitions, want 0 (project/user/plugin tiers are cut)", len(defs))
+	}
+}
+
+func TestDiscover_SkipsInvalidFiles(t *testing.T) {
+	// discoverDir itself (still used by adapter-based discovery, see
+	// testDirAdapter above) must still skip unparseable/non-.md files —
+	// this behavior is unchanged by the tier removal, only which tiers call
+	// discoverDir changed.
+	root := t.TempDir()
+	dir := filepath.Join(root, ".agentrc", "agents")
 	if err := os.MkdirAll(dir, 0755); err != nil {
 		t.Fatal(err)
 	}
@@ -177,55 +243,12 @@ func TestDiscover_SkipsInvalidFiles(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	defs, err := Discover(DiscoverOptions{WorkingDir: root, HomeDir: t.TempDir()})
+	defs, err := Discover(DiscoverOptions{WorkingDir: root, Adapters: newTestAdapterRegistry()})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
 	if len(defs) != 1 || defs[0].Slug != "good" {
 		t.Errorf("got %v, want 1 agent with slug=good", defs)
-	}
-}
-
-func TestDiscover_ClaudeCodeAgents(t *testing.T) {
-	root := t.TempDir()
-	writeAgentFile(t, filepath.Join(root, ".claude", "agents"), "helper.md", "helper")
-
-	defs, err := Discover(DiscoverOptions{WorkingDir: root, HomeDir: t.TempDir(), Adapters: newTestAdapterRegistry()})
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-
-	if len(defs) != 1 || defs[0].Source != "claude" {
-		t.Errorf("got %v, want 1 agent with source=claude", defs)
-	}
-}
-
-func TestDiscover_SlugDedup(t *testing.T) {
-	root := t.TempDir()
-
-	// Same slug across all 4 project-local sources.
-	writeAgentFile(t, filepath.Join(root, ".nanite", "agents"), "dupe.md", "dupe")
-	writeAgentFile(t, filepath.Join(root, ".agentrc", "agents"), "dupe.md", "dupe")
-	writeAgentFile(t, filepath.Join(root, ".claude", "agents"), "dupe.md", "dupe")
-
-	pluginsDir := filepath.Join(root, "plugins")
-	writeAgentFile(t, filepath.Join(pluginsDir, "myplugin", "agents"), "dupe.md", "dupe")
-
-	defs, err := Discover(DiscoverOptions{
-		WorkingDir: root,
-		HomeDir:    t.TempDir(),
-		PluginsDir: pluginsDir,
-		Adapters:   newTestAdapterRegistry(),
-	})
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-
-	if len(defs) != 1 {
-		t.Fatalf("got %d definitions, want 1 (dedup)", len(defs))
-	}
-	if defs[0].Source != "project" {
-		t.Errorf("source = %q, want %q (highest priority)", defs[0].Source, "project")
 	}
 }

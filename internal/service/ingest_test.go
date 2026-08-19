@@ -97,9 +97,16 @@ func TestAutoIngestSkills_IdempotentReingest(t *testing.T) {
 	}
 }
 
-// TestAutoIngestSkills_VersionBumpsOnContentChange verifies that re-ingesting
-// with a changed prompt bumps the version counter.
-func TestAutoIngestSkills_VersionBumpsOnContentChange(t *testing.T) {
+// TestAutoIngestSkills_ContentChangeDoesNotOverwriteExistingRow is
+// TASKS/phase-1/08's core regression for skills: once a row has been
+// ingested via AutoIngestSkills' boot-time pass, a subsequent boot's
+// re-parse of the same (now-changed) file must NOT overwrite the DB row's
+// content or bump its version -- the file is the first-ingest path, not a
+// standing sync. (Before this fix, re-ingesting with a changed prompt under
+// the same source bumped the version and overwrote the content on every
+// boot -- see this test's prior name/assertions,
+// TestAutoIngestSkills_VersionBumpsOnContentChange.)
+func TestAutoIngestSkills_ContentChangeDoesNotOverwriteExistingRow(t *testing.T) {
 	st := newIngestTestStore(t)
 
 	def := &skillpkg.Definition{
@@ -117,8 +124,58 @@ func TestAutoIngestSkills_VersionBumpsOnContentChange(t *testing.T) {
 	if err != nil || sk == nil {
 		t.Fatalf("GetSkillBySlug: %v, %v", sk, err)
 	}
+	if sk.Version != 1 {
+		t.Errorf("Version should stay frozen at 1 on boot-time reingest, got %d", sk.Version)
+	}
+	if sk.Prompt != "v1 content" {
+		t.Errorf("Prompt: got %q, want frozen v1 content (boot-time reingest must not overwrite an existing row)", sk.Prompt)
+	}
+}
+
+// TestAutoIngestSkills_SourceChangeStillSyncsOnce is the provenance-
+// transition exception to the freeze above: if a skill's source genuinely
+// changes between boots (e.g. the file relocated from one discovery tier to
+// another), that's a deliberate one-time reclassification, not an ordinary
+// repeated boot -- the content sync (and version bump, if content also
+// changed) still happens once.
+func TestAutoIngestSkills_SourceChangeStillSyncsOnce(t *testing.T) {
+	st := newIngestTestStore(t)
+
+	def := &skillpkg.Definition{
+		Name:   "Relocating Skill",
+		Slug:   "relocating-skill",
+		Source: "user",
+		Prompt: "v1 content",
+	}
+	AutoIngestSkills(st, []*skillpkg.Definition{def})
+
+	def.Source = "project"
+	def.Prompt = "v2 content — relocated"
+	AutoIngestSkills(st, []*skillpkg.Definition{def})
+
+	sk, err := st.GetSkillBySlug("relocating-skill")
+	if err != nil || sk == nil {
+		t.Fatalf("GetSkillBySlug: %v, %v", sk, err)
+	}
+	if sk.Source != "project" {
+		t.Errorf("Source: got %q, want %q after the provenance transition", sk.Source, "project")
+	}
+	if sk.Prompt != "v2 content — relocated" {
+		t.Errorf("Prompt: got %q, want the synced v2 content", sk.Prompt)
+	}
 	if sk.Version != 2 {
-		t.Errorf("Version should be 2 after content change, got %d", sk.Version)
+		t.Errorf("Version should bump once on the provenance-transition sync, got %d", sk.Version)
+	}
+
+	// A further boot pass under the new (now-stable) source freezes again.
+	def.Prompt = "v3 content — should be ignored"
+	AutoIngestSkills(st, []*skillpkg.Definition{def})
+	sk2, err := st.GetSkillBySlug("relocating-skill")
+	if err != nil || sk2 == nil {
+		t.Fatalf("GetSkillBySlug (2nd check): %v, %v", sk2, err)
+	}
+	if sk2.Prompt != "v2 content — relocated" {
+		t.Errorf("Prompt after re-freeze: got %q, want frozen v2 content", sk2.Prompt)
 	}
 }
 
@@ -481,9 +538,17 @@ func TestAutoIngestAgents_H1TrustTierPlugin(t *testing.T) {
 	}
 }
 
-// TestAutoIngestAgents_UpdateOnReingest verifies that re-ingesting an agent
-// with changed system prompt updates the DB row.
-func TestAutoIngestAgents_UpdateOnReingest(t *testing.T) {
+// TestAutoIngestAgents_ReingestDoesNotOverwriteExistingRow is
+// TASKS/phase-1/08's core regression ("kill the file-reingest-on-boot
+// pattern, in full"): once a row has been ingested via AutoIngestAgents'
+// boot-time pass, a subsequent boot's re-parse of the same (now-changed)
+// file must NOT overwrite the DB row's content, for any source (project,
+// user, plugin, internal alike) -- the file stays the first-ingest path,
+// not a standing sync that runs unconditionally on every process start.
+// (This test previously asserted the opposite -- the old always-overwrite
+// behavior this task kills -- under the name
+// TestAutoIngestAgents_UpdateOnReingest.)
+func TestAutoIngestAgents_ReingestDoesNotOverwriteExistingRow(t *testing.T) {
 	st := newIngestTestStore(t)
 
 	def := &agentpkg.Definition{
@@ -494,16 +559,258 @@ func TestAutoIngestAgents_UpdateOnReingest(t *testing.T) {
 	}
 	AutoIngestAgents(st, []*agentpkg.Definition{def}, nil)
 
-	// Change the system prompt and re-ingest.
-	def.SystemPrompt = "v2 prompt — updated"
+	// Change the system prompt and re-ingest via the same boot-time path
+	// (simulates the file on disk changing, or simply being re-parsed
+	// verbatim, on a subsequent Nanite restart).
+	def.SystemPrompt = "v2 prompt — should be ignored"
 	AutoIngestAgents(st, []*agentpkg.Definition{def}, nil)
 
 	a, err := st.GetAgentBySlug("update-agent")
 	if err != nil {
 		t.Fatalf("GetAgentBySlug: %v", err)
 	}
-	if a.SystemPrompt != "v2 prompt — updated" {
-		t.Errorf("SystemPrompt: got %q, want updated value", a.SystemPrompt)
+	if a.SystemPrompt != "v1 prompt" {
+		t.Errorf("SystemPrompt: got %q, want frozen v1 value (boot-time reingest must not overwrite an existing row)", a.SystemPrompt)
+	}
+}
+
+// TestIngestAgentDefinition_ExplicitReimportStillSyncs proves the other half
+// of TASKS/phase-1/08's contract: IngestAgentDefinition -- the explicit,
+// deliberate reimport path used by AgentConfigService.writeManaged /
+// SaveManagedAgentProfile immediately after a managed agent's file is
+// written -- is NOT subject to the boot-time freeze. It always
+// content-syncs, even when a row already exists under the same source; this
+// is the one legitimate "pull this file's content into the DB" action the
+// task explicitly preserves.
+func TestIngestAgentDefinition_ExplicitReimportStillSyncs(t *testing.T) {
+	st := newIngestTestStore(t)
+
+	def := &agentpkg.Definition{
+		Slug:         "managed-agent",
+		Name:         "Managed Agent",
+		SystemPrompt: "v1 prompt",
+		Source:       "user",
+	}
+	if err := IngestAgentDefinition(st, def); err != nil {
+		t.Fatalf("IngestAgentDefinition (create): %v", err)
+	}
+
+	def.SystemPrompt = "v2 prompt — deliberate edit"
+	if err := IngestAgentDefinition(st, def); err != nil {
+		t.Fatalf("IngestAgentDefinition (reimport): %v", err)
+	}
+
+	a, err := st.GetAgentBySlug("managed-agent")
+	if err != nil {
+		t.Fatalf("GetAgentBySlug: %v", err)
+	}
+	if a.SystemPrompt != "v2 prompt — deliberate edit" {
+		t.Errorf("SystemPrompt: got %q, want the deliberate reimport's updated value (explicit reimport must not be frozen)", a.SystemPrompt)
+	}
+}
+
+// TestAutoIngestAgents_DBEditSurvivesBootReingest is TASKS/phase-1/08's
+// literal Done-means scenario, simulated at the ingest layer: a DB-side
+// edit to an agent's content -- however it landed (REST API PATCH, an
+// agent_update self-tool call, etc.) -- must survive a subsequent boot's
+// AutoIngestAgents pass, even though the backing definition (standing in
+// for the file discovery would re-parse) still carries its original
+// content.
+func TestAutoIngestAgents_DBEditSurvivesBootReingest(t *testing.T) {
+	st := newIngestTestStore(t)
+
+	def := &agentpkg.Definition{
+		Slug:         "project-agent",
+		Name:         "Project Agent",
+		SystemPrompt: "file-authored prompt",
+		Source:       "project",
+	}
+	if n := AutoIngestAgents(st, []*agentpkg.Definition{def}, nil); n != 1 {
+		t.Fatalf("expected 1 ingested agent, got %d", n)
+	}
+
+	// Simulate a DB-side edit landing outside the file-parse path.
+	if _, err := st.DB.Exec(
+		`UPDATE agent_profiles SET system_prompt = ? WHERE slug = ?`,
+		"DB-edited prompt", "project-agent",
+	); err != nil {
+		t.Fatalf("simulate DB edit: %v", err)
+	}
+
+	// Re-run the boot-time pass with the unchanged file-derived def.
+	AutoIngestAgents(st, []*agentpkg.Definition{def}, nil)
+
+	a, err := st.GetAgentBySlug("project-agent")
+	if err != nil {
+		t.Fatalf("GetAgentBySlug: %v", err)
+	}
+	if a.SystemPrompt != "DB-edited prompt" {
+		t.Errorf("SystemPrompt: got %q, want the DB edit to survive the boot-time reingest", a.SystemPrompt)
+	}
+}
+
+// TestAutoIngestAgents_DirectDBMutationToInternalProfileSurvivesBootReingest
+// is TASKS/phase-2/05-freeze-internal-agent-profiles-on-reingest.md's own
+// literal Done-means scenario, targeted specifically at source="internal"
+// (the profile class that task exists to protect) rather than the generic
+// source used by TestAutoIngestAgents_DBEditSurvivesBootReingest above.
+// upsertAgentDef's freeze (TASKS/phase-1/08, `bootPass && existing.Source ==
+// profile.Source`) is fully source-agnostic and already covers this case as
+// a special case of the general rule -- proven indirectly by
+// TestAutoIngestAgents_SourceFlipFromBuiltinToInternal's third pass (a
+// changed in-memory def is ignored once frozen at source="internal"). This
+// test closes the remaining literal gap: a mutation applied directly to the
+// DB row (standing in for however the edit landed -- REST PATCH, the
+// agent_update self-tool, manual SQL) rather than via a second
+// AutoIngestAgents call with a mutated def.
+func TestAutoIngestAgents_DirectDBMutationToInternalProfileSurvivesBootReingest(t *testing.T) {
+	st := newIngestTestStore(t)
+
+	def := &agentpkg.Definition{
+		Slug:         "internal-profile-under-test",
+		Name:         "Internal Profile Under Test",
+		SystemPrompt: "compiled-in prompt v1",
+		Source:       "internal",
+	}
+	if n := AutoIngestAgents(st, []*agentpkg.Definition{def}, nil); n != 1 {
+		t.Fatalf("expected 1 ingested agent, got %d", n)
+	}
+
+	// Simulate a DB-side edit landing outside the file-parse path (e.g. a
+	// PATCH through the REST API, or -- pre-task-34 -- the agent_update
+	// self-tool).
+	if _, err := st.DB.Exec(
+		`UPDATE agent_profiles SET system_prompt = ? WHERE slug = ?`,
+		"DB-edited prompt", "internal-profile-under-test",
+	); err != nil {
+		t.Fatalf("simulate DB edit: %v", err)
+	}
+
+	// Re-run the boot-time pass with the unchanged file-derived def (the
+	// compiled-in builtin/internal profile content never changed).
+	if n := AutoIngestAgents(st, []*agentpkg.Definition{def}, nil); n != 1 {
+		t.Fatalf("expected 1 ingested agent on re-run, got %d", n)
+	}
+
+	a, err := st.GetAgentBySlug("internal-profile-under-test")
+	if err != nil {
+		t.Fatalf("GetAgentBySlug: %v", err)
+	}
+	if a.SystemPrompt != "DB-edited prompt" {
+		t.Errorf("SystemPrompt: got %q, want the DB edit to survive the boot-time reingest of a source=internal profile", a.SystemPrompt)
+	}
+}
+
+// TestAutoIngestAgents_NewFileStillIngestedAlongsideFrozenRow proves
+// TASKS/phase-1/08's explicit non-regression requirement: freezing an
+// already-ingested row must not block first-ingest of a genuinely new file
+// discovered in the same (or a later) boot-time pass.
+// TestAutoIngestAgents_NewInternalDefStillIngestedAlongsideFrozenRow is the
+// Round 2 rewrite of the original
+// TestAutoIngestAgents_NewFileStillIngestedAlongsideFrozenRow (TASKS/phase-1/08
+// Round 1). That test proved a brand-new *project*-sourced file, discovered
+// alongside an already-frozen row in the same boot batch, still got
+// first-ingested — exactly the standing "keep discovering and ingesting new
+// project/user/plugin files forever" behavior Round 2 removes at the
+// agent.Discover layer (a file dropped into .nanite/agents/ is no longer
+// discovered at all, so AutoIngestAgents never sees such a def in practice).
+//
+// AutoIngestAgents itself is still source-agnostic, though — it ingests
+// whatever []*Definition it's handed, regardless of where the caller got the
+// list from. That generic behavior is still real and still load-bearing:
+// when a new release ships an additional compiled-in builtin/internal
+// profile, AutoIngestAgents' next boot-time pass must still create that new
+// row even though every other already-ingested internal profile in the same
+// batch stays frozen. This rewrite proves exactly that scenario, using
+// Source: "internal" (a source that can still legitimately produce a new def
+// post-cut) instead of "project" (which no longer reaches AutoIngestAgents
+// at all).
+func TestAutoIngestAgents_NewInternalDefStillIngestedAlongsideFrozenRow(t *testing.T) {
+	st := newIngestTestStore(t)
+
+	existingDef := &agentpkg.Definition{
+		Slug:         "already-there",
+		Name:         "Already There",
+		SystemPrompt: "v1",
+		Source:       "internal",
+	}
+	AutoIngestAgents(st, []*agentpkg.Definition{existingDef}, nil)
+
+	// Second boot: the existing def's compiled content "changed" (must
+	// freeze) and a new internal profile shipped in this release (must
+	// still be created).
+	existingDef.SystemPrompt = "v2 -- should be ignored"
+	newDef := &agentpkg.Definition{
+		Slug:         "brand-new",
+		Name:         "Brand New",
+		SystemPrompt: "hello",
+		Source:       "internal",
+	}
+	n := AutoIngestAgents(st, []*agentpkg.Definition{existingDef, newDef}, nil)
+	if n != 2 {
+		t.Fatalf("expected both defs to report as ingested (frozen no-op still counts as success), got %d", n)
+	}
+
+	frozen, err := st.GetAgentBySlug("already-there")
+	if err != nil {
+		t.Fatalf("GetAgentBySlug already-there: %v", err)
+	}
+	if frozen.SystemPrompt != "v1" {
+		t.Errorf("already-there SystemPrompt: got %q, want frozen v1", frozen.SystemPrompt)
+	}
+
+	created, err := st.GetAgentBySlug("brand-new")
+	if err != nil {
+		t.Fatalf("GetAgentBySlug brand-new: %v", err)
+	}
+	if created.SystemPrompt != "hello" {
+		t.Errorf("brand-new SystemPrompt: got %q, want %q (a new internal/builtin def in the same batch must still ingest)", created.SystemPrompt, "hello")
+	}
+}
+
+// TestAutoIngestAgents_RolesTableUntouched is TASKS/phase-1/08's negative
+// verification for its "role reingest" landmine item: the roles table
+// (TASKS/phase-1/01-add-roles-table-and-cascade-resolution.md) has zero
+// file-reingest path of its own -- confirmed by code review (grep across
+// internal/ found store.CreateRole/UpdateRole called only from
+// internal/api/roles.go's REST handlers; no boot-time or file-parse call
+// site references either function) and reinforced here at the ingest-pass
+// level: running AutoIngestAgents/AutoIngestSkills must never create,
+// alter, or seed a roles row.
+func TestAutoIngestAgents_RolesTableUntouched(t *testing.T) {
+	st := newIngestTestStore(t)
+
+	// The only supported write path for roles is store.CreateRole (the REST
+	// API) -- seed one directly so the boot passes below can be proven not
+	// to touch it, in either direction (no accidental creation of a second
+	// row, no accidental mutation of this one).
+	role := &store.Role{Slug: "sme", Name: "Subject Matter Expert", SystemPrompt: "v1"}
+	if err := st.CreateRole(role); err != nil {
+		t.Fatalf("CreateRole: %v", err)
+	}
+
+	agentDefs := []*agentpkg.Definition{
+		{Slug: "some-agent", Name: "Some Agent", SystemPrompt: "x", Source: "project"},
+	}
+	skillDefs := []*skillpkg.Definition{
+		{Slug: "some-skill", Name: "Some Skill", Source: "user", Prompt: "x"},
+	}
+	AutoIngestAgents(st, agentDefs, nil)
+	AutoIngestSkills(st, skillDefs)
+
+	roles, err := st.ListRoles()
+	if err != nil {
+		t.Fatalf("ListRoles: %v", err)
+	}
+	if len(roles) != 1 {
+		t.Fatalf("expected exactly the 1 directly-seeded role to remain, got %d -- AutoIngestAgents/AutoIngestSkills must never write to roles", len(roles))
+	}
+	got, err := st.GetRoleBySlug("sme")
+	if err != nil || got == nil {
+		t.Fatalf("GetRoleBySlug: %v, %v", got, err)
+	}
+	if got.SystemPrompt != "v1" {
+		t.Errorf("SystemPrompt: got %q, want unchanged %q (AutoIngestAgents/AutoIngestSkills must never write to roles)", got.SystemPrompt, "v1")
 	}
 }
 
@@ -569,6 +876,23 @@ func TestAutoIngestAgents_SourceFlipFromBuiltinToInternal(t *testing.T) {
 	if got.SystemPrompt != "new body from internal/agent/builtin/profiles/<slug>.md" {
 		t.Errorf("SystemPrompt: got %q, want updated file-SOT body", got.SystemPrompt)
 	}
+
+	// TASKS/phase-1/08 extension: once the row has flipped to source=
+	// 'internal', a further boot-time pass must freeze it -- the flip is a
+	// one-time provenance transition, not a standing sync. Without this
+	// third pass, this test would only prove the flip works, not that
+	// upsertAgentDef's freeze actually engages afterward.
+	def.SystemPrompt = "third body -- should be ignored, row is now frozen"
+	if n := AutoIngestAgents(st, []*agentpkg.Definition{def}, nil); n != 1 {
+		t.Fatalf("AutoIngestAgents count (3rd pass): got %d, want 1", n)
+	}
+	gotAfterFreeze, err := st.GetAgentBySlug(slug)
+	if err != nil {
+		t.Fatalf("GetAgentBySlug (3rd pass): %v", err)
+	}
+	if gotAfterFreeze.SystemPrompt != "new body from internal/agent/builtin/profiles/<slug>.md" {
+		t.Errorf("SystemPrompt after freeze: got %q, want the 2nd-pass body to stay frozen", gotAfterFreeze.SystemPrompt)
+	}
 }
 
 // TestAutoIngestSkills_EmptyDefsIsNoOp verifies that passing an empty def slice
@@ -591,20 +915,16 @@ func TestAutoIngestAgents_EmptyDefsIsNoOp(t *testing.T) {
 	}
 }
 
-// TestAutoIngestSkills_ResolvesModeSlugsToIDs is the E2 (CW-20260428-0017)
-// happy-path: a skill frontmatter with `modes: [plan, work]` is ingested with
-// the corresponding mode IDs serialized into mode_ids. Unknown slugs are
-// dropped silently (warnings logged) so a typo doesn't crash boot.
-func TestAutoIngestSkills_ResolvesModeSlugsToIDs(t *testing.T) {
+// TestAutoIngestSkills_StoresModeSlugsUnresolved is the E2 (CW-20260428-0017)
+// happy-path, updated for Phase 0 item 21 ("Cut Modes, in full"): a skill
+// frontmatter with `modes: [plan, work]` is ingested with those slugs
+// serialized directly into mode_ids. Before the cut, resolveSkillModeIDs
+// resolved each slug against the now-deleted `modes` catalog table (dropping
+// unresolved slugs); there is no more catalog to resolve against, so the
+// slugs are now stored as their own identity, unresolved — see
+// resolveSkillModeIDs's doc comment in ingest.go.
+func TestAutoIngestSkills_StoresModeSlugsUnresolved(t *testing.T) {
 	st := newIngestTestStore(t)
-	plan := &store.Mode{Slug: "plan", Name: "Plan"}
-	work := &store.Mode{Slug: "work", Name: "Work"}
-	if err := st.CreateMode(plan); err != nil {
-		t.Fatalf("CreateMode plan: %v", err)
-	}
-	if err := st.CreateMode(work); err != nil {
-		t.Fatalf("CreateMode work: %v", err)
-	}
 
 	defs := []*skillpkg.Definition{
 		{
@@ -632,8 +952,14 @@ func TestAutoIngestSkills_ResolvesModeSlugsToIDs(t *testing.T) {
 		t.Fatal("plan-bound not in DB")
 	}
 	gotIDs := store.ParseSkillModeIDs(planSkill.ModeIDs)
-	if len(gotIDs) != 1 || gotIDs[0] != plan.ID {
-		t.Fatalf("plan-bound mode_ids: got %v, want [%q]", gotIDs, plan.ID)
+	wantIDs := []string{"plan", "nonexistent"}
+	if len(gotIDs) != len(wantIDs) {
+		t.Fatalf("plan-bound mode_ids: got %v, want %v", gotIDs, wantIDs)
+	}
+	for i, want := range wantIDs {
+		if gotIDs[i] != want {
+			t.Errorf("plan-bound mode_ids[%d] = %q, want %q", i, gotIDs[i], want)
+		}
 	}
 
 	universal, err := st.GetSkillBySlug("universal-skill")

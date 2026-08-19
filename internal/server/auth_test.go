@@ -19,7 +19,7 @@ func TestAuthMiddlewareDisabled(t *testing.T) {
 
 	handler := basicAuthMiddleware(dummyHandler)
 
-	req := httptest.NewRequest("GET", "/api/workspaces", nil)
+	req := httptest.NewRequest("GET", "/api/sessions", nil)
 	w := httptest.NewRecorder()
 	handler.ServeHTTP(w, req)
 
@@ -35,7 +35,7 @@ func TestAuthMiddlewareEnabled(t *testing.T) {
 	handler := basicAuthMiddleware(dummyHandler)
 
 	// Request without credentials.
-	req := httptest.NewRequest("GET", "/api/workspaces", nil)
+	req := httptest.NewRequest("GET", "/api/sessions", nil)
 	w := httptest.NewRecorder()
 	handler.ServeHTTP(w, req)
 
@@ -44,7 +44,7 @@ func TestAuthMiddlewareEnabled(t *testing.T) {
 	}
 
 	// Request with correct credentials.
-	req = httptest.NewRequest("GET", "/api/workspaces", nil)
+	req = httptest.NewRequest("GET", "/api/sessions", nil)
 	req.SetBasicAuth("admin", "secret")
 	w = httptest.NewRecorder()
 	handler.ServeHTTP(w, req)
@@ -54,7 +54,7 @@ func TestAuthMiddlewareEnabled(t *testing.T) {
 	}
 
 	// Request with wrong credentials.
-	req = httptest.NewRequest("GET", "/api/workspaces", nil)
+	req = httptest.NewRequest("GET", "/api/sessions", nil)
 	req.SetBasicAuth("admin", "wrong")
 	w = httptest.NewRecorder()
 	handler.ServeHTTP(w, req)

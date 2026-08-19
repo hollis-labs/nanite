@@ -57,14 +57,18 @@ func newDurableAgentServiceTestStore(t *testing.T) *store.Store {
 	return st
 }
 
+// TestDurableAgentServiceLifecycleRequests is a Phase 0 item 2
+// (RequestStart fix) regression test: RequestStart used to be a no-op
+// status flip to start_requested with nothing downstream ever driving it
+// further. It now calls straight through to Start (mirroring
+// RequestResume's call-through-to-Resume shape), so a sleeping instance
+// with an already-attached, reusable session actually launches and reaches
+// active status with that session attached — not stuck at start_requested.
 func TestDurableAgentServiceLifecycleRequests(t *testing.T) {
 	st := newDurableAgentServiceTestStore(t)
 	profile := &store.AgentProfile{Name: "Svc Agent", Slug: "svc-agent", SystemPrompt: "x"}
 	if err := st.CreateAgent(profile); err != nil {
 		t.Fatalf("CreateAgent: %v", err)
-	}
-	if err := st.CreateWorkspace(&store.Workspace{ID: "workspace-a", Name: "Workspace A"}); err != nil {
-		t.Fatalf("CreateWorkspace: %v", err)
 	}
 	svc := NewDurableAgentService(st)
 	inst := &store.DurableAgentInstance{
@@ -76,13 +80,30 @@ func TestDurableAgentServiceLifecycleRequests(t *testing.T) {
 	if err := svc.Create(context.Background(), inst); err != nil {
 		t.Fatalf("Create: %v", err)
 	}
+	// RequestStart calls through to Start with an empty
+	// DurableAgentStartRequest{} (no workspace_id, same as
+	// RequestResume/Resume) — so a fresh instance with no attached
+	// session needs a pre-attached, reusable session for the
+	// advisor-class default ReuseLatestOrCreate policy to find. This
+	// mirrors a real "sleeping instance that already has a session, wake
+	// it back up" scenario.
+	sess := &store.Session{Title: "svc instance session", Provider: "anthropic", Model: "model-a"}
+	if err := st.CreateSession(sess); err != nil {
+		t.Fatalf("CreateSession: %v", err)
+	}
+	if err := st.AttachDurableAgentInstanceSession(inst.ID, sess.ID, store.DurableAgentSessionRelationPrimary); err != nil {
+		t.Fatalf("AttachDurableAgentInstanceSession: %v", err)
+	}
 
 	started, err := svc.RequestStart(context.Background(), inst.ID)
 	if err != nil {
 		t.Fatalf("RequestStart: %v", err)
 	}
-	if started.Status != store.DurableAgentStatusStartRequested {
-		t.Fatalf("status = %q, want start_requested", started.Status)
+	if started.Status != store.DurableAgentStatusActive {
+		t.Fatalf("status = %q, want active", started.Status)
+	}
+	if started.CurrentSessionID != sess.ID {
+		t.Fatalf("current_session_id = %q, want %q", started.CurrentSessionID, sess.ID)
 	}
 	paused, err := svc.RequestPause(context.Background(), inst.ID)
 	if err != nil {
@@ -221,9 +242,6 @@ func TestDurableAgentStartCreatesOrReusesSession(t *testing.T) {
 	if err := st.CreateAgent(profile); err != nil {
 		t.Fatalf("CreateAgent: %v", err)
 	}
-	if err := st.CreateWorkspace(&store.Workspace{ID: "workspace-a", Name: "Workspace A"}); err != nil {
-		t.Fatalf("CreateWorkspace: %v", err)
-	}
 	svc := NewDurableAgentService(st)
 	inst := &store.DurableAgentInstance{
 		Name:             "Start Instance",
@@ -239,7 +257,7 @@ func TestDurableAgentStartCreatesOrReusesSession(t *testing.T) {
 		t.Fatalf("Create: %v", err)
 	}
 
-	first, err := svc.Start(context.Background(), inst.ID, DurableAgentStartRequest{WorkspaceID: "workspace-a"})
+	first, err := svc.Start(context.Background(), inst.ID, DurableAgentStartRequest{})
 	if err != nil {
 		t.Fatalf("Start first: %v", err)
 	}
@@ -260,7 +278,7 @@ func TestDurableAgentStartCreatesOrReusesSession(t *testing.T) {
 		t.Fatalf("relations = %+v", rels)
 	}
 
-	second, err := svc.Start(context.Background(), inst.ID, DurableAgentStartRequest{WorkspaceID: "workspace-a"})
+	second, err := svc.Start(context.Background(), inst.ID, DurableAgentStartRequest{})
 	if err != nil {
 		t.Fatalf("Start second: %v", err)
 	}
@@ -285,9 +303,6 @@ func TestDurableAgentProcessStartCreatesFreshWakeSession(t *testing.T) {
 	if err := st.CreateAgent(profile); err != nil {
 		t.Fatalf("CreateAgent: %v", err)
 	}
-	if err := st.CreateWorkspace(&store.Workspace{ID: "workspace-a", Name: "Workspace A"}); err != nil {
-		t.Fatalf("CreateWorkspace: %v", err)
-	}
 	svc := NewDurableAgentService(st)
 	inst := &store.DurableAgentInstance{
 		Name:             "Process Instance",
@@ -302,11 +317,11 @@ func TestDurableAgentProcessStartCreatesFreshWakeSession(t *testing.T) {
 	if err := svc.Create(context.Background(), inst); err != nil {
 		t.Fatalf("Create: %v", err)
 	}
-	first, err := svc.Start(context.Background(), inst.ID, DurableAgentStartRequest{WorkspaceID: "workspace-a"})
+	first, err := svc.Start(context.Background(), inst.ID, DurableAgentStartRequest{})
 	if err != nil {
 		t.Fatalf("Start first: %v", err)
 	}
-	second, err := svc.Start(context.Background(), inst.ID, DurableAgentStartRequest{WorkspaceID: "workspace-a"})
+	second, err := svc.Start(context.Background(), inst.ID, DurableAgentStartRequest{})
 	if err != nil {
 		t.Fatalf("Start second: %v", err)
 	}
@@ -363,9 +378,6 @@ func TestDurableAgentResumeArmsRecovery(t *testing.T) {
 	if err := st.CreateAgent(profile); err != nil {
 		t.Fatalf("CreateAgent: %v", err)
 	}
-	if err := st.CreateWorkspace(&store.Workspace{ID: "workspace-a", Name: "Workspace A"}); err != nil {
-		t.Fatalf("CreateWorkspace: %v", err)
-	}
 	runtime := &fakeDurableRuntimeController{}
 	svc := NewDurableAgentServiceWithRuntime(st, runtime)
 	inst := &store.DurableAgentInstance{
@@ -381,7 +393,7 @@ func TestDurableAgentResumeArmsRecovery(t *testing.T) {
 	if err := svc.Create(context.Background(), inst); err != nil {
 		t.Fatalf("Create: %v", err)
 	}
-	started, err := svc.Start(context.Background(), inst.ID, DurableAgentStartRequest{WorkspaceID: "workspace-a"})
+	started, err := svc.Start(context.Background(), inst.ID, DurableAgentStartRequest{})
 	if err != nil {
 		t.Fatalf("Start: %v", err)
 	}

@@ -21,15 +21,20 @@ import (
 // error class. See the W3 implementer report for the full restriction
 // survey.
 //
-// Surviving fields are the Phase-4 chat-loop runaway breakers (soft
-// max-turn warning, hard ceiling on iterations, consecutive/runaway
-// failure caps, and the chat-loop idle wall) which are different in
-// kind from a "this agent must finish by N seconds" deadline — they
-// catch local pathologies (tool storming, no progress) rather than
-// bounding total wall time.
+// Surviving fields are the Phase-4 chat-loop runaway breakers (hard
+// ceiling on iterations, consecutive/runaway failure caps, and the
+// chat-loop idle wall) which are different in kind from a "this agent
+// must finish by N seconds" deadline — they catch local pathologies
+// (tool storming, no progress) rather than bounding total wall time.
+//
+// CW-20260818 (Phase 0 item 12): MaxTurns (a soft, telemetry-only
+// budget that only fired a warning and never stopped the loop) was
+// removed here, alongside the strategy planner's own soft MaxTurns
+// (Phase 0 item 11). The real, hard stoppers below — RunawayFailCap,
+// HardCeiling, IdleTimeoutSeconds — plus the natural end_turn stop
+// signal are the surviving termination bounds.
 type AgentConstraints struct {
 	// Phase 4 — Chat Loop Hardening.
-	MaxTurns    int `json:"max_turns"`    // 0=default(25), -1=unlimited, >0=value
 	HardCeiling int `json:"hard_ceiling"` // 0=default(100), absolute max turns
 	// ConsecutiveFailCap is the soft-warning threshold. CW-20260417-0485:
 	// reaching this count no longer terminates the loop — it only drives the
@@ -238,26 +243,52 @@ type Usage struct {
 }
 
 // PresenceEvent is broadcast to all connected presence clients.
+//
+// Phase 0 item 21 ("Cut Modes, in full") removed the `session_mode_changed`
+// event type and its ModeID/ModeSlug fields — Session Mode is gone.
 type PresenceEvent struct {
-	Type      string `json:"type"` // stream_start, stream_end, tool_pending, tool_resolved, session_archived, work_changed, session_mode_changed (F1)
+	Type      string `json:"type"` // stream_start, stream_end, tool_pending, tool_resolved, session_archived, work_changed
 	SessionID string `json:"session_id"`
 	AgentID   string `json:"agent_id,omitempty"`
 	ToolName  string `json:"tool_name,omitempty"`
 	Timestamp string `json:"timestamp"`
-	// ModeID and ModeSlug are populated for `session_mode_changed` events
-	// (F1, CW-20260429-0001). Both are empty when the session pointer is
-	// cleared. FE consumers invalidate their session-mode query on receipt.
-	ModeID   string `json:"mode_id,omitempty"`
-	ModeSlug string `json:"mode_slug,omitempty"`
 }
 
 // IsCLIProvider returns true if the provider name is any CLI adapter variant
 // (PTY bridge or subprocess bridge).
+//
+// Phase 2 item 01 (TASKS/phase-2/01-wire-runtime-kind-routing.md):
+// agent_profiles.runtime_kind ("cli" | "api") is now the authoritative
+// CLI-vs-API ROUTING decision (architecture/02-agent-launching.md, "CLI-vs-
+// API routing is an explicit typed field") — see
+// chatServiceImpl.classifyNilProvider, the actual decision point.
+// IsCLIProvider itself is NOT deleted: it remains a legitimate string-shape
+// classifier for two narrower, still-live purposes that are not the
+// routing decision itself: (1) an OR'd fallback inside classifyNilProvider
+// for the two cases where runtime_kind isn't populated or isn't
+// authoritative yet — a file-discovered agent profile with no DB row (no
+// frontmatter representation for runtime_kind at all; see
+// classifyNilProvider's own doc comment in service/chat.go for why this
+// case is very likely fully dead as of TASKS/adhoc/01-eliminate-file-based-
+// agent-runtime.md, left untouched here as out of that task's scope), and
+// a boot-profile-catalog-driven session, whose
+// cliRoutableProvider (chat_bootprofile_resolve.go) synthesizes a
+// "pty-<adapter>" alias to force CLI routing independent of whichever
+// agent happens to be bound to the session (that whole mechanism is
+// retired in full by TASKS/phase-2/04-retire-boot-profile-catalog.md, at
+// which point this fallback becomes dead and should be deleted); and (2)
+// telemetry/UI-presence gates elsewhere in chat_generate.go (PTY
+// tool-pending broadcasts, the pty_turn_start observability event) that
+// run strictly downstream of the already-decided route and merely mirror
+// it for logging, not for deciding it.
 func IsCLIProvider(name string) bool {
 	return name == "pty" || strings.HasPrefix(name, "pty-") || strings.HasPrefix(name, "sub-")
 }
 
 // IsPTYProvider returns true if the provider name is any PTY adapter variant.
+// Same post-decision, non-routing status as IsCLIProvider above — used only
+// for downstream telemetry/observability gating in chat_generate.go, not for
+// deciding CLI-vs-API routing (that's runtime_kind's job as of Phase 2 item 01).
 func IsPTYProvider(name string) bool {
 	return name == "pty" || strings.HasPrefix(name, "pty-")
 }
@@ -280,15 +311,21 @@ func IsPTYProvider(name string) bool {
 //   - anything else      → unchanged
 //
 // Non-CLI provider names ("anthropic", "openai", etc.) flow through
-// unchanged. This is the single source of truth consulted by:
+// unchanged.
 //
-//   - chat_generate.go's CLI bypass when the registry returns prov == nil
-//   - runtime/agent bootdir.go's layout dispatch
-//   - runtime/agent factory.go's shouldUsePTY check
+// Phase 2 item 01: this is NOT a CLI-vs-API routing decision (runtime_kind
+// is) — it is a post-decision, string-shape helper that derives the bare
+// adapter name once CLI routing is already known, consulted by:
+//
+//   - runtime/agent bootdir.go's layout dispatch (which CLI adapter —
+//     claude/codex/opencode — not whether to use one)
+//   - runtime/agent factory.go's normalizeProviderName (kept warm for
+//     future PTY-capable adapters; shouldUsePTY itself decides nothing
+//     CLI-vs-API, see that function's own doc comment)
 //   - service/agent_deps.go's stripRegistryPrefix (which delegates here)
 //
-// so the four sites can't drift from each other when a new CLI flavor
-// lands.
+// so these string-shape sites can't drift from each other when a new CLI
+// flavor lands.
 func NormalizeCLIProvider(name string) string {
 	if name == "pty" {
 		return "claude"
@@ -307,7 +344,7 @@ func NormalizeCLIProvider(name string) string {
 //
 //  1. Exact lookup in the canonical registry (pkg/models).
 //  2. Gateway-prefix helper for bare prefixed IDs not yet registered.
-//  3. Prefix-routing fallbacks for unregistered OpenAI/Ollama families.
+//  3. Prefix-routing fallback for unregistered OpenAI families.
 //  4. seedcatalog.DefaultProviderType as the routing floor.
 //
 // Note: this is a ROUTING decision (which provider should handle this
@@ -328,22 +365,26 @@ func InferProvider(model string) string {
 	if p, ok := models.ProviderHasPrefix(model); ok {
 		return p
 	}
-	// Unregistered-model fallbacks. Keep OpenAI GPT family and
-	// Ollama-style local names routable until the registry is expanded or
-	// the operator registers the row explicitly. Mistral API models are
-	// intentionally not prefix-matched here (see audit 02): Mistral API
-	// IDs end with "-latest" and must be registered to resolve correctly.
+	// Unregistered-model fallback. Keep OpenAI GPT family routable until
+	// the registry is expanded or the operator registers the row
+	// explicitly. Mistral API models are intentionally not prefix-matched
+	// here (see audit 02): Mistral API IDs end with "-latest" and must be
+	// registered to resolve correctly.
+	//
+	// A prior "ollama"-returning branch here (matching llama*/gemma*/
+	// mistral-7b*/"model:tag" names) was removed 2026-08-18 (TASKS/phase-0/
+	// 05-remove-ollama-routing.md): it routed to a provider name that was
+	// never registered in cmd/nanite/main.go's initProviders — Step 6.5
+	// (SP-20260508-0001) had already deliberately dropped Ollama from the
+	// provider catalog (see internal/store/seed.go, pkg/models/registry.go).
+	// Model names matching that old pattern set now fall through to the
+	// DefaultProviderType floor below, same as any other unrecognized name.
 	switch {
 	case strings.HasPrefix(model, "gpt-"),
 		strings.HasPrefix(model, "o1-"),
 		strings.HasPrefix(model, "o3-"),
 		strings.HasPrefix(model, "o4-"):
 		return "openai"
-	case strings.HasPrefix(model, "llama"),
-		strings.HasPrefix(model, "gemma"),
-		strings.HasPrefix(model, "mistral-7b"),
-		strings.Contains(model, ":"): // "model:tag" is an ollama-ism
-		return "ollama"
 	}
 	return seedcatalog.DefaultProviderType
 }

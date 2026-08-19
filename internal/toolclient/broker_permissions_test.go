@@ -15,34 +15,6 @@ import (
 // rules). With uniform names there is exactly one name per tool and one
 // permission check; the bypass surface is gone by construction.
 
-// --- 1. Structured deny return ---
-
-func TestCheckPermission_DenyByExactName(t *testing.T) {
-	// Direct policy-layer deny on the uniform name.
-	p := ToolPermissions{DenyList: []string{"dev_bash"}, MaxCallsPerTurn: 25}
-	if p.CheckPermission("dev_bash") {
-		t.Fatal("expected deny on dev_bash")
-	}
-	if !p.CheckPermission("dev_read") {
-		t.Fatal("expected dev_read to remain allowed")
-	}
-}
-
-func TestCheckPermission_DenyByGlob(t *testing.T) {
-	// Glob deny on the uniform `dev_*` namespace covers every dev tool;
-	// there is no longer a bare-name escape (ADR-002 — single name).
-	p := ToolPermissions{DenyList: []string{"dev_*"}, MaxCallsPerTurn: 25}
-	if p.CheckPermission("dev_bash") {
-		t.Fatal("expected deny on dev_bash via dev_* glob")
-	}
-	if p.CheckPermission("dev_read") {
-		t.Fatal("expected deny on dev_read via dev_* glob")
-	}
-	if !p.CheckPermission("todo_create") {
-		t.Fatal("expected todo_create to remain allowed")
-	}
-}
-
 func TestCallTool_UnknownToolReturnsError(t *testing.T) {
 	// Drive CallTool with a MCPManager but a tool name that is NOT registered,
 	// to confirm the "not found" branch returns a clear error and does
@@ -67,20 +39,19 @@ func TestCallTool_UnknownToolReturnsError(t *testing.T) {
 	}
 }
 
-// --- 2. Builtin permission filtering at SelectToolsAsProvider ---
+// --- 2. Builtin selection at SelectToolsAsProvider ---
 
-func TestSelectToolsAsProvider_BuiltinFilteredThroughPermissions(t *testing.T) {
-	// Build a ToolClient with a builtin tool registered. With Store=nil the
-	// default permissions are permissive, so the builtin should appear. The
-	// important regression assertion here is that SelectToolsAsProvider
-	// *calls* CheckPermission on each builtin rather than blanket-prepending.
-	// We verify that by: (a) registering a builtin and confirming it appears
-	// under permissive policy, and (b) confirming the code path is present by
-	// inspecting the filtered slice's size matches the policy outcome.
+func TestSelectToolsAsProvider_BuiltinsPassThrough(t *testing.T) {
+	// Build a ToolClient with a builtin tool registered. SelectToolsAsProvider
+	// no longer applies any permission filtering of its own
+	// (TASKS/adhoc/02-remove-tool-permissions-collapse-to-agent-tools.md
+	// moved that responsibility entirely to the caller's agent_tools filter,
+	// service/tool.go's filterToolsByAgentTools) -- this just confirms
+	// builtins still pass through uncapped, dev-tool-gate aside.
 	//
 	// Note: dev_* tools are gated behind developer_mode; we use non-dev
-	// builtins here to keep the test focused on permission filtering, not the
-	// dev-mode gate. See devmode_gate_test.go for dev-mode gate coverage.
+	// builtins here to keep the test focused, not the dev-mode gate. See
+	// devmode_gate_test.go for dev-mode gate coverage.
 
 	tb := New(nil, nil, DefaultConfig())
 	tb.Builtins.RegisterBuiltins("self", []llmtypes.ToolDefinition{
@@ -88,57 +59,42 @@ func TestSelectToolsAsProvider_BuiltinFilteredThroughPermissions(t *testing.T) {
 		{Name: "plan_create", Description: "Create a plan"},
 	})
 
-	res, err := tb.SelectToolsAsProvider(context.Background(), "general", nil, "", "agent-permissive")
+	res, err := tb.SelectToolsAsProvider(context.Background(), "general", nil, "", "agent-1")
 	if err != nil {
 		t.Fatalf("SelectToolsAsProvider: %v", err)
 	}
 
-	// Permissive default → both builtins present.
 	names := map[string]bool{}
 	for _, d := range res.Tools {
 		names[d.Name] = true
 	}
 	if !names["todo_create"] || !names["plan_create"] {
-		t.Errorf("expected both builtins under permissive policy, got: %v", names)
-	}
-}
-
-func TestCheckPermission_BuiltinDeniable(t *testing.T) {
-	// Direct policy-layer assertion: a deny_list for a builtin name must take
-	// effect.
-	p := ToolPermissions{
-		DenyList:        []string{"dev_bash"},
-		MaxCallsPerTurn: 25,
-	}
-	if p.CheckPermission("dev_bash") {
-		t.Error("expected dev_bash to be denied by policy")
-	}
-	if !p.CheckPermission("dev_read") {
-		t.Error("expected dev_read to remain allowed")
+		t.Errorf("expected both builtins to pass through, got: %v", names)
 	}
 }
 
 // --- 3. request_tools escalation — name + arg-level checks ---
 
 func TestHandleRequestToolsForAgent_FiltersDeniedInnerNames(t *testing.T) {
-	// With Store=nil we cannot force denies via policy, so we
-	// verify: (a) the permitted path returns all tools under permissive
-	// policy, (b) arg-level escalation triggers an immediate deny regardless
-	// of policy. Tool names are uniform — newTestBrokerWithTools registers
-	// them under the "test" server name, so via the broker their uniform
-	// names are exactly the original names (ADR-002).
+	// With Store=nil, isToolGrantedToAgent default-permits, so we verify:
+	// (a) the permitted path returns all tools under the permissive
+	// nil-Store default, (b) arg-level escalation triggers an immediate
+	// deny regardless of grants. Tool names are uniform —
+	// newTestBrokerWithTools registers them under the "test" server name,
+	// so via the broker their uniform names are exactly the original names
+	// (ADR-002).
 	tools := []llmtypes.ToolDefinition{
-		{Name: "volon_task_create", Description: "Create a task"},
+		{Name: "example_task_create", Description: "Create a task"},
 		{Name: "dev_bash", Description: "Shell execution"},
 	}
 	tb := newTestBrokerWithTools(tools)
 
-	// (a) Permissive policy — all merged tools returned.
-	permitted, summary := tb.HandleRequestToolsForAgent("agent-1", map[string]any{
-		"tool_names": []any{"volon_task_create", "dev_bash"},
+	// (a) Permissive default (nil Store) — all merged tools returned.
+	permitted, summary := tb.HandleRequestToolsForAgent(context.Background(), "agent-1", map[string]any{
+		"tool_names": []any{"example_task_create", "dev_bash"},
 	})
 	if len(permitted) != 2 {
-		t.Errorf("expected 2 permitted tools under permissive policy, got %d (summary: %s)", len(permitted), summary)
+		t.Errorf("expected 2 permitted tools under the permissive default, got %d (summary: %s)", len(permitted), summary)
 	}
 }
 
@@ -147,7 +103,7 @@ func TestHandleRequestToolsForAgent_DeniesPathTraversalArg(t *testing.T) {
 		{Name: "dev_read", Description: "Read files"},
 	})
 
-	permitted, summary := tb.HandleRequestToolsForAgent("agent-1", map[string]any{
+	permitted, summary := tb.HandleRequestToolsForAgent(context.Background(), "agent-1", map[string]any{
 		"tool_names": []any{"dev_read"},
 		"path":       "../../etc/passwd",
 	})
@@ -165,7 +121,7 @@ func TestHandleRequestToolsForAgent_DeniesNestedTraversal(t *testing.T) {
 	})
 
 	// Path-traversal hidden inside a nested map.
-	permitted, summary := tb.HandleRequestToolsForAgent("agent-1", map[string]any{
+	permitted, summary := tb.HandleRequestToolsForAgent(context.Background(), "agent-1", map[string]any{
 		"tool_names": []any{"dev_read"},
 		"options": map[string]any{
 			"target": "safe",

@@ -1,3 +1,4 @@
+-- +goose Up
 -- D1 (CW-20260428-0014): Scope enum (turn|session|project) on
 -- reminders + pinned_content + todos. Adds project-level continuity so
 -- reminders/pins/todos created in one session can surface in any
@@ -101,9 +102,26 @@ CREATE INDEX IF NOT EXISTS idx_todos_project ON todos(project_id);
 
 -- Recreate the updated_at trigger that 003 attached to the original todos
 -- table. The CREATE TRIGGER from 003 was a no-op against the renamed table.
+--
+-- goose's default SQL parser splits statements on a trailing semicolon per
+-- line, which would otherwise chop this trigger's BEGIN...END body into
+-- fragments. StatementBegin/End brackets the whole CREATE TRIGGER as one
+-- atomic statement.
+-- +goose StatementBegin
 CREATE TRIGGER IF NOT EXISTS trg_todos_updated_at
 AFTER UPDATE ON todos
 FOR EACH ROW
 BEGIN
     UPDATE todos SET updated_at = CURRENT_TIMESTAMP WHERE id = OLD.id;
 END;
+-- +goose StatementEnd
+
+-- +goose Down
+-- No down migration: this file predates goose adoption (see
+-- docs/engineering/architecture/05-storage-and-migrations.md, "Migrations:
+-- adopting a real ledger"). Every pre-cutover migration ships a
+-- deliberately empty Down section rather than a hand-derived rollback --
+-- reconstructing the exact pre-migration schema/data shape for 94 files
+-- retroactively isn't worth doing when the historical state it would
+-- recreate has no operational value. New migrations going forward are
+-- expected to carry a real, tested Down.

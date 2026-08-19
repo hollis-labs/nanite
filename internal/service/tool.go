@@ -30,10 +30,9 @@ const chatRoleAgentSlug = "default"
 // ToolSelection holds the result of tool selection, including progressive
 // discovery metadata. Mirrors chat.toolSelection but is owned by the service layer.
 type ToolSelection struct {
-	Tools         []llmtypes.ToolDefinition // tools to send to the LLM
-	Catalog       string                    // non-empty when progressive discovery is active
-	Progressive   bool                      // true when using progressive discovery
-	OverrideBlock string                    // markdown "## Tool Overrides" section composed from per-tool Hints (go-toolbroker); empty when no tool in the final selection has enrichment
+	Tools       []llmtypes.ToolDefinition // tools to send to the LLM
+	Catalog     string                    // non-empty when progressive discovery is active
+	Progressive bool                      // true when using progressive discovery
 }
 
 // ToolResult holds the outcome of a single tool execution.
@@ -70,7 +69,12 @@ type ToolService interface {
 
 	// GetToolMeta returns safety metadata for a tool. Returns false if the
 	// tool is not found in the registry. Used by the permission engine.
-	GetToolMeta(toolName string) (ToolMetaInfo, bool)
+	//
+	// ctx is used to read the tool's declared concurrency-safety
+	// classification from the known_tools catalog (TASKS/phase-4/07-tool-
+	// concurrency-safety-classification.md) -- see the implementation's
+	// doc comment for the full account.
+	GetToolMeta(ctx context.Context, toolName string) (ToolMetaInfo, bool)
 
 	// GetToolSchema returns the InputSchema for a named tool, or nil if the
 	// tool has no schema or is not found. Used by arg validation at execute time.
@@ -90,27 +94,11 @@ type ToolMetaInfo struct {
 // progressive discovery is activated.
 const ProgressiveDiscoveryThreshold = 10
 
-// BrokerDecisionLogger logs tool selection decisions for debugging.
-type BrokerDecisionLogger interface {
-	LogBrokerDecision(sessionID, intent, layerReached string, selectedTools []string, signals string) error
-}
-
-// BrokerDecisionExLogger is the Phase 5 / D3 (CW-20260419-0011) extension.
-// Implementations record every request_tools call (intent + outcome +
-// consecutive_empty + total_calls + reflection_query). *store.Store
-// satisfies it via LogBrokerDecisionEx — the adapter lives here so the
-// service layer doesn't depend on the store package's record shape.
-type BrokerDecisionExLogger interface {
-	BrokerDecisionLogger
-	LogBrokerDecisionEx(e store.BrokerDecisionEntry) error
-}
-
 // toolServiceImpl is the concrete implementation of ToolService.
 type toolServiceImpl struct {
-	toolClient     *toolclient.ToolClient
-	mcpManager     *mcp.Manager
-	agents         AgentReader
-	decisionLogger BrokerDecisionLogger
+	toolClient *toolclient.ToolClient
+	mcpManager *mcp.Manager
+	agents     AgentReader
 
 	// repairConfig wires the C2 LLM-augmented repair pipeline
 	// (CW-20260429-0008). Nil-safe: when unset (or when the cost gates
@@ -168,46 +156,6 @@ func NewToolService(tc *toolclient.ToolClient, mcpMgr *mcp.Manager, agents Agent
 	}
 }
 
-// SetDecisionLogger attaches a broker decision logger (typically *store.Store).
-func (s *toolServiceImpl) SetDecisionLogger(dl BrokerDecisionLogger) {
-	s.decisionLogger = dl
-}
-
-// LogRequestToolsCall persists a single request_tools meta-tool call to
-// broker_decisions. Called by the chat service via the brokerCallPersister
-// interface. Routes through the BrokerDecisionExLogger when available
-// (so the new fields land), falling back to the legacy LogBrokerDecision
-// when the attached logger is the older shape.
-func (s *toolServiceImpl) LogRequestToolsCall(
-	sessionID, intent, outcome string,
-	consecutiveEmpty, totalCalls, loadedCount int,
-	reflectionQuery string,
-) {
-	if s.decisionLogger == nil || sessionID == "" {
-		return
-	}
-	if ex, ok := s.decisionLogger.(BrokerDecisionExLogger); ok {
-		err := ex.LogBrokerDecisionEx(store.BrokerDecisionEntry{
-			SessionID:        sessionID,
-			Intent:           intent,
-			LayerReached:     "request_tools",
-			Outcome:          outcome,
-			ConsecutiveEmpty: consecutiveEmpty,
-			TotalCalls:       totalCalls,
-			LoadedCount:      loadedCount,
-			ReflectionQuery:  reflectionQuery,
-		})
-		if err != nil {
-			slog.Warn("service/tool: failed to persist request_tools call (ex)", "err", err)
-		}
-		return
-	}
-	// Legacy fallback — at least the row lands so debug panels see it.
-	if err := s.decisionLogger.LogBrokerDecision(sessionID, intent, "request_tools", nil, outcome); err != nil {
-		slog.Warn("service/tool: failed to persist request_tools call", "err", err)
-	}
-}
-
 // SetRepairConfig attaches the C2 repair pipeline wiring. Nil-safe —
 // pass nil to disable repair entirely (the env-var and user-pref gates
 // also disable it independently).
@@ -220,37 +168,20 @@ func (s *toolServiceImpl) SelectForAgent(ctx context.Context, sessionID, agentID
 	intent, hints := extractIntent(userMessage)
 	slog.Debug("service/tool: extracted intent", "intent", intent, "hints", hints)
 
-	// Collect tools via broker selection.
+	// Collect tools via catalog selection.
 	var allTools []llmtypes.ToolDefinition
-	var overrideBlock string
 	seen := map[string]bool{} // dedup: Anthropic API rejects duplicate tool names
 
 	if s.toolClient != nil {
 		res, err := s.toolClient.SelectToolsAsProvider(ctx, intent, hints, workspaceID, agentID)
 		if err != nil {
-			slog.Warn("service/tool: broker selection failed — falling back to MCP manager", "err", err)
+			slog.Warn("service/tool: catalog selection failed — falling back to MCP manager", "err", err)
 		} else {
-			overrideBlock = res.OverrideBlock
 			for _, t := range res.Tools {
 				if !seen[t.Name] {
 					seen[t.Name] = true
 					allTools = append(allTools, t)
 				}
-			}
-		}
-		// Phase 5 / D3 (CW-20260419-0011): when the toolclient has skills
-		// or a memory recaller wired, run the reasoning-augmented signal
-		// pass to capture diagnostic state (logged + persisted). The
-		// signal pass returns the same tool universe as SelectToolsAsProvider
-		// for the time being — it informs ranking, not surface composition,
-		// because the agent permission filter downstream of this path
-		// expects llmtypes.ToolDefinition output. Future work: pass the
-		// augmented order into provider conversion so the LLM receives
-		// skills-prioritised tools first. (See follow-ups in the ADR-003
-		// "Limitations" section.)
-		if s.toolClient.MemoryRecaller() != nil || len(s.toolClient.Skills()) > 0 {
-			if _, _, signals, err := s.toolClient.SelectToolsAugmented(ctx, intent, hints, workspaceID, agentID, windowSize); err == nil {
-				s.logDecisionWithSignals(sessionID, intent, "augmented", allTools, signals)
 			}
 		}
 	}
@@ -264,24 +195,44 @@ func (s *toolServiceImpl) SelectForAgent(ctx context.Context, sessionID, agentID
 		}
 	}
 
-	// Honor the agent profile's tool_permissions JSON (allow_list /
-	// deny_list) at description-render time (CW-20260512-0117 /
-	// SP-20260512-0010). SelectToolsAsProvider already applies
-	// CheckPermission to broker-selected and builtin tools (broker.go),
-	// but the discoverAgentMCPTools fallback above appends tools without
-	// running them past the policy. Filtering here covers every code path
-	// that lands a tool in allTools so the LLM only sees what it's
-	// permitted to call. The execution-time gate in
-	// ToolClient.CallTool remains the load-bearing backstop — defense in
-	// depth, per the harness-restoration design session.
-	allTools = filterToolsByPermissions(s.toolClient, agentID, allTools)
+	// Resolve the agent's real agent_profiles row once, if any -- used by
+	// the agent_tools grant filter below, dispatch-allowlist parsing, and
+	// the chat-surface filter. Every agent (including the compiled-in
+	// builtin profiles) is a real agent_profiles row with a real ID by the
+	// time any selection runs (TASKS/adhoc/01-eliminate-file-based-agent-
+	// runtime.md), so a miss (err != nil) here means agentID itself does
+	// not resolve to a known agent, not "this population needs a
+	// different permission model."
+	var callerSlug string
+	var callerDispatchAllowlist []string
+	var dbAgent *store.AgentProfile
+	if s.agents != nil {
+		if agent, err := s.agents.GetAgent(agentID); err == nil {
+			dbAgent = agent
+		}
+	}
 
-	// Apply agent tools allowlist (schema v2) and the chat-role surface
-	// filter. The allowlist is always applied (when configured); the
-	// chat-surface filter only applies when the agent is the chat-role
-	// profile (slug "default"). Worker / Planner / executor / hint-selector
-	// / mux-orchestrator profiles bypass the chat-surface filter — they
-	// have their own surface decisions per
+	// agent_tools (through known_tools) is the sole roster-membership
+	// gate, unconditionally, for every agent -- the FK-based replacement
+	// for the schema-v2 tools allowlist this used to read
+	// (filterToolsByAllowlist(allTools, agent.Tools), retired from this
+	// path by TASKS/phase-4/05) and, as of
+	// TASKS/adhoc/02-remove-tool-permissions-collapse-to-agent-tools.md,
+	// for the legacy tool_permissions/PermissionResolver fallback that
+	// used to run here for agentIDs with no real agent_profiles row (only
+	// ever file-based agents, eliminated by TASKS/adhoc/01). Called
+	// directly against agentID rather than gated on dbAgent != nil --
+	// filterToolsByAgentTools' own store lookup degrades to "no grants" for
+	// a genuinely unknown agentID, which is the correct fail-closed
+	// outcome. This also closes the gap for tools that land in allTools
+	// from outside SelectToolsAsProvider's own gate (e.g. the
+	// discoverAgentMCPTools fallback above).
+	allTools = filterToolsByAgentTools(ctx, s.agentToolsStore(), agentID, allTools)
+
+	// Apply the chat-role surface filter. Only applies when the agent is
+	// the chat-role profile (slug "default"). Worker / Planner / executor
+	// / hint-selector / mux-orchestrator profiles bypass it — they have
+	// their own surface decisions per
 	// decisions.nanite.architecture.role_profile_seeding.
 	//
 	// Phase 2 graduation per executor-handoff design (CW-20260429-0033 / B4):
@@ -290,25 +241,36 @@ func (s *toolServiceImpl) SelectForAgent(ctx context.Context, sessionID, agentID
 	// recovery flow stays inside the executor (B3 pilot —
 	// internal/executor/envelope_render). See internal/dispatch/chat_surface.go
 	// for the canonical exclusion list.
-	var callerSlug string
-	var callerDispatchAllowlist []string
-	if s.agents != nil {
-		if agent, err := s.agents.GetAgent(agentID); err == nil {
-			callerSlug = agent.Slug
-			callerDispatchAllowlist = parseParentDispatchAllowlist(agent.ParentDispatchAllowlist)
-			allTools = filterToolsByAllowlist(allTools, agent.Tools)
-			if agent.Slug == chatRoleAgentSlug {
-				allTools = applyChatSurfaceFilter(allTools, dispatch.DefaultChatToolSurface())
-			}
+	if dbAgent != nil {
+		callerSlug = dbAgent.Slug
+		callerDispatchAllowlist = parseParentDispatchAllowlist(dbAgent.ParentDispatchAllowlist)
+		if dbAgent.Slug == chatRoleAgentSlug {
+			allTools = applyChatSurfaceFilter(allTools, dispatch.DefaultChatToolSurface())
 		}
 	}
 
-	// Cap + token-budget prune LAST, now that permission and allowlist
-	// filtering are both done (CW-20260815-0011). Applying MaxSelectedTools
-	// any earlier — inside broker selection, before this point — could
-	// truncate out a tool the agent's own allowlist above explicitly kept.
+	// Cap + token-budget prune, now that agent_tools/permission filtering
+	// and the chat-surface filter are all done (CW-20260815-0011). Applying
+	// MaxSelectedTools any earlier — inside broker selection, before this
+	// point — could truncate out a tool the agent's own grants above
+	// explicitly kept.
 	if s.toolClient != nil {
 		allTools = s.toolClient.FinalizeToolSelection(allTools, windowSize)
+	}
+
+	// known_tools.always_included escape hatch (this task's item 5):
+	// request_tools/tool_list/tool_describe must survive selection
+	// regardless of agent_tools membership — folded in LAST, after the
+	// cap/budget prune, so it can never be silently squeezed out by
+	// either. Still respects the chat-surface filter's own deliberate
+	// exclusion of tool_describe for the chat-role agent (B4 above)
+	// rather than re-adding it.
+	if s.toolClient != nil {
+		always := s.resolveAlwaysIncludedTools(ctx)
+		if dbAgent != nil && dbAgent.Slug == chatRoleAgentSlug {
+			always = applyChatSurfaceFilter(always, dispatch.DefaultChatToolSurface())
+		}
+		allTools = unionToolsByName(allTools, always)
 	}
 
 	// Per-call description-render hook (CW-20260512-0105 / SP-20260512-0008
@@ -351,10 +313,21 @@ func (s *toolServiceImpl) SelectForAgent(ctx context.Context, sessionID, agentID
 			}
 		}
 
+		// The always_included escape hatch (item 5) must survive
+		// progressive discovery's truncated builtin-only surface too --
+		// union in anything IsBuiltinTool missed above (e.g.
+		// tool_list/tool_describe, which ship via the self MCP server
+		// rather than ToolClient's own builtin registry, so the loop
+		// above never picks them up).
+		always := s.resolveAlwaysIncludedTools(ctx)
+		if dbAgent != nil && dbAgent.Slug == chatRoleAgentSlug {
+			always = applyChatSurfaceFilter(always, dispatch.DefaultChatToolSurface())
+		}
+		builtinTools = unionToolsByName(builtinTools, always)
+
 		slog.Info("service/tool: progressive discovery active",
 			"mcp_tools", mcpToolCount, "builtins", len(builtinTools)-1, "catalog_entries", len(summaries))
 
-		s.logDecision(sessionID, intent, "progressive", builtinTools)
 		return &ToolSelection{
 			Tools:       builtinTools,
 			Catalog:     catalog,
@@ -362,32 +335,7 @@ func (s *toolServiceImpl) SelectForAgent(ctx context.Context, sessionID, agentID
 		}, nil
 	}
 
-	layer := "broker"
-	if len(allTools) == 0 {
-		layer = "empty"
-	}
-	s.logDecision(sessionID, intent, layer, allTools)
-	return &ToolSelection{Tools: allTools, OverrideBlock: overrideBlock}, nil
-}
-
-// logDecision persists the broker selection decision for the debug panel.
-func (s *toolServiceImpl) logDecision(sessionID, intent, layer string, tools []llmtypes.ToolDefinition) {
-	s.logDecisionWithSignals(sessionID, intent, layer, tools, "")
-}
-
-// logDecisionWithSignals is logDecision plus the diagnostic signals JSON.
-// Phase 5 / D3 routes the reasoning-augmented selection signals here.
-func (s *toolServiceImpl) logDecisionWithSignals(sessionID, intent, layer string, tools []llmtypes.ToolDefinition, signals string) {
-	if s.decisionLogger == nil || sessionID == "" {
-		return
-	}
-	names := make([]string, len(tools))
-	for i, t := range tools {
-		names[i] = t.Name
-	}
-	if err := s.decisionLogger.LogBrokerDecision(sessionID, intent, layer, names, signals); err != nil {
-		slog.Warn("service/tool: failed to log broker decision", "err", err)
-	}
+	return &ToolSelection{Tools: allTools}, nil
 }
 
 // Execute implements ToolService. Unified execution path: ToolClient (with
@@ -745,9 +693,27 @@ func (s *toolServiceImpl) ListSummaries() []toolclient.ToolSummary {
 }
 
 // GetToolMeta implements ToolService. Returns safety metadata for a tool.
-// Uses name-based heuristics consistent with internal/tool/adapt.go patterns.
-// Concurrency safety: read/search/fetch tools are safe; write/edit/bash are not.
-func (s *toolServiceImpl) GetToolMeta(toolName string) (ToolMetaInfo, bool) {
+//
+// IsReadOnly/IsDestructive still use name-based heuristics consistent with
+// internal/tool/adapt.go patterns -- those two fields are out of scope for
+// TASKS/phase-4/07-tool-concurrency-safety-classification.md, which only
+// covers IsConcurrencySafe (see that task file and architecture/
+// 03-steering.md's "Two correctness gaps carried into implementation").
+//
+// IsConcurrencySafe reads the tool's DECLARED classification from the
+// known_tools catalog (known_tools.concurrency_safe, populated at boot by
+// SyncKnownTools from the curated table in tool_concurrency_classification.go
+// -- see that file's doc comment for what "declared" means here and why).
+// It never inspects toolName. A tool whose known_tools row doesn't exist
+// yet, or whose concurrency_safe column is still NULL ("not yet
+// classified"), defaults to false -- fail closed, not a name guess. This
+// replaces a pure suffix/substring name-heuristic that used to live here;
+// TASKS/phase-4/07's Work Log has the audit that found real
+// misclassifications under it (e.g. base64_encode, message_inbox,
+// tool_describe, and search_tool_result -- the last one because "search"
+// was a PREFIX, not a suffix, which the old heuristic could not match at
+// all).
+func (s *toolServiceImpl) GetToolMeta(ctx context.Context, toolName string) (ToolMetaInfo, bool) {
 	meta := ToolMetaInfo{}
 
 	// Read-only tools.
@@ -770,19 +736,29 @@ func (s *toolServiceImpl) GetToolMeta(toolName string) (ToolMetaInfo, bool) {
 		meta.IsDestructive = true
 	}
 
-	// Concurrency safety — mirrors internal/tool/adapt.go:inferSafetyOptions.
-	// Read-only tools are concurrent-safe; write/edit/bash/destructive are not.
-	switch {
-	case meta.IsReadOnly:
-		meta.IsConcurrencySafe = true
-	case strings.Contains(toolName, "json_parse") || strings.Contains(toolName, "datetime") ||
-		strings.Contains(toolName, "hash") || strings.Contains(toolName, "uuid"):
-		meta.IsConcurrencySafe = true // pure utility tools
-	default:
-		meta.IsConcurrencySafe = false
-	}
+	meta.IsConcurrencySafe = s.declaredConcurrencySafe(ctx, toolName)
 
 	return meta, true
+}
+
+// declaredConcurrencySafe returns the known_tools.concurrency_safe value
+// for toolName, or false when no store is wired (chiefly tests), the tool
+// has no known_tools row yet, or the row's concurrency_safe column is
+// still NULL. Never consults toolName's text -- see GetToolMeta's doc
+// comment for the reasoning and the audit that replaced the old heuristic.
+func (s *toolServiceImpl) declaredConcurrencySafe(ctx context.Context, toolName string) bool {
+	st := s.agentToolsStore()
+	if st == nil {
+		return false
+	}
+	row, err := st.GetKnownToolByName(ctx, toolName)
+	if err != nil {
+		return false
+	}
+	if row.ConcurrencySafe == nil {
+		return false
+	}
+	return *row.ConcurrencySafe
 }
 
 // ---------------------------------------------------------------------------
@@ -896,65 +872,139 @@ func parseParentDispatchAllowlist(raw string) []string {
 	return out
 }
 
-// filterToolsByPermissions narrows the tool list to those permitted by the
-// agent profile's tool_permissions JSON column (allow_list / deny_list).
-// Idempotent for tools already filtered by toolclient.SelectToolsAsProvider —
-// re-applying the same CheckPermission to a tool that passed once is a
-// no-op. The value-add is closing the gap on tools that landed in allTools
-// from outside the broker (e.g., discoverAgentMCPTools fallback) so every
-// tool the LLM sees has cleared the policy.
+// filterToolsByAgentTools narrows tools to the set explicitly granted to
+// the agent via agent_tools (through known_tools) -- the FK-based
+// replacement for the old schema-v2 tools allowlist
+// (filterToolsByAllowlist(allTools, agent.Tools), retired from the live
+// path by TASKS/phase-4/05-wire-select-for-agent-to-read-agent-tools.md;
+// see that task's Work Log for the full deny-semantics decision).
 //
-// Nil-safe: tc == nil short-circuits (no permission machinery wired); empty
-// agentID returns the input unchanged because GetPermissions would yield
-// permissive default-permit and a wasteful CheckPermission walk.
+// agent_tools is a plain positive-grant join with no glob/deny concept
+// (per architecture/01-agent-construction.md) -- a tool not present in
+// the agent's granted set is excluded here, full stop. There is no live
+// "unrestricted" bypass for an agent with few/zero grants: per that
+// task's item 4 decision, agent_tools is the literal, static source of
+// truth for roster membership going forward, not a live re-derivation
+// of a "no restriction" flag that has no representation anywhere in the
+// 04 schema. The known_tools.always_included escape hatch (item 5) is
+// folded in separately by the caller (SelectForAgent), NOT inside this
+// function, so it survives even when this filter yields zero rows.
 //
-// Cacheable-prefix note: tools surviving SelectToolsAsProvider already
-// passed CheckPermission, so this pass preserves their order and does not
-// invalidate the cacheable head of the tool array. Only discovery-fallback
-// tails are subject to net new filtering here. The cache-marker priority
-// work (CW-20260512-0109 / Sprint 1 T1.5) governs where the marker lands
-// — see decisions.nanite.tool_broker.per_call_descriptions_tail in Vanta.
-func filterToolsByPermissions(tc *toolclient.ToolClient, agentID string, tools []llmtypes.ToolDefinition) []llmtypes.ToolDefinition {
-	if tc == nil || agentID == "" || len(tools) == 0 {
+// st == nil degrades to a no-op (tools pass through unfiltered) -- the
+// "machinery not wired" precedent every nil-safe helper in this file
+// follows (chiefly tests); production always wires a real *store.Store
+// onto ToolClient (cmd/nanite/main.go).
+func filterToolsByAgentTools(ctx context.Context, st *store.Store, agentID string, tools []llmtypes.ToolDefinition) []llmtypes.ToolDefinition {
+	if st == nil || len(tools) == 0 {
 		return tools
 	}
+	granted, err := st.ListAgentToolNames(ctx, agentID)
+	if err != nil {
+		slog.Warn("service/tool: agent_tools lookup failed — denying non-escape-hatch tools", "agent", agentID, "err", err)
+		return nil
+	}
+	if len(granted) == 0 {
+		slog.Debug("service/tool: zero agent_tools grants", "agent", agentID)
+		return nil
+	}
+	grantedSet := make(map[string]bool, len(granted))
+	for _, n := range granted {
+		grantedSet[n] = true
+	}
 	filtered := make([]llmtypes.ToolDefinition, 0, len(tools))
-	var denied []string
 	for _, t := range tools {
-		if tc.CheckPermission(agentID, t.Name) {
+		if grantedSet[t.Name] {
 			filtered = append(filtered, t)
-			continue
 		}
-		denied = append(denied, t.Name)
 	}
-	if len(denied) > 0 {
-		slog.Debug("service/tool: tool_permissions filtered at description-render",
-			"agent", agentID, "before", len(tools), "after", len(filtered), "denied", denied)
-	}
+	slog.Debug("service/tool: agent_tools filtered", "agent", agentID, "before", len(tools), "after", len(filtered))
 	return filtered
 }
 
-// filterToolsByAllowlist removes tools not in the agent's tools allowlist.
-// An empty or "[]" allowlist means no filtering.
-func filterToolsByAllowlist(tools []llmtypes.ToolDefinition, allowlistJSON string) []llmtypes.ToolDefinition {
-	if allowlistJSON == "" || allowlistJSON == "[]" {
-		return tools
+// agentToolsStore returns the *store.Store backing this service's
+// ToolClient, or nil when none is wired (chiefly tests) -- see
+// filterToolsByAgentTools's and resolveAlwaysIncludedTools' doc comments
+// for the resulting nil-safe fallbacks. Production always wires a real
+// *store.Store onto ToolClient (cmd/nanite/main.go).
+func (s *toolServiceImpl) agentToolsStore() *store.Store {
+	if s.toolClient == nil {
+		return nil
 	}
-	var allowlist []string
-	if err := parseJSONStrings(allowlistJSON, &allowlist); err != nil || len(allowlist) == 0 {
-		return tools
+	return s.toolClient.Store
+}
+
+// resolveAlwaysIncludedTools returns the full llmtypes.ToolDefinition for
+// every known_tools row flagged always_included=true and status=
+// 'available' -- the request_tools/tool_list/tool_describe tool-discovery
+// escape hatch (architecture/01-agent-construction.md;
+// TASKS/phase-1/04's known_tools.always_included column; item 5 of
+// TASKS/phase-4/05). Nil-safe: returns nil when no store-backed
+// ToolClient is wired (no known_tools catalog to read).
+//
+// request_tools has no registration anywhere in the normal builtin/MCP
+// catalog — it is synthesized ad hoc by SelectForAgent's progressive-
+// discovery branch via toolclient.RequestToolsMetaTool(). This function
+// special-cases it the same way so the escape hatch also works OUTSIDE
+// progressive discovery. tool_list/tool_describe ship via the self MCP
+// server and ARE present in ToolClient.ListTools(), so they're looked up
+// there directly.
+func (s *toolServiceImpl) resolveAlwaysIncludedTools(ctx context.Context) []llmtypes.ToolDefinition {
+	st := s.agentToolsStore()
+	if st == nil {
+		return nil
 	}
-	filtered := make([]llmtypes.ToolDefinition, 0, len(tools))
-	for _, t := range tools {
-		for _, pattern := range allowlist {
-			if toolclient.MatchPattern(pattern, t.Name) {
-				filtered = append(filtered, t)
-				break
-			}
+	rows, err := st.ListAlwaysIncludedKnownTools(ctx)
+	if err != nil {
+		slog.Warn("service/tool: list always_included known_tools failed", "err", err)
+		return nil
+	}
+	if len(rows) == 0 {
+		return nil
+	}
+	byName := make(map[string]llmtypes.ToolDefinition, len(rows))
+	if s.toolClient != nil {
+		for _, t := range s.toolClient.ListTools() {
+			byName[t.Name] = t
 		}
 	}
-	slog.Debug("service/tool: allowlist filtered", "before", len(tools), "after", len(filtered))
-	return filtered
+	out := make([]llmtypes.ToolDefinition, 0, len(rows))
+	for _, kt := range rows {
+		if kt.Status != "available" {
+			continue
+		}
+		if def, ok := byName[kt.Name]; ok {
+			out = append(out, def)
+			continue
+		}
+		if kt.Name == "request_tools" {
+			out = append(out, toolclient.RequestToolsMetaTool())
+		}
+	}
+	return out
+}
+
+// unionToolsByName appends every tool from extra whose name is not
+// already present in base, preserving base's order and appending extra
+// tools in extra's own order. Used to fold the always_included escape
+// hatch (item 5) into an already-filtered/capped tool list without
+// duplicating an entry that survived on its own merits.
+func unionToolsByName(base, extra []llmtypes.ToolDefinition) []llmtypes.ToolDefinition {
+	if len(extra) == 0 {
+		return base
+	}
+	present := make(map[string]bool, len(base)+len(extra))
+	for _, t := range base {
+		present[t.Name] = true
+	}
+	out := base
+	for _, t := range extra {
+		if present[t.Name] {
+			continue
+		}
+		present[t.Name] = true
+		out = append(out, t)
+	}
+	return out
 }
 
 // extractIntent derives an intent string and keyword hints from a user message.

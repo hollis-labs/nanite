@@ -50,6 +50,11 @@ const (
 	ErrTargetNotFound = -32002
 	// ErrInvalidTarget: Target is malformed or not addressable.
 	ErrInvalidTarget = -32003
+	// ErrTaskNotCancelable: Task cannot be canceled — either already in a
+	// terminal state other than 'canceled', or its target_kind has no real
+	// cancellation primitive yet (see TaskManager.CancelTask's workflow
+	// branch, TASKS/phase-0/08-a2a-conformance.md).
+	ErrTaskNotCancelable = -32004
 )
 
 // NewJSONRPCRequest constructs a JSON-RPC 2.0 request.

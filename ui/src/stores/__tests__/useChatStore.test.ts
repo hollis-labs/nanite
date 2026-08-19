@@ -26,7 +26,6 @@ afterEach(() => {
     chatToast: null,
     pendingJump: null,
     scrollToMessageId: null,
-    autoSwitchSessionOverrides: {},
     activeStreams: new Map(),
     pendingTools: new Map(),
     cliActiveSessions: new Map(),
@@ -51,7 +50,6 @@ describe("useChatStore lifecycle", () => {
     useChatStore.getState().ensureSession(SESSION_A);
     const slice = useChatStore.getState().sessions.get(SESSION_A);
     expect(slice).toBeDefined();
-    expect(slice?.activeMode).toBe(EMPTY_CHAT_SESSION_STATE.activeMode);
     expect(slice?.activeModel).toBe(EMPTY_CHAT_SESSION_STATE.activeModel);
     expect(slice?.activeEffort).toBe(EMPTY_CHAT_SESSION_STATE.activeEffort);
     expect(slice?.isStreaming).toBe(false);
@@ -213,22 +211,18 @@ describe("useChatStore cross-session isolation (G-FE-SINGLETON repro)", () => {
     expect(calls?.[0]?.detail).toBe("/etc/hosts");
   });
 
-  it("dial settings (mode/model/effort) are independent per session", () => {
+  it("dial settings (model/effort) are independent per session", () => {
     const store = useChatStore.getState();
-    store.setActiveMode(SESSION_A, "planner");
     store.setActiveModel(SESSION_A, "claude-opus-4-7");
     store.setActiveEffort(SESSION_A, "high");
 
-    store.setActiveMode(SESSION_B, "writer");
     store.setActiveModel(SESSION_B, "claude-haiku-4-5");
     store.setActiveEffort(SESSION_B, "low");
 
     const a = useChatStore.getState().sessions.get(SESSION_A);
     const b = useChatStore.getState().sessions.get(SESSION_B);
-    expect(a?.activeMode).toBe("planner");
     expect(a?.activeModel).toBe("claude-opus-4-7");
     expect(a?.activeEffort).toBe("high");
-    expect(b?.activeMode).toBe("writer");
     expect(b?.activeModel).toBe("claude-haiku-4-5");
     expect(b?.activeEffort).toBe("low");
   });

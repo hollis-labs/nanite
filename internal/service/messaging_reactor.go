@@ -13,6 +13,7 @@ import (
 	"encoding/json"
 	"log/slog"
 
+	"github.com/hollis-labs/nanite/internal/agent/override"
 	"github.com/hollis-labs/nanite/internal/chat"
 	"github.com/hollis-labs/nanite/internal/messaging"
 )
@@ -57,11 +58,25 @@ func (r *messagingWakeReactor) ReactToMessage(ctx context.Context, msg *messagin
 }
 
 // resolveMessageWakePolicy resolves the effective message-wake policy for
-// sessionID: an explicit session override
-// (sessions.metadata["message_wake_policy"]) wins, then the session's
-// agent-profile default (agent_profiles.constraints via
-// chat.AgentConstraints.MessageWakePolicy), then the global default —
-// auto_summarize (CW-20260816-0065).
+// sessionID via the role->agent->task composition cascade
+// (internal/agent/override, the same merge engine
+// internal/service/role_cascade.go's ResolveAgentCascade is built on —
+// see that file and architecture/01-agent-construction.md for the
+// broader cascade this reuses), rather than its own independent
+// three-step bespoke walk. Layers, closest wins:
+//  1. role tier (base) — deliberately the zero value: roles has no
+//     message_wake_policy-equivalent column today (same "no live
+//     role-level source column yet, but wire the seam" status as
+//     ModelID's precedent in role_cascade.go/merge.go), so this layer
+//     never contributes a value in practice yet.
+//  2. agent tier (project) — the session's agent-profile default
+//     (agent_profiles.constraints via chat.AgentConstraints.
+//     MessageWakePolicy).
+//  3. task/invocation tier (session) — an explicit per-session override
+//     (sessions.metadata["message_wake_policy"]), the narrowest layer.
+//
+// Falls back to the global default — auto_summarize (CW-20260816-0065) —
+// when no layer resolves to a non-empty value.
 //
 // This default is the opposite of resolveSubagentCompletionPolicy's
 // (render_and_wait): a subagent completion still reaches the model via
@@ -77,26 +92,16 @@ func (r *messagingWakeReactor) ReactToMessage(ctx context.Context, msg *messagin
 //
 // Mirrors resolveSubagentCompletionPolicy's tiering and typo-safety
 // (each tier is validated via chat.IsValidSubagentCompletionPolicy so a
-// stale or misspelled override is logged and ignored rather than trusted
-// verbatim) but is intentionally a separate resolver and session-
-// metadata key: whether an agent wants its own dispatched subagents to
-// auto-summarize and whether it wants to be woken by a peer's message
-// are independent operator choices that happen to share the same
-// three-state vocabulary (chat.SubagentPolicy* constants) rather than
-// warranting a third, differently-shaped gating mechanism.
+// stale or misspelled override is logged and ignored — left out of its
+// layer entirely so the merge falls through to the next tier — rather
+// than trusted verbatim) but is intentionally a separate resolver and
+// session-metadata key: whether an agent wants its own dispatched
+// subagents to auto-summarize and whether it wants to be woken by a
+// peer's message are independent operator choices that happen to share
+// the same three-state vocabulary (chat.SubagentPolicy* constants)
+// rather than warranting a third, differently-shaped gating mechanism.
 func (s *chatServiceImpl) resolveMessageWakePolicy(ctx context.Context, sessionID string) string {
-	if session, err := s.sessions.Get(ctx, sessionID); err == nil && session != nil && session.Metadata != "" {
-		var meta map[string]any
-		if json.Unmarshal([]byte(session.Metadata), &meta) == nil {
-			if v, ok := meta["message_wake_policy"].(string); ok && v != "" {
-				if chat.IsValidSubagentCompletionPolicy(v) {
-					return v
-				}
-				slog.Warn("messaging-reactor: unrecognized session policy override, ignoring",
-					"session_id", sessionID, "value", v)
-			}
-		}
-	}
+	var agentLayer override.OverrideConfig
 
 	// Read-only lookup deliberately: this is a fire-and-forget policy
 	// check that runs on every eligible SendMessage (see
@@ -107,15 +112,39 @@ func (s *chatServiceImpl) resolveMessageWakePolicy(ctx context.Context, sessionI
 	// touches — ResolveForSessionReadOnly runs the identical resolution
 	// chain without that mutation. See internal/service/agent.go's doc
 	// comment on both methods for the full rationale.
-	if agent, _, err := s.agents.ResolveForSessionReadOnly(ctx, sessionID); err == nil && agent != nil {
+	if agent, err := s.agents.ResolveForSessionReadOnly(ctx, sessionID); err == nil && agent != nil {
 		constraints := chat.ParseAgentConstraints(agent.Constraints)
 		if constraints.MessageWakePolicy != "" {
 			if chat.IsValidSubagentCompletionPolicy(constraints.MessageWakePolicy) {
-				return constraints.MessageWakePolicy
+				agentLayer.MessageWakePolicy = constraints.MessageWakePolicy
+			} else {
+				slog.Warn("messaging-reactor: unrecognized agent-profile policy default, ignoring",
+					"session_id", sessionID, "agent_id", agent.ID, "value", constraints.MessageWakePolicy)
 			}
-			slog.Warn("messaging-reactor: unrecognized agent-profile policy default, ignoring",
-				"session_id", sessionID, "agent_id", agent.ID, "value", constraints.MessageWakePolicy)
 		}
+	}
+
+	var taskLayer *override.OverrideConfig
+	if session, err := s.sessions.Get(ctx, sessionID); err == nil && session != nil && session.Metadata != "" {
+		var meta map[string]any
+		if json.Unmarshal([]byte(session.Metadata), &meta) == nil {
+			if v, ok := meta["message_wake_policy"].(string); ok && v != "" {
+				if chat.IsValidSubagentCompletionPolicy(v) {
+					taskLayer = &override.OverrideConfig{MessageWakePolicy: v}
+				} else {
+					slog.Warn("messaging-reactor: unrecognized session policy override, ignoring",
+						"session_id", sessionID, "value", v)
+				}
+			}
+		}
+	}
+
+	// override.Resolve(base, project, session) applies role -> agent ->
+	// task in that order, closest (task) wins. base is the zero value —
+	// see doc comment above.
+	resolved := override.Resolve(override.OverrideConfig{}, &agentLayer, taskLayer)
+	if resolved.MessageWakePolicy != "" {
+		return resolved.MessageWakePolicy
 	}
 
 	return chat.SubagentPolicyAutoSummarize

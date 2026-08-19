@@ -5,13 +5,10 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
-	"log/slog"
 	"os"
 	"strings"
 	"time"
 
-	"github.com/hollis-labs/nanite/internal/agent"
-	"github.com/hollis-labs/nanite/internal/agent/builtin"
 	"github.com/hollis-labs/nanite/internal/brand"
 	"github.com/hollis-labs/nanite/internal/messaging"
 	"github.com/hollis-labs/nanite/internal/service"
@@ -368,45 +365,26 @@ func messageHandoff(svc *messaging.Service, args []string) {
 	}
 }
 
-// newMessagingServiceForCLI wires a minimal AgentService as the messaging.Service
-// resolver for CLI use. It discovers file-based agents from the working
-// directory and plugins dir (same as the server) and appends the built-in
-// default agent so "file-default" resolves. Events is nil: the CLI doesn't
-// emit activity, and AgentService.Get — the only method messaging.Service calls
-// via AgentResolver — never dereferences the Events field.
+// newMessagingServiceForCLI wires a minimal AgentService as the
+// messaging.Service resolver for CLI use, backed entirely by the DB.
+//
+// TASKS/adhoc/01-eliminate-file-based-agent-runtime.md removed the file
+// discovery + internal-profile-loading this function used to do to
+// populate an in-memory fileDefs registry so a "file-<slug>" address would
+// resolve without touching the DB: that registry no longer exists anywhere
+// (AgentServiceConfig has no FileAgents field), and every agent -- the 9
+// internal builtin profiles included -- already has a real agent_profiles
+// row with a real ID from the server's own boot-time AutoIngestAgents pass,
+// which always runs before this CLI command would have anything meaningful
+// to address anyway. Events is nil: the CLI doesn't emit activity, and
+// AgentService.Get — the only method messaging.Service calls via
+// AgentResolver — never dereferences the Events field.
 func newMessagingServiceForCLI(s *store.Store) (*messaging.Service, error) {
-	agentDefs, err := agent.Discover(agent.DiscoverOptions{
-		WorkingDir: ".",
-		PluginsDir: "plugins",
-		Adapters:   agent.NewAdapterRegistry(),
-	})
-	if err != nil {
-		// Non-fatal: CLI can still address the "user" sentinel and DB
-		// agents even if file discovery hits a parse error on one tier.
-		slog.Warn("message: agent discovery", "err", err)
-	}
-	// CW-20260512-0111: load all internal profiles (default, worker,
-	// planner, hint-selector) from internal/agent/builtin/profiles/*.md.
-	// Each is stamped Source="internal" so the CLI resolves "file-<slug>"
-	// against the same set the server does.
-	//
-	// Per profiles.go contract: parse failures here are build-level bugs
-	// (the files are embedded at compile time). Fail-fast so the CLI does
-	// not silently address a partial agent set on an unparseable internal
-	// profile.
-	internalDefs, err := builtin.InternalProfiles()
-	if err != nil {
-		return nil, fmt.Errorf("message: load internal agent profiles: %w", err)
-	}
-	agentDefs = append(agentDefs, internalDefs...)
-
 	agents := service.NewAgentService(service.AgentServiceConfig{
-		Agents:     s,
-		Writers:    s,
-		Settings:   s,
-		Events:     nil,
-		FileAgents: agentDefs,
-		Overrides:  s,
+		Agents:   s,
+		Writers:  s,
+		Settings: s,
+		Events:   nil,
 	})
 	return messaging.NewService(messaging.NewSQLiteStore(s.DB), s.DB, agents, s), nil
 }

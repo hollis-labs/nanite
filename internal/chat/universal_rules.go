@@ -10,8 +10,14 @@
 // Why this is a content source, not a template assignment:
 //
 //   - Pre-CW-20260512-0100 the rules were bound only to the file-default
-//     profile via agent_prompt_templates(file-default, blt-chat-harness-001).
-//     Every other built-in or auto-discovered profile (worker, planner,
+//     profile via agent_prompt_templates(file-default, blt-chat-harness-001)
+//     — the prompt_templates/agent_prompt_templates mechanism itself, along
+//     with that binding, was cut in full by Phase 0 item 29
+//     ("29-cut-prompt-templates"); every agent now composes its system
+//     prompt from agent.SystemPrompt directly (internal/chat/context_client.go,
+//     assembleAgentSlotContent), with this universal-rules block prepended
+//     unconditionally as described below. Every other built-in or
+//     auto-discovered profile (worker, planner,
 //     researcher, analyst, backend, background-job, file-backend,
 //     fragments-engine) had no template assignment and therefore skipped
 //     these rules entirely. The c160 fabrication chain (researcher subagent
@@ -51,7 +57,9 @@
 // subagent, background job. Changes to the block content take effect on
 // the next dispatch; no DB write or migration re-flow is required.
 //
-// Migration 058 (058_universal_rules_extract.sql) and the demoted body in
+// Migration 059 (059_universal_rules_extract.sql, renumbered from
+// 058_... by 09-adopt-goose-migrations's duplicate-051-prefix resolution)
+// and the demoted body in
 // internal/agent/builtin/profiles/default.md track the historic
 // chat-role-harness body, NOT the universal-rules block here. They are
 // frozen artifacts of the pre-CW-20260512-0100 extraction and are

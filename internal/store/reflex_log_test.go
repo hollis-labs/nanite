@@ -2,14 +2,12 @@ package store
 
 import (
 	"testing"
-
-	"github.com/hollis-labs/nanite/internal/promptrouter"
 )
 
 func TestLogReflexMatch_RoundTrip(t *testing.T) {
 	s := newTestStore(t)
 
-	entry := promptrouter.ReflexMatchEntry{
+	entry := ReflexMatchLogEntry{
 		SessionID:           "sess-integration-001",
 		TurnID:              "turn-001",
 		ReflexID:            "planner-mention",
@@ -62,7 +60,7 @@ func TestLogReflexMatch_NullTurnID(t *testing.T) {
 	s := newTestStore(t)
 
 	// TurnID="" should store as NULL and come back as "".
-	entry := promptrouter.ReflexMatchEntry{
+	entry := ReflexMatchLogEntry{
 		SessionID: "sess-integration-002",
 		TurnID:    "",
 		ReflexID:  "worker-execute",
@@ -89,7 +87,7 @@ func TestLogReflexMatch_MultipleRows(t *testing.T) {
 
 	for i, reflexID := range []string{"planner-mention", "researcher-mention", "worker-execute"} {
 		_ = i
-		if err := s.LogReflexMatch(promptrouter.ReflexMatchEntry{
+		if err := s.LogReflexMatch(ReflexMatchLogEntry{
 			SessionID: "sess-integration-003",
 			ReflexID:  reflexID,
 			Source:    "reflex",
@@ -124,7 +122,7 @@ func TestLogReflexMatch_RawSentTextDiffer_PersistsBoth(t *testing.T) {
 	raw := "help me fix the flaky reaper test"
 	sent := "## Relevant memories\n- reaper tests flake on timer drift\nhelp me fix the flaky reaper test"
 
-	entry := promptrouter.ReflexMatchEntry{
+	entry := ReflexMatchLogEntry{
 		SessionID:     "sess-audit-001",
 		ReflexID:      "worker-execute",
 		Source:        "reflex",
@@ -160,7 +158,7 @@ func TestLogReflexMatch_RawSentTextIdentical_NotDuplicated(t *testing.T) {
 	s := newTestStore(t)
 
 	same := "let's plan out the migration"
-	entry := promptrouter.ReflexMatchEntry{
+	entry := ReflexMatchLogEntry{
 		SessionID:     "sess-audit-002",
 		ReflexID:      "planner-mention",
 		Source:        "reflex",
@@ -190,12 +188,12 @@ func TestLogReflexMatch_RawSentTextIdentical_NotDuplicated(t *testing.T) {
 func TestListReflexMatchLog_OtherSessionIsolated(t *testing.T) {
 	s := newTestStore(t)
 
-	_ = s.LogReflexMatch(promptrouter.ReflexMatchEntry{
+	_ = s.LogReflexMatch(ReflexMatchLogEntry{
 		SessionID: "sess-A",
 		ReflexID:  "planner-mention",
 		Source:    "reflex",
 	})
-	_ = s.LogReflexMatch(promptrouter.ReflexMatchEntry{
+	_ = s.LogReflexMatch(ReflexMatchLogEntry{
 		SessionID: "sess-B",
 		ReflexID:  "worker-execute",
 		Source:    "reflex",

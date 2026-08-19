@@ -28,7 +28,6 @@ import type {
   AgentKnowledgeSeedUpsertRequest,
   AgentKnownSkillUpsertRequest,
   AgentKnownToolUpsertRequest,
-  AgentBootPlanDocument,
   AgentProcedureUpsertRequest,
   AgentProfile,
   CreateAgentProfileRequest,
@@ -36,7 +35,6 @@ import type {
   DurableAgentLaunchResult,
   DurableAgentRecipe,
   ModelRecord,
-  PromptTemplate,
   RuntimeKind,
   Skill,
   StartSurfaceCapabilitiesResponse,
@@ -44,12 +42,6 @@ import type {
 import { useAppStore } from "@/stores/useAppStore";
 import { useLayoutStore } from "@/stores/useLayoutStore";
 import { AgentCreateWizard } from "./AgentCreateWizard";
-import {
-  AgentBootPlanEditor,
-  AgentBootPlanPreview,
-  createEmptyBootPlan,
-  hasBootPlanContent,
-} from "./AgentBootPlanEditor";
 import { EditableStringList } from "./editors/EditableStringList";
 
 type AgentBuilderWizardProps = {
@@ -122,7 +114,6 @@ export function AgentBuilderWizard({
   onCreated,
 }: AgentBuilderWizardProps) {
   const queryClient = useQueryClient();
-  const activeWorkspaceId = useAppStore((state) => state.activeWorkspaceId);
   const activeProjectId = useAppStore((state) => state.activeProjectId);
   const setActiveSession = useAppStore((state) => state.setActiveSession);
   const setCurrentPage = useLayoutStore((state) => state.setCurrentPage);
@@ -167,10 +158,6 @@ export function AgentBuilderWizard({
   const skillsQuery = useQuery({
     queryKey: ["skills"],
     queryFn: api.listSkills,
-  });
-  const templatesQuery = useQuery({
-    queryKey: ["prompt-templates"],
-    queryFn: api.listPromptTemplates,
   });
 
   const capabilities = startSurfaceQuery.data;
@@ -247,7 +234,6 @@ export function AgentBuilderWizard({
         draft,
         dryRun,
         defaultModel,
-        activeWorkspaceId,
         activeProjectId,
         skills: skillsQuery.data ?? [],
       });
@@ -538,7 +524,6 @@ export function AgentBuilderWizard({
                     setSubmitError(null);
                   }}
                   skills={skillsQuery.data ?? []}
-                  templates={templatesQuery.data ?? []}
                   recipes={recipes}
                   providers={providers}
                   models={models}
@@ -647,12 +632,6 @@ export function AgentBuilderWizard({
                       body={JSON.stringify(dryRun.notification_preview, null, 2)}
                     />
                   </div>
-                  {dryRun.boot_plan_preview ? (
-                    <div className="mt-4">
-                      <div className="mb-3 text-sm font-medium text-fg">Boot Plan Preview</div>
-                      <AgentBootPlanPreview preview={dryRun.boot_plan_preview} />
-                    </div>
-                  ) : null}
                   <div className="mt-3 text-xs text-fg-muted">
                     Validation state: {dryRun.valid ? "ready to submit" : "fix errors before submit"}.
                   </div>
@@ -766,7 +745,6 @@ function DraftEditor({
   draft,
   setDraft,
   skills,
-  templates,
   recipes,
   providers,
   models,
@@ -776,7 +754,6 @@ function DraftEditor({
   draft: AgentBuilderDraft;
   setDraft: (draft: AgentBuilderDraft) => void;
   skills: Skill[];
-  templates: PromptTemplate[];
   recipes: DurableAgentRecipe[];
   providers: StartSurfaceCapabilitiesResponse["providers"];
   models: ModelRecord[];
@@ -956,21 +933,6 @@ function DraftEditor({
               })
             }
           />
-          <SelectableList
-            title="Prompt Templates"
-            items={templates.map((template) => ({
-              id: template.id,
-              label: template.name,
-              meta: template.slug,
-            }))}
-            selected={draft.capabilities.prompt_template_ids ?? []}
-            onToggle={(values) =>
-              setDraft({
-                ...draft,
-                capabilities: { ...draft.capabilities, prompt_template_ids: values },
-              })
-            }
-          />
         </div>
 
         <div className="mt-4 grid gap-4 lg:grid-cols-2">
@@ -1100,19 +1062,6 @@ function DraftEditor({
             )}
           />
         </div>
-      </BuilderSection>
-
-      <BuilderSection title="Boot Plan">
-        <AgentBootPlanEditor
-          plan={draft.boot_plan ?? createEmptyBootPlan()}
-          compact
-          onChange={(boot_plan) =>
-            setDraft({
-              ...draft,
-              boot_plan,
-            })
-          }
-        />
       </BuilderSection>
 
       <BuilderSection title="Durable / Launch">
@@ -1583,7 +1532,6 @@ function mergeDraftWithIntake(draft: AgentBuilderDraft, intake: BuilderIntake): 
       model: draft.durable_instance.model || intake.preferredModel,
       runtime_kind: draft.durable_instance.runtime_kind || intake.preferredRuntimeKind,
       work_root: draft.durable_instance.work_root || intake.workRoot,
-      workspace_id: draft.durable_instance.workspace_id,
       project_id: draft.durable_instance.project_id,
       start: intake.startNow,
       metadata: draft.durable_instance.metadata ?? {},
@@ -1594,7 +1542,6 @@ function mergeDraftWithIntake(draft: AgentBuilderDraft, intake: BuilderIntake): 
       target_id: "current-user",
       ...draft.operator_notification,
     },
-    boot_plan: draft.boot_plan ?? createEmptyBootPlan(),
   };
 }
 
@@ -1617,14 +1564,12 @@ function buildBlankDraftFromIntake(intake: BuilderIntake): AgentBuilderDraft {
     },
     capabilities: {
       assigned_skill_ids: [],
-      prompt_template_ids: [],
       known_tools: [],
       known_skills: [],
       procedures: [],
       knowledge_seeds: [],
       reflex_suggestions: [],
     },
-    boot_plan: createEmptyBootPlan(),
     durable_instance: {
       create: intake.createDurable,
       recipe_id: intake.recipeId,
@@ -1651,7 +1596,6 @@ function buildDryRunRequest(draft: AgentBuilderDraft | null): AgentBuilderDryRun
     mode: draft.durable_instance.create ? "create_profile_and_instance" : "create_profile",
     profile: draft.profile,
     capabilities: draft.capabilities,
-    boot_plan: draft.boot_plan,
     durable_instance: draft.durable_instance,
     operator_notification: draft.operator_notification,
   };
@@ -1661,14 +1605,12 @@ async function submitDraft({
   draft,
   dryRun,
   defaultModel,
-  activeWorkspaceId,
   activeProjectId,
   skills,
 }: {
   draft: AgentBuilderDraft;
   dryRun: AgentBuilderDryRunResponse;
   defaultModel: string;
-  activeWorkspaceId: string | null;
   activeProjectId: string | null;
   skills: Skill[];
 }) {
@@ -1678,10 +1620,6 @@ async function submitDraft({
 
   let durableInstance: DurableAgentInstance | null = null;
   let launchResult: DurableAgentLaunchResult | null = null;
-  const bootPlan = resolveBootPlanForSubmit(profile.id, draft.boot_plan, dryRun.boot_plan_preview);
-  if (bootPlan) {
-    await api.updateAgentBootPlan(profile.id, bootPlan);
-  }
   if (draft.durable_instance.create) {
     if (draft.durable_instance.recipe_id) {
       const recipeRequest = {
@@ -1692,7 +1630,6 @@ async function submitDraft({
         model: emptyToUndefined(draft.durable_instance.model),
         runtime_kind: emptyToUndefined(String(draft.durable_instance.runtime_kind || "")),
         work_root: emptyToUndefined(draft.durable_instance.work_root),
-        workspace_id: activeWorkspaceId ?? undefined,
         project_id: activeProjectId ?? undefined,
         metadata: draft.durable_instance.metadata,
         start: !!draft.durable_instance.start,
@@ -1717,7 +1654,6 @@ async function submitDraft({
       });
       if (draft.durable_instance.start) {
         launchResult = await api.startDurableAgent(durableInstance.id, {
-          workspace_id: activeWorkspaceId ?? undefined,
           project_id: activeProjectId ?? undefined,
           wake_payload: {
             reason: "manual",
@@ -1752,10 +1688,6 @@ async function assignBuilderCapabilities(
   for (const skillId of slugSkillIds) {
     if ((capabilities.assigned_skill_ids ?? []).includes(skillId)) continue;
     await api.assignSkillToAgent(agentId, { skill_id: skillId });
-  }
-
-  for (const templateId of capabilities.prompt_template_ids ?? []) {
-    await api.assignTemplateToAgent(agentId, { template_id: templateId });
   }
 
   const roleTools = new Set(parseJSONStringArray(normalizedProfile.role_tools));
@@ -1845,20 +1777,6 @@ function parseJSONStringArray(value?: string): string[] {
 
 function emptyToUndefined(value?: string) {
   return value && value.trim() !== "" ? value : undefined;
-}
-
-function resolveBootPlanForSubmit(
-  agentId: string,
-  draftBootPlan: AgentBootPlanDocument | undefined,
-  preview: AgentBuilderDryRunResponse["boot_plan_preview"] | undefined,
-) {
-  const source = preview?.valid ? preview.normalized_plan : draftBootPlan;
-  if (!source || !hasBootPlanContent(source)) return null;
-  return {
-    ...source,
-    agent_id: agentId,
-    schema_version: source.schema_version || 1,
-  };
 }
 
 function buildModelOptions(models: ModelRecord[], fallback: { id: string; label: string }[]) {

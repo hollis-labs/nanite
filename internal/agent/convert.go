@@ -2,50 +2,28 @@ package agent
 
 import (
 	"encoding/json"
-	"fmt"
 	"strings"
 	"time"
 
 	"github.com/hollis-labs/nanite/internal/store"
 )
 
-const fileIDPrefix = "file-"
-
-// IsFileBasedID returns true if the agent ID was generated from a file-based definition.
-func IsFileBasedID(id string) bool {
-	return len(id) > len(fileIDPrefix) && id[:len(fileIDPrefix)] == fileIDPrefix
-}
-
-// SlugFromFileID extracts the slug from a file-based agent ID.
-func SlugFromFileID(id string) string {
-	if !IsFileBasedID(id) {
-		return ""
-	}
-	return id[len(fileIDPrefix):]
-}
-
-// CanonicalID returns the identity used for the DB projection row and all
-// FK children. A managed file stamped with a UUID (`id:` frontmatter) owns
-// that UUID; embedded/unstamped definitions fall back to the deterministic
-// "file-<slug>" runtime identity that the harness hard-codes in several
-// places (e.g. the file-default chat-role-harness template binding). Keeping
-// unstamped agents on "file-<slug>" is deliberate — only managed-writable
-// files get a real UUID written back.
-func (d *Definition) CanonicalID() string {
-	if id := strings.TrimSpace(d.ID); id != "" {
-		return id
-	}
-	return fileIDPrefix + d.Slug
-}
-
 // ToProfile converts a Definition to a store.AgentProfile.
 // JSON array fields are marshaled from typed Go slices.
-// The ID is deterministic: "file-{slug}".
+//
+// The file-based agent runtime (TASKS/adhoc/01-eliminate-file-based-agent-
+// runtime.md) is eliminated: there is no more deterministic "file-<slug>"
+// fallback identity. d.ID is either a real, stamped agent_profiles UUID (a
+// managed file already carrying `id:` frontmatter) or empty (an unstamped
+// definition, e.g. an internal builtin seed profile that has never been
+// ingested into a DB row yet) -- the standard agent-creation path
+// (store.CreateAgent, called from upsertAgentDef) mints a fresh UUID for the
+// empty case exactly the way it does for any other newly created agent.
 func (d *Definition) ToProfile() *store.AgentProfile {
 	now := time.Now().UTC().Format(time.RFC3339)
 
 	p := &store.AgentProfile{
-		ID:           d.CanonicalID(),
+		ID:           strings.TrimSpace(d.ID),
 		Name:         d.Name,
 		Slug:         d.Slug,
 		Avatar:       d.Avatar,
@@ -75,31 +53,26 @@ func (d *Definition) ToProfile() *store.AgentProfile {
 		p.Constraints = "{}"
 	}
 
-	// Modes as JSON array of slug strings (for the modes column).
-	// Note: the profile no longer carries a `default_mode` field — the
-	// active mode is a *session* attribute (sessions.current_mode_id), not
-	// an agent attribute. See migration 063 + CW-20260512-0115.
-	if len(d.Modes) > 0 {
-		slugs := make([]string, len(d.Modes))
-		for i, m := range d.Modes {
-			slugs[i] = m.Slug
-		}
-		p.Modes = marshalJSONOr(slugs, "[]")
-	} else {
-		p.Modes = "[]"
-	}
+	// agent_profiles.modes is a legacy denormalized column (pre-dates
+	// Phase 0 item 21, "Cut Modes, in full"). It always carries "[]" now
+	// — frontmatter no longer declares inline agent modes (ModeDefinition
+	// / Definition.Modes were deleted with the rest of Legacy Agent Mode;
+	// see TASKS/phase-0/21-cut-modes.md). The column itself is left in
+	// place (out of that task's scope — it's not one of the
+	// modes/agent_modes/agent_mode_assignments tables or the
+	// sessions.current_mode_id column the task enumerates) but is
+	// permanently inert.
+	p.Modes = "[]"
 
-	// ToolPermissions — frontmatter wins; fall back to deriving an allow_list
-	// from Tools so existing agents keep their implicit allowlist behavior.
-	switch {
-	case d.ToolPermissions != nil:
-		p.ToolPermissions = marshalJSONOr(d.ToolPermissions, "{}")
-	case len(d.Tools) > 0:
-		tp := map[string]any{"allow_list": d.Tools}
-		p.ToolPermissions = marshalJSONOr(tp, "{}")
-	default:
-		p.ToolPermissions = "{}"
-	}
+	// ToolPermissions -- TASKS/adhoc/02-remove-tool-permissions-collapse-to-
+	// agent-tools.md retired the tool_permissions/CheckPermission
+	// enforcement machinery and the toolPermissions: frontmatter field
+	// entirely; agent_tools is now the sole tool-selection gate for every
+	// agent, ingested or not. The agent_profiles.tool_permissions column
+	// itself is left in place (that task's schema decision) but always
+	// written as an inert "{}" now — there is no more frontmatter input to
+	// derive it from.
+	p.ToolPermissions = "{}"
 
 	// ParentDispatchAllowlist — CW-20260512-0107 (SP-20260512-0008 W2A).
 	// JSON array of role slugs this agent may dispatch via task_execute;
@@ -109,7 +82,6 @@ func (d *Definition) ToProfile() *store.AgentProfile {
 	p.ParentDispatchAllowlist = marshalSlice(d.ParentDispatchAllowlist)
 
 	p.RoleTools = marshalSlice(d.RoleTools)
-	p.RoleSkills = marshalSlice(d.RoleSkills)
 
 	if len(d.ContextPolicy) > 0 {
 		p.ContextPolicy = marshalJSONOr(d.ContextPolicy, "{}")
@@ -130,26 +102,6 @@ func (d *Definition) ToProfile() *store.AgentProfile {
 
 	p.Settings = "{}"
 	return p
-}
-
-// ToModes converts the inline mode definitions to store.AgentMode slices.
-// Each mode gets a deterministic ID: "file-{agentSlug}-{modeSlug}".
-func (d *Definition) ToModes() []store.AgentMode {
-	modes := make([]store.AgentMode, len(d.Modes))
-	agentID := fileIDPrefix + d.Slug
-
-	for i, m := range d.Modes {
-		modes[i] = store.AgentMode{
-			ID:             fmt.Sprintf("%s%s-%s", fileIDPrefix, d.Slug, m.Slug),
-			AgentID:        agentID,
-			Slug:           m.Slug,
-			Name:           m.Name,
-			PromptAddendum: m.PromptAddendum,
-			ToolOverrides:  marshalJSONOr(m.ToolOverrides, "{}"),
-			Settings:       "{}",
-		}
-	}
-	return modes
 }
 
 // marshalSlice marshals a string slice to JSON, normalizing nil to "[]".

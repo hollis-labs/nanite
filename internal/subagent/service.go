@@ -764,16 +764,19 @@ func (svc *Service) Spawn(ctx context.Context, req SpawnRequest) (string, error)
 		AttemptsJSON:    "[]",
 	}
 
-	// H1 trust resolution: consult the workspace-scoped trust tier before
-	// any approval-gate logic. Tier determines whether to refuse, gate, or
-	// bypass the approval envelope.
+	// H1 trust resolution: consult the agent's trust tier before any
+	// approval-gate logic. Tier determines whether to refuse, gate, or
+	// bypass the approval envelope. Phase 0 item 20 (retire workspaces):
+	// resolution is no longer workspace-scoped — workspace_role_trust
+	// (the override layer) is retired in full, operator-confirmed
+	// 2026-08-18.
 	trust := dispatch.TrustNormal
-	if svc.trustResolver != nil && req.WorkspaceID != "" && req.AgentProfileID != "" {
-		t, terr := svc.trustResolver.ResolveTrust(ctx, req.WorkspaceID, req.AgentProfileID)
+	if svc.trustResolver != nil && req.AgentProfileID != "" {
+		t, terr := svc.trustResolver.ResolveTrust(ctx, req.AgentProfileID)
 		if terr != nil {
 			// Fail closed: treat resolve error as normal (require approval).
 			slog.Warn("subagent: trust resolve error; defaulting to normal", "err", terr,
-				"workspace_id", req.WorkspaceID, "agent_profile_id", req.AgentProfileID)
+				"agent_profile_id", req.AgentProfileID)
 		} else {
 			trust = t
 		}
@@ -787,7 +790,6 @@ func (svc *Service) Spawn(ctx context.Context, req SpawnRequest) (string, error)
 	// Trusted: bypass approval, write audit log, proceed to ungated path.
 	if trust == dispatch.TrustTrusted {
 		meta, _ := json.Marshal(map[string]any{
-			"workspace_id":     req.WorkspaceID,
 			"agent_profile_id": req.AgentProfileID,
 			"role":             req.Role,
 		})

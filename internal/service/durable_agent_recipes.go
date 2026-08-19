@@ -112,7 +112,6 @@ type DurableAgentRecipeRequest struct {
 	Model       string                  `json:"model"`
 	RuntimeKind string                  `json:"runtime_kind"`
 	WorkRoot    string                  `json:"work_root"`
-	WorkspaceID string                  `json:"workspace_id"`
 	ProjectID   string                  `json:"project_id"`
 	WakePayload DurableAgentWakePayload `json:"wake_payload"`
 	Metadata    map[string]string       `json:"metadata"`
@@ -207,7 +206,6 @@ func (s *durableAgentRecipeService) Apply(ctx context.Context, id string, req Du
 	result := &DurableAgentRecipeApplyResult{Plan: plan, Instance: &inst}
 	if req.Start {
 		launch, err := s.agents.Start(ctx, inst.ID, DurableAgentStartRequest{
-			WorkspaceID: req.WorkspaceID,
 			ProjectID:   req.ProjectID,
 			WakePayload: plan.WakePayload,
 		})
@@ -229,9 +227,6 @@ func compileDurableAgentRecipe(recipe DurableAgentRecipe, req DurableAgentRecipe
 	missing := validateDurableAgentRecipe(recipe)
 	if req.ProfileID == "" && recipe.ProfileID == "" {
 		missing = append(missing, "profile_id")
-	}
-	if req.Start && req.WorkspaceID == "" {
-		missing = append(missing, "workspace_id")
 	}
 	missing = append(missing, missingRecipeInputs(recipe, req)...)
 
@@ -519,7 +514,6 @@ func builtinDurableAgentRecipes() []DurableAgentRecipe {
 				recipeModelInput(false, "claude-cli"),
 				recipeRuntimeKindInput(false, string(runtimekind.StreamingStdio)),
 				recipePathInput("work_root", "Work root", "durable_agent.work_root", false, "~/dev/project"),
-				recipeStringInput("boot_profile_id", "Boot profile ID", "metadata.boot_profile_id", false, "bootprofile:claude-smoke"),
 				recipeTextareaInput("kickoff_prompt", "Kickoff prompt", "wake_payload.prompt", false, "Optional kickoff instructions for the managed harness."),
 				recipeTextareaInput("boot_plan_hint", "Boot plan hint", "metadata.boot_plan_hint", false, "Preview-only non-secret note about files, prompts, or setup the harness should eventually plant."),
 			},
@@ -1200,8 +1194,6 @@ func recipeRequestValue(req DurableAgentRecipeRequest, key string) string {
 		return req.RuntimeKind
 	case "durable_agent.work_root":
 		return req.WorkRoot
-	case "workspace_id":
-		return req.WorkspaceID
 	case "project_id":
 		return req.ProjectID
 	case "wake_payload.reason":

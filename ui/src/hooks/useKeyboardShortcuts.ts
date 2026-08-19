@@ -68,34 +68,20 @@ export function usePluginKeybindings() {
   })
 }
 
-/** Hook to fetch custom actions (for keybinding registration) */
-export function useActionKeybindings() {
-  return useQuery({
-    queryKey: ['actions'],
-    queryFn: async () => {
-      const data = await api.listActions()
-      return data.actions.filter((a) => a.enabled && a.keybinding)
-    },
-    staleTime: 60_000,
-  })
-}
-
 export function useKeyboardShortcuts(options: KeyboardShortcutsOptions = {}) {
   const toggleLeftSidebar = useLayoutStore((s) => s.toggleLeftSidebar)
   const toggleRightRail = useLayoutStore((s) => s.toggleRightRail)
   const toggleArtifactsDrawer = useLayoutStore((s) => s.toggleArtifactsDrawer)
   const toggleHeaderChips = useLayoutStore((s) => s.toggleHeaderChips)
   const activeSessionId = useAppStore((s) => s.activeSessionId)
-  const activeWorkspaceId = useAppStore((s) => s.activeWorkspaceId)
   const setActiveSession = useAppStore((s) => s.setActiveSession)
   const queryClient = useQueryClient()
 
   const { data: userSettings } = useSettings()
   const { focusComposer, sessions = [], openCommandPalette, openSearch } = options
 
-  // Fetch plugin keybindings and action keybindings
+  // Fetch plugin keybindings
   const { data: pluginKeybindings } = usePluginKeybindings()
-  const { data: actionBindings } = useActionKeybindings()
 
   // Merge user-customized shortcuts with defaults.
   const bindings = useMemo(() => {
@@ -104,10 +90,8 @@ export function useKeyboardShortcuts(options: KeyboardShortcutsOptions = {}) {
   }, [userSettings?.ext_settings])
 
   const handleNewSession = useCallback(async () => {
-    if (!activeWorkspaceId) return
     try {
       const newSession = await api.createSession({
-        workspace_id: activeWorkspaceId,
         provider: userSettings?.default_provider || undefined,
         model: userSettings?.default_model || undefined,
       })
@@ -116,7 +100,7 @@ export function useKeyboardShortcuts(options: KeyboardShortcutsOptions = {}) {
     } catch (err) {
       console.error('Failed to create session:', err)
     }
-  }, [activeWorkspaceId, queryClient, setActiveSession, userSettings])
+  }, [queryClient, setActiveSession, userSettings])
 
   const handleBookmarkLast = useCallback(async () => {
     if (!activeSessionId) return
@@ -214,16 +198,6 @@ export function useKeyboardShortcuts(options: KeyboardShortcutsOptions = {}) {
         e.preventDefault()
         toggleHeaderChips()
       } else {
-        // Check custom action keybindings
-        if (actionBindings && activeSessionId) {
-          for (const action of actionBindings) {
-            if (matchesBinding(e, action.keybinding)) {
-              e.preventDefault()
-              void api.executeAction(action.id, activeSessionId)
-              return
-            }
-          }
-        }
         // Check plugin keybindings
         if (pluginKeybindings) {
           for (const kb of pluginKeybindings) {
@@ -257,7 +231,6 @@ export function useKeyboardShortcuts(options: KeyboardShortcutsOptions = {}) {
     currentPage,
     setCurrentPage,
     openCommandPalette,
-    actionBindings,
     pluginKeybindings,
     activeSessionId,
   ])

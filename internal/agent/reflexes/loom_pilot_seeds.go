@@ -227,6 +227,10 @@ func SeedAgentReflexesBySlug(ctx context.Context, st *store.Store, seeds []Agent
 			ActionSpec:  string(actionJSON),
 			Priority:    s.Priority,
 			CreatedBy:   "system",
+			// All of this pilot's seeds are inject_reminder nudges, not
+			// safety-critical halts — permissive default (Phase 1 item
+			// 07, TASKS/phase-1/07-add-reflex-opt-out-field.md).
+			OptOutAllowed: true,
 		}); err != nil {
 			return inserted, fmt.Errorf("seed %s/%s: %w", s.AgentSlug, s.Name, err)
 		}

@@ -10,7 +10,6 @@ package adapterclaude
 import (
 	_ "embed"
 	"fmt"
-	"os"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -125,35 +124,18 @@ func (a *Adapter) Name() string { return "claude" }
 // Priority returns the discovery order. Lower = checked first.
 func (a *Adapter) Priority() int { return 60 }
 
-// Discover scans {projectDir}/.claude/agents/*.md and returns normalized Definitions.
-func (a *Adapter) Discover(projectDir string) ([]agent.Definition, error) {
-	agentsDir := filepath.Join(projectDir, ".claude", "agents")
-	entries, err := os.ReadDir(agentsDir)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return nil, nil
-		}
-		return nil, fmt.Errorf("adapter-claude: read agents dir: %w", err)
-	}
-
-	var defs []agent.Definition
-	for _, entry := range entries {
-		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".md") {
-			continue
-		}
-
-		path := filepath.Join(agentsDir, entry.Name())
-		def, err := agent.ParseMDFile(path)
-		if err != nil {
-			// Skip unparseable files rather than failing the whole discovery.
-			continue
-		}
-
-		def.Source = "claude"
-		defs = append(defs, *def)
-	}
-
-	return defs, nil
+// Discover is a no-op. External-format agent import (scanning
+// .claude/agents/*.md and parsing each as a Nanite agent.Definition) was cut
+// in Phase 0 item 16 — see TASKS.md, docs/architecture-decision-log-2026-08-17.md
+// §4/§6, and docs/engineering/architecture/01-agent-construction.md's "What's
+// cut" section: Nanite agents are defined in Nanite's own schema, with no
+// replacement for importing external CLI-agent config formats.
+//
+// The signature stays so the agent.CLIAgentAdapter interface contract holds
+// (mirroring the precedent set by PopulateSandbox above). SyncProjectRoot
+// below (the opposite, export direction) is unaffected and remains live.
+func (a *Adapter) Discover(_ string) ([]agent.Definition, error) {
+	return nil, nil
 }
 
 // PopulateSandbox is a no-op since Phase 4c.6 (CW-20260508-0002): claude

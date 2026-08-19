@@ -28,7 +28,6 @@ import { api } from "@/lib/api";
 import type {
   AgentProfile,
   DurableAgentInstance,
-  Mode,
   Session,
   SessionDetailsResponse,
 } from "@/lib/types";
@@ -43,7 +42,6 @@ afterEach(() => {
   vi.restoreAllMocks();
   localStorage.clear();
   useAppStore.setState({
-    activeWorkspaceId: null,
     activeProjectId: null,
     activeSessionId: null,
     configVersion: 0,
@@ -66,7 +64,6 @@ function session(overrides: Partial<Session> = {}): Session {
     short_code: "c1",
     title: "Session One",
     custom_name: "",
-    workspace_id: "workspace-1",
     project_id: "project-1",
     context_type: null,
     context_id: null,
@@ -79,21 +76,6 @@ function session(overrides: Partial<Session> = {}): Session {
     tags: "[]",
     last_activity: "2026-05-24T00:00:00Z",
     created_at: "2026-05-24T00:00:00Z",
-    ...overrides,
-  };
-}
-
-function mode(overrides: Partial<Mode> = {}): Mode {
-  return {
-    id: "mode-1",
-    slug: "work",
-    name: "Work",
-    prompt_addendum: "",
-    tool_overrides: "",
-    settings: "",
-    is_builtin: true,
-    created_at: "",
-    updated_at: "",
     ...overrides,
   };
 }
@@ -158,7 +140,6 @@ function details(
 ): SessionDetailsResponse {
   return {
     session: session(),
-    mode: mode(),
     primary_agent: agent(),
     durable_attachments: [],
     current_durable_agent: null,
@@ -198,8 +179,6 @@ function mockHeaderApi(response: SessionDetailsResponse) {
     estimated_cost_usd: 0,
   });
   vi.spyOn(api, "listAgents").mockResolvedValue([]);
-  vi.spyOn(api, "listModes").mockResolvedValue([]);
-  vi.spyOn(api, "getSessionMode").mockResolvedValue(null);
   vi.spyOn(api, "listUISlots").mockResolvedValue({});
   return vi.spyOn(api, "getSessionDetails").mockResolvedValue(response);
 }
@@ -358,12 +337,10 @@ describe("SessionDetailsPanel", () => {
         session: session({
           title: "",
           short_code: "",
-          workspace_id: "",
           project_id: "",
           provider: "",
           model: "",
         }),
-        mode: null,
         primary_agent: null,
         activity_state: "",
         immutable_start_fields: [],
@@ -381,7 +358,6 @@ describe("SessionDetailsPanel", () => {
     );
 
     expect(await screen.findByText("Untitled")).toBeTruthy();
-    expect(screen.getByText("chat")).toBeTruthy();
     expect(screen.getByText("None attached")).toBeTruthy();
     expect(screen.getAllByText("None").length).toBeGreaterThan(3);
   });
@@ -411,7 +387,6 @@ describe("SessionDetailsPanel", () => {
         include_messages: false,
         provider: "anthropic",
         model: "claude-sonnet-4",
-        mode_id: "mode-1",
       });
       expect(useAppStore.getState().activeSessionId).toBe("session-restarted");
     });

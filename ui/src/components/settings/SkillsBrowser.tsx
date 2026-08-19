@@ -52,9 +52,16 @@ function resolveSource(skill: { source?: string; settings: string }): string {
   }
 }
 
-// E2 (CW-20260428-0017): parse mode tags. Skills carry mode_ids (resolved
-// IDs) on the top-level column AND mode_slugs (raw slugs) inside settings
-// for back-compat with file-defs that haven't been ingested yet.
+// E2 (CW-20260428-0017): parse mode tags. Skills carry mode_ids on the
+// top-level column AND mode_slugs (raw slugs) inside settings for
+// back-compat with file-defs that haven't been ingested yet.
+//
+// Phase 0 item 21 ("Cut Modes, in full") removed the Session/Agent Mode
+// catalog (the `modes` table + `api.listModes`) entirely. The backend's
+// resolveSkillModeIDs no longer resolves slugs against that catalog — it
+// stores them verbatim — so despite the field's name, `mode_ids` now
+// already holds slug strings, not catalog IDs. There is nothing left to
+// look them up against, so we render them as-is.
 function parseModeIDs(skill: { mode_ids?: string }): string[] {
   if (!skill.mode_ids) return [];
   try {
@@ -95,24 +102,21 @@ export function SkillsBrowser({}: SkillsBrowserProps) {
   const [showCreateForm, setShowCreateForm] = useState(false);
   const [categoryFilter, setCategoryFilter] = useState<string>("all");
   const [sourceFilter, setSourceFilter] = useState<string>("all");
-  // E2 (CW-20260428-0017): filter skills by current session mode. "all"
-  // disables the filter; otherwise we keep skills whose mode_ids contains
-  // the picked mode ID OR whose mode_ids is empty (back-compat — those
-  // skills are available everywhere).
+  // E2 (CW-20260428-0017): filter skills by mode tag slug. "all" disables
+  // the filter; otherwise we keep skills whose mode_ids contains the
+  // picked slug OR whose mode_ids is empty (back-compat — those skills
+  // are available everywhere).
+  //
+  // Phase 0 item 21 cut the Session/Agent Mode catalog (`modes` table +
+  // api.listModes), so there is no longer a fixed list of modes to
+  // enumerate for the dropdown — options are derived from whatever slugs
+  // actually appear on skills (see modeSlugOptions below).
   const [modeFilter, setModeFilter] = useState<string>("all");
   const queryClient = useQueryClient();
 
   const { data: skills = [], isLoading } = useQuery({
     queryKey: ["skills"],
     queryFn: api.listSkills,
-  });
-
-  // Modes feed the per-skill tag rendering (slug from ID) and the mode
-  // filter dropdown. The list is small and stable enough that we don't
-  // need pagination here.
-  const { data: modes = [] } = useQuery({
-    queryKey: ["modes"],
-    queryFn: api.listModes,
   });
 
   // Dev-mode flag drives the inline-edit affordance on internal skills.
@@ -130,11 +134,17 @@ export function SkillsBrowser({}: SkillsBrowserProps) {
     },
   });
 
-  const modeByID = useMemo(() => {
-    const m = new Map<string, { id: string; slug: string; name: string }>();
-    for (const md of modes) m.set(md.id, md);
-    return m;
-  }, [modes]);
+  // Every distinct mode slug tagged on any skill, sorted, for the filter
+  // dropdown — the replacement for the removed modes-catalog query.
+  const modeSlugOptions = useMemo(() => {
+    const set = new Set<string>();
+    for (const skill of skills) {
+      const ids = parseModeIDs(skill);
+      const slugs = ids.length > 0 ? ids : parseModeSlugs(skill.settings);
+      for (const slug of slugs) set.add(slug);
+    }
+    return Array.from(set).sort();
+  }, [skills]);
 
   const { data: skillDetail } = useQuery({
     queryKey: ["skill-detail", selectedSkill],
@@ -207,10 +217,11 @@ export function SkillsBrowser({}: SkillsBrowserProps) {
       if (sourceFilter !== "all" && resolveSource(skill) !== sourceFilter) return false;
       if (modeFilter !== "all") {
         const ids = parseModeIDs(skill);
-        // Empty mode_ids → "available everywhere" (back-compat); also kept.
+        const slugs = ids.length > 0 ? ids : parseModeSlugs(skill.settings);
+        // Empty slugs → "available everywhere" (back-compat); also kept.
         // E2 acceptance: filter "active for current mode" works for skills
         // bound to that mode AND for skills with no binding.
-        if (ids.length > 0 && !ids.includes(modeFilter)) return false;
+        if (slugs.length > 0 && !slugs.includes(modeFilter)) return false;
       }
       return true;
     });
@@ -240,12 +251,12 @@ export function SkillsBrowser({}: SkillsBrowserProps) {
               value={modeFilter}
               onChange={(e) => setModeFilter(e.target.value)}
               className="appearance-none px-3 pr-8 py-1.5 bg-surface/50 border border-border rounded-lg text-fg text-xs focus:outline-none focus:ring-1 focus:ring-primary cursor-pointer"
-              title="Show only skills active for the selected mode"
+              title="Show only skills tagged with the selected mode slug"
             >
               <option value="all">All Modes</option>
-              {modes.map((m) => (
-                <option key={m.id} value={m.id}>
-                  {m.name}
+              {modeSlugOptions.map((slug) => (
+                <option key={slug} value={slug}>
+                  {slug}
                 </option>
               ))}
             </select>
@@ -320,10 +331,7 @@ export function SkillsBrowser({}: SkillsBrowserProps) {
               const toolCount = parseToolBindings(skill.tool_bindings).length;
               const source = resolveSource(skill);
               const ids = parseModeIDs(skill);
-              const tagSlugs =
-                ids.length > 0
-                  ? ids.map((id) => modeByID.get(id)?.slug).filter(Boolean) as string[]
-                  : parseModeSlugs(skill.settings);
+              const tagSlugs = ids.length > 0 ? ids : parseModeSlugs(skill.settings);
               const isInternal = source === "" || source === "builtin" || source === "seed";
               return (
                 <ContextMenu key={skill.id}>

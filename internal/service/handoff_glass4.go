@@ -153,14 +153,3 @@ func emitHandoffLoaded(ch chan chat.StreamEvent, stashID string, p ctxpkg.Handof
 		slog.Warn("handoff_loaded: stream channel full, event dropped")
 	}
 }
-
-// IsLongRunning reports whether session.Intent indicates a long-running
-// session. Used as the gate for both the proactive Glass-4 stash hook and
-// the post-compaction inject — per-turn / ephemeral / unclassified
-// sessions never carry a Glass-4 handoff.
-func IsLongRunning(sess *store.Session) bool {
-	if sess == nil || sess.Intent == nil {
-		return false
-	}
-	return *sess.Intent == store.SessionIntentLongRunning
-}

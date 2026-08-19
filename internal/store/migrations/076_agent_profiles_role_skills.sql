@@ -1,0 +1,32 @@
+-- +goose Up
+-- FU-33: role_skills column on agent_profiles.
+--
+-- Mirrors the FU-7a role_tools surface for the curated skills roster. A JSON
+-- array of skill slugs the agent should be pre-seeded with at create time.
+-- The boot-time hook in internal/service/ingest.go and the API CreateAgent
+-- handler in internal/api/agents.go read this column, parse the JSON array,
+-- and insert one agent_known_skills row per entry with pinned=1,
+-- reason='role_seed'. The seed is a best-effort enrichment, NOT a contract
+-- the runtime enforces.
+--
+-- Empty array is the column default so existing rows and rows created by
+-- callers that don't populate the field don't break the JSON-parse hook.
+--
+-- The migration runner has no schema_migrations table, so every migration
+-- re-runs on every boot. ALTER TABLE ADD COLUMN is handled by the runner's
+-- duplicate-column tolerance (see internal/store/store.go), so the plain
+-- ALTER without a guard is idempotent in practice. NOTE: the runner splits
+-- statements on the semicolon character, including inside comments, so
+-- this file uses none.
+
+ALTER TABLE agent_profiles ADD COLUMN role_skills TEXT NOT NULL DEFAULT '[]';
+
+-- +goose Down
+-- No down migration: this file predates goose adoption (see
+-- docs/engineering/architecture/05-storage-and-migrations.md, "Migrations:
+-- adopting a real ledger"). Every pre-cutover migration ships a
+-- deliberately empty Down section rather than a hand-derived rollback --
+-- reconstructing the exact pre-migration schema/data shape for 94 files
+-- retroactively isn't worth doing when the historical state it would
+-- recreate has no operational value. New migrations going forward are
+-- expected to carry a real, tested Down.

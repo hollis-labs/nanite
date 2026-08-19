@@ -219,3 +219,106 @@ func TestAgentOverrideConfig_DecodesJSONDefaults(t *testing.T) {
 		t.Errorf("Permissions: got %v, want empty for '{}'", got.Permissions)
 	}
 }
+
+// TestAgentOverrideConfig_IncludesModelID confirms 02-add-agents-
+// composition-columns.md's model_id wiring into AgentOverrideConfig.
+func TestAgentOverrideConfig_IncludesModelID(t *testing.T) {
+	profile := &store.AgentProfile{ModelID: "claude-sonnet"}
+	got := AgentOverrideConfig(profile)
+	if got.ModelID != "claude-sonnet" {
+		t.Errorf("ModelID: got %q, want %q", got.ModelID, "claude-sonnet")
+	}
+}
+
+// TestRoleOverrideConfig_NeverSuppliesModelID documents (and pins) that
+// roles has no model_id-equivalent hint column today -- RoleOverrideConfig
+// always leaves ModelID empty regardless of the role's other fields, so
+// the composition's own ModelID is the only real source until a role-level
+// default is ever added.
+func TestRoleOverrideConfig_NeverSuppliesModelID(t *testing.T) {
+	role := &store.Role{DefaultModel: "role-model", DefaultProvider: "role-provider"}
+	got := RoleOverrideConfig(role)
+	if got.ModelID != "" {
+		t.Errorf("ModelID: got %q, want empty (roles has no model_id-equivalent column)", got.ModelID)
+	}
+}
+
+// TestApplyScalarCascade_ModelIDPassthrough confirms applyScalarCascade
+// writes a non-empty cascade-resolved ModelID back onto the profile copy
+// it returns, the same way it already does for Model/Provider/Class.
+func TestApplyScalarCascade_ModelIDPassthrough(t *testing.T) {
+	profile := &store.AgentProfile{ID: "agent-1", ModelID: "claude-sonnet"}
+	got := applyScalarCascade(profile, nil, nil)
+	if got.ModelID != "claude-sonnet" {
+		t.Errorf("ModelID: got %q, want %q", got.ModelID, "claude-sonnet")
+	}
+}
+
+// TestAgentService_RoleForProfile_RealLookup is the regression test for
+// this task's real roleForProfile implementation (task 01 left it a
+// permanent nil stub since agent_profiles.role_id didn't exist yet). A
+// profile with RoleID set now resolves through s.agents.GetRole; a profile
+// with RoleID unset, or one whose role_id points at nothing (deleted role,
+// bad data), both degrade to nil rather than erroring.
+func TestAgentService_RoleForProfile_RealLookup(t *testing.T) {
+	reader := newStubReader()
+	role := &store.Role{ID: "role-1", Slug: "sme", Name: "SME", SystemPrompt: "role persona"}
+	reader.addRole(role)
+
+	svc := &agentServiceImpl{agents: reader}
+
+	bound := &store.AgentProfile{ID: "agent-1", RoleID: "role-1"}
+	if got := svc.roleForProfile(context.Background(), bound); got == nil || got.ID != "role-1" {
+		t.Errorf("roleForProfile(bound) = %+v, want role-1", got)
+	}
+
+	unbound := &store.AgentProfile{ID: "agent-2"}
+	if got := svc.roleForProfile(context.Background(), unbound); got != nil {
+		t.Errorf("roleForProfile(unbound) = %+v, want nil (RoleID unset)", got)
+	}
+
+	dangling := &store.AgentProfile{ID: "agent-3", RoleID: "role-does-not-exist"}
+	if got := svc.roleForProfile(context.Background(), dangling); got != nil {
+		t.Errorf("roleForProfile(dangling) = %+v, want nil (unknown role_id degrades, not errors)", got)
+	}
+}
+
+// TestAgentService_ResolveForSession_RoleCascadeAppliesWhenRoleIDSet is the
+// end-to-end companion to TestAgentService_ResolveForSession_
+// CascadeIsNoOpToday above: once a profile's role_id is populated (Phase 1
+// item 02's whole point), resolveForSession's cascade call now
+// contributes real role-level defaults through the live service seam, not
+// just through the pure-function tests above.
+func TestAgentService_ResolveForSession_RoleCascadeAppliesWhenRoleIDSet(t *testing.T) {
+	reader := newStubReader()
+	role := &store.Role{ID: "role-cascade-live", Slug: "sme-live", Name: "SME Live", SystemPrompt: "role-level persona (live)"}
+	reader.addRole(role)
+
+	profile := &store.AgentProfile{
+		ID:     "agent-role-bound",
+		Name:   "Role Bound",
+		Slug:   "role-bound",
+		Status: "active",
+		RoleID: role.ID,
+		// SystemPrompt deliberately left unset so the role's default flows
+		// through -- proves this isn't just a passthrough of the agent's
+		// own value.
+	}
+	reader.addAgent(profile)
+	reader.sessionBind["sess-role-bound"] = &store.SessionAgent{
+		SessionID: "sess-role-bound", AgentID: "agent-role-bound", Mode: "default", IsPrimary: true,
+	}
+
+	svc := NewAgentService(AgentServiceConfig{
+		Agents:  reader,
+		Writers: &stubAgentWriter{},
+	})
+
+	got, err := svc.ResolveForSession(context.Background(), "sess-role-bound")
+	if err != nil {
+		t.Fatalf("ResolveForSession: %v", err)
+	}
+	if got.SystemPrompt != role.SystemPrompt {
+		t.Errorf("SystemPrompt: got %q, want role default %q (role_id is now real, not a permanent nil stub)", got.SystemPrompt, role.SystemPrompt)
+	}
+}

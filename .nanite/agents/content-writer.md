@@ -6,7 +6,7 @@ description: Template writing specialist that drafts and revises content from a 
 icon: file-pen-line
 durable: true
 class: template
-activationMode: instance
+activationMode: fresh-per-wake
 defaultState: active
 tags:
   - durable-agent

@@ -157,15 +157,53 @@ type AgentProfile struct {
 	// docs/engineering/architecture/01-agent-construction.md. Added by
 	// migration 106 (TASKS/phase-1/03-add-consumers-table.md).
 	ConsumerID string `json:"consumer_id"`
+
+	// RoleID is a nullable FK to roles(id) -- the broadest layer of the
+	// role -> agent -> task cascade (see internal/service/role_cascade.go
+	// and architecture/01-agent-construction.md). Empty string means no
+	// role bound yet; nullable during transition per
+	// 02-add-agents-composition-columns.md's own text (existing rows have
+	// no role until 10-data-migrate-nanite-agents-md.md backfills one,
+	// which is out of Phase 1 scope). Added by migration 110.
+	RoleID string `json:"role_id"`
+
+	// ModelID is a nullable FK to models(id) -- a relational reference into
+	// the DB-authoritative models catalog (06-fix-models-table-sync-
+	// target.md), distinct from the pre-existing free-text
+	// DefaultModel/DefaultProvider scalars that already participate in the
+	// role->agent->task cascade. Empty string means no relational model
+	// bound yet. Added by migration 110.
+	ModelID string `json:"model_id"`
+
+	// RuntimeKind is 'cli' or 'api' -- see GLOSSARY.md's "Runtime kind"
+	// entry. Populated for every row (backfilled by migration 110 from
+	// each row's pre-existing default_provider via inferRuntimeKind,
+	// mirroring chat.IsCLIProvider; defaulted the same way for every row
+	// created afterward by applyMultiAgentDefaults) but deliberately not
+	// yet consulted anywhere for CLI-vs-API routing decisions -- wiring it
+	// as the actual routing switch is Phase 2's job, not this task's.
+	RuntimeKind string `json:"runtime_kind"`
 }
 
 // validateAgentMultiAgentFields enforces the enum constraints that
 // migration 070 deliberately did not encode at the column level. FU-28.
+//
+// activation_mode's valid set was widened from 'singleton'/'instance' to
+// 'singleton'/'fresh-per-wake'/'concurrent' by migration 110 (Phase 1 item
+// 02, TASKS/phase-1/02-add-agents-composition-columns.md) -- the real
+// design decision documented in that task's Work Log: extend this existing
+// column to the 3-value instance_mode shape architecture/
+// 01-agent-construction.md calls for, rather than add a second, competing
+// column, since exhaustive grep confirmed nothing anywhere read the old
+// 2-value column for behavior (durable_wake.go's wakeSkipReason -- the
+// intended real consumer -- switched on lifecycle_class instead). 'instance'
+// is retired as a valid value; every pre-existing row (and every
+// .nanite/agents/*.md file) was migrated to 'fresh-per-wake' in lockstep.
 func validateAgentMultiAgentFields(a *AgentProfile) error {
 	switch a.ActivationMode {
-	case "", "singleton", "instance":
+	case "", "singleton", "fresh-per-wake", "concurrent":
 	default:
-		return fmt.Errorf("activation_mode %q invalid: must be 'singleton' or 'instance'", a.ActivationMode)
+		return fmt.Errorf("activation_mode %q invalid: must be 'singleton', 'fresh-per-wake', or 'concurrent'", a.ActivationMode)
 	}
 	switch a.Class {
 	case "", "advisor", "process", "template", "harness":
@@ -177,22 +215,42 @@ func validateAgentMultiAgentFields(a *AgentProfile) error {
 	default:
 		return fmt.Errorf("default_state %q invalid: must be 'sleeping' or 'active'", a.DefaultState)
 	}
+	// runtime_kind also carries a real DB-level CHECK (migration 110,
+	// unlike the three enums above), but validating it here too gives API
+	// callers a clean Go error instead of a raw SQLite CHECK-constraint
+	// failure, matching this function's existing job for every other
+	// enum-shaped column on this row.
+	switch a.RuntimeKind {
+	case "", "cli", "api":
+	default:
+		return fmt.Errorf("runtime_kind %q invalid: must be 'cli' or 'api'", a.RuntimeKind)
+	}
 	return nil
 }
 
 // applyMultiAgentDefaults applies the FU-28 column defaults (activation_mode,
-// class, default_state, urn_aliases) and mints a URN if none is set.
-// When minting, the slug-form URN is pushed into urn_aliases so legacy
-// routing keeps resolving. FU-28.
+// class, default_state, urn_aliases, runtime_kind) and mints a URN if none
+// is set. When minting, the slug-form URN is pushed into urn_aliases so
+// legacy routing keeps resolving. FU-28; runtime_kind + the class-aware
+// activation_mode default added by migration 110 (Phase 1 item 02).
+//
+// Class is defaulted *before* ActivationMode here (reordered from this
+// function's original shape) because DefaultActivationModeForClass needs
+// a's final class value, not whatever it was before applyMultiAgentDefaults
+// ran -- a caller that sets Class="process" and leaves ActivationMode empty
+// must still land on 'fresh-per-wake', not 'singleton'.
 func applyMultiAgentDefaults(a *AgentProfile) {
-	if a.ActivationMode == "" {
-		a.ActivationMode = "singleton"
-	}
 	if a.Class == "" {
 		a.Class = "advisor"
 	}
+	if a.ActivationMode == "" {
+		a.ActivationMode = DefaultActivationModeForClass(a.Class)
+	}
 	if a.DefaultState == "" {
 		a.DefaultState = "sleeping"
+	}
+	if a.RuntimeKind == "" {
+		a.RuntimeKind = inferRuntimeKind(a.DefaultProvider)
 	}
 	if a.URNAliases == "" {
 		a.URNAliases = "[]"
@@ -224,6 +282,49 @@ func applyMultiAgentDefaults(a *AgentProfile) {
 	}
 }
 
+// DefaultActivationModeForClass returns the activation_mode value a newly
+// created composition should default to when the caller leaves it unset,
+// derived from class. Exported so internal/api/agent_builder.go's draft
+// advisor (which pre-fills a suggested ActivationMode for the operator to
+// review before create, rather than leaving it empty for
+// applyMultiAgentDefaults to fill in later) can share this exact mapping
+// instead of hardcoding its own -- avoiding a second, drifting source of
+// the same decision.
+//
+// process and template both default to 'fresh-per-wake': both use a
+// fresh/one-shot session policy with no reuse collision for "already
+// active" to guard against (durableAgentLaunchPolicyFor's
+// SessionPolicyFreshPerWake and SessionPolicyFreshOneShot, respectively --
+// see internal/service/durable_agents.go). advisor and harness (or
+// anything else, including empty/unrecognized values) default to
+// 'singleton', matching durable_wake.go's pre-migration-110 behavior for
+// every class other than process.
+func DefaultActivationModeForClass(class string) string {
+	switch class {
+	case "process", "template":
+		return "fresh-per-wake"
+	default:
+		return "singleton"
+	}
+}
+
+// inferRuntimeKind mirrors chat.IsCLIProvider's exact classification
+// (name == "pty" OR has prefix "pty-" OR has prefix "sub-" => cli, else
+// api) without importing internal/chat -- internal/chat already imports
+// internal/store, so the reverse import would cycle. Same "mirror without
+// an import cycle" convention this file already uses for
+// urnPrefix/generateAgentURN (see their doc comments above). Kept in
+// lockstep with chat.IsCLIProvider and this migration's SQL backfill
+// (110_agent_profiles_composition_columns.sql) by hand; chat/engine.go's
+// own doc comment lists every other site that same classification must not
+// drift from.
+func inferRuntimeKind(providerName string) string {
+	if providerName == "pty" || strings.HasPrefix(providerName, "pty-") || strings.HasPrefix(providerName, "sub-") {
+		return "cli"
+	}
+	return "api"
+}
+
 // agentColumns is the canonical SELECT column list for agent_profiles.
 const agentColumns = `id, name, slug, COALESCE(avatar,''), system_prompt, COALESCE(description,''),
         modes, COALESCE(default_model,''), COALESCE(default_provider,''),
@@ -240,7 +341,8 @@ const agentColumns = `id, name, slug, COALESCE(avatar,''), system_prompt, COALES
         COALESCE(urn,''), COALESCE(urn_aliases,'[]'),
         COALESCE(activation_mode,'singleton'), COALESCE(class,'advisor'),
         COALESCE(default_state,'sleeping'),
-        COALESCE(consumer_id,'')`
+        COALESCE(consumer_id,''),
+        COALESCE(role_id,''), COALESCE(model_id,''), COALESCE(runtime_kind,'api')`
 
 // scanAgent scans a row into an AgentProfile using the canonical column order.
 func scanAgent(scanner interface{ Scan(...any) error }, a *AgentProfile) error {
@@ -261,6 +363,7 @@ func scanAgent(scanner interface{ Scan(...any) error }, a *AgentProfile) error {
 		&a.ActivationMode, &a.Class,
 		&a.DefaultState,
 		&a.ConsumerID,
+		&a.RoleID, &a.ModelID, &a.RuntimeKind,
 	)
 }
 
@@ -399,8 +502,9 @@ func (s *Store) CreateAgent(a *AgentProfile) error {
 		                              durable,
 		                              urn, urn_aliases,
 		                              activation_mode, class, default_state,
-		                              consumer_id)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		                              consumer_id,
+		                              role_id, model_id, runtime_kind)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		a.ID, a.Name, a.Slug, nullIfEmpty(a.Avatar), a.SystemPrompt, nullIfEmpty(a.Description),
 		a.Modes, nullIfEmpty(a.DefaultModel), a.DefaultProvider,
 		a.MCPServers, a.ToolPermissions, a.CanExecute, a.Settings,
@@ -417,6 +521,7 @@ func (s *Store) CreateAgent(a *AgentProfile) error {
 		a.URN, a.URNAliases,
 		a.ActivationMode, a.Class, a.DefaultState,
 		nullIfEmpty(a.ConsumerID),
+		nullIfEmpty(a.RoleID), nullIfEmpty(a.ModelID), a.RuntimeKind,
 	)
 	if err != nil {
 		return fmt.Errorf("create agent: %w", err)
@@ -570,7 +675,8 @@ func (s *Store) UpdateAgent(a *AgentProfile) error {
 		        durable = ?,
 		        urn = ?, urn_aliases = ?,
 		        activation_mode = ?, class = ?, default_state = ?,
-		        consumer_id = ?
+		        consumer_id = ?,
+		        role_id = ?, model_id = ?, runtime_kind = ?
 		 WHERE id = ?`,
 		a.Name, a.Slug, nullIfEmpty(a.Avatar), a.SystemPrompt, nullIfEmpty(a.Description),
 		a.Modes, nullIfEmpty(a.DefaultModel), a.DefaultProvider,
@@ -587,6 +693,7 @@ func (s *Store) UpdateAgent(a *AgentProfile) error {
 		a.URN, a.URNAliases,
 		a.ActivationMode, a.Class, a.DefaultState,
 		nullIfEmpty(a.ConsumerID),
+		nullIfEmpty(a.RoleID), nullIfEmpty(a.ModelID), a.RuntimeKind,
 		a.ID,
 	)
 	if err != nil {

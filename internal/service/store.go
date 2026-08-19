@@ -46,6 +46,10 @@ type AgentReader interface {
 	ListAgentSkills(agentID string) ([]store.Skill, error)
 	ListAgentProjects(agentID string) ([]store.Project, error)
 	ListProjectAgents(projectID string) ([]store.AgentProfile, error)
+	// GetRole backs roleForProfile's role -> agent -> task cascade lookup
+	// (02-add-agents-composition-columns.md). Returns (nil, nil) on a
+	// miss, matching store.Store.GetRole's own contract.
+	GetRole(id string) (*store.Role, error)
 }
 
 // AgentWriter provides write access to agents and session-agent bindings.

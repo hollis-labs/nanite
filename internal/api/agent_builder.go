@@ -58,10 +58,19 @@ func (deterministicAgentBuilderAdvisor) Draft(_ context.Context, req AgentBuilde
 			RoleTools:       "[]",
 			RoleSkills:      "[]",
 			ContextPolicy:   "{}",
-			ActivationMode:  "singleton",
-			Class:           lifecycle,
-			DefaultState:    "sleeping",
-			Source:          "user",
+			// store.DefaultActivationModeForClass, not a hardcoded
+			// "singleton" -- a lifecycle=process/template draft that
+			// always pre-filled "singleton" here would let an operator
+			// unknowingly submit a new durable agent straight into the
+			// CW-20260817 "wakeable exactly once" bug this task's
+			// migration 110 exists to close (see agents.go's
+			// DefaultActivationModeForClass doc comment). The free-text
+			// field in AgentBuilderWizard.tsx still lets the operator
+			// override this suggestion before submit.
+			ActivationMode: store.DefaultActivationModeForClass(lifecycle),
+			Class:          lifecycle,
+			DefaultState:   "sleeping",
+			Source:         "user",
 		},
 		Capabilities: AgentBuilderCapabilitiesInput{},
 		DurableInstance: AgentBuilderDurableInstanceInput{

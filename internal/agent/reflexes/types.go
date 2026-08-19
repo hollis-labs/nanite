@@ -101,6 +101,24 @@ type State struct {
 	// PrefixTokens is the most recent input prefix size, used by the
 	// context_pressure predicate. 0 means unknown.
 	PrefixTokens int `json:"prefix_tokens"`
+	// ScopeTier / ExecutionPattern (Phase 4 item 02,
+	// TASKS/phase-4/02-dispatch-to-agent-reflex-action-kind-and-broker-migration.md)
+	// carry the CURRENT turn's pre-loop classify.ScopeTier /
+	// classify.ExecutionPattern signal (internal/classify), stringified
+	// via their own String() methods (e.g. "open", "subagent"). Unlike
+	// every other State field — built from persisted history by
+	// StateCollector — these two are populated directly by the caller
+	// from the in-flight turn's already-computed classification;
+	// StateCollector has no way to know a not-yet-decided turn's live
+	// classification (it only reads rows already committed to the
+	// store). Empty string when the caller has no classification to
+	// offer. Only internal/service/chat_reflex_dispatch.go's
+	// dispatch_to_agent evaluation populates these today — the general
+	// inject_reminder/halt_session/etc. evaluation pass
+	// (chat_reflexes.go's evaluateAndInjectReflexes, via
+	// StateCollector.Collect) does not.
+	ScopeTier        string `json:"scope_tier,omitempty"`
+	ExecutionPattern string `json:"execution_pattern,omitempty"`
 }
 
 // EventSignal is a thin projection of store.EventLogEntry for the

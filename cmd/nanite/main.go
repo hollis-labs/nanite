@@ -289,6 +289,11 @@ func cmdServe(args []string) {
 	logger := plugin.NewLogger(brand.ID + "-plugin")
 	pluginHost := plugin.NewHost(nil, logger)
 	pluginHost.SetStore(s)
+	// Phase 5 item 02: share this same store instance with manage.go's
+	// package-level DisablePlugin/EnablePlugin/IsDisabled/PluginStatus so
+	// the running server and those functions read/write the same `plugins`
+	// state table instead of opening a second connection to the DB file.
+	plugin.SetPluginStateStore(s)
 	pluginHost.SetEnvelopeRegistry(envReg)
 	pluginHost.SetMCPRegistrar(mcpManager)
 	pluginHost.RegisterService("store", s)

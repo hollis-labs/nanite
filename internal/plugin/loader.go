@@ -1,6 +1,7 @@
 package plugin
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"os/exec"
@@ -9,6 +10,7 @@ import (
 
 	fplugin "github.com/hollis-labs/plugin-sdk"
 	"github.com/hollis-labs/nanite/internal/plugin/subprocess"
+	"github.com/hollis-labs/nanite/internal/store"
 )
 
 // DiscoveredPlugin holds metadata parsed from a plugin.yaml plus the
@@ -18,6 +20,15 @@ type DiscoveredPlugin struct {
 	Manifest    *PluginManifest
 	Dir         string
 	Constructor PluginConstructor // nil for subprocess plugins
+	// MigratedFromDisabled is true when this plugin's plugin.yaml was found
+	// under its legacy renamed name (plugin.yaml.disabled, left by the now-
+	// retired file-rename disable mechanism) and restored to plugin.yaml by
+	// this discovery pass. LoadDiscovered uses this to seed the DB-backed
+	// `plugins` state table with enabled=false instead of the normal
+	// first-sight default of enabled=true, so a plugin an operator had
+	// explicitly disabled under the old mechanism doesn't silently come
+	// back enabled after this migration (see TASKS/phase-5/02's Work Log).
+	MigratedFromDisabled bool
 }
 
 // IsSubprocess returns true if this plugin uses the subprocess runtime.
@@ -46,9 +57,26 @@ func DiscoverPlugins(pluginsDir string) ([]DiscoveredPlugin, error) {
 
 		dir := filepath.Join(pluginsDir, entry.Name())
 		manifestPath := filepath.Join(dir, "plugin.yaml")
+		migrated := false
 
 		if _, err := os.Stat(manifestPath); err != nil {
-			continue // no plugin.yaml — skip
+			// Phase 5 item 02: the old disable mechanism renamed plugin.yaml
+			// to plugin.yaml.disabled; that rename is now retired, but a
+			// database from before this change may still have a directory
+			// stuck in that state. Restore it in place — file presence no
+			// longer carries any enable/disable meaning, only the DB
+			// `plugins` table does — so the plugin becomes discoverable
+			// again (LoadDiscovered seeds the DB row as disabled for it,
+			// preserving the pre-migration state instead of silently
+			// re-enabling it).
+			legacyDisabled := filepath.Join(dir, "plugin.yaml.disabled")
+			if _, legacyErr := os.Stat(legacyDisabled); legacyErr != nil {
+				continue // truly no plugin.yaml — skip
+			}
+			if err := os.Rename(legacyDisabled, manifestPath); err != nil {
+				return nil, fmt.Errorf("migrate legacy disabled manifest %s: %w", legacyDisabled, err)
+			}
+			migrated = true
 		}
 
 		manifest, err := ParseManifest(manifestPath)
@@ -62,8 +90,9 @@ func DiscoverPlugins(pluginsDir string) ([]DiscoveredPlugin, error) {
 				return nil, fmt.Errorf("plugin %q: runtime is subprocess but no entrypoint specified", manifest.Identifier())
 			}
 			discovered = append(discovered, DiscoveredPlugin{
-				Manifest: manifest,
-				Dir:      dir,
+				Manifest:             manifest,
+				Dir:                  dir,
+				MigratedFromDisabled: migrated,
 			})
 			continue
 		}
@@ -76,18 +105,56 @@ func DiscoverPlugins(pluginsDir string) ([]DiscoveredPlugin, error) {
 		}
 
 		discovered = append(discovered, DiscoveredPlugin{
-			Manifest:    manifest,
-			Dir:         dir,
-			Constructor: constructor,
+			Manifest:             manifest,
+			Dir:                  dir,
+			Constructor:          constructor,
+			MigratedFromDisabled: migrated,
 		})
 	}
 
 	return discovered, nil
 }
 
+// seedAndCheckEnabled seeds the DB-backed `plugins` state row for pluginID
+// on first sight (defaultEnabled only takes effect if no row exists yet --
+// see Store.EnsurePluginSeeded, which never overwrites an existing row) and
+// reports whether the plugin is currently enabled. This is the Phase 5 item
+// 02 gate: callers use the return value to decide whether to load the
+// plugin (and therefore whether applyManifestRegistrations ever runs for
+// it) at all.
+//
+// When host has no store configured (host.store is nil -- common in unit
+// tests that construct a bare Host without SetStore), this fails open and
+// reports enabled=true without touching any database. That preserves every
+// existing test's assumption that a bare Host loads plugins unconditionally,
+// and mirrors the plugin system's pre-Phase-5-item-02 default-on behavior
+// for any plugin that was never explicitly disabled.
+func seedAndCheckEnabled(host *Host, pluginID, kind string, defaultEnabled bool) bool {
+	host.mu.RLock()
+	db := host.store
+	host.mu.RUnlock()
+	if db == nil {
+		return true
+	}
+	ctx := context.Background()
+	if err := db.EnsurePluginSeeded(ctx, pluginID, kind, defaultEnabled); err != nil {
+		host.logger.Warn("plugin state: seed failed, defaulting to enabled", "plugin", pluginID, "error", err.Error())
+		return true
+	}
+	enabled, _, err := db.IsPluginEnabled(ctx, pluginID)
+	if err != nil {
+		host.logger.Warn("plugin state: enabled check failed, defaulting to enabled", "plugin", pluginID, "error", err.Error())
+		return true
+	}
+	return enabled
+}
+
 // LoadDiscovered instantiates and loads all discovered plugins into the host,
 // respecting dependency order. Supports both builtin and subprocess plugins.
-// Returns the list of successfully loaded plugins.
+// Returns the list of successfully loaded plugins. A plugin the DB-backed
+// `plugins` table marks disabled is skipped entirely -- it is never handed
+// to host.LoadPlugin, so its Load() never runs and
+// applyManifestRegistrations never sees it (Phase 5 item 02).
 func LoadDiscovered(host *Host, discovered []DiscoveredPlugin) ([]fplugin.Plugin, []error) {
 	// Topological sort: plugins load after their dependencies.
 	sorted, cycleErr := sortByDeps(discovered)
@@ -100,6 +167,19 @@ func LoadDiscovered(host *Host, discovered []DiscoveredPlugin) ([]fplugin.Plugin
 
 	for _, dp := range sorted {
 		pluginID := dp.Manifest.Identifier()
+
+		kind := store.PluginKindBuiltin
+		if dp.IsSubprocess() {
+			kind = store.PluginKindSubprocess
+		}
+		// defaultEnabled is false only when this directory's manifest was
+		// just restored from a legacy plugin.yaml.disabled -- preserves the
+		// plugin's pre-migration disabled state instead of silently
+		// re-enabling it on first sight under the new DB-backed model.
+		if !seedAndCheckEnabled(host, pluginID, kind, !dp.MigratedFromDisabled) {
+			host.logger.Info("plugin disabled — skipping load", "plugin", pluginID, "kind", kind)
+			continue
+		}
 
 		// Build config for this plugin.
 		cfg, err := NewPluginConfig(pluginID, dp.Dir)
@@ -258,6 +338,14 @@ func parseEntrypoint(entrypoint, pluginDir string) (string, []string) {
 // LoadRegisteredBuiltins loads all registered plugin constructors that are not
 // already loaded in the host. This ensures compiled-in plugins without a
 // plugins/ directory (no plugin.yaml) are still loaded and visible.
+//
+// Phase 5 item 02: this is the exact loop that let the old file-rename
+// disable mechanism silently fail for builtins -- it loaded every
+// registered constructor not yet present in host.plugins, completely
+// independent of any on-disk manifest state. A builtin skipped by
+// DiscoverPlugins (because its rare pluginsDir copy of plugin.yaml had been
+// renamed away) still got loaded right here. The DB-backed enabled check
+// below closes that gap.
 func LoadRegisteredBuiltins(host *Host) ([]fplugin.Plugin, []error) {
 	registered := GetRegistered()
 
@@ -267,6 +355,15 @@ func LoadRegisteredBuiltins(host *Host) ([]fplugin.Plugin, []error) {
 	for id, constructor := range registered {
 		// Skip if already loaded (e.g. via DiscoverPlugins).
 		if _, exists := host.GetPlugin(id); exists {
+			continue
+		}
+
+		// Builtins reaching this path normally have no on-disk pluginsDir
+		// copy of their manifest at all (see manage.go's doc comment), so
+		// there is no "migrated from disabled" signal here -- first sight
+		// always defaults to enabled=true.
+		if !seedAndCheckEnabled(host, id, store.PluginKindBuiltin, true) {
+			host.logger.Info("plugin disabled — skipping builtin load", "plugin", id)
 			continue
 		}
 

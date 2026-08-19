@@ -2,6 +2,7 @@ package plugin
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"io"
 	"net/http"
@@ -222,6 +223,28 @@ func applyManifestRegistrations(host *Host, manifest *PluginManifest, p goplugin
 		return nil
 	}
 	pluginID := p.ID()
+
+	// Phase 5 item 02 (TASKS/phase-5/02-build-plugin-installed-enabled-state-
+	// model.md): defense-in-depth gate on the DB-backed `plugins` state
+	// table. LoadDiscovered/LoadRegisteredBuiltins (loader.go) already skip
+	// calling this function at all for a disabled plugin -- that's the
+	// primary gate, and the one that actually stops a subprocess plugin's
+	// process from spawning. This second check exists because
+	// applyManifestRegistrations is the single shared entrypoint every
+	// registration category (present and future -- see the doc comment
+	// above this function) funnels through: any caller that ever reaches
+	// this function directly, bypassing the loader, still can't wire up a
+	// disabled plugin's registrations. Fails open (proceeds normally) when
+	// no store is configured, matching every other read path in this file.
+	host.mu.RLock()
+	stateDB := host.store
+	host.mu.RUnlock()
+	if stateDB != nil {
+		if enabled, hasRow, err := stateDB.IsPluginEnabled(context.Background(), pluginID); err == nil && hasRow && !enabled {
+			host.logger.Info("plugin disabled — skipping manifest registrations", "plugin", pluginID)
+			return nil
+		}
+	}
 
 	// Record the manifest for the B.7 /api/plugins/registry endpoint. Done
 	// before registrations so the side-map reflects the plugin even if a

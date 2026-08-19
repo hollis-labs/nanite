@@ -140,19 +140,21 @@ This branch (`phase-1-execution`, based off Phase 0's `HEAD` as of 2026-08-18 �
 
 | Task | Status | Depends on |
 |---|---|---|
-| 01-wire-runtime-kind-routing | validated | Phase 1 `02` (`runtime_kind` column, landed via the Phase 1→main merge) |
-| 02-port-forward-dynamic-resolver | validated | none (land before `04` deletes the source it ports from) |
-| 03-mandatory-post-compaction-reread | validated | none (land before `04`) |
-| 04-retire-boot-profile-catalog | validated | `01`; `02`, `03` (build-then-cut — don't delete the source before its replacement exists); `TASKS/phase-0/18a` |
-| 05-freeze-internal-agent-profiles-on-reingest | validated | none directly; coordinate with the Phase 1→main merge (check `08-kill-file-reingest-on-boot-pattern` first) — redo of Phase 0 `10`, whose claimed fix never actually landed on `main` |
-| 06-cut-nanite-native-adapter-agent-sync | validated | none directly; closes Phase 0 `16`'s leftover carve-out — redo of Phase 1 `13`, resolved 2026-08-19: real, deliberate mechanism, cut anyway per the standing "files as agent storage" decision |
+| 01-wire-runtime-kind-routing | reviewed | Phase 1 `02` (`runtime_kind` column, landed via the Phase 1→main merge) |
+| 02-port-forward-dynamic-resolver | reviewed | none (land before `04` deletes the source it ports from) |
+| 03-mandatory-post-compaction-reread | reviewed | none (land before `04`) |
+| 04-retire-boot-profile-catalog | reviewed | `01`; `02`, `03` (build-then-cut — don't delete the source before its replacement exists); `TASKS/phase-0/18a` |
+| 05-freeze-internal-agent-profiles-on-reingest | reviewed | none directly; coordinate with the Phase 1→main merge (check `08-kill-file-reingest-on-boot-pattern` first) — redo of Phase 0 `10`, whose claimed fix never actually landed on `main` |
+| 06-cut-nanite-native-adapter-agent-sync | reviewed | none directly; closes Phase 0 `16`'s leftover carve-out — redo of Phase 1 `13`, resolved 2026-08-19: real, deliberate mechanism, cut anyway per the standing "files as agent storage" decision |
 
 **Parallelization:**
 - **Wave 1 — parallel.** `01, 02, 03`. `01` touches `engine.go`/`factory.go`/`bootdir.go`/`agent_deps.go`; `02` touches `bootprofile/*` (read-only reference) + a new resolver home; `03` touches `sandbox_content_*.go` — no file overlap between the three.
 - **Wave 2 — solo.** `04` (needs `01`, `02`, `03` all landed) — the actual deletion step.
 - `05` and `06` are independent of the boot-profile-catalog cluster and of each other — both touch `internal/service/ingest.go`/adjacent code but different functions; can run in parallel with Wave 1 or after.
 
-**Validation (2026-08-19, Orchestrator):** all 6 tasks merged to `main`; backend (`go build`/`vet`/`test`) and frontend (`tsc`/`vite build`/`vitest`, 180/180 passing) baselines green. Real dogfeed against the live `nanite-api-service` deployment: clean restart with new pid, no dangling `bootprofile` references in logs; a genuine DB-only `runtime_kind='cli'` agent (no backing file) correctly routed to the CLI runtime end-to-end (`"chat-service: CLI provider routed to agent runtime"`, real ~9s subprocess turn) — confirms `01`'s mechanism is correct. Finding logged in `TASKS/ESCALATIONS.md` (2026-08-19): file-backed agents (the overwhelming majority of agents in this deployment today) short-circuit `Get()`/`GetBySlug()` to an in-memory `agent.Definition` that carries no `runtime_kind`, so the legacy `chat.IsCLIProvider` fallback still decides routing for them in practice — not a bug, informational context for `phase-3/01`. Ready for fresh Reviewer dispatch.
+**Validation (2026-08-19, Orchestrator):** all 6 tasks merged to `main`; backend (`go build`/`vet`/`test`) and frontend (`tsc`/`vite build`/`vitest`, 180/180 passing) baselines green. Real dogfeed against the live `nanite-api-service` deployment: clean restart with new pid, no dangling `bootprofile` references in logs; a genuine DB-only `runtime_kind='cli'` agent (no backing file) correctly routed to the CLI runtime end-to-end (`"chat-service: CLI provider routed to agent runtime"`, real ~9s subprocess turn) — confirms `01`'s mechanism is correct. Finding logged in `TASKS/ESCALATIONS.md` (2026-08-19): file-backed agents (the overwhelming majority of agents in this deployment today) short-circuit `Get()`/`GetBySlug()` to an in-memory `agent.Definition` that carries no `runtime_kind`, so the legacy `chat.IsCLIProvider` fallback still decides routing for them in practice — not a bug, informational context for `phase-3/01`.
+
+**Review (2026-08-19, fresh Reviewer, no shared context with workers):** 5/6 tasks (`02`-`06`) pass clean — no findings, every significant Work Log claim independently re-verified against code (not trusted). `01` passes on its own correctly-bounded scope but the reviewer independently confirmed (via its own empirical probe test) the same silent-misroute gap the Orchestrator's dogfeed run above had already hit by hand: `resolveProvider`'s untouched legacy cascade can resolve to a real HTTP provider before `runtime_kind` is ever consulted, so a `runtime_kind='cli'` agent with a bare (non-`pty-`-prefixed) `default_provider` would silently route to the API path today. Doesn't regress any live agent (all 28 real rows have `default_provider=""`/`runtime_kind='api'`); explicitly out of `01`'s scope and deferred to `phase-3/01` by design. Not a Phase 2 blocker — landed as a concrete requirement (Context finding + new "Done means" criterion + required test) directly in `TASKS/phase-3/01-collapse-resolveprovider-into-cascade.md`, and logged in `TASKS/ESCALATIONS.md`. **Phase 2 is `reviewed` and closed.**
 
 ## Phase 3 — Compaction & Recovery Events (3 task files)
 

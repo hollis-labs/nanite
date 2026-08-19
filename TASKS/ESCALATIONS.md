@@ -198,6 +198,15 @@ Format per entry:
 
 ---
 
+## 2026-08-18 — Log integrity: Phase 0 item 10's "implemented" status does not match the code — RESOLVED, subsumed by Phase 1 #08, Phase 0's own record needs correction by its owning session
+
+**Raised by:** the Phase 1 Orchestrator, following up on a finding self-reported by `TASKS/phase-1/08-kill-file-reingest-on-boot-pattern.md`'s worker
+**Question / mismatch:** `TASKS/phase-0/10-seed-builtin-agent-profiles.md`'s own Work Log describes a real, specific fix (freeze `source='internal'` `agent_profiles` rows from being overwritten by `AutoIngestAgents`'s unconditional boot-time `upsertAgentDef` → `UpdateAgent` call) and Phase 0's `INDEX.md` table marks it `implemented`. Independently verified against `phase-1-execution` (branched from Phase 0's `f2d2114b`, itself well after item 10's claimed completion): `internal/service/ingest.go`'s `upsertAgentDef` calls `st.UpdateAgent(profile)` unconditionally on line 219 with zero source-based guard, exactly the pre-fix behavior the task file's own Work Log describes fixing. `git log --oneline --all -- internal/service/ingest.go` shows no commit between item 10's claimed completion and this discovery that touches this function — the last touch before this session's own `Phase 1 #08` commit was `0c22d5f1` ("Cut Modes, in full, Phase 0 item 21"). The described fix's implementation genuinely never landed on the branch history, despite the task file's detailed, specific, plausible-sounding Work Log and the INDEX row saying otherwise. This is not a fabricated-attestation incident like the two rogue-dispatch entries earlier in this log (no false claim of Orchestrator/Reviewer approval) — it reads as a real implementation that was done in some worktree and never actually merged, or a status marked complete before the merge step finished and never corrected.
+**Resolution:** Not a blocker for Phase 1. `TASKS/phase-1/08-kill-file-reingest-on-boot-pattern.md`'s own fix (frozen overwrite for *every* source — `internal`, `project`, `user`, `plugin` — not just `internal`) fully subsumes item 10's intended behavior once it merges; no separate fix needed on the Phase 1 side. **Phase 0's own `INDEX.md` row for item 10 needs correction by whichever session owns that section** (per this project's established section-ownership split, Phase 1 does not edit Phase 0's table) — flagging here for that session's attention, and to the operator directly, rather than silently letting the record stand uncorrected.
+**Follow-up:** Whoever next has write access to Phase 0's `INDEX.md`/`TASKS/phase-0/10-seed-builtin-agent-profiles.md` should correct the status (e.g. `implemented, but merge did not land — superseded by Phase 1 #08` or similar) rather than leaving it reading as done. No Nanite code action needed beyond Phase 1 #08 itself, already in progress.
+
+---
+
 ## 2026-08-18 — Migration number collision (104) between tasks 21 and 25, plus a real column-drift bug it exposed — CLOSED, fixed at merge
 
 **Raised by:** the Orchestrator, self-reported after independent investigation

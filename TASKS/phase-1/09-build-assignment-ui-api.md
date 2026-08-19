@@ -1,30 +1,40 @@
-# Build/extend the assignment UI and API for the new role/scope/agent composition model
+# Build the assignment API — backend only, no frontend work
 
 **Phase:** 1
 **Status:** not-started
-**Depends on:** `01`-`07` (every new column/table this UI needs to expose must exist first)
-**Touches:** `ui/src/components/settings/agents/AgentDetailView.tsx`, `AgentBuilderWizard.tsx`, `AgentCreateWizard.tsx`, `editors/ToolPermissionsEditor.tsx`, `editors/ConstraintsEditor.tsx`, `editors/SystemPromptEditor.tsx`, `AgentCapabilitiesPanel.tsx`, new `RoleDetailView.tsx`/`RoleCreateWizard.tsx` (roles has no existing UI at all), `internal/api/api.go` (existing `/api/agents/*` routes — extend; new `/api/roles/*` routes)
+**Depends on:** `01`-`08` (every new column/table this API needs to expose must exist first — `08`'s Round 2 in particular, since the API surface should reflect the file-discovery cut's end state, not the pre-cut behavior)
 
-## Context
+## ⚠️ Scope correction, 2026-08-18 (operator decision, standing rule for every phase)
 
-TASKS.md Phase 1: *"Build the assignment UI/API."* This is **not a greenfield build** — verified a substantial, already-real UI and REST surface exists for agent management today: `AgentDetailView.tsx`, `AgentBuilderWizard.tsx`, `AgentCreateWizard.tsx`, dedicated editors (`ToolPermissionsEditor.tsx`, `ConstraintsEditor.tsx`, `SystemPromptEditor.tsx`, `McpServerList.tsx`), `AgentCapabilitiesPanel.tsx` (the live `agent_known_tools`/`agent_known_skills` roster UI), `AgentReflexesPanel.tsx`. REST: a full `/api/agents/{id}/...` surface already covers known-tools, known-skills, procedures, knowledge-seeds, reflexes, projects (`internal/api/api.go:102-145`) — plus `boot-plan`/`modes` sub-resources that Phase 0 (`18a`, `21`) cuts before this task starts.
+**No frontend work is part of any phase.** This task's original scope (filename kept as `09-build-assignment-ui-api.md` for cross-reference stability — 7 other files already point at it — but read it as API-only) included React component work (`AgentDetailView.tsx`, a new `RoleDetailView.tsx`/`RoleCreateWizard.tsx`, replacing `ToolPermissionsEditor.tsx`'s free-text editing with a picker, etc.). **All of that is cut from this task, and from Phase 1 entirely.** This is not a Phase-1-specific call — the operator's instruction was general: backend/API only, in every phase, going forward. Whoever picks up a later phase with UI-shaped items in its own scope (e.g. Phase 5's Cards work) should get this same correction applied there too — not this task's job to edit those files, just flagging it so it isn't missed.
 
-This task's real scope is **extending** that existing surface to expose the new composition model's fields — `role_id` selection (and the new `roles` CRUD UI, which genuinely doesn't exist yet), `consumer_id` tagging, `model_id` (FK-based, replacing whatever free-text model entry exists today), `instance_mode`/`activation_mode` (whichever `02` settles on), `runtime_kind`, and FK-based tool assignment via `agent_tools` (replacing whatever raw JSON editing `ToolPermissionsEditor.tsx` currently does) — not building agent management from nothing.
+This task's remaining, real scope is the **REST API surface** the new composition model needs — none of it currently exists end-to-end (see Context for exactly what's missing vs. already built).
+
+**Touches:** `internal/api/agents.go` (`CreateAgentRequest`/`UpdateAgentRequest` — add `role_id`/`consumer_id`/`model_id` fields, currently absent), `internal/api/api.go` (route registration), new `internal/api/consumers.go` (no REST layer exists yet for `consumers` — task `03` deliberately deferred this here), `internal/api/agent_tools.go` or extend `agents.go` (grant/revoke endpoints for `agent_tools` — only a `GET .../tools` list endpoint exists today, per `04`'s own scope)
+
+## Context — what already exists vs. what's actually missing (verified directly, not assumed)
+
+- **`roles` REST CRUD already exists in full** (`internal/api/roles.go`, built by task `01`: `GET/POST /api/roles`, `GET/PUT/DELETE /api/roles/{id}`). Nothing to build here.
+- **`agent_profiles.role_id`/`consumer_id`/`model_id` are NOT settable via the API today**, confirmed live during Wave 2's validation checkpoint: `CreateAgentRequest`/`UpdateAgentRequest` (`internal/api/types.go`) have no fields for any of the three. The columns exist (`02`, `03`) and are correctly readable (once `12` lands), but there's no write path via the API yet. This is real, missing work.
+- **`consumers` has store-layer CRUD only, no REST** (`internal/store/consumers.go`, task `03`'s own Work Log explicitly deferred the REST layer to this task). Build `GET/POST /api/consumers`, `GET/PUT/DELETE /api/consumers/{id}`, matching the existing route-naming convention `roles.go` already established.
+- **`agent_tools` has a list endpoint only** (`GET /api/agents/{id}/tools`, from task `04`). No grant/revoke (`POST`/`DELETE`) endpoints exist yet — an operator (or a future UI, whenever one gets built in some later, explicitly-scoped effort) needs a way to actually assign/remove a tool grant via the API, not just read the current set.
+- **`agent_dispatch_tool_allowlist`** (task `04`'s renamed table, resolving the `agent_dispatch_allowlist`/`parent_dispatch_allowlist` naming collision) — check whether anything currently needs a REST surface for it before building one; if nothing consumes it yet, note that in the Work Log and skip rather than building speculative CRUD.
 
 ## What to do
 
-1. Build `roles` UI: a list/detail/create view for the new `roles` table (name, system_prompt, default tool/skill hints) — this genuinely doesn't exist today, unlike everything else in this task.
-2. Extend `AgentDetailView.tsx`/`AgentBuilderWizard.tsx`/`AgentCreateWizard.tsx` to add: a role picker (select an existing `roles` row, see the cascade-resolved defaults it supplies), a consumer picker (nullable, defaults to operator-owned), a model picker sourced from the now-DB-authoritative `models` table (`06`) instead of free text, an `instance_mode`/`activation_mode` selector (whichever `02` settled on), and a `runtime_kind` display/selector (read-only display is acceptable for Phase 1 — Phase 2 is what makes it functionally load-bearing).
-3. Replace `ToolPermissionsEditor.tsx`'s raw JSON/free-text tool editing with a real picker against `known_tools` (checkbox/multi-select against the catalog, not a text field) — wire to `agent_tools` (`04`).
-4. Extend `internal/api/api.go`'s `/api/agents/*` surface (or add `/api/roles/*`) as needed to back the above UI changes — reuse the existing route-naming conventions already established by the current agent CRUD surface.
-5. Do not build any UI for `agent_dispatch_allowlist` unless `04`'s naming-collision question resolved in favor of a genuinely new, distinct concept from `parent_dispatch_allowlist` — if they turn out to be the same concept, this task inherits whatever UI (if any) already covers `parent_dispatch_allowlist`, it doesn't build a second one.
+1. Add `role_id`, `consumer_id`, `model_id` fields to `CreateAgentRequest`/`UpdateAgentRequest` (`internal/api/types.go`) and wire them through `handleCreateAgent`/`handleUpdateAgent` (`internal/api/agents.go`) — following the same nullable/pointer-field convention already used for `activation_mode` on the update path.
+2. Build `internal/api/consumers.go`: full REST CRUD for `consumers`, matching `roles.go`'s existing shape and route-naming convention. Register routes in `internal/api/api.go`.
+3. Add grant/revoke endpoints for `agent_tools` — e.g. `POST /api/agents/{id}/tools` (grant), `DELETE /api/agents/{id}/tools/{toolId}` (revoke) — backed by the store-layer functions task `04` already built (`internal/store/agent_tools.go`).
+4. Check whether `agent_dispatch_tool_allowlist` needs a REST surface yet (see Context) — build it only if something real consumes it; otherwise note the skip and why.
+5. Do not touch anything under `ui/` — no exceptions. If you find yourself about to edit a `.tsx` file, stop; that's not this task's job in this phase.
 
 ## Done means
 
-- A user can create a `roles` row, create an `agents` composition bound to it, see the cascade-resolved defaults reflected in the UI, and override them at the composition level — exercised end to end in a real browser session, not just component-level tests.
-- Tool assignment happens via a real picker against `known_tools`, not free-text JSON editing.
-- `cd ui && npm run build` passes.
+- `role_id`/`consumer_id`/`model_id` are settable via `POST`/`PUT /api/agents` and correctly readable back afterward (verified live against a running instance, not just `go test` — the same live-dogfeed discipline the rest of Phase 1 has used).
+- `consumers` has full REST CRUD, exercised by at least one integration test.
+- `agent_tools` grant/revoke works via the API, exercised by at least one integration test, and correctly rejects a grant referencing a nonexistent `known_tools` row or a nonexistent agent (same FK-integrity discipline as task `05`).
 - `go build ./cmd/nanite/`, `go vet ./...`, `go test ./...` pass.
+- No file under `ui/` is touched.
 
 ## Work log
 <Worker fills this in as it goes: what was actually done, any deviation from plan and why, anything escalated.>

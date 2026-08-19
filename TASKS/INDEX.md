@@ -108,7 +108,7 @@ This branch (`phase-1-execution`, based off Phase 0's `HEAD` as of 2026-08-18 �
 | 06-fix-models-table-sync-target | reviewed | none |
 | 07-add-reflex-opt-out-field | reviewed | none |
 | 08-kill-file-reingest-on-boot-pattern | **reopened (in-progress)** | `01` (roles negative-verification) |
-| 09-build-assignment-ui-api | not-started | 01–07 (excludes 10, which is out of scope) |
+| 09-build-assignment-ui-api | not-started (rescoped to backend-only, 2026-08-18) | 01–08 (excludes 10, which is out of scope) |
 | 10-data-migrate-nanite-agents-md | **out-of-scope** | n/a — cut for Phase 1, operator decision 2026-08-18 |
 | 11-wire-select-for-agent-to-read-agent-tools | not-started | `04` (schema/sync/backfill must exist first) |
 | 12-fix-agent-service-get-drops-new-db-only-columns | implemented (not yet merged — see note) | `02`, `03` (the columns whose reads this task fixes) |
@@ -190,6 +190,8 @@ This branch (`phase-1-execution`, based off Phase 0's `HEAD` as of 2026-08-18 �
 | 03-scratchpad-ttl-pruning | not-started | `TASKS/phase-0/27-cut-p7-scratchpad-snapshot` |
 
 ### Cards (6 tasks)
+
+**⚠️ Flag for whoever plans/executes this section, 2026-08-18 (operator standing rule, discovered during Phase 1): no frontend work is part of any phase — backend/API only.** Several of these tasks as titled ("rebuild X as a composition," a React `Card` rendering system per this repo's own `CLAUDE.md` Envelope System section) plausibly include real `ui/src/components/chat/envelopes/` component work. Not investigated or corrected here — Phase 1's own Orchestrator doesn't own this section and hasn't reviewed these task files in detail — but re-scope before dispatching, the same way Phase 1's `09-build-assignment-ui-api.md` was cut down to backend-only.
 
 | Task | Status | Depends on |
 |---|---|---|

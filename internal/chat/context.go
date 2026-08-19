@@ -156,7 +156,11 @@ Use the think tool to organize your reasoning before acting:
 //
 // TODO(F5/CW-20260420-0022): Replace this static list with dynamic hint
 // selection once the playbook runtime (CW-20260419-0027) and PeerQuery
-// dispatch land. F5 scores BuiltinReflexes() against session context and
+// dispatch land. F5 scores the reflex catalog (internal/agent/reflexes'
+// DB-backed agent_reflexes rows — the retired internal/promptrouter
+// package's in-memory BuiltinReflexes() this comment used to name was
+// migrated onto that table by TASKS/phase-4/
+// 03-migrate-promptrouter-to-reflexes.md) against session context and
 // injects only the top-N affordance hints.
 const thinkToolBlockV1 = `
 

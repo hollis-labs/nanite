@@ -24,7 +24,6 @@ import (
 	"github.com/hollis-labs/nanite/internal/grounding"
 	"github.com/hollis-labs/nanite/internal/learnings"
 	"github.com/hollis-labs/nanite/internal/messaging"
-	"github.com/hollis-labs/nanite/internal/promptrouter"
 	"github.com/hollis-labs/nanite/internal/reminders"
 	"github.com/hollis-labs/nanite/internal/service/install"
 	"github.com/hollis-labs/nanite/internal/store"
@@ -153,15 +152,24 @@ type SelfToolsTransport struct {
 	// so a wiring miss is visible rather than silently dropped.
 	Executor dispatch.Executor
 
-	// ReflexSet is the merged (builtin + user-override) reflex slice used
-	// by the E1 reflex matcher (CW-20260419-0027). Set post-construction
-	// from the startup wiring (see internal/service or cmd/nanite). When
-	// nil, reflex matching is skipped and the dispatch path is unchanged.
-	ReflexSet []promptrouter.Reflex
 	// ReflexLogger persists reflex match events to playbook_match_log.
 	// Set post-construction; nil disables match logging (matching still
 	// runs and influences dispatch). *store.Store satisfies this interface.
-	ReflexLogger promptrouter.MatchLogger
+	//
+	// The reflex catalog itself is no longer a Go-literal/YAML slice field
+	// on this struct (formerly ReflexSet []promptrouter.Reflex, merged
+	// builtin + ~/.nanite/reflexes/*.yaml user overrides at boot) —
+	// TASKS/phase-4/03-migrate-promptrouter-to-reflexes.md retired
+	// internal/promptrouter in full and moved its phrase catalog onto
+	// DB-backed dispatch_to_agent agent_reflexes rows (seeds.go). Since
+	// the DB is already authoritative here, callExecuteTask reads live
+	// dispatch_to_agent rows directly off st.Store (see
+	// matchDispatchToAgentReflex in self_tools_dispatch.go) instead of a
+	// pre-merged in-memory slice — no separate load-and-merge boot step
+	// needed. The ~/.nanite/reflexes/*.yaml user-override convention is
+	// retired too; operators use the same agent_reflexes CRUD path
+	// (internal/api/reflexes.go) as every other reflex.
+	ReflexLogger ReflexMatchLogger
 
 	// PythonPermChecker is the permission engine used by python_run
 	// to validate tool calls made from inside the Python sandbox.

@@ -99,11 +99,26 @@ func TestAttemptReflexDispatch_RealSeededReflex_ScopeTierOpenSubagent_RoutesToPl
 	// Real pre-loop classification (classifyAndAttach — the same helper
 	// generateResponse calls right before the retired broker call site
 	// used to run, and where attemptReflexDispatch runs now). This
-	// message hits ScopeTierOpenKeywords ("full implementation",
-	// "end-to-end"); classifyPattern maps any TierOpen message to
-	// PatternSubagent (internal/classify/classify.go), matching what the
-	// retired broker's Rule 5 required.
-	userMessage := "build a full implementation of the new reporting module, end-to-end"
+	// message hits ScopeTierOpenKeywords ("scaffold"); classifyPattern
+	// maps any TierOpen message to PatternSubagent
+	// (internal/classify/classify.go), matching what the retired
+	// broker's Rule 5 required.
+	//
+	// Deliberately NOT "build a full implementation... end-to-end" (the
+	// message this test used before TASKS/phase-4/03-migrate-
+	// promptrouter-to-reflexes.md landed): that message contains "build",
+	// one of worker-execute's migrated phrase-match triggers
+	// (dispatch_to_agent_worker_execute, seeds.go), which now fires
+	// FIRST (priority 20, above dispatch_to_agent_open_subagent's 10)
+	// and correctly wins per task 02's own design note 2 ("a specific
+	// phrase match wins over the general tier/pattern rule") — that's
+	// the new INTENDED behavior, not a regression, but it means this
+	// fixture message no longer isolates Rule 5 in particular. Swapped
+	// to a message that reaches TierOpen via a different keyword
+	// ("scaffold") while containing none of the 6 migrated phrase
+	// catalogs, so this test still isolates the general open+subagent
+	// fallback reflex specifically.
+	userMessage := "scaffold the new reporting module from a blank slate"
 	ls := newLoopState(chat.AgentConstraints{}, nil, false)
 	classifyAndAttach(ls, "sess-rule5-1", userMessage, nil)
 	gotTier, gotPattern := ls.Classification()
@@ -219,7 +234,17 @@ func TestAttemptReflexDispatch_RealSeededReflex_TierSmall_NoDispatch(t *testing.
 		tools:        tools,
 	}
 
-	userMessage := "what does this function do"
+	// Deliberately NOT "what does this function do" (the message this
+	// test used before TASKS/phase-4/03-migrate-promptrouter-to-
+	// reflexes.md landed): "what does" is one of researcher-mention's
+	// migrated phrase-match triggers (dispatch_to_agent_researcher_
+	// mention, seeds.go), which now correctly fires on that phrase
+	// regardless of tier — the new intended behavior, not a regression,
+	// but it means that message no longer exercises the true "nothing
+	// fires" case this test is for. Swapped to a message that contains
+	// none of the 6 migrated phrase catalogs and stays well under the
+	// classifier's trivial-tier token floor.
+	userMessage := "please say hello to the team"
 	ls := newLoopState(chat.AgentConstraints{}, nil, false)
 	classifyAndAttach(ls, "sess-rule6-1", userMessage, nil)
 	gotTier, gotPattern := ls.Classification()

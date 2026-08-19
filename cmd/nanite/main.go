@@ -23,7 +23,6 @@ import (
 	envelope_render "github.com/hollis-labs/nanite/internal/executor/envelope_render"
 	"github.com/hollis-labs/nanite/internal/learnings"
 	naniteotel "github.com/hollis-labs/nanite/internal/otel"
-	"github.com/hollis-labs/nanite/internal/promptrouter"
 	"github.com/hollis-labs/nanite/internal/providercatalog"
 	"github.com/hollis-labs/nanite/internal/worktree"
 
@@ -873,14 +872,16 @@ func initMCP(s *store.Store, cfg *config.Config, appCfg *config.AppConfig) (*mcp
 		slog.Error("mcp: failed to register builtin server", "name", mcp.CodeServerName, "err", err)
 	}
 	selfTools := mcp.NewSelfToolsTransport(s)
-	// E1 (CW-20260419-0027): wire reflex set + logger into the dispatch path.
-	// LoadUserReflexes returns nil on a missing dir (not an error); merge with
-	// builtins so user overrides with priority>=50 reliably beat built-ins.
-	userReflexes, err := promptrouter.LoadUserReflexes("")
-	if err != nil {
-		slog.Warn("reflex: failed to load user overrides", "err", err)
-	}
-	selfTools.ReflexSet = promptrouter.MergeReflexes(promptrouter.BuiltinReflexes(), userReflexes)
+	// E1 (CW-20260419-0027; migrated off internal/promptrouter by
+	// TASKS/phase-4/03-migrate-promptrouter-to-reflexes.md): wire the
+	// match-log writer into the dispatch path. The reflex catalog itself
+	// no longer needs a boot-time load-and-merge step — callExecuteTask
+	// reads live dispatch_to_agent agent_reflexes rows directly off
+	// selfTools.Store (already wired via NewSelfToolsTransport above),
+	// the same DB-authoritative source every other reflex uses. The
+	// former ~/.nanite/reflexes/*.yaml user-override convention is
+	// retired; operators use the same agent_reflexes CRUD path
+	// (internal/api/reflexes.go) as everyone else.
 	selfTools.ReflexLogger = s
 	// B1 (CW-20260429-0006): wire the manager as the cross-server schema
 	// registry so tool_validate can pre-flight check args for any

@@ -8,14 +8,18 @@
 // pending_reflexes DB tables, the store.AgentReflex/store.PendingReflex
 // types, and the /api/agents/{id}/reflexes API surface.
 //
-// Not to be confused with: internal/promptrouter — a completely
-// different system, a deterministic phrase-match dispatch router that
-// feeds dispatch.AssignRole from user input before nanite_execute_task
-// runs. It shares no code, no lifecycle, and no runtime with this
-// package. (It was previously named internal/reflex; it was renamed to
-// internal/promptrouter to remove the naming collision this comment used
-// to warn about.) See docs/promptrouter-catalog.md and
-// docs/promptrouter-authoring.md for that system's docs.
+// Historical naming-collision note: this package was once confused with
+// internal/promptrouter — a since-retired deterministic phrase-match
+// dispatch router that fed dispatch.AssignRole from user input before
+// nanite_execute_task ran. It shared no code, no lifecycle, and no
+// runtime with this package. (It was previously named internal/reflex;
+// it was renamed to internal/promptrouter specifically to stop
+// colliding with this package's name.) TASKS/phase-4/
+// 03-migrate-promptrouter-to-reflexes.md retired internal/promptrouter
+// in full and migrated its phrase catalog onto this package's own
+// DB-backed dispatch_to_agent agent_reflexes rows (see seeds.go) — the
+// naming collision this note used to warn about no longer has two
+// live sides. "reflexes" is now unambiguous.
 //
 // Historical note: this package was briefly named driftguard
 // (CW-20260816-0062) in an attempt to resolve the naming collision

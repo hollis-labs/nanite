@@ -9,7 +9,7 @@ No. There is no real pseudo-terminal anywhere in the current runtime. Claude run
 Envelope = the wire-protocol wrapper (transport shape only). Card = the rendered UI system built on top of it. See `architecture/08-cards.md`.
 
 **What's the difference between Reflexes and `promptrouter`?**
-Reflexes (`internal/agent/reflexes`) is the real, DB-backed steering primitive going forward. `promptrouter` is a phrase-match router being absorbed into reflexes — it used to be literally named `internal/reflex`, which is exactly why this question needs an FAQ entry.
+There's only one system now. Reflexes (`internal/agent/reflexes`) is the real, DB-backed steering primitive. `promptrouter` was a separate phrase-match router — it used to be literally named `internal/reflex`, which is exactly why this question needed an FAQ entry — but it's retired: `TASKS/phase-4/03-migrate-promptrouter-to-reflexes.md` deleted the package in full and migrated its phrase catalog onto `dispatch_to_agent` reflex rows (`internal/agent/reflexes/seeds.go`). If you see "promptrouter" in an older doc or commit, mentally substitute "the reflex engine's `dispatch_to_agent` action kind."
 
 **Why did `go build ./cmd/nanite/` not change what's running?**
 Because it doesn't deploy anything — it's a compile check. The running service is a separate artifact managed by Cerberus. See `deployment.md`.

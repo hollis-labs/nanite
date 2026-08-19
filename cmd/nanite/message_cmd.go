@@ -369,15 +369,16 @@ func messageHandoff(svc *messaging.Service, args []string) {
 }
 
 // newMessagingServiceForCLI wires a minimal AgentService as the messaging.Service
-// resolver for CLI use. It discovers file-based agents from the working
-// directory and plugins dir (same as the server) and appends the built-in
-// default agent so "file-default" resolves. Events is nil: the CLI doesn't
-// emit activity, and AgentService.Get — the only method messaging.Service calls
-// via AgentResolver — never dereferences the Events field.
+// resolver for CLI use. It discovers agents from the remaining live tiers
+// (same as the server — see agent.Discover's doc comment; TASKS/phase-1/08
+// cut the project/user/plugin directory-scan tiers in full) and appends the
+// built-in default agent so "file-default" resolves. Events is nil: the CLI
+// doesn't emit activity, and AgentService.Get — the only method
+// messaging.Service calls via AgentResolver — never dereferences the Events
+// field.
 func newMessagingServiceForCLI(s *store.Store) (*messaging.Service, error) {
 	agentDefs, err := agent.Discover(agent.DiscoverOptions{
 		WorkingDir: ".",
-		PluginsDir: "plugins",
 		Adapters:   agent.NewAdapterRegistry(),
 	})
 	if err != nil {

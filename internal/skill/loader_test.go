@@ -73,16 +73,15 @@ func TestWriteUserSkillFile_RejectsTraversalSlugs(t *testing.T) {
 	}
 }
 
-// TestDropAndLoad_EndToEnd is the primary acceptance test for J6.
-// It simulates the folder-drop flow:
-//
-//  1. EnsureHomeDirs creates ~/.nanite/skills/ if absent.
-//  2. A skill file is dropped into the user-level directory.
-//  3. Discover loads the file and returns the parsed definition.
-//
-// This test does not interact with the real home directory — HomeDir is
-// overridden via DiscoverOptions to isolate from the developer's machine.
-func TestDropAndLoad_EndToEnd(t *testing.T) {
+// TestDropAndLoad_UserTierNoLongerDiscovered is TASKS/phase-1/08's negative
+// verification for the ~/.nanite/skills/ (user) tier, superseding the old
+// J6 acceptance test of the same drop flow (which asserted the file WAS
+// discovered — exactly the behavior this task cuts). EnsureHomeDirs still
+// creates the directory on first run (unaffected, still exercised here to
+// prove the two behaviors are independent), but a file dropped into it is
+// no longer picked up by Discover() — DiscoverOptions doesn't even carry a
+// HomeDir field to point at it anymore.
+func TestDropAndLoad_UserTierNoLongerDiscovered(t *testing.T) {
 	home := t.TempDir()
 
 	// Step 1: ensure dirs (mirrors what NewContainer calls at startup).
@@ -90,7 +89,7 @@ func TestDropAndLoad_EndToEnd(t *testing.T) {
 		t.Fatalf("EnsureHomeDirs: %v", err)
 	}
 
-	// Step 2: drop a skill file.
+	// Step 2: drop a skill file, same as the old J6 flow.
 	skillsDir := filepath.Join(home, ".nanite", "skills")
 	content := `---
 name: Summarise
@@ -103,23 +102,12 @@ Summarise everything discussed so far in three bullet points.
 		t.Fatalf("write skill file: %v", err)
 	}
 
-	// Step 3: discover — HomeDir set to temp home to isolate from real machine.
-	defs, err := Discover(DiscoverOptions{HomeDir: home})
+	// Step 3: discover — must find nothing; the user tier is cut in full.
+	defs, err := Discover(DiscoverOptions{})
 	if err != nil {
 		t.Fatalf("Discover: %v", err)
 	}
-
-	if len(defs) != 1 {
-		t.Fatalf("got %d defs, want 1", len(defs))
-	}
-	got := defs[0]
-	if got.Slug != "summarise" {
-		t.Errorf("slug = %q, want %q", got.Slug, "summarise")
-	}
-	if got.Name != "Summarise" {
-		t.Errorf("name = %q, want %q", got.Name, "Summarise")
-	}
-	if got.Source != "user" {
-		t.Errorf("source = %q, want %q", got.Source, "user")
+	if len(defs) != 0 {
+		t.Fatalf("got %d defs, want 0 (user skill tier is cut)", len(defs))
 	}
 }

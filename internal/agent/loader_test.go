@@ -43,16 +43,15 @@ func TestEnsureHomeDirs_Idempotent(t *testing.T) {
 	}
 }
 
-// TestDropAndLoad_EndToEnd verifies the folder-drop flow for agents:
-//
-//  1. EnsureHomeDirs creates ~/.nanite/agents/ if absent.
-//  2. An agent file is dropped into the user-level directory.
-//  3. Discover loads the file and returns the parsed definition.
-//
-// Discover uses the caller-supplied HomeDir override when present, so tests
-// can stay hermetic and avoid loading the operator's real ~/.nanite/agents.
-// This test still exercises the project-tier drop flow via WorkingDir.
-func TestDropAndLoad_EndToEnd(t *testing.T) {
+// TestDropAndLoad_ProjectTierNoLongerDiscovered is TASKS/phase-1/08's
+// negative verification for the .nanite/agents/ (project) tier, superseding
+// the old end-to-end acceptance test of the same drop flow (which asserted
+// the file WAS discovered — exactly the behavior this task cuts).
+// EnsureHomeDirs still creates the directory on first run (unaffected,
+// still exercised here to prove the two behaviors are independent), but a
+// file dropped into it is no longer picked up by Discover() — the project
+// directory-scan tier was removed in full.
+func TestDropAndLoad_ProjectTierNoLongerDiscovered(t *testing.T) {
 	root := t.TempDir()
 
 	// Step 1: ensure dirs (mirrors what NewContainer calls at startup).
@@ -60,7 +59,8 @@ func TestDropAndLoad_EndToEnd(t *testing.T) {
 		t.Fatalf("EnsureHomeDirs: %v", err)
 	}
 
-	// Step 2: drop an agent file into the project-level agents/ directory.
+	// Step 2: drop an agent file into the project-level agents/ directory,
+	// same as the old end-to-end flow.
 	agentsDir := filepath.Join(root, ".nanite", "agents")
 	if err := os.MkdirAll(agentsDir, 0o755); err != nil {
 		t.Fatalf("mkdir agents: %v", err)
@@ -76,23 +76,12 @@ You are a research assistant. Investigate topics thoroughly.
 		t.Fatalf("write agent file: %v", err)
 	}
 
-	// Step 3: discover — WorkingDir set to temp root.
-	defs, err := Discover(DiscoverOptions{WorkingDir: root, HomeDir: t.TempDir()})
+	// Step 3: discover — must find nothing; the project tier is cut in full.
+	defs, err := Discover(DiscoverOptions{WorkingDir: root})
 	if err != nil {
 		t.Fatalf("Discover: %v", err)
 	}
-
-	if len(defs) != 1 {
-		t.Fatalf("got %d defs, want 1", len(defs))
-	}
-	got := defs[0]
-	if got.Slug != "researcher" {
-		t.Errorf("slug = %q, want %q", got.Slug, "researcher")
-	}
-	if got.Name != "Researcher" {
-		t.Errorf("name = %q, want %q", got.Name, "Researcher")
-	}
-	if got.Source != "project" {
-		t.Errorf("source = %q, want %q", got.Source, "project")
+	if len(defs) != 0 {
+		t.Fatalf("got %d defs, want 0 (project agent tier is cut)", len(defs))
 	}
 }

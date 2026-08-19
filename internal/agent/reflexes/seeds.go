@@ -33,11 +33,14 @@ type BaseReflexSeed struct {
 	Required    bool
 }
 
-// BaseSeeds returns the canonical per-class base reflex seeds — 11 as
-// of this writing (process: 6, advisor: 3, template: 2; TASKS/phase-1/
-// 07-add-reflex-opt-out-field.md's task file cites 12, an off-by-one in
-// the task file itself, not in this count — corrected here per
-// EXECUTION-PROCESS.md worker step 7).
+// BaseSeeds returns the canonical per-class base reflex seeds — 12 as
+// of this writing (process: 6, advisor: 4, template: 2; TASKS/phase-1/
+// 07-add-reflex-opt-out-field.md's task file cites 12 against an
+// 11-seed baseline, an off-by-one in that task file itself, not in this
+// count — corrected here per EXECUTION-PROCESS.md worker step 7. Phase 4
+// item 02 added the 12th seed, advisor's dispatch_to_agent_open_subagent,
+// which coincidentally makes the total match that earlier off-by-one
+// number for real).
 //
 // All predicates are conjunctions — see types.go's package doc for
 // rationale. The conjunction principle is the FU-30 design contract;
@@ -275,6 +278,48 @@ func BaseSeeds() []BaseReflexSeed {
 			ActionSpec: map[string]interface{}{
 				"body":    "Grounding nudge: evidence/currentness language appeared without recent tool use. Cite the source if you have one; otherwise mark it as inference and verify before relying on it.",
 				"urgency": "info",
+			},
+		},
+
+		// dispatch_to_agent_open_subagent (Phase 4 item 02,
+		// TASKS/phase-4/02-dispatch-to-agent-reflex-action-kind-and-broker-migration.md):
+		// migrated from the retired agent-broker's Rule 5
+		// (agentkit/broker/deterministic.go's ScopeTier==TierOpen &&
+		// ExecutionPattern==PatternSubagent -> planner rule, fixed
+		// confidence 0.75, mode-independent — see that task file's
+		// Context for the full rule enumeration). Class-bound to
+		// "advisor" only, NOT "process"/"template" (the old broker had
+		// no class gating at all — this narrows it): process/template
+		// class agents are exclusively subagent/instance contexts
+		// already blocked by task_execute's own hard recursion-depth
+		// cap (internal/mcp/self_tools_dispatch.go's recursionBlocked),
+		// so seeding this reflex for those classes would only ever
+		// produce a swallowed "recursion blocked" dispatch failure —
+		// never a different observable outcome than not seeding them.
+		// Priority 10 — deliberately low among dispatch_to_agent
+		// reflexes so a future, more-specific promptrouter-migrated
+		// phrase-match reflex (the old broker's Rule 1, higher priority
+		// than Rule 5 in the retired priority-ordered rule list) can be
+		// seeded above it and win first. See
+		// internal/service/chat_reflex_dispatch.go for the evaluation
+		// call site (priority DESC, first fire wins).
+		{
+			ClassTag:    "advisor",
+			Name:        "dispatch_to_agent_open_subagent",
+			TriggerKind: "predicate",
+			Priority:    10,
+			TriggerSpec: map[string]interface{}{
+				"kind": "AND",
+				"clauses": []interface{}{
+					map[string]interface{}{"kind": "scope_tier", "op": "=", "value": "open"},
+					map[string]interface{}{"kind": "execution_pattern", "op": "=", "value": "subagent"},
+				},
+			},
+			ActionKind: "dispatch_to_agent",
+			ActionSpec: map[string]interface{}{
+				"agent_slug": "planner",
+				"confidence": 0.75,
+				"reason":     "scope_tier=open + execution_pattern=subagent (migrated agent-broker Rule 5)",
 			},
 		},
 

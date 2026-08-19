@@ -37,6 +37,18 @@ const (
 	ReflexActionSendMessage     = "send_message"
 	ReflexActionHaltSession     = "halt_session"
 	ReflexActionAddSchedule     = "add_schedule"
+	// ReflexActionDispatchToAgent (Phase 4 item 02,
+	// TASKS/phase-4/02-dispatch-to-agent-reflex-action-kind-and-broker-migration.md)
+	// routes the current turn to a different agent profile — the reflex
+	// absorption of the retired agent-broker's real intent (architecture
+	// doc 03-steering.md, "Reflexes are the single steering primitive").
+	// action_spec shape: {"agent_slug": string (required), "confidence":
+	// number (optional, [0,1]), "reason": string (optional, defaults to
+	// "reflex:"+name)}. See internal/service/chat_reflex_dispatch.go for
+	// the executor call site and internal/agent/reflexes/evaluator.go's
+	// scope_tier/execution_pattern predicate kinds for the trigger shape
+	// the migrated Rule 5 seed uses.
+	ReflexActionDispatchToAgent = "dispatch_to_agent"
 
 	ReflexStatusActive  = "active"
 	ReflexStatusPaused  = "paused"

@@ -10,7 +10,6 @@ import (
 
 	"github.com/google/uuid"
 	agentsessions "github.com/hollis-labs/agentkit/agentsessions"
-	agentbroker "github.com/hollis-labs/agentkit/broker"
 	llmcontracts "github.com/hollis-labs/go-llm-contracts"
 	"github.com/hollis-labs/go-modelsdev/modelsdev"
 	"github.com/hollis-labs/go-providers/provider"
@@ -209,25 +208,6 @@ type ChatServiceConfig struct {
 	// nil-safe: when absent, the route hint stays purely informative
 	// and every turn runs the chat-direct loop.
 	EnvelopeRenderExecutor dispatch.Executor
-
-	// AgentBroker is the upstream agent-router primitive
-	// (CW-20260509-0046, SP-20260429-0001 broker-v1). Consulted before
-	// the chat-loop entry to decide whether the turn should dispatch to
-	// a worker/planner subagent OR be handled by the chat agent
-	// directly. The deterministic v1 impl is `broker.New()` from
-	// github.com/hollis-labs/agentkit/broker (agentkit v0.3.0+).
-	//
-	// nil-safe: when absent, the call-site is a pass-through and every
-	// turn falls through to the chat-direct LLM loop. Production wiring
-	// in cmd/nanite/main.go installs the deterministic broker; tests
-	// can install a fake or leave nil.
-	//
-	// The broker is UPSTREAM of the existing reflex/grounding/
-	// inner-broker scaffold in self_tools_dispatch.go::callExecuteTask
-	// — that downstream layer enriches the dispatch CALL; this upstream
-	// broker is the dispatch DECISION. Both layers run; the boundary is
-	// load-bearing per `decisions.nanite.architecture.agent_broker_v1`.
-	AgentBroker agentbroker.Broker
 }
 
 // chatServiceImpl is the concrete ChatService implementation.
@@ -372,12 +352,6 @@ type chatServiceImpl struct {
 	// the route is purely informative and the chat-direct loop runs.
 	envelopeRenderExecutor dispatch.Executor
 
-	// agentBroker is the upstream agent-router primitive
-	// (CW-20260509-0046). nil-safe — when absent the call site is a
-	// pass-through and every turn falls through to the chat-direct
-	// loop. See ChatServiceConfig.AgentBroker for the full contract.
-	agentBroker agentbroker.Broker
-
 	// activeSessionContextBlocks stamps the resolved output of a
 	// session's agent's DB-configured cmd/http context resolvers (Phase
 	// 2 item 02, TASKS/phase-2/02-port-forward-dynamic-resolver.md),
@@ -464,7 +438,6 @@ func NewChatService(cfg ChatServiceConfig) ChatService {
 		agentEventBridge:        cfg.AgentEventBridge,
 		agentBootDirAdapter:     cfg.AgentBootDirAdapter,
 		envelopeRenderExecutor:  cfg.EnvelopeRenderExecutor,
-		agentBroker:             cfg.AgentBroker,
 	}
 	// CW-20260512-0121 (SP-20260512-0011): wire the single dispatcher
 	// door. The Dispatcher delegates to chatServiceImpl.generateResponse

@@ -329,14 +329,20 @@ func cmdServe(args []string) {
 		slog.Info("worktree manager initialized", "dir", wtBaseDir)
 	}
 
-	// CW-20260502-0005 / CW-20260509-0045 / CW-20260509-0046: agent-broker
-	// instance. Constructed BEFORE NewContainer so it can be threaded
-	// into ContainerConfig (chat-service upstream wire site) AND
-	// installed onto selfTools.Broker (downstream scaffold) below. One
-	// broker, two consumers — the deterministic v1 impl
-	// (`broker.New()`) is concurrency-safe (pure function over
-	// broker.Input). See chat_broker_dispatch.go for the load-bearing
-	// boundary between the two wire sites.
+	// CW-20260502-0005 / CW-20260509-0045: agent-broker instance.
+	// Phase 4 item 02
+	// (TASKS/phase-4/02-dispatch-to-agent-reflex-action-kind-and-broker-migration.md)
+	// retired the upstream chat-service consumer (formerly
+	// chat_broker_dispatch.go's attemptBrokerDispatch, which used to
+	// consult a copy of this instance via ContainerConfig.AgentBroker
+	// before the chat-loop entry — that upstream decision is now made
+	// by the dispatch_to_agent reflex action kind instead, see
+	// internal/service/chat_reflex_dispatch.go). This instance is kept
+	// solely for the one remaining consumer: selfTools.Broker below
+	// (internal/mcp/self_tools_dispatch.go's callExecuteTask — the
+	// deliberately-independent downstream scaffold that task explicitly
+	// left untouched). The deterministic v1 impl (`broker.New()`) is
+	// concurrency-safe (pure function over broker.Input).
 	agentBrokerInstance := agentbroker.New()
 
 	// --- Service container: single wiring point ---
@@ -361,7 +367,6 @@ func cmdServe(args []string) {
 		Worktrees:       wtMgr,
 		CLIAdapters:     cliAdapters,
 		ProviderCatalog: providerCatalog,
-		AgentBroker:     agentBrokerInstance,
 		// CW-20260512-0118 (SP-20260512-0010 W2): thread the dev-tools
 		// allow-list onto the ContextClient so the per-session
 		// SlotPermissions summary surfaces the baseline READ roots.
@@ -522,14 +527,14 @@ func cmdServe(args []string) {
 		// dispatch.DefaultEnvelopeWrapper when unset.
 	}
 
-	// CW-20260509-0046: install the upstream agent-broker instance on
-	// the SelfToolsTransport's downstream scaffold seam. The same
-	// instance was threaded into ContainerConfig.AgentBroker above —
-	// chatServiceImpl now consults the broker BEFORE the chat-loop
-	// entry (load-bearing decision); the downstream wire-up here
-	// preserves the CW-20260502-0005 audit-into-event_log behavior on
-	// the dispatch CALL (callExecuteTask). Sharing one broker is safe
-	// — DeterministicBroker is stateless / concurrency-safe.
+	// CW-20260509-0046 (narrowed by Phase 4 item 02 — see the
+	// agentBrokerInstance comment above): install the agent-broker
+	// instance on the SelfToolsTransport's downstream scaffold seam.
+	// This is now the ONLY live consumer of agentBrokerInstance — the
+	// upstream chat-service call site was retired. Preserves the
+	// CW-20260502-0005 audit-into-event_log behavior on the dispatch
+	// CALL (callExecuteTask); DeterministicBroker is stateless /
+	// concurrency-safe.
 	selfTools.Broker = agentBrokerInstance
 
 	// CW-20260429-0036 (B2 closing piece): wire the dispatch_executor

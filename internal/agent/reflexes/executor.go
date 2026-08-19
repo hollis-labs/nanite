@@ -103,6 +103,24 @@ func (e *Executor) Apply(ctx context.Context, reflex store.AgentReflex, state St
 			}
 		}
 		return applied, nil
+	case store.ReflexActionDispatchToAgent:
+		// No live hook here — unlike Halt/Schedule/SendMessage,
+		// dispatch_to_agent needs a stream channel + the chat service's
+		// ToolService to synthesize a task_execute call and emit the
+		// resulting envelope, neither of which this package depends on
+		// (it would create an internal/agent/reflexes -> internal/service
+		// import cycle). internal/service/chat_reflex_dispatch.go's
+		// attemptReflexDispatch calls Apply() directly (not through
+		// Engine.EvaluateState's debounced per-turn pass) to get the
+		// parsed AppliedAction.Spec (agent_slug/confidence/reason), then
+		// performs the dispatch itself. See that file and
+		// TASKS/phase-4/02-dispatch-to-agent-reflex-action-kind-and-broker-migration.md
+		// for why dispatch_to_agent is evaluated on its own path instead
+		// of through the generic 15-minute recently-fired debounce every
+		// other action kind goes through here: a routing decision is a
+		// per-turn re-evaluation, not a nudge that should only fire once
+		// per cooldown window.
+		return applied, nil
 	default:
 		return applied, fmt.Errorf("unknown action_kind %q", reflex.ActionKind)
 	}

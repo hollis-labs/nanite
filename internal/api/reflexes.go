@@ -289,7 +289,8 @@ func validateReflexDefinition(row store.AgentReflex) []string {
 	}
 	switch row.ActionKind {
 	case store.ReflexActionInjectReminder, store.ReflexActionForceToolChoice,
-		store.ReflexActionSendMessage, store.ReflexActionHaltSession, store.ReflexActionAddSchedule:
+		store.ReflexActionSendMessage, store.ReflexActionHaltSession, store.ReflexActionAddSchedule,
+		store.ReflexActionDispatchToAgent:
 	default:
 		errs = append(errs, fmt.Sprintf("invalid action_kind %q", row.ActionKind))
 	}
@@ -299,6 +300,19 @@ func validateReflexDefinition(row store.AgentReflex) []string {
 		var spec map[string]any
 		if err := json.Unmarshal([]byte(row.ActionSpec), &spec); err != nil {
 			errs = append(errs, "action_spec: invalid JSON: "+err.Error())
+		} else if row.ActionKind == store.ReflexActionDispatchToAgent {
+			// dispatch_to_agent's config shape (Phase 4 item 02,
+			// TASKS/phase-4/02-dispatch-to-agent-reflex-action-kind-and-broker-migration.md):
+			// agent_slug is the one required field — it names the target
+			// agent profile's slug/role for event_log capture and (for
+			// class-bound reflexes migrated from the retired agent
+			// broker) for the reflex's own self-documentation. confidence
+			// and reason are optional (reason defaults to "reflex:"+name
+			// at the executor call site).
+			slug, _ := spec["agent_slug"].(string)
+			if slug == "" {
+				errs = append(errs, "action_spec: dispatch_to_agent requires a non-empty agent_slug")
+			}
 		}
 	}
 	switch row.Status {

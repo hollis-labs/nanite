@@ -68,6 +68,37 @@ func TestHandleGetSession_InterruptedTurn(t *testing.T) {
 		if it["last_message_id"] != "interrupt-a-m0" {
 			t.Errorf("last_message_id = %v, want interrupt-a-m0", it["last_message_id"])
 		}
+
+		// A real event_log row lands with reasoning metadata — not just a
+		// bare event-type string (CW-20260518-0084 postmortem extension,
+		// TASKS/phase-3/03-extend-event-log-to-recovery-mechanisms.md).
+		events, err := a.Services.Store.ListEvents("recovery", 50)
+		if err != nil {
+			t.Fatalf("ListEvents: %v", err)
+		}
+		var logged *store.EventLog
+		for i := range events {
+			if events[i].EventType == "interrupted_turn_detected" && events[i].SessionID == "interrupt-a" {
+				logged = &events[i]
+				break
+			}
+		}
+		if logged == nil {
+			t.Fatalf("event_log missing interrupted_turn_detected row for interrupt-a; got %d recovery events", len(events))
+		}
+		var meta map[string]any
+		if err := json.Unmarshal([]byte(logged.Metadata), &meta); err != nil {
+			t.Fatalf("event_log metadata not JSON: %v\nblob: %s", err, logged.Metadata)
+		}
+		if meta["last_message_id"] != "interrupt-a-m0" {
+			t.Errorf("metadata.last_message_id = %v, want interrupt-a-m0", meta["last_message_id"])
+		}
+		if meta["last_message_role"] != "user" {
+			t.Errorf("metadata.last_message_role = %v, want user", meta["last_message_role"])
+		}
+		if meta["reason"] != "service_restart" {
+			t.Errorf("metadata.reason = %v, want service_restart", meta["reason"])
+		}
 	})
 
 	t.Run("not interrupted when the turn completed (last message is assistant)", func(t *testing.T) {
@@ -76,6 +107,15 @@ func TestHandleGetSession_InterruptedTurn(t *testing.T) {
 
 		if _, ok := getInterrupted(t, mux, "interrupt-b"); ok {
 			t.Errorf("expected interrupted_turn to be null for a completed turn")
+		}
+		events, err := a.Services.Store.ListEvents("recovery", 50)
+		if err != nil {
+			t.Fatalf("ListEvents: %v", err)
+		}
+		for _, e := range events {
+			if e.EventType == "interrupted_turn_detected" {
+				t.Errorf("event_log should not log interrupted_turn_detected for a completed turn, got %+v", e)
+			}
 		}
 	})
 
@@ -89,6 +129,15 @@ func TestHandleGetSession_InterruptedTurn(t *testing.T) {
 
 		if _, ok := getInterrupted(t, mux, "interrupt-c"); ok {
 			t.Errorf("expected interrupted_turn to be null while a live stream exists")
+		}
+		events, err := a.Services.Store.ListEvents("recovery", 50)
+		if err != nil {
+			t.Fatalf("ListEvents: %v", err)
+		}
+		for _, e := range events {
+			if e.EventType == "interrupted_turn_detected" {
+				t.Errorf("event_log should not log interrupted_turn_detected while a live stream exists, got %+v", e)
+			}
 		}
 	})
 }

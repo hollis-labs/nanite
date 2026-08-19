@@ -593,6 +593,13 @@ func (s *agentRuntimeStore) MarkRuntimeOrphaned(id, reason string) error {
 	return s.store.MarkAgentRuntimeOrphaned(id, reason)
 }
 
+// LogEvent satisfies runtimeagent.RuntimeStore's postmortem-logging method
+// by delegating straight to the store's shared event_log writer — the same
+// sink chat_reflexes.go and recovery_pack_glue.go write through.
+func (s *agentRuntimeStore) LogEvent(sessionID, eventType, category, detail, metadata string) {
+	s.store.LogEvent(sessionID, eventType, category, detail, metadata)
+}
+
 // marshalMeta projects an arbitrary map into a JSON string suitable for
 // agent_runtime.meta_json. nil / empty → "{}". Encoding errors collapse to
 // "{}" so the runtime row is never refused on metadata-only failures.

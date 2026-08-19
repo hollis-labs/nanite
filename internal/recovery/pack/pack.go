@@ -70,6 +70,21 @@ func ExcludeCurrentTurn(msgs []store.Message, userContent string) []store.Messag
 	return msgs
 }
 
+// CountCharTruncatedMessages reports how many messages in history exceed
+// the per-message truncation threshold BuildRecoveryPack applies
+// (recoveryMessageMaxChars). Exposed so the host-side glue (event_log
+// postmortem write) can report truncation stats without duplicating the
+// threshold constant.
+func CountCharTruncatedMessages(history []store.Message) int {
+	n := 0
+	for _, m := range history {
+		if len(MessagePlainText(m.Content)) > recoveryMessageMaxChars {
+			n++
+		}
+	}
+	return n
+}
+
 // RecoveryPackInput is the bounded, explicit input to BuildRecoveryPack.
 type RecoveryPackInput struct {
 	Session  *store.Session

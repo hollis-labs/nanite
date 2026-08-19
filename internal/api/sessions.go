@@ -177,7 +177,52 @@ func (a *API) detectInterruptedTurn(sessionID string, sess *store.Session) map[s
 	// the four recovery mechanisms); this method's job is just the store/
 	// stream lookups that feed it.
 	hasLiveStream := a.Services.Streams != nil && a.Services.Streams.HasLiveStreamForSession(sessionID)
-	return recovery.DetectInterruptedTurn(last.Role, last.ID, last.CreatedAt, hasLiveStream)
+	result := recovery.DetectInterruptedTurn(last.Role, last.ID, last.CreatedAt, hasLiveStream)
+	if result != nil {
+		a.logInterruptedTurnDetected(sessionID, last, result)
+	}
+	return result
+}
+
+// interruptedTurnDetectedMeta is the structured event_log.metadata payload
+// for event_type="interrupted_turn_detected" — the session/turn context
+// that triggered the heuristic, not a bare event-type string. Mirrors the
+// shape convention chat_reflexes.go's "reflex_action" write established
+// (docs/engineering/architecture/06-session-lifecycle-and-recovery.md:
+// "extend event_log logging to all four [recovery mechanisms]").
+type interruptedTurnDetectedMeta struct {
+	SessionID       string `json:"session_id"`
+	LastMessageID   string `json:"last_message_id"`
+	LastMessageRole string `json:"last_message_role"`
+	LastActivityAt  string `json:"last_activity_at"`
+	Reason          string `json:"reason"`
+}
+
+// logInterruptedTurnDetected writes the event_log postmortem row for a real
+// interrupted-turn detection firing (a GET /sessions/{id} that finds a
+// dangling unanswered user turn with no live stream, per
+// DetectInterruptedTurn above). Best-effort — a.Services.Store.LogEvent
+// already swallows its own DB errors; this only degrades to a skipped
+// write if Store is nil (never true in production wiring).
+func (a *API) logInterruptedTurnDetected(sessionID string, last store.Message, result map[string]any) {
+	if a.Services.Store == nil {
+		return
+	}
+	reason, _ := result["reason"].(string)
+	meta := interruptedTurnDetectedMeta{
+		SessionID:       sessionID,
+		LastMessageID:   last.ID,
+		LastMessageRole: last.Role,
+		LastActivityAt:  last.CreatedAt,
+		Reason:          reason,
+	}
+	blob, err := json.Marshal(meta)
+	if err != nil {
+		blob = []byte("{}")
+	}
+	a.Services.Store.LogEvent(sessionID, "interrupted_turn_detected", "recovery",
+		fmt.Sprintf("interrupted turn detected: last message %s (%s) has no reply and no live stream", last.ID, last.Role),
+		string(blob))
 }
 
 func (a *API) handleUpdateSession(w http.ResponseWriter, r *http.Request) {

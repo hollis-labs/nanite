@@ -1,6 +1,7 @@
 package service
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -84,6 +85,40 @@ func TestComposeBootPayload_ColdBootInjectsRecovery(t *testing.T) {
 	// Pointer file written.
 	if _, err := os.Stat(filepath.Join(bootDir, recoveryPackFileName)); err != nil {
 		t.Errorf("recovery.md pointer not written: %v", err)
+	}
+
+	// event_log postmortem: a real, enriched row lands via the same store
+	// the pack was built against — not a bare event-type marker.
+	events, err := st.ListEvents("recovery", 50)
+	if err != nil {
+		t.Fatalf("ListEvents: %v", err)
+	}
+	var plantedEvent *store.EventLog
+	for i := range events {
+		if events[i].EventType == "recovery_pack_planted" && events[i].SessionID == sess.ID {
+			plantedEvent = &events[i]
+			break
+		}
+	}
+	if plantedEvent == nil {
+		t.Fatalf("event_log missing recovery_pack_planted row for session %s; got %d recovery events", sess.ID, len(events))
+	}
+	var meta map[string]any
+	if err := json.Unmarshal([]byte(plantedEvent.Metadata), &meta); err != nil {
+		t.Fatalf("event_log metadata not JSON: %v\nblob: %s", err, plantedEvent.Metadata)
+	}
+	// 2 prior turns replayed (the "continue please" current turn is excluded).
+	if got, want := meta["messages_replayed"], float64(2); got != want {
+		t.Errorf("metadata.messages_replayed = %v, want %v", got, want)
+	}
+	if meta["source_session_id"] != sess.ID {
+		t.Errorf("metadata.source_session_id = %v, want %v", meta["source_session_id"], sess.ID)
+	}
+	if meta["reason"] == "" || meta["reason"] == nil {
+		t.Errorf("metadata.reason is empty, want a real reason string")
+	}
+	if meta["history_window_capped"] != false {
+		t.Errorf("metadata.history_window_capped = %v, want false (only 2 prior turns, well under the window)", meta["history_window_capped"])
 	}
 
 	// Live runtime (not cold) → no recovery pack.

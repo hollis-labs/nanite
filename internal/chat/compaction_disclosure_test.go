@@ -358,10 +358,16 @@ func TestRenderedDisclosureUnderTokenBudget(t *testing.T) {
 // TestInterpolateDisclosure_syntheticEvent is a direct unit test against the
 // hardcoded compactionDisclosureTemplate (Phase 0 item 29), exercising
 // interpolateDisclosure with a synthetic *store.CompactionEvent rather than
-// round-tripping through the store. This is the primary regression guard for
-// the relocated content since compaction_events has no production writer
-// wired yet (Phase 5) — renderCompactionDisclosure can't be triggered
-// end-to-end by a real compaction in a live session today.
+// round-tripping through the store. Originally this was the only regression
+// guard for the relocated content, since compaction_events had no production
+// writer wired at the time (renderCompactionDisclosure couldn't be triggered
+// end-to-end by a real compaction). The writer is now wired at all three
+// production CompactionPipeline{} construction sites (Phase 3 item 02,
+// TASKS/phase-3/02-wire-compaction-events.md) — see
+// internal/service.TestCompactionEventWriter_WiredAtAllThreeSites_EndToEnd
+// for the real end-to-end coverage (real store, real pipeline, real writer,
+// real disclosure render on the next turn). This test is kept as a direct,
+// synthetic-input unit test of interpolateDisclosure's template formatting.
 func TestInterpolateDisclosure_syntheticEvent(t *testing.T) {
 	stash := "handoff-xyz"
 	start := "msg-010"

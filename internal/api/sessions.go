@@ -404,12 +404,13 @@ func (a *API) handleCompactSession(w http.ResponseWriter, r *http.Request) {
 	summarizer := service.BuildSummarizer(a.Services.Providers, a.Services.Store, settings)
 	mode := service.ClassifyCompactionMode(agent)
 	pipeline := &ctxpkg.CompactionPipeline{
-		Window:               result.Window,
-		Estimator:            ctxpkg.DefaultEstimator{},
-		Summarizer:           summarizer,
-		Mode:                 mode,
-		ConversationMessages: result.Messages,
-		SessionID:            sessionID,
+		Window:                result.Window,
+		Estimator:             ctxpkg.DefaultEstimator{},
+		Summarizer:            summarizer,
+		Mode:                  mode,
+		ConversationMessages:  result.Messages,
+		SessionID:             sessionID,
+		CompactionEventWriter: service.NewCompactionEventWriter(a.Services.Store),
 	}
 
 	tokensBefore := result.Window.UsedTokens()

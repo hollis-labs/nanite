@@ -875,12 +875,17 @@ func NewContainer(cfg ContainerConfig) (*Container, error) {
 	// Model catalog — fetches pricing and context-window data from models.dev.
 	// After each successful fetch the OnRefresh hook pushes the data into the
 	// pkg/models overlay so all callers of Pricing/MaxOutputFor/ContextWindowFor
-	// automatically see live values without threading the catalog through the stack.
+	// automatically see live values without threading the catalog through the
+	// stack, then materialises the same overlay values into the `models` DB
+	// table (store.SyncModelsFromRegistry) so agents.model_id has a real,
+	// current row to FK against — see Phase 1 #06.
 	catalogCtx, stopCatalog := context.WithCancel(context.Background())
-	modelCatalog := modelsdev.New(modelsdev.WithOnRefresh(syncCatalogToRegistry))
+	modelCatalog := modelsdev.New(modelsdev.WithOnRefresh(func(c *modelsdev.Client) {
+		syncCatalogToRegistry(c, cfg.Store)
+	}))
 	// Sync from disk cache immediately (warm cache path) so the registry is
 	// enriched before accepting traffic even when no network fetch is needed.
-	syncCatalogToRegistry(modelCatalog)
+	syncCatalogToRegistry(modelCatalog, cfg.Store)
 	modelCatalog.StartRefresher(catalogCtx)
 
 	// I1 (CW-20260426-0004): inspector service — dev-mode only.
@@ -1534,11 +1539,42 @@ func buildResultCache(s *store.Store) *tool.ResultCache {
 	return tool.NewResultCache(s.DB, cfg)
 }
 
+// modelsDevProviderAllowlist restricts syncCatalogToRegistry's merge to the
+// models.dev provider keys Nanite's own provider adapters actually call
+// (see seededProviders in internal/store/seed.go). Verified against a real
+// models.dev disk cache (2026-08-17 fetch, 190 providers) while building
+// Phase 1 #06: models.dev's catalog is deliberately provider-agnostic
+// (ADR-001, docs/decisions/ADR-001-models-catalog-sync.md) and
+// modelsdev.CatalogInput's maps are keyed by bare model ID with no
+// provider dimension at all — several reseller/gateway providers
+// (confirmed real entries: qihang-ai, 302ai, jiekou, nano-gpt, helicone,
+// llmgateway, abacus) mirror "claude-sonnet-4-5-20250929" verbatim at
+// different (often discounted) pricing and context limits. Sorted
+// alphabetically after "anthropic", the last one processed silently wins
+// and clobbers the real vendor's numbers for every caller of
+// models.Pricing/MaxOutputFor/ContextWindowFor — and, since this task
+// added a DB-write path fed from the same overlay, the models table too.
+// ADR-001's provider-agnostic design is not being reopened here (still
+// Option C, still one shared merge); this only narrows which of
+// models.dev's ~190 providers are allowed to contribute to that merge.
+var modelsDevProviderAllowlist = map[string]bool{
+	"anthropic": true,
+	"openai":    true,
+}
+
 // syncCatalogToRegistry builds a CatalogInput from the models.dev client and
 // pushes it into the pkg/models overlay so all callers of Pricing,
 // MaxOutputFor, and ContextWindowFor see live values without the catalog being
-// threaded through the call stack.
-func syncCatalogToRegistry(c *modelsdev.Client) {
+// threaded through the call stack. It then upserts the same, now-current
+// values into the `models` DB table via st.SyncModelsFromRegistry so the
+// table isn't just fed once by the boot-time seed (Phase 1 #06 — see
+// internal/store/models.go for why this must run after SyncFromCatalog,
+// not independently of it).
+//
+// st may be nil in tests that construct a bare *modelsdev.Client without a
+// store; the DB-write half is skipped in that case and only the in-memory
+// overlay is updated.
+func syncCatalogToRegistry(c *modelsdev.Client, st *store.Store) {
 	refs := c.List()
 	if len(refs) == 0 {
 		return
@@ -1551,6 +1587,9 @@ func syncCatalogToRegistry(c *modelsdev.Client) {
 	}
 	for _, ref := range refs {
 		if ref.ID == "" {
+			continue
+		}
+		if !modelsDevProviderAllowlist[ref.ProviderID] {
 			continue
 		}
 		if ref.Limit.ContextWindow > 0 {
@@ -1567,6 +1606,15 @@ func syncCatalogToRegistry(c *modelsdev.Client) {
 		}
 	}
 	models.SyncFromCatalog(input)
+
+	if st == nil {
+		return
+	}
+	if n, err := st.SyncModelsFromRegistry(); err != nil {
+		slog.Warn("service container: models table sync from catalog failed", "err", err)
+	} else {
+		slog.Debug("service container: models table synced from catalog", "rows", n)
+	}
 }
 
 // recoveryBrokerOrNil resolves the *recovery.Broker on the agent

@@ -140,17 +140,19 @@ This branch (`phase-1-execution`, based off Phase 0's `HEAD` as of 2026-08-18 �
 
 | Task | Status | Depends on |
 |---|---|---|
-| 01-wire-runtime-kind-routing | not-started | Phase 1 `02` (`runtime_kind` column, landed via the Phase 1→main merge) |
-| 02-port-forward-dynamic-resolver | not-started | none (land before `04` deletes the source it ports from) |
-| 03-mandatory-post-compaction-reread | not-started | none (land before `04`) |
-| 04-retire-boot-profile-catalog | not-started | `01`; `02`, `03` (build-then-cut — don't delete the source before its replacement exists); `TASKS/phase-0/18a` |
-| 05-freeze-internal-agent-profiles-on-reingest | not-started | none directly; coordinate with the Phase 1→main merge (check `08-kill-file-reingest-on-boot-pattern` first) — redo of Phase 0 `10`, whose claimed fix never actually landed on `main` |
-| 06-cut-nanite-native-adapter-agent-sync | not-started | none directly; closes Phase 0 `16`'s leftover carve-out — redo of Phase 1 `13`, resolved 2026-08-19: real, deliberate mechanism, cut anyway per the standing "files as agent storage" decision |
+| 01-wire-runtime-kind-routing | validated | Phase 1 `02` (`runtime_kind` column, landed via the Phase 1→main merge) |
+| 02-port-forward-dynamic-resolver | validated | none (land before `04` deletes the source it ports from) |
+| 03-mandatory-post-compaction-reread | validated | none (land before `04`) |
+| 04-retire-boot-profile-catalog | validated | `01`; `02`, `03` (build-then-cut — don't delete the source before its replacement exists); `TASKS/phase-0/18a` |
+| 05-freeze-internal-agent-profiles-on-reingest | validated | none directly; coordinate with the Phase 1→main merge (check `08-kill-file-reingest-on-boot-pattern` first) — redo of Phase 0 `10`, whose claimed fix never actually landed on `main` |
+| 06-cut-nanite-native-adapter-agent-sync | validated | none directly; closes Phase 0 `16`'s leftover carve-out — redo of Phase 1 `13`, resolved 2026-08-19: real, deliberate mechanism, cut anyway per the standing "files as agent storage" decision |
 
 **Parallelization:**
 - **Wave 1 — parallel.** `01, 02, 03`. `01` touches `engine.go`/`factory.go`/`bootdir.go`/`agent_deps.go`; `02` touches `bootprofile/*` (read-only reference) + a new resolver home; `03` touches `sandbox_content_*.go` — no file overlap between the three.
 - **Wave 2 — solo.** `04` (needs `01`, `02`, `03` all landed) — the actual deletion step.
 - `05` and `06` are independent of the boot-profile-catalog cluster and of each other — both touch `internal/service/ingest.go`/adjacent code but different functions; can run in parallel with Wave 1 or after.
+
+**Validation (2026-08-19, Orchestrator):** all 6 tasks merged to `main`; backend (`go build`/`vet`/`test`) and frontend (`tsc`/`vite build`/`vitest`, 180/180 passing) baselines green. Real dogfeed against the live `nanite-api-service` deployment: clean restart with new pid, no dangling `bootprofile` references in logs; a genuine DB-only `runtime_kind='cli'` agent (no backing file) correctly routed to the CLI runtime end-to-end (`"chat-service: CLI provider routed to agent runtime"`, real ~9s subprocess turn) — confirms `01`'s mechanism is correct. Finding logged in `TASKS/ESCALATIONS.md` (2026-08-19): file-backed agents (the overwhelming majority of agents in this deployment today) short-circuit `Get()`/`GetBySlug()` to an in-memory `agent.Definition` that carries no `runtime_kind`, so the legacy `chat.IsCLIProvider` fallback still decides routing for them in practice — not a bug, informational context for `phase-3/01`. Ready for fresh Reviewer dispatch.
 
 ## Phase 3 — Compaction & Recovery Events (3 task files)
 
@@ -237,11 +239,11 @@ This is called out in the task file itself (a prominent banner at the top of `TA
 
 | Task | Status | Depends on |
 |---|---|---|
-| 01-old-docs-archival-pass | not-started | none functionally; needs explicit operator policy confirmation before any file is touched |
+| 01-old-docs-archival-pass | not-started | none — policy confirmed 2026-08-19, see below |
 
-### ⚠️ `01-old-docs-archival-pass`'s policy is not yet confirmed
+### ✅ `01-old-docs-archival-pass`'s policy confirmed 2026-08-19
 
-`TASKS.md` flags its own proposed policy (archive vs. delete vs. "superseded by" banner) as "needs confirmation before executing" — this is carried forward unresolved into the task file itself (its own banner: do not default to any single treatment, including the standing aggressive-dead-code-removal policy, as a substitute for that confirmation). Planning research also found a **third, previously-undiscussed `ADR-001` collision** (`adr/ADR-001-tech-stack.md`, a ~25-file `adr/` directory never mentioned by `TASKS.md` or `docs/engineering/decisions/README.md`'s "two colliding sequences" framing) — flag this to the operator alongside the policy question, don't silently fold it in or ignore it.
+Operator decision, recorded in full in the task file: genuinely superseded docs with no remaining historical value (mainly `docs/architecture/` and top-level `docs/*.md`) are **deleted** per the standing dead-code policy. All ADRs — including the newly-found **third `ADR-001` collision** (`adr/ADR-001-tech-stack.md`, a 23-file `adr/` directory never mentioned by `TASKS.md` or `docs/engineering/decisions/README.md`'s "two colliding sequences" framing) — are **kept with a banner** noting the collision and pointing to `docs/engineering/decisions/` as canonical, not deleted. `docs/audits/` (325 files) is archived/bannered as **one historical-snapshot unit**, not per-file triage. `adr/` is explicitly **in scope** for this pass.
 
 ---
 
@@ -251,7 +253,7 @@ In addition to `TASKS/ESCALATIONS.md`'s existing entries (Phase 0 planning), thi
 - **Process note**: a research fork drifted into unauthorized self-dispatch (second occurrence of Phase 0's failure mode) — audited and kept, see `ESCALATIONS.md`.
 - **Phase 8 reaper verification**: the "no live traffic to verify against" scoping conflict, resolved via historical-log analysis — see `ESCALATIONS.md`, and the real bug it found (reaper's activity-reset fix silently non-functional in production).
 - **Phase 5 middleware plugin-extensibility** (`06`): a genuine, unsettled design question needing operator input before implementation — see `ESCALATIONS.md`.
-- **Phase 9 item 1's docs-archival policy**: not resolved here, per `TASKS.md`'s own instruction; carried forward with an additional finding (a third `adr/` ADR-collision sequence).
+- **Phase 9 item 1's docs-archival policy**: resolved 2026-08-19 (operator decision — delete superseded, keep+banner all ADRs including the third `adr/` collision, archive `docs/audits/` as one unit) — see Phase 9's table above.
 - **Phase 8 item 1's sign-off requirement**: not an escalation in the doc/reality-mismatch sense, but the one item in this whole pass requiring a standing, repeatable, live-dispatch-time gate — see above.
 
 See `TASKS/ESCALATIONS.md` for the full list of doc/reality mismatches found during planning, including which ones are already resolved (via Orchestrator/Planner judgment call within existing docs) and which ones genuinely need an operator decision before the relevant task is dispatched.

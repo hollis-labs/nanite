@@ -441,6 +441,35 @@ type DurableAgentRecipeRequest struct {
 	Start       bool                           `json:"start"`
 }
 
+// --- Roles ---
+//
+// Phase 1 item 01 (TASKS/phase-1/01-add-roles-table-and-cascade-resolution.md).
+// See internal/store/roles.go for the Role struct these requests map onto.
+
+type CreateRoleRequest struct {
+	Slug               string `json:"slug"`
+	Name               string `json:"name"`
+	SystemPrompt       string `json:"system_prompt"`
+	DefaultClass       string `json:"default_class"`
+	DefaultModel       string `json:"default_model"`
+	DefaultProvider    string `json:"default_provider"`
+	DefaultTools       string `json:"default_tools"`
+	DefaultSkills      string `json:"default_skills"`
+	DefaultPermissions string `json:"default_permissions"`
+}
+
+type UpdateRoleRequest struct {
+	Slug               *string `json:"slug"`
+	Name               *string `json:"name"`
+	SystemPrompt       *string `json:"system_prompt"`
+	DefaultClass       *string `json:"default_class"`
+	DefaultModel       *string `json:"default_model"`
+	DefaultProvider    *string `json:"default_provider"`
+	DefaultTools       *string `json:"default_tools"`
+	DefaultSkills      *string `json:"default_skills"`
+	DefaultPermissions *string `json:"default_permissions"`
+}
+
 // --- Artifacts ---
 
 type PlaceArtifactRequest struct {

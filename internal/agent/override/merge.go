@@ -12,12 +12,19 @@ type OverrideConfig struct {
 	Model       string `yaml:"model,omitempty"       json:"model,omitempty"`
 	Provider    string `yaml:"provider,omitempty"    json:"provider,omitempty"`
 	Description string `yaml:"description,omitempty" json:"description,omitempty"`
+	// SystemPrompt and Class back the role -> agent -> task cascade
+	// (TASKS/phase-1/01-add-roles-table-and-cascade-resolution.md) — see
+	// internal/service/role_cascade.go, the first real caller of this
+	// package. Same last-non-empty-writer-wins scalar semantics as Model/
+	// Provider/Description above.
+	SystemPrompt string `yaml:"system_prompt,omitempty" json:"system_prompt,omitempty"`
+	Class        string `yaml:"class,omitempty"          json:"class,omitempty"`
 
 	// Lists — union with optional +/- prefix support.
-	Tools      []string `yaml:"tools,omitempty"       json:"tools,omitempty"`
-	Skills     []string `yaml:"skills,omitempty"      json:"skills,omitempty"`
-	MCPServers []string `yaml:"mcp_servers,omitempty" json:"mcp_servers,omitempty"`
-	Tags       []string `yaml:"tags,omitempty"        json:"tags,omitempty"`
+	Tools       []string `yaml:"tools,omitempty"       json:"tools,omitempty"`
+	Skills      []string `yaml:"skills,omitempty"      json:"skills,omitempty"`
+	MCPServers  []string `yaml:"mcp_servers,omitempty" json:"mcp_servers,omitempty"`
+	Tags        []string `yaml:"tags,omitempty"        json:"tags,omitempty"`
 	Directories []string `yaml:"directories,omitempty" json:"directories,omitempty"`
 
 	// Maps — shallow deep-merge (overlay keys replace base keys).
@@ -66,6 +73,12 @@ func applyLayer(base, layer OverrideConfig) OverrideConfig {
 	}
 	if layer.Description != "" {
 		base.Description = layer.Description
+	}
+	if layer.SystemPrompt != "" {
+		base.SystemPrompt = layer.SystemPrompt
+	}
+	if layer.Class != "" {
+		base.Class = layer.Class
 	}
 
 	// Lists: union with +/- prefix support.

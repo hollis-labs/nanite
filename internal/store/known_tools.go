@@ -112,6 +112,23 @@ func (s *Store) ListAlwaysIncludedKnownTools(ctx context.Context) ([]KnownTool, 
 	return out, rows.Err()
 }
 
+// GetKnownTool returns a known_tools row by ID, or ErrKnownToolNotFound if
+// no such row exists. Phase 5 item 01 (TASKS/phase-5/01-build-assignment-
+// api.md) -- used by the agent_tools grant endpoint to reject a grant that
+// references a nonexistent known_tools row with a clean 404 rather than
+// relying solely on agent_tools.tool_id's FK constraint.
+func (s *Store) GetKnownTool(ctx context.Context, id string) (*KnownTool, error) {
+	var t KnownTool
+	row := s.DB.QueryRowContext(ctx, `SELECT `+knownToolColumns+` FROM known_tools WHERE id = ?`, id)
+	if err := scanKnownTool(row, &t); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, ErrKnownToolNotFound
+		}
+		return nil, fmt.Errorf("get known_tools by id %s: %w", id, err)
+	}
+	return &t, nil
+}
+
 // GetKnownToolByName returns a known_tools row by name, or
 // ErrKnownToolNotFound if no such row exists.
 func (s *Store) GetKnownToolByName(ctx context.Context, name string) (*KnownTool, error) {

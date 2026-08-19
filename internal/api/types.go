@@ -105,6 +105,18 @@ type CreateAgentRequest struct {
 	ActivationMode          string `json:"activation_mode"`
 	Class                   string `json:"class"`
 	DefaultState            string `json:"default_state"`
+	// RoleID/ConsumerID/ModelID (Phase 5 item 01,
+	// TASKS/phase-5/01-build-assignment-api.md) -- the composition-model
+	// FKs architecture/01-agent-construction.md names (agents.role_id ->
+	// roles(id), agents.consumer_id -> consumers(id), agents.model_id ->
+	// models(id)). These are DB-only columns with zero frontmatter
+	// representation (agent.OverlayDBFields' doc comment) -- the handler
+	// writes them via store.UpdateAgentComposition, a direct-DB step
+	// separate from AgentConfigService.Create's file-based write, not
+	// through this struct's other fields' usual store.AgentProfile path.
+	RoleID     string `json:"role_id"`
+	ConsumerID string `json:"consumer_id"`
+	ModelID    string `json:"model_id"`
 }
 
 type UpdateAgentRequest struct {
@@ -134,6 +146,13 @@ type UpdateAgentRequest struct {
 	ActivationMode          *string `json:"activation_mode"`
 	Class                   *string `json:"class"`
 	DefaultState            *string `json:"default_state"`
+	// RoleID/ConsumerID/ModelID -- see CreateAgentRequest's doc comment.
+	// Pointer semantics match every other field on this partial-update
+	// struct: nil leaves the column untouched, a pointer to "" clears it
+	// (nulls the FK), a pointer to a non-empty value sets/reassigns it.
+	RoleID     *string `json:"role_id"`
+	ConsumerID *string `json:"consumer_id"`
+	ModelID    *string `json:"model_id"`
 	// Revision is the optimistic-concurrency token the client loaded with the
 	// agent (the managed file's content hash). When set, the update is
 	// rejected with 409 if the on-disk file changed underneath. Empty skips
@@ -463,6 +482,41 @@ type UpdateRoleRequest struct {
 	DefaultTools       *string `json:"default_tools"`
 	DefaultSkills      *string `json:"default_skills"`
 	DefaultPermissions *string `json:"default_permissions"`
+}
+
+// --- Consumers ---
+//
+// Phase 5 item 01 (TASKS/phase-5/01-build-assignment-api.md). Phase 1 item
+// 03 (TASKS/phase-1/03-add-consumers-table.md) built the store-layer CRUD
+// (internal/store/consumers.go) and deliberately deferred the REST layer
+// here. See that file's store.Consumer struct these requests map onto, and
+// GLOSSARY.md's Consumer entry.
+
+type CreateConsumerRequest struct {
+	Slug string `json:"slug"`
+	Name string `json:"name"`
+}
+
+type UpdateConsumerRequest struct {
+	Slug *string `json:"slug"`
+	Name *string `json:"name"`
+}
+
+// --- Agent tools (grant/revoke) ---
+//
+// Phase 5 item 01 (TASKS/phase-5/01-build-assignment-api.md). Phase 1 item
+// 04 (TASKS/phase-1/04-add-known-tools-and-agent-tools-fk.md) built the
+// store-layer grant/revoke functions (internal/store/agent_tools.go) and a
+// list-only REST endpoint; this is the write side.
+
+// GrantAgentToolRequest grants a known_tools row (by ID) to the agent in
+// the URL path. GrantedVia is an optional provenance tag ("explicit" |
+// "role_seed" | "legacy_backfill" -- see agent_tools.granted_via's doc
+// comment); empty defaults to "explicit", matching store.GrantAgentTool's
+// own default.
+type GrantAgentToolRequest struct {
+	ToolID     string `json:"tool_id"`
+	GrantedVia string `json:"granted_via"`
 }
 
 // --- Agent context resolvers ---

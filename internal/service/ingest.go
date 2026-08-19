@@ -258,6 +258,29 @@ func upsertAgentDef(st *store.Store, def *agentpkg.Definition, bootPass bool) er
 		if profile.LimitsJSON == "" {
 			profile.LimitsJSON = existing.LimitsJSON
 		}
+		// role_id / consumer_id / model_id (Phase 1 items 02/03,
+		// architecture/01-agent-construction.md's composition model) have
+		// zero frontmatter representation -- def.ToProfile() always
+		// returns their empty zero-value for a file-backed definition
+		// (see agent.OverlayDBFields' doc comment, which already
+		// documents this for the read side). Without this, ANY reingest
+		// through this path -- every managed-agent edit via
+		// AgentConfigService.Create/Update, including ones with nothing
+		// to do with composition -- would silently wipe a value set
+		// through TASKS/phase-5/01-build-assignment-api.md's composition
+		// write path (store.UpdateAgentComposition) back to NULL the next
+		// time the agent's file was saved for an unrelated reason.
+		// Preserve the existing row's values here, mirroring
+		// OverlayDBFields' "DB wins" rule on the write side too.
+		// runtime_kind is deliberately NOT included -- unlike these
+		// three, it already self-heals via applyMultiAgentDefaults'
+		// inferRuntimeKind(a.DefaultProvider) whenever a caller leaves it
+		// empty (called inside st.UpdateAgent below), which is the
+		// desired behavior: a provider change on reingest SHOULD
+		// re-derive cli/api classification, not freeze it.
+		profile.RoleID = existing.RoleID
+		profile.ConsumerID = existing.ConsumerID
+		profile.ModelID = existing.ModelID
 		// TASKS/phase-1/08: on a boot-time pass, a row that's already been
 		// ingested under its current source is frozen -- skip the content
 		// sync so a DB-side edit (however it landed) survives the next

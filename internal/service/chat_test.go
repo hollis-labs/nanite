@@ -268,6 +268,18 @@ func (stubAgentReaderStore) ListAgentProjects(string) ([]store.Project, error)  
 func (stubAgentReaderStore) ListProjectAgents(string) ([]store.AgentProfile, error) { return nil, nil }
 func (stubAgentReaderStore) GetRole(string) (*store.Role, error)                    { return nil, nil }
 
+// ListAgentToolNames and ListAlwaysIncludedKnownTools satisfy the Store
+// interface's Phase 5 item 01 additions (TASKS/phase-5/01-build-assignment-
+// api.md) for the test fakes. No agent_tools grants / always_included rows
+// by default -- tests that need to exercise enforceExecutionRulesViaAgentTools
+// construct a real *store.Store instead (see tool_execution_rules_test.go).
+func (stubAgentReaderStore) ListAgentToolNames(context.Context, string) ([]string, error) {
+	return nil, nil
+}
+func (stubAgentReaderStore) ListAlwaysIncludedKnownTools(context.Context) ([]store.KnownTool, error) {
+	return nil, nil
+}
+
 type stubAgentWriterStore struct{}
 
 func (stubAgentWriterStore) CreateAgent(*store.AgentProfile) error                 { return nil }

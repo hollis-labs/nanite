@@ -100,7 +100,7 @@ This branch (`phase-1-execution`, based off Phase 0's `HEAD` as of 2026-08-18 â€
 
 | Task | Status | Depends on |
 |---|---|---|
-| 01-add-roles-table-and-cascade-resolution | not-started | none |
+| 01-add-roles-table-and-cascade-resolution | implemented | none |
 | 02-add-agents-composition-columns | not-started | 01, 06 |
 | 03-add-consumers-table | implemented | none |
 | 04-add-known-tools-and-agent-tools-fk | not-started | none |

@@ -409,7 +409,7 @@ func (s *Store) CreateAgent(a *AgentProfile) error {
 // agent_profiles (they may reference file-based agents), so deleting them
 // explicitly is both correct and FK-safe. agent_skills/agent_projects DO now
 // carry a real `agent_id ... REFERENCES agent_profiles(id) ON DELETE CASCADE`
-// FK (migration 106, Phase 1 #05) — the explicit cleanup lines below for
+// FK (migration 107, Phase 1 #05) — the explicit cleanup lines below for
 // both are no longer required for correctness (the CASCADE would handle it
 // on its own), but are kept anyway for the same belt-and-suspenders reason
 // the per-agent capability/runtime children below are (they run before the

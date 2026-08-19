@@ -1,7 +1,7 @@
 # Kill the file-reingest-on-boot pattern, in full — files are not agent/skill storage or config, only seeding
 
 **Phase:** 1
-**Status:** in-progress (reopened, 2026-08-18 — Round 1's fix was real but insufficient; see banner below)
+**Status:** implemented
 **Depends on:** `01-add-roles-table-and-cascade-resolution.md` (roles negative-verification, already done). No longer coupled to `10-data-migrate-nanite-agents-md.md` (out of scope for Phase 1) or `04-add-known-tools-and-agent-tools-fk.md` (already merged; if this task's Round 2 touches `internal/service/ingest.go` again, diff against `04`'s `seedRoleToolsFromIngest` changes before editing, don't blind-overwrite).
 **Touches:** `internal/agent/discovery.go` (`Discover`, `DiscoverOptions`), `internal/skill/discovery.go` (`Discover`, `DiscoverOptions`), `internal/service/container.go` (both `Discover` call sites — currently ~lines 399, 543), `internal/service/ingest.go` (`AutoIngestAgents`/`AutoIngestSkills` — Round 1 already landed the overwrite-freeze here, keep it; may need adjusting once fewer sources reach it), `TASKS/phase-1/12-fix-agent-service-get-drops-new-db-only-columns.md`'s own scope (read, don't re-do — see the coordination note in "What to do")
 
@@ -269,8 +269,289 @@ similar verification steps.
 No schema change. `TASKS/INDEX.md` intentionally left untouched (Orchestrator
 updates it after merge).
 
-## Work log — Round 2 (fill in here)
-<Worker fills this in: what was actually done for the full cut, any deviation from plan and why, anything escalated.>
+## Work log — Round 2 (2026-08-18)
+
+**Starting state / branch note.** This worktree's branch (`worktree-agent-
+a56ce396d515a71db`) had been created off an earlier `phase-1-execution`
+commit (`df71e710`, a strict ancestor with zero divergent commits of its
+own — same shape as Round 1's own branch-note) rather than the branch's
+current tip. Fast-forwarded to `phase-1-execution`'s tip (`f7821c02`, "Phase
+1 #08: reopen for a full redo") before starting — that commit, with the
+Reopened banner visible, is where this Round 2 work actually began.
+
+**1. CLI `--agent` flag tier (Context item 1) — investigated, left in place.**
+Exhaustively grepped every real call site of `agent.Discover` /
+`DiscoverOptions.CLIAgentPath` across `cmd/nanite/` and
+`internal/service/container.go`. Finding: **`CLIAgentPath` is never set to a
+non-empty value anywhere in production code** — it is 100% dead/unreachable
+today, stronger than the task's own framing ("ephemeral, in-memory only")
+anticipated. The `--agent` flags that do exist (`chat_cmd.go`,
+`message_cmd.go`) take an **agent ID/slug** for selecting an existing
+agent for a session/message — a completely different mechanism, never
+wired to `CLIAgentPath`. Mechanically, *if* it were ever populated, the
+resulting `Definition` (`Source: "cli"`) would flow into the same
+`agentDefs` list passed to `AutoIngestAgents`/`upsertAgentDef` as every
+other tier — i.e. it is capable of persisting a row exactly like the cut
+tiers, if reached. But since it is never reached, the answer to the task's
+literal test ("does it currently silently write a persisted row?") is no.
+Per the task's own explicit default ("leave it alone unless you find it's
+silently writing a persisted row the same way the cut tiers do") —
+**left the CLI tier's code in place unchanged** (both the `CLIAgentPath`
+field and its branch in `Discover()`), documented the finding directly in
+`DiscoverOptions`' doc comment and the field's own comment so a future
+reader doesn't have to re-derive it. Did not remove it despite it being
+genuinely dead code, since the task's instruction here is explicit and takes
+priority over my own inclination to apply the project's dead-code policy
+more aggressively — noting this as a deliberate, documented deviation from
+what I'd have done absent that instruction, not an oversight.
+
+**2. `internal/agent/discovery.go` — project/user/plugin tiers removed in
+full.** Removed the `discoverDir(..., "project")` and `discoverDir(...,
+"user")` call sites, the `discoverPluginAgents` call site, and the
+`discoverPluginAgents` function itself (nothing else called it). Removed
+`DiscoverOptions.HomeDir` and `DiscoverOptions.PluginsDir` (no longer read
+by anything). `discoverDir` itself is **retained** — not dead, since
+`discovery_test.go`'s `testDirAdapter` (used to simulate adapter-based
+discovery tiers in tests, e.g. `.agentrc/agents/`, `.claude/agents/`) still
+calls it directly. `DiscoverOptions.WorkingDir` and `.Adapters` are kept —
+still read by the live CLI tier context and the adapter-registry tier
+(nanite-native + the already-no-op external-format adapters, Phase 0 task
+16). Updated the type's doc comment to state plainly what's cut and why.
+
+**3. `internal/skill/discovery.go` — every tier removed in full, including
+`.claude/skills/`.** Investigated the task's own caveat (stop and report if
+`.claude/skills/` turns out to need special treatment) before cutting:
+grepped every reference to `.claude/skills` and `source == "claude"` across
+`internal/`. Found three unrelated things that must NOT be confused with
+the discovery tier being cut, and confirmed none of them depend on it
+surviving:
+  - `internal/skillbroker/broker.go`'s `sourceBias` — a generic ranking
+    tiebreaker keyed on whatever `source` string a skill row already
+    carries (works identically for historical `source='claude'` rows
+    already in the DB; doesn't care whether new ones can still be
+    discovered).
+  - `internal/bootprofile/profile.go`'s `skill_index` requirement type — a
+    genuinely separate mechanism (the boot-profile catalog compiler,
+    `internal/bootprofile/*`, explicitly out of scope per this task's own
+    "What stays" section / Phase 2) with its own resolver, unrelated to
+    `internal/skill/discovery.go`.
+  - `internal/agentvalidation/validation.go`'s `validSources` enum — a
+    generic historical/possible-value validator for whatever `source` an
+    `agent_profiles` row can carry (edit-time validation), not live
+    discovery.
+  No genuine dependent found. **Cut `.claude/skills/` in full, matching
+  agents**, per the operator's "no debt carries forward" directive and the
+  task's own instruction to treat it the same way absent a real reason not
+  to. Since skills have no CLI-flag or adapter-registry tier to preserve
+  (unlike agents), and `discoverDir`/`discoverPluginSkills` ended up with
+  **zero remaining callers** (confirmed via grep, including test files),
+  removed both outright — not left in place as unreachable code. `Discover`
+  now always returns `nil, nil`; `DiscoverOptions` is an empty struct kept
+  only so the container.go call site and a future non-file discovery source
+  have an obvious attachment point, per the task's phrasing that both
+  `Discover` call sites should remain.
+
+**4. `internal/service/container.go` — both call sites updated.** Agent
+call site: dropped `PluginsDir: "plugins"` (field no longer exists),
+`WorkingDir`/`Adapters` kept. Skill call site: now calls
+`skill.Discover(skill.DiscoverOptions{})` with no fields (always returns
+empty). Updated the surrounding comments to explain why. Also had to fix a
+**third real call site not in the task's enumerated list**,
+`cmd/nanite/message_cmd.go`'s `newMessagingServiceForCLI` (used by the CLI
+`message` subcommands) — it also passed the now-removed `PluginsDir` field
+and would not have compiled otherwise. Fixed the same way as
+container.go's agent call site.
+
+**5. `AutoIngestAgents`/`AutoIngestSkills` — confirmed correct against the
+smaller input, no code change needed.** Both remain fully source-agnostic:
+they ingest whatever `[]*Definition` slice they're handed, with the
+Source-driven trust-tier/freeze logic (Round 1's fix) applying uniformly
+regardless of where the caller obtained the list. Verified by full test
+suite pass (item 6/9 below) — nothing assumed the removed tiers still fed
+these functions except the one test named in the task (item 6).
+
+**6. Tests updated for every removed tier.**
+- `internal/agent/discovery_test.go`: removed `TestDiscover_PriorityOrder`
+  (renamed to `TestDiscover_AdapterPriorityOrder`, project-vs-adapter case
+  dropped since project is cut) and `TestDiscover_PluginAgents` (plugin tier
+  cut). Added `TestDiscover_ProjectUserPluginTiersRemoved` — the explicit
+  negative-verification test: drops a file into each of the three cut
+  directories (`.nanite/agents/`, `~/.nanite/agents/`,
+  `plugins/*/agents/`) before calling `Discover()`, asserts zero results.
+  Added `TestDiscover_CLIAgentWinsOverAdapter` — proves the CLI tier's
+  priority-1 position (still real, per item 1) is unaffected by the cut.
+  `TestDiscover_SkipsInvalidFiles`/`TestDiscover_SlugDedup` rewritten to
+  exercise the adapter tier (via `testDirAdapter`) instead of the removed
+  project tier, since the underlying `discoverDir` skip/dedup behavior they
+  test is otherwise unchanged and worth keeping coverage for.
+- `internal/agent/loader_test.go`: `TestDropAndLoad_EndToEnd` (asserted a
+  project-tier file drop WAS discovered) rewritten as
+  `TestDropAndLoad_ProjectTierNoLongerDiscovered` (asserts it is NOT) —
+  same drop flow, inverted assertion, per the task's step 7 instruction to
+  invert Round 1's regression check.
+- `internal/skill/discovery_test.go`: replaced entirely with
+  `TestDiscover_AlwaysEmpty` (`Discover(DiscoverOptions{})` always returns
+  nothing — `DiscoverOptions` has no fields left to point it at anything).
+- `internal/skill/loader_test.go`: `TestDropAndLoad_EndToEnd` (asserted a
+  ~/.nanite/skills/ drop WAS discovered, Source="user") rewritten as
+  `TestDropAndLoad_UserTierNoLongerDiscovered` (asserts NOT discovered),
+  same inversion as the agent side. `TestEnsureHomeDirs_*` and
+  `TestWriteUserSkillFile_RejectsTraversalSlugs` untouched — unrelated to
+  discovery (directory creation and the managed-write path, respectively).
+- `internal/service/ingest_test.go`: rewrote
+  `TestAutoIngestAgents_NewFileStillIngestedAlongsideFrozenRow` (flagged by
+  Round 1's own Work Log) into
+  `TestAutoIngestAgents_NewInternalDefStillIngestedAlongsideFrozenRow`.
+  `AutoIngestAgents` itself is still source-agnostic and the underlying
+  mechanic ("a new def in the same batch as a frozen row still ingests") is
+  still real and load-bearing — just no longer reachable via
+  `Source: "project"` (since `Discover()` never produces that anymore), but
+  fully reachable via `Source: "internal"` (a new builtin/internal profile
+  shipping in a later release, alongside already-frozen ones from a prior
+  release). Rewrote the test to use "internal" instead of "project" so it
+  keeps proving a real, still-true fact about `AutoIngestAgents` rather than
+  a now-false one about file discovery. No other `ingest_test.go` test
+  needed changes — all remaining `Source: "project"/"user"/"plugin"` usages
+  in that file call `AutoIngestAgents`/`AutoIngestSkills` directly with
+  hand-built `[]*Definition` slices (never through `Discover()`), and they
+  test genuinely still-live logic (the trust-tier assignment `upsertAgentDef`
+  applies to whatever `Source` a def carries, reachable today via the
+  still-live `IngestAgentDefinition` explicit-reimport path used by managed
+  agent edits) — none of them claim anything false about boot-time file
+  discovery.
+- `internal/api/loom_curator_wake_test.go` — **a real, unenumerated
+  breakage found by running the full suite, not named in the task's own
+  list.** `newTestAPIWithLoomCurator`'s doc comment explicitly documented
+  and asserted the exact pattern this task kills: "a plain file drop +
+  restart is sufficient to produce a real, wakeable durable_agent_instances
+  row." It worked by copying the repo's real
+  `.nanite/agents/loom-curator.md` into a temp `WorkingDir` and relying on
+  boot-time project-tier discovery + `AutoIngestAgents` to create the
+  `agent_profiles` row before `SyncManagedDurableAgentConfigs` (a separate,
+  untouched mechanism that reads `.nanite/durable-agents/*.yaml` and
+  resolves the agent by slug) could provision the durable-agent instance.
+  With the project tier cut, that row never appears, and 4 tests failed
+  (`TestLoomCuratorInstanceSeededFromFileDrop`,
+  `TestLoomCuratorWake_FEPayloadShape`, `TestLoomCuratorWake_DeliversRealTurn`,
+  `TestLoomCuratorScheduleSeededFromFileDrop`). This is real, currently-live
+  Loom Curator functionality (Loom is a real `consumer_id`, per
+  `docs/engineering/architecture/01-agent-construction.md`), so I traced it
+  rather than just patching the test blind: in production, Loom Curator's
+  `agent_profiles` row was already ingested under the old (pre-Round-2)
+  mechanism and — per Round 1's still-in-force overwrite-freeze — stays
+  exactly as-is on every future boot regardless of whether the file is ever
+  scanned again; the only scenario this cut actually breaks is provisioning
+  the row for the very first time in a genuinely fresh DB, which is exactly
+  what this task's architecture says should no longer happen via automatic
+  file-drop-on-boot for a non-seed agent. Fixed the test helper to
+  reproduce "the row already exists" the way a real fresh environment now
+  must produce it going forward — via `service.IngestAgentDefinition` (the
+  one explicit, deliberate reimport path this task preserves, the same one
+  the managed-agent-edit API route uses) — instead of relying on the cut
+  automatic path. All downstream assertions (SyncManagedDurableAgentConfigs,
+  the wake endpoint, real-turn delivery, schedule seeding) are unchanged and
+  still pass, proving that machinery is unaffected by this task; only the
+  *setup*, not the *behavior under test*, changed. Renamed
+  `TestLoomCuratorInstanceSeededFromFileDrop` →
+  `TestLoomCuratorInstanceSeededFromDurableConfigDrop` and
+  `TestLoomCuratorScheduleSeededFromFileDrop` →
+  `TestLoomCuratorScheduleSeededFromDurableConfigDrop` to name what's
+  actually still being dropped-and-discovered (the durable-agent YAML
+  config, an untouched mechanism) versus what no longer is (the agent
+  profile itself). This is real product-functionality impact from doing
+  the task as specified, exactly the "if the correction means the job is
+  bigger than it looked... do the full job" case — done in full, not
+  escalated, since it was fully within my ability to fix without touching
+  any out-of-scope mechanism, and doesn't leave anything worse off for a
+  genuinely fresh production environment than the architecture already
+  says it should be.
+
+**7. Real-backup-DB verification.** Copied
+`~/.local/share/nanite/workspaces/default/backups/
+main.db.pre-execution-backup-20260818-132726` to a scratch path. The backup
+carries 28 `agent_profiles` rows (9 `internal` + 19 `project` — not "~33";
+that figure in Round 1's own report came from a *live* `Discover()` run
+against the repo's current on-disk corpus, not from the backup DB's actual
+row count at the time it was taken; used the real, verified number here)
+and 821 `skills` rows (820 `builtin` + 1 `user`). Wrote a temporary
+`_test.go` (`internal/service/`, deleted after the run) that: opened the
+copied DB via `store.New`; built a real `service.Container` against it with
+`WorkingDir` pointed at this repo's actual root (so the real, currently
+24-file `.nanite/agents/*.md` corpus is on disk during boot, same as a real
+deploy); captured every pre-boot row's `system_prompt` by slug; called
+`NewContainer` a second time (simulating a restart); asserted every
+pre-existing slug is still present with an unchanged `system_prompt`, and
+that 5 slugs with real on-disk `.md` files but no matching DB row as of the
+backup (`frontend`, `plugin-dev-tasks`, `plugin-dev`, `reviewer-backend`,
+`reviewer-frontend` — a genuine, pre-existing gap between disk and DB the
+OLD code would have ingested on this very boot) are still absent afterward;
+also asserted the `skills` table's total row count is unchanged (821).
+**Note on total agent count**: it legitimately grows from 28 to 35 on this
+boot — not a regression. The +7 comes entirely from the still-live,
+out-of-scope nanite-native adapter tier (Phase 0 task 16, unaffected by
+this task), which reads *this repo's own* `.nanite/config.yaml` `agents:`
+block (7 real entries: `nanite-backend`, `nanite-frontend`,
+`nanite-plugin-dev`, `nanite-planner`, `nanite-reviewer`,
+`nanite-reviewer-backend`, `nanite-reviewer-frontend` — this very
+engineering process's own worker sub-agent definitions), stamped
+`Source: "nanite"`, a structurally different mechanism from the cut
+project/user/plugin `.md`-directory scans. Verified this is legitimate and
+unrelated by first-principles code reading of `adapter-nanite-native/
+plugin.go`'s `Discover` (reads `.nanite/config.yaml`, not
+`.nanite/agents/*.md`) before accepting it rather than assuming. A second
+temporary test dropped a brand-new `.md` file into a fresh scratch project
+dir (not this repo's tracked directory, to avoid Round 1's documented
+"accidentally wrote to a tracked file" incident) before boot and confirmed
+it produces no `agent_profiles` row. Both temporary tests passed; the file
+was deleted after the run (not a permanent artifact, per Round 1's own
+precedent) — confirmed via `git status` that no stray file was left behind
+and that no tracked file (including `.nanite/agents/loom-curator.md`) was
+modified.
+
+**8. Live-verify against a real running scratch instance.** Checked port
+availability first (`lsof -ti:<port>`) — several low ports were already in
+use on this machine; used `18095` after confirming it was free. Built a
+scratch binary (`go build -o <scratchdir>/nanite-scratch ./cmd/nanite/`),
+copied the same real backup DB into a scratch directory with no
+`.nanite/config.yaml`/`.nanite/agents/` (a clean environment, isolating the
+project-tier claim from the nanite-native adapter's own separate, kept
+behavior seen in step 7), and ran `nanite-scratch serve --port 18095 --db
+<scratch>/main.db` from that directory as CWD (so `WorkingDir` defaults to
+it). First boot: log shows `discovered file-based agents count=9` (exactly
+the 9 internal/builtin profiles, zero from any cut tier) and `discovered
+file-based skills count=8` (builtin only); `GET /api/agents` returned
+exactly the pre-existing 28 rows (9 internal + 19 project), including
+`loom-curator`, servable in full via `GET /api/agents/<id>` (200). Only
+ERROR-level log line across the entire boot was a pre-existing, unrelated
+warning about the internal `system-architect` profile declaring unknown
+tool names (`unknownDeclaredTools`, untouched by this task). Stopped the
+server, dropped a new `.nanite/agents/new-test-agent.md` file into the
+scratch directory, rebooted: log again shows `discovered file-based agents
+count=9` (unchanged), and `GET /api/agents` confirmed `new-test-agent` is
+absent (still 28 total). Stopped the server (confirmed via `lsof -ti:<port>`
+returning nothing after `kill`) and deleted every scratch file (binary, DB,
+logs, dropped `.md` file) — confirmed via directory listing that only
+pre-existing, unrelated scratch artifacts from an earlier, different
+session remain in the shared scratchpad.
+
+**9. Checks.**
+- `go build ./cmd/nanite/` — pass.
+- `go vet ./...` — pass except the same pre-existing, unrelated
+  `container.go:1214/1234` ("stopReaper"/"stopRuntimeReaper" possible
+  context leak) findings Round 1 already confirmed predate any of this
+  task's changes (`git stash` of every changed file, re-ran
+  `go vet ./internal/service/...`, identical findings, restored the stash).
+- `go test ./internal/agent/... ./internal/skill/...` — pass.
+- `go test ./internal/service/ -run "TestAutoIngest|TestIngestAgentDefinition" -v -count=1`
+  — all 23 tests pass (22 pre-existing/renamed + 1 rewritten).
+- `go test ./internal/api/... -run TestLoomCurator -v -count=1` — all 5
+  Loom Curator tests pass (4 fixed + `TestLoomCuratorWake_MissingFragmentID`
+  unaffected).
+- `go test ./... -count=1` — pass across every package with test files, zero
+  failures.
+
+No schema change. `TASKS/INDEX.md` intentionally left untouched (Orchestrator
+updates it after merge).
 
 ## Review notes
 <Reviewer fills this in: pass/fail, what was checked, anything fixed and how.>

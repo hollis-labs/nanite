@@ -395,10 +395,13 @@ func NewContainer(cfg ContainerConfig) (*Container, error) {
 		slog.Warn("service container: ensure agent home dirs", "err", err)
 	}
 
-	// Discover file-based agent definitions from all priority locations.
+	// Discover agent definitions from the remaining live tiers (CLI --agent
+	// flag, currently unreachable, plus adapter-discovered — e.g. the
+	// nanite-native adapter's .nanite/config.yaml agents: block). The
+	// project/user/plugin directory-scan tiers were cut in full by
+	// TASKS/phase-1/08 — no PluginsDir/HomeDir wiring is needed anymore.
 	agentDefs, err := agent.Discover(agent.DiscoverOptions{
 		WorkingDir: workingDir,
-		PluginsDir: "plugins",
 		Adapters:   adapterRegistry,
 	})
 	if err != nil {
@@ -539,11 +542,12 @@ func NewContainer(cfg ContainerConfig) (*Container, error) {
 		slog.Warn("service container: ensure skill home dirs", "err", err)
 	}
 
-	// Discover file-based skill definitions from all 5 priority locations.
-	skillDefs, err := skill.Discover(skill.DiscoverOptions{
-		WorkingDir: ".",
-		PluginsDir: "plugins",
-	})
+	// Discover skill definitions. TASKS/phase-1/08 cut every file-based
+	// discovery tier (project, user, .claude/skills/, plugin) in full;
+	// skill.Discover always returns empty now, kept as a call site for
+	// symmetry with agent discovery in case a real non-file source is added
+	// later.
+	skillDefs, err := skill.Discover(skill.DiscoverOptions{})
 	if err != nil {
 		slog.Warn("service container: skill discovery", "err", err)
 	}

@@ -653,25 +653,46 @@ func TestAutoIngestAgents_DBEditSurvivesBootReingest(t *testing.T) {
 // TASKS/phase-1/08's explicit non-regression requirement: freezing an
 // already-ingested row must not block first-ingest of a genuinely new file
 // discovered in the same (or a later) boot-time pass.
-func TestAutoIngestAgents_NewFileStillIngestedAlongsideFrozenRow(t *testing.T) {
+// TestAutoIngestAgents_NewInternalDefStillIngestedAlongsideFrozenRow is the
+// Round 2 rewrite of the original
+// TestAutoIngestAgents_NewFileStillIngestedAlongsideFrozenRow (TASKS/phase-1/08
+// Round 1). That test proved a brand-new *project*-sourced file, discovered
+// alongside an already-frozen row in the same boot batch, still got
+// first-ingested — exactly the standing "keep discovering and ingesting new
+// project/user/plugin files forever" behavior Round 2 removes at the
+// agent.Discover layer (a file dropped into .nanite/agents/ is no longer
+// discovered at all, so AutoIngestAgents never sees such a def in practice).
+//
+// AutoIngestAgents itself is still source-agnostic, though — it ingests
+// whatever []*Definition it's handed, regardless of where the caller got the
+// list from. That generic behavior is still real and still load-bearing:
+// when a new release ships an additional compiled-in builtin/internal
+// profile, AutoIngestAgents' next boot-time pass must still create that new
+// row even though every other already-ingested internal profile in the same
+// batch stays frozen. This rewrite proves exactly that scenario, using
+// Source: "internal" (a source that can still legitimately produce a new def
+// post-cut) instead of "project" (which no longer reaches AutoIngestAgents
+// at all).
+func TestAutoIngestAgents_NewInternalDefStillIngestedAlongsideFrozenRow(t *testing.T) {
 	st := newIngestTestStore(t)
 
 	existingDef := &agentpkg.Definition{
 		Slug:         "already-there",
 		Name:         "Already There",
 		SystemPrompt: "v1",
-		Source:       "project",
+		Source:       "internal",
 	}
 	AutoIngestAgents(st, []*agentpkg.Definition{existingDef}, nil)
 
-	// Second boot: the existing def's file content "changed" (must freeze)
-	// and a brand new file appeared (must still be created).
+	// Second boot: the existing def's compiled content "changed" (must
+	// freeze) and a new internal profile shipped in this release (must
+	// still be created).
 	existingDef.SystemPrompt = "v2 -- should be ignored"
 	newDef := &agentpkg.Definition{
 		Slug:         "brand-new",
 		Name:         "Brand New",
 		SystemPrompt: "hello",
-		Source:       "project",
+		Source:       "internal",
 	}
 	n := AutoIngestAgents(st, []*agentpkg.Definition{existingDef, newDef}, nil)
 	if n != 2 {
@@ -691,7 +712,7 @@ func TestAutoIngestAgents_NewFileStillIngestedAlongsideFrozenRow(t *testing.T) {
 		t.Fatalf("GetAgentBySlug brand-new: %v", err)
 	}
 	if created.SystemPrompt != "hello" {
-		t.Errorf("brand-new SystemPrompt: got %q, want %q (first-ingest of a new file must still work)", created.SystemPrompt, "hello")
+		t.Errorf("brand-new SystemPrompt: got %q, want %q (a new internal/builtin def in the same batch must still ingest)", created.SystemPrompt, "hello")
 	}
 }
 

@@ -13,19 +13,34 @@ import (
 	"time"
 
 	"github.com/hollis-labs/go-providers/provider"
+	"github.com/hollis-labs/nanite/internal/agent"
 	"github.com/hollis-labs/nanite/internal/service"
 	"github.com/hollis-labs/nanite/internal/store"
 )
 
-// newTestAPIWithLoomCurator boots a fresh container the same way newTestAPI
-// does, but first copies the repo's real .nanite/agents/loom-curator.md and
-// .nanite/durable-agents/loom-curator.yaml into the temp WorkingDir /
-// ManagedConfigRoot before calling service.NewContainer. That exercises the
-// exact boot pipeline a real Cerberus deploy+reload runs (agent.Discover ->
-// ReconcileManagedAgentIDs -> AutoIngestAgents -> SyncManagedDurableAgentConfigs,
-// see container.go), proving a plain file drop + restart is sufficient to
-// produce a real, wakeable durable_agent_instances row — no migration or
-// extra manual step required (CW-20260816-0020's seeding-gap trace).
+// newTestAPIWithLoomCurator boots a fresh container against a DB that
+// already carries a real loom-curator agent_profiles row, then copies the
+// repo's real .nanite/durable-agents/loom-curator.yaml into the temp
+// ManagedConfigRoot before calling service.NewContainer.
+//
+// TASKS/phase-1/08 ("Kill the file-reingest-on-boot pattern, in full") cut
+// the project-tier (.nanite/agents/) directory scan that this helper used to
+// rely on to auto-provision the agent_profiles row from a dropped
+// .nanite/agents/loom-curator.md file at boot — that mechanism no longer
+// exists, by design (files are not agent storage going forward, except
+// builtin/seed content). What SyncManagedDurableAgentConfigs actually needs
+// — an agent_profiles row for slug "loom-curator" to already exist before it
+// resolves .nanite/durable-agents/loom-curator.yaml against it — is
+// unaffected by that cut: in production, Loom Curator's real DB row was
+// already ingested under the old mechanism and (per this task's own
+// overwrite-freeze, still in force) stays exactly as-is on every subsequent
+// boot regardless of whether the file is ever scanned again. Here, the
+// equivalent of "the agent already exists" is reproduced explicitly via
+// IngestAgentDefinition — the one deliberate reimport path this task
+// preserves (the same one AgentConfigService's managed-agent write flow
+// uses) — rather than relying on the now-cut automatic first-ingest-at-boot
+// path. Everything downstream (SyncManagedDurableAgentConfigs, the wake
+// endpoint, schedule seeding) is exercised exactly as before.
 func newTestAPIWithLoomCurator(t *testing.T) (*API, *http.ServeMux) {
 	t.Helper()
 	root := t.TempDir()
@@ -49,7 +64,7 @@ func newTestAPIWithLoomCurator(t *testing.T) (*API, *http.ServeMux) {
 			t.Fatalf("write fixture %s: %v", dst, err)
 		}
 	}
-	copyFixture(".nanite/agents/loom-curator.md")
+	agentFixturePath := filepath.Join(repoRoot, ".nanite", "agents", "loom-curator.md")
 	copyFixture(".nanite/durable-agents/loom-curator.yaml")
 
 	dbPath := filepath.Join(root, "test.db")
@@ -68,6 +83,20 @@ func newTestAPIWithLoomCurator(t *testing.T) (*API, *http.ServeMux) {
 		t.Fatalf("Seed: %v", err)
 	}
 
+	// Reproduce "loom-curator's agent_profiles row already exists" — the
+	// state every real boot finds it in — via the one explicit reimport path
+	// TASKS/phase-1/08 preserves, standing in for however the row first got
+	// created (in production: the old boot-time discovery mechanism, before
+	// this task cut it; going forward: an explicit create/import action).
+	def, err := agent.ParseMDFile(agentFixturePath)
+	if err != nil {
+		t.Fatalf("parse loom-curator.md fixture: %v", err)
+	}
+	def.Source = "project"
+	if err := service.IngestAgentDefinition(s, def); err != nil {
+		t.Fatalf("ingest loom-curator agent definition: %v", err)
+	}
+
 	svc, err := service.NewContainer(service.ContainerConfig{
 		Store:             s,
 		Providers:         provider.NewRegistry(),
@@ -84,10 +113,13 @@ func newTestAPIWithLoomCurator(t *testing.T) (*API, *http.ServeMux) {
 	return a, mux
 }
 
-// TestLoomCuratorInstanceSeededFromFileDrop confirms the two managed config
-// files alone (no migration, no API call) are enough for container boot to
-// produce a real durable_agent_instances row for Loom Curator.
-func TestLoomCuratorInstanceSeededFromFileDrop(t *testing.T) {
+// TestLoomCuratorInstanceSeededFromDurableConfigDrop confirms that once an
+// agent_profiles row exists for loom-curator (see newTestAPIWithLoomCurator —
+// no longer auto-provisioned by a boot-time file scan, per TASKS/phase-1/08),
+// dropping .nanite/durable-agents/loom-curator.yaml alone (no migration, no
+// API call) is enough for container boot's SyncManagedDurableAgentConfigs
+// pass to produce a real durable_agent_instances row for it.
+func TestLoomCuratorInstanceSeededFromDurableConfigDrop(t *testing.T) {
 	a, _ := newTestAPIWithLoomCurator(t)
 
 	inst, err := a.Services.Store.GetDurableAgentInstanceBySlug("loom-curator")
@@ -233,20 +265,21 @@ func TestLoomCuratorWake_MissingFragmentID(t *testing.T) {
 	}
 }
 
-// TestLoomCuratorScheduleSeededFromFileDrop proves CW-20260816-0021's
+// TestLoomCuratorScheduleSeededFromDurableConfigDrop proves CW-20260816-0021's
 // schedule-seeding mechanism end to end: the structured `schedule:` block
 // in .nanite/durable-agents/loom-curator.yaml produces a real
 // agent_schedules row once container boot resolves Loom Curator's real
 // profile ID (syncManagedDurableAgentConfig, called from
 // SyncManagedDurableAgentConfigs — the same boot path
-// TestLoomCuratorInstanceSeededFromFileDrop above already proves seeds the
-// durable_agent_instances row). It also proves the row is keyed correctly
-// (agent_id = the *profile* ID, not the instance ID — ListDue/ListSchedules
-// in durable_wake.go look it up via inst.ProfileID), that ListDue/RunDue
-// find it due at an appropriate simulated time, and that firing it does
-// not error. This is the other half of CW-20260816-0020's "no scheduling
-// mechanism exists yet" gap that CW-20260816-0021 was scoped to close.
-func TestLoomCuratorScheduleSeededFromFileDrop(t *testing.T) {
+// TestLoomCuratorInstanceSeededFromDurableConfigDrop above already proves
+// seeds the durable_agent_instances row). It also proves the row is keyed
+// correctly (agent_id = the *profile* ID, not the instance ID —
+// ListDue/ListSchedules in durable_wake.go look it up via inst.ProfileID),
+// that ListDue/RunDue find it due at an appropriate simulated time, and that
+// firing it does not error. This is the other half of CW-20260816-0020's "no
+// scheduling mechanism exists yet" gap that CW-20260816-0021 was scoped to
+// close.
+func TestLoomCuratorScheduleSeededFromDurableConfigDrop(t *testing.T) {
 	a, _ := newTestAPIWithLoomCurator(t)
 	ctx := context.Background()
 

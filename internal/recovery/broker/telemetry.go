@@ -1,4 +1,4 @@
-package recovery
+package broker
 
 // telemetry.go is the breadcrumb-writing seam. Phase 1 declares no new
 // surface here — Broker.writeBreadcrumb (in broker.go) already routes

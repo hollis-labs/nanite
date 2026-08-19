@@ -1,4 +1,4 @@
-package recovery
+package broker
 
 import (
 	"context"
@@ -65,7 +65,7 @@ type Dependencies struct {
 }
 
 // AgentBoot is the broker's hook into agent.Boot for replacement-session
-// dispatch. Production wiring is `recovery.NewAgentBootFunc(agentDeps)`
+// dispatch. Production wiring is `broker.NewAgentBootFunc(agentDeps)`
 // which closes over a *agent.Dependencies and forwards to agent.Boot.
 type AgentBoot interface {
 	// Boot dispatches a replacement session. The broker calls this with
@@ -220,7 +220,7 @@ var errNoAgentBootWired = brokerErr("recovery: AgentBoot not wired in Dependenci
 var errNoHTTPRetryWired = brokerErr("recovery: HTTPRetry not wired in Dependencies")
 
 // brokerErr is a tiny error type used for sentinel errors inside the
-// recovery package. Avoids pulling in errors.New / fmt for the few
+// broker package. Avoids pulling in errors.New / fmt for the few
 // constants we need.
 type brokerErr string
 

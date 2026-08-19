@@ -1,4 +1,4 @@
-package recovery
+package broker
 
 import (
 	"strings"
@@ -15,14 +15,14 @@ func TestRenderUserMessageActionRouting(t *testing.T) {
 	b := NewBroker(Dependencies{})
 
 	cases := []struct {
-		name           string
-		ev             *FailureEvent
-		c              Classification
-		action         Action
-		wantKind       string
-		wantSeverity   string
-		wantHasTitle   string
-		wantHasCancel  bool
+		name          string
+		ev            *FailureEvent
+		c             Classification
+		action        Action
+		wantKind      string
+		wantSeverity  string
+		wantHasTitle  string
+		wantHasCancel bool
 	}{
 		{
 			name:          "transient -> info-card",

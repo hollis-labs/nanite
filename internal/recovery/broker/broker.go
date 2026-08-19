@@ -1,4 +1,4 @@
-package recovery
+package broker
 
 import (
 	"context"
@@ -150,13 +150,13 @@ func (b *Broker) OnRestart(sessionID string, attempt int, prevExit *agentsession
 	// restart attempts even when they succeed and never escalate to the
 	// broker's OnSessionExit path.
 	b.writeBreadcrumb(Breadcrumb{
-		Timestamp:   time.Now(),
-		SessionID:   sessionID,
-		Class:       ClassTransient,
-		Cause:       cause,
-		Remediation: RemediationNone,
-		Action:      ActionRetryTransient,
-		Outcome:     OutcomeUnknown, // unknown at observation time; the next OnSessionExit (if any) updates
+		Timestamp:    time.Now(),
+		SessionID:    sessionID,
+		Class:        ClassTransient,
+		Cause:        cause,
+		Remediation:  RemediationNone,
+		Action:       ActionRetryTransient,
+		Outcome:      OutcomeUnknown, // unknown at observation time; the next OnSessionExit (if any) updates
 		AttemptCount: attempt,
 		Reason:       "lib-level restart attempt",
 	})
@@ -511,7 +511,7 @@ func itoa(n int) string {
 
 // errNilFailureEvent is returned by DispatchRetry when the caller
 // hands it a nil event. Defensive guard against orchestration bugs.
-var errNilFailureEvent = brokerErr("recovery.DispatchRetry: nil failure event")
+var errNilFailureEvent = brokerErr("broker.DispatchRetry: nil failure event")
 
 // notifyReplacement invokes the replacementHook (when set) with the
 // freshly booted replacement session. nil-safe on every front: a nil

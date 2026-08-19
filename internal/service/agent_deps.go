@@ -20,8 +20,8 @@ import (
 	"github.com/hollis-labs/nanite/internal/chat"
 	"github.com/hollis-labs/nanite/internal/mcp"
 	"github.com/hollis-labs/nanite/internal/permission"
+	"github.com/hollis-labs/nanite/internal/recovery/broker"
 	runtimeagent "github.com/hollis-labs/nanite/internal/runtime/agent"
-	"github.com/hollis-labs/nanite/internal/runtime/agent/recovery"
 	"github.com/hollis-labs/nanite/internal/store"
 )
 
@@ -56,7 +56,7 @@ type AgentDepsConfig struct {
 	APIBaseURL string
 
 	// MCP, when non-nil, wires the recovery broker's MCP-transport
-	// remediation adapter (recovery.MCPControl). The adapter forwards
+	// remediation adapter (broker.MCPControl). The adapter forwards
 	// RestartTransport to mcp.Manager.RestartStdioTransports so the broker
 	// can recover from a wedged MCP stdio subprocess. Nil leaves
 	// Dependencies.MCP unwired and the broker degrades to escalating
@@ -88,12 +88,12 @@ type AgentDepsBundle struct {
 	// driveBootSession can bind per-session routers.
 	Bridge *agentEventBridge
 
-	// BootDirAdapter is the recovery.BootDirOps adapter wired into the
+	// BootDirAdapter is the broker.BootDirOps adapter wired into the
 	// recovery broker. The chat service calls Track / Untrack on it so
 	// the broker has bootDir + Options on hand when a remediation fires.
 	BootDirAdapter *agentBootDirAdapter
 
-	// BootAdapter is the recovery.AgentBoot adapter wired into the
+	// BootAdapter is the broker.AgentBoot adapter wired into the
 	// recovery broker. The chat composition root installs a pre-boot
 	// hook on it (CW-20260514-0049) so boot-profile-backed sessions
 	// re-resolve via Registry.CompileFor under the fresh-catalog
@@ -208,7 +208,7 @@ func BuildAgentDependencies(cfg AgentDepsConfig) (AgentDepsBundle, error) {
 		LiveSessions: managerLiveSessions{manager: manager},
 	}
 
-	// BootDir adapter — satisfies recovery.BootDirOps by re-running the
+	// BootDir adapter — satisfies broker.BootDirOps by re-running the
 	// per-provider sandbox-dir population logic against the existing
 	// boot dir. The chat service calls bootDirAdapter.Track right after
 	// each successful runtimeagent.Boot so the broker has bootDir +
@@ -236,7 +236,7 @@ func BuildAgentDependencies(cfg AgentDepsConfig) (AgentDepsBundle, error) {
 	// reach — see recoveryCredentialsAdapter.Refresh for the full
 	// disposition.
 	bootAdapter := &agentBootAdapter{deps: deps}
-	brokerDeps := recovery.Dependencies{
+	brokerDeps := broker.Dependencies{
 		AgentBoot: bootAdapter,
 		BootDir:   bootDirAdapter,
 		Store: &recoveryBrokerStore{
@@ -258,7 +258,7 @@ func BuildAgentDependencies(cfg AgentDepsConfig) (AgentDepsBundle, error) {
 	if cfg.MCP != nil {
 		brokerDeps.MCP = &recoveryMCPAdapter{manager: cfg.MCP}
 	}
-	broker := recovery.NewBroker(brokerDeps)
+	broker := broker.NewBroker(brokerDeps)
 	deps.Recovery = broker
 
 	return AgentDepsBundle{
@@ -270,7 +270,7 @@ func BuildAgentDependencies(cfg AgentDepsConfig) (AgentDepsBundle, error) {
 	}, nil
 }
 
-// agentBootAdapter satisfies recovery.AgentBoot by forwarding into
+// agentBootAdapter satisfies broker.AgentBoot by forwarding into
 // agent.Boot with IsRelaunch=true so CreateRuntimeRow is skipped (the
 // broker has already transitioned the runtime row via
 // MarkAgentRuntimeRelaunching).
@@ -325,7 +325,7 @@ func (a *agentBootAdapter) Boot(ctx context.Context, opts runtimeagent.Options) 
 	return runtimeagent.Boot(ctx, a.deps, opts)
 }
 
-// recoveryHTTPRetryAdapter satisfies recovery.HTTPRetry for HTTP-provider
+// recoveryHTTPRetryAdapter satisfies broker.HTTPRetry for HTTP-provider
 // (bootdir-free) chat sessions — Phase 0 task 04 / decision log §19's
 // real HTTP-provider retry path.
 //
@@ -357,7 +357,7 @@ func newRecoveryHTTPRetryAdapter(retryLastMessage func(ctx context.Context, sess
 	return &recoveryHTTPRetryAdapter{retryLastMessage: retryLastMessage}
 }
 
-func (a *recoveryHTTPRetryAdapter) Retry(ctx context.Context, ev *recovery.FailureEvent) error {
+func (a *recoveryHTTPRetryAdapter) Retry(ctx context.Context, ev *broker.FailureEvent) error {
 	if a == nil || a.retryLastMessage == nil {
 		return errors.New("recovery: http retry adapter not wired")
 	}
@@ -368,7 +368,7 @@ func (a *recoveryHTTPRetryAdapter) Retry(ctx context.Context, ev *recovery.Failu
 	return err
 }
 
-// recoveryBrokerStore satisfies recovery.BrokerStore against the store
+// recoveryBrokerStore satisfies broker.BrokerStore against the store
 // package. MarkRuntimeRelaunching sets state="launching" with the
 // broker's audit reason; WriteBreadcrumb persists into
 // nanite_recovery_breadcrumbs (migration 054).
@@ -380,7 +380,7 @@ func (s *recoveryBrokerStore) MarkRuntimeRelaunching(sessionID, reason string) e
 	return s.store.MarkAgentRuntimeRelaunching(sessionID, reason)
 }
 
-func (s *recoveryBrokerStore) WriteBreadcrumb(b recovery.Breadcrumb) error {
+func (s *recoveryBrokerStore) WriteBreadcrumb(b broker.Breadcrumb) error {
 	return s.store.WriteRecoveryBreadcrumb(&store.RecoveryBreadcrumb{
 		Timestamp:    b.Timestamp,
 		SessionID:    b.SessionID,
@@ -404,7 +404,7 @@ type mcpTransportRestarter interface {
 	RestartStdioTransports(ctx context.Context) error
 }
 
-// recoveryMCPAdapter satisfies recovery.MCPControl. Phase 9 (CW-20260510-0015)
+// recoveryMCPAdapter satisfies broker.MCPControl. Phase 9 (CW-20260510-0015)
 // wiring: the broker's RemediationRefreshMCPTransport action lands here
 // when the classifier observes MCPTransport.Down on a failure event.
 //
@@ -446,7 +446,6 @@ func (a *recoveryMCPAdapter) RestartTransport(ctx context.Context, sessionID str
 	slog.Info("recovery: restarted mcp stdio transports", "session_id", sessionID)
 	return nil
 }
-
 
 // stripRegistryPrefix drops the nanite registry-side prefix
 // ("pty-claude" → "claude", "sub-codex" → "codex"). Callers that already
@@ -605,7 +604,7 @@ func marshalMeta(m map[string]any) string {
 
 // agentRuntimeStateSink translates agentsessions.Manager state events into
 // agent_runtime row updates. The lib emits launching → running → done|failed;
-// orphaned is set separately by SweepOrphans.
+// orphaned is set separately by orphansweep.SweepOrphans.
 type agentRuntimeStateSink struct {
 	store *store.Store
 }
@@ -617,7 +616,7 @@ func (s *agentRuntimeStateSink) UpdateSessionState(id string, state agentsession
 // --- LiveSessions adapter ---
 
 // managerLiveSessions satisfies runtimeagent.LiveSessionChecker against
-// the in-process agentsessions.Manager. SweepOrphans uses it to
+// the in-process agentsessions.Manager. orphansweep.SweepOrphans uses it to
 // distinguish a pid=0 row whose session is still live in *this* nanite
 // process from one left over from a pre-restart process.
 //

@@ -10,8 +10,8 @@ import (
 
 	agentsessions "github.com/hollis-labs/agentkit/agentsessions"
 	llmcontracts "github.com/hollis-labs/go-llm-contracts"
+	"github.com/hollis-labs/nanite/internal/recovery/broker"
 	runtimeagent "github.com/hollis-labs/nanite/internal/runtime/agent"
-	"github.com/hollis-labs/nanite/internal/runtime/agent/recovery"
 	"github.com/hollis-labs/nanite/internal/safego"
 )
 
@@ -56,7 +56,7 @@ const (
 
 // HTTP-stream meta keys threaded into the recovery broker's meta bag.
 // These are nanite-specific extras carried alongside the standard
-// recovery.MetaKey* set. The broker's classifier only consumes the
+// broker.MetaKey* set. The broker's classifier only consumes the
 // standard keys; these extras are used in-process for envelope
 // rendering / logging and would also be available to any future
 // classifier extension. They are NOT persisted to nanite_recovery_breadcrumbs
@@ -156,9 +156,9 @@ func (s *chatServiceImpl) notifyRecoveryBrokerForHTTPStreamError(
 	// breadcrumb and a misleading "retrying..." envelope.
 	//
 	// Phase 0 task 04 (decision log §19) closes that structural gap:
-	// recovery.Broker.DispatchRetry itself now branches on
+	// broker.Broker.DispatchRetry itself now branches on
 	// runtimeagent.HasBootdirLayout(ev.Provider) and routes no-bootdir
-	// sessions to a real, bootdir-free HTTP retry path (recovery.HTTPRetry)
+	// sessions to a real, bootdir-free HTTP retry path (broker.HTTPRetry)
 	// instead of ever reaching AgentBoot.Boot for them. That guarantee —
 	// "never dispatch a doomed CLI-boot retry for a no-bootdir-layout
 	// provider" — now lives inside the broker, not at this call site, so
@@ -201,12 +201,12 @@ func (s *chatServiceImpl) notifyRecoveryBrokerForHTTPStreamError(
 	// the httpStreamMetaKeySource extra key instead of being smuggled
 	// through the Mode slot.
 	meta := map[string]any{
-		recovery.MetaKeyAgentProfile: agentProfileSlug,
-		recovery.MetaKeyProvider:     providerName,
-		recovery.MetaKeyMode:         runtimeagent.ModeOneShot.String(),
-		recovery.MetaKeyStderrTail:   stderrTail,
-		httpStreamMetaKeySource:      httpStreamMetaSource,
-		httpStreamMetaKeyErrorClass:  errorClass,
+		broker.MetaKeyAgentProfile:  agentProfileSlug,
+		broker.MetaKeyProvider:      providerName,
+		broker.MetaKeyMode:          runtimeagent.ModeOneShot.String(),
+		broker.MetaKeyStderrTail:    stderrTail,
+		httpStreamMetaKeySource:     httpStreamMetaSource,
+		httpStreamMetaKeyErrorClass: errorClass,
 	}
 
 	broker := s.agentDeps.Recovery

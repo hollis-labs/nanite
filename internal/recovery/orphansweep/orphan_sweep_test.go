@@ -1,4 +1,4 @@
-package agent
+package orphansweep
 
 import (
 	"context"
@@ -7,6 +7,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/hollis-labs/nanite/internal/runtime/agent"
 )
 
 // fakeLiveSessions is the test-side LiveSessionChecker. live[id]==true
@@ -20,6 +22,59 @@ func (f *fakeLiveSessions) IsLive(id string) bool {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	return f.live[id]
+}
+
+// fakeRuntimeStore is a self-contained agent.RuntimeStore fake scoped to
+// this package's tests. Mirrors internal/runtime/agent's own
+// fakeRuntimeStore (fakes_test.go) — that one is unexported and can't be
+// reused across the package boundary now that orphan-sweep logic lives
+// here, so this is a deliberate, minimal duplicate covering only what
+// SweepOrphans/RuntimeReaper exercise.
+type fakeRuntimeStore struct {
+	mu        sync.Mutex
+	orphaned  map[string]string
+	listRows  []*agent.RuntimeRow
+	createErr error
+}
+
+func newFakeRuntimeStore() *fakeRuntimeStore {
+	return &fakeRuntimeStore{
+		orphaned: map[string]string{},
+	}
+}
+
+func (f *fakeRuntimeStore) CreateRuntimeRow(row *agent.RuntimeRow) error {
+	if f.createErr != nil {
+		return f.createErr
+	}
+	return nil
+}
+
+func (f *fakeRuntimeStore) MarkRuntimeFailed(id, reason string) error {
+	return nil
+}
+
+func (f *fakeRuntimeStore) MarkRuntimeOrphaned(id, reason string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.orphaned[id] = reason
+	return nil
+}
+
+func (f *fakeRuntimeStore) SetProviderSessionID(id, providerSessionID string) error {
+	return nil
+}
+
+func (f *fakeRuntimeStore) GetCheckpoint(string) (*agent.RuntimeCheckpoint, error) {
+	return nil, nil
+}
+
+func (f *fakeRuntimeStore) ListRunningRows() ([]*agent.RuntimeRow, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	out := make([]*agent.RuntimeRow, len(f.listRows))
+	copy(out, f.listRows)
+	return out, nil
 }
 
 // TestPidAlive_Self confirms our own pid is reported alive (signal-0
@@ -51,7 +106,7 @@ func TestPidAlive_Dead(t *testing.T) {
 // TestSweepOrphans_RequiresStore returns a clear error when deps.Store
 // is missing.
 func TestSweepOrphans_RequiresStore(t *testing.T) {
-	_, err := SweepOrphans(context.Background(), &Dependencies{})
+	_, err := SweepOrphans(context.Background(), &agent.Dependencies{})
 	if err == nil || !strings.Contains(err.Error(), "Store") {
 		t.Fatalf("expected Store-required error, got %v", err)
 	}
@@ -62,13 +117,13 @@ func TestSweepOrphans_RequiresStore(t *testing.T) {
 // are skipped (UpdatedAt zero), live PIDs stay, dead PIDs flip to orphaned.
 func TestSweepOrphans_MarksDeadRows(t *testing.T) {
 	store := newFakeRuntimeStore()
-	store.listRows = []*RuntimeRow{
-		{ID: "no-pid", PID: 0},        // skipped (no checker, UpdatedAt zero)
+	store.listRows = []*agent.RuntimeRow{
+		{ID: "no-pid", PID: 0},         // skipped (no checker, UpdatedAt zero)
 		{ID: "self", PID: os.Getpid()}, // alive
 		{ID: "dead", PID: 1<<22 + 99},  // dead
 	}
 
-	orphaned, err := SweepOrphans(context.Background(), &Dependencies{Store: store})
+	orphaned, err := SweepOrphans(context.Background(), &agent.Dependencies{Store: store})
 	if err != nil {
 		t.Fatalf("SweepOrphans: %v", err)
 	}
@@ -95,13 +150,13 @@ func TestSweepOrphans_MarksDeadRows(t *testing.T) {
 func TestSweepOrphans_PidZero_NoLiveSession(t *testing.T) {
 	store := newFakeRuntimeStore()
 	old := time.Now().Add(-10 * time.Minute) // well past the default grace
-	store.listRows = []*RuntimeRow{
+	store.listRows = []*agent.RuntimeRow{
 		{ID: "codex-live", PID: 0, UpdatedAt: old},
 		{ID: "codex-dead", PID: 0, UpdatedAt: old},
 	}
 	live := &fakeLiveSessions{live: map[string]bool{"codex-live": true}}
 
-	orphaned, err := SweepOrphans(context.Background(), &Dependencies{
+	orphaned, err := SweepOrphans(context.Background(), &agent.Dependencies{
 		Store:        store,
 		LiveSessions: live,
 	})
@@ -127,12 +182,12 @@ func TestSweepOrphans_PidZero_NoLiveSession(t *testing.T) {
 // before the registry has populated.
 func TestSweepOrphans_PidZero_GraceWindow(t *testing.T) {
 	store := newFakeRuntimeStore()
-	store.listRows = []*RuntimeRow{
+	store.listRows = []*agent.RuntimeRow{
 		{ID: "codex-fresh", PID: 0, UpdatedAt: time.Now().Add(-1 * time.Second)},
 	}
 	live := &fakeLiveSessions{live: map[string]bool{}}
 
-	orphaned, err := sweepOrphansAt(context.Background(), &Dependencies{
+	orphaned, err := sweepOrphansAt(context.Background(), &agent.Dependencies{
 		Store:        store,
 		LiveSessions: live,
 	}, 1*time.Minute, time.Now)
@@ -149,12 +204,12 @@ func TestSweepOrphans_PidZero_GraceWindow(t *testing.T) {
 // flips with reason="pid_zero_stale" even without a LiveSessions checker.
 func TestSweepOrphans_PidZero_StaleWithoutChecker(t *testing.T) {
 	store := newFakeRuntimeStore()
-	store.listRows = []*RuntimeRow{
+	store.listRows = []*agent.RuntimeRow{
 		{ID: "codex-stale", PID: 0, UpdatedAt: time.Now().Add(-10 * time.Minute)},
 		{ID: "codex-fresh", PID: 0, UpdatedAt: time.Now()}, // within default grace
 	}
 
-	orphaned, err := SweepOrphans(context.Background(), &Dependencies{Store: store})
+	orphaned, err := SweepOrphans(context.Background(), &agent.Dependencies{Store: store})
 	if err != nil {
 		t.Fatalf("SweepOrphans: %v", err)
 	}
@@ -180,8 +235,8 @@ func TestClassifyForReconciliation_Matrix(t *testing.T) {
 
 	tests := []struct {
 		name       string
-		row        *RuntimeRow
-		live       LiveSessionChecker
+		row        *agent.RuntimeRow
+		live       agent.LiveSessionChecker
 		wantReason string
 		wantDrop   bool
 	}{
@@ -192,43 +247,43 @@ func TestClassifyForReconciliation_Matrix(t *testing.T) {
 		},
 		{
 			name:     "live pid",
-			row:      &RuntimeRow{ID: "x", PID: os.Getpid()},
+			row:      &agent.RuntimeRow{ID: "x", PID: os.Getpid()},
 			wantDrop: false,
 		},
 		{
 			name:       "dead pid",
-			row:        &RuntimeRow{ID: "x", PID: 1<<22 + 7},
+			row:        &agent.RuntimeRow{ID: "x", PID: 1<<22 + 7},
 			wantReason: ReasonReconcileDeadPid,
 			wantDrop:   true,
 		},
 		{
 			name:     "pid 0, in registry",
-			row:      &RuntimeRow{ID: "in-registry", PID: 0, UpdatedAt: old},
+			row:      &agent.RuntimeRow{ID: "in-registry", PID: 0, UpdatedAt: old},
 			live:     liveAll,
 			wantDrop: false,
 		},
 		{
 			name:       "pid 0, not in registry, stale",
-			row:        &RuntimeRow{ID: "missing", PID: 0, UpdatedAt: old},
+			row:        &agent.RuntimeRow{ID: "missing", PID: 0, UpdatedAt: old},
 			live:       liveAll,
 			wantReason: ReasonReconcileNoLiveSession,
 			wantDrop:   true,
 		},
 		{
 			name:     "pid 0, not in registry, fresh",
-			row:      &RuntimeRow{ID: "missing", PID: 0, UpdatedAt: fresh},
+			row:      &agent.RuntimeRow{ID: "missing", PID: 0, UpdatedAt: fresh},
 			live:     liveAll,
 			wantDrop: false,
 		},
 		{
 			name:       "pid 0, no checker, stale",
-			row:        &RuntimeRow{ID: "x", PID: 0, UpdatedAt: old},
+			row:        &agent.RuntimeRow{ID: "x", PID: 0, UpdatedAt: old},
 			wantReason: ReasonReconcilePidZeroStale,
 			wantDrop:   true,
 		},
 		{
 			name:     "pid 0, no checker, zero updated_at",
-			row:      &RuntimeRow{ID: "x", PID: 0},
+			row:      &agent.RuntimeRow{ID: "x", PID: 0},
 			wantDrop: false,
 		},
 	}
@@ -251,7 +306,7 @@ func TestClassifyForReconciliation_Matrix(t *testing.T) {
 // edge case doesn't deadlock — mirrors the subagent reaper's
 // startOnce/doneOnce contract.
 func TestRuntimeReaper_StopBeforeStart(t *testing.T) {
-	reaper := NewRuntimeReaper(&Dependencies{Store: newFakeRuntimeStore()}, RuntimeReaperOptions{})
+	reaper := NewRuntimeReaper(&agent.Dependencies{Store: newFakeRuntimeStore()}, RuntimeReaperOptions{})
 	done := make(chan struct{})
 	go func() {
 		reaper.Stop()
@@ -267,7 +322,7 @@ func TestRuntimeReaper_StopBeforeStart(t *testing.T) {
 // TestRuntimeReaper_NilStore short-circuits cleanly when deps.Store is
 // nil — Start logs and exits, Stop returns immediately.
 func TestRuntimeReaper_NilStore(t *testing.T) {
-	reaper := NewRuntimeReaper(&Dependencies{}, RuntimeReaperOptions{})
+	reaper := NewRuntimeReaper(&agent.Dependencies{}, RuntimeReaperOptions{})
 	reaper.Start(context.Background())
 	done := make(chan struct{})
 	go func() {
@@ -285,10 +340,10 @@ func TestRuntimeReaper_NilStore(t *testing.T) {
 // used by the composition root for the startup reconciliation pass.
 func TestRuntimeReaper_SweepOnce(t *testing.T) {
 	store := newFakeRuntimeStore()
-	store.listRows = []*RuntimeRow{
+	store.listRows = []*agent.RuntimeRow{
 		{ID: "dead", PID: 1<<22 + 5},
 	}
-	reaper := NewRuntimeReaper(&Dependencies{Store: store}, RuntimeReaperOptions{})
+	reaper := NewRuntimeReaper(&agent.Dependencies{Store: store}, RuntimeReaperOptions{})
 	n, err := reaper.SweepOnce(context.Background())
 	if err != nil {
 		t.Fatalf("SweepOnce: %v", err)

@@ -1,4 +1,4 @@
-package recovery
+package broker
 
 import (
 	"crypto/rand"
@@ -13,9 +13,9 @@ import (
 // envelope schemas — no new kinds. info-card / error-report /
 // chat-loop-terminated render through the existing FE projection.
 const (
-	envelopeKindInfoCard            = "info-card"
-	envelopeKindErrorReport         = "error-report"
-	envelopeKindChatLoopTerminated  = "chat-loop-terminated"
+	envelopeKindInfoCard           = "info-card"
+	envelopeKindErrorReport        = "error-report"
+	envelopeKindChatLoopTerminated = "chat-loop-terminated"
 )
 
 // Severity levels used on the broker's envelopes. Match the existing

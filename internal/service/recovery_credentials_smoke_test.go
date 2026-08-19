@@ -7,7 +7,7 @@ import (
 
 	"github.com/hollis-labs/go-providers/provider"
 	nllmanthropic "github.com/hollis-labs/nanite/internal/llm/anthropic"
-	"github.com/hollis-labs/nanite/internal/runtime/agent/recovery"
+	"github.com/hollis-labs/nanite/internal/recovery/broker"
 	"github.com/hollis-labs/nanite/internal/store"
 )
 
@@ -37,18 +37,18 @@ func TestSmoke_BrokerRemediateThroughCredentialsAdapter(t *testing.T) {
 	// Build a broker with ONLY Credentials wired — mirrors the
 	// "BootDir/MCP still nil" Phase 9 wiring intermediate state to
 	// confirm the credentials path lights up independently.
-	b := recovery.NewBroker(recovery.Dependencies{
+	b := broker.NewBroker(broker.Dependencies{
 		Credentials: adapter,
 	})
 
-	ev := &recovery.FailureEvent{
+	ev := &broker.FailureEvent{
 		SessionID:    "smoke-session",
 		AgentProfile: "agent-x",
 	}
-	c := recovery.Classification{
-		Class:       recovery.ClassConfigPermissions,
+	c := broker.Classification{
+		Class:       broker.ClassConfigPermissions,
 		Reason:      "smoke: stderr indicates auth failure",
-		Remediation: recovery.RemediationRefreshCredentials,
+		Remediation: broker.RemediationRefreshCredentials,
 	}
 
 	if err := b.Remediate(context.Background(), ev, c); err != nil {
@@ -71,14 +71,14 @@ func TestSmoke_BrokerRemediateCLIProviderEscalates(t *testing.T) {
 	}
 	adapter := newAdapterForTest(profiles, provider.NewRegistry(), nil)
 
-	b := recovery.NewBroker(recovery.Dependencies{
+	b := broker.NewBroker(broker.Dependencies{
 		Credentials: adapter,
 	})
 
-	ev := &recovery.FailureEvent{SessionID: "cli-session", AgentProfile: "agent-cli"}
-	c := recovery.Classification{
-		Class:       recovery.ClassConfigPermissions,
-		Remediation: recovery.RemediationRefreshCredentials,
+	ev := &broker.FailureEvent{SessionID: "cli-session", AgentProfile: "agent-cli"}
+	c := broker.Classification{
+		Class:       broker.ClassConfigPermissions,
+		Remediation: broker.RemediationRefreshCredentials,
 	}
 
 	err := b.Remediate(context.Background(), ev, c)

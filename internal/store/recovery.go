@@ -7,7 +7,7 @@ import (
 
 // RecoveryBreadcrumb is the persistence shape the in-process recovery
 // broker writes per failure observation. The broker package
-// (internal/runtime/agent/recovery) owns the typed enum values; this
+// (internal/recovery/broker) owns the typed enum values; this
 // row stores their lower-case string forms via the broker's Stringers.
 //
 // One row per broker-handled FailureEvent. Postmortem queries pivot

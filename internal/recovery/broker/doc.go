@@ -1,4 +1,4 @@
-// Package recovery is the in-process subagent recovery broker for nanite's
+// Package broker is the in-process subagent recovery broker for nanite's
 // CLI/PTY agent sessions. It classifies whole-session failures (process
 // crashes, sandbox dir write failures, MCP transport drops, etc.),
 // attempts automated remediation, dispatches a replacement session
@@ -29,4 +29,4 @@
 // In-process by design (not a separate subagent process). Locked decision
 // per D-SUBAGENT-RECOVERY-BROKER in
 // nanite/docs/architecture/chat-system/future-work.md.
-package recovery
+package broker

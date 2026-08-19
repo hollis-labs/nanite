@@ -1,4 +1,4 @@
-package recovery
+package broker
 
 import (
 	"context"
@@ -13,17 +13,17 @@ import (
 // degrades gracefully when keys are absent (zero-valued FailureEvent
 // fields).
 const (
-	MetaKeyAgentProfile    = "agent_profile"
-	MetaKeyProvider        = "provider"
-	MetaKeyMode            = "mode"
-	MetaKeyLineageOf       = "lineage_of"
-	MetaKeyWorkdir         = "workdir"
-	MetaKeyStderrTail      = "stderr_tail"
-	MetaKeySandboxState    = "sandbox_state"     // SandboxState value
-	MetaKeyMCPState        = "mcp_state"         // MCPState value
-	MetaKeyPathGrants      = "path_grants"       // []string
-	MetaKeySessionAge      = "session_age"       // time.Duration
-	MetaKeyLastTurnPos     = "last_turn_pos"     // int
+	MetaKeyAgentProfile = "agent_profile"
+	MetaKeyProvider     = "provider"
+	MetaKeyMode         = "mode"
+	MetaKeyLineageOf    = "lineage_of"
+	MetaKeyWorkdir      = "workdir"
+	MetaKeyStderrTail   = "stderr_tail"
+	MetaKeySandboxState = "sandbox_state" // SandboxState value
+	MetaKeyMCPState     = "mcp_state"     // MCPState value
+	MetaKeyPathGrants   = "path_grants"   // []string
+	MetaKeySessionAge   = "session_age"   // time.Duration
+	MetaKeyLastTurnPos  = "last_turn_pos" // int
 )
 
 // OnSessionExit is the broker's main orchestration entry point.

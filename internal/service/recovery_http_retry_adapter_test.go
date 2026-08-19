@@ -8,7 +8,7 @@ import (
 	"time"
 
 	agentsessions "github.com/hollis-labs/agentkit/agentsessions"
-	"github.com/hollis-labs/nanite/internal/runtime/agent/recovery"
+	"github.com/hollis-labs/nanite/internal/recovery/broker"
 )
 
 // TestRecoveryHTTPRetryAdapter_ForwardsToRetryLastMessage verifies the
@@ -24,7 +24,7 @@ func TestRecoveryHTTPRetryAdapter_ForwardsToRetryLastMessage(t *testing.T) {
 	})
 
 	ctx := context.Background()
-	ev := &recovery.FailureEvent{SessionID: "sess-abc", Provider: "anthropic"}
+	ev := &broker.FailureEvent{SessionID: "sess-abc", Provider: "anthropic"}
 	if err := a.Retry(ctx, ev); err != nil {
 		t.Fatalf("Retry: unexpected err = %v", err)
 	}
@@ -45,7 +45,7 @@ func TestRecoveryHTTPRetryAdapter_PropagatesUnderlyingErr(t *testing.T) {
 		return "", wantErr
 	})
 
-	err := a.Retry(context.Background(), &recovery.FailureEvent{SessionID: "sess-abc"})
+	err := a.Retry(context.Background(), &broker.FailureEvent{SessionID: "sess-abc"})
 	if !errors.Is(err, wantErr) {
 		t.Errorf("Retry err = %v, want %v", err, wantErr)
 	}
@@ -62,14 +62,14 @@ func TestRecoveryHTTPRetryAdapter_NilGuards(t *testing.T) {
 				t.Fatalf("Retry panicked on nil adapter: %v", r)
 			}
 		}()
-		if err := a.Retry(context.Background(), &recovery.FailureEvent{SessionID: "s"}); err == nil {
+		if err := a.Retry(context.Background(), &broker.FailureEvent{SessionID: "s"}); err == nil {
 			t.Fatal("expected error from nil adapter")
 		}
 	})
 
 	t.Run("unwired retry func", func(t *testing.T) {
 		a := &recoveryHTTPRetryAdapter{}
-		if err := a.Retry(context.Background(), &recovery.FailureEvent{SessionID: "s"}); err == nil {
+		if err := a.Retry(context.Background(), &broker.FailureEvent{SessionID: "s"}); err == nil {
 			t.Fatal("expected error from unwired retryLastMessage")
 		}
 	})
@@ -94,7 +94,7 @@ func TestRecoveryHTTPRetryAdapter_NilGuards(t *testing.T) {
 			called = true
 			return "", nil
 		})
-		if err := a.Retry(context.Background(), &recovery.FailureEvent{SessionID: ""}); err == nil {
+		if err := a.Retry(context.Background(), &broker.FailureEvent{SessionID: ""}); err == nil {
 			t.Fatal("expected error for empty session id")
 		}
 		if called {
@@ -103,18 +103,18 @@ func TestRecoveryHTTPRetryAdapter_NilGuards(t *testing.T) {
 	})
 }
 
-// Compile-time assertion that the adapter satisfies recovery.HTTPRetry.
-var _ recovery.HTTPRetry = (*recoveryHTTPRetryAdapter)(nil)
+// Compile-time assertion that the adapter satisfies broker.HTTPRetry.
+var _ broker.HTTPRetry = (*recoveryHTTPRetryAdapter)(nil)
 
-// smokeRecoveryStore is a minimal recovery.BrokerStore fake for the
+// smokeRecoveryStore is a minimal broker.BrokerStore fake for the
 // end-to-end smoke test below — only WriteBreadcrumb matters here.
 type smokeRecoveryStore struct {
-	breadcrumbs []recovery.Breadcrumb
+	breadcrumbs []broker.Breadcrumb
 }
 
 func (s *smokeRecoveryStore) MarkRuntimeRelaunching(string, string) error { return nil }
 
-func (s *smokeRecoveryStore) WriteBreadcrumb(b recovery.Breadcrumb) error {
+func (s *smokeRecoveryStore) WriteBreadcrumb(b broker.Breadcrumb) error {
 	s.breadcrumbs = append(s.breadcrumbs, b)
 	return nil
 }
@@ -122,7 +122,7 @@ func (s *smokeRecoveryStore) WriteBreadcrumb(b recovery.Breadcrumb) error {
 // TestSmoke_BrokerHTTPRetryThroughAdapter is the end-to-end functional
 // check for Phase 0 task 04 / decision log §19, built the same way this
 // package's existing recovery-adapter smoke tests are (see
-// recovery_credentials_smoke_test.go): a real recovery.Broker wired
+// recovery_credentials_smoke_test.go): a real broker.Broker wired
 // against the REAL recoveryHTTPRetryAdapter (not a fakeHTTPRetry stand-in
 // like the recovery package's own unit tests use), backed by a scripted
 // "test double provider" retryLastMessage func standing in for
@@ -146,11 +146,11 @@ func TestSmoke_BrokerHTTPRetryThroughAdapter(t *testing.T) {
 	}
 
 	store := &smokeRecoveryStore{}
-	b := recovery.NewBroker(recovery.Dependencies{
+	b := broker.NewBroker(broker.Dependencies{
 		Store: store,
 		// AgentBoot intentionally left nil — proves the HTTP-provider
 		// branch never reaches it for a no-bootdir-layout provider.
-	}, recovery.WithRemediationTimeout(20*time.Millisecond)) // keep backoff fast
+	}, broker.WithRemediationTimeout(20*time.Millisecond)) // keep backoff fast
 
 	b.SetHTTPRetry(newRecoveryHTTPRetryAdapter(testDoubleRetryLastMessage))
 
@@ -159,9 +159,9 @@ func TestSmoke_BrokerHTTPRetryThroughAdapter(t *testing.T) {
 	// value; the literal string here is enough to prove the shape).
 	exit := &agentsessions.ExitError{Code: -1, Cause: "http_stream_timeout"}
 	b.OnSessionExit("smoke-http-session", exit, map[string]any{
-		recovery.MetaKeyProvider:     "anthropic",
-		recovery.MetaKeyAgentProfile: "claude-sonnet",
-		recovery.MetaKeyMode:         "one_shot",
+		broker.MetaKeyProvider:     "anthropic",
+		broker.MetaKeyAgentProfile: "claude-sonnet",
+		broker.MetaKeyMode:         "one_shot",
 	})
 
 	if got := atomic.LoadInt32(&retryCalls); got != 1 {
@@ -175,7 +175,7 @@ func TestSmoke_BrokerHTTPRetryThroughAdapter(t *testing.T) {
 		t.Fatalf("breadcrumbs: got %d, want 1", len(store.breadcrumbs))
 	}
 	bc := store.breadcrumbs[0]
-	if bc.Outcome != recovery.OutcomeTransientRetrySucceeded {
+	if bc.Outcome != broker.OutcomeTransientRetrySucceeded {
 		t.Errorf("breadcrumb Outcome = %v, want OutcomeTransientRetrySucceeded", bc.Outcome)
 	}
 	if bc.Cause != "http_stream_timeout" {

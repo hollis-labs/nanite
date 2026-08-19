@@ -10,16 +10,16 @@ import (
 	"testing"
 
 	"github.com/hollis-labs/go-providers/provider"
-	"github.com/hollis-labs/nanite/internal/runtime/agent/recovery"
+	"github.com/hollis-labs/nanite/internal/recovery/broker"
 	"github.com/hollis-labs/nanite/internal/service"
 	"github.com/hollis-labs/nanite/internal/store"
 )
 
 // newTestAPIWithRecovery wires an API + Container that exposes a real
-// recovery.Broker so the cancel endpoint can be exercised end-to-end.
+// broker.Broker so the cancel endpoint can be exercised end-to-end.
 // Distinct from newTestAPI (which omits broker wiring) so tests that
 // don't need the recovery surface don't pay for it.
-func newTestAPIWithRecovery(t *testing.T) (*API, *http.ServeMux, *recovery.Broker) {
+func newTestAPIWithRecovery(t *testing.T) (*API, *http.ServeMux, *broker.Broker) {
 	t.Helper()
 	dbPath := filepath.Join(t.TempDir(), "test.db")
 	s, err := store.New(context.Background(), dbPath)

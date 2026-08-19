@@ -1,4 +1,4 @@
-package recovery
+package broker
 
 import (
 	"context"
@@ -354,7 +354,7 @@ func TestSetReplacementSessionHook_PostConstruction(t *testing.T) {
 	}
 }
 
-// nopEnvelope satisfies recovery.EnvelopeSink for tests that don't care
+// nopEnvelope satisfies broker.EnvelopeSink for tests that don't care
 // about envelope content — only the dispatch path.
 type nopEnvelope struct{}
 

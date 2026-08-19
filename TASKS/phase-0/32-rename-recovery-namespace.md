@@ -1,7 +1,7 @@
 # internal/recovery/* namespace regrouping
 
 **Phase:** 0
-**Status:** not-started
+**Status:** implemented
 **Depends on:** `04-build-http-provider-retry`
 **Touches:** `internal/runtime/agent/recovery/*` (18 files: `broker.go`, `cancel_test.go`, `classifier.go`, `classifier_test.go`, `deps.go`, `dispatch_test.go`, `doc.go`, `envelope.go`, `envelope_test.go`, `orchestration.go`, `orchestration_test.go`, `remediator.go`, `remediator_test.go`, `telemetry.go`, `testhelpers.go`, `types.go`, `types_test.go`), `internal/runtime/agent/orphan_sweep.go` + `orphan_sweep_test.go`, `internal/service/recovery_pack.go` + `recovery_pack_test.go`, `internal/api/sessions.go` (`detectInterruptedTurn`, lines 164/168/200) + `internal/api/interrupted_turn_test.go`, plus every import-site listed in "What to do" step 1 (12 files for the Recovery Broker alone) and the `internal/runtime/agent` package's own `Dependencies`/`RuntimeRow` types (`internal/runtime/agent/deps.go` — read/reference only, not moved).
 
@@ -56,7 +56,161 @@ Architecture doc `docs/engineering/architecture/06-session-lifecycle-and-recover
 - No behavior change beyond the package move itself — this task does not add new `event_log` writers, does not change the Broker's retry/backoff logic (that's task `04`'s job, already landed), and does not touch `nanite_recovery_breadcrumbs`' schema.
 
 ## Work log
-<Worker fills this in as it goes: what was actually done, any deviation from plan and why, anything escalated.>
+
+**Status: implemented.**
+
+### Final package layout
+
+- `internal/recovery/broker/` — the Recovery Broker, moved verbatim (all 18 files,
+  including `http_retry_test.go` which wasn't in this file's original 17-file
+  enumeration but is part of the same package post-task-04). Package renamed
+  `recovery` → `broker` (directory name == package name, matching the
+  `internal/agent/{override,reflexes,builtin}` idiom) rather than kept as
+  `recovery` living under an `internal/recovery/broker` directory — that would
+  read as `broker.recovery.Foo` stutter-free but leaves the directory/package
+  name mismatched, and the task's own flavor text flagged exactly this choice
+  as open. Renaming is also what the "avoids a confusing stutter" framing was
+  steering toward once the parent namespace is itself named `recovery`.
+- `internal/recovery/orphansweep/` — the Orphan/Runtime Reaper (`orphan_sweep.go`
+  + test), moved out of `package agent`. All bare `Dependencies`/`RuntimeRow`
+  references qualified as `agent.Dependencies`/`agent.RuntimeRow`.
+- `internal/recovery/pack/` — the Recovery Pack's pure functions
+  (`BuildRecoveryPack`, `ShouldBuildRecoveryPack`, `MessagePlainText`,
+  `ExcludeCurrentTurn`, `RecoveryPackInput`), capitalized and exported per the
+  task's naming. `internal/service/recovery_pack.go` renamed to
+  `recovery_pack_glue.go` and now holds only the three thin `*chatServiceImpl`
+  methods (`shouldRecoverColdBoot`, `buildSessionRecoveryPrefix`,
+  `composeBootPayload`), calling into `pack.*`.
+- `internal/recovery/interrupted_turn.go` — top-level `package recovery` (no
+  subpackage, per the task's own judgment call for something this small).
+  Holds `DetectInterruptedTurn(lastMessageRole, lastMessageID,
+  lastActivityAt string, hasLiveStream bool) map[string]any`, the pure
+  "dangling user turn + no live stream" decision. `internal/api/sessions.go`'s
+  `detectInterruptedTurn` stays a thin method doing the store/stream lookups
+  (including the `sess.Status != "active"` early-out, which the task's literal
+  param list — last message role/timestamp + hasLiveStream — didn't include,
+  so it stayed in the wrapper rather than becoming a fourth pure-function
+  parameter).
+
+### Real complications hit beyond the task's own flagged ones
+
+1. **`LiveSessionChecker` couldn't move with `orphan_sweep.go`.** The interface
+   was defined *in* `orphan_sweep.go` but `internal/runtime/agent/deps.go`'s own
+   `Dependencies.LiveSessions` field is typed with it in-package. Moving it to
+   `internal/recovery/orphansweep` would force `internal/runtime/agent` to
+   import `orphansweep`, which itself must import `internal/runtime/agent` for
+   `agent.Dependencies`/`agent.RuntimeRow` — a cycle. Left `LiveSessionChecker`
+   defined in `internal/runtime/agent/deps.go`; `orphansweep` references it as
+   `agent.LiveSessionChecker`. `internal/service/agent_deps.go`'s
+   `managerLiveSessions` (which already said `runtimeagent.LiveSessionChecker`)
+   needed zero changes — confirms this was the right call.
+2. **`orphan_sweep_test.go` couldn't reuse `internal/runtime/agent`'s
+   unexported `fakeRuntimeStore`/`newFakeRuntimeStore`** (package-private,
+   still used by `boot_test.go` in the old package — left in place). Wrote a
+   small self-contained duplicate `fakeRuntimeStore` in the new package's test
+   file implementing `agent.RuntimeStore` in full (only 2 of its 6 methods are
+   exercised by sweep logic, but the interface requires all 6 to satisfy
+   `Dependencies.Store`).
+3. **Package-rename local-variable shadowing.** Renaming `internal/runtime/agent/recovery`'s
+   package from `recovery` to `broker` meant every `recovery.X` call-site
+   reference became `broker.X` — and one file
+   (`internal/service/recovery_mcp_adapter_smoke_test.go`) had a local variable
+   named `broker` (`broker := recovery.NewBroker(...)`) that, after the
+   mechanical rename, shadowed the `broker` package for the rest of its
+   function and broke `broker.FailureEvent`/`broker.Classification`/etc. type
+   references later in the same scope (`go vet` caught it:
+   `broker.FailureEvent is not a type`). Renamed the two local vars to `b`
+   (matching the sibling smoke-test files' existing convention). Checked every
+   other `broker := ...`/`broker, ok := ...` site (`container.go` x2,
+   `chat_boot_drive.go` x2, `agent_deps.go` x1, `internal/api/recovery_test.go`
+   x2) — none of those reference the package by name again after the shadow
+   (method calls or `return broker` only), so they compile fine as-is; left
+   them unchanged rather than renaming defensively.
+4. **`firstNonEmpty` duplication.** `buildRecoveryPack` used
+   `internal/service`'s `firstNonEmpty` helper (defined in
+   `durable_agent_recipes.go`). Since `internal/service` now imports
+   `internal/recovery/pack` (for the glue methods), `pack` importing back into
+   `internal/service` for one 8-line helper would cycle. Duplicated the
+   trivial helper into `pack.go` as an unexported function rather than
+   inventing a new shared-utility package for it.
+5. **Accidental broad `gofmt -w` blast radius.** Ran `gofmt -w` over whole
+   directory globs (`internal/service/*.go`, `internal/api/*.go`,
+   `internal/runtime/agent/*.go`) once mid-task, which reformatted ~20
+   unrelated files' pre-existing comment continuation indentation (a gofmt
+   version-drift cosmetic diff, no semantic content). Caught it via `git
+   status` showing files well outside this task's touch list, verified via
+   `git diff` that every one of those diffs was comment-whitespace-only (no
+   `recovery`/`broker`/`orphansweep` token in any of them), and reverted all
+   of them with `git checkout --`. Lesson logged for future workers: gofmt
+   only the specific files actually edited, never a directory glob.
+
+### Doc comments updated
+
+`internal/runtime/agent/deps.go` (both the `LiveSessions` field comment and
+the `RecoveryHooks` comment's `recovery.Broker`/`importing recovery` mentions,
+now `orphansweep.SweepOrphans`/`broker.Broker`/`importing broker`),
+`internal/store/recovery.go`'s `RecoveryBreadcrumb` doc, and the bare
+`SweepOrphans` mentions in `internal/store/agent_runtime.go` and
+`internal/service/agent_deps.go` (now `orphansweep.SweepOrphans` — these
+crossed a package boundary for the first time with this move, so the
+qualifier is now informative where it wasn't needed before).
+
+### Checks
+
+- `go build ./cmd/nanite/` — pass.
+- `go vet ./...` — pass, modulo one **pre-existing, unrelated** `lostcancel`
+  warning on `container.go`'s `stopReaper`/`stopRuntimeReaper` (verified via
+  `git show HEAD:internal/service/container.go` — identical
+  `context.WithCancel` shape existed before this task touched the file; out
+  of this task's scope).
+- `go test ./...` — all packages pass, including the four new/moved
+  `internal/recovery/*` packages and every consumer in `internal/service`,
+  `internal/api`, `internal/store`.
+
+### Real functional verification (per Done means — not just a green build)
+
+Wrote a throwaway verification file (`internal/service/zz_verify_task32_test.go`,
+deleted after use — not part of this task's deliverable) that, against a real
+`store.New()`-backed SQLite DB with migrations applied and the real
+production adapters (`recoveryBrokerStore`, `agentRuntimeStore`,
+`newRecoveryHTTPRetryAdapter`), confirmed:
+
+1. **Recovery Broker**: a real `broker.Broker.OnSessionExit` call for a
+   synthesized HTTP-stream-timeout exit classified transient, dispatched the
+   HTTP retry through the real adapter, and a row landed in the real
+   `nanite_recovery_breadcrumbs` table (`class=transient
+   outcome=transient_retry_succeeded cause=http_stream_timeout`) — read back
+   via `store.ListRecoveryBreadcrumbsForSession`.
+2. **Orphan Sweep**: created a real `agent_runtime` row in `state="running"`
+   with a virtually-certain-dead PID (simulating "process was killed while
+   the daemon was down"), ran `orphansweep.RuntimeReaper.SweepOnce` (the exact
+   call `container.go`'s startup sweep makes), and confirmed the real row
+   flipped to `state="orphaned" failure_reason="dead_pid"` via direct SQL
+   readback.
+3. **Recovery Pack**: cold-booted (`composeBootPayload(..., shouldRecover=true)`)
+   a session with 3 prior persisted messages, confirmed the
+   `<recovered-session-context>` prefix was planted with prior-turn content,
+   and confirmed a `recovery_pack_planted` row landed in the real `event_log`
+   table via `store.ListEvents("recovery", 10)`.
+4. **Interrupted-turn detection**: covered by the existing
+   `internal/api/interrupted_turn_test.go`
+   (`TestHandleGetSession_InterruptedTurn`, unchanged, still green — real HTTP
+   round-trip through `a.RegisterRoutes` covering both the interrupted and
+   non-interrupted cases) plus the new direct unit test
+   `internal/recovery/interrupted_turn_test.go` for the extracted pure
+   function. Since the wrapper's contract and JSON shape are byte-for-byte
+   unchanged, this is genuine pre/post parity, not just "still compiles."
+
+All 4 real functional checks passed. No escalations — every deviation above
+was resolved per worker step 7 (small, behavior-preserving corrections
+logged here, action executed).
+
+### Commit
+
+`git add` was scoped explicitly to this task's files (see file list in this
+task's header) — never `git add -A` — to avoid touching the shared
+checkout's untracked peer-session files (`TASKS/phase-1` through `phase-6`,
+`HANDOFF.md`, `.claude/agents/`, the orchestrator-kickoff docs, `data/artifacts/...`).
 
 ## Review notes
 <Reviewer fills this in: pass/fail, what was checked, anything fixed and how.>

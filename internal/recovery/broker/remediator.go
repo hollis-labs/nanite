@@ -1,4 +1,4 @@
-package recovery
+package broker
 
 import (
 	"context"
@@ -17,7 +17,7 @@ func (b *Broker) Remediate(ctx context.Context, ev *FailureEvent, c Classificati
 		return nil
 	}
 	if ev == nil {
-		return fmt.Errorf("recovery.Remediate: nil failure event")
+		return fmt.Errorf("broker.Remediate: nil failure event")
 	}
 
 	rctx, cancel := context.WithTimeout(ctx, b.remediationTimeout)
@@ -26,28 +26,28 @@ func (b *Broker) Remediate(ctx context.Context, ev *FailureEvent, c Classificati
 	switch c.Remediation {
 	case RemediationRepopulateSandbox:
 		if b.deps.BootDir == nil {
-			return fmt.Errorf("recovery.Remediate: BootDir not wired")
+			return fmt.Errorf("broker.Remediate: BootDir not wired")
 		}
 		return b.deps.BootDir.Repopulate(rctx, ev.SessionID)
 
 	case RemediationRefreshMCPTransport:
 		if b.deps.MCP == nil {
-			return fmt.Errorf("recovery.Remediate: MCP not wired")
+			return fmt.Errorf("broker.Remediate: MCP not wired")
 		}
 		return b.deps.MCP.RestartTransport(rctx, ev.SessionID)
 
 	case RemediationRefreshCredentials:
 		if b.deps.Credentials == nil {
-			return fmt.Errorf("recovery.Remediate: Credentials not wired")
+			return fmt.Errorf("broker.Remediate: Credentials not wired")
 		}
 		return b.deps.Credentials.Refresh(rctx, ev.AgentProfile)
 
 	case RemediationRegenerateCLAUDEMD:
 		if b.deps.BootDir == nil {
-			return fmt.Errorf("recovery.Remediate: BootDir not wired")
+			return fmt.Errorf("broker.Remediate: BootDir not wired")
 		}
 		return b.deps.BootDir.RegenerateCLAUDEMD(rctx, ev.SessionID)
 	}
 
-	return fmt.Errorf("recovery.Remediate: unknown remediation %v", c.Remediation)
+	return fmt.Errorf("broker.Remediate: unknown remediation %v", c.Remediation)
 }

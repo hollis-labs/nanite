@@ -48,7 +48,7 @@ Live tracker for `docs/engineering/TASKS.md`'s execution, per `docs/engineering/
 | 29-cut-prompt-templates | not-started | none (see Context; sequenced after 21) | 3 (chain pos. 9) |
 | 30-cut-templates-table | implemented | none | 1 |
 | 31-rename-pty-naming-scrub | not-started | (all of Phase 0, see below) | 4 |
-| 32-rename-recovery-namespace | not-started | 04 | 3 (chain pos. 6) |
+| 32-rename-recovery-namespace | implemented | 04 | 3 (chain pos. 6) |
 | 33-rename-volon-eradication | implemented | none | 1 |
 | 34-gate-agent-update-create-editable-check | implemented | none | 1 |
 | 35-fix-orphaned-indexes-agent-messages-todos | implemented | 19 | 1 |

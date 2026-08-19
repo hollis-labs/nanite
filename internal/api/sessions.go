@@ -12,6 +12,7 @@ import (
 	llmtypes "github.com/hollis-labs/go-llm-types"
 	"github.com/hollis-labs/nanite/internal/chat"
 	ctxpkg "github.com/hollis-labs/nanite/internal/context"
+	"github.com/hollis-labs/nanite/internal/recovery"
 	"github.com/hollis-labs/nanite/internal/safego"
 	"github.com/hollis-labs/nanite/internal/service"
 	"github.com/hollis-labs/nanite/internal/store"
@@ -170,20 +171,13 @@ func (a *API) detectInterruptedTurn(sessionID string, sess *store.Session) map[s
 		return nil
 	}
 	last := tail[len(tail)-1]
-	if last.Role != "user" {
-		return nil
-	}
 	// A live stream means this process is genuinely generating the reply —
-	// not interrupted.
-	if a.Services.Streams != nil && a.Services.Streams.HasLiveStreamForSession(sessionID) {
-		return nil
-	}
-	return map[string]any{
-		"interrupted":      true,
-		"reason":           "service_restart",
-		"last_message_id":  last.ID,
-		"last_activity_at": last.CreatedAt,
-	}
+	// not interrupted. The pure "dangling user turn + no live stream" decision
+	// lives in internal/recovery (interrupted-turn detection, the fourth of
+	// the four recovery mechanisms); this method's job is just the store/
+	// stream lookups that feed it.
+	hasLiveStream := a.Services.Streams != nil && a.Services.Streams.HasLiveStreamForSession(sessionID)
+	return recovery.DetectInterruptedTurn(last.Role, last.ID, last.CreatedAt, hasLiveStream)
 }
 
 func (a *API) handleUpdateSession(w http.ResponseWriter, r *http.Request) {

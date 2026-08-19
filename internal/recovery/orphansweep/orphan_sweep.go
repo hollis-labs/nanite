@@ -1,4 +1,11 @@
-package agent
+// Package orphansweep is the Orphan/Runtime Reaper — one of the four
+// recovery mechanisms grouped under internal/recovery/*. It reconciles
+// stale agent_runtime rows against actually-dead PIDs, most commonly
+// after a daemon restart. See internal/recovery/broker for the
+// in-process crash-recovery mechanism and internal/recovery/pack for
+// cold-boot context replay — those answer different "what went wrong"
+// questions and are not consolidated with this one.
+package orphansweep
 
 import (
 	"context"
@@ -9,6 +16,8 @@ import (
 	"sync/atomic"
 	"syscall"
 	"time"
+
+	"github.com/hollis-labs/nanite/internal/runtime/agent"
 )
 
 // Default tunings for the agent-runtime reaper. Values picked to surface
@@ -38,16 +47,6 @@ const (
 	ReasonReconcileNoLiveSession = "no_live_session" // pid=0 + no in-memory session entry
 )
 
-// LiveSessionChecker reports whether the in-process session registry has
-// an entry for runtimeID. Production wires this against
-// agentsessions.Manager.Get; tests pass a fake. Optional in Dependencies —
-// nil means the sweep falls back to PID + updated_at staleness only,
-// which still catches the common post-restart case (a fresh process has
-// an empty registry, so every persisted row is "no live session").
-type LiveSessionChecker interface {
-	IsLive(runtimeID string) bool
-}
-
 // SweepOrphans runs at daemon startup and on each periodic reaper tick.
 // For every runtime row in state="running" or state="launching" it
 // reconciles the row against three signals:
@@ -68,21 +67,21 @@ type LiveSessionChecker interface {
 //
 // Returns the number of rows reconciled. Per-row persistence failures are
 // logged via slog and skipped; a single failure does not abort the sweep.
-func SweepOrphans(ctx context.Context, deps *Dependencies) (int, error) {
+func SweepOrphans(ctx context.Context, deps *agent.Dependencies) (int, error) {
 	return sweepOrphansAt(ctx, deps, DefaultRuntimeReaperPidZeroGrace, time.Now)
 }
 
 // sweepOrphansAt is the testable core of SweepOrphans. Tests inject a
 // fixed clock + a tighter grace window to drive deterministic sweeps.
-func sweepOrphansAt(ctx context.Context, deps *Dependencies, pidZeroGrace time.Duration, now func() time.Time) (int, error) {
+func sweepOrphansAt(ctx context.Context, deps *agent.Dependencies, pidZeroGrace time.Duration, now func() time.Time) (int, error) {
 	if deps == nil || deps.Store == nil {
-		return 0, errors.New("agent.SweepOrphans: Dependencies.Store is required")
+		return 0, errors.New("orphansweep.SweepOrphans: Dependencies.Store is required")
 	}
 	_ = ctx
 
 	rows, err := deps.Store.ListRunningRows()
 	if err != nil {
-		return 0, fmt.Errorf("agent.SweepOrphans: list running rows: %w", err)
+		return 0, fmt.Errorf("orphansweep.SweepOrphans: list running rows: %w", err)
 	}
 
 	var orphaned int
@@ -124,7 +123,7 @@ func sweepOrphansAt(ctx context.Context, deps *Dependencies, pidZeroGrace time.D
 // (empty when the row is healthy) and whether to write it. Pulled out so
 // the test surface can exercise the matrix without standing up a fake
 // store.
-func classifyForReconciliation(row *RuntimeRow, live LiveSessionChecker, now time.Time, pidZeroGrace time.Duration) (string, bool) {
+func classifyForReconciliation(row *agent.RuntimeRow, live agent.LiveSessionChecker, now time.Time, pidZeroGrace time.Duration) (string, bool) {
 	if row == nil {
 		return "", false
 	}
@@ -200,7 +199,7 @@ func pidAlive(pid int) bool {
 // owns a single goroutine in production; tests may call SweepOnce
 // directly.
 type RuntimeReaper struct {
-	deps         *Dependencies
+	deps         *agent.Dependencies
 	interval     time.Duration
 	pidZeroGrace time.Duration
 	now          func() time.Time
@@ -225,7 +224,7 @@ type RuntimeReaperOptions struct {
 // carry a non-nil Store; otherwise Start logs and exits without ever
 // sweeping. Defaults for Interval and PidZeroGrace are applied here;
 // pass non-zero values to override.
-func NewRuntimeReaper(deps *Dependencies, opts RuntimeReaperOptions) *RuntimeReaper {
+func NewRuntimeReaper(deps *agent.Dependencies, opts RuntimeReaperOptions) *RuntimeReaper {
 	interval := opts.Interval
 	if interval <= 0 {
 		interval = DefaultRuntimeReaperInterval

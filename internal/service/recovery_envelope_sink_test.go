@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/hollis-labs/nanite/internal/runtime/agent/recovery"
+	"github.com/hollis-labs/nanite/internal/recovery/broker"
 )
 
 // TestProjectRecoveryEnvelope_KindMapping pins the wire shape per
@@ -15,13 +15,13 @@ import (
 func TestProjectRecoveryEnvelope_KindMapping(t *testing.T) {
 	cases := []struct {
 		name             string
-		env              recovery.Envelope
+		env              broker.Envelope
 		wantType         string
 		wantDataContains map[string]any
 	}{
 		{
 			name: "info-card transient retry",
-			env: recovery.Envelope{
+			env: broker.Envelope{
 				Kind:        "info-card",
 				Title:       "Reconnecting agent",
 				Content:     "Agent ran into a temporary error. Retrying now…",
@@ -37,7 +37,7 @@ func TestProjectRecoveryEnvelope_KindMapping(t *testing.T) {
 		},
 		{
 			name: "info-card warning severity",
-			env: recovery.Envelope{
+			env: broker.Envelope{
 				Kind:     "info-card",
 				Title:    "Slow recovery",
 				Content:  "Agent is slow to respond.",
@@ -52,7 +52,7 @@ func TestProjectRecoveryEnvelope_KindMapping(t *testing.T) {
 		},
 		{
 			name: "info-card error severity maps to danger",
-			env: recovery.Envelope{
+			env: broker.Envelope{
 				Kind:     "info-card",
 				Title:    "Stuck",
 				Content:  "Agent appears stuck.",
@@ -65,7 +65,7 @@ func TestProjectRecoveryEnvelope_KindMapping(t *testing.T) {
 		},
 		{
 			name: "error-report permanent failure",
-			env: recovery.Envelope{
+			env: broker.Envelope{
 				Kind:     "error-report",
 				Title:    "Agent unavailable",
 				Content:  "Exit code 127: agent binary not found on PATH. Try a different agent.",
@@ -78,7 +78,7 @@ func TestProjectRecoveryEnvelope_KindMapping(t *testing.T) {
 		},
 		{
 			name: "chat-loop-terminated runaway",
-			env: recovery.Envelope{
+			env: broker.Envelope{
 				Kind:     "chat-loop-terminated",
 				Title:    "Agent stopped",
 				Content:  "The agent kept failing after multiple restart attempts.",
@@ -91,7 +91,7 @@ func TestProjectRecoveryEnvelope_KindMapping(t *testing.T) {
 		},
 		{
 			name:     "missing kind degrades to error-report",
-			env:      recovery.Envelope{Title: "X"},
+			env:      broker.Envelope{Title: "X"},
 			wantType: "error-report",
 			wantDataContains: map[string]any{
 				"code": "agent_recovery_internal_error",
@@ -124,7 +124,7 @@ func TestProjectRecoveryEnvelope_KindMapping(t *testing.T) {
 // kinds surface as an error rather than silently producing an empty
 // envelope (defends against typos drifting into the wire).
 func TestProjectRecoveryEnvelope_UnknownKindError(t *testing.T) {
-	_, _, err := projectRecoveryEnvelope(recovery.Envelope{Kind: "made-up-kind"})
+	_, _, err := projectRecoveryEnvelope(broker.Envelope{Kind: "made-up-kind"})
 	if err == nil {
 		t.Fatal("expected error for unknown kind, got nil")
 	}
@@ -173,7 +173,7 @@ func TestBuildRecoveryEnvelopeWrap_CancelTokenPresenceDrivesWireField(t *testing
 }
 
 // TestRecoveryEnvelopeSink_EmitsPluginEnvelopeOnSSE is the integration
-// pass: a recovery.Envelope through the production sink lands as a
+// pass: a broker.Envelope through the production sink lands as a
 // plugin_envelope SSE event with the projected payload + cancel_token
 // at wrap level. Validates end-to-end broker → sink → SSE channel.
 func TestRecoveryEnvelopeSink_EmitsPluginEnvelopeOnSSE(t *testing.T) {
@@ -187,7 +187,7 @@ func TestRecoveryEnvelopeSink_EmitsPluginEnvelopeOnSSE(t *testing.T) {
 	}
 
 	sink := &recoveryEnvelopeSink{streams: sm}
-	if err := sink.Emit(sessionID, recovery.Envelope{
+	if err := sink.Emit(sessionID, broker.Envelope{
 		Kind:        "info-card",
 		Title:       "Reconnecting agent",
 		Content:     "Retrying now…",
@@ -242,7 +242,7 @@ func TestRecoveryEnvelopeSink_EmitsPluginEnvelopeOnSSE(t *testing.T) {
 // take down the recovery flow entirely.
 func TestRecoveryEnvelopeSink_NilStreamsIsBenign(t *testing.T) {
 	sink := &recoveryEnvelopeSink{streams: nil}
-	if err := sink.Emit("s", recovery.Envelope{Kind: "info-card", Title: "x", Content: "y"}); err != nil {
+	if err := sink.Emit("s", broker.Envelope{Kind: "info-card", Title: "x", Content: "y"}); err != nil {
 		t.Errorf("Emit with nil streams: %v", err)
 	}
 }

@@ -1,4 +1,4 @@
-package recovery
+package broker
 
 import (
 	"strings"
@@ -27,9 +27,9 @@ import (
 //  12. Signal 9 + SessionAge < 5s    → Permanent (likely missing binary / immediate config error)
 //  13. Signal 9 + SessionAge >= 5s   → Transient
 //  14. Default Code != 0:
-//       Attempt == 1                → Transient
-//       Attempt >= 2                → Permanent (avoid retry loops on
-//                                     unclassified failures)
+//     Attempt == 1                → Transient
+//     Attempt >= 2                → Permanent (avoid retry loops on
+//     unclassified failures)
 //
 // The broker hard cap (Attempt >= broker.maxRetries) is enforced one
 // layer up in the broker itself, before Classify is consulted. The

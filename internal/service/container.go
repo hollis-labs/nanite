@@ -45,9 +45,10 @@ import (
 	nanitenative "github.com/hollis-labs/nanite/internal/plugin/builtin/adapter-nanite-native"
 	adapteropencode "github.com/hollis-labs/nanite/internal/plugin/builtin/adapter-opencode"
 	"github.com/hollis-labs/nanite/internal/providercatalog"
+	"github.com/hollis-labs/nanite/internal/recovery/broker"
+	"github.com/hollis-labs/nanite/internal/recovery/orphansweep"
 	"github.com/hollis-labs/nanite/internal/reminders"
 	runtimeagent "github.com/hollis-labs/nanite/internal/runtime/agent"
-	"github.com/hollis-labs/nanite/internal/runtime/agent/recovery"
 	"github.com/hollis-labs/nanite/internal/skill"
 	skillbuiltin "github.com/hollis-labs/nanite/internal/skill/builtin"
 	"github.com/hollis-labs/nanite/internal/store"
@@ -193,10 +194,10 @@ type Container struct {
 	// Recovery is the in-process subagent recovery broker (Phase 8/9).
 	// Exposed on the container so API handlers can route FE-driven
 	// cancel_retry requests back to Broker.Cancel(sessionID, token).
-	// nil-safe: when the broker isn't a *recovery.Broker (test fakes
+	// nil-safe: when the broker isn't a *broker.Broker (test fakes
 	// inject mocks that satisfy agent.RecoveryHooks but not *Broker),
 	// the field is left nil and the cancel endpoint returns 503.
-	Recovery *recovery.Broker
+	Recovery *broker.Broker
 
 	// Inspector is the I1 per-turn dev-mode aggregator (CW-20260426-0004).
 	// nil when developer_mode is false.
@@ -236,7 +237,7 @@ type Container struct {
 	// sweep) and mid-run process deaths (periodic). Started during
 	// container build; stopped during Shutdown before the DB closes.
 	// CW-20260518-0085.
-	runtimeReaper *runtimeagent.RuntimeReaper
+	runtimeReaper *orphansweep.RuntimeReaper
 	// stopRuntimeReaper cancels the runtime reaper's bound context.
 	stopRuntimeReaper context.CancelFunc
 }
@@ -1105,7 +1106,7 @@ func NewContainer(cfg ContainerConfig) (*Container, error) {
 	// (deleted from activeSessions during cleanup) and boots yet another
 	// session, orphaning the broker's retry. Best-effort: a non-Broker
 	// RecoveryHooks (mocks in tests) silently skips wiring.
-	if broker, ok := agentDeps.Recovery.(*recovery.Broker); ok {
+	if broker, ok := agentDeps.Recovery.(*broker.Broker); ok {
 		broker.SetReplacementSessionHook(func(sessionID string, sess *runtimeagent.Session) {
 			chatSvcImpl.adoptReplacementSession(sessionID, sess)
 		})
@@ -1204,7 +1205,7 @@ func NewContainer(cfg ContainerConfig) (*Container, error) {
 	// before the chat layer starts serving requests; periodic reaper
 	// then catches mid-run deaths on the configured interval.
 	runtimeReaperCtx, stopRuntimeReaper := context.WithCancel(context.Background())
-	runtimeReaper := runtimeagent.NewRuntimeReaper(agentDeps, runtimeagent.RuntimeReaperOptions{})
+	runtimeReaper := orphansweep.NewRuntimeReaper(agentDeps, orphansweep.RuntimeReaperOptions{})
 	// PR #213 review: bound the startup sweep to runtimeReaperCtx (so Shutdown
 	// during container build can cancel it) and to a 30s wall clock (so a
 	// stuck SQLite query cannot block boot indefinitely).
@@ -1222,8 +1223,8 @@ func NewContainer(cfg ContainerConfig) (*Container, error) {
 	}
 	runtimeReaper.Start(runtimeReaperCtx)
 	slog.Info("service container: agent_runtime reaper started",
-		"interval", runtimeagent.DefaultRuntimeReaperInterval.String(),
-		"pid_zero_grace", runtimeagent.DefaultRuntimeReaperPidZeroGrace.String(),
+		"interval", orphansweep.DefaultRuntimeReaperInterval.String(),
+		"pid_zero_grace", orphansweep.DefaultRuntimeReaperPidZeroGrace.String(),
 	)
 
 	// G-4: register the subagent-spawn-approval typed response handler so
@@ -1571,15 +1572,15 @@ func syncCatalogToRegistry(c *modelsdev.Client) {
 	models.SyncFromCatalog(input)
 }
 
-// recoveryBrokerOrNil resolves the *recovery.Broker on the agent
+// recoveryBrokerOrNil resolves the *broker.Broker on the agent
 // dependencies, or returns nil when the wired recovery hooks are not a
 // concrete *Broker (test fakes register interface-only mocks). The
 // API recovery-cancel endpoint is no-op when nil — there is nothing
 // to cancel against.
-func recoveryBrokerOrNil(deps *runtimeagent.Dependencies) *recovery.Broker {
+func recoveryBrokerOrNil(deps *runtimeagent.Dependencies) *broker.Broker {
 	if deps == nil {
 		return nil
 	}
-	broker, _ := deps.Recovery.(*recovery.Broker)
+	broker, _ := deps.Recovery.(*broker.Broker)
 	return broker
 }

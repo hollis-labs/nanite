@@ -72,26 +72,41 @@ func (a *API) handleCreateAgentReflex(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var req struct {
-		Name        string `json:"name"`
-		TriggerKind string `json:"trigger_kind"`
-		TriggerSpec string `json:"trigger_spec"`
-		ActionKind  string `json:"action_kind"`
-		ActionSpec  string `json:"action_spec"`
-		Priority    int64  `json:"priority"`
+		Name          string `json:"name"`
+		TriggerKind   string `json:"trigger_kind"`
+		TriggerSpec   string `json:"trigger_spec"`
+		ActionKind    string `json:"action_kind"`
+		ActionSpec    string `json:"action_spec"`
+		Priority      int64  `json:"priority"`
+		OptOutAllowed *bool  `json:"opt_out_allowed"`
 	}
 	if err := a.decode(r, &req); err != nil {
 		a.errorResp(w, http.StatusBadRequest, "invalid JSON body")
 		return
 	}
+	// opt_out_allowed defaults to true (permissive) when omitted — same
+	// "default-on, agent may opt out" default the DB column and every
+	// pre-existing row carry (Phase 1 item 07,
+	// TASKS/phase-1/07-add-reflex-opt-out-field.md). Agent-created
+	// reflexes through this endpoint are never the hand-picked
+	// safety-critical base seeds, so permissive-by-default is correct
+	// here; an operator who genuinely needs a non-opt-outable
+	// agent-specific reflex can still pass opt_out_allowed:false
+	// explicitly.
+	optOutAllowed := true
+	if req.OptOutAllowed != nil {
+		optOutAllowed = *req.OptOutAllowed
+	}
 	row := store.AgentReflex{
-		AgentID:     agent.ID,
-		Name:        req.Name,
-		TriggerKind: req.TriggerKind,
-		TriggerSpec: req.TriggerSpec,
-		ActionKind:  req.ActionKind,
-		ActionSpec:  req.ActionSpec,
-		Priority:    req.Priority,
-		CreatedBy:   "operator",
+		AgentID:       agent.ID,
+		Name:          req.Name,
+		TriggerKind:   req.TriggerKind,
+		TriggerSpec:   req.TriggerSpec,
+		ActionKind:    req.ActionKind,
+		ActionSpec:    req.ActionSpec,
+		Priority:      req.Priority,
+		CreatedBy:     "operator",
+		OptOutAllowed: optOutAllowed,
 	}
 	if errs := validateReflexDefinition(row); len(errs) > 0 {
 		a.jsonResp(w, http.StatusBadRequest, map[string]any{"valid": false, "errors": errs})
@@ -130,15 +145,16 @@ func (a *API) handlePatchAgentReflex(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var req struct {
-		Name        *string `json:"name"`
-		TriggerKind *string `json:"trigger_kind"`
-		TriggerSpec *string `json:"trigger_spec"`
-		ActionKind  *string `json:"action_kind"`
-		ActionSpec  *string `json:"action_spec"`
-		Status      *string `json:"status"`
-		Priority    *int64  `json:"priority"`
-		FiredCount  *int64  `json:"fired_count"`
-		LastFiredAt *string `json:"last_fired_at"`
+		Name          *string `json:"name"`
+		TriggerKind   *string `json:"trigger_kind"`
+		TriggerSpec   *string `json:"trigger_spec"`
+		ActionKind    *string `json:"action_kind"`
+		ActionSpec    *string `json:"action_spec"`
+		Status        *string `json:"status"`
+		Priority      *int64  `json:"priority"`
+		FiredCount    *int64  `json:"fired_count"`
+		LastFiredAt   *string `json:"last_fired_at"`
+		OptOutAllowed *bool   `json:"opt_out_allowed"`
 	}
 	if err := a.decode(r, &req); err != nil {
 		a.errorResp(w, http.StatusBadRequest, "invalid JSON body")
@@ -171,6 +187,9 @@ func (a *API) handlePatchAgentReflex(w http.ResponseWriter, r *http.Request) {
 	}
 	if req.LastFiredAt != nil {
 		updated.LastFiredAt = *req.LastFiredAt
+	}
+	if req.OptOutAllowed != nil {
+		updated.OptOutAllowed = *req.OptOutAllowed
 	}
 	if errs := validateReflexDefinition(updated); len(errs) > 0 {
 		a.jsonResp(w, http.StatusBadRequest, map[string]any{"valid": false, "errors": errs})

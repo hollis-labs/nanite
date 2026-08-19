@@ -14,6 +14,14 @@ import (
 // boot, missing rows are added but existing rows are left alone so
 // operators can mutate (pause / delete / re-priority) without seed
 // undoing it.
+//
+// Required (Phase 1 item 07, TASKS/phase-1/07-add-reflex-opt-out-field.md)
+// marks a seed as "cannot opt out": SeedBaseReflexes sets the inserted
+// row's opt_out_allowed to false for these, so no per-agent opt-out
+// entry in agent_reflex_opt_outs can suppress it. Zero-value default
+// (false, i.e. not required) preserves every existing seed's current
+// opt-out-able behavior without having to touch each literal below —
+// only the genuinely safety-critical ones set Required: true.
 type BaseReflexSeed struct {
 	ClassTag    string
 	Name        string
@@ -22,13 +30,27 @@ type BaseReflexSeed struct {
 	ActionKind  string
 	ActionSpec  map[string]interface{}
 	Priority    int64
+	Required    bool
 }
 
-// BaseSeeds returns the canonical per-class base reflex seeds.
+// BaseSeeds returns the canonical per-class base reflex seeds — 11 as
+// of this writing (process: 6, advisor: 3, template: 2; TASKS/phase-1/
+// 07-add-reflex-opt-out-field.md's task file cites 12, an off-by-one in
+// the task file itself, not in this count — corrected here per
+// EXECUTION-PROCESS.md worker step 7).
 //
 // All predicates are conjunctions — see types.go's package doc for
 // rationale. The conjunction principle is the FU-30 design contract;
 // the corresponding tests in evaluator_test.go encode it.
+//
+// Phase 1 item 07 safety audit (which of these 11 get Required: true,
+// i.e. opt_out_allowed=false): exactly the three whose action_kind is
+// halt_session — drift_detector_echo, task_complete_self_terminate,
+// task_timeout. All three are hard kill switches (runaway-detection or
+// lifecycle-cap), where letting an agent suppress its own halt defeats
+// the mechanism. Every inject_reminder seed (the other 8) is a nudge an
+// agent can legitimately outgrow or find too noisy, so all 8 stay at
+// the permissive default (opt_out_allowed=true).
 func BaseSeeds() []BaseReflexSeed {
 	return []BaseReflexSeed{
 		// ── class=process ────────────────────────────────────────
@@ -38,12 +60,16 @@ func BaseSeeds() []BaseReflexSeed {
 		// 3 turns, zero cache_read, input_tokens < 10, and identical
 		// output across the window. The conjunction blocks
 		// false-positives on healthy idle compression (which has
-		// cache_read in the millions).
+		// cache_read in the millions). Required: true (Phase 1 item
+		// 07 safety audit) — this is a kill switch for a real runaway
+		// attractor; an agent opting out of its own drift-halt would
+		// defeat the mechanism entirely.
 		{
 			ClassTag:    "process",
 			Name:        "drift_detector_echo",
 			TriggerKind: "predicate",
 			Priority:    100,
+			Required:    true,
 			TriggerSpec: map[string]interface{}{
 				"kind": "AND",
 				"clauses": []interface{}{
@@ -257,11 +283,17 @@ func BaseSeeds() []BaseReflexSeed {
 		// FU-32 will revisit these with instance-mode lifecycle wiring.
 		// For now they are placeholders so the class has at least one
 		// seeded reflex.
+		// task_complete_self_terminate: Required: true (Phase 1 item 07
+		// safety audit) — a template-instance agent that could opt out
+		// of its own post-completion halt would keep running (and
+		// consuming resources) indefinitely past the point its
+		// instance-mode lifecycle says it should stop.
 		{
 			ClassTag:    "template",
 			Name:        "task_complete_self_terminate",
 			TriggerKind: "event",
 			Priority:    100,
+			Required:    true,
 			TriggerSpec: map[string]interface{}{
 				"name": "task_completed",
 			},
@@ -270,11 +302,15 @@ func BaseSeeds() []BaseReflexSeed {
 				"reason": "task_complete_self_terminate",
 			},
 		},
+		// task_timeout: Required: true (Phase 1 item 07 safety audit) —
+		// the hard runaway cap for template-instance agents, same class
+		// of protection as drift_detector_echo, just interval-triggered.
 		{
 			ClassTag:    "template",
 			Name:        "task_timeout",
 			TriggerKind: "interval",
 			Priority:    10,
+			Required:    true,
 			TriggerSpec: map[string]interface{}{
 				"every_n_ticks": 20,
 			},
@@ -316,14 +352,15 @@ func SeedBaseReflexes(ctx context.Context, st *store.Store, logger *slog.Logger)
 			return inserted, fmt.Errorf("marshal action %s: %w", s.Name, err)
 		}
 		if _, err := st.InsertAgentReflex(ctx, store.AgentReflex{
-			ClassTag:    s.ClassTag,
-			Name:        s.Name,
-			TriggerKind: s.TriggerKind,
-			TriggerSpec: string(triggerJSON),
-			ActionKind:  s.ActionKind,
-			ActionSpec:  string(actionJSON),
-			Priority:    s.Priority,
-			CreatedBy:   "system",
+			ClassTag:      s.ClassTag,
+			Name:          s.Name,
+			TriggerKind:   s.TriggerKind,
+			TriggerSpec:   string(triggerJSON),
+			ActionKind:    s.ActionKind,
+			ActionSpec:    string(actionJSON),
+			Priority:      s.Priority,
+			CreatedBy:     "system",
+			OptOutAllowed: !s.Required,
 		}); err != nil {
 			return inserted, fmt.Errorf("seed %s: %w", s.Name, err)
 		}

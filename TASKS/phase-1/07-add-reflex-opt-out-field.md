@@ -51,7 +51,7 @@ Architecture doc `01-agent-construction.md`: *"Reflexes at construction time —
 
 **Verification:** `go build ./cmd/nanite/`, `go vet ./...` (pre-existing, unrelated `internal/service/container.go` reaper-leak vet warnings only — confirmed present before this change via `git stash`), and `go test ./...` all pass (0 failures across 90 tested packages).
 
-Commit: (recorded in a follow-up commit per this codebase's established two-step pattern, e.g. `54ed763c`).
+Commit: `ea331b50c5e79f17e7e868be396ec7816a59c416` (worktree branch `worktree-agent-ade117f7ad95d7e77`, fast-forwarded to `phase-1-execution` tip `505f1f8f` before this work started).
 
 ## Review notes
 <Reviewer fills this in: pass/fail, what was checked, anything fixed and how.>

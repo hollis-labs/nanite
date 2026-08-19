@@ -295,6 +295,13 @@ func (a *API) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/tools/refresh", a.handleRefreshTools)
 	mux.HandleFunc("POST /api/tools/call", a.handleSelfToolCall)
 	mux.HandleFunc("GET /api/agents/{id}/tools", a.handleListAgentTools)
+	// agent_tools grant/revoke (Phase 5 item 01: TASKS/phase-5/01-build-
+	// assignment-api.md; the list endpoint above and the store-layer grant/
+	// revoke functions were built by Phase 1 item 04). The real FK-based
+	// replacement for tools:/toolPermissions:/roleTools: -- see
+	// internal/api/agent_tools.go's doc comment for the full context.
+	mux.HandleFunc("POST /api/agents/{id}/tools", a.handleGrantAgentTool)
+	mux.HandleFunc("DELETE /api/agents/{id}/tools/{toolId}", a.handleRevokeAgentTool)
 
 	// Permissions & Approvals
 	mux.HandleFunc("GET /api/permissions/mode", a.handleGetPermissionMode)
@@ -336,6 +343,16 @@ func (a *API) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/roles/{id}", a.handleGetRole)
 	mux.HandleFunc("PUT /api/roles/{id}", a.handleUpdateRole)
 	mux.HandleFunc("DELETE /api/roles/{id}", a.handleDeleteRole)
+
+	// Consumers (Phase 5 item 01: TASKS/phase-5/01-build-assignment-api.md;
+	// store-layer CRUD built by Phase 1 item 03, TASKS/phase-1/03-add-
+	// consumers-table.md, which deliberately deferred this REST layer) --
+	// the ownership/tenancy tag on an Agent composition (agents.consumer_id).
+	mux.HandleFunc("GET /api/consumers", a.handleListConsumers)
+	mux.HandleFunc("POST /api/consumers", a.handleCreateConsumer)
+	mux.HandleFunc("GET /api/consumers/{id}", a.handleGetConsumer)
+	mux.HandleFunc("PUT /api/consumers/{id}", a.handleUpdateConsumer)
+	mux.HandleFunc("DELETE /api/consumers/{id}", a.handleDeleteConsumer)
 
 	// MCP Servers (user-managed)
 	mux.HandleFunc("GET /api/mcp-servers", a.handleListMCPServers)

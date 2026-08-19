@@ -702,6 +702,61 @@ func (s *Store) UpdateAgent(a *AgentProfile) error {
 	return nil
 }
 
+// UpdateAgentComposition directly sets an agent's DB-only composition
+// columns (role_id, consumer_id, model_id) -- see the RoleID/ConsumerID/
+// ModelID field doc comments above and agent.OverlayDBFields' doc comment
+// (internal/agent/convert.go): all three have zero frontmatter
+// representation. That matters for writes, not just reads:
+// AgentConfigService.Create/Update's managed-agent write pipeline
+// (writeManaged -> file write -> file reparse -> IngestAgentDefinition ->
+// upsertAgentDef) always reconstructs its store.AgentProfile from a fresh
+// file parse, whose Definition has no role_id/consumer_id/model_id fields
+// at all -- so routing a composition write through that pipeline would
+// silently wipe these columns back to NULL. This is the one legitimate
+// direct-DB write path for them (TASKS/phase-5/01-build-assignment-api.md).
+//
+// roleID/consumerID/modelID are each a *string: nil leaves that column
+// untouched; non-nil (including a pointer to "") sets or clears it. A
+// non-empty value must reference a real roles/consumers/models row --
+// enforced by the column's own FK constraint (this codebase runs with
+// PRAGMA foreign_keys=1) and surfaced here as a wrapped error.
+func (s *Store) UpdateAgentComposition(agentID string, roleID, consumerID, modelID *string) error {
+	if agentID == "" {
+		return fmt.Errorf("update agent composition: agent_id is required")
+	}
+	sets := make([]string, 0, 3)
+	args := make([]any, 0, 4)
+	if roleID != nil {
+		sets = append(sets, "role_id = ?")
+		args = append(args, nullIfEmpty(*roleID))
+	}
+	if consumerID != nil {
+		sets = append(sets, "consumer_id = ?")
+		args = append(args, nullIfEmpty(*consumerID))
+	}
+	if modelID != nil {
+		sets = append(sets, "model_id = ?")
+		args = append(args, nullIfEmpty(*modelID))
+	}
+	if len(sets) == 0 {
+		return nil
+	}
+	args = append(args, agentID)
+	query := "UPDATE agent_profiles SET " + strings.Join(sets, ", ") + " WHERE id = ?"
+	res, err := s.DB.Exec(query, args...)
+	if err != nil {
+		return fmt.Errorf("update agent composition: %w", err)
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("update agent composition: %w", err)
+	}
+	if n == 0 {
+		return fmt.Errorf("update agent composition: agent %q not found", agentID)
+	}
+	return nil
+}
+
 // SessionAgent represents a record in the session_agents table.
 type SessionAgent struct {
 	SessionID string `json:"session_id"`

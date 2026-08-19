@@ -137,8 +137,39 @@ func (a *API) handleCreateAgent(w http.ResponseWriter, r *http.Request) {
 		a.errorResp(w, http.StatusInternalServerError, err.Error())
 		return
 	}
+
+	// role_id/consumer_id/model_id (Phase 5 item 01,
+	// TASKS/phase-5/01-build-assignment-api.md) are DB-only composition
+	// columns with zero frontmatter representation -- AgentConfigService.
+	// Create's managed-file write pipeline above cannot carry them (see
+	// store.UpdateAgentComposition's doc comment), so they're set via a
+	// direct, separate DB write once the profile row exists.
+	if req.RoleID != "" || req.ConsumerID != "" || req.ModelID != "" {
+		if err := a.Services.Store.UpdateAgentComposition(res.Profile.ID, ptrOrNilString(req.RoleID), ptrOrNilString(req.ConsumerID), ptrOrNilString(req.ModelID)); err != nil {
+			a.errorResp(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		if refreshed, err := a.Services.Store.GetAgent(res.Profile.ID); err == nil {
+			res.Profile = refreshed
+		}
+	}
+
 	view := a.agentView(*res.Profile)
 	a.jsonResp(w, http.StatusCreated, view)
+}
+
+// ptrOrNilString returns nil for an empty string, or a pointer to v
+// otherwise. Used for CreateAgentRequest's plain (non-pointer) RoleID/
+// ConsumerID/ModelID fields, whose "not provided" and "explicitly empty"
+// cases are indistinguishable on create (matching every other plain-string
+// field on that struct) -- an empty value here is simply "don't set this
+// column," not "clear an existing one" (there is nothing to clear yet on a
+// freshly created agent).
+func ptrOrNilString(v string) *string {
+	if v == "" {
+		return nil
+	}
+	return &v
 }
 
 // Phase 0 item 21 ("Cut Modes, in full") removed the "modes" key this
@@ -299,6 +330,20 @@ func (a *API) handleUpdateAgent(w http.ResponseWriter, r *http.Request) {
 		}
 		return
 	}
+
+	// role_id/consumer_id/model_id -- see handleCreateAgent's matching
+	// comment. Pointer semantics here (nil = untouched, non-nil = set or
+	// clear) match every other partial-update field on UpdateAgentRequest.
+	if req.RoleID != nil || req.ConsumerID != nil || req.ModelID != nil {
+		if err := a.Services.Store.UpdateAgentComposition(res.Profile.ID, req.RoleID, req.ConsumerID, req.ModelID); err != nil {
+			a.errorResp(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		if refreshed, err := a.Services.Store.GetAgent(res.Profile.ID); err == nil {
+			res.Profile = refreshed
+		}
+	}
+
 	a.jsonResp(w, http.StatusOK, a.agentView(*res.Profile))
 }
 

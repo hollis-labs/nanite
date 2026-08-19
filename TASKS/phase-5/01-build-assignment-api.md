@@ -3,7 +3,7 @@
 *(Relocated from `TASKS/phase-1/09` — worktree `phase-1-execution` — as part of the 2026-08-19 Phase 2-9 resequencing.)*
 
 **Phase:** 5
-**Status:** not-started
+**Status:** implemented
 **Depends on:** Phase 1 tasks 01-08 (landed via the Phase 1→main merge) — every new column/table this API needs to expose must exist first — `08`'s Round 2 in particular, since the API surface should reflect the file-discovery cut's end state, not the pre-cut behavior
 
 ## ⚠️ Scope correction, 2026-08-18 (operator decision, standing rule for every phase)
@@ -44,7 +44,99 @@ This task's remaining, real scope is the **REST API surface** the new compositio
 - No file under `ui/` is touched.
 
 ## Work log
-<Worker fills this in as it goes: what was actually done, any deviation from plan and why, anything escalated.>
+
+Implemented by a Worker subagent. Read this task file, `docs/engineering/EXECUTION-PROCESS.md`, `docs/engineering/architecture/01-agent-construction.md`, `GLOSSARY.md`, and `TASKS/phase-4/05-wire-select-for-agent-to-read-agent-tools.md`'s full Work Log before writing any code. No naming collisions found against `GLOSSARY.md` for anything introduced here (`Consumer`/`Role`/`agent_tools` were already-defined terms; new identifiers — `UpdateAgentComposition`, `requireRealAgentToolsTarget`, `matchingDenyPattern`, `enforceExecutionRulesViaAgentTools` — are plain Go names, not new domain vocabulary).
+
+### Stale-deny-list handling decision (item 3(a) of the task's Context)
+
+**Decision: (a), reject-with-error.** The grant handler (`handleGrantAgentTool`, `internal/api/agent_tools.go`) parses the target agent's `tool_permissions` via `toolclient.ParsePermissions` and checks the tool name against `deny_list` glob patterns (`toolclient.MatchPattern`, same matcher `ToolPermissions.CheckPermission` uses). A match rejects the grant with `409 Conflict`, naming the conflicting pattern and the agent slug in the error body, and does **not** insert the `agent_tools` row.
+
+Rejected (b) warn-only because it still lets the exact footgun through if the operator doesn't read the warning field — the grant would "succeed" and silently be dead at the deeper `SelectToolsAsProvider`/`CallTool` gate. Rejected (c) clear/neutralize `tool_permissions` on first grant because `05`'s own Work Log (item 1.2) documents that `tool_permissions` is not solely a legacy shadow of `agent_tools` — it also protects a distinct, already-tested gap (`CW-20260512-0117`/`SP-20260512-0010`: tools reaching `allTools` via the `discoverAgentMCPTools` direct-MCP fallback, which bypasses `SelectToolsAsProvider`'s own gate entirely). Silently clearing it as a side effect of an unrelated grant call would have disabled that defense-in-depth mechanism without the operator ever deciding to.
+
+Live-verified (see "Live-dogfeed verification" below): granting `dev_read` to an agent whose `tool_permissions` is `{"deny_list":["dev_*"]}` returns `409` with a message naming the pattern; a non-matching tool grants normally on the same agent.
+
+### `enforceExecutionRules` gap (item 3(b)) — closed
+
+`internal/service/tool_execution_rules.go`'s `enforceExecutionRules` used to unconditionally re-check the legacy `agent_profiles.tools` JSON column, completely independent of `SelectForAgent`'s post-`05` `agent_tools` read path. Rewired to mirror `filterToolsByAgentTools`'s exact scoping: for any `agentID` that resolves to a real `agent_profiles` row (checked via a raw `s.store.GetAgent(agentID)` lookup — misses for a file-based `"file-<slug>"` alias, exactly the same distinguishing signal `SelectForAgent`'s own `dbAgent` check uses), a new `enforceExecutionRulesViaAgentTools` reads `agent_tools` (+ the `known_tools.always_included` escape hatch) as the sole gate. Every other `agentID` (structurally, today, only file-based agents) falls through to the unchanged legacy allowlist/permission check. `tool_permissions` is deliberately **not** re-consulted a second time for the `agent_tools`-gated population, matching `SelectForAgent`'s own decision not to double-gate on it there (`05`'s "two systems of record" tradeoff is about the *deeper* `ToolClient.SelectToolsAsProvider`/`CallTool` backstop, which still runs independently, before this function is ever reached, and is unaffected either way).
+
+This required adding `ListAgentToolNames`/`ListAlwaysIncludedKnownTools` to `internal/service/store.go`'s `Store` interface (both already implemented by `*store.Store`, per Phase 1 #04 and this task). Deliberately added directly to `Store`, **not** to the narrower `AgentReader` segment `toolServiceImpl`/`agentServiceImpl` also use — `AgentReader` has several hand-rolled test doubles (`stubAgentReader`, `toolSelectionFilterAgentReader`) with no reason to grow these two agent_tools-specific methods; scoping the addition to `Store` (used only by `chatServiceImpl`) confined the blast radius to `chat_test.go`'s `minimalStore`/`stubAgentReaderStore`, which got two new no-op stub methods.
+
+Verified with three new tests in `internal/service/tool_execution_rules_test.go`: a real `agent_profiles`-backed agent granted a tool NOT in its legacy `tools` column is accepted by both `SelectForAgent` and `enforceExecutionRules` (the exact Done-means bullet 4 scenario); an ungranted tool is rejected; the `always_included` escape hatch survives the execution-time re-check too (so `request_tools`/`tool_list`/`tool_describe` don't regress for DB-backed agents once `agent_tools` becomes their sole gate).
+
+### `role_id`/`consumer_id`/`model_id` write path — a real gap found and closed, beyond the task's literal instruction
+
+The task's own Touches list said this was just "add fields to `CreateAgentRequest`/`UpdateAgentRequest` and wire them through the handlers." Tracing the actual write path (`AgentConfigService.Create`/`Update` → `writeManaged` → file write → `agent.ParseMDFile` reparse → `IngestAgentDefinition` → `upsertAgentDef`) found this would not actually work: `role_id`/`consumer_id`/`model_id` have **zero frontmatter representation** (documented in `agent.OverlayDBFields`'s own doc comment, added by Phase 1 #12, for the *read* side). `upsertAgentDef`'s existing-row branch builds its `store.AgentProfile` fresh from `def.ToProfile()` on every reingest, which always produces the empty zero-value for these three columns, and (before this fix) never restored them from the row being updated — so simply wiring the fields into the request struct and setting them on the in-memory profile before calling `AgentConfigService.Update` would have had **zero effect**: the very reingest step the write pipeline always runs would silently discard the value on the same call, and — separately — silently wipe an *already-set* value on the next unrelated edit to the same agent (e.g. renaming it, changing its description).
+
+This is not a decision-log-rationale mismatch (the "distinguish decision from rationale" carve-out) — it's the task's own stated action turning out to require materially more work than its `Touches` list implied, the same "split rather than silently under-scope" judgment `04`/`05` used repeatedly. Two changes closed it:
+
+1. **`internal/store/agents.go`**: new `UpdateAgentComposition(agentID string, roleID, consumerID, modelID *string) error` — a direct, targeted `UPDATE agent_profiles SET ...` bypassing the file-write/reparse/reingest pipeline entirely (the one legitimate direct-DB write path for these three DB-only columns). `nil` leaves a column untouched; a non-nil pointer (including `&""`) sets or clears it. Relies on the columns' real FK constraints (`role_id REFERENCES roles(id)`, `consumer_id REFERENCES consumers(id)`, `model_id REFERENCES models(id)`; this codebase runs `PRAGMA foreign_keys=1`) for referential integrity — no duplicate application-layer existence pre-check.
+2. **`internal/service/ingest.go`**: `upsertAgentDef`'s existing-row branch now preserves `existing.RoleID`/`ConsumerID`/`ModelID` onto `profile` before calling `st.UpdateAgent`, mirroring `OverlayDBFields`' "DB wins" rule on the *write* side too — so a value set via `UpdateAgentComposition` survives every subsequent unrelated managed-agent edit. `runtime_kind` deliberately excluded from this preservation: unlike the other three, it already self-heals via `applyMultiAgentDefaults`' `inferRuntimeKind(a.DefaultProvider)` whenever left empty, which is the *desired* behavior (a provider change on reingest should re-derive cli/api classification, not freeze a stale one).
+
+`handleCreateAgent`/`handleUpdateAgent` (`internal/api/agents.go`) call `AgentConfigService.Create`/`Update` first (unchanged), then call `UpdateAgentComposition` as a second, separate step when any of the three fields is present, and re-fetch the profile so the HTTP response reflects the committed composition. **Known, accepted limitation**: this second step is not transactionally coupled to the first — an invalid `role_id`/`consumer_id`/`model_id` on `POST /api/agents` returns `400` but the agent (with valid fields) has already been created and persisted; the response and a subsequent `GET` both show it existing with the composition column left at its prior value (empty, on create). Not silently glossed over — flagged here because a fully atomic version would need `AgentConfigService.Create` itself to accept a composition payload, which is more surface than this task's stated scope, and 400 remains the correct signal to the caller either way (the request was rejected).
+
+### `agent_dispatch_tool_allowlist` — skipped, per the task's own instruction
+
+Verified no consumer exists anywhere in `internal/`, `cmd/`, or `ui/src` beyond the store-layer functions Phase 1 #04 built (`GrantAgentDispatchTool`/`RevokeAgentDispatchTool`/`ListAgentDispatchToolNames`) — no service-layer read, no API route, no frontend reference. Per the task's own instruction ("build it only if something real consumes it"), no REST surface was added.
+
+### A real, discovered, and *deliberately unfixed* gap: agent_tools grant/revoke is unreachable for file-based/embedded agents' conventional identity
+
+Tracing `requireAgent`'s resolution (`a.Services.Agents.Get(ctx, id)` → `agentServiceImpl.Get` → `resolveFileProfile` → `d.ToProfile()`, whose `ID` is always `d.CanonicalID()`) found that **every** internal/embedded or plugin/vendor agent (`worker`, `default`, `planner`, ...) reports its `.ID` as the deterministic `"file-<slug>"` runtime alias in every existing `GET /api/agents`/`GET /api/agents/{id}` response — never the real UUID `agent_profiles` row Phase 1 #04's own backfill (and `05`'s selection wiring) actually operates against. Granting via that alias fails `agent_tools.agent_id`'s FK constraint. This is exactly the same "`agentServiceImpl.Get`'s file-based-vs-DB-backed ID resolution semantics" `05`'s own Work Log named and explicitly declined to fix within its own scope ("needed more investigation than that task's scope warranted") — and `internal/service/agent.go`/`agentServiceImpl` is not in this task's `Touches` list either. Rather than silently ship an endpoint that 500s opaquely for this population, `requireRealAgentToolsTarget` (`internal/api/agent_tools.go`) detects the file-based-alias shape up front and returns a clear `400` naming the actual limitation instead of a raw SQL constraint error. This is a real, practically-significant gap for the exact population `05`'s Work Log flagged as most needing fresh grants (an agent that "looks unrestricted" today because it was snapshotted at backfill time) — **flagged here, not fixed**, since fixing it correctly means deciding what identity `agent_tools`/the wider composition API should present for this population, which is new design surface this task's own scope doesn't cover. Agents created/updated through this same API (`POST`/`PUT /api/agents`) always mint a real UUID and are fully unaffected — this is the actual "assignment API" target population working end-to-end.
+
+### What was built (file by file)
+
+- `internal/api/types.go`: `RoleID`/`ConsumerID`/`ModelID` added to `CreateAgentRequest` (plain strings) and `UpdateAgentRequest` (pointers, matching the existing partial-update convention). New `CreateConsumerRequest`/`UpdateConsumerRequest` and `GrantAgentToolRequest`.
+- `internal/api/agents.go`: `handleCreateAgent`/`handleUpdateAgent` call `store.UpdateAgentComposition` after the existing `AgentConfigService.Create`/`Update` call, re-fetching the profile so the response reflects it. New `ptrOrNilString` helper.
+- `internal/api/consumers.go` (new): full REST CRUD for `consumers` (`GET/POST /api/consumers`, `GET/PUT/DELETE /api/consumers/{id}`), mirroring `roles.go`'s shape exactly.
+- `internal/api/agent_tools.go` (new): `handleGrantAgentTool` (`POST /api/agents/{id}/tools`) and `handleRevokeAgentTool` (`DELETE /api/agents/{id}/tools/{toolId}`), backed by Phase 1 #04's store functions. Gated by `requireAgent` (existence only) rather than `requireMutableAgent` — `agent_tools` is a DB-only mechanism independent of managed-file editability, and the non-editable internal/embedded agents are exactly the population most needing fresh grants (see `05`'s Work Log item 4). Includes `requireRealAgentToolsTarget` and `matchingDenyPattern` helpers.
+- `internal/api/api.go`: route registration for the above (consumers routes placed next to roles; agent_tools grant/revoke placed next to the existing list endpoint).
+- `internal/store/agents.go`: new `UpdateAgentComposition`.
+- `internal/store/known_tools.go`: new `GetKnownTool(ctx, id)` (ID-based lookup; only `GetKnownToolByName` existed).
+- `internal/service/ingest.go`: `upsertAgentDef` preserves `RoleID`/`ConsumerID`/`ModelID` across a reingest (see above).
+- `internal/service/tool_execution_rules.go`: `enforceExecutionRules` rewired; new `enforceExecutionRulesViaAgentTools` (see above).
+- `internal/service/store.go`: `Store` interface gains `ListAgentToolNames`/`ListAlwaysIncludedKnownTools`.
+- `internal/service/chat_test.go`: `stubAgentReaderStore` gets two new no-op stub methods to satisfy the widened `Store` interface.
+
+No file under `ui/` was touched.
+
+### Testing
+
+- `internal/api/agents_composition_test.go` (new): `TestHandleCreateAgent_SetsCompositionFields` (all three fields set + read back via an independent `GET`), `TestHandleCreateAgent_InvalidRoleIDRejected` (FK rejection → 400), `TestHandleUpdateAgent_SetsAndClearsCompositionFields` (set via `PUT`, survives an unrelated field-only edit — the reingest-preservation regression guard — then clears via `PUT {"role_id":""}`).
+- `internal/api/consumers_test.go` (new): `TestConsumersCRUD_EndToEnd` (full CRUD, mirrors `roles_test.go`'s `TestRolesCRUD_EndToEnd`), `TestHandleDeleteConsumer_RejectsWhileReferenced` (FK-constraint delete-while-referenced).
+- `internal/api/agent_tools_test.go` (new): `TestAgentToolsGrantRevoke_EndToEnd`, `TestHandleGrantAgentTool_RejectsNonexistentTool` (404, mirrors Phase 1 #05's `TestHandleAddAgentProject_RejectsNonexistentAgent` precedent), `TestHandleGrantAgentTool_RejectsNonexistentAgent` (404), `TestHandleGrantAgentTool_RejectsStaleDenyListMatch` (409, plus a non-conflicting tool on the same agent still grants normally).
+- `internal/service/tool_execution_rules_test.go` (new): `TestAgentToolsGrant_SelectionAndExecutionBothAccept` (the literal Done-means bullet 4 scenario — grants a tool absent from the legacy `agent_profiles.tools` column, confirms both `SelectForAgent` and `enforceExecutionRules` accept it), `TestEnforceExecutionRules_AgentToolsRejectsUngrantedTool`, `TestEnforceExecutionRules_AgentToolsAllowsAlwaysIncluded`.
+
+**Debugging note for future readers**: the first attempt at `TestEnforceExecutionRules_AgentToolsAllowsAlwaysIncluded` appeared to hang the whole `internal/service` package indefinitely (`go test` sat at ~0% CPU for 10+ minutes). Root cause was **not** a build-cache or environment issue — it was a real, classic `database/sql` footgun in the test itself: a stray sanity-check line called `st.DB.QueryRowContext(ctx, "SELECT 1").Err()` without ever calling `.Scan()`. `Row.Err()` alone never releases the underlying connection back to the pool (only `Scan()`/`rows.Close()` does), so the one connection SQLite's driver typically pools was permanently leaked, and every subsequent `ExecContext`/`QueryContext` call on that `*sql.Store` blocked forever waiting for a connection. Confirmed via `kill -QUIT` on the stuck test binary (Go dumps all goroutine stacks on SIGQUIT) — the blocked goroutine's stack pointed exactly at the leaking line. Fixed by deleting the pointless sanity check (it wasn't needed). No production code was ever implicated.
+
+### Live-dogfeed verification (against a real running instance, per the task's Done-means and the same discipline Phase 1 used)
+
+Built the binary from this worktree (`go build -o <scratch>/nanite-verify ./cmd/nanite`) and launched `nanite-verify serve --port 8199` with `NANITE_WORKSPACE=phase5-01-verify` (an XDG workspace name never used before, isolated from the shared `default` workspace `cerberus_resource_status`/CLAUDE.md describes) and CWD set to a fresh scratch directory outside the repo (so `AgentConfigService`'s managed-file writes land at `<scratch>/.nanite/agents/*.md`, never touching this worktree's real, tracked `.nanite/agents/`) — following `EXECUTION-PROCESS.md` worker step 5's explicit allowance for "a real running server built and launched from the working directory" as long as it targets an isolated copy/scratch location, not a real tracked file. Exercised via `curl` against the live HTTP server:
+
+- `POST /api/roles` → created a real role.
+- `GET /api/consumers` → confirmed migration 112's seeded `loom` row.
+- `POST /api/agents` with `role_id`+`consumer_id` set → `201`, both fields present in the response; confirmed the managed file landed at `<scratch>/.nanite/agents/live-verify-agent.md` (not the real repo).
+- `GET /api/agents/{id}` (a separate request, not the create response) → both fields round-tripped.
+- `PUT /api/agents/{id}` with an unrelated field (`description`) only → `role_id`/`consumer_id` survived unchanged (the live proof of the `upsertAgentDef` reingest-preservation fix — without it this step wipes both to `""`).
+- `PUT /api/agents/{id}` with `{"role_id":""}` → cleared to `""`, `consumer_id` left untouched.
+- `PUT /api/agents/{id}` with `{"role_id":"does-not-exist"}` → `400` with the wrapped FK-constraint error surfaced verbatim.
+- Seeded a real `providers`/`models` row directly via `sqlite3` against the isolated DB, then `PUT /api/agents/{id}` with `model_id` set → round-tripped on a subsequent `GET` alongside the already-set `consumer_id` and the already-cleared `role_id`.
+- `POST /api/agents/{id}/tools` with a real `known_tools.id` (`dev_read`, live-synced by the running server's own `SyncKnownTools`) → `201`, `{"tool_names":["dev_read"]}`; confirmed the `agent_tools` row directly via `sqlite3`.
+- `DELETE /api/agents/{id}/tools/{toolId}` → `200`; confirmed the row was gone via `sqlite3`.
+- Set `tool_permissions` to `{"deny_list":["dev_*"]}` via `PUT`, then `POST /api/agents/{id}/tools` for `dev_read` → `409` with the exact conflicting-pattern message.
+- `POST /api/agents/{id}/tools` with a nonexistent `tool_id` → `404`; with a nonexistent agent in the path → `404`.
+
+Shut the server down, deleted the isolated `~/.local/share/nanite/workspaces/phase5-01-verify/` directory and the scratch build artifacts, and confirmed `git status --short` in this worktree shows only the intended source/test file changes — no stray writes to any tracked file.
+
+### Deviations from the plan
+
+1. **`internal/service/ingest.go` touched** (not in this task's stated `Touches` list) — closes the reingest wipe-to-NULL bug for `role_id`/`consumer_id`/`model_id` described above. Without it, the task's own Done-means bullet 1 ("correctly readable back afterward") would fail the moment any unrelated managed-agent edit happened after the composition write.
+2. **`internal/service/store.go` and `internal/service/chat_test.go` touched** (not in this task's stated `Touches` list) — required to give `chatServiceImpl.enforceExecutionRules` a `Store`-interface path to `agent_tools`/`known_tools.always_included`, per item 3(b)'s explicit instruction.
+3. The `agentServiceImpl`/`internal/agent`-level file-based-alias identity gap for `agent_tools` grant/revoke (see above) is flagged, not fixed — consistent with `05`'s own precedent for the identical class of gap.
+
+### Build/vet/test
+
+`go build ./cmd/nanite/`: pass. `go vet ./...`: only the pre-existing `stopReaper`/`stopRuntimeReaper` context-leak finding in `internal/service/container.go` (a file this task never touches — confirmed via `git status --short`), the same finding Phase 1 #04's and Phase 4 #05's own Work Logs already documented as pre-existing on the base branch. `go test ./...`: full repo, every package, pass (`internal/service` 64.180s, `internal/api` 41.961s, `internal/store` 11.783s, remainder green).
+
+No escalations.
 
 ## Review notes
 <Reviewer fills this in: pass/fail, what was checked, anything fixed and how.>

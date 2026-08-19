@@ -299,6 +299,24 @@ type Store interface {
 	// TASKS/phase-2/02-port-forward-dynamic-resolver.md). Used by
 	// chat_boot_drive.go's resolveAgentContextForBoot at launch time.
 	ListEnabledAgentContextResolvers(ctx context.Context, agentID string) ([]store.AgentContextResolver, error)
+
+	// ListAgentToolNames and ListAlwaysIncludedKnownTools (Phase 5 item 01,
+	// TASKS/phase-5/01-build-assignment-api.md) back
+	// chatServiceImpl.enforceExecutionRules' agent_tools-authoritative
+	// execution-time re-check -- mirroring filterToolsByAgentTools' and
+	// resolveAlwaysIncludedTools' selection-time reads (internal/service/
+	// tool.go, TASKS/phase-4/05) so a grant made via the agent_tools API
+	// isn't rejected one turn later purely because this separate re-check
+	// didn't know about the new table. Deliberately added directly here
+	// rather than to AgentReader/ToolStore above -- those narrower
+	// interfaces are also used by toolServiceImpl/agentServiceImpl via
+	// hand-rolled test doubles that have no reason to grow these two
+	// agent_tools-specific methods; scoping the addition to the one
+	// composite interface that actually needs them (Store, used by
+	// chatServiceImpl) keeps the blast radius to this interface's own
+	// fakes (chat_test.go's minimalStore).
+	ListAgentToolNames(ctx context.Context, agentID string) ([]string, error)
+	ListAlwaysIncludedKnownTools(ctx context.Context) ([]store.KnownTool, error)
 }
 
 // Compile-time verification that *store.Store satisfies the composite interface.

@@ -588,10 +588,13 @@ func pluginEnable(name string) {
 		os.Exit(1)
 	}
 	fmt.Printf("Plugin %q enabled.\n", name)
-	// Unlike disable/uninstall, plugin.yaml exists again at this point
-	// (EnablePlugin just renamed it back from plugin.yaml.disabled), so the
-	// reload endpoint's unload(no-op)-then-load cycle resolves correctly —
-	// functionally the same hot-load the API's own handleEnable performs.
+	// Unlike disable/uninstall, plugin.yaml is present on disk at this
+	// point — Phase 5 item 02 (TASKS/phase-5/02-build-plugin-installed-
+	// enabled-state-model.md) made EnablePlugin/DisablePlugin pure DB
+	// writes against the `plugins` state table; neither renames the
+	// manifest file anymore. So the reload endpoint's unload(no-op)-then-
+	// load cycle resolves correctly — functionally the same hot-load the
+	// API's own handleEnable performs.
 	manifest, merr := plugin.ParseManifest(filepath.Join(dir, name, "plugin.yaml"))
 	if merr != nil {
 		manifest = nil

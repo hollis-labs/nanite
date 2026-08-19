@@ -346,6 +346,29 @@ func (s *chatServiceImpl) generateResponse(ctx context.Context, sessionID, assis
 		selection = &ToolSelection{}
 	}
 	tools := selection.Tools
+
+	// Filter: tool_selection — a plugin may add, remove, or reshape the
+	// tool list offered to the model this turn. Applied here, immediately
+	// after SelectForAgent returns, rather than wiring pluginHost into
+	// toolServiceImpl.SelectForAgent itself — matching the exact pattern
+	// the other five chat_generate.go-resident filters already use
+	// (system_prompt / user_message / context_window / assistant_response /
+	// envelope_data all operate on the value about to be used, not on
+	// SelectForAgent's internal intermediate state). Consequence: a plugin
+	// sees the fully-resolved tool list (post agent_tools grant filter,
+	// post cap/token-budget prune, post always_included escape hatch, post
+	// progressive-discovery repackaging when active) — not the broker's
+	// raw pre-filter output. See
+	// TASKS/phase-4/06-add-filter-tool-selection.md's Work Log for the full
+	// insertion-point reasoning.
+	//
+	// Applied before normalizeToolInputSchemas (below) so a plugin-added
+	// tool's schema is normalized too, and before the tools-lazy-load
+	// essential/lazy partition and the no-tools warning check further down
+	// so both see the plugin-filtered list, not the pre-filter one.
+	fctx := pluginpkg.FilterContext{SessionID: sessionID, AgentID: agentID}
+	tools = applyToolSelectionFilter(s.pluginHost, tools, fctx)
+
 	normalizeToolInputSchemas(tools)
 
 	// Phase 0 item 21 ("Cut Modes, in full") deleted the B1 (CW-20260428-0009)
@@ -418,7 +441,9 @@ func (s *chatServiceImpl) generateResponse(ctx context.Context, sessionID, assis
 	// (the only string-shaped portion of the system payload); slot content is
 	// not exposed to the filter. Plugins that need to mutate static system
 	// content should target the upcoming slot-aware filter (S4 backlog).
-	fctx := pluginpkg.FilterContext{SessionID: sessionID, AgentID: agentID}
+	// fctx was already declared above, right before the tool_selection
+	// filter — reused here and by every other pluginHost.ApplyFilter call
+	// site below.
 	if s.pluginHost != nil {
 		if filtered, err := s.pluginHost.ApplyFilter(pluginpkg.FilterSystemPrompt, extraSystemPrefix, fctx); err != nil {
 			slog.Warn("chat-service: system_prompt filter error", "err", err)
@@ -3502,6 +3527,39 @@ func normalizeToolInputSchemas(tools []llmtypes.ToolDefinition) {
 		normalizeSchemaNode(clone)
 		tools[i].InputSchema = clone
 	}
+}
+
+// applyToolSelectionFilter runs the FilterToolSelection plugin filter chain
+// over the fully-resolved per-turn tool list, letting a plugin add, remove,
+// or reshape which tools are offered to the model this turn. See
+// TASKS/phase-4/06-add-filter-tool-selection.md.
+//
+// Extracted as its own function (mirroring composeExtraSystemPrefix and
+// applyChatSurfaceFilter's existing precedent in this package) so the exact
+// production call site is independently unit-testable without needing to
+// exercise the rest of generateResponse's provider/streaming machinery.
+//
+// nil-safe: a nil pluginHost (no plugin host wired) or a chain with zero
+// registered handlers returns tools unchanged. On a filter error, or when
+// the handler chain returns a value that doesn't type-assert back to
+// []llmtypes.ToolDefinition, the input tools are returned unchanged and the
+// error (if any) is logged — a misbehaving plugin filter must never crash
+// the turn or silently empty the tool surface.
+func applyToolSelectionFilter(pluginHost PluginEventSink, tools []llmtypes.ToolDefinition, fctx pluginpkg.FilterContext) []llmtypes.ToolDefinition {
+	if pluginHost == nil {
+		return tools
+	}
+	filtered, err := pluginHost.ApplyFilter(pluginpkg.FilterToolSelection, tools, fctx)
+	if err != nil {
+		slog.Warn("chat-service: tool_selection filter error", "err", err)
+		return tools
+	}
+	ft, ok := filtered.([]llmtypes.ToolDefinition)
+	if !ok {
+		slog.Warn("chat-service: tool_selection filter returned unexpected type — ignoring", "type", fmt.Sprintf("%T", filtered))
+		return tools
+	}
+	return ft
 }
 
 // cloneSchemaNode returns a deep copy of a JSON-Schema-shaped map. Maps and

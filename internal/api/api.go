@@ -325,16 +325,6 @@ func (a *API) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/agents/{id}/skills", a.handleAssignAgentSkill)
 	mux.HandleFunc("DELETE /api/agents/{id}/skills/{skillId}", a.handleRemoveAgentSkill)
 
-	// Prompt Templates
-	mux.HandleFunc("GET /api/prompt-templates", a.handleListPromptTemplates)
-	mux.HandleFunc("POST /api/prompt-templates", a.handleCreatePromptTemplate)
-	mux.HandleFunc("GET /api/prompt-templates/{id}", a.handleGetPromptTemplate)
-	mux.HandleFunc("PUT /api/prompt-templates/{id}", a.handleUpdatePromptTemplate)
-	mux.HandleFunc("DELETE /api/prompt-templates/{id}", a.handleDeletePromptTemplate)
-	mux.HandleFunc("GET /api/agents/{id}/prompt-templates", a.handleListAgentPromptTemplates)
-	mux.HandleFunc("POST /api/agents/{id}/prompt-templates", a.handleAssignAgentPromptTemplate)
-	mux.HandleFunc("DELETE /api/agents/{id}/prompt-templates/{templateId}", a.handleRemoveAgentPromptTemplate)
-
 	// MCP Servers (user-managed)
 	mux.HandleFunc("GET /api/mcp-servers", a.handleListMCPServers)
 	mux.HandleFunc("POST /api/mcp-servers", a.handleCreateMCPServer)

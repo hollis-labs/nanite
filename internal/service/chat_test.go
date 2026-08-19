@@ -130,7 +130,6 @@ type minimalStore struct {
 	stubProjectStore
 	stubBookmarkStore
 	stubArtifactStore
-	stubTemplateStore
 	stubSkillStore
 	stubProviderStore
 	stubTodoStore
@@ -337,25 +336,6 @@ func (stubArtifactStore) ListArtifactsByProject(string, string) ([]store.Artifac
 }
 func (stubArtifactStore) CreateArtifact(*store.Artifact) error        { return nil }
 func (stubArtifactStore) GetArtifact(string) (*store.Artifact, error) { return nil, nil }
-
-type stubTemplateStore struct{}
-
-func (stubTemplateStore) ListPromptTemplates() ([]store.PromptTemplate, error)    { return nil, nil }
-func (stubTemplateStore) GetPromptTemplate(string) (*store.PromptTemplate, error) { return nil, nil }
-func (stubTemplateStore) GetPromptTemplateBySlug(string) (*store.PromptTemplate, error) {
-	return nil, nil
-}
-func (stubTemplateStore) CreatePromptTemplate(*store.PromptTemplate) error { return nil }
-func (stubTemplateStore) UpdatePromptTemplate(*store.PromptTemplate) error { return nil }
-func (stubTemplateStore) DeletePromptTemplate(string) error                { return nil }
-func (stubTemplateStore) ListPromptTemplatesForAgent(string) ([]store.PromptTemplate, error) {
-	return nil, nil
-}
-func (stubTemplateStore) AssignPromptTemplateToAgent(string, string) error   { return nil }
-func (stubTemplateStore) RemovePromptTemplateFromAgent(string, string) error { return nil }
-func (stubTemplateStore) ComposePromptForAgent(string, map[string]string) (string, error) {
-	return "", nil
-}
 
 type stubSkillStore struct{}
 

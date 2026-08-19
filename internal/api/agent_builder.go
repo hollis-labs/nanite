@@ -502,14 +502,6 @@ func capabilityOperations(c AgentBuilderCapabilitiesInput, mode string) []AgentB
 			Count:  n,
 		})
 	}
-	if n := len(c.PromptTemplateIDs); n > 0 {
-		ops = append(ops, AgentBuilderCapabilityOperation{
-			Area:   "prompt_templates",
-			Action: "assign",
-			Target: mode,
-			Count:  n,
-		})
-	}
 	if n := len(c.KnownTools); n > 0 {
 		ops = append(ops, AgentBuilderCapabilityOperation{
 			Area:   "known_tools",

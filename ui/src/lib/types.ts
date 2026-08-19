@@ -880,7 +880,6 @@ export interface AgentBuilderProfileInput {
 export interface AgentBuilderCapabilitiesInput {
   assigned_skill_ids?: string[];
   assigned_skill_slugs?: string[];
-  prompt_template_ids?: string[];
   known_tools?: AgentKnownToolUpsertRequest[];
   known_skills?: AgentKnownSkillUpsertRequest[];
   procedures?: AgentProcedureUpsertRequest[];
@@ -2378,20 +2377,6 @@ export interface TemplateVariable {
   default?: string | number | boolean;
   description?: string;
   options?: string[];
-}
-
-export interface PromptTemplate {
-  id: string;
-  name: string;
-  slug: string;
-  scope: "system" | "mode" | "skill" | "context";
-  template: string;
-  variables: string;
-  priority: number;
-  icon: string;
-  is_builtin: boolean;
-  created_at: string;
-  updated_at: string;
 }
 
 // --- Workflow / Pipeline ---

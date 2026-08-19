@@ -45,7 +45,7 @@ Live tracker for `docs/engineering/TASKS.md`'s execution, per `docs/engineering/
 | 26-cut-session-compaction-summary-fields | implemented | (sequenced after 27, see below) | 3 (chain pos. 4) |
 | 27-cut-p7-scratchpad-snapshot | implemented | none | 3 (chain pos. 3) |
 | 28-cut-session-intent-classifier | implemented | (sequenced after 27, see below) | 3 (chain pos. 5) |
-| 29-cut-prompt-templates | not-started | none (see Context; sequenced after 21) | 3 (chain pos. 9) |
+| 29-cut-prompt-templates | implemented | none (see Context; sequenced after 21) | 3 (chain pos. 9) |
 | 30-cut-templates-table | implemented | none | 1 |
 | 31-rename-pty-naming-scrub | not-started | (all of Phase 0, see below) | 4 |
 | 32-rename-recovery-namespace | implemented | 04 | 3 (chain pos. 6) |

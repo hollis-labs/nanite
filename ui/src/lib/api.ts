@@ -93,7 +93,6 @@ import type {
   PluginUIComponent,
   ProcessHealthResponse,
   Project,
-  PromptTemplate,
   ProviderConfig,
   ProviderStatus,
   Reminder,
@@ -2160,97 +2159,6 @@ export const api = {
     });
     if (!res.ok)
       throw new Error(`Failed to remove skill from agent: ${res.status}`);
-  },
-
-  // Prompt Templates
-  listPromptTemplates: async (): Promise<PromptTemplate[]> => {
-    const res = await fetch(`${API_BASE}/prompt-templates`);
-    if (!res.ok)
-      throw new Error(`Failed to list prompt templates: ${res.status}`);
-    return res.json();
-  },
-
-  getPromptTemplate: async (id: string): Promise<PromptTemplate> => {
-    const res = await fetch(`${API_BASE}/prompt-templates/${id}`);
-    if (!res.ok)
-      throw new Error(`Failed to get prompt template: ${res.status}`);
-    return res.json();
-  },
-
-  createPromptTemplate: async (
-    data: Omit<
-      PromptTemplate,
-      "id" | "created_at" | "updated_at" | "is_builtin"
-    >,
-  ): Promise<PromptTemplate> => {
-    const res = await fetch(`${API_BASE}/prompt-templates`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(data),
-    });
-    if (!res.ok)
-      throw new Error(`Failed to create prompt template: ${res.status}`);
-    return res.json();
-  },
-
-  updatePromptTemplate: async (
-    id: string,
-    data: Partial<
-      Omit<PromptTemplate, "id" | "created_at" | "updated_at" | "is_builtin">
-    >,
-  ): Promise<PromptTemplate> => {
-    const res = await fetch(`${API_BASE}/prompt-templates/${id}`, {
-      method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(data),
-    });
-    if (!res.ok)
-      throw new Error(`Failed to update prompt template: ${res.status}`);
-    return res.json();
-  },
-
-  deletePromptTemplate: async (id: string): Promise<void> => {
-    const res = await fetch(`${API_BASE}/prompt-templates/${id}`, {
-      method: "DELETE",
-    });
-    if (!res.ok)
-      throw new Error(`Failed to delete prompt template: ${res.status}`);
-  },
-
-  // Agent Templates (returns PromptTemplate[], not a join-table type)
-  listAgentTemplates: async (agentId: string): Promise<PromptTemplate[]> => {
-    const res = await fetch(`${API_BASE}/agents/${agentId}/prompt-templates`);
-    if (!res.ok)
-      throw new Error(`Failed to list agent templates: ${res.status}`);
-    return res.json();
-  },
-
-  assignTemplateToAgent: async (
-    agentId: string,
-    data: { template_id: string },
-  ): Promise<PromptTemplate> => {
-    const res = await fetch(`${API_BASE}/agents/${agentId}/prompt-templates`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(data),
-    });
-    if (!res.ok)
-      throw new Error(`Failed to assign template to agent: ${res.status}`);
-    return res.json();
-  },
-
-  removeTemplateFromAgent: async (
-    agentId: string,
-    templateId: string,
-  ): Promise<void> => {
-    const res = await fetch(
-      `${API_BASE}/agents/${agentId}/prompt-templates/${templateId}`,
-      {
-        method: "DELETE",
-      },
-    );
-    if (!res.ok)
-      throw new Error(`Failed to remove template from agent: ${res.status}`);
   },
 
   // Engine Backlog

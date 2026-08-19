@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
-	"strconv"
 	"strings"
 
 	"github.com/hollis-labs/nanite/internal/contextbroker"
@@ -38,8 +37,8 @@ import (
 // every turn until the first assistant reply lands. Acceptable for v1 — the
 // pre-first-assistant case is exotic enough not to warrant a special branch.
 //
-// Returns "" on any failure path (store error, no event, no template,
-// missing summary_mode); the caller treats "" as "no disclosure to inject".
+// Returns "" on any failure path (store error, no event); the caller treats
+// "" as "no disclosure to inject".
 func renderCompactionDisclosure(s *store.Store, sessionID string) string {
 	ctx := context.Background()
 	evt, err := s.GetLatestCompactionEvent(ctx, sessionID)
@@ -55,17 +54,7 @@ func renderCompactionDisclosure(s *store.Store, sessionID string) string {
 		return ""
 	}
 
-	slug := disclosureSlugForMode(evt.SummaryMode)
-	tmpl, err := s.GetPromptTemplateBySlug(slug)
-	if err != nil || tmpl == nil {
-		if err != nil {
-			slog.Warn("chat: GetPromptTemplateBySlug failed for disclosure",
-				"slug", slug, "err", err)
-		}
-		return ""
-	}
-
-	return interpolateDisclosure(tmpl.Template, evt)
+	return interpolateDisclosure(evt)
 }
 
 // isCompactionEventFresh returns true when no assistant message in the session
@@ -94,28 +83,45 @@ func isCompactionEventFresh(s *store.Store, sessionID, eventCreatedAt string) bo
 	return true
 }
 
-// disclosureSlugForMode maps a CompactionMode to the seeded disclosure
-// template slug. Unknown modes fall back to the general variant so the
-// disclosure path stays robust to mode-string drift.
-func disclosureSlugForMode(mode string) string {
-	switch mode {
-	case "code":
-		return "compaction-disclosure-code"
-	case "plan":
-		return "compaction-disclosure-plan"
-	case "research":
-		return "compaction-disclosure-research"
-	default:
-		return "compaction-disclosure-general"
-	}
-}
+// compactionDisclosureTemplate is the single, universal, hardcoded
+// compaction-disclosure message (Phase 0 item 29, TASKS.md Phase 0 Cuts).
+//
+// Relocated from the DB-backed prompt_templates mechanism (four
+// mode-branched variants — general/code/plan/research — seeded by migration
+// 030 and selected via disclosureSlugForMode/CompactionMode) into a single
+// hardcoded message here. The four originals shared ~90% identical
+// structure (Compaction Notice → Preserved/Lost → Recovery: handoff stash
+// id, chat_search, summary metadata) and differed mainly in which nouns got
+// preserved/lost per domain; collapsing them keeps the substance (what's
+// preserved vs. lost, the two concrete recovery actions) without a mode
+// lookup. This is independent of 21-cut-modes — classifyModeFromAgentTags /
+// CompactionPipeline.Mode / summarySystemPrompt are untouched and continue
+// to select the *summarizer's* system prompt; only the disclosure-template
+// selection is collapsed here.
+//
+// %s verbs (in order): handoff stash id, coverage window start, coverage
+// window end. %d verbs (in order): summary token count, evicted cache
+// pointer count, preserved source count.
+const compactionDisclosureTemplate = `## Compaction Notice
 
-// interpolateDisclosure fills the {{var}} placeholders in a disclosure
-// template with values from the latest compaction_events row. Nullable
-// fields (handoff_stash_id, coverage_window_*) render as "(none)" /
-// "(unknown)" so the LLM gets a literal placeholder rather than an empty
-// region that might read as "the value was lost".
-func interpolateDisclosure(tmpl string, evt *store.CompactionEvent) string {
+This conversation was compacted just before your turn. An LLM-generated summary replaced the older messages. Treat it as a lossy paraphrase, not a transcript.
+
+**Preserved:** decisions, problems, findings, and outcomes — file paths, symbols, and ticket/ID references the summarizer flagged as load-bearing.
+**Lost:** raw text of older turns, full tool inputs/outputs, exact numbers/quotes, verbatim diffs or source excerpts.
+
+**Recovery:**
+- **Handoff stash id:** %s — if set, holds decisions, open questions, file refs, and ticket IDs from pre-compaction. Read before answering about earlier-session state.
+- **chat_search** {query, scope?, limit?} — search pre-compaction turns for specifics the summary omits.
+- **Summary metadata:** window %s → %s, ≈ %d tokens, %d cache pointer(s) evicted, %d preserved source(s).
+
+If the summary is silent on prior detail, search rather than guess.`
+
+// interpolateDisclosure renders compactionDisclosureTemplate against the
+// latest compaction_events row. Nullable fields (handoff_stash_id,
+// coverage_window_*) render as "(none)" / "(unknown)" so the LLM gets a
+// literal placeholder rather than an empty region that might read as "the
+// value was lost".
+func interpolateDisclosure(evt *store.CompactionEvent) string {
 	stashID := "(none)"
 	if evt.HandoffStashID != nil && *evt.HandoffStashID != "" {
 		stashID = *evt.HandoffStashID
@@ -129,14 +135,9 @@ func interpolateDisclosure(tmpl string, evt *store.CompactionEvent) string {
 		endTurn = *evt.CoverageWindowEnd
 	}
 
-	out := tmpl
-	out = strings.ReplaceAll(out, "{{handoff_stash_id}}", stashID)
-	out = strings.ReplaceAll(out, "{{coverage_window_start}}", startTurn)
-	out = strings.ReplaceAll(out, "{{coverage_window_end}}", endTurn)
-	out = strings.ReplaceAll(out, "{{summary_token_count}}", strconv.Itoa(evt.SummaryTokenCount))
-	out = strings.ReplaceAll(out, "{{evicted_pointer_count}}", strconv.Itoa(len(evt.EvictedCachePointers)))
-	out = strings.ReplaceAll(out, "{{preserved_source_count}}", strconv.Itoa(len(evt.PreservedSources)))
-	return out
+	return fmt.Sprintf(compactionDisclosureTemplate,
+		stashID, startTurn, endTurn,
+		evt.SummaryTokenCount, len(evt.EvictedCachePointers), len(evt.PreservedSources))
 }
 
 // thinkToolBlock is the v0 think-tool instruction (baseline for eval A/B).

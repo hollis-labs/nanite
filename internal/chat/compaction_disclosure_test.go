@@ -117,9 +117,9 @@ func TestRenderCompactionDisclosure_freshEventInjects(t *testing.T) {
 	if got == "" {
 		t.Fatal("expected non-empty disclosure for fresh compaction event")
 	}
-	// Mode-anchored: code variant should mention "code session".
-	if !strings.Contains(got, "code session") {
-		t.Errorf("expected code-mode disclosure, got: %q", got)
+	// Unified message: no mode-branching, always the same title.
+	if !strings.Contains(got, "## Compaction Notice") {
+		t.Errorf("expected unified disclosure title, got: %q", got)
 	}
 	// Variables fully interpolated (no leftover {{...}}).
 	if strings.Contains(got, "{{") {
@@ -133,42 +133,38 @@ func TestRenderCompactionDisclosure_freshEventInjects(t *testing.T) {
 	}
 }
 
-// TestRenderCompactionDisclosure_modeAllVariants asserts each CompactionMode
-// resolves to its own template variant. Bumps coverage on
-// disclosureSlugForMode.
-func TestRenderCompactionDisclosure_modeAllVariants(t *testing.T) {
+// TestRenderCompactionDisclosure_modeIsIrrelevant asserts that
+// SummaryMode no longer selects a template variant (Phase 0 item 29
+// collapsed the four mode-branched disclosure templates into one hardcoded
+// message) — every mode string, including unknown ones, produces the same
+// unified disclosure body.
+func TestRenderCompactionDisclosure_modeIsIrrelevant(t *testing.T) {
 	s := newTestStoreForChat(t)
 
-	cases := []struct {
-		mode      string
-		wantSlug  string
-		wantTitle string
-	}{
-		{"general", "compaction-disclosure-general", "Compaction Notice"},
-		{"code", "compaction-disclosure-code", "code session"},
-		{"plan", "compaction-disclosure-plan", "planning session"},
-		{"research", "compaction-disclosure-research", "research session"},
-		// Unknown modes fall back to general.
-		{"unknown-mode-xyz", "compaction-disclosure-general", "Compaction Notice"},
+	modes := []string{"general", "code", "plan", "research", "unknown-mode-xyz", ""}
+	var rendered []string
+	for _, mode := range modes {
+		sess := &store.Session{}
+		if err := s.CreateSession(sess); err != nil {
+			t.Fatalf("CreateSession: %v", err)
+		}
+		writeCompactionEventForTest(t, s, store.CompactionEvent{
+			SessionID:   sess.ID,
+			SummaryMode: mode,
+		})
+
+		got := renderCompactionDisclosure(s, sess.ID)
+		if !strings.Contains(got, "## Compaction Notice") {
+			t.Errorf("mode=%q: expected unified disclosure title, got: %q", mode, got)
+		}
+		rendered = append(rendered, got)
 	}
 
-	for _, tc := range cases {
-		t.Run(tc.mode, func(t *testing.T) {
-			sess := &store.Session{}
-			if err := s.CreateSession(sess); err != nil {
-				t.Fatalf("CreateSession: %v", err)
-			}
-			writeCompactionEventForTest(t, s, store.CompactionEvent{
-				SessionID:   sess.ID,
-				SummaryMode: tc.mode,
-			})
-
-			got := renderCompactionDisclosure(s, sess.ID)
-			if !strings.Contains(got, tc.wantTitle) {
-				t.Errorf("mode=%q: expected title fragment %q, got: %q",
-					tc.mode, tc.wantTitle, got)
-			}
-		})
+	for i := 1; i < len(rendered); i++ {
+		if rendered[i] != rendered[0] {
+			t.Errorf("expected identical disclosure body across modes (mode-independent), mode[%d] differs:\n%q\nvs\n%q",
+				i, rendered[i], rendered[0])
+		}
 	}
 }
 
@@ -314,8 +310,8 @@ func TestAssembleAgentSlotContent_appendsDisclosure(t *testing.T) {
 	})
 
 	got := assembleAgentSlotContent(s, agent, "", sess.ID)
-	if !strings.Contains(got, "research session") {
-		t.Errorf("expected research-mode disclosure in agent slot, got: %q", got)
+	if !strings.Contains(got, "## Compaction Notice") {
+		t.Errorf("expected unified disclosure in agent slot, got: %q", got)
 	}
 }
 
@@ -356,5 +352,79 @@ func TestRenderedDisclosureUnderTokenBudget(t *testing.T) {
 					mode, got, ceiling)
 			}
 		})
+	}
+}
+
+// TestInterpolateDisclosure_syntheticEvent is a direct unit test against the
+// hardcoded compactionDisclosureTemplate (Phase 0 item 29), exercising
+// interpolateDisclosure with a synthetic *store.CompactionEvent rather than
+// round-tripping through the store. This is the primary regression guard for
+// the relocated content since compaction_events has no production writer
+// wired yet (Phase 5) — renderCompactionDisclosure can't be triggered
+// end-to-end by a real compaction in a live session today.
+func TestInterpolateDisclosure_syntheticEvent(t *testing.T) {
+	stash := "handoff-xyz"
+	start := "msg-010"
+	end := "msg-099"
+	evt := &store.CompactionEvent{
+		ID:                   "evt-synthetic-1",
+		SessionID:            "sess-synthetic-1",
+		SummaryMode:          "general",
+		SummaryTokenCount:    512,
+		HandoffStashID:       &stash,
+		CoverageWindowStart:  &start,
+		CoverageWindowEnd:    &end,
+		EvictedCachePointers: []string{"p1", "p2", "p3"},
+		PreservedSources:     []string{"s1"},
+	}
+
+	got := interpolateDisclosure(evt)
+
+	// Title + section headers (unified message, no mode branching).
+	for _, want := range []string{
+		"## Compaction Notice",
+		"**Preserved:**",
+		"**Lost:**",
+		"**Recovery:**",
+		"**Handoff stash id:**",
+		"chat_search",
+		"**Summary metadata:**",
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("expected disclosure to contain %q, got: %q", want, got)
+		}
+	}
+
+	// Interpolated values.
+	for _, want := range []string{stash, start, end, "512", "3", "1"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("expected disclosure to contain interpolated value %q, got: %q", want, got)
+		}
+	}
+
+	// No leftover placeholders.
+	if strings.Contains(got, "{{") || strings.Contains(got, "%s") || strings.Contains(got, "%d") {
+		t.Errorf("expected fully interpolated disclosure, got leftover placeholder in: %q", got)
+	}
+}
+
+// TestInterpolateDisclosure_nilFieldsSynthetic asserts the nullable-field
+// placeholder behavior directly against interpolateDisclosure (as opposed to
+// TestRenderCompactionDisclosure_nullableFieldsRenderPlaceholders, which
+// exercises the same behavior through the store round-trip).
+func TestInterpolateDisclosure_nilFieldsSynthetic(t *testing.T) {
+	evt := &store.CompactionEvent{
+		ID:          "evt-synthetic-2",
+		SessionID:   "sess-synthetic-2",
+		SummaryMode: "general",
+		// HandoffStashID, CoverageWindowStart, CoverageWindowEnd left nil.
+	}
+
+	got := interpolateDisclosure(evt)
+	if !strings.Contains(got, "(none)") {
+		t.Errorf("expected (none) placeholder for missing stash id, got: %q", got)
+	}
+	if !strings.Contains(got, "(unknown)") {
+		t.Errorf("expected (unknown) placeholder for missing coverage window, got: %q", got)
 	}
 }

@@ -239,7 +239,6 @@ type AgentBuilderProfileInput struct {
 type AgentBuilderCapabilitiesInput struct {
 	AssignedSkillIDs   []string                          `json:"assigned_skill_ids"`
 	AssignedSkillSlugs []string                          `json:"assigned_skill_slugs"`
-	PromptTemplateIDs  []string                          `json:"prompt_template_ids"`
 	KnownTools         []AgentKnownToolUpsertRequest     `json:"known_tools"`
 	KnownSkills        []AgentKnownSkillUpsertRequest    `json:"known_skills"`
 	Procedures         []AgentProcedureUpsertRequest     `json:"procedures"`
@@ -454,32 +453,6 @@ type PlaceArtifactRequest struct {
 type SelectToolsRequest struct {
 	Intent string   `json:"intent"`
 	Hints  []string `json:"hints"`
-}
-
-// --- Prompt Templates ---
-
-type CreatePromptTemplateRequest struct {
-	Name      string `json:"name"`
-	Slug      string `json:"slug"`
-	Scope     string `json:"scope"`
-	Template  string `json:"template"`
-	Variables string `json:"variables"`
-	Priority  int    `json:"priority"`
-	Icon      string `json:"icon"`
-}
-
-type UpdatePromptTemplateRequest struct {
-	Name      *string `json:"name"`
-	Slug      *string `json:"slug"`
-	Scope     *string `json:"scope"`
-	Template  *string `json:"template"`
-	Variables *string `json:"variables"`
-	Priority  *int    `json:"priority"`
-	Icon      *string `json:"icon"`
-}
-
-type AssignAgentPromptTemplateRequest struct {
-	TemplateID string `json:"template_id"`
 }
 
 // --- Bookmarks ---

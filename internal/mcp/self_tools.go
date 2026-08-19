@@ -284,16 +284,16 @@ func selfToolDefinitions() []Tool {
 		// Builder tools — interactive step-by-step creation flows
 		{
 			Name: "builder_start",
-			Description: "Start a step-by-step creation wizard for a new agent, skill, or prompt template.\n\n" +
-				"**When to use:** When the user wants to interactively create a new agent, skill, or prompt template and you want to gather the required fields one step at a time.\n\n" +
-				"**When NOT to use:** NOT for asking arbitrary questions — this builder only drives entity creation (agent / skill / prompt_template). Do not call this for read or update operations. If you already have all required fields, use agent_create or skill_create directly.\n\n" +
+			Description: "Start a step-by-step creation wizard for a new agent or skill.\n\n" +
+				"**When to use:** When the user wants to interactively create a new agent or skill and you want to gather the required fields one step at a time.\n\n" +
+				"**When NOT to use:** NOT for asking arbitrary questions — this builder only drives entity creation (agent / skill). Do not call this for read or update operations. If you already have all required fields, use agent_create or skill_create directly.\n\n" +
 				"**Required context:** You MUST supply builder_name. Omit it only to list available builder types.\n\n" +
 				"**Output shape:** Returns the first step prompt. Pass the response to builder_step to advance through subsequent steps.\n\n" +
 				"**Chaining:** Always follow with builder_step for each subsequent step until the builder signals completion.",
 			InputSchema: map[string]any{
 				"type": "object",
 				"properties": map[string]any{
-					"builder_name": map[string]any{"type": "string", "description": "Builder to start: agent, skill, or prompt_template. Omit to list available builders."},
+					"builder_name": map[string]any{"type": "string", "description": "Builder to start: agent or skill. Omit to list available builders."},
 				},
 			},
 		},
@@ -306,7 +306,7 @@ func selfToolDefinitions() []Tool {
 			InputSchema: map[string]any{
 				"type": "object",
 				"properties": map[string]any{
-					"builder_name": map[string]any{"type": "string", "description": "Name of the active builder (agent, skill, or prompt_template)"},
+					"builder_name": map[string]any{"type": "string", "description": "Name of the active builder (agent or skill)"},
 					"step_name":    map[string]any{"type": "string", "description": "Name of the step to submit a value for"},
 					"value":        map[string]any{"type": "string", "description": "The value for this step"},
 				},

@@ -186,9 +186,6 @@ func cmdServe(args []string) {
 	if err := s.SeedProviders(); err != nil {
 		slogx.Fatal("failed to seed providers", "err", err)
 	}
-	if err := s.SeedBuiltinPromptTemplates(); err != nil {
-		slogx.Fatal("failed to seed prompt templates", "err", err)
-	}
 
 	// Load the canonical envelope catalog from go-envelopes (lib v0.1.0).
 	// The lib's embedded manifest replaces nanite/config/envelopes.yaml as the

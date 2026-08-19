@@ -597,37 +597,16 @@ func formatPacketItemsBySource(packet *contextbroker.ContextPacket, memoryOnly b
 // (agent.SystemPrompt, skill list) without the workspace or think-tool
 // sections that live in the System slot. Phase 0 item 21 ("Cut Modes, in
 // full") removed the Legacy AgentMode addendum this used to splice in —
-// there is no more per-agent mode to append.
+// there is no more per-agent mode to append. Phase 0 item 29 ("Relocate
+// compaction-disclosure content, then cut prompt_templates") removed the
+// prompt_templates-backed ComposePromptForAgent composition path — every
+// agent now uses agent.SystemPrompt directly, unconditionally.
 //
 // When sessionID is non-empty and a fresh CompactionContract event exists for
-// the session, the appropriate disclosure is appended (P8A,
-// CW-20260420-0025). Disclosure lands in the agent slot because every system
-// prompt assembly path passes through this function or its sibling
-// assembleSystemPromptFromTemplates.
+// the session, the unified disclosure is appended (P8A, CW-20260420-0025;
+// collapsed to a single hardcoded message by Phase 0 item 29).
 func assembleAgentSlotContent(s *store.Store, agent *store.AgentProfile, skillList, sessionID string) string {
-	vars := map[string]string{
-		"agent_name":        agent.Name,
-		"agent_description": agent.Description,
-	}
-	if skillList != "" {
-		vars["skill_list"] = skillList
-	}
-	if agent.Tools != "" && agent.Tools != "[]" {
-		vars["tools_allowlist"] = agent.Tools
-	}
-	if agent.Tags != "" && agent.Tags != "[]" {
-		vars["agent_tags"] = agent.Tags
-	}
-
-	composed, err := s.ComposePromptForAgent(agent.ID, vars)
-	if err != nil {
-		slog.Warn("chat: agent slot ComposePromptForAgent failed — falling back", "err", err)
-		composed = ""
-	}
-	if composed == "" {
-		// Legacy fallback: bare agent prompt (workspace lives in System slot).
-		composed = agent.SystemPrompt
-	}
+	composed := agent.SystemPrompt
 	if skillList != "" {
 		composed += "\n\nAvailable skills:\n" + skillList
 	}

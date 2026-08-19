@@ -35,7 +35,6 @@ import type {
   DurableAgentLaunchResult,
   DurableAgentRecipe,
   ModelRecord,
-  PromptTemplate,
   RuntimeKind,
   Skill,
   StartSurfaceCapabilitiesResponse,
@@ -159,10 +158,6 @@ export function AgentBuilderWizard({
   const skillsQuery = useQuery({
     queryKey: ["skills"],
     queryFn: api.listSkills,
-  });
-  const templatesQuery = useQuery({
-    queryKey: ["prompt-templates"],
-    queryFn: api.listPromptTemplates,
   });
 
   const capabilities = startSurfaceQuery.data;
@@ -529,7 +524,6 @@ export function AgentBuilderWizard({
                     setSubmitError(null);
                   }}
                   skills={skillsQuery.data ?? []}
-                  templates={templatesQuery.data ?? []}
                   recipes={recipes}
                   providers={providers}
                   models={models}
@@ -751,7 +745,6 @@ function DraftEditor({
   draft,
   setDraft,
   skills,
-  templates,
   recipes,
   providers,
   models,
@@ -761,7 +754,6 @@ function DraftEditor({
   draft: AgentBuilderDraft;
   setDraft: (draft: AgentBuilderDraft) => void;
   skills: Skill[];
-  templates: PromptTemplate[];
   recipes: DurableAgentRecipe[];
   providers: StartSurfaceCapabilitiesResponse["providers"];
   models: ModelRecord[];
@@ -938,21 +930,6 @@ function DraftEditor({
               setDraft({
                 ...draft,
                 capabilities: { ...draft.capabilities, assigned_skill_ids: values },
-              })
-            }
-          />
-          <SelectableList
-            title="Prompt Templates"
-            items={templates.map((template) => ({
-              id: template.id,
-              label: template.name,
-              meta: template.slug,
-            }))}
-            selected={draft.capabilities.prompt_template_ids ?? []}
-            onToggle={(values) =>
-              setDraft({
-                ...draft,
-                capabilities: { ...draft.capabilities, prompt_template_ids: values },
               })
             }
           />
@@ -1587,7 +1564,6 @@ function buildBlankDraftFromIntake(intake: BuilderIntake): AgentBuilderDraft {
     },
     capabilities: {
       assigned_skill_ids: [],
-      prompt_template_ids: [],
       known_tools: [],
       known_skills: [],
       procedures: [],
@@ -1712,10 +1688,6 @@ async function assignBuilderCapabilities(
   for (const skillId of slugSkillIds) {
     if ((capabilities.assigned_skill_ids ?? []).includes(skillId)) continue;
     await api.assignSkillToAgent(agentId, { skill_id: skillId });
-  }
-
-  for (const templateId of capabilities.prompt_template_ids ?? []) {
-    await api.assignTemplateToAgent(agentId, { template_id: templateId });
   }
 
   const roleTools = new Set(parseJSONStringArray(normalizedProfile.role_tools));

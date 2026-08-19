@@ -21,10 +21,10 @@ export interface SystemPromptEntry {
   /** Unique slug (matches Go slug where applicable) */
   slug: string;
   /** How it enters the composition pipeline */
-  kind: "builtin-embed" | "builtin-go-var" | "builtin-db-seed" | "builtin-yaml";
+  kind: "builtin-embed" | "builtin-yaml";
   /** Scope label from store or doc */
   scope: string;
-  /** Priority in ComposeFpromptForAgent (undefined = not injected via compose) */
+  /** Priority, when this prompt participates in a priority-ordered assembly */
   priority?: number;
   /** Source file + line reference */
   source: string;
@@ -90,92 +90,7 @@ You are a helpful AI assistant embedded in the Nanite chat harness. You have acc
 - If a tool returns an error, acknowledge it honestly — don't paper over failures with fabricated content.`,
   },
 
-  // ── 2. Platform Capabilities / PlatformPromptTemplate (Go var) ──────────
-  {
-    name: "Platform Capabilities",
-    slug: "platform-capabilities",
-    kind: "builtin-go-var",
-    scope: "platform",
-    priority: 5,
-    source: "internal/store/prompt_templates.go:292 (PlatformPromptTemplate var)",
-    variables: [],
-    note:
-      "Go var — NOT stored in DB. Injected by ComposePromptForAgent() at priority 5 for every " +
-      "agent that has ≥1 DB template assigned. Zero-consumer by default (no agent has templates " +
-      "assigned in a fresh install). Legacy identity text retired per B5-DF (CW-20260426-0018) — " +
-      "the chat-role-harness DB template (migration 027) is the canonical identity surface. " +
-      "This var is preserved for the composition path but its content is superseded.",
-    defaultTemplate: `[Legacy platform identity text — retired per B5-DF Option B (CW-20260426-0018).
-The chat-role-harness template (migration 027, slug: chat-role-harness, priority 1) is
-the canonical Chat-role identity. PlatformPromptTemplate is superseded and zero-consumer
-in the default install. See internal/store/prompt_templates.go for the var definition.]`,
-  },
-
-  // ── 3–7. BuiltinPromptTemplates (DB-seeded, priority 10–50) ─────────────
-  {
-    name: "Base Identity",
-    slug: "base-identity",
-    kind: "builtin-db-seed",
-    scope: "system",
-    priority: 10,
-    source: "internal/store/prompt_templates.go:241 (BuiltinPromptTemplates[0])",
-    variables: ["agent_name", "agent_description"],
-    note:
-      "Seeded to DB with is_builtin=1. Not auto-assigned to any agent. Consumer count: 0 unless " +
-      "explicitly assigned via AgentDetailView.",
-    defaultTemplate: `You are {{agent_name}}, {{agent_description}}.`,
-  },
-  {
-    name: "Workspace Context",
-    slug: "workspace-context",
-    kind: "builtin-db-seed",
-    scope: "context",
-    priority: 20,
-    source: "internal/store/prompt_templates.go:249 (BuiltinPromptTemplates[1])",
-    variables: ["workspace_name", "workspace_description"],
-    note: "Seeded to DB with is_builtin=1. Not auto-assigned.",
-    defaultTemplate: `You are operating within the workspace "{{workspace_name}}": {{workspace_description}}.`,
-  },
-  {
-    name: "Project Context",
-    slug: "project-context",
-    kind: "builtin-db-seed",
-    scope: "context",
-    priority: 30,
-    source: "internal/store/prompt_templates.go:257 (BuiltinPromptTemplates[2])",
-    variables: ["project_name", "project_description"],
-    note: "Seeded to DB with is_builtin=1. Not auto-assigned.",
-    defaultTemplate: `Current project: {{project_name}}. {{project_description}}`,
-  },
-  {
-    name: "Mode Addendum",
-    slug: "mode-addendum",
-    kind: "builtin-db-seed",
-    scope: "mode",
-    priority: 40,
-    source: "internal/store/prompt_templates.go:265 (BuiltinPromptTemplates[3])",
-    variables: ["mode_addendum"],
-    note:
-      "Seeded to DB with is_builtin=1. Resolves to empty string when no mode is set (skipped " +
-      "by ComposePromptForAgent). Not auto-assigned.",
-    defaultTemplate: `{{mode_addendum}}`,
-  },
-  {
-    name: "Tool Awareness",
-    slug: "tool-awareness",
-    kind: "builtin-db-seed",
-    scope: "skill",
-    priority: 50,
-    source: "internal/store/prompt_templates.go:273 (BuiltinPromptTemplates[4])",
-    variables: ["skill_list"],
-    note: "Seeded to DB with is_builtin=1. Not auto-assigned.",
-    defaultTemplate: `You have access to the following skills and their tools:
-{{skill_list}}
-
-Use these tools when appropriate to accomplish tasks. Each skill provides specific capabilities that you can invoke.`,
-  },
-
-  // ── 8. Worker agent system prompt (YAML config) ─────────────────────────
+  // ── 2. Worker agent system prompt (YAML config) ─────────────────────────
   {
     name: "Worker Agent",
     slug: "worker-builtin-yaml",
@@ -193,15 +108,11 @@ Use these tools when appropriate to accomplish tasks. Each skill provides specif
 // ─── Kind metadata ────────────────────────────────────────────────────────
 const KIND_LABEL: Record<SystemPromptEntry["kind"], string> = {
   "builtin-embed": "Go embed",
-  "builtin-go-var": "Go var",
-  "builtin-db-seed": "DB seed",
   "builtin-yaml": "YAML config",
 };
 
 const KIND_TONE: Record<SystemPromptEntry["kind"], string> = {
   "builtin-embed": "bg-status-ok/10 text-status-ok border-status-ok/30",
-  "builtin-go-var": "bg-status-warn/10 text-status-warn border-status-warn/30",
-  "builtin-db-seed": "bg-brand/10 text-brand border-brand/30",
   "builtin-yaml": "bg-status-info/10 text-status-info border-status-info/30",
 };
 
@@ -210,7 +121,6 @@ const SCOPE_TONE: Record<string, string> = {
   context: "bg-brand/10 text-brand border-brand/30",
   mode: "bg-status-ok/10 text-status-ok border-status-ok/30",
   skill: "bg-status-warn/10 text-status-warn border-status-warn/30",
-  platform: "bg-status-error/10 text-status-error border-status-error/30",
 };
 
 // ─── PromptCard ────────────────────────────────────────────────────────────
@@ -348,14 +258,13 @@ export function SystemPromptsViewer() {
       {/* Footer note */}
       <div className="rounded-lg border border-border-subtle bg-surface px-4 py-3">
         <p className="text-[11px] text-fg-faint leading-relaxed">
-          <strong className="text-fg-muted">Composition pipeline:</strong> Agents with ≥1 assigned
-          DB templates use <code className="font-mono">ComposePromptForAgent()</code> (template
-          path) which prepends Platform Capabilities (P5) then appends DB templates in priority
-          order. Agents with no assigned templates use the legacy path:{" "}
-          <code className="font-mono">assembleSystemPrompt()</code> with{" "}
-          <code className="font-mono">agent.SystemPrompt</code> directly. In the default install, no
-          agents have templates assigned — the Base Chat Agent is the active prompt for all
-          sessions.
+          <strong className="text-fg-muted">Composition pipeline:</strong> every agent composes its
+          system prompt directly from{" "}
+          <code className="font-mono">agent.SystemPrompt</code> via{" "}
+          <code className="font-mono">assembleAgentSlotContent()</code> — there is no separate
+          DB-backed prompt-template assembly path (the prompt_templates/agent_prompt_templates
+          mechanism was cut in full; Phase 0 item 29). The Base Chat Agent is the active prompt for
+          all default-agent sessions.
         </p>
       </div>
     </div>

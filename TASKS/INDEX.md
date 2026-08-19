@@ -207,6 +207,7 @@ This branch (`phase-1-execution`, based off Phase 0's `HEAD` as of 2026-08-18 �
 | 05-develop-registers-panels-and-crud | validated | none; held until `02` merges — scope corrected 2026-08-19 (see task file), now `crud[]` only |
 | 06-make-http-middleware-plugin-extensible | not-started | **operator design decision — see escalation below, not ready for mechanical dispatch — SKIPPED for this batch** |
 | 10-fix-list-agent-tools-endpoint-stale-permissions-view | validated | `TASKS/phase-4/05`, `01` (both already landed) — fix-as-new-worker-task for a real gap found during Orchestrator live dogfeed validation, see `TASKS/phase-5/10-fix-list-agent-tools-endpoint-stale-permissions-view.md` |
+| 11-fix-hot-reload-never-applies-manifest-registrations | in-progress | `02`, `03`, `04`, `05` (all already landed) — fix-as-new-worker-task for a real, pre-existing-but-newly-load-bearing gap found by the fresh Phase 5 Reviewer, see `TASKS/phase-5/11-fix-hot-reload-never-applies-manifest-registrations.md` |
 
 **Parallelization:** `02`, `03`, `05` all touch `internal/plugin/registrations.go` (different sections — the gating wrapper, the `agent_profiles` stub, the `panels`/`crud` stubs) — real overlap risk; land `02` first (it changes the shared gating structure `applyManifestRegistrations` wraps), then `03`/`05` can layer their specific registration logic on top. `01` (new REST endpoints, `internal/api/*`) has low file overlap with this cluster. `04` (`plugin_cmd.go`) and `06` (`server.go`) have no overlap with anything else in this cluster — fully parallel-safe.
 

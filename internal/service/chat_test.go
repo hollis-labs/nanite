@@ -314,8 +314,7 @@ func (stubUsageStore) GetUtilityCallSummary() ([]store.UtilityCallSummary, error
 func (stubUsageStore) GetUtilityCallLog(int) ([]store.ExecutionMetrics, error)    { return nil, nil }
 func (stubUsageStore) LogEvent(string, string, string, string, string)            {}
 func (stubUsageStore) ListEvents(string, int) ([]store.EventLog, error)           { return nil, nil }
-func (stubUsageStore) CountSessionToolCalls(string) int                           { return 0 }
-func (stubUsageStore) InsertAgentBrokerDecision(*store.AgentBrokerDecision) error { return nil }
+func (stubUsageStore) CountSessionToolCalls(string) int { return 0 }
 
 type stubProjectStore struct{}
 

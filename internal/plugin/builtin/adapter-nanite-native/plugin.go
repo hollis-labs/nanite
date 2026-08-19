@@ -1,12 +1,19 @@
-// Package nanitenative implements the nanite-native adapter plugin. It reads
-// agent definitions from .nanite/ and implements both
-// agent.CLIAgentAdapter and agent.AgentComposer for role/skill-based prompt
-// composition.
+// Package nanitenative implements the nanite-native adapter plugin. As of
+// TASKS/phase-2/06-cut-nanite-native-adapter-agent-sync.md it no longer
+// reads .nanite/config.yaml's agents: block into agent_profiles (both the
+// direct Plugin.Load sync and the Adapter.Discover composition into
+// AutoIngestAgents were cut — see each method's doc comment). It still
+// implements agent.CLIAgentAdapter (PopulateSandbox is real and live — a
+// different, DB/config -> disposable-sandbox-file direction) and
+// agent.AgentComposer for role/skill-based prompt composition, though the
+// AgentComposer methods (ComposePrompt/ListRoles/ListSkills) currently have
+// no callers anywhere in the codebase (a pre-existing condition, not
+// created by this cut — flagged as a follow-up candidate in that task's
+// Work Log rather than removed here).
 package nanitenative
 
 import (
 	_ "embed"
-	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -107,7 +114,7 @@ func (p *Plugin) ID() string      { return "adapter-nanite-native" }
 func (p *Plugin) Name() string    { return "Nanite Native Adapter" }
 func (p *Plugin) Version() string { return "0.2.0" }
 func (p *Plugin) Description() string {
-	return "Syncs .nanite/ agent definitions and provides CLIAgentAdapter + AgentComposer"
+	return "Provides CLIAgentAdapter (sandbox population) + AgentComposer for .nanite/ (agent_profiles sync removed, TASKS/phase-2/06)"
 }
 func (p *Plugin) Dependencies() []string { return nil }
 
@@ -116,110 +123,28 @@ func (p *Plugin) Dependencies() []string { return nil }
 // CLIAgentAdapter is wired via internal/service/install/adapters.go.
 func (p *Plugin) Manifest() *hostplugin.PluginManifest { return loadManifest() }
 
+// Load is a no-op with respect to agent storage. Prior to
+// TASKS/phase-2/06-cut-nanite-native-adapter-agent-sync.md this method read
+// .nanite/config.yaml's agents: block and directly upserted each entry into
+// agent_profiles via store.UpsertAgentBySlug — an ungated, unconditional
+// overwrite on every boot. That write path is cut in full per the standing
+// decision in docs/engineering/architecture/01-agent-construction.md's
+// "What's cut" section ("Files as agent storage, except builtin/seed
+// content"), which applies to this adapter's file-based sync regardless of
+// how deliberately it was originally built (see the task file's Context for
+// the operator's own confirmation of that). Adapter.Discover's parallel
+// composition into the AutoIngestAgents pipeline was cut alongside this one
+// — see that method's doc comment.
+//
+// The plugin still loads successfully with no store dependency: it no
+// longer needs the "store" service at all for this method.
+// PopulateSandbox (per-launch sandbox population, a different DB/config ->
+// disposable-file direction) is unaffected and does not depend on Load
+// running any sync logic.
 func (p *Plugin) Load(host plugin.Host) error {
 	p.host = host
-	logger := host.Logger()
-
-	svc, err := host.GetService("store")
-	if err != nil {
-		return fmt.Errorf("adapter-nanite-native: store service unavailable: %w", err)
-	}
-	s, ok := svc.(*store.Store)
-	if !ok {
-		return fmt.Errorf("adapter-nanite-native: store service has unexpected type %T", svc)
-	}
-
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return fmt.Errorf("adapter-nanite-native: cannot determine home dir: %w", err)
-	}
-
-	// Read global config for role definitions.
-	globalCfg := readGlobalConfigFromHome(home)
-
-	// Read project-level config.
-	projectCfg, projectConfigDir, err := readProjectConfigFromRoot(".")
-	if err != nil {
-		logger.Info("adapter-nanite-native: no project config found", "error", err.Error())
-		p.status = plugin.PluginStatus{Loaded: true, Enabled: true, LoadedAt: time.Now()}
-		return nil
-	}
-
-	if len(projectCfg.Agents) == 0 {
-		logger.Info("adapter-nanite-native: no agents defined in project config")
-		p.status = plugin.PluginStatus{Loaded: true, Enabled: true, LoadedAt: time.Now()}
-		return nil
-	}
-
-	rolesDir := globalDir(home, "roles")
-	configPath, _ := filepath.Abs(filepath.Join(projectConfigDir, "config.yaml"))
-
-	// Track which slugs we synced so we can disable removed agents.
-	syncedSlugs := make(map[string]bool, len(projectCfg.Agents))
-
-	for slug, agentDef := range projectCfg.Agents {
-		syncedSlugs[slug] = true
-
-		// Compose system prompt from roles.
-		systemPrompt := composeSystemPrompt(globalCfg, rolesDir, agentDef.Roles)
-
-		// Append project context if specified.
-		if agentDef.Context != "" {
-			ctxPath := filepath.Join(projectConfigDir, agentDef.Context)
-			if data, err := os.ReadFile(ctxPath); err == nil {
-				systemPrompt += "\n\n[Project Context]\n" + string(data)
-			} else {
-				logger.Warn("adapter-nanite-native: could not read context file", "path", ctxPath, "error", err.Error())
-			}
-		}
-
-		// Build tags from roles + skills.
-		tags := []string{"nanite"}
-		tags = append(tags, agentDef.Roles...)
-		tagsJSON, _ := json.Marshal(tags)
-
-		ap := &store.AgentProfile{
-			Name:         agentDef.Name,
-			Slug:         slug,
-			Description:  agentDef.Description,
-			SystemPrompt: systemPrompt,
-			CanExecute:   true,
-			Status:       "active",
-			Source:       "nanite",
-			SourceRef:    configPath,
-			Tags:         string(tagsJSON),
-		}
-
-		if err := s.UpsertAgentBySlug(ap); err != nil {
-			logger.Error("adapter-nanite-native: failed to upsert agent", "slug", slug, "error", err.Error())
-			continue
-		}
-		logger.Info("adapter-nanite-native: synced agent", "slug", slug, "name", agentDef.Name)
-	}
-
-	// Disable agents that were previously synced but are no longer in the config.
-	existing, err := s.ListAgentsBySource("nanite")
-	if err != nil {
-		logger.Warn("adapter-nanite-native: could not list existing agents", "source", "nanite", "error", err.Error())
-	} else {
-		for _, a := range existing {
-			if !syncedSlugs[a.Slug] && a.Status == "active" {
-				a.Status = "disabled"
-				if err := s.UpdateAgent(&a); err != nil {
-					logger.Warn("adapter-nanite-native: failed to disable removed agent", "slug", a.Slug, "error", err.Error())
-				} else {
-					logger.Info("adapter-nanite-native: disabled removed agent", "slug", a.Slug)
-				}
-			}
-		}
-	}
-
-	p.status = plugin.PluginStatus{
-		Loaded:   true,
-		Enabled:  true,
-		LoadedAt: time.Now(),
-	}
-	logger.Info("adapter-nanite-native: loaded", "agents_synced", len(syncedSlugs))
+	p.status = plugin.PluginStatus{Loaded: true, Enabled: true, LoadedAt: time.Now()}
+	host.Logger().Info("adapter-nanite-native: loaded (agent_profiles sync removed, TASKS/phase-2/06)")
 	return nil
 }
 
@@ -258,47 +183,27 @@ func (a *Adapter) Name() string { return "nanite-native" }
 // Priority returns the discovery order. Lower = checked first.
 func (a *Adapter) Priority() int { return 50 }
 
-// Discover scans projectDir for agent definitions and returns normalized Definitions.
-func (a *Adapter) Discover(projectDir string) ([]agent.Definition, error) {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return nil, fmt.Errorf("adapter-nanite-native: cannot determine home dir: %w", err)
-	}
-
-	globalCfg := readGlobalConfigFromHome(home)
-
-	projectCfg, projectConfigDir, err := readProjectConfigFromRoot(projectDir)
-	if err != nil {
-		// No config file is not an error — just no agents to discover.
-		return nil, nil
-	}
-
-	rolesDir := globalDir(home, "roles")
-
-	var defs []agent.Definition
-	for slug, agentDef := range projectCfg.Agents {
-		systemPrompt := composeSystemPrompt(globalCfg, rolesDir, agentDef.Roles)
-
-		if agentDef.Context != "" {
-			ctxPath := filepath.Join(projectConfigDir, agentDef.Context)
-			if data, err := os.ReadFile(ctxPath); err == nil {
-				systemPrompt += "\n\n[Project Context]\n" + string(data)
-			}
-		}
-
-		defs = append(defs, agent.Definition{
-			Name:         agentDef.Name,
-			Slug:         slug,
-			Description:  agentDef.Description,
-			SystemPrompt: systemPrompt,
-			Source:       "nanite",
-			SourceRef:    filepath.Join(projectConfigDir, "config.yaml"),
-			Skills:       agentDef.Skills,
-			Tags:         append([]string{"nanite"}, agentDef.Roles...),
-		})
-	}
-
-	return defs, nil
+// Discover is a no-op. This adapter used to re-parse .nanite/config.yaml's
+// agents: block independently of Load (above) and feed the results into the
+// (gated) AutoIngestAgents/upsertAgentDef pipeline via
+// internal/agent/discovery.go's adapter-discovery tier — a second, parallel
+// .nanite/config.yaml -> agent_profiles write path alongside Load's direct
+// sync. Both paths are cut together by
+// TASKS/phase-2/06-cut-nanite-native-adapter-agent-sync.md, closing the
+// carve-out left open by TASKS/phase-0/16-cut-external-agent-import.md
+// (which cut the same Discover method on the four external-format adapters
+// — adapter-claude/codex/gemini/opencode — but explicitly kept this
+// adapter's Discover alive at the time because nothing else fed the
+// adapter-discovery tier). See
+// docs/engineering/architecture/01-agent-construction.md's "What's cut"
+// section: "Files as agent storage, except builtin/seed content."
+//
+// The signature stays so the agent.CLIAgentAdapter interface contract holds
+// (mirroring the precedent set by the four external-format adapters).
+// PopulateSandbox below (the opposite, DB/config -> disposable-sandbox-file
+// direction) is unaffected and remains live.
+func (a *Adapter) Discover(_ string) ([]agent.Definition, error) {
+	return nil, nil
 }
 
 // PopulateSandbox writes a minimal .nanite/ structure into sandboxDir for the agent.

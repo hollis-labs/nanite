@@ -396,11 +396,16 @@ func NewContainer(cfg ContainerConfig) (*Container, error) {
 		slog.Warn("service container: ensure agent home dirs", "err", err)
 	}
 
-	// Discover agent definitions from the remaining live tiers (CLI --agent
-	// flag, currently unreachable, plus adapter-discovered — e.g. the
-	// nanite-native adapter's .nanite/config.yaml agents: block). The
-	// project/user/plugin directory-scan tiers were cut in full by
-	// TASKS/phase-1/08 — no PluginsDir/HomeDir wiring is needed anymore.
+	// Discover agent definitions from the remaining tiers (CLI --agent flag,
+	// currently unreachable, plus adapter-discovered). As of
+	// TASKS/phase-2/06-cut-nanite-native-adapter-agent-sync.md every
+	// registered CLIAgentAdapter (including nanite-native, the last one
+	// that used to produce real results here) has a no-op Discover() — see
+	// internal/agent/discovery.go's DiscoverOptions.Adapters doc comment
+	// for why adapterRegistry is still passed through (it's also used below
+	// for PopulateAllSandboxes/SyncAllProjectRoots). The project/user/plugin
+	// directory-scan tiers were cut in full by TASKS/phase-1/08 — no
+	// PluginsDir/HomeDir wiring is needed anymore.
 	agentDefs, err := agent.Discover(agent.DiscoverOptions{
 		WorkingDir: workingDir,
 		Adapters:   adapterRegistry,

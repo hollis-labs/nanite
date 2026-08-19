@@ -39,8 +39,20 @@ type DiscoverOptions struct {
 	// Adapters is an optional AdapterRegistry for adapter-based discovery.
 	// External-ecosystem-format adapters (claude/codex/gemini/opencode)
 	// already have a no-op Discover() as of Phase 0's cut of external agent
-	// import; the nanite-native adapter's own discovery is unaffected by
-	// this task and stays live.
+	// import (TASKS/phase-0/16). The nanite-native adapter's own Discover
+	// (.nanite/config.yaml's agents: block -> agent_profiles, the last
+	// remaining producer at this tier) was also cut to a no-op by
+	// TASKS/phase-2/06-cut-nanite-native-adapter-agent-sync.md — see
+	// docs/engineering/architecture/01-agent-construction.md's "What's cut"
+	// ("Files as agent storage, except builtin/seed content"). As of that
+	// task, every currently-registered CLIAgentAdapter.Discover() returns
+	// (nil, nil); this tier contributes nothing to agentDefs in practice.
+	// The loop below is left in place as a live extension point for the
+	// CLIAgentAdapter interface (a future plugin-provided adapter could
+	// still return real Definitions) and because the same AdapterRegistry
+	// instance is also used for the unrelated, still-live
+	// PopulateAllSandboxes/SyncAllProjectRoots directions — see
+	// internal/service/container.go's newRuntimeAdapterRegistry.
 	Adapters *AdapterRegistry
 }
 
@@ -71,10 +83,12 @@ func Discover(opts DiscoverOptions) ([]*Definition, error) {
 		add(def)
 	}
 
-	// Priority 2+: adapter-discovered agents (e.g. the nanite-native
-	// adapter's .nanite/config.yaml agents: block). External-ecosystem-format
-	// adapters were already cut to no-ops by Phase 0's external-agent-import
-	// removal.
+	// Priority 2+: adapter-discovered agents. As of
+	// TASKS/phase-2/06-cut-nanite-native-adapter-agent-sync.md every
+	// registered CLIAgentAdapter's Discover() (including nanite-native's,
+	// the last one that used to produce real results here) returns
+	// (nil, nil) — this tier is currently always empty in practice. See
+	// DiscoverOptions.Adapters' doc comment above for why the loop stays.
 	if opts.Adapters != nil {
 		adapterDefs, err := opts.Adapters.DiscoverAll(opts.WorkingDir)
 		if err != nil {

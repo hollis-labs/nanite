@@ -3,9 +3,14 @@
 **Phase:** 9
 **Status:** not-started
 
-## ⚠️ POLICY NOT YET CONFIRMED — DO NOT RESOLVE DURING PLANNING OR EXECUTION WITHOUT OPERATOR CONFIRMATION
+## ✅ Policy confirmed 2026-08-19 — operator decision, see below
 
-**TASKS.md itself flags its proposed policy as "needs confirmation before executing." This task file drafts the scope and inventory fully, but the actual archive-vs-delete-vs-banner policy decision must come from the operator before any file in this task's scope is moved, banner-stamped, or deleted. Do not default to any single treatment (including the standing aggressive-dead-code-removal policy) as a substitute for that confirmation — this item is explicitly carved out from that default by TASKS.md's own wording.**
+**Resolved.** The operator confirmed the archive-vs-delete-vs-banner policy directly (2026-08-19), including the third `adr/` sequence question. Recorded here so a worker doesn't need to re-ask:
+
+- **Genuinely superseded docs with no remaining historical value** (the bulk of `docs/architecture/` and the ~56-58 supersedable top-level `docs/*.md`): **delete per the standing dead-code policy.** Do not archive these — git history is sufficient if ever needed.
+- **ADRs — all three colliding sequences** (`docs/decisions/`'s 3 files, `docs/architecture/ADR-001-tool-scoping-and-resilience.md`, and the newly-found `adr/` directory's 23 files, including its own `ADR-001-tech-stack.md`): **keep, do not delete** — add a banner on each noting the collision and pointing to `docs/engineering/decisions/` as the one canonical sequence going forward. ADRs are an immutable record of a real decision-with-alternatives; that's real historical value even when superseded, unlike a plain design doc that's just wrong now. The `adr/` directory is explicitly **in scope** for this pass — do not silently fold it in without a banner, and do not defer it.
+- **`docs/audits/`** (325 files, ~29K lines, the April tree): treat as **one historical-snapshot unit**, not per-file triage — archive/banner the whole tree together rather than triaging 325 individual files. Scale alone (not urgency) is why: per-file triage here would be a materially different, much larger task.
+- The 6-7 live review-artifact top-level files (see list below) stay untouched regardless — not part of any bucket above.
 
 **Depends on:** none functionally, but should run late in the overall effort (per its own phase placement) since docs across `docs/engineering/*` may keep evolving until then, and a docs sweep run too early would need re-verification.
 **Touches:** `docs/architecture/` (42 files, 8,786 lines), `docs/decisions/` (3 files, 403 lines), `docs/audits/` (325 files, 29,307 lines — the April tree, distinct from `docs/system-audit/2026-08-17/`, which is EXCLUDED from this task's scope), top-level `docs/*.md` (65 files, 12,995 lines).
@@ -41,22 +46,22 @@ Two files collide exactly as TASKS.md names:
 
 ## What to do
 
-1. **Get explicit operator confirmation on the archive-vs-delete-vs-banner policy before touching any file** — present the three-way split (archive location, delete-per-dead-code-policy, superseded-banner) and get a real decision, not an inferred default. Also get an explicit in/out-of-scope call on the third `adr/` ADR sequence.
-2. Resolve the two (or three, if in scope) colliding `ADR-001` files per whatever the operator decides — likely: keep both/all as historical record with a banner noting the collision and pointing to `docs/engineering/decisions/` as canonical going forward, rather than renumbering retroactively (per `docs/engineering/decisions/README.md`'s own stated approach).
-3. For `docs/architecture/` and `docs/decisions/` (smaller, target-architecture-shaped corpora): do the real file-by-file superseded-vs-real-historical-value triage the research pass above only sampled, and apply the confirmed policy.
-4. For `docs/audits/`: apply whatever unit-of-treatment the operator confirms (whole-tree archival vs. per-file triage) — do not default to per-file triage given the ~29K-line scale unless the operator explicitly wants that granularity.
-5. For top-level `docs/*.md`: apply the confirmed policy to the ~56-58 non-excluded files; explicitly leave the 6-7 review-artifact files listed above untouched, un-bannered, and in place.
-6. Fix `docs/audits/README.md`'s stale "where ADRs go" pointer regardless of the broader policy outcome.
-7. If "archive location" is the chosen policy for any bucket, confirm the location doesn't collide with anything else in the repo and is clearly marked as historical (not just moved to a same-looking directory).
+1. For `docs/architecture/` and `docs/decisions/` (smaller, target-architecture-shaped corpora): do the real file-by-file superseded-vs-real-historical-value triage the research pass above only sampled. Delete confirmed-superseded, no-remaining-value files (mostly `docs/architecture/`); keep and banner the ADRs (`docs/decisions/`'s 3 files, plus `docs/architecture/ADR-001-tool-scoping-and-resilience.md`) per the confirmed policy above.
+2. Resolve all three colliding `ADR-001` files (`docs/decisions/ADR-001-models-catalog-sync.md`, `docs/architecture/ADR-001-tool-scoping-and-resilience.md`, `adr/ADR-001-tech-stack.md`) the same way: keep all three as historical record, each with a banner noting the collision and pointing to `docs/engineering/decisions/` as canonical going forward — not renumbered retroactively (per `docs/engineering/decisions/README.md`'s own stated approach).
+3. Apply the same keep-and-banner treatment to the rest of the `adr/` directory's 23 files — in scope for this pass, not deferred.
+4. For `docs/audits/`: archive/banner the whole tree as one historical-snapshot unit — do not do per-file triage, per the confirmed policy.
+5. For top-level `docs/*.md`: delete the ~56-58 confirmed-superseded, non-excluded files; explicitly leave the 6-7 review-artifact files listed above untouched, un-bannered, and in place.
+6. Fix `docs/audits/README.md`'s stale "where ADRs go" pointer.
+7. For whichever bucket ends up archived rather than deleted (the audits tree, at minimum), confirm the archive location doesn't collide with anything else in the repo and is clearly marked as historical (not just moved to a same-looking directory).
 
 ## Done means
 
-- Explicit operator confirmation of the policy is recorded in this file's Work Log before any file was moved, banner-stamped, or deleted.
-- The `ADR-001` collision (and the `adr/` third-sequence question) is resolved per that confirmed policy, not silently.
-- Every file identified as superseded either carries an explicit "superseded by `docs/engineering/...`" banner, has been moved to a clearly-marked archive location, or was deleted — per the confirmed policy, applied consistently, not on an ad hoc per-file basis.
+- The `ADR-001` collision across all three sequences (including `adr/`) is resolved per the confirmed policy: kept, bannered, not deleted.
+- Every file identified as genuinely superseded with no remaining historical value (mainly `docs/architecture/` and top-level `docs/*.md`) is deleted per the standing dead-code policy.
+- `docs/audits/` is archived/bannered as one unit, not per-file.
 - The 6-7 live review-artifact files are confirmed untouched.
 - `docs/audits/README.md`'s stale ADR-location pointer is fixed.
-- A final accounting (file counts moved/deleted/bannered/left-as-is) is recorded in this file's Work Log.
+- A final accounting (file counts deleted/bannered/left-as-is) is recorded in this file's Work Log.
 
 ## Work log
 <Worker fills this in as it goes: what was actually done, any deviation from plan and why, anything escalated. Record the operator's policy confirmation explicitly here before any archival action.>

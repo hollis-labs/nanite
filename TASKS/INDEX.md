@@ -196,16 +196,17 @@ This branch (`phase-1-execution`, based off Phase 0's `HEAD` as of 2026-08-18 �
 
 **Escalation logged**: the reaper item's real-world-behavior verification (originally scoped here as `01`, now `TASKS/phase-8/05-verify-reaper-behavior.md`) is resolved via historical-log analysis against the real production DB backup — see `TASKS/ESCALATIONS.md`'s corresponding entry and Phase 8 below.
 
-## Phase 5 — Plugins & Registers (6 task files)
+## Phase 5 — Plugins & Registers (7 task files)
 
 | Task | Status | Depends on |
 |---|---|---|
 | 01-build-assignment-api | implemented | Phase 1 tasks 01-08 (landed via the Phase 1→main merge) |
 | 02-build-plugin-installed-enabled-state-model | implemented | none |
-| 03-wire-registers-agent-profiles | in-progress | Phase 1 in full (landed via the Phase 1→main merge); held until `02` merges |
+| 03-wire-registers-agent-profiles | implemented | Phase 1 in full (landed via the Phase 1→main merge); held until `02` merges |
 | 04-close-cli-install-hot-reload-asymmetry | implemented | none |
 | 05-develop-registers-panels-and-crud | implemented | none; held until `02` merges — scope corrected 2026-08-19 (see task file), now `crud[]` only |
 | 06-make-http-middleware-plugin-extensible | not-started | **operator design decision — see escalation below, not ready for mechanical dispatch — SKIPPED for this batch** |
+| 10-fix-list-agent-tools-endpoint-stale-permissions-view | in-progress | `TASKS/phase-4/05`, `01` (both already landed) — fix-as-new-worker-task for a real gap found during Orchestrator live dogfeed validation, see `TASKS/phase-5/10-fix-list-agent-tools-endpoint-stale-permissions-view.md` |
 
 **Parallelization:** `02`, `03`, `05` all touch `internal/plugin/registrations.go` (different sections — the gating wrapper, the `agent_profiles` stub, the `panels`/`crud` stubs) — real overlap risk; land `02` first (it changes the shared gating structure `applyManifestRegistrations` wraps), then `03`/`05` can layer their specific registration logic on top. `01` (new REST endpoints, `internal/api/*`) has low file overlap with this cluster. `04` (`plugin_cmd.go`) and `06` (`server.go`) have no overlap with anything else in this cluster — fully parallel-safe.
 

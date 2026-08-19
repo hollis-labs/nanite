@@ -266,7 +266,7 @@ func (s *chatServiceImpl) generateResponse(ctx context.Context, sessionID, assis
 	}
 
 	// --- Resolve provider ---
-	providerName, prov := s.resolveProvider(sessionID, session.Provider, agent.DefaultProvider, model)
+	providerName, prov := s.resolveProvider(sessionID, session.Provider, agent.DefaultProvider, model, agent.RuntimeKind)
 	if prov == nil {
 		// CW-20260514-0045: dropdown-selected CLI providers (e.g.
 		// "pty-claude", "pty-codex", "pty-opencode", legacy "pty") no
@@ -279,6 +279,14 @@ func (s *chatServiceImpl) generateResponse(ctx context.Context, sessionID, assis
 		// call site further down, which now branches on `prov == nil`
 		// (this decision, made exactly once here) rather than
 		// re-deriving CLI-ness from providerName's string shape.
+		//
+		// Phase 3 item 01 (TASKS/phase-3/01-collapse-resolveprovider-
+		// into-cascade.md): resolveProvider above now also threads
+		// agent.RuntimeKind through its own walk, so a runtime_kind='cli'
+		// agent can no longer silently resolve to a non-nil HTTP provider
+		// in the first place (the bug this task fixed) — classifyNilProvider
+		// here is now purely the nil-provider classification step, not
+		// the only place runtime_kind is consulted.
 		switch s.classifyNilProvider(agent.RuntimeKind, providerName) {
 		case nilProviderRouteCLI:
 			slog.Info("chat-service: CLI provider routed to agent runtime (no llmcontracts.Provider registered)",

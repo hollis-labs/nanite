@@ -29,6 +29,21 @@ type OverrideConfig struct {
 	// parallel resolution path, per that task's own explicit instruction.
 	ModelID string `yaml:"model_id,omitempty" json:"model_id,omitempty"`
 
+	// MessageWakePolicy backs chat.AgentConstraints.MessageWakePolicy
+	// (CW-20260816-0065) — same three-value vocabulary
+	// (render_and_wait/auto_summarize/batch) as the agent-profile
+	// constraints field it mirrors. Added by Phase 3 item 01
+	// (TASKS/phase-3/01-collapse-resolveprovider-into-cascade.md), which
+	// folded internal/service's resolveMessageWakePolicy into this
+	// package's shared merge engine instead of its own bespoke three-step
+	// walk. Same "no live role-level source column yet, but wire the seam"
+	// precedent as ModelID above: roles has no message_wake_policy-
+	// equivalent column, so only the agent (project) and session (task)
+	// layers ever populate this in practice today — see
+	// internal/service/messaging_reactor.go's resolveMessageWakePolicy,
+	// the caller.
+	MessageWakePolicy string `yaml:"message_wake_policy,omitempty" json:"message_wake_policy,omitempty"`
+
 	// Lists — union with optional +/- prefix support.
 	Tools       []string `yaml:"tools,omitempty"       json:"tools,omitempty"`
 	Skills      []string `yaml:"skills,omitempty"      json:"skills,omitempty"`
@@ -91,6 +106,9 @@ func applyLayer(base, layer OverrideConfig) OverrideConfig {
 	}
 	if layer.ModelID != "" {
 		base.ModelID = layer.ModelID
+	}
+	if layer.MessageWakePolicy != "" {
+		base.MessageWakePolicy = layer.MessageWakePolicy
 	}
 
 	// Lists: union with +/- prefix support.

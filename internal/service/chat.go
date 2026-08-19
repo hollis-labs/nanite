@@ -1029,14 +1029,62 @@ func (s *chatServiceImpl) CloseAgentSession(ctx context.Context, sessionID strin
 // Internal helpers
 // ---------------------------------------------------------------------------
 
-// resolveProvider walks the provider fallback chain. Resolution order:
-//  1. sessionProvider (explicit per-session)
-//  2. agentProvider (agent profile default)
-//  3. user_settings.default_provider (operator SSOT preference)
-//  4. user_settings.ProviderFallbackChain (resilience list)
-//  5. chat.InferProvider(model) — map model name to provider
+// resolveProvider reads the role->agent->task composition cascade's
+// already-resolved provider as its primary path (architecture/
+// 02-agent-launching.md: "Once an agents row has a real, cascade-resolved
+// model_id, provider/model resolution is 'read the already-resolved
+// value,' not a second independent walk"). agentProvider arrives here as
+// agent.DefaultProvider from chat_generate.go's
+// s.agents.ResolveForSession(...) call, which already ran
+// applyScalarCascade/ResolveAgentCascade (Phase 1 item 01) before
+// returning — reading it here is not a second, independent lookup, it's
+// consuming that cascade's output.
 //
-// CW-20260812-0001 investigation: step 3 was missing entirely before this
+// Phase 3 item 01 (this task, TASKS/phase-3/01-collapse-resolveprovider-
+// into-cascade.md) folded runtimeKind into the walk itself, closing a
+// real, confirmed bug found during Phase 2's close-out review: this
+// function used to have zero awareness of agent.RuntimeKind, so a
+// runtime_kind='cli' agent configured with a bare (non-"pty-"/"sub-"-
+// prefixed) default_provider — e.g. "claude" instead of the legacy
+// "pty-claude" alias shape — could walk all the way to a real, registered
+// HTTP provider (via user_settings.default_provider, the fallback chain,
+// or chat.InferProvider(model)) and never reach chat_generate.go's
+// classifyNilProvider at all, where runtime_kind is otherwise consulted.
+// The turn then silently routed through the HTTP/API path with no error.
+//
+// Fixed by making runtimeKind=="cli" authoritative and checked once, per
+// architecture/02-agent-launching.md's "CLI-vs-API routing is an explicit
+// typed field" design: as soon as the session-level or cascade-resolved
+// (agent-level) candidate is known to not already be CLI-shaped, a cli
+// runtime commits to a (name, nil) result right there and never walks
+// into steps 3/4/5 below — none of which have any way to produce a
+// CLI-safe result, since they only ever resolve names that are either
+// operator-configured HTTP providers or InferProvider's HTTP-provider
+// routing floor. See chat_resolve_provider_test.go's
+// TestResolveProvider_CLIRuntimeKind_BareDefaultProvider_NeverRoutesHTTP
+// for the literal reproduction of the pre-fix bug.
+//
+// Resolution order:
+//  1. sessionProvider (explicit per-session override — narrowest,
+//     task/invocation-shaped tier)
+//  2. agentProvider (cascade-resolved composition default — primary path
+//     once Phase 1's cascade is populated; today still "" for every
+//     pre-existing row, since none have role_id/model_id/a non-empty
+//     default_provider set — see this task's Work Log for the real-data
+//     check)
+//  3. user_settings.default_provider (operator-level installation-wide
+//     default — NOT part of the role->agent->task composition cascade;
+//     kept as a narrow, still-load-bearing fallback tier rather than
+//     declared dead, because every one of the 28 real rows in the
+//     production DB backup resolves through this step today. See Work
+//     Log for the full rationale.)
+//  4. user_settings.ProviderFallbackChain (resilience list, same tier as 3)
+//  5. chat.InferProvider(model) — the genuine "no resolvable composition
+//     anywhere" floor
+//
+// Steps 3-5 are UNREACHABLE whenever runtimeKind=="cli" — see above.
+//
+// CW-20260812-0001 investigation: step 3 was missing entirely before that
 // fix. user_settings.default_provider was never consulted here — it's a
 // separate resolver used only for the *model* dimension elsewhere (see
 // store.ResolveProviderAndModel in chat_generate.go). A session with no
@@ -1076,6 +1124,13 @@ func (s *chatServiceImpl) CloseAgentSession(ctx context.Context, sessionID strin
 // candidate. requested is the originally-requested provider (for the
 // session or agent step); when the resolved name differs from it, a
 // provider.fallback plugin event is emitted before returning.
+//
+// Only ever called from resolveProvider's steps 3/4 (operator-level
+// user_settings tiers) after this task's rewrite — those steps are
+// structurally unreachable once runtimeKind=="cli" is known (see
+// resolveProvider's doc comment), so this helper itself doesn't need its
+// own runtimeKind parameter: by the time it can run, the caller has
+// already confirmed the current turn is not CLI-authoritative.
 func (s *chatServiceImpl) tryProviderCandidate(sessionID, requested, name, warnMsg string) (string, llmcontracts.Provider, bool) {
 	if p, ok := s.providers.Get(name); ok {
 		if requested != "" && requested != name && s.pluginHost != nil {
@@ -1093,7 +1148,7 @@ func (s *chatServiceImpl) tryProviderCandidate(sessionID, requested, name, warnM
 	return "", nil, false
 }
 
-func (s *chatServiceImpl) resolveProvider(sessionID, sessionProvider, agentProvider, model string) (string, llmcontracts.Provider) {
+func (s *chatServiceImpl) resolveProvider(sessionID, sessionProvider, agentProvider, model, runtimeKind string) (string, llmcontracts.Provider) {
 	// Track the first requested provider so we can emit a fallback event
 	// when a later candidate is selected instead.
 	requested := sessionProvider
@@ -1101,28 +1156,89 @@ func (s *chatServiceImpl) resolveProvider(sessionID, sessionProvider, agentProvi
 		requested = agentProvider
 	}
 
+	// cliRuntime is authoritative once true: this turn's session-bound
+	// agent has agents.runtime_kind='cli' (architecture/
+	// 02-agent-launching.md's "CLI-vs-API routing is an explicit typed
+	// field" — one typed field, checked once, not re-derived from string
+	// shape at every step). See this function's doc comment for the real
+	// bug this closes.
+	cliRuntime := runtimeKind == "cli"
+
+	// --- Step 1: sessionProvider (explicit per-session override) ---
 	if sessionProvider != "" {
 		runtimeProvider := sessionProvider
 		if stored, err := s.store.GetProvider(sessionProvider); err == nil && stored != nil && stored.ProviderType != "" {
 			runtimeProvider = stored.ProviderType
 		}
-		if p, ok := s.providers.Get(runtimeProvider); ok {
-			return runtimeProvider, p
-		}
 		if chat.IsCLIProvider(runtimeProvider) {
 			return runtimeProvider, nil
 		}
-		slog.Warn("chat-service: session provider not registered, falling through",
-			"provider", sessionProvider, "runtime_provider", runtimeProvider)
+		if cliRuntime {
+			// A non-CLI-shaped explicit session provider must not win
+			// over an authoritatively-cli agent — probing the HTTP
+			// registry here would risk exactly the bug this task fixes.
+			// Fall through to the cascade-resolved (agent) tier instead
+			// of resolving a real HTTP provider for this session.
+			slog.Warn("chat-service: session provider is not CLI-shaped but agent runtime_kind is cli, ignoring in favor of the cascade-resolved provider",
+				"provider", sessionProvider, "runtime_provider", runtimeProvider)
+		} else if p, ok := s.providers.Get(runtimeProvider); ok {
+			return runtimeProvider, p
+		} else {
+			slog.Warn("chat-service: session provider not registered, falling through",
+				"provider", sessionProvider, "runtime_provider", runtimeProvider)
+		}
 	}
 
+	// --- Step 2: agentProvider (cascade-resolved composition default —
+	// primary path; see doc comment above) ---
 	if agentProvider != "" {
+		if chat.IsCLIProvider(agentProvider) {
+			if requested != "" && requested != agentProvider && s.pluginHost != nil {
+				s.pluginHost.EmitProviderFallback(sessionID, requested, agentProvider)
+			}
+			return agentProvider, nil
+		}
+		if cliRuntime {
+			// The real, confirmed bug this task fixes: a bare (non-
+			// "pty-"/"sub-"-prefixed) cascade-resolved default_provider
+			// on a runtime_kind='cli' agent must still route CLI, not
+			// fall through to tryProviderCandidate's registry probe
+			// below (which is exactly what silently produced a real
+			// HTTP provider before this fix).
+			return agentProvider, nil
+		}
 		if name, p, ok := s.tryProviderCandidate(sessionID, requested, agentProvider,
 			"chat-service: agent provider not registered, falling through"); ok {
 			return name, p
 		}
 	}
 
+	if cliRuntime {
+		// runtime_kind='cli' is still authoritative even when neither
+		// step above produced a CLI-shaped name (e.g. agentProvider=="",
+		// or it missed IsCLIProvider and got intercepted above). Commit
+		// to the CLI route here rather than falling through to the
+		// operator-level tiers below (3/4/5), none of which can ever
+		// resolve to a value safe to hand back as a non-CLI-shaped
+		// (name, nil): those tiers only ever produce HTTP-registered
+		// provider names.
+		name := agentProvider
+		if name == "" {
+			name = sessionProvider
+		}
+		return name, nil
+	}
+
+	// --- Steps 3/4: user_settings.default_provider / ProviderFallbackChain
+	// — operator-level, installation-wide floor. Not part of the
+	// role->agent->task composition cascade (roles/agent_profiles have no
+	// equivalent of this — it's a single global preference, not a
+	// per-role/per-agent value), but deliberately kept as a real,
+	// documented fallback rather than declared dead: see this task's Work
+	// Log for the real production-data check that every one of the 28
+	// existing agent rows resolves through this tier today (all have
+	// default_provider=""), so removing it would be a behavior change,
+	// not a resolution-mechanism swap. ---
 	if us, err := s.store.GetUserSettings(); err == nil {
 		if us.DefaultProvider != "" {
 			if name, p, ok := s.tryProviderCandidate(sessionID, requested, us.DefaultProvider,
@@ -1139,6 +1255,8 @@ func (s *chatServiceImpl) resolveProvider(sessionID, sessionProvider, agentProvi
 		}
 	}
 
+	// --- Step 5: chat.InferProvider(model) — the genuine "no resolvable
+	// composition anywhere" floor. ---
 	inferred := chat.InferProvider(model)
 	if p, ok := s.providers.Get(inferred); ok {
 		if requested != "" && requested != inferred && s.pluginHost != nil {

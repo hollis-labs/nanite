@@ -68,7 +68,7 @@ func TestResolveProvider_CLISessionProvider_ShortCircuits(t *testing.T) {
 		store:     mustNewStoreForResolveTest(t),
 	}
 
-	name, prov := s.resolveProvider("sess-1", "pty", "", "claude-cli")
+	name, prov := s.resolveProvider("sess-1", "pty", "", "claude-cli", "api")
 	if name != "pty" {
 		t.Fatalf("resolveProvider returned name=%q, want %q (c195 regression — must not fall through to anthropic stub)", name, "pty")
 	}
@@ -94,7 +94,7 @@ func TestResolveProvider_StoredProviderID_UsesRuntimeProviderType(t *testing.T) 
 		store:     st,
 	}
 
-	name, prov := s.resolveProvider("sess-1", "tether-001", "", "auto")
+	name, prov := s.resolveProvider("sess-1", "tether-001", "", "auto", "api")
 	if name != "tether" {
 		t.Fatalf("resolveProvider returned name=%q, want %q (stored provider ids must map to runtime provider_type before fallback)", name, "tether")
 	}
@@ -109,7 +109,7 @@ func TestResolveProvider_CLIAgentProvider_ShortCircuits(t *testing.T) {
 		store:     mustNewStoreForResolveTest(t),
 	}
 
-	name, prov := s.resolveProvider("sess-1", "", "pty-claude", "claude-cli")
+	name, prov := s.resolveProvider("sess-1", "", "pty-claude", "claude-cli", "api")
 	if name != "pty-claude" {
 		t.Fatalf("resolveProvider returned name=%q, want %q (must not fall through to anthropic stub)", name, "pty-claude")
 	}
@@ -140,7 +140,7 @@ func TestResolveProvider_FallbackChainCLI_ShortCircuits(t *testing.T) {
 	// "claude-cli" InferProvider would return "pty" and the
 	// inferred-CLI guard would short-circuit too, masking a broken
 	// fallback-chain layer.
-	name, prov := s.resolveProvider("sess-1", "", "", "claude-sonnet-4-20250514")
+	name, prov := s.resolveProvider("sess-1", "", "", "claude-sonnet-4-20250514", "api")
 	if name != "pty" {
 		t.Fatalf("resolveProvider returned name=%q, want %q (fallback-chain CLI alias must short-circuit before InferProvider→anthropic stub)", name, "pty")
 	}
@@ -174,7 +174,7 @@ func TestResolveProvider_DefaultProviderWinsOverStaleFallbackChain(t *testing.T)
 		store:     st,
 	}
 
-	name, prov := s.resolveProvider("sess-1", "", "", "claude-sonnet-4-5-20250929")
+	name, prov := s.resolveProvider("sess-1", "", "", "claude-sonnet-4-5-20250929", "api")
 	if name != "anthropic" {
 		t.Fatalf("resolveProvider returned name=%q, want %q (default_provider must win over stale fallback-chain CLI alias)", name, "anthropic")
 	}
@@ -205,7 +205,7 @@ func TestResolveProvider_DefaultProviderCLI_ShortCircuits(t *testing.T) {
 		store:     st,
 	}
 
-	name, prov := s.resolveProvider("sess-1", "", "", "claude-sonnet-4-5-20250929")
+	name, prov := s.resolveProvider("sess-1", "", "", "claude-sonnet-4-5-20250929", "api")
 	if name != "pty" {
 		t.Fatalf("resolveProvider returned name=%q, want %q (CLI-shaped default_provider must short-circuit before anthropic stub)", name, "pty")
 	}
@@ -225,7 +225,7 @@ func TestResolveProvider_InferredCLI_ShortCircuits(t *testing.T) {
 		store:     mustNewStoreForResolveTest(t),
 	}
 
-	name, prov := s.resolveProvider("sess-1", "", "", "claude-cli")
+	name, prov := s.resolveProvider("sess-1", "", "", "claude-cli", "api")
 	if name != "pty" {
 		t.Fatalf("resolveProvider inferred name=%q, want %q (InferProvider(claude-cli) must short-circuit on CLI before anthropic stub)", name, "pty")
 	}
@@ -261,7 +261,7 @@ func TestResolveProvider_FallbackChainNonCLIMiss_Warns(t *testing.T) {
 	// The fallback chain entry "openai" must miss the registry (only
 	// "anthropic" is registered), emit a Warn, and let resolution
 	// continue to InferProvider→anthropic.
-	name, _ := s.resolveProvider("sess-1", "", "", "claude-sonnet-4-20250514")
+	name, _ := s.resolveProvider("sess-1", "", "", "claude-sonnet-4-20250514", "api")
 	if name != "anthropic" {
 		t.Fatalf("resolveProvider returned name=%q, want %q (non-CLI miss must skip but not short-circuit)", name, "anthropic")
 	}
@@ -290,7 +290,7 @@ func TestResolveProvider_NothingConfigured_NoSilentDefault(t *testing.T) {
 		store:     mustNewStoreForResolveTest(t),
 	}
 
-	name, prov := s.resolveProvider("sess-1", "", "", "claude-sonnet-4-5-20250929")
+	name, prov := s.resolveProvider("sess-1", "", "", "claude-sonnet-4-5-20250929", "api")
 	if prov != nil {
 		t.Fatalf("resolveProvider returned non-nil prov with an empty registry; must be nil so the caller errors")
 	}
@@ -301,6 +301,121 @@ func TestResolveProvider_NothingConfigured_NoSilentDefault(t *testing.T) {
 		// derived so callers can log/report it, it just must not turn an
 		// unregistered "anthropic" into a usable Provider.
 		t.Fatalf("resolveProvider returned name=%q, want %q (InferProvider's own routing floor)", name, "anthropic")
+	}
+}
+
+// TestResolveProvider_CLIRuntimeKind_BareDefaultProvider_NeverRoutesHTTP is
+// the literal reproduction of the real, confirmed bug this task
+// (TASKS/phase-3/01-collapse-resolveprovider-into-cascade.md) fixes —
+// found and empirically confirmed twice independently during Phase 2's
+// close-out (Orchestrator's live dogfeed validation against the running
+// nanite-api-service, and the fresh Phase 2 Reviewer's own throwaway
+// probe test against the real resolveProvider method — both 2026-08-19;
+// see TASKS/ESCALATIONS.md's matching 2026-08-19 entries).
+//
+// Pre-fix: resolveProvider had zero awareness of agent.RuntimeKind. A
+// runtime_kind='cli' agent configured the "obvious" way post-Phase-2 — a
+// bare default_provider ("claude", not the legacy "pty-claude"/"sub-
+// claude" alias shape) — never reached chat_generate.go's
+// classifyNilProvider (where runtime_kind is otherwise consulted) at
+// all: resolveProvider's old chain fell through the agent-provider step
+// (a bare "claude" name isn't itself registered as an HTTP provider, and
+// isn't CLI-shaped either) straight to user_settings.default_provider,
+// which resolved to a real, registered HTTP provider and returned it —
+// silently routing the turn through the HTTP/API path with no error, no
+// warning distinguishing it from correct routing.
+//
+// This test reproduces the exact scenario the Reviewer used to confirm
+// the bug: a runtime_kind='cli' agent with a bare, non-prefixed
+// default_provider, alongside a registered HTTP provider AND a populated
+// user_settings.default_provider that would otherwise resolve one.
+// Post-fix, the turn must still route CLI (name=="claude", prov==nil),
+// not HTTP.
+func TestResolveProvider_CLIRuntimeKind_BareDefaultProvider_NeverRoutesHTTP(t *testing.T) {
+	st := mustNewStoreForResolveTest(t)
+	us, err := st.GetUserSettings()
+	if err != nil {
+		t.Fatalf("GetUserSettings: %v", err)
+	}
+	us.DefaultProvider = "anthropic"
+	if err := st.UpdateUserSettings(us); err != nil {
+		t.Fatalf("UpdateUserSettings: %v", err)
+	}
+
+	s := &chatServiceImpl{
+		providers: newRegistryWithAnthropicStub(), // a real, registered HTTP provider is present
+		store:     st,
+	}
+
+	name, prov := s.resolveProvider("sess-1", "", "claude", "claude-sonnet-4-5-20250929", "cli")
+	if name != "claude" {
+		t.Fatalf("resolveProvider returned name=%q, want %q (runtime_kind='cli' must win over a bare default_provider even with user_settings.default_provider populated and a registered HTTP provider present)", name, "claude")
+	}
+	if prov != nil {
+		t.Fatalf("resolveProvider returned non-nil prov for a runtime_kind='cli' agent; must be nil so classifyNilProvider routes the turn to driveBootSession, not the HTTP path (this is the exact silent-fail-open bug this task fixes)")
+	}
+}
+
+// TestResolveProvider_CLIRuntimeKind_NoAgentProviderAtAll_StillCLI covers
+// the companion case: runtime_kind='cli' with NO agent-level
+// default_provider at all (agentProvider=="") and no explicit session
+// provider either. Even with nothing CLI-shaped anywhere in the inputs,
+// runtime_kind must still win over user_settings.default_provider/the
+// fallback chain — the function must never fall through to the
+// operator-level HTTP tiers once runtimeKind=="cli" is known.
+func TestResolveProvider_CLIRuntimeKind_NoAgentProviderAtAll_StillCLI(t *testing.T) {
+	st := mustNewStoreForResolveTest(t)
+	us, err := st.GetUserSettings()
+	if err != nil {
+		t.Fatalf("GetUserSettings: %v", err)
+	}
+	us.DefaultProvider = "anthropic"
+	if err := st.UpdateUserSettings(us); err != nil {
+		t.Fatalf("UpdateUserSettings: %v", err)
+	}
+
+	s := &chatServiceImpl{
+		providers: newRegistryWithAnthropicStub(),
+		store:     st,
+	}
+
+	name, prov := s.resolveProvider("sess-1", "", "", "claude-sonnet-4-5-20250929", "cli")
+	if name != "" {
+		t.Fatalf("resolveProvider returned name=%q, want \"\" (no agent/session provider name available to route with)", name)
+	}
+	if prov != nil {
+		t.Fatalf("resolveProvider returned non-nil prov for a runtime_kind='cli' agent with no resolvable name; must stay nil, never fall through to user_settings.default_provider")
+	}
+}
+
+// TestResolveProvider_APIRuntimeKind_BareDefaultProvider_StillResolvesHTTP
+// is the no-regression companion: a runtime_kind='api' agent (the
+// backfilled default for every pre-existing row — see this task's Work
+// Log) with the exact same bare default_provider shape must still
+// resolve to the registered HTTP provider exactly as before. Only
+// runtimeKind=="cli" changes behavior.
+func TestResolveProvider_APIRuntimeKind_BareDefaultProvider_StillResolvesHTTP(t *testing.T) {
+	st := mustNewStoreForResolveTest(t)
+	us, err := st.GetUserSettings()
+	if err != nil {
+		t.Fatalf("GetUserSettings: %v", err)
+	}
+	us.DefaultProvider = "anthropic"
+	if err := st.UpdateUserSettings(us); err != nil {
+		t.Fatalf("UpdateUserSettings: %v", err)
+	}
+
+	s := &chatServiceImpl{
+		providers: newRegistryWithAnthropicStub(),
+		store:     st,
+	}
+
+	name, prov := s.resolveProvider("sess-1", "", "claude", "claude-sonnet-4-5-20250929", "api")
+	if name != "anthropic" {
+		t.Fatalf("resolveProvider returned name=%q, want %q (runtime_kind='api' must still fall through to user_settings.default_provider)", name, "anthropic")
+	}
+	if prov == nil {
+		t.Fatalf("resolveProvider returned nil prov for a runtime_kind='api' agent that should resolve to the registered anthropic provider")
 	}
 }
 

@@ -170,7 +170,7 @@ This branch (`phase-1-execution`, based off Phase 0's `HEAD` as of 2026-08-18 �
 
 **Review (2026-08-19, fresh Reviewer, no shared context with workers): PASS, all 3 tasks.** Reviewer traced `resolveProvider`'s full rewritten logic by hand (not trusting the Work Log or test alone) and confirmed every path is closed once `runtimeKind=="cli"` — including the `agentProvider==""`/`sessionProvider==""` edge case, which surfaces a loud `ErrorCodeProviderError` rather than a silent fail-open. Independently re-ran all real-store tests across all three tasks (compaction writer end-to-end, orphan sweep smoke test, recovery pack, interrupted-turn detection) and confirmed each genuinely exercises production code paths, not mocks. Confirmed Recovery Broker's breadcrumbs-only decision by grep (no `event_log` call exists in `broker.go`, consistent with the documented choice). One non-blocking observation: `resolveProvider`'s step 1 now checks CLI-shape before the HTTP registry lookup (reordered from the original sequencing) — behaviorally inert today since `chat.IsCLIProvider` names are never registered as real HTTP providers, flagged for awareness only if that naming invariant ever changes. No fix-and-re-review cycle needed. **Phase 3 is `reviewed` and closed.**
 
-## Phase 4 — Steering & Reflex Migration (8 task files)
+## Phase 4 — Steering & Reflex Migration (9 task files)
 
 | Task | Status | Depends on |
 |---|---|---|
@@ -182,6 +182,7 @@ This branch (`phase-1-execution`, based off Phase 0's `HEAD` as of 2026-08-18 �
 | 06-add-filter-tool-selection | validated | `TASKS/phase-0/22-remove-skill-and-tool-broker-abstractions`; held until `05` merges (both touch `internal/service/tool.go`'s `SelectForAgent`) |
 | 07-tool-concurrency-safety-classification | validated | none directly; held until `05` merges — its target (`GetToolMeta`) also lives in `internal/service/tool.go`, an overlap the original parallelization note didn't flag |
 | 08-export-and-drop-agent-broker-decisions | validated | `02` |
+| 09-fix-dispatch-to-agent-generic-pass-leak | in-progress | `02`, `03` (both already landed) — fix-as-new-worker-task for a real finding from the fresh Phase 4 Reviewer, see `TASKS/phase-4/09-fix-dispatch-to-agent-generic-pass-leak.md` |
 
 **Orchestrator note (2026-08-19):** confirmed via grep that `07`'s target (the concurrency-safety name-heuristic) lives in `internal/service/tool.go:677-682` — the same file `05` and `06` both touch, a three-way overlap the original parallelization plan below only partially flagged. Serializing: `05` solo first (Wave 1), then `06`+`07` together once `05` merges (Wave 1.5).
 

@@ -203,7 +203,7 @@ This branch (`phase-1-execution`, based off Phase 0's `HEAD` as of 2026-08-18 �
 | 01-build-assignment-api | in-progress | Phase 1 tasks 01-08 (landed via the Phase 1→main merge) |
 | 02-build-plugin-installed-enabled-state-model | in-progress | none |
 | 03-wire-registers-agent-profiles | not-started | Phase 1 in full (landed via the Phase 1→main merge); held until `02` merges |
-| 04-close-cli-install-hot-reload-asymmetry | in-progress | none |
+| 04-close-cli-install-hot-reload-asymmetry | implemented | none |
 | 05-develop-registers-panels-and-crud | not-started | none; held until `02` merges — scope corrected 2026-08-19 (see task file), now `crud[]` only |
 | 06-make-http-middleware-plugin-extensible | not-started | **operator design decision — see escalation below, not ready for mechanical dispatch — SKIPPED for this batch** |
 

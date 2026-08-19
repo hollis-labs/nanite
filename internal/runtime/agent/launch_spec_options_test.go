@@ -6,15 +6,18 @@ package agent
 // compiled bootprofile.LaunchSpec.
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/hollis-labs/nanite/internal/store"
 )
 
-// TestResolveBootPrompt_Override verifies Options.BootPromptOverride
-// wins verbatim over the role-derived composeSystemPrompt output.
-// Pinned per-layout coverage lives in TestBootPrompt_*Layout below;
-// this test exercises the shared resolver directly.
+// TestResolveBootPrompt_Override verifies Options.BootPromptOverride's
+// BODY wins verbatim over the role-derived composeSystemPrompt output —
+// but the mandatory post-compaction re-read instruction (Phase 2 task 03)
+// is still appended unconditionally; a catalog-authored override cannot
+// suppress it. Pinned per-layout coverage lives in TestBootPrompt_*Layout
+// below; this test exercises the shared resolver directly.
 func TestResolveBootPrompt_Override(t *testing.T) {
 	profile := &store.AgentProfile{SystemPrompt: "should-not-appear"}
 	opts := Options{
@@ -23,19 +26,27 @@ func TestResolveBootPrompt_Override(t *testing.T) {
 		BootPromptOverride: "OVERRIDE BODY",
 	}
 	got := resolveBootPrompt(profile, opts)
-	if got != "OVERRIDE BODY" {
-		t.Fatalf("resolveBootPrompt with override = %q, want override verbatim", got)
+	if !strings.HasPrefix(got, "OVERRIDE BODY") {
+		t.Fatalf("resolveBootPrompt with override = %q, want it to start with the override body verbatim", got)
+	}
+	if strings.Contains(got, "should-not-appear") {
+		t.Fatalf("resolveBootPrompt with override = %q, want profile prompt NOT to leak through", got)
+	}
+	if !strings.Contains(got, mandatoryPostCompactionRereadInstruction) {
+		t.Fatalf("resolveBootPrompt with override = %q, want the mandatory post-compaction re-read instruction appended even when a catalog override is set", got)
 	}
 }
 
 // TestResolveBootPrompt_FallthroughComposes verifies the empty
 // override delegates to composeSystemPrompt — the pre-CW-20260514-0048
-// behavior.
+// behavior — with the mandatory post-compaction re-read instruction
+// (Phase 2 task 03) appended.
 func TestResolveBootPrompt_FallthroughComposes(t *testing.T) {
 	profile := &store.AgentProfile{SystemPrompt: "base prompt"}
 	got := resolveBootPrompt(profile, Options{Role: "", Mode: ModeLongLived})
-	if got != "base prompt" {
-		t.Fatalf("resolveBootPrompt fallthrough = %q, want %q", got, "base prompt")
+	want := "base prompt\n\n" + mandatoryPostCompactionRereadInstruction
+	if got != want {
+		t.Fatalf("resolveBootPrompt fallthrough = %q, want %q", got, want)
 	}
 }
 
@@ -43,13 +54,16 @@ func TestResolveBootPrompt_FallthroughComposes(t *testing.T) {
 // layout reads the override via resolveBootPrompt — the chat layer
 // sets opts.BootPromptOverride; the layout's BootPrompt method MUST
 // honor it. Regression check that a future refactor doesn't bypass
-// resolveBootPrompt and call composeSystemPrompt directly.
+// resolveBootPrompt and call composeSystemPrompt directly. The mandatory
+// post-compaction re-read instruction (Phase 2 task 03) is appended on
+// top of the override body — it is not overridable.
 func TestBootPrompt_ClaudeLayout_HonorsOverride(t *testing.T) {
 	got := claudeLayout{}.BootPrompt(
 		&store.AgentProfile{SystemPrompt: "base"},
 		Options{BootPromptOverride: "from-spec"})
-	if got != "from-spec" {
-		t.Fatalf("claudeLayout.BootPrompt = %q, want from-spec", got)
+	want := "from-spec\n\n" + mandatoryPostCompactionRereadInstruction
+	if got != want {
+		t.Fatalf("claudeLayout.BootPrompt = %q, want %q", got, want)
 	}
 }
 
@@ -59,8 +73,9 @@ func TestBootPrompt_CodexLayout_HonorsOverride(t *testing.T) {
 	got := codexLayout{}.BootPrompt(
 		&store.AgentProfile{SystemPrompt: "base"},
 		Options{BootPromptOverride: "from-spec"})
-	if got != "from-spec" {
-		t.Fatalf("codexLayout.BootPrompt = %q, want from-spec", got)
+	want := "from-spec\n\n" + mandatoryPostCompactionRereadInstruction
+	if got != want {
+		t.Fatalf("codexLayout.BootPrompt = %q, want %q", got, want)
 	}
 }
 
@@ -70,8 +85,9 @@ func TestBootPrompt_OpencodeLayout_HonorsOverride(t *testing.T) {
 	got := opencodeLayout{}.BootPrompt(
 		&store.AgentProfile{SystemPrompt: "base"},
 		Options{BootPromptOverride: "from-spec"})
-	if got != "from-spec" {
-		t.Fatalf("opencodeLayout.BootPrompt = %q, want from-spec", got)
+	want := "from-spec\n\n" + mandatoryPostCompactionRereadInstruction
+	if got != want {
+		t.Fatalf("opencodeLayout.BootPrompt = %q, want %q", got, want)
 	}
 }
 

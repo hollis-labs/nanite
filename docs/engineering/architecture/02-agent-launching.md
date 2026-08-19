@@ -26,6 +26,8 @@ Nothing else carries forward. "Lineage" (built for Tesseract's version-diffing u
 
 ## CLI-vs-API routing is an explicit typed field
 
-`agents.runtime_kind` (`cli` | `api`) replaces a fragile four-site string-prefix convention (`chat.IsCLIProvider`/`NormalizeCLIProvider`, `shouldUsePTY`, `agent_deps.go`'s `stripRegistryPrefix`, plus the boot-profile catalog's own layered `pty-` prefix convention) that has caused real historical misrouting bugs. One typed field, checked once, not a string pattern matched in four places expected to stay in sync by convention.
+`agents.runtime_kind` (`cli` | `api`, nullable) replaces a fragile four-site string-prefix convention (`chat.IsCLIProvider`/`NormalizeCLIProvider`, `shouldUsePTY`, `agent_deps.go`'s `stripRegistryPrefix`, plus the boot-profile catalog's own layered `pty-` prefix convention) that has caused real historical misrouting bugs. One typed field, checked once, not a string pattern matched in four places expected to stay in sync by convention.
 
 Part of this work: fully scrub the remaining "PTY" naming — see `GLOSSARY.md`.
+
+**Both CLI and API substrates are being kept, not decided between.** A dedicated 2026-08-19 review found the two paths much closer in behavior than originally assumed. The remaining work is a three-tier default cascade: an app-level default (**CLI**), a system-wide override (`UserSettings.DefaultRuntimeKind`), and the existing per-agent override (`agent_profiles.runtime_kind`, nullable — NULL means "inherit"). Per-agent beats system-wide beats app default. See `TASKS/phase-8/01-set-default-runtime-kind.md`.

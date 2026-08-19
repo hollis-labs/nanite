@@ -1,7 +1,7 @@
 # Volon eradication + fragments-envelope drop
 
 **Phase:** 0
-**Status:** not-started
+**Status:** implemented
 **Depends on:** none
 **Touches:** `internal/chat/envelope.go` (`envelopePattern`, line 222-223) + `internal/chat/envelope_test.go` (4 literal-string occurrences), `ui/src/components/chat/ChatMessage.tsx` (line 269), `ui/src/components/chat/MessageContent.tsx` (lines 224/229), plus the secondary real-source "volon" occurrences listed in "What to do" step 2 (`ui/src/lib/api.ts`, `internal/config/config_test.go`, `internal/toolclient/config.go` + 3 test files, `cmd/nanite/main.go` — flagged, not all definitely in scope, see Context).
 
@@ -70,7 +70,12 @@ The case-insensitive repo-wide grep for "volon" also surfaces real source-code h
 - The `cmd/nanite/main.go:274` comment no longer names "Volon" — reworded to describe the mechanism generically, per the operator's resolution.
 
 ## Work log
-<Worker fills this in as it goes: what was actually done, any deviation from plan and why, anything escalated.>
+
+Envelope fence-tag parsing narrowed to `nanite-envelope` only in `internal/chat/envelope.go`'s `envelopePattern` and both frontend regexes (`ChatMessage.tsx:269`, `MessageContent.tsx:224,229`). `internal/chat/envelope_test.go` reworked per the task file's explicit instruction — added `TestParseEnvelopes_LegacyTagsNotRecognized`, which plants `volon-envelope`/`fragments-envelope` fences and confirms `ParseEnvelopes` leaves them as inert unparsed text rather than extracting them, instead of just deleting the old positive-coverage. Deleted dead `promoteBacklogItem` from `ui/src/lib/api.ts` (confirmed zero callers, no matching backend route). Per direct operator instruction (volon_*-namespaced tool references "not consumed, not supposed to exist"): rewrote `internal/toolclient`'s `volon_*` test fixtures (`broker_test.go`, `broker_permissions_test.go`, `permissions_test.go`) to generic `example_*` placeholders and stripped the naming from `config.go`'s doc comment — confirmed via search this planning pass's grep coverage that no real `volon_mcp` server registration or tool-dispatch wiring existed beyond these test-fixture/comment strings. Reworded `cmd/nanite/main.go:274`'s comment to drop the external app name entirely, per the operator's resolution (no name-confirmation needed). Did not touch `adr/`, `docs/`, or `internal/assets/framework/` per the explicit out-of-scope list.
+
+Re-verified today (2026-08-18, during a tracking audit) against the current codebase: `grep -rni "volon"`/`"fragments-envelope"` across the in-scope paths returns only the two intentional references inside the new negative-assertion test itself (confirming the tags are *not* recognized) — no stray real occurrences. `go build`/`go vet`/`go test ./...` have stayed clean through every subsequent Phase 0 task built on top of this commit.
+
+Committed as `85949b87` ("Phase 0 #33: Volon eradication + fragments-envelope drop"). This entry backfills the Work Log — the code landed correctly at the time but the task file's own Status/Work Log fields were never updated to match; caught during a tracking-consistency audit.
 
 ## Review notes
 <Reviewer fills this in: pass/fail, what was checked, anything fixed and how.>

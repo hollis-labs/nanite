@@ -20,7 +20,7 @@ The primary mechanism for adding custom use-case logic, app-specific integration
 
 **Builtin plugin enable/disable** needs a real installed/enabled state model — not the current file-rename mechanism, which is subprocess-only and doesn't even apply to the 12 currently-loaded builtins. Modeled on WordPress's plugin state (code present = installed, a separate flag = active), working uniformly across builtin and subprocess plugins via GUI/CLI/API, backed by the DB rather than a file's presence/absence.
 
-**`registers.panels[]`** (right-rail tab entries — currently registers but the render function is a placeholder) and **`registers.crud[]`** (generic CRUD resource handlers — also unwired) are both real and worth developing, neither urgent. Build when there's a first real consumer or genuine downtime.
+**`registers.panels[]`** (right-rail tab entries — currently registers but the render function is a placeholder) and **`registers.crud[]`** (generic CRUD resource handlers — also unwired) are both real and worth developing, neither urgent. Build when there's a first real consumer or genuine downtime. **`registers.panels[]`'s rendering half is frontend work — deferred to the separate frontend pass, not any backend phase.** Its registration/manifest/backend half is fair game for a backend phase; the render function itself is not.
 
 ## Cut
 

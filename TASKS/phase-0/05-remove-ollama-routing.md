@@ -38,7 +38,14 @@ resolves to a provider name (`"ollama"`) that is never registered anywhere in `i
 - The Work Log records that this task inverted the original planning-pass scope (build → remove) per direct operator instruction, so a future reader isn't confused by the mismatch between this file's content and `TASKS.md` item 5's original "build" framing.
 
 ## Work log
-<Worker fills this in as it goes: what was actually done, any deviation from plan and why, anything escalated.>
+
+Inverted from the original "build Ollama support" planning-pass scope per direct operator instruction (2026-08-18, final) — `05-build-ollama-provider.md` replaced by this file. Removed the dangling `"ollama"`-returning branch from `chat.InferProvider` (`internal/chat/engine.go`); model names matching the old pattern set (`llama*`/`gemma*`/`mistral-7b*`/anything containing `:`) now fall through to the function's existing default/unknown-model behavior. Also removed the remaining dangling references the prior partial removal (SP-20260508-0001) left behind: unused `OLLAMA_HOST` env passthrough, dead frontend Ollama UI branches/icons in `ProviderManager.tsx`/`ComposerToolbar.tsx`/`MemoryPanel.tsx`, `docker-compose.yaml`'s Ollama service entry, and stale comments describing a nonexistent live Ollama probe (`internal/api/settings.go`). Corrected `docs/engineering/architecture/02-agent-launching.md`'s now-inaccurate "Ollama gets fixed for real" framing to match the inverted (remove, not build) decision.
+
+`ui/src/generated/plugin-envelopes.ts`'s regeneration from this task's own frontend build was superseded by task 14's later regeneration (reflects both this cut and item 14's) — committed separately under task 14, noted here so the two don't look like a missed artifact.
+
+Re-verified today (2026-08-18, during a tracking audit) against the current codebase: `grep -rni "ollama"` across Go/TS sources returns only (a) explanatory comments describing this historical removal, matching the Done-means allowance to log rather than eliminate every trace, and (b) generic test fixtures using the string "ollama" as an arbitrary example provider name in unrelated tests (e.g. `execution_metrics_test.go`'s metrics-summary tests, `user_settings_test.go`'s fallback-chain persistence tests) — none exercise real Ollama functionality. `internal/context/overflow.go`'s multi-provider context-overflow error-phrase detection legitimately checks Ollama's error-message format alongside Anthropic/OpenAI/Gemini's as part of a live, unrelated feature — correctly out of this task's scope (a different kind of Ollama reference: detecting a phrase a live provider's error text might contain, not routing to a removed provider). No live `InferProvider`-style routing to a removed provider remains anywhere.
+
+Committed as `1004e724` ("Phase 0 #05: remove Ollama routing entirely"). This entry backfills the Work Log — the code landed correctly at the time but the task file's own Work Log was never filled in; caught during a tracking-consistency audit (Status field was already correctly `implemented`).
 
 ## Review notes
 <Reviewer fills this in: pass/fail, what was checked, anything fixed and how.>

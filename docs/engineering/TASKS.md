@@ -62,7 +62,7 @@ Concrete, sequenced work implementing `architecture/*.md`. Full reasoning/verifi
 
 ## Phase 1 — Agent Construction (foundational)
 
-See `architecture/01-agent-construction.md` for the target schema. Migrations: `roles`, `agents` composition columns (`role_id`, `consumer_id`, `model_id`, `instance_mode`, `runtime_kind`), `consumers`, `known_tools`, `agent_tools`, `agent_dispatch_allowlist`, fix `agent_skills`'/`agent_projects`' missing FKs, fix the `models` table's `models.dev` sync target, add the reflex opt-out field. Kill the file-reingest-on-boot pattern generally. Build the assignment UI/API. Data-migrate every current `.nanite/agents/*.md` onto `roles`/`agents`.
+See `architecture/01-agent-construction.md` for the target schema. Migrations: `roles`, `agents` composition columns (`role_id`, `consumer_id`, `model_id`, `instance_mode`, `runtime_kind`), `consumers`, `known_tools`, `agent_tools`, `agent_dispatch_allowlist`, fix `agent_skills`'/`agent_projects`' missing FKs, fix the `models` table's `models.dev` sync target, add the reflex opt-out field. Kill the file-reingest-on-boot pattern generally. Build the assignment API — **backend only; no frontend work in any phase, ever, full stop.** UI for this is entirely out of scope here, part of the separate, deferred frontend pass. Data-migrate every current `.nanite/agents/*.md` onto `roles`/`agents`.
 
 ## Phase 2 — Agent Launching (depends on Phase 1's `runtime_kind` column)
 
@@ -79,8 +79,8 @@ Verify the reaper's real-world behavior before further idle-timeout tuning. Unif
 ## Phase 5 — Session Lifecycle, Messaging, Cards, Plugins
 
 - **Session lifecycle**: extend `event_log` postmortem logging to all four recovery mechanisms. Wire `compaction_events` (relocate the compaction-disclosure text off `prompt_templates` as part of this, per Phase 0 #29). Add TTL pruning to the scratchpad tool.
-- **Cards**: rebuild `todo-list`/`plan-review`/`subagent-spawn-approval` as compositions of the primitive set. Build the interactive-table-with-row-actions primitive (schema-validated actions, reusing the `approval-card` response-routing pattern). Build the context-replay exclusion (Card data excluded from replayed conversation history) — the highest-leverage single item in this phase. Fix CLI-agent boot content to source the type list dynamically instead of a hardcoded stale list.
-- **Plugins**: wire `registers.agent_profiles[]`. Build the real installed/enabled state model (WordPress-style, DB-backed, builtin+subprocess uniform). Close the CLI-install-vs-hot-reload asymmetry. Develop `registers.panels[]` and `registers.crud[]` (not urgent). Make the HTTP middleware chain plugin-extensible.
+- **Cards**: **no frontend work in any phase, ever, full stop** — the `todo-list`/`plan-review`/`subagent-spawn-approval` composition rebuilds and the interactive-table-with-row-actions primitive's React/component halves belong entirely to the separate, deferred frontend pass, not this phase. This phase's real scope here: the context-replay exclusion (Card data excluded from replayed conversation history, backend-only) — the highest-leverage single item in this phase — and fixing CLI-agent boot content to source the type list dynamically instead of a hardcoded stale list (backend-only). Any backend/schema support the interactive-table primitive needs (not its rendering) is in scope; its `.tsx` work is not.
+- **Plugins**: wire `registers.agent_profiles[]`. Build the real installed/enabled state model (WordPress-style, DB-backed, builtin+subprocess uniform). Close the CLI-install-vs-hot-reload asymmetry. Develop `registers.panels[]`'s registration/manifest/backend half and `registers.crud[]` (not urgent) — **`registers.panels[]`'s rendering half is frontend, deferred to the separate frontend pass, not this phase.** Make the HTTP middleware chain plugin-extensible.
 
 ## Phase 6 — The one open experiment, and documentation follow-through
 

@@ -9,6 +9,21 @@ package service
 // Auto-ingestion is called from NewContainer after Discover() returns.
 // It makes the DB the runtime source of truth: files are the import path,
 // DB is where the runtime reads from.
+//
+// TASKS/phase-1/08 ("Kill the file-reingest-on-boot pattern, in full"):
+// AutoIngestAgents/AutoIngestSkills run unconditionally on every boot, but
+// once a def has already been ingested into a DB row, that row's content is
+// frozen against further boot-time file-parse passes -- the file stays the
+// *first-ingest* path, not a standing sync. The one exception is a genuine
+// provenance transition (existing.Source != the incoming def's Source,
+// e.g. the historical builtin->internal migration flip, CW-20260512-0111)
+// -- that's a deliberate, one-time reclassification, not an ordinary
+// repeated boot, so it still content-syncs once. A real, deliberate
+// re-import (an agent edited through the managed-agent write path,
+// AgentConfigService.Update/writeManaged/SaveManagedAgentProfile, all of
+// which call IngestAgentDefinition directly, not through the boot-time
+// AutoIngestAgents pass) is unaffected by the freeze -- see upsertAgentDef's
+// bootPass parameter.
 
 import (
 	"context"
@@ -67,7 +82,7 @@ func AutoIngestAgents(st *store.Store, defs []*agentpkg.Definition, knownTools m
 			continue
 		}
 		considered++
-		if err := upsertAgentDef(st, def); err != nil {
+		if err := upsertAgentDef(st, def, true /* bootPass: freeze already-ingested rows */); err != nil {
 			slog.Warn("service: auto-ingest agent", "slug", def.Slug, "err", err)
 			failures = append(failures, fmt.Sprintf("%s: %v", def.Slug, err))
 			continue
@@ -122,16 +137,28 @@ func unknownDeclaredTools(def *agentpkg.Definition, knownTools map[string]bool) 
 	return bad
 }
 
+// IngestAgentDefinition is the explicit, deliberate reimport path -- called
+// by AgentConfigService.writeManaged/SaveManagedAgentProfile immediately
+// after a managed agent's file is written, so the edit that was just made
+// takes effect in the DB right away. Unlike AutoIngestAgents' boot-time bulk
+// pass, this always content-syncs the row (bootPass=false) -- it is the one
+// legitimate "pull this file's content into the DB" action TASKS/phase-1/08
+// preserves, not the standing every-boot sync it kills.
 func IngestAgentDefinition(st *store.Store, def *agentpkg.Definition) error {
 	if def == nil || def.Slug == "" {
 		return fmt.Errorf("definition slug is required")
 	}
-	return upsertAgentDef(st, def)
+	return upsertAgentDef(st, def, false /* bootPass: explicit reimport always syncs */)
 }
 
 // AutoIngestSkills upserts all discovered skill definitions into the DB.
-// Called once at container startup. Errors per-definition are logged and
-// skipped; the function returns the count of successful ingestions.
+// Called once at container startup, and again every subsequent boot. Errors
+// per-definition are logged and skipped; the function returns the count of
+// successful ingestions.
+//
+// TASKS/phase-1/08: a skill row, once ingested under its current source, is
+// frozen against this boot-time pass -- see upsertSkillDef's freeze for the
+// exact rule (and the provenance-transition exception).
 func AutoIngestSkills(st *store.Store, defs []*skillpkg.Definition) int {
 	count := 0
 	for _, def := range defs {
@@ -149,7 +176,21 @@ func AutoIngestSkills(st *store.Store, defs []*skillpkg.Definition) int {
 
 // upsertAgentDef inserts or updates one agent_profiles row from a Definition.
 // Uses ToProfile() for field mapping; applies H1 trust tier; sets ingestion metadata.
-func upsertAgentDef(st *store.Store, def *agentpkg.Definition) error {
+//
+// bootPass distinguishes the two legitimate callers (TASKS/phase-1/08):
+//   - true  (AutoIngestAgents' boot-time bulk pass): once a row already
+//     exists under its current source, content sync (UpdateAgent, plus the
+//     secondary seedProcedures/seedRoleToolsFromIngest passes) is skipped --
+//     the DB is authoritative, the file is not re-synced on every process
+//     start. The one exception is a genuine provenance transition (the
+//     existing row's source differs from this def's source) -- that's a
+//     deliberate one-time reclassification (e.g. the historical
+//     builtin->internal migration flip), not an ordinary repeated boot, so
+//     it still syncs once.
+//   - false (IngestAgentDefinition's explicit reimport): always syncs,
+//     regardless of whether a row already exists -- this is the deliberate
+//     "the operator/API just edited this file, commit it" action.
+func upsertAgentDef(st *store.Store, def *agentpkg.Definition, bootPass bool) error {
 	now := time.Now().UTC().Format(time.RFC3339)
 
 	// H1 trust: user/plugin-dropped files are untrusted until promoted.
@@ -216,10 +257,24 @@ func upsertAgentDef(st *store.Store, def *agentpkg.Definition) error {
 		if profile.LimitsJSON == "" {
 			profile.LimitsJSON = existing.LimitsJSON
 		}
-		if err := st.UpdateAgent(profile); err != nil {
-			return fmt.Errorf("update: %w", err)
+		// TASKS/phase-1/08: on a boot-time pass, a row that's already been
+		// ingested under its current source is frozen -- skip the content
+		// sync so a DB-side edit (however it landed) survives the next
+		// restart. sourceChanged (below) carves out the one legitimate
+		// exception: a genuine provenance transition still syncs once.
+		if !(bootPass && existing.Source == profile.Source) {
+			if err := st.UpdateAgent(profile); err != nil {
+				return fmt.Errorf("update: %w", err)
+			}
 		}
 	}
+	// freshContent is true when this call actually created the row or (on a
+	// boot pass) just completed a provenance-transition sync -- the two
+	// cases where the secondary seed passes below (procedures, role tools)
+	// should also run. It mirrors the UpdateAgent gate above so a frozen
+	// boot-time reingest doesn't re-stomp a GUI/API customization to either
+	// child table either.
+	freshContent := existing == nil || !bootPass || existing.Source != profile.Source
 
 	// Apply H1 trust tier. Always reconcile — if a file was promoted to trusted
 	// and then the source changed (e.g., file moved to ~/.nanite/agents/), re-ingest
@@ -233,13 +288,13 @@ func upsertAgentDef(st *store.Store, def *agentpkg.Definition) error {
 		return fmt.Errorf("set trust tier: %w", err)
 	}
 
-	if len(def.Procedures) > 0 {
+	if freshContent && len(def.Procedures) > 0 {
 		row, err := st.GetAgentBySlug(def.Slug)
 		if err == nil && row != nil {
 			seedProcedures(context.Background(), st, row.ID, def.Procedures)
 		}
 	}
-	if len(def.RoleTools) > 0 {
+	if freshContent && len(def.RoleTools) > 0 {
 		row, err := st.GetAgentBySlug(def.Slug)
 		if err == nil && row != nil {
 			seedRoleToolsFromIngest(context.Background(), st, row.ID, def.RoleTools)
@@ -326,6 +381,22 @@ func upsertSkillDef(st *store.Store, def *skillpkg.Definition) error {
 		if err := st.CreateSkill(sk); err != nil {
 			return fmt.Errorf("create: %w", err)
 		}
+		return nil
+	}
+
+	// TASKS/phase-1/08: once a row already exists under its current source,
+	// AutoIngestSkills' boot-time pass no longer content-syncs it -- the DB
+	// is authoritative, the file is not re-parsed-and-overwritten on every
+	// process start. upsertSkillDef has exactly one caller (AutoIngestSkills
+	// -- confirmed via grep; the REST CRUD path's handleUpdateSkill writes
+	// through st.UpdateSkill directly, never through this function), so
+	// unlike upsertAgentDef there is no separate "explicit reimport" caller
+	// to preserve a resync path for. The one exception is a genuine
+	// provenance transition (the row's source differs from this def's
+	// source) -- a deliberate one-time reclassification, not an ordinary
+	// repeated boot, so it still syncs once and bumps the version if the
+	// content also changed.
+	if existing.Source == source {
 		return nil
 	}
 

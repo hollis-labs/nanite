@@ -89,8 +89,30 @@ func (a *API) handleRefreshTools(w http.ResponseWriter, r *http.Request) {
 	a.jsonResp(w, http.StatusOK, diff)
 }
 
-// handleListAgentTools returns tools available to a specific agent (filtered by permissions).
+// handleListAgentTools returns tools available to a specific agent, with an
+// `allowed` flag per tool.
 // GET /api/agents/{id}/tools
+//
+// The `allowed` computation mirrors the exact dbAgent-resolution split
+// internal/service/tool.go's SelectForAgent/filterToolsByAgentTools and
+// internal/service/tool_execution_rules.go's
+// enforceExecutionRulesViaAgentTools already use (TASKS/phase-4/05,
+// TASKS/phase-5/01): an agentID that resolves to a real agent_profiles row
+// is agent_tools-authoritative (+ the known_tools.always_included escape
+// hatch) -- NOT the legacy tool_permissions/CheckPermission mechanism, which
+// reads "everything allowed" for any DB-backed agent with no
+// tool_permissions configured (the normal case for a freshly-created
+// agent). An agentID that does NOT resolve to a real row (a file-based
+// agent, which structurally cannot have agent_tools rows -- a real FK to
+// agent_profiles) keeps the legacy tool_permissions/CheckPermission
+// behaviour unchanged.
+//
+// This was the third and, per this task's own audit, final operator-facing
+// read surface still reporting the stale pre-agent_tools answer --
+// TASKS/phase-5/10-fix-list-agent-tools-endpoint-stale-permissions-view.md's
+// Work Log has the live-dogfeed gap that found it and the audit of the
+// other two (already-fixed) surfaces plus every other GetPermissions/
+// CheckPermission call site.
 func (a *API) handleListAgentTools(w http.ResponseWriter, r *http.Request) {
 	agentID := r.PathValue("id")
 
@@ -99,9 +121,7 @@ func (a *API) handleListAgentTools(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Get all tools and filter by agent permissions.
 	allTools := a.Services.ToolClient.ListTools()
-	perms := a.Services.ToolClient.GetPermissions(agentID)
 
 	type toolItem struct {
 		Name        string `json:"name"`
@@ -109,14 +129,53 @@ func (a *API) handleListAgentTools(w http.ResponseWriter, r *http.Request) {
 		Allowed     bool   `json:"allowed"`
 	}
 
+	// Resolve whether agentID has a real agent_profiles row. A miss means a
+	// file-based agent (or an unknown ID) -- structurally unable to hold
+	// agent_tools grants -- which keeps the legacy path below.
+	var dbAgent bool
+	if a.Services.Store != nil {
+		if _, err := a.Services.Store.GetAgent(agentID); err == nil {
+			dbAgent = true
+		}
+	}
+
 	items := make([]toolItem, 0, len(allTools))
-	for _, t := range allTools {
-		allowed := perms.CheckPermission(t.Name)
-		items = append(items, toolItem{
-			Name:        t.Name,
-			Description: t.Description,
-			Allowed:     allowed,
-		})
+
+	if dbAgent {
+		granted := make(map[string]bool)
+		if names, err := a.Services.Store.ListAgentToolNames(r.Context(), agentID); err == nil {
+			for _, n := range names {
+				granted[n] = true
+			}
+		}
+		// known_tools.always_included escape hatch (request_tools/
+		// tool_list/tool_describe) -- must read as allowed regardless of
+		// agent_tools grant membership, mirroring
+		// resolveAlwaysIncludedTools/enforceExecutionRulesViaAgentTools.
+		always := make(map[string]bool)
+		if rows, err := a.Services.Store.ListAlwaysIncludedKnownTools(r.Context()); err == nil {
+			for _, kt := range rows {
+				if kt.Status == "available" {
+					always[kt.Name] = true
+				}
+			}
+		}
+		for _, t := range allTools {
+			items = append(items, toolItem{
+				Name:        t.Name,
+				Description: t.Description,
+				Allowed:     granted[t.Name] || always[t.Name],
+			})
+		}
+	} else {
+		perms := a.Services.ToolClient.GetPermissions(agentID)
+		for _, t := range allTools {
+			items = append(items, toolItem{
+				Name:        t.Name,
+				Description: t.Description,
+				Allowed:     perms.CheckPermission(t.Name),
+			})
+		}
 	}
 
 	a.jsonResp(w, http.StatusOK, items)

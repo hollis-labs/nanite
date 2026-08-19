@@ -30,10 +30,9 @@ const chatRoleAgentSlug = "default"
 // ToolSelection holds the result of tool selection, including progressive
 // discovery metadata. Mirrors chat.toolSelection but is owned by the service layer.
 type ToolSelection struct {
-	Tools         []llmtypes.ToolDefinition // tools to send to the LLM
-	Catalog       string                    // non-empty when progressive discovery is active
-	Progressive   bool                      // true when using progressive discovery
-	OverrideBlock string                    // markdown "## Tool Overrides" section composed from per-tool Hints (go-toolbroker); empty when no tool in the final selection has enrichment
+	Tools       []llmtypes.ToolDefinition // tools to send to the LLM
+	Catalog     string                    // non-empty when progressive discovery is active
+	Progressive bool                      // true when using progressive discovery
 }
 
 // ToolResult holds the outcome of a single tool execution.
@@ -220,17 +219,15 @@ func (s *toolServiceImpl) SelectForAgent(ctx context.Context, sessionID, agentID
 	intent, hints := extractIntent(userMessage)
 	slog.Debug("service/tool: extracted intent", "intent", intent, "hints", hints)
 
-	// Collect tools via broker selection.
+	// Collect tools via catalog selection.
 	var allTools []llmtypes.ToolDefinition
-	var overrideBlock string
 	seen := map[string]bool{} // dedup: Anthropic API rejects duplicate tool names
 
 	if s.toolClient != nil {
 		res, err := s.toolClient.SelectToolsAsProvider(ctx, intent, hints, workspaceID, agentID)
 		if err != nil {
-			slog.Warn("service/tool: broker selection failed — falling back to MCP manager", "err", err)
+			slog.Warn("service/tool: catalog selection failed — falling back to MCP manager", "err", err)
 		} else {
-			overrideBlock = res.OverrideBlock
 			for _, t := range res.Tools {
 				if !seen[t.Name] {
 					seen[t.Name] = true
@@ -249,7 +246,7 @@ func (s *toolServiceImpl) SelectForAgent(ctx context.Context, sessionID, agentID
 		// skills-prioritised tools first. (See follow-ups in the ADR-003
 		// "Limitations" section.)
 		if s.toolClient.MemoryRecaller() != nil || len(s.toolClient.Skills()) > 0 {
-			if _, _, signals, err := s.toolClient.SelectToolsAugmented(ctx, intent, hints, workspaceID, agentID, windowSize); err == nil {
+			if _, signals, err := s.toolClient.SelectToolsAugmented(ctx, intent, hints, workspaceID, agentID, windowSize); err == nil {
 				s.logDecisionWithSignals(sessionID, intent, "augmented", allTools, signals)
 			}
 		}
@@ -362,12 +359,12 @@ func (s *toolServiceImpl) SelectForAgent(ctx context.Context, sessionID, agentID
 		}, nil
 	}
 
-	layer := "broker"
+	layer := "catalog"
 	if len(allTools) == 0 {
 		layer = "empty"
 	}
 	s.logDecision(sessionID, intent, layer, allTools)
-	return &ToolSelection{Tools: allTools, OverrideBlock: overrideBlock}, nil
+	return &ToolSelection{Tools: allTools}, nil
 }
 
 // logDecision persists the broker selection decision for the debug panel.

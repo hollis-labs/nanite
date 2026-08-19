@@ -17,10 +17,16 @@ import (
 //
 // ParseSkillModeIDs / MarshalSkillModeIDs / SkillMatchesMode survive below
 // — they're pure helpers over the skills.mode_ids column (unrelated to the
-// now-deleted modes table) still consumed independently by
-// internal/skillbroker's mode-bound relevance bonus (a skill with any
-// mode_ids tag scores slightly higher, regardless of session state) and by
+// now-deleted modes table) still consumed by
 // internal/service/ingest.go's frontmatter → mode_ids resolution.
+//
+// Phase 0 item 22 (decision log §11): internal/skillbroker — the other
+// consumer, whose mode-bound relevance bonus read SkillMatchesMode/
+// ParseSkillModeIDs (a skill with any mode_ids tag scored slightly higher,
+// regardless of session state) — is retired. SkillMatchesMode has no
+// remaining caller in this app as of this cut; left in place (mirroring
+// the tool_enrichments precedent from 18a-cut-dead-storage-and-config)
+// since removing it is outside this task's scope.
 
 // ParseSkillModeIDs decodes the JSON-array string stored in skills.mode_ids.
 // Empty / "[]" / invalid JSON returns nil with no error so callers can keep

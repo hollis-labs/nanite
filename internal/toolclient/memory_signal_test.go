@@ -4,7 +4,7 @@ import (
 	"context"
 	"testing"
 
-	"github.com/hollis-labs/go-toolbroker/broker"
+	llmtypes "github.com/hollis-labs/go-llm-types"
 )
 
 func TestSelectToolsAugmented_MemoryHitsLiftRanking(t *testing.T) {
@@ -12,7 +12,7 @@ func TestSelectToolsAugmented_MemoryHitsLiftRanking(t *testing.T) {
 	cfg.ContextWindowTokens = 200000
 	tb := New(nil, nil, cfg)
 
-	defs := []broker.ToolDefinition{
+	defs := []llmtypes.ToolDefinition{
 		{Name: "memory_get", Description: "fetch a single memory"},
 		{Name: "memory_recall", Description: "rank memories by activation"},
 		{Name: "filler_a", Description: "unrelated"},
@@ -27,7 +27,7 @@ func TestSelectToolsAugmented_MemoryHitsLiftRanking(t *testing.T) {
 		},
 	})
 
-	final, _, signals, err := tb.SelectToolsAugmented(
+	final, signals, err := tb.SelectToolsAugmented(
 		context.Background(),
 		"search memory for prior decisions", nil, "", "", 200000,
 	)
@@ -46,7 +46,7 @@ func TestSelectToolsAugmented_MemoryHitsLiftRanking(t *testing.T) {
 		}
 	}
 	if !found {
-		t.Errorf("memory_recall should be promoted by memory hit; got %v", brokerToolNames(final))
+		t.Errorf("memory_recall should be promoted by memory hit; got %v", defNames(final))
 	}
 	if signals == "" {
 		t.Error("expected diagnostic signals JSON")
@@ -57,12 +57,12 @@ func TestSelectToolsAugmented_NilRecallerIsSafe(t *testing.T) {
 	cfg := DefaultConfig()
 	tb := New(nil, nil, cfg)
 
-	defs := []broker.ToolDefinition{
+	defs := []llmtypes.ToolDefinition{
 		{Name: "any_tool", Description: "noop"},
 	}
 	tb.RegisterTools(defs)
 
-	final, _, _, err := tb.SelectToolsAugmented(
+	final, _, err := tb.SelectToolsAugmented(
 		context.Background(),
 		"any intent", nil, "", "", 200000,
 	)
@@ -109,7 +109,7 @@ func sliceEqual(a, b []string) bool {
 	return true
 }
 
-func brokerToolNames(in []broker.ToolDefinition) []string {
+func defNames(in []llmtypes.ToolDefinition) []string {
 	out := make([]string, len(in))
 	for i, t := range in {
 		out[i] = t.Name

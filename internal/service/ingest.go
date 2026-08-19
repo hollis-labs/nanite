@@ -364,10 +364,14 @@ func upsertSkillDef(st *store.Store, def *skillpkg.Definition) error {
 // Phase 0 item 21 ("Cut Modes, in full") deleted the `modes` catalog table
 // and store.GetModeBySlug — this function used to resolve each slug against
 // that table and store the resolved row ID. There is no more catalog to
-// resolve against, and skills.mode_ids' only remaining consumer
-// (internal/skillbroker's mode-bound relevance bonus) only ever checks
-// whether the column is non-empty, never a specific ID — so the slugs
-// themselves are now stored directly as their own identity, unresolved.
+// resolve against, so the slugs are stored directly as their own identity,
+// unresolved.
+//
+// Phase 0 item 22 (decision log §11): skills.mode_ids' other reader —
+// internal/skillbroker's mode-bound relevance bonus, which only ever
+// checked whether the column was non-empty, never a specific ID — is
+// retired along with the rest of the Skill Broker. This write path is
+// kept as-is; the column just has no active reader today.
 func resolveSkillModeIDs(_ *store.Store, slugs []string) string {
 	return store.MarshalSkillModeIDs(slugs)
 }

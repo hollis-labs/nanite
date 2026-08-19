@@ -6,7 +6,6 @@ import (
 	"testing"
 
 	llmtypes "github.com/hollis-labs/go-llm-types"
-	"github.com/hollis-labs/go-toolbroker/broker"
 	"github.com/hollis-labs/nanite/internal/dispatch"
 	"github.com/hollis-labs/nanite/internal/store"
 	"github.com/hollis-labs/nanite/internal/toolclient"
@@ -142,21 +141,21 @@ func TestSelectForAgent_NonChatRoleKeepsLensPrimitives(t *testing.T) {
 // --- helpers ---
 
 // buildToolClientWithLens wires a toolclient with the four lens primitives
-// plus a couple of unrelated tools so the broker has something to rank.
-// Tools are registered as broker tools (not builtins) so they flow through
-// SelectToolsAsProvider unchanged.
+// plus a couple of unrelated tools so there's a real set to filter. Tools
+// are registered directly on the catalog (not as builtins) so they flow
+// through SelectToolsAsProvider unchanged.
 func buildToolClientWithLens(t *testing.T) *toolclient.ToolClient {
 	t.Helper()
 	cfg := toolclient.DefaultConfig()
 	tc := toolclient.New(nil, nil, cfg)
-	tc.RegisterTools([]broker.ToolDefinition{
-		{Name: "tool_describe", Server: "self", Description: "describe a tool's input schema (lens)"},
-		{Name: "tool_validate", Server: "self", Description: "validate args against a tool's schema (lens)"},
-		{Name: "lesson_capture", Server: "self", Description: "remember a one-sentence lesson (lens)"},
-		{Name: "card_show", Server: "self", Description: "render an envelope card"},
-		{Name: "dev_grep", Server: "dev", Description: "search files for a pattern"},
-		{Name: "memory_recall", Server: "vanta", Description: "recall durable memory entries"},
-		{Name: "knowledge_get", Server: "vanta", Description: "fetch a knowledge entry by key"},
+	tc.RegisterTools([]llmtypes.ToolDefinition{
+		{Name: "tool_describe", Description: "describe a tool's input schema (lens)"},
+		{Name: "tool_validate", Description: "validate args against a tool's schema (lens)"},
+		{Name: "lesson_capture", Description: "remember a one-sentence lesson (lens)"},
+		{Name: "card_show", Description: "render an envelope card"},
+		{Name: "dev_grep", Description: "search files for a pattern"},
+		{Name: "memory_recall", Description: "recall durable memory entries"},
+		{Name: "knowledge_get", Description: "fetch a knowledge entry by key"},
 	})
 	return tc
 }

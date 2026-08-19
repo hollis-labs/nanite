@@ -8,7 +8,6 @@ import (
 	"strings"
 
 	llmtypes "github.com/hollis-labs/go-llm-types"
-	"github.com/hollis-labs/go-toolbroker/broker"
 )
 
 // RankingSignals aggregates the contextual signals that contribute to a
@@ -36,14 +35,17 @@ type RankingSignals struct {
 	Skills       []ToolPreferenceSkill
 	MemoryHits   []ToolPatternHit
 	KeywordTools []llmtypes.ToolDefinition // pre-scored by SelectByIntent
-	BrokerResult []broker.ToolDefinition   // raw broker.SelectTools result
+	// BrokerResult is the full selection candidate set (ToolClient.catalogTools,
+	// née go-toolbroker's LocalBroker.SelectTools result — see decision log
+	// §11 / Phase 0 item 22). Name kept for call-site stability.
+	BrokerResult []llmtypes.ToolDefinition
 }
 
 // ScoredTool is a tool with its aggregated rank score and the per-signal
 // breakdown. The breakdown is preserved for diagnostics: when an operator
-// asks "why did the broker pick X?", we can answer.
+// asks "why did selection pick X?", we can answer.
 type ScoredTool struct {
-	Tool         broker.ToolDefinition
+	Tool         llmtypes.ToolDefinition
 	Score        int
 	SkillScore   int
 	MemoryScore  int
@@ -52,18 +54,18 @@ type ScoredTool struct {
 }
 
 // RankTools combines the ranking signals into a single ordered slice of
-// scored tools. Higher score first; ties broken by the original broker
-// order (which is itself rule-priority + name-stable per go-toolbroker).
+// scored tools. Higher score first; ties broken by the original catalog
+// order (ToolClient.catalogTools' registration order, name-stable).
 //
 // Tools that appear in BrokerResult but score zero from every signal are
 // retained at the tail with score 0 — they are the "neutral candidates"
 // the err-toward-more bias may pad onto the final selection if budget
 // permits.
 func RankTools(s RankingSignals) []ScoredTool {
-	// Build a lookup from name → broker.ToolDefinition. The broker result
-	// is the authoritative tool definition (description, schema); ranking
+	// Build a lookup from name → tool definition. BrokerResult is the
+	// authoritative tool definition (description, schema); ranking
 	// signals reference tools by name.
-	defByName := make(map[string]broker.ToolDefinition, len(s.BrokerResult))
+	defByName := make(map[string]llmtypes.ToolDefinition, len(s.BrokerResult))
 	for _, t := range s.BrokerResult {
 		defByName[t.Name] = t
 	}
@@ -151,23 +153,23 @@ func RankTools(s RankingSignals) []ScoredTool {
 		out = append(out, st)
 	}
 
-	// Stable secondary key: original broker order. Build an index map.
-	brokerOrder := make(map[string]int, len(s.BrokerResult))
+	// Stable secondary key: original catalog order. Build an index map.
+	catalogOrder := make(map[string]int, len(s.BrokerResult))
 	for i, t := range s.BrokerResult {
-		brokerOrder[t.Name] = i
+		catalogOrder[t.Name] = i
 	}
 
 	sort.SliceStable(out, func(i, j int) bool {
 		if out[i].Score != out[j].Score {
 			return out[i].Score > out[j].Score
 		}
-		oi, ok1 := brokerOrder[out[i].Tool.Name]
-		oj, ok2 := brokerOrder[out[j].Tool.Name]
+		oi, ok1 := catalogOrder[out[i].Tool.Name]
+		oj, ok2 := catalogOrder[out[j].Tool.Name]
 		if ok1 && ok2 {
 			return oi < oj
 		}
 		if ok1 != ok2 {
-			return ok1 // tools with broker ordering precede orphans
+			return ok1 // tools with catalog ordering precede orphans
 		}
 		return out[i].Tool.Name < out[j].Tool.Name
 	})
@@ -176,9 +178,10 @@ func RankTools(s RankingSignals) []ScoredTool {
 }
 
 // SelectWithSignals is the reasoning-augmented selection entry point. It
-// runs the broker keyword path, gathers skills + memory signals, ranks the
-// union, applies the token budget with the "err toward more" bias, and
-// returns the final tool slice + override block + diagnostic signals JSON.
+// runs the base selection pass (keyword scoring via SelectByIntent),
+// gathers skills + memory signals, ranks the union, applies the token
+// budget with the "err toward more" bias, and returns the final tool
+// slice + diagnostic signals JSON.
 //
 // extraNamesPad caps how many neutral-score candidates the bias may add.
 // Default 3 — enough to absorb the typical "I forgot one helper" miss
@@ -192,11 +195,11 @@ func (tb *ToolClient) SelectWithSignals(
 	skills []ToolPreferenceSkill,
 	memHits []ToolPatternHit,
 	extraNamesPad int,
-) ([]broker.ToolDefinition, string, string, error) {
-	// Run the existing broker selection pass (keyword / rule based).
-	tools, overrideBlock, err := tb.SelectTools(ctx, intent, hints, workspaceID, agentID, windowSize)
+) ([]llmtypes.ToolDefinition, string, error) {
+	// Run the base selection pass (full catalog, capped + token-pruned).
+	tools, err := tb.SelectTools(ctx, intent, hints, workspaceID, agentID, windowSize)
 	if err != nil {
-		return nil, "", "", err
+		return nil, "", err
 	}
 
 	// Score the union with all signals.
@@ -227,10 +230,10 @@ func (tb *ToolClient) SelectWithSignals(
 
 	// Strict tier: tools with a non-zero score, in rank order.
 	// When NO signals scored anything (no skills, no memory, no keyword
-	// hits), fall back to the broker's own result so we don't regress the
-	// keyword-only path. The augmented selection should never load fewer
-	// tools than the legacy path.
-	strict := make([]broker.ToolDefinition, 0, len(scored))
+	// hits), fall back to the base selection result so we don't regress
+	// the keyword-only path. The augmented selection should never load
+	// fewer tools than the legacy path.
+	strict := make([]llmtypes.ToolDefinition, 0, len(scored))
 	for _, st := range scored {
 		if st.Score > 0 {
 			strict = append(strict, st.Tool)
@@ -296,7 +299,7 @@ func (tb *ToolClient) SelectWithSignals(
 		"ctx_window", ctxWindow, "tool_tokens", EstimateToolTokens(final),
 		"err_toward_more_pad", extraNamesPad,
 	)
-	return final, overrideBlock, signals, nil
+	return final, signals, nil
 }
 
 // signalsJSON builds a tiny diagnostic blob for the broker_decisions row.

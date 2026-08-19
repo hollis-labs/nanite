@@ -14,7 +14,6 @@ import (
 	llmtypes "github.com/hollis-labs/go-llm-types"
 	"github.com/hollis-labs/nanite/internal/contextbroker"
 	"github.com/hollis-labs/nanite/internal/permission"
-	"github.com/hollis-labs/nanite/internal/skillbroker"
 	"github.com/hollis-labs/nanite/internal/store"
 	wsutil "github.com/hollis-labs/nanite/internal/workspace"
 )
@@ -182,16 +181,16 @@ func (cb *ContextClient) AssembleSlotSources(ctx context.Context, session *store
 	// re-evaluate.
 	//
 	// Intent is derived unconditionally so the service-layer assembly decider
-	// (and the Skill Broker, below) can use it even when ContextBroker is
-	// nil (no Fetch happens, but the intent still drives slot selection
-	// for non-broker slots and skill ranking).
+	// can use it even when ContextBroker is nil (no Fetch happens, but the
+	// intent still drives slot selection for non-broker slots).
 	//
-	// SP-20260512-0008 W2B (CW-20260512-0106): intent derivation moved above
-	// skill-list construction so the Skill Broker has the per-turn intent
-	// signal. Previously intent was derived only for the Context Broker step
-	// further down — that left the skill list with no per-turn ranking input.
+	// Phase 0 item 22 (decision log §11): the Skill Broker that used to
+	// consume this intent for per-turn skill ranking is retired — skill
+	// selection is now a direct cap (see buildSkillListForSession), so
+	// intent no longer needs to reach the skill-list call. It's still
+	// derived here for the Context Broker step further down.
 	intent := cb.deriveIntent(session, agent)
-	skillList := buildSkillListForSessionWithIntent(ctx, cb.Store, agent.ID, session.ID, intent, skillbroker.AgentIdentityFromProfile(agent))
+	skillList := buildSkillListForSession(ctx, cb.Store, agent.ID, session.ID)
 	agentPrompt := assembleAgentSlotContent(cb.Store, agent, skillList, session.ID)
 
 	// Rules slot — agent tags + tool allowlist. S4a expands this.

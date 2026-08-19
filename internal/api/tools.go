@@ -64,7 +64,7 @@ func (a *API) handleSelectTools(w http.ResponseWriter, r *http.Request) {
 
 	// No per-session model context available at the API boundary — pass 0 so
 	// SelectTools falls back to DefaultContextWindowTokens.
-	tools, _, err := a.Services.ToolClient.SelectTools(r.Context(), req.Intent, req.Hints, "", "", 0)
+	tools, err := a.Services.ToolClient.SelectTools(r.Context(), req.Intent, req.Hints, "", "", 0)
 	if err != nil {
 		a.errorResp(w, http.StatusInternalServerError, err.Error())
 		return

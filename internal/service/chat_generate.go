@@ -56,14 +56,16 @@ type composeConfig struct {
 }
 
 // composeExtraSystemPrefix builds the per-turn system prompt prefix: optional
-// no-tools warning, optional progressive discovery catalog, the native tool
-// guide, and (when non-empty) the per-tool override block appended after the
-// native guide. Order is significant — tool-specific overrides ship AFTER the
-// general guide so they override conflicting general rules for the named tool.
+// no-tools warning, optional progressive discovery catalog, then the native
+// tool guide.
 //
-// overrideBlock is the markdown "## Tool Overrides" section composed by the
-// broker (via broker.ComposeOverrideBlock). Empty string skips the section.
-func composeExtraSystemPrefix(overrideBlock string, cfg composeConfig) string {
+// Phase 0 item 22: this used to also append a per-tool "## Tool Overrides"
+// markdown block (composed via go-toolbroker's enricher/WithEnricher) after
+// the native guide. Cut entirely per the operator's 2026-08-18 resolution —
+// no port-forward — because the tool_enrichments write path was already
+// dead (18a-cut-dead-storage-and-config), making the override block
+// structurally inert. See decision log §11.
+func composeExtraSystemPrefix(cfg composeConfig) string {
 	var b strings.Builder
 	if cfg.noTools {
 		b.WriteString(noToolsWarningPrefix)
@@ -73,10 +75,6 @@ func composeExtraSystemPrefix(overrideBlock string, cfg composeConfig) string {
 		b.WriteString("\n\n")
 	}
 	b.WriteString(strings.TrimLeft(nativeToolGuide, "\n"))
-	if overrideBlock != "" {
-		b.WriteString("\n\n")
-		b.WriteString(overrideBlock)
-	}
 	return b.String()
 }
 
@@ -419,13 +417,7 @@ func (s *chatServiceImpl) generateResponse(ctx context.Context, sessionID, assis
 		ch <- chat.StreamEvent{Type: "tool_warning", Data: string(warningJSON)}
 	}
 
-	// selection.OverrideBlock is composed upstream by ToolClient via
-	// go-toolbroker's ComposeOverrideBlock over the FINAL tool set (post
-	// permission filtering + token budget prune), so the block never mentions
-	// a tool the LLM won't see. Empty string when no enricher is configured
-	// or no selected tool has Hints — composeExtraSystemPrefix skips the
-	// section in that case.
-	extraSystemPrefix := composeExtraSystemPrefix(selection.OverrideBlock, composeConfig{
+	extraSystemPrefix := composeExtraSystemPrefix(composeConfig{
 		noTools:            noTools,
 		progressiveActive:  selection.Progressive,
 		progressiveCatalog: selection.Catalog,

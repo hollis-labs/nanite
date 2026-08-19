@@ -165,7 +165,6 @@ func TestSelectToolsAsProvider_MCPDevToolsExcludedWhenDevModeOff(t *testing.T) {
 	}
 	tb := New(mgr, nil, DefaultConfig())
 	tb.DeveloperModeFunc = func() bool { return false }
-	mgr.Broker = tb.LocalBroker
 
 	if err := mgr.DiscoverTools(context.Background()); err != nil {
 		t.Fatalf("DiscoverTools: %v", err)

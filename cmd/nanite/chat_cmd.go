@@ -33,18 +33,12 @@ var errSessionTakeover = errors.New("session taken over by another client")
 func cmdChat(args []string) {
 	fs := flag.NewFlagSet("chat", flag.ExitOnError)
 	url := fs.String("url", "", "harness API base URL (default: "+apiBaseURL()+"; also honors NANITE_API_URL/NANITE_PORT)")
-	workspace := fs.String("workspace", "", "workspace_id for a new session (required unless --session is given)")
 	project := fs.String("project", "", "project_id for a new session")
 	agentID := fs.String("agent", "", "agent_id for a new session")
 	sessionID := fs.String("session", "", "resume an existing session id instead of creating a new one")
 	title := fs.String("title", "", "title for a new session")
 	noAutostart := fs.Bool("no-autostart", false, "fail fast instead of auto-starting `nanite serve` if it isn't already running")
 	fs.Parse(args)
-
-	if *sessionID == "" && *workspace == "" {
-		fmt.Fprintln(os.Stderr, "chat: --workspace is required when creating a new session (or pass --session to resume one)")
-		os.Exit(1)
-	}
 
 	ctx := context.Background()
 
@@ -60,10 +54,9 @@ func cmdChat(args []string) {
 	client := newHarnessClient(*url)
 
 	sess, err := resolveChatSession(ctx, client, *sessionID, harnessCreateSessionRequest{
-		WorkspaceID: *workspace,
-		ProjectID:   *project,
-		AgentID:     *agentID,
-		Title:       *title,
+		ProjectID: *project,
+		AgentID:   *agentID,
+		Title:     *title,
 	})
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "chat: %v\n", err)

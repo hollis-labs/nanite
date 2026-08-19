@@ -36,19 +36,19 @@ Live tracker for `docs/engineering/TASKS.md`'s execution, per `docs/engineering/
 | 18a-cut-dead-storage-and-config | implemented | none | 1 |
 | 18b-cut-dead-messaging-and-plugin-tables | implemented | none | 1 |
 | 19-cut-legacy-rename-tables | implemented | 09 | 1 |
-| 20-retire-workspaces-and-instance-mechanism | not-started | 28 (orchestrator-added, see below) | 3 (chain pos. 8) |
+| 20-retire-workspaces-and-instance-mechanism | implemented | 28 (orchestrator-added, see below) | 3 (chain pos. 8) |
 | 21-cut-modes | implemented | 28 (orchestrator-added); coordinate w/ 18a on `agents.go` | 3 (chain pos. 7) |
-| 22-remove-skill-and-tool-broker-abstractions | not-started | (sequenced after 29, see below) | 3 (chain pos. 10) |
-| 23-export-and-drop-decision-tables | not-started | 11, 22 | 3 (chain pos. 11) |
+| 22-remove-skill-and-tool-broker-abstractions | implemented | (sequenced after 29, see below) | 3 (chain pos. 10) |
+| 23-export-and-drop-decision-tables | implemented | 11, 22 | 3 (chain pos. 11) |
 | 24-housekeeping-agent-profile-files | implemented | none | 1 |
 | 25-drop-unused-session-status-enum | implemented | 26 | 3 (parallel with chain, after pos. 4) |
 | 26-cut-session-compaction-summary-fields | implemented | (sequenced after 27, see below) | 3 (chain pos. 4) |
 | 27-cut-p7-scratchpad-snapshot | implemented | none | 3 (chain pos. 3) |
 | 28-cut-session-intent-classifier | implemented | (sequenced after 27, see below) | 3 (chain pos. 5) |
-| 29-cut-prompt-templates | not-started | none (see Context; sequenced after 21) | 3 (chain pos. 9) |
+| 29-cut-prompt-templates | implemented | none (see Context; sequenced after 21) | 3 (chain pos. 9) |
 | 30-cut-templates-table | implemented | none | 1 |
 | 31-rename-pty-naming-scrub | not-started | (all of Phase 0, see below) | 4 |
-| 32-rename-recovery-namespace | not-started | 04 | 3 (chain pos. 6) |
+| 32-rename-recovery-namespace | implemented | 04 | 3 (chain pos. 6) |
 | 33-rename-volon-eradication | implemented | none | 1 |
 | 34-gate-agent-update-create-editable-check | implemented | none | 1 |
 | 35-fix-orphaned-indexes-agent-messages-todos | implemented | 19 | 1 |
@@ -190,8 +190,6 @@ This branch (`phase-1-execution`, based off Phase 0's `HEAD` as of 2026-08-18 �
 | 03-scratchpad-ttl-pruning | not-started | `TASKS/phase-0/27-cut-p7-scratchpad-snapshot` |
 
 ### Cards (6 tasks)
-
-**⚠️ Flag for whoever plans/executes this section, 2026-08-18 (operator standing rule, discovered during Phase 1): no frontend work is part of any phase — backend/API only.** Several of these tasks as titled ("rebuild X as a composition," a React `Card` rendering system per this repo's own `CLAUDE.md` Envelope System section) plausibly include real `ui/src/components/chat/envelopes/` component work. Not investigated or corrected here — Phase 1's own Orchestrator doesn't own this section and hasn't reviewed these task files in detail — but re-scope before dispatching, the same way Phase 1's `09-build-assignment-ui-api.md` was cut down to backend-only.
 
 | Task | Status | Depends on |
 |---|---|---|

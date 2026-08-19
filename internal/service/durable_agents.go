@@ -13,7 +13,6 @@ import (
 )
 
 var (
-	ErrDurableAgentWorkspaceRequired     = errors.New("durable agent start requires workspace_id when creating a session")
 	ErrDurableAgentNoResumableSession    = errors.New("durable agent has no resumable attached session")
 	ErrDurableAgentUnsupportedLaunchPlan = errors.New("durable agent launch policy is unsupported")
 )
@@ -52,7 +51,6 @@ type DurableAgentLaunchPolicy struct {
 }
 
 type DurableAgentStartRequest struct {
-	WorkspaceID string
 	ProjectID   string
 	WakePayload DurableAgentWakePayload
 }
@@ -721,9 +719,6 @@ func (s *durableAgentService) selectOrCreateLaunchSession(inst *store.DurableAge
 			return sess, true, nil
 		}
 	}
-	if req.WorkspaceID == "" {
-		return nil, false, ErrDurableAgentWorkspaceRequired
-	}
 	metadata, _ := json.Marshal(map[string]string{"durable_agent_instance_id": inst.ID})
 	sessionTitle := strings.TrimSpace(inst.Name)
 	if sessionTitle == "" {
@@ -733,7 +728,6 @@ func (s *durableAgentService) selectOrCreateLaunchSession(inst *store.DurableAge
 		sessionTitle = inst.ID
 	}
 	sess := &store.Session{
-		WorkspaceID: req.WorkspaceID,
 		ProjectID:   req.ProjectID,
 		Provider:    inst.Provider,
 		Model:       inst.Model,

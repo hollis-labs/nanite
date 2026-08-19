@@ -6,7 +6,6 @@ import (
 	"testing"
 
 	llmtypes "github.com/hollis-labs/go-llm-types"
-	"github.com/hollis-labs/go-toolbroker/broker"
 	"github.com/hollis-labs/nanite/internal/chat"
 	"github.com/hollis-labs/nanite/internal/mcp"
 	"github.com/hollis-labs/nanite/internal/store"
@@ -99,19 +98,18 @@ func TestSelectForAgent_LateAlphabetAllowlistedToolSurvivesCap(t *testing.T) {
 
 	const wanted = "torque_task_get"
 	fillerCount := toolclient.MaxSelectedTools + 5
-	tools := make([]broker.ToolDefinition, 0, fillerCount+1)
+	tools := make([]llmtypes.ToolDefinition, 0, fillerCount+1)
 	for i := 0; i < fillerCount; i++ {
-		tools = append(tools, broker.ToolDefinition{
+		tools = append(tools, llmtypes.ToolDefinition{
 			Name:        fmt.Sprintf("torque_filler_%03d", i),
-			Server:      "torque",
 			Description: "filler tool",
 		})
 	}
-	// Registered LAST — past MaxSelectedTools in the broker's raw
+	// Registered LAST — past MaxSelectedTools in the catalog's raw
 	// (unranked) registration order, exactly the failure mode described in
 	// the ticket ("alphabetically late among Torque's ~93-98 native
 	// tools").
-	tools = append(tools, broker.ToolDefinition{Name: wanted, Server: "torque", Description: "Fetch a task"})
+	tools = append(tools, llmtypes.ToolDefinition{Name: wanted, Description: "Fetch a task"})
 	tc.RegisterTools(tools)
 
 	reader := newStubReader()

@@ -206,7 +206,6 @@ export function DurableAgentAdminPanel() {
 function DurableAgentDetail({ agent }: { agent: DurableAgentInstance | null }) {
   const queryClient = useQueryClient();
   const setActiveSession = useAppStore((state) => state.setActiveSession);
-  const activeWorkspaceId = useAppStore((state) => state.activeWorkspaceId);
   const activeProjectId = useAppStore((state) => state.activeProjectId);
   const setCurrentPage = useLayoutStore((state) => state.setCurrentPage);
   const agentID = agent?.id ?? "";
@@ -253,9 +252,6 @@ function DurableAgentDetail({ agent }: { agent: DurableAgentInstance | null }) {
   const onLifecycleSuccess = (
     result: DurableAgentInstance | DurableAgentLaunchResult,
   ) => {
-    void queryClient.invalidateQueries({
-      queryKey: ["sessions", activeWorkspaceId],
-    });
     void queryClient.invalidateQueries({ queryKey: ["sessions"] });
     void queryClient.invalidateQueries({ queryKey: ["durable-agents"] });
     void queryClient.invalidateQueries({
@@ -276,29 +272,19 @@ function DurableAgentDetail({ agent }: { agent: DurableAgentInstance | null }) {
   };
 
   const startMutation = useMutation({
-    mutationFn: () => {
-      if (!activeWorkspaceId) {
-        throw new Error("Choose a workspace before starting a durable agent.");
-      }
-      return api.startDurableAgent(agentID, {
-        workspace_id: activeWorkspaceId,
+    mutationFn: () =>
+      api.startDurableAgent(agentID, {
         project_id: activeProjectId ?? undefined,
         wake_payload: { reason: "manual" },
-      });
-    },
+      }),
     onSuccess: onLifecycleSuccess,
   });
   const resumeMutation = useMutation({
-    mutationFn: () => {
-      if (!activeWorkspaceId) {
-        throw new Error("Choose a workspace before resuming a durable agent.");
-      }
-      return api.resumeDurableAgent(agentID, {
-        workspace_id: activeWorkspaceId,
+    mutationFn: () =>
+      api.resumeDurableAgent(agentID, {
         project_id: activeProjectId ?? undefined,
         wake_payload: { reason: "lifecycle_resume" },
-      });
-    },
+      }),
     onSuccess: onLifecycleSuccess,
   });
   const pauseMutation = useMutation({
@@ -581,7 +567,6 @@ function CreateFromRecipeCard({
   const queryClient = useQueryClient();
   const setActiveSession = useAppStore((state) => state.setActiveSession);
   const setCurrentPage = useLayoutStore((state) => state.setCurrentPage);
-  const activeWorkspaceId = useAppStore((state) => state.activeWorkspaceId);
   const activeProjectId = useAppStore((state) => state.activeProjectId);
   const [recipeId, setRecipeId] = useState("");
   const [name, setName] = useState("");
@@ -639,7 +624,6 @@ function CreateFromRecipeCard({
       model: model || undefined,
       runtime_kind: runtimeKind || undefined,
       work_root: workRoot.trim() || undefined,
-      workspace_id: activeWorkspaceId ?? undefined,
       project_id: activeProjectId ?? undefined,
       wake_payload: wakePayload,
       start,
@@ -651,7 +635,6 @@ function CreateFromRecipeCard({
     return next;
   }, [
     activeProjectId,
-    activeWorkspaceId,
     inputValues,
     model,
     name,

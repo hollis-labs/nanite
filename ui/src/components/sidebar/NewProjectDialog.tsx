@@ -20,19 +20,16 @@ interface NewProjectDialogProps {
 }
 
 export function NewProjectDialog({ open, onOpenChange, onCreated }: NewProjectDialogProps) {
-  const activeWorkspaceId = useAppStore((s) => s.activeWorkspaceId);
   const setActiveProject = useAppStore((s) => s.setActiveProject);
   const queryClient = useQueryClient();
   const formRef = useRef<HTMLFormElement>(null);
   const [error, setError] = useState<string | null>(null);
 
   const createMutation = useMutation({
-    mutationFn: (data: { name: string; description?: string; repo_path?: string }) => {
-      if (!activeWorkspaceId) throw new Error("No active workspace");
-      return api.createProject(activeWorkspaceId, data);
-    },
+    mutationFn: (data: { name: string; description?: string; repo_path?: string }) =>
+      api.createProject(data),
     onSuccess: (project) => {
-      void queryClient.invalidateQueries({ queryKey: ["projects", activeWorkspaceId] });
+      void queryClient.invalidateQueries({ queryKey: ["projects"] });
       setActiveProject(project.id);
       onCreated?.(project.id);
       onOpenChange(false);
@@ -125,7 +122,7 @@ export function NewProjectDialog({ open, onOpenChange, onCreated }: NewProjectDi
             </Button>
             <Button
               type="submit"
-              disabled={createMutation.isPending || !activeWorkspaceId}
+              disabled={createMutation.isPending}
               className="gap-2"
             >
               {createMutation.isPending && <Loader2 className="size-3.5 animate-spin" />}

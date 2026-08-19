@@ -53,11 +53,7 @@ func TestAgentSkills_FKCascadesOnAgentDelete(t *testing.T) {
 func TestAgentProjects_FKRejectsOrphanedAgentID(t *testing.T) {
 	s := newTestStore(t)
 
-	ws := &Workspace{ID: "ws-fk-test-projects", Name: "FK Test Workspace"}
-	if err := s.CreateWorkspace(ws); err != nil {
-		t.Fatalf("CreateWorkspace: %v", err)
-	}
-	proj := &Project{ID: "proj-fk-test", WorkspaceID: ws.ID, Name: "FK Test Project"}
+	proj := &Project{ID: "proj-fk-test", Name: "FK Test Project"}
 	if err := s.CreateProject(proj); err != nil {
 		t.Fatalf("CreateProject: %v", err)
 	}
@@ -73,11 +69,7 @@ func TestAgentProjects_FKCascadesOnAgentDelete(t *testing.T) {
 	s := newTestStore(t)
 	agent := makeTestAgent(t, s, "fk-cascade-projects")
 
-	ws := &Workspace{ID: "ws-fk-cascade-projects", Name: "FK Cascade Workspace"}
-	if err := s.CreateWorkspace(ws); err != nil {
-		t.Fatalf("CreateWorkspace: %v", err)
-	}
-	proj := &Project{ID: "proj-fk-cascade", WorkspaceID: ws.ID, Name: "FK Cascade Project"}
+	proj := &Project{ID: "proj-fk-cascade", Name: "FK Cascade Project"}
 	if err := s.CreateProject(proj); err != nil {
 		t.Fatalf("CreateProject: %v", err)
 	}

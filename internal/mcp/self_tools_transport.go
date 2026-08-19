@@ -1748,7 +1748,7 @@ func (st *SelfToolsTransport) callSpawnSubagent(ctx context.Context, args map[st
 	// arg is a fallback only for ctx-less paths (tests, etc.), never an
 	// override of a real ctx-derived identity.
 	parentAgentID := strArg(args, "parent_agent_id", "")
-	if _, apID := CallerProfileFromContext(ctx); apID != "" {
+	if apID := CallerProfileFromContext(ctx); apID != "" {
 		parentAgentID = apID
 	}
 	req := subagent.SpawnRequest{

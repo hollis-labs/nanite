@@ -26,7 +26,7 @@ func TestAssembleSlots_FillsAllSlotsFromRawSources(t *testing.T) {
 	client := chat.NewContextClient(s)
 	svc := NewContextService(ContextServiceConfig{Client: client})
 
-	sess := &store.Session{ID: "slot-fill-sess", Title: "FillTest", WorkspaceID: ""}
+	sess := &store.Session{ID: "slot-fill-sess", Title: "FillTest"}
 	if err := s.CreateSession(sess); err != nil {
 		t.Fatalf("CreateSession: %v", err)
 	}
@@ -53,7 +53,7 @@ func TestAssembleSlots_FillsAllSlotsFromRawSources(t *testing.T) {
 		{Name: "dev_read", Description: "Read a file"},
 	}
 
-	result, err := svc.AssembleSlots(context.Background(), sess, agent, nil, tools, "Native tool guide.", 200000, "")
+	result, err := svc.AssembleSlots(context.Background(), sess, agent, tools, "Native tool guide.", 200000, "")
 	if err != nil {
 		t.Fatalf("AssembleSlots: %v", err)
 	}
@@ -145,7 +145,7 @@ func TestAssembleSlots_NoToolsLeavesToolsSlotEmpty(t *testing.T) {
 	}
 	agent := &store.AgentProfile{ID: "no-tools-agent", Slug: "x", Status: "active"}
 
-	result, err := svc.AssembleSlots(context.Background(), sess, agent, nil, nil, "", 200000, "")
+	result, err := svc.AssembleSlots(context.Background(), sess, agent, nil, "", 200000, "")
 	if err != nil {
 		t.Fatalf("AssembleSlots: %v", err)
 	}

@@ -50,7 +50,6 @@ afterEach(() => {
   vi.restoreAllMocks();
   localStorage.clear();
   useAppStore.setState({
-    activeWorkspaceId: null,
     activeProjectId: null,
     activeSessionId: null,
     configVersion: 0,
@@ -100,7 +99,6 @@ function session(overrides: Partial<Session> = {}): Session {
     short_code: "s2",
     title: "Started agent",
     custom_name: "",
-    workspace_id: "workspace-1",
     project_id: "project-1",
     context_type: "durable_agent",
     context_id: "durable-1",
@@ -325,7 +323,6 @@ describe("DurableAgentAdminPanel", () => {
     const agent = durableAgent();
     mockBaseApi(agent);
     useAppStore.setState({
-      activeWorkspaceId: "workspace-1",
       activeProjectId: "project-1",
       activeSessionId: null,
       configVersion: 0,
@@ -365,7 +362,6 @@ describe("DurableAgentAdminPanel", () => {
     );
     await waitFor(() =>
       expect(startSpy).toHaveBeenCalledWith("durable-1", {
-        workspace_id: "workspace-1",
         project_id: "project-1",
         wake_payload: { reason: "manual" },
       }),
@@ -382,7 +378,6 @@ describe("DurableAgentAdminPanel", () => {
     );
     await waitFor(() =>
       expect(resumeSpy).toHaveBeenCalledWith("durable-1", {
-        workspace_id: "workspace-1",
         project_id: "project-1",
         wake_payload: { reason: "lifecycle_resume" },
       }),
@@ -406,7 +401,6 @@ describe("DurableAgentAdminPanel", () => {
 
   it("renders lifecycle mutation errors inline", async () => {
     useAppStore.setState({
-      activeWorkspaceId: "workspace-1",
       activeProjectId: "project-1",
       activeSessionId: null,
       configVersion: 0,
@@ -427,21 +421,10 @@ describe("DurableAgentAdminPanel", () => {
     ).toBeTruthy();
   });
 
-  it("requires an active workspace before start", async () => {
-    mockBaseApi();
-    const startSpy = vi.spyOn(api, "startDurableAgent");
-
-    renderWithClient(<DurableAgentAdminPanel />);
-
-    fireEvent.click(
-      await screen.findByRole("button", { name: "Start durable agent" }),
-    );
-
-    expect(
-      await screen.findByText("Choose a workspace before starting a durable agent."),
-    ).toBeTruthy();
-    expect(startSpy).not.toHaveBeenCalled();
-  });
+  // "requires an active workspace before start" was removed by Phase 0
+  // item 20 (retire workspaces,
+  // TASKS/phase-0/20-retire-workspaces-and-instance-mechanism.md): starting
+  // a durable agent no longer requires (or accepts) a workspace_id.
 
   it("opens attached sessions from the sessions table", async () => {
     mockBaseApi();

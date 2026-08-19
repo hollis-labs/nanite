@@ -80,7 +80,6 @@ type harnessV1CapabilitiesResponse struct {
 }
 
 type harnessV1CreateSessionRequest struct {
-	WorkspaceID    string         `json:"workspace_id"`
 	ProjectID      string         `json:"project_id,omitempty"`
 	Provider       string         `json:"provider,omitempty"`
 	Model          string         `json:"model,omitempty"`
@@ -201,10 +200,6 @@ func (a *API) handleHarnessV1CreateSession(w http.ResponseWriter, r *http.Reques
 		a.errorResp(w, http.StatusBadRequest, "invalid JSON: "+err.Error())
 		return
 	}
-	if req.WorkspaceID == "" {
-		a.errorResp(w, http.StatusBadRequest, "workspace_id is required")
-		return
-	}
 	if req.RuntimeKind != "" {
 		a.errorResp(w, http.StatusUnprocessableEntity, "runtime_kind override is unsupported on harness v1 session create; runtime is inferred from provider or boot profile")
 		return
@@ -229,10 +224,9 @@ func (a *API) handleHarnessV1CreateSession(w http.ResponseWriter, r *http.Reques
 	}
 
 	sess := &store.Session{
-		WorkspaceID: req.WorkspaceID,
-		ProjectID:   req.ProjectID,
-		Provider:    providerID,
-		Model:       req.Model,
+		ProjectID: req.ProjectID,
+		Provider:  providerID,
+		Model:     req.Model,
 	}
 	if err := a.Services.Store.CreateSession(sess); err != nil {
 		a.errorResp(w, http.StatusInternalServerError, err.Error())
@@ -430,7 +424,6 @@ func (a *API) handleHarnessV1DurableStart(w http.ResponseWriter, r *http.Request
 		return
 	}
 	result, err := a.Services.DurableAgents.Start(r.Context(), r.PathValue("id"), service.DurableAgentStartRequest{
-		WorkspaceID: req.WorkspaceID,
 		ProjectID:   req.ProjectID,
 		WakePayload: durableAgentWakePayloadFromRequest(req.WakePayload),
 	})
@@ -444,7 +437,6 @@ func (a *API) handleHarnessV1DurableResume(w http.ResponseWriter, r *http.Reques
 		return
 	}
 	result, err := a.Services.DurableAgents.Resume(r.Context(), r.PathValue("id"), service.DurableAgentStartRequest{
-		WorkspaceID: req.WorkspaceID,
 		ProjectID:   req.ProjectID,
 		WakePayload: durableAgentWakePayloadFromRequest(req.WakePayload),
 	})
@@ -458,7 +450,6 @@ func (a *API) handleHarnessV1DurableWake(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	result, err := a.Services.DurableWake.Wake(r.Context(), r.PathValue("id"), service.DurableAgentWakeRequest{
-		WorkspaceID: req.WorkspaceID,
 		ProjectID:   req.ProjectID,
 		WakePayload: durableAgentWakePayloadFromRequest(req.WakePayload),
 	})

@@ -131,7 +131,7 @@ func TestChat_PathGrants_DevGlobE2E(t *testing.T) {
 	defer close(ch)
 
 	results := svc.executeToolBatch(
-		context.Background(), plans, ls, "agent-test", ch, "sess-e2e", "ws-test",
+		context.Background(), plans, ls, "agent-test", ch, "sess-e2e",
 	)
 
 	if len(results) != 1 {
@@ -241,7 +241,7 @@ func TestE2E_WorkerInheritsParentGrant(t *testing.T) {
 	// Dispatch under the WORKER session ID. Pre-fix this fails with
 	// bucket_size:0; post-fix it resolves via the lineage walk to parent.
 	results := svc.executeToolBatch(
-		context.Background(), plans, ls, "agent-worker", ch, workerSessionID, "ws-test",
+		context.Background(), plans, ls, "agent-worker", ch, workerSessionID,
 	)
 
 	if len(results) != 1 {

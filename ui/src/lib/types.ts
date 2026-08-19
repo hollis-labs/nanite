@@ -1,16 +1,7 @@
 import type { ResponseV1 } from "@/lib/envelope-response";
 
-export interface Workspace {
-  id: string;
-  name: string;
-  description: string;
-  icon: string;
-  sort_order: number;
-}
-
 export interface Project {
   id: string;
-  workspace_id: string;
   name: string;
   description: string;
   repo_path: string;
@@ -25,7 +16,6 @@ export interface Session {
   short_code: string;
   title: string;
   custom_name: string;
-  workspace_id: string;
   project_id: string;
   context_type: string | null;
   context_id: string | null;
@@ -353,7 +343,6 @@ export interface DurableAgentLaunchPlan {
 }
 
 export interface DurableAgentStartRequest {
-  workspace_id?: string;
   project_id?: string;
   wake_payload?: DurableAgentWakePayload;
 }
@@ -392,7 +381,6 @@ export interface DurableAgentWakeDueItem {
   wake_reason: string;
   due: boolean;
   skip_reason?: string;
-  workspace_id?: string;
   project_id?: string;
 }
 
@@ -469,7 +457,6 @@ export interface DurableAgentRecipeRequest {
   model?: string;
   runtime_kind?: RuntimeKind | string;
   work_root?: string;
-  workspace_id?: string;
   project_id?: string;
   wake_payload?: DurableAgentWakePayload;
   metadata?: Record<string, string>;
@@ -636,7 +623,6 @@ export interface HarnessSessionResponse {
 }
 
 export interface HarnessCreateSessionRequest {
-  workspace_id: string;
   project_id?: string;
   provider?: string;
   model?: string;
@@ -894,7 +880,6 @@ export interface AgentBuilderProfileInput {
 export interface AgentBuilderCapabilitiesInput {
   assigned_skill_ids?: string[];
   assigned_skill_slugs?: string[];
-  prompt_template_ids?: string[];
   known_tools?: AgentKnownToolUpsertRequest[];
   known_skills?: AgentKnownSkillUpsertRequest[];
   procedures?: AgentProcedureUpsertRequest[];
@@ -910,7 +895,6 @@ export interface AgentBuilderDurableInstanceInput {
   model?: string;
   runtime_kind?: RuntimeKind | string;
   work_root?: string;
-  workspace_id?: string;
   project_id?: string;
   start?: boolean;
   metadata?: Record<string, string>;
@@ -1556,18 +1540,6 @@ export interface PendingApproval extends ApprovalRequest {
     decision: ApprovalDecision;
     scope?: ApprovalScope;
   };
-}
-
-// --- Broker Decisions ---
-
-export interface BrokerDecision {
-  id: number;
-  session_id: string;
-  intent: string;
-  layer_reached: string;
-  selected_tools: string[];
-  signals: string;
-  created_at: string;
 }
 
 // --- Turn Snapshots ---
@@ -2395,20 +2367,6 @@ export interface TemplateVariable {
   options?: string[];
 }
 
-export interface PromptTemplate {
-  id: string;
-  name: string;
-  slug: string;
-  scope: "system" | "mode" | "skill" | "context";
-  template: string;
-  variables: string;
-  priority: number;
-  icon: string;
-  is_builtin: boolean;
-  created_at: string;
-  updated_at: string;
-}
-
 // --- Workflow / Pipeline ---
 
 export interface PipelineInfo {
@@ -2519,14 +2477,8 @@ export interface MemoryUpdateRequest {
 
 // --- Role Trust (H1 CW-20260421-0014) ---
 
-export type TrustTier = "untrusted" | "normal" | "trusted";
-
-// WorkspaceRoleTrustOverride is a single row from workspace_role_trust
-// listing the explicit override for one agent profile in a workspace.
-export interface WorkspaceRoleTrustOverride {
-  workspace_id: string;
-  agent_profile_id: string;
-  trust_tier: TrustTier;
-  promoted_at: string;
-  promoted_by: string;
-}
+// TrustTier and WorkspaceRoleTrustOverride (H1, CW-20260421-0014) were
+// removed by Phase 0 item 20 (retire workspaces,
+// TASKS/phase-0/20-retire-workspaces-and-instance-mechanism.md):
+// workspace_role_trust and its REST surface are retired in full,
+// operator-confirmed 2026-08-18.

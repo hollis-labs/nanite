@@ -8,7 +8,7 @@ import (
 	"time"
 
 	"github.com/hollis-labs/nanite/internal/chat"
-	"github.com/hollis-labs/nanite/internal/runtime/agent/recovery"
+	"github.com/hollis-labs/nanite/internal/recovery/broker"
 )
 
 // recoveryInfoCardCancelToken is the wire-level wrap key the FE reads to
@@ -40,7 +40,7 @@ var recoveryGiphyQueries = []string{
 	"oops mistake",
 }
 
-// recoveryEnvelopeSink satisfies recovery.EnvelopeSink by projecting
+// recoveryEnvelopeSink satisfies broker.EnvelopeSink by projecting
 // the broker's typed Envelope onto the existing plugin_envelope wire
 // format. Each envelope.Kind maps onto a registered envelope schema:
 //
@@ -64,7 +64,7 @@ type recoveryEnvelopeSink struct {
 // session's plugin_envelope SSE channel. Returns nil even on a missing
 // StreamManager (degraded-mode boot, tests) — the broker treats sink
 // errors as advisory and continues the recovery flow.
-func (e *recoveryEnvelopeSink) Emit(sessionID string, env recovery.Envelope) error {
+func (e *recoveryEnvelopeSink) Emit(sessionID string, env broker.Envelope) error {
 	if e.streams == nil {
 		return nil
 	}
@@ -93,7 +93,7 @@ func (e *recoveryEnvelopeSink) Emit(sessionID string, env recovery.Envelope) err
 	return nil
 }
 
-// projectRecoveryEnvelope maps a recovery.Envelope onto the (envelope-
+// projectRecoveryEnvelope maps a broker.Envelope onto the (envelope-
 // type, json-payload) pair the FE EnvelopeRenderer consumes.
 //
 // Wire shape per Kind:
@@ -106,7 +106,7 @@ func (e *recoveryEnvelopeSink) Emit(sessionID string, env recovery.Envelope) err
 // (one of the schema's enum values) — the broker only reaches the
 // chat-loop-terminated branch on CauseRestartExhausted, which matches
 // the schema's "retry budget exhausted" semantics.
-func projectRecoveryEnvelope(env recovery.Envelope) (string, []byte, error) {
+func projectRecoveryEnvelope(env broker.Envelope) (string, []byte, error) {
 	switch env.Kind {
 	case "info-card":
 		payload, err := json.Marshal(infoCardPayload{

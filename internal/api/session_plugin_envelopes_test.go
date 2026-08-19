@@ -12,10 +12,7 @@ import (
 func TestListSessionPluginEnvelopes_RehydratesPendingStandaloneCards(t *testing.T) {
 	a, mux := newTestAPI(t)
 
-	if err := a.Services.Store.CreateWorkspace(&store.Workspace{ID: "ws-penv", Name: "plugin env"}); err != nil {
-		t.Fatalf("CreateWorkspace: %v", err)
-	}
-	sess := &store.Session{WorkspaceID: "ws-penv"}
+	sess := &store.Session{}
 	if err := a.Services.Store.CreateSession(sess); err != nil {
 		t.Fatalf("CreateSession: %v", err)
 	}

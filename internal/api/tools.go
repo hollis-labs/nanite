@@ -2,7 +2,6 @@ package api
 
 import (
 	"net/http"
-	"strconv"
 
 	pluginpkg "github.com/hollis-labs/nanite/internal/plugin"
 )
@@ -64,7 +63,7 @@ func (a *API) handleSelectTools(w http.ResponseWriter, r *http.Request) {
 
 	// No per-session model context available at the API boundary — pass 0 so
 	// SelectTools falls back to DefaultContextWindowTokens.
-	tools, _, err := a.Services.ToolClient.SelectTools(r.Context(), req.Intent, req.Hints, "", "", 0)
+	tools, err := a.Services.ToolClient.SelectTools(r.Context(), req.Intent, req.Hints, "", "", 0)
 	if err != nil {
 		a.errorResp(w, http.StatusInternalServerError, err.Error())
 		return
@@ -121,31 +120,6 @@ func (a *API) handleListAgentTools(w http.ResponseWriter, r *http.Request) {
 	}
 
 	a.jsonResp(w, http.StatusOK, items)
-}
-
-// handleListBrokerDecisions returns broker decision logs for a session.
-// GET /api/broker/decisions?session_id=X&limit=N
-func (a *API) handleListBrokerDecisions(w http.ResponseWriter, r *http.Request) {
-	sessionID := r.URL.Query().Get("session_id")
-	if sessionID == "" {
-		a.errorResp(w, http.StatusBadRequest, "session_id is required")
-		return
-	}
-
-	limit := 50
-	if ls := r.URL.Query().Get("limit"); ls != "" {
-		if n, err := strconv.Atoi(ls); err == nil && n > 0 {
-			limit = n
-		}
-	}
-
-	decisions, err := a.Services.Store.ListBrokerDecisions(sessionID, limit)
-	if err != nil {
-		a.errorResp(w, http.StatusInternalServerError, err.Error())
-		return
-	}
-
-	a.jsonResp(w, http.StatusOK, decisions)
 }
 
 // handleGetToolLoadPreferences returns the user's tool load type overrides.

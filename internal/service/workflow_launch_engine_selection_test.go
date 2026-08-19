@@ -49,7 +49,6 @@ func TestWorkflowLauncher_Launch_EmptyEngine_DefaultsToBuiltin(t *testing.T) {
 
 	if _, err := launcher.Launch(context.Background(), WorkflowLaunchRequest{
 		WorkflowName:   "noop-workflow",
-		WorkspaceID:    "ws-launch",
 		AgentProfileID: profile.ID,
 	}); err != nil {
 		t.Fatalf("Launch: %v", err)
@@ -80,7 +79,6 @@ func TestWorkflowLauncher_Launch_ExplicitEngine_RoutesToIt(t *testing.T) {
 
 	if _, err := launcher.Launch(context.Background(), WorkflowLaunchRequest{
 		WorkflowName:   "langgraph-workflow",
-		WorkspaceID:    "ws-launch",
 		AgentProfileID: profile.ID,
 	}); err != nil {
 		t.Fatalf("Launch: %v", err)
@@ -108,7 +106,6 @@ func TestWorkflowLauncher_Launch_UnregisteredEngine_ClearError(t *testing.T) {
 
 	_, err := launcher.Launch(context.Background(), WorkflowLaunchRequest{
 		WorkflowName:   "crewai-workflow",
-		WorkspaceID:    "ws-launch",
 		AgentProfileID: profile.ID,
 	})
 	if err == nil {
@@ -140,7 +137,6 @@ func TestWorkflowLauncher_Launch_MissingBuiltinEngine_NotFullyConfiguredError(t 
 
 	_, err := launcher.Launch(context.Background(), WorkflowLaunchRequest{
 		WorkflowName:   "noop-workflow",
-		WorkspaceID:    "ws-launch",
 		AgentProfileID: profile.ID,
 	})
 	if err == nil || !strings.Contains(err.Error(), "not fully configured") {
@@ -167,7 +163,6 @@ func TestWorkflowLauncher_Launch_NilEngineValueInMap_ClearError(t *testing.T) {
 
 	_, err := launcher.Launch(context.Background(), WorkflowLaunchRequest{
 		WorkflowName:   "crewai-workflow",
-		WorkspaceID:    "ws-launch",
 		AgentProfileID: profile.ID,
 	})
 	if err == nil {

@@ -147,7 +147,6 @@ function SessionDetailsBody({
             value={formatDateTime(details.last_useful_activity_at)}
             mono
           />
-          <Fact label="Workspace" value={session.workspace_id} mono />
           <Fact label="Project" value={session.project_id} mono />
         </FactGrid>
       </Section>

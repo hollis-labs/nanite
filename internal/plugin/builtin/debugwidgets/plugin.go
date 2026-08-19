@@ -33,9 +33,14 @@ func init() {
 	hostplugin.RegisterPlugin("debug-widgets", func() plugin.Plugin { return New() })
 }
 
-// DebugWidgetsPlugin provides developer-only debug widgets:
-// broker decisions, slot inspector, and turn snapshots.
-// Activates only when developer_mode is true.
+// DebugWidgetsPlugin provides developer-only debug widgets: slot inspector
+// and turn snapshots. Activates only when developer_mode is true.
+//
+// The former "broker decisions" widget (SQL-backed via the now-dropped
+// broker_decisions table) was removed by
+// TASKS/phase-0/23-export-and-drop-decision-tables.md — its replacement is
+// the inspector-backed Broker tab in
+// ui/src/components/settings/inspector/InspectorPanel.tsx.
 type DebugWidgetsPlugin struct {
 	status plugin.PluginStatus
 }
@@ -45,7 +50,7 @@ func New() *DebugWidgetsPlugin { return &DebugWidgetsPlugin{} }
 func (p *DebugWidgetsPlugin) ID() string             { return "debug-widgets" }
 func (p *DebugWidgetsPlugin) Name() string           { return "Debug Widgets" }
 func (p *DebugWidgetsPlugin) Version() string        { return "1.0.0" }
-func (p *DebugWidgetsPlugin) Description() string    { return "Broker decisions, slot inspector, and turn snapshot widgets (developer_mode only)" }
+func (p *DebugWidgetsPlugin) Description() string    { return "Slot inspector and turn snapshot widgets (developer_mode only)" }
 func (p *DebugWidgetsPlugin) Dependencies() []string { return nil }
 
 // Manifest exposes the embedded plugin.yaml so widget UIComponents register

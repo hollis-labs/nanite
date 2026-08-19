@@ -30,7 +30,6 @@ import (
 	llmcontracts "github.com/hollis-labs/go-llm-contracts"
 	llmtypes "github.com/hollis-labs/go-llm-types"
 	"github.com/hollis-labs/go-providers/provider"
-	"github.com/hollis-labs/go-toolbroker/broker"
 	"github.com/hollis-labs/nanite/internal/agentregistry"
 	"github.com/hollis-labs/nanite/internal/agentworkflow"
 	"github.com/hollis-labs/nanite/internal/api"
@@ -185,9 +184,6 @@ func cmdServe(args []string) {
 	}
 	if err := s.SeedProviders(); err != nil {
 		slogx.Fatal("failed to seed providers", "err", err)
-	}
-	if err := s.SeedBuiltinPromptTemplates(); err != nil {
-		slogx.Fatal("failed to seed prompt templates", "err", err)
 	}
 
 	// Load the canonical envelope catalog from go-envelopes (lib v0.1.0).
@@ -951,15 +947,13 @@ func initMCP(s *store.Store, cfg *config.Config, appCfg *config.AppConfig) (*mcp
 	registerVantaServer(mcpManager, cfg)
 
 	loadPersistedMCPServers(s, mcpManager)
-	// Both the MCPManager's broker and the ToolClient's Config must share
-	// the same ruleset (CW-20260815-0011): constructing them from two
-	// disconnected calls — one to the go-toolbroker library's own
-	// DefaultRules() here, one to toolclient.New(..., nil) below (which
-	// silently defaulted to library rules too) — meant Nanite's real
-	// ruleset (toolclient.DefaultConfig / NaniteDefaultRules) was never
-	// actually in effect for either broker instance.
+	// Phase 0 item 22 (decision log §11): the go-toolbroker LocalBroker that
+	// used to sit between mcpManager and tb — populated here via
+	// mcpManager.Broker, then shared onto tb.LocalBroker below — is retired.
+	// mcpManager.GetAllTools() is now the single, direct source of
+	// MCP-discovered tools for tb's catalog (see ToolClient.catalogTools);
+	// no shared broker instance, no rule-based filtering to keep in sync.
 	toolCfg := toolclient.DefaultConfig()
-	mcpManager.Broker = broker.NewLocalBroker(nil, toolCfg.Rules)
 	if diff, err := mcpManager.AutoDiscover(context.Background(), s); err != nil {
 		slog.Warn("MCP auto-discovery failed", "err", err)
 	} else {
@@ -970,10 +964,6 @@ func initMCP(s *store.Store, cfg *config.Config, appCfg *config.AppConfig) (*mcp
 	}
 
 	tb := toolclient.New(mcpManager, s, toolCfg)
-	if mcpManager.Broker != nil {
-		tb.LocalBroker = mcpManager.Broker
-		slog.Info("toolclient: sharing MCPManager broker", "tool_summaries", len(mcpManager.Broker.AllTools()))
-	}
 	devToolDefs := mcp.DevToolProviderDefinitions()
 	tb.Builtins.RegisterBuiltins("dev", devToolDefs)
 	slog.Info("registered dev built-in tools", "count", len(devToolDefs))

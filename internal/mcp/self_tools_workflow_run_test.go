@@ -49,9 +49,9 @@ func exampleWorkflowDefinitionsDir(t *testing.T) string {
 
 // TestCallWorkflowRun_TrustResolutionAndEnvelopeWrap proves callWorkflowRun,
 // given the real worker-reviewer-gate definition's name, pulls
-// WorkspaceID/AgentProfileID from ctx (not args), forwards them plus params
-// into the WorkflowLaunchRequest, and wraps the launcher's SpawnResult in a
-// valid envelope.
+// AgentProfileID from ctx (not args), forwards it plus params into the
+// WorkflowLaunchRequest, and wraps the launcher's SpawnResult in a valid
+// envelope.
 func TestCallWorkflowRun_TrustResolutionAndEnvelopeWrap(t *testing.T) {
 	dir := exampleWorkflowDefinitionsDir(t)
 	registry, err := agentworkflow.LoadRegistryDir(dir)
@@ -69,7 +69,7 @@ func TestCallWorkflowRun_TrustResolutionAndEnvelopeWrap(t *testing.T) {
 	}
 	st := &SelfToolsTransport{WorkflowLauncher: launcher}
 
-	ctx := WithCallerProfile(context.Background(), "ws-1", "profile-1")
+	ctx := WithCallerProfile(context.Background(), "profile-1")
 	res, err := st.callWorkflowRun(ctx, map[string]any{
 		"workflow_name": wf.Name,
 		"params":        map[string]any{"task": "reverse the string \"abc\""},
@@ -87,9 +87,9 @@ func TestCallWorkflowRun_TrustResolutionAndEnvelopeWrap(t *testing.T) {
 	if launcher.saw.WorkflowName != "worker-reviewer-gate" {
 		t.Errorf("saw.WorkflowName = %q, want worker-reviewer-gate", launcher.saw.WorkflowName)
 	}
-	if launcher.saw.WorkspaceID != "ws-1" || launcher.saw.AgentProfileID != "profile-1" {
-		t.Errorf("saw (WorkspaceID, AgentProfileID) = (%q, %q), want (ws-1, profile-1) — must come from CallerProfileFromContext, not an LLM-suppliable arg",
-			launcher.saw.WorkspaceID, launcher.saw.AgentProfileID)
+	if launcher.saw.AgentProfileID != "profile-1" {
+		t.Errorf("saw.AgentProfileID = %q, want profile-1 — must come from CallerProfileFromContext, not an LLM-suppliable arg",
+			launcher.saw.AgentProfileID)
 	}
 	if task, _ := launcher.saw.Params["task"].(string); task != "reverse the string \"abc\"" {
 		t.Errorf("saw.Params[task] = %v, want the forwarded task string", launcher.saw.Params["task"])
@@ -114,17 +114,14 @@ func TestCallWorkflowRun_TrustResolutionAndEnvelopeWrap(t *testing.T) {
 }
 
 // TestCallWorkflowRun_NoCallerProfile_RejectsBeforeLaunch is the negative
-// case for the same trust gate: callWorkflowRun.go:63-68 checks
-// WorkspaceID/AgentProfileID before ever calling the launcher. A session
-// with no caller-profile context stamped (e.g. a malformed or bypassed
-// service-layer call) must be rejected, not silently launched with empty
-// identity.
+// case for the same trust gate: callWorkflowRun.go checks AgentProfileID
+// before ever calling the launcher. A session with no caller-profile
+// context stamped (e.g. a malformed or bypassed service-layer call) must be
+// rejected, not silently launched with empty identity.
 func TestCallWorkflowRun_NoCallerProfile_RejectsBeforeLaunch(t *testing.T) {
-	// WithCallerProfile itself enforces all-or-nothing (both IDs non-empty
-	// or neither is stamped — tool_ctx.go), so a bare context.Background()
-	// is the only reachable "unresolved" state via the public API; it
-	// exercises both the WorkspaceID=="" and AgentProfileID=="" checks in
-	// callWorkflowRun at once.
+	// A bare context.Background() is the only reachable "unresolved" state
+	// via the public API; it exercises the AgentProfileID=="" check in
+	// callWorkflowRun.
 	launcher := &stubWorkflowLauncher{result: &dispatch.SpawnResult{Summary: "should not be reached"}}
 	st := &SelfToolsTransport{WorkflowLauncher: launcher}
 
@@ -148,7 +145,7 @@ func TestCallWorkflowRun_MissingWorkflowName_RejectsBeforeLaunch(t *testing.T) {
 	launcher := &stubWorkflowLauncher{result: &dispatch.SpawnResult{Summary: "should not be reached"}}
 	st := &SelfToolsTransport{WorkflowLauncher: launcher}
 
-	ctx := WithCallerProfile(context.Background(), "ws-1", "profile-1")
+	ctx := WithCallerProfile(context.Background(), "profile-1")
 	res, err := st.callWorkflowRun(ctx, map[string]any{})
 	if err != nil {
 		t.Fatalf("callWorkflowRun: %v", err)
@@ -178,7 +175,7 @@ func TestCallWorkflowRun_MissingRequiredParam_RejectsBeforeLaunchWithClearError(
 	launcher := &stubWorkflowLauncher{result: &dispatch.SpawnResult{Summary: "should not be reached"}}
 	st := &SelfToolsTransport{WorkflowLauncher: launcher, WorkflowRegistry: registry}
 
-	ctx := WithCallerProfile(context.Background(), "ws-1", "profile-1")
+	ctx := WithCallerProfile(context.Background(), "profile-1")
 	res, err := st.callWorkflowRun(ctx, map[string]any{
 		"workflow_name": "worker-reviewer-gate",
 		// params.task deliberately omitted.
@@ -219,7 +216,7 @@ func TestCallWorkflowRun_RequiredParamSupplied_NoRegistryRegression(t *testing.T
 	launcher := &stubWorkflowLauncher{result: &dispatch.SpawnResult{Summary: "ok"}}
 	st := &SelfToolsTransport{WorkflowLauncher: launcher, WorkflowRegistry: registry}
 
-	ctx := WithCallerProfile(context.Background(), "ws-1", "profile-1")
+	ctx := WithCallerProfile(context.Background(), "profile-1")
 	res, err := st.callWorkflowRun(ctx, map[string]any{
 		"workflow_name": "worker-reviewer-gate",
 		"params":        map[string]any{"task": "reverse the string \"abc\""},
@@ -249,7 +246,7 @@ func TestCallWorkflowRun_UnknownWorkflowName_StillReachesLauncher(t *testing.T) 
 	launcher := &stubWorkflowLauncher{result: &dispatch.SpawnResult{Summary: "ok"}}
 	st := &SelfToolsTransport{WorkflowLauncher: launcher, WorkflowRegistry: registry}
 
-	ctx := WithCallerProfile(context.Background(), "ws-1", "profile-1")
+	ctx := WithCallerProfile(context.Background(), "profile-1")
 	_, err = st.callWorkflowRun(ctx, map[string]any{
 		"workflow_name": "does-not-exist",
 	})

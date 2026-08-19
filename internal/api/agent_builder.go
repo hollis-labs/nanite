@@ -246,7 +246,6 @@ func (a *API) agentBuilderDryRun(ctx context.Context, req AgentBuilderDryRunRequ
 				Model:       req.DurableInstance.Model,
 				RuntimeKind: req.DurableInstance.RuntimeKind,
 				WorkRoot:    req.DurableInstance.WorkRoot,
-				WorkspaceID: req.DurableInstance.WorkspaceID,
 				ProjectID:   req.DurableInstance.ProjectID,
 				WakePayload: durableWakePayloadForDryRun(req),
 				Metadata:    req.DurableInstance.Metadata,
@@ -261,9 +260,6 @@ func (a *API) agentBuilderDryRun(ctx context.Context, req AgentBuilderDryRunRequ
 			}
 		} else {
 			launchPreview = buildAgentBuilderLaunchPlanPreview(req)
-			if req.DurableInstance.Start && strings.TrimSpace(req.DurableInstance.WorkspaceID) == "" {
-				errors = append(errors, "workspace_id is required when dry-run includes a launch/start preview")
-			}
 		}
 	}
 
@@ -510,14 +506,6 @@ func capabilityOperations(c AgentBuilderCapabilitiesInput, mode string) []AgentB
 	if n := len(c.AssignedSkillIDs) + len(c.AssignedSkillSlugs); n > 0 {
 		ops = append(ops, AgentBuilderCapabilityOperation{
 			Area:   "skills",
-			Action: "assign",
-			Target: mode,
-			Count:  n,
-		})
-	}
-	if n := len(c.PromptTemplateIDs); n > 0 {
-		ops = append(ops, AgentBuilderCapabilityOperation{
-			Area:   "prompt_templates",
 			Action: "assign",
 			Target: mode,
 			Count:  n,

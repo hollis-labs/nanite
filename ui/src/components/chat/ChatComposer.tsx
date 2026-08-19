@@ -102,7 +102,6 @@ export function ChatComposer({
 }: ChatComposerProps) {
   const activeSessionId = useAppStore((s) => s.activeSessionId);
   const setActiveSession = useAppStore((s) => s.setActiveSession);
-  const activeWorkspaceId = useAppStore((s) => s.activeWorkspaceId);
   const queryClient = useQueryClient();
   const {
     mode: shellMode,
@@ -169,7 +168,7 @@ export function ChatComposer({
     async (cmd: SlashCommand, cmdArgs = "") => {
       switch (cmd.name) {
         case "new": {
-          const session = await api.createSession({ workspace_id: activeWorkspaceId || "" });
+          const session = await api.createSession({});
           setActiveSession(session.id);
           void queryClient.invalidateQueries({ queryKey: ["sessions"] });
           return;
@@ -257,7 +256,7 @@ export function ChatComposer({
         }
       }
     },
-    [activeSessionId, activeWorkspaceId, setActiveSession, queryClient, onSend, reloadMessages],
+    [activeSessionId, setActiveSession, queryClient, onSend, reloadMessages],
   );
 
   const handleCommandRef = useRef(handleCommand);

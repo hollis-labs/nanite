@@ -12,7 +12,7 @@ func TestStateCollector_CollectsUserMessagesAndStructuredRefs(t *testing.T) {
 	if err := st.Seed(); err != nil {
 		t.Fatalf("Seed: %v", err)
 	}
-	if err := st.CreateSession(&store.Session{ID: "sess-reflex", WorkspaceID: "default", Title: "reflex"}); err != nil {
+	if err := st.CreateSession(&store.Session{ID: "sess-reflex", Title: "reflex"}); err != nil {
 		t.Fatalf("CreateSession: %v", err)
 	}
 	if err := st.CreateMessage(&store.Message{

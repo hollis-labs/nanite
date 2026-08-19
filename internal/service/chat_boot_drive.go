@@ -15,11 +15,11 @@ import (
 	llmtypes "github.com/hollis-labs/go-llm-types"
 	"github.com/hollis-labs/nanite/internal/bootprofile"
 	"github.com/hollis-labs/nanite/internal/chat"
-	"github.com/hollis-labs/nanite/internal/launchplan"
 	ctxpkg "github.com/hollis-labs/nanite/internal/context"
 	"github.com/hollis-labs/nanite/internal/fsutil"
+	"github.com/hollis-labs/nanite/internal/launchplan"
+	"github.com/hollis-labs/nanite/internal/recovery/broker"
 	runtimeagent "github.com/hollis-labs/nanite/internal/runtime/agent"
-	"github.com/hollis-labs/nanite/internal/runtime/agent/recovery"
 	"github.com/hollis-labs/nanite/internal/store"
 )
 
@@ -415,7 +415,7 @@ func (s *chatServiceImpl) observeSessionForRecovery(sess *runtimeagent.Session, 
 		s.activeSessions.CompareAndDelete(sessionID, sess)
 		s.activeSessionSlots.Delete(sessionID)
 		s.toolPartitionStates.Delete(sessionID)
-		if broker, ok := s.agentDeps.Recovery.(*recovery.Broker); ok {
+		if broker, ok := s.agentDeps.Recovery.(*broker.Broker); ok {
 			broker.ClearSession(sessionID)
 		}
 		slog.Info("recovery: session exited via intentional reboot — skipping broker",
@@ -434,7 +434,7 @@ func (s *chatServiceImpl) observeSessionForRecovery(sess *runtimeagent.Session, 
 		// Comma-ok rather than panicking type assert: future
 		// RecoveryHooks impls (mocks in tests) may not expose
 		// ClearSession; the cleanup is best-effort.
-		if broker, ok := s.agentDeps.Recovery.(*recovery.Broker); ok {
+		if broker, ok := s.agentDeps.Recovery.(*broker.Broker); ok {
 			broker.ClearSession(sessionID)
 		}
 		return
@@ -492,11 +492,11 @@ func (s *chatServiceImpl) observeSessionForRecovery(sess *runtimeagent.Session, 
 // *runtimeagent.Session to Wait on.
 func buildSessionExitMeta(agentProfile, provider, workdir string, sessionAge time.Duration) map[string]any {
 	return map[string]any{
-		recovery.MetaKeyAgentProfile: agentProfile,
-		recovery.MetaKeyProvider:     provider,
-		recovery.MetaKeyWorkdir:      workdir,
-		recovery.MetaKeyMode:         "long_lived",
-		recovery.MetaKeySessionAge:   sessionAge,
+		broker.MetaKeyAgentProfile: agentProfile,
+		broker.MetaKeyProvider:     provider,
+		broker.MetaKeyWorkdir:      workdir,
+		broker.MetaKeyMode:         "long_lived",
+		broker.MetaKeySessionAge:   sessionAge,
 	}
 }
 

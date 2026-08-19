@@ -161,11 +161,11 @@ func (st *SelfToolsTransport) resolvePanelAccess(ctx context.Context, panelID st
 		// safe default elsewhere in the codebase.
 		return false, "untrusted"
 	}
-	wsID, apID := CallerProfileFromContext(ctx)
-	if wsID == "" || apID == "" {
+	apID := CallerProfileFromContext(ctx)
+	if apID == "" {
 		return false, "untrusted"
 	}
-	tier, err := st.TrustResolver.ResolveTrust(ctx, wsID, apID)
+	tier, err := st.TrustResolver.ResolveTrust(ctx, apID)
 	if err != nil {
 		return false, "untrusted"
 	}

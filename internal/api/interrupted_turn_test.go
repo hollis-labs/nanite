@@ -33,11 +33,7 @@ func TestHandleGetSession_InterruptedTurn(t *testing.T) {
 
 	seed := func(t *testing.T, a *API, sessID string, lastRole string) {
 		t.Helper()
-		ws := &store.Workspace{ID: sessID + "-ws", Name: sessID + "-ws"}
-		if err := a.Services.Store.CreateWorkspace(ws); err != nil {
-			t.Fatalf("CreateWorkspace: %v", err)
-		}
-		sess := &store.Session{ID: sessID, WorkspaceID: ws.ID, Title: "t"}
+		sess := &store.Session{ID: sessID, Title: "t"}
 		if err := a.Services.Store.CreateSession(sess); err != nil {
 			t.Fatalf("CreateSession: %v", err)
 		}

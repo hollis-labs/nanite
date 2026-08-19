@@ -80,15 +80,11 @@ func TestDurableAgentRecipesAPI_ApplyAndStart(t *testing.T) {
 	if err := a.Services.Store.CreateAgent(profile); err != nil {
 		t.Fatalf("CreateAgent: %v", err)
 	}
-	if err := a.Services.Store.CreateWorkspace(&store.Workspace{ID: "workspace-a", Name: "Workspace A"}); err != nil {
-		t.Fatalf("CreateWorkspace: %v", err)
-	}
 	body, _ := json.Marshal(DurableAgentRecipeRequest{
-		Name:        "Monitor API",
-		Slug:        "monitor-api",
-		ProfileID:   profile.ID,
-		WorkspaceID: "workspace-a",
-		Start:       true,
+		Name:      "Monitor API",
+		Slug:      "monitor-api",
+		ProfileID: profile.ID,
+		Start:     true,
 	})
 	req := httptest.NewRequest("POST", "/api/durable-agent-recipes/process-monitor/apply", bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")

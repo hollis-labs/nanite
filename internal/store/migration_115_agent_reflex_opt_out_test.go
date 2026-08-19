@@ -50,7 +50,6 @@ func TestMigrate115AddsOptOutColumnAndTable(t *testing.T) {
 	}
 
 	// The opt-out table exists and enforces its FKs / PK.
-	seedWorkspace(t, s, "ws-migration-115")
 	agent := &AgentProfile{Name: "Opt-Out Probe", Slug: "opt-out-probe", SystemPrompt: "x", Class: "process"}
 	if err := s.CreateAgent(agent); err != nil {
 		t.Fatalf("CreateAgent: %v", err)
@@ -119,7 +118,6 @@ func TestMigrate115AgentDeleteCascadesOptOuts(t *testing.T) {
 		t.Fatalf("InsertAgentReflex (class-bound): %v", err)
 	}
 
-	seedWorkspace(t, s, "ws-migration-115-agent-delete")
 	agent := &AgentProfile{Name: "Opt-Out Agent Delete Probe", Slug: "opt-out-agent-delete-probe", SystemPrompt: "x", Class: "process"}
 	if err := s.CreateAgent(agent); err != nil {
 		t.Fatalf("CreateAgent: %v", err)

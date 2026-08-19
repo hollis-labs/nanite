@@ -14,7 +14,6 @@ import (
 	llmtypes "github.com/hollis-labs/go-llm-types"
 	"github.com/hollis-labs/nanite/internal/contextbroker"
 	"github.com/hollis-labs/nanite/internal/permission"
-	"github.com/hollis-labs/nanite/internal/skillbroker"
 	"github.com/hollis-labs/nanite/internal/store"
 	wsutil "github.com/hollis-labs/nanite/internal/workspace"
 )
@@ -98,23 +97,23 @@ type SlotSources struct {
 	// rules — Anthropic's `cacheable_prefix_tokens` math depends on this
 	// being the leading slot. SP-20260512-0008 W1A reserved position 0;
 	// CW-20260512-0114 wires the content here.
-	Universal        string
-	System           string                 // think-tool block + workspace identity (no agent-specific text)
-	Memory           string                 // formatted ContextBroker items where Source == "memory"
-	Agent            string                 // agent.SystemPrompt + skill list
+	Universal string
+	System    string // think-tool block (no agent-specific text)
+	Memory    string // formatted ContextBroker items where Source == "memory"
+	Agent     string // agent.SystemPrompt + skill list
 	// Mode is always "" — Phase 0 item 21 ("Cut Modes, in full") deleted
 	// both Session Mode and Legacy Agent Mode. Kept as a field (not
 	// removed) so SlotMode keeps a content source to bind to; see INV4 in
 	// internal/context/INVARIANTS.md for why the slot itself stays.
-	Mode             string
-	Rules            string                 // agent tags + tool allowlist (S4a expands)
+	Mode  string
+	Rules string // agent tags + tool allowlist (S4a expands)
 	// Permissions carries the rendered SlotPermissions block — a
 	// human-readable summary of the session's effective path access
 	// (binary AllowedPaths + session PathGrants + lineage walk + resolved
 	// permission.RuleSet). CW-20260512-0118 (SP-20260512-0010 W2): closes
 	// the H1 fabrication gap by making the path-access substrate visible
 	// to the LLM. Empty when no constraints are configured for the agent.
-	Permissions      string
+	Permissions string
 	// Workspace carries the AGENTS.md walk-up payload for the session's
 	// working_dir. CW-20260512-0116 (SP-20260512-0009 W6). Sourced from
 	// internal/workspace.Cache.Refresh — innermost-first concatenation of
@@ -123,7 +122,7 @@ type SlotSources struct {
 	// WorkspaceCache / resolver is wired or no instruction files are
 	// found on the walk path.
 	Workspace        string
-	Session          string                 // session name, mode label, workspace name
+	Session          string                 // session name, mode label
 	Context          string                 // formatted ContextBroker items where Source != "memory"
 	UserContext      string                 // J10 (CW-20260426-0008): user-authored session context prompt + included docs.
 	Messages         []llmtypes.ChatMessage // conversation slot messages
@@ -144,7 +143,7 @@ type SlotSources struct {
 // Agent Mode and Session Mode are gone. SlotMode (see the SlotSources.Mode
 // field) is now permanently empty/inert per INV4's post-cut definition in
 // internal/context/INVARIANTS.md; its position in SlotOrder is unchanged.
-func (cb *ContextClient) AssembleSlotSources(ctx context.Context, session *store.Session, agent *store.AgentProfile, workspace *store.Workspace) (*SlotSources, error) {
+func (cb *ContextClient) AssembleSlotSources(ctx context.Context, session *store.Session, agent *store.AgentProfile) (*SlotSources, error) {
 	_, span := feotel.StartSpan(ctx, "nanite.broker.assembleSlotSources")
 	defer span.End()
 	span.SetAttributes(
@@ -152,10 +151,12 @@ func (cb *ContextClient) AssembleSlotSources(ctx context.Context, session *store
 		attribute.String("nanite.agent.id", agent.ID),
 	)
 
-	// System slot — think-tool block + workspace identity. Agent-specific
-	// content lives in the Agent slot; universal rules live in SlotUniversal
-	// at position 0 (CW-20260512-0114, see below). v0/v1/v2 think-tool
-	// selected by feature flags.
+	// System slot — think-tool block. Agent-specific content lives in the
+	// Agent slot; universal rules live in SlotUniversal at position 0
+	// (CW-20260512-0114, see below). v0/v1/v2 think-tool selected by
+	// feature flags. Phase 0 item 20 (retire workspaces): this used to
+	// also carry "Workspace: <name> - <description>" from the now-retired
+	// in-app `workspaces` table.
 	var sysB strings.Builder
 	var thinkBlock string
 	if cb.HintDispatcher != nil && IsThinkBlockV2Enabled() {
@@ -164,14 +165,6 @@ func (cb *ContextClient) AssembleSlotSources(ctx context.Context, session *store
 		thinkBlock = ThinkToolBlock()
 	}
 	sysB.WriteString(strings.TrimLeft(thinkBlock, "\n"))
-	if workspace != nil && workspace.Name != "" {
-		sysB.WriteString("\n\nWorkspace: ")
-		sysB.WriteString(workspace.Name)
-		if workspace.Description != "" {
-			sysB.WriteString(" - ")
-			sysB.WriteString(workspace.Description)
-		}
-	}
 	systemSlotContent := sysB.String()
 
 	// Agent slot — composed via prompt templates with skills, falling back to
@@ -188,16 +181,16 @@ func (cb *ContextClient) AssembleSlotSources(ctx context.Context, session *store
 	// re-evaluate.
 	//
 	// Intent is derived unconditionally so the service-layer assembly decider
-	// (and the Skill Broker, below) can use it even when ContextBroker is
-	// nil (no Fetch happens, but the intent still drives slot selection
-	// for non-broker slots and skill ranking).
+	// can use it even when ContextBroker is nil (no Fetch happens, but the
+	// intent still drives slot selection for non-broker slots).
 	//
-	// SP-20260512-0008 W2B (CW-20260512-0106): intent derivation moved above
-	// skill-list construction so the Skill Broker has the per-turn intent
-	// signal. Previously intent was derived only for the Context Broker step
-	// further down — that left the skill list with no per-turn ranking input.
+	// Phase 0 item 22 (decision log §11): the Skill Broker that used to
+	// consume this intent for per-turn skill ranking is retired — skill
+	// selection is now a direct cap (see buildSkillListForSession), so
+	// intent no longer needs to reach the skill-list call. It's still
+	// derived here for the Context Broker step further down.
 	intent := cb.deriveIntent(session, agent)
-	skillList := buildSkillListForSessionWithIntent(ctx, cb.Store, agent.ID, session.ID, intent, skillbroker.AgentIdentityFromProfile(agent))
+	skillList := buildSkillListForSession(ctx, cb.Store, agent.ID, session.ID)
 	agentPrompt := assembleAgentSlotContent(cb.Store, agent, skillList, session.ID)
 
 	// Rules slot — agent tags + tool allowlist. S4a expands this.
@@ -240,7 +233,7 @@ func (cb *ContextClient) AssembleSlotSources(ctx context.Context, session *store
 	workspaceContent := cb.buildWorkspaceSlotContent(ctx, session)
 
 	// Session slot — small, stable identifiers.
-	sessionContent := buildSessionSlotContent(session, workspace)
+	sessionContent := buildSessionSlotContent(session)
 
 	// Memory + Context — both sourced from ContextBroker; split by item.Source.
 	var memoryContent, contextContent string
@@ -603,37 +596,16 @@ func formatPacketItemsBySource(packet *contextbroker.ContextPacket, memoryOnly b
 // (agent.SystemPrompt, skill list) without the workspace or think-tool
 // sections that live in the System slot. Phase 0 item 21 ("Cut Modes, in
 // full") removed the Legacy AgentMode addendum this used to splice in —
-// there is no more per-agent mode to append.
+// there is no more per-agent mode to append. Phase 0 item 29 ("Relocate
+// compaction-disclosure content, then cut prompt_templates") removed the
+// prompt_templates-backed ComposePromptForAgent composition path — every
+// agent now uses agent.SystemPrompt directly, unconditionally.
 //
 // When sessionID is non-empty and a fresh CompactionContract event exists for
-// the session, the appropriate disclosure is appended (P8A,
-// CW-20260420-0025). Disclosure lands in the agent slot because every system
-// prompt assembly path passes through this function or its sibling
-// assembleSystemPromptFromTemplates.
+// the session, the unified disclosure is appended (P8A, CW-20260420-0025;
+// collapsed to a single hardcoded message by Phase 0 item 29).
 func assembleAgentSlotContent(s *store.Store, agent *store.AgentProfile, skillList, sessionID string) string {
-	vars := map[string]string{
-		"agent_name":        agent.Name,
-		"agent_description": agent.Description,
-	}
-	if skillList != "" {
-		vars["skill_list"] = skillList
-	}
-	if agent.Tools != "" && agent.Tools != "[]" {
-		vars["tools_allowlist"] = agent.Tools
-	}
-	if agent.Tags != "" && agent.Tags != "[]" {
-		vars["agent_tags"] = agent.Tags
-	}
-
-	composed, err := s.ComposePromptForAgent(agent.ID, vars)
-	if err != nil {
-		slog.Warn("chat: agent slot ComposePromptForAgent failed — falling back", "err", err)
-		composed = ""
-	}
-	if composed == "" {
-		// Legacy fallback: bare agent prompt (workspace lives in System slot).
-		composed = agent.SystemPrompt
-	}
+	composed := agent.SystemPrompt
 	if skillList != "" {
 		composed += "\n\nAvailable skills:\n" + skillList
 	}
@@ -698,7 +670,7 @@ func parseJSONStringArray(raw string) []string {
 // Phase 0 item 21 ("Cut Modes, in full") removed the `mode *store.AgentMode`
 // parameter this used to take and the "Mode: <slug>" line it rendered —
 // there is no more mode to report.
-func buildSessionSlotContent(session *store.Session, _ *store.Workspace) string {
+func buildSessionSlotContent(session *store.Session) string {
 	var b strings.Builder
 	now := time.Now()
 	fmt.Fprintf(&b, "Today: %s (%s)\n", now.Format("2006-01-02"), now.Format("Monday"))

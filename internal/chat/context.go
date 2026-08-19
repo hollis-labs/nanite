@@ -6,11 +6,8 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
-	"strconv"
 	"strings"
 
-	"github.com/hollis-labs/nanite/internal/contextbroker"
-	"github.com/hollis-labs/nanite/internal/skillbroker"
 	"github.com/hollis-labs/nanite/internal/store"
 )
 
@@ -38,8 +35,8 @@ import (
 // every turn until the first assistant reply lands. Acceptable for v1 — the
 // pre-first-assistant case is exotic enough not to warrant a special branch.
 //
-// Returns "" on any failure path (store error, no event, no template,
-// missing summary_mode); the caller treats "" as "no disclosure to inject".
+// Returns "" on any failure path (store error, no event); the caller treats
+// "" as "no disclosure to inject".
 func renderCompactionDisclosure(s *store.Store, sessionID string) string {
 	ctx := context.Background()
 	evt, err := s.GetLatestCompactionEvent(ctx, sessionID)
@@ -55,17 +52,7 @@ func renderCompactionDisclosure(s *store.Store, sessionID string) string {
 		return ""
 	}
 
-	slug := disclosureSlugForMode(evt.SummaryMode)
-	tmpl, err := s.GetPromptTemplateBySlug(slug)
-	if err != nil || tmpl == nil {
-		if err != nil {
-			slog.Warn("chat: GetPromptTemplateBySlug failed for disclosure",
-				"slug", slug, "err", err)
-		}
-		return ""
-	}
-
-	return interpolateDisclosure(tmpl.Template, evt)
+	return interpolateDisclosure(evt)
 }
 
 // isCompactionEventFresh returns true when no assistant message in the session
@@ -94,28 +81,45 @@ func isCompactionEventFresh(s *store.Store, sessionID, eventCreatedAt string) bo
 	return true
 }
 
-// disclosureSlugForMode maps a CompactionMode to the seeded disclosure
-// template slug. Unknown modes fall back to the general variant so the
-// disclosure path stays robust to mode-string drift.
-func disclosureSlugForMode(mode string) string {
-	switch mode {
-	case "code":
-		return "compaction-disclosure-code"
-	case "plan":
-		return "compaction-disclosure-plan"
-	case "research":
-		return "compaction-disclosure-research"
-	default:
-		return "compaction-disclosure-general"
-	}
-}
+// compactionDisclosureTemplate is the single, universal, hardcoded
+// compaction-disclosure message (Phase 0 item 29, TASKS.md Phase 0 Cuts).
+//
+// Relocated from the DB-backed prompt_templates mechanism (four
+// mode-branched variants — general/code/plan/research — seeded by migration
+// 030 and selected via disclosureSlugForMode/CompactionMode) into a single
+// hardcoded message here. The four originals shared ~90% identical
+// structure (Compaction Notice → Preserved/Lost → Recovery: handoff stash
+// id, chat_search, summary metadata) and differed mainly in which nouns got
+// preserved/lost per domain; collapsing them keeps the substance (what's
+// preserved vs. lost, the two concrete recovery actions) without a mode
+// lookup. This is independent of 21-cut-modes — classifyModeFromAgentTags /
+// CompactionPipeline.Mode / summarySystemPrompt are untouched and continue
+// to select the *summarizer's* system prompt; only the disclosure-template
+// selection is collapsed here.
+//
+// %s verbs (in order): handoff stash id, coverage window start, coverage
+// window end. %d verbs (in order): summary token count, evicted cache
+// pointer count, preserved source count.
+const compactionDisclosureTemplate = `## Compaction Notice
 
-// interpolateDisclosure fills the {{var}} placeholders in a disclosure
-// template with values from the latest compaction_events row. Nullable
-// fields (handoff_stash_id, coverage_window_*) render as "(none)" /
-// "(unknown)" so the LLM gets a literal placeholder rather than an empty
-// region that might read as "the value was lost".
-func interpolateDisclosure(tmpl string, evt *store.CompactionEvent) string {
+This conversation was compacted just before your turn. An LLM-generated summary replaced the older messages. Treat it as a lossy paraphrase, not a transcript.
+
+**Preserved:** decisions, problems, findings, and outcomes — file paths, symbols, and ticket/ID references the summarizer flagged as load-bearing.
+**Lost:** raw text of older turns, full tool inputs/outputs, exact numbers/quotes, verbatim diffs or source excerpts.
+
+**Recovery:**
+- **Handoff stash id:** %s — if set, holds decisions, open questions, file refs, and ticket IDs from pre-compaction. Read before answering about earlier-session state.
+- **chat_search** {query, scope?, limit?} — search pre-compaction turns for specifics the summary omits.
+- **Summary metadata:** window %s → %s, ≈ %d tokens, %d cache pointer(s) evicted, %d preserved source(s).
+
+If the summary is silent on prior detail, search rather than guess.`
+
+// interpolateDisclosure renders compactionDisclosureTemplate against the
+// latest compaction_events row. Nullable fields (handoff_stash_id,
+// coverage_window_*) render as "(none)" / "(unknown)" so the LLM gets a
+// literal placeholder rather than an empty region that might read as "the
+// value was lost".
+func interpolateDisclosure(evt *store.CompactionEvent) string {
 	stashID := "(none)"
 	if evt.HandoffStashID != nil && *evt.HandoffStashID != "" {
 		stashID = *evt.HandoffStashID
@@ -129,14 +133,9 @@ func interpolateDisclosure(tmpl string, evt *store.CompactionEvent) string {
 		endTurn = *evt.CoverageWindowEnd
 	}
 
-	out := tmpl
-	out = strings.ReplaceAll(out, "{{handoff_stash_id}}", stashID)
-	out = strings.ReplaceAll(out, "{{coverage_window_start}}", startTurn)
-	out = strings.ReplaceAll(out, "{{coverage_window_end}}", endTurn)
-	out = strings.ReplaceAll(out, "{{summary_token_count}}", strconv.Itoa(evt.SummaryTokenCount))
-	out = strings.ReplaceAll(out, "{{evicted_pointer_count}}", strconv.Itoa(len(evt.EvictedCachePointers)))
-	out = strings.ReplaceAll(out, "{{preserved_source_count}}", strconv.Itoa(len(evt.PreservedSources)))
-	return out
+	return fmt.Sprintf(compactionDisclosureTemplate,
+		stashID, startTurn, endTurn,
+		evt.SummaryTokenCount, len(evt.EvictedCachePointers), len(evt.PreservedSources))
 }
 
 // thinkToolBlock is the v0 think-tool instruction (baseline for eval A/B).
@@ -219,48 +218,33 @@ func ThinkToolBlockWithDispatch(ctx context.Context, dispatcher HintDispatcher, 
 // enough to keep init-time tokens bounded as agents accumulate skills.
 // Tune off Glass-2 telemetry once data accumulates.
 //
-// SP-20260512-0008 W2B (CW-20260512-0106): the cap is also the default
-// Skill Broker top-N. The Skill Broker (internal/skillbroker) is the seat
-// that owns ranking; rendering preserves this cap by deferring to the
-// broker's MaxSelectedSkills default.
-const SkillEssentialCap = skillbroker.MaxSelectedSkills
+// Phase 0 item 22 (decision log §11): this used to default to the Skill
+// Broker's MaxSelectedSkills constant (internal/skillbroker, now retired —
+// "no separate ranking abstraction"). Kept as a plain local constant with
+// the same value so the cap is unchanged.
+const SkillEssentialCap = 25
 
-// buildSkillListForSession is the mode-aware skill-list renderer.
+// buildSkillListForSession is the skill-list renderer for an agent's
+// assigned skills.
 //
-// SP-20260512-0008 W2B (CW-20260512-0106): selection runs through the
-// Skill Broker (internal/skillbroker) — the ranked top-N subset is what
-// gets rendered, not the full assigned set sliced at SkillEssentialCap.
-// This overload of the function carries no per-turn intent or agent-tag
-// signal — it falls through to the broker's stable rank order
-// (source-bias + alphabetical), which preserves the slot-prefix cache
-// behavior for callers that haven't migrated to the intent-aware overload.
-// The slot-based path (chat.ContextClient.AssembleSlotSources) uses
-// buildSkillListForSessionWithIntent so the broker has real ranking signal.
+// Phase 0 item 22 (decision log §11): this used to run assigned skills
+// through the Skill Broker (internal/skillbroker.SelectSkills) — a
+// keyword/agent-tag/mode-bonus ranking pass. The broker was functionally
+// inert in every real environment (zero agent_skills rows workspace-wide,
+// per the decision log), so it's retired in favor of a direct cap:
+// s.ListAgentSkills already returns rows ordered by name (`ORDER BY
+// sk.name`), which gives a stable, deterministic "first SkillEssentialCap"
+// selection with no scoring heuristic to maintain.
 //
 // Glass-5 (CW-20260502-0012): the rendered list is partitioned into
-// "essentials" (broker-ranked assigned skills passing the mode filter)
-// and "discoverable" (everything else in the catalog). Essentials are
-// inlined; discoverable count is surfaced via a LoadHint pointer at the
-// tail of the rendered string. The pointer references real MCP tools
-// (skill_list, tool_list) and is framed as invitation, not warning —
-// the agent should feel the catalog has every skill it needs and only
-// carries what it currently uses.
-func buildSkillListForSession(ctx context.Context, s *store.Store, agentID, sessionID string) string {
-	return buildSkillListForSessionWithIntent(ctx, s, agentID, sessionID, contextbroker.Intent{}, skillbroker.AgentIdentity{ID: agentID})
-}
-
-// buildSkillListForSessionWithIntent is the broker-aware variant. The
-// slot-based assembly path (AssembleSlotSources) passes the per-turn
-// intent (already derived for the Context Broker) and the agent identity
-// (slug + tags) so the Skill Broker can rank the assigned skills by
-// relevance — intent keyword match, agent-tag/role match, mode-binding
-// bonus. The render shape is unchanged from the legacy hard-slice path
-// (`- name: description [tools: ...]\n` per essential, then the LoadHint
-// pointer).
-//
-// SP-20260512-0008 W2B (CW-20260512-0106). Acceptance: same agent +
-// different intent → different ranked subset.
-func buildSkillListForSessionWithIntent(ctx context.Context, s *store.Store, agentID, sessionID string, intent contextbroker.Intent, identity skillbroker.AgentIdentity) string {
+// "essentials" (the first SkillEssentialCap assigned skills) and
+// "discoverable" (everything else in the catalog). Essentials are inlined;
+// discoverable count is surfaced via a LoadHint pointer at the tail of the
+// rendered string. The pointer references real MCP tools (skill_list,
+// tool_list) and is framed as invitation, not warning — the agent should
+// feel the catalog has every skill it needs and only carries what it
+// currently uses.
+func buildSkillListForSession(_ context.Context, s *store.Store, agentID, _ string) string {
 	skills, err := s.ListAgentSkills(agentID)
 	if err != nil {
 		slog.Warn("chat: failed to load agent skills", "err", err)
@@ -271,8 +255,11 @@ func buildSkillListForSessionWithIntent(ctx context.Context, s *store.Store, age
 	// (filterAgentSkillsByMode) that used to run here — it resolved
 	// s.GetSessionMode(sessionID), which no longer exists. There is no
 	// more session-scoped mode to gate skills on; every agent skill is a
-	// broker candidate now.
-	rendered := skillbroker.SelectSkills(ctx, intent, identity, skills, skillbroker.Options{})
+	// candidate now.
+	rendered := skills
+	if len(rendered) > SkillEssentialCap {
+		rendered = rendered[:SkillEssentialCap]
+	}
 
 	var sb strings.Builder
 	for _, sk := range rendered {
@@ -314,4 +301,3 @@ func skillCatalogLoadHint(s *store.Store, renderedCount int) string {
 		discoverable,
 	)
 }
-

@@ -8,9 +8,9 @@ import (
 	"fmt"
 	"log/slog"
 	"strings"
+	"sync"
 
 	llmtypes "github.com/hollis-labs/go-llm-types"
-	"github.com/hollis-labs/go-toolbroker/broker"
 	"github.com/hollis-labs/nanite/internal/describer"
 	"github.com/hollis-labs/nanite/internal/mcp"
 	"github.com/hollis-labs/nanite/internal/store"
@@ -18,10 +18,6 @@ import (
 
 // MaxSelectedTools is the maximum number of tools returned by SelectTools.
 const MaxSelectedTools = 15
-
-// DefaultFallbackToolCount is the number of tools returned when intent is
-// a wildcard or empty — a minimal safe set instead of everything.
-const DefaultFallbackToolCount = 5
 
 // PermissionResolver resolves an agent's ToolPermissions outside of the
 // database. It is intended for file-based agents (synthetic ID prefix
@@ -34,12 +30,21 @@ type PermissionResolver func(agentID string) (ToolPermissions, bool)
 
 // ToolClient mediates all tool access: selection, permissions, and execution.
 type ToolClient struct {
-	LocalBroker        *broker.LocalBroker
 	MCPManager         *mcp.Manager
 	Store              *store.Store
 	Config             *Config
 	Builtins           *BuiltinToolRegistry
 	PermissionResolver PermissionResolver
+
+	// registeredTools holds tools registered directly via RegisterTools —
+	// the seam callers without a live MCP manager (chiefly tests, and the
+	// /api/tools/select preview path) use to inject a synthetic catalog.
+	// Guarded by registeredToolsMu; catalogTools() unions this with
+	// MCPManager.GetAllTools() to build the full selection candidate set.
+	// Phase 0 item 22: replaces the go-toolbroker LocalBroker's tool
+	// registry — see decision log §11.
+	registeredTools   []llmtypes.ToolDefinition
+	registeredToolsMu sync.RWMutex
 
 	// Describers is the opt-in per-call description-render registry
 	// (CW-20260512-0105 / SP-20260512-0008 W1B). Tools that need
@@ -68,32 +73,31 @@ type ToolClient struct {
 }
 
 // SelectResult is the return shape of ToolClient.SelectToolsAsProvider. It
-// carries both the provider-shaped tool definitions for the LLM and the
-// markdown override block composed from per-tool Hints (via the broker's
-// WithEnricher option), ready to append to the system prompt.
+// carries the provider-shaped tool definitions for the LLM.
+//
+// Phase 0 item 22: this used to also carry OverrideBlock, a markdown
+// "## Tool Overrides" section composed from per-tool Hints via the
+// go-toolbroker enricher (tool_enrichments table). Cut entirely per the
+// operator's 2026-08-18 resolution — no port-forward — because the
+// enrichment table's write path was already dead (18a-cut-dead-storage-
+// and-config), making the read side structurally inert. See decision log
+// §11.
 type SelectResult struct {
-	Tools         []llmtypes.ToolDefinition
-	OverrideBlock string
+	Tools []llmtypes.ToolDefinition
 }
 
-// New creates a new ToolClient. When s is non-nil, a storeEnricher is wired
-// so SelectToolsAsProvider returns per-tool override blocks composed from
-// the tool_enrichments table.
+// New creates a new ToolClient.
 func New(mcpManager *mcp.Manager, s *store.Store, cfg *Config) *ToolClient {
 	if cfg == nil {
 		cfg = DefaultConfig()
 	}
 
-	enr := NewStoreEnricher(s)
-	lb := broker.NewLocalBroker(nil, cfg.Rules, broker.WithEnricher(enr))
-
 	return &ToolClient{
-		LocalBroker: lb,
-		MCPManager:  mcpManager,
-		Store:       s,
-		Config:      cfg,
-		Builtins:    NewBuiltinToolRegistry(),
-		Describers:  describer.NewRegistry(),
+		MCPManager: mcpManager,
+		Store:      s,
+		Config:     cfg,
+		Builtins:   NewBuiltinToolRegistry(),
+		Describers: describer.NewRegistry(),
 	}
 }
 
@@ -181,7 +185,7 @@ func (tb *ToolClient) SelectToolsAugmented(
 	hints []string,
 	workspaceID, agentID string,
 	windowSize int,
-) ([]broker.ToolDefinition, string, string, error) {
+) ([]llmtypes.ToolDefinition, string, error) {
 	var memHits []ToolPatternHit
 	if tb.memoryRecaller != nil {
 		hits, err := tb.memoryRecaller.RecallToolPatterns(ctx, intent)
@@ -217,80 +221,85 @@ func (tb *ToolClient) IsBuiltinTool(name string) bool {
 // (non-strict). See decisions.nanite.tools.strict_default_off in Vanta.
 var strictTrue = func() *bool { v := true; return &v }()
 
-// RegisterTools registers tool definitions with the underlying broker.
-func (tb *ToolClient) RegisterTools(tools []broker.ToolDefinition) {
-	tb.LocalBroker.RegisterTools(tools)
+// RegisterTools registers tool definitions directly on this ToolClient's
+// catalog (see registeredTools). This is the seam tests (and the
+// /api/tools/select preview path, when no live MCP manager backs the
+// client) use to inject a synthetic tool set. Production MCP-discovered
+// tools do NOT flow through this method — they reach catalogTools() via
+// MCPManager.GetAllTools() instead.
+//
+// Phase 0 item 22: replaces the go-toolbroker LocalBroker.RegisterTools
+// call this used to make. Same append-only semantics as the library
+// method it replaces — callers registering the same tool name twice get
+// two entries; catalogTools() dedupes by name at read time.
+func (tb *ToolClient) RegisterTools(tools []llmtypes.ToolDefinition) {
+	tb.registeredToolsMu.Lock()
+	tb.registeredTools = append(tb.registeredTools, tools...)
+	tb.registeredToolsMu.Unlock()
 	slog.Info("toolclient: registered tools", "count", len(tools))
 }
 
-// isWildcardIntent returns true if the intent is a wildcard or empty string.
-func isWildcardIntent(intent string) bool {
-	return intent == "" || intent == "*"
+// catalogTools returns the full tool-selection candidate set: tools
+// registered directly via RegisterTools, unioned with tools discovered by
+// the MCP manager (mcp.Manager.GetAllTools — the real production source).
+// Deduped by name; a directly-registered tool wins over a same-named
+// MCP-discovered one.
+//
+// Phase 0 item 22 (decision log §11): replaces go-toolbroker's
+// LocalBroker.SelectTools rule-matching pass, which — with
+// NaniteDefaultRules' single "*" catch-all rule always installed — always
+// returned the entire registered catalog, unranked. Returning the full
+// catalog directly here preserves that real production behavior without
+// the rule-engine machinery. Real narrowing happens downstream:
+// tool_permissions (CheckPermission), the schema-v2 tools allowlist
+// (filterToolsByAllowlist), the chat-role surface filter
+// (applyChatSurfaceFilter), the developer_mode dev-tool gate, and
+// progressive discovery.
+func (tb *ToolClient) catalogTools() []llmtypes.ToolDefinition {
+	tb.registeredToolsMu.RLock()
+	direct := make([]llmtypes.ToolDefinition, len(tb.registeredTools))
+	copy(direct, tb.registeredTools)
+	tb.registeredToolsMu.RUnlock()
+
+	seen := make(map[string]bool, len(direct))
+	out := make([]llmtypes.ToolDefinition, 0, len(direct))
+	for _, t := range direct {
+		if seen[t.Name] {
+			continue
+		}
+		seen[t.Name] = true
+		out = append(out, t)
+	}
+	if tb.MCPManager != nil {
+		for _, t := range tb.MCPManager.GetAllTools() {
+			if seen[t.Name] {
+				continue
+			}
+			seen[t.Name] = true
+			out = append(out, t)
+		}
+	}
+	return out
 }
 
-// noRulesMatchedRationale is the go-toolbroker library's exact
-// SelectResult.Rationale string (broker/local.go) when zero rules matched a
-// well-formed intent and it fell back to returning the entire catalog,
-// unranked. With NaniteDefaultRules always installing a "*" catch-all rule,
-// this should be unreachable in production — every real Config.Rules has at
-// least one always-applicable rule. This check is defense-in-depth for the
-// degenerate case (e.g. Config.Rules misconfigured to empty), matching the
-// gap ADR-001 flagged: "returning everything" must never be the silent
-// default (CW-20260815-0011).
-const noRulesMatchedRationale = "no rules matched intent; returning all tools"
-
-// selectToolsUncapped runs the broker selection pass (rule application +
-// the zero-match fallback guard) WITHOUT applying MaxSelectedTools or the
-// token-budget prune. Callers that still need to run permission/allowlist
-// filtering on the result (SelectToolsAsProvider, and — one layer up —
-// service/tool.go's schema-v2 tools allowlist) must defer capping until
-// after that filtering, or a correctly-declared, correctly-permitted tool
-// can be truncated out before its own allowlist ever sees it (e.g. a
+// selectToolsUncapped returns the full tool-selection candidate set
+// (catalogTools) WITHOUT applying MaxSelectedTools or the token-budget
+// prune. Callers that still need to run permission/allowlist filtering on
+// the result (SelectToolsAsProvider, and — one layer up — service/tool.go's
+// schema-v2 tools allowlist) must defer capping until after that
+// filtering, or a correctly-declared, correctly-permitted tool can be
+// truncated out before its own allowlist ever sees it (e.g. a
 // late-alphabet tool name among Torque's ~90+ registered tools). See
 // FinalizeToolSelection for the capping step this defers to.
-func (tb *ToolClient) selectToolsUncapped(ctx context.Context, intent string, hints []string, workspaceID, agentID string) (tools []broker.ToolDefinition, overrideBlock string, total int, err error) {
-	if isWildcardIntent(intent) {
-		slog.Warn("toolclient: wildcard/empty intent received — substituting general intent",
-			"workspace", workspaceID, "agent", agentID)
-		intent = "general"
-	}
-
-	// Load rules unconditionally — not just when workspaceID/agentID are
-	// scoped. LocalBroker.rules is shared, mutable state on one long-lived
-	// broker instance (guarded by its own mutex, not per-call); a
-	// conditional load here means a prior SCOPED call's override rules
-	// stay loaded and silently apply to a later UNSCOPED call that skips
-	// this block. RulesFor("", "") already returns exactly the base rules
-	// (no overrides applied) for the unscoped case, so calling it every
-	// time is both correct and simpler than trying to skip it. (Review
-	// finding on PR #242.)
-	rules := tb.Config.RulesFor(workspaceID, agentID)
-	tb.LocalBroker.LoadRules(rules)
-
-	result, err := tb.LocalBroker.SelectTools(ctx, intent, hints)
-	if err != nil {
-		return nil, "", 0, fmt.Errorf("select tools: %w", err)
-	}
-
-	tools = result.Tools
-	if result.Rationale == noRulesMatchedRationale && result.Total > DefaultFallbackToolCount {
-		slog.Error("toolclient: zero broker rules matched a well-formed intent — degrading to a minimal safe set instead of the full catalog; check Config.Rules is non-empty",
-			"workspace", workspaceID, "agent", agentID, "intent", intent,
-			"catalog_size", result.Total, "fallback_count", DefaultFallbackToolCount)
-		// Bound by len(tools), not just result.Total: today the library
-		// only sets this exact Rationale when Tools holds every registered
-		// tool (so Total == len(Tools) always), but that's an internal
-		// invariant of the library's current implementation, not a
-		// guarantee this code should rely on for a slice bound. (Review
-		// finding on PR #242.)
-		fallbackCount := DefaultFallbackToolCount
-		if len(tools) < fallbackCount {
-			fallbackCount = len(tools)
-		}
-		tools = tools[:fallbackCount]
-	}
-
-	return tools, result.OverrideBlock, result.Total, nil
+//
+// intent, hints, workspaceID, and agentID are accepted for API-surface
+// stability (callers throughout the package pass them; SelectByIntent and
+// the reasoning-augmented ranking in ranking.go still use intent/hints for
+// scoring) but no longer drive selection here — Phase 0 item 22 retired
+// the rule-matching layer that used to key off them (decision log §11).
+func (tb *ToolClient) selectToolsUncapped(_ context.Context, _ string, _ []string, _, _ string) (tools []llmtypes.ToolDefinition, total int, err error) {
+	tools = tb.catalogTools()
+	return tools, len(tools), nil
 }
 
 // toolTokenBudget computes the token budget for tool definitions from the
@@ -312,9 +321,8 @@ func (tb *ToolClient) toolTokenBudget(windowSize int) (budget, ctxWindow int) {
 	return int(budgetPct * float64(ctxWindow)), ctxWindow
 }
 
-// SelectTools returns tools filtered by intent and hints, capped at MaxSelectedTools,
-// together with the per-tool override block from the broker enricher.
-// Optionally scoped by workspace and agent for rule overrides.
+// SelectTools returns tools filtered by intent and hints, capped at
+// MaxSelectedTools.
 //
 // This is the self-contained entry point (used by the /api/tools/select
 // preview endpoint and any caller with no further permission/allowlist
@@ -324,12 +332,12 @@ func (tb *ToolClient) toolTokenBudget(windowSize int) (budget, ctxWindow int) {
 // happens AFTER permission and allowlist filtering (CW-20260815-0011).
 //
 // windowSize is the per-session context window in tokens (from models.dev /
-// user settings). When windowSize <= 0 the broker falls back to
+// user settings). When windowSize <= 0 this falls back to
 // DefaultContextWindowTokens so behaviour on unknown models is preserved.
-func (tb *ToolClient) SelectTools(ctx context.Context, intent string, hints []string, workspaceID, agentID string, windowSize int) ([]broker.ToolDefinition, string, error) {
-	tools, overrideBlock, total, err := tb.selectToolsUncapped(ctx, intent, hints, workspaceID, agentID)
+func (tb *ToolClient) SelectTools(ctx context.Context, intent string, hints []string, workspaceID, agentID string, windowSize int) ([]llmtypes.ToolDefinition, error) {
+	tools, total, err := tb.selectToolsUncapped(ctx, intent, hints, workspaceID, agentID)
 	if err != nil {
-		return nil, "", err
+		return nil, err
 	}
 
 	if len(tools) > MaxSelectedTools {
@@ -350,7 +358,7 @@ func (tb *ToolClient) SelectTools(ctx context.Context, intent string, hints []st
 		"tool_tokens", EstimateToolTokens(tools), "budget", tokenBudget,
 		"ctx_window", ctxWindow)
 
-	return tools, overrideBlock, nil
+	return tools, nil
 }
 
 // DevServerName is the MCP server name for developer tools (dev_bash, dev_read,
@@ -393,13 +401,8 @@ func (tb *ToolClient) developerModeEnabled() bool {
 	return us.DeveloperMode
 }
 
-// SelectToolsAsProvider returns selected tools converted to llmtypes.ToolDefinition format,
-// together with the per-turn override block composed from per-tool Hints
-// (the override block is composed by the underlying broker library BEFORE
-// any permission/cap filtering runs — see go-toolbroker's
-// LocalBroker.composeOverrideBlock — so it may reference tools beyond what
-// survives filtering here; that mismatch predates this function and is not
-// addressed by CW-20260815-0011).
+// SelectToolsAsProvider returns selected tools converted to
+// llmtypes.ToolDefinition format.
 //
 // Deliberately uncapped (CW-20260815-0011): the MaxSelectedTools cut and
 // token-budget prune are NOT applied here. This function only runs the
@@ -416,7 +419,7 @@ func (tb *ToolClient) developerModeEnabled() bool {
 // developer_mode is false in user_settings. This prevents the LLM from ever
 // seeing or requesting those tools in non-developer sessions.
 func (tb *ToolClient) SelectToolsAsProvider(ctx context.Context, intent string, hints []string, workspaceID, agentID string) (*SelectResult, error) {
-	tools, overrideBlock, _, err := tb.selectToolsUncapped(ctx, intent, hints, workspaceID, agentID)
+	tools, _, err := tb.selectToolsUncapped(ctx, intent, hints, workspaceID, agentID)
 	if err != nil {
 		return nil, err
 	}
@@ -447,15 +450,14 @@ func (tb *ToolClient) SelectToolsAsProvider(ctx context.Context, intent string, 
 		defs = make([]llmtypes.ToolDefinition, 0, len(tools))
 	}
 
-	// Append broker-selected MCP tools, filtered by agent permissions.
-	// Names are uniform (no `mcp__server__` prefix) per ADR-002; the
-	// broker is registered with uniform names by mcp.Manager, so t.Name
-	// here is already the agent-facing name.
+	// Append the catalog tools (registered directly + MCP-discovered),
+	// filtered by agent permissions. Names are uniform (no
+	// `mcp__server__` prefix) per ADR-002.
 	//
-	// Strict defaults to nil (non-strict) for all broker-registered tools.
-	// Tools that benefit from Anthropic server-side input-schema enforcement
-	// can opt in explicitly by setting Strict to strictTrue (declared above)
-	// at registration time. See decisions.nanite.tools.strict_default_off in
+	// Strict defaults to nil (non-strict) for all catalog tools. Tools that
+	// benefit from Anthropic server-side input-schema enforcement can opt
+	// in explicitly by setting Strict to strictTrue (declared above) at
+	// registration time. See decisions.nanite.tools.strict_default_off in
 	// Vanta for the full rationale: strict was being applied blanket-fashion
 	// to all tools, which conflated input-shape validation (where strict
 	// adds value) with high-blast-radius permissions (which belong at
@@ -477,10 +479,7 @@ func (tb *ToolClient) SelectToolsAsProvider(ctx context.Context, intent string, 
 		})
 	}
 
-	// overrideBlock was returned by SelectTools (from the broker's SelectResult
-	// composed via the WithEnricher option). No second LocalBroker.SelectTools
-	// call needed — the D1 redundant-call pattern is eliminated here.
-	return &SelectResult{Tools: defs, OverrideBlock: overrideBlock}, nil
+	return &SelectResult{Tools: defs}, nil
 }
 
 // CallTool executes a tool call after checking permissions. Routes through
@@ -690,61 +689,34 @@ func (tb *ToolClient) ListServers() []mcp.ServerInfo {
 	return tb.MCPManager.ListServers()
 }
 
-// EstimateToolTokens estimates the total token count for a set of tool definitions
-// by serializing each to JSON and dividing by 4 (consistent with chat.EstimateTokens).
-func EstimateToolTokens(tools []broker.ToolDefinition) int {
-	total := 0
-	for _, t := range tools {
-		data, err := json.Marshal(t)
-		if err != nil {
-			// Fallback: estimate from name + description length.
-			n := len(t.Name) + len(t.Description)
-			if n == 0 {
-				n = 4
-			}
-			total += n / 4
-			continue
-		}
-		n := len(data) / 4
-		if n == 0 {
-			n = 1
-		}
-		total += n
-	}
-	return total
+// EstimateToolTokens estimates the total token count for a set of tool
+// definitions by serializing each to JSON and dividing by 4 (consistent
+// with chat.EstimateTokens).
+//
+// Phase 0 item 22: this used to take []broker.ToolDefinition (the
+// go-toolbroker currency type used pre-conversion) while EstimateToolDefTokens
+// took the post-conversion []llmtypes.ToolDefinition. With the broker
+// retired, both the pre- and post-conversion tool lists share the same
+// llmtypes.ToolDefinition type, so this is now a thin alias — kept as a
+// separate name because callers throughout this package and its tests
+// still reference it at the pre-permission-filter selection stage.
+func EstimateToolTokens(tools []llmtypes.ToolDefinition) int {
+	return EstimateToolDefTokens(tools)
 }
 
-// PruneToolsToTokenBudget removes tools from the end of the slice (lowest priority)
-// until the total estimated tokens fits within the given budget.
+// PruneToolsToTokenBudget removes tools from the end of the slice (lowest
+// priority) until the total estimated tokens fits within the given budget.
 // At least one tool is always retained.
-func PruneToolsToTokenBudget(tools []broker.ToolDefinition, budgetTokens int) []broker.ToolDefinition {
-	if len(tools) == 0 {
-		return tools
-	}
-
-	total := EstimateToolTokens(tools)
-	if total <= budgetTokens {
-		return tools
-	}
-
-	// Remove from end until under budget, keeping at least 1.
-	for len(tools) > 1 && total > budgetTokens {
-		last := tools[len(tools)-1]
-		data, _ := json.Marshal(last)
-		tokens := len(data) / 4
-		if tokens == 0 {
-			tokens = 1
-		}
-		total -= tokens
-		tools = tools[:len(tools)-1]
-	}
-
-	return tools
+//
+// Phase 0 item 22: thin alias over PruneToolDefsToTokenBudget — see
+// EstimateToolTokens's doc comment for why the two currency types merged.
+func PruneToolsToTokenBudget(tools []llmtypes.ToolDefinition, budgetTokens int) []llmtypes.ToolDefinition {
+	return PruneToolDefsToTokenBudget(tools, budgetTokens)
 }
 
 // EstimateToolDefTokens mirrors EstimateToolTokens for llmtypes.ToolDefinition
 // (the provider-shaped type used after builtin-prepend + permission
-// filtering, as opposed to broker.ToolDefinition used pre-conversion).
+// filtering).
 func EstimateToolDefTokens(tools []llmtypes.ToolDefinition) int {
 	total := 0
 	for _, t := range tools {

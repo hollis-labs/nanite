@@ -105,13 +105,12 @@ func (e *ActivityEmitter) Emit(ctx context.Context, ev activityEvent) {
 }
 
 // EmitSessionCreated records that a new chat session was created.
-func (e *ActivityEmitter) EmitSessionCreated(ctx context.Context, sessionID, workspaceID string) {
+func (e *ActivityEmitter) EmitSessionCreated(ctx context.Context, sessionID string) {
 	e.Emit(ctx, activityEvent{
 		EventType:   EventSessionCreated,
 		EntityType:  "chat_session",
 		EntityID:    sessionID,
 		EntityTitle: "Session created",
-		Payload:     fmt.Sprintf(`{"workspace_id":%q}`, workspaceID),
 	})
 }
 

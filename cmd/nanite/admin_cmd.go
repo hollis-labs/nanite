@@ -40,7 +40,7 @@ import (
 // `nanite message` convention).
 func cmdAdmin(args []string) {
 	usage := func(w io.Writer) {
-		fmt.Fprintf(w, "usage: %s admin [--db path] <agent-broker-decisions>\n", brand.BinaryName)
+		fmt.Fprintf(w, "usage: %s admin [--db path] <agent-broker-decisions|export-decision-tables>\n", brand.BinaryName)
 	}
 
 	if len(args) < 1 {
@@ -67,6 +67,11 @@ func cmdAdmin(args []string) {
 	switch sub {
 	case "agent-broker-decisions":
 		adminAgentBrokerDecisions(dbPath, rest)
+	case "export-decision-tables":
+		// TASKS/phase-0/23-export-and-drop-decision-tables.md — export
+		// strategy_decisions + broker_decisions to event_log before their
+		// drop migration runs. See admin_export_decisions.go.
+		adminExportDecisionTables(dbPath, rest)
 	default:
 		fmt.Fprintf(os.Stderr, "unknown admin subcommand: %s\n", sub)
 		usage(os.Stderr)

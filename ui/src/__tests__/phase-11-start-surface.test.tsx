@@ -31,7 +31,6 @@ function session(id: string, overrides: Partial<Session> = {}): Session {
     short_code: "c1",
     title: "Started",
     custom_name: "",
-    workspace_id: "workspace-1",
     project_id: "project-1",
     context_type: null,
     context_id: null,
@@ -232,7 +231,6 @@ describe("Phase 11 Start surface", () => {
       <StartSurfaceDialog
         open
         onOpenChange={() => undefined}
-        workspaceId="workspace-1"
         projectId="project-1"
         defaultProvider="anthropic"
         defaultModel="claude-sonnet-4"
@@ -246,7 +244,6 @@ describe("Phase 11 Start surface", () => {
 
     await waitFor(() => {
       expect(createSession).toHaveBeenCalledWith({
-        workspace_id: "workspace-1",
         project_id: "project-1",
         provider: "anthropic",
         model: "claude-sonnet-4",
@@ -271,7 +268,6 @@ describe("Phase 11 Start surface", () => {
       <StartSurfaceDialog
         open
         onOpenChange={() => undefined}
-        workspaceId="workspace-1"
         projectId={null}
         onSessionStarted={() => undefined}
       />,
@@ -293,7 +289,6 @@ describe("Phase 11 Start surface", () => {
       <StartSurfaceDialog
         open
         onOpenChange={() => undefined}
-        workspaceId="workspace-1"
         projectId={null}
         onSessionStarted={onSessionStarted}
       />,
@@ -305,7 +300,6 @@ describe("Phase 11 Start surface", () => {
 
     await waitFor(() => {
       expect(createSession).toHaveBeenCalledWith({
-        workspace_id: "workspace-1",
         project_id: undefined,
         provider: "bootprofile:claude-smoke",
         model: "bootprofile:claude-smoke",
@@ -344,7 +338,6 @@ describe("Phase 11 Start surface", () => {
       <StartSurfaceDialog
         open
         onOpenChange={() => undefined}
-        workspaceId="workspace-1"
         projectId={null}
         onSessionStarted={onSessionStarted}
       />,
@@ -413,7 +406,6 @@ describe("Phase 11 Start surface", () => {
       <StartSurfaceDialog
         open
         onOpenChange={() => undefined}
-        workspaceId="workspace-1"
         projectId={null}
         onSessionStarted={onSessionStarted}
       />,
@@ -464,7 +456,6 @@ describe("Phase 11 Start surface", () => {
       <StartSurfaceDialog
         open
         onOpenChange={() => undefined}
-        workspaceId="workspace-1"
         projectId={null}
         onSessionStarted={() => undefined}
       />,

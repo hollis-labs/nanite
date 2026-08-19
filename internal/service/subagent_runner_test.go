@@ -302,7 +302,7 @@ func TestChatRunner_FabricationSuspectedFailsRun(t *testing.T) {
 
 	st := &recordingSessionStore{
 		parents: map[string]*store.Session{
-			"sess-parent": {ID: "sess-parent", WorkspaceID: "ws-1"},
+			"sess-parent": {ID: "sess-parent"},
 		},
 	}
 	runner := &ChatRunner{
@@ -359,7 +359,7 @@ func TestChatRunner_GroundedReplyDoesNotFireFabricationDetector(t *testing.T) {
 
 	st := &recordingSessionStore{
 		parents: map[string]*store.Session{
-			"sess-parent": {ID: "sess-parent", WorkspaceID: "ws-1"},
+			"sess-parent": {ID: "sess-parent"},
 		},
 	}
 	runner := &ChatRunner{
@@ -538,7 +538,7 @@ func TestChatRunner_DrainsSummaryAndEnvelope(t *testing.T) {
 
 	st := &recordingSessionStore{
 		parents: map[string]*store.Session{
-			"sess-parent": {ID: "sess-parent", WorkspaceID: "ws-1"},
+			"sess-parent": {ID: "sess-parent"},
 		},
 	}
 	runner := &ChatRunner{
@@ -612,7 +612,7 @@ func TestChatRunner_CapturesPartialResultOnStreamError(t *testing.T) {
 
 	st := &recordingSessionStore{
 		parents: map[string]*store.Session{
-			"sess-parent": {ID: "sess-parent", WorkspaceID: "ws-1"},
+			"sess-parent": {ID: "sess-parent"},
 		},
 	}
 	runner := &ChatRunner{
@@ -683,7 +683,7 @@ func TestChatRunner_UserMessageCreationError(t *testing.T) {
 	st := &messageFailingStore{
 		recordingSessionStore: recordingSessionStore{
 			parents: map[string]*store.Session{
-				"sess-parent": {ID: "sess-parent", WorkspaceID: "ws-1"},
+				"sess-parent": {ID: "sess-parent"},
 			},
 		},
 		createMessageErr: errors.New("db write failed"),
@@ -733,7 +733,7 @@ func TestChatRunner_ProviderOverride_UsesFallbackWhenEmpty(t *testing.T) {
 	}}
 	st := &recordingSessionStore{
 		parents: map[string]*store.Session{
-			"sess-p": {ID: "sess-p", WorkspaceID: "ws-1"},
+			"sess-p": {ID: "sess-p"},
 		},
 	}
 	runner := &ChatRunner{
@@ -771,7 +771,7 @@ func TestChatRunner_ProviderOverride_InheritsParentWhenNoOverrideOrAgentDefault(
 	}}
 	st := &recordingSessionStore{
 		parents: map[string]*store.Session{
-			"sess-p": {ID: "sess-p", WorkspaceID: "ws-1", Provider: "anthropic"},
+			"sess-p": {ID: "sess-p", Provider: "anthropic"},
 		},
 	}
 	runner := &ChatRunner{
@@ -807,7 +807,7 @@ func TestChatRunner_ProviderOverride_UsesOverrideWhenSet(t *testing.T) {
 	}}
 	st := &recordingSessionStore{
 		parents: map[string]*store.Session{
-			"sess-p": {ID: "sess-p", WorkspaceID: "ws-1"},
+			"sess-p": {ID: "sess-p"},
 		},
 	}
 	runner := &ChatRunner{
@@ -889,7 +889,7 @@ func TestChatRunner_ZeroOutputRunGatedAsStalled(t *testing.T) {
 
 	st := &recordingSessionStore{
 		parents: map[string]*store.Session{
-			"sess-parent": {ID: "sess-parent", WorkspaceID: "ws-1"},
+			"sess-parent": {ID: "sess-parent"},
 		},
 	}
 	runner := &ChatRunner{
@@ -939,7 +939,7 @@ func TestChatRunner_TextLightSuccessNotGated(t *testing.T) {
 
 	st := &recordingSessionStore{
 		parents: map[string]*store.Session{
-			"sess-parent": {ID: "sess-parent", WorkspaceID: "ws-1"},
+			"sess-parent": {ID: "sess-parent"},
 		},
 	}
 	runner := &ChatRunner{

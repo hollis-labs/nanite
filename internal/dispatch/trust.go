@@ -27,14 +27,18 @@ func (t TrustTier) IsValid() bool {
 	return false
 }
 
-// TrustResolver resolves the effective trust tier for a (workspace, agent)
-// pair. Implementations consult the workspace_role_trust override table
-// and fall back to agent_profiles.default_trust_tier.
+// TrustResolver resolves the effective trust tier for an agent profile.
+//
+// Phase 0 item 20 (TASKS/phase-0/20-retire-workspaces-and-instance-mechanism.md):
+// simplified from a (workspace, agent) pair to just agentProfileID —
+// workspace_role_trust (the per-workspace override layer) is retired in
+// full, operator-confirmed 2026-08-18. Implementations now resolve
+// unconditionally from agent_profiles.default_trust_tier.
 type TrustResolver interface {
-	ResolveTrust(ctx context.Context, workspaceID, agentProfileID string) (TrustTier, error)
+	ResolveTrust(ctx context.Context, agentProfileID string) (TrustTier, error)
 }
 
 // ErrUntrustedRole is returned by dispatch when a role's resolved trust is
 // `untrusted`. Callers must NOT bypass — `untrusted` means refuse the call,
 // not "fall back to approval prompt."
-var ErrUntrustedRole = errors.New("dispatch: role is untrusted in this workspace")
+var ErrUntrustedRole = errors.New("dispatch: role is untrusted")

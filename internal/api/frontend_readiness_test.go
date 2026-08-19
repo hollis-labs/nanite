@@ -67,7 +67,7 @@ func TestSessionDetailsContract(t *testing.T) {
 	if err := a.Services.Store.CreateAgent(profile); err != nil {
 		t.Fatalf("CreateAgent: %v", err)
 	}
-	sess := &store.Session{WorkspaceID: "", Provider: "anthropic", Model: "model-a"}
+	sess := &store.Session{Provider: "anthropic", Model: "model-a"}
 	if err := a.Services.Store.CreateSession(sess); err != nil {
 		t.Fatalf("CreateSession: %v", err)
 	}

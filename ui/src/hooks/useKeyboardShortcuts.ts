@@ -74,7 +74,6 @@ export function useKeyboardShortcuts(options: KeyboardShortcutsOptions = {}) {
   const toggleArtifactsDrawer = useLayoutStore((s) => s.toggleArtifactsDrawer)
   const toggleHeaderChips = useLayoutStore((s) => s.toggleHeaderChips)
   const activeSessionId = useAppStore((s) => s.activeSessionId)
-  const activeWorkspaceId = useAppStore((s) => s.activeWorkspaceId)
   const setActiveSession = useAppStore((s) => s.setActiveSession)
   const queryClient = useQueryClient()
 
@@ -91,10 +90,8 @@ export function useKeyboardShortcuts(options: KeyboardShortcutsOptions = {}) {
   }, [userSettings?.ext_settings])
 
   const handleNewSession = useCallback(async () => {
-    if (!activeWorkspaceId) return
     try {
       const newSession = await api.createSession({
-        workspace_id: activeWorkspaceId,
         provider: userSettings?.default_provider || undefined,
         model: userSettings?.default_model || undefined,
       })
@@ -103,7 +100,7 @@ export function useKeyboardShortcuts(options: KeyboardShortcutsOptions = {}) {
     } catch (err) {
       console.error('Failed to create session:', err)
     }
-  }, [activeWorkspaceId, queryClient, setActiveSession, userSettings])
+  }, [queryClient, setActiveSession, userSettings])
 
   const handleBookmarkLast = useCallback(async () => {
     if (!activeSessionId) return

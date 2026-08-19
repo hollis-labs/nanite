@@ -52,11 +52,11 @@ type Worker struct {
 	ID              string             `json:"id"`
 	Type            Type               `json:"type"`
 	ParentSessionID string             `json:"parent_session_id"`
-	SessionID       string             `json:"session_id,omitempty"`  // access via Get/SetSessionID
-	TaskID          string             `json:"task_id,omitempty"`     // linked task
+	SessionID       string             `json:"session_id,omitempty"` // access via Get/SetSessionID
+	TaskID          string             `json:"task_id,omitempty"`    // linked task
 	AgentID         string             `json:"agent_id"`
-	Status          Status             `json:"status"`                     // access via Get/SetStatus
-	WorktreePath    string             `json:"worktree_path,omitempty"`    // access via Get/SetWorktreePath
+	Status          Status             `json:"status"`                  // access via Get/SetStatus
+	WorktreePath    string             `json:"worktree_path,omitempty"` // access via Get/SetWorktreePath
 	CreatedAt       time.Time          `json:"created_at"`
 	cancel          context.CancelFunc `json:"-"`
 	mu              sync.RWMutex       `json:"-"`
@@ -145,7 +145,6 @@ type SpawnRequest struct {
 	AgentID         string // optional, defaults to parent's agent
 	Mode            string // optional, defaults to "default"
 	Model           string // optional, defaults to parent's model
-	WorkspaceID     string // optional
 	Isolation       string // "worktree" triggers git worktree creation
 	TaskID          string // optional, pre-created task ID
 }

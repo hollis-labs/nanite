@@ -114,28 +114,6 @@ func isShortCode(s string) bool {
 	return true
 }
 
-// enforceWorkspaceScope rejects a target whose workspace differs from the
-// caller's. When the caller has no workspace stamped on ctx (test paths, CLI-
-// launch self-tools with no caller profile) the gate is skipped — same
-// permissive default the H1 mux trust gate uses when WorkspaceID is empty.
-//
-// Returns nil on allow, an errorResult on deny.
-func enforceWorkspaceScope(ctx context.Context, target *store.Session) *ToolResult {
-	callerWS, _ := CallerProfileFromContext(ctx)
-	if callerWS == "" {
-		return nil // no caller workspace stamped — fall back to allow
-	}
-	if target.WorkspaceID == "" {
-		// Target predates workspace assignment — treat as in-scope rather than
-		// leaking "wrong workspace" when the comparison itself is meaningless.
-		return nil
-	}
-	if target.WorkspaceID != callerWS {
-		return errorResult(fmt.Sprintf("cross-workspace read denied: chat %s belongs to a different workspace", target.ShortCode))
-	}
-	return nil
-}
-
 // callChatSearch implements chat_search — search a chat's conversation
 // history including compacted (summarised) spans. By default the search is
 // scoped to the current session (back-compat with the pre-CW-20260519-0063
@@ -197,13 +175,9 @@ func (st *SelfToolsTransport) callChatSearch(ctx context.Context, args map[strin
 			}
 			// Back-compat: `session_id` legacy alias falls through to using
 			// the raw string as the search scope (matches the pre-PR-#213
-			// behavior). The workspace gate cannot apply when we don't have
-			// a Session row to consult — same as before.
+			// behavior).
 			sessionID = targetArg
 		} else {
-			if errRes := enforceWorkspaceScope(ctx, sess); errRes != nil {
-				return errRes, nil
-			}
 			targetSess = sess
 			sessionID = sess.ID
 			// Only treat as cross-session when the resolved target differs from
@@ -324,7 +298,8 @@ func (st *SelfToolsTransport) callChatSearch(ctx context.Context, args map[strin
 //	include_compacted bool (optional, default true) — include summary blobs
 //
 // Return shape: { session_id, short_code, title, workspace_id, total,
-//                 has_more, messages: [{id, role, text, is_compacted, created_at}, ...] }
+//
+//	has_more, messages: [{id, role, text, is_compacted, created_at}, ...] }
 //
 // CW-20260519-0063.
 func (st *SelfToolsTransport) callChatGet(ctx context.Context, args map[string]any) (*ToolResult, error) {
@@ -343,9 +318,6 @@ func (st *SelfToolsTransport) callChatGet(ctx context.Context, args map[string]a
 
 	sess, errRes := resolveChatTarget(st, targetArg)
 	if errRes != nil {
-		return errRes, nil
-	}
-	if errRes := enforceWorkspaceScope(ctx, sess); errRes != nil {
 		return errRes, nil
 	}
 
@@ -388,16 +360,15 @@ func (st *SelfToolsTransport) callChatGet(ctx context.Context, args map[string]a
 	}
 
 	payload := map[string]any{
-		"session_id":   sess.ID,
-		"short_code":   sess.ShortCode,
-		"title":        sess.Title,
-		"workspace_id": sess.WorkspaceID,
-		"total":        page.Total,
-		"offset":       offset,
-		"limit":        limit,
-		"has_more":     page.HasMore,
-		"count":        len(views),
-		"messages":     views,
+		"session_id": sess.ID,
+		"short_code": sess.ShortCode,
+		"title":      sess.Title,
+		"total":      page.Total,
+		"offset":     offset,
+		"limit":      limit,
+		"has_more":   page.HasMore,
+		"count":      len(views),
+		"messages":   views,
 	}
 	out, err := json.Marshal(payload)
 	if err != nil {

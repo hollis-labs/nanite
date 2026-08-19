@@ -28,7 +28,7 @@ func (s *stubSessionService) Get(_ context.Context, id string) (*store.Session, 
 	}
 	return nil, fmt.Errorf("session %s not found", id)
 }
-func (s *stubSessionService) List(_ context.Context, _ string, _ bool) ([]store.Session, error) {
+func (s *stubSessionService) List(_ context.Context, _ bool) ([]store.Session, error) {
 	return nil, nil
 }
 func (s *stubSessionService) Update(_ context.Context, _ *store.Session) error { return nil }
@@ -127,10 +127,9 @@ type minimalStore struct {
 	stubAgentWriterStore
 	stubToolStore
 	stubUsageStore
-	stubWorkspaceStore
+	stubProjectStore
 	stubBookmarkStore
 	stubArtifactStore
-	stubTemplateStore
 	stubSkillStore
 	stubProviderStore
 	stubTodoStore
@@ -215,8 +214,8 @@ type stubSessionStore struct{}
 func (stubSessionStore) GetSession(string) (*store.Session, error) {
 	return nil, fmt.Errorf("not found")
 }
-func (stubSessionStore) ListSessions(string, ...bool) ([]store.Session, error) { return nil, nil }
-func (stubSessionStore) ListMessages(string, int) ([]store.Message, error)     { return nil, nil }
+func (stubSessionStore) ListSessions(...bool) ([]store.Session, error)     { return nil, nil }
+func (stubSessionStore) ListMessages(string, int) ([]store.Message, error) { return nil, nil }
 func (stubSessionStore) ListMessagesPaginated(string, int, int) (*store.MessagePage, error) {
 	return nil, nil
 }
@@ -226,7 +225,7 @@ func (stubSessionStore) ListMessagesAroundID(string, string, int, int) (*store.M
 func (stubSessionStore) GetMessage(string) (*store.Message, error) {
 	return nil, fmt.Errorf("not found")
 }
-func (stubSessionStore) SearchMessages(string, string, string, int) ([]store.SearchResult, error) {
+func (stubSessionStore) SearchMessages(string, string, int) ([]store.SearchResult, error) {
 	return nil, nil
 }
 func (stubSessionStore) CreateSession(*store.Session) error              { return nil }
@@ -310,18 +309,13 @@ func (stubUsageStore) ListEvents(string, int) ([]store.EventLog, error)         
 func (stubUsageStore) CountSessionToolCalls(string) int                           { return 0 }
 func (stubUsageStore) InsertAgentBrokerDecision(*store.AgentBrokerDecision) error { return nil }
 
-type stubWorkspaceStore struct{}
+type stubProjectStore struct{}
 
-func (stubWorkspaceStore) ListWorkspaces() ([]store.Workspace, error)    { return nil, nil }
-func (stubWorkspaceStore) GetWorkspace(string) (*store.Workspace, error) { return nil, nil }
-func (stubWorkspaceStore) CreateWorkspace(*store.Workspace) error        { return nil }
-func (stubWorkspaceStore) UpdateWorkspace(*store.Workspace) error        { return nil }
-func (stubWorkspaceStore) DeleteWorkspace(string) error                  { return nil }
-func (stubWorkspaceStore) ListProjects(string) ([]store.Project, error)  { return nil, nil }
-func (stubWorkspaceStore) GetProject(string) (*store.Project, error)     { return nil, nil }
-func (stubWorkspaceStore) CreateProject(*store.Project) error            { return nil }
-func (stubWorkspaceStore) UpdateProject(*store.Project) error            { return nil }
-func (stubWorkspaceStore) DeleteProject(string) error                    { return nil }
+func (stubProjectStore) ListProjects() ([]store.Project, error)    { return nil, nil }
+func (stubProjectStore) GetProject(string) (*store.Project, error) { return nil, nil }
+func (stubProjectStore) CreateProject(*store.Project) error        { return nil }
+func (stubProjectStore) UpdateProject(*store.Project) error        { return nil }
+func (stubProjectStore) DeleteProject(string) error                { return nil }
 
 type stubBookmarkStore struct{}
 
@@ -343,25 +337,6 @@ func (stubArtifactStore) ListArtifactsByProject(string, string) ([]store.Artifac
 }
 func (stubArtifactStore) CreateArtifact(*store.Artifact) error        { return nil }
 func (stubArtifactStore) GetArtifact(string) (*store.Artifact, error) { return nil, nil }
-
-type stubTemplateStore struct{}
-
-func (stubTemplateStore) ListPromptTemplates() ([]store.PromptTemplate, error)    { return nil, nil }
-func (stubTemplateStore) GetPromptTemplate(string) (*store.PromptTemplate, error) { return nil, nil }
-func (stubTemplateStore) GetPromptTemplateBySlug(string) (*store.PromptTemplate, error) {
-	return nil, nil
-}
-func (stubTemplateStore) CreatePromptTemplate(*store.PromptTemplate) error { return nil }
-func (stubTemplateStore) UpdatePromptTemplate(*store.PromptTemplate) error { return nil }
-func (stubTemplateStore) DeletePromptTemplate(string) error                { return nil }
-func (stubTemplateStore) ListPromptTemplatesForAgent(string) ([]store.PromptTemplate, error) {
-	return nil, nil
-}
-func (stubTemplateStore) AssignPromptTemplateToAgent(string, string) error   { return nil }
-func (stubTemplateStore) RemovePromptTemplateFromAgent(string, string) error { return nil }
-func (stubTemplateStore) ComposePromptForAgent(string, map[string]string) (string, error) {
-	return "", nil
-}
 
 type stubSkillStore struct{}
 

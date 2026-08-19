@@ -54,11 +54,8 @@ func TestEstimateTokens(t *testing.T) {
 func TestAssembleSlotSources_AgentPromptAndMessageCount(t *testing.T) {
 	cb, s := newTestBroker(t)
 
-	// Set up workspace, session, agent.
-	if err := s.CreateWorkspace(&store.Workspace{ID: "ws1", Name: "Test"}); err != nil {
-		t.Fatalf("CreateWorkspace: %v", err)
-	}
-	sess := &store.Session{WorkspaceID: "ws1"}
+	// Set up session, agent.
+	sess := &store.Session{}
 	if err := s.CreateSession(sess); err != nil {
 		t.Fatalf("CreateSession: %v", err)
 	}
@@ -72,8 +69,6 @@ func TestAssembleSlotSources_AgentPromptAndMessageCount(t *testing.T) {
 		t.Fatalf("CreateAgent: %v", err)
 	}
 
-	workspace := &store.Workspace{Name: "Test WS", Description: "Testing"}
-
 	// Add a few messages.
 	for i := 0; i < 3; i++ {
 		msg := &store.Message{SessionID: sess.ID, Role: "user", Content: "test message"}
@@ -82,7 +77,7 @@ func TestAssembleSlotSources_AgentPromptAndMessageCount(t *testing.T) {
 		}
 	}
 
-	sources, err := cb.AssembleSlotSources(context.Background(), sess, agent, workspace)
+	sources, err := cb.AssembleSlotSources(context.Background(), sess, agent)
 	if err != nil {
 		t.Fatalf("AssembleSlotSources: %v", err)
 	}

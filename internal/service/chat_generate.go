@@ -56,14 +56,16 @@ type composeConfig struct {
 }
 
 // composeExtraSystemPrefix builds the per-turn system prompt prefix: optional
-// no-tools warning, optional progressive discovery catalog, the native tool
-// guide, and (when non-empty) the per-tool override block appended after the
-// native guide. Order is significant — tool-specific overrides ship AFTER the
-// general guide so they override conflicting general rules for the named tool.
+// no-tools warning, optional progressive discovery catalog, then the native
+// tool guide.
 //
-// overrideBlock is the markdown "## Tool Overrides" section composed by the
-// broker (via broker.ComposeOverrideBlock). Empty string skips the section.
-func composeExtraSystemPrefix(overrideBlock string, cfg composeConfig) string {
+// Phase 0 item 22: this used to also append a per-tool "## Tool Overrides"
+// markdown block (composed via go-toolbroker's enricher/WithEnricher) after
+// the native guide. Cut entirely per the operator's 2026-08-18 resolution —
+// no port-forward — because the tool_enrichments write path was already
+// dead (18a-cut-dead-storage-and-config), making the override block
+// structurally inert. See decision log §11.
+func composeExtraSystemPrefix(cfg composeConfig) string {
 	var b strings.Builder
 	if cfg.noTools {
 		b.WriteString(noToolsWarningPrefix)
@@ -73,10 +75,6 @@ func composeExtraSystemPrefix(overrideBlock string, cfg composeConfig) string {
 		b.WriteString("\n\n")
 	}
 	b.WriteString(strings.TrimLeft(nativeToolGuide, "\n"))
-	if overrideBlock != "" {
-		b.WriteString("\n\n")
-		b.WriteString(overrideBlock)
-	}
 	return b.String()
 }
 
@@ -234,12 +232,6 @@ func (s *chatServiceImpl) generateResponse(ctx context.Context, sessionID, assis
 	// hard-ceiling (see resolveIterationLimits in chat_loop_state.go).
 	constraints := chat.ParseAgentConstraints(agent.Constraints)
 
-	// --- Load workspace ---
-	var workspace *store.Workspace
-	if session.WorkspaceID != "" {
-		workspace, _ = s.store.GetWorkspace(session.WorkspaceID)
-	}
-
 	// --- Resolve model ---
 	// CW-20260526-0003: model resolution walks session → agent →
 	// store.ResolveProviderAndModel (user_settings.default_model →
@@ -354,7 +346,11 @@ func (s *chatServiceImpl) generateResponse(ctx context.Context, sessionID, assis
 	// from the actual model window (e.g. 1M for Gemini) rather than the
 	// hardcoded 200K default. contextWindowSize returns 0 on miss, which causes
 	// the broker to fall back to DefaultContextWindowTokens (CW-20260426-0032).
-	selection, err := s.tools.SelectForAgent(ctx, sessionID, agentID, userContent, session.WorkspaceID, s.contextWindowSize(providerName, model))
+	// Phase 0 item 20 (retire workspaces): session.WorkspaceID no longer
+	// exists — SelectForAgent's workspaceID param (toolclient's
+	// Config.WorkspaceOverrides rule-merge hook) has no populated loader in
+	// production today, so this is a no-op change, not a feature removal.
+	selection, err := s.tools.SelectForAgent(ctx, sessionID, agentID, userContent, "", s.contextWindowSize(providerName, model))
 	if err != nil {
 		slog.Warn("chat-service: tool selection failed", "err", err)
 		selection = &ToolSelection{}
@@ -421,13 +417,7 @@ func (s *chatServiceImpl) generateResponse(ctx context.Context, sessionID, assis
 		ch <- chat.StreamEvent{Type: "tool_warning", Data: string(warningJSON)}
 	}
 
-	// selection.OverrideBlock is composed upstream by ToolClient via
-	// go-toolbroker's ComposeOverrideBlock over the FINAL tool set (post
-	// permission filtering + token budget prune), so the block never mentions
-	// a tool the LLM won't see. Empty string when no enricher is configured
-	// or no selected tool has Hints — composeExtraSystemPrefix skips the
-	// section in that case.
-	extraSystemPrefix := composeExtraSystemPrefix(selection.OverrideBlock, composeConfig{
+	extraSystemPrefix := composeExtraSystemPrefix(composeConfig{
 		noTools:            noTools,
 		progressiveActive:  selection.Progressive,
 		progressiveCatalog: selection.Catalog,
@@ -468,7 +458,7 @@ func (s *chatServiceImpl) generateResponse(ctx context.Context, sessionID, assis
 	// argument.
 
 	// --- Assemble context (slot-based) ---
-	slotResult, err := s.assembleTurnContext(ctx, session, agent, workspace, tools, extraSystemPrefix, providerName, model, ch, toolsLazyHint)
+	slotResult, err := s.assembleTurnContext(ctx, session, agent, tools, extraSystemPrefix, providerName, model, ch, toolsLazyHint)
 	if err != nil {
 		return
 	}
@@ -1599,7 +1589,7 @@ func (s *chatServiceImpl) generateResponse(ctx context.Context, sessionID, assis
 		plans := s.preCheckTools(ctx, sessionID, agentID, regularTools, ls, ch, selection, tools)
 
 		// Execute tools: concurrent-safe in parallel, serial one at a time.
-		execResults := s.executeToolBatch(ctx, plans, ls, agentID, ch, sessionID, session.WorkspaceID)
+		execResults := s.executeToolBatch(ctx, plans, ls, agentID, ch, sessionID)
 
 		// Post-process: stuck loop detection, truncation, envelopes, artifacts.
 		// model is threaded through so truncate.OutputForModel can size the
@@ -2381,12 +2371,13 @@ func toolSlotChangeKindFor(s HydrationState) string {
 // err without emitting again.
 //
 // Phase 0 item 21 ("Cut Modes, in full") removed the `mode *store.AgentMode`
-// and `sessionMode *store.Mode` parameters this used to take.
+// and `sessionMode *store.Mode` parameters this used to take. Phase 0 item
+// 20 (retire workspaces) removed the `workspace *store.Workspace` parameter
+// — the in-app `workspaces` table it sourced is retired in full.
 func (s *chatServiceImpl) assembleTurnContext(
 	ctx context.Context,
 	session *store.Session,
 	agent *store.AgentProfile,
-	workspace *store.Workspace,
 	tools []llmtypes.ToolDefinition,
 	extraSystemPrefix string,
 	providerName, model string,
@@ -2394,7 +2385,7 @@ func (s *chatServiceImpl) assembleTurnContext(
 	toolsLazyHint string,
 ) (*SlotAssemblyResult, error) {
 	windowSize := s.contextWindowSize(providerName, model)
-	result, err := s.context.AssembleSlots(ctx, session, agent, workspace, tools, extraSystemPrefix, windowSize, toolsLazyHint)
+	result, err := s.context.AssembleSlots(ctx, session, agent, tools, extraSystemPrefix, windowSize, toolsLazyHint)
 	if err != nil {
 		ch <- chat.ErrorEvent(chat.ErrorCodeInternal, "Failed to assemble context",
 			map[string]interface{}{"raw": err.Error()})
@@ -2727,10 +2718,10 @@ func classifyModeFromAgentTags(agent *store.AgentProfile) string {
 //   - If the cap trips a SECOND time within the same turn (i.e. the LLM
 //     reflected once already and is still asking), we fall back to the
 //     pre-Phase-5 hard halt — we don't reflect repeatedly.
-//   - Every call is persisted to broker_decisions with intent + outcome +
-//     consecutive_empty + total_calls so future Phase 4 mining work has a
-//     ground-truth signal to learn from. (Phase 4 mining itself is
-//     deferred — see follow-ups.)
+//   - Every call is persisted to the inspector ring buffer with intent +
+//     outcome + consecutive_empty + total_calls (TASKS/phase-0/23-export-
+//     and-drop-decision-tables.md retired the SQL-backed broker_decisions
+//     table this used to also write to — see persistBrokerCallEx).
 func (s *chatServiceImpl) handleRequestTools(
 	ctx context.Context,
 	tu llmtypes.ToolUseBlock,
@@ -2750,7 +2741,8 @@ func (s *chatServiceImpl) handleRequestTools(
 	*totalCalls++
 
 	// Pull the LLM-supplied intent up front so it ends up in every
-	// broker_decisions row (selected, loaded, empty, halted, reflected).
+	// inspector broker-decision record (selected, loaded, empty, halted,
+	// reflected).
 	requestedIntent := ""
 	if tu.Input != nil {
 		if v, ok := tu.Input["intent"]; ok {
@@ -2868,22 +2860,22 @@ func sortedKeys(m map[string]bool) []string {
 	return out
 }
 
-// persistBrokerCall records every request_tools meta-tool call into the
-// broker_decisions table AND the inspector ring buffer (when inspector is
-// wired). Best-effort: a failed write is logged but never gates the loop.
-// The chat service's store-backed BrokerDecisionLogger is only available via
-// toolServiceImpl; we route through that adapter so tests with a stub
-// ToolService don't have to provide a Store.
-func (s *chatServiceImpl) persistBrokerCall(
-	sessionID, intent, outcome string,
-	consecutiveEmpty, totalCalls, loadedCount int,
-	reflectionQuery string,
-) {
-	s.persistBrokerCallEx(sessionID, "", intent, outcome, consecutiveEmpty, totalCalls, loadedCount, reflectionQuery, nil, "")
-}
-
-// persistBrokerCallEx is the extended form used by handleRequestTools to also
-// record the broker decision into the inspector aggregator.
+// persistBrokerCallEx records one request_tools meta-tool call into the
+// inspector ring buffer (when inspector is wired). No-op when the
+// inspector is disabled, sessionID is empty, or no turn ID is available —
+// dev-mode telemetry only, never gates the loop.
+//
+// Historical note (TASKS/phase-0/23-export-and-drop-decision-tables.md):
+// this used to also persist every call into the `broker_decisions` SQL
+// table via toolServiceImpl's BrokerDecisionLogger/LogRequestToolsCall.
+// That table (and its writer) was retired in full as part of the same
+// task — its historical rows were exported to event_log
+// (event_type="broker_decision_export") before the table was dropped. The
+// inspector ring buffer is now the only live per-turn broker-decision
+// telemetry; the old SQL-backed debug panel (BrokerDecisionsPanel/Widget,
+// GET /api/broker/decisions) was removed alongside it — see
+// ui/src/components/settings/inspector/InspectorPanel.tsx for its
+// replacement.
 func (s *chatServiceImpl) persistBrokerCallEx(
 	sessionID, inspectorTurnID, intent, outcome string,
 	consecutiveEmpty, totalCalls, loadedCount int,
@@ -2891,42 +2883,23 @@ func (s *chatServiceImpl) persistBrokerCallEx(
 	selectedTools []string,
 	layerReached string,
 ) {
-	if sessionID == "" {
-		return
-	}
-	logger, ok := s.tools.(brokerCallPersister)
-	if !ok || logger == nil {
+	if sessionID == "" || s.inspector == nil || inspectorTurnID == "" {
 		return
 	}
 	if intent == "" {
 		intent = "(no intent supplied)"
 	}
-	logger.LogRequestToolsCall(
-		sessionID, intent, outcome,
-		consecutiveEmpty, totalCalls, loadedCount, reflectionQuery,
-	)
-	// I1 (CW-20260426-0004): additive — also emit to inspector.
-	if s.inspector != nil && inspectorTurnID != "" {
-		d := inspectsvc.BrokerDecision{
-			Intent:           intent,
-			Outcome:          outcome,
-			SelectedTools:    selectedTools,
-			LayerReached:     layerReached,
-			ConsecutiveEmpty: consecutiveEmpty,
-			TotalCalls:       totalCalls,
-			LoadedCount:      loadedCount,
-			ReflectionQuery:  reflectionQuery,
-		}
-		s.inspector.RecordBrokerDecision(sessionID, inspectorTurnID, d)
+	d := inspectsvc.BrokerDecision{
+		Intent:           intent,
+		Outcome:          outcome,
+		SelectedTools:    selectedTools,
+		LayerReached:     layerReached,
+		ConsecutiveEmpty: consecutiveEmpty,
+		TotalCalls:       totalCalls,
+		LoadedCount:      loadedCount,
+		ReflectionQuery:  reflectionQuery,
 	}
-}
-
-// brokerCallPersister is the narrow surface persistBrokerCall uses. It is
-// satisfied by toolServiceImpl (which holds a *store.Store via the
-// BrokerDecisionLogger setter); a stub ToolService that doesn't satisfy
-// this interface is silently a no-op for persistence.
-type brokerCallPersister interface {
-	LogRequestToolsCall(sessionID, intent, outcome string, consecutiveEmpty, totalCalls, loadedCount int, reflectionQuery string)
+	s.inspector.RecordBrokerDecision(sessionID, inspectorTurnID, d)
 }
 
 // detectStuckLoop checks for repeated identical tool results and returns

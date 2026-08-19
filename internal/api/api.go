@@ -53,16 +53,17 @@ func (a *API) SetEmbedderSelectDeps(deps service.EmbedderSelectDeps) {
 
 // RegisterRoutes wires all API routes onto the given ServeMux.
 func (a *API) RegisterRoutes(mux *http.ServeMux) {
-	// Workspaces
-	mux.HandleFunc("GET /api/workspaces", a.handleListWorkspaces)
-	mux.HandleFunc("POST /api/workspaces", a.handleCreateWorkspace)
-	mux.HandleFunc("GET /api/workspaces/{id}", a.handleGetWorkspace)
-	mux.HandleFunc("PUT /api/workspaces/{id}", a.handleUpdateWorkspace)
-	mux.HandleFunc("DELETE /api/workspaces/{id}", a.handleDeleteWorkspace)
-	mux.HandleFunc("GET /api/workspaces/{wid}/projects", a.handleListProjects)
-	mux.HandleFunc("POST /api/workspaces/{wid}/projects", a.handleCreateProject)
-	mux.HandleFunc("PUT /api/workspaces/{wid}/projects/{pid}", a.handleUpdateProject)
-	mux.HandleFunc("DELETE /api/workspaces/{wid}/projects/{pid}", a.handleDeleteProject)
+	// Projects. Phase 0 item 20 (retire workspaces,
+	// TASKS/phase-0/20-retire-workspaces-and-instance-mechanism.md): the
+	// in-app `workspaces` table and its 5 CRUD routes are retired in full.
+	// `projects` is flat now — no more /api/workspaces/{wid}/projects
+	// nesting. agent_projects and its routes below are untouched — that's
+	// the live Agent Construction scope mechanism, unrelated to the
+	// workspaces table despite sharing the `projects` table.
+	mux.HandleFunc("GET /api/projects", a.handleListProjects)
+	mux.HandleFunc("POST /api/projects", a.handleCreateProject)
+	mux.HandleFunc("PUT /api/projects/{pid}", a.handleUpdateProject)
+	mux.HandleFunc("DELETE /api/projects/{pid}", a.handleDeleteProject)
 	mux.HandleFunc("GET /api/projects/{id}/agents", a.handleListProjectAgents)
 
 	// Sessions
@@ -290,7 +291,6 @@ func (a *API) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/tools/select", a.handleSelectTools)
 	mux.HandleFunc("POST /api/tools/refresh", a.handleRefreshTools)
 	mux.HandleFunc("POST /api/tools/call", a.handleSelfToolCall)
-	mux.HandleFunc("GET /api/broker/decisions", a.handleListBrokerDecisions)
 	mux.HandleFunc("GET /api/agents/{id}/tools", a.handleListAgentTools)
 
 	// Permissions & Approvals
@@ -333,16 +333,6 @@ func (a *API) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/roles/{id}", a.handleGetRole)
 	mux.HandleFunc("PUT /api/roles/{id}", a.handleUpdateRole)
 	mux.HandleFunc("DELETE /api/roles/{id}", a.handleDeleteRole)
-
-	// Prompt Templates
-	mux.HandleFunc("GET /api/prompt-templates", a.handleListPromptTemplates)
-	mux.HandleFunc("POST /api/prompt-templates", a.handleCreatePromptTemplate)
-	mux.HandleFunc("GET /api/prompt-templates/{id}", a.handleGetPromptTemplate)
-	mux.HandleFunc("PUT /api/prompt-templates/{id}", a.handleUpdatePromptTemplate)
-	mux.HandleFunc("DELETE /api/prompt-templates/{id}", a.handleDeletePromptTemplate)
-	mux.HandleFunc("GET /api/agents/{id}/prompt-templates", a.handleListAgentPromptTemplates)
-	mux.HandleFunc("POST /api/agents/{id}/prompt-templates", a.handleAssignAgentPromptTemplate)
-	mux.HandleFunc("DELETE /api/agents/{id}/prompt-templates/{templateId}", a.handleRemoveAgentPromptTemplate)
 
 	// MCP Servers (user-managed)
 	mux.HandleFunc("GET /api/mcp-servers", a.handleListMCPServers)
@@ -465,10 +455,10 @@ func (a *API) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/metrics/utility", a.handleGetUtilityCallSummary)
 	mux.HandleFunc("GET /api/metrics/utility/log", a.handleGetUtilityCallLog)
 
-	// Role Trust (H1, CW-20260421-0014)
-	mux.HandleFunc("GET /api/workspaces/{workspace_id}/roles", a.handleListWorkspaceRoleTrust)
-	mux.HandleFunc("POST /api/workspaces/{workspace_id}/roles/{agent_profile_id}/trust", a.handleSetWorkspaceRoleTrust)
-	mux.HandleFunc("DELETE /api/workspaces/{workspace_id}/roles/{agent_profile_id}/trust", a.handleDeleteWorkspaceRoleTrust)
+	// Role Trust (H1, CW-20260421-0014) REST surface retired in full
+	// alongside workspace_role_trust — Phase 0 item 20 (retire workspaces,
+	// operator-confirmed 2026-08-18). Trust resolution reverts to
+	// unconditional base-tier resolution (internal/store/trust.go).
 
 	// A2A Protocol (CW-20260814-0014, CW-20260814-0016)
 	// Agent Card discovery at /.well-known/agent-card.json

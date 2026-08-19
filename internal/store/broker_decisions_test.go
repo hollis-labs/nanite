@@ -192,13 +192,15 @@ func TestMigration058_TableExists(t *testing.T) {
 		}
 	}
 
-	// The pre-existing tool-broker `broker_decisions` table must still be
-	// present — the new migration must NOT collide with it.
-	if err := s.DB.QueryRow(
-		`SELECT name FROM sqlite_master WHERE type='table' AND name='broker_decisions'`,
-	).Scan(&tableName); err != nil {
-		t.Errorf("pre-existing broker_decisions table missing — migration 058 must not displace it: %v", err)
-	}
+	// Historical note: this used to also assert that the pre-existing
+	// tool-broker `broker_decisions` table survived migration 058 (i.e.
+	// migration 058 doesn't collide with it). That assertion no longer
+	// holds by design — TASKS/phase-0/23-export-and-drop-decision-tables.md
+	// (migration 111_drop_broker_and_strategy_decisions.sql) drops
+	// `broker_decisions` outright, after exporting its rows to event_log.
+	// The two tables never collided at 058-authoring time; 058's own
+	// non-collision property is unaffected by 111 dropping one of them
+	// later, so no replacement assertion is needed here.
 }
 
 // TestMigration058_Idempotent re-runs migration 058's own SQL directly

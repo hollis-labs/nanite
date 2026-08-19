@@ -7,7 +7,6 @@ import (
 	"testing"
 
 	llmtypes "github.com/hollis-labs/go-llm-types"
-	"github.com/hollis-labs/go-toolbroker/broker"
 	"github.com/hollis-labs/nanite/internal/mcp"
 	"github.com/hollis-labs/nanite/internal/store"
 	"github.com/hollis-labs/nanite/internal/toolclient"
@@ -33,21 +32,21 @@ import (
 // fallback that motivated this fix — regresses loudly.
 
 // buildToolClientForPerms wires a toolclient with a representative tool set
-// covering the ticket's acceptance scenarios. Tools are registered as
-// broker tools so they flow through SelectToolsAsProvider just as MCP-
+// covering the ticket's acceptance scenarios. Tools are registered directly
+// on the catalog so they flow through SelectToolsAsProvider just as MCP-
 // discovered tools would. developer_mode is pinned ON so the orthogonal
 // dev-mode gate cannot perturb tool counts here.
 func buildToolClientForPerms(t *testing.T) *toolclient.ToolClient {
 	t.Helper()
 	tc := toolclient.New(nil, nil, toolclient.DefaultConfig())
 	tc.DeveloperModeFunc = func() bool { return true }
-	tc.RegisterTools([]broker.ToolDefinition{
-		{Name: "read_file", Server: "fs", Description: "Read a file"},
-		{Name: "list_files", Server: "fs", Description: "List files in a directory"},
-		{Name: "write_file", Server: "fs", Description: "Write a file"},
-		{Name: "delete_file", Server: "fs", Description: "Delete a file"},
-		{Name: "engine_task_create", Server: "engine", Description: "Create a task"},
-		{Name: "engine_task_list", Server: "engine", Description: "List tasks"},
+	tc.RegisterTools([]llmtypes.ToolDefinition{
+		{Name: "read_file", Description: "Read a file"},
+		{Name: "list_files", Description: "List files in a directory"},
+		{Name: "write_file", Description: "Write a file"},
+		{Name: "delete_file", Description: "Delete a file"},
+		{Name: "engine_task_create", Description: "Create a task"},
+		{Name: "engine_task_list", Description: "List tasks"},
 	})
 	return tc
 }

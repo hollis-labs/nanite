@@ -30,11 +30,6 @@ type WorkflowLaunchRequest struct {
 	// as agentworkflow.WorkflowInput.Params.
 	Params map[string]any
 
-	// WorkspaceID is required — durable_agents.go's Start() requires it
-	// when creating a fresh session (ErrDurableAgentWorkspaceRequired),
-	// and a template-class instance's fresh_one_shot session policy
-	// always creates fresh.
-	WorkspaceID string
 	// ProjectID is optional, forwarded to Start's session-creation request.
 	ProjectID string
 	// AgentProfileID identifies the agent_profiles row the launched
@@ -153,9 +148,6 @@ func (l *WorkflowLauncher) Launch(ctx context.Context, req WorkflowLaunchRequest
 	if !ok || engine == nil {
 		return nil, fmt.Errorf("workflow: workflow %q targets engine %q, which is not registered on this launcher", wf.Name, engineName)
 	}
-	if req.WorkspaceID == "" {
-		return nil, ErrDurableAgentWorkspaceRequired
-	}
 	if req.AgentProfileID == "" {
 		return nil, fmt.Errorf("workflow: agent_profile_id is required (durable_agent_instances.profile_id is a required FK)")
 	}
@@ -178,7 +170,6 @@ func (l *WorkflowLauncher) Launch(ctx context.Context, req WorkflowLaunchRequest
 	}
 
 	startResult, err := l.durable.Start(ctx, inst.ID, DurableAgentStartRequest{
-		WorkspaceID: req.WorkspaceID,
 		ProjectID:   req.ProjectID,
 		WakePayload: DurableAgentWakePayload{Reason: DurableAgentWakeManual},
 	})

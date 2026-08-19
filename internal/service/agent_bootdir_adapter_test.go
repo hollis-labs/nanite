@@ -8,8 +8,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/hollis-labs/nanite/internal/recovery/broker"
 	runtimeagent "github.com/hollis-labs/nanite/internal/runtime/agent"
-	"github.com/hollis-labs/nanite/internal/runtime/agent/recovery"
 	"github.com/hollis-labs/nanite/internal/store"
 )
 
@@ -325,7 +325,7 @@ func TestBootDirAdapter_TrackOverwrites(t *testing.T) {
 }
 
 // TestBootDirAdapter_BrokerRemediate_E2E exercises the full broker →
-// adapter path: builds a recovery.Broker wired with a real
+// adapter path: builds a broker.Broker wired with a real
 // agentBootDirAdapter, wipes the sandbox dir, asks the broker to
 // Remediate(RepopulateSandbox), and asserts the dir is repopulated and
 // no "BootDir not wired" error surfaces (the smoke acceptance from the
@@ -350,7 +350,7 @@ func TestBootDirAdapter_BrokerRemediate_E2E(t *testing.T) {
 	// Stand the broker up with the adapter wired in. AgentBoot / Store /
 	// Envelope stay nil — Remediate doesn't reach into those for the
 	// RepopulateSandbox branch.
-	b := recovery.NewBroker(recovery.Dependencies{
+	b := broker.NewBroker(broker.Dependencies{
 		BootDir: a,
 	})
 
@@ -367,11 +367,11 @@ func TestBootDirAdapter_BrokerRemediate_E2E(t *testing.T) {
 	}
 
 	// Drive Remediate with a Classification carrying RemediationRepopulateSandbox.
-	classification := recovery.Classification{
-		Class:       recovery.ClassConfigPermissions,
-		Remediation: recovery.RemediationRepopulateSandbox,
+	classification := broker.Classification{
+		Class:       broker.ClassConfigPermissions,
+		Remediation: broker.RemediationRepopulateSandbox,
 	}
-	ev := &recovery.FailureEvent{SessionID: sessID}
+	ev := &broker.FailureEvent{SessionID: sessID}
 	if err := b.Remediate(context.Background(), ev, classification); err != nil {
 		t.Fatalf("broker.Remediate: %v (this is the smoke that previously returned 'BootDir not wired')", err)
 	}
@@ -420,12 +420,12 @@ func TestBootDirAdapter_BrokerRemediate_RegenerateCLAUDEMD_E2E(t *testing.T) {
 		t.Fatalf("seed sentinel: %v", err)
 	}
 
-	b := recovery.NewBroker(recovery.Dependencies{BootDir: a})
-	classification := recovery.Classification{
-		Class:       recovery.ClassConfigPermissions,
-		Remediation: recovery.RemediationRegenerateCLAUDEMD,
+	b := broker.NewBroker(broker.Dependencies{BootDir: a})
+	classification := broker.Classification{
+		Class:       broker.ClassConfigPermissions,
+		Remediation: broker.RemediationRegenerateCLAUDEMD,
 	}
-	ev := &recovery.FailureEvent{SessionID: sessID}
+	ev := &broker.FailureEvent{SessionID: sessID}
 	if err := b.Remediate(context.Background(), ev, classification); err != nil {
 		t.Fatalf("broker.Remediate (RegenerateCLAUDEMD): %v", err)
 	}

@@ -33,9 +33,8 @@ function formatDate(dateStr: string): string {
 }
 
 export function SearchModal({ open, onOpenChange }: SearchModalProps) {
-  const [scope, setScope] = useState<"all" | "workspace" | "project">("workspace");
+  const [scope, setScope] = useState<"all" | "project">("all");
   const [query, setQuery] = useState("");
-  const activeWorkspaceId = useAppStore((s) => s.activeWorkspaceId);
   const activeProjectId = useAppStore((s) => s.activeProjectId);
   const setActiveSession = useAppStore((s) => s.setActiveSession);
   const setCurrentPage = useLayoutStore((s) => s.setCurrentPage);
@@ -47,23 +46,23 @@ export function SearchModal({ open, onOpenChange }: SearchModalProps) {
   }, [open]);
 
   const { data: sessions = [] } = useQuery({
-    queryKey: ["sessions", activeWorkspaceId],
-    queryFn: () => api.listSessions(activeWorkspaceId ?? undefined),
+    queryKey: ["sessions"],
+    queryFn: () => api.listSessions(),
     enabled: open,
   });
 
   const { data: projects = [] } = useQuery({
-    queryKey: ["projects", activeWorkspaceId],
-    queryFn: () => api.listProjects(activeWorkspaceId!),
-    enabled: open && !!activeWorkspaceId,
+    queryKey: ["projects"],
+    queryFn: () => api.listProjects(),
+    enabled: open,
   });
 
   // Backend message search (debounced via queryKey changes)
   const searchProjectId = scope === "project" ? (activeProjectId ?? undefined) : undefined;
   const { data: searchResults = [], isFetching: isSearching } = useQuery({
-    queryKey: ["search", query, activeWorkspaceId, searchProjectId],
-    queryFn: () => api.searchMessages(query, activeWorkspaceId!, searchProjectId),
-    enabled: open && !!activeWorkspaceId && query.length >= 2,
+    queryKey: ["search", query, searchProjectId],
+    queryFn: () => api.searchMessages(query, searchProjectId),
+    enabled: open && query.length >= 2,
     staleTime: 30_000,
   });
 
@@ -131,9 +130,6 @@ export function SearchModal({ open, onOpenChange }: SearchModalProps) {
       <div className="flex items-center gap-1 px-3 py-1.5 border-b border-border-subtle">
         <ScopeButton active={scope === "all"} onClick={() => setScope("all")}>
           All
-        </ScopeButton>
-        <ScopeButton active={scope === "workspace"} onClick={() => setScope("workspace")}>
-          Workspace
         </ScopeButton>
         {activeProjectId && (
           <ScopeButton active={scope === "project"} onClick={() => setScope("project")}>

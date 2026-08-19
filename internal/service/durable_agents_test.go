@@ -70,9 +70,6 @@ func TestDurableAgentServiceLifecycleRequests(t *testing.T) {
 	if err := st.CreateAgent(profile); err != nil {
 		t.Fatalf("CreateAgent: %v", err)
 	}
-	if err := st.CreateWorkspace(&store.Workspace{ID: "workspace-a", Name: "Workspace A"}); err != nil {
-		t.Fatalf("CreateWorkspace: %v", err)
-	}
 	svc := NewDurableAgentService(st)
 	inst := &store.DurableAgentInstance{
 		Name:             "Svc Instance",
@@ -245,9 +242,6 @@ func TestDurableAgentStartCreatesOrReusesSession(t *testing.T) {
 	if err := st.CreateAgent(profile); err != nil {
 		t.Fatalf("CreateAgent: %v", err)
 	}
-	if err := st.CreateWorkspace(&store.Workspace{ID: "workspace-a", Name: "Workspace A"}); err != nil {
-		t.Fatalf("CreateWorkspace: %v", err)
-	}
 	svc := NewDurableAgentService(st)
 	inst := &store.DurableAgentInstance{
 		Name:             "Start Instance",
@@ -263,7 +257,7 @@ func TestDurableAgentStartCreatesOrReusesSession(t *testing.T) {
 		t.Fatalf("Create: %v", err)
 	}
 
-	first, err := svc.Start(context.Background(), inst.ID, DurableAgentStartRequest{WorkspaceID: "workspace-a"})
+	first, err := svc.Start(context.Background(), inst.ID, DurableAgentStartRequest{})
 	if err != nil {
 		t.Fatalf("Start first: %v", err)
 	}
@@ -284,7 +278,7 @@ func TestDurableAgentStartCreatesOrReusesSession(t *testing.T) {
 		t.Fatalf("relations = %+v", rels)
 	}
 
-	second, err := svc.Start(context.Background(), inst.ID, DurableAgentStartRequest{WorkspaceID: "workspace-a"})
+	second, err := svc.Start(context.Background(), inst.ID, DurableAgentStartRequest{})
 	if err != nil {
 		t.Fatalf("Start second: %v", err)
 	}
@@ -309,9 +303,6 @@ func TestDurableAgentProcessStartCreatesFreshWakeSession(t *testing.T) {
 	if err := st.CreateAgent(profile); err != nil {
 		t.Fatalf("CreateAgent: %v", err)
 	}
-	if err := st.CreateWorkspace(&store.Workspace{ID: "workspace-a", Name: "Workspace A"}); err != nil {
-		t.Fatalf("CreateWorkspace: %v", err)
-	}
 	svc := NewDurableAgentService(st)
 	inst := &store.DurableAgentInstance{
 		Name:             "Process Instance",
@@ -326,11 +317,11 @@ func TestDurableAgentProcessStartCreatesFreshWakeSession(t *testing.T) {
 	if err := svc.Create(context.Background(), inst); err != nil {
 		t.Fatalf("Create: %v", err)
 	}
-	first, err := svc.Start(context.Background(), inst.ID, DurableAgentStartRequest{WorkspaceID: "workspace-a"})
+	first, err := svc.Start(context.Background(), inst.ID, DurableAgentStartRequest{})
 	if err != nil {
 		t.Fatalf("Start first: %v", err)
 	}
-	second, err := svc.Start(context.Background(), inst.ID, DurableAgentStartRequest{WorkspaceID: "workspace-a"})
+	second, err := svc.Start(context.Background(), inst.ID, DurableAgentStartRequest{})
 	if err != nil {
 		t.Fatalf("Start second: %v", err)
 	}
@@ -387,9 +378,6 @@ func TestDurableAgentResumeArmsRecovery(t *testing.T) {
 	if err := st.CreateAgent(profile); err != nil {
 		t.Fatalf("CreateAgent: %v", err)
 	}
-	if err := st.CreateWorkspace(&store.Workspace{ID: "workspace-a", Name: "Workspace A"}); err != nil {
-		t.Fatalf("CreateWorkspace: %v", err)
-	}
 	runtime := &fakeDurableRuntimeController{}
 	svc := NewDurableAgentServiceWithRuntime(st, runtime)
 	inst := &store.DurableAgentInstance{
@@ -405,7 +393,7 @@ func TestDurableAgentResumeArmsRecovery(t *testing.T) {
 	if err := svc.Create(context.Background(), inst); err != nil {
 		t.Fatalf("Create: %v", err)
 	}
-	started, err := svc.Start(context.Background(), inst.ID, DurableAgentStartRequest{WorkspaceID: "workspace-a"})
+	started, err := svc.Start(context.Background(), inst.ID, DurableAgentStartRequest{})
 	if err != nil {
 		t.Fatalf("Start: %v", err)
 	}

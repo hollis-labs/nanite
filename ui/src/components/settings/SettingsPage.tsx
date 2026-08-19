@@ -48,7 +48,7 @@ import { ShortcutsPanel } from "./ShortcutsPanel";
 import { SkillsBrowser } from "./SkillsBrowser";
 import { ToolDashboard } from "./ToolDashboard";
 import { WidgetManager } from "./WidgetManager";
-import { WorkspaceProjectManager } from "./WorkspaceProjectManager";
+import { ProjectManager } from "./ProjectManager";
 import { ProfilePanel } from "./ProfilePanel";
 import { PanelManager } from "./PanelManager";
 import { MetaHarnessManager } from "./MetaHarnessManager";
@@ -226,7 +226,7 @@ export default function SettingsPage() {
       case "panels":
         return <PanelManager />;
       case "workspaces":
-        return <WorkspaceProjectManager />;
+        return <ProjectManager />;
       case "memory":
         return <MemoryPanel />;
       case "observability":

@@ -58,7 +58,6 @@ func (a *API) handleDurableAgentWake(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	result, err := a.Services.DurableWake.Wake(r.Context(), r.PathValue("id"), service.DurableAgentWakeRequest{
-		WorkspaceID: req.WorkspaceID,
 		ProjectID:   req.ProjectID,
 		WakePayload: durableAgentWakePayloadFromRequest(req.WakePayload),
 	})

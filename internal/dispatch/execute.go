@@ -70,11 +70,10 @@ type ExecuteTaskArgs struct {
 	// RoleInvalid to use AssignRole.
 	RoleOverride Role
 
-	// WorkspaceID and AgentProfileID are forwarded to SpawnRequest for H1
-	// trust resolution (CW-20260421-0014). Empty strings cause the subagent
-	// gate to fall back to TrustNormal. Set by callExecuteTask from the
-	// CallerProfile ctx stamped in executeToolBatch.
-	WorkspaceID    string
+	// AgentProfileID is forwarded to SpawnRequest for H1 trust resolution
+	// (CW-20260421-0014). Empty string causes the subagent gate to fall
+	// back to TrustNormal. Set by callExecuteTask from the CallerProfile
+	// ctx stamped in executeToolBatch.
 	AgentProfileID string
 
 	// ReflexHints carries pre-computed hints from the prompt router matcher
@@ -126,7 +125,6 @@ type WorkflowLaunchRequest struct {
 
 	ParentSessionID string
 	ParentAgentID   string
-	WorkspaceID     string
 	AgentProfileID  string
 	TimeoutSeconds  int
 }
@@ -163,10 +161,8 @@ type SpawnRequest struct {
 	Mode            string
 	Provider        string
 	TimeoutSeconds  int
-	// WorkspaceID and AgentProfileID are required for H1 trust resolution
-	// (CW-20260421-0014). Empty strings cause the trust gate to fall back
-	// to TrustNormal.
-	WorkspaceID    string
+	// AgentProfileID is required for H1 trust resolution (CW-20260421-0014).
+	// Empty string causes the trust gate to fall back to TrustNormal.
 	AgentProfileID string
 }
 
@@ -316,7 +312,6 @@ func ExecuteTask(ctx context.Context, spawner Spawner, wrapper EnvelopeWrapper, 
 			Params:          map[string]any{"message": args.Message},
 			ParentSessionID: args.SessionID,
 			ParentAgentID:   args.ParentAgentID,
-			WorkspaceID:     args.WorkspaceID,
 			AgentProfileID:  args.AgentProfileID,
 			TimeoutSeconds:  args.TimeoutSeconds,
 		})
@@ -329,7 +324,6 @@ func ExecuteTask(ctx context.Context, spawner Spawner, wrapper EnvelopeWrapper, 
 			Mode:            mode,
 			Provider:        args.Provider,
 			TimeoutSeconds:  args.TimeoutSeconds,
-			WorkspaceID:     args.WorkspaceID,
 			AgentProfileID:  args.AgentProfileID,
 		})
 	}

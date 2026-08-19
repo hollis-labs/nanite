@@ -344,7 +344,6 @@ func (s *chatServiceImpl) executeToolBatch(
 	agentID string,
 	ch chan chat.StreamEvent,
 	sessionID string,
-	workspaceID string,
 ) []toolExecResult {
 	// CW-20260418 (c7 scope_id bug fix): stamp the current chat session
 	// onto ctx so downstream tool handlers — notably the MCP self-tools
@@ -361,11 +360,13 @@ func (s *chatServiceImpl) executeToolBatch(
 		ctx = permission.WithPathGrants(ctx, sessionID, s.pathGrants)
 	}
 
-	// H1 trust gate (CW-20260421-0014): stamp (workspace_id, agent_profile_id)
-	// so MuxTransportAdapter and self_tools_dispatch can derive the caller's
+	// H1 trust gate (CW-20260421-0014): stamp agent_profile_id so
+	// MuxTransportAdapter and self_tools_dispatch can derive the caller's
 	// trust tier without changing CallTool signatures. agentID IS the
-	// agent_profiles.id for the primary agent of this session.
-	ctx = mcp.WithCallerProfile(ctx, workspaceID, agentID)
+	// agent_profiles.id for the primary agent of this session. Phase 0 item
+	// 20 (retire workspaces): this used to also stamp workspace_id — the
+	// caller-profile ctx is now agent-only.
+	ctx = mcp.WithCallerProfile(ctx, agentID)
 
 	// CW-20260429-0024: stamp the union of (prior iterations' tool_use_ids
 	// from ls.toolCallRefs) and (this iteration's plan tool_use_ids) so the

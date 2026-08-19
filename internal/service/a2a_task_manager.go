@@ -81,9 +81,8 @@ type TaskSubmitRequest struct {
 	Message string
 	// PushNotificationConfig is optional push delivery config.
 	PushNotificationConfig *a2a.PushNotificationConfig
-	// WorkspaceID / ProjectID are internal context, not in the wire protocol.
-	WorkspaceID string
-	ProjectID   string
+	// ProjectID is internal context, not in the wire protocol.
+	ProjectID string
 }
 
 // TaskSubmitResult is the outcome of a successful task submission.
@@ -105,7 +104,6 @@ func (tm *TaskManager) SubmitTask(ctx context.Context, req TaskSubmitRequest) (*
 	tm.logger.Info("a2a: task submit",
 		"task_id", taskID,
 		"target", req.Target,
-		"workspace_id", req.WorkspaceID,
 		"project_id", req.ProjectID,
 	)
 
@@ -210,8 +208,7 @@ func (tm *TaskManager) submitWorkflowTask(ctx context.Context, task *store.A2ATa
 		Params: map[string]any{
 			"prompt": req.Message,
 		},
-		WorkspaceID: req.WorkspaceID,
-		ProjectID:   req.ProjectID,
+		ProjectID: req.ProjectID,
 		// TODO: Thread through AgentProfileID when we have a way to derive it
 		// from the A2A request context. For now, leave it empty and rely on
 		// WorkflowLauncher's defaults.
@@ -266,8 +263,7 @@ func (tm *TaskManager) submitInstanceTask(ctx context.Context, task *store.A2ATa
 
 	// Wake the instance with the task message as the prompt.
 	wakeReq := DurableAgentWakeRequest{
-		WorkspaceID: req.WorkspaceID,
-		ProjectID:   req.ProjectID,
+		ProjectID: req.ProjectID,
 		WakePayload: DurableAgentWakePayload{
 			Reason: DurableAgentWakeExternalMessage,
 			Prompt: req.Message,

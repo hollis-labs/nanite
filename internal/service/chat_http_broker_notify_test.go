@@ -18,7 +18,7 @@ package service
 // breadcrumb with zero recovery value.
 //
 // Phase 0 task 04 (decision log §19) replaced that stopgap with a real
-// bootdir-free HTTP retry path: recovery.Broker.DispatchRetry now
+// bootdir-free HTTP retry path: broker.Broker.DispatchRetry now
 // branches on HasBootdirLayout itself and never reaches AgentBoot.Boot
 // for a no-bootdir-layout provider, so the guard here is gone —
 // notifyRecoveryBrokerForHTTPStreamError notifies the broker
@@ -38,12 +38,12 @@ import (
 
 	agentsessions "github.com/hollis-labs/agentkit/agentsessions"
 	llmcontracts "github.com/hollis-labs/go-llm-contracts"
+	"github.com/hollis-labs/nanite/internal/recovery/broker"
 	runtimeagent "github.com/hollis-labs/nanite/internal/runtime/agent"
-	"github.com/hollis-labs/nanite/internal/runtime/agent/recovery"
 )
 
 // canonicalHTTPChatMode is the canonical agent.Mode string the
-// broker-notify helper writes into recovery.MetaKeyMode for HTTP chat
+// broker-notify helper writes into broker.MetaKeyMode for HTTP chat
 // observations. Surfacing it as a test-side constant pins the contract
 // (parseMode must round-trip this value) instead of duplicating the
 // magic string across cases.
@@ -160,13 +160,13 @@ func TestPersistPartialAssistantAndNotifyBroker_TimeoutClass(t *testing.T) {
 	if got := c.meta[httpStreamMetaKeySource]; got != httpStreamMetaSource {
 		t.Errorf("source: got %v, want %q", got, httpStreamMetaSource)
 	}
-	if got := c.meta[recovery.MetaKeyProvider]; got != "claude" {
+	if got := c.meta[broker.MetaKeyProvider]; got != "claude" {
 		t.Errorf("provider: got %v, want claude", got)
 	}
-	if got := c.meta[recovery.MetaKeyMode]; got != canonicalHTTPChatMode {
+	if got := c.meta[broker.MetaKeyMode]; got != canonicalHTTPChatMode {
 		t.Errorf("mode: got %v, want %q (canonical agent.Mode string consumed by broker.parseMode)", got, canonicalHTTPChatMode)
 	}
-	if got := c.meta[recovery.MetaKeyAgentProfile]; got != "claude-sonnet" {
+	if got := c.meta[broker.MetaKeyAgentProfile]; got != "claude-sonnet" {
 		t.Errorf("agent_profile: got %v, want claude-sonnet (broker remediation pivots on this — UUID or empty silently retargets the default profile)", got)
 	}
 }
@@ -209,7 +209,7 @@ func TestPersistPartialAssistantAndNotifyBroker_TransportClass(t *testing.T) {
 	}
 	// StderrTail must contain the raw error string so the classifier's
 	// auth-failure substring rule can fire when applicable.
-	if got, _ := c.meta[recovery.MetaKeyStderrTail].(string); got == "" {
+	if got, _ := c.meta[broker.MetaKeyStderrTail].(string); got == "" {
 		t.Errorf("stderr_tail: expected non-empty error string in meta bag")
 	}
 }
@@ -330,7 +330,7 @@ func TestPersistPartialAssistantAndNotifyBroker_NoRecoveryDegradesCleanly(t *tes
 // producing nothing but a guaranteed "permanent failure" breadcrumb.
 //
 // That guarantee ("never dispatch a doomed CLI-boot retry for a
-// no-bootdir-layout provider") now lives INSIDE recovery.Broker.DispatchRetry
+// no-bootdir-layout provider") now lives INSIDE broker.Broker.DispatchRetry
 // itself (it branches on runtimeagent.HasBootdirLayout before ever
 // touching AgentBoot.Boot), not at this call site — so this helper no
 // longer needs its own skip-guard. Every provider, bootdir-layout or
@@ -343,7 +343,7 @@ func TestPersistPartialAssistantAndNotifyBroker_NotifiesRegardlessOfBootdirLayou
 		"openai",
 		"gemini-api",
 		"openrouter",
-		"gemini",  // CLI tool name, but no Layout implemented yet
+		"gemini", // CLI tool name, but no Layout implemented yet
 		"claude",
 		"pty-claude", // CLI alias — normalizes to "claude"
 		"codex",
@@ -469,10 +469,10 @@ func TestPersistPartialAssistantAndNotifyBroker_StandardMetaBagFields(t *testing
 
 	// Profile slug, NOT UUID. Compare against the input slug so refactors
 	// to the resolver can't silently regress this.
-	if got := c.meta[recovery.MetaKeyAgentProfile]; got != "claude-sonnet" {
+	if got := c.meta[broker.MetaKeyAgentProfile]; got != "claude-sonnet" {
 		t.Errorf("MetaKeyAgentProfile: got %v, want %q (profile slug, NOT agent UUID)", got, "claude-sonnet")
 	}
-	if got := c.meta[recovery.MetaKeyAgentProfile]; got == "agent-uuid-abcdef" {
+	if got := c.meta[broker.MetaKeyAgentProfile]; got == "agent-uuid-abcdef" {
 		t.Errorf("MetaKeyAgentProfile must not carry the agent UUID (got %v) — broker remediations resolve by profile slug", got)
 	}
 
@@ -481,7 +481,7 @@ func TestPersistPartialAssistantAndNotifyBroker_StandardMetaBagFields(t *testing
 	// pin the value AND verify it's one of the canonical strings
 	// parseMode understands (defense in depth — if ModeOneShot.String()
 	// ever changes, the canonical-set check still flags this).
-	gotMode, _ := c.meta[recovery.MetaKeyMode].(string)
+	gotMode, _ := c.meta[broker.MetaKeyMode].(string)
 	if gotMode != canonicalHTTPChatMode {
 		t.Errorf("MetaKeyMode: got %q, want %q", gotMode, canonicalHTTPChatMode)
 	}

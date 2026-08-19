@@ -45,6 +45,15 @@ func (s *Store) GetToolEnrichment(toolName string) (ToolEnrichment, error) {
 // Write-side CRUD (UpsertToolEnrichment/DeleteToolEnrichment/ListToolEnrichments)
 // was cut in 18a-cut-dead-storage-and-config: zero callers anywhere in the
 // codebase ever populated or managed tool_enrichments rows, so the table can
-// never hold real data through this app. GetToolEnrichment above stays — it's
-// wired into the tool broker's enrichment lookup (internal/toolclient/enricher.go)
-// and is live in the hot path of every tool-catalog assembly.
+// never hold real data through this app.
+//
+// GetToolEnrichment above previously had a live caller — the tool broker's
+// enrichment lookup, internal/toolclient/enricher.go's storeEnricher — but
+// that mechanism (the "## Tool Overrides" markdown block threaded into the
+// system prompt) was cut entirely in Phase 0 item 22, per the operator's
+// 2026-08-18 resolution: with no write path, the override block was already
+// structurally inert, so cutting it produced zero behavior change. This
+// function is kept, matching the write-side precedent above, in case
+// external admin tooling / SQL scripts still read tool_enrichments rows
+// directly (see TestToolEnrichment_ExternalWriterCompat) — not because
+// anything in this app calls it anymore.

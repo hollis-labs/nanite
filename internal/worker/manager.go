@@ -37,12 +37,12 @@ type ManagerConfig struct {
 
 // Manager manages worker lifecycle with concurrency limiting.
 type Manager struct {
-	chat      ChatDelegator
-	coord     coordination.CoordStore
-	tasks     task.Service
-	worktrees worktree.Manager
-	workers   sync.Map     // workerID -> *Worker
-	sem       chan struct{} // concurrency semaphore
+	chat       ChatDelegator
+	coord      coordination.CoordStore
+	tasks      task.Service
+	worktrees  worktree.Manager
+	workers    sync.Map      // workerID -> *Worker
+	sem        chan struct{} // concurrency semaphore
 	maxWorkers int
 
 	// lifecycle owns all goroutines spawned by this Manager (heartbeats,
@@ -146,7 +146,6 @@ func (m *Manager) SpawnFull(ctx context.Context, req SpawnRequest) (*Result, err
 		AgentID:         req.AgentID,
 		Mode:            req.Mode,
 		Model:           req.Model,
-		WorkspaceID:     req.WorkspaceID,
 	})
 
 	// Build result.

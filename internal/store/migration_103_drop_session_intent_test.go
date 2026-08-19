@@ -28,8 +28,7 @@ func TestMigrate103DropsSessionIntentColumn(t *testing.T) {
 
 	// The sessions table must still be otherwise usable — dropping the
 	// column must not touch the rest of the schema or any existing rows.
-	seedWorkspace(t, s, "ws-migration-103")
-	sess := &Session{WorkspaceID: "ws-migration-103", Title: "post-drop-probe"}
+	sess := &Session{Title: "post-drop-probe"}
 	if err := s.CreateSession(sess); err != nil {
 		t.Fatalf("CreateSession after migration 103: %v", err)
 	}
@@ -104,8 +103,7 @@ func TestMigrate103DownReaddsSessionIntentColumn(t *testing.T) {
 	// raw SQL, bypassing any Go-level validation (there is none left; the
 	// classifier and its SetSessionIntent helper are both deleted), so this
 	// verifies the SQL-layer constraint itself.
-	seedWorkspace(t, s, "ws-migration-103-down")
-	sess := &Session{WorkspaceID: "ws-migration-103-down", Title: "down-check-probe"}
+	sess := &Session{Title: "down-check-probe"}
 	if err := s.CreateSession(sess); err != nil {
 		t.Fatalf("CreateSession after down: %v", err)
 	}

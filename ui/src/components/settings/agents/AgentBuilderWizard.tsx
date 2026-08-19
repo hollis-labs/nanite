@@ -35,7 +35,6 @@ import type {
   DurableAgentLaunchResult,
   DurableAgentRecipe,
   ModelRecord,
-  PromptTemplate,
   RuntimeKind,
   Skill,
   StartSurfaceCapabilitiesResponse,
@@ -115,7 +114,6 @@ export function AgentBuilderWizard({
   onCreated,
 }: AgentBuilderWizardProps) {
   const queryClient = useQueryClient();
-  const activeWorkspaceId = useAppStore((state) => state.activeWorkspaceId);
   const activeProjectId = useAppStore((state) => state.activeProjectId);
   const setActiveSession = useAppStore((state) => state.setActiveSession);
   const setCurrentPage = useLayoutStore((state) => state.setCurrentPage);
@@ -160,10 +158,6 @@ export function AgentBuilderWizard({
   const skillsQuery = useQuery({
     queryKey: ["skills"],
     queryFn: api.listSkills,
-  });
-  const templatesQuery = useQuery({
-    queryKey: ["prompt-templates"],
-    queryFn: api.listPromptTemplates,
   });
 
   const capabilities = startSurfaceQuery.data;
@@ -240,7 +234,6 @@ export function AgentBuilderWizard({
         draft,
         dryRun,
         defaultModel,
-        activeWorkspaceId,
         activeProjectId,
         skills: skillsQuery.data ?? [],
       });
@@ -531,7 +524,6 @@ export function AgentBuilderWizard({
                     setSubmitError(null);
                   }}
                   skills={skillsQuery.data ?? []}
-                  templates={templatesQuery.data ?? []}
                   recipes={recipes}
                   providers={providers}
                   models={models}
@@ -753,7 +745,6 @@ function DraftEditor({
   draft,
   setDraft,
   skills,
-  templates,
   recipes,
   providers,
   models,
@@ -763,7 +754,6 @@ function DraftEditor({
   draft: AgentBuilderDraft;
   setDraft: (draft: AgentBuilderDraft) => void;
   skills: Skill[];
-  templates: PromptTemplate[];
   recipes: DurableAgentRecipe[];
   providers: StartSurfaceCapabilitiesResponse["providers"];
   models: ModelRecord[];
@@ -940,21 +930,6 @@ function DraftEditor({
               setDraft({
                 ...draft,
                 capabilities: { ...draft.capabilities, assigned_skill_ids: values },
-              })
-            }
-          />
-          <SelectableList
-            title="Prompt Templates"
-            items={templates.map((template) => ({
-              id: template.id,
-              label: template.name,
-              meta: template.slug,
-            }))}
-            selected={draft.capabilities.prompt_template_ids ?? []}
-            onToggle={(values) =>
-              setDraft({
-                ...draft,
-                capabilities: { ...draft.capabilities, prompt_template_ids: values },
               })
             }
           />
@@ -1557,7 +1532,6 @@ function mergeDraftWithIntake(draft: AgentBuilderDraft, intake: BuilderIntake): 
       model: draft.durable_instance.model || intake.preferredModel,
       runtime_kind: draft.durable_instance.runtime_kind || intake.preferredRuntimeKind,
       work_root: draft.durable_instance.work_root || intake.workRoot,
-      workspace_id: draft.durable_instance.workspace_id,
       project_id: draft.durable_instance.project_id,
       start: intake.startNow,
       metadata: draft.durable_instance.metadata ?? {},
@@ -1590,7 +1564,6 @@ function buildBlankDraftFromIntake(intake: BuilderIntake): AgentBuilderDraft {
     },
     capabilities: {
       assigned_skill_ids: [],
-      prompt_template_ids: [],
       known_tools: [],
       known_skills: [],
       procedures: [],
@@ -1632,14 +1605,12 @@ async function submitDraft({
   draft,
   dryRun,
   defaultModel,
-  activeWorkspaceId,
   activeProjectId,
   skills,
 }: {
   draft: AgentBuilderDraft;
   dryRun: AgentBuilderDryRunResponse;
   defaultModel: string;
-  activeWorkspaceId: string | null;
   activeProjectId: string | null;
   skills: Skill[];
 }) {
@@ -1659,7 +1630,6 @@ async function submitDraft({
         model: emptyToUndefined(draft.durable_instance.model),
         runtime_kind: emptyToUndefined(String(draft.durable_instance.runtime_kind || "")),
         work_root: emptyToUndefined(draft.durable_instance.work_root),
-        workspace_id: activeWorkspaceId ?? undefined,
         project_id: activeProjectId ?? undefined,
         metadata: draft.durable_instance.metadata,
         start: !!draft.durable_instance.start,
@@ -1684,7 +1654,6 @@ async function submitDraft({
       });
       if (draft.durable_instance.start) {
         launchResult = await api.startDurableAgent(durableInstance.id, {
-          workspace_id: activeWorkspaceId ?? undefined,
           project_id: activeProjectId ?? undefined,
           wake_payload: {
             reason: "manual",
@@ -1719,10 +1688,6 @@ async function assignBuilderCapabilities(
   for (const skillId of slugSkillIds) {
     if ((capabilities.assigned_skill_ids ?? []).includes(skillId)) continue;
     await api.assignSkillToAgent(agentId, { skill_id: skillId });
-  }
-
-  for (const templateId of capabilities.prompt_template_ids ?? []) {
-    await api.assignTemplateToAgent(agentId, { template_id: templateId });
   }
 
   const roleTools = new Set(parseJSONStringArray(normalizedProfile.role_tools));

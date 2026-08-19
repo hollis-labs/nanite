@@ -158,10 +158,9 @@ func TestListAgents(t *testing.T) {
 
 func TestEnsureSessionAgent(t *testing.T) {
 	s := newTestStore(t)
-	seedWorkspace(t, s, "ws1")
 	a := makeTestAgent(t, s, "ensure-agent")
 
-	sess := &Session{WorkspaceID: "ws1"}
+	sess := &Session{}
 	if err := s.CreateSession(sess); err != nil {
 		t.Fatalf("CreateSession: %v", err)
 	}
@@ -188,10 +187,9 @@ func TestEnsureSessionAgent(t *testing.T) {
 
 func TestGetSessionPrimaryAgent(t *testing.T) {
 	s := newTestStore(t)
-	seedWorkspace(t, s, "ws1")
 	a := makeTestAgent(t, s, "primary-agent")
 
-	sess := &Session{WorkspaceID: "ws1"}
+	sess := &Session{}
 	if err := s.CreateSession(sess); err != nil {
 		t.Fatalf("CreateSession: %v", err)
 	}
@@ -214,11 +212,10 @@ func TestGetSessionPrimaryAgent(t *testing.T) {
 
 func TestListSessionAgents(t *testing.T) {
 	s := newTestStore(t)
-	seedWorkspace(t, s, "ws1")
 	a1 := makeTestAgent(t, s, "list-sa-1")
 	a2 := makeTestAgent(t, s, "list-sa-2")
 
-	sess := &Session{WorkspaceID: "ws1"}
+	sess := &Session{}
 	if err := s.CreateSession(sess); err != nil {
 		t.Fatalf("CreateSession: %v", err)
 	}
@@ -244,16 +241,15 @@ func TestListSessionAgents(t *testing.T) {
 // finding where PRAGMA foreign_keys=OFF was applied pool-wide around the
 // operation. Asserts:
 //   - agent_profiles row is gone
-//   - agent_skills, agent_prompt_templates rows are gone
+//   - agent_skills, session_agents rows are gone
 //   - messages rows remain with agent_id NULLed (user data preserved)
 //   - FK enforcement is still ON after the operation (run an FK-violating
 //     INSERT and expect it to fail).
 func TestDeleteAgent_NoPragmaToggle(t *testing.T) {
 	s := newTestStore(t)
-	seedWorkspace(t, s, "ws1")
 	agent := makeTestAgent(t, s, "del-agent")
 
-	// skill + prompt-template assignments
+	// skill assignment
 	sk := &Skill{Name: "S", Slug: "s-del", Description: "d", Category: "t", ToolBindings: `[]`}
 	if err := s.CreateSkill(sk); err != nil {
 		t.Fatalf("CreateSkill: %v", err)
@@ -261,16 +257,9 @@ func TestDeleteAgent_NoPragmaToggle(t *testing.T) {
 	if err := s.AssignSkillToAgent(agent.ID, sk.ID, ""); err != nil {
 		t.Fatalf("AssignSkillToAgent: %v", err)
 	}
-	pt := &PromptTemplate{Name: "T", Slug: "t-del", Scope: "system", Template: "hi", Priority: 1}
-	if err := s.CreatePromptTemplate(pt); err != nil {
-		t.Fatalf("CreatePromptTemplate: %v", err)
-	}
-	if err := s.AssignPromptTemplateToAgent(agent.ID, pt.ID); err != nil {
-		t.Fatalf("AssignPromptTemplateToAgent: %v", err)
-	}
 
 	// session + message referencing the agent
-	sess := &Session{WorkspaceID: "ws1"}
+	sess := &Session{}
 	if err := s.CreateSession(sess); err != nil {
 		t.Fatalf("CreateSession: %v", err)
 	}
@@ -296,7 +285,7 @@ func TestDeleteAgent_NoPragmaToggle(t *testing.T) {
 	}
 
 	// junctions cleared
-	for _, table := range []string{"agent_skills", "agent_prompt_templates", "session_agents"} {
+	for _, table := range []string{"agent_skills", "session_agents"} {
 		if err := s.DB.QueryRow("SELECT COUNT(*) FROM "+table+" WHERE agent_id = ?", agent.ID).Scan(&n); err != nil {
 			t.Fatalf("count %s: %v", table, err)
 		}

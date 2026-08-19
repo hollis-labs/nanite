@@ -18,11 +18,7 @@ import (
 func TestHandleAddAgentProject_RejectsNonexistentAgent(t *testing.T) {
 	a, mux := newTestAPI(t)
 
-	ws := &store.Workspace{ID: "ws-agent-projects-test", Name: "Agent Projects Test"}
-	if err := a.Services.Store.CreateWorkspace(ws); err != nil {
-		t.Fatalf("CreateWorkspace: %v", err)
-	}
-	proj := &store.Project{ID: "proj-agent-projects-test", WorkspaceID: ws.ID, Name: "Test Project"}
+	proj := &store.Project{ID: "proj-agent-projects-test", Name: "Test Project"}
 	if err := a.Services.Store.CreateProject(proj); err != nil {
 		t.Fatalf("CreateProject: %v", err)
 	}

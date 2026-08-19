@@ -125,7 +125,6 @@ func TestWorkflowDefinitionsSmoke_LaunchesEndToEnd(t *testing.T) {
 
 	result, err := launcher.Launch(context.Background(), WorkflowLaunchRequest{
 		WorkflowName:   "worker-reviewer-gate",
-		WorkspaceID:    "ws-launch",
 		AgentProfileID: profile.ID,
 		Params:         map[string]any{"task": "reverse the string \"abc\""},
 	})

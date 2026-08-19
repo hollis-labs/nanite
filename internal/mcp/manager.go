@@ -13,7 +13,6 @@ import (
 	"go.opentelemetry.io/otel/codes"
 
 	llmtypes "github.com/hollis-labs/go-llm-types"
-	"github.com/hollis-labs/go-toolbroker/broker"
 	"github.com/hollis-labs/nanite/internal/plugin/subprocess"
 	"github.com/hollis-labs/nanite/internal/store"
 )
@@ -55,7 +54,6 @@ type Manager struct {
 	tools                  []*toolEntry            // all discovered tools with server association (pointer slice: entries are mutated in place post-insertion by collision-rename, so a later append reallocating this slice must never orphan an outstanding uniformIndex pointer — see assignUniformNameLocked)
 	uniformIndex           map[string]*toolEntry   // uniform name → entry (owns the *toolEntry)
 	discoveryWarnings      []DiscoveryWarning      // tools rejected during discovery
-	Broker                 *broker.LocalBroker     // intent-aware tool broker
 	LoadChecker            ToolLoadChecker         // optional loadType filter
 	mu                     sync.RWMutex
 }
@@ -460,24 +458,6 @@ func (m *Manager) DiscoverTools(ctx context.Context) error {
 		)
 	}
 
-	// Register tools with the broker under their uniform agent-facing
-	// names. Server attribution is preserved on the broker.ToolDefinition
-	// so audit/telemetry retains source-server context, but the broker's
-	// tool index is keyed by the uniform name the agent will see.
-	if m.Broker != nil {
-		var brokerTools []broker.ToolDefinition
-		for _, entry := range m.tools {
-			brokerTools = append(brokerTools, broker.ToolDefinition{
-				Name:        entry.uniformName,
-				Description: entry.tool.Description,
-				InputSchema: entry.tool.InputSchema,
-				Server:      entry.serverName,
-			})
-		}
-		m.Broker.RegisterTools(brokerTools)
-		slog.Info("mcp: registered tools with broker", "count", len(brokerTools))
-	}
-
 	span.SetAttributes(
 		attribute.Int("nanite.mcp.tools.total", totalTools),
 		attribute.Int("nanite.mcp.servers.count", len(m.servers)),
@@ -485,45 +465,6 @@ func (m *Manager) DiscoverTools(ctx context.Context) error {
 
 	slog.Info("mcp: discovery complete", "total_tools", totalTools, "servers", len(m.servers))
 	return nil
-}
-
-// GetTools returns available tools as llmtypes.ToolDefinition slice, filtered
-// by the broker's default rules (intent "*"). Names are uniform (no
-// `mcp__server__` prefix) — see ADR-002.
-func (m *Manager) GetTools() []llmtypes.ToolDefinition {
-	return m.GetToolsForIntent("*", nil)
-}
-
-// GetToolsForIntent returns tools filtered by the broker for the given intent and hints.
-// If no broker is configured, returns all tools unfiltered. Names are uniform.
-func (m *Manager) GetToolsForIntent(intent string, hints []string) []llmtypes.ToolDefinition {
-	m.mu.RLock()
-	defer m.mu.RUnlock()
-
-	// If no broker, fall back to returning all tools.
-	if m.Broker == nil {
-		return m.getAllToolsLocked()
-	}
-
-	result, err := m.Broker.SelectTools(context.Background(), intent, hints)
-	if err != nil {
-		slog.Warn("mcp: broker SelectTools error — returning all tools", "err", err)
-		return m.getAllToolsLocked()
-	}
-
-	// The broker is registered with uniform names already (see
-	// DiscoverTools); selection results carry uniform names directly.
-	defs := make([]llmtypes.ToolDefinition, 0, len(result.Tools))
-	for _, t := range result.Tools {
-		defs = append(defs, llmtypes.ToolDefinition{
-			Name:        t.Name,
-			Description: t.Description,
-			InputSchema: t.InputSchema,
-		})
-	}
-
-	slog.Debug("mcp: broker selected tools", "count", result.Count, "total", result.Total, "intent", intent, "rationale", result.Rationale)
-	return defs
 }
 
 // GetAllTools returns all enabled tools. Opt-in tools excluded unless enabled.

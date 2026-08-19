@@ -45,7 +45,7 @@ func TestChatRunner_ForwardsParentDeniesIntoChildSession(t *testing.T) {
 	}}
 	st := &recordingSessionStore{
 		parents: map[string]*store.Session{
-			parentSessionID: {ID: parentSessionID, WorkspaceID: "ws-1"},
+			parentSessionID: {ID: parentSessionID},
 		},
 	}
 	runner := &ChatRunner{
@@ -131,7 +131,7 @@ func TestChatRunner_DerivedRulesClearedOnRunReturn(t *testing.T) {
 	}}
 	st := &recordingSessionStore{
 		parents: map[string]*store.Session{
-			"sess-parent-gc": {ID: "sess-parent-gc", WorkspaceID: "ws-1"},
+			"sess-parent-gc": {ID: "sess-parent-gc"},
 		},
 	}
 	runner := &ChatRunner{
@@ -195,7 +195,7 @@ func TestChatRunner_ThreeLevelChainPropagatesDenies(t *testing.T) {
 	// Level 1 — child of top.
 	st1 := &recordingSessionStore{
 		parents: map[string]*store.Session{
-			"top-session": {ID: "top-session", WorkspaceID: "ws-1"},
+			"top-session": {ID: "top-session"},
 		},
 	}
 	runner1 := &ChatRunner{
@@ -245,7 +245,7 @@ func TestChatRunner_ThreeLevelChainPropagatesDenies(t *testing.T) {
 	// Level 2 — grandchild of top, child of lvl1.
 	st2 := &recordingSessionStore{
 		parents: map[string]*store.Session{
-			level1ChildID: {ID: level1ChildID, WorkspaceID: "ws-1"},
+			level1ChildID: {ID: level1ChildID},
 		},
 	}
 	runner2 := &ChatRunner{
@@ -321,7 +321,7 @@ func TestChatRunner_NoParentRulesEmptyDerivation(t *testing.T) {
 	}}
 	st := &recordingSessionStore{
 		parents: map[string]*store.Session{
-			"top": {ID: "top", WorkspaceID: "ws-1"},
+			"top": {ID: "top"},
 		},
 	}
 	runner := &ChatRunner{

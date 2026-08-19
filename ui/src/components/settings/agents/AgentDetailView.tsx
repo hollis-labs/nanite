@@ -34,7 +34,6 @@ import { TagInput } from "@/components/ui/tag-input";
 import type {
   AgentProfile,
   Project,
-  PromptTemplate,
   Skill,
 } from "@/lib/types";
 import { ConstraintsEditor } from "./editors/ConstraintsEditor";
@@ -60,11 +59,6 @@ export interface AgentDetailViewProps {
   availableSkills: Skill[];
   onAssignSkill: (skillId: string) => void;
   onRemoveSkill: (skillId: string) => void;
-  // Templates
-  agentTemplates: PromptTemplate[];
-  availableTemplates: PromptTemplate[];
-  onAssignTemplate: (templateId: string) => void;
-  onRemoveTemplate: (templateId: string) => void;
   // Projects
   agentProjects: Project[];
   availableProjects: Project[];
@@ -88,10 +82,6 @@ export function AgentDetailView({
   availableSkills,
   onAssignSkill,
   onRemoveSkill,
-  agentTemplates,
-  availableTemplates,
-  onAssignTemplate,
-  onRemoveTemplate,
   agentProjects,
   availableProjects,
   onAddProject,
@@ -452,10 +442,6 @@ export function AgentDetailView({
             availableSkills={availableSkills}
             onAssignSkill={onAssignSkill}
             onRemoveSkill={onRemoveSkill}
-            agentTemplates={agentTemplates}
-            availableTemplates={availableTemplates}
-            onAssignTemplate={onAssignTemplate}
-            onRemoveTemplate={onRemoveTemplate}
             onUpdateAgent={onUpdateAgent}
           />
         </TabsContent>

@@ -22,7 +22,6 @@ require (
 	github.com/hollis-labs/go-otel v0.1.0
 	github.com/hollis-labs/go-providers v0.23.0
 	github.com/hollis-labs/go-sandbox v0.2.1
-	github.com/hollis-labs/go-toolbroker v0.2.0
 	github.com/modelcontextprotocol/go-sdk v1.5.0
 	github.com/oklog/ulid/v2 v2.1.1
 	github.com/openai/openai-go v1.12.0

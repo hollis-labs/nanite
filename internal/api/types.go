@@ -12,11 +12,10 @@ import (
 // --- Sessions ---
 
 type CreateSessionRequest struct {
-	WorkspaceID string `json:"workspace_id"`
-	ProjectID   string `json:"project_id"`
-	Model       string `json:"model"`
-	Provider    string `json:"provider"`
-	AgentID     string `json:"agent_id"`
+	ProjectID string `json:"project_id"`
+	Model     string `json:"model"`
+	Provider  string `json:"provider"`
+	AgentID   string `json:"agent_id"`
 }
 
 // Phase 0 item 21 ("Cut Modes, in full") removed this file's ModeID field
@@ -240,7 +239,6 @@ type AgentBuilderProfileInput struct {
 type AgentBuilderCapabilitiesInput struct {
 	AssignedSkillIDs   []string                          `json:"assigned_skill_ids"`
 	AssignedSkillSlugs []string                          `json:"assigned_skill_slugs"`
-	PromptTemplateIDs  []string                          `json:"prompt_template_ids"`
 	KnownTools         []AgentKnownToolUpsertRequest     `json:"known_tools"`
 	KnownSkills        []AgentKnownSkillUpsertRequest    `json:"known_skills"`
 	Procedures         []AgentProcedureUpsertRequest     `json:"procedures"`
@@ -256,7 +254,6 @@ type AgentBuilderDurableInstanceInput struct {
 	Model          string            `json:"model"`
 	RuntimeKind    string            `json:"runtime_kind"`
 	WorkRoot       string            `json:"work_root"`
-	WorkspaceID    string            `json:"workspace_id"`
 	ProjectID      string            `json:"project_id"`
 	Start          bool              `json:"start"`
 	Metadata       map[string]string `json:"metadata"`
@@ -421,7 +418,6 @@ type DurableAgentWakePayloadRequest struct {
 }
 
 type DurableAgentStartRequest struct {
-	WorkspaceID string                         `json:"workspace_id"`
 	ProjectID   string                         `json:"project_id"`
 	WakePayload DurableAgentWakePayloadRequest `json:"wake_payload"`
 }
@@ -434,7 +430,6 @@ type DurableAgentRecipeRequest struct {
 	Model       string                         `json:"model"`
 	RuntimeKind string                         `json:"runtime_kind"`
 	WorkRoot    string                         `json:"work_root"`
-	WorkspaceID string                         `json:"workspace_id"`
 	ProjectID   string                         `json:"project_id"`
 	WakePayload DurableAgentWakePayloadRequest `json:"wake_payload"`
 	Metadata    map[string]string              `json:"metadata"`
@@ -489,32 +484,6 @@ type SelectToolsRequest struct {
 	Hints  []string `json:"hints"`
 }
 
-// --- Prompt Templates ---
-
-type CreatePromptTemplateRequest struct {
-	Name      string `json:"name"`
-	Slug      string `json:"slug"`
-	Scope     string `json:"scope"`
-	Template  string `json:"template"`
-	Variables string `json:"variables"`
-	Priority  int    `json:"priority"`
-	Icon      string `json:"icon"`
-}
-
-type UpdatePromptTemplateRequest struct {
-	Name      *string `json:"name"`
-	Slug      *string `json:"slug"`
-	Scope     *string `json:"scope"`
-	Template  *string `json:"template"`
-	Variables *string `json:"variables"`
-	Priority  *int    `json:"priority"`
-	Icon      *string `json:"icon"`
-}
-
-type AssignAgentPromptTemplateRequest struct {
-	TemplateID string `json:"template_id"`
-}
-
 // --- Bookmarks ---
 
 type CreateBookmarkRequest struct {
@@ -540,20 +509,10 @@ type ShellExecRequest struct {
 	Approved bool   `json:"approved"`
 }
 
-// --- Workspaces ---
-
-type CreateWorkspaceRequest struct {
-	ID          string `json:"id"`
-	Name        string `json:"name"`
-	Description string `json:"description"`
-	Icon        string `json:"icon"`
-}
-
-type UpdateWorkspaceRequest struct {
-	Name        *string `json:"name"`
-	Description *string `json:"description"`
-	Icon        *string `json:"icon"`
-}
+// --- Projects ---
+// Phase 0 item 20 (retire workspaces): the in-app `workspaces` table (and
+// CreateWorkspaceRequest/UpdateWorkspaceRequest, its REST DTOs) is retired
+// in full. `projects` is flat now — no more workspace nesting.
 
 type CreateProjectRequest struct {
 	ID          string `json:"id"`
@@ -665,10 +624,3 @@ type SetProviderAPIKeyRequest struct {
 }
 
 // --- Trust (H1, CW-20260421-0014) ---
-
-// SetWorkspaceRoleTrustRequest is the body for
-// POST /api/workspaces/{workspace_id}/roles/{agent_profile_id}/trust.
-type SetWorkspaceRoleTrustRequest struct {
-	Tier       string `json:"tier"`        // "untrusted" | "normal" | "trusted"
-	PromotedBy string `json:"promoted_by"` // optional attribution string
-}

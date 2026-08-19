@@ -28,7 +28,7 @@ func TestProcedureGet_HappyPath(t *testing.T) {
 		t.Fatalf("seed procedure: %v", err)
 	}
 
-	ctx := WithCallerProfile(context.Background(), "ws-test", "agent-pm-1")
+	ctx := WithCallerProfile(context.Background(), "agent-pm-1")
 	res, err := st.CallTool(ctx, "procedure_get", map[string]any{"name": "boot"})
 	if err != nil {
 		t.Fatalf("procedure_get error: %v", err)
@@ -62,7 +62,7 @@ func TestProcedureGet_ScopedToCallingAgent(t *testing.T) {
 		t.Fatalf("seed procedure: %v", err)
 	}
 
-	ctx := WithCallerProfile(context.Background(), "ws-test", "agent-other")
+	ctx := WithCallerProfile(context.Background(), "agent-other")
 	res, err := st.CallTool(ctx, "procedure_get", map[string]any{"name": "boot"})
 	if err != nil {
 		t.Fatalf("procedure_get error: %v", err)
@@ -78,7 +78,7 @@ func TestProcedureGet_NotFound(t *testing.T) {
 	s := newTestStore(t)
 	st := NewSelfToolsTransport(s)
 
-	ctx := WithCallerProfile(context.Background(), "ws-test", "agent-pm-1")
+	ctx := WithCallerProfile(context.Background(), "agent-pm-1")
 	res, err := st.CallTool(ctx, "procedure_get", map[string]any{"name": "nonexistent"})
 	if err != nil {
 		t.Fatalf("procedure_get error: %v", err)
@@ -94,7 +94,7 @@ func TestProcedureGet_MissingName(t *testing.T) {
 	s := newTestStore(t)
 	st := NewSelfToolsTransport(s)
 
-	ctx := WithCallerProfile(context.Background(), "ws-test", "agent-pm-1")
+	ctx := WithCallerProfile(context.Background(), "agent-pm-1")
 	res, err := st.CallTool(ctx, "procedure_get", map[string]any{})
 	if err != nil {
 		t.Fatalf("procedure_get error: %v", err)

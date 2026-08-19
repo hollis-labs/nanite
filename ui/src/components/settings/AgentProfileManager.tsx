@@ -31,7 +31,6 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { useModels, useSettings } from "@/hooks/useSettings";
 import { api } from "@/lib/api";
 import type { AgentProfile } from "@/lib/types";
-import { useAppStore } from "@/stores/useAppStore";
 import { AgentBuilderWizard } from "./agents/AgentBuilderWizard";
 import { AgentDetailView } from "./agents/AgentDetailView";
 
@@ -88,24 +87,11 @@ export function AgentProfileManager({}: AgentProfileManagerProps) {
     enabled: !!selectedAgent,
   });
 
-  const { data: allTemplates = [] } = useQuery({
-    queryKey: ["prompt-templates"],
-    queryFn: api.listPromptTemplates,
-    enabled: !!selectedAgent,
-  });
-
-  const { data: agentTemplates = [] } = useQuery({
-    queryKey: ["agent-templates", selectedAgent],
-    queryFn: () => api.listAgentTemplates(selectedAgent!),
-    enabled: !!selectedAgent,
-  });
-
   // Agent-Project many-to-many
-  const activeWorkspaceId = useAppStore((s) => s.activeWorkspaceId);
   const { data: allProjects = [] } = useQuery({
-    queryKey: ["projects", activeWorkspaceId],
-    queryFn: () => api.listProjects(activeWorkspaceId!),
-    enabled: !!selectedAgent && !!activeWorkspaceId,
+    queryKey: ["projects"],
+    queryFn: () => api.listProjects(),
+    enabled: !!selectedAgent,
   });
   const { data: agentProjects = [] } = useQuery({
     queryKey: ["agent-projects", selectedAgent],
@@ -160,22 +146,6 @@ export function AgentProfileManager({}: AgentProfileManagerProps) {
     },
   });
 
-  const assignTemplateMutation = useMutation({
-    mutationFn: ({ agentId, templateId }: { agentId: string; templateId: string }) =>
-      api.assignTemplateToAgent(agentId, { template_id: templateId }),
-    onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: ["agent-templates", selectedAgent] });
-    },
-  });
-
-  const removeTemplateMutation = useMutation({
-    mutationFn: ({ agentId, templateId }: { agentId: string; templateId: string }) =>
-      api.removeTemplateFromAgent(agentId, templateId),
-    onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: ["agent-templates", selectedAgent] });
-    },
-  });
-
   const addProjectMutation = useMutation({
     mutationFn: ({ agentId, projectId }: { agentId: string; projectId: string }) =>
       api.addAgentProject(agentId, projectId),
@@ -208,29 +178,8 @@ export function AgentProfileManager({}: AgentProfileManagerProps) {
     [selectedAgent, removeSkillMutation],
   );
 
-  const handleAssignTemplate = useCallback(
-    (templateId: string) => {
-      if (!selectedAgent) return;
-      assignTemplateMutation.mutate({ agentId: selectedAgent, templateId });
-    },
-    [selectedAgent, assignTemplateMutation],
-  );
-
-  const handleRemoveTemplate = useCallback(
-    (templateId: string) => {
-      if (!selectedAgent) return;
-      removeTemplateMutation.mutate({ agentId: selectedAgent, templateId });
-    },
-    [selectedAgent, removeTemplateMutation],
-  );
-
   // Get available skills (not yet assigned to this agent)
   const availableSkills = allSkills.filter((skill) => !agentSkills.some((s) => s.id === skill.id));
-
-  // Get available templates (not yet assigned to this agent)
-  const availableTemplates = allTemplates.filter(
-    (template) => !agentTemplates.some((t) => t.id === template.id),
-  );
 
   // Get available projects (not yet assigned to this agent)
   const availableProjects = allProjects.filter(
@@ -488,10 +437,6 @@ export function AgentProfileManager({}: AgentProfileManagerProps) {
         availableSkills={availableSkills}
         onAssignSkill={handleAssignSkill}
         onRemoveSkill={handleRemoveSkill}
-        agentTemplates={agentTemplates}
-        availableTemplates={availableTemplates}
-        onAssignTemplate={handleAssignTemplate}
-        onRemoveTemplate={handleRemoveTemplate}
         agentProjects={agentProjects}
         availableProjects={availableProjects}
         onAddProject={handleAddProject}

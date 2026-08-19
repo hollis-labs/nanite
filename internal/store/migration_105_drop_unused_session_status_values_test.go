@@ -18,8 +18,7 @@ import (
 func TestMigrate105NarrowsSessionStatusCheck(t *testing.T) {
 	s := newTestStore(t)
 
-	seedWorkspace(t, s, "ws-migration-105")
-	sess := &Session{WorkspaceID: "ws-migration-105", Title: "status-check-probe"}
+	sess := &Session{Title: "status-check-probe"}
 	if err := s.CreateSession(sess); err != nil {
 		t.Fatalf("CreateSession after migration 105: %v", err)
 	}
@@ -94,8 +93,7 @@ func TestMigrate105DownWidensSessionStatusCheck(t *testing.T) {
 	s := newTestStore(t)
 	ctx := context.Background()
 
-	seedWorkspace(t, s, "ws-migration-105-down")
-	sess := &Session{WorkspaceID: "ws-migration-105-down", Title: "down-check-probe"}
+	sess := &Session{Title: "down-check-probe"}
 	if err := s.CreateSession(sess); err != nil {
 		t.Fatalf("CreateSession before down: %v", err)
 	}

@@ -238,7 +238,10 @@ func (a *API) setSessionMetadataField(sessionID, key string, value interface{}) 
 }
 
 // resolveShellWorkDir determines the working directory for shell commands.
-// Priority: project directory > session workspace > $HOME.
+// Priority: project directory > $HOME. Phase 0 item 20 (retire workspaces):
+// this used to also fall back to the session's workspace settings
+// (workspaces.settings' project_dir) — the in-app `workspaces` table is
+// retired in full.
 func (a *API) resolveShellWorkDir(sessionID string) string {
 	sess, err := a.Services.Store.GetSession(sessionID)
 	if err != nil {
@@ -250,18 +253,6 @@ func (a *API) resolveShellWorkDir(sessionID string) string {
 	if err := json.Unmarshal([]byte(sess.Metadata), &meta); err == nil {
 		if dir, ok := meta["project_dir"].(string); ok && dir != "" {
 			return dir
-		}
-	}
-
-	// Try workspace settings.
-	if sess.WorkspaceID != "" {
-		if ws, err := a.Services.Store.GetWorkspace(sess.WorkspaceID); err == nil {
-			var wsMeta map[string]interface{}
-			if err := json.Unmarshal([]byte(ws.Settings), &wsMeta); err == nil {
-				if dir, ok := wsMeta["project_dir"].(string); ok && dir != "" {
-					return dir
-				}
-			}
 		}
 	}
 

@@ -1,52 +1,75 @@
-# Kill the file-reingest-on-boot pattern, in full — enumerated, not generalized
+# Kill the file-reingest-on-boot pattern, in full — files are not agent/skill storage or config, only seeding
 
 **Phase:** 1
-**Status:** implemented
-**Depends on:** `TASKS/phase-0/10-seed-builtin-agent-profiles.md` (implemented — fixes the narrower `source='internal'`-only piece of this same problem; this task finishes the rest), `01-add-roles-table-and-cascade-resolution.md` (needed for the roles negative-verification check, item 4 below). **No longer coupled to `10-data-migrate-nanite-agents-md.md`** — that task is out of scope for Phase 1 (operator decision, 2026-08-18; see that file). Coordinate merge order with `04-add-known-tools-and-agent-tools-fk.md` — both touch `internal/service/ingest.go` (different functions: `04`'s `seedRoleToolsFromIngest` vs. this task's `AutoIngestAgents`/`AutoIngestSkills`), whichever lands first, the other rebases.
-**Touches:** `internal/service/ingest.go` (`AutoIngestAgents`, `AutoIngestSkills`), `internal/service/container.go` (boot-time call sites, ~lines 469, 541), `internal/agent/discovery.go` (`Discover`, `discoverDir` — read path stays, the *re-upsert-every-boot* behavior is what changes)
+**Status:** in-progress (reopened, 2026-08-18 — Round 1's fix was real but insufficient; see banner below)
+**Depends on:** `01-add-roles-table-and-cascade-resolution.md` (roles negative-verification, already done). No longer coupled to `10-data-migrate-nanite-agents-md.md` (out of scope for Phase 1) or `04-add-known-tools-and-agent-tools-fk.md` (already merged; if this task's Round 2 touches `internal/service/ingest.go` again, diff against `04`'s `seedRoleToolsFromIngest` changes before editing, don't blind-overwrite).
+**Touches:** `internal/agent/discovery.go` (`Discover`, `DiscoverOptions`), `internal/skill/discovery.go` (`Discover`, `DiscoverOptions`), `internal/service/container.go` (both `Discover` call sites — currently ~lines 399, 543), `internal/service/ingest.go` (`AutoIngestAgents`/`AutoIngestSkills` — Round 1 already landed the overwrite-freeze here, keep it; may need adjusting once fewer sources reach it), `TASKS/phase-1/12-fix-agent-service-get-drops-new-db-only-columns.md`'s own scope (read, don't re-do — see the coordination note in "What to do")
 
-## Context
+## ⚠️ Reopened, 2026-08-18 — Round 1 was a real, correctly-implemented fix for the wrong scope
 
-TASKS.md Phase 1: *"Kill the file-reingest-on-boot pattern generally."* Planning landmine, explicit: *"'kill the file-reingest-on-boot pattern generally' doesn't name which reingest paths. Enumerate them explicitly (agent `.md` reingest, role reingest, boot-profile catalog reingest, whatever else you find) rather than planning against 'generally.'"* This task is that enumeration, verified against real code — not all three landmine-named items turn out to be real, equally-scoped gaps; report accordingly.
+Round 1 (Work Log below, already merged into `phase-1-execution`) fixed the *overwrite* problem: a DB row, once ingested, is no longer silently reverted by a later boot's file-parse pass. That fix is real, tested, and stays. But it left automatic **first-ingest** of project/user/plugin `.md` files as a permanent, ongoing mechanism — treating file-drop as a legitimate way to create an agent or skill going forward. That's not what the architecture actually says, and the operator has now said directly: *"The only file based agents should be from seeding. [...] no debt carries forward."*
 
-### 1. Agent `.md` reingest — real, only partially fixed by Phase 0 #10
+**The exact text this task under-scoped, re-verified:**
+- `docs/engineering/architecture/01-agent-construction.md`, "What's cut": *"**Files as agent storage**, except builtin/seed content."* No carve-out for project/user `.nanite/agents/*.md` — the exception is builtin/seed only.
+- `docs/architecture-decision-log-2026-08-17.md` §6's settled summary: *"files dropped except builtin/seed, DB-authoritative with no re-ingest-on-boot."* Not "no destructive re-ingest" — no re-ingest-on-boot, period.
 
-`AutoIngestAgents` (`internal/service/ingest.go:59`) is called **unconditionally every boot** from `container.go:469`, for every definition `Discover()` returns regardless of source (`cli`/`project`/`user`/`plugin`/adapter-discovered). Phase 0 item 10 (already read in full) stops the boot-time pass from **overwriting** `source='internal'` rows once seeded — a narrow, real fix for the specific "GUI customization to a builtin agent silently reverted on restart" bug. It does **not** stop the boot-time file-parse-and-upsert pass for `project`/`user`-source agents (the real `.nanite/agents/*.md` corpus, confirmed via `internal/agent/discovery.go:56` — `discoverDir(filepath.Join(opts.WorkingDir, ".nanite", "agents"), "project")`, priority 2). Every one of these still gets re-parsed from disk and re-upserted into `agent_profiles` on every single boot today. **This is the real remaining gap** — the same class of bug Phase 0 #10 fixed for builtins (a DB-side edit silently reverted by the next restart's file-reingest) still exists for every project/user-source agent.
+Round 1's own task-file text (before this rewrite) explicitly said *"this task changes 'keep re-overwriting forever' to 'ingest once, then leave DB-authoritative,' not 'stop ingesting new files ever'"* — that sentence is the error. Ingesting new files, ever, automatically, on boot, for non-seed sources, is exactly what's supposed to stop.
 
-**Update, 2026-08-18**: the 24 current `.nanite/agents/*.md` files stay in place, undisturbed, and are not being data-migrated (`10` is out of scope for Phase 1 — see that file). This task's fix still applies to them exactly as described — nothing here changes because `10` isn't running; if anything, it matters less urgently since none of these agents will be dispatched until Phase 1-5 completes, but the fix is still real, decided, scoped work per `TASKS.md`.
+**Scope confirmed with the operator (2026-08-18):** applies to skills too, same treatment as agents — same bug class, same fix, no special-casing.
 
-### 2. "Role reingest" — not a real existing mechanism; this task's job is to *not create one*, not to kill an existing one
+## Context — what's actually in scope, verified against real code (not the same enumeration as Round 1)
 
-Investigated directly: there is no separate "role" reingest pattern in the current codebase to kill. `~/.nanite/roles/` (the developer-persona Claude-Code-boot convention, per `GLOSSARY.md`, explicitly **not** part of Nanite's own runtime agent system) is unrelated and out of scope entirely — do not touch it. The new `roles` table (`01-add-roles-table-and-cascade-resolution.md`) has no file-based precedent to reingest from; its own task file already states it must be DB-authoritative from creation, with no reingest path ever built. **This landmine item resolves to: confirm `01`'s `roles` table genuinely never grows a reingest-from-file path — a negative verification, not a cut.**
+### Agent discovery tiers (`internal/agent/discovery.go`'s `Discover`), by priority
 
-### 3. Boot-profile catalog reingest — real, but explicitly out of this task's scope (Phase 2's job)
+1. **CLI `--agent` flag (single file, `source="cli"`)** — an explicit, per-invocation override the caller names deliberately at launch time, not an ongoing background scan of a directory. Plausibly *not* "agent storage" in the sense the architecture doc means — but verify, don't assume: check whether a `source="cli"` definition ever gets persisted into `agent_profiles` via `upsertAgentDef`/`AutoIngestAgents` the same as the other tiers, or whether it's purely ephemeral (used only for that one process's in-memory resolution, never written to the DB). If it does persist, decide whether that's itself a "config via file" case needing the same cut, or a legitimate one-shot exception, and document the decision — don't silently leave it as-is without checking.
+2. **`.nanite/agents/` (project, `source="project"`)** — the real sprawl case. **Cut**: stop scanning this directory at boot.
+3. **`~/.nanite/agents/` (user, `source="user"`)** — same pattern, personal-scope. **Cut.**
+4. **`plugins/*/agents/*.md` (plugin, `source="plugin"`, via `discoverPluginAgents`)** — loose `.md`-file scanning under a plugin's own directory. **Cut** — this is not the same thing as `registers.agent_profiles[]` (a plugin manifest's declarative registration field, Phase 5's `10-wire-registers-agent-profiles.md`, a structurally different mechanism this task does not touch or affect). Confirm via grep whether any real plugin currently ships files under `plugins/*/agents/` (as of this writing, none do — `find . -path '*/plugins/*/agents'` returns nothing — so this is very likely dead-in-practice already; cut the scan regardless, per the architecture doc's flat statement, not because it's dead).
+5. **Adapter-discovered tier** — already cut for external formats by Phase 0 `16-cut-external-agent-import.md`. The `nanite-native` adapter's own discovery (reading `.nanite/config.yaml`'s `agents:` block — a different format, explicitly kept by task `16`) is unaffected by this task; do not touch it.
 
-The boot-profile catalog (`bootprofile.Profile`/`Launch` YAML, `internal/bootprofile/loader.go`) is retired as a standalone system in Phase 2, per architecture doc `02-agent-launching.md` and decision log §7. It does re-read from disk (confirmed: `internal/bootprofile/loader.go:51` `LoadCatalog`, `os.ReadDir`/`os.ReadFile` at load time) — but per `TASKS/INDEX.md`'s own phase assignment and the architecture doc's explicit framing ("retire as a standalone system," carrying forward only the `cmd`/`http` dynamic-resolver and the mandatory post-compaction re-read as first-class *launching-time* mechanisms), the actual retirement work belongs to Phase 2's task files, not here. **Do not attempt to fix or retire the boot-profile catalog's reingest as part of this task** — note its existence for completeness (per the landmine's "enumerate explicitly" instruction) and defer the fix to Phase 2.
+### Skill discovery tiers (`internal/skill/discovery.go`'s `Discover`), by priority
 
-### 4. Skill reingest — a fourth real instance the landmine's list didn't name, found during research
+1. **`.nanite/skills/` (project)** — **cut**, same reasoning as agents.
+2. **`~/.nanite/skills/` (user)** — **cut.**
+3. **`.claude/skills/` (Claude Code ecosystem format, `source="claude"`)** — this is skills' analogue of the external-format-adapter tier Phase 0 `16` cut for agents (no equivalent task exists for skills — nothing in Phase 0 or Phase 1's plan named it explicitly). Per the operator's "same treatment as agents, no debt carries forward" — **cut this too**; don't leave an un-cut external-ecosystem-format tier for skills just because no task happened to name it yet. If you find a reason this specific tier is genuinely different (e.g., something else depends on it that isn't true for the agent side), stop and say so in the Work Log rather than guessing past it — but verify first, don't assume parity with agents means automatic exemption either way.
+4. **`plugins/*/skills/*.md` (plugin)** — **cut**, same reasoning as the agent plugin tier.
 
-`AutoIngestSkills` (`internal/service/ingest.go:135`), called unconditionally every boot from `container.go:541`, is the parallel mechanism for skill definitions — same boot-time re-parse-and-upsert pattern as `AutoIngestAgents`, not fixed by any Phase 0 item. Include this in scope; it's the same bug class on a sibling system.
+### What stays, unaffected by this task
+
+- **Builtin/seed agents** (`internal/agent/builtin/profiles/`, compiled-in via Go embed) — the one real exception the architecture doc names. Round 1's overwrite-freeze already handles these correctly (seed once, never re-overwritten). No change here.
+- **Builtin skills** (`internal/skill/builtin/`, compiled-in via Go embed, confirmed to exist — same shape as agent builtins). Same treatment, no change needed.
+- **Plugin-manifest agent registration** (`registers.agent_profiles[]`, Phase 5 `10-wire-registers-agent-profiles.md`) — a declarative manifest field, not a scanned `.md` directory. Out of scope for this task, not affected by cutting `plugins/*/agents/*.md` scanning.
+- **The `nanite-native` adapter's `.nanite/config.yaml` `agents:` block** — a different, already-decided-to-stay mechanism (Phase 0 `16`). Not touched.
+- **Boot-profile catalog reingest** (`internal/bootprofile/loader.go`) — still explicitly Phase 2's job, per Round 1's own (still-correct) reasoning. Not touched here.
+- **The ~33 agent rows and ~9 skill rows already ingested into the DB** from prior boots' file discovery — these stay exactly as they are, as ordinary DB rows (`source='project'`/`'user'` preserved as a historical provenance tag). No deletion, no migration into `roles`/`agents` (that's `10`'s job, explicitly out of scope). They simply stop being subject to any further file-based re-discovery once this task lands — a file changing on disk after this task ships has zero effect on the DB going forward, by design.
+- **The underlying `.nanite/agents/*.md`/`.nanite/skills/*.md` files themselves** — not deleted, not touched. They just stop being read automatically. Per the operator: *"Don't worry about generating a cached copy right now, YAGNI. If we need them again, that's when we'll add that."* — no export/backup/snapshot mechanism needed as part of this task.
+
+### Coordination with `12-fix-agent-service-get-drops-new-db-only-columns.md`
+
+That task (already implemented, not yet merged as of this writing) fixed `AgentService.Get`/`GetBySlug`/`List` to overlay DB-only columns (`role_id`/`model_id`/`runtime_kind`/`consumer_id`/`activation_mode`/`class`/`default_state`) onto the file-derived view for any agent still resolved via an in-memory `Definition`. This task's cut **shrinks** the population that fix matters for (most of the ~33 project/user-source agents will no longer have a matching in-memory `Definition` at all post-cut, since their backing files stop being discovered — they'll correctly fall through to the real DB read path, `s.agents.GetAgent(id)`, on their own). It does **not** make `12`'s fix wrong or redundant: builtin-seeded agents are *both* file-defined (compiled-in) *and* DB-seeded, so they'll still resolve via the in-memory-def path and still need `12`'s overlay. Land both; don't try to make one obsolete the other.
 
 ## What to do
 
-1. Change `AutoIngestAgents`/`AutoIngestSkills`'s boot-time behavior so a DB row, once it exists (regardless of source — `internal`, `project`, `user`, `plugin`), is never silently overwritten by a subsequent boot's file-parse pass. The file remains the *import* path (a real, deliberate "pull this file's content into the DB" action — e.g. an explicit CLI/API-triggered re-import), not a standing *sync* path that runs unconditionally on every process start.
-2. Preserve the real value `AutoIngestAgents` currently provides on first sight of a genuinely new file (a `.nanite/agents/new-agent.md` a developer just added should still get picked up and create a new `agent_profiles` row) — this task changes "keep re-overwriting forever" to "ingest once, then leave DB-authoritative," not "stop ingesting new files ever."
-3. Preserve the unknown-tool-reference and hardcoded-model warnings `AutoIngestAgents` currently emits (`ingest.go:76-99`) — these are real, valuable diagnostics; don't lose them just because the overwrite behavior changes.
-4. Confirm `01`'s `roles` table has no reingest path (negative verification, see Context item 2) — add a test or explicit code-review note confirming this, since there's no existing mechanism to remove.
-5. Note (don't fix) the boot-profile catalog's reingest pattern for Phase 2, per Context item 3 — a one-line pointer in this task's Work Log is sufficient, not a design document.
-6. ~~Sequence with `10-data-migrate-nanite-agents-md.md`~~ — moot, `10` is out of scope for Phase 1. Instead, coordinate merge order with `04` per the Depends-on note above (both touch `internal/service/ingest.go`, different functions).
+1. Verify the `source="cli"` single-file tier's actual persistence behavior (see Context item 1) and decide/document whether it needs any change. Default to leaving it alone unless you find it's silently writing a persisted row the same way the cut tiers do.
+2. In `internal/agent/discovery.go`: remove (not merely stop-calling-with-empty-args — actually remove, per this project's standing dead-code policy) the project/user/plugin discovery tiers (`discoverDir` calls for `"project"`/`"user"` sources, `discoverPluginAgents` and its call site) from `Discover()`. Remove the now-dead `discoverPluginAgents` function itself if nothing else calls it. Update `DiscoverOptions`' doc comments to reflect the smaller real tier set.
+3. Do the same for `internal/skill/discovery.go` — remove the project/user/`.claude/skills/`/plugin tiers and `discoverPluginSkills`.
+4. Update `internal/service/container.go`'s two `Discover` call sites accordingly — remove now-meaningless `WorkingDir`/`PluginsDir`/`HomeDir` wiring for the removed tiers if `DiscoverOptions` itself shrinks; if the struct still carries fields for the CLI-flag tier or other still-live options, keep those.
+5. Confirm `AutoIngestAgents`/`AutoIngestSkills` (Round 1's fix) still make sense against the smaller input set `Discover()` now returns — they should, since they operate on whatever `[]*Definition` they're handed, but re-run the full test suite to confirm nothing assumed the removed tiers existed.
+6. Update every test that currently exercises the removed tiers (`internal/agent/discovery_test.go`, `internal/skill/discovery_test.go`, and Round 1's own `ingest_test.go` additions if any assumed project/user auto-discovery) — remove tests for removed behavior, don't leave them red or silently skipped.
+7. Real-backup-DB verification: boot against a copy of the real backup, confirm the ~33 previously-discovered agents remain exactly as they are in the DB (no data loss, no re-ingestion), and confirm a brand-new `.nanite/agents/new-test-agent.md` file dropped in before boot is **not** picked up (the inverse of Round 1's regression check — this is now the correct, intended behavior).
+8. Live-verify against a real running scratch instance: boot, confirm the log no longer reports discovering/ingesting project/user-source `.md` files (only builtin + whatever the CLI-flag/nanite-native-adapter tiers still contribute), confirm the existing DB rows for previously-discovered agents are still fully intact and servable via the API.
+9. Update this file's own Work Log with a clear "Round 2" section — do not delete Round 1's Work Log, it's an accurate record of real, still-correct work; just make clear Round 2 is what completes the task.
 
 ## Done means
 
-- A DB-side edit to a project/user-source agent (or a skill) survives a full process restart — verified directly: edit an agent via the REST API, restart the service, confirm the edit is still present (not reverted by the next boot's file-parse pass).
-- A genuinely new `.nanite/agents/*.md` file added by a developer is still picked up on the next boot and creates a new row (regression check — this task must not silently disable first-ingest).
-- The unknown-tool-reference and hardcoded-model-pin warnings still fire correctly.
-- `roles` (from `01`) has zero reingest-from-file code path — confirmed by code review/test, documented in this file's Work Log.
-- The boot-profile catalog's reingest is explicitly noted as deferred to Phase 2, not silently forgotten or accidentally fixed here.
-- `go build ./cmd/nanite/`, `go vet ./...`, `go test ./...` pass.
-- Tested against a real copy of the backed-up database.
+- `Discover()` (agents and skills) no longer scans `.nanite/agents/`, `~/.nanite/agents/`, `plugins/*/agents/*.md`, `.nanite/skills/`, `~/.nanite/skills/`, `.claude/skills/`, or `plugins/*/skills/*.md` at boot or ever, by code inspection (the scanning code itself is removed, not merely unreached).
+- A fresh boot against a copy of the real backup DB shows the previously-ingested ~33 agents/~9 skills fully present and correct in the DB, with **zero** new file-discovery log lines for the cut tiers.
+- A new `.md` file dropped into any of the cut directories before boot produces **no** new `agent_profiles`/`skills` row — verified live, not just by code review.
+- Builtin/seed agents and skills are unaffected — still seed correctly, still frozen against re-overwrite (Round 1's fix, unchanged).
+- `registers.agent_profiles[]` (Phase 5, not yet built) and the `nanite-native` adapter's `.nanite/config.yaml` tier are confirmed untouched by this change.
+- `go build ./cmd/nanite/`, `go vet ./...`, `go test ./...` pass, including updated/removed tests for the cut tiers.
 
-## Work log
+## Work log — Round 1 (2026-08-18, superseded in scope, kept for the record — see banner)
 
 **Branch/base note.** This worktree's branch had been created off an earlier
 `phase-1-execution` commit (`df71e710`, a strict ancestor with zero divergent
@@ -180,7 +203,10 @@ than the original landmine list; folded into the main implementation).
   `AutoIngestAgents` pass with an unchanged file-derived def.
 - Added `TestAutoIngestAgents_NewFileStillIngestedAlongsideFrozenRow` --
   proves freezing an existing row doesn't block first-ingest of a genuinely
-  new file discovered in the same batch.
+  new file discovered in the same batch. **(Note, Round 2: this exact
+  behavior — first-ingest of a new file — is what Round 2 removes. This
+  test's assumption is now wrong and must be removed or rewritten as part
+  of Round 2, not left passing against behavior that no longer exists.)**
 - Extended `TestAutoIngestAgents_SourceFlipFromBuiltinToInternal` with a
   third boot pass after the flip, proving the freeze actually engages once
   the row has flipped to `source='internal'` (the original two-pass test
@@ -242,6 +268,9 @@ similar verification steps.
 
 No schema change. `TASKS/INDEX.md` intentionally left untouched (Orchestrator
 updates it after merge).
+
+## Work log — Round 2 (fill in here)
+<Worker fills this in: what was actually done for the full cut, any deviation from plan and why, anything escalated.>
 
 ## Review notes
 <Reviewer fills this in: pass/fail, what was checked, anything fixed and how.>

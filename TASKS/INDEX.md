@@ -100,13 +100,13 @@ This branch (`phase-1-execution`, based off Phase 0's `HEAD` as of 2026-08-18 �
 
 | Task | Status | Depends on |
 |---|---|---|
-| 01-add-roles-table-and-cascade-resolution | implemented | none |
+| 01-add-roles-table-and-cascade-resolution | validated | none |
 | 02-add-agents-composition-columns | not-started | 01, 06 |
-| 03-add-consumers-table | implemented | none |
+| 03-add-consumers-table | validated | none |
 | 04-add-known-tools-and-agent-tools-fk | not-started | none |
-| 05-fix-agent-skills-and-agent-projects-fks | implemented | none hard — independently verify `agent_skills`/`agent_projects` are still zero-row (see task file) |
-| 06-fix-models-table-sync-target | implemented | none |
-| 07-add-reflex-opt-out-field | implemented | none |
+| 05-fix-agent-skills-and-agent-projects-fks | validated | none hard — independently verify `agent_skills`/`agent_projects` are still zero-row (see task file) |
+| 06-fix-models-table-sync-target | validated | none |
+| 07-add-reflex-opt-out-field | validated | none |
 | 08-kill-file-reingest-on-boot-pattern | not-started | `TASKS/phase-0/10-seed-builtin-agent-profiles` (implemented); `01` (roles negative-verification) |
 | 09-build-assignment-ui-api | not-started | 01–07 (excludes 10, which is out of scope) |
 | 10-data-migrate-nanite-agents-md | **out-of-scope** | n/a — cut for Phase 1, operator decision 2026-08-18 |
@@ -115,6 +115,8 @@ This branch (`phase-1-execution`, based off Phase 0's `HEAD` as of 2026-08-18 �
 - **Wave 1 — parallel.** `01, 03, 05, 06, 07`. New, independent tables/columns. Coordination note, not a hard block: `01`, `03`, and `05` **all** touch `internal/store/agents.go` (`01`'s `agent_profiles` read/cascade path; `03`'s `consumer_id` column plumbing; `05`'s `DeleteAgent` cleanups slice) — different functions/regions in each case, but worktree-isolate all three and merge one at a time, re-running tests after each, same pattern as Phase 0's `02`/`03` `durable_agents.go` coordination. `06` touches `container.go`/`pkg/models` only; `07` touches `agent_reflexes`-adjacent code only — both fully parallel-safe against the rest of this wave.
 - **Wave 2 — parallel.** `02` (needs `01`+`06`), `04` (no hard dep, low file overlap with `02`), `08` (needs `01`). `02`/`04` both touch `agent_profiles`-adjacent migrations but different columns/tables — sequence merges, don't run truly concurrent writes to the same migration file. `04` and `08` both touch `internal/service/ingest.go` (`04`'s `seedRoleToolsFromIngest` vs. `08`'s `AutoIngestAgents`/`AutoIngestSkills`) — different functions, whichever merges first, the other rebases onto it, same low-risk pattern as the `agents.go` note above.
 - **Wave 3 — solo.** `09` — needs `01`–`08` all landed (frontend + `internal/api/api.go` additions).
+
+**Wave 1 validation (2026-08-18)**: per `EXECUTION-PROCESS.md`'s validation-checkpoint rule and `standards/testing.md`'s "dogfeed it, don't just trust a green test suite," ran a real scratch instance (`nanite serve -db <scratch>`, isolated from any real data) and exercised each merged feature live, not just via `go test`: `POST`/`GET /api/roles` (created a real role, confirmed round-trip); `POST /api/agents/{id}/skills` and `.../projects` against a nonexistent agent ID both now correctly return 404 (previously the projects path had no check at all, and the skills path passed for file-based ghost agents — task `05`'s fix, confirmed live); `agent_profiles.consumer_id` column and the seeded Loom row in `consumers` confirmed via direct query; `models` table confirmed populated (DB-authoritative per task `06`); `agent_reflexes.opt_out_allowed` confirmed live via `GET /api/agents/{id}/reflexes` and a direct query showing exactly the 3 `halt_session` seeds (`drift_detector_echo`, `task_complete_self_terminate`, `task_timeout`) at `opt_out_allowed=0` and every other seed at `1`. Full `go build`/`go vet`/`go test ./...` also re-verified clean after every merge (see individual commit messages). Scratch instance and binary discarded after verification — no real data touched.
 
 ## Phase 2 — Agent Launching (5 task files)
 

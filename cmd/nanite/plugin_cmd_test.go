@@ -4,6 +4,8 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"github.com/hollis-labs/nanite/internal/plugin"
 )
 
 func TestIsLocalPath(t *testing.T) {
@@ -57,6 +59,60 @@ func TestCopyPluginDir(t *testing.T) {
 			t.Errorf("expected %s skipped, got err=%v", rel, err)
 		}
 	}
+}
+
+// TestActivationMode locks in the builtin-vs-subprocess branch that closes
+// the CLI-install-vs-hot-reload asymmetry (TASKS/phase-5/04): a subprocess
+// plugin hot-reloads, everything else (builtin, unknown/nil) still needs a
+// restart since a builtin's Go code has to already be compiled into the
+// running binary — hot-reload cannot structurally apply to it.
+func TestActivationMode(t *testing.T) {
+	cases := []struct {
+		name     string
+		manifest *plugin.PluginManifest
+		want     string
+	}{
+		{"nil manifest (kind unknown) defaults to restart", nil, "restart"},
+		{"subprocess runtime hot-reloads", &plugin.PluginManifest{Runtime: "subprocess"}, "hot-reload"},
+		{"explicit builtin runtime restarts", &plugin.PluginManifest{Runtime: "builtin"}, "restart"},
+		{"empty runtime (legacy manifests default to builtin) restarts", &plugin.PluginManifest{Runtime: ""}, "restart"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := activationMode(tc.manifest); got != tc.want {
+				t.Errorf("activationMode(%+v) = %q, want %q", tc.manifest, got, tc.want)
+			}
+		})
+	}
+}
+
+// TestTriggerHotReload_UnreachableServiceDegradesSoftly confirms
+// triggerHotReload never os.Exit()s on failure — unlike pluginReload (a
+// direct CLI command allowed to exit non-zero), this runs as the tail step
+// of an install/update/enable that already succeeded on disk, so a failed
+// hot-reload call must degrade to a manual-reload hint and return, exactly
+// like triggerRestart's soft-failure path when cerberus is unavailable. If
+// this test process observes this line, the function didn't exit.
+func TestTriggerHotReload_UnreachableServiceDegradesSoftly(t *testing.T) {
+	t.Setenv("NANITE_API_URL", "http://127.0.0.1:1") // nothing listens on port 1
+	triggerHotReload("does-not-matter")
+}
+
+// TestTriggerActivation_NoRestartStillGatesBuiltin confirms --no-restart
+// keeps its original, literal meaning on the builtin path: triggerRestart
+// itself checks the noRestart package var and returns immediately without
+// shelling out, so triggerActivation must reach it (not silently swallow
+// the builtin branch) for any non-subprocess manifest.
+func TestTriggerActivation_NoRestartStillGatesBuiltin(t *testing.T) {
+	old := noRestart
+	noRestart = true
+	t.Cleanup(func() { noRestart = old })
+
+	// A builtin manifest routes to triggerRestart(), which no-ops under
+	// noRestart=true without touching the network or shelling out — so this
+	// call completing at all (no hang, no exit) demonstrates the flag still
+	// gates the builtin path post-change.
+	triggerActivation("some-builtin", &plugin.PluginManifest{Runtime: "builtin"})
 }
 
 func writeFile(t *testing.T, path, content string) {

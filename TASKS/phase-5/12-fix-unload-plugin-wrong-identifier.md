@@ -1,7 +1,7 @@
 # Fix: `unloadPluginFromHost` (and task 11's own rollback) unload by the wrong identifier, so reload of an already-loaded plugin always fails
 
 **Phase:** 5
-**Status:** not-started
+**Status:** implemented
 **Depends on:** `TASKS/phase-5/11-fix-hot-reload-never-applies-manifest-registrations.md` (already landed on `main` — this task fixes a real bug the Orchestrator found during task 11's own post-merge live dogfeed re-verification, and task 11's new rollback code shares the same bug)
 **Touches:** `internal/api/plugins.go` (`unloadPluginFromHost`, `runPluginLoadIntoHost`'s rollback branch)
 
@@ -56,3 +56,37 @@ Every other caller of `Host.UnloadPlugin` in the codebase (`internal/plugin/load
 
 - `unloadPluginFromHost`'s bigger design (should it treat not-found as fatal vs. benign at all, callers passing the wrong shape of identifier elsewhere in the codebase, etc.) — fix only the two confirmed wrong-key call sites, don't redesign the function's error semantics.
 - Any other plugin-lifecycle bug not already confirmed by direct trace in this task file — if you find something else while in this code, log it in `TASKS/ESCALATIONS.md`, don't silently fix it inline.
+
+## Work Log
+
+Implemented by worker `af6a8ae05a11dc75b`, worktree `agent-af6a8ae05a11dc75b`. The worktree branch itself was never committed to (still at its merge-base with `main`, `885c3c69`) — the worker's actual changes sat uncommitted in the worktree's working directory. The Orchestrator reviewed that diff directly (`git diff` inside the worktree, since the branch had nothing to `git merge`), confirmed it matched this task's "What to do" precisely, then applied the same two-line fix and the new test file to `main`'s working tree by hand and committed there, rather than merging a no-op branch. The worktree/branch were removed after (`git worktree remove`, `git branch -D worktree-agent-af6a8ae05a11dc75b`) since nothing of value was left in them once ported.
+
+### Root-cause confirmation (worker)
+
+Cross-referenced `internal/plugin/host.go`'s `LoadPlugin`/`UnloadPlugin` (both key `h.plugins` by `id := p.ID()`) and `internal/plugin/config.go`'s `PluginManifest.Identifier()`. Confirmed via a full-repo grep of `.UnloadPlugin(` (excluding tests) that `internal/plugin/loader.go`'s two callers already pass the correct identifier — only `internal/api/plugins.go`'s two call sites (`unloadPluginFromHost`, and `runPluginLoadIntoHost`'s `ApplyManifestRegistrations`-failure rollback) had the bug. Also confirmed why this shipped unnoticed: every builtin plugin's `plugin.yaml` in `internal/plugin/builtin/*/` has `id == name` (spot-checked three), and the CLI scaffold's own generated manifest is the only in-repo source that produces `id != name` — no existing test exercised that shape through these two functions.
+
+### Fix applied
+
+`internal/api/plugins.go`:
+- `unloadPluginFromHost`: `UnloadPlugin(manifest.Name)` → `UnloadPlugin(manifest.Identifier())`, with the accompanying `slog.Warn` field updated to log the same corrected identifier (a reasonable, minor improvement beyond this task's literal instruction #3 to leave logging untouched — the Orchestrator reviewed and kept it, since logging the value actually used for the lookup is strictly more useful for debugging, not a functional change).
+- `runPluginLoadIntoHost`'s rollback branch: `UnloadPlugin(manifest.Name)` → `UnloadPlugin(p.ID())` (per the task's own stated preference — `p` is already in scope and is guaranteed to match what `LoadPlugin` just stored it under), with its `slog.Warn` field updated the same way.
+- Deliberately left `runPluginLoadIntoHost`'s other pre-existing uses of `manifest.Name` untouched (`NewPluginConfig`, `SetPluginConfig`, `LookupConstructor` for the builtin-runtime branch) — a separate, pre-existing convention (builtin constructors are registered/looked up by `manifest.Name`, not `Identifier()`) outside this task's stated scope; noted, not touched.
+
+### Tests added — `internal/api/plugins_unload_test.go` (new file)
+
+Three tests, all deliberately using an `id != name` fixture (the shape the CLI's own scaffold generates, unlike every pre-existing fixture in the repo):
+- `TestUnloadPluginFromHost_UsesIdentifierNotName` — direct regression for the primary bug site.
+- `TestRunPluginLoadIntoHost_ReloadTwice_IDNameMismatch` — reproduces the exact live symptom (reload succeeds once, then fails with "already loaded") across three full reload cycles, driving the same `unloadPluginFromHost` + `runPluginLoadIntoHost` pair `handleReload` calls.
+- `TestRunPluginLoadIntoHost_RollbackUsesPluginID` — forces `ApplyManifestRegistrations` to fail via a deliberately invalid `registers.components[].type`, then confirms the plugin is NOT left half-registered in the host, and that a corrected retry succeeds afterward (proving the id slot was actually freed).
+
+The worker verified regression validity directly (`git stash` isolating pre-fix code with the new tests in place, confirmed all three failed with the exact predicted symptoms, then restored the fix and confirmed all three pass) inside its own worktree before reporting done. The Orchestrator independently re-ran all three against the ported code on `main` (`go test ./internal/api/... -run "TestUnloadPluginFromHost|TestRunPluginLoadIntoHost" -v`) — all pass, log output shows exactly one `unloaded plugin`/`loaded plugin` pair per reload cycle with no stale-state artifacts.
+
+### Baseline checks (Orchestrator, on `main` after porting)
+
+- `go build ./cmd/nanite/` — passes.
+- `go vet ./...` — same 4 pre-existing findings in `internal/service/container.go`, unchanged.
+- `go test ./...` — all packages pass.
+
+### Live re-verification (Orchestrator, against the real deployed `nanite-api-service`)
+
+Deployed via `cerberus_resource_deploy nanite-api-service` (client-side timeout as usual, completed server-side) + `cerberus_resource_reload nanite-api-service` (new `launchd_pid` confirmed). Reinstalled the same throwaway `dogfeed-crud-check` subprocess plugin (`id != name`, `registers.crud[]`) used for task 11's own re-verification. Reloaded it three times in a row via `nanite plugin reload dogfeed-crud-check` — all three succeeded (previously, the second reload 500'd with `"already loaded"`). Confirmed via server log that each reload cycle logged exactly one `UnloadPlugin` success followed by one fresh `LoadPlugin`/`registered CRUD handler` pair, with `GET /api/plugins/dogfeed-crud-check-items` continuing to work correctly after every cycle (no duplicate registration, no stale handler). Cleaned up afterward: uninstalled the plugin, removed its directory, and reloaded the live service again to fully clear in-host state before closing out.

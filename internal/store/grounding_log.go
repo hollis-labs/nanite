@@ -129,13 +129,13 @@ func (s *Store) ListGroundingConsultations(sessionID string) ([]GroundingConsult
 // GroundingOutcomeRow is a row read back from grounding_outcomes.
 // Used in tests and future analytics queries.
 type GroundingOutcomeRow struct {
-	ID               int64   `json:"id"`
-	ConsultationID   int64   `json:"consultation_id"`
-	OutcomeKind      string  `json:"outcome_kind"`
-	FollowUpExcerpt  string  `json:"follow_up_excerpt"`
-	SecondsSinceAck  float64 `json:"seconds_since_ack"`
-	PruningWords     string  `json:"pruning_words"`
-	RecordedAt       string  `json:"recorded_at"`
+	ID              int64   `json:"id"`
+	ConsultationID  int64   `json:"consultation_id"`
+	OutcomeKind     string  `json:"outcome_kind"`
+	FollowUpExcerpt string  `json:"follow_up_excerpt"`
+	SecondsSinceAck float64 `json:"seconds_since_ack"`
+	PruningWords    string  `json:"pruning_words"`
+	RecordedAt      string  `json:"recorded_at"`
 }
 
 // ListGroundingOutcomes returns all outcome rows for a consultation ID.

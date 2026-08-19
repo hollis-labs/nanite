@@ -118,9 +118,9 @@ func TestCompactionDisclosureMigration_tokenBudget(t *testing.T) {
 
 	// Realistic-length sample values for worst-case sizing.
 	vars := map[string]string{
-		"handoff_stash_id":       "01HJ8N7XK5R8M3Y6PZQWA9V2BC",                      // ULID, 26 chars
-		"coverage_window_start":  "turn-msg-01HJ8N7XK5R8M3Y6PZQWA9V2BC",              // 33 chars
-		"coverage_window_end":    "turn-msg-01HJ8N7XK5R8M3Y6PZQWA9V2BC",              // 33 chars
+		"handoff_stash_id":       "01HJ8N7XK5R8M3Y6PZQWA9V2BC",          // ULID, 26 chars
+		"coverage_window_start":  "turn-msg-01HJ8N7XK5R8M3Y6PZQWA9V2BC", // 33 chars
+		"coverage_window_end":    "turn-msg-01HJ8N7XK5R8M3Y6PZQWA9V2BC", // 33 chars
 		"summary_token_count":    "1234",
 		"evicted_pointer_count":  "12",
 		"preserved_source_count": "8",

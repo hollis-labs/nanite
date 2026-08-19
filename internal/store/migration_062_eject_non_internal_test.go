@@ -14,23 +14,23 @@ import (
 // ambiguous source.
 //
 // Test shape:
-//   1. Open a fresh DB. Migrations 001-062 run in order; migration 061 seeds
-//      the canonical internal slugs (default, worker, planner, hint-selector,
-//      plus whatever future migrations layer on). Migration 062 runs against
-//      the fresh state and is a no-op (no non-internal rows exist).
-//   2. Capture `baselineCount` from the post-migration state (BEFORE any
-//      fixtures land) so this test stays robust as future migrations seed
-//      additional internal profiles (e.g. CW-20260512-0113 / W4 will add
-//      ~7 more internal profile rows).
-//   3. INSERT fixture rows with mixed sources (auto, nanite, user, claude)
-//      plus one additional source='internal' row and two source='project'
-//      rows to confirm that both keep-list classes survive.
-//   4. Re-execute the migration 062 DELETE against the now-populated DB to
-//      simulate what happens on the next boot.
-//   5. Assert: total row count == baselineCount + 3 (the extra internal
-//      fixture plus the 2 project fixtures survive, the remaining 4
-//      ambiguous fixtures get wiped), every surviving row has source in the
-//      keep-list, and the expected slugs survive.
+//  1. Open a fresh DB. Migrations 001-062 run in order; migration 061 seeds
+//     the canonical internal slugs (default, worker, planner, hint-selector,
+//     plus whatever future migrations layer on). Migration 062 runs against
+//     the fresh state and is a no-op (no non-internal rows exist).
+//  2. Capture `baselineCount` from the post-migration state (BEFORE any
+//     fixtures land) so this test stays robust as future migrations seed
+//     additional internal profiles (e.g. CW-20260512-0113 / W4 will add
+//     ~7 more internal profile rows).
+//  3. INSERT fixture rows with mixed sources (auto, nanite, user, claude)
+//     plus one additional source='internal' row and two source='project'
+//     rows to confirm that both keep-list classes survive.
+//  4. Re-execute the migration 062 DELETE against the now-populated DB to
+//     simulate what happens on the next boot.
+//  5. Assert: total row count == baselineCount + 3 (the extra internal
+//     fixture plus the 2 project fixtures survive, the remaining 4
+//     ambiguous fixtures get wiped), every surviving row has source in the
+//     keep-list, and the expected slugs survive.
 func TestMigration062_EjectsNonInternalProfiles(t *testing.T) {
 	tempDir := t.TempDir()
 	dbPath := filepath.Join(tempDir, "fresh.db")

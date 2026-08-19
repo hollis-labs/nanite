@@ -9,9 +9,9 @@ func TestCreatePlan(t *testing.T) {
 	s := newTestStore(t)
 
 	plan := &Plan{
-		Scope: "project",
+		Scope:   "project",
 		ScopeID: "proj-1",
-		Title: "Refactoring plan",
+		Title:   "Refactoring plan",
 	}
 	if err := s.CreatePlan(plan); err != nil {
 		t.Fatalf("CreatePlan: %v", err)

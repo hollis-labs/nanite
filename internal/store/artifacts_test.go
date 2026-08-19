@@ -9,10 +9,10 @@ import "testing"
 // in another project, attach artifacts to each, and verify all three
 // scenarios:
 //
-//	1. project filter alone returns artifacts from both same-project sessions
-//	   (and nothing from the other project).
-//	2. exclude_session_id filter removes the active session's artifacts.
-//	3. an empty project_id returns an empty slice (no SQL fired).
+//  1. project filter alone returns artifacts from both same-project sessions
+//     (and nothing from the other project).
+//  2. exclude_session_id filter removes the active session's artifacts.
+//  3. an empty project_id returns an empty slice (no SQL fired).
 func TestListArtifactsByProject(t *testing.T) {
 	s := newTestStore(t)
 

@@ -28,14 +28,14 @@ func TestMigration019_ExistingRowsPreserved(t *testing.T) {
 
 	// Read it back and verify old cols preserved + new cols are empty string.
 	var (
-		id, parentSessionID, childSessionID   string
-		role, prompt, mode, status            string
-		inputsJSON, resultJSON, errCol        string
-		createdAt, startedAt, completedAt     string
-		parentAgentID, envelopeInstanceID     string
-		approvedAt, approvedBy                string
-		rejectedAt, rejectionReason           string
-		timeoutSeconds                        int
+		id, parentSessionID, childSessionID string
+		role, prompt, mode, status          string
+		inputsJSON, resultJSON, errCol      string
+		createdAt, startedAt, completedAt   string
+		parentAgentID, envelopeInstanceID   string
+		approvedAt, approvedBy              string
+		rejectedAt, rejectionReason         string
+		timeoutSeconds                      int
 	)
 	row := s.DB.QueryRow(`
 		SELECT id, parent_session_id, child_session_id, role, prompt, mode, status,

@@ -129,4 +129,3 @@ func (s *Store) ListRecentAgentBrokerDecisions(limit int) ([]*AgentBrokerDecisio
 	}
 	return out, nil
 }
-

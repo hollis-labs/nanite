@@ -43,8 +43,8 @@ func TestMigration063_SeedsFiveRolePrompts(t *testing.T) {
 	defer s.Close()
 
 	type want struct {
-		slug         string
-		canExecute   bool
+		slug           string
+		canExecute     bool
 		identityTokens []string // role-identity tokens that must appear in the body
 		// toolPermissionsContains, when non-empty, asserts the raw
 		// tool_permissions JSON contains the substring. The deny-all

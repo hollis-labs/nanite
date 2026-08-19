@@ -307,35 +307,35 @@ func (s *Store) ComposePromptForAgent(agentID string, variables map[string]strin
 // BuiltinPromptTemplates defines the default prompt templates.
 var BuiltinPromptTemplates = []PromptTemplate{
 	{
-		Name:     "Base Identity",
-		Slug:     "base-identity",
-		Scope:    "system",
-		Priority: 10,
-		Template: `You are {{agent_name}}, {{agent_description}}.`,
+		Name:      "Base Identity",
+		Slug:      "base-identity",
+		Scope:     "system",
+		Priority:  10,
+		Template:  `You are {{agent_name}}, {{agent_description}}.`,
 		Variables: `["agent_name","agent_description"]`,
 	},
 	{
-		Name:     "Workspace Context",
-		Slug:     "workspace-context",
-		Scope:    "context",
-		Priority: 20,
-		Template: `You are operating within the workspace "{{workspace_name}}": {{workspace_description}}.`,
+		Name:      "Workspace Context",
+		Slug:      "workspace-context",
+		Scope:     "context",
+		Priority:  20,
+		Template:  `You are operating within the workspace "{{workspace_name}}": {{workspace_description}}.`,
 		Variables: `["workspace_name","workspace_description"]`,
 	},
 	{
-		Name:     "Project Context",
-		Slug:     "project-context",
-		Scope:    "context",
-		Priority: 30,
-		Template: `Current project: {{project_name}}. {{project_description}}`,
+		Name:      "Project Context",
+		Slug:      "project-context",
+		Scope:     "context",
+		Priority:  30,
+		Template:  `Current project: {{project_name}}. {{project_description}}`,
 		Variables: `["project_name","project_description"]`,
 	},
 	{
-		Name:     "Mode Addendum",
-		Slug:     "mode-addendum",
-		Scope:    "mode",
-		Priority: 40,
-		Template: `{{mode_addendum}}`,
+		Name:      "Mode Addendum",
+		Slug:      "mode-addendum",
+		Scope:     "mode",
+		Priority:  40,
+		Template:  `{{mode_addendum}}`,
 		Variables: `["mode_addendum"]`,
 	},
 	{
@@ -350,7 +350,6 @@ Use these tools when appropriate to accomplish tasks. Each skill provides specif
 		Variables: `["skill_list"]`,
 	},
 }
-
 
 // SeedBuiltinPromptTemplates inserts built-in prompt templates if they don't exist.
 func (s *Store) SeedBuiltinPromptTemplates() error {

@@ -11,11 +11,11 @@ import (
 
 // WorkspaceRoleTrust is a single row from workspace_role_trust.
 type WorkspaceRoleTrust struct {
-	WorkspaceID     string `json:"workspace_id"`
-	AgentProfileID  string `json:"agent_profile_id"`
-	TrustTier       string `json:"trust_tier"`
-	PromotedAt      string `json:"promoted_at"`
-	PromotedBy      string `json:"promoted_by"`
+	WorkspaceID    string `json:"workspace_id"`
+	AgentProfileID string `json:"agent_profile_id"`
+	TrustTier      string `json:"trust_tier"`
+	PromotedAt     string `json:"promoted_at"`
+	PromotedBy     string `json:"promoted_by"`
 }
 
 // ResolveTrust implements dispatch.TrustResolver.

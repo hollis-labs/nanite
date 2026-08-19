@@ -177,8 +177,15 @@ func (a *API) handleAssignAgentSkill(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Verify agent exists.
-	if _, err := a.Services.Agents.Get(r.Context(), agentID); err != nil {
+	// Verify agent exists as a real agent_profiles DB row -- NOT via
+	// a.Services.Agents.Get, which also resolves file-based agents through
+	// their in-memory definition (agent.IsFileBasedID/"file-<slug>") even
+	// when AutoIngestAgents has never successfully written (or has failed
+	// to write) a backing row for that slug (see internal/service/ingest.go's
+	// AutoIngestAgents doc comment, CW-20260815-0009). agent_skills.agent_id
+	// carries a real FK to agent_profiles(id) (Phase 1 #05), so the
+	// existence check here must match what the FK actually enforces.
+	if _, err := a.Services.Store.GetAgent(agentID); err != nil {
 		a.errorResp(w, http.StatusNotFound, "agent not found")
 		return
 	}

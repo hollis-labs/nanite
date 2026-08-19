@@ -480,6 +480,15 @@ func (a *API) handleAddAgentProject(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Verify agent exists as a real agent_profiles DB row. Previously there
+	// was no check here at all -- agent_projects.agent_id now carries a real
+	// FK to agent_profiles(id) (Phase 1 #05), so reject up front rather than
+	// letting the INSERT fail deeper in the store layer.
+	if _, err := a.Services.Store.GetAgent(agentID); err != nil {
+		a.errorResp(w, http.StatusNotFound, "agent not found")
+		return
+	}
+
 	if err := a.Services.Store.AddAgentProject(agentID, req.ProjectID); err != nil {
 		a.errorResp(w, http.StatusInternalServerError, err.Error())
 		return

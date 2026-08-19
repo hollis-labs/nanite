@@ -389,13 +389,21 @@ func (s *Store) CreateAgent(a *AgentProfile) error {
 }
 
 // DeleteAgent removes an agent profile by slug, including related records
-// (skills, session associations). Returns nil if the agent doesn't exist.
+// (skills, project links, session associations). Returns nil if the agent
+// doesn't exist.
 //
-// All deletes run inside a single transaction — no PRAGMA toggling. Junction
-// tables (agent_skills, agent_prompt_templates, session_agents)
-// intentionally have no FK back to agent_profiles (they may reference
-// file-based agents), so deleting them explicitly is both correct and
-// FK-safe. Messages have their agent_id nullified to preserve user data.
+// All deletes run inside a single transaction — no PRAGMA toggling.
+// agent_prompt_templates/session_agents intentionally have no FK back to
+// agent_profiles (they may reference file-based agents), so deleting them
+// explicitly is both correct and FK-safe. agent_skills/agent_projects DO now
+// carry a real `agent_id ... REFERENCES agent_profiles(id) ON DELETE CASCADE`
+// FK (migration 106, Phase 1 #05) — the explicit cleanup lines below for
+// both are no longer required for correctness (the CASCADE would handle it
+// on its own), but are kept anyway for the same belt-and-suspenders reason
+// the per-agent capability/runtime children below are (they run before the
+// final agent_profiles delete regardless, so behavior is identical with or
+// without the CASCADE). Messages have their agent_id nullified to preserve
+// user data.
 func (s *Store) DeleteAgent(slug string) error {
 	agent, err := s.GetAgentBySlug(slug)
 	if err != nil {
@@ -411,6 +419,7 @@ func (s *Store) DeleteAgent(slug string) error {
 	cleanups := []string{
 		"DELETE FROM session_agents WHERE agent_id = ?",
 		"DELETE FROM agent_skills WHERE agent_id = ?",
+		"DELETE FROM agent_projects WHERE agent_id = ?",
 		"DELETE FROM agent_prompt_templates WHERE agent_id = ?",
 		// Per-agent capability/runtime children (migrations 068/070/074/085).
 		// These declare FKs to agent_profiles(id); clean them explicitly so a

@@ -1,7 +1,7 @@
 # Fix `agent_skills`/`agent_projects` missing `agent_id` FKs
 
 **Phase:** 1
-**Status:** not-started
+**Status:** implemented
 **Depends on:** none hard — `10-data-migrate-nanite-agents-md.md` is out of scope for Phase 1 (operator decision, 2026-08-18; see that file), so this task no longer waits on it. Independently verify the zero-row precondition below before adding the constraint (see Context and What to do #1) — this verification is now the primary safety check, not a fallback.
 **Touches:** new migration (`agent_skills.agent_id`, `agent_projects.agent_id` — add real FK constraint; SQLite rename-recreate-copy pattern), `internal/store/skills.go`/`internal/store/projects.go` or wherever these tables' CRUD lives
 
@@ -59,6 +59,52 @@ Architecture doc `01-agent-construction.md`: *"Real relational references, not f
 **Baseline sanity check (no code changes made, so this is informational only):** `go build ./cmd/nanite/` passes; `go test ./...` passes across all packages; `go vet ./...` reports two pre-existing findings in `internal/service/container.go` (`stopReaper`/`stopRuntimeReaper` possible-context-leak) — confirmed pre-existing on the `phase-1-execution` tip (`505f1f8f`) prior to any change made in this session (working tree was clean when `go vet` was run), unrelated to this task and not touched.
 
 **Recommendation for whoever picks this back up:** either (a) scope in the two live-write-path gaps as a precondition sub-task — close the ingest-failure race for `agent_skills` (e.g. `handleAssignAgentSkill` should check the DB row directly, not `AgentService.Get`'s file-def-resolving semantics) and add an equivalent real existence check to `handleAddAgentProject` — before re-attempting the FK, or (b) explicitly accept that file-based/ingest-pending agents lose write access to these two endpoints as an intentional side effect of adding the FK, and get that traded off decided rather than defaulted into.
+
+---
+
+**Resume, same session, scope expanded by the Orchestrator.** The Orchestrator reviewed the escalation above and directed (a) from the recommendation: close both live-write-path gaps, re-verify, then proceed with the original FK work. Recorded here per instruction; this scope expansion was the Orchestrator's call, not one this worker made unilaterally.
+
+### Step 1 — closed both gaps
+
+- **`internal/api/skills.go`'s `handleAssignAgentSkill`**: replaced the `a.Services.Agents.Get(ctx, agentID)` existence check with `a.Services.Store.GetAgent(agentID)` — a direct `agent_profiles` row lookup (`internal/store/agents.go`'s `GetAgent`, already used for the identical purpose in `handleAddSessionAgent`/`handleAssignAgentSkill`'s sibling handlers elsewhere in the codebase), instead of the file-def-resolving `AgentService.Get`. Same 404 error convention as before (`"agent not found"`). This closes the ingest-race path: a `"file-<slug>"` agent with no `agent_profiles` row is now correctly rejected.
+- **`internal/api/agents.go`'s `handleAddAgentProject`**: added the same `a.Services.Store.GetAgent(agentID)` check (there was none before at all) — reject 404 before calling `AddAgentProject`.
+
+### Step 2 — re-verification
+
+Code review: both handlers now gate on a real DB-row lookup before calling into `AssignSkillToAgent`/`AddAgentProject`; re-ran the same whole-repo write-path grep from the original escalation and confirmed no other call site reaches either INSERT without going through one of these two now-fixed handlers (store-level `AssignSkillToAgent`/`AddAgentProject`/`RemoveSkillFromAgent`/`RemoveAgentProject` have no other callers outside `internal/api` and tests — reconfirmed via `grep -rn` across `internal/`).
+
+Added regression tests pinning the exact scenarios found during the original escalation:
+- `internal/api/skills_test.go`:
+  - `TestHandleAssignAgentSkill_RejectsNonexistentAgent` — a plain nonexistent agent ID is rejected 404, no `agent_skills` row created.
+  - `TestHandleAssignAgentSkill_RejectsFileBasedGhostAgent` — the direct pin for the finding: constructs a real `agent.Definition` with no `id:` (canonical ID `"file-ghost-agent-no-db-row"`), overrides `a.Services.Agents` with a fresh `AgentService` that resolves it via `FileAgents` (mirroring `internal/service/agent_test.go`'s own pattern for testing this fallback), asserts as a sanity check that the *old* check (`AgentService.Get`) still resolves this ghost agent (proving the vulnerability was real) while `a.Services.Store.GetAgent` does not, then asserts the HTTP endpoint now rejects the assignment with 404 and no `agent_skills` row lands.
+- `internal/api/agent_projects_test.go`:
+  - `TestHandleAddAgentProject_RejectsNonexistentAgent` — a plain nonexistent agent ID is rejected 404 (previously this succeeded unconditionally), no `agent_projects` row created.
+
+All three pass (`go test ./internal/api/ -run "TestHandleAssignAgentSkill|TestHandleAddAgentProject" -count=1`, exit 0).
+
+**`agent_projects`' missing `DeleteAgent` cleanup line**: decided to add it (for symmetry with `agent_skills`, which already has one) rather than rely solely on the new `ON DELETE CASCADE`. Both are now genuinely redundant with the CASCADE (the explicit cleanup lines run before the final `agent_profiles` DELETE regardless, so behavior is identical either way) but kept as the same belt-and-suspenders pattern this file already uses for the migration-068/070/074/085 per-agent children (which have FKs *without* cascade, requiring the explicit line for correctness — confirmed by reading `069_per_agent_state.sql`: `agent_known_tools`/`agent_known_skills` are `REFERENCES agent_profiles(id)` with no `ON DELETE CASCADE`, unlike this task's new FKs). Updated the doc comment above the `cleanups` slice to explain this distinction.
+
+### Step 3 — FK migration
+
+Added `internal/store/migrations/106_agent_skills_agent_projects_fk.sql` (goose, rename-recreate-copy pattern per Phase 0 #9, matching `105_drop_unused_session_status_values.sql`'s structure): both `agent_skills.agent_id` and `agent_projects.agent_id` now carry `REFERENCES agent_profiles(id) ON DELETE CASCADE`. No other column drift existed for either table since `001_schema.sql` (reconfirmed), so the rebuilt shape is identical apart from the new FK. `Down` reverts to the original FK-less shape.
+
+Added `internal/store/agent_skills_agent_projects_fk_test.go`:
+- `TestAgentSkills_FKRejectsOrphanedAgentID` / `TestAgentProjects_FKRejectsOrphanedAgentID` — direct store-level insert against a nonexistent `agent_id` now fails (FK violation).
+- `TestAgentSkills_FKCascadesOnAgentDelete` / `TestAgentProjects_FKCascadesOnAgentDelete` — deleting the parent `agent_profiles` row directly (bypassing `DeleteAgent`'s own cleanup) cascades the child row away, confirming `ON DELETE CASCADE` actually works independent of the belt-and-suspenders application-level cleanup.
+
+### Step 4 — build/vet/test + real-backup migration test
+
+- `go build ./cmd/nanite/`: passes.
+- `go vet ./...`: same two pre-existing findings in `internal/service/container.go` as the original escalation noted (`stopReaper`/`stopRuntimeReaper`), unrelated to this task, not introduced by this change, not touched.
+- `go test ./...` (full suite, `-count=1`): all packages pass, exit 0, no `FAIL` lines.
+- **Real backed-up DB**: copied `~/.local/share/nanite/workspaces/default/backups/main.db.pre-execution-backup-20260818-132726` (+ its `-wal` sidecar, checkpointed) to a scratch path and ran the actual `store.New` migration path (via a throwaway test, deleted before commit — not part of this diff) against it. This backup turned out to genuinely predate goose's ledger entirely (`sessions` still had `compaction_summary`/`compacted_at`/`current_mode_id`/`auto_switch_override`/`intent` and the 6-value `status` CHECK, i.e. pre-100/102/103/104/105 shape), so this exercised the full legacy-ledger-seed path plus every migration from wherever it left off through 106, a stronger real-world test than a fresh DB. Result: migration ran clean; `agent_skills`/`agent_projects` both show `agent_id ... REFERENCES agent_profiles(id) ON DELETE CASCADE` in `sqlite_master`; row counts after migration: `agent_skills`=0, `agent_projects`=0 (data-preservation confirmed — nothing lost, precondition still held at the moment of migration), `agent_profiles`=28 (untouched), `agent_known_skills`=13 (**confirmed untouched** — regression check satisfied). Attempting a raw `INSERT INTO agent_skills` for a nonexistent `agent_id` against the migrated real-backup copy failed as expected, directly confirming "Done means" bullet 2 (FK rejects a non-existent-agent insert) against real data, not just a fresh test fixture.
+
+### Final state
+
+- `agent_skills.agent_id` / `agent_projects.agent_id`: real, enforced FK to `agent_profiles(id)`, cascade-delete.
+- Both previously-open write-path gaps closed at the API layer, with regression tests.
+- `agent_known_skills`: confirmed untouched throughout (read-only check performed against both the fresh test DB and the real backup; no code in this diff writes to it).
+- Files touched: `internal/api/skills.go`, `internal/api/agents.go`, `internal/store/agents.go`, `internal/store/migrations/106_agent_skills_agent_projects_fk.sql` (new), `internal/api/skills_test.go` (new), `internal/api/agent_projects_test.go` (new), `internal/store/agent_skills_agent_projects_fk_test.go` (new).
 
 ## Review notes
 <Reviewer fills this in: pass/fail, what was checked, anything fixed and how.>

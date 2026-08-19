@@ -816,10 +816,19 @@ func (pms *pluginManagerState) unloadPluginFromHost(manifestPath string) bool {
 // runPluginLoadIntoHost loads a plugin into the running host so its
 // agent profiles and MCP tools become available immediately. Supports both
 // builtin (compiled-in) and subprocess plugins. Returns true only when the
-// plugin was actually loaded into the host; returns false on no-op (nil
-// host, parse/config error, missing entrypoint, no constructor) or failure
-// (LoadPlugin returned error). Callers use this to decide whether to emit
-// plugin.enabled / bump registry (true) or plugin.load_failed (false).
+// plugin was actually loaded into the host AND its manifest-declared
+// registrations were applied; returns false on no-op (nil host, parse/config
+// error, missing entrypoint, no constructor) or failure (LoadPlugin or
+// ApplyManifestRegistrations returned error — the latter's failure rolls the
+// load back via UnloadPlugin so nothing stays half-registered). Callers use
+// this to decide whether to emit plugin.enabled / bump registry (true) or
+// plugin.load_failed (false).
+//
+// Until Phase 5 item 11 (TASKS/phase-5/11-fix-hot-reload-never-applies-
+// manifest-registrations.md), this function called only LoadPlugin and the
+// "agent profiles ... become available immediately" claim above was false
+// for registers.agent_profiles[]/registers.crud[] — those categories only
+// ever took effect at a full process restart, not via this hot-load path.
 func (pms *pluginManagerState) runPluginLoadIntoHost(manifestPath, pluginDir string) bool {
 	if pms.pluginHost == nil {
 		return false
@@ -887,6 +896,27 @@ func (pms *pluginManagerState) runPluginLoadIntoHost(manifestPath, pluginDir str
 		slog.Warn("plugin-api: hot-load failed", "name", manifest.Name, "err", err)
 		return false
 	}
+
+	// Apply yaml-authoritative manifest registrations (Phase 5 item 11,
+	// TASKS/phase-5/11-fix-hot-reload-never-applies-manifest-registrations.md).
+	// Without this call, registers.crud[]/registers.agent_profiles[] (and every
+	// other registers.* category) never actually took effect on this
+	// API-driven install/enable/reload path — LoadPlugin alone only runs the
+	// plugin's own Load() method; the declarative manifest wiring is applied
+	// separately by applyManifestRegistrations, which previously only ran at
+	// boot time via loader.go.
+	if err := naniteplugin.ApplyManifestRegistrations(pms.pluginHost, manifest, p, pluginDir); err != nil {
+		slog.Warn("plugin-api: apply manifest registrations failed", "name", manifest.Name, "err", err)
+		// Best-effort rollback so a partially-registered plugin doesn't stay
+		// "loaded" in the host with none of its declared registrations live —
+		// mirrors loader.go's LoadDiscovered error-rollback behavior for the
+		// boot-time path.
+		if unloadErr := pms.pluginHost.UnloadPlugin(manifest.Name); unloadErr != nil {
+			slog.Warn("plugin-api: rollback unload after failed manifest apply failed", "name", manifest.Name, "err", unloadErr)
+		}
+		return false
+	}
+
 	slog.Info("plugin-api: hot-loaded plugin", "name", manifest.Name)
 	return true
 }

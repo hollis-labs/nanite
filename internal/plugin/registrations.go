@@ -224,6 +224,27 @@ func (h *Host) bumpRegistryVersionLocked() {
 // registers.crud[] entries into Host.RegisterCRUDHandler using the
 // subprocess proxy (subprocess.NewCRUDHandler) that had already landed in an
 // earlier pass but was never reachable from this manifest path.
+// ApplyManifestRegistrations is the exported wrapper around
+// applyManifestRegistrations for callers outside this package (Phase 5 item
+// 11, TASKS/phase-5/11-fix-hot-reload-never-applies-manifest-registrations.md).
+//
+// Before this existed, applyManifestRegistrations had exactly two callers —
+// loader.go's LoadDiscovered and LoadRegisteredBuiltins, both reachable only
+// from cmd/nanite/main.go's boot-time discoverAndLoadPlugins. Every
+// API-driven plugin lifecycle action (internal/api/plugins.go's
+// runPluginLoadIntoHost, which backs install/enable/reload — including the
+// CLI's no-restart hot-reload default added by
+// TASKS/phase-5/04-close-cli-install-hot-reload-asymmetry.md) called
+// Host.LoadPlugin directly and returned, so registers.crud[] (task 05),
+// registers.agent_profiles[] (task 03), and every other registers.*
+// category never actually took effect on that path until a full process
+// restart. runPluginLoadIntoHost now calls this after Host.LoadPlugin
+// succeeds, passing the same already-parsed manifest/loaded plugin/
+// pluginDir loader.go's callers pass.
+func ApplyManifestRegistrations(host *Host, manifest *PluginManifest, p goplugin.Plugin, pluginDir string) error {
+	return applyManifestRegistrations(host, manifest, p, pluginDir)
+}
+
 func applyManifestRegistrations(host *Host, manifest *PluginManifest, p goplugin.Plugin, pluginDir string) error {
 	if manifest == nil {
 		return nil

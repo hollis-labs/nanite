@@ -608,14 +608,27 @@ func pluginDisable(name string) {
 		os.Exit(1)
 	}
 	fmt.Printf("Plugin %q disabled.\n", name)
-	// Deliberately always triggerRestart() here too, both plugin kinds.
-	// DisablePlugin already renamed plugin.yaml -> plugin.yaml.disabled, so
-	// POST /api/plugins/reload would 404 on the now-missing plugin.yaml
-	// instead of unloading the plugin from the live host — the running
-	// process would keep the "disabled" plugin loaded and active until
-	// restart. A full restart is the only way this task's scope (the
-	// existing reload endpoint, as-is) can actually apply a CLI disable to
-	// the live host.
+	// Deliberately always triggerRestart() here too, both plugin kinds. This
+	// comment previously said DisablePlugin renamed plugin.yaml ->
+	// plugin.yaml.disabled and that's why reload can't be used — that stopped
+	// being true as of TASKS/phase-5/02-build-plugin-installed-enabled-state-
+	// model.md: DisablePlugin is now a pure DB write and plugin.yaml is never
+	// renamed, so POST /api/plugins/reload would find the manifest just fine.
+	//
+	// The real, current reason triggerRestart() must stay unconditional here
+	// (not triggerActivation()'s conditional hot-reload, the way install/
+	// enable use it): as of TASKS/phase-5/11-fix-hot-reload-never-applies-
+	// manifest-registrations.md, POST /api/plugins/reload (handleReload)
+	// genuinely calls Host.LoadPlugin and applies the plugin's manifest
+	// registrations. Host.LoadPlugin runs — and, for a subprocess plugin,
+	// spawns its process — before applyManifestRegistrations's own DB-backed
+	// enabled gate ever gets a chance to no-op. So if this disable path were
+	// ever wired onto the hot-reload endpoint, calling reload against a
+	// disabled plugin would silently bring it back live even though its DB
+	// row still says disabled. A full restart is the only path that actually
+	// respects the disabled flag before load (loader.go's seedAndCheckEnabled
+	// gate skips a disabled plugin entirely, before Host.LoadPlugin is ever
+	// called) — do not "fix" this to hot-reload without also closing that gap.
 	triggerRestart()
 }
 
@@ -663,11 +676,20 @@ func pluginList() {
 		name := entry.Name()
 		status := plugin.PluginStatus(dir, name)
 
-		// Try to parse manifest (active or disabled)
+		// Read plugin.yaml directly regardless of status. Under the DB-backed
+		// installed/enabled model (TASKS/phase-5/02-build-plugin-installed-
+		// enabled-state-model.md) disabling a plugin never renames its
+		// manifest to plugin.yaml.disabled — that mechanism is fully retired.
+		// The previous "status == disabled -> read plugin.yaml.disabled"
+		// fallback therefore pointed at a file the new model never creates;
+		// ParseManifest failed and the loop silently `continue`d, dropping
+		// every disabled plugin from this command's output entirely (Phase 5
+		// item 11, Finding 3 — a real, live regression an operator hits the
+		// first time they disable a plugin via the CLI and run this command).
+		// PluginStatus above already migrated any pre-Phase-5-#02 legacy
+		// plugin.yaml.disabled left on disk into plugin.yaml in place (via
+		// resolvePluginIdentity), so plugin.yaml is authoritative here.
 		manifestPath := filepath.Join(dir, name, "plugin.yaml")
-		if status == "disabled" {
-			manifestPath = filepath.Join(dir, name, "plugin.yaml.disabled")
-		}
 		manifest, err := plugin.ParseManifest(manifestPath)
 		if err != nil {
 			continue

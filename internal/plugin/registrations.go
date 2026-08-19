@@ -374,9 +374,15 @@ func applyManifestRegistrations(host *Host, manifest *PluginManifest, p goplugin
 			return err
 		}
 	}
+	// Phase 5 item 03 (TASKS/phase-5/03-wire-registers-agent-profiles.md):
+	// registers.agent_profiles[] is a real registration path now -- see
+	// agent_profiles.go for the parse/validate/upsert implementation and
+	// the new PluginAgentProfileDocument shape a plugin's `file:` must
+	// conform to (role/agent composition, not the old flat shape).
 	if len(reg.AgentProfiles) > 0 {
-		host.logger.Info("manifest agent_profiles: yaml-driven registration deferred (follow-up B.4 task)", "plugin", pluginID, "count", len(reg.AgentProfiles))
-		skipped += len(reg.AgentProfiles)
+		if err := registerManifestAgentProfiles(host, pluginID, reg.AgentProfiles, pluginDir); err != nil {
+			return err
+		}
 	}
 	// 6. Card rules (J5 — CW-20260421-0013). Compile and register each rule
 	// into the host's Stage 1 detection registry. Built-in rules have already

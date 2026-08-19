@@ -271,8 +271,18 @@ type MCPServerRegistration struct {
 	Tools       []string `yaml:"tools"`
 }
 
-// AgentProfileRegistration declares an agent profile shipped with the plugin.
-// File is a relative path to the YAML file containing the profile.
+// AgentProfileRegistration declares an agent profile shipped with the
+// plugin. ID is the manifest-level registration key (used for duplicate
+// detection and log/error messages -- it need not match the constructed
+// agent's own slug, which lives inside File). File is a relative path
+// (resolved against the plugin dir) to a YAML document that must conform to
+// the role/agent composition shape defined in agent_profiles.go's
+// PluginAgentProfileDocument (Phase 5 item 03,
+// TASKS/phase-5/03-wire-registers-agent-profiles.md) -- NOT the old flat
+// agent-profile shape a pre-Phase-5 plugin (e.g. the now-cut giphy
+// reference plugin) used to ship; see agent_profiles.go's package doc
+// comment for the full design and "no legacy grandfathering" rejection
+// behavior.
 type AgentProfileRegistration struct {
 	ID   string `yaml:"id"`
 	File string `yaml:"file"`

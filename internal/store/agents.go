@@ -183,6 +183,17 @@ type AgentProfile struct {
 	// yet consulted anywhere for CLI-vs-API routing decisions -- wiring it
 	// as the actual routing switch is Phase 2's job, not this task's.
 	RuntimeKind string `json:"runtime_kind"`
+
+	// PluginID tags this row as created/owned by a plugin's
+	// registers.agent_profiles[] registration (Phase 5 item 03,
+	// TASKS/phase-5/03-wire-registers-agent-profiles.md) -- the plugin's
+	// canonical id (manifest.Identifier() / p.ID()), mirroring the
+	// artifacts.source_plugin_id precedent. Empty string means this row is
+	// operator/GUI-created (or predates Phase 5 item 03). Read by
+	// ListAgentsByPluginID and plugin.Host.UnloadPlugin's unload sweep so a
+	// plugin uninstall/unload correctly removes what it registered. Added
+	// by migration 122.
+	PluginID string `json:"plugin_id"`
 }
 
 // validateAgentMultiAgentFields enforces the enum constraints that
@@ -342,7 +353,8 @@ const agentColumns = `id, name, slug, COALESCE(avatar,''), system_prompt, COALES
         COALESCE(activation_mode,'singleton'), COALESCE(class,'advisor'),
         COALESCE(default_state,'sleeping'),
         COALESCE(consumer_id,''),
-        COALESCE(role_id,''), COALESCE(model_id,''), COALESCE(runtime_kind,'api')`
+        COALESCE(role_id,''), COALESCE(model_id,''), COALESCE(runtime_kind,'api'),
+        COALESCE(plugin_id,'')`
 
 // scanAgent scans a row into an AgentProfile using the canonical column order.
 func scanAgent(scanner interface{ Scan(...any) error }, a *AgentProfile) error {
@@ -364,6 +376,7 @@ func scanAgent(scanner interface{ Scan(...any) error }, a *AgentProfile) error {
 		&a.DefaultState,
 		&a.ConsumerID,
 		&a.RoleID, &a.ModelID, &a.RuntimeKind,
+		&a.PluginID,
 	)
 }
 
@@ -503,8 +516,9 @@ func (s *Store) CreateAgent(a *AgentProfile) error {
 		                              urn, urn_aliases,
 		                              activation_mode, class, default_state,
 		                              consumer_id,
-		                              role_id, model_id, runtime_kind)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		                              role_id, model_id, runtime_kind,
+		                              plugin_id)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		a.ID, a.Name, a.Slug, nullIfEmpty(a.Avatar), a.SystemPrompt, nullIfEmpty(a.Description),
 		a.Modes, nullIfEmpty(a.DefaultModel), a.DefaultProvider,
 		a.MCPServers, a.ToolPermissions, a.CanExecute, a.Settings,
@@ -522,6 +536,7 @@ func (s *Store) CreateAgent(a *AgentProfile) error {
 		a.ActivationMode, a.Class, a.DefaultState,
 		nullIfEmpty(a.ConsumerID),
 		nullIfEmpty(a.RoleID), nullIfEmpty(a.ModelID), a.RuntimeKind,
+		nullIfEmpty(a.PluginID),
 	)
 	if err != nil {
 		return fmt.Errorf("create agent: %w", err)
@@ -675,7 +690,8 @@ func (s *Store) UpdateAgent(a *AgentProfile) error {
 		        urn = ?, urn_aliases = ?,
 		        activation_mode = ?, class = ?, default_state = ?,
 		        consumer_id = ?,
-		        role_id = ?, model_id = ?, runtime_kind = ?
+		        role_id = ?, model_id = ?, runtime_kind = ?,
+		        plugin_id = ?
 		 WHERE id = ?`,
 		a.Name, a.Slug, nullIfEmpty(a.Avatar), a.SystemPrompt, nullIfEmpty(a.Description),
 		a.Modes, nullIfEmpty(a.DefaultModel), a.DefaultProvider,
@@ -693,6 +709,7 @@ func (s *Store) UpdateAgent(a *AgentProfile) error {
 		a.ActivationMode, a.Class, a.DefaultState,
 		nullIfEmpty(a.ConsumerID),
 		nullIfEmpty(a.RoleID), nullIfEmpty(a.ModelID), a.RuntimeKind,
+		nullIfEmpty(a.PluginID),
 		a.ID,
 	)
 	if err != nil {
@@ -830,6 +847,46 @@ func (s *Store) ListAgentsBySource(source string) ([]AgentProfile, error) {
 		out = append(out, a)
 	}
 	return out, rows.Err()
+}
+
+// ListAgentsByPluginID returns every agent_profiles row tagged with the
+// given plugin_id -- the plugin-ownership column added by Phase 5 item 03
+// (TASKS/phase-5/03-wire-registers-agent-profiles.md, migration 122)
+// alongside registers.agent_profiles[]'s registration path. Used by
+// plugin.Host.UnloadPlugin's unload sweep to find rows to remove; DB-
+// authoritative rather than an in-memory host-side map so the sweep is
+// correct even for a plugin uninstalled while disabled (never loaded into
+// the current host process at all).
+func (s *Store) ListAgentsByPluginID(pluginID string) ([]AgentProfile, error) {
+	rows, err := s.DB.Query(`SELECT `+agentColumns+` FROM agent_profiles WHERE plugin_id = ? ORDER BY slug`, pluginID)
+	if err != nil {
+		return nil, fmt.Errorf("list agents by plugin_id: %w", err)
+	}
+	defer rows.Close()
+
+	out := make([]AgentProfile, 0)
+	for rows.Next() {
+		var a AgentProfile
+		if err := scanAgent(rows, &a); err != nil {
+			return nil, fmt.Errorf("scan agent: %w", err)
+		}
+		out = append(out, a)
+	}
+	return out, rows.Err()
+}
+
+// CountAgentsByRoleID returns how many agent_profiles rows currently
+// reference roleID. Used before deleting a plugin-owned role during
+// plugin.Host.UnloadPlugin's sweep so a role another agent still depends on
+// (e.g. an operator or a different plugin bound to a reused, shared role --
+// see agent_profiles.go's resolveOrCreatePluginRole) is never removed out
+// from under it.
+func (s *Store) CountAgentsByRoleID(roleID string) (int, error) {
+	var n int
+	if err := s.DB.QueryRow(`SELECT COUNT(*) FROM agent_profiles WHERE role_id = ?`, roleID).Scan(&n); err != nil {
+		return 0, fmt.Errorf("count agents by role_id: %w", err)
+	}
+	return n, nil
 }
 
 // UpsertAgentBySlug inserts or updates an agent profile by slug.

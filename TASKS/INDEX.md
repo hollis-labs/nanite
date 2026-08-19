@@ -41,7 +41,7 @@ Live tracker for `docs/engineering/TASKS.md`'s execution, per `docs/engineering/
 | 22-remove-skill-and-tool-broker-abstractions | not-started | (sequenced after 29, see below) | 3 (chain pos. 10) |
 | 23-export-and-drop-decision-tables | not-started | 11, 22 | 3 (chain pos. 11) |
 | 24-housekeeping-agent-profile-files | implemented | none | 1 |
-| 25-drop-unused-session-status-enum | not-started | 26 | 3 (parallel with chain, after pos. 4) |
+| 25-drop-unused-session-status-enum | implemented | 26 | 3 (parallel with chain, after pos. 4) |
 | 26-cut-session-compaction-summary-fields | implemented | (sequenced after 27, see below) | 3 (chain pos. 4) |
 | 27-cut-p7-scratchpad-snapshot | implemented | none | 3 (chain pos. 3) |
 | 28-cut-session-intent-classifier | implemented | (sequenced after 27, see below) | 3 (chain pos. 5) |

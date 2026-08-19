@@ -1,7 +1,7 @@
 # Add `consumers` table and `agents.consumer_id` ownership tagging
 
 **Phase:** 1
-**Status:** not-started
+**Status:** implemented
 **Depends on:** none
 **Touches:** new migration (`consumers` table, `agent_profiles.consumer_id` column), `internal/store/agents.go`, new `internal/store/consumers.go` (CRUD)
 
@@ -32,7 +32,91 @@ Verified: no `consumers` table, no `consumer_id` column, no tenancy concept anyw
 - `go build ./cmd/nanite/`, `go vet ./...`, `go test ./...` pass.
 
 ## Work log
-<Worker fills this in as it goes: what was actually done, any deviation from plan and why, anything escalated.>
+
+**Worktree base correction (infra, not task content):** the worker's worktree
+was initially branched from `main` at `df71e710` (pre-dating
+`phase-1-execution`'s cut), so `TASKS/phase-1/` didn't exist yet and the
+task file couldn't be found. Confirmed `df71e710` is an ancestor of
+`phase-1-execution` (`505f1f8f`) with zero unique commits on the worker's
+branch, so `git merge phase-1-execution --ff-only` was a lossless
+fast-forward, not a destructive rewrite. Landed on `505f1f8f` before doing
+any task work. Flagging this so the Orchestrator can check whether other
+worktrees cut around the same time have the same base problem.
+
+**Naming check (per this file's own flag):** re-verified `internal/classify/
+doc.go`, `internal/effort/effort.go` (doc-comment "consumer"/"consumer
+contract" terminology) and `internal/plugin/subprocess/plugin.go`'s
+`EnvelopeConsumer` interface — confirmed no collision with the new
+`consumers` table / `consumer_id` column / `internal/store/consumers.go`.
+`GLOSSARY.md` already carries a dedicated Consumer entry distinguishing it
+from Instance, so no glossary edit was needed.
+
+**Scope note — task `10` and agent tagging:** per the Orchestrator's brief,
+`10-data-migrate-nanite-agents-md.md` is out-of-scope for Phase 1 (operator
+decision, cut in the `phase-1-execution` planning commit), so this task's
+own note about confirming which of Curator/Weaver/Atlas-Curator gets the
+first real `consumer_id` tag "once `10` runs" no longer applies. This task
+seeds exactly one `consumers` row for Loom and tags no agent — no agent
+data migration happened here.
+
+**What was built:**
+- Migration `internal/store/migrations/106_add_consumers_table.sql` (goose
+  Up/Down, both tested): creates `consumers` (`id`, `slug` unique, `name`,
+  `created_at`), adds nullable `agent_profiles.consumer_id TEXT REFERENCES
+  consumers(id)`, and seeds one real row (`blt-loom-001` / slug `loom` /
+  name `Loom`) via `INSERT OR IGNORE`. Down drops the column before the
+  table (reverse order of Up) — verified this succeeds even with
+  `PRAGMA foreign_keys=1` (this codebase's default, confirmed by reading
+  `github.com/hollis-labs/go-sqlite/sqlitekit`) and with live child rows
+  present, via both a raw `sqlite3` CLI probe and a goose `DownTo`/`Up`
+  round-trip test.
+- `internal/store/consumers.go`: `Consumer` struct + `ListConsumers`,
+  `GetConsumer`, `GetConsumerBySlug`, `CreateConsumer` (requires slug +
+  name, generates a uuid ID if unset), `UpdateConsumer`, `DeleteConsumer`.
+  Followed the existing `mcp_servers.go`-style minimal CRUD shape. Did
+  **not** build a REST layer — the task's own step 4 hedges this as "if
+  useful for the assignment UI in `09`," and `09-build-assignment-ui-api.md`
+  is a separate, not-yet-started task that owns that surface; adding
+  untested, unconsumed HTTP handlers here would be scope creep against this
+  task's own "Touches" list (which only names the migration,
+  `internal/store/agents.go`, and the new `consumers.go`).
+- `internal/store/agents.go`: added `AgentProfile.ConsumerID string` (empty
+  = operator-owned, matching the existing nullable-string convention used
+  for `Avatar`/`Description`/`DefaultModel`/etc. via `COALESCE(...,'')` +
+  `nullIfEmpty`), wired into `agentColumns`, `scanAgent`, `CreateAgent`'s
+  INSERT, and `UpdateAgent`'s UPDATE so the column is settable through the
+  normal agent CRUD path, not just raw SQL.
+- Tests: `internal/store/consumers_test.go` — seed-row verification (with
+  re-migrate no-op check), full CRUD round-trip, `CreateConsumer` slug/name
+  validation, `AgentProfile.ConsumerID` round-trip through
+  Create/Update/Get including a real FK-violation check (deleting a
+  referenced consumer fails; clearing the tag first allows it), and a
+  goose `DownTo(105)`/`Up` round-trip test for migration 106's Down half
+  (mirrors the pattern in `migration_102_drop_session_compaction_test.go`).
+
+**Verification against a real backed-up database (not just an empty
+fixture):** copied
+`~/.local/share/nanite/workspaces/default/backups/main.db.pre-execution-
+backup-20260818-132726` (the most recent backup at task start; pre-dates
+goose adoption — no `goose_db_version` table) to a scratch path and ran the
+real `store.New` migration path (including the pre-goose-to-goose ledger
+cutover) against it via a temporary, not-committed test. Confirmed: all 28
+pre-existing `agent_profiles` rows survived migration with `consumer_id=""`
+(nullable, correctly defaulted, none backfilled per this task's own "Done
+means"), `consumers` table created with the Loom row
+(`blt-loom-001`/`loom`/`Loom`), `goose_db_version` ledger landed at `106`,
+and a second `migrate()` call (simulated restart) was a clean no-op. The
+temporary test file and scratch DB copy were deleted after verification —
+not part of this task's committed deliverable.
+
+**Verification:** `go build ./cmd/nanite/`, `go vet ./internal/store/...`,
+and `go test ./...` (full suite, `-count=1`) all pass.
+`go vet ./...` at the repo root surfaces a pre-existing, unrelated
+lostcancel-style finding in `internal/service/container.go`
+(`stopReaper`/`stopRuntimeReaper` not used on all paths) — confirmed via
+`git show 505f1f8f:internal/service/container.go` that this file is
+untouched by this task and the finding predates this branch's
+`phase-1-execution` cut; not something this task's scope covers.
 
 ## Review notes
 <Reviewer fills this in: pass/fail, what was checked, anything fixed and how.>

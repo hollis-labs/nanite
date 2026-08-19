@@ -123,6 +123,14 @@ type AgentProfile struct {
 	ActivationMode string `json:"activation_mode"`
 	Class          string `json:"class"`
 	DefaultState   string `json:"default_state"`
+
+	// ConsumerID is a nullable FK to consumers(id) -- the ownership/tenancy
+	// tag identifying which external system this agent belongs to (e.g.
+	// Loom owns Curator). Empty string means internal/operator-owned, per
+	// decision log Section 4. See internal/store/consumers.go and
+	// docs/engineering/architecture/01-agent-construction.md. Added by
+	// migration 106 (TASKS/phase-1/03-add-consumers-table.md).
+	ConsumerID string `json:"consumer_id"`
 }
 
 // validateAgentMultiAgentFields enforces the enum constraints that
@@ -205,7 +213,8 @@ const agentColumns = `id, name, slug, COALESCE(avatar,''), system_prompt, COALES
         COALESCE(durable,0),
         COALESCE(urn,''), COALESCE(urn_aliases,'[]'),
         COALESCE(activation_mode,'singleton'), COALESCE(class,'advisor'),
-        COALESCE(default_state,'sleeping')`
+        COALESCE(default_state,'sleeping'),
+        COALESCE(consumer_id,'')`
 
 // scanAgent scans a row into an AgentProfile using the canonical column order.
 func scanAgent(scanner interface{ Scan(...any) error }, a *AgentProfile) error {
@@ -225,6 +234,7 @@ func scanAgent(scanner interface{ Scan(...any) error }, a *AgentProfile) error {
 		&a.URN, &a.URNAliases,
 		&a.ActivationMode, &a.Class,
 		&a.DefaultState,
+		&a.ConsumerID,
 	)
 }
 
@@ -362,8 +372,9 @@ func (s *Store) CreateAgent(a *AgentProfile) error {
 		                              context_policy,
 		                              durable,
 		                              urn, urn_aliases,
-		                              activation_mode, class, default_state)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		                              activation_mode, class, default_state,
+		                              consumer_id)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		a.ID, a.Name, a.Slug, nullIfEmpty(a.Avatar), a.SystemPrompt, nullIfEmpty(a.Description),
 		a.Modes, nullIfEmpty(a.DefaultModel), a.DefaultProvider,
 		a.MCPServers, a.ToolPermissions, a.CanExecute, a.Settings,
@@ -379,6 +390,7 @@ func (s *Store) CreateAgent(a *AgentProfile) error {
 		a.Durable,
 		a.URN, a.URNAliases,
 		a.ActivationMode, a.Class, a.DefaultState,
+		nullIfEmpty(a.ConsumerID),
 	)
 	if err != nil {
 		return fmt.Errorf("create agent: %w", err)
@@ -513,7 +525,8 @@ func (s *Store) UpdateAgent(a *AgentProfile) error {
 		        context_policy = ?,
 		        durable = ?,
 		        urn = ?, urn_aliases = ?,
-		        activation_mode = ?, class = ?, default_state = ?
+		        activation_mode = ?, class = ?, default_state = ?,
+		        consumer_id = ?
 		 WHERE id = ?`,
 		a.Name, a.Slug, nullIfEmpty(a.Avatar), a.SystemPrompt, nullIfEmpty(a.Description),
 		a.Modes, nullIfEmpty(a.DefaultModel), a.DefaultProvider,
@@ -529,6 +542,7 @@ func (s *Store) UpdateAgent(a *AgentProfile) error {
 		a.Durable,
 		a.URN, a.URNAliases,
 		a.ActivationMode, a.Class, a.DefaultState,
+		nullIfEmpty(a.ConsumerID),
 		a.ID,
 	)
 	if err != nil {

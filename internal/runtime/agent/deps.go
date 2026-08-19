@@ -183,6 +183,17 @@ type RuntimeStore interface {
 	// with the supplied reason. orphansweep.SweepOrphans calls this for rows whose
 	// persisted PID is no longer alive.
 	MarkRuntimeOrphaned(runtimeID, reason string) error
+
+	// LogEvent appends a row to the shared event_log postmortem trail.
+	// orphansweep.SweepOrphans calls this alongside MarkRuntimeOrphaned so
+	// every reconciliation leaves a queryable, reasoning-populated record
+	// (docs/engineering/architecture/06-session-lifecycle-and-recovery.md:
+	// "extend event_log logging to all four [recovery mechanisms]").
+	// sessionID is the runtime row's ID (equal to the chat session ID for
+	// ModeLongLived rows; a scoped subagent/background run ID otherwise —
+	// event_log.session_id carries no FK constraint, so this is always
+	// safe to write). metadata should be a JSON object, not a bare string.
+	LogEvent(sessionID, eventType, category, detail, metadata string)
 }
 
 // RuntimeRow is the lifecycle-tracking row Boot writes. Distinct from

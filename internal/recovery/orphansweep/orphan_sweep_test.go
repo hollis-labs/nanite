@@ -2,6 +2,7 @@ package orphansweep
 
 import (
 	"context"
+	"encoding/json"
 	"os"
 	"strings"
 	"sync"
@@ -35,6 +36,16 @@ type fakeRuntimeStore struct {
 	orphaned  map[string]string
 	listRows  []*agent.RuntimeRow
 	createErr error
+	events    []fakeLoggedEvent
+}
+
+// fakeLoggedEvent captures one LogEvent call for test assertions.
+type fakeLoggedEvent struct {
+	SessionID string
+	EventType string
+	Category  string
+	Detail    string
+	Metadata  string
 }
 
 func newFakeRuntimeStore() *fakeRuntimeStore {
@@ -75,6 +86,18 @@ func (f *fakeRuntimeStore) ListRunningRows() ([]*agent.RuntimeRow, error) {
 	out := make([]*agent.RuntimeRow, len(f.listRows))
 	copy(out, f.listRows)
 	return out, nil
+}
+
+func (f *fakeRuntimeStore) LogEvent(sessionID, eventType, category, detail, metadata string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.events = append(f.events, fakeLoggedEvent{
+		SessionID: sessionID,
+		EventType: eventType,
+		Category:  category,
+		Detail:    detail,
+		Metadata:  metadata,
+	})
 }
 
 // TestPidAlive_Self confirms our own pid is reported alive (signal-0
@@ -140,6 +163,54 @@ func TestSweepOrphans_MarksDeadRows(t *testing.T) {
 	}
 	if _, ok := store.orphaned["no-pid"]; ok {
 		t.Errorf("no-pid row should be skipped (no live-sessions checker, zero updated_at), not orphaned")
+	}
+}
+
+// TestSweepOrphans_LogsEventOnReconciliation verifies every reconciled row
+// writes a real, structured event_log entry (event_type=
+// "orphan_sweep_reconciled", category="recovery") carrying the PID, prior
+// state, and reconciliation reason — not just a bare event-type string.
+func TestSweepOrphans_LogsEventOnReconciliation(t *testing.T) {
+	store := newFakeRuntimeStore()
+	store.listRows = []*agent.RuntimeRow{
+		{ID: "dead-row", Provider: "claude", Mode: "chat", State: "running", PID: 1<<22 + 42},
+	}
+
+	orphaned, err := SweepOrphans(context.Background(), &agent.Dependencies{Store: store})
+	if err != nil {
+		t.Fatalf("SweepOrphans: %v", err)
+	}
+	if orphaned != 1 {
+		t.Fatalf("orphaned count = %d, want 1", orphaned)
+	}
+	if len(store.events) != 1 {
+		t.Fatalf("expected 1 logged event, got %d: %+v", len(store.events), store.events)
+	}
+	ev := store.events[0]
+	if ev.SessionID != "dead-row" {
+		t.Errorf("event.SessionID = %q, want dead-row", ev.SessionID)
+	}
+	if ev.EventType != "orphan_sweep_reconciled" {
+		t.Errorf("event.EventType = %q, want orphan_sweep_reconciled", ev.EventType)
+	}
+	if ev.Category != "recovery" {
+		t.Errorf("event.Category = %q, want recovery", ev.Category)
+	}
+	var meta map[string]any
+	if err := json.Unmarshal([]byte(ev.Metadata), &meta); err != nil {
+		t.Fatalf("event metadata not JSON: %v\nblob: %s", err, ev.Metadata)
+	}
+	if meta["runtime_id"] != "dead-row" {
+		t.Errorf("metadata.runtime_id = %v, want dead-row", meta["runtime_id"])
+	}
+	if meta["state_before"] != "running" {
+		t.Errorf("metadata.state_before = %v, want running", meta["state_before"])
+	}
+	if meta["reason"] != ReasonReconcileDeadPid {
+		t.Errorf("metadata.reason = %v, want %q", meta["reason"], ReasonReconcileDeadPid)
+	}
+	if got, want := meta["pid"], float64(1<<22+42); got != want {
+		t.Errorf("metadata.pid = %v, want %v", got, want)
 	}
 }
 

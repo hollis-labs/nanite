@@ -1,6 +1,7 @@
 package service
 
 import (
+	"encoding/json"
 	"fmt"
 	"log/slog"
 	"os"
@@ -63,12 +64,14 @@ func (s *chatServiceImpl) buildSessionRecoveryPrefix(sessionID string, session *
 		return ""
 	}
 	history := pack.ExcludeCurrentTurn(msgs, userContent)
-	if len(history) > recoveryHistoryMessages {
+	windowCapped := len(history) > recoveryHistoryMessages
+	if windowCapped {
 		history = history[len(history)-recoveryHistoryMessages:]
 	}
 	if !pack.ShouldBuildRecoveryPack(true, len(history)) {
 		return ""
 	}
+	const reason = "host service restart (cold boot with prior history)"
 	packPath := ""
 	if strings.TrimSpace(bootDir) != "" {
 		packPath = filepath.Join(bootDir, recoveryPackFileName)
@@ -76,7 +79,7 @@ func (s *chatServiceImpl) buildSessionRecoveryPrefix(sessionID string, session *
 	built := pack.BuildRecoveryPack(pack.RecoveryPackInput{
 		Session:  session,
 		Agent:    agent,
-		Reason:   "host service restart (cold boot with prior history)",
+		Reason:   reason,
 		History:  history,
 		PackPath: packPath,
 	})
@@ -86,8 +89,49 @@ func (s *chatServiceImpl) buildSessionRecoveryPrefix(sessionID string, session *
 		}
 	}
 	s.store.LogEvent(sessionID, "recovery_pack_planted", "recovery",
-		fmt.Sprintf("planted recovery pack (%d prior turns)", len(history)), "{}")
+		fmt.Sprintf("planted recovery pack (%d prior turns)", len(history)),
+		recoveryPackPlantedMetadata(sessionID, reason, packPath, msgs, history, windowCapped))
 	return built
+}
+
+// recoveryPackPlantedMeta is the structured event_log.metadata payload for
+// event_type="recovery_pack_planted" — a real postmortem of what was
+// replayed (message count, any truncation applied), not a bare marker.
+// Mirrors the shape convention chat_reflexes.go's "reflex_action" write
+// established.
+type recoveryPackPlantedMeta struct {
+	SourceSessionID       string `json:"source_session_id"`
+	Reason                string `json:"reason"`
+	MessagesReplayed      int    `json:"messages_replayed"`
+	MessagesAvailable     int    `json:"messages_available"`
+	HistoryWindowCapped   bool   `json:"history_window_capped"`
+	MessagesCharTruncated int    `json:"messages_char_truncated"`
+	RecoveryHistoryMax    int    `json:"recovery_history_max"`
+	PackPath              string `json:"pack_path,omitempty"`
+}
+
+// recoveryPackPlantedMetadata builds the JSON metadata blob for the
+// "recovery_pack_planted" event_log row. msgs is the raw pre-exclusion/
+// pre-window fetch (used to report how much history existed vs. how much
+// was actually replayed); history is the final bounded set BuildRecoveryPack
+// rendered. windowCapped reports whether history was longer than
+// recoveryHistoryMessages before being sliced down to the trailing window.
+func recoveryPackPlantedMetadata(sessionID, reason, packPath string, msgs, history []store.Message, windowCapped bool) string {
+	meta := recoveryPackPlantedMeta{
+		SourceSessionID:       sessionID,
+		Reason:                reason,
+		MessagesReplayed:      len(history),
+		MessagesAvailable:     len(msgs),
+		HistoryWindowCapped:   windowCapped,
+		MessagesCharTruncated: pack.CountCharTruncatedMessages(history),
+		RecoveryHistoryMax:    recoveryHistoryMessages,
+		PackPath:              packPath,
+	}
+	blob, err := json.Marshal(meta)
+	if err != nil {
+		return "{}"
+	}
+	return string(blob)
 }
 
 // composeBootPayload builds the per-turn payload for the boot-driven CLI path.

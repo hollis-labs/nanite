@@ -9,6 +9,7 @@ package orphansweep
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -113,9 +114,61 @@ func sweepOrphansAt(ctx context.Context, deps *agent.Dependencies, pidZeroGrace 
 			"reason", reason,
 			"updated_at_age", nowTS.Sub(row.UpdatedAt).String(),
 		)
+		logReconciliation(deps, row, reason, nowTS)
 		orphaned++
 	}
 	return orphaned, nil
+}
+
+// orphanReconciledMeta is the structured event_log.metadata payload for
+// event_type="orphan_sweep_reconciled" — the reasoning fields a postmortem
+// query needs: which row, what its prior state/PID was, which branch of
+// classifyForReconciliation fired, and how stale it was when reaped.
+// Mirrors the shape convention chat_reflexes.go's "reflex_action" write
+// established: a real JSON struct, not a bare event-type string.
+type orphanReconciledMeta struct {
+	RuntimeID       string `json:"runtime_id"`
+	Provider        string `json:"provider,omitempty"`
+	Mode            string `json:"mode,omitempty"`
+	StateBefore     string `json:"state_before"`
+	PID             int    `json:"pid"`
+	Reason          string `json:"reason"`
+	ParentSessionID string `json:"parent_session_id,omitempty"`
+	UpdatedAtAge    string `json:"updated_at_age,omitempty"`
+}
+
+// logReconciliation writes the event_log postmortem row for one reconciled
+// orphan. Best-effort: deps.Store.LogEvent already swallows its own DB
+// errors (store.Store.LogEvent), and a nil/absent LogEvent capability
+// (only possible via a test fake that doesn't implement it, which the Go
+// compiler would already reject) is not a runtime concern here.
+func logReconciliation(deps *agent.Dependencies, row *agent.RuntimeRow, reason string, now time.Time) {
+	var age string
+	if !row.UpdatedAt.IsZero() {
+		age = now.Sub(row.UpdatedAt).String()
+	}
+	meta := orphanReconciledMeta{
+		RuntimeID:    row.ID,
+		Provider:     row.Provider,
+		Mode:         row.Mode,
+		StateBefore:  row.State,
+		PID:          row.PID,
+		Reason:       reason,
+		UpdatedAtAge: age,
+	}
+	if row.ParentSessionID != nil {
+		meta.ParentSessionID = *row.ParentSessionID
+	}
+	blob, err := json.Marshal(meta)
+	if err != nil {
+		blob = []byte("{}")
+	}
+	detail := fmt.Sprintf("orphan runtime row %s reconciled (%s)", row.ID, reason)
+	// row.ID is the runtime row's ID — equal to the chat session ID for
+	// ModeLongLived rows, or a scoped subagent/background run ID
+	// otherwise. event_log.session_id has no FK constraint, so this is
+	// always a safe, meaningful correlation key.
+	deps.Store.LogEvent(row.ID, "orphan_sweep_reconciled", "recovery", detail, string(blob))
 }
 
 // classifyForReconciliation is the pure decision function: given a row

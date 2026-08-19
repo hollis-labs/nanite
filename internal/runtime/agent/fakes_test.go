@@ -33,6 +33,16 @@ type fakeRuntimeStore struct {
 	checkpoint *RuntimeCheckpoint
 	createErr  error
 	listRows   []*RuntimeRow
+	events     []fakeLoggedEvent
+}
+
+// fakeLoggedEvent captures one LogEvent call for test assertions.
+type fakeLoggedEvent struct {
+	SessionID string
+	EventType string
+	Category  string
+	Detail    string
+	Metadata  string
 }
 
 func newFakeRuntimeStore() *fakeRuntimeStore {
@@ -87,6 +97,18 @@ func (f *fakeRuntimeStore) ListRunningRows() ([]*RuntimeRow, error) {
 	out := make([]*RuntimeRow, len(f.listRows))
 	copy(out, f.listRows)
 	return out, nil
+}
+
+func (f *fakeRuntimeStore) LogEvent(sessionID, eventType, category, detail, metadata string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.events = append(f.events, fakeLoggedEvent{
+		SessionID: sessionID,
+		EventType: eventType,
+		Category:  category,
+		Detail:    detail,
+		Metadata:  metadata,
+	})
 }
 
 // fakeAdapter is a minimal CLIAdapter that produces predictable BuildArgs

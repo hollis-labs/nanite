@@ -100,13 +100,13 @@ This branch (`phase-1-execution`, based off Phase 0's `HEAD` as of 2026-08-18 �
 
 | Task | Status | Depends on |
 |---|---|---|
-| 01-add-roles-table-and-cascade-resolution | validated | none |
+| 01-add-roles-table-and-cascade-resolution | reviewed | none |
 | 02-add-agents-composition-columns | not-started | 01, 06 |
-| 03-add-consumers-table | validated | none |
+| 03-add-consumers-table | reviewed | none |
 | 04-add-known-tools-and-agent-tools-fk | not-started | none |
-| 05-fix-agent-skills-and-agent-projects-fks | validated | none hard — independently verify `agent_skills`/`agent_projects` are still zero-row (see task file) |
-| 06-fix-models-table-sync-target | validated | none |
-| 07-add-reflex-opt-out-field | validated | none |
+| 05-fix-agent-skills-and-agent-projects-fks | reviewed | none hard — independently verify `agent_skills`/`agent_projects` are still zero-row (see task file) |
+| 06-fix-models-table-sync-target | reviewed | none |
+| 07-add-reflex-opt-out-field | reviewed | none |
 | 08-kill-file-reingest-on-boot-pattern | not-started | `TASKS/phase-0/10-seed-builtin-agent-profiles` (implemented); `01` (roles negative-verification) |
 | 09-build-assignment-ui-api | not-started | 01–07 (excludes 10, which is out of scope) |
 | 10-data-migrate-nanite-agents-md | **out-of-scope** | n/a — cut for Phase 1, operator decision 2026-08-18 |
@@ -117,6 +117,11 @@ This branch (`phase-1-execution`, based off Phase 0's `HEAD` as of 2026-08-18 �
 - **Wave 3 — solo.** `09` — needs `01`–`08` all landed (frontend + `internal/api/api.go` additions).
 
 **Wave 1 validation (2026-08-18)**: per `EXECUTION-PROCESS.md`'s validation-checkpoint rule and `standards/testing.md`'s "dogfeed it, don't just trust a green test suite," ran a real scratch instance (`nanite serve -db <scratch>`, isolated from any real data) and exercised each merged feature live, not just via `go test`: `POST`/`GET /api/roles` (created a real role, confirmed round-trip); `POST /api/agents/{id}/skills` and `.../projects` against a nonexistent agent ID both now correctly return 404 (previously the projects path had no check at all, and the skills path passed for file-based ghost agents — task `05`'s fix, confirmed live); `agent_profiles.consumer_id` column and the seeded Loom row in `consumers` confirmed via direct query; `models` table confirmed populated (DB-authoritative per task `06`); `agent_reflexes.opt_out_allowed` confirmed live via `GET /api/agents/{id}/reflexes` and a direct query showing exactly the 3 `halt_session` seeds (`drift_detector_echo`, `task_complete_self_terminate`, `task_timeout`) at `opt_out_allowed=0` and every other seed at `1`. Full `go build`/`go vet`/`go test ./...` also re-verified clean after every merge (see individual commit messages). Scratch instance and binary discarded after verification — no real data touched.
+
+**Wave 1 review (2026-08-18)**: fresh Reviewer dispatch (no shared context with the implementing workers) re-ran `go build`/`go vet`/`go test ./... -count=1` independently (all clean, the one `go vet` finding confirmed byte-identical to the pre-Phase-1 base — pre-existing, not introduced here), verified the migration renumbering is fully consistent (no stray old-number references, every `DownTo` target correct), and passed all five tasks on correctness and architecture alignment. No blocking findings. Two non-blocking items surfaced, worth carrying forward rather than dropping:
+- **Follow-up candidate**: `internal/service/container.go`'s `modelsDevProviderAllowlist` (`{"anthropic","openai"}`) and `internal/store/seed.go`'s `seededProviders` encode the same "which providers Nanite seeds" fact as two independent hardcoded maps in two packages (`service` vs. `store`) — they currently agree, so no live bug, but nothing enforces they stay in sync. Task `06`'s own Work Log already disclosed this as a known risk. Recommend a real follow-up task once a natural owner exists (e.g. export a typed provider-catalog accessor from `store` that `container.go` derives its allowlist from) — not urgent enough to block Phase 1, but don't let it silently disappear either.
+- **Known limitation, not fixed**: `internal/store/migrations/106_add_consumers_table.sql` declares `-- +goose NO TRANSACTION` despite only doing `CREATE TABLE`/`ALTER TABLE ADD COLUMN`/`INSERT OR IGNORE` (no `PRAGMA foreign_keys` toggle, unlike `107`/`109` which genuinely need it) — drops this migration's atomicity for no benefit. Cosmetic, verified harmless against a real backup and the full test suite; leaving as-is rather than dispatching a fix cycle for a one-line pragma removal.
+- **Known limitation, not fixed**: `internal/service/role_cascade.go`'s JSON-array/object decoders silently swallow unmarshal errors (matches the existing `internal/store/agents.go:183` convention, not a new regression) — currently inert since `applyScalarCascade` only applies the four scalar fields, never the decoded `Tools`/`Skills`/`Permissions`. Worth revisiting once a later task (`02` or beyond) starts applying the tool/skill half of the cascade live — flagging now so it isn't forgotten once that happens.
 
 ## Phase 2 — Agent Launching (5 task files)
 

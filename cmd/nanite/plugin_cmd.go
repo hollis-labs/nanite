@@ -23,8 +23,14 @@ import (
 
 const pluginGitOrg = "hollis-labs"
 
-// noRestart is set via the --no-restart flag to skip auto-restart after
-// install/uninstall/disable/enable operations.
+// noRestart is set via the --no-restart flag. It still gates every restart
+// path exactly as it always did: builtin install/update/enable, and
+// uninstall/disable (both plugin kinds — see the rationale comments on
+// pluginUninstall/pluginDisable for why those two don't hot-reload). It has
+// nothing to skip on the subprocess hot-reload path added by
+// triggerActivation: hot-reloading a subprocess plugin never restarted the
+// service to begin with, so the flag is a no-op there — subprocess
+// install/update/enable no longer restart by default at all.
 var noRestart bool
 
 // installLink is set via the --link flag to symlink the source directory
@@ -198,6 +204,63 @@ func triggerRestart() {
 	}
 }
 
+// triggerHotReload hot-loads a subprocess plugin into the running service
+// via the same POST /api/plugins/reload endpoint `nanite plugin reload`
+// already uses (handleReload: unload-best-effort, then load). Unlike
+// pluginReload — a direct CLI command that os.Exit(1)s on failure — this
+// runs as the tail step of an install/update/enable that already succeeded
+// on disk, so a failure here must not abort the process; it degrades to a
+// manual-reload hint, mirroring triggerRestart's soft-failure behavior when
+// cerberus isn't available.
+func triggerHotReload(name string) {
+	fmt.Printf("Hot-reloading %q...\n", name)
+	resp, err := apiPost("/api/plugins/reload", map[string]string{"name": name})
+	if err != nil {
+		fmt.Printf("  Could not reach %s to hot-reload (is the service running?): %v\n", apiBaseURL(), err)
+		fmt.Printf("  Reload manually: %s plugin reload %s\n", brand.BinaryName, name)
+		return
+	}
+	defer resp.Body.Close()
+	body, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode >= 400 {
+		fmt.Printf("  Hot-reload failed (%d): %s\n", resp.StatusCode, strings.TrimSpace(string(body)))
+		fmt.Printf("  Reload manually: %s plugin reload %s\n", brand.BinaryName, name)
+		return
+	}
+	fmt.Printf("Plugin %q is live — no restart needed.\n", name)
+}
+
+// activationMode decides how a plugin should be brought live after an
+// install/update/enable that already landed a valid plugin.yaml on disk. A
+// subprocess plugin's runtime lives entirely under plugins/<id>/ as data the
+// host reads at load time — the running nanite binary itself doesn't change
+// — so it hot-loads via the /api/plugins/reload path with no restart. A
+// builtin's Go code is compiled into the nanite binary; a fresh or updated
+// builtin can't be hot-loaded because that code isn't in the currently
+// running binary until it's rebuilt, so it genuinely needs a restart. A nil
+// manifest (kind couldn't be determined) conservatively defaults to restart
+// — the safe choice when kind is unknown.
+func activationMode(manifest *plugin.PluginManifest) string {
+	if manifest != nil && manifest.Runtime == "subprocess" {
+		return "hot-reload"
+	}
+	return "restart"
+}
+
+// triggerActivation applies activationMode's decision: hot-reload for a
+// subprocess plugin, a full triggerRestart() (still --no-restart-gated) for
+// a builtin or unknown kind. This is the fix for the CLI-install-vs-hot-
+// reload asymmetry (docs/engineering/architecture/09-plugin-system.md) —
+// the CLI now calls the same reload endpoint the API-driven install path and
+// `nanite plugin reload` already use, instead of always requiring a restart.
+func triggerActivation(name string, manifest *plugin.PluginManifest) {
+	if activationMode(manifest) == "hot-reload" {
+		triggerHotReload(name)
+		return
+	}
+	triggerRestart()
+}
+
 // isLocalPath returns true if arg refers to a local filesystem path
 // rather than a plugin name to clone from GitHub. Explicit path
 // prefixes (./, ../, /) are always local; a bare token is local if it
@@ -287,7 +350,7 @@ func pluginInstallLocal(src string) {
 	}
 
 	fmt.Printf("\nPlugin %q installed to %s\n", id, target)
-	triggerRestart()
+	triggerActivation(id, manifest)
 }
 
 // pluginInstallRemote installs a plugin. Tries the signed catalog first;
@@ -313,7 +376,11 @@ func pluginInstallRemote(name string) {
 		}
 		if found {
 			fmt.Printf("\nPlugin %q installed from catalog to %s\n", name, final)
-			triggerRestart()
+			installedManifest, merr := plugin.ParseManifest(filepath.Join(final, "plugin.yaml"))
+			if merr != nil {
+				installedManifest = nil
+			}
+			triggerActivation(name, installedManifest)
 			return
 		}
 		fmt.Printf("  %q not in catalog — falling back to git clone.\n", name)
@@ -357,7 +424,7 @@ func pluginInstallRemote(name string) {
 	}
 
 	fmt.Printf("\nPlugin %q installed to %s\n", name, target)
-	triggerRestart()
+	triggerActivation(name, manifest)
 }
 
 // skipCopyNames are entry names (directories or files) that are never
@@ -482,6 +549,17 @@ func pluginUninstall(name string) {
 	}
 
 	fmt.Printf("\nPlugin %q uninstalled.\n", name)
+	// Deliberately always triggerRestart() here, not triggerActivation, for
+	// both plugin kinds. By this point the plugin directory (and its
+	// plugin.yaml) is already removed, so POST /api/plugins/reload
+	// (handleReload) would 404 on the missing manifest instead of unloading
+	// the live host state — the running process (subprocess included) would
+	// keep serving a plugin whose files no longer exist. There's no
+	// unload-only endpoint in play here (this task's scope reuses the
+	// existing reload endpoint's unload-then-load cycle unchanged, and
+	// that's not the same operation as a bare unload), so a full restart is
+	// the only way to guarantee no stale plugin state survives an
+	// uninstall.
 	triggerRestart()
 }
 
@@ -492,6 +570,14 @@ func pluginDisable(name string) {
 		os.Exit(1)
 	}
 	fmt.Printf("Plugin %q disabled.\n", name)
+	// Deliberately always triggerRestart() here too, both plugin kinds.
+	// DisablePlugin already renamed plugin.yaml -> plugin.yaml.disabled, so
+	// POST /api/plugins/reload would 404 on the now-missing plugin.yaml
+	// instead of unloading the plugin from the live host — the running
+	// process would keep the "disabled" plugin loaded and active until
+	// restart. A full restart is the only way this task's scope (the
+	// existing reload endpoint, as-is) can actually apply a CLI disable to
+	// the live host.
 	triggerRestart()
 }
 
@@ -502,7 +588,15 @@ func pluginEnable(name string) {
 		os.Exit(1)
 	}
 	fmt.Printf("Plugin %q enabled.\n", name)
-	triggerRestart()
+	// Unlike disable/uninstall, plugin.yaml exists again at this point
+	// (EnablePlugin just renamed it back from plugin.yaml.disabled), so the
+	// reload endpoint's unload(no-op)-then-load cycle resolves correctly —
+	// functionally the same hot-load the API's own handleEnable performs.
+	manifest, merr := plugin.ParseManifest(filepath.Join(dir, name, "plugin.yaml"))
+	if merr != nil {
+		manifest = nil
+	}
+	triggerActivation(name, manifest)
 }
 
 func pluginList() {

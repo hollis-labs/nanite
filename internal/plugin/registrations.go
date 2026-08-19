@@ -213,11 +213,17 @@ func (h *Host) bumpRegistryVersionLocked() {
 //
 // Scope note (B.4 first-cut): categories that require a handler proxy built
 // on top of subprocess JSON-RPC or builtin in-process dispatch (commands,
-// events, crud, http_routes, mcp_servers) are logged as TODO and deferred
+// events, http_routes, mcp_servers) are logged as TODO and deferred
 // to B.5/B.6 which land the transport and unregister primitives these need.
 // Purely declarative categories (envelopes, slots, keybindings, components)
 // are fully wired here — that is enough to migrate bookmarks off direct
 // Register calls as the B.4 acceptance proof.
+//
+// crud (Phase 5 item 05, TASKS/phase-5/05-develop-registers-panels-and-crud.md)
+// is no longer deferred: registerManifestCrud below wires yaml-declared
+// registers.crud[] entries into Host.RegisterCRUDHandler using the
+// subprocess proxy (subprocess.NewCRUDHandler) that had already landed in an
+// earlier pass but was never reachable from this manifest path.
 func applyManifestRegistrations(host *Host, manifest *PluginManifest, p goplugin.Plugin, pluginDir string) error {
 	if manifest == nil {
 		return nil
@@ -361,8 +367,9 @@ func applyManifestRegistrations(host *Host, manifest *PluginManifest, p goplugin
 		}
 	}
 	if len(reg.Crud) > 0 {
-		host.logger.Info("manifest crud: yaml-driven registration deferred to B.5/B.6 proxy work", "plugin", pluginID, "count", len(reg.Crud))
-		skipped += len(reg.Crud)
+		if err := registerManifestCrud(host, pluginID, reg.Crud, p); err != nil {
+			return err
+		}
 	}
 	if len(reg.HttpRoutes) > 0 {
 		if err := registerManifestHTTPRoutes(host, pluginID, reg.HttpRoutes, p); err != nil {
@@ -506,6 +513,55 @@ func registerManifestEvents(host *Host, pluginID string, entries []EventRegistra
 		if err := host.RegisterEventHook(entry.Types, hook); err != nil {
 			return fmt.Errorf("plugin %q: register event hook for %v: %w", pluginID, entry.Types, err)
 		}
+	}
+	return nil
+}
+
+// registerManifestCrud wires each manifest crud entry into the host's generic
+// CRUD resource-handler registry (Host.RegisterCRUDHandler), which auto-wires
+// a full REST route set at /api/plugins/{resource}/* — GET (list), POST
+// (create), GET/{id} (read), PUT/{id} (update), DELETE/{id} (delete); see
+// crud.go. For subprocess plugins each declared resource gets a CRUD handler
+// that proxies those five operations over JSON-RPC via the plugin's existing
+// transport (subprocess.NewCRUDHandler → MethodCRUDCreate/Read/Update/Delete/
+// List) — that wire-level proxy landed in an earlier pass (B.5/B.6) but was
+// never reachable from this manifest path until this task. Builtins that want
+// CRUD routes call host.RegisterCRUDHandler directly from their own Load —
+// this path only handles yaml-declared resources for subprocess plugins,
+// matching every other subprocess-only registration category in this file
+// (commands, events, http_routes, mcp_servers).
+//
+// entry.Methods is accepted by the manifest schema but not enforced here:
+// Host.RegisterCRUDHandler always wires the full five-route set — there is no
+// per-method opt-out in the host today. A plugin declaring methods: [list]
+// still gets all five routes wired; its own CRUDHandler implementation
+// (across the wire) is free to return an error for operations it doesn't
+// support. Narrowing which routes actually get registered per entry.Methods
+// is a reasonable follow-up if a real consumer needs it — no consumer exists
+// yet to motivate the extra complexity now.
+func registerManifestCrud(host *Host, pluginID string, entries []CRUDRegistration, p goplugin.Plugin) error {
+	sp, isSubprocess := p.(*subprocess.SubprocessPlugin)
+	if !isSubprocess {
+		host.logger.Info("manifest crud: builtin plugin — skipping (builtins register CRUD handlers directly)",
+			"plugin", pluginID, "count", len(entries))
+		return nil
+	}
+
+	transport := sp.Transport()
+	if transport == nil {
+		return fmt.Errorf("plugin %q: subprocess transport not ready for crud registration", pluginID)
+	}
+
+	for _, entry := range entries {
+		if entry.Resource == "" {
+			return fmt.Errorf("plugin %q: crud entry missing resource", pluginID)
+		}
+		handler := subprocess.NewCRUDHandler(entry.Resource, transport)
+		if err := host.RegisterCRUDHandler(entry.Resource, handler); err != nil {
+			return fmt.Errorf("plugin %q: register crud resource %q: %w", pluginID, entry.Resource, err)
+		}
+		host.logger.Info("registered plugin crud resource",
+			"plugin", pluginID, "resource", entry.Resource, "methods", entry.Methods)
 	}
 	return nil
 }

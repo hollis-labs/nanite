@@ -92,7 +92,11 @@ Per `EXECUTION-PROCESS.md`, real validation (not just build/vet/test) happens at
 
 ---
 
-## Phase 1 — Agent Construction (10 task files)
+## Phase 1 — Agent Construction (9 active task files + 1 out-of-scope)
+
+**Update, 2026-08-18 (operator decision)**: `10-data-migrate-nanite-agents-md` is **out of scope for Phase 1** — none of the 24 current `.nanite/agents/*.md` files (including Curator/Weaver) are being data-migrated into `roles`/`agents`. The operator has backed them up separately and will create new agents selectively, manually, via `09`'s UI once Phase 1 lands. No agent runs until Phase 1-5 is complete, so there's no urgency to preserve any legacy agent's behavior right now. See `10`'s own file for the full note. This removed `05`'s and `08`'s dependencies on `10`, simplifying the wave plan from 5 waves to 3 (below).
+
+This branch (`phase-1-execution`, based off Phase 0's `HEAD` as of 2026-08-18 — commit `f2d2114b`) is where Phase 1 execution and its own task-file/INDEX updates land, kept separate from the shared Phase-0-in-progress working directory per the existing **Section ownership** split above. Do not edit Phase 0's table/parallelization-plan sections from this branch; that stays the Phase 0 Orchestrator's.
 
 | Task | Status | Depends on |
 |---|---|---|
@@ -100,19 +104,17 @@ Per `EXECUTION-PROCESS.md`, real validation (not just build/vet/test) happens at
 | 02-add-agents-composition-columns | not-started | 01, 06 |
 | 03-add-consumers-table | not-started | none |
 | 04-add-known-tools-and-agent-tools-fk | not-started | none |
-| 05-fix-agent-skills-and-agent-projects-fks | not-started | 10 (or independent verification that no file-based, DB-row-less agents remain) |
+| 05-fix-agent-skills-and-agent-projects-fks | not-started | none hard — independently verify `agent_skills`/`agent_projects` are still zero-row (see task file) |
 | 06-fix-models-table-sync-target | not-started | none |
 | 07-add-reflex-opt-out-field | not-started | none |
-| 08-kill-file-reingest-on-boot-pattern | not-started | `TASKS/phase-0/10-seed-builtin-agent-profiles`; sequenced with 01/10, see file |
-| 09-build-assignment-ui-api | not-started | 01–07 |
-| 10-data-migrate-nanite-agents-md | not-started | 01, 02, 03, 04; `TASKS/phase-0/24-housekeeping-agent-profile-files`'s final disposition |
+| 08-kill-file-reingest-on-boot-pattern | not-started | `TASKS/phase-0/10-seed-builtin-agent-profiles` (implemented); `01` (roles negative-verification) |
+| 09-build-assignment-ui-api | not-started | 01–07 (excludes 10, which is out of scope) |
+| 10-data-migrate-nanite-agents-md | **out-of-scope** | n/a — cut for Phase 1, operator decision 2026-08-18 |
 
 **Parallelization** (file/table overlap checked against each task's own Touches list):
-- **Wave 1 — parallel.** `01, 03, 06, 07`. New, independent tables/columns — no shared migration files, no shared Go files (`01` touches `internal/service/agent.go`; `03` touches a new `internal/store/consumers.go`; `06` touches `container.go`/`pkg/models`; `07` touches `agent_reflexes`-adjacent code only).
-- **Wave 2 — parallel.** `02` (needs `01`+`06`), `04` (no hard dep, low file overlap with `02`). Both touch `agent_profiles`-adjacent migrations but different columns/tables — sequence merges, don't run truly concurrent writes to the same migration file.
-- **Wave 3 — solo.** `10` (needs `01`,`02`,`03`,`04` all landed) — the real design/analysis work (grouping files into roles vs. scope variants) plus the actual data write; high-value to isolate.
-- **Wave 4 — parallel.** `05` (needs `10`), `08` (needs `10` landed or closely sequenced after it, per `08`'s own note — land in the same change or immediately following, not truly parallel with `10` itself).
-- **Wave 5.** `09` — needs `01`–`07`; can plausibly run alongside Wave 3/4 (frontend + `internal/api/api.go` additions, low file overlap with `10`'s migration/data work), but default to running it after Wave 4 unless a worker confirms no conflict.
+- **Wave 1 — parallel.** `01, 03, 05, 06, 07`. New, independent tables/columns. Coordination note, not a hard block: `01`, `03`, and `05` **all** touch `internal/store/agents.go` (`01`'s `agent_profiles` read/cascade path; `03`'s `consumer_id` column plumbing; `05`'s `DeleteAgent` cleanups slice) — different functions/regions in each case, but worktree-isolate all three and merge one at a time, re-running tests after each, same pattern as Phase 0's `02`/`03` `durable_agents.go` coordination. `06` touches `container.go`/`pkg/models` only; `07` touches `agent_reflexes`-adjacent code only — both fully parallel-safe against the rest of this wave.
+- **Wave 2 — parallel.** `02` (needs `01`+`06`), `04` (no hard dep, low file overlap with `02`), `08` (needs `01`). `02`/`04` both touch `agent_profiles`-adjacent migrations but different columns/tables — sequence merges, don't run truly concurrent writes to the same migration file. `04` and `08` both touch `internal/service/ingest.go` (`04`'s `seedRoleToolsFromIngest` vs. `08`'s `AutoIngestAgents`/`AutoIngestSkills`) — different functions, whichever merges first, the other rebases onto it, same low-risk pattern as the `agents.go` note above.
+- **Wave 3 — solo.** `09` — needs `01`–`08` all landed (frontend + `internal/api/api.go` additions).
 
 ## Phase 2 — Agent Launching (5 task files)
 

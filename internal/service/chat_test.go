@@ -87,7 +87,7 @@ func (s *stubToolService) HandleRequestTools(_ context.Context, _ map[string]any
 	return nil, "No tools", nil
 }
 func (s *stubToolService) ListSummaries() []toolclient.ToolSummary { return nil }
-func (s *stubToolService) GetToolMeta(toolName string) (ToolMetaInfo, bool) {
+func (s *stubToolService) GetToolMeta(_ context.Context, toolName string) (ToolMetaInfo, bool) {
 	return ToolMetaInfo{}, true
 }
 

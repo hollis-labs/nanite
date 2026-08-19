@@ -1,6 +1,7 @@
 package service
 
 import (
+	"context"
 	"fmt"
 	"strings"
 	"testing"
@@ -9,6 +10,7 @@ import (
 	llmtypes "github.com/hollis-labs/go-llm-types"
 	"github.com/hollis-labs/nanite/internal/chat"
 	"github.com/hollis-labs/nanite/internal/dispatcher"
+	"github.com/hollis-labs/nanite/internal/toolclient"
 )
 
 // TestLoopState_ResolvedMaxTurns pins resolvedMaxTurns()'s remaining
@@ -424,35 +426,95 @@ func TestNewLoopState_Defaults(t *testing.T) {
 	}
 }
 
+// TestToolMetaInfo_ConcurrencySafe is Phase 4 item 07's declared-metadata
+// mechanism, exercised end to end: SyncKnownTools backfills
+// known_tools.concurrency_safe from the curated table in
+// tool_concurrency_classification.go, then GetToolMeta reads it back. No
+// name-heuristic is involved anywhere in this path — several of the cases
+// below (base64_encode, message_inbox, tool_describe, search_tool_result)
+// are real tools the OLD suffix/substring heuristic misclassified as
+// unsafe; they're pinned here specifically so that regression can't recur
+// silently. See TASKS/phase-4/07-tool-concurrency-safety-classification.md's
+// Work Log for the full audit.
 func TestToolMetaInfo_ConcurrencySafe(t *testing.T) {
-	svc := &toolServiceImpl{}
+	st := newKnownToolsTestStore(t)
+	ctx := context.Background()
 
 	tests := []struct {
 		name     string
 		tool     string
 		wantSafe bool
 	}{
-		// Uniform agent-facing names per ADR-002 — no `mcp__server__` prefix.
 		{"read tool", "dev_read", true},
 		{"grep tool", "dev_grep", true},
 		{"glob tool", "dev_glob", true},
-		{"search tool", "context_search", true},
-		{"web fetch", "web_fetch", true},
-		{"web search", "web_search", true},
 		{"write tool", "dev_write", false},
 		{"edit tool", "dev_edit", false},
-		{"bash tool", "dev_bash", false},
-		{"delete tool", "engine_task_delete", false},
+		{"bash tool — input-dependent, conservative static default", "dev_bash", false},
+		{"web fetch", "web_fetch", true},
+		{"base64 encode — misclassified unsafe by the old name heuristic", "base64_encode", true},
+		{"url decode — misclassified unsafe by the old name heuristic", "url_decode", true},
+		{"math eval — misclassified unsafe by the old name heuristic", "math_eval", true},
+		{"install diff — dry-run stub, misclassified unsafe by the old name heuristic", "install_diff", true},
+		{"message inbox — misclassified unsafe by the old name heuristic", "message_inbox", true},
+		{"whoami — misclassified unsafe by the old name heuristic", "whoami", true},
+		{"tool describe — misclassified unsafe by the old name heuristic", "tool_describe", true},
+		{"tool validate — misclassified unsafe by the old name heuristic", "tool_validate", true},
+		{"fetch_tool_result — misclassified unsafe by the old name heuristic", "fetch_tool_result", true},
+		{"search_tool_result — 'search' is a PREFIX here, which the old suffix heuristic could never match", "search_tool_result", true},
+		{"skill delete — genuinely destructive, must stay unsafe", "skill_delete", false},
+		{"code execute — genuinely destructive, must stay unsafe", "code_execute", false},
 	}
+
+	catalog := make([]llmtypes.ToolDefinition, 0, len(tests))
+	for _, tt := range tests {
+		catalog = append(catalog, llmtypes.ToolDefinition{Name: tt.tool})
+	}
+	SyncKnownTools(ctx, st, catalog, func(string) bool { return true })
+
+	svc := &toolServiceImpl{toolClient: &toolclient.ToolClient{Store: st}}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			meta, _ := svc.GetToolMeta(tt.tool)
+			meta, ok := svc.GetToolMeta(ctx, tt.tool)
+			if !ok {
+				t.Fatalf("GetToolMeta(%q) ok = false, want true", tt.tool)
+			}
 			if meta.IsConcurrencySafe != tt.wantSafe {
 				t.Errorf("GetToolMeta(%q).IsConcurrencySafe = %v, want %v", tt.tool, meta.IsConcurrencySafe, tt.wantSafe)
 			}
 		})
 	}
+}
+
+// TestToolMetaInfo_ConcurrencySafe_UndeclaredFailsClosed covers both "no
+// store wired" (chiefly tests/callers that never attach one) and "tool has
+// no known_tools row / row not yet classified" — both must default to
+// false (fail closed), never a name guess.
+func TestToolMetaInfo_ConcurrencySafe_UndeclaredFailsClosed(t *testing.T) {
+	t.Run("no store wired", func(t *testing.T) {
+		svc := &toolServiceImpl{}
+		meta, ok := svc.GetToolMeta(context.Background(), "dev_read")
+		if !ok {
+			t.Fatal("GetToolMeta ok = false, want true")
+		}
+		if meta.IsConcurrencySafe {
+			t.Error("IsConcurrencySafe = true with no store wired, want false (fail closed)")
+		}
+	})
+
+	t.Run("unknown tool, never classified", func(t *testing.T) {
+		st := newKnownToolsTestStore(t)
+		ctx := context.Background()
+		svc := &toolServiceImpl{toolClient: &toolclient.ToolClient{Store: st}}
+		meta, ok := svc.GetToolMeta(ctx, "totally_unknown_mcp_tool_xyz")
+		if !ok {
+			t.Fatal("GetToolMeta ok = false, want true")
+		}
+		if meta.IsConcurrencySafe {
+			t.Error("IsConcurrencySafe = true for an unclassified tool, want false (fail closed)")
+		}
+	})
 }
 
 func TestNewLoopState_ScratchpadInitialized(t *testing.T) {

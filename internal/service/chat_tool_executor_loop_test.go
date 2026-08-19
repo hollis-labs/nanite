@@ -34,9 +34,11 @@ func (s *loopTestToolStub) Execute(_ context.Context, _, _ string, _ map[string]
 func (*loopTestToolStub) HandleRequestTools(_ context.Context, _ map[string]any) ([]llmtypes.ToolDefinition, string, error) {
 	return nil, "no tools", nil
 }
-func (*loopTestToolStub) ListSummaries() []toolclient.ToolSummary   { return nil }
-func (*loopTestToolStub) GetToolMeta(_ string) (ToolMetaInfo, bool) { return ToolMetaInfo{}, false }
-func (*loopTestToolStub) GetToolSchema(_ string) map[string]any     { return nil }
+func (*loopTestToolStub) ListSummaries() []toolclient.ToolSummary { return nil }
+func (*loopTestToolStub) GetToolMeta(_ context.Context, _ string) (ToolMetaInfo, bool) {
+	return ToolMetaInfo{}, false
+}
+func (*loopTestToolStub) GetToolSchema(_ string) map[string]any { return nil }
 
 // ─── Store stub ───────────────────────────────────────────────────────────────
 

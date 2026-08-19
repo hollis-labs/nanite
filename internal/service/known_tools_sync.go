@@ -50,6 +50,17 @@ func SyncKnownTools(ctx context.Context, st *store.Store, catalog []llmtypes.Too
 			continue
 		}
 		result.Upserted++
+
+		// Phase 4 item 07 (TASKS/phase-4/07-tool-concurrency-safety-
+		// classification.md): backfill concurrency_safe from the curated
+		// declared-metadata table, but only while the column is still
+		// NULL -- see SetKnownToolConcurrencySafeIfUnset's doc comment for
+		// why a routine re-sync must never clobber an already-set value.
+		if safe, declared := declaredConcurrencySafety(t.Name); declared {
+			if err := st.SetKnownToolConcurrencySafeIfUnset(ctx, t.Name, safe); err != nil {
+				slog.Warn("service: sync known_tools concurrency_safe backfill", "tool", t.Name, "err", err)
+			}
+		}
 	}
 
 	marked, err := st.MarkKnownToolsUnavailableExcept(ctx, names)

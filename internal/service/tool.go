@@ -69,7 +69,12 @@ type ToolService interface {
 
 	// GetToolMeta returns safety metadata for a tool. Returns false if the
 	// tool is not found in the registry. Used by the permission engine.
-	GetToolMeta(toolName string) (ToolMetaInfo, bool)
+	//
+	// ctx is used to read the tool's declared concurrency-safety
+	// classification from the known_tools catalog (TASKS/phase-4/07-tool-
+	// concurrency-safety-classification.md) -- see the implementation's
+	// doc comment for the full account.
+	GetToolMeta(ctx context.Context, toolName string) (ToolMetaInfo, bool)
 
 	// GetToolSchema returns the InputSchema for a named tool, or nil if the
 	// tool has no schema or is not found. Used by arg validation at execute time.
@@ -698,9 +703,27 @@ func (s *toolServiceImpl) ListSummaries() []toolclient.ToolSummary {
 }
 
 // GetToolMeta implements ToolService. Returns safety metadata for a tool.
-// Uses name-based heuristics consistent with internal/tool/adapt.go patterns.
-// Concurrency safety: read/search/fetch tools are safe; write/edit/bash are not.
-func (s *toolServiceImpl) GetToolMeta(toolName string) (ToolMetaInfo, bool) {
+//
+// IsReadOnly/IsDestructive still use name-based heuristics consistent with
+// internal/tool/adapt.go patterns -- those two fields are out of scope for
+// TASKS/phase-4/07-tool-concurrency-safety-classification.md, which only
+// covers IsConcurrencySafe (see that task file and architecture/
+// 03-steering.md's "Two correctness gaps carried into implementation").
+//
+// IsConcurrencySafe reads the tool's DECLARED classification from the
+// known_tools catalog (known_tools.concurrency_safe, populated at boot by
+// SyncKnownTools from the curated table in tool_concurrency_classification.go
+// -- see that file's doc comment for what "declared" means here and why).
+// It never inspects toolName. A tool whose known_tools row doesn't exist
+// yet, or whose concurrency_safe column is still NULL ("not yet
+// classified"), defaults to false -- fail closed, not a name guess. This
+// replaces a pure suffix/substring name-heuristic that used to live here;
+// TASKS/phase-4/07's Work Log has the audit that found real
+// misclassifications under it (e.g. base64_encode, message_inbox,
+// tool_describe, and search_tool_result -- the last one because "search"
+// was a PREFIX, not a suffix, which the old heuristic could not match at
+// all).
+func (s *toolServiceImpl) GetToolMeta(ctx context.Context, toolName string) (ToolMetaInfo, bool) {
 	meta := ToolMetaInfo{}
 
 	// Read-only tools.
@@ -723,19 +746,29 @@ func (s *toolServiceImpl) GetToolMeta(toolName string) (ToolMetaInfo, bool) {
 		meta.IsDestructive = true
 	}
 
-	// Concurrency safety — mirrors internal/tool/adapt.go:inferSafetyOptions.
-	// Read-only tools are concurrent-safe; write/edit/bash/destructive are not.
-	switch {
-	case meta.IsReadOnly:
-		meta.IsConcurrencySafe = true
-	case strings.Contains(toolName, "json_parse") || strings.Contains(toolName, "datetime") ||
-		strings.Contains(toolName, "hash") || strings.Contains(toolName, "uuid"):
-		meta.IsConcurrencySafe = true // pure utility tools
-	default:
-		meta.IsConcurrencySafe = false
-	}
+	meta.IsConcurrencySafe = s.declaredConcurrencySafe(ctx, toolName)
 
 	return meta, true
+}
+
+// declaredConcurrencySafe returns the known_tools.concurrency_safe value
+// for toolName, or false when no store is wired (chiefly tests), the tool
+// has no known_tools row yet, or the row's concurrency_safe column is
+// still NULL. Never consults toolName's text -- see GetToolMeta's doc
+// comment for the reasoning and the audit that replaced the old heuristic.
+func (s *toolServiceImpl) declaredConcurrencySafe(ctx context.Context, toolName string) bool {
+	st := s.agentToolsStore()
+	if st == nil {
+		return false
+	}
+	row, err := st.GetKnownToolByName(ctx, toolName)
+	if err != nil {
+		return false
+	}
+	if row.ConcurrencySafe == nil {
+		return false
+	}
+	return *row.ConcurrencySafe
 }
 
 // ---------------------------------------------------------------------------

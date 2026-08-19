@@ -158,6 +158,27 @@ func (s *Store) UpsertKnownTool(ctx context.Context, name, source, status, descr
 	return row.ID, nil
 }
 
+// SetKnownToolConcurrencySafeIfUnset backfills known_tools.concurrency_safe
+// for a single row -- but ONLY while the column is still NULL ("not yet
+// classified"). Mirrors UpsertKnownTool's own contract for this exact
+// column: once a value is set (by this backfill or by a future operator
+// override), a later call here is a deliberate no-op, so a routine catalog
+// re-sync (TASKS/phase-4/07-tool-concurrency-safety-classification.md)
+// can never silently revert an operator's explicit classification -- same
+// precedent as always_included. No-op (nil error, zero rows affected) if
+// no known_tools row named name exists yet.
+func (s *Store) SetKnownToolConcurrencySafeIfUnset(ctx context.Context, name string, safe bool) error {
+	now := time.Now().UTC().Format(time.RFC3339)
+	_, err := s.DB.ExecContext(ctx,
+		`UPDATE known_tools SET concurrency_safe = ?, updated_at = ? WHERE name = ? AND concurrency_safe IS NULL`,
+		safe, now, name,
+	)
+	if err != nil {
+		return fmt.Errorf("set known_tools concurrency_safe %s: %w", name, err)
+	}
+	return nil
+}
+
 // MarkKnownToolsUnavailableExcept sets status='unavailable' on every
 // known_tools row whose name is not in currentNames. Rows are never
 // deleted -- per architecture/01-agent-construction.md ("status=unavailable,

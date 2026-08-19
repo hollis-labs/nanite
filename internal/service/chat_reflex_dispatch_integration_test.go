@@ -61,7 +61,7 @@ func (f *recordingReflexDispatchToolService) HandleRequestTools(context.Context,
 	return nil, "", nil
 }
 func (f *recordingReflexDispatchToolService) ListSummaries() []toolclient.ToolSummary { return nil }
-func (f *recordingReflexDispatchToolService) GetToolMeta(string) (ToolMetaInfo, bool) {
+func (f *recordingReflexDispatchToolService) GetToolMeta(context.Context, string) (ToolMetaInfo, bool) {
 	return ToolMetaInfo{}, false
 }
 func (f *recordingReflexDispatchToolService) GetToolSchema(string) map[string]any { return nil }

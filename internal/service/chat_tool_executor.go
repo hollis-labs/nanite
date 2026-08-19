@@ -155,7 +155,7 @@ func (s *chatServiceImpl) preCheckTools(
 		// Permission check.
 		if s.permissions != nil {
 			meta := permission.ToolMeta{}
-			if toolInfo, ok := s.tools.GetToolMeta(tu.Name); ok {
+			if toolInfo, ok := s.tools.GetToolMeta(ctx, tu.Name); ok {
 				meta.IsReadOnly = toolInfo.IsReadOnly
 				meta.IsDestructive = toolInfo.IsDestructive
 			}
@@ -321,7 +321,7 @@ func (s *chatServiceImpl) preCheckTools(
 
 		// Tool passed pre-check — determine concurrency safety.
 		plan.status = toolPlanReady
-		if toolInfo, ok := s.tools.GetToolMeta(tu.Name); ok {
+		if toolInfo, ok := s.tools.GetToolMeta(ctx, tu.Name); ok {
 			plan.concurrent = toolInfo.IsConcurrencySafe
 		}
 		// Scratchpad tools access loopState directly with no mutex; always serial.

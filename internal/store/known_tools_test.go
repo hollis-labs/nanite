@@ -166,6 +166,65 @@ func TestAlwaysIncludedToolsSurviveZeroExplicitGrants(t *testing.T) {
 	}
 }
 
+// TestSetKnownToolConcurrencySafeIfUnset_BackfillsThenPreservesOverride is
+// Phase 4 item 07's declared-metadata mechanism, verified directly: the
+// first classification call fills a NULL column; a later call with a
+// different value is a no-op, matching always_included's established
+// "operator-owned once set" contract for this table.
+func TestSetKnownToolConcurrencySafeIfUnset_BackfillsThenPreservesOverride(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+
+	if _, err := s.UpsertKnownTool(ctx, "dev_read", "builtin", "available", "Reads a file."); err != nil {
+		t.Fatalf("UpsertKnownTool(dev_read): %v", err)
+	}
+
+	got, err := s.GetKnownToolByName(ctx, "dev_read")
+	if err != nil {
+		t.Fatalf("GetKnownToolByName(dev_read): %v", err)
+	}
+	if got.ConcurrencySafe != nil {
+		t.Fatalf("dev_read: expected concurrency_safe to start NULL, got %+v", got.ConcurrencySafe)
+	}
+
+	if err := s.SetKnownToolConcurrencySafeIfUnset(ctx, "dev_read", true); err != nil {
+		t.Fatalf("SetKnownToolConcurrencySafeIfUnset(dev_read, true): %v", err)
+	}
+	got2, err := s.GetKnownToolByName(ctx, "dev_read")
+	if err != nil {
+		t.Fatalf("GetKnownToolByName(dev_read) after backfill: %v", err)
+	}
+	if got2.ConcurrencySafe == nil || *got2.ConcurrencySafe != true {
+		t.Fatalf("dev_read: expected concurrency_safe=true after backfill, got %+v", got2.ConcurrencySafe)
+	}
+
+	// A later call with a different value must NOT clobber the already-set
+	// value -- this is what lets an operator's explicit override survive a
+	// routine re-classification pass.
+	if err := s.SetKnownToolConcurrencySafeIfUnset(ctx, "dev_read", false); err != nil {
+		t.Fatalf("SetKnownToolConcurrencySafeIfUnset(dev_read, false): %v", err)
+	}
+	got3, err := s.GetKnownToolByName(ctx, "dev_read")
+	if err != nil {
+		t.Fatalf("GetKnownToolByName(dev_read) after second call: %v", err)
+	}
+	if got3.ConcurrencySafe == nil || *got3.ConcurrencySafe != true {
+		t.Fatalf("dev_read: concurrency_safe was clobbered, got %+v, want true (unchanged)", got3.ConcurrencySafe)
+	}
+}
+
+// TestSetKnownToolConcurrencySafeIfUnset_MissingRowIsNoOp confirms the
+// method never errors when the named row doesn't exist -- SyncKnownTools
+// calls this right after UpsertKnownTool for the same name in the same
+// pass, so in practice the row always exists, but the method itself must
+// not assume that.
+func TestSetKnownToolConcurrencySafeIfUnset_MissingRowIsNoOp(t *testing.T) {
+	s := newTestStore(t)
+	if err := s.SetKnownToolConcurrencySafeIfUnset(context.Background(), "no_such_tool", true); err != nil {
+		t.Fatalf("SetKnownToolConcurrencySafeIfUnset on missing row: unexpected error %v", err)
+	}
+}
+
 func TestListAlwaysIncludedKnownTools(t *testing.T) {
 	s := newTestStore(t)
 	list, err := s.ListAlwaysIncludedKnownTools(context.Background())

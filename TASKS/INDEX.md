@@ -160,11 +160,13 @@ This branch (`phase-1-execution`, based off Phase 0's `HEAD` as of 2026-08-18 �
 
 | Task | Status | Depends on |
 |---|---|---|
-| 01-collapse-resolveprovider-into-cascade | not-started | `TASKS/phase-2/01-wire-runtime-kind-routing.md` (needs `runtime_kind` already wired); Phase 1's cascade-resolved `model_id` |
-| 02-wire-compaction-events | not-started | `TASKS/phase-0/29-cut-prompt-templates` |
-| 03-extend-event-log-to-recovery-mechanisms | not-started | `TASKS/phase-0/32-rename-recovery-namespace` |
+| 01-collapse-resolveprovider-into-cascade | validated | `TASKS/phase-2/01-wire-runtime-kind-routing.md` (needs `runtime_kind` already wired); Phase 1's cascade-resolved `model_id`; also now carries a required bug-fix (see 2026-08-19 addendum in the task file) from Phase 2 review |
+| 02-wire-compaction-events | validated | `TASKS/phase-0/29-cut-prompt-templates` |
+| 03-extend-event-log-to-recovery-mechanisms | validated | `TASKS/phase-0/32-rename-recovery-namespace` |
 
 **Parallelization:** All three touch different files (`01`: `chat.go`/`engine.go`; `02`/`03`: `internal/api/sessions.go` at different call sites — the manual `/compact` endpoint vs. interrupted-turn detection) — low-risk parallel, merge-coordinate on `sessions.go` between `02`/`03`.
+
+**Validation (2026-08-19, Orchestrator):** all 3 tasks merged to `main`; backend baseline (`go build ./...`, `go vet ./...` — same 2 pre-existing `container.go` findings, `go test ./...`) fully green. Real dogfeed against the live `nanite-api-service` deployment (redeployed, new pid, clean startup logs): `01`'s bug fix was already verified pre-merge by the worker against 343 real production sessions (0 mismatches) plus a direct reproduction test — not re-litigated live. `02`'s compaction-disclosure fix verified end-to-end against the running service: created a real session, sent a turn, forced a real compaction via `POST /sessions/{id}/compact`, confirmed a real `compaction_events` row landed, then sent a second turn and had the agent itself confirm — in its own reply — that it saw the compaction disclosure in its context. `03`'s three real-trigger tests (orphan sweep, recovery pack, interrupted-turn detection) were left to their own worker-authored real-store tests rather than re-triggered live (harder to safely reproduce against a shared service without real risk); reviewer should spot-check these. Test agents/sessions cleaned up after. Ready for fresh Reviewer dispatch.
 
 ## Phase 4 — Steering & Reflex Migration (8 task files)
 

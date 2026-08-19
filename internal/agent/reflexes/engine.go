@@ -99,6 +99,33 @@ func (e *Engine) EvaluateState(ctx context.Context, agentID, agentClass string, 
 	}
 	now := time.Now()
 	for _, r := range reflexes {
+		// Phase 4 item 09
+		// (TASKS/phase-4/09-fix-dispatch-to-agent-generic-pass-leak.md):
+		// dispatch_to_agent rows are architecturally evaluated exclusively
+		// through the dedicated attemptReflexDispatch
+		// (internal/service/chat_reflex_dispatch.go) and
+		// matchDispatchToAgentReflex (internal/mcp/self_tools_dispatch.go)
+		// call sites — both call Store.ListAgentReflexesForAgent and
+		// Executor.Apply directly, never through this generic per-turn
+		// pass. Executor.Apply's dispatch_to_agent case is an explicit,
+		// documented no-op (see executor.go) because a real dispatch needs
+		// a stream channel + ToolService this package deliberately doesn't
+		// depend on. Without this skip, that no-op still returns
+		// (applied, nil), and this loop would treat it as a real fire:
+		// bump fired_count, write a redundant event_log row (via
+		// evaluateAndInjectReflexes), and emit
+		// EmitReflexFired/EmitReflexActionStaged with no dispatch having
+		// actually occurred — inflating telemetry and giving plugins a
+		// false "this routing reflex fired" signal. Skip BEFORE trigger
+		// evaluation, the fired_count bump, and plugin hook emission — a
+		// dispatch_to_agent row should be entirely invisible to this pass,
+		// not just short-circuited after being evaluated. This does not
+		// affect the query itself (Store.ListAgentReflexesForAgent still
+		// returns dispatch_to_agent rows — the dedicated call sites above
+		// share that same query and need them).
+		if r.ActionKind == store.ReflexActionDispatchToAgent {
+			continue
+		}
 		fired, evalErr := EvaluateTrigger(r.TriggerKind, r.TriggerSpec, state)
 		if evalErr != nil {
 			e.Logger.Warn("reflex trigger evaluate failed",

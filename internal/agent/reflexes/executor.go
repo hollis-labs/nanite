@@ -120,6 +120,17 @@ func (e *Executor) Apply(ctx context.Context, reflex store.AgentReflex, state St
 		// other action kind goes through here: a routing decision is a
 		// per-turn re-evaluation, not a nudge that should only fire once
 		// per cooldown window.
+		//
+		// Comment-accuracy note (Phase 4 item 09,
+		// TASKS/phase-4/09-fix-dispatch-to-agent-generic-pass-leak.md):
+		// Engine.EvaluateState (engine.go) now skips dispatch_to_agent rows
+		// entirely before they ever reach Apply, so this case is reached
+		// ONLY via attemptReflexDispatch's direct Apply() call described
+		// above — never through the generic per-turn pass. Before that
+		// fix, EvaluateState's loop still called Apply() for a firing
+		// dispatch_to_agent row, treated this no-op's nil error as a real
+		// fire, and bumped fired_count/emitted plugin hooks for a dispatch
+		// that never actually happened.
 		return applied, nil
 	default:
 		return applied, fmt.Errorf("unknown action_kind %q", reflex.ActionKind)

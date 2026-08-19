@@ -25,7 +25,8 @@ The `dispatch_to_agent` action-kind design and the promptrouter catalog migratio
 - **Grounding** (`internal/grounding`, memory-recall-informed strategy signal) — fully built, disabled by default, never exercised. Worth testing in real sessions as a possible complement to reflexes before deciding to integrate, re-architect, or cut.
 - **`pending_reflexes`** (agent proposes its own reflex, operator approves) — complete backend, missing only the self-tool that would let an agent call it. Build the missing piece and test before deciding.
 
-## Two correctness gaps carried into implementation
+## One correctness gap carried into implementation
 
-- Tool concurrency-safety classification is currently pure name-heuristic (suffix/substring matching), not derived from declared tool metadata.
 - Truncation, broadly (not just one specific case), has a real documented history of causing bugs here — needs deliberate care wherever it's touched next, not "add a limit and move on."
+
+(Tool concurrency-safety classification was the other gap listed here; it's closed — `known_tools.concurrency_safe` declared metadata, fail-closed default, replaced the name-heuristic in full. `TASKS/phase-4/07-tool-concurrency-safety-classification.md`.)

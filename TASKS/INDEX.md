@@ -107,7 +107,7 @@ This branch (`phase-1-execution`, based off Phase 0's `HEAD` as of 2026-08-18 �
 | 05-fix-agent-skills-and-agent-projects-fks | reviewed | none hard — independently verify `agent_skills`/`agent_projects` are still zero-row (see task file) |
 | 06-fix-models-table-sync-target | reviewed | none |
 | 07-add-reflex-opt-out-field | reviewed | none |
-| 08-kill-file-reingest-on-boot-pattern | **reopened (in-progress)** | `01` (roles negative-verification) |
+| 08-kill-file-reingest-on-boot-pattern | implemented (Round 2 complete) | `01` (roles negative-verification) |
 | 09-build-assignment-ui-api | not-started (rescoped to backend-only, 2026-08-18) | 01–08 (excludes 10, which is out of scope) |
 | 10-data-migrate-nanite-agents-md | **out-of-scope** | n/a — cut for Phase 1, operator decision 2026-08-18 |
 | 11-wire-select-for-agent-to-read-agent-tools | not-started | `04` (schema/sync/backfill must exist first) |

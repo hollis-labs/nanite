@@ -11,7 +11,9 @@
 
 Each pattern entry is a **template** — a named behavioral contract the harness can instantiate as an agent profile. Patterns do not map 1:1 to agent YAML files; a single agent may embody one pattern, and one pattern may be instantiated as many agents (e.g., a Worker pattern can produce `nanite-backend`, `nanite-frontend`, `nanite-reviewer-backend`).
 
-The **ScopeTier hint mapping** section of each pattern describes which classifier outputs *should* route to this pattern when `AssignRole` is the decision-maker. M3 reflex catalog wires the dispatch; the entries here describe the contract M3 must honor.
+The **ScopeTier hint mapping** section of each pattern describes which classifier outputs *should* route to this pattern when `AssignRole` is the decision-maker. The M3 reflex catalog wires the dispatch; the entries here describe the contract it honors.
+
+**Status (post `TASKS/phase-4/03-migrate-promptrouter-to-reflexes.md`):** the M3 reflex layer is no longer the in-memory `internal/promptrouter` package this doc originally described (retired in full) — it is the DB-backed `dispatch_to_agent` reflex rows in `internal/agent/reflexes/seeds.go`. Of the patterns below, **Planner, Researcher, Reviewer, and Worker** have a real, live `dispatch_to_agent` reflex routing to them (plus Planner's pre-existing `AssignRole` tier/pattern routing). **Strategist and Documentor do not** — both are real pattern definitions with no matching agent profile in this codebase, so their entries below describe an aspirational routing contract only ("what *should* happen if a profile existed"), not something reachable today. See the migration task's Work Log for the phantom-entry accounting.
 
 ---
 
@@ -441,4 +443,4 @@ Strategist, Researcher, Documentor, and Reviewer are Worker-pattern specializati
 
 ---
 
-*Note for M3:* The Planner slug (`planner`) is reserved by migration 028 (CW-20260426-0016). Dispatch can target `PlannerRoleSlug` today; the full Planner identity lands in Phase 6. All other specialist patterns (Strategist, Researcher, Documentor, Reviewer) route as `RoleWorker` with profile selection in M3's reflex layer — no AssignRole changes required.
+*Note:* The Planner slug (`planner`) is reserved by migration 028 (CW-20260426-0016). Dispatch can target `PlannerRoleSlug` today; the full Planner identity lands in Phase 6. Researcher, Reviewer, and Worker route as `RoleWorker` with profile selection in the DB-backed `dispatch_to_agent` reflex layer (`internal/agent/reflexes/seeds.go`) — no `AssignRole` changes needed. Strategist and Documentor have no matching agent profile and were deliberately not migrated into that reflex layer (`TASKS/phase-4/03-migrate-promptrouter-to-reflexes.md`) — routing to them is not reachable until a real profile exists for either.

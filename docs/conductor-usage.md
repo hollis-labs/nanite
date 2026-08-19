@@ -35,18 +35,24 @@ A pending Torque checkpoint, a `torque_sprint_approve` decision, or a message fr
 ### Distilled output, not transcripts
 When Conductor relays a completed delegated session, expect a `report-card` (title, a couple of metrics, a one/two-sentence summary) with a **`session_link`** — either a real clickable URL or a plain-text identifier (e.g. a Torque task id) when no direct link exists yet. If you ever see a raw tool-output dump instead, that's a regression worth flagging.
 
-## Deterministic reflex triggers
+## Deterministic reflex triggers — RETIRED (correction + status)
 
-Certain phrasings are matched deterministically (no LLM call) before the turn reaches Conductor's own reasoning, per `internal/promptrouter/` + the user-level overrides in `~/.nanite/reflexes/conductor-*.yaml`. These don't change *what* Conductor does (that's still driven by its system prompt) — they tag the turn for the UI's mode indicator and the raw-vs-sent audit log (`playbook_match_log`, `CW-20260816-0068`), and critically, they keep Conductor from being force-dispatched to a synchronous worker/planner subagent the way a bare phrase like "research X" normally would be.
+**As of `TASKS/phase-4/03-migrate-promptrouter-to-reflexes.md`, this mechanism no longer runs.** `internal/promptrouter` (the phrase-match router this section originally described) is deleted in full, and its `~/.nanite/reflexes/*.yaml` user-override loader — the mechanism that read `~/.nanite/reflexes/conductor-*.yaml` — is retired with it. The six `conductor-*.yaml` files themselves still exist on disk (this migration did not delete any operator-owned file outside the repo) but nothing loads them anymore.
 
-| Trigger phrases (examples) | What it's for |
+**Correcting the record on what this mechanism actually did**, since the sentence above ("keep Conductor from being force-dispatched") turned out to describe a wiring the code didn't actually have: `~/.nanite/reflexes/*.yaml` overrides only ever fed `internal/mcp/self_tools_dispatch.go`'s `callExecuteTask` — the reflex matcher that runs **inside** a `task_execute` call, after the Chat/Conductor LLM has already decided to dispatch. Nothing in that call site could have prevented `task_execute` from being invoked in the first place; that decision was always the LLM's own tool choice (or, before it was retired, the upstream agent-broker's Rule 1 — a different call site the conductor YAML files' own header comments named as their intended target, which they were never actually wired into). Since every one of the six conductor reflexes left `resolves_to.profile` empty (by design — see the retired files' own comments), a match at the wired call site never overrode the dispatch target either. **The practical effect of a conductor reflex match was therefore limited to an audit-log row in `playbook_match_log`** (and a since-cut session-mode-bus signal — Modes were cut in full, `TASKS/phase-0/21-cut-modes.md`) — not a routing guarantee. Conductor's actual behavior (staying in chat and calling `memory_write`/`torque_task_create`/`torque_task_checkpoint_respond` directly for these phrasings, per `.nanite/agents/conductor.md`) was always driven by its system prompt, same as this doc's own next sentence already said — so retiring this mechanism is not expected to change Conductor's observable behavior for these phrasings, only to drop the (already-limited) audit tagging.
+
+**What replaces it:** reflexes are DB-authoritative now (`agent_reflexes` table, CRUD via `internal/api/reflexes.go`). The new `dispatch_to_agent` action kind these conductor entries would migrate onto is a positive "route TO this agent" primitive — it has no representation for "stay in chat, don't dispatch" (the semantic these six entries actually wanted), so they were not mechanically migrated; see the migration task's Work Log for the full reasoning. If deterministic audit tagging for these phrasings is wanted again, it would need a new reflex action kind (or a dedicated `event_log` write) — not built as part of this migration.
+
+The table below is preserved for historical reference (what the six retired conductor override files covered) — it does not describe live behavior.
+
+| Trigger phrases (examples) | What it was for |
 |---|---|
 | "note for Nil: ...", "note to self", "capture a note for ..." | Note capture (see below for per-target routing) |
 | "approve the checkpoint", "sign off on this", "reject the checkpoint" | Approval/checkpoint phrasing — Conductor acts on the verdict directly (`torque_task_checkpoint_respond`, `torque_sprint_approve`) |
 | "drop the results in ...", "research this and drop it in ...", "file a task with the results" | Non-linear research-and-file — routes to `torque_task_create`, not an inline synchronous dispatch |
 | "dispatch this to ...", "queue this up for ...", "hand this off to ..." | Dispatch-to-project — routes to Torque task creation for the target project's `orchestrator` to pick up |
 
-Full phrase lists live in `~/.nanite/reflexes/conductor-*.yaml`; documented in `docs/promptrouter-catalog.md`.
+Full phrase lists still live in `~/.nanite/reflexes/conductor-*.yaml` (unloaded); the schema they used is documented (retired) in `docs/promptrouter-catalog.md`.
 
 ## Note capture, by target
 

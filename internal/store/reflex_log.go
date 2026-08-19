@@ -3,17 +3,49 @@ package store
 import (
 	"database/sql"
 	"fmt"
-
-	"github.com/hollis-labs/nanite/internal/promptrouter"
 )
 
+// ReflexMatchLogEntry is the write-shape for LogReflexMatch — one match
+// event to persist to playbook_match_log.
+//
+// Previously internal/promptrouter.ReflexMatchEntry; moved here (Phase 4
+// item 03, TASKS/phase-4/03-migrate-promptrouter-to-reflexes.md) when
+// internal/promptrouter was retired in full. The table and this write
+// path stay alive — the raw-vs-sent audit trail (CW-20260816-0068) is a
+// real, still-useful mechanism independent of promptrouter's phrase
+// matcher — only the type's package and the field source (now the
+// DB-backed dispatch_to_agent reflex evaluation in
+// internal/mcp/self_tools_dispatch.go, not internal/promptrouter.Match)
+// changed.
+type ReflexMatchLogEntry struct {
+	SessionID           string
+	TurnID              string // optional; empty stored as NULL
+	ReflexID            string
+	Priority            int
+	Source              string // "reflex" for every current writer
+	MatchedInputExcerpt string // first 200 chars of raw input
+	HintTier            string // classify.ScopeTier.String() at match time
+	HintPattern         string // classify.ExecutionPattern.String() at match time
+	ProfileSlug         string // the matched reflex's dispatch target agent_slug
+	Mode                string // retained for schema/history continuity; no live producer sets this since Modes were cut in full (TASKS/phase-0/21-cut-modes.md)
+
+	// RawInputText and SentInputText (CW-20260816-0068) carry the full,
+	// untruncated raw-vs-dispatched text pair for the turn's audit trail.
+	// RawInputText is the user's raw input as typed; SentInputText is the
+	// text actually sent/dispatched to the spawned agent after any
+	// pre-dispatch rewrite (e.g. E2 grounding's memory-block prepend).
+	// Callers that perform no rewrite should set both to the same value —
+	// the writer (store.LogReflexMatch) collapses identical pairs to empty
+	// strings before persisting, so equal values never bloat the table.
+	RawInputText  string
+	SentInputText string
+}
+
 // LogReflexMatch persists one row to playbook_match_log (migration 032).
-// It implements promptrouter.MatchLogger so *Store satisfies that interface and
-// can be passed directly to promptrouter.AssignRoleWithReflex.
 //
 // Errors are returned so callers can log them; the reflex dispatcher swallows
 // them intentionally so a transient DB failure never blocks the dispatch path.
-func (s *Store) LogReflexMatch(entry promptrouter.ReflexMatchEntry) error {
+func (s *Store) LogReflexMatch(entry ReflexMatchLogEntry) error {
 	var turnID sql.NullString
 	if entry.TurnID != "" {
 		turnID = sql.NullString{String: entry.TurnID, Valid: true}

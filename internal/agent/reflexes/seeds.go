@@ -5,9 +5,32 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"regexp"
+	"strings"
 
 	"github.com/hollis-labs/nanite/internal/store"
 )
+
+// anyPhraseRegex builds a case-insensitive "any of these phrases is a
+// substring of the message" regex pattern from a literal phrase list —
+// the trigger shape TASKS/phase-4/03-migrate-promptrouter-to-reflexes.md
+// uses to migrate internal/promptrouter's UserPhraseAnyOf catalog onto
+// the reflex engine's user_regex_window predicate (a documented superset
+// of promptrouter's flat phrase-list matching, per architecture doc
+// 03-steering.md: "the reflex predicate engine already supports
+// regex-match triggers, a superset of promptrouter's flat phrase-list
+// matching"). Each phrase is regexp.QuoteMeta-escaped before joining —
+// none of the migrated phrases below actually contain a regex
+// metacharacter, but this keeps future phrase edits safe by
+// construction rather than by re-auditing every string for
+// specialness.
+func anyPhraseRegex(phrases []string) string {
+	quoted := make([]string, len(phrases))
+	for i, p := range phrases {
+		quoted[i] = regexp.QuoteMeta(p)
+	}
+	return "(?i)(" + strings.Join(quoted, "|") + ")"
+}
 
 // BaseReflexSeed declares a class-bound base reflex (agent_id NULL,
 // class_tag set). The seeder inserts these idempotently — on every
@@ -33,14 +56,19 @@ type BaseReflexSeed struct {
 	Required    bool
 }
 
-// BaseSeeds returns the canonical per-class base reflex seeds — 12 as
-// of this writing (process: 6, advisor: 4, template: 2; TASKS/phase-1/
+// BaseSeeds returns the canonical per-class base reflex seeds — 18 as
+// of this writing (process: 6, advisor: 10, template: 2; TASKS/phase-1/
 // 07-add-reflex-opt-out-field.md's task file cites 12 against an
 // 11-seed baseline, an off-by-one in that task file itself, not in this
 // count — corrected here per EXECUTION-PROCESS.md worker step 7. Phase 4
-// item 02 added the 12th seed, advisor's dispatch_to_agent_open_subagent,
-// which coincidentally makes the total match that earlier off-by-one
-// number for real).
+// item 02 added the 12th seed, advisor's dispatch_to_agent_open_subagent.
+// Phase 4 item 03 (TASKS/phase-4/03-migrate-promptrouter-to-reflexes.md)
+// added 6 more advisor-class dispatch_to_agent seeds, migrating the 6
+// non-phantom entries of the retired internal/promptrouter package's
+// BuiltinReflexes() phrase catalog — see the "migrated from
+// promptrouter" seeds below for the per-entry mapping and the task
+// file's Work Log for the phantom-entry (documentor-mention,
+// strategist-mention) drop decision).
 //
 // All predicates are conjunctions — see types.go's package doc for
 // rationale. The conjunction principle is the FU-30 design contract;
@@ -320,6 +348,188 @@ func BaseSeeds() []BaseReflexSeed {
 				"agent_slug": "planner",
 				"confidence": 0.75,
 				"reason":     "scope_tier=open + execution_pattern=subagent (migrated agent-broker Rule 5)",
+			},
+		},
+
+		// ── class=advisor, migrated from internal/promptrouter ─────
+		//
+		// TASKS/phase-4/03-migrate-promptrouter-to-reflexes.md: the 6
+		// non-phantom entries of the retired internal/promptrouter
+		// package's BuiltinReflexes() (catalog.go), migrated onto
+		// dispatch_to_agent reflex rows. Two entries (documentor-mention,
+		// strategist-mention) are deliberately DROPPED, not migrated —
+		// both left `resolves_to.profile` empty in the old catalog
+		// because no matching agent profile exists (no `documentor.md`;
+		// `.nanite/agents/content-strategist.md` is a real but unrelated,
+		// narrower Glyph-editorial role) — see the task file's Work Log
+		// for the full phantom-entry accounting.
+		//
+		// Priority: every entry here is > 10 (dispatch_to_agent_open_
+		// subagent's priority, above) so a specific phrase match always
+		// wins over the general open-tier/subagent-pattern fallback —
+		// mirroring the old promptrouter-fed broker's Rule 1 (phrase
+		// match) being checked before Rule 5 (tier/pattern) in the
+		// retired priority-ordered rule list (see task 02's Work Log,
+		// design decision 2). Relative ordering among these 6 preserves
+		// the original promptrouter catalog's Priority field ordering
+		// (25 > 20 > 18 > 15 = 15 > 10), rescaled upward with distinct
+		// values so DB created_at tie-break timing never matters.
+		// `confidence` is the original promptrouter Priority/100.0 (the
+		// same derivation task 02's retired broker Rule 1 used for
+		// in.ReflexConfidence) — an audit/telemetry value only, not
+		// gated on anywhere, same as every other dispatch_to_agent
+		// reflex's confidence field.
+		//
+		// Predicate shape: user_regex_window (scope=user implied,
+		// window=1) matches the CURRENT turn's raw text — the synthetic
+		// single-entry State.UserMessages window
+		// internal/service/chat_reflex_dispatch.go populates (Phase 4
+		// item 02's design note 3). Entries that originally carried a
+		// ScopeTierHint/ExecutionPatternHint guard AND that phrase
+		// window with a scope_tier/execution_pattern predicate;
+		// tierAtLeast's old ">=" semantics (a ScopeTierHint of X means
+		// "X or broader") are reproduced via an OR over every tier at or
+		// above X, since scope_tier's predicate is plain string equality,
+		// not a comparison.
+		{
+			ClassTag:    "advisor",
+			Name:        "dispatch_to_agent_background_long_task",
+			TriggerKind: "predicate",
+			Priority:    60,
+			TriggerSpec: map[string]interface{}{
+				"kind": "AND",
+				"clauses": []interface{}{
+					map[string]interface{}{
+						"kind": "user_regex_window", "window": 1,
+						"pattern": anyPhraseRegex([]string{
+							"in the background", "async", "when you get a chance",
+							"overnight", "index the whole", "crawl the entire",
+						}),
+					},
+					map[string]interface{}{"kind": "execution_pattern", "op": "=", "value": "background"},
+				},
+			},
+			ActionKind: "dispatch_to_agent",
+			ActionSpec: map[string]interface{}{
+				"agent_slug": "worker",
+				"confidence": 0.25,
+				"reason":     "phrase match: background-long-task (migrated from internal/promptrouter)",
+			},
+		},
+		{
+			ClassTag:    "advisor",
+			Name:        "dispatch_to_agent_planner_mention",
+			TriggerKind: "predicate",
+			Priority:    50,
+			TriggerSpec: map[string]interface{}{
+				"kind": "AND",
+				"clauses": []interface{}{
+					map[string]interface{}{
+						"kind": "user_regex_window", "window": 1,
+						"pattern": anyPhraseRegex([]string{
+							"let's plan", "let's work on", "sprint",
+							"plan this", "plan out", "create a plan",
+						}),
+					},
+					map[string]interface{}{"kind": "scope_tier", "op": "=", "value": "open"},
+				},
+			},
+			ActionKind: "dispatch_to_agent",
+			ActionSpec: map[string]interface{}{
+				"agent_slug": "planner",
+				"confidence": 0.20,
+				"reason":     "phrase match: planner-mention (migrated from internal/promptrouter)",
+			},
+		},
+		{
+			ClassTag:    "advisor",
+			Name:        "dispatch_to_agent_planner_large_task",
+			TriggerKind: "predicate",
+			Priority:    45,
+			TriggerSpec: map[string]interface{}{
+				"kind": "AND",
+				"clauses": []interface{}{
+					map[string]interface{}{
+						"kind": "user_regex_window", "window": 1,
+						"pattern": anyPhraseRegex([]string{
+							"big project", "multi-step", "break this down",
+							"sequence of", "phases", "end to end",
+						}),
+					},
+					// scope_tier_hint: large in the old catalog meant
+					// "large or broader" (tierAtLeast) — large's only
+					// broader tier is open, so OR both.
+					map[string]interface{}{
+						"kind": "OR",
+						"clauses": []interface{}{
+							map[string]interface{}{"kind": "scope_tier", "op": "=", "value": "large"},
+							map[string]interface{}{"kind": "scope_tier", "op": "=", "value": "open"},
+						},
+					},
+				},
+			},
+			ActionKind: "dispatch_to_agent",
+			ActionSpec: map[string]interface{}{
+				"agent_slug": "planner",
+				"confidence": 0.18,
+				"reason":     "phrase match: planner-large-task (migrated from internal/promptrouter)",
+			},
+		},
+		{
+			ClassTag:    "advisor",
+			Name:        "dispatch_to_agent_researcher_mention",
+			TriggerKind: "predicate",
+			Priority:    35,
+			TriggerSpec: map[string]interface{}{
+				"kind": "user_regex_window", "window": 1,
+				"pattern": anyPhraseRegex([]string{
+					"research", "investigate", "look into", "find out",
+					"dig into", "what does", "find all", "summarize the state",
+				}),
+			},
+			ActionKind: "dispatch_to_agent",
+			ActionSpec: map[string]interface{}{
+				"agent_slug": "researcher",
+				"confidence": 0.15,
+				"reason":     "phrase match: researcher-mention (migrated from internal/promptrouter)",
+			},
+		},
+		{
+			ClassTag:    "advisor",
+			Name:        "dispatch_to_agent_reviewer_mention",
+			TriggerKind: "predicate",
+			Priority:    30,
+			TriggerSpec: map[string]interface{}{
+				"kind": "user_regex_window", "window": 1,
+				"pattern": anyPhraseRegex([]string{
+					"review", "assess", "second opinion", "critique",
+					"audit", "check this", "give me feedback on",
+				}),
+			},
+			ActionKind: "dispatch_to_agent",
+			ActionSpec: map[string]interface{}{
+				"agent_slug": "reviewer",
+				"confidence": 0.15,
+				"reason":     "phrase match: reviewer-mention (migrated from internal/promptrouter)",
+			},
+		},
+		{
+			ClassTag:    "advisor",
+			Name:        "dispatch_to_agent_worker_execute",
+			TriggerKind: "predicate",
+			Priority:    20,
+			TriggerSpec: map[string]interface{}{
+				"kind": "user_regex_window", "window": 1,
+				"pattern": anyPhraseRegex([]string{
+					"build", "implement", "fix", "refactor", "write the code",
+					"add the feature", "make it", "run the migration",
+				}),
+			},
+			ActionKind: "dispatch_to_agent",
+			ActionSpec: map[string]interface{}{
+				"agent_slug": "worker",
+				"confidence": 0.10,
+				"reason":     "phrase match: worker-execute (migrated from internal/promptrouter)",
 			},
 		},
 

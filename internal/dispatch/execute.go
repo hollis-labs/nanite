@@ -76,23 +76,35 @@ type ExecuteTaskArgs struct {
 	// ctx stamped in executeToolBatch.
 	AgentProfileID string
 
-	// ReflexHints carries pre-computed hints from the prompt router matcher
-	// (internal/promptrouter). When non-nil, the tier and pattern hints
-	// override the classifier output before AssignRole is called; the
-	// AgentSlug hint, when non-empty, overrides the AssignRole default
-	// slug. The prompt router layer is always upstream of AssignRole —
-	// reflexes produce hints; AssignRole consumes them.
+	// ReflexHints carries pre-computed hints from a matched dispatch_to_agent
+	// reflex. When non-nil, the tier and pattern hints override the
+	// classifier output before AssignRole is called; the AgentSlug hint,
+	// when non-empty, overrides the AssignRole default slug. This
+	// reflex-match layer is always upstream of AssignRole — reflexes
+	// produce hints; AssignRole consumes them.
 	//
 	// nil means "no reflex matched; use classifier output as-is".
 	ReflexHints *ReflexHints
 }
 
-// ReflexHints carries the dispatch-layer projection of a reflex match result.
-// It avoids a direct import of internal/promptrouter from internal/dispatch
-// (which would create a cycle, since internal/promptrouter imports
-// internal/dispatch). The MCP layer (internal/mcp/self_tools_dispatch.go)
-// constructs this struct from a promptrouter.ReflexMatch and passes it
-// through ExecuteTaskArgs.
+// ReflexHints carries the dispatch-layer projection of a reflex match
+// result. It avoids a direct import of internal/mcp/internal/agent/reflexes
+// from internal/dispatch (which would create a cycle: internal/mcp
+// imports internal/dispatch for SpawnRequest/ExecuteTaskArgs/etc). The
+// MCP layer (internal/mcp/self_tools_dispatch.go's
+// matchDispatchToAgentReflex) constructs this struct from a matched
+// DB-backed dispatch_to_agent agent_reflexes row's action_spec and
+// passes it through ExecuteTaskArgs.
+//
+// Formerly (before TASKS/phase-4/03-migrate-promptrouter-to-reflexes.md
+// retired the package) constructed from a promptrouter.ReflexMatch —
+// that in-memory phrase-match catalog is now DB-backed
+// dispatch_to_agent reflex rows (internal/agent/reflexes/seeds.go), and
+// the current matcher only ever sets AgentSlug/ReflexID (the
+// dispatch_to_agent action_spec shape has no fields for HintTier/
+// HintPattern/Mode/WorkflowName) — those four fields remain part of this
+// struct for RoleOverride/test-seam use and any future caller that wants
+// them, not because the live reflex path populates them today.
 type ReflexHints struct {
 	// HintTier overrides the M1 classifier ScopeTier when non-zero.
 	HintTier classify.ScopeTier

@@ -6,12 +6,12 @@ Steering is the layer that decides what an agent does moment to moment. It went 
 
 `internal/agent/reflexes` — a DB-backed predicate/event/interval rule engine — absorbs the real, valuable jobs of everything else being retired:
 
-- **The agent broker's real intent** ("know which agent to use based on context"; nudge on mail/detected intent) folds in as a new reflex action kind (e.g. `dispatch_to_agent`) alongside the existing five (`inject_reminder`/`force_tool_choice`/`send_message`/`halt_session`/`add_schedule`).
-- **`promptrouter`'s phrase-matching** — the reflex predicate engine already supports regex-match triggers, a superset of promptrouter's flat phrase-list matching. Promptrouter's job becomes a reflex trigger shape, not a separate system.
+- **The agent broker's real intent** ("know which agent to use based on context"; nudge on mail/detected intent) folds in as a new reflex action kind, `dispatch_to_agent`, alongside the existing five (`inject_reminder`/`force_tool_choice`/`send_message`/`halt_session`/`add_schedule`). **Done** — `TASKS/phase-4/02-dispatch-to-agent-reflex-action-kind-and-broker-migration.md`.
+- **`promptrouter`'s phrase-matching** — the reflex predicate engine already supports regex-match triggers, a superset of promptrouter's flat phrase-list matching. Promptrouter's job became a reflex trigger shape, not a separate system. **Done** — `internal/promptrouter` is deleted in full; its catalog lives on as `dispatch_to_agent` reflex rows (`internal/agent/reflexes/seeds.go`) — `TASKS/phase-4/03-migrate-promptrouter-to-reflexes.md`.
 - **Skill-usage and scratchpad-usage nudging** — reflexes point an agent toward using an assigned skill or its own scratchpad on a specific, testable condition, the same pattern reflexes already use to point agents at named procedures.
 - **`session_handoffs` triggering** — a handoff request becomes something a reflex condition or a workflow step can initiate, not a separate steering mechanism.
 
-Concrete design (exact action-kind shapes, how promptrouter's catalog migrates) is not yet finalized — direction is set, specifics aren't. **Watch item**: reflexes are now carrying six distinct jobs that used to be five separate systems. That consolidation was the right call case-by-case, but it will likely need real internal structure (a clear action-kind taxonomy, maybe priority tiers) to stay comprehensible once fully built — don't assume the current simple schema scales to six jobs as cleanly as it handled one.
+The `dispatch_to_agent` action-kind design and the promptrouter catalog migration above are both finalized (see the two linked task files' Work Logs for the concrete shapes and decisions). **Watch item** (still open): reflexes are now carrying six distinct jobs that used to be five separate systems. That consolidation was the right call case-by-case, but it will likely need real internal structure (a clear action-kind taxonomy, maybe priority tiers) to stay comprehensible once fully built — don't assume the current simple schema scales to six jobs as cleanly as it handled one.
 
 ## What's cut
 

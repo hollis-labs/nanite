@@ -88,7 +88,6 @@ type harnessV1CreateSessionRequest struct {
 	Metadata       map[string]any `json:"metadata,omitempty"`
 	RuntimeKind    string         `json:"runtime_kind,omitempty"`
 	WorkRoot       string         `json:"work_root,omitempty"`
-	BootProfileID  string         `json:"boot_profile_id,omitempty"`
 	DurableAgentID string         `json:"durable_agent_id,omitempty"`
 }
 
@@ -177,12 +176,12 @@ func (a *API) handleHarnessV1Capabilities(w http.ResponseWriter, r *http.Request
 				"agent_id",
 				"title",
 				"metadata",
-				"boot_profile_id",
 			},
 			Unsupported: []string{
 				"runtime_kind",
 				"work_root",
 				"durable_agent_id",
+				"boot_profile_id",
 			},
 		},
 		TurnSendFields: harnessV1FieldSupport{
@@ -214,14 +213,6 @@ func (a *API) handleHarnessV1CreateSession(w http.ResponseWriter, r *http.Reques
 	}
 
 	providerID := strings.TrimSpace(req.Provider)
-	if req.BootProfileID != "" {
-		bootProvider := "bootprofile:" + strings.TrimSpace(req.BootProfileID)
-		if providerID != "" && providerID != bootProvider {
-			a.errorResp(w, http.StatusBadRequest, "provider and boot_profile_id conflict")
-			return
-		}
-		providerID = bootProvider
-	}
 
 	sess := &store.Session{
 		ProjectID: req.ProjectID,

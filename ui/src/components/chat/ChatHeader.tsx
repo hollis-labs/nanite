@@ -192,17 +192,10 @@ export function ChatHeader() {
   const openStartFromDetails = useCallback((details: SessionDetailsResponse) => {
     const durableID = details.current_durable_agent?.id || "";
     setStartPrefill({
-      path: durableID
-        ? "durable"
-        : details.session.provider?.startsWith("bootprofile:")
-          ? "harness"
-          : "chat",
+      path: durableID ? "durable" : "chat",
       provider: details.session.provider || undefined,
       model: details.session.model || undefined,
       agent_id: details.primary_agent?.id || undefined,
-      boot_profile_id: details.session.provider?.startsWith("bootprofile:")
-        ? details.session.provider
-        : undefined,
       durable_agent_id: durableID || undefined,
     });
     setDetailsOpen(false);
@@ -471,12 +464,9 @@ export function ChatHeader() {
                   type="button"
                   onClick={() => {
                     setStartPrefill({
-                      path: session?.provider?.startsWith("bootprofile:") ? "harness" : "chat",
+                      path: "chat",
                       provider: session?.provider || undefined,
                       model: session?.model || undefined,
-                      boot_profile_id: session?.provider?.startsWith("bootprofile:")
-                        ? session.provider
-                        : undefined,
                     });
                     setStartOpen(true);
                     setMoreOpen(false);

@@ -30,12 +30,10 @@ import (
 	llmcontracts "github.com/hollis-labs/go-llm-contracts"
 	llmtypes "github.com/hollis-labs/go-llm-types"
 	"github.com/hollis-labs/go-providers/provider"
-	"github.com/hollis-labs/nanite/internal/agentregistry"
 	"github.com/hollis-labs/nanite/internal/agentworkflow"
 	"github.com/hollis-labs/nanite/internal/api"
 	"github.com/hollis-labs/nanite/internal/chat"
 	"github.com/hollis-labs/nanite/internal/filter"
-	"github.com/hollis-labs/nanite/internal/launcher"
 	"github.com/hollis-labs/nanite/internal/lifecycle"
 	nllmanthropic "github.com/hollis-labs/nanite/internal/llm/anthropic"
 	nllmopenai "github.com/hollis-labs/nanite/internal/llm/openai"
@@ -60,15 +58,13 @@ import (
 func main() {
 	if len(os.Args) < 2 {
 		fmt.Fprintf(os.Stderr, "usage: %s <command>\n", brand.BinaryName)
-		fmt.Fprintln(os.Stderr, "commands: serve, launch, chat, plugin, mcp, message, admin, path, version (framework-injection moved to `nanite-agent init`)")
+		fmt.Fprintln(os.Stderr, "commands: serve, chat, plugin, mcp, message, admin, path, version (framework-injection moved to `nanite-agent init`)")
 		os.Exit(1)
 	}
 
 	switch os.Args[1] {
 	case "serve":
 		cmdServe(os.Args[2:])
-	case "launch":
-		cmdLaunch(os.Args[2:])
 	case "chat":
 		cmdChat(os.Args[2:])
 	case "plugin":
@@ -343,25 +339,6 @@ func cmdServe(args []string) {
 	// boundary between the two wire sites.
 	agentBrokerInstance := agentbroker.New()
 
-	// --- S5 Phase C/F: shared directory registry ---
-	//
-	// Build the shared registry-primary registrar (FileBackedRegistrar +
-	// DegradingRegistrar + LastKnownGoodCache) over the boot-profile
-	// catalog root ONCE, here, BEFORE NewContainer. The SAME instance is
-	// threaded into:
-	//
-	//   - ContainerConfig.AgentRegistry — so the GUI chat boot-profile
-	//     launch path (driveBootSession) resolves its runtime binding
-	//     registry-primary via launchplan.Build (Phase F);
-	//   - the standalone `nanite launch` subcommand builds its own (it is
-	//     a separate process), but uses the identical agentregistry.Build
-	//     + launchplan.Build seam.
-	//
-	// agent-source registration (the D2 resolver handle) runs after the
-	// HTTP port is known — see further below. agentregistry.Build does
-	// pure local filesystem I/O and never fails the process (D1).
-	agentRegistry := agentregistry.Build(resolveBootProfileCatalogPath(cfg), "", slog.Default())
-
 	// --- Service container: single wiring point ---
 	// apiBaseURL also backs the external workflow-engine wiring below
 	// (CW-20260814-0003) — the same "point a subprocess at this live
@@ -394,17 +371,6 @@ func cmdServe(args []string) {
 		// (no drift between what the agent reads and what the gate
 		// enforces).
 		DevToolsAllowedPaths: resolveDevToolsAllowedPaths(cfg),
-		// S5 Phase F: thread the shared directory registrar so the GUI
-		// chat boot-profile launch path resolves registry-primary via
-		// launchplan.Build — the same seam the standalone launcher uses.
-		AgentRegistry: agentRegistry,
-		// CW-20260514-0047: thread the configured boot-profile catalog
-		// path so the service container builds an in-memory registry of
-		// compiled LaunchSpec entries. ResolvedBootProfileCatalogPath
-		// returns an empty string when the field is unset, in which
-		// case the registry constructor produces an inert (empty)
-		// Registry and the dropdown surfaces only DB-seeded providers.
-		BootProfileCatalogPath: resolveBootProfileCatalogPath(cfg),
 		// Durable-agent recipe catalog files/dirs merge with built-ins at
 		// startup through the app config seam used for product tunables.
 		DurableAgentRecipeCatalogPaths: appCfg.Recipes.CatalogPaths,
@@ -461,7 +427,7 @@ func cmdServe(args []string) {
 	} else {
 		externalBinPath := ""
 		if exe, exeErr := os.Executable(); exeErr == nil {
-			externalBinPath = launcher.ResolveBinaryPath(exe)
+			externalBinPath = resolveBinaryPath(exe)
 		} else {
 			slog.Warn("workflow-runner: os.Executable failed, langgraph/crewai engines unavailable", "err", exeErr)
 		}
@@ -507,10 +473,11 @@ func cmdServe(args []string) {
 	selfTools.WorkflowRegistry = workflowDefinitionsRegistry
 
 	// CW-20260814-0014: A2A Agent Card generator for /.well-known/agent-card.json
-	// Uses the same workflow registry + boot profile registry to derive skills.
+	// Uses the workflow registry to derive skills. TASKS/phase-2/04-
+	// retire-boot-profile-catalog.md removed the boot-profile-catalog
+	// skill source this used to also thread through.
 	container.AgentCardGenerator = service.NewAgentCardGenerator(
 		workflowDefinitionsRegistry,
-		container.BootProfiles,
 		apiBaseURL,
 		version.Full(),
 	)
@@ -634,24 +601,6 @@ func cmdServe(args []string) {
 	// so a CLI-launched chat agent's `nanite mcp` subprocess can forward
 	// self-tool calls into this running harness.
 	a.SetSelfTools(selfTools)
-
-	// --- S5 Phase C: agent-source handle registration ---
-	//
-	// agentRegistry was built earlier (before NewContainer) so the SAME
-	// instance is shared by the chat service and this registration. Here
-	// we register Nanite as an `agent-source` resolver HANDLE pointing
-	// back at the loopback /api/tools/call endpoint (operation
-	// agent_source_resolve). The directory holds the handle only — never
-	// agent bodies (D2). A registration failure is logged and does NOT
-	// crash startup: the registry is never mandatory (D1).
-	loopbackToolsURL := fmt.Sprintf("http://127.0.0.1:%d/api/tools/call", *port)
-	handleDir := filepath.Join(os.TempDir(), brand.ID+"-agent-source")
-	if home, herr := os.UserHomeDir(); herr == nil {
-		handleDir = filepath.Join(home, "."+brand.ID, "registry")
-	}
-	if err := agentregistry.RegisterAgentSource(agentRegistry, loopbackToolsURL, handleDir, slog.Default()); err != nil {
-		slog.Warn("agent-source registration failed; continuing without directory handle", "err", err)
-	}
 
 	// Lifecycle manager for long-running daemon goroutines (cleanup,
 	// snapshots, reapers). Owned by cmdServe; shut down on signal before
@@ -836,21 +785,6 @@ func resolveDevToolsAllowedPaths(cfg *config.Config) []string {
 	return nil
 }
 
-// resolveBootProfileCatalogPath resolves the configured boot-profile
-// catalog root (CW-20260514-0047). Returns an empty string when the
-// field is unset, which the registry constructor interprets as
-// "no catalog" — the dropdown shows only DB-seeded providers and
-// behavior is identical to before this feature. Tilde expansion is
-// delegated to config.ResolvedBootProfileCatalogPath so the rules
-// stay consistent with how every other path-shaped config field is
-// handled.
-func resolveBootProfileCatalogPath(cfg *config.Config) string {
-	if cfg == nil {
-		return ""
-	}
-	return cfg.ResolvedBootProfileCatalogPath()
-}
-
 // resolveWorkflowDefinitionsPath resolves the configured workflow
 // definitions directory (CW-20260813-0014). Returns an empty string when
 // the field is unset, which agentworkflow.LoadRegistryDir interprets as
@@ -860,6 +794,25 @@ func resolveWorkflowDefinitionsPath(cfg *config.Config) string {
 		return ""
 	}
 	return cfg.ResolvedWorkflowDefinitionsPath()
+}
+
+// resolveBinaryPath resolves exe through any symlinks so an external
+// workflow-engine subprocess (langgraph/crewai/etc., invoked via
+// internal/workflowrunner) is pointed at the real binary path rather than
+// a symlink target. Falls back to exe verbatim when symlink resolution
+// fails. Formerly internal/launcher.ResolveBinaryPath — moved here as a
+// local helper when TASKS/phase-2/04-retire-boot-profile-catalog.md cut
+// internal/launcher in full (that package existed solely to serve the
+// boot-profile-catalog-driven `nanite launch` subcommand; this one
+// generic helper had a second, unrelated real caller here).
+func resolveBinaryPath(exe string) string {
+	if exe == "" {
+		return ""
+	}
+	if resolved, err := filepath.EvalSymlinks(exe); err == nil {
+		return resolved
+	}
+	return exe
 }
 
 // devAllowedSource returns a short string describing where the dev tools

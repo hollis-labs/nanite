@@ -10,14 +10,11 @@ import (
 	"strings"
 	"time"
 
-	"github.com/hollis-labs/agentkit/agentlaunch"
 	agentsessions "github.com/hollis-labs/agentkit/agentsessions"
 	llmtypes "github.com/hollis-labs/go-llm-types"
-	"github.com/hollis-labs/nanite/internal/bootprofile"
 	"github.com/hollis-labs/nanite/internal/chat"
 	ctxpkg "github.com/hollis-labs/nanite/internal/context"
 	"github.com/hollis-labs/nanite/internal/fsutil"
-	"github.com/hollis-labs/nanite/internal/launchplan"
 	"github.com/hollis-labs/nanite/internal/recovery/broker"
 	runtimeagent "github.com/hollis-labs/nanite/internal/runtime/agent"
 	"github.com/hollis-labs/nanite/internal/store"
@@ -132,18 +129,6 @@ func (s *chatServiceImpl) driveBootSession(
 			Role:         role,
 		}
 		applyLegacyCLIProviderToBootOpts(&bootOpts, providerName)
-		// CW-20260514-0048 / S5 Phase F: when this session is backed by a
-		// compiled boot-profile LaunchSpec (provider was a
-		// "bootprofile:<id>" id that chat_generate.go decoded + stashed),
-		// resolve the launch through the SHARED plan-assembly seam and
-		// project the validated agentlaunch.LaunchPlan onto bootOpts —
-		// the SAME launchplan.Build the standalone launcher uses. The
-		// runtime binding resolves registry-primary with an explicit,
-		// observable file/spec fallback (D1 + §4.1). See
-		// applyLaunchSpecAsPlanToBootOpts for the projection + fallback.
-		if launchSpec := s.launchSpecFor(sessionID); launchSpec != nil {
-			s.applyLaunchSpecAsPlanToBootOpts(&bootOpts, launchSpec)
-		}
 		// Phase 2 item 02 (TASKS/phase-2/02-port-forward-dynamic-resolver.md):
 		// resolve this agent's DB-configured cmd/http context resolvers, if
 		// any, and fold the output into the boot prompt via
@@ -569,18 +554,13 @@ func (s *chatServiceImpl) regenerateBootDirSlots(sessionID, bootDir string, agen
 	claudePath := filepath.Join(bootDir, "CLAUDE.md")
 	// CW-20260516-0007 round 1: recompute the SAME resolved boot prompt
 	// the initial Boot planted, so a mid-session slot refresh doesn't
-	// silently thin a bootprofile session's operating instructions.
+	// silently thin the session's operating instructions.
 	// resolveBootPrompt's inputs: role (from the agent profile), the runtime
-	// Mode (ModeLongLived for every chat session — the only caller),
-	// and a bootprofile LaunchSpec's BootPrompt as the override. The
-	// LaunchSpec is the per-session stash keyed by sessionID; nil for
-	// non-bootprofile sessions, where ResolveSystemPrompt falls back to
-	// the role-composed prompt.
+	// Mode (ModeLongLived for every chat session — the only caller), and an
+	// optional Options.BootPromptOverride (currently unset by any chat-side
+	// caller — see runtimeagent.Options's doc comment for the mechanism).
 	role := bootSessionRole(agent)
 	bootPromptOverride := ""
-	if ls := s.launchSpecFor(sessionID); ls != nil {
-		bootPromptOverride = ls.BootPrompt
-	}
 	// Phase 2 item 02: re-thread the SAME resolved dynamic-context blocks
 	// the initial Boot stashed, so a mid-session slot regen doesn't
 	// silently drop a resolver's live-fetched data the way a bare
@@ -633,12 +613,10 @@ func bootSessionWorkdir(session *store.Session) string {
 // already decided "boot CLI" based on the resolved name while this
 // helper independently re-derived from a column that was still empty.
 //
-// chat.IsCLIProvider gates the assignment so bootprofile-shaped
-// names ("bootprofile:<id>") and HTTP shapes pass through untouched —
-// applyLaunchSpecToBootOpts stays the source of truth for bootprofile
-// sessions, and a resolved HTTP provider should never have reached
-// driveBootSession in the first place (the chat-resolve layer routes
-// those through the llmcontracts.Provider path).
+// chat.IsCLIProvider gates the assignment so HTTP-shaped provider names
+// pass through untouched — a resolved HTTP provider should never have
+// reached driveBootSession in the first place (the chat-resolve layer
+// routes those through the llmcontracts.Provider path).
 //
 // chat.NormalizeCLIProvider applies the canonical alias table:
 // "pty" → "claude", "pty-claude" → "claude", "sub-codex" → "codex",
@@ -655,213 +633,6 @@ func applyLegacyCLIProviderToBootOpts(bootOpts *runtimeagent.Options, providerNa
 		return
 	}
 	bootOpts.Provider = chat.NormalizeCLIProvider(providerName)
-}
-
-// applyLaunchSpecToBootOpts overlays a compiled bootprofile.LaunchSpec
-// onto the agent.Options that driveBootSession passes to runtimeagent.Boot.
-// CW-20260514-0048: factored out of the inline boot setup so the merge
-// semantics are unit-testable without booting a real runtime.
-//
-// Precedence rules (pinned in tests under chat_boot_drive_test.go):
-//
-//	Workdir          — caller-supplied bootOpts.Workdir wins (chat
-//	                    layer may have a session-scoped override);
-//	                    falls through to spec.Workdir when empty.
-//	                    Today bootSessionWorkdir returns "" so the
-//	                    spec value lands; if a future ticket puts a
-//	                    real workdir on store.Session, that wins.
-//	Env              — spec values overlay bootOpts.Env (spec wins on
-//	                    key collision; pre-existing caller-supplied
-//	                    keys persist for keys the spec doesn't touch).
-//	                    Inside agent.Boot, composeEnv then layers:
-//	                    host < profile < Options.Env, so spec values
-//	                    beat the inherited host env.
-//	ExtraArgs        — spec.Args are APPENDED to bootOpts.ExtraArgs
-//	                    so any caller-side argv (none today) is
-//	                    preserved. The runtime splices ExtraArgs
-//	                    after adapter.BuildArgs.
-//	BootPrompt       — spec.BootPrompt overrides the role-derived
-//	                    composeSystemPrompt output via
-//	                    Options.BootPromptOverride. Empty
-//	                    spec.BootPrompt leaves the legacy
-//	                    behavior intact (composeSystemPrompt fires).
-//	Provider         — caller-supplied bootOpts.Provider wins (no
-//	                    caller sets it today, but the precedence
-//	                    mirrors Workdir so a future explicit
-//	                    override remains the most specific signal);
-//	                    spec.Provider (the bare adapter name, e.g.
-//	                    "claude") fills the empty case. The override
-//	                    propagates through agent.Boot via
-//	                    effectiveProvider, replacing the agent
-//	                    profile's DefaultProvider. CW-20260514-0053
-//	                    fix: the file-default agent profile has
-//	                    DefaultProvider="" so without this override
-//	                    agent.Boot would dispatch bootdirLayoutFor("")
-//	                    and crash with the c197 "bootdir for provider
-//	                    \"\" is not yet implemented" error.
-//
-// CW-20260514-0048 scope: ModeResume / ResumeFromCheckpoint are
-// explicitly NOT touched here — normal boot-profile launches start
-// fresh. Crash recovery's resume path (CW-20260514-0049) constructs
-// its own Options and bypasses this helper.
-func applyLaunchSpecToBootOpts(bootOpts *runtimeagent.Options, spec *bootprofile.LaunchSpec) {
-	if bootOpts == nil || spec == nil {
-		return
-	}
-	if spec.Workdir != "" && bootOpts.Workdir == "" {
-		bootOpts.Workdir = spec.Workdir
-	}
-	if len(spec.Env) > 0 {
-		if bootOpts.Env == nil {
-			bootOpts.Env = make(map[string]string, len(spec.Env))
-		}
-		for k, v := range spec.Env {
-			bootOpts.Env[k] = v
-		}
-	}
-	if len(spec.Args) > 0 {
-		bootOpts.ExtraArgs = append(bootOpts.ExtraArgs, spec.Args...)
-	}
-	if spec.BootPrompt != "" {
-		bootOpts.BootPromptOverride = spec.BootPrompt
-	}
-	if spec.Provider != "" && bootOpts.Provider == "" {
-		bootOpts.Provider = spec.Provider
-	}
-}
-
-// applyLaunchSpecAsPlanToBootOpts is the S5 Phase F chat-side launch
-// seam. It routes a compiled bootprofile.LaunchSpec through the SHARED
-// plan-assembly path (launchplan.Build → agentlaunch.PlanFromLaunch)
-// instead of overlaying the spec directly — so a GUI chat boot-profile
-// session and a standalone `nanite launch` resolve their runtime binding
-// and assemble their plan identically.
-//
-// # Why route through a LaunchPlan at all
-//
-// Phase C flipped the standalone launcher to registry-primary launch
-// resolution; the chat path never assembled a LaunchPlan. Phase F
-// converges them: launchplan.Build resolves the runner→RuntimeBinding
-// registry-primary through the shared agentregistry.Registry, with an
-// explicit, observable fallback to the spec/profile default (D1 + §4.1),
-// and runs agentlaunch.PlanFromLaunch — which Validate()s the plan.
-//
-// # No behavior change for the user (locked decision §4.1)
-//
-// The composer's provider/model selection stays authoritative. It is
-// spec.Provider — the `runner` id. Registry resolution RESOLVES that
-// runner; it never substitutes a different provider. When the registry
-// has a binding for the runner it carries the same provider; when it has
-// none or is down, launchplan.Build's fallback is RuntimeBindingForSpec
-// (carrying exactly spec.Provider). Either way the projected
-// bootOpts.Provider equals the composer/profile selection. The plan path
-// therefore produces a byte-identical boot to the pre-Phase-F
-// applyLaunchSpecToBootOpts overlay — the user's UI pick always wins.
-//
-// # Degradation (D1 — chat must work offline / registry-down)
-//
-// launchplan.Build never hard-fails on a down/empty registry — the
-// DegradingRegistrar + cache-miss handling inside ResolveRuntimeBinding
-// degrades to the file/spec fallback. The ONLY way Build returns an
-// error here is a genuine fault (ambiguous registry match, malformed
-// source file) or a structurally invalid spec. On any error we log it
-// and fall back to the proven spec-direct overlay
-// (applyLaunchSpecToBootOpts) so the chat session still boots — the
-// registry is a side service, never a launch-path dependency.
-//
-// nil-safe on bootOpts / spec: both no-op (matches the surrounding
-// helper pattern).
-func (s *chatServiceImpl) applyLaunchSpecAsPlanToBootOpts(bootOpts *runtimeagent.Options, spec *bootprofile.LaunchSpec) {
-	if bootOpts == nil || spec == nil {
-		return
-	}
-
-	plan, err := launchplan.Build(spec, s.agentRegistry, slog.Default())
-	if err != nil {
-		// A genuine registry fault or a structurally invalid spec. D1:
-		// never block the launch — degrade to the spec-direct overlay,
-		// observably. The user still gets their composer-selected
-		// provider/model/boot prompt.
-		slog.Warn("driveBootSession: launch-plan assembly failed; degrading to spec-direct overlay",
-			"profile_id", spec.ProfileID, "provider", spec.Provider, "err", err)
-		applyLaunchSpecToBootOpts(bootOpts, spec)
-		return
-	}
-
-	applyLaunchPlanToBootOpts(bootOpts, plan, spec)
-}
-
-// applyLaunchPlanToBootOpts projects a validated agentlaunch.LaunchPlan
-// onto the runtimeagent.Options driveBootSession hands to agent.Boot.
-//
-// The plan is the registry-resolved, PlanFromLaunch-assembled,
-// Validate()-clean projection of the compiled spec. spec is still passed
-// because three boot-relevant fields are NOT carried as load-bearing
-// data on the LaunchPlan and stay spec-sourced — they were never
-// registry-resolvable, and projecting them from the spec keeps the chat
-// boot byte-identical to the pre-Phase-F applyLaunchSpecToBootOpts
-// overlay (the no-behavior-change guarantee):
-//
-//	Env       — go-agent-launch's LaunchPlan does not carry a process
-//	            env map on the base plan (it lands on ProviderSpec.Env /
-//	            InjectionSpec.Env post-Prepare); the compiled
-//	            bootprofile.LaunchSpec.Env stays the source of truth.
-//	BootPrompt— PlanFromLaunch maps the rendered boot body onto
-//	            BootProfile.Inline.BootContent. Nanite's runtime expects
-//	            the durable system/persona prompt on
-//	            Options.BootPromptOverride; spec.BootPrompt IS that
-//	            rendered body (it is what launchplan.Build fed into
-//	            RenderResult.Body), so spec.BootPrompt is used verbatim —
-//	            identical bytes to plan.BootProfile.Inline.BootContent.
-//	ExtraArgs — spec.Args is the profile-authored argv. PlanFromLaunch
-//	            does map a RuntimeBinding's Args onto Provider.Flags, but
-//	            a registry-hit binding (which does NOT carry the
-//	            profile's argv) would otherwise DROP spec.Args — a
-//	            behavior change. spec.Args is therefore appended directly,
-//	            exactly as the legacy overlay did. A future ticket that
-//	            wants registry-contributed argv extends this deliberately.
-//
-// The PLAN is authoritative for the registry-resolved fields:
-//
-//	Provider  — plan.Provider.ID is the runtime binding's Provider, the
-//	            registry-primary resolution of the composer/profile
-//	            runner. Caller-supplied bootOpts.Provider still wins when
-//	            set (precedence mirrors applyLaunchSpecToBootOpts; no chat
-//	            caller sets it today).
-//	Workdir   — plan.Workspace.Workdir is PlanFromLaunch's resolved work
-//	            dir (sourced from spec.Workdir). Caller-supplied
-//	            bootOpts.Workdir wins when set.
-func applyLaunchPlanToBootOpts(bootOpts *runtimeagent.Options, plan agentlaunch.LaunchPlan, spec *bootprofile.LaunchSpec) {
-	if bootOpts == nil {
-		return
-	}
-
-	if plan.Workspace.Workdir != "" && bootOpts.Workdir == "" {
-		bootOpts.Workdir = plan.Workspace.Workdir
-	}
-	if plan.Provider.ID != "" && bootOpts.Provider == "" {
-		bootOpts.Provider = plan.Provider.ID
-	}
-
-	// Env + Args + BootPrompt are not registry-resolvable and stay
-	// spec-sourced — keeps the chat boot byte-identical to the legacy
-	// applyLaunchSpecToBootOpts overlay.
-	if spec != nil {
-		if len(spec.Env) > 0 {
-			if bootOpts.Env == nil {
-				bootOpts.Env = make(map[string]string, len(spec.Env))
-			}
-			for k, v := range spec.Env {
-				bootOpts.Env[k] = v
-			}
-		}
-		if len(spec.Args) > 0 {
-			bootOpts.ExtraArgs = append(bootOpts.ExtraArgs, spec.Args...)
-		}
-		if spec.BootPrompt != "" {
-			bootOpts.BootPromptOverride = spec.BootPrompt
-		}
-	}
 }
 
 // bootSessionRole derives a role identifier from the agent profile for

@@ -186,10 +186,6 @@ func (a *API) RegisterRoutes(mux *http.ServeMux) {
 
 	// Frontend-readiness and external harness control plane.
 	mux.HandleFunc("GET /api/start-surface/capabilities", a.handleStartSurfaceCapabilities)
-	mux.HandleFunc("GET /api/meta-harnesses", a.handleListMetaHarnesses)
-	mux.HandleFunc("POST /api/meta-harnesses", a.handleCreateMetaHarness)
-	mux.HandleFunc("PUT /api/meta-harnesses/{id}", a.handleUpdateMetaHarness)
-	mux.HandleFunc("DELETE /api/meta-harnesses/{id}", a.handleDeleteMetaHarness)
 	mux.HandleFunc("GET /api/harness/v1/initialize", a.handleHarnessV1Initialize)
 	mux.HandleFunc("GET /api/harness/v1/capabilities", a.handleHarnessV1Capabilities)
 	mux.HandleFunc("POST /api/harness/v1/sessions", a.handleHarnessV1CreateSession)

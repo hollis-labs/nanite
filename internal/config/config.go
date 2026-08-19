@@ -50,19 +50,6 @@ type Config struct {
 	// sourced; this knob only widens which roots qualify, it never disables
 	// traversal protection.
 	DevToolsAllowedPaths []string `yaml:"dev_tools_allowed_paths"`
-	// BootProfileCatalogPath is the on-disk root that
-	// internal/bootprofile.LoadCatalog reads when surfacing boot-profile-
-	// backed entries in the provider/model dropdown (CW-20260514-0047)
-	// and, in a follow-up ticket, when the chat runtime boots a session
-	// against a profile-backed entry (CW-20260514-0048). The path may
-	// use a leading ~/ for the user's home directory; expansion happens
-	// in ResolvedBootProfileCatalogPath.
-	//
-	// When unset (empty string) the boot-profile registry stays inert —
-	// the existing API/CLI provider behavior is unchanged and the
-	// dropdown only shows DB-seeded rows. This satisfies the "no
-	// catalog → no behavior change" acceptance criterion.
-	BootProfileCatalogPath string `yaml:"boot_profile_catalog_path"`
 	// WorkflowDefinitionsPath is the on-disk directory internal/agentworkflow's
 	// registry loader reads at startup — one WorkflowDefinition per *.yaml
 	// file (CW-20260813-0014), keyed by the definition's Name field. The
@@ -71,7 +58,7 @@ type Config struct {
 	//
 	// When unset (empty string) the registry stays empty — workflow_run
 	// self-tool calls fail with "unknown workflow" but nothing else changes
-	// ("no catalog → no behavior change", matching BootProfileCatalogPath).
+	// ("no catalog → no behavior change").
 	WorkflowDefinitionsPath string `yaml:"workflow_definitions_path"`
 	// Vanta is the optional Vanta MCP server configuration (CW-20260501-0005
 	// sub-ticket 2). When URL is non-empty, the chat harness registers a
@@ -182,14 +169,6 @@ func (c *Config) ProjectRoot() string {
 	return expandHome(c.Project.Root)
 }
 
-// ResolvedBootProfileCatalogPath returns the configured BootProfileCatalogPath
-// with a leading ~/ tilde-expanded to the user's home directory. Returns an
-// empty string when the field is unset, which the boot-profile registry
-// treats as "no catalog configured" (inert).
-func (c *Config) ResolvedBootProfileCatalogPath() string {
-	return expandHome(c.BootProfileCatalogPath)
-}
-
 // ResolvedWorkflowDefinitionsPath returns the configured
 // WorkflowDefinitionsPath with a leading ~/ tilde-expanded to the user's
 // home directory. Returns an empty string when the field is unset, which
@@ -255,9 +234,6 @@ func merge(user, project *Config) *Config {
 	}
 	if project.DevToolsAllowedPaths != nil {
 		out.DevToolsAllowedPaths = project.DevToolsAllowedPaths
-	}
-	if project.BootProfileCatalogPath != "" {
-		out.BootProfileCatalogPath = project.BootProfileCatalogPath
 	}
 	if project.WorkflowDefinitionsPath != "" {
 		out.WorkflowDefinitionsPath = project.WorkflowDefinitionsPath

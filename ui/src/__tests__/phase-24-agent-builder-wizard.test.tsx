@@ -121,7 +121,6 @@ function startSurface(): StartSurfaceCapabilitiesResponse {
         provider_type: "api",
       },
     ],
-    boot_profiles: [],
     work_root_hints: [],
   };
 }

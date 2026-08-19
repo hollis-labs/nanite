@@ -1542,18 +1542,6 @@ export interface PendingApproval extends ApprovalRequest {
   };
 }
 
-// --- Broker Decisions ---
-
-export interface BrokerDecision {
-  id: number;
-  session_id: string;
-  intent: string;
-  layer_reached: string;
-  selected_tools: string[];
-  signals: string;
-  created_at: string;
-}
-
 // --- Turn Snapshots ---
 
 export interface TurnSnapshot {

@@ -89,27 +89,11 @@ type ToolMetaInfo struct {
 // progressive discovery is activated.
 const ProgressiveDiscoveryThreshold = 10
 
-// BrokerDecisionLogger logs tool selection decisions for debugging.
-type BrokerDecisionLogger interface {
-	LogBrokerDecision(sessionID, intent, layerReached string, selectedTools []string, signals string) error
-}
-
-// BrokerDecisionExLogger is the Phase 5 / D3 (CW-20260419-0011) extension.
-// Implementations record every request_tools call (intent + outcome +
-// consecutive_empty + total_calls + reflection_query). *store.Store
-// satisfies it via LogBrokerDecisionEx — the adapter lives here so the
-// service layer doesn't depend on the store package's record shape.
-type BrokerDecisionExLogger interface {
-	BrokerDecisionLogger
-	LogBrokerDecisionEx(e store.BrokerDecisionEntry) error
-}
-
 // toolServiceImpl is the concrete implementation of ToolService.
 type toolServiceImpl struct {
-	toolClient     *toolclient.ToolClient
-	mcpManager     *mcp.Manager
-	agents         AgentReader
-	decisionLogger BrokerDecisionLogger
+	toolClient *toolclient.ToolClient
+	mcpManager *mcp.Manager
+	agents     AgentReader
 
 	// repairConfig wires the C2 LLM-augmented repair pipeline
 	// (CW-20260429-0008). Nil-safe: when unset (or when the cost gates
@@ -167,46 +151,6 @@ func NewToolService(tc *toolclient.ToolClient, mcpMgr *mcp.Manager, agents Agent
 	}
 }
 
-// SetDecisionLogger attaches a broker decision logger (typically *store.Store).
-func (s *toolServiceImpl) SetDecisionLogger(dl BrokerDecisionLogger) {
-	s.decisionLogger = dl
-}
-
-// LogRequestToolsCall persists a single request_tools meta-tool call to
-// broker_decisions. Called by the chat service via the brokerCallPersister
-// interface. Routes through the BrokerDecisionExLogger when available
-// (so the new fields land), falling back to the legacy LogBrokerDecision
-// when the attached logger is the older shape.
-func (s *toolServiceImpl) LogRequestToolsCall(
-	sessionID, intent, outcome string,
-	consecutiveEmpty, totalCalls, loadedCount int,
-	reflectionQuery string,
-) {
-	if s.decisionLogger == nil || sessionID == "" {
-		return
-	}
-	if ex, ok := s.decisionLogger.(BrokerDecisionExLogger); ok {
-		err := ex.LogBrokerDecisionEx(store.BrokerDecisionEntry{
-			SessionID:        sessionID,
-			Intent:           intent,
-			LayerReached:     "request_tools",
-			Outcome:          outcome,
-			ConsecutiveEmpty: consecutiveEmpty,
-			TotalCalls:       totalCalls,
-			LoadedCount:      loadedCount,
-			ReflectionQuery:  reflectionQuery,
-		})
-		if err != nil {
-			slog.Warn("service/tool: failed to persist request_tools call (ex)", "err", err)
-		}
-		return
-	}
-	// Legacy fallback — at least the row lands so debug panels see it.
-	if err := s.decisionLogger.LogBrokerDecision(sessionID, intent, "request_tools", nil, outcome); err != nil {
-		slog.Warn("service/tool: failed to persist request_tools call", "err", err)
-	}
-}
-
 // SetRepairConfig attaches the C2 repair pipeline wiring. Nil-safe —
 // pass nil to disable repair entirely (the env-var and user-pref gates
 // also disable it independently).
@@ -233,21 +177,6 @@ func (s *toolServiceImpl) SelectForAgent(ctx context.Context, sessionID, agentID
 					seen[t.Name] = true
 					allTools = append(allTools, t)
 				}
-			}
-		}
-		// Phase 5 / D3 (CW-20260419-0011): when the toolclient has skills
-		// or a memory recaller wired, run the reasoning-augmented signal
-		// pass to capture diagnostic state (logged + persisted). The
-		// signal pass returns the same tool universe as SelectToolsAsProvider
-		// for the time being — it informs ranking, not surface composition,
-		// because the agent permission filter downstream of this path
-		// expects llmtypes.ToolDefinition output. Future work: pass the
-		// augmented order into provider conversion so the LLM receives
-		// skills-prioritised tools first. (See follow-ups in the ADR-003
-		// "Limitations" section.)
-		if s.toolClient.MemoryRecaller() != nil || len(s.toolClient.Skills()) > 0 {
-			if _, signals, err := s.toolClient.SelectToolsAugmented(ctx, intent, hints, workspaceID, agentID, windowSize); err == nil {
-				s.logDecisionWithSignals(sessionID, intent, "augmented", allTools, signals)
 			}
 		}
 	}
@@ -351,7 +280,6 @@ func (s *toolServiceImpl) SelectForAgent(ctx context.Context, sessionID, agentID
 		slog.Info("service/tool: progressive discovery active",
 			"mcp_tools", mcpToolCount, "builtins", len(builtinTools)-1, "catalog_entries", len(summaries))
 
-		s.logDecision(sessionID, intent, "progressive", builtinTools)
 		return &ToolSelection{
 			Tools:       builtinTools,
 			Catalog:     catalog,
@@ -359,32 +287,7 @@ func (s *toolServiceImpl) SelectForAgent(ctx context.Context, sessionID, agentID
 		}, nil
 	}
 
-	layer := "catalog"
-	if len(allTools) == 0 {
-		layer = "empty"
-	}
-	s.logDecision(sessionID, intent, layer, allTools)
 	return &ToolSelection{Tools: allTools}, nil
-}
-
-// logDecision persists the broker selection decision for the debug panel.
-func (s *toolServiceImpl) logDecision(sessionID, intent, layer string, tools []llmtypes.ToolDefinition) {
-	s.logDecisionWithSignals(sessionID, intent, layer, tools, "")
-}
-
-// logDecisionWithSignals is logDecision plus the diagnostic signals JSON.
-// Phase 5 / D3 routes the reasoning-augmented selection signals here.
-func (s *toolServiceImpl) logDecisionWithSignals(sessionID, intent, layer string, tools []llmtypes.ToolDefinition, signals string) {
-	if s.decisionLogger == nil || sessionID == "" {
-		return
-	}
-	names := make([]string, len(tools))
-	for i, t := range tools {
-		names[i] = t.Name
-	}
-	if err := s.decisionLogger.LogBrokerDecision(sessionID, intent, layer, names, signals); err != nil {
-		slog.Warn("service/tool: failed to log broker decision", "err", err)
-	}
 }
 
 // Execute implements ToolService. Unified execution path: ToolClient (with

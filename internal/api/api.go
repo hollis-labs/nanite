@@ -291,7 +291,6 @@ func (a *API) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/tools/select", a.handleSelectTools)
 	mux.HandleFunc("POST /api/tools/refresh", a.handleRefreshTools)
 	mux.HandleFunc("POST /api/tools/call", a.handleSelfToolCall)
-	mux.HandleFunc("GET /api/broker/decisions", a.handleListBrokerDecisions)
 	mux.HandleFunc("GET /api/agents/{id}/tools", a.handleListAgentTools)
 
 	// Permissions & Approvals

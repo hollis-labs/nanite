@@ -90,14 +90,6 @@ const CORE_ENTRIES: Record<string, WidgetRegistryEntry> = {
     ),
     source: "bookmarks",
   },
-  "broker-decisions": {
-    component: lazy(() =>
-      import("@/components/plugins/debug/BrokerDecisionsWidget").then((m) => ({
-        default: m.BrokerDecisionsWidget,
-      })),
-    ),
-    source: "debug",
-  },
   "slot-inspector": {
     component: lazy(() =>
       import("@/components/plugins/debug/SlotInspectorWidget").then((m) => ({
@@ -130,14 +122,12 @@ export const DEFAULT_WIDGET_ORDER: string[] = [
   "observability",
   "tools",
   "agent-status",
-  "broker-decisions",
   "slot-inspector",
   "turn-snapshots",
 ];
 
 /** Widget IDs that require developer_mode to be visible. */
 export const DEVELOPER_ONLY_WIDGETS: Set<string> = new Set([
-  "broker-decisions",
   "slot-inspector",
   "turn-snapshots",
 ]);

@@ -287,8 +287,14 @@ func (tb *ToolClient) SelectWithSignals(
 	// removes from the tail until it fits, keeping at least one).
 	final = PruneToolsToTokenBudget(final, tokenBudget)
 
-	// Diagnostic signals JSON for the broker_decisions row. Compact key
-	// names so the payload stays readable in a debug panel.
+	// Diagnostic signals JSON, returned to the caller alongside the
+	// selection. Compact key names so the payload stays readable wherever
+	// it's logged/displayed. (Its former consumer — the broker_decisions
+	// SQL debug row — was removed by
+	// TASKS/phase-0/23-export-and-drop-decision-tables.md, which leaves
+	// SelectWithSignals/SelectToolsAugmented without a production caller
+	// today; test-only reachable. Flagged as a candidate for a future
+	// cleanup pass, out of scope for that task.)
 	signals := signalsJSON(scored, len(final))
 
 	slog.Info("toolclient: reasoning-augmented selection",
@@ -302,8 +308,9 @@ func (tb *ToolClient) SelectWithSignals(
 	return final, signals, nil
 }
 
-// signalsJSON builds a tiny diagnostic blob for the broker_decisions row.
-// We keep it small (top-3 only) — full per-tool breakdown lives in slog.
+// signalsJSON builds a tiny diagnostic blob describing the top-scored
+// candidates. We keep it small (top-3 only) — full per-tool breakdown
+// lives in slog.
 func signalsJSON(scored []ScoredTool, finalCount int) string {
 	limit := 3
 	if len(scored) < limit {

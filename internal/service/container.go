@@ -664,7 +664,6 @@ func NewContainer(cfg ContainerConfig) (*Container, error) {
 	var agentReader AgentReader = cfg.Store
 	tools := NewToolService(cfg.ToolClient, cfg.MCP, agentReader)
 	if impl, ok := tools.(*toolServiceImpl); ok {
-		impl.SetDecisionLogger(cfg.Store)
 		// C2 (CW-20260429-0008): wire the LLM-augmented repair pipeline.
 		// The repair model is selectable via NANITE_REPAIR_MODEL; the
 		// provider is picked from the user's utility provider (which

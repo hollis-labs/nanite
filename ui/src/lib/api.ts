@@ -26,7 +26,6 @@ import type {
   Artifact,
   AttachDurableAgentSessionRequest,
   Bookmark,
-  BrokerDecision,
   CatalogBrowseEntry,
   CatalogSource,
   CLIDetectionResult,
@@ -3148,20 +3147,6 @@ export const api = {
   }> => {
     const res = await fetch(`${API_BASE}/sessions/${sessionId}/shell-info`);
     if (!res.ok) throw new Error(`Failed to get shell info: ${res.status}`);
-    return res.json();
-  },
-
-  // --- vNext: Broker Decisions ---
-
-  getBrokerDecisions: async (
-    sessionId: string,
-    limit = 50,
-  ): Promise<BrokerDecision[]> => {
-    const res = await fetch(
-      `${API_BASE}/broker/decisions?session_id=${encodeURIComponent(sessionId)}&limit=${limit}`,
-    );
-    if (!res.ok)
-      throw new Error(`Failed to get broker decisions: ${res.status}`);
     return res.json();
   },
 

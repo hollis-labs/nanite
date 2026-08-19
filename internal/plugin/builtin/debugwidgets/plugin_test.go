@@ -15,8 +15,8 @@ func TestManifestYAMLParses(t *testing.T) {
 	if m.ID != "debug-widgets" {
 		t.Errorf("expected ID debug-widgets, got %q", m.ID)
 	}
-	if len(m.Registers.Components) != 3 {
-		t.Fatalf("expected 3 components in manifest, got %d", len(m.Registers.Components))
+	if len(m.Registers.Components) != 2 {
+		t.Fatalf("expected 2 components in manifest, got %d", len(m.Registers.Components))
 	}
 }
 
@@ -36,7 +36,7 @@ func TestManifestPathRegistersWidgets(t *testing.T) {
 	if _, errs := hostplugin.LoadRegisteredBuiltins(host); len(errs) != 0 {
 		t.Fatalf("LoadRegisteredBuiltins errs: %v", errs)
 	}
-	found := map[string]bool{"broker-decisions": false, "slot-inspector": false, "turn-snapshots": false}
+	found := map[string]bool{"slot-inspector": false, "turn-snapshots": false}
 	for _, c := range host.GetUIComponents() {
 		if _, ok := found[c.ID]; ok {
 			found[c.ID] = true

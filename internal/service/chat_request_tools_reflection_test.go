@@ -7,42 +7,32 @@ import (
 
 	llmtypes "github.com/hollis-labs/go-llm-types"
 	"github.com/hollis-labs/nanite/internal/chat"
-	"github.com/hollis-labs/nanite/internal/store"
+	inspectsvc "github.com/hollis-labs/nanite/internal/inspector"
 )
 
 // fakeRequestToolsService satisfies ToolService for the reflection unit test.
 // HandleRequestTools always returns no new tools so the cap-trip path fires.
 type fakeRequestToolsService struct {
 	stubToolService // embed the existing test stub from chat_test.go
-	logged          []store.BrokerDecisionEntry
 }
 
 // GetToolSchema satisfies the ToolService interface — stubToolService doesn't
 // implement it, so we add the no-op here to keep the fake compilable.
 func (f *fakeRequestToolsService) GetToolSchema(_ string) map[string]any { return nil }
 
-// LogRequestToolsCall captures the persistence calls so the test can assert
-// the right outcome strings reach the store.
-func (f *fakeRequestToolsService) LogRequestToolsCall(
-	sessionID, intent, outcome string,
-	consecutiveEmpty, totalCalls, loadedCount int,
-	reflectionQuery string,
-) {
-	f.logged = append(f.logged, store.BrokerDecisionEntry{
-		SessionID:        sessionID,
-		Intent:           intent,
-		LayerReached:     "request_tools",
-		Outcome:          outcome,
-		ConsecutiveEmpty: consecutiveEmpty,
-		TotalCalls:       totalCalls,
-		LoadedCount:      loadedCount,
-		ReflectionQuery:  reflectionQuery,
-	})
-}
+// Persistence for request_tools calls used to be captured directly on this
+// fake (via a LogRequestToolsCall method satisfying the now-deleted
+// brokerCallPersister interface, writing to the now-dropped broker_decisions
+// SQL table — TASKS/phase-0/23-export-and-drop-decision-tables.md). The
+// only remaining live persistence path is the inspector ring buffer
+// (chatServiceImpl.persistBrokerCallEx), so these tests now wire a real
+// *inspector.Service and assert against its recorded BrokerDecisions
+// instead of a fake-captured slice.
 
 func TestHandleRequestTools_ReflectionThenHalt(t *testing.T) {
 	fake := &fakeRequestToolsService{}
-	s := &chatServiceImpl{tools: fake}
+	insp := inspectsvc.NewService()
+	s := &chatServiceImpl{tools: fake, inspector: insp}
 
 	loadedTools := map[string]bool{
 		"dev_read":      true,
@@ -54,6 +44,7 @@ func TestHandleRequestTools_ReflectionThenHalt(t *testing.T) {
 	maxCalls := 3
 	reflectionFired := false
 	sessionID := "s1"
+	turnID := "turn1"
 
 	// Buffered channel sized to absorb the events the helper emits per call:
 	// one tool_call + one tool_result per request_tools invocation.
@@ -74,7 +65,7 @@ func TestHandleRequestTools_ReflectionThenHalt(t *testing.T) {
 		&consecutiveEmpty, &totalCalls, maxCalls,
 		nil, nil,
 		sessionID, &reflectionFired,
-		"", // inspectorTurnID — inspector not wired in this test
+		turnID,
 	)
 	if len(resultBlocks) != 1 || len(refs) != 1 {
 		t.Fatalf("expected 1 result block + ref; got %d / %d", len(resultBlocks), len(refs))
@@ -91,8 +82,9 @@ func TestHandleRequestTools_ReflectionThenHalt(t *testing.T) {
 	if !strings.Contains(resultBlocks[0].Content, "dev_grep") {
 		t.Errorf("reflection prompt should mention loaded dev_grep; got %q", resultBlocks[0].Content)
 	}
-	if len(fake.logged) != 1 || fake.logged[0].Outcome != "reflected" {
-		t.Errorf("expected one 'reflected' broker_decisions row; got %v", fake.logged)
+	snap := insp.Snapshot(sessionID, turnID)
+	if snap == nil || len(snap.BrokerDecisions) != 1 || snap.BrokerDecisions[0].Outcome != "reflected" {
+		t.Errorf("expected one 'reflected' broker decision recorded; got %+v", snap)
 	}
 
 	// Second call → reflection already fired; cap still tripped → hard halt.
@@ -103,7 +95,7 @@ func TestHandleRequestTools_ReflectionThenHalt(t *testing.T) {
 		&consecutiveEmpty, &totalCalls, maxCalls,
 		nil, nil,
 		sessionID, &reflectionFired,
-		"",
+		turnID,
 	)
 	if len(resultBlocks2) != 1 || len(refs2) != 1 {
 		t.Fatalf("expected 1 result block + ref; got %d / %d", len(resultBlocks2), len(refs2))
@@ -111,14 +103,16 @@ func TestHandleRequestTools_ReflectionThenHalt(t *testing.T) {
 	if !strings.Contains(resultBlocks2[0].Content, "Tool discovery cap reached") {
 		t.Errorf("second-strike should hard-halt; got %q", resultBlocks2[0].Content)
 	}
-	if len(fake.logged) != 2 || fake.logged[1].Outcome != "halted" {
-		t.Errorf("expected second row outcome=halted; got %v", fake.logged)
+	snap = insp.Snapshot(sessionID, turnID)
+	if snap == nil || len(snap.BrokerDecisions) != 2 || snap.BrokerDecisions[1].Outcome != "halted" {
+		t.Errorf("expected second decision outcome=halted; got %+v", snap)
 	}
 }
 
 func TestHandleRequestTools_LogsLoadedOutcome(t *testing.T) {
 	fake := &fakeRequestToolsService{}
-	s := &chatServiceImpl{tools: fake}
+	insp := inspectsvc.NewService()
+	s := &chatServiceImpl{tools: fake, inspector: insp}
 
 	loadedTools := map[string]bool{}
 	consecutiveEmpty := 0
@@ -126,6 +120,7 @@ func TestHandleRequestTools_LogsLoadedOutcome(t *testing.T) {
 	maxCalls := 5
 	reflectionFired := false
 	sessionID := "s2"
+	turnID := "turn2"
 
 	ch := make(chan chat.StreamEvent, 8)
 	tu := llmtypes.ToolUseBlock{
@@ -143,15 +138,16 @@ func TestHandleRequestTools_LogsLoadedOutcome(t *testing.T) {
 		&consecutiveEmpty, &totalCalls, maxCalls,
 		nil, nil,
 		sessionID, &reflectionFired,
-		"",
+		turnID,
 	)
-	if len(fake.logged) != 1 {
-		t.Fatalf("expected 1 logged row, got %d", len(fake.logged))
+	snap := insp.Snapshot(sessionID, turnID)
+	if snap == nil || len(snap.BrokerDecisions) != 1 {
+		t.Fatalf("expected 1 recorded broker decision, got %+v", snap)
 	}
-	if fake.logged[0].Outcome != "empty" {
-		t.Errorf("outcome=%q want 'empty' (stub returns no tools)", fake.logged[0].Outcome)
+	if snap.BrokerDecisions[0].Outcome != "empty" {
+		t.Errorf("outcome=%q want 'empty' (stub returns no tools)", snap.BrokerDecisions[0].Outcome)
 	}
-	if fake.logged[0].TotalCalls != 1 {
-		t.Errorf("totalCalls=%d want 1", fake.logged[0].TotalCalls)
+	if snap.BrokerDecisions[0].TotalCalls != 1 {
+		t.Errorf("totalCalls=%d want 1", snap.BrokerDecisions[0].TotalCalls)
 	}
 }

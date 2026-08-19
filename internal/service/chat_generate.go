@@ -2718,10 +2718,10 @@ func classifyModeFromAgentTags(agent *store.AgentProfile) string {
 //   - If the cap trips a SECOND time within the same turn (i.e. the LLM
 //     reflected once already and is still asking), we fall back to the
 //     pre-Phase-5 hard halt — we don't reflect repeatedly.
-//   - Every call is persisted to broker_decisions with intent + outcome +
-//     consecutive_empty + total_calls so future Phase 4 mining work has a
-//     ground-truth signal to learn from. (Phase 4 mining itself is
-//     deferred — see follow-ups.)
+//   - Every call is persisted to the inspector ring buffer with intent +
+//     outcome + consecutive_empty + total_calls (TASKS/phase-0/23-export-
+//     and-drop-decision-tables.md retired the SQL-backed broker_decisions
+//     table this used to also write to — see persistBrokerCallEx).
 func (s *chatServiceImpl) handleRequestTools(
 	ctx context.Context,
 	tu llmtypes.ToolUseBlock,
@@ -2741,7 +2741,8 @@ func (s *chatServiceImpl) handleRequestTools(
 	*totalCalls++
 
 	// Pull the LLM-supplied intent up front so it ends up in every
-	// broker_decisions row (selected, loaded, empty, halted, reflected).
+	// inspector broker-decision record (selected, loaded, empty, halted,
+	// reflected).
 	requestedIntent := ""
 	if tu.Input != nil {
 		if v, ok := tu.Input["intent"]; ok {
@@ -2859,22 +2860,22 @@ func sortedKeys(m map[string]bool) []string {
 	return out
 }
 
-// persistBrokerCall records every request_tools meta-tool call into the
-// broker_decisions table AND the inspector ring buffer (when inspector is
-// wired). Best-effort: a failed write is logged but never gates the loop.
-// The chat service's store-backed BrokerDecisionLogger is only available via
-// toolServiceImpl; we route through that adapter so tests with a stub
-// ToolService don't have to provide a Store.
-func (s *chatServiceImpl) persistBrokerCall(
-	sessionID, intent, outcome string,
-	consecutiveEmpty, totalCalls, loadedCount int,
-	reflectionQuery string,
-) {
-	s.persistBrokerCallEx(sessionID, "", intent, outcome, consecutiveEmpty, totalCalls, loadedCount, reflectionQuery, nil, "")
-}
-
-// persistBrokerCallEx is the extended form used by handleRequestTools to also
-// record the broker decision into the inspector aggregator.
+// persistBrokerCallEx records one request_tools meta-tool call into the
+// inspector ring buffer (when inspector is wired). No-op when the
+// inspector is disabled, sessionID is empty, or no turn ID is available —
+// dev-mode telemetry only, never gates the loop.
+//
+// Historical note (TASKS/phase-0/23-export-and-drop-decision-tables.md):
+// this used to also persist every call into the `broker_decisions` SQL
+// table via toolServiceImpl's BrokerDecisionLogger/LogRequestToolsCall.
+// That table (and its writer) was retired in full as part of the same
+// task — its historical rows were exported to event_log
+// (event_type="broker_decision_export") before the table was dropped. The
+// inspector ring buffer is now the only live per-turn broker-decision
+// telemetry; the old SQL-backed debug panel (BrokerDecisionsPanel/Widget,
+// GET /api/broker/decisions) was removed alongside it — see
+// ui/src/components/settings/inspector/InspectorPanel.tsx for its
+// replacement.
 func (s *chatServiceImpl) persistBrokerCallEx(
 	sessionID, inspectorTurnID, intent, outcome string,
 	consecutiveEmpty, totalCalls, loadedCount int,
@@ -2882,42 +2883,23 @@ func (s *chatServiceImpl) persistBrokerCallEx(
 	selectedTools []string,
 	layerReached string,
 ) {
-	if sessionID == "" {
-		return
-	}
-	logger, ok := s.tools.(brokerCallPersister)
-	if !ok || logger == nil {
+	if sessionID == "" || s.inspector == nil || inspectorTurnID == "" {
 		return
 	}
 	if intent == "" {
 		intent = "(no intent supplied)"
 	}
-	logger.LogRequestToolsCall(
-		sessionID, intent, outcome,
-		consecutiveEmpty, totalCalls, loadedCount, reflectionQuery,
-	)
-	// I1 (CW-20260426-0004): additive — also emit to inspector.
-	if s.inspector != nil && inspectorTurnID != "" {
-		d := inspectsvc.BrokerDecision{
-			Intent:           intent,
-			Outcome:          outcome,
-			SelectedTools:    selectedTools,
-			LayerReached:     layerReached,
-			ConsecutiveEmpty: consecutiveEmpty,
-			TotalCalls:       totalCalls,
-			LoadedCount:      loadedCount,
-			ReflectionQuery:  reflectionQuery,
-		}
-		s.inspector.RecordBrokerDecision(sessionID, inspectorTurnID, d)
+	d := inspectsvc.BrokerDecision{
+		Intent:           intent,
+		Outcome:          outcome,
+		SelectedTools:    selectedTools,
+		LayerReached:     layerReached,
+		ConsecutiveEmpty: consecutiveEmpty,
+		TotalCalls:       totalCalls,
+		LoadedCount:      loadedCount,
+		ReflectionQuery:  reflectionQuery,
 	}
-}
-
-// brokerCallPersister is the narrow surface persistBrokerCall uses. It is
-// satisfied by toolServiceImpl (which holds a *store.Store via the
-// BrokerDecisionLogger setter); a stub ToolService that doesn't satisfy
-// this interface is silently a no-op for persistence.
-type brokerCallPersister interface {
-	LogRequestToolsCall(sessionID, intent, outcome string, consecutiveEmpty, totalCalls, loadedCount int, reflectionQuery string)
+	s.inspector.RecordBrokerDecision(sessionID, inspectorTurnID, d)
 }
 
 // detectStuckLoop checks for repeated identical tool results and returns

@@ -39,7 +39,7 @@ Live tracker for `docs/engineering/TASKS.md`'s execution, per `docs/engineering/
 | 20-retire-workspaces-and-instance-mechanism | implemented | 28 (orchestrator-added, see below) | 3 (chain pos. 8) |
 | 21-cut-modes | implemented | 28 (orchestrator-added); coordinate w/ 18a on `agents.go` | 3 (chain pos. 7) |
 | 22-remove-skill-and-tool-broker-abstractions | implemented | (sequenced after 29, see below) | 3 (chain pos. 10) |
-| 23-export-and-drop-decision-tables | not-started | 11, 22 | 3 (chain pos. 11) |
+| 23-export-and-drop-decision-tables | implemented | 11, 22 | 3 (chain pos. 11) |
 | 24-housekeeping-agent-profile-files | implemented | none | 1 |
 | 25-drop-unused-session-status-enum | implemented | 26 | 3 (parallel with chain, after pos. 4) |
 | 26-cut-session-compaction-summary-fields | implemented | (sequenced after 27, see below) | 3 (chain pos. 4) |

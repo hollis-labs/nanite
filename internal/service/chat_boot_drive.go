@@ -144,6 +144,22 @@ func (s *chatServiceImpl) driveBootSession(
 		if launchSpec := s.launchSpecFor(sessionID); launchSpec != nil {
 			s.applyLaunchSpecAsPlanToBootOpts(&bootOpts, launchSpec)
 		}
+		// Phase 2 item 02 (TASKS/phase-2/02-port-forward-dynamic-resolver.md):
+		// resolve this agent's DB-configured cmd/http context resolvers, if
+		// any, and fold the output into the boot prompt via
+		// Options.DynamicContext. Runs for every agent — not gated behind a
+		// bootprofile session — since the whole point of the port is making
+		// this a first-class mechanism available to every agent.
+		if agent != nil && agent.ID != "" {
+			blocks, resolveErr := s.resolveAgentContextForBoot(ctx, agent.ID, workdir)
+			if resolveErr != nil {
+				return nil, fmt.Errorf("driveBootSession: resolve agent context: %w", resolveErr)
+			}
+			if len(blocks) > 0 {
+				bootOpts.DynamicContext = blocks
+				s.activeSessionContextBlocks.Store(sessionID, blocks)
+			}
+		}
 		// CW-20260525-0001 Slice 3: resume the provider's prior session after a
 		// host restart. Read the captured provider_session_id BEFORE Boot —
 		// CreateRuntimeRow upserts the row and clears the column. When present,
@@ -258,6 +274,43 @@ func (s *chatServiceImpl) driveBootSession(
 	}()
 
 	return turnCh, nil
+}
+
+// resolveAgentContextForBoot loads agentID's enabled
+// agent_context_resolvers rows and resolves them through
+// runtimeagent.ResolveContextBlocks (Phase 2 item 02,
+// TASKS/phase-2/02-port-forward-dynamic-resolver.md), returning the
+// slot-name -> resolved-content map that driveBootSession folds into
+// Options.DynamicContext.
+//
+// Returns (nil, nil) when the store isn't wired, agentID is empty, or
+// the agent has no resolvers configured — the common case, and the
+// pre-existing behavior for every session that predates this
+// mechanism.
+//
+// A resolver-level failure (cmd non-zero exit, HTTP non-2xx, a bad
+// timeout string, …) is NOT swallowed: it propagates as a boot error,
+// mirroring the pre-port bootprofile.ResolveRequirements behavior — a
+// half-resolved boot prompt is worse than a clean stop. An operator
+// who wants a flaky resolver to stop blocking an agent's boot should
+// disable that row (agent_context_resolvers.enabled) rather than rely
+// on silent degradation here.
+func (s *chatServiceImpl) resolveAgentContextForBoot(ctx context.Context, agentID, workdir string) (map[string]string, error) {
+	if s.store == nil || agentID == "" {
+		return nil, nil
+	}
+	rows, err := s.store.ListEnabledAgentContextResolvers(ctx, agentID)
+	if err != nil {
+		return nil, fmt.Errorf("list agent_context_resolvers: %w", err)
+	}
+	if len(rows) == 0 {
+		return nil, nil
+	}
+	blocks, err := runtimeagent.ResolveContextBlocks(ctx, rows, workdir)
+	if err != nil {
+		return nil, fmt.Errorf("agent %q: %w", agentID, err)
+	}
+	return blocks, nil
 }
 
 // composeUserPayload assembles the per-turn payload SendInput delivers to the
@@ -528,7 +581,17 @@ func (s *chatServiceImpl) regenerateBootDirSlots(sessionID, bootDir string, agen
 	if ls := s.launchSpecFor(sessionID); ls != nil {
 		bootPromptOverride = ls.BootPrompt
 	}
-	systemPrompt := runtimeagent.ResolveSystemPrompt(role, agent, runtimeagent.ModeLongLived, bootPromptOverride)
+	// Phase 2 item 02: re-thread the SAME resolved dynamic-context blocks
+	// the initial Boot stashed, so a mid-session slot regen doesn't
+	// silently drop a resolver's live-fetched data the way a bare
+	// re-derive from role/profile/override alone would.
+	var dynamicContext map[string]string
+	if v, ok := s.activeSessionContextBlocks.Load(sessionID); ok {
+		if blocks, blocksOK := v.(map[string]string); blocksOK {
+			dynamicContext = blocks
+		}
+	}
+	systemPrompt := runtimeagent.ResolveSystemPrompt(role, agent, runtimeagent.ModeLongLived, bootPromptOverride, dynamicContext)
 	if err := fsutil.AtomicWriteFile(claudePath, []byte(runtimeagent.BuildCLAUDEMD(agent.Name, agent.Description, systemPrompt)), 0o644); err != nil {
 		return fmt.Errorf("regen CLAUDE.md: %w", err)
 	}

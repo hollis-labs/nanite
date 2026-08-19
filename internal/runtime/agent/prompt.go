@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"sort"
 	"strings"
 
 	"github.com/hollis-labs/nanite/internal/store"
@@ -36,40 +37,89 @@ func composeSystemPrompt(role string, profile *store.AgentProfile, mode Mode) st
 
 // resolveBootPrompt is the single hook the per-provider Layout
 // implementations consult. When Options.BootPromptOverride is non-empty,
-// it wins verbatim — CW-20260514-0048 (boot-profile-driven launches)
-// passes the fully-rendered LaunchSpec.BootPrompt through here so the
-// catalog-authored prompt lands on the runtime in place of the
-// role-derived composeSystemPrompt result. Empty override delegates to
-// composeSystemPrompt for the prior behavior.
+// it wins verbatim over the role-derived composition — CW-20260514-0048
+// (boot-profile-driven launches) passes the fully-rendered
+// LaunchSpec.BootPrompt through here so the catalog-authored prompt
+// lands on the runtime in place of the role-derived composeSystemPrompt
+// result. Empty override delegates to composeSystemPrompt for the prior
+// behavior. Either way, Options.DynamicContext (Phase 2 item 02,
+// TASKS/phase-2/02-port-forward-dynamic-resolver.md) is appended on top
+// — a resolver's live-fetched data folds into the assembled context
+// regardless of which path produced the base prompt.
 //
 // Keeping the resolution in one place means the three live layouts
 // (claude / codex / opencode) — plus any future addition — share one
 // override hook rather than three independently-wired branches.
 func resolveBootPrompt(profile *store.AgentProfile, opts Options) string {
-	if opts.BootPromptOverride != "" {
-		return opts.BootPromptOverride
+	base := opts.BootPromptOverride
+	if base == "" {
+		base = composeSystemPrompt(opts.Role, profile, opts.Mode)
 	}
-	return composeSystemPrompt(opts.Role, profile, opts.Mode)
+	return appendDynamicContext(base, opts.DynamicContext)
 }
 
 // ResolveSystemPrompt is the exported entry point for recomputing a
 // session's boot prompt OUTSIDE agent.Boot — it applies the same
 // resolution resolveBootPrompt does (override wins verbatim; otherwise
-// role/profile/mode-composed), but takes the inputs loose rather than
-// bundled in an Options.
+// role/profile/mode-composed; dynamicContext appended on top either
+// way), but takes the inputs loose rather than bundled in an Options.
 //
 // CW-20260516-0007 round 1: the chat service's mid-session CLAUDE.md
 // regeneration (regenerateBootDirSlots) uses this so a slot refresh
 // re-plants the SAME system prompt the initial Boot planted — role and
-// mode framing AND a bootprofile LaunchSpec's BootPromptOverride
-// included. Previously the regen path wrote only the agent profile's
-// bare SystemPrompt, silently thinning a bootprofile session's
-// operating instructions on the first mid-run slot change.
-func ResolveSystemPrompt(role string, profile *store.AgentProfile, mode Mode, bootPromptOverride string) string {
-	if bootPromptOverride != "" {
-		return bootPromptOverride
+// mode framing, a bootprofile LaunchSpec's BootPromptOverride, AND
+// (Phase 2 item 02) any resolved dynamic-context blocks the initial Boot
+// folded in, all included. Previously the regen path wrote only the
+// agent profile's bare SystemPrompt, silently thinning a bootprofile
+// session's operating instructions on the first mid-run slot change —
+// the same gap would otherwise recur for dynamic-resolver content if the
+// caller didn't re-thread it here too.
+func ResolveSystemPrompt(role string, profile *store.AgentProfile, mode Mode, bootPromptOverride string, dynamicContext map[string]string) string {
+	base := bootPromptOverride
+	if base == "" {
+		base = composeSystemPrompt(role, profile, mode)
 	}
-	return composeSystemPrompt(role, profile, mode)
+	return appendDynamicContext(base, dynamicContext)
+}
+
+// appendDynamicContext appends each non-empty block in blocks (keyed by
+// slot name) as its own "## Dynamic context: <slot>" section after base,
+// sorted by slot name for determinism (map iteration order is not
+// stable, and this content will land in a system prompt that a CLI
+// provider may cache — a stable render matters for the same reasons
+// INV3 of internal/context/INVARIANTS.md cares about cache-marker
+// stability on the API side). Empty/nil blocks (or a blocks map whose
+// entries are all blank) return base unchanged.
+func appendDynamicContext(base string, blocks map[string]string) string {
+	if len(blocks) == 0 {
+		return base
+	}
+	names := make([]string, 0, len(blocks))
+	for name, content := range blocks {
+		if strings.TrimSpace(content) == "" {
+			continue
+		}
+		names = append(names, name)
+	}
+	if len(names) == 0 {
+		return base
+	}
+	sort.Strings(names)
+
+	var b strings.Builder
+	if base != "" {
+		b.WriteString(base)
+	}
+	for _, name := range names {
+		if b.Len() > 0 {
+			b.WriteString("\n\n")
+		}
+		b.WriteString("## Dynamic context: ")
+		b.WriteString(name)
+		b.WriteString("\n\n")
+		b.WriteString(strings.TrimSpace(blocks[name]))
+	}
+	return b.String()
 }
 
 // roleFraming returns the role-specific prefix for the system prompt. Empty

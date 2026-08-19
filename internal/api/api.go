@@ -128,6 +128,13 @@ func (a *API) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/agents/{id}/projects", a.handleListAgentProjects)
 	mux.HandleFunc("POST /api/agents/{id}/projects", a.handleAddAgentProject)
 	mux.HandleFunc("DELETE /api/agents/{id}/projects/{projectId}", a.handleRemoveAgentProject)
+	// Phase 2 item 02 (TASKS/phase-2/02-port-forward-dynamic-resolver.md):
+	// DB-CRUD surface for an agent's cmd/http dynamic context resolvers.
+	mux.HandleFunc("GET /api/agents/{id}/context-resolvers", a.handleListAgentContextResolvers)
+	mux.HandleFunc("POST /api/agents/{id}/context-resolvers", a.handleCreateAgentContextResolver)
+	mux.HandleFunc("GET /api/agents/{id}/context-resolvers/{resolverId}", a.handleGetAgentContextResolver)
+	mux.HandleFunc("PATCH /api/agents/{id}/context-resolvers/{resolverId}", a.handleUpdateAgentContextResolver)
+	mux.HandleFunc("DELETE /api/agents/{id}/context-resolvers/{resolverId}", a.handleDeleteAgentContextResolver)
 
 	// Session compaction
 	mux.HandleFunc("POST /api/sessions/{id}/compact", a.handleCompactSession)

@@ -172,14 +172,14 @@ func TestResolveSystemPrompt(t *testing.T) {
 	}
 
 	t.Run("override wins verbatim", func(t *testing.T) {
-		got := ResolveSystemPrompt("executor", profile, ModeLongLived, "CATALOG OVERRIDE")
+		got := ResolveSystemPrompt("executor", profile, ModeLongLived, "CATALOG OVERRIDE", nil)
 		if got != "CATALOG OVERRIDE" {
 			t.Errorf("ResolveSystemPrompt = %q, want the verbatim override", got)
 		}
 	})
 
 	t.Run("empty override composes role + profile", func(t *testing.T) {
-		got := ResolveSystemPrompt("executor", profile, ModeLongLived, "")
+		got := ResolveSystemPrompt("executor", profile, ModeLongLived, "", nil)
 		if !strings.Contains(got, "profile-level system prompt") {
 			t.Errorf("ResolveSystemPrompt = %q, want it to include the profile system prompt", got)
 		}
@@ -193,9 +193,25 @@ func TestResolveSystemPrompt(t *testing.T) {
 		// produce identical output for the same inputs.
 		opts := Options{Role: "reviewer", Mode: ModeLongLived}
 		viaOpts := resolveBootPrompt(profile, opts)
-		viaExport := ResolveSystemPrompt("reviewer", profile, ModeLongLived, "")
+		viaExport := ResolveSystemPrompt("reviewer", profile, ModeLongLived, "", nil)
 		if viaOpts != viaExport {
 			t.Errorf("export drift:\n resolveBootPrompt   = %q\n ResolveSystemPrompt = %q", viaOpts, viaExport)
+		}
+	})
+
+	t.Run("dynamic context blocks append after the base prompt", func(t *testing.T) {
+		got := ResolveSystemPrompt("executor", profile, ModeLongLived, "", map[string]string{
+			"weather": "72F and sunny",
+			"empty":   "   ",
+		})
+		if !strings.Contains(got, "profile-level system prompt") {
+			t.Errorf("ResolveSystemPrompt = %q, want it to still include the base prompt", got)
+		}
+		if !strings.Contains(got, "## Dynamic context: weather") || !strings.Contains(got, "72F and sunny") {
+			t.Errorf("ResolveSystemPrompt = %q, want the resolved dynamic-context block appended", got)
+		}
+		if strings.Contains(got, "## Dynamic context: empty") {
+			t.Errorf("ResolveSystemPrompt = %q, want a blank-content block omitted", got)
 		}
 	})
 }

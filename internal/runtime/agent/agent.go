@@ -154,6 +154,21 @@ type Options struct {
 	// derives the prompt from profile + role + mode as it always has.
 	BootPromptOverride string
 
+	// DynamicContext carries the resolved output of this agent's
+	// DB-configured cmd/http context resolvers (Phase 2 item 02,
+	// TASKS/phase-2/02-port-forward-dynamic-resolver.md), keyed by slot
+	// name. Populated by the caller (chat_boot_drive.go's
+	// resolveAgentContextForBoot) via
+	// internal/runtime/agent.ResolveContextBlocks BEFORE Boot is called
+	// — resolution is launch-time, not something Boot itself performs.
+	//
+	// resolveBootPrompt appends each non-empty block as its own section
+	// AFTER the role-derived (or BootPromptOverride-replaced) system
+	// prompt, so a resolver's live-fetched data folds into the assembled
+	// launch context regardless of which path produced the base prompt.
+	// Nil/empty leaves the prior behavior unchanged.
+	DynamicContext map[string]string
+
 	// ExtraArgs is appended verbatim to the spawned process's argv
 	// (after the adapter's BuildArgs output). CW-20260514-0048: lets
 	// a boot-profile-driven launch thread LaunchSpec.Args into the

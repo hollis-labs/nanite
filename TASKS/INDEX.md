@@ -200,16 +200,18 @@ This branch (`phase-1-execution`, based off Phase 0's `HEAD` as of 2026-08-18 �
 
 | Task | Status | Depends on |
 |---|---|---|
-| 01-build-assignment-api | not-started | Phase 1 tasks 01-08 (landed via the Phase 1→main merge) |
-| 02-build-plugin-installed-enabled-state-model | not-started | none |
-| 03-wire-registers-agent-profiles | not-started | Phase 1 in full (landed via the Phase 1→main merge) |
-| 04-close-cli-install-hot-reload-asymmetry | not-started | none |
-| 05-develop-registers-panels-and-crud | not-started | none (not urgent — may run whenever a real consumer exists) |
-| 06-make-http-middleware-plugin-extensible | not-started | **operator design decision — see escalation below, not ready for mechanical dispatch** |
+| 01-build-assignment-api | in-progress | Phase 1 tasks 01-08 (landed via the Phase 1→main merge) |
+| 02-build-plugin-installed-enabled-state-model | in-progress | none |
+| 03-wire-registers-agent-profiles | not-started | Phase 1 in full (landed via the Phase 1→main merge); held until `02` merges |
+| 04-close-cli-install-hot-reload-asymmetry | in-progress | none |
+| 05-develop-registers-panels-and-crud | not-started | none; held until `02` merges — scope corrected 2026-08-19 (see task file), now `crud[]` only |
+| 06-make-http-middleware-plugin-extensible | not-started | **operator design decision — see escalation below, not ready for mechanical dispatch — SKIPPED for this batch** |
 
 **Parallelization:** `02`, `03`, `05` all touch `internal/plugin/registrations.go` (different sections — the gating wrapper, the `agent_profiles` stub, the `panels`/`crud` stubs) — real overlap risk; land `02` first (it changes the shared gating structure `applyManifestRegistrations` wraps), then `03`/`05` can layer their specific registration logic on top. `01` (new REST endpoints, `internal/api/*`) has low file overlap with this cluster. `04` (`plugin_cmd.go`) and `06` (`server.go`) have no overlap with anything else in this cluster — fully parallel-safe.
 
-**Escalation logged** (`TASKS/ESCALATIONS.md`): `06-make-http-middleware-plugin-extensible` has a real, unsettled design question (where plugin middleware may legally sit relative to the existing security-ordered chain — CORS-outside-auth, body-limit-inside-auth, caller-identity-between) that needs explicit operator input before implementation, not a worker default-guess. Do not dispatch `06` as a routine batch task until that input is recorded.
+**Escalation logged** (`TASKS/ESCALATIONS.md`): `06-make-http-middleware-plugin-extensible` has a real, unsettled design question (where plugin middleware may legally sit relative to the existing security-ordered chain — CORS-outside-auth, body-limit-inside-auth, caller-identity-between) that needs explicit operator input before implementation, not a worker default-guess. Do not dispatch `06` as a routine batch task until that input is recorded. **Confirmed still unresolved as of 2026-08-19 — skipped for this batch, flagged to the operator at wrap-up.**
+
+**Orchestrator scope correction (2026-08-19):** `05-develop-registers-panels-and-crud.md` originally asked for `registers.panels[]`'s frontend rendering half (a "generic frontend component" + `npm run build` in its Done means) — this directly contradicts the standing operator instruction "no frontend work in any phase, ever" (already banner'd on `01`) and `docs/engineering/TASKS.md`'s own already-corrected Phase 5 text ("`registers.panels[]`'s rendering half is frontend, deferred to the separate frontend pass, not this phase"). Task file corrected before dispatch to `crud[]`-only scope; `panels[]`'s backend/manifest half is already fully wired per the task's own Context, so nothing remained to build there once the frontend half was correctly excluded.
 
 ## Phase 6 — Envelopes & Cards (6 task files)
 

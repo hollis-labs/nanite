@@ -1,9 +1,19 @@
-# Develop `registers.panels[]` (rendering) and `registers.crud[]` (generic CRUD resource handlers)
+# Develop `registers.panels[]` (backend/manifest half only) and `registers.crud[]` (generic CRUD resource handlers)
 
 **Phase:** 5
 **Status:** not-started
 **Depends on:** none
-**Touches:** `internal/plugin/registrations.go:340-343` (`crud[]` deferred-skip stub), `:371-381` (`registerManifestPanels` — the real, already-wired panel *registration* path), plugin panel rendering (frontend — the missing half, locate during implementation), `internal/plugin/config.go` (`PanelRegistration{ID, Title, DefaultVisible, Icon, Order, Description}`)
+**Touches:** `internal/plugin/registrations.go:340-343` (`crud[]` deferred-skip stub), `internal/plugin/config.go` (`PanelRegistration{ID, Title, DefaultVisible, Icon, Order, Description}`, only if the backend/manifest schema itself needs a field this task's `crud[]`-equivalent design surfaces a gap in)
+
+## ⚠️ Scope correction, 2026-08-19 (Orchestrator, applying the same standing operator instruction already banner'd on `TASKS/phase-5/01-build-assignment-api.md`)
+
+**No frontend work is part of any phase — this task's original file (below, kept for context) asked for `registers.panels[]`'s rendering half, which is real frontend work (a "generic frontend component" + `cd ui && npm run build` in the original Done means) and directly contradicts that standing instruction. It also contradicts `docs/engineering/TASKS.md`'s own already-corrected Phase 5 text, which explicitly says: "`registers.panels[]`'s rendering half is frontend, deferred to the separate frontend pass, not this phase."** This task file was evidently not updated when that correction landed elsewhere (task `01` got its own banner for the same class of issue) — treating this as the same known contamination pattern, not a new design decision.
+
+**This task's real, corrected scope is `registers.crud[]` only.** `registers.panels[]`'s registration/manifest path is already fully wired per this file's own Context section below (`registrations.go:371-381`'s `registerManifestPanels`, already calling into the host's panel registry) — there is no remaining backend gap to close for `panels[]` once its frontend rendering half is correctly excluded. Do not build any frontend component, do not touch anything under `ui/`, and do not run `npm run build` as an acceptance check. If you find yourself about to edit a `.tsx` file, stop — that's not this task's job in this phase.
+
+---
+
+*(Original file content preserved below for context on why `panels[]` registration is already wired — read it, but its `panels[]` rendering instructions are superseded by the correction above.)*
 
 ## Context
 
@@ -21,15 +31,15 @@ Same deferred-skip pattern as `registers.agent_profiles[]` (`10`): `registration
 
 ## What to do
 
-1. **`panels[]`**: build the actual rendering mechanism — likely a generic frontend component that fetches/renders whatever a registered panel declares (a URL, a component reference, or a data-driven schema, depending on what `PanelRegistration`'s fields support today vs. what's needed). Verify with at least one real or test plugin panel rendering live content in the right rail.
-2. **`crud[]`**: design and build the generic CRUD resource-handler registration — a plugin declares a resource shape and gets automatic REST CRUD routes wired through the host, following the same manifest-driven pattern the rest of the plugin system already uses.
-3. Given the explicit "not urgent" framing, this task may reasonably be picked up only when a real first consumer exists — if no real consumer is identified by the time this task is dispatched, build a minimal test-plugin consumer for each to prove the mechanism works, rather than leaving it unverified.
+1. **`panels[]`**: NOT this task's job (see the 2026-08-19 scope correction above) — its registration/manifest half is already fully wired, and its rendering half is frontend, deferred to the separate frontend pass. Do not build anything for `panels[]` in this task. If, while reading `registrations.go:371-381` to orient yourself, you find the backend registration path is genuinely incomplete in some way that has nothing to do with rendering (a real gap, not the already-known rendering placeholder), note it in the Work Log and escalate rather than silently building past it — but the expected finding is "already wired, nothing to do here."
+2. **`crud[]`**: design and build the generic CRUD resource-handler registration — a plugin declares a resource shape and gets automatic REST CRUD routes wired through the host, following the same manifest-driven pattern the rest of the plugin system already uses. This is this task's real, actionable scope.
+3. Given the explicit "not urgent" framing, if no real first consumer exists for `crud[]` by the time this task is dispatched, build a minimal test-plugin consumer to prove the mechanism works, rather than leaving it unverified.
 
 ## Done means
 
-- A real (or test) plugin panel renders live content in the right rail, not a placeholder.
+- `panels[]`'s backend/manifest registration path is confirmed already-wired (a Work Log statement, not new code) — no frontend rendering work attempted.
 - A real (or test) plugin's declared CRUD resource shape produces working REST routes through the host.
-- `go build ./cmd/nanite/`, `go vet ./...`, `go test ./...` pass; `cd ui && npm run build` passes.
+- `go build ./cmd/nanite/`, `go vet ./...`, `go test ./...` pass. No `ui/` file touched; `npm run build` is not part of this task's acceptance bar.
 
 ## Work log
 <Worker fills this in as it goes: what was actually done, any deviation from plan and why, anything escalated.>

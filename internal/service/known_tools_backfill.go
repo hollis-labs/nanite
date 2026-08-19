@@ -2,9 +2,9 @@ package service
 
 // Phase 1 item 04 (TASKS/phase-1/04-add-known-tools-and-agent-tools-fk.md):
 // BackfillAgentToolsFromLegacyColumns carries the CURRENT value of every
-// agent_profiles row's tools/tool_permissions/role_tools columns into real
-// agent_tools grant rows, once per agent -- so the follow-up that actually
-// wires SelectForAgent to read agent_tools
+// agent_profiles row's tools/role_tools columns into real agent_tools grant
+// rows, once per agent -- so the follow-up that actually wires
+// SelectForAgent to read agent_tools
 // (TASKS/phase-4/05-wire-select-for-agent-to-read-agent-tools.md, which
 // landed the SelectForAgent read path this file's comments below describe
 // as "the follow-up" -- filterToolsByAllowlist referenced below no longer
@@ -106,9 +106,8 @@ func BackfillAgentToolsFromLegacyColumns(ctx context.Context, st *store.Store) (
 
 // legacyGrantCandidates computes, for one agent, the set of currently-
 // available tool names that today's live selection path
-// (filterToolsByAllowlist + toolclient.ToolPermissions.CheckPermission,
-// internal/service/tool.go) would consider selectable for it, given its
-// current tools/role_tools/tool_permissions column values.
+// (filterToolsByAllowlist, internal/service/tool.go) would consider
+// selectable for it, given its current tools/role_tools column values.
 //
 //   - agent.Tools ("[]"/empty means no restriction, matching
 //     filterToolsByAllowlist's own documented behavior) and agent.RoleTools
@@ -117,35 +116,35 @@ func BackfillAgentToolsFromLegacyColumns(ctx context.Context, st *store.Store) (
 //     "every currently-available tool" (mirrors the no-restriction case).
 //   - The pattern set is expanded against allNames via
 //     toolclient.MatchPattern (the same glob matcher filterToolsByAllowlist
-//     already uses), then narrowed through agent.ToolPermissions'
-//     CheckPermission (allow_list / deny_list) — replaying the exact two-
-//     stage filter SelectForAgent applies today, so the backfilled grant
-//     set matches today's real selection outcome, not an approximation.
+//     already uses).
+//
+// TASKS/adhoc/02-remove-tool-permissions-collapse-to-agent-tools.md removed
+// the second stage this used to run — narrowing the pattern-matched
+// candidate set through agent.ToolPermissions' CheckPermission (allow_list
+// / deny_list) — since tool_permissions no longer gates tool selection
+// anywhere else in the system; replaying a narrowing step here that every
+// other surface has stopped honoring would make this one-time backfill the
+// LAST live consumer of a deny_list, silently under-granting relative to
+// what agent_tools is now the sole, unconditional source of truth for. Any
+// pre-existing agent's tool_permissions content (real, in the live DB for
+// 14 of 35 seeded agents as of this task) is inert historical data now —
+// see agent_profiles.ToolPermissions' doc comment (internal/store/agents.go).
 func legacyGrantCandidates(agent store.AgentProfile, allNames []string) []string {
 	patterns := dedupStrings(append(parseLegacyToolList(agent.Tools), parseLegacyToolList(agent.RoleTools)...))
 
-	var candidates []string
 	if len(patterns) == 0 {
-		candidates = allNames
-	} else {
-		for _, name := range allNames {
-			for _, pattern := range patterns {
-				if toolclient.MatchPattern(pattern, name) {
-					candidates = append(candidates, name)
-					break
-				}
+		return allNames
+	}
+	var candidates []string
+	for _, name := range allNames {
+		for _, pattern := range patterns {
+			if toolclient.MatchPattern(pattern, name) {
+				candidates = append(candidates, name)
+				break
 			}
 		}
 	}
-
-	perms := toolclient.ParsePermissions(agent.ToolPermissions)
-	out := make([]string, 0, len(candidates))
-	for _, name := range candidates {
-		if perms.CheckPermission(name) {
-			out = append(out, name)
-		}
-	}
-	return out
+	return candidates
 }
 
 // parseLegacyToolList parses a JSON-array-of-strings column

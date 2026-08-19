@@ -27,7 +27,6 @@ type managedFileFrontmatter struct {
 	MCPServers              []string              `yaml:"mcpServers,omitempty"`
 	Directories             []string              `yaml:"directories,omitempty"`
 	Constraints             map[string]any        `yaml:"constraints,omitempty"`
-	ToolPermissions         map[string]any        `yaml:"toolPermissions,omitempty"`
 	ParentDispatchAllowlist []string              `yaml:"parentDispatchAllowlist,omitempty"`
 	RoleTools               []string              `yaml:"roleTools,omitempty"`
 	ContextPolicy           map[string]any        `yaml:"contextPolicy,omitempty"`
@@ -112,7 +111,6 @@ func WriteManagedAgentProfile(path string, profile *store.AgentProfile, procedur
 		MCPServers:              parseJSONArray(profile.MCPServers),
 		Directories:             parseJSONArray(profile.Directories),
 		Constraints:             parseJSONObject(profile.Constraints),
-		ToolPermissions:         parseJSONObject(profile.ToolPermissions),
 		ParentDispatchAllowlist: parseJSONArray(profile.ParentDispatchAllowlist),
 		RoleTools:               parseJSONArray(profile.RoleTools),
 		ContextPolicy:           parseJSONObject(profile.ContextPolicy),

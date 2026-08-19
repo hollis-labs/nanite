@@ -484,14 +484,16 @@ func NewContainer(cfg ContainerConfig) (*Container, error) {
 	// needed.
 	agentConfig := NewAgentConfigService(cfg.Store, agentClassification, managedConfigRoot, nil)
 
-	// newFileAgentPermissionResolver (agent_permissions.go) is permanently
-	// unreachable dead code as of TASKS/adhoc/01-eliminate-file-based-agent-
-	// runtime.md -- no agent ID is ever "file-<slug>"-shaped anymore, so it
-	// has nothing left to resolve. Left unwired here (not deleted -- its
-	// removal, along with tool_permissions/PermissionResolver/CheckPermission
-	// itself, is TASKS/adhoc/02's job); cfg.ToolClient.PermissionResolver
-	// stays nil and every agent's permissions resolve through the normal
-	// store-backed ToolClient.GetPermissions path.
+	// agent_permissions.go (newFileAgentPermissionResolver) and
+	// ToolClient.PermissionResolver/GetPermissions/CheckPermission/
+	// ToolPermissions/ParsePermissions were deleted outright by
+	// TASKS/adhoc/02-remove-tool-permissions-collapse-to-agent-tools.md --
+	// no agent ID is ever "file-<slug>"-shaped anymore (TASKS/adhoc/01), so
+	// there was nothing left for that resolver to resolve, and every other
+	// tool_permissions consumer had a real agent_tools-backed replacement.
+	// agent_tools (+ the known_tools.always_included escape hatch) is now
+	// the sole tool-permission gate everywhere, including inside
+	// ToolClient.CallTool's own execution-time backstop.
 
 	// Messaging service. Uses the AgentService as its resolver -- every
 	// agent is DB-backed now (TASKS/adhoc/01-eliminate-file-based-agent-

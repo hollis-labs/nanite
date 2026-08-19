@@ -100,9 +100,13 @@ func BuildAgentContext(ap *store.AgentProfile) string {
 		}
 	}
 
-	if ap.ToolPermissions != "" && ap.ToolPermissions != "{}" {
-		fmt.Fprintf(&b, "## Tool Permissions\n\n%s\n\n", ap.ToolPermissions)
-	}
+	// A "## Tool Permissions" section rendering ap.ToolPermissions used to
+	// live here. TASKS/adhoc/02-remove-tool-permissions-collapse-to-agent-
+	// tools.md retired that column's enforcement entirely (agent_tools is
+	// the sole tool-selection gate now) -- surfacing its now-inert content
+	// to a launched agent as if it reflected real access control would be
+	// actively misleading, so the section is removed rather than kept as
+	// dead boot content.
 
 	if ap.Tools != "" && ap.Tools != "[]" {
 		var tools []string

@@ -45,19 +45,23 @@ type AgentProfile struct {
 	DefaultModel    string `json:"default_model"`
 	DefaultProvider string `json:"default_provider"`
 	MCPServers      string `json:"mcp_servers"`
-	// ToolPermissions (allow_list/deny_list JSON, toolclient.ToolPermissions)
-	// is DEPRECATED as of Phase 1 item 04
-	// (TASKS/phase-1/04-add-known-tools-and-agent-tools-fk.md) in favor of
-	// the FK-based agent_tools join (internal/store/agent_tools.go) --
-	// architecture/01-agent-construction.md's stated replacement target.
-	// Not dropped: still read at every SelectForAgent call
-	// (internal/service/tool.go's filterToolsByPermissions/CheckPermission)
-	// -- that live read path is intentionally NOT rewired by this task (see
-	// TASKS/phase-1/11-wire-select-for-agent-to-read-agent-tools.md, split
-	// off because ToolPermissions' glob-based allow/deny semantics don't
-	// map onto agent_tools' plain positive-grant shape as a mechanical
-	// read-path swap). Its CURRENT value was carried into agent_tools for
-	// every existing agent by this task's one-time backfill
+	// ToolPermissions (allow_list/deny_list JSON) was DEPRECATED as of
+	// Phase 1 item 04 (TASKS/phase-1/04-add-known-tools-and-agent-tools-
+	// fk.md) in favor of the FK-based agent_tools join
+	// (internal/store/agent_tools.go), and its enforcement machinery
+	// (toolclient.ToolPermissions/CheckPermission/GetPermissions/
+	// ParsePermissions/PermissionResolver) was deleted outright by
+	// TASKS/adhoc/02-remove-tool-permissions-collapse-to-agent-tools.md:
+	// agent_tools (+ the known_tools.always_included escape hatch) is the
+	// sole tool-selection/execution gate everywhere now, including the
+	// deeper ToolClient.CallTool backstop that used to also read this
+	// column. The column is left in place (that task's schema decision —
+	// reversible, low-risk to defer) but is now permanently inert: nothing
+	// reads it for access control, and new agents always get "{}" here
+	// (internal/agent's Definition.ToProfile()). Pre-existing rows may
+	// still carry real historical JSON from before that task; it is dead
+	// data. Its CURRENT value at the time was carried into agent_tools for
+	// every existing agent by the earlier one-time backfill
 	// (internal/service/known_tools_backfill.go).
 	ToolPermissions string `json:"tool_permissions"`
 	CanExecute      bool   `json:"can_execute"`
@@ -68,9 +72,14 @@ type AgentProfile struct {
 	AgentHash string `json:"agent_hash"`
 	Version   int    `json:"version"`
 	// Tools (schema-v2 allowlist of tool-name patterns) is DEPRECATED as of
-	// Phase 1 item 04 -- see ToolPermissions' doc comment immediately
-	// above; same replacement target (agent_tools), same "still read live,
-	// not rewired by this task" status, same one-time backfill coverage.
+	// Phase 1 item 04 in favor of agent_tools, same as ToolPermissions
+	// above, but — unlike ToolPermissions — is NOT inert: it (unioned with
+	// RoleTools) is still the pattern-match input
+	// internal/service/known_tools_backfill.go's one-time-per-agent
+	// backfill reads to derive a brand-new agent's initial agent_tools
+	// grant set. Not read anywhere else (SelectForAgent/
+	// enforceExecutionRulesViaAgentTools consult agent_tools directly, not
+	// this column, once a grant exists).
 	Tools       string `json:"tools"`
 	Directories string `json:"directories"`
 	Constraints string `json:"constraints"`

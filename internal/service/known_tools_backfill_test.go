@@ -91,7 +91,16 @@ func TestBackfillAgentToolsFromLegacyColumns_EmptyAllowlistGrantsFullCatalog(t *
 	}
 }
 
-func TestBackfillAgentToolsFromLegacyColumns_DenyListExcludesTool(t *testing.T) {
+// TestBackfillAgentToolsFromLegacyColumns_ToolPermissionsNoLongerNarrows is
+// the regression test for TASKS/adhoc/02-remove-tool-permissions-collapse-
+// to-agent-tools.md's change to legacyGrantCandidates: a still-populated
+// legacy tool_permissions.deny_list on the agent row must NOT exclude a
+// pattern-matched tool anymore -- tool_permissions is inert everywhere else
+// in the system now, so this one-time backfill must not be the last place
+// that still honors it. (Superseded the deleted
+// TestBackfillAgentToolsFromLegacyColumns_DenyListExcludesTool, which
+// asserted the opposite, pre-this-task behavior.)
+func TestBackfillAgentToolsFromLegacyColumns_ToolPermissionsNoLongerNarrows(t *testing.T) {
 	st := newKnownToolsTestStore(t)
 	ctx := context.Background()
 
@@ -116,8 +125,9 @@ func TestBackfillAgentToolsFromLegacyColumns_DenyListExcludesTool(t *testing.T) 
 	if err != nil {
 		t.Fatalf("ListAgentToolNames: %v", err)
 	}
-	if len(names) != 1 || names[0] != "dev_read" {
-		t.Fatalf("ListAgentToolNames: got %v, want [dev_read] (dev_bash denied)", names)
+	sort.Strings(names)
+	if len(names) != 2 || names[0] != "dev_bash" || names[1] != "dev_read" {
+		t.Fatalf("ListAgentToolNames: got %v, want [dev_bash dev_read] (tool_permissions.deny_list no longer narrows)", names)
 	}
 }
 

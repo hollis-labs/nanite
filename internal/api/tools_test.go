@@ -78,12 +78,15 @@ func TestHandleListAgentTools_DBBackedAgentUsesAgentTools(t *testing.T) {
 	}
 }
 
-// TestHandleListAgentTools_FileBasedAgentUnchanged is the regression check
-// (Done-means bullet 2): an agentID with no real agent_profiles row (the
-// file-based population, which cannot hold agent_tools grants) must keep
-// reading its allowed flags from the legacy tool_permissions/CheckPermission
-// path, unaffected by this task's dbAgent-resolution fix.
-func TestHandleListAgentTools_FileBasedAgentUnchanged(t *testing.T) {
+// TestHandleListAgentTools_UnknownAgentDeniesAll is the regression check
+// for TASKS/adhoc/02-remove-tool-permissions-collapse-to-agent-tools.md's
+// unconditional agent_tools collapse: an agentID with no real
+// agent_profiles row (previously the file-based population, eliminated by
+// TASKS/adhoc/01, or simply a typo'd/unknown ID) reads back zero
+// agent_tools grants -- fail closed (allowed:false for everything), NOT
+// the legacy tool_permissions/CheckPermission fallback's "everything
+// allowed" default this replaced.
+func TestHandleListAgentTools_UnknownAgentDeniesAll(t *testing.T) {
 	a, mux := newTestAPI(t)
 
 	tc := toolclient.New(mcp.NewManager(), a.Services.Store, nil)
@@ -91,18 +94,9 @@ func TestHandleListAgentTools_FileBasedAgentUnchanged(t *testing.T) {
 		{Name: "dev_read", Description: "Read a file"},
 		{Name: "dev_write", Description: "Write a file"},
 	})
-	// Simulate the file-based agent's PermissionResolver path
-	// (newFileAgentPermissionResolver in production) with a restrictive
-	// allow-list -- distinguishes this test from the default-permit
-	// fallback GetPermissions would otherwise apply for an unresolvable ID.
-	tc.PermissionResolver = func(agentID string) (toolclient.ToolPermissions, bool) {
-		return toolclient.ToolPermissions{AllowList: []string{"dev_read"}}, true
-	}
 	a.Services.ToolClient = tc
 
-	// "file-worker" has no agent_profiles row -- store.GetAgent misses,
-	// so handleListAgentTools must fall back to the legacy path.
-	req := httptest.NewRequest("GET", "/api/agents/file-worker/tools", nil)
+	req := httptest.NewRequest("GET", "/api/agents/does-not-exist/tools", nil)
 	w := httptest.NewRecorder()
 	mux.ServeHTTP(w, req)
 	if w.Code != http.StatusOK {
@@ -116,14 +110,9 @@ func TestHandleListAgentTools_FileBasedAgentUnchanged(t *testing.T) {
 	if err := json.NewDecoder(w.Body).Decode(&items); err != nil {
 		t.Fatalf("decode response: %v", err)
 	}
-	got := make(map[string]bool, len(items))
 	for _, it := range items {
-		got[it.Name] = it.Allowed
-	}
-	if !got["dev_read"] {
-		t.Errorf("expected dev_read (in tool_permissions.allow_list) to be allowed:true, got %v", got)
-	}
-	if got["dev_write"] {
-		t.Errorf("expected dev_write (not in tool_permissions.allow_list) to be allowed:false, got %v", got)
+		if it.Allowed {
+			t.Errorf("expected every tool to be allowed:false for an unknown agentID, got %s=true", it.Name)
+		}
 	}
 }

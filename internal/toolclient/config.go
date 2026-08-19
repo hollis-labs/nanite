@@ -16,10 +16,12 @@ const DefaultContextWindowTokens = 200000
 // matched every intent and included every registered tool, so the rule
 // engine was already a no-op in production; selectToolsUncapped now
 // returns the full registered catalog directly. Real narrowing happens
-// downstream of selection: tool_permissions (ToolClient.CheckPermission),
-// the agent_tools grant filter (service/tool.go's filterToolsByAgentTools
-// — replaced the old schema-v2 tools allowlist / filterToolsByAllowlist
-// as of TASKS/phase-4/05-wire-select-for-agent-to-read-agent-tools.md),
+// downstream of selection: the agent_tools grant filter
+// (service/tool.go's filterToolsByAgentTools — replaced the old
+// schema-v2 tools allowlist / filterToolsByAllowlist as of
+// TASKS/phase-4/05-wire-select-for-agent-to-read-agent-tools.md, and the
+// legacy tool_permissions/ToolClient.CheckPermission mechanism entirely as
+// of TASKS/adhoc/02-remove-tool-permissions-collapse-to-agent-tools.md),
 // the chat-role surface filter (applyChatSurfaceFilter), the
 // developer_mode dev-tool gate, and progressive discovery — none of
 // which lived in this Config.

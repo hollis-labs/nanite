@@ -64,17 +64,15 @@ func (d *Definition) ToProfile() *store.AgentProfile {
 	// permanently inert.
 	p.Modes = "[]"
 
-	// ToolPermissions — frontmatter wins; fall back to deriving an allow_list
-	// from Tools so existing agents keep their implicit allowlist behavior.
-	switch {
-	case d.ToolPermissions != nil:
-		p.ToolPermissions = marshalJSONOr(d.ToolPermissions, "{}")
-	case len(d.Tools) > 0:
-		tp := map[string]any{"allow_list": d.Tools}
-		p.ToolPermissions = marshalJSONOr(tp, "{}")
-	default:
-		p.ToolPermissions = "{}"
-	}
+	// ToolPermissions -- TASKS/adhoc/02-remove-tool-permissions-collapse-to-
+	// agent-tools.md retired the tool_permissions/CheckPermission
+	// enforcement machinery and the toolPermissions: frontmatter field
+	// entirely; agent_tools is now the sole tool-selection gate for every
+	// agent, ingested or not. The agent_profiles.tool_permissions column
+	// itself is left in place (that task's schema decision) but always
+	// written as an inert "{}" now — there is no more frontmatter input to
+	// derive it from.
+	p.ToolPermissions = "{}"
 
 	// ParentDispatchAllowlist — CW-20260512-0107 (SP-20260512-0008 W2A).
 	// JSON array of role slugs this agent may dispatch via task_execute;

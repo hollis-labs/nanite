@@ -170,7 +170,6 @@ export type DurableAgentEventSource =
 export type SessionBootSource =
   | "api_default"
   | "legacy_cli"
-  | "boot_profile"
   | "durable_agent"
   | "unknown";
 
@@ -178,7 +177,6 @@ export type ImmutableStartField =
   | "provider"
   | "model"
   | "runtime_kind"
-  | "boot_profile"
   | "recipe"
   | "lifecycle_class"
   | "work_root";
@@ -195,54 +193,11 @@ export interface RuntimeKindOption extends EnumOption<RuntimeKind> {
   product_supported: boolean;
 }
 
-export interface BootProfileOption {
-  id: string;
-  label: string;
-  provider: string;
-  work_root?: string;
-}
-
 export interface WorkRootHint {
   id: string;
   label: string;
   path?: string;
   description?: string;
-}
-
-export interface MetaHarness {
-  id: string;
-  display_name: string;
-  launch: string;
-  ui_label: string;
-  provider: string;
-  provider_alias?: string;
-  workdir: string;
-  boot_mode?: string;
-  args: string[];
-  env: Record<string, string>;
-  role?: string;
-  project?: string;
-  work_root?: string;
-  tracking_root?: string;
-  mcp_servers: string[];
-  profile_path: string;
-  launch_path: string;
-}
-
-export interface MetaHarnessInput {
-  id?: string;
-  display_name?: string;
-  ui_label?: string;
-  provider?: string;
-  workdir?: string;
-  boot_mode?: string;
-  args?: string[];
-  env?: Record<string, string>;
-  role?: string;
-  project?: string;
-  work_root?: string;
-  tracking_root?: string;
-  mcp_servers?: string[];
 }
 
 export interface DurableAgentWakePayload {
@@ -499,7 +454,6 @@ export interface StartSurfaceCapabilitiesResponse {
   profiles: AgentProfile[];
   providers: ProviderConfig[];
   models: ModelRecord[];
-  boot_profiles: BootProfileOption[];
   work_root_hints: WorkRootHint[];
 }
 
@@ -632,7 +586,6 @@ export interface HarnessCreateSessionRequest {
   mode_id?: string;
   runtime_kind?: string;
   work_root?: string;
-  boot_profile_id?: string;
   durable_agent_id?: string;
 }
 
@@ -657,11 +610,10 @@ export interface HarnessCancelResponse {
 }
 
 export interface StartSurfacePrefill {
-  path?: "chat" | "harness" | "durable" | "recipe";
+  path?: "chat" | "durable" | "recipe";
   provider?: string;
   model?: string;
   agent_id?: string;
-  boot_profile_id?: string;
   durable_agent_id?: string;
   durable_prompt?: string;
 }

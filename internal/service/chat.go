@@ -16,8 +16,6 @@ import (
 	"github.com/hollis-labs/go-providers/provider"
 	"github.com/hollis-labs/nanite/internal/agent"
 	"github.com/hollis-labs/nanite/internal/agent/reflexes"
-	"github.com/hollis-labs/nanite/internal/agentregistry"
-	"github.com/hollis-labs/nanite/internal/bootprofile"
 	"github.com/hollis-labs/nanite/internal/chat"
 	"github.com/hollis-labs/nanite/internal/config"
 	"github.com/hollis-labs/nanite/internal/dispatch"
@@ -230,27 +228,6 @@ type ChatServiceConfig struct {
 	// broker is the dispatch DECISION. Both layers run; the boundary is
 	// load-bearing per `decisions.nanite.architecture.agent_broker_v1`.
 	AgentBroker agentbroker.Broker
-
-	// BootProfiles is the boot-profile registry (CW-20260514-0047 / 0048).
-	// chat_generate.go decodes `bootprofile:<id>` provider names, compiles a
-	// session-scoped LaunchSpec via CompileFor, drains requirements, and
-	// stashes the spec so driveBootSession can thread Env / Args / Workdir /
-	// BootPrompt into the runtime Boot call. nil-safe: when absent (no
-	// catalog configured / tests), `bootprofile:` provider names fall
-	// through as the legacy "no llmcontracts.Provider registered" fatal
-	// branch — the same shape as a misconfigured CLI provider today.
-	BootProfiles *bootprofile.Registry
-
-	// AgentRegistry is the shared go-agent-launch directory registrar
-	// (FileBackedRegistrar + DegradingRegistrar + LastKnownGoodCache),
-	// the SAME instance the standalone launcher uses (S5 Phase F). When
-	// set, driveBootSession's boot-profile path resolves its runtime
-	// binding registry-primary via launchplan.Build with an explicit,
-	// observable file/spec fallback (D1 + §4.1). nil-safe: when absent —
-	// tests, or a registry-less bootstrap — the chat boot-profile path
-	// resolves fully file/spec-default and still boots (D1: the registry
-	// is NEVER mandatory on the launch hot path).
-	AgentRegistry *agentregistry.Registry
 }
 
 // chatServiceImpl is the concrete ChatService implementation.
@@ -401,27 +378,6 @@ type chatServiceImpl struct {
 	// loop. See ChatServiceConfig.AgentBroker for the full contract.
 	agentBroker agentbroker.Broker
 
-	// bootProfiles is the boot-profile registry (CW-20260514-0048).
-	// Used by chat_generate.go to decode `bootprofile:` provider ids and
-	// compile a session-scoped LaunchSpec. nil-safe: when absent, the
-	// `bootprofile:` provider id falls through as a legacy fatal because
-	// classifyNilProvider(...) returns nilProviderRouteFatal for it
-	// (IsCLIProvider is narrow by design).
-	bootProfiles *bootprofile.Registry
-
-	// agentRegistry is the shared directory registrar (S5 Phase F). When
-	// set, driveBootSession's boot-profile path resolves its runtime
-	// binding registry-primary through launchplan.Build. nil-safe — see
-	// ChatServiceConfig.AgentRegistry.
-	agentRegistry *agentregistry.Registry
-
-	// activeSessionLaunchSpecs stamps the compiled LaunchSpec for sessions
-	// whose chat provider is a boot-profile id. driveBootSession reads it
-	// at boot time to thread per-profile env/args/workdir/boot-prompt into
-	// agent.Options. Map values are *bootprofile.LaunchSpec. Cleared in
-	// CloseAgentSession alongside the other per-session maps.
-	activeSessionLaunchSpecs sync.Map
-
 	// activeSessionContextBlocks stamps the resolved output of a
 	// session's agent's DB-configured cmd/http context resolvers (Phase
 	// 2 item 02, TASKS/phase-2/02-port-forward-dynamic-resolver.md),
@@ -509,8 +465,6 @@ func NewChatService(cfg ChatServiceConfig) ChatService {
 		agentBootDirAdapter:     cfg.AgentBootDirAdapter,
 		envelopeRenderExecutor:  cfg.EnvelopeRenderExecutor,
 		agentBroker:             cfg.AgentBroker,
-		bootProfiles:            cfg.BootProfiles,
-		agentRegistry:           cfg.AgentRegistry,
 	}
 	// CW-20260512-0121 (SP-20260512-0011): wire the single dispatcher
 	// door. The Dispatcher delegates to chatServiceImpl.generateResponse
@@ -1055,7 +1009,6 @@ func (s *chatServiceImpl) CloseAgentSession(ctx context.Context, sessionID strin
 	}
 	s.activeSessionSlots.Delete(sessionID)
 	s.toolPartitionStates.Delete(sessionID)
-	s.activeSessionLaunchSpecs.Delete(sessionID)
 	s.activeSessionContextBlocks.Delete(sessionID)
 	if s.agentEventBridge != nil {
 		s.agentEventBridge.SetPerSessionRouter(sessionID, nil)
@@ -1256,21 +1209,19 @@ const (
 // vs-API routing is an explicit typed field"), not by re-deriving the
 // classification from providerName's "pty"/"sub-" prefix shape. The
 // chat.IsCLIProvider(providerName) check is still OR'd in, deliberately,
-// for two cases where runtimeKind is not yet the reliable single source of
-// truth:
+// for one remaining case where runtimeKind is not yet the reliable single
+// source of truth: a file-discovered agent profile with no agent_profiles
+// DB row yet — Definition.ToProfile() has no frontmatter representation
+// for runtime_kind at all, so runtimeKind arrives here as "" (see
+// agent.OverlayDBFields's doc comment). Falling back to the legacy
+// provider-name classification reproduces prior behavior exactly.
 //
-//  1. A file-discovered agent profile with no agent_profiles DB row yet —
-//     Definition.ToProfile() has no frontmatter representation for
-//     runtime_kind at all, so runtimeKind arrives here as "" (see
-//     agent.OverlayDBFields's doc comment). Falling back to the legacy
-//     provider-name classification reproduces prior behavior exactly.
-//  2. A boot-profile-catalog-driven session — chat_bootprofile_resolve.go's
-//     cliRoutableProvider synthesizes a "pty-<adapter>" alias to force CLI
-//     routing regardless of whichever agent happens to be bound to the
-//     session. That whole mechanism is retired in full by
-//     TASKS/phase-2/04-retire-boot-profile-catalog.md; once it lands, this
-//     OR'd fallback is dead code and should be deleted rather than left as
-//     a silent, permanent second decision input.
+// TASKS/phase-2/04-retire-boot-profile-catalog.md removed the second case
+// this OR used to cover — the boot-profile catalog's own
+// cliRoutableProvider, which synthesized a "pty-<adapter>" alias to force
+// CLI routing independent of the session's bound agent. That whole
+// mechanism (and its provider-id encoding) is gone; this OR now exists
+// solely for the file-discovered-agent case above.
 //
 // Adapter lookup goes through agentDeps.ProviderAdapter which already
 // applies the CW-20260514-0045 alias normalization (stripRegistryPrefix

@@ -276,22 +276,21 @@ func BuildAgentDependencies(cfg AgentDepsConfig) (AgentDepsBundle, error) {
 // MarkAgentRuntimeRelaunching).
 //
 // CW-20260514-0049: PreBootHook is an optional pre-boot interceptor the
-// chat composition root installs after construction. The hook receives a
-// pointer to the agent.Options the broker assembled and may mutate it
-// before agent.Boot fires — production wiring uses this to re-resolve
-// boot-profile-backed sessions via Registry.CompileFor under the
-// fresh-catalog policy (CW-20260514-0049 design default #2). Hook errors
-// abort the relaunch (returned verbatim to the broker; orchestration
-// escalates to Permanent with an actionable reason). Empty hook = no
-// pre-boot intercept (legacy behavior).
+// chat composition root MAY install after construction. The hook
+// receives a pointer to the agent.Options the broker assembled and may
+// mutate it before agent.Boot fires. Hook errors abort the relaunch
+// (returned verbatim to the broker; orchestration escalates to Permanent
+// with an actionable reason). Empty hook (the current default — no
+// caller installs one after TASKS/phase-2/04-retire-boot-profile-
+// catalog.md removed the boot-profile-catalog resume-reresolve hook that
+// used to be the sole populator) = no pre-boot intercept.
 //
 // The hook is also where resume-flavored fields (Mode=ModeResume,
 // ResumeFromCheckpoint) MAY be threaded onto Options — this is the
 // crash-recovery code path and the only structural entry point for
-// resume IDs. Normal launches go through driveBootSession +
-// applyLaunchSpecToBootOpts, neither of which touches resume fields,
-// keeping the "never pass resume ID on normal launch" guarantee
-// structural.
+// resume IDs. Normal launches go through driveBootSession directly,
+// which never touches resume fields, keeping the "never pass resume ID
+// on normal launch" guarantee structural.
 type agentBootAdapter struct {
 	deps *runtimeagent.Dependencies
 

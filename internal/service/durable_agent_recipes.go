@@ -514,7 +514,6 @@ func builtinDurableAgentRecipes() []DurableAgentRecipe {
 				recipeModelInput(false, "claude-cli"),
 				recipeRuntimeKindInput(false, string(runtimekind.StreamingStdio)),
 				recipePathInput("work_root", "Work root", "durable_agent.work_root", false, "~/dev/project"),
-				recipeStringInput("boot_profile_id", "Boot profile ID", "metadata.boot_profile_id", false, "bootprofile:claude-smoke"),
 				recipeTextareaInput("kickoff_prompt", "Kickoff prompt", "wake_payload.prompt", false, "Optional kickoff instructions for the managed harness."),
 				recipeTextareaInput("boot_plan_hint", "Boot plan hint", "metadata.boot_plan_hint", false, "Preview-only non-secret note about files, prompts, or setup the harness should eventually plant."),
 			},

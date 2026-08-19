@@ -73,8 +73,6 @@ import type {
   MemoryUpdateRequest,
   Message,
   MessagePage,
-  MetaHarness,
-  MetaHarnessInput,
   ModelRecord,
   PermissionMode,
   PinnedContent,
@@ -1832,42 +1830,6 @@ export const api = {
     const res = await fetch(`${API_BASE}/providers`);
     if (!res.ok) throw new Error(`Failed to list providers: ${res.status}`);
     return res.json();
-  },
-  listMetaHarnesses: async (): Promise<MetaHarness[]> => {
-    const res = await fetch(`${API_BASE}/meta-harnesses`);
-    if (!res.ok)
-      throw await readAPIError(res, `Failed to list meta harnesses: ${res.status}`);
-    return res.json();
-  },
-  createMetaHarness: async (data: MetaHarnessInput): Promise<MetaHarness> => {
-    const res = await fetch(`${API_BASE}/meta-harnesses`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(data),
-    });
-    if (!res.ok)
-      throw await readAPIError(res, `Failed to create meta harness: ${res.status}`);
-    return res.json();
-  },
-  updateMetaHarness: async (
-    id: string,
-    data: MetaHarnessInput,
-  ): Promise<MetaHarness> => {
-    const res = await fetch(`${API_BASE}/meta-harnesses/${encodeURIComponent(id)}`, {
-      method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(data),
-    });
-    if (!res.ok)
-      throw await readAPIError(res, `Failed to update meta harness: ${res.status}`);
-    return res.json();
-  },
-  deleteMetaHarness: async (id: string): Promise<void> => {
-    const res = await fetch(`${API_BASE}/meta-harnesses/${encodeURIComponent(id)}`, {
-      method: "DELETE",
-    });
-    if (!res.ok)
-      throw await readAPIError(res, `Failed to delete meta harness: ${res.status}`);
   },
   listProviderStatuses: async (): Promise<ProviderStatus[]> => {
     const res = await fetch(`${API_BASE}/providers/status`);

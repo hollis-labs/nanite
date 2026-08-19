@@ -22,9 +22,7 @@ import (
 	"github.com/hollis-labs/nanite/internal/agent"
 	"github.com/hollis-labs/nanite/internal/agent/builtin"
 	"github.com/hollis-labs/nanite/internal/agent/reflexes"
-	"github.com/hollis-labs/nanite/internal/agentregistry"
 	"github.com/hollis-labs/nanite/internal/background"
-	"github.com/hollis-labs/nanite/internal/bootprofile"
 	"github.com/hollis-labs/nanite/internal/chat"
 	"github.com/hollis-labs/nanite/internal/config"
 	"github.com/hollis-labs/nanite/internal/contextbroker"
@@ -167,21 +165,6 @@ type Container struct {
 	// AdapterRegistry holds registered CLIAgentAdapters for discovery and sandbox ops.
 	AdapterRegistry *agent.AdapterRegistry
 
-	// BootProfiles is the boot-profile registry (CW-20260514-0047). Holds
-	// compiled LaunchSpec entries indexed by ProfileID and exposes List /
-	// Lookup for the dropdown surface and the chat runtime hookup
-	// (CW-20260514-0048). nil-safe — when no catalog path is configured
-	// the registry is empty and the dropdown response degrades to the
-	// pre-feature shape (DB-seeded rows only). The plugin lifecycle
-	// wiring that will call Registry.Reload() lives in 0049/0050; for
-	// now, an out-of-band reload entry point is exposed for future
-	// callers and exercised in registry_test.go.
-	BootProfiles *bootprofile.Registry
-	// BootProfileCatalogPath is the configured on-disk catalog root used by
-	// BootProfiles. Exposed so admin handlers can edit the same file-backed
-	// source of truth and reload the registry.
-	BootProfileCatalogPath string
-
 	// ProviderCatalog is the registry-backed provider/model dropdown
 	// catalog (CW-20260526-0001). One entry per provider successfully
 	// registered in cmd/nanite/main.go:initProviders. The API layer
@@ -302,14 +285,6 @@ type ContainerConfig struct {
 	// layers run; see chat_broker_dispatch.go for the boundary).
 	AgentBroker agentbroker.Broker
 
-	// BootProfileCatalogPath is the on-disk catalog root used to populate
-	// the boot-profile registry surfaced via Container.BootProfiles
-	// (CW-20260514-0047). Empty = registry stays empty / inert; existing
-	// dropdown behavior is unchanged. The string is expected to be
-	// already-tilde-expanded by the caller (cmd/nanite/main.go calls
-	// config.ResolvedBootProfileCatalogPath before threading it here).
-	BootProfileCatalogPath string
-
 	// ProviderCatalog is the registry-backed dropdown catalog
 	// (CW-20260526-0001). nil-safe — when nil, handleListProviders falls
 	// back to the DB-only shape so tests without explicit wiring work.
@@ -327,16 +302,6 @@ type ContainerConfig struct {
 	// baseline READ roots the agent operates against. Empty / nil leaves
 	// the "workspace allow-list" section out of the rendered summary.
 	DevToolsAllowedPaths []string
-
-	// AgentRegistry is the shared go-agent-launch directory registrar
-	// (S5 Phase C — agentregistry.Build). main.go builds ONE instance and
-	// threads the SAME pointer here so the GUI chat launch path
-	// (driveBootSession) resolves its runtime binding registry-primary
-	// through the same registrar the standalone launcher uses — Phase F
-	// converges the two launch paths on one seam. nil-safe: when absent
-	// the chat boot-profile path resolves fully file/spec-default and
-	// still boots (D1 — the registry is never mandatory).
-	AgentRegistry *agentregistry.Registry
 }
 
 func newRuntimeAdapterRegistry() *agent.AdapterRegistry {
@@ -1018,30 +983,6 @@ func NewContainer(cfg ContainerConfig) (*Container, error) {
 		"adapters", len(cliAdapters),
 		"workspaces_root", agentDeps.WorkspacesRoot)
 
-	// CW-20260514-0047/0048: build the boot-profile registry from the
-	// configured catalog path. NewRegistry is nil-safe (empty path
-	// returns an empty Registry) so this call is unconditional; an
-	// unset catalog path leaves the dropdown / runtime hookup surfaces
-	// observing an empty List. Per-profile compile errors are logged
-	// here but do not abort container construction — the operator
-	// fixes the bad YAML and triggers a reload (Reload entry point on
-	// the registry; plugin wiring lands in CW-20260514-0049/0050).
-	//
-	// Hoisted above NewChatService so the registry can be threaded into
-	// ChatServiceConfig — driveBootSession needs CompileFor at boot time
-	// (CW-20260514-0048).
-	bootProfileRegistry, bootProfileErr := bootprofile.NewRegistry(cfg.BootProfileCatalogPath)
-	if bootProfileErr != nil {
-		slog.Warn("service container: boot-profile registry: partial load",
-			"catalog_path", cfg.BootProfileCatalogPath,
-			"err", bootProfileErr)
-	}
-	if bootProfileRegistry != nil && !bootProfileRegistry.IsEmpty() {
-		slog.Info("service container: boot-profile registry loaded",
-			"catalog_path", cfg.BootProfileCatalogPath,
-			"profiles", len(bootProfileRegistry.List()))
-	}
-
 	chatSvc := NewChatService(ChatServiceConfig{
 		Sessions:           sessions,
 		Agents:             agents,
@@ -1098,18 +1039,6 @@ func NewContainer(cfg ContainerConfig) (*Container, error) {
 		// downstream call audits the dispatch CALL into event_log.
 		// Concurrency-safe (DeterministicBroker is stateless).
 		AgentBroker: cfg.AgentBroker,
-		// CW-20260514-0048: the boot-profile registry is threaded
-		// here so chat_generate.go can decode "bootprofile:<id>"
-		// provider names + compile session-scoped LaunchSpecs.
-		// nil-safe — when the catalog isn't configured the
-		// registry is empty and `bootprofile:` ids never appear
-		// in session rows in the first place.
-		BootProfiles: bootProfileRegistry,
-		// S5 Phase F: thread the shared directory registrar so the GUI
-		// chat boot-profile launch path (driveBootSession) resolves its
-		// runtime binding registry-primary via launchplan.Build — the
-		// SAME seam the standalone launcher uses. nil-safe (D1).
-		AgentRegistry: cfg.AgentRegistry,
 	})
 
 	// G-3 + G-5: subagent service with the real chat-engine-backed runner.
@@ -1153,23 +1082,15 @@ func NewContainer(cfg ContainerConfig) (*Container, error) {
 		broker.SetHTTPRetry(newRecoveryHTTPRetryAdapter(chatSvcImpl.RetryLastMessage))
 	}
 
-	// CW-20260514-0049: install the boot-profile recovery pre-boot
-	// hook on the agentBootAdapter so broker-dispatched relaunches
-	// that target a boot-profile-backed session re-resolve via
-	// Registry.CompileFor (fresh-catalog policy) and overlay the new
-	// LaunchSpec onto agent.Options BEFORE the relaunch fires. This
-	// is the ONLY code path through which the chat layer touches
-	// agent.Options en route to recovery; normal launches go through
-	// driveBootSession's call to runtimeagent.Boot directly. The
-	// resume-vs-normal-start split is therefore structural — the
-	// recovery hook is the single structural entry point for any
-	// future resume-ID threading. nil-safe: bundle.BootAdapter is
-	// unset in tests / standalone configs that don't wire the
-	// adapter.
-	if agentDepsBundle.BootAdapter != nil {
-		agentDepsBundle.BootAdapter.SetPreBootHook(chatSvcImpl.recoveryPreBootHook)
-	}
-
+	// TASKS/phase-2/04-retire-boot-profile-catalog.md: the boot-profile
+	// recovery pre-boot hook (chatSvcImpl.recoveryPreBootHook) that used
+	// to install here has been removed along with the whole boot-profile
+	// catalog — its entire body re-resolved a boot-profile-backed session
+	// via Registry.CompileFor, and every other session type already
+	// passed through unchanged. agentBootAdapter.SetPreBootHook remains a
+	// real, general extension point (see its doc comment in
+	// agent_deps.go) for a future resume-ID-threading use case; no
+	// current caller needs it installed.
 	legacyRunner := NewChatRunner(chatSvcImpl, agentReader, cfg.Store, cfg.Store.DB, pathGrants)
 	subagentRunner := NewBootRunner(agentDeps, agentBridge, agentReader, cfg.Store, cfg.Store.DB, pathGrants, legacyRunner)
 	approvalEmitter := NewApprovalEmitter(cfg.Store, streams)
@@ -1432,8 +1353,6 @@ func NewContainer(cfg ContainerConfig) (*Container, error) {
 		Permissions:            permissions,
 		PathGrants:             pathGrants,
 		AdapterRegistry:        adapterRegistry,
-		BootProfiles:           bootProfileRegistry,
-		BootProfileCatalogPath: cfg.BootProfileCatalogPath,
 		ProviderCatalog:        cfg.ProviderCatalog,
 		Recovery:               recoveryBrokerOrNil(agentDeps),
 		Inspector:              inspectorSvc,

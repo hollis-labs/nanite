@@ -53,9 +53,14 @@ After `reload`, `cerberus_resource_status` should show a new `launchd_pid` and `
 
 The slot system's six load-bearing invariants — stable sent shape, universal slot at position 0, cache marker priority, mode-aware content swap, pointer/stash determinism, permission visibility — are documented in `internal/context/INVARIANTS.md` and enforced by `internal/service/slot_invariants_test.go`. Update both in lock-step if a future ticket needs to change one.
 
-## Boot-profile CLI harness
+## Agent launching (Phase 2 — boot-profile catalog retired)
 
-Boot profiles let an operator register shared catalog YAML that surfaces as additional rows in the chat composer's provider/model dropdown. Selecting a row spins up a headless CLI agent session against the compiled boot prompt. See `docs/boot-profile-cli-harness.md` for the catalog schema, end-to-end happy path, crash-recovery semantics, and known limitations. The example catalog at `examples/boot-profiles/` is wired into a smoke test (`go test ./internal/service/ -run TestBootProfileSmoke_`) and is safe to point `boot_profile_catalog_path` at directly.
+The boot-profile catalog (a shared YAML directory that surfaced extra provider/model dropdown rows and spun up headless CLI sessions against a compiled boot prompt) is retired in full — `TASKS/phase-2/04-retire-boot-profile-catalog.md`. It never competed with agent construction; it only ever overrode prompt content, with a real `agents` row still resolved underneath. Two pieces carry forward as first-class, DB-configurable mechanisms available to every agent, not gated behind a separate catalog:
+
+- **Dynamic context resolvers** (`agent_context_resolvers` table, `internal/runtime/agent/context_resolver.go`) — configure a `cmd`- or `http`-kind resolver per agent to fetch live data at launch time and fold it into the assembled boot context. CRUD lives at `GET/POST/PATCH/DELETE /api/agents/{id}/context-resolvers`. See `docs/engineering/architecture/02-agent-launching.md`.
+- **Mandatory post-compaction re-read** — every CLI-based agent's planted boot content unconditionally instructs it to re-read the project's real `CLAUDE.md`/`AGENTS.md` after a Claude Code compaction event (`internal/runtime/agent/prompt.go`'s `mandatoryPostCompactionRereadInstruction`). Not a per-agent opt-in.
+
+Nothing else carries forward — "lineage" (`LineageAlias`/`LineageID`) is dropped entirely, and cross-app portability (Tether/Torque interop via a shared boot-profile file format) is deliberately opt-in via MCP, not a structural default.
 
 ## Envelope System (critical — read before touching)
 

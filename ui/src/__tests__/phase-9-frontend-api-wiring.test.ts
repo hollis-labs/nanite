@@ -833,7 +833,6 @@ describe("phase 9 response shape fixtures", () => {
       profiles: [],
       providers: [],
       models: [],
-      boot_profiles: [],
       work_root_hints: [
         { id: "operator-provided", label: "Operator provided" },
       ],

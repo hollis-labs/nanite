@@ -2228,12 +2228,13 @@ func (s *chatServiceImpl) recoverFromContextOverflow(
 	}
 
 	pipeline := &ctxpkg.CompactionPipeline{
-		Window:               result.Window,
-		Estimator:            ctxpkg.DefaultEstimator{},
-		Summarizer:           summarizer,
-		Mode:                 classifyModeFromAgentTags(agent),
-		ConversationMessages: chatMessages,
-		SessionID:            sessionID,
+		Window:                result.Window,
+		Estimator:             ctxpkg.DefaultEstimator{},
+		Summarizer:            summarizer,
+		Mode:                  classifyModeFromAgentTags(agent),
+		ConversationMessages:  chatMessages,
+		SessionID:             sessionID,
+		CompactionEventWriter: NewCompactionEventWriter(s.store),
 	}
 
 	tokensBefore := result.Window.UsedTokens()
@@ -2482,12 +2483,13 @@ func (s *chatServiceImpl) enforceBudgetOrCompact(
 	}
 
 	pipeline := &ctxpkg.CompactionPipeline{
-		Window:               result.Window,
-		Estimator:            ctxpkg.DefaultEstimator{},
-		Summarizer:           summarizer,
-		Mode:                 classifyModeFromAgentTags(agent),
-		ConversationMessages: chatMessages,
-		SessionID:            sessionID,
+		Window:                result.Window,
+		Estimator:             ctxpkg.DefaultEstimator{},
+		Summarizer:            summarizer,
+		Mode:                  classifyModeFromAgentTags(agent),
+		ConversationMessages:  chatMessages,
+		SessionID:             sessionID,
+		CompactionEventWriter: NewCompactionEventWriter(s.store),
 	}
 
 	tokensBefore := result.Window.UsedTokens()
@@ -2584,6 +2586,46 @@ func (r storeCompactionEventReader) GetLatestCompactionEvent(ctx context.Context
 // without importing the unexported adapter directly.
 func NewCompactionEventReader(s CompactionEventStore) ctxpkg.CompactionEventReader {
 	return storeCompactionEventReader{s: s}
+}
+
+// storeCompactionEventWriter bridges CompactionEventStore to
+// ctxpkg.CompactionEventWriter (P8 CompactionContract — write side,
+// CW-20260420-0027). All three production CompactionPipeline{} construction
+// sites (internal/api/sessions.go's manual /compact endpoint,
+// assembleTurnContext's compact-recoverable path, and the pre-loop
+// enforceBudgetOrCompact gate) assign this adapter so the pipeline's
+// post-stage event emission (compaction.go's runStages) actually persists a
+// compaction_events row, which storeCompactionEventReader / the
+// CompactionContract disclosure (internal/chat/context.go) reads back on the
+// next turn. Mirrors storeCompactionEventReader's field-by-field translation
+// above, just in the opposite direction.
+type storeCompactionEventWriter struct {
+	s CompactionEventStore
+}
+
+func (w storeCompactionEventWriter) WriteCompactionEvent(ctx context.Context, event ctxpkg.CompactionEvent) error {
+	out := store.CompactionEvent{
+		ID:                   event.ID,
+		SessionID:            event.SessionID,
+		CoverageWindowStart:  event.CoverageWindowStart,
+		CoverageWindowEnd:    event.CoverageWindowEnd,
+		EvictedCachePointers: append([]string(nil), event.EvictedCachePointers...),
+		PreservedSources:     append([]string(nil), event.PreservedSources...),
+		SummaryMode:          event.SummaryMode,
+		SummaryTokenCount:    event.SummaryTokenCount,
+		OriginalTokenCount:   event.OriginalTokenCount,
+		HandoffStashID:       event.HandoffStashID,
+		StagesApplied:        append([]string(nil), event.StagesApplied...),
+		CreatedAt:            event.CreatedAt,
+	}
+	return w.s.WriteCompactionEvent(ctx, out)
+}
+
+// NewCompactionEventWriter returns a ctxpkg.CompactionEventWriter backed by the
+// given store. Exported so api / chat / context packages can share the bridge
+// without importing the unexported adapter directly.
+func NewCompactionEventWriter(s CompactionEventStore) ctxpkg.CompactionEventWriter {
+	return storeCompactionEventWriter{s: s}
 }
 
 // BuildSummarizer resolves the provider+model used to summarize compacted

@@ -2,10 +2,12 @@ package service
 
 import (
 	"context"
+	"errors"
 	"time"
 
 	"github.com/robfig/cron/v3"
 
+	"github.com/hollis-labs/nanite/internal/dispatcher"
 	"github.com/hollis-labs/nanite/internal/store"
 )
 
@@ -147,6 +149,20 @@ func (s *durableWakeService) RunDue(ctx context.Context, req DurableAgentWakeRun
 			result.Skipped = true
 			result.SkipReason = item.SkipReason
 			s.recordWakeEvent(item.InstanceID, store.DurableAgentEventWakeSkipped, "", item.SkipReason, map[string]string{"schedule_id": item.Schedule.ID})
+			// Phase 4 task 04: this skip short-circuits before ever
+			// calling Wake (a ListDue-precomputed skip, avoiding a
+			// wasted Wake call for a known-skippable item in a bulk
+			// sweep) — log the same shared outcome shape Wake itself
+			// reports below so a skip is visible under "agent-run:
+			// outcome" regardless of which of RunDue's two skip paths
+			// caught it.
+			dispatcher.LogOutcome(dispatcher.AgentRunResult{
+				CallerType:      dispatcher.CallerBackground,
+				Completion:      dispatcher.CompletionQueued,
+				TargetSessionID: item.CurrentSessionID,
+				Status:          dispatcher.RunStatusSkipped,
+				Err:             errors.New(item.SkipReason),
+			})
 			out.Results = append(out.Results, result)
 			continue
 		}
@@ -185,6 +201,24 @@ func (s *durableWakeService) RunDue(ctx context.Context, req DurableAgentWakeRun
 	return out, nil
 }
 
+// Wake is durable-agent wake's real entry point (surface C of Phase 4
+// task 04's three run-another-agent surfaces). Unlike REST delegation
+// and LLM-triggered subagent dispatch, it fundamentally cannot
+// synchronously drain the dispatched turn — Start/Resume queue the
+// wake prompt via deliverWakePrompt and return once the turn is
+// merely queued, not once it finishes (chat.HandleMessage's
+// launchGeneration runs the actual turn in its own goroutine). Every
+// AgentRunResult this method reports therefore uses
+// dispatcher.CompletionQueued, and a successful wake is honestly
+// dispatcher.RunStatusQueued rather than borrowing
+// durable_agent_instances.status=Active (which means "has a live,
+// reusable session", not "this turn completed" — see wakeSkipReason's
+// doc comment for the documented gap around that distinction). This
+// is the "give the unified result type an honest, non-misleading
+// status" resolution Phase 4 task 04 calls for: representing "queued,
+// poll status separately" as the legitimate terminal shape for this
+// surface rather than attempting a full durable-agent lifecycle
+// completion-tracking redesign, which is out of this task's scope.
 func (s *durableWakeService) Wake(ctx context.Context, instanceID string, req DurableAgentWakeRequest) (*DurableAgentWakeResult, error) {
 	inst, err := s.store.GetDurableAgentInstance(instanceID)
 	if err != nil {
@@ -195,8 +229,24 @@ func (s *durableWakeService) Wake(ctx context.Context, instanceID string, req Du
 	if projectID == "" && scopeSession != nil {
 		projectID = scopeSession.ProjectID
 	}
+	// Phase 4 task 04: the shared AgentRunRequest for this surface.
+	// TargetSessionID is unknown until Start/Resume resolves (or
+	// reuses) a session below, so it's filled in on each AgentRunResult
+	// individually rather than carried on runReq itself.
+	runReq := dispatcher.AgentRunRequest{
+		CallerType: dispatcher.CallerBackground,
+		Completion: dispatcher.CompletionQueued,
+		Prompt:     req.WakePayload.Prompt,
+	}
 	if reason := wakeSkipReason(inst, s.activationModeForInstance(inst)); reason != "" {
 		s.recordWakeEvent(inst.ID, store.DurableAgentEventWakeSkipped, inst.CurrentSessionID, reason, nil)
+		dispatcher.LogOutcome(dispatcher.AgentRunResult{
+			CallerType:      runReq.CallerType,
+			Completion:      runReq.Completion,
+			TargetSessionID: inst.CurrentSessionID,
+			Status:          dispatcher.RunStatusSkipped,
+			Err:             errors.New(reason),
+		})
 		return &DurableAgentWakeResult{
 			InstanceID: inst.ID,
 			WakeReason: req.WakePayload.Reason,
@@ -217,12 +267,29 @@ func (s *durableWakeService) Wake(ctx context.Context, instanceID string, req Du
 	launchResult, err := s.durable.Start(ctx, inst.ID, startReq)
 	if err != nil {
 		s.recordWakeEvent(inst.ID, store.DurableAgentEventWakeFailed, inst.CurrentSessionID, err.Error(), map[string]string{"reason": payload.Reason})
+		dispatcher.LogOutcome(dispatcher.AgentRunResult{
+			CallerType:      runReq.CallerType,
+			Completion:      runReq.Completion,
+			TargetSessionID: inst.CurrentSessionID,
+			Status:          dispatcher.RunStatusFailed,
+			Err:             err,
+		})
 		return &DurableAgentWakeResult{
 			InstanceID:    inst.ID,
 			WakeReason:    payload.Reason,
 			FailureReason: err.Error(),
 		}, err
 	}
+	targetSessionID := inst.CurrentSessionID
+	if launchResult != nil && launchResult.Session != nil {
+		targetSessionID = launchResult.Session.ID
+	}
+	dispatcher.LogOutcome(dispatcher.AgentRunResult{
+		CallerType:      runReq.CallerType,
+		Completion:      runReq.Completion,
+		TargetSessionID: targetSessionID,
+		Status:          dispatcher.RunStatusQueued,
+	})
 	return &DurableAgentWakeResult{
 		InstanceID:   inst.ID,
 		WakeReason:   payload.Reason,

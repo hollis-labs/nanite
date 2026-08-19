@@ -15,6 +15,7 @@ type stubAgentReader struct {
 	agents      map[string]*store.AgentProfile // keyed by ID
 	slugIndex   map[string]*store.AgentProfile // keyed by slug
 	sessionBind map[string]*store.SessionAgent // keyed by sessionID
+	roles       map[string]*store.Role         // keyed by ID
 }
 
 func newStubReader() *stubAgentReader {
@@ -22,6 +23,7 @@ func newStubReader() *stubAgentReader {
 		agents:      make(map[string]*store.AgentProfile),
 		slugIndex:   make(map[string]*store.AgentProfile),
 		sessionBind: make(map[string]*store.SessionAgent),
+		roles:       make(map[string]*store.Role),
 	}
 }
 
@@ -30,6 +32,19 @@ func (s *stubAgentReader) addAgent(a *store.AgentProfile) {
 	if a.Slug != "" {
 		s.slugIndex[a.Slug] = a
 	}
+}
+
+func (s *stubAgentReader) addRole(r *store.Role) {
+	s.roles[r.ID] = r
+}
+
+// GetRole mirrors store.Store.GetRole's contract: (nil, nil) on a miss,
+// never an error for "not found".
+func (s *stubAgentReader) GetRole(id string) (*store.Role, error) {
+	if r, ok := s.roles[id]; ok {
+		return r, nil
+	}
+	return nil, nil
 }
 
 func (s *stubAgentReader) GetAgent(id string) (*store.AgentProfile, error) {
@@ -80,16 +95,22 @@ func (s *stubAgentWriter) CreateAgent(a *store.AgentProfile) error {
 	s.created = append(s.created, *a)
 	return nil
 }
-func (s *stubAgentWriter) UpdateAgent(*store.AgentProfile) error             { return nil }
-func (s *stubAgentWriter) DeleteAgent(slug string) error                     { s.deleted = append(s.deleted, slug); return nil }
-func (s *stubAgentWriter) UpsertAgentBySlug(*store.AgentProfile) error       { return nil }
-func (s *stubAgentWriter) EnsureSessionAgent(sid, _, _ string, _ bool) error { s.ensured = append(s.ensured, sid); return nil }
-func (s *stubAgentWriter) SetSessionAgentMode(string, string, string) error  { return nil }
-func (s *stubAgentWriter) DeleteSessionAgent(string, string) error           { return nil }
-func (s *stubAgentWriter) AssignSkillToAgent(string, string, string) error   { return nil }
-func (s *stubAgentWriter) RemoveSkillFromAgent(string, string) error         { return nil }
-func (s *stubAgentWriter) AddAgentProject(string, string) error              { return nil }
-func (s *stubAgentWriter) RemoveAgentProject(string, string) error           { return nil }
+func (s *stubAgentWriter) UpdateAgent(*store.AgentProfile) error { return nil }
+func (s *stubAgentWriter) DeleteAgent(slug string) error {
+	s.deleted = append(s.deleted, slug)
+	return nil
+}
+func (s *stubAgentWriter) UpsertAgentBySlug(*store.AgentProfile) error { return nil }
+func (s *stubAgentWriter) EnsureSessionAgent(sid, _, _ string, _ bool) error {
+	s.ensured = append(s.ensured, sid)
+	return nil
+}
+func (s *stubAgentWriter) SetSessionAgentMode(string, string, string) error { return nil }
+func (s *stubAgentWriter) DeleteSessionAgent(string, string) error          { return nil }
+func (s *stubAgentWriter) AssignSkillToAgent(string, string, string) error  { return nil }
+func (s *stubAgentWriter) RemoveSkillFromAgent(string, string) error        { return nil }
+func (s *stubAgentWriter) AddAgentProject(string, string) error             { return nil }
+func (s *stubAgentWriter) RemoveAgentProject(string, string) error          { return nil }
 
 type stubSettings struct {
 	defaultAgent string
@@ -98,13 +119,13 @@ type stubSettings struct {
 func (s *stubSettings) GetUserSettings() (*store.UserSettings, error) {
 	return &store.UserSettings{DefaultAgent: s.defaultAgent}, nil
 }
-func (s *stubSettings) UpdateUserSettings(*store.UserSettings) error                    { return nil }
-func (s *stubSettings) GetPluginSettings(string) (*store.PluginSettings, error)         { return nil, nil }
-func (s *stubSettings) UpsertPluginSettings(string, map[string]any) error               { return nil }
-func (s *stubSettings) UpsertPluginSchema(string, []store.ConfigField) error            { return nil }
-func (s *stubSettings) ListPluginSettings() ([]*store.PluginSettings, error)            { return nil, nil }
-func (s *stubSettings) UpdatePluginIcon(string, string) error                           { return nil }
-func (s *stubSettings) GetPluginSettingValue(string, string) (string, error)            { return "", nil }
+func (s *stubSettings) UpdateUserSettings(*store.UserSettings) error            { return nil }
+func (s *stubSettings) GetPluginSettings(string) (*store.PluginSettings, error) { return nil, nil }
+func (s *stubSettings) UpsertPluginSettings(string, map[string]any) error       { return nil }
+func (s *stubSettings) UpsertPluginSchema(string, []store.ConfigField) error    { return nil }
+func (s *stubSettings) ListPluginSettings() ([]*store.PluginSettings, error)    { return nil, nil }
+func (s *stubSettings) UpdatePluginIcon(string, string) error                   { return nil }
+func (s *stubSettings) GetPluginSettingValue(string, string) (string, error)    { return "", nil }
 
 // --- tests ---
 

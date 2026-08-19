@@ -10,9 +10,14 @@ import (
 // RoleOverrideConfig maps a store.Role's default-hint columns into the
 // broadest ("base") layer of the role -> agent -> task cascade described
 // in architecture/01-agent-construction.md and decision log §6. A nil
-// role (no role bound -- agent_profiles.role_id doesn't exist until
-// 02-add-agents-composition-columns.md adds and backfills it) returns the
-// zero value, contributing nothing to the merge.
+// role (no role bound -- agent_profiles.role_id was nil for every row
+// until 02-add-agents-composition-columns.md added and backfilled it)
+// returns the zero value, contributing nothing to the merge.
+//
+// ModelID is deliberately left unset here: roles (migration 108) has no
+// model_id-equivalent column, only the free-text DefaultModel/
+// DefaultProvider hints already mapped to Model/Provider above -- there is
+// no role-level default for the relational FK today.
 func RoleOverrideConfig(role *store.Role) override.OverrideConfig {
 	if role == nil {
 		return override.OverrideConfig{}
@@ -33,6 +38,16 @@ func RoleOverrideConfig(role *store.Role) override.OverrideConfig {
 // values into the middle ("agent"/composition-scope) layer of the cascade
 // -- between the role's broadest defaults and any task/invocation-level
 // override. A nil profile returns the zero value.
+//
+// ModelID (02-add-agents-composition-columns.md) is wired here as a plain
+// passthrough of the composition's own value -- since RoleOverrideConfig
+// never supplies one (see above) and no caller supplies a task-level
+// override for it yet, this is a proven no-op today for every row without
+// role_id/model_id populated, same shape as Model/Provider before 01
+// landed. RuntimeKind is deliberately NOT included in this cascade: per
+// 02's own scope, runtime_kind must not gain a new read/consult site
+// beyond its own backfill and tests until Phase 2 makes it live for
+// routing.
 func AgentOverrideConfig(profile *store.AgentProfile) override.OverrideConfig {
 	if profile == nil {
 		return override.OverrideConfig{}
@@ -42,6 +57,7 @@ func AgentOverrideConfig(profile *store.AgentProfile) override.OverrideConfig {
 		Class:        profile.Class,
 		Model:        profile.DefaultModel,
 		Provider:     profile.DefaultProvider,
+		ModelID:      profile.ModelID,
 		Tools:        decodeJSONStringArray(profile.Tools),
 		Skills:       decodeJSONStringArray(profile.RoleSkills),
 		Permissions:  decodeJSONObject(profile.ToolPermissions),

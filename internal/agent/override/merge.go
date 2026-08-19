@@ -19,6 +19,15 @@ type OverrideConfig struct {
 	// Provider/Description above.
 	SystemPrompt string `yaml:"system_prompt,omitempty" json:"system_prompt,omitempty"`
 	Class        string `yaml:"class,omitempty"          json:"class,omitempty"`
+	// ModelID backs 02-add-agents-composition-columns.md's relational
+	// model_id FK (agent_profiles.model_id -> models(id)), distinct from
+	// the free-text Model/Provider scalars above. roles has no model_id-
+	// equivalent column today, so the role layer never contributes a
+	// value for this field (RoleOverrideConfig leaves it empty) — it's
+	// wired into the same three-tier cascade shape as everything else so
+	// a future role-level default has a seam to land in without a second,
+	// parallel resolution path, per that task's own explicit instruction.
+	ModelID string `yaml:"model_id,omitempty" json:"model_id,omitempty"`
 
 	// Lists — union with optional +/- prefix support.
 	Tools       []string `yaml:"tools,omitempty"       json:"tools,omitempty"`
@@ -79,6 +88,9 @@ func applyLayer(base, layer OverrideConfig) OverrideConfig {
 	}
 	if layer.Class != "" {
 		base.Class = layer.Class
+	}
+	if layer.ModelID != "" {
+		base.ModelID = layer.ModelID
 	}
 
 	// Lists: union with +/- prefix support.

@@ -328,29 +328,40 @@ func (s *agentServiceImpl) resolveBinding(sessionID string) (agentID, modeName s
 }
 
 // roleForProfile resolves the store.Role a profile's role binding points
-// at. Always returns nil today: agent_profiles has no role_id column until
-// 02-add-agents-composition-columns.md adds and backfills it. Once that
-// column exists, this becomes a real s.agents-backed lookup (or nil when
-// role_id is unset) and resolveForSession's cascade call starts
-// contributing real role-level defaults without any other change to that
-// function.
-func (s *agentServiceImpl) roleForProfile(_ context.Context, _ *store.AgentProfile) *store.Role {
-	return nil
+// at, or nil when the profile has no role_id set (still true for every
+// pre-existing row until 10-data-migrate-nanite-agents-md.md backfills one
+// -- out of Phase 1 scope) or the lookup fails for any reason (unknown ID,
+// store error). Made real by 02-add-agents-composition-columns.md, which
+// added agent_profiles.role_id; before that column existed this always
+// returned nil, making resolveForSession's cascade call a proven no-op
+// (see role_cascade_test.go's TestAgentService_ResolveForSession_
+// CascadeIsNoOpToday, which still passes unchanged: its fixture profile
+// leaves RoleID unset, so this function still returns nil for it).
+func (s *agentServiceImpl) roleForProfile(_ context.Context, profile *store.AgentProfile) *store.Role {
+	if profile == nil || profile.RoleID == "" {
+		return nil
+	}
+	role, err := s.agents.GetRole(profile.RoleID)
+	if err != nil || role == nil {
+		return nil
+	}
+	return role
 }
 
 // applyScalarCascade resolves the role -> agent -> task cascade
 // (ResolveAgentCascade) for an already-loaded profile and writes the
-// resolved system_prompt/class/model/provider back onto a copy of it.
-// Only these four scalars are written back into the per-turn resolution
-// path — per architecture/01-agent-construction.md, tools/skills/
-// permissions "bind at the composition (agents) level, not fixed by
+// resolved system_prompt/class/model/provider/model_id back onto a copy of
+// it. Only these five scalars are written back into the per-turn
+// resolution path — per architecture/01-agent-construction.md, tools/
+// skills/permissions "bind at the composition (agents) level, not fixed by
 // role... the actual grant is adjustable per composition/scope," so a
 // role's tool/skill/permission defaults are a composition-creation-time
 // seed hint (see internal/store/roles.go), not something re-merged into
 // every turn's live tool/skill grant. ResolveAgentCascade still computes
 // the full merge (including tools/skills/permissions) so that part of the
 // cascade logic is exercised and tested (role_cascade_test.go) even
-// though it isn't applied here.
+// though it isn't applied here. runtime_kind is deliberately excluded --
+// see AgentOverrideConfig's doc comment.
 func applyScalarCascade(profile *store.AgentProfile, role *store.Role, taskOverride *override.OverrideConfig) *store.AgentProfile {
 	if profile == nil {
 		return profile
@@ -368,6 +379,9 @@ func applyScalarCascade(profile *store.AgentProfile, role *store.Role, taskOverr
 	}
 	if cascade.Provider != "" {
 		out.DefaultProvider = cascade.Provider
+	}
+	if cascade.ModelID != "" {
+		out.ModelID = cascade.ModelID
 	}
 	return &out
 }

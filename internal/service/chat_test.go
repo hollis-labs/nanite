@@ -259,6 +259,7 @@ func (stubAgentReaderStore) ListSessionAgents(string) ([]store.SessionAgent, err
 func (stubAgentReaderStore) ListAgentSkills(string) ([]store.Skill, error)          { return nil, nil }
 func (stubAgentReaderStore) ListAgentProjects(string) ([]store.Project, error)      { return nil, nil }
 func (stubAgentReaderStore) ListProjectAgents(string) ([]store.AgentProfile, error) { return nil, nil }
+func (stubAgentReaderStore) GetRole(string) (*store.Role, error)                    { return nil, nil }
 
 type stubAgentWriterStore struct{}
 

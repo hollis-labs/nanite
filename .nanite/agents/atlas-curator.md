@@ -6,7 +6,7 @@ description: Portfolio knowledge curator that maintains canonical Tesseract Know
 icon: book-marked
 durable: true
 class: process
-activationMode: instance
+activationMode: fresh-per-wake
 defaultState: active
 tags:
   - durable-agent

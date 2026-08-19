@@ -164,7 +164,7 @@ type AgentProfile struct {
 	// role bound yet; nullable during transition per
 	// 02-add-agents-composition-columns.md's own text (existing rows have
 	// no role until 10-data-migrate-nanite-agents-md.md backfills one,
-	// which is out of Phase 1 scope). Added by migration 110.
+	// which is out of Phase 1 scope). Added by migration 111.
 	RoleID string `json:"role_id"`
 
 	// ModelID is a nullable FK to models(id) -- a relational reference into
@@ -172,11 +172,11 @@ type AgentProfile struct {
 	// target.md), distinct from the pre-existing free-text
 	// DefaultModel/DefaultProvider scalars that already participate in the
 	// role->agent->task cascade. Empty string means no relational model
-	// bound yet. Added by migration 110.
+	// bound yet. Added by migration 111.
 	ModelID string `json:"model_id"`
 
 	// RuntimeKind is 'cli' or 'api' -- see GLOSSARY.md's "Runtime kind"
-	// entry. Populated for every row (backfilled by migration 110 from
+	// entry. Populated for every row (backfilled by migration 111 from
 	// each row's pre-existing default_provider via inferRuntimeKind,
 	// mirroring chat.IsCLIProvider; defaulted the same way for every row
 	// created afterward by applyMultiAgentDefaults) but deliberately not
@@ -189,7 +189,7 @@ type AgentProfile struct {
 // migration 070 deliberately did not encode at the column level. FU-28.
 //
 // activation_mode's valid set was widened from 'singleton'/'instance' to
-// 'singleton'/'fresh-per-wake'/'concurrent' by migration 110 (Phase 1 item
+// 'singleton'/'fresh-per-wake'/'concurrent' by migration 111 (Phase 1 item
 // 02, TASKS/phase-1/02-add-agents-composition-columns.md) -- the real
 // design decision documented in that task's Work Log: extend this existing
 // column to the 3-value instance_mode shape architecture/
@@ -215,7 +215,7 @@ func validateAgentMultiAgentFields(a *AgentProfile) error {
 	default:
 		return fmt.Errorf("default_state %q invalid: must be 'sleeping' or 'active'", a.DefaultState)
 	}
-	// runtime_kind also carries a real DB-level CHECK (migration 110,
+	// runtime_kind also carries a real DB-level CHECK (migration 111,
 	// unlike the three enums above), but validating it here too gives API
 	// callers a clean Go error instead of a raw SQLite CHECK-constraint
 	// failure, matching this function's existing job for every other
@@ -232,7 +232,7 @@ func validateAgentMultiAgentFields(a *AgentProfile) error {
 // class, default_state, urn_aliases, runtime_kind) and mints a URN if none
 // is set. When minting, the slug-form URN is pushed into urn_aliases so
 // legacy routing keeps resolving. FU-28; runtime_kind + the class-aware
-// activation_mode default added by migration 110 (Phase 1 item 02).
+// activation_mode default added by migration 111 (Phase 1 item 02).
 //
 // Class is defaulted *before* ActivationMode here (reordered from this
 // function's original shape) because DefaultActivationModeForClass needs
@@ -315,7 +315,7 @@ func DefaultActivationModeForClass(class string) string {
 // an import cycle" convention this file already uses for
 // urnPrefix/generateAgentURN (see their doc comments above). Kept in
 // lockstep with chat.IsCLIProvider and this migration's SQL backfill
-// (110_agent_profiles_composition_columns.sql) by hand; chat/engine.go's
+// (111_agent_profiles_composition_columns.sql) by hand; chat/engine.go's
 // own doc comment lists every other site that same classification must not
 // drift from.
 func inferRuntimeKind(providerName string) string {

@@ -101,7 +101,7 @@ This branch (`phase-1-execution`, based off Phase 0's `HEAD` as of 2026-08-18 â€
 | Task | Status | Depends on |
 |---|---|---|
 | 01-add-roles-table-and-cascade-resolution | reviewed | none |
-| 02-add-agents-composition-columns | not-started | 01, 06 |
+| 02-add-agents-composition-columns | implemented | 01, 06 |
 | 03-add-consumers-table | reviewed | none |
 | 04-add-known-tools-and-agent-tools-fk | implemented | none |
 | 05-fix-agent-skills-and-agent-projects-fks | reviewed | none hard â€” independently verify `agent_skills`/`agent_projects` are still zero-row (see task file) |

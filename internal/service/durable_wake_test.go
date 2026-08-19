@@ -338,7 +338,7 @@ func TestDurableWakeAdvisorClassStillBlockedWhileActive(t *testing.T) {
 // agent per the production backup inspected for this task) is exactly this
 // case. Once wakeSkipReason reads activation_mode instead of
 // lifecycle_class, a template-class composition with activation_mode=
-// 'fresh-per-wake' (the value migration 110's backfill gives content-writer)
+// 'fresh-per-wake' (the value migration 111's backfill gives content-writer)
 // gets the same rewake fix process already had.
 func TestDurableWakeTemplateClassRewakeableWhileActive(t *testing.T) {
 	st := newDurableAgentServiceTestStore(t)

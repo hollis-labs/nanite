@@ -3,7 +3,7 @@ package store
 import "testing"
 
 // TestAgentSkills_FKRejectsOrphanedAgentID is the "Done means" verification
-// for Phase 1 #05 (migration 106): agent_skills.agent_id must carry a real,
+// for Phase 1 #05 (migration 107): agent_skills.agent_id must carry a real,
 // enforced FK to agent_profiles(id) — inserting a row for an agent_id with
 // no backing agent_profiles row must be rejected at the DB level.
 func TestAgentSkills_FKRejectsOrphanedAgentID(t *testing.T) {

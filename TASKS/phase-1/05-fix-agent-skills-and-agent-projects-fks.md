@@ -86,7 +86,7 @@ All three pass (`go test ./internal/api/ -run "TestHandleAssignAgentSkill|TestHa
 
 ### Step 3 — FK migration
 
-Added `internal/store/migrations/106_agent_skills_agent_projects_fk.sql` (goose, rename-recreate-copy pattern per Phase 0 #9, matching `105_drop_unused_session_status_values.sql`'s structure): both `agent_skills.agent_id` and `agent_projects.agent_id` now carry `REFERENCES agent_profiles(id) ON DELETE CASCADE`. No other column drift existed for either table since `001_schema.sql` (reconfirmed), so the rebuilt shape is identical apart from the new FK. `Down` reverts to the original FK-less shape.
+Added `internal/store/migrations/107_agent_skills_agent_projects_fk.sql` (goose, rename-recreate-copy pattern per Phase 0 #9, matching `105_drop_unused_session_status_values.sql`'s structure): both `agent_skills.agent_id` and `agent_projects.agent_id` now carry `REFERENCES agent_profiles(id) ON DELETE CASCADE`. No other column drift existed for either table since `001_schema.sql` (reconfirmed), so the rebuilt shape is identical apart from the new FK. `Down` reverts to the original FK-less shape.
 
 Added `internal/store/agent_skills_agent_projects_fk_test.go`:
 - `TestAgentSkills_FKRejectsOrphanedAgentID` / `TestAgentProjects_FKRejectsOrphanedAgentID` — direct store-level insert against a nonexistent `agent_id` now fails (FK violation).
@@ -104,7 +104,7 @@ Added `internal/store/agent_skills_agent_projects_fk_test.go`:
 - `agent_skills.agent_id` / `agent_projects.agent_id`: real, enforced FK to `agent_profiles(id)`, cascade-delete.
 - Both previously-open write-path gaps closed at the API layer, with regression tests.
 - `agent_known_skills`: confirmed untouched throughout (read-only check performed against both the fresh test DB and the real backup; no code in this diff writes to it).
-- Files touched: `internal/api/skills.go`, `internal/api/agents.go`, `internal/store/agents.go`, `internal/store/migrations/106_agent_skills_agent_projects_fk.sql` (new), `internal/api/skills_test.go` (new), `internal/api/agent_projects_test.go` (new), `internal/store/agent_skills_agent_projects_fk_test.go` (new).
+- Files touched: `internal/api/skills.go`, `internal/api/agents.go`, `internal/store/agents.go`, `internal/store/migrations/107_agent_skills_agent_projects_fk.sql` (new), `internal/api/skills_test.go` (new), `internal/api/agent_projects_test.go` (new), `internal/store/agent_skills_agent_projects_fk_test.go` (new).
 
 ## Review notes
 <Reviewer fills this in: pass/fail, what was checked, anything fixed and how.>

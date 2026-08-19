@@ -465,6 +465,38 @@ type UpdateRoleRequest struct {
 	DefaultPermissions *string `json:"default_permissions"`
 }
 
+// --- Agent context resolvers ---
+//
+// Phase 2 item 02 (TASKS/phase-2/02-port-forward-dynamic-resolver.md).
+// See internal/store/agent_context_resolvers.go for the
+// AgentContextResolver struct these requests map onto.
+
+type CreateAgentContextResolverRequest struct {
+	SlotName       string `json:"slot_name"`
+	Kind           string `json:"kind"`
+	Run            string `json:"run"`
+	CWD            string `json:"cwd"`
+	Timeout        string `json:"timeout"`
+	URL            string `json:"url"`
+	HeadersJSON    string `json:"headers_json"`
+	ResponseFormat string `json:"response_format"`
+	JSONPath       string `json:"json_path"`
+	Enabled        *bool  `json:"enabled"`
+}
+
+type UpdateAgentContextResolverRequest struct {
+	SlotName       *string `json:"slot_name"`
+	Kind           *string `json:"kind"`
+	Run            *string `json:"run"`
+	CWD            *string `json:"cwd"`
+	Timeout        *string `json:"timeout"`
+	URL            *string `json:"url"`
+	HeadersJSON    *string `json:"headers_json"`
+	ResponseFormat *string `json:"response_format"`
+	JSONPath       *string `json:"json_path"`
+	Enabled        *bool   `json:"enabled"`
+}
+
 // --- Artifacts ---
 
 type PlaceArtifactRequest struct {

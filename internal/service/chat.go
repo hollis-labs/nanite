@@ -422,6 +422,18 @@ type chatServiceImpl struct {
 	// CloseAgentSession alongside the other per-session maps.
 	activeSessionLaunchSpecs sync.Map
 
+	// activeSessionContextBlocks stamps the resolved output of a
+	// session's agent's DB-configured cmd/http context resolvers (Phase
+	// 2 item 02, TASKS/phase-2/02-port-forward-dynamic-resolver.md),
+	// keyed by chat session id. Map values are map[string]string
+	// (slot name -> resolved content). Resolved once at initial cold
+	// boot (resolveAgentContextForBoot); regenerateBootDirSlots reads
+	// the stash so a mid-session CLAUDE.md regen doesn't drop the
+	// resolved content the way a bare re-derive from the agent profile
+	// would. Cleared in CloseAgentSession alongside the other
+	// per-session maps.
+	activeSessionContextBlocks sync.Map
+
 	// dispatcher is the single agent-dispatch door
 	// (CW-20260512-0121 / SP-20260512-0011). launchGeneration routes
 	// the user → chat call-site through this; ChatRunner (subagent
@@ -1044,6 +1056,7 @@ func (s *chatServiceImpl) CloseAgentSession(ctx context.Context, sessionID strin
 	s.activeSessionSlots.Delete(sessionID)
 	s.toolPartitionStates.Delete(sessionID)
 	s.activeSessionLaunchSpecs.Delete(sessionID)
+	s.activeSessionContextBlocks.Delete(sessionID)
 	if s.agentEventBridge != nil {
 		s.agentEventBridge.SetPerSessionRouter(sessionID, nil)
 	}

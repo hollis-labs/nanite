@@ -301,6 +301,12 @@ type Store interface {
 	// to clear an expired id after a fast-exit-after-resume so the next
 	// turn cold-boots without --resume.
 	SetAgentRuntimeProviderSessionID(id, providerSessionID string) error
+
+	// ListEnabledAgentContextResolvers returns an agent's enabled
+	// cmd/http dynamic context resolvers (Phase 2 item 02,
+	// TASKS/phase-2/02-port-forward-dynamic-resolver.md). Used by
+	// chat_boot_drive.go's resolveAgentContextForBoot at launch time.
+	ListEnabledAgentContextResolvers(ctx context.Context, agentID string) ([]store.AgentContextResolver, error)
 }
 
 // Compile-time verification that *store.Store satisfies the composite interface.

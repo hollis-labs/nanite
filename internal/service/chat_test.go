@@ -151,6 +151,14 @@ func (m *minimalStore) AgentRuntimeProviderSessionID(string) (string, error) { r
 // override on a per-test stub.
 func (m *minimalStore) SetAgentRuntimeProviderSessionID(string, string) error { return nil }
 
+// ListEnabledAgentContextResolvers satisfies the Store interface for the
+// test fakes (Phase 2 item 02,
+// TASKS/phase-2/02-port-forward-dynamic-resolver.md). Returns no
+// configured resolvers by default.
+func (m *minimalStore) ListEnabledAgentContextResolvers(context.Context, string) ([]store.AgentContextResolver, error) {
+	return nil, nil
+}
+
 // stubSubagentRunsReader returns no active subagent for any session by
 // default. Tests that need to exercise the suppression branch (CW-20260512-0002 d)
 // embed a custom reader instead.

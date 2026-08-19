@@ -105,6 +105,17 @@ func (s *chatServiceImpl) resolveBootProfile(sessionID, providerName string, ses
 // CW-20260514-0048: kept narrow + structural so a future change that
 // adds another CLI prefix (e.g. "agentsession-*") drops in by
 // extending chat.IsCLIProvider alone.
+//
+// Phase 2 item 01 (TASKS/phase-2/01-wire-runtime-kind-routing.md): this
+// is the boot-profile catalog's own live, still-un-migrated CLI routing
+// mechanism — it forces CLI routing via a synthesized "pty-<adapter>"
+// alias regardless of the session's actual bound agent's
+// agent_profiles.runtime_kind. service/chat.go's classifyNilProvider
+// deliberately OR's in the legacy chat.IsCLIProvider(providerName) check
+// specifically to keep this working. TASKS/phase-2/04-retire-boot-profile-
+// catalog.md removes this function (and the whole boot-profile catalog)
+// in full; once that lands, classifyNilProvider's OR'd fallback for this
+// case becomes dead and should be deleted.
 func cliRoutableProvider(spec *bootprofile.LaunchSpec) string {
 	if spec == nil {
 		return ""

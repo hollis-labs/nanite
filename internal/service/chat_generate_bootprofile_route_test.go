@@ -127,8 +127,13 @@ func TestBootprofile_RoutesToBareAdapter_ThroughClassifier(t *testing.T) {
 	}
 
 	// Now run the classifier on the substituted name — the same
-	// shape chat_generate.go threads through.
-	if route := s.classifyNilProvider(got); route != nilProviderRouteCLI {
+	// shape chat_generate.go threads through. runtimeKind is "" here:
+	// the stub agent bound to this session (Slug: "x") has no DB row,
+	// so its resolved runtime_kind is empty and classifyNilProvider
+	// must fall back to the OR'd chat.IsCLIProvider(providerName) check
+	// (Phase 2 item 01's documented boot-profile-catalog exception —
+	// see classifyNilProvider's doc comment) to still route CLI here.
+	if route := s.classifyNilProvider("", got); route != nilProviderRouteCLI {
 		t.Fatalf("classifyNilProvider(%q) = %v, want nilProviderRouteCLI (route to driveBootSession)",
 			got, route)
 	}

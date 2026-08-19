@@ -1227,23 +1227,48 @@ const (
 	nilProviderRouteCLINoAdapter
 )
 
-// classifyNilProvider returns the nilProviderRoute case for the resolved
-// provider name. Returns nilProviderRouteFatal when the name is not a
-// CLI alias (the original behavior). Returns nilProviderRouteCLI when the
-// name is a CLI alias AND the agent runtime has a registered adapter for
-// it. Returns nilProviderRouteCLINoAdapter when the name is a CLI alias
-// but no adapter is registered (misconfiguration).
+// classifyNilProvider returns the nilProviderRoute case for a resolved
+// (providerName, nil-provider) pair — i.e. the CLI bypass chat_generate.go
+// hits when resolveProvider comes back with no registered
+// llmcontracts.Provider. Returns nilProviderRouteFatal when CLI routing
+// isn't warranted (see below) — the original behavior. Returns
+// nilProviderRouteCLI when CLI routing IS warranted AND the agent runtime
+// has a registered adapter for the resolved name. Returns
+// nilProviderRouteCLINoAdapter when CLI routing is warranted but no
+// adapter is registered (misconfiguration).
+//
+// Phase 2 item 01 (TASKS/phase-2/01-wire-runtime-kind-routing.md): CLI
+// routing is decided primarily by runtimeKind — agent_profiles.runtime_kind
+// on the resolved session agent (architecture/02-agent-launching.md, "CLI-
+// vs-API routing is an explicit typed field"), not by re-deriving the
+// classification from providerName's "pty"/"sub-" prefix shape. The
+// chat.IsCLIProvider(providerName) check is still OR'd in, deliberately,
+// for two cases where runtimeKind is not yet the reliable single source of
+// truth:
+//
+//  1. A file-discovered agent profile with no agent_profiles DB row yet —
+//     Definition.ToProfile() has no frontmatter representation for
+//     runtime_kind at all, so runtimeKind arrives here as "" (see
+//     agent.OverlayDBFields's doc comment). Falling back to the legacy
+//     provider-name classification reproduces prior behavior exactly.
+//  2. A boot-profile-catalog-driven session — chat_bootprofile_resolve.go's
+//     cliRoutableProvider synthesizes a "pty-<adapter>" alias to force CLI
+//     routing regardless of whichever agent happens to be bound to the
+//     session. That whole mechanism is retired in full by
+//     TASKS/phase-2/04-retire-boot-profile-catalog.md; once it lands, this
+//     OR'd fallback is dead code and should be deleted rather than left as
+//     a silent, permanent second decision input.
 //
 // Adapter lookup goes through agentDeps.ProviderAdapter which already
 // applies the CW-20260514-0045 alias normalization (stripRegistryPrefix
 // → chat.NormalizeCLIProvider), so the caller passes the dropdown-shape
 // name verbatim.
-func (s *chatServiceImpl) classifyNilProvider(providerName string) nilProviderRoute {
-	if !chat.IsCLIProvider(providerName) {
+func (s *chatServiceImpl) classifyNilProvider(runtimeKind, providerName string) nilProviderRoute {
+	if runtimeKind != "cli" && !chat.IsCLIProvider(providerName) {
 		return nilProviderRouteFatal
 	}
 	if s.agentDeps == nil || s.agentDeps.ProviderAdapter == nil {
-		// CLI provider name but no runtime composition wired —
+		// CLI-routable but no runtime composition wired —
 		// behave as fatal so the operator sees the legacy error.
 		return nilProviderRouteFatal
 	}

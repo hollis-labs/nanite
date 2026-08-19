@@ -44,10 +44,16 @@ func RoleOverrideConfig(role *store.Role) override.OverrideConfig {
 // never supplies one (see above) and no caller supplies a task-level
 // override for it yet, this is a proven no-op today for every row without
 // role_id/model_id populated, same shape as Model/Provider before 01
-// landed. RuntimeKind is deliberately NOT included in this cascade: per
-// 02's own scope, runtime_kind must not gain a new read/consult site
-// beyond its own backfill and tests until Phase 2 makes it live for
-// routing.
+// landed. RuntimeKind is still deliberately NOT included in this cascade:
+// Phase 2 item 01 (TASKS/phase-2/01-wire-runtime-kind-routing.md) made
+// runtime_kind live for CLI-vs-API routing, but reads it straight off the
+// already-resolved *store.AgentProfile ResolveForSession/Get produce
+// (agent.RuntimeKind) at the routing call sites themselves
+// (service/chat_generate.go, service/chat.go's classifyNilProvider) --
+// not through this override-merge cascade. runtime_kind isn't a per-role
+// or per-task overridable setting the way system_prompt/model/tools are;
+// it's a fixed property of which runtime an agent composition boots
+// under, so there is no cascade layer for it to merge across.
 func AgentOverrideConfig(profile *store.AgentProfile) override.OverrideConfig {
 	if profile == nil {
 		return override.OverrideConfig{}

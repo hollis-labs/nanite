@@ -454,9 +454,17 @@ func (a *recoveryMCPAdapter) RestartTransport(ctx context.Context, sessionID str
 // CW-20260514-0045: legacy bare "pty" (pre-CW-20260508-0002 default)
 // normalizes to "claude" so dropdown-selected CLI providers still resolve
 // to a registered adapter after the PTYBridge registry registrations
-// were removed. Delegates to chat.NormalizeCLIProvider so the four
-// normalization call sites (chat_generate CLI bypass, bootdirLayoutFor,
-// shouldUsePTY, this) can't drift.
+// were removed. Delegates to chat.NormalizeCLIProvider so the string-shape
+// normalization call sites (chat_generate's ProviderAdapter lookup,
+// bootdirLayoutFor, factory.go's normalizeProviderName, this) can't drift.
+//
+// Post-decision helper only (Phase 2 item 01,
+// TASKS/phase-2/01-wire-runtime-kind-routing.md) — this is called from
+// agentProfileResolver's ProviderAdapter closure ONLY once
+// classifyNilProvider (service/chat.go) has already decided the turn
+// routes CLI (primarily via agent_profiles.runtime_kind, not this
+// prefix convention); its job here is deriving which CLI adapter to
+// look up, not deciding CLI-vs-API.
 func stripRegistryPrefix(name string) string {
 	return chat.NormalizeCLIProvider(name)
 }

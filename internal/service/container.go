@@ -423,6 +423,19 @@ func NewContainer(cfg ContainerConfig) (*Container, error) {
 	var knownTools map[string]bool
 	if cfg.ToolClient != nil {
 		catalog := cfg.ToolClient.ListTools()
+		// request_tools has no registration anywhere in the builtin/MCP
+		// catalog ToolClient.ListTools() draws from — it's a meta-tool
+		// synthesized ad hoc by SelectForAgent (progressive discovery and
+		// the always_included escape hatch, service/tool.go), with its
+		// own dedicated execution path (ToolService.HandleRequestTools),
+		// not routed through MCPManager/Builtins like an ordinary tool.
+		// Append it here so known_tools' live-sync (below) sees it as a
+		// real, permanently-available catalog entry instead of marking
+		// its migration-seeded always_included row 'unavailable' on the
+		// very first boot (TASKS/phase-4/05-wire-select-for-agent-to-
+		// read-agent-tools.md — caught by that task's own zero-grant
+		// escape-hatch test).
+		catalog = append(catalog, toolclient.RequestToolsMetaTool())
 		knownTools = make(map[string]bool, len(catalog))
 		for _, t := range catalog {
 			knownTools[t.Name] = true

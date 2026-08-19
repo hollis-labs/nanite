@@ -17,9 +17,12 @@ const DefaultContextWindowTokens = 200000
 // engine was already a no-op in production; selectToolsUncapped now
 // returns the full registered catalog directly. Real narrowing happens
 // downstream of selection: tool_permissions (ToolClient.CheckPermission),
-// the schema-v2 tools allowlist (filterToolsByAllowlist), the chat-role
-// surface filter (applyChatSurfaceFilter), the developer_mode dev-tool
-// gate, and progressive discovery — none of which lived in this Config.
+// the agent_tools grant filter (service/tool.go's filterToolsByAgentTools
+// — replaced the old schema-v2 tools allowlist / filterToolsByAllowlist
+// as of TASKS/phase-4/05-wire-select-for-agent-to-read-agent-tools.md),
+// the chat-role surface filter (applyChatSurfaceFilter), the
+// developer_mode dev-tool gate, and progressive discovery — none of
+// which lived in this Config.
 type Config struct {
 	// ToolTokenBudgetPct is the fraction of the context window budget allocated to tool definitions.
 	// Default: 0.20 (20%).

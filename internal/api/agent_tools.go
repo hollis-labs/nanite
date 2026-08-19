@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"net/http"
 
-	agentpkg "github.com/hollis-labs/nanite/internal/agent"
 	"github.com/hollis-labs/nanite/internal/store"
 	"github.com/hollis-labs/nanite/internal/toolclient"
 )
@@ -39,9 +38,6 @@ import (
 func (a *API) handleGrantAgentTool(w http.ResponseWriter, r *http.Request) {
 	agent, ok := a.requireAgent(w, r)
 	if !ok {
-		return
-	}
-	if !a.requireRealAgentToolsTarget(w, agent) {
 		return
 	}
 
@@ -117,9 +113,6 @@ func (a *API) handleRevokeAgentTool(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	if !a.requireRealAgentToolsTarget(w, agent) {
-		return
-	}
 	toolID := r.PathValue("toolId")
 	if toolID == "" {
 		a.errorResp(w, http.StatusBadRequest, "toolId is required")
@@ -132,38 +125,15 @@ func (a *API) handleRevokeAgentTool(w http.ResponseWriter, r *http.Request) {
 	a.jsonResp(w, http.StatusOK, map[string]string{"status": "revoked"})
 }
 
-// requireRealAgentToolsTarget rejects a grant/revoke request whose resolved
-// agent has no real agent_profiles UUID identity to hang an agent_tools
-// row off of, writing a clear 400 (naming the actual limitation) instead of
-// letting the request fall through to agent_tools' agent_id FK constraint
-// and surface as an opaque SQL error.
-//
-// Known, documented gap (this task's Work Log has the full writeup, not
-// fixed here -- out of this task's own Touches list, same "needs more
-// investigation than this task's scope warrants" judgment call
-// TASKS/phase-4/05's Work Log used for the identical agentServiceImpl.Get
-// resolution question): for an internal/embedded or plugin/vendor agent
-// (worker, default, planner, ...), a.Services.Agents.Get(ctx, id) resolves
-// through agentServiceImpl.resolveFileProfile, whose ID is always the
-// deterministic "file-<slug>" runtime alias (agent.Definition.CanonicalID),
-// never the real agent_profiles UUID a parallel DB row was minted under at
-// ingest time (see TASKS/phase-4/05's Work Log item 1 for the full
-// analysis of this same mismatch inside SelectForAgent). Every existing
-// GET /api/agents / GET /api/agents/{id} response for that population also
-// reports this same alias as "id" -- there is currently no REST-visible way
-// for an operator to discover the real UUID to work around this. Agents
-// created/updated through this same API (POST/PUT /api/agents) always mint
-// a real UUID (AgentConfigService.Create) and are unaffected.
-func (a *API) requireRealAgentToolsTarget(w http.ResponseWriter, agent *store.AgentProfile) bool {
-	if agentpkg.IsFileBasedID(agent.ID) {
-		a.errorResp(w, http.StatusBadRequest, fmt.Sprintf(
-			"agent %q resolves to the file-based runtime alias %q, not a real agent_profiles row -- agent_tools grants require a real UUID identity (managed agents created/updated via POST/PUT /api/agents have one; internal/embedded and plugin/vendor agents currently do not expose one through this API -- see this task's Work Log)",
-			agent.Slug, agent.ID,
-		))
-		return false
-	}
-	return true
-}
+// requireRealAgentToolsTarget (rejecting a grant/revoke request against an
+// agent with no real agent_profiles UUID identity) was removed by
+// TASKS/adhoc/01-eliminate-file-based-agent-runtime.md: the file-based
+// runtime alias (agent.Definition.CanonicalID's "file-<slug>" fallback)
+// this guard existed to detect no longer exists. Every agent resolved via
+// a.Services.Agents.Get -- internal/embedded, plugin/vendor, or
+// managed/API-created -- now carries its real agent_profiles UUID, so
+// grant/revoke can rely on agent.ID directly the same way any other real
+// FK-bearing write does.
 
 // matchingDenyPattern reports whether toolName matches any glob in perms'
 // deny_list, returning the first matching pattern (deny_list order,

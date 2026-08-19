@@ -4,9 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
-	"sync"
 
-	"github.com/hollis-labs/nanite/internal/agent"
 	"github.com/hollis-labs/nanite/internal/agent/override"
 	"github.com/hollis-labs/nanite/internal/store"
 )
@@ -36,49 +34,40 @@ type AgentService interface {
 	ResolveForSessionReadOnly(ctx context.Context, sessionID string) (agent *store.AgentProfile, err error)
 }
 
-// defaultFallbackAgent is the agent ID used when no session-agent binding
-// or user-settings default exists. Points to the file-based default agent.
-const defaultFallbackAgent = "file-default"
-
-// defaultFallbackSlug is the slug-based fallback when neither the session
-// agent nor the default agent ID can be found.
+// defaultFallbackSlug is the agent slug used when no session-agent binding
+// or user-settings default resolves to a valid agent — the ultimate
+// fallback, resolved via GetBySlug so it stays correct regardless of
+// whichever real agent_profiles.id the "default" agent happens to have.
+//
+// TASKS/adhoc/01-eliminate-file-based-agent-runtime.md removed the old
+// defaultFallbackAgent ID-shaped constant ("file-default", a synthetic
+// runtime alias no real agent_profiles row ever carried as its actual
+// primary key) — every fallback in this file now resolves by slug only.
 const defaultFallbackSlug = "default"
 
-// agentServiceImpl implements AgentService backed by file-based definitions
-// (primary) with DB fallback for user-created agents.
+// agentServiceImpl implements AgentService backed entirely by the
+// agent_profiles DB. TASKS/adhoc/01-eliminate-file-based-agent-runtime.md
+// removed the in-memory file-definition registry this type used to consult
+// before ever touching the DB (fileDefs/findDefByID/findDefBySlug/
+// resolveFileProfile, and the "file-<slug>" synthetic-ID resolution branch
+// in Get) — every agent, including the 9 internal builtin profiles, is a
+// real agent_profiles row with a real ID by the time this service is
+// constructed (AutoIngestAgents runs before NewAgentService in
+// container.go), so there is no more parallel runtime identity to resolve
+// through.
 type agentServiceImpl struct {
 	agents   AgentReader
 	writers  AgentWriter
 	settings SettingsStore
 	events   EventEmitter
-
-	// mu guards fileDefs. The slice was historically immutable after
-	// construction, but the managed-agent write contract reloads a single
-	// def in place after a GUI/API/CLI edit so changes are visible without a
-	// restart (AgentConfigService → ReloadFileAgent / RemoveFileAgent).
-	mu       sync.RWMutex
-	fileDefs []*agent.Definition // file-based agent definitions, priority-ordered
-}
-
-// AgentRegistryReloader lets the managed-agent write path refresh the live
-// in-memory registry after a file/DB write so reads reflect the change
-// without a restart. Implemented by agentServiceImpl.
-type AgentRegistryReloader interface {
-	// ReloadFileAgent replaces (or appends) the in-memory definition for
-	// def.Slug with def. def is expected to already carry its resolved
-	// Source/SourceRef/ID.
-	ReloadFileAgent(def *agent.Definition)
-	// RemoveFileAgent drops the in-memory definition for slug, if present.
-	RemoveFileAgent(slug string)
 }
 
 // AgentServiceConfig holds dependencies for constructing an AgentService.
 type AgentServiceConfig struct {
-	Agents     AgentReader
-	Writers    AgentWriter
-	Settings   SettingsStore
-	Events     EventEmitter
-	FileAgents []*agent.Definition // from agent.Discover() + builtin
+	Agents   AgentReader
+	Writers  AgentWriter
+	Settings SettingsStore
+	Events   EventEmitter
 }
 
 // NewAgentService creates an AgentService from its required dependencies.
@@ -88,146 +77,19 @@ func NewAgentService(cfg AgentServiceConfig) AgentService {
 		writers:  cfg.Writers,
 		settings: cfg.Settings,
 		events:   cfg.Events,
-		fileDefs: cfg.FileAgents,
 	}
 }
 
 func (s *agentServiceImpl) Get(_ context.Context, id string) (*store.AgentProfile, error) {
-	// Legacy "file-<slug>" identity: resolve through the in-memory def so the
-	// deterministic runtime identity keeps working.
-	if agent.IsFileBasedID(id) {
-		slug := agent.SlugFromFileID(id)
-		if d := s.findDefBySlug(slug); d != nil {
-			return s.resolveFileProfile(d), nil
-		}
-	}
-	// Stamped managed agents carry a real UUID == their DB row PK; an
-	// in-memory def (if loaded) wins so GUI/CLI edits reloaded into the
-	// registry are visible without a restart, otherwise fall through to DB.
-	if d := s.findDefByID(id); d != nil {
-		return s.resolveFileProfile(d), nil
-	}
 	return s.agents.GetAgent(id)
 }
 
 func (s *agentServiceImpl) GetBySlug(_ context.Context, slug string) (*store.AgentProfile, error) {
-	// File-based agents take priority.
-	if d := s.findDefBySlug(slug); d != nil {
-		return s.resolveFileProfile(d), nil
-	}
 	return s.agents.GetAgentBySlug(slug)
 }
 
 func (s *agentServiceImpl) List(_ context.Context) ([]store.AgentProfile, error) {
-	// Start with file-based agents (snapshot under lock).
-	s.mu.RLock()
-	defs := make([]*agent.Definition, len(s.fileDefs))
-	copy(defs, s.fileDefs)
-	s.mu.RUnlock()
-
-	seen := make(map[string]bool, len(defs))
-	var result []store.AgentProfile
-	for _, d := range defs {
-		result = append(result, *s.resolveFileProfile(d))
-		seen[d.Slug] = true
-	}
-
-	// Append DB agents whose slug is not already present.
-	dbAgents, err := s.agents.ListAgents()
-	if err != nil {
-		return result, err // return file-based agents even if DB fails
-	}
-	for _, a := range dbAgents {
-		if !seen[a.Slug] {
-			result = append(result, a)
-		}
-	}
-	return result, nil
-}
-
-// resolveFileProfile returns d's file-derived profile (Definition.ToProfile())
-// overlaid with the real agent_profiles DB row's authoritative values, when
-// one exists for d.Slug — TASKS/phase-1/12-fix-agent-service-get-drops-new-db-
-// only-columns.md. Before this fix, Get/GetBySlug/List returned
-// d.ToProfile() as-is for every file-backed def, silently dropping
-// role_id/model_id/runtime_kind/consumer_id (and, on file/DB divergence,
-// activation_mode/class/default_state) for every one of the ~33
-// file-discovered agents in this project once a DB row existed for them —
-// see agent.OverlayDBFields's doc comment for the full precedence rationale.
-// A missing/errored DB lookup (the "file-backed but no DB row yet" case, a
-// genuinely new file not yet ingested) degrades to the unmodified file-only
-// view rather than erroring — those DB-only fields simply stay at
-// ToProfile()'s zero-value default.
-func (s *agentServiceImpl) resolveFileProfile(d *agent.Definition) *store.AgentProfile {
-	p := d.ToProfile()
-	row, err := s.agents.GetAgentBySlug(d.Slug)
-	if err != nil || row == nil {
-		return p
-	}
-	return agent.OverlayDBFields(p, row)
-}
-
-// findDefBySlug returns the in-memory definition for slug, or nil.
-func (s *agentServiceImpl) findDefBySlug(slug string) *agent.Definition {
-	if slug == "" {
-		return nil
-	}
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	for _, d := range s.fileDefs {
-		if d.Slug == slug {
-			return d
-		}
-	}
-	return nil
-}
-
-// findDefByID returns the in-memory definition whose canonical identity
-// matches id (the stamped UUID for managed agents), or nil.
-func (s *agentServiceImpl) findDefByID(id string) *agent.Definition {
-	if id == "" {
-		return nil
-	}
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	for _, d := range s.fileDefs {
-		if d.CanonicalID() == id {
-			return d
-		}
-	}
-	return nil
-}
-
-// ReloadFileAgent implements AgentRegistryReloader.
-func (s *agentServiceImpl) ReloadFileAgent(def *agent.Definition) {
-	if def == nil || def.Slug == "" {
-		return
-	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	for i, d := range s.fileDefs {
-		if d.Slug == def.Slug {
-			s.fileDefs[i] = def
-			return
-		}
-	}
-	s.fileDefs = append(s.fileDefs, def)
-}
-
-// RemoveFileAgent implements AgentRegistryReloader.
-func (s *agentServiceImpl) RemoveFileAgent(slug string) {
-	if slug == "" {
-		return
-	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	out := s.fileDefs[:0]
-	for _, d := range s.fileDefs {
-		if d.Slug != slug {
-			out = append(out, d)
-		}
-	}
-	s.fileDefs = out
+	return s.agents.ListAgents()
 }
 
 func (s *agentServiceImpl) Create(_ context.Context, agent *store.AgentProfile) error {
@@ -247,7 +109,7 @@ func (s *agentServiceImpl) Delete(_ context.Context, id string) error {
 //
 //  1. Look up the session's primary agent binding (session_agents table).
 //  2. If no binding exists, check user_settings.default_agent.
-//  3. If still empty, fall back to the hardcoded default ("file-default").
+//  3. If still empty, fall back to the hardcoded default slug ("default").
 //  4. Auto-assign the resolved agent to the session.
 //  5. Load the agent profile by ID, falling back to slug lookup.
 //  6. Reject disabled agents.
@@ -282,7 +144,13 @@ func (s *agentServiceImpl) ResolveForSessionReadOnly(ctx context.Context, sessio
 func (s *agentServiceImpl) resolveForSession(ctx context.Context, sessionID string, allowAutoAssign bool) (*store.AgentProfile, error) {
 	agentID, modeName, autoAssigned := s.resolveBinding(sessionID)
 
-	// Load the agent profile. Check file-based agents first, then DB.
+	// Load the agent profile by ID. resolveBinding's own ultimate fallback
+	// returns a bare slug ("default"), not a real ID, so that lookup misses
+	// here by design and falls through to the GetBySlug fallback below —
+	// same two-hop shape a stale pre-reconciliation session_agents/
+	// user_settings value degrades to as well (TASKS/adhoc/01's migration
+	// 123 reconciles those to real IDs going forward, but this fallback
+	// stays as a defensive net regardless).
 	resolved, err := s.Get(ctx, agentID)
 	if err != nil {
 		resolved, err = s.GetBySlug(ctx, defaultFallbackSlug)
@@ -345,8 +213,8 @@ func (s *agentServiceImpl) resolveBinding(sessionID string) (agentID, modeName s
 	}
 
 	// Ultimate fallback.
-	slog.Info("agent-service: no primary agent, falling back", "session_id", sessionID, "agent", defaultFallbackAgent)
-	return defaultFallbackAgent, "default", true
+	slog.Info("agent-service: no primary agent, falling back", "session_id", sessionID, "agent", defaultFallbackSlug)
+	return defaultFallbackSlug, "default", true
 }
 
 // roleForProfile resolves the store.Role a profile's role binding points

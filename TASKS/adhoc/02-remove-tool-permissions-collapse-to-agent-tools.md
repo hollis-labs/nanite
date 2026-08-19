@@ -1,8 +1,10 @@
 # Remove `tool_permissions`/`CheckPermission` entirely; collapse all agent-tool-permission surfaces to `agent_tools`-only
 
 **Status:** not-started
-**Depends on:** `TASKS/adhoc/01-eliminate-file-based-agent-runtime.md` (must land first — this task assumes no agent ID is ever file-based-shaped by the time it runs; removing the legacy fallback while that assumption doesn't hold yet would leave any still-file-based agent with no permission check at all)
-**Touches:** `internal/toolclient/permissions.go`, `internal/toolclient/broker.go`, `internal/service/agent_permissions.go` (delete), `internal/service/tool.go` (`SelectForAgent`), `internal/service/tool_execution_rules.go` (`enforceExecutionRulesViaAgentTools`), `internal/api/tools.go` (`handleListAgentTools`), `internal/api/agent_tools.go` (`requireRealAgentToolsTarget`), `internal/store` (`agent_profiles.tool_permissions` column — see step on schema below)
+**Depends on:** `TASKS/adhoc/01-eliminate-file-based-agent-runtime.md` (landed and validated 2026-08-19 — see `TASKS/INDEX.md`'s "Ad hoc tasks" section and that task's own Work Log)
+**Touches:** `internal/toolclient/permissions.go`, `internal/toolclient/broker.go`, `internal/service/agent_permissions.go` (delete), `internal/service/tool.go` (`SelectForAgent`), `internal/service/tool_execution_rules.go` (`enforceExecutionRulesViaAgentTools`), `internal/api/tools.go` (`handleListAgentTools`), `internal/store` (`agent_profiles.tool_permissions` column — see step on schema below)
+
+**Scope note (2026-08-19, Orchestrator, post-`01` landing):** `01`'s own implementation already removed surface 4 (`internal/api/agent_tools.go`'s `requireRealAgentToolsTarget`) in full — it had no independent logic beyond the now-deleted `agent.IsFileBasedID` check, so it was correctly swept as part of `01`'s own call-site cleanup rather than left for this task. `01` also already left `internal/service/agent_permissions.go`'s `newFileAgentPermissionResolver` stubbed to a permanent no-op (unwired from `container.go`, no longer callable) but did **not** delete it, per its own task file's explicit instruction to leave full deletion to this task. This task's remaining scope is therefore: surfaces 1-3 below, deleting `agent_permissions.go` and the `tool_permissions`/`CheckPermission` machinery itself, and the schema question in step 6. Step 4 below (re-examining `requireRealAgentToolsTarget`) is done — nothing left to do there.
 
 ## Context
 

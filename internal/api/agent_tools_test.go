@@ -12,8 +12,11 @@ import (
 )
 
 // createTestAgentForGrant creates a real, DB-backed (real UUID identity)
-// managed agent via the REST layer -- the population this endpoint targets,
-// per requireRealAgentToolsTarget's doc comment.
+// managed agent via the REST layer. TASKS/adhoc/01-eliminate-file-based-
+// agent-runtime.md removed the requireRealAgentToolsTarget guard this
+// comment used to reference -- every agent (managed or internal/embedded)
+// now carries a real UUID, so this helper's shape is no longer load-bearing
+// for that distinction, just a convenient way to seed a fixture agent.
 func createTestAgentForGrant(t *testing.T, mux http.Handler, slug string, extra map[string]any) store.AgentProfile {
 	t.Helper()
 	body := map[string]any{

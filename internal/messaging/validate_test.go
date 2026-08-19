@@ -40,13 +40,18 @@ func TestValidateAgentID_User(t *testing.T) {
 	}
 }
 
-func TestValidateAgentID_FileSlug(t *testing.T) {
-	r := newFakeResolver("file-backend")
-	if err := ValidateAgentID(context.Background(), r, "file-backend"); err != nil {
-		t.Errorf("file-backend rejected: %v", err)
+// TestValidateAgentID_ArbitraryAgentID pins that ValidateAgentID has no
+// format-specific branch for any particular agent ID shape --
+// TASKS/adhoc/01-eliminate-file-based-agent-runtime.md removed the old
+// "file-<slug>" special case, so a resolver-known ID validates and an
+// unknown one is rejected regardless of what it looks like.
+func TestValidateAgentID_ArbitraryAgentID(t *testing.T) {
+	r := newFakeResolver("agt-backend")
+	if err := ValidateAgentID(context.Background(), r, "agt-backend"); err != nil {
+		t.Errorf("agt-backend rejected: %v", err)
 	}
-	if err := ValidateAgentID(context.Background(), r, "file-does-not-exist"); err == nil {
-		t.Error("expected rejection for unknown file agent")
+	if err := ValidateAgentID(context.Background(), r, "agt-does-not-exist"); err == nil {
+		t.Error("expected rejection for unknown agent id")
 	}
 }
 

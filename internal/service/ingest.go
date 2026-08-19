@@ -214,10 +214,11 @@ func upsertAgentDef(st *store.Store, def *agentpkg.Definition, bootPass bool) er
 	// Identity resolution. A managed file stamped with a UUID (`id:`) owns a
 	// stable identity that survives slug renames — look it up by ID first so a
 	// renamed file updates the existing row (and its FK children) instead of
-	// colliding on a fresh insert. Fall back to slug for unstamped/internal
-	// definitions, whose runtime identity stays "file-<slug>".
+	// colliding on a fresh insert. Fall back to slug for unstamped
+	// definitions (e.g. an internal builtin seed profile with no `id:`
+	// frontmatter, not yet ingested).
 	var existing *store.AgentProfile
-	if def.ID != "" && !agentpkg.IsFileBasedID(def.ID) {
+	if def.ID != "" {
 		if row, err := st.GetAgent(def.ID); err == nil {
 			existing = row
 		}
@@ -229,14 +230,15 @@ func upsertAgentDef(st *store.Store, def *agentpkg.Definition, bootPass bool) er
 	}
 
 	if existing == nil {
-		// Unstamped/internal definitions (CanonicalID == "file-<slug>") get a
-		// minted DB UUID while the harness keeps using the deterministic
-		// "file-<slug>" runtime identity. A managed file stamped with a real
-		// UUID uses that UUID as the DB row PK so reflex/known-tool/boot-plan
-		// FKs resolve correctly.
-		if agentpkg.IsFileBasedID(profile.ID) {
-			profile.ID = ""
-		}
+		// Unstamped definitions (def.ID == "", so profile.ID == "" too --
+		// see Definition.ToProfile) get a minted DB UUID here, through the
+		// exact same store.CreateAgent path any other newly created agent
+		// goes through (TASKS/adhoc/01-eliminate-file-based-agent-runtime.md
+		// -- this is now the one-time seed for the 9 internal builtin
+		// profiles: no more parallel "file-<slug>" runtime identity, no
+		// special-casing). A managed file stamped with a real UUID already
+		// carries it in profile.ID and CreateAgent uses it as-is, so
+		// reflex/known-tool/boot-plan FKs resolve correctly from creation.
 		profile.Kind = "internal"
 		profile.CapabilitiesJSON = "[]"
 		profile.LimitsJSON = "{}"
@@ -261,17 +263,18 @@ func upsertAgentDef(st *store.Store, def *agentpkg.Definition, bootPass bool) er
 		// role_id / consumer_id / model_id (Phase 1 items 02/03,
 		// architecture/01-agent-construction.md's composition model) have
 		// zero frontmatter representation -- def.ToProfile() always
-		// returns their empty zero-value for a file-backed definition
-		// (see agent.OverlayDBFields' doc comment, which already
-		// documents this for the read side). Without this, ANY reingest
-		// through this path -- every managed-agent edit via
-		// AgentConfigService.Create/Update, including ones with nothing
-		// to do with composition -- would silently wipe a value set
-		// through TASKS/phase-5/01-build-assignment-api.md's composition
-		// write path (store.UpdateAgentComposition) back to NULL the next
-		// time the agent's file was saved for an unrelated reason.
-		// Preserve the existing row's values here, mirroring
-		// OverlayDBFields' "DB wins" rule on the write side too.
+		// returns their empty zero-value for a file-backed definition.
+		// Without this, ANY reingest through this path -- every
+		// managed-agent edit via AgentConfigService.Create/Update,
+		// including ones with nothing to do with composition -- would
+		// silently wipe a value set through TASKS/phase-5/01-build-
+		// assignment-api.md's composition write path
+		// (store.UpdateAgentComposition) back to NULL the next time the
+		// agent's file was saved for an unrelated reason. Preserve the
+		// existing row's values here -- "DB wins" on the write side, same
+		// as the read side (agentServiceImpl.Get/GetBySlug/List just
+		// return the row as-is now; see TASKS/adhoc/01-eliminate-file-
+		// based-agent-runtime.md).
 		// runtime_kind is deliberately NOT included -- unlike these
 		// three, it already self-heals via applyMultiAgentDefaults'
 		// inferRuntimeKind(a.DefaultProvider) whenever a caller leaves it

@@ -267,8 +267,11 @@ type PresenceEvent struct {
 // routing decision itself: (1) an OR'd fallback inside classifyNilProvider
 // for the two cases where runtime_kind isn't populated or isn't
 // authoritative yet — a file-discovered agent profile with no DB row (no
-// frontmatter representation for runtime_kind — see
-// agent.OverlayDBFields), and a boot-profile-catalog-driven session, whose
+// frontmatter representation for runtime_kind at all; see
+// classifyNilProvider's own doc comment in service/chat.go for why this
+// case is very likely fully dead as of TASKS/adhoc/01-eliminate-file-based-
+// agent-runtime.md, left untouched here as out of that task's scope), and
+// a boot-profile-catalog-driven session, whose
 // cliRoutableProvider (chat_bootprofile_resolve.go) synthesizes a
 // "pty-<adapter>" alias to force CLI routing independent of whichever
 // agent happens to be bound to the session (that whole mechanism is

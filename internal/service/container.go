@@ -331,11 +331,12 @@ func NewContainer(cfg ContainerConfig) (*Container, error) {
 	// --- Domain services (Wave 1) ---
 
 	sessions := NewSessionService(SessionServiceDeps{
-		Sessions: cfg.Store,
-		Writer:   cfg.Store,
-		Agents:   cfg.Store,
-		Settings: cfg.Store,
-		Events:   events,
+		Sessions:    cfg.Store,
+		Writer:      cfg.Store,
+		Agents:      cfg.Store,
+		AgentReader: cfg.Store,
+		Settings:    cfg.Store,
+		Events:      events,
 	})
 
 	// Adapter registry — adapters self-register via plugin loading.
@@ -467,35 +468,35 @@ func NewContainer(cfg ContainerConfig) (*Container, error) {
 	}
 
 	agents := NewAgentService(AgentServiceConfig{
-		Agents:     cfg.Store,
-		Writers:    cfg.Store,
-		Settings:   cfg.Store,
-		Events:     events,
-		FileAgents: agentDefs,
+		Agents:   cfg.Store,
+		Writers:  cfg.Store,
+		Settings: cfg.Store,
+		Events:   events,
 	})
 
 	// Shared managed-agent write service. GUI/API/CLI/MCP route all managed
-	// config mutations through this one path (validate → atomic file write →
-	// DB upsert/reindex → live registry reload → event). nil-safe reloader:
-	// the concrete agentServiceImpl implements AgentRegistryReloader.
-	var agentReloader AgentRegistryReloader
-	if r, ok := agents.(AgentRegistryReloader); ok {
-		agentReloader = r
-	}
-	agentConfig := NewAgentConfigService(cfg.Store, agentClassification, managedConfigRoot, agentReloader, nil)
+	// config mutations through this one path (validate → atomic file write
+	// → DB upsert/reindex → event). TASKS/adhoc/01-eliminate-file-based-
+	// agent-runtime.md dropped the live in-memory-registry reload step
+	// (AgentRegistryReloader/ReloadFileAgent/RemoveFileAgent) — agentServiceImpl
+	// now reads straight from the DB on every call, so the row writeManaged
+	// already upserted synchronously is immediately visible with no reload
+	// needed.
+	agentConfig := NewAgentConfigService(cfg.Store, agentClassification, managedConfigRoot, nil)
 
-	// Wire the toolclient's file-agent permission resolver. File-based agents
-	// have synthetic IDs ("file-<slug>") and live on disk, not in
-	// agent_profiles — a store-backed permission lookup would miss every
-	// time. Resolving through the AgentService lets a file agent's
-	// frontmatter (or implicit Tools allowlist) flow into the broker.
-	if cfg.ToolClient != nil {
-		cfg.ToolClient.PermissionResolver = newFileAgentPermissionResolver(agentDefs)
-	}
+	// newFileAgentPermissionResolver (agent_permissions.go) is permanently
+	// unreachable dead code as of TASKS/adhoc/01-eliminate-file-based-agent-
+	// runtime.md -- no agent ID is ever "file-<slug>"-shaped anymore, so it
+	// has nothing left to resolve. Left unwired here (not deleted -- its
+	// removal, along with tool_permissions/PermissionResolver/CheckPermission
+	// itself, is TASKS/adhoc/02's job); cfg.ToolClient.PermissionResolver
+	// stays nil and every agent's permissions resolve through the normal
+	// store-backed ToolClient.GetPermissions path.
 
-	// Messaging service. Uses the AgentService as its resolver so both
-	// DB-backed and file-based agents validate uniformly. Takes the
-	// SQLite-backed messaging Store plus the underlying *sql.DB so
+	// Messaging service. Uses the AgentService as its resolver -- every
+	// agent is DB-backed now (TASKS/adhoc/01-eliminate-file-based-agent-
+	// runtime.md). Takes the SQLite-backed messaging Store plus the
+	// underlying *sql.DB so
 	// handoff transactions (which span session_handoffs +
 	// session_agents) can run as a single txn.
 	msgStore := messaging.NewSQLiteStore(cfg.Store.DB)

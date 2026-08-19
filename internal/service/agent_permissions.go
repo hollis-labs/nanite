@@ -5,41 +5,24 @@ import (
 	"github.com/hollis-labs/nanite/internal/toolclient"
 )
 
-// newFileAgentPermissionResolver returns a toolclient.PermissionResolver that
-// answers permission lookups for file-based agent IDs ("file-<slug>") by
-// matching against in-memory Definition slice. Returns ok=false for any ID
-// that is not file-based or whose slug is unknown — the caller will fall
-// through to the store-backed lookup, preserving the WARN-on-miss signal for
-// real DB-backed agents.
+// newFileAgentPermissionResolver used to answer permission lookups for
+// file-based agent IDs ("file-<slug>") by matching against an in-memory
+// Definition slice, so a file-discovered agent (no agent_profiles row) could
+// still get a real toolclient.ToolPermissions decision instead of always
+// falling through to a store lookup that was guaranteed to miss.
 //
-// File agents may set a `toolPermissions` frontmatter; when absent, the
-// implicit allow_list derived from `tools:` is used (see Definition.ToProfile).
-// An empty permissions block parses to default-permit with the standard
-// MaxCallsPerTurn cap, matching the long-standing fallback behavior the
-// pre-fix code provided via WARN-then-default.
-//
-// Permissions are resolved once at construction so CheckPermission is a pure
-// map lookup — no per-call JSON marshal/unmarshal on the hot path.
-func newFileAgentPermissionResolver(defs []*agent.Definition) toolclient.PermissionResolver {
-	if len(defs) == 0 {
-		return nil
-	}
-	bySlug := make(map[string]toolclient.ToolPermissions, len(defs))
-	for _, d := range defs {
-		if d == nil || d.Slug == "" {
-			continue
-		}
-		bySlug[d.Slug] = toolclient.ParsePermissions(d.ToProfile().ToolPermissions)
-	}
-
-	return func(agentID string) (toolclient.ToolPermissions, bool) {
-		if !agent.IsFileBasedID(agentID) {
-			return toolclient.ToolPermissions{}, false
-		}
-		perms, ok := bySlug[agent.SlugFromFileID(agentID)]
-		if !ok {
-			return toolclient.ToolPermissions{}, false
-		}
-		return perms, true
-	}
+// TASKS/adhoc/01-eliminate-file-based-agent-runtime.md eliminated the file-
+// based agent runtime this resolver existed for: agent.IsFileBasedID/
+// SlugFromFileID/the "file-<slug>" synthetic ID no longer exist anywhere,
+// and every agent (including the 9 internal builtin profiles) is a real
+// agent_profiles row with a real ID by the time any permission check runs.
+// There is nothing left for this function to resolve, so it is now a
+// permanent no-op -- kept in place (not deleted, not wired into
+// container.go's cfg.ToolClient.PermissionResolver) per that task's own
+// instruction, since its full removal is tangled up with
+// tool_permissions/PermissionResolver/CheckPermission itself, which is
+// TASKS/adhoc/02-remove-tool-permissions-collapse-to-agent-tools.md's job,
+// not this one's.
+func newFileAgentPermissionResolver(_ []*agent.Definition) toolclient.PermissionResolver {
+	return nil
 }

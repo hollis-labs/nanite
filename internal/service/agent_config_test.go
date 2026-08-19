@@ -55,7 +55,7 @@ func TestReconcileManagedAgentIDs_StampsAndIsIdempotent(t *testing.T) {
 	}
 
 	ReconcileManagedAgentIDs(st, []*agent.Definition{def}, classification)
-	if def.ID == "" || agent.IsFileBasedID(def.ID) {
+	if def.ID == "" {
 		t.Fatalf("expected a minted UUID, got %q", def.ID)
 	}
 	stamped := def.ID
@@ -117,7 +117,7 @@ func TestAgentConfig_SlugRenamePreservesIdentityAndChildren(t *testing.T) {
 	st := newConfigTestStore(t)
 	root := t.TempDir()
 	classification := agent.NewClassification(root, "")
-	svc := NewAgentConfigService(st, classification, root, nil, nil)
+	svc := NewAgentConfigService(st, classification, root, nil)
 
 	created, err := svc.Create(&store.AgentProfile{Name: "Atlas", Slug: "atlas", SystemPrompt: "x"}, nil)
 	if err != nil {
@@ -181,7 +181,7 @@ func TestAgentConfig_CopyToManaged_NotIngestedSurfacesDistinctError(t *testing.T
 	st := newConfigTestStore(t)
 	root := t.TempDir()
 	classification := agent.NewClassification(root, "")
-	svc := NewAgentConfigService(st, classification, root, nil, nil)
+	svc := NewAgentConfigService(st, classification, root, nil)
 
 	ghost := &store.AgentProfile{
 		ID:     "11111111-1111-1111-1111-111111111111",
@@ -206,7 +206,7 @@ func TestAgentConfig_CopyToManaged_AlreadyManagedWhenPersisted(t *testing.T) {
 	st := newConfigTestStore(t)
 	root := t.TempDir()
 	classification := agent.NewClassification(root, "")
-	svc := NewAgentConfigService(st, classification, root, nil, nil)
+	svc := NewAgentConfigService(st, classification, root, nil)
 
 	created, err := svc.Create(&store.AgentProfile{Name: "Atlas", Slug: "atlas", SystemPrompt: "x"}, nil)
 	if err != nil {
@@ -223,7 +223,7 @@ func TestAgentConfig_CopyToManaged_AlreadyManagedWhenPersisted(t *testing.T) {
 func TestAgentConfig_RevisionConflict(t *testing.T) {
 	st := newConfigTestStore(t)
 	root := t.TempDir()
-	svc := NewAgentConfigService(st, agent.NewClassification(root, ""), root, nil, nil)
+	svc := NewAgentConfigService(st, agent.NewClassification(root, ""), root, nil)
 
 	created, err := svc.Create(&store.AgentProfile{Name: "Atlas", Slug: "atlas", SystemPrompt: "x"}, nil)
 	if err != nil {

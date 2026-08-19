@@ -36,14 +36,30 @@ func (s *chatServiceImpl) DelegateTask(ctx context.Context, req chat.DelegationR
 		return nil, fmt.Errorf("load parent session: %w", err)
 	}
 
-	// Resolve defaults from parent.
+	// Resolve defaults from parent. TASKS/adhoc/01-eliminate-file-based-
+	// agent-runtime.md: the error branch below used to hardcode the literal
+	// placeholder string "file-default" (written straight into
+	// session_agents.agent_id, which has no FK, so a bad value here was
+	// never caught at write time) — resolve the real "default" agent row
+	// instead. Unlike the other two call sites this task touched
+	// (internal/api/sessions.go, internal/service/session.go, both
+	// explicitly best-effort — "log but don't fail"), this call site's
+	// existing EnsureSessionAgent write below is NOT best-effort: it already
+	// returns a hard error on failure. A worker session with no resolvable
+	// agent at all can't actually do anything useful, so if even the
+	// "default" agent row can't be found, fail the delegation outright
+	// (mirroring agent.go's ResolveForSession hard-error behavior) rather
+	// than proceed to create an orphaned, agent-less worker session.
 	agentID := req.AgentID
 	if agentID == "" {
 		if agent, resolveErr := s.agents.ResolveForSession(ctx, req.ParentSessionID); resolveErr == nil {
 			agentID = agent.ID
-		} else {
-			agentID = "file-default"
+		} else if defaultAgent, defaultErr := s.agents.GetBySlug(ctx, "default"); defaultErr == nil && defaultAgent != nil {
+			agentID = defaultAgent.ID
 		}
+	}
+	if agentID == "" {
+		return nil, fmt.Errorf("delegation: no agent could be resolved for worker session (parent session %s)", req.ParentSessionID)
 	}
 	mode := req.Mode
 	if mode == "" {

@@ -192,9 +192,10 @@ func (a *API) handleGetAgent(w http.ResponseWriter, r *http.Request) {
 func (a *API) handleUpdateAgent(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 
-	// Resolve through the AgentService so both stamped managed agents (real
-	// UUID) and legacy "file-<slug>" identities resolve, and the in-memory
-	// def's SourceRef/Source drive classification.
+	// Resolve through the AgentService (a plain DB lookup -- TASKS/adhoc/01-
+	// eliminate-file-based-agent-runtime.md removed the old legacy
+	// "file-<slug>" in-memory-definition resolution branch); the returned
+	// row's own Source/SourceRef drive classification below.
 	existing, err := a.Services.Agents.Get(r.Context(), id)
 	if err != nil {
 		a.errorResp(w, http.StatusNotFound, "agent not found")

@@ -721,8 +721,7 @@ func (s *Store) UpdateAgent(a *AgentProfile) error {
 
 // UpdateAgentComposition directly sets an agent's DB-only composition
 // columns (role_id, consumer_id, model_id) -- see the RoleID/ConsumerID/
-// ModelID field doc comments above and agent.OverlayDBFields' doc comment
-// (internal/agent/convert.go): all three have zero frontmatter
+// ModelID field doc comments above: all three have zero frontmatter
 // representation. That matters for writes, not just reads:
 // AgentConfigService.Create/Update's managed-agent write pipeline
 // (writeManaged -> file write -> file reparse -> IngestAgentDefinition ->

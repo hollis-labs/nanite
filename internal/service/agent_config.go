@@ -18,13 +18,20 @@ import (
 // it so the write contract is enforced uniformly:
 //
 //	validated request -> normalized agent config document -> atomic file write
-//	-> DB upsert/reindex -> live registry reload -> event
+//	-> DB upsert/reindex -> event
 //
 // Files remain the durable source of truth; the DB row is the indexed runtime
 // projection. The service owns source classification (managed-writable vs
 // internal-embedded vs plugin/vendor vs unknown-external), identity stamping
 // (UUID in frontmatter), optimistic concurrency (file-content revision), and
 // the copy-to-managed / make-editable path for read-only sources.
+//
+// TASKS/adhoc/01-eliminate-file-based-agent-runtime.md dropped the live
+// in-memory-registry reload step (AgentRegistryReloader/ReloadFileAgent/
+// RemoveFileAgent) this doc comment used to describe: agentServiceImpl now
+// reads straight from the DB on every call, so the row this service's
+// writeManaged already upserts synchronously is immediately visible with no
+// reload needed.
 type AgentConfigService struct {
 	store          *store.Store
 	classification agent.Classification
@@ -32,17 +39,15 @@ type AgentConfigService struct {
 	// agents and copies (the project .nanite by default). Existing agents are
 	// rewritten in place at their own SourceRef.
 	managedRoot string
-	reloader    AgentRegistryReloader     // nil-safe live-registry refresh
 	notify      func(slug, action string) // nil-safe best-effort change event
 }
 
 // NewAgentConfigService constructs the shared managed-agent write service.
-func NewAgentConfigService(st *store.Store, classification agent.Classification, managedRoot string, reloader AgentRegistryReloader, notify func(slug, action string)) *AgentConfigService {
+func NewAgentConfigService(st *store.Store, classification agent.Classification, managedRoot string, notify func(slug, action string)) *AgentConfigService {
 	return &AgentConfigService{
 		store:          st,
 		classification: classification,
 		managedRoot:    managedRoot,
-		reloader:       reloader,
 		notify:         notify,
 	}
 }
@@ -95,9 +100,10 @@ func (s *AgentConfigService) Classify(p *store.AgentProfile) agent.ManageClass {
 // upsert also succeeded. A profile whose file parses fine but whose class/
 // other field fails store-layer validation is exactly this mismatch
 // (CW-20260815-0009): visible via file discovery, absent from the DB.
-// Looked up by slug (not p.ID) because unstamped/internal definitions carry
-// a deterministic "file-<slug>" runtime ID in memory while their DB row
-// gets a minted UUID — slug is the identity that's stable across both.
+// Looked up by slug (not p.ID) so a genuinely new, not-yet-ingested
+// definition (p.ID still empty -- see Definition.ToProfile) is correctly
+// reported unpersisted even when a same-slug row happens to already exist
+// under a different, real ID.
 func (s *AgentConfigService) Persisted(p *store.AgentProfile) bool {
 	if p == nil || strings.TrimSpace(p.Slug) == "" {
 		return false
@@ -106,10 +112,7 @@ func (s *AgentConfigService) Persisted(p *store.AgentProfile) bool {
 	if err != nil || row == nil {
 		return false
 	}
-	if !agent.IsFileBasedID(p.ID) && row.ID != p.ID {
-		return false
-	}
-	return true
+	return row.ID == p.ID
 }
 
 // Revision returns the optimistic-concurrency token (file-content hash) for a
@@ -216,9 +219,6 @@ func (s *AgentConfigService) Delete(profile *store.AgentProfile) error {
 	if err := s.store.DeleteAgent(profile.Slug); err != nil {
 		return fmt.Errorf("delete agent projection: %w", err)
 	}
-	if s.reloader != nil {
-		s.reloader.RemoveFileAgent(profile.Slug)
-	}
 	s.emit(profile.Slug, "deleted")
 	return nil
 }
@@ -259,7 +259,7 @@ func (s *AgentConfigService) CopyToManaged(source *store.AgentProfile, procedure
 
 // writeManaged performs the shared tail of the write contract: stamp identity
 // into the frontmatter, atomic file write, optional old-file cleanup (rename),
-// DB upsert/reindex, live registry reload, and event emission.
+// DB upsert/reindex, and event emission.
 func (s *AgentConfigService) writeManaged(path, oldPath string, profile *store.AgentProfile, procedures []agent.ProcedureDefinition, action string) (*AgentConfigResult, error) {
 	if err := agent.EnsureManagedConfigDirs(s.managedRoot); err != nil {
 		// Non-fatal for in-place edits whose dir already exists; only the
@@ -290,10 +290,6 @@ func (s *AgentConfigService) writeManaged(path, oldPath string, profile *store.A
 	def.SourceRef = path
 	if err := IngestAgentDefinition(s.store, def); err != nil {
 		return nil, err
-	}
-	// Refresh the live registry so reads reflect the edit without a restart.
-	if s.reloader != nil {
-		s.reloader.ReloadFileAgent(def)
 	}
 	saved, err := s.store.GetAgentBySlug(profile.Slug)
 	if err != nil {
@@ -361,7 +357,7 @@ func ReconcileManagedAgentIDs(st *store.Store, defs []*agent.Definition, classif
 			continue // defensive: never write outside a known writable root
 		}
 		id := uuid.New().String()
-		if existing, err := st.GetAgentBySlug(def.Slug); err == nil && existing != nil && existing.ID != "" && !agent.IsFileBasedID(existing.ID) {
+		if existing, err := st.GetAgentBySlug(def.Slug); err == nil && existing != nil && existing.ID != "" {
 			id = existing.ID // adopt the existing projection's identity
 		}
 		if err := agent.InjectFrontmatterID(def.SourceRef, id); err != nil {

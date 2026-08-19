@@ -52,14 +52,29 @@ func TestReflexesAPI_CreatePatchDeleteAgentReflex(t *testing.T) {
 	}
 }
 
-func TestReflexesAPI_ListSupportsFileBackedAgent(t *testing.T) {
-	_, mux := newTestAPI(t)
+// TestReflexesAPI_ListWorksForInternalBuiltinAgent replaces the pre-
+// TASKS/adhoc/01-eliminate-file-based-agent-runtime.md
+// TestReflexesAPI_ListSupportsFileBackedAgent, which asserted
+// GET /api/agents/file-default/reflexes resolved through the now-removed
+// in-memory file-definition registry. The 9 internal builtin profiles
+// (including "default") are real agent_profiles rows with real IDs from
+// boot-time AutoIngestAgents now — there is no more "file-<slug>" alias to
+// address them by, so this pins the equivalent, still-real requirement
+// (listing reflexes for an internal/embedded agent works, same as any
+// other) against the agent's actual ID.
+func TestReflexesAPI_ListWorksForInternalBuiltinAgent(t *testing.T) {
+	a, mux := newTestAPI(t)
 
-	req := httptest.NewRequest(http.MethodGet, "/api/agents/file-default/reflexes", nil)
+	defaultAgent, err := a.Services.Store.GetAgentBySlug("default")
+	if err != nil || defaultAgent == nil {
+		t.Fatalf("GetAgentBySlug(default): %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/api/agents/"+defaultAgent.ID+"/reflexes", nil)
 	w := httptest.NewRecorder()
 	mux.ServeHTTP(w, req)
 	if w.Code != http.StatusOK {
-		t.Fatalf("list file-backed reflexes = %d body=%s", w.Code, w.Body.String())
+		t.Fatalf("list reflexes for internal builtin agent = %d body=%s", w.Code, w.Body.String())
 	}
 
 	var rows []store.AgentReflex

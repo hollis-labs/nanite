@@ -110,7 +110,7 @@ type CreateAgentRequest struct {
 	// FKs architecture/01-agent-construction.md names (agents.role_id ->
 	// roles(id), agents.consumer_id -> consumers(id), agents.model_id ->
 	// models(id)). These are DB-only columns with zero frontmatter
-	// representation (agent.OverlayDBFields' doc comment) -- the handler
+	// representation at all -- the handler
 	// writes them via store.UpdateAgentComposition, a direct-DB step
 	// separate from AgentConfigService.Create's file-based write, not
 	// through this struct's other fields' usual store.AgentProfile path.

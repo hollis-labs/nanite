@@ -20,10 +20,11 @@ func newWorkflowContextAssemblerTestDeps(t *testing.T) (*store.Store, SessionSer
 		t.Fatalf("store.New: %v", err)
 	}
 	sessions := NewSessionService(SessionServiceDeps{
-		Sessions: s,
-		Writer:   s,
-		Agents:   s,
-		Settings: s,
+		Sessions:    s,
+		Writer:      s,
+		Agents:      s,
+		AgentReader: s,
+		Settings:    s,
 	})
 	agents := NewAgentService(AgentServiceConfig{
 		Agents:   s,

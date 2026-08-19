@@ -47,7 +47,13 @@ func (a *API) handleCreateSession(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Resolve agent: request param → user settings default → file-default.
+	// Resolve agent: request param → user settings default → real "default"
+	// agent row. TASKS/adhoc/01-eliminate-file-based-agent-runtime.md: this
+	// used to fall back to the literal placeholder string "file-default",
+	// which got written straight into session_agents.agent_id (no FK on
+	// that column, so nothing caught it) — resolve the real agent_profiles
+	// row for the "default" slug instead, so only a genuine agent ID is
+	// ever written here.
 	agentID := req.AgentID
 	if agentID == "" {
 		if settings, err := a.Services.Store.GetUserSettings(); err == nil && settings.DefaultAgent != "" {
@@ -55,13 +61,24 @@ func (a *API) handleCreateSession(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	if agentID == "" {
-		agentID = "file-default"
+		if defaultAgent, err := a.Services.Store.GetAgentBySlug("default"); err == nil && defaultAgent != nil {
+			agentID = defaultAgent.ID
+		}
 	}
 
-	// Assign the resolved agent as primary.
-	if err := a.Services.Store.EnsureSessionAgent(sess.ID, agentID, "default", true); err != nil {
-		// Log but don't fail — session was created successfully.
-		_ = err
+	// Assign the resolved agent as primary (best-effort — matches the
+	// pre-existing "log but don't fail" contract of this write). Skip the
+	// write entirely in the true edge case where even the "default" agent
+	// row can't be resolved (no such row exists at all) rather than write
+	// an empty/placeholder agent_id — the session itself was already
+	// created successfully and stays usable without a primary-agent
+	// binding; ResolveForSession's own two-hop fallback handles an unbound
+	// session gracefully on read.
+	if agentID != "" {
+		if err := a.Services.Store.EnsureSessionAgent(sess.ID, agentID, "default", true); err != nil {
+			// Log but don't fail — session was created successfully.
+			_ = err
+		}
 	}
 
 	// Emit session creation event (fire-and-forget).

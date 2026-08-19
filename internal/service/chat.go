@@ -1303,9 +1303,15 @@ const (
 // for one remaining case where runtimeKind is not yet the reliable single
 // source of truth: a file-discovered agent profile with no agent_profiles
 // DB row yet — Definition.ToProfile() has no frontmatter representation
-// for runtime_kind at all, so runtimeKind arrives here as "" (see
-// agent.OverlayDBFields's doc comment). Falling back to the legacy
-// provider-name classification reproduces prior behavior exactly.
+// for runtime_kind at all, so runtimeKind arrives here as "". Falling back
+// to the legacy provider-name classification reproduces prior behavior
+// exactly. TASKS/adhoc/01-eliminate-file-based-agent-runtime.md removed
+// the in-memory-registry resolution path that used to produce a "no DB row
+// yet" resolved session agent at all (every agent, including the 9
+// internal builtin profiles, is DB-backed by the time ResolveForSession
+// returns one) -- this OR is very likely fully dead now too, but left
+// untouched here since chat routing is outside this task's own scope; a
+// future cleanup pass can confirm and remove it.
 //
 // TASKS/phase-2/04-retire-boot-profile-catalog.md removed the second case
 // this OR used to cover — the boot-profile catalog's own

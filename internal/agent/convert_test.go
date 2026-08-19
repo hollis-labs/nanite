@@ -3,8 +3,6 @@ package agent
 import (
 	"encoding/json"
 	"testing"
-
-	"github.com/hollis-labs/nanite/internal/store"
 )
 
 func TestDefinition_ToProfile(t *testing.T) {
@@ -28,8 +26,11 @@ func TestDefinition_ToProfile(t *testing.T) {
 
 	p := def.ToProfile()
 
-	if p.ID != "file-code" {
-		t.Errorf("ID = %q, want %q", p.ID, "file-code")
+	// The file-based agent runtime is eliminated (TASKS/adhoc/01) -- an
+	// unstamped Definition (no `id:` frontmatter) has no identity until the
+	// standard agent-creation path mints one.
+	if p.ID != "" {
+		t.Errorf("ID = %q, want empty (unstamped def has no ID until CreateAgent mints one)", p.ID)
 	}
 	if p.Name != "Code Agent" {
 		t.Errorf("Name = %q", p.Name)
@@ -157,8 +158,8 @@ func TestDefinition_ToProfile_Minimal(t *testing.T) {
 
 	p := def.ToProfile()
 
-	if p.ID != "file-minimal" {
-		t.Errorf("ID = %q", p.ID)
+	if p.ID != "" {
+		t.Errorf("ID = %q, want empty (unstamped def has no ID until CreateAgent mints one)", p.ID)
 	}
 	if p.Tools != "[]" {
 		t.Errorf("Tools = %q, want %q", p.Tools, "[]")
@@ -182,86 +183,11 @@ func TestDefinition_ToProfile_Minimal(t *testing.T) {
 // agent-file mode concept to convert. TestDefinition_ToModes was removed
 // with it.
 
-func TestIsFileBasedID(t *testing.T) {
-	tests := []struct {
-		id   string
-		want bool
-	}{
-		{"file-code", true},
-		{"file-default", true},
-		{"file-", false},
-		{"mentat-001", false},
-		{"", false},
-	}
-	for _, tt := range tests {
-		if got := IsFileBasedID(tt.id); got != tt.want {
-			t.Errorf("IsFileBasedID(%q) = %v, want %v", tt.id, got, tt.want)
-		}
-	}
-}
-
-// TestOverlayDBFields is the unit-level pin for the merge helper behind
-// TASKS/phase-1/12-fix-agent-service-get-drops-new-db-only-columns.md's fix
-// (internal/service/agent.go's resolveFileProfile calls this). A nil db
-// leaves p untouched (the "no DB row yet" case); a non-nil db overwrites
-// every DB-authoritative field on p regardless of whether p already had a
-// non-empty (but stale/file-derived) value for it.
-func TestOverlayDBFields(t *testing.T) {
-	def := &Definition{
-		Name:           "File",
-		Slug:           "file-slug",
-		ActivationMode: "singleton",
-		Class:          "advisor",
-		DefaultState:   "sleeping",
-	}
-	p := def.ToProfile()
-
-	if got := OverlayDBFields(p, nil); got != p {
-		t.Fatalf("OverlayDBFields(p, nil) should return p unchanged")
-	}
-	if p.RoleID != "" || p.ModelID != "" || p.RuntimeKind != "" || p.ConsumerID != "" {
-		t.Errorf("nil db: DB-only fields should stay empty, got role_id=%q model_id=%q runtime_kind=%q consumer_id=%q",
-			p.RoleID, p.ModelID, p.RuntimeKind, p.ConsumerID)
-	}
-
-	db := &store.AgentProfile{
-		RoleID:         "role-1",
-		ModelID:        "model-1",
-		RuntimeKind:    "cli",
-		ConsumerID:     "consumer-1",
-		ActivationMode: "concurrent",
-		Class:          "harness",
-		DefaultState:   "active",
-	}
-	OverlayDBFields(p, db)
-	if p.RoleID != db.RoleID {
-		t.Errorf("RoleID = %q, want %q", p.RoleID, db.RoleID)
-	}
-	if p.ModelID != db.ModelID {
-		t.Errorf("ModelID = %q, want %q", p.ModelID, db.ModelID)
-	}
-	if p.RuntimeKind != db.RuntimeKind {
-		t.Errorf("RuntimeKind = %q, want %q", p.RuntimeKind, db.RuntimeKind)
-	}
-	if p.ConsumerID != db.ConsumerID {
-		t.Errorf("ConsumerID = %q, want %q", p.ConsumerID, db.ConsumerID)
-	}
-	if p.ActivationMode != db.ActivationMode {
-		t.Errorf("ActivationMode = %q, want %q (db must win over file's %q)", p.ActivationMode, db.ActivationMode, "singleton")
-	}
-	if p.Class != db.Class {
-		t.Errorf("Class = %q, want %q (db must win over file's %q)", p.Class, db.Class, "advisor")
-	}
-	if p.DefaultState != db.DefaultState {
-		t.Errorf("DefaultState = %q, want %q (db must win over file's %q)", p.DefaultState, db.DefaultState, "sleeping")
-	}
-}
-
-func TestSlugFromFileID(t *testing.T) {
-	if got := SlugFromFileID("file-code"); got != "code" {
-		t.Errorf("SlugFromFileID(file-code) = %q", got)
-	}
-	if got := SlugFromFileID("mentat-001"); got != "" {
-		t.Errorf("SlugFromFileID(mentat-001) = %q, want empty", got)
-	}
-}
+// TestIsFileBasedID / TestOverlayDBFields / TestSlugFromFileID were removed
+// by TASKS/adhoc/01-eliminate-file-based-agent-runtime.md: the file-based
+// agent runtime (IsFileBasedID/SlugFromFileID/CanonicalID()'s "file-<slug>"
+// fallback, and the OverlayDBFields merge helper that existed solely to
+// patch DB-only columns onto a file-derived profile) no longer exists. See
+// TestDefinition_ToProfile / TestDefinition_ToProfile_Minimal above for the
+// replacement coverage (an unstamped Definition's ToProfile().ID is simply
+// empty now, not a synthetic alias).

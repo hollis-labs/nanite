@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"strings"
@@ -122,6 +123,21 @@ func (s *chatServiceImpl) DelegateTask(ctx context.Context, req chat.DelegationR
 	assistantMsgID := uuid.New().String()
 	ch := s.streams.CreateStream(assistantMsgID, workerSession.ID)
 
+	// Phase 4 task 04 (docs/engineering/architecture/04-harness.md,
+	// "Run-another-agent surfaces, unified"): build the shared,
+	// surface-agnostic AgentRunRequest before deriving the narrower
+	// dispatcher.Request Dispatcher.Run actually consumes. Delegation's
+	// 5-minute synchronous timeout now has a single source of truth
+	// (runReq.Timeout) instead of being a literal re-hardcoded at the
+	// select loop below.
+	runReq := dispatcher.AgentRunRequest{
+		CallerType:      dispatcher.CallerSubagent,
+		Completion:      dispatcher.CompletionSyncDrain,
+		TargetSessionID: workerSession.ID,
+		Prompt:          taskContent,
+		Timeout:         5 * time.Minute,
+	}
+
 	// Start async generation in worker session.
 	// CW-20260512-0121 (SP-20260512-0011): delegation spawns a child
 	// worker session and runs one assistant turn against it — the
@@ -134,10 +150,10 @@ func (s *chatServiceImpl) DelegateTask(ctx context.Context, req chat.DelegationR
 	// the 5-minute timeout.
 	safego.Go(ctx, "service.delegation.delegateTask.dispatch", func() {
 		if err := s.dispatcher.Run(ctx, dispatcher.Request{
-			SessionID:      workerSession.ID,
+			SessionID:      runReq.TargetSessionID,
 			AssistantMsgID: assistantMsgID,
-			UserContent:    taskContent,
-			CallerType:     dispatcher.CallerSubagent,
+			UserContent:    runReq.Prompt,
+			CallerType:     runReq.CallerType,
 		}, ch); err != nil {
 			slog.Error("delegation: dispatcher.Run rejected",
 				"worker_session_id", workerSession.ID,
@@ -158,7 +174,7 @@ func (s *chatServiceImpl) DelegateTask(ctx context.Context, req chat.DelegationR
 	}
 
 	var content strings.Builder
-	timeout := time.After(5 * time.Minute)
+	timeout := time.After(runReq.Timeout)
 
 	for {
 		select {
@@ -170,6 +186,26 @@ func (s *chatServiceImpl) DelegateTask(ctx context.Context, req chat.DelegationR
 					result.Success = false
 					result.Error = "worker produced no output"
 				}
+
+				// Phase 4 task 04: derive (never drive) the shared
+				// AgentRunResult from the already-finalized result
+				// fields above — this is purely an additional,
+				// normalized reporting view (dispatcher.LogOutcome),
+				// not a second source of truth for result's fields.
+				outcome := dispatcher.AgentRunResult{
+					CallerType:      runReq.CallerType,
+					Completion:      runReq.Completion,
+					TargetSessionID: workerSession.ID,
+					Content:         result.Content,
+					TokensUsed:      result.TokensUsed,
+					Status:          dispatcher.RunStatusCompleted,
+				}
+				if !result.Success {
+					outcome.Status = dispatcher.RunStatusFailed
+					outcome.Err = errors.New(result.Error)
+				}
+				dispatcher.LogOutcome(outcome)
+
 				slog.Info("delegation: worker completed",
 					"short_code", workerSession.ShortCode, "chars", len(result.Content))
 
@@ -211,6 +247,14 @@ func (s *chatServiceImpl) DelegateTask(ctx context.Context, req chat.DelegationR
 			result.Content = content.String()
 			result.Success = false
 			result.Error = "delegation timed out after 5 minutes"
+			dispatcher.LogOutcome(dispatcher.AgentRunResult{
+				CallerType:      runReq.CallerType,
+				Completion:      runReq.Completion,
+				TargetSessionID: workerSession.ID,
+				Content:         result.Content,
+				Status:          dispatcher.RunStatusTimedOut,
+				Err:             errors.New(result.Error),
+			})
 			slog.Warn("delegation: worker timed out", "short_code", workerSession.ShortCode)
 			if trackedTask != nil && s.tasks != nil {
 				trackedTask.Error = result.Error
@@ -223,6 +267,14 @@ func (s *chatServiceImpl) DelegateTask(ctx context.Context, req chat.DelegationR
 			result.Content = content.String()
 			result.Success = false
 			result.Error = "delegation cancelled"
+			dispatcher.LogOutcome(dispatcher.AgentRunResult{
+				CallerType:      runReq.CallerType,
+				Completion:      runReq.Completion,
+				TargetSessionID: workerSession.ID,
+				Content:         result.Content,
+				Status:          dispatcher.RunStatusCancelled,
+				Err:             errors.New(result.Error),
+			})
 			if trackedTask != nil && s.tasks != nil {
 				_ = s.tasks.Cancel(ctx, trackedTask.ID)
 			}

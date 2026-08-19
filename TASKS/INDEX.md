@@ -105,7 +105,7 @@ This branch (`phase-1-execution`, based off Phase 0's `HEAD` as of 2026-08-18 �
 | 03-add-consumers-table | implemented | none |
 | 04-add-known-tools-and-agent-tools-fk | not-started | none |
 | 05-fix-agent-skills-and-agent-projects-fks | not-started | none hard — independently verify `agent_skills`/`agent_projects` are still zero-row (see task file) |
-| 06-fix-models-table-sync-target | not-started | none |
+| 06-fix-models-table-sync-target | implemented | none |
 | 07-add-reflex-opt-out-field | not-started | none |
 | 08-kill-file-reingest-on-boot-pattern | not-started | `TASKS/phase-0/10-seed-builtin-agent-profiles` (implemented); `01` (roles negative-verification) |
 | 09-build-assignment-ui-api | not-started | 01–07 (excludes 10, which is out of scope) |

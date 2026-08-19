@@ -65,7 +65,6 @@ func (f *fakeEventEmitter) EmitContextBudgetExceeded(_ context.Context, _ string
 }
 func (f *fakeEventEmitter) EmitError(_ context.Context, _, _, _ string)                    {}
 func (f *fakeEventEmitter) EmitMessageReceived(_ context.Context, _, _, _ string, _ int64) {}
-func (f *fakeEventEmitter) EmitModeChanged(_ context.Context, _, _, _ string)              {}
 
 // TestRecoverFromContextOverflow_DisabledFlag covers the plan §T9 requirement
 // that UserSettings.ContextOverflowRecovery=false produces a no-op — callers

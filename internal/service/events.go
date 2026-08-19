@@ -25,7 +25,6 @@ type EventEmitter interface {
 	EmitContextBudgetExceeded(ctx context.Context, sessionID string, total, ceiling int)
 	EmitError(ctx context.Context, sessionID, errorType, detail string)
 	EmitMessageReceived(ctx context.Context, sessionID, messageID, contentPreview string, elapsed int64)
-	EmitModeChanged(ctx context.Context, sessionID, previousMode, newMode string)
 	EmitPreCompact(ctx context.Context, sessionID string, messageCount int, reason string)
 	EmitPostCompact(ctx context.Context, sessionID string, tokensSaved int, stagesApplied []string)
 }
@@ -58,7 +57,6 @@ type PluginEventSink interface {
 	EmitMessageReceived(sessionID, messageID, content string, responseTime int64)
 	EmitToolCalled(sessionID, toolName string, args, result any)
 	EmitToolFailed(sessionID, toolName string, args any, err string)
-	EmitModeChanged(sessionID, previousMode, newMode string)
 	EmitEnvelopeRendered(sessionID, envelopeType string, data interface{})
 	EmitProviderError(sessionID, providerName, model, errMsg string)
 	EmitProviderFallback(sessionID, fromProvider, toProvider string)

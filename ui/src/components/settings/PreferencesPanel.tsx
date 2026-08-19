@@ -287,26 +287,6 @@ export function PreferencesPanel() {
         />
       </SCard>
 
-      <SCard title="Modes" description="Auto-detect when to switch between chat / plan / work">
-        <SRow
-          label="Auto-switch behavior"
-          description="What to do when the classifier detects a different mode fits the message"
-        >
-          <ModeAutoSwitchSelector
-            value={settings?.mode_auto_switch_pref ?? ''}
-            onChange={(v) => mutation.mutate({ mode_auto_switch_pref: v })}
-          />
-        </SRow>
-        <div className="px-4 py-2.5 border-b border-border-subtle [&:last-child]:border-b-0">
-          <p className="text-[11px] text-fg-muted">
-            You can also change mode any time via the chip in the chat header or
-            the <code className="rounded-[4px] bg-surface px-1 py-0.5 font-mono text-[10px]">/chat</code>{' '}
-            <code className="rounded-[4px] bg-surface px-1 py-0.5 font-mono text-[10px]">/plan</code>{' '}
-            <code className="rounded-[4px] bg-surface px-1 py-0.5 font-mono text-[10px]">/work</code> slash commands.
-          </p>
-        </div>
-      </SCard>
-
       <SCard title="Bottom Drawer" description="Defaults for the bottom chat drawer (CW-20260428-0012)">
         <SRow label="Default tab" description="Tab activated when the drawer opens with no specific target">
           <BottomDrawerDefaultTabSelector />
@@ -352,42 +332,3 @@ function BottomDrawerDefaultTabSelector() {
   return <SSelect value={value} options={options} onChange={(v) => setValue(v)} />
 }
 
-// B3 (CW-20260428-0011): tri-state selector for mode_auto_switch_pref.
-// Empty string is the unset sentinel (never selected here, just rendered
-// faintly as a hint). Three buttons map to "always" / "ask" / "never".
-function ModeAutoSwitchSelector({
-  value,
-  onChange,
-}: {
-  value: '' | 'always' | 'ask' | 'never'
-  onChange: (v: '' | 'always' | 'ask' | 'never') => void
-}) {
-  const options: { value: 'always' | 'ask' | 'never'; label: string }[] = [
-    { value: 'always', label: 'Always' },
-    { value: 'ask', label: 'Ask' },
-    { value: 'never', label: 'Never' },
-  ]
-  return (
-    <div className="inline-flex p-[3px] gap-[2px] bg-surface border border-border-subtle rounded-[7px]">
-      {options.map((opt) => {
-        const isActive = value === opt.value
-        return (
-          <button
-            key={opt.value}
-            type="button"
-            aria-pressed={isActive}
-            onClick={() => onChange(opt.value)}
-            className={
-              'px-3 py-[5px] rounded-[5px] text-xs transition-colors ' +
-              (isActive
-                ? 'bg-bg-elevated text-fg font-medium shadow-sm'
-                : 'text-fg-muted hover:text-fg-secondary')
-            }
-          >
-            {opt.label}
-          </button>
-        )
-      })}
-    </div>
-  )
-}

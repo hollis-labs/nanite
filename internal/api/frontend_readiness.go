@@ -61,7 +61,6 @@ type workRootHint struct {
 
 type sessionDetailsResponse struct {
 	Session              *store.Session                           `json:"session"`
-	Mode                 *store.Mode                              `json:"mode,omitempty"`
 	PrimaryAgent         *store.AgentProfile                      `json:"primary_agent,omitempty"`
 	DurableAttachments   []store.DurableAgentInstanceSessionState `json:"durable_attachments"`
 	CurrentDurableAgent  *store.DurableAgentInstance              `json:"current_durable_agent,omitempty"`
@@ -184,9 +183,6 @@ func (a *API) sessionDetails(id string) (sessionDetailsResponse, error) {
 	}
 	if halt, err := a.Services.Store.GetSessionHalt(id); err == nil && halt != nil {
 		details.Halt = haltDetailFromStore(halt)
-	}
-	if mode, err := a.Services.Store.GetSessionMode(id); err == nil {
-		details.Mode = mode
 	}
 	if primary, err := a.Services.Store.GetSessionPrimaryAgent(id); err == nil {
 		if agent, err := a.Services.Store.GetAgent(primary.AgentID); err == nil {

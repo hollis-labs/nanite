@@ -223,20 +223,6 @@ func (e *ActivityEmitter) EmitPreCompact(ctx context.Context, sessionID string, 
 // EventPreCompact is the activity event type for pre-compaction.
 const EventPreCompact = "chat_pre_compact"
 
-// EventModeChanged is the activity event type for agent mode changes.
-const EventModeChanged = "chat_mode_changed"
-
-// EmitModeChanged records that an agent mode was changed on a session.
-func (e *ActivityEmitter) EmitModeChanged(ctx context.Context, sessionID, previousMode, newMode string) {
-	e.Emit(ctx, activityEvent{
-		EventType:   EventModeChanged,
-		EntityType:  "chat_session",
-		EntityID:    sessionID,
-		EntityTitle: "Mode changed: " + newMode,
-		Payload:     fmt.Sprintf(`{"previous_mode":%q,"new_mode":%q}`, previousMode, newMode),
-	})
-}
-
 // EmitError records an error during chat processing.
 func (e *ActivityEmitter) EmitError(ctx context.Context, sessionID, errorType, detail string) {
 	e.Emit(ctx, activityEvent{

@@ -29,7 +29,7 @@ func TestAssembleSlotSources_PermissionsSlot_EmptyWhenNothingConfigured(t *testi
 		t.Fatalf("CreateAgent: %v", err)
 	}
 
-	sources, err := cb.AssembleSlotSources(context.Background(), sess, agent, nil, &store.Workspace{Name: "WS"}, nil)
+	sources, err := cb.AssembleSlotSources(context.Background(), sess, agent, &store.Workspace{Name: "WS"})
 	if err != nil {
 		t.Fatalf("AssembleSlotSources: %v", err)
 	}
@@ -65,7 +65,7 @@ func TestAssembleSlotSources_PermissionsSlot_BinaryAllowList(t *testing.T) {
 		t.Fatalf("CreateAgent: %v", err)
 	}
 
-	sources, err := cb.AssembleSlotSources(context.Background(), sess, agent, nil, &store.Workspace{Name: "WS"}, nil)
+	sources, err := cb.AssembleSlotSources(context.Background(), sess, agent, &store.Workspace{Name: "WS"})
 	if err != nil {
 		t.Fatalf("AssembleSlotSources: %v", err)
 	}
@@ -105,7 +105,7 @@ func TestAssembleSlotSources_PermissionsSlot_SubagentScope(t *testing.T) {
 		t.Fatalf("CreateAgent: %v", err)
 	}
 
-	sources, err := cb.AssembleSlotSources(context.Background(), sess, agent, nil, &store.Workspace{Name: "WS"}, nil)
+	sources, err := cb.AssembleSlotSources(context.Background(), sess, agent, &store.Workspace{Name: "WS"})
 	if err != nil {
 		t.Fatalf("AssembleSlotSources: %v", err)
 	}
@@ -139,7 +139,7 @@ func TestAssembleSlotSources_PermissionsSlot_SessionGrants(t *testing.T) {
 	// Stage an explicit grant on the session.
 	cb.PathGrants.RegisterFromUserMessage(sess.ID, "look at /tmp/explicit-grant/file.go")
 
-	sources, err := cb.AssembleSlotSources(context.Background(), sess, agent, nil, &store.Workspace{Name: "WS"}, nil)
+	sources, err := cb.AssembleSlotSources(context.Background(), sess, agent, &store.Workspace{Name: "WS"})
 	if err != nil {
 		t.Fatalf("AssembleSlotSources: %v", err)
 	}
@@ -181,7 +181,7 @@ func TestAssembleSlotSources_PermissionsSlot_LineageGrants(t *testing.T) {
 	cb.PathGrants.RegisterFromUserMessage(parentSess.ID, "research /tmp/parent-research-area/notes.md")
 	cb.PathGrants.RegisterLineage(childSess.ID, parentSess.ID)
 
-	sources, err := cb.AssembleSlotSources(context.Background(), childSess, agent, nil, &store.Workspace{Name: "WS"}, nil)
+	sources, err := cb.AssembleSlotSources(context.Background(), childSess, agent, &store.Workspace{Name: "WS"})
 	if err != nil {
 		t.Fatalf("AssembleSlotSources: %v", err)
 	}
@@ -243,7 +243,7 @@ func TestAssembleSlotSources_PermissionsSlot_c160_RegressionRepro(t *testing.T) 
 	cb.PathGrants.RegisterFromUserMessage(parentSess.ID, "research /Users/u/Projects-apps/nanite/internal/")
 	cb.PathGrants.RegisterLineage(childSess.ID, parentSess.ID)
 
-	sources, err := cb.AssembleSlotSources(context.Background(), childSess, researcher, nil, &store.Workspace{Name: "WS"}, nil)
+	sources, err := cb.AssembleSlotSources(context.Background(), childSess, researcher, &store.Workspace{Name: "WS"})
 	if err != nil {
 		t.Fatalf("AssembleSlotSources: %v", err)
 	}
@@ -331,7 +331,7 @@ func TestAssembleSlotSources_PermissionsSlot_W3ForwardedDeniesRendered(t *testin
 	}
 	cb.PathGrants.RegisterDerivedRules(childSess.ID, derived)
 
-	sources, err := cb.AssembleSlotSources(context.Background(), childSess, researcher, nil, &store.Workspace{Name: "WS"}, nil)
+	sources, err := cb.AssembleSlotSources(context.Background(), childSess, researcher, &store.Workspace{Name: "WS"})
 	if err != nil {
 		t.Fatalf("AssembleSlotSources: %v", err)
 	}
@@ -378,11 +378,11 @@ func TestAssembleSlotSources_PermissionsSlot_DeterministicAcrossTurns(t *testing
 	}
 	cb.PathGrants.RegisterFromUserMessage(sess.ID, "look at /tmp/some/path.go")
 
-	a, err := cb.AssembleSlotSources(context.Background(), sess, agent, nil, &store.Workspace{Name: "WS"}, nil)
+	a, err := cb.AssembleSlotSources(context.Background(), sess, agent, &store.Workspace{Name: "WS"})
 	if err != nil {
 		t.Fatalf("AssembleSlotSources (a): %v", err)
 	}
-	b, err := cb.AssembleSlotSources(context.Background(), sess, agent, nil, &store.Workspace{Name: "WS"}, nil)
+	b, err := cb.AssembleSlotSources(context.Background(), sess, agent, &store.Workspace{Name: "WS"})
 	if err != nil {
 		t.Fatalf("AssembleSlotSources (b): %v", err)
 	}

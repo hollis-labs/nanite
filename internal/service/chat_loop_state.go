@@ -10,7 +10,6 @@ import (
 	"github.com/hollis-labs/nanite/internal/classify"
 	"github.com/hollis-labs/nanite/internal/dispatcher"
 	"github.com/hollis-labs/nanite/internal/effort"
-	"github.com/hollis-labs/nanite/internal/store"
 )
 
 // ContinueSite identifies why the chat loop continues for another iteration.
@@ -265,13 +264,6 @@ type loopState struct {
 	// handleRequestTools and executeSingleTool so broker/tool producers
 	// can append to the same per-turn snapshot.
 	inspectorTurnID string
-
-	// F1 (CW-20260429-0001): per-turn session-mode tool_overrides spec.
-	// Resolved once before the chat loop runs; consumed by handleRequestTools
-	// to filter newly-loaded tools so the progressive-discovery path respects
-	// the same allow/deny rules B1 applied at materialization. Zero value =
-	// no filter (passthrough).
-	modeToolOverrides store.ToolOverrideSpec
 }
 
 // maxCompactRecoverableAttempts caps the number of synchronous compaction

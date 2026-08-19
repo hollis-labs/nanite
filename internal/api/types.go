@@ -19,14 +19,14 @@ type CreateSessionRequest struct {
 	AgentID     string `json:"agent_id"`
 }
 
+// Phase 0 item 21 ("Cut Modes, in full") removed this file's ModeID field
+// from ForkSessionRequest, plus SwitchSessionModeRequest, SetSessionModeRequest,
+// SetSessionAutoSwitchRequest, and SessionAutoSwitchResponse — Session Mode
+// and Legacy Agent Mode are both gone.
 type ForkSessionRequest struct {
 	IncludeMessages bool   `json:"include_messages"`
 	Provider        string `json:"provider"`
 	Model           string `json:"model"`
-	// ModeID points the forked session at a specific mode. The GUI sends the
-	// source session's resolved mode on every fork/restart so the fork inherits
-	// it; empty leaves the store's default (copy the source's current_mode_id).
-	ModeID string `json:"mode_id"`
 }
 
 type UpdateSessionRequest struct {
@@ -36,35 +36,6 @@ type UpdateSessionRequest struct {
 	Model      *string `json:"model"`
 	Provider   *string `json:"provider"`
 	Status     *string `json:"status"`
-}
-
-type SwitchSessionModeRequest struct {
-	Mode string `json:"mode"`
-}
-
-// SetSessionModeRequest is the body for PATCH /api/sessions/{id}/mode (B1,
-// CW-20260428-0009). Either Slug or ModeID may be supplied; if both are
-// empty the session-mode pointer is cleared (fall-through to legacy AgentMode).
-type SetSessionModeRequest struct {
-	Slug   string `json:"slug,omitempty"`
-	ModeID string `json:"mode_id,omitempty"`
-}
-
-// SetSessionAutoSwitchRequest is the body for
-// PATCH /api/sessions/{id}/auto-switch (F2, CW-20260429-0002). The Override
-// field is a tri-state pointer:
-//
-//	{"override": true}  → force ON for this session (does NOT bypass first-use)
-//	{"override": false} → force OFF for this session
-//	{"override": null}  → clear the per-session override (inherit user pref)
-type SetSessionAutoSwitchRequest struct {
-	Override *bool `json:"override"`
-}
-
-// SessionAutoSwitchResponse is the response shape for the auto-switch GET/PATCH
-// endpoints. Override mirrors the persisted column value (nil = inherit).
-type SessionAutoSwitchResponse struct {
-	Override *bool `json:"override"`
 }
 
 // --- Messages ---
@@ -201,14 +172,6 @@ type AddSessionAgentRequest struct {
 
 type AddAgentProjectRequest struct {
 	ProjectID string `json:"project_id"`
-}
-
-type CreateAgentModeRequest struct {
-	Slug           string `json:"slug"`
-	Name           string `json:"name"`
-	PromptAddendum string `json:"prompt_addendum"`
-	ToolOverrides  string `json:"tool_overrides"`
-	Settings       string `json:"settings"`
 }
 
 type AgentKnownToolUpsertRequest struct {
@@ -605,28 +568,6 @@ type UpdateSkillRequest struct {
 type AssignAgentSkillRequest struct {
 	SkillID string `json:"skill_id"`
 	Config  string `json:"config"`
-}
-
-// --- Modes ---
-
-type CreateModeRequest struct {
-	Name           string `json:"name"`
-	Slug           string `json:"slug"`
-	PromptAddendum string `json:"prompt_addendum"`
-	ToolOverrides  string `json:"tool_overrides"`
-	Settings       string `json:"settings"`
-}
-
-type UpdateModeRequest struct {
-	Name           *string `json:"name"`
-	Slug           *string `json:"slug"`
-	PromptAddendum *string `json:"prompt_addendum"`
-	ToolOverrides  *string `json:"tool_overrides"`
-	Settings       *string `json:"settings"`
-}
-
-type AssignModeToAgentRequest struct {
-	ModeID string `json:"mode_id"`
 }
 
 // --- Approvals ---

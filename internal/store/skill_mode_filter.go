@@ -5,20 +5,22 @@ import (
 	"strings"
 )
 
-// E2 (CW-20260428-0017): mode-aware skill filtering. Two-pass pipeline:
+// E2 (CW-20260428-0017): mode-aware skill filtering.
 //
-//	Pass 1 — mode binding: keep skills whose mode_ids contains the current
-//	         mode ID, or whose mode_ids is empty (back-compat: empty = all
-//	         modes).
-//	Pass 2 — mode tool_overrides (B1): apply the mode's tool_overrides
-//	         allow/deny set on the result. Mode tool_overrides is
-//	         authoritative — a skill listed in deny is excluded even when
-//	         mode_ids matches the current mode.
+// Phase 0 item 21 ("Cut Modes, in full") deleted Session Mode (the
+// sessions.current_mode_id pointer, the modes table, store.GetSessionMode)
+// and the mode tool_overrides subsystem it fed (store.ToolOverrideSpec /
+// store.ApplyToolOverrides), along with FilterSkillsByMode — the two-pass
+// pipeline that used to combine skill.mode_ids binding with a mode's
+// tool_overrides allow/deny set. There is no more session-level "current
+// mode" to filter skills by.
 //
-// Precedence (locked 2026-04-28): mode tool_overrides wins over skill
-// mode_ids. Rationale: skill mode_ids declares "where I'm appropriate";
-// mode tool_overrides declares "what's actually loaded right now".
-// Overrides override.
+// ParseSkillModeIDs / MarshalSkillModeIDs / SkillMatchesMode survive below
+// — they're pure helpers over the skills.mode_ids column (unrelated to the
+// now-deleted modes table) still consumed independently by
+// internal/skillbroker's mode-bound relevance bonus (a skill with any
+// mode_ids tag scores slightly higher, regardless of session state) and by
+// internal/service/ingest.go's frontmatter → mode_ids resolution.
 
 // ParseSkillModeIDs decodes the JSON-array string stored in skills.mode_ids.
 // Empty / "[]" / invalid JSON returns nil with no error so callers can keep
@@ -87,52 +89,4 @@ func SkillMatchesMode(skillModeIDs string, modeID string) bool {
 		}
 	}
 	return false
-}
-
-// FilterSkillsByMode runs the two-pass pipeline described at the top of the
-// file and returns the kept skills. modeID is the resolved
-// session.current_mode_id (empty = no mode set; behavior is back-compat
-// "keep everything"). modeToolOverrides is the parsed tool override spec
-// from the same mode; isEmpty / zero-value spec is a passthrough.
-//
-// The skill is matched against tool_overrides by slug. The skill slug is
-// the canonical handle — the mode's tool_overrides Allow/Deny lists treat
-// each entry as either a tool name (for B1) or a skill slug (here). This
-// keeps the contract obvious: "deny: [foo]" denies the skill named foo.
-func FilterSkillsByMode(skills []Skill, modeID string, modeToolOverrides ToolOverrideSpec) []Skill {
-	out := make([]Skill, 0, len(skills))
-
-	denySet := stringSet(modeToolOverrides.Deny)
-	allowSet := stringSet(modeToolOverrides.Allow)
-	hasOverrides := !isEmptyToolOverrideSpec(modeToolOverrides)
-
-	for _, sk := range skills {
-		// Pass 1: mode binding.
-		if !SkillMatchesMode(sk.ModeIDs, modeID) {
-			continue
-		}
-		// Pass 2: mode tool_overrides — precedence wins over Pass 1.
-		if hasOverrides {
-			// Deny is absolute (mirrors ApplyToolOverrides rule 1).
-			if _, denied := denySet[sk.Slug]; denied {
-				continue
-			}
-			// Explicit allow keeps the skill regardless of patterns.
-			if _, allowed := allowSet[sk.Slug]; allowed {
-				out = append(out, sk)
-				continue
-			}
-			// DenyPatterns drops if matched.
-			if matchesAnyPattern(sk.Slug, modeToolOverrides.DenyPatterns) {
-				continue
-			}
-			// AllowPatterns whitelist mode: when non-empty, drop non-matches.
-			if len(modeToolOverrides.AllowPatterns) > 0 &&
-				!matchesAnyPattern(sk.Slug, modeToolOverrides.AllowPatterns) {
-				continue
-			}
-		}
-		out = append(out, sk)
-	}
-	return out
 }

@@ -30,7 +30,7 @@ import { DynamicIcon } from "@/components/ui/icon-picker";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useModels, useSettings } from "@/hooks/useSettings";
 import { api } from "@/lib/api";
-import type { AgentModeProfile, AgentProfile } from "@/lib/types";
+import type { AgentProfile } from "@/lib/types";
 import { useAppStore } from "@/stores/useAppStore";
 import { AgentBuilderWizard } from "./agents/AgentBuilderWizard";
 import { AgentDetailView } from "./agents/AgentDetailView";
@@ -144,19 +144,6 @@ export function AgentProfileManager({}: AgentProfileManagerProps) {
     onError: (error) => setActionError(errorMessage(error)),
   });
 
-  const createModeMutation = useMutation({
-    mutationFn: ({
-      agentId,
-      data,
-    }: {
-      agentId: string;
-      data: Omit<AgentModeProfile, "id" | "agent_id">;
-    }) => api.createAgentMode(agentId, data),
-    onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: ["agent-detail", selectedAgent] });
-    },
-  });
-
   const assignSkillMutation = useMutation({
     mutationFn: ({ agentId, skillId }: { agentId: string; skillId: string }) =>
       api.assignSkillToAgent(agentId, { skill_id: skillId }),
@@ -204,14 +191,6 @@ export function AgentProfileManager({}: AgentProfileManagerProps) {
       void queryClient.invalidateQueries({ queryKey: ["agent-projects", selectedAgent] });
     },
   });
-
-  // const deleteModeMutation = useMutation({  // DELETE not implemented in backend
-  //   mutationFn: ({ agentId, modeId }: { agentId: string; modeId: string }) =>
-  //     api.deleteAgentMode(agentId, modeId),
-  //   onSuccess: () => {
-  //     void queryClient.invalidateQueries({ queryKey: ['agent-detail', selectedAgent] })
-  //   },
-  // })
 
   const handleAssignSkill = useCallback(
     (skillId: string) => {
@@ -488,12 +467,11 @@ export function AgentProfileManager({}: AgentProfileManagerProps) {
 
   // Detail View
   if (selectedAgent && agentDetail) {
-    const { agent, modes } = agentDetail;
+    const { agent } = agentDetail;
 
     return (
       <AgentDetailView
         agent={agent}
-        modes={modes}
         modelOptions={modelOptions}
         allKnownTags={allKnownTags}
         actionError={actionError}
@@ -506,8 +484,6 @@ export function AgentProfileManager({}: AgentProfileManagerProps) {
         }
         onDeleteAgent={() => deleteMutation.mutate(agent.id)}
         onCopyToManaged={() => copyToManagedMutation.mutate(agent.id)}
-        onCreateMode={(data) => createModeMutation.mutate({ agentId: agent.id, data })}
-        isCreatingMode={createModeMutation.isPending}
         agentSkills={agentSkills}
         availableSkills={availableSkills}
         onAssignSkill={handleAssignSkill}

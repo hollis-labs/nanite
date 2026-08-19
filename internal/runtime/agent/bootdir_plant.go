@@ -164,7 +164,7 @@ func writePlantedFile(bootDir, relPath, content string, mode os.FileMode) error 
 // InjectionSpec.NativeFiles" rule).
 func sandboxNativeFiles(params SetupParams) []agentlaunch.NativeFile {
 	return []agentlaunch.NativeFile{
-		nativeFileRaw(".sandbox/agent-context.md", BuildAgentContext(params.AgentProfile, nil), 0o644),
+		nativeFileRaw(".sandbox/agent-context.md", BuildAgentContext(params.AgentProfile), 0o644),
 		nativeFileRaw(".sandbox/envelope-schema.md", envelopeSchemaContent, 0o644),
 	}
 }

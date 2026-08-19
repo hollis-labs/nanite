@@ -1,8 +1,13 @@
 // Route classification for B2 (CW-20260429-0031).
 //
 // This is a sibling of scope.go's ScopeTier / ExecutionPattern primitive
-// and mode.go's ClassifyMode primitive but answers a different question:
-// "should this turn dispatch to an executor, or stay chat-direct?"
+// but answers a different question: "should this turn dispatch to an
+// executor, or stay chat-direct?" (The session-mode classifier this file
+// used to sit alongside, mode.go's ClassifyMode, was cut in full per
+// Phase 0 item 21 — "Cut Modes, in full" — docs/engineering/TASKS.md.
+// The phraseHit/isWordBoundary/isWordRune word-boundary helpers below
+// were originally defined in mode.go and moved here when it was deleted,
+// since this file remained the only consumer.)
 //
 // The classifier's output is INFORMATIVE. Consumers (chat_generate.go's
 // dispatch seam) MAY attempt an executor handoff when a non-direct route
@@ -20,7 +25,10 @@
 // Design: docs/architecture/classifier-routing.md.
 package classify
 
-import "strings"
+import (
+	"strings"
+	"unicode"
+)
 
 // Route is the dispatch hint. The constant values are stable wire
 // strings — they ride into B6 telemetry and into the dispatch seam's
@@ -303,7 +311,7 @@ func ClassifyRoute(intent IntentSignals) RouteDecision {
 }
 
 // anyPhraseHit reports whether any phrase in needles appears in
-// haystack with word-boundary anchoring (mode.go::phraseHit). Used for
+// haystack with word-boundary anchoring (phraseHit, below). Used for
 // render-verb / demo-cue keyword matching where "rendering" must not
 // trigger "render".
 func anyPhraseHit(haystack string, needles []string) bool {
@@ -313,6 +321,58 @@ func anyPhraseHit(haystack string, needles []string) bool {
 		}
 	}
 	return false
+}
+
+// phraseHit reports whether phrase appears in haystack with word-boundary
+// anchoring at both ends. A "word boundary" here means start-of-string,
+// end-of-string, or any non-letter/non-digit rune. Both haystack and phrase
+// are expected to be already lower-cased by the caller.
+//
+// This is the guard that keeps "planet vs space" from triggering "plan"
+// (because "planet" is one token; the "et" after "plan" fails the
+// trailing-boundary check). Originally defined in mode.go (deleted per
+// Phase 0 item 21 — Cut Modes); moved here since this file is the only
+// remaining consumer.
+func phraseHit(haystack, phrase string) bool {
+	if phrase == "" || len(haystack) < len(phrase) {
+		return false
+	}
+	start := 0
+	for {
+		idx := strings.Index(haystack[start:], phrase)
+		if idx < 0 {
+			return false
+		}
+		absIdx := start + idx
+		if isWordBoundary(haystack, absIdx) && isWordBoundary(haystack, absIdx+len(phrase)) {
+			return true
+		}
+		// Advance past this attempt (at least one rune) and keep searching;
+		// a later match in the same string may still satisfy the boundary.
+		start = absIdx + 1
+		if start >= len(haystack) {
+			return false
+		}
+	}
+}
+
+// isWordBoundary reports whether position pos in s is at a word boundary —
+// either the start/end of the string, or a position where the surrounding
+// runes are not both letters/digits. This treats apostrophes and quotes as
+// non-letter so "let's" splits cleanly into "let" + "s" for matching.
+func isWordBoundary(s string, pos int) bool {
+	if pos <= 0 || pos >= len(s) {
+		return true
+	}
+	prev := rune(s[pos-1])
+	next := rune(s[pos])
+	return !(isWordRune(prev) && isWordRune(next))
+}
+
+// isWordRune is true for letters and digits only — apostrophes, quotes, and
+// punctuation are non-word so they create boundaries for phrase matching.
+func isWordRune(r rune) bool {
+	return unicode.IsLetter(r) || unicode.IsDigit(r)
 }
 
 // matchEnvelopeType returns the longest envelope-type substring found

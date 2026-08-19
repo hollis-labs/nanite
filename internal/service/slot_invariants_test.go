@@ -58,10 +58,15 @@ func dispatchFlavors() []dispatchFlavor {
 	}
 }
 
-// invariantsFixture is the shared session/agent/mode/workspace setup
-// the six invariant checks operate against. Built fresh per dispatch
-// flavor so each subtest sees identical inputs — only the
-// CallerType-tagged context differs.
+// invariantsFixture is the shared session/agent/workspace setup the six
+// invariant checks operate against. Built fresh per dispatch flavor so
+// each subtest sees identical inputs — only the CallerType-tagged
+// context differs.
+//
+// Phase 0 item 21 ("Cut Modes, in full") removed this fixture's mode /
+// altMode fields — Session Mode (store.Mode, sessions.current_mode_id,
+// store.GetSessionMode/SetSessionMode) is gone. See invariantModeSlotInert
+// (INV4, below) for the post-cut replacement of invariantModeAwareContentSwap.
 type invariantsFixture struct {
 	store     *store.Store
 	svc       ContextService
@@ -69,8 +74,6 @@ type invariantsFixture struct {
 	session   *store.Session
 	agent     *store.AgentProfile
 	workspace *store.Workspace
-	mode      *store.Mode
-	altMode   *store.Mode
 	tools     []llmtypes.ToolDefinition
 }
 
@@ -98,25 +101,6 @@ func newInvariantsFixture(t *testing.T) *invariantsFixture {
 		t.Fatalf("CreateAgent: %v", err)
 	}
 
-	modeBuild := &store.Mode{
-		ID:             "mode-inv-build",
-		Slug:           "inv-build",
-		Name:           "Invariants Build",
-		PromptAddendum: "INV_BUILD_SENTINEL: build mode — write code.",
-	}
-	if err := s.CreateMode(modeBuild); err != nil {
-		t.Fatalf("CreateMode build: %v", err)
-	}
-	modeRead := &store.Mode{
-		ID:             "mode-inv-read",
-		Slug:           "inv-read",
-		Name:           "Invariants Read",
-		PromptAddendum: "INV_READ_SENTINEL: read mode — refuse to mutate.",
-	}
-	if err := s.CreateMode(modeRead); err != nil {
-		t.Fatalf("CreateMode read: %v", err)
-	}
-
 	sess := &store.Session{
 		ID:          "sess-inv",
 		WorkspaceID: ws.ID,
@@ -124,13 +108,6 @@ func newInvariantsFixture(t *testing.T) *invariantsFixture {
 	}
 	if err := s.CreateSession(sess); err != nil {
 		t.Fatalf("CreateSession: %v", err)
-	}
-	if err := s.SetSessionMode(sess.ID, modeBuild.ID); err != nil {
-		t.Fatalf("SetSessionMode: %v", err)
-	}
-	sess, err = s.GetSession(sess.ID)
-	if err != nil {
-		t.Fatalf("GetSession: %v", err)
 	}
 	if err := s.CreateMessage(&store.Message{
 		ID:        "msg-inv-1",
@@ -155,8 +132,6 @@ func newInvariantsFixture(t *testing.T) *invariantsFixture {
 		session:   sess,
 		agent:     agent,
 		workspace: ws,
-		mode:      modeBuild,
-		altMode:   modeRead,
 		tools:     []llmtypes.ToolDefinition{},
 	}
 }
@@ -171,11 +146,7 @@ func newInvariantsFixture(t *testing.T) *invariantsFixture {
 func (f *invariantsFixture) assembleWithCaller(t *testing.T, caller dispatcher.CallerType) *SlotAssemblyResult {
 	t.Helper()
 	ctx := dispatcher.WithCallerType(context.Background(), caller)
-	resolvedMode, err := f.store.GetSessionMode(f.session.ID)
-	if err != nil {
-		t.Fatalf("GetSessionMode: %v", err)
-	}
-	res, err := f.svc.AssembleSlots(ctx, f.session, f.agent, nil, f.workspace, f.tools, "", 200000, resolvedMode, "")
+	res, err := f.svc.AssembleSlots(ctx, f.session, f.agent, f.workspace, f.tools, "", 200000, "")
 	if err != nil {
 		t.Fatalf("AssembleSlots (%s): %v", caller, err)
 	}
@@ -328,61 +299,46 @@ func invariantCacheMarkerPriority(res *SlotAssemblyResult) error {
 	return nil
 }
 
-// invariantModeAwareContentSwap — INVARIANT #4.
+// invariantModeSlotInert — INVARIANT #4 (post-cut redefinition).
 //
-// Same agent + same session + different mode pointer produces
-// different SlotMode content. SlotMode's POSITION and IDENTITY remain
-// constant (cache-prefix stability); only its CONTENT changes.
-// Asserted by re-pointing the session's current_mode_id between two
-// modes with sentinel-distinct PromptAddendum text and re-assembling.
+// Phase 0 item 21 ("Cut Modes, in full") deleted Session Mode
+// (sessions.current_mode_id, the modes table, store.GetSessionMode /
+// SetSessionMode). This invariant replaces invariantModeAwareContentSwap,
+// which asserted that re-pointing a session's current_mode_id produced
+// different SlotMode content — there is no more session-mode pointer to
+// re-point, so that assertion is no longer meaningful (see
+// internal/context/INVARIANTS.md's INV4 section for the full rationale).
 //
-// The caller parameter threads CallerType into both assembly passes so
-// the invariant is checked under the flavor named by the subtest —
-// otherwise the chat-flavored assertion would silently re-run for
-// every flavor and the cross-flavor coverage claim would be vacuous.
-func invariantModeAwareContentSwap(t *testing.T, f *invariantsFixture, caller dispatcher.CallerType) error {
-	t.Helper()
-	res1 := f.assembleWithCaller(t, caller)
-	idx1 := indexOfSlot(res1.Plan.Decisions, ctxpkg.SlotMode)
-	if idx1 < 0 {
-		return fmt.Errorf("SlotMode missing from initial plan")
+// What still holds, and what this checks:
+//
+//   - SlotMode's POSITION and IDENTITY in the plan are unchanged — it
+//     still occupies its assigned slot in ctxpkg.SlotOrder (INV1's
+//     stable-shape contract covers this structurally; asserted again
+//     here, scoped to SlotMode specifically, since INV4 is the section
+//     of the doc a reader looks to for SlotMode's own contract).
+//   - SlotMode's CONTENT is always empty — there is no more mode content
+//     source, so the slot is permanently inert.
+//   - The assembly decider reports it as ActionSkip / ReasonTag
+//     "skipped_no_content", the same path any other empty slot takes —
+//     SlotMode gets no special-cased handling now that it carries
+//     nothing.
+func invariantModeSlotInert(res *SlotAssemblyResult) error {
+	idx := indexOfSlot(res.Plan.Decisions, ctxpkg.SlotMode)
+	if idx < 0 {
+		return fmt.Errorf("SlotMode missing from plan — position/identity must survive even though the slot is inert")
 	}
-	content1 := res1.Plan.Decisions[idx1].Content
-	if !strings.Contains(content1, "INV_BUILD_SENTINEL") {
-		return fmt.Errorf("initial SlotMode content does not carry build sentinel: %q", content1)
+	d := res.Plan.Decisions[idx]
+	if d.SlotName != ctxpkg.SlotMode {
+		return fmt.Errorf("SlotMode identity drifted: %q", d.SlotName)
 	}
-
-	if err := f.store.SetSessionMode(f.session.ID, f.altMode.ID); err != nil {
-		return fmt.Errorf("SetSessionMode swap: %v", err)
+	if d.Content != "" {
+		return fmt.Errorf("SlotMode content = %q, want empty (Session Mode was cut — no content source remains)", d.Content)
 	}
-	sessReloaded, err := f.store.GetSession(f.session.ID)
-	if err != nil {
-		return fmt.Errorf("GetSession after swap: %v", err)
+	if d.Action != contextbroker.ActionSkip {
+		return fmt.Errorf("SlotMode action = %v, want ActionSkip (empty slots are skipped like any other)", d.Action)
 	}
-	f.session = sessReloaded
-
-	res2 := f.assembleWithCaller(t, caller)
-	idx2 := indexOfSlot(res2.Plan.Decisions, ctxpkg.SlotMode)
-	if idx2 != idx1 {
-		return fmt.Errorf("SlotMode position drifted across mode swap: %d → %d (cache prefix broken)", idx1, idx2)
-	}
-	if res2.Plan.Decisions[idx2].SlotName != ctxpkg.SlotMode {
-		return fmt.Errorf("SlotMode identity drifted across mode swap: %q", res2.Plan.Decisions[idx2].SlotName)
-	}
-	content2 := res2.Plan.Decisions[idx2].Content
-	if content2 == content1 {
-		return fmt.Errorf("mode swap did not change SlotMode content (still %q)", content1)
-	}
-	if !strings.Contains(content2, "INV_READ_SENTINEL") {
-		return fmt.Errorf("post-swap SlotMode content does not carry read sentinel: %q", content2)
-	}
-
-	// Restore original mode so subsequent flavors see fixture's initial state.
-	if err := f.store.SetSessionMode(f.session.ID, f.mode.ID); err != nil {
-		return fmt.Errorf("SetSessionMode restore: %v", err)
-	}
-	if sess, err := f.store.GetSession(f.session.ID); err == nil {
-		f.session = sess
+	if d.ReasonTag != "skipped_no_content" {
+		return fmt.Errorf("SlotMode ReasonTag = %q, want %q", d.ReasonTag, "skipped_no_content")
 	}
 	return nil
 }
@@ -503,8 +459,8 @@ func TestSlotInvariants_AcrossDispatchTypes(t *testing.T) {
 			if err := invariantCacheMarkerPriority(res); err != nil {
 				t.Errorf("INV3 cache marker priority (%s): %v", flavor.Name, err)
 			}
-			if err := invariantModeAwareContentSwap(t, f, flavor.Caller); err != nil {
-				t.Errorf("INV4 mode-aware content swap (%s): %v", flavor.Name, err)
+			if err := invariantModeSlotInert(res); err != nil {
+				t.Errorf("INV4 mode slot inert (%s): %v", flavor.Name, err)
 			}
 			if err := invariantPointerStashDeterminism(flavor.Caller, &fakeArtifactStasher{}); err != nil {
 				t.Errorf("INV5 pointer/stash determinism (%s): %v", flavor.Name, err)
@@ -636,6 +592,28 @@ func TestSlotInvariants_DeliberateViolation_PointerNonDeterministic(t *testing.T
 	// regression where the broker stops calling the stasher at all).
 	if stasher.count < 2 {
 		t.Errorf("stasher invoked %d times, expected ≥2 (one per DecideAssembly call) — broker may have skipped the stash branch", stasher.count)
+	}
+}
+
+// TestSlotInvariants_DeliberateViolation_ModeSlotNotInert proves
+// invariantModeSlotInert (the post-cut INV4) has teeth: a plan where
+// SlotMode carries non-empty content (simulating a future regression that
+// accidentally repurposes the slot without updating the invariant/doc
+// together, per INVARIANTS.md's "How to evolve the contract" step 1) must
+// be caught, not silently accepted.
+func TestSlotInvariants_DeliberateViolation_ModeSlotNotInert(t *testing.T) {
+	brokenPlan := contextbroker.AssemblyPlan{
+		Decisions: []contextbroker.SlotDecision{
+			{SlotName: ctxpkg.SlotMode, Content: "some content that should not exist", Action: contextbroker.ActionShip, ReasonTag: "needed"},
+		},
+	}
+	res := &SlotAssemblyResult{Plan: brokenPlan}
+	err := invariantModeSlotInert(res)
+	if err == nil {
+		t.Fatal("DELIBERATE VIOLATION NOT CAUGHT: invariantModeSlotInert accepted a plan with non-empty SlotMode content — assertion has no teeth")
+	}
+	if !strings.Contains(err.Error(), "want empty") {
+		t.Errorf("violation caught but for the wrong reason — expected the empty-content message: %v", err)
 	}
 }
 

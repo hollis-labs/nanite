@@ -5,7 +5,6 @@ import (
 	"testing"
 
 	llmtypes "github.com/hollis-labs/go-llm-types"
-	"github.com/hollis-labs/nanite/internal/store"
 )
 
 // G-HOT-SWAP-DEAD activation tests. Every assertion targets one of the
@@ -42,7 +41,7 @@ func contains(s []string, x string) bool {
 
 func TestPartitionTools_BelowCapKeepsEverythingEssential(t *testing.T) {
 	tools := mkTools("a", "b", "c", "d")
-	p, st := PartitionTools(tools, store.ToolOverrideSpec{}, nil, ToolPartitionState{}, ToolEssentialCap)
+	p, st := PartitionTools(tools, nil, ToolPartitionState{}, ToolEssentialCap)
 
 	if len(p.Lazy) != 0 {
 		t.Errorf("lazy should be empty when input <= cap; got %v", tnames(p.Lazy))
@@ -63,7 +62,7 @@ func TestPartitionTools_OverCapTrimsToCap(t *testing.T) {
 		names[i] = string(rune('a'+i%26)) + string(rune('0'+i/26))
 	}
 	tools := mkTools(names...)
-	p, _ := PartitionTools(tools, store.ToolOverrideSpec{}, nil, ToolPartitionState{}, 25)
+	p, _ := PartitionTools(tools, nil, ToolPartitionState{}, 25)
 
 	if len(p.Essential) != 25 {
 		t.Errorf("expected 25 essential, got %d", len(p.Essential))
@@ -79,29 +78,13 @@ func TestPartitionTools_OverCapTrimsToCap(t *testing.T) {
 	}
 }
 
-func TestPartitionTools_ModeAllowPromotesAboveCap(t *testing.T) {
-	// 30 input tools; mode.Allow names 3 tools that are at the *end* of
-	// the input list. They should be promoted into essential — they'd
-	// otherwise be filler-cap-trimmed.
-	names := make([]string, 30)
-	for i := range names {
-		names[i] = "tool_" + string(rune('a'+i%26)) + string(rune('0'+i/26))
-	}
-	tools := mkTools(names...)
-	mode := store.ToolOverrideSpec{
-		Allow: []string{names[27], names[28], names[29]},
-	}
-	p, _ := PartitionTools(tools, mode, nil, ToolPartitionState{}, 25)
-
-	if len(p.Essential) != 25 {
-		t.Fatalf("expected 25 essential, got %d", len(p.Essential))
-	}
-	for _, want := range mode.Allow {
-		if !contains(tnames(p.Essential), want) {
-			t.Errorf("mode-allow %q should be essential; got %v", want, tnames(p.Essential))
-		}
-	}
-}
+// Phase 0 item 21 ("Cut Modes, in full") deleted PartitionTools' mode-explicit
+// (tool_overrides.allow) and mode-pattern (tool_overrides.allow_patterns)
+// scoring tiers — both were sourced exclusively from Session Mode's
+// Mode.ToolOverrides, which is gone. TestPartitionTools_ModeAllowPromotesAboveCap
+// and TestPartitionTools_ModeAllowPatternsPromotion, which covered those two
+// tiers, were removed with them. Recently-used and hysteresis (still real,
+// mode-independent signals) keep their coverage below.
 
 func TestPartitionTools_RecentlyUsedPromotesAboveCap(t *testing.T) {
 	names := make([]string, 30)
@@ -110,32 +93,11 @@ func TestPartitionTools_RecentlyUsedPromotesAboveCap(t *testing.T) {
 	}
 	tools := mkTools(names...)
 	recent := []string{names[26], names[27], names[28]}
-	p, _ := PartitionTools(tools, store.ToolOverrideSpec{}, recent, ToolPartitionState{}, 25)
+	p, _ := PartitionTools(tools, recent, ToolPartitionState{}, 25)
 
 	for _, want := range recent {
 		if !contains(tnames(p.Essential), want) {
 			t.Errorf("recently-used %q should be essential; got %v", want, tnames(p.Essential))
-		}
-	}
-}
-
-func TestPartitionTools_ModeAllowPatternsPromotion(t *testing.T) {
-	// 30 tools; mode.AllowPatterns says hadron_*. 3 hadron_* are at the
-	// end and must be promoted.
-	names := []string{
-		"a", "b", "c", "d", "e", "f", "g", "h", "i", "j",
-		"k", "l", "m", "n", "o", "p", "q", "r", "s", "t",
-		"u", "v", "w", "x", "y", "z", "aa", "hadron_run", "hadron_blueprint", "hadron_inspect",
-	}
-	tools := mkTools(names...)
-	mode := store.ToolOverrideSpec{
-		AllowPatterns: []string{"hadron_*"},
-	}
-	p, _ := PartitionTools(tools, mode, nil, ToolPartitionState{}, 25)
-
-	for _, want := range []string{"hadron_run", "hadron_blueprint", "hadron_inspect"} {
-		if !contains(tnames(p.Essential), want) {
-			t.Errorf("hadron_* match %q should be essential; got %v", want, tnames(p.Essential))
 		}
 	}
 }
@@ -146,7 +108,7 @@ func TestPartitionTools_MetaToolsAlwaysEssential(t *testing.T) {
 		names = append(names, string(rune('a'+i%26))+string(rune('0'+i/26)))
 	}
 	tools := mkTools(names...)
-	p, _ := PartitionTools(tools, store.ToolOverrideSpec{}, nil, ToolPartitionState{}, 5)
+	p, _ := PartitionTools(tools, nil, ToolPartitionState{}, 5)
 
 	for _, meta := range []string{"request_tools", "fetch_tool_result"} {
 		if !contains(tnames(p.Essential), meta) {
@@ -171,14 +133,14 @@ func TestPartitionTools_HysteresisPinsAcrossTurns(t *testing.T) {
 	tools := mkTools(names...)
 
 	// Turn 1: pinned is recently-used.
-	p, st := PartitionTools(tools, store.ToolOverrideSpec{}, []string{pinned}, ToolPartitionState{}, 25)
+	p, st := PartitionTools(tools, []string{pinned}, ToolPartitionState{}, 25)
 	if !contains(tnames(p.Essential), pinned) {
 		t.Fatalf("turn 1: pinned should be essential, got %v", tnames(p.Essential))
 	}
 
 	// Turns 2..ToolHysteresisFloor: no recent signal. Hysteresis keeps it.
 	for turn := 2; turn <= ToolHysteresisFloor; turn++ {
-		p, st = PartitionTools(tools, store.ToolOverrideSpec{}, nil, st, 25)
+		p, st = PartitionTools(tools, nil, st, 25)
 		if !contains(tnames(p.Essential), pinned) {
 			t.Errorf("turn %d (within hysteresis floor): pinned should still be essential", turn)
 		}
@@ -186,7 +148,7 @@ func TestPartitionTools_HysteresisPinsAcrossTurns(t *testing.T) {
 
 	// Turn ToolHysteresisFloor+1: hysteresis expired (Turn - first >= floor).
 	// Pinned can now drop to lazy if filler-cap doesn't reach it.
-	p, _ = PartitionTools(tools, store.ToolOverrideSpec{}, nil, st, 25)
+	p, _ = PartitionTools(tools, nil, st, 25)
 	// 30 tools, 25 cap, names[0..24] are filler-essential; names[25..29] go
 	// lazy. pinned = names[27], so after hysteresis expiry it should be lazy.
 	if !contains(tnames(p.Lazy), pinned) {
@@ -196,7 +158,7 @@ func TestPartitionTools_HysteresisPinsAcrossTurns(t *testing.T) {
 }
 
 func TestPartitionTools_EmptyInput(t *testing.T) {
-	p, st := PartitionTools(nil, store.ToolOverrideSpec{}, nil, ToolPartitionState{}, 25)
+	p, st := PartitionTools(nil, nil, ToolPartitionState{}, 25)
 	if len(p.Essential) != 0 || len(p.Lazy) != 0 {
 		t.Errorf("empty input → empty partition; got %v / %v", tnames(p.Essential), tnames(p.Lazy))
 	}
@@ -207,7 +169,7 @@ func TestPartitionTools_EmptyInput(t *testing.T) {
 
 func TestPartitionTools_CapZeroFallsBackToDefault(t *testing.T) {
 	tools := mkTools("a", "b", "c")
-	p, _ := PartitionTools(tools, store.ToolOverrideSpec{}, nil, ToolPartitionState{}, 0)
+	p, _ := PartitionTools(tools, nil, ToolPartitionState{}, 0)
 	// 3 tools, default cap = 25 → all essential.
 	if len(p.Essential) != 3 || len(p.Lazy) != 0 {
 		t.Errorf("cap=0 should fall back to ToolEssentialCap=%d; got essential=%d lazy=%d",
@@ -348,7 +310,7 @@ func TestPartitionTools_TokenSavingsScale(t *testing.T) {
 			},
 		}
 	}
-	p, _ := PartitionTools(tools, store.ToolOverrideSpec{}, nil, ToolPartitionState{}, 25)
+	p, _ := PartitionTools(tools, nil, ToolPartitionState{}, 25)
 	hint := RenderToolLazyHint(p.Lazy)
 	if len(p.Essential) != 25 || len(p.Lazy) != 25 {
 		t.Fatalf("expected 25/25 split, got %d/%d", len(p.Essential), len(p.Lazy))

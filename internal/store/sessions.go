@@ -35,16 +35,6 @@ type Session struct {
 	HaltedAt     *string `json:"halted_at,omitempty"`
 	HaltedReason *string `json:"halted_reason,omitempty"`
 	RuntimeState *string `json:"runtime_state,omitempty"`
-	// CurrentModeID is the session-level mode pointer (B1, CW-20260428-0009).
-	// Nil/empty = fall back to agent-assigned mode (back-compat with the
-	// legacy AgentMode pipeline). Resolves into a *Mode via GetSessionMode.
-	CurrentModeID *string `json:"current_mode_id,omitempty"`
-	// AutoSwitchOverride is the per-session override for the auto-mode-switch
-	// behavior (F2, CW-20260429-0002). nil = inherit user pref
-	// (user_settings.mode_auto_switch_pref). true = force ON for this session
-	// (does NOT bypass first-use prompt). false = force OFF (suppress all
-	// auto-switches even when user pref says always/ask).
-	AutoSwitchOverride *bool `json:"auto_switch_override,omitempty"`
 	// Sidebar relationship metadata, computed from subagent_runs for list/detail
 	// consumers. Normal top-level sessions return null values.
 	ParentSessionID *string `json:"parent_session_id"`
@@ -131,7 +121,6 @@ func (s *Store) ListSessions(workspaceID string, includeArchived ...bool) ([]Ses
 		            ORDER BY ar.started_at DESC
 		            LIMIT 1
 		       ) AS runtime_state,
-		       sess.current_mode_id, sess.auto_switch_override,
 		       rel.parent_session_id, rel.root_session_id, rel.relation, rel.depth
 		  FROM sessions sess
 		  LEFT JOIN session_relationships rel ON rel.child_session_id = sess.id
@@ -150,8 +139,6 @@ func (s *Store) ListSessions(workspaceID string, includeArchived ...bool) ([]Ses
 	out := make([]Session, 0)
 	for rows.Next() {
 		var sess Session
-		var currentModeID sql.NullString
-		var autoSwitchOverride sql.NullBool
 		var haltedAt sql.NullString
 		var haltedReason sql.NullString
 		var runtimeState sql.NullString
@@ -167,12 +154,11 @@ func (s *Store) ListSessions(workspaceID string, includeArchived ...bool) ([]Ses
 			&sess.Status, &sess.IsPinned, &sess.SortOrder, &sess.MessageCount,
 			&sess.Tags, &sess.Metadata, &sess.LastActivity, &sess.CreatedAt, &sess.UpdatedAt,
 			&haltedAt, &haltedReason, &runtimeState,
-			&currentModeID, &autoSwitchOverride,
 			&parentSessionID, &rootSessionID, &relation, &depth,
 		); err != nil {
 			return nil, fmt.Errorf("scan session: %w", err)
 		}
-		hydrateSessionOptionalFields(&sess, currentModeID, autoSwitchOverride, haltedAt, haltedReason, runtimeState, parentSessionID, rootSessionID, relation, depth)
+		hydrateSessionOptionalFields(&sess, haltedAt, haltedReason, runtimeState, parentSessionID, rootSessionID, relation, depth)
 		out = append(out, sess)
 	}
 	return out, rows.Err()
@@ -181,8 +167,6 @@ func (s *Store) ListSessions(workspaceID string, includeArchived ...bool) ([]Ses
 // GetSession returns a single session by ID.
 func (s *Store) GetSession(id string) (*Session, error) {
 	var sess Session
-	var currentModeID sql.NullString
-	var autoSwitchOverride sql.NullBool
 	var haltedAt sql.NullString
 	var haltedReason sql.NullString
 	var runtimeState sql.NullString
@@ -247,7 +231,6 @@ func (s *Store) GetSession(id string) (*Session, error) {
 		            ORDER BY ar.started_at DESC
 		            LIMIT 1
 		       ) AS runtime_state,
-		       sess.current_mode_id, sess.auto_switch_override,
 		       rel.parent_session_id, rel.root_session_id, rel.relation, rel.depth
 		  FROM sessions sess
 		  LEFT JOIN session_relationships rel ON rel.child_session_id = sess.id
@@ -260,25 +243,16 @@ func (s *Store) GetSession(id string) (*Session, error) {
 		&sess.Status, &sess.IsPinned, &sess.SortOrder, &sess.MessageCount,
 		&sess.Tags, &sess.Metadata, &sess.LastActivity, &sess.CreatedAt, &sess.UpdatedAt,
 		&haltedAt, &haltedReason, &runtimeState,
-		&currentModeID, &autoSwitchOverride,
 		&parentSessionID, &rootSessionID, &relation, &depth,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("get session %s: %w", id, err)
 	}
-	hydrateSessionOptionalFields(&sess, currentModeID, autoSwitchOverride, haltedAt, haltedReason, runtimeState, parentSessionID, rootSessionID, relation, depth)
+	hydrateSessionOptionalFields(&sess, haltedAt, haltedReason, runtimeState, parentSessionID, rootSessionID, relation, depth)
 	return &sess, nil
 }
 
-func hydrateSessionOptionalFields(sess *Session, currentModeID sql.NullString, autoSwitchOverride sql.NullBool, haltedAt sql.NullString, haltedReason sql.NullString, runtimeState sql.NullString, parentSessionID sql.NullString, rootSessionID sql.NullString, relation sql.NullString, depth sql.NullInt64) {
-	if currentModeID.Valid && currentModeID.String != "" {
-		v := currentModeID.String
-		sess.CurrentModeID = &v
-	}
-	if autoSwitchOverride.Valid {
-		v := autoSwitchOverride.Bool
-		sess.AutoSwitchOverride = &v
-	}
+func hydrateSessionOptionalFields(sess *Session, haltedAt sql.NullString, haltedReason sql.NullString, runtimeState sql.NullString, parentSessionID sql.NullString, rootSessionID sql.NullString, relation sql.NullString, depth sql.NullInt64) {
 	if haltedAt.Valid && haltedAt.String != "" {
 		v := haltedAt.String
 		sess.HaltedAt = &v
@@ -307,32 +281,6 @@ func hydrateSessionOptionalFields(sess *Session, currentModeID sql.NullString, a
 		v := int(depth.Int64)
 		sess.Depth = &v
 	}
-}
-
-// SetSessionAutoSwitchOverride sets (or clears) the per-session auto-switch
-// override (F2, CW-20260429-0002). Pass nil to clear (inherit user pref); pass
-// &true to force ON or &false to force OFF for this session.
-func (s *Store) SetSessionAutoSwitchOverride(id string, override *bool) error {
-	now := time.Now().UTC().Format(time.RFC3339)
-	var v interface{}
-	if override != nil {
-		v = *override
-	}
-	res, err := s.DB.Exec(
-		`UPDATE sessions SET auto_switch_override = ?, updated_at = ? WHERE id = ?`,
-		v, now, id,
-	)
-	if err != nil {
-		return fmt.Errorf("set session auto-switch override %s: %w", id, err)
-	}
-	n, err := res.RowsAffected()
-	if err != nil {
-		return fmt.Errorf("set session auto-switch override %s: rows affected: %w", id, err)
-	}
-	if n == 0 {
-		return fmt.Errorf("set session auto-switch override %s: session not found", id)
-	}
-	return nil
 }
 
 // CreateSession inserts a new session, auto-generating ID and short_code.
@@ -458,8 +406,6 @@ func (s *Store) ArchiveSession(id string) error {
 // CW-20260519-0063 (cross-session chat read self-tool).
 func (s *Store) GetSessionByShortCode(code string) (*Session, error) {
 	var sess Session
-	var currentModeID sql.NullString
-	var autoSwitchOverride sql.NullBool
 	err := s.DB.QueryRow(
 		`SELECT id, short_code, COALESCE(title,''), COALESCE(custom_name,''),
 		        COALESCE(workspace_id,''), COALESCE(project_id,''),
@@ -467,8 +413,7 @@ func (s *Store) GetSessionByShortCode(code string) (*Session, error) {
 		        COALESCE(provider,''), COALESCE(model,''),
 		        status, is_pinned, sort_order, message_count,
 		        COALESCE(tags,'[]'), COALESCE(metadata,'{}'),
-		        last_activity, created_at, updated_at,
-		        current_mode_id, auto_switch_override
+		        last_activity, created_at, updated_at
 		 FROM sessions WHERE short_code = ?`, code,
 	).Scan(
 		&sess.ID, &sess.ShortCode, &sess.Title, &sess.CustomName,
@@ -477,18 +422,9 @@ func (s *Store) GetSessionByShortCode(code string) (*Session, error) {
 		&sess.Provider, &sess.Model,
 		&sess.Status, &sess.IsPinned, &sess.SortOrder, &sess.MessageCount,
 		&sess.Tags, &sess.Metadata, &sess.LastActivity, &sess.CreatedAt, &sess.UpdatedAt,
-		&currentModeID, &autoSwitchOverride,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("get session by short_code %s: %w", code, err)
-	}
-	if currentModeID.Valid && currentModeID.String != "" {
-		v := currentModeID.String
-		sess.CurrentModeID = &v
-	}
-	if autoSwitchOverride.Valid {
-		v := autoSwitchOverride.Bool
-		sess.AutoSwitchOverride = &v
 	}
 	return &sess, nil
 }
@@ -754,14 +690,13 @@ func (s *Store) ForkSession(sourceID string, overrides *Session, copyMessages bo
 
 	// Build new session from source, applying overrides.
 	newSess := &Session{
-		WorkspaceID:   src.WorkspaceID,
-		ProjectID:     src.ProjectID,
-		Provider:      src.Provider,
-		Model:         src.Model,
-		Tags:          src.Tags,
-		ContextType:   src.ContextType,
-		ContextID:     src.ContextID,
-		CurrentModeID: src.CurrentModeID,
+		WorkspaceID: src.WorkspaceID,
+		ProjectID:   src.ProjectID,
+		Provider:    src.Provider,
+		Model:       src.Model,
+		Tags:        src.Tags,
+		ContextType: src.ContextType,
+		ContextID:   src.ContextID,
 	}
 
 	// Apply overrides.
@@ -771,9 +706,6 @@ func (s *Store) ForkSession(sourceID string, overrides *Session, copyMessages bo
 		}
 		if overrides.Model != "" {
 			newSess.Model = overrides.Model
-		}
-		if overrides.CurrentModeID != nil {
-			newSess.CurrentModeID = overrides.CurrentModeID
 		}
 	}
 
@@ -837,14 +769,14 @@ func (s *Store) ForkSession(sourceID string, overrides *Session, copyMessages bo
 		`INSERT INTO sessions (id, short_code, title, custom_name, workspace_id, project_id,
 		                       context_type, context_id, provider, model,
 		                       status, is_pinned, sort_order, message_count,
-		                       tags, metadata, current_mode_id, last_activity, created_at, updated_at)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?, ?)`,
+		                       tags, metadata, last_activity, created_at, updated_at)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?)`,
 		newSess.ID, newSess.ShortCode, nullIfEmpty(newSess.Title), nullIfEmpty(newSess.CustomName),
 		nullIfEmpty(newSess.WorkspaceID), nullIfEmpty(newSess.ProjectID),
 		nullIfEmpty(newSess.ContextType), nullIfEmpty(newSess.ContextID),
 		nullIfEmpty(newSess.Provider), nullIfEmpty(newSess.Model),
 		newSess.Status, newSess.IsPinned, newSess.SortOrder,
-		newSess.Tags, newSess.Metadata, nullableStringPtr(newSess.CurrentModeID), now, now, now,
+		newSess.Tags, newSess.Metadata, now, now, now,
 	); err != nil {
 		return nil, fmt.Errorf("create forked session: %w", err)
 	}
@@ -1068,11 +1000,4 @@ func nullIfEmpty(val string) interface{} {
 		return nil
 	}
 	return val
-}
-
-func nullableStringPtr(value *string) interface{} {
-	if value == nil || *value == "" {
-		return nil
-	}
-	return *value
 }

@@ -64,6 +64,13 @@ func TestParseMD_AllFields(t *testing.T) {
 	// continues to load without error even though the values are no
 	// longer honored. Validation warns on these keys at the API layer
 	// (see internal/agentvalidation/validation.go).
+	//
+	// The `modes:` block is retained for the same reason since Phase 0
+	// item 21 ("Cut Modes, in full") deleted Definition.Modes /
+	// ModeDefinition: an agent file still carrying legacy `modes:`
+	// frontmatter (from before the cut) must keep parsing without error,
+	// it just no longer produces anything — yaml.Unmarshal silently
+	// drops the now-unrecognized key.
 	data := []byte(`---
 name: Full Agent
 slug: full-agent
@@ -135,18 +142,6 @@ System prompt body here.
 	// surviving turn-count knob (`maxTurns`) is asserted above.
 	if def.Constraints != (AgentConstraints{}) {
 		t.Errorf("Constraints = %+v, want empty struct (CW-20260512-0123)", def.Constraints)
-	}
-	if len(def.Modes) != 2 {
-		t.Fatalf("Modes len = %d, want 2", len(def.Modes))
-	}
-	if def.Modes[0].Slug != "default" {
-		t.Errorf("Modes[0].Slug = %q", def.Modes[0].Slug)
-	}
-	if def.Modes[1].PromptAddendum != "Focus on design." {
-		t.Errorf("Modes[1].PromptAddendum = %q", def.Modes[1].PromptAddendum)
-	}
-	if def.Modes[1].ToolOverrides == nil {
-		t.Error("Modes[1].ToolOverrides is nil")
 	}
 }
 

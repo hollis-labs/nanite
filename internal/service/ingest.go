@@ -357,27 +357,17 @@ func upsertSkillDef(st *store.Store, def *skillpkg.Definition) error {
 	return nil
 }
 
-// resolveSkillModeIDs translates a list of mode slugs to mode IDs by
-// querying the modes table. Unresolved slugs are dropped silently (logged
-// as a warning). Empty input → "[]" (back-compat: skill is available in
-// every mode). The result is the JSON-array string written to
-// skills.mode_ids.
-func resolveSkillModeIDs(st *store.Store, slugs []string) string {
-	if len(slugs) == 0 {
-		return "[]"
-	}
-	ids := make([]string, 0, len(slugs))
-	for _, slug := range slugs {
-		mode, err := st.GetModeBySlug(slug)
-		if err != nil {
-			slog.Warn("service: resolve skill mode slug", "slug", slug, "err", err)
-			continue
-		}
-		if mode == nil {
-			slog.Warn("service: skill mode slug not found", "slug", slug)
-			continue
-		}
-		ids = append(ids, mode.ID)
-	}
-	return store.MarshalSkillModeIDs(ids)
+// resolveSkillModeIDs marshals a skill definition's frontmatter `modes:`
+// slugs into the JSON-array string written to skills.mode_ids. Empty input
+// → "[]" (back-compat: skill is available in every mode).
+//
+// Phase 0 item 21 ("Cut Modes, in full") deleted the `modes` catalog table
+// and store.GetModeBySlug — this function used to resolve each slug against
+// that table and store the resolved row ID. There is no more catalog to
+// resolve against, and skills.mode_ids' only remaining consumer
+// (internal/skillbroker's mode-bound relevance bonus) only ever checks
+// whether the column is non-empty, never a specific ID — so the slugs
+// themselves are now stored directly as their own identity, unresolved.
+func resolveSkillModeIDs(_ *store.Store, slugs []string) string {
+	return store.MarshalSkillModeIDs(slugs)
 }

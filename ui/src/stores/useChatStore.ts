@@ -1,12 +1,8 @@
 import { create } from "zustand";
 import type {
   ActiveStreamInfo,
-  AgentMode,
   ChatError,
   CLIActiveInfo,
-  ModeAutoSwitchEffective,
-  ModeAutoSwitchOverride,
-  ModeSuggestion,
   PendingApproval,
   PendingToolInfo,
   PluginEnvelopeItem,
@@ -21,30 +17,6 @@ import {
   emptyChatSessionState,
   MAX_RETAINED_SESSIONS,
 } from "./chatSessionState";
-
-/**
- * B3 (CW-20260428-0011) — pure resolver for the effective auto-switch
- * behavior. Exported so it can be unit-tested independently of the store.
- *
- * Semantics:
- *   - session override "off"      → "off"  (suppress all auto-switches)
- *   - global pref ""  (unset)     → "firstUse"  (show 5-option card)
- *     even when override is "on"  →  the user must make the choice once
- *   - global pref "never"         → "off"
- *   - global pref "always"        → "auto"
- *   - global pref "ask"           → "ask"
- */
-export function getAutoSwitchEffective(
-  override: ModeAutoSwitchOverride | undefined,
-  pref: "" | "always" | "ask" | "never" | undefined,
-): ModeAutoSwitchEffective {
-  if (override === "off") return "off";
-  const p = pref ?? "";
-  if (p === "") return "firstUse";
-  if (p === "never") return "off";
-  if (p === "always") return "auto";
-  return "ask";
-}
 
 function safeLocalStorageGet(key: string): string | null {
   if (typeof localStorage === "undefined") return null;
@@ -120,12 +92,7 @@ interface ChatStore {
   dismissChatError: (sessionID: string, id: string) => void;
   clearChatErrors: (sessionID: string) => void;
 
-  // ── Mode suggestion ──
-  setPendingModeSuggestion: (sessionID: string, s: ModeSuggestion | null) => void;
-  clearModeSuggestion: (sessionID: string) => void;
-
   // ── Per-session dials ──
-  setActiveMode: (sessionID: string, mode: AgentMode) => void;
   setActiveModel: (sessionID: string, model: string) => void;
   setActiveEffort: (sessionID: string, effort: string) => void;
 
@@ -156,10 +123,6 @@ interface ChatStore {
   setPendingJump: (jump: { sessionId: string; messageId: string } | null) => void;
   scrollToMessageId: string | null;
   setScrollToMessageId: (id: string | null) => void;
-
-  /** Per-session auto-switch override. Keyed by sessionID; absence = inherit global pref. */
-  autoSwitchSessionOverrides: Record<string, ModeAutoSwitchOverride>;
-  setAutoSwitchOverride: (sessionID: string, override: ModeAutoSwitchOverride | "inherit") => void;
 
   /**
    * Chat-scoped toast (e.g. "Switched to plan mode").
@@ -493,21 +456,7 @@ export const useChatStore = create<ChatStore>((set) => ({
       sessions: applyToSession(state.sessions, sessionID, { chatErrors: [] }),
     })),
 
-  // ── Mode suggestion ──
-  setPendingModeSuggestion: (sessionID, s) =>
-    set((state) => ({
-      sessions: applyToSession(state.sessions, sessionID, { pendingModeSuggestion: s }),
-    })),
-  clearModeSuggestion: (sessionID) =>
-    set((state) => ({
-      sessions: applyToSession(state.sessions, sessionID, { pendingModeSuggestion: null }),
-    })),
-
   // ── Per-session dials ──
-  setActiveMode: (sessionID, mode) =>
-    set((state) => ({
-      sessions: applyToSession(state.sessions, sessionID, { activeMode: mode }),
-    })),
   setActiveModel: (sessionID, model) =>
     set((state) => ({
       sessions: applyToSession(state.sessions, sessionID, { activeModel: model }),
@@ -594,19 +543,6 @@ export const useChatStore = create<ChatStore>((set) => ({
   setPendingJump: (jump) => set({ pendingJump: jump }),
   scrollToMessageId: null,
   setScrollToMessageId: (id) => set({ scrollToMessageId: id }),
-
-  // ── Per-session auto-switch override (already keyed) ──
-  autoSwitchSessionOverrides: {},
-  setAutoSwitchOverride: (sessionID, override) =>
-    set((state) => {
-      const next = { ...state.autoSwitchSessionOverrides };
-      if (override === "inherit") {
-        delete next[sessionID];
-      } else {
-        next[sessionID] = override;
-      }
-      return { autoSwitchSessionOverrides: next };
-    }),
 
   // ── Chat toast (intentional global) ──
   chatToast: null,
@@ -696,12 +632,6 @@ export function usePendingApprovals(sessionID?: string | null): PendingApproval[
 }
 export function useToolWarnings(sessionID?: string | null): ToolWarning[] {
   return useActiveSliceField(sessionID, "toolWarnings");
-}
-export function usePendingModeSuggestion(sessionID?: string | null): ModeSuggestion | null {
-  return useActiveSliceField(sessionID, "pendingModeSuggestion");
-}
-export function useActiveMode(sessionID?: string | null): AgentMode {
-  return useActiveSliceField(sessionID, "activeMode");
 }
 export function useActiveModel(sessionID?: string | null): string {
   return useActiveSliceField(sessionID, "activeModel");

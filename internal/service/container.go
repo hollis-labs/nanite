@@ -847,10 +847,6 @@ func NewContainer(cfg ContainerConfig) (*Container, error) {
 	// Command registry.
 	commands := chat.NewCommandRegistry()
 	commands.RegisterServerCommands(cfg.Store, cfg.Providers)
-	// B2 (CW-20260428-0010): bind /mode, /chat, /plan, /work to the store's
-	// session-mode setter. Must run after NewCommandRegistry so it overwrites
-	// the placeholder /mode entry created at construction time.
-	commands.RegisterModeCommands(cfg.Store)
 	RegisterToolCacheCommand(commands, overrideStore)
 
 	// Register file-based skills as slash commands.

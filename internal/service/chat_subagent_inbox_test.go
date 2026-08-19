@@ -74,8 +74,7 @@ func newTestSlotResult(t *testing.T, sessionID string) *SlotAssemblyResult {
 		ID: "agent-subagent-inbox-test", Name: "SubagentInboxTestAgent",
 		Slug: "subagent-inbox-test", Status: "active", Tags: "[]", Tools: "[]",
 	}
-	mode := &store.AgentMode{Slug: "default"}
-	slotResult, err := svc.AssembleSlots(context.Background(), sess, agent, mode, nil, []llmtypes.ToolDefinition{}, "", 200000, nil, "")
+	slotResult, err := svc.AssembleSlots(context.Background(), sess, agent, nil, []llmtypes.ToolDefinition{}, "", 200000, "")
 	if err != nil {
 		t.Fatalf("AssembleSlots: %v", err)
 	}

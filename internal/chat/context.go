@@ -267,12 +267,12 @@ func buildSkillListForSessionWithIntent(ctx context.Context, s *store.Store, age
 		return ""
 	}
 
-	// E2 mode filter runs first — the broker is a read-only consumer of
-	// the agent's mode-eligible skill set. Mode-denied skills do not
-	// reach the broker, so they cannot leak into the rendered list.
-	candidates := filterAgentSkillsByMode(s, skills, sessionID)
-
-	rendered := skillbroker.SelectSkills(ctx, intent, identity, candidates, skillbroker.Options{})
+	// Phase 0 item 21 ("Cut Modes, in full") deleted the E2 mode filter
+	// (filterAgentSkillsByMode) that used to run here — it resolved
+	// s.GetSessionMode(sessionID), which no longer exists. There is no
+	// more session-scoped mode to gate skills on; every agent skill is a
+	// broker candidate now.
+	rendered := skillbroker.SelectSkills(ctx, intent, identity, skills, skillbroker.Options{})
 
 	var sb strings.Builder
 	for _, sk := range rendered {
@@ -315,26 +315,3 @@ func skillCatalogLoadHint(s *store.Store, renderedCount int) string {
 	)
 }
 
-// filterAgentSkillsByMode applies the E2 two-pass pipeline. Empty
-// sessionID, or a session with no current_mode_id, returns the input
-// unchanged (back-compat).
-func filterAgentSkillsByMode(s *store.Store, skills []store.Skill, sessionID string) []store.Skill {
-	if sessionID == "" {
-		return skills
-	}
-	mode, err := s.GetSessionMode(sessionID)
-	if err != nil {
-		slog.Warn("chat: get session mode for skill filter", "session_id", sessionID, "err", err)
-		return skills
-	}
-	if mode == nil {
-		return skills
-	}
-	spec, err := store.ParseToolOverrides(mode.ToolOverrides)
-	if err != nil {
-		slog.Warn("chat: parse mode tool_overrides for skill filter", "mode_id", mode.ID, "err", err)
-		// Fall through with empty spec — Pass-1 still applies.
-		spec = store.ToolOverrideSpec{}
-	}
-	return store.FilterSkillsByMode(skills, mode.ID, spec)
-}

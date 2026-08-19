@@ -46,14 +46,6 @@ export interface Session {
   root_session_id?: string | null;
   relation?: string | null;
   depth?: number | null;
-  // B1 (CW-20260428-0009): session-level mode pointer.
-  // Null = fall back to agent-assigned legacy AgentMode.
-  current_mode_id?: string | null;
-  // F2 (CW-20260429-0002): per-session auto-mode-switch override. Tri-state
-  // — null/undefined inherits user_settings.mode_auto_switch_pref; true =
-  // force ON for this session (does NOT bypass first-use prompt); false =
-  // force OFF (suppress all auto-switches even when user pref permits).
-  auto_switch_override?: boolean | null;
 }
 
 export const DURABLE_AGENT_LIFECYCLE_CLASSES = [
@@ -551,7 +543,6 @@ export interface SessionHaltDetail {
 
 export interface SessionDetailsResponse {
   session: Session;
-  mode?: Mode | null;
   primary_agent?: AgentProfile | null;
   durable_attachments: DurableAgentSessionAttachmentState[];
   current_durable_agent?: DurableAgentInstance | null;
@@ -1249,30 +1240,6 @@ export interface AgentKnowledgeSeedUpsertRequest {
   tags?: string[];
 }
 
-export interface AgentModeProfile {
-  id: string;
-  agent_id: string;
-  slug: string;
-  name: string;
-  prompt_addendum: string;
-  tool_overrides: string;
-  settings: string;
-}
-
-// First-class reusable Mode (B1, CW-20260428-0009).
-// Mirrors store.Mode in internal/store/modes.go.
-export interface Mode {
-  id: string;
-  slug: string;
-  name: string;
-  prompt_addendum: string;
-  tool_overrides: string;
-  settings: string;
-  is_builtin: boolean;
-  created_at: string;
-  updated_at: string;
-}
-
 // --- Chat Errors ---
 
 export type ChatErrorCode =
@@ -1290,19 +1257,6 @@ export interface ChatError {
   dismissed?: boolean;
 }
 
-/**
- * B2 (CW-20260428-0010): non-binding mode-classifier signal emitted by the
- * backend when the deterministic classifier disagrees with the session's
- * current mode at high confidence. The FE stores this for B3 to consume
- * (confirm-card / auto-apply); B2 itself does not act on it.
- */
-export interface ModeSuggestion {
-  current: string;
-  suggested: string;
-  confidence: number;
-  signals: string[];
-}
-
 export interface StreamEvent {
   type:
     | "stream_start"
@@ -1317,8 +1271,7 @@ export interface StreamEvent {
     | "circuit_open"
     | "session_takeover"
     | "approval_request"
-    | "plugin_envelope"
-    | "mode_suggestion";
+    | "plugin_envelope";
   /**
    * Phase classifies delta events by their narrative role (F4 / CW-20260419-0029).
    * "narration" — inter-iteration prose emitted between tool_use blocks.
@@ -1473,23 +1426,6 @@ export interface ProcessHealthResponse {
   stale_threshold: string;
 }
 
-// --- Agent Modes ---
-
-export const AGENT_MODES = [
-  "default",
-  "architect",
-  "planner",
-  "writer",
-] as const;
-export type AgentMode = (typeof AGENT_MODES)[number];
-
-export const MODE_COLORS: Record<AgentMode, string> = {
-  default: "blue",
-  architect: "red",
-  planner: "green",
-  writer: "amber",
-};
-
 // --- Models ---
 
 export interface ModelOption {
@@ -1554,19 +1490,7 @@ export interface UserSettings {
     | "disabled"
     | "missing_credentials"
     | "unreachable";
-  // B3 (CW-20260428-0011): user-level preference for auto-applying classifier
-  // mode suggestions. "" = unset (triggers first-use prompt).
-  mode_auto_switch_pref?: "" | "always" | "ask" | "never";
 }
-
-// B3 (CW-20260428-0011): per-session override for auto-mode-switching.
-// Stored only in the FE chat store (not persisted) — resets on full reload.
-export type ModeAutoSwitchOverride = "on" | "off";
-
-// B3 (CW-20260428-0011): the resolved effective behavior for a session,
-// computed from the global pref + per-session override. Returned by
-// useChatStore.getAutoSwitchEffective.
-export type ModeAutoSwitchEffective = "auto" | "ask" | "off" | "firstUse";
 
 export interface EmbeddingProviderInfo {
   id: string;

@@ -107,7 +107,7 @@ func (s *chatServiceImpl) resolveMessageWakePolicy(ctx context.Context, sessionI
 	// touches — ResolveForSessionReadOnly runs the identical resolution
 	// chain without that mutation. See internal/service/agent.go's doc
 	// comment on both methods for the full rationale.
-	if agent, _, err := s.agents.ResolveForSessionReadOnly(ctx, sessionID); err == nil && agent != nil {
+	if agent, err := s.agents.ResolveForSessionReadOnly(ctx, sessionID); err == nil && agent != nil {
 		constraints := chat.ParseAgentConstraints(agent.Constraints)
 		if constraints.MessageWakePolicy != "" {
 			if chat.IsValidSubagentCompletionPolicy(constraints.MessageWakePolicy) {

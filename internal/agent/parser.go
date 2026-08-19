@@ -55,9 +55,6 @@ type Definition struct {
 	Directories    []string         `yaml:"directories"`
 	Constraints    AgentConstraints `yaml:"constraints"`
 
-	// Modes (inline)
-	Modes []ModeDefinition `yaml:"modes"`
-
 	// ToolPermissions, when set, replaces the implicit allow_list derived from
 	// Tools. Lets file-based agents express deny rules, allow-list patterns,
 	// and call-budget caps without needing an agent_profiles row.
@@ -103,14 +100,6 @@ type ProcedureDefinition struct {
 	Body     string `yaml:"body,omitempty"`
 	BodyFile string `yaml:"body_file,omitempty"`
 	Scope    string `yaml:"scope,omitempty"`
-}
-
-// ModeDefinition is an inline mode within an agent file.
-type ModeDefinition struct {
-	Slug           string         `yaml:"slug"`
-	Name           string         `yaml:"name"`
-	PromptAddendum string         `yaml:"promptAddendum"`
-	ToolOverrides  map[string]any `yaml:"toolOverrides"`
 }
 
 // AgentConstraints is the frontmatter slot for per-agent runtime

@@ -185,13 +185,6 @@ func (a *API) handleUpdateSettings(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	if v, ok := raw["mode_auto_switch_pref"]; ok {
-		// B3 (CW-20260428-0011): pass-through. UpdateUserSettings validates the enum.
-		if err := json.Unmarshal(v, &existing.ModeAutoSwitchPref); err != nil {
-			a.errorResp(w, http.StatusBadRequest, "invalid value for field 'mode_auto_switch_pref'")
-			return
-		}
-	}
 	if v, ok := raw["allow_unsigned_plugins"]; ok {
 		// J.2: raw field pass-through. The setting is honoured only in
 		// devmode builds of the host (compile-time gate in
@@ -252,46 +245,7 @@ func (a *API) handleUpdateSettings(w http.ResponseWriter, r *http.Request) {
 	a.jsonResp(w, http.StatusOK, out)
 }
 
-// handleGetModeAutoSwitch returns the user-level preference for auto-applying
-// classifier mode suggestions (B3, CW-20260428-0011). Empty string means the
-// user has not made a choice yet — the FE should render the first-use prompt
-// the next time a suggestion arrives.
-func (a *API) handleGetModeAutoSwitch(w http.ResponseWriter, r *http.Request) {
-	settings, err := a.Services.Store.GetUserSettings()
-	if err != nil {
-		a.errorResp(w, http.StatusInternalServerError, "failed to load settings")
-		return
-	}
-	a.jsonResp(w, http.StatusOK, map[string]string{"pref": settings.ModeAutoSwitchPref})
-}
-
-// handleSetModeAutoSwitch updates the user-level preference. Accepts the
-// empty string to clear (back to first-use). Validation against the enum
-// (always/ask/never) is delegated to UpdateUserSettings.
-func (a *API) handleSetModeAutoSwitch(w http.ResponseWriter, r *http.Request) {
-	var body struct {
-		Pref string `json:"pref"`
-	}
-	if err := a.decode(r, &body); err != nil {
-		a.errorResp(w, http.StatusBadRequest, "invalid request body")
-		return
-	}
-	switch body.Pref {
-	case "", "always", "ask", "never":
-		// valid
-	default:
-		a.errorResp(w, http.StatusBadRequest, "pref must be \"\", \"always\", \"ask\", or \"never\"")
-		return
-	}
-	existing, err := a.Services.Store.GetUserSettings()
-	if err != nil {
-		a.errorResp(w, http.StatusInternalServerError, "failed to load settings")
-		return
-	}
-	existing.ModeAutoSwitchPref = body.Pref
-	if err := a.Services.Store.UpdateUserSettings(existing); err != nil {
-		a.errorResp(w, http.StatusInternalServerError, "failed to update settings")
-		return
-	}
-	a.jsonResp(w, http.StatusOK, map[string]string{"pref": existing.ModeAutoSwitchPref})
-}
+// Phase 0 item 21 ("Cut Modes, in full") removed handleGetModeAutoSwitch and
+// handleSetModeAutoSwitch (B3, CW-20260428-0011) — the classifier mode
+// suggestion this preference gated is gone (classify.ClassifyMode was
+// deleted, along with the mode_suggestion SSE event it fed).

@@ -529,10 +529,18 @@ func TestAttemptBrokerDispatch_ToolExecuteMalformedJSON_NoEmit(t *testing.T) {
 }
 
 // TestAttemptBrokerDispatch_BuildsInputFromClassifications validates
-// the primitive-projection seam. The broker MUST receive the per-turn
-// classified mode (from classify.ClassifyMode), the loopState's
-// scope/pattern (from classifyAndAttach upstream), and any reflex
-// match — all projected to the broker.Input primitive shape.
+// the primitive-projection seam. The broker MUST receive the loopState's
+// scope/pattern (from classifyAndAttach upstream) and any reflex match —
+// projected to the broker.Input primitive shape.
+//
+// Phase 0 item 21 ("Cut Modes, in full") deleted classify.ClassifyMode,
+// the per-turn mode classifier that used to populate broker.Input.Mode /
+// ModeConfidence here (see TASKS/phase-0/21-cut-modes.md). This test
+// used to assert a "/work" prefix projected ModeWork at confidence 1.0;
+// it now asserts the opposite — in.Mode/in.ModeConfidence stay at their
+// zero values regardless of input text, which is exactly what makes
+// agentkit's DeterministicBroker rules 2-4 (mode=work / mode=plan)
+// permanently unreachable without touching the external agentkit module.
 func TestAttemptBrokerDispatch_BuildsInputFromClassifications(t *testing.T) {
 	fb := &fakeAgentBroker{
 		decision: agentbroker.Decision{
@@ -551,8 +559,10 @@ func TestAttemptBrokerDispatch_BuildsInputFromClassifications(t *testing.T) {
 	ls.SetClassification(classify.TierMedium, classify.PatternSubagent)
 
 	ch := make(chan chat.StreamEvent, 4)
-	// "/work" prefix triggers SignalSlashWork in ClassifyMode at
-	// confidence 1.0, projected to broker.Input.Mode.
+	// "/work" prefix used to trigger SignalSlashWork in the now-deleted
+	// classify.ClassifyMode at confidence 1.0. It's kept in the fixture
+	// text to prove the mode signal genuinely never fires anymore, not
+	// just that it was never exercised.
 	_ = s.attemptBrokerDispatch(context.Background(), "session-1", "turn-1", "/work refactor the foo", "agent-1", ls, ch)
 	close(ch)
 
@@ -563,11 +573,11 @@ func TestAttemptBrokerDispatch_BuildsInputFromClassifications(t *testing.T) {
 	if got.UserText != "/work refactor the foo" {
 		t.Errorf("input.UserText = %q, want \"/work refactor the foo\"", got.UserText)
 	}
-	if got.Mode != agentbroker.ModeWork {
-		t.Errorf("input.Mode = %q, want %q (per-turn classified)", got.Mode, agentbroker.ModeWork)
+	if got.Mode != "" {
+		t.Errorf("input.Mode = %q, want \"\" (classify.ClassifyMode was cut — Mode must never be populated)", got.Mode)
 	}
-	if got.ModeConfidence != 1.0 {
-		t.Errorf("input.ModeConfidence = %g, want 1.0 (slash prefix)", got.ModeConfidence)
+	if got.ModeConfidence != 0 {
+		t.Errorf("input.ModeConfidence = %g, want 0 (classify.ClassifyMode was cut — ModeConfidence must never be populated)", got.ModeConfidence)
 	}
 	if got.ScopeTier != classify.TierMedium.String() {
 		t.Errorf("input.ScopeTier = %q, want %q", got.ScopeTier, classify.TierMedium.String())

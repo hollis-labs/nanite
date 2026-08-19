@@ -228,17 +228,6 @@ func scanAgent(scanner interface{ Scan(...any) error }, a *AgentProfile) error {
 	)
 }
 
-// AgentMode represents a mode configuration for an agent.
-type AgentMode struct {
-	ID             string `json:"id"`
-	AgentID        string `json:"agent_id"`
-	Slug           string `json:"slug"`
-	Name           string `json:"name"`
-	PromptAddendum string `json:"prompt_addendum"`
-	ToolOverrides  string `json:"tool_overrides"`
-	Settings       string `json:"settings"`
-}
-
 // GetAgentBySlug returns an agent profile by its slug.
 func (s *Store) GetAgentBySlug(slug string) (*AgentProfile, error) {
 	var a AgentProfile
@@ -247,19 +236,6 @@ func (s *Store) GetAgentBySlug(slug string) (*AgentProfile, error) {
 		return nil, fmt.Errorf("get agent by slug %s: %w", slug, err)
 	}
 	return &a, nil
-}
-
-// GetAgentMode returns a specific mode for an agent.
-func (s *Store) GetAgentMode(agentID, modeSlug string) (*AgentMode, error) {
-	var m AgentMode
-	err := s.DB.QueryRow(
-		`SELECT id, agent_id, slug, name, prompt_addendum, tool_overrides, settings
-		 FROM agent_modes WHERE agent_id = ? AND slug = ?`, agentID, modeSlug,
-	).Scan(&m.ID, &m.AgentID, &m.Slug, &m.Name, &m.PromptAddendum, &m.ToolOverrides, &m.Settings)
-	if err != nil {
-		return nil, fmt.Errorf("get agent mode %s/%s: %w", agentID, modeSlug, err)
-	}
-	return &m, nil
 }
 
 // GetAgent returns an agent profile by ID.
@@ -413,14 +389,13 @@ func (s *Store) CreateAgent(a *AgentProfile) error {
 }
 
 // DeleteAgent removes an agent profile by slug, including related records
-// (modes, skills, session associations). Returns nil if the agent doesn't exist.
+// (skills, session associations). Returns nil if the agent doesn't exist.
 //
 // All deletes run inside a single transaction — no PRAGMA toggling. Junction
-// tables (agent_modes, agent_skills, agent_prompt_templates,
-// agent_mode_assignments, session_agents) intentionally have no FK back to
-// agent_profiles (they may reference file-based agents), so deleting them
-// explicitly is both correct and FK-safe. Messages have their agent_id
-// nullified to preserve user data.
+// tables (agent_skills, agent_prompt_templates, session_agents)
+// intentionally have no FK back to agent_profiles (they may reference
+// file-based agents), so deleting them explicitly is both correct and
+// FK-safe. Messages have their agent_id nullified to preserve user data.
 func (s *Store) DeleteAgent(slug string) error {
 	agent, err := s.GetAgentBySlug(slug)
 	if err != nil {
@@ -435,10 +410,8 @@ func (s *Store) DeleteAgent(slug string) error {
 
 	cleanups := []string{
 		"DELETE FROM session_agents WHERE agent_id = ?",
-		"DELETE FROM agent_modes WHERE agent_id = ?",
 		"DELETE FROM agent_skills WHERE agent_id = ?",
 		"DELETE FROM agent_prompt_templates WHERE agent_id = ?",
-		"DELETE FROM agent_mode_assignments WHERE agent_id = ?",
 		// Per-agent capability/runtime children (migrations 068/070/074/085).
 		// These declare FKs to agent_profiles(id); clean them explicitly so a
 		// managed-agent delete leaves no orphaned reflexes, known tools/skills,
@@ -562,51 +535,6 @@ func (s *Store) UpdateAgent(a *AgentProfile) error {
 		return fmt.Errorf("update agent: %w", err)
 	}
 	a.UpdatedAt = now
-	return nil
-}
-
-// ListAgentModes returns all modes for a given agent.
-func (s *Store) ListAgentModes(agentID string) ([]AgentMode, error) {
-	rows, err := s.DB.Query(
-		`SELECT id, agent_id, slug, name, prompt_addendum, tool_overrides, settings
-		 FROM agent_modes WHERE agent_id = ? ORDER BY slug`, agentID,
-	)
-	if err != nil {
-		return nil, fmt.Errorf("list agent modes: %w", err)
-	}
-	defer rows.Close()
-
-	out := make([]AgentMode, 0)
-	for rows.Next() {
-		var m AgentMode
-		if err := rows.Scan(&m.ID, &m.AgentID, &m.Slug, &m.Name, &m.PromptAddendum, &m.ToolOverrides, &m.Settings); err != nil {
-			return nil, fmt.Errorf("scan agent mode: %w", err)
-		}
-		out = append(out, m)
-	}
-	return out, rows.Err()
-}
-
-// CreateAgentMode inserts a new mode for an agent.
-func (s *Store) CreateAgentMode(m *AgentMode) error {
-	if m.ID == "" {
-		m.ID = uuid.New().String()
-	}
-	if m.ToolOverrides == "" {
-		m.ToolOverrides = "{}"
-	}
-	if m.Settings == "" {
-		m.Settings = "{}"
-	}
-
-	_, err := s.DB.Exec(
-		`INSERT INTO agent_modes (id, agent_id, slug, name, prompt_addendum, tool_overrides, settings)
-		 VALUES (?, ?, ?, ?, ?, ?, ?)`,
-		m.ID, m.AgentID, m.Slug, m.Name, m.PromptAddendum, m.ToolOverrides, m.Settings,
-	)
-	if err != nil {
-		return fmt.Errorf("create agent mode: %w", err)
-	}
 	return nil
 }
 

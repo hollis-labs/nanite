@@ -42,7 +42,7 @@ func TestEnvelopeRespond_E2E_TranscriptThreadedIntoContext(t *testing.T) {
 
 	// Next-turn simulation: assemble context as the LLM adapter would.
 	client := chat.NewContextClient(a.Services.Store)
-	sources, err := client.AssembleSlotSources(context.Background(), sess, agent, &store.AgentMode{}, nil, nil)
+	sources, err := client.AssembleSlotSources(context.Background(), sess, agent, nil)
 	if err != nil {
 		t.Fatalf("AssembleSlotSources: %v", err)
 	}
@@ -93,7 +93,7 @@ func TestEnvelopeRespond_E2E_SilentHandlerNotInContext(t *testing.T) {
 	}
 
 	client := chat.NewContextClient(a.Services.Store)
-	sources, err := client.AssembleSlotSources(context.Background(), sess, agent, &store.AgentMode{}, nil, nil)
+	sources, err := client.AssembleSlotSources(context.Background(), sess, agent, nil)
 	if err != nil {
 		t.Fatalf("AssembleSlotSources: %v", err)
 	}

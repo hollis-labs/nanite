@@ -137,7 +137,8 @@ func (s *Server) SetPluginsDir(dir string) {
 // ListenAndServe starts the HTTP server.
 //
 // Middleware chain (outer -> inner):
-//   recover -> logging -> CORS -> basicAuth -> callerIdentity -> bodyLimit -> mux
+//
+//	recover -> logging -> CORS -> basicAuth -> callerIdentity -> bodyLimit -> mux
 //
 // CORS is outside basicAuth so that preflight (OPTIONS) requests succeed for
 // allowed origins even when the caller has not yet sent credentials — auth
@@ -492,7 +493,6 @@ var knownEmitEventTypes = map[string]struct{}{
 	naniteplugin.EventMessageDeleted:      {},
 	naniteplugin.EventMessageBookmarked:   {},
 	naniteplugin.EventMessageUnbookmarked: {},
-	naniteplugin.EventModeChanged:         {},
 	naniteplugin.EventScopeChanged:        {},
 	naniteplugin.EventToolCalled:          {},
 	naniteplugin.EventToolFailed:          {},

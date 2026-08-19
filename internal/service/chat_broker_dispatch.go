@@ -90,8 +90,12 @@ type agentBrokerDecisionPayload struct {
 	// 0 for default-chat-handle / unmatched rules.
 	Confidence float64 `json:"confidence"`
 
-	// ModeSignal is the per-turn classified mode ("work", "chat", ...)
-	// from classify.ClassifyMode. Empty when no mode signal fired.
+	// ModeSignal mirrors agent_broker_decisions.mode_signal /
+	// agentbroker.Input.Mode. Always empty since Phase 0 item 21 ("Cut
+	// Modes, in full") deleted classify.ClassifyMode, the per-turn mode
+	// classifier that used to populate this field — kept as a wire-shape
+	// field (not removed) since agent_broker_decisions is a durable
+	// telemetry table, not part of the Mode cut itself.
 	ModeSignal string `json:"mode_signal,omitempty"`
 
 	// ScopeTier is the loop-state's classified scope tier
@@ -353,26 +357,22 @@ func (s *chatServiceImpl) attemptBrokerDispatch(
 // rule set.
 //
 // The projection composes the same primitives the chat-loop strategy
-// path consumes (classify.ClassifyMode + classify.Classify + promptrouter.Match
-// over promptrouter.BuiltinReflexes). It does NOT consult a session-mode
-// pointer — SessionMode is the workspace persistent mode and the
-// deterministic v1 broker keys off the per-turn classified mode (see
-// CW-20260509-0045 implementer report §"Distinct Mode vs SessionMode").
+// path consumes (classify.Classify + promptrouter.Match over
+// promptrouter.BuiltinReflexes).
+//
+// Phase 0 item 21 ("Cut Modes, in full") deleted classify.ClassifyMode —
+// the per-turn mode classifier that used to populate in.Mode /
+// in.ModeConfidence here. Those fields are now permanently left at their
+// zero values, which makes agentkit's DeterministicBroker rules 2-4 (the
+// mode=work / mode=plan thresholds) permanently unreachable without any
+// change to the external agentkit module: in.Mode == ModeWork (and
+// == ModePlan) can never be true when in.Mode is always "". Rules 1
+// (reflex override) and 5/6 (ScopeTier/ExecutionPattern-only) are
+// untouched. See docs/engineering/architecture/03-steering.md's "What's
+// cut" section and TASKS/phase-0/21-cut-modes.md.
 func (s *chatServiceImpl) buildBrokerInput(userContent string, ls *loopState) agentbroker.Input {
 	in := agentbroker.Input{
 		UserText: userContent,
-	}
-
-	// Per-turn mode classification. Same call ChatService already runs
-	// upstream of this seam (the mode_suggestion emit on
-	// chat_generate.go:420), but called fresh here so the broker has a
-	// stable input even if the upstream emit was skipped (e.g. the
-	// classified mode matched the session mode and the suggestion was
-	// suppressed).
-	mode := classify.ClassifyMode(userContent)
-	if mode.Suggested != "" {
-		in.Mode = mode.Suggested
-		in.ModeConfidence = mode.Confidence
 	}
 
 	// Pre-loop scope/pattern classification. Read from loopState because

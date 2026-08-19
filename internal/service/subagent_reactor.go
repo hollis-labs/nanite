@@ -88,7 +88,7 @@ func (s *chatServiceImpl) resolveSubagentCompletionPolicy(ctx context.Context, s
 		}
 	}
 
-	if agent, _, err := s.agents.ResolveForSession(ctx, sessionID); err == nil && agent != nil {
+	if agent, err := s.agents.ResolveForSession(ctx, sessionID); err == nil && agent != nil {
 		constraints := chat.ParseAgentConstraints(agent.Constraints)
 		if constraints.SubagentCompletionPolicy != "" {
 			if chat.IsValidSubagentCompletionPolicy(constraints.SubagentCompletionPolicy) {

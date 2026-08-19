@@ -141,6 +141,10 @@ func (a *API) handleCreateAgent(w http.ResponseWriter, r *http.Request) {
 	a.jsonResp(w, http.StatusCreated, view)
 }
 
+// Phase 0 item 21 ("Cut Modes, in full") removed the "modes" key this
+// response used to carry (a.Services.Agents.ListModes — Legacy Agent Mode
+// is gone). The frontend's AgentProfileManager.tsx / AgentDetailView.tsx
+// "Modes" tab were updated in lock-step to stop expecting it.
 func (a *API) handleGetAgent(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 	ag, err := a.Services.Agents.Get(r.Context(), id)
@@ -149,15 +153,8 @@ func (a *API) handleGetAgent(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	modes, err := a.Services.Agents.ListModes(r.Context(), id)
-	if err != nil {
-		a.errorResp(w, http.StatusInternalServerError, err.Error())
-		return
-	}
-
 	a.jsonResp(w, http.StatusOK, map[string]any{
 		"agent": a.agentView(*ag),
-		"modes": modes,
 	})
 }
 
@@ -384,16 +381,6 @@ func (a *API) handleCopyAgentToManaged(w http.ResponseWriter, r *http.Request) {
 	a.jsonResp(w, http.StatusCreated, a.agentView(*res.Profile))
 }
 
-func (a *API) handleListAgentModes(w http.ResponseWriter, r *http.Request) {
-	agentID := r.PathValue("id")
-	modes, err := a.Services.Store.ListAgentModes(agentID)
-	if err != nil {
-		a.errorResp(w, http.StatusInternalServerError, err.Error())
-		return
-	}
-	a.jsonResp(w, http.StatusOK, modes)
-}
-
 func (a *API) handleListSessionAgents(w http.ResponseWriter, r *http.Request) {
 	sessionID := r.PathValue("id")
 	agents, err := a.Services.Store.ListSessionAgents(sessionID)
@@ -525,38 +512,4 @@ func (a *API) handleListProjectAgents(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	a.jsonResp(w, http.StatusOK, agents)
-}
-
-func (a *API) handleCreateAgentMode(w http.ResponseWriter, r *http.Request) {
-	agentID := r.PathValue("id")
-
-	// Verify agent exists.
-	if _, err := a.Services.Store.GetAgent(agentID); err != nil {
-		a.errorResp(w, http.StatusNotFound, "agent not found")
-		return
-	}
-
-	var req CreateAgentModeRequest
-	if err := a.decode(r, &req); err != nil {
-		a.errorResp(w, http.StatusBadRequest, "invalid JSON: "+err.Error())
-		return
-	}
-	if req.Slug == "" || req.Name == "" || req.PromptAddendum == "" {
-		a.errorResp(w, http.StatusBadRequest, "slug, name, and prompt_addendum are required")
-		return
-	}
-
-	mode := &store.AgentMode{
-		AgentID:        agentID,
-		Slug:           req.Slug,
-		Name:           req.Name,
-		PromptAddendum: req.PromptAddendum,
-		ToolOverrides:  req.ToolOverrides,
-		Settings:       req.Settings,
-	}
-	if err := a.Services.Store.CreateAgentMode(mode); err != nil {
-		a.errorResp(w, http.StatusInternalServerError, err.Error())
-		return
-	}
-	a.jsonResp(w, http.StatusCreated, mode)
 }

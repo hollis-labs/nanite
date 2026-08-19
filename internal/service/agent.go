@@ -19,8 +19,12 @@ type AgentService interface {
 	Create(ctx context.Context, agent *store.AgentProfile) error
 	Update(ctx context.Context, agent *store.AgentProfile) error
 	Delete(ctx context.Context, id string) error
-	ResolveForSession(ctx context.Context, sessionID string) (agent *store.AgentProfile, mode *store.AgentMode, err error)
-	// ResolveForSessionReadOnly resolves the same effective agent+mode as
+	// ResolveForSession implements the agent resolution fallback chain
+	// (session binding -> user-settings default -> hardcoded fallback).
+	// Phase 0 item 21 ("Cut Modes, in full") removed this method's second
+	// (*store.AgentMode) return value — Legacy Agent Mode is gone.
+	ResolveForSession(ctx context.Context, sessionID string) (agent *store.AgentProfile, err error)
+	// ResolveForSessionReadOnly resolves the same effective agent as
 	// ResolveForSession (session binding -> user-settings default ->
 	// hardcoded fallback) but never mutates session-agent-binding state:
 	// unlike ResolveForSession, it does not call EnsureSessionAgent or
@@ -28,8 +32,7 @@ type AgentService interface {
 	// this for read-only policy lookups (e.g. resolveMessageWakePolicy)
 	// that should not have the side effect of auto-binding a session to
 	// an agent merely because something checked its effective policy.
-	ResolveForSessionReadOnly(ctx context.Context, sessionID string) (agent *store.AgentProfile, mode *store.AgentMode, err error)
-	ListModes(ctx context.Context, agentID string) ([]store.AgentMode, error)
+	ResolveForSessionReadOnly(ctx context.Context, sessionID string) (agent *store.AgentProfile, err error)
 }
 
 // defaultFallbackAgent is the agent ID used when no session-agent binding
@@ -216,20 +219,6 @@ func (s *agentServiceImpl) Delete(_ context.Context, id string) error {
 	return s.writers.DeleteAgent(id)
 }
 
-func (s *agentServiceImpl) ListModes(_ context.Context, agentID string) ([]store.AgentMode, error) {
-	if agent.IsFileBasedID(agentID) {
-		if d := s.findDefBySlug(agent.SlugFromFileID(agentID)); d != nil {
-			return d.ToModes(), nil
-		}
-	}
-	// Stamped managed agents carry a UUID id; modes live in the file def, not
-	// the DB. Prefer the def's inline modes, fall back to DB-stored modes.
-	if d := s.findDefByID(agentID); d != nil {
-		return d.ToModes(), nil
-	}
-	return s.agents.ListAgentModes(agentID)
-}
-
 // ResolveForSession implements the agent resolution fallback chain previously
 // inlined in engine.go generateResponse (lines 446-495):
 //
@@ -239,8 +228,11 @@ func (s *agentServiceImpl) ListModes(_ context.Context, agentID string) ([]store
 //  4. Auto-assign the resolved agent to the session.
 //  5. Load the agent profile by ID, falling back to slug lookup.
 //  6. Reject disabled agents.
-//  7. Load the agent mode (falling back to empty mode on miss).
-func (s *agentServiceImpl) ResolveForSession(ctx context.Context, sessionID string) (*store.AgentProfile, *store.AgentMode, error) {
+//
+// Phase 0 item 21 ("Cut Modes, in full") removed step 7 ("load the agent
+// mode") — Legacy Agent Mode is gone, so ResolveForSession no longer
+// returns a *store.AgentMode second value.
+func (s *agentServiceImpl) ResolveForSession(ctx context.Context, sessionID string) (*store.AgentProfile, error) {
 	return s.resolveForSession(ctx, sessionID, true)
 }
 
@@ -253,7 +245,7 @@ func (s *agentServiceImpl) ResolveForSession(ctx context.Context, sessionID stri
 // unbound sessions to an agent (EnsureSessionAgent) and emitting
 // AgentAssigned as an unintended side effect. This variant runs the exact
 // same resolution chain but skips step 4 below entirely.
-func (s *agentServiceImpl) ResolveForSessionReadOnly(ctx context.Context, sessionID string) (*store.AgentProfile, *store.AgentMode, error) {
+func (s *agentServiceImpl) ResolveForSessionReadOnly(ctx context.Context, sessionID string) (*store.AgentProfile, error) {
 	return s.resolveForSession(ctx, sessionID, false)
 }
 
@@ -261,7 +253,7 @@ func (s *agentServiceImpl) ResolveForSessionReadOnly(ctx context.Context, sessio
 // and ResolveForSessionReadOnly. allowAutoAssign gates step 4
 // (EnsureSessionAgent + EmitAgentAssigned) only — every other step in the
 // resolution chain runs identically regardless of its value.
-func (s *agentServiceImpl) resolveForSession(ctx context.Context, sessionID string, allowAutoAssign bool) (*store.AgentProfile, *store.AgentMode, error) {
+func (s *agentServiceImpl) resolveForSession(ctx context.Context, sessionID string, allowAutoAssign bool) (*store.AgentProfile, error) {
 	agentID, modeName, autoAssigned := s.resolveBinding(sessionID)
 
 	// Load the agent profile. Check file-based agents first, then DB.
@@ -269,16 +261,21 @@ func (s *agentServiceImpl) resolveForSession(ctx context.Context, sessionID stri
 	if err != nil {
 		resolved, err = s.GetBySlug(ctx, defaultFallbackSlug)
 		if err != nil {
-			return nil, nil, fmt.Errorf("resolve agent for session %s: %w", sessionID, err)
+			return nil, fmt.Errorf("resolve agent for session %s: %w", sessionID, err)
 		}
 	}
 
 	if resolved.Status == "disabled" {
-		return nil, nil, fmt.Errorf("agent %q is disabled", resolved.Name)
+		return nil, fmt.Errorf("agent %q is disabled", resolved.Name)
 	}
 
 	// Auto-assign to session if we had to fall back (only for the
-	// mutating variant — see resolveForSession's doc comment).
+	// mutating variant — see resolveForSession's doc comment). modeName
+	// here is the session_agents.mode binding string — a separate table/
+	// column from the cut Legacy AgentMode / Session Mode systems (see
+	// GLOSSARY.md's naming-collision guidance) and out of this task's
+	// scope; resolveBinding's own fallback ("default") threads through
+	// unchanged.
 	if autoAssigned && allowAutoAssign {
 		if err := s.writers.EnsureSessionAgent(sessionID, resolved.ID, modeName, true); err != nil {
 			slog.Warn("agent-service: failed to auto-assign agent", "agent", resolved.ID, "session_id", sessionID, "err", err)
@@ -288,14 +285,7 @@ func (s *agentServiceImpl) resolveForSession(ctx context.Context, sessionID stri
 		}
 	}
 
-	// Load mode — check file-based modes first, then DB.
-	mode, err := s.resolveMode(ctx, resolved.ID, modeName)
-	if err != nil {
-		slog.Warn("agent-service: could not load mode (using base prompt)", "agent", resolved.ID, "mode", modeName, "err", err)
-		mode = &store.AgentMode{}
-	}
-
-	return resolved, mode, nil
+	return resolved, nil
 }
 
 // resolveBinding determines the agent ID and mode for a session.
@@ -319,21 +309,3 @@ func (s *agentServiceImpl) resolveBinding(sessionID string) (agentID, modeName s
 	return defaultFallbackAgent, "default", true
 }
 
-// resolveMode loads a mode for an agent, checking file-based definitions first.
-func (s *agentServiceImpl) resolveMode(_ context.Context, agentID, modeName string) (*store.AgentMode, error) {
-	var def *agent.Definition
-	if agent.IsFileBasedID(agentID) {
-		def = s.findDefBySlug(agent.SlugFromFileID(agentID))
-	} else {
-		def = s.findDefByID(agentID)
-	}
-	if def != nil {
-		for _, m := range def.ToModes() {
-			if m.Slug == modeName {
-				return &m, nil
-			}
-		}
-		return nil, fmt.Errorf("mode %q not found for file agent %q", modeName, def.Slug)
-	}
-	return s.agents.GetAgentMode(agentID, modeName)
-}

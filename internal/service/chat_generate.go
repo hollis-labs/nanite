@@ -205,7 +205,7 @@ func (s *chatServiceImpl) generateResponse(ctx context.Context, sessionID, assis
 	s.maybeEmitEmbeddingWarning(sessionID, ch)
 
 	// --- Resolve agent ---
-	agent, mode, err := s.agents.ResolveForSession(ctx, sessionID)
+	agent, err := s.agents.ResolveForSession(ctx, sessionID)
 	if err != nil {
 		ch <- chat.ErrorEvent(chat.ErrorCodeInternal, "Failed to resolve agent", map[string]interface{}{"raw": err.Error()})
 		return
@@ -362,44 +362,12 @@ func (s *chatServiceImpl) generateResponse(ctx context.Context, sessionID, assis
 	tools := selection.Tools
 	normalizeToolInputSchemas(tools)
 
-	// B1 (CW-20260428-0009) + F1 (CW-20260429-0001): apply session-mode
-	// tool_overrides at the tool surface. B1 wired this for the deterministic
-	// (non-progressive) selection path; F1 extends the same filter to the
-	// progressive path's seed builtins AND its catalog summaries, and stores
-	// the resolved spec on loopState so handleRequestTools can apply the same
-	// rules to tools loaded mid-turn via request_tools.
-	//
-	// Resolution helper is store.ApplyToolOverrides (deny > allow, explicit >
-	// pattern); meta-tools are exempt so the agent's escape hatches stay
-	// reachable regardless of mode policy.
-	var modeOverrideSpec store.ToolOverrideSpec
-	if session.CurrentModeID != nil && *session.CurrentModeID != "" {
-		if sm, gerr := s.store.GetMode(*session.CurrentModeID); gerr == nil && sm != nil &&
-			sm.ToolOverrides != "" && sm.ToolOverrides != "{}" {
-			spec, perr := store.ParseToolOverrides(sm.ToolOverrides)
-			if perr != nil {
-				slog.Warn("chat-service: parse session-mode tool_overrides failed",
-					"session_id", sessionID, "mode_id", sm.ID, "err", perr)
-			} else {
-				modeOverrideSpec = spec
-			}
-		}
-	}
-	if !isEmptySpec(modeOverrideSpec) {
-		before := len(tools)
-		tools = applyModeToolOverridesToTools(tools, modeOverrideSpec)
-		if selection.Progressive && selection.Catalog != "" && s.tools != nil {
-			// Rebuild the catalog so denied tools aren't advertised to the
-			// LLM in the progressive system prefix. Source-of-truth is the
-			// same summary list used in tool.go (ListSummaries returns the
-			// full registered set; we filter, then rebuild).
-			filteredSummaries := applyModeToolOverridesToSummaries(s.tools.ListSummaries(), modeOverrideSpec)
-			selection.Catalog = chat.BuildToolCatalog(filteredSummaries)
-		}
-		slog.Debug("chat-service: session-mode tool_overrides applied",
-			"session_id", sessionID, "progressive", selection.Progressive,
-			"tools_before", before, "tools_after", len(tools))
-	}
+	// Phase 0 item 21 ("Cut Modes, in full") deleted the B1 (CW-20260428-0009)
+	// + F1 (CW-20260429-0001) session-mode tool_overrides block that used to
+	// live here — it resolved session.CurrentModeID -> s.store.GetMode and
+	// applied the mode's tool_overrides (deny > allow, explicit > pattern)
+	// to the tool surface. Both the session-mode pointer and store.GetMode
+	// are gone; there is no more per-session tool_overrides source.
 
 	// G-HOT-SWAP-DEAD activation. NANITE_TOOLS_LAZY_LOAD=true partitions the
 	// tool universe into "essential" (inline, full schemas) and "lazy"
@@ -412,7 +380,7 @@ func (s *chatServiceImpl) generateResponse(ctx context.Context, sessionID, assis
 	lazyLoadActive := false
 	if chat.IsToolsLazyLoadEnabled() && !selection.Progressive {
 		prevState := s.loadToolPartitionState(sessionID)
-		partition, newState := chat.PartitionTools(tools, modeOverrideSpec, nil, prevState, chat.ToolEssentialCap)
+		partition, newState := chat.PartitionTools(tools, nil, prevState, chat.ToolEssentialCap)
 		s.storeToolPartitionState(sessionID, newState)
 		if len(partition.Lazy) > 0 {
 			lazyLoadActive = true
@@ -488,54 +456,19 @@ func (s *chatServiceImpl) generateResponse(ctx context.Context, sessionID, assis
 		}
 	}
 
-	// B1 (CW-20260428-0009): resolve session-level mode (chat/plan/work or
-	// any custom *store.Mode). Order: session.current_mode_id → nil (callers
-	// fall through to the legacy AgentMode pipeline already wired into the
-	// Agent slot). Resolution is best-effort — a missing/dangling FK or store
-	// error logs and proceeds with sessionMode=nil rather than failing the turn.
-	var sessionMode *store.Mode
-	if session.CurrentModeID != nil && *session.CurrentModeID != "" {
-		if m, gerr := s.store.GetMode(*session.CurrentModeID); gerr != nil {
-			slog.Warn("chat-service: GetMode failed for session-mode pointer",
-				"session_id", sessionID, "mode_id", *session.CurrentModeID, "err", gerr)
-		} else if m != nil {
-			sessionMode = m
-		}
-	}
-
-	// B2 (CW-20260428-0010): emit a non-binding mode_suggestion event when
-	// the deterministic classifier disagrees with the session's current mode
-	// at high confidence. This is informational only — B3 wires the
-	// confirm-card / auto-apply path on top. Placed before assembleTurnContext
-	// so the suggestion races ahead of any backend slot work and the FE can
-	// stage the prompt while context is still being built.
-	if cls := classify.ClassifyMode(userContent); cls.Suggested != "" && cls.Confidence >= 0.7 {
-		currentSlug := ""
-		if sessionMode != nil {
-			currentSlug = sessionMode.Slug
-		}
-		if currentSlug == "" && mode != nil {
-			currentSlug = mode.Slug
-		}
-		if cls.Suggested != currentSlug {
-			signals := make([]string, len(cls.Signals))
-			for i, sig := range cls.Signals {
-				signals[i] = string(sig)
-			}
-			payload := map[string]any{
-				"current":    currentSlug,
-				"suggested":  cls.Suggested,
-				"confidence": cls.Confidence,
-				"signals":    signals,
-			}
-			if data, err := json.Marshal(payload); err == nil {
-				ch <- chat.StreamEvent{Type: "mode_suggestion", Data: string(data)}
-			}
-		}
-	}
+	// Phase 0 item 21 ("Cut Modes, in full") deleted two blocks that used to
+	// live here:
+	//   - B1 (CW-20260428-0009)'s sessionMode resolution
+	//     (session.CurrentModeID -> s.store.GetMode).
+	//   - B2 (CW-20260428-0010)'s mode_suggestion SSE emit, which compared
+	//     classify.ClassifyMode(userContent) against the resolved session
+	//     mode and streamed a non-binding suggestion event.
+	// Both classify.ClassifyMode and store.GetMode/sessions.current_mode_id
+	// are gone. assembleTurnContext below no longer takes a sessionMode
+	// argument.
 
 	// --- Assemble context (slot-based) ---
-	slotResult, err := s.assembleTurnContext(ctx, session, agent, mode, workspace, tools, extraSystemPrefix, providerName, model, ch, sessionMode, toolsLazyHint)
+	slotResult, err := s.assembleTurnContext(ctx, session, agent, workspace, tools, extraSystemPrefix, providerName, model, ch, toolsLazyHint)
 	if err != nil {
 		return
 	}
@@ -648,7 +581,11 @@ func (s *chatServiceImpl) generateResponse(ctx context.Context, sessionID, assis
 	s.streams.BroadcastPresence(presenceStart)
 
 	if s.events != nil {
-		s.events.EmitSessionStart(ctx, sessionID, agent.ID, model, mode.Slug)
+		// Phase 0 item 21 ("Cut Modes, in full") deleted store.AgentMode —
+		// there is no more per-agent mode slug to report. "default" matches
+		// the literal already used at session.go's own EmitSessionStart call
+		// site for the same event.
+		s.events.EmitSessionStart(ctx, sessionID, agent.ID, model, "default")
 	}
 
 	// CW-20260420-0032: PTY observability — emit pty_turn_start so
@@ -701,11 +638,6 @@ func (s *chatServiceImpl) generateResponse(ctx context.Context, sessionID, assis
 	// I1 (CW-20260426-0004): attach turn ID to loop state so broker/tool
 	// producers can record to the same snapshot.
 	ls.inspectorTurnID = inspectorTurnID
-
-	// F1 (CW-20260429-0001): pass the resolved session-mode tool_overrides
-	// spec into the loop so handleRequestTools can scrub progressive-loaded
-	// tools before they reach the LLM. Empty spec is a passthrough.
-	ls.modeToolOverrides = modeOverrideSpec
 
 	// I1 (CW-20260426-0004): record scope tier to inspector (B2 already shipped).
 	if s.inspector != nil && inspectorTurnID != "" {
@@ -1070,7 +1002,7 @@ func (s *chatServiceImpl) generateResponse(ctx context.Context, sessionID, assis
 		// provider.StreamChat per turn with the slot pipeline running as
 		// today.
 		if chat.IsCLIProvider(providerName) {
-			provCh, err = s.driveBootSession(provCtx, sessionID, session, agent, mode, slotResult, userContent, ls.iteration, providerName)
+			provCh, err = s.driveBootSession(provCtx, sessionID, session, agent, slotResult, userContent, ls.iteration, providerName)
 		} else {
 			provCh, err = prov.StreamChat(provCtx, llmtypes.ChatRequest{
 				SystemPrompt: extraSystemPrefix,
@@ -1657,7 +1589,6 @@ func (s *chatServiceImpl) generateResponse(ctx context.Context, sessionID, assis
 					resultBlocks, ls.toolCallRefs,
 					sessionID, &ls.reflectionFired,
 					ls.inspectorTurnID,
-					ls.modeToolOverrides,
 				)
 			} else {
 				regularTools = append(regularTools, tu)
@@ -1988,7 +1919,7 @@ func (s *chatServiceImpl) generateResponse(ctx context.Context, sessionID, assis
 	metrics := &store.ExecutionMetrics{
 		SessionID: sessionID, MessageID: assistantMsgID,
 		Provider: providerName, Adapter: adapterType, Model: model,
-		AgentID: agent.ID, AgentSlug: agent.Slug, Mode: mode.Slug,
+		AgentID: agent.ID, AgentSlug: agent.Slug,
 		DurationMs:      time.Since(startTime).Milliseconds(),
 		ContextMessages: len(chatMessages), ToolIterations: ls.iteration,
 		ToolCalls: len(ls.toolCallRefs),
@@ -2448,21 +2379,22 @@ func toolSlotChangeKindFor(s HydrationState) string {
 // ContextWindow for the compaction pipeline. On error it writes an error
 // event to the stream and returns; callers should just `return` on non-nil
 // err without emitting again.
+//
+// Phase 0 item 21 ("Cut Modes, in full") removed the `mode *store.AgentMode`
+// and `sessionMode *store.Mode` parameters this used to take.
 func (s *chatServiceImpl) assembleTurnContext(
 	ctx context.Context,
 	session *store.Session,
 	agent *store.AgentProfile,
-	mode *store.AgentMode,
 	workspace *store.Workspace,
 	tools []llmtypes.ToolDefinition,
 	extraSystemPrefix string,
 	providerName, model string,
 	ch chan chat.StreamEvent,
-	sessionMode *store.Mode,
 	toolsLazyHint string,
 ) (*SlotAssemblyResult, error) {
 	windowSize := s.contextWindowSize(providerName, model)
-	result, err := s.context.AssembleSlots(ctx, session, agent, mode, workspace, tools, extraSystemPrefix, windowSize, sessionMode, toolsLazyHint)
+	result, err := s.context.AssembleSlots(ctx, session, agent, workspace, tools, extraSystemPrefix, windowSize, toolsLazyHint)
 	if err != nil {
 		ch <- chat.ErrorEvent(chat.ErrorCodeInternal, "Failed to assemble context",
 			map[string]interface{}{"raw": err.Error()})
@@ -2813,7 +2745,6 @@ func (s *chatServiceImpl) handleRequestTools(
 	sessionID string,
 	reflectionFired *bool,
 	inspectorTurnID string, // I1 (CW-20260426-0004): "" when inspector is disabled
-	modeOverrideSpec store.ToolOverrideSpec, // F1 (CW-20260429-0001): scrub mode-denied tools loaded mid-turn
 ) ([]llmtypes.ContentBlock, []chat.ToolCallRef) {
 	ch <- chat.StreamEvent{Type: "tool_call", Tool: tu.Name, ToolID: tu.ID}
 	*totalCalls++
@@ -2890,18 +2821,6 @@ func (s *chatServiceImpl) handleRequestTools(
 	}
 
 	newTools, rtResult, _ := s.tools.HandleRequestTools(ctx, tu.Input)
-
-	// F1 (CW-20260429-0001): scrub mode-denied tools BEFORE they reach the
-	// LLM. Same resolution helper B1 wired at materialization (deny > allow,
-	// explicit > pattern); meta-tools are exempt. Empty spec is a passthrough.
-	if !isEmptySpec(modeOverrideSpec) {
-		filtered := applyModeToolOverridesToTools(newTools, modeOverrideSpec)
-		if len(filtered) != len(newTools) {
-			slog.Info("chat-service: request_tools filtered by session-mode tool_overrides",
-				"session_id", sessionID, "before", len(newTools), "after", len(filtered))
-		}
-		newTools = filtered
-	}
 
 	var loaded []string
 	for _, nt := range newTools {

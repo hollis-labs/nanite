@@ -32,16 +32,15 @@ type ContextService interface {
 	// ChatRequest.SystemPrompt; callers should pass extraSystemPrefix there
 	// directly so that static content flows exclusively through SlotBlocks.
 	//
-	// sessionMode (B1, CW-20260428-0009) is the resolved session-level
-	// *store.Mode — pass nil when no session-mode pointer is set. Distinct
-	// from the legacy `mode *store.AgentMode` argument which still feeds the
-	// Agent slot.
-	//
 	// toolsLazyHint (G-HOT-SWAP-DEAD activation) is the LoadHint string
 	// surfaced after S3b's tools-slot output when the caller's
 	// chat.PartitionTools step produced a non-empty lazy set. Empty string
 	// disables the hint append — preserves legacy behavior.
-	AssembleSlots(ctx context.Context, session *store.Session, agent *store.AgentProfile, mode *store.AgentMode, workspace *store.Workspace, tools []llmtypes.ToolDefinition, extraSystemPrefix string, providerWindowSize int, sessionMode *store.Mode, toolsLazyHint string) (*SlotAssemblyResult, error)
+	//
+	// Phase 0 item 21 ("Cut Modes, in full") removed this method's `mode
+	// *store.AgentMode` and `sessionMode *store.Mode` parameters — both
+	// Legacy Agent Mode and Session Mode are gone.
+	AssembleSlots(ctx context.Context, session *store.Session, agent *store.AgentProfile, workspace *store.Workspace, tools []llmtypes.ToolDefinition, extraSystemPrefix string, providerWindowSize int, toolsLazyHint string) (*SlotAssemblyResult, error)
 
 	PruneAfterTurn(ctx context.Context, sessionID string) error
 }
@@ -195,8 +194,8 @@ func NewContextService(cfg ContextServiceConfig) ContextService {
 // the G-HOT-SWAP-DEAD layer's pointer at the lazy partition. The caller
 // (chat-service) decides whether the partition is active and renders the
 // hint via chat.RenderToolLazyHint; AssembleSlots only attaches it.
-func (s *contextServiceImpl) AssembleSlots(ctx context.Context, session *store.Session, agent *store.AgentProfile, mode *store.AgentMode, workspace *store.Workspace, tools []llmtypes.ToolDefinition, extraSystemPrefix string, providerWindowSize int, sessionMode *store.Mode, toolsLazyHint string) (*SlotAssemblyResult, error) {
-	sources, err := s.client.AssembleSlotSources(ctx, session, agent, mode, workspace, sessionMode)
+func (s *contextServiceImpl) AssembleSlots(ctx context.Context, session *store.Session, agent *store.AgentProfile, workspace *store.Workspace, tools []llmtypes.ToolDefinition, extraSystemPrefix string, providerWindowSize int, toolsLazyHint string) (*SlotAssemblyResult, error) {
+	sources, err := s.client.AssembleSlotSources(ctx, session, agent, workspace)
 	if err != nil {
 		return nil, err
 	}
@@ -224,16 +223,16 @@ func (s *contextServiceImpl) AssembleSlots(ctx context.Context, session *store.S
 	// content from chat.UniversalRulesBlock() in AssembleSlotSources so
 	// every dispatch carries the universal-rules block as the cacheable
 	// prefix. The decision is deterministic and free of I/O.
+	//
+	// ModeSlug is always "" now — Phase 0 item 21 ("Cut Modes, in full")
+	// deleted both Session Mode and Legacy Agent Mode, the two sources this
+	// used to resolve from. contextbroker.AssemblyInput.ModeSlug itself is
+	// left in place (out of this task's scope — see that field's own doc
+	// comment: "used today only as a passthrough signal; future deciders
+	// may gate slots on mode" — it never drove real DecideAssembly logic).
 	slotSources := slotSourceMap(sources, toolsContent)
-	modeSlug := ""
-	if sessionMode != nil {
-		modeSlug = sessionMode.Slug
-	} else if mode != nil {
-		modeSlug = mode.Slug
-	}
 	plan := contextbroker.DecideAssembly(ctx, contextbroker.AssemblyInput{
 		Intent:    sources.Intent,
-		ModeSlug:  modeSlug,
 		SlotOrder: ctxpkg.SlotOrder,
 		Sources:   slotSources,
 		Budgets:   ctxpkg.DefaultBudgets(),

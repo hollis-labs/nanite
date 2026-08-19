@@ -109,7 +109,13 @@ func TestNew(t *testing.T) {
 	}
 
 	// Verify migrations ran by checking that tables exist.
-	tables := []string{"workspaces", "sessions", "messages", "agent_profiles", "agent_modes", "session_agents"}
+	//
+	// agent_modes was dropped by migration 104 (Phase 0 item 21, "Cut
+	// Modes, in full") — Legacy Agent Mode no longer has a backing table.
+	// Swapped in skills as a still-real post-104 table so this check
+	// still exercises "migrations ran to completion" rather than
+	// asserting a table that no longer exists.
+	tables := []string{"workspaces", "sessions", "messages", "agent_profiles", "skills", "session_agents"}
 	for _, tbl := range tables {
 		var name string
 		err := s.DB.QueryRow("SELECT name FROM sqlite_master WHERE type='table' AND name=?", tbl).Scan(&name)

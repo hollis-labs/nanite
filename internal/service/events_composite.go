@@ -146,19 +146,6 @@ func (c *CompositeEmitter) EmitMessageReceived(ctx context.Context, sessionID, m
 	}
 }
 
-func (c *CompositeEmitter) EmitModeChanged(ctx context.Context, sessionID, previousMode, newMode string) {
-	if c.activity != nil {
-		safego.Go(ctx, "service.events.activity.mode-changed", func() {
-			c.activity.EmitModeChanged(ctx, sessionID, previousMode, newMode)
-		})
-	}
-	if c.plugin != nil {
-		safego.Go(ctx, "service.events.plugin.mode-changed", func() {
-			c.plugin.EmitModeChanged(sessionID, previousMode, newMode)
-		})
-	}
-}
-
 func (c *CompositeEmitter) EmitPreCompact(ctx context.Context, sessionID string, messageCount int, reason string) {
 	if c.activity != nil {
 		safego.Go(ctx, "service.events.activity.pre-compact", func() {

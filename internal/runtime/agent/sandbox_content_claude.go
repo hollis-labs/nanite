@@ -59,14 +59,18 @@ by the UI — no error, no warning.
 
 ## Reference Files
 - ` + "`.sandbox/envelope-schema.md`" + ` — full envelope JSON schema, field docs, examples per type
-- ` + "`.sandbox/agent-context.md`" + ` — agent profile, current mode, capabilities
+- ` + "`.sandbox/agent-context.md`" + ` — agent profile, capabilities
 `
 
 // BuildAgentContext returns the .sandbox/agent-context.md body for the given
-// profile and (optional) mode. Exported so the chat service can regenerate
-// the file on slot change without re-reaching into the agent package
-// internals (Phase 4c slot-regeneration).
-func BuildAgentContext(ap *store.AgentProfile, mode *store.AgentMode) string {
+// profile. Exported so the chat service can regenerate the file on slot
+// change without re-reaching into the agent package internals (Phase 4c
+// slot-regeneration).
+//
+// Phase 0 item 21 ("Cut Modes, in full") removed the second (*store.AgentMode)
+// parameter this used to take — Legacy Agent Mode is gone, so there is no
+// more "current mode" section to render here.
+func BuildAgentContext(ap *store.AgentProfile) string {
 	var b strings.Builder
 
 	if ap == nil {
@@ -84,13 +88,6 @@ func BuildAgentContext(ap *store.AgentProfile, mode *store.AgentMode) string {
 		fmt.Fprintf(&b, "**Default Model:** %s\n", ap.DefaultModel)
 	}
 	b.WriteString("\n")
-
-	if mode != nil && mode.Name != "" {
-		fmt.Fprintf(&b, "## Current Mode: %s\n\n", mode.Name)
-		if mode.PromptAddendum != "" {
-			fmt.Fprintf(&b, "%s\n\n", mode.PromptAddendum)
-		}
-	}
 
 	if ap.MCPServers != "" && ap.MCPServers != "[]" {
 		var servers []string

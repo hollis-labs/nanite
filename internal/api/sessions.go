@@ -1,7 +1,6 @@
 package api
 
 import (
-	"bytes"
 	"database/sql"
 	"encoding/json"
 	"errors"
@@ -104,11 +103,6 @@ func (a *API) handleForkSession(w http.ResponseWriter, r *http.Request) {
 	overrides := &store.Session{
 		Provider: req.Provider,
 		Model:    req.Model,
-	}
-	// An explicit mode_id overrides the source session's mode on the fork;
-	// empty falls through to the store default (inherit source's current_mode_id).
-	if req.ModeID != "" {
-		overrides.CurrentModeID = &req.ModeID
 	}
 
 	newSess, err := a.Services.Store.ForkSession(sourceID, overrides, req.IncludeMessages)
@@ -309,212 +303,6 @@ func (a *API) handleDeleteSession(w http.ResponseWriter, r *http.Request) {
 	a.jsonResp(w, http.StatusOK, map[string]string{"archived": id})
 }
 
-func (a *API) handleSwitchSessionMode(w http.ResponseWriter, r *http.Request) {
-	sessionID := r.PathValue("id")
-
-	var req SwitchSessionModeRequest
-	if err := a.decode(r, &req); err != nil {
-		a.errorResp(w, http.StatusBadRequest, "invalid JSON: "+err.Error())
-		return
-	}
-	if req.Mode == "" {
-		a.errorResp(w, http.StatusBadRequest, "mode is required")
-		return
-	}
-
-	// Get the primary agent for this session.
-	sa, err := a.Services.Store.GetSessionPrimaryAgent(sessionID)
-	if err != nil {
-		a.errorResp(w, http.StatusNotFound, "no primary agent for session")
-		return
-	}
-
-	// Verify the mode exists for this agent.
-	if _, err := a.Services.Store.GetAgentMode(sa.AgentID, req.Mode); err != nil {
-		a.errorResp(w, http.StatusBadRequest, "unknown mode: "+req.Mode)
-		return
-	}
-
-	previousMode := sa.Mode
-
-	// Update the mode.
-	if err := a.Services.Store.SetSessionAgentMode(sessionID, sa.AgentID, req.Mode); err != nil {
-		a.errorResp(w, http.StatusInternalServerError, err.Error())
-		return
-	}
-
-	// Emit plugin event: mode changed.
-	if a.Services.Plugins != nil {
-		safego.Go(r.Context(), "api.sessions.emit.mode-changed", func() {
-			a.Services.Plugins.EmitModeChanged(sessionID, previousMode, req.Mode)
-		})
-	}
-
-	// Return updated session info.
-	sess, err := a.Services.Store.GetSession(sessionID)
-	if err != nil {
-		a.errorResp(w, http.StatusInternalServerError, err.Error())
-		return
-	}
-
-	a.jsonResp(w, http.StatusOK, map[string]any{
-		"session": sess,
-		"mode":    req.Mode,
-	})
-}
-
-// handleGetSessionMode returns the resolved session-level *store.Mode (B1,
-// CW-20260428-0009). 200 with `null` body means the session has no
-// session-mode pointer set — the legacy agent-scoped AgentMode is the active
-// mode for that session's prompts.
-func (a *API) handleGetSessionMode(w http.ResponseWriter, r *http.Request) {
-	sessionID := r.PathValue("id")
-	mode, err := a.Services.Store.GetSessionMode(sessionID)
-	if err != nil {
-		a.errorResp(w, http.StatusInternalServerError, err.Error())
-		return
-	}
-	a.jsonResp(w, http.StatusOK, mode)
-}
-
-// handleSetSessionMode points a session at a specific mode by slug or mode_id
-// (B1, CW-20260428-0009). Empty body or {slug:"", mode_id:""} clears the
-// pointer. Returns the resolved mode (or null when cleared).
-func (a *API) handleSetSessionMode(w http.ResponseWriter, r *http.Request) {
-	sessionID := r.PathValue("id")
-
-	var req SetSessionModeRequest
-	if err := a.decode(r, &req); err != nil {
-		a.errorResp(w, http.StatusBadRequest, "invalid JSON: "+err.Error())
-		return
-	}
-
-	// Verify session exists up front so we don't silently no-op a clear on a
-	// missing session.
-	if _, err := a.Services.Store.GetSession(sessionID); err != nil {
-		a.errorResp(w, http.StatusNotFound, "session not found")
-		return
-	}
-
-	// Resolve target mode ID.
-	modeID := req.ModeID
-	if modeID == "" && req.Slug != "" {
-		m, err := a.Services.Store.GetModeBySlug(req.Slug)
-		if err != nil {
-			a.errorResp(w, http.StatusInternalServerError, err.Error())
-			return
-		}
-		if m == nil {
-			a.errorResp(w, http.StatusBadRequest, "unknown mode slug: "+req.Slug)
-			return
-		}
-		modeID = m.ID
-	}
-
-	if modeID == "" {
-		// Clear path.
-		if err := a.Services.Store.ClearSessionMode(sessionID); err != nil {
-			a.errorResp(w, http.StatusInternalServerError, err.Error())
-			return
-		}
-		// F1 (CW-20260429-0001): broadcast cross-tab so a second tab open on
-		// the same session updates its mode chip without manual refetch.
-		// Empty mode_id/mode_slug signal a clear (default chat mode).
-		if a.Services.Streams != nil {
-			a.Services.Streams.BroadcastSessionModeChanged(sessionID, "", "")
-		}
-		a.jsonResp(w, http.StatusOK, nil)
-		return
-	}
-
-	// Verify mode_id resolves before writing the FK.
-	if req.ModeID != "" {
-		m, err := a.Services.Store.GetMode(modeID)
-		if err != nil {
-			a.errorResp(w, http.StatusInternalServerError, err.Error())
-			return
-		}
-		if m == nil {
-			a.errorResp(w, http.StatusBadRequest, "unknown mode_id: "+modeID)
-			return
-		}
-	}
-
-	if err := a.Services.Store.SetSessionMode(sessionID, modeID); err != nil {
-		a.errorResp(w, http.StatusInternalServerError, err.Error())
-		return
-	}
-
-	resolved, err := a.Services.Store.GetSessionMode(sessionID)
-	if err != nil {
-		a.errorResp(w, http.StatusInternalServerError, err.Error())
-		return
-	}
-
-	// F1 (CW-20260429-0001): broadcast the resolved mode so other tabs on
-	// the same session pick up the change without polling. Reuses the
-	// presence pipe — same channel as session_archived / work_changed.
-	if a.Services.Streams != nil && resolved != nil {
-		a.Services.Streams.BroadcastSessionModeChanged(sessionID, resolved.ID, resolved.Slug)
-	}
-
-	a.jsonResp(w, http.StatusOK, resolved)
-}
-
-// handleSetSessionAutoSwitch sets the per-session auto-switch override for
-// classifier mode suggestions (F2, CW-20260429-0002).
-//
-//	PATCH /api/sessions/{id}/auto-switch
-//	{ "override": true | false | null }
-//
-// `null` clears the override (session inherits user_settings.mode_auto_switch_pref).
-// `true` forces ON for this session (does NOT bypass first-use prompt).
-// `false` forces OFF for this session.
-//
-// Returns the persisted override on the session row.
-func (a *API) handleSetSessionAutoSwitch(w http.ResponseWriter, r *http.Request) {
-	sessionID := r.PathValue("id")
-
-	// Verify session exists up front so we don't silently no-op on a missing
-	// session — same shape as handleSetSessionMode.
-	if _, err := a.Services.Store.GetSession(sessionID); err != nil {
-		a.errorResp(w, http.StatusNotFound, "session not found")
-		return
-	}
-
-	// `encoding/json` decodes both `{}` (field absent) and `{"override": null}`
-	// into a nil pointer, so a plain `*bool` field can't distinguish absent
-	// from null. Decode into a raw map first, require the `override` key, then
-	// unmarshal the value — clients that omit it get a 400 instead of a silent
-	// override-clear (PR #93 Copilot feedback).
-	var raw map[string]json.RawMessage
-	if err := a.decode(r, &raw); err != nil {
-		a.errorResp(w, http.StatusBadRequest, "invalid JSON: "+err.Error())
-		return
-	}
-	rawOverride, present := raw["override"]
-	if !present {
-		a.errorResp(w, http.StatusBadRequest, "override field is required (use null to clear)")
-		return
-	}
-	var override *bool
-	if !bytes.Equal(bytes.TrimSpace(rawOverride), []byte("null")) {
-		var b bool
-		if err := json.Unmarshal(rawOverride, &b); err != nil {
-			a.errorResp(w, http.StatusBadRequest, "override must be true, false, or null")
-			return
-		}
-		override = &b
-	}
-
-	if err := a.Services.Store.SetSessionAutoSwitchOverride(sessionID, override); err != nil {
-		a.errorResp(w, http.StatusInternalServerError, err.Error())
-		return
-	}
-
-	a.jsonResp(w, http.StatusOK, SessionAutoSwitchResponse{Override: override})
-}
-
 // handleCompactSession runs the slot-aware compaction pipeline against the
 // active conversation: drops dynamic context enrichment, summarizes the
 // oldest messages via the configured summarizer, and strips tool-result
@@ -619,7 +407,7 @@ func (a *API) handleCompactSession(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	agent, _, err := a.Services.Agents.ResolveForSession(ctx, sessionID)
+	agent, err := a.Services.Agents.ResolveForSession(ctx, sessionID)
 	if err != nil {
 		a.errorResp(w, http.StatusInternalServerError, err.Error())
 		return
@@ -636,10 +424,7 @@ func (a *API) handleCompactSession(w http.ResponseWriter, r *http.Request) {
 		windowSize = settings.ContextWindowTokens
 	}
 
-	// B1 (CW-20260428-0009): manual /compact path doesn't need the session-
-	// mode addendum (compaction operates on the existing window, not on a
-	// new turn). Pass nil sessionMode — same as we pass nil AgentMode here.
-	result, err := a.Services.Context.AssembleSlots(ctx, session, agent, nil, workspace, []llmtypes.ToolDefinition{}, "", windowSize, nil, "")
+	result, err := a.Services.Context.AssembleSlots(ctx, session, agent, workspace, []llmtypes.ToolDefinition{}, "", windowSize, "")
 	if err != nil {
 		a.errorResp(w, http.StatusInternalServerError, err.Error())
 		return

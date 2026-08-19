@@ -1,10 +1,9 @@
 import { Bot } from "lucide-react";
 import { useModels } from "@/hooks/useSettings";
-import { useActiveMode, useActiveModel, useIsStreaming, useToolCalls } from "@/stores/useChatStore";
-import { ModeChip, StatusDot, Widget, WidgetRow } from "./Widget";
+import { useActiveModel, useIsStreaming, useToolCalls } from "@/stores/useChatStore";
+import { StatusDot, Widget, WidgetRow } from "./Widget";
 
 export function AgentStatusWidget() {
-  const activeMode = useActiveMode();
   const activeModel = useActiveModel();
   const isStreaming = useIsStreaming();
   const toolCalls = useToolCalls();
@@ -29,9 +28,6 @@ export function AgentStatusWidget() {
     <Widget id="agent-status" title="Agent" icon={Bot} accent="text-brand">
       <div className="flex flex-col gap-1.5">
         <WidgetRow label="Status">{statusDot}</WidgetRow>
-        <WidgetRow label="Mode">
-          <ModeChip mode={activeMode} />
-        </WidgetRow>
         <WidgetRow label="Model" mono>
           {modelLabel || "—"}
         </WidgetRow>

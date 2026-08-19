@@ -48,13 +48,12 @@ func TestAssembleSlots_FillsAllSlotsFromRawSources(t *testing.T) {
 		Tags:         `["code","backend"]`,
 		Tools:        `["dev_grep","dev_read"]`,
 	}
-	mode := &store.AgentMode{Slug: "default", PromptAddendum: ""}
 	tools := []llmtypes.ToolDefinition{
 		{Name: "dev_grep", Description: "Search files via ripgrep"},
 		{Name: "dev_read", Description: "Read a file"},
 	}
 
-	result, err := svc.AssembleSlots(context.Background(), sess, agent, mode, nil, tools, "Native tool guide.", 200000, nil, "")
+	result, err := svc.AssembleSlots(context.Background(), sess, agent, nil, tools, "Native tool guide.", 200000, "")
 	if err != nil {
 		t.Fatalf("AssembleSlots: %v", err)
 	}
@@ -146,7 +145,7 @@ func TestAssembleSlots_NoToolsLeavesToolsSlotEmpty(t *testing.T) {
 	}
 	agent := &store.AgentProfile{ID: "no-tools-agent", Slug: "x", Status: "active"}
 
-	result, err := svc.AssembleSlots(context.Background(), sess, agent, &store.AgentMode{}, nil, nil, "", 200000, nil, "")
+	result, err := svc.AssembleSlots(context.Background(), sess, agent, nil, nil, "", 200000, "")
 	if err != nil {
 		t.Fatalf("AssembleSlots: %v", err)
 	}

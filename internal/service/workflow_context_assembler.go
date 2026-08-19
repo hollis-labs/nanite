@@ -3,7 +3,6 @@ package service
 import (
 	"context"
 	"fmt"
-	"log/slog"
 
 	llmtypes "github.com/hollis-labs/go-llm-types"
 
@@ -21,16 +20,20 @@ type WorkflowContextAssembler interface {
 
 // contextServiceWorkflowAssembler is the production WorkflowContextAssembler.
 // It resolves the store rows a workflow step only carries IDs for (session,
-// agent, mode, workspace, session-level mode — mirroring the resolution
-// generateResponse performs via SessionService.Get / AgentService.Get /
-// store.GetWorkspace / store.GetMode, plus a read-only agent-mode lookup —
-// see resolveMode) and delegates the actual assembly to
-// ContextService.AssembleSlots — the same slot-based method Chat/GUI/CLI
-// turns call (chat_generate.go's assembleTurnContext) — collapsing its
-// SlotAssemblyResult down to the flat systemPrompt + messages shape this
-// interface returns. Memory recall is not a separate step here —
+// agent, workspace — mirroring the resolution generateResponse performs via
+// SessionService.Get / AgentService.Get / store.GetWorkspace) and delegates
+// the actual assembly to ContextService.AssembleSlots — the same slot-based
+// method Chat/GUI/CLI turns call (chat_generate.go's assembleTurnContext) —
+// collapsing its SlotAssemblyResult down to the flat systemPrompt + messages
+// shape this interface returns. Memory recall is not a separate step here —
 // contextbroker.MemorySource is one of the ContextBroker's default sources,
 // so it rides inside AssembleSlots' enrichment automatically.
+//
+// Phase 0 item 21 ("Cut Modes, in full") removed this file's resolveMode
+// (agent-mode lookup via session_agents.mode) and resolveSessionMode
+// (session.CurrentModeID -> store.GetMode) helpers along with the
+// AssembleSlots arguments they fed — both Legacy Agent Mode and Session Mode
+// are gone.
 //
 // tools, extraSystemPrefix, and toolsLazyHint are turn-specific concerns
 // AssembleSlots also accepts (selected tool defs for the Tools slot, a
@@ -39,8 +42,8 @@ type WorkflowContextAssembler interface {
 // step's tool surface is already capability-restricted and passed straight
 // to the provider by workflow_step_executor.go, not selected here. They are
 // passed as zero values; every other slot (Universal, Rules, Permissions,
-// Workspace, session-level Mode, UserContext) is sourced independently of
-// those three and so is unaffected.
+// Workspace, UserContext) is sourced independently of those three and so is
+// unaffected.
 type contextServiceWorkflowAssembler struct {
 	sessions SessionService
 	agents   AgentService
@@ -75,72 +78,13 @@ func (a *contextServiceWorkflowAssembler) AssembleContext(ctx context.Context, s
 		workspace, _ = a.store.GetWorkspace(session.WorkspaceID)
 	}
 
-	mode := a.resolveMode(ctx, sessionID, agentID)
-	sessionMode := a.resolveSessionMode(session)
-
 	// providerWindowSize=0 falls back to ctxpkg.DefaultContextWindowSize
 	// (ctxpkg.NewContextWindow) — this call site has no provider/model to
 	// look up a real budget from, matching chat_generate.go's own
 	// contextWindowSize "returns 0 on miss" fallback behavior.
-	result, err := a.context.AssembleSlots(ctx, session, agent, mode, workspace, nil, "", 0, sessionMode, "")
+	result, err := a.context.AssembleSlots(ctx, session, agent, workspace, nil, "", 0, "")
 	if err != nil {
 		return "", nil, fmt.Errorf("workflow: context assembly: assemble slots: %w", err)
 	}
 	return result.SystemPrompt, result.Messages, nil
-}
-
-// resolveSessionMode looks up the session-level mode pointer
-// (session.CurrentModeID via the read-only store.GetMode), mirroring the B1
-// resolution chat_generate.go performs before calling AssembleSlots. This is
-// a session-scoped mode-switch pointer distinct from resolveMode's agent-mode
-// lookup below — AssembleSlots takes both independently (sessionMode feeds
-// the Mode slot; the agent mode returned by resolveMode still feeds the
-// Agent slot).
-//
-// Best-effort: a missing/dangling FK or store error degrades to nil rather
-// than failing the turn — mode-addendum content is enrichment, not identity.
-func (a *contextServiceWorkflowAssembler) resolveSessionMode(session *store.Session) *store.Mode {
-	if session.CurrentModeID == nil || *session.CurrentModeID == "" {
-		return nil
-	}
-	m, err := a.store.GetMode(*session.CurrentModeID)
-	if err != nil {
-		slog.Warn("workflow: GetMode failed for session-mode pointer",
-			"session_id", session.ID, "mode_id", *session.CurrentModeID, "err", err)
-		return nil
-	}
-	return m
-}
-
-// resolveMode looks up the session's bound mode (session_agents.mode) via
-// the read-only store.GetSessionPrimaryAgent — deliberately not
-// AgentService.ResolveForSession, which auto-assigns a default agent to an
-// unbound session as a side effect; a workflow step's context-assembly
-// lookup must not silently rebind a chat session's primary agent.
-//
-// The resolved mode is only applied when the session's primary-agent
-// binding's AgentID matches this call's agentID — a workflow step can name
-// an agent identity that differs from the session's chat binding, and
-// there's no principled way to know which of that other agent's modes
-// should apply, so the safe default is no mode (matching pre-opt-in
-// behavior) rather than guessing.
-//
-// Any lookup failure (no binding row, mode slug not found on the agent)
-// degrades to nil — mode-addendum content is enrichment, not identity; the
-// turn still proceeds on the agent's base prompt.
-func (a *contextServiceWorkflowAssembler) resolveMode(ctx context.Context, sessionID, agentID string) *store.AgentMode {
-	sa, err := a.store.GetSessionPrimaryAgent(sessionID)
-	if err != nil || sa == nil || sa.AgentID != agentID || sa.Mode == "" {
-		return nil
-	}
-	modes, err := a.agents.ListModes(ctx, agentID)
-	if err != nil {
-		return nil
-	}
-	for i := range modes {
-		if modes[i].Slug == sa.Mode {
-			return &modes[i]
-		}
-	}
-	return nil
 }

@@ -29,8 +29,6 @@ const (
 	EventMessageBookmarked   = "message.bookmarked"
 	EventMessageUnbookmarked = "message.unbookmarked"
 
-	// Mode Events
-	EventModeChanged = "mode.changed"
 	// planned-v2: needed once runtime scope transitions are tracked
 	EventScopeChanged = "scope.changed"
 
@@ -136,10 +134,8 @@ type EventData struct {
 	EnvelopeType string      `json:"envelope_type,omitempty"`
 	EnvelopeData interface{} `json:"envelope_data,omitempty"`
 
-	// Mode events
-	PreviousMode  string `json:"previous_mode,omitempty"`
+	// Scope events (planned-v2)
 	PreviousScope string `json:"previous_scope,omitempty"`
-	NewMode       string `json:"new_mode,omitempty"`
 	NewScope      string `json:"new_scope,omitempty"`
 
 	// Tool events
@@ -207,14 +203,8 @@ func NewEvent(eventType, source string, data EventData) plugin.Event {
 	if data.EnvelopeData != nil {
 		eventMap["envelope_data"] = data.EnvelopeData
 	}
-	if data.PreviousMode != "" {
-		eventMap["previous_mode"] = data.PreviousMode
-	}
 	if data.PreviousScope != "" {
 		eventMap["previous_scope"] = data.PreviousScope
-	}
-	if data.NewMode != "" {
-		eventMap["new_mode"] = data.NewMode
 	}
 	if data.NewScope != "" {
 		eventMap["new_scope"] = data.NewScope
@@ -310,16 +300,6 @@ func (h *Host) EmitMessageReceived(sessionID, messageID, content string, respons
 		Content:      content,
 		Role:         "assistant",
 		ResponseTime: responseTime,
-	})
-	h.EmitEvent(event)
-}
-
-// EmitModeChanged emits a mode.changed event
-func (h *Host) EmitModeChanged(sessionID, previousMode, newMode string) {
-	event := NewEvent(EventModeChanged, brand.ID, EventData{
-		SessionID:    sessionID,
-		PreviousMode: previousMode,
-		NewMode:      newMode,
 	})
 	h.EmitEvent(event)
 }

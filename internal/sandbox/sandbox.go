@@ -13,6 +13,7 @@ import (
 )
 
 var baseDirName = "." + brand.ID + "/sandboxes"
+
 const sandboxSubDir = ".sandbox"
 
 // sessionIDRe is the character class allowed for session IDs when they are
@@ -55,15 +56,20 @@ func Dir(sessionID string) (string, error) {
 
 // PopulateOpts contains optional parameters for sandbox population.
 type PopulateOpts struct {
-	SessionID string                  // Nanite session ID (for MCP server args)
-	DBPath    string                  // Absolute path to Nanite's SQLite database
+	SessionID string                    // Nanite session ID (for MCP server args)
+	DBPath    string                    // Absolute path to Nanite's SQLite database
 	Adapters  *agentpkg.AdapterRegistry // Adapter registry for delegated sandbox writing
 }
 
 // Populate creates the sandbox subdirectory and delegates content generation
 // to registered adapters. If no adapter registry is provided, it is a no-op
 // beyond directory creation.
-func Populate(dir string, agent *store.AgentProfile, mode *store.AgentMode, opts PopulateOpts) error {
+//
+// Phase 0 item 21 ("Cut Modes, in full") removed the mode *store.AgentMode
+// parameter this used to take — it was already unused in the function body
+// (Legacy Agent Mode never fed sandbox population) and store.AgentMode no
+// longer exists.
+func Populate(dir string, agent *store.AgentProfile, opts PopulateOpts) error {
 	subDir := filepath.Join(dir, sandboxSubDir)
 	if err := os.MkdirAll(subDir, 0755); err != nil {
 		return fmt.Errorf("sandbox: create subdir: %w", err)
@@ -78,4 +84,3 @@ func Populate(dir string, agent *store.AgentProfile, mode *store.AgentMode, opts
 	}
 	return nil
 }
-

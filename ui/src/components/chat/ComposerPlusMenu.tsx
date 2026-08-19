@@ -5,7 +5,6 @@ import {
   Paperclip,
   Plus,
   Slash,
-  Sparkles,
   Terminal,
   Unlock,
   Zap,
@@ -34,10 +33,6 @@ export interface ComposerPlusMenuProps {
   onCycleShell: () => void
   shellTitle: string
   shellClass: string
-  autoSwitchOverride: 'inherit' | 'off' | 'on' | undefined
-  onCycleAutoSwitch: () => void
-  autoSwitchTitle: string
-  autoSwitchClass: string
   uploading: boolean
   layoutOpen: boolean
   onToggleLayout: () => void
@@ -52,10 +47,6 @@ export function ComposerPlusMenu({
   onCycleShell,
   shellTitle,
   shellClass,
-  autoSwitchOverride,
-  onCycleAutoSwitch,
-  autoSwitchTitle,
-  autoSwitchClass,
   uploading,
   layoutOpen,
   onToggleLayout,
@@ -121,13 +112,6 @@ export function ComposerPlusMenu({
     shellMode === 'yolo' ? 'YOLO' : shellMode === 'session' ? 'Session' : 'Ask'
   const ShellIcon =
     shellMode === 'yolo' ? Zap : shellMode === 'session' ? Unlock : Terminal
-
-  const autoSwitchLabel =
-    autoSwitchOverride === 'on'
-      ? 'On'
-      : autoSwitchOverride === 'off'
-        ? 'Off'
-        : 'Inherit'
 
   return (
     <div className="relative">
@@ -223,20 +207,6 @@ export function ComposerPlusMenu({
           >
             <ShellIcon size={14} className={shellMode === 'yolo' ? 'fill-current' : ''} />
             Shell: {shellLabel}
-          </button>
-
-          <button
-            type="button"
-            onClick={() => {
-              onCycleAutoSwitch()
-              setOpen(false)
-            }}
-            title={autoSwitchTitle}
-            className={`flex items-center gap-1.5 rounded-[4px] px-2 py-1 text-xs transition-colors hover:bg-fg-secondary hover:text-bg ${autoSwitchClass || 'text-bg-elevated'}`}
-            role="menuitem"
-          >
-            <Sparkles size={14} />
-            Auto-switch: {autoSwitchLabel}
           </button>
 
           {pluginButtons}

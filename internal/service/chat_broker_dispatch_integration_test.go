@@ -117,8 +117,12 @@ func TestAttemptBrokerDispatch_Integration_PersistsRowEventLogAndSSE(t *testing.
 	if row.Confidence != 1.0 {
 		t.Errorf("row.Confidence = %g, want 1.0", row.Confidence)
 	}
-	if row.ModeSignal != agentbroker.ModeWork {
-		t.Errorf("row.ModeSignal = %q, want %q", row.ModeSignal, agentbroker.ModeWork)
+	// Phase 0 item 21 ("Cut Modes, in full") deleted classify.ClassifyMode
+	// — buildBrokerInput never populates Input.Mode anymore, so the
+	// persisted ModeSignal column is always empty regardless of the
+	// "/work"-prefixed fixture text or the stubbed broker decision below.
+	if row.ModeSignal != "" {
+		t.Errorf("row.ModeSignal = %q, want \"\" (classify.ClassifyMode was cut)", row.ModeSignal)
 	}
 	if row.ScopeTier != classify.TierMedium.String() {
 		t.Errorf("row.ScopeTier = %q, want %q", row.ScopeTier, classify.TierMedium.String())
@@ -199,8 +203,10 @@ func TestAttemptBrokerDispatch_Integration_PersistsRowEventLogAndSSE(t *testing.
 	if payload.Confidence != 1.0 {
 		t.Errorf("SSE payload.Confidence = %g, want 1.0", payload.Confidence)
 	}
-	if payload.ModeSignal != agentbroker.ModeWork {
-		t.Errorf("SSE payload.ModeSignal = %q, want %q", payload.ModeSignal, agentbroker.ModeWork)
+	// See the row.ModeSignal assertion above — same reasoning applies to
+	// the SSE wire payload.
+	if payload.ModeSignal != "" {
+		t.Errorf("SSE payload.ModeSignal = %q, want \"\" (classify.ClassifyMode was cut)", payload.ModeSignal)
 	}
 	if payload.ScopeTier != classify.TierMedium.String() {
 		t.Errorf("SSE payload.ScopeTier = %q, want %q", payload.ScopeTier, classify.TierMedium.String())

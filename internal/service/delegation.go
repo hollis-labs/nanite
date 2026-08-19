@@ -38,7 +38,7 @@ func (s *chatServiceImpl) DelegateTask(ctx context.Context, req chat.DelegationR
 	// Resolve defaults from parent.
 	agentID := req.AgentID
 	if agentID == "" {
-		if agent, _, resolveErr := s.agents.ResolveForSession(ctx, req.ParentSessionID); resolveErr == nil {
+		if agent, resolveErr := s.agents.ResolveForSession(ctx, req.ParentSessionID); resolveErr == nil {
 			agentID = agent.ID
 		} else {
 			agentID = "file-default"

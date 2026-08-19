@@ -23,6 +23,44 @@ func newTestStoreForChat(t *testing.T) *store.Store {
 	return s
 }
 
+// mustCreateAgent, mustCreateSkill, and mustAssignSkill were originally
+// defined in skill_list_mode_test.go, deleted by Phase 0 item 21 ("Cut
+// Modes, in full") along with the mode-filter tests it covered — moved here
+// since skill_list_loadhint_test.go and skill_broker_wire_test.go still use
+// them independently of mode filtering.
+
+func mustCreateAgent(t *testing.T, s *store.Store, slug string) *store.AgentProfile {
+	t.Helper()
+	a := &store.AgentProfile{
+		Slug:        slug,
+		Name:        slug,
+		Description: "test agent",
+		Source:      "user",
+	}
+	if err := s.CreateAgent(a); err != nil {
+		t.Fatalf("CreateAgent: %v", err)
+	}
+	return a
+}
+
+func mustCreateSkill(t *testing.T, s *store.Store, sk *store.Skill) *store.Skill {
+	t.Helper()
+	if sk.ToolBindings == "" {
+		sk.ToolBindings = "[]"
+	}
+	if err := s.CreateSkill(sk); err != nil {
+		t.Fatalf("CreateSkill: %v", err)
+	}
+	return sk
+}
+
+func mustAssignSkill(t *testing.T, s *store.Store, agentID, skillID string) {
+	t.Helper()
+	if err := s.AssignSkillToAgent(agentID, skillID, ""); err != nil {
+		t.Fatalf("AssignSkillToAgent: %v", err)
+	}
+}
+
 // writeCompactionEventForTest is a small helper so each test can fabricate an
 // event row without copy-pasting the full struct.
 func writeCompactionEventForTest(t *testing.T, s *store.Store, evt store.CompactionEvent) {
@@ -297,7 +335,7 @@ func TestAssembleAgentSlotContent_appendsDisclosure(t *testing.T) {
 		SummaryMode: "research",
 	})
 
-	got := assembleAgentSlotContent(s, agent, nil, "", sess.ID)
+	got := assembleAgentSlotContent(s, agent, "", sess.ID)
 	if !strings.Contains(got, "research session") {
 		t.Errorf("expected research-mode disclosure in agent slot, got: %q", got)
 	}

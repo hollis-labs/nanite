@@ -88,16 +88,6 @@ func (a *API) RegisterRoutes(mux *http.ServeMux) {
 	// Retry (circuit breaker reset + re-generate)
 	mux.HandleFunc("POST /api/sessions/{id}/retry", a.handleRetryStream)
 
-	// Session mode switching (legacy: agent-scoped AgentMode pipeline).
-	mux.HandleFunc("POST /api/sessions/{id}/mode", a.handleSwitchSessionMode)
-	// Session-level mode pointer (B1, CW-20260428-0009): first-class Mode
-	// resolved via sessions.current_mode_id → modes.id.
-	mux.HandleFunc("GET /api/sessions/{id}/mode", a.handleGetSessionMode)
-	mux.HandleFunc("PATCH /api/sessions/{id}/mode", a.handleSetSessionMode)
-	// F2 (CW-20260429-0002): per-session auto-mode-switch override. Tri-state
-	// — null = inherit user pref, true = force ON, false = force OFF.
-	mux.HandleFunc("PATCH /api/sessions/{id}/auto-switch", a.handleSetSessionAutoSwitch)
-
 	// Agents
 	mux.HandleFunc("GET /api/agents", a.handleListAgents)
 	mux.HandleFunc("POST /api/agents", a.handleCreateAgent)
@@ -134,8 +124,6 @@ func (a *API) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/pending/reflexes", a.handleListPendingReflexes)
 	mux.HandleFunc("POST /api/pending/reflexes/{id}/approve", a.handleApprovePendingReflex)
 	mux.HandleFunc("POST /api/pending/reflexes/{id}/reject", a.handleRejectPendingReflex)
-	mux.HandleFunc("GET /api/agents/{id}/modes", a.handleListAgentModes)
-	mux.HandleFunc("POST /api/agents/{id}/modes", a.handleCreateAgentMode)
 	mux.HandleFunc("GET /api/agents/{id}/projects", a.handleListAgentProjects)
 	mux.HandleFunc("POST /api/agents/{id}/projects", a.handleAddAgentProject)
 	mux.HandleFunc("DELETE /api/agents/{id}/projects/{projectId}", a.handleRemoveAgentProject)
@@ -346,18 +334,6 @@ func (a *API) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/agents/{id}/prompt-templates", a.handleAssignAgentPromptTemplate)
 	mux.HandleFunc("DELETE /api/agents/{id}/prompt-templates/{templateId}", a.handleRemoveAgentPromptTemplate)
 
-	// Modes (first-class reusable modes)
-	mux.HandleFunc("GET /api/modes", a.handleListModes)
-	mux.HandleFunc("POST /api/modes", a.handleCreateMode)
-	mux.HandleFunc("GET /api/modes/{id}", a.handleGetMode)
-	mux.HandleFunc("PUT /api/modes/{id}", a.handleUpdateMode)
-	mux.HandleFunc("DELETE /api/modes/{id}", a.handleDeleteMode)
-
-	// Agent ↔ Mode assignments (many-to-many)
-	mux.HandleFunc("GET /api/agents/{id}/assigned-modes", a.handleListAgentAssignedModes)
-	mux.HandleFunc("POST /api/agents/{id}/assigned-modes", a.handleAssignModeToAgent)
-	mux.HandleFunc("DELETE /api/agents/{id}/assigned-modes/{modeId}", a.handleUnassignModeFromAgent)
-
 	// MCP Servers (user-managed)
 	mux.HandleFunc("GET /api/mcp-servers", a.handleListMCPServers)
 	mux.HandleFunc("POST /api/mcp-servers", a.handleCreateMCPServer)
@@ -389,10 +365,6 @@ func (a *API) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/settings", a.handleGetSettings)
 	mux.HandleFunc("PUT /api/settings", a.handleUpdateSettings)
 	mux.HandleFunc("GET /api/settings/embedding/providers", a.handleEmbeddingProviders)
-	// B3 (CW-20260428-0011): dedicated routes for mode auto-switch pref so
-	// the FE can read/update without round-tripping the full settings doc.
-	mux.HandleFunc("GET /api/settings/mode-auto-switch", a.handleGetModeAutoSwitch)
-	mux.HandleFunc("PATCH /api/settings/mode-auto-switch", a.handleSetModeAutoSwitch)
 
 	// Plugin Config (prefixed to avoid collision with plugin CRUD routes)
 	mux.HandleFunc("GET /api/plugin-config/{id}", a.handleGetPluginConfig)

@@ -35,20 +35,17 @@ type SessionWriter interface {
 	CopyMessages(sourceSessionID, targetSessionID string) error
 }
 
-// AgentReader provides read access to agents, modes, skills, and session-agent bindings.
+// AgentReader provides read access to agents, skills, and session-agent bindings.
 type AgentReader interface {
 	GetAgent(id string) (*store.AgentProfile, error)
 	GetAgentBySlug(slug string) (*store.AgentProfile, error)
 	ListAgents() ([]store.AgentProfile, error)
 	ListAgentsBySource(source string) ([]store.AgentProfile, error)
-	GetAgentMode(agentID, modeSlug string) (*store.AgentMode, error)
-	ListAgentModes(agentID string) ([]store.AgentMode, error)
 	GetSessionPrimaryAgent(sessionID string) (*store.SessionAgent, error)
 	ListSessionAgents(sessionID string) ([]store.SessionAgent, error)
 	ListAgentSkills(agentID string) ([]store.Skill, error)
 	ListAgentProjects(agentID string) ([]store.Project, error)
 	ListProjectAgents(projectID string) ([]store.AgentProfile, error)
-	GetAgentAssignedModes(agentID string) ([]store.Mode, error)
 }
 
 // AgentWriter provides write access to agents and session-agent bindings.
@@ -57,7 +54,6 @@ type AgentWriter interface {
 	UpdateAgent(a *store.AgentProfile) error
 	DeleteAgent(slug string) error
 	UpsertAgentBySlug(a *store.AgentProfile) error
-	CreateAgentMode(m *store.AgentMode) error
 	EnsureSessionAgent(sessionID, agentID, mode string, isPrimary bool) error
 	SetSessionAgentMode(sessionID, agentID, mode string) error
 	DeleteSessionAgent(sessionID, agentID string) error
@@ -65,8 +61,6 @@ type AgentWriter interface {
 	RemoveSkillFromAgent(agentID, skillID string) error
 	AddAgentProject(agentID, projectID string) error
 	RemoveAgentProject(agentID, projectID string) error
-	AssignModeToAgent(agentID, modeID string) error
-	UnassignModeFromAgent(agentID, modeID string) error
 }
 
 // ToolStore provides access to MCP server configs and the catalog.
@@ -179,16 +173,6 @@ type SkillStore interface {
 	CreateSkill(sk *store.Skill) error
 	UpdateSkill(sk *store.Skill) error
 	DeleteSkill(id string) error
-}
-
-// ModeStore provides CRUD access to modes (independent of agent bindings).
-type ModeStore interface {
-	CreateMode(m *store.Mode) error
-	GetMode(id string) (*store.Mode, error)
-	GetModeBySlug(slug string) (*store.Mode, error)
-	ListModes() ([]store.Mode, error)
-	UpdateMode(m *store.Mode) error
-	DeleteMode(id string) error
 }
 
 // TodoStore provides CRUD access to internal todos.
@@ -310,7 +294,6 @@ type Store interface {
 	ArtifactStore
 	TemplateStore
 	SkillStore
-	ModeStore
 	ProviderStore
 	TodoStore
 	PlanStore

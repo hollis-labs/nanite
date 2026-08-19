@@ -7,7 +7,6 @@ import (
 	"strings"
 
 	llmtypes "github.com/hollis-labs/go-llm-types"
-	"github.com/hollis-labs/nanite/internal/store"
 )
 
 // G-HOT-SWAP-DEAD activation: per-session partition that ships only an
@@ -70,11 +69,9 @@ type ToolPartition struct {
 // PartitionTools splits an agent's tool universe into Essential and Lazy
 // sets per the G-HOT-SWAP-DEAD locked decisions:
 //
-//  1. Mode-explicit (top priority): tool_overrides.allow names.
-//  2. Recently-used: invoked in the last RecentToolWindow assistant turns.
-//  3. Mode-pattern: tool_overrides.allow_patterns matches.
-//  4. Hysteresis: pinned for ToolHysteresisFloor turns post-promotion.
-//  5. Filler: remaining input tools, in input order.
+//  1. Recently-used: invoked in the last RecentToolWindow assistant turns.
+//  2. Hysteresis: pinned for ToolHysteresisFloor turns post-promotion.
+//  3. Filler: remaining input tools, in input order.
 //
 // All input tools that don't make the cut after the cap is applied move
 // into Lazy. Meta-tools (request_tools, fetch_tool_result, …) are
@@ -88,9 +85,15 @@ type ToolPartition struct {
 // (zero-value PromotedAt map is acceptable for fresh sessions).
 //
 // Returns the partition plus the new state to persist for the next turn.
+//
+// Phase 0 item 21 ("Cut Modes, in full") removed this function's
+// `modeSpec store.ToolOverrideSpec` parameter and the two highest-priority
+// scoring tiers it drove (mode-explicit tool_overrides.allow names,
+// mode-pattern tool_overrides.allow_patterns matches) — both were sourced
+// exclusively from Session Mode's Mode.ToolOverrides, which is gone.
+// Recently-used and hysteresis are unaffected; they never depended on mode.
 func PartitionTools(
 	tools []llmtypes.ToolDefinition,
-	modeSpec store.ToolOverrideSpec,
 	recentNames []string,
 	prev ToolPartitionState,
 	cap int,
@@ -111,11 +114,6 @@ func PartitionTools(
 		recentSet[n] = struct{}{}
 	}
 
-	allowSet := make(map[string]struct{}, len(modeSpec.Allow))
-	for _, n := range modeSpec.Allow {
-		allowSet[n] = struct{}{}
-	}
-
 	// Score each input tool. Higher score = stronger essential candidate.
 	// The score determines trim order when overflow occurs.
 	type scored struct {
@@ -128,12 +126,10 @@ func PartitionTools(
 	}
 
 	const (
-		scoreMeta      = 1000
-		scoreModeAllow = 400
-		scoreRecent    = 300
-		scoreModePat   = 200
-		scoreHyst      = 100
-		scoreFiller    = 0
+		scoreMeta   = 1000
+		scoreRecent = 300
+		scoreHyst   = 100
+		scoreFiller = 0
 	)
 
 	scoredTools := make([]scored, 0, len(tools))
@@ -145,14 +141,8 @@ func PartitionTools(
 			// Meta-tools are non-negotiable: always essential, never lazy.
 			s = scoreMeta
 		} else {
-			if _, ok := allowSet[t.Name]; ok {
-				s = max(s, scoreModeAllow)
-			}
 			if _, ok := recentSet[t.Name]; ok {
 				s = max(s, scoreRecent)
-			}
-			if matchesAnyAllowPattern(t.Name, modeSpec.AllowPatterns) {
-				s = max(s, scoreModePat)
 			}
 			if prev.PromotedAt != nil {
 				if first, ok := prev.PromotedAt[t.Name]; ok && (nextTurn-first) < ToolHysteresisFloor {
@@ -335,29 +325,3 @@ func isMetaToolName(name string) bool {
 	return false
 }
 
-// matchesAnyAllowPattern uses path.Match-style glob matching (matching
-// store.ApplyToolOverrides' AllowPatterns semantics).
-func matchesAnyAllowPattern(name string, patterns []string) bool {
-	for _, p := range patterns {
-		if p == "" {
-			continue
-		}
-		if matchToolPattern(p, name) {
-			return true
-		}
-	}
-	return false
-}
-
-// matchToolPattern mirrors toolclient.MatchPattern semantics (prefix
-// glob with trailing *, falling back to path.Match). Replicated locally
-// to avoid a chat → toolclient import cycle.
-func matchToolPattern(pattern, name string) bool {
-	if strings.HasSuffix(pattern, "*") {
-		return strings.HasPrefix(name, strings.TrimSuffix(pattern, "*"))
-	}
-	// path.Match is intentionally not used here for the "*" suffix case
-	// because it doesn't span "_" / "-" boundaries the way our glob
-	// convention expects ("hadron_*" matching "hadron_run_enqueue").
-	return pattern == name
-}

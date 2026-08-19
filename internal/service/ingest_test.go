@@ -591,20 +591,16 @@ func TestAutoIngestAgents_EmptyDefsIsNoOp(t *testing.T) {
 	}
 }
 
-// TestAutoIngestSkills_ResolvesModeSlugsToIDs is the E2 (CW-20260428-0017)
-// happy-path: a skill frontmatter with `modes: [plan, work]` is ingested with
-// the corresponding mode IDs serialized into mode_ids. Unknown slugs are
-// dropped silently (warnings logged) so a typo doesn't crash boot.
-func TestAutoIngestSkills_ResolvesModeSlugsToIDs(t *testing.T) {
+// TestAutoIngestSkills_StoresModeSlugsUnresolved is the E2 (CW-20260428-0017)
+// happy-path, updated for Phase 0 item 21 ("Cut Modes, in full"): a skill
+// frontmatter with `modes: [plan, work]` is ingested with those slugs
+// serialized directly into mode_ids. Before the cut, resolveSkillModeIDs
+// resolved each slug against the now-deleted `modes` catalog table (dropping
+// unresolved slugs); there is no more catalog to resolve against, so the
+// slugs are now stored as their own identity, unresolved — see
+// resolveSkillModeIDs's doc comment in ingest.go.
+func TestAutoIngestSkills_StoresModeSlugsUnresolved(t *testing.T) {
 	st := newIngestTestStore(t)
-	plan := &store.Mode{Slug: "plan", Name: "Plan"}
-	work := &store.Mode{Slug: "work", Name: "Work"}
-	if err := st.CreateMode(plan); err != nil {
-		t.Fatalf("CreateMode plan: %v", err)
-	}
-	if err := st.CreateMode(work); err != nil {
-		t.Fatalf("CreateMode work: %v", err)
-	}
 
 	defs := []*skillpkg.Definition{
 		{
@@ -632,8 +628,14 @@ func TestAutoIngestSkills_ResolvesModeSlugsToIDs(t *testing.T) {
 		t.Fatal("plan-bound not in DB")
 	}
 	gotIDs := store.ParseSkillModeIDs(planSkill.ModeIDs)
-	if len(gotIDs) != 1 || gotIDs[0] != plan.ID {
-		t.Fatalf("plan-bound mode_ids: got %v, want [%q]", gotIDs, plan.ID)
+	wantIDs := []string{"plan", "nonexistent"}
+	if len(gotIDs) != len(wantIDs) {
+		t.Fatalf("plan-bound mode_ids: got %v, want %v", gotIDs, wantIDs)
+	}
+	for i, want := range wantIDs {
+		if gotIDs[i] != want {
+			t.Errorf("plan-bound mode_ids[%d] = %q, want %q", i, gotIDs[i], want)
+		}
 	}
 
 	universal, err := st.GetSkillBySlug("universal-skill")

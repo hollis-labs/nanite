@@ -70,12 +70,13 @@ const staleResumeFastExitWindow = 5 * time.Second
 // internally → no tool_use blocks return through provCh → loop exits after
 // iter 0). On iter > 0 we log + return an immediately-closed chan so the
 // outer harness exits gracefully without crashing the session.
+// Phase 0 item 21 ("Cut Modes, in full") removed this function's `mode
+// *store.AgentMode` parameter — Legacy Agent Mode is gone.
 func (s *chatServiceImpl) driveBootSession(
 	ctx context.Context,
 	sessionID string,
 	session *store.Session,
 	agent *store.AgentProfile,
-	mode *store.AgentMode,
 	slotResult *SlotAssemblyResult,
 	userContent string,
 	iteration int,
@@ -122,7 +123,7 @@ func (s *chatServiceImpl) driveBootSession(
 			profileSlug = agent.Slug
 		}
 		workdir := bootSessionWorkdir(session)
-		role := bootSessionRole(agent, mode)
+		role := bootSessionRole(agent)
 		bootOpts := runtimeagent.Options{
 			Mode:         runtimeagent.ModeLongLived,
 			SessionID:    sessionID,
@@ -192,7 +193,7 @@ func (s *chatServiceImpl) driveBootSession(
 		// 3. Refresh the boot dir when System / Agent / Mode / Rules
 		// slots have shifted. UserContext changes per turn by design and
 		// flows via SendInput; we don't regen CLAUDE.md for it.
-		if err := s.regenerateBootDirSlots(sessionID, sess.BootDir, agent, mode); err != nil {
+		if err := s.regenerateBootDirSlots(sessionID, sess.BootDir, agent); err != nil {
 			slog.Warn("driveBootSession: slot regen failed",
 				"session_id", sessionID, "err", err)
 		} else {
@@ -502,7 +503,10 @@ func buildSessionExitMeta(agentProfile, provider, workdir string, sessionAge tim
 // regenerateBootDirSlots rewrites the boot dir's CLAUDE.md and
 // .sandbox/agent-context.md atomically. Called when slotsChangedFor returns
 // true mid-session. Phase 4c.5.
-func (s *chatServiceImpl) regenerateBootDirSlots(sessionID, bootDir string, agent *store.AgentProfile, mode *store.AgentMode) error {
+//
+// Phase 0 item 21 ("Cut Modes, in full") removed this function's `mode
+// *store.AgentMode` parameter — Legacy Agent Mode is gone.
+func (s *chatServiceImpl) regenerateBootDirSlots(sessionID, bootDir string, agent *store.AgentProfile) error {
 	if bootDir == "" {
 		return errors.New("regenerateBootDirSlots: empty bootDir")
 	}
@@ -513,13 +517,13 @@ func (s *chatServiceImpl) regenerateBootDirSlots(sessionID, bootDir string, agen
 	// CW-20260516-0007 round 1: recompute the SAME resolved boot prompt
 	// the initial Boot planted, so a mid-session slot refresh doesn't
 	// silently thin a bootprofile session's operating instructions.
-	// resolveBootPrompt's inputs: role (from agent/mode), the runtime
+	// resolveBootPrompt's inputs: role (from the agent profile), the runtime
 	// Mode (ModeLongLived for every chat session — the only caller),
 	// and a bootprofile LaunchSpec's BootPrompt as the override. The
 	// LaunchSpec is the per-session stash keyed by sessionID; nil for
 	// non-bootprofile sessions, where ResolveSystemPrompt falls back to
-	// the role/mode-composed prompt.
-	role := bootSessionRole(agent, mode)
+	// the role-composed prompt.
+	role := bootSessionRole(agent)
 	bootPromptOverride := ""
 	if ls := s.launchSpecFor(sessionID); ls != nil {
 		bootPromptOverride = ls.BootPrompt
@@ -529,7 +533,7 @@ func (s *chatServiceImpl) regenerateBootDirSlots(sessionID, bootDir string, agen
 		return fmt.Errorf("regen CLAUDE.md: %w", err)
 	}
 	contextPath := filepath.Join(bootDir, ".sandbox", "agent-context.md")
-	if err := fsutil.AtomicWriteFile(contextPath, []byte(runtimeagent.BuildAgentContext(agent, mode)), 0o644); err != nil {
+	if err := fsutil.AtomicWriteFile(contextPath, []byte(runtimeagent.BuildAgentContext(agent)), 0o644); err != nil {
 		return fmt.Errorf("regen agent-context.md: %w", err)
 	}
 	return nil
@@ -797,14 +801,15 @@ func applyLaunchPlanToBootOpts(bootOpts *runtimeagent.Options, plan agentlaunch.
 	}
 }
 
-// bootSessionRole derives a role identifier from the agent profile + mode for
-// system-prompt assembly. Returns the empty string when neither the profile
-// nor the mode advertises a role-specific slug; the agent package's
-// composeSystemPrompt handles empty roles via its null-role default.
-func bootSessionRole(agent *store.AgentProfile, mode *store.AgentMode) string {
-	if mode != nil && mode.Slug != "" {
-		return mode.Slug
-	}
+// bootSessionRole derives a role identifier from the agent profile for
+// system-prompt assembly. Returns the empty string when the profile
+// advertises no role-specific slug; the agent package's composeSystemPrompt
+// handles empty roles via its null-role default.
+//
+// Phase 0 item 21 ("Cut Modes, in full") removed this function's `mode
+// *store.AgentMode` parameter and the mode-slug-wins-over-agent-slug
+// preference it implemented — Legacy Agent Mode is gone.
+func bootSessionRole(agent *store.AgentProfile) string {
 	if agent != nil && agent.Slug != "" {
 		return agent.Slug
 	}

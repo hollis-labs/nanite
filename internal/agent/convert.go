@@ -2,7 +2,6 @@ package agent
 
 import (
 	"encoding/json"
-	"fmt"
 	"strings"
 	"time"
 
@@ -75,19 +74,16 @@ func (d *Definition) ToProfile() *store.AgentProfile {
 		p.Constraints = "{}"
 	}
 
-	// Modes as JSON array of slug strings (for the modes column).
-	// Note: the profile no longer carries a `default_mode` field — the
-	// active mode is a *session* attribute (sessions.current_mode_id), not
-	// an agent attribute. See migration 063 + CW-20260512-0115.
-	if len(d.Modes) > 0 {
-		slugs := make([]string, len(d.Modes))
-		for i, m := range d.Modes {
-			slugs[i] = m.Slug
-		}
-		p.Modes = marshalJSONOr(slugs, "[]")
-	} else {
-		p.Modes = "[]"
-	}
+	// agent_profiles.modes is a legacy denormalized column (pre-dates
+	// Phase 0 item 21, "Cut Modes, in full"). It always carries "[]" now
+	// — frontmatter no longer declares inline agent modes (ModeDefinition
+	// / Definition.Modes were deleted with the rest of Legacy Agent Mode;
+	// see TASKS/phase-0/21-cut-modes.md). The column itself is left in
+	// place (out of that task's scope — it's not one of the
+	// modes/agent_modes/agent_mode_assignments tables or the
+	// sessions.current_mode_id column the task enumerates) but is
+	// permanently inert.
+	p.Modes = "[]"
 
 	// ToolPermissions — frontmatter wins; fall back to deriving an allow_list
 	// from Tools so existing agents keep their implicit allowlist behavior.
@@ -129,26 +125,6 @@ func (d *Definition) ToProfile() *store.AgentProfile {
 
 	p.Settings = "{}"
 	return p
-}
-
-// ToModes converts the inline mode definitions to store.AgentMode slices.
-// Each mode gets a deterministic ID: "file-{agentSlug}-{modeSlug}".
-func (d *Definition) ToModes() []store.AgentMode {
-	modes := make([]store.AgentMode, len(d.Modes))
-	agentID := fileIDPrefix + d.Slug
-
-	for i, m := range d.Modes {
-		modes[i] = store.AgentMode{
-			ID:             fmt.Sprintf("%s%s-%s", fileIDPrefix, d.Slug, m.Slug),
-			AgentID:        agentID,
-			Slug:           m.Slug,
-			Name:           m.Name,
-			PromptAddendum: m.PromptAddendum,
-			ToolOverrides:  marshalJSONOr(m.ToolOverrides, "{}"),
-			Settings:       "{}",
-		}
-	}
-	return modes
 }
 
 // marshalSlice marshals a string slice to JSON, normalizing nil to "[]".

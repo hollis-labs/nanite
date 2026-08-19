@@ -2,17 +2,13 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ArrowDown, Bot, Info, Loader2, Sparkles } from "lucide-react";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { useSettings } from "@/hooks/useSettings";
 import { api } from "@/lib/api";
 import { shouldRenderStandalonePluginEnvelope } from "@/lib/envelope-lane";
-import type { AgentMode, Message } from "@/lib/types";
+import type { Message } from "@/lib/types";
 import { useAppStore } from "@/stores/useAppStore";
 import {
-  getAutoSwitchEffective,
-  useActiveMode,
   useChatErrors,
   useChatStore,
-  usePendingModeSuggestion,
   usePluginEnvelopes,
   useStreamingFinal,
   useStreamingNarration,
@@ -26,7 +22,6 @@ import { ErrorBanner } from "./ErrorBanner";
 import { EnvelopeRenderer } from "./envelopes/EnvelopeRenderer";
 import { Envelope, EnvelopeHeader } from "./envelopes/primitives";
 import { MessageContent } from "./MessageContent";
-import { ModeSuggestionCard } from "./ModeSuggestionCard";
 import { ThinkingIndicator } from "./ThinkingIndicator";
 import { ToolWarningBanner } from "./ToolWarningBanner";
 
@@ -57,13 +52,6 @@ import { ToolWarningBanner } from "./ToolWarningBanner";
  *    uses the new ThinkingIndicator shape (three dots, mono "thinking" label).
  */
 
-const MODE_AVATAR_STYLES: Record<AgentMode, { bg: string; text: string }> = {
-  default: { bg: "bg-mode-default/10", text: "text-mode-default" },
-  architect: { bg: "bg-mode-architect/10", text: "text-mode-architect" },
-  planner: { bg: "bg-mode-planner/10", text: "text-mode-planner" },
-  writer: { bg: "bg-mode-writer/10", text: "text-mode-writer" },
-};
-
 interface ChatTranscriptProps {
   messages: Message[];
   isStreaming: boolean;
@@ -85,7 +73,6 @@ export function ChatTranscript({
 }: ChatTranscriptProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
-  const activeMode = useActiveMode();
   const toolWarnings = useToolWarnings();
   const textOnlyMode = useTextOnlyMode();
   const scrollToMessageId = useChatStore((s) => s.scrollToMessageId);
@@ -95,62 +82,6 @@ export function ChatTranscript({
   const activeSessionId = useAppStore((s) => s.activeSessionId);
   const pluginEnvelopes = usePluginEnvelopes(activeSessionId);
   const queryClient = useQueryClient();
-
-  // B3 (CW-20260428-0011) — pending classifier suggestion + global pref +
-  // per-session override. Resolved into one of {auto, ask, off, firstUse}
-  // by getAutoSwitchEffective.
-  const pendingModeSuggestion = usePendingModeSuggestion();
-  const clearModeSuggestion = useChatStore((s) => s.clearModeSuggestion);
-  const showChatToast = useChatStore((s) => s.showChatToast);
-  const autoSwitchOverride = useChatStore((s) =>
-    activeSessionId ? s.autoSwitchSessionOverrides[activeSessionId] : undefined,
-  );
-  const { data: settings } = useSettings();
-  const modeAutoSwitchPref = settings?.mode_auto_switch_pref;
-  const effectiveAutoSwitch = getAutoSwitchEffective(autoSwitchOverride, modeAutoSwitchPref);
-
-  // Per-session slices keep their own pendingModeSuggestion, so a stale
-  // suggestion in session A does not bleed into session B (G-FE-SINGLETON
-  // closure). The previous "drop stale suggestion on session switch" effect
-  // is no longer needed.
-
-  // Effect-driven branch for "auto" (apply + toast) and "off" (discard).
-  // The "ask" / "firstUse" branches render the card below — render-side
-  // calls are avoided here to dodge React state-set-during-render warnings.
-  useEffect(() => {
-    if (!pendingModeSuggestion || !activeSessionId) return undefined;
-    if (effectiveAutoSwitch === "off") {
-      clearModeSuggestion(activeSessionId);
-      return undefined;
-    }
-    if (effectiveAutoSwitch === "auto") {
-      let cancelled = false;
-      void (async () => {
-        try {
-          await api.setSessionMode(activeSessionId, { slug: pendingModeSuggestion.suggested });
-          if (cancelled) return;
-          showChatToast(`Switched to ${pendingModeSuggestion.suggested} mode`, "success");
-          void queryClient.invalidateQueries({ queryKey: ["session-mode", activeSessionId] });
-          void queryClient.invalidateQueries({ queryKey: ["session", activeSessionId] });
-        } catch (err) {
-          console.error("[ChatTranscript] auto-switch mode failed:", err);
-        } finally {
-          if (!cancelled) clearModeSuggestion(activeSessionId);
-        }
-      })();
-      return () => {
-        cancelled = true;
-      };
-    }
-    return undefined;
-  }, [
-    pendingModeSuggestion,
-    activeSessionId,
-    effectiveAutoSwitch,
-    clearModeSuggestion,
-    showChatToast,
-    queryClient,
-  ]);
 
   // F4 (CW-20260419-0029) — narration strip + collapse-pill.
   // F3 (CW-20260420-0023) — thinking strip.
@@ -184,8 +115,6 @@ export function ChatTranscript({
       }
     }
   }, [isStreaming, streamingContent]);
-
-  const avatarStyle = MODE_AVATAR_STYLES[activeMode];
 
   const checkScrollPosition = useCallback(() => {
     const scrollElement = scrollRef.current;
@@ -472,7 +401,7 @@ export function ChatTranscript({
         {isStreaming && (
           <div className="flex gap-3">
             <div
-              className={`mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-[8px] ${avatarStyle.bg} ${avatarStyle.text}`}
+              className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-[8px] bg-mode-default/10 text-mode-default"
             >
               <Bot className="h-4 w-4" />
             </div>
@@ -520,20 +449,6 @@ export function ChatTranscript({
               onDismiss={(id) => activeSessionId && dismissChatError(activeSessionId, id)}
             />
           ))}
-
-        {/* B3 (CW-20260428-0011): mode-suggestion confirm card. Renders only
-            when the effective behavior is "ask" (compact strip) or
-            "firstUse" (5-option card). The "auto" / "off" branches are
-            handled in the effect above. */}
-        {pendingModeSuggestion &&
-          activeSessionId &&
-          (effectiveAutoSwitch === "ask" || effectiveAutoSwitch === "firstUse") && (
-            <ModeSuggestionCard
-              suggestion={pendingModeSuggestion}
-              sessionId={activeSessionId}
-              variant={effectiveAutoSwitch === "firstUse" ? "firstUse" : "compact"}
-            />
-          )}
 
         <div ref={bottomRef} />
       </div>

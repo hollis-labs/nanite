@@ -832,7 +832,7 @@ func (s *chatServiceImpl) RetryLastMessage(ctx context.Context, sessionID string
 func (s *chatServiceImpl) SendAgentMessage(ctx context.Context, fromSessionID, toSessionID, content string) (string, error) {
 	// Look up the sending agent.
 	fromAgentID := "unknown"
-	if agent, _, err := s.agents.ResolveForSession(ctx, fromSessionID); err == nil {
+	if agent, err := s.agents.ResolveForSession(ctx, fromSessionID); err == nil {
 		fromAgentID = agent.ID
 	}
 

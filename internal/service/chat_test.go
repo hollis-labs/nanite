@@ -45,7 +45,6 @@ func (s *stubSessionService) Search(_ context.Context, _ string, _ SearchOpts) (
 
 type stubAgentService struct {
 	agent *store.AgentProfile
-	mode  *store.AgentMode
 
 	// Call counters so tests can assert which resolution path a caller
 	// used — in particular, that resolveMessageWakePolicy uses the
@@ -67,16 +66,13 @@ func (s *stubAgentService) List(_ context.Context) ([]store.AgentProfile, error)
 func (s *stubAgentService) Create(_ context.Context, _ *store.AgentProfile) error { return nil }
 func (s *stubAgentService) Update(_ context.Context, _ *store.AgentProfile) error { return nil }
 func (s *stubAgentService) Delete(_ context.Context, _ string) error              { return nil }
-func (s *stubAgentService) ResolveForSession(_ context.Context, _ string) (*store.AgentProfile, *store.AgentMode, error) {
+func (s *stubAgentService) ResolveForSession(_ context.Context, _ string) (*store.AgentProfile, error) {
 	s.resolveForSessionCalls++
-	return s.agent, s.mode, nil
+	return s.agent, nil
 }
-func (s *stubAgentService) ResolveForSessionReadOnly(_ context.Context, _ string) (*store.AgentProfile, *store.AgentMode, error) {
+func (s *stubAgentService) ResolveForSessionReadOnly(_ context.Context, _ string) (*store.AgentProfile, error) {
 	s.resolveForSessionReadOnlyCalls++
-	return s.agent, s.mode, nil
-}
-func (s *stubAgentService) ListModes(_ context.Context, _ string) ([]store.AgentMode, error) {
-	return nil, nil
+	return s.agent, nil
 }
 
 type stubToolService struct{}
@@ -136,7 +132,6 @@ type minimalStore struct {
 	stubArtifactStore
 	stubTemplateStore
 	stubSkillStore
-	stubModeStore
 	stubProviderStore
 	stubTodoStore
 	stubPlanStore
@@ -257,10 +252,6 @@ func (stubAgentReaderStore) GetAgentBySlug(string) (*store.AgentProfile, error) 
 }
 func (stubAgentReaderStore) ListAgents() ([]store.AgentProfile, error)               { return nil, nil }
 func (stubAgentReaderStore) ListAgentsBySource(string) ([]store.AgentProfile, error) { return nil, nil }
-func (stubAgentReaderStore) GetAgentMode(string, string) (*store.AgentMode, error) {
-	return nil, fmt.Errorf("not found")
-}
-func (stubAgentReaderStore) ListAgentModes(string) ([]store.AgentMode, error) { return nil, nil }
 func (stubAgentReaderStore) GetSessionPrimaryAgent(string) (*store.SessionAgent, error) {
 	return nil, fmt.Errorf("not found")
 }
@@ -268,7 +259,6 @@ func (stubAgentReaderStore) ListSessionAgents(string) ([]store.SessionAgent, err
 func (stubAgentReaderStore) ListAgentSkills(string) ([]store.Skill, error)          { return nil, nil }
 func (stubAgentReaderStore) ListAgentProjects(string) ([]store.Project, error)      { return nil, nil }
 func (stubAgentReaderStore) ListProjectAgents(string) ([]store.AgentProfile, error) { return nil, nil }
-func (stubAgentReaderStore) GetAgentAssignedModes(string) ([]store.Mode, error)     { return nil, nil }
 
 type stubAgentWriterStore struct{}
 
@@ -276,7 +266,6 @@ func (stubAgentWriterStore) CreateAgent(*store.AgentProfile) error              
 func (stubAgentWriterStore) UpdateAgent(*store.AgentProfile) error                 { return nil }
 func (stubAgentWriterStore) DeleteAgent(string) error                              { return nil }
 func (stubAgentWriterStore) UpsertAgentBySlug(*store.AgentProfile) error           { return nil }
-func (stubAgentWriterStore) CreateAgentMode(*store.AgentMode) error                { return nil }
 func (stubAgentWriterStore) EnsureSessionAgent(string, string, string, bool) error { return nil }
 func (stubAgentWriterStore) SetSessionAgentMode(string, string, string) error      { return nil }
 func (stubAgentWriterStore) DeleteSessionAgent(string, string) error               { return nil }
@@ -284,8 +273,6 @@ func (stubAgentWriterStore) AssignSkillToAgent(string, string, string) error    
 func (stubAgentWriterStore) RemoveSkillFromAgent(string, string) error             { return nil }
 func (stubAgentWriterStore) AddAgentProject(string, string) error                  { return nil }
 func (stubAgentWriterStore) RemoveAgentProject(string, string) error               { return nil }
-func (stubAgentWriterStore) AssignModeToAgent(string, string) error                { return nil }
-func (stubAgentWriterStore) UnassignModeFromAgent(string, string) error            { return nil }
 
 type stubToolStore struct{}
 
@@ -383,15 +370,6 @@ func (stubSkillStore) GetSkillBySlug(string) (*store.Skill, error) { return nil,
 func (stubSkillStore) CreateSkill(*store.Skill) error              { return nil }
 func (stubSkillStore) UpdateSkill(*store.Skill) error              { return nil }
 func (stubSkillStore) DeleteSkill(string) error                    { return nil }
-
-type stubModeStore struct{}
-
-func (stubModeStore) CreateMode(*store.Mode) error              { return nil }
-func (stubModeStore) GetMode(string) (*store.Mode, error)       { return nil, nil }
-func (stubModeStore) GetModeBySlug(string) (*store.Mode, error) { return nil, nil }
-func (stubModeStore) ListModes() ([]store.Mode, error)          { return nil, nil }
-func (stubModeStore) UpdateMode(*store.Mode) error              { return nil }
-func (stubModeStore) DeleteMode(string) error                   { return nil }
 
 type stubProviderStore struct{}
 

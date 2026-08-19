@@ -101,8 +101,12 @@ type SlotSources struct {
 	Universal        string
 	System           string                 // think-tool block + workspace identity (no agent-specific text)
 	Memory           string                 // formatted ContextBroker items where Source == "memory"
-	Agent            string                 // agent.SystemPrompt + AgentMode.PromptAddendum (legacy) + skill list
-	Mode             string                 // B1 (CW-20260428-0009): session-level *store.Mode.PromptAddendum.
+	Agent            string                 // agent.SystemPrompt + skill list
+	// Mode is always "" — Phase 0 item 21 ("Cut Modes, in full") deleted
+	// both Session Mode and Legacy Agent Mode. Kept as a field (not
+	// removed) so SlotMode keeps a content source to bind to; see INV4 in
+	// internal/context/INVARIANTS.md for why the slot itself stays.
+	Mode             string
 	Rules            string                 // agent tags + tool allowlist (S4a expands)
 	// Permissions carries the rendered SlotPermissions block — a
 	// human-readable summary of the session's effective path access
@@ -135,10 +139,12 @@ type SlotSources struct {
 // The Tools slot is intentionally not populated here — the service layer
 // fills it from the selected tool definitions after calling this method.
 //
-// sessionMode (B1, CW-20260428-0009) is the resolved session-level *store.Mode
-// — pass nil when no session mode is set; the legacy AgentMode addendum still
-// rides inside the Agent slot independently of this argument.
-func (cb *ContextClient) AssembleSlotSources(ctx context.Context, session *store.Session, agent *store.AgentProfile, mode *store.AgentMode, workspace *store.Workspace, sessionMode *store.Mode) (*SlotSources, error) {
+// Phase 0 item 21 ("Cut Modes, in full") removed this function's `mode
+// *store.AgentMode` and `sessionMode *store.Mode` parameters — both Legacy
+// Agent Mode and Session Mode are gone. SlotMode (see the SlotSources.Mode
+// field) is now permanently empty/inert per INV4's post-cut definition in
+// internal/context/INVARIANTS.md; its position in SlotOrder is unchanged.
+func (cb *ContextClient) AssembleSlotSources(ctx context.Context, session *store.Session, agent *store.AgentProfile, workspace *store.Workspace) (*SlotSources, error) {
 	_, span := feotel.StartSpan(ctx, "nanite.broker.assembleSlotSources")
 	defer span.End()
 	span.SetAttributes(
@@ -192,7 +198,7 @@ func (cb *ContextClient) AssembleSlotSources(ctx context.Context, session *store
 	// further down — that left the skill list with no per-turn ranking input.
 	intent := cb.deriveIntent(session, agent)
 	skillList := buildSkillListForSessionWithIntent(ctx, cb.Store, agent.ID, session.ID, intent, skillbroker.AgentIdentityFromProfile(agent))
-	agentPrompt := assembleAgentSlotContent(cb.Store, agent, mode, skillList, session.ID)
+	agentPrompt := assembleAgentSlotContent(cb.Store, agent, skillList, session.ID)
 
 	// Rules slot — agent tags + tool allowlist. S4a expands this.
 	rules := buildRulesSlotContent(agent)
@@ -234,7 +240,7 @@ func (cb *ContextClient) AssembleSlotSources(ctx context.Context, session *store
 	workspaceContent := cb.buildWorkspaceSlotContent(ctx, session)
 
 	// Session slot — small, stable identifiers.
-	sessionContent := buildSessionSlotContent(session, mode, workspace)
+	sessionContent := buildSessionSlotContent(session, workspace)
 
 	// Memory + Context — both sourced from ContextBroker; split by item.Source.
 	var memoryContent, contextContent string
@@ -275,12 +281,16 @@ func (cb *ContextClient) AssembleSlotSources(ctx context.Context, session *store
 	// J11 (CW-20260426-0009) pin tool will extend this same pattern.
 	userContextContent := buildUserContextSlot(cb.Store, session.ID)
 
-	// B1 (CW-20260428-0009): SlotMode carries the session-level Mode addendum.
-	// Independent of the legacy AgentMode handling inside SlotAgent.
-	var modeContent string
-	if sessionMode != nil {
-		modeContent = sessionMode.PromptAddendum
-	}
+	// SlotMode — INV4 (internal/context/INVARIANTS.md). Phase 0 item 21
+	// ("Cut Modes, in full") deleted Session Mode (sessions.current_mode_id,
+	// the modes table, store.GetSessionMode/SetSessionMode). There is no
+	// more session-scoped *store.Mode pointer to render, so SlotMode is now
+	// permanently empty/inert — content source removed, not the slot
+	// itself. SlotOrder (internal/context/slot.go) still carries SlotMode
+	// at its existing position so INV1 (stable sent shape) and INV3 (cache
+	// marker priority list) are unaffected; the assembly decider ships it
+	// as skipped_no_content like any other empty slot.
+	const modeContent = ""
 
 	return &SlotSources{
 		// SlotUniversal carries the universal-rules block at position 0
@@ -590,22 +600,20 @@ func formatPacketItemsBySource(packet *contextbroker.ContextPacket, memoryOnly b
 }
 
 // assembleAgentSlotContent composes the agent-specific portion of the prompt
-// (agent.SystemPrompt, mode addendum, skill list) without the workspace or
-// think-tool sections that live in the System slot.
+// (agent.SystemPrompt, skill list) without the workspace or think-tool
+// sections that live in the System slot. Phase 0 item 21 ("Cut Modes, in
+// full") removed the Legacy AgentMode addendum this used to splice in —
+// there is no more per-agent mode to append.
 //
 // When sessionID is non-empty and a fresh CompactionContract event exists for
-// the session, the appropriate mode-anchored disclosure is appended (P8A,
-// CW-20260420-0025). Disclosure lands in the agent slot because (a) the
-// agent slot already carries mode-specific content, and (b) every system
+// the session, the appropriate disclosure is appended (P8A,
+// CW-20260420-0025). Disclosure lands in the agent slot because every system
 // prompt assembly path passes through this function or its sibling
 // assembleSystemPromptFromTemplates.
-func assembleAgentSlotContent(s *store.Store, agent *store.AgentProfile, mode *store.AgentMode, skillList, sessionID string) string {
+func assembleAgentSlotContent(s *store.Store, agent *store.AgentProfile, skillList, sessionID string) string {
 	vars := map[string]string{
 		"agent_name":        agent.Name,
 		"agent_description": agent.Description,
-	}
-	if mode != nil {
-		vars["mode_addendum"] = mode.PromptAddendum
 	}
 	if skillList != "" {
 		vars["skill_list"] = skillList
@@ -623,14 +631,8 @@ func assembleAgentSlotContent(s *store.Store, agent *store.AgentProfile, mode *s
 		composed = ""
 	}
 	if composed == "" {
-		// Legacy fallback: agent prompt + mode addendum only (workspace lives in System slot).
-		var b strings.Builder
-		b.WriteString(agent.SystemPrompt)
-		if mode != nil && mode.PromptAddendum != "" {
-			b.WriteString("\n\n")
-			b.WriteString(mode.PromptAddendum)
-		}
-		composed = b.String()
+		// Legacy fallback: bare agent prompt (workspace lives in System slot).
+		composed = agent.SystemPrompt
 	}
 	if skillList != "" {
 		composed += "\n\nAvailable skills:\n" + skillList
@@ -692,7 +694,11 @@ func parseJSONStringArray(raw string) []string {
 // the LLM against drift toward training-cutoff dates in its outputs.
 // Workspace is intentionally omitted here because SlotSystem already carries
 // it — we don't want to waste tokens on a duplicate.
-func buildSessionSlotContent(session *store.Session, mode *store.AgentMode, _ *store.Workspace) string {
+//
+// Phase 0 item 21 ("Cut Modes, in full") removed the `mode *store.AgentMode`
+// parameter this used to take and the "Mode: <slug>" line it rendered —
+// there is no more mode to report.
+func buildSessionSlotContent(session *store.Session, _ *store.Workspace) string {
 	var b strings.Builder
 	now := time.Now()
 	fmt.Fprintf(&b, "Today: %s (%s)\n", now.Format("2006-01-02"), now.Format("Monday"))
@@ -701,9 +707,6 @@ func buildSessionSlotContent(session *store.Session, mode *store.AgentMode, _ *s
 	// a space is treated as intentional.
 	if t := session.Title; t != "" && (len(t) > 4 || strings.Contains(t, " ")) {
 		fmt.Fprintf(&b, "Session: %s\n", t)
-	}
-	if mode != nil && mode.Slug != "" && mode.Slug != "default" {
-		fmt.Fprintf(&b, "Mode: %s\n", mode.Slug)
 	}
 	return b.String()
 }

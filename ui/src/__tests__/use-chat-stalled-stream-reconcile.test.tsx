@@ -129,7 +129,6 @@ beforeEach(() => {
     chatToast: null,
     pendingJump: null,
     scrollToMessageId: null,
-    autoSwitchSessionOverrides: {},
     activeStreams: new Map(),
     pendingTools: new Map(),
     cliActiveSessions: new Map(),

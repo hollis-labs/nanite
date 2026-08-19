@@ -510,21 +510,6 @@ func (sm *StreamManager) BroadcastSessionArchived(sessionID string) {
 	})
 }
 
-// BroadcastSessionModeChanged fans a `session_mode_changed` presence event
-// out to every connected presence client so a tab open on the same session
-// updates its mode chip without manual refetch. Empty modeID/modeSlug
-// signal a clear (session pointer reset to default chat mode). Reuses the
-// existing presence channel — no new transport. F1 (CW-20260429-0001).
-func (sm *StreamManager) BroadcastSessionModeChanged(sessionID, modeID, modeSlug string) {
-	sm.BroadcastPresence(chat.PresenceEvent{
-		Type:      "session_mode_changed",
-		SessionID: sessionID,
-		ModeID:    modeID,
-		ModeSlug:  modeSlug,
-		Timestamp: time.Now().UTC().Format(time.RFC3339),
-	})
-}
-
 // ThrottledCLIPresence emits a cli_active presence event at most once per the
 // configured throttle interval per session.
 func (sm *StreamManager) ThrottledCLIPresence(sessionID string) {

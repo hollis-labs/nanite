@@ -7,7 +7,6 @@
  * Gated behind developer_mode — never rendered for standard users.
  */
 
-import { useQuery } from "@tanstack/react-query";
 import { useState } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
@@ -15,7 +14,6 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { Skeleton } from "@/components/ui/skeleton";
 import { ScopeChip } from "@/components/work/ScopeChip";
 import { useInspectorTurn, useInspectorTurns } from "@/hooks/useInspector";
-import { api } from "@/lib/api";
 import type {
   InspectorBrokerDecision,
   InspectorLLMMessageRecord,
@@ -24,7 +22,6 @@ import type {
   InspectorToolCallRecord,
   InspectorTurnSnapshot,
 } from "@/lib/types";
-import { usePendingModeSuggestion } from "@/stores/useChatStore";
 
 // ─── Sub-components ──────────────────────────────────────────────────────────
 
@@ -337,8 +334,7 @@ function TurnDetail({
         {activeTab === "tools" && <ToolCallList calls={snap.tool_calls ?? []} />}
         {activeTab === "meta" && (
           <div className="space-y-2 text-[11px]">
-            {/* F2 (CW-20260429-0002) — SlotMode + pending mode suggestion. */}
-            <ModeSection sessionId={sessionId} slots={snap.slots ?? []} />
+            <ModeSection slots={snap.slots ?? []} />
             {snap.loop_status ? (
               <PanelCard title="Loop Detection">
                 <p>
@@ -359,25 +355,19 @@ function TurnDetail({
   );
 }
 
-// ─── Mode section (F2, CW-20260429-0002) ────────────────────────────────────
+// ─── Mode section ────────────────────────────────────────────────────────
 //
 // Surfaces SlotMode and SlotAgent on separate labeled lines so debugging
-// "why is the agent acting like a planner?" is one inspector lookup. The
-// pendingModeSuggestion row reflects the same B2 SSE signal the mode chip
-// uses (read straight from useChatStore — no separate subscription needed).
+// slot-shape questions is one inspector lookup.
+//
+// Phase 0 item 21 ("Cut Modes, in full") removed the "Active session mode"
+// and "Pending Mode Suggestion" rows this section used to carry — Session
+// Mode and classify.ClassifyMode's mode_suggestion signal are both gone.
+// SlotMode itself is NOT removed (see internal/context/INVARIANTS.md's
+// post-cut INV4): it now always ships empty/inert, so `modeSlot.tokens`
+// below is expected to always read 0.
 
-function ModeSection({ sessionId, slots }: { sessionId: string; slots: InspectorSlotSnapshot[] }) {
-  // Live-updated session mode (PATCH /api/sessions/{id}/mode invalidates this
-  // query, same key the ChatHeader chip uses — staying on a single source).
-  const { data: sessionMode } = useQuery({
-    queryKey: ["session-mode", sessionId],
-    queryFn: () => api.getSessionMode(sessionId),
-    enabled: !!sessionId,
-  });
-
-  // Same SSE-fed signal the mode chip subscribes to. No new subscription.
-  const pendingSuggestion = usePendingModeSuggestion(sessionId);
-
+function ModeSection({ slots }: { slots: InspectorSlotSnapshot[] }) {
   const slotByName = new Map(slots.map((s) => [s.name, s]));
   const modeSlot = slotByName.get("mode");
   const agentSlot = slotByName.get("agent");
@@ -419,43 +409,6 @@ function ModeSection({ sessionId, slots }: { sessionId: string; slots: Inspector
           )}
         </dd>
 
-        {/* Active session mode — resolved via current_mode_id → modes.id. */}
-        <dt className="text-fg-muted">Active session mode</dt>
-        <dd className="text-fg font-mono">
-          {sessionMode ? (
-            <>
-              {sessionMode.slug}
-              <span className="ml-1 text-[10px] text-fg-muted">({sessionMode.id})</span>
-            </>
-          ) : (
-            <span className="italic text-fg-muted">none (legacy AgentMode fallback)</span>
-          )}
-        </dd>
-
-        {/* Pending classifier suggestion — B2 (CW-20260428-0010). */}
-        <dt className="text-fg-muted">Pending Mode Suggestion</dt>
-        <dd className="text-fg">
-          {pendingSuggestion ? (
-            <div className="space-y-0.5">
-              <div className="font-mono text-[10px]">
-                {pendingSuggestion.current} → {pendingSuggestion.suggested}
-              </div>
-              <div className="text-[10px] text-fg-muted">
-                confidence:{" "}
-                <span className="font-mono">
-                  {(pendingSuggestion.confidence * 100).toFixed(0)}%
-                </span>
-              </div>
-              {pendingSuggestion.signals && pendingSuggestion.signals.length > 0 && (
-                <div className="text-[10px] text-fg-muted">
-                  reason: <span className="text-fg">{pendingSuggestion.signals.join(", ")}</span>
-                </div>
-              )}
-            </div>
-          ) : (
-            <span className="italic text-fg-muted">no pending suggestion</span>
-          )}
-        </dd>
       </dl>
     </PanelCard>
   );

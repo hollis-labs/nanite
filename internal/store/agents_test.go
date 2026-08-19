@@ -156,44 +156,6 @@ func TestListAgents(t *testing.T) {
 	}
 }
 
-func TestCreateAgentMode(t *testing.T) {
-	s := newTestStore(t)
-	a := makeTestAgent(t, s, "mode-agent")
-
-	m := &AgentMode{
-		AgentID:        a.ID,
-		Slug:           "coder",
-		Name:           "Coder",
-		PromptAddendum: "You are in coder mode.",
-	}
-	if err := s.CreateAgentMode(m); err != nil {
-		t.Fatalf("CreateAgentMode: %v", err)
-	}
-	if m.ID == "" {
-		t.Error("expected mode ID to be generated")
-	}
-}
-
-func TestListAgentModes(t *testing.T) {
-	s := newTestStore(t)
-	a := makeTestAgent(t, s, "modes-agent")
-
-	for _, slug := range []string{"alpha", "beta"} {
-		m := &AgentMode{AgentID: a.ID, Slug: slug, Name: slug, PromptAddendum: "test"}
-		if err := s.CreateAgentMode(m); err != nil {
-			t.Fatalf("CreateAgentMode %s: %v", slug, err)
-		}
-	}
-
-	modes, err := s.ListAgentModes(a.ID)
-	if err != nil {
-		t.Fatalf("ListAgentModes: %v", err)
-	}
-	if len(modes) != 2 {
-		t.Fatalf("expected 2 modes, got %d", len(modes))
-	}
-}
-
 func TestEnsureSessionAgent(t *testing.T) {
 	s := newTestStore(t)
 	seedWorkspace(t, s, "ws1")
@@ -282,7 +244,7 @@ func TestListSessionAgents(t *testing.T) {
 // finding where PRAGMA foreign_keys=OFF was applied pool-wide around the
 // operation. Asserts:
 //   - agent_profiles row is gone
-//   - agent_modes, agent_skills, agent_prompt_templates rows are gone
+//   - agent_skills, agent_prompt_templates rows are gone
 //   - messages rows remain with agent_id NULLed (user data preserved)
 //   - FK enforcement is still ON after the operation (run an FK-violating
 //     INSERT and expect it to fail).
@@ -291,11 +253,7 @@ func TestDeleteAgent_NoPragmaToggle(t *testing.T) {
 	seedWorkspace(t, s, "ws1")
 	agent := makeTestAgent(t, s, "del-agent")
 
-	// mode + skill + prompt-template assignments
-	mode := &AgentMode{AgentID: agent.ID, Slug: "m", Name: "m", PromptAddendum: "x"}
-	if err := s.CreateAgentMode(mode); err != nil {
-		t.Fatalf("CreateAgentMode: %v", err)
-	}
+	// skill + prompt-template assignments
 	sk := &Skill{Name: "S", Slug: "s-del", Description: "d", Category: "t", ToolBindings: `[]`}
 	if err := s.CreateSkill(sk); err != nil {
 		t.Fatalf("CreateSkill: %v", err)
@@ -338,7 +296,7 @@ func TestDeleteAgent_NoPragmaToggle(t *testing.T) {
 	}
 
 	// junctions cleared
-	for _, table := range []string{"agent_modes", "agent_skills", "agent_prompt_templates", "session_agents"} {
+	for _, table := range []string{"agent_skills", "agent_prompt_templates", "session_agents"} {
 		if err := s.DB.QueryRow("SELECT COUNT(*) FROM "+table+" WHERE agent_id = ?", agent.ID).Scan(&n); err != nil {
 			t.Fatalf("count %s: %v", table, err)
 		}

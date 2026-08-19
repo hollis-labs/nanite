@@ -5,8 +5,7 @@ import type { PresenceEvent } from '@/lib/types'
 
 /**
  * Pure dispatcher for presence events. Extracted from the hook body so it
- * can be unit-tested without spinning up a React tree / EventSource. F1
- * (CW-20260429-0001) — needed for testing session_mode_changed routing.
+ * can be unit-tested without spinning up a React tree / EventSource.
  */
 export interface PresenceHandlers {
   setActiveStream: (sessionId: string, info: { agentId: string; startedAt: string }) => void
@@ -60,16 +59,6 @@ export function dispatchPresenceEvent(evt: PresenceEvent, h: PresenceHandlers): 
     case 'work_changed':
       h.queryClient.invalidateQueries({ queryKey: ['todos'] })
       h.queryClient.invalidateQueries({ queryKey: ['plans'] })
-      break
-
-    case 'session_mode_changed':
-      // F1 (CW-20260429-0001): another tab (or another client on the
-      // same tab) flipped the session mode via PATCH /api/sessions/{id}/mode.
-      // Match the invalidation pattern ChatComposer uses for the /mode
-      // slash command (mode_switched:<slug>) so the mode chip and any
-      // session-derived UI refresh from the new current_mode_id.
-      h.queryClient.invalidateQueries({ queryKey: ['session-mode', evt.session_id] })
-      h.queryClient.invalidateQueries({ queryKey: ['session', evt.session_id] })
       break
   }
 }

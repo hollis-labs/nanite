@@ -87,7 +87,6 @@ type harnessV1CreateSessionRequest struct {
 	AgentID        string         `json:"agent_id,omitempty"`
 	Title          string         `json:"title,omitempty"`
 	Metadata       map[string]any `json:"metadata,omitempty"`
-	ModeID         string         `json:"mode_id,omitempty"`
 	RuntimeKind    string         `json:"runtime_kind,omitempty"`
 	WorkRoot       string         `json:"work_root,omitempty"`
 	BootProfileID  string         `json:"boot_profile_id,omitempty"`
@@ -179,7 +178,6 @@ func (a *API) handleHarnessV1Capabilities(w http.ResponseWriter, r *http.Request
 				"agent_id",
 				"title",
 				"metadata",
-				"mode_id",
 				"boot_profile_id",
 			},
 			Unsupported: []string{
@@ -277,13 +275,6 @@ func (a *API) handleHarnessV1CreateSession(w http.ResponseWriter, r *http.Reques
 			return
 		}
 	}
-	if req.ModeID != "" {
-		if err := a.Services.Store.SetSessionMode(sess.ID, req.ModeID); err != nil {
-			a.errorResp(w, http.StatusBadRequest, err.Error())
-			return
-		}
-	}
-
 	details, err := a.sessionDetails(sess.ID)
 	if err != nil {
 		a.errorResp(w, http.StatusInternalServerError, err.Error())

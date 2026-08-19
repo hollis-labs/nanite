@@ -166,29 +166,28 @@ func (st *SelfToolsTransport) callExecuteTask(ctx context.Context, args map[stri
 	// and returns the current-behavior agent profile so wiring it produces
 	// no semantic change. Decision.Reason is logged to event_log so future
 	// sessions (and the v1 deterministic replacement) can audit routing.
+	//
+	// Phase 0 item 21 ("Cut Modes, in full") deleted store.GetSessionMode —
+	// this used to resolve the session's *store.Mode here and project its
+	// slug into broker.Input.SessionMode. That lookup is gone; SessionMode
+	// is now always "". This is the second real call site of the same
+	// "coupled step" TASKS/phase-0/21-cut-modes.md documents for
+	// chat_broker_dispatch.go's buildBrokerInput (the task file's own
+	// enumeration only named that one) — the production broker instance is
+	// agentkit's DeterministicBroker (wired via agentbroker.New() in
+	// cmd/nanite/main.go, shared between chatServiceImpl.agentBroker and
+	// SelfToolsTransport.Broker here), and per agentkit/broker/broker.go's
+	// own doc comment, DeterministicBroker.Decide never actually consults
+	// Input.SessionMode (its rules key off the separate per-turn Input.Mode
+	// field instead) — SessionMode only ever fed telemetry/audit logging
+	// below, which now just always logs an empty string.
 	if st.Broker != nil {
-		mode := ""
-		var modeLookupErr error
-		if st.Store != nil {
-			m, err := st.Store.GetSessionMode(sessionID)
-			if err != nil {
-				// Log the lookup failure so an empty mode in the broker
-				// audit trail isn't ambiguous between "no mode set" and
-				// "mode lookup failed". PR #113 review feedback.
-				modeLookupErr = err
-				slog.Warn("mcp: broker session_mode lookup failed",
-					"session_id", sessionID, "err", err)
-			} else if m != nil {
-				mode = m.Slug
-			}
-		}
 		brokerInput := broker.Input{
 			// PR #113 review: broker must see the same effective text
 			// dispatch will see (post-grounding-injection), otherwise the
 			// audit trail and any future non-noop broker logic won't
 			// correspond to the actual dispatched prompt.
-			UserText:    dispatchMessage,
-			SessionMode: mode,
+			UserText: dispatchMessage,
 		}
 		if reflexHints != nil {
 			brokerInput.ReflexMatchID = reflexHints.ReflexID
@@ -204,19 +203,15 @@ func (st *SelfToolsTransport) callExecuteTask(ctx context.Context, args map[stri
 				"session_id", sessionID, "err", derr)
 			if st.Store != nil {
 				meta := fmt.Sprintf(
-					`{"error":%q,"session_mode":%q,"reflex_match_id":%q}`,
-					derr.Error(), mode, brokerInput.ReflexMatchID,
+					`{"error":%q,"reflex_match_id":%q}`,
+					derr.Error(), brokerInput.ReflexMatchID,
 				)
 				st.Store.LogEvent(sessionID, "broker_decision_error", "error", derr.Error(), meta)
 			}
 		case st.Store != nil:
-			modeErrStr := ""
-			if modeLookupErr != nil {
-				modeErrStr = modeLookupErr.Error()
-			}
 			meta := fmt.Sprintf(
-				`{"agent_profile":%q,"reason":%q,"confidence":%g,"session_mode":%q,"reflex_match_id":%q,"mode_lookup_error":%q}`,
-				decision.AgentProfile, decision.Reason, decision.Confidence, mode, brokerInput.ReflexMatchID, modeErrStr,
+				`{"agent_profile":%q,"reason":%q,"confidence":%g,"reflex_match_id":%q}`,
+				decision.AgentProfile, decision.Reason, decision.Confidence, brokerInput.ReflexMatchID,
 			)
 			st.Store.LogEvent(sessionID, "broker_decision", "info", decision.Reason, meta)
 		}

@@ -19,13 +19,9 @@ func TestDefinition_ToProfile(t *testing.T) {
 		Tags:           []string{"backend"},
 		Directories:    []string{"./src"},
 		PermissionMode: "yolo",
-		Modes: []ModeDefinition{
-			{Slug: "default", Name: "Default", PromptAddendum: "Be helpful."},
-			{Slug: "architect", Name: "Architect", PromptAddendum: "Focus on design."},
-		},
-		SystemPrompt: "You are a code agent.",
-		Source:       "project",
-		SourceRef:    "/path/to/code.md",
+		SystemPrompt:   "You are a code agent.",
+		Source:         "project",
+		SourceRef:      "/path/to/code.md",
 	}
 
 	p := def.ToProfile()
@@ -80,13 +76,11 @@ func TestDefinition_ToProfile(t *testing.T) {
 		t.Errorf("MCPServers = %v", servers)
 	}
 
-	// Check modes column (slug array).
-	var modesSlugs []string
-	if err := json.Unmarshal([]byte(p.Modes), &modesSlugs); err != nil {
-		t.Fatalf("Modes JSON: %v", err)
-	}
-	if len(modesSlugs) != 2 || modesSlugs[0] != "default" {
-		t.Errorf("Modes = %v", modesSlugs)
+	// Phase 0 item 21 ("Cut Modes, in full") deleted Definition.Modes /
+	// ModeDefinition — the legacy agent_profiles.modes column is always
+	// "[]" now (see ToProfile's doc comment).
+	if p.Modes != "[]" {
+		t.Errorf("Modes = %q, want \"[]\" (Legacy Agent Mode was cut)", p.Modes)
 	}
 
 	// An unset (zero-value) Constraints still serializes to "{}" — see
@@ -181,42 +175,10 @@ func TestDefinition_ToProfile_Minimal(t *testing.T) {
 	}
 }
 
-func TestDefinition_ToModes(t *testing.T) {
-	def := &Definition{
-		Slug: "test",
-		Modes: []ModeDefinition{
-			{Slug: "default", Name: "Default", PromptAddendum: "Be helpful."},
-			{
-				Slug:           "architect",
-				Name:           "Architect",
-				PromptAddendum: "Design first.",
-				ToolOverrides:  map[string]any{"prefer": []string{"read", "grep"}},
-			},
-		},
-	}
-
-	modes := def.ToModes()
-	if len(modes) != 2 {
-		t.Fatalf("got %d modes, want 2", len(modes))
-	}
-
-	if modes[0].ID != "file-test-default" {
-		t.Errorf("modes[0].ID = %q", modes[0].ID)
-	}
-	if modes[0].AgentID != "file-test" {
-		t.Errorf("modes[0].AgentID = %q", modes[0].AgentID)
-	}
-	if modes[0].PromptAddendum != "Be helpful." {
-		t.Errorf("modes[0].PromptAddendum = %q", modes[0].PromptAddendum)
-	}
-
-	if modes[1].Slug != "architect" {
-		t.Errorf("modes[1].Slug = %q", modes[1].Slug)
-	}
-	if modes[1].ToolOverrides == "{}" {
-		t.Error("modes[1].ToolOverrides should not be empty")
-	}
-}
+// Phase 0 item 21 ("Cut Modes, in full") deleted Definition.ToModes() along
+// with store.AgentMode / ModeDefinition — there is no more inline
+// agent-file mode concept to convert. TestDefinition_ToModes was removed
+// with it.
 
 func TestIsFileBasedID(t *testing.T) {
 	tests := []struct {

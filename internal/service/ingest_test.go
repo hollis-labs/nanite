@@ -649,6 +649,58 @@ func TestAutoIngestAgents_DBEditSurvivesBootReingest(t *testing.T) {
 	}
 }
 
+// TestAutoIngestAgents_DirectDBMutationToInternalProfileSurvivesBootReingest
+// is TASKS/phase-2/05-freeze-internal-agent-profiles-on-reingest.md's own
+// literal Done-means scenario, targeted specifically at source="internal"
+// (the profile class that task exists to protect) rather than the generic
+// source used by TestAutoIngestAgents_DBEditSurvivesBootReingest above.
+// upsertAgentDef's freeze (TASKS/phase-1/08, `bootPass && existing.Source ==
+// profile.Source`) is fully source-agnostic and already covers this case as
+// a special case of the general rule -- proven indirectly by
+// TestAutoIngestAgents_SourceFlipFromBuiltinToInternal's third pass (a
+// changed in-memory def is ignored once frozen at source="internal"). This
+// test closes the remaining literal gap: a mutation applied directly to the
+// DB row (standing in for however the edit landed -- REST PATCH, the
+// agent_update self-tool, manual SQL) rather than via a second
+// AutoIngestAgents call with a mutated def.
+func TestAutoIngestAgents_DirectDBMutationToInternalProfileSurvivesBootReingest(t *testing.T) {
+	st := newIngestTestStore(t)
+
+	def := &agentpkg.Definition{
+		Slug:         "internal-profile-under-test",
+		Name:         "Internal Profile Under Test",
+		SystemPrompt: "compiled-in prompt v1",
+		Source:       "internal",
+	}
+	if n := AutoIngestAgents(st, []*agentpkg.Definition{def}, nil); n != 1 {
+		t.Fatalf("expected 1 ingested agent, got %d", n)
+	}
+
+	// Simulate a DB-side edit landing outside the file-parse path (e.g. a
+	// PATCH through the REST API, or -- pre-task-34 -- the agent_update
+	// self-tool).
+	if _, err := st.DB.Exec(
+		`UPDATE agent_profiles SET system_prompt = ? WHERE slug = ?`,
+		"DB-edited prompt", "internal-profile-under-test",
+	); err != nil {
+		t.Fatalf("simulate DB edit: %v", err)
+	}
+
+	// Re-run the boot-time pass with the unchanged file-derived def (the
+	// compiled-in builtin/internal profile content never changed).
+	if n := AutoIngestAgents(st, []*agentpkg.Definition{def}, nil); n != 1 {
+		t.Fatalf("expected 1 ingested agent on re-run, got %d", n)
+	}
+
+	a, err := st.GetAgentBySlug("internal-profile-under-test")
+	if err != nil {
+		t.Fatalf("GetAgentBySlug: %v", err)
+	}
+	if a.SystemPrompt != "DB-edited prompt" {
+		t.Errorf("SystemPrompt: got %q, want the DB edit to survive the boot-time reingest of a source=internal profile", a.SystemPrompt)
+	}
+}
+
 // TestAutoIngestAgents_NewFileStillIngestedAlongsideFrozenRow proves
 // TASKS/phase-1/08's explicit non-regression requirement: freezing an
 // already-ingested row must not block first-ingest of a genuinely new file

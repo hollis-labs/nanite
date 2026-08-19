@@ -180,7 +180,7 @@ This branch (`phase-1-execution`, based off Phase 0's `HEAD` as of 2026-08-18 �
 | 04-unify-run-another-agent-surfaces | implemented | `TASKS/phase-0/03-fix-callertype-mistagging` |
 | 05-wire-select-for-agent-to-read-agent-tools | implemented | Phase 1's `04-add-known-tools-and-agent-tools-fk` (landed via the Phase 1→main merge) |
 | 06-add-filter-tool-selection | implemented | `TASKS/phase-0/22-remove-skill-and-tool-broker-abstractions`; held until `05` merges (both touch `internal/service/tool.go`'s `SelectForAgent`) |
-| 07-tool-concurrency-safety-classification | in-progress | none directly; held until `05` merges — its target (`GetToolMeta`) also lives in `internal/service/tool.go`, an overlap the original parallelization note didn't flag |
+| 07-tool-concurrency-safety-classification | implemented | none directly; held until `05` merges — its target (`GetToolMeta`) also lives in `internal/service/tool.go`, an overlap the original parallelization note didn't flag |
 | 08-export-and-drop-agent-broker-decisions | implemented | `02` |
 
 **Orchestrator note (2026-08-19):** confirmed via grep that `07`'s target (the concurrency-safety name-heuristic) lives in `internal/service/tool.go:677-682` — the same file `05` and `06` both touch, a three-way overlap the original parallelization plan below only partially flagged. Serializing: `05` solo first (Wave 1), then `06`+`07` together once `05` merges (Wave 1.5).

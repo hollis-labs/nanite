@@ -326,7 +326,7 @@ func (s *Store) BumpAgentReflexFired(ctx context.Context, id string, now time.Ti
 
 // DeleteAgentReflex removes a row by id. Any agent_reflex_opt_outs rows
 // referencing it are removed automatically via ON DELETE CASCADE
-// (migration 106_agent_reflex_opt_out.sql) — no manual cleanup needed
+// (migration 109_agent_reflex_opt_out.sql) — no manual cleanup needed
 // here, unlike agent_reflexes.agent_id's own FK to agent_profiles,
 // which DeleteAgent still cleans up explicitly.
 func (s *Store) DeleteAgentReflex(ctx context.Context, id string) error {

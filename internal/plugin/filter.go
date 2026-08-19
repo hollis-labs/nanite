@@ -197,8 +197,21 @@ func (r *FilterRegistry) RemoveByPlugin(pluginID string) int {
 
 // Standard filter point names. Plugins reference these when registering filters.
 const (
-	FilterSystemPrompt      = "system_prompt"      // string → string
-	FilterUserMessage       = "user_message"       // string → string
+	FilterSystemPrompt = "system_prompt" // string → string
+	FilterUserMessage  = "user_message"  // string → string
+	// FilterToolSelection lets a plugin add, remove, or reshape the tool
+	// list offered to the model for a turn. Called once per turn in
+	// internal/service/chat_generate.go, right after ToolService.
+	// SelectForAgent resolves the final tool set (post agent_tools grant
+	// filter, post cap/token-budget prune, post known_tools.always_included
+	// escape hatch, post progressive-discovery repackaging when active) --
+	// i.e. it sees the same tool list about to be sent to the LLM this
+	// turn, not the broker's raw pre-filter output. The selection-time
+	// counterpart to FilterToolResult below (post-execution) -- closes the
+	// one gap the plugin-system review found in an otherwise close-to-
+	// comprehensive filter chain. See
+	// TASKS/phase-4/06-add-filter-tool-selection.md.
+	FilterToolSelection     = "tool_selection"     // []llmtypes.ToolDefinition → []llmtypes.ToolDefinition
 	FilterToolResult        = "tool_result"        // string → string
 	FilterAssistantResponse = "assistant_response" // string → string
 	FilterContextWindow     = "context_window"     // []llmtypes.ChatMessage → []llmtypes.ChatMessage

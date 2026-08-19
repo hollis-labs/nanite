@@ -63,7 +63,7 @@ func (deterministicAgentBuilderAdvisor) Draft(_ context.Context, req AgentBuilde
 			// always pre-filled "singleton" here would let an operator
 			// unknowingly submit a new durable agent straight into the
 			// CW-20260817 "wakeable exactly once" bug this task's
-			// migration 111 exists to close (see agents.go's
+			// migration 117 exists to close (see agents.go's
 			// DefaultActivationModeForClass doc comment). The free-text
 			// field in AgentBuilderWizard.tsx still lets the operator
 			// override this suggestion before submit.

@@ -1,6 +1,6 @@
 -- +goose Up
 -- +goose NO TRANSACTION
--- 106_add_consumers_table.sql
+-- 112_add_consumers_table.sql
 -- TASKS/phase-1/03-add-consumers-table.md
 --
 -- Adds a minimal `consumers` table for ownership/tenancy tagging (see

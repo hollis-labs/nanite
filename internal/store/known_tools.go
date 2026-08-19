@@ -21,7 +21,7 @@ var ErrKnownToolNotFound = errors.New("known tool not found")
 // GUI. KnownTool is a global catalog -- one row per tool that exists in the
 // system at all, live-synced against builtins + current MCP discovery by
 // SyncKnownTools (internal/service/known_tools_sync.go). See this migration's
-// own doc comment (110_known_tools_and_agent_tools.sql) for the full
+// own doc comment (116_known_tools_and_agent_tools.sql) for the full
 // naming-collision analysis.
 type KnownTool struct {
 	ID          string `json:"id"`

@@ -39,7 +39,7 @@ func (s *Store) GrantAgentTool(ctx context.Context, agentID, toolID, grantedVia 
 // has already considered agentID -- a dedicated, independent marker
 // (agent_tools_legacy_backfill), NOT derived from whether any resulting
 // agent_tools rows still exist. See that table's migration doc comment
-// (110_known_tools_and_agent_tools.sql) for why: an agent with a
+// (116_known_tools_and_agent_tools.sql) for why: an agent with a
 // deny-everything policy legitimately gets zero grants and must still be
 // marked as "considered" so it isn't recomputed forever, and an operator
 // revoking every grant a backfill produced must not un-mark the agent as
@@ -151,7 +151,7 @@ func (s *Store) CountAgentTools(ctx context.Context, agentID string) (int, error
 // may authorize a subagent it dispatches to use. Deliberately a separate
 // table from agent_profiles.parent_dispatch_allowlist (role slugs a parent
 // may dispatch task_execute to) -- see this migration's doc comment
-// (110_known_tools_and_agent_tools.sql) for the naming-collision analysis.
+// (116_known_tools_and_agent_tools.sql) for the naming-collision analysis.
 func (s *Store) GrantAgentDispatchTool(ctx context.Context, agentID, toolID string) error {
 	if agentID == "" || toolID == "" {
 		return fmt.Errorf("grant agent_dispatch_tool_allowlist: agent_id and tool_id are required")

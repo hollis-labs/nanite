@@ -76,7 +76,7 @@ func TestCreateAgent_RoleIDModelIDNullableRoundTrip(t *testing.T) {
 }
 
 // TestCreateAgent_RuntimeKindDefaultedFromProvider is the Go-side mirror of
-// migration 111's SQL backfill: a newly created row with no explicit
+// migration 117's SQL backfill: a newly created row with no explicit
 // RuntimeKind infers 'cli' for any pty/pty-*/sub-* provider and 'api' for
 // everything else (including an empty provider), exactly matching
 // chat.IsCLIProvider's classification.
@@ -116,7 +116,7 @@ func TestCreateAgent_RuntimeKindDefaultedFromProvider(t *testing.T) {
 }
 
 // TestCreateAgent_RuntimeKindInvalidRejected confirms the Go-layer
-// validation (mirroring the DB-level CHECK migration 111 adds) rejects any
+// validation (mirroring the DB-level CHECK migration 117 adds) rejects any
 // value outside 'cli'/'api'/empty.
 func TestCreateAgent_RuntimeKindInvalidRejected(t *testing.T) {
 	s := newTestStore(t)
@@ -130,7 +130,7 @@ func TestCreateAgent_RuntimeKindInvalidRejected(t *testing.T) {
 // TestValidateAgentMultiAgentFields_ActivationModeThreeValueEnum confirms
 // the design decision this task made explicit: activation_mode now accepts
 // singleton/fresh-per-wake/concurrent, and the old 'instance' value (valid
-// before migration 111) is rejected going forward.
+// before migration 117) is rejected going forward.
 func TestValidateAgentMultiAgentFields_ActivationModeThreeValueEnum(t *testing.T) {
 	valid := []string{"", "singleton", "fresh-per-wake", "concurrent"}
 	for _, v := range valid {
@@ -141,14 +141,14 @@ func TestValidateAgentMultiAgentFields_ActivationModeThreeValueEnum(t *testing.T
 	}
 	a := &AgentProfile{ActivationMode: "instance"}
 	if err := validateAgentMultiAgentFields(a); err == nil {
-		t.Error("activation_mode 'instance': expected rejection, got nil (it was retired by migration 111)")
+		t.Error("activation_mode 'instance': expected rejection, got nil (it was retired by migration 117)")
 	}
 }
 
 // TestDefaultActivationModeForClass pins the class -> activation_mode
 // default mapping documented on DefaultActivationModeForClass: process and
 // template both get the non-blocking 'fresh-per-wake' default (matching
-// durable_wake.go's pre-migration-110 behavior for process, and
+// durable_wake.go's pre-migration-116 behavior for process, and
 // deliberately extending it to template -- see this task's Work Log and
 // the migration's own Up comment for the CW-20260817 template-class latent
 // bug this closes); every other class (including unrecognized ones)

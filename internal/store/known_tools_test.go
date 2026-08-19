@@ -48,7 +48,7 @@ func TestUpsertKnownTool_PreservesAlwaysIncluded(t *testing.T) {
 	s := newTestStore(t)
 	ctx := context.Background()
 
-	// request_tools is seeded by migration 110 with always_included=TRUE.
+	// request_tools is seeded by migration 116 with always_included=TRUE.
 	got, err := s.GetKnownToolByName(ctx, "request_tools")
 	if err != nil {
 		t.Fatalf("GetKnownToolByName(request_tools): %v", err)

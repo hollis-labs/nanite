@@ -357,7 +357,7 @@ func wakeAllowsConcurrentActive(activationMode string) bool {
 // durableAgentLaunchPolicyFor), so there is no session-reuse collision for
 // "active" to be guarding against. Treating it as a permanent block meant
 // every such agent (Loom Curator, Atlas Curator, Torque Supervisor, and —
-// under the pre-migration-110 lifecycle_class-only check, which this
+// under the pre-migration-116 lifecycle_class-only check, which this
 // rewrite closes — content-writer/task-planner too, a latent instance of
 // the same bug the original CW-20260817 fix never covered since it only
 // exempted lifecycle_class == process) was wakeable exactly once, ever: the

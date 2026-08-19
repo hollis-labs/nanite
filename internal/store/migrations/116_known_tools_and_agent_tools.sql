@@ -65,9 +65,9 @@
 --
 -- agent_tools / agent_dispatch_tool_allowlist are both plain (agent_id,
 -- tool_id) composite-PK join tables, matching the established
--- agent_skills/agent_projects FK pattern (107_agent_skills_agent_projects_fk.sql)
+-- agent_skills/agent_projects FK pattern (113_agent_skills_agent_projects_fk.sql)
 -- -- real ON DELETE CASCADE FKs from the start, since these are brand-new
--- tables (no ALTER-table rebuild dance needed, unlike 107's retrofit).
+-- tables (no ALTER-table rebuild dance needed, unlike 113's retrofit).
 --
 -- agent_tools.granted_via is a free-text provenance tag mirroring
 -- agent_known_tools.reason's established precedent (migration 069): 'explicit'

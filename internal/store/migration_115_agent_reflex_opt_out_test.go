@@ -8,12 +8,12 @@ import (
 	"github.com/pressly/goose/v3"
 )
 
-// TestMigrate109AddsOptOutColumnAndTable is the regression test for
+// TestMigrate115AddsOptOutColumnAndTable is the regression test for
 // TASKS/phase-1/07-add-reflex-opt-out-field.md: agent_reflexes gains a
 // permissive-by-default opt_out_allowed column, and a new
 // agent_reflex_opt_outs join table exists with ON DELETE CASCADE FKs to
 // both agent_profiles and agent_reflexes.
-func TestMigrate109AddsOptOutColumnAndTable(t *testing.T) {
+func TestMigrate115AddsOptOutColumnAndTable(t *testing.T) {
 	s := newTestStore(t)
 	ctx := context.Background()
 
@@ -23,7 +23,7 @@ func TestMigrate109AddsOptOutColumnAndTable(t *testing.T) {
 	// (seeds.go's Required-derived value, loom_pilot_seeds.go's explicit
 	// true, and internal/api/reflexes.go's *bool-with-default-true
 	// request field). The column's own DEFAULT TRUE is a backstop for
-	// non-Go-layer inserts: pre-migration rows backfilled by 109's own Up,
+	// non-Go-layer inserts: pre-migration rows backfilled by 115's own Up,
 	// and ApprovePendingReflex's raw SQL INSERT, which omits the column on
 	// purpose. Verify that backstop directly via a raw SQL insert that
 	// mirrors ApprovePendingReflex's own column list (no opt_out_allowed).
@@ -32,13 +32,13 @@ func TestMigrate109AddsOptOutColumnAndTable(t *testing.T) {
 		    (id, agent_id, class_tag, name, trigger_kind, trigger_spec,
 		     action_kind, action_spec, status, priority, fired_count,
 		     last_fired_at, created_at, created_by)
-		 VALUES ('rfx-migration-109-probe', NULL, 'process', 'migration-109-probe',
+		 VALUES ('rfx-migration-115-probe', NULL, 'process', 'migration-115-probe',
 		         'event', '{"name":"probe"}', 'inject_reminder', '{"body":"probe"}',
 		         'active', 0, 0, NULL, datetime('now'), 'test')`,
 	); err != nil {
 		t.Fatalf("raw insert omitting opt_out_allowed: %v", err)
 	}
-	id := "rfx-migration-109-probe"
+	id := "rfx-migration-115-probe"
 	var optOutAllowed bool
 	if err := s.DB.QueryRowContext(ctx,
 		`SELECT opt_out_allowed FROM agent_reflexes WHERE id = ?`, id,
@@ -50,7 +50,7 @@ func TestMigrate109AddsOptOutColumnAndTable(t *testing.T) {
 	}
 
 	// The opt-out table exists and enforces its FKs / PK.
-	seedWorkspace(t, s, "ws-migration-109")
+	seedWorkspace(t, s, "ws-migration-115")
 	agent := &AgentProfile{Name: "Opt-Out Probe", Slug: "opt-out-probe", SystemPrompt: "x", Class: "process"}
 	if err := s.CreateAgent(agent); err != nil {
 		t.Fatalf("CreateAgent: %v", err)
@@ -93,16 +93,16 @@ func TestMigrate109AddsOptOutColumnAndTable(t *testing.T) {
 
 	// Simulated restart: a second full migrate() must be a clean no-op.
 	if err := s.migrate(); err != nil {
-		t.Fatalf("re-migrate after 109 already applied: %v", err)
+		t.Fatalf("re-migrate after 115 already applied: %v", err)
 	}
 }
 
-// TestMigrate109AgentDeleteCascadesOptOuts verifies the other cascade
+// TestMigrate115AgentDeleteCascadesOptOuts verifies the other cascade
 // direction: deleting the opting-out agent removes its opt-out rows too
 // (agent_reflex_opt_outs.agent_id ON DELETE CASCADE), exercised against a
 // class-bound reflex the agent has opted out of (the real-world shape:
 // opting out of a global/class-bound reflex, not an agent-owned one).
-func TestMigrate109AgentDeleteCascadesOptOuts(t *testing.T) {
+func TestMigrate115AgentDeleteCascadesOptOuts(t *testing.T) {
 	s := newTestStore(t)
 	ctx := context.Background()
 
@@ -119,7 +119,7 @@ func TestMigrate109AgentDeleteCascadesOptOuts(t *testing.T) {
 		t.Fatalf("InsertAgentReflex (class-bound): %v", err)
 	}
 
-	seedWorkspace(t, s, "ws-migration-109-agent-delete")
+	seedWorkspace(t, s, "ws-migration-115-agent-delete")
 	agent := &AgentProfile{Name: "Opt-Out Agent Delete Probe", Slug: "opt-out-agent-delete-probe", SystemPrompt: "x", Class: "process"}
 	if err := s.CreateAgent(agent); err != nil {
 		t.Fatalf("CreateAgent: %v", err)
@@ -148,9 +148,9 @@ func TestMigrate109AgentDeleteCascadesOptOuts(t *testing.T) {
 	}
 }
 
-// TestMigrate109DownDropsOptOutColumnAndTable is the tested Down half of
-// migration 109.
-func TestMigrate109DownDropsOptOutColumnAndTable(t *testing.T) {
+// TestMigrate115DownDropsOptOutColumnAndTable is the tested Down half of
+// migration 115.
+func TestMigrate115DownDropsOptOutColumnAndTable(t *testing.T) {
 	s := newTestStore(t)
 	ctx := context.Background()
 
@@ -163,8 +163,8 @@ func TestMigrate109DownDropsOptOutColumnAndTable(t *testing.T) {
 		t.Fatalf("construct goose provider: %v", err)
 	}
 
-	if _, err := provider.DownTo(ctx, 108); err != nil {
-		t.Fatalf("goose DownTo 108 (reverse migration 109): %v", err)
+	if _, err := provider.DownTo(ctx, 114); err != nil {
+		t.Fatalf("goose DownTo 114 (reverse migration 115): %v", err)
 	}
 
 	// opt_out_allowed no longer exists.
@@ -179,10 +179,10 @@ func TestMigrate109DownDropsOptOutColumnAndTable(t *testing.T) {
 		t.Error("agent_reflex_opt_outs table should not exist after Down")
 	}
 
-	// Insert must still work against the pre-109 shape (no opt_out_allowed
+	// Insert must still work against the pre-115 shape (no opt_out_allowed
 	// column to satisfy). Uses a raw INSERT rather than InsertAgentReflex —
 	// InsertAgentReflex is current Go code, which always binds
-	// opt_out_allowed and therefore assumes the current (post-109) schema;
+	// opt_out_allowed and therefore assumes the current (post-115) schema;
 	// a real rollback pairs the older schema with the older Go binary, so
 	// exercising that combination here would test a mismatch that never
 	// actually occurs in production.
@@ -201,7 +201,7 @@ func TestMigrate109DownDropsOptOutColumnAndTable(t *testing.T) {
 	// Back up to the top so the store is left fully migrated again,
 	// mirroring the shape of a real down-then-up-again cycle.
 	if _, err := provider.Up(ctx); err != nil {
-		t.Fatalf("goose Up after DownTo 108: %v", err)
+		t.Fatalf("goose Up after DownTo 114: %v", err)
 	}
 	if err := s.DB.QueryRowContext(ctx, `SELECT opt_out_allowed FROM agent_reflexes LIMIT 1`).Scan(&probe); err != nil {
 		t.Errorf("opt_out_allowed column should exist again after replaying Up: %v", err)

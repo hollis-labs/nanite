@@ -155,7 +155,7 @@ type AgentProfile struct {
 	// Loom owns Curator). Empty string means internal/operator-owned, per
 	// decision log Section 4. See internal/store/consumers.go and
 	// docs/engineering/architecture/01-agent-construction.md. Added by
-	// migration 106 (TASKS/phase-1/03-add-consumers-table.md).
+	// migration 112 (TASKS/phase-1/03-add-consumers-table.md).
 	ConsumerID string `json:"consumer_id"`
 
 	// RoleID is a nullable FK to roles(id) -- the broadest layer of the
@@ -164,7 +164,7 @@ type AgentProfile struct {
 	// role bound yet; nullable during transition per
 	// 02-add-agents-composition-columns.md's own text (existing rows have
 	// no role until 10-data-migrate-nanite-agents-md.md backfills one,
-	// which is out of Phase 1 scope). Added by migration 111.
+	// which is out of Phase 1 scope). Added by migration 117.
 	RoleID string `json:"role_id"`
 
 	// ModelID is a nullable FK to models(id) -- a relational reference into
@@ -172,11 +172,11 @@ type AgentProfile struct {
 	// target.md), distinct from the pre-existing free-text
 	// DefaultModel/DefaultProvider scalars that already participate in the
 	// role->agent->task cascade. Empty string means no relational model
-	// bound yet. Added by migration 111.
+	// bound yet. Added by migration 117.
 	ModelID string `json:"model_id"`
 
 	// RuntimeKind is 'cli' or 'api' -- see GLOSSARY.md's "Runtime kind"
-	// entry. Populated for every row (backfilled by migration 111 from
+	// entry. Populated for every row (backfilled by migration 117 from
 	// each row's pre-existing default_provider via inferRuntimeKind,
 	// mirroring chat.IsCLIProvider; defaulted the same way for every row
 	// created afterward by applyMultiAgentDefaults) but deliberately not
@@ -189,7 +189,7 @@ type AgentProfile struct {
 // migration 070 deliberately did not encode at the column level. FU-28.
 //
 // activation_mode's valid set was widened from 'singleton'/'instance' to
-// 'singleton'/'fresh-per-wake'/'concurrent' by migration 111 (Phase 1 item
+// 'singleton'/'fresh-per-wake'/'concurrent' by migration 117 (Phase 1 item
 // 02, TASKS/phase-1/02-add-agents-composition-columns.md) -- the real
 // design decision documented in that task's Work Log: extend this existing
 // column to the 3-value instance_mode shape architecture/
@@ -215,7 +215,7 @@ func validateAgentMultiAgentFields(a *AgentProfile) error {
 	default:
 		return fmt.Errorf("default_state %q invalid: must be 'sleeping' or 'active'", a.DefaultState)
 	}
-	// runtime_kind also carries a real DB-level CHECK (migration 111,
+	// runtime_kind also carries a real DB-level CHECK (migration 117,
 	// unlike the three enums above), but validating it here too gives API
 	// callers a clean Go error instead of a raw SQLite CHECK-constraint
 	// failure, matching this function's existing job for every other
@@ -232,7 +232,7 @@ func validateAgentMultiAgentFields(a *AgentProfile) error {
 // class, default_state, urn_aliases, runtime_kind) and mints a URN if none
 // is set. When minting, the slug-form URN is pushed into urn_aliases so
 // legacy routing keeps resolving. FU-28; runtime_kind + the class-aware
-// activation_mode default added by migration 111 (Phase 1 item 02).
+// activation_mode default added by migration 117 (Phase 1 item 02).
 //
 // Class is defaulted *before* ActivationMode here (reordered from this
 // function's original shape) because DefaultActivationModeForClass needs
@@ -297,7 +297,7 @@ func applyMultiAgentDefaults(a *AgentProfile) {
 // SessionPolicyFreshPerWake and SessionPolicyFreshOneShot, respectively --
 // see internal/service/durable_agents.go). advisor and harness (or
 // anything else, including empty/unrecognized values) default to
-// 'singleton', matching durable_wake.go's pre-migration-110 behavior for
+// 'singleton', matching durable_wake.go's pre-migration-116 behavior for
 // every class other than process.
 func DefaultActivationModeForClass(class string) string {
 	switch class {
@@ -315,7 +315,7 @@ func DefaultActivationModeForClass(class string) string {
 // an import cycle" convention this file already uses for
 // urnPrefix/generateAgentURN (see their doc comments above). Kept in
 // lockstep with chat.IsCLIProvider and this migration's SQL backfill
-// (111_agent_profiles_composition_columns.sql) by hand; chat/engine.go's
+// (117_agent_profiles_composition_columns.sql) by hand; chat/engine.go's
 // own doc comment lists every other site that same classification must not
 // drift from.
 func inferRuntimeKind(providerName string) string {
@@ -540,7 +540,7 @@ func (s *Store) CreateAgent(a *AgentProfile) error {
 // agent_profiles (they may reference file-based agents), so deleting them
 // explicitly is both correct and FK-safe. agent_skills/agent_projects DO now
 // carry a real `agent_id ... REFERENCES agent_profiles(id) ON DELETE CASCADE`
-// FK (migration 107, Phase 1 #05) — the explicit cleanup lines below for
+// FK (migration 113, Phase 1 #05) — the explicit cleanup lines below for
 // both are no longer required for correctness (the CASCADE would handle it
 // on its own), but are kept anyway for the same belt-and-suspenders reason
 // the per-agent capability/runtime children below are (they run before the
@@ -570,12 +570,12 @@ func (s *Store) DeleteAgent(slug string) error {
 		// procedures, knowledge seeds, or schedules.
 		"DELETE FROM agent_known_tools WHERE agent_id = ?",
 		"DELETE FROM agent_known_skills WHERE agent_id = ?",
-		// Phase 1 item 04 (migration 110): agent_tools/
+		// Phase 1 item 04 (migration 116): agent_tools/
 		// agent_dispatch_tool_allowlist both already declare
 		// ON DELETE CASCADE agent_profiles(id) FKs, so these two lines are
 		// belt-and-suspenders, matching this list's existing style of
 		// explicitly clearing agent_skills/agent_projects even though
-		// migration 107 gave those real cascade FKs too.
+		// migration 113 gave those real cascade FKs too.
 		"DELETE FROM agent_tools WHERE agent_id = ?",
 		"DELETE FROM agent_dispatch_tool_allowlist WHERE agent_id = ?",
 		"DELETE FROM agent_tools_legacy_backfill WHERE agent_id = ?",

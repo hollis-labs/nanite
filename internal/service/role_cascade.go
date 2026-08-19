@@ -14,7 +14,7 @@ import (
 // until 02-add-agents-composition-columns.md added and backfilled it)
 // returns the zero value, contributing nothing to the merge.
 //
-// ModelID is deliberately left unset here: roles (migration 108) has no
+// ModelID is deliberately left unset here: roles (migration 114) has no
 // model_id-equivalent column, only the free-text DefaultModel/
 // DefaultProvider hints already mapped to Model/Provider above -- there is
 // no role-level default for the relational FK today.

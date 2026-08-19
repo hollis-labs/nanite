@@ -4,18 +4,18 @@
 -- names for `agents` (still `agent_profiles` under the hood, per decision
 -- log Section 6) that aren't already covered by a sibling Phase 1 task --
 -- role_id (FK -> roles, added by 01-add-roles-table-and-cascade-
--- resolution.md/migration 108), model_id (FK -> models, only meaningful
+-- resolution.md/migration 114), model_id (FK -> models, only meaningful
 -- once 06-fix-models-table-sync-target.md's DB-authoritative sync landed),
 -- and runtime_kind (cli|api, populated but deliberately not yet consulted
 -- for routing -- that's Phase 2's job). consumer_id was added separately by
--- 03-add-consumers-table.md/migration 106; class already existed
+-- 03-add-consumers-table.md/migration 112; class already existed
 -- (migration 074).
 --
 -- Both new FK columns are nullable during transition -- existing rows have
 -- no role/model bound yet until 10-data-migrate-nanite-agents-md.md (out of
 -- Phase 1 scope) backfills them; a NOT NULL constraint here would break
 -- every pre-existing row. No CHECK/rewrite dance is needed for either (see
--- 106_add_consumers_table.sql's identical precedent for a nullable FK added
+-- 112_add_consumers_table.sql's identical precedent for a nullable FK added
 -- via plain ADD COLUMN).
 ALTER TABLE agent_profiles ADD COLUMN role_id TEXT REFERENCES roles(id);
 ALTER TABLE agent_profiles ADD COLUMN model_id TEXT REFERENCES models(id);
@@ -95,7 +95,7 @@ UPDATE agent_profiles
 
 -- +goose Down
 -- Structure-only, matching this codebase's established precedent for
--- lossy value-remap migrations (105/109's Downs): the activation_mode
+-- lossy value-remap migrations (105/115's Downs): the activation_mode
 -- value rewrite above is not reverted -- there is no reliable way to
 -- recover which pre-migration rows were 'instance' vs 'singleton' once
 -- collapsed into the new 3-value space, and (per the Up comment above)

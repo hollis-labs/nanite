@@ -8,7 +8,7 @@ import (
 	"github.com/pressly/goose/v3"
 )
 
-// TestConsumersMigration_SeedsLoomRow verifies migration 106 creates the
+// TestConsumersMigration_SeedsLoomRow verifies migration 112 creates the
 // consumers table and seeds one real row for Loom, per
 // TASKS/phase-1/03-add-consumers-table.md step 3.
 func TestConsumersMigration_SeedsLoomRow(t *testing.T) {
@@ -199,10 +199,10 @@ func TestAgentProfile_ConsumerIDRoundTrip(t *testing.T) {
 	}
 }
 
-// TestMigrate106DownRemovesConsumersAndColumn is the tested Down half of
-// migration 106: goose's DownTo must drop agent_profiles.consumer_id and
+// TestMigrate112DownRemovesConsumersAndColumn is the tested Down half of
+// migration 112: goose's DownTo must drop agent_profiles.consumer_id and
 // the consumers table, then Up must be able to replay cleanly.
-func TestMigrate106DownRemovesConsumersAndColumn(t *testing.T) {
+func TestMigrate112DownRemovesConsumersAndColumn(t *testing.T) {
 	s := newTestStore(t)
 	ctx := context.Background()
 
@@ -226,7 +226,7 @@ func TestMigrate106DownRemovesConsumersAndColumn(t *testing.T) {
 	}
 
 	if _, err := provider.DownTo(ctx, 105); err != nil {
-		t.Fatalf("goose DownTo 105 (reverse migration 106): %v", err)
+		t.Fatalf("goose DownTo 105 (reverse migration 112): %v", err)
 	}
 
 	exists, err := agentProfilesColumnExists(ctx, s, "consumer_id")

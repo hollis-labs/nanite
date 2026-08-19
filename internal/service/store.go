@@ -95,14 +95,6 @@ type UsageStore interface {
 	LogEvent(sessionID, eventType, category, detail, metadata string)
 	ListEvents(category string, limit int) ([]store.EventLog, error)
 	CountSessionToolCalls(sessionID string) int
-
-	// InsertAgentBrokerDecision appends a row to agent_broker_decisions.
-	// CW-20260509-0046: the upstream agent-broker call site in
-	// chat_generate.go writes one row per turn (dispatch or chat-direct).
-	// Distinct from the tool-broker's broker_decisions log
-	// (BrokerDecisionLogger above) — naming history captured at
-	// internal/store/broker_decisions.go.
-	InsertAgentBrokerDecision(row *store.AgentBrokerDecision) error
 }
 
 // SettingsStore provides access to user settings and plugin settings.

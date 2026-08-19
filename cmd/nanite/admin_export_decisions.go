@@ -10,20 +10,25 @@ package main
 // internal/store/migrations/111_drop_broker_and_strategy_decisions.sql
 // drops the two tables — this command is that export step.
 //
+// TASKS/phase-4/08-export-and-drop-agent-broker-decisions.md: once the
+// Agent Broker's writer is retired (TASKS/phase-4/02-dispatch-to-agent-
+// reflex-action-kind-and-broker-migration.md deletes chat_broker_dispatch.go
+// in full), `agent_broker_decisions` (migration 058) has zero live writers
+// and joins the same export-then-drop treatment this file already gives
+// `strategy_decisions`/`broker_decisions`. Reuses this exact mechanism
+// rather than inventing a new one, per that task's explicit instruction —
+// this is the only change needed: one more entry in
+// decisionTablesToExport below, plus the drop migration
+// (120_drop_agent_broker_decisions.sql).
+//
 // Deliberately does NOT go through store.New(): store.New applies every
 // pending goose migration unconditionally (internal/store/store.go's
-// migrate()), so if migration 111 has already landed in this binary,
-// store.New would drop both tables before this command's own code ever
+// migrate()), so if the drop migration has already landed in this binary,
+// store.New would drop the table(s) before this command's own code ever
 // runs. This command opens the SQLite file directly (the same opener
 // store.New uses, minus the migrate() call) so the export works
 // regardless of build/deploy order — run it against a database BEFORE
-// deploying a build that contains migration 111.
-//
-// Does NOT touch agent_broker_decisions — that table's writer (the Agent
-// Broker, github.com/hollis-labs/agentkit/broker) is not retired by any
-// currently-scheduled Phase 0 task. See TASKS/phase-0/23-export-and-drop-
-// decision-tables.md's Context section and TASKS/ESCALATIONS.md's "Item 23"
-// entry.
+// deploying a build that contains the drop migration.
 //
 // Usage:
 //
@@ -54,6 +59,7 @@ type decisionTableExport struct {
 var decisionTablesToExport = []decisionTableExport{
 	{table: "strategy_decisions", eventType: "strategy_decision_export", category: "strategy", detailColumn: "approach"},
 	{table: "broker_decisions", eventType: "broker_decision_export", category: "tool_broker", detailColumn: "intent"},
+	{table: "agent_broker_decisions", eventType: "agent_broker_decision_export", category: "agent_broker", detailColumn: "decision"},
 }
 
 // adminExportDecisionTables is the entry point for
@@ -105,7 +111,7 @@ func adminExportDecisionTables(dbPath string, args []string) {
 	if !force {
 		var already int
 		err := db.QueryRow(
-			`SELECT COUNT(*) FROM event_log WHERE event_type IN ('strategy_decision_export', 'broker_decision_export')`,
+			`SELECT COUNT(*) FROM event_log WHERE event_type IN ('strategy_decision_export', 'broker_decision_export', 'agent_broker_decision_export')`,
 		).Scan(&already)
 		if err == nil && already > 0 {
 			fmt.Fprintf(os.Stderr,

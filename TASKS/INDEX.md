@@ -174,14 +174,16 @@ This branch (`phase-1-execution`, based off Phase 0's `HEAD` as of 2026-08-18 �
 
 | Task | Status | Depends on |
 |---|---|---|
-| 01-scratchpad-ttl-pruning | not-started | `TASKS/phase-0/27-cut-p7-scratchpad-snapshot` |
-| 02-dispatch-to-agent-reflex-action-kind-and-broker-migration | not-started | Phase 1's reflex opt-out field; `TASKS/phase-0/21-cut-modes` |
-| 03-migrate-promptrouter-to-reflexes | not-started | `02` |
-| 04-unify-run-another-agent-surfaces | not-started | `TASKS/phase-0/03-fix-callertype-mistagging` |
-| 05-wire-select-for-agent-to-read-agent-tools | not-started | Phase 1's `04-add-known-tools-and-agent-tools-fk` (landed via the Phase 1→main merge) |
-| 06-add-filter-tool-selection | not-started | `TASKS/phase-0/22-remove-skill-and-tool-broker-abstractions` |
-| 07-tool-concurrency-safety-classification | not-started | none |
-| 08-export-and-drop-agent-broker-decisions | not-started | `02` |
+| 01-scratchpad-ttl-pruning | implemented | `TASKS/phase-0/27-cut-p7-scratchpad-snapshot` |
+| 02-dispatch-to-agent-reflex-action-kind-and-broker-migration | implemented | Phase 1's reflex opt-out field; `TASKS/phase-0/21-cut-modes` |
+| 03-migrate-promptrouter-to-reflexes | in-progress | `02` |
+| 04-unify-run-another-agent-surfaces | implemented | `TASKS/phase-0/03-fix-callertype-mistagging` |
+| 05-wire-select-for-agent-to-read-agent-tools | implemented | Phase 1's `04-add-known-tools-and-agent-tools-fk` (landed via the Phase 1→main merge) |
+| 06-add-filter-tool-selection | in-progress | `TASKS/phase-0/22-remove-skill-and-tool-broker-abstractions`; held until `05` merges (both touch `internal/service/tool.go`'s `SelectForAgent`) |
+| 07-tool-concurrency-safety-classification | in-progress | none directly; held until `05` merges — its target (`GetToolMeta`) also lives in `internal/service/tool.go`, an overlap the original parallelization note didn't flag |
+| 08-export-and-drop-agent-broker-decisions | implemented | `02` |
+
+**Orchestrator note (2026-08-19):** confirmed via grep that `07`'s target (the concurrency-safety name-heuristic) lives in `internal/service/tool.go:677-682` — the same file `05` and `06` both touch, a three-way overlap the original parallelization plan below only partially flagged. Serializing: `05` solo first (Wave 1), then `06`+`07` together once `05` merges (Wave 1.5).
 
 **Parallelization:**
 - **Wave 1 — parallel.** `01, 02, 04, 05, 06, 07`. Coordination, not hard blocks: `05` changes what `SelectForAgent` reads before `06`'s plugin filter hooks its output — land `05` first if both are in flight together. `06`/`07` both touch tool-catalog-rendering-adjacent territory — low risk, note for awareness.

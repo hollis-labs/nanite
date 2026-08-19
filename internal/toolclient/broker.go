@@ -251,10 +251,12 @@ func (tb *ToolClient) RegisterTools(tools []llmtypes.ToolDefinition) {
 // returned the entire registered catalog, unranked. Returning the full
 // catalog directly here preserves that real production behavior without
 // the rule-engine machinery. Real narrowing happens downstream:
-// tool_permissions (CheckPermission), the schema-v2 tools allowlist
-// (filterToolsByAllowlist), the chat-role surface filter
-// (applyChatSurfaceFilter), the developer_mode dev-tool gate, and
-// progressive discovery.
+// tool_permissions (CheckPermission), the agent_tools grant filter
+// (service/tool.go's filterToolsByAgentTools — replaced the old
+// schema-v2 tools allowlist / filterToolsByAllowlist as of
+// TASKS/phase-4/05-wire-select-for-agent-to-read-agent-tools.md), the
+// chat-role surface filter (applyChatSurfaceFilter), the developer_mode
+// dev-tool gate, and progressive discovery.
 func (tb *ToolClient) catalogTools() []llmtypes.ToolDefinition {
 	tb.registeredToolsMu.RLock()
 	direct := make([]llmtypes.ToolDefinition, len(tb.registeredTools))
@@ -766,9 +768,12 @@ func PruneToolDefsToTokenBudget(tools []llmtypes.ToolDefinition, budgetTokens in
 
 // FinalizeToolSelection applies the MaxSelectedTools cap and token-budget
 // prune to a tool list that has ALREADY been through permission and
-// allowlist filtering. This must run LAST in the agent tool-selection
-// pipeline (service/tool.go SelectForAgent, after filterToolsByAllowlist /
-// applyChatSurfaceFilter) — applying it earlier let an agent's own
+// roster-membership filtering. This must run LAST in the agent
+// tool-selection pipeline (service/tool.go SelectForAgent, after
+// filterToolsByAgentTools / applyChatSurfaceFilter — filterToolsByAgentTools
+// replaced filterToolsByAllowlist as of
+// TASKS/phase-4/05-wire-select-for-agent-to-read-agent-tools.md) —
+// applying it earlier let an agent's own
 // correctly-declared, correctly-permitted tool be truncated out before its
 // own allowlist ever got a chance to keep it (CW-20260815-0011): e.g. a
 // late-alphabet tool name among Torque's ~90+ registered tools, sitting

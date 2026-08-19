@@ -5,7 +5,11 @@ package service
 // agent_profiles row's tools/tool_permissions/role_tools columns into real
 // agent_tools grant rows, once per agent -- so the follow-up that actually
 // wires SelectForAgent to read agent_tools
-// (TASKS/phase-1/11-wire-select-for-agent-to-read-agent-tools.md) starts
+// (TASKS/phase-4/05-wire-select-for-agent-to-read-agent-tools.md, which
+// landed the SelectForAgent read path this file's comments below describe
+// as "the follow-up" -- filterToolsByAllowlist referenced below no longer
+// exists as of that task; it's retained here as the historical parity
+// target this one-time backfill algorithm was built to replicate) starts
 // from data that already matches today's live selection behavior instead
 // of an empty table.
 //

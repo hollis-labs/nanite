@@ -190,24 +190,54 @@ func (s *toolServiceImpl) SelectForAgent(ctx context.Context, sessionID, agentID
 		}
 	}
 
-	// Honor the agent profile's tool_permissions JSON (allow_list /
-	// deny_list) at description-render time (CW-20260512-0117 /
-	// SP-20260512-0010). SelectToolsAsProvider already applies
-	// CheckPermission to broker-selected and builtin tools (broker.go),
-	// but the discoverAgentMCPTools fallback above appends tools without
-	// running them past the policy. Filtering here covers every code path
-	// that lands a tool in allTools so the LLM only sees what it's
-	// permitted to call. The execution-time gate in
-	// ToolClient.CallTool remains the load-bearing backstop — defense in
-	// depth, per the harness-restoration design session.
-	allTools = filterToolsByPermissions(s.toolClient, agentID, allTools)
+	// Resolve the agent's real agent_profiles row once, if any -- used by
+	// the agent_tools grant filter below, dispatch-allowlist parsing, and
+	// the chat-surface filter. A miss (err != nil) means agentID has no
+	// real DB row to hang an agent_tools grant off of -- chiefly a
+	// file-based agent dispatched under its runtime "file-<slug>" alias
+	// (internal/service/agent_permissions.go), which structurally cannot
+	// participate in agent_tools (a real FK to agent_profiles) and keeps
+	// relying on tool_permissions/PermissionResolver below instead. See
+	// TASKS/phase-4/05-wire-select-for-agent-to-read-agent-tools.md's Work
+	// Log for the full deny-semantics decision this split reflects.
+	var callerSlug string
+	var callerDispatchAllowlist []string
+	var dbAgent *store.AgentProfile
+	if s.agents != nil {
+		if agent, err := s.agents.GetAgent(agentID); err == nil {
+			dbAgent = agent
+		}
+	}
 
-	// Apply agent tools allowlist (schema v2) and the chat-role surface
-	// filter. The allowlist is always applied (when configured); the
-	// chat-surface filter only applies when the agent is the chat-role
-	// profile (slug "default"). Worker / Planner / executor / hint-selector
-	// / mux-orchestrator profiles bypass the chat-surface filter — they
-	// have their own surface decisions per
+	if dbAgent != nil {
+		// agent_tools (through known_tools) is the sole roster-membership
+		// gate for an agent with a real agent_profiles row, going forward
+		// — the FK-based replacement for the schema-v2 tools allowlist
+		// this used to read (filterToolsByAllowlist(allTools, agent.Tools),
+		// retired from this path by this task). Per this task's deny-
+		// semantics decision, agent_profiles.tool_permissions is NOT
+		// consulted again here for this population — it stays live only
+		// as the deeper broker-level/execution-time backstop
+		// (ToolClient.SelectToolsAsProvider's own CheckPermission call,
+		// already applied inside the SelectToolsAsProvider call above, and
+		// CallTool's own gate). See the Work Log for the resulting "two
+		// systems of record" tradeoff this leaves.
+		allTools = filterToolsByAgentTools(ctx, s.agentToolsStore(), agentID, allTools)
+	} else {
+		// No real agent_profiles row for agentID — agent_tools is
+		// structurally unreachable (its agent_id column is a real FK to
+		// agent_profiles). tool_permissions/PermissionResolver remains
+		// this population's ONLY selection-time filter (CW-20260512-0117 /
+		// SP-20260512-0010); this also closes the gap for tools that land
+		// in allTools from outside SelectToolsAsProvider's own gate (e.g.
+		// the discoverAgentMCPTools fallback above).
+		allTools = filterToolsByPermissions(s.toolClient, agentID, allTools)
+	}
+
+	// Apply the chat-role surface filter. Only applies when the agent is
+	// the chat-role profile (slug "default"). Worker / Planner / executor
+	// / hint-selector / mux-orchestrator profiles bypass it — they have
+	// their own surface decisions per
 	// decisions.nanite.architecture.role_profile_seeding.
 	//
 	// Phase 2 graduation per executor-handoff design (CW-20260429-0033 / B4):
@@ -216,25 +246,36 @@ func (s *toolServiceImpl) SelectForAgent(ctx context.Context, sessionID, agentID
 	// recovery flow stays inside the executor (B3 pilot —
 	// internal/executor/envelope_render). See internal/dispatch/chat_surface.go
 	// for the canonical exclusion list.
-	var callerSlug string
-	var callerDispatchAllowlist []string
-	if s.agents != nil {
-		if agent, err := s.agents.GetAgent(agentID); err == nil {
-			callerSlug = agent.Slug
-			callerDispatchAllowlist = parseParentDispatchAllowlist(agent.ParentDispatchAllowlist)
-			allTools = filterToolsByAllowlist(allTools, agent.Tools)
-			if agent.Slug == chatRoleAgentSlug {
-				allTools = applyChatSurfaceFilter(allTools, dispatch.DefaultChatToolSurface())
-			}
+	if dbAgent != nil {
+		callerSlug = dbAgent.Slug
+		callerDispatchAllowlist = parseParentDispatchAllowlist(dbAgent.ParentDispatchAllowlist)
+		if dbAgent.Slug == chatRoleAgentSlug {
+			allTools = applyChatSurfaceFilter(allTools, dispatch.DefaultChatToolSurface())
 		}
 	}
 
-	// Cap + token-budget prune LAST, now that permission and allowlist
-	// filtering are both done (CW-20260815-0011). Applying MaxSelectedTools
-	// any earlier — inside broker selection, before this point — could
-	// truncate out a tool the agent's own allowlist above explicitly kept.
+	// Cap + token-budget prune, now that agent_tools/permission filtering
+	// and the chat-surface filter are all done (CW-20260815-0011). Applying
+	// MaxSelectedTools any earlier — inside broker selection, before this
+	// point — could truncate out a tool the agent's own grants above
+	// explicitly kept.
 	if s.toolClient != nil {
 		allTools = s.toolClient.FinalizeToolSelection(allTools, windowSize)
+	}
+
+	// known_tools.always_included escape hatch (this task's item 5):
+	// request_tools/tool_list/tool_describe must survive selection
+	// regardless of agent_tools membership — folded in LAST, after the
+	// cap/budget prune, so it can never be silently squeezed out by
+	// either. Still respects the chat-surface filter's own deliberate
+	// exclusion of tool_describe for the chat-role agent (B4 above)
+	// rather than re-adding it.
+	if s.toolClient != nil {
+		always := s.resolveAlwaysIncludedTools(ctx)
+		if dbAgent != nil && dbAgent.Slug == chatRoleAgentSlug {
+			always = applyChatSurfaceFilter(always, dispatch.DefaultChatToolSurface())
+		}
+		allTools = unionToolsByName(allTools, always)
 	}
 
 	// Per-call description-render hook (CW-20260512-0105 / SP-20260512-0008
@@ -276,6 +317,18 @@ func (s *toolServiceImpl) SelectForAgent(ctx context.Context, sessionID, agentID
 				builtinTools = append(builtinTools, t)
 			}
 		}
+
+		// The always_included escape hatch (item 5) must survive
+		// progressive discovery's truncated builtin-only surface too --
+		// union in anything IsBuiltinTool missed above (e.g.
+		// tool_list/tool_describe, which ship via the self MCP server
+		// rather than ToolClient's own builtin registry, so the loop
+		// above never picks them up).
+		always := s.resolveAlwaysIncludedTools(ctx)
+		if dbAgent != nil && dbAgent.Slug == chatRoleAgentSlug {
+			always = applyChatSurfaceFilter(always, dispatch.DefaultChatToolSurface())
+		}
+		builtinTools = unionToolsByName(builtinTools, always)
 
 		slog.Info("service/tool: progressive discovery active",
 			"mcp_tools", mcpToolCount, "builtins", len(builtinTools)-1, "catalog_entries", len(summaries))
@@ -834,27 +887,139 @@ func filterToolsByPermissions(tc *toolclient.ToolClient, agentID string, tools [
 	return filtered
 }
 
-// filterToolsByAllowlist removes tools not in the agent's tools allowlist.
-// An empty or "[]" allowlist means no filtering.
-func filterToolsByAllowlist(tools []llmtypes.ToolDefinition, allowlistJSON string) []llmtypes.ToolDefinition {
-	if allowlistJSON == "" || allowlistJSON == "[]" {
+// filterToolsByAgentTools narrows tools to the set explicitly granted to
+// the agent via agent_tools (through known_tools) -- the FK-based
+// replacement for the old schema-v2 tools allowlist
+// (filterToolsByAllowlist(allTools, agent.Tools), retired from the live
+// path by TASKS/phase-4/05-wire-select-for-agent-to-read-agent-tools.md;
+// see that task's Work Log for the full deny-semantics decision).
+//
+// agent_tools is a plain positive-grant join with no glob/deny concept
+// (per architecture/01-agent-construction.md) -- a tool not present in
+// the agent's granted set is excluded here, full stop. There is no live
+// "unrestricted" bypass for an agent with few/zero grants: per that
+// task's item 4 decision, agent_tools is the literal, static source of
+// truth for roster membership going forward, not a live re-derivation
+// of a "no restriction" flag that has no representation anywhere in the
+// 04 schema. The known_tools.always_included escape hatch (item 5) is
+// folded in separately by the caller (SelectForAgent), NOT inside this
+// function, so it survives even when this filter yields zero rows.
+//
+// st == nil degrades to a no-op (tools pass through unfiltered) --
+// matches filterToolsByPermissions' existing nil-safety precedent for
+// "machinery not wired" callers (chiefly tests); production always wires
+// a real *store.Store onto ToolClient (cmd/nanite/main.go).
+func filterToolsByAgentTools(ctx context.Context, st *store.Store, agentID string, tools []llmtypes.ToolDefinition) []llmtypes.ToolDefinition {
+	if st == nil || len(tools) == 0 {
 		return tools
 	}
-	var allowlist []string
-	if err := parseJSONStrings(allowlistJSON, &allowlist); err != nil || len(allowlist) == 0 {
-		return tools
+	granted, err := st.ListAgentToolNames(ctx, agentID)
+	if err != nil {
+		slog.Warn("service/tool: agent_tools lookup failed — denying non-escape-hatch tools", "agent", agentID, "err", err)
+		return nil
+	}
+	if len(granted) == 0 {
+		slog.Debug("service/tool: zero agent_tools grants", "agent", agentID)
+		return nil
+	}
+	grantedSet := make(map[string]bool, len(granted))
+	for _, n := range granted {
+		grantedSet[n] = true
 	}
 	filtered := make([]llmtypes.ToolDefinition, 0, len(tools))
 	for _, t := range tools {
-		for _, pattern := range allowlist {
-			if toolclient.MatchPattern(pattern, t.Name) {
-				filtered = append(filtered, t)
-				break
-			}
+		if grantedSet[t.Name] {
+			filtered = append(filtered, t)
 		}
 	}
-	slog.Debug("service/tool: allowlist filtered", "before", len(tools), "after", len(filtered))
+	slog.Debug("service/tool: agent_tools filtered", "agent", agentID, "before", len(tools), "after", len(filtered))
 	return filtered
+}
+
+// agentToolsStore returns the *store.Store backing this service's
+// ToolClient, or nil when none is wired (chiefly tests) -- see
+// filterToolsByAgentTools's and resolveAlwaysIncludedTools' doc comments
+// for the resulting nil-safe fallbacks. Production always wires a real
+// *store.Store onto ToolClient (cmd/nanite/main.go).
+func (s *toolServiceImpl) agentToolsStore() *store.Store {
+	if s.toolClient == nil {
+		return nil
+	}
+	return s.toolClient.Store
+}
+
+// resolveAlwaysIncludedTools returns the full llmtypes.ToolDefinition for
+// every known_tools row flagged always_included=true and status=
+// 'available' -- the request_tools/tool_list/tool_describe tool-discovery
+// escape hatch (architecture/01-agent-construction.md;
+// TASKS/phase-1/04's known_tools.always_included column; item 5 of
+// TASKS/phase-4/05). Nil-safe: returns nil when no store-backed
+// ToolClient is wired (no known_tools catalog to read).
+//
+// request_tools has no registration anywhere in the normal builtin/MCP
+// catalog — it is synthesized ad hoc by SelectForAgent's progressive-
+// discovery branch via toolclient.RequestToolsMetaTool(). This function
+// special-cases it the same way so the escape hatch also works OUTSIDE
+// progressive discovery. tool_list/tool_describe ship via the self MCP
+// server and ARE present in ToolClient.ListTools(), so they're looked up
+// there directly.
+func (s *toolServiceImpl) resolveAlwaysIncludedTools(ctx context.Context) []llmtypes.ToolDefinition {
+	st := s.agentToolsStore()
+	if st == nil {
+		return nil
+	}
+	rows, err := st.ListAlwaysIncludedKnownTools(ctx)
+	if err != nil {
+		slog.Warn("service/tool: list always_included known_tools failed", "err", err)
+		return nil
+	}
+	if len(rows) == 0 {
+		return nil
+	}
+	byName := make(map[string]llmtypes.ToolDefinition, len(rows))
+	if s.toolClient != nil {
+		for _, t := range s.toolClient.ListTools() {
+			byName[t.Name] = t
+		}
+	}
+	out := make([]llmtypes.ToolDefinition, 0, len(rows))
+	for _, kt := range rows {
+		if kt.Status != "available" {
+			continue
+		}
+		if def, ok := byName[kt.Name]; ok {
+			out = append(out, def)
+			continue
+		}
+		if kt.Name == "request_tools" {
+			out = append(out, toolclient.RequestToolsMetaTool())
+		}
+	}
+	return out
+}
+
+// unionToolsByName appends every tool from extra whose name is not
+// already present in base, preserving base's order and appending extra
+// tools in extra's own order. Used to fold the always_included escape
+// hatch (item 5) into an already-filtered/capped tool list without
+// duplicating an entry that survived on its own merits.
+func unionToolsByName(base, extra []llmtypes.ToolDefinition) []llmtypes.ToolDefinition {
+	if len(extra) == 0 {
+		return base
+	}
+	present := make(map[string]bool, len(base)+len(extra))
+	for _, t := range base {
+		present[t.Name] = true
+	}
+	out := base
+	for _, t := range extra {
+		if present[t.Name] {
+			continue
+		}
+		present[t.Name] = true
+		out = append(out, t)
+	}
+	return out
 }
 
 // extractIntent derives an intent string and keyword hints from a user message.

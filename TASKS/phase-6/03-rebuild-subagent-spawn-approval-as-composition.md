@@ -1,6 +1,6 @@
 # Rebuild `subagent-spawn-approval` as an `approval-card` composition (larger rebuild than `todo-list`/`plan-review`)
 
-**Phase:** 5
+**Phase:** 6
 **Status:** not-started
 **Depends on:** none
 **Touches:** `libs/go-envelopes/manifest/envelopes.yaml` (remove standalone `subagent-spawn-approval` entry, or keep the type name but change its component wiring — see What to do), `ui/src/components/chat/envelopes/SubagentSpawnApprovalCard.tsx` (retire, folding its UI into/alongside `ApprovalCard`), `internal/subagent/service.go:848` (`svc.approver.Emit(ctx, run.ParentSessionID, "subagent-spawn-approval", payload)` — the real emitter), `internal/chat/envelope_response_subagent.go` (the registered response handler — `chat.RegisterResponseHandler("subagent-spawn-approval", ...)`, `internal/service/container.go:1231`), `internal/api/sessions.go` (a conditional at ~line 818 gating recovery-related handling on `inst.EnvelopeType != "subagent-spawn-approval" && ... != "elicitation-prompt"` — must not break)

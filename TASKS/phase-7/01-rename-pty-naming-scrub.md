@@ -1,6 +1,6 @@
 # PTY naming scrub
 
-**Phase:** 0
+**Phase:** 7
 **Status:** not-started
 **Depends on:** none
 **Touches:** ~90 files across `cmd/nanite/`, `internal/api/`, `internal/bootprofile/`, `internal/chat/`, `internal/launcher/`, `internal/messaging/`, `internal/mcpserver/`, `internal/plugin/`, `internal/runtime/agent/` (root files only, not the `recovery/` subpackage), `internal/service/`, `internal/skill/`, `internal/store/`, `internal/subagent/`, `pkg/models/registry.go`, `config/nanite.yaml`, `examples/boot-profiles/launches/claude-smoke.yaml`, `AGENTS.md`, `CLAUDE.md`, and `ui/src/{components/chat,components/settings,lib,__tests__}/*`. Full file list in "What to do" below — every file is listed, not a sample, per the no-partial-rename requirement. Explicitly **excludes** `internal/background/*` (a different, unrelated subsystem — see Context) and any symbol whose definition lives in the external `agentkit`/`go-providers` Go modules (also see Context).

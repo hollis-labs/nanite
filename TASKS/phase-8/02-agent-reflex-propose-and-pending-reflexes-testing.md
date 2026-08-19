@@ -1,6 +1,6 @@
 # Build the `agent_reflex_propose` self-tool; test `pending_reflexes` in real sessions
 
-**Phase:** 3
+**Phase:** 8
 **Status:** not-started
 **Depends on:** none functionally (independent of tasks 01/02 — `pending_reflexes` is a separate, already-complete backend), but natural to sequence after 01/02 since all three touch `internal/agent/reflexes`-adjacent code and testing benefits from the dispatch migration being settled first.
 **Touches:** `internal/mcp/self_tools*.go` (new tool registration, pattern per existing self-tools like `self_tools_validate.go`/`self_tools_workflow_run.go`), `internal/store/agent_reflexes.go` (`InsertPendingReflex` — read, not modified, unless the propose path needs its own validation variant), `internal/api/reflexes.go` (`validateReflexDefinition` — check if it should also run pre-insert on the propose path).

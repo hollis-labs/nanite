@@ -1,6 +1,6 @@
 # Exclude Card data from replayed conversation history (the highest-leverage item in this phase)
 
-**Phase:** 5
+**Phase:** 6
 **Status:** not-started
 **Depends on:** none
 **Touches:** `internal/chat/context_client.go:256-267` (`AssembleSlotSources`'s message-history build — **the actual fix site, not `internal/context/compaction.go`**, see Context), `internal/service/chat_generate.go:1801,1868-1972,2004-2008` (the emit/persist path, read-only reference — confirms the shape of what needs filtering, not itself the fix site), `internal/chat/structured.go` (`StructuredMessage`, `EnvelopeRef`, `MarshalContent`)

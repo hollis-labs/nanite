@@ -1,6 +1,6 @@
 # Build the interactive-table-with-row-actions primitive
 
-**Phase:** 5
+**Phase:** 6
 **Status:** not-started
 **Depends on:** none
 **Touches:** `libs/go-envelopes/manifest/schemas/table-card.schema.json` (currently `additionalProperties: false` at root and column level — needs a real schema change, not just a frontend addition), `ui/src/components/chat/envelopes/primitives/TableCard.tsx`, `internal/chat/envelope_handler.go` (`ResponseHandler` registry — the reuse target, see Context), `internal/api/envelopes.go` (`handleEnvelopeRespond` — confirm no change needed, generic already)

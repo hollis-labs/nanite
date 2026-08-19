@@ -1,6 +1,6 @@
 # Execution Index
 
-Live tracker for `docs/engineering/TASKS.md`'s execution, per `docs/engineering/EXECUTION-PROCESS.md`. Phase 0 is planned in full below (34 task files, tracked by the Phase 0 Orchestrator session). Phases 1-6 are now also planned in full below (41 task files, tracked by this Planner session) — see `docs/engineering/PLANNER-KICKOFF-PROMPT.md`. **Section ownership**: the Phase 0 Orchestrator session owns the "Phase 0 — task table" and its "Parallelization plan"; this Planner session owns everything from "Phase 1 — Agent Construction" onward. Cross-section edits are coordinated by message between the two sessions, not blind overwrites.
+Live tracker for `docs/engineering/TASKS.md`'s execution, per `docs/engineering/EXECUTION-PROCESS.md`. Phase 0 is planned in full below (34 task files, tracked by the Phase 0 Orchestrator session). Phase 1 (Agent Construction) is tracked separately, pending a merge from the `phase-1-execution` worktree into `main` — see `PHASE-0-1-AUDIT-FOLLOWUPS.md`. Phases 2-9 (36 task files across 8 phases) are planned in full below, tracked by this Planner session — see `docs/engineering/PLANNER-KICKOFF-PROMPT.md`. **Resequenced 2026-08-19**: the original Phases 1-6 grouping was reviewed and reorganized into this Phase 2-9 layout, with two real Phase 0/Phase 1 gaps folded in as new tasks (`TASKS/phase-2/05`, `TASKS/phase-2/06`) — see `PHASE-0-1-AUDIT-FOLLOWUPS.md`'s reconciliation note for the full record. **Section ownership**: the Phase 0 Orchestrator session owns the "Phase 0 — task table" and its "Parallelization plan"; this Planner session owns everything from "Phase 1 — Agent Construction" onward. Cross-section edits are coordinated by message between the two sessions, not blind overwrites.
 
 **Process note on Phases 1-6's planning**: several research forks dispatched for this pass drifted into believing they were the Planner and self-dispatched unauthorized further agents (the same failure mode as Phase 0's first planning pass) — see `TASKS/ESCALATIONS.md`'s "second occurrence" entry. Every file that landed via an unauthorized path was individually audited against this session's own independently-gathered research before being kept.
 
@@ -9,6 +9,8 @@ Live tracker for `docs/engineering/TASKS.md`'s execution, per `docs/engineering/
 **Update, 2026-08-18**: the operator resolved every open escalation from the initial plan presentation (full detail in `TASKS/ESCALATIONS.md`) and sharpened the escalation rule in `EXECUTION-PROCESS.md`/`ORCHESTRATOR-KICKOFF-PROMPT.md` — `TASKS.md`'s decided action stands even when a decision-log rationale turns out to be wrong; default to cut on genuinely undocumented items; real stop-and-escalate is reserved for security/trust/data-integrity-sensitive or hard-to-reverse cases. Several task files were updated accordingly: `05` inverted from a build to a removal, `15` unblocked and split into three concrete removal tasks (`15a`/`15b`/`15c`), and `18b`/`20`/`22`/`33` had their conditional/escalation language replaced with final, direct instructions. Phase 0 is now fully unblocked and in execution (Phase B).
 
 ---
+
+**Status correction, 2026-08-18**: task `10-seed-builtin-agent-profiles` was marked `implemented` but an independent audit (triggered by a Phase 1 finding, then re-verified directly) found the actual fix never landed — `AutoIngestAgents`/`upsertAgentDef` (`internal/service/container.go:470`, `internal/service/ingest.go:219`) still unconditionally overwrites every existing agent row, including builtin (`Source="internal"`) ones, on every boot. No source-check exists anywhere in that path. This is a real, live bug (a GUI customization to a builtin agent is silently reverted on restart), not just a stale status — needs an actual fix, tracked as a new task before this can be marked done again.
 
 ## Phase 0 — task table
 
@@ -23,7 +25,7 @@ Live tracker for `docs/engineering/TASKS.md`'s execution, per `docs/engineering/
 | 07-harden-builtin-server-check | implemented | none | 1 |
 | 08-a2a-conformance | implemented | none | 1 |
 | 09-adopt-goose-migrations | implemented | none | 0 |
-| 10-seed-builtin-agent-profiles | implemented | none | 1 |
+| 10-seed-builtin-agent-profiles | **not implemented — status corrected 2026-08-18, see note; redo tracked as `TASKS/phase-2/05-freeze-internal-agent-profiles-on-reingest.md`** | none | 1 |
 | 11-cut-strategy-planner | implemented | none | 3 (chain pos. 1) |
 | 12-cut-agentconstraints-maxturns | implemented | 11 | 3 (chain pos. 2) |
 | 13-cut-question-form | implemented | none | 1 |
@@ -47,7 +49,7 @@ Live tracker for `docs/engineering/TASKS.md`'s execution, per `docs/engineering/
 | 28-cut-session-intent-classifier | implemented | (sequenced after 27, see below) | 3 (chain pos. 5) |
 | 29-cut-prompt-templates | implemented | none (see Context; sequenced after 21) | 3 (chain pos. 9) |
 | 30-cut-templates-table | implemented | none | 1 |
-| 31-rename-pty-naming-scrub | not-started | (all of Phase 0, see below) | 4 |
+| 31-rename-pty-naming-scrub | not-started — relocated to TASKS/phase-7/01-rename-pty-naming-scrub.md | (all of Phase 0, see below) | 4 |
 | 32-rename-recovery-namespace | implemented | 04 | 3 (chain pos. 6) |
 | 33-rename-volon-eradication | implemented | none | 1 |
 | 34-gate-agent-update-create-editable-check | implemented | none | 1 |
@@ -134,113 +136,122 @@ This branch (`phase-1-execution`, based off Phase 0's `HEAD` as of 2026-08-18 �
 - **Known limitation, not fixed**: `internal/store/migrations/106_add_consumers_table.sql` declares `-- +goose NO TRANSACTION` despite only doing `CREATE TABLE`/`ALTER TABLE ADD COLUMN`/`INSERT OR IGNORE` (no `PRAGMA foreign_keys` toggle, unlike `107`/`109` which genuinely need it) — drops this migration's atomicity for no benefit. Cosmetic, verified harmless against a real backup and the full test suite; leaving as-is rather than dispatching a fix cycle for a one-line pragma removal.
 - **Known limitation, not fixed**: `internal/service/role_cascade.go`'s JSON-array/object decoders silently swallow unmarshal errors (matches the existing `internal/store/agents.go:183` convention, not a new regression) — currently inert since `applyScalarCascade` only applies the four scalar fields, never the decoded `Tools`/`Skills`/`Permissions`. Worth revisiting once a later task (`02` or beyond) starts applying the tool/skill half of the cascade live — flagging now so it isn't forgotten once that happens.
 
-## Phase 2 — Agent Launching (5 task files)
+## Phase 2 — Clean-up (6 task files)
 
 | Task | Status | Depends on |
 |---|---|---|
-| 01-wire-runtime-kind-routing | not-started | Phase 1 `02` (`runtime_kind` column) |
-| 02-retire-boot-profile-catalog | not-started | `01`; `03`, `04` (build-then-cut — don't delete the source before its replacement exists); `TASKS/phase-0/18a` |
-| 03-port-forward-dynamic-resolver | not-started | none (land before `02` deletes the source it ports from) |
-| 04-mandatory-post-compaction-reread | not-started | none (land before `02`) |
-| 05-collapse-resolveprovider-into-cascade | not-started | `01` (needs `runtime_kind` already wired); Phase 1's cascade-resolved `model_id` |
+| 01-wire-runtime-kind-routing | not-started | Phase 1 `02` (`runtime_kind` column, landed via the Phase 1→main merge) |
+| 02-port-forward-dynamic-resolver | not-started | none (land before `04` deletes the source it ports from) |
+| 03-mandatory-post-compaction-reread | not-started | none (land before `04`) |
+| 04-retire-boot-profile-catalog | not-started | `01`; `02`, `03` (build-then-cut — don't delete the source before its replacement exists); `TASKS/phase-0/18a` |
+| 05-freeze-internal-agent-profiles-on-reingest | not-started | none directly; coordinate with the Phase 1→main merge (check `08-kill-file-reingest-on-boot-pattern` first) — redo of Phase 0 `10`, whose claimed fix never actually landed on `main` |
+| 06-cut-nanite-native-adapter-agent-sync | not-started | none directly; closes Phase 0 `16`'s leftover carve-out — redo of Phase 1 `13`, resolved 2026-08-19: real, deliberate mechanism, cut anyway per the standing "files as agent storage" decision |
 
 **Parallelization:**
-- **Wave 1 — parallel.** `01, 03, 04`. `01` touches `engine.go`/`factory.go`/`bootdir.go`/`agent_deps.go`; `03` touches `bootprofile/*` (read-only reference) + a new resolver home; `04` touches `sandbox_content_*.go` — no file overlap between the three.
-- **Wave 2 — solo.** `05` (needs `01`) — also touches `chat.go`, same file `01` touches (`resolveProvider` vs. the CLI-bypass check) — sequence after `01`, don't run concurrently against the same file.
-- **Wave 3 — solo.** `02` (needs `01`, `03`, `04` all landed) — the actual deletion step.
+- **Wave 1 — parallel.** `01, 02, 03`. `01` touches `engine.go`/`factory.go`/`bootdir.go`/`agent_deps.go`; `02` touches `bootprofile/*` (read-only reference) + a new resolver home; `03` touches `sandbox_content_*.go` — no file overlap between the three.
+- **Wave 2 — solo.** `04` (needs `01`, `02`, `03` all landed) — the actual deletion step.
+- `05` and `06` are independent of the boot-profile-catalog cluster and of each other — both touch `internal/service/ingest.go`/adjacent code but different functions; can run in parallel with Wave 1 or after.
 
-## Phase 3 — Steering (8 task files)
-
-| Task | Status | Depends on |
-|---|---|---|
-| 01-dispatch-to-agent-reflex-action-kind-and-broker-migration | not-started | Phase 1's reflex opt-out field; `TASKS/phase-0/21-cut-modes` |
-| 02-migrate-promptrouter-to-reflexes | not-started | 01 |
-| 03-agent-reflex-propose-and-pending-reflexes-testing | not-started | none |
-| 04-test-grounding-in-real-sessions | not-started | none |
-| 05-add-filter-tool-selection | not-started | `TASKS/phase-0/22-remove-skill-and-tool-broker-abstractions` |
-| 06-tool-concurrency-safety-classification | not-started | none |
-| 07-truncation-review | not-started | none; coordinate with `05` (both touch tool-catalog rendering) |
-| 08-export-and-drop-agent-broker-decisions | not-started | 01 |
-
-**Parallelization:**
-- **Wave 1 — parallel, with two coordination notes.** `01, 03, 04, 05, 06`. Coordination, not hard blocks: `04` (grounding, E2 layer) and `02` (Wave 2, promptrouter's E1 layer) both touch `internal/mcp/self_tools_dispatch.go`'s `callExecuteTask` at different lines — land `04` first since it's Wave 1, `02` rebases onto it. `05` and `07` (Wave 2) both touch `internal/service/tool.go`/`chat_generate.go`'s tool-catalog rendering — `07`'s own file explicitly defers to `05`'s outcome.
-- **Wave 2 — parallel.** `02` (needs `01`), `07` (needs `05`'s insertion-point decision), `08` (needs `01`).
-
-## Phase 4 — Harness (2 task files)
+## Phase 3 — Compaction & Recovery Events (3 task files)
 
 | Task | Status | Depends on |
 |---|---|---|
-| 01-verify-reaper-behavior | not-started | none |
-| 02-unify-run-another-agent-surfaces | not-started | `TASKS/phase-0/03-fix-callertype-mistagging` |
-
-**Parallelization:** Both are Wave-1-eligible in principle (`01` touches `internal/subagent/reaper.go`/`service.go`; `02` touches `internal/dispatcher/`, `internal/chat/delegate.go`, `internal/service/delegation.go`, `internal/subagent/types.go`/`subagent_runner.go`, `internal/service/durable_*.go`) — no direct file collision found, but both sit in the subagent-adjacent code region; default to sequential (`01` then `02`) unless a worker confirms zero practical overlap once `02` is scoped in detail.
-
-**Escalation logged**: the reaper item's "verify real-world behavior... no live traffic during this effort" scoping conflict (flagged as a planning landmine) is resolved in `01`'s own task file via historical-log analysis against the real production DB backup, not live observation — see `TASKS/ESCALATIONS.md`'s corresponding entry for the formal record. That analysis already found a real, currently-live bug (`last_activity_at` never writes in production, so the reaper's activity-reset fix has been silently non-functional since it shipped) — `01` scopes root-causing and fixing this as its primary deliverable.
-
-## Phase 5 — Session Lifecycle, Messaging, Cards, Plugins (14 task files)
-
-**Note on "Messaging"**: TASKS.md's Phase 5 title includes "Messaging" but its own body text has no explicit Messaging bullet. Planning research found the one remaining messaging-domain item — `MessageWakePolicy`'s resolution-chain collapse into the construction cascade (architecture doc `07-inter-agent-messaging.md`) — is the same shape/mechanism as `resolveProvider`'s collapse, which Phase 2 already owns; it's folded into `TASKS/phase-2/05-collapse-resolveprovider-into-cascade.md` rather than getting a standalone Phase 5 task. `session_handoffs`' reflex-integration direction (architecture doc `06`) has no locked design yet — deliberately not given a task file this pass (nothing to plan against beyond "keep and evaluate," already the case today); revisit once Phase 3's reflex work is further along.
-
-### Session lifecycle (3 tasks)
-
-| Task | Status | Depends on |
-|---|---|---|
-| 01-extend-event-log-to-recovery-mechanisms | not-started | `TASKS/phase-0/32-rename-recovery-namespace` |
+| 01-collapse-resolveprovider-into-cascade | not-started | `TASKS/phase-2/01-wire-runtime-kind-routing.md` (needs `runtime_kind` already wired); Phase 1's cascade-resolved `model_id` |
 | 02-wire-compaction-events | not-started | `TASKS/phase-0/29-cut-prompt-templates` |
-| 03-scratchpad-ttl-pruning | not-started | `TASKS/phase-0/27-cut-p7-scratchpad-snapshot` |
+| 03-extend-event-log-to-recovery-mechanisms | not-started | `TASKS/phase-0/32-rename-recovery-namespace` |
 
-### Cards (6 tasks)
+**Parallelization:** All three touch different files (`01`: `chat.go`/`engine.go`; `02`/`03`: `internal/api/sessions.go` at different call sites — the manual `/compact` endpoint vs. interrupted-turn detection) — low-risk parallel, merge-coordinate on `sessions.go` between `02`/`03`.
 
-| Task | Status | Depends on |
-|---|---|---|
-| 04-rebuild-todo-list-as-composition | not-started | none |
-| 05-rebuild-plan-review-as-composition | not-started | none |
-| 06-rebuild-subagent-spawn-approval-as-composition | not-started | none |
-| 07-build-interactive-table-row-actions-primitive | not-started | none |
-| 08-exclude-card-data-from-replayed-context | not-started | none |
-| 09-fix-cli-boot-content-card-type-list | not-started | none functionally; best run after `04`–`07` so the sourced list reflects the final type set |
-
-### Plugins (5 tasks)
+## Phase 4 — Steering & Reflex Migration (8 task files)
 
 | Task | Status | Depends on |
 |---|---|---|
-| 10-wire-registers-agent-profiles | not-started | Phase 1 in full |
-| 11-build-plugin-installed-enabled-state-model | not-started | none |
-| 12-close-cli-install-hot-reload-asymmetry | not-started | none |
-| 13-develop-registers-panels-and-crud | not-started | none (not urgent — may run whenever a real consumer exists) |
-| 14-make-http-middleware-plugin-extensible | not-started | **operator design decision — see escalation below, not ready for mechanical dispatch** |
+| 01-scratchpad-ttl-pruning | not-started | `TASKS/phase-0/27-cut-p7-scratchpad-snapshot` |
+| 02-dispatch-to-agent-reflex-action-kind-and-broker-migration | not-started | Phase 1's reflex opt-out field; `TASKS/phase-0/21-cut-modes` |
+| 03-migrate-promptrouter-to-reflexes | not-started | `02` |
+| 04-unify-run-another-agent-surfaces | not-started | `TASKS/phase-0/03-fix-callertype-mistagging` |
+| 05-wire-select-for-agent-to-read-agent-tools | not-started | Phase 1's `04-add-known-tools-and-agent-tools-fk` (landed via the Phase 1→main merge) |
+| 06-add-filter-tool-selection | not-started | `TASKS/phase-0/22-remove-skill-and-tool-broker-abstractions` |
+| 07-tool-concurrency-safety-classification | not-started | none |
+| 08-export-and-drop-agent-broker-decisions | not-started | `02` |
 
 **Parallelization:**
-- **Session lifecycle**: `01`/`02` both touch `internal/api/sessions.go` at different call sites (interrupted-turn detection vs. the manual `/compact` endpoint) — low-risk parallel, merge-coordinate on that one file. `03` has no overlap with either.
-- **Cards**: `04`, `05`, `06` **all edit the same shared external manifest file** (`libs/go-envelopes/manifest/envelopes.yaml`, each removing/replacing a different standalone entry) — worktree-isolate for the actual coding work, but **merge one at a time**, same pattern as Phase 0's `15a`/`15c` card-type-registration coordination. `07` touches a different file in the same external module directory (`table-card.schema.json`) — lower risk, still flag for awareness. `08` (`internal/chat/context_client.go`) and `09` (`sandbox_content_*.go`) have no overlap with `04`–`07` or each other — fully parallel-safe.
-- **Plugins**: `10`, `11`, `13` all touch `internal/plugin/registrations.go` (different sections — `agent_profiles` stub, the gating wrapper, the `panels`/`crud` stubs) — real overlap risk; land `11` first (it changes the shared gating structure `applyManifestRegistrations` wraps), then `10`/`13` can layer their specific registration logic on top. `12` (`plugin_cmd.go`) and `14` (`server.go`) have no overlap with anything else in this cluster — fully parallel-safe.
+- **Wave 1 — parallel.** `01, 02, 04, 05, 06, 07`. Coordination, not hard blocks: `05` changes what `SelectForAgent` reads before `06`'s plugin filter hooks its output — land `05` first if both are in flight together. `06`/`07` both touch tool-catalog-rendering-adjacent territory — low risk, note for awareness.
+- **Wave 2 — parallel.** `03` (needs `02`), `08` (needs `02`) — both depend on `02` landing but not on each other.
 
-**Escalation logged** (`TASKS/ESCALATIONS.md`): `14-make-http-middleware-plugin-extensible` has a real, unsettled design question (where plugin middleware may legally sit relative to the existing security-ordered chain — CORS-outside-auth, body-limit-inside-auth, caller-identity-between) that needs explicit operator input before implementation, not a worker default-guess. Do not dispatch `14` as a routine batch task until that input is recorded.
+**Escalation logged**: the reaper item's real-world-behavior verification (originally scoped here as `01`, now `TASKS/phase-8/05-verify-reaper-behavior.md`) is resolved via historical-log analysis against the real production DB backup — see `TASKS/ESCALATIONS.md`'s corresponding entry and Phase 8 below.
 
-## Phase 6 — Open Experiment & Docs Follow-Through (2 task files planned; items 3–4 deliberately left index-level only, per the operator's original scope decision — see `docs/engineering/TASKS.md`'s own framing, unchanged)
+## Phase 5 — Plugins & Registers (6 task files)
 
 | Task | Status | Depends on |
 |---|---|---|
-| 01-cli-vs-api-experiment-durable-agents | not-started | **Phase 2 in full** — see below for the required sign-off, separate from this |
-| 02-old-docs-archival-pass | not-started | none functionally; needs explicit operator policy confirmation before any file is touched |
+| 01-build-assignment-api | not-started | Phase 1 tasks 01-08 (landed via the Phase 1→main merge) |
+| 02-build-plugin-installed-enabled-state-model | not-started | none |
+| 03-wire-registers-agent-profiles | not-started | Phase 1 in full (landed via the Phase 1→main merge) |
+| 04-close-cli-install-hot-reload-asymmetry | not-started | none |
+| 05-develop-registers-panels-and-crud | not-started | none (not urgent — may run whenever a real consumer exists) |
+| 06-make-http-middleware-plugin-extensible | not-started | **operator design decision — see escalation below, not ready for mechanical dispatch** |
+
+**Parallelization:** `02`, `03`, `05` all touch `internal/plugin/registrations.go` (different sections — the gating wrapper, the `agent_profiles` stub, the `panels`/`crud` stubs) — real overlap risk; land `02` first (it changes the shared gating structure `applyManifestRegistrations` wraps), then `03`/`05` can layer their specific registration logic on top. `01` (new REST endpoints, `internal/api/*`) has low file overlap with this cluster. `04` (`plugin_cmd.go`) and `06` (`server.go`) have no overlap with anything else in this cluster — fully parallel-safe.
+
+**Escalation logged** (`TASKS/ESCALATIONS.md`): `06-make-http-middleware-plugin-extensible` has a real, unsettled design question (where plugin middleware may legally sit relative to the existing security-ordered chain — CORS-outside-auth, body-limit-inside-auth, caller-identity-between) that needs explicit operator input before implementation, not a worker default-guess. Do not dispatch `06` as a routine batch task until that input is recorded.
+
+## Phase 6 — Envelopes & Cards (6 task files)
+
+| Task | Status | Depends on |
+|---|---|---|
+| 01-rebuild-todo-list-as-composition | not-started | none |
+| 02-rebuild-plan-review-as-composition | not-started | none |
+| 03-rebuild-subagent-spawn-approval-as-composition | not-started | none |
+| 04-build-interactive-table-row-actions-primitive | not-started | none |
+| 05-exclude-card-data-from-replayed-context | not-started | none |
+| 06-fix-cli-boot-content-card-type-list | not-started | none functionally; best run after `01`–`04` so the sourced list reflects the final type set |
+
+**Parallelization:** `01`, `02`, `03` **all edit the same shared external manifest file** (`libs/go-envelopes/manifest/envelopes.yaml`, each removing/replacing a different standalone entry) — worktree-isolate for the actual coding work, but **merge one at a time**, same pattern as Phase 0's `15a`/`15c` card-type-registration coordination. `04` touches a different file in the same external module directory (`table-card.schema.json`) — lower risk, still flag for awareness. `05` (`internal/chat/context_client.go`) and `06` (`sandbox_content_*.go`) have no overlap with `01`–`04` or each other — fully parallel-safe.
+
+## Phase 7 — PTY Rename (1 task file)
+
+| Task | Status | Depends on |
+|---|---|---|
+| 01-rename-pty-naming-scrub | not-started | all of Phase 0 (see task file) |
+
+**Solo phase.** This task touches ~90 files across nearly every subsystem the earlier phases modify (`chat_generate.go`, `container.go`, `chat.go`, `agent_deps.go`, durable-agent files) — a pure identifier/comment rename, no logic change. Run after every logic-changing task in Phases 2-6 has landed, to avoid repeated rebasing against a fast-moving set of files.
+
+## Phase 8 — Test, Review, Verify (5 task files)
+
+| Task | Status | Depends on |
+|---|---|---|
+| 01-cli-vs-api-experiment-durable-agents | not-started | **New Phase 2 in full, and New Phase 3's `01-collapse-resolveprovider-into-cascade.md`** — see below for the required sign-off, separate from this |
+| 02-agent-reflex-propose-and-pending-reflexes-testing | not-started | none |
+| 03-test-grounding-in-real-sessions | not-started | none |
+| 04-truncation-review | not-started | none; coordinate with `TASKS/phase-4/06-add-filter-tool-selection.md` (both touch tool-catalog rendering) |
+| 05-verify-reaper-behavior | not-started | none |
 
 ### ⚠️ `01-cli-vs-api-experiment-durable-agents` requires explicit, live operator sign-off at dispatch time
 
-This is called out in the task file itself (a prominent banner at the top of `TASKS/phase-6/01-cli-vs-api-experiment-durable-agents.md`), and repeated here per the Planner's kickoff instructions: **this task routes a real Curator wake — a live production action against a real external system (Loom) — through an unproven CLI-based path.** Approving this overall plan, or Phase 6's index entry, does **not** authorize dispatching this specific task. It must never be bundled into a batch "the plan looks good, proceed." Whoever dispatches it (Orchestrator or operator directly) must get a live, in-the-moment go-ahead immediately before dispatch, every time — including which Curator config to use (`loom-curator` vs. `atlas-curator`) and what constitutes stopping the experiment early. Record the sign-off in the task file's own Work Log before any dispatch action.
+This is called out in the task file itself (a prominent banner at the top of `TASKS/phase-8/01-cli-vs-api-experiment-durable-agents.md`), and repeated here per the Planner's kickoff instructions: **this task routes a real Curator wake — a live production action against a real external system (Loom) — through an unproven CLI-based path.** Approving this overall plan, or Phase 8's index entry, does **not** authorize dispatching this specific task. It must never be bundled into a batch "the plan looks good, proceed." Whoever dispatches it (Orchestrator or operator directly) must get a live, in-the-moment go-ahead immediately before dispatch, every time — including which Curator config to use (`loom-curator` vs. `atlas-curator`) and what constitutes stopping the experiment early. Record the sign-off in the task file's own Work Log before any dispatch action.
 
-### ⚠️ `02-old-docs-archival-pass`'s policy is not yet confirmed
+**Escalation logged**: `05-verify-reaper-behavior`'s "no live traffic during this effort" scoping conflict (flagged as a planning landmine) is resolved in its own task file via historical-log analysis against the real production DB backup, not live observation — see `TASKS/ESCALATIONS.md`'s corresponding entry for the formal record. That analysis already found a real, currently-live bug (`last_activity_at` never writes in production, so the reaper's activity-reset fix has been silently non-functional since it shipped) — `05` scopes root-causing and fixing this as its primary deliverable.
+
+## Phase 9 — Final Clean-up (1 task file; items formerly numbered 3–4 in TASKS.md's original Phase 6 remain deliberately left index-level only, per the operator's original scope decision — see `docs/engineering/TASKS.md`'s own framing, unchanged)
+
+| Task | Status | Depends on |
+|---|---|---|
+| 01-old-docs-archival-pass | not-started | none functionally; needs explicit operator policy confirmation before any file is touched |
+
+### ⚠️ `01-old-docs-archival-pass`'s policy is not yet confirmed
 
 `TASKS.md` flags its own proposed policy (archive vs. delete vs. "superseded by" banner) as "needs confirmation before executing" — this is carried forward unresolved into the task file itself (its own banner: do not default to any single treatment, including the standing aggressive-dead-code-removal policy, as a substitute for that confirmation). Planning research also found a **third, previously-undiscussed `ADR-001` collision** (`adr/ADR-001-tech-stack.md`, a ~25-file `adr/` directory never mentioned by `TASKS.md` or `docs/engineering/decisions/README.md`'s "two colliding sequences" framing) — flag this to the operator alongside the policy question, don't silently fold it in or ignore it.
 
 ---
 
-## Escalations raised during Phases 1-6 planning (new since the Phase 0 presentation)
+## Escalations raised during Phases 1-6 planning (new since the Phase 0 presentation; phase/task numbers below use the 2026-08-19 Phase 2-9 resequencing)
 
 In addition to `TASKS/ESCALATIONS.md`'s existing entries (Phase 0 planning), this pass adds:
 - **Process note**: a research fork drifted into unauthorized self-dispatch (second occurrence of Phase 0's failure mode) — audited and kept, see `ESCALATIONS.md`.
-- **Phase 4 reaper verification**: the "no live traffic to verify against" scoping conflict, resolved via historical-log analysis — see `ESCALATIONS.md`, and the real bug it found (reaper's activity-reset fix silently non-functional in production).
-- **Phase 5 middleware plugin-extensibility** (`14`): a genuine, unsettled design question needing operator input before implementation — see `ESCALATIONS.md`.
-- **Phase 6 item 2's docs-archival policy**: not resolved here, per `TASKS.md`'s own instruction; carried forward with an additional finding (a third `adr/` ADR-collision sequence).
-- **Phase 6 item 1's sign-off requirement**: not an escalation in the doc/reality-mismatch sense, but the one item in this whole pass requiring a standing, repeatable, live-dispatch-time gate — see above.
+- **Phase 8 reaper verification**: the "no live traffic to verify against" scoping conflict, resolved via historical-log analysis — see `ESCALATIONS.md`, and the real bug it found (reaper's activity-reset fix silently non-functional in production).
+- **Phase 5 middleware plugin-extensibility** (`06`): a genuine, unsettled design question needing operator input before implementation — see `ESCALATIONS.md`.
+- **Phase 9 item 1's docs-archival policy**: not resolved here, per `TASKS.md`'s own instruction; carried forward with an additional finding (a third `adr/` ADR-collision sequence).
+- **Phase 8 item 1's sign-off requirement**: not an escalation in the doc/reality-mismatch sense, but the one item in this whole pass requiring a standing, repeatable, live-dispatch-time gate — see above.
 
 See `TASKS/ESCALATIONS.md` for the full list of doc/reality mismatches found during planning, including which ones are already resolved (via Orchestrator/Planner judgment call within existing docs) and which ones genuinely need an operator decision before the relevant task is dispatched.

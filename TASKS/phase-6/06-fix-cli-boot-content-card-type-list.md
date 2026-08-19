@@ -1,8 +1,8 @@
 # Fix CLI-agent boot content to source the Card type list dynamically instead of hardcoded/stale content
 
-**Phase:** 5
+**Phase:** 6
 **Status:** not-started
-**Depends on:** none, but should land after `04`-`07` (the primitive-composition rebuilds) so the dynamically-sourced list reflects the final, post-rebuild type set rather than needing a second pass
+**Depends on:** none, but should land after `01`-`04` (the primitive-composition rebuilds) so the dynamically-sourced list reflects the final, post-rebuild type set rather than needing a second pass
 **Touches:** `internal/runtime/agent/sandbox_content_envelope.go` (`envelopeSchemaContent` — planted `.sandbox/envelope-schema.md`), `internal/runtime/agent/sandbox_content_claude.go` (`claudeMDBody` — the CLAUDE.md addendum planted into Claude-CLI boot dirs), `internal/chat/envelope.go` (`EnvelopeRegistry()`/`registeredTypes` — the live, in-process registry to query instead of hardcoding), `internal/plugin/builtin/adapter-claude/plugin.go:168` (the planting call site)
 
 ## Context

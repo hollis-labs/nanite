@@ -1,6 +1,6 @@
 # Add `FilterToolSelection`
 
-**Phase:** 3
+**Phase:** 4
 **Status:** not-started
 **Depends on:** Phase 0 #22 (`22-remove-skill-and-tool-broker-abstractions.md`) should already be landed — this task is that removal's explicitly named forward-looking replacement mechanism for the go-toolbroker enricher's cut `OverrideBlock` feature, not a mechanism that needs to coexist with it.
 **Touches:** `internal/plugin/filter.go` (new `FilterToolSelection` constant, alongside the existing 8), `internal/service/tool.go` (`toolServiceImpl` struct and `SelectForAgent` — needs a design decision on where the filter applies, see Context), `internal/service/chat_generate.go` (likely insertion point, see Context), `internal/service/container.go` (wiring if `toolServiceImpl` gains a `pluginHost` field).

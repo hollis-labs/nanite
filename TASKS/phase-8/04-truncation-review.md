@@ -1,6 +1,6 @@
 # Truncation review, broadly — deliberate care wherever touched next
 
-**Phase:** 3
+**Phase:** 8
 **Status:** not-started
 **Depends on:** none, but coordinate with any other Phase 1-3 task that happens to touch a truncation path (e.g. tool-catalog rendering work in Phase 1) — don't duplicate a fix mid-flight elsewhere.
 **Touches:** `internal/tool_result_cache` (or equivalent — the Phase 3 S4a tool-result cache described in this project's `CLAUDE.md`), the file-based truncation fallback (locate exact package — `internal/truncate` or similar, confirm during implementation), the 80-character progressive-discovery tool-catalog description truncation (`internal/service/tool.go`'s catalog rendering, referenced in task 01/05's research).
@@ -13,7 +13,7 @@ This is not scoped as a single bug fix — it's a standing caution the review wa
 
 1. The tool-result cache (per this project's `CLAUDE.md`: results over 64 KiB get cached with a `tool_result://<id>` pointer shown to the LLM) and the MCP trust-tier size ceilings layered on top of it (2 MiB/512 KiB/256 KiB/128 KiB per tier, per `docs/mcp-trust-model.md`).
 2. Any file-based truncation fallback for oversized content.
-3. The progressive-discovery tool-catalog's 80-character description truncation (referenced in this phase's other tasks as the specific historical incident site).
+3. The progressive-discovery tool-catalog's 80-character description truncation (referenced in `TASKS/phase-4/06-add-filter-tool-selection.md`'s research as the specific historical incident site).
 4. Error-message truncation anywhere in the tool-execution or provider-response path (the specific incident that caused an agent to hallucinate a tool didn't exist).
 
 This item, like `06-tool-concurrency-safety-classification.md`, is drawn from architecture doc `03-steering.md`'s explicit "carried into implementation" list rather than `TASKS.md`'s terse Phase 3 summary line — included for the same reason: the architecture doc is the authoritative detail behind `TASKS.md`'s deliberately short phrasing.
@@ -29,7 +29,7 @@ This item, like `06-tool-concurrency-safety-classification.md`, is drawn from ar
 
 - A real inventory of truncation paths exists (recorded in this file's Work Log), not just the ones named in the architecture doc.
 - Every truncation path that lacks a clear "content was cut" signal to the model gets one.
-- No new truncation path introduced elsewhere during this same phase's other tasks lacks the same signal — this task's findings should be checked against Phase 3's other work (e.g. the tool-catalog rendering touched by `05-add-filter-tool-selection.md`) before that work is marked done.
+- No new truncation path introduced elsewhere lacks the same signal — this task's findings should be checked against `TASKS/phase-4/06-add-filter-tool-selection.md`'s tool-catalog rendering work before that task is marked done.
 - `go build ./cmd/nanite/`, `go vet ./...`, `go test ./...` pass.
 
 ## Work log

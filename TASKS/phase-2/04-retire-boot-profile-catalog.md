@@ -19,7 +19,7 @@ This project's own root `CLAUDE.md` currently reads: *"Boot profiles let an oper
 
 ## What to do
 
-1. Confirm `03-port-forward-dynamic-resolver.md` and `04-mandatory-post-compaction-reread.md` have landed (or land in the same batch) — those two carry forward the only pieces of this system with real value; this task should not delete anything before its replacement exists, per this project's general build-then-cut sequencing principle.
+1. Confirm `02-port-forward-dynamic-resolver.md` and `03-mandatory-post-compaction-reread.md` have landed (or land in the same batch) — those two carry forward the only pieces of this system with real value; this task should not delete anything before its replacement exists, per this project's general build-then-cut sequencing principle.
 2. Delete `internal/bootprofile/*` in full once nothing references it — confirm via grep no remaining import.
 3. Remove `internal/config.Config`'s `BootProfileCatalogPath` field and its resolution logic.
 4. Retire `examples/boot-profiles/` and the `TestBootProfileSmoke_*` test suite, or repoint the smoke test at whatever `03`/`04` build if genuinely equivalent coverage is wanted (a worker judgment call — don't force artificial test coverage of a retired system just to preserve a test name).

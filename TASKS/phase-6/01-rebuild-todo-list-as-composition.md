@@ -1,6 +1,6 @@
 # Rebuild `todo-list` as a `list-card` composition
 
-**Phase:** 5
+**Phase:** 6
 **Status:** not-started
 **Depends on:** none
 **Touches:** `libs/go-envelopes/manifest/envelopes.yaml` (external module, local `replace` directive — remove the standalone `todo-list` entry), `ui/src/components/chat/envelopes/TodoListCard.tsx` (retire or fold into `list-card`'s component), `ui/src/components/chat/envelopes/primitives/` (the `list-card` primitive component), `internal/mcp/self_tools_transport.go:1074` (the `"type": "todo-list"` emitter — update to emit `list-card` with a status field/discriminator instead)

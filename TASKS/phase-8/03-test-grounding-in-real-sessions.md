@@ -1,6 +1,6 @@
 # Test grounding in real sessions
 
-**Phase:** 3
+**Phase:** 8
 **Status:** not-started
 **Depends on:** none
 **Touches:** `cmd/nanite/main.go` (`SelfToolsTransport.GroundingRecaller`/`GroundingLogger` wiring — currently absent, see Context, must be fixed before any testing is meaningful), `internal/grounding/*` (no further code changes expected beyond the wiring fix unless testing surfaces a second real bug — this is otherwise an evaluation task, not a build task), `internal/mcp/self_tools_dispatch.go` (`callExecuteTask` — where grounding is invoked today, labeled "E2," running before the "E1" reflex-match step), `NANITE_GROUNDING_ENABLED` env var / eventual `memory.grounding.enabled` settings flag.

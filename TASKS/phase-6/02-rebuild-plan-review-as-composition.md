@@ -1,6 +1,6 @@
 # Rebuild `plan-review` as a `list-card` + `confirmation-card` composition
 
-**Phase:** 5
+**Phase:** 6
 **Status:** not-started
 **Depends on:** none
 **Touches:** `libs/go-envelopes/manifest/envelopes.yaml` (remove standalone `plan-review` entry), `ui/src/components/chat/envelopes/PlanReviewCard.tsx` (retire or fold into composed primitives), plan-creation call site (not yet traced — locate during implementation, see Context)

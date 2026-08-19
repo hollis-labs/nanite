@@ -1,6 +1,6 @@
 # Scratchpad TTL pruning — reality check: confirm there is nothing to prune
 
-**Phase:** 5
+**Phase:** 4
 **Status:** not-started
 **Depends on:** `TASKS/phase-0/27-cut-p7-scratchpad-snapshot.md` (removes the one mechanism that ever pushed scratchpad content into longer-lived storage — confirm landed before closing this task)
 **Touches:** `internal/service/chat_loop_state.go` (`loopState`'s scratchpad field, read-only confirmation), `internal/mcp/self_tools.go` (`scratchpad_write`/`_read`/`_clear` — read-only confirmation)

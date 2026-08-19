@@ -1,6 +1,6 @@
 # Extend `event_log` postmortem logging to Orphan Sweep, Recovery Pack, and interrupted-turn detection
 
-**Phase:** 5
+**Phase:** 3
 **Status:** not-started
 **Depends on:** `TASKS/phase-0/32-rename-recovery-namespace.md` (moves the four recovery mechanisms into `internal/recovery/*` — this task's file paths assume that landed)
 **Touches:** `internal/recovery/orphansweep/` (formerly `internal/runtime/agent/orphan_sweep.go`), `internal/recovery/pack/` (formerly `internal/service/recovery_pack.go`), `internal/recovery/` top-level interrupted-turn-detection logic (thin `*API` wrapper stays in `internal/api/sessions.go` per `32`'s own scoping), `internal/store/events.go` (`LogEvent` — read-only reuse, no schema change)

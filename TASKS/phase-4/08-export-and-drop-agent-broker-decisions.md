@@ -1,8 +1,8 @@
 # Export and drop `agent_broker_decisions`
 
-**Phase:** 3
+**Phase:** 4
 **Status:** not-started
-**Depends on:** `01-dispatch-to-agent-reflex-action-kind-and-broker-migration.md` (this table's writer, `attemptBrokerDispatch`/`persistAgentBrokerDecision`, is retired by that task — this task can't drop the table safely until nothing writes to it anymore)
+**Depends on:** `02-dispatch-to-agent-reflex-action-kind-and-broker-migration.md` (this table's writer, `attemptBrokerDispatch`/`persistAgentBrokerDecision`, is retired by that task — this task can't drop the table safely until nothing writes to it anymore)
 **Touches:** `internal/store/broker_decisions.go` (`InsertAgentBrokerDecision`, `ListRecentAgentBrokerDecisions`), `internal/service/chat_broker_dispatch.go` (`persistAgentBrokerDecision` — should already be gone once task 01 lands; confirm), `cmd/nanite/admin_cmd.go` (the admin CLI subcommand that dumps recent rows), `internal/store/migrations/` (new drop migration for `agent_broker_decisions`)
 
 ## Context

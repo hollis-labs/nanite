@@ -1,8 +1,8 @@
 # Collapse `resolveProvider`'s fallback chain into the construction cascade; fold in `MessageWakePolicy`'s equivalent collapse
 
-**Phase:** 2
+**Phase:** 3
 **Status:** not-started
-**Depends on:** Phase 1's `agents.model_id` (`TASKS/phase-1/02-add-agents-composition-columns.md`) resolved through a real cascade (`TASKS/phase-1/01-add-roles-table-and-cascade-resolution.md`); `01-wire-runtime-kind-routing.md` (this task's replacement logic needs `runtime_kind` already wired)
+**Depends on:** Phase 1's `agents.model_id` (`TASKS/phase-1/02-add-agents-composition-columns.md`) resolved through a real cascade (`TASKS/phase-1/01-add-roles-table-and-cascade-resolution.md`); `TASKS/phase-2/01-wire-runtime-kind-routing.md` (this task's replacement logic needs `runtime_kind` already wired)
 **Touches:** `internal/service/chat.go` (`resolveProvider`, `tryProviderCandidate`), `internal/chat/engine.go` (`InferProvider`), `internal/service/messaging_reactor.go` (`resolveMessageWakePolicy` — folded into this task, see Context)
 
 ## Context

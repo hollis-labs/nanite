@@ -1,6 +1,6 @@
 # Old-docs archival pass
 
-**Phase:** 6
+**Phase:** 9
 **Status:** not-started
 
 ## ⚠️ POLICY NOT YET CONFIRMED — DO NOT RESOLVE DURING PLANNING OR EXECUTION WITHOUT OPERATOR CONFIRMATION

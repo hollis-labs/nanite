@@ -1,13 +1,13 @@
 # Run the CLI-vs-API experiment for durable agents (Curator wake)
 
-**Phase:** 6
+**Phase:** 8
 **Status:** not-started
 
 ## ⚠️ REQUIRES EXPLICIT OPERATOR SIGN-OFF AT DISPATCH TIME — SEPARATE FROM PLAN APPROVAL
 
 **This task routes a real Curator wake — a live production action against a real external system (Loom's Curator agent, `consumer_id`-tagged, currently wired to `internal/api/loom_curator_wake.go`) — through a CLI-based subprocess instead of its current API path. Approving this plan (or the Phase 6 index) does NOT authorize dispatching this task. Do not dispatch this task under a batch "the plan looks good, proceed" — the operator must give a live, in-the-moment go-ahead immediately before this specific task is dispatched, every time it's dispatched. If a worker or the Orchestrator is ever tempted to fold this into a routine batch-execution pass, stop and get that explicit go-ahead first.**
 
-**Depends on:** Phase 2 in full — specifically `runtime_kind` actually wired as the real CLI/API routing mechanism. See Context: the experiment as described in TASKS.md ("made cheap by Phase 2's `runtime_kind` field") is not cheaply runnable before Phase 2 lands; the pre-Phase-2 alternative (editing `loom-curator.yaml`'s `provider:` string directly) is a materially different, riskier action than the one this task is scoped to perform.
+**Depends on:** New Phase 2 in full (`TASKS/phase-2/`) and New Phase 3's `01-collapse-resolveprovider-into-cascade.md` — specifically `runtime_kind` actually wired as the real CLI/API routing mechanism. See Context: the experiment as described in TASKS.md ("made cheap by Phase 2's `runtime_kind` field") is not cheaply runnable before that lands; the pre-Phase-2 alternative (editing `loom-curator.yaml`'s `provider:` string directly) is a materially different, riskier action than the one this task is scoped to perform.
 **Touches:** `.nanite/durable-agents/loom-curator.yaml` (or `atlas-curator.yaml` — pick one, see below), `internal/api/loom_curator_wake.go`, `internal/service/durable_wake.go` (`Wake`), `internal/service/durable_agents.go` (`durableAgentLaunchPolicyFor`, `selectOrCreateLaunchSession`), the Recovery Broker's telemetry (`nanite_recovery_breadcrumbs`) and `durable_agent_instances.status`.
 
 ## Context

@@ -1,6 +1,6 @@
 # Wire `compaction_events` — assign the writer at all production `CompactionPipeline{}` sites
 
-**Phase:** 5
+**Phase:** 3
 **Status:** not-started
 **Depends on:** `TASKS/phase-0/29-cut-prompt-templates.md` (already relocates the compaction-disclosure content into a single hardcoded string — confirm landed; this task does not duplicate that work, only wires the event writer)
 **Touches:** `internal/api/sessions.go:671` (manual `/compact` endpoint), `internal/service/chat_generate.go:2372,2636` (**three** production `CompactionPipeline{}` construction sites total — see Context), `internal/context/handoff_stash.go` (`CompactionEventWriter` interface), `internal/store/compaction_events.go` (`Store.WriteCompactionEvent` — already real), new adapter in `chat_generate.go` mirroring `storeCompactionEventReader`

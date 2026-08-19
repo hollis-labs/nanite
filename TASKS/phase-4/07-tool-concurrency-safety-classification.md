@@ -1,6 +1,6 @@
 # Tool concurrency-safety classification — replace name-heuristic with declared metadata
 
-**Phase:** 3
+**Phase:** 4
 **Status:** not-started
 **Depends on:** none
 **Touches:** wherever the current name-heuristic lives (`GetToolMeta` per the architecture doc's own reference — locate and confirm exact file:line during implementation), `known_tools` catalog (Phase 1) if a declared-metadata field belongs there instead of/alongside the current mechanism.

@@ -1,6 +1,6 @@
 # Verify the subagent reaper's real-world behavior before further idle-timeout tuning
 
-**Phase:** 4
+**Phase:** 8
 **Status:** not-started
 **Depends on:** none
 **Touches:** `internal/subagent/reaper.go` (`Reaper.SweepOnce`, the activity-reset inactivity branch), `internal/subagent/service.go` (`stampActivity`/`emitHeartbeat`, `startHeartbeat`), `internal/store/migrations/093_subagent_run_last_activity.sql`-added `subagent_runs.last_activity_at` column, `internal/service/container.go` (`NewBootRunner` wiring, `SetStreamSink`).

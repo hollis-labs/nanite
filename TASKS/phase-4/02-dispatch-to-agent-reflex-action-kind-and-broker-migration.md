@@ -1,6 +1,6 @@
 # Design and add the `dispatch_to_agent` reflex action kind; migrate the agent broker's remaining rules
 
-**Phase:** 3
+**Phase:** 4
 **Status:** not-started
 **Depends on:** Phase 1's reflex opt-out field (the "required, cannot opt out" vs. "default-on, may opt out" distinction on `agent_reflexes`); Phase 0 #21 (`21-cut-modes.md`) must already be landed — it neuters rules 2-4 by deleting the `classify.ClassifyMode` call site that fed `in.Mode`/`in.ModeConfidence`.
 **Touches:** `internal/agent/reflexes/*` (new action-kind type + executor branch), `internal/service/chat_broker_dispatch.go` (`attemptBrokerDispatch`, `buildBrokerInput` — full retirement of this 571-line file's broker call site), `internal/mcp/self_tools_dispatch.go` (`callExecuteTask`'s separate `st.ReflexSet`-driven dispatch hint mechanism — a second, deliberately-independent consumer of reflex/promptrouter matching, see Context), `cmd/nanite/main.go:354` (`agentbroker.New()` wiring — likely removed once the call site is gone), `internal/store/migrations/075_agent_reflexes.sql`-adjacent new migration (action-kind enum/config shape), `internal/api/reflexes.go` (CRUD/validation for the new action kind).

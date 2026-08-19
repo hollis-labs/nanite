@@ -1,8 +1,8 @@
 # Migrate promptrouter's phrase catalog into reflex predicates; fix phantom entries; retire `internal/promptrouter`
 
-**Phase:** 3
+**Phase:** 4
 **Status:** not-started
-**Depends on:** `01-dispatch-to-agent-reflex-action-kind-and-broker-migration.md` (needs the new action kind, and its documented decision on whether the reflex-table match directly feeds dispatch or is subsumed into the action kind's own trigger evaluation).
+**Depends on:** `02-dispatch-to-agent-reflex-action-kind-and-broker-migration.md` (needs the new action kind, and its documented decision on whether the reflex-table match directly feeds dispatch or is subsumed into the action kind's own trigger evaluation).
 **Touches:** `internal/promptrouter/*` (full package: `catalog.go`, `dispatcher.go`, `matcher.go`, `loader.go` — retire after migration), `internal/mcp/self_tools_dispatch.go` (`callExecuteTask`'s separate `st.ReflexSet`-driven hint mechanism — a second consumer of the same catalog, see Context), `internal/service/chat_broker_dispatch.go` (already emptied by task 01; confirm no remaining `promptrouter` import), `internal/agent/builtin/profiles/{researcher,reviewer}.md` (reference only — confirms these two phantom-adjacent slugs already resolve correctly), `~/.nanite/reflexes/*.yaml` user-override convention (`loader.go`'s `LoadUserReflexes` — decide what replaces this once the catalog moves into the DB-backed `agent_reflexes` table), `docs/promptrouter-catalog.md`, `docs/promptrouter-authoring.md`, `docs/agent-pattern-catalog.md` (doc cleanup).
 
 ## Context

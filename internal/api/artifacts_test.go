@@ -101,14 +101,10 @@ func newArtifactTestAPI(t *testing.T) (*API, string) {
 		t.Fatalf("service.NewContainer: %v", err)
 	}
 
-	// Seed the minimum workspace+session rows the artifacts FK chain
-	// requires. We go via direct SQL to avoid pulling in the full
-	// session-service wiring; the exact column set tracks the
-	// workspaces/sessions schema.
-	if _, err := s.DB.Exec(`INSERT INTO workspaces (id, name) VALUES (?, ?)`, "ws-test", "test"); err != nil {
-		t.Fatalf("seed workspace: %v", err)
-	}
-	if _, err := s.DB.Exec(`INSERT INTO sessions (id, short_code, workspace_id, title) VALUES (?, ?, ?, ?)`, "sess1", "sc-sess1", "ws-test", "t"); err != nil {
+	// Seed the minimum session row the artifacts FK chain requires. We go
+	// via direct SQL to avoid pulling in the full session-service wiring;
+	// the exact column set tracks the sessions schema.
+	if _, err := s.DB.Exec(`INSERT INTO sessions (id, short_code, title) VALUES (?, ?, ?)`, "sess1", "sc-sess1", "t"); err != nil {
 		t.Fatalf("seed session: %v", err)
 	}
 

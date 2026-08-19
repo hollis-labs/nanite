@@ -13,12 +13,12 @@ import (
 // SessionReader provides read access to sessions and messages.
 type SessionReader interface {
 	GetSession(id string) (*store.Session, error)
-	ListSessions(workspaceID string, includeArchived ...bool) ([]store.Session, error)
+	ListSessions(includeArchived ...bool) ([]store.Session, error)
 	ListMessages(sessionID string, limit int) ([]store.Message, error)
 	ListMessagesPaginated(sessionID string, limit, offset int) (*store.MessagePage, error)
 	ListMessagesAroundID(sessionID, messageID string, before, after int) (*store.MessagePage, error)
 	GetMessage(id string) (*store.Message, error)
-	SearchMessages(query, workspaceID, projectID string, limit int) ([]store.SearchResult, error)
+	SearchMessages(query, projectID string, limit int) ([]store.SearchResult, error)
 }
 
 // SessionWriter provides write access to sessions and messages.
@@ -113,14 +113,12 @@ type SettingsStore interface {
 	GetPluginSettingValue(pluginID, key string) (string, error)
 }
 
-// WorkspaceStore provides access to workspaces and projects.
-type WorkspaceStore interface {
-	ListWorkspaces() ([]store.Workspace, error)
-	GetWorkspace(id string) (*store.Workspace, error)
-	CreateWorkspace(w *store.Workspace) error
-	UpdateWorkspace(w *store.Workspace) error
-	DeleteWorkspace(id string) error
-	ListProjects(workspaceID string) ([]store.Project, error)
+// ProjectStore provides access to projects. Formerly WorkspaceStore —
+// renamed when the in-app `workspaces` table (and its nesting of projects
+// under a workspace_id) was retired in full (Phase 0 item 20,
+// TASKS/phase-0/20-retire-workspaces-and-instance-mechanism.md).
+type ProjectStore interface {
+	ListProjects() ([]store.Project, error)
 	GetProject(id string) (*store.Project, error)
 	CreateProject(p *store.Project) error
 	UpdateProject(p *store.Project) error
@@ -289,7 +287,7 @@ type Store interface {
 	ToolStore
 	UsageStore
 	SettingsStore
-	WorkspaceStore
+	ProjectStore
 	BookmarkStore
 	ArtifactStore
 	TemplateStore

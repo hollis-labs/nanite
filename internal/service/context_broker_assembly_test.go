@@ -7,8 +7,8 @@ import (
 
 	llmtypes "github.com/hollis-labs/go-llm-types"
 	"github.com/hollis-labs/nanite/internal/chat"
-	"github.com/hollis-labs/nanite/internal/contextbroker"
 	ctxpkg "github.com/hollis-labs/nanite/internal/context"
+	"github.com/hollis-labs/nanite/internal/contextbroker"
 	"github.com/hollis-labs/nanite/internal/store"
 )
 
@@ -40,7 +40,7 @@ func TestAssembleSlots_PlanReachesResult(t *testing.T) {
 	}
 	agent := &store.AgentProfile{ID: "plan-agent", Slug: "plan", Status: "active", SystemPrompt: "p"}
 
-	result, err := svc.AssembleSlots(context.Background(), sess, agent, nil, nil, "", 200000, "")
+	result, err := svc.AssembleSlots(context.Background(), sess, agent, nil, "", 200000, "")
 	if err != nil {
 		t.Fatalf("AssembleSlots: %v", err)
 	}
@@ -77,7 +77,7 @@ func TestAssembleSlots_StableCachePrefix_AcrossTurns(t *testing.T) {
 	if err := s.CreateMessage(&store.Message{ID: "t1", SessionID: sess.ID, Role: "user", Content: "write a new helper function"}); err != nil {
 		t.Fatalf("CreateMessage t1: %v", err)
 	}
-	res1, err := svc.AssembleSlots(context.Background(), sess, agent, nil, nil, "", 200000, "")
+	res1, err := svc.AssembleSlots(context.Background(), sess, agent, nil, "", 200000, "")
 	if err != nil {
 		t.Fatalf("turn 1: %v", err)
 	}
@@ -86,7 +86,7 @@ func TestAssembleSlots_StableCachePrefix_AcrossTurns(t *testing.T) {
 	if err := s.CreateMessage(&store.Message{ID: "t2", SessionID: sess.ID, Role: "user", Content: "review our session history"}); err != nil {
 		t.Fatalf("CreateMessage t2: %v", err)
 	}
-	res2, err := svc.AssembleSlots(context.Background(), sess, agent, nil, nil, "", 200000, "")
+	res2, err := svc.AssembleSlots(context.Background(), sess, agent, nil, "", 200000, "")
 	if err != nil {
 		t.Fatalf("turn 2: %v", err)
 	}
@@ -235,7 +235,7 @@ func TestAssembleSlots_UniversalSlotShipsContent(t *testing.T) {
 		SystemPrompt: "",
 	}
 
-	result, err := svc.AssembleSlots(context.Background(), sess, subagentProfile, nil, nil, "", 200000, "")
+	result, err := svc.AssembleSlots(context.Background(), sess, subagentProfile, nil, "", 200000, "")
 	if err != nil {
 		t.Fatalf("AssembleSlots: %v", err)
 	}
@@ -308,7 +308,7 @@ func TestAssembleSlots_ConversationNotInPlanDecider(t *testing.T) {
 	}
 	agent := &store.AgentProfile{ID: "conv-agent", Slug: "c", Status: "active", SystemPrompt: "p"}
 
-	result, err := svc.AssembleSlots(context.Background(), sess, agent, nil, []llmtypes.ToolDefinition{}, "", 200000, "")
+	result, err := svc.AssembleSlots(context.Background(), sess, agent, []llmtypes.ToolDefinition{}, "", 200000, "")
 	if err != nil {
 		t.Fatalf("AssembleSlots: %v", err)
 	}

@@ -44,7 +44,7 @@ func TestChatRunner_RegistersAndClearsLineage(t *testing.T) {
 
 	st := &recordingSessionStore{
 		parents: map[string]*store.Session{
-			parentSessionID: {ID: parentSessionID, WorkspaceID: "ws-1"},
+			parentSessionID: {ID: parentSessionID},
 		},
 	}
 
@@ -114,7 +114,7 @@ func TestChatRunner_RegistersAndClearsLineage(t *testing.T) {
 func TestChatRunner_LineageNilSafe(t *testing.T) {
 	st := &recordingSessionStore{
 		parents: map[string]*store.Session{
-			"sess-parent": {ID: "sess-parent", WorkspaceID: "ws-1"},
+			"sess-parent": {ID: "sess-parent"},
 		},
 	}
 	invoker := chatInvokerFunc(func(_ context.Context, _, _, _ string, ch chan chat.StreamEvent) {

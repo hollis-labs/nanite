@@ -11,8 +11,8 @@ import (
 
 	llmtypes "github.com/hollis-labs/go-llm-types"
 	"github.com/hollis-labs/nanite/internal/chat"
-	"github.com/hollis-labs/nanite/internal/contextbroker"
 	ctxpkg "github.com/hollis-labs/nanite/internal/context"
+	"github.com/hollis-labs/nanite/internal/contextbroker"
 	"github.com/hollis-labs/nanite/internal/store"
 	"github.com/hollis-labs/nanite/internal/tool/intent"
 	"github.com/hollis-labs/nanite/internal/tool/stash"
@@ -40,7 +40,7 @@ type ContextService interface {
 	// Phase 0 item 21 ("Cut Modes, in full") removed this method's `mode
 	// *store.AgentMode` and `sessionMode *store.Mode` parameters — both
 	// Legacy Agent Mode and Session Mode are gone.
-	AssembleSlots(ctx context.Context, session *store.Session, agent *store.AgentProfile, workspace *store.Workspace, tools []llmtypes.ToolDefinition, extraSystemPrefix string, providerWindowSize int, toolsLazyHint string) (*SlotAssemblyResult, error)
+	AssembleSlots(ctx context.Context, session *store.Session, agent *store.AgentProfile, tools []llmtypes.ToolDefinition, extraSystemPrefix string, providerWindowSize int, toolsLazyHint string) (*SlotAssemblyResult, error)
 
 	PruneAfterTurn(ctx context.Context, sessionID string) error
 }
@@ -180,8 +180,8 @@ func NewContextService(cfg ContextServiceConfig) ContextService {
 }
 
 // AssembleSlots builds a slot-based context window. Each named slot is sourced
-// independently from raw inputs (agent profile, workspace, ContextBroker,
-// session messages, selected tools) so provider adapters that exploit slot
+// independently from raw inputs (agent profile, ContextBroker, session
+// messages, selected tools) so provider adapters that exploit slot
 // boundaries (e.g., Anthropic cache_control) can mark unchanged slots as
 // cacheable.
 //
@@ -194,8 +194,14 @@ func NewContextService(cfg ContextServiceConfig) ContextService {
 // the G-HOT-SWAP-DEAD layer's pointer at the lazy partition. The caller
 // (chat-service) decides whether the partition is active and renders the
 // hint via chat.RenderToolLazyHint; AssembleSlots only attaches it.
-func (s *contextServiceImpl) AssembleSlots(ctx context.Context, session *store.Session, agent *store.AgentProfile, workspace *store.Workspace, tools []llmtypes.ToolDefinition, extraSystemPrefix string, providerWindowSize int, toolsLazyHint string) (*SlotAssemblyResult, error) {
-	sources, err := s.client.AssembleSlotSources(ctx, session, agent, workspace)
+//
+// Phase 0 item 20 (retire workspaces): the `workspace *store.Workspace`
+// parameter this used to take is gone — the in-app `workspaces` table it
+// sourced is retired in full, and its content (workspace name/description
+// in the System slot) was already unused by the Session slot
+// (buildSessionSlotContent ignored the parameter).
+func (s *contextServiceImpl) AssembleSlots(ctx context.Context, session *store.Session, agent *store.AgentProfile, tools []llmtypes.ToolDefinition, extraSystemPrefix string, providerWindowSize int, toolsLazyHint string) (*SlotAssemblyResult, error) {
+	sources, err := s.client.AssembleSlotSources(ctx, session, agent)
 	if err != nil {
 		return nil, err
 	}

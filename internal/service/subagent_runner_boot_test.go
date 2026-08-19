@@ -276,7 +276,7 @@ func TestBootRunner_CLIProvider_BootsAndDrains(t *testing.T) {
 	bridge := newFakeBridge()
 	st := &recordingSessionStore{
 		parents: map[string]*store.Session{
-			"sess-parent": {ID: "sess-parent", WorkspaceID: "ws-1"},
+			"sess-parent": {ID: "sess-parent"},
 		},
 	}
 
@@ -382,7 +382,7 @@ func TestBootRunner_RunProviderOverride_ThreadsToBootOptions(t *testing.T) {
 	bridge := newFakeBridge()
 	st := &recordingSessionStore{
 		parents: map[string]*store.Session{
-			"sess-parent": {ID: "sess-parent", WorkspaceID: "ws-1"},
+			"sess-parent": {ID: "sess-parent"},
 		},
 	}
 
@@ -452,7 +452,7 @@ func TestBootRunner_NoProviderOverride_LeavesOptionsProviderToProfileFallback(t 
 	bridge := newFakeBridge()
 	st := &recordingSessionStore{
 		parents: map[string]*store.Session{
-			"sess-parent": {ID: "sess-parent", WorkspaceID: "ws-1"},
+			"sess-parent": {ID: "sess-parent"},
 		},
 	}
 
@@ -511,7 +511,7 @@ func TestBootRunner_BootError_UnbindsRouter(t *testing.T) {
 	bridge := newFakeBridge()
 	st := &recordingSessionStore{
 		parents: map[string]*store.Session{
-			"sess-p": {ID: "sess-p", WorkspaceID: "ws-1"},
+			"sess-p": {ID: "sess-p"},
 		},
 	}
 	bootErr := errors.New("boot failed deliberately")
@@ -554,7 +554,7 @@ func TestBootRunner_CLIProvider_EmptySummaryFallback(t *testing.T) {
 	bridge := newFakeBridge()
 	st := &recordingSessionStore{
 		parents: map[string]*store.Session{
-			"sess-p": {ID: "sess-p", WorkspaceID: "ws-1"},
+			"sess-p": {ID: "sess-p"},
 		},
 	}
 	booter := func(_ context.Context, _ *runtimeagent.Dependencies, opts runtimeagent.Options) (*runtimeagent.Session, error) {
@@ -596,7 +596,7 @@ func TestBootRunner_CLIProvider_EmptySummaryFallback(t *testing.T) {
 func TestBootRunner_PersistFailure_AbortsBeforeBoot(t *testing.T) {
 	st := &recordingSessionStore{
 		parents: map[string]*store.Session{
-			"sess-p": {ID: "sess-p", WorkspaceID: "ws-1"},
+			"sess-p": {ID: "sess-p"},
 		},
 	}
 	bootCalled := false
@@ -636,7 +636,7 @@ func TestBootRunner_ProviderOverride_RoutesToCLIPath(t *testing.T) {
 	bridge := newFakeBridge()
 	st := &recordingSessionStore{
 		parents: map[string]*store.Session{
-			"sess-p": {ID: "sess-p", WorkspaceID: "ws-1"},
+			"sess-p": {ID: "sess-p"},
 		},
 	}
 	bootCalled := 0

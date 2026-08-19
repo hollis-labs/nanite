@@ -94,10 +94,7 @@ func writeCompactionEventForTest(t *testing.T, s *store.Store, evt store.Compact
 func TestRenderCompactionDisclosure_freshEventInjects(t *testing.T) {
 	s := newTestStoreForChat(t)
 
-	if err := s.CreateWorkspace(&store.Workspace{ID: "ws", Name: "WS"}); err != nil {
-		t.Fatalf("CreateWorkspace: %v", err)
-	}
-	sess := &store.Session{WorkspaceID: "ws"}
+	sess := &store.Session{}
 	if err := s.CreateSession(sess); err != nil {
 		t.Fatalf("CreateSession: %v", err)
 	}
@@ -142,10 +139,6 @@ func TestRenderCompactionDisclosure_freshEventInjects(t *testing.T) {
 func TestRenderCompactionDisclosure_modeAllVariants(t *testing.T) {
 	s := newTestStoreForChat(t)
 
-	if err := s.CreateWorkspace(&store.Workspace{ID: "ws", Name: "WS"}); err != nil {
-		t.Fatalf("CreateWorkspace: %v", err)
-	}
-
 	cases := []struct {
 		mode      string
 		wantSlug  string
@@ -161,7 +154,7 @@ func TestRenderCompactionDisclosure_modeAllVariants(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run(tc.mode, func(t *testing.T) {
-			sess := &store.Session{WorkspaceID: "ws"}
+			sess := &store.Session{}
 			if err := s.CreateSession(sess); err != nil {
 				t.Fatalf("CreateSession: %v", err)
 			}
@@ -183,10 +176,7 @@ func TestRenderCompactionDisclosure_modeAllVariants(t *testing.T) {
 // no compaction events produces no disclosure.
 func TestRenderCompactionDisclosure_noEventReturnsEmpty(t *testing.T) {
 	s := newTestStoreForChat(t)
-	if err := s.CreateWorkspace(&store.Workspace{ID: "ws", Name: "WS"}); err != nil {
-		t.Fatalf("CreateWorkspace: %v", err)
-	}
-	sess := &store.Session{WorkspaceID: "ws"}
+	sess := &store.Session{}
 	if err := s.CreateSession(sess); err != nil {
 		t.Fatalf("CreateSession: %v", err)
 	}
@@ -203,10 +193,7 @@ func TestRenderCompactionDisclosure_noEventReturnsEmpty(t *testing.T) {
 // This exercises the freshness invariant: event_created_at > latest_assistant_created_at.
 func TestRenderCompactionDisclosure_staleEventReturnsEmpty(t *testing.T) {
 	s := newTestStoreForChat(t)
-	if err := s.CreateWorkspace(&store.Workspace{ID: "ws", Name: "WS"}); err != nil {
-		t.Fatalf("CreateWorkspace: %v", err)
-	}
-	sess := &store.Session{WorkspaceID: "ws"}
+	sess := &store.Session{}
 	if err := s.CreateSession(sess); err != nil {
 		t.Fatalf("CreateSession: %v", err)
 	}
@@ -246,10 +233,7 @@ func TestRenderCompactionDisclosure_staleEventReturnsEmpty(t *testing.T) {
 // messages do. This locks in the "model has acted on the disclosure" semantic.
 func TestRenderCompactionDisclosure_userMessageDoesNotStaleIt(t *testing.T) {
 	s := newTestStoreForChat(t)
-	if err := s.CreateWorkspace(&store.Workspace{ID: "ws", Name: "WS"}); err != nil {
-		t.Fatalf("CreateWorkspace: %v", err)
-	}
-	sess := &store.Session{WorkspaceID: "ws"}
+	sess := &store.Session{}
 	if err := s.CreateSession(sess); err != nil {
 		t.Fatalf("CreateSession: %v", err)
 	}
@@ -281,10 +265,7 @@ func TestRenderCompactionDisclosure_userMessageDoesNotStaleIt(t *testing.T) {
 // un-interpolated {{...}} markers.
 func TestRenderCompactionDisclosure_nullableFieldsRenderPlaceholders(t *testing.T) {
 	s := newTestStoreForChat(t)
-	if err := s.CreateWorkspace(&store.Workspace{ID: "ws", Name: "WS"}); err != nil {
-		t.Fatalf("CreateWorkspace: %v", err)
-	}
-	sess := &store.Session{WorkspaceID: "ws"}
+	sess := &store.Session{}
 	if err := s.CreateSession(sess); err != nil {
 		t.Fatalf("CreateSession: %v", err)
 	}
@@ -314,10 +295,7 @@ func TestRenderCompactionDisclosure_nullableFieldsRenderPlaceholders(t *testing.
 // when the legacy AssembleContext path was deleted (CW-20260814-0005).
 func TestAssembleAgentSlotContent_appendsDisclosure(t *testing.T) {
 	s := newTestStoreForChat(t)
-	if err := s.CreateWorkspace(&store.Workspace{ID: "ws", Name: "WS"}); err != nil {
-		t.Fatalf("CreateWorkspace: %v", err)
-	}
-	sess := &store.Session{WorkspaceID: "ws"}
+	sess := &store.Session{}
 	if err := s.CreateSession(sess); err != nil {
 		t.Fatalf("CreateSession: %v", err)
 	}
@@ -346,9 +324,6 @@ func TestAssembleAgentSlotContent_appendsDisclosure(t *testing.T) {
 // even with realistic-length sample values.
 func TestRenderedDisclosureUnderTokenBudget(t *testing.T) {
 	s := newTestStoreForChat(t)
-	if err := s.CreateWorkspace(&store.Workspace{ID: "ws", Name: "WS"}); err != nil {
-		t.Fatalf("CreateWorkspace: %v", err)
-	}
 
 	stash := "01HJ8N7XK5R8M3Y6PZQWA9V2BC"          // ULID-shaped, 26 chars
 	start := "turn-msg-01HJ8N7XK5R8M3Y6PZQWA9V2BC" // 33 chars
@@ -356,7 +331,7 @@ func TestRenderedDisclosureUnderTokenBudget(t *testing.T) {
 
 	for _, mode := range []string{"general", "code", "plan", "research"} {
 		t.Run(mode, func(t *testing.T) {
-			sess := &store.Session{WorkspaceID: "ws"}
+			sess := &store.Session{}
 			if err := s.CreateSession(sess); err != nil {
 				t.Fatalf("CreateSession: %v", err)
 			}

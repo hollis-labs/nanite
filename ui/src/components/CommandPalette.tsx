@@ -52,12 +52,11 @@ export function CommandPalette({ open, onOpenChange, onNewSession }: CommandPale
   const setCurrentPage = useLayoutStore((s) => s.setCurrentPage)
   const currentPage = useLayoutStore((s) => s.currentPage)
   const setActiveSession = useAppStore((s) => s.setActiveSession)
-  const activeWorkspaceId = useAppStore((s) => s.activeWorkspaceId)
   const navPush = useNavigationStore((s) => s.push)
 
   const { data: sessions = [] } = useQuery({
-    queryKey: ['sessions', activeWorkspaceId],
-    queryFn: () => api.listSessions(activeWorkspaceId ?? undefined),
+    queryKey: ['sessions'],
+    queryFn: () => api.listSessions(),
     enabled: open,
   })
 

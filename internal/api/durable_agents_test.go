@@ -108,9 +108,6 @@ func TestDurableAgentsAPI_LifecycleAndSessionAttachment(t *testing.T) {
 	if err := a.Services.Store.CreateAgent(profile); err != nil {
 		t.Fatalf("CreateAgent: %v", err)
 	}
-	if err := a.Services.Store.CreateWorkspace(&store.Workspace{ID: "workspace-a", Name: "Workspace A"}); err != nil {
-		t.Fatalf("CreateWorkspace: %v", err)
-	}
 	inst := &store.DurableAgentInstance{
 		Name:             "Attach Instance",
 		Slug:             "attach-instance-api",
@@ -180,9 +177,6 @@ func TestDurableAgentsAPI_StartAndResume(t *testing.T) {
 	if err := a.Services.Store.CreateAgent(profile); err != nil {
 		t.Fatalf("CreateAgent: %v", err)
 	}
-	if err := a.Services.Store.CreateWorkspace(&store.Workspace{ID: "workspace-a", Name: "Workspace A"}); err != nil {
-		t.Fatalf("CreateWorkspace: %v", err)
-	}
 	inst := &store.DurableAgentInstance{
 		Name:             "Launch Instance",
 		Slug:             "launch-instance-api",
@@ -210,7 +204,7 @@ func TestDurableAgentsAPI_StartAndResume(t *testing.T) {
 		t.Fatalf("plan = %+v", plan)
 	}
 
-	startBody, _ := json.Marshal(DurableAgentStartRequest{WorkspaceID: "workspace-a"})
+	startBody, _ := json.Marshal(DurableAgentStartRequest{})
 	req = httptest.NewRequest("POST", "/api/durable-agents/"+inst.ID+"/start", bytes.NewReader(startBody))
 	req.Header.Set("Content-Type", "application/json")
 	w = httptest.NewRecorder()

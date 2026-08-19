@@ -13,12 +13,7 @@ func TestMigration008_EnvelopeResponseRoleAllowed(t *testing.T) {
 
 	// Seed a session so the FK is satisfied.
 	if _, err := s.DB.Exec(
-		`INSERT INTO workspaces (id, name, created_at) VALUES ('w1', 'ws', CURRENT_TIMESTAMP)`,
-	); err != nil {
-		t.Fatalf("seed workspace: %v", err)
-	}
-	if _, err := s.DB.Exec(
-		`INSERT INTO sessions (id, workspace_id, title, short_code, created_at) VALUES ('s1', 'w1', 't', 'sc1', CURRENT_TIMESTAMP)`,
+		`INSERT INTO sessions (id, title, short_code, created_at) VALUES ('s1', 't', 'sc1', CURRENT_TIMESTAMP)`,
 	); err != nil {
 		t.Fatalf("seed session: %v", err)
 	}

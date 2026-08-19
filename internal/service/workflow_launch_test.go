@@ -3,7 +3,6 @@ package service
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"path/filepath"
 	"strings"
@@ -67,9 +66,6 @@ func newWorkflowLaunchTestFixture(t *testing.T) (*store.Store, *store.AgentProfi
 	if err := st.CreateAgent(profile); err != nil {
 		t.Fatalf("CreateAgent: %v", err)
 	}
-	if err := st.CreateWorkspace(&store.Workspace{ID: "ws-launch", Name: "Launch Workspace"}); err != nil {
-		t.Fatalf("CreateWorkspace: %v", err)
-	}
 	return st, profile
 }
 
@@ -86,7 +82,6 @@ func TestWorkflowLauncher_Launch_Success(t *testing.T) {
 
 	result, err := launcher.Launch(context.Background(), WorkflowLaunchRequest{
 		WorkflowName:   "noop-workflow",
-		WorkspaceID:    "ws-launch",
 		AgentProfileID: profile.ID,
 	})
 	if err != nil {
@@ -143,7 +138,6 @@ func TestWorkflowLauncher_Launch_UnknownWorkflow(t *testing.T) {
 
 	_, err := launcher.Launch(context.Background(), WorkflowLaunchRequest{
 		WorkflowName:   "does-not-exist",
-		WorkspaceID:    "ws-launch",
 		AgentProfileID: profile.ID,
 	})
 	if err == nil || !strings.Contains(err.Error(), "unknown workflow") {
@@ -151,23 +145,12 @@ func TestWorkflowLauncher_Launch_UnknownWorkflow(t *testing.T) {
 	}
 }
 
-func TestWorkflowLauncher_Launch_RequiresWorkspaceID(t *testing.T) {
-	st, profile := newWorkflowLaunchTestFixture(t)
-	registry := agentworkflow.NewRegistry(map[string]agentworkflow.WorkflowDefinition{
-		"noop-workflow": singleToolStepWorkflow("noop-workflow"),
-	})
-	engine := NewBuiltinWorkflowEngine(st)
-	exec := NewWorkflowStepExecutor(&fakeWorkflowToolService{}, &fakeProviderResolver{}, nil)
-	launcher := NewWorkflowLauncher(registry, builtinEngineSet(engine), exec, NewDurableAgentService(st))
-
-	_, err := launcher.Launch(context.Background(), WorkflowLaunchRequest{
-		WorkflowName:   "noop-workflow",
-		AgentProfileID: profile.ID,
-	})
-	if !errors.Is(err, ErrDurableAgentWorkspaceRequired) {
-		t.Fatalf("err = %v, want ErrDurableAgentWorkspaceRequired", err)
-	}
-}
+// TestWorkflowLauncher_Launch_RequiresWorkspaceID was removed by Phase 0
+// item 20 (retire workspaces,
+// TASKS/phase-0/20-retire-workspaces-and-instance-mechanism.md):
+// ErrDurableAgentWorkspaceRequired and the WorkspaceID field it gated are
+// both gone — a workflow launch no longer requires a workspace to create a
+// session.
 
 func TestWorkflowLauncher_Launch_RequiresAgentProfileID(t *testing.T) {
 	st, _ := newWorkflowLaunchTestFixture(t)
@@ -180,7 +163,6 @@ func TestWorkflowLauncher_Launch_RequiresAgentProfileID(t *testing.T) {
 
 	_, err := launcher.Launch(context.Background(), WorkflowLaunchRequest{
 		WorkflowName: "noop-workflow",
-		WorkspaceID:  "ws-launch",
 	})
 	if err == nil || !strings.Contains(err.Error(), "agent_profile_id") {
 		t.Fatalf("err = %v, want agent_profile_id required", err)
@@ -213,7 +195,6 @@ func TestWorkflowLauncher_Launch_RespectsTimeout(t *testing.T) {
 	start := time.Now()
 	result, err := launcher.Launch(context.Background(), WorkflowLaunchRequest{
 		WorkflowName:   "slow-workflow",
-		WorkspaceID:    "ws-launch",
 		AgentProfileID: profile.ID,
 		TimeoutSeconds: 1,
 	})
@@ -263,7 +244,6 @@ func TestWorkflowLauncher_Launch_StampsParentSessionIDInName(t *testing.T) {
 
 	result, err := launcher.Launch(context.Background(), WorkflowLaunchRequest{
 		WorkflowName:    "noop-workflow",
-		WorkspaceID:     "ws-launch",
 		AgentProfileID:  profile.ID,
 		ParentSessionID: "sess-abc",
 	})
@@ -296,7 +276,6 @@ func TestWorkflowLauncher_Launch_EngineInfraError_OmitsEmptyRunID(t *testing.T) 
 
 	_, err := launcher.Launch(context.Background(), WorkflowLaunchRequest{
 		WorkflowName:   "noop-workflow",
-		WorkspaceID:    "ws-launch",
 		AgentProfileID: profile.ID,
 	})
 	if err == nil || !strings.Contains(err.Error(), "simulated infra failure") {

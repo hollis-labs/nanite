@@ -9,11 +9,10 @@ import (
 
 // CreateSessionOpts holds the parameters for creating a new session.
 type CreateSessionOpts struct {
-	WorkspaceID string
-	ProjectID   string
-	Model       string
-	Provider    string
-	AgentID     string // optional; falls back to settings default, then "file-default"
+	ProjectID string
+	Model     string
+	Provider  string
+	AgentID   string // optional; falls back to settings default, then "file-default"
 }
 
 // ForkOpts holds the parameters for forking a session.
@@ -25,9 +24,8 @@ type ForkOpts struct {
 
 // SearchOpts holds optional filters for message search.
 type SearchOpts struct {
-	WorkspaceID string
-	ProjectID   string
-	Limit       int
+	ProjectID string
+	Limit     int
 }
 
 // SessionService encapsulates session lifecycle operations.
@@ -35,7 +33,7 @@ type SearchOpts struct {
 type SessionService interface {
 	Create(ctx context.Context, opts CreateSessionOpts) (*store.Session, error)
 	Get(ctx context.Context, id string) (*store.Session, error)
-	List(ctx context.Context, workspaceID string, includeArchived bool) ([]store.Session, error)
+	List(ctx context.Context, includeArchived bool) ([]store.Session, error)
 	Update(ctx context.Context, sess *store.Session) error
 	Archive(ctx context.Context, id string) error
 	Fork(ctx context.Context, sourceID string, opts ForkOpts) (*store.Session, error)
@@ -86,15 +84,10 @@ func NewSessionService(deps SessionServiceDeps) SessionService {
 }
 
 func (s *sessionServiceImpl) Create(ctx context.Context, opts CreateSessionOpts) (*store.Session, error) {
-	if opts.WorkspaceID == "" {
-		return nil, fmt.Errorf("workspace_id is required")
-	}
-
 	sess := &store.Session{
-		WorkspaceID: opts.WorkspaceID,
-		ProjectID:   opts.ProjectID,
-		Model:       opts.Model,
-		Provider:    opts.Provider,
+		ProjectID: opts.ProjectID,
+		Model:     opts.Model,
+		Provider:  opts.Provider,
 	}
 	if err := s.writer.CreateSession(sess); err != nil {
 		return nil, fmt.Errorf("create session: %w", err)
@@ -130,8 +123,8 @@ func (s *sessionServiceImpl) Get(_ context.Context, id string) (*store.Session, 
 	return sess, nil
 }
 
-func (s *sessionServiceImpl) List(_ context.Context, workspaceID string, includeArchived bool) ([]store.Session, error) {
-	return s.sessions.ListSessions(workspaceID, includeArchived)
+func (s *sessionServiceImpl) List(_ context.Context, includeArchived bool) ([]store.Session, error) {
+	return s.sessions.ListSessions(includeArchived)
 }
 
 func (s *sessionServiceImpl) Update(_ context.Context, sess *store.Session) error {
@@ -171,5 +164,5 @@ func (s *sessionServiceImpl) Search(_ context.Context, query string, opts Search
 	if limit <= 0 {
 		limit = 20
 	}
-	return s.sessions.SearchMessages(query, opts.WorkspaceID, opts.ProjectID, limit)
+	return s.sessions.SearchMessages(query, opts.ProjectID, limit)
 }

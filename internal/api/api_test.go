@@ -66,10 +66,10 @@ func TestHealthEndpoint(t *testing.T) {
 	}
 }
 
-func TestListWorkspacesEmpty(t *testing.T) {
+func TestListProjectsEmpty(t *testing.T) {
 	_, mux := newTestAPI(t)
 
-	req := httptest.NewRequest("GET", "/api/workspaces", nil)
+	req := httptest.NewRequest("GET", "/api/projects", nil)
 	w := httptest.NewRecorder()
 	mux.ServeHTTP(w, req)
 
@@ -83,23 +83,17 @@ func TestListWorkspacesEmpty(t *testing.T) {
 		t.Fatal("expected JSON array [], got null")
 	}
 
-	var workspaces []store.Workspace
-	if err := json.Unmarshal([]byte(body), &workspaces); err != nil {
+	var projects []store.Project
+	if err := json.Unmarshal([]byte(body), &projects); err != nil {
 		t.Fatalf("decode response: %v", err)
 	}
-	if len(workspaces) != 0 {
-		t.Errorf("expected 0 workspaces, got %d", len(workspaces))
+	if len(projects) != 0 {
+		t.Errorf("expected 0 projects, got %d", len(projects))
 	}
 }
 
 func TestCreateAndListSessions(t *testing.T) {
 	a, mux := newTestAPI(t)
-
-	// Create a workspace first.
-	ws := &store.Workspace{ID: "ws-api", Name: "API Test"}
-	if err := a.Services.Store.CreateWorkspace(ws); err != nil {
-		t.Fatalf("CreateWorkspace: %v", err)
-	}
 
 	// Seed an agent so EnsureSessionAgent doesn't fail on FK constraint.
 	if err := a.Services.Store.CreateAgent(&store.AgentProfile{
@@ -112,7 +106,7 @@ func TestCreateAndListSessions(t *testing.T) {
 	}
 
 	// POST /api/sessions
-	body, _ := json.Marshal(map[string]string{"workspace_id": "ws-api"})
+	body, _ := json.Marshal(map[string]string{})
 	req := httptest.NewRequest("POST", "/api/sessions", bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
@@ -130,8 +124,8 @@ func TestCreateAndListSessions(t *testing.T) {
 		t.Fatal("expected session ID to be set")
 	}
 
-	// GET /api/sessions?workspace_id=ws-api
-	req = httptest.NewRequest("GET", "/api/sessions?workspace_id=ws-api", nil)
+	// GET /api/sessions
+	req = httptest.NewRequest("GET", "/api/sessions", nil)
 	w = httptest.NewRecorder()
 	mux.ServeHTTP(w, req)
 

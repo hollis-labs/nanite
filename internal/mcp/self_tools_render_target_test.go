@@ -112,7 +112,7 @@ func TestCallShowCard_PluginPanel_TrustedPasses(t *testing.T) {
 	st := newSelfTools(t)
 	st.PanelLookup = func() []string { return []string{"plugin_panel_x"} }
 	st.TrustResolver = &fakeTrustResolver{tier: dispatch.TrustTrusted}
-	ctx := WithCallerProfile(context.Background(), "ws-1", "ap-1")
+	ctx := WithCallerProfile(context.Background(), "ap-1")
 
 	res, err := st.callShowCard(ctx, map[string]any{
 		"type":          "info-card",
@@ -138,7 +138,7 @@ func TestCallShowCard_PluginPanel_UntrustedFallsBack(t *testing.T) {
 	st := newSelfTools(t)
 	st.PanelLookup = func() []string { return []string{"plugin_panel_x"} }
 	st.TrustResolver = &fakeTrustResolver{tier: dispatch.TrustNormal}
-	ctx := WithCallerProfile(context.Background(), "ws-1", "ap-1")
+	ctx := WithCallerProfile(context.Background(), "ap-1")
 
 	res, err := st.callShowCard(ctx, map[string]any{
 		"type":          "info-card",
@@ -188,7 +188,7 @@ func TestCallShowCard_TrustResolverError_FallsBackUntrusted(t *testing.T) {
 	st := newSelfTools(t)
 	st.PanelLookup = func() []string { return []string{"plugin_panel_x"} }
 	st.TrustResolver = &fakeTrustResolver{err: errors.New("boom")}
-	ctx := WithCallerProfile(context.Background(), "ws-1", "ap-1")
+	ctx := WithCallerProfile(context.Background(), "ap-1")
 
 	res, err := st.callShowCard(ctx, map[string]any{
 		"type":          "info-card",

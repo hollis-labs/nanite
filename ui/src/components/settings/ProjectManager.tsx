@@ -14,17 +14,21 @@ import { NewProjectDialog } from "@/components/sidebar/NewProjectDialog";
 import { api } from "@/lib/api";
 import { useAppStore } from "@/stores/useAppStore";
 
-export function WorkspaceProjectManager() {
-  const activeWorkspaceId = useAppStore((s) => s.activeWorkspaceId);
+// Phase 0 item 20 (retire workspaces,
+// TASKS/phase-0/20-retire-workspaces-and-instance-mechanism.md): formerly
+// WorkspaceProjectManager. The in-app `workspaces` table this used to be
+// nested under is retired in full — this always only rendered a flat
+// projects grid, so it survives as a project-only manager per the task's
+// "reduce, don't necessarily delete" resolution.
+export function ProjectManager() {
   const activeProjectId = useAppStore((s) => s.activeProjectId);
   const setActiveProject = useAppStore((s) => s.setActiveProject);
 
   const [showCreateProject, setShowCreateProject] = useState(false);
 
   const { data: projects = [], isLoading: projectsLoading } = useQuery({
-    queryKey: ["projects", activeWorkspaceId],
-    queryFn: () => api.listProjects(activeWorkspaceId!),
-    enabled: !!activeWorkspaceId,
+    queryKey: ["projects"],
+    queryFn: () => api.listProjects(),
   });
 
   return (
@@ -34,7 +38,6 @@ export function WorkspaceProjectManager() {
           <h2 className="text-xl font-semibold text-fg">Projects</h2>
           <Button
             onClick={() => setShowCreateProject(true)}
-            disabled={!activeWorkspaceId}
             className="gap-2"
           >
             <Plus className="size-4" />

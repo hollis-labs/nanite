@@ -25,27 +25,13 @@ func seedMessage(t *testing.T, s *store.Store, sessionID, role, content string, 
 	return msg
 }
 
-// seedWorkspaceOnce creates the shared test workspace (idempotent).
-func seedWorkspaceOnce(t *testing.T, s *store.Store) {
-	t.Helper()
-	_, err := s.DB.Exec(
-		`INSERT OR IGNORE INTO workspaces (id, name, description, icon, sort_order, settings, created_at, updated_at)
-		 VALUES ('ws-test', 'Test Workspace', '', '', 0, '{}', datetime('now'), datetime('now'))`,
-	)
-	if err != nil {
-		t.Fatalf("seed workspace: %v", err)
-	}
-}
-
 // seedSession creates a minimal session for testing.
 func seedSession(t *testing.T, s *store.Store, id string) {
 	t.Helper()
-	seedWorkspaceOnce(t, s)
 	sess := &store.Session{
-		ID:          id,
-		WorkspaceID: "ws-test",
-		Title:       "Test Session " + id,
-		Status:      "active",
+		ID:     id,
+		Title:  "Test Session " + id,
+		Status: "active",
 	}
 	if err := s.CreateSession(sess); err != nil {
 		t.Fatalf("seed session: %v", err)

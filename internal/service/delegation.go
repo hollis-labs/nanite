@@ -62,19 +62,13 @@ func (s *chatServiceImpl) DelegateTask(ctx context.Context, req chat.DelegationR
 			return nil, fmt.Errorf("delegation: %w", err)
 		}
 	}
-	workspaceID := req.WorkspaceID
-	if workspaceID == "" {
-		workspaceID = parentSession.WorkspaceID
-	}
-
 	// Create worker session.
 	workerSession := &store.Session{
-		ID:          uuid.New().String(),
-		Title:       fmt.Sprintf("[Worker] %s", req.Title),
-		WorkspaceID: workspaceID,
-		ProjectID:   parentSession.ProjectID,
-		Model:       model,
-		Status:      "active",
+		ID:        uuid.New().String(),
+		Title:     fmt.Sprintf("[Worker] %s", req.Title),
+		ProjectID: parentSession.ProjectID,
+		Model:     model,
+		Status:    "active",
 		Metadata: fmt.Sprintf(`{"delegation":true,"parent_session_id":%q,"task_title":%q}`,
 			req.ParentSessionID, req.Title),
 	}

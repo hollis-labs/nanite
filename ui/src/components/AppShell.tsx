@@ -31,7 +31,6 @@ export function AppShell() {
   const [searchOpen, setSearchOpen] = useState(false)
   const [pluginModal, setPluginModal] = useState<{ component: string; props?: Record<string, unknown> } | null>(null)
   const focusRef = useRef<(() => void) | null>(null)
-  const activeWorkspaceId = useAppStore((s) => s.activeWorkspaceId)
   const queryClient = useQueryClient()
   const currentPage = useLayoutStore((s) => s.currentPage)
 
@@ -75,29 +74,9 @@ export function AppShell() {
   usePluginRegistry()
   usePluginEvents()
 
-  // Set default workspace on load
-  const setActiveWorkspace = useAppStore((s) => s.setActiveWorkspace)
-  const { data: workspaces = [] } = useQuery({
-    queryKey: ['workspaces'],
-    queryFn: api.listWorkspaces,
-  })
-  useEffect(() => {
-    if (workspaces.length === 0) return
-    // CW-20260815-0010: also self-heal a STALE persisted workspace id (e.g.
-    // localStorage still pointing at a workspace that was since removed by
-    // a consolidation), not just a missing one — otherwise the session
-    // list silently renders empty ("enabled: !!activeWorkspaceId" below
-    // still fetches, but for an id nothing matches) with no indication why.
-    const isValid = !!activeWorkspaceId && workspaces.some((w) => w.id === activeWorkspaceId)
-    if (!isValid) {
-      setActiveWorkspace(workspaces[0].id)
-    }
-  }, [activeWorkspaceId, workspaces, setActiveWorkspace])
-
   const { data: sessions = [] } = useQuery({
-    queryKey: ['sessions', activeWorkspaceId],
-    queryFn: () => api.listSessions(activeWorkspaceId ?? undefined),
-    enabled: !!activeWorkspaceId,
+    queryKey: ['sessions'],
+    queryFn: () => api.listSessions(),
   })
 
   // Get the active session's primary agent for inbox panel
@@ -121,9 +100,8 @@ export function AppShell() {
   }, [])
 
   const handleNewSessionFromPalette = useCallback(async () => {
-    if (!activeWorkspaceId) return
     try {
-      const newSession = await api.createSession({ workspace_id: activeWorkspaceId })
+      const newSession = await api.createSession({})
       void queryClient.invalidateQueries({ queryKey: ['sessions'] })
       useAppStore.getState().setActiveSession(newSession.id)
       useLayoutStore.getState().setCurrentPage('chat')
@@ -131,7 +109,7 @@ export function AppShell() {
     } catch {
       // handled by UI
     }
-  }, [activeWorkspaceId, queryClient])
+  }, [queryClient])
 
   useKeyboardShortcuts({
     focusComposer,

@@ -121,8 +121,6 @@ import type {
   WorkDiff,
   Worker,
   WorkflowRun,
-  Workspace,
-  WorkspaceRoleTrustOverride,
 } from "./types";
 
 const API_BASE = "/api";
@@ -357,9 +355,8 @@ export const api = {
   },
 
   // Sessions
-  listSessions: async (workspaceId?: string): Promise<Session[]> => {
-    const params = workspaceId ? `?workspace_id=${workspaceId}` : "";
-    const res = await fetch(`${API_BASE}/sessions${params}`);
+  listSessions: async (): Promise<Session[]> => {
+    const res = await fetch(`${API_BASE}/sessions`);
     if (!res.ok) throw new Error(`Failed to list sessions: ${res.status}`);
     return res.json();
   },
@@ -392,7 +389,6 @@ export const api = {
   },
 
   createSession: async (data: {
-    workspace_id: string;
     project_id?: string;
     provider?: string;
     model?: string;
@@ -645,43 +641,23 @@ export const api = {
     return res.json();
   },
 
-  // Workspaces
-  listWorkspaces: async (): Promise<Workspace[]> => {
-    const res = await fetch(`${API_BASE}/workspaces`);
-    if (!res.ok) throw new Error(`Failed to list workspaces: ${res.status}`);
-    return res.json();
-  },
-
-  createWorkspace: async (data: {
-    name: string;
-    description?: string;
-    icon?: string;
-  }): Promise<Workspace> => {
-    const res = await fetch(`${API_BASE}/workspaces`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(data),
-    });
-    if (!res.ok) {
-      const err = await res
-        .json()
-        .catch(() => ({ error: `Request failed: ${res.status}` }));
-      throw new Error(err.error || `Failed to create workspace: ${res.status}`);
-    }
-    return res.json();
-  },
-
-  listProjects: async (workspaceId: string): Promise<Project[]> => {
-    const res = await fetch(`${API_BASE}/workspaces/${workspaceId}/projects`);
+  // Projects. Phase 0 item 20 (retire workspaces,
+  // TASKS/phase-0/20-retire-workspaces-and-instance-mechanism.md): the
+  // in-app workspaces concept (listWorkspaces/createWorkspace/
+  // updateWorkspace/deleteWorkspace and the /api/workspaces/{wid}/projects
+  // nesting) is retired in full. Projects are flat now.
+  listProjects: async (): Promise<Project[]> => {
+    const res = await fetch(`${API_BASE}/projects`);
     if (!res.ok) throw new Error(`Failed to list projects: ${res.status}`);
     return res.json();
   },
 
-  createProject: async (
-    workspaceId: string,
-    data: { name: string; description?: string; repo_path?: string },
-  ): Promise<Project> => {
-    const res = await fetch(`${API_BASE}/workspaces/${workspaceId}/projects`, {
+  createProject: async (data: {
+    name: string;
+    description?: string;
+    repo_path?: string;
+  }): Promise<Project> => {
+    const res = await fetch(`${API_BASE}/projects`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(data),
@@ -3065,13 +3041,11 @@ export const api = {
   // Search
   searchMessages: async (
     query: string,
-    workspaceId: string,
     projectId?: string,
     limit = 20,
   ): Promise<SearchResult[]> => {
     const params = new URLSearchParams({
       q: query,
-      workspace_id: workspaceId,
       limit: String(limit),
     });
     if (projectId) params.set("project_id", projectId);
@@ -3115,45 +3089,18 @@ export const api = {
       throw new Error(`Failed to remove agent project: ${res.status}`);
   },
 
-  // Workspace & Project Management
-  updateWorkspace: async (
-    id: string,
-    data: Partial<Workspace>,
-  ): Promise<Workspace> => {
-    const res = await fetch(`${API_BASE}/workspaces/${id}`, {
+  // Project Management. Workspace CRUD (updateWorkspace/deleteWorkspace)
+  // is retired along with the workspaces table — see the Projects block
+  // above.
+  updateProject: async (
+    projectId: string,
+    data: Partial<Project>,
+  ): Promise<Project> => {
+    const res = await fetch(`${API_BASE}/projects/${projectId}`, {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(data),
     });
-    if (!res.ok) {
-      const err = await res
-        .json()
-        .catch(() => ({ error: `Request failed: ${res.status}` }));
-      throw new Error(err.error || `Failed to update workspace: ${res.status}`);
-    }
-    return res.json();
-  },
-
-  deleteWorkspace: async (id: string): Promise<void> => {
-    const res = await fetch(`${API_BASE}/workspaces/${id}`, {
-      method: "DELETE",
-    });
-    if (!res.ok) throw new Error(`Failed to delete workspace: ${res.status}`);
-  },
-
-  updateProject: async (
-    workspaceId: string,
-    projectId: string,
-    data: Partial<Project>,
-  ): Promise<Project> => {
-    const res = await fetch(
-      `${API_BASE}/workspaces/${workspaceId}/projects/${projectId}`,
-      {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(data),
-      },
-    );
     if (!res.ok) {
       const err = await res
         .json()
@@ -3163,16 +3110,10 @@ export const api = {
     return res.json();
   },
 
-  deleteProject: async (
-    workspaceId: string,
-    projectId: string,
-  ): Promise<void> => {
-    const res = await fetch(
-      `${API_BASE}/workspaces/${workspaceId}/projects/${projectId}`,
-      {
-        method: "DELETE",
-      },
-    );
+  deleteProject: async (projectId: string): Promise<void> => {
+    const res = await fetch(`${API_BASE}/projects/${projectId}`, {
+      method: "DELETE",
+    });
     if (!res.ok) throw new Error(`Failed to delete project: ${res.status}`);
   },
 
@@ -3446,55 +3387,11 @@ export const api = {
     return res.json();
   },
 
-  // Role trust — H1 CW-20260421-0014
-  // GET /api/workspaces/{workspace_id}/roles
-  listWorkspaceRoleTrust: async (
-    workspaceID: string,
-  ): Promise<{
-    workspace_id: string;
-    trust_overrides: WorkspaceRoleTrustOverride[];
-  }> => {
-    const res = await fetch(
-      `${API_BASE}/workspaces/${encodeURIComponent(workspaceID)}/roles`,
-    );
-    if (!res.ok) throw new Error(`Failed to list role trust: ${res.status}`);
-    return res.json();
-  },
-
-  // POST /api/workspaces/{workspace_id}/roles/{agent_profile_id}/trust
-  setWorkspaceRoleTrust: async (
-    workspaceID: string,
-    agentProfileID: string,
-    tier: "untrusted" | "normal" | "trusted",
-  ): Promise<{
-    workspace_id: string;
-    agent_profile_id: string;
-    trust_tier: string;
-  }> => {
-    const res = await fetch(
-      `${API_BASE}/workspaces/${encodeURIComponent(workspaceID)}/roles/${encodeURIComponent(agentProfileID)}/trust`,
-      {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ tier, promoted_by: "ui" }),
-      },
-    );
-    if (!res.ok) throw new Error(`Failed to set role trust: ${res.status}`);
-    return res.json();
-  },
-
-  // DELETE /api/workspaces/{workspace_id}/roles/{agent_profile_id}/trust
-  deleteWorkspaceRoleTrust: async (
-    workspaceID: string,
-    agentProfileID: string,
-  ): Promise<{ status: string }> => {
-    const res = await fetch(
-      `${API_BASE}/workspaces/${encodeURIComponent(workspaceID)}/roles/${encodeURIComponent(agentProfileID)}/trust`,
-      { method: "DELETE" },
-    );
-    if (!res.ok) throw new Error(`Failed to delete role trust: ${res.status}`);
-    return res.json();
-  },
+  // Role trust (H1, CW-20260421-0014) REST surface retired in full
+  // alongside workspace_role_trust — Phase 0 item 20 (retire workspaces,
+  // operator-confirmed 2026-08-18). Trust resolution reverts to
+  // unconditional base-tier resolution; there is nothing left to manage
+  // from the client.
 
   // Inspector (I1, CW-20260426-0004)
   getInspectorTurns: async (

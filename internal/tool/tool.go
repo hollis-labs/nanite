@@ -62,10 +62,9 @@ type Tool interface {
 
 // ExecutionContext carries per-invocation context passed to Tool.Call.
 type ExecutionContext struct {
-	SessionID   string
-	AgentID     string
-	WorkspaceID string
-	WorkingDir  string
+	SessionID  string
+	AgentID    string
+	WorkingDir string
 }
 
 // ToolResult is the outcome of a tool call.

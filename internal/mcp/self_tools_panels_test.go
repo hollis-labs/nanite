@@ -32,7 +32,7 @@ type fakeTrustResolver struct {
 	err  error
 }
 
-func (f *fakeTrustResolver) ResolveTrust(_ context.Context, _, _ string) (dispatch.TrustTier, error) {
+func (f *fakeTrustResolver) ResolveTrust(_ context.Context, _ string) (dispatch.TrustTier, error) {
 	if f.err != nil {
 		return "", f.err
 	}
@@ -155,7 +155,7 @@ func TestPanelOpen_PluginPanel_RequiresTrustedTier(t *testing.T) {
 			st := newPanelTransport(sink, lookup, tc.resolver)
 			ctx := WithSessionID(context.Background(), "sess-1")
 			if tc.ctxProfile {
-				ctx = WithCallerProfile(ctx, "ws-1", "ap-1")
+				ctx = WithCallerProfile(ctx, "ap-1")
 			}
 			res, err := st.callPanelOpen(ctx, map[string]any{"panel_id": "plugin-doc-pad"})
 			if err != nil {

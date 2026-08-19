@@ -16,19 +16,6 @@ func (a *API) handleSearchMessages(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// CW-20260815-0010: resolve to the sole real workspace when the param
-	// is missing or names a workspace that no longer exists, instead of
-	// erroring — see Store.ResolveWorkspaceID.
-	workspaceID, err := a.Services.Store.ResolveWorkspaceID(q.Get("workspace_id"))
-	if err != nil {
-		a.errorResp(w, http.StatusInternalServerError, err.Error())
-		return
-	}
-	if workspaceID == "" {
-		a.errorResp(w, http.StatusBadRequest, "workspace_id query parameter is required (multiple workspaces exist)")
-		return
-	}
-
 	projectID := q.Get("project_id") // optional
 
 	limit := 20
@@ -38,7 +25,7 @@ func (a *API) handleSearchMessages(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	results, err := a.Services.Store.SearchMessages(query, workspaceID, projectID, limit)
+	results, err := a.Services.Store.SearchMessages(query, projectID, limit)
 	if err != nil {
 		a.errorResp(w, http.StatusInternalServerError, err.Error())
 		return

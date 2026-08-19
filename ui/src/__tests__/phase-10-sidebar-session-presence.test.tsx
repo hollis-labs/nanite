@@ -23,7 +23,6 @@ function session(overrides: Partial<Session> = {}): Session {
     short_code: "c1",
     title: "Chat",
     custom_name: "",
-    workspace_id: "workspace-1",
     project_id: "project-1",
     context_type: null,
     context_id: null,

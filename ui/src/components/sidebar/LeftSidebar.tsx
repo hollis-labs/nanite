@@ -96,7 +96,6 @@ export function LeftSidebar() {
   const showSearch = useLayoutStore((s) => s.leftRailSearchVisible);
   const setCurrentPage = useLayoutStore((s) => s.setCurrentPage);
   const activeSessionId = useAppStore((s) => s.activeSessionId);
-  const activeWorkspaceId = useAppStore((s) => s.activeWorkspaceId);
   const activeProjectId = useAppStore((s) => s.activeProjectId);
   const setActiveSession = useAppStore((s) => s.setActiveSession);
   const navPush = useNavigationStore((s) => s.push);
@@ -117,11 +116,11 @@ export function LeftSidebar() {
       } as Partial<Session>),
     onMutate: async ({ id, archived }) => {
       await queryClient.cancelQueries({
-        queryKey: ["sessions", activeWorkspaceId],
+        queryKey: ["sessions"],
       });
-      const prev = queryClient.getQueryData(["sessions", activeWorkspaceId]);
+      const prev = queryClient.getQueryData(["sessions"]);
       queryClient.setQueryData(
-        ["sessions", activeWorkspaceId],
+        ["sessions"],
         (old: Session[] | undefined) =>
           old?.map((s) =>
             s.id === id
@@ -141,7 +140,7 @@ export function LeftSidebar() {
     },
     onError: (_err, _vars, context) => {
       if (context?.prev)
-        queryClient.setQueryData(["sessions", activeWorkspaceId], context.prev);
+        queryClient.setQueryData(["sessions"], context.prev);
     },
     onSettled: () => {
       void queryClient.invalidateQueries({ queryKey: ["sessions"] });
@@ -152,11 +151,11 @@ export function LeftSidebar() {
     mutationFn: (id: string) => api.deleteSession(id),
     onMutate: async (id) => {
       await queryClient.cancelQueries({
-        queryKey: ["sessions", activeWorkspaceId],
+        queryKey: ["sessions"],
       });
-      const prev = queryClient.getQueryData(["sessions", activeWorkspaceId]);
+      const prev = queryClient.getQueryData(["sessions"]);
       queryClient.setQueryData(
-        ["sessions", activeWorkspaceId],
+        ["sessions"],
         (old: Session[] | undefined) => old?.filter((s) => s.id !== id),
       );
       return { prev };
@@ -168,7 +167,7 @@ export function LeftSidebar() {
     },
     onError: (_err, _id, context) => {
       if (context?.prev)
-        queryClient.setQueryData(["sessions", activeWorkspaceId], context.prev);
+        queryClient.setQueryData(["sessions"], context.prev);
     },
     onSettled: () => {
       void queryClient.invalidateQueries({ queryKey: ["sessions"] });
@@ -178,9 +177,8 @@ export function LeftSidebar() {
   const { data: userSettings } = useSettings();
 
   const { data: sessions = [], isLoading } = useQuery({
-    queryKey: ["sessions", activeWorkspaceId],
-    queryFn: () => api.listSessions(activeWorkspaceId ?? undefined),
-    enabled: !!activeWorkspaceId,
+    queryKey: ["sessions"],
+    queryFn: () => api.listSessions(),
   });
 
   const renameMutation = useMutation({
@@ -188,11 +186,11 @@ export function LeftSidebar() {
       api.updateSession(id, { custom_name: name } as Partial<Session>),
     onMutate: async ({ id, name }) => {
       await queryClient.cancelQueries({
-        queryKey: ["sessions", activeWorkspaceId],
+        queryKey: ["sessions"],
       });
-      const prev = queryClient.getQueryData(["sessions", activeWorkspaceId]);
+      const prev = queryClient.getQueryData(["sessions"]);
       queryClient.setQueryData(
-        ["sessions", activeWorkspaceId],
+        ["sessions"],
         (old: Session[] | undefined) =>
           old?.map((s) => (s.id === id ? { ...s, custom_name: name } : s)),
       );
@@ -200,7 +198,7 @@ export function LeftSidebar() {
     },
     onError: (_err, _vars, context) => {
       if (context?.prev)
-        queryClient.setQueryData(["sessions", activeWorkspaceId], context.prev);
+        queryClient.setQueryData(["sessions"], context.prev);
     },
     onSettled: () => {
       void queryClient.invalidateQueries({ queryKey: ["sessions"] });
@@ -212,11 +210,11 @@ export function LeftSidebar() {
       api.pinSession(id, pinned),
     onMutate: async ({ id, pinned }) => {
       await queryClient.cancelQueries({
-        queryKey: ["sessions", activeWorkspaceId],
+        queryKey: ["sessions"],
       });
-      const prev = queryClient.getQueryData(["sessions", activeWorkspaceId]);
+      const prev = queryClient.getQueryData(["sessions"]);
       queryClient.setQueryData(
-        ["sessions", activeWorkspaceId],
+        ["sessions"],
         (old: Session[] | undefined) =>
           old?.map((s) => (s.id === id ? { ...s, is_pinned: pinned } : s)),
       );
@@ -224,7 +222,7 @@ export function LeftSidebar() {
     },
     onError: (_err, _vars, context) => {
       if (context?.prev)
-        queryClient.setQueryData(["sessions", activeWorkspaceId], context.prev);
+        queryClient.setQueryData(["sessions"], context.prev);
     },
     onSettled: () => {
       void queryClient.invalidateQueries({ queryKey: ["sessions"] });
@@ -324,22 +322,13 @@ export function LeftSidebar() {
     <>
       <LeftRail
         open={open}
-        workspaceHeader={
-          activeWorkspaceId ? (
-            <ScopeSelector workspaceId={activeWorkspaceId} />
-          ) : (
-            <div className="flex h-full items-center px-1 text-[13px] font-semibold text-fg">
-              Chats
-            </div>
-          )
-        }
+        workspaceHeader={<ScopeSelector />}
         onNewChat={() => setStartOpen(true)}
         onSearch={openSearch}
         newChatLabel="Start"
         showWorkspace={showWorkspace}
         showNewChat={showNewChat}
         showSearch={showSearch}
-        newChatDisabled={!activeWorkspaceId}
         emptyState={
           isLoading ? (
             <div className="px-3 py-3">
@@ -512,7 +501,6 @@ export function LeftSidebar() {
       <StartSurfaceDialog
         open={startOpen}
         onOpenChange={setStartOpen}
-        workspaceId={activeWorkspaceId}
         projectId={activeProjectId}
         defaultProvider={userSettings?.default_provider}
         defaultModel={userSettings?.default_model}

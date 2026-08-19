@@ -37,41 +37,39 @@ func SessionIDFromContext(ctx context.Context) string {
 	return v
 }
 
-// callerProfileCtxKey carries the (workspace_id, agent_profile_id) pair of the
-// session whose tool execution is in flight. Used by:
+// callerProfileCtxKey carries the agent_profile_id of the session whose tool
+// execution is in flight. Used by:
 //
 //   - callExecuteTask → dispatch.SpawnRequest fields (H1 subagent trust gate)
 //
 // Stamped by the service layer in executeToolBatch alongside WithSessionID so
 // both ctx-stamping conventions stay co-located at the same call site.
 // H1 CW-20260421-0014.
+//
+// Phase 0 item 20 (retire workspaces,
+// TASKS/phase-0/20-retire-workspaces-and-instance-mechanism.md): this used
+// to carry a (workspace_id, agent_profile_id) pair. workspace_id is gone —
+// it only ever fed the now-retired workspace_role_trust override lookup and
+// the cross-workspace chat-search gate (both removed).
 type callerProfileCtxKey struct{}
 
-// callerProfile is the value type for callerProfileCtxKey.
-type callerProfile struct {
-	WorkspaceID    string
-	AgentProfileID string
-}
-
-// WithCallerProfile returns a new context carrying the workspace and agent
-// profile IDs of the calling session. Both values must be non-empty; partial
-// identity returns ctx unchanged (same all-or-nothing contract as
-// messaging.WithCaller).
-func WithCallerProfile(ctx context.Context, workspaceID, agentProfileID string) context.Context {
-	if workspaceID == "" || agentProfileID == "" {
+// WithCallerProfile returns a new context carrying the agent profile ID of
+// the calling session. An empty value returns ctx unchanged.
+func WithCallerProfile(ctx context.Context, agentProfileID string) context.Context {
+	if agentProfileID == "" {
 		return ctx
 	}
-	return context.WithValue(ctx, callerProfileCtxKey{}, callerProfile{workspaceID, agentProfileID})
+	return context.WithValue(ctx, callerProfileCtxKey{}, agentProfileID)
 }
 
-// CallerProfileFromContext extracts the (workspaceID, agentProfileID) stamped
-// by WithCallerProfile. Returns ("", "") when none was set.
-func CallerProfileFromContext(ctx context.Context) (workspaceID, agentProfileID string) {
+// CallerProfileFromContext extracts the agentProfileID stamped by
+// WithCallerProfile. Returns "" when none was set.
+func CallerProfileFromContext(ctx context.Context) (agentProfileID string) {
 	if ctx == nil {
-		return "", ""
+		return ""
 	}
-	v, _ := ctx.Value(callerProfileCtxKey{}).(callerProfile)
-	return v.WorkspaceID, v.AgentProfileID
+	v, _ := ctx.Value(callerProfileCtxKey{}).(string)
+	return v
 }
 
 // turnToolUseIDsCtxKey carries the set of tool_use_id strings observed during
@@ -152,4 +150,3 @@ func TurnToolNamesFromContext(ctx context.Context) []string {
 	v, _ := ctx.Value(turnToolNamesCtxKey{}).([]string)
 	return v
 }
-

@@ -234,12 +234,6 @@ func (s *chatServiceImpl) generateResponse(ctx context.Context, sessionID, assis
 	// hard-ceiling (see resolveIterationLimits in chat_loop_state.go).
 	constraints := chat.ParseAgentConstraints(agent.Constraints)
 
-	// --- Load workspace ---
-	var workspace *store.Workspace
-	if session.WorkspaceID != "" {
-		workspace, _ = s.store.GetWorkspace(session.WorkspaceID)
-	}
-
 	// --- Resolve model ---
 	// CW-20260526-0003: model resolution walks session → agent →
 	// store.ResolveProviderAndModel (user_settings.default_model →
@@ -354,7 +348,11 @@ func (s *chatServiceImpl) generateResponse(ctx context.Context, sessionID, assis
 	// from the actual model window (e.g. 1M for Gemini) rather than the
 	// hardcoded 200K default. contextWindowSize returns 0 on miss, which causes
 	// the broker to fall back to DefaultContextWindowTokens (CW-20260426-0032).
-	selection, err := s.tools.SelectForAgent(ctx, sessionID, agentID, userContent, session.WorkspaceID, s.contextWindowSize(providerName, model))
+	// Phase 0 item 20 (retire workspaces): session.WorkspaceID no longer
+	// exists — SelectForAgent's workspaceID param (toolclient's
+	// Config.WorkspaceOverrides rule-merge hook) has no populated loader in
+	// production today, so this is a no-op change, not a feature removal.
+	selection, err := s.tools.SelectForAgent(ctx, sessionID, agentID, userContent, "", s.contextWindowSize(providerName, model))
 	if err != nil {
 		slog.Warn("chat-service: tool selection failed", "err", err)
 		selection = &ToolSelection{}
@@ -468,7 +466,7 @@ func (s *chatServiceImpl) generateResponse(ctx context.Context, sessionID, assis
 	// argument.
 
 	// --- Assemble context (slot-based) ---
-	slotResult, err := s.assembleTurnContext(ctx, session, agent, workspace, tools, extraSystemPrefix, providerName, model, ch, toolsLazyHint)
+	slotResult, err := s.assembleTurnContext(ctx, session, agent, tools, extraSystemPrefix, providerName, model, ch, toolsLazyHint)
 	if err != nil {
 		return
 	}
@@ -1599,7 +1597,7 @@ func (s *chatServiceImpl) generateResponse(ctx context.Context, sessionID, assis
 		plans := s.preCheckTools(ctx, sessionID, agentID, regularTools, ls, ch, selection, tools)
 
 		// Execute tools: concurrent-safe in parallel, serial one at a time.
-		execResults := s.executeToolBatch(ctx, plans, ls, agentID, ch, sessionID, session.WorkspaceID)
+		execResults := s.executeToolBatch(ctx, plans, ls, agentID, ch, sessionID)
 
 		// Post-process: stuck loop detection, truncation, envelopes, artifacts.
 		// model is threaded through so truncate.OutputForModel can size the
@@ -2381,12 +2379,13 @@ func toolSlotChangeKindFor(s HydrationState) string {
 // err without emitting again.
 //
 // Phase 0 item 21 ("Cut Modes, in full") removed the `mode *store.AgentMode`
-// and `sessionMode *store.Mode` parameters this used to take.
+// and `sessionMode *store.Mode` parameters this used to take. Phase 0 item
+// 20 (retire workspaces) removed the `workspace *store.Workspace` parameter
+// — the in-app `workspaces` table it sourced is retired in full.
 func (s *chatServiceImpl) assembleTurnContext(
 	ctx context.Context,
 	session *store.Session,
 	agent *store.AgentProfile,
-	workspace *store.Workspace,
 	tools []llmtypes.ToolDefinition,
 	extraSystemPrefix string,
 	providerName, model string,
@@ -2394,7 +2393,7 @@ func (s *chatServiceImpl) assembleTurnContext(
 	toolsLazyHint string,
 ) (*SlotAssemblyResult, error) {
 	windowSize := s.contextWindowSize(providerName, model)
-	result, err := s.context.AssembleSlots(ctx, session, agent, workspace, tools, extraSystemPrefix, windowSize, toolsLazyHint)
+	result, err := s.context.AssembleSlots(ctx, session, agent, tools, extraSystemPrefix, windowSize, toolsLazyHint)
 	if err != nil {
 		ch <- chat.ErrorEvent(chat.ErrorCodeInternal, "Failed to assemble context",
 			map[string]interface{}{"raw": err.Error()})

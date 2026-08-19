@@ -112,7 +112,6 @@ type DurableAgentRecipeRequest struct {
 	Model       string                  `json:"model"`
 	RuntimeKind string                  `json:"runtime_kind"`
 	WorkRoot    string                  `json:"work_root"`
-	WorkspaceID string                  `json:"workspace_id"`
 	ProjectID   string                  `json:"project_id"`
 	WakePayload DurableAgentWakePayload `json:"wake_payload"`
 	Metadata    map[string]string       `json:"metadata"`
@@ -207,7 +206,6 @@ func (s *durableAgentRecipeService) Apply(ctx context.Context, id string, req Du
 	result := &DurableAgentRecipeApplyResult{Plan: plan, Instance: &inst}
 	if req.Start {
 		launch, err := s.agents.Start(ctx, inst.ID, DurableAgentStartRequest{
-			WorkspaceID: req.WorkspaceID,
 			ProjectID:   req.ProjectID,
 			WakePayload: plan.WakePayload,
 		})
@@ -229,9 +227,6 @@ func compileDurableAgentRecipe(recipe DurableAgentRecipe, req DurableAgentRecipe
 	missing := validateDurableAgentRecipe(recipe)
 	if req.ProfileID == "" && recipe.ProfileID == "" {
 		missing = append(missing, "profile_id")
-	}
-	if req.Start && req.WorkspaceID == "" {
-		missing = append(missing, "workspace_id")
 	}
 	missing = append(missing, missingRecipeInputs(recipe, req)...)
 
@@ -1200,8 +1195,6 @@ func recipeRequestValue(req DurableAgentRecipeRequest, key string) string {
 		return req.RuntimeKind
 	case "durable_agent.work_root":
 		return req.WorkRoot
-	case "workspace_id":
-		return req.WorkspaceID
 	case "project_id":
 		return req.ProjectID
 	case "wake_payload.reason":

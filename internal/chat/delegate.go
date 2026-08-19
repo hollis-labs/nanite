@@ -9,10 +9,9 @@ type DelegationRequest struct {
 	ParentSessionID string `json:"parent_session_id"`
 	Title           string `json:"title"`
 	Description     string `json:"description"`
-	AgentID         string `json:"agent_id,omitempty"`   // worker agent (defaults to parent's agent)
-	Mode            string `json:"mode,omitempty"`       // worker mode (defaults to "default")
-	Model           string `json:"model,omitempty"`      // LLM model (defaults to parent's model)
-	WorkspaceID     string `json:"workspace_id,omitempty"`
+	AgentID         string `json:"agent_id,omitempty"` // worker agent (defaults to parent's agent)
+	Mode            string `json:"mode,omitempty"`     // worker mode (defaults to "default")
+	Model           string `json:"model,omitempty"`    // LLM model (defaults to parent's model)
 }
 
 // DelegationResult holds the outcome of a delegated task.

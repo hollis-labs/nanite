@@ -38,7 +38,7 @@ func whoamiToolDefinition() Tool {
 // the same H1 trust-gate mechanism the dispatch subsystem already relies
 // on, not a separate identity lookup.
 func (st *SelfToolsTransport) executeWhoami(ctx context.Context, args map[string]any) (*ToolResult, error) {
-	_, agentID := CallerProfileFromContext(ctx)
+	agentID := CallerProfileFromContext(ctx)
 	if agentID == "" {
 		return errorResult("whoami: no agent profile in context (not called from a durable-agent session)"), nil
 	}

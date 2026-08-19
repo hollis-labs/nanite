@@ -4,23 +4,18 @@ import (
 	"testing"
 )
 
-// makeProjectAndSession is a small helper that creates the workspace + project +
-// session rows the post-D1 ListPinnedContent / ListUnfiredReminders queries need
-// in order to surface project-scoped rows. Returns sessionID and projectID.
+// makeProjectAndSession is a small helper that creates the project + session
+// rows the post-D1 ListPinnedContent / ListUnfiredReminders queries need in
+// order to surface project-scoped rows. Returns sessionID and projectID.
 func makeProjectAndSession(t *testing.T, s *Store, sessionID, projectID string) {
 	t.Helper()
-	wsID := "ws-test-" + sessionID
-	if err := s.CreateWorkspace(&Workspace{ID: wsID, Name: "test-ws"}); err != nil {
-		t.Fatalf("CreateWorkspace: %v", err)
-	}
-	if err := s.CreateProject(&Project{ID: projectID, WorkspaceID: wsID, Name: "test-project", RepoPath: "/tmp/" + projectID}); err != nil {
+	if err := s.CreateProject(&Project{ID: projectID, Name: "test-project", RepoPath: "/tmp/" + projectID}); err != nil {
 		t.Fatalf("CreateProject: %v", err)
 	}
 	if err := s.CreateSession(&Session{
-		ID:          sessionID,
-		ShortCode:   sessionID,
-		WorkspaceID: wsID,
-		ProjectID:   projectID,
+		ID:        sessionID,
+		ShortCode: sessionID,
+		ProjectID: projectID,
 	}); err != nil {
 		t.Fatalf("CreateSession: %v", err)
 	}
@@ -136,7 +131,7 @@ func TestPinnedContent_ProjectScope_CrossSession(t *testing.T) {
 	makeProjectAndSession(t, s, sessA, projectID)
 	// Add a second session in the same project (we already have the project + workspace).
 	if err := s.CreateSession(&Session{
-		ID: sessB, ShortCode: sessB, WorkspaceID: "ws-test-" + sessA, ProjectID: projectID,
+		ID: sessB, ShortCode: sessB, ProjectID: projectID,
 	}); err != nil {
 		t.Fatalf("CreateSession B: %v", err)
 	}
@@ -260,7 +255,7 @@ func TestReminders_ProjectScope_CrossSession(t *testing.T) {
 	sessB := "sess-rem-B"
 	makeProjectAndSession(t, s, sessA, projectID)
 	if err := s.CreateSession(&Session{
-		ID: sessB, ShortCode: sessB, WorkspaceID: "ws-test-" + sessA, ProjectID: projectID,
+		ID: sessB, ShortCode: sessB, ProjectID: projectID,
 	}); err != nil {
 		t.Fatalf("CreateSession B: %v", err)
 	}
@@ -323,7 +318,7 @@ func TestReminders_TurnScope_DoesNotLeak(t *testing.T) {
 	sessB := "sess-turn-B"
 	makeProjectAndSession(t, s, sessA, projectID)
 	if err := s.CreateSession(&Session{
-		ID: sessB, ShortCode: sessB, WorkspaceID: "ws-test-" + sessA, ProjectID: projectID,
+		ID: sessB, ShortCode: sessB, ProjectID: projectID,
 	}); err != nil {
 		t.Fatalf("CreateSession B: %v", err)
 	}

@@ -5,24 +5,10 @@ import (
 	"time"
 )
 
-func seedWorkspace(t *testing.T, s *Store, id string) {
-	t.Helper()
-	now := time.Now().UTC().Format(time.RFC3339)
-	_, err := s.DB.Exec(
-		`INSERT OR IGNORE INTO workspaces (id, name, description, icon, sort_order, settings, created_at, updated_at)
-		 VALUES (?, ?, '', '', 0, '{}', ?, ?)`,
-		id, "Test Workspace", now, now,
-	)
-	if err != nil {
-		t.Fatalf("seedWorkspace: %v", err)
-	}
-}
-
 func TestCreateSession(t *testing.T) {
 	s := newTestStore(t)
-	seedWorkspace(t, s, "ws1")
 
-	sess := &Session{WorkspaceID: "ws1"}
+	sess := &Session{}
 	if err := s.CreateSession(sess); err != nil {
 		t.Fatalf("CreateSession: %v", err)
 	}
@@ -43,9 +29,8 @@ func TestCreateSession(t *testing.T) {
 
 func TestGetSession(t *testing.T) {
 	s := newTestStore(t)
-	seedWorkspace(t, s, "ws1")
 
-	sess := &Session{WorkspaceID: "ws1", Title: "Test Chat"}
+	sess := &Session{Title: "Test Chat"}
 	if err := s.CreateSession(sess); err != nil {
 		t.Fatalf("CreateSession: %v", err)
 	}
@@ -64,9 +49,6 @@ func TestGetSession(t *testing.T) {
 	if got.Title != "Test Chat" {
 		t.Errorf("Title mismatch: got %q, want %q", got.Title, "Test Chat")
 	}
-	if got.WorkspaceID != "ws1" {
-		t.Errorf("WorkspaceID mismatch: got %q, want %q", got.WorkspaceID, "ws1")
-	}
 	if got.Status != "active" {
 		t.Errorf("Status mismatch: got %q, want %q", got.Status, "active")
 	}
@@ -74,11 +56,10 @@ func TestGetSession(t *testing.T) {
 
 func TestListSessions(t *testing.T) {
 	s := newTestStore(t)
-	seedWorkspace(t, s, "ws1")
 
 	// Create sessions with small delays to guarantee ordering.
 	for i := 0; i < 3; i++ {
-		sess := &Session{WorkspaceID: "ws1", Title: "Chat"}
+		sess := &Session{Title: "Chat"}
 		if err := s.CreateSession(sess); err != nil {
 			t.Fatalf("CreateSession %d: %v", i, err)
 		}
@@ -86,7 +67,7 @@ func TestListSessions(t *testing.T) {
 		time.Sleep(10 * time.Millisecond)
 	}
 
-	sessions, err := s.ListSessions("ws1")
+	sessions, err := s.ListSessions()
 	if err != nil {
 		t.Fatalf("ListSessions: %v", err)
 	}
@@ -105,9 +86,8 @@ func TestListSessions(t *testing.T) {
 
 func TestArchiveSession(t *testing.T) {
 	s := newTestStore(t)
-	seedWorkspace(t, s, "ws1")
 
-	sess := &Session{WorkspaceID: "ws1"}
+	sess := &Session{}
 	if err := s.CreateSession(sess); err != nil {
 		t.Fatalf("CreateSession: %v", err)
 	}
@@ -127,11 +107,10 @@ func TestArchiveSession(t *testing.T) {
 
 func TestNextShortCode(t *testing.T) {
 	s := newTestStore(t)
-	seedWorkspace(t, s, "ws1")
 
 	expected := []string{"c1", "c2", "c3"}
 	for _, want := range expected {
-		sess := &Session{WorkspaceID: "ws1"}
+		sess := &Session{}
 		if err := s.CreateSession(sess); err != nil {
 			t.Fatalf("CreateSession: %v", err)
 		}
@@ -143,9 +122,8 @@ func TestNextShortCode(t *testing.T) {
 
 func TestCreateMessage(t *testing.T) {
 	s := newTestStore(t)
-	seedWorkspace(t, s, "ws1")
 
-	sess := &Session{WorkspaceID: "ws1"}
+	sess := &Session{}
 	if err := s.CreateSession(sess); err != nil {
 		t.Fatalf("CreateSession: %v", err)
 	}
@@ -171,9 +149,8 @@ func TestCreateMessage(t *testing.T) {
 
 func TestListMessages(t *testing.T) {
 	s := newTestStore(t)
-	seedWorkspace(t, s, "ws1")
 
-	sess := &Session{WorkspaceID: "ws1"}
+	sess := &Session{}
 	if err := s.CreateSession(sess); err != nil {
 		t.Fatalf("CreateSession: %v", err)
 	}
@@ -209,9 +186,8 @@ func TestListMessages(t *testing.T) {
 // messages are present and message_count matches.
 func TestForkSession_AtomicMessages(t *testing.T) {
 	s := newTestStore(t)
-	seedWorkspace(t, s, "ws1")
 
-	src := &Session{WorkspaceID: "ws1", Title: "Source"}
+	src := &Session{Title: "Source"}
 	if err := s.CreateSession(src); err != nil {
 		t.Fatalf("CreateSession src: %v", err)
 	}
@@ -256,9 +232,8 @@ func TestForkSession_AtomicMessages(t *testing.T) {
 // verifies no partial messages leaked into the messages table.
 func TestCopyMessages_AtomicOnFailure(t *testing.T) {
 	s := newTestStore(t)
-	seedWorkspace(t, s, "ws1")
 
-	src := &Session{WorkspaceID: "ws1"}
+	src := &Session{}
 	if err := s.CreateSession(src); err != nil {
 		t.Fatalf("CreateSession: %v", err)
 	}
@@ -286,9 +261,8 @@ func TestCopyMessages_AtomicOnFailure(t *testing.T) {
 
 func TestListSessionsReturnsEmptyArray(t *testing.T) {
 	s := newTestStore(t)
-	seedWorkspace(t, s, "ws1")
 
-	sessions, err := s.ListSessions("ws1")
+	sessions, err := s.ListSessions()
 	if err != nil {
 		t.Fatalf("ListSessions: %v", err)
 	}
@@ -307,7 +281,7 @@ func TestArchiveSession_EvictsSessionObjects(t *testing.T) {
 	// rows — in the same transaction, so a failure can't leave orphan objects
 	// attached to an archived session.
 	s := newTestStore(t)
-	sess := makeTestSession(t, s, "workspace-1")
+	sess := makeTestSession(t, s)
 
 	// Put two objects on this session and one on a sibling session (control).
 	for i := 0; i < 2; i++ {
@@ -315,7 +289,7 @@ func TestArchiveSession_EvictsSessionObjects(t *testing.T) {
 			t.Fatalf("put %d on sess: %v", i, err)
 		}
 	}
-	sibling := makeTestSession(t, s, "workspace-1")
+	sibling := makeTestSession(t, s)
 	siblingObj, err := s.PutSessionObject(SessionObjectInput{SessionID: sibling.ID, Payload: `{}`})
 	if err != nil {
 		t.Fatalf("put on sibling: %v", err)

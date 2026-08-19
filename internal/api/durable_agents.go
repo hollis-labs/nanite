@@ -230,7 +230,6 @@ func (a *API) handleDurableAgentStart(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	result, err := a.Services.DurableAgents.Start(r.Context(), r.PathValue("id"), service.DurableAgentStartRequest{
-		WorkspaceID: req.WorkspaceID,
 		ProjectID:   req.ProjectID,
 		WakePayload: durableAgentWakePayloadFromRequest(req.WakePayload),
 	})
@@ -244,7 +243,6 @@ func (a *API) handleDurableAgentResume(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	result, err := a.Services.DurableAgents.Resume(r.Context(), r.PathValue("id"), service.DurableAgentStartRequest{
-		WorkspaceID: req.WorkspaceID,
 		ProjectID:   req.ProjectID,
 		WakePayload: durableAgentWakePayloadFromRequest(req.WakePayload),
 	})
@@ -329,8 +327,7 @@ func (a *API) writeDurableAgentLaunchResult(w http.ResponseWriter, result *servi
 		a.errorResp(w, http.StatusNotFound, "durable agent not found")
 		return
 	}
-	if errors.Is(err, service.ErrDurableAgentWorkspaceRequired) ||
-		errors.Is(err, service.ErrDurableAgentNoResumableSession) {
+	if errors.Is(err, service.ErrDurableAgentNoResumableSession) {
 		a.errorResp(w, http.StatusConflict, err.Error())
 		return
 	}

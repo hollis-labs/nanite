@@ -31,7 +31,6 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { useModels, useSettings } from "@/hooks/useSettings";
 import { api } from "@/lib/api";
 import type { AgentProfile } from "@/lib/types";
-import { useAppStore } from "@/stores/useAppStore";
 import { AgentBuilderWizard } from "./agents/AgentBuilderWizard";
 import { AgentDetailView } from "./agents/AgentDetailView";
 
@@ -101,11 +100,10 @@ export function AgentProfileManager({}: AgentProfileManagerProps) {
   });
 
   // Agent-Project many-to-many
-  const activeWorkspaceId = useAppStore((s) => s.activeWorkspaceId);
   const { data: allProjects = [] } = useQuery({
-    queryKey: ["projects", activeWorkspaceId],
-    queryFn: () => api.listProjects(activeWorkspaceId!),
-    enabled: !!selectedAgent && !!activeWorkspaceId,
+    queryKey: ["projects"],
+    queryFn: () => api.listProjects(),
+    enabled: !!selectedAgent,
   });
   const { data: agentProjects = [] } = useQuery({
     queryKey: ["agent-projects", selectedAgent],

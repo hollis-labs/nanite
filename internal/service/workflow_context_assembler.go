@@ -20,8 +20,8 @@ type WorkflowContextAssembler interface {
 
 // contextServiceWorkflowAssembler is the production WorkflowContextAssembler.
 // It resolves the store rows a workflow step only carries IDs for (session,
-// agent, workspace — mirroring the resolution generateResponse performs via
-// SessionService.Get / AgentService.Get / store.GetWorkspace) and delegates
+// agent — mirroring the resolution generateResponse performs via
+// SessionService.Get / AgentService.Get) and delegates
 // the actual assembly to ContextService.AssembleSlots — the same slot-based
 // method Chat/GUI/CLI turns call (chat_generate.go's assembleTurnContext) —
 // collapsing its SlotAssemblyResult down to the flat systemPrompt + messages
@@ -73,16 +73,11 @@ func (a *contextServiceWorkflowAssembler) AssembleContext(ctx context.Context, s
 		return "", nil, fmt.Errorf("workflow: context assembly: load agent %q: %w", agentID, err)
 	}
 
-	var workspace *store.Workspace
-	if session.WorkspaceID != "" {
-		workspace, _ = a.store.GetWorkspace(session.WorkspaceID)
-	}
-
 	// providerWindowSize=0 falls back to ctxpkg.DefaultContextWindowSize
 	// (ctxpkg.NewContextWindow) — this call site has no provider/model to
 	// look up a real budget from, matching chat_generate.go's own
 	// contextWindowSize "returns 0 on miss" fallback behavior.
-	result, err := a.context.AssembleSlots(ctx, session, agent, workspace, nil, "", 0, "")
+	result, err := a.context.AssembleSlots(ctx, session, agent, nil, "", 0, "")
 	if err != nil {
 		return "", nil, fmt.Errorf("workflow: context assembly: assemble slots: %w", err)
 	}

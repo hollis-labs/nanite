@@ -49,13 +49,9 @@ func newTestHarnessServer(t *testing.T) (*httptest.Server, *string) {
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
 		}
-		if req.WorkspaceID == "" {
-			http.Error(w, "workspace_id is required", http.StatusBadRequest)
-			return
-		}
 		w.WriteHeader(http.StatusCreated)
 		json.NewEncoder(w).Encode(harnessSessionResponse{
-			Session: &store.Session{ID: "sess-1", WorkspaceID: req.WorkspaceID, Title: req.Title},
+			Session: &store.Session{ID: "sess-1", Title: req.Title},
 		})
 	})
 
@@ -66,7 +62,7 @@ func newTestHarnessServer(t *testing.T) (*httptest.Server, *string) {
 			return
 		}
 		json.NewEncoder(w).Encode(harnessSessionResponse{
-			Session: &store.Session{ID: id, WorkspaceID: "ws-1"},
+			Session: &store.Session{ID: id},
 		})
 	})
 
@@ -116,11 +112,11 @@ func TestHarnessClient_CreateAndGetSession(t *testing.T) {
 	client := newHarnessClient(srv.URL)
 	ctx := context.Background()
 
-	sess, err := client.CreateSession(ctx, harnessCreateSessionRequest{WorkspaceID: "ws-1", Title: "test"})
+	sess, err := client.CreateSession(ctx, harnessCreateSessionRequest{Title: "test"})
 	if err != nil {
 		t.Fatalf("CreateSession: %v", err)
 	}
-	if sess.ID != "sess-1" || sess.WorkspaceID != "ws-1" {
+	if sess.ID != "sess-1" {
 		t.Fatalf("unexpected session: %+v", sess)
 	}
 
@@ -137,15 +133,10 @@ func TestHarnessClient_CreateAndGetSession(t *testing.T) {
 	}
 }
 
-func TestHarnessClient_CreateSession_RequiresWorkspace(t *testing.T) {
-	srv, _ := newTestHarnessServer(t)
-	defer srv.Close()
-
-	client := newHarnessClient(srv.URL)
-	if _, err := client.CreateSession(context.Background(), harnessCreateSessionRequest{}); err == nil {
-		t.Fatal("expected error when workspace_id is empty, got nil")
-	}
-}
+// TestHarnessClient_CreateSession_RequiresWorkspace was removed by Phase 0
+// item 20 (retire workspaces,
+// TASKS/phase-0/20-retire-workspaces-and-instance-mechanism.md):
+// workspace_id is no longer required (or accepted) on session creation.
 
 func TestHarnessClient_SendTurnAndStreamEvents(t *testing.T) {
 	srv, _ := newTestHarnessServer(t)
@@ -331,7 +322,7 @@ func TestHarnessClient_BasicAuth(t *testing.T) {
 	t.Setenv("NANITE_AUTH_PASSWORD", "secret")
 
 	client := newHarnessClient(srv.URL)
-	if _, err := client.CreateSession(context.Background(), harnessCreateSessionRequest{WorkspaceID: "ws-1"}); err != nil {
+	if _, err := client.CreateSession(context.Background(), harnessCreateSessionRequest{}); err != nil {
 		t.Fatalf("CreateSession: %v", err)
 	}
 	if *lastAuth != "alice" {

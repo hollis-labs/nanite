@@ -17,9 +17,8 @@ import (
 func TestMigration008_SurvivesBookmarkFK(t *testing.T) {
 	s := newTestStore(t)
 
-	// Seed a workspace → session → message → bookmark chain.
-	mustExec(t, s, `INSERT INTO workspaces (id, name) VALUES ('w1', 'ws')`)
-	mustExec(t, s, `INSERT INTO sessions (id, workspace_id, title, short_code) VALUES ('s1', 'w1', 't', 'sc1')`)
+	// Seed a session → message → bookmark chain.
+	mustExec(t, s, `INSERT INTO sessions (id, title, short_code) VALUES ('s1', 't', 'sc1')`)
 	mustExec(t, s, `INSERT INTO messages (id, session_id, role, content) VALUES ('m1','s1','user','hi')`)
 	mustExec(t, s, `INSERT INTO bookmarks (id, message_id, session_id) VALUES ('b1','m1','s1')`)
 
@@ -54,9 +53,8 @@ func TestMigration008_SurvivesBookmarkFK(t *testing.T) {
 func TestMigration008_SurvivesOrphanMessage(t *testing.T) {
 	s := newTestStore(t)
 
-	// Seed workspace, session, message.
-	mustExec(t, s, `INSERT INTO workspaces (id, name) VALUES ('w1', 'ws')`)
-	mustExec(t, s, `INSERT INTO sessions (id, workspace_id, title, short_code) VALUES ('s1', 'w1', 't', 'sc1')`)
+	// Seed session, message.
+	mustExec(t, s, `INSERT INTO sessions (id, title, short_code) VALUES ('s1', 't', 'sc1')`)
 	mustExec(t, s, `INSERT INTO messages (id, session_id, role, content) VALUES ('m1','s1','user','orphan-me')`)
 
 	// Orphan the message by deleting the session with FKs disabled on a

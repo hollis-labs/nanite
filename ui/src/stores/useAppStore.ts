@@ -1,6 +1,5 @@
 import { create } from 'zustand'
 
-const STORAGE_KEY = 'nanite-active-workspace'
 const SESSION_STORAGE_KEY = 'nanite-active-session'
 
 function safeLocalStorageGet(key: string): string | null {
@@ -31,26 +30,18 @@ function safeLocalStorageRemove(key: string) {
 }
 
 interface AppState {
-  activeWorkspaceId: string | null
   activeProjectId: string | null
   activeSessionId: string | null
   configVersion: number
-  setActiveWorkspace: (id: string) => void
   setActiveProject: (id: string | null) => void
   setActiveSession: (id: string | null) => void
   bumpConfigVersion: () => void
 }
 
 export const useAppStore = create<AppState>((set) => ({
-  activeWorkspaceId: safeLocalStorageGet(STORAGE_KEY),
   activeProjectId: null,
   activeSessionId: safeLocalStorageGet(SESSION_STORAGE_KEY),
   configVersion: 0,
-  setActiveWorkspace: (id) => {
-    safeLocalStorageSet(STORAGE_KEY, id)
-    safeLocalStorageRemove(SESSION_STORAGE_KEY)
-    set({ activeWorkspaceId: id, activeProjectId: null, activeSessionId: null })
-  },
   setActiveProject: (id) => set({ activeProjectId: id }),
   setActiveSession: (id) => {
     if (id) {

@@ -36,7 +36,7 @@ Live tracker for `docs/engineering/TASKS.md`'s execution, per `docs/engineering/
 | 18a-cut-dead-storage-and-config | implemented | none | 1 |
 | 18b-cut-dead-messaging-and-plugin-tables | implemented | none | 1 |
 | 19-cut-legacy-rename-tables | implemented | 09 | 1 |
-| 20-retire-workspaces-and-instance-mechanism | not-started | 28 (orchestrator-added, see below) | 3 (chain pos. 8) |
+| 20-retire-workspaces-and-instance-mechanism | implemented | 28 (orchestrator-added, see below) | 3 (chain pos. 8) |
 | 21-cut-modes | implemented | 28 (orchestrator-added); coordinate w/ 18a on `agents.go` | 3 (chain pos. 7) |
 | 22-remove-skill-and-tool-broker-abstractions | not-started | (sequenced after 29, see below) | 3 (chain pos. 10) |
 | 23-export-and-drop-decision-tables | not-started | 11, 22 | 3 (chain pos. 11) |

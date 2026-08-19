@@ -115,7 +115,7 @@ func TestReminderEngine_TurnCountFiresAndInjectsSlot(t *testing.T) {
 		Tags:   `[]`,
 		Tools:  `[]`,
 	}
-	slotResult, err := svc.AssembleSlots(context.Background(), sess, agent, nil, []llmtypes.ToolDefinition{}, "", 200000, "")
+	slotResult, err := svc.AssembleSlots(context.Background(), sess, agent, []llmtypes.ToolDefinition{}, "", 200000, "")
 	if err != nil {
 		t.Fatalf("AssembleSlots: %v", err)
 	}
@@ -219,7 +219,7 @@ func TestReminderEngine_TimeTriggerReachesLLMSlotBlocks(t *testing.T) {
 		Tags:   `[]`,
 		Tools:  `[]`,
 	}
-	slotResult, err := svc.AssembleSlots(context.Background(), sess, agent, nil, []llmtypes.ToolDefinition{}, "", 200000, "")
+	slotResult, err := svc.AssembleSlots(context.Background(), sess, agent, []llmtypes.ToolDefinition{}, "", 200000, "")
 	if err != nil {
 		t.Fatalf("AssembleSlots: %v", err)
 	}
@@ -329,7 +329,7 @@ func TestReminderEngine_TurnCountFiresThroughInjectionPipeline(t *testing.T) {
 	agent := &store.AgentProfile{
 		ID: "a-1", Name: "A", Slug: "a", Status: "active", Tags: "[]", Tools: "[]",
 	}
-	slotResult, err := svc.AssembleSlots(context.Background(), sess, agent, nil, []llmtypes.ToolDefinition{}, "", 200000, "")
+	slotResult, err := svc.AssembleSlots(context.Background(), sess, agent, []llmtypes.ToolDefinition{}, "", 200000, "")
 	if err != nil {
 		t.Fatalf("AssembleSlots: %v", err)
 	}

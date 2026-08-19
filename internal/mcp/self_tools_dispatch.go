@@ -217,12 +217,12 @@ func (st *SelfToolsTransport) callExecuteTask(ctx context.Context, args map[stri
 		}
 	}
 
-	// H1 trust resolution (CW-20260421-0014): populate WorkspaceID and
-	// AgentProfileID from the caller-profile ctx stamped by the service layer
-	// in executeToolBatch. When the ctx carries no profile (e.g. direct test
-	// invocations), both fields are empty and the subagent gate falls back to
+	// H1 trust resolution (CW-20260421-0014): populate AgentProfileID from
+	// the caller-profile ctx stamped by the service layer in
+	// executeToolBatch. When the ctx carries no profile (e.g. direct test
+	// invocations), the field is empty and the subagent gate falls back to
 	// TrustNormal (approval required — existing safe default).
-	wsID, apID := CallerProfileFromContext(ctx)
+	apID := CallerProfileFromContext(ctx)
 
 	// CW-20260516-0058 / CW-20260815 (emit-react postmortem): ParentAgentID
 	// drives the subagent reply-delivery block in subagent.Service.execute
@@ -245,7 +245,6 @@ func (st *SelfToolsTransport) callExecuteTask(ctx context.Context, args map[stri
 		Provider:       strArg(args, "provider", ""),
 		TimeoutSeconds: intArg(args, "timeout_seconds", 0),
 		ReflexHints:    reflexHints,
-		WorkspaceID:    wsID,
 		AgentProfileID: apID,
 	})
 	if err != nil {

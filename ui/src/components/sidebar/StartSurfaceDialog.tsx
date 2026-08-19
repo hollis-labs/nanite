@@ -35,7 +35,6 @@ type DurableAction = "start" | "resume";
 interface StartSurfaceDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  workspaceId: string | null;
   projectId: string | null;
   defaultProvider?: string;
   defaultModel?: string;
@@ -54,7 +53,6 @@ const PATHS: Array<{ id: StartPath; label: string; icon: typeof MessageSquare }>
 export function StartSurfaceDialog({
   open,
   onOpenChange,
-  workspaceId,
   projectId,
   defaultProvider,
   defaultModel,
@@ -184,26 +182,21 @@ export function StartSurfaceDialog({
   };
 
   const createChat = useMutation({
-    mutationFn: () => {
-      if (!workspaceId) throw new Error("Choose a workspace before starting.");
-      return api.createSession({
-        workspace_id: workspaceId,
+    mutationFn: () =>
+      api.createSession({
         project_id: projectId ?? undefined,
         provider: provider || undefined,
         model: model || undefined,
         agent_id: agentId || undefined,
-      });
-    },
+      }),
     onSuccess: (session) => complete(session.id),
     onError: (err) => setError(errorMessage(err)),
   });
 
   const createHarness = useMutation({
     mutationFn: () => {
-      if (!workspaceId) throw new Error("Choose a workspace before starting.");
       if (!bootProfileId) throw new Error("No boot profile is selected.");
       return api.createSession({
-        workspace_id: workspaceId,
         project_id: projectId ?? undefined,
         provider: bootProfileId,
         model: bootProfileId,
@@ -218,7 +211,6 @@ export function StartSurfaceDialog({
     mutationFn: async () => {
       if (!durableAgentId) throw new Error("No durable agent is selected.");
       const body = {
-        workspace_id: workspaceId ?? undefined,
         project_id: projectId ?? undefined,
         wake_payload: {
           reason: durableAction === "resume" ? "lifecycle_resume" : "manual",
@@ -268,7 +260,6 @@ export function StartSurfaceDialog({
       model: recipeModel || undefined,
       runtime_kind: recipeRuntimeKind || undefined,
       work_root: recipeWorkRoot || undefined,
-      workspace_id: workspaceId ?? undefined,
       project_id: projectId ?? undefined,
       start: true,
       wake_payload: {
@@ -294,7 +285,6 @@ export function StartSurfaceDialog({
     recipeSlug,
     recipeWakePrompt,
     recipeWorkRoot,
-    workspaceId,
   ]);
 
   const pending =

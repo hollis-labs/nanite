@@ -34,8 +34,8 @@ import (
 
 	llmtypes "github.com/hollis-labs/go-llm-types"
 	"github.com/hollis-labs/nanite/internal/chat"
-	"github.com/hollis-labs/nanite/internal/contextbroker"
 	ctxpkg "github.com/hollis-labs/nanite/internal/context"
+	"github.com/hollis-labs/nanite/internal/contextbroker"
 	"github.com/hollis-labs/nanite/internal/dispatcher"
 	"github.com/hollis-labs/nanite/internal/store"
 )
@@ -58,23 +58,27 @@ func dispatchFlavors() []dispatchFlavor {
 	}
 }
 
-// invariantsFixture is the shared session/agent/workspace setup the six
-// invariant checks operate against. Built fresh per dispatch flavor so
-// each subtest sees identical inputs — only the CallerType-tagged
-// context differs.
+// invariantsFixture is the shared session/agent setup the six invariant
+// checks operate against. Built fresh per dispatch flavor so each subtest
+// sees identical inputs — only the CallerType-tagged context differs.
 //
 // Phase 0 item 21 ("Cut Modes, in full") removed this fixture's mode /
 // altMode fields — Session Mode (store.Mode, sessions.current_mode_id,
 // store.GetSessionMode/SetSessionMode) is gone. See invariantModeSlotInert
 // (INV4, below) for the post-cut replacement of invariantModeAwareContentSwap.
+//
+// Phase 0 item 20 (retire workspaces,
+// TASKS/phase-0/20-retire-workspaces-and-instance-mechanism.md) removed
+// this fixture's workspace field — the in-app `workspaces` table (and the
+// *store.Workspace parameter AssembleSlots used to take) is retired in
+// full.
 type invariantsFixture struct {
-	store     *store.Store
-	svc       ContextService
-	client    *chat.ContextClient
-	session   *store.Session
-	agent     *store.AgentProfile
-	workspace *store.Workspace
-	tools     []llmtypes.ToolDefinition
+	store   *store.Store
+	svc     ContextService
+	client  *chat.ContextClient
+	session *store.Session
+	agent   *store.AgentProfile
+	tools   []llmtypes.ToolDefinition
 }
 
 func newInvariantsFixture(t *testing.T) *invariantsFixture {
@@ -84,11 +88,6 @@ func newInvariantsFixture(t *testing.T) *invariantsFixture {
 		t.Fatalf("store.New: %v", err)
 	}
 	t.Cleanup(func() { s.Close() })
-
-	ws := &store.Workspace{ID: "ws-inv", Name: "InvariantsWS", Description: "slot invariants fixture"}
-	if err := s.CreateWorkspace(ws); err != nil {
-		t.Fatalf("CreateWorkspace: %v", err)
-	}
 
 	agent := &store.AgentProfile{
 		ID:           "agent-inv",
@@ -102,9 +101,8 @@ func newInvariantsFixture(t *testing.T) *invariantsFixture {
 	}
 
 	sess := &store.Session{
-		ID:          "sess-inv",
-		WorkspaceID: ws.ID,
-		Title:       "Slot invariants session",
+		ID:    "sess-inv",
+		Title: "Slot invariants session",
 	}
 	if err := s.CreateSession(sess); err != nil {
 		t.Fatalf("CreateSession: %v", err)
@@ -126,13 +124,12 @@ func newInvariantsFixture(t *testing.T) *invariantsFixture {
 	svc := NewContextService(ContextServiceConfig{Client: client})
 
 	return &invariantsFixture{
-		store:     s,
-		svc:       svc,
-		client:    client,
-		session:   sess,
-		agent:     agent,
-		workspace: ws,
-		tools:     []llmtypes.ToolDefinition{},
+		store:   s,
+		svc:     svc,
+		client:  client,
+		session: sess,
+		agent:   agent,
+		tools:   []llmtypes.ToolDefinition{},
 	}
 }
 
@@ -146,7 +143,7 @@ func newInvariantsFixture(t *testing.T) *invariantsFixture {
 func (f *invariantsFixture) assembleWithCaller(t *testing.T, caller dispatcher.CallerType) *SlotAssemblyResult {
 	t.Helper()
 	ctx := dispatcher.WithCallerType(context.Background(), caller)
-	res, err := f.svc.AssembleSlots(ctx, f.session, f.agent, f.workspace, f.tools, "", 200000, "")
+	res, err := f.svc.AssembleSlots(ctx, f.session, f.agent, f.tools, "", 200000, "")
 	if err != nil {
 		t.Fatalf("AssembleSlots (%s): %v", caller, err)
 	}
@@ -232,19 +229,19 @@ func invariantUniversalAtPositionZero(res *SlotAssemblyResult) error {
 // the stable-prefix priority [SlotUniversal, SlotSystem] (per
 // internal/llm/anthropic/cache_plan.go). The invariant asserts:
 //
-//   (a) The cacheable_prefix slot decisions (universal + system) MUST
-//       be ActionShip with non-empty Content — they're the anchor of
-//       the cache prefix and cannot be empty.
-//   (b) NEITHER of them may carry a Changed=true marker (dynamic
-//       break would invalidate the marker), which is asserted via the
-//       SlotBlock.Changed field on the assembled wire blocks.
-//   (c) Per-turn dynamic slots (SlotMode, SlotContext, SlotSession,
-//       SlotConversation, SlotUserContext, SlotHandoff) MUST NOT
-//       appear in the stable-prefix priority list — that invariant is
-//       structural and asserted against the package-level constant in
-//       internal/llm/anthropic/cache_plan.go's tests
-//       (TestCacheMarkerPriority_*). Here we pin the broker-side
-//       precondition: the slots the cache-plan walks ARE eligible.
+//	(a) The cacheable_prefix slot decisions (universal + system) MUST
+//	    be ActionShip with non-empty Content — they're the anchor of
+//	    the cache prefix and cannot be empty.
+//	(b) NEITHER of them may carry a Changed=true marker (dynamic
+//	    break would invalidate the marker), which is asserted via the
+//	    SlotBlock.Changed field on the assembled wire blocks.
+//	(c) Per-turn dynamic slots (SlotMode, SlotContext, SlotSession,
+//	    SlotConversation, SlotUserContext, SlotHandoff) MUST NOT
+//	    appear in the stable-prefix priority list — that invariant is
+//	    structural and asserted against the package-level constant in
+//	    internal/llm/anthropic/cache_plan.go's tests
+//	    (TestCacheMarkerPriority_*). Here we pin the broker-side
+//	    precondition: the slots the cache-plan walks ARE eligible.
 //
 // The downstream wire-level marker placement is asserted by the
 // existing TestCacheMarkerPriority_UniversalSlotFirst_LoadBearing in
@@ -264,8 +261,9 @@ func invariantCacheMarkerPriority(res *SlotAssemblyResult) error {
 		}
 	}
 	// Both cache-anchor slots must ship non-empty content on a chat-flavored
-	// assembly. SlotSystem may be empty in degenerate setups, but the fixture
-	// wires a workspace name → SlotSystem is non-empty.
+	// assembly. SlotSystem may be empty in degenerate setups, but the
+	// think-tool block it always carries (see buildSlotSources' System slot
+	// construction) means SlotSystem is non-empty here regardless.
 	for _, d := range res.Plan.Decisions {
 		if d.SlotName != ctxpkg.SlotUniversal && d.SlotName != ctxpkg.SlotSystem {
 			continue

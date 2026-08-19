@@ -237,7 +237,6 @@ func (a *API) agentBuilderDryRun(ctx context.Context, req AgentBuilderDryRunRequ
 				Model:       req.DurableInstance.Model,
 				RuntimeKind: req.DurableInstance.RuntimeKind,
 				WorkRoot:    req.DurableInstance.WorkRoot,
-				WorkspaceID: req.DurableInstance.WorkspaceID,
 				ProjectID:   req.DurableInstance.ProjectID,
 				WakePayload: durableWakePayloadForDryRun(req),
 				Metadata:    req.DurableInstance.Metadata,
@@ -252,9 +251,6 @@ func (a *API) agentBuilderDryRun(ctx context.Context, req AgentBuilderDryRunRequ
 			}
 		} else {
 			launchPreview = buildAgentBuilderLaunchPlanPreview(req)
-			if req.DurableInstance.Start && strings.TrimSpace(req.DurableInstance.WorkspaceID) == "" {
-				errors = append(errors, "workspace_id is required when dry-run includes a launch/start preview")
-			}
 		}
 	}
 

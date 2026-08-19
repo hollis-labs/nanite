@@ -316,11 +316,10 @@ func (r *BootRunner) createChildSession(ctx context.Context, run *subagent.Run, 
 	}
 	childID := uuid.New().String()
 	if err := r.store.CreateSession(&store.Session{
-		ID:          childID,
-		WorkspaceID: parent.WorkspaceID,
-		Provider:    prov,
-		Model:       agent.DefaultModel,
-		Title:       fmt.Sprintf("subagent: %s — %s", run.Role, truncatePrompt(run.Prompt, 60)),
+		ID:       childID,
+		Provider: prov,
+		Model:    agent.DefaultModel,
+		Title:    fmt.Sprintf("subagent: %s — %s", run.Role, truncatePrompt(run.Prompt, 60)),
 	}); err != nil {
 		return "", fmt.Errorf("create child session: %w", err)
 	}

@@ -19,14 +19,13 @@ type stubTrustResolver struct {
 }
 
 type trustResolveCall struct {
-	workspaceID    string
 	agentProfileID string
 }
 
-func (r *stubTrustResolver) ResolveTrust(_ context.Context, workspaceID, agentProfileID string) (dispatch.TrustTier, error) {
+func (r *stubTrustResolver) ResolveTrust(_ context.Context, agentProfileID string) (dispatch.TrustTier, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	r.calls = append(r.calls, trustResolveCall{workspaceID, agentProfileID})
+	r.calls = append(r.calls, trustResolveCall{agentProfileID})
 	return r.tier, r.err
 }
 
@@ -83,7 +82,6 @@ func TestSpawn_UntrustedRole(t *testing.T) {
 		Role:            "plugin-agent",
 		Prompt:          "do something",
 		Mode:            ModeSync,
-		WorkspaceID:     "ws-1",
 		AgentProfileID:  "ap-plugin",
 	})
 
@@ -118,7 +116,6 @@ func TestSpawn_TrustedRole(t *testing.T) {
 		Role:            "worker",
 		Prompt:          "do work",
 		Mode:            ModeSync,
-		WorkspaceID:     "ws-1",
 		AgentProfileID:  "ap-worker",
 	})
 	if err != nil {
@@ -172,7 +169,6 @@ func TestSpawn_NormalRole_ApprovalRequired(t *testing.T) {
 		Role:            "chat",
 		Prompt:          "hello",
 		Mode:            ModeSync,
-		WorkspaceID:     "ws-1",
 		AgentProfileID:  "ap-chat",
 	})
 	if err != nil {
@@ -194,9 +190,10 @@ func TestSpawn_NormalRole_ApprovalRequired(t *testing.T) {
 	}
 }
 
-// TestSpawn_NoWorkspaceID_FallbackToNormal verifies that empty WorkspaceID
-// causes the trust gate to skip resolution and fall through to normal gate.
-func TestSpawn_NoWorkspaceID_FallbackToNormal(t *testing.T) {
+// TestSpawn_NoAgentProfileID_FallbackToNormal verifies that empty
+// AgentProfileID causes the trust gate to skip resolution and fall through
+// to normal gate.
+func TestSpawn_NoAgentProfileID_FallbackToNormal(t *testing.T) {
 	db, _ := newTestDB(t)
 	resolver := &stubTrustResolver{tier: dispatch.TrustTrusted} // would be trusted if consulted
 	poster := &stubPoster{}
@@ -206,13 +203,13 @@ func TestSpawn_NoWorkspaceID_FallbackToNormal(t *testing.T) {
 	})
 	svc.SetTrustResolver(resolver)
 
-	// No WorkspaceID → resolver should NOT be called.
+	// No AgentProfileID → resolver should NOT be called.
 	id, err := svc.Spawn(context.Background(), SpawnRequest{
 		ParentSessionID: "sess-4",
 		Role:            "worker",
 		Prompt:          "work",
 		Mode:            ModeSync,
-		// WorkspaceID intentionally empty
+		// AgentProfileID intentionally empty
 	})
 	if err != nil {
 		t.Fatalf("Spawn: %v", err)
@@ -221,7 +218,7 @@ func TestSpawn_NoWorkspaceID_FallbackToNormal(t *testing.T) {
 		t.Fatal("expected run id")
 	}
 	if resolver.callCount() != 0 {
-		t.Errorf("expected 0 resolver calls when WorkspaceID empty, got %d", resolver.callCount())
+		t.Errorf("expected 0 resolver calls when AgentProfileID empty, got %d", resolver.callCount())
 	}
 }
 
@@ -245,7 +242,6 @@ func TestSpawn_TrustResolverError_FailClosed(t *testing.T) {
 		Role:            "worker",
 		Prompt:          "work",
 		Mode:            ModeSync,
-		WorkspaceID:     "ws-1",
 		AgentProfileID:  "ap-worker",
 	})
 	if err != nil {

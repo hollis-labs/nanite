@@ -22,7 +22,7 @@ func TestAssembleSlots_LazyHintAppendedToToolsSlot(t *testing.T) {
 	sess, agent := seedSession(t, s, "test lazy append")
 
 	hint := "[Tool catalog (lazy): 5 tools available. Use `request_tools` ...]"
-	r, err := svc.AssembleSlots(context.Background(), sess, agent, nil, tools3(), "", 200000, hint)
+	r, err := svc.AssembleSlots(context.Background(), sess, agent, tools3(), "", 200000, hint)
 	if err != nil {
 		t.Fatalf("AssembleSlots: %v", err)
 	}
@@ -61,7 +61,7 @@ func TestAssembleSlots_EmptyLazyHintIsNoOp(t *testing.T) {
 	// CacheKey behavior for the empty-hint case is covered separately by
 	// TestAssembleSlots_LazyHintInvalidatesCacheKey (which uses
 	// "" as the baseline).
-	r, err := svc.AssembleSlots(context.Background(), sess, agent, nil, tools3(), "", 200000, "")
+	r, err := svc.AssembleSlots(context.Background(), sess, agent, tools3(), "", 200000, "")
 	if err != nil {
 		t.Fatalf("AssembleSlots: %v", err)
 	}
@@ -74,7 +74,7 @@ func TestAssembleSlots_EmptyLazyHintIsNoOp(t *testing.T) {
 	}
 	// Determinism: a second call with identical inputs must produce
 	// identical content.
-	r2, err := svc.AssembleSlots(context.Background(), sess, agent, nil, tools3(), "", 200000, "")
+	r2, err := svc.AssembleSlots(context.Background(), sess, agent, tools3(), "", 200000, "")
 	if err != nil {
 		t.Fatalf("AssembleSlots (second pass): %v", err)
 	}
@@ -98,14 +98,14 @@ func TestAssembleSlots_LazyHintInvalidatesCacheKey(t *testing.T) {
 	sess, agent := seedSession(t, s, "test cache key")
 
 	// Turn 1: no hint.
-	r1, err := svc.AssembleSlots(context.Background(), sess, agent, nil, tools3(), "", 200000, "")
+	r1, err := svc.AssembleSlots(context.Background(), sess, agent, tools3(), "", 200000, "")
 	if err != nil {
 		t.Fatalf("AssembleSlots t1: %v", err)
 	}
 	t1Key := slotCacheKey(r1.Blocks, "tools")
 
 	// Turn 2: same tools, different (non-empty) hint.
-	r2, err := svc.AssembleSlots(context.Background(), sess, agent, nil, tools3(), "", 200000, "[lazy hint v1]")
+	r2, err := svc.AssembleSlots(context.Background(), sess, agent, tools3(), "", 200000, "[lazy hint v1]")
 	if err != nil {
 		t.Fatalf("AssembleSlots t2: %v", err)
 	}
@@ -115,7 +115,7 @@ func TestAssembleSlots_LazyHintInvalidatesCacheKey(t *testing.T) {
 	}
 
 	// Turn 3: same hint as turn 2 (cache key matches t2).
-	r3, err := svc.AssembleSlots(context.Background(), sess, agent, nil, tools3(), "", 200000, "[lazy hint v1]")
+	r3, err := svc.AssembleSlots(context.Background(), sess, agent, tools3(), "", 200000, "[lazy hint v1]")
 	if err != nil {
 		t.Fatalf("AssembleSlots t3: %v", err)
 	}
@@ -125,7 +125,7 @@ func TestAssembleSlots_LazyHintInvalidatesCacheKey(t *testing.T) {
 	}
 
 	// Turn 4: different hint string → key shifts again.
-	r4, err := svc.AssembleSlots(context.Background(), sess, agent, nil, tools3(), "", 200000, "[lazy hint v2]")
+	r4, err := svc.AssembleSlots(context.Background(), sess, agent, tools3(), "", 200000, "[lazy hint v2]")
 	if err != nil {
 		t.Fatalf("AssembleSlots t4: %v", err)
 	}
@@ -144,7 +144,7 @@ func TestAssembleSlots_LazyHintWithS3bPointerStillAppends(t *testing.T) {
 	sess, agent := seedSession(t, s, "trigger pointer mode")
 
 	hint := "[lazy partition hint]"
-	r, err := svc.AssembleSlots(context.Background(), sess, agent, nil, tools3(), "", 200000, hint)
+	r, err := svc.AssembleSlots(context.Background(), sess, agent, tools3(), "", 200000, hint)
 	if err != nil {
 		t.Fatalf("AssembleSlots: %v", err)
 	}

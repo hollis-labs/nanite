@@ -7,9 +7,8 @@ import (
 
 func TestRecordUsage(t *testing.T) {
 	s := newTestStore(t)
-	seedWorkspace(t, s, "ws1")
 
-	sess := &Session{WorkspaceID: "ws1"}
+	sess := &Session{}
 	if err := s.CreateSession(sess); err != nil {
 		t.Fatalf("CreateSession: %v", err)
 	}
@@ -46,9 +45,8 @@ func TestRecordUsage(t *testing.T) {
 
 func TestGetSessionUsage(t *testing.T) {
 	s := newTestStore(t)
-	seedWorkspace(t, s, "ws1")
 
-	sess := &Session{WorkspaceID: "ws1"}
+	sess := &Session{}
 	if err := s.CreateSession(sess); err != nil {
 		t.Fatalf("CreateSession: %v", err)
 	}
@@ -98,9 +96,8 @@ func TestGetSessionUsageEmpty(t *testing.T) {
 
 func TestGetUsageSummary(t *testing.T) {
 	s := newTestStore(t)
-	seedWorkspace(t, s, "ws1")
 
-	sess := &Session{WorkspaceID: "ws1"}
+	sess := &Session{}
 	if err := s.CreateSession(sess); err != nil {
 		t.Fatalf("CreateSession: %v", err)
 	}

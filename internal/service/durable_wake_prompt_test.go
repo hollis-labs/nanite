@@ -19,9 +19,6 @@ func TestDurableAgentStartDeliversWakePromptAsUserTurn(t *testing.T) {
 	if err := st.CreateAgent(profile); err != nil {
 		t.Fatalf("CreateAgent: %v", err)
 	}
-	if err := st.CreateWorkspace(&store.Workspace{ID: "workspace-a", Name: "Workspace A"}); err != nil {
-		t.Fatalf("CreateWorkspace: %v", err)
-	}
 	runtime := &fakeDurableRuntimeController{}
 	svc := NewDurableAgentServiceWithRuntime(st, runtime)
 	inst := &store.DurableAgentInstance{
@@ -39,7 +36,6 @@ func TestDurableAgentStartDeliversWakePromptAsUserTurn(t *testing.T) {
 	}
 
 	result, err := svc.Start(context.Background(), inst.ID, DurableAgentStartRequest{
-		WorkspaceID: "workspace-a",
 		WakePayload: DurableAgentWakePayload{Reason: DurableAgentWakeExternalMessage, Prompt: "hello from an inbound wake"},
 	})
 	if err != nil {
@@ -62,9 +58,6 @@ func TestDurableAgentStartWithEmptyPromptDoesNotDeliverMessage(t *testing.T) {
 	if err := st.CreateAgent(profile); err != nil {
 		t.Fatalf("CreateAgent: %v", err)
 	}
-	if err := st.CreateWorkspace(&store.Workspace{ID: "workspace-a", Name: "Workspace A"}); err != nil {
-		t.Fatalf("CreateWorkspace: %v", err)
-	}
 	runtime := &fakeDurableRuntimeController{}
 	svc := NewDurableAgentServiceWithRuntime(st, runtime)
 	inst := &store.DurableAgentInstance{
@@ -81,7 +74,7 @@ func TestDurableAgentStartWithEmptyPromptDoesNotDeliverMessage(t *testing.T) {
 		t.Fatalf("Create: %v", err)
 	}
 
-	if _, err := svc.Start(context.Background(), inst.ID, DurableAgentStartRequest{WorkspaceID: "workspace-a"}); err != nil {
+	if _, err := svc.Start(context.Background(), inst.ID, DurableAgentStartRequest{}); err != nil {
 		t.Fatalf("Start: %v", err)
 	}
 	if len(runtime.sent) != 0 {
@@ -99,9 +92,6 @@ func TestDurableAgentResumeDeliversWakePromptAsUserTurn(t *testing.T) {
 	if err := st.CreateAgent(profile); err != nil {
 		t.Fatalf("CreateAgent: %v", err)
 	}
-	if err := st.CreateWorkspace(&store.Workspace{ID: "workspace-a", Name: "Workspace A"}); err != nil {
-		t.Fatalf("CreateWorkspace: %v", err)
-	}
 	runtime := &fakeDurableRuntimeController{}
 	svc := NewDurableAgentServiceWithRuntime(st, runtime)
 	inst := &store.DurableAgentInstance{
@@ -117,7 +107,7 @@ func TestDurableAgentResumeDeliversWakePromptAsUserTurn(t *testing.T) {
 	if err := svc.Create(context.Background(), inst); err != nil {
 		t.Fatalf("Create: %v", err)
 	}
-	started, err := svc.Start(context.Background(), inst.ID, DurableAgentStartRequest{WorkspaceID: "workspace-a"})
+	started, err := svc.Start(context.Background(), inst.ID, DurableAgentStartRequest{})
 	if err != nil {
 		t.Fatalf("Start: %v", err)
 	}
@@ -202,19 +192,14 @@ func TestDurableAgentWakeEndToEndPersistsPromptAsSessionMessage(t *testing.T) {
 	if err := st.CreateAgent(profile); err != nil {
 		t.Fatalf("CreateAgent: %v", err)
 	}
-	if err := st.CreateWorkspace(&store.Workspace{ID: "workspace-a", Name: "Workspace A"}); err != nil {
-		t.Fatalf("CreateWorkspace: %v", err)
-	}
 
 	runtime := NewChatDurableAgentRuntimeController(&fakeWakePromptChatService{store: st})
 	durableSvc := NewDurableAgentServiceWithRuntime(st, runtime)
 	wakeSvc := NewDurableAgentWakeService(st, durableSvc)
 
-	// Wake() resolves its workspace scope from an already-attached session
-	// (wakeSkipReason), not from the request's WorkspaceID directly — seed
-	// one, matching how a real A2A-targeted instance would already have a
-	// primary session attached before it can be woken.
-	seedSession := &store.Session{WorkspaceID: "workspace-a", Provider: "anthropic", Model: "model-a"}
+	// Seed an attached session, matching how a real A2A-targeted instance
+	// would already have a primary session attached before it can be woken.
+	seedSession := &store.Session{Provider: "anthropic", Model: "model-a"}
 	if err := st.CreateSession(seedSession); err != nil {
 		t.Fatalf("CreateSession: %v", err)
 	}

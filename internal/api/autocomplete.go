@@ -10,8 +10,8 @@ import (
 
 // fileResult is a single autocomplete result for file references.
 type fileResult struct {
-	Path    string `json:"path"`     // relative path from root
-	Name    string `json:"name"`     // basename
+	Path    string `json:"path"` // relative path from root
+	Name    string `json:"name"` // basename
 	IsDir   bool   `json:"is_dir"`
 	Size    int64  `json:"size"`
 	ModTime string `json:"mod_time"` // RFC3339
@@ -129,31 +129,26 @@ func (a *API) handleAutocompleteFiles(w http.ResponseWriter, r *http.Request) {
 }
 
 // resolveRoot determines the filesystem root for file autocomplete.
-// Priority: session's project repo_path → cwd.
+// Priority: session's project repo_path → cwd. No longer workspace-scoped
+// (Phase 0 item 20, retire workspaces — there has only ever been one
+// workspace in practice).
 func resolveRoot(a *API, sessionID string) string {
 	if sessionID != "" {
-		// Look up session → workspace → projects with repo_path.
+		// Look up session → project with repo_path.
 		session, err := a.Services.Store.GetSession(sessionID)
 		if err == nil && session != nil {
 			// If session has a project_id, use that project's repo_path.
 			if session.ProjectID != "" {
-				projects, err := a.Services.Store.ListProjects(session.WorkspaceID)
-				if err == nil {
-					for _, p := range projects {
-						if p.ID == session.ProjectID && p.RepoPath != "" {
-							return p.RepoPath
-						}
-					}
+				if p, err := a.Services.Store.GetProject(session.ProjectID); err == nil && p != nil && p.RepoPath != "" {
+					return p.RepoPath
 				}
 			}
-			// Otherwise, try the first project in the workspace with a repo_path.
-			if session.WorkspaceID != "" {
-				projects, err := a.Services.Store.ListProjects(session.WorkspaceID)
-				if err == nil {
-					for _, p := range projects {
-						if p.RepoPath != "" {
-							return p.RepoPath
-						}
+			// Otherwise, try the first project with a repo_path.
+			projects, err := a.Services.Store.ListProjects()
+			if err == nil {
+				for _, p := range projects {
+					if p.RepoPath != "" {
+						return p.RepoPath
 					}
 				}
 			}

@@ -11,9 +11,7 @@ import (
 // newHandoffTestSession inserts a real sessions row so that the
 // session_handoffs(session_id) foreign key is satisfied. The session gets a
 // unique short_code via the store's auto-generation, so multiple calls in a
-// single test are safe. WorkspaceID is left empty so CreateSession stores
-// NULL for workspace_id and doesn't trip the FK against the workspaces
-// table (which is empty in tests).
+// single test are safe.
 func newHandoffTestSession(t *testing.T, s *store.Store) *store.Session {
 	t.Helper()
 	sess := &store.Session{}

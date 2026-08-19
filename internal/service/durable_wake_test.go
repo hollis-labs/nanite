@@ -39,12 +39,15 @@ func TestDurableWakeListDueAndDryRun(t *testing.T) {
 		t.Fatalf("InsertAgentSchedule: %v", err)
 	}
 
+	// Phase 0 item 20 (retire workspaces): a due item with no attached
+	// session and default status is no longer skipped with "workspace
+	// unavailable" — that gate is retired along with sessions.workspace_id.
 	wakeSvc := NewDurableAgentWakeService(st, NewDurableAgentService(st))
 	items, err := wakeSvc.ListDue(ctx, time.Now().UTC())
 	if err != nil {
 		t.Fatalf("ListDue: %v", err)
 	}
-	if len(items) != 1 || items[0].Schedule.ID != "sched-1" || items[0].SkipReason != "workspace unavailable" {
+	if len(items) != 1 || items[0].Schedule.ID != "sched-1" || items[0].SkipReason != "" {
 		t.Fatalf("due items = %+v", items)
 	}
 
@@ -52,7 +55,7 @@ func TestDurableWakeListDueAndDryRun(t *testing.T) {
 	if err != nil {
 		t.Fatalf("RunDue dry-run: %v", err)
 	}
-	if len(run.Results) != 1 || !run.Results[0].Skipped || run.Results[0].SkipReason != "workspace unavailable" {
+	if len(run.Results) != 1 || run.Results[0].Skipped {
 		t.Fatalf("dry-run results = %+v", run.Results)
 	}
 	schedule, err := st.GetAgentSchedule(ctx, "sched-1")
@@ -71,10 +74,7 @@ func TestDurableWakeRunDueStartsAttachedSessionAndBumpsSchedule(t *testing.T) {
 	if err := st.CreateAgent(profile); err != nil {
 		t.Fatalf("CreateAgent: %v", err)
 	}
-	if err := st.CreateWorkspace(&store.Workspace{ID: "workspace-a", Name: "Workspace A"}); err != nil {
-		t.Fatalf("CreateWorkspace: %v", err)
-	}
-	seedSession := &store.Session{WorkspaceID: "workspace-a", Provider: "anthropic", Model: "model-a"}
+	seedSession := &store.Session{Provider: "anthropic", Model: "model-a"}
 	if err := st.CreateSession(seedSession); err != nil {
 		t.Fatalf("CreateSession: %v", err)
 	}
@@ -141,9 +141,17 @@ func TestDurableWakeRunDueSkipsPausedAndActiveInstances(t *testing.T) {
 	if err := st.CreateAgent(profile); err != nil {
 		t.Fatalf("CreateAgent: %v", err)
 	}
+	// "active" uses DurableAgentClassTemplate, not Process: per the
+	// CW-20260817 fix (see TestDurableWakeProcessClassRewakeableWhileActive),
+	// a process-class instance already Active is intentionally rewakeable,
+	// not skipped. Advisor class isn't wake-managed at all (wakeManagedLifecycle
+	// only includes Process/Template), so it would drop out of ListDue
+	// entirely rather than surface as a skipped result — Template is the
+	// wake-managed class that still stays blocked while active
+	// (LifecycleClass != Process triggers "wake already active").
 	instances := []store.DurableAgentInstance{
 		{Name: "paused", Slug: "paused", ProfileID: profile.ID, LifecycleClass: store.DurableAgentClassProcess, Status: store.DurableAgentStatusPaused},
-		{Name: "active", Slug: "active", ProfileID: profile.ID, LifecycleClass: store.DurableAgentClassProcess, Status: store.DurableAgentStatusActive},
+		{Name: "active", Slug: "active", ProfileID: profile.ID, LifecycleClass: store.DurableAgentClassTemplate, Status: store.DurableAgentStatusActive},
 	}
 	for i := range instances {
 		if err := st.CreateDurableAgentInstance(&instances[i]); err != nil {
@@ -177,16 +185,24 @@ func TestDurableWakeRunDueSkipsPausedAndActiveInstances(t *testing.T) {
 	}
 }
 
-func TestDurableWakeFailurePersistsFailureReason(t *testing.T) {
+// TestDurableWakeNoAttachedSessionStillSucceeds is the post-Phase-0-item-20
+// (retire workspaces) replacement for the old "no workspace_id means the
+// wake is skipped with workspace unavailable" regression test — that gate
+// (and sessions.workspace_id, the column it depended on) is retired in
+// full. A process-class instance with no attached session and no
+// caller-supplied ProjectID now succeeds (creates a fresh session) rather
+// than being skipped, since Wake()/Start() no longer require a workspace
+// to create one.
+func TestDurableWakeNoAttachedSessionStillSucceeds(t *testing.T) {
 	st := newDurableAgentServiceTestStore(t)
 	ctx := context.Background()
-	profile := &store.AgentProfile{Name: "Wake Fail Agent", Slug: "wake-fail-agent", SystemPrompt: "x"}
+	profile := &store.AgentProfile{Name: "Wake Agent 2", Slug: "wake-agent-2", SystemPrompt: "x"}
 	if err := st.CreateAgent(profile); err != nil {
 		t.Fatalf("CreateAgent: %v", err)
 	}
 	inst := &store.DurableAgentInstance{
-		Name:           "Wake Fail Instance",
-		Slug:           "wake-fail-instance",
+		Name:           "Wake Instance 2",
+		Slug:           "wake-instance-2",
 		ProfileID:      profile.ID,
 		LifecycleClass: store.DurableAgentClassProcess,
 		Provider:       "anthropic",
@@ -202,15 +218,18 @@ func TestDurableWakeFailurePersistsFailureReason(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Wake: unexpected error: %v", err)
 	}
-	if result == nil || !result.Skipped || result.SkipReason != "workspace unavailable" {
-		t.Fatalf("wake result = %+v", result)
+	if result == nil || result.Skipped {
+		t.Fatalf("wake result = %+v, want a non-skipped wake", result)
+	}
+	if result.LaunchResult == nil || result.LaunchResult.Session == nil {
+		t.Fatalf("wake result missing launch_result/session: %+v", result)
 	}
 	events, err := st.ListDurableAgentEvents(inst.ID, 20)
 	if err != nil {
 		t.Fatalf("ListDurableAgentEvents: %v", err)
 	}
-	if !durableAgentEventsContain(events, store.DurableAgentEventWakeSkipped) {
-		t.Fatalf("expected wake_skipped event, got %+v", events)
+	if !durableAgentEventsContain(events, store.DurableAgentEventWakeRequested) || !durableAgentEventsContain(events, store.DurableAgentEventWakeStarted) {
+		t.Fatalf("expected wake_requested and wake_started events, got %+v", events)
 	}
 }
 
@@ -231,10 +250,7 @@ func TestDurableWakeProcessClassRewakeableWhileActive(t *testing.T) {
 	if err := st.CreateAgent(profile); err != nil {
 		t.Fatalf("CreateAgent: %v", err)
 	}
-	if err := st.CreateWorkspace(&store.Workspace{ID: "workspace-rewake", Name: "Workspace Rewake"}); err != nil {
-		t.Fatalf("CreateWorkspace: %v", err)
-	}
-	priorSession := &store.Session{WorkspaceID: "workspace-rewake", Provider: "anthropic", Model: "model-a"}
+	priorSession := &store.Session{Provider: "anthropic", Model: "model-a"}
 	if err := st.CreateSession(priorSession); err != nil {
 		t.Fatalf("CreateSession: %v", err)
 	}
@@ -258,7 +274,6 @@ func TestDurableWakeProcessClassRewakeableWhileActive(t *testing.T) {
 
 	wakeSvc := NewDurableAgentWakeService(st, NewDurableAgentService(st))
 	result, err := wakeSvc.Wake(ctx, inst.ID, DurableAgentWakeRequest{
-		WorkspaceID: "workspace-rewake",
 		WakePayload: DurableAgentWakePayload{Reason: "callback:wiki_page"},
 	})
 	if err != nil {
@@ -303,7 +318,6 @@ func TestDurableWakeAdvisorClassStillBlockedWhileActive(t *testing.T) {
 
 	wakeSvc := NewDurableAgentWakeService(st, NewDurableAgentService(st))
 	result, err := wakeSvc.Wake(ctx, inst.ID, DurableAgentWakeRequest{
-		WorkspaceID: "workspace-does-not-exist",
 		WakePayload: DurableAgentWakePayload{Reason: DurableAgentWakeManual},
 	})
 	if err != nil {

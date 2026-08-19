@@ -158,10 +158,9 @@ func TestListAgents(t *testing.T) {
 
 func TestEnsureSessionAgent(t *testing.T) {
 	s := newTestStore(t)
-	seedWorkspace(t, s, "ws1")
 	a := makeTestAgent(t, s, "ensure-agent")
 
-	sess := &Session{WorkspaceID: "ws1"}
+	sess := &Session{}
 	if err := s.CreateSession(sess); err != nil {
 		t.Fatalf("CreateSession: %v", err)
 	}
@@ -188,10 +187,9 @@ func TestEnsureSessionAgent(t *testing.T) {
 
 func TestGetSessionPrimaryAgent(t *testing.T) {
 	s := newTestStore(t)
-	seedWorkspace(t, s, "ws1")
 	a := makeTestAgent(t, s, "primary-agent")
 
-	sess := &Session{WorkspaceID: "ws1"}
+	sess := &Session{}
 	if err := s.CreateSession(sess); err != nil {
 		t.Fatalf("CreateSession: %v", err)
 	}
@@ -214,11 +212,10 @@ func TestGetSessionPrimaryAgent(t *testing.T) {
 
 func TestListSessionAgents(t *testing.T) {
 	s := newTestStore(t)
-	seedWorkspace(t, s, "ws1")
 	a1 := makeTestAgent(t, s, "list-sa-1")
 	a2 := makeTestAgent(t, s, "list-sa-2")
 
-	sess := &Session{WorkspaceID: "ws1"}
+	sess := &Session{}
 	if err := s.CreateSession(sess); err != nil {
 		t.Fatalf("CreateSession: %v", err)
 	}
@@ -250,7 +247,6 @@ func TestListSessionAgents(t *testing.T) {
 //     INSERT and expect it to fail).
 func TestDeleteAgent_NoPragmaToggle(t *testing.T) {
 	s := newTestStore(t)
-	seedWorkspace(t, s, "ws1")
 	agent := makeTestAgent(t, s, "del-agent")
 
 	// skill + prompt-template assignments
@@ -270,7 +266,7 @@ func TestDeleteAgent_NoPragmaToggle(t *testing.T) {
 	}
 
 	// session + message referencing the agent
-	sess := &Session{WorkspaceID: "ws1"}
+	sess := &Session{}
 	if err := s.CreateSession(sess); err != nil {
 		t.Fatalf("CreateSession: %v", err)
 	}

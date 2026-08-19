@@ -16,42 +16,39 @@ import "testing"
 func TestListArtifactsByProject(t *testing.T) {
 	s := newTestStore(t)
 
-	// Seed workspace + projects + sessions. We bypass the higher-level
-	// service layer and hit the DB directly so the test stays focused on
-	// the query under test.
-	if _, err := s.DB.Exec(`INSERT INTO workspaces (id, name) VALUES (?, ?)`, "ws-f4", "f4"); err != nil {
-		t.Fatalf("seed workspace: %v", err)
-	}
+	// Seed projects + sessions. We bypass the higher-level service layer
+	// and hit the DB directly so the test stays focused on the query
+	// under test.
 	if _, err := s.DB.Exec(
-		`INSERT INTO projects (id, workspace_id, name) VALUES (?, ?, ?)`,
-		"proj-A", "ws-f4", "Project A",
+		`INSERT INTO projects (id, name) VALUES (?, ?)`,
+		"proj-A", "Project A",
 	); err != nil {
 		t.Fatalf("seed proj-A: %v", err)
 	}
 	if _, err := s.DB.Exec(
-		`INSERT INTO projects (id, workspace_id, name) VALUES (?, ?, ?)`,
-		"proj-B", "ws-f4", "Project B",
+		`INSERT INTO projects (id, name) VALUES (?, ?)`,
+		"proj-B", "Project B",
 	); err != nil {
 		t.Fatalf("seed proj-B: %v", err)
 	}
 	if _, err := s.DB.Exec(
-		`INSERT INTO sessions (id, short_code, workspace_id, project_id, title)
-		 VALUES (?, ?, ?, ?, ?)`,
-		"sess-active", "sc-1", "ws-f4", "proj-A", "active",
+		`INSERT INTO sessions (id, short_code, project_id, title)
+		 VALUES (?, ?, ?, ?)`,
+		"sess-active", "sc-1", "proj-A", "active",
 	); err != nil {
 		t.Fatalf("seed active session: %v", err)
 	}
 	if _, err := s.DB.Exec(
-		`INSERT INTO sessions (id, short_code, workspace_id, project_id, title)
-		 VALUES (?, ?, ?, ?, ?)`,
-		"sess-sibling", "sc-2", "ws-f4", "proj-A", "sibling",
+		`INSERT INTO sessions (id, short_code, project_id, title)
+		 VALUES (?, ?, ?, ?)`,
+		"sess-sibling", "sc-2", "proj-A", "sibling",
 	); err != nil {
 		t.Fatalf("seed sibling session: %v", err)
 	}
 	if _, err := s.DB.Exec(
-		`INSERT INTO sessions (id, short_code, workspace_id, project_id, title)
-		 VALUES (?, ?, ?, ?, ?)`,
-		"sess-other-project", "sc-3", "ws-f4", "proj-B", "other",
+		`INSERT INTO sessions (id, short_code, project_id, title)
+		 VALUES (?, ?, ?, ?)`,
+		"sess-other-project", "sc-3", "proj-B", "other",
 	); err != nil {
 		t.Fatalf("seed other-project session: %v", err)
 	}

@@ -27,10 +27,7 @@ func seedEnvelopeInstance(t *testing.T, a *API, sessionID, envelopeType string) 
 
 func seedSessionForEnvelope(t *testing.T, a *API) string {
 	t.Helper()
-	if err := a.Services.Store.CreateWorkspace(&store.Workspace{ID: "ws-env", Name: "env"}); err != nil {
-		t.Fatalf("CreateWorkspace: %v", err)
-	}
-	sess := &store.Session{WorkspaceID: "ws-env"}
+	sess := &store.Session{}
 	if err := a.Services.Store.CreateSession(sess); err != nil {
 		t.Fatalf("CreateSession: %v", err)
 	}

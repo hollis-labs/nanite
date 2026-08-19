@@ -561,7 +561,6 @@ export function ChatHeader() {
       <StartSurfaceDialog
         open={startOpen}
         onOpenChange={setStartOpen}
-        workspaceId={session?.workspace_id || null}
         projectId={session?.project_id || null}
         defaultProvider={session?.provider}
         defaultModel={session?.model}

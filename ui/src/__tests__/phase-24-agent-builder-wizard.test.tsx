@@ -28,7 +28,6 @@ vi.mock("@/hooks/useSettings", () => ({
 vi.mock("@/stores/useAppStore", () => ({
   useAppStore: (selector: (state: Record<string, unknown>) => unknown) =>
     selector({
-      activeWorkspaceId: "workspace-1",
       activeProjectId: "project-1",
       setActiveSession: vi.fn(),
     }),
@@ -464,7 +463,7 @@ describe("Phase 24 agent builder wizard", () => {
     const startDurableSpy = vi.spyOn(api, "startDurableAgent").mockResolvedValue({
       instance: {} as DurableAgentInstance,
       policy: {} as never,
-      session: { id: "session-1", title: "", custom_name: "", workspace_id: "", project_id: "", context_type: null, context_id: null, provider: "anthropic", model: "claude-sonnet-4", status: "active", is_pinned: false, sort_order: 0, message_count: 0, tags: "", last_activity: "", created_at: "" },
+      session: { id: "session-1", title: "", custom_name: "", project_id: "", context_type: null, context_id: null, provider: "anthropic", model: "claude-sonnet-4", status: "active", is_pinned: false, sort_order: 0, message_count: 0, tags: "", last_activity: "", created_at: "" },
     } as never);
 
     renderWithClient(

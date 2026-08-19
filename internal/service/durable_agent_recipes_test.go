@@ -350,18 +350,14 @@ func TestDurableAgentRecipeApplyWithStartAttachesSession(t *testing.T) {
 	if err := st.CreateAgent(profile); err != nil {
 		t.Fatalf("CreateAgent: %v", err)
 	}
-	if err := st.CreateWorkspace(&store.Workspace{ID: "workspace-a", Name: "Workspace A"}); err != nil {
-		t.Fatalf("CreateWorkspace: %v", err)
-	}
 	durableSvc := NewDurableAgentService(st)
 	recipeSvc := newRecipeServiceForTest(t, durableSvc)
 
 	result, err := recipeSvc.Apply(context.Background(), "process-monitor", DurableAgentRecipeRequest{
-		Name:        "Monitor",
-		Slug:        "monitor",
-		ProfileID:   profile.ID,
-		WorkspaceID: "workspace-a",
-		Start:       true,
+		Name:      "Monitor",
+		Slug:      "monitor",
+		ProfileID: profile.ID,
+		Start:     true,
 	})
 	if err != nil {
 		t.Fatalf("Apply start: %v", err)

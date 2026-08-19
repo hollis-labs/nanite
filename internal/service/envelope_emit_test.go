@@ -19,17 +19,11 @@ func TestApprovalEmitter_PersistsAndStreams(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = s.Close() })
 
-	// Seed workspace + session rows required by envelope_instances FK.
-	if _, err := s.DB.Exec(
-		`INSERT INTO workspaces (id, name, created_at) VALUES (?, ?, CURRENT_TIMESTAMP)`,
-		"ws-emit-test", "emit-test",
-	); err != nil {
-		t.Fatalf("seed workspace: %v", err)
-	}
+	// Seed the session row required by envelope_instances FK.
 	sessionID := "sess-emit-1"
 	if _, err := s.DB.Exec(
-		`INSERT INTO sessions (id, workspace_id, title, short_code, created_at) VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)`,
-		sessionID, "ws-emit-test", "emit test", "sc-emit-1",
+		`INSERT INTO sessions (id, title, short_code, created_at) VALUES (?, ?, ?, CURRENT_TIMESTAMP)`,
+		sessionID, "emit test", "sc-emit-1",
 	); err != nil {
 		t.Fatalf("seed session: %v", err)
 	}

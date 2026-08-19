@@ -19,22 +19,9 @@ import (
 
 func (a *API) handleListSessions(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
-	// CW-20260815-0010: resolve to the sole real workspace when the param
-	// is missing or names a workspace that no longer exists, instead of
-	// erroring — see Store.ResolveWorkspaceID.
-	workspaceID, err := a.Services.Store.ResolveWorkspaceID(q.Get("workspace_id"))
-	if err != nil {
-		a.errorResp(w, http.StatusInternalServerError, err.Error())
-		return
-	}
-	if workspaceID == "" {
-		a.errorResp(w, http.StatusBadRequest, "workspace_id query parameter is required (multiple workspaces exist)")
-		return
-	}
-
 	includeArchived := q.Get("include_archived") == "true"
 
-	sessions, err := a.Services.Store.ListSessions(workspaceID, includeArchived)
+	sessions, err := a.Services.Store.ListSessions(includeArchived)
 	if err != nil {
 		a.errorResp(w, http.StatusInternalServerError, err.Error())
 		return
@@ -48,16 +35,11 @@ func (a *API) handleCreateSession(w http.ResponseWriter, r *http.Request) {
 		a.errorResp(w, http.StatusBadRequest, "invalid JSON: "+err.Error())
 		return
 	}
-	if req.WorkspaceID == "" {
-		a.errorResp(w, http.StatusBadRequest, "workspace_id is required")
-		return
-	}
 
 	sess := &store.Session{
-		WorkspaceID: req.WorkspaceID,
-		ProjectID:   req.ProjectID,
-		Model:       req.Model,
-		Provider:    req.Provider,
+		ProjectID: req.ProjectID,
+		Model:     req.Model,
+		Provider:  req.Provider,
 	}
 	if err := a.Services.Store.CreateSession(sess); err != nil {
 		a.errorResp(w, http.StatusInternalServerError, err.Error())
@@ -84,7 +66,7 @@ func (a *API) handleCreateSession(w http.ResponseWriter, r *http.Request) {
 	// Emit session creation event (fire-and-forget).
 	if a.Services.Activity != nil {
 		safego.Go(r.Context(), "api.sessions.activity.session-created", func() {
-			a.Services.Activity.EmitSessionCreated(r.Context(), sess.ID, sess.WorkspaceID)
+			a.Services.Activity.EmitSessionCreated(r.Context(), sess.ID)
 		})
 	}
 
@@ -413,18 +395,13 @@ func (a *API) handleCompactSession(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var workspace *store.Workspace
-	if session.WorkspaceID != "" {
-		workspace, _ = a.Services.Store.GetWorkspace(session.WorkspaceID)
-	}
-
 	settings, _ := a.Services.Store.GetUserSettings()
 	windowSize := 0
 	if settings != nil {
 		windowSize = settings.ContextWindowTokens
 	}
 
-	result, err := a.Services.Context.AssembleSlots(ctx, session, agent, workspace, []llmtypes.ToolDefinition{}, "", windowSize, "")
+	result, err := a.Services.Context.AssembleSlots(ctx, session, agent, []llmtypes.ToolDefinition{}, "", windowSize, "")
 	if err != nil {
 		a.errorResp(w, http.StatusInternalServerError, err.Error())
 		return

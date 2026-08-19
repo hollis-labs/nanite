@@ -15,7 +15,7 @@ type AgentProject struct {
 // ListAgentProjects returns all projects linked to an agent.
 func (s *Store) ListAgentProjects(agentID string) ([]Project, error) {
 	rows, err := s.DB.Query(
-		`SELECT p.id, p.workspace_id, p.name, COALESCE(p.description,''), COALESCE(p.repo_path,''),
+		`SELECT p.id, p.name, COALESCE(p.description,''), COALESCE(p.repo_path,''),
 		        p.settings, p.sort_order, p.created_at, p.updated_at
 		 FROM projects p
 		 JOIN agent_projects ap ON p.id = ap.project_id
@@ -30,7 +30,7 @@ func (s *Store) ListAgentProjects(agentID string) ([]Project, error) {
 	out := make([]Project, 0)
 	for rows.Next() {
 		var p Project
-		if err := rows.Scan(&p.ID, &p.WorkspaceID, &p.Name, &p.Description, &p.RepoPath,
+		if err := rows.Scan(&p.ID, &p.Name, &p.Description, &p.RepoPath,
 			&p.Settings, &p.SortOrder, &p.CreatedAt, &p.UpdatedAt); err != nil {
 			return nil, fmt.Errorf("scan agent project: %w", err)
 		}

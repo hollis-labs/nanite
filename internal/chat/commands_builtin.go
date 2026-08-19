@@ -211,15 +211,7 @@ func searchHandler(s *store.Store) CommandHandler {
 			return &CommandResult{Action: "error", Content: "Usage: /search <query>"}, nil
 		}
 
-		// Get workspace from current session for scoping.
-		workspaceID := ""
-		if sessionID != "" {
-			if sess, err := s.GetSession(sessionID); err == nil {
-				workspaceID = sess.WorkspaceID
-			}
-		}
-
-		results, err := s.SearchMessages(query, workspaceID, "", 20)
+		results, err := s.SearchMessages(query, "", 20)
 		if err != nil {
 			return nil, fmt.Errorf("search failed: %w", err)
 		}

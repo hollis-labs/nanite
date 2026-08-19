@@ -8,23 +8,22 @@ import { api } from '@/lib/api'
 import type { Project } from '@/lib/types'
 
 interface CreateProjectModalProps {
-  workspaceId: string
   onClose: () => void
   onCreated: (project: Project) => void
 }
 
-export function CreateProjectModal({ workspaceId, onClose, onCreated }: CreateProjectModalProps) {
+export function CreateProjectModal({ onClose, onCreated }: CreateProjectModalProps) {
   const [name, setName] = useState('')
   const [description, setDescription] = useState('')
   const queryClient = useQueryClient()
 
   const createMutation = useMutation({
-    mutationFn: () => api.createProject(workspaceId, {
+    mutationFn: () => api.createProject({
       name: name.trim(),
       description: description.trim() || undefined,
     }),
     onSuccess: (project) => {
-      void queryClient.invalidateQueries({ queryKey: ['projects', workspaceId] })
+      void queryClient.invalidateQueries({ queryKey: ['projects'] })
       onCreated(project)
     },
   })
@@ -39,7 +38,7 @@ export function CreateProjectModal({ workspaceId, onClose, onCreated }: CreatePr
       <DialogContent className="sm:max-w-md">
         <DialogHeader className="px-5 pt-5">
           <DialogTitle className="text-sm">New Project</DialogTitle>
-          <DialogDescription className="sr-only">Create a new project in this workspace</DialogDescription>
+          <DialogDescription className="sr-only">Create a new project</DialogDescription>
         </DialogHeader>
 
         {/* Form */}

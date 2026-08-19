@@ -114,7 +114,7 @@ func (st *SelfToolsTransport) callPin(ctx context.Context, args map[string]any) 
 	agentID := strArg(args, "agent_id", "")
 	if agentID == "" {
 		// Fall back to caller profile from context (set by H1 trust middleware).
-		_, agentID = CallerProfileFromContext(ctx)
+		agentID = CallerProfileFromContext(ctx)
 	}
 
 	// Resolve project_id when scope=project. Auto-fill from the current

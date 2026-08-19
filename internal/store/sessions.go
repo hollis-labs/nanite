@@ -17,7 +17,6 @@ type Session struct {
 	ShortCode    string  `json:"short_code"`
 	Title        string  `json:"title"`
 	CustomName   string  `json:"custom_name"`
-	WorkspaceID  string  `json:"workspace_id"`
 	ProjectID    string  `json:"project_id"`
 	ContextType  string  `json:"context_type"`
 	ContextID    string  `json:"context_id"`
@@ -57,9 +56,11 @@ type Message struct {
 	CreatedAt   string `json:"created_at"`
 }
 
-// ListSessions returns sessions filtered by workspace, ordered by last_activity DESC.
-// By default archived sessions are excluded; set includeArchived to include them.
-func (s *Store) ListSessions(workspaceID string, includeArchived ...bool) ([]Session, error) {
+// ListSessions returns all sessions, ordered by last_activity DESC. No
+// longer workspace-scoped (Phase 0 item 20, retire workspaces — there has
+// only ever been one workspace in practice). By default archived sessions
+// are excluded; set includeArchived to include them.
+func (s *Store) ListSessions(includeArchived ...bool) ([]Session, error) {
 	inclArchived := false
 	if len(includeArchived) > 0 {
 		inclArchived = includeArchived[0]
@@ -107,7 +108,7 @@ func (s *Store) ListSessions(workspaceID string, includeArchived ...bool) ([]Ses
 		    WHERE deeper.child_session_id IS NULL
 		 )
 		SELECT sess.id, sess.short_code, COALESCE(sess.title,''), COALESCE(sess.custom_name,''),
-		       COALESCE(sess.workspace_id,''), COALESCE(sess.project_id,''),
+		       COALESCE(sess.project_id,''),
 		       COALESCE(sess.context_type,''), COALESCE(sess.context_id,''),
 		       COALESCE(sess.provider,''), COALESCE(sess.model,''),
 		       sess.status, sess.is_pinned, sess.sort_order, sess.message_count,
@@ -123,14 +124,13 @@ func (s *Store) ListSessions(workspaceID string, includeArchived ...bool) ([]Ses
 		       ) AS runtime_state,
 		       rel.parent_session_id, rel.root_session_id, rel.relation, rel.depth
 		  FROM sessions sess
-		  LEFT JOIN session_relationships rel ON rel.child_session_id = sess.id
-		 WHERE sess.workspace_id = ?`
+		  LEFT JOIN session_relationships rel ON rel.child_session_id = sess.id`
 	if !inclArchived {
-		query += ` AND sess.status != 'archived'`
+		query += ` WHERE sess.status != 'archived'`
 	}
 	query += ` ORDER BY sess.last_activity DESC`
 
-	rows, err := s.DB.Query(query, workspaceID)
+	rows, err := s.DB.Query(query)
 	if err != nil {
 		return nil, fmt.Errorf("list sessions: %w", err)
 	}
@@ -148,7 +148,7 @@ func (s *Store) ListSessions(workspaceID string, includeArchived ...bool) ([]Ses
 		var depth sql.NullInt64
 		if err := rows.Scan(
 			&sess.ID, &sess.ShortCode, &sess.Title, &sess.CustomName,
-			&sess.WorkspaceID, &sess.ProjectID,
+			&sess.ProjectID,
 			&sess.ContextType, &sess.ContextID,
 			&sess.Provider, &sess.Model,
 			&sess.Status, &sess.IsPinned, &sess.SortOrder, &sess.MessageCount,
@@ -217,7 +217,7 @@ func (s *Store) GetSession(id string) (*Session, error) {
 		    WHERE deeper.child_session_id IS NULL
 		 )
 		SELECT sess.id, sess.short_code, COALESCE(sess.title,''), COALESCE(sess.custom_name,''),
-		       COALESCE(sess.workspace_id,''), COALESCE(sess.project_id,''),
+		       COALESCE(sess.project_id,''),
 		       COALESCE(sess.context_type,''), COALESCE(sess.context_id,''),
 		       COALESCE(sess.provider,''), COALESCE(sess.model,''),
 		       sess.status, sess.is_pinned, sess.sort_order, sess.message_count,
@@ -237,7 +237,7 @@ func (s *Store) GetSession(id string) (*Session, error) {
 		 WHERE sess.id = ?`, id,
 	).Scan(
 		&sess.ID, &sess.ShortCode, &sess.Title, &sess.CustomName,
-		&sess.WorkspaceID, &sess.ProjectID,
+		&sess.ProjectID,
 		&sess.ContextType, &sess.ContextID,
 		&sess.Provider, &sess.Model,
 		&sess.Status, &sess.IsPinned, &sess.SortOrder, &sess.MessageCount,
@@ -304,13 +304,13 @@ func (s *Store) CreateSession(sess *Session) error {
 	}
 
 	_, err = s.DB.Exec(
-		`INSERT INTO sessions (id, short_code, title, custom_name, workspace_id, project_id,
+		`INSERT INTO sessions (id, short_code, title, custom_name, project_id,
 		                       context_type, context_id, provider, model,
 		                       status, is_pinned, sort_order, message_count,
 		                       metadata, last_activity, created_at, updated_at)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?)`,
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?)`,
 		sess.ID, sess.ShortCode, nullIfEmpty(sess.Title), nullIfEmpty(sess.CustomName),
-		nullIfEmpty(sess.WorkspaceID), nullIfEmpty(sess.ProjectID),
+		nullIfEmpty(sess.ProjectID),
 		nullIfEmpty(sess.ContextType), nullIfEmpty(sess.ContextID),
 		nullIfEmpty(sess.Provider), nullIfEmpty(sess.Model),
 		sess.Status, sess.IsPinned, sess.SortOrder,
@@ -408,7 +408,7 @@ func (s *Store) GetSessionByShortCode(code string) (*Session, error) {
 	var sess Session
 	err := s.DB.QueryRow(
 		`SELECT id, short_code, COALESCE(title,''), COALESCE(custom_name,''),
-		        COALESCE(workspace_id,''), COALESCE(project_id,''),
+		        COALESCE(project_id,''),
 		        COALESCE(context_type,''), COALESCE(context_id,''),
 		        COALESCE(provider,''), COALESCE(model,''),
 		        status, is_pinned, sort_order, message_count,
@@ -417,7 +417,7 @@ func (s *Store) GetSessionByShortCode(code string) (*Session, error) {
 		 FROM sessions WHERE short_code = ?`, code,
 	).Scan(
 		&sess.ID, &sess.ShortCode, &sess.Title, &sess.CustomName,
-		&sess.WorkspaceID, &sess.ProjectID,
+		&sess.ProjectID,
 		&sess.ContextType, &sess.ContextID,
 		&sess.Provider, &sess.Model,
 		&sess.Status, &sess.IsPinned, &sess.SortOrder, &sess.MessageCount,
@@ -690,7 +690,6 @@ func (s *Store) ForkSession(sourceID string, overrides *Session, copyMessages bo
 
 	// Build new session from source, applying overrides.
 	newSess := &Session{
-		WorkspaceID: src.WorkspaceID,
 		ProjectID:   src.ProjectID,
 		Provider:    src.Provider,
 		Model:       src.Model,
@@ -766,13 +765,13 @@ func (s *Store) ForkSession(sourceID string, overrides *Session, copyMessages bo
 	now := time.Now().UTC().Format(time.RFC3339)
 
 	if _, err := tx.Exec(
-		`INSERT INTO sessions (id, short_code, title, custom_name, workspace_id, project_id,
+		`INSERT INTO sessions (id, short_code, title, custom_name, project_id,
 		                       context_type, context_id, provider, model,
 		                       status, is_pinned, sort_order, message_count,
 		                       tags, metadata, last_activity, created_at, updated_at)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?)`,
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?)`,
 		newSess.ID, newSess.ShortCode, nullIfEmpty(newSess.Title), nullIfEmpty(newSess.CustomName),
-		nullIfEmpty(newSess.WorkspaceID), nullIfEmpty(newSess.ProjectID),
+		nullIfEmpty(newSess.ProjectID),
 		nullIfEmpty(newSess.ContextType), nullIfEmpty(newSess.ContextID),
 		nullIfEmpty(newSess.Provider), nullIfEmpty(newSess.Model),
 		newSess.Status, newSess.IsPinned, newSess.SortOrder,
@@ -905,8 +904,10 @@ type SearchResult struct {
 }
 
 // SearchMessages searches message content using LIKE matching.
-// Returns matches with surrounding snippet text. Filters by workspace and optionally project.
-func (s *Store) SearchMessages(query, workspaceID, projectID string, limit int) ([]SearchResult, error) {
+// Returns matches with surrounding snippet text. Optionally filters by
+// project. No longer workspace-scoped (Phase 0 item 20, retire workspaces
+// — there has only ever been one workspace in practice).
+func (s *Store) SearchMessages(query, projectID string, limit int) ([]SearchResult, error) {
 	if limit <= 0 {
 		limit = 20
 	}
@@ -925,11 +926,11 @@ func (s *Store) SearchMessages(query, workspaceID, projectID string, limit int) 
 			        COALESCE(s.title,''), s.short_code
 			 FROM messages m
 			 JOIN sessions s ON m.session_id = s.id
-			 WHERE s.workspace_id = ? AND s.project_id = ? AND s.status != 'archived'
+			 WHERE s.project_id = ? AND s.status != 'archived'
 			   AND m.content LIKE ?
 			 ORDER BY m.created_at DESC
 			 LIMIT ?`,
-			workspaceID, projectID, likePattern, limit,
+			projectID, likePattern, limit,
 		)
 	} else {
 		rows, err = s.DB.Query(
@@ -937,11 +938,11 @@ func (s *Store) SearchMessages(query, workspaceID, projectID string, limit int) 
 			        COALESCE(s.title,''), s.short_code
 			 FROM messages m
 			 JOIN sessions s ON m.session_id = s.id
-			 WHERE s.workspace_id = ? AND s.status != 'archived'
+			 WHERE s.status != 'archived'
 			   AND m.content LIKE ?
 			 ORDER BY m.created_at DESC
 			 LIMIT ?`,
-			workspaceID, likePattern, limit,
+			likePattern, limit,
 		)
 	}
 	if err != nil {

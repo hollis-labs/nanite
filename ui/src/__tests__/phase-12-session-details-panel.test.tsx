@@ -42,7 +42,6 @@ afterEach(() => {
   vi.restoreAllMocks();
   localStorage.clear();
   useAppStore.setState({
-    activeWorkspaceId: null,
     activeProjectId: null,
     activeSessionId: null,
     configVersion: 0,
@@ -65,7 +64,6 @@ function session(overrides: Partial<Session> = {}): Session {
     short_code: "c1",
     title: "Session One",
     custom_name: "",
-    workspace_id: "workspace-1",
     project_id: "project-1",
     context_type: null,
     context_id: null,
@@ -339,7 +337,6 @@ describe("SessionDetailsPanel", () => {
         session: session({
           title: "",
           short_code: "",
-          workspace_id: "",
           project_id: "",
           provider: "",
           model: "",

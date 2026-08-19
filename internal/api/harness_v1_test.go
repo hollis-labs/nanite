@@ -100,21 +100,17 @@ func TestHarnessV1InitializeAndCapabilities(t *testing.T) {
 
 func TestHarnessV1CreateAndLoadSession(t *testing.T) {
 	a, mux := newTestAPI(t)
-	if err := a.Services.Store.CreateWorkspace(&store.Workspace{ID: "ws-harness", Name: "Harness"}); err != nil {
-		t.Fatalf("CreateWorkspace: %v", err)
-	}
 	agent := &store.AgentProfile{Name: "Harness Agent", Slug: "harness-agent", SystemPrompt: "x"}
 	if err := a.Services.Store.CreateAgent(agent); err != nil {
 		t.Fatalf("CreateAgent: %v", err)
 	}
 
 	body, _ := json.Marshal(harnessV1CreateSessionRequest{
-		WorkspaceID: "ws-harness",
-		Provider:    "anthropic",
-		Model:       "claude-sonnet-4",
-		AgentID:     agent.ID,
-		Title:       "Harness Session",
-		Metadata:    map[string]any{"client": "external"},
+		Provider: "anthropic",
+		Model:    "claude-sonnet-4",
+		AgentID:  agent.ID,
+		Title:    "Harness Session",
+		Metadata: map[string]any{"client": "external"},
 	})
 	req := httptest.NewRequest(http.MethodPost, "/api/harness/v1/sessions", bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
@@ -153,12 +149,8 @@ func TestHarnessV1CreateAndLoadSession(t *testing.T) {
 }
 
 func TestHarnessV1CreateSessionRejectsUnsupportedRuntime(t *testing.T) {
-	a, mux := newTestAPI(t)
-	if err := a.Services.Store.CreateWorkspace(&store.Workspace{ID: "ws-harness", Name: "Harness"}); err != nil {
-		t.Fatalf("CreateWorkspace: %v", err)
-	}
+	_, mux := newTestAPI(t)
 	body, _ := json.Marshal(harnessV1CreateSessionRequest{
-		WorkspaceID: "ws-harness",
 		RuntimeKind: "pty",
 	})
 	req := httptest.NewRequest(http.MethodPost, "/api/harness/v1/sessions", bytes.NewReader(body))
@@ -263,9 +255,6 @@ func TestHarnessV1TurnCancelAndEvents(t *testing.T) {
 
 func TestHarnessV1DurableWrappers(t *testing.T) {
 	a, mux := newTestAPI(t)
-	if err := a.Services.Store.CreateWorkspace(&store.Workspace{ID: "workspace-a", Name: "Workspace A"}); err != nil {
-		t.Fatalf("CreateWorkspace: %v", err)
-	}
 	profile := &store.AgentProfile{Name: "Harness Durable", Slug: "harness-durable", SystemPrompt: "x"}
 	if err := a.Services.Store.CreateAgent(profile); err != nil {
 		t.Fatalf("CreateAgent: %v", err)
@@ -296,7 +285,7 @@ func TestHarnessV1DurableWrappers(t *testing.T) {
 	if err := a.Services.Store.CreateDurableAgentInstance(process); err != nil {
 		t.Fatalf("CreateDurableAgentInstance process: %v", err)
 	}
-	scopeSession := &store.Session{WorkspaceID: "workspace-a", Provider: "anthropic", Model: "model-a"}
+	scopeSession := &store.Session{Provider: "anthropic", Model: "model-a"}
 	if err := a.Services.Store.CreateSession(scopeSession); err != nil {
 		t.Fatalf("CreateSession scope: %v", err)
 	}
@@ -304,7 +293,7 @@ func TestHarnessV1DurableWrappers(t *testing.T) {
 		t.Fatalf("AttachDurableAgentInstanceSession process: %v", err)
 	}
 
-	startBody, _ := json.Marshal(DurableAgentStartRequest{WorkspaceID: "workspace-a"})
+	startBody, _ := json.Marshal(DurableAgentStartRequest{})
 	req := httptest.NewRequest(http.MethodPost, "/api/harness/v1/durable-agents/"+advisor.ID+"/start", bytes.NewReader(startBody))
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
@@ -336,7 +325,6 @@ func TestHarnessV1DurableWrappers(t *testing.T) {
 	}
 
 	wakeBody, _ := json.Marshal(DurableAgentStartRequest{
-		WorkspaceID: "workspace-a",
 		WakePayload: DurableAgentWakePayloadRequest{Reason: service.DurableAgentWakeManual},
 	})
 	req = httptest.NewRequest(http.MethodPost, "/api/harness/v1/durable-agents/"+process.ID+"/wake", bytes.NewReader(wakeBody))
@@ -393,9 +381,6 @@ func TestHarnessV1RecoverSession(t *testing.T) {
 // when the agent doesn't exist instead of silently falling back to default.
 func TestHarnessV1CreateSessionAgentResolution(t *testing.T) {
 	a, mux := newTestAPI(t)
-	if err := a.Services.Store.CreateWorkspace(&store.Workspace{ID: "ws-test", Name: "Test"}); err != nil {
-		t.Fatalf("CreateWorkspace: %v", err)
-	}
 
 	// Create a test agent with known ID and slug
 	agent := &store.AgentProfile{
@@ -409,8 +394,7 @@ func TestHarnessV1CreateSessionAgentResolution(t *testing.T) {
 
 	// Test 1: Resolution by ID should work
 	body, _ := json.Marshal(harnessV1CreateSessionRequest{
-		WorkspaceID: "ws-test",
-		AgentID:     agent.ID,
+		AgentID: agent.ID,
 	})
 	req := httptest.NewRequest(http.MethodPost, "/api/harness/v1/sessions", bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
@@ -429,8 +413,7 @@ func TestHarnessV1CreateSessionAgentResolution(t *testing.T) {
 
 	// Test 2: Resolution by slug should work
 	body, _ = json.Marshal(harnessV1CreateSessionRequest{
-		WorkspaceID: "ws-test",
-		AgentID:     "test-agent", // slug, not ID
+		AgentID: "test-agent", // slug, not ID
 	})
 	req = httptest.NewRequest(http.MethodPost, "/api/harness/v1/sessions", bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
@@ -449,8 +432,7 @@ func TestHarnessV1CreateSessionAgentResolution(t *testing.T) {
 
 	// Test 3: Nonexistent agent should fail loudly (not silently fall back)
 	body, _ = json.Marshal(harnessV1CreateSessionRequest{
-		WorkspaceID: "ws-test",
-		AgentID:     "does-not-exist",
+		AgentID: "does-not-exist",
 	})
 	req = httptest.NewRequest(http.MethodPost, "/api/harness/v1/sessions", bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")

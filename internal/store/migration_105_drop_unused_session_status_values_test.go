@@ -8,20 +8,20 @@ import (
 	"github.com/pressly/goose/v3"
 )
 
-// TestMigrate104NarrowsSessionStatusCheck is the regression test for
+// TestMigrate105NarrowsSessionStatusCheck is the regression test for
 // TASKS/phase-0/25-drop-unused-session-status-enum.md: a fresh full
 // migration run must leave sessions.status's CHECK constraint accepting
 // only active/paused/archived — sleeping/halted/terminated (added by
 // 074_agent_profiles_multi_agent.sql, never written by any code path) must
 // be rejected at the SQL layer. halted_at/halted_reason (a separate, real
 // mechanism, see internal/store/session_halt.go) must be unaffected.
-func TestMigrate104NarrowsSessionStatusCheck(t *testing.T) {
+func TestMigrate105NarrowsSessionStatusCheck(t *testing.T) {
 	s := newTestStore(t)
 
-	seedWorkspace(t, s, "ws-migration-104")
-	sess := &Session{WorkspaceID: "ws-migration-104", Title: "status-check-probe"}
+	seedWorkspace(t, s, "ws-migration-105")
+	sess := &Session{WorkspaceID: "ws-migration-105", Title: "status-check-probe"}
 	if err := s.CreateSession(sess); err != nil {
-		t.Fatalf("CreateSession after migration 104: %v", err)
+		t.Fatalf("CreateSession after migration 105: %v", err)
 	}
 
 	// The three removed values must now be rejected at the SQL layer.
@@ -50,11 +50,11 @@ func TestMigrate104NarrowsSessionStatusCheck(t *testing.T) {
 	// monitor-loop halt mechanism (a distinct concept from the status enum
 	// despite the shared word "halted") must keep working identically.
 	if err := s.MarkSessionHalted(sess.ID, "circuit breaker tripped"); err != nil {
-		t.Fatalf("MarkSessionHalted after migration 104: %v", err)
+		t.Fatalf("MarkSessionHalted after migration 105: %v", err)
 	}
 	halt, err := s.GetSessionHalt(sess.ID)
 	if err != nil {
-		t.Fatalf("GetSessionHalt after migration 104: %v", err)
+		t.Fatalf("GetSessionHalt after migration 105: %v", err)
 	}
 	if !halt.IsHalted() {
 		t.Errorf("expected session to be halted after MarkSessionHalted")
@@ -63,7 +63,7 @@ func TestMigrate104NarrowsSessionStatusCheck(t *testing.T) {
 		t.Errorf("halted_reason round-trip: got %v, want %q", halt.HaltedReason, "circuit breaker tripped")
 	}
 	if err := s.ClearSessionHalt(sess.ID); err != nil {
-		t.Fatalf("ClearSessionHalt after migration 104: %v", err)
+		t.Fatalf("ClearSessionHalt after migration 105: %v", err)
 	}
 	halt, err = s.GetSessionHalt(sess.ID)
 	if err != nil {
@@ -78,24 +78,24 @@ func TestMigrate104NarrowsSessionStatusCheck(t *testing.T) {
 	// Simulated restart: a second full migrate() must be a clean no-op and
 	// the narrowed constraint must still hold afterward.
 	if err := s.migrate(); err != nil {
-		t.Fatalf("re-migrate after 104 already applied: %v", err)
+		t.Fatalf("re-migrate after 105 already applied: %v", err)
 	}
 	if _, err := s.DB.Exec(`UPDATE sessions SET status = 'terminated' WHERE id = ?`, sess.ID); err == nil {
 		t.Errorf("removed status 'terminated' accepted after re-migrate — narrowed CHECK must not be lost on restart")
 	}
 }
 
-// TestMigrate104DownWidensSessionStatusCheck is the tested Down half of
-// migration 104: goose's DownTo must be able to reverse this migration,
+// TestMigrate105DownWidensSessionStatusCheck is the tested Down half of
+// migration 105: goose's DownTo must be able to reverse this migration,
 // restoring the original 6-value CHECK from
 // 074_agent_profiles_multi_agent.sql, with the constraint actually enforced
 // at the SQL layer again (not just structurally present).
-func TestMigrate104DownWidensSessionStatusCheck(t *testing.T) {
+func TestMigrate105DownWidensSessionStatusCheck(t *testing.T) {
 	s := newTestStore(t)
 	ctx := context.Background()
 
-	seedWorkspace(t, s, "ws-migration-104-down")
-	sess := &Session{WorkspaceID: "ws-migration-104-down", Title: "down-check-probe"}
+	seedWorkspace(t, s, "ws-migration-105-down")
+	sess := &Session{WorkspaceID: "ws-migration-105-down", Title: "down-check-probe"}
 	if err := s.CreateSession(sess); err != nil {
 		t.Fatalf("CreateSession before down: %v", err)
 	}
@@ -114,8 +114,8 @@ func TestMigrate104DownWidensSessionStatusCheck(t *testing.T) {
 		t.Fatalf("construct goose provider: %v", err)
 	}
 
-	if _, err := provider.DownTo(ctx, 103); err != nil {
-		t.Fatalf("goose DownTo 103 (reverse migration 104): %v", err)
+	if _, err := provider.DownTo(ctx, 104); err != nil {
+		t.Fatalf("goose DownTo 104 (reverse migration 105): %v", err)
 	}
 
 	// The re-widened constraint must accept all six original values again.
@@ -141,9 +141,9 @@ func TestMigrate104DownWidensSessionStatusCheck(t *testing.T) {
 	}
 
 	// Reset to a value the narrowed CHECK will accept before re-upping —
-	// re-running 104's Up rebuilds the table via INSERT ... SELECT, which
+	// re-running 105's Up rebuilds the table via INSERT ... SELECT, which
 	// would itself fail the narrowed CHECK if any row still held one of the
-	// three removed values. (This is precisely the real-world hazard 104's
+	// three removed values. (This is precisely the real-world hazard 105's
 	// own Up migration guards against: a pre-existing out-of-range status
 	// row would fail the migration loudly at deploy time, not silently.)
 	if _, err := s.DB.Exec(`UPDATE sessions SET status = 'active' WHERE id = ?`, sess.ID); err != nil {
@@ -156,6 +156,6 @@ func TestMigrate104DownWidensSessionStatusCheck(t *testing.T) {
 		t.Fatalf("goose Up after DownTo 103: %v", err)
 	}
 	if _, err := s.DB.Exec(`UPDATE sessions SET status = 'sleeping' WHERE id = ?`, sess.ID); err == nil {
-		t.Errorf("status 'sleeping' accepted after Up replayed 104 — Up should narrow the CHECK again")
+		t.Errorf("status 'sleeping' accepted after Up replayed 105 — Up should narrow the CHECK again")
 	}
 }

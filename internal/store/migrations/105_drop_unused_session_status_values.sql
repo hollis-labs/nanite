@@ -30,11 +30,16 @@
 -- that originally widened this constraint. The column shape below reflects
 -- the live schema as of this migration -- notably without
 -- compaction_summary/compacted_at (dropped by
--- 102_drop_session_compaction_summary_fields.sql) and without intent
--- (dropped by 103_drop_session_intent.sql), confirmed against a fresh
--- `newTestStore` schema dump rather than assumed. Any future column added
--- to sessions must be re-mirrored here or in a later table-rebuild
--- migration, same caveat 074 left for itself.
+-- 102_drop_session_compaction_summary_fields.sql), without intent
+-- (dropped by 103_drop_session_intent.sql), and without
+-- current_mode_id/auto_switch_override (dropped by
+-- 104_cut_modes.sql -- this migration was renumbered from a colliding 104
+-- to 105 during merge, after 104_cut_modes.sql had already landed on the
+-- number this task originally claimed; the column list below was corrected
+-- at that point to match the post-104 schema instead of the pre-104 one it
+-- was originally written against). Any future column added to sessions
+-- must be re-mirrored here or in a later table-rebuild migration, same
+-- caveat 074 left for itself.
 
 PRAGMA foreign_keys = OFF;
 
@@ -61,8 +66,6 @@ CREATE TABLE IF NOT EXISTS sessions_new (
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     context_prompt TEXT NOT NULL DEFAULT '',
-    current_mode_id TEXT REFERENCES modes(id),
-    auto_switch_override INTEGER DEFAULT NULL,
     halted_at DATETIME,
     halted_reason TEXT
 );
@@ -72,14 +75,14 @@ INSERT INTO sessions_new
      context_type, context_id, provider, model, status,
      is_pinned, sort_order, message_count, tags, metadata,
      last_activity, created_at, updated_at,
-     context_prompt, current_mode_id, auto_switch_override,
+     context_prompt,
      halted_at, halted_reason)
 SELECT
     id, short_code, title, custom_name, workspace_id, project_id,
     context_type, context_id, provider, model, status,
     is_pinned, sort_order, message_count, tags, metadata,
     last_activity, created_at, updated_at,
-    context_prompt, current_mode_id, auto_switch_override,
+    context_prompt,
     halted_at, halted_reason
 FROM sessions;
 
@@ -96,7 +99,10 @@ END;
 PRAGMA foreign_keys = ON;
 
 -- +goose Down
--- Rebuilds sessions with the original 6-value CHECK restored, exactly as
+-- Rebuilds sessions matching the post-104_cut_modes.sql, pre-105 shape
+-- (no current_mode_id/auto_switch_override -- 104 dropped those and this
+-- Down does not re-add them, only 104's own Down does that) with the
+-- original 6-value CHECK restored, exactly as
 -- 074_agent_profiles_multi_agent.sql first defined it. Structure only --
 -- no data is fabricated for the three re-widened values; existing rows
 -- keep whatever status they already held, and only active/paused/archived
@@ -128,8 +134,6 @@ CREATE TABLE IF NOT EXISTS sessions_new (
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     context_prompt TEXT NOT NULL DEFAULT '',
-    current_mode_id TEXT REFERENCES modes(id),
-    auto_switch_override INTEGER DEFAULT NULL,
     halted_at DATETIME,
     halted_reason TEXT
 );
@@ -139,14 +143,14 @@ INSERT INTO sessions_new
      context_type, context_id, provider, model, status,
      is_pinned, sort_order, message_count, tags, metadata,
      last_activity, created_at, updated_at,
-     context_prompt, current_mode_id, auto_switch_override,
+     context_prompt,
      halted_at, halted_reason)
 SELECT
     id, short_code, title, custom_name, workspace_id, project_id,
     context_type, context_id, provider, model, status,
     is_pinned, sort_order, message_count, tags, metadata,
     last_activity, created_at, updated_at,
-    context_prompt, current_mode_id, auto_switch_override,
+    context_prompt,
     halted_at, halted_reason
 FROM sessions;
 

@@ -143,8 +143,9 @@ func TestComposeBootdirParams_SystemPromptHonorsOverride(t *testing.T) {
 			BootPromptOverride: "CATALOG-AUTHORED BOOT PROMPT",
 		}
 		_, params := composeBootdirParams(nil, opts, profile, "sess-1")
-		if params.SystemPrompt != "CATALOG-AUTHORED BOOT PROMPT" {
-			t.Errorf("SetupParams.SystemPrompt = %q, want the BootPromptOverride (bootprofile path)", params.SystemPrompt)
+		want := "CATALOG-AUTHORED BOOT PROMPT\n\n" + mandatoryPostCompactionRereadInstruction
+		if params.SystemPrompt != want {
+			t.Errorf("SetupParams.SystemPrompt = %q, want %q (BootPromptOverride, bootprofile path, plus the mandatory post-compaction re-read instruction)", params.SystemPrompt, want)
 		}
 	})
 
@@ -171,10 +172,11 @@ func TestResolveSystemPrompt(t *testing.T) {
 		SystemPrompt: "profile-level system prompt",
 	}
 
-	t.Run("override wins verbatim", func(t *testing.T) {
+	t.Run("override body wins verbatim, plus mandatory re-read appended", func(t *testing.T) {
 		got := ResolveSystemPrompt("executor", profile, ModeLongLived, "CATALOG OVERRIDE", nil)
-		if got != "CATALOG OVERRIDE" {
-			t.Errorf("ResolveSystemPrompt = %q, want the verbatim override", got)
+		want := "CATALOG OVERRIDE\n\n" + mandatoryPostCompactionRereadInstruction
+		if got != want {
+			t.Errorf("ResolveSystemPrompt = %q, want %q", got, want)
 		}
 	})
 
@@ -185,6 +187,9 @@ func TestResolveSystemPrompt(t *testing.T) {
 		}
 		if !strings.Contains(got, "executor") {
 			t.Errorf("ResolveSystemPrompt = %q, want it to include the executor role framing", got)
+		}
+		if !strings.Contains(got, mandatoryPostCompactionRereadInstruction) {
+			t.Errorf("ResolveSystemPrompt = %q, want the mandatory post-compaction re-read instruction (Phase 2 task 03)", got)
 		}
 	})
 

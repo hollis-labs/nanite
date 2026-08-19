@@ -37,15 +37,16 @@ func composeSystemPrompt(role string, profile *store.AgentProfile, mode Mode) st
 
 // resolveBootPrompt is the single hook the per-provider Layout
 // implementations consult. When Options.BootPromptOverride is non-empty,
-// it wins verbatim over the role-derived composition — CW-20260514-0048
+// its BODY wins verbatim over composeSystemPrompt — CW-20260514-0048
 // (boot-profile-driven launches) passes the fully-rendered
-// LaunchSpec.BootPrompt through here so the catalog-authored prompt
-// lands on the runtime in place of the role-derived composeSystemPrompt
-// result. Empty override delegates to composeSystemPrompt for the prior
-// behavior. Either way, Options.DynamicContext (Phase 2 item 02,
-// TASKS/phase-2/02-port-forward-dynamic-resolver.md) is appended on top
-// — a resolver's live-fetched data folds into the assembled context
-// regardless of which path produced the base prompt.
+// LaunchSpec.BootPrompt through here so the catalog-authored prompt lands
+// on the runtime in place of the role-derived composeSystemPrompt result.
+// Empty override delegates to composeSystemPrompt for the prior behavior.
+// Either way, Options.DynamicContext (Phase 2 item 02,
+// TASKS/phase-2/02-port-forward-dynamic-resolver.md) is folded in next,
+// and withMandatoryPostCompactionReread (Phase 2 item 03) appends the
+// fixed post-compaction re-read instruction last (see its doc comment) —
+// that part is NOT overridable by a catalog-authored prompt.
 //
 // Keeping the resolution in one place means the three live layouts
 // (claude / codex / opencode) — plus any future addition — share one
@@ -55,14 +56,16 @@ func resolveBootPrompt(profile *store.AgentProfile, opts Options) string {
 	if base == "" {
 		base = composeSystemPrompt(opts.Role, profile, opts.Mode)
 	}
-	return appendDynamicContext(base, opts.DynamicContext)
+	base = appendDynamicContext(base, opts.DynamicContext)
+	return withMandatoryPostCompactionReread(base)
 }
 
 // ResolveSystemPrompt is the exported entry point for recomputing a
 // session's boot prompt OUTSIDE agent.Boot — it applies the same
-// resolution resolveBootPrompt does (override wins verbatim; otherwise
-// role/profile/mode-composed; dynamicContext appended on top either
-// way), but takes the inputs loose rather than bundled in an Options.
+// resolution resolveBootPrompt does (override body wins verbatim over
+// composeSystemPrompt; dynamicContext folded in next; the mandatory
+// post-compaction re-read instruction appended last, unconditionally),
+// but takes the inputs loose rather than bundled in an Options.
 //
 // CW-20260516-0007 round 1: the chat service's mid-session CLAUDE.md
 // regeneration (regenerateBootDirSlots) uses this so a slot refresh
@@ -79,7 +82,8 @@ func ResolveSystemPrompt(role string, profile *store.AgentProfile, mode Mode, bo
 	if base == "" {
 		base = composeSystemPrompt(role, profile, mode)
 	}
-	return appendDynamicContext(base, dynamicContext)
+	base = appendDynamicContext(base, dynamicContext)
+	return withMandatoryPostCompactionReread(base)
 }
 
 // appendDynamicContext appends each non-empty block in blocks (keyed by
@@ -120,6 +124,47 @@ func appendDynamicContext(base string, blocks map[string]string) string {
 		b.WriteString(strings.TrimSpace(blocks[name]))
 	}
 	return b.String()
+}
+
+// mandatoryPostCompactionRereadInstruction is the fixed instruction line
+// appended, unconditionally, to every CLI-based agent's resolved boot
+// content (Phase 2 task 03). See architecture/02-agent-launching.md:
+// "Post-compaction re-read of the project's real CLAUDE.md/AGENTS.md is
+// mandatory-by-default, code-driven — not a per-agent opt-in flag."
+//
+// This is deliberately a DIFFERENT mechanism from Nanite's own boot-dir
+// CLAUDE.md/AGENTS.md planting (bootdir.go / kickoff.go), which this task
+// does not touch: that boot-dir file already survives Claude Code's own
+// context-recovery re-read automatically, with no prompt text required —
+// see this file's own doc comment on composeSystemPrompt. This
+// instruction is content riding on top of that already-working delivery
+// mechanism; it tells the agent to ALSO re-read the PROJECT's own real
+// CLAUDE.md/AGENTS.md — a different file, reachable via --add-dir, not
+// this boot directory — since project-specific conventions living outside
+// the boot dir are not restored automatically by Claude Code's own
+// recovery behavior.
+//
+// No per-agent flag gates this: research for this task did not find an
+// existing per-agent opt-in controlling a project-CLAUDE.md re-read
+// instruction anywhere in the codebase (see this task's Work Log) — this
+// constant introduces the instruction for the first time, unconditionally,
+// rather than converting a prior opt-in to mandatory.
+const mandatoryPostCompactionRereadInstruction = "After any context compaction or context-recovery event during this session, re-read the project's own CLAUDE.md and/or AGENTS.md files (the project directory reachable via --add-dir, not this boot directory) before continuing work, so project-specific conventions are not silently dropped."
+
+// withMandatoryPostCompactionReread appends
+// mandatoryPostCompactionRereadInstruction to prompt, unconditionally.
+// Both resolveBootPrompt and ResolveSystemPrompt route through this single
+// append point, after any Phase 2 item 02 dynamic-context blocks have
+// already been folded in, so every CLI-based agent's planted boot content
+// carries the instruction regardless of whether the base content came
+// from the role/profile/mode composition, a boot-profile catalog's
+// BootPromptOverride, or a resolver's live-fetched data — not per-agent
+// opt-in, not YAML-catalog-gated.
+func withMandatoryPostCompactionReread(prompt string) string {
+	if strings.TrimSpace(prompt) == "" {
+		return mandatoryPostCompactionRereadInstruction
+	}
+	return prompt + "\n\n" + mandatoryPostCompactionRereadInstruction
 }
 
 // roleFraming returns the role-specific prefix for the system prompt. Empty

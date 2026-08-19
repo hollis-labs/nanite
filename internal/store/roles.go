@@ -50,6 +50,16 @@ type Role struct {
 	DefaultPermissions string `json:"default_permissions"`
 	CreatedAt          string `json:"created_at"`
 	UpdatedAt          string `json:"updated_at"`
+
+	// PluginID tags this row as created/owned by a plugin's
+	// registers.agent_profiles[] registration (Phase 5 item 03,
+	// TASKS/phase-5/03-wire-registers-agent-profiles.md) -- mirrors
+	// AgentProfile.PluginID's doc comment. Empty string means this role is
+	// operator/GUI-created, or was reused (read-only, not claimed) by a
+	// plugin registration that found an existing role at the same slug --
+	// see agent_profiles.go's resolveOrCreatePluginRole. Added by
+	// migration 122.
+	PluginID string `json:"plugin_id"`
 }
 
 // validateRoleFields enforces the DefaultClass enum constraint at the Go
@@ -71,13 +81,15 @@ func validateRoleFields(r *Role) error {
 
 // roleColumns is the canonical SELECT column list for roles.
 const roleColumns = `id, slug, name, system_prompt, default_class, default_model, default_provider,
-        default_tools, default_skills, default_permissions, created_at, updated_at`
+        default_tools, default_skills, default_permissions, created_at, updated_at,
+        COALESCE(plugin_id,'')`
 
 // scanRole scans a row into a Role using the canonical column order.
 func scanRole(scanner interface{ Scan(...any) error }, r *Role) error {
 	return scanner.Scan(
 		&r.ID, &r.Slug, &r.Name, &r.SystemPrompt, &r.DefaultClass, &r.DefaultModel, &r.DefaultProvider,
 		&r.DefaultTools, &r.DefaultSkills, &r.DefaultPermissions, &r.CreatedAt, &r.UpdatedAt,
+		&r.PluginID,
 	)
 }
 
@@ -145,10 +157,12 @@ func (s *Store) CreateRole(r *Role) error {
 	now := time.Now().UTC().Format(time.RFC3339)
 	_, err := s.DB.Exec(
 		`INSERT INTO roles (id, slug, name, system_prompt, default_class, default_model, default_provider,
-		                    default_tools, default_skills, default_permissions, created_at, updated_at)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		                    default_tools, default_skills, default_permissions, created_at, updated_at,
+		                    plugin_id)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		r.ID, r.Slug, r.Name, r.SystemPrompt, r.DefaultClass, r.DefaultModel, r.DefaultProvider,
 		r.DefaultTools, r.DefaultSkills, r.DefaultPermissions, now, now,
+		nullIfEmpty(r.PluginID),
 	)
 	if err != nil {
 		return fmt.Errorf("create role: %w", err)
@@ -177,11 +191,11 @@ func (s *Store) UpdateRole(r *Role) error {
 	res, err := s.DB.Exec(
 		`UPDATE roles SET slug = ?, name = ?, system_prompt = ?, default_class = ?, default_model = ?,
 		        default_provider = ?, default_tools = ?, default_skills = ?, default_permissions = ?,
-		        updated_at = ?
+		        updated_at = ?, plugin_id = ?
 		 WHERE id = ?`,
 		r.Slug, r.Name, r.SystemPrompt, r.DefaultClass, r.DefaultModel,
 		r.DefaultProvider, r.DefaultTools, r.DefaultSkills, r.DefaultPermissions,
-		now, r.ID,
+		now, nullIfEmpty(r.PluginID), r.ID,
 	)
 	if err != nil {
 		return fmt.Errorf("update role: %w", err)
@@ -192,6 +206,27 @@ func (s *Store) UpdateRole(r *Role) error {
 	}
 	r.UpdatedAt = now
 	return nil
+}
+
+// ListRolesByPluginID returns every roles row tagged with the given
+// plugin_id (see Role.PluginID's doc comment / migration 122). Used by
+// plugin.Host.UnloadPlugin's unload sweep.
+func (s *Store) ListRolesByPluginID(pluginID string) ([]Role, error) {
+	rows, err := s.DB.Query(`SELECT `+roleColumns+` FROM roles WHERE plugin_id = ? ORDER BY slug`, pluginID)
+	if err != nil {
+		return nil, fmt.Errorf("list roles by plugin_id: %w", err)
+	}
+	defer rows.Close()
+
+	out := make([]Role, 0)
+	for rows.Next() {
+		var r Role
+		if err := scanRole(rows, &r); err != nil {
+			return nil, fmt.Errorf("scan role: %w", err)
+		}
+		out = append(out, r)
+	}
+	return out, rows.Err()
 }
 
 // DeleteRole removes a role by ID.

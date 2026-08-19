@@ -208,7 +208,18 @@ func NewHost(router *http.ServeMux, logger plugin.Logger) *Host {
 // NewHostWithStore creates a minimal plugin host with just a store service.
 // Used by CLI commands (e.g. nanite plugin uninstall) that need to run
 // plugin lifecycle methods without a full server.
-func NewHostWithStore(store interface{}) *Host {
+//
+// s is also assigned to h.store (not just h.services["store"]) -- Phase 5
+// item 03 (TASKS/phase-5/03-wire-registers-agent-profiles.md) added
+// SweepPluginAgentProfiles, which (like applyManifestRegistrations' enabled
+// gate before it) reads the typed h.store field, not the generic services
+// map. Before this task, nothing read h.store on a CLI-built host, so
+// leaving it unset was harmless; SweepPluginAgentProfiles is the first
+// thing that needs it populated here too. The parameter type was widened
+// from the previous `interface{}` to *store.Store for exactly this reason
+// -- every real call site already passed a *store.Store or nil, so this is
+// not a behavior change for any existing caller.
+func NewHostWithStore(s *store.Store) *Host {
 	ctx, cancel := context.WithCancel(context.Background())
 	h := &Host{
 		plugins:            make(map[string]plugin.Plugin),
@@ -238,7 +249,8 @@ func NewHostWithStore(store interface{}) *Host {
 		ctxCancel:          cancel,
 	}
 	h.filters = NewFilterRegistry()
-	h.services["store"] = store
+	h.services["store"] = s
+	h.store = s
 	return h
 }
 
@@ -1551,6 +1563,16 @@ func (h *Host) UnloadPlugin(id string) error {
 			h.logger.Debug("plugin unload: cleared config schema", "plugin", id)
 		}
 	}
+
+	// 18. Plugin-owned agent_profiles/roles (Phase 5 item 03 --
+	// TASKS/phase-5/03-wire-registers-agent-profiles.md). See
+	// SweepPluginAgentProfiles's doc comment (agent_profiles.go) for why
+	// this is a DB-authoritative sweep (not an in-memory host side-map like
+	// every category above) and why it's exported as its own method rather
+	// than inlined here -- cmd/nanite/plugin_cmd.go's CLI uninstall/disable
+	// commands need to run the exact same teardown without a live
+	// UnloadPlugin call to ride along with.
+	h.SweepPluginAgentProfiles(id)
 
 	h.logger.Info("unloaded plugin", "id", id)
 

@@ -762,24 +762,33 @@ func fileExists(path string) bool {
 }
 
 // runPluginUninstallCleanup runs the plugin's Uninstall() method to clean up
-// DB artifacts (agent profiles, etc.) so changes are visible immediately.
+// DB artifacts (agent profiles, etc.) so changes are visible immediately,
+// plus (Phase 5 item 03, TASKS/phase-5/03-wire-registers-agent-profiles.md)
+// SweepPluginAgentProfiles -- a belt-and-suspenders call alongside
+// unloadPluginFromHost's own live-host UnloadPlugin sweep. This function
+// runs on BOTH the active-plugin uninstall path (where unloadPluginFromHost
+// also runs and already covers this) AND the already-disabled path (see
+// handleUninstall, which does NOT call unloadPluginFromHost when the
+// plugin's manifest was already the disabled copy) -- for that second
+// path, this is the only sweep that runs, so it must not skip
+// SweepPluginAgentProfiles the way it skips the Uninstallable branch below
+// when there's no compiled-in constructor (e.g. a subprocess plugin).
 func (pms *pluginManagerState) runPluginUninstallCleanup(manifestPath string) {
 	manifest, err := naniteplugin.ParseManifest(manifestPath)
 	if err != nil {
 		return
 	}
-	constructor, ok := naniteplugin.LookupConstructor(manifest.Name)
-	if !ok {
-		return
-	}
-	p := constructor()
-	if u, ok := p.(fplugin.Uninstallable); ok {
-		// Use a minimal host backed by the live store
-		host := naniteplugin.NewHostWithStore(pms.store)
-		if err := u.Uninstall(host); err != nil {
-			slog.Warn("plugin-api: uninstall cleanup failed", "name", manifest.Name, "err", err)
+	if constructor, ok := naniteplugin.LookupConstructor(manifest.Name); ok {
+		p := constructor()
+		if u, ok := p.(fplugin.Uninstallable); ok {
+			// Use a minimal host backed by the live store
+			host := naniteplugin.NewHostWithStore(pms.store)
+			if err := u.Uninstall(host); err != nil {
+				slog.Warn("plugin-api: uninstall cleanup failed", "name", manifest.Name, "err", err)
+			}
 		}
 	}
+	naniteplugin.NewHostWithStore(pms.store).SweepPluginAgentProfiles(manifest.Identifier())
 }
 
 // unloadPluginFromHost removes a plugin from the running host's registry so

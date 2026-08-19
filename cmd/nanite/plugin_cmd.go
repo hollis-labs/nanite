@@ -524,22 +524,34 @@ func pluginUninstall(name string) {
 		os.Exit(1)
 	}
 
-	// Run plugin's Uninstall() if it implements Uninstallable
-	if constructor, ok := plugin.LookupConstructor(manifest.Name); ok {
-		p := constructor()
-		if uninstallable, ok := p.(fplugin.Uninstallable); ok {
-			fmt.Printf("Running %s cleanup...\n", manifest.Name)
-			host, hostErr := buildMinimalHost()
-			if hostErr != nil {
-				fmt.Fprintf(os.Stderr, "Warning: could not initialize for cleanup: %v\n", hostErr)
-			} else {
-				if err := uninstallable.Uninstall(host); err != nil {
+	// A single minimal store-only host serves both cleanup steps below:
+	// the plugin's own optional Uninstall() hook, and (Phase 5 item 03,
+	// TASKS/phase-5/03-wire-registers-agent-profiles.md)
+	// SweepPluginAgentProfiles, tearing down whatever roles/agent_profiles
+	// rows this plugin's registers.agent_profiles[] registered. This CLI
+	// path never goes through a live Host.UnloadPlugin call (this whole
+	// command applies its effect via a subsequent triggerRestart(), not a
+	// live in-process unload) -- both cleanups are DB-authoritative
+	// precisely so they can run here too, off a minimal store-only host,
+	// instead of only being reachable from a running server's live
+	// UnloadPlugin path.
+	cleanupHost, hostErr := buildMinimalHost()
+	if hostErr != nil {
+		fmt.Fprintf(os.Stderr, "Warning: could not initialize for cleanup: %v\n", hostErr)
+	} else {
+		// Run plugin's Uninstall() if it implements Uninstallable.
+		if constructor, ok := plugin.LookupConstructor(manifest.Name); ok {
+			p := constructor()
+			if uninstallable, ok := p.(fplugin.Uninstallable); ok {
+				fmt.Printf("Running %s cleanup...\n", manifest.Name)
+				if err := uninstallable.Uninstall(cleanupHost); err != nil {
 					fmt.Fprintf(os.Stderr, "Warning: cleanup error: %v\n", err)
 				} else {
 					fmt.Println("Cleanup complete — agent profile removed.")
 				}
 			}
 		}
+		cleanupHost.SweepPluginAgentProfiles(manifest.Identifier())
 	}
 
 	// Remove the plugin directory
@@ -565,6 +577,32 @@ func pluginUninstall(name string) {
 
 func pluginDisable(name string) {
 	dir := resolvePluginsDir()
+
+	// Phase 5 item 03 (TASKS/phase-5/03-wire-registers-agent-profiles.md):
+	// mirror the API's handleDisable, which already runs the equivalent
+	// agent-profile cleanup before flipping the DB-backed enabled flag (see
+	// internal/api/plugins.go's runPluginUninstallCleanup +
+	// unloadPluginFromHost, both called unconditionally on disable, not
+	// just uninstall). Resolve the canonical plugin id from its manifest
+	// first (manifest.Identifier() can differ from the on-disk directory
+	// name, per manage.go's resolvePluginIdentity), checking both the
+	// normal and legacy-disabled manifest paths the same way pluginUninstall
+	// does above.
+	manifestPath := filepath.Join(dir, name, "plugin.yaml")
+	if _, err := os.Stat(manifestPath); err != nil {
+		legacy := filepath.Join(dir, name, "plugin.yaml.disabled")
+		if _, legacyErr := os.Stat(legacy); legacyErr == nil {
+			manifestPath = legacy
+		}
+	}
+	if manifest, err := plugin.ParseManifest(manifestPath); err == nil {
+		if host, hostErr := buildMinimalHost(); hostErr == nil {
+			host.SweepPluginAgentProfiles(manifest.Identifier())
+		} else {
+			fmt.Fprintf(os.Stderr, "Warning: could not initialize for agent_profiles cleanup: %v\n", hostErr)
+		}
+	}
+
 	if err := plugin.DisablePlugin(dir, name); err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 		os.Exit(1)

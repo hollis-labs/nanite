@@ -294,10 +294,13 @@ func (s *chatServiceImpl) generateResponse(ctx context.Context, sessionID, assis
 		// longer register an llmcontracts.Provider — the bridges were
 		// removed when agent-sessions became the runtime path (Phase
 		// 4c.6, CW-20260508-0002). Resolution therefore returns
-		// (name, nil) for these, but the downstream CLI bypass below
-		// (chat.IsCLIProvider(providerName) branch) still routes them
-		// to driveBootSession.
-		switch s.classifyNilProvider(providerName) {
+		// (name, nil) for these, but classifyNilProvider below still
+		// routes a legitimate CLI turn (per agent.RuntimeKind, Phase 2
+		// item 01) to driveBootSession — see the per-iteration provider
+		// call site further down, which now branches on `prov == nil`
+		// (this decision, made exactly once here) rather than
+		// re-deriving CLI-ness from providerName's string shape.
+		switch s.classifyNilProvider(agent.RuntimeKind, providerName) {
 		case nilProviderRouteCLI:
 			slog.Info("chat-service: CLI provider routed to agent runtime (no llmcontracts.Provider registered)",
 				"session_id", sessionID, "provider", providerName)
@@ -991,7 +994,18 @@ func (s *chatServiceImpl) generateResponse(ctx context.Context, sessionID, assis
 		// openrouter / openzen / azure-openai / ollama) keep going through
 		// provider.StreamChat per turn with the slot pipeline running as
 		// today.
-		if chat.IsCLIProvider(providerName) {
+		//
+		// Phase 2 item 01 (TASKS/phase-2/01-wire-runtime-kind-routing.md):
+		// this branches on `prov == nil` rather than re-checking
+		// chat.IsCLIProvider(providerName) — prov/providerName are fixed
+		// for the whole call (resolveProvider ran once, above, outside
+		// this loop) and classifyNilProvider already made the CLI-vs-API
+		// routing decision (primarily from agent.RuntimeKind) the one time
+		// it needed to be made. Re-deriving it here from the string a
+		// second time is exactly the "matched in N places, expected to
+		// stay in sync by convention" pattern architecture/
+		// 02-agent-launching.md's runtime_kind field replaces.
+		if prov == nil {
 			provCh, err = s.driveBootSession(provCtx, sessionID, session, agent, slotResult, userContent, ls.iteration, providerName)
 		} else {
 			provCh, err = prov.StreamChat(provCtx, llmtypes.ChatRequest{

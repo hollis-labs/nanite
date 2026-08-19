@@ -256,11 +256,36 @@ type PresenceEvent struct {
 
 // IsCLIProvider returns true if the provider name is any CLI adapter variant
 // (PTY bridge or subprocess bridge).
+//
+// Phase 2 item 01 (TASKS/phase-2/01-wire-runtime-kind-routing.md):
+// agent_profiles.runtime_kind ("cli" | "api") is now the authoritative
+// CLI-vs-API ROUTING decision (architecture/02-agent-launching.md, "CLI-vs-
+// API routing is an explicit typed field") — see
+// chatServiceImpl.classifyNilProvider, the actual decision point.
+// IsCLIProvider itself is NOT deleted: it remains a legitimate string-shape
+// classifier for two narrower, still-live purposes that are not the
+// routing decision itself: (1) an OR'd fallback inside classifyNilProvider
+// for the two cases where runtime_kind isn't populated or isn't
+// authoritative yet — a file-discovered agent profile with no DB row (no
+// frontmatter representation for runtime_kind — see
+// agent.OverlayDBFields), and a boot-profile-catalog-driven session, whose
+// cliRoutableProvider (chat_bootprofile_resolve.go) synthesizes a
+// "pty-<adapter>" alias to force CLI routing independent of whichever
+// agent happens to be bound to the session (that whole mechanism is
+// retired in full by TASKS/phase-2/04-retire-boot-profile-catalog.md, at
+// which point this fallback becomes dead and should be deleted); and (2)
+// telemetry/UI-presence gates elsewhere in chat_generate.go (PTY
+// tool-pending broadcasts, the pty_turn_start observability event) that
+// run strictly downstream of the already-decided route and merely mirror
+// it for logging, not for deciding it.
 func IsCLIProvider(name string) bool {
 	return name == "pty" || strings.HasPrefix(name, "pty-") || strings.HasPrefix(name, "sub-")
 }
 
 // IsPTYProvider returns true if the provider name is any PTY adapter variant.
+// Same post-decision, non-routing status as IsCLIProvider above — used only
+// for downstream telemetry/observability gating in chat_generate.go, not for
+// deciding CLI-vs-API routing (that's runtime_kind's job as of Phase 2 item 01).
 func IsPTYProvider(name string) bool {
 	return name == "pty" || strings.HasPrefix(name, "pty-")
 }
@@ -283,15 +308,21 @@ func IsPTYProvider(name string) bool {
 //   - anything else      → unchanged
 //
 // Non-CLI provider names ("anthropic", "openai", etc.) flow through
-// unchanged. This is the single source of truth consulted by:
+// unchanged.
 //
-//   - chat_generate.go's CLI bypass when the registry returns prov == nil
-//   - runtime/agent bootdir.go's layout dispatch
-//   - runtime/agent factory.go's shouldUsePTY check
+// Phase 2 item 01: this is NOT a CLI-vs-API routing decision (runtime_kind
+// is) — it is a post-decision, string-shape helper that derives the bare
+// adapter name once CLI routing is already known, consulted by:
+//
+//   - runtime/agent bootdir.go's layout dispatch (which CLI adapter —
+//     claude/codex/opencode — not whether to use one)
+//   - runtime/agent factory.go's normalizeProviderName (kept warm for
+//     future PTY-capable adapters; shouldUsePTY itself decides nothing
+//     CLI-vs-API, see that function's own doc comment)
 //   - service/agent_deps.go's stripRegistryPrefix (which delegates here)
 //
-// so the four sites can't drift from each other when a new CLI flavor
-// lands.
+// so these string-shape sites can't drift from each other when a new CLI
+// flavor lands.
 func NormalizeCLIProvider(name string) string {
 	if name == "pty" {
 		return "claude"

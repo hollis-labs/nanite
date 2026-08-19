@@ -77,6 +77,13 @@ func TestStripRegistryPrefix_AliasTable(t *testing.T) {
 // adapter registered. classifyNilProvider must return nilProviderRouteCLI
 // so chat_generate.go falls through to driveBootSession instead of
 // erroring out.
+//
+// Phase 2 item 01 (TASKS/phase-2/01-wire-runtime-kind-routing.md):
+// classifyNilProvider now takes runtimeKind as its primary decision input;
+// these cases pass "" (matching a not-yet-backfilled/file-only agent
+// profile, or a boot-profile-driven session) to exercise the OR'd
+// chat.IsCLIProvider(providerName) fallback and pin that its behavior is
+// unchanged from before the runtime_kind wiring landed.
 func TestClassifyNilProvider_CLIWithAdapter(t *testing.T) {
 	// Stub adapter index resolves "claude" → a non-nil adapter, which
 	// is what the agent_deps.go closure does after stripRegistryPrefix
@@ -96,9 +103,44 @@ func TestClassifyNilProvider_CLIWithAdapter(t *testing.T) {
 
 	cliInputs := []string{"pty", "pty-claude"}
 	for _, name := range cliInputs {
-		if got := s.classifyNilProvider(name); got != nilProviderRouteCLI {
+		if got := s.classifyNilProvider("", name); got != nilProviderRouteCLI {
 			t.Errorf("classifyNilProvider(%q) = %v, want nilProviderRouteCLI", name, got)
 		}
+	}
+}
+
+// TestClassifyNilProvider_RuntimeKindCLI_Authoritative pins the new
+// primary decision input: runtimeKind == "cli" routes to CLI even when
+// providerName's string shape would NOT match the legacy IsCLIProvider
+// convention (the exact class of agent that could previously misroute —
+// a CLI-configured agent whose default_provider isn't "pty"/"sub-"
+// prefixed).
+func TestClassifyNilProvider_RuntimeKindCLI_Authoritative(t *testing.T) {
+	stubAdapter := &stubCLIAdapter{name: "claude"}
+	deps := &runtimeagent.Dependencies{
+		ProviderAdapter: func(name string) provider.CLIAdapter {
+			bare := stripRegistryPrefix(name)
+			if bare == "claude" {
+				return stubAdapter
+			}
+			return nil
+		},
+	}
+	s := &chatServiceImpl{agentDeps: deps}
+
+	if got := s.classifyNilProvider("cli", "claude"); got != nilProviderRouteCLI {
+		t.Errorf(`classifyNilProvider("cli", "claude") = %v, want nilProviderRouteCLI`, got)
+	}
+}
+
+// TestClassifyNilProvider_RuntimeKindAPI_StaysFatalForNonCLIName pins the
+// no-regression companion: runtimeKind == "api" with a non-CLI-shaped name
+// must still fatal — runtime_kind never routes a genuinely API agent to a
+// CLI boot just because a nil-provider situation arose.
+func TestClassifyNilProvider_RuntimeKindAPI_StaysFatalForNonCLIName(t *testing.T) {
+	s := &chatServiceImpl{}
+	if got := s.classifyNilProvider("api", "typo-provider"); got != nilProviderRouteFatal {
+		t.Errorf(`classifyNilProvider("api", "typo-provider") = %v, want nilProviderRouteFatal`, got)
 	}
 }
 
@@ -115,7 +157,7 @@ func TestClassifyNilProvider_CLINoAdapter(t *testing.T) {
 	s := &chatServiceImpl{agentDeps: deps}
 
 	for _, name := range []string{"pty-claude", "pty-codex", "pty-opencode"} {
-		if got := s.classifyNilProvider(name); got != nilProviderRouteCLINoAdapter {
+		if got := s.classifyNilProvider("", name); got != nilProviderRouteCLINoAdapter {
 			t.Errorf("classifyNilProvider(%q) = %v, want nilProviderRouteCLINoAdapter", name, got)
 		}
 	}
@@ -129,14 +171,22 @@ func TestClassifyNilProvider_CLINoAdapter(t *testing.T) {
 // can't accidentally turn this into a CLI bypass.
 func TestClassifyNilProvider_CLIWithoutDeps(t *testing.T) {
 	s := &chatServiceImpl{} // agentDeps == nil
-	if got := s.classifyNilProvider("pty-claude"); got != nilProviderRouteFatal {
+	if got := s.classifyNilProvider("", "pty-claude"); got != nilProviderRouteFatal {
 		t.Errorf("classifyNilProvider(pty-claude) with nil agentDeps = %v, want nilProviderRouteFatal", got)
 	}
 
 	// agentDeps non-nil but ProviderAdapter nil — same degradation.
 	s2 := &chatServiceImpl{agentDeps: &runtimeagent.Dependencies{ProviderAdapter: nil}}
-	if got := s2.classifyNilProvider("pty-claude"); got != nilProviderRouteFatal {
+	if got := s2.classifyNilProvider("", "pty-claude"); got != nilProviderRouteFatal {
 		t.Errorf("classifyNilProvider(pty-claude) with nil ProviderAdapter = %v, want nilProviderRouteFatal", got)
+	}
+
+	// runtimeKind == "cli" but no runtime composition wired must ALSO
+	// degrade to fatal — runtime_kind alone can't route without the
+	// agent-runtime adapter wiring either.
+	s3 := &chatServiceImpl{}
+	if got := s3.classifyNilProvider("cli", "claude"); got != nilProviderRouteFatal {
+		t.Errorf(`classifyNilProvider("cli", "claude") with nil agentDeps = %v, want nilProviderRouteFatal`, got)
 	}
 }
 
@@ -157,7 +207,7 @@ func TestClassifyNilProvider_NonCLIStaysFatal(t *testing.T) {
 
 	nonCLI := []string{"anthropic", "openai", "gemini-api", "mistral", "openrouter", "ollama", "typo-provider"}
 	for _, name := range nonCLI {
-		if got := s.classifyNilProvider(name); got != nilProviderRouteFatal {
+		if got := s.classifyNilProvider("", name); got != nilProviderRouteFatal {
 			t.Errorf("classifyNilProvider(%q) = %v, want nilProviderRouteFatal", name, got)
 		}
 	}

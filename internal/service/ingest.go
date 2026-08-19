@@ -12,6 +12,7 @@ package service
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"time"
@@ -248,6 +249,26 @@ func upsertAgentDef(st *store.Store, def *agentpkg.Definition) error {
 	return nil
 }
 
+// seedRoleToolsFromIngest seeds two things from a def's roleTools:
+// frontmatter, per Phase 1 item 04
+// (TASKS/phase-1/04-add-known-tools-and-agent-tools-fk.md):
+//
+//  1. agent_known_tools (unchanged, pre-existing behavior) — a pinned roster
+//     row per name, reason='role_seed'. This is the live, per-agent
+//     roster/telemetry table with its own REST CRUD and GUI; still not
+//     touched by this task per its own Context section.
+//  2. agent_tools (new) — a real grant row per name that resolves against
+//     the known_tools catalog, granted_via='role_seed'. This is the
+//     upgrade: role_tools used to only ever seed the best-effort
+//     agent_known_tools roster ("NOT a contract the runtime enforces",
+//     migration 070's own doc comment) with zero effect on real tool
+//     selection. Now it also produces a real agent_tools grant, matching
+//     architecture/01-agent-construction.md's statement that agent_tools
+//     replaces roleTools: "entirely." A name with no matching known_tools
+//     row (not yet live-synced, or a genuine typo — see
+//     unknownDeclaredTools above) is skipped for (2) without failing the
+//     ingest; (1) still records it regardless, preserving today's
+//     tolerant behavior for that table.
 func seedRoleToolsFromIngest(ctx context.Context, st *store.Store, agentID string, tools []string) {
 	for i, name := range tools {
 		if name == "" {
@@ -261,6 +282,17 @@ func seedRoleToolsFromIngest(ctx context.Context, st *store.Store, agentID strin
 			Reason:    "role_seed",
 		}); err != nil {
 			slog.Warn("service: seed role tool (ingest)", "agent_id", agentID, "tool", name, "err", err)
+		}
+
+		known, err := st.GetKnownToolByName(ctx, name)
+		if err != nil {
+			if !errors.Is(err, store.ErrKnownToolNotFound) {
+				slog.Warn("service: seed role tool (ingest) — known_tools lookup", "agent_id", agentID, "tool", name, "err", err)
+			}
+			continue
+		}
+		if err := st.GrantAgentTool(ctx, agentID, known.ID, "role_seed"); err != nil {
+			slog.Warn("service: seed role tool (ingest) — agent_tools grant", "agent_id", agentID, "tool", name, "err", err)
 		}
 	}
 }

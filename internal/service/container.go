@@ -465,9 +465,30 @@ func NewContainer(cfg ContainerConfig) (*Container, error) {
 		for _, t := range catalog {
 			knownTools[t.Name] = true
 		}
+
+		// Phase 1 item 04 (TASKS/phase-1/04-add-known-tools-and-agent-tools-fk.md):
+		// live-sync the known_tools global catalog against this same
+		// builtins+MCP catalog, before AutoIngestAgents runs below (its
+		// seedRoleToolsFromIngest call needs known_tools rows to already
+		// exist so it can resolve roleTools: names to real grants).
+		syncResult := SyncKnownTools(context.Background(), cfg.Store, catalog, cfg.ToolClient.IsBuiltinTool)
+		slog.Info("service container: synced known_tools catalog",
+			"upserted", syncResult.Upserted, "marked_unavailable", syncResult.MarkedUnavailable)
 	}
 	if n := AutoIngestAgents(cfg.Store, agentDefs, knownTools); n > 0 {
 		slog.Info("service container: auto-ingested agents into DB", "count", n)
+	}
+
+	// Phase 1 item 04: one-time-per-agent carry-over of
+	// tools:/tool_permissions:/role_tools:' CURRENT values into real
+	// agent_tools grants. Runs after AutoIngestAgents so brand-new agents
+	// ingested this same boot are covered too; see
+	// BackfillAgentToolsFromLegacyColumns' doc comment for why this is
+	// guarded to run at most once per agent, ever.
+	if n, err := BackfillAgentToolsFromLegacyColumns(context.Background(), cfg.Store); err != nil {
+		slog.Warn("service container: backfill agent_tools from legacy columns", "err", err)
+	} else if n > 0 {
+		slog.Info("service container: backfilled agent_tools from legacy columns", "grants", n)
 	}
 
 	agents := NewAgentService(AgentServiceConfig{

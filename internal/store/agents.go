@@ -45,14 +45,32 @@ type AgentProfile struct {
 	DefaultModel    string `json:"default_model"`
 	DefaultProvider string `json:"default_provider"`
 	MCPServers      string `json:"mcp_servers"`
+	// ToolPermissions (allow_list/deny_list JSON, toolclient.ToolPermissions)
+	// is DEPRECATED as of Phase 1 item 04
+	// (TASKS/phase-1/04-add-known-tools-and-agent-tools-fk.md) in favor of
+	// the FK-based agent_tools join (internal/store/agent_tools.go) --
+	// architecture/01-agent-construction.md's stated replacement target.
+	// Not dropped: still read at every SelectForAgent call
+	// (internal/service/tool.go's filterToolsByPermissions/CheckPermission)
+	// -- that live read path is intentionally NOT rewired by this task (see
+	// TASKS/phase-1/11-wire-select-for-agent-to-read-agent-tools.md, split
+	// off because ToolPermissions' glob-based allow/deny semantics don't
+	// map onto agent_tools' plain positive-grant shape as a mechanical
+	// read-path swap). Its CURRENT value was carried into agent_tools for
+	// every existing agent by this task's one-time backfill
+	// (internal/service/known_tools_backfill.go).
 	ToolPermissions string `json:"tool_permissions"`
 	CanExecute      bool   `json:"can_execute"`
 	Settings        string `json:"settings"`
 	CreatedAt       string `json:"created_at"`
 	UpdatedAt       string `json:"updated_at"`
 	// Schema v2 fields
-	AgentHash   string `json:"agent_hash"`
-	Version     int    `json:"version"`
+	AgentHash string `json:"agent_hash"`
+	Version   int    `json:"version"`
+	// Tools (schema-v2 allowlist of tool-name patterns) is DEPRECATED as of
+	// Phase 1 item 04 -- see ToolPermissions' doc comment immediately
+	// above; same replacement target (agent_tools), same "still read live,
+	// not rewired by this task" status, same one-time backfill coverage.
 	Tools       string `json:"tools"`
 	Directories string `json:"directories"`
 	Constraints string `json:"constraints"`
@@ -90,6 +108,14 @@ type AgentProfile struct {
 	// this field, parses the JSON array, and inserts one agent_known_tools
 	// row per entry with pinned=1, reason='role_seed'. Empty "[]" means no
 	// seed. Added by FU-7a (migration 066).
+	//
+	// DEPRECATED as of Phase 1 item 04
+	// (TASKS/phase-1/04-add-known-tools-and-agent-tools-fk.md): its names
+	// now also produce real agent_tools grant rows (granted_via='role_seed',
+	// internal/service/ingest.go's seedRoleToolsFromIngest), on top of the
+	// agent_known_tools seeding described above, which is unchanged.
+	// Existing agents' current values were carried into agent_tools once
+	// by this task's backfill (internal/service/known_tools_backfill.go).
 	RoleTools string `json:"role_tools"`
 
 	// RoleSkills is a JSON array of skill slugs this agent should be
@@ -439,6 +465,15 @@ func (s *Store) DeleteAgent(slug string) error {
 		// procedures, knowledge seeds, or schedules.
 		"DELETE FROM agent_known_tools WHERE agent_id = ?",
 		"DELETE FROM agent_known_skills WHERE agent_id = ?",
+		// Phase 1 item 04 (migration 110): agent_tools/
+		// agent_dispatch_tool_allowlist both already declare
+		// ON DELETE CASCADE agent_profiles(id) FKs, so these two lines are
+		// belt-and-suspenders, matching this list's existing style of
+		// explicitly clearing agent_skills/agent_projects even though
+		// migration 107 gave those real cascade FKs too.
+		"DELETE FROM agent_tools WHERE agent_id = ?",
+		"DELETE FROM agent_dispatch_tool_allowlist WHERE agent_id = ?",
+		"DELETE FROM agent_tools_legacy_backfill WHERE agent_id = ?",
 		"DELETE FROM agent_procedures WHERE agent_id = ?",
 		"DELETE FROM agent_knowledge_seed WHERE agent_id = ?",
 		"DELETE FROM agent_log WHERE agent_id = ?",

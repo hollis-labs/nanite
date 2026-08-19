@@ -200,7 +200,7 @@ This branch (`phase-1-execution`, based off Phase 0's `HEAD` as of 2026-08-18 �
 
 | Task | Status | Depends on |
 |---|---|---|
-| 01-build-assignment-api | in-progress | Phase 1 tasks 01-08 (landed via the Phase 1→main merge) |
+| 01-build-assignment-api | implemented | Phase 1 tasks 01-08 (landed via the Phase 1→main merge) |
 | 02-build-plugin-installed-enabled-state-model | implemented | none |
 | 03-wire-registers-agent-profiles | in-progress | Phase 1 in full (landed via the Phase 1→main merge); held until `02` merges |
 | 04-close-cli-install-hot-reload-asymmetry | implemented | none |

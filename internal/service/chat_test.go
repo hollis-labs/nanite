@@ -393,7 +393,7 @@ func TestChatService_ResolveProvider(t *testing.T) {
 		store:     testStore,
 	}
 
-	name, prov := impl.resolveProvider("test-session", "", "", "gpt-4o")
+	name, prov := impl.resolveProvider("test-session", "", "", "gpt-4o", "api")
 	// No provider registered, so prov should be nil and name should be inferred.
 	if prov != nil {
 		t.Error("expected nil provider when none registered")

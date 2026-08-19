@@ -322,3 +322,150 @@ func TestAgentService_ResolveForSession_DisabledAgent(t *testing.T) {
 // ResolveForSession fell back to an empty *store.AgentMode when the
 // session's bound mode slug didn't resolve. There is no more Legacy
 // AgentMode resolution step to fall back from.
+
+// TestAgentService_Get_FileBackedAgentOverlaysDBOnlyFields is the
+// regression test for TASKS/phase-1/12-fix-agent-service-get-drops-new-db-
+// only-columns.md. Before this fix, Get/GetBySlug/List returned
+// Definition.ToProfile() as-is for a file-backed agent, silently dropping
+// role_id/model_id/runtime_kind/consumer_id — pure DB-only columns with no
+// frontmatter representation at all (Phase 1 items 02/03) — even when a
+// real agent_profiles DB row for the same slug carried real, non-default
+// values for all four. It also dropped a DB-side edit to
+// activation_mode/class/default_state whenever it diverged from what the
+// file's own frontmatter declared, since those three DO have frontmatter
+// fields and ToProfile()'s pre-existing "file wins when non-empty"
+// handling took priority over the DB row unconditionally — this test's
+// fixture deliberately gives the file its own (would-be-wrong) opinion on
+// all three to prove the DB row wins even then, not just when the file is
+// silent.
+func TestAgentService_Get_FileBackedAgentOverlaysDBOnlyFields(t *testing.T) {
+	reader := newStubReader()
+	dbRow := &store.AgentProfile{
+		ID:             "widget-uuid-1",
+		Name:           "Widget (DB)",
+		Slug:           "widget-agent",
+		Status:         "active",
+		RoleID:         "role-99",
+		ModelID:        "claude-widget-model",
+		RuntimeKind:    "api",
+		ConsumerID:     "loom",
+		ActivationMode: "concurrent",
+		Class:          "harness",
+		DefaultState:   "active",
+	}
+	reader.addAgent(dbRow)
+
+	fileDef := &agent.Definition{
+		Name:           "Widget (file)",
+		Slug:           "widget-agent",
+		SystemPrompt:   "You build widgets.",
+		Source:         "project",
+		SourceRef:      "/fake/widget-agent.md",
+		ActivationMode: "singleton",
+		Class:          "advisor",
+		DefaultState:   "sleeping",
+	}
+
+	svc := NewAgentService(AgentServiceConfig{
+		Agents:     reader,
+		Writers:    &stubAgentWriter{},
+		FileAgents: []*agent.Definition{fileDef},
+	})
+	ctx := context.Background()
+
+	assertOverlaid := func(t *testing.T, label string, got *store.AgentProfile, err error) {
+		t.Helper()
+		if err != nil {
+			t.Fatalf("%s: %v", label, err)
+		}
+		if got.SystemPrompt != fileDef.SystemPrompt {
+			t.Errorf("%s: SystemPrompt = %q, want file-derived %q", label, got.SystemPrompt, fileDef.SystemPrompt)
+		}
+		if got.RoleID != dbRow.RoleID {
+			t.Errorf("%s: RoleID = %q, want DB value %q", label, got.RoleID, dbRow.RoleID)
+		}
+		if got.ModelID != dbRow.ModelID {
+			t.Errorf("%s: ModelID = %q, want DB value %q", label, got.ModelID, dbRow.ModelID)
+		}
+		if got.RuntimeKind != dbRow.RuntimeKind {
+			t.Errorf("%s: RuntimeKind = %q, want DB value %q", label, got.RuntimeKind, dbRow.RuntimeKind)
+		}
+		if got.ConsumerID != dbRow.ConsumerID {
+			t.Errorf("%s: ConsumerID = %q, want DB value %q", label, got.ConsumerID, dbRow.ConsumerID)
+		}
+		if got.ActivationMode != dbRow.ActivationMode {
+			t.Errorf("%s: ActivationMode = %q, want DB value %q (not file's %q)", label, got.ActivationMode, dbRow.ActivationMode, fileDef.ActivationMode)
+		}
+		if got.Class != dbRow.Class {
+			t.Errorf("%s: Class = %q, want DB value %q (not file's %q)", label, got.Class, dbRow.Class, fileDef.Class)
+		}
+		if got.DefaultState != dbRow.DefaultState {
+			t.Errorf("%s: DefaultState = %q, want DB value %q (not file's %q)", label, got.DefaultState, dbRow.DefaultState, fileDef.DefaultState)
+		}
+	}
+
+	// Get, by the legacy file-based ID ("file-<slug>" — fileDef carries no
+	// `id:` frontmatter, so its CanonicalID() is deterministic).
+	got, err := svc.Get(ctx, fileDef.CanonicalID())
+	assertOverlaid(t, "Get(file-based ID)", got, err)
+
+	// GetBySlug.
+	got, err = svc.GetBySlug(ctx, "widget-agent")
+	assertOverlaid(t, "GetBySlug", got, err)
+
+	// List.
+	all, err := svc.List(ctx)
+	if err != nil {
+		t.Fatalf("List: %v", err)
+	}
+	var found *store.AgentProfile
+	for i := range all {
+		if all[i].Slug == "widget-agent" {
+			found = &all[i]
+			break
+		}
+	}
+	if found == nil {
+		t.Fatalf("List: widget-agent not found among %d results", len(all))
+	}
+	assertOverlaid(t, "List", found, nil)
+}
+
+// TestAgentService_Get_FileBackedAgentNoDBRowYet confirms the "file-backed
+// but no DB row yet" case (a genuinely new file not yet ingested) degrades
+// to the file-only view rather than crashing or fabricating data — Done
+// means bullet 2 of TASKS/phase-1/12-fix-agent-service-get-drops-new-db-
+// only-columns.md.
+func TestAgentService_Get_FileBackedAgentNoDBRowYet(t *testing.T) {
+	reader := newStubReader() // no DB row anywhere for "brand-new"
+	fileDef := &agent.Definition{
+		Name:         "Brand New",
+		Slug:         "brand-new",
+		SystemPrompt: "Fresh off disk.",
+		Source:       "project",
+	}
+	svc := NewAgentService(AgentServiceConfig{
+		Agents:     reader,
+		Writers:    &stubAgentWriter{},
+		FileAgents: []*agent.Definition{fileDef},
+	})
+
+	got, err := svc.GetBySlug(context.Background(), "brand-new")
+	if err != nil {
+		t.Fatalf("GetBySlug: %v", err)
+	}
+	if got.SystemPrompt != fileDef.SystemPrompt {
+		t.Errorf("SystemPrompt = %q, want %q", got.SystemPrompt, fileDef.SystemPrompt)
+	}
+	dbOnlyFields := map[string]string{
+		"RoleID":      got.RoleID,
+		"ModelID":     got.ModelID,
+		"RuntimeKind": got.RuntimeKind,
+		"ConsumerID":  got.ConsumerID,
+	}
+	for name, val := range dbOnlyFields {
+		if val != "" {
+			t.Errorf("%s = %q, want empty default (no DB row exists yet)", name, val)
+		}
+	}
+}

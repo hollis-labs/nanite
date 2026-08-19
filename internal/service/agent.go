@@ -98,14 +98,14 @@ func (s *agentServiceImpl) Get(_ context.Context, id string) (*store.AgentProfil
 	if agent.IsFileBasedID(id) {
 		slug := agent.SlugFromFileID(id)
 		if d := s.findDefBySlug(slug); d != nil {
-			return d.ToProfile(), nil
+			return s.resolveFileProfile(d), nil
 		}
 	}
 	// Stamped managed agents carry a real UUID == their DB row PK; an
 	// in-memory def (if loaded) wins so GUI/CLI edits reloaded into the
 	// registry are visible without a restart, otherwise fall through to DB.
 	if d := s.findDefByID(id); d != nil {
-		return d.ToProfile(), nil
+		return s.resolveFileProfile(d), nil
 	}
 	return s.agents.GetAgent(id)
 }
@@ -113,7 +113,7 @@ func (s *agentServiceImpl) Get(_ context.Context, id string) (*store.AgentProfil
 func (s *agentServiceImpl) GetBySlug(_ context.Context, slug string) (*store.AgentProfile, error) {
 	// File-based agents take priority.
 	if d := s.findDefBySlug(slug); d != nil {
-		return d.ToProfile(), nil
+		return s.resolveFileProfile(d), nil
 	}
 	return s.agents.GetAgentBySlug(slug)
 }
@@ -128,7 +128,7 @@ func (s *agentServiceImpl) List(_ context.Context) ([]store.AgentProfile, error)
 	seen := make(map[string]bool, len(defs))
 	var result []store.AgentProfile
 	for _, d := range defs {
-		result = append(result, *d.ToProfile())
+		result = append(result, *s.resolveFileProfile(d))
 		seen[d.Slug] = true
 	}
 
@@ -143,6 +143,28 @@ func (s *agentServiceImpl) List(_ context.Context) ([]store.AgentProfile, error)
 		}
 	}
 	return result, nil
+}
+
+// resolveFileProfile returns d's file-derived profile (Definition.ToProfile())
+// overlaid with the real agent_profiles DB row's authoritative values, when
+// one exists for d.Slug — TASKS/phase-1/12-fix-agent-service-get-drops-new-db-
+// only-columns.md. Before this fix, Get/GetBySlug/List returned
+// d.ToProfile() as-is for every file-backed def, silently dropping
+// role_id/model_id/runtime_kind/consumer_id (and, on file/DB divergence,
+// activation_mode/class/default_state) for every one of the ~33
+// file-discovered agents in this project once a DB row existed for them —
+// see agent.OverlayDBFields's doc comment for the full precedence rationale.
+// A missing/errored DB lookup (the "file-backed but no DB row yet" case, a
+// genuinely new file not yet ingested) degrades to the unmodified file-only
+// view rather than erroring — those DB-only fields simply stay at
+// ToProfile()'s zero-value default.
+func (s *agentServiceImpl) resolveFileProfile(d *agent.Definition) *store.AgentProfile {
+	p := d.ToProfile()
+	row, err := s.agents.GetAgentBySlug(d.Slug)
+	if err != nil || row == nil {
+		return p
+	}
+	return agent.OverlayDBFields(p, row)
 }
 
 // findDefBySlug returns the in-memory definition for slug, or nil.

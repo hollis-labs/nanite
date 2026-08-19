@@ -324,6 +324,16 @@ func (a *API) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/agents/{id}/skills", a.handleAssignAgentSkill)
 	mux.HandleFunc("DELETE /api/agents/{id}/skills/{skillId}", a.handleRemoveAgentSkill)
 
+	// Roles (Phase 1 item 01: TASKS/phase-1/01-add-roles-table-and-cascade-
+	// resolution.md) -- the reusable persona/behavior template an Agent
+	// composition is built from. DB-authoritative from creation; no
+	// file-import route (contrast with Skills' fork-to-user).
+	mux.HandleFunc("GET /api/roles", a.handleListRoles)
+	mux.HandleFunc("POST /api/roles", a.handleCreateRole)
+	mux.HandleFunc("GET /api/roles/{id}", a.handleGetRole)
+	mux.HandleFunc("PUT /api/roles/{id}", a.handleUpdateRole)
+	mux.HandleFunc("DELETE /api/roles/{id}", a.handleDeleteRole)
+
 	// Prompt Templates
 	mux.HandleFunc("GET /api/prompt-templates", a.handleListPromptTemplates)
 	mux.HandleFunc("POST /api/prompt-templates", a.handleCreatePromptTemplate)

@@ -7,6 +7,7 @@ import (
 	"sync"
 
 	"github.com/hollis-labs/nanite/internal/agent"
+	"github.com/hollis-labs/nanite/internal/agent/override"
 	"github.com/hollis-labs/nanite/internal/store"
 )
 
@@ -228,10 +229,13 @@ func (s *agentServiceImpl) Delete(_ context.Context, id string) error {
 //  4. Auto-assign the resolved agent to the session.
 //  5. Load the agent profile by ID, falling back to slug lookup.
 //  6. Reject disabled agents.
+//  7. Apply the role -> agent -> task cascade (Phase 1 item 01) to
+//     system_prompt/class/model/provider.
 //
-// Phase 0 item 21 ("Cut Modes, in full") removed step 7 ("load the agent
-// mode") — Legacy Agent Mode is gone, so ResolveForSession no longer
-// returns a *store.AgentMode second value.
+// Phase 0 item 21 ("Cut Modes, in full") removed the step that used to be
+// numbered 7 here ("load the agent mode") — Legacy Agent Mode is gone, so
+// ResolveForSession no longer returns a *store.AgentMode second value. The
+// cascade step above reuses that freed slot.
 func (s *agentServiceImpl) ResolveForSession(ctx context.Context, sessionID string) (*store.AgentProfile, error) {
 	return s.resolveForSession(ctx, sessionID, true)
 }
@@ -268,6 +272,20 @@ func (s *agentServiceImpl) resolveForSession(ctx context.Context, sessionID stri
 	if resolved.Status == "disabled" {
 		return nil, fmt.Errorf("agent %q is disabled", resolved.Name)
 	}
+
+	// Phase 1 item 01 (TASKS/phase-1/01-add-roles-table-and-cascade-
+	// resolution.md): role -> agent -> task closest-wins cascade for
+	// system_prompt/class/model selection, per architecture/
+	// 01-agent-construction.md. s.roleForProfile is nil today for every
+	// row (agent_profiles.role_id doesn't exist until
+	// 02-add-agents-composition-columns.md adds and backfills it), and no
+	// caller threads a task/invocation-level override into
+	// ResolveForSession yet, so this call is a proven no-op passthrough
+	// right now (see role_cascade_test.go) -- it establishes the
+	// resolution seam at this insertion point rather than a second one,
+	// ready for 02 to make the role layer real without this function's
+	// shape changing again.
+	resolved = applyScalarCascade(resolved, s.roleForProfile(ctx, resolved), nil)
 
 	// Auto-assign to session if we had to fall back (only for the
 	// mutating variant — see resolveForSession's doc comment). modeName
@@ -309,3 +327,47 @@ func (s *agentServiceImpl) resolveBinding(sessionID string) (agentID, modeName s
 	return defaultFallbackAgent, "default", true
 }
 
+// roleForProfile resolves the store.Role a profile's role binding points
+// at. Always returns nil today: agent_profiles has no role_id column until
+// 02-add-agents-composition-columns.md adds and backfills it. Once that
+// column exists, this becomes a real s.agents-backed lookup (or nil when
+// role_id is unset) and resolveForSession's cascade call starts
+// contributing real role-level defaults without any other change to that
+// function.
+func (s *agentServiceImpl) roleForProfile(_ context.Context, _ *store.AgentProfile) *store.Role {
+	return nil
+}
+
+// applyScalarCascade resolves the role -> agent -> task cascade
+// (ResolveAgentCascade) for an already-loaded profile and writes the
+// resolved system_prompt/class/model/provider back onto a copy of it.
+// Only these four scalars are written back into the per-turn resolution
+// path — per architecture/01-agent-construction.md, tools/skills/
+// permissions "bind at the composition (agents) level, not fixed by
+// role... the actual grant is adjustable per composition/scope," so a
+// role's tool/skill/permission defaults are a composition-creation-time
+// seed hint (see internal/store/roles.go), not something re-merged into
+// every turn's live tool/skill grant. ResolveAgentCascade still computes
+// the full merge (including tools/skills/permissions) so that part of the
+// cascade logic is exercised and tested (role_cascade_test.go) even
+// though it isn't applied here.
+func applyScalarCascade(profile *store.AgentProfile, role *store.Role, taskOverride *override.OverrideConfig) *store.AgentProfile {
+	if profile == nil {
+		return profile
+	}
+	cascade := ResolveAgentCascade(role, profile, taskOverride)
+	out := *profile
+	if cascade.SystemPrompt != "" {
+		out.SystemPrompt = cascade.SystemPrompt
+	}
+	if cascade.Class != "" {
+		out.Class = cascade.Class
+	}
+	if cascade.Model != "" {
+		out.DefaultModel = cascade.Model
+	}
+	if cascade.Provider != "" {
+		out.DefaultProvider = cascade.Provider
+	}
+	return &out
+}

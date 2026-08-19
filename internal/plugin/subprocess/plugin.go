@@ -122,6 +122,23 @@ func NewSubprocessPlugin(pluginDir string, manifestID string, config map[string]
 	return sp
 }
 
+// NewSubprocessPluginForTest constructs a *SubprocessPlugin with a pre-set id
+// and transport, bypassing the init/load handshake that Load() normally runs
+// against a real spawned subprocess. Test-only helper (mirrors the
+// internal/plugin package's UnregisterPluginForTest precedent for an exported
+// symbol that exists solely so tests outside this package can exercise a real
+// *SubprocessPlugin — e.g. internal/plugin/registrations.go's manifest-driven
+// registration functions, which concrete-type-assert on *SubprocessPlugin and
+// so cannot be exercised end to end from another package's tests via a fake).
+// Not used by any production code path.
+func NewSubprocessPluginForTest(id string, transport *Transport) *SubprocessPlugin {
+	return &SubprocessPlugin{
+		id:        id,
+		transport: transport,
+		status:    plugin.PluginStatus{Enabled: true},
+	}
+}
+
 // --- plugin.Plugin interface ---
 
 func (sp *SubprocessPlugin) ID() string {
@@ -613,6 +630,20 @@ func isPreHookEvent(eventType string) bool {
 }
 
 // --- CRUD handler proxy ---
+
+// NewCRUDHandler builds a plugin.CRUDHandler that proxies Create/Read/Update/
+// Delete/List calls for resourceType to the subprocess over JSON-RPC (via
+// MethodCRUDCreate/Read/Update/Delete/List). Mirrors NewEventHook's shape —
+// a free function taking the plugin's transport directly — so the parent
+// plugin package (registrations.go's registerManifestCrud) can wire a
+// registers.crud[] manifest entry without reaching into this package's
+// unexported subprocessCRUDHandler type.
+func NewCRUDHandler(resourceType string, transport *Transport) plugin.CRUDHandler {
+	return &subprocessCRUDHandler{
+		resourceType: resourceType,
+		transport:    transport,
+	}
+}
 
 // subprocessCRUDHandler implements plugin.CRUDHandler by proxying to the subprocess.
 type subprocessCRUDHandler struct {

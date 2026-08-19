@@ -2,11 +2,9 @@ package api
 
 import (
 	"errors"
-	"fmt"
 	"net/http"
 
 	"github.com/hollis-labs/nanite/internal/store"
-	"github.com/hollis-labs/nanite/internal/toolclient"
 )
 
 // Agent tools grant/revoke -- Phase 5 item 01 (TASKS/phase-5/01-build-
@@ -61,34 +59,17 @@ func (a *API) handleGrantAgentTool(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// TASKS/phase-4/05's Work Log item 3 (the stale-deny-list footgun):
-	// agent_profiles.tool_permissions.deny_list is retired at the
-	// SelectForAgent surface for any agent with a real agent_profiles row,
-	// but stays live at the deeper ToolClient.SelectToolsAsProvider/
-	// CallTool layer as a deliberate defense-in-depth backstop (05's own
-	// Work Log item 3) -- so a still-populated legacy deny_list can
-	// silently veto a fresh agent_tools grant before it ever reaches the
-	// LLM's selection, even though this endpoint reports success.
-	//
-	// Decision (this task's Work Log): reject the grant outright and name
-	// the conflicting pattern, rather than (b) warn-only or (c) clear/
-	// neutralize tool_permissions on first grant. (c) was rejected because
-	// tool_permissions is not solely a legacy shadow of agent_tools -- it
-	// also protects a distinct, already-tested gap (tools reaching
-	// allTools via the discoverAgentMCPTools direct-MCP fallback, which
-	// bypasses SelectToolsAsProvider's own gate entirely -- CW-20260512-
-	// 0117 / SP-20260512-0010, per 05's Work Log item 1.2) that this
-	// endpoint has no business silently disabling as a side effect of an
-	// unrelated grant call.
-	perms := toolclient.ParsePermissions(agent.ToolPermissions)
-	if pattern, denied := matchingDenyPattern(perms, tool.Name); denied {
-		a.errorResp(w, http.StatusConflict, fmt.Sprintf(
-			"grant rejected: agent %q has a legacy tool_permissions.deny_list pattern %q that would still veto tool %q at the deeper execution-time/broker permission backstop, even though this agent_tools grant would otherwise succeed -- clear or narrow that deny_list entry (PUT /api/agents/%s) before granting",
-			agent.Slug, pattern, tool.Name, agent.ID,
-		))
-		return
-	}
-
+	// TASKS/phase-4/05's Work Log item 3 (the stale-deny-list footgun) used
+	// to reject a grant here outright when the agent's legacy
+	// agent_profiles.tool_permissions.deny_list still matched the granted
+	// tool name, because tool_permissions.CheckPermission stayed live as a
+	// deeper ToolClient.SelectToolsAsProvider/CallTool backstop that could
+	// silently veto a fresh grant. TASKS/adhoc/02-remove-tool-permissions-
+	// collapse-to-agent-tools.md removed that backstop entirely -- agent_tools
+	// (+ the known_tools.always_included escape hatch) is now the sole gate
+	// at every layer, including CallTool -- so there is no deeper mechanism
+	// left for a stale deny_list to veto, and this pre-flight check is
+	// removed along with it.
 	grantedVia := req.GrantedVia
 	if grantedVia == "" {
 		grantedVia = "explicit"
@@ -134,16 +115,3 @@ func (a *API) handleRevokeAgentTool(w http.ResponseWriter, r *http.Request) {
 // managed/API-created -- now carries its real agent_profiles UUID, so
 // grant/revoke can rely on agent.ID directly the same way any other real
 // FK-bearing write does.
-
-// matchingDenyPattern reports whether toolName matches any glob in perms'
-// deny_list, returning the first matching pattern (deny_list order,
-// mirroring ToolPermissions.CheckPermission's own "first match wins"
-// iteration) or ("", false) if none match.
-func matchingDenyPattern(perms toolclient.ToolPermissions, toolName string) (string, bool) {
-	for _, pattern := range perms.DenyList {
-		if toolclient.MatchPattern(pattern, toolName) {
-			return pattern, true
-		}
-	}
-	return "", false
-}

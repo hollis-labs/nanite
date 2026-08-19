@@ -2,9 +2,7 @@ package toolclient
 
 import (
 	"context"
-	"database/sql"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"log/slog"
 	"strings"
@@ -19,22 +17,12 @@ import (
 // MaxSelectedTools is the maximum number of tools returned by SelectTools.
 const MaxSelectedTools = 15
 
-// PermissionResolver resolves an agent's ToolPermissions outside of the
-// database. It is intended for file-based agents (synthetic ID prefix
-// "file-"), which have no agent_profiles row by design — their definitions
-// live on disk. Return ok=false to defer to the store-backed lookup.
-//
-// Wired by the service layer once the AgentService knows about file
-// definitions; tests typically leave it nil and rely on default-permit.
-type PermissionResolver func(agentID string) (ToolPermissions, bool)
-
 // ToolClient mediates all tool access: selection, permissions, and execution.
 type ToolClient struct {
-	MCPManager         *mcp.Manager
-	Store              *store.Store
-	Config             *Config
-	Builtins           *BuiltinToolRegistry
-	PermissionResolver PermissionResolver
+	MCPManager *mcp.Manager
+	Store      *store.Store
+	Config     *Config
+	Builtins   *BuiltinToolRegistry
 
 	// registeredTools holds tools registered directly via RegisterTools —
 	// the seam callers without a live MCP manager (chiefly tests, and the
@@ -250,11 +238,12 @@ func (tb *ToolClient) RegisterTools(tools []llmtypes.ToolDefinition) {
 // NaniteDefaultRules' single "*" catch-all rule always installed — always
 // returned the entire registered catalog, unranked. Returning the full
 // catalog directly here preserves that real production behavior without
-// the rule-engine machinery. Real narrowing happens downstream:
-// tool_permissions (CheckPermission), the agent_tools grant filter
-// (service/tool.go's filterToolsByAgentTools — replaced the old
-// schema-v2 tools allowlist / filterToolsByAllowlist as of
-// TASKS/phase-4/05-wire-select-for-agent-to-read-agent-tools.md), the
+// the rule-engine machinery. Real narrowing happens downstream: the
+// agent_tools grant filter (service/tool.go's filterToolsByAgentTools —
+// replaced the old schema-v2 tools allowlist / filterToolsByAllowlist as of
+// TASKS/phase-4/05-wire-select-for-agent-to-read-agent-tools.md, and the
+// legacy tool_permissions/CheckPermission mechanism entirely as of
+// TASKS/adhoc/02-remove-tool-permissions-collapse-to-agent-tools.md), the
 // chat-role surface filter (applyChatSurfaceFilter), the developer_mode
 // dev-tool gate, and progressive discovery.
 func (tb *ToolClient) catalogTools() []llmtypes.ToolDefinition {
@@ -407,14 +396,18 @@ func (tb *ToolClient) developerModeEnabled() bool {
 // llmtypes.ToolDefinition format.
 //
 // Deliberately uncapped (CW-20260815-0011): the MaxSelectedTools cut and
-// token-budget prune are NOT applied here. This function only runs the
-// tool_permissions-JSON permission check (CheckPermission); the caller
-// (service/tool.go SelectForAgent) still has its own schema-v2 tools
-// allowlist filter to run afterward. Capping before that second filter
-// could truncate out a tool the agent's own allowlist explicitly declares
-// and is permitted to use — see FinalizeToolSelection, which the caller
-// must invoke once ALL filtering (permissions + allowlist + chat-surface)
-// is done.
+// token-budget prune are NOT applied here. This function no longer applies
+// any per-tool permission filtering of its own (TASKS/adhoc/02-remove-
+// tool-permissions-collapse-to-agent-tools.md removed the tool_permissions-
+// JSON CheckPermission call that used to run here) — the caller
+// (service/tool.go SelectForAgent) unconditionally applies the
+// agent_tools-authoritative filter (filterToolsByAgentTools) to this
+// function's output immediately afterward, so a second, redundant
+// per-candidate DB round trip here would add cost without adding
+// protection. Capping is deferred to FinalizeToolSelection for the same
+// reason it always was: it must run once ALL filtering (agent_tools +
+// chat-surface) is done, or a correctly-granted tool could be truncated
+// out before its own grant ever got a chance to keep it.
 //
 // Dev-tool gate: tools from the "dev" server (dev_bash, dev_read, dev_write,
 // dev_edit, dev_glob, dev_grep) are stripped from the returned set when
@@ -430,10 +423,9 @@ func (tb *ToolClient) SelectToolsAsProvider(ctx context.Context, intent string, 
 	devMode := tb.developerModeEnabled()
 
 	// Start with built-in tools — always available regardless of MCP status.
-	// Builtins must pass the same permission check as MCP tools; a blanket
-	// prepend would bypass deny/allow lists for sensitive builtins (e.g.,
-	// dev_bash, dev_write) and let the LLM call them before the execution-
-	// time check in CallTool denies them.
+	// The agent_tools filter the caller applies right after this function
+	// returns covers builtins and catalog tools identically, so there is no
+	// permission check to duplicate here.
 	var defs []llmtypes.ToolDefinition
 	if tb.Builtins != nil {
 		builtins := tb.Builtins.GetBuiltins()
@@ -443,18 +435,14 @@ func (tb *ToolClient) SelectToolsAsProvider(ctx context.Context, intent string, 
 			if !devMode && isDevTool(bt.Name) {
 				continue
 			}
-			if !tb.CheckPermission(agentID, bt.Name) {
-				continue
-			}
 			defs = append(defs, bt)
 		}
 	} else {
 		defs = make([]llmtypes.ToolDefinition, 0, len(tools))
 	}
 
-	// Append the catalog tools (registered directly + MCP-discovered),
-	// filtered by agent permissions. Names are uniform (no
-	// `mcp__server__` prefix) per ADR-002.
+	// Append the catalog tools (registered directly + MCP-discovered).
+	// Names are uniform (no `mcp__server__` prefix) per ADR-002.
 	//
 	// Strict defaults to nil (non-strict) for all catalog tools. Tools that
 	// benefit from Anthropic server-side input-schema enforcement can opt
@@ -468,9 +456,6 @@ func (tb *ToolClient) SelectToolsAsProvider(ctx context.Context, intent string, 
 		name := t.Name
 		// Dev-tool gate: skip dev tools when developer_mode is off.
 		if !devMode && isDevTool(name) {
-			continue
-		}
-		if !tb.CheckPermission(agentID, name) {
 			continue
 		}
 		defs = append(defs, llmtypes.ToolDefinition{
@@ -492,18 +477,25 @@ func (tb *ToolClient) SelectToolsAsProvider(ctx context.Context, intent string, 
 // Dev-tool gate: if the tool name belongs to the "dev" set (dev_bash,
 // dev_read, dev_write, dev_edit, dev_glob, dev_grep) and developer_mode
 // is false in user_settings, execution is denied regardless of the
-// agent's permission policy. This is the execution-time backstop that
-// complements the selection-time filter in SelectToolsAsProvider.
+// agent's agent_tools grants. This is the execution-time backstop that
+// complements the selection-time filter in SelectToolsAsProvider's caller.
 //
-// Defense-in-depth contract (CW-20260512-0117 / SP-20260512-0010): the
-// tool_permissions JSON (allow_list / deny_list) is honored at
-// description-render time so the LLM only sees tools it can call —
-// see SelectToolsAsProvider (broker.go) and filterToolsByPermissions
-// (service/tool.go) for the surface-side filter. This CheckPermission
-// call is the load-bearing backstop: if a tool name slips past the
-// description filter (caller bypass, bug, stale tool cache, etc.), the
-// gate here denies execution. Do NOT remove this check on the
-// assumption the description filter is sufficient.
+// Defense-in-depth contract: agent_tools (+ the known_tools.always_included
+// escape hatch) is honored at description-render time
+// (service/tool.go's filterToolsByAgentTools) so the LLM only sees tools it
+// can call. The isToolGrantedToAgent check below is the load-bearing
+// execution-time backstop: it is the ONLY gate for callers that invoke
+// ToolService.Execute directly without first re-checking
+// enforceExecutionRules (chat_reflex_dispatch.go's task_execute dispatch,
+// workflow_step_executor.go's tool/LLM steps) — if a tool name slips past
+// every selection-time filter (caller bypass, bug, stale tool cache, etc.),
+// the gate here denies execution. Do NOT remove this check on the
+// assumption a selection-time filter is sufficient.
+//
+// TASKS/adhoc/02-remove-tool-permissions-collapse-to-agent-tools.md
+// replaced the legacy tool_permissions/CheckPermission version of this gate
+// with the agent_tools-based isToolGrantedToAgent — same backstop role,
+// same load-bearing status, different (now sole-system-of-record) source.
 func (tb *ToolClient) CallTool(ctx context.Context, agentID, toolName string, args map[string]any) (string, error) {
 	// Dev-tool gate (execution-time backstop). Applied before the permission
 	// check so a misconfigured allow-list cannot re-enable dev tools when
@@ -512,7 +504,7 @@ func (tb *ToolClient) CallTool(ctx context.Context, agentID, toolName string, ar
 		return "", fmt.Errorf("permission denied: tool %q requires developer_mode to be enabled", toolName)
 	}
 
-	if !tb.CheckPermission(agentID, toolName) {
+	if !tb.isToolGrantedToAgent(ctx, agentID, toolName) {
 		return "", fmt.Errorf("permission denied: tool %q not permitted for agent %q", toolName, agentID)
 	}
 
@@ -544,12 +536,13 @@ func (tb *ToolClient) CallToolWithPolicyCheck(ctx context.Context, agentID, tool
 // Behaviour:
 //   - If args contain a known escalation pattern (e.g., a path with ".."),
 //     return an empty result and a deny summary.
-//   - Inner tool names that fail CheckPermission for agentID are dropped
-//     from the returned slice; the summary reports denied names.
+//   - Inner tool names not granted to agentID via agent_tools (+ the
+//     known_tools.always_included escape hatch) are dropped from the
+//     returned slice; the summary reports denied names.
 //
 // Policies today do not expose arg-level predicates per tool, so the arg
 // check is a conservative global safety net rather than per-tool policy.
-func (tb *ToolClient) HandleRequestToolsForAgent(agentID string, input map[string]any) ([]llmtypes.ToolDefinition, string) {
+func (tb *ToolClient) HandleRequestToolsForAgent(ctx context.Context, agentID string, input map[string]any) ([]llmtypes.ToolDefinition, string) {
 	if ArgsContainEscalationPattern(input) {
 		return nil, fmt.Sprintf("permission denied: request_tools arguments contain escalation pattern (\"..\") for agent %q", agentID)
 	}
@@ -562,7 +555,7 @@ func (tb *ToolClient) HandleRequestToolsForAgent(agentID string, input map[strin
 	permitted := make([]llmtypes.ToolDefinition, 0, len(merged))
 	var denied []string
 	for _, t := range merged {
-		if tb.CheckPermission(agentID, t.Name) {
+		if tb.isToolGrantedToAgent(ctx, agentID, t.Name) {
 			permitted = append(permitted, t)
 			continue
 		}
@@ -585,47 +578,51 @@ func (tb *ToolClient) HandleRequestToolsForAgent(agentID string, input map[strin
 		len(permitted), agentID, strings.Join(names, ", "), strings.Join(denied, ", "))
 }
 
-// GetPermissions loads tool permissions for an agent. File-based agents
-// (ID prefix "file-") are resolved through PermissionResolver when wired —
-// they have no agent_profiles row by design, so a store miss is expected.
-// DB-backed agent IDs fall through to the store; a miss there is a real
-// signal (stale binding or deleted profile) and is logged at WARN.
+// isToolGrantedToAgent reports whether toolName is allowed for agentID
+// under agent_tools (+ the known_tools.always_included escape hatch) — the
+// toolclient-package-local counterpart of
+// internal/service/tool.go's filterToolsByAgentTools and
+// internal/service/tool_execution_rules.go's
+// enforceExecutionRulesViaAgentTools, used by this package's own execution
+// (CallTool) and request_tools (HandleRequestToolsForAgent) backstops now
+// that TASKS/adhoc/02-remove-tool-permissions-collapse-to-agent-tools.md
+// retired tool_permissions/CheckPermission/GetPermissions/PermissionResolver
+// entirely.
 //
-// Only sql.ErrNoRows for file-based IDs is downgraded to DEBUG — a real DB
-// error (busy, corruption, I/O) stays at WARN for every agent ID so operational
-// issues remain visible.
-func (tb *ToolClient) GetPermissions(agentID string) ToolPermissions {
-	if tb.PermissionResolver != nil {
-		if perms, ok := tb.PermissionResolver(agentID); ok {
-			return perms
-		}
-	}
-
-	fileBased := strings.HasPrefix(agentID, "file-")
-
+// Nil-safe: tb.Store == nil default-permits, matching CheckPermission's own
+// pre-existing "machinery not wired" precedent (chiefly tests). Once a
+// Store is wired, a genuinely-ungranted tool is denied unless it carries
+// the always_included escape hatch — fail closed, matching
+// filterToolsByAgentTools' own default.
+func (tb *ToolClient) isToolGrantedToAgent(ctx context.Context, agentID, toolName string) bool {
 	if tb.Store == nil {
-		return ToolPermissions{MaxCallsPerTurn: DefaultMaxCallsPerTurn}
+		return true
 	}
 
-	agent, err := tb.Store.GetAgent(agentID)
+	granted, err := tb.Store.ListAgentToolNames(ctx, agentID)
 	if err != nil {
-		if fileBased && errors.Is(err, sql.ErrNoRows) {
-			slog.Debug("toolclient: file-based agent not in store; using default-permit",
-				"agent", agentID, "err", err)
-		} else {
-			slog.Warn("toolclient: could not load agent for permissions",
-				"agent", agentID, "err", err)
+		slog.Warn("toolclient: agent_tools lookup failed — denying non-escape-hatch tool",
+			"agent", agentID, "tool", toolName, "err", err)
+	} else {
+		for _, n := range granted {
+			if n == toolName {
+				return true
+			}
 		}
-		return ToolPermissions{MaxCallsPerTurn: DefaultMaxCallsPerTurn}
 	}
 
-	return ParsePermissions(agent.ToolPermissions)
-}
-
-// CheckPermission returns true if the agent is allowed to use the named tool.
-func (tb *ToolClient) CheckPermission(agentID, toolName string) bool {
-	perms := tb.GetPermissions(agentID)
-	return perms.CheckPermission(toolName)
+	always, err := tb.Store.ListAlwaysIncludedKnownTools(ctx)
+	if err != nil {
+		slog.Warn("toolclient: list always_included known_tools failed — denying",
+			"agent", agentID, "tool", toolName, "err", err)
+		return false
+	}
+	for _, t := range always {
+		if t.Name == toolName && t.Status == "available" {
+			return true
+		}
+	}
+	return false
 }
 
 // ToolSummary is a lightweight tool description without the full schema.

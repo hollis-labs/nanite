@@ -197,14 +197,12 @@ func (s *toolServiceImpl) SelectForAgent(ctx context.Context, sessionID, agentID
 
 	// Resolve the agent's real agent_profiles row once, if any -- used by
 	// the agent_tools grant filter below, dispatch-allowlist parsing, and
-	// the chat-surface filter. A miss (err != nil) means agentID has no
-	// real DB row to hang an agent_tools grant off of -- chiefly a
-	// file-based agent dispatched under its runtime "file-<slug>" alias
-	// (internal/service/agent_permissions.go), which structurally cannot
-	// participate in agent_tools (a real FK to agent_profiles) and keeps
-	// relying on tool_permissions/PermissionResolver below instead. See
-	// TASKS/phase-4/05-wire-select-for-agent-to-read-agent-tools.md's Work
-	// Log for the full deny-semantics decision this split reflects.
+	// the chat-surface filter. Every agent (including the compiled-in
+	// builtin profiles) is a real agent_profiles row with a real ID by the
+	// time any selection runs (TASKS/adhoc/01-eliminate-file-based-agent-
+	// runtime.md), so a miss (err != nil) here means agentID itself does
+	// not resolve to a known agent, not "this population needs a
+	// different permission model."
 	var callerSlug string
 	var callerDispatchAllowlist []string
 	var dbAgent *store.AgentProfile
@@ -214,30 +212,22 @@ func (s *toolServiceImpl) SelectForAgent(ctx context.Context, sessionID, agentID
 		}
 	}
 
-	if dbAgent != nil {
-		// agent_tools (through known_tools) is the sole roster-membership
-		// gate for an agent with a real agent_profiles row, going forward
-		// — the FK-based replacement for the schema-v2 tools allowlist
-		// this used to read (filterToolsByAllowlist(allTools, agent.Tools),
-		// retired from this path by this task). Per this task's deny-
-		// semantics decision, agent_profiles.tool_permissions is NOT
-		// consulted again here for this population — it stays live only
-		// as the deeper broker-level/execution-time backstop
-		// (ToolClient.SelectToolsAsProvider's own CheckPermission call,
-		// already applied inside the SelectToolsAsProvider call above, and
-		// CallTool's own gate). See the Work Log for the resulting "two
-		// systems of record" tradeoff this leaves.
-		allTools = filterToolsByAgentTools(ctx, s.agentToolsStore(), agentID, allTools)
-	} else {
-		// No real agent_profiles row for agentID — agent_tools is
-		// structurally unreachable (its agent_id column is a real FK to
-		// agent_profiles). tool_permissions/PermissionResolver remains
-		// this population's ONLY selection-time filter (CW-20260512-0117 /
-		// SP-20260512-0010); this also closes the gap for tools that land
-		// in allTools from outside SelectToolsAsProvider's own gate (e.g.
-		// the discoverAgentMCPTools fallback above).
-		allTools = filterToolsByPermissions(s.toolClient, agentID, allTools)
-	}
+	// agent_tools (through known_tools) is the sole roster-membership
+	// gate, unconditionally, for every agent -- the FK-based replacement
+	// for the schema-v2 tools allowlist this used to read
+	// (filterToolsByAllowlist(allTools, agent.Tools), retired from this
+	// path by TASKS/phase-4/05) and, as of
+	// TASKS/adhoc/02-remove-tool-permissions-collapse-to-agent-tools.md,
+	// for the legacy tool_permissions/PermissionResolver fallback that
+	// used to run here for agentIDs with no real agent_profiles row (only
+	// ever file-based agents, eliminated by TASKS/adhoc/01). Called
+	// directly against agentID rather than gated on dbAgent != nil --
+	// filterToolsByAgentTools' own store lookup degrades to "no grants" for
+	// a genuinely unknown agentID, which is the correct fail-closed
+	// outcome. This also closes the gap for tools that land in allTools
+	// from outside SelectToolsAsProvider's own gate (e.g. the
+	// discoverAgentMCPTools fallback above).
+	allTools = filterToolsByAgentTools(ctx, s.agentToolsStore(), agentID, allTools)
 
 	// Apply the chat-role surface filter. Only applies when the agent is
 	// the chat-role profile (slug "default"). Worker / Planner / executor
@@ -882,44 +872,6 @@ func parseParentDispatchAllowlist(raw string) []string {
 	return out
 }
 
-// filterToolsByPermissions narrows the tool list to those permitted by the
-// agent profile's tool_permissions JSON column (allow_list / deny_list).
-// Idempotent for tools already filtered by toolclient.SelectToolsAsProvider —
-// re-applying the same CheckPermission to a tool that passed once is a
-// no-op. The value-add is closing the gap on tools that landed in allTools
-// from outside the broker (e.g., discoverAgentMCPTools fallback) so every
-// tool the LLM sees has cleared the policy.
-//
-// Nil-safe: tc == nil short-circuits (no permission machinery wired); empty
-// agentID returns the input unchanged because GetPermissions would yield
-// permissive default-permit and a wasteful CheckPermission walk.
-//
-// Cacheable-prefix note: tools surviving SelectToolsAsProvider already
-// passed CheckPermission, so this pass preserves their order and does not
-// invalidate the cacheable head of the tool array. Only discovery-fallback
-// tails are subject to net new filtering here. The cache-marker priority
-// work (CW-20260512-0109 / Sprint 1 T1.5) governs where the marker lands
-// — see decisions.nanite.tool_broker.per_call_descriptions_tail in Vanta.
-func filterToolsByPermissions(tc *toolclient.ToolClient, agentID string, tools []llmtypes.ToolDefinition) []llmtypes.ToolDefinition {
-	if tc == nil || agentID == "" || len(tools) == 0 {
-		return tools
-	}
-	filtered := make([]llmtypes.ToolDefinition, 0, len(tools))
-	var denied []string
-	for _, t := range tools {
-		if tc.CheckPermission(agentID, t.Name) {
-			filtered = append(filtered, t)
-			continue
-		}
-		denied = append(denied, t.Name)
-	}
-	if len(denied) > 0 {
-		slog.Debug("service/tool: tool_permissions filtered at description-render",
-			"agent", agentID, "before", len(tools), "after", len(filtered), "denied", denied)
-	}
-	return filtered
-}
-
 // filterToolsByAgentTools narrows tools to the set explicitly granted to
 // the agent via agent_tools (through known_tools) -- the FK-based
 // replacement for the old schema-v2 tools allowlist
@@ -938,10 +890,10 @@ func filterToolsByPermissions(tc *toolclient.ToolClient, agentID string, tools [
 // folded in separately by the caller (SelectForAgent), NOT inside this
 // function, so it survives even when this filter yields zero rows.
 //
-// st == nil degrades to a no-op (tools pass through unfiltered) --
-// matches filterToolsByPermissions' existing nil-safety precedent for
-// "machinery not wired" callers (chiefly tests); production always wires
-// a real *store.Store onto ToolClient (cmd/nanite/main.go).
+// st == nil degrades to a no-op (tools pass through unfiltered) -- the
+// "machinery not wired" precedent every nil-safe helper in this file
+// follows (chiefly tests); production always wires a real *store.Store
+// onto ToolClient (cmd/nanite/main.go).
 func filterToolsByAgentTools(ctx context.Context, st *store.Store, agentID string, tools []llmtypes.ToolDefinition) []llmtypes.ToolDefinition {
 	if st == nil || len(tools) == 0 {
 		return tools

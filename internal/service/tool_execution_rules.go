@@ -2,31 +2,24 @@ package service
 
 import (
 	"context"
-	"encoding/json"
 	"log/slog"
-
-	"github.com/hollis-labs/nanite/internal/toolclient"
 )
 
 // enforceExecutionRules re-checks a subset of selection-broker rules at
 // execute time. This catches cases where the agent config changed between
 // tool selection and tool execution within the same turn.
 //
-// Checks, for any agentID that resolves to a real agent_profiles row
-// (mirroring SelectForAgent's own dbAgent split -- filterToolsByAgentTools,
-// TASKS/phase-4/05's Work Log item 1):
-//   - agent_tools grant membership (+ the known_tools.always_included
-//     escape hatch), via enforceExecutionRulesViaAgentTools.
-//
-// ...and for every other agentID (structurally, today, only a file-based
-// agent dispatched under its runtime "file-<slug>" alias, which cannot
-// participate in agent_tools -- a real FK to agent_profiles):
-//   - Agent tools allowlist (AgentProfile.Tools JSON array, legacy schema-
-//     v2 shape).
-//   - Agent permission deny/allow list (ToolPermissions).
+// agent_tools grant membership (+ the known_tools.always_included escape
+// hatch), via enforceExecutionRulesViaAgentTools, is the sole gate for
+// every agentID, unconditionally --
+// TASKS/adhoc/02-remove-tool-permissions-collapse-to-agent-tools.md
+// removed the legacy Agent-tools-allowlist/ToolPermissions re-check that
+// used to run here for agentIDs with no real agent_profiles row (only ever
+// file-based agents, eliminated by
+// TASKS/adhoc/01-eliminate-file-based-agent-runtime.md).
 //
 // TASKS/phase-5/01-build-assignment-api.md closed a real gap here: before
-// this change, this function unconditionally re-checked the legacy
+// that change, this function unconditionally re-checked the legacy
 // agent_profiles.tools column for every agent, completely independent of
 // SelectForAgent's post-05 agent_tools-based selection -- so a tool granted
 // via that task's own agent_tools API could be offered to the model at
@@ -42,72 +35,36 @@ func (s *chatServiceImpl) enforceExecutionRules(ctx context.Context, agentID, to
 		return true, ""
 	}
 
-	// Look up agent config via the agents service.
+	// Look up agent config via the agents service. Every agent (including
+	// the compiled-in builtin profiles) is a real agent_profiles row as of
+	// TASKS/adhoc/01-eliminate-file-based-agent-runtime.md -- a lookup
+	// failure here means agentID itself doesn't resolve to a known agent,
+	// so fail open (allow) rather than reject a legitimate call over a
+	// stale/unresolvable ID, matching this function's pre-existing
+	// missing-wiring precedent below.
 	if s.agents == nil {
 		return true, ""
 	}
-
-	agent, err := s.agents.Get(ctx, agentID)
-	if err != nil {
+	if _, err := s.agents.Get(ctx, agentID); err != nil {
 		slog.Warn("tool-execution-rules: agent lookup failed — allowing",
 			"agent", agentID, "err", err)
 		return true, ""
 	}
-
-	// Prefer the agent_tools-authoritative path for any agentID that
-	// resolves to a real agent_profiles row. A raw store.GetAgent(agentID)
-	// lookup (unlike s.agents.Get above, which also resolves a file-based
-	// "file-<slug>" alias to an in-memory profile) misses for anything
-	// that isn't a real DB row under that exact ID -- the same
-	// distinguishing signal SelectForAgent's own dbAgent check uses
-	// (toolServiceImpl.agentToolsStore()-backed filterToolsByAgentTools).
-	if s.store != nil {
-		if _, err := s.store.GetAgent(agentID); err == nil {
-			return s.enforceExecutionRulesViaAgentTools(ctx, agentID, toolName)
-		}
+	if s.store == nil {
+		return true, ""
 	}
 
-	// No real agent_profiles row for agentID (a file-based agent) --
-	// unchanged legacy allowlist/permission re-check.
-	// Check agent tools allowlist (same logic as selection-time filterToolsByAllowlist).
-	if agent.Tools != "" && agent.Tools != "[]" {
-		var allowlist []string
-		if err := json.Unmarshal([]byte(agent.Tools), &allowlist); err == nil && len(allowlist) > 0 {
-			allowed := false
-			for _, pattern := range allowlist {
-				if toolclient.MatchPattern(pattern, toolName) {
-					allowed = true
-					break
-				}
-			}
-			if !allowed {
-				return false, "tool not in agent's allowed tool set"
-			}
-		}
-	}
-
-	// Check permission deny/allow via ToolClient.
-	if s.permissions != nil {
-		perms := toolclient.ParsePermissions(agent.ToolPermissions)
-		if !perms.CheckPermission(toolName) {
-			return false, "tool denied by agent permission policy"
-		}
-	}
-
-	return true, ""
+	return s.enforceExecutionRulesViaAgentTools(ctx, agentID, toolName)
 }
 
 // enforceExecutionRulesViaAgentTools is the agent_tools-authoritative
-// execution-time re-check for any agentID that resolves to a real
-// agent_profiles row -- mirrors filterToolsByAgentTools' exact scoping
-// (TASKS/phase-4/05's Work Log items 1/2/5). agent_tools membership (+ the
-// known_tools.always_included escape hatch) is the sole gate for this
-// population; tool_permissions is deliberately NOT re-consulted a second
-// time here, matching SelectForAgent's own decision not to double-gate on
-// it at that surface for this population (05's Work Log item 3's "two
-// systems of record" tradeoff is about the deeper ToolClient.
-// SelectToolsAsProvider/CallTool backstop, which still runs independently
-// and is unaffected by this function either way).
+// execution-time re-check, unconditionally, for every agentID -- mirrors
+// filterToolsByAgentTools' exact scoping (TASKS/phase-4/05's Work Log items
+// 1/2/5). agent_tools membership (+ the known_tools.always_included escape
+// hatch) is the sole gate; tool_permissions no longer exists anywhere in
+// the system as of TASKS/adhoc/02-remove-tool-permissions-collapse-to-
+// agent-tools.md (including the deeper ToolClient.SelectToolsAsProvider/
+// CallTool layer, which that task also collapsed onto agent_tools).
 func (s *chatServiceImpl) enforceExecutionRulesViaAgentTools(ctx context.Context, agentID, toolName string) (bool, string) {
 	granted, err := s.store.ListAgentToolNames(ctx, agentID)
 	if err != nil {

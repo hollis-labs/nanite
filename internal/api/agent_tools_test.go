@@ -148,12 +148,17 @@ func TestHandleGrantAgentTool_RejectsNonexistentAgent(t *testing.T) {
 	}
 }
 
-// TestHandleGrantAgentTool_RejectsStaleDenyListMatch is the Done-means
-// integration test for the stale-legacy-deny-list footgun (item 3(a) of
-// this task's Context): a grant that would be silently vetoed by the
-// agent's still-populated legacy tool_permissions.deny_list must be
-// rejected outright, not silently succeed.
-func TestHandleGrantAgentTool_RejectsStaleDenyListMatch(t *testing.T) {
+// TestHandleGrantAgentTool_SucceedsDespiteStaleDenyList is the direct
+// replacement for the deleted TestHandleGrantAgentTool_RejectsStaleDenyListMatch
+// (TASKS/phase-5/01's stale-legacy-deny-list footgun test): that test
+// asserted a grant was REJECTED (409) when the agent's legacy
+// tool_permissions.deny_list still matched the granted tool, because
+// tool_permissions.CheckPermission stayed live as a deeper broker-level
+// backstop that could silently veto the grant. TASKS/adhoc/02-remove-
+// tool-permissions-collapse-to-agent-tools.md removed that backstop
+// entirely, so the same setup must now succeed (201) -- there is no more
+// deeper mechanism left for a stale deny_list to conflict with.
+func TestHandleGrantAgentTool_SucceedsDespiteStaleDenyList(t *testing.T) {
 	a, mux := newTestAPI(t)
 	ctx := context.Background()
 
@@ -174,31 +179,15 @@ func TestHandleGrantAgentTool_RejectsStaleDenyListMatch(t *testing.T) {
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
 	mux.ServeHTTP(w, req)
-	if w.Code != http.StatusConflict {
-		t.Fatalf("POST /api/agents/{id}/tools (deny_list conflict): expected 409, got %d; body: %s", w.Code, w.Body.String())
+	if w.Code != http.StatusCreated {
+		t.Fatalf("POST /api/agents/{id}/tools: expected 201 (tool_permissions no longer vetoes grants), got %d; body: %s", w.Code, w.Body.String())
 	}
 
 	names, err := a.Services.Store.ListAgentToolNames(ctx, agent.ID)
 	if err != nil {
 		t.Fatalf("ListAgentToolNames: %v", err)
 	}
-	if len(names) != 0 {
-		t.Errorf("expected no agent_tools row for a deny_list-rejected grant, got %v", names)
-	}
-
-	// A tool NOT matched by the deny_list glob still grants normally --
-	// confirms the rejection is pattern-specific, not a blanket agent-level
-	// lockout.
-	toolID2, err := a.Services.Store.UpsertKnownTool(ctx, "web_search", "builtin", "available", "")
-	if err != nil {
-		t.Fatalf("UpsertKnownTool (web_search): %v", err)
-	}
-	grantBody2, _ := json.Marshal(GrantAgentToolRequest{ToolID: toolID2})
-	req = httptest.NewRequest("POST", "/api/agents/"+agent.ID+"/tools", bytes.NewReader(grantBody2))
-	req.Header.Set("Content-Type", "application/json")
-	w = httptest.NewRecorder()
-	mux.ServeHTTP(w, req)
-	if w.Code != http.StatusCreated {
-		t.Fatalf("POST /api/agents/{id}/tools (non-conflicting tool): expected 201, got %d; body: %s", w.Code, w.Body.String())
+	if len(names) != 1 || names[0] != "dev_read" {
+		t.Errorf("expected dev_read to be granted despite the stale deny_list, got %v", names)
 	}
 }

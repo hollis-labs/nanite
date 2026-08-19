@@ -10,7 +10,6 @@ import (
 
 	"github.com/hollis-labs/nanite/internal/chat"
 	"github.com/hollis-labs/nanite/internal/store"
-	"github.com/hollis-labs/nanite/internal/toolclient"
 )
 
 // ValidationResult holds the outcome of an agent config validation.
@@ -38,59 +37,17 @@ func (v ValidationResult) Error() string {
 func ValidateAgentConfig(agent *store.AgentProfile) ValidationResult {
 	var result ValidationResult
 
-	// 1. Validate tool_permissions JSON is well-formed
-	tp := strings.TrimSpace(agent.ToolPermissions)
-	if tp != "" && tp != "{}" {
-		var perms toolclient.ToolPermissions
-		if err := json.Unmarshal([]byte(tp), &perms); err != nil {
-			result.Errors = append(result.Errors,
-				fmt.Sprintf("tool_permissions is malformed JSON: %s", err.Error()))
-		} else {
-			// 2. Check for empty allow_list (explicitly set but empty)
-			// We need to detect if allow_list was explicitly set to [].
-			// Re-parse as raw map to check.
-			var raw map[string]json.RawMessage
-			if err := json.Unmarshal([]byte(tp), &raw); err == nil {
-				if v, ok := raw["allow_list"]; ok {
-					var list []string
-					if json.Unmarshal(v, &list) == nil && len(list) == 0 {
-						result.Warnings = append(result.Warnings,
-							"allow_list is empty - this will deny all tools")
-					}
-				}
-				// Also check shorthand "allow"
-				if v, ok := raw["allow"]; ok {
-					var list []string
-					if json.Unmarshal(v, &list) == nil && len(list) == 0 {
-						result.Warnings = append(result.Warnings,
-							"allow_list is empty - this will deny all tools")
-					}
-				}
-			}
-
-			// 4. Validate glob patterns in allow_list and deny_list
-			for _, pattern := range perms.AllowList {
-				if err := validateGlobPattern(pattern); err != nil {
-					result.Errors = append(result.Errors,
-						fmt.Sprintf("invalid glob pattern in allow_list %q: %s", pattern, err.Error()))
-				}
-			}
-			for _, pattern := range perms.DenyList {
-				if err := validateGlobPattern(pattern); err != nil {
-					result.Errors = append(result.Errors,
-						fmt.Sprintf("invalid glob pattern in deny_list %q: %s", pattern, err.Error()))
-				}
-			}
-		}
-	}
-
-	// 3. Warn if no MCP servers and permissive (empty) permissions
-	mcpEmpty := isMCPServersEmpty(agent.MCPServers)
-	permissive := isPermissionsPermissive(tp)
-	if mcpEmpty && permissive {
-		result.Warnings = append(result.Warnings,
-			"agent has no MCP servers and permissive permissions - it will have no tools but unrestricted access")
-	}
+	// tool_permissions is no longer validated here.
+	// TASKS/adhoc/02-remove-tool-permissions-collapse-to-agent-tools.md
+	// retired the tool_permissions/CheckPermission enforcement machinery
+	// entirely -- agent_tools (+ the known_tools.always_included escape
+	// hatch) is the sole tool-selection gate now, everywhere. The
+	// agent_profiles.tool_permissions column is left in place (that task's
+	// schema decision — see internal/store/agents.go's doc comment on the
+	// field) but nothing reads it for access control anymore, so validating
+	// its JSON shape or warning about an "unrestricted access" outcome that
+	// can no longer actually happen would be validating dead data, not
+	// protecting the operator from anything real.
 
 	// --- v2 field validation ---
 
@@ -222,24 +179,4 @@ func validateGlobPattern(pattern string) error {
 		return fmt.Errorf("bad glob syntax: %w", err)
 	}
 	return nil
-}
-
-// isMCPServersEmpty returns true if the mcp_servers field is empty or "[]".
-func isMCPServersEmpty(mcpServers string) bool {
-	s := strings.TrimSpace(mcpServers)
-	return s == "" || s == "[]"
-}
-
-// isPermissionsPermissive returns true if tool_permissions is empty, "{}", or
-// has neither allow_list nor deny_list set.
-func isPermissionsPermissive(tp string) bool {
-	s := strings.TrimSpace(tp)
-	if s == "" || s == "{}" {
-		return true
-	}
-	var perms toolclient.ToolPermissions
-	if err := json.Unmarshal([]byte(s), &perms); err != nil {
-		return false // malformed — not permissive
-	}
-	return len(perms.AllowList) == 0 && len(perms.DenyList) == 0
 }

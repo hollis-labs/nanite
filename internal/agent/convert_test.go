@@ -92,13 +92,11 @@ func TestDefinition_ToProfile(t *testing.T) {
 		t.Errorf("Constraints = %q, want %q", p.Constraints, "{}")
 	}
 
-	// Check tool permissions derived from tools.
-	var tp map[string]any
-	if err := json.Unmarshal([]byte(p.ToolPermissions), &tp); err != nil {
-		t.Fatalf("ToolPermissions JSON: %v", err)
-	}
-	if tp["allow_list"] == nil {
-		t.Error("ToolPermissions missing allow_list")
+	// TASKS/adhoc/02-remove-tool-permissions-collapse-to-agent-tools.md:
+	// ToolPermissions is always written as an inert "{}" now, regardless of
+	// Tools -- it is no longer derived from anything.
+	if p.ToolPermissions != "{}" {
+		t.Errorf("ToolPermissions = %q, want %q", p.ToolPermissions, "{}")
 	}
 }
 

@@ -174,16 +174,18 @@ This branch (`phase-1-execution`, based off Phase 0's `HEAD` as of 2026-08-18 �
 
 | Task | Status | Depends on |
 |---|---|---|
-| 01-scratchpad-ttl-pruning | implemented | `TASKS/phase-0/27-cut-p7-scratchpad-snapshot` |
-| 02-dispatch-to-agent-reflex-action-kind-and-broker-migration | implemented | Phase 1's reflex opt-out field; `TASKS/phase-0/21-cut-modes` |
-| 03-migrate-promptrouter-to-reflexes | in-progress | `02` |
-| 04-unify-run-another-agent-surfaces | implemented | `TASKS/phase-0/03-fix-callertype-mistagging` |
-| 05-wire-select-for-agent-to-read-agent-tools | implemented | Phase 1's `04-add-known-tools-and-agent-tools-fk` (landed via the Phase 1→main merge) |
-| 06-add-filter-tool-selection | implemented | `TASKS/phase-0/22-remove-skill-and-tool-broker-abstractions`; held until `05` merges (both touch `internal/service/tool.go`'s `SelectForAgent`) |
-| 07-tool-concurrency-safety-classification | implemented | none directly; held until `05` merges — its target (`GetToolMeta`) also lives in `internal/service/tool.go`, an overlap the original parallelization note didn't flag |
-| 08-export-and-drop-agent-broker-decisions | implemented | `02` |
+| 01-scratchpad-ttl-pruning | validated | `TASKS/phase-0/27-cut-p7-scratchpad-snapshot` |
+| 02-dispatch-to-agent-reflex-action-kind-and-broker-migration | validated | Phase 1's reflex opt-out field; `TASKS/phase-0/21-cut-modes` |
+| 03-migrate-promptrouter-to-reflexes | validated | `02` |
+| 04-unify-run-another-agent-surfaces | validated | `TASKS/phase-0/03-fix-callertype-mistagging` |
+| 05-wire-select-for-agent-to-read-agent-tools | validated | Phase 1's `04-add-known-tools-and-agent-tools-fk` (landed via the Phase 1→main merge) |
+| 06-add-filter-tool-selection | validated | `TASKS/phase-0/22-remove-skill-and-tool-broker-abstractions`; held until `05` merges (both touch `internal/service/tool.go`'s `SelectForAgent`) |
+| 07-tool-concurrency-safety-classification | validated | none directly; held until `05` merges — its target (`GetToolMeta`) also lives in `internal/service/tool.go`, an overlap the original parallelization note didn't flag |
+| 08-export-and-drop-agent-broker-decisions | validated | `02` |
 
 **Orchestrator note (2026-08-19):** confirmed via grep that `07`'s target (the concurrency-safety name-heuristic) lives in `internal/service/tool.go:677-682` — the same file `05` and `06` both touch, a three-way overlap the original parallelization plan below only partially flagged. Serializing: `05` solo first (Wave 1), then `06`+`07` together once `05` merges (Wave 1.5).
+
+**Validation (2026-08-19, Orchestrator):** all 8 tasks merged to `main`; backend baseline (`go build ./...`, `go vet ./...` -- same 2 pre-existing `container.go` findings, `go test ./...`) fully green. Real dogfeed against the redeployed live `nanite-api-service`: clean restart with new pid, clean startup logs. Exercised the biggest structural change (agent-broker retirement) directly -- a real DB-only test agent, message "Please research the current state of the authentication system" correctly fired `dispatch_to_agent_researcher_mention` (`02`+`03`'s migrated reflex), attempted dispatch to `researcher`, hit a real and correct safety gate (`researcher`'s real profile has `can_execute=false`, not on the text-only whitelist), and gracefully fell back to chat-direct exactly as `02` designed -- confirms the full reflex-dispatch mechanism works end-to-end, not just in isolated tests. The chat-direct fallback then surfaced a real, `safego`-caught panic in `internal/mcp/dev_tools.go`'s `callGrep` (integer divide by zero) while using `dev_grep`/`dev_glob` -- investigated and confirmed unrelated to this batch (file untouched by any Phase 2-5 task; `dev_grep` was already concurrency-safe under the *pre*-Phase-4 heuristic too, so `07`'s reclassification didn't newly enable this path; the bug is a deterministic single-request logic error, not a race) -- logged in `TASKS/ESCALATIONS.md` as an out-of-scope discovery for a future fix, not a Phase 4 blocker. Test agent/session cleaned up after. Ready for fresh Reviewer dispatch.
 
 **Parallelization:**
 - **Wave 1 — parallel.** `01, 02, 04, 05, 06, 07`. Coordination, not hard blocks: `05` changes what `SelectForAgent` reads before `06`'s plugin filter hooks its output — land `05` first if both are in flight together. `06`/`07` both touch tool-catalog-rendering-adjacent territory — low risk, note for awareness.

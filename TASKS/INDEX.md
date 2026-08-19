@@ -200,17 +200,21 @@ This branch (`phase-1-execution`, based off Phase 0's `HEAD` as of 2026-08-18 �
 
 | Task | Status | Depends on |
 |---|---|---|
-| 01-build-assignment-api | implemented | Phase 1 tasks 01-08 (landed via the Phase 1→main merge) |
-| 02-build-plugin-installed-enabled-state-model | implemented | none |
-| 03-wire-registers-agent-profiles | implemented | Phase 1 in full (landed via the Phase 1→main merge); held until `02` merges |
-| 04-close-cli-install-hot-reload-asymmetry | implemented | none |
-| 05-develop-registers-panels-and-crud | implemented | none; held until `02` merges — scope corrected 2026-08-19 (see task file), now `crud[]` only |
+| 01-build-assignment-api | validated | Phase 1 tasks 01-08 (landed via the Phase 1→main merge) |
+| 02-build-plugin-installed-enabled-state-model | validated | none |
+| 03-wire-registers-agent-profiles | validated | Phase 1 in full (landed via the Phase 1→main merge); held until `02` merges |
+| 04-close-cli-install-hot-reload-asymmetry | validated | none |
+| 05-develop-registers-panels-and-crud | validated | none; held until `02` merges — scope corrected 2026-08-19 (see task file), now `crud[]` only |
 | 06-make-http-middleware-plugin-extensible | not-started | **operator design decision — see escalation below, not ready for mechanical dispatch — SKIPPED for this batch** |
-| 10-fix-list-agent-tools-endpoint-stale-permissions-view | in-progress | `TASKS/phase-4/05`, `01` (both already landed) — fix-as-new-worker-task for a real gap found during Orchestrator live dogfeed validation, see `TASKS/phase-5/10-fix-list-agent-tools-endpoint-stale-permissions-view.md` |
+| 10-fix-list-agent-tools-endpoint-stale-permissions-view | validated | `TASKS/phase-4/05`, `01` (both already landed) — fix-as-new-worker-task for a real gap found during Orchestrator live dogfeed validation, see `TASKS/phase-5/10-fix-list-agent-tools-endpoint-stale-permissions-view.md` |
 
 **Parallelization:** `02`, `03`, `05` all touch `internal/plugin/registrations.go` (different sections — the gating wrapper, the `agent_profiles` stub, the `panels`/`crud` stubs) — real overlap risk; land `02` first (it changes the shared gating structure `applyManifestRegistrations` wraps), then `03`/`05` can layer their specific registration logic on top. `01` (new REST endpoints, `internal/api/*`) has low file overlap with this cluster. `04` (`plugin_cmd.go`) and `06` (`server.go`) have no overlap with anything else in this cluster — fully parallel-safe.
 
 **Escalation logged** (`TASKS/ESCALATIONS.md`): `06-make-http-middleware-plugin-extensible` has a real, unsettled design question (where plugin middleware may legally sit relative to the existing security-ordered chain — CORS-outside-auth, body-limit-inside-auth, caller-identity-between) that needs explicit operator input before implementation, not a worker default-guess. Do not dispatch `06` as a routine batch task until that input is recorded. **Confirmed still unresolved as of 2026-08-19 — skipped for this batch, flagged to the operator at wrap-up.**
+
+**Orchestrator scope correction (2026-08-19)**: `05`'s original scope asked for `registers.panels[]`'s frontend rendering half, contradicting the standing "no frontend in any phase" operator instruction and `docs/engineering/TASKS.md`'s own already-corrected Phase 5 text. Narrowed to `crud[]`-only before dispatch; `panels[]`'s backend/manifest half confirmed already fully wired, nothing left to build there.
+
+**Validation (2026-08-19, Orchestrator):** all 6 tasks (01-05, 10) merged to `main`; backend baseline (`go build ./...`, `go vet ./...` -- same 2 pre-existing `container.go` findings, `go test ./...`) fully green. Real dogfeed against the redeployed live `nanite-api-service`: clean restart, all 11 real builtin plugins loaded correctly through `02`'s new DB-backed state model (`"plugins: loaded builtins","count":11`). Exercised `01`'s assignment API directly: created a real role, set `role_id` on a real agent at creation, granted/revoked a real `agent_tools` entry via the new endpoints -- all worked. That same live exercise surfaced a real gap: `GET /api/agents/{id}/tools` (a pre-existing Phase 1 endpoint neither `01` nor `phase-4/05` touched) still computed `allowed` from the legacy `tool_permissions` path, showing every tool as allowed regardless of real `agent_tools` grants -- the same "two systems of record" pattern already closed at two other surfaces, just never closed here. Fixed as `10`, verified live post-merge: a fresh agent showed only `always_included` tools allowed before any grant, and exactly `{granted tool} + always_included` after -- matching the bug reproduction exactly. Test agents/roles cleaned up after each check. Ready for fresh Reviewer dispatch.
 
 **Orchestrator scope correction (2026-08-19):** `05-develop-registers-panels-and-crud.md` originally asked for `registers.panels[]`'s frontend rendering half (a "generic frontend component" + `npm run build` in its Done means) — this directly contradicts the standing operator instruction "no frontend work in any phase, ever" (already banner'd on `01`) and `docs/engineering/TASKS.md`'s own already-corrected Phase 5 text ("`registers.panels[]`'s rendering half is frontend, deferred to the separate frontend pass, not this phase"). Task file corrected before dispatch to `crud[]`-only scope; `panels[]`'s backend/manifest half is already fully wired per the task's own Context, so nothing remained to build there once the frontend half was correctly excluded.
 

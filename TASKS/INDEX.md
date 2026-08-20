@@ -361,10 +361,10 @@ Implements `docs/engineering/architecture/12-scheduling.md` — the design produ
 | `03-runner-adapter-and-job-taxonomy` | 1 | reviewed (merged `becaa3d9`) — pass, no findings | none directly (parallel-safe with `01`/`02`) |
 | `04-retry-backoff-on-fail-policy` | 1 | reviewed (merged `010d8975`) — pass; real correctness fix found+applied (`Job.RunID` unstable across retries; correlate by `ScheduleID`+open-row status instead), independently confirmed twice (Orchestrator, then fresh Reviewer) against `go-scheduler` source; one non-blocking heads-up logged in `ESCALATIONS.md` for `06` | `01`, `02`, `03` |
 | `05-engine-wiring-and-full-replace` | 1 | reviewed (merged `0c8598c9`) — pass; restart-mid-cycle no-double-fire claim independently re-verified via the reviewer's own separate live re-run (real production code, harsher non-graceful kill than the original dogfeed); two minor non-blocking findings logged in `ESCALATIONS.md` as follow-up candidates | `02`, `04` |
-| `06-schedule-fire-telemetry` | 2 | in-progress | `03` |
-| `07-wire-add-schedule-reflex` | 2 | in-progress | `02` |
+| `06-schedule-fire-telemetry` | 2 | implemented, merged `4946e64b`, Orchestrator-verified build/vet/test — real gap found+flagged (not fixed): `fired_count` never bumped by the new engine path, only by the manual `RunDue` admin endpoint | `03` |
+| `07-wire-add-schedule-reflex` | 2 | implemented (worker-reported, not yet Orchestrator-verified/merged) | `02` |
 | `08-agent-self-tool` | 2 | in-progress | `02`; cross-batch on `TASKS/harness-reactive-self-tools/01` — confirmed already landed, targeting `internal/selftools` directly |
-| `09-operator-http-api` | 2 | in-progress | `02` |
+| `09-operator-http-api` | 2 | implemented, merged `537e8bf2`, Orchestrator-verified build/vet/test | `02` |
 
 **Phase 1 complete and fully reviewed clean (2026-08-20).** All five tasks implemented, merged, and independently reviewed by fresh reviewers with no shared context with the workers — including a dedicated review of `05` (highest blast-radius task) that independently re-ran the restart-mid-cycle no-double-fire safety property against real production code, not just a code trace. The production scheduling mechanism (2-minute ticker + 15-minute-lookback heuristic) is fully retired; `go-scheduler`'s `Engine` is now the live mechanism. Two minor, non-blocking cosmetic findings from `05`'s review logged in `ESCALATIONS.md` as follow-up candidates (not fixed, not blocking).
 

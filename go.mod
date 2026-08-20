@@ -38,6 +38,7 @@ require (
 	github.com/grpc-ecosystem/grpc-gateway/v2 v2.28.0 // indirect
 	github.com/hollis-labs/go-queue v0.1.2 // indirect
 	github.com/hollis-labs/go-runner v0.5.0 // indirect
+	github.com/hollis-labs/go-scheduler v0.1.0 // indirect
 	github.com/invopop/jsonschema v0.13.0 // indirect
 	github.com/mailru/easyjson v0.7.7 // indirect
 	github.com/mfridman/interpolate v0.0.2 // indirect

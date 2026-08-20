@@ -15,6 +15,8 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/robfig/cron/v3"
+
 	"github.com/hollis-labs/nanite/internal/agent/reflexes"
 	"github.com/hollis-labs/nanite/internal/store"
 )
@@ -113,18 +115,33 @@ func NewReflexScheduleHook(st *store.Store) reflexes.ScheduleHook {
 // ListDueAgentSchedules on the very next engine tick, rather than sitting
 // invisible until the next process restart's backfillScheduleNextRun pass.
 //
-// Validation here is deliberately shallow where store.ComputeAgentScheduleNextRun
-// already has documented, correct fallback behavior (a malformed but
-// non-empty cron expression falls back to "due now," matching
-// backfillScheduleNextRun/managed_durable_configs.go's own established
-// precedent) -- this function only rejects action_spec shapes that would
-// otherwise either fail the DB's own CHECK constraints (schedule_kind/
-// on_fail/job_type) or produce a semantically broken row (missing
-// name/body, a cron schedule with no schedule_spec at all, invalid
-// job_payload JSON). That combination is what "fails cleanly, not a broken
-// row" means for this hook: reject up front with a clear error, or insert
-// a fully valid, dispatchable row -- never something schema-valid but
-// silently wrong.
+// Validation here rejects action_spec shapes that would otherwise either
+// fail the DB's own CHECK constraints (schedule_kind/on_fail/job_type) or
+// produce a semantically broken row (missing name/body, a cron schedule
+// with no schedule_spec at all, invalid job_payload JSON) -- plus, for
+// schedule_kind="cron", a syntactically invalid (but non-empty)
+// schedule_spec (see below). That combination is what "fails cleanly, not
+// a broken row" means for this hook: reject up front with a clear error,
+// or insert a fully valid, dispatchable row -- never something schema-valid
+// but silently wrong.
+//
+// A non-empty cron schedule_spec is validated via cron.ParseStandard before
+// next_run is ever computed -- mirroring the front-door validation
+// internal/selftools/self_tools_schedule_create.go's callScheduleCreate and
+// internal/api/schedules.go's validateCronSpec both already do for the
+// identical reason. This function used to rely on
+// store.ComputeAgentScheduleNextRun's documented "fall back to due now"
+// behavior for a malformed expression instead, but that fallback is only
+// safe for the *next_run computation*, not for the row's ongoing life:
+// go-scheduler's own tick() (libs/go-scheduler/engine.go) re-parses
+// CronExpr on every tick and silently skips a row that fails to parse
+// (bumping WorkerErrors, never reaching the CAS claim) -- so a bad cron
+// expression that fell through to the "due now" fallback here would
+// produce a schema-valid row that never fires again, with no signal beyond
+// a coarse aggregate error counter. See TASKS/scheduling/
+// 07-wire-add-schedule-reflex.md's Review notes and TASKS/ESCALATIONS.md's
+// 2026-08-20 "Scheduling Phase 2 review: task 07's malformed-cron gap"
+// entry for the full finding this fixes.
 func buildReflexAgentSchedule(agentID string, spec map[string]interface{}, now time.Time) (store.AgentSchedule, error) {
 	name := specString(spec, "name")
 	if name == "" {
@@ -141,9 +158,15 @@ func buildReflexAgentSchedule(agentID string, spec map[string]interface{}, now t
 	}
 
 	scheduleSpec := specString(spec, "schedule_spec")
-	if kind == store.ScheduleKindCron && scheduleSpec == "" {
-		return store.AgentSchedule{}, fmt.Errorf(
-			"action_spec.schedule_spec is required when schedule_kind=%q", store.ScheduleKindCron)
+	if kind == store.ScheduleKindCron {
+		if scheduleSpec == "" {
+			return store.AgentSchedule{}, fmt.Errorf(
+				"action_spec.schedule_spec is required when schedule_kind=%q", store.ScheduleKindCron)
+		}
+		if _, err := cron.ParseStandard(scheduleSpec); err != nil {
+			return store.AgentSchedule{}, fmt.Errorf(
+				"action_spec.schedule_spec %q is not a valid cron expression: %w", scheduleSpec, err)
+		}
 	}
 
 	body := specString(spec, "body")

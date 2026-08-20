@@ -54,6 +54,10 @@ func selfToolDefinitions() []mcp.Tool {
 		handoffStashToolDefinition(),
 		handoffPointersExpandToolDefinition(),
 		whoamiToolDefinition(),
+		// Harness-reactive self-tools worked example (docs/engineering/
+		// architecture/11-harness-reactive-self-tools.md, TASKS/
+		// harness-reactive-self-tools/07-worked-example-task-update-report.md).
+		taskUpdateReportToolDefinition(),
 		{
 			Name: "skill_create",
 			Description: "Create a new skill that binds a set of tool names to a named category.\n\n" +

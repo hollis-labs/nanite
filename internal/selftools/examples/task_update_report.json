@@ -1,0 +1,11 @@
+[
+  {
+    "title": "Report a task-status update and let configured reactions decide what surfaces",
+    "args": {
+      "id": "task-042",
+      "msg": "Migration script finished — 1,204 rows converted, 0 errors."
+    },
+    "result": "Reported task update for \"task-042\": Migration script finished — 1,204 rows converted, 0 errors.\n<!--ENVELOPE_DATA:{\"kind\":\"envelope\",\"version\":1,\"type\":\"info-card\",\"data\":{\"title\":\"Task update\",\"body\":\"Migration script finished — 1,204 rows converted, 0 errors.\"}}:ENVELOPE_DATA-->",
+    "notes": "This tool has NO persisted state of its own (docs/engineering/architecture/11-harness-reactive-self-tools.md's worked example) — every observable effect comes from however this tool's selftool_reactions rows are configured. The default seed (SeedTaskUpdateReportReactions) fires two reactions per call: a render_card (shown here as the embedded ENVELOPE_DATA marker) and an internal_api_call against a demo fixture endpoint. Do not use this to update Nanite's own todo/plan store — use todo_update/plan_update for that."
+  }
+]

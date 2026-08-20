@@ -1,7 +1,7 @@
 # Reaction engine core — `internal/selftools/reactions.Fire`
 
 **Phase:** 1 — Core mechanism (`TASKS/harness-reactive-self-tools`)
-**Status:** implemented
+**Status:** reviewed
 **Depends on:** `01-move-self-tools-to-internal-selftools.md` (the `internal/selftools` package must exist to host this sub-package), `02-reactive-layer-schema.md` (needs `ListEnabledSelftoolReactions` and the two new tables).
 **Touches:** new package `internal/selftools/reactions` (new files — a `Fire` entry point, an `internal_api_call` executor, a `render_card` resolver stub wired to `04`), `internal/store/selftool_reactions.go` (read-only consumer, no changes expected beyond what `02` already built).
 
@@ -74,4 +74,15 @@ Test store setup (`reactions_test.go`) mirrors `internal/selftools/self_tools_te
 
 ## Review notes
 
-<!-- Reviewer fills in. -->
+**2026-08-20 — PASS, scrutinized hardest as the core mechanism.** Fresh reviewer dispatch (no shared context with any of the four Phase 1 workers), reviewing the full diff range `6d668a35..HEAD` against `docs/engineering/architecture/11-harness-reactive-self-tools.md`, `GLOSSARY.md`, and `EXECUTION-PROCESS.md`'s review criteria (correctness, doc alignment, regression into old patterns).
+
+Findings:
+- `Fire()`'s branching matches the design doc's four-kind split exactly (two executed, two defensively skipped even against a hypothetical future `implemented=true` hand-flip). Verified by reading the loop directly: no early return on a per-row error, confirmed by all three required regression tests read line-by-line — `TestFire_RenderCardAndInternalAPICall_BothFireIndependently` genuinely posts to a real `httptest.Server` and asserts method/path/body server-side, not just the returned `Result`; the `implemented=false`-skip and non-2xx-doesn't-block-sibling tests both confirm the sibling reaction still reached `OutcomeSuccess` with real server-side confirmation. Real integration proofs, not mocked-out assertions.
+- `internal_api_call`'s HTTP client: bounded 10s timeout, non-2xx is a per-reaction error with a size-capped (512-byte) body read, no injection risk (`cfg.Endpoint` is never template-substituted, only `BodyTemplate`, and the result goes through `json.Marshal` — proper escaping, not string concatenation).
+- `ResolveRenderCard`'s base envelope shape (`{kind:"envelope", version:1, type, data}`) confirmed identical to `buildShowEnvelope`'s (`internal/selftools/self_tools_transport.go:848`) base fields by direct side-by-side comparison — correctly omits `buildShowEnvelope`'s optional `target`/`mode`/`render_target` fields (a reaction config has no equivalent source for those).
+- `Store` interface is genuinely narrow (2 methods), matching the cited `reflexes` `TraceStore` precedent (verified directly).
+- **Import-cycle constraint independently verified**, not assumed: `go list -deps ./internal/selftools/...` shows no `internal/chat`/`internal/service` entry. This is the design's central, load-bearing constraint and it holds.
+- Regression-pattern check: no silent fail-open (every skip/error path logs via `slog.Warn` and records `Outcome`/`Error` per-reaction), no naming collision, no CRUD surface added. One noted-but-not-blocking soft duplication: the 4-key envelope-wire-shape map literal appears in both `buildShowEnvelope` and `ResolveRenderCard` — structurally forced by the import-cycle constraint itself (`reactions` cannot import `selftools`), matches this codebase's pre-existing ad hoc-map convention, not a regression this batch introduced. Nothing enforces the two stay in sync if `buildShowEnvelope`'s base shape ever changes — worth being aware of, not worth blocking on.
+- Confirmed via grep: no production code yet calls `reactions.NewEngine`/`Fire` — correct, since that's `07`'s job in Phase 2, not this task's.
+
+Build/vet/test independently re-run: `go build ./...` clean, `go vet ./...` shows exactly the two pre-existing unrelated `container.go` findings and nothing new, `go test ./...` all green.

@@ -1,7 +1,7 @@
 # Reactive-layer schema — `selftool_reaction_kinds` + `selftool_reactions`
 
 **Phase:** 1 — Core mechanism (`TASKS/harness-reactive-self-tools`)
-**Status:** implemented
+**Status:** reviewed
 **Depends on:** none. Parallel-safe with `01-move-self-tools-to-internal-selftools.md` — this task's entire file surface is `internal/store/`, no overlap with `01`'s `internal/mcp`/`internal/selftools`/`main.go` changes.
 **Touches:** `internal/store/migrations/` (new migration), a new `internal/store/selftool_reactions.go` (Go read/write helpers, mirroring `internal/store/reflex_taxonomy.go`'s shape).
 
@@ -102,4 +102,4 @@ The design doc's own shape (illustrative, not migration-ready DDL, same precisio
 
 ## Review notes
 
-<!-- Reviewer fills in. -->
+**2026-08-20 — PASS.** Fresh reviewer (no shared context with the worker), full batch review covering all of Phase 1 (`01`-`04`) together — see `03`'s Review notes for the full methodology and cross-task findings. For this task specifically: confirmed migration `126_selftool_reactions.sql` seeds exactly the four design-doc rows byte-for-byte (cross-checked against `TestMigrate126SeedsSelftoolReactionKinds`, which pins the full struct including description text), and the FK/index are correct. Independently confirmed the documented `time.Time`/manual-RFC3339 workaround for `created_at TEXT` is real, not self-inflicted — cross-checked `event_log`/`catalog_sources` (both `DATETIME`-affinity, auto-scan into `time.Time`) against `durable_agents.go`'s own pre-existing `parseStoreTime` helper (same TEXT-column problem, same fix shape already established in this codebase). `InsertSelftoolReaction`/`ListEnabledSelftoolReactions` are sound, parameterized, and covered by a real round-trip test.

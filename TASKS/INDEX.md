@@ -336,10 +336,10 @@ Implements `docs/engineering/architecture/11-harness-reactive-self-tools.md` —
 
 | Task | Phase | Status | Depends on |
 |---|---|---|---|
-| `01-move-self-tools-to-internal-selftools` | 1 | implemented | none |
-| `02-reactive-layer-schema` | 1 | implemented | none (parallel-safe with `01`) |
-| `03-reaction-engine-core` | 1 | implemented | `01`, `02` |
-| `04-render-card-construction` | 1 | implemented | `03` |
+| `01-move-self-tools-to-internal-selftools` | 1 | reviewed | none |
+| `02-reactive-layer-schema` | 1 | reviewed | none (parallel-safe with `01`) |
+| `03-reaction-engine-core` | 1 | reviewed | `01`, `02` |
+| `04-render-card-construction` | 1 | reviewed | `03` |
 | `05-selftool-reaction-telemetry` | 2 | not-started | `03` |
 | `06-collapse-envelope-marker-consumers` | 2 | not-started | none — separable DRY cleanup, not required for `04`'s render_card path |
 | `07-worked-example-task-update-report` | 2 | not-started | `01`, `03`, `04`, `05` (`06` not required) |

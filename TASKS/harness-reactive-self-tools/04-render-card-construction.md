@@ -1,7 +1,7 @@
 # `render_card` reaction — marker construction and delivery
 
 **Phase:** 1 — Core mechanism (`TASKS/harness-reactive-self-tools`)
-**Status:** implemented
+**Status:** reviewed
 **Depends on:** `03-reaction-engine-core.md` (needs `reactions.Fire`'s `render_card` resolution to produce the envelope JSON this task embeds).
 **Touches:** a new small helper in `internal/selftools` (or `internal/selftools/reactions`, if it belongs closer to the resolver — your call, document it) that a self-tool handler calls to turn a resolved `render_card` payload into the existing marker string; no changes expected to `internal/service/chat_generate.go`, `internal/api/tools_call.go`, or `internal/mcpserver/handlers.go` in this task (that's `06`, and it's a separate concern — see below).
 
@@ -54,4 +54,4 @@ Implemented 2026-08-20, directly against the shared `nanite` checkout (task `03`
 
 ## Review notes
 
-<!-- Reviewer fills in. -->
+**2026-08-20 — PASS.** Fresh reviewer (no shared context with the worker), full batch review covering all of Phase 1 (`01`-`04`) together — see `03`'s Review notes for the full methodology. For this task specifically: `EmbedRenderCardMarker`'s output format confirmed byte-identical to `callShowCard`'s own construction at `internal/selftools/self_tools_transport.go:962` by direct source comparison (not trusting the doc comment's claim), and pinned by its own unit test. The round-trip regression test in `internal/api/tools_call_test.go` calls the real, unchanged `extractEnvelopeMarker` (confirmed `internal/api/tools_call.go` has zero diff in this range) — a genuine integration proof, not a reimplementation of the consumer being tested against.

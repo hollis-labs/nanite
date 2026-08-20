@@ -1,7 +1,7 @@
 # Move self-tool definitions and dispatch to `internal/selftools`
 
 **Phase:** 1 — Core mechanism (`TASKS/harness-reactive-self-tools`)
-**Status:** implemented
+**Status:** reviewed
 **Depends on:** none
 **Touches:** `internal/mcp/self_tools_transport.go` and the 15 sibling `internal/mcp/self_tools_*.go` files that add methods to `SelfToolsTransport` (full move to a new `internal/selftools` package, including their `_test.go` counterparts); `cmd/nanite/main.go` (`initMCP`'s `mcp.NewSelfToolsTransport(s)` call and every `selfTools.<Field> = ...` wiring line, ~30 lines around `main.go:889-914`); `internal/mcp/naming.go` (only if `IsReservedSelfToolName` or similar needs to move — investigate first, see step 3); `docs/tool-naming-convention.md` (its "Do not add MCP-origin tools to this namespace... add it to `internal/mcp/self_tools.go`" line, `docs/tool-naming-convention.md:103`, names a file that doesn't exist under that name today and won't exist under `internal/mcp` at all after this move).
 
@@ -84,4 +84,4 @@ All ~470 resulting `mcp.`-qualification call sites across the moved files were d
 
 ## Review notes
 
-<!-- Reviewer fills in. -->
+**2026-08-20 — PASS.** Fresh reviewer (no shared context with the worker), full batch review covering all of Phase 1 (`01`-`04`) together — see `03`'s Review notes for the full methodology and cross-task findings. For this task specifically: verified the pure-move claim was real, not just asserted — wrote a normalization script reversing every claimed identifier export (`errorResult→ErrorResult`, `textResult→TextResult`, `intArg→IntArg`, `elicitUserInput→ElicitUserInput`, `elicitationCreateParams→ElicitationCreateParams`, `elicitationRequestedSchema→ElicitationRequestedSchema`, plus `mcp.`-qualification of pre-existing exports) and diffed all 48 moved `.go` files plus the 4 files that stayed in `internal/mcp` but had calls rewritten against their pre-move originals. Byte-identical after normalization except two accurate comment corrections, `gofmt` realignment triggered by longer qualified names (confirmed zero `gofmt -l` issues today), and one correctly-scoped new local test double (`elicitation_pilot_test.go`'s `stubElicitationService`, necessitated by the package-boundary split, trimmed to only what that one test actually exercises). Confirmed `errorResult`/`textResult` were originally defined in `internal/mcp/dev_tools.go` (which did not move) — exporting them is the correct single-source-of-truth fix, not a duplication. No behavior change found anywhere in the diff.

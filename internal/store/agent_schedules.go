@@ -221,6 +221,40 @@ func (s *Store) ListAgentSchedules(ctx context.Context, agentID string) ([]Agent
 	return out, rows.Err()
 }
 
+// ListAllAgentSchedules returns every agent_schedules row across every
+// agent, ordered the same way ListAgentSchedules orders its per-agent
+// results (priority DESC, created_at ASC). Backs the unfiltered case of
+// GET /api/schedules (TASKS/scheduling/09-operator-http-api.md) -- the
+// operator HTTP surface is the first caller that needs a cross-agent view;
+// every other existing caller of this table (durable_wake.go, the
+// go-scheduler StoreAdapter, the reflex hook, managed_durable_configs.go)
+// is agent-scoped by construction and has no need for it. Deliberately not
+// added to the AgentStateStore interface above: that interface exists to
+// let a future per-agent-file backend swap in for the per-agent state
+// tables, and "list every agent's schedules in one call" is not a
+// per-agent-state concept that backend would need to reason about --
+// it's a plain operator-surface convenience specific to the central DB.
+func (s *Store) ListAllAgentSchedules(ctx context.Context) ([]AgentSchedule, error) {
+	rows, err := s.DB.QueryContext(ctx,
+		`SELECT `+agentScheduleColumns+`
+		 FROM agent_schedules
+		 ORDER BY priority DESC, created_at ASC`,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("list all agent_schedules: %w", err)
+	}
+	defer rows.Close()
+	out := make([]AgentSchedule, 0)
+	for rows.Next() {
+		var sch AgentSchedule
+		if err := scanAgentSchedule(rows, &sch); err != nil {
+			return nil, fmt.Errorf("scan agent_schedules: %w", err)
+		}
+		out = append(out, sch)
+	}
+	return out, rows.Err()
+}
+
 // DeleteAgentSchedule removes a row by id. Returns ErrAgentScheduleNotFound
 // if no row matched.
 func (s *Store) DeleteAgentSchedule(ctx context.Context, id string) error {

@@ -163,6 +163,22 @@ func (a *API) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/durable-agent-wake/due", a.handleListDurableAgentDueWake)
 	mux.HandleFunc("POST /api/durable-agent-wake/run-due", a.handleRunDurableAgentDueWake)
 
+	// Operator schedule CRUD (TASKS/scheduling/09-operator-http-api.md) --
+	// the agent_schedules table go-scheduler's Engine polls, exposed for
+	// direct operator/UI-driven management outside of agent or reflex
+	// control. /api/schedules/status is a literal path segment competing
+	// with /api/schedules/{id}'s wildcard; Go 1.22+ ServeMux resolves that
+	// in favor of the more specific literal match regardless of
+	// registration order, so no ordering care is needed here -- confirmed
+	// against net/http's own pattern-precedence rules before relying on
+	// it.
+	mux.HandleFunc("GET /api/schedules", a.handleListSchedules)
+	mux.HandleFunc("POST /api/schedules", a.handleCreateSchedule)
+	mux.HandleFunc("GET /api/schedules/status", a.handleScheduleEngineStatus)
+	mux.HandleFunc("GET /api/schedules/{id}", a.handleGetSchedule)
+	mux.HandleFunc("PATCH /api/schedules/{id}", a.handlePatchSchedule)
+	mux.HandleFunc("DELETE /api/schedules/{id}", a.handleDeleteSchedule)
+
 	// CW-20260816-0020: Fragments Engine's `callback` destination (fifth
 	// destination type, loom-architecture.md §4) POSTs an opaque
 	// {generator, fragment:{...}} body here, fire-and-forget, whenever a

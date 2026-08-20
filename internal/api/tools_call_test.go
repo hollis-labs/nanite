@@ -15,6 +15,7 @@ import (
 	"github.com/hollis-labs/nanite/internal/envelope"
 	"github.com/hollis-labs/nanite/internal/mcp"
 	"github.com/hollis-labs/nanite/internal/selftools"
+	"github.com/hollis-labs/nanite/internal/selftools/reactions"
 	"github.com/hollis-labs/nanite/internal/service"
 	"github.com/hollis-labs/nanite/internal/store"
 )
@@ -206,6 +207,74 @@ func TestExtractEnvelopeMarker(t *testing.T) {
 				t.Errorf("extractEnvelopeMarker = %q, want %q", got, tc.want)
 			}
 		})
+	}
+}
+
+// TestExtractEnvelopeMarker_RoundTripsRenderCardReactionPayload is
+// TASKS/harness-reactive-self-tools/04-render-card-construction.md's
+// regression proof: a render_card reaction's resolved payload, once
+// embedded via selftools.EmbedRenderCardMarker, round-trips correctly
+// through extractEnvelopeMarker (an existing, real marker consumer, one of
+// the three the architecture doc names) with zero changes to that
+// function. The fired reaction here is a minimal synthetic
+// reactions.Result test double — 07-worked-example-task-update-report.md
+// is not yet landed, so there is no real self-tool handler to call through
+// yet; this proves the wiring contract the handler will rely on.
+func TestExtractEnvelopeMarker_RoundTripsRenderCardReactionPayload(t *testing.T) {
+	// Mirrors how reactions.Fire's render_card branch populates a
+	// FiredReaction: ResolveRenderCard's output stashed verbatim in
+	// Payload, Outcome success.
+	resolvedPayload, err := reactions.ResolveRenderCard(
+		`{"envelope_type":"info-card","template":{"title":"Task update","body":"{{msg}}"}}`,
+		map[string]any{"id": "task-1", "msg": "hello from the reaction engine"},
+	)
+	if err != nil {
+		t.Fatalf("reactions.ResolveRenderCard: %v", err)
+	}
+
+	fireResult := reactions.Result{
+		ToolName: "task_update_report",
+		Reactions: []reactions.FiredReaction{
+			{
+				ReactionID: "reaction-1",
+				Kind:       reactions.KindRenderCard,
+				Outcome:    reactions.OutcomeSuccess,
+				Payload:    resolvedPayload,
+			},
+		},
+	}
+
+	envJSON, ok := fireResult.RenderCardPayload()
+	if !ok {
+		t.Fatalf("RenderCardPayload() returned ok=false, want a resolved render_card payload")
+	}
+
+	// The self-tool handler's own side: embed the resolved payload as the
+	// marker and append it to the tool result text, exactly as
+	// callShowCard does today for card_show.
+	marker := selftools.EmbedRenderCardMarker("info-card: Task update", string(envJSON))
+	toolResultText := "Task update recorded.\n" + marker
+
+	res := &mcp.ToolResult{Content: []mcp.ToolContent{{Type: "text", Text: toolResultText}}}
+
+	got := extractEnvelopeMarker(res)
+	if got != string(envJSON) {
+		t.Fatalf("extractEnvelopeMarker round-trip mismatch:\ngot:  %s\nwant: %s", got, envJSON)
+	}
+
+	// Confirm the round-tripped JSON is the exact envelope wire shape
+	// buildShowEnvelope produces (kind/version/type/data), not just an
+	// opaque string match.
+	var env map[string]any
+	if err := json.Unmarshal([]byte(got), &env); err != nil {
+		t.Fatalf("round-tripped payload is not valid JSON: %v (%s)", err, got)
+	}
+	if env["kind"] != "envelope" || env["version"] != float64(1) || env["type"] != "info-card" {
+		t.Fatalf("round-tripped envelope missing expected wire shape: %#v", env)
+	}
+	data, ok := env["data"].(map[string]any)
+	if !ok || data["body"] != "hello from the reaction engine" {
+		t.Fatalf("round-tripped envelope data not template-substituted correctly: %#v", env["data"])
 	}
 }
 

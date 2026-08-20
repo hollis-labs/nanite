@@ -61,4 +61,4 @@
 
 ## Review notes
 
-<!-- Reviewer fills in. -->
+**Pass (2026-08-20, fresh Reviewer, Phase 1 section review covering 01-04).** CAS safety independently re-derived: `sqlitekit.OpenSingle` forces `MaxOpenConns=1` (confirmed by reading `sqlitekit/open.go` directly, not just the doc claim), and `TestStoreAdapter_ClaimAndUpdateScheduleRun_ConcurrentClaim` (8 racing goroutines, real `*store.Store`) proves exactly one winner and `(false, nil)` for losers under `-race`. `resolveDurableAgentInstanceID`'s profile→instance mapping checked directly against `durable_wake.go`'s real `ListDue` (confirmed it really does key `ListAgentSchedules(ctx, inst.ProfileID)` the same way). 0-match/2+-match skip-and-log behavior confirmed real and tested. Payload wire-compatibility with `03` confirmed via a real cross-adapter integration test (`TestStoreAdapter_Payload_CompatibleWithRunnerAdapter_AllJobTypes`), not just isolated unit tests on each side. No findings.

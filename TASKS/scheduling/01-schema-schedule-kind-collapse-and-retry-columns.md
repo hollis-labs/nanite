@@ -92,4 +92,4 @@
 
 ## Review notes
 
-<!-- Reviewer fills in. -->
+**Pass (2026-08-20, fresh Reviewer, Phase 1 section review covering 01-04).** Migration `127_schedule_runs_and_retry_policy.sql` read directly: correct rename-recreate-copy pattern matching `119`'s precedent, CHECK narrowing to `('cron','one_shot')` confirmed, all pre-existing columns preserved in the `INSERT...SELECT`. `next_run` backfill (`backfillScheduleNextRun`, Go-side, real `robfig/cron` parsing, called from `Store.New()`) independently confirmed idempotent (`WHERE next_run IS NULL` guard) with correct next-occurrence math. `AgentStateStore` interface correctly lost `GetDueSchedules`; zero dangling references to the five removed identifiers anywhere in the tree (grep-confirmed). Migration renumbering to `127` confirmed correct against the real migrations directory. No findings.

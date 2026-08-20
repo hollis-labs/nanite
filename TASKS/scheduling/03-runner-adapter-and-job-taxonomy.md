@@ -125,4 +125,4 @@ While diagnosing the repo-wide `go vet ./...` pre-existing-failure question, one
 
 ## Review notes
 
-<!-- Reviewer fills in. -->
+**Pass (2026-08-20, fresh Reviewer, Phase 1 section review covering 01-04).** All four dispatch-target signatures (`DurableAgentWakeService.Wake`, `WorkflowLauncher.Launch`, `ToolService.Execute`, `reflexes.Executor.Apply`/`State`) checked directly against their real definitions — exact matches, no drift. The "no job type currently exposes a duplicate-run signal" finding confirmed as a defensible, documented finding rather than an invented no-op check. No findings.

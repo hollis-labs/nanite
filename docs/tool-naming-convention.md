@@ -100,7 +100,8 @@ must not publish tools whose bare name falls in this namespace. The registration
 (`Manager.assignUniformNameLocked`) force-prefixes any violating tool with its server name.
 
 Do not add MCP-origin tools to this namespace. If you need a harness-internal tool, add it
-to `internal/mcp/self_tools.go`.
+to `internal/selftools` (TASKS/harness-reactive-self-tools/01: self-tool definitions and
+dispatch moved out of `internal/mcp` into their own top-level package).
 
 ---
 

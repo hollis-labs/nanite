@@ -11,6 +11,7 @@ import (
 
 	"github.com/hollis-labs/nanite/internal/brand"
 	condmcp "github.com/hollis-labs/nanite/internal/mcp"
+	"github.com/hollis-labs/nanite/internal/selftools"
 	"github.com/hollis-labs/nanite/internal/store"
 	"github.com/hollis-labs/nanite/internal/version"
 )
@@ -67,7 +68,7 @@ func New(s *store.Store, sessionID string, allowedPaths []string, artifactsRoot,
 	if apiURL != "" {
 		self = newSelfToolProxy(s, apiURL, sessionID)
 	} else {
-		self = condmcp.NewSelfToolsTransport(s)
+		self = selftools.NewSelfToolsTransport(s)
 	}
 
 	return &Server{

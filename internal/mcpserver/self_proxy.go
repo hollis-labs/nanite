@@ -11,6 +11,7 @@ import (
 	"time"
 
 	condmcp "github.com/hollis-labs/nanite/internal/mcp"
+	"github.com/hollis-labs/nanite/internal/selftools"
 	"github.com/hollis-labs/nanite/internal/store"
 )
 
@@ -37,7 +38,7 @@ type selfToolProxy struct {
 // advertised surface matches what the live server can dispatch — while
 // CallTool forwards over HTTP.
 func newSelfToolProxy(s *store.Store, apiURL, sessionID string) *selfToolProxy {
-	catalog, _ := condmcp.NewSelfToolsTransport(s).ListTools(context.Background())
+	catalog, _ := selftools.NewSelfToolsTransport(s).ListTools(context.Background())
 	return &selfToolProxy{
 		apiURL:    strings.TrimRight(apiURL, "/"),
 		sessionID: sessionID,

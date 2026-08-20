@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -108,7 +109,7 @@ func (a *API) handleCreateAgentReflex(w http.ResponseWriter, r *http.Request) {
 		CreatedBy:     "operator",
 		OptOutAllowed: optOutAllowed,
 	}
-	if errs := validateReflexDefinition(row); len(errs) > 0 {
+	if errs := a.validateReflexDefinition(r.Context(), row); len(errs) > 0 {
 		a.jsonResp(w, http.StatusBadRequest, map[string]any{"valid": false, "errors": errs})
 		return
 	}
@@ -191,7 +192,7 @@ func (a *API) handlePatchAgentReflex(w http.ResponseWriter, r *http.Request) {
 	if req.OptOutAllowed != nil {
 		updated.OptOutAllowed = *req.OptOutAllowed
 	}
-	if errs := validateReflexDefinition(updated); len(errs) > 0 {
+	if errs := a.validateReflexDefinition(r.Context(), updated); len(errs) > 0 {
 		a.jsonResp(w, http.StatusBadRequest, map[string]any{"valid": false, "errors": errs})
 		return
 	}
@@ -257,7 +258,7 @@ func (a *API) handleValidateReflex(w http.ResponseWriter, r *http.Request) {
 		ActionSpec:  req.ActionSpec,
 		Status:      store.ReflexStatusActive,
 	}
-	errs := validateReflexDefinition(row)
+	errs := a.validateReflexDefinition(r.Context(), row)
 	a.jsonResp(w, http.StatusOK, map[string]any{
 		"valid":        len(errs) == 0,
 		"errors":       errs,
@@ -269,7 +270,33 @@ func (a *API) handleValidateReflex(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-func validateReflexDefinition(row store.AgentReflex) []string {
+// validateReflexDefinition validates row's shape (trigger/action kind and
+// spec JSON) and, per TASKS/reflex-taxonomy/05-provenance-tier-enforcement.md,
+// enforces the provenance-tier declare allow-list (Facet 3,
+// docs/engineering/architecture/10-reflex-action-taxonomy.md): whether the
+// resolved provenance tier for this write may even declare row's
+// action_kind. Called from all three real touch points that decide what an
+// agent_reflexes row would look like — handleCreateAgentReflex,
+// handlePatchAgentReflex, and the dry-run handleValidateReflex preview —
+// so the same gate applies whether the definition is about to be written
+// or merely previewed.
+//
+// The provenance tier used for the gate check is resolved the same way
+// created_by is resolved at each real call site (mostly already fixed by
+// construction, per this task's own Context): row.ProvenanceTier is used
+// directly when the caller has already set it (handlePatchAgentReflex
+// carries the existing row's real tier forward; a synthetic test row can
+// set it explicitly to exercise a tier with no live insert path, e.g.
+// "plugin"); otherwise it falls back to the same rule
+// store.InsertAgentReflex already applies when a caller leaves
+// ProvenanceTier unset: CreatedBy == "system" resolves to "system",
+// anything else (including handleCreateAgentReflex's hardcoded "operator"
+// and handleValidateReflex's unset CreatedBy) resolves to "operator". No
+// live call site resolves to "plugin" today — no concrete plugin insert
+// path exists (task's own step 5) — so this fallback never invents a
+// "plugin" resolution; it only ever mirrors the "operator"/"system" split
+// InsertAgentReflex already encodes.
+func (a *API) validateReflexDefinition(ctx context.Context, row store.AgentReflex) []string {
 	var errs []string
 	if row.Name == "" {
 		errs = append(errs, "name is required")
@@ -287,12 +314,32 @@ func validateReflexDefinition(row store.AgentReflex) []string {
 			errs = append(errs, "trigger_spec: invalid JSON: "+err.Error())
 		}
 	}
+	validActionKind := true
 	switch row.ActionKind {
 	case store.ReflexActionInjectReminder, store.ReflexActionForceToolChoice,
 		store.ReflexActionSendMessage, store.ReflexActionHaltSession, store.ReflexActionAddSchedule,
 		store.ReflexActionDispatchToAgent:
 	default:
+		validActionKind = false
 		errs = append(errs, fmt.Sprintf("invalid action_kind %q", row.ActionKind))
+	}
+	if validActionKind {
+		tier := row.ProvenanceTier
+		if tier == "" {
+			// Same default InsertAgentReflex already applies when a caller
+			// leaves ProvenanceTier unset — see this function's doc comment.
+			if row.CreatedBy == "system" {
+				tier = "system"
+			} else {
+				tier = "operator"
+			}
+		}
+		allowed, err := a.Services.Store.ActionKindAllowsProvenanceTier(ctx, row.ActionKind, tier)
+		if err != nil {
+			errs = append(errs, fmt.Sprintf("provenance tier check failed: %v", err))
+		} else if !allowed {
+			errs = append(errs, fmt.Sprintf("provenance tier %q may not declare action_kind %q", tier, row.ActionKind))
+		}
 	}
 	if row.ActionSpec == "" {
 		errs = append(errs, "action_spec is required")

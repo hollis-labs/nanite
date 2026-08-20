@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/hollis-labs/nanite/internal/store"
@@ -138,4 +139,60 @@ func TestReflexesAPI_PendingReviewAndValidate(t *testing.T) {
 	if !got.Valid || !got.Fired {
 		t.Fatalf("validate = %+v, want valid and fired", got)
 	}
+}
+
+// TestValidateReflexDefinition_ProvenanceTierGate is the regression test for
+// TASKS/reflex-taxonomy/05-provenance-tier-enforcement.md: attempting to
+// declare a halt_session reflex at plugin tier is rejected with a clear
+// error naming both the kind and the tier; the same attempt at system or
+// operator tier succeeds (no provenance-tier error in the result). No live
+// plugin-tier insert path exists today (the task's own step 5), so
+// "plugin" is set directly on the row here to exercise the gate the same
+// way a future plugin-registration caller would hit it.
+func TestValidateReflexDefinition_ProvenanceTierGate(t *testing.T) {
+	a, _ := newTestAPI(t)
+	ctx := context.Background()
+
+	baseRow := func(tier string) store.AgentReflex {
+		return store.AgentReflex{
+			Name:           "halt-gate-test",
+			TriggerKind:    store.ReflexTriggerPredicate,
+			TriggerSpec:    `{"kind":"tool_calls_window","window":1,"op":"=","value":0}`,
+			ActionKind:     store.ReflexActionHaltSession,
+			ActionSpec:     `{"reason":"gate test"}`,
+			Status:         store.ReflexStatusActive,
+			ProvenanceTier: tier,
+		}
+	}
+
+	t.Run("plugin tier rejected", func(t *testing.T) {
+		errs := a.validateReflexDefinition(ctx, baseRow("plugin"))
+		found := false
+		for _, e := range errs {
+			if strings.Contains(e, "plugin") && strings.Contains(e, "halt_session") {
+				found = true
+			}
+		}
+		if !found {
+			t.Fatalf("validateReflexDefinition(halt_session @ plugin) errs = %v, want an error naming both %q and %q", errs, "plugin", "halt_session")
+		}
+	})
+
+	t.Run("system tier succeeds", func(t *testing.T) {
+		errs := a.validateReflexDefinition(ctx, baseRow("system"))
+		for _, e := range errs {
+			if strings.Contains(e, "provenance tier") {
+				t.Fatalf("validateReflexDefinition(halt_session @ system) errs = %v, want no provenance-tier error", errs)
+			}
+		}
+	})
+
+	t.Run("operator tier succeeds", func(t *testing.T) {
+		errs := a.validateReflexDefinition(ctx, baseRow("operator"))
+		for _, e := range errs {
+			if strings.Contains(e, "provenance tier") {
+				t.Fatalf("validateReflexDefinition(halt_session @ operator) errs = %v, want no provenance-tier error", errs)
+			}
+		}
+	})
 }

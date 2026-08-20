@@ -131,9 +131,16 @@ func TestGenericReflexPass_DoesNotDuplicateDispatchToAgentFiring(t *testing.T) {
 		t.Errorf("FiredCount after generic pass = %d, want 0 — the generic pass must not bump fired_count for this reflex", afterGeneric.FiredCount)
 	}
 
-	genericReflexActionEvents := countEventLogRowsForReflex(t, st, "reflex_action", "dispatch_to_agent_researcher_mention")
+	// TASKS/reflex-taxonomy/06-unified-reflex-telemetry.md: the generic
+	// pass's own event_log write no longer uses a fixed "reflex_action"
+	// event_type literal (it's now the fired action_kind, per
+	// reflexes.EmitFirings) — checking by reflex name (Detail) rather than
+	// a specific event_type string is the shape-agnostic way to assert "no
+	// row for this reflex was written," regardless of which action_kind
+	// string a future kind might use.
+	genericReflexActionEvents := countEventLogRowsForReflex(t, st, "dispatch_to_agent_researcher_mention")
 	if genericReflexActionEvents != 0 {
-		t.Errorf("event_log has %d reflex_action row(s) naming dispatch_to_agent_researcher_mention after the generic pass, want 0", genericReflexActionEvents)
+		t.Errorf("event_log has %d row(s) naming dispatch_to_agent_researcher_mention after the generic pass, want 0", genericReflexActionEvents)
 	}
 
 	// --- Pass 2: the DEDICATED dispatch pass (chat_generate.go:670's own
@@ -164,20 +171,26 @@ func TestGenericReflexPass_DoesNotDuplicateDispatchToAgentFiring(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ListEvents: %v", err)
 	}
-	var dispatchEvents, reflexActionEvents int
+	var dispatchEvents, otherReflexEventsForThisReflex int
 	for _, e := range events {
+		if e.SessionID != sessionID {
+			continue
+		}
 		switch {
-		case e.EventType == "dispatch_to_agent" && e.SessionID == sessionID:
+		case e.EventType == "dispatch_to_agent":
 			dispatchEvents++
-		case e.EventType == "reflex_action" && e.SessionID == sessionID:
-			reflexActionEvents++
+		case e.Detail == "dispatch_to_agent_researcher_mention":
+			// Any OTHER event_type naming this same reflex would mean the
+			// generic pass wrote a redundant row for it too — shape-agnostic
+			// check, see the matching comment above.
+			otherReflexEventsForThisReflex++
 		}
 	}
 	if dispatchEvents != 1 {
 		t.Errorf("event_log dispatch_to_agent rows = %d, want exactly 1 (the real dedicated-pass dispatch)", dispatchEvents)
 	}
-	if reflexActionEvents != 0 {
-		t.Errorf("event_log reflex_action rows = %d, want 0 — the generic pass must not have written a redundant row for this turn", reflexActionEvents)
+	if otherReflexEventsForThisReflex != 0 {
+		t.Errorf("event_log has %d other row(s) naming dispatch_to_agent_researcher_mention, want 0 — the generic pass must not have written a redundant row for this turn", otherReflexEventsForThisReflex)
 	}
 }
 
@@ -199,7 +212,12 @@ func findAgentReflexByName(ctx context.Context, st *store.Store, name string) (*
 	return nil, store.ErrAgentReflexNotFound
 }
 
-func countEventLogRowsForReflex(t *testing.T, st *store.Store, eventType, reflexName string) int {
+// countEventLogRowsForReflex counts event_log rows whose Detail names
+// reflexName, regardless of event_type — TASKS/reflex-taxonomy/
+// 06-unified-reflex-telemetry.md made event_type per-action-kind (the
+// fired reflex's own action_kind) rather than a fixed "reflex_action"
+// literal, so a shape-agnostic count by reflex name is the stable check.
+func countEventLogRowsForReflex(t *testing.T, st *store.Store, reflexName string) int {
 	t.Helper()
 	events, err := st.ListEvents("", 100)
 	if err != nil {
@@ -207,7 +225,7 @@ func countEventLogRowsForReflex(t *testing.T, st *store.Store, eventType, reflex
 	}
 	count := 0
 	for _, e := range events {
-		if e.EventType == eventType && e.Detail == reflexName {
+		if e.Detail == reflexName {
 			count++
 		}
 	}

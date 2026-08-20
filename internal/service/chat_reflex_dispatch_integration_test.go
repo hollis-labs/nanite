@@ -31,6 +31,7 @@ import (
 	"github.com/hollis-labs/nanite/internal/agent/reflexes"
 	"github.com/hollis-labs/nanite/internal/chat"
 	"github.com/hollis-labs/nanite/internal/classify"
+	pluginpkg "github.com/hollis-labs/nanite/internal/plugin"
 	"github.com/hollis-labs/nanite/internal/store"
 	"github.com/hollis-labs/nanite/internal/toolclient"
 )
@@ -90,9 +91,17 @@ func TestAttemptReflexDispatch_RealSeededReflex_ScopeTierOpenSubagent_RoutesToPl
 	}
 
 	tools := &recordingReflexDispatchToolService{}
+	engine := reflexes.NewEngine(st, nil)
+	// TASKS/reflex-taxonomy/06-unified-reflex-telemetry.md gap 3: plugin
+	// observability hooks used to be invoked exclusively from inside
+	// Engine.EvaluateState's loop — attemptReflexDispatch bypassed them
+	// entirely. Wiring a fake here and asserting on it below proves this
+	// call site now fires them too, via reflexes.EmitFirings.
+	hooks := &recordingReflexPluginHooks{}
+	engine.SetPluginHooks(hooks)
 	s := &chatServiceImpl{
 		store:        st,
-		reflexEngine: reflexes.NewEngine(st, nil),
+		reflexEngine: engine,
 		tools:        tools,
 	}
 
@@ -192,12 +201,22 @@ func TestAttemptReflexDispatch_RealSeededReflex_ScopeTierOpenSubagent_RoutesToPl
 	if dispatchEvent.SessionID != "sess-rule5-1" {
 		t.Errorf("event_log.SessionID = %q, want sess-rule5-1", dispatchEvent.SessionID)
 	}
+	// TASKS/reflex-taxonomy/06-unified-reflex-telemetry.md: this call
+	// site's event_log write is now built by reflexes.EmitFirings — the
+	// SAME shape every action kind's firing emits, not a dispatch_to_agent-
+	// specific flat record. action_kind-specific fields (agent_slug,
+	// confidence, reason) live nested under "spec" (action.Spec, unified
+	// across every kind) rather than at the metadata top level.
 	var meta map[string]any
 	if err := json.Unmarshal([]byte(dispatchEvent.Metadata), &meta); err != nil {
 		t.Fatalf("event_log metadata not JSON: %v\nblob: %s", err, dispatchEvent.Metadata)
 	}
-	if got, want := meta["agent_slug"], "planner"; got != want {
-		t.Errorf("event_log metadata.agent_slug = %v, want %q", got, want)
+	spec, ok := meta["spec"].(map[string]any)
+	if !ok {
+		t.Fatalf("event_log metadata.spec is not a nested object: %#v", meta["spec"])
+	}
+	if got, want := spec["agent_slug"], "planner"; got != want {
+		t.Errorf("event_log metadata.spec.agent_slug = %v, want %q", got, want)
 	}
 	if got, want := meta["scope_tier"], "open"; got != want {
 		t.Errorf("event_log metadata.scope_tier = %v, want %q", got, want)
@@ -205,10 +224,44 @@ func TestAttemptReflexDispatch_RealSeededReflex_ScopeTierOpenSubagent_RoutesToPl
 	if got, want := meta["execution_pattern"], "subagent"; got != want {
 		t.Errorf("event_log metadata.execution_pattern = %v, want %q", got, want)
 	}
+	if got, want := meta["category"], "execute_action"; got != want {
+		t.Errorf("event_log metadata.category = %v, want %q", got, want)
+	}
+	if got, want := meta["combining_algorithm"], "first_applicable"; got != want {
+		t.Errorf("event_log metadata.combining_algorithm = %v, want %q", got, want)
+	}
+	if got, want := meta["provenance_tier"], "system"; got != want {
+		t.Errorf("event_log metadata.provenance_tier = %v, want %q (seeded reflexes are system-tier)", got, want)
+	}
 	if _, ok := meta["alternatives_considered"]; !ok {
 		t.Errorf("event_log metadata missing alternatives_considered")
 	}
+
+	// Gap 3 (plugin hooks blind to two of three paths): this call site
+	// must now invoke EmitReflexFired/EmitReflexActionStaged exactly
+	// once, matching every other real firing.
+	if hooks.fired != 1 || hooks.staged != 1 {
+		t.Errorf("plugin hooks fired=%d staged=%d, want 1 each — attemptReflexDispatch must emit them via reflexes.EmitFirings", hooks.fired, hooks.staged)
+	}
 }
+
+// recordingReflexPluginHooks is a minimal reflexes.PluginHooks fake used
+// to prove attemptReflexDispatch/matchDispatchToAgentReflex now emit the
+// same EmitReflexFired/EmitReflexActionStaged hooks Engine.EvaluateState
+// always did — TASKS/reflex-taxonomy/06-unified-reflex-telemetry.md's gap
+// 3. ApplyFilter is a pass-through no-op; neither dispatch_to_agent call
+// site runs FilterReflexAction (that filter is Engine.EvaluateState's own
+// mechanism, not part of this task's telemetry scope).
+type recordingReflexPluginHooks struct {
+	fired  int
+	staged int
+}
+
+func (h *recordingReflexPluginHooks) ApplyFilter(_ string, data interface{}, _ pluginpkg.FilterContext) (interface{}, error) {
+	return data, nil
+}
+func (h *recordingReflexPluginHooks) EmitReflexFired(string, map[string]any)        { h.fired++ }
+func (h *recordingReflexPluginHooks) EmitReflexActionStaged(string, map[string]any) { h.staged++ }
 
 // TestAttemptReflexDispatch_RealSeededReflex_TierSmall_NoDispatch confirms
 // the former Rule 6 ("default, no dispatch") absence-of-match behavior:

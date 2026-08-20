@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"time"
 
 	"github.com/hollis-labs/agentkit/broker"
 	"github.com/hollis-labs/nanite/internal/agent/reflexes"
@@ -278,20 +279,6 @@ func (st *SelfToolsTransport) recursionBlocked(ctx context.Context) (bool, error
 	return isChild, nil
 }
 
-// ReflexMatchLogger is the narrow store interface
-// matchDispatchToAgentReflex uses to persist a dispatch_to_agent match
-// event to playbook_match_log. *store.Store satisfies it.
-//
-// Previously (pre-migration) this package referenced
-// promptrouter.MatchLogger directly; TASKS/phase-4/
-// 03-migrate-promptrouter-to-reflexes.md retired internal/promptrouter
-// in full, so this narrow interface now lives here, against
-// store.ReflexMatchLogEntry instead of the retired
-// promptrouter.ReflexMatchEntry.
-type ReflexMatchLogger interface {
-	LogReflexMatch(entry store.ReflexMatchLogEntry) error
-}
-
 // matchDispatchToAgentReflex is callExecuteTask's own, deliberately
 // independent evaluation of the DB-backed dispatch_to_agent
 // agent_reflexes rows (see callExecuteTask's header comment for why this
@@ -299,14 +286,21 @@ type ReflexMatchLogger interface {
 // internal/service/chat_reflex_dispatch.go's upstream
 // attemptReflexDispatch).
 //
-// It replicates the shape of attemptReflexDispatch's own evaluation loop
-// (list active dispatch_to_agent rows for the caller's class via
-// Store.ListAgentReflexesForAgent — already ordered priority DESC,
-// created_at ASC — then reflexes.EvaluateTrigger each one, first fire
-// wins) rather than calling into internal/service, since internal/mcp
-// cannot import internal/service (service already imports mcp — that
-// would be a cycle) and the evaluation itself is cheap, read-only, and
-// has no side effects beyond the optional match-log write below.
+// It lists active dispatch_to_agent rows for the caller's class via
+// Store.ListAgentReflexesForAgent (already ordered priority DESC,
+// created_at ASC), then — as of TASKS/reflex-taxonomy/
+// 03-shared-decision-engine.md — decides which one (if any) actually wins
+// via the SAME shared reflexes.Resolve() primitive Engine.EvaluateState
+// and attemptReflexDispatch call, rather than a hand-rolled loop of its
+// own. This function still can't call into internal/service directly
+// (internal/mcp cannot import internal/service — service already imports
+// mcp, that would be a cycle), so it builds its own State/candidate list
+// and Resolve() call rather than calling attemptReflexDispatch itself —
+// but the actual combining-algorithm decision logic is no longer
+// duplicated, only the State-building and store access are (a legitimate,
+// permanent difference per the architecture doc's "One shared decision
+// engine, multiple legitimate invocation points" section, not the
+// duplicated-decision-logic problem task 03 fixes).
 //
 // Returns nil on any of: no store wired, no candidate rows, no firing
 // trigger, or a fired trigger whose action_spec has an empty agent_slug
@@ -362,6 +356,14 @@ func (st *SelfToolsTransport) matchDispatchToAgentReflex(ctx context.Context, se
 	}
 
 	state := reflexes.State{
+		// SessionID (TASKS/reflex-taxonomy/06-unified-reflex-telemetry.md):
+		// no trigger predicate reads this (evaluator.go never touches
+		// State.SessionID), but reflexes.EmitFirings' unified event_log
+		// write below needs it to attribute the emitted trace record to
+		// the right session — the same field
+		// internal/service/chat_reflex_dispatch.go's attemptReflexDispatch
+		// already populates for its own (upstream) evaluation.
+		SessionID:        sessionID,
 		AgentID:          agentProfileID,
 		AgentClass:       class,
 		ScopeTier:        m1Tier.String(),
@@ -372,61 +374,133 @@ func (st *SelfToolsTransport) matchDispatchToAgentReflex(ctx context.Context, se
 		UserMessages: []reflexes.MessageSignal{{Content: message}},
 	}
 
-	for i := range candidates {
-		r := candidates[i]
-		if r.ActionKind != store.ReflexActionDispatchToAgent {
-			continue
+	// Facet 4 recurrence cascade (TASKS/reflex-taxonomy/
+	// 02-recurrence-cascade.md, docs/engineering/architecture/
+	// 10-reflex-action-taxonomy.md): resolved once per call (there's only
+	// ever one dispatch_to_agent kind row to look up, not one per
+	// candidate) via the same store.GetReflexActionKind primitive
+	// internal/agent/reflexes.Engine's own cache is built from. A lookup
+	// failure (e.g. an unmigrated test DB) degrades to nil — the same
+	// "inherit the system default" behavior EffectiveCooldown gives an
+	// absent kind-level override. The same fetched row's
+	// CombiningAlgorithm (Facet 2, seeded 'first_applicable') is reused
+	// below as the ActionKindLookup Resolve() calls — this call site's own
+	// candidates list (below) is filtered to dispatch_to_agent only, so no
+	// other kind name is ever requested.
+	dispatchKind, kindErr := st.Store.GetReflexActionKind(ctx, store.ReflexActionDispatchToAgent)
+	var dispatchKindDefaultSeconds *int64
+	if kindErr == nil {
+		dispatchKindDefaultSeconds = dispatchKind.DefaultRecurrenceSeconds
+	} else {
+		slog.Warn("mcp: dispatch-reflex action-kind lookup failed", "err", kindErr)
+	}
+	now := time.Now()
+	cooldownFn := func(r store.AgentReflex) bool {
+		// A fired candidate whose own cooldown hasn't elapsed yet is not
+		// eligible to win — same shared check
+		// internal/service/chat_reflex_dispatch.go's attemptReflexDispatch
+		// applies. Under today's seed data (kind default 0, no
+		// reflex-level overrides) this never suppresses; a future non-zero
+		// recurrence_override_seconds on a dispatch_to_agent row now takes
+		// effect here too, not just at the upstream call site.
+		cooldown := reflexes.EffectiveCooldown(dispatchKindDefaultSeconds, r.RecurrenceOverrideSeconds)
+		suppressed := reflexes.RecentlyFired(r, now, cooldown)
+		if suppressed {
+			slog.Info("mcp: dispatch-reflex fired but suppressed by cooldown",
+				"reflex", r.Name, "cooldown", cooldown)
 		}
-		fired, evalErr := reflexes.EvaluateTrigger(r.TriggerKind, r.TriggerSpec, state)
-		if evalErr != nil {
-			slog.Warn("mcp: dispatch-reflex trigger eval failed",
-				"reflex", r.Name, "err", evalErr)
-			continue
-		}
-		if !fired {
-			continue
-		}
-		var spec map[string]any
-		if err := json.Unmarshal([]byte(r.ActionSpec), &spec); err != nil {
-			slog.Warn("mcp: dispatch-reflex parse action_spec failed",
-				"reflex", r.Name, "err", err)
-			continue
-		}
-		agentSlug, _ := spec["agent_slug"].(string)
-		if agentSlug == "" {
-			continue
-		}
+		return suppressed
+	}
+	kindLookup := func(_ context.Context, _ string) (*store.ReflexActionKind, error) {
+		return dispatchKind, kindErr
+	}
 
-		if st.ReflexLogger != nil {
-			excerpt := message
-			if len(excerpt) > 200 {
-				excerpt = excerpt[:200]
-			}
-			_ = st.ReflexLogger.LogReflexMatch(store.ReflexMatchLogEntry{
-				SessionID:           sessionID,
-				TurnID:              turnID,
-				ReflexID:            r.ID,
-				Priority:            int(r.Priority),
-				Source:              "reflex",
-				MatchedInputExcerpt: excerpt,
-				HintTier:            m1Tier.String(),
-				HintPattern:         m1Pattern.String(),
-				ProfileSlug:         agentSlug,
-				// CW-20260816-0068: raw-vs-sent audit trail. message is
-				// the raw user input the reflex matcher ran against;
-				// dispatchMessage is what actually reaches the spawned
-				// agent (may be prepended with the E2 grounding block
-				// above, or any future rewrite-for-clarity step). The
-				// writer collapses identical pairs to avoid bloat.
-				RawInputText:  message,
-				SentInputText: dispatchMessage,
-			})
-		}
-
-		return &dispatch.ReflexHints{
-			AgentSlug: agentSlug,
-			ReflexID:  r.ID,
+	// This call site's own candidate list — see engine.go's/
+	// attemptReflexDispatch's identical comment: Resolve() (below) has no
+	// opinion on which rows a caller passes it; filtering to
+	// dispatch_to_agent only is this caller's own job.
+	dispatchCandidates := make([]store.AgentReflex, 0, len(candidates))
+	for _, r := range candidates {
+		if r.ActionKind == store.ReflexActionDispatchToAgent {
+			dispatchCandidates = append(dispatchCandidates, r)
 		}
 	}
-	return nil
+
+	// This call site has no *reflexes.Engine of its own to reuse an
+	// Executor from (unlike attemptReflexDispatch, which reuses
+	// s.reflexEngine.Executor) — a bare Executor with only Logger set is
+	// equivalent for dispatch_to_agent's own Apply case (executor.go's
+	// dispatch_to_agent branch touches no hook, it only parses
+	// action_spec into the returned AppliedAction.Spec), matching exactly
+	// what this function's own hand-rolled json.Unmarshal(r.ActionSpec)
+	// used to do before this task.
+	dispatchExecutor := &reflexes.Executor{Logger: slog.Default()}
+	resolved, outcomes, resolveErr := reflexes.Resolve(ctx, dispatchCandidates, state, dispatchExecutor, cooldownFn, kindLookup)
+	if resolveErr != nil {
+		slog.Warn("mcp: dispatch-reflex resolve failed", "err", resolveErr)
+		return nil
+	}
+	for _, oc := range outcomes {
+		if oc.TriggerError != "" {
+			slog.Warn("mcp: dispatch-reflex trigger eval failed",
+				"reflex", oc.ReflexName, "err", oc.TriggerError)
+		}
+		if oc.ApplyError != "" {
+			slog.Warn("mcp: dispatch-reflex apply failed",
+				"reflex", oc.ReflexName, "err", oc.ApplyError)
+		}
+	}
+	if len(resolved.FiredReflexes) == 0 {
+		return nil
+	}
+	if len(resolved.FiredReflexes) > 1 {
+		// TASKS/reflex-taxonomy/08-fix-resolve-fail-open-visibility.md:
+		// canary for the same kind-lookup-failure fail-open Resolve() now
+		// Warn-logs directly — see the matching note in
+		// chat_reflex_dispatch.go's attemptReflexDispatch. Only the first
+		// candidate is ever used below.
+		slog.Warn("mcp: dispatch-reflex resolved multiple candidates, only the first is used",
+			"session_id", sessionID,
+			"candidate_count", len(resolved.FiredReflexes),
+		)
+	}
+	r := resolved.FiredReflexes[0]
+	winnerAction := resolved.Actions[0]
+
+	agentSlug, _ := winnerAction.Spec["agent_slug"].(string)
+	if agentSlug == "" {
+		return nil
+	}
+
+	// TASKS/reflex-taxonomy/06-unified-reflex-telemetry.md: this call
+	// site's former dedicated playbook_match_log write (via
+	// st.ReflexLogger/store.LogReflexMatch) is retired in favor of the
+	// same unified event_log sink Engine.EvaluateState and
+	// attemptReflexDispatch now go through — see the task's Work Log for
+	// the "no real reader" grep confirming playbook_match_log had no
+	// consumer left to starve. The CW-20260816-0068 raw-vs-sent
+	// audit-trail pair and the matched-input excerpt are preserved via
+	// ExtraMetadata rather than dropped; identical raw/sent text is
+	// collapsed to absent (same bloat-avoidance rule
+	// store.LogReflexMatch used to apply), not persisted as a
+	// pointlessly duplicated pair.
+	excerpt := message
+	if len(excerpt) > 200 {
+		excerpt = excerpt[:200]
+	}
+	extra := map[string]any{"matched_input_excerpt": excerpt}
+	if message != dispatchMessage {
+		extra["raw_input_text"] = message
+		extra["sent_input_text"] = dispatchMessage
+	}
+	reflexes.EmitFirings(ctx, st.Store, st.Plugins, resolved, outcomes, state, reflexes.FiringContext{
+		AgentID:       agentProfileID,
+		AgentClass:    class,
+		ExtraMetadata: extra,
+	}, slog.Default())
+
+	return &dispatch.ReflexHints{
+		AgentSlug: agentSlug,
+		ReflexID:  r.ID,
+	}
 }

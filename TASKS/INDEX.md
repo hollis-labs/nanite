@@ -399,7 +399,7 @@ Implements `docs/engineering/architecture/15-teams.md` — the design produced b
 |---|---|---|---|
 | `01-team-definition-schema` | 1 | implemented (migration `128`) | none |
 | `02-team-run-members-table` | 1 | implemented (migration `129`) | none directly (parallel-safe with `01`/`03`/`04`/`05`) |
-| `03-stepkindflex-schema` | 1 | not-started | none directly (parallel-safe) |
+| `03-stepkindflex-schema` | 1 | implemented (migration `130`) | none directly (parallel-safe) |
 | `04-team-authority-schema` | 1 | not-started | `01` |
 | `05-agent-reflexes-run-scoping` | 1 | not-started | none directly (parallel-safe) |
 | `06-stepkindflex-executor` | 2 | not-started | `03` |

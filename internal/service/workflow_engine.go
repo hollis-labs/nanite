@@ -295,6 +295,14 @@ type stepRunOutcome struct {
 // gate is engine-native pausing, StepExecutor has no gate method); gate
 // steps mark themselves waiting_on_gate and stop there. Every transition
 // (running, then terminal) is persisted immediately.
+//
+// flex steps (StepKindFlex, TASKS/teams/03-stepkindflex-schema.md) fall
+// into the same llm/tool dispatch path today only as a placeholder: they
+// currently complete immediately with a clear "not yet implemented"
+// failure (executeLLMOrTool's StepKindFlex case) rather than gate's real
+// wait-and-pause behavior. Task 06 replaces this with the design doc's
+// actual flex semantics — reusing gate's pause/Resume shape, not this
+// synchronous one.
 func (e *BuiltinWorkflowEngine) runStep(
 	ctx context.Context,
 	runID string,
@@ -390,6 +398,21 @@ func (e *BuiltinWorkflowEngine) executeLLMOrTool(
 			sr = agentworkflow.StepResult{StepID: step.ID, Kind: step.Kind, IsError: true, Output: execErr.Error()}
 		} else {
 			sr = agentworkflow.StepResult{StepID: step.ID, Kind: step.Kind, Output: res.Output, IsError: res.IsError}
+		}
+
+	case agentworkflow.StepKindFlex:
+		// Placeholder only (TASKS/teams/03-stepkindflex-schema.md): real
+		// flex-step execution (the wait/exit-trigger/Resume body, design
+		// doc Decision 2) is task 06's job, not implemented here. Without
+		// this explicit case, a flex step reaching this switch would fall
+		// through with a zero-value StepResult{} — IsError false, empty
+		// Output — indistinguishable from a step that ran and legitimately
+		// produced nothing. That silent-no-op shape is exactly what 03 is
+		// required not to leave in place now that migration 130 makes
+		// kind='flex' a DB-valid row: fail clearly and say why instead.
+		sr = agentworkflow.StepResult{
+			StepID: step.ID, Kind: step.Kind, IsError: true,
+			Output: "agentworkflow: flex step execution not yet implemented (see TASKS/teams/06-stepkindflex-executor.md)",
 		}
 	}
 

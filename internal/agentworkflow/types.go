@@ -15,6 +15,22 @@ const (
 	StepKindTool StepKind = "tool"
 	// StepKindGate is a human-in-the-loop pause.
 	StepKindGate StepKind = "gate"
+	// StepKindFlex is a Team fluid-coordination stretch
+	// (docs/engineering/architecture/15-teams.md, Decision 2 — "TeamRun IS
+	// a WorkflowRun"). Verbatim from that doc: "A flex step is a phase
+	// boundary, not a single execution action." Its Config names which
+	// Team slots are active participants for the stretch and an exit
+	// trigger; execution during a flex step is N slot-members
+	// self-organizing via messaging/reflexes, not one prescribed actor per
+	// step the way llm/tool steps are today. It reuses the same
+	// pause/external-resolve/Resume plumbing StepKindGate already has —
+	// the design doc's own framing: "the pause/resume plumbing itself is
+	// not new." This constant (plus the matching workflow_run_steps.kind
+	// CHECK widening, migration 130) is the schema/const half of
+	// TASKS/teams/03-stepkindflex-schema.md; real flex-step execution
+	// behavior (the wait/resume body, exit-trigger evaluation) is task
+	// 06's job, not implemented here.
+	StepKindFlex StepKind = "flex"
 )
 
 // VerifyMode selects how a step's output is checked. Verify is a modifier

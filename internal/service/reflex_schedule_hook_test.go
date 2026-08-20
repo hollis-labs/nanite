@@ -189,6 +189,24 @@ func TestBuildReflexAgentSchedule_MalformedSpecs(t *testing.T) {
 			},
 		},
 		{
+			// Regression for TASKS/scheduling/07-wire-add-schedule-reflex.md's
+			// Review notes / TASKS/ESCALATIONS.md's 2026-08-20
+			// "Scheduling Phase 2 review: task 07's malformed-cron gap"
+			// finding: a syntactically invalid but non-empty schedule_spec
+			// used to fall through to store.ComputeAgentScheduleNextRun's
+			// "due now" fallback and insert a schema-valid row that
+			// go-scheduler's own tick() would then skip forever (parse
+			// error before the CAS claim, never firing again). Must be
+			// rejected here, before next_run is ever computed.
+			name: "cron kind with malformed (non-empty) schedule_spec",
+			spec: map[string]interface{}{
+				"name":          "n",
+				"schedule_kind": "cron",
+				"schedule_spec": "not a cron expr",
+				"body":          "body",
+			},
+		},
+		{
 			name: "missing body",
 			spec: map[string]interface{}{
 				"name":          "n",
@@ -405,5 +423,63 @@ func TestExecutorApply_AddSchedule_MalformedSpec_NoRowInserted(t *testing.T) {
 	}
 	if len(rows) != 0 {
 		t.Fatalf("ListAgentSchedules = %d rows, want 0 (malformed spec must not insert a broken row): %+v", len(rows), rows)
+	}
+}
+
+// TestExecutorApply_AddSchedule_MalformedCronSpec_NoRowInserted is the
+// regression for TASKS/scheduling/07-wire-add-schedule-reflex.md's Review
+// notes / TASKS/ESCALATIONS.md's 2026-08-20 "Scheduling Phase 2 review:
+// task 07's malformed-cron gap" finding: a schedule_kind="cron" action_spec
+// with a syntactically invalid (but non-empty) schedule_spec used to fall
+// through to store.ComputeAgentScheduleNextRun's documented "due now"
+// fallback and insert a schema-valid row -- but go-scheduler's own tick()
+// (libs/go-scheduler/engine.go) re-parses CronExpr on every tick and skips
+// (never claims, never fires) a row whose cron expression fails to parse,
+// so that row would sit in agent_schedules forever, invisible except for a
+// coarse WorkerErrors counter climbing on every tick. Mirrors
+// TestExecutorApply_AddSchedule_MalformedSpec_NoRowInserted's shape: assert
+// the hook itself rejects the spec directly, then confirm firing through
+// the real reflexes.Executor.Apply call site (the actual production
+// dispatch surface) leaves zero agent_schedules rows behind.
+func TestExecutorApply_AddSchedule_MalformedCronSpec_NoRowInserted(t *testing.T) {
+	ctx := context.Background()
+	agentID := "reflex-schedule-malformed-cron-agent"
+	st := newReflexScheduleTestStore(t, agentID)
+
+	hook := NewReflexScheduleHook(st)
+	if err := hook(ctx, agentID, map[string]interface{}{
+		"name":          "n",
+		"schedule_kind": "cron",
+		"schedule_spec": "not a cron expr",
+		"body":          "body",
+	}); err == nil {
+		t.Fatal("hook returned nil error for a malformed cron schedule_spec, want an error")
+	}
+
+	executor := &reflexes.Executor{
+		Schedule: hook,
+		Logger:   testLogger(t),
+	}
+	reflex := store.AgentReflex{
+		ID:         "reflex-add-schedule-malformed-cron",
+		AgentID:    agentID,
+		Name:       "malformed-cron-schedule",
+		ActionKind: store.ReflexActionAddSchedule,
+		ActionSpec: `{"name":"n","schedule_kind":"cron","schedule_spec":"not a cron expr","body":"body"}`,
+	}
+	// Apply itself does not propagate a hook error (matches
+	// TestExecutorApply_AddSchedule_MalformedSpec_NoRowInserted's existing
+	// finding for Halt/SendMessage's identical behavior in executor.go) --
+	// only ListAgentSchedules below proves no row was left behind.
+	if _, err := executor.Apply(ctx, reflex, reflexes.State{}); err != nil {
+		t.Fatalf("Apply: %v", err)
+	}
+
+	rows, err := st.ListAgentSchedules(ctx, agentID)
+	if err != nil {
+		t.Fatalf("ListAgentSchedules: %v", err)
+	}
+	if len(rows) != 0 {
+		t.Fatalf("ListAgentSchedules = %d rows, want 0 (malformed cron schedule_spec must not insert a row that would never fire): %+v", len(rows), rows)
 	}
 }

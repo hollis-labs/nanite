@@ -356,9 +356,9 @@ Implements `docs/engineering/architecture/12-scheduling.md` — the design produ
 
 | Task | Phase | Status | Depends on |
 |---|---|---|---|
-| `01-schema-schedule-kind-collapse-and-retry-columns` | 1 | not-started | none |
-| `02-store-adapter` | 1 | not-started | `01` |
-| `03-runner-adapter-and-job-taxonomy` | 1 | not-started | none directly (parallel-safe with `01`/`02`) |
+| `01-schema-schedule-kind-collapse-and-retry-columns` | 1 | reviewed-pending (implemented, merged `04f05392`, Orchestrator-verified build/vet/test; fresh reviewer not yet dispatched) | none |
+| `02-store-adapter` | 1 | in-progress | `01` |
+| `03-runner-adapter-and-job-taxonomy` | 1 | reviewed-pending (implemented, merged `becaa3d9`, Orchestrator-verified build/vet/test; fresh reviewer not yet dispatched) | none directly (parallel-safe with `01`/`02`) |
 | `04-retry-backoff-on-fail-policy` | 1 | not-started | `01`, `02`, `03` |
 | `05-engine-wiring-and-full-replace` | 1 | not-started | `02`, `04` |
 | `06-schedule-fire-telemetry` | 2 | not-started | `03` |
@@ -368,9 +368,11 @@ Implements `docs/engineering/architecture/12-scheduling.md` — the design produ
 
 **Sequencing.** Phase 1 (`01`-`05`) adopts `go-scheduler` and retires the existing 2-minute-ticker/`wakeScheduleDue` mechanism in full — `05` is the highest-blast-radius task in the batch (deletes the one live production scheduling path in the same change that replaces it) and is sequenced last, needing both the Store adapter (`02`) and the complete retry-wrapped Runner (`04`) ready before the new `Engine` can start for real. Phase 2 (`06`-`09`) is four mutually parallel-safe tasks once Phase 1 lands: observability, the two remaining producers (`add_schedule` reflex wiring, a new agent self-tool), and the operator API.
 
-**Cross-batch migration-numbering collision, real, flagged explicitly in both folders:** `01`'s new migration and `TASKS/harness-reactive-self-tools/02-reactive-layer-schema.md`'s new migration both provisionally claim `126` against the same baseline (`125_reflex_action_kind_provenance_allow.sql`). Whichever batch is dispatched second must renumber.
+**Cross-batch migration-numbering collision, real, flagged explicitly in both folders — RESOLVED.** `harness-reactive-self-tools` landed `126_selftool_reactions.sql` first; `01` was dispatched with, and landed, `127_schedule_runs_and_retry_policy.sql` instead of its provisional `126` claim.
 
-**Not yet dispatched.** Filed as a planning-only session (2026-08-20) per the operator's explicit request — task files and this index entry only, no implementation. Operator will boot a dedicated Orchestrator for execution when ready.
+**`03`'s payload-shape contract, fixed for `02` to encode against** (from `03`'s Work Log): `durable_agent_wake: {instance_id, project_id?, reason?, prompt?, facts?, metadata?}` (note: `instance_id` is a `durable_agent_instances.id`, not `agent_schedules.agent_id` — `02` must resolve profile→instance at Schedule-conversion time); `agent_workflow_run: {workflow_name, params?, project_id?, agent_profile_id, parent_session_id?, timeout_seconds?}`; `command_run: {agent_id, command, args?}`; `reflex_dispatch: {reflex_id, session_id?}`.
+
+**Dispatched 2026-08-20.** Execution Orchestrator booted; `01` and `03` in progress (parallel, worktree-isolated — file-disjoint per README's dependency table). Migration-numbering collision confirmed real and resolved: latest migration on disk at dispatch time is `126_selftool_reactions.sql` (harness-reactive-self-tools batch landed first) — `01` is dispatched with `127_schedule_runs_and_retry_policy.sql`, not the provisionally-claimed `126`. `08`'s cross-batch dependency (`internal/selftools`) is also confirmed already landed on disk — `08` will target `internal/selftools` directly when dispatched, no fallback needed.
 
 ---
 

@@ -360,7 +360,7 @@ Implements `docs/engineering/architecture/12-scheduling.md` — the design produ
 | `02-store-adapter` | 1 | reviewed (merged `f832cedc`) — pass, no findings | `01` |
 | `03-runner-adapter-and-job-taxonomy` | 1 | reviewed (merged `becaa3d9`) — pass, no findings | none directly (parallel-safe with `01`/`02`) |
 | `04-retry-backoff-on-fail-policy` | 1 | reviewed (merged `010d8975`) — pass; real correctness fix found+applied (`Job.RunID` unstable across retries; correlate by `ScheduleID`+open-row status instead), independently confirmed twice (Orchestrator, then fresh Reviewer) against `go-scheduler` source; one non-blocking heads-up logged in `ESCALATIONS.md` for `06` | `01`, `02`, `03` |
-| `05-engine-wiring-and-full-replace` | 1 | in-progress — Phase 1 section review passed clean, cleared to start | `02`, `04` |
+| `05-engine-wiring-and-full-replace` | 1 | implemented, merged `0c8598c9` — old ticker/`wakeScheduleDue` fully removed, Engine wired via `04`'s `RetryingRunner` (not the bare `RunnerAdapter`); real bug found+fixed in `managed_durable_configs.go` (retry-policy columns were being silently wiped on every boot); live dogfeed (cron fire, one_shot fire-once-then-disable, restart-mid-cycle no-double-fire) reported by worker, Orchestrator-verified via full diff read + independent build/vet/test + main-checkout cleanliness check; dedicated fresh reviewer dispatched given elevated risk, not yet returned | `02`, `04` |
 | `06-schedule-fire-telemetry` | 2 | not-started | `03` |
 | `07-wire-add-schedule-reflex` | 2 | not-started | `02` |
 | `08-agent-self-tool` | 2 | not-started | `02`; cross-batch on `TASKS/harness-reactive-self-tools/01` — see `08`'s own note |

@@ -1,7 +1,7 @@
 # Worked example — `task_update_report(id, msg)`
 
 **Phase:** 2 — Telemetry, consumer cleanup, worked example (`TASKS/harness-reactive-self-tools`)
-**Status:** not-started
+**Status:** in-progress
 **Depends on:** `01-move-self-tools-to-internal-selftools.md` (needs `internal/selftools` to add the new tool to), `03-reaction-engine-core.md` (`Fire`), `04-render-card-construction.md` (the render_card marker helper), `05-selftool-reaction-telemetry.md` (`EmitReactionTrace`, to prove full coverage). `06-collapse-envelope-marker-consumers.md` is **not** required — this task's render_card path works against the three pre-`06` consumer implementations unchanged; land `06` before or after this task, whichever is convenient.
 **Touches:** a new `internal/selftools/self_tools_task_update_report.go` (tool definition + handler, registered in `SelfToolsTransport.ListTools`/`CallTool`), a seed for the two `selftool_reactions` rows (a Go-side seed function, mirroring `internal/agent/reflexes/seeds.go`'s pattern for reflex seeds — or a migration-time `INSERT`, your call, document it), a minimal example internal endpoint for the `internal_api_call` reaction to target (see step 4 — kept illustrative, not a real consumer).
 

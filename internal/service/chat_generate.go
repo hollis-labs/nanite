@@ -520,8 +520,41 @@ func (s *chatServiceImpl) generateResponse(ctx context.Context, sessionID, assis
 	// FU-30: evaluate DB-backed agent reflexes for this turn and inject any
 	// staged actions (e.g. inject_reminder) into SlotUserContext. nil-safe via
 	// the engine guard inside evaluateAndInjectReflexes.
-	if actions := s.evaluateAndInjectReflexes(ctx, session, agent, slotResult); len(actions) > 0 {
+	reflexActions := s.evaluateAndInjectReflexes(ctx, session, agent, slotResult)
+	if len(reflexActions) > 0 {
 		systemPrompt = slotResult.SystemPrompt
+	}
+
+	// TASKS/reflex-taxonomy/04-halt-turn-synchronicity.md: a fired
+	// halt_session reflex must stop THIS turn synchronously, not just stamp
+	// halted_at for a future request to notice (frontend_readiness.go
+	// already handles that side, untouched by this task). 03's Resolve()
+	// deny_overrides guarantee (internal/agent/reflexes/resolve.go) means
+	// that if a halt_session action is present here, it is the ONLY action
+	// in reflexActions for this pass — no need to also handle "halt plus
+	// other actions" as a real case, but this loop doesn't rely on that
+	// invisibly: it scans the whole slice and aborts on the first halt it
+	// finds regardless of position.
+	for _, action := range reflexActions {
+		if action.ActionKind != store.ReflexActionHaltSession {
+			continue
+		}
+		reason, _ := action.Spec["reason"].(string)
+		if reason == "" {
+			reason = "reflex " + action.ReflexName + " fired"
+		}
+		// HaltHook (container.go's Executor.Halt -> store.MarkSessionHalted)
+		// already ran synchronously inside evaluateAndInjectReflexes's call
+		// to reflexEngine.Evaluate, above — the session row is already
+		// stamped halted_at/halted_reason by the time we get here. This
+		// return is the other half: stop THIS turn before it reaches the
+		// LLM provider call further down in this function. Matches this
+		// file's existing early-abort shape (e.g. the disabled-agent check
+		// and the provider-resolution-failure branch above).
+		ch <- chat.ErrorEvent(chat.ErrorCodeInternal,
+			fmt.Sprintf("Session halted: %s", reason),
+			map[string]interface{}{"reflex": action.ReflexName, "reason": reason})
+		return
 	}
 
 	// CW-20260512-0019: surface pending subagent completions at turn

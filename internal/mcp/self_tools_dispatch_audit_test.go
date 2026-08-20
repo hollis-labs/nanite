@@ -2,6 +2,7 @@ package mcp
 
 import (
 	"context"
+	"encoding/json"
 	"testing"
 
 	"github.com/hollis-labs/nanite/internal/agent/reflexes"
@@ -9,67 +10,41 @@ import (
 	"github.com/hollis-labs/nanite/internal/store"
 )
 
-// capturingReflexLogger records every store.ReflexMatchLogEntry passed to
-// LogReflexMatch, verbatim, before store.Store.LogReflexMatch's own
-// identical-pair collapse (the bloat-avoidance behavior
-// TestLogReflexMatch_RawSentTextIdentical_NotDuplicated in
-// internal/store already covers). Using a capturing fake here — instead
-// of reading back through the real store — isolates what this file's
-// own code (matchDispatchToAgentReflex) is responsible for (setting
-// RawInputText/SentInputText correctly on the way in) from what
-// store.LogReflexMatch is responsible for (collapsing them at
-// persistence time), rather than conflating the two under one
-// assertion.
-type capturingReflexLogger struct {
-	captured []store.ReflexMatchLogEntry
-}
-
-func (l *capturingReflexLogger) LogReflexMatch(entry store.ReflexMatchLogEntry) error {
-	l.captured = append(l.captured, entry)
-	return nil
-}
-
-// TestCallExecuteTask_ReflexMatch_LogsRawAndSentInputText is the
-// CW-20260816-0068 wiring regression, re-based (TASKS/phase-4/
-// 03-migrate-promptrouter-to-reflexes.md) onto the DB-backed
-// dispatch_to_agent reflex path: matchDispatchToAgentReflex
-// (internal/mcp/self_tools_dispatch.go) must populate the
-// store.ReflexMatchLogEntry's RawInputText/SentInputText fields from the
-// same two variables the dispatch call itself uses — message (raw user
-// input) and dispatchMessage (the text actually sent to
-// dispatch.ExecuteTask, which E2 grounding may rewrite before this call
-// site is reached). With no GroundingRecaller configured here,
-// dispatchMessage never diverges from message, so both fields must come
-// through identical to the raw message — proving the call site reads
-// from the correct variables rather than, say, leaving the new fields
-// zero-valued.
+// TestCallExecuteTask_ReflexMatch_EmitsUnifiedTraceRecord is the
+// CW-20260816-0068 wiring regression, re-based onto TASKS/reflex-taxonomy/
+// 06-unified-reflex-telemetry.md's unified sink: matchDispatchToAgentReflex
+// (internal/mcp/self_tools_dispatch.go) no longer writes a dedicated
+// playbook_match_log row via a ReflexLogger — that field/table/write path
+// is retired (no real reader was found; see the task's Work Log). The
+// match now surfaces as a single event_log row, written by
+// reflexes.EmitFirings, with event_type="dispatch_to_agent",
+// category="reflex". This test proves that row exists and carries the
+// same raw-vs-sent audit-trail fact the retired write used to: with no
+// GroundingRecaller configured, message and dispatchMessage never diverge,
+// so raw_input_text/sent_input_text must be ABSENT from the metadata
+// (collapsed, matching store.LogReflexMatch's old bloat-avoidance rule)
+// rather than present-but-identical.
 //
-// Uses a real *store.Store (newTestStore, self_tools_test.go) for
-// st.Store, seeded via the real reflexes.SeedBaseReflexes — the same
-// seed data TASKS/phase-4/03's migrated worker-execute reflex
-// (dispatch_to_agent_worker_execute) lives in — rather than a
-// hand-constructed promptrouter.Reflex fixture, since the reflex catalog
-// is DB-backed now, not an in-memory ReflexSet field. st.ReflexLogger is
-// a separate capturing fake (see above), independent of st.Store, so
-// this test observes the entry exactly as this file's code built it.
-func TestCallExecuteTask_ReflexMatch_LogsRawAndSentInputText(t *testing.T) {
+// Uses a real *store.Store (newTestStore, self_tools_test.go) seeded via
+// the real reflexes.SeedBaseReflexes — the same seed data
+// dispatch_to_agent_worker_execute lives in — rather than a
+// hand-constructed fixture.
+func TestCallExecuteTask_ReflexMatch_EmitsUnifiedTraceRecord(t *testing.T) {
 	s := newTestStore(t)
 	if _, err := reflexes.SeedBaseReflexes(context.Background(), s, nil); err != nil {
 		t.Fatalf("SeedBaseReflexes: %v", err)
 	}
 
 	spawner := &recordingSpawner{result: &dispatch.SpawnResult{Summary: "worker done"}}
-	logger := &capturingReflexLogger{}
 	st := NewSelfToolsTransport(s)
 	st.Dispatch = spawner
-	st.ReflexLogger = logger
 
 	// "Implement" is a worker-execute migrated phrase
-	// (dispatch_to_agent_worker_execute, seeds.go) — matches the same
-	// intent as the message this test used before the migration.
+	// (dispatch_to_agent_worker_execute, seeds.go).
 	const msg = "Implement the reflex matcher module"
+	const sessionID = "sess-audit-1"
 	res, err := st.callExecuteTask(context.Background(), map[string]any{
-		"session_id": "sess-audit-1",
+		"session_id": sessionID,
 		"message":    msg,
 	})
 	if err != nil {
@@ -78,25 +53,43 @@ func TestCallExecuteTask_ReflexMatch_LogsRawAndSentInputText(t *testing.T) {
 	if res.IsError {
 		t.Fatalf("expected success result, got error: %+v", res)
 	}
-	if len(logger.captured) != 1 {
-		t.Fatalf("expected 1 logged reflex match, got %d", len(logger.captured))
+
+	events, err := s.ListEvents("reflex", 50)
+	if err != nil {
+		t.Fatalf("ListEvents: %v", err)
+	}
+	var dispatchEvent *store.EventLog
+	for i := range events {
+		if events[i].EventType == "dispatch_to_agent" && events[i].SessionID == sessionID {
+			dispatchEvent = &events[i]
+			break
+		}
+	}
+	if dispatchEvent == nil {
+		t.Fatalf("event_log has no dispatch_to_agent row for session %q; got %d reflex-category events", sessionID, len(events))
 	}
 
-	entry := logger.captured[0]
-	if entry.ReflexID == "" {
-		t.Errorf("ReflexID is empty, want the matched dispatch_to_agent_worker_execute row id")
+	var meta map[string]any
+	if err := json.Unmarshal([]byte(dispatchEvent.Metadata), &meta); err != nil {
+		t.Fatalf("event_log metadata not JSON: %v\nblob: %s", err, dispatchEvent.Metadata)
 	}
-	if entry.ProfileSlug != "worker" {
-		t.Errorf("ProfileSlug = %q, want worker", entry.ProfileSlug)
+	if meta["reflex_id"] == "" || meta["reflex_id"] == nil {
+		t.Errorf("metadata.reflex_id is empty, want the matched dispatch_to_agent_worker_execute row id")
 	}
-	if entry.RawInputText != msg {
-		t.Errorf("RawInputText = %q, want %q", entry.RawInputText, msg)
+	spec, ok := meta["spec"].(map[string]any)
+	if !ok {
+		t.Fatalf("metadata.spec is not a nested object: %#v", meta["spec"])
 	}
-	if entry.SentInputText != msg {
-		t.Errorf("SentInputText = %q, want %q", entry.SentInputText, msg)
+	if spec["agent_slug"] != "worker" {
+		t.Errorf("metadata.spec.agent_slug = %v, want worker", spec["agent_slug"])
 	}
-	if entry.RawInputText != entry.SentInputText {
-		t.Errorf("expected RawInputText == SentInputText with no grounding rewrite, got %q vs %q",
-			entry.RawInputText, entry.SentInputText)
+	if got := meta["matched_input_excerpt"]; got != msg {
+		t.Errorf("metadata.matched_input_excerpt = %v, want %q", got, msg)
+	}
+	if _, ok := meta["raw_input_text"]; ok {
+		t.Errorf("metadata.raw_input_text present = %v, want absent (no grounding rewrite happened, raw==sent should collapse)", meta["raw_input_text"])
+	}
+	if _, ok := meta["sent_input_text"]; ok {
+		t.Errorf("metadata.sent_input_text present = %v, want absent (no grounding rewrite happened, raw==sent should collapse)", meta["sent_input_text"])
 	}
 }

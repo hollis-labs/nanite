@@ -72,22 +72,38 @@ const (
 // table: false means the reflex applies unconditionally no matter what
 // agent_reflex_opt_outs contains; true means an opt-out row for
 // (agent_id, this reflex's id) suppresses it for that agent.
+//
+// ProvenanceTier and RecurrenceOverrideSeconds (Reflex Action Taxonomy
+// Facets 3/4, docs/engineering/architecture/10-reflex-action-taxonomy.md,
+// TASKS/reflex-taxonomy/01-taxonomy-schema-foundation.md) were added by
+// migration 124_reflex_action_taxonomy.sql. ProvenanceTier is immutable
+// after creation (like CreatedBy, which it's derived from) — a real
+// FK-backed authority tier (system/operator/plugin, reflex_provenance_tiers)
+// intended for a future per-kind allow-list gating which tiers may declare
+// which action kinds; that gate is not built by this task.
+// RecurrenceOverrideSeconds is the most-specific level of the recurrence
+// cascade (system default -> reflex_action_kinds.default_recurrence_seconds
+// -> this field); nil means "inherit the kind-level default." Reading and
+// applying that cascade is TASKS/reflex-taxonomy/02-recurrence-cascade.md's
+// job, not this one — this task only adds the column and exposes it here.
 type AgentReflex struct {
-	ID            string `json:"id"`
-	AgentID       string `json:"agent_id"`
-	ClassTag      string `json:"class_tag"`
-	Name          string `json:"name"`
-	TriggerKind   string `json:"trigger_kind"`
-	TriggerSpec   string `json:"trigger_spec"`
-	ActionKind    string `json:"action_kind"`
-	ActionSpec    string `json:"action_spec"`
-	Status        string `json:"status"`
-	Priority      int64  `json:"priority"`
-	FiredCount    int64  `json:"fired_count"`
-	LastFiredAt   string `json:"last_fired_at"`
-	CreatedAt     string `json:"created_at"`
-	CreatedBy     string `json:"created_by"`
-	OptOutAllowed bool   `json:"opt_out_allowed"`
+	ID                        string `json:"id"`
+	AgentID                   string `json:"agent_id"`
+	ClassTag                  string `json:"class_tag"`
+	Name                      string `json:"name"`
+	TriggerKind               string `json:"trigger_kind"`
+	TriggerSpec               string `json:"trigger_spec"`
+	ActionKind                string `json:"action_kind"`
+	ActionSpec                string `json:"action_spec"`
+	Status                    string `json:"status"`
+	Priority                  int64  `json:"priority"`
+	FiredCount                int64  `json:"fired_count"`
+	LastFiredAt               string `json:"last_fired_at"`
+	CreatedAt                 string `json:"created_at"`
+	CreatedBy                 string `json:"created_by"`
+	OptOutAllowed             bool   `json:"opt_out_allowed"`
+	ProvenanceTier            string `json:"provenance_tier"`
+	RecurrenceOverrideSeconds *int64 `json:"recurrence_override_seconds"`
 }
 
 // PendingReflex is one row in the pending_reflexes table. The
@@ -112,15 +128,36 @@ type PendingReflex struct {
 const agentReflexColumns = `id, COALESCE(agent_id,''), COALESCE(class_tag,''), name,
        trigger_kind, trigger_spec, action_kind, action_spec,
        status, priority, fired_count, COALESCE(last_fired_at,''),
-       created_at, created_by, opt_out_allowed`
+       created_at, created_by, opt_out_allowed,
+       provenance_tier, recurrence_override_seconds`
 
 func scanAgentReflex(scanner interface{ Scan(...any) error }, r *AgentReflex) error {
-	return scanner.Scan(
+	var recurrenceOverride sql.NullInt64
+	if err := scanner.Scan(
 		&r.ID, &r.AgentID, &r.ClassTag, &r.Name,
 		&r.TriggerKind, &r.TriggerSpec, &r.ActionKind, &r.ActionSpec,
 		&r.Status, &r.Priority, &r.FiredCount, &r.LastFiredAt,
 		&r.CreatedAt, &r.CreatedBy, &r.OptOutAllowed,
-	)
+		&r.ProvenanceTier, &recurrenceOverride,
+	); err != nil {
+		return err
+	}
+	r.RecurrenceOverrideSeconds = nil
+	if recurrenceOverride.Valid {
+		v := recurrenceOverride.Int64
+		r.RecurrenceOverrideSeconds = &v
+	}
+	return nil
+}
+
+// nullIfNilInt64 returns nil (binds SQL NULL) if v is nil, otherwise the
+// dereferenced value. The *int64-nullable-column counterpart to
+// nullIfEmpty (sessions.go), used for recurrence_override_seconds.
+func nullIfNilInt64(v *int64) interface{} {
+	if v == nil {
+		return nil
+	}
+	return *v
 }
 
 const pendingReflexColumns = `id, proposed_by, proposed_at,
@@ -165,15 +202,34 @@ func (s *Store) InsertAgentReflex(ctx context.Context, row AgentReflex) (string,
 	if row.ID == "" {
 		row.ID = "rfx-" + ulid.Make().String()
 	}
+	if row.ProvenanceTier == "" {
+		// Same rule migration 124_reflex_action_taxonomy.sql's backfill
+		// applies to pre-existing rows: created_by = "system" (the base
+		// reflex seeder's convention, seeds.go/loom_pilot_seeds.go) means
+		// provenance_tier = "system"; every other convention in use today
+		// (a bare "operator", or ApprovePendingReflex's
+		// "operator:"+reviewedBy) means "operator". Keeps every future
+		// InsertAgentReflex call — including re-running the seeder against
+		// a fresh database — consistent with that same rule instead of
+		// silently falling through to the column's own DEFAULT 'operator'
+		// for system-seeded rows.
+		if row.CreatedBy == "system" {
+			row.ProvenanceTier = "system"
+		} else {
+			row.ProvenanceTier = "operator"
+		}
+	}
 	_, err := s.DB.ExecContext(ctx,
 		`INSERT OR REPLACE INTO agent_reflexes
 		    (id, agent_id, class_tag, name, trigger_kind, trigger_spec,
 		     action_kind, action_spec, status, priority, fired_count,
-		     last_fired_at, created_at, created_by, opt_out_allowed)
+		     last_fired_at, created_at, created_by, opt_out_allowed,
+		     provenance_tier, recurrence_override_seconds)
 		 VALUES (?, ?, ?, ?, ?, ?,
 		         ?, ?, ?, ?, ?,
 		         ?,
 		         COALESCE(NULLIF(?, ''), datetime('now')),
+		         ?, ?,
 		         ?, ?)`,
 		row.ID, nullIfEmpty(row.AgentID), nullIfEmpty(row.ClassTag),
 		row.Name, row.TriggerKind, row.TriggerSpec,
@@ -181,6 +237,7 @@ func (s *Store) InsertAgentReflex(ctx context.Context, row AgentReflex) (string,
 		nullIfEmpty(row.LastFiredAt),
 		row.CreatedAt,
 		row.CreatedBy, row.OptOutAllowed,
+		row.ProvenanceTier, nullIfNilInt64(row.RecurrenceOverrideSeconds),
 	)
 	if err != nil {
 		return "", fmt.Errorf("insert agent_reflexes: %w", err)
@@ -278,6 +335,16 @@ func (s *Store) ListAllAgentReflexes(ctx context.Context, agentID string) ([]Age
 
 // UpdateAgentReflex updates an existing row's editable fields. Scope
 // bindings (agent_id/class_tag), created_at, and created_by are immutable.
+// ProvenanceTier is likewise immutable — same rationale as CreatedBy, which
+// it's derived from: it is a security-relevant authority marker set at
+// creation, not an operator-tunable knob (Facet 3,
+// docs/engineering/architecture/10-reflex-action-taxonomy.md). It is
+// deliberately absent from this SET clause. RecurrenceOverrideSeconds is
+// included, unlike ProvenanceTier, since it's a tunable cascade knob (Facet
+// 4) rather than a security marker; no caller currently sets it to a
+// non-nil value on update (no API request field exposes it yet —
+// TASKS/reflex-taxonomy/02-recurrence-cascade.md's job), so today every
+// call preserves whatever value GetAgentReflex populated row from.
 func (s *Store) UpdateAgentReflex(ctx context.Context, row AgentReflex) error {
 	if row.ID == "" {
 		return fmt.Errorf("update agent_reflexes: id is required")
@@ -293,12 +360,14 @@ func (s *Store) UpdateAgentReflex(ctx context.Context, row AgentReflex) error {
 		        priority = ?,
 		        fired_count = ?,
 		        last_fired_at = ?,
-		        opt_out_allowed = ?
+		        opt_out_allowed = ?,
+		        recurrence_override_seconds = ?
 		  WHERE id = ?`,
 		row.Name, row.TriggerKind, row.TriggerSpec,
 		row.ActionKind, row.ActionSpec,
 		row.Status, row.Priority, row.FiredCount,
-		nullIfEmpty(row.LastFiredAt), row.OptOutAllowed, row.ID,
+		nullIfEmpty(row.LastFiredAt), row.OptOutAllowed,
+		nullIfNilInt64(row.RecurrenceOverrideSeconds), row.ID,
 	)
 	if err != nil {
 		return fmt.Errorf("update agent_reflexes: %w", err)
@@ -571,14 +640,29 @@ func (s *Store) ApprovePendingReflex(ctx context.Context, id, reviewedBy string)
 	if reviewedBy != "" {
 		createdBy = "operator:" + reviewedBy
 	}
+	// provenance_tier is hardcoded 'operator' here, independent of
+	// pending.ProposedBy or whatever the pending row's own (nonexistent)
+	// tier might otherwise suggest — TASKS/reflex-taxonomy/
+	// 05-provenance-tier-enforcement.md, mirroring the createdBy
+	// "operator:"+reviewedBy collapse immediately above. agent_proposed is
+	// not a fourth live provenance tier (Facet 3,
+	// docs/engineering/architecture/10-reflex-action-taxonomy.md); approval
+	// through this path is what makes a pending reflex real, and "active in
+	// agent_reflexes => operator-approved" must hold for provenance_tier
+	// the same way it already holds for created_by. Relying on the
+	// column's own DEFAULT 'operator' (migration
+	// 124_reflex_action_taxonomy.sql) would happen to produce the same
+	// value today, but leaving it implicit would silently break if that
+	// default ever changed — so it's set explicitly in this INSERT's
+	// column list instead.
 	if _, err := tx.ExecContext(ctx,
 		`INSERT INTO agent_reflexes
 		    (id, agent_id, class_tag, name, trigger_kind, trigger_spec,
 		     action_kind, action_spec, status, priority, fired_count,
-		     last_fired_at, created_at, created_by)
+		     last_fired_at, created_at, created_by, provenance_tier)
 		 VALUES (?, ?, NULL, ?, ?, ?,
 		         ?, ?, 'active', 0, 0,
-		         NULL, datetime('now'), ?)`,
+		         NULL, datetime('now'), ?, 'operator')`,
 		newID, nullIfEmpty(pending.TargetAgentID),
 		pending.Name, pending.TriggerKind, pending.TriggerSpec,
 		pending.ActionKind, pending.ActionSpec, createdBy,

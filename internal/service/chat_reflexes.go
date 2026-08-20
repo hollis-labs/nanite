@@ -2,7 +2,6 @@ package service
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"strings"
 
@@ -29,12 +28,12 @@ func (s *chatServiceImpl) evaluateAndInjectReflexes(ctx context.Context, session
 	if len(applied.Actions) == 0 {
 		return nil
 	}
-	for _, action := range applied.Actions {
-		if s.store != nil {
-			meta, _ := json.Marshal(action)
-			s.store.LogEvent(session.ID, "reflex_action", "reflex", action.ReflexName, string(meta))
-		}
-	}
+	// TASKS/reflex-taxonomy/06-unified-reflex-telemetry.md: the per-action
+	// event_log write that used to live here (one layer above the engine)
+	// is now done centrally, inside Engine.EvaluateState itself, via
+	// reflexes.EmitFirings — s.reflexEngine.Evaluate above already
+	// triggered it. Writing it here too would double the event_log rows
+	// for every firing this pass.
 	injection := formatReflexReminder(applied.Actions)
 	if injection == "" {
 		return applied.Actions

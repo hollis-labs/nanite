@@ -14,6 +14,7 @@ import (
 
 	"github.com/hollis-labs/agentkit/broker"
 	"github.com/hollis-labs/nanite/internal/agent"
+	"github.com/hollis-labs/nanite/internal/agent/reflexes"
 	"github.com/hollis-labs/nanite/internal/agentworkflow"
 	"github.com/hollis-labs/nanite/internal/background"
 	"github.com/hollis-labs/nanite/internal/builders"
@@ -152,10 +153,6 @@ type SelfToolsTransport struct {
 	// so a wiring miss is visible rather than silently dropped.
 	Executor dispatch.Executor
 
-	// ReflexLogger persists reflex match events to playbook_match_log.
-	// Set post-construction; nil disables match logging (matching still
-	// runs and influences dispatch). *store.Store satisfies this interface.
-	//
 	// The reflex catalog itself is no longer a Go-literal/YAML slice field
 	// on this struct (formerly ReflexSet []promptrouter.Reflex, merged
 	// builtin + ~/.nanite/reflexes/*.yaml user overrides at boot) —
@@ -169,7 +166,32 @@ type SelfToolsTransport struct {
 	// needed. The ~/.nanite/reflexes/*.yaml user-override convention is
 	// retired too; operators use the same agent_reflexes CRUD path
 	// (internal/api/reflexes.go) as every other reflex.
-	ReflexLogger ReflexMatchLogger
+	//
+	// ReflexLogger (the former dedicated playbook_match_log writer via
+	// store.LogReflexMatch) is retired by TASKS/reflex-taxonomy/
+	// 06-unified-reflex-telemetry.md — matchDispatchToAgentReflex's
+	// firings now go through the same unified reflexes.EmitFirings sink
+	// (event_log) every other reflex firing does, via the Plugins field
+	// below plus st.Store directly. See that task's Work Log for the "no
+	// real reader of playbook_match_log" confirmation behind this
+	// removal — the table/migrations are left in place, only the
+	// now-fully-dead Go write path (this field, the ReflexMatchLogger
+	// interface, store.LogReflexMatch/ReflexMatchLogEntry) is gone.
+
+	// Plugins is the reflex-firing plugin observability hook pair
+	// (EmitReflexFired/EmitReflexActionStaged) — TASKS/reflex-taxonomy/
+	// 06-unified-reflex-telemetry.md, closing the "plugin hooks blind to
+	// two of three paths" gap docs/engineering/architecture/
+	// 10-reflex-action-taxonomy.md's Telemetry section names. Wired
+	// post-construction from the same *plugin.Host instance
+	// internal/service's container wires onto
+	// internal/agent/reflexes.Engine.Plugins, so a dispatch_to_agent
+	// reflex fired via THIS (task_execute self-tool) path emits the same
+	// plugin hooks a reflex fired via the chat-turn-loop path or the
+	// generic per-turn pass does. Nil-safe: reflexes.EmitFirings treats
+	// a nil PluginHooks as "no plugin emission," matching every other
+	// nil-safe field on this struct.
+	Plugins reflexes.PluginHooks
 
 	// PythonPermChecker is the permission engine used by python_run
 	// to validate tool calls made from inside the Python sandbox.

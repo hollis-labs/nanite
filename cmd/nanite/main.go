@@ -301,6 +301,16 @@ func cmdServe(args []string) {
 	pluginHost.RegisterService("toolclient", tb)
 	slog.Info("plugin host initialized")
 
+	// TASKS/reflex-taxonomy/06-unified-reflex-telemetry.md: wire the same
+	// plugin-hook instance internal/service's container wires onto
+	// internal/agent/reflexes.Engine.Plugins (below, via
+	// service.ContainerConfig.Plugins) onto selfTools too, so a
+	// dispatch_to_agent reflex fired via the task_execute self-tool path
+	// (matchDispatchToAgentReflex, self_tools_dispatch.go) emits the same
+	// EmitReflexFired/EmitReflexActionStaged plugin hooks the chat-turn-
+	// loop path and the generic per-turn pass already do.
+	selfTools.Plugins = pluginHost
+
 	// --- Coordination store (Badger KV for multi-agent state) ---
 	// Anchored on the go-apppaths StateDir (CW-20260517-0061) — runtime
 	// state, not data, and explicitly NOT derived from filepath.Dir(dbPath).
@@ -878,16 +888,19 @@ func initMCP(s *store.Store, cfg *config.Config, appCfg *config.AppConfig) (*mcp
 	}
 	selfTools := mcp.NewSelfToolsTransport(s)
 	// E1 (CW-20260419-0027; migrated off internal/promptrouter by
-	// TASKS/phase-4/03-migrate-promptrouter-to-reflexes.md): wire the
-	// match-log writer into the dispatch path. The reflex catalog itself
-	// no longer needs a boot-time load-and-merge step — callExecuteTask
-	// reads live dispatch_to_agent agent_reflexes rows directly off
-	// selfTools.Store (already wired via NewSelfToolsTransport above),
-	// the same DB-authoritative source every other reflex uses. The
-	// former ~/.nanite/reflexes/*.yaml user-override convention is
-	// retired; operators use the same agent_reflexes CRUD path
-	// (internal/api/reflexes.go) as everyone else.
-	selfTools.ReflexLogger = s
+	// TASKS/phase-4/03-migrate-promptrouter-to-reflexes.md): the reflex
+	// catalog itself no longer needs a boot-time load-and-merge step —
+	// callExecuteTask reads live dispatch_to_agent agent_reflexes rows
+	// directly off selfTools.Store (already wired via
+	// NewSelfToolsTransport above), the same DB-authoritative source
+	// every other reflex uses. The former ~/.nanite/reflexes/*.yaml
+	// user-override convention is retired; operators use the same
+	// agent_reflexes CRUD path (internal/api/reflexes.go) as everyone
+	// else. (The dedicated match-log writer this comment used to wire
+	// here — selfTools.ReflexLogger — is itself retired by
+	// TASKS/reflex-taxonomy/06-unified-reflex-telemetry.md; see
+	// selfTools.Plugins, wired in main() once pluginHost exists, for its
+	// unified-sink replacement.)
 	// B1 (CW-20260429-0006): wire the manager as the cross-server schema
 	// registry so tool_validate can pre-flight check args for any
 	// registered tool, not just self-tools.

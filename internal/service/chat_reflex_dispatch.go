@@ -26,20 +26,45 @@
 //  2. dispatch_to_agent's evaluation deliberately does NOT go through
 //     reflexes.Engine.EvaluateState (the same pipeline
 //     chat_reflexes.go's evaluateAndInjectReflexes uses for
-//     inject_reminder/force_tool_choice/halt_session/etc.) because that
-//     pipeline suppresses a reflex from re-firing for 15 minutes
-//     (Engine.recentlyFired). That debounce is correct for a nudge
-//     (inject_reminder) but wrong for a routing decision — the retired
-//     broker re-evaluated Rule 5 fresh on every single turn, with no
-//     cooldown. attemptReflexDispatch below re-implements the
-//     list-active-reflexes + evaluate-trigger steps directly (via
-//     reflexes.EvaluateTrigger, the same exported primitive
-//     Engine.EvaluateState calls internally) and calls
-//     reflexEngine.Executor.Apply once per candidate purely to get the
-//     parsed action_spec back as an AppliedAction — no hook, no
-//     recently-fired gate, no fired_count bump from Apply itself. This
-//     file bumps fired_count directly (best-effort, for the operator UI's
-//     fired_count/last_fired_at telemetry) without the debounce gate.
+//     inject_reminder/force_tool_choice/halt_session/etc.).
+//     TASKS/reflex-taxonomy/02-recurrence-cascade.md corrected this
+//     design note's original framing: this is no longer "skip the
+//     pipeline to dodge its 15-minute debounce." The debounce itself is
+//     now data, not code (reflex_action_kinds.default_recurrence_seconds
+//     / agent_reflexes.recurrence_override_seconds, migration
+//     124_reflex_action_taxonomy.sql), and dispatch_to_agent's
+//     kind-level default is seeded at 0 ("no cooldown") — the exact
+//     "re-evaluate fresh every turn" behavior the retired broker's Rule 5
+//     always had. attemptReflexDispatch below applies that same cascade
+//     explicitly (reflexes.EffectiveCooldown +
+//     reflexEngine.ActionKindDefaultRecurrenceSeconds, same functions
+//     EvaluateState's own debounce check uses) rather than inheriting it
+//     implicitly from being inside EvaluateState's loop. Under today's
+//     data (every dispatch_to_agent row's recurrence_override_seconds is
+//     NULL, the kind default is 0) this check is a real comparison that
+//     always evaluates to "not suppressed" — but a future non-zero
+//     recurrence_override_seconds on a specific dispatch_to_agent row now
+//     genuinely takes effect here, not just in theory.
+//
+//     The real, still-standing reason this file exists as a separate
+//     call site from EvaluateState — not a recurrence-semantics
+//     difference, and (as of TASKS/reflex-taxonomy/
+//     03-shared-decision-engine.md) not a decision-logic difference either
+//     — is the import-cycle constraint (internal/mcp cannot import
+//     internal/service, so matchDispatchToAgentReflex below in
+//     self_tools_dispatch.go cannot call this file's own function) plus
+//     the live, in-flight State construction covered in note (3) below:
+//     StateCollector (which EvaluateState uses) only reads state already
+//     committed to the store, and cannot see this turn's not-yet-persisted
+//     classification/user text. attemptReflexDispatch lists active
+//     dispatch_to_agent rows itself, then calls the SAME shared
+//     reflexes.Resolve() primitive Engine.EvaluateState calls (task 03) —
+//     which internally runs reflexes.EvaluateTrigger and
+//     reflexEngine.Executor.Apply for whichever candidate the
+//     dispatch_to_agent kind's combining algorithm (first_applicable)
+//     selects. No hook, no fired_count bump from Apply/Resolve itself —
+//     this file bumps fired_count directly (best-effort, for the operator
+//     UI's fired_count/last_fired_at telemetry), same as before task 03.
 //
 //  3. reflexes.State's ScopeTier/ExecutionPattern fields (added by this
 //     task) are populated here from ls.Classification() — the CURRENT
@@ -169,11 +194,23 @@ func (s *chatServiceImpl) attemptReflexDispatch(
 	// engine already holds the full store handle for its own Collect/
 	// Evaluate pipeline (engine.go), so reusing it avoids widening the
 	// interface just for this call site.
-	candidates, err := s.reflexEngine.Store.ListAgentReflexesForAgent(ctx, agentID, class)
+	allCandidates, err := s.reflexEngine.Store.ListAgentReflexesForAgent(ctx, agentID, class)
 	if err != nil {
 		slog.Warn("chat-service: dispatch-reflex list failed",
 			"session_id", sessionID, "agent_id", agentID, "class", class, "err", err)
 		return reflexDispatchOutcome{}
+	}
+	// This call site's own candidate list, per TASKS/reflex-taxonomy/
+	// 03-shared-decision-engine.md: Resolve() (below) is the shared
+	// combining-algorithm primitive, but it has no opinion on which rows a
+	// caller passes it — filtering to dispatch_to_agent only is this
+	// caller's own job, same as EvaluateState's dispatch_to_agent
+	// exclusion is that (different) caller's own job.
+	candidates := make([]store.AgentReflex, 0, len(allCandidates))
+	for _, r := range allCandidates {
+		if r.ActionKind == store.ReflexActionDispatchToAgent {
+			candidates = append(candidates, r)
+		}
 	}
 
 	state := reflexes.State{
@@ -189,45 +226,72 @@ func (s *chatServiceImpl) attemptReflexDispatch(
 		UserMessages: []reflexes.MessageSignal{{Content: userContent}},
 	}
 
-	type evalResult struct {
-		id, name string
-		fired    bool
+	// Facet 4 recurrence cascade (design note 2 above,
+	// TASKS/reflex-taxonomy/02-recurrence-cascade.md): looked up once
+	// (there's only ever one dispatch_to_agent kind row, not one per
+	// candidate) via the Engine's cached ActionKindDefaultRecurrenceSeconds
+	// — the same accessor used pre-this-task. Under today's seed data
+	// (dispatch_to_agent's kind-level default is 0, no row has a
+	// reflex-level override) cooldownFn below always resolves to "not
+	// suppressed" — this is exactly what makes design note (2) above
+	// correct: the pipeline's own cascade, not a bypass of it.
+	now := time.Now()
+	kindDefault := s.reflexEngine.ActionKindDefaultRecurrenceSeconds(store.ReflexActionDispatchToAgent)
+	cooldownFn := func(r store.AgentReflex) bool {
+		cooldown := reflexes.EffectiveCooldown(kindDefault, r.RecurrenceOverrideSeconds)
+		suppressed := reflexes.RecentlyFired(r, now, cooldown)
+		if suppressed {
+			slog.Info("chat-service: dispatch-reflex fired but suppressed by cooldown",
+				"session_id", sessionID, "reflex", r.Name, "cooldown", cooldown)
+		}
+		return suppressed
 	}
-	results := make([]evalResult, 0, len(candidates))
-
-	var winner *store.AgentReflex
-	var winnerAction reflexes.AppliedAction
-
-	for i := range candidates {
-		r := candidates[i]
-		if r.ActionKind != store.ReflexActionDispatchToAgent {
-			continue
-		}
-		fired, evalErr := reflexes.EvaluateTrigger(r.TriggerKind, r.TriggerSpec, state)
-		if evalErr != nil {
-			slog.Warn("chat-service: dispatch-reflex trigger eval failed",
-				"session_id", sessionID, "reflex", r.Name, "err", evalErr)
-			results = append(results, evalResult{id: r.ID, name: r.Name, fired: false})
-			continue
-		}
-		results = append(results, evalResult{id: r.ID, name: r.Name, fired: fired})
-		if !fired || winner != nil {
-			continue
-		}
-		action, applyErr := s.reflexEngine.Executor.Apply(ctx, r, state)
-		if applyErr != nil {
-			slog.Warn("chat-service: dispatch-reflex apply failed",
-				"session_id", sessionID, "reflex", r.Name, "err", applyErr)
-			continue
-		}
-		rCopy := r
-		winner = &rCopy
-		winnerAction = action
+	// dispatch_to_agent's own reflex_action_kinds row (Facet 2's
+	// combining_algorithm, seeded 'first_applicable' by migration
+	// 124_reflex_action_taxonomy.sql) — fetched once and reused as the
+	// ActionKindLookup Resolve() calls, since candidates above is already
+	// filtered to this one kind so no other kind name is ever requested.
+	dispatchKind, kindErr := s.reflexEngine.Store.GetReflexActionKind(ctx, store.ReflexActionDispatchToAgent)
+	kindLookup := func(_ context.Context, _ string) (*store.ReflexActionKind, error) {
+		return dispatchKind, kindErr
 	}
 
-	if winner == nil {
+	resolved, outcomes, resolveErr := reflexes.Resolve(ctx, candidates, state, s.reflexEngine.Executor, cooldownFn, kindLookup)
+	if resolveErr != nil {
+		slog.Warn("chat-service: dispatch-reflex resolve failed",
+			"session_id", sessionID, "err", resolveErr)
 		return reflexDispatchOutcome{}
 	}
+	for _, oc := range outcomes {
+		if oc.TriggerError != "" {
+			slog.Warn("chat-service: dispatch-reflex trigger eval failed",
+				"session_id", sessionID, "reflex", oc.ReflexName, "err", oc.TriggerError)
+		}
+		if oc.ApplyError != "" {
+			slog.Warn("chat-service: dispatch-reflex apply failed",
+				"session_id", sessionID, "reflex", oc.ReflexName, "err", oc.ApplyError)
+		}
+	}
+
+	if len(resolved.FiredReflexes) == 0 {
+		return reflexDispatchOutcome{}
+	}
+	if len(resolved.FiredReflexes) > 1 {
+		// TASKS/reflex-taxonomy/08-fix-resolve-fail-open-visibility.md:
+		// canary for the same kind-lookup-failure fail-open Resolve() now
+		// Warn-logs directly — dispatch_to_agent's kind is seeded
+		// first_applicable (single winner), so more than one candidate
+		// selected here means the kind lookup above degraded to
+		// all_applicable. Only the first candidate is ever used below;
+		// the rest are silently discarded, which is worth an operator-
+		// visible note rather than a quiet drop.
+		slog.Warn("chat-service: dispatch-reflex resolved multiple candidates, only the first is used",
+			"session_id", sessionID,
+			"candidate_count", len(resolved.FiredReflexes),
+		)
+	}
+	winner := &resolved.FiredReflexes[0]
+	winnerAction := resolved.Actions[0]
 
 	agentSlug, _ := winnerAction.Spec["agent_slug"].(string)
 	if agentSlug == "" {
@@ -242,50 +306,28 @@ func (s *chatServiceImpl) attemptReflexDispatch(
 	reason, _ := winnerAction.Spec["reason"].(string)
 	if reason == "" {
 		reason = "reflex:" + winner.Name
+		// Reflected into the emitted trace record's own spec below too —
+		// winnerAction.Spec and resolved.Actions[0].Spec are the same
+		// underlying map (winnerAction is a value copy of the struct, but
+		// Spec is a map, a reference type), so this mutation is visible
+		// to EmitFirings without any extra plumbing.
+		winnerAction.Spec["reason"] = reason
 	}
 	confidence, _ := winnerAction.Spec["confidence"].(float64)
 
-	// Best-effort fired_count/last_fired_at bump — mirrors the operator
-	// UI telemetry every other action kind gets via Engine.EvaluateState,
-	// without that pipeline's 15-minute recently-fired debounce (design
-	// note 2). Failure does not block the dispatch.
-	if err := s.reflexEngine.Store.BumpAgentReflexFired(ctx, winner.ID, time.Now()); err != nil {
-		slog.Warn("chat-service: dispatch-reflex bump fired_count failed",
-			"session_id", sessionID, "reflex", winner.Name, "err", err)
-	}
-
-	// decision log §14 write-site-discipline: real structured reasoning,
-	// not a bare event name. alternatives_considered lists every
-	// dispatch_to_agent candidate evaluated this turn (not just the
-	// winner) so an operator/auditor can see why this reflex won over
-	// the others — including candidates whose trigger did NOT fire.
-	alternatives := make([]map[string]any, 0, len(results))
-	for _, r := range results {
-		if r.id == winner.ID {
-			continue
-		}
-		alternatives = append(alternatives, map[string]any{
-			"reflex_id":   r.id,
-			"reflex_name": r.name,
-			"fired":       r.fired,
-		})
-	}
-	meta := map[string]any{
-		"reflex_id":               winner.ID,
-		"reflex_name":             winner.Name,
-		"agent_slug":              agentSlug,
-		"confidence":              confidence,
-		"reason":                  reason,
-		"scope_tier":              tier.String(),
-		"execution_pattern":       pattern.String(),
-		"alternatives_considered": alternatives,
-	}
-	if metaJSON, mErr := json.Marshal(meta); mErr != nil {
-		slog.Warn("chat-service: dispatch-reflex marshal event_log metadata failed",
-			"session_id", sessionID, "reflex", winner.Name, "err", mErr)
-	} else {
-		s.store.LogEvent(sessionID, "dispatch_to_agent", "reflex", reason, string(metaJSON))
-	}
+	// TASKS/reflex-taxonomy/06-unified-reflex-telemetry.md: the event_log
+	// write (decision log §14 write-site-discipline: real structured
+	// reasoning, not a bare event name — this call site's own
+	// alternatives_considered pattern is now the standard EmitFirings
+	// generalizes to every kind), the fired_count/last_fired_at bump, and
+	// plugin-hook emission (previously never fired from this call site —
+	// gap 3 in the architecture doc's Telemetry section) are now one
+	// centralized call, the same EmitFirings Engine.EvaluateState and
+	// matchDispatchToAgentReflex go through.
+	reflexes.EmitFirings(ctx, s.reflexEngine.Store, s.reflexEngine.Plugins, resolved, outcomes, state, reflexes.FiringContext{
+		AgentID:    agentID,
+		AgentClass: class,
+	}, slog.Default())
 
 	out := reflexDispatchOutcome{
 		Matched:    true,

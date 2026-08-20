@@ -37,18 +37,18 @@ type ElicitationService interface {
 	RespondFromEnvelopeData(data map[string]any) error
 }
 
-// elicitationCreateParams mirrors the MCP 2025-06-18 spec for elicitation/create.
+// ElicitationCreateParams mirrors the MCP 2025-06-18 spec for elicitation/create.
 // The tool mid-call sends this; the transport decodes it and calls the Service.
-type elicitationCreateParams struct {
+type ElicitationCreateParams struct {
 	// Message is the question shown to the user.
 	Message string `json:"message"`
 	// RequestedSchema constrains the allowed response. The type field drives
 	// the UI widget (boolean → accept/decline, string → text input).
-	RequestedSchema *elicitationRequestedSchema `json:"requestedSchema,omitempty"`
+	RequestedSchema *ElicitationRequestedSchema `json:"requestedSchema,omitempty"`
 }
 
-type elicitationRequestedSchema struct {
-	Type        string `json:"type"`        // "boolean" | "string"
+type ElicitationRequestedSchema struct {
+	Type        string `json:"type"` // "boolean" | "string"
 	Title       string `json:"title,omitempty"`
 	Description string `json:"description,omitempty"`
 }
@@ -64,8 +64,11 @@ type elicitationResponse struct {
 	Content string `json:"content,omitempty"`
 }
 
-// elicitUserInput is the server-side elicitation helper. Nanite's own write
+// ElicitUserInput is the server-side elicitation helper. Nanite's own write
 // tools call this when they need mid-call user confirmation before proceeding.
+// Exported (CW self-tools move, TASKS/harness-reactive-self-tools/01) because
+// its primary caller (message_send kind=directive) now lives in
+// internal/selftools, a separate package from this file.
 //
 // sessionID / agentID identify where to deliver the elicitation-prompt envelope.
 // toolCallID is echoed back for correlation (MCP tool_use_id).
@@ -73,11 +76,11 @@ type elicitationResponse struct {
 // Returns the user's response. If the user declines, returns ActionDecline so
 // the tool knows to abort. If the request times out, returns ActionCancel +
 // reason=timeout.
-func elicitUserInput(
+func ElicitUserInput(
 	ctx context.Context,
 	svc ElicitationService,
 	sessionID, agentID, toolCallID string,
-	params elicitationCreateParams,
+	params ElicitationCreateParams,
 ) (elicitationResponse, error) {
 	if svc == nil {
 		// Elicitation not wired — fall back to auto-accept so the tool doesn't
@@ -122,7 +125,7 @@ type ClientElicitationResult struct {
 	// remote server's tool call blocks until Respond(ID, ...) is called.
 	ID string
 	// Params are the elicitation parameters from the remote server.
-	Params elicitationCreateParams
+	Params ElicitationCreateParams
 }
 
 // parseElicitationCreate extracts an elicitation/create request from a raw
@@ -134,10 +137,10 @@ type ClientElicitationResult struct {
 // transport model it arrives as a nested payload in a tool result or as an
 // out-of-band SSE event, depending on the server implementation. Both paths
 // ultimately decode the same shape.
-func parseElicitationCreate(raw json.RawMessage) (*elicitationCreateParams, bool) {
+func parseElicitationCreate(raw json.RawMessage) (*ElicitationCreateParams, bool) {
 	var req struct {
 		Method string                   `json:"method"`
-		Params *elicitationCreateParams `json:"params"`
+		Params *ElicitationCreateParams `json:"params"`
 	}
 	if err := json.Unmarshal(raw, &req); err != nil {
 		return nil, false
@@ -160,7 +163,7 @@ func routeClientElicitation(
 	ctx context.Context,
 	svc ElicitationService,
 	sessionID, agentID, toolCallID string,
-	params elicitationCreateParams,
+	params ElicitationCreateParams,
 ) (json.RawMessage, error) {
 	if svc == nil {
 		// No elicitation service wired — auto-cancel gracefully.

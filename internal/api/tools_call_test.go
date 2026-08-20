@@ -14,6 +14,8 @@ import (
 	"github.com/hollis-labs/go-providers/provider"
 	"github.com/hollis-labs/nanite/internal/envelope"
 	"github.com/hollis-labs/nanite/internal/mcp"
+	"github.com/hollis-labs/nanite/internal/selftools"
+	"github.com/hollis-labs/nanite/internal/selftools/reactions"
 	"github.com/hollis-labs/nanite/internal/service"
 	"github.com/hollis-labs/nanite/internal/store"
 )
@@ -57,7 +59,7 @@ func postToolCall(t *testing.T, a *API, body any) *httptest.ResponseRecorder {
 // is refused — the endpoint runs arbitrary self-tools and is internal-only.
 func TestHandleSelfToolCall_RejectsNonLoopback(t *testing.T) {
 	a, s := newToolCallTestAPI(t)
-	a.SetSelfTools(mcp.NewSelfToolsTransport(s))
+	a.SetSelfTools(selftools.NewSelfToolsTransport(s))
 
 	req := httptest.NewRequest(http.MethodPost, "/api/tools/call", bytes.NewReader([]byte(`{"name":"todo_create"}`)))
 	req.RemoteAddr = "203.0.113.7:40000" // non-loopback
@@ -82,7 +84,7 @@ func TestHandleSelfToolCall_Unavailable(t *testing.T) {
 // TestHandleSelfToolCall_MissingName pins the 400 for a nameless request.
 func TestHandleSelfToolCall_MissingName(t *testing.T) {
 	a, s := newToolCallTestAPI(t)
-	a.SetSelfTools(mcp.NewSelfToolsTransport(s))
+	a.SetSelfTools(selftools.NewSelfToolsTransport(s))
 	rec := postToolCall(t, a, map[string]any{"args": map[string]any{}})
 	if rec.Code != http.StatusBadRequest {
 		t.Errorf("status = %d, want 400", rec.Code)
@@ -95,7 +97,7 @@ func TestHandleSelfToolCall_MissingName(t *testing.T) {
 // failure. This proves the routing without depending on any wired service.
 func TestHandleSelfToolCall_DispatchesUnknownTool(t *testing.T) {
 	a, s := newToolCallTestAPI(t)
-	a.SetSelfTools(mcp.NewSelfToolsTransport(s))
+	a.SetSelfTools(selftools.NewSelfToolsTransport(s))
 
 	rec := postToolCall(t, a, map[string]any{"name": "definitely_not_a_real_tool"})
 	if rec.Code != http.StatusOK {
@@ -139,7 +141,7 @@ func (r *recordingPanelSink) BroadcastPanelSignal(sessionID, signalType, payload
 // to this fully-wired transport).
 func TestHandleSelfToolCall_PanelOpenReachesWiredSink(t *testing.T) {
 	a, s := newToolCallTestAPI(t)
-	st := mcp.NewSelfToolsTransport(s)
+	st := selftools.NewSelfToolsTransport(s)
 	sink := &recordingPanelSink{}
 	st.PanelSignalSink = sink
 	a.SetSelfTools(st)
@@ -208,6 +210,98 @@ func TestExtractEnvelopeMarker(t *testing.T) {
 	}
 }
 
+// TestExtractEnvelopeMarker_MalformedMarkerAndMultiBlock is
+// TASKS/harness-reactive-self-tools/06-collapse-envelope-marker-consumers.md's
+// regression proof for this call site: extractEnvelopeMarker no longer
+// hand-scans for the marker itself — it delegates to
+// chat.ExtractEnvelopeMarker (internal/chat/envelope_marker.go), the same
+// shared function internal/service/chat_generate.go's captureEnvelopeData
+// and internal/mcpserver/handlers.go's convertEnvelopeMarkers now delegate
+// to. This exercises extractEnvelopeMarker's own real call-site behavior —
+// iterating a *mcp.ToolResult's content blocks, skipping a block whose
+// marker is malformed (no closing delimiter) and falling through to a
+// later block that carries a well-formed one — not just the shared
+// function in isolation.
+func TestExtractEnvelopeMarker_MalformedMarkerAndMultiBlock(t *testing.T) {
+	res := &mcp.ToolResult{Content: []mcp.ToolContent{
+		{Type: "text", Text: `<!--ENVELOPE_DATA:{"truncated":true} no closing delimiter here`},
+		{Type: "text", Text: `<!--ENVELOPE_DATA:{"type":"info-card"}:ENVELOPE_DATA-->`},
+	}}
+	got := extractEnvelopeMarker(res)
+	want := `{"type":"info-card"}`
+	if got != want {
+		t.Fatalf("extractEnvelopeMarker = %q, want %q (malformed first block skipped, well-formed second block found)", got, want)
+	}
+}
+
+// TestExtractEnvelopeMarker_RoundTripsRenderCardReactionPayload is
+// TASKS/harness-reactive-self-tools/04-render-card-construction.md's
+// regression proof: a render_card reaction's resolved payload, once
+// embedded via selftools.EmbedRenderCardMarker, round-trips correctly
+// through extractEnvelopeMarker (an existing, real marker consumer, one of
+// the three the architecture doc names) with zero changes to that
+// function. The fired reaction here is a minimal synthetic
+// reactions.Result test double — 07-worked-example-task-update-report.md
+// is not yet landed, so there is no real self-tool handler to call through
+// yet; this proves the wiring contract the handler will rely on.
+func TestExtractEnvelopeMarker_RoundTripsRenderCardReactionPayload(t *testing.T) {
+	// Mirrors how reactions.Fire's render_card branch populates a
+	// FiredReaction: ResolveRenderCard's output stashed verbatim in
+	// Payload, Outcome success.
+	resolvedPayload, err := reactions.ResolveRenderCard(
+		`{"envelope_type":"info-card","template":{"title":"Task update","body":"{{msg}}"}}`,
+		map[string]any{"id": "task-1", "msg": "hello from the reaction engine"},
+	)
+	if err != nil {
+		t.Fatalf("reactions.ResolveRenderCard: %v", err)
+	}
+
+	fireResult := reactions.Result{
+		ToolName: "task_update_report",
+		Reactions: []reactions.FiredReaction{
+			{
+				ReactionID: "reaction-1",
+				Kind:       reactions.KindRenderCard,
+				Outcome:    reactions.OutcomeSuccess,
+				Payload:    resolvedPayload,
+			},
+		},
+	}
+
+	envJSON, ok := fireResult.RenderCardPayload()
+	if !ok {
+		t.Fatalf("RenderCardPayload() returned ok=false, want a resolved render_card payload")
+	}
+
+	// The self-tool handler's own side: embed the resolved payload as the
+	// marker and append it to the tool result text, exactly as
+	// callShowCard does today for card_show.
+	marker := selftools.EmbedRenderCardMarker("info-card: Task update", string(envJSON))
+	toolResultText := "Task update recorded.\n" + marker
+
+	res := &mcp.ToolResult{Content: []mcp.ToolContent{{Type: "text", Text: toolResultText}}}
+
+	got := extractEnvelopeMarker(res)
+	if got != string(envJSON) {
+		t.Fatalf("extractEnvelopeMarker round-trip mismatch:\ngot:  %s\nwant: %s", got, envJSON)
+	}
+
+	// Confirm the round-tripped JSON is the exact envelope wire shape
+	// buildShowEnvelope produces (kind/version/type/data), not just an
+	// opaque string match.
+	var env map[string]any
+	if err := json.Unmarshal([]byte(got), &env); err != nil {
+		t.Fatalf("round-tripped payload is not valid JSON: %v (%s)", err, got)
+	}
+	if env["kind"] != "envelope" || env["version"] != float64(1) || env["type"] != "info-card" {
+		t.Fatalf("round-tripped envelope missing expected wire shape: %#v", env)
+	}
+	data, ok := env["data"].(map[string]any)
+	if !ok || data["body"] != "hello from the reaction engine" {
+		t.Fatalf("round-tripped envelope data not template-substituted correctly: %#v", env["data"])
+	}
+}
+
 // TestHandleSelfToolCall_CardShowBroadcastsEnvelope is the CW-20260517-0041
 // regression: a CLI-launched agent runs card_show in its own process and
 // forwards the call through POST /api/tools/call. The endpoint must broadcast
@@ -221,7 +315,7 @@ func TestHandleSelfToolCall_CardShowBroadcastsEnvelope(t *testing.T) {
 	envelope.SetupForTesting()
 
 	a, s := newToolCallTestAPI(t)
-	a.SetSelfTools(mcp.NewSelfToolsTransport(s))
+	a.SetSelfTools(selftools.NewSelfToolsTransport(s))
 
 	const sessionID = "sess-cli-cardshow"
 	const msgID = "msg-cli-cardshow"
@@ -280,7 +374,7 @@ func TestHandleSelfToolCall_CardShowBroadcastsEnvelope(t *testing.T) {
 // TodoStore and a session in context) succeeds through it.
 func TestHandleSelfToolCall_StampsSessionAndDispatches(t *testing.T) {
 	a, s := newToolCallTestAPI(t)
-	st := mcp.NewSelfToolsTransport(s)
+	st := selftools.NewSelfToolsTransport(s)
 	st.TodoStore = s // *store.Store satisfies the TodoStore interface
 	a.SetSelfTools(st)
 

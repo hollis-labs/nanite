@@ -42,6 +42,8 @@ import (
 	_ "github.com/hollis-labs/nanite/internal/plugin/allplugins" // registers all built-in plugins
 	"github.com/hollis-labs/nanite/internal/safego"
 	"github.com/hollis-labs/nanite/internal/secrets"
+	"github.com/hollis-labs/nanite/internal/selftools"
+	"github.com/hollis-labs/nanite/internal/selftools/reactions"
 	"github.com/hollis-labs/nanite/internal/server"
 	"github.com/hollis-labs/nanite/internal/service"
 	"github.com/hollis-labs/nanite/internal/slogx"
@@ -353,7 +355,7 @@ func cmdServe(args []string) {
 	// by the dispatch_to_agent reflex action kind instead, see
 	// internal/service/chat_reflex_dispatch.go). This instance is kept
 	// solely for the one remaining consumer: selfTools.Broker below
-	// (internal/mcp/self_tools_dispatch.go's callExecuteTask — the
+	// (internal/selftools/self_tools_dispatch.go's callExecuteTask — the
 	// deliberately-independent downstream scaffold that task explicitly
 	// left untouched). The deterministic v1 impl (`broker.New()`) is
 	// concurrency-safe (pure function over broker.Input).
@@ -513,6 +515,30 @@ func cmdServe(args []string) {
 		workflowDefinitionsRegistry,
 		slog.Default(),
 	)
+
+	// TASKS/harness-reactive-self-tools/07-worked-example-task-update-
+	// report.md: wire the harness-reactive self-tools reaction engine
+	// (03-reaction-engine-core.md) into the transport so task_update_report
+	// (and any future harness-reactive self-tool) can call Fire. nil
+	// httpClient lets the engine fall back to its own bounded-timeout
+	// client (reactions.defaultHTTPTimeout).
+	selfTools.Reactions = reactions.NewEngine(s, nil, slog.Default())
+
+	// Seed task_update_report's two illustrative selftool_reactions rows
+	// (render_card + internal_api_call) idempotently — a no-op on every
+	// boot after the first. apiBaseURL resolves the internal_api_call
+	// reaction's endpoint to this process's own real listen address
+	// (internal/selftools/reactions/internal_api_call.go's own doc
+	// comment: the seeding caller, not the executor, must resolve
+	// endpoint into a full URL) — the same pre-resolved value every
+	// other same-process HTTP consumer in this codebase already threads
+	// through (WorkflowContextAssembler, ExternalWorkflowEngineConfig.
+	// APIBaseURL, AgentCardGenerator, above).
+	if n, err := selftools.SeedTaskUpdateReportReactions(context.Background(), s, apiBaseURL, slog.Default()); err != nil {
+		slog.Warn("main: task_update_report reaction seed", "err", err)
+	} else if n > 0 {
+		slog.Info("main: seeded task_update_report reactions", "count", n)
+	}
 
 	// Wire todo/plan store into the self-tools transport.
 	selfTools.TodoStore = s
@@ -854,7 +880,7 @@ func devAllowedSource(cfg *config.Config) string {
 // devmode build tag via registerMuxTransport (G5 — CW-20260421-0001).
 // In production builds registerMuxTransport is a no-op and no mux_* tools
 // appear in the tool surface.
-func initMCP(s *store.Store, cfg *config.Config, appCfg *config.AppConfig) (*mcp.Manager, *toolclient.ToolClient, *mcp.SelfToolsTransport) {
+func initMCP(s *store.Store, cfg *config.Config, appCfg *config.AppConfig) (*mcp.Manager, *toolclient.ToolClient, *selftools.SelfToolsTransport) {
 	mcpManager := mcp.NewManager()
 
 	devAllowed := resolveDevToolsAllowedPaths(cfg)
@@ -886,7 +912,7 @@ func initMCP(s *store.Store, cfg *config.Config, appCfg *config.AppConfig) (*mcp
 	if err := mcpManager.AddBuiltinServer(mcp.CodeServerName, mcp.NewCodeExecTransport("")); err != nil {
 		slog.Error("mcp: failed to register builtin server", "name", mcp.CodeServerName, "err", err)
 	}
-	selfTools := mcp.NewSelfToolsTransport(s)
+	selfTools := selftools.NewSelfToolsTransport(s)
 	// E1 (CW-20260419-0027; migrated off internal/promptrouter by
 	// TASKS/phase-4/03-migrate-promptrouter-to-reflexes.md): the reflex
 	// catalog itself no longer needs a boot-time load-and-merge step —
@@ -945,7 +971,7 @@ func initMCP(s *store.Store, cfg *config.Config, appCfg *config.AppConfig) (*mcp
 	tb.Builtins.RegisterBuiltins("dev", devToolDefs)
 	slog.Info("registered dev built-in tools", "count", len(devToolDefs))
 
-	selfToolDefs := mcp.SelfToolProviderDefinitions()
+	selfToolDefs := selftools.SelfToolProviderDefinitions()
 	tb.Builtins.RegisterBuiltins("self-service", selfToolDefs)
 	slog.Info("registered self-service built-in tools", "count", len(selfToolDefs))
 
@@ -953,8 +979,8 @@ func initMCP(s *store.Store, cfg *config.Config, appCfg *config.AppConfig) (*mcp
 	// W1B). Opt-in: only the named adopters (task_execute, tool_list,
 	// skill_list) get caller-specific descriptions; all other tools emit
 	// their static registration-time string. See
-	// internal/mcp/self_tools_describer.go for the renderer bodies.
-	mcp.RegisterSelfToolDescribers(tb.Describers)
+	// internal/selftools/self_tools_describer.go for the renderer bodies.
+	selftools.RegisterSelfToolDescribers(tb.Describers)
 	slog.Info("registered self-tool describers", "count", tb.Describers.Count())
 
 	// Register result-cache meta-tools (S4a). These let the LLM recall

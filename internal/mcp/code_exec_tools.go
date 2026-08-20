@@ -71,7 +71,7 @@ func (c *CodeExecTransport) ListTools(_ context.Context) ([]Tool, error) {
 // CallTool dispatches to the code execution handler.
 func (c *CodeExecTransport) CallTool(_ context.Context, name string, args map[string]any) (*ToolResult, error) {
 	if name != "code_execute" {
-		return errorResult(fmt.Sprintf("unknown tool: %s", name)), nil
+		return ErrorResult(fmt.Sprintf("unknown tool: %s", name)), nil
 	}
 	return c.callCodeExecute(args)
 }
@@ -91,7 +91,7 @@ var interpreters = map[string]interpreterInfo{
 func (c *CodeExecTransport) callCodeExecute(args map[string]any) (*ToolResult, error) {
 	code, _ := args["code"].(string)
 	if code == "" {
-		return errorResult("code is required"), nil
+		return ErrorResult("code is required"), nil
 	}
 
 	language, _ := args["language"].(string)
@@ -101,10 +101,10 @@ func (c *CodeExecTransport) callCodeExecute(args map[string]any) (*ToolResult, e
 
 	interp, ok := interpreters[language]
 	if !ok {
-		return errorResult(fmt.Sprintf("unsupported language %q (use shell, python, or javascript)", language)), nil
+		return ErrorResult(fmt.Sprintf("unsupported language %q (use shell, python, or javascript)", language)), nil
 	}
 
-	timeoutSec := intArg(args, "timeout", 30)
+	timeoutSec := IntArg(args, "timeout", 30)
 	if timeoutSec < 1 {
 		timeoutSec = 1
 	}
@@ -120,14 +120,14 @@ func (c *CodeExecTransport) callCodeExecute(args map[string]any) (*ToolResult, e
 	// Resolve sandbox directory to write the temp script file.
 	sandboxDir, err := sandbox.Dir(sessionID)
 	if err != nil {
-		return errorResult(fmt.Sprintf("sandbox dir: %v", err)), nil
+		return ErrorResult(fmt.Sprintf("sandbox dir: %v", err)), nil
 	}
 
 	// Write code to a temp file in the sandbox directory.
 	scriptName := fmt.Sprintf("exec_%s%s", uuid.New().String()[:8], interp.extension)
 	scriptPath := filepath.Join(sandboxDir, scriptName)
 	if err := os.WriteFile(scriptPath, []byte(code), 0644); err != nil {
-		return errorResult(fmt.Sprintf("write script: %v", err)), nil
+		return ErrorResult(fmt.Sprintf("write script: %v", err)), nil
 	}
 	defer os.Remove(scriptPath)
 
@@ -139,7 +139,7 @@ func (c *CodeExecTransport) callCodeExecute(args map[string]any) (*ToolResult, e
 		Timeout:   time.Duration(timeoutSec) * time.Second,
 	})
 	if err != nil {
-		return errorResult(fmt.Sprintf("execution error: %v", err)), nil
+		return ErrorResult(fmt.Sprintf("execution error: %v", err)), nil
 	}
 
 	// Format output.
@@ -160,7 +160,7 @@ func formatExecResult(result *sandbox.ExecResult) *ToolResult {
 			sb.WriteString("\n--- stderr (partial) ---\n")
 			sb.WriteString(result.Stderr)
 		}
-		return errorResult(sb.String())
+		return ErrorResult(sb.String())
 	}
 
 	var sb strings.Builder
@@ -192,9 +192,9 @@ func formatExecResult(result *sandbox.ExecResult) *ToolResult {
 	// Truncate large output using the truncation system.
 	tr := truncate.Output(output, "code_execute")
 	if tr.Truncated {
-		return textResult(tr.Content +
+		return TextResult(tr.Content +
 			"\nOutput was truncated. To see specific parts, modify your code to print only the relevant output.")
 	}
 
-	return textResult(output)
+	return TextResult(output)
 }

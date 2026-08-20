@@ -7,7 +7,7 @@ import (
 
 	llmtypes "github.com/hollis-labs/go-llm-types"
 	"github.com/hollis-labs/nanite/internal/describer"
-	"github.com/hollis-labs/nanite/internal/mcp"
+	"github.com/hollis-labs/nanite/internal/selftools"
 	"github.com/hollis-labs/nanite/internal/store"
 	"github.com/hollis-labs/nanite/internal/toolclient"
 )
@@ -137,7 +137,7 @@ func TestSelectForAgent_EmptyAllowlistFallsBackToBaseline(t *testing.T) {
 
 // buildToolClientWithTaskExecute wires a toolclient with a stand-in
 // task_execute tool registered directly on the catalog plus the production
-// describer registered through mcp.RegisterSelfToolDescribers. This lets
+// describer registered through selftools.RegisterSelfToolDescribers. This lets
 // the service-layer test exercise the real describeTaskExecute renderer
 // without spinning up the full self-tool stack.
 func buildToolClientWithTaskExecute(t *testing.T) *toolclient.ToolClient {
@@ -149,7 +149,7 @@ func buildToolClientWithTaskExecute(t *testing.T) *toolclient.ToolClient {
 	})
 	// Wire the production describer set so describeTaskExecute is what
 	// renders on the SelectForAgent hot path.
-	mcp.RegisterSelfToolDescribers(tc.Describers)
+	selftools.RegisterSelfToolDescribers(tc.Describers)
 	return tc
 }
 

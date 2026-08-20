@@ -111,6 +111,8 @@ Resolved shape: implement as small, purpose-built `nanite_*` self-tools (the nam
 
 This mechanism gets its own design pass when it's actually built — this doc captures the distinction and the naming constraint so the context isn't lost, not a full spec for it.
 
+**Update (2026-08-20):** that design pass happened — see `docs/engineering/architecture/11-harness-reactive-self-tools.md`. Resolved: `internal/selftools` (not `internal/mcp`, not `internal/agent/selftools`), with the reaction engine at `internal/selftools/reactions` (not `action` — that word is already claimed by this doc's own `action_kind`/`AppliedAction`/`Executor.Apply` vocabulary). Implementation remains deferred pending a concrete consumer.
+
 ## Deferred extension points (documented, not built)
 
 - **Plugin-registered action kinds.** Two things would be needed together, not one: a registration surface (direct precedent exists — `plugin.yaml`'s `registers.envelopes` + `scripts/generate-plugin-imports.mjs` for envelope types) *and* an Executor hook so `Apply`'s effect dispatch can reach plugin code for kinds it doesn't natively know (today `Apply` is a closed Go `switch`). No concrete plugin need exists today — the one real plugin-shaped precedent in this codebase, the Loom Curator/Weaver pilot reflexes (`internal/agent/reflexes/loom_pilot_seeds.go`), only uses the core `inject_reminder` kind. Documented as a deliberate seam, not built.
@@ -124,7 +126,7 @@ Listed explicitly so a future reader doesn't mistake omission for a locked decis
 - Exact table/column names and DDL — this doc is architecture-level agreement, not migration-ready schema. (Illustrative shape: `reflex_action_categories`, `reflex_action_kinds` with `category_id`/`combining_algorithm`/`default_recurrence` columns replacing the current CHECK-enum `action_kind` TEXT column, `reflex_provenance_tiers` with a per-kind allow-list join, `agent_reflexes.provenance_tier_id` and `.recurrence_override` FKs/columns.)
 - The specific per-tier action-kind allow-list values (which tiers may declare `halt_session`/`dispatch_to_agent`, etc.) — the ceiling mechanism is decided, the values are not.
 - Whether recurrence needs a third "fire once ever" mode beyond duration/none.
-- Final naming for the harness-reactive self-tool mechanism and its category value.
+- ~~Final naming for the harness-reactive self-tool mechanism and its category value.~~ Resolved 2026-08-20 — see `docs/engineering/architecture/11-harness-reactive-self-tools.md`.
 - Whether/when to build the plugin-registered-action-kind seam.
 - The unified telemetry sink (`event_log` vs. a new dedicated reflex-trace table) — the requirement (one consistent trace record, one sink, full plugin-hook coverage) is decided; the storage shape is not.
 

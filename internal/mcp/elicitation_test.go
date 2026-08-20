@@ -47,7 +47,7 @@ func (s *stubElicitationService) RespondFromEnvelopeData(data map[string]any) er
 // --- Server-side handler unit test ---
 
 // TestElicitUserInput_ServerSide_Accept verifies the server-side path: a tool
-// calls elicitUserInput, the service returns accept, the tool receives it.
+// calls ElicitUserInput, the service returns accept, the tool receives it.
 func TestElicitUserInput_ServerSide_Accept(t *testing.T) {
 	svc := &stubElicitationService{
 		elicitFn: func(_ context.Context, req elicitation.ElicitInput) (elicitation.Response, error) {
@@ -61,15 +61,15 @@ func TestElicitUserInput_ServerSide_Accept(t *testing.T) {
 		},
 	}
 
-	params := elicitationCreateParams{
+	params := ElicitationCreateParams{
 		Message: "Proceed with bulk delete?",
-		RequestedSchema: &elicitationRequestedSchema{
+		RequestedSchema: &ElicitationRequestedSchema{
 			Type: "boolean",
 		},
 	}
-	resp, err := elicitUserInput(context.Background(), svc, "sess-1", "agent-1", "tc-001", params)
+	resp, err := ElicitUserInput(context.Background(), svc, "sess-1", "agent-1", "tc-001", params)
 	if err != nil {
-		t.Fatalf("elicitUserInput error: %v", err)
+		t.Fatalf("ElicitUserInput error: %v", err)
 	}
 	if resp.Action != "accept" {
 		t.Errorf("action: got %q, want %q", resp.Action, "accept")
@@ -85,10 +85,10 @@ func TestElicitUserInput_ServerSide_Decline(t *testing.T) {
 		},
 	}
 
-	resp, err := elicitUserInput(context.Background(), svc, "sess-1", "agent-1", "tc-002",
-		elicitationCreateParams{Message: "Are you sure?"})
+	resp, err := ElicitUserInput(context.Background(), svc, "sess-1", "agent-1", "tc-002",
+		ElicitationCreateParams{Message: "Are you sure?"})
 	if err != nil {
-		t.Fatalf("elicitUserInput error: %v", err)
+		t.Fatalf("ElicitUserInput error: %v", err)
 	}
 	if resp.Action != "decline" {
 		t.Errorf("action: got %q, want %q", resp.Action, "decline")
@@ -97,8 +97,8 @@ func TestElicitUserInput_ServerSide_Decline(t *testing.T) {
 
 // TestElicitUserInput_NilService verifies that a nil service auto-accepts (non-blocking).
 func TestElicitUserInput_NilService(t *testing.T) {
-	resp, err := elicitUserInput(context.Background(), nil, "sess-1", "agent-1", "tc-003",
-		elicitationCreateParams{Message: "Confirm?"})
+	resp, err := ElicitUserInput(context.Background(), nil, "sess-1", "agent-1", "tc-003",
+		ElicitationCreateParams{Message: "Confirm?"})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -121,9 +121,9 @@ func TestRouteClientElicitation_Accept(t *testing.T) {
 		},
 	}
 
-	params := elicitationCreateParams{
+	params := ElicitationCreateParams{
 		Message: "Allow external tool to read your notes?",
-		RequestedSchema: &elicitationRequestedSchema{
+		RequestedSchema: &ElicitationRequestedSchema{
 			Type: "boolean",
 		},
 	}
@@ -145,7 +145,7 @@ func TestRouteClientElicitation_Accept(t *testing.T) {
 // TestRouteClientElicitation_NilService verifies nil service auto-cancels.
 func TestRouteClientElicitation_NilService(t *testing.T) {
 	raw, err := routeClientElicitation(context.Background(), nil, "sess-2", "agent-1", "ext-tc-002",
-		elicitationCreateParams{Message: "Hello?"})
+		ElicitationCreateParams{Message: "Hello?"})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -176,8 +176,8 @@ func TestElicitUserInput_Timeout(t *testing.T) {
 		},
 	}
 
-	resp, err := elicitUserInput(ctx, svc, "sess-3", "agent-1", "tc-timeout",
-		elicitationCreateParams{Message: "Will you respond?"})
+	resp, err := ElicitUserInput(ctx, svc, "sess-3", "agent-1", "tc-timeout",
+		ElicitationCreateParams{Message: "Will you respond?"})
 	if !errors.Is(err, context.DeadlineExceeded) {
 		// context_cancelled or deadline — both are acceptable "no response" paths.
 		if err != nil && !errors.Is(err, context.Canceled) {

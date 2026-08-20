@@ -5,7 +5,7 @@ import (
 	"testing"
 
 	llmtypes "github.com/hollis-labs/go-llm-types"
-	"github.com/hollis-labs/nanite/internal/mcp"
+	"github.com/hollis-labs/nanite/internal/selftools"
 )
 
 // TestNormalizeToolInputSchemas_SourceMapInvariance verifies that
@@ -162,13 +162,13 @@ func TestNormalizeToolInputSchemas_PropertyLessNodeNotClosed(t *testing.T) {
 
 // TestNormalizeToolInputSchemas_ShowCardC107Regression is the c107/c109
 // regression guard. It runs normalizeToolInputSchemas against the live
-// card_show definition pulled from mcp.SelfToolProviderDefinitions, then
+// card_show definition pulled from selftools.SelfToolProviderDefinitions, then
 // validates a realistic report-card payload against the SHARED schema map (the
 // one BuiltinToolRegistry / GetToolSchema reads). Before the fix, the shared
 // map's `data` node had been silently closed and the validator rejected every
 // inner field. After the fix, the shared map stays loose and validation passes.
 func TestNormalizeToolInputSchemas_ShowCardC107Regression(t *testing.T) {
-	defs := mcp.SelfToolProviderDefinitions()
+	defs := selftools.SelfToolProviderDefinitions()
 	var liveSchema map[string]any
 	for _, d := range defs {
 		if d.Name == "card_show" {
@@ -177,7 +177,7 @@ func TestNormalizeToolInputSchemas_ShowCardC107Regression(t *testing.T) {
 		}
 	}
 	if liveSchema == nil {
-		t.Fatal("card_show not found in mcp.SelfToolProviderDefinitions()")
+		t.Fatal("card_show not found in selftools.SelfToolProviderDefinitions()")
 	}
 
 	// Hold a reference to the original `data` sub-schema BEFORE normalize runs.

@@ -295,22 +295,22 @@ func (g *GeneralToolsTransport) CallTool(ctx context.Context, name string, args 
 	case "think":
 		return g.callThink(args)
 	default:
-		return errorResult(fmt.Sprintf("unknown tool: %s", name)), nil
+		return ErrorResult(fmt.Sprintf("unknown tool: %s", name)), nil
 	}
 }
 
 func (g *GeneralToolsTransport) callWebFetch(ctx context.Context, args map[string]any) (*ToolResult, error) {
 	if err := ctx.Err(); err != nil {
-		return errorResult(fmt.Sprintf("cancelled: %v", err)), nil
+		return ErrorResult(fmt.Sprintf("cancelled: %v", err)), nil
 	}
 	rawURL, _ := args["url"].(string)
 	if rawURL == "" {
-		return errorResult("url is required"), nil
+		return ErrorResult("url is required"), nil
 	}
 
 	parsed, err := url.Parse(rawURL)
 	if err != nil {
-		return errorResult(fmt.Sprintf("invalid url: %v", err)), nil
+		return ErrorResult(fmt.Sprintf("invalid url: %v", err)), nil
 	}
 
 	// Scheme allowlist. Reject file://, ftp://, gopher://, etc. Go's default
@@ -318,10 +318,10 @@ func (g *GeneralToolsTransport) callWebFetch(ctx context.Context, args map[strin
 	// the error message is informative and no clever transport injection
 	// reaches the dialer.
 	if parsed.Scheme != "http" && parsed.Scheme != "https" {
-		return errorResult(fmt.Sprintf("unsupported scheme %q (http/https only)", parsed.Scheme)), nil
+		return ErrorResult(fmt.Sprintf("unsupported scheme %q (http/https only)", parsed.Scheme)), nil
 	}
 	if parsed.Host == "" {
-		return errorResult("url missing host"), nil
+		return ErrorResult("url missing host"), nil
 	}
 
 	// Build a Transport whose DialContext resolves the hostname once, checks
@@ -435,7 +435,7 @@ func (g *GeneralToolsTransport) callWebFetch(ctx context.Context, args map[strin
 		case FetchErrRedirectLoop:
 			msg += "\nhint: too many redirects. Try the final destination URL directly."
 		}
-		return errorResult(msg), nil
+		return ErrorResult(msg), nil
 	}
 	defer resp.Body.Close()
 
@@ -445,7 +445,7 @@ func (g *GeneralToolsTransport) callWebFetch(ctx context.Context, args map[strin
 	limited := io.LimitReader(resp.Body, int64(webFetchBodyCap)+1)
 	raw, err := io.ReadAll(limited)
 	if err != nil {
-		return errorResult(fmt.Sprintf("read error: %v", err)), nil
+		return ErrorResult(fmt.Sprintf("read error: %v", err)), nil
 	}
 	truncatedByBody := len(raw) > webFetchBodyCap
 	if truncatedByBody {
@@ -469,7 +469,7 @@ func (g *GeneralToolsTransport) callWebFetch(ctx context.Context, args map[strin
 			fe.Kind, fe.URL, fe.Attempts, fe.Status, fe.Detail,
 		)
 		msg += "\nhint: page appears JS-rendered or behind an anti-bot gate. The tier-1 fetch cannot bypass this — try an API endpoint or a different source."
-		return errorResult(msg), nil
+		return ErrorResult(msg), nil
 	}
 
 	// Sanitize upstream bytes before they are stitched into the tool
@@ -514,7 +514,7 @@ func (g *GeneralToolsTransport) callWebFetch(ctx context.Context, args map[strin
 		fmt.Fprintf(&out, "\n[truncated: %d chars shown; body cap %d bytes]", webFetchExposedCap, webFetchBodyCap)
 	}
 
-	return textResult(out.String()), nil
+	return TextResult(out.String()), nil
 }
 
 // envelopeMarkerRE matches the <!--ENVELOPE_DATA:...:ENVELOPE_DATA--> marker
@@ -585,13 +585,13 @@ func (g *GeneralToolsTransport) callJSONParse(args map[string]any) (*ToolResult,
 	jsonStr, _ := args["json"].(string)
 	pathStr, _ := args["path"].(string)
 	if jsonStr == "" || pathStr == "" {
-		return errorResult("json and path are required"), nil
+		return ErrorResult("json and path are required"), nil
 	}
 
 	// Parse JSON into any.
 	var data any
 	if err := json.Unmarshal([]byte(jsonStr), &data); err != nil {
-		return errorResult(fmt.Sprintf("invalid JSON: %v", err)), nil
+		return ErrorResult(fmt.Sprintf("invalid JSON: %v", err)), nil
 	}
 
 	// Navigate the path.
@@ -602,28 +602,28 @@ func (g *GeneralToolsTransport) callJSONParse(args map[string]any) (*ToolResult,
 		case map[string]any:
 			val, ok := v[part.key]
 			if !ok {
-				return errorResult(fmt.Sprintf("key %q not found", part.key)), nil
+				return ErrorResult(fmt.Sprintf("key %q not found", part.key)), nil
 			}
 			current = val
 		case []any:
 			if part.index < 0 || part.index >= len(v) {
-				return errorResult(fmt.Sprintf("index %d out of range (length %d)", part.index, len(v))), nil
+				return ErrorResult(fmt.Sprintf("index %d out of range (length %d)", part.index, len(v))), nil
 			}
 			current = v[part.index]
 		default:
-			return errorResult(fmt.Sprintf("cannot navigate into %T at %q", current, part.key)), nil
+			return ErrorResult(fmt.Sprintf("cannot navigate into %T at %q", current, part.key)), nil
 		}
 	}
 
 	// Format the result.
 	switch v := current.(type) {
 	case string:
-		return textResult(v), nil
+		return TextResult(v), nil
 	case nil:
-		return textResult("null"), nil
+		return TextResult("null"), nil
 	default:
 		out, _ := json.Marshal(v)
-		return textResult(string(out)), nil
+		return TextResult(string(out)), nil
 	}
 }
 
@@ -669,16 +669,16 @@ func (g *GeneralToolsTransport) callDatetime(args map[string]any) (*ToolResult, 
 
 	op, _ := args["operation"].(string)
 	if op == "" {
-		return textResult(now.Format(time.RFC3339)), nil
+		return TextResult(now.Format(time.RFC3339)), nil
 	}
 
 	duration, err := parseDateMath(op)
 	if err != nil {
-		return errorResult(err.Error()), nil
+		return ErrorResult(err.Error()), nil
 	}
 
 	result := now.Add(duration)
-	return textResult(result.Format(time.RFC3339)), nil
+	return TextResult(result.Format(time.RFC3339)), nil
 }
 
 // parseDateMath parses expressions like "+3d", "-1h", "+30m", "-2w".
@@ -729,47 +729,47 @@ func parseDateMath(expr string) (time.Duration, error) {
 func (g *GeneralToolsTransport) callBase64Encode(args map[string]any) (*ToolResult, error) {
 	input, _ := args["input"].(string)
 	if input == "" {
-		return errorResult("input is required"), nil
+		return ErrorResult("input is required"), nil
 	}
-	return textResult(base64.StdEncoding.EncodeToString([]byte(input))), nil
+	return TextResult(base64.StdEncoding.EncodeToString([]byte(input))), nil
 }
 
 func (g *GeneralToolsTransport) callBase64Decode(args map[string]any) (*ToolResult, error) {
 	input, _ := args["input"].(string)
 	if input == "" {
-		return errorResult("input is required"), nil
+		return ErrorResult("input is required"), nil
 	}
 	decoded, err := base64.StdEncoding.DecodeString(input)
 	if err != nil {
-		return errorResult(fmt.Sprintf("decode error: %v", err)), nil
+		return ErrorResult(fmt.Sprintf("decode error: %v", err)), nil
 	}
-	return textResult(string(decoded)), nil
+	return TextResult(string(decoded)), nil
 }
 
 func (g *GeneralToolsTransport) callURLEncode(args map[string]any) (*ToolResult, error) {
 	input, _ := args["input"].(string)
 	if input == "" {
-		return errorResult("input is required"), nil
+		return ErrorResult("input is required"), nil
 	}
-	return textResult(url.QueryEscape(input)), nil
+	return TextResult(url.QueryEscape(input)), nil
 }
 
 func (g *GeneralToolsTransport) callURLDecode(args map[string]any) (*ToolResult, error) {
 	input, _ := args["input"].(string)
 	if input == "" {
-		return errorResult("input is required"), nil
+		return ErrorResult("input is required"), nil
 	}
 	decoded, err := url.QueryUnescape(input)
 	if err != nil {
-		return errorResult(fmt.Sprintf("decode error: %v", err)), nil
+		return ErrorResult(fmt.Sprintf("decode error: %v", err)), nil
 	}
-	return textResult(decoded), nil
+	return TextResult(decoded), nil
 }
 
 func (g *GeneralToolsTransport) callHash(args map[string]any) (*ToolResult, error) {
 	input, _ := args["input"].(string)
 	if input == "" {
-		return errorResult("input is required"), nil
+		return ErrorResult("input is required"), nil
 	}
 	algorithm, _ := args["algorithm"].(string)
 	if algorithm == "" {
@@ -779,53 +779,53 @@ func (g *GeneralToolsTransport) callHash(args map[string]any) (*ToolResult, erro
 	switch algorithm {
 	case "sha256":
 		h := sha256.Sum256([]byte(input))
-		return textResult(hex.EncodeToString(h[:])), nil
+		return TextResult(hex.EncodeToString(h[:])), nil
 	case "md5":
 		// md5 is offered as an explicit, user-requested algorithm choice in
 		// the tool contract. Not used internally for any security purpose
 		// (integrity, authentication, cache-key collision-resistance).
 		//nolint:gosec // G401: user-requested algorithm, non-security use.
 		h := md5.Sum([]byte(input))
-		return textResult(hex.EncodeToString(h[:])), nil
+		return TextResult(hex.EncodeToString(h[:])), nil
 	default:
-		return errorResult(fmt.Sprintf("unsupported algorithm %q (use sha256 or md5)", algorithm)), nil
+		return ErrorResult(fmt.Sprintf("unsupported algorithm %q (use sha256 or md5)", algorithm)), nil
 	}
 }
 
 func (g *GeneralToolsTransport) callMathEval(args map[string]any) (*ToolResult, error) {
 	expr, _ := args["expression"].(string)
 	if expr == "" {
-		return errorResult("expression is required"), nil
+		return ErrorResult("expression is required"), nil
 	}
 	if len(expr) > maxMathExprLen {
-		return errorResult(fmt.Sprintf("expression too long: %d bytes (max %d)", len(expr), maxMathExprLen)), nil
+		return ErrorResult(fmt.Sprintf("expression too long: %d bytes (max %d)", len(expr), maxMathExprLen)), nil
 	}
 
 	result, err := evalExpr(expr)
 	if err != nil {
-		return errorResult(fmt.Sprintf("eval error: %v", err)), nil
+		return ErrorResult(fmt.Sprintf("eval error: %v", err)), nil
 	}
 
 	// Format nicely: show integer if whole number.
 	if result == float64(int64(result)) && !math.IsInf(result, 0) {
-		return textResult(strconv.FormatInt(int64(result), 10)), nil
+		return TextResult(strconv.FormatInt(int64(result), 10)), nil
 	}
-	return textResult(strconv.FormatFloat(result, 'g', -1, 64)), nil
+	return TextResult(strconv.FormatFloat(result, 'g', -1, 64)), nil
 }
 
 func (g *GeneralToolsTransport) callThink(args map[string]any) (*ToolResult, error) {
 	raw, exists := args["thought"]
 	if !exists || raw == nil {
-		return errorResult("thought is required"), nil
+		return ErrorResult("thought is required"), nil
 	}
 	thought, ok := raw.(string)
 	if !ok {
 		thought = fmt.Sprintf("%v", raw)
 	}
 	if thought == "" {
-		return errorResult("thought is required"), nil
+		return ErrorResult("thought is required"), nil
 	}
-	return textResult("Thought recorded."), nil
+	return TextResult("Thought recorded."), nil
 }
 
 // --- math expression parser (recursive descent) ---

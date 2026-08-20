@@ -30,7 +30,7 @@ var defaultAgentExec agentExecFunc = sandbox.AgentExec
 // errResolverUnconfigured / errArtifactNotFound classify the failure
 // modes the dev_read(artifact_id=) path may return. Defined as package
 // vars for `errors.Is` checks in tests and future telemetry; the user-
-// facing message goes through errorResult unchanged.
+// facing message goes through ErrorResult unchanged.
 var (
 	errResolverUnconfigured = errors.New("artifact resolver not configured")
 	errArtifactNotFound     = errors.New("artifact not found")
@@ -402,9 +402,9 @@ func (d *DevToolsTransport) resolveArtifact(artifactID string) (string, error) {
 func pathErrorResult(userPath string, err error) *ToolResult {
 	var escape *pathsafe.EscapeError
 	if errors.As(err, &escape) {
-		return errorResult(fmt.Sprintf("path %q outside allowed directories: %s", userPath, escape.Error()))
+		return ErrorResult(fmt.Sprintf("path %q outside allowed directories: %s", userPath, escape.Error()))
 	}
-	return errorResult(fmt.Sprintf("path %q: %v", userPath, err))
+	return ErrorResult(fmt.Sprintf("path %q: %v", userPath, err))
 }
 
 // allowedDirsSummary returns a comma-separated list of configured allowed
@@ -609,7 +609,7 @@ func (d *DevToolsTransport) CallTool(ctx context.Context, name string, args map[
 	case "dev_bash":
 		return d.callBash(ctx, args)
 	default:
-		return errorResult(fmt.Sprintf("unknown tool: %s", name)), nil
+		return ErrorResult(fmt.Sprintf("unknown tool: %s", name)), nil
 	}
 }
 
@@ -618,10 +618,10 @@ func (d *DevToolsTransport) callRead(ctx context.Context, args map[string]any) (
 	artifactID, _ := args["artifact_id"].(string)
 
 	if path != "" && artifactID != "" {
-		return errorResult("path and artifact_id are mutually exclusive — pass one or the other"), nil
+		return ErrorResult("path and artifact_id are mutually exclusive — pass one or the other"), nil
 	}
 	if path == "" && artifactID == "" {
-		return errorResult("path or artifact_id is required"), nil
+		return ErrorResult("path or artifact_id is required"), nil
 	}
 
 	if artifactID != "" {
@@ -634,7 +634,7 @@ func (d *DevToolsTransport) callRead(ctx context.Context, args map[string]any) (
 		// can page through large stashed bodies.
 		resolved, err := d.resolveArtifact(artifactID)
 		if err != nil {
-			return errorResult(err.Error()), nil
+			return ErrorResult(err.Error()), nil
 		}
 		path = resolved
 	} else {
@@ -645,15 +645,15 @@ func (d *DevToolsTransport) callRead(ctx context.Context, args map[string]any) (
 		path = resolved
 	}
 
-	offset := intArg(args, "offset", 1)
-	limit := intArg(args, "limit", 200)
+	offset := IntArg(args, "offset", 1)
+	limit := IntArg(args, "limit", 200)
 	if offset < 1 {
 		offset = 1
 	}
 
 	f, err := os.Open(path)
 	if err != nil {
-		return errorResult(fmt.Sprintf("open: %v", err)), nil
+		return ErrorResult(fmt.Sprintf("open: %v", err)), nil
 	}
 	defer f.Close()
 
@@ -665,7 +665,7 @@ func (d *DevToolsTransport) callRead(ctx context.Context, args map[string]any) (
 	collected := 0
 	for scanner.Scan() {
 		if err := ctx.Err(); err != nil {
-			return errorResult(fmt.Sprintf("cancelled: %v", err)), nil
+			return ErrorResult(fmt.Sprintf("cancelled: %v", err)), nil
 		}
 		lineNum++
 		if lineNum < offset {
@@ -678,23 +678,23 @@ func (d *DevToolsTransport) callRead(ctx context.Context, args map[string]any) (
 		collected++
 	}
 	if err := scanner.Err(); err != nil {
-		return errorResult(fmt.Sprintf("read error: %v", err)), nil
+		return ErrorResult(fmt.Sprintf("read error: %v", err)), nil
 	}
 
 	if collected == 0 {
-		return textResult(fmt.Sprintf("(empty or offset %d beyond end of file at line %d)", offset, lineNum)), nil
+		return TextResult(fmt.Sprintf("(empty or offset %d beyond end of file at line %d)", offset, lineNum)), nil
 	}
-	return textResult(sb.String()), nil
+	return TextResult(sb.String()), nil
 }
 
 func (d *DevToolsTransport) callGrep(ctx context.Context, args map[string]any) (*ToolResult, error) {
 	pattern, _ := args["pattern"].(string)
 	dir, _ := args["directory"].(string)
 	if pattern == "" || dir == "" {
-		return errorResult("pattern and directory are required"), nil
+		return ErrorResult("pattern and directory are required"), nil
 	}
 	if len(pattern) > devGrepPatternCap {
-		return errorResult(fmt.Sprintf("pattern too long: %d bytes (max %d)", len(pattern), devGrepPatternCap)), nil
+		return ErrorResult(fmt.Sprintf("pattern too long: %d bytes (max %d)", len(pattern), devGrepPatternCap)), nil
 	}
 	resolvedDir, err := d.resolveAllowed(ctx, dir)
 	if err != nil {
@@ -704,11 +704,11 @@ func (d *DevToolsTransport) callGrep(ctx context.Context, args map[string]any) (
 
 	re, err := regexp.Compile(pattern)
 	if err != nil {
-		return errorResult(fmt.Sprintf("invalid regex: %v", err)), nil
+		return ErrorResult(fmt.Sprintf("invalid regex: %v", err)), nil
 	}
 
 	globFilter, _ := args["glob"].(string)
-	ctxLines := intArg(args, "context", 2)
+	ctxLines := IntArg(args, "context", 2)
 	if ctxLines < 0 {
 		ctxLines = 0
 	}
@@ -871,16 +871,16 @@ func (d *DevToolsTransport) callGrep(ctx context.Context, args map[string]any) (
 	})
 	if err != nil && !errors.Is(err, errStopWalk) {
 		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
-			return errorResult(fmt.Sprintf("cancelled: %v", err)), nil
+			return ErrorResult(fmt.Sprintf("cancelled: %v", err)), nil
 		}
-		return errorResult(fmt.Sprintf("walk error: %v", err)), nil
+		return ErrorResult(fmt.Sprintf("walk error: %v", err)), nil
 	}
 
 	if matchCount == 0 {
 		if truncatedBySize || truncatedByFileBudget {
-			return textResult(fmt.Sprintf("no matches found (skipped %d file(s) over %d bytes; inspected %d files)", filesSkippedBySize, devGrepPerFileCap, filesInspected)), nil
+			return TextResult(fmt.Sprintf("no matches found (skipped %d file(s) over %d bytes; inspected %d files)", filesSkippedBySize, devGrepPerFileCap, filesInspected)), nil
 		}
-		return textResult("no matches found"), nil
+		return TextResult("no matches found"), nil
 	}
 	var header strings.Builder
 	fmt.Fprintf(&header, "Found %d match(es):\n", matchCount)
@@ -897,17 +897,17 @@ func (d *DevToolsTransport) callGrep(ctx context.Context, args map[string]any) (
 		fmt.Fprintf(&header, "(stopped after %d files per file-budget cap)\n", devGrepFileBudget)
 	}
 	header.WriteString("\n")
-	return textResult(header.String() + sb.String()), nil
+	return TextResult(header.String() + sb.String()), nil
 }
 
 func (d *DevToolsTransport) callWrite(ctx context.Context, args map[string]any) (*ToolResult, error) {
 	if err := ctx.Err(); err != nil {
-		return errorResult(fmt.Sprintf("cancelled: %v", err)), nil
+		return ErrorResult(fmt.Sprintf("cancelled: %v", err)), nil
 	}
 	path, _ := args["path"].(string)
 	content, _ := args["content"].(string)
 	if path == "" {
-		return errorResult("path is required"), nil
+		return ErrorResult("path is required"), nil
 	}
 	resolved, err := d.resolveAllowed(ctx, path)
 	if err != nil {
@@ -917,28 +917,28 @@ func (d *DevToolsTransport) callWrite(ctx context.Context, args map[string]any) 
 
 	dir := filepath.Dir(path)
 	if err := os.MkdirAll(dir, 0o755); err != nil {
-		return errorResult(fmt.Sprintf("mkdir: %v", err)), nil
+		return ErrorResult(fmt.Sprintf("mkdir: %v", err)), nil
 	}
 
 	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
-		return errorResult(fmt.Sprintf("write: %v", err)), nil
+		return ErrorResult(fmt.Sprintf("write: %v", err)), nil
 	}
 
-	return textResult(fmt.Sprintf("wrote %d bytes to %s", len(content), path)), nil
+	return TextResult(fmt.Sprintf("wrote %d bytes to %s", len(content), path)), nil
 }
 
 func (d *DevToolsTransport) callEdit(ctx context.Context, args map[string]any) (*ToolResult, error) {
 	if err := ctx.Err(); err != nil {
-		return errorResult(fmt.Sprintf("cancelled: %v", err)), nil
+		return ErrorResult(fmt.Sprintf("cancelled: %v", err)), nil
 	}
 	path, _ := args["path"].(string)
 	oldStr, _ := args["old_string"].(string)
 	newStr, _ := args["new_string"].(string)
 	if path == "" || oldStr == "" {
-		return errorResult("path and old_string are required"), nil
+		return ErrorResult("path and old_string are required"), nil
 	}
 	if oldStr == newStr {
-		return errorResult("old_string and new_string must be different"), nil
+		return ErrorResult("old_string and new_string must be different"), nil
 	}
 	resolved, err := d.resolveAllowed(ctx, path)
 	if err != nil {
@@ -948,7 +948,7 @@ func (d *DevToolsTransport) callEdit(ctx context.Context, args map[string]any) (
 
 	data, err := os.ReadFile(path)
 	if err != nil {
-		return errorResult(fmt.Sprintf("read: %v", err)), nil
+		return ErrorResult(fmt.Sprintf("read: %v", err)), nil
 	}
 	content := string(data)
 
@@ -956,10 +956,10 @@ func (d *DevToolsTransport) callEdit(ctx context.Context, args map[string]any) (
 
 	count := strings.Count(content, oldStr)
 	if count == 0 {
-		return errorResult("old_string not found in file"), nil
+		return ErrorResult("old_string not found in file"), nil
 	}
 	if !replaceAll && count > 1 {
-		return errorResult(fmt.Sprintf("old_string appears %d times — provide more context to make it unique, or set replace_all=true", count)), nil
+		return ErrorResult(fmt.Sprintf("old_string appears %d times — provide more context to make it unique, or set replace_all=true", count)), nil
 	}
 
 	var newContent string
@@ -970,7 +970,7 @@ func (d *DevToolsTransport) callEdit(ctx context.Context, args map[string]any) (
 	}
 
 	if err := os.WriteFile(path, []byte(newContent), 0o644); err != nil {
-		return errorResult(fmt.Sprintf("write: %v", err)), nil
+		return ErrorResult(fmt.Sprintf("write: %v", err)), nil
 	}
 
 	// Build a summary showing the line number of the first replacement.
@@ -987,14 +987,14 @@ func (d *DevToolsTransport) callEdit(ctx context.Context, args map[string]any) (
 	if lineNum > 0 {
 		msg += fmt.Sprintf(" (first at line %d)", lineNum)
 	}
-	return textResult(msg), nil
+	return TextResult(msg), nil
 }
 
 func (d *DevToolsTransport) callGlob(ctx context.Context, args map[string]any) (*ToolResult, error) {
 	pattern, _ := args["pattern"].(string)
 	dir, _ := args["directory"].(string)
 	if pattern == "" || dir == "" {
-		return errorResult("pattern and directory are required"), nil
+		return ErrorResult("pattern and directory are required"), nil
 	}
 	resolvedDir, err := d.resolveAllowed(ctx, dir)
 	if err != nil {
@@ -1002,7 +1002,7 @@ func (d *DevToolsTransport) callGlob(ctx context.Context, args map[string]any) (
 	}
 	dir = resolvedDir
 
-	maxResults := intArg(args, "max_results", 50)
+	maxResults := IntArg(args, "max_results", 50)
 	if maxResults < 1 {
 		maxResults = 1
 	}
@@ -1044,9 +1044,9 @@ func (d *DevToolsTransport) callGlob(ctx context.Context, args map[string]any) (
 	})
 	if err != nil {
 		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
-			return errorResult(fmt.Sprintf("cancelled: %v", err)), nil
+			return ErrorResult(fmt.Sprintf("cancelled: %v", err)), nil
 		}
-		return errorResult(fmt.Sprintf("walk error: %v", err)), nil
+		return ErrorResult(fmt.Sprintf("walk error: %v", err)), nil
 	}
 
 	// Sort by modification time, newest first.
@@ -1055,7 +1055,7 @@ func (d *DevToolsTransport) callGlob(ctx context.Context, args map[string]any) (
 	})
 
 	if len(matches) == 0 {
-		return textResult("no matches found"), nil
+		return TextResult("no matches found"), nil
 	}
 
 	var sb strings.Builder
@@ -1071,7 +1071,7 @@ func (d *DevToolsTransport) callGlob(ctx context.Context, args map[string]any) (
 	for i := 0; i < count; i++ {
 		fmt.Fprintf(&sb, "%s\n", matches[i].path)
 	}
-	return textResult(sb.String()), nil
+	return TextResult(sb.String()), nil
 }
 
 // globMatch matches a path against a pattern supporting ** for recursive matching.
@@ -1142,11 +1142,11 @@ const devBashSessionID = "dev-bash"
 
 func (d *DevToolsTransport) callBash(ctx context.Context, args map[string]any) (*ToolResult, error) {
 	if err := ctx.Err(); err != nil {
-		return errorResult(fmt.Sprintf("cancelled: %v", err)), nil
+		return ErrorResult(fmt.Sprintf("cancelled: %v", err)), nil
 	}
 	command, _ := args["command"].(string)
 	if command == "" {
-		return errorResult("command is required"), nil
+		return ErrorResult("command is required"), nil
 	}
 
 	// CW-fix-dev-glob-grant Stage B: unify the dev_* permission gate.
@@ -1165,7 +1165,7 @@ func (d *DevToolsTransport) callBash(ctx context.Context, args map[string]any) (
 	if workDir == "" {
 		workDir = d.deriveDefaultWorkingDir(ctx)
 		if workDir == "" {
-			return errorResult("dev_bash: no working_dir provided and no allowed path available for this session — supply working_dir explicitly, or have the user mention a path with ~/ or / so a session grant is registered"), nil
+			return ErrorResult("dev_bash: no working_dir provided and no allowed path available for this session — supply working_dir explicitly, or have the user mention a path with ~/ or / so a session grant is registered"), nil
 		}
 	}
 	resolved, err := d.resolveAllowed(ctx, workDir)
@@ -1181,7 +1181,7 @@ func (d *DevToolsTransport) callBash(ctx context.Context, args map[string]any) (
 	// the agent's "git status in ~/foo" silently ran in the sandbox
 	// scoping dir and reported "fatal: not a git repository" (c150).
 
-	timeout := intArg(args, "timeout", 30)
+	timeout := IntArg(args, "timeout", 30)
 	if timeout < 1 {
 		timeout = 1
 	}
@@ -1217,14 +1217,14 @@ func (d *DevToolsTransport) callBash(ctx context.Context, args map[string]any) (
 		// own timeout; we return promptly so the caller's goroutine does not
 		// stay wedged waiting for the shell. The in-flight goroutine drains
 		// into the buffered `done` channel and is garbage-collected.
-		return errorResult(fmt.Sprintf("cancelled: %v", ctx.Err())), nil
+		return ErrorResult(fmt.Sprintf("cancelled: %v", ctx.Err())), nil
 	case out := <-done:
 		result, err = out.res, out.err
 	}
 	if err != nil {
 		// sandbox setup / denylist / dir-resolve errors surface here. These
 		// are hard rejections (e.g. CheckDenylist match).
-		return errorResult(fmt.Sprintf("sandbox error: %v", err)), nil
+		return ErrorResult(fmt.Sprintf("sandbox error: %v", err)), nil
 	}
 
 	// Cap each stream at devBashStreamCap to bound the envelope size. The
@@ -1248,16 +1248,16 @@ func (d *DevToolsTransport) callBash(ctx context.Context, args map[string]any) (
 	output := sb.String()
 
 	if result.TimedOut {
-		return errorResult(fmt.Sprintf("command timed out after %ds\n%s", timeout, output)), nil
+		return ErrorResult(fmt.Sprintf("command timed out after %ds\n%s", timeout, output)), nil
 	}
 	if result.ExitCode != 0 {
-		return errorResult(fmt.Sprintf("exit error: exit status %d\n%s", result.ExitCode, output)), nil
+		return ErrorResult(fmt.Sprintf("exit error: exit status %d\n%s", result.ExitCode, output)), nil
 	}
 
 	if output == "" {
 		output = "(no output)"
 	}
-	return textResult(output), nil
+	return TextResult(output), nil
 }
 
 // --- helpers ---
@@ -1272,7 +1272,12 @@ func capOutput(s string, cap int) string {
 	return s[:cap] + fmt.Sprintf("\n[truncated: %d of %d bytes shown]", cap, len(s))
 }
 
-func intArg(args map[string]any, key string, def int) int {
+// IntArg, TextResult, and ErrorResult are shared MCP tool-call helpers used
+// by every in-process builtin transport (dev, code, general, and — via the
+// mcp. qualifier post-move — self). Exported (CW self-tools move,
+// TASKS/harness-reactive-self-tools/01) because internal/selftools, split
+// out of this package, is now their heaviest caller.
+func IntArg(args map[string]any, key string, def int) int {
 	v, ok := args[key]
 	if !ok {
 		return def
@@ -1291,13 +1296,13 @@ func intArg(args map[string]any, key string, def int) int {
 	}
 }
 
-func textResult(text string) *ToolResult {
+func TextResult(text string) *ToolResult {
 	return &ToolResult{
 		Content: []ToolContent{{Type: "text", Text: text}},
 	}
 }
 
-func errorResult(msg string) *ToolResult {
+func ErrorResult(msg string) *ToolResult {
 	return &ToolResult{
 		Content: []ToolContent{{Type: "text", Text: msg}},
 		IsError: true,

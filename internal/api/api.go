@@ -4,7 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 
-	"github.com/hollis-labs/nanite/internal/mcp"
+	"github.com/hollis-labs/nanite/internal/selftools"
 	"github.com/hollis-labs/nanite/internal/service"
 )
 
@@ -19,7 +19,7 @@ type API struct {
 	// SetSelfTools from main.go. Backs POST /api/tools/call, which a
 	// CLI-launched chat agent's `nanite mcp` subprocess forwards to so it
 	// dispatches through the live harness. nil = the endpoint 503s.
-	selfTools *mcp.SelfToolsTransport
+	selfTools *selftools.SelfToolsTransport
 	// agentBuilder freezes the no-write Agent Builder draft/review seam.
 	// The default implementation is deterministic so tests never require a
 	// live runtime. A future live agent path can be injected here without
@@ -40,7 +40,7 @@ func New(svc *service.Container) *API {
 // SetSelfTools wires the fully-wired in-process self-tools transport that
 // backs POST /api/tools/call. Called once from main.go after the transport's
 // post-construction dependencies are installed.
-func (a *API) SetSelfTools(st *mcp.SelfToolsTransport) {
+func (a *API) SetSelfTools(st *selftools.SelfToolsTransport) {
 	a.selfTools = st
 }
 
@@ -487,6 +487,12 @@ func (a *API) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/whoami", a.handleWhoami)
 	// JSON-RPC 2.0 endpoint for A2A Task methods (submit/get/cancel)
 	mux.HandleFunc("POST /api/a2a/jsonrpc", a.handleA2AJSONRPC)
+
+	// Harness-reactive self-tools worked example (TASKS/harness-reactive-
+	// self-tools/07-worked-example-task-update-report.md) — a trivial
+	// demo/test fixture the task_update_report self-tool's seeded
+	// internal_api_call reaction targets. See example_task_updates.go.
+	mux.HandleFunc("POST /api/example/task-updates", a.handleExampleTaskUpdate)
 }
 
 // jsonResp writes a JSON response with the given status code.

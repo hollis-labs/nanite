@@ -561,6 +561,11 @@ func cmdServe(args []string) {
 		Schedules: s,
 		Disabler:  scheduleStoreAdapter,
 		Logger:    slog.Default(),
+		// TASKS/scheduling/06-schedule-fire-telemetry.md: *store.Store
+		// already satisfies scheduler.TraceStore (LogEvent) directly, no
+		// adapter needed -- one event_log row (category="schedule_fire")
+		// per real dispatch outcome (success, retry, exhausted).
+		Traces: s,
 	}
 	// Exported on the container (not an unexported main.go local) so
 	// Engine.Status() is reachable from wherever TASKS/scheduling/

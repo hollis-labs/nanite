@@ -29,6 +29,7 @@ import (
 	llmcontracts "github.com/hollis-labs/go-llm-contracts"
 	llmtypes "github.com/hollis-labs/go-llm-types"
 	"github.com/hollis-labs/go-providers/provider"
+	gosched "github.com/hollis-labs/go-scheduler"
 	"github.com/hollis-labs/nanite/internal/agentworkflow"
 	"github.com/hollis-labs/nanite/internal/api"
 	"github.com/hollis-labs/nanite/internal/chat"
@@ -41,6 +42,7 @@ import (
 	"github.com/hollis-labs/nanite/internal/plugin"
 	_ "github.com/hollis-labs/nanite/internal/plugin/allplugins" // registers all built-in plugins
 	"github.com/hollis-labs/nanite/internal/safego"
+	"github.com/hollis-labs/nanite/internal/scheduler"
 	"github.com/hollis-labs/nanite/internal/secrets"
 	"github.com/hollis-labs/nanite/internal/selftools"
 	"github.com/hollis-labs/nanite/internal/selftools/reactions"
@@ -515,6 +517,58 @@ func cmdServe(args []string) {
 		workflowDefinitionsRegistry,
 		slog.Default(),
 	)
+
+	// TASKS/scheduling/05-engine-wiring-and-full-replace.md: construct the
+	// go-scheduler Engine that fully replaces the old
+	// "durable-agent-wake-tick" 2-minute ticker and durable_wake.go's
+	// wakeScheduleDue lookback heuristic (both removed by this same task —
+	// see docs/engineering/architecture/12-scheduling.md's "Full replace,
+	// not dual-run"). Store side: 02's StoreAdapter over the shared *store.
+	// Store. Runner side: 04's RetryingRunner (retry/backoff/on_fail
+	// policy) wrapping 03's RunnerAdapter as its Inner — the
+	// RetryingRunner, never the bare RunnerAdapter, is what gets handed to
+	// gosched.New, or 04's entire retry/backoff/on_fail policy is silently
+	// bypassed (04's own Work Log flags this explicitly; see also this
+	// package's regression test that asserts against the wired-in type,
+	// not just a passing build).
+	//
+	// Wired here, not inside service.NewContainer: RunnerAdapter's
+	// Workflows field needs workflowLauncher (constructed just above),
+	// which itself depends on container.DurableAgents and is only built in
+	// main.go's own boot sequence, strictly after NewContainer returns —
+	// the same reason container.TaskManager/AgentCardGenerator are also
+	// only set from main.go rather than built inside NewContainer.
+	//
+	// ReflexLookup/ReflexExecutor (the reflex_dispatch job type) are left
+	// unconfigured: reflexes.Executor isn't exposed on *service.Container
+	// today (only reachable internally via chat.Config, inside
+	// NewContainer), and nothing in this codebase produces an
+	// agent_schedules row with job_type=reflex_dispatch yet (TASKS/
+	// scheduling/07-wire-add-schedule-reflex.md, not yet built, is the
+	// first real producer). RunnerAdapter treats a nil ReflexExecutor as
+	// "not configured" (a clear per-firing error, not a panic) rather than
+	// silently no-oping, so this is a documented, safe gap for a future
+	// task to close, not a silent one.
+	scheduleStoreAdapter := &scheduler.StoreAdapter{Store: s, Logger: slog.Default()}
+	scheduleRunnerAdapter := &scheduler.RunnerAdapter{
+		Wake:      container.DurableWake,
+		Workflows: workflowLauncher,
+		Commands:  container.Tools,
+	}
+	scheduleRetryingRunner := &scheduler.RetryingRunner{
+		Inner:     scheduleRunnerAdapter,
+		Runs:      s,
+		Schedules: s,
+		Disabler:  scheduleStoreAdapter,
+		Logger:    slog.Default(),
+	}
+	// Exported on the container (not an unexported main.go local) so
+	// Engine.Status() is reachable from wherever TASKS/scheduling/
+	// 09-operator-http-api.md's HTTP surface ends up living — see
+	// service.Container's own Engine field doc comment. Start()ed below,
+	// alongside the rest of the daemon's background goroutines
+	// (startBackgroundWorkers); Stop()ed from Container.Shutdown().
+	container.Engine = gosched.New(scheduleStoreAdapter, scheduleRetryingRunner)
 
 	// TASKS/harness-reactive-self-tools/07-worked-example-task-update-
 	// report.md: wire the harness-reactive self-tools reaction engine
@@ -1084,40 +1138,31 @@ func startBackgroundWorkers(lc *lifecycle.Manager, container *service.Container)
 		})
 	}
 
-	// Periodic durable-agent wake tick.
-	// CW-20260816-0005: RunDue fires class:process durable agent instances
-	// (e.g. Atlas Curator's nightly schedule) whose agent_schedules entry is
-	// due. It previously had no internal ticker and depended entirely on an
-	// external caller hitting POST /api/durable-agent-wake/run-due. RunDue is
-	// idempotent and cheap (a due-ness check per instance), so a 2-minute
-	// interval — matching stale-worker-reaper's cadence — gives schedules a
-	// tight enough resolution for both Atlas Curator today and Loom Curator's
-	// planned lint+export tick, without adding meaningful load.
-	lc.Go("durable-agent-wake-tick", func(ctx context.Context) {
-		ticker := time.NewTicker(2 * time.Minute)
-		defer ticker.Stop()
-		for {
-			select {
-			case <-ctx.Done():
-				return
-			case <-ticker.C:
-				result, err := container.DurableWake.RunDue(ctx, service.DurableAgentWakeRunRequest{Now: time.Now()})
-				if err != nil {
-					slog.Warn("durable agent wake tick: run due failed", "error", err)
-					continue
-				}
-				woken := 0
-				for _, r := range result.Results {
-					if !r.Skipped {
-						woken++
-					}
-				}
-				if woken > 0 {
-					slog.Info("durable agent wake tick: woke durable agent instances", "count", woken)
-				}
-			}
-		}
-	})
+	// Schedule engine (TASKS/scheduling/05-engine-wiring-and-full-replace.md).
+	// Replaces the old "durable-agent-wake-tick" 2-minute ticker (CW-20260816-
+	// 0005) in full — not commented out, deleted. The old ticker called
+	// DurableAgentWakeService.RunDue on a fixed interval, itself driven by
+	// wakeScheduleDue's 15-minute-lookback due-check (also removed). Engine
+	// owns its own internal tick loop and goroutine (go-scheduler's
+	// 1-second cadence, a real CAS claim per schedule via
+	// internal/scheduler.StoreAdapter) — Start() here only launches that
+	// loop, it does not block; it is not wrapped in lc.Go because the
+	// Engine manages its own lifecycle (Start/Stop), not a
+	// context-cancellation-driven loop the way the rest of this function's
+	// daemons do. Stop() is called from service.Container.Shutdown(), not
+	// here — see that method for why (needs to stop before the Runner's
+	// own dependencies, e.g. DurableWake/WorkflowLauncher/ToolService,
+	// start closing).
+	//
+	// POST /api/durable-agent-wake/run-due (the endpoint the old ticker's
+	// own doc comment named as a fallback manual-trigger surface) is kept,
+	// not removed or repointed at the Engine — see durable_wake.go's
+	// RunDue doc comment for the full reasoning (it's a real, still-used
+	// admin-panel affordance, and repointing it onto Engine.TickNow would
+	// drop its per-item Results/DryRun/SkipReason reporting).
+	if container.Engine != nil {
+		container.Engine.Start()
+	}
 }
 
 // discoverAndLoadPlugins finds plugins on disk, loads them and builtins,

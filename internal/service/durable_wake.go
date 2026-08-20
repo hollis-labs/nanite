@@ -5,8 +5,6 @@ import (
 	"errors"
 	"time"
 
-	"github.com/robfig/cron/v3"
-
 	"github.com/hollis-labs/nanite/internal/dispatcher"
 	"github.com/hollis-labs/nanite/internal/store"
 )
@@ -100,8 +98,7 @@ func (s *durableWakeService) ListDue(ctx context.Context, now time.Time) ([]Dura
 		scopeSession, _ := s.resolveWakeScope(&inst)
 		activationMode := s.activationModeForInstance(&inst)
 		for _, schedule := range schedules {
-			due, err := wakeScheduleDue(schedule, now)
-			if err != nil || !due {
+			if !scheduleDueByNextRun(schedule, now) {
 				continue
 			}
 			item := DurableAgentWakeDueItem{
@@ -125,6 +122,42 @@ func (s *durableWakeService) ListDue(ctx context.Context, now time.Time) ([]Dura
 	return items, nil
 }
 
+// RunDue is a manual "fire everything due right now" surface — real,
+// still-live callers: POST /api/durable-agent-wake/run-due
+// (internal/api/durable_agent_wake.go) and its "Run due wake pass" button
+// in the durable-agent admin panel (ui/src/components/settings/
+// DurableAgentAdminPanel.tsx). It predates and is independent of the
+// automatic dispatch mechanism: originally the *only* dispatch mechanism
+// (per this file's own CW-20260816-0005 history), then also driven by a
+// 2-minute background ticker (cmd/nanite/main.go's now-removed
+// "durable-agent-wake-tick"), and as of TASKS/scheduling/
+// 05-engine-wiring-and-full-replace.md, superseded for automatic dispatch
+// by the go-scheduler.Engine wired into cmd/nanite/main.go — which claims
+// and fires due schedules on its own 1-second tick via a real CAS
+// (internal/scheduler.StoreAdapter.ClaimAndUpdateScheduleRun), advancing
+// next_run as it goes. RunDue is kept as a manual operator convenience,
+// not retired, because it's a real, still-used admin-panel affordance (not
+// a dead/undocumented surface); it is deliberately NOT repointed onto the
+// Engine's own claim path (e.g. Engine.TickNow), because doing so would
+// drop this method's per-item Results/DryRun/SkipReason reporting that the
+// admin panel and this service's own tests rely on.
+//
+// This does mean RunDue's own dispatch (via Wake, below) does not go
+// through the Engine's CAS claim and does not itself advance next_run —
+// accepted, not a new correctness gap this task introduces: even before
+// the Engine existed, both the old ticker and this manual endpoint called
+// Wake directly with no coordination between them, and Wake's own
+// per-instance "already active" skip (wakeSkipReason) was always the sole
+// protection against a genuine double-fire. In practice, since the Engine
+// now ticks every 1 second, a manually-triggered RunDue call on an
+// already-due cron schedule will very likely race the Engine's own next
+// tick for the same row; whichever call wins gets the real dispatch, the
+// other observes the instance already Active and skips gracefully (a
+// normal, logged "wake already active" skip event, not an error). A
+// one_shot schedule cannot double-fire this way: RunDue sets its status to
+// expired directly on success, which excludes it from the Engine's own
+// ListDueSchedules query (status='active' filter) immediately, regardless
+// of next_run.
 func (s *durableWakeService) RunDue(ctx context.Context, req DurableAgentWakeRunRequest) (*DurableAgentWakeRunResult, error) {
 	now := req.Now.UTC()
 	if now.IsZero() {
@@ -434,38 +467,48 @@ func wakeSkipReason(inst *store.DurableAgentInstance, activationMode string) str
 	return ""
 }
 
-func wakeScheduleDue(schedule store.AgentSchedule, now time.Time) (bool, error) {
+// scheduleDueByNextRun reports whether schedule is due at now, per its
+// persisted next_run column (added by TASKS/scheduling/
+// 01-schema-schedule-kind-collapse-and-retry-columns.md's migration 127).
+//
+// Replaces wakeScheduleDue (removed by TASKS/scheduling/
+// 05-engine-wiring-and-full-replace.md) — that function recomputed due-ness
+// from schedule_spec on every call, cron-kind rows via a 15-minute lookback
+// window from last_fired_at/created_at as a heuristic substitute for real
+// dispatch tracking (docs/engineering/architecture/12-scheduling.md's "Full
+// replace, not dual-run" section names this exact fragility as what the
+// go-scheduler.Engine's CAS-claim mechanism retires). next_run is now the
+// single real source of truth for "when is this schedule next due" —
+// go-scheduler.Engine's own Store adapter (internal/scheduler.StoreAdapter)
+// is the sole writer of this column once a schedule has fired at least once
+// under the new engine (ClaimAndUpdateScheduleRun/SetScheduleNextRun); this
+// function only ever reads it, exactly like the engine's own
+// ListDueSchedules query (internal/store/agent_schedules.go's
+// ListDueAgentSchedules) does — same due-ness definition, no second
+// independent due-check.
+//
+// ListDue/RunDue's own callers (the GET /api/durable-agent-wake/due
+// introspection endpoint and the POST .../run-due manual-trigger endpoint,
+// both real and still live per that task's Work Log) keep working on this
+// same field the automatic Engine maintains, rather than a second,
+// independently-computed notion of due-ness.
+func scheduleDueByNextRun(schedule store.AgentSchedule, now time.Time) bool {
 	if schedule.Status != store.ScheduleStatusActive {
-		return false, nil
+		return false
 	}
 	if schedule.ExpiresAt != "" {
 		if expiresAt, err := time.Parse(time.RFC3339, schedule.ExpiresAt); err == nil && !expiresAt.After(now) {
-			return false, nil
+			return false
 		}
 	}
-	switch schedule.ScheduleKind {
-	case store.ScheduleKindCron:
-		parser := cron.NewParser(cron.Minute | cron.Hour | cron.Dom | cron.Month | cron.Dow)
-		parsed, err := parser.Parse(schedule.ScheduleSpec)
-		if err != nil {
-			return false, err
-		}
-		ref := now.Add(-15 * time.Minute)
-		if schedule.LastFiredAt != "" {
-			if t, err := time.Parse(time.RFC3339, schedule.LastFiredAt); err == nil {
-				ref = t
-			}
-		} else if schedule.CreatedAt != "" {
-			if t, err := time.Parse(time.RFC3339, schedule.CreatedAt); err == nil {
-				ref = t
-			}
-		}
-		return !parsed.Next(ref).After(now), nil
-	case store.ScheduleKindOneShot:
-		return schedule.FiredCount == 0, nil
-	default:
-		return false, nil
+	if schedule.NextRun == "" {
+		return false
 	}
+	nextRun, err := time.Parse(time.RFC3339, schedule.NextRun)
+	if err != nil {
+		return false
+	}
+	return !nextRun.After(now)
 }
 
 func (s *durableWakeService) recordWakeEvent(instanceID, eventType, sessionID, message string, metadata map[string]string) {

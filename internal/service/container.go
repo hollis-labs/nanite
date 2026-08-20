@@ -18,6 +18,7 @@ import (
 	embedcontracts "github.com/hollis-labs/go-embed-contracts"
 	"github.com/hollis-labs/go-modelsdev/modelsdev"
 	"github.com/hollis-labs/go-providers/provider"
+	gosched "github.com/hollis-labs/go-scheduler"
 	"github.com/hollis-labs/nanite/internal/agent"
 	"github.com/hollis-labs/nanite/internal/agent/builtin"
 	"github.com/hollis-labs/nanite/internal/agent/reflexes"
@@ -122,6 +123,28 @@ type Container struct {
 	Tasks               task.Service
 	Workers             *worker.Manager
 	Worktrees           worktree.Manager
+
+	// Engine is the go-scheduler schedule-tick engine (TASKS/scheduling/
+	// 05-engine-wiring-and-full-replace.md) — the full replacement for the
+	// old "durable-agent-wake-tick" 2-minute ticker and durable_wake.go's
+	// wakeScheduleDue lookback heuristic. Typed as *gosched.Engine (the
+	// external go-scheduler package) rather than *internal/scheduler.Engine
+	// deliberately: internal/scheduler already imports internal/service
+	// (RunnerAdapter decodes into service.DurableAgentWakeRequest/
+	// WorkflowLaunchRequest/ToolResult), so a Container field typed against
+	// internal/scheduler would create an import cycle. Constructed and
+	// Start()ed in cmd/nanite/main.go (mirroring apps/hadron/cmd/hadrond/
+	// main.go's construct-at-boot/Start-with-the-rest-of-the-daemon/
+	// Stop-on-shutdown lifecycle) once its Store/Runner adapters
+	// (internal/scheduler.StoreAdapter, .RunnerAdapter, .RetryingRunner)
+	// are available — nil in any Container built directly via NewContainer
+	// without that main.go wiring (e.g. most tests), matching
+	// AgentCardGenerator/TaskManager's own existing "set post-hoc from
+	// main.go, nil-checked at use" pattern on this struct. Exported here
+	// (not buried unexported in main.go) so Engine.Status() is reachable
+	// from wherever TASKS/scheduling/09-operator-http-api.md's HTTP surface
+	// ends up living.
+	Engine *gosched.Engine
 
 	// Subsystems exposed for API handlers that need direct access.
 	// These will shrink as more domain services are added.
@@ -1408,6 +1431,19 @@ func (c *Container) Shutdown() {
 
 	if c.stopModelCatalog != nil {
 		c.stopModelCatalog()
+	}
+
+	// TASKS/scheduling/05-engine-wiring-and-full-replace.md: stop the
+	// schedule engine's own tick goroutine before any of the subsystem
+	// shutdowns below kick in — same "stop the thing that can fire new
+	// work into a subsystem before that subsystem starts closing" ordering
+	// already established for the reapers just below. Engine.Stop blocks
+	// until the tick loop has actually exited (go-scheduler's own
+	// documented contract), so by the time we proceed, no in-flight tick
+	// can dispatch into a Runner (DurableWake/WorkflowLauncher/ToolService/
+	// reflexes.Executor) whose own Shutdown/Close is about to run below.
+	if c.Engine != nil {
+		c.Engine.Stop()
 	}
 
 	// CW-20260512-0002 (b)+(c): stop the reaper goroutine before any of

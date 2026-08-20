@@ -216,19 +216,38 @@ func syncManagedDurableAgentConfig(st *store.Store, cfg ManagedDurableAgentConfi
 // boot would silently reset fired_count/last_fired_at/created_at to zero
 // values each time, which would re-arm an already-fired one_shot schedule
 // and reset a cron schedule's due-ness reference point to "now" on every
-// redeploy (wakeScheduleDue falls back to last_fired_at, then created_at —
-// but created_at is stored in SQLite's native datetime('now') format, not
-// RFC3339, so that second fallback never actually parses for a freshly
-// inserted schedule; in practice a reset last_fired_at/created_at just
-// falls all the way through to wakeScheduleDue's own now-15min default,
-// which is exactly the "just fired" state a real reset would wrongly
-// produce) — defeating the whole point of persisting fire state. So this
-// preserves that trio from any existing row with the same ID, the same
-// discipline SyncDurableAgentInstanceConfig already uses for
+// redeploy (this used to matter for wakeScheduleDue's last_fired_at/
+// created_at fallback chain, retired in full by TASKS/scheduling/
+// 05-engine-wiring-and-full-replace.md — see next_run below for what
+// replaced it) — defeating the whole point of persisting fire state. So
+// this preserves that trio from any existing row with the same ID, the
+// same discipline SyncDurableAgentInstanceConfig already uses for
 // CurrentSessionID/FailureReason/ArchivedAt above. It also preserves any
 // existing non-active status (paused, expired, ...) rather than silently
 // reactivating a schedule an operator turned off or that already expired
 // through the admin surface or a fired one_shot.
+//
+// next_run/max_retries/on_fail/job_type/job_payload preservation (real bug
+// found and fixed while wiring TASKS/scheduling/05-engine-wiring-and-full-
+// replace.md, not present before that task): before this fix, this
+// function only preserved FiredCount/LastFiredAt/CreatedAt/Status on an
+// existing-row re-sync — next_run (and the other four migration-127
+// columns) fell through to InsertAgentSchedule's zero-value defaulting on
+// every single re-sync, i.e. every container boot after the first. Since
+// SyncManagedDurableAgentConfigs runs unconditionally on every boot
+// (managed_durable_configs.go's own package doc), and
+// store.backfillScheduleNextRun only ever backfills next_run once, at
+// Store.New() time — strictly *before* this function's caller runs, in the
+// same boot — this re-sync would silently null out next_run on every
+// single restart, permanently un-scheduling the row from
+// go-scheduler.Engine's perspective (a NULL/zero NextRun is "unscheduled
+// and skipped" by go-scheduler's own convention). That would have made the
+// one real production schedule (Loom Curator's lint-and-export) invisible
+// to the new engine on every boot after the very first migration-127
+// backfill — caught by this task's own required live dogfeed, fixed here
+// rather than left for that dogfeed to merely report. An existing row's
+// next_run/max_retries/on_fail/job_type/job_payload are now preserved the
+// same way FiredCount/LastFiredAt/CreatedAt/Status already were.
 func syncManagedDurableAgentSchedule(ctx context.Context, st *store.Store, profileID string, sch ManagedDurableAgentSchedule) error {
 	row := store.AgentSchedule{
 		ID:           managedDurableAgentScheduleID(profileID, sch.Name),
@@ -250,9 +269,30 @@ func syncManagedDurableAgentSchedule(ctx context.Context, st *store.Store, profi
 		if existing.Status != store.ScheduleStatusActive {
 			row.Status = existing.Status
 		}
+		// Preserve the go-scheduler-facing columns across every re-sync —
+		// see this function's doc comment above for the bug this closes.
+		// A defensive fallback still computes a fresh next_run if the
+		// existing row somehow has none (e.g. it predates migration 127
+		// and this process's own backfillScheduleNextRun pass hasn't run
+		// yet for some reason) rather than leaving the row permanently
+		// unscheduled.
+		row.NextRun = existing.NextRun
+		if row.NextRun == "" {
+			row.NextRun = store.ComputeAgentScheduleNextRun(row.ScheduleKind, row.ScheduleSpec, time.Now()).Format(time.RFC3339)
+		}
+		row.MaxRetries = existing.MaxRetries
+		row.OnFail = existing.OnFail
+		row.JobType = existing.JobType
+		row.JobPayload = existing.JobPayload
 	case errors.Is(err, store.ErrAgentScheduleNotFound):
 		// First sync for this schedule — InsertAgentSchedule defaults
-		// CreatedAt to datetime('now') when left empty.
+		// CreatedAt/MaxRetries/OnFail/JobType/JobPayload when left empty,
+		// but next_run has no such default (an empty value means a real,
+		// meaningful "unscheduled" everywhere else in this codebase) — so
+		// a brand-new managed schedule needs next_run computed here,
+		// explicitly, rather than waiting for the next process restart's
+		// backfillScheduleNextRun pass to make it live.
+		row.NextRun = store.ComputeAgentScheduleNextRun(row.ScheduleKind, row.ScheduleSpec, time.Now()).Format(time.RFC3339)
 	default:
 		return err
 	}

@@ -318,14 +318,33 @@ func TestLoomCuratorScheduleSeededFromDurableConfigDrop(t *testing.T) {
 		t.Fatalf("schedule body missing expected loom_* tool references: %q", sched.Body)
 	}
 
-	// wakeScheduleDue's cron branch (durable_wake.go) falls back to
-	// ref = now.Add(-15*time.Minute) whenever LastFiredAt is empty and
-	// CreatedAt fails to RFC3339-parse — which it always does here,
-	// since InsertAgentSchedule defaults created_at to SQLite's native
-	// datetime('now') format, not RFC3339. So a 15-minute window after
-	// each daily "0 3 * * *" boundary is due, on any calendar date;
-	// 03:05 UTC sits comfortably inside it.
+	// Due-ness is now next_run-based (scheduleDueByNextRun, durable_wake.go
+	// — TASKS/scheduling/05-engine-wiring-and-full-replace.md removed the
+	// old wakeScheduleDue 15-minute-lookback heuristic this comment used to
+	// describe). syncManagedDurableAgentSchedule (managed_durable_configs.go)
+	// computes next_run at first-sync time via store.
+	// ComputeAgentScheduleNextRun("0 3 * * *", <real wall-clock time this
+	// test process boots at>) — the real next occurrence of the schedule's
+	// daily 3am UTC cron expression, not a fixed date. simulatedNow is
+	// deliberately set far enough in the future (2027) that it is always
+	// after whatever next_run really got computed to, regardless of what
+	// day this test happens to run on, so ListDue/RunDue reliably see the
+	// row as due without this test needing to compute the exact same
+	// cron-next-occurrence math itself just to pick a "due" timestamp.
+	// Asserted directly below (sched.NextRun) rather than only inferred
+	// from ListDue's result, so a future regression in next_run's
+	// computation fails loudly here instead of only downstream.
 	simulatedNow := time.Date(2027, time.January, 4, 3, 5, 0, 0, time.UTC)
+	if sched.NextRun == "" {
+		t.Fatalf("schedule.NextRun is empty — syncManagedDurableAgentSchedule should have computed a real next_run at first sync: %+v", sched)
+	}
+	nextRun, err := time.Parse(time.RFC3339, sched.NextRun)
+	if err != nil {
+		t.Fatalf("schedule.NextRun %q does not parse as RFC3339: %v", sched.NextRun, err)
+	}
+	if !nextRun.Before(simulatedNow) {
+		t.Fatalf("schedule.NextRun = %s, want before simulatedNow %s (test's own due-ness assumption)", nextRun, simulatedNow)
+	}
 
 	due, err := a.Services.DurableWake.ListDue(ctx, simulatedNow)
 	if err != nil {

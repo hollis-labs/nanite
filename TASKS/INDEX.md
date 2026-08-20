@@ -340,13 +340,13 @@ Implements `docs/engineering/architecture/11-harness-reactive-self-tools.md` —
 | `02-reactive-layer-schema` | 1 | reviewed | none (parallel-safe with `01`) |
 | `03-reaction-engine-core` | 1 | reviewed | `01`, `02` |
 | `04-render-card-construction` | 1 | reviewed | `03` |
-| `05-selftool-reaction-telemetry` | 2 | implemented | `03` |
-| `06-collapse-envelope-marker-consumers` | 2 | implemented | none — separable DRY cleanup, not required for `04`'s render_card path |
-| `07-worked-example-task-update-report` | 2 | implemented | `01`, `03`, `04`, `05` (`06` not required) |
+| `05-selftool-reaction-telemetry` | 2 | reviewed | `03` |
+| `06-collapse-envelope-marker-consumers` | 2 | reviewed | none — separable DRY cleanup, not required for `04`'s render_card path |
+| `07-worked-example-task-update-report` | 2 | reviewed | `01`, `03`, `04`, `05` (`06` not required) |
 
 **Sequencing.** Phase 1 (`01`-`04`) builds the mechanism itself: the package move (`01`) and the new reactive-layer schema (`02`) are independent of each other; `03`'s reaction engine needs both; `04`'s render_card marker construction needs `03`'s resolved payload. Phase 2 layers telemetry (`05`) and the worked example (`07`) on top, plus one separable DRY cleanup (`06`, the three pre-existing `ENVELOPE_DATA` marker-extraction implementations collapsed into one — not on `07`'s critical path, since those three consumers are already marker-agnostic and pick up `04`'s output unchanged).
 
-**Phase 1 implemented and reviewed clean (2026-08-20).** All four tasks (`01`-`04`) implemented, independently build/vet/test-verified by the Orchestrator, and passed a fresh-reviewer review with no blocking findings (import-cycle constraint holds, all required regression tests are real integration proofs, no silent fail-open, no CRUD surface added). Migration `126_selftool_reactions.sql` landed first against the shared `125` baseline — the sibling `TASKS/scheduling/01`'s own `126` claim (see that section's own note below) will need to renumber to `127` when dispatched. Phase 2 (`05`-`07`) next.
+**Batch complete, all 7 tasks reviewed clean (2026-08-20).** Phase 1 (`01`-`04`, the core mechanism) and Phase 2 (`05`-`07`, telemetry + marker-consumer DRY cleanup + the `task_update_report` worked example) both implemented, independently build/vet/test-verified by the Orchestrator, and each passed its own fresh-reviewer review with no blocking findings. Import-cycle constraint holds throughout (`internal/selftools`/`internal/selftools/reactions` never import `internal/chat`/`internal/service`); the `07`-added `internal/mcpserver`→`internal/chat` edge doesn't cycle either. Migration `126_selftool_reactions.sql` landed first against the shared `125` baseline — the sibling `TASKS/scheduling/01`'s own `126` claim (see that section's own note below) will need to renumber to `127` when dispatched. One real, self-corrected finding along the way: a live security gap (a new HTTP route's auth exemption lacked the loopback check its own comment claimed) was found and fixed pre-merge, and a subsequent commit-message/Work-Log inaccuracy about *when* that fix landed was itself caught by the Phase 2 reviewer and corrected — see `TASKS/ESCALATIONS.md`'s two 2026-08-20 entries. Doc-writer handoff next.
 
 ---
 

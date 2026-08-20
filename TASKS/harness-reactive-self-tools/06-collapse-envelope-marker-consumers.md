@@ -1,7 +1,7 @@
 # Collapse the three `ENVELOPE_DATA` marker-extraction implementations into one
 
 **Phase:** 2 — Telemetry, consumer cleanup, worked example (`TASKS/harness-reactive-self-tools`)
-**Status:** implemented
+**Status:** reviewed
 **Depends on:** none. Not required for `04-render-card-construction.md`'s render_card path to work — the three consumers below are already marker-agnostic and pick up a correctly-formatted marker regardless of which code produced it (see `04`'s own Context for why). This task is a separable DRY cleanup the design doc flags, not a functional prerequisite for anything else in this batch. Can land before, after, or in parallel with the rest of Phase 1/2.
 **Touches:** `internal/service/chat_tool_executor.go` + `internal/service/chat_generate.go` (`captureEnvelopeData`, `internal/service/chat_generate.go:3049`), `internal/api/tools_call.go` (`extractEnvelopeMarker`, `internal/api/tools_call.go:129`), `internal/mcpserver/handlers.go` (`convertEnvelopeMarkers`, `internal/mcpserver/handlers.go:30`) — a new shared location for the collapsed function (package TBD, see step 1).
 
@@ -71,4 +71,4 @@ No escalations. No blockers.
 
 ## Review notes
 
-<!-- Reviewer fills in. -->
+**2026-08-20 — PASS.** Fresh reviewer (no shared context with the worker), full Phase 2 review covering `05`/`06`/`07` together. Confirmed real, not just claimed: diffed every pre-collapse original (`git show bce8426f:<path>`) against its new caller byte-for-byte — `captureEnvelopeData`'s untrimmed first-marker-only semantics, `extractEnvelopeMarker`'s malformed-marker fall-through-to-next-block behavior, and `convertEnvelopeMarkers`' full-text replace-loop semantics all preserved exactly. The two-function split (`ExtractEnvelopeMarker` single-read vs. `ReplaceEnvelopeMarkers` replace-all) confirmed genuinely necessary, not unnecessary complication — the two single-read call sites and the one replace-all call site have real, different jobs on top of one shared internal scan. Confirmed task `04`'s regression test (`TestExtractEnvelopeMarker_RoundTripsRenderCardReactionPayload`) is present and unmodified by this diff. Also independently verified the new `internal/mcpserver` → `internal/chat` import edge this task introduces doesn't create a cycle (`internal/chat` has zero transitive dependency back on `internal/mcpserver`).

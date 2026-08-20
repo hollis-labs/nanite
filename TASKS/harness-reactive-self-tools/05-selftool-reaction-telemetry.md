@@ -1,7 +1,7 @@
 # Self-tool reaction telemetry — `event_log`, `category = "selftool_reaction"`
 
 **Phase:** 2 — Telemetry, consumer cleanup, worked example (`TASKS/harness-reactive-self-tools`)
-**Status:** implemented
+**Status:** reviewed
 **Depends on:** `03-reaction-engine-core.md` (needs `Fire`'s per-reaction `Result` shape to wrap).
 **Touches:** new file `internal/selftools/reactions/telemetry.go` (a parallel, thin wrapper — not an extension of `internal/agent/reflexes/telemetry.go`), `internal/store/` (only if `LogEvent` needs a narrow interface excerpt — likely already usable as-is, see below).
 
@@ -192,4 +192,4 @@ self-tool to test against").
 
 ## Review notes
 
-<!-- Reviewer fills in. -->
+**2026-08-20 — PASS.** Fresh reviewer (no shared context with the worker), full Phase 2 review covering `05`/`06`/`07` together. `EmitReactionTrace` confirmed to write exactly one `event_log` row per `Result.Reactions` entry unconditionally (including `skipped_not_implemented`), `category="selftool_reaction"` correctly distinct from reflexes' `"reflex"`, both required regression tests independently confirmed to prove independent queryability with no cross-contamination (checked both filtered reads and an unfiltered read seeing both). Independently evaluated the `session_id=""` design call (not just trusted the Work Log's own reasoning) — agreed it's a reasonable, deliberate scope call: `Result`/`FiredReaction` carry no session context by design, and `ListEvents` is category-filtered only, never session-filtered, so no real capability is lost.

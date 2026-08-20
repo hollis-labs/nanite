@@ -1,7 +1,7 @@
 # Worked example — `task_update_report(id, msg)`
 
 **Phase:** 2 — Telemetry, consumer cleanup, worked example (`TASKS/harness-reactive-self-tools`)
-**Status:** implemented
+**Status:** reviewed
 **Depends on:** `01-move-self-tools-to-internal-selftools.md` (needs `internal/selftools` to add the new tool to), `03-reaction-engine-core.md` (`Fire`), `04-render-card-construction.md` (the render_card marker helper), `05-selftool-reaction-telemetry.md` (`EmitReactionTrace`, to prove full coverage). `06-collapse-envelope-marker-consumers.md` is **not** required — this task's render_card path works against the three pre-`06` consumer implementations unchanged; land `06` before or after this task, whichever is convenient.
 **Touches:** a new `internal/selftools/self_tools_task_update_report.go` (tool definition + handler, registered in `SelfToolsTransport.ListTools`/`CallTool`), a seed for the two `selftool_reactions` rows (a Go-side seed function, mirroring `internal/agent/reflexes/seeds.go`'s pattern for reflex seeds — or a migration-time `INSERT`, your call, document it), a minimal example internal endpoint for the `internal_api_call` reaction to target (see step 4 — kept illustrative, not a real consumer).
 
@@ -239,36 +239,40 @@ Context-gathering step had to do. Recommend committing the doc (and its
 siblings) to `main` so it's reachable the normal way for the next
 worktree/task.
 
-**Addendum (2026-08-20) — post-review fix: loopback gate added to the handler.**
-Orchestrator review flagged that the `basicAuthMiddleware` exemption comment
-in `internal/server/auth.go` for `/api/example/task-updates` claimed parity
-with `/api/tools/call`'s exemption immediately above it ("exactly the
-reasoning /api/tools/call above already documents"), but that claim was
-false as landed: `/api/tools/call`'s actual safety comes from a real
-`isLoopbackRequest(r)` check inside `handleSelfToolCall`
-(`internal/api/tools_call.go`), and `handleExampleTaskUpdate`
-(`internal/api/example_task_updates.go`) had no equivalent check — it was
-auth-exempt with genuinely zero gating, not "the loopback gate instead of
-basic auth" like the comment implied. Low impact as landed (the handler
-only logs and returns `{"received": true}`, no store write, no other side
-effect), but a real gap between what the code claimed and what it did.
+**Addendum (2026-08-20) — pre-merge fix: loopback gate on the handler.**
+During Orchestrator verification (before this task's first commit), the
+first drafted version of `handleExampleTaskUpdate` had no loopback check,
+even though the `basicAuthMiddleware` exemption comment in
+`internal/server/auth.go` for `/api/example/task-updates` claimed parity
+with `/api/tools/call`'s exemption immediately above it — whose actual
+safety comes from a real `isLoopbackRequest(r)` check inside
+`handleSelfToolCall` (`internal/api/tools_call.go`). Low impact as it
+briefly stood (the handler only logs and returns `{"received": true}`, no
+store write, no other side effect), but a real gap between what the code
+claimed and what it did.
 
 Fixed by adding the same `isLoopbackRequest(r)` check `handleSelfToolCall`
-already has to the top of `handleExampleTaskUpdate`, returning 403 with a
-short message for a non-loopback caller — making the `auth.go` comment's
-parity claim actually true rather than aspirational. Added
-`internal/api/example_task_updates_test.go` (new file, modeled on
-`tools_call_test.go`'s `TestHandleSelfToolCall_RejectsNonLoopback` and
-reusing its `newToolCallTestAPI` helper) with two tests:
-`TestHandleExampleTaskUpdate_RejectsNonLoopback` (non-loopback caller gets
-403) and `TestHandleExampleTaskUpdate_LoopbackSucceeds` (loopback caller
-still gets 200 + `{"received": true}`). `auth.go`'s own comment was left
-untouched — it already describes the intended trust model, which the fix
-now makes true; no other files were touched. `go build ./cmd/nanite/`,
-`go vet ./...` (same single pre-existing, unrelated `container.go`
-finding), and `go test ./...` all pass, including this task's own existing
-suite (`internal/selftools/self_tools_task_update_report_test.go`) and the
-two new regression tests.
+already has to the top of `handleExampleTaskUpdate`, in-worktree, before
+this task's implementation was committed — so `internal/api/
+example_task_updates.go` carries the gate in its very first commit
+(`309aa981`) and was never reachable without it at any point a commit
+could be checked out. `internal/api/example_task_updates_test.go` (two
+tests: `TestHandleExampleTaskUpdate_RejectsNonLoopback`,
+`TestHandleExampleTaskUpdate_LoopbackSucceeds`, modeled on
+`tools_call_test.go`'s `TestHandleSelfToolCall_RejectsNonLoopback`) landed
+one commit later (`57ed73b3`) purely because the Orchestrator split the
+worktree's already-fixed final state into two commits by file grouping,
+not because the fix and its tests happened at different times — `57ed73b3`'s
+own commit message narrates adding the check, which is misleading against
+its actual diff (test file only). See `TASKS/ESCALATIONS.md`'s 2026-08-20
+"Log integrity" entry for the full correction; this paragraph is that
+correction reflected here. No code was ever unfixed in committed history;
+only the commit-message narrative was inaccurate about *when* relative to
+other commits the fix was authored. `go build ./cmd/nanite/`, `go vet
+./...` (same single pre-existing, unrelated `container.go` finding), and
+`go test ./...` all pass, including this task's own existing suite
+(`internal/selftools/self_tools_task_update_report_test.go`) and the two
+regression tests above.
 
 **Independently re-verified by the Orchestrator before merge:** re-read
 the auth.go/example_task_updates.go/main.go/self_tools.go/
@@ -280,4 +284,11 @@ and the full `go test ./...` suite plus the two new
 
 ## Review notes
 
-<!-- Reviewer fills in. -->
+**2026-08-20 — PASS, with one non-blocking audit-trail finding (corrected, see below).** Fresh reviewer (no shared context with the worker), full Phase 2 review covering `05`/`06`/`07` together, treating this task as the highest-risk of the three (first live wiring of `reactions.Engine` into production, plus a new HTTP route with an auth exemption). Confirmed directly by reading the code, not trusting the task's own narrative:
+- `callTaskUpdateReport` validates required fields, calls `Fire`, embeds the render_card marker only when one resolved, calls `EmitReactionTrace` whenever `Reactions` is wired, stays nil-safe otherwise.
+- **The loopback gate — the single most important thing checked in this review — confirmed to genuinely hold in the committed code**: `handleExampleTaskUpdate` checks `isLoopbackRequest(r)` as its first statement, before body decoding; both regression tests exercise the real handler with a real `*http.Request`/`RemoteAddr` (non-loopback → 403, loopback → 200), not a mock.
+- `SeedTaskUpdateReportReactions` confirmed genuinely idempotent (a second call with a *different* `apiBaseURL` inserts nothing and doesn't mutate the existing row; a disabled row isn't silently re-enabled on reboot).
+- `TestCallTaskUpdateReport_FullChain_RenderCardAndInternalAPICall` confirmed to be a real integration test — real `SelfToolsTransport.CallTool`, real `reactions.Engine`, a real `httptest.Server` for the `internal_api_call` leg (asserting method/content-type/substituted body actually arrived), both `event_log` rows asserted with `outcome:"success"`.
+- No naming collision, no wired-but-unreachable code (the golden-example JSON is consumed by the existing repo-wide invariant test every self-tool must satisfy).
+
+**Finding (informational, audit-trail only — not a functional or security defect):** the reviewer independently traced this task's own Work Log addendum and the `57ed73b3` commit message against `git show`/`git log --graph` and found both mischaracterized *when* the loopback-gate fix landed — narrated as a distinct post-review fix commit, when the actual code landed in `309aa981` (this task's own first commit) and `57ed73b3` added only the regression tests. The runtime code itself was correct and safe at every committed point; only the historical narrative was inaccurate. Corrected by the Orchestrator directly in this file's own addendum (above) and logged in `TASKS/ESCALATIONS.md`'s 2026-08-20 "Log integrity" entry — not re-litigated here since it requires no further code change.

@@ -229,4 +229,4 @@ for anyone tailing logs, and the one signal that still fires if a
 
 ## Review notes
 
-<!-- Reviewer fills in. -->
+**Pass (2026-08-20, fresh Reviewer, Phase 2 section review covering 06-09).** Confirmed directly against `retrying_runner.go`: `emitTrace` fires from exactly the three real outcome branches (success, exhausted, retry) and is genuinely absent from the backoff-window short-circuit and the `ErrDuplicateJob` pass-through. The three `event_log` categories (`"reflex"`, `"selftool_reaction"`, `"schedule_fire"`) confirmed non-colliding by grep. The `fired_count`-never-bumped-by-the-new-engine-path finding independently re-confirmed accurate (`BumpAgentScheduleFireCount`'s only real caller is the manual `RunDue` admin endpoint). No findings.

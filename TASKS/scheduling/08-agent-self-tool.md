@@ -230,4 +230,6 @@ tools/07`'s own Work Log), and `go test ./...` (full suite, every package
 
 ## Review notes
 
-<!-- Reviewer fills in. -->
+**Pass (2026-08-20, fresh Reviewer, Phase 2 section review covering 06-09).** Confirmed no `agent_id` (or any cross-agent-targeting) field exists anywhere in the tool's `InputSchema`; `job_type` likewise never reachable as input. Traced both `resolveSelfScheduleAgentID` resolution paths against their real definitions — both are pure `context.Value` reads set exclusively by trusted call sites, never derived from the tool's `args` map, so a spoofed `agent_id` arg has structurally no path to influence the resolved identity (confirmed the shipped negative test exercises a real cross-agent attempt, not just a schema-absence assertion). `on_fail="disable"` divergence confirmed real and correctly reasoned.
+
+**One minor, non-blocking nit**: `scheduleCreateMaxRetries = 3` is a second hardcoded literal duplicating `InsertAgentSchedule`'s own default (also 3) — `07`'s hook avoids this by leaving `MaxRetries` unset and letting the column default apply. If the store-level default ever changes, this tool's rows would silently stop tracking it. Low severity, not fixed, worth a note for a future consolidation pass alongside the `Engine` field rename / `ComputeAgentScheduleNextRun` dedup already logged in `ESCALATIONS.md`.

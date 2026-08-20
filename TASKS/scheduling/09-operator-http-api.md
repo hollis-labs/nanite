@@ -69,4 +69,4 @@ Implemented against real current state, not the stale field name the task's own 
 
 ## Review notes
 
-<!-- Reviewer fills in. -->
+**Pass (2026-08-20, fresh Reviewer, Phase 2 section review covering 06-09).** The Go 1.22+ `ServeMux` literal-beats-wildcard precedence claim (`/api/schedules/status` vs. `/api/schedules/{id}`) independently re-verified via a standalone repro (registered in the opposite order, literal still won). Confirmed `agent_id`/`schedule_kind`/`job_type` are genuinely absent from `schedulePatchRequest`, silently ignored by `json.Decode` rather than accepted. Auth model confirmed to ride the existing uniform middleware chain with no new gate and no new gap. Spot-checked `TestSchedulesAPI_StatusEndpoint` in full — wires a real `gosched.Engine` over the real production adapters, not a mock. No findings.

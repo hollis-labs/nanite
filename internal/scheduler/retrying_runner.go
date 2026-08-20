@@ -118,6 +118,16 @@ type RetryingRunner struct {
 	Disabler  ScheduleDisabler
 	Logger    *slog.Logger
 
+	// Traces is TASKS/scheduling/06-schedule-fire-telemetry.md's
+	// event_log sink (telemetry.go's TraceStore) -- optional, unlike
+	// Runs/Schedules/Disabler/Logger: a nil Traces means
+	// EmitScheduleFireTrace no-ops for every outcome (see that function's
+	// own doc comment for why a nil TraceStore is tolerated here rather
+	// than treated as a construction bug), so existing callers/tests that
+	// have no need for schedule-fire telemetry are unaffected by this
+	// field's addition. *store.Store satisfies this today.
+	Traces TraceStore
+
 	Now       func() time.Time
 	BaseDelay time.Duration
 	MaxDelay  time.Duration
@@ -178,6 +188,17 @@ func (r *RetryingRunner) backoffDelay(attempt int64) time.Duration {
 //     layer's own backoff window, not the library's, governs the real
 //     retry cadence).
 //  6. Success: mark the row succeeded, return nil.
+//
+// TASKS/scheduling/06-schedule-fire-telemetry.md: each of steps 5's two
+// sub-branches (retry, exhaustion) and step 6 (success) -- the three real
+// dispatch outcomes -- calls r.emitTrace immediately after its own
+// RecordScheduleRunAttempt call, win or lose. Step 1's terminal
+// short-circuit and step 2's backoff-window short-circuit do not (no real
+// dispatch attempt happened), nor does gosched.ErrDuplicateJob's pass-
+// through in step 4 (no schedule_runs write happens there either, by this
+// function's own step-4 rule -- a trace row with nothing in schedule_runs
+// to correlate against would be a half-recorded event). See telemetry.go's
+// ScheduleFireOutcome doc comment for the full reasoning.
 func (r *RetryingRunner) Enqueue(ctx context.Context, job gosched.Job) error {
 	run, terminal, err := r.getOrCreateRun(ctx, job)
 	if err != nil {
@@ -197,9 +218,11 @@ func (r *RetryingRunner) Enqueue(ctx context.Context, job gosched.Job) error {
 	dispatchErr := r.Inner.Enqueue(ctx, job)
 
 	if dispatchErr == nil {
-		if rerr := r.Runs.RecordScheduleRunAttempt(ctx, run.ID, store.ScheduleRunStatusSucceeded, "", nil); rerr != nil {
-			r.logger().Error("scheduler: record schedule_runs success failed", "schedule_id", job.ScheduleID, "run_id", run.ID, "error", rerr)
+		bkErr := r.Runs.RecordScheduleRunAttempt(ctx, run.ID, store.ScheduleRunStatusSucceeded, "", nil)
+		if bkErr != nil {
+			r.logger().Error("scheduler: record schedule_runs success failed", "schedule_id", job.ScheduleID, "run_id", run.ID, "error", bkErr)
 		}
+		r.emitTrace(ctx, job, run.ID, ScheduleFireOutcomeSuccess, run.AttemptCount+1, 0, "", nil, bkErr)
 		return nil
 	}
 
@@ -207,7 +230,9 @@ func (r *RetryingRunner) Enqueue(ctx context.Context, job gosched.Job) error {
 		// Pass through unchanged -- a duplicate-run race is not a
 		// retry-policy concern (task step 5). No schedule_runs write:
 		// this attempt never really happened from the retry budget's
-		// point of view.
+		// point of view. No trace row either, by the same logic -- see
+		// this method's own doc comment and telemetry.go's
+		// ScheduleFireOutcome doc comment.
 		return dispatchErr
 	}
 
@@ -216,9 +241,11 @@ func (r *RetryingRunner) Enqueue(ctx context.Context, job gosched.Job) error {
 
 	if attemptCount >= maxRetries {
 		r.applyOnFail(ctx, job, onFail)
-		if rerr := r.Runs.RecordScheduleRunAttempt(ctx, run.ID, store.ScheduleRunStatusExhausted, dispatchErr.Error(), nil); rerr != nil {
-			r.logger().Error("scheduler: record schedule_runs exhaustion failed", "schedule_id", job.ScheduleID, "run_id", run.ID, "error", rerr)
+		bkErr := r.Runs.RecordScheduleRunAttempt(ctx, run.ID, store.ScheduleRunStatusExhausted, dispatchErr.Error(), nil)
+		if bkErr != nil {
+			r.logger().Error("scheduler: record schedule_runs exhaustion failed", "schedule_id", job.ScheduleID, "run_id", run.ID, "error", bkErr)
 		}
+		r.emitTrace(ctx, job, run.ID, ScheduleFireOutcomeExhausted, attemptCount, maxRetries, onFail, dispatchErr, bkErr)
 		// Stop go-scheduler's own retry loop -- the real outcome lives in
 		// schedule_runs (status=exhausted, last_error set), not
 		// misrepresented to the engine as a successful dispatch.
@@ -226,10 +253,66 @@ func (r *RetryingRunner) Enqueue(ctx context.Context, job gosched.Job) error {
 	}
 
 	nextAt := r.now().Add(r.backoffDelay(attemptCount))
-	if rerr := r.Runs.RecordScheduleRunAttempt(ctx, run.ID, store.ScheduleRunStatusFailed, dispatchErr.Error(), &nextAt); rerr != nil {
-		r.logger().Error("scheduler: record schedule_runs failure failed", "schedule_id", job.ScheduleID, "run_id", run.ID, "error", rerr)
+	bkErr := r.Runs.RecordScheduleRunAttempt(ctx, run.ID, store.ScheduleRunStatusFailed, dispatchErr.Error(), &nextAt)
+	if bkErr != nil {
+		r.logger().Error("scheduler: record schedule_runs failure failed", "schedule_id", job.ScheduleID, "run_id", run.ID, "error", bkErr)
 	}
+	r.emitTrace(ctx, job, run.ID, ScheduleFireOutcomeRetry, attemptCount, maxRetries, onFail, dispatchErr, bkErr)
 	return dispatchErr
+}
+
+// emitTrace resolves this firing's schedule_name (only when telemetry is
+// actually configured -- see below) and calls EmitScheduleFireTrace for
+// one real dispatch outcome. Called from all three of Enqueue's real
+// outcome branches (success, retry, exhausted); never from the
+// terminal/backoff-window short-circuits or the ErrDuplicateJob
+// pass-through, per this file's own package-level and Enqueue doc
+// comments.
+//
+// The extra r.Schedules.GetAgentSchedule lookup this performs (beyond
+// whatever retryPolicy already did for the retry/exhausted branches) only
+// happens when r.Traces is non-nil -- i.e., exactly when telemetry is
+// wired up and a caller will actually read this value. Every existing
+// TASKS/scheduling/04 regression test constructs a RetryingRunner without
+// setting Traces, so this adds zero additional store queries to that
+// existing, already-reviewed test suite.
+func (r *RetryingRunner) emitTrace(
+	ctx context.Context,
+	job gosched.Job,
+	scheduleRunRowID string,
+	outcome ScheduleFireOutcome,
+	attemptCount, maxRetries int64,
+	onFail string,
+	dispatchErr, bkErr error,
+) {
+	if r.Traces == nil {
+		return
+	}
+	EmitScheduleFireTrace(ctx, r.Traces, r.logger(), ScheduleFireTraceInput{
+		Job:              job,
+		ScheduleName:     r.scheduleName(ctx, job.ScheduleID),
+		ScheduleRunRowID: scheduleRunRowID,
+		Outcome:          outcome,
+		AttemptCount:     attemptCount,
+		MaxRetries:       maxRetries,
+		OnFail:           onFail,
+		DispatchError:    dispatchErr,
+		BookkeepingError: bkErr,
+	})
+}
+
+// scheduleName resolves scheduleID's agent_schedules.name for
+// EmitScheduleFireTrace's detail field -- falls back to the raw
+// scheduleID (never empty, unlike name -- see telemetry.go's package doc
+// comment for why name, not id, is still the preferred detail value) when
+// the row can't be resolved or its name is empty, mirroring retryPolicy's
+// own fail-safe-default convention immediately below.
+func (r *RetryingRunner) scheduleName(ctx context.Context, scheduleID string) string {
+	sched, err := r.Schedules.GetAgentSchedule(ctx, scheduleID)
+	if err != nil || sched == nil || sched.Name == "" {
+		return scheduleID
+	}
+	return sched.Name
 }
 
 // getOrCreateRun resolves the schedule_runs row for job's firing.
@@ -343,16 +426,21 @@ func (r *RetryingRunner) applyOnFail(ctx context.Context, job gosched.Job, onFai
 	}
 }
 
-// emitExhaustionNotice is the placeholder emission point for
-// TASKS/scheduling/06-schedule-fire-telemetry.md, which had not landed as
-// of this task's implementation (TASKS/scheduling/README.md listed it
-// Phase 2, status not-started). 06's own task file names this exact
-// hand-off: "this task's notify branch must call into whatever emission
-// point 06 builds, or a placeholder this task documents clearly if 06
-// hasn't landed yet." This is that placeholder -- a structured slog.Warn
-// at the exact call site 06 should replace with a real
-// EmitScheduleFireTrace(...)-style event_log row (category=
-// "schedule_fire").
+// emitExhaustionNotice was the placeholder emission point named by
+// TASKS/scheduling/06-schedule-fire-telemetry.md's own dispatch prompt,
+// left in place (not deleted) once 06 landed, downgraded from
+// "placeholder" to "supplementary log line": the real, structured record
+// of this exact event is now Enqueue's own r.emitTrace call, one call
+// site up, immediately after applyOnFail returns -- it fires for this
+// on_fail branch (and, unlike this function, for on_fail=disable too),
+// carries the same schedule_id/run_id/job_type/on_fail fields plus the
+// dispatch error and attempt/retry-budget detail, and lands in event_log
+// (category="schedule_fire") where it survives a process restart and is
+// queryable, unlike this slog line. Kept anyway as a zero-cost real-time
+// operational signal for anyone tailing logs, and as the one fallback
+// that still fires if a RetryingRunner is ever constructed with Traces
+// left nil (telemetry not wired up) -- see TraceStore's own doc comment
+// for why that's a tolerated, non-error configuration state here.
 func (r *RetryingRunner) emitExhaustionNotice(ctx context.Context, job gosched.Job, onFail string) {
 	r.logger().Warn("scheduler: schedule exhausted retries, on_fail does not disable",
 		"schedule_id", job.ScheduleID, "run_id", job.RunID, "job_type", job.JobType, "on_fail", onFail)

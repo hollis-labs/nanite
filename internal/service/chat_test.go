@@ -519,6 +519,47 @@ func TestCaptureEnvelopeData(t *testing.T) {
 	}
 }
 
+// TestCaptureEnvelopeData_UsesSharedExtractor is
+// TASKS/harness-reactive-self-tools/06-collapse-envelope-marker-consumers.md's
+// regression proof for this call site: captureEnvelopeData no longer
+// hand-scans for the marker itself — it delegates to
+// chat.ExtractEnvelopeMarker (internal/chat/envelope_marker.go), the same
+// shared function internal/api/tools_call.go's extractEnvelopeMarker and
+// internal/mcpserver/handlers.go's convertEnvelopeMarkers now delegate to.
+// This exercises captureEnvelopeData's own real call-site behavior
+// (appending to a pending slice, ignoring a malformed marker, and
+// accumulating across repeated calls the way chat_tool_executor.go's tool
+// loop actually calls it) rather than testing the shared function in
+// isolation.
+func TestCaptureEnvelopeData_UsesSharedExtractor(t *testing.T) {
+	var pending []string
+
+	// A malformed marker (no closing delimiter) must not be captured —
+	// this is the shared function's malformed-marker behavior surfacing
+	// through this call site.
+	pending = captureEnvelopeData(`<!--ENVELOPE_DATA:{"truncated":true} no closing delimiter`, pending)
+	if len(pending) != 0 {
+		t.Fatalf("malformed marker: got %d envelopes, want 0", len(pending))
+	}
+
+	// Simulates chat_tool_executor.go's real call pattern: each tool
+	// result's captured envelope (if any) is appended onto the same
+	// pendingEnvelopes slice across the turn's sequence of tool calls.
+	pending = captureEnvelopeData(`no marker in this result`, pending)
+	pending = captureEnvelopeData(`<!--ENVELOPE_DATA:{"type":"info-card","data":{"title":"first"}}:ENVELOPE_DATA-->`, pending)
+	pending = captureEnvelopeData(`<!--ENVELOPE_DATA:{"type":"info-card","data":{"title":"second"}}:ENVELOPE_DATA-->`, pending)
+
+	if len(pending) != 2 {
+		t.Fatalf("got %d accumulated envelopes, want 2: %#v", len(pending), pending)
+	}
+	if pending[0] != `{"type":"info-card","data":{"title":"first"}}` {
+		t.Errorf("pending[0] = %q", pending[0])
+	}
+	if pending[1] != `{"type":"info-card","data":{"title":"second"}}` {
+		t.Errorf("pending[1] = %q", pending[1])
+	}
+}
+
 func contains(s, sub string) bool {
 	return len(s) >= len(sub) && (s == sub || len(s) > 0 && containsStr(s, sub))
 }

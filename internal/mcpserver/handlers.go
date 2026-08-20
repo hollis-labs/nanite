@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"strings"
 
+	"github.com/hollis-labs/nanite/internal/chat"
 	condmcp "github.com/hollis-labs/nanite/internal/mcp"
 )
 
@@ -27,25 +28,21 @@ func extractText(result *condmcp.ToolResult) string {
 // convertEnvelopeMarkers replaces <!--ENVELOPE_DATA:{...}:ENVELOPE_DATA-->
 // markers with ```nanite-envelope fenced blocks so the engine's
 // ParseEnvelopes() can extract them from streamed PTY output.
+//
+// The delimiter scan itself delegates to chat.ReplaceEnvelopeMarkers, the
+// shared marker-extraction machinery three independent hand-scans (this
+// one, internal/service/chat_generate.go's captureEnvelopeData,
+// internal/api/tools_call.go's extractEnvelopeMarker) collapsed onto
+// (TASKS/harness-reactive-self-tools/06-collapse-envelope-marker-consumers.md).
+// This function's own remaining job — replacing every marker occurrence
+// with a fenced code block, rather than just reading the first payload out
+// — is call-site-specific, not duplicated scan logic; it's why this caller
+// uses ReplaceEnvelopeMarkers instead of the single-marker
+// ExtractEnvelopeMarker the other two use.
 func convertEnvelopeMarkers(text string) string {
-	const startTag = "<!--ENVELOPE_DATA:"
-	const endTag = ":ENVELOPE_DATA-->"
-
-	for {
-		start := strings.Index(text, startTag)
-		if start < 0 {
-			break
-		}
-		tail := text[start+len(startTag):]
-		end := strings.Index(tail, endTag)
-		if end < 0 {
-			break
-		}
-		payload := tail[:end]
-		replacement := "\n\n```nanite-envelope\n" + payload + "\n```"
-		text = text[:start] + replacement + tail[end+len(endTag):]
-	}
-	return text
+	return chat.ReplaceEnvelopeMarkers(text, func(payload string) string {
+		return "\n\n```nanite-envelope\n" + payload + "\n```"
+	})
 }
 
 // mustMarshalSchema marshals a tool input schema to JSON bytes.

@@ -557,6 +557,10 @@ func (st *SelfToolsTransport) CallTool(ctx context.Context, name string, args ma
 	// harness-reactive-self-tools/07) ---
 	case taskUpdateReportToolName:
 		return st.callTaskUpdateReport(ctx, args)
+	// --- Agent self-scheduling producer (TASKS/scheduling/08-agent-self-
+	// tool.md) ---
+	case scheduleCreateToolName:
+		return st.callScheduleCreate(ctx, args)
 	case "scratchpad_write", "scratchpad_read", "scratchpad_clear":
 		// scratchpad_* are per-turn tools backed by the in-process chat
 		// loop's loopState. They are dispatched by the chat-loop executor,

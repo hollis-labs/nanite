@@ -58,6 +58,10 @@ func selfToolDefinitions() []mcp.Tool {
 		// architecture/11-harness-reactive-self-tools.md, TASKS/
 		// harness-reactive-self-tools/07-worked-example-task-update-report.md).
 		taskUpdateReportToolDefinition(),
+		// Agent self-scheduling producer (docs/engineering/architecture/
+		// 12-scheduling.md's "Producers" item 2, TASKS/scheduling/
+		// 08-agent-self-tool.md).
+		scheduleCreateToolDefinition(),
 		{
 			Name: "skill_create",
 			Description: "Create a new skill that binds a set of tool names to a named category.\n\n" +

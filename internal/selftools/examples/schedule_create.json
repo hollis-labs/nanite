@@ -1,0 +1,22 @@
+[
+  {
+    "title": "Schedule a recurring 9am self follow-up",
+    "args": {
+      "kind": "cron",
+      "cron_expr": "0 9 * * *",
+      "message": "Check whether yesterday's export job finished cleanly and re-run it if not.",
+      "name": "daily-export-audit"
+    },
+    "result": "Scheduled self follow-up \"daily-export-audit\" (id=self-sched-01J9Z8Q3K1N5W1G7X2M4P6R8T0, kind=cron, next_run=2026-08-21T09:00:00Z)",
+    "notes": "Always scoped to the CALLING agent -- there is no agent_id input field, so this can never schedule a wake on another agent's behalf (docs/engineering/architecture/12-scheduling.md's Producers item 2). Produces exactly one job_type=durable_agent_wake agent_schedules row; job_type/job_payload are not configurable through this tool. cron_expr is required for kind=\"cron\" and validated before insert."
+  },
+  {
+    "title": "Schedule an immediate one-shot self follow-up",
+    "args": {
+      "kind": "one_shot",
+      "message": "Pick back up on the migration review once the CI run finishes."
+    },
+    "result": "Scheduled self follow-up \"Self-scheduled follow-up: Pick back up on the migration review once the CI run finishes.\" (id=self-sched-01J9Z8QN7H3F6D2B8C1E5A9K4M, kind=one_shot, next_run=2026-08-20T18:04:11Z)",
+    "notes": "kind=\"one_shot\" fires on the scheduler engine's next tick (effectively immediately), not at a delayed future time -- there is no target-time field for one_shot. Use kind=\"cron\" with a future cron expression for a delayed one-off wake instead. name was omitted here, so a short label was auto-derived from message."
+  }
+]

@@ -953,6 +953,14 @@ func NewContainer(cfg ContainerConfig) (*Container, error) {
 		cfg.Store.LogEvent(sessionID, "session_halted", "reflex", "reflex-fired halt", string(metaBlob))
 		return nil
 	}
+	// TASKS/scheduling/07-wire-add-schedule-reflex.md: closes
+	// CW-20260819-0006's loop -- a firing action_kind='add_schedule'
+	// reflex now genuinely inserts an agent_schedules row (via
+	// newReflexScheduleHook/buildReflexAgentSchedule, internal/service/
+	// reflex_schedule_hook.go) instead of only being staged in
+	// AppliedActions/event_log. Wired here, alongside Executor.Halt above,
+	// per docs/engineering/architecture/12-scheduling.md's "Producers" #3.
+	reflexEngine.Executor.Schedule = NewReflexScheduleHook(cfg.Store)
 	if n, err := reflexes.SeedBaseReflexes(context.Background(), cfg.Store, slog.Default()); err != nil {
 		slog.Warn("service container: reflex base-seed", "err", err)
 	} else if n > 0 {

@@ -54,18 +54,24 @@ type AgentStateStore interface {
 	// hook.
 	MarkAgentKnowledgeSeedApplied(ctx context.Context, agentID, seedKey string) error
 
-	// agent_schedules — directive rows the composer (FU-27) folds into
-	// the per-tick procedure body. Authored by operator, agent (self),
-	// or system.
+	// agent_schedules — a per-agent scheduled directive that fires and
+	// dispatches a job (docs/engineering/architecture/12-scheduling.md).
+	// Authored by operator, agent (self), or system.
+	//
+	// GetDueSchedules (a tick-count-based due-check over
+	// every_n_ticks/on_tick/on_event, none of which ever had a real
+	// firing mechanism) was removed from this interface by
+	// TASKS/scheduling/01-schema-schedule-kind-collapse-and-retry-
+	// columns.md — zero production callers, confirmed by grep. The real
+	// due-check going forward is go-scheduler's own Store.ListDueSchedules
+	// (TASKS/scheduling/02-store-adapter.md), a different method entirely,
+	// not restored here.
 	InsertAgentSchedule(ctx context.Context, row AgentSchedule) error
 	GetAgentSchedule(ctx context.Context, id string) (*AgentSchedule, error)
 	ListAgentSchedules(ctx context.Context, agentID string) ([]AgentSchedule, error)
 	DeleteAgentSchedule(ctx context.Context, id string) error
 	UpdateAgentScheduleStatus(ctx context.Context, id, status string) error
 	BumpAgentScheduleFireCount(ctx context.Context, id string, now time.Time) error
-	// GetDueSchedules returns the active schedules whose firing criteria
-	// match the given tick context, sorted priority DESC, created_at ASC.
-	GetDueSchedules(ctx context.Context, agentID, sessionID string, tickN int, now time.Time) ([]AgentSchedule, error)
 }
 
 // Compile-time assertion that the central-DB *Store satisfies the seam.

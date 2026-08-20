@@ -171,10 +171,12 @@ func (s *durableWakeService) RunDue(ctx context.Context, req DurableAgentWakeRun
 			continue
 		}
 		// CW-20260816-0021 finding: AgentSchedule.Body's doc comment
-		// describes a "composer (FU-27)" that folds Body into a per-tick
-		// procedure body — no such composer exists anywhere in this
-		// codebase (GetDueSchedules, the API it implies, has zero
-		// production call sites; only tests use it). The only real,
+		// used to describe a "composer (FU-27)" that folds Body into a
+		// per-tick procedure body — no such composer ever existed in this
+		// codebase (GetDueSchedules, the API it implied, had zero
+		// production call sites and was removed outright by
+		// TASKS/scheduling/01-schema-schedule-kind-collapse-and-retry-
+		// columns.md). The only real,
 		// wired delivery mechanism from a scheduled agent_schedules row
 		// into the woken session is DurableAgentWakePayload.Prompt,
 		// which Start/Resume's deliverWakePrompt injects as a genuine

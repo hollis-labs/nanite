@@ -5,7 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
-	"strconv"
+	"strings"
 	"time"
 
 	"github.com/robfig/cron/v3"
@@ -17,12 +17,18 @@ var ErrAgentScheduleNotFound = errors.New("agent schedule not found")
 
 // Schedule kind constants. The CHECK constraint on agent_schedules.schedule_kind
 // keeps DB rows aligned with these values; mismatches surface as INSERT errors.
+//
+// TASKS/scheduling/01-schema-schedule-kind-collapse-and-retry-columns.md
+// (migration 127) collapsed this from five values down to these two --
+// every_n_ticks/on_tick/on_event never had a real production firing
+// mechanism (the FU-27 composer that would have interpreted them was never
+// built) and don't map onto go-scheduler's time-based-only model
+// (docs/engineering/architecture/12-scheduling.md, "Full replace, not
+// dual-run"). Do not reintroduce them without a corresponding schema
+// migration widening the CHECK back out.
 const (
-	ScheduleKindEveryNTicks = "every_n_ticks"
-	ScheduleKindOnTick      = "on_tick"
-	ScheduleKindCron        = "cron"
-	ScheduleKindOneShot     = "one_shot"
-	ScheduleKindOnEvent     = "on_event"
+	ScheduleKindCron    = "cron"
+	ScheduleKindOneShot = "one_shot"
 )
 
 // Schedule status constants. CHECK constraint enforces.
@@ -32,9 +38,35 @@ const (
 	ScheduleStatusExpired = "expired"
 )
 
-// AgentSchedule is one row in the agent_schedules table — a per-agent
-// directive that the composer (FU-27) folds into the per-tick procedure
-// body when its firing criteria match the tick.
+// on_fail policy constants. CHECK constraint enforces. See migration 127's
+// doc comment and TASKS/scheduling/01-schema-schedule-kind-collapse-and-
+// retry-columns.md's Work Log for how 'retry' (the column default) is
+// meant to resolve once max_retries is actually exhausted -- it is not a
+// fourth do-nothing terminal state.
+const (
+	ScheduleOnFailRetry   = "retry"
+	ScheduleOnFailDisable = "disable"
+	ScheduleOnFailNotify  = "notify"
+)
+
+// Job type constants -- docs/engineering/architecture/12-scheduling.md's
+// "The Runner adapter and job taxonomy" table. durable_agent_wake is the
+// only value with a live dispatch path today; the other three are schema-
+// ready for TASKS/scheduling/03-runner-adapter-and-job-taxonomy.md.
+const (
+	ScheduleJobTypeDurableAgentWake = "durable_agent_wake"
+	ScheduleJobTypeAgentWorkflowRun = "agent_workflow_run"
+	ScheduleJobTypeCommandRun       = "command_run"
+	ScheduleJobTypeReflexDispatch   = "reflex_dispatch"
+)
+
+// AgentSchedule is one row in the agent_schedules table -- a per-agent
+// directive that fires on a schedule and dispatches a job. Historically
+// (pre-migration-127) described as feeding an "FU-27 composer" that was
+// never built; the live mechanism today is durable_wake.go's RunDue for
+// job_type=durable_agent_wake, and the go-scheduler-backed engine
+// (TASKS/scheduling/02..05) is what next_run/max_retries/on_fail/job_type/
+// job_payload exist to support going forward.
 type AgentSchedule struct {
 	ID           string `json:"id"`
 	AgentID      string `json:"agent_id"`
@@ -50,17 +82,32 @@ type AgentSchedule struct {
 	LastFiredAt  string `json:"last_fired_at"`
 	CreatedAt    string `json:"created_at"`
 	CreatedBy    string `json:"created_by"`
+
+	// MaxRetries, OnFail, NextRun, JobType, JobPayload were added by
+	// migration 127 (TASKS/scheduling/01-schema-schedule-kind-collapse-
+	// and-retry-columns.md).
+	MaxRetries int64  `json:"max_retries"`
+	OnFail     string `json:"on_fail"`
+	// NextRun is empty when unscheduled (DB NULL), matching go-scheduler's
+	// own "zero NextRun is skipped" convention. When set, it is RFC3339 --
+	// the same format LastFiredAt/ExpiresAt already use in this table, and
+	// what the Store adapter (TASKS/scheduling/02-store-adapter.md) parses.
+	NextRun    string `json:"next_run"`
+	JobType    string `json:"job_type"`
+	JobPayload string `json:"job_payload"`
 }
 
 const agentScheduleColumns = `id, agent_id, COALESCE(session_id,''), name, schedule_kind,
        schedule_spec, body, priority, status, COALESCE(expires_at,''),
-       fired_count, COALESCE(last_fired_at,''), created_at, created_by`
+       fired_count, COALESCE(last_fired_at,''), created_at, created_by,
+       max_retries, on_fail, COALESCE(next_run,''), job_type, job_payload`
 
 func scanAgentSchedule(scanner interface{ Scan(...any) error }, s *AgentSchedule) error {
 	return scanner.Scan(
 		&s.ID, &s.AgentID, &s.SessionID, &s.Name, &s.ScheduleKind,
 		&s.ScheduleSpec, &s.Body, &s.Priority, &s.Status, &s.ExpiresAt,
 		&s.FiredCount, &s.LastFiredAt, &s.CreatedAt, &s.CreatedBy,
+		&s.MaxRetries, &s.OnFail, &s.NextRun, &s.JobType, &s.JobPayload,
 	)
 }
 
@@ -87,21 +134,46 @@ func (s *Store) InsertAgentSchedule(ctx context.Context, row AgentSchedule) erro
 	if row.CreatedBy == "" {
 		row.CreatedBy = "operator"
 	}
+	// MaxRetries/OnFail/JobType/JobPayload default from their zero Go
+	// value, mirroring Status/CreatedBy above and matching the DDL's own
+	// column defaults (migration 127) -- since every value is passed
+	// explicitly in this INSERT, SQLite's column DEFAULT never actually
+	// applies, so it has to be replicated here. Trade-off, documented: a
+	// genuine "zero retries, fail immediately" policy isn't independently
+	// expressible via MaxRetries==0 today (it collapses to the default of
+	// 3) -- callers wanting fail-fast use on_fail alone with a small
+	// MaxRetries (e.g. 1), not MaxRetries==0. NextRun has no default: an
+	// empty value is a real, meaningful "unscheduled" (NULL), not a gap to
+	// fill in.
+	if row.MaxRetries <= 0 {
+		row.MaxRetries = 3
+	}
+	if row.OnFail == "" {
+		row.OnFail = ScheduleOnFailRetry
+	}
+	if row.JobType == "" {
+		row.JobType = ScheduleJobTypeDurableAgentWake
+	}
+	if row.JobPayload == "" {
+		row.JobPayload = "{}"
+	}
 	_, err := s.DB.ExecContext(ctx,
 		`INSERT OR REPLACE INTO agent_schedules
 		    (id, agent_id, session_id, name, schedule_kind, schedule_spec,
 		     body, priority, status, expires_at, fired_count, last_fired_at,
-		     created_at, created_by)
+		     created_at, created_by, max_retries, on_fail, next_run,
+		     job_type, job_payload)
 		 VALUES (?, ?, ?, ?, ?, ?,
 		         ?, ?, ?, ?, ?, ?,
 		         COALESCE(NULLIF(?, ''), datetime('now')),
-		         ?)`,
+		         ?, ?, ?, ?, ?, ?)`,
 		row.ID, row.AgentID, nullIfEmpty(row.SessionID), row.Name,
 		row.ScheduleKind, row.ScheduleSpec,
 		row.Body, row.Priority, row.Status, nullIfEmpty(row.ExpiresAt),
 		row.FiredCount, nullIfEmpty(row.LastFiredAt),
 		row.CreatedAt,
-		row.CreatedBy,
+		row.CreatedBy, row.MaxRetries, row.OnFail, nullIfEmpty(row.NextRun),
+		row.JobType, row.JobPayload,
 	)
 	if err != nil {
 		return fmt.Errorf("insert agent_schedules: %w", err)
@@ -216,118 +288,93 @@ func (s *Store) BumpAgentScheduleFireCount(ctx context.Context, id string, now t
 	return nil
 }
 
-// GetDueSchedules returns the active schedules for a given session+tick
-// whose firing criteria match the current tick context. Results are
-// ordered by priority DESC, created_at ASC so the composer can render
-// them top-to-bottom.
+// backfillScheduleNextRun computes agent_schedules.next_run for every
+// active cron/one_shot row that doesn't already have one -- covers rows
+// that pre-date migration 127's next_run column (which the migration's
+// own SQL deliberately leaves NULL for every row; see 127's Up doc
+// comment for why). Called once per process, from New() immediately after
+// migrate() succeeds -- see store.go.
 //
-// Matching rules:
-//   - status must be 'active'
-//   - session_id matches the provided sessionID, OR session_id IS NULL
-//     (the latter applies to all sessions of the agent)
-//   - expires_at, if set, must be in the future relative to now
-//   - schedule_kind firing semantics defined in the table comment
+// Idempotent by construction: only rows with next_run IS NULL are
+// touched, so this is a safe no-op on every boot after the one that
+// actually needed to backfill something. TASKS/scheduling/02-store-
+// adapter.md's Store adapter (ClaimAndUpdateScheduleRun/SetScheduleNextRun)
+// keeps next_run populated going forward once a schedule has fired at
+// least once under the new engine, so this function's job is strictly
+// "cover the gap between migration 127 landing and the new engine's first
+// real tick," not an ongoing recomputation path.
 //
-// agentID is required to scope the lookup. sessionID may be empty to
-// look up only NULL-session schedules.
-func (s *Store) GetDueSchedules(ctx context.Context, agentID, sessionID string, tickN int, now time.Time) ([]AgentSchedule, error) {
-	if agentID == "" {
-		return nil, fmt.Errorf("get due schedules: agent_id is required")
-	}
+// cron rows: computed via cron.ParseStandard(schedule_spec).Next(now) --
+// the exact same parsing go-scheduler.NextRun itself wraps
+// (libs/go-scheduler/scheduler.go:85-92). Deliberately hand-called here
+// via the already-present robfig/cron/v3 dependency rather than importing
+// go-scheduler directly -- introducing that dependency to Nanite's go.mod
+// is 02-store-adapter.md's job, not this migration's. A malformed
+// schedule_spec (should not happen for the one real production row, which
+// is a plain `0 3 * * *`, but defensively for any other DB this migration
+// might run against) falls back to "due now" rather than leaving next_run
+// NULL -- NULL means "unscheduled, permanently skipped" to go-scheduler,
+// which would silently and permanently disable the row; "due now" costs
+// at most one off-schedule immediate fire, which is recoverable, versus a
+// silent, permanent loss of due-ness, which is what this whole backfill
+// exists to prevent.
+//
+// one_shot rows: confirmed by reading wakeScheduleDue (internal/service/
+// durable_wake.go) before writing this -- a one_shot row today has no
+// independent target-time encoding in schedule_spec at all. It's
+// evaluated as due immediately and continuously until FiredCount stops
+// being 0; there is no "wait until time X" semantics to preserve.
+// Backfilling next_run=now matches that real, existing "due now" behavior
+// rather than inventing a delayed target time the current data model
+// never had.
+func (s *Store) backfillScheduleNextRun(ctx context.Context, now time.Time) error {
 	rows, err := s.DB.QueryContext(ctx,
-		`SELECT `+agentScheduleColumns+`
-		 FROM agent_schedules
-		 WHERE agent_id = ?
-		   AND status = 'active'
-		   AND (session_id IS NULL OR session_id = ?)
-		   AND (expires_at IS NULL OR expires_at > ?)
-		 ORDER BY priority DESC, created_at ASC`,
-		agentID, sessionID, now.UTC().Format(time.RFC3339),
+		`SELECT id, schedule_kind, schedule_spec FROM agent_schedules
+		 WHERE status = 'active' AND next_run IS NULL
+		   AND schedule_kind IN ('cron', 'one_shot')`,
 	)
 	if err != nil {
-		return nil, fmt.Errorf("get due schedules: %w", err)
+		return fmt.Errorf("backfill agent_schedules next_run: query: %w", err)
 	}
-	defer rows.Close()
-
-	candidates := make([]AgentSchedule, 0)
+	type candidate struct {
+		id, kind, spec string
+	}
+	var candidates []candidate
 	for rows.Next() {
-		var sch AgentSchedule
-		if err := scanAgentSchedule(rows, &sch); err != nil {
-			return nil, fmt.Errorf("scan agent_schedules: %w", err)
+		var c candidate
+		if err := rows.Scan(&c.id, &c.kind, &c.spec); err != nil {
+			rows.Close()
+			return fmt.Errorf("backfill agent_schedules next_run: scan: %w", err)
 		}
-		candidates = append(candidates, sch)
+		candidates = append(candidates, c)
 	}
 	if err := rows.Err(); err != nil {
-		return nil, err
+		return fmt.Errorf("backfill agent_schedules next_run: rows: %w", err)
 	}
+	rows.Close()
 
-	out := make([]AgentSchedule, 0, len(candidates))
-	for _, sch := range candidates {
-		fires, err := scheduleFires(sch, tickN, now)
-		if err != nil {
-			return nil, fmt.Errorf("schedule %s (%s): %w", sch.ID, sch.ScheduleKind, err)
+	nowUTC := now.UTC()
+	for _, c := range candidates {
+		var next time.Time
+		switch c.kind {
+		case ScheduleKindOneShot:
+			next = nowUTC
+		case ScheduleKindCron:
+			parsed, err := cron.ParseStandard(strings.TrimSpace(c.spec))
+			if err != nil {
+				next = nowUTC
+			} else {
+				next = parsed.Next(nowUTC)
+			}
+		default:
+			continue
 		}
-		if fires {
-			out = append(out, sch)
+		if _, err := s.DB.ExecContext(ctx,
+			`UPDATE agent_schedules SET next_run = ? WHERE id = ? AND next_run IS NULL`,
+			next.Format(time.RFC3339), c.id,
+		); err != nil {
+			return fmt.Errorf("backfill agent_schedules next_run: update %s: %w", c.id, err)
 		}
 	}
-	return out, nil
-}
-
-// scheduleFires evaluates whether a schedule's firing criteria match the
-// given tick context. Pure function for unit testability.
-func scheduleFires(sch AgentSchedule, tickN int, now time.Time) (bool, error) {
-	switch sch.ScheduleKind {
-	case ScheduleKindEveryNTicks:
-		n, err := strconv.Atoi(sch.ScheduleSpec)
-		if err != nil {
-			return false, fmt.Errorf("every_n_ticks spec %q is not an integer", sch.ScheduleSpec)
-		}
-		if n <= 0 {
-			return false, fmt.Errorf("every_n_ticks spec must be positive, got %d", n)
-		}
-		return tickN > 0 && tickN%n == 0, nil
-
-	case ScheduleKindOnTick:
-		target, err := strconv.Atoi(sch.ScheduleSpec)
-		if err != nil {
-			return false, fmt.Errorf("on_tick spec %q is not an integer", sch.ScheduleSpec)
-		}
-		return tickN == target, nil
-
-	case ScheduleKindCron:
-		// Standard 5-field cron (no seconds). Use ParseStandard so the
-		// spec format matches operator intuition (`0 9 * * *`).
-		parser := cron.NewParser(cron.Minute | cron.Hour | cron.Dom | cron.Month | cron.Dow)
-		schedule, err := parser.Parse(sch.ScheduleSpec)
-		if err != nil {
-			return false, fmt.Errorf("cron spec %q: %w", sch.ScheduleSpec, err)
-		}
-		// Fires when the schedule's next-fire instant relative to a
-		// reference one tick ago is at or before now. We approximate
-		// "one tick ago" as 15 minutes (the Supervisor cadence). This
-		// is the spike-default; callers wanting tighter precision will
-		// pass a more recent reference once the composer threads tick
-		// timing properly.
-		ref := now.Add(-15 * time.Minute)
-		next := schedule.Next(ref)
-		return !next.After(now), nil
-
-	case ScheduleKindOneShot:
-		// Fires on the next tick after creation. Composer is expected to
-		// flip the row to status='expired' after firing.
-		return sch.FiredCount == 0, nil
-
-	case ScheduleKindOnEvent:
-		// Event detection happens outside this function. The composer
-		// passes an event-resolved schedule kind by flipping a
-		// transient flag, or by changing the row's kind temporarily.
-		// For Phase A (this commit), on_event is a no-op — it never
-		// fires from scheduleFires. Phase B will introduce an event
-		// resolver.
-		return false, nil
-
-	default:
-		return false, fmt.Errorf("unknown schedule_kind %q", sch.ScheduleKind)
-	}
+	return nil
 }

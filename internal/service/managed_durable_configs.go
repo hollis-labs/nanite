@@ -48,9 +48,13 @@ type ManagedDurableAgentConfig struct {
 
 // ManagedDurableAgentSchedule declares a real agent_schedules row for a
 // file-dropped process-class instance. Kind must be one of
-// store.ScheduleKindCron / ScheduleKindEveryNTicks / ScheduleKindOnTick /
-// ScheduleKindOneShot / ScheduleKindOnEvent; Spec's shape depends on Kind
-// (e.g. a 5-field cron expression for ScheduleKindCron). Body is the
+// store.ScheduleKindCron / store.ScheduleKindOneShot — the only two
+// schedule_kind values agent_schedules' CHECK constraint accepts as of
+// migration 127 (TASKS/scheduling/01-schema-schedule-kind-collapse-and-
+// retry-columns.md; the other three historical values —
+// every_n_ticks/on_tick/on_event — were dropped from the schema entirely,
+// not merely deprecated). Spec's shape depends on Kind (e.g. a 5-field
+// cron expression for ScheduleKindCron). Body is the
 // instruction text delivered as the woken session's first user turn when
 // this schedule fires (see durable_wake.go's RunDue, which forwards
 // Schedule.Body into DurableAgentWakePayload.Prompt) — write it as a

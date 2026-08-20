@@ -388,3 +388,33 @@ In addition to `TASKS/ESCALATIONS.md`'s existing entries (Phase 0 planning), thi
 - **Phase 8 item 1's sign-off requirement**: not an escalation in the doc/reality-mismatch sense, but the one item in this whole pass requiring a standing, repeatable, live-dispatch-time gate — see above.
 
 See `TASKS/ESCALATIONS.md` for the full list of doc/reality mismatches found during planning, including which ones are already resolved (via Orchestrator/Planner judgment call within existing docs) and which ones genuinely need an operator decision before the relevant task is dispatched.
+
+---
+
+## Teams (`TASKS/teams/`, outside the Phase 0-9 sequence)
+
+Implements `docs/engineering/architecture/15-teams.md` — the design produced by a dedicated architecture-alignment session (2026-08-20, operator-signed-off, no code changed) that reviewed an external proposal against Nanite's real code (`internal/agentworkflow`, `internal/dispatch`, `internal/agent/reflexes`, `internal/messaging`, Agent Construction) before proposing anything, generalizing today's hardcoded three-role dispatch into a configurable, reusable N-slot organizational shape that compiles to an ordinary `agentworkflow` run rather than a new orchestration engine. A sibling to `TASKS/reflex-taxonomy/`, `TASKS/harness-reactive-self-tools/`, and `TASKS/scheduling/`. See `TASKS/teams/README.md` for the full read-first list and scope boundaries.
+
+| Task | Phase | Status | Depends on |
+|---|---|---|---|
+| `01-team-definition-schema` | 1 | implemented (migration `128`) | none |
+| `02-team-run-members-table` | 1 | implemented (migration `129`) | none directly (parallel-safe with `01`/`03`/`04`/`05`) |
+| `03-stepkindflex-schema` | 1 | not-started | none directly (parallel-safe) |
+| `04-team-authority-schema` | 1 | not-started | `01` |
+| `05-agent-reflexes-run-scoping` | 1 | not-started | none directly (parallel-safe) |
+| `06-stepkindflex-executor` | 2 | not-started | `03` |
+| `07-team-compiler` | 2 | not-started | `01`, `02`, `03`, `04`, `05`, `06` |
+| `08-team-run-launcher` | 2 | not-started | `07`, `04` |
+| `09-team-routing` | 3 | not-started | `05`, `08` |
+| `10-team-crud-api` | 4 | not-started | `01` |
+| `11-team-run-launch-api` | 4 | not-started | `08`, `10` |
+
+**Sequencing.** Phase 1 (`01`-`05`) is schema/storage only — four of the five tasks are mutually parallel-safe (different tables/columns), worktree-isolated; only `04` has a real (if soft) dependency on `01`'s Team Slot vocabulary. All five touch `internal/store/migrations/` — coordinate numbering at dispatch time, same real cross-batch collision pattern the scheduling and harness-reactive-self-tools batches already hit each other with (see `README.md`). Phase 2 (`06`-`08`) is a strict-ish serial chain: the flex-step executor, then the compiler that depends on every Phase 1 primitive plus the executor's real config shape, then the launcher that calls the compiler and does slot resolution. Phase 3 (`09`) needs both run-scoped reflexes and a real launched run to route against. Phase 4 (`10`-`11`) is the operator/consumer-facing surface, dispatched last.
+
+**Real, load-bearing corrections to the design doc, found during this planning session's own research against the live codebase** (not just doc-vs-doc inconsistencies — each is cited with file/line in its owning task's Context, and each changes what "generalize the existing mechanism" or "reuse the existing column" actually means in practice): `agent_parent_dispatch_allowlist` (migration 060) is a JSON role-slug column on `agent_profiles`, not a table, and is advisory-only today (rendered into an LLM-facing tool description, no hard enforcement) — `04` must build real enforcement, not copy this pattern. `agent_profiles.durable` is an unrelated eject-survival flag (migration 073), not a signal for whether a slot should wake an existing durable identity — `08` treats `resolution: durable|fresh` as new Team-Slot-level launch config instead. `workflow_run_steps.kind` has a hardcoded DB CHECK (migration 051) that blocks inserting a `flex`-kind step without a real table-rebuild migration — `03` exists specifically because of this. The real messaging self-tool is `message_send`, not `send_message` (that name belongs to the reflex `action_kind`) — `09`. "Slot" already has an established, unrelated, load-bearing meaning in this codebase (`internal/context/slot.go`'s `SlotOrder`, one of six invariants in `internal/context/INVARIANTS.md`) that `15-teams.md`'s own naming-collision review never checked against — `01` requires "Team Slot" always spelled out in new identifiers, and adds the disambiguating GLOSSARY.md entry.
+
+**Two explicitly-required stress-test answers, not left as open design questions**: the design doc's own "Validating this design" section names the **phase-closure race** (flex-step exit trigger fires while other active members are still working, owned by `06`) and **routing-target resolution failure** (message routes to an unavailable/failed slot member, owned by `09`) as "likely the messiest runtime edges of the whole design," deserving concrete implemented-and-tested answers before implementation, not a passing mention — both are required "Done means" items on their owning tasks.
+
+**Deliberately out of this batch's scope** (see `README.md`'s full list): mid-run elastic slot growth (a concrete, current blocker — `task_execute`'s real recursion-depth-0 cap — not just caution, since a Team orchestrator slot triggering it is itself typically a non-root session); the final authority verb set beyond the three the design doc names; a final locked default for multi-member `@slot` addressing; the eventual Team/Workflow definition split.
+
+**Planned 2026-08-20, not yet dispatched.** Per `EXECUTION-PROCESS.md`'s Phase A discipline, this is the planning checkpoint — present to the operator for review before any worker is dispatched.

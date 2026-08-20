@@ -341,7 +341,7 @@ Implements `docs/engineering/architecture/11-harness-reactive-self-tools.md` —
 | `03-reaction-engine-core` | 1 | reviewed | `01`, `02` |
 | `04-render-card-construction` | 1 | reviewed | `03` |
 | `05-selftool-reaction-telemetry` | 2 | implemented | `03` |
-| `06-collapse-envelope-marker-consumers` | 2 | in-progress | none — separable DRY cleanup, not required for `04`'s render_card path |
+| `06-collapse-envelope-marker-consumers` | 2 | implemented | none — separable DRY cleanup, not required for `04`'s render_card path |
 | `07-worked-example-task-update-report` | 2 | in-progress | `01`, `03`, `04`, `05` (`06` not required) |
 
 **Sequencing.** Phase 1 (`01`-`04`) builds the mechanism itself: the package move (`01`) and the new reactive-layer schema (`02`) are independent of each other; `03`'s reaction engine needs both; `04`'s render_card marker construction needs `03`'s resolved payload. Phase 2 layers telemetry (`05`) and the worked example (`07`) on top, plus one separable DRY cleanup (`06`, the three pre-existing `ENVELOPE_DATA` marker-extraction implementations collapsed into one — not on `07`'s critical path, since those three consumers are already marker-agnostic and pick up `04`'s output unchanged).

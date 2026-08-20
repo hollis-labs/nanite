@@ -359,8 +359,8 @@ Implements `docs/engineering/architecture/12-scheduling.md` — the design produ
 | `01-schema-schedule-kind-collapse-and-retry-columns` | 1 | reviewed-pending (implemented, merged `04f05392`, Orchestrator-verified build/vet/test; fresh reviewer not yet dispatched) | none |
 | `02-store-adapter` | 1 | reviewed-pending (implemented, merged `f832cedc`, Orchestrator-verified build/vet/test; fresh reviewer not yet dispatched) | `01` |
 | `03-runner-adapter-and-job-taxonomy` | 1 | reviewed-pending (implemented, merged `becaa3d9`, Orchestrator-verified build/vet/test; fresh reviewer not yet dispatched) | none directly (parallel-safe with `01`/`02`) |
-| `04-retry-backoff-on-fail-policy` | 1 | in-progress | `01`, `02`, `03` |
-| `05-engine-wiring-and-full-replace` | 1 | not-started | `02`, `04` |
+| `04-retry-backoff-on-fail-policy` | 1 | implemented, merged `010d8975` — real correctness fix found+applied (`Job.RunID` unstable across retries; correlate by `ScheduleID`+open-row status instead), independently confirmed by Orchestrator against `go-scheduler` source | `01`, `02`, `03` |
+| `05-engine-wiring-and-full-replace` | 1 | blocked pending Phase 1 section review (`01`-`04`), fresh Reviewer dispatched — gate per kickoff instructions: `05` may not start before `02`/`04` are reviewed-clean | `02`, `04` |
 | `06-schedule-fire-telemetry` | 2 | not-started | `03` |
 | `07-wire-add-schedule-reflex` | 2 | not-started | `02` |
 | `08-agent-self-tool` | 2 | not-started | `02`; cross-batch on `TASKS/harness-reactive-self-tools/01` — see `08`'s own note |

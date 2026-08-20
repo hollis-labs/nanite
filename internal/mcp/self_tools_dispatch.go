@@ -391,8 +391,6 @@ func (st *SelfToolsTransport) matchDispatchToAgentReflex(ctx context.Context, se
 	var dispatchKindDefaultSeconds *int64
 	if kindErr == nil {
 		dispatchKindDefaultSeconds = dispatchKind.DefaultRecurrenceSeconds
-	} else {
-		slog.Warn("mcp: dispatch-reflex action-kind lookup failed", "err", kindErr)
 	}
 	now := time.Now()
 	cooldownFn := func(r store.AgentReflex) bool {

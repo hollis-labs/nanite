@@ -252,10 +252,6 @@ func (s *chatServiceImpl) attemptReflexDispatch(
 	// ActionKindLookup Resolve() calls, since candidates above is already
 	// filtered to this one kind so no other kind name is ever requested.
 	dispatchKind, kindErr := s.reflexEngine.Store.GetReflexActionKind(ctx, store.ReflexActionDispatchToAgent)
-	if kindErr != nil {
-		slog.Warn("chat-service: dispatch-reflex action-kind lookup failed",
-			"session_id", sessionID, "err", kindErr)
-	}
 	kindLookup := func(_ context.Context, _ string) (*store.ReflexActionKind, error) {
 		return dispatchKind, kindErr
 	}

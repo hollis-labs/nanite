@@ -4,7 +4,6 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
-	"strings"
 	"time"
 
 	"github.com/hollis-labs/nanite/internal/chat"
@@ -112,20 +111,19 @@ func (a *API) handleSelfToolCall(w http.ResponseWriter, r *http.Request) {
 	a.jsonResp(w, http.StatusOK, result)
 }
 
-// envelopeMarkerOpen / envelopeMarkerClose delimit the structured-UI payload
-// card_show embeds in its tool result text. extractEnvelopeMarker pulls the
-// JSON payload back out so the CLI-launch proxy can broadcast it as a
-// plugin_envelope SSE event (same delimiters as captureEnvelopeData in the
-// service package — kept as a local string scan to avoid an import widening).
-const (
-	envelopeMarkerOpen  = "<!--ENVELOPE_DATA:"
-	envelopeMarkerClose = ":ENVELOPE_DATA-->"
-)
-
 // extractEnvelopeMarker returns the JSON envelope payload embedded in a
 // card_show tool result, or "" when no marker is present. The payload is the
 // {kind, version, type, data, ...} wire shape buildShowEnvelope produces —
 // already a valid Envelope for the FE's plugin_envelope handler.
+//
+// The delimiter scan itself delegates to chat.ExtractEnvelopeMarker, the
+// shared marker-extraction function three independent hand-scans (this one,
+// internal/service/chat_generate.go's captureEnvelopeData,
+// internal/mcpserver/handlers.go's convertEnvelopeMarkers) collapsed onto
+// (TASKS/harness-reactive-self-tools/06-collapse-envelope-marker-consumers.md).
+// This function's own remaining job — iterating a *mcp.ToolResult's content
+// blocks to find the one carrying the marker — is call-site-specific, not
+// duplicated scan logic.
 func extractEnvelopeMarker(result *mcp.ToolResult) string {
 	if result == nil {
 		return ""
@@ -134,16 +132,9 @@ func extractEnvelopeMarker(result *mcp.ToolResult) string {
 		if block.Type != "text" || block.Text == "" {
 			continue
 		}
-		start := strings.Index(block.Text, envelopeMarkerOpen)
-		if start < 0 {
-			continue
+		if payload, ok := chat.ExtractEnvelopeMarker(block.Text); ok {
+			return payload
 		}
-		tail := block.Text[start+len(envelopeMarkerOpen):]
-		end := strings.Index(tail, envelopeMarkerClose)
-		if end < 0 {
-			continue
-		}
-		return tail[:end]
 	}
 	return ""
 }

@@ -210,6 +210,30 @@ func TestExtractEnvelopeMarker(t *testing.T) {
 	}
 }
 
+// TestExtractEnvelopeMarker_MalformedMarkerAndMultiBlock is
+// TASKS/harness-reactive-self-tools/06-collapse-envelope-marker-consumers.md's
+// regression proof for this call site: extractEnvelopeMarker no longer
+// hand-scans for the marker itself — it delegates to
+// chat.ExtractEnvelopeMarker (internal/chat/envelope_marker.go), the same
+// shared function internal/service/chat_generate.go's captureEnvelopeData
+// and internal/mcpserver/handlers.go's convertEnvelopeMarkers now delegate
+// to. This exercises extractEnvelopeMarker's own real call-site behavior —
+// iterating a *mcp.ToolResult's content blocks, skipping a block whose
+// marker is malformed (no closing delimiter) and falling through to a
+// later block that carries a well-formed one — not just the shared
+// function in isolation.
+func TestExtractEnvelopeMarker_MalformedMarkerAndMultiBlock(t *testing.T) {
+	res := &mcp.ToolResult{Content: []mcp.ToolContent{
+		{Type: "text", Text: `<!--ENVELOPE_DATA:{"truncated":true} no closing delimiter here`},
+		{Type: "text", Text: `<!--ENVELOPE_DATA:{"type":"info-card"}:ENVELOPE_DATA-->`},
+	}}
+	got := extractEnvelopeMarker(res)
+	want := `{"type":"info-card"}`
+	if got != want {
+		t.Fatalf("extractEnvelopeMarker = %q, want %q (malformed first block skipped, well-formed second block found)", got, want)
+	}
+}
+
 // TestExtractEnvelopeMarker_RoundTripsRenderCardReactionPayload is
 // TASKS/harness-reactive-self-tools/04-render-card-construction.md's
 // regression proof: a render_card reaction's resolved payload, once

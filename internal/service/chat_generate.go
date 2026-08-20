@@ -3046,12 +3046,18 @@ func (s *chatServiceImpl) detectStuckLoop(
 // of that plugin's frontend and backend footprint. The generic
 // ENVELOPE_DATA marker extraction below is shared infrastructure used by
 // card_show and other tools and stays in place.
+//
+// The delimiter scan itself is not implemented here — it delegates to
+// chat.ExtractEnvelopeMarker, the shared marker-extraction function three
+// independent hand-scans (this one, internal/api/tools_call.go's
+// extractEnvelopeMarker, internal/mcpserver/handlers.go's
+// convertEnvelopeMarkers) collapsed onto
+// (TASKS/harness-reactive-self-tools/06-collapse-envelope-marker-consumers.md).
+// This wrapper's own remaining job — appending to the caller's pending
+// slice — is call-site-specific, not duplicated scan logic.
 func captureEnvelopeData(result string, pending []string) []string {
-	if eStart := strings.Index(result, "<!--ENVELOPE_DATA:"); eStart >= 0 {
-		tail := result[eStart+len("<!--ENVELOPE_DATA:"):]
-		if eEnd := strings.Index(tail, ":ENVELOPE_DATA-->"); eEnd >= 0 {
-			pending = append(pending, tail[:eEnd])
-		}
+	if payload, ok := chat.ExtractEnvelopeMarker(result); ok {
+		pending = append(pending, payload)
 	}
 	return pending
 }

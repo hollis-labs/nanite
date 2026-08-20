@@ -71,6 +71,26 @@ func TestConvertEnvelopeMarkers_Multiple(t *testing.T) {
 	}
 }
 
+// TestConvertEnvelopeMarkers_MalformedMarkerHaltsLoop is
+// TASKS/harness-reactive-self-tools/06-collapse-envelope-marker-consumers.md's
+// regression proof for this call site: convertEnvelopeMarkers no longer
+// hand-scans for the marker itself — it delegates to
+// chat.ReplaceEnvelopeMarkers (internal/chat/envelope_marker.go), the same
+// shared machinery internal/service/chat_generate.go's captureEnvelopeData
+// and internal/api/tools_call.go's extractEnvelopeMarker delegate to (via
+// chat.ExtractEnvelopeMarker). This exercises convertEnvelopeMarkers' own
+// real call-site behavior — a malformed marker (an opening delimiter with
+// no closing delimiter anywhere later in the text) halts the replace loop
+// entirely, leaving the text unconverted — matching this function's
+// pre-collapse behavior exactly.
+func TestConvertEnvelopeMarkers_MalformedMarkerHaltsLoop(t *testing.T) {
+	input := `<!--ENVELOPE_DATA:{"truncated":true} no closing delimiter anywhere in this text`
+	got := convertEnvelopeMarkers(input)
+	if got != input {
+		t.Errorf("got:\n%s\nwant unchanged (malformed leading marker halts the loop):\n%s", got, input)
+	}
+}
+
 func TestMustMarshalSchema(t *testing.T) {
 	schema := map[string]any{
 		"type": "object",

@@ -447,20 +447,9 @@ func (s *Store) backfillScheduleNextRun(ctx context.Context, now time.Time) erro
 	}
 	rows.Close()
 
-	nowUTC := now.UTC()
 	for _, c := range candidates {
-		var next time.Time
-		switch c.kind {
-		case ScheduleKindOneShot:
-			next = nowUTC
-		case ScheduleKindCron:
-			parsed, err := cron.ParseStandard(strings.TrimSpace(c.spec))
-			if err != nil {
-				next = nowUTC
-			} else {
-				next = parsed.Next(nowUTC)
-			}
-		default:
+		next := ComputeAgentScheduleNextRun(c.kind, c.spec, now)
+		if next.IsZero() {
 			continue
 		}
 		if _, err := s.DB.ExecContext(ctx,
@@ -471,4 +460,48 @@ func (s *Store) backfillScheduleNextRun(ctx context.Context, now time.Time) erro
 		}
 	}
 	return nil
+}
+
+// ComputeAgentScheduleNextRun computes the next-fire time for a cron/
+// one_shot schedule given its kind/spec, as of now. Factored out of
+// backfillScheduleNextRun (above) so a schedule producer that inserts a
+// genuinely new row mid-process (managed_durable_configs.go's
+// syncManagedDurableAgentSchedule is the one real caller today) can compute
+// a usable next_run at insert time, instead of leaving it NULL until the
+// next process restart's backfillScheduleNextRun pass — see that function's
+// call site for the full finding (TASKS/scheduling/
+// 05-engine-wiring-and-full-replace.md's Work Log) on why a NULL next_run
+// on a freshly-synced row is a real, not hypothetical, gap: backfillScheduleNextRun
+// only runs once, at Store.New() boot time, strictly before
+// SyncManagedDurableAgentConfigs (container.go) ever gets a chance to
+// upsert a schedule row for the first time.
+//
+// one_shot rows: no independent target-time encoding exists in spec today
+// (see backfillScheduleNextRun's own doc comment) — "now" matches the
+// existing due-immediately-and-continuously-until-fired semantics.
+//
+// cron rows: cron.ParseStandard(spec).Next(now) — the exact parsing
+// go-scheduler.NextRun itself wraps (libs/go-scheduler/scheduler.go:85-92).
+// A malformed spec falls back to "due now" rather than returning the zero
+// time, matching backfillScheduleNextRun's own defensive rationale: NULL/
+// zero next_run means "permanently unscheduled" to go-scheduler, a worse
+// failure mode than one off-schedule immediate fire.
+//
+// An unrecognized kind returns the zero time — the caller's cue to leave
+// next_run unset (NULL) rather than inventing a due time for a kind this
+// function doesn't understand.
+func ComputeAgentScheduleNextRun(kind, spec string, now time.Time) time.Time {
+	nowUTC := now.UTC()
+	switch kind {
+	case ScheduleKindOneShot:
+		return nowUTC
+	case ScheduleKindCron:
+		parsed, err := cron.ParseStandard(strings.TrimSpace(spec))
+		if err != nil {
+			return nowUTC
+		}
+		return parsed.Next(nowUTC)
+	default:
+		return time.Time{}
+	}
 }

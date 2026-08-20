@@ -35,6 +35,15 @@ func TestDurableWakeListDueAndDryRun(t *testing.T) {
 		Body:         "wake",
 		Status:       store.ScheduleStatusActive,
 		CreatedAt:    time.Now().UTC().Format(time.RFC3339),
+		// NextRun set explicitly (TASKS/scheduling/05-engine-wiring-and-
+		// full-replace.md) -- ListDue's due-check now reads next_run
+		// (scheduleDueByNextRun, durable_wake.go) instead of the removed
+		// wakeScheduleDue's FiredCount==0-means-due-now heuristic for
+		// one_shot rows; InsertAgentSchedule itself never defaults
+		// NextRun (an empty value is a real "unscheduled", not a gap to
+		// fill in), so a "due now" test fixture must set it explicitly,
+		// same as any real schedule producer now must.
+		NextRun: time.Now().UTC().Format(time.RFC3339),
 	}); err != nil {
 		t.Fatalf("InsertAgentSchedule: %v", err)
 	}
@@ -102,6 +111,7 @@ func TestDurableWakeRunDueStartsAttachedSessionAndBumpsSchedule(t *testing.T) {
 		Body:         "wake",
 		Status:       store.ScheduleStatusActive,
 		CreatedAt:    time.Now().UTC().Format(time.RFC3339),
+		NextRun:      time.Now().UTC().Format(time.RFC3339),
 	}); err != nil {
 		t.Fatalf("InsertAgentSchedule: %v", err)
 	}
@@ -166,6 +176,7 @@ func TestDurableWakeRunDueSkipsPausedAndActiveInstances(t *testing.T) {
 		Body:         "wake",
 		Status:       store.ScheduleStatusActive,
 		CreatedAt:    time.Now().UTC().Format(time.RFC3339),
+		NextRun:      time.Now().UTC().Format(time.RFC3339),
 	}); err != nil {
 		t.Fatalf("InsertAgentSchedule: %v", err)
 	}

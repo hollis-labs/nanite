@@ -38,7 +38,6 @@ require (
 	github.com/grpc-ecosystem/grpc-gateway/v2 v2.28.0 // indirect
 	github.com/hollis-labs/go-queue v0.1.2 // indirect
 	github.com/hollis-labs/go-runner v0.5.0 // indirect
-	github.com/hollis-labs/go-scheduler v0.1.0 // indirect
 	github.com/invopop/jsonschema v0.13.0 // indirect
 	github.com/mailru/easyjson v0.7.7 // indirect
 	github.com/mfridman/interpolate v0.0.2 // indirect
@@ -107,6 +106,7 @@ require (
 	github.com/hollis-labs/go-llm-contracts v0.3.0
 	github.com/hollis-labs/go-llm-types v0.3.0
 	github.com/hollis-labs/go-messaging v0.2.1
+	github.com/hollis-labs/go-scheduler v0.1.0
 	github.com/hollis-labs/go-sqlite v0.1.0
 	github.com/hollis-labs/tesseract v0.7.1-0.20260518032333-bbce958849ac
 	github.com/pressly/goose/v3 v3.27.3

@@ -27,6 +27,7 @@ import (
 	"github.com/hollis-labs/nanite/internal/mcp"
 	"github.com/hollis-labs/nanite/internal/messaging"
 	"github.com/hollis-labs/nanite/internal/reminders"
+	"github.com/hollis-labs/nanite/internal/selftools/reactions"
 	"github.com/hollis-labs/nanite/internal/service/install"
 	"github.com/hollis-labs/nanite/internal/store"
 	"github.com/hollis-labs/nanite/internal/subagent"
@@ -313,6 +314,19 @@ type SelfToolsTransport struct {
 	// distinguishing "managed in a real root" from "external" for
 	// file-backed profiles when no roots are configured.
 	AgentClassifier AgentClassifier
+
+	// Reactions is the harness-reactive self-tools' reaction engine
+	// (internal/selftools/reactions, TASKS/harness-reactive-self-tools/
+	// 03-reaction-engine-core.md). task_update_report
+	// (self_tools_task_update_report.go, TASKS/harness-reactive-
+	// self-tools/07-worked-example-task-update-report.md) is the first
+	// and, as of this writing, only caller — any future harness-reactive
+	// self-tool calls Fire the same way. Set post-construction from
+	// main.go. Nil-safe: when unwired (e.g. a bare SelfToolsTransport in
+	// a test harness), a harness-reactive self-tool's handler skips
+	// firing reactions entirely rather than panicking, matching every
+	// other nil-safe field on this struct.
+	Reactions *reactions.Engine
 }
 
 // AgentClassifier resolves the management class of an agent profile.
@@ -539,6 +553,10 @@ func (st *SelfToolsTransport) CallTool(ctx context.Context, name string, args ma
 	// --- Self-discovery (A2A, CW-20260519-0069) ---
 	case "whoami":
 		return st.executeWhoami(ctx, args)
+	// --- Harness-reactive self-tools worked example (TASKS/
+	// harness-reactive-self-tools/07) ---
+	case taskUpdateReportToolName:
+		return st.callTaskUpdateReport(ctx, args)
 	case "scratchpad_write", "scratchpad_read", "scratchpad_clear":
 		// scratchpad_* are per-turn tools backed by the in-process chat
 		// loop's loopState. They are dispatched by the chat-loop executor,

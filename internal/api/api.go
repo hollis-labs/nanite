@@ -487,6 +487,12 @@ func (a *API) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/whoami", a.handleWhoami)
 	// JSON-RPC 2.0 endpoint for A2A Task methods (submit/get/cancel)
 	mux.HandleFunc("POST /api/a2a/jsonrpc", a.handleA2AJSONRPC)
+
+	// Harness-reactive self-tools worked example (TASKS/harness-reactive-
+	// self-tools/07-worked-example-task-update-report.md) — a trivial
+	// demo/test fixture the task_update_report self-tool's seeded
+	// internal_api_call reaction targets. See example_task_updates.go.
+	mux.HandleFunc("POST /api/example/task-updates", a.handleExampleTaskUpdate)
 }
 
 // jsonResp writes a JSON response with the given status code.

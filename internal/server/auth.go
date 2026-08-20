@@ -38,6 +38,18 @@ func basicAuthMiddleware(next http.Handler) http.Handler {
 			return
 		}
 
+		// Exempt /api/example/task-updates: the harness-reactive
+		// self-tools worked example's internal_api_call reaction
+		// (internal/selftools/reactions/internal_api_call.go) issues this
+		// same-host, same-process call with no credentials, exactly the
+		// reasoning /api/tools/call above already documents — it's a
+		// trivial demo/test fixture, not a real feature, so no gate
+		// beyond "reachable from this process" is warranted.
+		if r.URL.Path == "/api/example/task-updates" {
+			next.ServeHTTP(w, r)
+			return
+		}
+
 		// Only protect /api/ routes.
 		if !strings.HasPrefix(r.URL.Path, "/api/") {
 			next.ServeHTTP(w, r)

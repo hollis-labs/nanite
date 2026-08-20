@@ -121,6 +121,28 @@ func (s *Store) ListEnabledSelftoolReactions(ctx context.Context, toolName strin
 	return out, rows.Err()
 }
 
+// CountSelftoolReactionsByToolAndKind returns the count of
+// selftool_reactions rows for toolName + reactionKindID, regardless of
+// enabled state — the idempotent-seed check TASKS/harness-reactive-
+// self-tools/07-worked-example-task-update-report.md's
+// SeedTaskUpdateReportReactions needs (mirroring
+// internal/agent/reflexes/seeds.go's CountClassBaseReflexByName use in
+// SeedBaseReflexes). Deliberately not scoped to enabled=1 only, unlike
+// ListEnabledSelftoolReactions above — a seeder must not re-insert a row
+// an operator has since disabled, so "does a row exist at all" (not
+// "does an enabled row exist") is the correct idempotency check here.
+func (s *Store) CountSelftoolReactionsByToolAndKind(ctx context.Context, toolName, reactionKindID string) (int, error) {
+	var n int
+	err := s.DB.QueryRowContext(ctx,
+		`SELECT COUNT(*) FROM selftool_reactions WHERE tool_name = ? AND reaction_kind_id = ?`,
+		toolName, reactionKindID,
+	).Scan(&n)
+	if err != nil {
+		return 0, fmt.Errorf("count selftool_reactions: %w", err)
+	}
+	return n, nil
+}
+
 // InsertSelftoolReaction inserts a new selftool_reactions row. r.ID is
 // generated via uuid.New().String() when the caller leaves it empty,
 // matching this codebase's own insert-time-ID-generation convention

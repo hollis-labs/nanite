@@ -296,6 +296,26 @@ Operator decision, recorded in full in the task file: genuinely superseded docs 
 
 ---
 
+## Reflex Action Taxonomy (`TASKS/reflex-taxonomy/`, outside the Phase 0-9 sequence)
+
+Implements `docs/engineering/architecture/10-reflex-action-taxonomy.md` — the design produced by `TASKS/phase-4/10-reflex-architecture-review.md`'s dedicated architecture-review session (2026-08-19, operator-signed-off, no code changed). Resolves `docs/engineering/architecture/03-steering.md`'s former "Watch item" (reflexes carrying six distinct jobs with no real internal structure). Kept in its own subfolder — same pattern as `TASKS/adhoc/` — since this work wasn't part of the original `docs/engineering/TASKS.md` plan. See `TASKS/reflex-taxonomy/README.md` for the full read-first list and scope boundaries.
+
+| Task | Phase | Status | Depends on |
+|---|---|---|---|
+| `01-taxonomy-schema-foundation` | 1 | not-started | none |
+| `02-recurrence-cascade` | 1 | not-started | `01` |
+| `03-shared-decision-engine` | 1 | not-started | `01`, `02` |
+| `04-halt-turn-synchronicity` | 1 | not-started | `03` |
+| `05-provenance-tier-enforcement` | 2 | not-started | `01` |
+| `06-unified-reflex-telemetry` | 2 | not-started | `03`, `04` |
+| `07-harness-reactive-self-tools-design-session` | 2 (parked) | not-started | none — design session, operator books directly, do not auto-dispatch |
+
+**Sequencing.** Phase 1 (`01`-`04`) is a strict serial chain — each task's schema/behavior is a real prerequisite for the next, not just a merge-conflict-avoidance ordering. `05` only needs `01` and touches a largely disjoint file set (`internal/api/reflexes.go`, a new join table) from `02`-`04`'s engine-internal work — parallel-safe with those, but confirm no overlap on specific `internal/store/agent_reflexes.go` functions before running truly concurrently. `06` needs `03` (the single `Resolve()` entry point to hook telemetry into) and is sequenced after `04` specifically to avoid both tasks re-touching `chat_generate.go`/`chat_reflexes.go`'s reflex call site independently. `07` is independent of everything else and is not part of either phase's execution — it's a parked design-session placeholder, matching how `TASKS/phase-4/10` itself was tracked before this folder existed.
+
+**Two concrete, confirmed bugs this closes**: `force_tool_choice` reflexes can currently co-fire with contradictory directives (fixed by `03`'s `first_applicable` combining algorithm); `halt_session` neither preempts other actions in the same evaluation pass nor stops the current turn synchronously — it only stamps a DB flag checked on a later request (fixed by `03`'s same-pass `deny_overrides` preemption + `04`'s turn-level abort in `chat_generate.go`).
+
+---
+
 ## Escalations raised during Phases 1-6 planning (new since the Phase 0 presentation; phase/task numbers below use the 2026-08-19 Phase 2-9 resequencing)
 
 In addition to `TASKS/ESCALATIONS.md`'s existing entries (Phase 0 planning), this pass adds:

@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io/fs"
 	"path/filepath"
+	"time"
 
 	"github.com/hollis-labs/go-sqlite/sqlitekit"
 	"github.com/pressly/goose/v3"
@@ -55,6 +56,18 @@ func New(ctx context.Context, dbPath string) (*Store, error) {
 	if err := s.migrate(); err != nil {
 		db.Close()
 		return nil, fmt.Errorf("migrate: %w", err)
+	}
+	// TASKS/scheduling/01-schema-schedule-kind-collapse-and-retry-columns.md:
+	// migration 127 adds agent_schedules.next_run but deliberately leaves
+	// it NULL for pre-existing rows (real cron computation needs
+	// robfig/cron, not hand-rolled migration SQL) -- this idempotent,
+	// NULL-guarded step fills it in using real cron-parsing logic on every
+	// boot, a no-op once every active row has been backfilled once. See
+	// backfillScheduleNextRun's doc comment (agent_schedules.go) for the
+	// full reasoning.
+	if err := s.backfillScheduleNextRun(ctx, time.Now()); err != nil {
+		db.Close()
+		return nil, fmt.Errorf("backfill schedule next_run: %w", err)
 	}
 	return s, nil
 }

@@ -18,8 +18,8 @@ func TestAgentSchedule_RoundTrip(t *testing.T) {
 		ID:           "sched-001",
 		AgentID:      agent.ID,
 		Name:         "audit-cycle",
-		ScheduleKind: ScheduleKindEveryNTicks,
-		ScheduleSpec: "5",
+		ScheduleKind: ScheduleKindCron,
+		ScheduleSpec: "0 9 * * *",
 		Body:         "## Audit\nThis tick, audit the most recent run.",
 		Priority:     10,
 		CreatedBy:    "operator",
@@ -83,206 +83,218 @@ func TestAgentSchedule_InvalidStatus(t *testing.T) {
 	}
 }
 
-// TestScheduleFires_EveryNTicks verifies the every_n_ticks firing math:
-// fires when tickN > 0 && tickN % spec == 0.
-func TestScheduleFires_EveryNTicks(t *testing.T) {
-	sch := AgentSchedule{ScheduleKind: ScheduleKindEveryNTicks, ScheduleSpec: "5"}
-	now := time.Now()
-	cases := []struct {
-		tickN int
-		want  bool
-	}{
-		{0, false}, {1, false}, {4, false}, {5, true}, {10, true}, {11, false},
-	}
-	for _, tc := range cases {
-		got, err := scheduleFires(sch, tc.tickN, now)
-		if err != nil {
-			t.Fatalf("tick %d: %v", tc.tickN, err)
-		}
-		if got != tc.want {
-			t.Errorf("tick %d every_n_ticks 5: got=%v want=%v", tc.tickN, got, tc.want)
-		}
-	}
-}
-
-// TestScheduleFires_OnTick verifies on_tick fires exactly when tickN == spec.
-func TestScheduleFires_OnTick(t *testing.T) {
-	sch := AgentSchedule{ScheduleKind: ScheduleKindOnTick, ScheduleSpec: "42"}
-	now := time.Now()
-	cases := []struct {
-		tickN int
-		want  bool
-	}{
-		{41, false}, {42, true}, {43, false},
-	}
-	for _, tc := range cases {
-		got, err := scheduleFires(sch, tc.tickN, now)
-		if err != nil {
-			t.Fatalf("tick %d: %v", tc.tickN, err)
-		}
-		if got != tc.want {
-			t.Errorf("tick %d on_tick 42: got=%v want=%v", tc.tickN, got, tc.want)
-		}
-	}
-}
-
-// TestScheduleFires_OneShot fires only when fired_count == 0.
-func TestScheduleFires_OneShot(t *testing.T) {
-	now := time.Now()
-
-	first := AgentSchedule{ScheduleKind: ScheduleKindOneShot, FiredCount: 0}
-	got, err := scheduleFires(first, 7, now)
-	if err != nil || !got {
-		t.Errorf("one_shot fired_count=0: got=%v err=%v want=true", got, err)
-	}
-
-	already := AgentSchedule{ScheduleKind: ScheduleKindOneShot, FiredCount: 1}
-	got, err = scheduleFires(already, 7, now)
-	if err != nil || got {
-		t.Errorf("one_shot fired_count=1: got=%v err=%v want=false", got, err)
-	}
-}
-
-// TestScheduleFires_Cron — at minute 9:00 UTC daily, the schedule `0 9 * * *`
-// should fire when "now" is between 09:00 and 09:15 UTC (the spike's
-// 15-min lookback window).
-func TestScheduleFires_Cron(t *testing.T) {
-	sch := AgentSchedule{ScheduleKind: ScheduleKindCron, ScheduleSpec: "0 9 * * *"}
-
-	// 09:05 UTC — inside the 15-min lookback after 09:00, should fire.
-	inside := time.Date(2026, 5, 20, 9, 5, 0, 0, time.UTC)
-	got, err := scheduleFires(sch, 1, inside)
-	if err != nil {
-		t.Fatalf("cron inside window: %v", err)
-	}
-	if !got {
-		t.Error("cron at 09:05 should fire (9:00 cron, 15-min lookback)")
-	}
-
-	// 10:30 UTC — well past the window, should not fire (next 09:00 is tomorrow).
-	outside := time.Date(2026, 5, 20, 10, 30, 0, 0, time.UTC)
-	got, err = scheduleFires(sch, 1, outside)
-	if err != nil {
-		t.Fatalf("cron outside window: %v", err)
-	}
-	if got {
-		t.Error("cron at 10:30 should NOT fire (window is past)")
-	}
-}
-
-// TestScheduleFires_OnEvent — Phase A is a no-op for event-driven kinds.
-// The composer's event resolver lands in Phase B.
-func TestScheduleFires_OnEvent(t *testing.T) {
-	sch := AgentSchedule{ScheduleKind: ScheduleKindOnEvent, ScheduleSpec: "mail_received"}
-	got, err := scheduleFires(sch, 1, time.Now())
-	if err != nil {
-		t.Fatalf("on_event Phase A: %v", err)
-	}
-	if got {
-		t.Error("on_event Phase A should be a no-op (never fires)")
-	}
-}
-
-// TestGetDueSchedules_PriorityAndPausedExclusion exercises the full DB
-// query: active + matching tick + ordered by priority DESC.
-func TestGetDueSchedules_PriorityAndPausedExclusion(t *testing.T) {
+// TestAgentSchedule_RetryPolicyAndJobFields_RoundTrip is the regression
+// test for TASKS/scheduling/01-schema-schedule-kind-collapse-and-retry-
+// columns.md's Done means bullet: MaxRetries/OnFail/NextRun/JobType/
+// JobPayload round-trip correctly through InsertAgentSchedule/
+// GetAgentSchedule.
+func TestAgentSchedule_RetryPolicyAndJobFields_RoundTrip(t *testing.T) {
 	s := newTestStore(t)
 	ctx := context.Background()
-	agent := makeTestAgent(t, s, "sched-due")
-	now := time.Date(2026, 5, 20, 22, 51, 0, 0, time.UTC)
+	agent := makeTestAgent(t, s, "sched-retry-fields")
 
-	must(t, s.InsertAgentSchedule(ctx, AgentSchedule{
-		ID: "p-hi", AgentID: agent.ID, Name: "hi", Priority: 20,
-		ScheduleKind: ScheduleKindEveryNTicks, ScheduleSpec: "5",
-		Body: "high-priority",
-	}))
-	must(t, s.InsertAgentSchedule(ctx, AgentSchedule{
-		ID: "p-lo", AgentID: agent.ID, Name: "lo", Priority: 5,
-		ScheduleKind: ScheduleKindEveryNTicks, ScheduleSpec: "5",
-		Body: "low-priority",
-	}))
-	must(t, s.InsertAgentSchedule(ctx, AgentSchedule{
-		ID: "paused", AgentID: agent.ID, Name: "paused", Priority: 100,
-		ScheduleKind: ScheduleKindEveryNTicks, ScheduleSpec: "5",
-		Body: "should not appear", Status: ScheduleStatusPaused,
-	}))
-	must(t, s.InsertAgentSchedule(ctx, AgentSchedule{
-		ID: "wrong-tick", AgentID: agent.ID, Name: "wt", Priority: 30,
-		ScheduleKind: ScheduleKindEveryNTicks, ScheduleSpec: "7",
-		Body: "wrong cadence",
-	}))
+	nextRun := time.Date(2026, 8, 21, 3, 0, 0, 0, time.UTC).Format(time.RFC3339)
+	row := AgentSchedule{
+		ID:           "sched-retry-001",
+		AgentID:      agent.ID,
+		Name:         "explicit-fields",
+		ScheduleKind: ScheduleKindCron,
+		ScheduleSpec: "0 3 * * *",
+		Body:         "irrelevant for non-durable_agent_wake job types, but NOT NULL",
+		MaxRetries:   5,
+		OnFail:       ScheduleOnFailDisable,
+		NextRun:      nextRun,
+		JobType:      ScheduleJobTypeCommandRun,
+		JobPayload:   `{"command":"lint","args":["--fix"]}`,
+	}
+	if err := s.InsertAgentSchedule(ctx, row); err != nil {
+		t.Fatalf("InsertAgentSchedule: %v", err)
+	}
 
-	due, err := s.GetDueSchedules(ctx, agent.ID, "", 10, now)
+	got, err := s.GetAgentSchedule(ctx, "sched-retry-001")
 	if err != nil {
-		t.Fatalf("GetDueSchedules: %v", err)
+		t.Fatalf("GetAgentSchedule: %v", err)
 	}
-	if len(due) != 2 {
-		t.Fatalf("expected 2 due schedules at tick 10, got %d: %+v", len(due), due)
+	if got.MaxRetries != 5 {
+		t.Errorf("MaxRetries = %d, want 5", got.MaxRetries)
 	}
-	if due[0].ID != "p-hi" || due[1].ID != "p-lo" {
-		t.Errorf("priority order wrong: %s then %s", due[0].ID, due[1].ID)
+	if got.OnFail != ScheduleOnFailDisable {
+		t.Errorf("OnFail = %q, want %q", got.OnFail, ScheduleOnFailDisable)
+	}
+	if got.NextRun != nextRun {
+		t.Errorf("NextRun = %q, want %q", got.NextRun, nextRun)
+	}
+	if got.JobType != ScheduleJobTypeCommandRun {
+		t.Errorf("JobType = %q, want %q", got.JobType, ScheduleJobTypeCommandRun)
+	}
+	if got.JobPayload != `{"command":"lint","args":["--fix"]}` {
+		t.Errorf("JobPayload = %q, want the inserted JSON", got.JobPayload)
+	}
+
+	// Zero-value MaxRetries/OnFail/JobType/JobPayload on insert fall back to
+	// the documented Go-side defaults (mirroring the column DDL defaults),
+	// and NextRun stays empty (DB NULL) rather than defaulting to anything.
+	must(t, s.InsertAgentSchedule(ctx, AgentSchedule{
+		ID: "sched-retry-002", AgentID: agent.ID, Name: "defaults",
+		ScheduleKind: ScheduleKindOneShot, Body: "b",
+	}))
+	defaults, err := s.GetAgentSchedule(ctx, "sched-retry-002")
+	if err != nil {
+		t.Fatalf("GetAgentSchedule (defaults): %v", err)
+	}
+	if defaults.MaxRetries != 3 {
+		t.Errorf("default MaxRetries = %d, want 3", defaults.MaxRetries)
+	}
+	if defaults.OnFail != ScheduleOnFailRetry {
+		t.Errorf("default OnFail = %q, want %q", defaults.OnFail, ScheduleOnFailRetry)
+	}
+	if defaults.JobType != ScheduleJobTypeDurableAgentWake {
+		t.Errorf("default JobType = %q, want %q", defaults.JobType, ScheduleJobTypeDurableAgentWake)
+	}
+	if defaults.JobPayload != "{}" {
+		t.Errorf("default JobPayload = %q, want {}", defaults.JobPayload)
+	}
+	if defaults.NextRun != "" {
+		t.Errorf("default NextRun = %q, want empty (NULL)", defaults.NextRun)
 	}
 }
 
-// TestGetDueSchedules_SessionScope verifies session-scoped rows match only
-// for that session, while session_id=NULL rows match all sessions.
-func TestGetDueSchedules_SessionScope(t *testing.T) {
+// TestAgentSchedule_ScheduleKindCheckRejectsRetiredValues confirms
+// migration 127's narrowed CHECK constraint actually rejects the three
+// retired schedule_kind values at the DB level, not just at the (now-
+// removed) Go constant level.
+func TestAgentSchedule_ScheduleKindCheckRejectsRetiredValues(t *testing.T) {
 	s := newTestStore(t)
 	ctx := context.Background()
-	agent := makeTestAgent(t, s, "sched-scope")
-	now := time.Now().UTC()
+	agent := makeTestAgent(t, s, "sched-retired-kind")
 
-	must(t, s.InsertAgentSchedule(ctx, AgentSchedule{
-		ID: "all-sessions", AgentID: agent.ID, Name: "global",
-		ScheduleKind: ScheduleKindOneShot, Body: "global one-shot",
-	}))
-	must(t, s.InsertAgentSchedule(ctx, AgentSchedule{
-		ID: "sess-A", AgentID: agent.ID, SessionID: "session-A",
-		Name: "scoped", ScheduleKind: ScheduleKindOneShot, Body: "A-only",
-	}))
-
-	dueA, err := s.GetDueSchedules(ctx, agent.ID, "session-A", 1, now)
-	if err != nil {
-		t.Fatalf("GetDueSchedules A: %v", err)
-	}
-	if len(dueA) != 2 {
-		t.Errorf("session A: expected 2 (global + A-only), got %d", len(dueA))
-	}
-
-	dueB, err := s.GetDueSchedules(ctx, agent.ID, "session-B", 1, now)
-	if err != nil {
-		t.Fatalf("GetDueSchedules B: %v", err)
-	}
-	if len(dueB) != 1 {
-		t.Errorf("session B: expected 1 (global only), got %d", len(dueB))
+	for _, kind := range []string{"every_n_ticks", "on_tick", "on_event"} {
+		err := s.InsertAgentSchedule(ctx, AgentSchedule{
+			ID: "sched-retired-" + kind, AgentID: agent.ID, Name: kind,
+			ScheduleKind: kind, Body: "b",
+		})
+		if err == nil {
+			t.Errorf("schedule_kind=%q: expected CHECK violation, got nil error", kind)
+		}
 	}
 }
 
-// TestGetDueSchedules_ExpiresAt excludes rows whose expires_at is in the
-// past.
-func TestGetDueSchedules_ExpiresAt(t *testing.T) {
+// TestBackfillScheduleNextRun_Cron proves an active, pre-existing cron row
+// with NULL next_run gets backfilled to the real next cron occurrence
+// after "now", not just any non-null placeholder.
+func TestBackfillScheduleNextRun_Cron(t *testing.T) {
 	s := newTestStore(t)
 	ctx := context.Background()
-	agent := makeTestAgent(t, s, "sched-expires")
-	now := time.Date(2026, 5, 20, 22, 51, 0, 0, time.UTC)
+	agent := makeTestAgent(t, s, "sched-backfill-cron")
 
+	// Matches the one real production row found in the backup DB during
+	// this task's verification: cron, "0 3 * * *", active, never fired.
 	must(t, s.InsertAgentSchedule(ctx, AgentSchedule{
-		ID: "live", AgentID: agent.ID, Name: "live",
-		ScheduleKind: ScheduleKindOneShot, Body: "still good",
-		ExpiresAt: now.Add(time.Hour).Format(time.RFC3339),
+		ID: "cron-row", AgentID: agent.ID, Name: "lint-and-export",
+		ScheduleKind: ScheduleKindCron, ScheduleSpec: "0 3 * * *",
+		Body: "run lint and export",
 	}))
-	must(t, s.InsertAgentSchedule(ctx, AgentSchedule{
-		ID: "expired", AgentID: agent.ID, Name: "expired",
-		ScheduleKind: ScheduleKindOneShot, Body: "stale",
-		ExpiresAt: now.Add(-time.Hour).Format(time.RFC3339),
-	}))
-
-	due, err := s.GetDueSchedules(ctx, agent.ID, "", 1, now)
+	// InsertAgentSchedule leaves NextRun empty (NULL) when not given —
+	// confirm that starting assumption before backfilling.
+	before, err := s.GetAgentSchedule(ctx, "cron-row")
 	if err != nil {
-		t.Fatalf("GetDueSchedules: %v", err)
+		t.Fatalf("GetAgentSchedule (before): %v", err)
 	}
-	if len(due) != 1 || due[0].ID != "live" {
-		t.Errorf("expires_at filter wrong: %+v", due)
+	if before.NextRun != "" {
+		t.Fatalf("precondition: NextRun = %q, want empty before backfill", before.NextRun)
+	}
+
+	now := time.Date(2026, 8, 20, 22, 0, 0, 0, time.UTC) // well past 03:00 today
+	if err := s.backfillScheduleNextRun(ctx, now); err != nil {
+		t.Fatalf("backfillScheduleNextRun: %v", err)
+	}
+
+	after, err := s.GetAgentSchedule(ctx, "cron-row")
+	if err != nil {
+		t.Fatalf("GetAgentSchedule (after): %v", err)
+	}
+	if after.NextRun == "" {
+		t.Fatal("NextRun still empty after backfill — row silently lost its due-ness")
+	}
+	got, err := time.Parse(time.RFC3339, after.NextRun)
+	if err != nil {
+		t.Fatalf("NextRun %q did not parse as RFC3339: %v", after.NextRun, err)
+	}
+	want := time.Date(2026, 8, 21, 3, 0, 0, 0, time.UTC) // next 03:00 after "now"
+	if !got.Equal(want) {
+		t.Errorf("NextRun = %v, want %v (next real 03:00 UTC occurrence)", got, want)
+	}
+
+	// Idempotent: a second call must not overwrite an already-backfilled
+	// value.
+	if err := s.backfillScheduleNextRun(ctx, now.Add(time.Hour)); err != nil {
+		t.Fatalf("backfillScheduleNextRun (second call): %v", err)
+	}
+	again, err := s.GetAgentSchedule(ctx, "cron-row")
+	if err != nil {
+		t.Fatalf("GetAgentSchedule (second call): %v", err)
+	}
+	if again.NextRun != after.NextRun {
+		t.Errorf("second backfillScheduleNextRun call changed NextRun: %q -> %q", after.NextRun, again.NextRun)
+	}
+}
+
+// TestBackfillScheduleNextRun_OneShotAndNonActive proves: an active
+// one_shot row backfills to "due now" (matching wakeScheduleDue's real
+// existing semantics — a one_shot row has no independent target-time
+// encoding and is due immediately until it fires once), while paused and
+// expired rows are left alone (NextRun stays empty/NULL).
+func TestBackfillScheduleNextRun_OneShotAndNonActive(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+	agent := makeTestAgent(t, s, "sched-backfill-oneshot")
+
+	must(t, s.InsertAgentSchedule(ctx, AgentSchedule{
+		ID: "one-shot-active", AgentID: agent.ID, Name: "active-one-shot",
+		ScheduleKind: ScheduleKindOneShot, Body: "b",
+	}))
+	must(t, s.InsertAgentSchedule(ctx, AgentSchedule{
+		ID: "cron-paused", AgentID: agent.ID, Name: "paused-cron",
+		ScheduleKind: ScheduleKindCron, ScheduleSpec: "0 9 * * *", Body: "b",
+		Status: ScheduleStatusPaused,
+	}))
+	must(t, s.InsertAgentSchedule(ctx, AgentSchedule{
+		ID: "cron-expired", AgentID: agent.ID, Name: "expired-cron",
+		ScheduleKind: ScheduleKindCron, ScheduleSpec: "0 9 * * *", Body: "b",
+		Status: ScheduleStatusExpired,
+	}))
+
+	now := time.Date(2026, 8, 20, 22, 0, 0, 0, time.UTC)
+	if err := s.backfillScheduleNextRun(ctx, now); err != nil {
+		t.Fatalf("backfillScheduleNextRun: %v", err)
+	}
+
+	oneShot, err := s.GetAgentSchedule(ctx, "one-shot-active")
+	if err != nil {
+		t.Fatalf("GetAgentSchedule (one-shot): %v", err)
+	}
+	got, err := time.Parse(time.RFC3339, oneShot.NextRun)
+	if err != nil {
+		t.Fatalf("one_shot NextRun %q did not parse: %v", oneShot.NextRun, err)
+	}
+	if !got.Equal(now) {
+		t.Errorf("one_shot NextRun = %v, want %v (due now)", got, now)
+	}
+
+	paused, err := s.GetAgentSchedule(ctx, "cron-paused")
+	if err != nil {
+		t.Fatalf("GetAgentSchedule (paused): %v", err)
+	}
+	if paused.NextRun != "" {
+		t.Errorf("paused row NextRun = %q, want empty (backfill should not touch non-active rows)", paused.NextRun)
+	}
+
+	expired, err := s.GetAgentSchedule(ctx, "cron-expired")
+	if err != nil {
+		t.Fatalf("GetAgentSchedule (expired): %v", err)
+	}
+	if expired.NextRun != "" {
+		t.Errorf("expired row NextRun = %q, want empty", expired.NextRun)
 	}
 }
 

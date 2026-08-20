@@ -180,3 +180,95 @@ func TestEvaluateState_DispatchToAgent_DoesNotBlockOtherActionKinds(t *testing.T
 			hooks.actionFilters, hooks.fired, hooks.staged)
 	}
 }
+
+// TestEvaluateState_DispatchToAgent_RunScopedRowAlsoExcludedFromGenericPass
+// is TASKS/teams/05-agent-reflexes-run-scoping.md's own regression
+// requirement: migration 131_agent_reflexes_workflow_run_scoping.sql adds
+// agent_reflexes.workflow_run_id, and this test confirms
+// TestEvaluateState_DispatchToAgent_ExcludedFromGenericPass's exclusion
+// (TASKS/phase-4/09-fix-dispatch-to-agent-generic-pass-leak.md, above)
+// still holds unchanged for a dispatch_to_agent row that carries a
+// non-NULL workflow_run_id — the exclusion is keyed purely on
+// r.ActionKind (engine.go's EvaluateState loop), so a run-scoped row must
+// stay just as invisible to this generic per-turn pass as a global one
+// always has: it does not newly leak in just because it now also carries
+// a workflow_run_id. The two dedicated call sites this column exists for
+// (internal/service/chat_reflex_dispatch.go's attemptReflexDispatch,
+// internal/selftools/self_tools_dispatch.go's matchDispatchToAgentReflex)
+// have their own equivalent coverage proving the row DOES fire there,
+// for a session resolved to its own run — this test is the negative
+// space: EvaluateState must never see it fire, regardless of scope.
+func TestEvaluateState_DispatchToAgent_RunScopedRowAlsoExcludedFromGenericPass(t *testing.T) {
+	ctx := context.Background()
+	st := newReflexTestStore(t)
+	if err := st.CreateAgent(&store.AgentProfile{
+		ID:           "agent-dispatch-run-scoped-probe",
+		Name:         "Agent Dispatch Run Scoped Probe",
+		Slug:         "agent-dispatch-run-scoped-probe",
+		Class:        "advisor",
+		SystemPrompt: "test",
+		Source:       "test",
+	}); err != nil {
+		t.Fatalf("CreateAgent: %v", err)
+	}
+
+	// agent_reflexes.workflow_run_id REFERENCES workflow_runs(id) — a real
+	// row is required for the FK-enforced insert below (foreign_keys is
+	// ON by default, sqlitekit.WriterOptions).
+	if _, err := st.DB.ExecContext(ctx,
+		`INSERT INTO workflow_runs (id, started_at) VALUES (?, datetime('now'))`,
+		"run-generic-pass-probe",
+	); err != nil {
+		t.Fatalf("insert test workflow_runs row: %v", err)
+	}
+
+	dispatchID, err := st.InsertAgentReflex(ctx, store.AgentReflex{
+		ClassTag:      "advisor",
+		Name:          "dispatch_run_scoped_generic_pass_probe",
+		TriggerKind:   store.ReflexTriggerEvent,
+		TriggerSpec:   `{"name":"probe"}`,
+		ActionKind:    store.ReflexActionDispatchToAgent,
+		ActionSpec:    `{"agent_slug":"researcher","confidence":0.5,"reason":"test"}`,
+		WorkflowRunID: "run-generic-pass-probe",
+	})
+	if err != nil {
+		t.Fatalf("InsertAgentReflex: %v", err)
+	}
+
+	hooks := &fakeReflexPluginHooks{}
+	engine := NewEngine(st, nil)
+	engine.SetPluginHooks(hooks)
+
+	out, err := engine.EvaluateState(ctx, "agent-dispatch-run-scoped-probe", "advisor", State{
+		SessionID:  "sess-dispatch-run-scoped-probe",
+		AgentID:    "agent-dispatch-run-scoped-probe",
+		AgentClass: "advisor",
+		Events:     []EventSignal{{EventType: "probe"}},
+	})
+	if err != nil {
+		t.Fatalf("EvaluateState: %v", err)
+	}
+
+	if len(out.Actions) != 0 {
+		t.Fatalf("Actions = %+v, want none — a run-scoped dispatch_to_agent reflex must stay just as invisible to the generic pass as a global one", out.Actions)
+	}
+	if len(out.FiredReflexes) != 0 {
+		t.Fatalf("FiredReflexes = %+v, want none", out.FiredReflexes)
+	}
+
+	reflex, err := st.GetAgentReflex(ctx, dispatchID)
+	if err != nil {
+		t.Fatalf("GetAgentReflex: %v", err)
+	}
+	if reflex.FiredCount != 0 {
+		t.Errorf("FiredCount = %d, want 0 — the generic pass must not bump fired_count for a run-scoped dispatch_to_agent row either", reflex.FiredCount)
+	}
+	if reflex.WorkflowRunID != "run-generic-pass-probe" {
+		t.Fatalf("sanity check: reflex.WorkflowRunID = %q, want run-generic-pass-probe — the fixture itself is wrong if this fails", reflex.WorkflowRunID)
+	}
+
+	if hooks.actionFilters != 0 || hooks.fired != 0 || hooks.staged != 0 {
+		t.Errorf("hooks action=%d fired=%d staged=%d, want 0 each — a run-scoped dispatch_to_agent row must not reach plugin hooks via the generic pass",
+			hooks.actionFilters, hooks.fired, hooks.staged)
+	}
+}

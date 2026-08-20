@@ -349,11 +349,57 @@ func (st *SelfToolsTransport) matchDispatchToAgentReflex(ctx context.Context, se
 		MessageTokenEst: len(message) / 4,
 	})
 
-	candidates, err := st.Store.ListAgentReflexesForAgent(ctx, agentProfileID, class)
+	allCandidates, err := st.Store.ListAgentReflexesForAgent(ctx, agentProfileID, class)
 	if err != nil {
 		slog.Warn("mcp: dispatch-reflex list failed",
 			"agent_id", agentProfileID, "class", class, "err", err)
 		return nil
+	}
+
+	// TASKS/teams/05-agent-reflexes-run-scoping.md: allCandidates above
+	// (ListAgentReflexesForAgent) is NOT filtered by workflow_run_id at
+	// the SQL level — it returns every row matching (agentProfileID,
+	// class) regardless of scope, exactly as it always has (narrowing
+	// that shared query would change behavior for every other caller of
+	// it too, including Engine.EvaluateState's generic per-turn pass,
+	// which has no run context of its own). The WorkflowRunID=="" check
+	// below is this call site's own responsibility, same as the
+	// candidates variable's existing ActionKind filter (below,
+	// dispatchCandidates) — it is what keeps a run-scoped row (once one
+	// exists) from leaking into a session outside its own run via this
+	// global list.
+	candidates := make([]store.AgentReflex, 0, len(allCandidates))
+	for _, r := range allCandidates {
+		if r.WorkflowRunID == "" {
+			candidates = append(candidates, r)
+		}
+	}
+
+	// Widen with this session's TeamRun-scoped dispatch_to_agent rows, if
+	// any — the same widening internal/service/chat_reflex_dispatch.go's
+	// attemptReflexDispatch applies upstream (see that call site's own
+	// comment for the full rationale, including the documented
+	// global-vs-run-scoped priority-ordering call: candidates are merged
+	// into one flat list and dispatch_to_agent's existing
+	// first_applicable combining algorithm — unchanged — is the sole
+	// arbiter of which one wins). Global rules (candidates above) still
+	// apply; run-scoped rules layer on top, they do not replace the
+	// global set. A resolve failure (including "team_run_members doesn't
+	// exist on this database yet") degrades to "no run scoping" rather
+	// than aborting this call site's own evaluation — additive widening
+	// must never regress the base (non-Team) dispatch_to_agent behavior
+	// that existed before this task.
+	if runID, found, rerr := st.Store.ResolveWorkflowRunIDForSession(ctx, sessionID); rerr != nil {
+		slog.Warn("mcp: dispatch-reflex workflow-run resolve failed",
+			"session_id", sessionID, "err", rerr)
+	} else if found {
+		runScoped, rlErr := st.Store.ListAgentReflexesForWorkflowRun(ctx, runID, agentProfileID, class)
+		if rlErr != nil {
+			slog.Warn("mcp: dispatch-reflex run-scoped list failed",
+				"session_id", sessionID, "workflow_run_id", runID, "err", rlErr)
+		} else {
+			candidates = append(candidates, runScoped...)
+		}
 	}
 
 	state := reflexes.State{

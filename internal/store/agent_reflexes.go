@@ -86,6 +86,26 @@ const (
 // -> this field); nil means "inherit the kind-level default." Reading and
 // applying that cascade is TASKS/reflex-taxonomy/02-recurrence-cascade.md's
 // job, not this one — this task only adds the column and exposes it here.
+//
+// WorkflowRunID (TASKS/teams/05-agent-reflexes-run-scoping.md, migration
+// 131_agent_reflexes_workflow_run_scoping.sql) is the third scoping
+// dimension docs/engineering/architecture/15-teams.md's "Routing: real
+// reuse, and one real gap" section names: AgentID/ClassTag alone can only
+// express "global/class-bound" or "bound to one specific agent" — there
+// was no way to say "this reflex exists only for the lifetime of this
+// TeamRun." Empty (the value of every pre-existing row, and every row
+// created by any path that doesn't set it) means global/class-bound,
+// exactly as before this column existed. A non-empty value scopes the row
+// to one specific workflow_runs.id (a TeamRun — the design doc's "TeamRun
+// IS a WorkflowRun" decision, docs/engineering/architecture/15-teams.md's
+// "Decision 2"). Immutable after creation, same rationale as AgentID/
+// ClassTag above: it is a scope binding, not a tunable knob — deliberately
+// absent from UpdateAgentReflex's SET clause. See
+// ListAgentReflexesForWorkflowRun (below) for the read-side query this
+// column feeds, and internal/service/chat_reflex_dispatch.go's
+// attemptReflexDispatch / internal/selftools/self_tools_dispatch.go's
+// matchDispatchToAgentReflex for the two call sites that combine a run's
+// scoped candidates with ListAgentReflexesForAgent's existing global set.
 type AgentReflex struct {
 	ID                        string `json:"id"`
 	AgentID                   string `json:"agent_id"`
@@ -104,6 +124,7 @@ type AgentReflex struct {
 	OptOutAllowed             bool   `json:"opt_out_allowed"`
 	ProvenanceTier            string `json:"provenance_tier"`
 	RecurrenceOverrideSeconds *int64 `json:"recurrence_override_seconds"`
+	WorkflowRunID             string `json:"workflow_run_id"`
 }
 
 // PendingReflex is one row in the pending_reflexes table. The
@@ -129,7 +150,8 @@ const agentReflexColumns = `id, COALESCE(agent_id,''), COALESCE(class_tag,''), n
        trigger_kind, trigger_spec, action_kind, action_spec,
        status, priority, fired_count, COALESCE(last_fired_at,''),
        created_at, created_by, opt_out_allowed,
-       provenance_tier, recurrence_override_seconds`
+       provenance_tier, recurrence_override_seconds,
+       COALESCE(workflow_run_id,'')`
 
 func scanAgentReflex(scanner interface{ Scan(...any) error }, r *AgentReflex) error {
 	var recurrenceOverride sql.NullInt64
@@ -139,6 +161,7 @@ func scanAgentReflex(scanner interface{ Scan(...any) error }, r *AgentReflex) er
 		&r.Status, &r.Priority, &r.FiredCount, &r.LastFiredAt,
 		&r.CreatedAt, &r.CreatedBy, &r.OptOutAllowed,
 		&r.ProvenanceTier, &recurrenceOverride,
+		&r.WorkflowRunID,
 	); err != nil {
 		return err
 	}
@@ -224,13 +247,13 @@ func (s *Store) InsertAgentReflex(ctx context.Context, row AgentReflex) (string,
 		    (id, agent_id, class_tag, name, trigger_kind, trigger_spec,
 		     action_kind, action_spec, status, priority, fired_count,
 		     last_fired_at, created_at, created_by, opt_out_allowed,
-		     provenance_tier, recurrence_override_seconds)
+		     provenance_tier, recurrence_override_seconds, workflow_run_id)
 		 VALUES (?, ?, ?, ?, ?, ?,
 		         ?, ?, ?, ?, ?,
 		         ?,
 		         COALESCE(NULLIF(?, ''), datetime('now')),
 		         ?, ?,
-		         ?, ?)`,
+		         ?, ?, ?)`,
 		row.ID, nullIfEmpty(row.AgentID), nullIfEmpty(row.ClassTag),
 		row.Name, row.TriggerKind, row.TriggerSpec,
 		row.ActionKind, row.ActionSpec, row.Status, row.Priority, row.FiredCount,
@@ -238,6 +261,7 @@ func (s *Store) InsertAgentReflex(ctx context.Context, row AgentReflex) (string,
 		row.CreatedAt,
 		row.CreatedBy, row.OptOutAllowed,
 		row.ProvenanceTier, nullIfNilInt64(row.RecurrenceOverrideSeconds),
+		nullIfEmpty(row.WorkflowRunID),
 	)
 	if err != nil {
 		return "", fmt.Errorf("insert agent_reflexes: %w", err)
@@ -295,6 +319,73 @@ func (s *Store) ListAgentReflexesForAgent(ctx context.Context, agentID, classTag
 	)
 	if err != nil {
 		return nil, fmt.Errorf("list agent_reflexes: %w", err)
+	}
+	defer rows.Close()
+	out := make([]AgentReflex, 0)
+	for rows.Next() {
+		var r AgentReflex
+		if err := scanAgentReflex(rows, &r); err != nil {
+			return nil, fmt.Errorf("scan agent_reflexes: %w", err)
+		}
+		out = append(out, r)
+	}
+	return out, rows.Err()
+}
+
+// ListAgentReflexesForWorkflowRun returns the run-scoped counterpart of
+// ListAgentReflexesForAgent — TASKS/teams/05-agent-reflexes-run-scoping.md,
+// the "third scoping dimension" docs/engineering/architecture/
+// 15-teams.md's "Routing: real reuse, and one real gap" section names.
+// Same class-bound/opt-out/agent-specific filtering as
+// ListAgentReflexesForAgent, with the additional constraint
+// workflow_run_id = runID — i.e. rows deliberately scoped to one specific
+// TeamRun (a workflow_runs.id), not the global (workflow_run_id IS NULL)
+// set ListAgentReflexesForAgent already returns.
+//
+// Deliberately a separate query rather than a parameter added to
+// ListAgentReflexesForAgent: ListAgentReflexesForAgent's existing callers
+// (including Engine.EvaluateState's generic per-turn pass,
+// internal/agent/reflexes/engine.go) have no run-context of their own and
+// must keep seeing exactly the global set they always have — narrowing
+// that shared query would be a behavior change for every caller, not just
+// the two dispatch_to_agent call sites that actually need run-scoping
+// (internal/service/chat_reflex_dispatch.go's attemptReflexDispatch,
+// internal/selftools/self_tools_dispatch.go's matchDispatchToAgentReflex).
+// Both of those combine this method's result with
+// ListAgentReflexesForAgent's own (global rules still apply inside a
+// run; run-scoped rules layer on top, they do not replace the global
+// set) — see each call site's own comment for the merge and the
+// documented global-vs-run-scoped priority-ordering call.
+//
+// Returns an empty slice, no error, when runID is empty (no run context
+// to scope against — the common case for a non-Team session).
+func (s *Store) ListAgentReflexesForWorkflowRun(ctx context.Context, runID, agentID, classTag string) ([]AgentReflex, error) {
+	if runID == "" {
+		return nil, nil
+	}
+	rows, err := s.DB.QueryContext(ctx,
+		`SELECT `+agentReflexColumns+`
+		 FROM agent_reflexes
+		 WHERE status = 'active'
+		   AND workflow_run_id = ?
+		   AND (
+		         (
+		           agent_id IS NULL AND class_tag = ?
+		           AND (
+		                 opt_out_allowed = 0
+		              OR NOT EXISTS (
+		                   SELECT 1 FROM agent_reflex_opt_outs o
+		                    WHERE o.agent_id = ? AND o.reflex_id = agent_reflexes.id
+		                 )
+		               )
+		         )
+		      OR agent_id = ?
+		       )
+		 ORDER BY priority DESC, created_at ASC`,
+		runID, classTag, agentID, agentID,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("list agent_reflexes for workflow run: %w", err)
 	}
 	defer rows.Close()
 	out := make([]AgentReflex, 0)

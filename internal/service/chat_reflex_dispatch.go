@@ -206,10 +206,69 @@ func (s *chatServiceImpl) attemptReflexDispatch(
 	// caller passes it — filtering to dispatch_to_agent only is this
 	// caller's own job, same as EvaluateState's dispatch_to_agent
 	// exclusion is that (different) caller's own job.
+	//
+	// TASKS/teams/05-agent-reflexes-run-scoping.md: allCandidates above
+	// (ListAgentReflexesForAgent) is NOT filtered by workflow_run_id at
+	// the SQL level — it returns every row matching (agentID, class)
+	// regardless of scope, exactly as it always has, since narrowing that
+	// shared query would change behavior for every OTHER caller too
+	// (Engine.EvaluateState's generic per-turn pass has no run context of
+	// its own). So the WorkflowRunID=="" check below is this call site's
+	// own responsibility, same as the ActionKind check next to it — it is
+	// what keeps a run-scoped row (once one exists) from leaking into a
+	// session outside its own run via this global list.
 	candidates := make([]store.AgentReflex, 0, len(allCandidates))
 	for _, r := range allCandidates {
-		if r.ActionKind == store.ReflexActionDispatchToAgent {
+		if r.ActionKind == store.ReflexActionDispatchToAgent && r.WorkflowRunID == "" {
 			candidates = append(candidates, r)
+		}
+	}
+
+	// Widen with this session's TeamRun-scoped dispatch_to_agent rows, if
+	// any — the "third scoping dimension" docs/engineering/architecture/
+	// 15-teams.md's "Routing: real reuse, and one real gap" section names.
+	// Global rules (candidates above) still apply; run-scoped rules layer
+	// on top, they do not replace the global set. A resolve failure
+	// (including "team_run_members doesn't exist on this database yet" —
+	// see ResolveWorkflowRunIDForSession's own fail-open doc comment)
+	// degrades to "no run scoping" rather than aborting the whole dispatch
+	// attempt — widening the candidate set is additive, so a failure here
+	// must never regress the base (non-Team) dispatch_to_agent behavior
+	// that existed before this task.
+	//
+	// Global-vs-run-scoped priority ordering (TASKS/teams/
+	// 05-agent-reflexes-run-scoping.md's own documented judgment call,
+	// since the design doc's routing section only settles
+	// semantic-rule-before-coordinator-fallback ordering, not this):
+	// run-scoped candidates are appended to the SAME flat candidates slice
+	// below, so dispatch_to_agent's existing first_applicable combining
+	// algorithm (Resolve(), unchanged) is the sole arbiter — its own
+	// priority DESC / created_at ASC tie-break decides the winner
+	// regardless of which scope a candidate came from. No automatic
+	// run-scoped-over-global (or global-over-run-scoped) boost is applied
+	// here — that would be new combining logic, and this task's own brief
+	// is explicit that first_applicable is "already the live algorithm,
+	// no new combining logic needed here." A Team wanting its run-scoped
+	// routing rules to reliably beat the generic class-bound fallback
+	// achieves that the same way any two same-kind reflexes already
+	// resolve a tie today: by authoring a higher `priority` value — the
+	// same discipline the design doc's own "coordinator fallback = the
+	// lowest-priority row in the same scoped set" convention already
+	// assumes of Team-authored rows.
+	if runID, found, rerr := s.reflexEngine.Store.ResolveWorkflowRunIDForSession(ctx, sessionID); rerr != nil {
+		slog.Warn("chat-service: dispatch-reflex workflow-run resolve failed",
+			"session_id", sessionID, "err", rerr)
+	} else if found {
+		runScoped, rlErr := s.reflexEngine.Store.ListAgentReflexesForWorkflowRun(ctx, runID, agentID, class)
+		if rlErr != nil {
+			slog.Warn("chat-service: dispatch-reflex run-scoped list failed",
+				"session_id", sessionID, "workflow_run_id", runID, "err", rlErr)
+		} else {
+			for _, r := range runScoped {
+				if r.ActionKind == store.ReflexActionDispatchToAgent {
+					candidates = append(candidates, r)
+				}
+			}
 		}
 	}
 

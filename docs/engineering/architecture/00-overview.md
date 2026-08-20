@@ -26,6 +26,9 @@ These recur across every subsystem doc in this folder — they're not independen
 8. [Cards](08-cards.md) — the structured UI-card system (formerly "the envelope system").
 9. [Plugin System](09-plugin-system.md) — how Nanite gets extended without a core code change.
 10. [Reflex Action Taxonomy & Precedence](10-reflex-action-taxonomy.md) — how the six reflex job-types get resolved when they fire together (a [Steering](03-steering.md) detail doc).
+11. [Harness-Reactive Self-Tools](11-harness-reactive-self-tools.md) — the agent-initiated "declare a fact, let the harness react" mechanism, sibling to reflexes.
+12. [Scheduling](12-scheduling.md) — the `go-scheduler`-backed engine for running agents, workflows, and commands on a schedule.
+13. [Memory & Knowledge Tools](13-memory-and-knowledge-tools.md) — the native memory/knowledge/recall tool surface: scratchpad, todo/plan, handoff, per-agent durable state, embedded Tesseract, chat search.
 
 ## What's genuinely still open
 

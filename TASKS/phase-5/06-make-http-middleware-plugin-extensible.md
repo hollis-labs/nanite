@@ -1,10 +1,23 @@
 # Make the HTTP middleware chain plugin-extensible
 
 **Phase:** 5
-**Status:** not-started
+**Status:** superseded — see `TASKS/plugin-system/07-make-http-middleware-plugin-extensible.md`
 **Depends on:** none
 
-## ⚠️ DESIGN NOT YET SETTLED — read the escalation entry in `TASKS/ESCALATIONS.md` before dispatching this task as a mechanical build
+## ⚠️ SUPERSEDED, 2026-08-21 — do not dispatch this file
+
+The open design question this file was blocked on (where plugin-contributed middleware may
+legally sit, one fixed slot vs. declared priority, install-time validation shape) was settled
+by the operator during the `TASKS/plugin-system` planning pass: **builtins only,
+priority-ordered**, mirroring the filter chain's existing priority pattern
+(`docs/engineering/architecture/09-plugin-system.md`'s "Middleware" section). The mostly-moot
+original security concern (a less-trusted plugin affecting the auth-wrapping chain) dissolves
+under that decision — builtins are already full-trust, same tier as core code. Implementation
+is tracked at `TASKS/plugin-system/07-make-http-middleware-plugin-extensible.md`, which
+supersedes this file in full. Left in place for historical record of the original escalation;
+do not dispatch this file as a separate task.
+
+## ⚠️ DESIGN NOT YET SETTLED (historical — see supersede notice above) — read the escalation entry in `TASKS/ESCALATIONS.md` before dispatching this task as a mechanical build
 
 **This item is flagged in this planning pass as a genuine design-decision escalation candidate, not a locked shape ready for mechanical implementation.** The design review that produced `TASKS.md` ended this specific item with "take a look and let me know," per the Planner's own kickoff instructions — same posture as Phase 3's `dispatch_to_agent` action kind, but with a real security dimension `dispatch_to_agent` doesn't have. Do not dispatch this task expecting a worker to just "add a `registers.middleware[]` field and splice it in" — the ordering constraints below are security-sensitive and a wrong default here is the kind of thing this project's escalation discipline exists to catch before it ships, not after. Get real operator input on the open questions in **What to do**, step 1, before implementation begins.
 

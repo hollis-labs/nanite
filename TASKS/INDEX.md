@@ -459,7 +459,7 @@ Nanite itself), and scope boundaries.
 | `04-migrate-bootdir-layout-to-planter` | 2 | implemented | `02`, `03` |
 | `05-migrate-sandbox-profile-to-applier` | 2 | closed (no migration — see `ESCALATIONS.md`, finding folded into `06`) | `03` |
 | `05a-extend-wrapper-config-for-real-adapters` | 2 (sibling repo, Phase-1-shaped) | reviewed | none |
-| `06-migrate-session-lifecycle-to-wrapper` | 2 | not-started — unblocked, ready to re-dispatch | `02`, `04`, `05` (closed), `05a` |
+| `06-migrate-session-lifecycle-to-wrapper` | 2 | implemented — under fresh review | `02`, `04`, `05` (closed), `05a` |
 | `07-dogfeed-validate-host-migration` | 2 | not-started | `04`, `05`, `06` |
 | `08-build-acp-client-abstraction` | 3 | not-started | `02`; recommended after `07` |
 | `09-acp-native-adapter-opencode` | 3 | not-started | `08` |
@@ -533,7 +533,7 @@ Tether/Torque adopt this is a separate, later portfolio-level call.
 
 | Task | Phase | Status | Depends on |
 |---|---|---|---|
-| `01-filesystem-snapshot-host-mechanism` | 1 — host mechanism (sibling repo `libs/go-agent-wrapper`) | not-started | none — independent of `agent-host-acp`'s `wrapper.Wrapper` work |
+| `01-filesystem-snapshot-host-mechanism` | 1 — host mechanism (sibling repo `libs/go-agent-wrapper`) | implemented | none — independent of `agent-host-acp`'s `wrapper.Wrapper` work |
 | `02-nanite-capture-policy-and-wiring` | 2 — product policy & wiring (Nanite) | not-started | `01`; held pending `agent-host-acp/06` landing (same files: `internal/runtime/agent/agent.go`) |
 | `03-snapshot-diff-preview-restore-api` | 3 — consumer surface (Nanite, backend-only) | not-started | `01`, `02` |
 
@@ -548,6 +548,14 @@ exactly the file `agent-host-acp/06` is actively rewriting right now. Holding `0
 mid-rewrite. Will re-evaluate exact dispatch timing for `02` once `06` merges — may not need
 to wait for `07`'s dogfeed too, since `02` only needs `agent.go`'s *shape* to be stable, not
 a fully validated migration; will decide based on `06`'s actual landed diff.
+
+**Update (2026-08-21):** `01` landed (`libs/go-agent-wrapper` commit `5c1a343`), `06` landed
+(`1f947c55`, under fresh review). `06`'s diff to `agent.go` is substantial (real restructuring
+around `wrapper.Wrapper.Run`, not a no-op) — holding `02`'s dispatch until `06`'s fresh review
+resolves, to dispatch `02` against a reviewed, not just implemented, `agent.go` shape. Given
+`agent-host-acp` still has `07` (dogfeed) ahead of it and Phase 3-5, `02`/`03` will likely run
+interleaved with that batch's later phases rather than immediately back-to-back — sequencing
+each dispatch against whatever's actually in flight at the time.
 
 **Scope fences carried forward from the architecture doc, not silently expanded**: no
 universal filesystem rollback (only sandbox-`FS.Write`-derived targets are recoverable); no

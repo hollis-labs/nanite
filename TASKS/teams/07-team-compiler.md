@@ -1,7 +1,7 @@
 # The Team compiler — Team definition → `WorkflowDefinition`, the design's own guardrail piece
 
 **Phase:** 2 — Runtime engine (`TASKS/teams`)
-**Status:** implemented
+**Status:** reviewed
 **Depends on:** `01` (Team definition + phase sub-structure), `02` (`team_run_members` shape), `03` (`StepKindFlex` exists), `04` (authority grants — referenced, not enforced, by the compiled definition), `05` (run-scoped reflex routing — installed alongside compilation), `06` (flex-step semantics the compiled `Config` must satisfy)
 **Touches:** `internal/service/team_compiler.go` (new).
 
@@ -80,4 +80,7 @@ Because that old fixture would fail `validateTeamPhases` (no `active_slots`/`exi
 **Orchestrator merge note (2026-08-20):** independently reviewed the full diff before merging — confirmed `TestTeam_RoundTrip`'s pre-existing fixture (with its stray `depends_on` key) genuinely still passes with `TeamPhase` decoding it, confirmed the SME-example and `parseFlexStepConfig` round-trip tests are real (not vacuous), and independently ran `go build`/`go vet`/`go test ./...` after merge — all clean. No changes made to the worker's implementation; merged as delivered. The worker's own edit to `TASKS/INDEX.md` was not used — the Orchestrator's own INDEX.md update (below) supersedes it, per this project's standing "workers don't edit INDEX.md" convention.
 
 ## Review notes
-<Reviewer fills this in: pass/fail, what was checked, anything fixed and how.>
+
+**PASS (2026-08-20).** Fresh reviewer, no shared context with the implementing worker or the Orchestrator's own merge review. Independently confirmed the SME-example reproduction is field-by-field exact; the `parseFlexStepConfig` round-trip is a real call to task 06's actual function, not a reimplementation; `resolvedMembers` is genuinely unconsumed by design (proven byte-identical output nil vs. populated); fully-fluid-Team and single-flex-phase support; `Engine` is structurally hard-coded with no override path; the gate-Config finding is accurate (independently grepped `approver_slot`/`GateApprover`/`ResolveGate`/`GetWaitingGates` — confirmed nothing reads or enforces it); `validateTeamPhases`'s non-wiring into `CreateTeam`/`UpdateTeam` is a real, justified deferral to task 10, not a dropped requirement; all 7 `TestCompileTeam_Errors` subtests genuinely trigger their claimed failures; no live database anywhere in the test file. Independent `go build`/`go vet`/`go test ./...` and named-test verification — all clean.
+
+**One forward-looking observation, not a finding against this task:** `Team.Phases()`/`SetPhases()` currently have zero callers anywhere in the codebase — expected, since `CompileTeam` takes an already-decoded `[]store.TeamPhase` directly by design, and task `08` (the TeamRun launcher) is the natural next real caller. Flagged for task `08`'s own review: if `Team.Phases()` is still uncalled after `08` lands, that becomes a real dead-code finding at that point, not this one.

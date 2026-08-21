@@ -403,7 +403,7 @@ Implements `docs/engineering/architecture/15-teams.md` — the design produced b
 | `04-team-authority-schema` | 1 | reviewed (migration `132`) | `01` |
 | `05-agent-reflexes-run-scoping` | 1 | reviewed (migration `131`) | none directly (parallel-safe) |
 | `06-stepkindflex-executor` | 2 | reviewed (migration `133`) | `03` |
-| `07-team-compiler` | 2 | implemented (no migration — pure Go) | `01`, `02`, `03`, `04`, `05`, `06` |
+| `07-team-compiler` | 2 | reviewed (no migration — pure Go) | `01`, `02`, `03`, `04`, `05`, `06` |
 | `08-team-run-launcher` | 2 | not-started | `07`, `04` |
 | `09-team-routing` | 3 | not-started | `05`, `08` |
 | `10-team-crud-api` | 4 | not-started | `01` |

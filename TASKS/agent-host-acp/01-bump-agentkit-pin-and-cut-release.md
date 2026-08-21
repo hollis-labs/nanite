@@ -1,7 +1,7 @@
 # Bump go-agent-wrapper's agentkit pin, cut a real release
 
 **Phase:** 1 — Host foundation (`TASKS/agent-host-acp`)
-**Status:** not-started
+**Status:** reviewed
 **Depends on:** none
 **Touches:** `libs/go-agent-wrapper/go.mod`, `libs/go-agent-wrapper/go.sum`, `libs/go-agent-wrapper/CHANGELOG.md`. Repo: `libs/go-agent-wrapper` (sibling, NOT Nanite).
 
@@ -89,3 +89,103 @@ one tag (`v0.1.0`, pointing at the first commit). HEAD is untagged.
   local `replace` still present (per step 3).
 - A real git tag exists past `a248ab4`, reflecting this change.
 - `CHANGELOG.md` documents the bump.
+
+## Work log
+
+All work done in the isolated worktree `libs/go-agent-wrapper-wt-task01` on branch
+`agent-host-acp/task-01-bump-agentkit-pin`, checked out from `libs/go-agent-wrapper`'s `main`
+at `a248ab4`. Nothing touched in `libs/go-agent-wrapper-wt-task02`, the main
+`libs/go-agent-wrapper` checkout, or this repo (Nanite) beyond this task file.
+
+**Verified the task file's premises directly before touching anything**, all confirmed as
+stated:
+- `go.mod`'s `agentkit v0.1.0` require line vs. an active `replace ... => ../agentkit` that
+  was already resolving against `libs/agentkit`'s HEAD.
+- `libs/agentkit`'s tags are `v0.1.0`/`v0.2.0`/`v0.3.0`, HEAD (`5b8aaad`) is one docs-only
+  commit past `v0.3.0`.
+- `go build ./...`, `go vet ./...`, `go test ./...`, `gofmt -l .` all clean pre-change.
+
+**What I did:**
+1. `go.mod`: changed the `agentkit` require from `v0.1.0` to `v0.3.0`. No source changes
+   needed anywhere in `go-agent-wrapper` — confirmed clean `go build ./...` / `go vet ./...`
+   / `go test ./...` (all 11 packages, same as before) with the `agentkit` local `replace`
+   still in place.
+2. `go-runner`: already `v0.5.0` (indirect) — matched what the task expected, no change made.
+3. Left the `replace github.com/hollis-labs/agentkit => ../agentkit` block in place, per the
+   task's explicit instruction. **One thing worth flagging for task `03`'s worker and for the
+   Orchestrator**: the pre-existing comment directly above that `replace` block in `go.mod`
+   read "Local-development replaces — DO NOT COMMIT to a tagged release... Drop (or comment
+   out) before tagging a release" — i.e. the in-repo comment's own guidance is the opposite of
+   what this task instructs. Per this project's own decision-vs-rationale rule, the task
+   file's instruction is settled (keep the replace, tag anyway) regardless of whether the
+   comment's rationale holds up, so I did exactly that — but I also rewrote the comment itself
+   (in scope: `go.mod` is on the task's `Touches` list) so it no longer tells the next reader
+   to do the opposite of what actually happened. The new comment explains the agentkit replace
+   is intentionally staying past this tag for the Nanite-side reason task `03` cites, while
+   `go-harness-filters`/`go-runtime-events` keep the original "drop before tagging" discipline
+   (nothing depends on those two staying — both have their own `v0.1.0` tags already matching
+   their `require` lines). **Confirming explicitly for task `03`: the `agentkit` local replace
+   is still present in `go-agent-wrapper`'s `go.mod` on this tag — do not expect it gone.**
+4. Cut the tag as an annotated tag: `v0.2.0`. Reasoning: `Config` in `wrapper/wrapper.go`
+   gained two new optional fields (`SandboxProfile`, `HeartbeatInterval`) since `v0.1.0` —
+   additive, keyed-literal-compatible, not a breaking change to any exported signature — plus
+   the dependency bump itself. That's a minor-version bump under the project's own
+   `v0.1.0`/`v0.2.0`/`v0.3.0` precedent (`agentkit/CHANGELOG.md`), not a major one. This was a
+   judgment call, documented here per the task's own instruction, not escalated — no
+   operator sign-off needed for a version number on a zero-adopter library.
+5. `CHANGELOG.md` **already existed** (task file said "create it if it doesn't exist — check
+   first"; it exists, one prior entry: `v0.1.0 — 2026-05-26`). Added a `v0.2.0` entry above it.
+   One deliberate scope expansion beyond "record the agentkit pin bump and the version tag":
+   the commit immediately preceding my change, `a248ab4` ("Strengthen headless wrapper core" —
+   real feature work: `Config.Filters` now actually wired end-to-end via
+   `wrapper/filter_payload.go`/`io_streams.go`, a new `filters.RepairPipeline`, a new
+   `translateProviderEvent` provider-event bridge via a new `TypedEventCallback`, new
+   `Config.SandboxProfile`/`Config.HeartbeatInterval` fields, a new `JsonRpcRequestHook` wired
+   to `agent.permission_requested`/`resolved`, and `policy.ModeApproval` now mapping to its own
+   event kind instead of collapsing into `ModeBlock`) — had **never been changelogged**, and it
+   ships under this same `v0.2.0` tag. Documenting only the pin bump and leaving that
+   substantial, already-committed, untagged work with zero release notes would have made the
+   changelog inaccurate about what `v0.2.0` actually contains, so the entry covers both under
+   separate "Changed" (pin bump + the `ModeApproval`/turn-bookkeeping behavior changes) and
+   "Added" (the new Filters/TypedEventCallback/SandboxProfile/HeartbeatInterval/
+   JsonRpcRequestHook surface) headings, with a closing note attributing the "Added" section's
+   origin to `a248ab4` rather than to this task's own diff. `README.md`/`ROADMAP.md` still say
+   "Status (v0.1.0, 2026-05-26)" and weren't touched — out of this task's `Touches` scope
+   (`go.mod`, `go.sum`, `CHANGELOG.md` only); worth a follow-up if anyone reads the README
+   looking for current status.
+6. `go.sum`: untouched — `git diff` after the `go.mod` edit showed zero `go.sum` changes.
+   Expected: the `replace`d module resolves from the local filesystem, which bypasses
+   checksum-DB verification for that module entirely.
+
+**Build/test status:** `gofmt -l .` clean, `go build ./...` clean, `go vet ./...` clean,
+`go test ./...` clean (11 packages, same set as before: `activity`, `adapters`,
+`adapters/claude`, `adapters/codex`, `adapters/opencode`, `classifybridge`, `filters`,
+`plant`, `policy`, `sandbox`, `wrapper`) — verified both immediately after the `go.mod` edit
+and again at the final tagged commit.
+
+**Final state on branch `agent-host-acp/task-01-bump-agentkit-pin`:**
+- Commit `43847bf` ("Bump agentkit pin to v0.3.0, cut v0.2.0"), one commit past `a248ab4`,
+  touching only `go.mod` and `CHANGELOG.md`.
+- Annotated tag `v0.2.0` on that commit.
+- Working tree clean. Not merged to `main`, not pushed — left for the Orchestrator per this
+  batch's process notes.
+
+**Orchestrator merge note (2026-08-21):** Independently re-verified this task's claims
+directly (git log/diff/tag/build/vet/test in the worktree) before merging — all confirmed.
+Merged to `libs/go-agent-wrapper`'s `main` via `git merge --no-ff` as commit `3600d24`, after
+task `02`'s independent verification, alongside task `02`. Post-merge `go build`/`go vet`/
+`go test`/`go test -race` all clean. Worktree and branch removed after merge.
+
+## Review notes
+
+Fresh Reviewer (no shared context with this task's worker), 2026-08-21 — **PASS**, reviewed
+together with task `02` as Phase 1's logical section, against `libs/go-agent-wrapper`'s merge
+commit `3600d24`. Independently re-verified: `git diff v0.1.0 v0.3.0 -- agentsessions/` inside
+`libs/agentkit` is genuinely byte-empty (confirms "zero source changes needed"); `a248ab4`
+genuinely never touched `CHANGELOG.md` (confirms the "previously unchangelogged" claim behind
+folding that commit's feature work into the v0.2.0 entry); `go.sum` diff is genuinely empty;
+the `replace` block and its rewritten comment are present and accurate; the `v0.2.0` version
+judgment call is reasonable (additive fields, dependency bump, no breaking exported-API
+change). One non-blocking gap noted: `README.md`/`ROADMAP.md` still say "v0.1.0" — correctly
+out of this task's `Touches` scope, already flagged above as a follow-up. Independently ran
+`go build ./...`/`go vet ./...`/`go test ./...`/`go test -race ./...` clean. No fixes needed.

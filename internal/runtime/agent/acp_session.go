@@ -164,7 +164,7 @@ func (a *acpSession) sendFanout(ctx context.Context, ev llmtypes.StreamEvent) {
 // ordinary content); copilotacp tags the same distinction
 // {"content":...,"thinking":true} (see copilotacp/translate.go's
 // acpUpdateThinking case). Both tagging conventions are checked —
-// TASKS/agent-host-acp/11's Finding 2 review found that reading only
+// TASKS/agent-host-acp/11's Finding 1 review found that reading only
 // "content" and always emitting llmtypes.EventDelta (this file's prior
 // behavior) let reasoning/thought text flush as ordinary narration,
 // persisted as part of the visible answer instead of being routed to
@@ -223,8 +223,11 @@ type acpTurnCompletedPayload struct {
 // and must pick one or the other per call — see its own doc comment),
 // ACP's own KindTurnCompleted event fires exactly once per turn, so both
 // events are sent from this single combined payload when usage data is
-// present; EventUsage first so chat_generate.go's finalUsage observes it
-// before the terminal EventDone closes out the turn.
+// present. Order (EventUsage before EventDone) isn't load-bearing for
+// chat_generate.go's own consumption today — its streamLoop only exits
+// on channel close or an error/stall condition, not on seeing "done" —
+// but it's the more natural reading and matches how a native adapter
+// would report both when it has the data.
 func (a *acpSession) handleTurnCompleted(ctx context.Context, raw json.RawMessage) {
 	var p acpTurnCompletedPayload
 	if len(raw) > 0 {

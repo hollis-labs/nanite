@@ -1,7 +1,7 @@
 # Per-agent Protocol/Transport selection (DB-configurable surface)
 
 **Phase:** 3 — ACP client abstraction & native adapters (`TASKS/agent-host-acp`)
-**Status:** implemented
+**Status:** reviewed
 **Depends on:** `09`, `10` (at least the native ACP adapters must exist to be selectable);
 `07` (host migration validated — this wires real agents into the migrated path)
 **Touches:** possibly a new migration (`134` onward — check current highest at dispatch

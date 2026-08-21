@@ -226,7 +226,7 @@ Standalone work that doesn't belong to a phase's own scope — tracked here rath
 | 03-wire-registers-agent-profiles | reviewed | Phase 1 in full (landed via the Phase 1→main merge); held until `02` merges |
 | 04-close-cli-install-hot-reload-asymmetry | reviewed | none |
 | 05-develop-registers-panels-and-crud | reviewed | none; held until `02` merges — scope corrected 2026-08-19 (see task file), now `crud[]` only |
-| 06-make-http-middleware-plugin-extensible | not-started | **operator design decision — see escalation below, not ready for mechanical dispatch — SKIPPED for this batch** |
+| 06-make-http-middleware-plugin-extensible | superseded, 2026-08-21 — see `TASKS/plugin-system/07-make-http-middleware-plugin-extensible.md` | **operator design decision now settled (builtins only, priority-ordered) — implementation tracked under `TASKS/plugin-system`, not this phase** |
 | 10-fix-list-agent-tools-endpoint-stale-permissions-view | reviewed | `TASKS/phase-4/05`, `01` (both already landed) — fix-as-new-worker-task for a real gap found during Orchestrator live dogfeed validation, see `TASKS/phase-5/10-fix-list-agent-tools-endpoint-stale-permissions-view.md` |
 | 11-fix-hot-reload-never-applies-manifest-registrations | reviewed | `02`, `03`, `04`, `05` (all already landed) — fix-as-new-worker-task for a real, pre-existing-but-newly-load-bearing gap found by the fresh Phase 5 Reviewer, see `TASKS/phase-5/11-fix-hot-reload-never-applies-manifest-registrations.md` |
 | 12-fix-unload-plugin-wrong-identifier | reviewed | `11` (already landed) — fix-as-new-worker-task for a real bug the Orchestrator live-reproduced during `11`'s own post-merge dogfeed re-verification (reload of an already-loaded plugin always 500s; `11`'s own new rollback code shares the bug), see `TASKS/phase-5/12-fix-unload-plugin-wrong-identifier.md` |
@@ -469,7 +469,7 @@ Nanite itself), and scope boundaries.
 | `08-build-acp-client-abstraction` | 3 | reviewed (Orchestrator-verified; `go-agent-wrapper v0.5.0`, pushed+tagged) | `02`; recommended after `07` |
 | `09-acp-native-adapter-opencode` | 3 | reviewed (Orchestrator-verified live against real `opencode` binary; `go-agent-wrapper v0.6.0`) | `08` |
 | `10-acp-native-adapter-copilot-cli` | 3 | reviewed (Orchestrator-verified live against real `copilot` binary, both stdio+TCP; `go-agent-wrapper v0.7.0`) | `08` |
-| `11-nanite-per-agent-protocol-transport-config` | 3 | implemented — reviewed FAIL (2 real event-translation bugs, fix in progress) | `09`, `10`, `07` |
+| `11-nanite-per-agent-protocol-transport-config` | 3 | reviewed PASS (fix landed for 2 real event-translation bugs found on first review, re-reviewed clean) | `09`, `10`, `07` |
 | `12-pin-acp-bridge-library` | 4 | not-started | `08` — **escalation-gated, see README and `ESCALATIONS.md`, not ready for mechanical dispatch** |
 | `13-acp-bridge-adapter-claude` | 4 | not-started | `12` |
 | `14-acp-bridge-adapter-codex` | 4 | not-started | `12` |
@@ -567,3 +567,61 @@ universal filesystem rollback (only sandbox-`FS.Write`-derived targets are recov
 real conflict/merge resolution beyond task `03`'s lightweight hash-check (deferred until
 Teams sees real multi-agent concurrent usage); no GUI/frontend surface (backend-only, matches
 standing no-frontend-in-any-phase discipline); Nanite-first, not portfolio-shared by default.
+
+## Plugin System (`TASKS/plugin-system/`, outside the Phase 0-9 sequence)
+
+Implements `docs/engineering/architecture/09-plugin-system.md`'s "Target design" sections —
+the design produced by a dedicated planning session (2026-08-21) that reconciled the
+2026-04-11 internal audit (`docs/audits/2026-04-11-plugin-capability-model/`) against the
+plugin system's real, current state. A sibling to `TASKS/teams/`, `TASKS/reflex-taxonomy/`,
+`TASKS/harness-reactive-self-tools/`, `TASKS/scheduling/`, and `TASKS/agent-host-acp/`. See
+`TASKS/plugin-system/README.md` for the full read-first list and scope boundaries.
+
+| Task | Phase | Status | Depends on |
+|---|---|---|---|
+| `01-registration-preflight-validation-and-nanitecompat` | 1 | not-started | none |
+| `02-build-pluginstore-scoped-sql-proxy` | 2 | not-started | none |
+| `03-build-pluginmcpclient-scoped-proxy` | 2 | not-started | `02` |
+| `04-plugin-capabilities-manifest-schema-and-storage` | 3 | not-started | none |
+| `05-capability-install-time-approval-gate` | 3 | not-started | `04` |
+| `06-capability-enforcement-at-rpc-proxy-layer` | 3 | not-started | `04`; parallel-safe with `05` |
+| `07-make-http-middleware-plugin-extensible` | 4 | not-started | none directly; coordinate with `04` on `internal/plugin/config.go` — supersedes `TASKS/phase-5/06-make-http-middleware-plugin-extensible.md` (now marked superseded, see that phase's row above) |
+
+**Two audit findings this planning pass found already closed, not tasks in this batch**:
+finding 04 (no panic recovery in event-hook dispatch) landed 2026-04-12 in commit `ce40fbcf7`
+(the repo-wide `safego` adoption sweep), the day after the audit that flagged it; the
+CLI-install/hot-reload asymmetry `09-plugin-system.md` used to describe as an open decision
+was fully closed by `TASKS/phase-5/04`, `11`, and `12` (all `reviewed`). Both were independently
+re-verified against current code (not assumed from either the audit's or the doc's age) before
+this batch was scoped — `docs/engineering/architecture/09-plugin-system.md` was corrected in
+place rather than carrying either forward as a phantom task. See `TASKS/ESCALATIONS.md`'s
+2026-08-21 entry for the full record.
+
+**Sequencing.** Phase 1 (`01`) is small and independent — registration pre-flight validation
+plus `NaniteCompat` enforcement, no schema. Phase 2 (`02`-`03`) is Tier 1 hygiene: scoped
+`PluginStore`/`PluginMCPClient` proxies replacing raw `GetService("store")`/`GetService("mcp")`
+for builtins — hygiene, not enforcement, since builtins stay fully trusted; `03` depends on
+`02`'s per-plugin-identity-at-`GetService`-time pattern and slug validator. Phase 3
+(`04`-`06`) is the real Tier 2 enforcement lift for subprocess plugins — capability schema and
+storage first (`04`), then the install-time approval gate (`05`) and live RPC-proxy
+enforcement (`06`) in parallel, both depending only on `04`. Phase 4 (`07`) is independent of
+Phases 2-3 and resolves the previously-open Phase 5 HTTP-middleware-extensibility escalation
+now that the operator has settled its shape (builtins only, priority-ordered).
+
+**Real, load-bearing corrections to the architecture doc and the 2026-04-11 audit, found
+during this planning session's own research against the live code** (not just doc-vs-doc
+inconsistencies — each is cited with file:line in its owning task's Context): the audit's
+named unmanaged-schema offender (`internal/plugin/builtin/sessionstats/`) and both external
+plugins it cited (`plugins/support-ticket/`, `plugins/fragments-engine/`) are all already gone
+from this repo — `02`/`03` are genuinely new infrastructure, not a fix to a live offender.
+`applyManifestRegistrations`'s conflict checking is real for envelopes/UI components/
+keybindings but **does not exist at all** for commands/CRUD resources/HTTP routes (they
+silently overwrite on conflict today) — `01`'s pre-flight pass needs new detection logic for
+those three categories, not just relocation of an existing check. All four subprocess
+RPC-proxy call sites the target design names (`NewCRUDHandler`, `CallTool`, `NewEventHook`,
+`newSubprocessHTTPHandler`) are exact matches to real code and are confirmed fully
+unconditional today — zero authorization checks anywhere, grounding `06`'s scope precisely.
+
+**Planned 2026-08-21, not yet dispatched.** Per `EXECUTION-PROCESS.md`'s Phase A discipline,
+this is the planning checkpoint — present to the operator for review before any worker is
+dispatched.

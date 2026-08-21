@@ -124,3 +124,9 @@ Additional endpoints (authoring/scaffold helpers, usage/activation telemetry, et
 - Whether `agent_known_skills`' existing telemetry shape (`activation_count`/`pinned`/`ttl_seconds`, currently dead for prompt assembly per `TASKS/phase-0/17`) gets reused for the new grants/telemetry table or replaced outright — a real precedent worth checking before building a third shape from scratch, not resolved in this session.
 - Whether ecosystem-format packages (e.g. a `.claude/skills/` directory authored outside Nanite) can be installed through the same explicit-sync path unmodified, or need a format-detection/adaptation step first.
 - Migration/rollout sequencing into actual phased tasks — explicitly out of scope for this doc, which is architecture only.
+
+## Status
+
+Design complete as of 2026-08-21. Of the six items listed above as "genuinely still open," five were resolved during the same-day implementation-planning session that followed this doc (table/column shape, self-tool naming and schema, vendored-store addressing, policy vocabulary, and `agent_known_skills` reuse — see `TASKS/skills/README.md`'s "Real corrections found during this planning session's own research" and `TASKS/ESCALATIONS.md`'s matching 2026-08-21 entries for the resolutions). The sixth — ecosystem-format package adaptation — remains open but is explicitly fenced out of this batch's scope, filed as a separate future follow-up rather than blocking this one.
+
+Operator sign-off on the design given directly in-chat, 2026-08-21 (this project's standing approval channel — the operator reviews and approves during working sessions rather than via a separate written sign-off pass on the doc itself). Implementation is planned in full — `TASKS/skills/README.md` (12 task files across 7 phases, wave-sequenced) — and approved to proceed; dispatch is paused at the operator's request pending completion of unrelated, concurrent cleanup work in this repo, not on any remaining design question.

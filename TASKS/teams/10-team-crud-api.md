@@ -1,7 +1,7 @@
 # Team definition CRUD API
 
 **Phase:** 4 — Definition & launch API surface (`TASKS/teams`)
-**Status:** not-started
+**Status:** implemented
 **Depends on:** `01`
 **Touches:** `internal/api/teams.go` (new).
 
@@ -24,7 +24,43 @@ Standard REST CRUD over task `01`'s `teams` store, following this codebase's own
 - `go build`/`vet`/`test` clean.
 
 ## Work log
-<Worker fills this in as it goes: what was actually done, any deviation from plan and why, anything escalated.>
+
+**Pre-work verification.** Confirmed via `git log --oneline` and direct reads (not assumed) that tasks `01`/`04`/`07`/`09` are all on `main` as of dispatch: `internal/store/teams.go` carries `Team`, `TeamSlotDefinition` (+ `validateTeamSlots`/`SetSlots`, task `01`), `TeamPhase` (+ `validateTeamPhases`/`SetPhases`, task `07`), and `TeamRoutingRule`/`TeamRouting` (+ `validateTeamRouting`/`SetRouting`, task `09`) all fully typed. Task `04` ("Team authority — real enforced grants") landed as a **separate normalized table**, `team_authority_grants` (`internal/store/team_authority.go`, `TeamAuthorityGrant`/`AuthorizedForVerb`) — confirmed by grep that `AuthorityJSON`/`authority_json` has zero references outside `teams.go`/`teams_test.go` itself. `Team.AuthorityJSON` therefore remains exactly what task `01`'s own doc comment calls it: a storage placeholder with **no typed Go shape anywhere in this codebase** — task `04` redirected the real mechanism elsewhere rather than migrating this column, as task `01`'s doc comment had left open as a possibility. Read `internal/api/reflexes.go` in full (the `validateReflexDefinition` pattern, lines 297-371) and `internal/api/schedules.go`/`schedules_test.go` in full (`TASKS/scheduling/09-operator-http-api.md`'s structural template) before writing any code.
+
+**Files built:**
+- `internal/api/teams.go` (new) — `handleListTeams`/`handleGetTeam`/`handleCreateTeam`/`handlePatchTeam`/`handleDeleteTeam`, `teamCreateRequest`/`teamPatchRequest` DTOs, `validateTeamDefinition`.
+- `internal/api/api.go` — route registration (`GET/POST /api/teams`, `GET/PATCH/DELETE /api/teams/{id}`), placed directly after the schedules block.
+- `internal/api/teams_test.go` (new) — regression tests, see below.
+
+**Auth-model call (Context):** same call as `TASKS/scheduling/09`, for the same reason, re-verified rather than assumed — every `/api/*` route rides the same uniform middleware chain (`recover -> logging -> CORS -> basicAuthMiddleware -> callerIdentityMiddleware -> bodyLimitMiddleware`) applied at the mux level in `internal/server/server.go`, not opted into per-route. No narrower operator-only tier exists for any comparable resource-CRUD endpoint (agents/reflexes/durable-agents/schedules/workflows all use the same chain) and Teams has no plugin-registered producer today needing a provenance-tier boundary. No additional gating added. Documented in `internal/api/teams.go`'s own package doc comment, with the same explicit "concrete, documented call, not a locked security decision" framing this task's own Context asks for.
+
+**Validation split — typed vs. JSON-shape-only (task's explicit ask, step 2):**
+- `slots_json` — **full typed validation.** Decoded into `[]store.TeamSlotDefinition`, then `team.SetSlots(...)` is called explicitly, which runs `validateTeamSlots` — the real enforcement point for step 3's requirement (`Resolution` checked against `"durable"|"fresh"`, `ActivationMode` against `"singleton"|"fresh-per-wake"|"concurrent"`, plus `Min`/`Max` consistency and non-empty `Name`).
+- `phases_json` — **full typed validation.** Decoded into `[]store.TeamPhase`, then `team.SetPhases(...)` is called explicitly, running `validateTeamPhases`. This matters specifically because `store.CreateTeam`/`UpdateTeam` **deliberately do not** call `validateTeamPhases` themselves (per `SetPhases`' own doc comment, to avoid retroactively breaking task `01`'s already-merged pre-typed `TestTeam_RoundTrip` fixture) — this API layer calling `SetPhases` explicitly is what gives `phases_json` write-time validation at all, exactly the "future Team-authoring API" caller that doc comment names by this task's own file path.
+- `routing_json` — **full typed validation.** Decoded into `store.TeamRouting`, then `team.SetRouting(...)` is called explicitly, running `validateTeamRouting`. Same "not wired into CreateTeam/UpdateTeam, this API layer is the real enforcement call site" shape as `phases_json`, per `SetRouting`'s own doc comment. `""` and the literal `"[]"` (the column's own DEFAULT) are both treated as "no routing configured yet" and skipped rather than run through a struct decode that would otherwise fail on an array literal — mirrors `Team.Routing()`'s own identical special-case for those two values.
+- `authority_json` — **JSON-shape-only validation, not full typed.** No typed shape exists anywhere in `internal/store/teams.go` for this column (task `04` built a wholly separate table instead, confirmed above) — per the task's own explicit instruction for exactly this no-typed-shape case, this only validates that a non-empty value decodes as a well-formed JSON **array** (`json.Unmarshal` into `[]json.RawMessage`), matching the column's own `"[]"` DEFAULT in `store.CreateTeam`/`UpdateTeam`. No per-element shape is checked (there is nothing typed to check it against). Flagged here explicitly, per the task's own instruction, so a later task (giving this column a real typed shape, or retiring it now that `team_authority_grants` is the real mechanism) doesn't have to rediscover this gap.
+
+**PATCH validation scope — one real design call, documented:** `handlePatchTeam` follows `handlePatchSchedule`'s shape (load current row, overlay only patch-provided pointer fields, save the merged row) rather than `handlePatchAgentReflex`'s shape (always re-validate the full stored row on every PATCH regardless of which fields changed). This matters concretely for `authority_json`: since that column has zero pre-existing shape enforcement anywhere in this codebase (no caller before this task ever validated it), a row could in principle already carry non-array `authority_json` written through some other path; always-revalidate-the-whole-row-on-every-PATCH would then reject an unrelated-field PATCH against that row purely because of untouched legacy data in a column this specific request never touched. Since `validateTeamDefinition` runs against `updated` (a copy of `current` with only patch-provided fields overlaid), and only fields the caller actually supplied get their JSON strings changed, in practice this design already only re-validates a field when it's *possible* for it to differ from a previously-accepted value — but because the merged `updated.AuthorityJSON`/etc. genuinely could carry a pre-existing legacy value on an untouched field even under this shape, `TestTeamsAPI_PatchRejectsMalformedSlotsJSON` specifically also asserts the rejected patch left the stored row unmutated (not just that the response was 400), to make sure a rejected write never has a partial side effect.
+
+**Regression tests (`internal/api/teams_test.go`, 12 tests, all passing):**
+- `TestTeamsAPI_CreateGetListPatchDeleteLifecycle` — full CRUD round-trip (create with every sub-structure populated, get, list, patch a rename + slot shrink with an untouched-field-survives check, delete, 404-after-delete) — **required "Done means" bullet 1.**
+- `TestTeamsAPI_CreateDefaultsWithoutSubStructures` — name-only create round-trips the store's own `"[]"` defaults.
+- `TestTeamsAPI_GetPatchDeleteUnknownID404` — 404 on a nonexistent ID for GET/PATCH/DELETE — **required "Done means" bullet 1 (404 case).**
+- `TestTeamsAPI_CreateRejectsMissingName` / `TestTeamsAPI_CreateRejectsInvalidBodyJSON` — baseline required-field and malformed-request-body rejection.
+- `TestTeamsAPI_CreateRejectsMalformedSlotsJSON` — malformed `slots_json` string rejected with 400 — **required "Done means" bullet 2.**
+- `TestTeamsAPI_CreateRejectsInvalidSlotResolution` / `TestTeamsAPI_CreateRejectsInvalidActivationMode` — explicit enum-rejection tests for step 3's specific requirement.
+- `TestTeamsAPI_CreateRejectsMalformedRoutingJSON` — both non-JSON `routing_json` and a structurally-invalid rule (missing `target_slot`) rejected.
+- `TestTeamsAPI_CreateRejectsMalformedPhasesJSON` — both non-JSON `phases_json` and a structurally-invalid phase (flex phase missing `active_slots`/`exit_trigger`) rejected.
+- `TestTeamsAPI_CreateRejectsNonArrayAuthorityJSON` — non-JSON, and (specifically) a well-formed **object**-shaped `authority_json` (matching the design doc's own illustrative authority shape, to prove the array-only JSON-shape-only check is real and not accidentally permissive) are both rejected; a well-formed array is accepted.
+- `TestTeamsAPI_PatchRejectsMalformedSlotsJSON` — PATCH runs the same write-boundary validation as POST, and confirms a rejected PATCH does not mutate the stored row.
+
+**Baseline:** `go build ./cmd/nanite/` — ok. `go vet ./...` — exactly the 4 pre-existing findings in `internal/service/container.go` (`stopReaper`/`stopRuntimeReaper` not used on all paths), matching the dispatch instructions' stated expectation; nothing else. `go test ./... -count=1` — full repo, every package `ok`, zero `FAIL`.
+
+**Deviations from the task file's literal plan:** none load-bearing. The task's "Touches" line names only `internal/api/teams.go` (new); registering the routes required a small, expected addition to `internal/api/api.go` (route table), the same shape `TASKS/scheduling/09`'s own Work Log documents for its own `/api/schedules` routes.
+
+**Nothing escalated.** No genuine ambiguity was hit that wasn't already resolved by directly reading the current state of `internal/store/teams.go`/`internal/store/team_authority.go` before writing code, per the task's own required-reading list.
+
+**Orchestrator merge note (2026-08-20):** independently reviewed the full diff before merging — read `internal/api/teams.go` and `internal/api/teams_test.go` in full, confirmed every `store.*` API used (`CreateTeam`/`GetTeam`/`ListTeams`/`UpdateTeam`/`DeleteTeam`/`ErrTeamNotFound`) and every `a.*` helper used (`decode`/`jsonResp`/`errorResp`) are pre-existing, not invented; confirmed `newTestAPI` is a pre-existing shared test helper, not new. Independently ran `go build`/`go vet`/`go test ./internal/api/...` in the worktree — clean at the expected baseline (gopls surfaced the usual stale cross-worktree false-positive diagnostics, confirmed false by real compilation). No changes made to the worker's implementation; merged as delivered.
 
 ## Review notes
 <Reviewer fills this in: pass/fail, what was checked, anything fixed and how.>

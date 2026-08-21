@@ -179,6 +179,14 @@ func (a *API) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("PATCH /api/schedules/{id}", a.handlePatchSchedule)
 	mux.HandleFunc("DELETE /api/schedules/{id}", a.handleDeleteSchedule)
 
+	// Team definition CRUD (TASKS/teams/10-team-crud-api.md) -- thin
+	// handlers over task 01's teams store (internal/store/teams.go).
+	mux.HandleFunc("GET /api/teams", a.handleListTeams)
+	mux.HandleFunc("POST /api/teams", a.handleCreateTeam)
+	mux.HandleFunc("GET /api/teams/{id}", a.handleGetTeam)
+	mux.HandleFunc("PATCH /api/teams/{id}", a.handlePatchTeam)
+	mux.HandleFunc("DELETE /api/teams/{id}", a.handleDeleteTeam)
+
 	// CW-20260816-0020: Fragments Engine's `callback` destination (fifth
 	// destination type, loom-architecture.md §4) POSTs an opaque
 	// {generator, fragment:{...}} body here, fire-and-forget, whenever a

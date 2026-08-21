@@ -27,3 +27,10 @@ artifacts:
 
   # Storage root for auto-detected and placed artifacts.
   storage_dir: data/artifacts
+
+skills:
+  # Filesystem root for the content-addressed vendored skill store —
+  # installed SKILL.md packages (body + scripts/references/assets), keyed
+  # by content address, immutable once written. See
+  # docs/engineering/architecture/20-skills.md.
+  vendor_storage_dir: data/skills/vendor

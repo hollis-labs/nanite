@@ -12,6 +12,7 @@ import (
 type AppConfig struct {
 	Presence  PresenceConfig  `yaml:"presence"`
 	Artifacts ArtifactsConfig `yaml:"artifacts"`
+	Skills    SkillsConfig    `yaml:"skills"`
 	HTTP      HTTPConfig      `yaml:"http"`
 	OTel      OTelConfig      `yaml:"otel"`
 	Logging   LoggingConfig   `yaml:"logging"`
@@ -104,6 +105,17 @@ type ArtifactsConfig struct {
 	StorageDir      string   `yaml:"storage_dir"`
 }
 
+// SkillsConfig controls the skill system's on-disk storage.
+type SkillsConfig struct {
+	// VendorStorageDir is the filesystem root for the content-addressed
+	// vendored skill store (internal/skillvendor.Store) — installed
+	// SKILL.md packages (body + scripts/references/assets), keyed by
+	// content address, immutable once written. Mirrors
+	// ArtifactsConfig.StorageDir's own load/default/override pattern; see
+	// docs/engineering/architecture/20-skills.md's "The model" section.
+	VendorStorageDir string `yaml:"vendor_storage_dir"`
+}
+
 // DefaultAppConfig returns sensible defaults when no config file exists.
 func DefaultAppConfig() *AppConfig {
 	return &AppConfig{
@@ -114,6 +126,9 @@ func DefaultAppConfig() *AppConfig {
 			AutoDetectTools: []string{"Write", "write", "write_file", "create_file", "Edit", "edit"},
 			PathKeys:        []string{"file_path", "path", "filename"},
 			StorageDir:      "data/artifacts",
+		},
+		Skills: SkillsConfig{
+			VendorStorageDir: "data/skills/vendor",
 		},
 		HTTP: HTTPConfig{
 			ReadTimeoutSeconds:       30,

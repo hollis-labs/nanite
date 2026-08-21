@@ -456,7 +456,7 @@ Nanite itself), and scope boundaries.
 | `01-bump-agentkit-pin-and-cut-release` | 1 | reviewed | none |
 | `02-split-descriptor-protocol-transport-and-interrupt` | 1 | reviewed | none directly (parallel-safe with `01`) |
 | `03-add-go-agent-wrapper-dependency` | 2 | implemented | none |
-| `04-migrate-bootdir-layout-to-planter` | 2 | not-started | `02`, `03` |
+| `04-migrate-bootdir-layout-to-planter` | 2 | implemented | `02`, `03` |
 | `05-migrate-sandbox-profile-to-applier` | 2 | closed (no migration — see `ESCALATIONS.md`, finding folded into `06`) | `03` |
 | `06-migrate-session-lifecycle-to-wrapper` | 2 | not-started | `02`, `04`, `05` (closed) |
 | `07-dogfeed-validate-host-migration` | 2 | not-started | `04`, `05`, `06` |

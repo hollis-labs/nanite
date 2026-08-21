@@ -344,6 +344,120 @@ func (t *Team) SetPhases(phases []TeamPhase) error {
 	return nil
 }
 
+// TeamRoutingRule is one semantic routing rule decoded from
+// Team.RoutingJSON's Rules list — TASKS/teams/09-team-routing.md, which
+// owns this shape per task 01's own explicit deferral ("routing_json exist
+// here only as a storage placeholder... Task 09 owns the real routing-rule
+// shape"). Models 15-teams.md's illustrative `architecture_question ->
+// architect` routing entry: Phrases is the phrase set a run-scoped
+// dispatch_to_agent reflex's user_regex_window trigger is built from
+// (internal/service/team_routing.go's InstallTeamRunRouting), TargetSlot
+// is the Team Slot name the rule routes to.
+//
+// Deliberately does NOT carry the coordinator-fallback rule
+// (`otherwise -> orchestrator`) — that is a structural addition
+// InstallTeamRunRouting always makes once per Team (TeamRouting.
+// CoordinatorSlot, below), not a rule a Team author declares in this list.
+// See 15-teams.md's "Routing: real reuse, and one real gap" section's
+// three-tier framing (explicit / semantic / coordinator fallback) — Rules
+// here is exactly the "semantic" tier.
+type TeamRoutingRule struct {
+	// Name labels this rule (becomes part of the installed agent_reflexes
+	// row's own Name, e.g. "team-routing:<team>:<name>:<agent_id>") — not
+	// required to be globally unique, only distinct enough to read in an
+	// operator-facing reflex list.
+	Name string `json:"name"`
+
+	// Phrases feeds a user_regex_window trigger (anyPhraseRegex-shaped,
+	// window=1, matching the CURRENT turn's raw text — the same synthetic
+	// single-entry window internal/service/chat_reflex_dispatch.go already
+	// populates for every dispatch_to_agent candidate). At least one
+	// phrase is required — a semantic rule with no phrases has no way to
+	// ever become eligible, so validateTeamRouting rejects it.
+	Phrases []string `json:"phrases"`
+
+	// TargetSlot is the Team Slot name this rule routes to (e.g.
+	// "architect") — must name a real slot in the same Team's SlotsJSON;
+	// InstallTeamRunRouting validates this at install time since a
+	// JSON-blob column has no FK to enforce it at rest.
+	TargetSlot string `json:"target_slot"`
+
+	// Priority optionally overrides InstallTeamRunRouting's own derived
+	// default (declaration order, highest first) for this rule's installed
+	// agent_reflexes row. Zero/omitted means "use the derived default."
+	Priority int64 `json:"priority,omitempty"`
+}
+
+// TeamRouting is Team.RoutingJSON's decoded shape — TASKS/teams/
+// 09-team-routing.md's own routing-rule definition, per task 01's explicit
+// deferral. Rules is the semantic-routing tier (see TeamRoutingRule);
+// CoordinatorSlot names the Team Slot InstallTeamRunRouting's own
+// structural coordinator-fallback row targets (15-teams.md's `otherwise ->
+// orchestrator`) — empty defaults to "orchestrator", matching the SME
+// example's own slot name, but is overridable since nothing requires every
+// Team to name its coordinating slot "orchestrator".
+type TeamRouting struct {
+	Rules           []TeamRoutingRule `json:"rules"`
+	CoordinatorSlot string            `json:"coordinator_slot,omitempty"`
+}
+
+// validateTeamRouting checks each TeamRoutingRule's required fields — same
+// Go-layer-validation-over-a-JSON-blob-column approach validateTeamSlots/
+// validateTeamPhases already use. Does NOT check TargetSlot/CoordinatorSlot
+// against a real Team Slot name (this type has no visibility into the same
+// Team's own SlotsJSON at encode time) — that cross-field check is
+// InstallTeamRunRouting's own job, at install time, against the live Team.
+func validateTeamRouting(r TeamRouting) error {
+	seen := make(map[string]bool, len(r.Rules))
+	for _, rule := range r.Rules {
+		if rule.Name == "" {
+			return fmt.Errorf("team routing rule: name is required")
+		}
+		if seen[rule.Name] {
+			return fmt.Errorf("team routing rule %q: duplicate name", rule.Name)
+		}
+		seen[rule.Name] = true
+		if rule.TargetSlot == "" {
+			return fmt.Errorf("team routing rule %q: target_slot is required", rule.Name)
+		}
+		if len(rule.Phrases) == 0 {
+			return fmt.Errorf("team routing rule %q: at least one phrase is required", rule.Name)
+		}
+	}
+	return nil
+}
+
+// Routing decodes Team.RoutingJSON into TeamRouting. Returns the zero value
+// (nil, nil) for an empty/unset RoutingJSON — mirrors Slots()/Phases()'s
+// own "absent means legitimately empty" convention.
+func (t *Team) Routing() (TeamRouting, error) {
+	if t.RoutingJSON == "" || t.RoutingJSON == "[]" {
+		return TeamRouting{}, nil
+	}
+	var out TeamRouting
+	if err := json.Unmarshal([]byte(t.RoutingJSON), &out); err != nil {
+		return TeamRouting{}, fmt.Errorf("decode team routing: %w", err)
+	}
+	return out, nil
+}
+
+// SetRouting validates and encodes routing into Team.RoutingJSON. Mirrors
+// SetPhases' own choice not to be wired into CreateTeam/UpdateTeam
+// (task 01's TestTeam_RoundTrip fixture already saved an unvalidated
+// RoutingJSON placeholder string before this type existed;
+// validateTeamRouting still runs for any caller that uses this helper).
+func (t *Team) SetRouting(r TeamRouting) error {
+	if err := validateTeamRouting(r); err != nil {
+		return err
+	}
+	b, err := json.Marshal(r)
+	if err != nil {
+		return fmt.Errorf("encode team routing: %w", err)
+	}
+	t.RoutingJSON = string(b)
+	return nil
+}
+
 const teamColumns = `id, name, COALESCE(description,''), slots_json, authority_json,
        routing_json, phases_json, created_at, updated_at, COALESCE(created_by,'')`
 

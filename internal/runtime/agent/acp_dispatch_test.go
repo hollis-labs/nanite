@@ -82,7 +82,56 @@ func TestNewACPClient(t *testing.T) {
 	if _, err := newACPClient("pty-opencode", adapters.TransportStdio); err != nil {
 		t.Errorf("newACPClient(pty-opencode): unexpected error: %v", err)
 	}
-	if _, err := newACPClient("claude", adapters.TransportStdio); err == nil {
-		t.Error("newACPClient(claude): expected an error -- Claude ACP is a Phase 4 bridge, not selectable yet")
+	// TASKS/agent-host-acp/23: the three Phase 4 bridge-mediated providers
+	// (Claude via claudeacp, Codex via codexacp, Pi via piacp) are now wired
+	// into dispatch, same as opencode/copilot above.
+	if _, err := newACPClient("claude", adapters.TransportStdio); err != nil {
+		t.Errorf("newACPClient(claude): unexpected error: %v", err)
+	}
+	if _, err := newACPClient("codex", adapters.TransportStdio); err != nil {
+		t.Errorf("newACPClient(codex): unexpected error: %v", err)
+	}
+	if _, err := newACPClient("pi", adapters.TransportStdio); err != nil {
+		t.Errorf("newACPClient(pi): unexpected error: %v", err)
+	}
+	// "pty-claude"/"sub-codex" normalize the same way "pty-opencode" does
+	// above -- confirms the bridge providers get the same alias handling
+	// the two pre-existing native ACP providers already had.
+	if _, err := newACPClient("pty-claude", adapters.TransportStdio); err != nil {
+		t.Errorf("newACPClient(pty-claude): unexpected error: %v", err)
+	}
+	if _, err := newACPClient("sub-codex", adapters.TransportStdio); err != nil {
+		t.Errorf("newACPClient(sub-codex): unexpected error: %v", err)
+	}
+	// The bridge providers ignore the transport argument entirely (stdio
+	// only -- see newACPClient's own doc comment) -- confirm a tcp request
+	// still succeeds rather than erroring, unlike an unsupported provider.
+	if _, err := newACPClient("claude", adapters.TransportTCP); err != nil {
+		t.Errorf("newACPClient(claude, tcp): unexpected error: %v", err)
+	}
+	if _, err := newACPClient("nonsense-provider", adapters.TransportStdio); err == nil {
+		t.Error("newACPClient(nonsense-provider): expected an error for an unsupported provider")
+	}
+}
+
+// TestAcpSupportedProvidersTable pins the exact provider set newACPClient
+// dispatches for -- the two native ACP adapters (task 09 OpenCode, task 10
+// Copilot CLI) plus the three Phase 4 bridge-mediated adapters
+// (TASKS/agent-host-acp/23: Claude, Codex, Pi).
+func TestAcpSupportedProvidersTable(t *testing.T) {
+	want := map[string]bool{
+		"opencode": true,
+		"copilot":  true,
+		"claude":   true,
+		"codex":    true,
+		"pi":       true,
+	}
+	if len(acpSupportedProviders) != len(want) {
+		t.Fatalf("acpSupportedProviders has %d entries, want %d: %v", len(acpSupportedProviders), len(want), acpSupportedProviders)
+	}
+	for name, wantOK := range want {
+		if got := acpSupportedProviders[name]; got != wantOK {
+			t.Errorf("acpSupportedProviders[%q] = %v, want %v", name, got, wantOK)
+		}
 	}
 }

@@ -47,8 +47,11 @@ import (
 	agentsessions "github.com/hollis-labs/agentkit/agentsessions"
 	"github.com/hollis-labs/go-agent-wrapper/acp"
 	"github.com/hollis-labs/go-agent-wrapper/adapters"
+	"github.com/hollis-labs/go-agent-wrapper/adapters/claudeacp"
+	"github.com/hollis-labs/go-agent-wrapper/adapters/codexacp"
 	"github.com/hollis-labs/go-agent-wrapper/adapters/copilotacp"
 	"github.com/hollis-labs/go-agent-wrapper/adapters/opencodeacp"
+	"github.com/hollis-labs/go-agent-wrapper/adapters/piacp"
 	llmtypes "github.com/hollis-labs/go-llm-types"
 	"github.com/hollis-labs/go-providers/provider"
 	"github.com/hollis-labs/go-providers/provider/events"
@@ -56,31 +59,56 @@ import (
 )
 
 // acpSupportedProviders lists the providerName values newACPClient knows
-// how to build a real acp.Client for — the native ACP adapters this batch
-// ships (task 09 OpenCode, task 10 Copilot CLI). Bridge-mediated providers
-// (Claude/Codex/Pi via a third-party ACP bridge) are Phase 4 scope
-// (TASKS/agent-host-acp/12-15), not yet selectable here.
+// how to build a real acp.Client for — the two native ACP adapters (task
+// 09 OpenCode, task 10 Copilot CLI) plus the three bridge-mediated
+// adapters Phase 4 landed (task 13 Claude, task 14 Codex, task 15 Pi;
+// TASKS/agent-host-acp/12-15, libs/go-agent-wrapper v0.8.0). Wiring these
+// three into dispatch is TASKS/agent-host-acp/23's own job — Phase 4
+// built and live-verified the adapters but never wired them in here.
 var acpSupportedProviders = map[string]bool{
 	"opencode": true,
 	"copilot":  true,
+	"claude":   true,
+	"codex":    true,
+	"pi":       true,
 }
 
 // newACPClient builds the real acp.Client for providerName, per
 // factory.go's useACPProtocol/effectiveACPTransport dispatch. Returns a
-// clear error for any provider this batch's native adapters don't cover
-// yet, rather than silently falling back to the native runtime — an
-// operator who explicitly configured protocol="acp" on an unsupported
-// provider should see why launch failed, not a silent downgrade.
+// clear error for any provider none of this batch's adapters cover,
+// rather than silently falling back to the native runtime — an operator
+// who explicitly configured protocol="acp" on an unsupported provider
+// should see why launch failed, not a silent downgrade.
+//
+// claude/codex/pi all resolve through their respective npm-bridge
+// packages (claudeacp/codexacp/piacp) — each Client's own resolveCommand
+// spawns `npx -y <bridge-package>` by default (or a directly-configured
+// binary via that package's own env-var override), never taking the
+// `transport` argument: every bridge is stdio-only (JSON-RPC 2.0 over
+// the bridge subprocess's own stdin/stdout), unlike copilotacp, which
+// genuinely supports both stdio and tcp (its own daemon mode). An
+// operator who configures transport="tcp" alongside one of these three
+// providers gets a stdio client regardless — effectiveACPTransport still
+// resolves the value (so it round-trips through the config surface
+// unchanged), it's just not consulted by these three adapters, mirroring
+// opencodeacp's own already-established stdio-only handling immediately
+// below.
 func newACPClient(providerName string, transport adapters.Transport) (acp.Client, error) {
 	switch normalizeProviderName(providerName) {
 	case "opencode":
 		return opencodeacp.NewClient(), nil
 	case "copilot":
 		return copilotacp.NewClient(transport), nil
+	case "claude":
+		return claudeacp.NewClient(), nil
+	case "codex":
+		return codexacp.NewClient(), nil
+	case "pi":
+		return piacp.NewClient(), nil
 	default:
 		return nil, fmt.Errorf(
-			"agent: protocol=acp is not supported for provider %q yet (supported: opencode, copilot; "+
-				"claude/codex/pi ACP bridges are TASKS/agent-host-acp Phase 4)", providerName,
+			"agent: protocol=acp is not supported for provider %q yet (supported: opencode, copilot, "+
+				"claude, codex, pi)", providerName,
 		)
 	}
 }

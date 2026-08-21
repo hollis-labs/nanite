@@ -120,7 +120,7 @@ replace (
 )
 
 require (
-	github.com/hollis-labs/go-agent-wrapper v0.7.0
+	github.com/hollis-labs/go-agent-wrapper v0.8.1
 	github.com/hollis-labs/go-apppaths v0.1.0
 	github.com/hollis-labs/go-embed-contracts v0.1.1
 	github.com/hollis-labs/go-llm-contracts v0.3.0

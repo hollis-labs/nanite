@@ -187,6 +187,12 @@ func (a *API) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("PATCH /api/teams/{id}", a.handlePatchTeam)
 	mux.HandleFunc("DELETE /api/teams/{id}", a.handleDeleteTeam)
 
+	// TeamRun launch (TASKS/teams/11-team-run-launch-api.md) -- launch a
+	// saved Team by id with invocation-time overrides. See
+	// internal/api/team_runs.go's own package-level doc comment for why
+	// this is a REST route rather than a self-tool or an A2A skill target.
+	mux.HandleFunc("POST /api/teams/{id}/launch", a.handleLaunchTeam)
+
 	// CW-20260816-0020: Fragments Engine's `callback` destination (fifth
 	// destination type, loom-architecture.md §4) POSTs an opaque
 	// {generator, fragment:{...}} body here, fire-and-forget, whenever a

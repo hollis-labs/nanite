@@ -513,6 +513,21 @@ func cmdServe(args []string) {
 		version.Full(),
 	)
 
+	// TASKS/teams/11-team-run-launch-api.md: wire the "launch a saved Team
+	// by name" entry point behind POST /api/teams/{id}/launch. Same
+	// workflowDefinitionsRegistry/workflowLauncher pair AgentCardGenerator/
+	// TaskManager above are wired from — TeamRunLauncher.LaunchTeamRun
+	// registers its own per-launch compiled TeamRun definition into this
+	// same shared registry (agentworkflow.Registry.Register), which is
+	// exactly why AgentCardGenerator.Generate's own IsTeamRunDefinitionName
+	// filter matters: it's the same *Registry instance in both places.
+	container.TeamRunLauncher = service.NewTeamRunLauncher(
+		container.Store,
+		workflowDefinitionsRegistry,
+		workflowLauncher,
+		container.DurableAgents,
+	)
+
 	// CW-20260814-0015, CW-20260814-0016: A2A TaskManager for JSON-RPC task methods.
 	// Routes Task submissions to workflow launch or durable-agent wake.
 	// container.DurableAgents is threaded through so CancelTask can reuse

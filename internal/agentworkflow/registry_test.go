@@ -230,3 +230,61 @@ func TestRegistry_Register_ConcurrentWithGet(t *testing.T) {
 func concurrentRegisterTestName(i int) string {
 	return "concurrent-register-" + string(rune('a'+i%26)) + string(rune('0'+i/26))
 }
+
+// TestRegistry_Unregister_RemovesEntry is TASKS/teams/11-team-run-launch-
+// api.md's required registry-growth regression coverage: a registered
+// definition is reachable via Get/Names before Unregister, and gone after.
+func TestRegistry_Unregister_RemovesEntry(t *testing.T) {
+	reg := NewRegistry(nil)
+	wf := WorkflowDefinition{
+		Name:  "team-run:Feature Development:01ABC",
+		Steps: []StepDefinition{{ID: "only", Kind: StepKindTool, Config: map[string]any{"tool": "noop"}}},
+	}
+	if err := reg.Register(wf); err != nil {
+		t.Fatalf("Register: %v", err)
+	}
+	if _, ok := reg.Get(wf.Name); !ok {
+		t.Fatal("Get before Unregister: ok = false, want true")
+	}
+
+	reg.Unregister(wf.Name)
+
+	if _, ok := reg.Get(wf.Name); ok {
+		t.Fatal("Get after Unregister: ok = true, want false")
+	}
+	if len(reg.Names()) != 0 {
+		t.Fatalf("Names() after Unregister = %v, want empty", reg.Names())
+	}
+}
+
+// TestRegistry_Unregister_UnknownNameIsNoop confirms Unregister never
+// errors/panics for a name that was never registered -- a caller (e.g. a
+// racing double-unregister) shouldn't need to guard against this.
+func TestRegistry_Unregister_UnknownNameIsNoop(t *testing.T) {
+	reg := NewRegistry(nil)
+	reg.Unregister("does-not-exist")
+	var nilReg *Registry
+	nilReg.Unregister("also-fine-on-a-nil-registry")
+}
+
+// TestIsTeamRunDefinitionName exercises the naming-convention filter
+// AgentCardGenerator.Generate relies on to exclude per-launch compiled
+// TeamRun definitions from the public A2A skill-discovery response
+// (internal/service/a2a_agent_card_test.go covers that consumer directly;
+// this test covers the predicate itself, including the exact literal shape
+// team_run_launcher.go produces: "team-run:<team-name>:<ulid>").
+func TestIsTeamRunDefinitionName(t *testing.T) {
+	cases := map[string]bool{
+		"team-run:Feature Development:01K5ZQ2VXH8P8": true,
+		"team-run:":                         true,
+		"workflow-a":                        false,
+		"team-run":                          false, // no trailing ":" -- not this prefix
+		"my-team-run:not-actually-prefixed": false,
+		"":                                  false,
+	}
+	for name, want := range cases {
+		if got := IsTeamRunDefinitionName(name); got != want {
+			t.Errorf("IsTeamRunDefinitionName(%q) = %v, want %v", name, got, want)
+		}
+	}
+}

@@ -277,7 +277,7 @@ func (l *TeamRunLauncher) LaunchTeamRun(ctx context.Context, teamID string, over
 	}
 
 	// Step 2 — compile. No workflow_run_id needed (see doc comment above).
-	wfName := fmt.Sprintf("team-run:%s:%s", team.Name, ulid.Make().String())
+	wfName := fmt.Sprintf("%s%s:%s", agentworkflow.TeamRunDefinitionNamePrefix, team.Name, ulid.Make().String())
 	wf, err := CompileTeam(wfName, phases, nil)
 	if err != nil {
 		return nil, fmt.Errorf("team run launch: compile team %q: %w", team.Name, err)
@@ -303,6 +303,26 @@ func (l *TeamRunLauncher) LaunchTeamRun(ctx context.Context, teamID string, over
 		return nil, fmt.Errorf("team run launch: launch compiled team %q: launcher returned no run id", team.Name)
 	}
 
+	// Registry-growth mitigation (TASKS/teams/11-team-run-launch-api.md's
+	// required prerequisite; see agentworkflow.Registry.Unregister's own
+	// doc comment for the full reasoning). A run that came back terminal
+	// (completed/failed/cancelled) will never be Resume()d — nothing will
+	// ever call l.registry.Get(wfName) again — so its one-off compiled
+	// definition can be evicted immediately. A run still waiting on a gate
+	// or a flex step's exit trigger is deliberately left registered: Resume
+	// re-fetches the definition by name later
+	// (a2a_task_manager.go's resumeWorkflowRun), and evicting it here would
+	// break that resume path. This does not, by itself, bound registry
+	// growth for the common case (every 15-teams.md illustrative Team
+	// opens on a flex step) — AgentCardGenerator's own
+	// IsTeamRunDefinitionName filter is what unconditionally keeps a
+	// still-registered, still-waiting TeamRun definition out of the public
+	// A2A skill-discovery response regardless of this eviction's own
+	// narrower reach.
+	if isTerminalRunStatus(launchResult.Status) {
+		l.registry.Unregister(wfName)
+	}
+
 	// Step 4 — backfill team_run_members, now that the real
 	// workflow_runs.id exists.
 	for _, m := range resolved {
@@ -322,6 +342,21 @@ func (l *TeamRunLauncher) LaunchTeamRun(ctx context.Context, teamID string, over
 		StepResults: launchResult.StepResults,
 		Error:       launchResult.Error,
 	}, nil
+}
+
+// isTerminalRunStatus reports whether status is one of the built-in
+// engine's real terminal states (agentworkflow.RunStatusCompleted/Failed/
+// Cancelled) — as opposed to RunStatusWaiting/RunStatusWaitingOnFlex, which
+// mean the run made all the progress it currently can but is not done: a
+// later external Resume call will still need to look its compiled
+// definition up by name. See this file's own Unregister call site, above.
+func isTerminalRunStatus(status agentworkflow.RunStatus) bool {
+	switch status {
+	case agentworkflow.RunStatusCompleted, agentworkflow.RunStatusFailed, agentworkflow.RunStatusCancelled:
+		return true
+	default:
+		return false
+	}
 }
 
 // eagerResolutionItem is one planEagerResolution result entry: a Team Slot

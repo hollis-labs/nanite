@@ -37,12 +37,33 @@ func NewAgentCardGenerator(
 // derive skills from the boot-profile catalog's compiled LaunchSpecs
 // (skillFromBootProfile). That catalog is retired in full; workflow
 // definitions are the sole skill source now.
+//
+// TASKS/teams/11-team-run-launch-api.md's required registry-growth/
+// agent-card-pollution fix: g.workflowRegistry is the SAME shared
+// *agentworkflow.Registry instance TASKS/teams/08's LaunchTeamRun registers
+// a fresh, per-launch, permanently-unique-named compiled TeamRun
+// WorkflowDefinition into on every launch (agentworkflow.Registry.Register's
+// own doc comment). Those are internal implementation artifacts of one
+// TeamRun launch — never a reusable, externally-invokable "skill" a caller
+// could discover and launch by name (its own name embeds a fresh ulid every
+// time) — so they are deliberately excluded here via
+// agentworkflow.IsTeamRunDefinitionName, unconditionally, regardless of
+// whether the underlying registry entry has since been evicted
+// (Registry.Unregister) or is still reachable (a still-waiting TeamRun).
+// This is the resolution that actually prevents the public
+// /.well-known/agent-card.json discovery response from being polluted by a
+// stale one-off skill entry on every single TeamRun launch — Unregister
+// alone cannot guarantee that, since a still-waiting TeamRun's compiled
+// definition must stay registered for Resume to find it later.
 func (g *AgentCardGenerator) Generate() (*a2a.AgentCard, error) {
 	var skills []a2a.Skill
 
 	// Add workflow-derived skills
 	if g.workflowRegistry != nil {
 		for _, name := range g.workflowRegistry.Names() {
+			if agentworkflow.IsTeamRunDefinitionName(name) {
+				continue
+			}
 			wf, ok := g.workflowRegistry.Get(name)
 			if !ok {
 				continue

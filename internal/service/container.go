@@ -225,6 +225,16 @@ type Container struct {
 	// (CW-20260814-0015). Backs the JSON-RPC task methods (submit/get/cancel).
 	TaskManager *TaskManager
 
+	// TeamRunLauncher backs POST /api/teams/{id}/launch
+	// (TASKS/teams/11-team-run-launch-api.md): resolves a saved Team's Team
+	// Slots, compiles its phase sequence, and launches it as an ordinary
+	// WorkflowRun (task 08's LaunchTeamRun). Set post-hoc from main.go, nil-
+	// checked at use — same "constructed after NewContainer returns"
+	// pattern as AgentCardGenerator/TaskManager, above: it depends on the
+	// same workflowLauncher/workflowDefinitionsRegistry pair those two are
+	// built from in main.go's own boot sequence.
+	TeamRunLauncher *TeamRunLauncher
+
 	// stopModelCatalog cancels the model catalog background refresher.
 	stopModelCatalog context.CancelFunc
 

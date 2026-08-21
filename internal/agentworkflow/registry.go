@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 	"sync"
 )
 
@@ -161,4 +162,59 @@ func (r *Registry) Register(wf WorkflowDefinition) error {
 	}
 	r.definitions[wf.Name] = wf
 	return nil
+}
+
+// Unregister removes name from the registry, if present. A no-op — not an
+// error — when name isn't currently registered, so a caller that races
+// itself (or simply calls this defensively) never needs to guard against a
+// double-unregister.
+//
+// TASKS/teams/11-team-run-launch-api.md's own required prerequisite: task
+// 08's LaunchTeamRun registers a permanently-unique-named compiled
+// TeamRun WorkflowDefinition (Register, above) on every launch and never
+// removed it — an unbounded-growth gap a fresh reviewer flagged before this
+// task wired LaunchTeamRun into real, callable traffic. Unregister is the
+// primitive that closes it: TeamRunLauncher.LaunchTeamRun calls this once a
+// launched TeamRun's WorkflowResult comes back in a terminal status
+// (completed/failed/cancelled) — at that point nothing will ever call
+// registry.Get(wfName) again (a2a_task_manager.go's resumeWorkflowRun only
+// re-fetches by name for a run that's still RunStatusWaiting/
+// RunStatusWaitingOnFlex). A still-waiting TeamRun (the common case per
+// 15-teams.md's own illustrative examples, every one of which opens on a
+// flex step) is deliberately left registered here — Resume needs the
+// definition reachable by name later — so this alone does not fully bound
+// registry growth for long-lived TeamRuns. See
+// AgentCardGenerator.Generate's own use of IsTeamRunDefinitionName (below)
+// for the resolution that DOES apply unconditionally, regardless of run
+// status: excluding every per-launch compiled TeamRun definition from the
+// public A2A skill-discovery enumeration outright, so a still-registered
+// (waiting) TeamRun definition never pollutes /.well-known/agent-card.json
+// even though it remains reachable by name for Resume.
+func (r *Registry) Unregister(name string) {
+	if r == nil || name == "" {
+		return
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	delete(r.definitions, name)
+}
+
+// TeamRunDefinitionNamePrefix is the literal namespace prefix
+// TASKS/teams/08-team-run-launcher.md's LaunchTeamRun stamps on every
+// per-launch compiled TeamRun WorkflowDefinition it registers
+// (internal/service/team_run_launcher.go builds the full name as
+// fmt.Sprintf("team-run:%s:%s", team.Name, ulid.Make().String())) — never
+// present on a YAML-authored, LoadRegistryDir-loaded workflow definition
+// (those are named by their own authors; ":" is not a character this
+// codebase's own workflow-name convention uses elsewhere in a definition's
+// Name). Exported as a shared constant, not duplicated as a literal string
+// in both the producer (team_run_launcher.go) and the consumer
+// (a2a_agent_card.go's IsTeamRunDefinitionName-filtered skill enumeration),
+// so the two stay in lock-step by construction.
+const TeamRunDefinitionNamePrefix = "team-run:"
+
+// IsTeamRunDefinitionName reports whether name is a per-launch compiled
+// TeamRun WorkflowDefinition's own Name, per TeamRunDefinitionNamePrefix.
+func IsTeamRunDefinitionName(name string) bool {
+	return strings.HasPrefix(name, TeamRunDefinitionNamePrefix)
 }

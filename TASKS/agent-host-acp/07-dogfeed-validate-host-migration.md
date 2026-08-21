@@ -255,3 +255,197 @@ discipline, not patched inline)
   previously-unvalidated gaps exist. Not claiming Phase 2 `validated` in `TASKS/INDEX.md`
   (an edit outside this task's own authorization regardless); reporting this verdict to the
   Orchestrator for that decision.
+
+## Work Log addendum (2026-08-21, re-run) — re-verification against the fully-patched build
+
+This is a **second, independent dogfeed run**, dispatched after tasks `18`-`22` all landed and
+after the Orchestrator's own discovery (and fix, commit `83100a50`) that Go `replace` directives
+are not transitive — every sibling-repo fix had verified clean in isolation, but Nanite's own
+compiled binary was still silently running the old, buggy `agentkit v0.3.0` until that commit
+bumped `go.mod` to pull `agentkit v0.5.0`/`go-providers v0.24.0`/`go-agent-wrapper v0.4.0` with
+zero local `replace` directives for any of the three. This addendum documents the real,
+binary-level re-verification that those fixes actually take effect — not a repeat of the original
+run's methodology description (see above for the full scratch-server recipe rationale; this
+addendum assumes it and just applies it), just its results.
+
+**Appended, not rewriting, the original Work Log above** — the original run's own findings and
+verdict stand as the historical record of what was found and why. This addendum reports what
+changed since.
+
+### Pre-flight: dependency versions and baseline git status
+
+Confirmed via `go list -m` (from this repo's own `go.mod`, no `replace` line for any of the
+three): `github.com/hollis-labs/agentkit v0.5.0`, `github.com/hollis-labs/go-providers v0.24.0`,
+`github.com/hollis-labs/go-agent-wrapper v0.4.0` — exactly the versions the dispatch expected,
+with no `=>` annotation. Confirmed HEAD is `83100a50f2093b13e4455223107f4cc2a6b219dd` and `git
+status --short` baseline before touching anything: five pre-existing modified/untracked files
+(`TASKS/agent-host-acp/22-...md`, `docs/engineering/GLOSSARY.md`,
+`docs/engineering/architecture/00-overview.md`/`16-agent-host.md`/`17-acp.md`, plus untracked
+`docs/engineering/architecture/19-api-cli-runtime-parity.md` and `docs/launch-site/`) — none of
+these were touched by this run at any point; per the original run's own precedent (its Safety
+setup section noted an identical kind of pre-existing, not-mine untracked file appearing
+mid-session), treated as a concurrent, unrelated session's in-progress work in the same checkout
+and left alone throughout. `git status --short` was re-checked repeatedly (after the build, after
+each provider's turn, after the broker kill test, after shutdown, and finally after the full test
+run) and was byte-identical to this baseline at every check.
+
+Built a fresh scratch binary (`go build -o .../scratchpad/nanite-dogfeed07b ./cmd/nanite/`) —
+clean, confirming the new dependency versions compile in. Ran it from a fresh scratch CWD
+(`.../scratchpad/dogfeed07b-cwd`) on port 8099, with `XDG_DATA_HOME`/`XDG_STATE_HOME`/
+`XDG_CONFIG_HOME`/`XDG_CACHE_HOME` redirected to scratch subdirectories, an explicit `-db` pointed
+at a scratch SQLite file, and real `$HOME` left alone for CLI auth — the identical recipe the
+original run above established and verified safe. Seeded three fresh managed test agents
+(`dogfeed07b-claude`/`-codex`/`-opencode`) via the real `POST /api/agents` HTTP API, then set each
+one's `default_provider`/`runtime_kind` (`pty`/`pty-codex`/`pty-opencode`, `cli`) via a scoped
+`sqlite3 UPDATE` on the scratch DB, confirmed to round-trip via `GET /api/agents/{id}`. Seeded/
+patched `providers.default_model` rows for `pty`/`pty-codex`/`pty-opencode`
+(`sonnet`/`gpt-5-codex`/`opencode/grok-code`) — `pty-opencode` had no row at all in this fresh
+scratch DB and needed a full `INSERT`, matching the original run's own one-time setup note that
+this is scratch-DB bootstrapping, not a product finding.
+
+### Check 1 — Claude: real turn + `Session.Stop()`, no regression
+
+Created a harness session (`provider=pty`, `model=sonnet`), sent a real turn ("What is 17 + 25?
+Reply with only the number.") via `POST .../turns` and read the real SSE stream via `GET
+.../events`: `tool_warning` → `stream_start` → `delta` (`"42"`) → `stream_end` (real usage) — a
+correct answer from a real, live `claude -p --input-format stream-json --output-format
+stream-json --verbose` subprocess. Confirmed the assistant message persisted non-empty in the
+scratch DB (`{"v":1,"text":"42",...}`).
+
+Captured the live PID via `ps` (`22748`), then called `POST /api/sessions/{id}/agent/reboot`
+(→ `RebootSessionAgent` → `Session.Stop()`) and confirmed both that PID `22748` no longer exists
+afterward and that the server log shows the clean sequence `"recovery: session exited via
+intentional reboot — skipping broker"` → `"reboot: session agent stopped; next turn will
+cold-boot"`. **No regression** — identical behavior to the original run's own Step 1 finding for
+Claude.
+
+### Check 2 — Codex (task `19`): real turn now completes end-to-end
+
+Created a harness session (`provider=pty-codex`, `model=gpt-5-codex`), sent a real turn ("What is
+2+2? Reply with only the number.") against the real `codex-cli 0.147.0` binary. SSE stream:
+`tool_warning` → `stream_start` → `delta` (`"4"`) → `stream_end` (real usage), completing in
+~5s. The server log shows a clean `request_build` → `chat-loop-diag: provider stream closed`
+sequence with **zero** occurrences of `"not inside a trusted directory"` or `"process exited 1"`
+— the exact 100%-reproducible failure the original run documented is gone. Assistant message
+persisted non-empty in the scratch DB (`{"v":1,"text":"4",...}`). **Task `19`'s fix confirmed
+working live**, against the real binary, through the real production HTTP surface.
+
+### Check 3 — OpenCode (tasks `18` + `22` together): real turn now completes end-to-end, for the first time
+
+Created a harness session (`provider=pty-opencode`, `model=opencode/grok-code`), sent a real turn
+("What is 3+3? Reply with only the number.") against the real `opencode 1.15.6` binary. SSE
+stream: `tool_warning` → `stream_start` → `delta` (`"6\n"`) → `stream_end`, completing in ~7s —
+**no `Config.Workdir is required` crash** (task `18`'s fix) **and** the stream actually advances
+past `stream_start` to a real `delta`/`stream_end` (task `22`'s fix) rather than hanging forever,
+which is exactly what neither task `07`'s original run nor task `18`'s own re-verification (which
+stopped at confirming the crash was gone, and explicitly deferred this exact end-to-end check to
+task `22`/the Orchestrator's centralized pass) had ever exercised together against a real
+`opencode` binary before this run. Confirmed in the scratch DB: `agent_runtime.workdir` for this
+session is the real boot dir (not empty) — task `18`'s fix genuinely exercised, not just not-
+crashing by accident — and the assistant message persisted non-empty
+(`{"v":1,"text":"6\n",...}`). Confirmed via `ps` before and after that no `opencode` process was
+left running once the turn completed (subprocess-per-turn shape working as designed). **Both
+fixes confirmed working together, live, for the first time.**
+
+### Check 4 — Broker real-process-kill classification (task `20`): the single most important check, now confirmed working
+
+Repeated the original run's exact forced-failure scenario. Booted a **second**, fresh Claude
+session, sent one real turn to bring up a live subprocess, confirmed via `ps` it stayed alive
+after the turn completed (PID `23244`), then ran `kill -9 23244` externally (not via any Nanite
+API) against that real, live, healthy process. Within ~3 seconds the server log showed:
+
+```
+level=WARN msg="recovery: session exited with error — invoking broker" session_id=2f00d187-... cause="" code=-1 signal=9
+level=INFO msg="recovery: terminal exit observed" session_id=2f00d187-... attempt=1 cause="" code=-1 signal=9
+```
+
+— the exact classification log line shape the original run's task-`20`-adjacent finding named as
+what *should* happen but previously never did for a real process kill (only the chat-layer-
+synthesized `http_stream` path produced this before). The scratch DB's `agent_runtime` row for
+that session went to `state='running'`, `failure_reason='broker retry attempt 1'` — **not**
+silently flipping to `state='done'` with no `failure_reason`, which is exactly what the original
+run documented as the broken pre-fix behavior. Confirmed via `ps` a **new** live `claude`
+subprocess (PID `23299`, a different PID than the killed one) was spawned — the broker's
+dispatched replacement session, not just a classification log line with no real effect. Sent a
+second real turn ("Say the word recovered and nothing else.") to that same session ID and got a
+real, correct response (`"recovered"`) back through a full `stream_start`/`delta`/`stream_end`
+sequence — proving the replacement session isn't just alive but genuinely usable end to end.
+Cleanly stopped it afterward via `POST .../agent/reboot`; confirmed no leftover process via `ps`.
+
+**This is the direct, positive, live confirmation task `20`'s fix works** — the single check this
+re-run's dispatch explicitly named as most important, and it now holds.
+
+### Check 5 — Broker replacement-session leak (task `21`): lighter-touch confirmation, per this task's own allowance
+
+Judgment call, documented per this task's own "your judgment call, document what you did either
+way" instruction: reproducing task `21`'s own specific trigger sequence live (a mid-stream
+provider-level error reaching `notifyRecoveryBrokerForHTTPStreamError` without an underlying
+process exit) is not something the real HTTP API surface can force cleanly on demand — the
+original run itself only hit it by accident, via test-session messiness the original Work Log
+explicitly flagged as not independently re-isolated. Given that (a) task `21`'s own Work Log
+already built and passed a clean, single-variable repro using the *real* production call chain
+(a real `*runtimeagent.Session`, a real `*broker.Broker`, a real `notifyRecoveryBrokerForHTTPStreamError`
+call — not a shallow mock) rather than task `07`'s messier organic trigger, and (b) the specific
+concern motivating this whole re-run (fixes verifying clean in isolation but not actually
+compiled into Nanite's real binary) is exactly what a fresh `go test` run under the newly-bumped,
+correctly-resolved dependency graph checks for, re-ran task `21`'s own regression tests directly
+against this repo's current module graph:
+
+```
+$ go test ./internal/service/... -race -run 'TestAdoptReplacementSession_' -v -count=1
+...
+recovery: displaced session stopped by adoptReplacementSession — skipping broker session_id=sess-orphan-repro-2
+ok  	github.com/hollis-labs/nanite/internal/service	15.954s
+```
+
+Both `TestAdoptReplacementSession_MidStreamErrorPath_StopsDisplacedSession` and
+`TestAdoptReplacementSession_ObserveSessionForRecoveryPath_NoDoubleNotify` pass clean under
+`-race`, now compiled against `agentkit v0.5.0`/`go-agent-wrapper v0.4.0` (not the versions task
+`21` was originally verified against before the pin bump) — a real, non-trivial re-verification
+given this exact re-run's own premise that isolated-repo-clean does not guarantee
+compiled-into-Nanite-clean. This is the lighter-touch confirmation this task's own instructions
+explicitly allow in lieu of a fresh live repro; a fresh live single-variable repro of the mid-
+stream-error trigger itself was judged out of proportion for this re-verification pass given
+task `21`'s already-strong existing coverage.
+
+### Check 6 — full regression
+
+- `go build ./cmd/nanite/` — clean.
+- `go vet ./...` — clean except the same two pre-existing `internal/service/container.go`
+  findings (`stopReaper`/`stopRuntimeReaper`) every task in this batch has already noted as
+  predating the batch entirely.
+- `go test ./... -count=1` — clean across all 90 packages, no regression.
+- `git status --short` — identical to the pre-run baseline at every check throughout this run
+  (confirmed repeatedly: after the build, after each provider's turn, after the broker-kill test,
+  after shutdown, and after the full test run) — this run touched no tracked files.
+
+### Cleanup
+
+Shut the scratch server down cleanly (`kill -TERM`); server log shows the same graceful
+`"shutting down"` → reaper-stop sequence the original run observed. Confirmed via `ps` that no
+scratch-related `claude -p`/`codex exec`/`opencode run`/`nanite-dogfeed07b` processes remained
+afterward, and via `ls` that none of this run's own session-specific boot dirs (matched by
+session ID) remained under `/var/folders/.../T/` (a large number of *older*, unrelated stale boot
+dirs from prior, separate sessions on this machine do still exist there — pre-existing
+accumulation, not created or left behind by this run, and out of this task's scope to clean up).
+
+### Verdict
+
+All three previously-broken/unvalidated paths this re-run was dispatched to confirm are now
+**verifiably working against real binaries, through the real production HTTP surface**:
+
+- Codex (task `19`): real turn completes end-to-end — **confirmed**.
+- OpenCode (tasks `18`+`22` together): real turn completes end-to-end for the first time —
+  **confirmed**.
+- Broker real-process-kill classification (task `20`): the single most important check in this
+  re-run — **confirmed**, including a working end-to-end replacement-session dispatch, not just a
+  log line.
+- Broker replacement-session leak (task `21`): confirmed via lighter-touch re-verification
+  (existing regression tests, re-run clean against the now-correctly-resolved dependency graph),
+  per this task's own explicit allowance for that approach.
+- Claude (regression check): still fully working, including `Session.Stop()` — **no regression**.
+- `go test ./...`: clean. `git status --short`: clean throughout, identical to baseline.
+
+No new bugs found during this re-run. Reporting this verdict to the Orchestrator; per this task's
+own standing instruction, not editing `TASKS/INDEX.md` — that Phase-2-`validated` determination is
+the Orchestrator's to make.

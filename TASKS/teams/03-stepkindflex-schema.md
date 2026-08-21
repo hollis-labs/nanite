@@ -1,7 +1,7 @@
 # `StepKindFlex` — the one real engine-level schema change the design doc's own ledger names
 
 **Phase:** 1 — Schema & storage foundation (`TASKS/teams`)
-**Status:** implemented
+**Status:** reviewed
 **Depends on:** none directly (independent migration/const addition; parallel-safe with `01`/`02`/`04`/`05` — coordinate migration numbering only, see `01`'s numbering note)
 **Touches:** `internal/agentworkflow/types.go` (new `StepKindFlex` constant), `internal/store/migrations/` (new migration — `workflow_run_steps.kind` CHECK widening, table-rebuild), `internal/service/workflow_engine.go` (confirm/adjust the step-kind dispatch switch does not error on an unrecognized-but-now-valid `flex` kind before task `06` gives it real behavior).
 
@@ -61,4 +61,7 @@ All three pass. Also added `TestBuiltinWorkflowEngine_FlexStepReachesDispatchNot
 **No escalation needed.** Both judgment calls the dispatching brief flagged as expected (not escalation-worthy) were resolved as documented above: the placeholder dispatch behavior (synchronous, clear `IsError` "not yet implemented" result, not a pause) and the `launch_source_type` question (punted to task `08`, documented in both the migration file and here).
 
 ## Review notes
-<Reviewer fills this in: pass/fail, what was checked, anything fixed and how.>
+
+**PASS (2026-08-20).** Fresh Phase 1 reviewer, no shared context with the implementing worker — see `TASKS/ESCALATIONS.md`'s 2026-08-20 "Teams Phase 1 review" entry for the complete cross-task record. For this task specifically: confirmed `runStep` special-cases `StepKindGate` before the dispatch switch, so a flex step correctly falls into `executeLLMOrTool`'s new case and comes back with a clear `IsError: true` "not yet implemented" result, never a silent no-op; confirmed `internal/agentworkflow/validate.go`'s `Validate` switch was also updated (the second exhaustive-switch fix this task's own Work Log claims) — without it, a flex step would be rejected before ever reaching the dispatch switch, making the regression test impossible; confirmed migration 130's table-rebuild preserves all 13 original columns from `051` plus `gate_input` from `091`, and both indexes, by diffing against both source migrations directly.
+
+**One low-severity, non-blocking finding, not fixed here:** migration 130's `Down` section lacks a `-- +goose NO TRANSACTION` directive — inherited unchanged from `119_agent_reflex_dispatch_to_agent.sql`'s own Down section (confirmed `119` has the identical gap), which this task's own Work Log already flagged explicitly as a known, pre-existing gap in the pattern it was told to copy, choosing consistency over a silent one-off fix. If either Down were ever actually executed via goose, it would likely fail. Logged in `TASKS/ESCALATIONS.md`; recommended follow-up is a small bundled cleanup across both migrations whenever someone next has capacity, not urgent (neither Down has ever been executed via goose in this project's history).

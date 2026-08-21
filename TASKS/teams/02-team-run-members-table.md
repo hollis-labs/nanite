@@ -1,7 +1,7 @@
 # `team_run_members` — the one real new table the design doc names explicitly
 
 **Phase:** 1 — Schema & storage foundation (`TASKS/teams`)
-**Status:** implemented
+**Status:** reviewed
 **Depends on:** none directly (independent table; parallel-safe with `01`/`03`/`04`/`05` — different file/table surface, coordinate migration numbering only, see `01`'s numbering note)
 **Touches:** `internal/store/migrations/` (new migration), `internal/store/team_run_members.go` (new).
 
@@ -159,4 +159,5 @@ task's illustrative signatures taken literally. Summary:
   shape.
 
 ## Review notes
-<Reviewer fills this in: pass/fail, what was checked, anything fixed and how.>
+
+**PASS (2026-08-20).** Fresh Phase 1 reviewer, no shared context with the implementing worker — see `TASKS/ESCALATIONS.md`'s 2026-08-20 "Teams Phase 1 review" entry for the complete cross-task record. For this task specifically: confirmed `team_run_members` (migration 129) matches the design doc's own column list exactly, deliberately has no unique constraint on `(workflow_run_id, slot_name)`, and reads correctly for a multi-member slot. No findings against this task.

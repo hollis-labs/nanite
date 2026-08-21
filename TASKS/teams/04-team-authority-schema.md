@@ -1,7 +1,7 @@
 # Team authority — real enforced grants, not a copy of `parent_dispatch_allowlist`'s advisory pattern
 
 **Phase:** 1 — Schema & storage foundation (`TASKS/teams`)
-**Status:** implemented
+**Status:** reviewed
 **Depends on:** `01` (Team Slot vocabulary — this table's `from_slot`/`to_slot` values should correspond to real `TeamSlotDefinition.Name` values, though no FK is proposed since slots live inside `teams.slots_json`, not a normalized table)
 **Touches:** `internal/store/migrations/` (new migration), `internal/store/team_authority.go` (new — `TeamAuthorityGrant` struct, CRUD, `AuthorizedForVerb` check function).
 
@@ -77,4 +77,7 @@ This function does not itself decide what `true`/`false` *means* for `may_not_re
 **Nothing escalated.** No genuine unknown was hit — the two judgment calls above (verb-CHECK non-widening, `to_slot='self'` resolution) are exactly the kind of expected, document-your-reasoning calls the dispatch instructions named up front, not stop-worthy ambiguities.
 
 ## Review notes
-<Reviewer fills this in: pass/fail, what was checked, anything fixed and how.>
+
+**PASS (2026-08-20).** Fresh Phase 1 reviewer, no shared context with the implementing worker — see `TASKS/ESCALATIONS.md`'s 2026-08-20 "Teams Phase 1 review" entry for the complete cross-task record. For this task specifically: read `AuthorizedForVerb` directly and confirmed no `default: true` branch anywhere — every early-return and every fallthrough path returns `false`; spot-checked the fail-closed regression tests (unknown team, unknown slot, no grants at all, empty arguments) and confirmed they're real, not vacuous.
+
+**One low-severity, non-blocking finding, threaded forward rather than fixed here (out of this task's own scope — no enforcement wiring exists yet):** `AuthorizedForVerb`'s `to_slot='self'` handling has a sharp edge for a future caller — passing the literal string `"self"` as the `toSlot` *argument* (rather than resolving self-reference to the real slot name first) makes a `to_slot='self'` grant row match trivially, since the check is `grantToSlot == toSlot` before the real self-check (`fromSlot == toSlot`) runs. No caller exists in this task (that's `08`/`09`'s job), so this isn't a Phase 1 defect. Task `09` is `AuthorizedForVerb`'s first real `may_message`/`may_not_review` caller — added an explicit warning directly to `TASKS/teams/09-team-routing.md`'s own Context section instructing it to always resolve `toSlot` to the real Team Slot name, never the literal `"self"`. Logged in `TASKS/ESCALATIONS.md`.

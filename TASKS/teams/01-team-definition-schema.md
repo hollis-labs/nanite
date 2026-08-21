@@ -1,7 +1,7 @@
 # Team definition schema — `teams` table, Go types, store CRUD
 
 **Phase:** 1 — Schema & storage foundation (`TASKS/teams`)
-**Status:** implemented
+**Status:** reviewed
 **Depends on:** none
 **Touches:** `internal/store/migrations/` (new migration — see numbering note below), `internal/store/teams.go` (new — `Team` struct, `TeamSlotDefinition` struct, CRUD), `docs/engineering/GLOSSARY.md` (new entries: Team, Team Slot, TeamRun — see disambiguation requirement below).
 
@@ -83,4 +83,5 @@ plus a phase/gate sequence (the doc's "Illustrative shape" compiled `WorkflowDef
 **Nothing escalated.** No ambiguity in the task's own instruction, no zero-coverage gap in `docs/engineering/*`, no conflict with another active task found during implementation.
 
 ## Review notes
-<Reviewer fills this in: pass/fail, what was checked, anything fixed and how.>
+
+**PASS (2026-08-20).** Fresh Phase 1 reviewer, no shared context with the implementing worker — full review scope covering all of `01`-`05` together, see `TASKS/ESCALATIONS.md`'s 2026-08-20 "Teams Phase 1 review" entry for the complete cross-task record. For this task specifically: confirmed the `teams` table (migration 128) matches the illustrative DDL exactly; independently verified the GLOSSARY.md Team/Team Slot/TeamRun entries are a real, accurate disambiguation against `internal/context/slot.go`'s `SlotOrder` (not cosmetic); grepped all new Go identifiers in this batch and confirmed none use a bare `Slot`/`slot` type name. No findings against this task.

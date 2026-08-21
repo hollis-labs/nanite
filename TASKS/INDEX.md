@@ -462,7 +462,7 @@ Nanite itself), and scope boundaries.
 | `06-migrate-session-lifecycle-to-wrapper` | 2 | reviewed (PASS, 2 non-blocking findings fixed and verified) | `02`, `04`, `05` (closed), `05a` |
 | `07-dogfeed-validate-host-migration` | 2 | implemented (dogfeed run, found 4 real bugs — see `18`-`21`; not marking Phase 2 `validated` until they land) | `04`, `05`, `06` |
 | `18-fix-opencode-workdir-hard-fail-regression` | 2 (found via `07`) | not-started | none |
-| `19-fix-codex-missing-skip-git-repo-check` | 2 (found via `07`, sibling repo `libs/go-providers`) | not-started | none |
+| `19-fix-codex-missing-skip-git-repo-check` | 2 (found via `07`, sibling repo `libs/go-providers`) | implemented (v0.24.0 tagged; Nanite pin bump centralized, pending) | none |
 | `20-fix-agentkit-legacy-waiter-swallows-exit-errors` | 2 (found via `07`, sibling repo `libs/agentkit` — operator-approved cross-portfolio fix) | not-started | none |
 | `21-fix-broker-replacement-session-orphans-old-process` | 2 (found via `07`, lower confidence — needs its own repro first) | not-started | none |
 | `08-build-acp-client-abstraction` | 3 | not-started | `02`; recommended after `07` |

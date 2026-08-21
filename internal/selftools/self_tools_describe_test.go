@@ -251,8 +251,10 @@ func TestNaniteToolDescribe_ExamplesIncludePassiveRenderableCoverage(t *testing.
 // added these so the agent's first-call success rate on unfamiliar
 // envelope types is anchored on a real example rather than guesswork.
 //
-// Source of truth for the type list: config/envelopes.yaml +
-// internal/envelope/schemas/<type>.schema.json.
+// Source of truth for the type list: the external
+// github.com/hollis-labs/go-envelopes module's manifest/envelopes.yaml +
+// manifest/schemas/<type>.schema.json (config/envelopes.yaml and
+// internal/envelope/schemas/ do not exist in this repo).
 func TestNaniteToolDescribe_ShowCardExamplesCoverAllCoreTypes(t *testing.T) {
 	examples, err := loadGoldenExamples("card_show")
 	if err != nil || len(examples) == 0 {

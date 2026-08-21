@@ -1,7 +1,7 @@
 # Fix CLI-agent boot content to source the Card type list dynamically instead of hardcoded/stale content
 
 **Phase:** 6
-**Status:** implemented
+**Status:** reviewed
 **Depends on:** none, but should land after `01`-`04` (the primitive-composition rebuilds) so the dynamically-sourced list reflects the final, post-rebuild type set rather than needing a second pass
 **Touches:** `internal/runtime/agent/sandbox_content_envelope.go` (`envelopeSchemaContent` — planted `.sandbox/envelope-schema.md`), `internal/runtime/agent/sandbox_content_claude.go` (`claudeMDBody` — the CLAUDE.md addendum planted into Claude-CLI boot dirs), `internal/chat/envelope.go` (`EnvelopeRegistry()`/`registeredTypes` — the live, in-process registry to query instead of hardcoding), `internal/plugin/builtin/adapter-claude/plugin.go:168` (the planting call site)
 
@@ -54,4 +54,4 @@ Architecture doc `08-cards.md`: *"CLI-launched agents are currently told to cons
 **Baseline:** `go build ./cmd/nanite/` clean. `go vet ./...` reports the same 2 pre-existing findings in `internal/service/container.go` (`stopReaper`/`stopRuntimeReaper` context-leak warnings) that exist on this branch before any of this task's changes (confirmed via `git stash` + re-run) — unrelated to this task, not touched. `go test ./...` — all packages pass, zero FAIL.
 
 ## Review notes
-<Reviewer fills this in: pass/fail, what was checked, anything fixed and how.>
+**2026-08-21, fresh Reviewer (no shared context with the implementing worker): PASS.** All four claims in the Work Log independently verified: the stale call-site correction (`bootdir_plant.go`'s `sandboxFiles()` is the real planting site), the `RegisteredEnvelopeTypeNames()` vs `EnvelopeRegistry()` reasoning (traced through `internal/plugin/registrations.go` and the external `go-envelopes` module), the generated content itself (executed live against a real `envelopes.LoadCore()` registry — exactly 18 sorted core types, no stale/cut types), and the `BuildEnvelopeSchema` doc-comment bug fix (confirmed via `git log -S` that symbol never existed). The five files outside this task's originally-cited list are legitimate narrow doc-comment corrections, not scope creep. Fresh (non-cached) `go test -count=1 ./...` clean; `go vet ./...` shows only the 2 pre-existing `container.go` findings. Two non-blocking, pre-existing observations logged for awareness: a stale `"type": "nanite"` example in the planted boot-content header, and `08-cards.md`'s "known live bug" section now being stale (neither introduced by this task). No findings, no fix needed.

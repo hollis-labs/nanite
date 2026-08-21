@@ -518,9 +518,52 @@ func (svc *TeamRoutingService) InstallTeamRunRouting(ctx context.Context, runID,
 		priority := rule.Priority
 		if priority <= 0 {
 			priority = semanticRulePriorityBase - int64(i)*semanticRulePriorityStep
-			if priority <= coordinatorFallbackPriority {
-				priority = coordinatorFallbackPriority + 1
-			}
+		}
+		// Floor guard applies unconditionally to the FINAL priority value,
+		// regardless of whether it came from the derived-default path above
+		// or an explicit TeamRoutingRule.Priority override — the
+		// coordinator fallback (coordinatorFallbackPriority, fixed) must
+		// remain the lowest-priority row in this run's scoped set
+		// (15-teams.md's "Coordinator fallback... the lowest-priority row
+		// in the same scoped set"), full stop. Bug fixed here, found by 09's
+		// fresh reviewer (see 09-team-routing.md's Work Log addendum): this
+		// guard used to live ONLY inside the `priority <= 0` branch above,
+		// so an explicit rule.Priority set at or below
+		// coordinatorFallbackPriority sailed through unclamped and made
+		// that semantic rule permanently unreachable — first_applicable
+		// (internal/agent/reflexes/resolve.go) groups same-ActionKind
+		// (dispatch_to_agent) candidates and picks the single
+		// highest-priority ELIGIBLE one, and the always-firing (`.*`
+		// trigger) coordinator fallback would then always outrank it.
+		//
+		// Chosen behavior for an explicit-but-too-low override: silently
+		// clamp to coordinatorFallbackPriority+1, exactly matching the
+		// derived-default path's own pre-existing behavior, rather than a
+		// hard validation error at install time. Both are defensible (a
+		// hard error would surface the mistake more loudly); silent clamp
+		// was chosen because (1) it is the truly minimal fix — this is
+		// exactly what "the floor guard should apply unconditionally"
+		// means literally, one guard, one behavior, for both paths, not a
+		// second install-time validation rule with its own error shape;
+		// (2) it keeps this function's two priority-derivation paths
+		// (derived-default vs explicit override) behaving identically at
+		// the floor rather than diverging into "one clamps, one rejects,"
+		// which would itself be a surprising asymmetry; (3) this file
+		// already treats other under/mis-specified Team-authored routing
+		// input by silently completing it sensibly rather than hard-
+		// rejecting (e.g. an empty RoutingJSON.CoordinatorSlot defaults to
+		// "orchestrator" a few lines below) — hard validation is reserved
+		// in this function for a genuinely unresolvable reference (a rule
+		// naming a TargetSlot that doesn't exist on the Team at all, where
+		// no sensible default/clamp exists); (4) practically, the outcome
+		// the Team author actually wants — this rule outranks the
+		// coordinator fallback — is still fully achieved even though the
+		// stored number differs from what was typed. Documented trade-off:
+		// a Team author who explicitly writes Priority: 50 expecting it to
+		// win outright will not be told their literal value was raised; it
+		// is silently normalized to coordinatorFallbackPriority+1 instead.
+		if priority <= coordinatorFallbackPriority {
+			priority = coordinatorFallbackPriority + 1
 		}
 		triggerSpec := map[string]any{
 			"kind":    "user_regex_window",

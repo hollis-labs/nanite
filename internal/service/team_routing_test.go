@@ -560,6 +560,122 @@ func TestInstallTeamRunRouting_SemanticRuleAndCoordinatorFallback_InstalledAndPr
 	})
 }
 
+// TestInstallTeamRunRouting_ExplicitPriorityAtOrBelowFloor_IsFloorClamped is
+// the regression test for the bug a fresh reviewer of this task found and
+// reported (documented in this task's own Work Log addendum,
+// TASKS/teams/09-team-routing.md): InstallTeamRunRouting's floor guard
+// (coordinatorFallbackPriority) used to run ONLY inside the derived-default
+// (`rule.Priority <= 0`) branch, so a Team author setting
+// TeamRoutingRule.Priority explicitly to a value at or below
+// coordinatorFallbackPriority (100) sailed through unclamped and made that
+// semantic rule permanently unreachable: first_applicable groups same-
+// ActionKind candidates and picks the single highest-priority ELIGIBLE one,
+// and the always-firing coordinator fallback (fixed at 100) would always
+// outrank an explicit-priority rule set at or below 100. Mirrors
+// TestInstallTeamRunRouting_SemanticRuleAndCoordinatorFallback_
+// InstalledAndPrioritizedCorrectly's own install-then-Resolve approach
+// exactly, but with an EXPLICIT, too-low TeamRoutingRule.Priority (50)
+// instead of the derived-default path that test already covers — the real
+// end-to-end proof the reviewer's own reproduction used: confirms the
+// installed row's stored priority is now floor-clamped, AND that a matching
+// user message correctly resolves to the semantic rule's target via the
+// real reflexes.Resolve combining logic, not the coordinator fallback.
+func TestInstallTeamRunRouting_ExplicitPriorityAtOrBelowFloor_IsFloorClamped(t *testing.T) {
+	st, trl, rt := newTeamRoutingTestFixtures(t)
+	ctx := context.Background()
+	team, runID := launchSMETeamRun(t, st, trl, TeamRunOverrides{})
+	addRoutingToTeam(t, st, team, store.TeamRouting{
+		Rules: []store.TeamRoutingRule{
+			{
+				Name:       "architecture_question",
+				Phrases:    []string{"architecture question", "design review"},
+				TargetSlot: "architect",
+				// Explicit, well below coordinatorFallbackPriority (100) —
+				// the exact bug shape: before the fix, this sailed through
+				// unclamped and made the rule permanently unreachable.
+				Priority: 50,
+			},
+		},
+	})
+
+	installed, err := rt.InstallTeamRunRouting(ctx, runID, team.ID)
+	if err != nil {
+		t.Fatalf("InstallTeamRunRouting: %v", err)
+	}
+	if len(installed) != 6 {
+		t.Fatalf("installed = %d rows, want 6 (3 askers x (1 semantic rule + 1 coordinator fallback))", len(installed))
+	}
+
+	orch, err := st.ListTeamRunMembersBySlot(ctx, runID, "orchestrator")
+	if err != nil || len(orch) != 1 {
+		t.Fatalf("orchestrator members: %v, err=%v", orch, err)
+	}
+
+	candidates, err := st.ListAgentReflexesForWorkflowRun(ctx, runID, orch[0].AgentID, "advisor")
+	if err != nil {
+		t.Fatalf("ListAgentReflexesForWorkflowRun: %v", err)
+	}
+	if len(candidates) != 2 {
+		t.Fatalf("run-scoped candidates for orchestrator's own agent_id = %d, want 2 (semantic + fallback)", len(candidates))
+	}
+
+	// Confirm the stored priority is now correctly floor-clamped: strictly
+	// greater than coordinatorFallbackPriority, not the raw explicit 50
+	// that was set on the rule.
+	var semanticPriority, fallbackPriority int64
+	var foundSemantic, foundFallback bool
+	for _, c := range candidates {
+		switch {
+		case strings.Contains(c.Name, "architecture_question"):
+			semanticPriority = c.Priority
+			foundSemantic = true
+		case strings.Contains(c.Name, "coordinator_fallback"):
+			fallbackPriority = c.Priority
+			foundFallback = true
+		}
+	}
+	if !foundSemantic || !foundFallback {
+		t.Fatalf("expected both a semantic rule row and a coordinator fallback row, foundSemantic=%v foundFallback=%v", foundSemantic, foundFallback)
+	}
+	if semanticPriority <= coordinatorFallbackPriority {
+		t.Fatalf("semantic rule priority = %d, want strictly greater than coordinatorFallbackPriority (%d) -- explicit rule.Priority=50 must be floor-clamped, not stored as-is", semanticPriority, coordinatorFallbackPriority)
+	}
+	if semanticPriority <= fallbackPriority {
+		t.Fatalf("semantic rule priority (%d) must be greater than the coordinator fallback's own priority (%d) for first_applicable to ever pick it over the always-firing fallback", semanticPriority, fallbackPriority)
+	}
+
+	// The real end-to-end proof the reviewer's own reproduction used: a
+	// matching user message must resolve to the semantic rule's target via
+	// the REAL reflexes.Resolve combining logic, not silently lose to the
+	// coordinator fallback the way it did before this fix.
+	exec := &reflexes.Executor{Logger: slog.Default()}
+	kindLookup := func(ctx context.Context, kind string) (*store.ReflexActionKind, error) {
+		return st.GetReflexActionKind(ctx, kind)
+	}
+	state := reflexes.State{
+		SessionID:  orch[0].SessionID,
+		AgentID:    orch[0].AgentID,
+		AgentClass: "advisor",
+		UserMessages: []reflexes.MessageSignal{
+			{Content: "I have an architecture question about the schema"},
+		},
+	}
+	applied, _, err := reflexes.Resolve(ctx, candidates, state, exec, nil, kindLookup)
+	if err != nil {
+		t.Fatalf("Resolve: %v", err)
+	}
+	if len(applied.FiredReflexes) != 1 {
+		t.Fatalf("fired = %d, want 1", len(applied.FiredReflexes))
+	}
+	if !strings.Contains(applied.FiredReflexes[0].Name, "architecture_question") {
+		t.Fatalf("winner = %q, want the explicit-priority semantic rule to win over the coordinator fallback (this is exactly the bug: before the fix, the coordinator fallback always won here)", applied.FiredReflexes[0].Name)
+	}
+	targetSlot, _ := applied.Actions[0].Spec["team_target_slot"].(string)
+	if targetSlot != "architect" {
+		t.Fatalf("team_target_slot = %q, want %q", targetSlot, "architect")
+	}
+}
+
 // TestInstallTeamRunRouting_DormantTargetSlot_StillResolvesAgentSlug
 // confirms a semantic rule targeting a normally-dormant slot (architect)
 // still gets installed with a valid, non-empty agent_slug even though the

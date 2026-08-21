@@ -1,7 +1,7 @@
 # Flex-step executor — pause/exit-trigger/resume, plus the two stress tests the design doc says need real answers
 
 **Phase:** 2 — Runtime engine (`TASKS/teams`)
-**Status:** implemented
+**Status:** reviewed
 **Depends on:** `03` (`StepKindFlex` schema/const must exist)
 **Touches:** `internal/service/workflow_engine.go` (`BuiltinWorkflowEngine`'s step-dispatch logic — add real flex-step handling), `internal/agent/reflexes/evaluator.go` (reused read-only — confirm/export `EvaluateTrigger` if not already exported for cross-package use).
 
@@ -81,4 +81,9 @@ Regression test: `TestBuiltinWorkflowEngine_FlexStepExitTriggerAuthority_Unautho
 **Orchestrator merge note (2026-08-20):** independently reviewed the full diff before merging — verified migration 133's table-rebuild preserves both tables' full column shape (including `gate_input`), re-tested it against a fresh real backup DB copy (clean boot, `goose_db_version=133`, CHECK includes `waiting_on_flex`), independently confirmed `runStep`'s flex branch is only ever reached on first entry (grepped for `runStep`'s sole call site, gated behind `if waiting[step.ID]`), and independently ran the full repo `go build`/`go vet`/`go test ./...` after merge — all clean. No changes made to the worker's implementation; merged as delivered.
 
 ## Review notes
-<Reviewer fills this in: pass/fail, what was checked, anything fixed and how.>
+
+**PASS (2026-08-20).** Fresh reviewer, no shared context with the implementing worker or the Orchestrator's own merge review — see `TASKS/ESCALATIONS.md`'s 2026-08-20 entry for the flaky-test finding. Independently traced `runStep`'s sole call site and confirmed the flex first-entry branch is airtight (gated behind `if waiting[step.ID]`, a step visited at most once per `execute()` call); confirmed the phase-closure-race test genuinely simulates a still-active second member and asserts its `team_run_members` row transitions `active → stopped`, not just that the run completed; confirmed restart-mid-flex-step idempotency; independently reproduced the migration-133 real-backup-DB verification from scratch (own throwaway test, own scratch copy, deleted after); confirmed `flexOrGateWaitingStatus`'s gate-priority logic is correct by direct reading (no test for the combined gate+flex-waiting case — a real, non-blocking coverage gap); confirmed `ResolveGate`/`GetWaitingGates` are genuinely unaffected; confirmed the exit-trigger-authority default behaves as documented. Independent `go build`/`go vet`/`go test -count=1 ./...` and a targeted `-race` run on the workflow-engine test set — all clean.
+
+**One pre-existing, unrelated test flake surfaced during independent test runs, not a task 06 defect:** `TestDurableAgentStopRuntimeErrorMarksFailed` (`internal/service/durable_agents_test.go`) failed 1 of 4 repeated `go test` runs at this task's HEAD and 0 of 4 at the pre-task base commit — small sample, but the failing subsystem (durable-agent-stop event ordering) has no code touched by this diff. Logged in `TASKS/ESCALATIONS.md` as a heads-up for whoever next has capacity to investigate, not blocking this task or Phase 2.
+
+**Two minor, non-blocking observations:** the `"waiting_on_flex"` literal is duplicated as a raw string across 3 call sites rather than referencing `agentworkflow.RunStatusWaitingOnFlex` — mirrors the pre-existing `"waiting_on_gate"` convention exactly, not a new regression. No test exists for a run with both an unresolved gate and an unresolved flex step simultaneously — logic confirmed correct by direct reading, but untested; worth adding whenever someone next touches this area.

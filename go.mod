@@ -100,7 +100,18 @@ replace github.com/hollis-labs/go-modelsdev => ../../libs/go-modelsdev
 // includes it and bump the `require` version instead.
 replace github.com/hollis-labs/go-envelopes => ../../libs/go-envelopes
 
+// TASKS/agent-host-acp/03: go-agent-wrapper has zero adopters and no
+// module-proxy history yet beyond its own v0.1.0 tag pushed to origin --
+// v0.2.0 (the tag task 01 cut) only exists in the local sibling checkout,
+// so the plain tagged require below doesn't resolve via the proxy. Points
+// at the sibling checkout in libs/go-agent-wrapper, mirroring the
+// go-modelsdev/go-envelopes precedent above. Remove once go-agent-wrapper
+// pushes v0.2.0 (or later) to origin and bump the `require` version
+// instead.
+replace github.com/hollis-labs/go-agent-wrapper => ../../libs/go-agent-wrapper
+
 require (
+	github.com/hollis-labs/go-agent-wrapper v0.2.0
 	github.com/hollis-labs/go-apppaths v0.1.0
 	github.com/hollis-labs/go-embed-contracts v0.1.1
 	github.com/hollis-labs/go-llm-contracts v0.3.0

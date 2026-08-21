@@ -1,7 +1,7 @@
 # Rebuild `todo-list` as a `list-card` composition
 
 **Phase:** 6
-**Status:** implemented
+**Status:** reviewed
 **Depends on:** none
 **Touches:** `libs/go-envelopes/manifest/envelopes.yaml` (external module, local `replace` directive — remove the standalone `todo-list` entry), `ui/src/components/chat/envelopes/TodoListCard.tsx` (retire or fold into `list-card`'s component), `ui/src/components/chat/envelopes/primitives/` (the `list-card` primitive component), `internal/mcp/self_tools_transport.go:1074` (the `"type": "todo-list"` emitter — update to emit `list-card` with a status field/discriminator instead)
 
@@ -61,4 +61,4 @@ Architecture doc `08-cards.md`: *"`todo-list`, `plan-review`, and `subagent-spaw
 - Not performed: an actual live chat session click-through (create/list/toggle a todo end-to-end against a running server) — that requires a deployed instance via Cerberus and a live LLM turn, which is outside this implementation pass's tooling. The schema, emitter unit test, and frontend build/typecheck are the automated stand-ins; a reviewer with a live session should still exercise the real toggle path per "Done means."
 
 ## Review notes
-<Reviewer fills this in: pass/fail, what was checked, anything fixed and how.>
+**2026-08-21, fresh Reviewer (no shared context with the implementing worker): PASS.** Confirmed the emitter (`internal/selftools/self_tools_transport.go`'s `callTodoList`) emits `type:"list-card"` with `data_source:{kind:"todos",...}` matching the schema's `items`-required constraint. `ListCard.tsx`'s `LiveTodoList` reuses `useTodos`/`useToggleTodo` byte-for-byte. The manual merge with sibling task 02 in `ListCard.tsx` (both tasks independently added a `data_source`-driven branch to the same file) was independently re-verified as correct — see `TASKS/INDEX.md`'s Phase 6 section for the full combined review writeup covering all five tasks. No findings, no fix needed.

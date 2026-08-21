@@ -1,7 +1,7 @@
 # Build the interactive-table-with-row-actions primitive
 
 **Phase:** 6
-**Status:** implemented
+**Status:** reviewed
 **Depends on:** none
 **Touches:** `libs/go-envelopes/manifest/schemas/table-card.schema.json` (currently `additionalProperties: false` at root and column level — needs a real schema change, not just a frontend addition), `ui/src/components/chat/envelopes/primitives/TableCard.tsx`, `internal/chat/envelope_handler.go` (`ResponseHandler` registry — the reuse target, see Context), `internal/api/envelopes.go` (`handleEnvelopeRespond` — confirm no change needed, generic already)
 
@@ -64,4 +64,4 @@ Response payloads reference an action via `action_id` (+ `row_index`, + `column_
 **Baseline** (all green): `go build ./cmd/nanite/`; `go vet ./...` (only pre-existing, unrelated `container.go` lostcancel findings present before this change too — confirmed via isolated stash/pop of only `container.go`); `go test ./...` (all ~90 packages `ok`, including the new tests); `cd ui && npm run build` (tsc + vite, clean); `node scripts/generate-plugin-imports.mjs --check` (passes — table-card's manifest mapping unaffected, the generated file's only diff versus HEAD is from sibling tasks' concurrent `envelopes.yaml` edits, not from anything in this task); `cd ui && npx vitest run` (186/186 tests pass across 23 files, including the 6 new TableCard tests).
 
 ## Review notes
-<Reviewer fills this in: pass/fail, what was checked, anything fixed and how.>
+**2026-08-21, fresh Reviewer (no shared context with the implementing worker): PASS.** Schema, `TableCardActionHandler` (validates `action_id`/`column_key`/`row_index` against the persisted envelope, never trusts client data), `container.go` registration, and `TableCard.tsx`'s row/column action buttons with original-index-preserving sort all correct and well-tested. **Two non-blocking observations, not requiring a fix:** (1) zero real production emitter of an interactive table-card exists yet anywhere in this repo — fully wired and reachable, openly disclosed in this Work Log, judged a legitimate primitive-before-first-consumer situation rather than a "wired but unreachable" regression. (2) `internal/api/envelopes.go`'s `handleEnvelopeRespond` sets `responded_at` before invoking the `ResponseHandler`, so a handler rejection has no retry path — pre-existing generic framework behavior shared by every response handler, not introduced here, flagged only because table-card's click-driven UX makes it more reachable day-to-day than prior LLM-authored-JSON handlers.

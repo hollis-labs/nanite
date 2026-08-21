@@ -1,7 +1,7 @@
 # Rebuild `subagent-spawn-approval` as an `approval-card` composition (larger rebuild than `todo-list`/`plan-review`)
 
 **Phase:** 6
-**Status:** implemented
+**Status:** reviewed
 **Depends on:** none
 **Touches:** `libs/go-envelopes/manifest/envelopes.yaml` (remove standalone `subagent-spawn-approval` entry, or keep the type name but change its component wiring — see What to do), `ui/src/components/chat/envelopes/SubagentSpawnApprovalCard.tsx` (retire, folding its UI into/alongside `ApprovalCard`), `internal/subagent/service.go:848` (`svc.approver.Emit(ctx, run.ParentSessionID, "subagent-spawn-approval", payload)` — the real emitter), `internal/chat/envelope_response_subagent.go` (the registered response handler — `chat.RegisterResponseHandler("subagent-spawn-approval", ...)`, `internal/service/container.go:1231`), `internal/api/sessions.go` (a conditional at ~line 818 gating recovery-related handling on `inst.EnvelopeType != "subagent-spawn-approval" && ... != "elicitation-prompt"` — must not break)
 
@@ -68,4 +68,4 @@ Per the task's own explicit option ("Decide whether the manifest type string sta
 **Scope note:** confirmed (not part of this task, not touched) a pre-existing, unrelated schema/data mismatch: the emitter's payload includes a `"provider"` field (`internal/subagent/service.go:848`'s marshal) that the `subagent-spawn-approval.schema.json` schema doesn't declare, under `additionalProperties: false` — visible in 2 of the 5 real DB rows. This is invisible today because this emission path (`ApprovalEmitterImpl.Emit`) never calls `envelope.ValidateData` for this type. Pre-existing, unrelated to the UI composition being rebuilt here; not fixed as part of this task.
 
 ## Review notes
-<Reviewer fills this in: pass/fail, what was checked, anything fixed and how.>
+**2026-08-21, fresh Reviewer (no shared context with the implementing worker): PASS.** Confirmed zero backend Go changes (`internal/subagent/service.go`, `internal/chat/envelope_response_subagent.go`, `internal/api/sessions.go` byte-identical to `main`) by direct diff. The `sessions.go` recovery gate is actually at line 609 (not ~818 as this task file's stale Touches reference said — correctly caught during implementation). `ApprovalCard.tsx`'s two-flavor discrimination correctly preserves both wire contracts (subagent: `Submitted`/`Cancelled{reason}` vs. generic: always `Submitted` with `data.approved`). `TestEnvelopeResponse_SubagentApproval_Approve/_Reject` re-run directly, green. No findings, no fix needed.

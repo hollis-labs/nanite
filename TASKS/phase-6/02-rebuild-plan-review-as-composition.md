@@ -1,7 +1,7 @@
 # Rebuild `plan-review` as a `list-card` + `confirmation-card` composition
 
 **Phase:** 6
-**Status:** implemented
+**Status:** reviewed
 **Depends on:** none
 **Touches:** `libs/go-envelopes/manifest/envelopes.yaml` (remove standalone `plan-review` entry), `ui/src/components/chat/envelopes/PlanReviewCard.tsx` (retire or fold into composed primitives), plan-creation call site (not yet traced — locate during implementation, see Context)
 
@@ -53,4 +53,4 @@ On the frontend (per-worktree isolated, so `01`'s `ListCard.tsx`/`ConfirmationCa
 **Deliberately left unchanged:** `internal/subagent/envelope_lift_test.go` still uses `"plan-review"` as its example envelope type. Left as-is — the lift mechanism it tests (`extractLiftableEnvelopes`) is genuinely type-agnostic and never validates against the manifest, so the test remains a correct regression test of that plumbing regardless of whether `plan-review` is a registered type. Not part of this task's `Touches` list.
 
 ## Review notes
-<Reviewer fills this in: pass/fail, what was checked, anything fixed and how.>
+**2026-08-21, fresh Reviewer (no shared context with the implementing worker): PASS.** Independently confirmed the Context-section correction — the real emitter is `internal/selftools/self_tools.go`'s `plan_create` tool's prompt-string `Description` (lines ~395-397), not `internal/subagent/service.go` — via direct grep (`liftResultEnvelopes` is type-agnostic; `"plan-review"` appears there only in doc comments/tests). The manual merge with sibling task 01 in `ListCard.tsx` was independently re-verified as correct — see `TASKS/INDEX.md`'s Phase 6 section for the full combined review writeup covering all five tasks. No findings, no fix needed.

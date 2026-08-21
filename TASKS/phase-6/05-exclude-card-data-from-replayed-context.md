@@ -1,7 +1,7 @@
 # Exclude Card data from replayed conversation history (the highest-leverage item in this phase)
 
 **Phase:** 6
-**Status:** implemented
+**Status:** reviewed
 **Depends on:** none
 **Touches:** `internal/chat/context_client.go:256-267` (`AssembleSlotSources`'s message-history build — **the actual fix site, not `internal/context/compaction.go`**, see Context), `internal/service/chat_generate.go:1801,1868-1972,2004-2008` (the emit/persist path, read-only reference — confirms the shape of what needs filtering, not itself the fix site), `internal/chat/structured.go` (`StructuredMessage`, `EnvelopeRef`, `MarshalContent`)
 
@@ -67,4 +67,4 @@ Used the real backed-up database at `~/.local/share/nanite/workspaces/default/ba
 - `go test ./...` — all 91 packages pass, zero failures, including new tests: `TestReplayContent_StripsEnvelopeData`, `TestReplayContent_FallsBackForNonStructuredContent` (4 subtests), `TestReplayContent_PreservesTextOnlyStructuredMessage` (`internal/chat/structured_test.go`), and `TestAssembleSlotSources_ExcludesEnvelopeDataFromReplayedHistory` (`internal/chat/context_client_test.go`), an end-to-end test that persists a real `store.Message` row shaped exactly like `chat_generate.go` produces (200-row synthetic table-card via `WrapResponse`/`MarshalContent`) and asserts `AssembleSlotSources`'s `Messages` slot contains only the turn's `Text`, while the underlying stored row (verified via a direct `ListMessages` call) still retains the full envelope payload untouched.
 
 ## Review notes
-<Reviewer fills this in: pass/fail, what was checked, anything fixed and how.>
+**2026-08-21, fresh Reviewer (no shared context with the implementing worker): PASS — strongest piece of the phase.** Confirmed the single real fix site (`AssembleSlotSources`, one call site feeding every downstream consumer). `replayContent`'s `Version == 0` guard correctly distinguishes real `StructuredMessage` JSON (always `Version:1`) from legacy/non-structured JSON and `FormatEnvelopeResponseContent`'s output (never `{`-prefixed). Verified the emit path is untouched — only what's read back for replay changed — and the page-reload rendering path (`store.Message.Envelope` column) is a structurally separate, unaffected mechanism. Test coverage confirmed genuinely end-to-end, not mocked. No findings, no fix needed.

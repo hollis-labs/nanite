@@ -64,22 +64,6 @@ const CORE_ENTRIES: Record<string, EnvelopeRegistryEntry> = {
     source: "core",
     props: "envelope",
   },
-  "todo-list": {
-    component: lazy(() =>
-      import("@/components/chat/envelopes/TodoListCard").then((m) => ({
-        default: m.TodoListCard,
-      })),
-    ),
-    source: "core",
-  },
-  "plan-review": {
-    component: lazy(() =>
-      import("@/components/chat/envelopes/PlanReviewCard").then((m) => ({
-        default: m.PlanReviewCard,
-      })),
-    ),
-    source: "core",
-  },
   "info-card": {
     component: lazy(() =>
       import("@/components/chat/envelopes/primitives/InfoCard").then((m) => ({
@@ -155,8 +139,8 @@ const CORE_ENTRIES: Record<string, EnvelopeRegistryEntry> = {
   },
   "subagent-spawn-approval": {
     component: lazy(() =>
-      import("@/components/chat/envelopes/SubagentSpawnApprovalCard").then((m) => ({
-        default: m.SubagentSpawnApprovalCard,
+      import("@/components/chat/envelopes/ApprovalCard").then((m) => ({
+        default: m.ApprovalCard,
       })),
     ),
     source: "core",

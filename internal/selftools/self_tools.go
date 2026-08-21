@@ -369,10 +369,10 @@ func selfToolDefinitions() []mcp.Tool {
 		},
 		{
 			Name: "todo_list",
-			Description: "List todos with optional filters, and render an interactive todo-list card when scope is provided.\n\n" +
+			Description: "List todos with optional filters, and render an interactive todo list card (a `list-card` with a live todos data source) when scope is provided.\n\n" +
 				"**When to use:** When the user asks to see their todos, check what's pending, or view the task list for a session or project.\n\n" +
 				"**Scope semantics:** Pass `scope` + `scope_id` to get a correctly scoped live card. For `scope=session`, `scope_id` is auto-filled from the current session context when omitted — you do not need to supply it explicitly. For `scope=project`, supply the project_id explicitly (or rely on the current session's project).\n\n" +
-				"**Output shape:** Text summary of matching todos (count + titles). When `scope` is provided, also emits an interactive todo-list envelope that the UI renders as a live card (lazy-fetches current data at render time — NOT the snapshot from this call). Do NOT emit a nanite-envelope block manually — this tool handles that automatically.\n\n" +
+				"**Output shape:** Text summary of matching todos (count + titles). When `scope` is provided, also emits a `list-card` envelope (with a `data_source` pointer) that the UI renders as a live card (lazy-fetches current data at render time — NOT the snapshot from this call). Do NOT emit a nanite-envelope block manually — this tool handles that automatically.\n\n" +
 				"**When NOT to use:** Do not call without `scope` if you want the interactive card — a scopeless call returns text only and emits no card.",
 			InputSchema: map[string]any{
 				"type": "object",

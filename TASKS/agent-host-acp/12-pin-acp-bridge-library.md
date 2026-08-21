@@ -1,9 +1,19 @@
 # Pin ACP bridge library(ies) for Claude/Codex/Pi
 
 **Phase:** 4 — ACP bridge adapters for non-native agents (`TASKS/agent-host-acp`)
-**Status:** not-started — **escalation-gated, see banner below. Do not implement any adapter
-code as part of this task. Do not dispatch tasks `13`-`15` until this task's decision is
-recorded in `TASKS/ESCALATIONS.md` with explicit operator sign-off.**
+**Status:** reviewed — **resolved, operator sign-off recorded in `TASKS/ESCALATIONS.md`
+(2026-08-21, "Task 12 resolved: ACP bridge library decision, explicit operator sign-off
+recorded"). Decision: `agentclientprotocol/claude-agent-acp` (Claude),
+`agentclientprotocol/codex-acp` (Codex), `svkozak/pi-acp` (Pi — pursued now, not deferred).
+`beyond5959/acp-adapter` explicitly rejected (dormant 4+ months, source-verified Claude
+backend does bare SIGKILL with no wire-level cancel, self-rated "Initial" Pi maturity). Real
+interrupt/cancel capability was explicitly NOT the deciding criterion — the operator's own
+framing: the real goal is ACP protocol uniformity for future config-based provider
+extensibility with an honest per-adapter capabilities map, not immediate interrupt gain (which
+Nanite doesn't have today anyway and isn't blocked on). The three per-provider bridges require
+Node.js/npm at runtime for those three specific bridge-driven providers — an explicit,
+reversible choice (the `acp.Client` interface already isolates callers from the concrete
+bridge implementation), not a permanent stack commitment. Tasks `13`-`15` are unblocked.**
 **Depends on:** `08` (ACP client abstraction — this task's decision needs to be evaluated
 against a real target interface)
 **Touches:** none yet (research/decision only). Repo: N/A until a decision is made.

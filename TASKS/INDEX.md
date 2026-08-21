@@ -470,10 +470,10 @@ Nanite itself), and scope boundaries.
 | `09-acp-native-adapter-opencode` | 3 | reviewed (Orchestrator-verified live against real `opencode` binary; `go-agent-wrapper v0.6.0`) | `08` |
 | `10-acp-native-adapter-copilot-cli` | 3 | reviewed (Orchestrator-verified live against real `copilot` binary, both stdio+TCP; `go-agent-wrapper v0.7.0`) | `08` |
 | `11-nanite-per-agent-protocol-transport-config` | 3 | reviewed PASS (fix landed for 2 real event-translation bugs found on first review, re-reviewed clean) | `09`, `10`, `07` |
-| `12-pin-acp-bridge-library` | 4 | not-started | `08` — **escalation-gated, see README and `ESCALATIONS.md`, not ready for mechanical dispatch** |
-| `13-acp-bridge-adapter-claude` | 4 | not-started | `12` |
-| `14-acp-bridge-adapter-codex` | 4 | not-started | `12` |
-| `15-acp-bridge-adapter-pi` | 4 | not-started | `12` — lowest-confidence task in the batch, may be deferred at dispatch time (see task file) |
+| `12-pin-acp-bridge-library` | 4 | reviewed — resolved, operator sign-off recorded (per-provider bridges chosen, `beyond5959/acp-adapter` rejected) | `08` |
+| `13-acp-bridge-adapter-claude` | 4 | not-started (unblocked) | `12` |
+| `14-acp-bridge-adapter-codex` | 4 | not-started (unblocked) | `12` |
+| `15-acp-bridge-adapter-pi` | 4 | not-started (unblocked, pursuing now per operator decision) | `12` |
 | `16-audit-fs-terminal-proxying-requirement` | 5 | not-started | `09`, `10`, `13`, `14`, `15` |
 | `17-native-vs-acp-side-by-side-comparison` | 5 | not-started | `07`, `09`, `10`, `13`, `14`, `15` |
 
@@ -621,6 +621,174 @@ those three categories, not just relocation of an existing check. All four subpr
 RPC-proxy call sites the target design names (`NewCRUDHandler`, `CallTool`, `NewEventHook`,
 `newSubprocessHTTPHandler`) are exact matches to real code and are confirmed fully
 unconditional today — zero authorization checks anywhere, grounding `06`'s scope precisely.
+
+**Planned 2026-08-21, not yet dispatched.** Per `EXECUTION-PROCESS.md`'s Phase A discipline,
+this is the planning checkpoint — present to the operator for review before any worker is
+dispatched.
+
+---
+
+## Skills (`TASKS/skills/`, outside the Phase 0-9 sequence)
+
+Implements `docs/engineering/architecture/20-skills.md` in full — the output of a dedicated
+2026-08-21 architecture-alignment session that found skills were never fully implemented in
+Nanite: no `scripts:`/`references:`/`assets:` support ever existed, no composition, no real
+parameterization, and no path for a skill's actual body content to ever reach a model through
+any live mechanism, in any runtime. A sibling to `TASKS/teams/`, `TASKS/reflex-taxonomy/`,
+`TASKS/harness-reactive-self-tools/`, `TASKS/scheduling/`, `TASKS/agent-host-acp/`, and
+`TASKS/plugin-system/`. See `TASKS/skills/README.md` for the full read-first list, scope
+boundaries, and reused-primitives inventory.
+
+**This batch deliberately goes against the project's recently-established "DB over files"
+default** — a real, load-bearing exception for `scripts:`/`references:`/`assets:` content that
+has to be real files on disk at materialization time, not a silent regression to the pattern
+`TASKS/phase-1/08` killed (silent, unscoped, every-boot re-ingest stays dead; this is an
+explicit, single-target install/sync instead). See the README's opening section for the full
+reasoning.
+
+| Task | Phase | Status | Depends on |
+|---|---|---|---|
+| `01-cut-legacy-skill-discovery-autodiscover-and-adhoc-authoring` | 1 | not-started | none |
+| `02-redesign-skills-index-schema-and-extend-agent-known-skills` | 2 | not-started | `01` |
+| `03-build-content-addressed-vendored-skill-store` | 2 | not-started | none |
+| `04-build-skill-package-parser-and-install-sync-pipeline` | 3 | not-started | `02`, `03` |
+| `05-install-sync-rest-api-and-cli-command` | 3 | not-started | `04` |
+| `06-build-skill-resolver-and-parameter-binding` | 4 | not-started | `02`, `03`, `04` |
+| `07-implement-inline-fork-composition-semantics` | 4 | not-started | `04`, `06` |
+| `08-rebuild-inline-marker-and-scripts-execution` | 4 | not-started | `06` |
+| `09-sandbox-and-capability-policy-gate-for-skill-execution` | 5 | not-started | `02`, `08` |
+| `10-cli-hosted-native-skill-delivery-boot-dir-planting` | 6 | not-started | `02`, `03` |
+| `11-api-direct-skill-get-self-tool` | 6 | not-started | `06`, `07`, `08`, `09` |
+| `12-remaining-skills-rest-api-list-grants-preview-uninstall` | 7 | not-started | `02`, `05`, `09` |
+
+**Three real, load-bearing corrections/decisions this planning session's own research made,
+each logged in full in `TASKS/ESCALATIONS.md`'s 2026-08-21 entry, not silently baked into a
+task's Context alone**: (1) `docs/engineering/architecture/16-agent-host.md`'s description of
+`go-agent-wrapper`'s `policy.Engine`/`policy.Store` is accurate about the library but the
+mechanism is confirmed **dormant in Nanite today** — `wrapper.Config.Policy` is never set
+anywhere — so `20-skills.md`'s plan to "plug into the same shape the host already runs" has
+nothing live to plug into; task `09` builds narrow, direct capability enforcement instead,
+matching what `TASKS/plugin-system/06` independently decided for the same reason. (2)
+`agent_known_skills` is confirmed **not dead overall** (only dead for prompt assembly, per
+`TASKS/phase-0/17`) — it has a live REST API and two live frontend surfaces (Agent Builder
+Wizard, Agent Capabilities Panel) still writing real rows, and
+`docs/engineering/architecture/13-memory-and-knowledge-tools.md`'s §4a cites it as the reference
+catalog+attachment pattern; task `02` extends it in place (additive columns only) rather than
+building a third assignment table, resolving one of `20-skills.md`'s own "genuinely still open"
+questions. (3) The existing `skill_create`/`skill_update` self-tools are structurally
+incompatible with "skills are authored packages only" (no way to represent a real
+`scripts:`/`references:`/`assets:` package via flat CRUD fields) — task `01` cuts both; the new
+content-retrieval self-tool is named `skill_get` (task `11`), not `skill_invoke` as the
+architecture doc's placeholder phrasing suggested, matching `docs/tool-naming-convention.md`'s
+own `get`-verb precedent and the already-renamed bare `skill_*` self-tool family.
+
+**Migration numbering.** Highest existing goose migration on disk at this planning session's
+authoring time (2026-08-21) is `134_agent_profiles_protocol_transport.sql`.
+`TASKS/plugin-system/04` provisionally claims `135`. This batch provisionally claims `136`
+(task `02`'s skills-index redesign) and `137` (task `02`'s `agent_known_skills` extension +
+`agent_skills` drop) — both provisional, re-check the migrations directory immediately before
+either lands; `TASKS/agent-host-acp`, `TASKS/plugin-system`, and `TASKS/filesystem-snapshots`
+are all concurrently in flight and any may have claimed `135`-`137` first by dispatch time.
+
+**Sequencing.** Phase 1 (`01`) is a clean-slate cut, landing first so later phases build on a
+decluttered base — matches `20-skills.md`'s own explicit "no carried-forward content" operator
+call (none of the 8 embedded builtin skills or DB-originated auto-discovered rows has ever been
+observed in use). Phase 2 (`02`-`03`) is the DB-index + vendored-content-store foundation;
+`03` is a brand-new package with zero file overlap and can run in Wave 1 alongside `01`, but `02`
+needs `01` landed first (both redefine `internal/store/skills.go`'s `Skill` struct). Phase 3
+(`04`-`05`) is the explicit, single-target install/sync mechanism — the only way an index row is
+ever created or updated, never a directory sweep. Phase 4 (`06`-`08`) is the materialization
+pipeline (Resolver, composition, rebuilt inline-marker/scripts execution — the old marker's real
+code-fence-unaware accidental-execution flaw is fixed here, not carried forward). Phase 5 (`09`)
+is the one sandbox/policy gate every script/materializer execution routes through, regardless of
+caller. Phase 6 (`10`-`11`) is the two boundary-specific delivery adapters (CLI native boot-dir
+planting; the API-direct `skill_get` self-tool) sharing one canonical vendored source. Phase 7
+(`12`) rounds out the REST surface (list/get, assign/revoke, grants/policy view, invoke/preview,
+uninstall) the architecture doc's "API surface" section names.
+
+**What this batch does NOT do** (explicit scope fences, see the README for full reasoning):
+frontend/admin-UI work (a separate stream per the architecture doc itself); ecosystem-format
+package adaptation (installing a foreign `.claude/skills/`-authored directory that doesn't
+already match the real Agent-Skills-spec shape); explicit skill *triggering* (predicate-based
+automatic activation, a separate follow-up filed in `13-memory-and-knowledge-tools.md`'s §4a,
+not designed by `20-skills.md`); wiring `wrapper.Config.Policy`/`policy.Engine` live in Nanite
+for the first time; reviving `internal/skillbroker`'s rule-matching layer (cut in full,
+`TASKS/phase-0/22`, not reproposed here).
+
+**Planned 2026-08-21, not yet dispatched.** Per `EXECUTION-PROCESS.md`'s Phase A discipline,
+this is the planning checkpoint — present to the operator for review before any worker is
+dispatched.
+
+## Loops (`TASKS/loops/`, outside the Phase 0-9 sequence)
+
+Implements `docs/engineering/architecture/21-loops.md` in full — the output of a dedicated
+2026-08-21 architecture-alignment session that found Nanite has no control layer above
+execution: agent turns, `agentworkflow`, reflexes, scheduling, and Teams all exist, but
+nothing answers "keep working toward this target state, across multiple bounded executions,
+until it's actually true, on a budget, with an escalation path." A sibling to
+`TASKS/teams/`, `TASKS/reflex-taxonomy/`, `TASKS/harness-reactive-self-tools/`,
+`TASKS/scheduling/`, `TASKS/agent-host-acp/`, `TASKS/plugin-system/`, and `TASKS/skills/`.
+See `TASKS/loops/README.md` for the full read-first list, load-bearing corrections, and the
+resolution of every item on the design doc's own "What this session did not decide" list.
+
+| Task | Phase | Status | Depends on |
+|---|---|---|---|
+| `01-goals-schema` | 1 | not-started | none |
+| `02-goal-evidence-schema` | 1 | not-started | `01` |
+| `03-loop-runs-schema` | 1 | not-started | `01` |
+| `04-loop-run-iterations-schema` | 1 | not-started | `03` |
+| `05-workflow-runs-loop-scoping-columns` | 1 | not-started | `03` |
+| `06-stepkindloop-schema` | 1 | not-started | none |
+| `07-loop-continuation-policy` | 2 | not-started | `01`, `02`, `03`, `04` |
+| `08-loop-engine-core` | 2 | not-started | `03`, `04`, `07` |
+| `09-stepkindloop-executor-and-waiting-status` | 2 | not-started | `06`, `08` |
+| `10-loop-launcher-and-api` | 3 | not-started | `08` |
+| `11-loop-event-predicate-trigger` | 3 | not-started | `08` |
+| `12-loop-run-tick-scheduled-trigger` | 3 | not-started | `08` |
+| `13-loop-presets` | 4 | not-started | `07`, `08`, `10` |
+
+**Two real, load-bearing corrections this planning session's own research found against the
+actual code, neither anticipated by the design doc, both logged in full in
+`TASKS/ESCALATIONS.md`'s 2026-08-21 "Loops planning" entry**: (1) legacy
+`internal/workflow.LoopStep` (an unrelated, older pipeline primitive the design doc
+explicitly declines to retire) is **dynamically reachable today** via
+`POST /api/workflows/runs` accepting arbitrary YAML — not just theoretically present, as the
+design doc's own "the actual usage question wasn't checked" framing left open; no task in
+this batch touches it, flagged for the record. (2) The design doc's claim that Loop's
+event/predicate trigger can fully reuse the reflex trigger-spec AST "the same way" Team's
+flex-step exit trigger already does is **incomplete** — flex's own reuse is a lazy re-check
+piggybacked on an unrelated caller's `.Resume()`, not a real push, and a `WAIT`-status
+`LoopRun` has nothing to piggyback on; task `11` builds a real, new, legible reflex action
+kind (`resume_loop_run`) instead of assuming reuse alone solves it.
+
+**Every item on `21-loops.md`'s own "What this session did not decide" list is resolved by
+this planning session** — see `TASKS/loops/README.md`'s own section for the full list with
+reasoning: `goal_evidence` stays always-structured (no free-text rows); REARCHITECT reuses
+the same reasoning-fallback `ExecuteLLMStep` call as the no-progress case rather than a
+separate architect-agent dispatch; concurrent `LoopRun`s against one `goal_id` are
+disallowed for v1; `on_exhausted ∈ {"escalate","fail"}`; `loop_run_tick`'s payload is
+`{loop_run_id}`, matching the other four job types' exact convention now that Scheduling has
+landed; auth is standard operator auth, no new provenance tier; presets are Go-coded
+constants, not a DB table, with `ralph` built fully and the rest named-but-stubbed.
+
+**Migration numbering.** Highest existing goose migration on disk at this planning session's
+authoring time (2026-08-21) is `134_agent_profiles_protocol_transport.sql`.
+`TASKS/plugin-system/04` provisionally claims `135`; `TASKS/skills/02` claims `136`-`137`.
+This batch provisionally claims `138`-`144` (one per Phase 1 schema task, `01` through `06`,
+in order, plus `09`'s separate `RunStatusWaitingOnLoop` status-CHECK migration at `144`) —
+all seven provisional, re-check the migrations directory immediately before any lands;
+`TASKS/agent-host-acp` and `TASKS/filesystem-snapshots` may also be concurrently in flight.
+
+**Sequencing.** Phase 1 (`01`-`06`) is schema/storage only, no runtime behavior — three
+parallel waves (`01`+`06`, then `02`+`03`, then `04`+`05`), per the README's own
+parallelization note. Phase 2 (`07`-`09`) is the runtime engine — continuation policy first
+(pure logic, DB-only dependency), then the engine that drives `WorkflowLauncher` iterations
+using it, then the contained-loop step executor that needs the engine to exist. Phase 3
+(`10`-`12`) is three mutually parallel-safe trigger surfaces (manual/API + escalation
+resolution; event/predicate via a new reflex action kind; scheduled tick via Scheduling's
+`JobType` taxonomy) once `08` lands — same shape Scheduling's own Phase 2 producers took.
+Phase 4 (`13`) is the preset registry, needing the launcher, engine, and continuation policy
+all real.
 
 **Planned 2026-08-21, not yet dispatched.** Per `EXECUTION-PROCESS.md`'s Phase A discipline,
 this is the planning checkpoint — present to the operator for review before any worker is

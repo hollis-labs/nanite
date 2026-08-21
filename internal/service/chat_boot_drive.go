@@ -17,6 +17,7 @@ import (
 	"github.com/hollis-labs/nanite/internal/fsutil"
 	"github.com/hollis-labs/nanite/internal/recovery/broker"
 	runtimeagent "github.com/hollis-labs/nanite/internal/runtime/agent"
+	"github.com/hollis-labs/nanite/internal/safego"
 	"github.com/hollis-labs/nanite/internal/store"
 )
 
@@ -373,11 +374,39 @@ func hashSlots(slotResult *SlotAssemblyResult) uint64 {
 // terminal exits route back through the broker. Without this, the
 // replacement would not be observed and a second-tier failure would go
 // unrecovered.
+//
+// TASKS/agent-host-acp/21: this function's own doc comment used to state
+// an invariant — "the prior session's Delete(sessionID) ran before
+// adoptReplacementSession is invoked" — that only actually holds for the
+// observeSessionForRecovery call path (path 1: it Deletes its own entry
+// BEFORE calling the broker, so this function's Store lands in an empty
+// slot). notifyRecoveryBrokerForHTTPStreamError (chat_http_broker_notify.go,
+// path 2 — a chat-harness-level mid-stream error, entirely independent of
+// whether the underlying process actually exited) has no such Delete: a
+// live CLI session can still be cached under sessionID when its broker
+// call reaches here. A confirmed clean repro (chat_replacement_session_
+// orphan_test.go) showed the bare Store this function used to do silently
+// overwrote that live session — no .Stop() anywhere — orphaning its real
+// subprocess (plus MCP sidecar) and leaving its own
+// observeSessionForRecovery goroutine blocked on Wait() forever.
+//
+// Fixed here (not narrowly in notifyRecoveryBrokerForHTTPStreamError)
+// because this is the one seam every replacement-adoption call path
+// funnels through — defensive against any future third caller reaching
+// the broker without its own pre-clear, not just today's two.
+// activeSessions.Swap atomically captures whatever was displaced so
+// stopDisplacedSession can tear it down; the common path-1 case (prev is
+// absent, or prev == sess on an idempotent re-invoke) is a no-op here,
+// identical to the pre-fix behavior for that path.
 func (s *chatServiceImpl) adoptReplacementSession(sessionID string, sess *runtimeagent.Session) {
 	if sess == nil {
 		return
 	}
-	s.activeSessions.Store(sessionID, sess)
+	if prev, hadPrev := s.activeSessions.Swap(sessionID, sess); hadPrev {
+		if prevSess, ok := prev.(*runtimeagent.Session); ok && prevSess != nil && prevSess != sess {
+			s.stopDisplacedSession(sessionID, prevSess)
+		}
+	}
 	// Slot hash + tool-partition state reset is implicit: the prior
 	// session's Delete(sessionID) ran before adoptReplacementSession is
 	// invoked (see observeSessionForRecovery's call ordering), so the
@@ -417,6 +446,38 @@ func (s *chatServiceImpl) adoptReplacementSession(sessionID string, sess *runtim
 	go s.observeSessionForRecovery(sess, sessionID, "", replacementProvider, "", time.Now(), false)
 }
 
+// stopDisplacedSession cooperatively tears down prev — the session
+// adoptReplacementSession (TASKS/agent-host-acp/21) just displaced from
+// activeSessions in favor of a broker-dispatched replacement. Runs on its
+// own goroutine (safego.Go) with a bounded grace period so
+// adoptReplacementSession — documented as running synchronously on the
+// broker's own orchestration loop — never blocks on prev's cooperative
+// SIGTERM-then-SIGKILL escalation.
+//
+// Flags prev itself (by pointer, in displacedSessions — see chat.go's
+// field doc for why this is keyed by object identity rather than
+// sessionID) BEFORE calling Stop. prev's own still-running
+// observeSessionForRecovery goroutine is blocked on prev.Wait() at this
+// point (spawned back when prev was first booted); once Stop causes that
+// Wait to return, the flag lets that goroutine recognize the exit as
+// deliberate — mirroring RebootSessionAgent's identical
+// flag-before-Stop ordering for the reboot path (chat_session_reboot.go)
+// — instead of misreading a SIGTERM/SIGKILL exit as a fresh crash and
+// routing a second, unwanted OnSessionExit to the broker for a session
+// that's already been superseded (the double-notification/clobber race
+// task 21 names explicitly).
+func (s *chatServiceImpl) stopDisplacedSession(sessionID string, prev *runtimeagent.Session) {
+	s.displacedSessions.Store(prev, struct{}{})
+	safego.Go(context.Background(), "service.chat.recovery.stop-displaced-session", func() {
+		stopCtx, cancel := context.WithTimeout(context.Background(), stopRebootGrace)
+		defer cancel()
+		if err := prev.Stop(stopCtx); err != nil {
+			slog.Warn("adoptReplacementSession: stop displaced session failed",
+				"session_id", sessionID, "err", err)
+		}
+	})
+}
+
 // observeSessionForRecovery is the Wait-observer goroutine that watches
 // a booted runtime session and routes terminal *agentsessions.ExitError
 // to the recovery broker via deps.Recovery.OnSessionExit. Spawned per
@@ -439,6 +500,37 @@ func (s *chatServiceImpl) observeSessionForRecovery(sess *runtimeagent.Session, 
 	// Wait for the session to terminate. Manager.Shutdown unblocks this
 	// at daemon shutdown so the goroutine never leaks past process exit.
 	err := sess.Wait(context.Background())
+
+	// TASKS/agent-host-acp/21: sess was displaced by adoptReplacementSession
+	// and stopped on purpose (stopDisplacedSession flagged this exact sess
+	// pointer before calling Stop). Treat the exit as deliberate regardless
+	// of how Stop surfaced it, exactly like the rebootingSessions check
+	// below — but keyed by the sess pointer itself, not sessionID, so a
+	// fast-failing REPLACEMENT booted concurrently under the same
+	// sessionID can never steal this flag (see chat.go's displacedSessions
+	// field doc). CompareAndDelete(sessionID, sess) is what actually
+	// closes the double-notification/clobber race: activeSessions already
+	// holds the replacement by the time this fires, so the compare fails
+	// and the replacement is left untouched — this goroutine simply exits
+	// without ever reaching the broker.
+	//
+	// Deliberately does NOT call broker.ClearSession(sessionID) the way
+	// the rebootingSessions branch below does: sessionID's classifier
+	// state (attempt count) belongs to the recovery sequence that just
+	// dispatched THIS replacement, and stays live for whatever the
+	// replacement itself does next — clearing it here would silently
+	// reset the broker's hard-cap attempt counter every time a
+	// mid-stream-error-triggered replacement supersedes an older
+	// session, undermining the "escalate to permanent after N attempts"
+	// guard the cap exists for.
+	if _, displaced := s.displacedSessions.LoadAndDelete(sess); displaced {
+		s.activeSessions.CompareAndDelete(sessionID, sess)
+		s.activeSessionSlots.Delete(sessionID)
+		s.toolPartitionStates.Delete(sessionID)
+		slog.Info("recovery: displaced session stopped by adoptReplacementSession — skipping broker",
+			"session_id", sessionID)
+		return
+	}
 
 	// CW-20260516-0057: intentional per-session reboot. RebootSessionAgent
 	// stopped this runtime on purpose and flagged it before calling Stop.

@@ -2,7 +2,8 @@
 
 **Phase:** 2 — Nanite host migration (`TASKS/agent-host-acp`)
 **Status:** not-started
-**Depends on:** `02` (Descriptor split), `04` (Planter migration), `05` (Applier migration)
+**Depends on:** `02` (Descriptor split), `04` (Planter migration), `05` (closed — see
+correction below, its finding is folded into this task)
 **Touches:** `internal/runtime/agent/agent.go`, `factory.go`, `manager.go`, `deps.go`. Repo:
 Nanite. **Does not touch `internal/recovery/broker/*` directly — preserving its exact
 contract is a hard constraint of this task, see Context and Done means.**
@@ -97,6 +98,22 @@ it end-to-end inside an app." Wiring `wrapper.Wrapper`'s activity translation
 novel integration work, not a mechanical swap — budget real attention for it, and flag
 anywhere Nanite's existing event handling assumes a shape `go-runtime-events` doesn't provide.
 
+**Correction from task `05`'s escalation (`TASKS/ESCALATIONS.md`, 2026-08-21) — read before
+step 2 below.** Task `05` found `sandbox.Applier.Apply(ctx, pid)` is a true post-spawn
+attach-by-pid mechanism (confirmed against `wrapper.go`'s real call ordering: `Config.Sandbox`
+only runs via `runSandbox` *after* `runtime.Start` returns) — it does **not** fit
+`buildSandboxProfile`'s pre-spawn model, and task `05` was closed with no migration and no
+code changes. There is a *separate*, already-existing `wrapper.Config` field,
+`SandboxProfile sandboxprofile.Profile` (`wrapper.go:105-108`), that *is* the correct pre-spawn
+seam — it's forwarded directly into `agentsessions.StartOptions.Profile` inside
+`Wrapper.Run` (`wrapper.go:347`), the same semantic Nanite already relies on today via
+`StartOptions.Profile` directly. **`buildSandboxProfile`'s own logic needs zero changes** —
+this task's own job (building `wrapper.Config` in place of `StartOptions`) already covers
+routing its return value into `Config.SandboxProfile` instead of `StartOptions.Profile`
+directly; that's a one-field rewire, not a new migration surface. Do not attempt to route
+sandboxing through `Config.Sandbox`/`sandbox.Applier` — that's the wrong seam per `05`'s
+finding.
+
 ## What to do
 
 1. Implement `adapters.RuntimeAdapter`/`Adapter` for Claude/Codex/OpenCode on the Nanite side
@@ -105,8 +122,10 @@ anywhere Nanite's existing event handling assumes a shape `go-runtime-events` do
    used directly).
 2. Replace `agent.go:525-554`'s direct `agentsessions.StartOptions` construction +
    `SessionsManager.Start` call with a `wrapper.Wrapper.Run` invocation, feeding it whatever
-   `ResolveContext` the chosen `RuntimeAdapter` needs (boot dir, env, workdir, sandbox
-   profile — reusing tasks `04`/`05`'s migrated planting/sandboxing).
+   `ResolveContext` the chosen `RuntimeAdapter` needs (boot dir, env, workdir — reusing task
+   `04`'s migrated planting; sandbox profile — `buildSandboxProfile`'s existing, unmigrated
+   return value fed into `wrapper.Config.SandboxProfile`, per the correction above, not
+   `Config.Sandbox`).
 3. Replace `manager.go`'s `SendInput`/`Stop`/`Wait` implementations to call
    `wrapper.Wrapper.SendInput`/`Stop`/(internal `Run`-blocking equivalent to `Wait`) instead
    of `SessionsManager` directly, while keeping `agent.Session`'s own public method

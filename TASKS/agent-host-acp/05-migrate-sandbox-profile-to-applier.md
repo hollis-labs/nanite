@@ -1,12 +1,15 @@
 # Migrate buildSandboxProfile onto go-agent-wrapper's sandbox.Applier
 
 **Phase:** 2 — Nanite host migration (`TASKS/agent-host-acp`)
-**Status:** not-started — **escalated, no code changes made. See `TASKS/ESCALATIONS.md`
-(2026-08-21, "Task `05` (sandbox.Applier migration)…"). `Applier.Apply(ctx, pid)` is
-confirmed a true post-spawn attach-by-pid mechanism (option (b) in this file's own Context),
-incompatible with `buildSandboxProfile`'s pre-spawn model — do not dispatch a follow-up worker
-against this file's original scope without an Orchestrator/operator decision on the
-escalation's recommended path first.**
+**Status:** closed — no separate migration. See `TASKS/ESCALATIONS.md` (2026-08-21, "Task
+`05` (sandbox.Applier migration)…" + its Orchestrator resolution). `Applier.Apply(ctx, pid)`
+is confirmed a true post-spawn attach-by-pid mechanism, incompatible with
+`buildSandboxProfile`'s pre-spawn model — there is no seam here to migrate onto.
+`buildSandboxProfile`'s existing logic is correct as-is and needs no code change. The
+(trivial, mechanical) call-site rewire — feeding its return value into
+`wrapper.Config.SandboxProfile` instead of `agentsessions.StartOptions.Profile` directly — is
+folded into task `06`'s existing scope, which already owns replacing that construction site.
+No follow-up task against this file.
 **Depends on:** `03` (dependency wired)
 **Touches:** `internal/runtime/agent/sandbox_profile.go`. Repo: Nanite.
 

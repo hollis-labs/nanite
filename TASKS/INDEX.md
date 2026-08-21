@@ -476,6 +476,7 @@ Nanite itself), and scope boundaries.
 | `15-acp-bridge-adapter-pi` | 4 | reviewed (Orchestrator-verified; `pi` CLI installed+configured via local Ollama since no cloud creds available, real live turn+cancel verified, interrupt=Turn confirmed) | `12` |
 | `16-audit-fs-terminal-proxying-requirement` | 5 | reviewed (no in-process fs/terminal server needed, all 5 adapters self-handle; one minor heads-up logged) | `09`, `10`, `13`, `14`, `15` |
 | `17-native-vs-acp-side-by-side-comparison` | 5 | reviewed (Orchestrator independently re-ran both live comparison tests, all four dimensions' numbers confirmed exactly) | `07`, `09`, `10`, `13`, `14`, `15` |
+| `23-wire-claude-codex-pi-acp-bridge-dispatch` | post-handoff fix | implemented (Orchestrator-verified: `go.mod` pin, dispatch map, live Claude+Codex turns through Nanite's own API, `go build`/`vet`/`test` clean) | `13`, `14`, `15` |
 
 **Sequencing.** Phase 1 (`01`-`02`) is small, mechanical, foundation work entirely inside the
 sibling `libs/go-agent-wrapper` repo — both tasks are file-disjoint and parallel-safe. Phase 2
@@ -492,7 +493,13 @@ Pi before `13`-`15` can be dispatched (see `TASKS/ESCALATIONS.md`). Phase 5 (`16
 the batch: an audit of whether any ACP agent actually needs the host to proxy filesystem/
 terminal operations (a real, flagged-but-unresolved "hidden cost" risk in 17-acp.md), and a
 side-by-side native-vs-ACP comparison to ground any future per-agent default decision in real
-evidence.
+evidence. A post-handoff fix, `23`, closes a real gap the end-of-batch doc-writer pass
+surfaced: `11` (Phase 3) wired OpenCode/Copilot CLI into Nanite's own ACP dispatch table
+before Phase 4's bridge adapters existed, and no later task ever revisited it — so Claude/
+Codex/Pi's bridge adapters were built and library-verified but never reachable from Nanite
+itself. `23` extends the same dispatch table to all three and live-verifies Claude/Codex
+end-to-end (Pi's dispatch is correct but blocked by an unrelated, pre-existing gap — no `"pi"`
+entry in `cmd/nanite/main.go`'s `cliAdapters` list).
 
 **Real, load-bearing corrections to both docs, found during this planning session's own
 research against the live code** (not just doc-vs-doc inconsistencies — each is cited with

@@ -1,7 +1,19 @@
 # Migrate session construction/lifecycle onto go-agent-wrapper's wrapper.Wrapper
 
 **Phase:** 2 — Nanite host migration (`TASKS/agent-host-acp`)
-**Status:** not-started
+**Status:** not-started — **escalated, no code changes made. See `TASKS/ESCALATIONS.md`
+(2026-08-21, "Task `06` (migrate session lifecycle to `wrapper.Wrapper`)…"). `wrapper.Wrapper.Run`,
+as currently shipped, is structurally non-functional for all three of go-agent-wrapper's own
+real adapters (`adapters/claude`/`codex`/`opencode`) — its hardcoded internal
+`agentsessions.StartOptions{}` construction never sets `WorkspaceDir`/`LogPath`, which every
+one of the streaming-stdio/jsonrpc-stdio/serve-http runtime kinds hard-requires before
+spawning anything (empirically reproduced, not just read). It also exposes no seam for
+`SessionIDPreset`/`OnSessionID`/`AutoFireFirstTurn`/`FirstTurnPayload`, three more genuinely
+load-bearing pieces of Nanite's current session lifecycle. None of these gaps can be closed
+from inside this task's authorized Touches (four Nanite files) — the missing seam lives
+entirely inside `wrapper.go`, in the sibling `go-agent-wrapper` repo. Do not dispatch a
+follow-up worker against this file's original scope without an Orchestrator/operator decision
+on the escalation's recommended path first.**
 **Depends on:** `02` (Descriptor split), `04` (Planter migration), `05` (closed — see
 correction below, its finding is folded into this task)
 **Touches:** `internal/runtime/agent/agent.go`, `factory.go`, `manager.go`, `deps.go`. Repo:
@@ -156,3 +168,91 @@ finding.
 - Real end-to-end verification is task `07`'s job, not this one's — this task's own tests can
   use fakes/mocks per existing convention (`fakes_test.go`), but should not claim live-dogfeed
   verification in its Work Log.
+
+## Work Log (2026-08-21)
+
+**Read before writing any code**, per this task's own risk profile (largest, highest-risk
+task in the batch): `docs/engineering/architecture/16-agent-host.md`, this batch's
+`README.md`, `TASKS/ESCALATIONS.md`'s task-05 entry (the sandbox-profile correction folded
+into this task's Context above), all of `internal/runtime/agent/{agent.go,factory.go,
+manager.go,deps.go}`, and — critically — `go-agent-wrapper`'s `wrapper/wrapper.go`,
+`adapters/{adapter.go,runtime_adapter.go,claude/claude.go,codex/codex.go,opencode/opencode.go}`,
+`plant/plant.go`, and the relevant parts of `agentkit/agentsessions` (`types.go`'s full
+`StartOptions` field list, `streaming_stdio_session.go`, `jsonrpc_stdio_session.go`,
+`serve_http_session.go`, `from_adapter.go`, `from_provider.go`) and `go-providers/provider`'s
+real `BuildArgs` implementations for claude/codex/opencode.
+
+**Verification method**: traced every field Nanite's current `agent.go:525-541` sets on
+`agentsessions.StartOptions` against what `wrapper.Wrapper.Run`'s own hardcoded internal
+`agentsessions.StartOptions{}` construction (`wrapper.go:342-381`) actually forwards, then, for
+every field found missing, checked whether it's genuinely load-bearing today by grepping for
+real (non-test) call sites in Nanite and reading the actual `provider.CLIAdapter.BuildArgs`
+implementations each field feeds into — not just whether the field exists, but whether losing
+it would change real behavior.
+
+**Finding, in full, with exact evidence**: logged in `TASKS/ESCALATIONS.md`
+(2026-08-21, "Task `06` (migrate session lifecycle to `wrapper.Wrapper`)…"). Summary:
+
+1. `wrapper.Wrapper.Run` is **structurally non-functional for all three of go-agent-wrapper's
+   own real shipped adapters** (`adapters/claude`, `adapters/codex`, `adapters/opencode`).
+   Its hardcoded `agentsessions.StartOptions{}` literal never sets `WorkspaceDir` or
+   `LogPath`; every real runtime kind those three adapters' `Describe()` implementations map
+   to (streaming-stdio, jsonrpc-stdio, serve-http) hard-errors before spawning anything when
+   both are empty. **Empirically confirmed**, not just read: wrote a throwaway test
+   (`go-agent-wrapper/wrapper/zz_repro_logpath_test.go`, deleted immediately after use, never
+   committed — `git status --short` clean in that repo before and after) using the wrapper's
+   own fake-CLI-script test harness but with a real `adapters.ProtocolClaudeStreamJSON`/
+   `adapters.TransportStdio` Descriptor pair (matching `adapters/claude`'s actual `Describe()`)
+   instead of the empty pair every one of go-agent-wrapper's own integration tests uses. `Run`
+   failed exactly as predicted: `wrapper: runtime.Start: agentsessions: streaming-stdio
+   runtime requires StartOptions.LogPath or StartOptions.WorkspaceDir`. Root cause of why
+   go-agent-wrapper's own test suite never caught this: every integration test uses a fake
+   adapter with Protocol/Transport left unset, which routes to a fourth, different agentkit
+   runtime kind (`from_adapter.go`'s plain per-turn adapter runtime) that has zero
+   `WorkspaceDir`/`LogPath` references anywhere — none of go-agent-wrapper's shipped tests
+   exercise streaming-stdio/jsonrpc-stdio/serve-http at all.
+2. Three more real, load-bearing gaps confirmed against live Nanite call sites (not
+   hypothetical): `SessionIDPreset` (Claude's post-host-restart `--resume` flow, live caller
+   `internal/service/chat_boot_drive.go:159`), `OnSessionID` (the sole write path for
+   `RuntimeStore.SetProviderSessionID`, which the above resume flow reads back from), and
+   `AutoFireFirstTurn`/`FirstTurnPayload` (kickoff delivery for every `ModeOneShot`/
+   `ModeSubagent`/`ModeBackground` boot). None have a `wrapper.Config` field or any other
+   Nanite-reachable seam.
+3. By contrast, confirmed two other omissions are **not** load-bearing, so not part of the
+   blocking finding: `BootPrompt`/`BootMode` (already vestigial since task 04's Planter
+   migration — Nanite's own code force-zeroes it for Claude, and Codex/OpenCode's real
+   `BuildArgs` implementations explicitly ignore both params in the modes Nanite uses) and
+   `ExtraArgs`/`Supervisor` (no live caller for the former since the boot-profile catalog's
+   retirement; the latter is dead code today since `shouldUsePTY` always returns `false`).
+
+**Given the task's own explicit Done-means bullet** ("Session construction... routes through
+`wrapper.Wrapper.Run`/`SendInput`/`Stop`") **and its explicit Touches/Repo restriction**
+("Touches: four Nanite files... Repo: Nanite") **are jointly unsatisfiable** — finding 1 has
+no Nanite-side workaround at all (the missing values must be present inside `wrapper.go`'s own
+hardcoded `StartOptions{}` literal, in the sibling repo, outside this task's authorization) —
+this is exactly the "task file's own instruction is genuinely ambiguous/internally
+contradictory once verified against the real code" category this project's escalation
+criteria names as a real stop-and-escalate trigger, not a "correct the rationale, do the task
+anyway" situation: the task's *decided action* itself (route through `Wrapper.Run`) is not
+achievable as scoped, not just its supporting rationale.
+
+**No code changes made.** `internal/runtime/agent/{agent.go,factory.go,manager.go,deps.go}`
+are byte-identical to `main` — confirmed via `git status --short` (no diff). The throwaway
+`go-agent-wrapper` repro test was deleted immediately after producing its evidence, confirmed
+via `git status --short` in that repo (clean, "main ahead 4" only — no working-tree diff)
+both before writing it and after removing it. `go build ./cmd/nanite/`, `go vet ./...`,
+`go test ./...` were not re-run as part of this task's own verification since nothing in this
+repo changed; the pre-existing baseline (established by tasks `01`-`05`) is unaffected by a
+read-only investigation.
+
+**Escalation logged:** `TASKS/ESCALATIONS.md`, entry dated 2026-08-21, "Task `06` (migrate
+session lifecycle to `wrapper.Wrapper`)…" — includes the full evidence above plus three
+concrete recommended paths for the Orchestrator (extend `go-agent-wrapper`'s `Config`/`Run`
+surface as new cross-repo scope; descope this task to keep direct `StartOptions` construction
+while adopting only the `adapters.RuntimeAdapter` resolve half; or land the library extension
+as a new, small prerequisite task ahead of re-dispatching this one).
+
+**Per this task's own instructions and this project's escalation discipline, stopping
+here — not marking this task `implemented`.** Status left as `not-started — escalated` above.
+Task `07` (dogfeed validation) depends on this task; the Orchestrator should decide the
+recommended path before either `06` is re-dispatched or `07` is touched.

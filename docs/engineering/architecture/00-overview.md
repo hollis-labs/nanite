@@ -32,13 +32,15 @@ These recur across every subsystem doc in this folder — they're not independen
 15. [Teams](15-teams.md) — configurable N-slot organizational shapes (routing, authority, gates) that generalize today's hardcoded three-role dispatch, compiling to `agentworkflow` runs rather than a new orchestration engine.
 16. [Agent Host](16-agent-host.md) — the shared process/stdio/sandbox/env boundary underneath CLI agent launching, and where Nanite's current bespoke launch code stands against the portfolio's existing (unadopted) candidate for it.
 17. [Agent Client Protocol (ACP)](17-acp.md) — ACP as a transport for driving underlying CLI agents (a companion to [Agent Host](16-agent-host.md)), distinct from Tether's already-shipped ACP-server role.
+18. [Filesystem Snapshots](18-filesystem-snapshots.md) — shadow-git undo/audit mechanics for an agent's granted paths, living beside sandboxing in the host's responsibility list; a distinct axis from agent/session-state recovery ([Session Lifecycle & Recovery](06-session-lifecycle-and-recovery.md)).
 
 ## What's genuinely still open
 
 - ~~Whether durable agents should eventually run CLI-based instead of API-based.~~ **Resolved 2026-08-19**: keep both substrates. A dedicated review found the two paths much closer in behavior than originally assumed post-Phase-2-5, so there's no "which one wins" call to make. What remains is making the choice explicitly configurable: an app-level default (CLI), a system-wide override, and the existing per-agent override (`runtime_kind`, see [Agent Launching](02-agent-launching.md)) — `TASKS/phase-8/01-set-default-runtime-kind.md`.
 - GUI's start-surface reconciliation against the new construction model — deferred to the dedicated frontend pass.
 - A full archival pass on the docs this folder supersedes — see `../TASKS.md`.
-- Whether Nanite adopts `go-agent-wrapper` as the shared agent host, and whether/how it drives underlying agents over ACP — see [Agent Host](16-agent-host.md) and [ACP](17-acp.md). Both are evidence-gathering reviews, not decisions; planning inherits an open call, not a foregone one.
+- `go-agent-wrapper` host adoption and ACP driving of underlying agents ([Agent Host](16-agent-host.md), [ACP](17-acp.md)): planned and approved, in progress under active implementation.
+- Filesystem snapshots ([18-filesystem-snapshots.md](18-filesystem-snapshots.md)): reviewed and aligned, not yet planned.
 
 ## What this doesn't cover yet
 

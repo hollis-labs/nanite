@@ -73,4 +73,7 @@ Two minor, non-blocking findings, neither touching the registry-growth fix or sh
 Task `11` is now marked `reviewed`. **All 11 tasks in the Teams batch are reviewed-clean — Phase 4 is closed, and the batch is complete.**
 
 ## Review notes
-<Reviewer fills this in: pass/fail, what was checked, anything fixed and how.>
+
+**PASS, clean, first review — the batch's highest-risk task.** A fresh reviewer, briefed to be especially rigorous given the shared-production-wiring stakes, independently confirmed `TeamRunLauncher` and `AgentCardGenerator` share the exact same `*agentworkflow.Registry` instance in production (the single most important correctness question for the registry-growth fix), confirmed the agent-card exclusion filter is unconditional with no bypass, confirmed `Registry.Unregister`'s terminal-status gating is correctly scoped against `resumeWorkflowRun`'s real requirement, and re-verified all three step-1 research claims against source. Two minor, non-blocking findings logged (an unenforced `team-run:` naming-collision risk; a doc-comment overstatement about empty-body handling) — neither is a functional defect, neither required a fix. Full narrative is in this file's own Work Log ("Re-review" section above) rather than duplicated here; see also `TASKS/ESCALATIONS.md`'s "Teams task 11 review" entry.
+
+**This closes the Teams batch — all 11 tasks (`01`-`11`) are now `reviewed`.**

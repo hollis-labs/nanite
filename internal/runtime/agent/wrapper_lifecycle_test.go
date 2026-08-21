@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -413,5 +414,139 @@ func TestBoot_WrapperLifecycle_Codex_EnvParity(t *testing.T) {
 	}
 	if string(seen) != bootDir {
 		t.Errorf("fake codex process observed CODEX_HOME=%q, want %q (agent.Boot's env-wrapper-script workaround is not propagating codexLayout.AmendEnv's redirect)", string(seen), bootDir)
+	}
+}
+
+// fakeOpencodeRunScript is a POSIX sh script standing in for the real
+// opencode binary in `opencode run --agent <slug> ... "<prompt>"` mode
+// (Mode="" — the only mode cmd/nanite's composition root actually wires up,
+// per wrapper_adapter.go's own doc comment: opencode's HTTP+SSE "serve-http"
+// Mode is unused today; Nanite drives opencode as a subprocess-per-turn
+// "adapter runtime" exactly like Codex). Ignores argv (AutoFireFirstTurn's
+// NDJSON-framed kickoff is irrelevant to the fake), writes
+// OPENCODE_CONFIG_DIR's observed value to $NANITE_TEST_PROBE_FILE — proving
+// wrapEnvForSpawn's env-wrapper-script mechanism propagates
+// opencodeLayout.AmendEnv's redirect exactly as it does for Codex — then
+// prints one plain-text line, driving OpencodeAdapter.ParseLine's real
+// production parser (each non-empty stdout line -> llmtypes.EventDelta; no
+// structured completion event, the bridge synthesizes EventDone on clean
+// exit).
+const fakeOpencodeRunScript = `#!/bin/sh
+printf '%s' "$OPENCODE_CONFIG_DIR" > "$NANITE_TEST_PROBE_FILE"
+echo "hello from opencode"
+`
+
+// TestBoot_WrapperLifecycle_OpenCode is the regression coverage
+// TASKS/agent-host-acp/18 adds for the gap that let a real, 100%-
+// reproducible OpenCode crash ship: neither this file's Claude nor Codex
+// test (task 06's own new coverage) ever drove OpenCode through a real
+// Boot -> wrapper.Wrapper.Run path, and every other test that touches
+// opencodeLayout.SpawnWorkdir (bootdir_opencode_test.go) calls it directly
+// rather than through Boot.
+//
+// Options.Workdir is left EMPTY here deliberately — the exact real-world
+// shape internal/service/chat_boot_drive.go's bootSessionWorkdir always
+// produces for every real chat session today (a documented, intentional
+// stub that never threads a resolved project path through). Pre-fix, this
+// reproduced the live-dogfeed crash exactly: opencodeLayout.SpawnWorkdir
+// returned opts.Workdir ("") verbatim, wrapper.Config.Workdir ended up "",
+// and wrapper.Wrapper.Run hard-errored with "wrapper: Config.Workdir is
+// required" before ever spawning the fake script. Post-fix,
+// opencodeLayout.SpawnWorkdir falls back to bootDir, and this test proves
+// the fake process genuinely spawns, streams a real delta, and completes.
+func TestBoot_WrapperLifecycle_OpenCode(t *testing.T) {
+	probeFile := filepath.Join(t.TempDir(), "opencode_config_dir_seen.txt")
+	scriptPath := filepath.Join(t.TempDir(), "fake-opencode.sh")
+	if err := os.WriteFile(scriptPath, []byte(fakeOpencodeRunScript), 0o755); err != nil {
+		t.Fatalf("write fake opencode script: %v", err)
+	}
+	t.Setenv("OPENCODE_CLI_PATH", scriptPath)
+
+	fanoutCh := make(chan llmtypes.StreamEvent, 32)
+	store := newFakeRuntimeStore()
+	pg := permission.NewPathGrants()
+	profile := storeProfile("opencode")
+	deps := &Dependencies{
+		Agents:          &fakeAgentProfiles{profile: &profile},
+		SessionsManager: agentsessions.NewManager(nil),
+		Store:           store,
+		PathGrants:      pg,
+		ProviderAdapter: func(name string) provider.CLIAdapter {
+			if name != "opencode" {
+				return nil
+			}
+			return provider.NewOpencodeAdapter()
+		},
+		EventFanout:    func(string) chan<- llmtypes.StreamEvent { return fanoutCh },
+		WorkspacesRoot: t.TempDir(),
+	}
+	t.Cleanup(func() { _ = deps.SessionsManager.Shutdown(context.Background()) })
+
+	sess, err := Boot(context.Background(), deps, Options{
+		Mode: ModeOneShot,
+		// Workdir intentionally left empty — see doc comment above.
+		Role:          "executor",
+		OneShotPrompt: "say hi",
+		Env:           map[string]string{"NANITE_TEST_PROBE_FILE": probeFile},
+	})
+	if err != nil {
+		t.Fatalf("Boot: %v (pre-fix this failed with \"wrapper: Config.Workdir is required\" — TASKS/agent-host-acp/18)", err)
+	}
+	bootDir := sess.BootDir
+
+	// Same subprocess-per-turn "adapter runtime" shape as Codex — see
+	// TestBoot_WrapperLifecycle_Codex_EnvParity's comment on why Stop is
+	// called explicitly rather than waiting on Wait unprompted.
+	var gotDelta bool
+	deadline := time.Now().Add(15 * time.Second)
+	for time.Now().Before(deadline) {
+		select {
+		case ev := <-fanoutCh:
+			if ev.Type == llmtypes.EventDelta && strings.TrimSpace(ev.Content) == "hello from opencode" {
+				gotDelta = true
+			}
+		case <-time.After(50 * time.Millisecond):
+		}
+		if gotDelta {
+			break
+		}
+	}
+	if !gotDelta {
+		t.Fatalf("fanout: no EventDelta with opencode's stdout content observed within 15s")
+	}
+
+	stopCtx, stopCancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer stopCancel()
+	if err := sess.Stop(stopCtx); err != nil {
+		t.Fatalf("Stop: %v", err)
+	}
+
+	waitCtx, waitCancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer waitCancel()
+	if err := sess.Wait(waitCtx); err != nil {
+		t.Fatalf("Wait after Stop: %v", err)
+	}
+
+	// spawnWorkdir fell back to bootDir (this task's fix) — confirms both
+	// wrapper.Config.Workdir and the persisted runtime row's Workdir
+	// reflect the fallback, not an empty string.
+	store.mu.Lock()
+	var rowWorkdir string
+	for _, row := range store.created {
+		if row.ID == sess.ID {
+			rowWorkdir = row.Workdir
+		}
+	}
+	store.mu.Unlock()
+	if rowWorkdir != bootDir {
+		t.Errorf("runtime row Workdir = %q, want bootDir %q (SpawnWorkdir fallback)", rowWorkdir, bootDir)
+	}
+
+	seen, err := os.ReadFile(probeFile)
+	if err != nil {
+		t.Fatalf("read probe file (fake opencode process never ran, or wrapEnvForSpawn's script chain is broken): %v", err)
+	}
+	if string(seen) != bootDir {
+		t.Errorf("fake opencode process observed OPENCODE_CONFIG_DIR=%q, want %q (agent.Boot's env-wrapper-script workaround is not propagating opencodeLayout.AmendEnv's redirect)", string(seen), bootDir)
 	}
 }

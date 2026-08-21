@@ -110,10 +110,24 @@ func TestOpencodeLayout_AmendEnv(t *testing.T) {
 	}
 }
 
-// TestOpencodeLayout_SpawnWorkdir returns project dir, not boot dir.
+// TestOpencodeLayout_SpawnWorkdir returns project dir, not boot dir, when a
+// project dir is given.
 func TestOpencodeLayout_SpawnWorkdir(t *testing.T) {
 	if got := (opencodeLayout{}).SpawnWorkdir("/tmp/boot", "/proj"); got != "/proj" {
 		t.Errorf("SpawnWorkdir = %q, want /proj", got)
+	}
+}
+
+// TestOpencodeLayout_SpawnWorkdir_EmptyProjectDirFallsBackToBootDir is the
+// regression pin for TASKS/agent-host-acp/18: real chat sessions always call
+// SpawnWorkdir with an empty projectDir (bootSessionWorkdir's documented
+// stub, internal/service/chat_boot_drive.go), and the caller feeds the
+// result straight into wrapper.Config.Workdir, which wrapper.Wrapper.Run
+// hard-requires to be non-empty. Pre-fix this returned "" verbatim, which
+// crashed every real OpenCode CLI session on its first turn.
+func TestOpencodeLayout_SpawnWorkdir_EmptyProjectDirFallsBackToBootDir(t *testing.T) {
+	if got := (opencodeLayout{}).SpawnWorkdir("/tmp/boot", ""); got != "/tmp/boot" {
+		t.Errorf("SpawnWorkdir(bootDir, \"\") = %q, want /tmp/boot (bootDir fallback)", got)
 	}
 }
 

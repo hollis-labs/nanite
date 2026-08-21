@@ -779,4 +779,4 @@ package. `go test ./internal/runtime/agent/... -race -count=1`: clean.
 `internal/runtime/agent/launch_spec_options_test.go` (stale comment correction only, no
 behavioral test change).
 
-**Commit**: pending — see final report for the actual SHA once committed.
+**Commit**: `a55f239c` on `main`.

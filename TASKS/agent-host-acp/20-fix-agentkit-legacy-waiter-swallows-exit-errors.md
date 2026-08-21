@@ -6,7 +6,7 @@ is dead code for every Nanite CLI session today
 real-provider dogfeed validation — this is the direct, confirmed check on 16-agent-host.md's
 own named top risk ("`internal/recovery/broker`'s existing agentkit-based classifier/dispatch
 logic... needs auditing first").
-**Status:** implemented
+**Status:** reviewed
 **Depends on:** none.
 **Touches:** `libs/agentkit/agentsessions/streaming_stdio_session.go` (`spawnWaiterLegacy`).
 Sibling repo, NOT Nanite (nor `go-agent-wrapper` — this bug is one layer further down, in the
@@ -289,3 +289,10 @@ narrowed scope):** `go-agent-wrapper`'s `agentkit` pin, Nanite's own direct `age
 and the "Done means" dogfeed re-verification bullet (killing a real live subprocess through the
 running Nanite app and confirming the broker now classifies it) all remain outstanding — none of
 that was done as part of this task.
+
+## Review notes
+
+Orchestrator-verified (2026-08-21): independently confirmed the diff, re-ran build/vet/test,
+and re-confirmed live against the final, fully-patched build during the section-level Phase 2
+re-verification dogfeed. Full verification record: `TASKS/ESCALATIONS.md`'s 2026-08-21 entries
+for this task, and the whole-section fresh review (also 2026-08-21, PASS) that closed Phase 2.

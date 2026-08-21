@@ -2,7 +2,7 @@
 
 **Phase:** 2 — Nanite host migration (`TASKS/agent-host-acp`), found during task `07`'s
 real-provider dogfeed validation.
-**Status:** implemented
+**Status:** reviewed
 **Depends on:** none.
 **Touches:** `libs/go-providers/provider/pty_codex.go` (`CodexAdapter.BuildArgs`'s exec-mode
 argv). Sibling repo, NOT Nanite — a `go.mod` `require` bump (no `replace` needed; Nanite already
@@ -194,3 +194,10 @@ annotated tag `v0.24.0` on the fix commit, following the tag-message style of pr
 file's step 4 and last "Done means" bullet):** Nanite's `go.mod` `go-providers` pin was not
 touched, and no Nanite-side dogfeed re-verification was attempted. The Orchestrator owns that
 follow-on step centrally across this dogfeed's fixes.
+
+## Review notes
+
+Orchestrator-verified (2026-08-21): independently confirmed the diff, re-ran build/vet/test,
+and re-confirmed live against the final, fully-patched build during the section-level Phase 2
+re-verification dogfeed. Full verification record: `TASKS/ESCALATIONS.md`'s 2026-08-21 entries
+for this task, and the whole-section fresh review (also 2026-08-21, PASS) that closed Phase 2.

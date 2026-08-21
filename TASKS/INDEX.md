@@ -460,7 +460,7 @@ Nanite itself), and scope boundaries.
 | `05-migrate-sandbox-profile-to-applier` | 2 | closed (no migration — see `ESCALATIONS.md`, finding folded into `06`) | `03` |
 | `05a-extend-wrapper-config-for-real-adapters` | 2 (sibling repo, Phase-1-shaped) | reviewed | none |
 | `06-migrate-session-lifecycle-to-wrapper` | 2 | reviewed (PASS, 2 non-blocking findings fixed and verified) | `02`, `04`, `05` (closed), `05a` |
-| `07-dogfeed-validate-host-migration` | 2 | validated — real dogfeed against fully-patched build confirms all 5 fixes (`18`-`22`) work end-to-end, incl. the broker/kill-9 check | `04`, `05`, `06` |
+| `07-dogfeed-validate-host-migration` | 2 | reviewed — whole-section Phase 2 review PASS (fresh reviewer ran its own independent live dogfeed incl. broker/kill-9) | `04`, `05`, `06` |
 | `18-fix-opencode-workdir-hard-fail-regression` | 2 (found via `07`) | reviewed (Orchestrator-verified, confirmed live in final re-run) | none |
 | `22-fix-opencode-turn-never-completes-chat-harness` | 2 (found via `18`, sibling repo `libs/agentkit`) | reviewed (Orchestrator-verified, confirmed live in final re-run) | none |
 | `19-fix-codex-missing-skip-git-repo-check` | 2 (found via `07`, sibling repo `libs/go-providers`, tagged v0.24.0) | reviewed (Orchestrator-verified, confirmed live in final re-run) | none |

@@ -3,7 +3,7 @@ chat harness never observes it as done; the SSE stream hangs forever
 
 **Phase:** 2 — Nanite host migration (`TASKS/agent-host-acp`), found during task `18`'s
 real-binary dogfeed re-verification (itself following up on task `07`'s dogfeed).
-**Status:** implemented
+**Status:** reviewed
 **Depends on:** none functionally, but was unreachable until task `18` landed — every real
 OpenCode CLI session hard-crashed on `Config.Workdir is required` before this point (task `18`'s
 own finding) was ever reachable.
@@ -326,3 +326,10 @@ here:**
   `delta`/`stream_end` end-to-end and the persisted assistant message is non-empty.
 - Independently confirming, against the real `codex` binary (not just the fake-adapter test above),
   that Codex turns still complete correctly and don't double-fire under this fix.
+
+## Review notes
+
+Orchestrator-verified (2026-08-21): independently confirmed the diff, re-ran build/vet/test,
+and re-confirmed live against the final, fully-patched build during the section-level Phase 2
+re-verification dogfeed. Full verification record: `TASKS/ESCALATIONS.md`'s 2026-08-21 entries
+for this task, and the whole-section fresh review (also 2026-08-21, PASS) that closed Phase 2.

@@ -3,7 +3,7 @@ replaces — a real orphaned-process leak on the mid-stream-error broker path
 
 **Phase:** 2 — Nanite host migration (`TASKS/agent-host-acp`), found during task `07`'s
 real-provider dogfeed validation.
-**Status:** implemented
+**Status:** reviewed
 **Depends on:** none. Independent of task `18`/`19`/`20` — different code, different repo
 (Nanite, not a sibling), can land in any order relative to them.
 **Touches:** `internal/service/chat_boot_drive.go` (`adoptReplacementSession`,
@@ -237,3 +237,10 @@ the required (non-`-race`) baseline.
 `internal/service/chat_boot_drive.go` (`adoptReplacementSession` fix + new `stopDisplacedSession` +
 `observeSessionForRecovery` guard), `internal/service/chat_replacement_session_orphan_test.go` (new
 — clean repro + regression coverage).
+
+## Review notes
+
+Orchestrator-verified (2026-08-21): independently confirmed the diff, re-ran build/vet/test,
+and re-confirmed live against the final, fully-patched build during the section-level Phase 2
+re-verification dogfeed. Full verification record: `TASKS/ESCALATIONS.md`'s 2026-08-21 entries
+for this task, and the whole-section fresh review (also 2026-08-21, PASS) that closed Phase 2.

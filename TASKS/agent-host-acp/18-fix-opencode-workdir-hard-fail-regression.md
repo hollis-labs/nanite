@@ -2,7 +2,7 @@
 
 **Phase:** 2 — Nanite host migration (`TASKS/agent-host-acp`), found during task `07`'s
 real-provider dogfeed validation.
-**Status:** implemented
+**Status:** reviewed
 **Depends on:** none (task `06`, the migration that introduced this, is already landed/reviewed —
 this is a follow-up fix, not a blocker on anything upstream).
 **Touches:** `internal/runtime/agent/agent.go` (the `wrapper.Config.Workdir` wiring) and/or
@@ -328,3 +328,10 @@ explicitly rather than silently marking the literal Done-means checkbox complete
 
 Committed to this worktree's branch, `agent-host-acp/task-18-opencode-workdir-fix` — see git log
 for the SHA (Orchestrator merges).
+
+## Review notes
+
+Orchestrator-verified (2026-08-21): independently confirmed the diff, re-ran build/vet/test,
+and re-confirmed live against the final, fully-patched build during the section-level Phase 2
+re-verification dogfeed. Full verification record: `TASKS/ESCALATIONS.md`'s 2026-08-21 entries
+for this task, and the whole-section fresh review (also 2026-08-21, PASS) that closed Phase 2.

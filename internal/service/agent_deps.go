@@ -199,14 +199,20 @@ func BuildAgentDependencies(cfg AgentDepsConfig) (AgentDepsBundle, error) {
 		CLIWritableRoots:   cfg.CLIWritableRoots,
 		Telemetry:          telemetry,
 		SandboxBaseProfile: cfg.SandboxBaseProf,
-		// CW-20260518-0085: orphan sweep + periodic reaper consult the
-		// in-process session registry to distinguish "process gone but
-		// session still alive in this nanite" from "stale row left over
-		// from a pre-restart session." Wired against the same Manager
-		// the rest of agent_deps composes — same source of truth as
-		// SessionsManager above.
-		LiveSessions: managerLiveSessions{manager: manager},
 	}
+	// CW-20260518-0085, revised by TASKS/agent-host-acp/06: orphan sweep +
+	// periodic reaper consult the in-process session registry to
+	// distinguish "process gone but session still alive in this nanite"
+	// from "stale row left over from a pre-restart session." Pre-migration
+	// this was wired against *agentsessions.Manager (same source of truth
+	// as SessionsManager above); post-migration, Boot drives sessions
+	// through wrapper.Wrapper.Run directly and never registers them with
+	// Manager at all, so Manager's own registry would never see a
+	// wrapper-driven session as live. deps now answers LiveSessionChecker
+	// itself (runtimeagent.Dependencies.IsLive, backed by its own
+	// wrapper-driven-session registry) — set here rather than inline in
+	// the struct literal above because the value is self-referential.
+	deps.LiveSessions = deps
 
 	// BootDir adapter — satisfies broker.BootDirOps by re-running the
 	// per-provider sandbox-dir population logic against the existing
@@ -544,6 +550,16 @@ func (s *agentRuntimeStore) MarkRuntimeFailed(id, reason string) error {
 	return s.store.MarkAgentRuntimeFailed(id, reason)
 }
 
+// UpdateState delegates to the same store.SetAgentRuntimeState the
+// pre-migration agentRuntimeStateSink (below) drove automatically via
+// *agentsessions.Manager's StateSink callback. Boot and Session's own
+// completion path (internal/runtime/agent/agent.go) now call this
+// directly — see runtimeagent.RuntimeStore.UpdateState's doc comment for
+// why.
+func (s *agentRuntimeStore) UpdateState(id, state string, pid int) error {
+	return s.store.SetAgentRuntimeState(id, state, pid)
+}
+
 func (s *agentRuntimeStore) SetProviderSessionID(id, providerSessionID string) error {
 	return s.store.SetAgentRuntimeProviderSessionID(id, providerSessionID)
 }
@@ -628,28 +644,19 @@ func (s *agentRuntimeStateSink) UpdateSessionState(id string, state agentsession
 }
 
 // --- LiveSessions adapter ---
-
-// managerLiveSessions satisfies runtimeagent.LiveSessionChecker against
-// the in-process agentsessions.Manager. orphansweep.SweepOrphans uses it to
-// distinguish a pid=0 row whose session is still live in *this* nanite
-// process from one left over from a pre-restart process.
 //
-// CW-20260518-0085: codex / opencode adapters never persist a non-zero
-// pid into agent_runtime, so signal-0 liveness can't speak for them.
-// Manager.Get is authoritative for the current process — empty registry
-// means every persisted pid=0 row is by definition orphaned (and the
-// staleness grace keeps mid-launch rows safe).
-type managerLiveSessions struct {
-	manager *agentsessions.Manager
-}
-
-func (m managerLiveSessions) IsLive(runtimeID string) bool {
-	if m.manager == nil {
-		return false
-	}
-	_, ok := m.manager.Get(runtimeID)
-	return ok
-}
+// managerLiveSessions (the pre-migration runtimeagent.LiveSessionChecker
+// backed by *agentsessions.Manager.Get) is retired by
+// TASKS/agent-host-acp/06 — Boot no longer registers sessions with
+// Manager at all (wrapper.Wrapper.Run drives agentkit/agentsessions
+// directly), so Manager.Get would never find a wrapper-driven session
+// regardless of whether it's genuinely live. deps.LiveSessions is now
+// wired directly against the composed *runtimeagent.Dependencies value
+// itself (see this file's BuildAgentDependencies, "deps.LiveSessions =
+// deps") — Dependencies.IsLive is backed by its own wrapper-driven-session
+// registry, populated/cleared by Boot/Session directly. See
+// runtimeagent.Dependencies' liveSessions field doc comment for the full
+// rationale.
 
 // --- EventSink adapter ---
 

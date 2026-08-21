@@ -10,7 +10,8 @@ import (
 	"strings"
 	"time"
 
-	agentsessions "github.com/hollis-labs/agentkit/agentsessions"
+	"github.com/hollis-labs/go-agent-wrapper/activity"
+	"github.com/hollis-labs/go-agent-wrapper/wrapper"
 	"github.com/hollis-labs/nanite/internal/store"
 	"github.com/oklog/ulid/v2"
 )
@@ -217,8 +218,11 @@ func (o Options) Validate() error {
 }
 
 // Session is the handle Boot returns to the caller. Lifecycle methods are
-// thin wrappers around Dependencies.SessionsManager bound to this session's
-// id; no caller should reach into the runtime lib directly.
+// thin wrappers around the *wrapper.Wrapper Boot constructed for this
+// session's id (manager.go); no caller should reach into
+// go-agent-wrapper/agentkit directly. Public shape (exported fields) is
+// unchanged from the pre-migration version — internal/recovery/broker and
+// every other existing caller compile against it unmodified.
 type Session struct {
 	ID           string
 	Mode         Mode
@@ -231,6 +235,25 @@ type Session struct {
 	// hadLineage records whether Boot registered a PathGrants lineage for
 	// this session — Stop unwinds it.
 	hadLineage bool
+
+	// wr is the wrapper.Wrapper instance driving this session's runtime.
+	// SendInput/Stop (manager.go) call directly into it. Safe to use once
+	// runDone's owning goroutine has observed wrapper.Wrapper.Run reach
+	// runtimeevents.KindSessionReady — Boot blocks until that point (or a
+	// pre-ready failure) before ever returning a *Session, so every method
+	// below can assume wr is ready.
+	wr *wrapper.Wrapper
+
+	// runDone closes once the background goroutine Boot started observes
+	// wr.Run(runCtx) return (clean exit or error alike) — safe for any
+	// number of concurrent Wait callers, mirroring the pre-migration
+	// agentsessions.Manager's own sessionResult.done broadcast pattern.
+	// runErr is written by that same goroutine strictly before the close
+	// (Go's channel-close-as-broadcast memory-model guarantee), so any
+	// reader that first observes runDone closed may then safely read
+	// runErr without further synchronization.
+	runDone chan struct{}
+	runErr  error
 }
 
 // expandUserHome replaces a leading "~" or "~/" in path with the
@@ -283,8 +306,13 @@ func effectiveProvider(opts Options, profile *store.AgentProfile) string {
 // Boot resolves the agent profile, materializes the workspace and ephemeral
 // boot dir, composes env + system prompt, selects a runtime (PTY for chat
 // sessions with PTY-capable adapters; subprocess-per-turn elsewhere), wires
-// supervisor + sandbox gates per Mode, persists the runtime row, and starts
-// the runtime via Dependencies.SessionsManager.
+// sandbox gates per Mode, persists the runtime row, and starts the runtime
+// via a go-agent-wrapper wrapper.Wrapper — TASKS/agent-host-acp/06's
+// migration off the pre-migration direct
+// agentsessions.StartOptions/Dependencies.SessionsManager.Start call. Boot
+// still does not register the session with Dependencies.SessionsManager
+// (kept wired for other, orphan-sweep/shutdown-adjacent uses — see
+// deps.go) — wrapper.Wrapper.Run drives agentkit/agentsessions directly.
 //
 // Mode-specific dispatch is documented per-Mode constant. The chat harness
 // owns turn orchestration; Boot only owns process lifecycle.
@@ -392,14 +420,13 @@ func Boot(ctx context.Context, deps *Dependencies, opts Options) (*Session, erro
 		return cleanup(fmt.Errorf("agent.Boot: no adapter registered for provider %q", providerName))
 	}
 
+	// runtimeCfg's Caps output is reused (not recomputed) below to pick the
+	// wrapper.Config.Adapter's Protocol/Transport pair — the untouched,
+	// single source of truth for the PTY/StreamingStdio runtime-shape
+	// decision. runtimeCfg itself is no longer fed into
+	// agentsessions.NewFromAdapter directly (wrapper.Wrapper.Run builds
+	// its own AdapterRuntimeConfig internally from the Descriptor).
 	runtimeCfg := runtimeConfigForAdapter(adapter, providerName, opts.Mode)
-	runtimeCfg.ID = sessID
-	runtimeCfg.Kind = "cli"
-
-	rt, err := agentsessions.NewFromAdapter(runtimeCfg)
-	if err != nil {
-		return cleanup(fmt.Errorf("agent.Boot: build runtime: %w", err))
-	}
 
 	parentPtr := (*string)(nil)
 	if opts.ParentSessionID != "" {
@@ -442,42 +469,21 @@ func Boot(ctx context.Context, deps *Dependencies, opts Options) (*Session, erro
 		}
 	}
 
-	var supervisor *agentsessions.SupervisorOptions
-	if opts.Mode == ModeLongLived && runtimeCfg.Caps.PTY {
-		telem := deps.Telemetry
-		if telem == nil {
-			telem = noopTelemetry{}
-		}
-		recovery := deps.Recovery
-		supervisor = &agentsessions.SupervisorOptions{
-			IdleKill:          15 * time.Minute,
-			RestartOnCrash:    2,
-			MaxRestartBackoff: 30 * time.Second,
-			WatchdogTimeout:   0,
-			OnRestart: func(attempt int, prevExit *agentsessions.ExitError) {
-				telem.RecordPTYRestart(sessID, attempt, prevExit)
-				if recovery != nil {
-					recovery.OnRestart(sessID, attempt, prevExit)
-				}
-			},
-		}
-	}
+	// Pre-migration this block conditionally built an
+	// agentsessions.SupervisorOptions for StartOptions.Supervisor when
+	// opts.Mode == ModeLongLived && runtimeCfg.Caps.PTY — i.e. never,
+	// since shouldUsePTY always returns false today (dead code, confirmed
+	// non-load-bearing in this task's own folded-in escalation finding 3).
+	// wrapper.Config has no Supervisor-equivalent field at all, so there is
+	// nothing left to wire this into; deps.Telemetry/deps.Recovery.OnRestart
+	// stay as documented, unused-today seams for a future PTY-capable
+	// adapter (Telemetry itself is untouched by this task).
 
 	sandboxProfile := buildSandboxProfile(deps.SandboxBaseProfile, opts, ws.Root, bootDir)
 
 	onSessionID := func(id string) {
 		_ = deps.Store.SetProviderSessionID(sessID, id)
 	}
-
-	var eventFanout chan<- agentsessionsStreamEventChan
-	_ = eventFanout // type alias bridge — see below
-	var typedCallback = func() interface{} {
-		if deps.TypedEventCallback != nil {
-			return deps.TypedEventCallback(sessID)
-		}
-		return nil
-	}()
-	_ = typedCallback
 
 	// First-turn payload: ModeOneShot can override with OneShotPrompt; all
 	// others use the kickoff convention pointing at the planted boot.md.
@@ -486,80 +492,74 @@ func Boot(ctx context.Context, deps *Dependencies, opts Options) (*Session, erro
 		firstTurn = opts.OneShotPrompt
 	}
 
-	bootPrompt := layout.BootPrompt(profile, opts)
-	bootMode := layout.BootMode()
 	firstTurnPayload := []byte(firstTurn)
 
 	// CW-20260516-0007: the streaming-stdio runtime treats the child's
-	// stdin strictly as NDJSON. Three adjustments for that runtime:
+	// stdin strictly as NDJSON — NDJSON-frame FirstTurnPayload so
+	// AutoFireFirstTurn modes (one-shot / subagent / background) deliver a
+	// parseable kickoff.
 	//
-	//  1. Suppress the raw boot-prompt-on-stdin write. claudeLayout's
-	//     BootMode is "stdin" (correct for the PTY TUI), which makes the
-	//     runtime write BootPrompt verbatim at spawn. For streaming-stdio
-	//     that markdown text crashes claude's JSON parser (c207/c208).
-	//     The boot prompt's content is now planted into CLAUDE.md (see
-	//     composeBootdirParams → resolveBootPrompt → claudeLayout), which
-	//     claude auto-discovers from its cwd — so dropping the stdin
-	//     write loses nothing.
-	//  2. Force BootMode to "" so the boot-prompt-on-stdin path is
-	//     suppressed structurally, not just by the empty BootPrompt.
-	//     Today agentsessions gates the spawn-time write on
-	//     `BootMode=="stdin" && BootPrompt!=""`, so an empty BootPrompt
-	//     already skips it — but relying on that internal AND-guard is
-	//     fragile (round-1 review): a future agentsessions change could
-	//     write an empty "\n" line, itself invalid NDJSON. Clearing
-	//     BootMode removes the ambiguity. The Start path's
-	//     AutoFireFirstTurn check `!(BootMode=="stdin" && BootPrompt!="")`
-	//     still evaluates true with BootMode="", so FirstTurnPayload
-	//     delivery is unaffected.
-	//  3. NDJSON-frame FirstTurnPayload so AutoFireFirstTurn modes
-	//     (one-shot / subagent / background) deliver a parseable kickoff.
+	// The raw-boot-prompt-on-stdin suppression this comment used to also
+	// describe (points 1-2 of the pre-migration three-point note) is moot
+	// post-migration: wrapper.Config has no BootPrompt/BootMode field at
+	// all (confirmed non-load-bearing — this task's own folded-in
+	// escalation finding 3 — claude's planted CLAUDE.md is already
+	// auto-discovered via cwd, per claudeLayout.SpawnWorkdir), so there is
+	// no raw-boot-prompt-on-stdin write path left to suppress.
 	if shouldUseStreamingStdio(providerName, opts.Mode) {
-		bootPrompt = ""
-		bootMode = ""
 		if framed, ferr := streamingStdioUserFrame(firstTurn); ferr == nil {
 			firstTurnPayload = framed
 		}
 	}
 
-	startOpts := agentsessions.StartOptions{
-		Workdir:           spawnWorkdir,
-		WorkspaceDir:      ws.Root,
-		LogPath:           ws.LogPath,
-		BootPrompt:        bootPrompt,
-		BootMode:          bootMode,
-		Env:               envMapToSlice(envMap),
-		Profile:           sandboxProfile,
-		SessionIDPreset:   sessionIDPreset,
-		OnSessionID:       onSessionID,
-		Supervisor:        supervisor,
-		ResourceLimits:    nil,
-		AutoFireFirstTurn: shouldAutoFireFirstTurn(opts.Mode),
-		FirstTurnPayload:  firstTurnPayload,
-		AttachEnabled:     true,
-		ExtraArgs:         append([]string(nil), opts.ExtraArgs...),
+	// Env-parity workaround for a wrapper.Config gap task 05a did not
+	// cover — see wrapEnvForSpawn's doc comment (wrapper_adapter.go) for
+	// the full rationale: wrapper.Wrapper.Run's hardcoded StartOptions{}
+	// literal never sets Env, so without this the spawned child would
+	// silently inherit the Nanite daemon's own process environment instead
+	// of the per-session composed envMap — for Codex/OpenCode this means
+	// silently losing CODEX_HOME/OPENCODE_CONFIG_DIR, the sole redirect to
+	// their planted, sandboxed config.
+	wrappedCLI, err := wrapEnvForSpawn(adapter, providerName, bootDir, envMap)
+	if err != nil {
+		return cleanup(fmt.Errorf("agent.Boot: wrap env for spawn: %w", err))
 	}
+	nAdapter := newNativeAdapter(providerName, wrappedCLI, runtimeCfg.Caps)
+
+	sink := &runtimeEventSink{}
 	if deps.EventFanout != nil {
-		startOpts.EventFanout = deps.EventFanout(sessID)
+		sink.fanout = deps.EventFanout(sessID)
 	}
 	if deps.TypedEventCallback != nil {
-		startOpts.TypedEventCallback = deps.TypedEventCallback(sessID)
+		sink.typedCB = deps.TypedEventCallback(sessID)
 	}
+	readyCh := make(chan struct{})
+	sink.onReady = func() { close(readyCh) }
 
-	sessionMeta := metaToStringMap(opts.SessionMeta)
-	if err := deps.SessionsManager.Start(ctx, agentsessions.StartRequest{
-		ID:          sessID,
-		Runtime:     rt,
-		Options:     startOpts,
-		SessionMeta: sessionMeta,
-	}); err != nil {
+	wr, err := wrapper.New(wrapper.Config{
+		App:               "nanite",
+		Adapter:           nAdapter,
+		Activity:          activity.NewBridge(sink),
+		Workdir:           spawnWorkdir,
+		BootDir:           bootDir,
+		SessionID:         sessID,
+		WorkspaceDir:      ws.Root,
+		LogPath:           ws.LogPath,
+		SandboxProfile:    sandboxProfile,
+		SessionIDPreset:   sessionIDPreset,
+		OnSessionID:       onSessionID,
+		AutoFireFirstTurn: shouldAutoFireFirstTurn(opts.Mode),
+		FirstTurnPayload:  string(firstTurnPayload),
+	})
+	if err != nil {
 		if hadLineage && deps.PathGrants != nil {
 			deps.PathGrants.ClearLineage(sessID)
 		}
 		_ = deps.Store.MarkRuntimeFailed(sessID, err.Error())
-		return cleanup(fmt.Errorf("agent.Boot: SessionsManager.Start: %w", err))
+		return cleanup(fmt.Errorf("agent.Boot: wrapper.New: %w", err))
 	}
 
+	runCtx, runCancel := context.WithCancel(context.Background())
 	sess := &Session{
 		ID:           sessID,
 		Mode:         opts.Mode,
@@ -569,36 +569,83 @@ func Boot(ctx context.Context, deps *Dependencies, opts Options) (*Session, erro
 		deps:         deps,
 		startedAt:    time.Now(),
 		hadLineage:   hadLineage,
+		wr:           wr,
+		runDone:      make(chan struct{}),
 	}
 
-	// Mode-specific drive. AutoFireFirstTurn handles the kickoff for
-	// ModeOneShot / ModeSubagent / ModeBackground; ModeLongLived and
-	// ModeResume callers drive turns externally.
-	if opts.Mode == ModeOneShot && !shouldAutoFireFirstTurn(opts.Mode) {
-		// Defensive: shouldAutoFireFirstTurn(ModeOneShot) is true today,
-		// but the manual SendInput path remains here for future modes
-		// where AutoFireFirstTurn is false but the caller's intent is a
-		// single immediate turn.
-		// firstTurnPayload is the streaming-stdio-framed form when the
-		// runtime requires it (CW-20260516-0007); identical to
-		// []byte(firstTurn) for non-streaming runtimes.
-		if err := deps.SessionsManager.SendInput(sessID, firstTurnPayload); err != nil {
-			_ = sess.Stop(context.Background())
-			return nil, fmt.Errorf("agent.Boot: ModeOneShot SendInput: %w", err)
+	// wrapper.Wrapper.Run owns the full start-wait-emit-exit lifecycle and
+	// blocks until the session exits (a materially different call shape
+	// than the pre-migration SessionsManager.Start, which returned once
+	// the runtime was merely registered) — run it on a background
+	// goroutine detached from ctx (a long-lived ModeLongLived chat session
+	// must outlive the request-scoped ctx a caller passes into Boot).
+	// sess.wr becomes usable for SendInput/Stop the moment Wrapper.Run
+	// emits runtimeevents.KindSessionReady — sink.onReady (closing
+	// readyCh) mirrors that exact point, so Boot blocks below until it
+	// fires (or Run exits first, or the caller's ctx is cancelled) before
+	// returning sess to its own caller.
+	//
+	// runCancel is deliberately NOT called from Session.Stop (manager.go)
+	// — only here, deferred, strictly after wr.Run has already returned
+	// and computed sess.runErr. Wrapper.Run's own tail end falls back to
+	// ctx.Err() whenever the underlying session.Wait() reports a nil
+	// error (true for every clean stop, e.g. agentkit's adapterSession.
+	// Wait always returns a nil error) — cancelling runCtx from Stop
+	// while Run's own session.Wait()/ctx.Err() check is still in flight
+	// races into an *avoidable* context.Canceled on an otherwise-clean
+	// cooperative stop. wr.Stop's own ctx parameter (caller-bounded) is
+	// already the correct, sufficient interrupt mechanism — see
+	// manager.go's Stop.
+	go func() {
+		defer runCancel()
+		defer close(sess.runDone)
+		sess.runErr = wr.Run(runCtx)
+		deps.untrackLiveSession(sessID)
+		state := "done"
+		if sess.runErr != nil {
+			state = "failed"
 		}
+		_ = deps.Store.UpdateState(sessID, state, 0)
+	}()
+
+	select {
+	case <-readyCh:
+		_ = deps.Store.UpdateState(sessID, "running", 0)
+		deps.trackLiveSession(sessID, sess)
+	case <-sess.runDone:
+		runCancel()
+		if hadLineage && deps.PathGrants != nil {
+			deps.PathGrants.ClearLineage(sessID)
+		}
+		failErr := sess.runErr
+		if failErr == nil {
+			failErr = errors.New("agent.Boot: wrapper.Run exited before session became ready")
+		}
+		_ = deps.Store.MarkRuntimeFailed(sessID, failErr.Error())
+		return cleanup(fmt.Errorf("agent.Boot: wrapper.Run: %w", failErr))
+	case <-ctx.Done():
+		runCancel()
+		<-sess.runDone // block until the background goroutine observes cancellation
+		if hadLineage && deps.PathGrants != nil {
+			deps.PathGrants.ClearLineage(sessID)
+		}
+		return cleanup(ctx.Err())
 	}
 
+	// Mode-specific drive. AutoFireFirstTurn (wired into wrapper.Config
+	// above) handles the kickoff for ModeOneShot / ModeSubagent /
+	// ModeBackground; ModeLongLived and ModeResume callers drive turns
+	// externally via Session.SendInput.
 	return sess, nil
 }
 
-// agentsessionsStreamEventChan is an unused alias retained as a placeholder
-// for clarity around the EventFanout shape; deps.EventFanout returns the
-// real chan<- llmtypes.StreamEvent. Kept un-exported.
-type agentsessionsStreamEventChan = struct{}
-
-// envMapToSlice flattens the composed env map into the KEY=VALUE slice
-// agentsessions.StartOptions.Env requires. Sorted keys for deterministic
-// ordering (helps test assertions and child-process debug output).
+// envMapToSlice flattens the composed env map into a sorted KEY=VALUE
+// slice. Pre-migration this fed agentsessions.StartOptions.Env directly;
+// post-migration it's reused by writeEnvWrapperScript (wrapper_adapter.go)
+// to render the same composed env deterministically into the per-session
+// wrapper script — same helper, same sort-for-determinism rationale
+// (stable test assertions, stable child-process debug output), different
+// consumer.
 func envMapToSlice(env map[string]string) []string {
 	if len(env) == 0 {
 		return nil
@@ -611,25 +658,6 @@ func envMapToSlice(env map[string]string) []string {
 	out := make([]string, 0, len(env))
 	for _, k := range keys {
 		out = append(out, k+"="+env[k])
-	}
-	return out
-}
-
-// metaToStringMap projects the any-typed Options.SessionMeta into the
-// string-typed map agentsessions.StartRequest.SessionMeta requires.
-// Non-string values are rendered with fmt.Sprintf("%v", v).
-func metaToStringMap(meta map[string]any) map[string]string {
-	if len(meta) == 0 {
-		return nil
-	}
-	out := make(map[string]string, len(meta))
-	for k, v := range meta {
-		switch tv := v.(type) {
-		case string:
-			out[k] = tv
-		default:
-			out[k] = fmt.Sprintf("%v", v)
-		}
 	}
 	return out
 }

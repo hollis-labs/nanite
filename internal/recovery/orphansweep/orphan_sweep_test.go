@@ -65,6 +65,10 @@ func (f *fakeRuntimeStore) MarkRuntimeFailed(id, reason string) error {
 	return nil
 }
 
+func (f *fakeRuntimeStore) UpdateState(id, state string, pid int) error {
+	return nil
+}
+
 func (f *fakeRuntimeStore) MarkRuntimeOrphaned(id, reason string) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()

@@ -1,6 +1,9 @@
 package agent
 
 import (
+	"context"
+	"errors"
+	"sync"
 	"time"
 
 	agentsessions "github.com/hollis-labs/agentkit/agentsessions"
@@ -27,13 +30,23 @@ type Dependencies struct {
 	// store directly.
 	Agents AgentProfiles
 
-	// SessionsManager owns the runtime lifecycle (Start / SendInput / Stop /
-	// Wait / Checkpoint / Resume / Attach). Boot is a thin orchestration
-	// layer over this. Constructed in the composition root; nanite has no
-	// existing Manager wiring, so this is a fresh dependency for Phase 4.
+	// SessionsManager was Boot's runtime-lifecycle owner (Start / SendInput
+	// / Stop / Wait / Checkpoint / Resume / Attach) pre-migration.
+	// TASKS/agent-host-acp/06: Boot now drives sessions through a
+	// go-agent-wrapper wrapper.Wrapper instead (agent.go), which
+	// constructs its own agentkit runtime directly and never registers
+	// with this Manager — Boot no longer calls any method on this field.
+	// Kept as a required (non-nil) Dependencies field and still
+	// constructed by the composition root regardless, for other,
+	// independent uses that predate and are unaffected by this migration
+	// (e.g. AgentDepsBundle.Manager). See runtimeagent.Dependencies'
+	// liveSessions field and StopAllLiveSessions for the wrapper-driven
+	// replacements for the two things this Manager used to provide
+	// (live-session tracking for orphansweep, daemon-shutdown drain).
 	SessionsManager *agentsessions.Manager
 
-	// Store persists the runtime-lifecycle row Boot writes prior to Start.
+	// Store persists the runtime-lifecycle row Boot writes prior to
+	// constructing the wrapper.Wrapper that drives the session.
 	// Phase 4 backs this against store.Session, subagent_runs, or a new
 	// dedicated table — kept as an interface here so the composition root
 	// chooses without rippling through the agent package.
@@ -89,10 +102,11 @@ type Dependencies struct {
 	// LiveSessions, when non-nil, lets orphansweep.SweepOrphans probe the in-process
 	// session registry for runtime IDs whose persisted PID is 0 (codex-
 	// style adapters never report a pid). Production wires this against
-	// agentsessions.Manager.Get; tests pass a fake. Optional — nil leaves
-	// orphansweep.SweepOrphans falling back to updated_at staleness alone, which
-	// still reconciles pre-restart pid=0 rows once they age past the
-	// grace window.
+	// this same Dependencies value (Dependencies.IsLive, backed by the
+	// unexported liveSessions field below); tests pass a fake. Optional —
+	// nil leaves orphansweep.SweepOrphans falling back to updated_at
+	// staleness alone, which still reconciles pre-restart pid=0 rows once
+	// they age past the grace window.
 	LiveSessions LiveSessionChecker
 
 	// Recovery, when non-nil, observes lib-level restart attempts and
@@ -105,15 +119,99 @@ type Dependencies struct {
 	// SandboxBaseProfile is the starting profile composed per-spawn with
 	// AllowLoopback, FS allowlists, and ModeBackground/WideOpen overrides.
 	SandboxBaseProfile sandbox.Profile
+
+	// liveSessions tracks sessions currently driven through
+	// wrapper.Wrapper.Run, keyed by runtime/session id, populated by Boot
+	// once a session is confirmed started and cleared once its owning
+	// goroutine observes Run's return. Zero value (unset) is immediately
+	// usable — no constructor required.
+	//
+	// This is Dependencies' own answer to LiveSessionChecker (see
+	// Dependencies.IsLive below) now that Boot no longer registers
+	// sessions with *agentsessions.Manager — wrapper.Wrapper.Run drives
+	// agentkit/agentsessions directly and has no Manager involvement at
+	// all, so the Manager's own in-memory registry (the pre-migration
+	// backing for LiveSessionChecker) never sees these sessions. Codex/
+	// OpenCode never persist a real PID (see orphansweep's PID==0
+	// fallback branch), so an accurate live-session view here is load-
+	// bearing for orphansweep not false-positive-orphaning a genuinely
+	// live, merely-idle-between-turns chat session.
+	liveSessions sync.Map // runtimeID (string) -> *Session
 }
 
+// trackLiveSession registers sess as live under runtimeID. Called by Boot
+// once wrapper.Wrapper.Run's session is confirmed started (the same point
+// UpdateState(..., "running", ...) is called).
+func (d *Dependencies) trackLiveSession(runtimeID string, sess *Session) {
+	if d == nil {
+		return
+	}
+	d.liveSessions.Store(runtimeID, sess)
+}
+
+// untrackLiveSession removes runtimeID from the live-session registry.
+// Called once wrapper.Wrapper.Run's owning goroutine observes Run return
+// (clean exit or error alike) — mirrors agentsessions.Manager.watch
+// unregistering its own entry at the same point, pre-migration.
+func (d *Dependencies) untrackLiveSession(runtimeID string) {
+	if d == nil {
+		return
+	}
+	d.liveSessions.Delete(runtimeID)
+}
+
+// IsLive implements LiveSessionChecker against this package's own
+// wrapper-driven session registry. Wired as Dependencies.LiveSessions by
+// the composition root (internal/service/agent_deps.go) in place of the
+// pre-migration *agentsessions.Manager-backed adapter — see liveSessions'
+// field doc for why the Manager-backed one is no longer accurate.
+func (d *Dependencies) IsLive(runtimeID string) bool {
+	if d == nil {
+		return false
+	}
+	_, ok := d.liveSessions.Load(runtimeID)
+	return ok
+}
+
+// StopAllLiveSessions requests a cooperative stop for every session
+// currently tracked as live. This is the direct replacement for the
+// pre-migration daemon-shutdown drain (*agentsessions.Manager.Shutdown),
+// which stopped being effective once Boot stopped registering sessions
+// with the Manager — Manager.Shutdown on an empty registry is a silent
+// no-op, so without this, wrapper-driven CLI child processes would no
+// longer be asked to terminate cooperatively at daemon shutdown. Errors
+// from individual sessions are joined; best-effort, not fatal to the
+// sweep.
+func (d *Dependencies) StopAllLiveSessions(ctx context.Context) error {
+	if d == nil {
+		return nil
+	}
+	var errs []error
+	d.liveSessions.Range(func(_, value any) bool {
+		sess, _ := value.(*Session)
+		if sess != nil {
+			if err := sess.Stop(ctx); err != nil {
+				errs = append(errs, err)
+			}
+		}
+		return true
+	})
+	return errors.Join(errs...)
+}
+
+// Compile-time assertion: *Dependencies satisfies LiveSessionChecker so
+// the composition root can wire Dependencies.LiveSessions = deps directly.
+var _ LiveSessionChecker = (*Dependencies)(nil)
+
 // LiveSessionChecker reports whether the in-process session registry has
-// an entry for runtimeID. Production wires this against
-// agentsessions.Manager.Get; tests pass a fake. Optional in Dependencies —
-// nil means orphansweep.SweepOrphans falls back to PID + updated_at
-// staleness only, which still catches the common post-restart case (a
-// fresh process has an empty registry, so every persisted row is "no live
-// session").
+// an entry for runtimeID. Production wires this against Dependencies
+// itself (Dependencies.IsLive, backed by liveSessions above) now that Boot
+// drives sessions through wrapper.Wrapper.Run directly rather than
+// registering them with *agentsessions.Manager; tests pass a fake.
+// Optional in Dependencies — nil means orphansweep.SweepOrphans falls back
+// to PID + updated_at staleness only, which still catches the common
+// post-restart case (a fresh process has an empty registry, so every
+// persisted row is "no live session").
 //
 // Declared here (rather than in internal/recovery/orphansweep, which
 // implements the sweep logic that consumes it) because Dependencies.
@@ -159,12 +257,32 @@ type AgentProfiles interface {
 // the composition root decides.
 type RuntimeStore interface {
 	// CreateRuntimeRow persists the launching-state row Boot creates
-	// before SessionsManager.Start. The id is the agent runtime id
-	// (typically equal to opts.SessionID for chat ModeLongLived).
+	// before constructing the wrapper.Wrapper that drives this session.
+	// The id is the agent runtime id (typically equal to opts.SessionID
+	// for chat ModeLongLived).
 	CreateRuntimeRow(row *RuntimeRow) error
 
 	// MarkRuntimeFailed transitions the row to state="failed" with reason.
 	MarkRuntimeFailed(runtimeID, reason string) error
+
+	// UpdateState records a session lifecycle state transition
+	// ("running" once wrapper.Wrapper.Run's session is confirmed started;
+	// "done" or "failed" once it exits) together with the process's
+	// current PID (0 when the runtime kind doesn't expose one, e.g.
+	// Codex/OpenCode's subprocess-per-turn shape between turns).
+	//
+	// Pre-migration, these same transitions were driven automatically by
+	// agentsessions.Manager's StateSink (Manager.Start / Manager.watch)
+	// every time SessionsManager.Start registered a session. Boot no
+	// longer registers sessions with the Manager — wrapper.Wrapper.Run
+	// constructs its agentkit runtime directly via
+	// agentsessions.NewFromAdapter and drives it to completion internally,
+	// bypassing the Manager's registry entirely — so Boot and the
+	// session's own completion path now call UpdateState directly at the
+	// same two points the Manager used to. orphansweep.SweepOrphans and
+	// any UI/API surface reading agent_runtime.state depend on this not
+	// regressing to a permanent "launching" row.
+	UpdateState(runtimeID, state string, pid int) error
 
 	// SetProviderSessionID records the provider-side session id (claude's
 	// session_id, codex's, etc.) once the adapter reports it via

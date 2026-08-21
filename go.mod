@@ -36,6 +36,7 @@ require (
 	github.com/cenkalti/backoff/v5 v5.0.3 // indirect
 	github.com/dlclark/regexp2 v1.11.4 // indirect
 	github.com/grpc-ecosystem/grpc-gateway/v2 v2.28.0 // indirect
+	github.com/hollis-labs/go-harness-filters v0.1.0 // indirect
 	github.com/hollis-labs/go-queue v0.1.2 // indirect
 	github.com/hollis-labs/go-runner v0.5.0 // indirect
 	github.com/invopop/jsonschema v0.13.0 // indirect
@@ -110,13 +111,32 @@ replace github.com/hollis-labs/go-envelopes => ../../libs/go-envelopes
 // instead.
 replace github.com/hollis-labs/go-agent-wrapper => ../../libs/go-agent-wrapper
 
+// TASKS/agent-host-acp/06: go-harness-filters and go-runtime-events are
+// go-agent-wrapper's own transitive deps, now imported directly by Nanite
+// too (internal/runtime/agent's runtimeevents.Sink implementation). Per
+// this batch's README ("go-harness-filters and go-runtime-events keep the
+// older 'drop before tagging' discipline — nothing outside this repo
+// depends on their replace staying"), their module-proxy-published v0.1.0
+// tags are stale relative to the local sibling checkouts go-agent-wrapper
+// was actually built and reviewed against — confirmed directly: building
+// without these replaces fails with "undefined: hrepair.Chain" inside
+// go-agent-wrapper/filters, a symbol present in the local
+// libs/go-harness-filters checkout but not in the proxy-published v0.1.0.
+// Mirrors the go-agent-wrapper replace immediately above. Remove once both
+// repos cut a release that includes the proxy-published tags catching up.
+replace (
+	github.com/hollis-labs/go-harness-filters => ../../libs/go-harness-filters
+	github.com/hollis-labs/go-runtime-events => ../../libs/go-runtime-events
+)
+
 require (
-	github.com/hollis-labs/go-agent-wrapper v0.2.0
+	github.com/hollis-labs/go-agent-wrapper v0.3.0
 	github.com/hollis-labs/go-apppaths v0.1.0
 	github.com/hollis-labs/go-embed-contracts v0.1.1
 	github.com/hollis-labs/go-llm-contracts v0.3.0
 	github.com/hollis-labs/go-llm-types v0.3.0
 	github.com/hollis-labs/go-messaging v0.2.1
+	github.com/hollis-labs/go-runtime-events v0.1.0
 	github.com/hollis-labs/go-scheduler v0.1.0
 	github.com/hollis-labs/go-sqlite v0.1.0
 	github.com/hollis-labs/tesseract v0.7.1-0.20260518032333-bbce958849ac

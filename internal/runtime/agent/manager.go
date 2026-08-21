@@ -18,8 +18,13 @@ import (
 // (+'\n'); claude parses each line as JSON, so raw text would crash
 // its input parser (c207/c208). Non-streaming runtimes (PTY, codex/
 // opencode subprocess-per-turn) receive the payload unchanged.
+//
+// Routes through wr.SendInput (go-agent-wrapper's Wrapper.SendInput)
+// instead of Dependencies.SessionsManager directly — see agent.go's Boot
+// for why Boot no longer registers this session with
+// Dependencies.SessionsManager at all.
 func (s *Session) SendInput(payload []byte) error {
-	if s == nil || s.deps == nil || s.deps.SessionsManager == nil {
+	if s == nil || s.wr == nil {
 		return errors.New("agent.Session.SendInput: session not initialized")
 	}
 	if shouldUseStreamingStdio(s.Provider, s.Mode) {
@@ -29,22 +34,30 @@ func (s *Session) SendInput(payload []byte) error {
 		}
 		payload = framed
 	}
-	return s.deps.SessionsManager.SendInput(s.ID, payload)
+	return s.wr.SendInput(context.Background(), payload)
 }
 
-// Stop terminates the runtime cooperatively (SIGTERM with grace, then
-// SIGKILL via the lib's supervisor). On supervised PTY sessions, Stop is
-// non-restart per the v0.6.0 supervision contract. The ephemeral boot dir
-// is removed on success.
+// Stop terminates the runtime cooperatively: wr.Stop emits the
+// interrupt.requested/acknowledged event pair and calls the underlying
+// agentkit session's Stop (stdin close, grace period, then
+// SIGTERM/SIGKILL escalation — see go-agent-wrapper's
+// adapters.InterruptCapability for the honest per-adapter ceiling on this
+// today, carried forward unchanged by this migration). Deliberately does
+// NOT touch Session.runCancel — see agent.go's Boot for why cancelling
+// wr.Run's own ctx from here would race an otherwise-clean stop into an
+// avoidable context.Canceled error; wr.Stop's own ctx parameter (bounded
+// by the caller) is the correct, sufficient interrupt mechanism on its
+// own. The ephemeral boot dir is removed on success, matching
+// pre-migration behavior.
 func (s *Session) Stop(ctx context.Context) error {
-	if s == nil || s.deps == nil || s.deps.SessionsManager == nil {
+	if s == nil || s.wr == nil {
 		return errors.New("agent.Session.Stop: session not initialized")
 	}
-	err := s.deps.SessionsManager.Stop(ctx, s.ID)
+	err := s.wr.Stop(ctx)
 
 	// Path-grant lineage clears even if Stop fails — Boot registered it
 	// during launch, so a failed Stop must not leak the lineage entry.
-	if s.hadLineage && s.deps.PathGrants != nil {
+	if s.hadLineage && s.deps != nil && s.deps.PathGrants != nil {
 		s.deps.PathGrants.ClearLineage(s.ID)
 		s.hadLineage = false
 	}
@@ -60,25 +73,36 @@ func (s *Session) Stop(ctx context.Context) error {
 }
 
 // Wait blocks until the runtime exits or ctx is canceled. Returns the
-// underlying exit code via the manager's WaitSession.
+// error wr.Run's background goroutine (started in Boot) observed —
+// wrapper.Wrapper.Run's own Session.Wait call underneath still surfaces a
+// *agentsessions.ExitError on an abnormal exit (wrapped, not replaced, by
+// Run's "wrapper: session exited with error: %w"), so
+// errors.As(err, &exitErr) at every existing internal/recovery/broker call
+// site continues to unwrap correctly with zero broker-side changes.
+//
+// Safe to call from any number of goroutines concurrently — see runDone's
+// doc comment on Session for the happens-before argument.
 func (s *Session) Wait(ctx context.Context) error {
-	if s == nil || s.deps == nil || s.deps.SessionsManager == nil {
+	if s == nil || s.runDone == nil {
 		return errors.New("agent.Session.Wait: session not initialized")
 	}
-	if _, err := s.deps.SessionsManager.WaitSession(ctx, s.ID); err != nil {
-		return err
+	select {
+	case <-s.runDone:
+		return s.runErr
+	case <-ctx.Done():
+		return ctx.Err()
 	}
-	return nil
 }
 
-// Checkpoint requests a session-state snapshot. The agentsessions Manager
-// surface does not expose CheckpointHints directly today; ModeResume relies
-// on the persisted RuntimeStore checkpoint payload populated via
-// OnSessionID. This method is reserved for explicit checkpoint requests
-// once the lib surfaces a Manager-level entry; today it returns the empty
-// id without error so callers can no-op.
+// Checkpoint requests a session-state snapshot. The agentkit/go-agent-
+// wrapper surface does not expose CheckpointHints directly today;
+// ModeResume relies on the persisted RuntimeStore checkpoint payload
+// populated via OnSessionID. This method is reserved for explicit
+// checkpoint requests once the lib surfaces one; today it returns the
+// empty id without error so callers can no-op — unchanged by this
+// migration.
 func (s *Session) Checkpoint(ctx context.Context) (string, error) {
-	if s == nil || s.deps == nil || s.deps.SessionsManager == nil {
+	if s == nil || s.wr == nil {
 		return "", errors.New("agent.Session.Checkpoint: session not initialized")
 	}
 	_ = ctx

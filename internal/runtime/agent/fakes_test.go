@@ -30,10 +30,18 @@ type fakeRuntimeStore struct {
 	failed     map[string]string
 	orphaned   map[string]string
 	provIDs    map[string]string
+	states     []fakeStateUpdate
 	checkpoint *RuntimeCheckpoint
 	createErr  error
 	listRows   []*RuntimeRow
 	events     []fakeLoggedEvent
+}
+
+// fakeStateUpdate captures one UpdateState call for test assertions.
+type fakeStateUpdate struct {
+	ID    string
+	State string
+	PID   int
 }
 
 // fakeLoggedEvent captures one LogEvent call for test assertions.
@@ -67,6 +75,13 @@ func (f *fakeRuntimeStore) MarkRuntimeFailed(id, reason string) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.failed[id] = reason
+	return nil
+}
+
+func (f *fakeRuntimeStore) UpdateState(id, state string, pid int) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.states = append(f.states, fakeStateUpdate{ID: id, State: state, PID: pid})
 	return nil
 }
 

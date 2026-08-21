@@ -952,6 +952,21 @@ func (s *chatServiceImpl) Shutdown() {
 		}
 		cancel()
 	}
+	// TASKS/agent-host-acp/06: agentSessionsManager.Shutdown above no
+	// longer has anything to drain — Boot drives sessions through
+	// wrapper.Wrapper.Run directly and never registers them with
+	// *agentsessions.Manager (see internal/runtime/agent/agent.go's Boot),
+	// so its own Shutdown call is now a harmless no-op left in place for
+	// any other future Manager use, not a real drain path. This is the
+	// direct replacement: stop every session runtimeagent.Dependencies is
+	// still tracking as live.
+	if s.agentDeps != nil {
+		ctx, cancel := context.WithTimeout(context.Background(), chatShutdownMaxWait)
+		if err := s.agentDeps.StopAllLiveSessions(ctx); err != nil {
+			slog.Warn("chat-service: wrapper-driven agent sessions shutdown", "err", err)
+		}
+		cancel()
+	}
 	if s.lifecycle != nil {
 		if err := s.lifecycle.Shutdown(chatShutdownMaxWait); err != nil {
 			slog.Warn("chat-service: lifecycle shutdown", "err", err)

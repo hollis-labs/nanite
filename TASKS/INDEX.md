@@ -515,7 +515,42 @@ audit actually finding one is needed; locking a final ACP bridge library ahead o
 operator sign-off; a final locked default for which protocol/transport any agent runs on
 (migration is additive, per-agent, opportunistic — not a flag-day).
 
-**Planned 2026-08-21, not yet dispatched.** Per `EXECUTION-PROCESS.md`'s Phase A discipline,
-this is the planning checkpoint — present to the operator for review before any worker is
-dispatched. `12`'s bridge-library decision additionally needs its own explicit operator
-sign-off before Phase 4 can proceed, independent of the batch-level go-ahead.
+**Planned 2026-08-21, dispatched and in progress** (this note is stale as of Phase 2 —
+Phase 1 is reviewed, Phase 2 is in flight; kept here for historical record of the original
+planning checkpoint). `12`'s bridge-library decision still needs its own explicit operator
+sign-off before Phase 4 can proceed, independent of the batch-level go-ahead already given.
+
+## Filesystem Snapshots (`TASKS/filesystem-snapshots/`, outside the Phase 0-9 sequence)
+
+Implements `docs/engineering/architecture/18-filesystem-snapshots.md` — an undo/audit
+primitive for the filesystem state an agent's granted paths hold (shadow-git capture/diff/
+preview/selective-restore, per-model-step cadence, never conflated with session/conversation
+state). Planned by a separate planning session on 2026-08-21 while `agent-host-acp` was
+already executing; task files were handed to the Orchestrator pre-written
+(`TASKS/filesystem-snapshots/01-03`), with sequencing left to the Orchestrator's judgment.
+Nanite-first only (matches `agent-host-acp`'s own "not portfolio-wide" scoping) — whether
+Tether/Torque adopt this is a separate, later portfolio-level call.
+
+| Task | Phase | Status | Depends on |
+|---|---|---|---|
+| `01-filesystem-snapshot-host-mechanism` | 1 — host mechanism (sibling repo `libs/go-agent-wrapper`) | not-started | none — independent of `agent-host-acp`'s `wrapper.Wrapper` work |
+| `02-nanite-capture-policy-and-wiring` | 2 — product policy & wiring (Nanite) | not-started | `01`; held pending `agent-host-acp/06` landing (same files: `internal/runtime/agent/agent.go`) |
+| `03-snapshot-diff-preview-restore-api` | 3 — consumer surface (Nanite, backend-only) | not-started | `01`, `02` |
+
+**Sequencing decision (Orchestrator, 2026-08-21):** Task `01` lands entirely in the sibling
+`libs/go-agent-wrapper` repo and has zero file overlap with anything `agent-host-acp` has
+in flight (confirmed: that repo's working tree is clean at commit `7c65601`/`v0.3.0`, nothing
+else running there) — dispatching now, in parallel with `agent-host-acp`'s still-running task
+`06`. Tasks `02`/`03` land in Nanite; `02` specifically touches "wherever Nanite's per-turn/
+per-step execution loop lives (likely `chat_generate.go` or `agent.go`)" — `agent.go` is
+exactly the file `agent-host-acp/06` is actively rewriting right now. Holding `02`/`03` until
+`06` (and its section review) lands, to avoid a real merge collision on the same functions
+mid-rewrite. Will re-evaluate exact dispatch timing for `02` once `06` merges — may not need
+to wait for `07`'s dogfeed too, since `02` only needs `agent.go`'s *shape* to be stable, not
+a fully validated migration; will decide based on `06`'s actual landed diff.
+
+**Scope fences carried forward from the architecture doc, not silently expanded**: no
+universal filesystem rollback (only sandbox-`FS.Write`-derived targets are recoverable); no
+real conflict/merge resolution beyond task `03`'s lightweight hash-check (deferred until
+Teams sees real multi-agent concurrent usage); no GUI/frontend surface (backend-only, matches
+standing no-frontend-in-any-phase discipline); Nanite-first, not portfolio-shared by default.

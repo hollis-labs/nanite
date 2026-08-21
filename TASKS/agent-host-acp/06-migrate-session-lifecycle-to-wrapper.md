@@ -1,21 +1,23 @@
 # Migrate session construction/lifecycle onto go-agent-wrapper's wrapper.Wrapper
 
 **Phase:** 2 — Nanite host migration (`TASKS/agent-host-acp`)
-**Status:** not-started — **escalated, no code changes made. See `TASKS/ESCALATIONS.md`
-(2026-08-21, "Task `06` (migrate session lifecycle to `wrapper.Wrapper`)…"). `wrapper.Wrapper.Run`,
-as currently shipped, is structurally non-functional for all three of go-agent-wrapper's own
-real adapters (`adapters/claude`/`codex`/`opencode`) — its hardcoded internal
-`agentsessions.StartOptions{}` construction never sets `WorkspaceDir`/`LogPath`, which every
-one of the streaming-stdio/jsonrpc-stdio/serve-http runtime kinds hard-requires before
-spawning anything (empirically reproduced, not just read). It also exposes no seam for
+**Status:** not-started — **blocked on `05a`. See `TASKS/ESCALATIONS.md` (2026-08-21, "Task
+`06` (migrate session lifecycle to `wrapper.Wrapper`)…" + its Orchestrator resolution).
+`wrapper.Wrapper.Run`, as shipped at the time this task was first attempted, was structurally
+non-functional for all three of go-agent-wrapper's own real adapters
+(`adapters/claude`/`codex`/`opencode`) — its hardcoded internal `agentsessions.StartOptions{}`
+construction never set `WorkspaceDir`/`LogPath`, which every one of the
+streaming-stdio/jsonrpc-stdio/serve-http runtime kinds hard-requires before spawning anything
+(empirically reproduced, not just read). It also exposed no seam for
 `SessionIDPreset`/`OnSessionID`/`AutoFireFirstTurn`/`FirstTurnPayload`, three more genuinely
-load-bearing pieces of Nanite's current session lifecycle. None of these gaps can be closed
-from inside this task's authorized Touches (four Nanite files) — the missing seam lives
-entirely inside `wrapper.go`, in the sibling `go-agent-wrapper` repo. Do not dispatch a
-follow-up worker against this file's original scope without an Orchestrator/operator decision
-on the escalation's recommended path first.**
+load-bearing pieces of Nanite's current session lifecycle. **Operator-confirmed resolution**:
+a new prerequisite task, `TASKS/agent-host-acp/05a-extend-wrapper-config-for-real-adapters.md`,
+lands the missing `Config` seams in the sibling `go-agent-wrapper` repo. Once `05a` is
+implemented, reviewed, and Nanite's `go.mod` is bumped to its new tag, this task resumes
+**exactly as originally scoped below** — no other changes to this task's own brief.**
 **Depends on:** `02` (Descriptor split), `04` (Planter migration), `05` (closed — see
-correction below, its finding is folded into this task)
+correction below, its finding is folded into this task), `05a` (new prerequisite — must land
+before this task can be re-attempted)
 **Touches:** `internal/runtime/agent/agent.go`, `factory.go`, `manager.go`, `deps.go`. Repo:
 Nanite. **Does not touch `internal/recovery/broker/*` directly — preserving its exact
 contract is a hard constraint of this task, see Context and Done means.**

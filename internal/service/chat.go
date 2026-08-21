@@ -346,6 +346,22 @@ type chatServiceImpl struct {
 	// observer via LoadAndDelete. Keyed by chat session id.
 	rebootingSessions sync.Map
 
+	// displacedSessions flags the exact *runtimeagent.Session objects
+	// adoptReplacementSession (TASKS/agent-host-acp/21) is stopping on
+	// purpose after displacing them from activeSessions in favor of a
+	// broker-dispatched replacement. Deliberately keyed by session
+	// POINTER, not chat session id (unlike rebootingSessions): a
+	// displaced-and-a-replacement can be live under the SAME chat
+	// session id at once for a short window, each driven by its own
+	// observeSessionForRecovery goroutine — a sessionID-keyed flag can't
+	// tell which generation's exit it's meant for and risks either the
+	// replacement stealing a flag meant for the old session (clobbering
+	// itself out of activeSessions) or the old session's flag going
+	// stale forever if it never actually exits. Keying by the exact
+	// object being stopped removes that ambiguity entirely. Values are
+	// struct{}; entries are cleared by the observer via LoadAndDelete.
+	displacedSessions sync.Map
+
 	// envelopeRenderExecutor is the B3 in-process executor pilot,
 	// dispatched by chat_generate.go's route seam when the B2
 	// classifier emits RouteExecutorEnvelopeRender. nil-safe: when nil

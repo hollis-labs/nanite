@@ -516,4 +516,17 @@ Given `16-agent-host.md`'s own explicit framing ("adopting `go-agent-wrapper` as
 **Raised by:** fresh Reviewer, task `06`'s second attempt (after `05a` unblocked it)
 **Question / mismatch:** Reviewer found two real, cheaply-fixable issues, neither touching the task's hard constraints (broker contract, `agent.Mode` lifecycle decisions — both independently confirmed unchanged): (A) `Options.ExtraArgs` (`internal/runtime/agent/agent.go`) is now a silent no-op — the migration removed the only line that ever forwarded it into `StartOptions`, `wrapper.Config` has no equivalent field, and its doc comment still actively claims it's forwarded, contradicting this project's own standing "zero callers is grounds for outright removal" dead-code discipline (`docs/engineering/standards/code-quality.md`). (B) `Boot`'s new 3-way `select` (readyCh/runDone/ctx.Done()) has one abort path — caller `ctx` cancelled while waiting for `wrapper.Wrapper.Run` to reach ready — that only calls `UpdateState(sessID, "failed", 0)` (state only) instead of `MarkRuntimeFailed` (state + reason), unlike the sibling `runDone` branch; a narrower forensic trail than pre-migration for this one specific, edge-case abort.
 **Resolution:** Orchestrator judgment call, per the reviewer's own recommendation ("worth a small follow-up task, not a blocker for `07`"). Both are genuinely cheap to fix and match this project's own "promote recommendations, don't just log them" discipline (`EXECUTION-PROCESS.md`) rather than leaving a known, correctly-diagnosed footgun for someone else to rediscover. Dispatched a small, targeted worker fix rather than deferring indefinitely.
-**Follow-up:** See the next entry once the fix lands.
+**Follow-up:** Fixed, commit `a55f239c` (+ `f7e35b86`, a trivial SHA-recording follow-up). Finding
+A: `ExtraArgs` field and its stale doc comment deleted from `Options`, after independently
+re-confirming zero live callers (the two other `ExtraArgs` symbols in the repo,
+`internal/workflowrunner/launch.go`/`internal/service/workflow_external_engine.go`, are an
+unrelated, live, actively-used mechanism — untouched). Finding B: the `ctx.Done()` branch now
+calls `deps.Store.MarkRuntimeFailed(sessID, "agent.Boot: caller ctx cancelled: "+ctx.Err().Error())`,
+verified against `store.MarkAgentRuntimeFailed`'s real implementation (sets state AND reason in
+one write, correctly superseding the background goroutine's bare `UpdateState` call — no
+companion call needed). **Orchestrator independently re-verified** (2026-08-21): grepped
+confirming `ExtraArgs` has zero remaining live references, confirmed the `MarkRuntimeFailed`
+call lands in the right branch with the right message, and reproduced clean `go build`/
+`go vet` (same 2 pre-existing findings)/`go test ./...`/`go test ./internal/runtime/agent/... -race`
+directly. Closed without a separate reviewer round-trip given the fix's small size and this
+direct verification. Task `06` is fully closed.

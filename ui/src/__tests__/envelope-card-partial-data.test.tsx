@@ -20,15 +20,19 @@ import { cleanup, render } from "@testing-library/react";
 import { afterEach, describe, expect, it } from "vitest";
 import { ReportCard } from "@/components/chat/envelopes/ReportCard";
 import { ListCard } from "@/components/chat/envelopes/primitives/ListCard";
+import { ConfirmationCard } from "@/components/chat/envelopes/primitives/ConfirmationCard";
 import { TimelineCard } from "@/components/chat/envelopes/primitives/TimelineCard";
 import { TableCard } from "@/components/chat/envelopes/primitives/TableCard";
 import { DiffCard } from "@/components/chat/envelopes/primitives/DiffCard";
 import { ArtifactMiniCard } from "@/components/chat/envelopes/ArtifactMiniCard";
-import { PlanReviewCard } from "@/components/chat/envelopes/PlanReviewCard";
 
 afterEach(cleanup);
 
-/** Wrap a card needing react-query (PlanReviewCard) in a fresh QueryClient. */
+/**
+ * Wrap a card needing react-query (the plan-review composition's live
+ * `list-card`/`confirmation-card` branches — TASKS/phase-6/02-rebuild-
+ * plan-review-as-composition.md) in a fresh QueryClient.
+ */
 function renderWithQuery(ui: ReactElement) {
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
@@ -85,13 +89,43 @@ describe("envelope cards tolerate partially-loaded data", () => {
     expect(container.textContent).toContain("Untitled artifact");
   });
 
-  // CW-20260517-0007 Issue 4: PlanReviewCard did data.steps.map() unguarded —
-  // a partial envelope missing `steps` threw.
-  it("PlanReviewCard renders with steps missing", () => {
+  // CW-20260517-0007 Issue 4 (originally pinned against the now-retired
+  // PlanReviewCard): the plan-review composition's live `list-card` half
+  // must not throw when it arrives with no static `items` snapshot to
+  // fall back on while the live plan fetch is still in flight.
+  it("ListCard (plans data_source) renders with items missing", () => {
     const { container } = renderWithQuery(
-      <PlanReviewCard
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        data={{ plan_id: "p1", title: "Partial Plan", status: "proposed" } as any}
+      <ListCard
+        data={
+          {
+            title: "Partial Plan",
+            data_source: { kind: "plans", plan_id: "p1" },
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          } as any
+        }
+      />,
+    );
+    expect(container.textContent).toContain("Partial Plan");
+  });
+
+  // Same regression, `confirmation-card` half: must not throw when it
+  // arrives before the live plan fetch resolves.
+  it("ConfirmationCard (plan_approval data_source) renders with plan unresolved", () => {
+    const { container } = renderWithQuery(
+      <ConfirmationCard
+        envelope={
+          {
+            kind: "envelope",
+            version: 1,
+            type: "confirmation-card",
+            data: {
+              title: "Partial Plan",
+              message: "Approve this plan?",
+              data_source: { kind: "plan_approval", plan_id: "p1" },
+            },
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          } as any
+        }
       />,
     );
     expect(container.textContent).toContain("Partial Plan");

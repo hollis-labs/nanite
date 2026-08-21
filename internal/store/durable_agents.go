@@ -206,6 +206,38 @@ func (s *Store) GetDurableAgentInstanceBySlug(slug string) (*DurableAgentInstanc
 	return &inst, nil
 }
 
+// GetDurableAgentInstanceByProfileID returns the durable_agent_instances
+// row bound to profileID (profile_id, the NOT NULL FK to agent_profiles),
+// or ErrDurableAgentInstanceNotFound if none exists yet. When more than one
+// instance references the same profile (uncommon but not schema-forbidden
+// -- profile_id has no UNIQUE constraint), the most recently updated row
+// wins, matching ListDurableAgentInstances' own updated_at DESC ordering.
+//
+// TASKS/teams/08-team-run-launcher.md's `resolution: durable` Team Slot
+// resolution is the first real caller: a Team Slot's AgentID (task 01's
+// TeamSlotDefinition.AgentID, "the concrete agent_profiles.id to wake")
+// names a profile, not an instance -- this is how that resolution finds
+// (or learns it must first create) the durable_agent_instances row
+// DurableAgentService.Start/Resume actually operate on. Deliberately not
+// gated on agent_profiles.durable (see that task's own corrected-semantics
+// finding: a Team Slot's launch-time "durable" resolution is independent
+// of that unrelated migration-061-eject-survival flag) -- this is a plain
+// profile_id lookup, no durable-candidate filtering of any kind.
+func (s *Store) GetDurableAgentInstanceByProfileID(profileID string) (*DurableAgentInstance, error) {
+	var inst DurableAgentInstance
+	err := scanDurableAgentInstance(s.DB.QueryRow(
+		`SELECT `+durableAgentInstanceColumns+` FROM durable_agent_instances
+		  WHERE profile_id = ? ORDER BY updated_at DESC LIMIT 1`, profileID,
+	), &inst)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, ErrDurableAgentInstanceNotFound
+	}
+	if err != nil {
+		return nil, fmt.Errorf("get durable_agent_instances by profile_id %s: %w", profileID, err)
+	}
+	return &inst, nil
+}
+
 func (s *Store) ListDurableAgentInstances(includeArchived bool) ([]DurableAgentInstance, error) {
 	where := "WHERE status != 'archived'"
 	if includeArchived {

@@ -128,3 +128,105 @@ steps:
 		t.Fatalf("err = %v, want cycle rejection to propagate", err)
 	}
 }
+
+// TestRegistry_Register_MakesDefinitionReachableViaGet is
+// TASKS/teams/08-team-run-launcher.md's own regression coverage for the
+// Register method it added: a dynamically-built WorkflowDefinition (no
+// YAML file on disk at all) becomes reachable via Get once registered,
+// the same way a LoadRegistryDir-loaded definition already is.
+func TestRegistry_Register_MakesDefinitionReachableViaGet(t *testing.T) {
+	reg := NewRegistry(nil)
+	wf := WorkflowDefinition{
+		Name: "dynamic-team-run",
+		Steps: []StepDefinition{
+			{ID: "only", Kind: StepKindTool, Config: map[string]any{"tool": "noop"}},
+		},
+	}
+	if err := reg.Register(wf); err != nil {
+		t.Fatalf("Register: %v", err)
+	}
+	got, ok := reg.Get("dynamic-team-run")
+	if !ok {
+		t.Fatal("Get(dynamic-team-run) ok = false after Register")
+	}
+	if got.Name != "dynamic-team-run" || len(got.Steps) != 1 {
+		t.Fatalf("got = %+v", got)
+	}
+	names := reg.Names()
+	if len(names) != 1 || names[0] != "dynamic-team-run" {
+		t.Fatalf("Names() = %v", names)
+	}
+}
+
+func TestRegistry_Register_RejectsEmptyName(t *testing.T) {
+	reg := NewRegistry(nil)
+	err := reg.Register(WorkflowDefinition{Steps: []StepDefinition{{ID: "only", Kind: StepKindTool, Config: map[string]any{"tool": "noop"}}}})
+	if err == nil || !strings.Contains(err.Error(), "no name") {
+		t.Fatalf("err = %v, want \"no name\"", err)
+	}
+}
+
+func TestRegistry_Register_RejectsInvalidDefinition(t *testing.T) {
+	reg := NewRegistry(nil)
+	wf := WorkflowDefinition{
+		Name: "cyclic",
+		Steps: []StepDefinition{
+			{ID: "a", Kind: StepKindTool, DependsOn: []string{"b"}, Config: map[string]any{"tool": "noop"}},
+			{ID: "b", Kind: StepKindTool, DependsOn: []string{"a"}, Config: map[string]any{"tool": "noop"}},
+		},
+	}
+	if err := reg.Register(wf); err == nil || !strings.Contains(err.Error(), "cycle") {
+		t.Fatalf("err = %v, want cycle rejection", err)
+	}
+	if _, ok := reg.Get("cyclic"); ok {
+		t.Fatal("Get(cyclic) ok = true, want the invalid definition to never be registered")
+	}
+}
+
+func TestRegistry_Register_RejectsDuplicateName(t *testing.T) {
+	reg := NewRegistry(nil)
+	wf := WorkflowDefinition{
+		Name:  "dup",
+		Steps: []StepDefinition{{ID: "only", Kind: StepKindTool, Config: map[string]any{"tool": "noop"}}},
+	}
+	if err := reg.Register(wf); err != nil {
+		t.Fatalf("first Register: %v", err)
+	}
+	if err := reg.Register(wf); err == nil || !strings.Contains(err.Error(), "duplicate workflow name") {
+		t.Fatalf("second Register err = %v, want duplicate workflow name", err)
+	}
+}
+
+// TestRegistry_Register_ConcurrentWithGet exercises Register's own doc
+// comment claim directly: concurrent Register calls (simulating more than
+// one TeamRun launching at once against the shared *Registry
+// cmd/nanite/main.go constructs once) never race a concurrent Get/Names
+// reader. Run with -race to actually catch a regression here.
+func TestRegistry_Register_ConcurrentWithGet(t *testing.T) {
+	reg := NewRegistry(nil)
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		for i := 0; i < 50; i++ {
+			reg.Get("whatever")
+			reg.Names()
+		}
+	}()
+	for i := 0; i < 50; i++ {
+		wf := WorkflowDefinition{
+			Name:  concurrentRegisterTestName(i),
+			Steps: []StepDefinition{{ID: "only", Kind: StepKindTool, Config: map[string]any{"tool": "noop"}}},
+		}
+		if err := reg.Register(wf); err != nil {
+			t.Fatalf("Register(%d): %v", i, err)
+		}
+	}
+	<-done
+	if len(reg.Names()) != 50 {
+		t.Fatalf("Names() len = %d, want 50", len(reg.Names()))
+	}
+}
+
+func concurrentRegisterTestName(i int) string {
+	return "concurrent-register-" + string(rune('a'+i%26)) + string(rune('0'+i/26))
+}

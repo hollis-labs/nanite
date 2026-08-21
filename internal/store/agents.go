@@ -912,6 +912,35 @@ func (s *Store) ListAgentsBySource(source string) ([]AgentProfile, error) {
 	return out, rows.Err()
 }
 
+// ListAgentsByRoleID returns every agent_profiles row bound to roleID
+// (agent_profiles.role_id), ordered by name for a stable, deterministic
+// "first match" pick. TASKS/teams/08-team-run-launcher.md's `resolution:
+// fresh` Team Slot construction is the first real caller: given a Team
+// Slot's role_slug -> roles.id (GetRoleBySlug), this is how it finds the
+// concrete Agent (an already-composed agent_profiles row bound to that
+// Role -- see GLOSSARY.md's Agent entry: "a role... bound to a scope...
+// Not a flat, standalone definition") to attach a fresh session to,
+// mirroring CountAgentsByRoleID's existing role_id lookup shape (used
+// today only as a plugin-unload deletion guard) but returning full rows
+// instead of a count.
+func (s *Store) ListAgentsByRoleID(roleID string) ([]AgentProfile, error) {
+	rows, err := s.DB.Query(`SELECT `+agentColumns+` FROM agent_profiles WHERE role_id = ? ORDER BY name`, roleID)
+	if err != nil {
+		return nil, fmt.Errorf("list agents by role_id: %w", err)
+	}
+	defer rows.Close()
+
+	out := make([]AgentProfile, 0)
+	for rows.Next() {
+		var a AgentProfile
+		if err := scanAgent(rows, &a); err != nil {
+			return nil, fmt.Errorf("scan agent: %w", err)
+		}
+		out = append(out, a)
+	}
+	return out, rows.Err()
+}
+
 // ListAgentsByPluginID returns every agent_profiles row tagged with the
 // given plugin_id -- the plugin-ownership column added by Phase 5 item 03
 // (TASKS/phase-5/03-wire-registers-agent-profiles.md, migration 122)

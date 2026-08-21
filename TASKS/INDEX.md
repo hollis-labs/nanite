@@ -474,7 +474,7 @@ Nanite itself), and scope boundaries.
 | `13-acp-bridge-adapter-claude` | 4 | reviewed (Orchestrator-verified live against real `claude` binary via `claude-agent-acp` bridge; interrupt=Turn confirmed) | `12` |
 | `14-acp-bridge-adapter-codex` | 4 | reviewed (Orchestrator-verified live against real `codex` binary via `codex-acp` bridge; found+fixed real CODEX_PATH bundled-version bug; interrupt=Turn confirmed) | `12` |
 | `15-acp-bridge-adapter-pi` | 4 | reviewed (Orchestrator-verified; `pi` CLI installed+configured via local Ollama since no cloud creds available, real live turn+cancel verified, interrupt=Turn confirmed) | `12` |
-| `16-audit-fs-terminal-proxying-requirement` | 5 | not-started | `09`, `10`, `13`, `14`, `15` |
+| `16-audit-fs-terminal-proxying-requirement` | 5 | reviewed (no in-process fs/terminal server needed, all 5 adapters self-handle; one minor heads-up logged) | `09`, `10`, `13`, `14`, `15` |
 | `17-native-vs-acp-side-by-side-comparison` | 5 | not-started | `07`, `09`, `10`, `13`, `14`, `15` |
 
 **Sequencing.** Phase 1 (`01`-`02`) is small, mechanical, foundation work entirely inside the

@@ -475,7 +475,7 @@ Nanite itself), and scope boundaries.
 | `14-acp-bridge-adapter-codex` | 4 | reviewed (Orchestrator-verified live against real `codex` binary via `codex-acp` bridge; found+fixed real CODEX_PATH bundled-version bug; interrupt=Turn confirmed) | `12` |
 | `15-acp-bridge-adapter-pi` | 4 | reviewed (Orchestrator-verified; `pi` CLI installed+configured via local Ollama since no cloud creds available, real live turn+cancel verified, interrupt=Turn confirmed) | `12` |
 | `16-audit-fs-terminal-proxying-requirement` | 5 | reviewed (no in-process fs/terminal server needed, all 5 adapters self-handle; one minor heads-up logged) | `09`, `10`, `13`, `14`, `15` |
-| `17-native-vs-acp-side-by-side-comparison` | 5 | not-started | `07`, `09`, `10`, `13`, `14`, `15` |
+| `17-native-vs-acp-side-by-side-comparison` | 5 | reviewed (Orchestrator independently re-ran both live comparison tests, all four dimensions' numbers confirmed exactly) | `07`, `09`, `10`, `13`, `14`, `15` |
 
 **Sequencing.** Phase 1 (`01`-`02`) is small, mechanical, foundation work entirely inside the
 sibling `libs/go-agent-wrapper` repo — both tasks are file-disjoint and parallel-safe. Phase 2
@@ -789,6 +789,146 @@ resolution; event/predicate via a new reflex action kind; scheduled tick via Sch
 `JobType` taxonomy) once `08` lands — same shape Scheduling's own Phase 2 producers took.
 Phase 4 (`13`) is the preset registry, needing the launcher, engine, and continuation policy
 all real.
+
+**Planned 2026-08-21, not yet dispatched.** Per `EXECUTION-PROCESS.md`'s Phase A discipline,
+this is the planning checkpoint — present to the operator for review before any worker is
+dispatched.
+
+## Turn vs. Run (`TASKS/turn-vs-run/`, outside the Phase 0-9 sequence)
+
+Implements `docs/engineering/architecture/22-turn-vs-run.md`'s "Target design," approved for
+implementation by the operator 2026-08-21 (following a dedicated planning pass) — resolves
+`19-api-cli-runtime-parity.md`'s flagged conflation of one model-invocation-plus-tool-call
+cycle (**Turn**) with the full tool-settling loop (**Run**) under one name, and closes the
+Glossary's "recommended but not yet executed" `CancelActiveGeneration` → `Run.Cancel` rename.
+A sibling to `TASKS/teams/`, `TASKS/reflex-taxonomy/`, `TASKS/harness-reactive-self-tools/`,
+`TASKS/scheduling/`, `TASKS/agent-host-acp/`, `TASKS/filesystem-snapshots/`,
+`TASKS/plugin-system/`, `TASKS/skills/`, and `TASKS/loops/`. See
+`TASKS/turn-vs-run/README.md` for the full read-first list and scope boundaries.
+
+| Task | Phase | Status | Depends on |
+|---|---|---|---|
+| `01-define-turn-primitive` | 1 | not-started | none |
+| `02-rename-cancelactivegeneration-to-run-cancel` | 1 | not-started | none |
+| `03-wire-generateresponse-onto-turn-primitive` | 2 | not-started | `01` |
+| `04-consolidate-workflow-step-executor-onto-turn-primitive` | 2 | not-started | `01` |
+
+**Scoping deviation from the original 3-task sketch, found by this planning pass's own
+research.** `generateResponse`'s tool-settling loop (`chat_generate.go:757-1726`) is ~970
+lines with five distinct mid-loop retry shapes and live mid-stream side effects (SSE deltas,
+PTY presence, auto-artifact creation) — materially bigger and more state-entangled than doc
+22's own description suggests. Split into 4 tasks instead of 3: `01` defines the `Turn`
+primitive in isolation (unit-tested, not yet wired anywhere) so a reviewer can sign off on its
+contract before `03`'s actual rewire of `generateResponse` is attempted; `04` consolidates
+`workflow_step_executor.go`'s materially-simpler capability-restricted loop onto the same
+primitive without collapsing its deliberately-different tool-settlement path into
+`generateResponse`'s. `02` also found and scoped in three real stale-doc corrections beyond
+`CancelActiveGeneration` itself (a substantively wrong `Turn.Cancel` claim in
+`acp_session.go` and `17-acp.md`, plus two stale bullets in `00-overview.md`).
+
+**No migration needed** — pure in-process Go refactor plus doc/comment corrections.
+
+**What this batch explicitly does not do** (see README for full reasoning): rename
+`MaxTurns`/`TerminationMaxTurns`/the `/turns` HTTP route (a separate, larger, breaking-change
+question doc 22's approval doesn't cover); durable-agent Turn-level wakes; finer-grained
+`Turn.Cancel` itself; anything in `internal/loopdetect` (a different, unrelated mechanism);
+any change to tool execution/settlement/permission checking in either call site.
+
+**Planned 2026-08-21, not yet dispatched.** Per `EXECUTION-PROCESS.md`'s Phase A discipline,
+this is the planning checkpoint — present to the operator for review before any worker is
+dispatched.
+
+## Feedback-Carrying Denial (`TASKS/feedback-carrying-denial/`, outside the Phase 0-9 sequence)
+
+Implements `docs/engineering/architecture/23-feedback-carrying-denial.md`, approved for
+implementation by the operator 2026-08-21 (following a dedicated planning pass) — a denial
+should carry a decision, a reason, and — where the denying subsystem can produce one — a
+context-specific suggestion, with provenance, while enforcement itself stays hard. Extends
+`internal/recover`'s existing `RecoverableError{Kind, ToolName, SentArgs, SchemaURI,
+ErrorPath, ErrorReason, Suggestion}` taxonomy with new policy-class `Kind` values (each
+explicitly ineligible for C2's automatic LLM-repair loop) across four surfaces that today
+produce flat, hardcoded, or generic-template prose: the permission engine, human-reject
+feedback, the plugin pre-hook contract, and MCP trust-tier rejection. A sibling to
+`TASKS/teams/`, `TASKS/reflex-taxonomy/`, `TASKS/harness-reactive-self-tools/`,
+`TASKS/scheduling/`, `TASKS/agent-host-acp/`, `TASKS/filesystem-snapshots/`,
+`TASKS/plugin-system/`, `TASKS/skills/`, and `TASKS/loops/`. See
+`TASKS/feedback-carrying-denial/README.md` for the full read-first list and scope boundaries.
+
+| Task | Phase | Status | Depends on |
+|---|---|---|---|
+| `01-shared-kind-taxonomy-and-auto-repair-gate` | 1 | not-started | none |
+| `02-permission-engine-structured-denial` | 2 | not-started | `01` |
+| `03-human-reject-feedback` | 2 | not-started | `02` (same file, sequence not concurrent) |
+| `04-plugin-prehook-structured-contract` | 2 | not-started | `01`; sequence after `03` (shared file, disjoint blocks) |
+| `05-mcp-trust-tier-suggestion` | 2 | not-started | `01` |
+| `06-halt-session-recovery-pack-replay` | 3 | not-started | none |
+
+**Doc 23's three open questions, resolved by this planning pass with code evidence:**
+extend `internal/recover` in place, not a sibling type (`buildAgentErrorEnvelope`,
+`tool.go:573`, already takes `*RecoverableError` concretely); the four illustrative `Kind`
+names map 1:1 onto the four real surfaces, confirmed by trace; the plugin-SDK backward-compat
+question resolves asymmetrically — `EventHandleResult.Reason` already exists on the wire at
+the pinned `plugin-sdk@v0.3.0` and Nanite's host code simply discards it today (zero SDK bump
+needed), while `Suggestion` has no wire field yet and is a named follow-up for subprocess
+parity, not this batch. Also found: only the MCP surface (`05`) flows through
+`recover.Classify`'s repair-gating logic today — the other three decide and render inside
+`chat_tool_executor.go` before ever reaching it, which narrows `02`/`03`/`04`'s real risk to
+constructing the envelope correctly, not touching repair-eligibility logic.
+
+**No migration needed** — verified against real schema: approval requests are purely
+in-memory, and every other surface touched is an in-process Go type with no DB-backed state.
+
+**Planned 2026-08-21, not yet dispatched.** Per `EXECUTION-PROCESS.md`'s Phase A discipline,
+this is the planning checkpoint — present to the operator for review before any worker is
+dispatched.
+
+## Code Mode (`TASKS/code-mode/`, outside the Phase 0-9 sequence)
+
+Implements `docs/engineering/architecture/27-code-mode.md`, approved for implementation by
+the operator 2026-08-21 after two rounds of follow-up research (dispatched when the doc's
+original "no current pressure" framing was questioned) found the real blocker isn't whether
+to make Code Mode non-agentically reachable — it's that `PythonPermChecker`/
+`PythonDispatcher`, the fields bridging `python_run`'s sandboxed `tool_call()` helper to the
+real permission engine and tool dispatcher, are never assigned outside test code, so every
+`tool_call()` today either silently bypasses permission enforcement or fails outright,
+regardless of caller. A sibling to `TASKS/teams/`, `TASKS/reflex-taxonomy/`,
+`TASKS/harness-reactive-self-tools/`, `TASKS/scheduling/`, `TASKS/agent-host-acp/`,
+`TASKS/filesystem-snapshots/`, `TASKS/plugin-system/`, `TASKS/skills/`, and `TASKS/loops/`.
+See `TASKS/code-mode/README.md` for the full read-first list and scope boundaries.
+
+| Task | Phase | Status | Depends on |
+|---|---|---|---|
+| `01-fix-python-sandbox-permission-and-dispatcher-wiring` | 1 | not-started | none |
+| `02-workflow-tool-step-session-stamping` | 2 | not-started | `01` (sequencing only — no file overlap) |
+| `03-run-python-sandbox-reflex-action-kind` | 2 | not-started | `01` (real — calls `01`'s new dispatcher adapter) |
+
+**Correction to the original scoping brief, found by this planning pass:** the brief assumed
+no migration would be needed; `TASKS/reflex-taxonomy/` has since landed (`reviewed`) and
+`agent_reflexes.action_kind` now carries both a widened CHECK and a real FK to
+`reflex_action_kinds`, plus a `reflex_action_kind_provenance_allow` gate table — so task `03`'s
+new `run_python_sandbox` action kind is a real, small migration (one `reflex_action_kinds`
+row, three provenance-allow rows, a CHECK-widen rebuild), not pure Go wiring. Also found:
+`01`'s permission-check half needs zero adapter code (`permission.Engine.Check` already
+matches the interface structurally); its dispatch half needs a real small adapter
+(`service.NewPythonToolDispatcher`) reconciling a different parameter/return shape; task `02`'s
+session-id question resolves to reusing the `WorkflowRun`'s own ID rather than minting a
+synthetic one (verified: `event_log.session_id` has no FK, and the codebase already tolerates
+a non-real sentinel session in this exact code path); and `internal/api/reflexes.go`'s own
+hardcoded action-kind switch needs the new constant too, or the migration alone doesn't make
+the kind writable via the CRUD API.
+
+**Migration numbering.** This batch's one migration (task `03`) provisionally claims `144` —
+the next free slot after `TASKS/plugin-system`'s `135`, `TASKS/skills`'s `136`-`137`, and
+`TASKS/loops`'s `138`-`143` claims. Re-list `internal/store/migrations/` immediately before
+landing it and renumber if any sibling batch lands first.
+
+**What this batch explicitly does not do** (see README for full reasoning): wire Code Mode
+into `internal/scheduler`'s periodic-job surface directly (composable from what this batch
+ships, via `add_schedule` or a `loop_run_tick` producer, not a fourth task here); feed a
+`run_python_sandbox` reflex's result back into LLM context; the same session-stamping fix for
+`ExecuteLLMStep`'s own internal tool loop (a related, real, deliberately out-of-scope gap,
+flagged for a future task); any change to the sandbox's own resource/network limits; a
+CRUD/admin UI for authoring these reflexes.
 
 **Planned 2026-08-21, not yet dispatched.** Per `EXECUTION-PROCESS.md`'s Phase A discipline,
 this is the planning checkpoint — present to the operator for review before any worker is

@@ -467,7 +467,7 @@ Nanite itself), and scope boundaries.
 | `20-fix-agentkit-legacy-waiter-swallows-exit-errors` | 2 (found via `07`, sibling repo `libs/agentkit`, tagged v0.5.0 — operator-approved cross-portfolio fix) | reviewed PASS (fresh reviewer + Orchestrator, confirmed live in final re-run) | none |
 | `21-fix-broker-replacement-session-orphans-old-process` | 2 (found via `07`) | reviewed (Orchestrator-verified, regression tests re-confirmed against final build) | none |
 | `08-build-acp-client-abstraction` | 3 | reviewed (Orchestrator-verified; `go-agent-wrapper v0.5.0`, pushed+tagged) | `02`; recommended after `07` |
-| `09-acp-native-adapter-opencode` | 3 | not-started | `08` |
+| `09-acp-native-adapter-opencode` | 3 | reviewed (Orchestrator-verified live against real `opencode` binary; `go-agent-wrapper v0.6.0`) | `08` |
 | `10-acp-native-adapter-copilot-cli` | 3 | not-started | `08` |
 | `11-nanite-per-agent-protocol-transport-config` | 3 | not-started | `09`, `10`, `07` |
 | `12-pin-acp-bridge-library` | 4 | not-started | `08` — **escalation-gated, see README and `ESCALATIONS.md`, not ready for mechanical dispatch** |

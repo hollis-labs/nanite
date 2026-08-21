@@ -135,6 +135,15 @@ func TestTaskManager_deriveFromWorkflowRun(t *testing.T) {
 			wantState: a2a.TaskStateInputRequired,
 		},
 		{
+			// TASKS/teams/06-stepkindflex-executor.md: a flex-waiting
+			// TeamRun is agents self-organizing against a live exit
+			// trigger, not blocked on a human — deliberately NOT
+			// input-required, unlike waiting_on_gate above.
+			name:      "waiting_on_flex workflow maps to working, not input-required",
+			runStatus: "waiting_on_flex",
+			wantState: a2a.TaskStateWorking,
+		},
+		{
 			// "cancelled" is a real, schema-valid workflow_runs.status (see
 			// the CHECK constraint) that deriveFromWorkflowRun's switch
 			// doesn't explicitly map -- exercises the same default-fallback

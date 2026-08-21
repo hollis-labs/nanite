@@ -58,6 +58,18 @@ const (
 	// RunStatusWaiting means the run made all the progress it currently
 	// can — every remaining step is blocked behind an unresolved gate.
 	RunStatusWaiting RunStatus = "waiting_on_gate"
+	// RunStatusWaitingOnFlex means the run made all the progress it
+	// currently can and every remaining-blocked step is a flex step
+	// (StepKindFlex) waiting on its exit trigger — never a gate.
+	// Deliberately a distinct literal from RunStatusWaiting
+	// (TASKS/teams/06-stepkindflex-executor.md: "a flex step is not a
+	// gate," and reusing "waiting_on_gate" for a flex-step pause would
+	// make internal/service/a2a_task_manager.go's deriveFromWorkflowRun
+	// misreport a flex-waiting run as needing human input). If a run has
+	// both an unresolved gate and an unresolved flex step blocking it at
+	// once, RunStatusWaiting (gate) takes priority — see
+	// BuiltinWorkflowEngine.finishRun's flexOrGateWaitingStatus.
+	RunStatusWaitingOnFlex RunStatus = "waiting_on_flex"
 )
 
 // ToolCallRecord is one literal tool invocation made during an llm step's

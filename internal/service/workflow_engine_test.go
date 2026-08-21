@@ -337,22 +337,22 @@ func TestBuiltinWorkflowEngine_VerifyRunsEvenWhenStepAlreadyErrored(t *testing.T
 	}
 }
 
-// TestBuiltinWorkflowEngine_FlexStepReachesDispatchNotYetImplemented is the
-// regression test for TASKS/teams/03-stepkindflex-schema.md's dispatch-
-// switch requirement: a flex-kind step (agentworkflow.StepKindFlex, newly
-// DB-valid as of migration 130) must reach BuiltinWorkflowEngine's real
-// per-kind dispatch switch and come back with a clear, non-crashing "not
-// yet implemented" result — never a silent no-op (an empty, non-error
-// StepResult would be indistinguishable from a step that ran and produced
-// nothing) and never an unhandled-case panic. Real flex-step execution
-// (the wait/exit-trigger/Resume body) is task 06's job, not this one's.
+// TestBuiltinWorkflowEngine_FlexStepEntersWaitingState supersedes task 03's
+// own placeholder regression test (TestBuiltinWorkflowEngine_
+// FlexStepReachesDispatchNotYetImplemented, which asserted the "not yet
+// implemented" failure task 06 is chartered to replace — see 03's own
+// comment on the StepKindFlex dispatch case in workflow_engine.go). Real
+// flex-step execution (TASKS/teams/06-stepkindflex-executor.md) makes a
+// flex step reuse gate's pause shape on first entry: a distinct
+// waiting_on_flex status, not a terminal failure. Exit-trigger firing and
+// resolution are covered separately in workflow_engine_flex_test.go.
 //
-// Also proves flex landing alongside an ordinary tool step in the same run
-// doesn't disturb that sibling step — 03 must not quietly break existing
-// llm/tool/gate steps just because a flex step now validates and persists.
-func TestBuiltinWorkflowEngine_FlexStepReachesDispatchNotYetImplemented(t *testing.T) {
+// Still proves flex landing alongside an ordinary tool step in the same
+// run doesn't disturb that sibling step — the same regression 03's
+// placeholder test cared about, now updated for the real waiting outcome.
+func TestBuiltinWorkflowEngine_FlexStepEntersWaitingState(t *testing.T) {
 	wf := agentworkflow.WorkflowDefinition{
-		Name: "flex-placeholder",
+		Name: "flex-scope-work",
 		Steps: []agentworkflow.StepDefinition{
 			{
 				ID: "scope_work", Kind: agentworkflow.StepKindFlex,
@@ -373,41 +373,33 @@ func TestBuiltinWorkflowEngine_FlexStepReachesDispatchNotYetImplemented(t *testi
 		t.Fatalf("Run: %v", err)
 	}
 
-	flexResult, ok := result.StepResults["scope_work"]
-	if !ok {
-		t.Fatal("scope_work missing from StepResults — flex step never reached a terminal outcome")
+	if result.Status != agentworkflow.RunStatusWaitingOnFlex {
+		t.Fatalf("Status = %q, want %q", result.Status, agentworkflow.RunStatusWaitingOnFlex)
 	}
-	if !flexResult.IsError {
-		t.Fatal("flex step must come back IsError=true (a clear placeholder failure), not a silent no-op success")
-	}
-	if !strings.Contains(flexResult.Output, "not yet implemented") {
-		t.Fatalf("flex step Output = %q, want it to clearly say execution is not yet implemented", flexResult.Output)
-	}
-	if flexResult.Kind != agentworkflow.StepKindFlex {
-		t.Fatalf("flex step Kind = %q, want %q", flexResult.Kind, agentworkflow.StepKindFlex)
+	if _, ok := result.StepResults["scope_work"]; ok {
+		t.Fatal("scope_work must not appear in StepResults while still waiting — same convention gate steps already follow")
 	}
 
-	// The placeholder must dispatch to neither ExecuteLLMStep nor
-	// ExecuteToolStep — those calls belong to llm/tool steps only, and a
-	// flex step silently routing into one of them (rather than its own
-	// explicit case) would itself be a bug this test needs to catch.
+	// A still-waiting flex step must dispatch to neither ExecuteLLMStep
+	// nor ExecuteToolStep — those calls belong to llm/tool steps only,
+	// and a flex step silently routing into one of them (rather than its
+	// own explicit runStep branch) would itself be a bug this test needs
+	// to catch.
 	if len(exec.llmCalls) != 0 {
 		t.Fatalf("len(llmCalls) = %d, want 0 — flex must not fall through into the llm dispatch path", len(exec.llmCalls))
 	}
 	if exec.toolCallCount("unrelated") != 1 {
 		t.Fatalf("independent tool step's own call count = %d, want 1 — a flex step in the same run must not disturb an unrelated sibling step", exec.toolCallCount("unrelated"))
 	}
-
-	// Independent sibling step must still complete normally.
 	if result.StepResults["independent"].IsError {
 		t.Fatal("independent tool step must still succeed; it has no dependency on the flex step")
 	}
 
 	// Persisted state must reflect this too: kind='flex' actually landed
 	// in workflow_run_steps (proving migration 130's CHECK widening is
-	// exercised end-to-end, not just unit-tested against the store
-	// package directly) with a terminal, failed status — not left
-	// dangling in "running".
+	// exercised end-to-end) with the new waiting_on_flex status (migration
+	// 133), not left dangling in "running" and not the old placeholder's
+	// "failed".
 	runs := listAllRuns(t, runStore)
 	if len(runs) != 1 {
 		t.Fatalf("len(runs) = %d, want 1", len(runs))
@@ -428,11 +420,11 @@ func TestBuiltinWorkflowEngine_FlexStepReachesDispatchNotYetImplemented(t *testi
 	if flexRow.Kind != "flex" {
 		t.Fatalf("persisted kind = %q, want %q", flexRow.Kind, "flex")
 	}
-	if flexRow.Status != "failed" {
-		t.Fatalf("persisted status = %q, want %q (terminal, not left running/pending)", flexRow.Status, "failed")
+	if flexRow.Status != "waiting_on_flex" {
+		t.Fatalf("persisted status = %q, want %q", flexRow.Status, "waiting_on_flex")
 	}
-	if !flexRow.IsError {
-		t.Fatal("persisted is_error = false, want true")
+	if flexRow.IsError {
+		t.Fatal("persisted is_error = true, want false — waiting is not a failure")
 	}
 }
 

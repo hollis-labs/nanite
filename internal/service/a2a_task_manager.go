@@ -505,8 +505,13 @@ func (tm *TaskManager) deriveFromWorkflowRun(ctx context.Context, runID string) 
 	// Per design doc: "workflow run is running" → working,
 	// completed → completed, failed → failed.
 	// CW-20260814-0017: waiting_on_gate → input-required.
+	// TASKS/teams/06-stepkindflex-executor.md: waiting_on_flex → working,
+	// deliberately NOT input-required — a flex-waiting TeamRun is agents
+	// self-organizing against a live exit trigger, not blocked on a
+	// human, and migration 133 exists specifically so this distinction is
+	// real at the DB layer, not just documented here.
 	switch run.Status {
-	case "running":
+	case "running", "waiting_on_flex":
 		return a2a.TaskStateWorking
 	case "waiting_on_gate":
 		return a2a.TaskStateInputRequired

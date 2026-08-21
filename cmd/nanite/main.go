@@ -30,6 +30,7 @@ import (
 	llmtypes "github.com/hollis-labs/go-llm-types"
 	"github.com/hollis-labs/go-providers/provider"
 	gosched "github.com/hollis-labs/go-scheduler"
+	"github.com/hollis-labs/nanite/internal/agent/reflexes"
 	"github.com/hollis-labs/nanite/internal/agentworkflow"
 	"github.com/hollis-labs/nanite/internal/api"
 	"github.com/hollis-labs/nanite/internal/chat"
@@ -431,6 +432,13 @@ func cmdServe(args []string) {
 	slog.Info("workflow definitions registry loaded",
 		"path", resolveWorkflowDefinitionsPath(cfg), "count", len(workflowDefinitionsRegistry.Names()))
 	workflowEngine := service.NewBuiltinWorkflowEngine(container.Store)
+	// TASKS/teams/06-stepkindflex-executor.md: wire flex-step (StepKindFlex)
+	// support so a TeamRun's fluid-coordination phases can actually resolve
+	// — team_run_members lookups reuse container.Store directly (it already
+	// satisfies service.TeamMembershipStore structurally), and exit-trigger
+	// evaluation reuses the same reflexes.StateCollector shape
+	// reflexes.NewEngine builds internally (Window: 5), not a second one.
+	workflowEngine.WithFlexSupport(container.Store, &reflexes.StateCollector{Store: container.Store, Window: 5})
 	workflowEngines := map[string]agentworkflow.WorkflowEngine{agentworkflow.EngineBuiltin: workflowEngine}
 
 	// CW-20260814-0003: wire the external-engine invocation path — a

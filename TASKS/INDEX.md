@@ -472,7 +472,7 @@ Nanite itself), and scope boundaries.
 | `11-nanite-per-agent-protocol-transport-config` | 3 | reviewed PASS (fix landed for 2 real event-translation bugs found on first review, re-reviewed clean) | `09`, `10`, `07` |
 | `12-pin-acp-bridge-library` | 4 | reviewed — resolved, operator sign-off recorded (per-provider bridges chosen, `beyond5959/acp-adapter` rejected) | `08` |
 | `13-acp-bridge-adapter-claude` | 4 | reviewed (Orchestrator-verified live against real `claude` binary via `claude-agent-acp` bridge; interrupt=Turn confirmed) | `12` |
-| `14-acp-bridge-adapter-codex` | 4 | not-started (unblocked) | `12` |
+| `14-acp-bridge-adapter-codex` | 4 | reviewed (Orchestrator-verified live against real `codex` binary via `codex-acp` bridge; found+fixed real CODEX_PATH bundled-version bug; interrupt=Turn confirmed) | `12` |
 | `15-acp-bridge-adapter-pi` | 4 | not-started (unblocked, pursuing now per operator decision) | `12` |
 | `16-audit-fs-terminal-proxying-requirement` | 5 | not-started | `09`, `10`, `13`, `14`, `15` |
 | `17-native-vs-acp-side-by-side-comparison` | 5 | not-started | `07`, `09`, `10`, `13`, `14`, `15` |

@@ -465,7 +465,7 @@ Nanite itself), and scope boundaries.
 | `22-fix-opencode-turn-never-completes-chat-harness` | 2 (found via `18`, sibling repo `libs/agentkit`) | not-started | none |
 | `19-fix-codex-missing-skip-git-repo-check` | 2 (found via `07`, sibling repo `libs/go-providers`) | implemented (v0.24.0 tagged; Nanite pin bump centralized, pending) | none |
 | `20-fix-agentkit-legacy-waiter-swallows-exit-errors` | 2 (found via `07`, sibling repo `libs/agentkit` — operator-approved cross-portfolio fix) | not-started | none |
-| `21-fix-broker-replacement-session-orphans-old-process` | 2 (found via `07`, lower confidence — needs its own repro first) | not-started | none |
+| `21-fix-broker-replacement-session-orphans-old-process` | 2 (found via `07`) | implemented (confirmed by clean repro, fixed) | none |
 | `08-build-acp-client-abstraction` | 3 | not-started | `02`; recommended after `07` |
 | `09-acp-native-adapter-opencode` | 3 | not-started | `08` |
 | `10-acp-native-adapter-copilot-cli` | 3 | not-started | `08` |

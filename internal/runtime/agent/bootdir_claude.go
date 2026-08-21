@@ -1,10 +1,11 @@
 package agent
 
 import (
+	"context"
 	"fmt"
 	"os"
 
-	"github.com/hollis-labs/agentkit/agentlaunch"
+	"github.com/hollis-labs/go-agent-wrapper/plant"
 	"github.com/hollis-labs/nanite/internal/store"
 )
 
@@ -22,10 +23,13 @@ import (
 //
 // Spawn cwd: <bootDir>; project access: claude --add-dir <projectDir>.
 //
-// CW-20260515-0025: the bootdir file-set is now declared as an
-// agentlaunch.InjectionSpec and written through the shared planting
-// routine (plantInjectionSpec) — see bootdir_plant.go for why Nanite
-// uses the shared InjectionSpec primitives rather than providerplant.Plant.
+// TASKS/agent-host-acp/04: the bootdir file-set is declared as a
+// plant.Spec (github.com/hollis-labs/go-agent-wrapper/plant) and planted
+// through claudePlanter, which implements plant.Planter — see
+// bootdir_plant.go for why Nanite uses go-agent-wrapper's Planter
+// contract rather than agentkit/agentlaunch/providerplant.Plant, and for
+// why SpawnWorkdir/BootMode/BootPrompt below are NOT part of this
+// migration.
 //
 // S5 Phase B: .claude/settings.json is no longer a hand-rolled
 // {mcpServers,approvedTools} stub — it is sourced from go-providers'
@@ -38,31 +42,52 @@ import (
 // ignores both.
 type claudeLayout struct{}
 
-// claudeInjectionSpec assembles the full claude bootdir file-set as a
-// shared agentlaunch.InjectionSpec. The Nanite-owned CONTENT files
-// (CLAUDE.md, .sandbox/* docs, boot.md) ride as NativeFiles; the provider
-// CONFIG file .claude/settings.json also rides as a NativeFile but its
-// content is sourced from go-providers (claudeProviderConfigContent), not
-// hand-rolled; .mcp.json rides as a BootDirOverlay entry so it plants
-// last (overlay-wins-last, per the providerplant ordering contract).
-func claudeInjectionSpec(params SetupParams) (agentlaunch.InjectionSpec, error) {
+// claudePlanter implements plant.Planter for the claude bootdir shape.
+// Plant destinations: Spec.Files entries land verbatim at their map-key
+// path; Spec.MCPConfig lands at ".mcp.json"; Spec.ProviderSettings["claude"]
+// lands at ".claude/settings.json". See bootdir_plant.go's plantSpec for
+// the shared write routine.
+type claudePlanter struct{}
+
+var _ plant.Planter = claudePlanter{}
+
+func (claudePlanter) Plant(_ context.Context, bootDir string, spec plant.Spec) (plant.Result, error) {
+	return plantSpec(bootDir, spec, plantConfig{
+		provider:             "claude",
+		providerSettingsPath: ".claude/settings.json",
+	})
+}
+
+// claudePlantSpec assembles the full claude bootdir file-set as a
+// plant.Spec. The Nanite-owned CONTENT files (CLAUDE.md, .sandbox/* docs,
+// boot.md) ride as Files entries; the provider CONFIG file
+// .claude/settings.json rides as ProviderSettings["claude"] — its content
+// is sourced from go-providers (claudeProviderConfigContent), not
+// hand-rolled; .mcp.json rides as Spec.MCPConfig.
+func claudePlantSpec(params SetupParams) (plant.Spec, error) {
 	settings, err := claudeProviderConfigContent(params.CLIWritableRoots)
 	if err != nil {
-		return agentlaunch.InjectionSpec{}, err
+		return plant.Spec{}, err
 	}
-	native := []agentlaunch.NativeFile{
-		nativeFileRaw("CLAUDE.md",
-			BuildCLAUDEMD(params.AgentProfile.Name, params.AgentProfile.Description, params.SystemPrompt), 0o644),
-		bootMDNativeFile(params),
-		nativeFileRaw(".claude/settings.json", settings, 0o644),
-	}
-	native = append(native, sandboxNativeFiles(params)...)
 
-	overlay, err := mcpOverlay(params)
-	if err != nil {
-		return agentlaunch.InjectionSpec{}, err
+	files := map[string][]byte{
+		"CLAUDE.md": []byte(BuildCLAUDEMD(params.AgentProfile.Name, params.AgentProfile.Description, params.SystemPrompt)),
+		"boot.md":   []byte(params.BootContent),
 	}
-	return agentlaunch.InjectionSpec{NativeFiles: native, BootDirOverlay: overlay}, nil
+	for relPath, content := range sandboxFiles(params) {
+		files[relPath] = content
+	}
+
+	mcp, err := mcpConfigBytes(params)
+	if err != nil {
+		return plant.Spec{}, err
+	}
+
+	return plant.Spec{
+		Files:            files,
+		MCPConfig:        mcp,
+		ProviderSettings: map[string][]byte{"claude": []byte(settings)},
+	}, nil
 }
 
 func (l claudeLayout) Setup(params SetupParams) (string, error) {
@@ -80,19 +105,28 @@ func (l claudeLayout) Setup(params SetupParams) (string, error) {
 }
 
 // Populate writes the claude boot-dir shape into bootDir. Idempotent —
-// every file is replaced via the shared planting routine (atomic
-// temp-file + rename, no read of prior state); mkdir calls use MkdirAll
-// so a partially-populated dir converges. Used by both Setup (post-mkdir)
-// and the recovery BootDirOps adapter (against an existing dir).
+// claudePlanter's underlying writePlantedFile calls use atomic
+// temp-file + rename with no read of prior state; mkdir calls use
+// MkdirAll so a partially-populated dir converges. Used by both Setup
+// (post-mkdir) and the recovery BootDirOps adapter (against an existing
+// dir).
+//
+// Layout.Populate has no context.Context parameter (see bootdir.go); it
+// predates context threading and its external callers
+// (internal/service/agent_bootdir_adapter.go, agent.Boot) are unchanged
+// by this migration, so claudePlanter.Plant is called with
+// context.Background() here — this is a synchronous filesystem write
+// with no cancellation point today.
 func (claudeLayout) Populate(bootDir string, params SetupParams) error {
 	if params.AgentProfile == nil {
 		return fmt.Errorf("agent: claudeLayout.Populate: AgentProfile is required")
 	}
-	spec, err := claudeInjectionSpec(params)
+	spec, err := claudePlantSpec(params)
 	if err != nil {
 		return err
 	}
-	return plantInjectionSpec(bootDir, spec)
+	_, err = claudePlanter{}.Plant(context.Background(), bootDir, spec)
+	return err
 }
 
 // RegenerateSystemPromptSlot rewrites only CLAUDE.md, leaving the rest
@@ -102,27 +136,44 @@ func (claudeLayout) RegenerateSystemPromptSlot(bootDir string, params SetupParam
 	if params.AgentProfile == nil {
 		return fmt.Errorf("agent: claudeLayout.RegenerateSystemPromptSlot: AgentProfile is required")
 	}
-	return plantInjectionSpec(bootDir, agentlaunch.InjectionSpec{
-		NativeFiles: []agentlaunch.NativeFile{
-			nativeFileRaw("CLAUDE.md",
-				BuildCLAUDEMD(params.AgentProfile.Name, params.AgentProfile.Description, params.SystemPrompt), 0o644),
+	spec := plant.Spec{
+		Files: map[string][]byte{
+			"CLAUDE.md": []byte(BuildCLAUDEMD(params.AgentProfile.Name, params.AgentProfile.Description, params.SystemPrompt)),
 		},
-	})
+	}
+	_, err := claudePlanter{}.Plant(context.Background(), bootDir, spec)
+	return err
 }
 
 func (claudeLayout) AmendEnv(base map[string]string, _ string) map[string]string { return base }
 
 // SpawnWorkdir returns the boot dir; CLAUDE.md auto-loads from cwd.
+//
+// Nanite-owned, unchanged by TASKS/agent-host-acp/04: plant.Planter's
+// contract is file-planting only and has no concept of workdir
+// selection. Workdir choice is lifecycle policy — where a process
+// actually runs — which docs/engineering/architecture/16-agent-host.md
+// names as something a host does not own.
 func (claudeLayout) SpawnWorkdir(bootDir, _ string) string { return bootDir }
 
 // BootPrompt is the system prompt payload for the PTY runtime.
 // Sourced from resolveBootPrompt (prompt.go), which honors
 // Options.BootPromptOverride (CW-20260514-0048) and falls back to
 // composeSystemPrompt(role, profile, mode) otherwise.
+//
+// Nanite-owned, unchanged by TASKS/agent-host-acp/04: the prompt STRING
+// is product content (agent roles/skills), explicitly named in
+// docs/engineering/architecture/16-agent-host.md as something a host
+// does not own. Only the FILE that carries it (CLAUDE.md, planted via
+// claudePlanter above) is host-owned file-planting mechanics.
 func (claudeLayout) BootPrompt(profile *store.AgentProfile, opts Options) string {
 	return resolveBootPrompt(profile, opts)
 }
 
 // BootMode is "stdin" for PTY claude; the runtime writes the boot prompt
 // onto the master PTY at process start.
+//
+// Nanite-owned, unchanged by TASKS/agent-host-acp/04: boot-prompt
+// delivery mode is lifecycle policy, not file-planting — see
+// SpawnWorkdir's comment above for the same rationale.
 func (claudeLayout) BootMode() string { return "stdin" }

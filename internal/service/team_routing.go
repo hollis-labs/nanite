@@ -563,6 +563,14 @@ func (svc *TeamRoutingService) InstallTeamRunRouting(ctx context.Context, runID,
 		// win outright will not be told their literal value was raised; it
 		// is silently normalized to coordinatorFallbackPriority+1 instead.
 		if priority <= coordinatorFallbackPriority {
+			if rule.Priority > 0 {
+				// Only warn when an author-supplied value was actually
+				// overridden — the derived-default path already flows
+				// through this same clamp on every install and would
+				// otherwise log on every call for no reason.
+				slog.Warn("team routing: explicit rule priority at or below coordinator fallback floor, raised to stay reachable",
+					"team", team.Name, "rule", rule.Name, "requested_priority", rule.Priority, "applied_priority", coordinatorFallbackPriority+1)
+			}
 			priority = coordinatorFallbackPriority + 1
 		}
 		triggerSpec := map[string]any{

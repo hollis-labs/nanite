@@ -469,7 +469,7 @@ Nanite itself), and scope boundaries.
 | `08-build-acp-client-abstraction` | 3 | reviewed (Orchestrator-verified; `go-agent-wrapper v0.5.0`, pushed+tagged) | `02`; recommended after `07` |
 | `09-acp-native-adapter-opencode` | 3 | reviewed (Orchestrator-verified live against real `opencode` binary; `go-agent-wrapper v0.6.0`) | `08` |
 | `10-acp-native-adapter-copilot-cli` | 3 | reviewed (Orchestrator-verified live against real `copilot` binary, both stdio+TCP; `go-agent-wrapper v0.7.0`) | `08` |
-| `11-nanite-per-agent-protocol-transport-config` | 3 | not-started | `09`, `10`, `07` |
+| `11-nanite-per-agent-protocol-transport-config` | 3 | implemented — reviewed FAIL (2 real event-translation bugs, fix in progress) | `09`, `10`, `07` |
 | `12-pin-acp-bridge-library` | 4 | not-started | `08` — **escalation-gated, see README and `ESCALATIONS.md`, not ready for mechanical dispatch** |
 | `13-acp-bridge-adapter-claude` | 4 | not-started | `12` |
 | `14-acp-bridge-adapter-codex` | 4 | not-started | `12` |

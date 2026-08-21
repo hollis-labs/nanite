@@ -170,17 +170,6 @@ type Options struct {
 	// Nil/empty leaves the prior behavior unchanged.
 	DynamicContext map[string]string
 
-	// ExtraArgs is appended verbatim to the spawned process's argv
-	// (after the adapter's BuildArgs output). CW-20260514-0048: lets
-	// a boot-profile-driven launch thread LaunchSpec.Args into the
-	// runtime without forking agent.Boot. The runtime lib already
-	// supports the surface as agentsessions.StartOptions.ExtraArgs.
-	//
-	// Default empty preserves the pre-CW-20260514-0048 behavior. The
-	// runtime does NOT template-substitute these — callers pre-resolve
-	// any placeholders before passing the slice.
-	ExtraArgs []string
-
 	// Provider overrides the bare adapter name resolved from
 	// profile.DefaultProvider. CW-20260514-0053 (boot-profile-driven
 	// launches): a compiled LaunchSpec carries spec.Provider (e.g.
@@ -629,6 +618,12 @@ func Boot(ctx context.Context, deps *Dependencies, opts Options) (*Session, erro
 		if hadLineage && deps.PathGrants != nil {
 			deps.PathGrants.ClearLineage(sessID)
 		}
+		// MarkRuntimeFailed sets state="failed" AND persists a reason in
+		// one write, superseding whatever bare UpdateState the background
+		// goroutine above already wrote (state alone, no reason) — mirrors
+		// the <-sess.runDone branch's own MarkRuntimeFailed call above so
+		// every Boot abort path leaves a forensic reason, not just a state.
+		_ = deps.Store.MarkRuntimeFailed(sessID, "agent.Boot: caller ctx cancelled: "+ctx.Err().Error())
 		return cleanup(ctx.Err())
 	}
 

@@ -710,3 +710,73 @@ still lands correctly on `"failed"`, just without a recorded reason for this one
 Neither touches a hard constraint; both fixed as a small, targeted follow-up per the reviewer's
 own recommendation rather than left as debt (see this file's own Work Log addendum below, if
 present, or `TASKS/ESCALATIONS.md` for the fix's landing record).
+
+## Work Log addendum (2026-08-21) — small follow-up for the reviewer's two findings
+
+Read `TASKS/ESCALATIONS.md`'s 2026-08-21 "Task `06` re-attempt landed and reviewed PASS
+(commit `1f947c55`) — two real, non-blocking findings, fixed as a small follow-up" entry and
+this file's own Review notes section above before starting, per the dispatch instructions.
+Both findings verified independently against the current `main` source (not just trusted from
+the review summary) before fixing.
+
+**Finding A (`Options.ExtraArgs` silent no-op)**: grepped every reference to `ExtraArgs` across
+the repo. Confirmed `internal/runtime/agent/agent.go`'s `Options.ExtraArgs` field had zero
+setters and zero readers anywhere — `driveBootSession`/`chat_boot_drive.go` never sets it
+despite `launch_spec_options_test.go`'s file-level comment claiming it does (that comment only
+ever exercised `BootPromptOverride` in its actual test bodies). The only other `ExtraArgs`
+symbols in the repo (`internal/workflowrunner/launch.go`,
+`internal/service/workflow_external_engine.go`) are a completely unrelated, live, actively-used
+mechanism (external workflow script argv) — different package, different struct, not touched.
+No live caller found for `agent.Options.ExtraArgs`, matching the reviewer's own research.
+Removed the field and its stale doc comment from `Options` (`agent.go`), matching how
+`Supervisor`/`AttachEnabled` were already removed in task `06`'s own migration. Corrected the
+now-inaccurate file-level comment in `launch_spec_options_test.go` (previously claimed
+`ExtraArgs` was one of two Options fields under that file's regression coverage) to describe
+the removal instead of continuing to reference a field that no longer exists.
+
+**Finding B (`ctx.Done()` abort path records no failure reason)**: read `Boot`'s 3-way `select`
+(`agent.go`, `readyCh`/`sess.runDone`/`ctx.Done()` cases) and confirmed the exact asymmetry:
+the `<-sess.runDone:` branch calls `deps.Store.MarkRuntimeFailed(sessID, failErr.Error())`
+directly in the select-branch body, while the `<-ctx.Done():` branch had no equivalent call —
+the only store write on that path was the shared background goroutine's own unconditional,
+branch-agnostic `deps.Store.UpdateState(sessID, state, 0)` (state only, no reason), which runs
+for every exit of that goroutine regardless of which select branch triggered it.
+
+Verified `MarkRuntimeFailed`'s real signature and behavior before assuming it's a drop-in
+replacement, not guessing: `RuntimeStore.MarkRuntimeFailed(runtimeID, reason string) error`
+(`deps.go`) → `agentRuntimeStore.MarkRuntimeFailed` (`internal/service/agent_deps.go`) →
+`store.MarkAgentRuntimeFailed` (`internal/store/agent_runtime.go`), whose SQL is `UPDATE
+agent_runtime SET state = 'failed', failure_reason = ?, updated_at = ? WHERE id = ?` — it
+already sets `state='failed'` as part of persisting the reason, so it's the correct call to add
+in the `ctx.Done()` branch itself (mirroring the `runDone` branch's own shape exactly: a single
+`MarkRuntimeFailed` call, no companion `UpdateState` call in that branch), not something that
+needs to run alongside a separate `UpdateState` call. (`MarkRuntimeFailed` doesn't touch the
+`pid` column, unlike `UpdateState` — irrelevant here since every write on this path already
+persists `pid=0` uniformly, per this task's own original Work Log §6 corollary-fix note on
+`orphansweep`'s `PID==0` fallback.)
+
+Added the call after the branch's existing `<-sess.runDone` block-until-goroutine-exits and
+lineage-clear steps, with a reason string derived from `ctx.Err()`
+(`"agent.Boot: caller ctx cancelled: " + ctx.Err().Error()`) — prefixed `"agent.Boot: "` to
+match this file's existing reason-string convention (e.g. the sibling `runDone` branch's
+`"agent.Boot: wrapper.Run exited before session became ready"`). This call runs after the
+background goroutine's own bare `UpdateState` write and supersedes it (last write wins on the
+same row), landing on the correct final `state="failed"` + reason regardless of whatever
+transient state the background goroutine wrote first.
+
+No test previously exercised this specific abort path (grepped `boot_test.go`,
+`agent_test.go`, `wrapper_lifecycle_test.go`, `bootdir_alias_test.go` for
+`context.WithCancel`/`context.WithTimeout` near a `Boot` call — none found), so no existing
+assertion depended on the old, reason-less behavior; no test needed changing.
+
+**Verification**: `go build ./cmd/nanite/` clean. `go vet ./...` clean except the same two
+pre-existing, unrelated `container.go` warnings already noted in this task's original Work Log
+(file untouched by this follow-up — confirmed via `git status --short` showing no diff to
+`internal/service/container.go`). `go test ./...` (fresh, `-count=1`): clean across every
+package. `go test ./internal/runtime/agent/... -race -count=1`: clean.
+
+**Files touched**: `internal/runtime/agent/agent.go` (both fixes),
+`internal/runtime/agent/launch_spec_options_test.go` (stale comment correction only, no
+behavioral test change).
+
+**Commit**: pending — see final report for the actual SHA once committed.

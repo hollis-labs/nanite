@@ -1,9 +1,14 @@
 package agent
 
 // CW-20260514-0048: regression coverage for the boot-profile-driven
-// Options fields added in this ticket — BootPromptOverride and
-// ExtraArgs. The chat layer (driveBootSession) sets these from a
-// compiled bootprofile.LaunchSpec.
+// Options field added in this ticket — BootPromptOverride. The chat
+// layer (driveBootSession) sets it from a compiled
+// bootprofile.LaunchSpec. (This ticket also added an Options.ExtraArgs
+// field; task 06's migration onto wrapper.Wrapper.Run removed the only
+// line that ever forwarded it and it was never a live-set field in this
+// codebase, so it was removed as dead code — see
+// TASKS/agent-host-acp/06-migrate-session-lifecycle-to-wrapper.md's
+// 2026-08-21 addendum.)
 
 import (
 	"strings"

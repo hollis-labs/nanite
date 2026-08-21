@@ -29,12 +29,16 @@ These recur across every subsystem doc in this folder — they're not independen
 11. [Harness-Reactive Self-Tools](11-harness-reactive-self-tools.md) — the agent-initiated "declare a fact, let the harness react" mechanism, sibling to reflexes.
 12. [Scheduling](12-scheduling.md) — the `go-scheduler`-backed engine for running agents, workflows, and commands on a schedule.
 13. [Memory & Knowledge Tools](13-memory-and-knowledge-tools.md) — the native memory/knowledge/recall tool surface: scratchpad, todo/plan, handoff, per-agent durable state, embedded Tesseract, chat search.
+15. [Teams](15-teams.md) — configurable N-slot organizational shapes (routing, authority, gates) that generalize today's hardcoded three-role dispatch, compiling to `agentworkflow` runs rather than a new orchestration engine.
+16. [Agent Host](16-agent-host.md) — the shared process/stdio/sandbox/env boundary underneath CLI agent launching, and where Nanite's current bespoke launch code stands against the portfolio's existing (unadopted) candidate for it.
+17. [Agent Client Protocol (ACP)](17-acp.md) — ACP as a transport for driving underlying CLI agents (a companion to [Agent Host](16-agent-host.md)), distinct from Tether's already-shipped ACP-server role.
 
 ## What's genuinely still open
 
 - ~~Whether durable agents should eventually run CLI-based instead of API-based.~~ **Resolved 2026-08-19**: keep both substrates. A dedicated review found the two paths much closer in behavior than originally assumed post-Phase-2-5, so there's no "which one wins" call to make. What remains is making the choice explicitly configurable: an app-level default (CLI), a system-wide override, and the existing per-agent override (`runtime_kind`, see [Agent Launching](02-agent-launching.md)) — `TASKS/phase-8/01-set-default-runtime-kind.md`.
 - GUI's start-surface reconciliation against the new construction model — deferred to the dedicated frontend pass.
 - A full archival pass on the docs this folder supersedes — see `../TASKS.md`.
+- Whether Nanite adopts `go-agent-wrapper` as the shared agent host, and whether/how it drives underlying agents over ACP — see [Agent Host](16-agent-host.md) and [ACP](17-acp.md). Both are evidence-gathering reviews, not decisions; planning inherits an open call, not a foregone one.
 
 ## What this doesn't cover yet
 

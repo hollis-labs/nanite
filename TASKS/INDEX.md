@@ -434,3 +434,87 @@ Implements `docs/engineering/architecture/15-teams.md` — the design produced b
 `11` (TeamRun launch API, the batch's highest-risk task — shared production wiring) — adds `POST /api/teams/{id}/launch` calling task `08`'s `LaunchTeamRun`, after research confirmed no existing external-facing entry point could express a `TeamRunOverrides`-shaped launch. Resolves the required registry-growth/agent-card-pollution prerequisite from task `08`'s review with two complementary fixes: an unconditional naming-convention exclusion in `AgentCardGenerator.Generate()` (primary — holds regardless of registry state) plus terminal-status eviction via a new `Registry.Unregister` (secondary, narrower). Also wires `TeamRunLauncher` into `Container`/`main.go` for the first time — it had no prior production wiring. Reviewed PASS by a reviewer specifically asked to be rigorous given the stakes: independently confirmed `TeamRunLauncher` and `AgentCardGenerator` share the exact same registry instance in production (the single most important correctness question for the fix to actually work), confirmed the exclusion filter is unconditional with no bypass path, confirmed `Unregister`'s terminal-status gating is correctly scoped against `resumeWorkflowRun`'s real requirement, and independently re-verified every step-1 research claim against source. Two minor non-blocking findings (an unenforced `team-run:` naming-collision risk with a hypothetical operator-authored workflow; a doc-comment overstatement about empty-body handling) logged in `TASKS/ESCALATIONS.md`. Full detail in `TASKS/ESCALATIONS.md`'s "Teams task 11 review" entry and `TASKS/teams/11-team-run-launch-api.md`'s Work Log.
 
 **Phase 4 is `reviewed` and closed. All 11 tasks in the Teams batch (`01`-`11`) are now `reviewed`. The batch is complete.**
+
+---
+
+## Agent Host + ACP (`TASKS/agent-host-acp/`, outside the Phase 0-9 sequence)
+
+Implements `docs/engineering/architecture/16-agent-host.md` (adopt `go-agent-wrapper` — a
+sibling repo, `libs/go-agent-wrapper`, with zero adopters today — as Nanite's shared
+agent-launch host, replacing bespoke code in `internal/runtime/agent`) and
+`docs/engineering/architecture/17-acp.md` (add ACP-as-client support — Nanite driving other
+agents' CLIs over the Agent Client Protocol — layered on that host). Treated as one project
+per operator direction, since 17 depends structurally on 16 (every ACP adapter is a new
+`go-agent-wrapper` `Adapter`/`RuntimeAdapter` implementation). A sibling to `TASKS/teams/`,
+`TASKS/reflex-taxonomy/`, `TASKS/harness-reactive-self-tools/`, and `TASKS/scheduling/`. See
+`TASKS/agent-host-acp/README.md` for the full read-first list, the two-repo shape of this
+batch (most of Phases 1 and part of 3-4 land in the sibling `libs/go-agent-wrapper` repo, not
+Nanite itself), and scope boundaries.
+
+| Task | Phase | Status | Depends on |
+|---|---|---|---|
+| `01-bump-agentkit-pin-and-cut-release` | 1 | not-started | none |
+| `02-split-descriptor-protocol-transport-and-interrupt` | 1 | not-started | none directly (parallel-safe with `01`) |
+| `03-add-go-agent-wrapper-dependency` | 2 | not-started | none |
+| `04-migrate-bootdir-layout-to-planter` | 2 | not-started | `02`, `03` |
+| `05-migrate-sandbox-profile-to-applier` | 2 | not-started | `03` |
+| `06-migrate-session-lifecycle-to-wrapper` | 2 | not-started | `02`, `04`, `05` |
+| `07-dogfeed-validate-host-migration` | 2 | not-started | `04`, `05`, `06` |
+| `08-build-acp-client-abstraction` | 3 | not-started | `02`; recommended after `07` |
+| `09-acp-native-adapter-opencode` | 3 | not-started | `08` |
+| `10-acp-native-adapter-copilot-cli` | 3 | not-started | `08` |
+| `11-nanite-per-agent-protocol-transport-config` | 3 | not-started | `09`, `10`, `07` |
+| `12-pin-acp-bridge-library` | 4 | not-started | `08` — **escalation-gated, see README and `ESCALATIONS.md`, not ready for mechanical dispatch** |
+| `13-acp-bridge-adapter-claude` | 4 | not-started | `12` |
+| `14-acp-bridge-adapter-codex` | 4 | not-started | `12` |
+| `15-acp-bridge-adapter-pi` | 4 | not-started | `12` — lowest-confidence task in the batch, may be deferred at dispatch time (see task file) |
+| `16-audit-fs-terminal-proxying-requirement` | 5 | not-started | `09`, `10`, `13`, `14`, `15` |
+| `17-native-vs-acp-side-by-side-comparison` | 5 | not-started | `07`, `09`, `10`, `13`, `14`, `15` |
+
+**Sequencing.** Phase 1 (`01`-`02`) is small, mechanical, foundation work entirely inside the
+sibling `libs/go-agent-wrapper` repo — both tasks are file-disjoint and parallel-safe. Phase 2
+(`03`-`07`) is the real lift: migrating Nanite's bespoke `internal/runtime/agent` code (boot-
+dir planting, sandbox profile construction, session lifecycle) onto `go-agent-wrapper`'s
+`Planter`/`Applier`/`Wrapper` seams, closing with a real dogfeed validation — this is the
+**first real production exercise of `go-agent-wrapper` anywhere in the portfolio** (confirmed
+zero adopters at planning time), so `07`'s validation checkpoint carries more weight than
+usual. Phase 3 (`08`-`11`) builds the ACP client abstraction and the two low-risk native ACP
+adapters (OpenCode, Copilot CLI), then wires per-agent protocol/transport selection into
+Nanite's existing `runtime_kind`-adjacent routing. Phase 4 (`12`-`15`) is escalation-gated —
+`12` must get explicit operator sign-off on which ACP bridge library to pin for Claude/Codex/
+Pi before `13`-`15` can be dispatched (see `TASKS/ESCALATIONS.md`). Phase 5 (`16`-`17`) closes
+the batch: an audit of whether any ACP agent actually needs the host to proxy filesystem/
+terminal operations (a real, flagged-but-unresolved "hidden cost" risk in 17-acp.md), and a
+side-by-side native-vs-ACP comparison to ground any future per-agent default decision in real
+evidence.
+
+**Real, load-bearing corrections to both docs, found during this planning session's own
+research against the live code** (not just doc-vs-doc inconsistencies — each is cited with
+file:line in its owning task's Context): bumping go-agent-wrapper's `agentkit` pin from
+`v0.1.0` to `v0.3.0` requires **zero code changes**, not "a compat pass" — `agentsessions`
+(the only agentkit subpackage go-agent-wrapper imports) is byte-identical across those tags,
+and the renamed symbol 16-agent-host.md cites lives in `agentlaunch`, which go-agent-wrapper
+never imports (`01`). **Neither Claude's nor Codex's `Stop()` today calls any native
+wire-level interrupt** — contrary to what 17-acp.md's first-pass framing implied, both
+go-agent-wrapper (via `agentkit/agentsessions`) and Nanite's own current bespoke code do
+stdin-close + SIGTERM/SIGKILL only; only OpenCode calls a real native abort endpoint. This is
+a carried-forward limitation, not a regression — Nanite's own `internal/service/
+agent_deps.go:772-776` already has a TODO acknowledging the identical gap (`02`, `06`).
+`internal/recovery/broker`'s coupling to `agentkit` is narrow, not deep — only
+`*agentsessions.ExitError`'s shape and five `Cause*` constants, entirely mediated through
+Nanite's own `agent.Options`/`agent.Session`/`agent.HasBootdirLayout` types — so the migration
+blast radius on broker (16-agent-host.md's own named top risk) is small, not structural (`06`).
+
+**Deliberately out of this batch's scope** (see `README.md`'s full list): sequencing Tether's
+or Torque's own adoption of `go-agent-wrapper` (this is Nanite's own tracker; that's a
+portfolio-level call made in those apps' own planning); migrating `Mode`/lifecycle-decision
+logic out of Nanite (stays product-owned per both docs' explicit boundary); attach/detach to
+externally-launched CLI processes; building an in-process fs/terminal server ahead of `16`'s
+audit actually finding one is needed; locking a final ACP bridge library ahead of `12`'s
+operator sign-off; a final locked default for which protocol/transport any agent runs on
+(migration is additive, per-agent, opportunistic — not a flag-day).
+
+**Planned 2026-08-21, not yet dispatched.** Per `EXECUTION-PROCESS.md`'s Phase A discipline,
+this is the planning checkpoint — present to the operator for review before any worker is
+dispatched. `12`'s bridge-library decision additionally needs its own explicit operator
+sign-off before Phase 4 can proceed, independent of the batch-level go-ahead.

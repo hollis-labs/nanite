@@ -185,6 +185,165 @@ func (t *Team) SetSlots(slots []TeamSlotDefinition) error {
 	return nil
 }
 
+// TeamPhase is one entry decoded from Team.PhasesJSON -- one step in a
+// Team's phase/gate sequence (15-teams.md's "Illustrative shape":
+// scope_work (flex) -> review_gate (gate) -> address_feedback (flex) ->
+// merge_gate (gate)). TASKS/teams/07-team-compiler.md's CompileTeam
+// (internal/service/team_compiler.go) is this type's one real consumer: it
+// walks a []TeamPhase in slice order and emits one matching
+// agentworkflow.StepDefinition per phase.
+//
+// A phase sequence is a v1-linear chain: CompileTeam derives each compiled
+// step's DependsOn from slice order (the previous phase's ID) rather than
+// from an authored field here -- 15-teams.md's SME example never shows a
+// non-linear phase sequence, and the task that defined this type found no
+// concrete reason (yet) to support one. There is deliberately no
+// DependsOn/depends_on field on this type for that reason; if a later Team
+// definition needs a non-linear sequence, that's a real, documented
+// addition to this type, not an assumption baked in silently here.
+//
+// Deliberately its own decoded type/column, never folded into
+// TeamSlotDefinition/SlotsJSON -- see PhasesJSON's own doc comment above
+// for the forward-compat reasoning this type completes: a later Team/
+// Workflow definition split becomes "accept a phase sequence from a second
+// source," not a rewrite of the compiler.
+type TeamPhase struct {
+	// ID is this phase's step identifier -- becomes the compiled
+	// StepDefinition.ID verbatim (15-teams.md's `scope_work`,
+	// `review_gate`, `address_feedback`, `merge_gate`).
+	ID string `json:"id"`
+
+	// Kind is "flex" or "gate" -- maps 1:1 to agentworkflow.StepKindFlex /
+	// StepKindGate. No other kind is a legal phase: a Team's phase
+	// sequence never authors an llm/tool step directly (those happen
+	// inside a flex phase's self-organizing member turns, not as a phase
+	// of their own).
+	Kind string `json:"kind"`
+
+	// ActiveSlots names the Team Slots active during this flex phase.
+	// Required (non-empty) when Kind == "flex"; ignored when Kind ==
+	// "gate". Compiles to the flex StepDefinition's Config["active_slots"]
+	// verbatim -- Team Slot *names*, not resolved (agent_id, session_id)
+	// tuples. See CompileTeam's own doc comment for why names (not
+	// resolved tuples) is this task's documented design call.
+	ActiveSlots []string `json:"active_slots,omitempty"`
+
+	// ExitTrigger is this flex phase's exit condition, in the exact
+	// shorthand shape internal/service/workflow_engine_flex.go's
+	// parseFlexStepConfig (task 06) accepts: {"self_tool": "<name>"},
+	// {"event": "<name>"}, or {"kind": "...", "spec": {...}}, plus an
+	// optional "authorized_slot" key. Required (non-nil) when Kind ==
+	// "flex"; ignored when Kind == "gate". Compiles to the flex
+	// StepDefinition's Config["exit_trigger"] verbatim -- reusing the
+	// reflex trigger-spec vocabulary, per 15-teams.md's own instruction
+	// not to invent a second condition language.
+	ExitTrigger map[string]any `json:"exit_trigger,omitempty"`
+
+	// ApproverSlot is this gate phase's approving identity -- a Team Slot
+	// name (e.g. "reviewer") or a human sentinel (15-teams.md's `operator`
+	// -- "human, not a Team Slot"). Required (non-empty) when Kind ==
+	// "gate"; ignored when Kind == "flex". Compiles to the gate
+	// StepDefinition's Config["approver_slot"]. As of task 06/07,
+	// StepKindGate's real engine handling (runStep's gate branch,
+	// internal/service/workflow_engine.go) reads no Config key at all --
+	// approver_slot is carried here as forward-compatible metadata for a
+	// not-yet-built gate-approval-enforcement mechanism, not a claim that
+	// anything currently reads or enforces it. See CompileTeam's own doc
+	// comment for the full citation trail confirming this.
+	ApproverSlot string `json:"approver_slot,omitempty"`
+}
+
+// validTeamPhaseKinds is the enum validateTeamPhases checks Kind against --
+// same Go-layer-validation-over-a-JSON-blob-column approach
+// validTeamSlotResolutions/validTeamSlotActivationModes already use above.
+var validTeamPhaseKinds = map[string]bool{"flex": true, "gate": true}
+
+// validateTeamPhases checks each TeamPhase's Kind enum and the
+// Kind-specific fields CompileTeam requires (ActiveSlots/ExitTrigger for
+// flex, ApproverSlot for gate), plus non-empty/unique IDs. An empty slice
+// is a legitimate starting shape (mirrors validateTeamSlots). Deliberately
+// does NOT validate ExitTrigger's inner shape (self_tool/event/kind+spec)
+// -- that's internal/service/workflow_engine_flex.go's parseFlexStepConfig
+// job (a different package; this one can't import it, and duplicating its
+// validation here would be a second copy of the same rule to keep in
+// sync). This function is not wired into CreateTeam/UpdateTeam -- see
+// SetPhases' own doc comment for why.
+func validateTeamPhases(phases []TeamPhase) error {
+	seen := make(map[string]bool, len(phases))
+	for _, p := range phases {
+		if p.ID == "" {
+			return fmt.Errorf("team phase: id is required")
+		}
+		if seen[p.ID] {
+			return fmt.Errorf("team phase %q: duplicate id", p.ID)
+		}
+		seen[p.ID] = true
+		if !validTeamPhaseKinds[p.Kind] {
+			return fmt.Errorf("team phase %q: kind %q invalid: must be \"flex\" or \"gate\"", p.ID, p.Kind)
+		}
+		switch p.Kind {
+		case "flex":
+			if len(p.ActiveSlots) == 0 {
+				return fmt.Errorf("team phase %q: flex phase requires a non-empty active_slots", p.ID)
+			}
+			if p.ExitTrigger == nil {
+				return fmt.Errorf("team phase %q: flex phase requires exit_trigger", p.ID)
+			}
+		case "gate":
+			if p.ApproverSlot == "" {
+				return fmt.Errorf("team phase %q: gate phase requires approver_slot", p.ID)
+			}
+		}
+	}
+	return nil
+}
+
+// Phases decodes Team.PhasesJSON into []TeamPhase. Returns (nil, nil) for
+// an empty/unset PhasesJSON. Mirrors Slots() exactly: decode-only, no
+// validation (SetPhases is where validation happens, matching
+// SetSlots/validateTeamSlots's own split).
+func (t *Team) Phases() ([]TeamPhase, error) {
+	if t.PhasesJSON == "" {
+		return nil, nil
+	}
+	var out []TeamPhase
+	if err := json.Unmarshal([]byte(t.PhasesJSON), &out); err != nil {
+		return nil, fmt.Errorf("decode team phases: %w", err)
+	}
+	return out, nil
+}
+
+// SetPhases validates and encodes phases into Team.PhasesJSON. A nil slice
+// encodes to "[]", matching the column's own DEFAULT and SetSlots' own
+// convention.
+//
+// Deliberately NOT called from CreateTeam/UpdateTeam (unlike SetSlots,
+// which validateTeamSlots is wired into both of): task 01's own
+// TestTeam_RoundTrip fixture (internal/store/teams_test.go) already saved
+// a PhasesJSON string authored before this type existed
+// (`{"id":"scope_work","kind":"flex"}`, no active_slots/exit_trigger --
+// task 01 deliberately left PhasesJSON undecoded and unvalidated,
+// TASKS/teams/01-team-definition-schema.md). Wiring validateTeamPhases
+// into CreateTeam/UpdateTeam would retroactively reject that
+// already-reviewed-clean, merged fixture and break a passing test outside
+// this task's own scope. SetPhases itself still validates for any new
+// caller (e.g. a future Team-authoring API, TASKS/teams/
+// 10-team-crud-api.md) that chooses to use it.
+func (t *Team) SetPhases(phases []TeamPhase) error {
+	if err := validateTeamPhases(phases); err != nil {
+		return err
+	}
+	if phases == nil {
+		phases = []TeamPhase{}
+	}
+	b, err := json.Marshal(phases)
+	if err != nil {
+		return fmt.Errorf("encode team phases: %w", err)
+	}
+	t.PhasesJSON = string(b)
+	return nil
+}
+
 const teamColumns = `id, name, COALESCE(description,''), slots_json, authority_json,
        routing_json, phases_json, created_at, updated_at, COALESCE(created_by,'')`
 

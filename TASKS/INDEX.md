@@ -458,8 +458,8 @@ Nanite itself), and scope boundaries.
 | `03-add-go-agent-wrapper-dependency` | 2 | implemented | none |
 | `04-migrate-bootdir-layout-to-planter` | 2 | implemented | `02`, `03` |
 | `05-migrate-sandbox-profile-to-applier` | 2 | closed (no migration — see `ESCALATIONS.md`, finding folded into `06`) | `03` |
-| `05a-extend-wrapper-config-for-real-adapters` | 2 (sibling repo, Phase-1-shaped) | implemented | none |
-| `06-migrate-session-lifecycle-to-wrapper` | 2 | not-started — blocked on `05a` | `02`, `04`, `05` (closed), `05a` |
+| `05a-extend-wrapper-config-for-real-adapters` | 2 (sibling repo, Phase-1-shaped) | reviewed | none |
+| `06-migrate-session-lifecycle-to-wrapper` | 2 | not-started — unblocked, ready to re-dispatch | `02`, `04`, `05` (closed), `05a` |
 | `07-dogfeed-validate-host-migration` | 2 | not-started | `04`, `05`, `06` |
 | `08-build-acp-client-abstraction` | 3 | not-started | `02`; recommended after `07` |
 | `09-acp-native-adapter-opencode` | 3 | not-started | `08` |

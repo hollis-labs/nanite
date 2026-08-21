@@ -193,6 +193,22 @@ type AgentProfile struct {
 	// as the actual routing switch is Phase 2's job, not this task's.
 	RuntimeKind string `json:"runtime_kind"`
 
+	// Protocol/Transport (TASKS/agent-host-acp/11-nanite-per-agent-protocol-
+	// transport-config.md) select which wire protocol/transport pairing this
+	// agent's CLI process actually launches through -- orthogonal to
+	// RuntimeKind (which decides CLI vs. API substrate; an ACP-configured
+	// agent still carries RuntimeKind="cli" unchanged). Empty/unset means
+	// "use this provider's existing native protocol" -- 17-acp.md's
+	// explicit "additive, not a cutover" framing; no agent silently
+	// switches to ACP without an operator explicitly writing
+	// Protocol="acp". Transport is only meaningful when Protocol="acp"
+	// (task 10's Copilot CLI adapter supports both "stdio" and "tcp"; every
+	// native protocol's transport is implied by the protocol itself).
+	// Consulted once at launch by internal/runtime/agent/factory.go's
+	// useACPProtocol/effectiveACPTransport. Added by migration 134.
+	Protocol  string `json:"protocol"`
+	Transport string `json:"transport"`
+
 	// PluginID tags this row as created/owned by a plugin's
 	// registers.agent_profiles[] registration (Phase 5 item 03,
 	// TASKS/phase-5/03-wire-registers-agent-profiles.md) -- the plugin's
@@ -244,6 +260,22 @@ func validateAgentMultiAgentFields(a *AgentProfile) error {
 	case "", "cli", "api":
 	default:
 		return fmt.Errorf("runtime_kind %q invalid: must be 'cli' or 'api'", a.RuntimeKind)
+	}
+	// Protocol/Transport (TASKS/agent-host-acp/11) also carry a real
+	// DB-level CHECK (migration 134), mirrored here for the same clean-
+	// Go-error-instead-of-raw-CHECK-failure reason as runtime_kind above.
+	switch a.Protocol {
+	case "", "claude-stream-json", "codex-app-server", "opencode-native", "acp":
+	default:
+		return fmt.Errorf("protocol %q invalid: must be '', 'claude-stream-json', 'codex-app-server', 'opencode-native', or 'acp'", a.Protocol)
+	}
+	switch a.Transport {
+	case "", "stdio", "tcp":
+	default:
+		return fmt.Errorf("transport %q invalid: must be '', 'stdio', or 'tcp'", a.Transport)
+	}
+	if a.Transport != "" && a.Protocol != "acp" {
+		return fmt.Errorf("transport %q is only valid when protocol is 'acp' (got protocol %q)", a.Transport, a.Protocol)
 	}
 	return nil
 }
@@ -363,6 +395,7 @@ const agentColumns = `id, name, slug, COALESCE(avatar,''), system_prompt, COALES
         COALESCE(default_state,'sleeping'),
         COALESCE(consumer_id,''),
         COALESCE(role_id,''), COALESCE(model_id,''), COALESCE(runtime_kind,'api'),
+        COALESCE(protocol,''), COALESCE(transport,''),
         COALESCE(plugin_id,'')`
 
 // scanAgent scans a row into an AgentProfile using the canonical column order.
@@ -385,6 +418,7 @@ func scanAgent(scanner interface{ Scan(...any) error }, a *AgentProfile) error {
 		&a.DefaultState,
 		&a.ConsumerID,
 		&a.RoleID, &a.ModelID, &a.RuntimeKind,
+		&a.Protocol, &a.Transport,
 		&a.PluginID,
 	)
 }
@@ -526,8 +560,9 @@ func (s *Store) CreateAgent(a *AgentProfile) error {
 		                              activation_mode, class, default_state,
 		                              consumer_id,
 		                              role_id, model_id, runtime_kind,
+		                              protocol, transport,
 		                              plugin_id)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		a.ID, a.Name, a.Slug, nullIfEmpty(a.Avatar), a.SystemPrompt, nullIfEmpty(a.Description),
 		a.Modes, nullIfEmpty(a.DefaultModel), a.DefaultProvider,
 		a.MCPServers, a.ToolPermissions, a.CanExecute, a.Settings,
@@ -545,6 +580,7 @@ func (s *Store) CreateAgent(a *AgentProfile) error {
 		a.ActivationMode, a.Class, a.DefaultState,
 		nullIfEmpty(a.ConsumerID),
 		nullIfEmpty(a.RoleID), nullIfEmpty(a.ModelID), a.RuntimeKind,
+		nullIfEmpty(a.Protocol), nullIfEmpty(a.Transport),
 		nullIfEmpty(a.PluginID),
 	)
 	if err != nil {
@@ -700,6 +736,7 @@ func (s *Store) UpdateAgent(a *AgentProfile) error {
 		        activation_mode = ?, class = ?, default_state = ?,
 		        consumer_id = ?,
 		        role_id = ?, model_id = ?, runtime_kind = ?,
+		        protocol = ?, transport = ?,
 		        plugin_id = ?
 		 WHERE id = ?`,
 		a.Name, a.Slug, nullIfEmpty(a.Avatar), a.SystemPrompt, nullIfEmpty(a.Description),
@@ -718,6 +755,7 @@ func (s *Store) UpdateAgent(a *AgentProfile) error {
 		a.ActivationMode, a.Class, a.DefaultState,
 		nullIfEmpty(a.ConsumerID),
 		nullIfEmpty(a.RoleID), nullIfEmpty(a.ModelID), a.RuntimeKind,
+		nullIfEmpty(a.Protocol), nullIfEmpty(a.Transport),
 		nullIfEmpty(a.PluginID),
 		a.ID,
 	)
@@ -778,6 +816,72 @@ func (s *Store) UpdateAgentComposition(agentID string, roleID, consumerID, model
 	}
 	if n == 0 {
 		return fmt.Errorf("update agent composition: agent %q not found", agentID)
+	}
+	return nil
+}
+
+// UpdateAgentACPConfig directly sets an agent's Protocol/Transport columns
+// (TASKS/agent-host-acp/11-nanite-per-agent-protocol-transport-config.md),
+// mirroring UpdateAgentComposition's exact shape and for the identical
+// reason: like role_id/consumer_id/model_id, Protocol/Transport have zero
+// frontmatter representation in internal/agent's markdown Definition
+// format, so routing a write through AgentConfigService.Create/Update's
+// managed-file pipeline (write -> reparse -> IngestAgentDefinition) would
+// silently wipe them back to NULL on every save. This is the one
+// legitimate direct-DB write path for them.
+//
+// protocol/transport are each a *string: nil leaves that column untouched;
+// non-nil (including a pointer to "") sets or clears it. Validated against
+// the same enum validateAgentMultiAgentFields enforces for a full-struct
+// write, so a caller of this narrower path gets the identical rejection
+// for an invalid value (or an explicit transport set without protocol=
+// "acp") instead of a raw CHECK-constraint failure.
+func (s *Store) UpdateAgentACPConfig(agentID string, protocol, transport *string) error {
+	if agentID == "" {
+		return fmt.Errorf("update agent acp config: agent_id is required")
+	}
+	if protocol != nil || transport != nil {
+		existing, err := s.GetAgent(agentID)
+		if err != nil {
+			return fmt.Errorf("update agent acp config: %w", err)
+		}
+		probe := AgentProfile{RuntimeKind: "cli", Protocol: existing.Protocol, Transport: existing.Transport}
+		if protocol != nil {
+			probe.Protocol = *protocol
+		}
+		if transport != nil {
+			probe.Transport = *transport
+		}
+		if err := validateAgentMultiAgentFields(&probe); err != nil {
+			return fmt.Errorf("update agent acp config: %w", err)
+		}
+	}
+
+	sets := make([]string, 0, 2)
+	args := make([]any, 0, 3)
+	if protocol != nil {
+		sets = append(sets, "protocol = ?")
+		args = append(args, nullIfEmpty(*protocol))
+	}
+	if transport != nil {
+		sets = append(sets, "transport = ?")
+		args = append(args, nullIfEmpty(*transport))
+	}
+	if len(sets) == 0 {
+		return nil
+	}
+	args = append(args, agentID)
+	query := "UPDATE agent_profiles SET " + strings.Join(sets, ", ") + " WHERE id = ?"
+	res, err := s.DB.Exec(query, args...)
+	if err != nil {
+		return fmt.Errorf("update agent acp config: %w", err)
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("update agent acp config: %w", err)
+	}
+	if n == 0 {
+		return fmt.Errorf("update agent acp config: agent %q not found", agentID)
 	}
 	return nil
 }

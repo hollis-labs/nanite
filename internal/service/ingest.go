@@ -284,6 +284,17 @@ func upsertAgentDef(st *store.Store, def *agentpkg.Definition, bootPass bool) er
 		profile.RoleID = existing.RoleID
 		profile.ConsumerID = existing.ConsumerID
 		profile.ModelID = existing.ModelID
+		// protocol / transport (TASKS/agent-host-acp/11-nanite-per-agent-
+		// protocol-transport-config.md) are the identical shape: zero
+		// frontmatter representation, written via the direct-DB
+		// store.UpdateAgentACPConfig path (mirroring store.
+		// UpdateAgentComposition above). Without this preservation line,
+		// the very next unrelated managed-agent edit through this path
+		// would silently wipe an operator's protocol="acp" configuration
+		// back to "" (native) — same regression this file's RoleID/
+		// ConsumerID/ModelID preservation exists to prevent.
+		profile.Protocol = existing.Protocol
+		profile.Transport = existing.Transport
 		// TASKS/phase-1/08: on a boot-time pass, a row that's already been
 		// ingested under its current source is frozen -- skip the content
 		// sync so a DB-side edit (however it landed) survives the next

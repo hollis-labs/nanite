@@ -4,7 +4,9 @@ import (
 	"encoding/json"
 
 	agentsessions "github.com/hollis-labs/agentkit/agentsessions"
+	"github.com/hollis-labs/go-agent-wrapper/adapters"
 	"github.com/hollis-labs/go-providers/provider"
+	"github.com/hollis-labs/nanite/internal/store"
 )
 
 // streamingStdioUserFrame wraps raw text as a single NDJSON object in the
@@ -159,4 +161,46 @@ func runtimeConfigForAdapter(adapter provider.CLIAdapter, providerName string, m
 	cfg.Caps.StreamingStdio = shouldUseStreamingStdio(providerName, mode)
 	cfg.Caps.Resize = true
 	return cfg
+}
+
+// useACPProtocol reports whether profile is explicitly configured to
+// launch through the ACP client abstraction (TASKS/agent-host-acp/08-11,
+// libs/go-agent-wrapper's acp package plus its opencodeacp/copilotacp
+// native adapters) instead of its provider's existing native protocol.
+//
+// This is the per-agent Protocol/Transport dispatch decision
+// TASKS/agent-host-acp/11-nanite-per-agent-protocol-transport-config.md
+// adds, consulted from agent.Boot at the same point runtimeConfigForAdapter
+// (above) picks the native runtime shape — the same conceptual
+// "provider-dispatch logic" slot, per this task's own instruction.
+//
+// Empty/unset profile.Protocol (the default for every pre-existing
+// agent_profiles row, and for any agent an operator hasn't explicitly
+// opted in) means "use the native protocol" — 17-acp.md's explicit
+// "additive, not a cutover" framing. No new agents.runtime_kind value is
+// introduced or consulted here: an ACP-configured agent still carries
+// runtime_kind='cli' unchanged (verified by
+// TestUseACPProtocolDoesNotTouchRuntimeKind) — this function only ever
+// runs once runtime_kind has already routed the launch into this CLI
+// runtime package (see effectiveProvider's own doc comment for the
+// identical, established precedent of a narrower in-package dispatch
+// question that "runtime_kind alone can't answer").
+func useACPProtocol(profile *store.AgentProfile) bool {
+	return profile != nil && profile.Protocol == "acp"
+}
+
+// effectiveACPTransport resolves the adapters.Transport an ACP-configured
+// agent should connect over, defaulting to stdio when
+// agent_profiles.transport is unset — every native ACP adapter this batch
+// ships (task 09 OpenCode, task 10 Copilot CLI's stdio mode) supports
+// stdio; only Copilot CLI's daemon mode additionally supports tcp (task
+// 10). Only meaningful when useACPProtocol(profile) is true —
+// validateAgentMultiAgentFields (internal/store/agents.go) rejects a
+// transport value paired with any protocol other than "acp" before a row
+// can ever reach this function with a non-empty Transport.
+func effectiveACPTransport(profile *store.AgentProfile) adapters.Transport {
+	if profile != nil && profile.Transport == "tcp" {
+		return adapters.TransportTCP
+	}
+	return adapters.TransportStdio
 }

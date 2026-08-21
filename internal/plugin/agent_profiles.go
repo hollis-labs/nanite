@@ -111,6 +111,13 @@ type PluginAgentProfileAgent struct {
 	RuntimeKind     string `yaml:"runtime_kind,omitempty"`
 	DefaultModel    string `yaml:"default_model,omitempty"`
 	DefaultProvider string `yaml:"default_provider,omitempty"`
+	// Protocol/Transport (TASKS/agent-host-acp/11-nanite-per-agent-protocol-
+	// transport-config.md) mirror agent_profiles.protocol/transport (see
+	// internal/store/agents.go's AgentProfile doc comment). Both optional --
+	// empty means "use this provider's existing native protocol," same
+	// default as every other agent_profiles row.
+	Protocol  string `yaml:"protocol,omitempty"`
+	Transport string `yaml:"transport,omitempty"`
 	// SystemPromptOverride is the agent-composition-layer override of the
 	// role's system_prompt (the cascade's middle tier). Almost always left
 	// empty in practice -- an empty value here means the agent's effective
@@ -207,6 +214,19 @@ func (d *PluginAgentProfileDocument) Validate() error {
 	case "", "cli", "api":
 	default:
 		return fmt.Errorf("agent.runtime_kind %q invalid: must be 'cli' or 'api'", d.Agent.RuntimeKind)
+	}
+	switch d.Agent.Protocol {
+	case "", "claude-stream-json", "codex-app-server", "opencode-native", "acp":
+	default:
+		return fmt.Errorf("agent.protocol %q invalid: must be '', 'claude-stream-json', 'codex-app-server', 'opencode-native', or 'acp'", d.Agent.Protocol)
+	}
+	switch d.Agent.Transport {
+	case "", "stdio", "tcp":
+	default:
+		return fmt.Errorf("agent.transport %q invalid: must be '', 'stdio', or 'tcp'", d.Agent.Transport)
+	}
+	if d.Agent.Transport != "" && d.Agent.Protocol != "acp" {
+		return fmt.Errorf("agent.transport %q is only valid when agent.protocol is 'acp' (got %q)", d.Agent.Transport, d.Agent.Protocol)
 	}
 	return nil
 }
@@ -450,6 +470,8 @@ func applyPluginAgentProfile(ctx context.Context, host *Host, st *store.Store, p
 	agentRow.Class = doc.Agent.Class
 	agentRow.ActivationMode = doc.Agent.ActivationMode
 	agentRow.RuntimeKind = doc.Agent.RuntimeKind
+	agentRow.Protocol = doc.Agent.Protocol
+	agentRow.Transport = doc.Agent.Transport
 	agentRow.DefaultModel = doc.Agent.DefaultModel
 	agentRow.DefaultProvider = doc.Agent.DefaultProvider
 	agentRow.RoleID = role.ID

@@ -231,7 +231,22 @@ type Session struct {
 	// runtimeevents.KindSessionReady — Boot blocks until that point (or a
 	// pre-ready failure) before ever returning a *Session, so every method
 	// below can assume wr is ready.
+	//
+	// Mutually exclusive with acp (below) — a Session is driven through
+	// exactly one backend, decided once at Boot by factory.go's
+	// useACPProtocol.
 	wr *wrapper.Wrapper
+
+	// acp, when non-nil, is the ACP-client-driven backend for a session
+	// configured with agent_profiles.protocol="acp"
+	// (TASKS/agent-host-acp/11-nanite-per-agent-protocol-transport-
+	// config.md) — see acp_session.go's package doc for why this bypasses
+	// wr/wrapper.Wrapper.Run entirely rather than routing an ACP-protocol
+	// agent through the same wrapper.Config.Adapter seam as the native
+	// path. SendInput/Stop (manager.go) branch on this field being set;
+	// Wait/Checkpoint are backend-agnostic (runDone/runErr are populated
+	// identically by both bootACP and the native Boot path).
+	acp *acpSession
 
 	// runDone closes once the background goroutine Boot started observes
 	// wr.Run(runCtx) return (clean exit or error alike) — safe for any
@@ -379,6 +394,24 @@ func Boot(ctx context.Context, deps *Dependencies, opts Options) (*Session, erro
 		deps.PathGrants.RegisterLineage(sessID, opts.ParentSessionID)
 		hadLineage = true
 	}
+
+	// providerName is resolved here (moved ahead of the native bootdir-setup
+	// block below) so the ACP dispatch branch immediately after can consult
+	// it before ever calling composeBootdirParams/layout.Setup —
+	// TASKS/agent-host-acp/11: an ACP-configured agent (factory.go's
+	// useACPProtocol) skips Nanite's provider-specific boot-dir planting
+	// entirely (no planted CLAUDE.md/config.toml — neither task 09's nor
+	// task 10's native ACP adapter has been shown to consume it; see
+	// acp_session.go's package doc), so it must never reach
+	// bootdirLayoutFor(providerName), which has no case for an ACP-only
+	// provider name like "copilot" and would fail with "bootdir for
+	// provider ... is not yet implemented."
+	providerName := effectiveProvider(opts, profile)
+
+	if useACPProtocol(profile) {
+		return bootACP(ctx, deps, opts, profile, providerName, sessID, ws, hadLineage)
+	}
+
 	layout, params := composeBootdirParams(deps, opts, profile, sessID)
 	bootDir, err := layout.Setup(params)
 	if err != nil {
@@ -403,7 +436,6 @@ func Boot(ctx context.Context, deps *Dependencies, opts Options) (*Session, erro
 
 	spawnWorkdir := layout.SpawnWorkdir(bootDir, opts.Workdir)
 
-	providerName := effectiveProvider(opts, profile)
 	adapter := deps.ProviderAdapter(providerName)
 	if adapter == nil {
 		return cleanup(fmt.Errorf("agent.Boot: no adapter registered for provider %q", providerName))

@@ -154,6 +154,19 @@ func (a *API) handleCreateAgent(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// protocol/transport (TASKS/agent-host-acp/11) -- same DB-only,
+	// zero-frontmatter-representation shape as role_id/consumer_id/
+	// model_id immediately above.
+	if req.Protocol != "" || req.Transport != "" {
+		if err := a.Services.Store.UpdateAgentACPConfig(res.Profile.ID, ptrOrNilString(req.Protocol), ptrOrNilString(req.Transport)); err != nil {
+			a.errorResp(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		if refreshed, err := a.Services.Store.GetAgent(res.Profile.ID); err == nil {
+			res.Profile = refreshed
+		}
+	}
+
 	view := a.agentView(*res.Profile)
 	a.jsonResp(w, http.StatusCreated, view)
 }
@@ -337,6 +350,17 @@ func (a *API) handleUpdateAgent(w http.ResponseWriter, r *http.Request) {
 	// clear) match every other partial-update field on UpdateAgentRequest.
 	if req.RoleID != nil || req.ConsumerID != nil || req.ModelID != nil {
 		if err := a.Services.Store.UpdateAgentComposition(res.Profile.ID, req.RoleID, req.ConsumerID, req.ModelID); err != nil {
+			a.errorResp(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		if refreshed, err := a.Services.Store.GetAgent(res.Profile.ID); err == nil {
+			res.Profile = refreshed
+		}
+	}
+
+	// protocol/transport -- see handleCreateAgent's matching comment.
+	if req.Protocol != nil || req.Transport != nil {
+		if err := a.Services.Store.UpdateAgentACPConfig(res.Profile.ID, req.Protocol, req.Transport); err != nil {
 			a.errorResp(w, http.StatusBadRequest, err.Error())
 			return
 		}

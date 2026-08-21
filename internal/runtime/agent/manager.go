@@ -24,7 +24,17 @@ import (
 // for why Boot no longer registers this session with
 // Dependencies.SessionsManager at all.
 func (s *Session) SendInput(payload []byte) error {
-	if s == nil || s.wr == nil {
+	if s == nil {
+		return errors.New("agent.Session.SendInput: session not initialized")
+	}
+	// ACP backend (TASKS/agent-host-acp/11): acp.Client.Prompt drives its
+	// own ACP-native framing internally -- none of the streaming-stdio
+	// NDJSON framing below applies (that's specific to claude's native
+	// protocol, an entirely different wire shape from ACP).
+	if s.acp != nil {
+		return s.acp.SendInput(context.Background(), payload)
+	}
+	if s.wr == nil {
 		return errors.New("agent.Session.SendInput: session not initialized")
 	}
 	if shouldUseStreamingStdio(s.Provider, s.Mode) {
@@ -50,10 +60,23 @@ func (s *Session) SendInput(payload []byte) error {
 // own. The ephemeral boot dir is removed on success, matching
 // pre-migration behavior.
 func (s *Session) Stop(ctx context.Context) error {
-	if s == nil || s.wr == nil {
+	if s == nil {
 		return errors.New("agent.Session.Stop: session not initialized")
 	}
-	err := s.wr.Stop(ctx)
+	if s.wr == nil && s.acp == nil {
+		return errors.New("agent.Session.Stop: session not initialized")
+	}
+
+	var err error
+	if s.acp != nil {
+		// ACP backend (TASKS/agent-host-acp/11): acpSession.Stop
+		// Cancel-then-Closes the acp.Client directly -- see its own doc
+		// comment for why this mirrors wr.Stop's interrupt-then-terminate
+		// shape without touching wr at all.
+		err = s.acp.Stop(ctx)
+	} else {
+		err = s.wr.Stop(ctx)
+	}
 
 	// Path-grant lineage clears even if Stop fails — Boot registered it
 	// during launch, so a failed Stop must not leak the lineage entry.
@@ -102,7 +125,7 @@ func (s *Session) Wait(ctx context.Context) error {
 // empty id without error so callers can no-op — unchanged by this
 // migration.
 func (s *Session) Checkpoint(ctx context.Context) (string, error) {
-	if s == nil || s.wr == nil {
+	if s == nil || (s.wr == nil && s.acp == nil) {
 		return "", errors.New("agent.Session.Checkpoint: session not initialized")
 	}
 	_ = ctx

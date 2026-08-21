@@ -117,6 +117,16 @@ type CreateAgentRequest struct {
 	RoleID     string `json:"role_id"`
 	ConsumerID string `json:"consumer_id"`
 	ModelID    string `json:"model_id"`
+	// Protocol/Transport (TASKS/agent-host-acp/11-nanite-per-agent-protocol-
+	// transport-config.md) select which wire protocol/transport pairing
+	// this agent's CLI process launches through -- same "DB-only, zero
+	// frontmatter representation" shape as RoleID/ConsumerID/ModelID above,
+	// written the same way (store.UpdateAgentACPConfig, a direct-DB step
+	// separate from AgentConfigService.Create's file-based write). Empty
+	// means "use this provider's existing native protocol" (the default,
+	// preserving every pre-existing agent's behavior unchanged).
+	Protocol  string `json:"protocol"`
+	Transport string `json:"transport"`
 }
 
 type UpdateAgentRequest struct {
@@ -153,6 +163,12 @@ type UpdateAgentRequest struct {
 	RoleID     *string `json:"role_id"`
 	ConsumerID *string `json:"consumer_id"`
 	ModelID    *string `json:"model_id"`
+	// Protocol/Transport -- see CreateAgentRequest's doc comment. Pointer
+	// semantics match RoleID/ConsumerID/ModelID immediately above: nil
+	// leaves the column untouched, a pointer to "" clears it back to
+	// "native protocol," a pointer to a non-empty value sets it.
+	Protocol  *string `json:"protocol"`
+	Transport *string `json:"transport"`
 	// Revision is the optimistic-concurrency token the client loaded with the
 	// agent (the managed file's content hash). When set, the update is
 	// rejected with 409 if the on-disk file changed underneath. Empty skips

@@ -136,13 +136,19 @@ var examplePayloads = map[string]string{
 		"columns": [
 			{"key": "id", "label": "ID", "sortable": true},
 			{"key": "title", "label": "Title"},
-			{"key": "status", "label": "Status", "sortable": true}
+			{"key": "status", "label": "Status", "sortable": true, "actions": [
+				{"id": "mark_done", "label": "Mark done", "style": "primary"}
+			]}
 		],
 		"rows": [
 			{"id": "T-1", "title": "Fix bug", "status": "done"},
 			{"id": "T-2", "title": "Add tests", "status": "in_progress"}
 		],
-		"caption": "2 tasks total"
+		"caption": "2 tasks total",
+		"actions": [
+			{"id": "reassign", "label": "Reassign"},
+			{"id": "delete", "label": "Delete", "style": "destructive", "confirm": true, "confirm_message": "Delete this task?"}
+		]
 	}`,
 	"timeline-card": `{
 		"title": "Deployment Timeline",
@@ -238,6 +244,13 @@ var examplePayloads = map[string]string{
 var invalidPayloads = map[string]string{
 	// G-4 — subagent spawn approval: missing required fields role/prompt/mode.
 	"subagent-spawn-approval": `{"run_id":"r-1"}`,
+	// Phase 6 interactive-table actions: an action missing the required
+	// "label" field must fail $defs/action's required check.
+	"table-card": `{
+		"columns": [{"key": "id", "label": "ID"}],
+		"rows": [{"id": "T-1"}],
+		"actions": [{"id": "reassign"}]
+	}`,
 }
 
 // loadSchemaFiles returns all schema files from the go-envelopes lib's

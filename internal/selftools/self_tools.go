@@ -255,7 +255,7 @@ func selfToolDefinitions() []mcp.Tool {
 				"- `diff-card`: data={before:{label, content}, after:{label, content}} — optional format: text|code.\n\n" +
 				"**Unfamiliar type or first failure?** Call `tool_describe(name=\"card_show\")` for the full set of golden examples — one per v1 type with realistic values + optional fields populated, plus reference shapes for the decision-flow / backend-only types (session-task, error-report, approval-card, proposal-card, confirmation-card). The per-type schemas use `additionalProperties: false`, so unknown field names are rejected; the examples are the fastest way to anchor on the exact field set.\n\n" +
 				"**Grounding for `report-card` / `document-viewer`:** these prose-bearing types require a `sources` array — each source's `tool_use_id` must come from a tool call you actually made this turn. **When building the `sources` array, copy `tool_use_id` values verbatim from the `tool_result` blocks earlier in this turn** — do not retype, abbreviate, or pattern-match a plausible-looking id. **If you have no real tool_use_ids from this turn, return a plain-text reply describing what you couldn't fetch — do not render the card.** Inventing or reusing prior-turn `tool_use_id`s is rejected at the `card_show` boundary by a runtime validator that compares each `sources[i].tool_use_id` against this turn's known set; the error reads `source[i].tool_use_id \"…\" is not from this turn — known tool_use_ids: [...]`. Synthesizing metric values is allowed ONLY when the user explicitly invited a demo or sketch (\"sketch\", \"demo\", \"show me an example\"); the `tool_use_id`s must still come from real tool calls this turn. (CW-20260512-0100 R3: this rule moved here from the per-turn `nativeToolGuide` so agents see it in the authoritative location — right before invocation.)\n\n" +
-				"**Required context:** `type` from the v1 allow-list and `data` matching the per-type schema. The handler validates `data` against `internal/envelope/schemas/<type>.schema.json` at the boundary; payloads that miss required fields, wrong types, or carry unknown keys are rejected with a structured error citing the schema field that failed.\n\n" +
+				"**Required context:** `type` from the v1 allow-list and `data` matching the per-type schema. The handler validates `data` against the registered per-type JSON Schema at the boundary; payloads that miss required fields, wrong types, or carry unknown keys are rejected with a structured error citing the schema field that failed.\n\n" +
 				"**Render destination:** By default the card lands wherever the schema's `default_render_target` says — for the 9 passive renderables that's the bottom drawer. Pass `render_target` to override, or `render_target=\"\"` to force-inline. `target` (visibility — open this drawer) and `mode` (workspace preset) remain independent levers; both can travel with the envelope.",
 			InputSchema: map[string]any{
 				"type": "object",
@@ -277,7 +277,7 @@ func selfToolDefinitions() []mcp.Tool {
 					},
 					"data": map[string]any{
 						"type":        "object",
-						"description": "Card payload matching the schema for the chosen `type`. Schemas live at internal/envelope/schemas/<type>.schema.json — fields the schema doesn't declare are rejected (additionalProperties:false).",
+						"description": "Card payload matching the schema for the chosen `type`. Each type has a registered JSON Schema — fields the schema doesn't declare are rejected (additionalProperties:false).",
 					},
 					"sources": map[string]any{
 						"type":        "string",
@@ -369,10 +369,10 @@ func selfToolDefinitions() []mcp.Tool {
 		},
 		{
 			Name: "todo_list",
-			Description: "List todos with optional filters, and render an interactive todo-list card when scope is provided.\n\n" +
+			Description: "List todos with optional filters, and render an interactive todo list card (a `list-card` with a live todos data source) when scope is provided.\n\n" +
 				"**When to use:** When the user asks to see their todos, check what's pending, or view the task list for a session or project.\n\n" +
 				"**Scope semantics:** Pass `scope` + `scope_id` to get a correctly scoped live card. For `scope=session`, `scope_id` is auto-filled from the current session context when omitted — you do not need to supply it explicitly. For `scope=project`, supply the project_id explicitly (or rely on the current session's project).\n\n" +
-				"**Output shape:** Text summary of matching todos (count + titles). When `scope` is provided, also emits an interactive todo-list envelope that the UI renders as a live card (lazy-fetches current data at render time — NOT the snapshot from this call). Do NOT emit a nanite-envelope block manually — this tool handles that automatically.\n\n" +
+				"**Output shape:** Text summary of matching todos (count + titles). When `scope` is provided, also emits a `list-card` envelope (with a `data_source` pointer) that the UI renders as a live card (lazy-fetches current data at render time — NOT the snapshot from this call). Do NOT emit a nanite-envelope block manually — this tool handles that automatically.\n\n" +
 				"**When NOT to use:** Do not call without `scope` if you want the interactive card — a scopeless call returns text only and emits no card.",
 			InputSchema: map[string]any{
 				"type": "object",
@@ -392,8 +392,9 @@ func selfToolDefinitions() []mcp.Tool {
 				"**When to use:** When the user describes a multi-step or phased deliverable where order and dependencies matter — code migrations, feature rollouts, structured workflows. Prefer plans over todos when steps have depends_on relationships or acceptance criteria.\n\n" +
 				"**When NOT to use:** For simple unordered checklists, use todo_create instead. Do not create a plan for a single action.\n\n" +
 				"**Scope semantics:** Same three-tier scope as todos (workspace / project / session). For `scope=session`, `scope_id` is auto-filled from the current session context when omitted.\n\n" +
-				"**After creating a plan with status 'proposed'**, emit a plan-review envelope so the user can approve or reject inline:\n" +
-				"```nanite-envelope\n{\"kind\":\"envelope\",\"version\":1,\"type\":\"plan-review\",\"data\":{\"plan_id\":\"...\",\"title\":\"...\",\"description\":\"...\",\"status\":\"proposed\",\"steps\":[{\"id\":\"...\",\"title\":\"...\"}]}}\n```\n\n" +
+				"**After creating a plan with status 'proposed'**, emit TWO envelopes so the user can review the steps and approve/reject inline — a `list-card` for the live step list and a `confirmation-card` for the approve/reject/request-changes decision. (The standalone `plan-review` type is retired — this two-card composition replaces it; see TASKS/phase-6/02-rebuild-plan-review-as-composition.md. Both cards share the same `plan_id` and re-fetch the plan live, so they stay in sync with each other and with any later plan_update calls.) Note `list-card` items use `label`, not `title`, for the step text:\n" +
+				"```nanite-envelope\n{\"kind\":\"envelope\",\"version\":1,\"type\":\"list-card\",\"data\":{\"title\":\"...\",\"items\":[{\"id\":\"...\",\"label\":\"...\",\"status\":\"pending\"}],\"data_source\":{\"kind\":\"plans\",\"plan_id\":\"...\"}}}\n```\n" +
+				"```nanite-envelope\n{\"kind\":\"envelope\",\"version\":1,\"type\":\"confirmation-card\",\"data\":{\"title\":\"Approve \\\"...\\\"?\",\"message\":\"...\",\"confirm_label\":\"Approve plan\",\"cancel_label\":\"Reject\",\"data_source\":{\"kind\":\"plan_approval\",\"plan_id\":\"...\"}}}\n```\n\n" +
 				"**Output shape:** \"Created plan <title> (<id>)\" on success. Use plan_get to retrieve the full plan with step IDs.\n\n" +
 				"**Chaining:** Follow with plan_update(step_id=...) to advance individual step statuses as work progresses.",
 			InputSchema: map[string]any{

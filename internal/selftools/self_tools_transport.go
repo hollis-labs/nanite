@@ -1140,10 +1140,10 @@ func (st *SelfToolsTransport) callTodoList(ctx context.Context, args map[string]
 	}
 
 	// D1 (CW-20260428-0014): resolve scope_id / project_id from ctx when the
-	// agent omits them so the emitted todo-list envelope carries the real
-	// IDs. Otherwise TodoListCard lazy-fetches with empty filters and the
-	// drawer renders nothing. Listing itself still works fine with an empty
-	// filter, so this is best-effort — no error path.
+	// agent omits them so the emitted list-card envelope carries the real
+	// IDs. Otherwise the live todo composition lazy-fetches with empty
+	// filters and the drawer renders nothing. Listing itself still works
+	// fine with an empty filter, so this is best-effort — no error path.
 	scopeArg := strArg(args, "scope", "")
 	scopeIDArg := strArg(args, "scope_id", "")
 	projectIDArg := strArg(args, "project_id", "")
@@ -1189,22 +1189,32 @@ func (st *SelfToolsTransport) callTodoList(ctx context.Context, args map[string]
 		}
 	}
 
-	// Emit a todo-list envelope so the UI renders an interactive card. The
-	// TodoListCard component lazy-fetches /api/todos by scope + scope_id, so
-	// the envelope only needs to carry the filter coordinates — not the items
-	// themselves. We only attach the envelope when scope is present; an empty
-	// scope would render an un-scoped card that matches every session.
-	// CW-20260418-0045.
+	// Emit a list-card envelope (with a live `data_source` pointer) so the
+	// UI renders an interactive card. This is the Phase 6 composition that
+	// replaced the standalone `todo-list` envelope type
+	// (TASKS/phase-6/01-rebuild-todo-list-as-composition.md) — the frontend
+	// ListCard component detects data_source.kind == "todos" and
+	// lazy-fetches /api/todos by scope + scope_id itself, so the envelope
+	// only needs to carry the filter coordinates, not the items themselves.
+	// `items` still carries an empty placeholder array to satisfy
+	// list-card's schema (`items` is required); the frontend does not
+	// trust it when data_source is set. We only attach the envelope when
+	// scope is present; an empty scope would render an un-scoped card that
+	// matches every session. CW-20260418-0045.
 	if f.Scope != "" {
 		title := strArg(args, "title", "Todos")
 		envJSON, _ := json.Marshal(map[string]any{
 			"kind":    "envelope",
 			"version": 1,
-			"type":    "todo-list",
+			"type":    "list-card",
 			"data": map[string]any{
-				"scope":    f.Scope,
-				"scope_id": f.ScopeID,
-				"title":    title,
+				"title": title,
+				"items": []any{},
+				"data_source": map[string]any{
+					"kind":     "todos",
+					"scope":    f.Scope,
+					"scope_id": f.ScopeID,
+				},
 			},
 		})
 		fmt.Fprintf(&sb, "\n<!--ENVELOPE_DATA:%s:ENVELOPE_DATA-->", string(envJSON))

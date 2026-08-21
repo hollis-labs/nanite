@@ -1,7 +1,7 @@
 # Exclude Card data from replayed conversation history (the highest-leverage item in this phase)
 
 **Phase:** 6
-**Status:** not-started
+**Status:** reviewed
 **Depends on:** none
 **Touches:** `internal/chat/context_client.go:256-267` (`AssembleSlotSources`'s message-history build — **the actual fix site, not `internal/context/compaction.go`**, see Context), `internal/service/chat_generate.go:1801,1868-1972,2004-2008` (the emit/persist path, read-only reference — confirms the shape of what needs filtering, not itself the fix site), `internal/chat/structured.go` (`StructuredMessage`, `EnvelopeRef`, `MarshalContent`)
 
@@ -31,7 +31,40 @@ Architecture doc `08-cards.md`: *"Tool-auto-emitted card data is already exclude
 - `go build ./cmd/nanite/`, `go vet ./...`, `go test ./...` pass.
 
 ## Work log
-<Worker fills this in as it goes: what was actually done, any deviation from plan and why, anything escalated.>
+
+Implemented exactly at the fix site the task identified — `internal/chat/context_client.go`'s `AssembleSlotSources` message-history build — plus a small support helper in `internal/chat/structured.go`, which is the same file `StructuredMessage`/`EnvelopeRef`/`MarshalContent` already live in.
+
+**Mechanism changed:**
+
+1. Added `replayContent(content string) string` to `internal/chat/structured.go`. It trims the input, and if it doesn't start with `{`, returns it unchanged (covers plain user text and `envelope_response` rows, which are formatted by `FormatEnvelopeResponseContent` as `"[envelope:type status:...] {...}"` — never `{`-prefixed). If it does start with `{`, it unmarshals into `StructuredMessage`; on unmarshal failure or `Version == 0` (non-`StructuredMessage`-shaped legacy JSON), it also returns the input unchanged. Otherwise it returns only `sm.Text`, discarding `sm.Envelopes` and `sm.ToolCalls` entirely. Same fallback shape as the existing precedent in `internal/recovery/pack/pack.go`'s `MessagePlainText` (which unwraps the same JSON shape for a different purpose — Recovery Pack replay text — confirming this is an established, safe pattern in this codebase, not a new one).
+2. Changed exactly one line in `context_client.go`'s `AssembleSlotSources` (was line 265, in the `messages, err := cb.Store.ListMessages(...)` loop): `chatMessages[i] = llmtypes.ChatMessage{Role: role, Content: m.Content}` → `chatMessages[i] = llmtypes.ChatMessage{Role: role, Content: replayContent(m.Content)}`. This is the only call site of `ListMessages` inside `AssembleSlotSources`, and `AssembleSlotSources` has exactly one caller (`internal/service/context.go:204`), confirmed by grep — this is the single, real path that turns persisted message rows into LLM-facing conversation history for a turn.
+
+No other file was touched. `chat_generate.go`'s emit/persist path (`WrapResponse` → `MarshalContent` → `store.Message.Content`) is completely unchanged — `StructuredMessage.Envelopes` still gets written in full on every turn, exactly as before. Only what gets *read back* for history replay on a later turn changed, per the task's item 3.
+
+**Verification that Card rendering and the response round trip are unaffected (task item 2 / "no regression"):**
+
+- Confirmed via grep that the persisted, page-reload FE rendering path reads the separate `store.Message.Envelope` column (`internal/api/envelopes.go`), populated independently from `envelopeJSON` in `chat_generate.go:1793-1798`/`1938` — not `StructuredMessage.Envelopes` inside `Content`. `replayContent` only touches `Content`; `Envelope` is untouched. Persisted-card rendering on reload is unaffected.
+- Confirmed via grep (`grep -rn "StructuredMessage\|\.Envelopes\b" internal --include="*.go"`) that `StructuredMessage.Envelopes` has zero readers anywhere in the codebase other than the one line changed here — matches the task's own claim.
+- Confirmed the "current turn's own just-emitted card" visibility the model needs mid-turn comes from a structurally separate mechanism: `chat.ExtractEnvelopeMarker`/`captureEnvelopeData` (`internal/service/chat_generate.go` ~3041-3063) strips/extracts the `ENVELOPE_DATA` marker from *live* tool-result text within the in-flight turn, before that turn's own message is ever persisted. `AssembleSlotSources` only ever loads *already-persisted* rows (turns 1..N-1) when assembling context for turn N — the card the model is about to emit in turn N doesn't exist in `messages` yet when `AssembleSlotSources` runs, so there is no overlap/conflict between the two mechanisms, and this fix cannot regress it.
+- Confirmed the envelope-response round trip is untouched: `FormatEnvelopeResponseContent` output (`"[envelope:type status:...] {...}"`) never starts with `{`, so `replayContent` returns it verbatim — response payloads a user submits via `POST /api/envelopes/{id}/respond` still replay into history exactly as before.
+- Added `TestReplayContent_FallsBackForNonStructuredContent` covering plain user text, legacy non-`StructuredMessage` JSON, an actual `FormatEnvelopeResponseContent`-shaped `envelope_response` row, and empty content — all pass through byte-for-byte unchanged.
+
+**Context-size measurement (task item 4 / Done-means bullet — real session, before/after numbers):**
+
+Used the real backed-up database at `~/.local/share/nanite/workspaces/default/backups/main.db.pre-execution-backup-20260818-132726` (copied to the scratchpad to avoid touching the live file). Queried for the session with the most assistant turns carrying persisted card data:
+
+- Session `782cb1e1-3db7-4280-a39b-ccedeb762257`: 36 total messages, 6 historical assistant turns carrying real card data (`report-card` x5, `list-card`, `todo-list` — mix, one turn carries two).
+- Added a temporary, env-gated test (`internal/chat/zzz_measure_temp_test.go`, deleted after capturing this measurement — never committed) that ran `s.ListMessages(sessionID, 200)` (the exact call `AssembleSlotSources` makes) and summed `len(m.Content)` / `EstimateTokens(m.Content)` before vs. after `replayContent`, i.e. exactly what a late-session turn's replayed history looks like pre- and post-fix.
+- **Before:** 76,936 chars / ~19,222 estimated tokens of replayed message history.
+- **After:** 42,716 chars / ~10,669 estimated tokens.
+- **Reduction:** 34,220 chars / ~8,553 estimated tokens — **44.5%** — on a session whose card payloads happened to make up a large share of its total content. This is exactly the mechanism the architecture doc describes: a card shown once stops costing full-payload context on every later turn.
+
+**Deviation from plan:** none of substance. The fix landed exactly where the task said it would (`context_client.go:266`, now `replayContent(m.Content)` — the surrounding code shifted by a few lines during earlier phases but the target statement was still the same one). Added a small, well-precedented helper (`replayContent`) in `structured.go` rather than inlining the unmarshal in `context_client.go`, since `StructuredMessage` and its JSON shape already live there and `internal/recovery/pack` establishes the same "unwrap `StructuredMessage`, fall back to raw content" pattern as a first-class helper rather than inline logic. Also ran `gofmt -w` on `structured.go`, which fixed a pre-existing (unrelated) struct-tag alignment issue in the same file I was already editing — noted as a drive-by fix, not part of the task's substance.
+
+**Baseline checks:**
+- `go build ./cmd/nanite/` — clean, no errors.
+- `go vet ./...` — one pre-existing failure in `internal/service/container.go` (`stopReaper`/`stopRuntimeReaper` "not used on all paths" possible-leak lint), confirmed via `git stash` to exist identically on the unmodified baseline before this task's changes — unrelated to this task's fix site, not touched or introduced by this work.
+- `go test ./...` — all 91 packages pass, zero failures, including new tests: `TestReplayContent_StripsEnvelopeData`, `TestReplayContent_FallsBackForNonStructuredContent` (4 subtests), `TestReplayContent_PreservesTextOnlyStructuredMessage` (`internal/chat/structured_test.go`), and `TestAssembleSlotSources_ExcludesEnvelopeDataFromReplayedHistory` (`internal/chat/context_client_test.go`), an end-to-end test that persists a real `store.Message` row shaped exactly like `chat_generate.go` produces (200-row synthetic table-card via `WrapResponse`/`MarshalContent`) and asserts `AssembleSlotSources`'s `Messages` slot contains only the turn's `Text`, while the underlying stored row (verified via a direct `ListMessages` call) still retains the full envelope payload untouched.
 
 ## Review notes
-<Reviewer fills this in: pass/fail, what was checked, anything fixed and how.>
+**2026-08-21, fresh Reviewer (no shared context with the implementing worker): PASS — strongest piece of the phase.** Confirmed the single real fix site (`AssembleSlotSources`, one call site feeding every downstream consumer). `replayContent`'s `Version == 0` guard correctly distinguishes real `StructuredMessage` JSON (always `Version:1`) from legacy/non-structured JSON and `FormatEnvelopeResponseContent`'s output (never `{`-prefixed). Verified the emit path is untouched — only what's read back for replay changed — and the page-reload rendering path (`store.Message.Envelope` column) is a structurally separate, unaffected mechanism. Test coverage confirmed genuinely end-to-end, not mocked. No findings, no fix needed.

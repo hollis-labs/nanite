@@ -18,7 +18,6 @@ import { afterEach, describe, expect, it } from "vitest";
 import { ApprovalCard } from "@/components/chat/envelopes/ApprovalCard";
 import { ProposalCard } from "@/components/chat/envelopes/ProposalCard";
 import { ConfirmationCard } from "@/components/chat/envelopes/primitives/ConfirmationCard";
-import { SubagentSpawnApprovalCard } from "@/components/chat/envelopes/SubagentSpawnApprovalCard";
 import { ElicitationPromptCard } from "@/components/chat/envelopes/ElicitationPromptCard";
 import type { Envelope } from "@/lib/types";
 import type { ResponseV1 } from "@/lib/envelope-response";
@@ -102,23 +101,23 @@ describe("interactive cards hydrate from prior_response", () => {
     expect(container.textContent).toContain("Cancelled");
   });
 
-  it("SubagentSpawnApprovalCard renders the approved state when prior_response is submitted", () => {
+  it("ApprovalCard (subagent-spawn-approval flavor) renders the approved state when prior_response is submitted", () => {
     const env = envelope(
       "subagent-spawn-approval",
       { run_id: "run-1", role: "backend", prompt: "do x", mode: "async" },
       response({ status: "submitted" }),
     );
-    const { container } = render(<SubagentSpawnApprovalCard envelope={env} />);
+    const { container } = render(<ApprovalCard envelope={env} />);
     expect(container.textContent).toContain("approved");
   });
 
-  it("SubagentSpawnApprovalCard renders the rejected state when prior_response is cancelled", () => {
+  it("ApprovalCard (subagent-spawn-approval flavor) renders the rejected state when prior_response is cancelled", () => {
     const env = envelope(
       "subagent-spawn-approval",
       { run_id: "run-1", role: "backend", prompt: "do x", mode: "async" },
       response({ status: "cancelled" }),
     );
-    const { container } = render(<SubagentSpawnApprovalCard envelope={env} />);
+    const { container } = render(<ApprovalCard envelope={env} />);
     expect(container.textContent).toContain("rejected");
   });
 

@@ -91,7 +91,9 @@ const (
 
 // TerminationCode is the machine-readable reason a chat loop terminated
 // abnormally. Mirrors the `code` enum in the chat-loop-terminated envelope
-// schema (internal/envelope/schemas/chat-loop-terminated.schema.json).
+// schema (the external github.com/hollis-labs/go-envelopes module's
+// manifest/schemas/chat-loop-terminated.schema.json — not
+// internal/envelope/schemas/, which doesn't exist in this repo).
 type TerminationCode string
 
 const (

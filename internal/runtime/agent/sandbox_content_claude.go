@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/hollis-labs/nanite/internal/chat"
 	"github.com/hollis-labs/nanite/internal/store"
 )
 
@@ -35,22 +36,31 @@ func BuildCLAUDEMD(agentName, agentDescription, systemPrompt string) string {
 		b.WriteString("\n\n")
 	}
 
-	b.WriteString(claudeMDBody)
+	b.WriteString(claudeMDBody())
 	return b.String()
 }
 
-// claudeMDBody is the CLAUDE.md addendum (rules + reference pointers).
-const claudeMDBody = `## Envelope Format
+// claudeMDBody returns the CLAUDE.md addendum (rules + reference
+// pointers). The "registered types" paragraph is built at call time from
+// chat.RegisteredEnvelopeTypeNames() rather than pointing the agent at a
+// path to separately resolve — even a *correct* path wouldn't help here,
+// since the real manifest source (the external
+// github.com/hollis-labs/go-envelopes module) lives in a different repo,
+// not inside this project's boot dir the agent can actually read. The two
+// paths this used to name (config/envelopes.yaml,
+// internal/envelope/schemas/*.schema.json) don't exist anywhere in this
+// repo at all — see 08-cards.md's "known, live bug in CLI-agent boot
+// content" and TASKS/phase-6/06.
+func claudeMDBody() string {
+	var b strings.Builder
+	b.WriteString(`## Envelope Format
 
 Emit structured envelopes as fenced code blocks with the ` + "`nanite-envelope`" + ` language tag.
 ALWAYS set "version": 1. NEVER invent envelope types — only use registered types.
 
-For the current registered envelope types and per-type schemas, consult
-` + "`config/envelopes.yaml`" + ` and ` + "`internal/envelope/schemas/*.schema.json`" + ` —
-those are the runtime source of truth. Unregistered types are silently dropped
-by the UI — no error, no warning.
-
-## Rules
+`)
+	b.WriteString(registeredTypesParagraph())
+	b.WriteString(`## Rules
 1. ALWAYS use envelopes for data collection — never ask users to type structured data
 2. Propose, don't just do — use envelope proposals for creates/modifications
 3. Never fabricate references — look up IDs, sprint codes, task refs first
@@ -60,7 +70,27 @@ by the UI — no error, no warning.
 ## Reference Files
 - ` + "`.sandbox/envelope-schema.md`" + ` — full envelope JSON schema, field docs, examples per type
 - ` + "`.sandbox/agent-context.md`" + ` — agent profile, capabilities
-`
+`)
+	return b.String()
+}
+
+// registeredTypesParagraph renders the "which types exist" pointer
+// paragraph from chat.RegisteredEnvelopeTypeNames() — the same live,
+// in-process set envelopeSchemaContent's table sources (see
+// sandbox_content_envelope.go). Listing names inline here (rather than
+// only pointing at .sandbox/envelope-schema.md) means the agent sees the
+// allow-list without an extra file read.
+func registeredTypesParagraph() string {
+	names := chat.RegisteredEnvelopeTypeNames()
+	if len(names) == 0 {
+		return "The envelope registry was not yet populated when this boot dir was planted " +
+			"(this should not happen outside of tests) — consult `.sandbox/envelope-schema.md` " +
+			"once available. Unregistered types are silently dropped by the UI — no error, no warning.\n\n"
+	}
+	return "Currently registered types: " + strings.Join(names, ", ") + ".\n" +
+		"See `.sandbox/envelope-schema.md` (planted alongside this file) for full per-type field " +
+		"docs and examples. Unregistered types are silently dropped by the UI — no error, no warning.\n\n"
+}
 
 // BuildAgentContext returns the .sandbox/agent-context.md body for the given
 // profile. Exported so the chat service can regenerate the file on slot

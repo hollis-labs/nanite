@@ -1243,6 +1243,15 @@ func NewContainer(cfg ContainerConfig) (*Container, error) {
 	chat.RegisterResponseHandler("elicitation-prompt", chat.NewElicitationResponseHandler(elicitSvc))
 	slog.Info("service container: elicitation service enabled (G4, CW-20260420-0018)")
 
+	// Phase 6: interactive-table row/column-action primitive. table-card
+	// itself may still be emitted passively (card_show, no id, no
+	// interactivity) — this handler only ever runs for the subset of
+	// table-card responses that reach POST /api/envelopes/:id/respond,
+	// which requires the emitting caller to have persisted an
+	// EnvelopeInstance (the same requirement approval-card/
+	// elicitation-prompt already have). See internal/chat/envelope_response_table.go.
+	chat.RegisterResponseHandler("table-card", chat.NewTableCardActionHandler())
+
 	durableAgents := NewDurableAgentServiceWithRuntime(cfg.Store, NewChatDurableAgentRuntimeController(chatSvc))
 	durableWake := NewDurableAgentWakeService(cfg.Store, durableAgents)
 	durableAgentRecipes, err := NewDurableAgentRecipeService(durableAgents, cfg.DurableAgentRecipeCatalogPaths...)

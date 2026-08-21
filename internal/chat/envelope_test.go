@@ -7,7 +7,10 @@ import (
 
 func TestMain(m *testing.M) {
 	// Seed the envelope registry with types used by tests.
-	// In production these are loaded from config/envelopes.yaml at startup.
+	// In production these are loaded from the external
+	// github.com/hollis-labs/go-envelopes module's embedded
+	// manifest/envelopes.yaml at startup (envelopes.LoadCore, called from
+	// cmd/nanite/main.go) — config/envelopes.yaml does not exist in this repo.
 	InitCoreTypes([]string{"metric-card", "session-task", "document-viewer"})
 	os.Exit(m.Run())
 }

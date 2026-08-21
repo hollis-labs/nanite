@@ -672,3 +672,41 @@ verification against live claude/codex/opencode binaries.
 
 **Commit**: pending — this Work Log entry is written before the commit step; see the final
 report for the actual SHA once committed.
+
+**Final commit**: `1f947c55` on `main`.
+
+## Review notes
+
+Fresh Reviewer (no shared context with this task's worker), 2026-08-21 — **PASS**, against
+commit `1f947c55`. Independently confirmed both hard constraints against source, not diff
+summaries: `internal/recovery/broker` and `factory.go` have zero diff; separately confirmed
+`go.mod`'s diff does not touch `agentkit`'s version (only `go-agent-wrapper`/`go-runtime-events`/
+`go-harness-filters` moved), so the shared `agentsessions.ExitError` type broker depends on is
+untouched at the source, not just diff-empty. `agent.Mode`/lifecycle-decision sites verified
+present verbatim in the same relative order. Verified the `nativeAdapter` design decision
+against the actual shipped `adapters/{claude,codex,opencode}` source — confirmed the shipped
+Claude adapter genuinely has no way to inject the dev-mode `SkipPermissions` variant, and
+Codex/OpenCode's shipped `Descriptor`s genuinely map to a different `Capabilities` shape than
+Nanite's current subprocess-per-turn — a real, correct justification. Independently verified
+the `Env`-wrapper workaround's security properties (`bootDir`'s `MkdirTemp` `0700` mode makes
+the script's own `0o700` redundant-but-correct; fresh script per `Boot()` call, no stale-env
+risk; no cleanup-race — `RemoveAll` only runs post-ready, after the script has already `exec`'d
+into the real binary). Verified `wrapper_sink.go`'s `KindAgentToolUse`-routing claim directly
+against `agentEventBridge.translateStreamEvent`'s actual drop-tool_use-on-EventFanout code.
+Verified the `runCancel` race fix is real and correctly shaped. Traced all three corollary
+fixes (`RuntimeStore.UpdateState`, `liveSessions` registry, `StopAllLiveSessions`) — no leak
+found on any exit path. Ran the new `WrapperLifecycle` tests directly — genuine, not vacuous.
+Independently reproduced clean `go build`/`go vet` (same 2 pre-existing, unrelated findings)/
+`go test ./...`/`go test ./internal/runtime/agent/... -race`/`go test ./internal/recovery/... -race`.
+
+Two real, non-blocking findings (full detail in `TASKS/ESCALATIONS.md`'s 2026-08-21 "Task `06`
+re-attempt landed and reviewed PASS" entry): (A) `Options.ExtraArgs` is now a silent no-op with
+a stale, actively-misleading doc comment — the migration dropped the only forwarding line and
+`wrapper.Config` has no equivalent field, but the field/comment weren't removed alongside
+`Supervisor`/`AttachEnabled` (which were correctly removed for the identical reason). (B) one
+new abort path in `Boot`'s 3-way select (caller `ctx` cancelled while waiting for `ready`) only
+calls `UpdateState(..., "failed", 0)` instead of `MarkRuntimeFailed` (state + reason) — state
+still lands correctly on `"failed"`, just without a recorded reason for this one edge case.
+Neither touches a hard constraint; both fixed as a small, targeted follow-up per the reviewer's
+own recommendation rather than left as debt (see this file's own Work Log addendum below, if
+present, or `TASKS/ESCALATIONS.md` for the fix's landing record).

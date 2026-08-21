@@ -459,7 +459,7 @@ Nanite itself), and scope boundaries.
 | `04-migrate-bootdir-layout-to-planter` | 2 | implemented | `02`, `03` |
 | `05-migrate-sandbox-profile-to-applier` | 2 | closed (no migration — see `ESCALATIONS.md`, finding folded into `06`) | `03` |
 | `05a-extend-wrapper-config-for-real-adapters` | 2 (sibling repo, Phase-1-shaped) | reviewed | none |
-| `06-migrate-session-lifecycle-to-wrapper` | 2 | implemented — under fresh review | `02`, `04`, `05` (closed), `05a` |
+| `06-migrate-session-lifecycle-to-wrapper` | 2 | reviewed (PASS, 2 non-blocking findings — small follow-up fix in progress) | `02`, `04`, `05` (closed), `05a` |
 | `07-dogfeed-validate-host-migration` | 2 | not-started | `04`, `05`, `06` |
 | `08-build-acp-client-abstraction` | 3 | not-started | `02`; recommended after `07` |
 | `09-acp-native-adapter-opencode` | 3 | not-started | `08` |

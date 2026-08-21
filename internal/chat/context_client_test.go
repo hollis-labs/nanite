@@ -2,6 +2,7 @@ package chat
 
 import (
 	"context"
+	"encoding/json"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -93,6 +94,82 @@ func TestAssembleSlotSources_AgentPromptAndMessageCount(t *testing.T) {
 	}
 	if len(sources.Messages) != 3 {
 		t.Errorf("expected 3 messages, got %d", len(sources.Messages))
+	}
+}
+
+// TestAssembleSlotSources_ExcludesEnvelopeDataFromReplayedHistory is the
+// end-to-end regression test for
+// TASKS/phase-6/05-exclude-card-data-from-replayed-context.md: a historical
+// assistant turn that emitted a large table-card must have that card's
+// `data` payload excluded from the conversation-history Messages slot that
+// gets replayed into a later turn's LLM-facing context — only the turn's
+// Text survives. This is the mechanism that keeps a rich card shown once
+// from costing full-payload context on every later turn of a long session.
+func TestAssembleSlotSources_ExcludesEnvelopeDataFromReplayedHistory(t *testing.T) {
+	cb, s := newTestBroker(t)
+
+	sess := &store.Session{}
+	if err := s.CreateSession(sess); err != nil {
+		t.Fatalf("CreateSession: %v", err)
+	}
+	agent := &store.AgentProfile{Name: "Test", Slug: "test", SystemPrompt: "You are a test agent."}
+	if err := s.CreateAgent(agent); err != nil {
+		t.Fatalf("CreateAgent: %v", err)
+	}
+
+	// User turn.
+	if err := s.CreateMessage(&store.Message{SessionID: sess.ID, Role: "user", Content: "show me the table"}); err != nil {
+		t.Fatalf("CreateMessage(user): %v", err)
+	}
+
+	// Assistant turn carrying a large table-card, persisted exactly as
+	// chat_generate.go persists it: StructuredMessage JSON with the full
+	// envelope payload in Envelopes, via WrapResponse + MarshalContent.
+	rows := make([]any, 0, 200)
+	for i := 0; i < 200; i++ {
+		rows = append(rows, map[string]any{"id": i, "label": strings.Repeat("row-data-", 5)})
+	}
+	innerData, err := json.Marshal(map[string]any{"rows": rows})
+	if err != nil {
+		t.Fatalf("marshal inner data: %v", err)
+	}
+	structured := WrapResponse(
+		"Here's the table you asked for.",
+		"tool",
+		nil,
+		[]EnvelopeRef{{Type: "table-card", Data: json.RawMessage(innerData), ID: "env-table-1"}},
+		false, false,
+	)
+	assistantContent := structured.MarshalContent()
+	if err := s.CreateMessage(&store.Message{SessionID: sess.ID, Role: "assistant", Content: assistantContent}); err != nil {
+		t.Fatalf("CreateMessage(assistant): %v", err)
+	}
+
+	sources, err := cb.AssembleSlotSources(context.Background(), sess, agent)
+	if err != nil {
+		t.Fatalf("AssembleSlotSources: %v", err)
+	}
+	if len(sources.Messages) != 2 {
+		t.Fatalf("expected 2 messages, got %d", len(sources.Messages))
+	}
+
+	assistantReplay := sources.Messages[1]
+	if assistantReplay.Content != "Here's the table you asked for." {
+		t.Errorf("replayed assistant content should be Text-only, got %q", assistantReplay.Content)
+	}
+	if strings.Contains(assistantReplay.Content, "row-data-") || strings.Contains(assistantReplay.Content, "table-card") || strings.Contains(assistantReplay.Content, "env-table-1") {
+		t.Errorf("replayed history leaked envelope/card data: %q", assistantReplay.Content)
+	}
+
+	// Sanity: the raw persisted row (as ListMessages would return it before
+	// replayContent runs) still carries the full payload — this test is
+	// verifying what gets REPLAYED, not that storage itself changed.
+	stored, err := s.ListMessages(sess.ID, 200)
+	if err != nil {
+		t.Fatalf("ListMessages: %v", err)
+	}
+	if len(stored) != 2 || !strings.Contains(stored[1].Content, "row-data-") {
+		t.Fatalf("expected persisted store row to retain full envelope data untouched")
 	}
 }
 

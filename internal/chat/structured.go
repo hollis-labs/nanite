@@ -5,17 +5,18 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"strings"
 )
 
 // StructuredMessage is the universal wrapper for all assistant messages.
 type StructuredMessage struct {
-	Version   int            `json:"v"`
-	Text      string         `json:"text"`
-	Tier      string         `json:"tier"`
-	Hash      string         `json:"hash,omitempty"`
-	Envelopes []EnvelopeRef  `json:"envelopes,omitempty"`
-	ToolCalls []ToolCallRef  `json:"tool_calls,omitempty"`
-	Flags     MessageFlags   `json:"flags"`
+	Version   int           `json:"v"`
+	Text      string        `json:"text"`
+	Tier      string        `json:"tier"`
+	Hash      string        `json:"hash,omitempty"`
+	Envelopes []EnvelopeRef `json:"envelopes,omitempty"`
+	ToolCalls []ToolCallRef `json:"tool_calls,omitempty"`
+	Flags     MessageFlags  `json:"flags"`
 }
 
 // MessageFlags contains boolean flags for message state.
@@ -94,6 +95,50 @@ func (sm StructuredMessage) MarshalContent() string {
 		return sm.Text // fallback to raw text
 	}
 	return string(data)
+}
+
+// replayContent unwraps a persisted store.Message.Content value into the
+// text that should actually be replayed into a *later* turn's LLM-facing
+// conversation history (internal/chat/context_client.go's
+// AssembleSlotSources message-history build — the only reader of prior
+// turns' persisted content).
+//
+// Assistant turns are stored as StructuredMessage JSON
+// (chat.WrapResponse -> MarshalContent), and StructuredMessage.Envelopes
+// carries the FULL, untruncated Card/envelope data payload for that turn
+// (internal/chat/structured.go's EnvelopeRef.Data). That field has zero
+// readers anywhere else in the codebase — page-reload rendering reads the
+// separate store.Message.Envelope column (internal/api/envelopes.go), not
+// this one. Replaying Envelopes verbatim as literal history text on every
+// subsequent turn is exactly the "context-replay gap" described in
+// docs/engineering/architecture/08-cards.md and 06-session-lifecycle-and-
+// recovery.md: a card shown once would otherwise cost full-payload context
+// on every later turn of a long session, defeating the "harness injects
+// rich Card data, agent context stays light" design.
+//
+// Only StructuredMessage.Text is used for replay; Envelopes (and
+// ToolCalls) are deliberately discarded here. This does not affect the
+// *current* turn's tool-result content the agent sees (already excluded
+// upstream) or the assistant's own live response construction — WrapResponse
+// still writes the full Envelopes slice into Message.Content for storage;
+// only what gets READ back for history replay changes.
+//
+// Content that isn't StructuredMessage-shaped (plain user text, legacy
+// pre-structured rows, envelope_response rows formatted via
+// FormatEnvelopeResponseContent, which are prefixed "[envelope:...]" rather
+// than "{") is returned unchanged — same fallback shape as
+// internal/recovery/pack.MessagePlainText, which unwraps the same JSON
+// envelope for a different purpose (Recovery Pack replay text).
+func replayContent(content string) string {
+	trimmed := strings.TrimSpace(content)
+	if !strings.HasPrefix(trimmed, "{") {
+		return content
+	}
+	var sm StructuredMessage
+	if err := json.Unmarshal([]byte(trimmed), &sm); err != nil || sm.Version == 0 {
+		return content
+	}
+	return sm.Text
 }
 
 // ValidateStructured checks a StructuredMessage for consistency and returns warnings.

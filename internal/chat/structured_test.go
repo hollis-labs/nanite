@@ -4,6 +4,7 @@ import (
 	"crypto/sha256"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"testing"
 )
 
@@ -282,5 +283,82 @@ func TestEnvelopeRefOmitsEmptyRoutingFields(t *testing.T) {
 		if _, present := first[key]; present {
 			t.Errorf("expected key %q to be omitted when empty, but it was present (full envelope: %v)", key, first)
 		}
+	}
+}
+
+// TestReplayContent_StripsEnvelopeData is the direct regression test for
+// TASKS/phase-6/05-exclude-card-data-from-replayed-context.md: a
+// StructuredMessage carrying a large table-card payload in Envelopes must
+// have that payload discarded by replayContent, leaving only Text — this is
+// the mechanism context_client.go's AssembleSlotSources relies on for the
+// message-history build.
+func TestReplayContent_StripsEnvelopeData(t *testing.T) {
+	bigRows := make([]any, 0, 500)
+	for i := 0; i < 500; i++ {
+		bigRows = append(bigRows, map[string]any{
+			"id": i, "name": fmt.Sprintf("row-%d", i), "detail": strings.Repeat("x", 50),
+		})
+	}
+	innerData, err := json.Marshal(map[string]any{"rows": bigRows})
+	if err != nil {
+		t.Fatalf("marshal inner data: %v", err)
+	}
+	envelopes := []EnvelopeRef{
+		{Type: "table-card", Data: json.RawMessage(innerData), ID: "env-big"},
+	}
+	msg := WrapResponse("Here's the table you asked for.", "tool", nil, envelopes, false, false)
+	stored := msg.MarshalContent()
+
+	// Sanity: the persisted form really does carry the full envelope payload
+	// (this is what StructuredMessage.MarshalContent's contract intends —
+	// only what gets replayed is filtered, not what gets stored).
+	if !strings.Contains(stored, "row-499") {
+		t.Fatal("sanity check failed: persisted content should contain full envelope row data")
+	}
+
+	got := replayContent(stored)
+
+	if got != "Here's the table you asked for." {
+		t.Errorf("replayContent should return only Text, got %q", got)
+	}
+	if strings.Contains(got, "row-") || strings.Contains(got, "table-card") || strings.Contains(got, "env-big") {
+		t.Errorf("replayContent leaked envelope data into replayed text: %q", got)
+	}
+}
+
+// TestReplayContent_FallsBackForNonStructuredContent covers the three
+// non-StructuredMessage shapes that must pass through unchanged: plain user
+// text, legacy pre-structured rows (no "v" field), and envelope_response
+// rows (chat.FormatEnvelopeResponseContent's "[envelope:type status:...] "
+// prefix, which never starts with "{").
+func TestReplayContent_FallsBackForNonStructuredContent(t *testing.T) {
+	cases := []struct {
+		name    string
+		content string
+	}{
+		{"plain user text", "what's the status of the migration?"},
+		{"legacy non-structured JSON", `{"foo":"bar"}`},
+		{"envelope_response row", FormatEnvelopeResponseContent("approval-card", StatusSubmitted, `{"ok":true}`)},
+		{"empty content", ""},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := replayContent(tc.content)
+			if got != tc.content {
+				t.Errorf("replayContent(%q) = %q, want unchanged %q", tc.content, got, tc.content)
+			}
+		})
+	}
+}
+
+// TestReplayContent_PreservesTextOnlyStructuredMessage covers the common
+// no-card case: a plain StructuredMessage with no envelopes still round
+// trips its Text unchanged through replayContent.
+func TestReplayContent_PreservesTextOnlyStructuredMessage(t *testing.T) {
+	msg := WrapResponse("just a plain reply, no cards", "default", nil, nil, false, false)
+	stored := msg.MarshalContent()
+	got := replayContent(stored)
+	if got != "just a plain reply, no cards" {
+		t.Errorf("replayContent(%q) = %q, want %q", stored, got, "just a plain reply, no cards")
 	}
 }

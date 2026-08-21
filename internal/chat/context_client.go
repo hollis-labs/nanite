@@ -262,7 +262,7 @@ func (cb *ContextClient) AssembleSlotSources(ctx context.Context, session *store
 		if role == "system" || role == "tool" || role == RoleEnvelopeResponse {
 			role = "user"
 		}
-		chatMessages[i] = llmtypes.ChatMessage{Role: role, Content: m.Content}
+		chatMessages[i] = llmtypes.ChatMessage{Role: role, Content: replayContent(m.Content)}
 	}
 
 	// J10 (CW-20260426-0008): user context prompt + included documents.

@@ -328,3 +328,274 @@ them up next)
 
 Committed directly on top of `main` per this task's own dispatch instructions (serial work, no
 worktree). See the dispatching agent's final report for the commit SHA.
+
+## Work Log addendum (2026-08-21) — fix-up for the FAIL review
+
+Context: a fresh reviewer's pass on the original implementation (commit `567bd76c`) found two real,
+unflagged functional bugs plus one smaller accompanying gap in `acp_session.go`'s event
+translation — logged in `TASKS/ESCALATIONS.md`'s 2026-08-21 "Task 11 review: FAIL — two real,
+unflagged event-translation bugs in the new parallel ACP session backend" entry. This addendum is
+the targeted fix, confined to `internal/runtime/agent/acp_session.go` and `agent_acp.go` per the
+reviewer's own explicit recommendation — no architecture change. Read
+`internal/runtime/agent/wrapper_sink.go` (the native-path comparison baseline) and
+`internal/recovery/broker/classifier.go` in full before touching anything, per the reviewer's own
+"verified directly against the real classifier code, don't guess" instruction.
+
+### Finding 1 fix — reasoning/thinking content silently persisting into the visible answer
+
+`handleEvent`'s `KindAgentDelta` case and its `extractContent` helper only read the `"content"`
+key and always emitted a plain `llmtypes.EventDelta`, regardless of either sibling package's own
+thinking-tag convention (confirmed directly against both `translate.go` files):
+`opencodeacp` tags a reasoning chunk `{"content":...,"phase":"thought"}` (as distinct from
+`"phase":"message"` on ordinary content); `copilotacp` tags the same distinction
+`{"content":...,"thinking":true}`. Replaced `extractContent` with `extractDeltaEvent` (new
+`acpDeltaPayload` type reading `content`/`phase`/`thinking`), which emits `llmtypes.EventThinking`
+(with a populated `ThinkingBlock`) when either tag is present, mirroring `wrapper_sink.go`'s
+`handleDelta` branch on `p.Thinking != nil`. Also corrected the file's own incorrect doc comment
+that had claimed this flattening "matches the native runtimeEventSink's own flattening of the same
+distinction" — factually wrong; the native path does not flatten this distinction, and reading only
+one package's tag convention would have silently kept leaking the OTHER package's reasoning content
+into the answer even after a partial fix.
+
+### Finding 2 fix — a crashed ACP subprocess silently treated as a clean exit
+
+`acpSession.handleEvent`'s switch had no case for `runtimeevents.KindProcessExited`, and
+`bootACP`'s draining goroutine (`agent_acp.go`) never set `sess.runErr` at all — so
+`Session.Wait()` for every ACP-driven session always returned `nil` regardless of how the process
+died, meaning `internal/recovery/broker`'s crash-detection/auto-restart pipeline never engaged for
+ACP-driven agents.
+
+Verified directly against the real classifier before implementing (per the task's own explicit
+instruction not to guess): `internal/service/chat_boot_drive.go`'s `observeSessionForRecovery` does
+`errors.As(err, &xe)` against `*agentsessions.ExitError` specifically — a plain `error` would
+satisfy `Session.Wait()`'s "non-nil" contract but never reach the broker at all, reproducing this
+same bug one layer deeper. `agentsessions.ExitError`'s fields (`Code`, `Signal`, `Killed`,
+`ProcessState`, `Cause`) are all exported (only `waitErr` is not), so a real, minimally-populated
+value can be constructed directly from this package without reaching into unexported machinery.
+
+Added `acpSession.handleProcessExited` (new `processExitedPayload` type reading opencodeacp's
+`waitProcess`-populated `"error"` key) and a `processExitErr error` field on `acpSession`, set
+exactly once (single-writer, on `drain`'s own goroutine, strictly before the `for`-range loop
+returns). `bootACP`'s draining goroutine now assigns `sess.runErr = sink.processExitErr` strictly
+after `sink.drain(...)` returns and strictly before closing `runDone` — the same
+write-before-close ordering the native path's `sess.runErr = wr.Run(runCtx)` already uses, so
+`Session.Wait`'s happens-before argument holds identically for both backends.
+
+Traced the exact mechanics of *when* `KindProcessExited` can reach `handleEvent` at all, directly
+against `opencodeacp/client.go`: `Client.Close` (called by `acpSession.Stop`'s Cancel-then-Close)
+closes the Events channel **synchronously**, via `closeEvents()`, well before it ever waits on the
+subprocess — so for every intentional Stop, `drain`'s `for`-range loop exits via the channel close
+itself, and `waitProcess`'s own later `KindProcessExited` emit (guarded by `eventsClosed`) becomes
+a silent no-op. This means `KindProcessExited` only ever reaches `handleEvent` for a genuine,
+unprompted process death — exactly the case the broker exists to catch — and confirms no extra
+"was this intentional?" bookkeeping is needed at this layer (Nanite's existing
+`rebootingSessions`/`displacedSessions` flags in `chat_boot_drive.go` already handle the
+intentional-stop-vs-crash disambiguation one layer up, identically for both backends).
+
+Since ACP's wire protocol carries no structured exit-code/signal info (only the wrapped process
+error's string), the constructed `*agentsessions.ExitError` is minimally populated:
+`&agentsessions.ExitError{Code: -1}` (matching `ExitError.Code`'s own documented convention for
+"no real exit code available"), wrapped via `fmt.Errorf("acpSession: process exited abnormally
+(%s): %w", p.Error, xe)` so `errors.As` finds it and the original process-error text is preserved
+for logs. `Code: -1` (non-zero) is what makes `Classify`'s final default branch
+("unclassified non-zero exit... first occurrence transient, retry escalates to permanent")
+actually engage instead of falling through to the `Code == 0`/"not a recovery candidate" bottom
+branch reserved for a genuinely clean exit — verified directly against `classifier.go`, not
+assumed, and pinned by a new `internal/recovery/broker` test (below).
+
+`copilotacp.Client` does not emit `KindProcessExited` at all today (confirmed directly — no
+occurrence in its `client.go`) — a real, pre-existing `go-agent-wrapper` gap one level up, out of
+scope for this Nanite-side fix per the task's own instruction. Handled gracefully, not
+crash-prone: `bootACP`'s draining goroutine only reads `sink.processExitErr` **after**
+`sink.drain(...)` returns (i.e. after the Events channel closes for whatever reason, with or
+without a `KindProcessExited` event ever having arrived), so a Copilot-CLI-driven session simply
+always resolves `Wait()` to `nil` — the same behavior as before this fix for that provider, not a
+hang and not a false crash. Pinned by
+`TestACPSession_MissingProcessExitedEventDoesNotHang`.
+
+### Finding 3 fix — token/cost usage never populated for ACP turns
+
+`handleEvent`'s `KindTurnCompleted` case unconditionally sent only `EventDone`, never `EventUsage`
+— so `chat_generate.go`'s `finalUsage` (feeding the persisted cost ledger and `stream_end` SSE
+payload) stayed `nil` for every ACP-driven turn. Added `acpSession.handleTurnCompleted` (new
+`acpTurnCompletedPayload` type reading the `"usage"` key both `opencodeacp`'s `finishTurn` and
+`copilotacp`'s `awaitPromptResult` payloads may carry): when `Usage != nil`, sends `EventUsage`
+first, then the terminal `EventDone` — both from the single combined payload, since (unlike
+`wrapper_sink.go`'s native-path `handleTurnCompleted`, which receives usage and done as two
+*separate* `Write` calls and must pick one or the other per call) ACP's own `KindTurnCompleted`
+event fires exactly once per turn.
+
+Verified directly against both adapters' real code (not assumed) that `copilotacp` never populates
+a `"usage"` key at all today (`awaitPromptResult` only ever marshals `{"stop_reason":...}`) — so
+this fix is a genuine no-op improvement for Copilot-CLI-driven turns (still correctly emits just
+`EventDone`, unchanged from before), and only actually adds signal for `opencode`-driven turns.
+
+One correction against this fix's own initial caution, found only through the live re-verification
+below (documented here because it revises what the code's doc comment originally speculated): before
+live-testing, `opencodeacp`'s own package doc was read as never confirming the `session/prompt`
+response's `"usage"` field was observed in real traffic (only the unrelated `usage_update`
+session/update *notification* variant was, and that one is deliberately skipped) — combined with
+`llmtypes.Usage` having no JSON struct tags (so a raw `json.Unmarshal` only matches exact Go field
+names, e.g. `InputTokens`, not a JS/TS-style `inputTokens`/`totalTokens`), this looked like a real
+risk that `EventUsage` would carry a non-nil but silently zero-valued `Usage` for real opencode
+traffic. **Live-verified this concern to be unfounded**: real opencode 1.15.6 traffic's
+`session/prompt` response usage object round-trips correctly through the tagless
+`json.Unmarshal` — `stream_end`'s persisted usage showed real, non-zero `input_tokens`/
+`output_tokens` (see the live dogfeed below). Updated the code's own doc comment on
+`acpTurnCompletedPayload` to record this live-confirmed finding instead of the pre-verification
+caution.
+
+### New regression test coverage
+
+`internal/runtime/agent/acp_session_test.go` (new file):
+
+- `TestExtractDeltaEvent` / `TestHandleEvent_ThinkingDeltaRoutesToFanoutAsEventThinking` — pin
+  Finding 1: both tagging conventions (`phase:"thought"`, `thinking:true`) produce
+  `llmtypes.EventThinking` with the reasoning text isolated in `ThinkingBlock`, never in
+  `Content`; a `phase:"message"` (or untagged) delta still produces a plain `EventDelta`. The
+  second test drives the real `handleEvent` dispatch (not just the pure extractor), confirming the
+  fanout channel itself receives the two distinct event types for a thought-then-message pair.
+- `TestHandleTurnCompleted` — pins Finding 3: a `"usage"`-bearing payload sends `EventUsage` (with
+  the numeric fields correctly populated) immediately followed by the terminal `EventDone`; a
+  payload with no `"usage"` key (copilotacp's real shape) sends only `EventDone`, unchanged from
+  before; an empty/nil payload doesn't panic and still terminates the turn.
+- `TestACPSession_AbnormalProcessExitReachesSessionWait` — pins Finding 2's core claim: a fake
+  `acp.Client` (new `fakeACPClient` test double, implementing the real 6-method `acp.Client`
+  interface with a controllable `Events()` channel — no real subprocess spawned) emits
+  `KindProcessExited` with a non-empty `"error"`; `runACPDrainAndWait` replicates `bootACP`'s exact
+  production draining-goroutine logic (drain, assign `sess.runErr`, close `runDone`) against a real
+  `*Session`; the test asserts `sess.Wait(ctx)` returns non-nil AND that `errors.As` against
+  `*agentsessions.ExitError` succeeds with `Code != 0` — the exact two properties
+  `internal/recovery/broker`'s classifier requires to engage at all.
+- `TestACPSession_CleanExitLeavesSessionWaitNil` — a `KindProcessExited` with no `"error"` key
+  (clean exit) leaves `Wait()` nil.
+- `TestACPSession_IntentionalStopClosesEventsWithoutProcessExited` — the Events channel closing
+  directly (mirroring `Client.Close`'s real synchronous `closeEvents()` call, no
+  `KindProcessExited` ever observed) leaves `Wait()` nil — the common "stopped on purpose" path.
+- `TestACPSession_MissingProcessExitedEventDoesNotHang` — a Client that never emits
+  `KindProcessExited` at all (copilotacp's real shape today) still resolves `Wait()` to nil, not a
+  hang.
+- `TestHandleProcessExited_DirectUnit` — isolated unit coverage of `handleProcessExited` itself:
+  no-op on an empty/absent `"error"`; a populated `"error"` produces a wrapped
+  `*agentsessions.ExitError{Code: -1}`, recoverable via `errors.As`.
+
+`internal/recovery/broker/acp_exit_classification_test.go` (new file, in the broker package so it
+can use the package's own existing `fakeAgentBoot`/`fakeStore`/`newFakeEnvelope` test fixtures —
+`internal/runtime/agent` cannot import `internal/recovery/broker`, which imports it, so this
+couldn't live in the `agent` package):
+
+- `TestClassify_ACPUnclassifiedCrashShape` — pins that the *exact* `&agentsessions.ExitError{Code:
+  -1}` shape `acp_session.go`'s `handleProcessExited` constructs classifies as `ClassTransient` on
+  the first attempt and `ClassPermanent` on a repeat — i.e. it genuinely engages `Classify`'s
+  crash-handling branch, not the `Code == 0` bottom branch.
+- `TestOnSessionExit_ACPCrashShapeEngagesBroker` — drives that same exact shape through the real
+  `Broker.OnSessionExit` pipeline end to end (not just `Classify` in isolation): confirms a
+  replacement session is actually dispatched (`AgentBoot.Boot` called with the same `SessionID`)
+  and a `ClassTransient` breadcrumb is recorded — i.e. an ACP crash is no longer silently
+  swallowed at the point the pre-fix bug swallowed it (`Wait()` never even returning non-nil, so
+  `OnSessionExit` was never called at all).
+
+### Live dogfeed re-verification (real commands, real output — not mocked; this is the strongest
+confirmation available, per the task's own preference)
+
+Followed the same established scratch-server recipe prior tasks in this batch used: built a scratch
+binary (`nanite-dogfeed11fix`), ran it from a scratch CWD with `XDG_DATA_HOME`/`XDG_STATE_HOME`/
+`XDG_CONFIG_HOME`/`XDG_CACHE_HOME` redirected to scratch subdirectories, an explicit `-db` pointed
+at a scratch SQLite file, and real `$HOME` left alone for CLI auth (port 8398 — 8199/8200/8299
+already bound by other concurrent sessions). Confirmed `opencode 1.15.6` (matching this batch's
+prior live verification) resolves on this machine.
+
+Created a real managed agent (`protocol="acp"`, `transport="stdio"`) via `POST /api/agents`,
+set `default_provider='opencode'`/`runtime_kind='cli'` via a scoped `sqlite3 UPDATE` (same
+established precedent as the original task 11 dogfeed — these two fields have no REST CRUD surface
+on this endpoint, pre-existing, not something this fix-up touched), and re-confirmed the full row
+via `GET /api/agents/{id}`. Also seeded `user_settings.default_model`/`default_provider='opencode'`
+(needed for `ResolveProviderAndModel` on this fresh scratch DB — not required in the original task
+11 dogfeed, whose scratch DB apparently already carried a usable default from an earlier step; not
+a code change, purely scratch-environment setup).
+
+**Turn 1 — Findings 1 and 3, live, in one shot.** Sent a real turn ("What is 9 plus 33? Reply with
+only the number.") via `POST .../turns` and read the real SSE stream via `GET /api/stream/{id}`:
+
+```
+event: delta
+data: {"type":"delta","phase":"thinking","event_id":2}
+... (8 more phase:"thinking" deltas) ...
+event: delta
+data: {"type":"delta","content":"42","phase":"final","event_id":10}
+event: stream_end
+data: {"type":"stream_end", ...,"usage":{"input_tokens":22821,"output_tokens":19,"cache_creation_tokens":0,"cache_read_tokens":0,"stop_reason":""}, ...}
+```
+
+Eight distinct `phase:"thinking"` SSE deltas streamed separately from the `phase:"final"` answer
+delta — direct, live confirmation of Finding 1's fix (a genuine `opencode acp` process really does
+emit `agent_thought_chunk` updates for this kind of prompt, and they now route to a distinct SSE
+phase instead of blending into the answer). Confirmed the persisted assistant row in the scratch DB
+is exactly `{"v":1,"text":"42",...}` — no reasoning text leaked into the persisted answer either.
+`stream_end` carries real, non-zero `usage` — direct, live confirmation of Finding 3's fix (and the
+"field names round-trip cleanly" correction documented above).
+
+**Turn 2 — Finding 2, live, via a genuine mid-turn subprocess kill.** Sent a second turn designed
+to run for a few seconds ("Write a detailed 300 word essay about the history of the number
+zero..."), located the real `opencode acp` PID via `ps aux`, and `kill -9`'d it ~1.5s into the
+turn while streaming was in flight. Observed, in order: the SSE stream immediately received a
+`plugin_envelope` (`info-card`, "Reconnecting agent" / "Agent ran into a temporary error. Retrying
+now…") followed by `stream_end` — the exact same envelope shape
+`TestOnSessionExitTransientRetrySuccess` (`internal/recovery/broker`) pins for a `ClassTransient`
+classification. The real server log confirmed the full pipeline end to end:
+
+```
+WARN recovery: session exited with error — invoking broker session_id=... cause="" code=-1 signal=0
+INFO recovery: terminal exit observed session_id=... attempt=1 cause="" code=-1 signal=0
+INFO chat-service: cancelling prior in-flight generation for session session_id=... new_msg_id=...
+```
+
+`code=-1 signal=0` is exactly the `&agentsessions.ExitError{Code: -1}` shape `handleProcessExited`
+constructs — not a coincidence, a direct confirmation the real code path fired. A **second, genuine,
+freshly-spawned `opencode acp` subprocess** (confirmed via `ps aux`, a new PID) was launched by the
+broker's dispatched replacement session, and it **completed the retried turn end to end** — the
+server log shows a full second `chat-loop-diag: loop start` → `loop exit` cycle (191 streamed
+events, ~18.5s) for the replacement, and the scratch DB's `messages` table shows the real,
+complete essay (`# The History of Zero...`) persisted as the assistant reply. Before this fix, per
+the pre-fix bug, none of this recovery sequence would have fired at all — `Session.Wait()` would
+have returned `nil` and `observeSessionForRecovery` would have taken the silent "clean exit,
+nothing to recover" branch, exactly as the FAIL review predicted.
+
+**Cleanup discipline**: `git status --short` checked before, during, and after — the entire dogfeed
+run produced zero diff against the tracked/untracked file set already present before it started
+(the same pre-existing concurrent-session files noted in the original task 11 Work Log — untouched
+throughout). `Dependencies.WorkspacesRoot`'s real-`$HOME` exposure (the pre-existing, previously
+flagged gap — not something this fix-up touched or introduced) again wrote one real session
+workspace directory into the actual `~/.nanite/workspaces/`; removed it by hand after verification.
+Sent `SIGTERM` to the scratch server for a clean shutdown and confirmed via `ps aux` zero leftover
+`opencode acp`/`nanite-dogfeed11fix` processes afterward.
+
+### Build/test status
+
+`go build ./cmd/nanite/`: clean. `go vet ./...`: clean except the same two pre-existing, unrelated
+`internal/service/container.go` findings every other task in this batch has already noted (confirmed
+via `git status` that file is untouched by this fix-up's diff). `go test ./... -count=1`: clean
+across every package, no regressions — including the two new test files
+(`internal/runtime/agent/acp_session_test.go`, `internal/recovery/broker/
+acp_exit_classification_test.go`) and the full pre-existing `internal/runtime/agent`/
+`internal/recovery/broker` suites (including the original task 11 test files, still passing
+unmodified).
+
+### Known limitations (corrected from the original Work Log's version)
+
+- The original `extractContent` doc comment's claim that flattening the thinking/message
+  distinction "matches the native runtimeEventSink's own flattening of the same distinction" was
+  **factually wrong** — the native path does not flatten this distinction (`wrapper_sink.go`'s
+  `handleDelta` explicitly branches on it) — and has been removed/corrected in this fix-up.
+- `copilotacp.Client` still does not emit an equivalent `KindProcessExited` signal today — a real,
+  pre-existing `go-agent-wrapper` gap one level up, out of scope for this Nanite-side fix (per the
+  task's own instruction). Handled gracefully here (confirmed both by unit test and by the code's
+  own read-after-drain-returns ordering): a Copilot-CLI-driven session's `Wait()` always resolves to
+  `nil` regardless of how the process actually died, same as before this fix, rather than hanging or
+  misreporting. A future `go-agent-wrapper` task adding a real exit signal to `copilotacp.Client`
+  would need no further Nanite-side change beyond what this fix already wires up — `handleEvent`'s
+  `KindProcessExited` case and `handleProcessExited` are already provider-agnostic.
+- The three other, pre-existing "Known limitations / follow-up candidates" from the original Work
+  Log (no provider-session-id capture for ACP boots, Claude/Codex/Pi not selectable via
+  `protocol="acp"` yet, `Dependencies.WorkspacesRoot`'s real-`$HOME` scratch-dogfeed exposure) are
+  unaffected by this fix-up and still stand as originally documented.

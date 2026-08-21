@@ -44,6 +44,7 @@ import (
 	"encoding/json"
 	"fmt"
 
+	agentsessions "github.com/hollis-labs/agentkit/agentsessions"
 	"github.com/hollis-labs/go-agent-wrapper/acp"
 	"github.com/hollis-labs/go-agent-wrapper/adapters"
 	"github.com/hollis-labs/go-agent-wrapper/adapters/copilotacp"
@@ -93,6 +94,17 @@ type acpSession struct {
 
 	fanout  chan<- llmtypes.StreamEvent
 	typedCB provider.EventsCallback
+
+	// processExitErr captures a genuine, unprompted ACP subprocess crash
+	// (see handleProcessExited's doc comment for exactly which case this
+	// is — an intentional Stop never reaches it) — TASKS/agent-host-acp/
+	// 11's Finding 2 fix. Written exactly once, on drain's own goroutine,
+	// strictly before drain's for-range loop returns; bootACP's draining
+	// goroutine (agent_acp.go) reads it exactly once, strictly after
+	// drain(...) returns — single-writer-then-single-reader, so no lock
+	// is needed here, mirroring Session.runErr's own happens-before
+	// argument (agent.go's Session doc comment).
+	processExitErr error
 }
 
 // drain reads client.Events() until the channel closes (either Stop's
@@ -111,27 +123,26 @@ func (a *acpSession) drain(ctx context.Context) {
 func (a *acpSession) handleEvent(ctx context.Context, ev runtimeevents.Event) {
 	switch ev.Kind {
 	case runtimeevents.KindAgentDelta:
-		a.sendFanout(ctx, llmtypes.StreamEvent{Type: llmtypes.EventDelta, Content: extractContent(ev.Payload)})
+		a.sendFanout(ctx, extractDeltaEvent(ev.Payload))
 	case runtimeevents.KindAgentToolUse:
 		a.emitToolUse(ev.Payload)
 	case runtimeevents.KindAgentToolResult:
 		a.emitToolResult(ev.Payload)
 	case runtimeevents.KindTurnCompleted:
-		// Unconditionally the terminal "turn done" signal for the fanout
-		// channel — deliberately NOT mirroring wrapper_sink.go's
-		// handleTurnCompleted, which sends EventUsage instead of EventDone
-		// whenever the payload's "usage" key is present. opencodeacp's own
-		// KindTurnCompleted payload ({"stop_reason","usage"}) always
-		// includes a "usage" key when the turn had one, which would make
-		// that branch never send the terminal EventDone a chat consumer
-		// needs to know the turn ended. See this file's package doc.
-		a.sendFanout(ctx, llmtypes.StreamEvent{Type: llmtypes.EventDone})
+		a.handleTurnCompleted(ctx, ev.Payload)
 	case runtimeevents.KindTurnFailed:
 		a.sendFanout(ctx, llmtypes.StreamEvent{Type: llmtypes.EventError, Error: extractError(ev.Payload)})
+	case runtimeevents.KindProcessExited:
+		// TASKS/agent-host-acp/11 Finding 2: unlike every other
+		// process/session-lifecycle kind (default branch below), this one
+		// carries real crash-detection signal — captured, not no-op'd.
+		a.handleProcessExited(ev.Payload)
 	default:
-		// session/process/permission lifecycle kinds -- no EventFanout/
-		// TypedEventCallback analog today, matching runtimeEventSink.Write's
-		// identical default no-op for the native path.
+		// session/permission lifecycle kinds (and, for copilotacp, the
+		// process-lifecycle kind too — it never emits KindProcessExited)
+		// -- no EventFanout/TypedEventCallback analog today, matching
+		// runtimeEventSink.Write's identical default no-op for the native
+		// path.
 	}
 }
 
@@ -145,17 +156,134 @@ func (a *acpSession) sendFanout(ctx context.Context, ev llmtypes.StreamEvent) {
 	}
 }
 
-// extractContent reads the "content" key both opencodeacp's and
-// copilotacp's KindAgentDelta payloads share (message and thinking chunks
-// alike — see this file's package doc; phase/thinking distinction is not
-// surfaced separately here, matching the native runtimeEventSink's own
-// flattening of the same distinction).
-func extractContent(raw json.RawMessage) string {
-	var p struct {
-		Content string `json:"content"`
+// acpDeltaPayload reads the "content" key both opencodeacp's and
+// copilotacp's KindAgentDelta payloads share, plus each package's own
+// reasoning/thinking tagging convention — opencodeacp tags a reasoning
+// chunk {"content":...,"phase":"thought"} (see opencodeacp/translate.go's
+// agent_thought_chunk case, as distinct from the "phase":"message" tag on
+// ordinary content); copilotacp tags the same distinction
+// {"content":...,"thinking":true} (see copilotacp/translate.go's
+// acpUpdateThinking case). Both tagging conventions are checked —
+// TASKS/agent-host-acp/11's Finding 2 review found that reading only
+// "content" and always emitting llmtypes.EventDelta (this file's prior
+// behavior) let reasoning/thought text flush as ordinary narration,
+// persisted as part of the visible answer instead of being routed to
+// chat_generate.go's thinkingBlocks/chat.PhaseThinking like the native
+// path (wrapper_sink.go's handleDelta) already does.
+type acpDeltaPayload struct {
+	Content  string `json:"content"`
+	Phase    string `json:"phase"`
+	Thinking bool   `json:"thinking"`
+}
+
+// extractDeltaEvent mirrors wrapper_sink.go's handleDelta: a
+// thinking/thought-tagged chunk becomes llmtypes.EventThinking rather
+// than llmtypes.EventDelta, so chat_generate.go's shared streamLoop
+// excludes it from the persisted answer the same way it does for every
+// native-path adapter.
+func extractDeltaEvent(raw json.RawMessage) llmtypes.StreamEvent {
+	var p acpDeltaPayload
+	if len(raw) > 0 {
+		_ = json.Unmarshal(raw, &p)
 	}
-	_ = json.Unmarshal(raw, &p)
-	return p.Content
+	if p.Phase == "thought" || p.Thinking {
+		return llmtypes.StreamEvent{
+			Type:          llmtypes.EventThinking,
+			ThinkingBlock: &llmtypes.ThinkingBlock{Thinking: p.Content},
+		}
+	}
+	return llmtypes.StreamEvent{Type: llmtypes.EventDelta, Content: p.Content}
+}
+
+// acpTurnCompletedPayload mirrors opencodeacp's finishTurn payload shape
+// ({"stop_reason","usage"} — "usage" present only when the JSON-RPC
+// session/prompt response itself carried one, per opencodeacp/client.go's
+// finishTurn) and copilotacp's own KindTurnCompleted payload
+// ({"stop_reason"} only — copilotacp's awaitPromptResult never populates
+// a "usage" key today, confirmed directly). opencodeacp's own package doc
+// never claimed the session/prompt response's "usage" field was observed
+// in real traffic (only the unrelated usage_update session/update
+// NOTIFICATION variant was, and that one is deliberately skipped as
+// informational — see opencodeacp/translate.go) — live-verified directly
+// during this fix's own re-verification dogfeed (real opencode 1.15.6,
+// TASKS/agent-host-acp/11's Work Log addendum): the real response DOES
+// carry a "usage" object, and its field names line up with
+// llmtypes.Usage's own Go-style names closely enough that a plain
+// json.Unmarshal (no tag translation) round-trips real, non-zero
+// input/output token counts end to end into chat_generate.go's
+// finalUsage and the persisted stream_end payload.
+type acpTurnCompletedPayload struct {
+	Usage *llmtypes.Usage `json:"usage"`
+}
+
+// handleTurnCompleted sends EventUsage (when the payload carries usage
+// data) then the terminal EventDone — TASKS/agent-host-acp/11's Finding
+// 3 fix. Unlike wrapper_sink.go's handleTurnCompleted (which receives
+// usage and done as two SEPARATE Write calls from the native translator
+// and must pick one or the other per call — see its own doc comment),
+// ACP's own KindTurnCompleted event fires exactly once per turn, so both
+// events are sent from this single combined payload when usage data is
+// present; EventUsage first so chat_generate.go's finalUsage observes it
+// before the terminal EventDone closes out the turn.
+func (a *acpSession) handleTurnCompleted(ctx context.Context, raw json.RawMessage) {
+	var p acpTurnCompletedPayload
+	if len(raw) > 0 {
+		_ = json.Unmarshal(raw, &p)
+	}
+	if p.Usage != nil {
+		a.sendFanout(ctx, llmtypes.StreamEvent{Type: llmtypes.EventUsage, Usage: p.Usage})
+	}
+	a.sendFanout(ctx, llmtypes.StreamEvent{Type: llmtypes.EventDone})
+}
+
+// processExitedPayload reads the "error" key opencodeacp's waitProcess
+// populates with cmd.Wait()'s error string on an abnormal/unprompted
+// subprocess exit — empty/absent for a clean exit (Wait() returned nil;
+// see opencodeacp/client.go's waitProcess). copilotacp's Client does not
+// emit KindProcessExited at all today — a documented go-agent-wrapper
+// gap, not something this Nanite-side fix can close (see agent_acp.go's
+// bootACP doc comment) — so this case simply never fires for a
+// Copilot-CLI-driven session; processExitErr correctly stays nil for the
+// life of such a session, same as before this fix.
+type processExitedPayload struct {
+	Error string `json:"error"`
+}
+
+// handleProcessExited captures an abnormal ACP subprocess exit so
+// bootACP's draining goroutine can surface it through Session.Wait() as a
+// non-nil error — TASKS/agent-host-acp/11's Finding 2 fix. An intentional
+// Stop never reaches here: acpSession.Stop's Close() call closes the
+// Events channel synchronously (opencodeacp's Client.Close calls
+// closeEvents() immediately, well before it ever waits on the
+// subprocess) — by the time waitProcess's own later KindProcessExited
+// emit fires, the channel is already closed and the emit is a silent
+// no-op (see Client.emit's eventsClosed guard). So this only ever fires
+// for a genuine, unprompted process death — the exact case
+// internal/recovery/broker exists to catch.
+//
+// Constructs a real (if minimally populated) *agentsessions.ExitError
+// rather than a bare error: internal/recovery/broker's Classify requires
+// errors.As(err, &xe) against that exact concrete type (verified directly
+// against classifier.go) to route a crash to the broker at all — a plain
+// error would satisfy Session.Wait()'s "non-nil" contract but be
+// silently invisible to the broker, reproducing this exact "silent
+// fail-open" bug class one layer deeper. ACP's wire protocol carries no
+// structured exit-code/signal info (only the wrapped process error's
+// string), so Code is set to -1 — ExitError's own documented convention
+// for "no real exit code available" — which is enough for Classify's
+// final default branch (xe.Code != 0) to route this to the broker as an
+// unclassified crash (transient on the first attempt, permanent on
+// retry), same as it would for any other unclassified non-zero exit.
+func (a *acpSession) handleProcessExited(raw json.RawMessage) {
+	var p processExitedPayload
+	if len(raw) > 0 {
+		_ = json.Unmarshal(raw, &p)
+	}
+	if p.Error == "" {
+		return
+	}
+	a.processExitErr = fmt.Errorf("acpSession: process exited abnormally (%s): %w",
+		p.Error, &agentsessions.ExitError{Code: -1})
 }
 
 func extractError(raw json.RawMessage) string {

@@ -143,9 +143,23 @@ func bootACP(ctx context.Context, deps *Dependencies, opts Options, profile *sto
 	// row done and untracks it once the ACP Client's Events channel
 	// closes (Stop's explicit Close, or the underlying process exiting on
 	// its own — see acp_session.go's drain doc comment).
+	//
+	// TASKS/agent-host-acp/11 Finding 2 fix: sess.runErr is set from
+	// sink.processExitErr strictly after drain(...) returns (so
+	// handleProcessExited, called synchronously from within drain's own
+	// loop, has already run) and strictly before runDone closes — the
+	// same write-before-close ordering agent.go's native path uses for
+	// wr.Run's error, so Session.Wait's happens-before argument holds
+	// identically for both backends. nil (the common case — clean exit,
+	// intentional Stop, or copilotacp's Client, which never emits
+	// KindProcessExited at all) leaves Wait() returning nil, exactly like
+	// before this fix; a genuine unprompted crash now reaches Wait() as a
+	// non-nil error internal/recovery/broker's classifier can act on,
+	// instead of always looking like a clean exit.
 	go func() {
 		defer close(sess.runDone)
 		sink.drain(context.Background())
+		sess.runErr = sink.processExitErr
 		deps.untrackLiveSession(sessID)
 		_ = deps.Store.UpdateState(sessID, "done", 0)
 	}()

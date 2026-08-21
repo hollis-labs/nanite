@@ -41,7 +41,11 @@ type Layout interface {
 
 	// SpawnWorkdir returns the working directory for the spawn. claude /
 	// codex spawn from the boot dir; opencode spawns from the project dir
-	// with OPENCODE_CONFIG_DIR pointing at the boot dir.
+	// (falling back to the boot dir when projectDir is empty — see
+	// TASKS/agent-host-acp/18) with OPENCODE_CONFIG_DIR pointing at the
+	// boot dir. MUST NOT return "" — the caller feeds this straight into
+	// wrapper.Config.Workdir, which wrapper.Wrapper.Run hard-requires to
+	// be non-empty.
 	SpawnWorkdir(bootDir, projectDir string) string
 
 	// BootPrompt returns the system-prompt payload threaded into

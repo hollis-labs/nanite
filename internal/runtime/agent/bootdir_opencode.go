@@ -187,7 +187,32 @@ func (opencodeLayout) AmendEnv(base map[string]string, bootDir string) map[strin
 // forcing it into plant.Planter's file-planting contract would have
 // meant inventing a workdir concept the contract was never meant to
 // carry.
-func (opencodeLayout) SpawnWorkdir(_, projectDir string) string { return projectDir }
+//
+// TASKS/agent-host-acp/18: projectDir falls back to bootDir when empty.
+// Real chat sessions always call this with projectDir="" today —
+// internal/service/chat_boot_drive.go's bootSessionWorkdir is a
+// documented, intentional stub that never threads a resolved project
+// path through (project-repo workdir threading is a separate, larger,
+// still-deferred follow-up, not this fix's job). Pre-migration, an empty
+// projectDir flowed into agentsessions.StartOptions.Workdir directly,
+// which for exec.Cmd.Dir means "inherit the daemon's own cwd" — already
+// a real, silent wrong-cwd bug, but not a crash. Post-migration,
+// wrapper.Wrapper.Run hard-requires Config.Workdir non-empty
+// (wrapper.go's Run: "Config.Workdir is required"), so returning
+// projectDir verbatim turned that same empty value into an unconditional
+// crash on the very first turn of every real OpenCode CLI session. The
+// boot dir is always non-empty (Setup always creates it) and is at least
+// a real, scoped, per-session directory — closer to claude/codexLayout's
+// own SpawnWorkdir behavior (both always return bootDir) than to the
+// pre-migration daemon-cwd fallback. This does NOT resolve the
+// underlying wrong-cwd gap for OpenCode chat sessions (still bootDir, not
+// a real project path) — it only stops the hard crash.
+func (opencodeLayout) SpawnWorkdir(bootDir, projectDir string) string {
+	if projectDir == "" {
+		return bootDir
+	}
+	return projectDir
+}
 
 // BootPrompt is Nanite-owned, unchanged by TASKS/agent-host-acp/04 — see
 // claudeLayout.BootPrompt's comment for the rationale.

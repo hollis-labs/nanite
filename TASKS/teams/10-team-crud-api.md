@@ -1,7 +1,7 @@
 # Team definition CRUD API
 
 **Phase:** 4 — Definition & launch API surface (`TASKS/teams`)
-**Status:** implemented
+**Status:** reviewed
 **Depends on:** `01`
 **Touches:** `internal/api/teams.go` (new).
 
@@ -61,6 +61,8 @@ Standard REST CRUD over task `01`'s `teams` store, following this codebase's own
 **Nothing escalated.** No genuine ambiguity was hit that wasn't already resolved by directly reading the current state of `internal/store/teams.go`/`internal/store/team_authority.go` before writing code, per the task's own required-reading list.
 
 **Orchestrator merge note (2026-08-20):** independently reviewed the full diff before merging — read `internal/api/teams.go` and `internal/api/teams_test.go` in full, confirmed every `store.*` API used (`CreateTeam`/`GetTeam`/`ListTeams`/`UpdateTeam`/`DeleteTeam`/`ErrTeamNotFound`) and every `a.*` helper used (`decode`/`jsonResp`/`errorResp`) are pre-existing, not invented; confirmed `newTestAPI` is a pre-existing shared test helper, not new. Independently ran `go build`/`go vet`/`go test ./internal/api/...` in the worktree — clean at the expected baseline (gopls surfaced the usual stale cross-worktree false-positive diagnostics, confirmed false by real compilation). No changes made to the worker's implementation; merged as delivered.
+
+**Re-review (2026-08-20): PASS.** A fresh reviewer (no shared context with the worker or the Orchestrator) independently re-traced every claim in this Work Log against real source: confirmed every `store.*` call is real (read `internal/store/teams.go`/`team_authority.go` directly), confirmed the validation-split claim (grepped the whole repo for `AuthorityJSON`/`authority_json` usage, zero references outside this task's own files), traced `Resolution`/`ActivationMode` enum enforcement end-to-end from handler to `validateTeamSlots`, confirmed PATCH's partial-write safety holds by construction (validation failure means `store.UpdateTeam` is structurally never reached, not just tested-and-hoped), confirmed `CreatedBy`/`id`/timestamps are not caller-settable (the request DTOs have no such fields at all), and independently re-ran `go build`/`go vet`/`go test ./... -count=1` plus all 12 `TestTeamsAPI_*` tests individually via `go test -json` — all pass, same baseline. One process-only finding (not a code defect): this task's row in `TASKS/INDEX.md` had gone stale (`not-started`, not reflecting the merge) — the reviewer flagged it, and the Orchestrator corrected it alongside this review's own closure rather than waiting for a separate pass.
 
 ## Review notes
 <Reviewer fills this in: pass/fail, what was checked, anything fixed and how.>

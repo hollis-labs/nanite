@@ -251,7 +251,7 @@ That same live re-verification surfaced a second, unrelated real bug: reloading 
 |---|---|---|
 | 01-rebuild-todo-list-as-composition | implemented | none |
 | 02-rebuild-plan-review-as-composition | implemented | none |
-| 03-rebuild-subagent-spawn-approval-as-composition | not-started | none |
+| 03-rebuild-subagent-spawn-approval-as-composition | implemented | none |
 | 04-build-interactive-table-row-actions-primitive | implemented | none |
 | 05-exclude-card-data-from-replayed-context | implemented | none |
 | 06-fix-cli-boot-content-card-type-list | not-started | none functionally; best run after `01`–`04` so the sourced list reflects the final type set |

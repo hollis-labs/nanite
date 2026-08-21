@@ -142,8 +142,11 @@ func (a *Adapter) Discover(_ string) ([]agent.Definition, error) {
 // sandbox content is planted by the agent runtime via
 // internal/runtime/agent/bootdir_claude.Setup at agent.Boot time. The helper
 // content builders moved to internal/runtime/agent/sandbox_content_*.go in
-// Phase 3b.1 (commit 9dfcecf) and are exported as
-// runtimeagent.BuildCLAUDEMD / BuildAgentContext / BuildEnvelopeSchema.
+// Phase 3b.1 (commit 9dfcecf): the exported runtimeagent.BuildCLAUDEMD /
+// BuildAgentContext, plus the unexported envelopeSchemaContent (planted via
+// bootdir_plant.go's sandboxFiles — there never was a
+// "BuildEnvelopeSchema" export; that name in an earlier revision of this
+// comment didn't match any real symbol).
 //
 // The signature stays so the agent.CLIAgentAdapter interface contract holds
 // for the OLD adapter system that other adapters still implement.

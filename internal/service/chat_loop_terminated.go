@@ -9,13 +9,17 @@ import (
 )
 
 // chatLoopTerminatedEnvelopeType is the envelope `type` field emitted when
-// the chat loop exits abnormally. Registered in config/envelopes.yaml and
-// backed by internal/envelope/schemas/chat-loop-terminated.schema.json.
+// the chat loop exits abnormally. Registered as a core type in the external
+// github.com/hollis-labs/go-envelopes module's manifest/envelopes.yaml and
+// backed by that module's manifest/schemas/chat-loop-terminated.schema.json
+// (config/envelopes.yaml and internal/envelope/schemas/ do not exist in
+// this repo — see TASKS/phase-6/06-fix-cli-boot-content-card-type-list.md).
 // CW-20260417-0485.
 const chatLoopTerminatedEnvelopeType = "chat-loop-terminated"
 
 // chatLoopTerminatedPayload is the data payload for the chat-loop-terminated
-// envelope. Field names match internal/envelope/schemas/chat-loop-terminated.schema.json.
+// envelope. Field names match the go-envelopes module's
+// manifest/schemas/chat-loop-terminated.schema.json.
 type chatLoopTerminatedPayload struct {
 	Reason              string `json:"reason"`
 	Code                string `json:"code"`

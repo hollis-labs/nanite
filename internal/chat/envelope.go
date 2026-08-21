@@ -3,6 +3,7 @@ package chat
 import (
 	"encoding/json"
 	"regexp"
+	"sort"
 	"strings"
 	"sync"
 
@@ -80,6 +81,27 @@ func InitCoreTypes(types []string) {
 		registeredTypes[t] = true
 	}
 	registeredTypesMu.Unlock()
+}
+
+// RegisteredEnvelopeTypeNames returns every envelope type name ValidateEnvelope
+// currently accepts — core types from InitCoreTypes plus any plugin types
+// added at runtime via RegisterEnvelopeType — sorted for deterministic
+// output. This is the accurate, complete set: EnvelopeRegistry() alone
+// under-reports it, since a plugin envelope type registered without a JSON
+// Schema (Host.RegisterEnvelope without a matching
+// RegisterPluginEnvelopeSchema call) lands in registeredTypes but never in
+// the shared go-envelopes Registry. Exported so boot-content planting
+// (internal/runtime/agent) can build an accurate "Registered Envelope
+// Types" list without re-deriving this package's write-side bookkeeping.
+func RegisteredEnvelopeTypeNames() []string {
+	registeredTypesMu.RLock()
+	defer registeredTypesMu.RUnlock()
+	out := make([]string, 0, len(registeredTypes))
+	for t := range registeredTypes {
+		out = append(out, t)
+	}
+	sort.Strings(out)
+	return out
 }
 
 // ValidateEnvelope checks required fields on a parsed envelope.

@@ -185,7 +185,7 @@ func plantSpec(bootDir string, spec plant.Spec, cfg plantConfig) (plant.Result, 
 func sandboxFiles(params SetupParams) map[string][]byte {
 	return map[string][]byte{
 		".sandbox/agent-context.md":   []byte(BuildAgentContext(params.AgentProfile)),
-		".sandbox/envelope-schema.md": []byte(envelopeSchemaContent),
+		".sandbox/envelope-schema.md": []byte(envelopeSchemaContent()),
 	}
 }
 

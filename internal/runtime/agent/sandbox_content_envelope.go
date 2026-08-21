@@ -1,11 +1,80 @@
 package agent
 
-// envelopeSchemaContent is the .sandbox/envelope-schema.md body planted in
-// every nanite-managed boot dir, regardless of provider. The text mirrors
-// internal/plugin/builtin/adapter-claude/plugin.go's constant verbatim;
-// when the Phase 4c migration deletes the duplicate, this file becomes the
-// single source of truth.
-const envelopeSchemaContent = `# Nanite Envelope Schema
+import (
+	"fmt"
+	"strings"
+
+	"github.com/hollis-labs/nanite/internal/chat"
+)
+
+// envelopeSchemaContent returns the .sandbox/envelope-schema.md body
+// planted in every nanite-managed boot dir, regardless of provider.
+//
+// The "Registered Envelope Types" section is built at call time from
+// chat.RegisteredEnvelopeTypeNames() / chat.EnvelopeRegistry() — the live,
+// in-process registry populated at startup from the external
+// github.com/hollis-labs/go-envelopes module's embedded manifest, plus any
+// plugin-registered types (internal/plugin's Host.RegisterEnvelope). Do NOT
+// hardcode a static type table here again: a hand-maintained list silently
+// drifts every time a core type is added/removed or a plugin (un)registers
+// one, which is exactly the staleness this function replaced (Phase 6 task
+// 06 — the table used to list 7 fixed types, 5 of which were already cut).
+//
+// This used to be a package-level const string literal that duplicated
+// (per its own doc comment) a copy once carried in
+// internal/plugin/builtin/adapter-claude/plugin.go. That duplicate is long
+// gone — adapter-claude's PopulateSandbox has been a no-op since Phase
+// 4c.6 (CW-20260508-0002); this function is the sole source today.
+func envelopeSchemaContent() string {
+	var b strings.Builder
+	b.WriteString(envelopeSchemaHeader)
+	b.WriteString(registeredEnvelopeTypesSection())
+	b.WriteString(envelopeSchemaExamples)
+	return b.String()
+}
+
+// registeredEnvelopeTypesSection renders the "## Registered Envelope
+// Types" table. The type-name column comes from
+// chat.RegisteredEnvelopeTypeNames() (the complete set ValidateEnvelope
+// actually accepts); the Source column is enriched from
+// chat.EnvelopeRegistry() where available (core types are always present
+// there; a plugin type registered without a JSON Schema is not, and falls
+// back to "plugin" since only plugins register types outside InitCoreTypes).
+func registeredEnvelopeTypesSection() string {
+	var b strings.Builder
+	b.WriteString("## Registered Envelope Types\n\n")
+	b.WriteString("These are the only types the frontend can render. Using any other type\n")
+	b.WriteString("causes the envelope to be silently dropped — no error, no warning.\n\n")
+
+	names := chat.RegisteredEnvelopeTypeNames()
+	if len(names) == 0 {
+		b.WriteString("_(envelope registry was not yet populated when this boot dir was planted — " +
+			"this should not happen outside of tests; report it if seen against a live agent boot.)_\n\n")
+		return b.String()
+	}
+
+	reg := chat.EnvelopeRegistry()
+	b.WriteString("| Type | Source |\n")
+	b.WriteString("|------|--------|\n")
+	for _, name := range names {
+		source := "plugin"
+		if reg != nil {
+			if spec, ok := reg.Lookup(name); ok {
+				source = spec.Source.String()
+			}
+		}
+		fmt.Fprintf(&b, "| %s | %s |\n", name, source)
+	}
+	b.WriteString("\n")
+	return b.String()
+}
+
+// envelopeSchemaHeader is the static preamble: wire format + field
+// reference. Unlike the type table above, this describes the envelope
+// wire shape itself (kind/version/type/data and the question/action/
+// approval interactive pattern), which doesn't change per-registration —
+// no dynamic sourcing needed here.
+const envelopeSchemaHeader = `# Nanite Envelope Schema
 
 ## Format
 
@@ -75,17 +144,12 @@ Use kind="envelope" with a registered type for display cards (report-card, metri
 | risk | string | yes | "low", "medium", or "high" |
 | details | object | no | Additional context for the user |
 
-## Registered Envelope Types
+`
 
-These are the only types the frontend can render. Using any other type
-causes the envelope to be silently dropped — no error, no warning.
-
-| Type | Purpose |
-|------|---------|
-| document-viewer | Document display card |
-| report-card | Summary/report display |
-
-## Examples
+// envelopeSchemaExamples is the static closing section: worked examples of
+// each interactive-envelope kind. Not type-list content, so it doesn't
+// need dynamic sourcing.
+const envelopeSchemaExamples = `## Examples
 
 ### Question envelope
 ` + "```" + `nanite-envelope

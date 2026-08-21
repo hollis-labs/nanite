@@ -1,7 +1,7 @@
 # Filesystem snapshot host mechanism (FilesystemSnapshotProvider + ShadowGit)
 
 **Phase:** 1 — Host mechanism (`TASKS/filesystem-snapshots`)
-**Status:** not-started
+**Status:** implemented
 **Depends on:** conceptually continues the host boundary from `docs/engineering/
 architecture/16-agent-host.md`. Does **not** depend on that batch's `wrapper.Wrapper`
 session-launch mechanism (currently escalated in `TASKS/agent-host-acp/06` — see that task's
@@ -137,3 +137,115 @@ per-root shape in mind, not a single flat path list.
   operations inside a directory that also has a real `.git`, confirming zero effect on it.
 - `GLOSSARY.md` updated.
 - `go build ./...` / `go test ./...` clean in `libs/go-agent-wrapper`.
+
+## Work Log
+
+Implemented entirely in `libs/go-agent-wrapper` (sibling repo), committed directly on top of
+`main` at `7c65601` (tag `v0.3.0`) as commit `5c1a343`. New `snapshot/` package alongside
+`plant/`/`sandbox/`/`policy/`: `doc.go`, `types.go`, `provider.go`, `shadowgit.go`,
+`shadowgit_test.go`, `shadowgit_bench_test.go`.
+
+**`Target`/`SnapshotSet` shape.** `Target{ID, Root, IncludePaths}` — `ID` is caller-supplied
+and stable across captures (keys the shadow store via a `sha256(ID)`-derived directory name,
+never the raw ID, so arbitrary caller strings can't do path traversal into the shadow-store
+tree); `IncludePaths` is optional Root-relative scoping, expected to be handed in from a
+sandbox write-allowlist by a later Nanite-side task, not derived here. `SnapshotSet{ID,
+CapturedAt, Roots map[string]RootSnapshot}` is keyed by `Target.ID`, one `RootSnapshot`
+(`TreeHash`/`CommitHash`/`Skipped`/`Err`) per project root — never a single synthetic tree
+across roots, per the doc's `projects.repo_path` + `agent_projects` mapping.
+`Diff`/`Preview`/`RestoreChange` follow the same per-Target-keyed-map shape. Since
+`Preview`/`Restore`'s signatures are fixed to a flat `paths []string` but need to span
+multiple Targets, added `JoinPath(targetID, relPath) string` / `SplitPath` helpers (NUL-byte
+internal separator, documented as "always go through JoinPath, never hand-build the string")
+as this task's own answer to carrying the per-root shape through the fixed flat parameter.
+
+**Exclusion rules.** `.gitignore` and out-of-scope-path exclusion both ride on git's own
+engine for free — captures use `--git-dir=<shadow>/shadow.git --work-tree=<Root>`, so git's
+own ignore engine reads `.gitignore` files from the real `Root`, and `IncludePaths` becomes
+the `git add`/`ls-files` pathspec directly (no per-file enumeration needed for either rule —
+documented as a deliberate choice: enumerating every ignored file in something like
+`node_modules` would defeat the point of a fast per-step capture). Git metadata exclusion is
+an explicit `:(exclude).git` / `:(exclude,glob)**/.git` pathspec applied to every `add`, on
+top of git's own automatic nested-repo-boundary detection. Oversize-untracked (>2 MiB) is a
+Go-side check: `git ls-files --others --exclude-standard` scoped to `IncludePaths`, `os.Lstat`
+each result, pathspec-exclude (`:(exclude)<path>`) anything over
+`DefaultMaxUntrackedFileSize` (2 MiB, overridable via `WithMaxUntrackedFileSize`) — scoped to
+*untracked* files only, confirmed by test that a file already captured once keeps being
+captured even after growing past the ceiling. `SkippedPath`/`SkipReason` records only the
+git-metadata and oversize-untracked exclusions (both cheap/bounded); gitignored and
+out-of-scope paths are not enumerated individually, by design (documented in `types.go`).
+
+**Working-directory isolation.** Every git invocation passes `--git-dir`/`--work-tree` as
+explicit absolute-path CLI flags (never relies on inherited env), strips every
+`GIT_`-prefixed environment variable from the child process's env before layering back only
+what this package explicitly sets (author/committer identity for commits), and always sets an
+explicit non-zero `cmd.Dir` (the shadow store's own base directory — never inherited from the
+calling process, never inside any real repo's working tree). This is deliberately
+belt-and-suspenders: manually verified against real `git` (not just assumed) that with a
+poisoned `GIT_DIR`/`GIT_WORK_TREE` environment (simulating a real git hook's child-process
+env) and *no* explicit flags, git silently resolves to the wrong (real) repo — confirming the
+explicit-flags-plus-env-stripping combination is load-bearing, not redundant caution.
+`TestWorkingDirectoryIsolation_RealRepoUntouched` runs capture+restore against a `Target.Root`
+that has its own real `.git` and diffs the real repo's `HEAD` and `.git/index` bytes
+before/after (both unchanged); `TestWorkingDirectoryIsolation_EnvLeakage` additionally poisons
+`GIT_DIR`/`GIT_WORK_TREE` in the test process's own environment before calling `Capture` and
+confirms both that the capture still lands in the correct shadow store and that the real
+repo's `HEAD` is unaffected.
+
+**Two failure modes.** `ErrShadowStoreUnavailable` wraps only shadow-store
+init/open/identity-check failures (base dir uncreatable, `git init --bare` failing, missing
+git binary, on-disk `meta.json` target-ID mismatch) — always returned as a real top-level
+error from `NewShadowGit`/`Capture`, always logged at Error level. Everything after a
+successful `ensureShadowRepo` (missing `Target.Root`, a `git add`/`write-tree`/`commit-tree`
+failure for one Target) is recorded on that Target's `RootSnapshot.Err`, logged at Warn level,
+and never surfaces as `Capture`'s own returned error — a healthy shadow store's per-target
+capture hiccup never blocks the batch or the caller's turn. Covered by
+`TestCapture_LoudInfrastructureFailure`(+`_MissingGitBinary`) for the loud path and
+`TestCapture_SoftPerTargetFailure_NeverBlocksOtherTargets` (one target missing its Root
+alongside one healthy target in the same `Capture` call — healthy target still succeeds, top-
+level error stays nil) for the soft path.
+
+**Restore selectivity.** No whole-tree restore method or internal helper exists anywhere in
+the package — `Restore`/`Preview` always operate over an explicit `paths []string`, and an
+empty `paths` restores nothing (tested). Restore skips writing a path whose on-disk content
+already matches the snapshot (verified via a real `os.Stat` mtime-unchanged test), to avoid
+the OpenCode-reported whole-tree-restore mtime/editor-reload bug even at the single-path
+level. A destructive restore (on-disk content differs from the snapshot) is logged via
+`slog` rather than silently applied, matching the doc's "warn rather than silently overwrite"
+lightweight-conflict-check guidance — `Restore`'s signature only returns `error`, so warning
+happens via the configurable `WithLogger` logger rather than a new return value.
+
+**Shadow history shape / cleanup.** Each capture is an independent, parentless git commit
+under its own `refs/snapshots/<unixnano>-<nonce>` ref (not chained to the Target's previous
+capture) specifically so `Cleanup` can garbage-collect individual old captures
+(`update-ref -d` + `git gc --prune=now`) without rewriting a shared linear history — a
+parent-chained design was considered and rejected because a single ref pointing at the newest
+commit would keep every ancestor reachable forever, making per-capture cleanup structurally
+impossible. `Cleanup(ctx, targetID, CleanupPolicy{MaxAge, MaxSnapshotSets})` and
+`Purge(ctx, targetID)` (unconditional full removal) are both mechanism-only, per the task
+brief — policy values are caller-supplied.
+
+**Benchmark.** `BenchmarkCapture_RealisticTree` (2000 tracked files + 3000 gitignored
+`node_modules`-shaped files, 3 files mutated per iteration, matching the "several capture
+pairs per turn, small deltas" real cadence): **~52ms/op**, 637 allocs/op, on Apple M2 Pro.
+`BenchmarkCapture_FirstCapture` (cold, no prior shadow-repo state, same tree size): ~978ms/op
+— reported as a reference point, not the steady-state number the "non-blocking in practice"
+criterion is about, since real per-model-step captures hit the incremental path.
+`BenchmarkPreview_SinglePath`: ~4.9ms/op.
+
+**Deviations from the task file's own framing.** The task file's "Depends on"/"What's already
+in Nanite" sections reference "task `02`"/"task `03`" by number for the Nanite-side
+config/retention-policy and hash-check follow-on work; the actual prompt driving this session
+described this as the sole task in the batch with no numbered siblings currently tracked.
+Treated as pure framing difference, not a scope change — this task's own brief (the
+interface, exclusion rules, isolation, loud-vs-best-effort split, GLOSSARY entry) is
+unaffected either way, and the lightweight hash-check the doc assigns to "task 03" was in
+scope for `Preview`/`Restore` regardless (see "Restore selectivity" above), so it's
+implemented here rather than left as a stub.
+
+**Verification.** `go build ./...`, `go vet ./...`, `go test ./... -race`, and `gofmt -l
+snapshot/` all clean in `libs/go-agent-wrapper`. 21 tests in `snapshot/`, all passing
+(exclusion rules ×4, both failure modes, Diff, Preview, Restore selectivity/symlink/no-op/
+unsafe-path rejection, both working-directory-isolation tests, Cleanup age/count, Purge,
+JoinPath/SplitPath, NoOpProvider). Whole-repo test suite (`activity`, `adapters`,
+`classifybridge`, `filters`, `plant`, `policy`, `sandbox`, `wrapper`) unaffected.

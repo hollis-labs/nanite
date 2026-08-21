@@ -253,7 +253,7 @@ That same live re-verification surfaced a second, unrelated real bug: reloading 
 | 02-rebuild-plan-review-as-composition | not-started | none |
 | 03-rebuild-subagent-spawn-approval-as-composition | not-started | none |
 | 04-build-interactive-table-row-actions-primitive | not-started | none |
-| 05-exclude-card-data-from-replayed-context | not-started | none |
+| 05-exclude-card-data-from-replayed-context | implemented | none |
 | 06-fix-cli-boot-content-card-type-list | not-started | none functionally; best run after `01`–`04` so the sourced list reflects the final type set |
 
 **Parallelization:** `01`, `02`, `03` **all edit the same shared external manifest file** (`libs/go-envelopes/manifest/envelopes.yaml`, each removing/replacing a different standalone entry) — worktree-isolate for the actual coding work, but **merge one at a time**, same pattern as Phase 0's `15a`/`15c` card-type-registration coordination. `04` touches a different file in the same external module directory (`table-card.schema.json`) — lower risk, still flag for awareness. `05` (`internal/chat/context_client.go`) and `06` (`sandbox_content_*.go`) have no overlap with `01`–`04` or each other — fully parallel-safe.

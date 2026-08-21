@@ -1,10 +1,11 @@
 package agent
 
 import (
+	"context"
 	"fmt"
 	"os"
 
-	"github.com/hollis-labs/agentkit/agentlaunch"
+	"github.com/hollis-labs/go-agent-wrapper/plant"
 	"github.com/hollis-labs/go-providers/provider"
 	"github.com/hollis-labs/nanite/internal/store"
 )
@@ -21,9 +22,11 @@ import (
 //
 // Spawn cwd: <bootDir>; project access via codex's --cd flag.
 //
-// CW-20260515-0025: the bootdir file-set is declared as an
-// agentlaunch.InjectionSpec and written via plantInjectionSpec — see
-// bootdir_plant.go.
+// TASKS/agent-host-acp/04: the bootdir file-set is declared as a
+// plant.Spec (github.com/hollis-labs/go-agent-wrapper/plant) and planted
+// through codexPlanter, which implements plant.Planter — see
+// bootdir_plant.go for why Nanite uses go-agent-wrapper's Planter
+// contract rather than agentkit/agentlaunch/providerplant.Plant.
 //
 // S5 Phase B: config.toml is now planted (it was previously missing
 // entirely). Codex's load-bearing config lives in $CODEX_HOME/config.toml;
@@ -38,6 +41,25 @@ import (
 // ~/.codex/config.toml and the planted config.toml is never consulted.
 type codexLayout struct{}
 
+// codexPlanter implements plant.Planter for the codex bootdir shape.
+// Plant destinations: Spec.Files entries land verbatim at their map-key
+// path (including auth.json, forced to 0o600 via fileModeOverrides);
+// Spec.MCPConfig lands at ".mcp.json"; Spec.ProviderSettings["codex"]
+// lands at "config.toml", also at 0o600. See bootdir_plant.go's
+// plantSpec for the shared write routine.
+type codexPlanter struct{}
+
+var _ plant.Planter = codexPlanter{}
+
+func (codexPlanter) Plant(_ context.Context, bootDir string, spec plant.Spec) (plant.Result, error) {
+	return plantSpec(bootDir, spec, plantConfig{
+		provider:             "codex",
+		providerSettingsPath: "config.toml",
+		providerSettingsMode: codexConfigFileMode,
+		fileModeOverrides:    map[string]os.FileMode{"auth.json": codexConfigFileMode},
+	})
+}
+
 // codexAgentsMD renders the AGENTS.md system-prompt body. Codex's
 // system-prompt-bearing slot is AGENTS.md (the cwd-loaded file analogous
 // to claude's CLAUDE.md). The body shape comes from go-providers'
@@ -51,37 +73,47 @@ func codexAgentsMD(params SetupParams) string {
 	}, "")
 }
 
-// codexInjectionSpec assembles the full codex bootdir file-set as a
-// shared agentlaunch.InjectionSpec.
+// codexPlantSpec assembles the full codex bootdir file-set as a
+// plant.Spec.
 //
 // config.toml and auth.json are provider CONFIG files sourced from
 // go-providers' CodexAdapter.BootDirSpec (not hand-rolled). config.toml
 // carries approval_policy + sandbox_mode — the fix for the headless-codex
-// approval deadlock; auth.json carries the user's codex auth, planted
-// because CODEX_HOME (set by AmendEnv) redirects codex's auth lookup into
-// the boot dir. See bootdir_provider_config.go.
-func codexInjectionSpec(params SetupParams) (agentlaunch.InjectionSpec, error) {
+// approval deadlock — and rides Spec.ProviderSettings["codex"]; auth.json
+// carries the user's codex auth, planted because CODEX_HOME (set by
+// AmendEnv) redirects codex's auth lookup into the boot dir, and rides
+// Spec.Files (codexPlanter forces its mode to codexConfigFileMode via
+// fileModeOverrides — Spec.Files carries no per-entry mode of its own).
+// See bootdir_provider_config.go.
+func codexPlantSpec(params SetupParams) (plant.Spec, error) {
 	configTOML, err := codexConfigTOMLContent(params.CLIWritableRoots)
 	if err != nil {
-		return agentlaunch.InjectionSpec{}, err
+		return plant.Spec{}, err
 	}
 	authJSON, err := codexAuthJSONContent()
 	if err != nil {
-		return agentlaunch.InjectionSpec{}, err
+		return plant.Spec{}, err
 	}
-	native := []agentlaunch.NativeFile{
-		nativeFileRaw("AGENTS.md", codexAgentsMD(params), 0o644),
-		bootMDNativeFile(params),
-		nativeFileRaw("config.toml", configTOML, codexConfigFileMode),
-		nativeFileRaw("auth.json", authJSON, codexConfigFileMode),
-	}
-	native = append(native, sandboxNativeFiles(params)...)
 
-	overlay, err := mcpOverlay(params)
-	if err != nil {
-		return agentlaunch.InjectionSpec{}, err
+	files := map[string][]byte{
+		"AGENTS.md": []byte(codexAgentsMD(params)),
+		"boot.md":   []byte(params.BootContent),
+		"auth.json": []byte(authJSON),
 	}
-	return agentlaunch.InjectionSpec{NativeFiles: native, BootDirOverlay: overlay}, nil
+	for relPath, content := range sandboxFiles(params) {
+		files[relPath] = content
+	}
+
+	mcp, err := mcpConfigBytes(params)
+	if err != nil {
+		return plant.Spec{}, err
+	}
+
+	return plant.Spec{
+		Files:            files,
+		MCPConfig:        mcp,
+		ProviderSettings: map[string][]byte{"codex": []byte(configTOML)},
+	}, nil
 }
 
 func (l codexLayout) Setup(params SetupParams) (string, error) {
@@ -97,15 +129,20 @@ func (l codexLayout) Setup(params SetupParams) (string, error) {
 }
 
 // Populate writes the codex boot-dir shape into bootDir. Idempotent.
+//
+// Layout.Populate has no context.Context parameter (see bootdir.go
+// and claudeLayout.Populate's comment for why codexPlanter.Plant is
+// called with context.Background() here).
 func (codexLayout) Populate(bootDir string, params SetupParams) error {
 	if params.AgentProfile == nil {
 		return fmt.Errorf("agent: codexLayout.Populate: AgentProfile is required")
 	}
-	spec, err := codexInjectionSpec(params)
+	spec, err := codexPlantSpec(params)
 	if err != nil {
 		return err
 	}
-	return plantInjectionSpec(bootDir, spec)
+	_, err = codexPlanter{}.Plant(context.Background(), bootDir, spec)
+	return err
 }
 
 // RegenerateSystemPromptSlot rewrites only AGENTS.md, leaving the rest
@@ -114,11 +151,13 @@ func (codexLayout) RegenerateSystemPromptSlot(bootDir string, params SetupParams
 	if params.AgentProfile == nil {
 		return fmt.Errorf("agent: codexLayout.RegenerateSystemPromptSlot: AgentProfile is required")
 	}
-	return plantInjectionSpec(bootDir, agentlaunch.InjectionSpec{
-		NativeFiles: []agentlaunch.NativeFile{
-			nativeFileRaw("AGENTS.md", codexAgentsMD(params), 0o644),
+	spec := plant.Spec{
+		Files: map[string][]byte{
+			"AGENTS.md": []byte(codexAgentsMD(params)),
 		},
-	})
+	}
+	_, err := codexPlanter{}.Plant(context.Background(), bootDir, spec)
+	return err
 }
 
 // AmendEnv sets CODEX_HOME=<bootDir>. Codex reads its config (config.toml)
@@ -126,12 +165,15 @@ func (codexLayout) RegenerateSystemPromptSlot(bootDir string, params SetupParams
 // the planted config.toml the one codex actually consults — without this
 // codex would merge ~/.codex/config.toml instead and the planted
 // approval_policy / sandbox_mode (the headless-deadlock fix) would never
-// take effect. codexInjectionSpec plants auth.json alongside so the
+// take effect. codexPlantSpec plants auth.json alongside so the
 // redirected auth lookup still resolves. Mirrors opencodeLayout.AmendEnv's
 // OPENCODE_CONFIG_DIR=<bootDir> pattern.
 //
 // An empty bootDir leaves base unchanged (defensive — Setup/Populate
 // always pass a real path).
+//
+// Nanite-owned, unchanged by TASKS/agent-host-acp/04: plant.Planter's
+// contract is file-planting only and has no concept of env composition.
 func (codexLayout) AmendEnv(base map[string]string, bootDir string) map[string]string {
 	if bootDir == "" {
 		return base
@@ -144,12 +186,19 @@ func (codexLayout) AmendEnv(base map[string]string, bootDir string) map[string]s
 	return out
 }
 
+// SpawnWorkdir returns the boot dir.
+//
+// Nanite-owned, unchanged by TASKS/agent-host-acp/04 — see
+// claudeLayout.SpawnWorkdir's comment for the rationale.
 func (codexLayout) SpawnWorkdir(bootDir, _ string) string { return bootDir }
 
+// BootPrompt is Nanite-owned, unchanged by TASKS/agent-host-acp/04 — see
+// claudeLayout.BootPrompt's comment for the rationale.
 func (codexLayout) BootPrompt(profile *store.AgentProfile, opts Options) string {
 	return resolveBootPrompt(profile, opts)
 }
 
 // BootMode is empty for the subprocess-per-turn codex path; the boot
-// prompt threads as the first user message.
+// prompt threads as the first user message. Nanite-owned, unchanged by
+// TASKS/agent-host-acp/04 — see claudeLayout.BootMode's comment.
 func (codexLayout) BootMode() string { return "" }

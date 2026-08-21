@@ -181,8 +181,8 @@ func claudeProviderConfigContent(additionalDirectories []string) (string, error)
 // renderProviderConfigFile obtains the named PlantedFile from a
 // go-providers adapter's BootDirSpec and renders it with ctx. It is the
 // single seam between Nanite's bootdir layouts and go-providers' config
-// renderers — Nanite owns the planting (plantInjectionSpec), go-providers
-// owns the config-file CONTENT.
+// renderers — Nanite owns the planting (via claudePlanter/codexPlanter,
+// TASKS/agent-host-acp/04), go-providers owns the config-file CONTENT.
 //
 // An adapter that does not implement BootDirProvider, or a BootDirSpec
 // that does not declare relPath, is a programmer error (the go-providers

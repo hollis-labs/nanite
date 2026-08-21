@@ -6,40 +6,42 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/hollis-labs/agentkit/agentlaunch"
+	"github.com/hollis-labs/go-agent-wrapper/plant"
 	"github.com/hollis-labs/nanite/internal/store"
 )
 
-// TestPlantInjectionSpec_NativeFilesAndOverlay verifies the shared
-// planting routine writes NativeFiles and BootDirOverlay entries,
-// creates intermediate directories, and applies the overlay-wins-last
-// ordering (an overlay entry overrides a native file at the same path).
-func TestPlantInjectionSpec_NativeFilesAndOverlay(t *testing.T) {
+// TestPlantSpec_FilesMCPAndProviderSettings verifies the shared plantSpec
+// write routine writes Files entries, the MCPConfig ".mcp.json" shortcut,
+// and the configured ProviderSettings destination.
+func TestPlantSpec_FilesMCPAndProviderSettings(t *testing.T) {
 	bootDir := t.TempDir()
 
-	spec := agentlaunch.InjectionSpec{
-		NativeFiles: []agentlaunch.NativeFile{
-			nativeFileRaw("top.md", "native-top", 0o644),
-			nativeFileRaw("nested/dir/file.md", "native-nested", 0o644),
-			nativeFileRaw("collide.txt", "native-loser", 0o644),
+	spec := plant.Spec{
+		Files: map[string][]byte{
+			"top.md":             []byte("top-content"),
+			"nested/dir/file.md": []byte("nested-content"),
 		},
-		BootDirOverlay: map[string]string{
-			"collide.txt":  "overlay-winner",
-			"overlay-only": "overlay-content",
+		MCPConfig: []byte(`{"mcp":true}`),
+		ProviderSettings: map[string][]byte{
+			"claude": []byte(`{"permissions":{}}`),
 		},
 	}
-	if err := plantInjectionSpec(bootDir, spec); err != nil {
-		t.Fatalf("plantInjectionSpec: %v", err)
+	result, err := plantSpec(bootDir, spec, plantConfig{
+		provider:             "claude",
+		providerSettingsPath: ".claude/settings.json",
+	})
+	if err != nil {
+		t.Fatalf("plantSpec: %v", err)
 	}
 
 	cases := []struct {
 		path string
 		want string
 	}{
-		{"top.md", "native-top"},
-		{"nested/dir/file.md", "native-nested"},
-		{"collide.txt", "overlay-winner"}, // overlay wins last
-		{"overlay-only", "overlay-content"},
+		{"top.md", "top-content"},
+		{"nested/dir/file.md", "nested-content"},
+		{".mcp.json", `{"mcp":true}`},
+		{".claude/settings.json", `{"permissions":{}}`},
 	}
 	for _, c := range cases {
 		body, err := os.ReadFile(filepath.Join(bootDir, filepath.FromSlash(c.path)))
@@ -51,16 +53,48 @@ func TestPlantInjectionSpec_NativeFilesAndOverlay(t *testing.T) {
 			t.Errorf("%s = %q, want %q", c.path, string(body), c.want)
 		}
 	}
+	if len(result.PlantedFiles) != len(cases) {
+		t.Errorf("PlantedFiles = %v, want %d entries", result.PlantedFiles, len(cases))
+	}
 }
 
-// TestPlantInjectionSpec_RejectsUnsafePath verifies the shared bootdir
-// path-safety gate (agentlaunch.ValidateBootDirRelPath) rejects a
-// traversal path before any write happens.
-func TestPlantInjectionSpec_RejectsUnsafePath(t *testing.T) {
+// TestPlantSpec_ProviderSettingsAndFileModeOverrides verifies a
+// configured providerSettingsMode / fileModeOverrides entry is honored —
+// codex's config.toml/auth.json need 0o600, not the 0o644 Files default.
+func TestPlantSpec_ProviderSettingsAndFileModeOverrides(t *testing.T) {
 	bootDir := t.TempDir()
-	err := plantInjectionSpec(bootDir, agentlaunch.InjectionSpec{
-		BootDirOverlay: map[string]string{"../escape.txt": "nope"},
+	spec := plant.Spec{
+		Files:            map[string][]byte{"auth.json": []byte("secret")},
+		ProviderSettings: map[string][]byte{"codex": []byte("policy")},
+	}
+	_, err := plantSpec(bootDir, spec, plantConfig{
+		provider:             "codex",
+		providerSettingsPath: "config.toml",
+		providerSettingsMode: 0o600,
+		fileModeOverrides:    map[string]os.FileMode{"auth.json": 0o600},
 	})
+	if err != nil {
+		t.Fatalf("plantSpec: %v", err)
+	}
+	for _, p := range []string{"config.toml", "auth.json"} {
+		info, err := os.Stat(filepath.Join(bootDir, p))
+		if err != nil {
+			t.Fatalf("stat %s: %v", p, err)
+		}
+		if perm := info.Mode().Perm(); perm != 0o600 {
+			t.Errorf("%s mode = %o, want 0600", p, perm)
+		}
+	}
+}
+
+// TestPlantSpec_RejectsUnsafePath verifies the shared bootdir path-safety
+// gate (agentlaunch.ValidateBootDirRelPath) rejects a traversal path
+// before any write happens.
+func TestPlantSpec_RejectsUnsafePath(t *testing.T) {
+	bootDir := t.TempDir()
+	_, err := plantSpec(bootDir, plant.Spec{
+		Files: map[string][]byte{"../escape.txt": []byte("nope")},
+	}, plantConfig{provider: "claude"})
 	if err == nil {
 		t.Fatal("expected path-safety rejection, got nil")
 	}
@@ -69,26 +103,37 @@ func TestPlantInjectionSpec_RejectsUnsafePath(t *testing.T) {
 	}
 }
 
-// TestPlantInjectionSpec_RejectsNonRawNativeFile verifies a NativeFile
-// of a kind other than NativeFileRaw is rejected loudly — Nanite plants
-// no provider-native skill files into the bootdir.
-func TestPlantInjectionSpec_RejectsNonRawNativeFile(t *testing.T) {
+// TestPlantSpec_RejectsHooks verifies a non-empty Spec.Hooks is rejected
+// loudly — Nanite has no hook-planting destination yet, and nothing in
+// this package populates Hooks today, so a non-empty value can only mean
+// a caller expected behavior that isn't implemented.
+func TestPlantSpec_RejectsHooks(t *testing.T) {
 	bootDir := t.TempDir()
-	err := plantInjectionSpec(bootDir, agentlaunch.InjectionSpec{
-		NativeFiles: []agentlaunch.NativeFile{
-			{Kind: agentlaunch.NativeFileSkill, ID: "some-skill", Content: "x"},
-		},
-	})
-	if err == nil || !strings.Contains(err.Error(), "unsupported kind") {
-		t.Fatalf("expected unsupported-kind error, got %v", err)
+	_, err := plantSpec(bootDir, plant.Spec{
+		Hooks: []plant.Hook{{Provider: "claude", Name: "pre-tool-use"}},
+	}, plantConfig{provider: "claude"})
+	if err == nil || !strings.Contains(err.Error(), "hooks") {
+		t.Fatalf("expected hooks-unsupported error, got %v", err)
 	}
 }
 
-// TestClaudeInjectionSpec_RidesSharedPath verifies the claude layout's
-// app-extra files (.sandbox/* docs) are represented as NativeFile
-// entries and the MCP descriptor as a BootDirOverlay entry — i.e. the
-// Nanite app extras ride the shared InjectionSpec planting path.
-func TestClaudeInjectionSpec_RidesSharedPath(t *testing.T) {
+// TestPlantSpec_RejectsRecoveryPrompt mirrors TestPlantSpec_RejectsHooks
+// for Spec.RecoveryPrompt.
+func TestPlantSpec_RejectsRecoveryPrompt(t *testing.T) {
+	bootDir := t.TempDir()
+	_, err := plantSpec(bootDir, plant.Spec{
+		RecoveryPrompt: "resume here",
+	}, plantConfig{provider: "claude"})
+	if err == nil || !strings.Contains(err.Error(), "RecoveryPrompt") {
+		t.Fatalf("expected RecoveryPrompt-unsupported error, got %v", err)
+	}
+}
+
+// TestClaudePlantSpec_Shape verifies the claude layout's app-extra files
+// (.sandbox/* docs) and provider settings ride the plant.Spec vocabulary
+// correctly — i.e. the Nanite app extras land in Spec.Files and the MCP
+// descriptor lands in Spec.MCPConfig.
+func TestClaudePlantSpec_Shape(t *testing.T) {
 	params := SetupParams{
 		SessionID:    "sess-x",
 		AgentProfile: &store.AgentProfile{Name: "Specced", Slug: "specced"},
@@ -99,40 +144,44 @@ func TestClaudeInjectionSpec_RidesSharedPath(t *testing.T) {
 			DBPath:     "/tmp/x.db",
 		},
 	}
-	spec, err := claudeInjectionSpec(params)
+	spec, err := claudePlantSpec(params)
 	if err != nil {
-		t.Fatalf("claudeInjectionSpec: %v", err)
+		t.Fatalf("claudePlantSpec: %v", err)
 	}
-
-	var sawSandboxCtx, sawEnvelope bool
-	for _, nf := range spec.NativeFiles {
-		if nf.Kind != agentlaunch.NativeFileRaw {
-			t.Errorf("native file %q has non-raw kind %q", nf.RelPath, nf.Kind)
-		}
-		switch nf.RelPath {
-		case ".sandbox/agent-context.md":
-			sawSandboxCtx = true
-		case ".sandbox/envelope-schema.md":
-			sawEnvelope = true
+	for _, want := range []string{".sandbox/agent-context.md", ".sandbox/envelope-schema.md", "CLAUDE.md", "boot.md"} {
+		if _, ok := spec.Files[want]; !ok {
+			t.Errorf("claudePlantSpec: missing Files[%q]", want)
 		}
 	}
-	if !sawSandboxCtx || !sawEnvelope {
-		t.Errorf("sandbox app-extras not represented as NativeFiles: ctx=%v envelope=%v", sawSandboxCtx, sawEnvelope)
+	if len(spec.MCPConfig) == 0 {
+		t.Errorf("claudePlantSpec: expected non-empty MCPConfig")
 	}
-	if _, ok := spec.BootDirOverlay[".mcp.json"]; !ok {
-		t.Errorf(".mcp.json should ride as a BootDirOverlay entry, overlay=%v", spec.BootDirOverlay)
+	if _, ok := spec.ProviderSettings["claude"]; !ok {
+		t.Errorf("claudePlantSpec: missing ProviderSettings[claude]")
 	}
 }
 
-// TestMCPOverlay_DisabledWhenNoDBPath verifies MCP planting is skipped
-// (empty overlay) when MCPConfig carries no DBPath — matching the
-// pre-refactor writeMCPJSON behavior.
-func TestMCPOverlay_DisabledWhenNoDBPath(t *testing.T) {
-	overlay, err := mcpOverlay(SetupParams{SessionID: "s1"})
+// TestMCPConfigBytes_DisabledWhenNoDBPath verifies MCP planting is
+// skipped (nil MCPConfig bytes) when MCPConfig carries no DBPath —
+// matching mcpOverlay's existing DBPath-gating behavior.
+func TestMCPConfigBytes_DisabledWhenNoDBPath(t *testing.T) {
+	body, err := mcpConfigBytes(SetupParams{SessionID: "s1"})
 	if err != nil {
-		t.Fatalf("mcpOverlay: %v", err)
+		t.Fatalf("mcpConfigBytes: %v", err)
 	}
-	if len(overlay) != 0 {
-		t.Errorf("expected no MCP overlay when DBPath empty, got %v", overlay)
+	if len(body) != 0 {
+		t.Errorf("expected no MCP config when DBPath empty, got %q", body)
+	}
+}
+
+// TestPlanters_ImplementPlanterInterface is a compile-time-adjacent
+// smoke test pinning that all three provider Planters satisfy
+// plant.Planter (also enforced by the `var _ plant.Planter = ...`
+// assertions alongside each type, but kept here too so `go test` output
+// names the invariant explicitly).
+func TestPlanters_ImplementPlanterInterface(t *testing.T) {
+	var planters = []plant.Planter{claudePlanter{}, codexPlanter{}, opencodePlanter{}}
+	if len(planters) != 3 {
+		t.Fatalf("expected 3 planters, got %d", len(planters))
 	}
 }

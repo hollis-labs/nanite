@@ -1,11 +1,12 @@
 package agent
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"os"
 
-	"github.com/hollis-labs/agentkit/agentlaunch"
+	"github.com/hollis-labs/go-agent-wrapper/plant"
 	"github.com/hollis-labs/nanite/internal/store"
 )
 
@@ -25,10 +26,28 @@ import (
 // Spawn cwd: <projectDir> (NOT bootDir). The boot dir is the *config* dir,
 // surfaced via OPENCODE_CONFIG_DIR=<bootDir>.
 //
-// CW-20260515-0025: the bootdir file-set is declared as an
-// agentlaunch.InjectionSpec and written via plantInjectionSpec — see
-// bootdir_plant.go.
+// TASKS/agent-host-acp/04: the bootdir file-set is declared as a
+// plant.Spec (github.com/hollis-labs/go-agent-wrapper/plant) and planted
+// through opencodePlanter, which implements plant.Planter — see
+// bootdir_plant.go for why Nanite uses go-agent-wrapper's Planter
+// contract rather than agentkit/agentlaunch/providerplant.Plant.
 type opencodeLayout struct{}
+
+// opencodePlanter implements plant.Planter for the opencode bootdir
+// shape. Plant destinations: Spec.Files entries land verbatim at their
+// map-key path; Spec.MCPConfig lands at ".mcp.json". opencode has no
+// go-providers-sourced ProviderSettings destination — agents.json and
+// opencode.json are hand-rolled Nanite content and ride Spec.Files like
+// every other planted file, so plantConfig.providerSettingsPath is left
+// empty here. See bootdir_plant.go's plantSpec for the shared write
+// routine.
+type opencodePlanter struct{}
+
+var _ plant.Planter = opencodePlanter{}
+
+func (opencodePlanter) Plant(_ context.Context, bootDir string, spec plant.Spec) (plant.Result, error) {
+	return plantSpec(bootDir, spec, plantConfig{provider: "opencode"})
+}
 
 // opencodeAgentMD renders the agents/<slug>.md system-prompt body.
 // Opencode's system-prompt-bearing slot is the per-slug agent file
@@ -71,33 +90,36 @@ func opencodeJSON(slug string) (string, error) {
 	return string(b), nil
 }
 
-// opencodeInjectionSpec assembles the full opencode bootdir file-set as a
-// shared agentlaunch.InjectionSpec.
-func opencodeInjectionSpec(params SetupParams) (agentlaunch.InjectionSpec, error) {
+// opencodePlantSpec assembles the full opencode bootdir file-set as a
+// plant.Spec.
+func opencodePlantSpec(params SetupParams) (plant.Spec, error) {
 	slug := agentSlug(params)
 
 	agentsJSONBody, err := opencodeAgentsJSON(params, slug)
 	if err != nil {
-		return agentlaunch.InjectionSpec{}, err
+		return plant.Spec{}, err
 	}
 	opencodeJSONBody, err := opencodeJSON(slug)
 	if err != nil {
-		return agentlaunch.InjectionSpec{}, err
+		return plant.Spec{}, err
 	}
 
-	native := []agentlaunch.NativeFile{
-		nativeFileRaw(fmt.Sprintf("agents/%s.md", slug), opencodeAgentMD(params), 0o644),
-		nativeFileRaw("agents.json", agentsJSONBody, 0o644),
-		nativeFileRaw("opencode.json", opencodeJSONBody, 0o644),
-		bootMDNativeFile(params),
+	files := map[string][]byte{
+		fmt.Sprintf("agents/%s.md", slug): []byte(opencodeAgentMD(params)),
+		"agents.json":                     []byte(agentsJSONBody),
+		"opencode.json":                   []byte(opencodeJSONBody),
+		"boot.md":                         []byte(params.BootContent),
 	}
-	native = append(native, sandboxNativeFiles(params)...)
+	for relPath, content := range sandboxFiles(params) {
+		files[relPath] = content
+	}
 
-	overlay, err := mcpOverlay(params)
+	mcp, err := mcpConfigBytes(params)
 	if err != nil {
-		return agentlaunch.InjectionSpec{}, err
+		return plant.Spec{}, err
 	}
-	return agentlaunch.InjectionSpec{NativeFiles: native, BootDirOverlay: overlay}, nil
+
+	return plant.Spec{Files: files, MCPConfig: mcp}, nil
 }
 
 func (l opencodeLayout) Setup(params SetupParams) (string, error) {
@@ -113,15 +135,20 @@ func (l opencodeLayout) Setup(params SetupParams) (string, error) {
 }
 
 // Populate writes the opencode boot-dir shape into bootDir. Idempotent.
+//
+// Layout.Populate has no context.Context parameter (see bootdir.go
+// and claudeLayout.Populate's comment for why opencodePlanter.Plant is
+// called with context.Background() here).
 func (opencodeLayout) Populate(bootDir string, params SetupParams) error {
 	if params.AgentProfile == nil {
 		return fmt.Errorf("agent: opencodeLayout.Populate: AgentProfile is required")
 	}
-	spec, err := opencodeInjectionSpec(params)
+	spec, err := opencodePlantSpec(params)
 	if err != nil {
 		return err
 	}
-	return plantInjectionSpec(bootDir, spec)
+	_, err = opencodePlanter{}.Plant(context.Background(), bootDir, spec)
+	return err
 }
 
 // RegenerateSystemPromptSlot rewrites only agents/<slug>.md, leaving the
@@ -131,14 +158,19 @@ func (opencodeLayout) RegenerateSystemPromptSlot(bootDir string, params SetupPar
 		return fmt.Errorf("agent: opencodeLayout.RegenerateSystemPromptSlot: AgentProfile is required")
 	}
 	slug := agentSlug(params)
-	return plantInjectionSpec(bootDir, agentlaunch.InjectionSpec{
-		NativeFiles: []agentlaunch.NativeFile{
-			nativeFileRaw(fmt.Sprintf("agents/%s.md", slug), opencodeAgentMD(params), 0o644),
+	spec := plant.Spec{
+		Files: map[string][]byte{
+			fmt.Sprintf("agents/%s.md", slug): []byte(opencodeAgentMD(params)),
 		},
-	})
+	}
+	_, err := opencodePlanter{}.Plant(context.Background(), bootDir, spec)
+	return err
 }
 
 // AmendEnv injects OPENCODE_CONFIG_DIR=<bootDir>.
+//
+// Nanite-owned, unchanged by TASKS/agent-host-acp/04: plant.Planter's
+// contract is file-planting only and has no concept of env composition.
 func (opencodeLayout) AmendEnv(base map[string]string, bootDir string) map[string]string {
 	out := make(map[string]string, len(base)+1)
 	for k, v := range base {
@@ -148,11 +180,21 @@ func (opencodeLayout) AmendEnv(base map[string]string, bootDir string) map[strin
 	return out
 }
 
-// SpawnWorkdir returns the project dir (boot dir is the config dir, not cwd).
+// SpawnWorkdir returns the project dir (boot dir is the config dir, not
+// cwd). Nanite-owned, unchanged by TASKS/agent-host-acp/04 — see
+// claudeLayout.SpawnWorkdir's comment for the rationale. This is the
+// provider where SpawnWorkdir's divergence from bootDir matters most:
+// forcing it into plant.Planter's file-planting contract would have
+// meant inventing a workdir concept the contract was never meant to
+// carry.
 func (opencodeLayout) SpawnWorkdir(_, projectDir string) string { return projectDir }
 
+// BootPrompt is Nanite-owned, unchanged by TASKS/agent-host-acp/04 — see
+// claudeLayout.BootPrompt's comment for the rationale.
 func (opencodeLayout) BootPrompt(profile *store.AgentProfile, opts Options) string {
 	return resolveBootPrompt(profile, opts)
 }
 
+// BootMode is Nanite-owned, unchanged by TASKS/agent-host-acp/04 — see
+// claudeLayout.BootMode's comment.
 func (opencodeLayout) BootMode() string { return "" }

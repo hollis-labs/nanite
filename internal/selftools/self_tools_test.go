@@ -295,8 +295,11 @@ func TestSelfToolsTransport_WorkBroadcast(t *testing.T) {
 }
 
 // TestSelfToolsTransport_TodoListEmitsEnvelope verifies that todo_list
-// emits a todo-list envelope carrying the scope/scope_id the caller filtered
-// on, so TodoListCard can lazy-fetch correctly. CW-20260418-0045.
+// emits a list-card envelope (Phase 6 composition — the standalone
+// `todo-list` type was retired, TASKS/phase-6/01-rebuild-todo-list-as-composition.md)
+// carrying a `data_source` pointer with the scope/scope_id the caller
+// filtered on, so the frontend's live todo composition can lazy-fetch
+// correctly. CW-20260418-0045.
 func TestSelfToolsTransport_TodoListEmitsEnvelope(t *testing.T) {
 	st := newSelfTools(t)
 	st.TodoStore = st.Store
@@ -315,8 +318,11 @@ func TestSelfToolsTransport_TodoListEmitsEnvelope(t *testing.T) {
 	if !strings.Contains(body, "<!--ENVELOPE_DATA:") {
 		t.Fatalf("expected envelope marker in output, got: %s", body)
 	}
-	if !strings.Contains(body, `"type":"todo-list"`) {
-		t.Fatalf("expected todo-list envelope type, got: %s", body)
+	if !strings.Contains(body, `"type":"list-card"`) {
+		t.Fatalf("expected list-card envelope type, got: %s", body)
+	}
+	if !strings.Contains(body, `"kind":"todos"`) {
+		t.Fatalf("envelope missing data_source.kind, got: %s", body)
 	}
 	if !strings.Contains(body, `"scope":"session"`) || !strings.Contains(body, `"scope_id":"sess-env"`) {
 		t.Fatalf("envelope missing scope coordinates: %s", body)

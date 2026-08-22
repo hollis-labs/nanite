@@ -668,7 +668,7 @@ reasoning.
 | `01-cut-legacy-skill-discovery-autodiscover-and-adhoc-authoring` | 1 | reviewed | none |
 | `02-redesign-skills-index-schema-and-extend-agent-known-skills` | 2 | in-progress (review found a real bug, fix dispatched) | `01` |
 | `03-build-content-addressed-vendored-skill-store` | 2 | reviewed | none |
-| `04-build-skill-package-parser-and-install-sync-pipeline` | 3 | not-started | `02`, `03` |
+| `04-build-skill-package-parser-and-install-sync-pipeline` | 3 | validated | `02`, `03` |
 | `05-install-sync-rest-api-and-cli-command` | 3 | not-started | `04` |
 | `06-build-skill-resolver-and-parameter-binding` | 4 | not-started | `02`, `03`, `04` |
 | `07-implement-inline-fork-composition-semantics` | 4 | not-started | `04`, `06` |

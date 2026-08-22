@@ -1,7 +1,7 @@
 # Add unit tests for buildRepairConfig and discoverManagedDurableAgentConfigs (both 0.0% covered)
 
 **Phase:** Wave 2 — Correctness, lifecycle, concurrency (audit-remediation batch, sequenced 2026-08-21 — see the sequencing block below)
-**Status:** not-started
+**Status:** implemented
 **Depends on:** none — independently landable, pure test-debt closure.
 **Touches:** New/expanded test files for `internal/service/tool_cache_wiring.go` (`buildRepairConfig`) and `internal/service/managed_durable_configs.go` (`discoverManagedDurableAgentConfigs`). No production code changes expected.
 **Requires architect decision:** false — pure test-debt closure, no design ambiguity.
@@ -79,7 +79,11 @@ Essentially zero risk — additive test-only changes. Rollback is a trivial reve
 
 ## Work log
 
-<!-- Worker fills this in as it goes. -->
+- 2026-08-22: Re-derived both implementations and their production callers after the Wave 2 context sweep. `buildRepairConfig` is wired once during `NewContainer` tool-service construction and resolves providers in the live order `NANITE_REPAIR_PROVIDER` -> `ContainerConfig.UtilityProvider` -> `user_settings.utility_provider` -> `ResolveProviderAndModel` (user default, then seeded platform default). `discoverManagedDurableAgentConfigs` is the loader called by `SyncManagedDurableAgentConfigs`; it reads only YAML files from `<configRoot>/durable-agents`, silently treats an absent/unreadable directory as empty, fails the discovery on a selected file's read/parse/required-field error, keeps the first lexically encountered duplicate slug, and sorts the final configs by slug.
+- Added table-driven `buildRepairConfig` tests covering every provider source and its precedence, the nil-registry and environment kill-switch gates, a dry chain, a selected-but-unregistered provider, model propagation, valid/invalid/zero/negative timeout parsing, `SettingsReader` wiring, and identical results across repeated calls with identical inputs.
+- Expanded `managed_durable_configs_test.go` with table-driven discovery coverage for empty root, missing directory, empty directory, one valid uppercase-extension file, multiple files, filename-derived slugs, lexical duplicate selection, ignored extensions/directories, deterministic slug ordering, malformed YAML, missing required fields, an empty filename-derived slug, and a dangling-symlink read failure. No production code changed.
+- Coverage evidence: before this change, the current checkout measured `buildRepairConfig` at 39.3% (the task's cited 0.0% baseline had already drifted) and `discoverManagedDurableAgentConfigs` at 0.0%; after the tests, both measure 100.0% with `go test -coverprofile=<temp> ./internal/service` and `go tool cover -func=<temp>`.
+- Verification passed: focused tests; `go test -race ./internal/service -run 'TestBuildRepairConfig|TestDiscoverManagedDurableAgentConfigs' -count=5`; `go build ./cmd/nanite/`; `go vet ./...`; and `go test ./...`. The proposed per-function/file coverage ratchet remains deliberately assigned to the out-of-scope Wave 7 quality-ratchet work.
 
 ## Review notes
 

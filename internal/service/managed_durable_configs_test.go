@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -219,5 +220,182 @@ func TestSaveManagedDurableAgentConfig_RejectsSlugTraversalOnRenameShapedUpdate(
 	}
 	if _, err := os.Stat(legitPath); err != nil {
 		t.Fatalf("legit file must survive a rejected rename attempt: %v", err)
+	}
+}
+
+func TestDiscoverManagedDurableAgentConfigs_EmptySources(t *testing.T) {
+	tests := []struct {
+		name  string
+		setup func(t *testing.T) string
+	}{
+		{
+			name:  "empty config root",
+			setup: func(_ *testing.T) string { return "" },
+		},
+		{
+			name:  "missing durable agents directory",
+			setup: func(t *testing.T) string { return t.TempDir() },
+		},
+		{
+			name: "empty durable agents directory",
+			setup: func(t *testing.T) string {
+				root := t.TempDir()
+				if err := os.Mkdir(filepath.Join(root, "durable-agents"), 0o755); err != nil {
+					t.Fatalf("Mkdir: %v", err)
+				}
+				return root
+			},
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := discoverManagedDurableAgentConfigs(tc.setup(t))
+			if err != nil {
+				t.Fatalf("discoverManagedDurableAgentConfigs: %v", err)
+			}
+			if len(got) != 0 {
+				t.Fatalf("configs = %#v, want empty", got)
+			}
+		})
+	}
+}
+
+func TestDiscoverManagedDurableAgentConfigs_LoadsSortsAndFilters(t *testing.T) {
+	tests := []struct {
+		name      string
+		files     map[string]string
+		dirs      []string
+		wantSlugs []string
+		wantNames []string
+	}{
+		{
+			name: "one uppercase extension",
+			files: map[string]string{
+				"only.YAML": "name: Only\nslug: only\nprofile_slug: only-profile\nprovider: anthropic\n",
+			},
+			wantSlugs: []string{"only"},
+			wantNames: []string{"Only"},
+		},
+		{
+			name: "multiple are sorted with filename fallback and first duplicate wins",
+			files: map[string]string{
+				"10-alpha.yaml":    "name: Alpha\nprofile_slug: alpha-profile\n",
+				"20-zeta.yml":      "name: Zeta First\nslug: zeta\nprofile_slug: zeta-profile\n",
+				"30-zeta.yaml":     "name: Zeta Duplicate\nslug: zeta\nprofile_slug: duplicate-profile\n",
+				"40-ignored.json":  `{"slug":"ignored","profile_slug":"ignored"}`,
+				"README-no-suffix": "not a config",
+			},
+			dirs:      []string{"50-directory.yaml"},
+			wantSlugs: []string{"10-alpha", "zeta"},
+			wantNames: []string{"Alpha", "Zeta First"},
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			root := t.TempDir()
+			durableDir := filepath.Join(root, "durable-agents")
+			if err := os.Mkdir(durableDir, 0o755); err != nil {
+				t.Fatalf("Mkdir: %v", err)
+			}
+			for name, content := range tc.files {
+				if err := os.WriteFile(filepath.Join(durableDir, name), []byte(content), 0o644); err != nil {
+					t.Fatalf("WriteFile(%s): %v", name, err)
+				}
+			}
+			for _, name := range tc.dirs {
+				if err := os.Mkdir(filepath.Join(durableDir, name), 0o755); err != nil {
+					t.Fatalf("Mkdir(%s): %v", name, err)
+				}
+			}
+
+			got, err := discoverManagedDurableAgentConfigs(root)
+			if err != nil {
+				t.Fatalf("discoverManagedDurableAgentConfigs: %v", err)
+			}
+			gotSlugs := make([]string, len(got))
+			gotNames := make([]string, len(got))
+			for i, cfg := range got {
+				gotSlugs[i] = cfg.Slug
+				gotNames[i] = cfg.Name
+				if cfg.Source != managedDurableConfigSource {
+					t.Errorf("config %q Source = %q, want %q", cfg.Slug, cfg.Source, managedDurableConfigSource)
+				}
+				if filepath.Dir(cfg.SourceRef) != durableDir {
+					t.Errorf("config %q SourceRef = %q, want path under %q", cfg.Slug, cfg.SourceRef, durableDir)
+				}
+			}
+			if !reflect.DeepEqual(gotSlugs, tc.wantSlugs) {
+				t.Errorf("slugs = %v, want %v", gotSlugs, tc.wantSlugs)
+			}
+			if !reflect.DeepEqual(gotNames, tc.wantNames) {
+				t.Errorf("names = %v, want %v", gotNames, tc.wantNames)
+			}
+		})
+	}
+}
+
+func TestDiscoverManagedDurableAgentConfigs_RejectsInvalidFiles(t *testing.T) {
+	tests := []struct {
+		name        string
+		filename    string
+		content     string
+		dangling    bool
+		wantErrPart string
+	}{
+		{
+			name:        "malformed yaml",
+			filename:    "malformed.yaml",
+			content:     "name: [unterminated",
+			wantErrPart: "parse durable config",
+		},
+		{
+			name:        "missing profile slug",
+			filename:    "missing-profile.yaml",
+			content:     "name: Missing Profile\nslug: missing-profile\n",
+			wantErrPart: "missing slug or profile_slug",
+		},
+		{
+			name:        "empty filename-derived slug",
+			filename:    ".yaml",
+			content:     "name: Hidden\nprofile_slug: hidden-profile\n",
+			wantErrPart: "missing slug or profile_slug",
+		},
+		{
+			name:        "read failure",
+			filename:    "dangling.yaml",
+			dangling:    true,
+			wantErrPart: "read durable config",
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			root := t.TempDir()
+			durableDir := filepath.Join(root, "durable-agents")
+			if err := os.Mkdir(durableDir, 0o755); err != nil {
+				t.Fatalf("Mkdir: %v", err)
+			}
+			path := filepath.Join(durableDir, tc.filename)
+			if tc.dangling {
+				if err := os.Symlink(filepath.Join(root, "does-not-exist"), path); err != nil {
+					t.Fatalf("Symlink: %v", err)
+				}
+			} else if err := os.WriteFile(path, []byte(tc.content), 0o644); err != nil {
+				t.Fatalf("WriteFile: %v", err)
+			}
+
+			got, err := discoverManagedDurableAgentConfigs(root)
+			if err == nil {
+				t.Fatalf("discoverManagedDurableAgentConfigs = %#v, nil, want error containing %q", got, tc.wantErrPart)
+			}
+			if !strings.Contains(err.Error(), tc.wantErrPart) {
+				t.Fatalf("error = %q, want substring %q", err, tc.wantErrPart)
+			}
+			if !strings.Contains(err.Error(), path) {
+				t.Fatalf("error = %q, want source path %q", err, path)
+			}
+		})
 	}
 }

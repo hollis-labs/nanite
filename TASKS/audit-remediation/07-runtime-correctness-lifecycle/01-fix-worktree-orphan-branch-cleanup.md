@@ -1,7 +1,7 @@
 # Fix `worktree.gitManager.CleanupOrphaned` deleting the wrong (truncated) branch name
 
 **Phase:** Wave 2 — Correctness, lifecycle, concurrency
-**Status:** implemented
+**Status:** reviewed
 **Depends on:** none
 **Touches:** `internal/worktree/manager.go` (`Create`, `CleanupOrphaned`); `internal/worktree/manager_test.go` (`TestCleanupOrphaned`). No other packages need code changes — `CleanupOrphaned` has exactly one production caller (see Context) and its call signature does not change.
 
@@ -114,4 +114,12 @@ Low risk, single-file (plus one test file) change, narrowly scoped. The fix can 
 
 ## Review notes
 
-<!-- Reviewer fills in: pass/fail, what was independently re-verified. -->
+- 2026-08-22: Fresh-context reviewer PASS with no findings. Independently
+  confirmed the shared helper is the sole production branch derivation,
+  `Cleanup` still uses its stored branch, and all best-effort command handling
+  is unchanged.
+- Replayed the merged regression test against the parent production code and
+  reproduced the retained orphan branch twice. The fixed test passed 20
+  focused runs, the full package passed five runs, and
+  `go test -race ./internal/worktree/...`, worker-package checks,
+  `go build ./cmd/nanite/`, and `git diff --check` all passed.

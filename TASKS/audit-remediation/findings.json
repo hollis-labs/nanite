@@ -2819,7 +2819,7 @@
       "report_section": "\u00a78.13",
       "task_file": "TASKS/audit-remediation/07-runtime-correctness-lifecycle/01-fix-worktree-orphan-branch-cleanup.md",
       "disposition": "remediate",
-      "task_status": "not-started",
+      "task_status": "reviewed",
       "revalidation_note": "Confirmed still open and unchanged: manager.go:86 (Create) uses the full `sessionID` for the branch name, while CleanupOrphaned (manager.go:166-170) truncates to 8 chars before building `branch := \"worker-\" + short` -- the two never match, so the orphan branch is never actually deleted. No commits touched internal/worktree/ since the audit."
     },
     {

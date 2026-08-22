@@ -1053,7 +1053,7 @@ must not be dispatched.
 | `06/02` | `06-store-correctness/02-triage-store-context-and-transaction-gaps.md` | not-started | **none** (was `06/01`; corrected 2026-08-22 — file-disjoint, parallel-safe) | — (re-scoped by AD-14, gate lifted) |
 | `06/03` | `06-store-correctness/03-full-context-propagation-sweep.md` | validated | none technically — must not run concurrently with anything else in the batch | AD-14 (decided; sweep landed) |
 | `06/04` | `06-store-correctness/04-cancellation-safety-for-terminal-writes.md` | validated | `06/03` | — (fix task for `06/03`) |
-| `07/01` | `07-runtime-correctness-lifecycle/01-fix-worktree-orphan-branch-cleanup.md` | not-started | `00/01` | — |
+| `07/01` | `07-runtime-correctness-lifecycle/01-fix-worktree-orphan-branch-cleanup.md` | reviewed | `00/01` | — |
 | `07/02` | `07-runtime-correctness-lifecycle/02-fix-cmdserve-fatal-cleanup-bypass.md` | not-started | `00/01` | AD-17 |
 | `07/03` | `07-runtime-correctness-lifecycle/03-bound-background-job-registry-growth.md` | not-started | `00/01` | AD-18 |
 | `07/04` | `07-runtime-correctness-lifecycle/04-container-shutdown-idempotency-guard.md` | not-started | `04/01` | — |

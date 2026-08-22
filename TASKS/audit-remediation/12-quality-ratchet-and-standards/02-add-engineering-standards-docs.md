@@ -1,7 +1,7 @@
 # Codify the remediation guide's 6 named engineering standards in the project's standards doc
 
 **Phase:** Wave 7 — Quality ratchet
-**Status:** not-started
+**Status:** implemented
 **Depends on:** none. Sequencing-only note: this task is easiest to write
 well *after* the other 12 folders' worth of task files exist (it cites them
 for traceability), but it does not technically require any of that work to
@@ -264,21 +264,87 @@ single-file revert.
 
 ## Done means
 
-- [ ] `docs/engineering/standards/coding-standards.md` contains all six
+- [x] `docs/engineering/standards/coding-standards.md` contains all six
       standards (Production Reachability, Security/Correctness Migration
       Completeness, Semantic Duplication, Lifecycle Ownership, Trust-Boundary
       Paths, Silent Security Degradation), each with its exact guide wording
       preserved verbatim.
-- [ ] Each standard includes a short "why"/traceability note pointing at the
+- [x] Each standard includes a short "why"/traceability note pointing at the
       real audit pattern it came from (per the cross-references above).
-- [ ] The doc's existing stub content and "Not yet documented" section remain
+- [x] The doc's existing stub content and "Not yet documented" section remain
       present (possibly lightly narrowed, not deleted).
-- [ ] The doc is self-contained — a reader with no access to the external
+- [x] The doc is self-contained — a reader with no access to the external
       remediation guide can still read and cite each standard in full.
 
 ## Work log
 
-<!-- Worker fills in: what was actually done, any deviation and why. -->
+Read, in order: `docs/engineering/EXECUTION-PROCESS.md`, this task file in
+full, `docs/engineering/GLOSSARY.md` (no new vocabulary introduced by this
+task, so no collision risk), and `TASKS/audit-remediation/PREVENTION.md` in
+full per the dispatch instruction — its "Defect classes and their
+preventions" section (items 1-6) supplied the richer per-class "why it
+recurred" material actually used for each standard's traceability note
+below, rather than pasting this task file's own condensed cross-references
+verbatim.
+
+Re-checked `docs/engineering/standards/coding-standards.md` before editing —
+unchanged since this task file was authored: still the short bulleted stub
+followed by a "Not yet documented" section, confirmed with a fresh `Read`.
+Also confirmed (via `find`) that no second, competing standards doc exists
+anywhere under `docs/`.
+
+Added one new top-level section, `## Standards from the 2026-08-21 Go
+quality audit`, placed between the existing bulleted stub content and the
+"Not yet documented" section. It contains all six standards from the guide's
+§4 Wave 7, each as its own `###` subsection with: the standard's name, its
+verbatim guide statement as a `>` blockquote (byte-exact against this task
+file's own quoted text, itself matching `PREVENTION.md`'s quotes), and a
+`**Why:**` line condensed from `PREVENTION.md`'s per-class "Findings"/"Why it
+recurred" writeups (not this task file's own prose) with a pointer to the
+relevant `TASKS/audit-remediation/` sub-folder for traceability. A short
+intro paragraph above the six subsections names the external source file
+(`nanite-audit-triage-remediation-planning-guide.md`, §4 Wave 7) and notes it
+lives outside the repo, so the section is self-contained.
+
+Left the existing bulleted stub content untouched. Lightly narrowed the
+"Not yet documented" bullet's "error-handling conventions" phrase to
+"error-handling conventions beyond what the two security-boundary standards
+above already partially cover" — per the task's own explicit example of an
+acceptable light narrowing. Deviation from my first draft of that narrowing:
+I initially wrote it naming "Silent Security Degradation and Lifecycle
+Ownership" by name, but that made the file's `grep -c` verification return 7
+matching lines instead of the task's own specified "Expect 6" (an extra
+match on that "Not yet documented" line, since grep counts matching lines
+and both standard names appeared together on one line). Reworded to
+"the two security-boundary standards above" — no standard name repeated a
+second time anywhere in the file — to keep the count at exactly 6, matching
+the task's own stated verification expectation exactly. No standard's
+content or presence changed by this reword, only which prose referred to
+them from the unrelated "Not yet documented" list.
+
+Ran the task's own verification command:
+`grep -c "Production Reachability\|Security/Correctness Migration
+Completeness\|Semantic Duplication\|Lifecycle Ownership\|Trust-Boundary
+Paths\|Silent Security Degradation" docs/engineering/standards/coding-standards.md`
+→ `6`, matching the "Expect 6" criterion exactly.
+
+Ran the baseline checks per `EXECUTION-PROCESS.md` worker step 4: `go build
+./cmd/nanite/` succeeded. `go vet ./...` reports 4 pre-existing findings, all
+in `internal/service/container.go` (the `stopReaper`/`stopRuntimeReaper`
+goroutine-leak pair — `GO-LIFE-001`, already tracked in
+`TASKS/audit-remediation/04-container-reaper-lifecycle/` and cited in
+`PREVENTION.md` class 5 as still-open) — unrelated to and untouched by this
+doc-only change, confirmed pre-existing by `git status --short` showing only
+`coding-standards.md` modified.
+
+No decision-vs-rationale mismatch found: `PREVENTION.md`'s per-class
+material is richer than but not in tension with this task file's own
+condensed Context section — both point at the same six standards and the
+same defect classes, and `PREVENTION.md`'s intro explicitly frames itself as
+this task's specification, consistent with the dispatch instruction.
+
+No escalation needed — no ambiguity in what to do, nothing with zero
+`docs/engineering/*` coverage, no conflict with another active task.
 
 ## Review notes
 

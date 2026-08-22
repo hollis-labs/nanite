@@ -1,7 +1,7 @@
 # Revalidate all 113 audit findings against frozen HEAD and set real dispositions
 
 **Phase:** Audit remediation — Wave 0 (revalidate the baseline)
-**Status:** implemented
+**Status:** reviewed
 **Depends on:** none — but **hard-gated on the dev freeze** (see Context). Do not start while other batches are still landing code.
 **Blocks:** every task in `01/` through `13/`. This is the batch's dispatch gate. Also blocks **AD-01 through AD-04**, which the operator decides against this task's interim critical/high report — see "Interim report required" under What to do.
 **Parallelizable with:** `00/02` (different tooling; see that task's Non-goals for the `findings.json` merge protocol).
@@ -416,3 +416,28 @@ untouched (`git status --short` / `git diff --stat` both empty for that path) be
 finishing. All "Done means" criteria met; `**Status:**` set to `implemented` above.
 
 ## Review notes
+
+**PASS (2026-08-22)** — fresh reviewer, no shared context with the implementing worker.
+Independently re-derived from source rather than re-reading Work Log claims and agreeing
+(per this project's `TASKS/skills/` review-FAIL precedent). Ran the "Done means" programmatic
+check directly against current `findings.json` — passed exactly as reported. Read current
+source directly for all 3 critical + 8 high + `GO-SEC4-005` — every cited file/line/code
+shape in each `revalidation_note` matches the repo exactly (`internal/api/catalog.go:301`/
+`365-371`, `internal/sandbox/os_linux.go:64-71`/`132-148`, `internal/agent/managed_files.go:87-95`,
+`internal/service/agent_config.go:176-197`, `internal/store/agents.go:1213-1223`,
+`internal/server/auth.go:15-22`/`server.go:163-174`). Spot-checked 14 further findings across
+`needs-architect-decision`/`false-positive` dispositions (`GO-MEM-002`, `GO-MCPTOOL-003`,
+`GO-DEP-001`, `GO-STORE-002`, `GO-MEM-008`, `GO-RUNTIME-008`, `GO-MEM-001`, `GO-STORE-001`,
+`GO-STORE-005`, `GO-INFRA-001`, `GO-SVCEXEC-003`, `GO-API-007`, `GO-MCPTOOL-001`, `GO-STORE-006`)
+against source directly — all held up. Verified all 6 task-file line-number corrections
+byte-for-byte against current source. Confirmed `docs/audits/2026-08-21-go-quality/findings.json`
+(pristine) byte-identical to pre-Wave-0 state.
+
+**One non-blocking observation, not fixed here:** 4 findings beyond the two named catalog-gap
+corrections (`GO-SEC4-007`, `GO-MCPTOOL-012`, `GO-CHAT-007`, `GO-CHAT-001`) carry
+`disposition: needs-architect-decision` while `requires_architect_decision: false` in
+`findings.json` — same shape as the `GO-MEM-002`/`GO-MCPTOOL-003` gap this task explicitly
+corrected, but not named anywhere as a gap. Not a functional bug — nothing dispatches off this
+JSON boolean; the actual dispatch-gating mechanism is each task file's own `Gated on:` header,
+confirmed correct in all 4 cases. Worth a trivial catalog-consistency cleanup whenever
+`findings.json` is next touched; not blocking Wave 0's closure.

@@ -1020,8 +1020,8 @@ must not be dispatched.
 
 | Task | File | Status | Depends on | Gated on |
 |---|---|---|---|---|
-| `00/01` | `00-revalidate-baseline/01-revalidate-findings-against-head.md` | implemented | dev freeze | — |
-| `00/02` | `00-revalidate-baseline/02-refresh-tool-baseline-at-frozen-head.md` | implemented | dev freeze (step 1: none) | AD-23 |
+| `00/01` | `00-revalidate-baseline/01-revalidate-findings-against-head.md` | reviewed | dev freeze | — |
+| `00/02` | `00-revalidate-baseline/02-refresh-tool-baseline-at-frozen-head.md` | reviewed | dev freeze (step 1: none) | AD-23 |
 
 ### Wave 1 — Release-blocking trust boundaries
 

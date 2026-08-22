@@ -1,7 +1,7 @@
 # Rescue the audit's raw evidence, then refresh the tool baseline at frozen HEAD
 
 **Phase:** Audit remediation — Wave 0 (revalidate the baseline)
-**Status:** implemented
+**Status:** reviewed
 **Depends on:** none. **Step 1 is urgent and should run before anything else in this batch — see the banner below.** Steps 2+ are hard-gated on the dev freeze, same as `00/01`.
 **Blocks:** every task in `01/` through `13/`, jointly with `00/01`. Specifically blocks `08/03` (G304 triage), `08/08` (dependency bumps), `13/01` (dead-code removal), and `13/03` (gofmt backlog), whose scopes are *defined by counts this task refreshes*.
 **Parallelizable with:** `00/01` — different tooling, no overlapping writes except the final `findings.json` merge (see Non-goals).
@@ -342,3 +342,19 @@ docs/task-file only, so this is a sanity check, not an expected-to-fail
 gate).
 
 ## Review notes
+
+**PASS (2026-08-22)** — fresh reviewer, no shared context with the implementing worker.
+Independently reran `gofmt -l . | grep -v '^ui/' | wc -l` (got 130, matching the claim) and
+`deadcode ./...` (got 202, matching the claim). For the gosec G304 68→70 claim, confirmed the
+task used the audit's own documented methodology (`REPORT.md:384-385`'s
+`FromLinter=gosec`+`G304`+non-`_test.go` filter over `golangci-baseline.json`, not a naive
+grep) — reproducing that exact methodology against both the audit-era and frozen-HEAD
+`golangci-baseline.json` files gives 68 and 70 respectively, exactly matching. Verified the
+`dupl`-in-`internal/store` count (40 hits / 22 files) directly against `golangci-baseline.json`.
+Confirmed all 5 task-file `## Context`/prose amendments accurately quote the refreshed numbers
+with the audit-era figure preserved in parentheses. Confirmed no `.go` file anywhere in the
+diff, `REPORT.md` untouched, `.gitignore` negation present and working (`git check-ignore`
+returns nothing for the raw evidence logs). Confirmed the two Wave 0 tasks' edited task files
+never overlap (00/01: `04/01`, `04/04`, `06/01`, `07/02`, `07/04`, `08/10`; 00/02: `08/03`,
+`08/08`, `13/01`, `13/03`, `11/13`) — the land-00/02-first sequencing avoided the collision risk
+as intended.

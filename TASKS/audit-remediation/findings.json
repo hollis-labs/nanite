@@ -351,7 +351,7 @@
       "report_section": "\u00a78.1",
       "task_file": "TASKS/audit-remediation/06-store-correctness/01-fix-deleteagentbyid-error-swallowing.md",
       "disposition": "remediate",
-      "task_status": "not-started",
+      "task_status": "reviewed",
       "revalidation_note": "Confirmed still open, functionally byte-identical: DeleteAgentByID now sits at agents.go:1217-1223 (shifted +2 lines from the audit's 1211-1221 by an unrelated doc-comment edit above it in the file, commit e1ba2ac6 -- the function's own text is unchanged) and is still exactly 'a, err := s.GetAgent(id); if err != nil { return nil }; return s.DeleteAgent(a.Slug)', swallowing every GetAgent error rather than just sql.ErrNoRows. Host.SweepPluginAgentProfiles (internal/plugin/agent_profiles.go:286) is confirmed still the real production caller relying on this. Corrected the task file's stale line-number citations (1211-1214/1211-1221 -> 1213-1216/1213-1223) -- stale-line-numbers-only case, no scope change."
     },
     {

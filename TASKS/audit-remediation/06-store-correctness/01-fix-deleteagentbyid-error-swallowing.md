@@ -1,7 +1,7 @@
 # Fix `DeleteAgentByID` swallowing every `GetAgent` error, not just not-found
 
 **Phase:** Wave 2 — Correctness, lifecycle, concurrency
-**Status:** implemented
+**Status:** reviewed
 **Depends on:** none
 **Touches:** `internal/store/agents.go` (`DeleteAgentByID`, `GetAgent`); test file `internal/store/agents_fu28_test.go`. No other packages need code changes — `internal/plugin/agent_profiles.go`'s `SweepPluginAgentProfiles` is the real production caller this fix protects, but it calls `DeleteAgentByID` through its existing signature and needs no change itself (see Scope below for why).
 
@@ -198,4 +198,11 @@ Low risk, narrowly scoped to one method plus one doc comment. The only behaviora
 
 ## Review notes
 
-<!-- Reviewer fills in: pass/fail, what was independently re-verified. -->
+- PASS (2026-08-22): independent review found no correctness, regression, or
+  scope issues. The reviewer reproduced the original silent-success defect
+  against the parent commit, then verified the fixed implementation preserves
+  the not-found no-op while propagating a real closed-SQLite lookup failure.
+- Re-verified with the focused test under `-race`, the full store test suite,
+  targeted build/vet, and `golangci-lint --enable-only nilerr`; all passed.
+  `internal/plugin/agent_profiles.go` remained unchanged and its caller-side
+  error handling is sufficient once the store method returns the real error.

@@ -563,6 +563,38 @@ Observable behavior required for PASS:
   'Fanout|Approve|Cancel' -count=1 -v`; `go test -race
   ./internal/subagent/... -timeout 25m` (809.733s, no race); `go build ./...`;
   `go vet ./...`; and `go test ./...`.
+- 2026-08-22 review correction — Closed the two lifecycle races found by fresh
+  review. `Approve` and `Cancel` now serialize on `cancelMu` across the durable
+  requested/running/cancelled transition and cancellation-owner handoff.
+  `Approve` reads the run before its guarded UPDATE and has no fallible,
+  request-scoped operation between a successful transition and owner
+  installation. Pointer-identified owners prevent a duplicate approval or
+  obsolete cleanup from overwriting/deleting another lifecycle's hook. The
+  post-semaphore admission check uses the same mutex, giving slot admission and
+  operator cancellation a single linearization boundary.
+- Queue waits abandoned by caller cancellation or capacity timeout now perform
+  a background-context, status-guarded `running` → `cancelled` transition,
+  stamp `completed_at`, and emit the terminal status without clobbering an
+  operator or other concurrent terminal decision. Slot release and owner
+  cleanup are centralized in `executeWithSlot` for the admitted path and remain
+  exactly once on every rejected-admission path.
+- Added deterministic regressions for the historical approval gap (holding the
+  handoff mutex through request expiry proves `running` cannot become visible),
+  request cancellation synchronously after the durable transition, concurrent
+  duplicate Approve/Cancel calls, caller-cancelled queue abandonment, and
+  capacity-timeout queue abandonment. Stress passed with 100 repetitions of
+  the three approval ownership tests, 50 repetitions of all queue-abandonment
+  tests, and three repeated targeted race runs. The full extended package race
+  gate passed (`go test -race ./internal/subagent/... -timeout 25m -count=1`,
+  842.432s); its initially confusing orchestrator wall time was host/tool sleep
+  skew, confirmed by the buffered exit code/output. `go build ./...`, `go vet
+  ./...`, and `go test ./...` also passed after the correction.
+- Pre-correction proof used a disposable detached worktree at the correction
+  commit with only `internal/subagent/service.go` restored to `3183895d`.
+  `TestApprove_HandoffPrecedesRunningTransition` failed with durable status
+  `running` while the owner mutex was held; both caller-cancel and capacity-
+  timeout queue tests failed with `status="running" completed_at=""`. The
+  disposable worktree was removed after capturing the failures.
 
 ## Review notes
 

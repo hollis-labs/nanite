@@ -389,12 +389,13 @@ type Service struct {
 	parentage     ParentageChecker
 	profiles      ProfileResolver
 
-	// cancelers holds a per-run context.CancelFunc keyed by runID so
+	// cancelers holds a per-run cancellation owner keyed by runID so
 	// Cancel(runID) can propagate cancellation into the in-flight
 	// runner — not just flip the DB row. Spawn registers; execute's
-	// defer clears; Cancel invokes-and-deletes. Mutex-guarded.
+	// defer clears; Cancel invokes-and-deletes. Pointer identity prevents
+	// one lifecycle attempt from clearing a newer owner's hook. Mutex-guarded.
 	cancelMu  sync.Mutex
-	cancelers map[string]context.CancelFunc
+	cancelers map[string]*spawnSlotWait
 
 	// spawnSem is a buffered-channel semaphore that bounds the number of
 	// Spawn invocations with an in-flight runner to spawnFanoutCap.
@@ -419,7 +420,7 @@ func NewService(db *sql.DB, runner Runner, poster MessagePoster, approver Approv
 		poster:    poster,
 		approver:  approver,
 		settings:  settings,
-		cancelers: make(map[string]context.CancelFunc),
+		cancelers: make(map[string]*spawnSlotWait),
 		spawnSem:  make(chan struct{}, spawnFanoutCap),
 	}
 }
@@ -898,8 +899,7 @@ func (svc *Service) Spawn(ctx context.Context, req SpawnRequest) (string, error)
 		if err := svc.acquireSpawnSlotForRun(run.ID, slotWait); err != nil {
 			return "", err
 		}
-		defer slotWait.cancel()
-		svc.executeWithSlot(slotWait.runCtx, run, req.ParentAgentID)
+		svc.executeWithSlot(slotWait.runCtx, run, req.ParentAgentID, slotWait)
 	case ModeAsync, ModeAPI:
 		// Non-blocking: fire-and-forget goroutine. The reply lands
 		// in the parent session's inbox (async) or chat (api).
@@ -914,8 +914,7 @@ func (svc *Service) Spawn(ctx context.Context, req SpawnRequest) (string, error)
 			return "", err
 		}
 		safego.Go(context.Background(), "subagent.run", func() {
-			defer slotWait.cancel()
-			svc.executeWithSlot(slotWait.runCtx, run, req.ParentAgentID)
+			svc.executeWithSlot(slotWait.runCtx, run, req.ParentAgentID, slotWait)
 		})
 	}
 
@@ -955,29 +954,30 @@ func (svc *Service) Status(ctx context.Context, runID string) (*Run, error) {
 // reports "cancelled" (not the "failed" that execute writes after
 // ctx.Err()).
 //
-// CancelFunc invocation is deferred so the runner still unblocks even
-// if the DB UPDATE errors (e.g., caller ctx times out). We'd rather
-// return the error to the caller AND stop the runner than leak the
-// goroutine while surfacing the DB failure. On that error path the
-// row ends up "failed" via the runner's own finalizeRun (which finds
-// status = running and writes cleanly), but the runner does not leak.
+// The cancellation owner is invoked before returning even if the DB UPDATE
+// errors (e.g., caller ctx times out). We'd rather return the error to the
+// caller AND stop the runner than leak the goroutine while surfacing the DB
+// failure. On that error path the row ends up "failed" via the runner's own
+// finalizeRun (which finds status = running and writes cleanly), but the
+// runner does not leak.
 //
 // Idempotent: a second Cancel finds the row already terminal and the
 // map entry already cleared.
 func (svc *Service) Cancel(ctx context.Context, runID string) error {
-	defer func() {
-		svc.cancelMu.Lock()
-		if c, ok := svc.cancelers[runID]; ok {
-			c()
-			delete(svc.cancelers, runID)
-		}
-		svc.cancelMu.Unlock()
-	}()
-
+	// The mutex covers both the durable transition and cancellation-owner
+	// removal. Approve uses the same critical section for requested→running
+	// plus owner installation, so Cancel observes either the wholly requested
+	// state or the wholly handed-off running state, never the gap between them.
+	svc.cancelMu.Lock()
+	defer svc.cancelMu.Unlock()
 	_, err := svc.db.ExecContext(ctx,
 		`UPDATE subagent_runs SET status = ? WHERE id = ? AND status IN (?,?,?)`,
 		StatusCancelled, runID, StatusRequested, StatusApproved, StatusRunning,
 	)
+	if owner, ok := svc.cancelers[runID]; ok {
+		owner.cancel()
+		delete(svc.cancelers, runID)
+	}
 	if err != nil {
 		return fmt.Errorf("cancel run: %w", err)
 	}
@@ -1092,27 +1092,46 @@ func (svc *Service) Approve(ctx context.Context, runID string) error {
 		return ErrApprovalExpired
 	}
 
-	now := time.Now().UTC().Format(time.RFC3339Nano)
-	res, err := svc.db.ExecContext(ctx,
-		`UPDATE subagent_runs
-		   SET status=?, approved_at=?, approved_by=?, started_at=?
-		 WHERE id=? AND status=?`,
-		StatusRunning, now, "", now, runID, StatusRequested)
+	var (
+		run      *Run
+		slotWait *spawnSlotWait
+	)
+	// Serialize the durable transition with cancellation ownership. Reading the
+	// row before UPDATE also removes the fallible Status call that used to sit
+	// after requested→running and could strand a running row when ctx expired.
+	svc.cancelMu.Lock()
+	run, err := svc.Status(ctx, runID)
+	if err == nil {
+		now := time.Now().UTC().Format(time.RFC3339Nano)
+		var res sql.Result
+		res, err = svc.db.ExecContext(ctx,
+			`UPDATE subagent_runs
+			   SET status=?, approved_at=?, approved_by=?, started_at=?
+			 WHERE id=? AND status=?`,
+			StatusRunning, now, "", now, runID, StatusRequested)
+		if err == nil {
+			if n, _ := res.RowsAffected(); n == 0 {
+				err = ErrNotPending
+			} else {
+				run.Status = StatusRunning
+				run.ApprovedAt = now
+				run.ApprovedBy = ""
+				run.StartedAt = now
+				slotWait = svc.registerSpawnSlotWaitLocked(context.Background(), run.ID)
+			}
+		}
+	}
+	svc.cancelMu.Unlock()
 	if err != nil {
+		if errors.Is(err, ErrNotPending) {
+			return err
+		}
 		return fmt.Errorf("approve run: %w", err)
 	}
-	if n, _ := res.RowsAffected(); n == 0 {
-		return ErrNotPending
-	}
 
-	run, err := svc.Status(ctx, runID)
-	if err != nil {
-		return err
-	}
-	// Register cancellation before publishing the running transition. Approve
+	// Ownership is installed before publishing the running transition. Approve
 	// acquires capacity in the background so its HTTP caller remains fast, but
 	// Cancel can stop that queued wait from the moment the run is observable.
-	slotWait := svc.registerSpawnSlotWait(context.Background(), run.ID)
 	svc.emitStatus(run, "")
 
 	// Acquire inside the dispatched goroutine so approval responses do not
@@ -1122,8 +1141,7 @@ func (svc *Service) Approve(ctx context.Context, runID string) error {
 		if err := svc.acquireSpawnSlotForRun(run.ID, slotWait); err != nil {
 			return
 		}
-		defer slotWait.cancel()
-		svc.executeWithSlot(slotWait.runCtx, run, run.ParentAgentID)
+		svc.executeWithSlot(slotWait.runCtx, run, run.ParentAgentID, slotWait)
 	})
 	return nil
 }
@@ -1143,16 +1161,24 @@ type spawnSlotWait struct {
 // wait and the eventual runner context, so it does not need promotion or
 // replacement when capacity becomes available.
 func (svc *Service) registerSpawnSlotWait(waitCtx context.Context, runID string) *spawnSlotWait {
+	svc.cancelMu.Lock()
+	defer svc.cancelMu.Unlock()
+	return svc.registerSpawnSlotWaitLocked(waitCtx, runID)
+}
+
+// registerSpawnSlotWaitLocked installs an owner while cancelMu is already
+// held. Approve uses it to make its DB transition and ownership handoff one
+// linearizable operation with Cancel.
+func (svc *Service) registerSpawnSlotWaitLocked(waitCtx context.Context, runID string) *spawnSlotWait {
 	queueCtx, queueCancel := context.WithCancel(waitCtx)
 	runCtx, runCancel := context.WithCancel(context.Background())
 	cancel := func() {
 		queueCancel()
 		runCancel()
 	}
-	svc.cancelMu.Lock()
-	svc.cancelers[runID] = cancel
-	svc.cancelMu.Unlock()
-	return &spawnSlotWait{queueCtx: queueCtx, runCtx: runCtx, cancel: cancel}
+	wait := &spawnSlotWait{queueCtx: queueCtx, runCtx: runCtx, cancel: cancel}
+	svc.cancelers[runID] = wait
+	return wait
 }
 
 // acquireSpawnSlotForRun acquires capacity for a registered run. The runCtx
@@ -1161,23 +1187,68 @@ func (svc *Service) registerSpawnSlotWait(waitCtx context.Context, runID string)
 // ever invoking the runner.
 func (svc *Service) acquireSpawnSlotForRun(runID string, wait *spawnSlotWait) error {
 	if err := svc.acquireSpawnSlot(wait.queueCtx); err != nil {
-		svc.clearRunCanceler(runID)
+		svc.clearRunCanceler(runID, wait)
 		wait.cancel()
+		svc.abandonQueuedRun(runID)
 		return err
 	}
-	if err := wait.runCtx.Err(); err != nil {
+
+	// Synchronize the queue→admitted boundary with Cancel. If Cancel owns the
+	// mutex first, its context cancellation is visible here and the runner is
+	// never invoked. If this check owns it first, the run has left the queue and
+	// a following Cancel is ordinary in-flight cancellation.
+	svc.cancelMu.Lock()
+	ownerIsCurrent := svc.cancelers[runID] == wait
+	err := wait.queueCtx.Err()
+	if err == nil {
+		err = wait.runCtx.Err()
+	}
+	svc.cancelMu.Unlock()
+	if !ownerIsCurrent || err != nil {
 		svc.releaseSpawnSlot()
-		svc.clearRunCanceler(runID)
+		svc.clearRunCanceler(runID, wait)
 		wait.cancel()
+		svc.abandonQueuedRun(runID)
+		if err == nil {
+			err = context.Canceled
+		}
 		return err
 	}
 	return nil
 }
 
-func (svc *Service) clearRunCanceler(runID string) {
+func (svc *Service) clearRunCanceler(runID string, owner *spawnSlotWait) {
 	svc.cancelMu.Lock()
-	delete(svc.cancelers, runID)
+	if svc.cancelers[runID] == owner {
+		delete(svc.cancelers, runID)
+	}
 	svc.cancelMu.Unlock()
+}
+
+// abandonQueuedRun records that a persisted running run never crossed the
+// queue→runner boundary. The status guard preserves an operator cancellation
+// or any other concurrent terminal decision. A fresh context is required
+// because the queue caller's context is normally the reason this path runs.
+func (svc *Service) abandonQueuedRun(runID string) {
+	now := time.Now().UTC().Format(time.RFC3339Nano)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	res, err := svc.db.ExecContext(ctx,
+		`UPDATE subagent_runs SET status=?, completed_at=? WHERE id=? AND status=?`,
+		StatusCancelled, now, runID, StatusRunning)
+	if err != nil {
+		slog.Error("subagent: persist abandoned queued run", "err", err, "run_id", runID)
+		return
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return
+	}
+	run, err := svc.Status(ctx, runID)
+	if err != nil {
+		slog.Error("subagent: load abandoned queued run", "err", err, "run_id", runID)
+		return
+	}
+	svc.emitStatus(run, "")
 }
 
 // acquireSpawnSlot blocks until a slot in the fan-out semaphore is
@@ -1211,11 +1282,13 @@ func (svc *Service) acquireSpawnSlot(ctx context.Context) error {
 // releaseSpawnSlot returns a previously-acquired slot to the semaphore.
 func (svc *Service) releaseSpawnSlot() { <-svc.spawnSem }
 
-// executeWithSlot wraps execute with a deferred semaphore release so
-// the slot is returned exactly once regardless of how execute exits
-// (success, error, or cancellation).
-func (svc *Service) executeWithSlot(ctx context.Context, run *Run, parentAgentID string) {
+// executeWithSlot owns all post-admission cleanup: it removes only this
+// lifecycle's cancellation owner, cancels both contexts, and returns the slot
+// exactly once regardless of how execute exits (success, error, or cancel).
+func (svc *Service) executeWithSlot(ctx context.Context, run *Run, parentAgentID string, owner *spawnSlotWait) {
 	defer svc.releaseSpawnSlot()
+	defer owner.cancel()
+	defer svc.clearRunCanceler(run.ID, owner)
 	svc.execute(ctx, run, parentAgentID)
 }
 
@@ -1256,15 +1329,6 @@ func (svc *Service) executeWithSlot(ctx context.Context, run *Run, parentAgentID
 // without further retries (the loop checks ctx + the persisted status
 // before each iteration).
 func (svc *Service) execute(ctx context.Context, run *Run, parentAgentID string) {
-	// Clear the per-run cancel registration on exit so a late Cancel
-	// call after terminal state is a cheap no-op (no stale func held,
-	// no double-invocation).
-	defer func() {
-		svc.cancelMu.Lock()
-		delete(svc.cancelers, run.ID)
-		svc.cancelMu.Unlock()
-	}()
-
 	var (
 		result *Result
 		runErr error

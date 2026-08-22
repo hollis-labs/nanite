@@ -38,7 +38,13 @@ const staleResumeFastExitWindow = 5 * time.Second
 //  2. If active and any of the System / Agent / Mode / Rules slots changed
 //     since the last turn, regenerate CLAUDE.md / agent-context.md in the
 //     boot dir and SendInput a re-read instruction so the agent reloads
-//     context.
+//     context. Independent of that slot-hash gate — TASKS/skills/10:
+//     (re)plant this agent's plantable skill set into the boot dir every
+//     turn of an already-active session, so a newly-granted skill appears
+//     without a full session restart (skill grants are structurally
+//     invisible to the slot hash, since CLI-hosted skill delivery adds
+//     nothing to any prompt slot — see PlantAgentSkillFiles's call site
+//     below for the full reasoning).
 //  3. Construct a per-turn turnCh, bind it on the agentEventBridge so the
 //     runtime's EventFanout routes events here instead of broadcasting SSE.
 //     Spawn a watcher goroutine that unbinds + closes turnCh on ctx cancel.
@@ -191,16 +197,40 @@ func (s *chatServiceImpl) driveBootSession(
 		bootedProvider := bootOpts.Provider
 		bootedWorkdir := workdir
 		go s.observeSessionForRecovery(bootedSession, sessionID, bootedProfile, bootedProvider, bootedWorkdir, bootedAt, usedResume)
-	} else if s.slotsChangedFor(sessionID, slotResult) {
+	} else {
 		// 3. Refresh the boot dir when System / Agent / Mode / Rules
 		// slots have shifted. UserContext changes per turn by design and
 		// flows via SendInput; we don't regen CLAUDE.md for it.
-		if err := s.regenerateBootDirSlots(sessionID, sess.BootDir, agent); err != nil {
-			slog.Warn("driveBootSession: slot regen failed",
-				"session_id", sessionID, "err", err)
-		} else {
-			if err := sess.SendInput([]byte(slotRereadInstruction)); err != nil {
-				slog.Warn("driveBootSession: send reread instruction failed",
+		if s.slotsChangedFor(sessionID, slotResult) {
+			if err := s.regenerateBootDirSlots(sessionID, sess.BootDir, agent); err != nil {
+				slog.Warn("driveBootSession: slot regen failed",
+					"session_id", sessionID, "err", err)
+			} else {
+				if err := sess.SendInput([]byte(slotRereadInstruction)); err != nil {
+					slog.Warn("driveBootSession: send reread instruction failed",
+						"session_id", sessionID, "err", err)
+				}
+			}
+		}
+		// 3a. TASKS/skills/10: (re)plant this agent's plantable skill set
+		// into the already-running session's boot dir. Deliberately run
+		// on every turn of an active session, independent of
+		// slotsChangedFor above — granting/revoking a skill is
+		// structurally invisible to the System/Agent/Mode/Rules slot
+		// hash (CLI-hosted skill delivery adds nothing to any prompt
+		// slot at all, per docs/engineering/architecture/20-skills.md's
+		// explicit "no Nanite-specific rendering" instruction), so gating
+		// this on the same slot-hash check the CLAUDE.md regen uses would
+		// make a newly-granted skill invisible until an unrelated slot
+		// happened to change too. The operation itself is cheap (a
+		// couple of DB lookups plus a handful of small file writes,
+		// typically zero-to-few granted skills per agent) and
+		// idempotent/additive (SkillPlantFiles + writePlantedFile), so
+		// re-checking every turn is the correct granularity for "a newly
+		// granted skill appears without a full session restart."
+		if agent != nil && agent.ID != "" {
+			if err := runtimeagent.PlantAgentSkillFiles(ctx, s.agentDeps, sess.BootDir, sess.Provider, agent.ID); err != nil {
+				slog.Warn("driveBootSession: skill replant failed",
 					"session_id", sessionID, "err", err)
 			}
 		}

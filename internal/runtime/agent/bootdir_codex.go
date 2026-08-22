@@ -85,6 +85,16 @@ func codexAgentsMD(params SetupParams) string {
 // Spec.Files (codexPlanter forces its mode to codexConfigFileMode via
 // fileModeOverrides — Spec.Files carries no per-entry mode of its own).
 // See bootdir_provider_config.go.
+//
+// TASKS/skills/10: codex has NO native skill-loading mechanism — confirmed
+// against go-providers' own CodexAdapter.BootDirSpec (no skills-related
+// planted file or env amendment), the OpenAI Codex CLI's docs/config.md
+// reference, and its README (zero mentions of "skill"/"skills" in either).
+// See skill_plant.go's package doc for the full investigation. codexPlantSpec
+// therefore has no skill-files contribution at all — this is the
+// documented, legitimate "provider has no equivalent native-skill
+// mechanism" outcome 20-skills.md's own Context anticipates, not an
+// oversight.
 func codexPlantSpec(params SetupParams) (plant.Spec, error) {
 	configTOML, err := codexConfigTOMLContent(params.CLIWritableRoots)
 	if err != nil {

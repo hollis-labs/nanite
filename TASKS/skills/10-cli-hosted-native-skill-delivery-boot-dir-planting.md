@@ -1,7 +1,7 @@
 # CLI-hosted delivery — plant vendored skill packages into each provider's native boot-dir location
 
 **Phase:** 6 — Delivery (`TASKS/skills`)
-**Status:** not-started
+**Status:** implemented
 **Depends on:** `02`, `03`
 **Touches:** new file `internal/runtime/agent/skill_plant.go` (a shared helper feeding all three
 providers), `internal/runtime/agent/bootdir_claude.go`/`bootdir_codex.go`/`bootdir_opencode.go`
@@ -83,8 +83,191 @@ planting, which is a legitimate outcome, not a gap to paper over).
   the Work Log, not silently unhandled.
 
 ## Work log
-<Worker fills this in as it goes: what was actually done, any deviation from plan and why,
-anything escalated.>
+
+**Implementation.**
+
+- New file `internal/runtime/agent/skill_plant.go` — the shared helper feeding all three
+  providers, per the task's own "Touches" list:
+  - `SkillCatalogStore`/`SkillGrantStore`/`SkillStore` (combined) and `SkillVendorReader` — local,
+    narrow interfaces (`*store.Store`/`*skillvendor.Store` satisfy them directly). Local rather
+    than reused from `internal/skill/resolver.go`'s `SkillIndexStore` or `internal/skill/gate.go`'s
+    `AgentKnownSkillStore` because `internal/skill` already imports
+    `internal/runtime/agent` (for `ResolveContextBlocks`) — importing back would cycle.
+  - `ResolvePlantableSkills(ctx, grants, catalog, agentID)` — mirrors `internal/skill/gate.go`'s
+    `Gate.authorize` trust-validity check exactly (task 09), applied to planting instead of
+    execution: a grant is plantable only when `ApprovedContentHash` is non-empty (excludes a bare
+    `AssignSkillToAgent` row) **and** still matches the skill catalog row's current `ContentHash`
+    (excludes a stale approval from before a since-superseded re-install/sync). Does **not**
+    additionally gate on `store.Skill.Enabled` — `Gate.authorize` doesn't either, so the two checks
+    stay in lockstep by design, per the task's own "mirror task 09" instruction.
+  - `SkillPlantFiles(ctx, skills, vendor, destPrefixes)` — reads each plantable skill's vendored
+    tree via `SkillVendorReader.ReadFiles(ContentHash)` and returns the combined
+    `map[relPath][]byte`, nested under every prefix `destPrefixes(slug)` returns (a skill can be
+    planted under more than one destination for the same boot dir).
+  - `skillFilesForProvider(ctx, providerName, params)` — the per-provider dispatch: `claude` →
+    `.claude/skills/<slug>/`; `opencode` → **both** `skills/<slug>/` and `.opencode/skills/<slug>/`
+    (see "Per-provider native conventions" below); `codex` and anything unrecognized → `(nil, nil)`,
+    no planting, not an error. Returns `(nil, nil)` whenever `SetupParams.Skills`/`.SkillVendor` is
+    unset, so every pre-existing bootdir test/caller that doesn't know about skills is unaffected.
+  - `PlantAgentSkillFiles(ctx, deps, bootDir, providerName, agentID)` — the exported entry point
+    the mid-session regen path calls (see below); (re)plants into an *existing* boot dir via the
+    already-production `writePlantedFile` primitive. Additive-only (documented explicitly in the
+    file's own package doc — see "Known limitations" below).
+- `SetupParams` (`bootdir.go`) gained `Skills SkillStore` / `SkillVendor SkillVendorReader`;
+  `Dependencies` (`deps.go`) gained the same two fields; `composeBootdirParams` threads
+  `deps.Skills`/`deps.SkillVendor` into `SetupParams` alongside the existing `CLIWritableRoots`
+  threading.
+- `claudePlantSpec` (`bootdir_claude.go`) and `opencodePlantSpec` (`bootdir_opencode.go`) each
+  call `skillFilesForProvider` and merge the result into their `files` map, matching every other
+  boot-dir content source (`sandboxFiles`, `mcpConfigBytes`) already merged there.
+  `codexPlantSpec` (`bootdir_codex.go`) gets a doc-comment explaining the deliberate absence — see
+  "Per-provider native conventions" below — and no functional change (What-to-do item 5 is
+  satisfied structurally: `composeSystemPrompt`/`ResolveSystemPrompt`/the skill-catalog-teaser path
+  are untouched by this whole task; nothing in this change adds anything to prompt text).
+- Composition root: `AgentDepsConfig` (`internal/service/agent_deps.go`) gained `SkillVendor
+  *skillvendor.Store`; `BuildAgentDependencies` sets `deps.Skills = cfg.Store` (satisfies
+  `SkillStore` directly) and, **guarding against the classic Go "typed nil interface" trap**, only
+  assigns `deps.SkillVendor = cfg.SkillVendor` when `cfg.SkillVendor != nil` — a nil
+  `*skillvendor.Store` assigned unconditionally into the `SkillVendorReader` interface field would
+  produce a non-nil interface wrapping a nil pointer, which `skillFilesForProvider`'s own `!= nil`
+  guard would treat as "wired" and panic on the first `ReadFiles` call. `internal/service/
+  container.go` threads the same `skillVendor` value (already constructed a few lines earlier for
+  the install/sync pipeline, and already tolerant of a nil value on init failure) into
+  `AgentDepsConfig.SkillVendor`.
+- Mid-session regen (`internal/service/chat_boot_drive.go`'s `driveBootSession`): the prior
+  `} else if s.slotsChangedFor(...) { regenerateBootDirSlots(...) }` branch is restructured into
+  `} else { if s.slotsChangedFor(...) { regenerateBootDirSlots(...) }; runtimeagent.
+  PlantAgentSkillFiles(ctx, s.agentDeps, sess.BootDir, sess.Provider, agent.ID) }` — see "Real
+  design-latitude deviation from the task's literal wording" below for why skill (re)planting runs
+  on *every* turn of an active session, independent of `slotsChangedFor`, rather than nested inside
+  `regenerateBootDirSlots` and sharing its slot-hash gate.
+
+**Per-provider native conventions (investigated for real, not assumed):**
+
+- **Claude Code**: real, documented `.claude/skills/<slug>/SKILL.md` auto-discovery from cwd.
+  Nanite's claude boot dir *is* cwd (`claudeLayout.SpawnWorkdir`), so `.claude/skills/<slug>/` is
+  unambiguous.
+- **OpenCode**: also has a real, documented native skill mechanism (confirmed via
+  `opencode.ai/docs/skills/` and `opencode.ai/docs/config/`), but with genuine, unresolved
+  published-doc ambiguity about which of two conventions Nanite's own `OPENCODE_CONFIG_DIR` env
+  amendment (`opencodeLayout.AmendEnv`) actually reaches: project-local `.opencode/skills/<name>/`
+  (relative to cwd), or a config-dir-relative `skills/<name>/` (the docs describe
+  `OPENCODE_CONFIG_DIR` as searched "just like the standard `.opencode` directory... should follow
+  the same structure" — which a separate doc section says includes plural `skills/` — but the same
+  paragraph's own explicit enumeration of what gets searched there names only "agents, commands,
+  modes, and plugins," not "skills"). Given real ambiguity and zero functional cost to covering
+  both (inert extra files; nothing else in `opencodePlantSpec`'s `Files` map uses either top-level
+  name), `opencodeSkillDestPrefixes` plants to **both** `skills/<slug>/` and
+  `.opencode/skills/<slug>/`. This is a design-latitude call (task's own instruction: "confirm the
+  real native convention... rather than assuming"), documented in `skill_plant.go`'s package doc
+  rather than left silent.
+- **Codex**: confirmed to have **no native skill mechanism at all** — checked directly against (1)
+  the vendored `go-providers` module's `CodexAdapter.BootDirSpec` (no skills-related planted file
+  or env amendment anywhere in it), (2) a live web fetch of the OpenAI Codex CLI's own
+  `docs/config.md` reference (zero mentions of "skill"/"skills"), and (3) the CLI's GitHub README
+  (same). `codexPlantSpec` has no skill-files contribution — this is the "provider genuinely has no
+  equivalent native-skill mechanism" outcome the task's own Context explicitly names as a
+  legitimate result, not a gap. **This satisfies the Done-means bullet "for any provider confirmed
+  to have no native skill mechanism, this is documented explicitly" — Codex is that provider.**
+
+**Real design-latitude deviation from the task's literal wording, with reasoning:**
+`hashSlots`/`slotsChangedFor` (`chat_boot_drive.go`) only hash `SlotSystem`/`SlotAgent`/`SlotMode`/
+`SlotRules` prompt-slot content. Per `20-skills.md`'s own explicit instruction (also this task's
+What-to-do item 5), CLI-hosted skill delivery adds **nothing** to any prompt slot at all — so a
+bare skill grant/revoke can never change the slot hash. Nesting the skill-replant call *inside*
+`regenerateBootDirSlots` and letting it share that function's existing `slotsChangedFor` gate (the
+most literal reading of "wire the planting call into... the existing mid-session regeneration
+path") would make the Done-means bullet "granting a new skill mid-session results in it appearing
+in the boot dir without a full session restart" essentially unreachable in the ordinary case (it
+would only fire by coincidence, alongside an unrelated System/Agent/Mode/Rules slot change in the
+same turn). Per `EXECUTION-PROCESS.md`'s "reasoning vs. instruction" guidance, What-to-do's actual
+instruction is the acceptance criterion (a newly-granted skill appears without a full session
+restart), not the literal call-site nesting — so `driveBootSession`'s active-session branch now
+calls `runtimeagent.PlantAgentSkillFiles` unconditionally on every turn, alongside (not nested
+inside) the still slot-hash-gated `regenerateBootDirSlots` call. This is cheap (a couple of DB
+lookups plus a handful of small file writes, typically zero-to-few granted skills per agent) and
+idempotent/additive, so re-checking every turn is the correct granularity. Confirmed live in the
+dogfeed below: granting `late-grant-skill` mid-session (no slot content changed at all) and sending
+one more ordinary chat turn planted it into the same, already-running boot dir.
+
+**Live dogfeed (real Claude-launched CLI session, scratch DB/vendor-store/boot-dir throughout —
+absolute paths under this session's `/private/tmp/claude-.../scratchpad/skill-dogfeed-10/`, never a
+relative path resolved against CWD, never any real tracked `.nanite/`):**
+
+1. Built `nanite-bin` from this worktree; installed two real skill packages
+   (`demo-dogfeed-skill` with `SKILL.md` + `scripts/hello.sh`; `late-grant-skill` with just
+   `SKILL.md`) into a scratch vendored store via `nanite skill install` against a scratch
+   `NANITE_DB_PATH` and a scratch `config/nanite.yaml` (`skills.vendor_storage_dir` set to an
+   absolute scratch path — the CWD-relative default, `data/skills/vendor`, is exactly the footgun
+   this project's process doc warns about, avoided by an explicit absolute override).
+2. Started `nanite-bin serve` against the same scratch DB (`NANITE_WORKSPACE=skills-dogfeed-10`,
+   never `default`). Created a real agent via `POST /api/agents`, then set
+   `default_provider='pty'`/`runtime_kind='cli'` directly via `sqlite3` against the scratch DB
+   (the create/update REST payloads — `CreateAgentRequest`/`UpdateAgentRequest`,
+   `internal/api/types.go` — have no `default_provider`/`runtime_kind` field at all; a genuine,
+   separate pre-existing REST-surface gap, unrelated to this task, not fixed here). Granted
+   `demo-dogfeed-skill` to the agent via a direct `agent_known_skills` insert with
+   `approved_content_hash` set to the skill's real vendored address (task 02's grant-state columns
+   have no REST-settable path yet either — also pre-existing, also out of scope).
+3. Created a session bound to that agent, sent a real chat message through `POST /api/messages` —
+   real `claude` CLI subprocess spawned, replied "hi." over real SSE (`stream_start`/`delta`/
+   `stream_end`), confirming the whole harness path (not a stub).
+4. Found the real boot dir under `$TMPDIR` (`nanite-boot-claude-<sessionID>-r0-*`) and confirmed
+   `.claude/skills/demo-dogfeed-skill/SKILL.md` and `.claude/skills/demo-dogfeed-skill/scripts/
+   hello.sh` present with exact expected content — **the Done-means dogfeed bullet, satisfied
+   directly, not inferred from a unit test.**
+5. Granted `late-grant-skill` mid-session (agent already booted, session already running) via a
+   second direct `agent_known_skills` insert, then sent one more ordinary chat message (no slot
+   content changed) — confirmed `.claude/skills/late-grant-skill/SKILL.md` appeared in the
+   **same** boot dir (same directory name, no new boot dir created, no restart) after that turn —
+   **the mid-session Done-means bullet, satisfied.**
+6. Re-installed (`nanite skill sync`) `demo-dogfeed-skill` with changed body content, bumping its
+   catalog `ContentHash` to a new vendored address, while the agent's existing grant's
+   `approved_content_hash` stayed pointed at the old (now-stale) address. Created a **second**,
+   fresh session for the same agent and sent a message — a brand-new boot dir was created, and its
+   `.claude/skills/` contained **only** `late-grant-skill` (whose approval was still current) —
+   `demo-dogfeed-skill` (stale approval) was correctly **omitted entirely** — **the stale-hash
+   Done-means bullet, satisfied. Design choice: a stale-approval skill is omitted outright, never
+   planted at its old approved content — there is no "plant the old approved version" fallback.**
+7. Cleanup: killed the scratch `nanite-bin serve` process and its two spawned `nanite mcp`
+   subprocesses (`pkill -f skill-dogfeed-10/nanite-bin`); confirmed via `git status --short` in
+   this worktree that nothing leaked outside the scratch directory (the agent-create call's
+   "managed agent" file write landed at `<scratch>/.nanite/agents/skill-dogfeed-agent-10.md`,
+   never the real tracked `.nanite/agents/`, because the server's CWD was the scratch dir
+   throughout).
+
+**Unit tests** (`internal/runtime/agent/skill_plant_test.go`, all passing): grant-validity branch
+coverage (approved+matching → plantable; ungranted/empty-hash, stale-hash, and dangling-catalog-row
+→ excluded; nil-input tolerance); `SkillPlantFiles` multi-prefix fan-out; per-provider dispatch
+(claude/opencode/codex/unknown); no-skill-wiring no-op tolerance (so every pre-existing bootdir
+test stays unaffected); a real `claudeLayout{}.Setup(...)` call asserting the granted skill's files
+land on disk and the stale-approval skill does not; `PlantAgentSkillFiles`'s mid-session
+before/after-grant behavior; nil-`Dependencies` and no-wiring guards.
+
+**Baseline checks:** `go build ./cmd/nanite/`, `go vet ./...` (two pre-existing, unrelated
+`stopReaper`/`stopRuntimeReaper` warnings in `container.go` confirmed via `git diff` to predate
+this change), and `go test ./...` all pass.
+
+**Known limitations (documented, not Done-means gaps):**
+- **Additive-only; no removal-on-revoke.** Every write in this codebase's boot-dir mechanism
+  (`writePlantedFile`, `Populate`, `plantSpec`) is additive/idempotent-by-overwrite — none delete a
+  previously-planted file that's no longer needed, and this task follows the same convention. A
+  skill that stops being plantable (revoked, or a stale re-approval) simply stops being included in
+  a future plant/replant call's map; its previously-planted files stay on disk in an
+  already-running session's boot dir until that boot dir itself is torn down. This is a real,
+  narrow residual-trust window (a CLI agent's own native skill mechanism re-reads its skill
+  directory on each turn, not once at process start), logged here explicitly rather than left
+  undiscoverable — not something the task's Done-means requires fixing (its own wording is "is not
+  planted," satisfied by omission from future plant calls, and "appears... without a restart,"
+  satisfied by the additive mid-session path).
+- **OpenCode's dual-destination choice is a documented best-effort, not a verified-against-real-
+  opencode-binary confirmation** — no live OpenCode dogfeed was run (the task's Done-means only
+  requires a live Claude-launched dogfeed); the two-destination choice is deliberately safe
+  (inert extra files either way) rather than a guess at a single path.
+- **`default_provider`/`runtime_kind` and skill grant-state columns have no REST-settable path
+  yet** — found during the dogfeed (item 2 above); a genuinely separate, pre-existing gap in
+  `internal/api/types.go`'s `CreateAgentRequest`/`UpdateAgentRequest` and the known-skills REST
+  handlers, unrelated to this task's own scope, not fixed here.
 
 ## Review notes
 <Reviewer fills this in: pass/fail, what was checked, anything fixed and how.>

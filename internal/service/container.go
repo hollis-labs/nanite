@@ -1032,6 +1032,11 @@ func NewContainer(cfg ContainerConfig) (*Container, error) {
 		Providers:        cfg.Providers,
 		APIBaseURL:       cfg.APIBaseURL,
 		CLIWritableRoots: cfg.DevToolsAllowedPaths,
+		// TASKS/skills/10: threads the same vendored skill store
+		// constructed above (skillVendor, possibly nil on init failure —
+		// see its own comment) onto runtimeagent.Dependencies.SkillVendor
+		// so CLI-hosted agents can plant their granted skills.
+		SkillVendor: skillVendor,
 	})
 	if agentDepsErr != nil {
 		stopCatalog()

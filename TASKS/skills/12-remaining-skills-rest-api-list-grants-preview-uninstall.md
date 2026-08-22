@@ -1,7 +1,7 @@
 # Remaining REST surface: list/get, assign/revoke, grants/policy view, invoke/preview, uninstall
 
 **Phase:** 7 — Remaining REST API surface (`TASKS/skills`)
-**Status:** implemented
+**Status:** reviewed
 **Depends on:** `02`, `05` (install pipeline this uninstall path mirrors), `09` (grant-state
 model this task exposes read/write access to)
 **Touches:** `internal/api/skills.go` (extends whatever task `05` started), `internal/api/api.go`
@@ -381,3 +381,32 @@ modified. No `git stash` used at any point. This closes finding (1) and (2) from
 in `TASKS/ESCALATIONS.md`'s `2026-08-22 — Task \`12\` review` entry; findings (3) and (4) remain
 filed follow-up candidates, untouched, per the fix-required scope. This was the final task in the
 12-task Skills batch — the batch is now fully closed.
+
+## Final re-review (2026-08-22)
+
+**PASS.** Fresh reviewer, no shared context, independently verified both fixes against real code
+and real test runs, including a direct mutation test of fix 2.
+
+- **Fix 1 (comment correction)** verified accurate by directly reading `TASKS/ESCALATIONS.md`'s
+  task 10 and task 11 review entries (neither discusses caller-identity access control, confirming
+  the original attribution was indeed wrong) and by independently grepping
+  `internal/api/agent_capabilities.go`/`agents.go` for `CallerFromCtx`/`CallerIdentity` (zero
+  hits — both gate exclusively on `requireMutableAgent`) and confirming
+  `internal/server/caller_identity.go`'s middleware, while wired into the global chain, is
+  consumed only by `internal/messaging`, never by any agent-mutation handler. One minor stylistic
+  nuance noted (the comment's "never applied to agent-mutation endpoints" technically means "never
+  consumed by," since the middleware itself runs on every request) — read in context this doesn't
+  misstate anything load-bearing or resurrect the original overstated claim; not a defect.
+- **Fix 2 (typed-nil regression test)** verified genuine on all three required dimensions: a truly
+  typed nil (`var nilVendor *skillvendor.Store`, not an untyped literal), routed through the real
+  `DELETE /api/skills/{slug}` handler via `httptest` (not a direct `Uninstaller` call), asserting a
+  clean non-panicking error with the index row surviving. **Independently mutation-tested**:
+  reverted the guard to the unsafe direct-assignment form, reran the test, and reproduced the exact
+  predicted `nil pointer dereference` panic inside `skillvendor.(*Store).Delete` — confirming this
+  is a real, load-bearing regression guard, not a vacuous pass. Reverted the mutation and
+  reconfirmed clean.
+- Build/vet/test all pass on `main` HEAD; the one `go vet` finding is the already-confirmed
+  pre-existing, unrelated `container.go` reaper warning.
+
+**No further fixes required. Task `12` is fully closed: implemented, validated, reviewed. This
+was the final task in the 12-task Skills batch — the entire batch is now fully closed.**

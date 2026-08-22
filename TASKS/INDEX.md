@@ -1032,7 +1032,7 @@ must not be dispatched.
 | `02/01` | `02-linux-sandbox-fail-open/01-sandbox-fail-closed-without-bwrap.md` | not-started | `00/01`, `00/02` | AD-01, AD-02 |
 | `02/02` | `02-linux-sandbox-fail-open/02-macos-seatbelt-read-boundary-disclosure.md` | not-started | `00/01` | AD-03 |
 | `03/01` | `03-agent-slug-traversal/01-canonical-slug-path-validation.md` | not-started | `00/01`, `00/02` | — |
-| `12/02` | `12-quality-ratchet-and-standards/02-add-engineering-standards-docs.md` | not-started | `00/01` | — |
+| `12/02` | `12-quality-ratchet-and-standards/02-add-engineering-standards-docs.md` | reviewed | `00/01` | — |
 
 ### Wave 2a — Container/reaper lifecycle + subagent ordering
 

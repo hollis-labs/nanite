@@ -797,7 +797,7 @@ func selfToolDefinitions() []mcp.Tool {
 			Description: "Return the current lifecycle state and (when terminal) result of a background job.\n\n" +
 				"**When to use:** After background_job, to poll progress. Prefer waiting for the inbox notification; this is for active polling cases.\n\n" +
 				"**Required context:** job_id from the background_job response.\n\n" +
-				"**Output shape:** {job_id, status: pending|running|succeeded|failed|cancelled, output, error, started_at, completed_at, output_truncated}.",
+				"**Output shape:** {job_id, status: pending|running|succeeded|failed|cancelled|expired, output, error, started_at, completed_at, output_truncated}. Expired results return an explicit background job result expired error, distinct from an unknown job id.",
 			InputSchema: map[string]any{
 				"type": "object",
 				"properties": map[string]any{

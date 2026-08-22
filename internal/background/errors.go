@@ -3,9 +3,15 @@ package background
 import "errors"
 
 // ErrUnknownJob is returned by Backend.Status / Service.Status when
-// the queried job id is not tracked. Idempotent Cancel returns nil
-// for unknown ids; only Status surfaces ErrUnknownJob.
+// the queried job id was never issued by this service instance.
+// Idempotent Cancel returns nil for unknown ids.
 var ErrUnknownJob = errors.New("background: unknown job id")
+
+// ErrExpiredJob is returned by Service.Status / Service.Result when a
+// job id was issued by this service instance but its terminal record has
+// been evicted by the completed-job retention policy. Callers can use
+// errors.Is to distinguish expiry from a job id that was never known.
+var ErrExpiredJob = errors.New("background: job result expired")
 
 // ErrPatternNotBackground is returned by Service.Submit when the
 // caller passes a classify.ExecutionPattern other than PatternBackground.

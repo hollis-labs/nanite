@@ -310,9 +310,16 @@ func TestCancel_IsIdempotent(t *testing.T) {
 func TestStatus_UnknownReturnsErrUnknownJob(t *testing.T) {
 	t.Parallel()
 	svc := NewService(newStubBackend(), &stubMessenger{})
-	_, err := svc.Status("nope")
+	status, err := svc.Status("nope")
+	if status != "" {
+		t.Fatalf("Status(unknown) status = %q; want empty", status)
+	}
 	if !errors.Is(err, ErrUnknownJob) {
 		t.Fatalf("Status(unknown) = %v; want ErrUnknownJob", err)
+	}
+	result, err := svc.Result("nope")
+	if result != (JobResult{}) || !errors.Is(err, ErrUnknownJob) {
+		t.Fatalf("Result(unknown) = (%+v, %v); want zero result and ErrUnknownJob", result, err)
 	}
 }
 
@@ -451,5 +458,151 @@ func TestBudgetDefaults_Applied(t *testing.T) {
 	}
 	if got := be.starts[0].req.Budget.MaxOutputBytes; got != DefaultMaxOutputBytes {
 		t.Fatalf("MaxOutputBytes default not applied: got %d, want %d", got, DefaultMaxOutputBytes)
+	}
+}
+
+type fakeRetentionClock struct {
+	mu  sync.Mutex
+	now time.Time
+}
+
+func newFakeRetentionClock() *fakeRetentionClock {
+	return &fakeRetentionClock{now: time.Date(2026, 8, 22, 12, 0, 0, 0, time.UTC)}
+}
+
+func (c *fakeRetentionClock) Now() time.Time {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.now
+}
+
+func (c *fakeRetentionClock) Advance(d time.Duration) {
+	c.mu.Lock()
+	c.now = c.now.Add(d)
+	c.mu.Unlock()
+}
+
+func newRetentionTestService(maxCompleted int, ttl time.Duration) (*Service, *stubBackend, *stubMessenger, *fakeRetentionClock) {
+	clock := newFakeRetentionClock()
+	backend := newStubBackend()
+	messenger := &stubMessenger{}
+	svc := newServiceWithRetention(backend, messenger, completedJobRetention{
+		ttl:          ttl,
+		maxCompleted: maxCompleted,
+		now:          clock.Now,
+	})
+	return svc, backend, messenger, clock
+}
+
+func submitRetentionJob(t *testing.T, svc *Service) string {
+	t.Helper()
+	id, err := svc.Submit(context.Background(), classify.PatternBackground, validRequest())
+	if err != nil {
+		t.Fatalf("Submit: %v", err)
+	}
+	return id
+}
+
+func completeRetentionJob(backend *stubBackend, clock *fakeRetentionClock, id string, output string) {
+	backend.complete(id, BackendCompletion{
+		Status:      StatusSucceeded,
+		Output:      output,
+		StartedAt:   clock.Now().Add(-time.Second),
+		CompletedAt: clock.Now(),
+	})
+}
+
+func assertExpiredJob(t *testing.T, svc *Service, id string) {
+	t.Helper()
+	status, err := svc.Status(id)
+	if status != StatusExpired || !errors.Is(err, ErrExpiredJob) {
+		t.Fatalf("Status(%q) = (%q, %v); want (expired, ErrExpiredJob)", id, status, err)
+	}
+	result, err := svc.Result(id)
+	if result.JobID != id || result.Status != StatusExpired || !errors.Is(err, ErrExpiredJob) {
+		t.Fatalf("Result(%q) = (%+v, %v); want expired result and ErrExpiredJob", id, result, err)
+	}
+}
+
+func TestCompletedJobRetention_TTLExpiresOldResultButKeepsWithinWindow(t *testing.T) {
+	svc, backend, _, clock := newRetentionTestService(10, time.Hour)
+
+	oldID := submitRetentionJob(t, svc)
+	completeRetentionJob(backend, clock, oldID, "old")
+	clock.Advance(30 * time.Minute)
+	recentID := submitRetentionJob(t, svc)
+	completeRetentionJob(backend, clock, recentID, "recent")
+
+	clock.Advance(31 * time.Minute)
+	assertExpiredJob(t, svc, oldID)
+	result, err := svc.Result(recentID)
+	if err != nil || result.Status != StatusSucceeded || result.Output != "recent" {
+		t.Fatalf("within-window Result(%q) = (%+v, %v); want retained success", recentID, result, err)
+	}
+}
+
+func TestCompletedJobRetention_HardCapEvictsOldestCompleted(t *testing.T) {
+	svc, backend, _, clock := newRetentionTestService(2, 24*time.Hour)
+
+	ids := make([]string, 0, 3)
+	for i := 0; i < 3; i++ {
+		id := submitRetentionJob(t, svc)
+		completeRetentionJob(backend, clock, id, id)
+		ids = append(ids, id)
+		clock.Advance(time.Second)
+	}
+
+	assertExpiredJob(t, svc, ids[0])
+	for _, id := range ids[1:] {
+		if status, err := svc.Status(id); status != StatusSucceeded || err != nil {
+			t.Fatalf("Status(%q) = (%q, %v); want retained success", id, status, err)
+		}
+	}
+	svc.mu.Lock()
+	retained := len(svc.jobs)
+	svc.mu.Unlock()
+	if retained != 2 {
+		t.Fatalf("retained jobs = %d; want hard cap 2", retained)
+	}
+}
+
+func TestCompletedJobRetention_NeverEvictsActiveJob(t *testing.T) {
+	svc, backend, _, clock := newRetentionTestService(1, time.Minute)
+	activeID := submitRetentionJob(t, svc)
+
+	firstCompletedID := submitRetentionJob(t, svc)
+	completeRetentionJob(backend, clock, firstCompletedID, "first")
+	clock.Advance(time.Second)
+	latestCompletedID := submitRetentionJob(t, svc)
+	completeRetentionJob(backend, clock, latestCompletedID, "latest")
+	clock.Advance(2 * time.Minute)
+
+	if status, err := svc.Status(activeID); status != StatusRunning || err != nil {
+		t.Fatalf("active Status(%q) = (%q, %v); want running", activeID, status, err)
+	}
+	assertExpiredJob(t, svc, firstCompletedID)
+	assertExpiredJob(t, svc, latestCompletedID)
+
+	svc.mu.Lock()
+	retained := len(svc.jobs)
+	svc.mu.Unlock()
+	if retained != 1 {
+		t.Fatalf("retained jobs = %d; want only the active job", retained)
+	}
+}
+
+func TestCompletedJobRetention_LateDuplicateCompletionAfterEvictionIsSafe(t *testing.T) {
+	svc, backend, messenger, clock := newRetentionTestService(0, time.Hour)
+	id := submitRetentionJob(t, svc)
+	completeRetentionJob(backend, clock, id, "first")
+	assertExpiredJob(t, svc, id)
+
+	// A broken backend may fire again after the first completion caused
+	// immediate cap eviction. The callback must be a safe no-op: no panic,
+	// no record resurrection, and no duplicate completion envelope.
+	completeRetentionJob(backend, clock, id, "duplicate")
+	assertExpiredJob(t, svc, id)
+	if got := len(messenger.captured()); got != 1 {
+		t.Fatalf("completion envelopes = %d; want 1 after late duplicate", got)
 	}
 }

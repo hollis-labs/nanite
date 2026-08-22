@@ -1,7 +1,7 @@
 # Decide and fix `internal/background` job-registry unbounded growth (+ fix the false "reaped" claim)
 
 **Phase:** Wave 2 — Correctness, lifecycle, concurrency
-**Status:** not-started
+**Status:** implemented
 **Depends on:** none
 **Touches:** `internal/background/service.go` (`Service`, `jobRecord`, `Submit`, `onBackendComplete`, `Status`, `Result`); `internal/background/pty.go` (`PTYBackend`, `ptyJob`, `Status`'s doc comment). **This task requires an architect decision before the retention-policy half is implemented** — see Context and What to do. The doc-comment fix is required regardless of that decision.
 
@@ -137,7 +137,40 @@ Direction A carries real risk of evicting a job result before a caller has polle
 
 ## Work log
 
-<!-- Worker fills in: what was actually done, any deviation from plan and why, which direction was chosen and by whom. -->
+- 2026-08-22: Implemented the operator-approved AD-18 Direction A: `Service`
+  retains completed results for 24 hours with a hard ceiling of 100 completed
+  records. Retention runs inline on submit, completion, status, and result
+  access; it never selects pending/running jobs. The clock and limits are
+  injectable through an unexported test constructor, so TTL and count behavior
+  are deterministic without sleeps.
+- `Status` and `Result` now distinguish eviction from a never-issued id with
+  `StatusExpired` plus `ErrExpiredJob`. Issued ids carry a random per-service
+  prefix, which lets missing ids be classified without replacing the bounded
+  result registry with an unbounded tombstone map. The `background_status`
+  tool description includes the new state/error contract.
+- Caller trace: production constructs exactly one `Service`/`PTYBackend` pair
+  in `internal/service/container.go`; the `background_job` and
+  `background_status` self-tools call `Service.Submit` and `Service.Result`.
+  No production caller invokes `PTYBackend.Status` directly (its only direct
+  callers are package tests), so `Service` is the retained-result authority.
+  `PTYBackend` now deletes its process-only entry as completion is delivered.
+  Its status comment now describes that real behavior instead of claiming a
+  nonexistent post-completion retention/reaping policy.
+- Correction to the task's audit-era rationale: `ptyJob` does not retain the
+  captured output; the output is passed to the completion callback and retained
+  by `Service.jobRecord`. `PTYBackend.jobs` was still independently unbounded,
+  but only by process metadata, so immediate completion cleanup is the smallest
+  consistent policy for that map.
+- Added regressions for TTL eviction, within-window availability, the hard
+  completed-count cap, explicit expired-vs-unknown semantics, protection of
+  active jobs, late/duplicate completion after eviction, and backend process
+  record cleanup. Pre-fix proof: the new backend cleanup regression failed with
+  `completed backend job remains retained` before the production change.
+- Verification: `go build ./internal/background/...`,
+  `go vet ./internal/background/...`, and
+  `go test -race ./internal/background/... -count=1 -v` pass; focused
+  `internal/selftools` compilation passes; full `go build ./cmd/nanite/`,
+  `go vet ./...`, and `go test ./...` pass.
 
 ## Review notes
 

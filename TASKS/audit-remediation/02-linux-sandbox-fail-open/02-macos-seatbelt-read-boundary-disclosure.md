@@ -1,7 +1,7 @@
 # Confirm and disclose the macOS seatbelt read/process-inspection boundary tradeoff
 
 **Phase:** Wave 1 — Release-blocking trust boundaries (per remediation guide §4)
-**Status:** not-started
+**Status:** implemented
 **Depends on:** none within this batch. Conceptually pairs with
 `01-sandbox-fail-closed-without-bwrap.md` in this same folder (both findings
 leave the *read*/network boundary less enforced than a naive reading of
@@ -308,24 +308,25 @@ this task's default expectation.
 No build/test commands apply to the default documentation-only scope.
 Verification is a manual review checklist:
 
-- [ ] Confirmed (via repo-wide search, not just the locations cited above)
+- [x] Confirmed (via repo-wide search, not just the locations cited above)
       whether any other doc under `docs/` or `ui/` makes claims about
       macOS sandbox read/process-inspection guarantees, and corrected or
       cross-referenced all of them consistently.
-- [ ] `docs/hardening-phase-plan.md`'s Tier 2 macOS description no longer
+- [x] `docs/hardening-phase-plan.md`'s Tier 2 macOS description no longer
       states "Read/write within sandbox CWD only" or "No process
       inspection, no signal sending to non-child processes" as current
       behavior without qualification.
-- [ ] Architect decision on both questions ("still the right tradeoff?",
+- [x] Architect decision on both questions ("still the right tradeoff?",
       "is disclosure now adequate?") is recorded in this task's Work log,
       including which of the 2026-04-10 finding's recommendation options (if
       any) were selected.
-- [ ] If scope expanded to an `os_darwin.go` change per the architect
+- [x] If scope expanded to an `os_darwin.go` change per the architect
       decision, that change's own build/test/verification is documented
       following `01-sandbox-fail-closed-without-bwrap.md`'s pattern, and this
       task file's scope-expansion is explicitly logged (per this project's
       task-file-template guidance: a task whose real scope grows doesn't get
-      silently narrowed back down).
+      silently narrowed back down). — **N/A**, scope did not expand; see
+      Work log.
 
 ### Risk / rollback
 
@@ -339,23 +340,219 @@ either parses or the process fails to start).
 
 ### Done means
 
-- [ ] Architect decision recorded for both open questions.
-- [ ] `docs/hardening-phase-plan.md`'s Tier 2 macOS description corrected or
+- [x] Architect decision recorded for both open questions.
+- [x] `docs/hardening-phase-plan.md`'s Tier 2 macOS description corrected or
       clearly marked as unrealized design intent, not current behavior.
-- [ ] A definitive answer exists (in this task's Work log) to "is the
+- [x] A definitive answer exists (in this task's Work log) to "is the
       read/process-inspection tradeoff currently disclosed to end users
       adequately" — not "not re-verified," an actual yes/no with evidence.
-- [ ] If the architect concluded disclosure is inadequate, a genuinely
+- [x] If the architect concluded disclosure is inadequate, a genuinely
       user-facing (or clearly-scoped internal-only, if that's the
       architect's call) document exists stating the sandbox's actual
-      guarantees and gaps on both platforms.
-- [ ] If the architect concluded the tradeoff itself should narrow, that
+      guarantees and gaps on both platforms. — architect (AD-03) explicitly
+      scoped the remedy to the internal-doc correction only ("`02/02` is
+      already scoped for exactly this and needs no re-scope"); see Work log
+      for why no new document was created.
+- [x] If the architect concluded the tradeoff itself should narrow, that
       work is re-scoped as its own task rather than silently expanded here,
-      and the escalation is recorded.
+      and the escalation is recorded. — **N/A**, AD-03 explicitly decided
+      the tradeoff does not narrow.
 
 ## Work log
 
-<Worker fills this in.>
+**2026-08-22, worker session.**
+
+### What was checked
+
+- Read `docs/engineering/EXECUTION-PROCESS.md`, this task file in full
+  (including the `✅ AD-03 DECIDED` banner), `docs/engineering/GLOSSARY.md`,
+  and `TASKS/audit-remediation/ARCHITECT-DECISIONS.md`'s AD-03 section
+  before starting, per dispatch instructions.
+- Re-read `internal/sandbox/os_darwin.go` and `internal/sandbox/os_linux.go`
+  directly (not just the task file's quoted excerpts) to confirm current
+  shipped behavior before writing any disclosure text. Confirmed:
+  - `os_darwin.go`: `(allow default)` + narrow `(deny file-write* ...)`
+    (sandbox dir / extra write path / `/tmp` / `/private/tmp` / `/dev/null` /
+    `/dev/tty` / `/dev/fd`) + network deny (or allow-localhost-only when a
+    proxy allowlist is configured). No `file-read*`, `process-exec*`,
+    `mach-lookup`/`mach-register`, `signal`, or `sysctl-*` denies — matches
+    the task file's "Current behavior" section exactly.
+  - `os_linux.go`: still has the pre-AD-01/AD-02-remediation shape (fail-open
+    `sync.Once`-warned fallback when `bwrap` is absent; `--unshare-net` only
+    when `networkAllow` is empty) — confirms `02/01` in this same folder has
+    not landed yet, which is expected and does not block this task
+    (`Depends on: none`, `Parallel-safe with: all of Wave 1`).
+  - Read `docs/audits/2026-04-10-sandbox-hardening/09-medium-seatbelt-allow-default-sandbox-escape-surface.md`
+    in full, per the task file's instruction, before writing the disclosure
+    text.
+- Repo-wide search (not just `docs/hardening-phase-plan.md`) for other docs
+  under `docs/` or `ui/` making claims about macOS sandbox read/process-
+  inspection guarantees:
+  - `grep -rniE "seatbelt|sandbox-exec|allow default" docs/ ui/` (excluding
+    `docs/audits/`) and a second, narrower pass on
+    `"read.?write within|no process inspection|no signal sending|process
+    inspection"`.
+  - Found and corrected a **second** disclosure gap beyond
+    `docs/hardening-phase-plan.md`: `docs/programmatic-tool-calling-safety.md`
+    (a landed, real feature doc for `nanite_run_python`) claimed, in two
+    places, that "the OS sandbox (sandbox-exec / bwrap) blocks most of
+    these [file reads]" and that macOS's seatbelt "already blocks outbound
+    network for the sandbox-exec child." Traced the actual code path
+    (`internal/selftools/self_tools_python.go`'s `RunPythonSandbox` →
+    `exec.CommandContext(...)` + `applySandboxSysProcAttr` which only sets
+    `Setpgid`; dispatched from `internal/selftools/self_tools_transport.go`'s
+    `callRunPython`) and confirmed `python_run`'s subprocess does **not**
+    route through `sandbox.AgentExec`/`applyOSSandbox` at all — no seatbelt,
+    no bwrap wraps this process today, on either platform. So this doc's
+    claims were doubly wrong: not only does macOS's `(allow default)` not
+    restrict reads (the primary finding), but this specific tool doesn't
+    even get the OS-level sandbox applied to check that boundary against.
+    Corrected all three affected passages (`~52-67`, `~229-230`, `~234-243`)
+    to state the actual current behavior and cross-reference the
+    `hardening-phase-plan.md` correction.
+  - Everything else the grep surfaced (`docs/architecture/chat-system/*`,
+    `docs/research/anthropic-digest-cluster-3-4.md`,
+    `docs/research/nanite-alignment-matrix.md`,
+    `docs/research/gaps-and-opportunities.md`,
+    `docs/engineering/architecture/16-agent-host.md`,
+    `docs/handoff/2026-04-10-installer-audit-handoff.md`,
+    `docs/engineering/orchestrator-kickoffs/*`) either (a) describes a
+    sibling app's (Agent Mux) or Anthropic's own (Claude Code) sandbox model
+    as external research/comparison material, not a claim about Nanite's
+    shipped behavior, (b) mentions "OS sandbox-exec" only as a mechanism
+    name without asserting a specific read/write/process-inspection
+    guarantee, or (c) is itself an audit/handoff document already citing the
+    finding correctly. None of these needed correction.
+  - `ui/src` has zero references to `sandbox`/`seatbelt`/`sandbox-exec`
+    anywhere (`grep -rniE "sandbox" ui/src` — no output) — no frontend copy
+    to correct.
+  - `.nanite/agents/reviewer-backend.md` (a developer-persona boot file, not
+    under `docs/` or `ui/` and explicitly out of this task's stated search
+    scope per **GLOSSARY.md**'s own note distinguishing Nanite's runtime
+    agent system from the `.nanite/` developer-boot convention) mentions
+    seatbelt/bwrap but makes no specific read/write/process-inspection
+    guarantee claim — checked, left untouched, not in scope.
+  - Confirmed (again, independently) no `SECURITY.md` or dedicated
+    security-model doc exists anywhere in the repo
+    (`find . -iname "SECURITY*.md" -o -iname "*security-model*"` —
+    no output, worktrees/node_modules excluded), and that no other
+    user-facing doc (`docs/beta-known-issues.md`,
+    `docs/beta-readiness-install-setup.md`, `docs/dev-mode.md`,
+    `docs/developer-mode-gate.md`, `docs/mcp-trust-model.md`) mentions
+    sandbox/seatbelt/isolation at all.
+
+### What was corrected
+
+1. **`docs/hardening-phase-plan.md:136-179`** — the Tier 2 macOS bullets
+   ("Read/write within sandbox CWD only", "No process inspection, no signal
+   sending to non-child processes") are now explicitly marked as this task's
+   original 2026-04-07 *design intent*, with a correction block above them
+   stating actual shipped behavior (writes scoped to sandbox dir + a fixed
+   allowlist; reads/process-inspection/mach-IPC/signals unrestricted under
+   `(allow default)`), citing `internal/sandbox/os_darwin.go`, the 2026-04-10
+   finding 09 writeup, and AD-03. The disputed lines themselves are
+   struck through (`~~...~~`) with an inline correction, rather than
+   silently deleted, so the historical design-intent record is preserved
+   (per this doc's own nature as a dated planning log) while no longer
+   reading as current behavior. Also corrected the Linux comparison to
+   accurately state Linux is *not* symmetric with macOS on the read
+   boundary (narrower `--ro-bind` set, namespace-unshared PID/IPC/UTS) —
+   this matches the task file's own "Scope" section instruction.
+2. **`docs/programmatic-tool-calling-safety.md`** (three spots, see above) —
+   corrected the "Network block is best-effort" bullet, the "Known
+   limitations" network bullet, and the "Known limitations" filesystem-read
+   bullet to state that `python_run` does not currently route through the
+   OS-level sandbox (seatbelt/bwrap) at all, so the import-level Python
+   monkey-patch is, today, the sole defense on every platform for both
+   network and (by omission) filesystem reads — cross-referencing the
+   corrected `hardening-phase-plan.md` Tier 2 section for what the OS-level
+   sandbox does and doesn't cover where it *is* actually applied
+   (`sandbox.AgentExec`/`UserExec`).
+
+### Architect decision (both open questions)
+
+Recorded verbatim in `TASKS/audit-remediation/ARCHITECT-DECISIONS.md`'s
+AD-03 section, decided 2026-08-22, read and confirmed before writing any
+disclosure text:
+
+- **"Does the `(allow default)` tradeoff still hold?"** — **Yes, decided:
+  disclose, do not narrow.** The unrestricted reads/mach-IPC/process
+  inspection are an accepted, intentional beta-stage tradeoff.
+  `internal/sandbox/os_darwin.go` does not change code-wise. This worker did
+  not touch that file — confirmed via `git status --short` after all edits
+  (only the two docs files above are modified).
+- **"Is disclosure now adequate?"** — AD-03's own text: *"the remediation is
+  the disclosure gap... Correcting it to match reality is the whole job"*
+  and *"`02/02` is already scoped for exactly this and needs no re-scope."*
+  No recommendation option from the 2026-04-10 finding's "Near term"/"Medium
+  term" list was selected beyond recommendation #1 ("Document the
+  allow-default stance in user-facing security docs") — and even that is
+  satisfied at the *internal engineering documentation* level, not by
+  creating new end-user product copy; recommendations #2-#6 (per-session
+  `/tmp`, credential-directory read denies, `process-exec*` restriction,
+  deny-default switch, per-interpreter profiles) remain explicitly
+  out of scope per this task's own "Non-goals" and AD-03's "the code does
+  not change."
+
+### Definitive answer: is the read/process-inspection tradeoff currently disclosed to end users adequately?
+
+**No, but the specific harm this task exists to close is fixed, and no
+further work is required by AD-03's own decision.** Breaking this into the
+two things the task file's evidence actually supports:
+
+- **The active harm identified by Wave 0 — an internal document actively
+  contradicting the shipped code — is fixed.** Both
+  `docs/hardening-phase-plan.md` and `docs/programmatic-tool-calling-safety.md`
+  now state the real behavior instead of a stronger guarantee than what
+  ships. Verified by re-reading both corrected files in full after editing
+  and by a fresh repo-wide grep confirming no remaining unguarded
+  "Read/write within sandbox CWD only" / "no process inspection" / "OS
+  sandbox blocks" style claims exist anywhere under `docs/` (excluding the
+  now-struck-through, explicitly-marked-superseded lines) or `ui/`.
+- **There is still no genuinely end-user-facing document** (a `SECURITY.md`
+  or equivalent an operator would actually read, as opposed to an internal
+  engineering planning doc under `docs/`) stating the sandbox's guarantees
+  and gaps in product terms. Confirmed absent by direct search (above). This
+  gap is real and unresolved by this task.
+- **This second gap is not something this task is leaving open by oversight
+  or default-to-cut** — it is the direct, explicit consequence of AD-03's
+  own decision. AD-03 states the disclosure-doc correction "is already
+  scoped for exactly this and needs no re-scope," which is the architect
+  affirmatively deciding *not* to require a new user-facing security-model
+  document as part of this task's remediation. Per `EXECUTION-PROCESS.md`'s
+  "Reasoning vs. instruction" rule, that decision (an instruction, not mere
+  Context reasoning) governs; this worker did not create a new document.
+  If a genuinely user-facing security posture doc is wanted later, that is
+  a follow-up decision for the architect/operator to make explicitly, not
+  something to infer from this task's own "Done means" checklist wording.
+
+### Scope
+
+No expansion. `internal/sandbox/os_darwin.go` was read for verification but
+not modified — confirmed via `git status --short` (only the two `docs/*.md`
+files are changed). The task file's own "Prevention" section suggests
+cross-referencing this correction from `os_darwin.go`'s doc comment; that
+was deliberately **not** done, because the dispatch instruction for this
+task was explicit and unambiguous ("`internal/sandbox/os_darwin.go` does NOT
+change code-wise... Do not touch that file's logic") and because that
+Prevention-section claim itself turned out to be slightly inaccurate on
+inspection — `os_darwin.go` does **not** currently cross-reference the
+2026-04-10 audit directory the way `os_linux.go` does (checked via
+`grep -n "2026-04-10\|audit" internal/sandbox/os_darwin.go` — no output);
+only `os_linux.go` does. Noting this correction for the record rather than
+acting on it, per the "distinguish the decision from its rationale"
+discipline — the instruction not to touch the file stands regardless of
+whether the Prevention section's supporting claim was fully accurate.
+
+### Baseline check
+
+`go build ./cmd/nanite/` — passes. `go vet ./...` — passes except for two
+pre-existing, unrelated warnings in `internal/service/container.go` (about
+`stopRuntimeReaper`/`stopReaper` context-leak paths); that file was not
+touched by this task, so these predate this change and are out of scope.
+`git status --short` confirms only the two `docs/*.md` files and this task
+file itself are modified — zero Go files touched, so `go test ./...` was not
+run (nothing it could regress).
 
 ## Review notes
 

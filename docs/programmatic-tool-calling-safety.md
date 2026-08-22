@@ -52,11 +52,19 @@ defense-in-depth, not a hard isolation boundary. Specifically:
 - **Network block is best-effort.** The preamble monkey-patches
   `socket.socket.__init__` to raise `PermissionError`. This stops naive socket
   creation but does not prevent a `ctypes`-based raw syscall or a native C
-  extension that bypasses the Python socket module. On macOS the seatbelt
-  profile already blocks outbound network for the sandbox-exec child; on Linux
-  bwrap's `--unshare-net` (when bwrap is present) provides OS-level isolation.
-  On platforms without OS-level sandbox tooling, the import-level block is the
-  only defense.
+  extension that bypasses the Python socket module.
+  **Correction (2026-08-22,
+  `TASKS/audit-remediation/02-linux-sandbox-fail-open/02-macos-seatbelt-read-boundary-disclosure.md`):**
+  `nanite_run_python`'s subprocess (`internal/selftools/self_tools_python.go`'s
+  `RunPythonSandbox`) is spawned via a direct `exec.CommandContext` call with
+  only `Setpgid` applied (`applySandboxSysProcAttr`) — it does **not** route
+  through `sandbox.AgentExec`/`applyOSSandbox`, so neither the macOS seatbelt
+  profile nor Linux bwrap wraps this process today. The import-level
+  monkey-patch above is, currently, the *only* network defense for
+  `python_run` on every platform. (The OS-level sandbox — seatbelt on macOS,
+  bwrap on Linux — does apply to `sandbox.AgentExec`/`UserExec` callers, e.g.
+  shell tools; see `docs/hardening-phase-plan.md`'s Tier 2 section for what
+  that boundary does and doesn't cover.)
 - **CPU time cap is RLIMIT_CPU (CPU time, not wall-clock).** A tight spin loop
   is caught; a process blocked in I/O against its own socket is not CPU-billed.
   The Go-side wall-clock `context.WithTimeout` bounds total execution time
@@ -218,12 +226,18 @@ The following are explicitly deferred from this ticket:
 ## Known limitations (preserved)
 
 - Subprocess sandbox is defense-in-depth, not a hard boundary.
-- Network block is best-effort (import-level, not kernel-level, unless
-  OS sandbox is present).
+- Network block is import-level only, not kernel-level — `python_run` does
+  not currently route through the OS-level sandbox (seatbelt/bwrap) at all;
+  see the "Network block is best-effort" correction above.
 - `RLIMIT_AS` may be silently ignored on some kernels.
 - Windows: no rlimit caps.
 - No import whitelist.
-- Model code has no access to the host filesystem (no FDs opened to host
-  paths), but it can try to `open()` paths it can read from; the OS sandbox
-  (sandbox-exec / bwrap) blocks most of these, but the Python subprocess
-  sandbox alone does not enforce filesystem access control.
+- Model code has no access to the host filesystem via inherited FDs, but it
+  can try to `open()` any path the OS user can read. **Correction
+  (2026-08-22):** since `python_run` does not route through the OS-level
+  sandbox, nothing today restricts these reads at the process level — this
+  is a gap in the Python-only defenses, not "the OS sandbox blocks most of
+  these." Where `sandbox.AgentExec`/`UserExec` *are* used elsewhere in
+  Nanite, note macOS's seatbelt profile also does not restrict reads by
+  design (`docs/hardening-phase-plan.md`'s Tier 2 section) — only Linux's
+  narrowed `bwrap --ro-bind` set does.

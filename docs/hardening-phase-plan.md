@@ -134,11 +134,48 @@
 - User-exec: denylist only + env filtering (no API key leaks in output)
 
 **Tier 2 — OS-level isolation (agent-exec only):**
-- macOS: `sandbox-exec` (seatbelt) profile:
-  - Read/write within sandbox CWD only
-  - Network: proxy-allowlisted domains only (or deny-all for pure compute)
-  - No process inspection, no signal sending to non-child processes
-- Linux: bubblewrap with equivalent constraints
+
+> **Correction (2026-08-22) —
+> `TASKS/audit-remediation/02-linux-sandbox-fail-open/02-macos-seatbelt-read-boundary-disclosure.md`,
+> architect decision AD-03
+> (`TASKS/audit-remediation/ARCHITECT-DECISIONS.md`):** the macOS bullets
+> below describe this task's original 2026-04-07 design *intent*, not what
+> actually shipped. As implemented (`internal/sandbox/os_darwin.go`), the
+> macOS seatbelt profile is `(allow default)` — it denies file **writes**
+> outside the sandbox dir/extra granted write
+> path/`/tmp`/`/private/tmp`/`/dev/null`/`/dev/tty`/`/dev/fd`, and denies
+> non-localhost network — but it does **not** deny file **reads**, process
+> inspection (`ps`, `sysctl`, process_info), mach-IPC to bootstrap-registered
+> services, or signals to same-user processes. This is an accepted,
+> intentional beta-stage tradeoff (macOS processes need many mach
+> ports/sysctls/IPC operations that are hard to enumerate up front — see
+> `internal/sandbox/os_darwin.go`'s own doc comment, and
+> `docs/audits/2026-04-10-sandbox-hardening/09-medium-seatbelt-allow-default-sandbox-escape-surface.md`
+> for the full writeup), confirmed by AD-03 on 2026-08-22 — **the code is not
+> changing**; this correction exists only so this planning doc stops
+> describing protections the shipped code does not provide.
+
+- macOS: `sandbox-exec` (seatbelt) profile — **original design intent below;
+  see the correction above for what actually shipped:**
+  - ~~Read/write within sandbox CWD only~~ — only **write** is scoped to the
+    sandbox dir (plus `/tmp`/`/dev/null`/`/dev/tty`/`/dev/fd`); **reads are
+    unrestricted** (`(allow default)`) — the sandboxed process can read any
+    file the Nanite user can read, including credential files not otherwise
+    protected by filesystem permissions.
+  - Network: proxy-allowlisted domains only (or deny-all for pure compute) —
+    this part matches shipped behavior.
+  - ~~No process inspection, no signal sending to non-child processes~~ —
+    not implemented; both remain allowed under `(allow default)`.
+- Linux: bubblewrap with equivalent constraints — narrower and closer to
+  this original intent than macOS specifically on the read/process-inspection
+  boundary: `internal/sandbox/os_linux.go`'s `bwrapRoBindCandidates` scopes
+  reads to a fixed interpreter/TLS allowlist (excluding `/home`, `/root`,
+  and dotfiles), and PID/IPC/UTS namespaces are always unshared — so the
+  process/IPC-visibility gap macOS still has open is already closed on
+  Linux. Linux's network-allowlist enforcement has its own separate, tracked
+  gap (`GO-SEC4-002`,
+  `TASKS/audit-remediation/02-linux-sandbox-fail-open/01-sandbox-fail-closed-without-bwrap.md`)
+  — not the read/process-inspection gap this note is about.
 - Fallback: Tier 1 on unsupported platforms, with a logged warning
 
 **Acceptance:**

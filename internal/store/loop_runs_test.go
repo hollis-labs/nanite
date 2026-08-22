@@ -7,16 +7,9 @@ import (
 	"time"
 )
 
-// makeTestGoal is a minimal Goal fixture -- loop_runs.goal_id is FK-
-// enforced, so every LoopRun test needs a real goals row to point at.
-func makeTestGoal(t *testing.T, s *Store, intent string) *Goal {
-	t.Helper()
-	g := &Goal{Intent: intent}
-	if err := s.CreateGoal(context.Background(), g); err != nil {
-		t.Fatalf("CreateGoal (fixture %q): %v", intent, err)
-	}
-	return g
-}
+// makeTestGoal (loop_runs.goal_id is FK-enforced, so every LoopRun test
+// needs a real goals row to point at) is defined once in
+// goal_evidence_test.go and shared across this package's test files.
 
 // TestLoopRun_RoundTrip exercises the basic CRUD path: create (with a
 // Budget sub-structure round-trip), get, status update (with completedAt),

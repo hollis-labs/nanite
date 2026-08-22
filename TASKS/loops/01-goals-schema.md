@@ -1,7 +1,7 @@
 # Goals schema — `goals` table, Go types, store CRUD
 
 **Phase:** 1 — Schema & storage foundation (`TASKS/loops`)
-**Status:** implemented
+**Status:** reviewed
 **Depends on:** none
 **Touches:** `internal/store/migrations/` (new migration — see numbering note below),
 `internal/store/goals.go` (new — `Goal` struct, CRUD), `docs/engineering/GLOSSARY.md` (no
@@ -218,4 +218,38 @@ specifically at 29.073s including all six new Goal tests. Migration tested again
 scratch copy of a production backup (never the real backup file in place), per EXECUTION-PROCESS.md.
 
 ## Review notes
-<Reviewer fills this in: pass/fail, what was checked, anything fixed and how.>
+
+**PASS.** Fresh review (no shared context with the implementer), covering: task file + Work
+Log, `docs/engineering/architecture/21-loops.md` Decision 2 and its "Illustrative schema"
+section, `docs/engineering/GLOSSARY.md`'s Goal/Loop/LoopRun entries, the full diff
+(`internal/store/migrations/135_goals.sql`, `internal/store/goals.go`,
+`internal/store/goals_test.go`, `internal/store/migration135_goals_backup_test.go`), and a
+convention comparison against `internal/store/teams.go`/`internal/store/agent_schedules.go`.
+
+- Schema matches the design doc's illustrative `goals(...)` shape column-for-column: all
+  four JSON sub-structure columns, `parent_goal_id` self-reference, the exact 8-value status
+  CHECK enum, `priority`/`scope`/`owner`/`source` free-text fields, timestamp triad.
+- `goals.go`'s CRUD conventions (ctx-taking functions, insert-time `uuid.New()`, JSON-blob
+  columns as plain `string` with typed `[]string` accessor pairs, `nullIfEmpty` reuse from
+  `sessions.go`, `ErrGoalNotFound` sentinel, `UpdateGoal`/`UpdateGoalStatus` split) match
+  `teams.go`/`agent_schedules.go` precedent exactly, as claimed.
+- `UpdateGoalStatus`'s `COALESCE`-based one-time `activated_at`/`completed_at` writes and the
+  `blocked`-is-not-terminal exclusion are both correct and tested (redundant-call and
+  blocked-doesn't-complete cases both covered in `goals_test.go`).
+- `TestGoal_ParentFKEnforced` and `TestGoal_StatusCheckConstraint` correctly verify DB-level
+  (not just Go-level) enforcement, per this package's own established discipline.
+- `migration135_goals_backup_test.go` genuinely exercises a real backup copy (never in
+  place), confirms it's a real populated schema (343 sessions rows), and round-trips full
+  Goal CRUD including the FK and status side effects on top of it.
+- Migration-number collision with task `06` (both independently landed on `135` in parallel
+  worktrees) is accurately documented in this file's Work Log and
+  `TASKS/ESCALATIONS.md`; resolution (task `06` renumbered to `136`) is correctly reflected
+  in the merged tree.
+- `go build ./cmd/nanite/`, `go vet ./internal/store/...`, and `go test ./...` all verified
+  green independently (full suite, not just `internal/store`). The two `go vet` findings in
+  `internal/service/container.go` are confirmed pre-existing/unrelated (that file isn't
+  touched by this task's diff).
+
+No issues found in this task's own diff. (A stale "migration 135" doc-comment reference was
+found in `internal/agentworkflow/types.go`, added by task `06`'s commit, not this task's —
+reported separately against `TASKS/loops/06-stepkindloop-schema.md`.)

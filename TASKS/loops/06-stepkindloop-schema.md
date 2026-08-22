@@ -1,7 +1,7 @@
 # `StepKindLoop` schema — widen `workflow_run_steps.kind` CHECK
 
 **Phase:** 1 — Schema & storage foundation (`TASKS/loops`)
-**Status:** implemented
+**Status:** reviewed
 **Depends on:** none (parallel-safe — different table/column than tasks `01`-`05`)
 **Touches:** `internal/store/migrations/` (new migration), `internal/agentworkflow/types.go`
 (new `StepKind` constant only — no executor logic).
@@ -165,4 +165,9 @@ confirm and mark `reviewed`, per this project's log-integrity discipline (only t
 that actually checked it attests `reviewed`).
 
 ## Review notes
-<Reviewer fills this in: pass/fail, what was checked, anything fixed and how.>
+
+Pass. Re-checked the Orchestrator's post-review comment fix in
+`internal/agentworkflow/types.go`: `StepKindLoop`'s doc comment now correctly cites migration
+`136` (was `135`). Read the full `StepKind` const block end-to-end — no other stale migration
+references or drift found. `go build ./cmd/nanite/` confirmed green. This is the first
+reviewer sign-off on that specific fix, per this project's log-integrity discipline.

@@ -1,7 +1,7 @@
 # Fix Container constructor partial-failure cleanup (reaper goroutines leak on NewContainer error paths)
 
 **Phase:** Wave 2 — Correctness, lifecycle, concurrency (audit-remediation batch, sequenced 2026-08-21 — see the sequencing block below)
-**Status:** not-started
+**Status:** implemented
 **Depends on:** none — self-contained within `internal/service/container.go`'s `NewContainer`.
 **Touches:** `internal/service/container.go` (`NewContainer` only; no other symbol).
 **Requires architect decision:** false. Note: `findings.json`'s raw entry for `GO-LIFE-001` carries `requires_architect_decision: true`, but its own `recommendation` text is a concrete mechanical direction ("match the existing `stopCatalog()` cleanup pattern already present at both flagged sites"), not an open design question — this task file sets the flag to `false` per this batch's own stated convention (README.md: "flags `requires_architect_decision: true` wherever the underlying finding's recommendation was 'architect decision' in the audit"). Flagging this explicitly in case the `true` value in `findings.json` is a data-entry inconsistency rather than deliberate signal; a planner should treat `false` as this task's working assumption but can override.
@@ -90,7 +90,38 @@ Low risk — the change is additive cleanup code on already-identified error pat
 
 ## Work log
 
-<!-- Worker fills this in as it goes. -->
+- 2026-08-22: Re-derived `NewContainer` against branch HEAD `a9e7a425`. The
+  subagent reaper starts at `internal/service/container.go:1215`, the runtime
+  reaper starts at `:1235`, and the only error returns after both starts and
+  before Container assembly remain the durable-agent recipe load and managed
+  config sync branches at `:1294` and `:1298` (pre-edit line numbers).
+- Added constructor-scoped deferred cancellation for both reaper contexts.
+  A `containerCommitted` flag transfers lifecycle ownership to the returned
+  `Container` only after its full assembly, so every current or future
+  post-start constructor error cancels both contexts without changing the
+  successful path.
+- Added `TestNewContainer_PostReaperFailureStopsReapers`, which supplies a
+  missing durable-agent recipe catalog to force failure after both reapers
+  start and waits for both named goroutine loops to return to their baseline
+  counts. This single failure-path test covers both cancel funcs because the
+  deferred cleanup is constructor-wide rather than duplicated per branch.
+- Regression proof before the production fix:
+  `go test ./internal/service -run '^TestNewContainer_PostReaperFailureStopsReapers$' -count=1`
+  failed in 2.755s with `subagent 0 -> 1, runtime 0 -> 1`.
+- Post-fix verification:
+  - `go test ./internal/service -run '^TestNewContainer_PostReaperFailureStopsReapers$' -count=1` — pass (0.753s).
+  - `go vet ./internal/service` — pass; no possible-context-leak warnings.
+  - `go build ./...` — pass.
+  - `go test ./internal/service/...` — pass (`internal/service` 84.656s,
+    `internal/service/install` 0.705s).
+  - `go build ./cmd/nanite/` — pass.
+  - `go vet ./...` — pass.
+  - `go test ./...` — pass.
+- Scope deviation: the task's `Touches`/`Scope` prose names only
+  `internal/service/container.go`, but the task and orchestrator explicitly
+  require a regression test. The test was added to the existing
+  `internal/service/container_test.go`; no production symbol outside
+  `NewContainer` changed.
 
 ## Review notes
 

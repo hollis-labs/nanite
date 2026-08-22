@@ -154,8 +154,7 @@ Direction A: low-medium risk — changing `cmdServe`'s signature from `func(args
   with a directory supplied as the SQLite database file. The failure occurs
   after the log-handler and OTel defers are registered and proves `cmdServe`
   returns normally with the original store-open context instead of exiting
-  the test process. No dependency-injection seam or composition-root refactor
-  was needed.
+  the test process.
 - Pre-fix proof: the desired regression initially failed to build with
   `cmdServe(...)(no value) used as value`, directly demonstrating that the
   startup command could not return its failure to its caller before this
@@ -166,10 +165,23 @@ Direction A: low-medium risk — changing `cmdServe`'s signature from `func(args
   ./cmd/nanite -run '^TestCmdServeStartupFailureReturns$' -count=5`; `go test
   ./cmd/nanite/... -count=1`; `go build ./cmd/nanite/...`; `go vet ./...`; and
   `go test ./... -count=1`.
-- Deviation from the task's example seam: none was added because a stable,
-  real `store.New` failure is reachable directly. Success remains a nil return
-  if `ListenAndServe` ever returns nil; every current abnormal server return is
-  logged and propagated as an error.
+- Review correction: the first regression only observed error return; disabling
+  OTel and using `slogx.Init`'s no-op closer meant it could not observe either
+  cleanup. Added a narrow parameterized helper around only the logging and OTel
+  initializers. Production `cmdServe` still supplies `slogx.Init` and
+  `naniteotel.Init`; the test supplies a counting `io.Closer` and counting OTel
+  shutdown function while retaining the real `store.New` failure. Both are
+  asserted to run exactly once before the helper returns. No mutable package
+  global and no composition-root or store seam was introduced.
+- Mutation verification independently bypassed the logging defer and the OTel
+  defer. The corrected test failed with `logging cleanup calls = 0, want 1` and
+  `OTel cleanup calls = 0, want 1`, respectively; both production defers were
+  then restored. Review-correction verification passed with 50 race-enabled
+  focused repetitions, `go build ./cmd/nanite/...`, `go vet
+  ./cmd/nanite/...`, `go test ./cmd/nanite/... -count=1`, `go vet ./...`, and
+  `go test ./... -count=1`. Success remains a nil return if `ListenAndServe`
+  ever returns nil; every current abnormal server return is logged and
+  propagated as an error.
 
 ## Review notes
 

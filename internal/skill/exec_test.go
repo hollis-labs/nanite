@@ -148,6 +148,54 @@ func TestFindInlineMarkers_MultipleRealMarkers(t *testing.T) {
 	}
 }
 
+// TestFindInlineMarkers_RequiresLineStartOrPrecedingWhitespace is the
+// regression test for the fresh-reviewer-found bug (TASKS/skills/08's "Fix
+// required" section): the real Agent-Skills-spec
+// (https://code.claude.com/docs/en/skills) states the inline form is only
+// recognized when `!` starts a line or immediately follows whitespace — a
+// `!` preceded by any other character (its own spec example: `` KEY=!`cmd` ``)
+// must be left as literal text and never reported as a marker. Three cases,
+// exactly as the fix instructions specify: the spec's own "does not run"
+// example (no preceding whitespace), the spec's own "still runs" case
+// (preceded by whitespace), and a marker at the very start of a line with no
+// preceding character at all (already covered implicitly by other tests in
+// this file, confirmed explicitly here since the precedence check is now
+// conditional logic that could regress it).
+func TestFindInlineMarkers_RequiresLineStartOrPrecedingWhitespace(t *testing.T) {
+	t.Run("no preceding whitespace is left as literal text", func(t *testing.T) {
+		body := "KEY=!`echo should-not-run-per-spec`"
+		markers := FindInlineMarkers(body)
+		if len(markers) != 0 {
+			t.Fatalf("markers = %+v, want none — `!` immediately follows `=`, not whitespace or line-start, per the spec's own KEY=!`cmd` example", markers)
+		}
+	})
+
+	t.Run("preceded by whitespace is still a real marker", func(t *testing.T) {
+		body := "VALUE = !`echo should-run`"
+		markers := FindInlineMarkers(body)
+		if len(markers) != 1 {
+			t.Fatalf("markers = %+v, want exactly 1 — `!` immediately follows a space, which the spec explicitly allows", markers)
+		}
+		if markers[0].Command != "echo should-run" {
+			t.Errorf("Command = %q, want %q", markers[0].Command, "echo should-run")
+		}
+		if got := body[markers[0].Start:markers[0].End]; got != "!`echo should-run`" {
+			t.Errorf("marker span = %q, want the marker's exact text", got)
+		}
+	})
+
+	t.Run("start of line with no preceding character is still a real marker", func(t *testing.T) {
+		body := "!`echo at-line-start`\nAfter."
+		markers := FindInlineMarkers(body)
+		if len(markers) != 1 {
+			t.Fatalf("markers = %+v, want exactly 1 — `!` at the very start of a line has nothing preceding it and must be treated as a real marker", markers)
+		}
+		if markers[0].Command != "echo at-line-start" {
+			t.Errorf("Command = %q, want %q", markers[0].Command, "echo at-line-start")
+		}
+	})
+}
+
 // ---------------------------------------------------------------------
 // Test double GatedExecutor — the injected implementation this file's own
 // instructions require in place of task 09's not-yet-landed real gate.

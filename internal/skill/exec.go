@@ -361,10 +361,15 @@ func classifyFenceLines(spans []lineSpan) []bool {
 }
 
 // FindInlineMarkers returns every real `` !`cmd` `` marker in body — every
-// occurrence outside a fenced (```/~~~) code block. A marker whose literal
-// text appears inside a fenced code block (a documentation example, most
-// commonly) is never returned — this is the exact regression this task
-// exists to fix; see exec_test.go's TestFindInlineMarkers_CodeFenceAwareness.
+// occurrence outside a fenced (```/~~~) code block, and (per the real
+// Agent-Skills-spec's own precedence rule, https://code.claude.com/docs/en/skills)
+// at the start of a line or immediately preceded by whitespace. A marker
+// whose literal text appears inside a fenced code block (a documentation
+// example, most commonly), or whose `!` is preceded by a non-whitespace
+// character (e.g. `` KEY=!`cmd` `` — plausible prose about an env-var
+// convention, not a real marker), is never returned — see exec_test.go's
+// TestFindInlineMarkers_CodeFenceAwareness and
+// TestFindInlineMarkers_RequiresLineStartOrPrecedingWhitespace.
 func FindInlineMarkers(body string) []InlineMarker {
 	spans := splitLines(body)
 	eligible := classifyFenceLines(spans)
@@ -375,6 +380,9 @@ func FindInlineMarkers(body string) []InlineMarker {
 			continue
 		}
 		for _, idx := range markerPattern.FindAllStringSubmatchIndex(ln.text, -1) {
+			if !precededByLineStartOrWhitespace(ln.text, idx[0]) {
+				continue
+			}
 			markers = append(markers, InlineMarker{
 				Command: ln.text[idx[2]:idx[3]],
 				Start:   ln.start + idx[0],
@@ -384,6 +392,41 @@ func FindInlineMarkers(body string) []InlineMarker {
 		}
 	}
 	return markers
+}
+
+// precededByLineStartOrWhitespace reports whether the byte at matchStart in
+// line — the matched `!`'s own position, since markerPattern begins with
+// `!` — is either at the very start of the line, or immediately preceded by
+// a whitespace character. This is the real Agent-Skills-spec's own
+// precedence rule (https://code.claude.com/docs/en/skills): "The inline form
+// is only recognized when `!` appears at the start of a line or immediately
+// after whitespace. If `!` follows another character, as in `` KEY=!`cmd` ``,
+// the placeholder is left as literal text and the command does not run."
+//
+// Checks the single byte immediately before matchStart rather than decoding
+// a full rune. Every ASCII whitespace character a marker could plausibly sit
+// after (space, tab — the realistic SKILL.md authoring cases) is a single
+// byte, and a UTF-8 continuation byte or a non-ASCII character's trailing
+// byte is never itself an ASCII whitespace byte, so this can't misclassify a
+// multi-byte character as whitespace and accidentally treat a non-marker as
+// real. The one narrow gap is a line with a genuine non-ASCII Unicode space
+// character (e.g. U+00A0 NO-BREAK SPACE) immediately before `!`, which this
+// check treats as "not whitespace" and rejects as literal text — an
+// extremely unlikely real-world SKILL.md authoring pattern, and rejecting
+// (treating it as literal, non-executing text, the fail-safe direction for a
+// security-relevant gate like this one) is the correct failure mode even in
+// that edge case — so a byte-position ASCII check is deliberately sufficient
+// here rather than decoding the preceding rune via unicode.IsSpace.
+func precededByLineStartOrWhitespace(line string, matchStart int) bool {
+	if matchStart == 0 {
+		return true
+	}
+	switch line[matchStart-1] {
+	case ' ', '\t':
+		return true
+	default:
+		return false
+	}
 }
 
 // ResolveInlineMarkers replaces every real (non-fenced) `` !`cmd` `` marker

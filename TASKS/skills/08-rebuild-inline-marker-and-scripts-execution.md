@@ -1,7 +1,7 @@
 # Rebuild inline deterministic execution (code-fence-aware) + `scripts/` execution
 
 **Phase:** 4 — Materialization pipeline (`TASKS/skills`)
-**Status:** in-progress — review found a real bug, fix required (see "Fix required" section below)
+**Status:** implemented
 **Depends on:** `06`
 **Touches:** new file `internal/skill/exec.go` (the rebuilt replacement for the old,
 fully-deleted `internal/skill/context.go` marker logic — task `01` deleted the old file's
@@ -263,6 +263,61 @@ reports a misleading "timed out" error rather than surfacing the panic (bounded 
 way, just a cosmetic mislabel) — optional polish, not required.
 
 Re-verify `go build`/`go vet`/`go test ./internal/skill/... -race -count=1` clean when done.
+
+## Work log (fix, 2026-08-21)
+
+Fixed the mid-line-positioning bug the fresh reviewer found, scoped exactly to `FindInlineMarkers`
+as instructed.
+
+**The fix.** Added `precededByLineStartOrWhitespace(line string, matchStart int) bool` to
+`internal/skill/exec.go`: for each `markerPattern` match on a fence-eligible line, `matchStart`
+(`idx[0]`, the matched `!`'s own byte offset within the line) is accepted as a real marker only
+when it's `0` (line-start, nothing precedes it) or the byte immediately before it is `' '` or
+`'\t'`. A match failing this check is skipped in the loop — left as literal text in the returned
+body, exactly as the spec requires — rather than being appended to `markers`. Nothing else in
+`FindInlineMarkers`, `classifyFenceLines`, `ResolveInlineMarkers`, or `ExecuteScript` changed.
+
+**Byte-position check, not full rune decode — deliberate, documented in the function's own doc
+comment.** Every ASCII whitespace character a marker could realistically sit after in a SKILL.md
+body (space, tab) is a single byte, and a UTF-8 continuation byte (or any non-ASCII character's
+trailing byte) is never itself an ASCII whitespace byte — so a byte-position check can't
+misclassify a multi-byte character as whitespace and wrongly accept a non-marker. The one gap this
+leaves is a line with a genuine non-ASCII Unicode space character (e.g. U+00A0 NO-BREAK SPACE)
+immediately before `!`: this check treats that as "not whitespace" and rejects the match as
+literal text. Decided this is the correct failure direction rather than a defect worth spending
+more code on — for a security-relevant gate like this one, the safe failure mode is "treat it as
+non-executing text," and that's exactly what a byte-position check does in that edge case. Did not
+use `unicode.IsSpace` on a decoded rune, since it would add multi-byte boundary-finding complexity
+(walking backward from `matchStart` to find a full rune's start) for a case whose only effect,
+either way, is erring toward not executing.
+
+**Regression tests added to `internal/skill/exec_test.go`**, immediately after
+`TestFindInlineMarkers_MultipleRealMarkers` and before the `fakeGate` test-double section:
+`TestFindInlineMarkers_RequiresLineStartOrPrecedingWhitespace`, three subtests exactly matching the
+fix instructions —
+  - `"no preceding whitespace is left as literal text"`: body `` KEY=!`echo should-not-run-per-spec` ``
+    (the spec's own example verbatim) produces zero markers.
+  - `"preceded by whitespace is still a real marker"`: body `` VALUE = !`echo should-run` `` still
+    produces exactly one real marker, confirming the fix doesn't over-correct into rejecting the
+    legitimate preceded-by-whitespace case the spec explicitly allows; also asserts the marker's
+    exact command text and byte span.
+  - `"start of line with no preceding character is still a real marker"`: body starting with
+    `` !`echo at-line-start` `` (no preceding character at all) still produces exactly one marker,
+    confirming the now-conditional `matchStart == 0` branch didn't regress the line-start case —
+    requested explicitly in the fix instructions since this logic is new even though other existing
+    tests already exercise line-start markers implicitly.
+
+**Non-blocking review notes left untouched, as instructed.** Neither the inner-backtick-truncation
+behavior nor `runGated`'s "timed out" mislabel on gate panic was touched — both were explicitly
+called out as optional polish, not required for this fix, and the dispatch note said to keep this
+fix small and scoped to `FindInlineMarkers` and its regression tests.
+
+**Verification.** `go build ./cmd/nanite/` passes. `go vet ./...` reproduces only the same
+pre-existing, unrelated `internal/service/container.go:1197,1217,1277` finding already documented
+in this file's original Work Log — zero new vet findings from this fix. `go test
+./internal/skill/... -race -count=1 -v` passes in full (every pre-existing test plus the three new
+subtests), 12.888s. `go test ./...` for the whole repo also passes, exit code 0, with
+`internal/skill` reported as `ok` in that full run.
 
 ## Review notes
 <Reviewer fills this in: pass/fail, what was checked, anything fixed and how.>

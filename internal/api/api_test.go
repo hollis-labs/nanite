@@ -19,6 +19,7 @@ func newTestAPI(t *testing.T) (*API, *http.ServeMux) {
 	t.Helper()
 	root := t.TempDir()
 	dbPath := filepath.Join(root, "test.db")
+	prepareAPIStoreDB(t, dbPath)
 	s, err := store.New(context.Background(), dbPath)
 	if err != nil {
 		t.Fatalf("store.New: %v", err)

@@ -70,6 +70,7 @@ func newTestAPIWithSeededProviders(t *testing.T) (*API, *http.ServeMux) {
 func newSeededStore(t *testing.T) *store.Store {
 	t.Helper()
 	dbPath := filepath.Join(t.TempDir(), "test.db")
+	prepareAPIStoreDB(t, dbPath)
 	s, err := store.New(context.Background(), dbPath)
 	if err != nil {
 		t.Fatalf("store.New: %v", err)

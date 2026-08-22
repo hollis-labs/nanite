@@ -78,6 +78,7 @@ func newArtifactTestAPI(t *testing.T) (*API, string) {
 	t.Helper()
 	dir := t.TempDir()
 	dbPath := filepath.Join(dir, "test.db")
+	prepareAPIStoreDB(t, dbPath)
 	s, err := store.New(context.Background(), dbPath)
 	if err != nil {
 		t.Fatalf("store.New: %v", err)

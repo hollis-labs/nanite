@@ -117,7 +117,9 @@ func (fakeInstanceCanceller) RequestStop(_ context.Context, id string) (*store.D
 // store too, so tests can seed a2a_tasks/workflow_runs rows directly.
 func newTestTaskManager(t *testing.T) (*store.Store, *service.TaskManager) {
 	t.Helper()
-	st, err := store.New(context.Background(), filepath.Join(t.TempDir(), "test.db"))
+	dbPath := filepath.Join(t.TempDir(), "test.db")
+	prepareAPIStoreDB(t, dbPath)
+	st, err := store.New(context.Background(), dbPath)
 	if err != nil {
 		t.Fatalf("store.New: %v", err)
 	}

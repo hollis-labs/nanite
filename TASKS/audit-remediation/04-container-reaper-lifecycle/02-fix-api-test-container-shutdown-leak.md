@@ -131,6 +131,39 @@ Very low risk — purely additive test cleanup code, no production code touched,
   logs showed each owning test's reapers stopping. This independently rules
   out host contention as the sole explanation for the unmet gate, but it does
   not turn an incomplete race run into a pass.
+- 2026-08-22 — Applied the follow-up identified by task 04/03's completed
+  investigation: repeated fresh SQLite migrations, not a reaper leak or race,
+  were consuming the package timeout. Re-derived nine direct `store.New`
+  setup sites across nine API test files (`a2a_jsonrpc`, `api`, `artifacts`,
+  `catalog_install`, `loom_curator_wake`, `providers`, `recovery`,
+  `skills_install`, and `tools_call`) and routed all nine through one test-only
+  fixture helper.
+- The helper uses `sync.Once` to create and close one blank, fully migrated
+  SQLite template, then copies that immutable file into each test's existing
+  `t.TempDir` path. Every setup still calls `store.New` on its private copy, so
+  per-open connection pragmas, the Goose ledger check, and schedule backfill
+  remain live. Unique destination files preserve test isolation and make
+  concurrent copies safe if these tests adopt `t.Parallel` later. Existing
+  Store and Container cleanup registration is unchanged, including LIFO
+  Container-before-Store shutdown.
+- Focused pre/post race timing for five identical `TestHealthEndpoint` runs:
+  `47.640s` before versus `14.650s` after (69% lower package time).
+- Verification after the fixture change:
+  - Exact required gate, run fresh and alone on a quiet host after
+    `go clean -testcache`: `go test -race ./internal/api` — PASS, exit 0,
+    zero `DATA RACE` reports, `219.266s` package / `234.00s` wall, without a
+    timeout override. An earlier post-change run also passed in `220.287s`.
+  - `go test ./internal/api/...` — PASS (`17.283s`).
+  - `go build ./cmd/nanite/` — PASS.
+  - `go vet ./...` — PASS.
+  - `go test ./...` was intentionally terminated by the orchestrator after
+    its completed packages had passed because it overlapped a separate
+    approval-lifecycle race stress; it produced no test failure before the
+    infrastructure stop and was not counted as a pass.
+- Deviation from the original task's narrow cleanup-only direction: added
+  test-fixture setup after two exact gate attempts proved cleanup correctness
+  alone could not meet the explicit 10-minute acceptance criterion. No
+  production file or assertion behavior changed.
 
 ## Review notes
 

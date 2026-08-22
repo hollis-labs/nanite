@@ -24,7 +24,9 @@ import (
 // can wire a SelfToolsTransport against the same DB.
 func newToolCallTestAPI(t *testing.T) (*API, *store.Store) {
 	t.Helper()
-	s, err := store.New(context.Background(), filepath.Join(t.TempDir(), "test.db"))
+	dbPath := filepath.Join(t.TempDir(), "test.db")
+	prepareAPIStoreDB(t, dbPath)
+	s, err := store.New(context.Background(), dbPath)
 	if err != nil {
 		t.Fatalf("store.New: %v", err)
 	}

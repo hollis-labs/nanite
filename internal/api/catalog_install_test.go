@@ -39,7 +39,9 @@ func setupCatalogTestState(t *testing.T) (*catalogState, string) {
 	t.Helper()
 	pluginsDir := t.TempDir()
 	dbDir := t.TempDir()
-	s, err := store.New(context.Background(), filepath.Join(dbDir, "test.db"))
+	dbPath := filepath.Join(dbDir, "test.db")
+	prepareAPIStoreDB(t, dbPath)
+	s, err := store.New(context.Background(), dbPath)
 	if err != nil {
 		t.Fatalf("store.New: %v", err)
 	}

@@ -460,6 +460,40 @@ func (s *Store) UpdateLoopRunNoProgressStreak(ctx context.Context, id string, st
 	return nil
 }
 
+// UpdateLoopRunDefinitionName sets the definition_name column and bumps
+// updated_at to now. Narrow updater, mirrors this file's other narrow
+// updaters (BumpLoopRunIteration, UpdateLoopRunNoProgressStreak). Added by
+// TASKS/loops/10-loop-launcher-and-api.md for its escalation-resolution
+// endpoint's "supply a replan" override (docs/engineering/architecture/
+// 21-loops.md's "Human resolution of waiting_on_escalation" trigger
+// surface): an operator resolving a waiting_on_escalation LoopRun can
+// supply a revised definition_name for every subsequent iteration --
+// LoopEngine.Resume (engine.go) re-fetches this row and passes
+// lr.DefinitionName straight into driveIterations, so persisting the new
+// value here is sufficient; no other engine change is needed to honor it.
+// Returns ErrLoopRunNotFound if no row matched.
+func (s *Store) UpdateLoopRunDefinitionName(ctx context.Context, id, definitionName string) error {
+	if definitionName == "" {
+		return fmt.Errorf("update loop_run definition_name: definition_name is required")
+	}
+	now := time.Now().UTC().Format(time.RFC3339)
+	res, err := s.DB.ExecContext(ctx,
+		`UPDATE loop_runs SET definition_name = ?, updated_at = ? WHERE id = ?`,
+		definitionName, now, id,
+	)
+	if err != nil {
+		return fmt.Errorf("update loop_run definition_name: %w", err)
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("update loop_run definition_name rows affected: %w", err)
+	}
+	if n == 0 {
+		return ErrLoopRunNotFound
+	}
+	return nil
+}
+
 // DeleteLoopRun removes a loop_runs row by id. Returns ErrLoopRunNotFound
 // if no row matched. Storage-only: this does not check for or cascade into
 // any loop_run_iterations row referencing this LoopRun (loop_run_iterations

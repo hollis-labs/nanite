@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 
+	"github.com/hollis-labs/nanite/internal/loop"
 	"github.com/hollis-labs/nanite/internal/selftools"
 	"github.com/hollis-labs/nanite/internal/service"
 )
@@ -25,6 +26,18 @@ type API struct {
 	// live runtime. A future live agent path can be injected here without
 	// changing the API contract.
 	agentBuilder agentBuilderAdvisor
+	// loopLauncher backs the Loop trigger-surface REST routes (POST
+	// /api/loops and its /cancel, /resolve actions --
+	// TASKS/loops/10-loop-launcher-and-api.md). Set via SetLoopLauncher
+	// from main.go; nil in every test container that doesn't explicitly
+	// wire one (a handler checks for nil and 503s, matching selfTools'
+	// own nil-check convention). Not stored on service.Container itself:
+	// internal/loop imports internal/service (LoopEngine's own
+	// WorkflowLauncher dependency), so a *loop.LoopLauncher field on
+	// service.Container would be an import cycle -- the same reason
+	// cmd/nanite/main.go's own loopEngine local variable isn't threaded
+	// through Container either.
+	loopLauncher *loop.LoopLauncher
 }
 
 // New creates a new API instance from a service container.
@@ -49,6 +62,15 @@ func (a *API) SetSelfTools(st *selftools.SelfToolsTransport) {
 // live secret lookup/env vars.
 func (a *API) SetEmbedderSelectDeps(deps service.EmbedderSelectDeps) {
 	a.embedderSelectDeps = deps
+}
+
+// SetLoopLauncher wires the Loop trigger-surface launcher backing POST
+// /api/loops and its /cancel, /resolve actions. Called once from main.go
+// after loop.NewLoopLauncher is constructed (mirrors SetSelfTools's own
+// post-construction-setter shape, for the identical import-cycle reason
+// documented on the loopLauncher field above).
+func (a *API) SetLoopLauncher(l *loop.LoopLauncher) {
+	a.loopLauncher = l
 }
 
 // RegisterRoutes wires all API routes onto the given ServeMux.
@@ -192,6 +214,27 @@ func (a *API) RegisterRoutes(mux *http.ServeMux) {
 	// internal/api/team_runs.go's own package-level doc comment for why
 	// this is a REST route rather than a self-tool or an A2A skill target.
 	mux.HandleFunc("POST /api/teams/{id}/launch", a.handleLaunchTeam)
+
+	// Goal CRUD + Loop trigger surface (TASKS/loops/
+	// 10-loop-launcher-and-api.md) -- thin wrappers over task 01's goals
+	// store (internal/store/goals.go), task 02's goal_evidence store
+	// (internal/store/goal_evidence.go), task 04's loop_run_iterations
+	// store (internal/store/loop_run_iterations.go), and LoopLauncher
+	// (internal/loop/launcher.go), which itself wraps task 08's LoopEngine.
+	// See internal/api/loops.go's own package-level doc comment for the
+	// full auth-model call.
+	mux.HandleFunc("POST /api/goals", a.handleCreateGoal)
+	mux.HandleFunc("GET /api/goals", a.handleListGoals)
+	mux.HandleFunc("GET /api/goals/{id}", a.handleGetGoal)
+	mux.HandleFunc("PATCH /api/goals/{id}", a.handlePatchGoal)
+	mux.HandleFunc("DELETE /api/goals/{id}", a.handleDeleteGoal)
+	mux.HandleFunc("GET /api/goals/{id}/evidence", a.handleListGoalEvidence)
+	mux.HandleFunc("POST /api/loops", a.handleLaunchLoop)
+	mux.HandleFunc("GET /api/loops", a.handleListLoops)
+	mux.HandleFunc("GET /api/loops/{id}", a.handleGetLoop)
+	mux.HandleFunc("POST /api/loops/{id}/cancel", a.handleCancelLoop)
+	mux.HandleFunc("POST /api/loops/{id}/resolve", a.handleResolveLoopEscalation)
+	mux.HandleFunc("GET /api/loops/{id}/iterations", a.handleListLoopIterations)
 
 	// CW-20260816-0020: Fragments Engine's `callback` destination (fifth
 	// destination type, loom-architecture.md §4) POSTs an opaque

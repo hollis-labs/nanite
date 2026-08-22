@@ -38,11 +38,9 @@ func TestAutoDiscover_NeverWritesSkillsTable(t *testing.T) {
 	// proves AutoDiscover doesn't mutate an existing auto-discovered row,
 	// not just that it skips creating new ones.
 	preexisting := &store.Skill{
-		Name:         "Old Tool",
-		Slug:         "old-tool",
-		Category:     "auto-discovered",
-		ToolBindings: `["old_tool"]`,
-		Settings:     `{"server":"srv","auto_discovered":true}`,
+		Name:     "Old Tool",
+		Slug:     "old-tool",
+		Category: "auto-discovered",
 	}
 	if err := st.CreateSkill(preexisting); err != nil {
 		t.Fatalf("seed preexisting skill: %v", err)
@@ -82,7 +80,7 @@ func TestAutoDiscover_NeverWritesSkillsTable(t *testing.T) {
 		t.Fatalf("ListSkills row count changed: before=%d after=%d — AutoDiscover must never write to the skills table", len(before), len(after))
 	}
 	for i := range before {
-		if before[i].UpdatedAt != after[i].UpdatedAt || before[i].Settings != after[i].Settings {
+		if before[i].UpdatedAt != after[i].UpdatedAt || before[i].Version != after[i].Version {
 			t.Errorf("existing skill row %q was mutated by AutoDiscover: before=%+v after=%+v", before[i].Slug, before[i], after[i])
 		}
 	}

@@ -2,7 +2,6 @@ package chat
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"log/slog"
 	"os"
@@ -234,11 +233,14 @@ const SkillEssentialCap = 25
 // Phase 0 item 22 (decision log §11): this used to run assigned skills
 // through the Skill Broker (internal/skillbroker.SelectSkills) — a
 // keyword/agent-tag/mode-bonus ranking pass. The broker was functionally
-// inert in every real environment (zero agent_skills rows workspace-wide,
-// per the decision log), so it's retired in favor of a direct cap:
-// s.ListAgentSkills already returns rows ordered by name (`ORDER BY
-// sk.name`), which gives a stable, deterministic "first SkillEssentialCap"
-// selection with no scoring heuristic to maintain.
+// inert in every real environment (zero rows workspace-wide in the old
+// per-agent skill assignment join table, per the decision log), so it's
+// retired in favor of a direct cap: s.ListAgentSkills already returns rows
+// ordered by name (`ORDER BY sk.name`), which gives a stable, deterministic
+// "first SkillEssentialCap" selection with no scoring heuristic to
+// maintain. TASKS/skills/02: that old join table is dropped outright and
+// ListAgentSkills is rewired onto agent_known_skills — see
+// internal/store/skills.go's doc comment.
 //
 // Glass-5 (CW-20260502-0012): the rendered list is partitioned into
 // "essentials" (the first SkillEssentialCap assigned skills) and
@@ -265,14 +267,13 @@ func buildSkillListForSession(_ context.Context, s *store.Store, agentID, _ stri
 		rendered = rendered[:SkillEssentialCap]
 	}
 
+	// TASKS/skills/02: store.Skill.ToolBindings is dropped along with the
+	// index-only redesign (docs/engineering/architecture/20-skills.md's
+	// "The model") — an index row no longer carries a tool-binding list to
+	// render inline, so this loop is back to plain name/description.
 	var sb strings.Builder
 	for _, sk := range rendered {
-		fmt.Fprintf(&sb, "- %s: %s", sk.Name, sk.Description)
-		var tools []string
-		if err := json.Unmarshal([]byte(sk.ToolBindings), &tools); err == nil && len(tools) > 0 {
-			fmt.Fprintf(&sb, " [tools: %s]", strings.Join(tools, ", "))
-		}
-		sb.WriteString("\n")
+		fmt.Fprintf(&sb, "- %s: %s\n", sk.Name, sk.Description)
 	}
 
 	if hint := skillCatalogLoadHint(s, len(rendered)); hint != "" {

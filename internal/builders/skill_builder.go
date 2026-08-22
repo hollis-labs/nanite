@@ -7,11 +7,20 @@ import (
 	"github.com/hollis-labs/nanite/internal/store"
 )
 
-// NewSkillBuilder returns a Builder that creates Skill records.
+// NewSkillBuilder returns a Builder that creates Skill index rows.
+//
+// TASKS/skills/02: the "tool_bindings" step is dropped along with
+// store.Skill.ToolBindings itself — an index-only row (docs/engineering/
+// architecture/20-skills.md's "The model") has no tool-binding column to
+// populate. This builder's remaining scope (name/description/category) is
+// otherwise unchanged; it was already flagged out of this batch's scope by
+// TASKS/skills/01's own Work Log ("the builder wizard's own skill-creation
+// path... is untouched and out of scope") as a bare index-row creator, not
+// a real authored-package installer (tasks 04/05 own that).
 func NewSkillBuilder(s *store.Store) *Builder {
 	return &Builder{
 		Name:        "skill",
-		Description: "Create a new skill with a name, description, category, and tool bindings.",
+		Description: "Create a new skill with a name, description, and category.",
 		Steps: []BuilderStep{
 			{
 				Name:     "name",
@@ -26,15 +35,10 @@ func NewSkillBuilder(s *store.Store) *Builder {
 				Required: true,
 			},
 			{
-				Name:   "category",
-				Prompt: "Category for this skill (e.g. \"dev\", \"general\", \"research\"):",
-				Field:  "category",
+				Name:    "category",
+				Prompt:  "Category for this skill (e.g. \"dev\", \"general\", \"research\"):",
+				Field:   "category",
 				Default: "general",
-			},
-			{
-				Name:   "tool_bindings",
-				Prompt: "Comma-separated list of tool names this skill uses (e.g. \"dev_read,dev_write\"):",
-				Field:  "tool_bindings",
 			},
 		},
 		BuildFunc: func(inputs map[string]string) (*BuildResult, error) {
@@ -49,28 +53,11 @@ func NewSkillBuilder(s *store.Store) *Builder {
 				category = "general"
 			}
 
-			// Parse comma-separated tool bindings into a JSON array.
-			toolBindings := "[]"
-			if raw := strings.TrimSpace(inputs["tool_bindings"]); raw != "" {
-				parts := strings.Split(raw, ",")
-				var cleaned []string
-				for _, p := range parts {
-					p = strings.TrimSpace(p)
-					if p != "" {
-						cleaned = append(cleaned, fmt.Sprintf("%q", p))
-					}
-				}
-				if len(cleaned) > 0 {
-					toolBindings = "[" + strings.Join(cleaned, ",") + "]"
-				}
-			}
-
 			skill := &store.Skill{
-				Name:         name,
-				Slug:         slug,
-				Description:  strings.TrimSpace(inputs["description"]),
-				Category:     category,
-				ToolBindings: toolBindings,
+				Name:        name,
+				Slug:        slug,
+				Description: strings.TrimSpace(inputs["description"]),
+				Category:    category,
 			}
 
 			if err := s.CreateSkill(skill); err != nil {

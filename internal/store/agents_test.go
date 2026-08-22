@@ -1,6 +1,9 @@
 package store
 
-import "testing"
+import (
+	"context"
+	"testing"
+)
 
 func makeTestAgent(t *testing.T, s *Store, slug string) *AgentProfile {
 	t.Helper()
@@ -241,21 +244,24 @@ func TestListSessionAgents(t *testing.T) {
 // finding where PRAGMA foreign_keys=OFF was applied pool-wide around the
 // operation. Asserts:
 //   - agent_profiles row is gone
-//   - agent_skills, session_agents rows are gone
+//   - agent_known_skills, session_agents rows are gone
 //   - messages rows remain with agent_id NULLed (user data preserved)
 //   - FK enforcement is still ON after the operation (run an FK-violating
 //     INSERT and expect it to fail).
+//
+// TASKS/skills/02: this test used to seed via the old, now-dropped
+// per-agent skill join table (Skill + AssignSkillToAgent). AssignSkillToAgent
+// is rewired onto agent_known_skills in this same task, so the
+// skill-assignment junction this test exercises is now agent_known_skills
+// directly.
 func TestDeleteAgent_NoPragmaToggle(t *testing.T) {
 	s := newTestStore(t)
 	agent := makeTestAgent(t, s, "del-agent")
 
-	// skill assignment
-	sk := &Skill{Name: "S", Slug: "s-del", Description: "d", Category: "t", ToolBindings: `[]`}
-	if err := s.CreateSkill(sk); err != nil {
-		t.Fatalf("CreateSkill: %v", err)
-	}
-	if err := s.AssignSkillToAgent(agent.ID, sk.ID, ""); err != nil {
-		t.Fatalf("AssignSkillToAgent: %v", err)
+	// skill assignment (agent_known_skills — see comment above)
+	ctx := context.Background()
+	if err := s.InsertAgentKnownSkill(ctx, AgentKnownSkill{AgentID: agent.ID, SkillName: "s-del"}); err != nil {
+		t.Fatalf("InsertAgentKnownSkill: %v", err)
 	}
 
 	// session + message referencing the agent
@@ -285,7 +291,7 @@ func TestDeleteAgent_NoPragmaToggle(t *testing.T) {
 	}
 
 	// junctions cleared
-	for _, table := range []string{"agent_skills", "session_agents"} {
+	for _, table := range []string{"agent_known_skills", "session_agents"} {
 		if err := s.DB.QueryRow("SELECT COUNT(*) FROM "+table+" WHERE agent_id = ?", agent.ID).Scan(&n); err != nil {
 			t.Fatalf("count %s: %v", table, err)
 		}

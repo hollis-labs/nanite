@@ -18,9 +18,9 @@ const loadHintMarker = "additional skills are available"
 func TestBuildSkillListForSession_LoadHintWithZeroAssigned(t *testing.T) {
 	s := newTestStoreForChat(t)
 	agent := mustCreateAgent(t, s, "agent-zero-assigned")
-	mustCreateSkill(t, s, &store.Skill{Name: "Catalog A", Slug: "cat-a", Description: "first", ToolBindings: `[]`, ModeIDs: `[]`})
-	mustCreateSkill(t, s, &store.Skill{Name: "Catalog B", Slug: "cat-b", Description: "second", ToolBindings: `[]`, ModeIDs: `[]`})
-	mustCreateSkill(t, s, &store.Skill{Name: "Catalog C", Slug: "cat-c", Description: "third", ToolBindings: `[]`, ModeIDs: `[]`})
+	mustCreateSkill(t, s, &store.Skill{Name: "Catalog A", Slug: "cat-a", Description: "first"})
+	mustCreateSkill(t, s, &store.Skill{Name: "Catalog B", Slug: "cat-b", Description: "second"})
+	mustCreateSkill(t, s, &store.Skill{Name: "Catalog C", Slug: "cat-c", Description: "third"})
 	// No assignments — rendered=0, catalog=3, discoverable=3.
 
 	got := buildSkillListForSession(context.Background(), s, agent.ID, "")
@@ -38,11 +38,11 @@ func TestBuildSkillListForSession_LoadHintWithZeroAssigned(t *testing.T) {
 func TestBuildSkillListForSession_LoadHintWhenCatalogHasMore(t *testing.T) {
 	s := newTestStoreForChat(t)
 	agent := mustCreateAgent(t, s, "agent-some-assigned")
-	a := mustCreateSkill(t, s, &store.Skill{Name: "Assigned-1", Slug: "asn-1", Description: "first", ToolBindings: `[]`, ModeIDs: `[]`})
-	b := mustCreateSkill(t, s, &store.Skill{Name: "Assigned-2", Slug: "asn-2", Description: "second", ToolBindings: `[]`, ModeIDs: `[]`})
-	mustCreateSkill(t, s, &store.Skill{Name: "Catalog-Only-1", Slug: "co-1", Description: "x", ToolBindings: `[]`, ModeIDs: `[]`})
-	mustCreateSkill(t, s, &store.Skill{Name: "Catalog-Only-2", Slug: "co-2", Description: "y", ToolBindings: `[]`, ModeIDs: `[]`})
-	mustCreateSkill(t, s, &store.Skill{Name: "Catalog-Only-3", Slug: "co-3", Description: "z", ToolBindings: `[]`, ModeIDs: `[]`})
+	a := mustCreateSkill(t, s, &store.Skill{Name: "Assigned-1", Slug: "asn-1", Description: "first"})
+	b := mustCreateSkill(t, s, &store.Skill{Name: "Assigned-2", Slug: "asn-2", Description: "second"})
+	mustCreateSkill(t, s, &store.Skill{Name: "Catalog-Only-1", Slug: "co-1", Description: "x"})
+	mustCreateSkill(t, s, &store.Skill{Name: "Catalog-Only-2", Slug: "co-2", Description: "y"})
+	mustCreateSkill(t, s, &store.Skill{Name: "Catalog-Only-3", Slug: "co-3", Description: "z"})
 	mustAssignSkill(t, s, agent.ID, a.ID)
 	mustAssignSkill(t, s, agent.ID, b.ID)
 	// rendered=2, catalog=5, discoverable=3.
@@ -62,8 +62,8 @@ func TestBuildSkillListForSession_LoadHintWhenCatalogHasMore(t *testing.T) {
 func TestBuildSkillListForSession_NoLoadHintWhenCatalogExhausted(t *testing.T) {
 	s := newTestStoreForChat(t)
 	agent := mustCreateAgent(t, s, "agent-all-assigned")
-	a := mustCreateSkill(t, s, &store.Skill{Name: "Only-1", Slug: "only-1", Description: "x", ToolBindings: `[]`, ModeIDs: `[]`})
-	b := mustCreateSkill(t, s, &store.Skill{Name: "Only-2", Slug: "only-2", Description: "y", ToolBindings: `[]`, ModeIDs: `[]`})
+	a := mustCreateSkill(t, s, &store.Skill{Name: "Only-1", Slug: "only-1", Description: "x"})
+	b := mustCreateSkill(t, s, &store.Skill{Name: "Only-2", Slug: "only-2", Description: "y"})
 	mustAssignSkill(t, s, agent.ID, a.ID)
 	mustAssignSkill(t, s, agent.ID, b.ID)
 	// rendered=2, catalog=2, discoverable=0 → no hint.
@@ -83,7 +83,7 @@ func TestBuildSkillListForSession_EssentialCapEnforced(t *testing.T) {
 		// Names with leading zero-pad so ORDER BY name produces a stable
 		// "first SkillEssentialCap rendered" outcome we can assert.
 		name := nameForIdx(i)
-		sk := mustCreateSkill(t, s, &store.Skill{Name: name, Slug: name, Description: "x", ToolBindings: `[]`, ModeIDs: `[]`})
+		sk := mustCreateSkill(t, s, &store.Skill{Name: name, Slug: name, Description: "x"})
 		mustAssignSkill(t, s, agent.ID, sk.ID)
 	}
 
@@ -110,7 +110,7 @@ func TestBuildSkillListForSession_EssentialCapEnforced(t *testing.T) {
 func TestBuildSkillListForSession_LoadHintTokenBudget(t *testing.T) {
 	s := newTestStoreForChat(t)
 	agent := mustCreateAgent(t, s, "agent-token-budget")
-	mustCreateSkill(t, s, &store.Skill{Name: "Catalog-1", Slug: "c-1", Description: "x", ToolBindings: `[]`, ModeIDs: `[]`})
+	mustCreateSkill(t, s, &store.Skill{Name: "Catalog-1", Slug: "c-1", Description: "x"})
 	// rendered=0, catalog=1, discoverable=1.
 
 	got := buildSkillListForSession(context.Background(), s, agent.ID, "")
@@ -125,7 +125,7 @@ func TestBuildSkillListForSession_LoadHintTokenBudget(t *testing.T) {
 func TestBuildSkillListForSession_LoadHintReferencesRealTools(t *testing.T) {
 	s := newTestStoreForChat(t)
 	agent := mustCreateAgent(t, s, "agent-real-tools")
-	mustCreateSkill(t, s, &store.Skill{Name: "Catalog-X", Slug: "c-x", Description: "x", ToolBindings: `[]`, ModeIDs: `[]`})
+	mustCreateSkill(t, s, &store.Skill{Name: "Catalog-X", Slug: "c-x", Description: "x"})
 
 	got := buildSkillListForSession(context.Background(), s, agent.ID, "")
 	for _, tool := range []string{"skill_list", "tool_list"} {

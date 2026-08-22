@@ -1,10 +1,10 @@
 package skill
 
-import (
-	"encoding/json"
-	"testing"
-)
+import "testing"
 
+// TASKS/skills/02: rewritten against the redesigned, index-only
+// store.Skill shape — ToStoreSkill no longer produces ToolBindings,
+// IsBuiltin, Settings, or Prompt (see convert.go's doc comment for why).
 func TestToStoreSkill(t *testing.T) {
 	def := &Definition{
 		Name:         "Go Lint",
@@ -33,47 +33,32 @@ func TestToStoreSkill(t *testing.T) {
 	if sk.Category != "code" {
 		t.Errorf("Category = %q, want %q (first tag)", sk.Category, "code")
 	}
-	if !sk.IsBuiltin {
-		t.Error("IsBuiltin should be true for file-based skills")
+	if sk.SourceTier != "project" {
+		t.Errorf("SourceTier = %q, want %q (from Definition.Source)", sk.SourceTier, "project")
 	}
-
-	// Check ToolBindings JSON.
-	var tools []string
-	if err := json.Unmarshal([]byte(sk.ToolBindings), &tools); err != nil {
-		t.Fatalf("ToolBindings JSON: %v", err)
+	if !sk.Enabled {
+		t.Error("Enabled should be true for file-based skills")
 	}
-	if len(tools) != 2 || tools[0] != "shell" {
-		t.Errorf("ToolBindings = %v", tools)
+	if sk.InputSchema != "{}" {
+		t.Errorf("InputSchema = %q, want %q", sk.InputSchema, "{}")
 	}
-
-	// Check settings contain expected fields.
-	var settings map[string]any
-	if err := json.Unmarshal([]byte(sk.Settings), &settings); err != nil {
-		t.Fatalf("Settings JSON: %v", err)
+	if sk.DeclaredDependencies != "[]" {
+		t.Errorf("DeclaredDependencies = %q, want %q", sk.DeclaredDependencies, "[]")
 	}
-	if settings["model"] != "haiku" {
-		t.Errorf("settings.model = %v", settings["model"])
-	}
-	if settings["effort"] != "low" {
-		t.Errorf("settings.effort = %v", settings["effort"])
-	}
-	if settings["context"] != "fork" {
-		t.Errorf("settings.context = %v", settings["context"])
-	}
-	if settings["source"] != "project" {
-		t.Errorf("settings.source = %v", settings["source"])
+	if sk.Version != 1 {
+		t.Errorf("Version = %d, want 1", sk.Version)
 	}
 }
 
-func TestToStoreSkill_NilTools(t *testing.T) {
+func TestToStoreSkill_DefaultsSourceTierToUser(t *testing.T) {
 	def := &Definition{
 		Name: "Minimal",
 		Slug: "minimal",
 	}
 
 	sk := def.ToStoreSkill()
-	if sk.ToolBindings != "[]" {
-		t.Errorf("ToolBindings = %q, want %q", sk.ToolBindings, "[]")
+	if sk.SourceTier != "user" {
+		t.Errorf("SourceTier = %q, want %q (default when Definition.Source is unset)", sk.SourceTier, "user")
 	}
 }
 

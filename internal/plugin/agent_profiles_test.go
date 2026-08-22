@@ -32,7 +32,7 @@ import (
 // system_prompt (ready for internal/service.ResolveAgentCascade -- the
 // actual cascade merge is covered separately by role_cascade_test.go, which
 // internal/plugin cannot import without a cycle), and carries real
-// agent_tools/agent_skills grants of the exact shape
+// agent_tools/agent_known_skills grants of the exact shape
 // internal/service/tool.go's filterToolsByAgentTools reads at dispatch
 // time. Exercising an actual LLM turn is out of this backend-only task's
 // scope.

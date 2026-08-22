@@ -598,15 +598,18 @@ func (s *Store) CreateAgent(a *AgentProfile) error {
 // All deletes run inside a single transaction — no PRAGMA toggling.
 // session_agents intentionally has no FK back to agent_profiles (it may
 // reference file-based agents), so deleting it explicitly is both correct
-// and FK-safe. agent_skills/agent_projects DO now carry a real
+// and FK-safe. agent_projects DOES carry a real
 // `agent_id ... REFERENCES agent_profiles(id) ON DELETE CASCADE` FK
-// (migration 113, Phase 1 #05) — the explicit cleanup lines below for both
-// are no longer required for correctness (the CASCADE would handle it on
-// its own), but are kept anyway for the same belt-and-suspenders reason the
-// per-agent capability/runtime children below are (they run before the
-// final agent_profiles delete regardless, so behavior is identical with or
-// without the CASCADE). Messages have their agent_id nullified to preserve
-// user data.
+// (migration 113, Phase 1 #05) — the explicit cleanup line for it is no
+// longer required for correctness (the CASCADE would handle it on its own),
+// but is kept anyway for the same belt-and-suspenders reason the per-agent
+// capability/runtime children below are (they run before the final
+// agent_profiles delete regardless, so behavior is identical with or
+// without the CASCADE). The old, dedicated agent<->skill join table this
+// comment used to also cite here is dropped in full by TASKS/skills/02 —
+// agent_known_skills is now the sole per-agent skill attachment table, and
+// its own cleanup line below already covers it.
+// Messages have their agent_id nullified to preserve user data.
 func (s *Store) DeleteAgent(slug string) error {
 	agent, err := s.GetAgentBySlug(slug)
 	if err != nil {
@@ -621,7 +624,6 @@ func (s *Store) DeleteAgent(slug string) error {
 
 	cleanups := []string{
 		"DELETE FROM session_agents WHERE agent_id = ?",
-		"DELETE FROM agent_skills WHERE agent_id = ?",
 		"DELETE FROM agent_projects WHERE agent_id = ?",
 		// Per-agent capability/runtime children (migrations 068/070/074/085).
 		// These declare FKs to agent_profiles(id); clean them explicitly so a
@@ -633,8 +635,8 @@ func (s *Store) DeleteAgent(slug string) error {
 		// agent_dispatch_tool_allowlist both already declare
 		// ON DELETE CASCADE agent_profiles(id) FKs, so these two lines are
 		// belt-and-suspenders, matching this list's existing style of
-		// explicitly clearing agent_skills/agent_projects even though
-		// migration 113 gave those real cascade FKs too.
+		// explicitly clearing agent_projects even though migration 113 gave
+		// that a real cascade FK too.
 		"DELETE FROM agent_tools WHERE agent_id = ?",
 		"DELETE FROM agent_dispatch_tool_allowlist WHERE agent_id = ?",
 		"DELETE FROM agent_tools_legacy_backfill WHERE agent_id = ?",

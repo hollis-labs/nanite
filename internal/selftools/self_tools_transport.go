@@ -605,11 +605,20 @@ func (st *SelfToolsTransport) callListSkills(args map[string]any) (*mcp.ToolResu
 		return mcp.TextResult("No skills found."), nil
 	}
 
+	// TASKS/skills/02: rendering updated for the index-only Skill shape —
+	// no more Prompt to omit, no more ToolBindings to list. source_tier/
+	// version/enabled are the new columns worth surfacing here (whether a
+	// package has actually been installed/vendored yet is content_hash's
+	// job, not this listing's).
 	var sb strings.Builder
 	fmt.Fprintf(&sb, "Found %d skill(s):\n\n", len(skills))
 	for _, sk := range skills {
-		fmt.Fprintf(&sb, "- %s (id=%s, slug=%s, category=%s)\n  %s\n",
-			sk.Name, sk.ID, sk.Slug, sk.Category, sk.Description)
+		status := "enabled"
+		if !sk.Enabled {
+			status = "disabled"
+		}
+		fmt.Fprintf(&sb, "- %s (id=%s, slug=%s, category=%s, source=%s, v%d, %s)\n  %s\n",
+			sk.Name, sk.ID, sk.Slug, sk.Category, sk.SourceTier, sk.Version, status, sk.Description)
 	}
 	return mcp.TextResult(sb.String()), nil
 }

@@ -27,7 +27,7 @@ package plugin
 //                                           `agent_profiles` under the hood
 //                                           per decision log Section 6, not
 //                                           renamed to `agents`) plus its
-//                                           agent_tools/agent_skills grants
+//                                           agent_tools/agent_known_skills grants
 //   - agent.consumer_slug (or, if unset, the plugin's own id)
 //                                        -> a `consumers` row, tagging
 //                                           agent_profiles.consumer_id --
@@ -96,7 +96,7 @@ type PluginAgentProfileRole struct {
 
 // PluginAgentProfileAgent is the `agent:` block of a plugin agent-profile
 // file -- maps onto internal/store.AgentProfile (the composition record)
-// plus its agent_tools/agent_skills grants.
+// plus its agent_tools/agent_known_skills grants.
 type PluginAgentProfileAgent struct {
 	Slug        string `yaml:"slug"`
 	Name        string `yaml:"name"`
@@ -132,7 +132,7 @@ type PluginAgentProfileAgent struct {
 	// internal/service/known_tools_sync.go).
 	Tools []string `yaml:"tools,omitempty"`
 	// Skills is a list of skills.slug values this agent should be assigned
-	// (agent_skills). Same not-found-is-a-skip handling as Tools.
+	// (agent_known_skills). Same not-found-is-a-skip handling as Tools.
 	Skills []string `yaml:"skills,omitempty"`
 	// ConsumerSlug tags agent_profiles.consumer_id via a consumers row.
 	// Empty means default to the plugin's own canonical id -- "a plugin-
@@ -263,7 +263,7 @@ func validateOptionalClass(class string) error {
 // UnloadPlugin -- absent store is fine, there's nothing to sweep).
 //
 // Reuses store.DeleteAgentByID's existing full-cascade cleanup
-// (session_agents, agent_tools, agent_skills, agent_projects, reflexes,
+// (session_agents, agent_tools, agent_known_skills, agent_projects, reflexes,
 // durable instances, etc. -- internal/store/agents.go's DeleteAgent) rather
 // than re-deriving that sweep here. Roles are only removed once zero
 // agent_profiles rows still reference them -- CountAgentsByRoleID guards
@@ -330,7 +330,7 @@ func (h *Host) SweepPluginAgentProfiles(pluginID string) {
 // registration path -- the real B.4-follow-up replacement for the deferred-
 // skip stub applyManifestRegistrations used to log. Parses and validates
 // every declared entry's file, then constructs/upserts the corresponding
-// roles/agent_profiles rows (and their agent_tools/agent_skills grants) via
+// roles/agent_profiles rows (and their agent_tools/agent_known_skills grants) via
 // applyPluginAgentProfile.
 //
 // Degrades gracefully (logs + returns nil, does not fail plugin load) for
@@ -407,7 +407,7 @@ func registerManifestAgentProfiles(host *Host, pluginID string, entries []AgentP
 }
 
 // applyPluginAgentProfile constructs/upserts the roles + agent_profiles
-// rows (plus agent_tools/agent_skills grants) a single parsed document
+// rows (plus agent_tools/agent_known_skills grants) a single parsed document
 // describes. See registerManifestAgentProfiles for the entrypoint and this
 // file's package doc comment for the overall design.
 func applyPluginAgentProfile(ctx context.Context, host *Host, st *store.Store, pluginID string, doc *PluginAgentProfileDocument) error {

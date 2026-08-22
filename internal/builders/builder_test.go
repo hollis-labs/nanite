@@ -134,8 +134,10 @@ func TestSkillBuilder_FullFlow(t *testing.T) {
 	if start.Builder != "skill" {
 		t.Errorf("expected builder=skill, got %s", start.Builder)
 	}
-	if start.TotalSteps != 4 {
-		t.Errorf("expected 4 steps, got %d", start.TotalSteps)
+	// TASKS/skills/02: the "tool_bindings" step is dropped along with
+	// store.Skill.ToolBindings — the skill builder now has 3 steps, not 4.
+	if start.TotalSteps != 3 {
+		t.Errorf("expected 3 steps, got %d", start.TotalSteps)
 	}
 
 	// Step through.
@@ -146,7 +148,6 @@ func TestSkillBuilder_FullFlow(t *testing.T) {
 		{"name", "Code Review"},
 		{"description", "Reviews code for quality and correctness"},
 		{"category", "dev"},
-		{"tool_bindings", "dev_read, dev_grep"},
 	}
 
 	for i, st := range steps {
@@ -188,9 +189,6 @@ func TestSkillBuilder_FullFlow(t *testing.T) {
 	}
 	if skill.Category != "dev" {
 		t.Errorf("expected category=dev, got %s", skill.Category)
-	}
-	if !strings.Contains(skill.ToolBindings, "dev_read") {
-		t.Errorf("expected tool_bindings to contain dev_read, got %s", skill.ToolBindings)
 	}
 }
 

@@ -632,27 +632,40 @@ type UpdateProjectRequest struct {
 }
 
 // --- Skills ---
+//
+// TASKS/skills/02: request shapes follow store.Skill's redesigned,
+// index-only shape (docs/engineering/architecture/20-skills.md's "The
+// model: DB is an index, a vendored store is content") — ToolBindings and
+// Settings are dropped (no field on store.Skill to map them onto anymore).
+// This is still the bare admin-CRUD surface over the index row, not the
+// real authored-package install/sync path (tasks 04/05 own that) or the
+// remaining REST surface (list/grants/preview/uninstall, task 12) — the
+// full redesign of this handler's contract is explicitly later work.
 
 type CreateSkillRequest struct {
-	Name         string `json:"name"`
-	Slug         string `json:"slug"`
-	Description  string `json:"description"`
-	Category     string `json:"category"`
-	ToolBindings string `json:"tool_bindings"`
-	InputSchema  string `json:"input_schema"`
-	Settings     string `json:"settings"`
-	Icon         string `json:"icon"`
+	Name                 string `json:"name"`
+	Slug                 string `json:"slug"`
+	Description          string `json:"description"`
+	Category             string `json:"category"`
+	Icon                 string `json:"icon"`
+	InputSchema          string `json:"input_schema"`
+	SourceTier           string `json:"source_tier"`
+	ContentHash          string `json:"content_hash"`
+	DeclaredDependencies string `json:"declared_dependencies"`
+	Enabled              *bool  `json:"enabled"`
 }
 
 type UpdateSkillRequest struct {
-	Name         *string `json:"name"`
-	Slug         *string `json:"slug"`
-	Description  *string `json:"description"`
-	Category     *string `json:"category"`
-	ToolBindings *string `json:"tool_bindings"`
-	InputSchema  *string `json:"input_schema"`
-	Settings     *string `json:"settings"`
-	Icon         *string `json:"icon"`
+	Name                 *string `json:"name"`
+	Slug                 *string `json:"slug"`
+	Description          *string `json:"description"`
+	Category             *string `json:"category"`
+	Icon                 *string `json:"icon"`
+	InputSchema          *string `json:"input_schema"`
+	SourceTier           *string `json:"source_tier"`
+	ContentHash          *string `json:"content_hash"`
+	DeclaredDependencies *string `json:"declared_dependencies"`
+	Enabled              *bool   `json:"enabled"`
 }
 
 type AssignAgentSkillRequest struct {

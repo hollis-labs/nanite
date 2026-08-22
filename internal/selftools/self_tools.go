@@ -81,10 +81,10 @@ func selfToolDefinitions() []mcp.Tool {
 		},
 		{
 			Name: "skill_delete",
-			Description: "Permanently delete a skill by ID. Irreversible. Only non-builtin skills can be deleted.\n\n" +
-				"**When to use:** When the user explicitly asks to remove a custom skill.\n\n" +
+			Description: "Permanently delete a skill by ID. Irreversible.\n\n" +
+				"**When to use:** When the user explicitly asks to remove a skill.\n\n" +
 				"**Required context:** You need the skill ID — get it from skill_list if you only have the name.\n\n" +
-				"**Output shape:** \"Deleted skill <id>\" on success. Returns an error if the skill is builtin or not found.",
+				"**Output shape:** \"Deleted skill <id>\" on success. Returns an error if the skill is not found.",
 			InputSchema: map[string]any{
 				"type": "object",
 				"properties": map[string]any{

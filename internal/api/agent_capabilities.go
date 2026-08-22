@@ -284,6 +284,16 @@ func (a *API) handleUpdateAgentKnownSkill(w http.ResponseWriter, r *http.Request
 		AddedAt:         current.AddedAt,
 		TTLSeconds:      req.TTLSeconds,
 		Reason:          req.Reason,
+		// TASKS/skills/02: this handler's request shape (AgentKnownSkillUpsertRequest)
+		// has no grant-state fields — carry the current row's values forward
+		// the same way ActivationCount/LastUsedAt/AddedAt already are, so a
+		// plain Panel field edit (pinned/ttl/reason) can never silently wipe
+		// a grant a future task 09 workflow set via InsertAgentKnownSkill
+		// directly.
+		ApprovedContentHash: current.ApprovedContentHash,
+		GrantedAt:           current.GrantedAt,
+		GrantedBy:           current.GrantedBy,
+		CapabilitiesGranted: current.CapabilitiesGranted,
 	}
 	if err := a.Services.Store.InsertAgentKnownSkill(r.Context(), row); err != nil {
 		a.errorResp(w, http.StatusBadRequest, err.Error())

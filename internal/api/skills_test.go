@@ -14,7 +14,10 @@ import (
 // TestHandleAssignAgentSkill_RejectsNonexistentAgent is a regression pin for
 // Phase 1 #05's precondition-verification finding: assigning a skill to an
 // agent ID that has never existed anywhere (no DB row, no file definition)
-// must be rejected with 404, not silently inserted into agent_skills.
+// must be rejected with 404, not silently inserted. TASKS/skills/02:
+// AssignSkillToAgent now writes through agent_known_skills (replacing the
+// old, now-dropped per-agent skill join table) — the 404 gate and this
+// regression pin are otherwise unchanged.
 func TestHandleAssignAgentSkill_RejectsNonexistentAgent(t *testing.T) {
 	a, mux := newTestAPI(t)
 
@@ -38,7 +41,7 @@ func TestHandleAssignAgentSkill_RejectsNonexistentAgent(t *testing.T) {
 		t.Fatalf("ListAgentSkills: %v", err)
 	}
 	if len(skills) != 0 {
-		t.Errorf("expected no agent_skills row for a rejected assignment, got %d", len(skills))
+		t.Errorf("expected no agent_known_skills row for a rejected assignment, got %d", len(skills))
 	}
 }
 

@@ -9,7 +9,10 @@ import (
 // Roles CRUD -- Phase 1 item 01
 // (TASKS/phase-1/01-add-roles-table-and-cascade-resolution.md). roles is
 // DB-authoritative from creation; there is no file/YAML import path to
-// mirror here (contrast with Skills' fork-to-user affordance).
+// mirror here. (Skills' old "fork to user override" affordance, once the
+// contrast point here, was removed in full by TASKS/skills/02 — it
+// depended on both store.Skill.Prompt and a file-reingest-on-boot
+// mechanism TASKS/skills/01 had already deleted.)
 
 // handleListRoles returns all roles.
 // GET /api/roles

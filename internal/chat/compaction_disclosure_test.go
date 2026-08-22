@@ -45,9 +45,6 @@ func mustCreateAgent(t *testing.T, s *store.Store, slug string) *store.AgentProf
 
 func mustCreateSkill(t *testing.T, s *store.Store, sk *store.Skill) *store.Skill {
 	t.Helper()
-	if sk.ToolBindings == "" {
-		sk.ToolBindings = "[]"
-	}
 	if err := s.CreateSkill(sk); err != nil {
 		t.Fatalf("CreateSkill: %v", err)
 	}

@@ -1,7 +1,7 @@
 # Redesign `skills` as an index-only table; extend `agent_known_skills` as the grant/attachment table
 
 **Phase:** 2 — Index + vendored store (`TASKS/skills`)
-**Status:** implemented
+**Status:** in-progress — review found a real bug, fix required (see "Fix required" section below)
 **Depends on:** `01` (both touch `internal/store/skills.go` and its migrations — real collision
 risk if run concurrently, sequence the merge)
 **Touches:** `internal/store/skills.go` (`Skill` struct, all exported functions),
@@ -404,6 +404,68 @@ unknown" bar (ambiguous instruction, zero doc coverage, or item-vs-item contradi
 either a mechanical, forced consequence of the decided field/table removals, or a "the job is
 bigger than the Context section's own citations suggested" case worker step 7 explicitly directs
 to resolve by doing the full job and logging the correction, not by stopping.
+
+## Fix required (fresh reviewer, 2026-08-21 — see `TASKS/ESCALATIONS.md`'s matching entry)
+
+**Bug, reproduced directly:** collapsing `agent_skills` into `agent_known_skills` means
+`ListAgentSkills`/`AssignSkillToAgent`/`RemoveSkillFromAgent` (`internal/store/skills.go`) now
+read/write the identical `(agent_id, skill_name)` row space as
+`InsertAgentKnownSkill`/`GetAgentKnownSkill`/`DeleteAgentKnownSkill`
+(`internal/store/agent_known_skills.go`) — two REST surfaces that were safely independent before
+this task (`POST/DELETE /api/agents/{id}/skills` vs. `POST/PUT/DELETE
+/api/agents/{id}/known-skills`) now silently collide on the shared table:
+
+1. `handleCreateAgentKnownSkill` (`internal/api/agent_capabilities.go:202-244`) hard-rejects with
+   `409 Conflict` if *any* row already exists for `(agent_id, skill_name)` — it cannot distinguish
+   a real known-skill grant row from a bare row `AssignSkillToAgent` created moments earlier via
+   the unrelated "Assigned Skills" step. Reproduced directly: `AssignSkillToAgent` then
+   `GetAgentKnownSkill` for the same pair returns a non-nil row.
+2. `RemoveSkillFromAgent` (`internal/store/skills.go`) does an unconditional full-row `DELETE FROM
+   agent_known_skills WHERE agent_id = ? AND skill_name = ?` — this destroys any
+   `pinned`/`activation_count`/`last_used_at`/`ttl_seconds`/`reason`/`approved_content_hash`/
+   `granted_at`/`granted_by`/`capabilities_granted` data a *separate* write path (the Agent
+   Capabilities Panel, or a future task-`09` grant workflow) had set for that exact skill.
+
+Concretely reachable through the live, unmodified frontend: `AgentBuilderWizard.tsx`'s same
+submission assigns via `assigned_skill_ids` then creates via `known_skills` for the same skill
+(the 409 fires *after* the agent profile itself was already created, leaving a half-configured
+agent behind); and cross-surface, `AgentProfileManager.tsx`'s remove action silently wipes grant
+state `AgentCapabilitiesPanel.tsx` separately set for the same agent+skill. This directly
+contradicts this task's own stated constraint ("the existing Wizard/Panel frontend must keep
+working unmodified") — the original dogfeed verified coexistence using *different* skills through
+each path, not the actual collision case (same skill, both paths).
+
+**Not a re-litigation:** the decision to drop `agent_skills` and extend `agent_known_skills` in
+place stands — this is a correctness gap in how the rewired functions reconcile with the
+pre-existing known-skills handlers' assumptions about row ownership, not a reason to revisit the
+table-consolidation call.
+
+**What to do:** make the two write-surfaces safely independent again despite sharing one table.
+Concretely:
+
+1. `handleCreateAgentKnownSkill`'s pre-existence check must distinguish a genuine prior known-skill
+   grant from a bare row created only by `AssignSkillToAgent` (all known-skill-specific columns at
+   their zero-value: `pinned=0`, `activation_count=0`, `ttl_seconds` unset, `reason=""`, all four
+   grant-state columns empty). If the existing row is bare, `handleCreateAgentKnownSkill` should
+   upsert onto it (fill in the known-skill fields) rather than returning `409`. If the existing row
+   already carries real known-skill data, the `409` behavior is correct and unchanged.
+2. `RemoveSkillFromAgent` ("unassign," the Wizard's own semantics) must not destroy known-skill
+   grant/telemetry data set via the other path. Options (pick whichever fits the Wizard's actual
+   UX best — check what it does with the response): (a) only physically delete the row if it is
+   bare by the same test as above, otherwise leave the row's known-skill data intact and just no-op
+   the "assignment" removal (still return success — from the Wizard's perspective the skill is
+   unassigned, since "assignment" isn't a real column, just row-existence); or (b) some other
+   reconciliation that achieves the same guarantee: removing a bare assignment never touches real
+   grant data, and a caller can't lose known-skill state through the assignment-removal endpoint.
+3. Add regression tests reproducing exactly the reviewer's two scenarios: (a) `AssignSkillToAgent`
+   then `handleCreateAgentKnownSkill`/`InsertAgentKnownSkill` for the same `(agent_id, skill_name)`
+   must succeed, not conflict; (b) a row with real known-skill grant data set, followed by
+   `RemoveSkillFromAgent`, must leave that grant data intact (or the removal itself should be
+   rejected/no-op'd — whichever direction you choose in (2), test that it actually holds).
+4. Re-verify `go build`/`go vet`/`go test ./...` clean, and re-run a dogfeed that specifically
+   exercises the *same skill* through both `/api/agents/{id}/skills` and
+   `/api/agents/{id}/known-skills` for the same agent (not two different skills, which is what the
+   original dogfeed did) to prove the collision is actually gone end-to-end.
 
 ## Review notes
 <Reviewer fills this in: pass/fail, what was checked, anything fixed and how.>

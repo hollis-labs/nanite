@@ -132,4 +132,7 @@ bytes, compute its address, write it immutably, read it back live, detect corrup
 
 
 ## Review notes
-<Reviewer fills this in: pass/fail, what was checked, anything fixed and how.>
+
+**PASS (fresh reviewer, 2026-08-21, reviewed together with task `02` as Phase 2, no shared context with the worker).** Independently re-verified: `computeAddress` sorts keys before hashing (genuinely order-independent); `Write`'s idempotency fast-path re-verifies on-disk content via `verifyAddress` rather than trusting the address string alone; the atomic stage-then-rename write path is real (temp dir under the same root, single `os.Rename` to publish, race loser converges via the same verify-and-reuse path); corruption/disk-loss are typed, wrapped errors on every read and re-write path, never a silent overwrite. Re-ran the full test suite directly (`go test ./internal/skillvendor/... -race -count=1`, 24 tests, all pass). Confirmed `pathsafe.ResolveUnder` is used correctly (address validated via `ValidateAddress` before ever reaching `pathsafe`). No findings.
+
+Status: `reviewed`.

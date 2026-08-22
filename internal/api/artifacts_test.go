@@ -100,6 +100,7 @@ func newArtifactTestAPI(t *testing.T) (*API, string) {
 	if err != nil {
 		t.Fatalf("service.NewContainer: %v", err)
 	}
+	t.Cleanup(func() { svc.Shutdown() })
 
 	// Seed the minimum session row the artifacts FK chain requires. We go
 	// via direct SQL to avoid pulling in the full session-service wiring;

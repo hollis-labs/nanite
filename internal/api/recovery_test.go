@@ -35,6 +35,7 @@ func newTestAPIWithRecovery(t *testing.T) (*API, *http.ServeMux, *broker.Broker)
 	if err != nil {
 		t.Fatalf("service.NewContainer: %v", err)
 	}
+	t.Cleanup(func() { svc.Shutdown() })
 	if svc.Recovery == nil {
 		t.Fatal("Container.Recovery is nil; expected NewContainer to wire the broker")
 	}

@@ -1,7 +1,7 @@
 # Fix internal/api test suites' Container shutdown leak (no test calls Container.Shutdown())
 
 **Phase:** Wave 2 — Correctness, lifecycle, concurrency (audit-remediation batch, sequenced 2026-08-21 — see the sequencing block below)
-**Status:** not-started
+**Status:** implemented
 **Depends on:** none — a test-only, mechanical change independent of task 01 in this folder (constructor cleanup) and task 03 (a *different*, unsolved problem — see below).
 **Touches:** `internal/api/artifacts_test.go`, `internal/api/loom_curator_wake_test.go`, `internal/api/providers_test.go` (4 call sites), `internal/api/tools_call_test.go`, `internal/api/recovery_test.go`, `internal/api/api_test.go`. Possibly `internal/service`'s own test suite, per the audit's recommendation — see "Scope" below for why this task treats that as **out of scope in practice**, deferred to task 03.
 **Requires architect decision:** false — mechanical test-hygiene fix, no design ambiguity.
@@ -85,7 +85,44 @@ Very low risk — purely additive test cleanup code, no production code touched,
 
 ## Work log
 
-<!-- Worker fills this in as it goes. -->
+- 2026-08-22 — Re-derived the complete `internal/api` test call-site set from
+  this branch's `HEAD` before editing. The task brief's nine-call-site/six-file
+  inventory was stale: there are ten `service.NewContainer` constructions in
+  seven files. `internal/api/skills_install_test.go` added the tenth after the
+  brief's source audit. An exhaustive test-file search found no additional
+  constructions in `internal/api` and none in `internal/service`.
+- Added one `t.Cleanup(func() { svc.Shutdown() })` immediately after every
+  successful construction: one each in `api_test.go`, `artifacts_test.go`,
+  `loom_curator_wake_test.go`, `recovery_test.go`, `skills_install_test.go`, and
+  `tools_call_test.go`, plus four in `providers_test.go`. Because each store
+  cleanup is registered before its Container cleanup, Go's LIFO cleanup order
+  shuts the Container down before closing its store.
+- Verification:
+  - `go build ./cmd/nanite/` — PASS.
+  - `go build ./...` — PASS.
+  - `go test ./internal/api/...` — PASS (`71.993s`).
+  - `go test ./...` — PASS.
+  - `go vet ./internal/api` — PASS.
+  - `go vet ./...` — FAIL only on the four pre-existing `stopReaper` /
+    `stopRuntimeReaper` possible-context-leak diagnostics in
+    `internal/service/container.go`; those are the finding assigned to sibling
+    task 04/01, not production code this task is allowed to change.
+  - Required acceptance gate `go test -race ./internal/api` (no timeout
+    override) — FAIL at the default `10m0s` timeout, with zero `DATA RACE`
+    reports. The timeout occurred while the next test was opening a fresh store
+    and parsing migrations/model-cache JSON, not in `Container.Shutdown`;
+    reapers observed in test logs stopped after their owning tests. The host was
+    materially contended during this run (10 logical CPUs, load average about
+    24, with other repository-wide test jobs active), so this result does not
+    establish a new race, deadlock, or surviving Container reaper. The gate is
+    nevertheless recorded as unmet rather than reported as a pass. Per the
+    orchestrator, the required race command will be rerun in a quiet integration
+    window before validation/review instead of repeatedly consuming another ten
+    minutes while other Wave 2 jobs are active.
+- Deviation from the named-file scope: included `skills_install_test.go` so the
+  desired invariant and orchestrator instruction cover every current
+  `internal/api` test construction, rather than knowingly leaving the newly
+  added tenth Container leaking.
 
 ## Review notes
 

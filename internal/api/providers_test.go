@@ -56,6 +56,7 @@ func newTestAPIWithSeededProviders(t *testing.T) (*API, *http.ServeMux) {
 	if err != nil {
 		t.Fatalf("service.NewContainer: %v", err)
 	}
+	t.Cleanup(func() { svc.Shutdown() })
 	a := New(svc)
 	mux := http.NewServeMux()
 	a.RegisterRoutes(mux)
@@ -104,6 +105,7 @@ func TestListProviders_CatalogConfigured_SurfacesAllEntries(t *testing.T) {
 	if err != nil {
 		t.Fatalf("service.NewContainer: %v", err)
 	}
+	t.Cleanup(func() { svc.Shutdown() })
 	a := New(svc)
 	mux := http.NewServeMux()
 	a.RegisterRoutes(mux)
@@ -158,6 +160,7 @@ func TestListProviders_CatalogHidesDuplicateDBRow(t *testing.T) {
 	if err != nil {
 		t.Fatalf("service.NewContainer: %v", err)
 	}
+	t.Cleanup(func() { svc.Shutdown() })
 	a := New(svc)
 	mux := http.NewServeMux()
 	a.RegisterRoutes(mux)
@@ -199,6 +202,7 @@ func TestListProviders_NilCatalog_FallsBackToDB(t *testing.T) {
 	if err != nil {
 		t.Fatalf("service.NewContainer: %v", err)
 	}
+	t.Cleanup(func() { svc.Shutdown() })
 	a := New(svc)
 	mux := http.NewServeMux()
 	a.RegisterRoutes(mux)

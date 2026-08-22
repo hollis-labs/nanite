@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
+	"io"
 	"log/slog"
 	"os"
 	"os/signal"
@@ -60,6 +61,10 @@ import (
 	agentbroker "github.com/hollis-labs/agentkit/broker"
 )
 
+type serveLoggingInitializer func(slogx.Config) (*slog.Logger, io.Closer, error)
+
+type serveOTelInitializer func(context.Context, naniteotel.Config) (func(context.Context) error, error)
+
 func main() {
 	if len(os.Args) < 2 {
 		fmt.Fprintf(os.Stderr, "usage: %s <command>\n", brand.BinaryName)
@@ -97,6 +102,14 @@ func main() {
 }
 
 func cmdServe(args []string) error {
+	return cmdServeWithInitializers(args, slogx.Init, naniteotel.Init)
+}
+
+func cmdServeWithInitializers(
+	args []string,
+	initLogging serveLoggingInitializer,
+	initOTel serveOTelInitializer,
+) error {
 	fs := flag.NewFlagSet("serve", flag.ExitOnError)
 	port := fs.Int("port", 8090, "HTTP listen port")
 	// --db default is empty: an unset flag resolves the database path via
@@ -133,7 +146,7 @@ func cmdServe(args []string) error {
 	// Install the structured logging handler before anything else
 	// emits a log record. All slog-based sites flow through the PII
 	// redactor and JSON handler.
-	_, logCloser, logErr := slogx.Init(slogx.Config{
+	_, logCloser, logErr := initLogging(slogx.Config{
 		Format:    slogx.ParseFormat(appCfg.Logging.Format),
 		Level:     slogx.ParseLevel(appCfg.Logging.Level),
 		RedactPII: appCfg.Logging.RedactPII,
@@ -166,7 +179,7 @@ func cmdServe(args []string) error {
 	// and AppConfig.OTel.Disabled — either installs a no-op tracer
 	// provider and returns a no-op shutdown.
 	otelCtx := context.Background()
-	otelShutdown, otelErr := naniteotel.Init(otelCtx, naniteotel.Config{
+	otelShutdown, otelErr := initOTel(otelCtx, naniteotel.Config{
 		ServiceName: brand.OTelService,
 		Disabled:    appCfg.OTel.Disabled,
 	})

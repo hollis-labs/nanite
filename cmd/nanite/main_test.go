@@ -1,21 +1,34 @@
 package main
 
 import (
+	"context"
+	"io"
 	"log/slog"
 	"path/filepath"
 	"slices"
 	"strings"
+	"sync/atomic"
 	"testing"
 
 	"github.com/hollis-labs/go-providers/provider"
+	naniteotel "github.com/hollis-labs/nanite/internal/otel"
+	"github.com/hollis-labs/nanite/internal/slogx"
 )
+
+type countingCloser struct {
+	calls atomic.Int32
+}
+
+func (c *countingCloser) Close() error {
+	c.calls.Add(1)
+	return nil
+}
 
 func TestCmdServeStartupFailureReturns(t *testing.T) {
 	t.Setenv("XDG_CONFIG_HOME", filepath.Join(t.TempDir(), "config"))
 	t.Setenv("XDG_DATA_HOME", filepath.Join(t.TempDir(), "data"))
 	t.Setenv("XDG_STATE_HOME", filepath.Join(t.TempDir(), "state"))
 	t.Setenv("XDG_CACHE_HOME", filepath.Join(t.TempDir(), "cache"))
-	t.Setenv("NANITE_OTEL_DISABLED", "1")
 
 	// SQLite cannot open a directory as a database file. The directory itself
 	// is resolvable by go-apppaths, so this reaches a real store.New failure
@@ -23,15 +36,32 @@ func TestCmdServeStartupFailureReturns(t *testing.T) {
 	// requiring a composition-root dependency-injection seam.
 	dbPath := t.TempDir()
 
-	originalLogger := slog.Default()
-	t.Cleanup(func() { slog.SetDefault(originalLogger) })
+	logCleanup := &countingCloser{}
+	var otelCleanupCalls atomic.Int32
 
-	err := cmdServe([]string{"--db", dbPath, "--dev"})
+	err := cmdServeWithInitializers(
+		[]string{"--db", dbPath, "--dev"},
+		func(slogx.Config) (*slog.Logger, io.Closer, error) {
+			return slog.Default(), logCleanup, nil
+		},
+		func(context.Context, naniteotel.Config) (func(context.Context) error, error) {
+			return func(context.Context) error {
+				otelCleanupCalls.Add(1)
+				return nil
+			}, nil
+		},
+	)
 	if err == nil {
 		t.Fatal("cmdServe returned nil for an unopenable database path")
 	}
 	if !strings.Contains(err.Error(), "failed to open store") {
 		t.Fatalf("cmdServe error = %q, want failed-to-open-store context", err)
+	}
+	if got := logCleanup.calls.Load(); got != 1 {
+		t.Errorf("logging cleanup calls = %d, want 1", got)
+	}
+	if got := otelCleanupCalls.Load(); got != 1 {
+		t.Errorf("OTel cleanup calls = %d, want 1", got)
 	}
 }
 

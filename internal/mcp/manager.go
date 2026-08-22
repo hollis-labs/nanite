@@ -952,7 +952,7 @@ func (m *Manager) AutoDiscover(ctx context.Context, s *store.Store) (*DiscoveryD
 	m.mu.RUnlock()
 
 	// Load existing auto-discovered skills from DB.
-	existingSkills, err := s.ListSkills()
+	existingSkills, err := s.ListSkills(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("list skills: %w", err)
 	}

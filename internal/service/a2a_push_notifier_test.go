@@ -31,9 +31,11 @@ func TestA2APushNotifierEnqueueAndDeliver(t *testing.T) {
 	if err != nil {
 		t.Fatalf("store.New: %v", err)
 	}
-	defer s.Close()
+	defer s.Close(context.
 
-	// Set up mock webhook server
+		// Set up mock webhook server
+		Background())
+
 	var receivedNotifications []a2a.TaskStateNotification
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
@@ -71,7 +73,7 @@ func TestA2APushNotifierEnqueueAndDeliver(t *testing.T) {
 		PushNotificationConfig: sql.NullString{String: string(configJSON), Valid: true},
 	}
 
-	if err := s.CreateA2ATask(task); err != nil {
+	if err := s.CreateA2ATask(context.Background(), task); err != nil {
 		t.Fatalf("CreateA2ATask: %v", err)
 	}
 
@@ -85,7 +87,7 @@ func TestA2APushNotifierEnqueueAndDeliver(t *testing.T) {
 	}
 
 	// Verify delivery was enqueued
-	deliveries, err := s.GetPendingPushDeliveries(time.Now().Add(1 * time.Minute))
+	deliveries, err := s.GetPendingPushDeliveries(context.Background(), time.Now().Add(1*time.Minute))
 	if err != nil {
 		t.Fatalf("GetPendingPushDeliveries: %v", err)
 	}
@@ -117,7 +119,7 @@ func TestA2APushNotifierEnqueueAndDeliver(t *testing.T) {
 	}
 
 	// Verify delivery was deleted after success
-	deliveries, err = s.GetPendingPushDeliveries(time.Now().Add(1 * time.Minute))
+	deliveries, err = s.GetPendingPushDeliveries(context.Background(), time.Now().Add(1*time.Minute))
 	if err != nil {
 		t.Fatalf("GetPendingPushDeliveries: %v", err)
 	}
@@ -135,9 +137,11 @@ func TestA2APushNotifierRetry(t *testing.T) {
 	if err != nil {
 		t.Fatalf("store.New: %v", err)
 	}
-	defer s.Close()
+	defer s.Close(context.
 
-	// Set up mock webhook server that fails initially
+		// Set up mock webhook server that fails initially
+		Background())
+
 	attemptCount := 0
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		attemptCount++
@@ -165,7 +169,7 @@ func TestA2APushNotifierRetry(t *testing.T) {
 		PushNotificationConfig: sql.NullString{String: string(configJSON), Valid: true},
 	}
 
-	if err := s.CreateA2ATask(task); err != nil {
+	if err := s.CreateA2ATask(context.Background(), task); err != nil {
 		t.Fatalf("CreateA2ATask: %v", err)
 	}
 
@@ -182,7 +186,7 @@ func TestA2APushNotifierRetry(t *testing.T) {
 	}
 
 	// Verify delivery still pending with incremented attempt count
-	deliveries, err := s.GetPendingPushDeliveries(time.Now().Add(10 * time.Minute))
+	deliveries, err := s.GetPendingPushDeliveries(context.Background(), time.Now().Add(10*time.Minute))
 	if err != nil {
 		t.Fatalf("GetPendingPushDeliveries: %v", err)
 	}
@@ -195,7 +199,7 @@ func TestA2APushNotifierRetry(t *testing.T) {
 
 	// Update next_retry to now to allow immediate retry
 	deliveries[0].NextRetry = time.Now()
-	if err := s.UpdateA2APushDelivery(deliveries[0]); err != nil {
+	if err := s.UpdateA2APushDelivery(context.Background(), deliveries[0]); err != nil {
 		t.Fatalf("UpdateA2APushDelivery: %v", err)
 	}
 
@@ -204,7 +208,7 @@ func TestA2APushNotifierRetry(t *testing.T) {
 		t.Fatalf("ProcessPendingDeliveries (attempt 2): %v", err)
 	}
 
-	deliveries, err = s.GetPendingPushDeliveries(time.Now().Add(10 * time.Minute))
+	deliveries, err = s.GetPendingPushDeliveries(context.Background(), time.Now().Add(10*time.Minute))
 	if err != nil {
 		t.Fatalf("GetPendingPushDeliveries: %v", err)
 	}
@@ -217,7 +221,7 @@ func TestA2APushNotifierRetry(t *testing.T) {
 
 	// Update next_retry for third attempt
 	deliveries[0].NextRetry = time.Now()
-	if err := s.UpdateA2APushDelivery(deliveries[0]); err != nil {
+	if err := s.UpdateA2APushDelivery(context.Background(), deliveries[0]); err != nil {
 		t.Fatalf("UpdateA2APushDelivery: %v", err)
 	}
 
@@ -227,7 +231,7 @@ func TestA2APushNotifierRetry(t *testing.T) {
 	}
 
 	// Verify delivery was deleted after success
-	deliveries, err = s.GetPendingPushDeliveries(time.Now().Add(10 * time.Minute))
+	deliveries, err = s.GetPendingPushDeliveries(context.Background(), time.Now().Add(10*time.Minute))
 	if err != nil {
 		t.Fatalf("GetPendingPushDeliveries: %v", err)
 	}
@@ -250,9 +254,11 @@ func TestA2APushNotifierMaxRetries(t *testing.T) {
 	if err != nil {
 		t.Fatalf("store.New: %v", err)
 	}
-	defer s.Close()
+	defer s.Close(context.
 
-	// Set up mock webhook server that always fails
+		// Set up mock webhook server that always fails
+		Background())
+
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusInternalServerError)
 	}))
@@ -273,7 +279,7 @@ func TestA2APushNotifierMaxRetries(t *testing.T) {
 		PushNotificationConfig: sql.NullString{String: string(configJSON), Valid: true},
 	}
 
-	if err := s.CreateA2ATask(task); err != nil {
+	if err := s.CreateA2ATask(context.Background(), task); err != nil {
 		t.Fatalf("CreateA2ATask: %v", err)
 	}
 
@@ -291,7 +297,7 @@ func TestA2APushNotifierMaxRetries(t *testing.T) {
 		}
 
 		// Update next_retry to allow immediate retry
-		deliveries, err := s.GetPendingPushDeliveries(time.Now().Add(1 * time.Hour))
+		deliveries, err := s.GetPendingPushDeliveries(context.Background(), time.Now().Add(1*time.Hour))
 		if err != nil {
 			t.Fatalf("GetPendingPushDeliveries: %v", err)
 		}
@@ -302,7 +308,7 @@ func TestA2APushNotifierMaxRetries(t *testing.T) {
 				t.Fatalf("Expected 1 pending delivery after attempt %d, got %d", i+1, len(deliveries))
 			}
 			deliveries[0].NextRetry = time.Now()
-			if err := s.UpdateA2APushDelivery(deliveries[0]); err != nil {
+			if err := s.UpdateA2APushDelivery(context.Background(), deliveries[0]); err != nil {
 				t.Fatalf("UpdateA2APushDelivery: %v", err)
 			}
 		} else {
@@ -332,7 +338,7 @@ func TestA2APushNotifier_TickerDrivenPath_EndToEnd(t *testing.T) {
 	if err != nil {
 		t.Fatalf("store.New: %v", err)
 	}
-	defer st.Close()
+	defer st.Close(context.Background())
 
 	var received []a2a.TaskStateNotification
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -352,7 +358,7 @@ func TestA2APushNotifier_TickerDrivenPath_EndToEnd(t *testing.T) {
 	// AgentProfile + DurableAgentInstance, matching what SubmitTask's real
 	// production path requires.
 	profile := &store.AgentProfile{Name: "A2A Ticker Path Test Agent", Slug: "a2a-ticker-path-test-agent", SystemPrompt: "x"}
-	if err := st.CreateAgent(profile); err != nil {
+	if err := st.CreateAgent(context.Background(), profile); err != nil {
 		t.Fatalf("CreateAgent: %v", err)
 	}
 	inst := &store.DurableAgentInstance{
@@ -363,7 +369,7 @@ func TestA2APushNotifier_TickerDrivenPath_EndToEnd(t *testing.T) {
 		ProfileID:      profile.ID,
 		Status:         store.DurableAgentStatusActive,
 	}
-	if err := st.CreateDurableAgentInstance(inst); err != nil {
+	if err := st.CreateDurableAgentInstance(context.Background(), inst); err != nil {
 		t.Fatalf("CreateDurableAgentInstance: %v", err)
 	}
 
@@ -381,7 +387,7 @@ func TestA2APushNotifier_TickerDrivenPath_EndToEnd(t *testing.T) {
 		DurableAgentInstanceID: sql.NullString{String: inst.ID, Valid: true},
 		PushNotificationConfig: sql.NullString{String: string(configJSON), Valid: true},
 	}
-	if err := st.CreateA2ATask(task); err != nil {
+	if err := st.CreateA2ATask(context.Background(), task); err != nil {
 		t.Fatalf("CreateA2ATask: %v", err)
 	}
 
@@ -394,7 +400,7 @@ func TestA2APushNotifier_TickerDrivenPath_EndToEnd(t *testing.T) {
 		t.Fatalf("CancelTask: %v", err)
 	}
 
-	deliveries, err := st.GetPendingPushDeliveries(time.Now().Add(1 * time.Minute))
+	deliveries, err := st.GetPendingPushDeliveries(context.Background(), time.Now().Add(1*time.Minute))
 	if err != nil {
 		t.Fatalf("GetPendingPushDeliveries: %v", err)
 	}
@@ -421,7 +427,7 @@ func TestA2APushNotifier_TickerDrivenPath_EndToEnd(t *testing.T) {
 	}
 
 	// Delivery record is cleaned up after successful drain.
-	remaining, err := st.GetPendingPushDeliveries(time.Now().Add(1 * time.Minute))
+	remaining, err := st.GetPendingPushDeliveries(context.Background(), time.Now().Add(1*time.Minute))
 	if err != nil {
 		t.Fatalf("GetPendingPushDeliveries (after drain): %v", err)
 	}

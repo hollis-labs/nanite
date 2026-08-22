@@ -1,6 +1,7 @@
 package store
 
 import (
+	"context"
 	"database/sql"
 	"time"
 
@@ -56,14 +57,14 @@ type A2APushDelivery struct {
 }
 
 // CreateA2APushDelivery inserts a new push delivery record.
-func (s *Store) CreateA2APushDelivery(delivery *A2APushDelivery) error {
+func (s *Store) CreateA2APushDelivery(ctx context.Context, delivery *A2APushDelivery) error {
 	const q = `
 		INSERT INTO a2a_push_deliveries (
 			id, task_id, target_state, attempt_count,
 			last_error, next_retry, created_at, updated_at
 		) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
 	`
-	_, err := s.DB.Exec(q,
+	_, err := s.DB.ExecContext(ctx, q,
 		delivery.ID, delivery.TaskID, delivery.TargetState, delivery.AttemptCount,
 		delivery.LastError, delivery.NextRetry, delivery.CreatedAt, delivery.UpdatedAt,
 	)
@@ -71,7 +72,7 @@ func (s *Store) CreateA2APushDelivery(delivery *A2APushDelivery) error {
 }
 
 // GetPendingPushDeliveries retrieves push deliveries ready for retry.
-func (s *Store) GetPendingPushDeliveries(now time.Time) ([]*A2APushDelivery, error) {
+func (s *Store) GetPendingPushDeliveries(ctx context.Context, now time.Time) ([]*A2APushDelivery, error) {
 	const q = `
 		SELECT id, task_id, target_state, attempt_count,
 			   last_error, next_retry, created_at, updated_at
@@ -80,7 +81,7 @@ func (s *Store) GetPendingPushDeliveries(now time.Time) ([]*A2APushDelivery, err
 		ORDER BY next_retry ASC
 		LIMIT 100
 	`
-	rows, err := s.DB.Query(q, now)
+	rows, err := s.DB.QueryContext(ctx, q, now)
 	if err != nil {
 		return nil, err
 	}
@@ -101,7 +102,7 @@ func (s *Store) GetPendingPushDeliveries(now time.Time) ([]*A2APushDelivery, err
 }
 
 // UpdateA2APushDelivery updates an existing push delivery record.
-func (s *Store) UpdateA2APushDelivery(delivery *A2APushDelivery) error {
+func (s *Store) UpdateA2APushDelivery(ctx context.Context, delivery *A2APushDelivery) error {
 	const q = `
 		UPDATE a2a_push_deliveries SET
 			attempt_count = ?,
@@ -110,7 +111,7 @@ func (s *Store) UpdateA2APushDelivery(delivery *A2APushDelivery) error {
 			updated_at = ?
 		WHERE id = ?
 	`
-	_, err := s.DB.Exec(q,
+	_, err := s.DB.ExecContext(ctx, q,
 		delivery.AttemptCount, delivery.LastError, delivery.NextRetry,
 		delivery.UpdatedAt, delivery.ID,
 	)
@@ -118,14 +119,14 @@ func (s *Store) UpdateA2APushDelivery(delivery *A2APushDelivery) error {
 }
 
 // DeleteA2APushDelivery deletes a push delivery record by ID.
-func (s *Store) DeleteA2APushDelivery(id string) error {
+func (s *Store) DeleteA2APushDelivery(ctx context.Context, id string) error {
 	const q = `DELETE FROM a2a_push_deliveries WHERE id = ?`
-	_, err := s.DB.Exec(q, id)
+	_, err := s.DB.ExecContext(ctx, q, id)
 	return err
 }
 
 // CreateA2ATask inserts a new A2A task record.
-func (s *Store) CreateA2ATask(task *A2ATask) error {
+func (s *Store) CreateA2ATask(ctx context.Context, task *A2ATask) error {
 	now := time.Now()
 	task.CreatedAt = now
 	task.UpdatedAt = now
@@ -138,7 +139,7 @@ func (s *Store) CreateA2ATask(task *A2ATask) error {
 			created_at, updated_at
 		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`
-	_, err := s.DB.Exec(query,
+	_, err := s.DB.ExecContext(ctx, query,
 		task.ID,
 		task.TargetKind,
 		task.TargetRef,
@@ -156,7 +157,7 @@ func (s *Store) CreateA2ATask(task *A2ATask) error {
 }
 
 // GetA2ATask retrieves an A2A task by ID.
-func (s *Store) GetA2ATask(id string) (*A2ATask, error) {
+func (s *Store) GetA2ATask(ctx context.Context, id string) (*A2ATask, error) {
 	query := `
 		SELECT
 			id, target_kind, target_ref, message,
@@ -167,7 +168,7 @@ func (s *Store) GetA2ATask(id string) (*A2ATask, error) {
 		WHERE id = ?
 	`
 	task := &A2ATask{}
-	err := s.DB.QueryRow(query, id).Scan(
+	err := s.DB.QueryRowContext(ctx, query, id).Scan(
 		&task.ID,
 		&task.TargetKind,
 		&task.TargetRef,
@@ -191,7 +192,7 @@ func (s *Store) GetA2ATask(id string) (*A2ATask, error) {
 }
 
 // UpdateA2ATask updates an existing A2A task record.
-func (s *Store) UpdateA2ATask(task *A2ATask) error {
+func (s *Store) UpdateA2ATask(ctx context.Context, task *A2ATask) error {
 	task.UpdatedAt = time.Now()
 
 	query := `
@@ -208,7 +209,7 @@ func (s *Store) UpdateA2ATask(task *A2ATask) error {
 			updated_at = ?
 		WHERE id = ?
 	`
-	_, err := s.DB.Exec(query,
+	_, err := s.DB.ExecContext(ctx, query,
 		task.TargetKind,
 		task.TargetRef,
 		task.Message,

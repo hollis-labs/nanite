@@ -24,10 +24,10 @@ import (
 //
 //   - store: the Nexus-shaped messaging Store for message CRUD.
 //   - db:    the underlying *sql.DB for cross-table handoff txns that
-//            reach into session_handoffs / session_agents — those
-//            tables live outside the messaging Store interface.
+//     reach into session_handoffs / session_agents — those
+//     tables live outside the messaging Store interface.
 //   - resolver: looks up agents by ID so SendMessage and Subscribe
-//            can reject unknown addresses.
+//     can reject unknown addresses.
 //
 // Service is safe for concurrent use since Store, the *sql.DB, and
 // the pubsub are each safe for concurrent use.
@@ -357,7 +357,7 @@ func (svc *Service) maybeAutoRegister(ctx context.Context, fromAgentID, register
 		Source: "auto",
 		Kind:   kind,
 	}
-	if err := svc.registrar.CreateAgent(profile); err != nil {
+	if err := svc.registrar.CreateAgent(ctx, profile); err != nil {
 		// Race: another request may have registered the same id
 		// concurrently (SQLite UNIQUE constraint). Treat as
 		// success if the resolver now sees the row.

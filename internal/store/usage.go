@@ -1,6 +1,7 @@
 package store
 
 import (
+	"context"
 	"fmt"
 
 	"github.com/hollis-labs/nanite/pkg/models"
@@ -64,11 +65,11 @@ type UsageSummary struct {
 }
 
 // RecordUsage inserts a token usage record for a completed response.
-func (s *Store) RecordUsage(sessionID, messageID, model string, inputTokens, outputTokens, toolInputTokens, cacheCreationTokens, cacheReadTokens int) error {
+func (s *Store) RecordUsage(ctx context.Context, sessionID, messageID, model string, inputTokens, outputTokens, toolInputTokens, cacheCreationTokens, cacheReadTokens int) error {
 	totalTokens := inputTokens + outputTokens
 	cost := estimateCost(model, inputTokens, outputTokens)
 
-	_, err := s.DB.Exec(
+	_, err := s.DB.ExecContext(ctx,
 		`INSERT INTO token_usage (session_id, message_id, model, input_tokens, output_tokens, total_tokens, tool_input_tokens, cache_creation_tokens, cache_read_tokens, estimated_cost_usd)
 		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		sessionID, messageID, model, inputTokens, outputTokens, totalTokens, toolInputTokens, cacheCreationTokens, cacheReadTokens, cost,
@@ -80,9 +81,9 @@ func (s *Store) RecordUsage(sessionID, messageID, model string, inputTokens, out
 }
 
 // GetSessionUsage returns aggregate token usage for a session.
-func (s *Store) GetSessionUsage(sessionID string) (*SessionUsageSummary, error) {
+func (s *Store) GetSessionUsage(ctx context.Context, sessionID string) (*SessionUsageSummary, error) {
 	var summary SessionUsageSummary
-	err := s.DB.QueryRow(
+	err := s.DB.QueryRowContext(ctx,
 		`SELECT COALESCE(SUM(input_tokens),0), COALESCE(SUM(output_tokens),0),
 		        COALESCE(SUM(total_tokens),0), COALESCE(SUM(tool_input_tokens),0),
 		        COALESCE(SUM(cache_creation_tokens),0), COALESCE(SUM(cache_read_tokens),0),
@@ -99,11 +100,11 @@ func (s *Store) GetSessionUsage(sessionID string) (*SessionUsageSummary, error) 
 }
 
 // GetUsageSummary returns global token usage totals and per-model breakdown.
-func (s *Store) GetUsageSummary() (*UsageSummary, error) {
+func (s *Store) GetUsageSummary(ctx context.Context) (*UsageSummary, error) {
 	var summary UsageSummary
 
 	// Global totals.
-	err := s.DB.QueryRow(
+	err := s.DB.QueryRowContext(ctx,
 		`SELECT COALESCE(SUM(input_tokens),0), COALESCE(SUM(output_tokens),0),
 		        COALESCE(SUM(total_tokens),0), COALESCE(SUM(estimated_cost_usd),0)
 		 FROM token_usage`,
@@ -113,7 +114,7 @@ func (s *Store) GetUsageSummary() (*UsageSummary, error) {
 	}
 
 	// Per-model breakdown.
-	rows, err := s.DB.Query(
+	rows, err := s.DB.QueryContext(ctx,
 		`SELECT model, SUM(input_tokens), SUM(output_tokens), SUM(total_tokens), SUM(estimated_cost_usd)
 		 FROM token_usage GROUP BY model ORDER BY SUM(total_tokens) DESC`,
 	)

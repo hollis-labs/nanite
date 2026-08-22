@@ -40,7 +40,7 @@ func mcpImport(args []string) {
 		fmt.Fprintf(os.Stderr, "error: open db: %v\n", err)
 		os.Exit(1)
 	}
-	defer s.Close()
+	defer s.Close(context.TODO() /* TODO(ctx-sweep): no ctx available at this call site */)
 
 	result, err := mcpconfig.Import(s, data)
 	if err != nil {
@@ -77,7 +77,7 @@ func mcpExport(args []string) {
 		fmt.Fprintf(os.Stderr, "error: open db: %v\n", err)
 		os.Exit(1)
 	}
-	defer s.Close()
+	defer s.Close(context.TODO() /* TODO(ctx-sweep): no ctx available at this call site */)
 
 	cfg, err := mcpconfig.Export(s)
 	if err != nil {

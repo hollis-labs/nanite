@@ -26,7 +26,7 @@ func TestMatchDispatchToAgentReflex_KindLookupDegraded_LogsMultiCandidateCanary(
 	ctx := context.Background()
 	s := newTestStore(t)
 
-	if err := s.CreateAgent(&store.AgentProfile{
+	if err := s.CreateAgent(context.Background(), &store.AgentProfile{
 		ID:           "agent-multi-candidate-probe",
 		Name:         "Agent Multi Candidate Probe",
 		Slug:         "agent-multi-candidate-probe",

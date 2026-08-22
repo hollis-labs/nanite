@@ -1,6 +1,7 @@
 package store
 
 import (
+	"context"
 	"database/sql"
 	"fmt"
 	"time"
@@ -22,10 +23,10 @@ func (h HaltStatus) IsHalted() bool { return h.HaltedAt != nil }
 // GetSessionHalt returns the halt status for a session. A non-existent
 // session returns ErrNoRows; callers should treat that as "no halt"
 // rather than an error if they only care about the boolean.
-func (s *Store) GetSessionHalt(sessionID string) (*HaltStatus, error) {
+func (s *Store) GetSessionHalt(ctx context.Context, sessionID string) (*HaltStatus, error) {
 	var halted sql.NullString
 	var reason sql.NullString
-	err := s.DB.QueryRow(
+	err := s.DB.QueryRowContext(ctx,
 		`SELECT halted_at, halted_reason FROM sessions WHERE id = ?`,
 		sessionID,
 	).Scan(&halted, &reason)
@@ -46,9 +47,9 @@ func (s *Store) GetSessionHalt(sessionID string) (*HaltStatus, error) {
 // Idempotent — if the session is already halted, the existing halted_at
 // is preserved so the reason can be updated without losing the original
 // trip time. Callers that want to overwrite must ClearSessionHalt first.
-func (s *Store) MarkSessionHalted(sessionID, reason string) error {
+func (s *Store) MarkSessionHalted(ctx context.Context, sessionID, reason string) error {
 	now := time.Now().UTC().Format(time.RFC3339)
-	res, err := s.DB.Exec(
+	res, err := s.DB.ExecContext(ctx,
 		`UPDATE sessions
 		    SET halted_at = COALESCE(halted_at, ?),
 		        halted_reason = ?,
@@ -72,9 +73,9 @@ func (s *Store) MarkSessionHalted(sessionID, reason string) error {
 // ClearSessionHalt clears halted_at + halted_reason so the monitor loop
 // resumes ticking the session. Spike-style: the only resume path is
 // operator action (manual SQL UPDATE OR POST /api/sessions/{id}/resume).
-func (s *Store) ClearSessionHalt(sessionID string) error {
+func (s *Store) ClearSessionHalt(ctx context.Context, sessionID string) error {
 	now := time.Now().UTC().Format(time.RFC3339)
-	res, err := s.DB.Exec(
+	res, err := s.DB.ExecContext(ctx,
 		`UPDATE sessions
 		    SET halted_at = NULL,
 		        halted_reason = NULL,
@@ -100,11 +101,11 @@ func (s *Store) ClearSessionHalt(sessionID string) error {
 // breaker (FU-21) — Detector B inspects (input_tokens, cache_read_tokens,
 // output_tokens) on the last 3 rows; Detector C inspects output_tokens
 // for verbatim-echo identity.
-func (s *Store) LastNTokenUsage(sessionID string, n int) ([]TokenUsage, error) {
+func (s *Store) LastNTokenUsage(ctx context.Context, sessionID string, n int) ([]TokenUsage, error) {
 	if n <= 0 {
 		return nil, nil
 	}
-	rows, err := s.DB.Query(
+	rows, err := s.DB.QueryContext(ctx,
 		`SELECT id, session_id, message_id, model,
 		        input_tokens, output_tokens, total_tokens,
 		        tool_input_tokens, cache_creation_tokens, cache_read_tokens,
@@ -139,11 +140,11 @@ func (s *Store) LastNTokenUsage(sessionID string, n int) ([]TokenUsage, error) {
 // for a session, ordered most-recent-first. Used by the monitor-loop
 // circuit breaker — Detector A scans content for `[generation interrupted]`;
 // Detector C compares first-1KB content body for verbatim echo.
-func (s *Store) LastNAssistantMessages(sessionID string, n int) ([]Message, error) {
+func (s *Store) LastNAssistantMessages(ctx context.Context, sessionID string, n int) ([]Message, error) {
 	if n <= 0 {
 		return nil, nil
 	}
-	rows, err := s.DB.Query(
+	rows, err := s.DB.QueryContext(ctx,
 		`SELECT id, session_id, COALESCE(agent_id,''), role, content,
 		        COALESCE(envelope,''), COALESCE(metadata,'{}'),
 		        COALESCE(parent_id,''), is_compacted, created_at
@@ -177,9 +178,9 @@ func (s *Store) LastNAssistantMessages(sessionID string, n int) ([]Message, erro
 // utility calls) — the caller treats "no row" as zero tool calls,
 // which is conservative for Detector C (only halts when ALL three of
 // the last N messages have zero tool calls).
-func (s *Store) ToolCallsForMessage(messageID string) (int, error) {
+func (s *Store) ToolCallsForMessage(ctx context.Context, messageID string) (int, error) {
 	var n sql.NullInt64
-	err := s.DB.QueryRow(
+	err := s.DB.QueryRowContext(ctx,
 		`SELECT tool_calls FROM execution_metrics WHERE message_id = ? ORDER BY id DESC LIMIT 1`,
 		messageID,
 	).Scan(&n)

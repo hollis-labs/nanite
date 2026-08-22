@@ -19,7 +19,7 @@ func newConfigTestStore(t *testing.T) *store.Store {
 	if err != nil {
 		t.Fatalf("store.New: %v", err)
 	}
-	t.Cleanup(func() { st.Close() })
+	t.Cleanup(func() { st.Close(context.Background()) })
 	return st
 }
 
@@ -87,7 +87,7 @@ func TestReconcileManagedAgentIDs_AdoptsExistingProjection(t *testing.T) {
 	agentsDir := filepath.Join(root, "agents")
 
 	existing := &store.AgentProfile{Name: "Atlas", Slug: "atlas", SystemPrompt: "x", Source: "user"}
-	if err := st.CreateAgent(existing); err != nil {
+	if err := st.CreateAgent(context.Background(), existing); err != nil {
 		t.Fatalf("seed existing: %v", err)
 	}
 	path := writeRawAgentFile(t, agentsDir, "atlas", "---\nname: Atlas\nslug: atlas\n---\nYou curate.\n")
@@ -261,7 +261,7 @@ func TestAgentConfig_Update_DBOnlyMaterialize_RejectsSlugTraversal(t *testing.T)
 
 	// A DB-only operator agent: no on-disk file yet (SourceRef == "").
 	existing := &store.AgentProfile{Name: "Ghost", Slug: "ghost", SystemPrompt: "x", Source: "user"}
-	if err := st.CreateAgent(existing); err != nil {
+	if err := st.CreateAgent(context.Background(), existing); err != nil {
 		t.Fatalf("seed: %v", err)
 	}
 	if existing.SourceRef != "" {
@@ -341,7 +341,7 @@ func TestAgentConfig_Update_RenameBranch_SameSlugNoOp(t *testing.T) {
 	if _, err := os.Stat(created.Profile.SourceRef); err != nil {
 		t.Fatalf("file must still exist after a same-slug edit: %v", err)
 	}
-	if got, err := st.GetAgentBySlug("atlas"); err != nil || got.Description != "same slug, different field" {
+	if got, err := st.GetAgentBySlug(context.Background(), "atlas"); err != nil || got.Description != "same slug, different field" {
 		t.Fatalf("edit did not persist: %+v err=%v", got, err)
 	}
 }
@@ -384,7 +384,7 @@ func TestAgentConfig_Update_RenameBranch_SameSlugNoOp_LegacySourceRef(t *testing
 
 	// Seed the DB row the way a real, already-ingested managed agent looks.
 	seed := &store.AgentProfile{Name: "Atlas", Slug: "atlas", SystemPrompt: "x", Source: "user"}
-	if err := st.CreateAgent(seed); err != nil {
+	if err := st.CreateAgent(context.Background(), seed); err != nil {
 		t.Fatalf("seed agent: %v", err)
 	}
 	legacyPath := writeRawAgentFile(t, legacyAgentsDir, "atlas",
@@ -403,7 +403,7 @@ func TestAgentConfig_Update_RenameBranch_SameSlugNoOp_LegacySourceRef(t *testing
 	if _, err := os.Stat(legacyPath); err != nil {
 		t.Fatalf("legacy-style managed file must survive a same-slug edit: %v", err)
 	}
-	if got, err := st.GetAgentBySlug("atlas"); err != nil || got.Description != "same slug, legacy sourceref" {
+	if got, err := st.GetAgentBySlug(context.Background(), "atlas"); err != nil || got.Description != "same slug, legacy sourceref" {
 		t.Fatalf("edit did not persist: %+v err=%v", got, err)
 	}
 }

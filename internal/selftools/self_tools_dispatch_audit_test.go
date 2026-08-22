@@ -54,7 +54,7 @@ func TestCallExecuteTask_ReflexMatch_EmitsUnifiedTraceRecord(t *testing.T) {
 		t.Fatalf("expected success result, got error: %+v", res)
 	}
 
-	events, err := s.ListEvents("reflex", 50)
+	events, err := s.ListEvents(context.Background(), "reflex", 50)
 	if err != nil {
 		t.Fatalf("ListEvents: %v", err)
 	}

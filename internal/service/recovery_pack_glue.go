@@ -1,6 +1,7 @@
 package service
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"log/slog"
@@ -58,7 +59,7 @@ func (s *chatServiceImpl) buildSessionRecoveryPrefix(sessionID string, session *
 	if s.store == nil {
 		return ""
 	}
-	msgs, err := s.store.ListMessages(sessionID, recoveryHistoryMessages+2)
+	msgs, err := s.store.ListMessages(context.TODO() /* TODO(ctx-sweep): no ctx available at this call site */, sessionID, recoveryHistoryMessages+2)
 	if err != nil {
 		slog.Warn("recovery: list messages failed", "session_id", sessionID, "err", err)
 		return ""
@@ -88,7 +89,7 @@ func (s *chatServiceImpl) buildSessionRecoveryPrefix(sessionID string, session *
 			slog.Warn("recovery: write pack file failed", "session_id", sessionID, "path", packPath, "err", err)
 		}
 	}
-	s.store.LogEvent(sessionID, "recovery_pack_planted", "recovery",
+	s.store.LogEvent(context.TODO() /* TODO(ctx-sweep): no ctx available at this call site */, sessionID, "recovery_pack_planted", "recovery",
 		fmt.Sprintf("planted recovery pack (%d prior turns)", len(history)),
 		recoveryPackPlantedMetadata(sessionID, reason, packPath, msgs, history, windowCapped))
 	return built

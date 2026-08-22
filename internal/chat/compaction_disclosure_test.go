@@ -19,15 +19,18 @@ func newTestStoreForChat(t *testing.T) *store.Store {
 	if err != nil {
 		t.Fatalf("store.New: %v", err)
 	}
-	t.Cleanup(func() { s.Close() })
+	t.Cleanup(func() {
+		s.Close(context.Background(
+
+		// mustCreateAgent, mustCreateSkill, and mustAssignSkill were originally
+		// defined in skill_list_mode_test.go, deleted by Phase 0 item 21 ("Cut
+		// Modes, in full") along with the mode-filter tests it covered — moved here
+		// since skill_list_loadhint_test.go and skill_broker_wire_test.go still use
+		// them independently of mode filtering.
+		))
+	})
 	return s
 }
-
-// mustCreateAgent, mustCreateSkill, and mustAssignSkill were originally
-// defined in skill_list_mode_test.go, deleted by Phase 0 item 21 ("Cut
-// Modes, in full") along with the mode-filter tests it covered — moved here
-// since skill_list_loadhint_test.go and skill_broker_wire_test.go still use
-// them independently of mode filtering.
 
 func mustCreateAgent(t *testing.T, s *store.Store, slug string) *store.AgentProfile {
 	t.Helper()
@@ -37,7 +40,7 @@ func mustCreateAgent(t *testing.T, s *store.Store, slug string) *store.AgentProf
 		Description: "test agent",
 		Source:      "user",
 	}
-	if err := s.CreateAgent(a); err != nil {
+	if err := s.CreateAgent(context.Background(), a); err != nil {
 		t.Fatalf("CreateAgent: %v", err)
 	}
 	return a
@@ -45,7 +48,7 @@ func mustCreateAgent(t *testing.T, s *store.Store, slug string) *store.AgentProf
 
 func mustCreateSkill(t *testing.T, s *store.Store, sk *store.Skill) *store.Skill {
 	t.Helper()
-	if err := s.CreateSkill(sk); err != nil {
+	if err := s.CreateSkill(context.Background(), sk); err != nil {
 		t.Fatalf("CreateSkill: %v", err)
 	}
 	return sk
@@ -53,7 +56,7 @@ func mustCreateSkill(t *testing.T, s *store.Store, sk *store.Skill) *store.Skill
 
 func mustAssignSkill(t *testing.T, s *store.Store, agentID, skillID string) {
 	t.Helper()
-	if err := s.AssignSkillToAgent(agentID, skillID, ""); err != nil {
+	if err := s.AssignSkillToAgent(context.Background(), agentID, skillID, ""); err != nil {
 		t.Fatalf("AssignSkillToAgent: %v", err)
 	}
 }
@@ -92,7 +95,7 @@ func TestRenderCompactionDisclosure_freshEventInjects(t *testing.T) {
 	s := newTestStoreForChat(t)
 
 	sess := &store.Session{}
-	if err := s.CreateSession(sess); err != nil {
+	if err := s.CreateSession(context.Background(), sess); err != nil {
 		t.Fatalf("CreateSession: %v", err)
 	}
 
@@ -142,7 +145,7 @@ func TestRenderCompactionDisclosure_modeIsIrrelevant(t *testing.T) {
 	var rendered []string
 	for _, mode := range modes {
 		sess := &store.Session{}
-		if err := s.CreateSession(sess); err != nil {
+		if err := s.CreateSession(context.Background(), sess); err != nil {
 			t.Fatalf("CreateSession: %v", err)
 		}
 		writeCompactionEventForTest(t, s, store.CompactionEvent{
@@ -170,7 +173,7 @@ func TestRenderCompactionDisclosure_modeIsIrrelevant(t *testing.T) {
 func TestRenderCompactionDisclosure_noEventReturnsEmpty(t *testing.T) {
 	s := newTestStoreForChat(t)
 	sess := &store.Session{}
-	if err := s.CreateSession(sess); err != nil {
+	if err := s.CreateSession(context.Background(), sess); err != nil {
 		t.Fatalf("CreateSession: %v", err)
 	}
 
@@ -187,7 +190,7 @@ func TestRenderCompactionDisclosure_noEventReturnsEmpty(t *testing.T) {
 func TestRenderCompactionDisclosure_staleEventReturnsEmpty(t *testing.T) {
 	s := newTestStoreForChat(t)
 	sess := &store.Session{}
-	if err := s.CreateSession(sess); err != nil {
+	if err := s.CreateSession(context.Background(), sess); err != nil {
 		t.Fatalf("CreateSession: %v", err)
 	}
 
@@ -207,7 +210,7 @@ func TestRenderCompactionDisclosure_staleEventReturnsEmpty(t *testing.T) {
 	// Assistant turn at t1 > t0. Note: store.Message.CreatedAt is auto-set on
 	// CreateMessage, so we don't pass it; the new row's timestamp is the
 	// current wall clock, comfortably after t0.
-	if err := s.CreateMessage(&store.Message{
+	if err := s.CreateMessage(context.Background(), &store.Message{
 		SessionID: sess.ID,
 		Role:      "assistant",
 		Content:   "ack post-compaction",
@@ -227,7 +230,7 @@ func TestRenderCompactionDisclosure_staleEventReturnsEmpty(t *testing.T) {
 func TestRenderCompactionDisclosure_userMessageDoesNotStaleIt(t *testing.T) {
 	s := newTestStoreForChat(t)
 	sess := &store.Session{}
-	if err := s.CreateSession(sess); err != nil {
+	if err := s.CreateSession(context.Background(), sess); err != nil {
 		t.Fatalf("CreateSession: %v", err)
 	}
 
@@ -239,7 +242,7 @@ func TestRenderCompactionDisclosure_userMessageDoesNotStaleIt(t *testing.T) {
 	})
 
 	// User message after compaction — does not count as ack.
-	if err := s.CreateMessage(&store.Message{
+	if err := s.CreateMessage(context.Background(), &store.Message{
 		SessionID: sess.ID,
 		Role:      "user",
 		Content:   "follow-up question",
@@ -259,7 +262,7 @@ func TestRenderCompactionDisclosure_userMessageDoesNotStaleIt(t *testing.T) {
 func TestRenderCompactionDisclosure_nullableFieldsRenderPlaceholders(t *testing.T) {
 	s := newTestStoreForChat(t)
 	sess := &store.Session{}
-	if err := s.CreateSession(sess); err != nil {
+	if err := s.CreateSession(context.Background(), sess); err != nil {
 		t.Fatalf("CreateSession: %v", err)
 	}
 
@@ -289,7 +292,7 @@ func TestRenderCompactionDisclosure_nullableFieldsRenderPlaceholders(t *testing.
 func TestAssembleAgentSlotContent_appendsDisclosure(t *testing.T) {
 	s := newTestStoreForChat(t)
 	sess := &store.Session{}
-	if err := s.CreateSession(sess); err != nil {
+	if err := s.CreateSession(context.Background(), sess); err != nil {
 		t.Fatalf("CreateSession: %v", err)
 	}
 	agent := &store.AgentProfile{
@@ -297,7 +300,7 @@ func TestAssembleAgentSlotContent_appendsDisclosure(t *testing.T) {
 		Slug:         "slot",
 		SystemPrompt: "Slot agent prompt.",
 	}
-	if err := s.CreateAgent(agent); err != nil {
+	if err := s.CreateAgent(context.Background(), agent); err != nil {
 		t.Fatalf("CreateAgent: %v", err)
 	}
 
@@ -325,7 +328,7 @@ func TestRenderedDisclosureUnderTokenBudget(t *testing.T) {
 	for _, mode := range []string{"general", "code", "plan", "research"} {
 		t.Run(mode, func(t *testing.T) {
 			sess := &store.Session{}
-			if err := s.CreateSession(sess); err != nil {
+			if err := s.CreateSession(context.Background(), sess); err != nil {
 				t.Fatalf("CreateSession: %v", err)
 			}
 			writeCompactionEventForTest(t, s, store.CompactionEvent{

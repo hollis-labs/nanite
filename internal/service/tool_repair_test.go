@@ -54,7 +54,7 @@ type settingsReaderStub struct {
 	pref string
 }
 
-func (s *settingsReaderStub) GetUserSettings() (*store.UserSettings, error) {
+func (s *settingsReaderStub) GetUserSettings(ctx context.Context) (*store.UserSettings, error) {
 	return &store.UserSettings{AutoRepairPref: s.pref}, nil
 }
 

@@ -63,7 +63,7 @@ func isCompactionEventFresh(s *store.Store, sessionID, eventCreatedAt string) bo
 	}
 	// 200 is a generous limit — assistant messages are sparse relative to
 	// the limit, and we only need the timestamp of the latest one.
-	msgs, err := s.ListMessages(sessionID, 200)
+	msgs, err := s.ListMessages(context.TODO() /* TODO(ctx-sweep): no ctx available at this call site */, sessionID, 200)
 	if err != nil {
 		slog.Warn("chat: ListMessages failed during disclosure freshness check",
 			"err", err, "session_id", sessionID)
@@ -251,7 +251,7 @@ const SkillEssentialCap = 25
 // feel the catalog has every skill it needs and only carries what it
 // currently uses.
 func buildSkillListForSession(_ context.Context, s *store.Store, agentID, _ string) string {
-	skills, err := s.ListAgentSkills(agentID)
+	skills, err := s.ListAgentSkills(context.TODO() /* TODO(ctx-sweep): no ctx available at this call site */, agentID)
 	if err != nil {
 		slog.Warn("chat: failed to load agent skills", "err", err)
 		return ""
@@ -292,7 +292,7 @@ func buildSkillListForSession(_ context.Context, s *store.Store, agentID, _ stri
 // beyond what was rendered (no point hinting at zero discoverable skills).
 // Glass-5 (CW-20260502-0012).
 func skillCatalogLoadHint(s *store.Store, renderedCount int) string {
-	catalog, err := s.ListSkills()
+	catalog, err := s.ListSkills(context.TODO() /* TODO(ctx-sweep): no ctx available at this call site */)
 	if err != nil {
 		slog.Debug("chat: skillCatalogLoadHint ListSkills failed", "err", err)
 		return ""

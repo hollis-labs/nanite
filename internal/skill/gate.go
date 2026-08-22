@@ -383,7 +383,7 @@ func (g *Gate) ExecuteGated(ctx context.Context, req ExecRequest) (ExecResult, e
 // exact same check and the exact same typed errors (GrantRequiredError /
 // ReapprovalRequiredError) instead of re-deriving the decision from
 // scratch. TASKS/skills/11's skill_get self-tool is the motivating
-// caller: a skill with no `` !`cmd` `` markers or scripts/ entries (plain
+// caller: a skill with no “ !`cmd` “ markers or scripts/ entries (plain
 // instructional content, the common case) never reaches ExecuteGated any
 // other way, since ResolveInlineMarkers is a no-op on a body with no
 // markers — without this exposed method, an ungranted or stale-approval
@@ -409,7 +409,7 @@ func (g *Gate) Authorize(ctx context.Context, skillSlug, agentID string) (Capabi
 // current, and — only if it is — parse its granted capabilities. Never
 // touches the filesystem or spawns anything itself.
 func (g *Gate) authorize(ctx context.Context, req ExecRequest) (Capabilities, GateDecision, error) {
-	sk, err := g.Skills.GetSkillBySlug(req.SkillSlug)
+	sk, err := g.Skills.GetSkillBySlug(ctx, req.SkillSlug)
 	if err != nil {
 		msg := fmt.Sprintf("skill catalog lookup for %q failed", req.SkillSlug)
 		return Capabilities{}, blockDecision(req, msg), fmt.Errorf("skill gate: look up skill %q: %w", req.SkillSlug, err)
@@ -586,7 +586,7 @@ var secretEnvKeyPatterns = []string{
 // previously never set cmd.Env at all, so exec.Cmd's own "nil Env means
 // inherit" default leaked the full, unfiltered host process environment —
 // including real secrets — into every sandboxed skill's ExecResult.Stdout
-// via an ordinary "compute" marker such as `` !`env` ``, with no elevated
+// via an ordinary "compute" marker such as “ !`env` “, with no elevated
 // capability grant required.
 func filterSecretEnv(environ []string) []string {
 	filtered := make([]string, 0, len(environ))

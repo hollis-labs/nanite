@@ -13,17 +13,17 @@ func newSeededStore(t *testing.T) *Store {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := s.Seed(); err != nil {
+	if err := s.Seed(context.Background()); err != nil {
 		t.Fatalf("seed: %v", err)
 	}
-	t.Cleanup(func() { s.Close() })
+	t.Cleanup(func() { s.Close(context.Background()) })
 	return s
 }
 
 func TestGetUserSettings_Default(t *testing.T) {
 	s := newSeededStore(t)
 
-	us, err := s.GetUserSettings()
+	us, err := s.GetUserSettings(context.Background())
 	if err != nil {
 		t.Fatalf("GetUserSettings: %v", err)
 	}
@@ -46,11 +46,11 @@ func TestUpdateUserSettings(t *testing.T) {
 		DefaultProvider:       "anthropic",
 		DefaultModel:          "claude-sonnet-4-20250514",
 	}
-	if err := s.UpdateUserSettings(us); err != nil {
+	if err := s.UpdateUserSettings(context.Background(), us); err != nil {
 		t.Fatalf("UpdateUserSettings: %v", err)
 	}
 
-	got, err := s.GetUserSettings()
+	got, err := s.GetUserSettings(context.Background())
 	if err != nil {
 		t.Fatalf("GetUserSettings after update: %v", err)
 	}
@@ -74,7 +74,7 @@ func TestUpdateUserSettings(t *testing.T) {
 func TestUserSettings_EmbeddingDefaults(t *testing.T) {
 	s := newSeededStore(t)
 
-	us, err := s.GetUserSettings()
+	us, err := s.GetUserSettings(context.Background())
 	if err != nil {
 		t.Fatalf("GetUserSettings: %v", err)
 	}
@@ -100,11 +100,11 @@ func TestUserSettings_EmbeddingRoundTrip(t *testing.T) {
 		EmbeddingModel:    "text-embedding-3-small",
 		EmbeddingMode:     "explicit",
 	}
-	if err := s.UpdateUserSettings(us); err != nil {
+	if err := s.UpdateUserSettings(context.Background(), us); err != nil {
 		t.Fatalf("UpdateUserSettings: %v", err)
 	}
 
-	got, err := s.GetUserSettings()
+	got, err := s.GetUserSettings(context.Background())
 	if err != nil {
 		t.Fatalf("GetUserSettings: %v", err)
 	}
@@ -126,16 +126,16 @@ func TestUpdateUserSettings_EmptyChain(t *testing.T) {
 	us := &UserSettings{
 		ProviderFallbackChain: []string{"anthropic", "ollama"},
 	}
-	if err := s.UpdateUserSettings(us); err != nil {
+	if err := s.UpdateUserSettings(context.Background(), us); err != nil {
 		t.Fatalf("set chain: %v", err)
 	}
 
 	us.ProviderFallbackChain = nil
-	if err := s.UpdateUserSettings(us); err != nil {
+	if err := s.UpdateUserSettings(context.Background(), us); err != nil {
 		t.Fatalf("clear chain: %v", err)
 	}
 
-	got, err := s.GetUserSettings()
+	got, err := s.GetUserSettings(context.Background())
 	if err != nil {
 		t.Fatalf("get after clear: %v", err)
 	}
@@ -154,11 +154,11 @@ func TestUserSettings_ContextWindowRoundTrip(t *testing.T) {
 		SummarizerModel:     "claude-haiku",
 		CompactionStrategy:  "default",
 	}
-	if err := s.UpdateUserSettings(us); err != nil {
+	if err := s.UpdateUserSettings(context.Background(), us); err != nil {
 		t.Fatalf("UpdateUserSettings: %v", err)
 	}
 
-	got, err := s.GetUserSettings()
+	got, err := s.GetUserSettings(context.Background())
 	if err != nil {
 		t.Fatalf("GetUserSettings: %v", err)
 	}
@@ -182,7 +182,7 @@ func TestUserSettings_ContextWindowRoundTrip(t *testing.T) {
 func TestUserSettings_ContextWindowDefaults(t *testing.T) {
 	s := newSeededStore(t)
 
-	us, err := s.GetUserSettings()
+	us, err := s.GetUserSettings(context.Background())
 	if err != nil {
 		t.Fatalf("GetUserSettings: %v", err)
 	}
@@ -201,7 +201,7 @@ func TestUpdateUserSettings_InvalidCompactionStrategy(t *testing.T) {
 	s := newSeededStore(t)
 
 	us := &UserSettings{CompactionStrategy: "unknown-strategy"}
-	err := s.UpdateUserSettings(us)
+	err := s.UpdateUserSettings(context.Background(), us)
 	if err == nil {
 		t.Fatal("expected error for unknown compaction_strategy, got nil")
 	}
@@ -213,7 +213,7 @@ func TestUpdateUserSettings_InvalidCompactionStrategy(t *testing.T) {
 func TestUserSettings_ToolCacheDefaults(t *testing.T) {
 	s := newSeededStore(t)
 
-	us, err := s.GetUserSettings()
+	us, err := s.GetUserSettings(context.Background())
 	if err != nil {
 		t.Fatalf("GetUserSettings: %v", err)
 	}
@@ -242,11 +242,11 @@ func TestUserSettings_ToolCacheRoundTrip(t *testing.T) {
 		ToolClassifierTimeoutMS: 750,
 		ContextOverflowRecovery: false,
 	}
-	if err := s.UpdateUserSettings(us); err != nil {
+	if err := s.UpdateUserSettings(context.Background(), us); err != nil {
 		t.Fatalf("UpdateUserSettings: %v", err)
 	}
 
-	got, err := s.GetUserSettings()
+	got, err := s.GetUserSettings(context.Background())
 	if err != nil {
 		t.Fatalf("GetUserSettings: %v", err)
 	}
@@ -274,7 +274,7 @@ func TestUpdateUserSettings_InvalidToolClassifierMode(t *testing.T) {
 	s := newSeededStore(t)
 
 	us := &UserSettings{ToolClassifierMode: "bogus"}
-	err := s.UpdateUserSettings(us)
+	err := s.UpdateUserSettings(context.Background(), us)
 	if err == nil {
 		t.Fatal("expected error for unknown tool_classifier_mode, got nil")
 	}
@@ -288,10 +288,10 @@ func TestUpdateUserSettings_ToolClassifierTimeoutDefault(t *testing.T) {
 
 	// Zero / negative should default to 500.
 	us := &UserSettings{ToolClassifierMode: "broker", ToolClassifierTimeoutMS: 0}
-	if err := s.UpdateUserSettings(us); err != nil {
+	if err := s.UpdateUserSettings(context.Background(), us); err != nil {
 		t.Fatalf("UpdateUserSettings: %v", err)
 	}
-	got, err := s.GetUserSettings()
+	got, err := s.GetUserSettings(context.Background())
 	if err != nil {
 		t.Fatalf("GetUserSettings: %v", err)
 	}
@@ -302,7 +302,7 @@ func TestUpdateUserSettings_ToolClassifierTimeoutDefault(t *testing.T) {
 
 func TestUserSettings_G4_DefaultsApplied(t *testing.T) {
 	s := newSeededStore(t)
-	us, err := s.GetUserSettings()
+	us, err := s.GetUserSettings(context.Background())
 	if err != nil {
 		t.Fatalf("get: %v", err)
 	}
@@ -316,13 +316,13 @@ func TestUserSettings_G4_DefaultsApplied(t *testing.T) {
 
 func TestUserSettings_G4_UpdateRoundTrips(t *testing.T) {
 	s := newSeededStore(t)
-	us, _ := s.GetUserSettings()
+	us, _ := s.GetUserSettings(context.Background())
 	us.SubagentApprovalRequired = false
 	us.SubagentApprovalTimeoutSeconds = 600
-	if err := s.UpdateUserSettings(us); err != nil {
+	if err := s.UpdateUserSettings(context.Background(), us); err != nil {
 		t.Fatalf("update: %v", err)
 	}
-	got, _ := s.GetUserSettings()
+	got, _ := s.GetUserSettings(context.Background())
 	if got.SubagentApprovalRequired {
 		t.Errorf("SubagentApprovalRequired not persisted")
 	}
@@ -344,10 +344,10 @@ func TestUpdateUserSettings_BudgetPctClamp(t *testing.T) {
 
 	// Over 1.0 should be clamped to 1.0.
 	us := &UserSettings{ContextBudgetPct: 1.5}
-	if err := s.UpdateUserSettings(us); err != nil {
+	if err := s.UpdateUserSettings(context.Background(), us); err != nil {
 		t.Fatalf("UpdateUserSettings: %v", err)
 	}
-	got, err := s.GetUserSettings()
+	got, err := s.GetUserSettings(context.Background())
 	if err != nil {
 		t.Fatalf("GetUserSettings: %v", err)
 	}
@@ -357,10 +357,10 @@ func TestUpdateUserSettings_BudgetPctClamp(t *testing.T) {
 
 	// Below 0 should default to 0.80.
 	us = &UserSettings{ContextBudgetPct: -0.5}
-	if err := s.UpdateUserSettings(us); err != nil {
+	if err := s.UpdateUserSettings(context.Background(), us); err != nil {
 		t.Fatalf("UpdateUserSettings negative: %v", err)
 	}
-	got, err = s.GetUserSettings()
+	got, err = s.GetUserSettings(context.Background())
 	if err != nil {
 		t.Fatalf("GetUserSettings after negative: %v", err)
 	}

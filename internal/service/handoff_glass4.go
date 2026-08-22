@@ -1,6 +1,7 @@
 package service
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -32,7 +33,7 @@ func WriteGlass4Handoff(s HandoffStashStore, sessionID string, payload ctxpkg.Ha
 		return "", err
 	}
 	stashID := uuid.New().String()
-	if err := s.UpsertHandoffStash(store.HandoffStash{
+	if err := s.UpsertHandoffStash(context.TODO() /* TODO(ctx-sweep): no ctx available at this call site */, store.HandoffStash{
 		ID:        stashID,
 		SessionID: sessionID,
 		Payload:   string(envelopeBytes),
@@ -56,7 +57,7 @@ func ReadLatestGlass4Handoff(s HandoffStashStore, sessionID string) (*ctxpkg.Han
 	if sessionID == "" {
 		return nil, "", nil
 	}
-	row, err := s.GetLatestStashForSession(sessionID)
+	row, err := s.GetLatestStashForSession(context.TODO() /* TODO(ctx-sweep): no ctx available at this call site */, sessionID)
 	if err != nil {
 		if errors.Is(err, store.ErrHandoffStashNotFound) {
 			return nil, "", nil

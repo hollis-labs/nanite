@@ -1,6 +1,7 @@
 package store
 
 import (
+	"context"
 	"database/sql"
 	"errors"
 	"fmt"
@@ -140,7 +141,7 @@ const durableAgentInstanceColumns = `id, name, slug, profile_id, lifecycle_class
 const durableAgentEventColumns = `id, instance_id, event_type, status_before, status_after,
     session_id, source, message, metadata_json, created_at`
 
-func (s *Store) CreateDurableAgentInstance(inst *DurableAgentInstance) error {
+func (s *Store) CreateDurableAgentInstance(ctx context.Context, inst *DurableAgentInstance) error {
 	if inst == nil {
 		return errors.New("CreateDurableAgentInstance: nil instance")
 	}
@@ -153,7 +154,7 @@ func (s *Store) CreateDurableAgentInstance(inst *DurableAgentInstance) error {
 	if inst.ProfileID == "" {
 		return errors.New("CreateDurableAgentInstance: profile_id is required")
 	}
-	if _, err := s.GetAgent(inst.ProfileID); err != nil {
+	if _, err := s.GetAgent(ctx, inst.ProfileID); err != nil {
 		return fmt.Errorf("CreateDurableAgentInstance: profile %s: %w", inst.ProfileID, err)
 	}
 	applyDurableAgentInstanceDefaults(inst)
@@ -161,7 +162,7 @@ func (s *Store) CreateDurableAgentInstance(inst *DurableAgentInstance) error {
 		return err
 	}
 
-	_, err := s.DB.Exec(
+	_, err := s.DB.ExecContext(ctx,
 		`INSERT INTO durable_agent_instances (`+durableAgentInstanceColumns+`)
 		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		inst.ID, inst.Name, inst.Slug, inst.ProfileID, inst.LifecycleClass,
@@ -178,9 +179,9 @@ func (s *Store) CreateDurableAgentInstance(inst *DurableAgentInstance) error {
 	return nil
 }
 
-func (s *Store) GetDurableAgentInstance(id string) (*DurableAgentInstance, error) {
+func (s *Store) GetDurableAgentInstance(ctx context.Context, id string) (*DurableAgentInstance, error) {
 	var inst DurableAgentInstance
-	err := scanDurableAgentInstance(s.DB.QueryRow(
+	err := scanDurableAgentInstance(s.DB.QueryRowContext(ctx,
 		`SELECT `+durableAgentInstanceColumns+` FROM durable_agent_instances WHERE id = ?`, id,
 	), &inst)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -192,9 +193,9 @@ func (s *Store) GetDurableAgentInstance(id string) (*DurableAgentInstance, error
 	return &inst, nil
 }
 
-func (s *Store) GetDurableAgentInstanceBySlug(slug string) (*DurableAgentInstance, error) {
+func (s *Store) GetDurableAgentInstanceBySlug(ctx context.Context, slug string) (*DurableAgentInstance, error) {
 	var inst DurableAgentInstance
-	err := scanDurableAgentInstance(s.DB.QueryRow(
+	err := scanDurableAgentInstance(s.DB.QueryRowContext(ctx,
 		`SELECT `+durableAgentInstanceColumns+` FROM durable_agent_instances WHERE slug = ?`, slug,
 	), &inst)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -223,9 +224,9 @@ func (s *Store) GetDurableAgentInstanceBySlug(slug string) (*DurableAgentInstanc
 // finding: a Team Slot's launch-time "durable" resolution is independent
 // of that unrelated migration-061-eject-survival flag) -- this is a plain
 // profile_id lookup, no durable-candidate filtering of any kind.
-func (s *Store) GetDurableAgentInstanceByProfileID(profileID string) (*DurableAgentInstance, error) {
+func (s *Store) GetDurableAgentInstanceByProfileID(ctx context.Context, profileID string) (*DurableAgentInstance, error) {
 	var inst DurableAgentInstance
-	err := scanDurableAgentInstance(s.DB.QueryRow(
+	err := scanDurableAgentInstance(s.DB.QueryRowContext(ctx,
 		`SELECT `+durableAgentInstanceColumns+` FROM durable_agent_instances
 		  WHERE profile_id = ? ORDER BY updated_at DESC LIMIT 1`, profileID,
 	), &inst)
@@ -238,13 +239,13 @@ func (s *Store) GetDurableAgentInstanceByProfileID(profileID string) (*DurableAg
 	return &inst, nil
 }
 
-func (s *Store) ListDurableAgentInstances(includeArchived bool) ([]DurableAgentInstance, error) {
+func (s *Store) ListDurableAgentInstances(ctx context.Context, includeArchived bool) ([]DurableAgentInstance, error) {
 	where := "WHERE status != 'archived'"
 	if includeArchived {
 		where = ""
 	}
-	rows, err := s.DB.Query(
-		`SELECT ` + durableAgentInstanceColumns + ` FROM durable_agent_instances ` + where + ` ORDER BY updated_at DESC, name`,
+	rows, err := s.DB.QueryContext(ctx,
+		`SELECT `+durableAgentInstanceColumns+` FROM durable_agent_instances `+where+` ORDER BY updated_at DESC, name`,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("list durable_agent_instances: %w", err)
@@ -261,8 +262,8 @@ func (s *Store) ListDurableAgentInstances(includeArchived bool) ([]DurableAgentI
 	return out, rows.Err()
 }
 
-func (s *Store) UpdateDurableAgentInstance(id string, upd DurableAgentInstanceUpdate) (*DurableAgentInstance, error) {
-	inst, err := s.GetDurableAgentInstance(id)
+func (s *Store) UpdateDurableAgentInstance(ctx context.Context, id string, upd DurableAgentInstanceUpdate) (*DurableAgentInstance, error) {
+	inst, err := s.GetDurableAgentInstance(ctx, id)
 	if err != nil {
 		return nil, err
 	}
@@ -285,7 +286,7 @@ func (s *Store) UpdateDurableAgentInstance(id string, upd DurableAgentInstanceUp
 		return nil, err
 	}
 	inst.UpdatedAt = time.Now().UTC()
-	_, err = s.DB.Exec(
+	_, err = s.DB.ExecContext(ctx,
 		`UPDATE durable_agent_instances
 		    SET name = ?, slug = ?, work_root = ?, metadata_json = ?, updated_at = ?
 		  WHERE id = ?`,
@@ -295,16 +296,16 @@ func (s *Store) UpdateDurableAgentInstance(id string, upd DurableAgentInstanceUp
 	if err != nil {
 		return nil, fmt.Errorf("update durable_agent_instances %s: %w", id, err)
 	}
-	return s.GetDurableAgentInstance(id)
+	return s.GetDurableAgentInstance(ctx, id)
 }
 
-func (s *Store) SyncDurableAgentInstanceConfig(inst *DurableAgentInstance) (*DurableAgentInstance, error) {
+func (s *Store) SyncDurableAgentInstanceConfig(ctx context.Context, inst *DurableAgentInstance) (*DurableAgentInstance, error) {
 	if inst == nil {
 		return nil, errors.New("SyncDurableAgentInstanceConfig: nil instance")
 	}
-	existing, err := s.GetDurableAgentInstanceBySlug(inst.Slug)
+	existing, err := s.GetDurableAgentInstanceBySlug(ctx, inst.Slug)
 	if err == nil && existing != nil {
-		if _, err := s.GetAgent(inst.ProfileID); err != nil {
+		if _, err := s.GetAgent(ctx, inst.ProfileID); err != nil {
 			return nil, fmt.Errorf("SyncDurableAgentInstanceConfig: profile %s: %w", inst.ProfileID, err)
 		}
 		if inst.ID == "" {
@@ -329,7 +330,7 @@ func (s *Store) SyncDurableAgentInstanceConfig(inst *DurableAgentInstance) (*Dur
 		if err := validateDurableAgentInstance(inst); err != nil {
 			return nil, err
 		}
-		_, err := s.DB.Exec(
+		_, err := s.DB.ExecContext(ctx,
 			`UPDATE durable_agent_instances
 			    SET name = ?, slug = ?, profile_id = ?, lifecycle_class = ?, provider = ?, model = ?,
 			        runtime_kind = ?, launch_source_type = ?, launch_source_id = ?, work_root = ?,
@@ -345,7 +346,7 @@ func (s *Store) SyncDurableAgentInstanceConfig(inst *DurableAgentInstance) (*Dur
 		if err != nil {
 			return nil, fmt.Errorf("sync durable_agent_instances %s: %w", existing.ID, err)
 		}
-		return s.GetDurableAgentInstance(existing.ID)
+		return s.GetDurableAgentInstance(ctx, existing.ID)
 	}
 	if errors.Is(err, ErrDurableAgentInstanceNotFound) {
 		if inst.Status == "" {
@@ -355,10 +356,10 @@ func (s *Store) SyncDurableAgentInstanceConfig(inst *DurableAgentInstance) (*Dur
 				inst.Status = DurableAgentStatusSleeping
 			}
 		}
-		if err := s.CreateDurableAgentInstance(inst); err != nil {
+		if err := s.CreateDurableAgentInstance(ctx, inst); err != nil {
 			return nil, err
 		}
-		return s.GetDurableAgentInstance(inst.ID)
+		return s.GetDurableAgentInstance(ctx, inst.ID)
 	}
 	if err != nil {
 		return nil, err
@@ -366,12 +367,12 @@ func (s *Store) SyncDurableAgentInstanceConfig(inst *DurableAgentInstance) (*Dur
 	return existing, nil
 }
 
-func (s *Store) SetDurableAgentInstanceStatus(id, status string) (*DurableAgentInstance, error) {
+func (s *Store) SetDurableAgentInstanceStatus(ctx context.Context, id, status string) (*DurableAgentInstance, error) {
 	if !validDurableAgentStatus(status) || status == DurableAgentStatusArchived {
 		return nil, fmt.Errorf("SetDurableAgentInstanceStatus: invalid status %q", status)
 	}
 	now := time.Now().UTC()
-	res, err := s.DB.Exec(
+	res, err := s.DB.ExecContext(ctx,
 		`UPDATE durable_agent_instances SET status = ?, updated_at = ? WHERE id = ? AND status != 'archived'`,
 		status, now.Format(time.RFC3339Nano), id,
 	)
@@ -385,15 +386,15 @@ func (s *Store) SetDurableAgentInstanceStatus(id, status string) (*DurableAgentI
 	if n == 0 {
 		return nil, ErrDurableAgentInstanceNotFound
 	}
-	return s.GetDurableAgentInstance(id)
+	return s.GetDurableAgentInstance(ctx, id)
 }
 
-func (s *Store) SetDurableAgentInstanceLaunchState(id, status, sessionID, failureReason string) (*DurableAgentInstance, error) {
+func (s *Store) SetDurableAgentInstanceLaunchState(ctx context.Context, id, status, sessionID, failureReason string) (*DurableAgentInstance, error) {
 	if !validDurableAgentStatus(status) || status == DurableAgentStatusArchived {
 		return nil, fmt.Errorf("SetDurableAgentInstanceLaunchState: invalid status %q", status)
 	}
 	now := time.Now().UTC()
-	res, err := s.DB.Exec(
+	res, err := s.DB.ExecContext(ctx,
 		`UPDATE durable_agent_instances
 		    SET status = ?, current_session_id = ?, failure_reason = ?, updated_at = ?
 		  WHERE id = ? AND status != 'archived'`,
@@ -409,12 +410,12 @@ func (s *Store) SetDurableAgentInstanceLaunchState(id, status, sessionID, failur
 	if n == 0 {
 		return nil, ErrDurableAgentInstanceNotFound
 	}
-	return s.GetDurableAgentInstance(id)
+	return s.GetDurableAgentInstance(ctx, id)
 }
 
-func (s *Store) ArchiveDurableAgentInstance(id string) (*DurableAgentInstance, error) {
+func (s *Store) ArchiveDurableAgentInstance(ctx context.Context, id string) (*DurableAgentInstance, error) {
 	now := time.Now().UTC()
-	res, err := s.DB.Exec(
+	res, err := s.DB.ExecContext(ctx,
 		`UPDATE durable_agent_instances
 		    SET status = 'archived', archived_at = ?, updated_at = ?
 		  WHERE id = ? AND status != 'archived'`,
@@ -430,10 +431,10 @@ func (s *Store) ArchiveDurableAgentInstance(id string) (*DurableAgentInstance, e
 	if n == 0 {
 		return nil, ErrDurableAgentInstanceNotFound
 	}
-	return s.GetDurableAgentInstance(id)
+	return s.GetDurableAgentInstance(ctx, id)
 }
 
-func (s *Store) AttachDurableAgentInstanceSession(instanceID, sessionID, relation string) error {
+func (s *Store) AttachDurableAgentInstanceSession(ctx context.Context, instanceID, sessionID, relation string) error {
 	if relation == "" {
 		relation = DurableAgentSessionRelationOwned
 	}
@@ -441,7 +442,7 @@ func (s *Store) AttachDurableAgentInstanceSession(instanceID, sessionID, relatio
 		return fmt.Errorf("AttachDurableAgentInstanceSession: invalid relation %q", relation)
 	}
 	now := time.Now().UTC().Format(time.RFC3339Nano)
-	_, err := s.DB.Exec(
+	_, err := s.DB.ExecContext(ctx,
 		`INSERT INTO durable_agent_instance_sessions (instance_id, session_id, relation, attached_at, detached_at)
 		 VALUES (?, ?, ?, ?, NULL)
 		 ON CONFLICT(instance_id, session_id) DO UPDATE SET
@@ -455,8 +456,8 @@ func (s *Store) AttachDurableAgentInstanceSession(instanceID, sessionID, relatio
 	return nil
 }
 
-func (s *Store) ListDurableAgentInstanceSessions(instanceID string) ([]DurableAgentInstanceSession, error) {
-	rows, err := s.DB.Query(
+func (s *Store) ListDurableAgentInstanceSessions(ctx context.Context, instanceID string) ([]DurableAgentInstanceSession, error) {
+	rows, err := s.DB.QueryContext(ctx,
 		`SELECT instance_id, session_id, relation, attached_at, detached_at
 		   FROM durable_agent_instance_sessions
 		  WHERE instance_id = ?
@@ -477,8 +478,8 @@ func (s *Store) ListDurableAgentInstanceSessions(instanceID string) ([]DurableAg
 	return out, rows.Err()
 }
 
-func (s *Store) ListDurableAgentInstanceSessionStates(instanceID string) ([]DurableAgentInstanceSessionState, error) {
-	rows, err := s.DB.Query(
+func (s *Store) ListDurableAgentInstanceSessionStates(ctx context.Context, instanceID string) ([]DurableAgentInstanceSessionState, error) {
+	rows, err := s.DB.QueryContext(ctx,
 		`SELECT rel.instance_id, rel.session_id, rel.relation, rel.attached_at, rel.detached_at,
 		        COALESCE(sess.status, ''), COALESCE(sess.provider, ''), COALESCE(sess.model, ''),
 		        COALESCE((
@@ -526,7 +527,7 @@ func (s *Store) ListDurableAgentInstanceSessionStates(instanceID string) ([]Dura
 	return out, rows.Err()
 }
 
-func (s *Store) CreateDurableAgentEvent(event *DurableAgentEvent) error {
+func (s *Store) CreateDurableAgentEvent(ctx context.Context, event *DurableAgentEvent) error {
 	if event == nil {
 		return errors.New("CreateDurableAgentEvent: nil event")
 	}
@@ -537,7 +538,7 @@ func (s *Store) CreateDurableAgentEvent(event *DurableAgentEvent) error {
 		return errors.New("CreateDurableAgentEvent: event_type is required")
 	}
 	applyDurableAgentEventDefaults(event)
-	_, err := s.DB.Exec(
+	_, err := s.DB.ExecContext(ctx,
 		`INSERT INTO durable_agent_events (`+durableAgentEventColumns+`)
 		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		event.ID, event.InstanceID, event.EventType, event.StatusBefore, event.StatusAfter,
@@ -550,14 +551,14 @@ func (s *Store) CreateDurableAgentEvent(event *DurableAgentEvent) error {
 	return nil
 }
 
-func (s *Store) ListDurableAgentEvents(instanceID string, limit int) ([]DurableAgentEvent, error) {
+func (s *Store) ListDurableAgentEvents(ctx context.Context, instanceID string, limit int) ([]DurableAgentEvent, error) {
 	if instanceID == "" {
 		return nil, errors.New("ListDurableAgentEvents: instance_id is required")
 	}
 	if limit <= 0 {
 		limit = 50
 	}
-	rows, err := s.DB.Query(
+	rows, err := s.DB.QueryContext(ctx,
 		`SELECT `+durableAgentEventColumns+`
 		   FROM durable_agent_events
 		  WHERE instance_id = ?
@@ -579,8 +580,8 @@ func (s *Store) ListDurableAgentEvents(instanceID string, limit int) ([]DurableA
 	return out, rows.Err()
 }
 
-func (s *Store) ListDurableAgentSessionStatesForSession(sessionID string) ([]DurableAgentInstanceSessionState, error) {
-	rows, err := s.DB.Query(
+func (s *Store) ListDurableAgentSessionStatesForSession(ctx context.Context, sessionID string) ([]DurableAgentInstanceSessionState, error) {
+	rows, err := s.DB.QueryContext(ctx,
 		`SELECT rel.instance_id, rel.session_id, rel.relation, rel.attached_at, rel.detached_at,
 		        COALESCE(sess.status, ''), COALESCE(sess.provider, ''), COALESCE(sess.model, ''),
 		        COALESCE((

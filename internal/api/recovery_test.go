@@ -26,7 +26,7 @@ func newTestAPIWithRecovery(t *testing.T) (*API, *http.ServeMux, *broker.Broker)
 	if err != nil {
 		t.Fatalf("store.New: %v", err)
 	}
-	t.Cleanup(func() { s.Close() })
+	t.Cleanup(func() { s.Close(context.Background()) })
 
 	svc, err := service.NewContainer(service.ContainerConfig{
 		Store:     s,

@@ -1,6 +1,7 @@
 package service
 
 import (
+	"context"
 	"encoding/json"
 	"os"
 	"path/filepath"
@@ -54,7 +55,7 @@ func TestComposeBootPayload_ColdBootInjectsRecovery(t *testing.T) {
 	svc := &chatServiceImpl{store: st}
 
 	sess := &store.Session{Title: "Release prep", Provider: "claude", Model: "claude-sonnet"}
-	if err := st.CreateSession(sess); err != nil {
+	if err := st.CreateSession(context.Background(), sess); err != nil {
 		t.Fatalf("CreateSession: %v", err)
 	}
 	rawInsertMessage(t, st, sess.ID, "user", "what are the options?", "2026-05-25T10:00:01Z")
@@ -89,7 +90,7 @@ func TestComposeBootPayload_ColdBootInjectsRecovery(t *testing.T) {
 
 	// event_log postmortem: a real, enriched row lands via the same store
 	// the pack was built against — not a bare event-type marker.
-	events, err := st.ListEvents("recovery", 50)
+	events, err := st.ListEvents(context.Background(), "recovery", 50)
 	if err != nil {
 		t.Fatalf("ListEvents: %v", err)
 	}
@@ -128,7 +129,7 @@ func TestComposeBootPayload_ColdBootInjectsRecovery(t *testing.T) {
 
 	// Brand-new session (only the current turn, no prior history) → no pack.
 	fresh := &store.Session{Title: "New", Provider: "claude", Model: "claude-sonnet"}
-	if err := st.CreateSession(fresh); err != nil {
+	if err := st.CreateSession(context.Background(), fresh); err != nil {
 		t.Fatalf("CreateSession fresh: %v", err)
 	}
 	rawInsertMessage(t, st, fresh.ID, "user", "first message", "2026-05-25T11:00:01Z")

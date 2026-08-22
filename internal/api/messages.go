@@ -217,7 +217,7 @@ func (a *API) streamMessageEvents(w http.ResponseWriter, r *http.Request, messag
 				return
 			}
 		} else {
-			msg, err := a.Services.Store.GetMessage(messageID)
+			msg, err := a.Services.Store.GetMessage(r.Context(), messageID)
 			if err != nil {
 				a.errorResp(w, http.StatusNotFound, "message not found")
 				return

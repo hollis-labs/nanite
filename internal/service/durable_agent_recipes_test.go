@@ -195,7 +195,7 @@ func TestDurableAgentRecipeCatalogRejectsDuplicateConfiguredIDs(t *testing.T) {
 func TestDurableAgentRecipeDryRunCompilesWithoutMutation(t *testing.T) {
 	st := newDurableAgentServiceTestStore(t)
 	profile := &store.AgentProfile{Name: "Recipe Agent", Slug: "recipe-agent", SystemPrompt: "x"}
-	if err := st.CreateAgent(profile); err != nil {
+	if err := st.CreateAgent(context.Background(), profile); err != nil {
 		t.Fatalf("CreateAgent: %v", err)
 	}
 	recipeSvc := newRecipeServiceForTest(t, NewDurableAgentService(st))
@@ -224,7 +224,7 @@ func TestDurableAgentRecipeDryRunCompilesWithoutMutation(t *testing.T) {
 	if plan.WakePayload.Facts["project"] != "agridd" {
 		t.Fatalf("wake payload = %+v", plan.WakePayload)
 	}
-	instances, err := st.ListDurableAgentInstances(true)
+	instances, err := st.ListDurableAgentInstances(context.Background(), true)
 	if err != nil {
 		t.Fatalf("ListDurableAgentInstances: %v", err)
 	}
@@ -236,7 +236,7 @@ func TestDurableAgentRecipeDryRunCompilesWithoutMutation(t *testing.T) {
 func TestDurableAgentRecipeDryRun_ProductShapes(t *testing.T) {
 	st := newDurableAgentServiceTestStore(t)
 	profile := &store.AgentProfile{Name: "Recipe Product Agent", Slug: "recipe-product-agent", SystemPrompt: "x"}
-	if err := st.CreateAgent(profile); err != nil {
+	if err := st.CreateAgent(context.Background(), profile); err != nil {
 		t.Fatalf("CreateAgent: %v", err)
 	}
 	recipeSvc := newRecipeServiceForTest(t, NewDurableAgentService(st))
@@ -316,7 +316,7 @@ func TestDurableAgentRecipeDryRun_ProductShapes(t *testing.T) {
 func TestDurableAgentRecipeApplyCreatesInstance(t *testing.T) {
 	st := newDurableAgentServiceTestStore(t)
 	profile := &store.AgentProfile{Name: "Apply Agent", Slug: "apply-agent", SystemPrompt: "x"}
-	if err := st.CreateAgent(profile); err != nil {
+	if err := st.CreateAgent(context.Background(), profile); err != nil {
 		t.Fatalf("CreateAgent: %v", err)
 	}
 	recipeSvc := newRecipeServiceForTest(t, NewDurableAgentService(st))
@@ -335,7 +335,7 @@ func TestDurableAgentRecipeApplyCreatesInstance(t *testing.T) {
 	if result.LaunchResult != nil {
 		t.Fatalf("apply without start launched: %+v", result.LaunchResult)
 	}
-	got, err := st.GetDurableAgentInstance(result.Instance.ID)
+	got, err := st.GetDurableAgentInstance(context.Background(), result.Instance.ID)
 	if err != nil {
 		t.Fatalf("GetDurableAgentInstance: %v", err)
 	}
@@ -347,7 +347,7 @@ func TestDurableAgentRecipeApplyCreatesInstance(t *testing.T) {
 func TestDurableAgentRecipeApplyWithStartAttachesSession(t *testing.T) {
 	st := newDurableAgentServiceTestStore(t)
 	profile := &store.AgentProfile{Name: "Started Recipe Agent", Slug: "started-recipe-agent", SystemPrompt: "x"}
-	if err := st.CreateAgent(profile); err != nil {
+	if err := st.CreateAgent(context.Background(), profile); err != nil {
 		t.Fatalf("CreateAgent: %v", err)
 	}
 	durableSvc := NewDurableAgentService(st)
@@ -444,7 +444,7 @@ func TestDurableAgentRecipeRequiredInputsSupportMetadataAndWakeMaps(t *testing.T
 func TestDurableAgentRecipeApplyBackwardCompatibleExistingFields(t *testing.T) {
 	st := newDurableAgentServiceTestStore(t)
 	profile := &store.AgentProfile{Name: "Compat Agent", Slug: "compat-agent", SystemPrompt: "x"}
-	if err := st.CreateAgent(profile); err != nil {
+	if err := st.CreateAgent(context.Background(), profile); err != nil {
 		t.Fatalf("CreateAgent: %v", err)
 	}
 	recipeSvc := newRecipeServiceForTest(t, NewDurableAgentService(st))

@@ -321,7 +321,7 @@ type RuntimeStore interface {
 	// ModeLongLived rows; a scoped subagent/background run ID otherwise —
 	// event_log.session_id carries no FK constraint, so this is always
 	// safe to write). metadata should be a JSON object, not a bare string.
-	LogEvent(sessionID, eventType, category, detail, metadata string)
+	LogEvent(ctx context.Context, sessionID, eventType, category, detail, metadata string)
 }
 
 // RuntimeRow is the lifecycle-tracking row Boot writes. Distinct from

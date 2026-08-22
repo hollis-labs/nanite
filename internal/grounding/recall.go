@@ -214,7 +214,7 @@ func LogConsultations(logger ConsultationLogger, result GroundingResult, turnID 
 	var surfacedIDs []int64
 	for _, h := range result.Hits {
 		_, consumed := surfacedKeys[h.MemoryKey]
-		id, err := logger.LogGroundingConsultation(ConsultationEntry{
+		id, err := logger.LogGroundingConsultation(context.TODO() /* TODO(ctx-sweep): no ctx available at this call site */, ConsultationEntry{
 			SessionID:  result.SessionID,
 			TurnID:     turnID,
 			MemoryKey:  h.MemoryKey,

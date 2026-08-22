@@ -80,7 +80,7 @@ func TestRetryingRunner_ScheduleFireTelemetry_Success(t *testing.T) {
 		t.Fatalf("Enqueue: unexpected error: %v", err)
 	}
 
-	events, err := s.ListEvents(CategoryScheduleFire, 50)
+	events, err := s.ListEvents(context.Background(), CategoryScheduleFire, 50)
 	if err != nil {
 		t.Fatalf("ListEvents: %v", err)
 	}
@@ -147,7 +147,7 @@ func TestRetryingRunner_ScheduleFireTelemetry_RetryThenSuccess_TwoDistinctRows(t
 		t.Fatalf("attempt 2: expected nil (success), got %v", err)
 	}
 
-	events, err := s.ListEvents(CategoryScheduleFire, 50)
+	events, err := s.ListEvents(context.Background(), CategoryScheduleFire, 50)
 	if err != nil {
 		t.Fatalf("ListEvents: %v", err)
 	}
@@ -218,7 +218,7 @@ func TestRetryingRunner_ScheduleFireTelemetry_Exhausted(t *testing.T) {
 		t.Fatalf("Enqueue: expected nil (exhausted, stop retry loop), got %v", err)
 	}
 
-	events, err := s.ListEvents(CategoryScheduleFire, 50)
+	events, err := s.ListEvents(context.Background(), CategoryScheduleFire, 50)
 	if err != nil {
 		t.Fatalf("ListEvents: %v", err)
 	}
@@ -275,7 +275,7 @@ func TestRetryingRunner_ScheduleFireTelemetry_BackoffWindowSkip_NoTraceRow(t *te
 		t.Fatalf("second attempt: got err=%v, want ErrBackoffActive", err)
 	}
 
-	events, err := s.ListEvents(CategoryScheduleFire, 50)
+	events, err := s.ListEvents(context.Background(), CategoryScheduleFire, 50)
 	if err != nil {
 		t.Fatalf("ListEvents: %v", err)
 	}
@@ -303,7 +303,7 @@ func TestRetryingRunner_ScheduleFireTelemetry_DuplicateJob_NoTraceRow(t *testing
 		t.Fatalf("Enqueue: got err=%v, want it to wrap gosched.ErrDuplicateJob", err)
 	}
 
-	events, err := s.ListEvents(CategoryScheduleFire, 50)
+	events, err := s.ListEvents(context.Background(), CategoryScheduleFire, 50)
 	if err != nil {
 		t.Fatalf("ListEvents: %v", err)
 	}
@@ -330,8 +330,8 @@ func TestScheduleFireTelemetry_IndependentlyQueryableAcrossThreeStreams(t *testi
 	// which would widen this package's dependency surface for a
 	// test-only need (mirroring 05's own documented reasoning for the
 	// identical choice).
-	s.LogEvent("", "dispatch_to_agent", "reflex", "some-reflex", `{"reflex_id":"rx-1"}`)
-	s.LogEvent("", "render_card", "selftool_reaction", "some_tool", `{"tool_name":"some_tool"}`)
+	s.LogEvent(context.Background(), "", "dispatch_to_agent", "reflex", "some-reflex", `{"reflex_id":"rx-1"}`)
+	s.LogEvent(context.Background(), "", "render_card", "selftool_reaction", "some_tool", `{"tool_name":"some_tool"}`)
 
 	inner := &fakeInnerRunner{err: nil}
 	runner := tracingTestRunner(inner, s, nil)
@@ -340,7 +340,7 @@ func TestScheduleFireTelemetry_IndependentlyQueryableAcrossThreeStreams(t *testi
 		t.Fatalf("Enqueue: unexpected error: %v", err)
 	}
 
-	reflexRows, err := s.ListEvents("reflex", 50)
+	reflexRows, err := s.ListEvents(context.Background(), "reflex", 50)
 	if err != nil {
 		t.Fatalf("ListEvents(reflex): %v", err)
 	}
@@ -348,7 +348,7 @@ func TestScheduleFireTelemetry_IndependentlyQueryableAcrossThreeStreams(t *testi
 		t.Fatalf("ListEvents(reflex) = %d rows, want 1", len(reflexRows))
 	}
 
-	reactionRows, err := s.ListEvents("selftool_reaction", 50)
+	reactionRows, err := s.ListEvents(context.Background(), "selftool_reaction", 50)
 	if err != nil {
 		t.Fatalf("ListEvents(selftool_reaction): %v", err)
 	}
@@ -356,7 +356,7 @@ func TestScheduleFireTelemetry_IndependentlyQueryableAcrossThreeStreams(t *testi
 		t.Fatalf("ListEvents(selftool_reaction) = %d rows, want 1", len(reactionRows))
 	}
 
-	scheduleRows, err := s.ListEvents(CategoryScheduleFire, 50)
+	scheduleRows, err := s.ListEvents(context.Background(), CategoryScheduleFire, 50)
 	if err != nil {
 		t.Fatalf("ListEvents(schedule_fire): %v", err)
 	}
@@ -364,7 +364,7 @@ func TestScheduleFireTelemetry_IndependentlyQueryableAcrossThreeStreams(t *testi
 		t.Fatalf("ListEvents(schedule_fire) = %d rows, want 1", len(scheduleRows))
 	}
 
-	all, err := s.ListEvents("", 50)
+	all, err := s.ListEvents(context.Background(), "", 50)
 	if err != nil {
 		t.Fatalf(`ListEvents(""): %v`, err)
 	}

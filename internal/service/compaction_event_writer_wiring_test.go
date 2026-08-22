@@ -53,7 +53,7 @@ func TestCompactionEventWriter_WiredAtAllThreeSites_EndToEnd(t *testing.T) {
 	}
 
 	sess := &store.Session{ID: "wire-sess-1", Title: "compaction wiring test"}
-	if err := s.CreateSession(sess); err != nil {
+	if err := s.CreateSession(context.Background(), sess); err != nil {
 		t.Fatalf("CreateSession: %v", err)
 	}
 
@@ -68,7 +68,7 @@ func TestCompactionEventWriter_WiredAtAllThreeSites_EndToEnd(t *testing.T) {
 		if i%2 == 1 {
 			role = "assistant"
 		}
-		if err := s.CreateMessage(&store.Message{
+		if err := s.CreateMessage(context.Background(), &store.Message{
 			ID:        fmt.Sprintf("wire-msg-%d", i),
 			SessionID: sess.ID,
 			Role:      role,

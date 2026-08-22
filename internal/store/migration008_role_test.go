@@ -1,6 +1,7 @@
 package store
 
 import (
+	"context"
 	"strings"
 	"testing"
 )
@@ -43,7 +44,7 @@ func TestMigration008_Idempotent(t *testing.T) {
 	s := newTestStore(t)
 
 	// Re-run migrate() (simulates a second startup).
-	if err := s.migrate(); err != nil {
+	if err := s.migrate(context.Background()); err != nil {
 		t.Fatalf("second migrate: %v", err)
 	}
 

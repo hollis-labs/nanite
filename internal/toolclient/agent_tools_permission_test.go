@@ -28,7 +28,7 @@ func newStoreForPermTest(t *testing.T) *store.Store {
 	if err != nil {
 		t.Fatalf("store.New: %v", err)
 	}
-	t.Cleanup(func() { _ = s.Close() })
+	t.Cleanup(func() { _ = s.Close(context.Background()) })
 	return s
 }
 
@@ -37,7 +37,7 @@ func TestCallTool_AgentToolsDeniesUngrantedTool(t *testing.T) {
 	ctx := context.Background()
 
 	agent := &store.AgentProfile{Name: "Readonly", Slug: "readonly-agent-tools", SystemPrompt: "test"}
-	if err := s.CreateAgent(agent); err != nil {
+	if err := s.CreateAgent(context.Background(), agent); err != nil {
 		t.Fatalf("CreateAgent: %v", err)
 	}
 
@@ -99,7 +99,7 @@ func TestCallTool_FreshAgentZeroToolsAllowedBeforeAnyGrant(t *testing.T) {
 	ctx := context.Background()
 
 	agent := &store.AgentProfile{Name: "Fresh", Slug: "fresh-agent-tools", SystemPrompt: "test"}
-	if err := s.CreateAgent(agent); err != nil {
+	if err := s.CreateAgent(context.Background(), agent); err != nil {
 		t.Fatalf("CreateAgent: %v", err)
 	}
 	if _, err := s.UpsertKnownTool(ctx, "read_file", "builtin", "available", ""); err != nil {
@@ -117,7 +117,7 @@ func TestHandleRequestToolsForAgent_AgentToolsDeniesUngrantedInnerName(t *testin
 	ctx := context.Background()
 
 	agent := &store.AgentProfile{Name: "Restricted", Slug: "restricted-request-tools", SystemPrompt: "test"}
-	if err := s.CreateAgent(agent); err != nil {
+	if err := s.CreateAgent(context.Background(), agent); err != nil {
 		t.Fatalf("CreateAgent: %v", err)
 	}
 	grantedID, err := s.UpsertKnownTool(ctx, "example_task_create", "builtin", "available", "")

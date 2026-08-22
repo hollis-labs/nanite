@@ -161,7 +161,7 @@ func BuildAgentDependencies(cfg AgentDepsConfig) (AgentDepsBundle, error) {
 
 	dbPath := cfg.DBPath
 	if dbPath == "" {
-		dbPath = cfg.Store.DBPath()
+		dbPath = cfg.Store.DBPath(context.TODO() /* TODO(ctx-sweep): no ctx available at this call site */)
 	}
 
 	stateSink := &agentRuntimeStateSink{store: cfg.Store}
@@ -410,11 +410,11 @@ type recoveryBrokerStore struct {
 }
 
 func (s *recoveryBrokerStore) MarkRuntimeRelaunching(sessionID, reason string) error {
-	return s.store.MarkAgentRuntimeRelaunching(sessionID, reason)
+	return s.store.MarkAgentRuntimeRelaunching(context.TODO() /* TODO(ctx-sweep): no ctx available at this call site */, sessionID, reason)
 }
 
 func (s *recoveryBrokerStore) WriteBreadcrumb(b broker.Breadcrumb) error {
-	return s.store.WriteRecoveryBreadcrumb(&store.RecoveryBreadcrumb{
+	return s.store.WriteRecoveryBreadcrumb(context.TODO() /* TODO(ctx-sweep): no ctx available at this call site */, &store.RecoveryBreadcrumb{
 		Timestamp:    b.Timestamp,
 		SessionID:    b.SessionID,
 		Class:        b.Class.String(),
@@ -529,10 +529,10 @@ type agentProfileResolver struct {
 
 func (r *agentProfileResolver) GetOrDefault(name string) (*store.AgentProfile, error) {
 	if name != "" {
-		if p, err := r.store.GetAgentBySlug(name); err == nil && p != nil {
+		if p, err := r.store.GetAgentBySlug(context.TODO() /* TODO(ctx-sweep): no ctx available at this call site */, name); err == nil && p != nil {
 			return p, nil
 		}
-		if p, err := r.store.GetAgent(name); err == nil && p != nil {
+		if p, err := r.store.GetAgent(context.TODO() /* TODO(ctx-sweep): no ctx available at this call site */, name); err == nil && p != nil {
 			return p, nil
 		}
 	}
@@ -560,7 +560,7 @@ func (s *agentRuntimeStore) CreateRuntimeRow(row *runtimeagent.RuntimeRow) error
 	if row.ParentSessionID != nil {
 		parent = *row.ParentSessionID
 	}
-	return s.store.CreateAgentRuntimeRow(&store.AgentRuntimeRow{
+	return s.store.CreateAgentRuntimeRow(context.TODO() /* TODO(ctx-sweep): no ctx available at this call site */, &store.AgentRuntimeRow{
 		ID:              row.ID,
 		AgentProfile:    row.AgentProfile,
 		Provider:        row.Provider,
@@ -575,7 +575,7 @@ func (s *agentRuntimeStore) CreateRuntimeRow(row *runtimeagent.RuntimeRow) error
 }
 
 func (s *agentRuntimeStore) MarkRuntimeFailed(id, reason string) error {
-	return s.store.MarkAgentRuntimeFailed(id, reason)
+	return s.store.MarkAgentRuntimeFailed(context.TODO() /* TODO(ctx-sweep): no ctx available at this call site */, id, reason)
 }
 
 // UpdateState delegates to the same store.SetAgentRuntimeState the
@@ -585,15 +585,15 @@ func (s *agentRuntimeStore) MarkRuntimeFailed(id, reason string) error {
 // directly — see runtimeagent.RuntimeStore.UpdateState's doc comment for
 // why.
 func (s *agentRuntimeStore) UpdateState(id, state string, pid int) error {
-	return s.store.SetAgentRuntimeState(id, state, pid)
+	return s.store.SetAgentRuntimeState(context.TODO() /* TODO(ctx-sweep): no ctx available at this call site */, id, state, pid)
 }
 
 func (s *agentRuntimeStore) SetProviderSessionID(id, providerSessionID string) error {
-	return s.store.SetAgentRuntimeProviderSessionID(id, providerSessionID)
+	return s.store.SetAgentRuntimeProviderSessionID(context.TODO() /* TODO(ctx-sweep): no ctx available at this call site */, id, providerSessionID)
 }
 
 func (s *agentRuntimeStore) GetCheckpoint(id string) (*runtimeagent.RuntimeCheckpoint, error) {
-	cp, err := s.store.GetAgentRuntimeCheckpoint(id)
+	cp, err := s.store.GetAgentRuntimeCheckpoint(context.TODO() /* TODO(ctx-sweep): no ctx available at this call site */, id)
 	if err != nil {
 		return nil, err
 	}
@@ -605,7 +605,7 @@ func (s *agentRuntimeStore) GetCheckpoint(id string) (*runtimeagent.RuntimeCheck
 }
 
 func (s *agentRuntimeStore) ListRunningRows() ([]*runtimeagent.RuntimeRow, error) {
-	rows, err := s.store.ListRunningAgentRuntimeRows()
+	rows, err := s.store.ListRunningAgentRuntimeRows(context.TODO() /* TODO(ctx-sweep): no ctx available at this call site */)
 	if err != nil {
 		return nil, err
 	}
@@ -634,14 +634,14 @@ func (s *agentRuntimeStore) ListRunningRows() ([]*runtimeagent.RuntimeRow, error
 }
 
 func (s *agentRuntimeStore) MarkRuntimeOrphaned(id, reason string) error {
-	return s.store.MarkAgentRuntimeOrphaned(id, reason)
+	return s.store.MarkAgentRuntimeOrphaned(context.TODO() /* TODO(ctx-sweep): no ctx available at this call site */, id, reason)
 }
 
 // LogEvent satisfies runtimeagent.RuntimeStore's postmortem-logging method
 // by delegating straight to the store's shared event_log writer — the same
 // sink chat_reflexes.go and recovery_pack_glue.go write through.
-func (s *agentRuntimeStore) LogEvent(sessionID, eventType, category, detail, metadata string) {
-	s.store.LogEvent(sessionID, eventType, category, detail, metadata)
+func (s *agentRuntimeStore) LogEvent(ctx context.Context, sessionID, eventType, category, detail, metadata string) {
+	s.store.LogEvent(ctx, sessionID, eventType, category, detail, metadata)
 }
 
 // marshalMeta projects an arbitrary map into a JSON string suitable for
@@ -668,7 +668,7 @@ type agentRuntimeStateSink struct {
 }
 
 func (s *agentRuntimeStateSink) UpdateSessionState(id string, state agentsessions.State, pid int, exit *int) error {
-	return s.store.SetAgentRuntimeState(id, string(state), pid)
+	return s.store.SetAgentRuntimeState(context.TODO() /* TODO(ctx-sweep): no ctx available at this call site */, id, string(state), pid)
 }
 
 // --- LiveSessions adapter ---

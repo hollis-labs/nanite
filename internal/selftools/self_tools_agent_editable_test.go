@@ -29,7 +29,7 @@ func seedAgent(t *testing.T, s *store.Store, name, slug, source, sourceRef strin
 		Source:       source,
 		SourceRef:    sourceRef,
 	}
-	if err := s.CreateAgent(a); err != nil {
+	if err := s.CreateAgent(context.Background(), a); err != nil {
 		t.Fatalf("seed agent %s: %v", slug, err)
 	}
 	return a
@@ -93,7 +93,7 @@ func TestSelfToolsTransport_UpdateAgent_RejectsNonEditableClasses(t *testing.T) 
 			}
 
 			// Verify the write never happened.
-			after, err := st.Store.GetAgent(seeded.ID)
+			after, err := st.Store.GetAgent(context.Background(), seeded.ID)
 			if err != nil {
 				t.Fatalf("get agent after rejected update: %v", err)
 			}
@@ -127,7 +127,7 @@ func TestSelfToolsTransport_UpdateAgent_AllowsManagedClass(t *testing.T) {
 		t.Fatalf("expected managed-class update to succeed, got error: %s", result.Content[0].Text)
 	}
 
-	after, err := st.Store.GetAgent(seeded.ID)
+	after, err := st.Store.GetAgent(context.Background(), seeded.ID)
 	if err != nil {
 		t.Fatalf("get agent after update: %v", err)
 	}
@@ -190,7 +190,7 @@ func TestSelfToolsTransport_CreateAgent_RejectsSlugCollisionWithNonEditableClass
 
 			// Verify no fabricated profile was written and the original is
 			// untouched.
-			after, err := st.Store.GetAgent(seeded.ID)
+			after, err := st.Store.GetAgent(context.Background(), seeded.ID)
 			if err != nil {
 				t.Fatalf("get agent after rejected create: %v", err)
 			}

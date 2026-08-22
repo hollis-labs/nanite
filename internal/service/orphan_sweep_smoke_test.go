@@ -54,7 +54,7 @@ func TestSmoke_OrphanSweep_LogsRealEventLogRow(t *testing.T) {
 		t.Fatalf("orphaned = %d, want 1", orphaned)
 	}
 
-	events, err := st.ListEvents("recovery", 50)
+	events, err := st.ListEvents(context.Background(), "recovery", 50)
 	if err != nil {
 		t.Fatalf("ListEvents: %v", err)
 	}
@@ -88,7 +88,7 @@ func TestSmoke_OrphanSweep_LogsRealEventLogRow(t *testing.T) {
 
 	// Confirm the row also actually flipped to orphaned in agent_runtime —
 	// this is a real reconciliation, not just a logging side-effect.
-	rows, err := st.ListRunningAgentRuntimeRows()
+	rows, err := st.ListRunningAgentRuntimeRows(context.Background())
 	if err != nil {
 		t.Fatalf("ListRunningAgentRuntimeRows: %v", err)
 	}

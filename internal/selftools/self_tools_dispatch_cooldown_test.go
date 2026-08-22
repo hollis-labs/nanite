@@ -26,7 +26,7 @@ func TestMatchDispatchToAgentReflex_RecurrenceOverride_SuppressesRefire(t *testi
 	ctx := context.Background()
 	s := newTestStore(t)
 
-	if err := s.CreateAgent(&store.AgentProfile{
+	if err := s.CreateAgent(context.Background(), &store.AgentProfile{
 		ID:           "agent-cooldown-probe",
 		Name:         "Agent Cooldown Probe",
 		Slug:         "agent-cooldown-probe",

@@ -27,10 +27,10 @@ func TestAssembleSlots_PlanReachesResult(t *testing.T) {
 	svc := NewContextService(ContextServiceConfig{Client: client})
 
 	sess := &store.Session{ID: "plan-sess"}
-	if err := s.CreateSession(sess); err != nil {
+	if err := s.CreateSession(context.Background(), sess); err != nil {
 		t.Fatalf("CreateSession: %v", err)
 	}
-	if err := s.CreateMessage(&store.Message{
+	if err := s.CreateMessage(context.Background(), &store.Message{
 		ID:        "plan-msg",
 		SessionID: sess.ID,
 		Role:      "user",
@@ -68,13 +68,13 @@ func TestAssembleSlots_StableCachePrefix_AcrossTurns(t *testing.T) {
 	svc := NewContextService(ContextServiceConfig{Client: client})
 
 	sess := &store.Session{ID: "prefix-sess"}
-	if err := s.CreateSession(sess); err != nil {
+	if err := s.CreateSession(context.Background(), sess); err != nil {
 		t.Fatalf("CreateSession: %v", err)
 	}
 	agent := &store.AgentProfile{ID: "prefix-agent", Slug: "p", Status: "active", SystemPrompt: "p"}
 
 	// Turn 1 — user asks to write code (intent=write_code → context slot ships if present).
-	if err := s.CreateMessage(&store.Message{ID: "t1", SessionID: sess.ID, Role: "user", Content: "write a new helper function"}); err != nil {
+	if err := s.CreateMessage(context.Background(), &store.Message{ID: "t1", SessionID: sess.ID, Role: "user", Content: "write a new helper function"}); err != nil {
 		t.Fatalf("CreateMessage t1: %v", err)
 	}
 	res1, err := svc.AssembleSlots(context.Background(), sess, agent, nil, "", 200000, "")
@@ -83,7 +83,7 @@ func TestAssembleSlots_StableCachePrefix_AcrossTurns(t *testing.T) {
 	}
 
 	// Turn 2 — user asks to review (intent=review_session → context slot skipped).
-	if err := s.CreateMessage(&store.Message{ID: "t2", SessionID: sess.ID, Role: "user", Content: "review our session history"}); err != nil {
+	if err := s.CreateMessage(context.Background(), &store.Message{ID: "t2", SessionID: sess.ID, Role: "user", Content: "review our session history"}); err != nil {
 		t.Fatalf("CreateMessage t2: %v", err)
 	}
 	res2, err := svc.AssembleSlots(context.Background(), sess, agent, nil, "", 200000, "")
@@ -222,7 +222,7 @@ func TestAssembleSlots_UniversalSlotShipsContent(t *testing.T) {
 	svc := NewContextService(ContextServiceConfig{Client: client})
 
 	sess := &store.Session{ID: "subagent-sess"}
-	if err := s.CreateSession(sess); err != nil {
+	if err := s.CreateSession(context.Background(), sess); err != nil {
 		t.Fatalf("CreateSession: %v", err)
 	}
 	// Empty SystemPrompt mirrors the c160 researcher subagent that
@@ -300,10 +300,10 @@ func TestAssembleSlots_ConversationNotInPlanDecider(t *testing.T) {
 	svc := NewContextService(ContextServiceConfig{Client: client})
 
 	sess := &store.Session{ID: "conv-sess"}
-	if err := s.CreateSession(sess); err != nil {
+	if err := s.CreateSession(context.Background(), sess); err != nil {
 		t.Fatalf("CreateSession: %v", err)
 	}
-	if err := s.CreateMessage(&store.Message{ID: "c1", SessionID: sess.ID, Role: "user", Content: "hi"}); err != nil {
+	if err := s.CreateMessage(context.Background(), &store.Message{ID: "c1", SessionID: sess.ID, Role: "user", Content: "hi"}); err != nil {
 		t.Fatalf("CreateMessage: %v", err)
 	}
 	agent := &store.AgentProfile{ID: "conv-agent", Slug: "c", Status: "active", SystemPrompt: "p"}

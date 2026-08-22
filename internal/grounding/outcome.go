@@ -1,6 +1,7 @@
 package grounding
 
 import (
+	"context"
 	"log/slog"
 	"strings"
 	"time"
@@ -125,7 +126,7 @@ func RecordOutcome(
 	for _, id := range consultationIDs {
 		o := outcome
 		o.ConsultationID = id
-		if err := logger.LogGroundingOutcome(o); err != nil {
+		if err := logger.LogGroundingOutcome(context.TODO() /* TODO(ctx-sweep): no ctx available at this call site */, o); err != nil {
 			slog.Warn("grounding: log outcome error (non-fatal)", "err", err, "consultation_id", id)
 		}
 	}

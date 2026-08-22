@@ -25,16 +25,19 @@ func newIngestTestStore(t *testing.T) *store.Store {
 	if err != nil {
 		t.Fatalf("store.New: %v", err)
 	}
-	t.Cleanup(func() { s.Close() })
+	t.Cleanup(func() {
+		s.Close(context.Background(
+
+		// TASKS/skills/01: every AutoIngestSkills/upsertSkillDef test formerly here
+		// (insert, idempotent reingest, content-freeze, provenance-transition sync)
+		// is deleted along with the functions themselves — see
+		// docs/engineering/architecture/20-skills.md's "Migration: clean slate, no
+		// carried-forward content" section. There is no more file-based skill
+		// ingestion pass to regression-test.
+		))
+	})
 	return s
 }
-
-// TASKS/skills/01: every AutoIngestSkills/upsertSkillDef test formerly here
-// (insert, idempotent reingest, content-freeze, provenance-transition sync)
-// is deleted along with the functions themselves — see
-// docs/engineering/architecture/20-skills.md's "Migration: clean slate, no
-// carried-forward content" section. There is no more file-based skill
-// ingestion pass to regression-test.
 
 // TestAutoIngestAgents_InsertNewAgent verifies that a previously unknown agent
 // is inserted into the DB with the correct metadata and H1 trust tier.
@@ -56,7 +59,7 @@ func TestAutoIngestAgents_InsertNewAgent(t *testing.T) {
 		t.Fatalf("expected 1 ingested agent, got %d", n)
 	}
 
-	a, err := st.GetAgentBySlug("my-agent")
+	a, err := st.GetAgentBySlug(context.Background(), "my-agent")
 	if err != nil {
 		t.Fatalf("GetAgentBySlug: %v", err)
 	}
@@ -97,7 +100,7 @@ func TestAutoIngestAgents_ClassHarness(t *testing.T) {
 		t.Fatalf("expected 1 ingested agent, got %d", n)
 	}
 
-	a, err := st.GetAgentBySlug("orchestrator")
+	a, err := st.GetAgentBySlug(context.Background(), "orchestrator")
 	if err != nil {
 		t.Fatalf("GetAgentBySlug: %v", err)
 	}
@@ -136,7 +139,7 @@ func TestAutoIngestAgents_InvalidClassNotSilent(t *testing.T) {
 	if n != 0 {
 		t.Fatalf("expected 0 ingested agents for a rejected class value, got %d", n)
 	}
-	if _, err := st.GetAgentBySlug("bogus-agent"); err == nil {
+	if _, err := st.GetAgentBySlug(context.Background(), "bogus-agent"); err == nil {
 		t.Fatal("expected no agent_profiles row for a rejected class value")
 	}
 
@@ -213,7 +216,7 @@ func TestAutoIngestAgents_UnknownToolNameIsLoud(t *testing.T) {
 	if n != 1 {
 		t.Fatalf("expected the profile to still ingest despite the bad tool names, got n=%d", n)
 	}
-	if _, err := st.GetAgentBySlug("typo-agent"); err != nil {
+	if _, err := st.GetAgentBySlug(context.Background(), "typo-agent"); err != nil {
 		t.Fatalf("expected agent_profiles row despite unknown tool names: %v", err)
 	}
 
@@ -422,7 +425,7 @@ func TestAutoIngestAgents_ReingestDoesNotOverwriteExistingRow(t *testing.T) {
 	def.SystemPrompt = "v2 prompt — should be ignored"
 	AutoIngestAgents(st, []*agentpkg.Definition{def}, nil)
 
-	a, err := st.GetAgentBySlug("update-agent")
+	a, err := st.GetAgentBySlug(context.Background(), "update-agent")
 	if err != nil {
 		t.Fatalf("GetAgentBySlug: %v", err)
 	}
@@ -457,7 +460,7 @@ func TestIngestAgentDefinition_ExplicitReimportStillSyncs(t *testing.T) {
 		t.Fatalf("IngestAgentDefinition (reimport): %v", err)
 	}
 
-	a, err := st.GetAgentBySlug("managed-agent")
+	a, err := st.GetAgentBySlug(context.Background(), "managed-agent")
 	if err != nil {
 		t.Fatalf("GetAgentBySlug: %v", err)
 	}
@@ -497,7 +500,7 @@ func TestAutoIngestAgents_DBEditSurvivesBootReingest(t *testing.T) {
 	// Re-run the boot-time pass with the unchanged file-derived def.
 	AutoIngestAgents(st, []*agentpkg.Definition{def}, nil)
 
-	a, err := st.GetAgentBySlug("project-agent")
+	a, err := st.GetAgentBySlug(context.Background(), "project-agent")
 	if err != nil {
 		t.Fatalf("GetAgentBySlug: %v", err)
 	}
@@ -549,7 +552,7 @@ func TestAutoIngestAgents_DirectDBMutationToInternalProfileSurvivesBootReingest(
 		t.Fatalf("expected 1 ingested agent on re-run, got %d", n)
 	}
 
-	a, err := st.GetAgentBySlug("internal-profile-under-test")
+	a, err := st.GetAgentBySlug(context.Background(), "internal-profile-under-test")
 	if err != nil {
 		t.Fatalf("GetAgentBySlug: %v", err)
 	}
@@ -608,7 +611,7 @@ func TestAutoIngestAgents_NewInternalDefStillIngestedAlongsideFrozenRow(t *testi
 		t.Fatalf("expected both defs to report as ingested (frozen no-op still counts as success), got %d", n)
 	}
 
-	frozen, err := st.GetAgentBySlug("already-there")
+	frozen, err := st.GetAgentBySlug(context.Background(), "already-there")
 	if err != nil {
 		t.Fatalf("GetAgentBySlug already-there: %v", err)
 	}
@@ -616,7 +619,7 @@ func TestAutoIngestAgents_NewInternalDefStillIngestedAlongsideFrozenRow(t *testi
 		t.Errorf("already-there SystemPrompt: got %q, want frozen v1", frozen.SystemPrompt)
 	}
 
-	created, err := st.GetAgentBySlug("brand-new")
+	created, err := st.GetAgentBySlug(context.Background(), "brand-new")
 	if err != nil {
 		t.Fatalf("GetAgentBySlug brand-new: %v", err)
 	}
@@ -647,7 +650,7 @@ func TestAutoIngestAgents_RolesTableUntouched(t *testing.T) {
 	// touch it, in either direction (no accidental creation of a second row,
 	// no accidental mutation of this one).
 	role := &store.Role{Slug: "sme", Name: "Subject Matter Expert", SystemPrompt: "v1"}
-	if err := st.CreateRole(role); err != nil {
+	if err := st.CreateRole(context.Background(), role); err != nil {
 		t.Fatalf("CreateRole: %v", err)
 	}
 
@@ -656,14 +659,14 @@ func TestAutoIngestAgents_RolesTableUntouched(t *testing.T) {
 	}
 	AutoIngestAgents(st, agentDefs, nil)
 
-	roles, err := st.ListRoles()
+	roles, err := st.ListRoles(context.Background())
 	if err != nil {
 		t.Fatalf("ListRoles: %v", err)
 	}
 	if len(roles) != 1 {
 		t.Fatalf("expected exactly the 1 directly-seeded role to remain, got %d -- AutoIngestAgents must never write to roles", len(roles))
 	}
-	got, err := st.GetRoleBySlug("sme")
+	got, err := st.GetRoleBySlug(context.Background(), "sme")
 	if err != nil || got == nil {
 		t.Fatalf("GetRoleBySlug: %v, %v", got, err)
 	}
@@ -700,7 +703,7 @@ func TestAutoIngestAgents_SourceFlipFromBuiltinToInternal(t *testing.T) {
 		Source:       "builtin",
 		SourceRef:    "embedded:legacy-path",
 	}
-	if err := st.CreateAgent(existing); err != nil {
+	if err := st.CreateAgent(context.Background(), existing); err != nil {
 		t.Fatalf("seed CreateAgent: %v", err)
 	}
 
@@ -718,7 +721,7 @@ func TestAutoIngestAgents_SourceFlipFromBuiltinToInternal(t *testing.T) {
 		t.Fatalf("AutoIngestAgents count: got %d, want 1", n)
 	}
 
-	got, err := st.GetAgentBySlug(slug)
+	got, err := st.GetAgentBySlug(context.Background(), slug)
 	if err != nil {
 		t.Fatalf("GetAgentBySlug: %v", err)
 	}
@@ -744,7 +747,7 @@ func TestAutoIngestAgents_SourceFlipFromBuiltinToInternal(t *testing.T) {
 	if n := AutoIngestAgents(st, []*agentpkg.Definition{def}, nil); n != 1 {
 		t.Fatalf("AutoIngestAgents count (3rd pass): got %d, want 1", n)
 	}
-	gotAfterFreeze, err := st.GetAgentBySlug(slug)
+	gotAfterFreeze, err := st.GetAgentBySlug(context.Background(), slug)
 	if err != nil {
 		t.Fatalf("GetAgentBySlug (3rd pass): %v", err)
 	}

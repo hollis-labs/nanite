@@ -77,7 +77,7 @@ func TestMigrate126SeedsSelftoolReactionKinds(t *testing.T) {
 	assertGooseHasNothingPending(t, s)
 
 	// Simulated restart: a second full migrate() must be a clean no-op.
-	if err := s.migrate(); err != nil {
+	if err := s.migrate(context.Background()); err != nil {
 		t.Fatalf("re-migrate after 126 already applied: %v", err)
 	}
 }

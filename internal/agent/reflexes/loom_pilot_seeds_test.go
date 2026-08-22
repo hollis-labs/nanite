@@ -15,7 +15,7 @@ import (
 // .nanite/agents/loom-weaver.md / loom-curator.md.
 func seedLoomPilotAgents(t *testing.T, st *store.Store) (weaverID, curatorID string) {
 	t.Helper()
-	if err := st.CreateAgent(&store.AgentProfile{
+	if err := st.CreateAgent(context.Background(), &store.AgentProfile{
 		ID:           "profile-loom-weaver",
 		Name:         "Loom Weaver",
 		Slug:         "loom-weaver",
@@ -25,7 +25,7 @@ func seedLoomPilotAgents(t *testing.T, st *store.Store) (weaverID, curatorID str
 	}); err != nil {
 		t.Fatalf("CreateAgent(loom-weaver): %v", err)
 	}
-	if err := st.CreateAgent(&store.AgentProfile{
+	if err := st.CreateAgent(context.Background(), &store.AgentProfile{
 		ID:           "profile-loom-curator",
 		Name:         "Loom Curator",
 		Slug:         "loom-curator",
@@ -165,7 +165,7 @@ func TestSeedAgentReflexesBySlug_SkipsUningestedAgentGracefully(t *testing.T) {
 func TestSeedAgentReflexesBySlug_SeedsPartialSetWhenOnlyOneAgentIngested(t *testing.T) {
 	ctx := context.Background()
 	st := newReflexTestStore(t)
-	if err := st.CreateAgent(&store.AgentProfile{
+	if err := st.CreateAgent(context.Background(), &store.AgentProfile{
 		ID:           "profile-loom-weaver",
 		Name:         "Loom Weaver",
 		Slug:         "loom-weaver",

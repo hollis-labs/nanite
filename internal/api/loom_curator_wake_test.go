@@ -72,14 +72,18 @@ func newTestAPIWithLoomCurator(t *testing.T) (*API, *http.ServeMux) {
 	if err != nil {
 		t.Fatalf("store.New: %v", err)
 	}
-	t.Cleanup(func() { s.Close() })
-	// A real boot (cmd/nanite/main.go) calls Seed() right after store.New,
-	// which is what creates the "default" workspace row the wake handler's
-	// hardcoded WorkspaceID depends on (see loom_curator_wake.go). newTestAPI
-	// (api_test.go) skips this, so it must be done explicitly here for the
-	// session-creation FK constraint to resolve the same way it does in
-	// production.
-	if err := s.Seed(); err != nil {
+	t.Cleanup(func() {
+		s.Close(context.
+			// A real boot (cmd/nanite/main.go) calls Seed() right after store.New,
+			// which is what creates the "default" workspace row the wake handler's
+			// hardcoded WorkspaceID depends on (see loom_curator_wake.go). newTestAPI
+			// (api_test.go) skips this, so it must be done explicitly here for the
+			// session-creation FK constraint to resolve the same way it does in
+			// production.
+			Background())
+	})
+
+	if err := s.Seed(context.Background()); err != nil {
 		t.Fatalf("Seed: %v", err)
 	}
 
@@ -122,7 +126,7 @@ func newTestAPIWithLoomCurator(t *testing.T) (*API, *http.ServeMux) {
 func TestLoomCuratorInstanceSeededFromDurableConfigDrop(t *testing.T) {
 	a, _ := newTestAPIWithLoomCurator(t)
 
-	inst, err := a.Services.Store.GetDurableAgentInstanceBySlug("loom-curator")
+	inst, err := a.Services.Store.GetDurableAgentInstanceBySlug(context.Background(), "loom-curator")
 	if err != nil {
 		t.Fatalf("loom-curator instance not seeded: %v", err)
 	}
@@ -178,7 +182,7 @@ func TestLoomCuratorWake_FEPayloadShape(t *testing.T) {
 		t.Fatalf("wake_reason = %q, want callback:wiki_page", resp.WakeReason)
 	}
 
-	inst, err := a.Services.Store.GetDurableAgentInstanceBySlug("loom-curator")
+	inst, err := a.Services.Store.GetDurableAgentInstanceBySlug(context.Background(), "loom-curator")
 	if err != nil {
 		t.Fatalf("get instance: %v", err)
 	}
@@ -230,7 +234,7 @@ func TestLoomCuratorWake_DeliversRealTurn(t *testing.T) {
 		t.Fatalf("wake result missing launch_result/session: %+v", resp)
 	}
 
-	messages, err := a.Services.Store.ListMessages(resp.LaunchResult.Session.ID, 10)
+	messages, err := a.Services.Store.ListMessages(context.Background(), resp.LaunchResult.Session.ID, 10)
 	if err != nil {
 		t.Fatalf("ListMessages: %v", err)
 	}
@@ -283,7 +287,7 @@ func TestLoomCuratorScheduleSeededFromDurableConfigDrop(t *testing.T) {
 	a, _ := newTestAPIWithLoomCurator(t)
 	ctx := context.Background()
 
-	inst, err := a.Services.Store.GetDurableAgentInstanceBySlug("loom-curator")
+	inst, err := a.Services.Store.GetDurableAgentInstanceBySlug(context.Background(), "loom-curator")
 	if err != nil {
 		t.Fatalf("loom-curator instance not seeded: %v", err)
 	}

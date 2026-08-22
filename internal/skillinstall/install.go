@@ -80,9 +80,9 @@ type vendorDeleter interface {
 // depends on for the index-upsert step. A real *store.Store satisfies
 // this directly.
 type IndexStore interface {
-	GetSkillBySlug(slug string) (*store.Skill, error)
-	CreateSkill(sk *store.Skill) error
-	UpdateSkill(sk *store.Skill) error
+	GetSkillBySlug(ctx context.Context, slug string) (*store.Skill, error)
+	CreateSkill(ctx context.Context, sk *store.Skill) error
+	UpdateSkill(ctx context.Context, sk *store.Skill) error
 }
 
 // Result is what a successful Install call returns.
@@ -260,7 +260,7 @@ func (i *Installer) upsertIndex(def *skill.Definition, address string, deps []st
 		return nil, fmt.Errorf("marshal declared dependencies: %w", err)
 	}
 
-	existing, err := i.Index.GetSkillBySlug(def.Slug)
+	existing, err := i.Index.GetSkillBySlug(context.TODO() /* TODO(ctx-sweep): no ctx available at this call site */, def.Slug)
 	if err != nil {
 		return nil, fmt.Errorf("lookup existing skill %q: %w", def.Slug, err)
 	}
@@ -281,7 +281,7 @@ func (i *Installer) upsertIndex(def *skill.Definition, address string, deps []st
 		// real UUID, exactly like every other real CreateSkill caller in
 		// this codebase already gets.
 		fresh.ID = ""
-		if err := i.Index.CreateSkill(fresh); err != nil {
+		if err := i.Index.CreateSkill(context.TODO() /* TODO(ctx-sweep): no ctx available at this call site */, fresh); err != nil {
 			return nil, fmt.Errorf("create skill index row: %w", err)
 		}
 		return fresh, nil
@@ -299,7 +299,7 @@ func (i *Installer) upsertIndex(def *skill.Definition, address string, deps []st
 		updated.ContentHash = address
 		updated.Version = existing.Version + 1
 	}
-	if err := i.Index.UpdateSkill(&updated); err != nil {
+	if err := i.Index.UpdateSkill(context.TODO() /* TODO(ctx-sweep): no ctx available at this call site */, &updated); err != nil {
 		return nil, fmt.Errorf("update skill index row %q: %w", updated.ID, err)
 	}
 	return &updated, nil

@@ -95,7 +95,7 @@ func TestAttemptReflexDispatch_RunScopedReflex_IsolatedToItsOwnRun(t *testing.T)
 	if err != nil {
 		t.Fatalf("store.New: %v", err)
 	}
-	t.Cleanup(func() { _ = st.Close() })
+	t.Cleanup(func() { _ = st.Close(context.Background()) })
 
 	insertTestTeamRunMember(t, st, "sess-in-run-a", "run-A")
 	insertTestTeamRunMember(t, st, "sess-in-run-b", "run-B")
@@ -223,10 +223,13 @@ func TestAttemptReflexDispatch_NoTeamRunMembersTable_DegradesGracefully(t *testi
 	if err != nil {
 		t.Fatalf("store.New: %v", err)
 	}
-	t.Cleanup(func() { _ = st.Close() })
-	// Deliberately no createTestTeamRunMembers(t, st) call — this database
-	// has never had team_run_members created at all, the real-world state
-	// of every database that has run migration 131 but not task 02's.
+	t.Cleanup(func() {
+		_ = st.Close(context.
+			// Deliberately no createTestTeamRunMembers(t, st) call — this database
+			// has never had team_run_members created at all, the real-world state
+			// of every database that has run migration 131 but not task 02's.
+			Background())
+	})
 
 	if _, err := st.InsertAgentReflex(context.Background(), store.AgentReflex{
 		ClassTag:    "advisor",

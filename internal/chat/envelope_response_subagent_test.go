@@ -20,8 +20,9 @@ func newTestSubagentSvc(t *testing.T) *subagent.Service {
 	if err != nil {
 		t.Fatalf("store.New: %v", err)
 	}
-	t.Cleanup(func() { _ = s.Close() })
-	_ = s.Seed() // idempotent
+	t.Cleanup(func() { _ = s.Close(context.Background()) })
+	_ = s.Seed(context. // idempotent
+				Background())
 
 	emitter := &stubApprovalEmitter{} // local fake
 	settings := subagentSettingsStub{required: true}
@@ -39,7 +40,7 @@ func (stubApprovalEmitter) Emit(_ context.Context, sessionID, envelopeType strin
 // subagentSettingsStub: satisfies subagent.SettingsReader.
 type subagentSettingsStub struct{ required bool }
 
-func (s subagentSettingsStub) GetUserSettings() (*store.UserSettings, error) {
+func (s subagentSettingsStub) GetUserSettings(ctx context.Context) (*store.UserSettings, error) {
 	return &store.UserSettings{SubagentApprovalRequired: s.required}, nil
 }
 

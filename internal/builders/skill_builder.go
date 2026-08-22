@@ -1,6 +1,7 @@
 package builders
 
 import (
+	"context"
 	"fmt"
 	"strings"
 
@@ -60,7 +61,7 @@ func NewSkillBuilder(s *store.Store) *Builder {
 				Category:    category,
 			}
 
-			if err := s.CreateSkill(skill); err != nil {
+			if err := s.CreateSkill(context.TODO() /* TODO(ctx-sweep): no ctx available at this call site */, skill); err != nil {
 				return nil, fmt.Errorf("create skill: %w", err)
 			}
 

@@ -1,6 +1,9 @@
 package store
 
-import "time"
+import (
+	"context"
+	"time"
+)
 
 // EventLog represents an operational event for learning and diagnostics.
 type EventLog struct {
@@ -14,18 +17,18 @@ type EventLog struct {
 }
 
 // LogEvent appends an event to the event log.
-func (s *Store) LogEvent(sessionID, eventType, category, detail, metadata string) {
+func (s *Store) LogEvent(ctx context.Context, sessionID, eventType, category, detail, metadata string) {
 	if metadata == "" {
 		metadata = "{}"
 	}
-	_, _ = s.DB.Exec(
+	_, _ = s.DB.ExecContext(ctx,
 		`INSERT INTO event_log (session_id, event_type, category, detail, metadata) VALUES (?, ?, ?, ?, ?)`,
 		sessionID, eventType, category, detail, metadata,
 	)
 }
 
 // ListEvents returns recent events, optionally filtered by category.
-func (s *Store) ListEvents(category string, limit int) ([]EventLog, error) {
+func (s *Store) ListEvents(ctx context.Context, category string, limit int) ([]EventLog, error) {
 	if limit <= 0 {
 		limit = 50
 	}
@@ -40,7 +43,7 @@ func (s *Store) ListEvents(category string, limit int) ([]EventLog, error) {
 		args = []any{limit}
 	}
 
-	rows, err := s.DB.Query(query, args...)
+	rows, err := s.DB.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -60,9 +63,9 @@ func (s *Store) ListEvents(category string, limit int) ([]EventLog, error) {
 }
 
 // CountSessionToolCalls returns the number of tool_call events for a session.
-func (s *Store) CountSessionToolCalls(sessionID string) int {
+func (s *Store) CountSessionToolCalls(ctx context.Context, sessionID string) int {
 	var count int
-	_ = s.DB.QueryRow(
+	_ = s.DB.QueryRowContext(ctx,
 		`SELECT COUNT(*) FROM event_log WHERE session_id = ? AND event_type = 'tool_call'`,
 		sessionID,
 	).Scan(&count)

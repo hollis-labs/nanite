@@ -53,7 +53,7 @@ func TestReminderEngine_TurnCountFiresAndInjectsSlot(t *testing.T) {
 		Text:        "Don't forget to create that ticket!",
 		TriggerJSON: `{"type":"turn_count","n":2}`,
 	}
-	if err := s.CreateReminder(r); err != nil {
+	if err := s.CreateReminder(context.Background(), r); err != nil {
 		t.Fatalf("CreateReminder: %v", err)
 	}
 
@@ -104,7 +104,7 @@ func TestReminderEngine_TurnCountFiresAndInjectsSlot(t *testing.T) {
 	svc := NewContextService(ContextServiceConfig{Client: client})
 
 	sess := &store.Session{ID: sessionID, Title: "ReminderWireupTest"}
-	if err := s.CreateSession(sess); err != nil {
+	if err := s.CreateSession(context.Background(), sess); err != nil {
 		t.Fatalf("CreateSession: %v", err)
 	}
 	agent := &store.AgentProfile{
@@ -173,7 +173,7 @@ func TestReminderEngine_TimeTriggerReachesLLMSlotBlocks(t *testing.T) {
 
 	sessionID := "sess-time-reminder"
 	sess := &store.Session{ID: sessionID, Title: "TimeReminderRegression"}
-	if err := s.CreateSession(sess); err != nil {
+	if err := s.CreateSession(context.Background(), sess); err != nil {
 		t.Fatalf("CreateSession: %v", err)
 	}
 
@@ -185,7 +185,7 @@ func TestReminderEngine_TimeTriggerReachesLLMSlotBlocks(t *testing.T) {
 		Text:        "User wanted a status check on the build.",
 		TriggerJSON: fmt.Sprintf(`{"type":"time","at":%q}`, fireAt),
 	}
-	if err := s.CreateReminder(r); err != nil {
+	if err := s.CreateReminder(context.Background(), r); err != nil {
 		t.Fatalf("CreateReminder: %v", err)
 	}
 
@@ -199,7 +199,7 @@ func TestReminderEngine_TimeTriggerReachesLLMSlotBlocks(t *testing.T) {
 	}
 
 	// Verify fired_at is set in the DB (acceptance criterion 1).
-	got, err := s.GetReminder(r.ID)
+	got, err := s.GetReminder(context.Background(), r.ID)
 	if err != nil {
 		t.Fatalf("GetReminder: %v", err)
 	}
@@ -301,7 +301,7 @@ func TestReminderEngine_TurnCountFiresThroughInjectionPipeline(t *testing.T) {
 	engine := reminders.NewEngine(s)
 	sessionID := "sess-turn-pipeline"
 	sess := &store.Session{ID: sessionID, Title: "TurnReminderPipeline"}
-	if err := s.CreateSession(sess); err != nil {
+	if err := s.CreateSession(context.Background(), sess); err != nil {
 		t.Fatalf("CreateSession: %v", err)
 	}
 
@@ -311,7 +311,7 @@ func TestReminderEngine_TurnCountFiresThroughInjectionPipeline(t *testing.T) {
 		Text:        "Time-boxed reminder that should reach the LLM.",
 		TriggerJSON: `{"type":"turn_count","n":1}`,
 	}
-	if err := s.CreateReminder(r); err != nil {
+	if err := s.CreateReminder(context.Background(), r); err != nil {
 		t.Fatalf("CreateReminder: %v", err)
 	}
 	engine.RegisterTurnCount(r.ID, 0)
@@ -421,7 +421,7 @@ func TestReminderEngine_SessionMessageCountAsTurnCounter(t *testing.T) {
 
 	sessionID := "sess-turn-count"
 	sess := &store.Session{ID: sessionID, Title: "TurnCounterTest"}
-	if err := s.CreateSession(sess); err != nil {
+	if err := s.CreateSession(context.Background(), sess); err != nil {
 		t.Fatalf("CreateSession: %v", err)
 	}
 
@@ -433,13 +433,13 @@ func TestReminderEngine_SessionMessageCountAsTurnCounter(t *testing.T) {
 			Role:      "user",
 			Content:   "turn message",
 		}
-		if err := s.CreateMessage(msg); err != nil {
+		if err := s.CreateMessage(context.Background(), msg); err != nil {
 			t.Fatalf("CreateMessage %d: %v", i, err)
 		}
 	}
 
 	// Reload the session to get the DB-updated MessageCount.
-	reloaded, err := s.GetSession(sessionID)
+	reloaded, err := s.GetSession(context.Background(), sessionID)
 	if err != nil {
 		t.Fatalf("GetSession: %v", err)
 	}
@@ -455,7 +455,7 @@ func TestReminderEngine_SessionMessageCountAsTurnCounter(t *testing.T) {
 		Text:        "Turn counter check reminder",
 		TriggerJSON: `{"type":"turn_count","n":2}`,
 	}
-	if err := s.CreateReminder(r); err != nil {
+	if err := s.CreateReminder(context.Background(), r); err != nil {
 		t.Fatalf("CreateReminder: %v", err)
 	}
 	engine.RegisterTurnCount(r.ID, 0)

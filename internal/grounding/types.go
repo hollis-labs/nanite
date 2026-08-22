@@ -18,7 +18,10 @@
 // no-op and no rows are written.
 package grounding
 
-import "time"
+import (
+	"context"
+	"time"
+)
 
 // DefaultRecallLimit is the number of memories fetched per turn when not
 // overridden. E3 / settings may lower this; never exceed 10 in v1.
@@ -156,8 +159,8 @@ type ConsultationLogger interface {
 	// LogGroundingConsultation persists one consultation entry.
 	// Returns the auto-assigned row ID so outcome write-back can reference it.
 	// Errors are returned; callers should log and continue — never gate dispatch.
-	LogGroundingConsultation(entry ConsultationEntry) (int64, error)
+	LogGroundingConsultation(ctx context.Context, entry ConsultationEntry) (int64, error)
 
 	// LogGroundingOutcome persists one outcome entry referencing a consultation row.
-	LogGroundingOutcome(outcome Outcome) error
+	LogGroundingOutcome(ctx context.Context, outcome Outcome) error
 }

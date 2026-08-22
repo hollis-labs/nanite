@@ -60,13 +60,15 @@ func TestRealBackupGoalEvidenceMigrationAppliesCleanly(t *testing.T) {
 	if err != nil {
 		t.Fatalf("open+migrate scratch copy of real backup db (migration 140 goal_evidence): %v", err)
 	}
-	defer rs.Close()
+	defer rs.Close(context.
 
-	// Sanity-check this is a real, populated backup (not an accidentally-
-	// empty file) -- confirms the migration ran against a real prior schema
-	// state with real application data alongside it, not a no-op empty DB
-	// indistinguishable from the fixture-based tests in
-	// goal_evidence_test.go.
+		// Sanity-check this is a real, populated backup (not an accidentally-
+		// empty file) -- confirms the migration ran against a real prior schema
+		// state with real application data alongside it, not a no-op empty DB
+		// indistinguishable from the fixture-based tests in
+		// goal_evidence_test.go.
+		Background())
+
 	var sessionCount int
 	if err := rs.DB.QueryRowContext(ctx, `SELECT COUNT(*) FROM sessions`).Scan(&sessionCount); err != nil {
 		t.Fatalf("sanity-check pre-existing sessions count on real backup copy: %v", err)

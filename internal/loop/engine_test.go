@@ -39,7 +39,7 @@ func newTestLoopStore(t *testing.T) *store.Store {
 	if err != nil {
 		t.Fatalf("store.New: %v", err)
 	}
-	t.Cleanup(func() { s.Close() })
+	t.Cleanup(func() { s.Close(context.Background()) })
 	return s
 }
 
@@ -57,7 +57,7 @@ func newLoopEngineTestFixtures(t *testing.T, exec agentworkflow.StepExecutor) (*
 func createTestLoopAgentProfile(t *testing.T, st *store.Store, slug string) *store.AgentProfile {
 	t.Helper()
 	p := &store.AgentProfile{Name: slug, Slug: slug, SystemPrompt: "you are " + slug}
-	if err := st.CreateAgent(p); err != nil {
+	if err := st.CreateAgent(context.Background(), p); err != nil {
 		t.Fatalf("CreateAgent(%s): %v", slug, err)
 	}
 	return p
@@ -186,7 +186,7 @@ func TestLoopEngine_Run_MultiIterationLoop_CompletesOnGoalMet(t *testing.T) {
 			t.Fatalf("iterations[%d].Decision = %q, want %q", i, it.Decision, wantDecisions[i])
 		}
 
-		run, err := st.GetWorkflowRun(it.WorkflowRunID)
+		run, err := st.GetWorkflowRun(context.Background(), it.WorkflowRunID)
 		if err != nil {
 			t.Fatalf("GetWorkflowRun(%s): %v", it.WorkflowRunID, err)
 		}

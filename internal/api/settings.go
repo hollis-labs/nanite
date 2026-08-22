@@ -10,7 +10,7 @@ import (
 )
 
 func (a *API) handleGetSettings(w http.ResponseWriter, r *http.Request) {
-	settings, err := a.Services.Store.GetUserSettings()
+	settings, err := a.Services.Store.GetUserSettings(r.Context())
 	if err != nil {
 		a.errorResp(w, http.StatusInternalServerError, "failed to load settings")
 		return
@@ -62,7 +62,7 @@ func (a *API) handleEmbeddingProviders(w http.ResponseWriter, r *http.Request) {
 
 func (a *API) handleUpdateSettings(w http.ResponseWriter, r *http.Request) {
 	// Read existing settings first for partial merge.
-	existing, err := a.Services.Store.GetUserSettings()
+	existing, err := a.Services.Store.GetUserSettings(r.Context())
 	if err != nil {
 		a.errorResp(w, http.StatusInternalServerError, "failed to load current settings")
 		return
@@ -210,7 +210,7 @@ func (a *API) handleUpdateSettings(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	if err := a.Services.Store.UpdateUserSettings(existing); err != nil {
+	if err := a.Services.Store.UpdateUserSettings(r.Context(), existing); err != nil {
 		a.errorResp(w, http.StatusInternalServerError, "failed to update settings")
 		return
 	}

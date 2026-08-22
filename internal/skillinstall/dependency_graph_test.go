@@ -23,12 +23,12 @@ type fakeGraphIndex struct {
 	calls  int
 }
 
-func (f *fakeGraphIndex) GetSkillBySlug(slug string) (*store.Skill, error) {
+func (f *fakeGraphIndex) GetSkillBySlug(ctx context.Context, slug string) (*store.Skill, error) {
 	f.calls++
 	return f.skills[slug], nil
 }
-func (f *fakeGraphIndex) CreateSkill(sk *store.Skill) error { return nil }
-func (f *fakeGraphIndex) UpdateSkill(sk *store.Skill) error { return nil }
+func (f *fakeGraphIndex) CreateSkill(ctx context.Context, sk *store.Skill) error { return nil }
+func (f *fakeGraphIndex) UpdateSkill(ctx context.Context, sk *store.Skill) error { return nil }
 
 func (f *fakeGraphIndex) put(slug string, deps ...string) {
 	if f.skills == nil {
@@ -231,7 +231,7 @@ func TestInstall_DependencyCycle_RejectedAtInstallTime(t *testing.T) {
 
 	// No partial state: "a" was never indexed, and nothing beyond "b"'s
 	// own already-vendored content exists.
-	sk, err := idx.GetSkillBySlug("a")
+	sk, err := idx.GetSkillBySlug(context.Background(), "a")
 	if err != nil {
 		t.Fatalf("GetSkillBySlug: %v", err)
 	}
@@ -273,7 +273,7 @@ func TestInstall_RecursionLimitExceeded_RejectedAtInstallTime(t *testing.T) {
 		t.Fatalf("expected *RecursionLimitError, got %T: %v", err, err)
 	}
 
-	sk, err := idx.GetSkillBySlug("root")
+	sk, err := idx.GetSkillBySlug(context.Background(), "root")
 	if err != nil {
 		t.Fatalf("GetSkillBySlug: %v", err)
 	}

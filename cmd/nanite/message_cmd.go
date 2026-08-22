@@ -90,7 +90,7 @@ func cmdMessage(args []string) {
 	if err != nil {
 		slogx.Fatal("message: open db", "path", dbPath, "err", err)
 	}
-	defer s.Close()
+	defer s.Close(context.TODO() /* TODO(ctx-sweep): no ctx available at this call site */)
 
 	svc, err := newMessagingServiceForCLI(s)
 	if err != nil {

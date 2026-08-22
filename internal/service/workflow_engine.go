@@ -20,11 +20,11 @@ import (
 // WorkflowRunStore is the narrow persistence surface the built-in engine
 // needs. *store.Store satisfies it structurally; tests supply a fake.
 type WorkflowRunStore interface {
-	CreateWorkflowRun(row *store.WorkflowRunRow) error
-	SetWorkflowRunStatus(id, status, errMsg string, completedAt time.Time) error
-	GetWorkflowRun(id string) (*store.WorkflowRunRow, error)
-	UpsertWorkflowRunStep(row *store.WorkflowRunStepRow) error
-	ListWorkflowRunSteps(runID string) ([]*store.WorkflowRunStepRow, error)
+	CreateWorkflowRun(ctx context.Context, row *store.WorkflowRunRow) error
+	SetWorkflowRunStatus(ctx context.Context, id, status, errMsg string, completedAt time.Time) error
+	GetWorkflowRun(ctx context.Context, id string) (*store.WorkflowRunRow, error)
+	UpsertWorkflowRunStep(ctx context.Context, row *store.WorkflowRunStepRow) error
+	ListWorkflowRunSteps(ctx context.Context, runID string) ([]*store.WorkflowRunStepRow, error)
 }
 
 // BuiltinWorkflowEngine is the DAG-executing agentworkflow.WorkflowEngine
@@ -124,13 +124,13 @@ func (e *BuiltinWorkflowEngine) Run(ctx context.Context, wf agentworkflow.Workfl
 		return agentworkflow.WorkflowResult{}, fmt.Errorf("agentworkflow: marshal workflow input: %w", err)
 	}
 	runID := ulid.Make().String()
-	if err := e.store.CreateWorkflowRun(&store.WorkflowRunRow{
+	if err := e.store.CreateWorkflowRun(ctx, &store.WorkflowRunRow{
 		ID: runID, DefinitionName: wf.Name, Status: "running", InputJSON: string(inputJSON),
 	}); err != nil {
 		return agentworkflow.WorkflowResult{}, fmt.Errorf("agentworkflow: create run: %w", err)
 	}
 	for _, s := range wf.Steps {
-		if err := e.store.UpsertWorkflowRunStep(&store.WorkflowRunStepRow{
+		if err := e.store.UpsertWorkflowRunStep(ctx, &store.WorkflowRunStepRow{
 			WorkflowRunID: runID, StepID: s.ID, Kind: string(s.Kind), Status: "pending",
 		}); err != nil {
 			return agentworkflow.WorkflowResult{}, fmt.Errorf("agentworkflow: pre-register step %q: %w", s.ID, err)
@@ -161,7 +161,7 @@ func (e *BuiltinWorkflowEngine) Resume(ctx context.Context, runID string, wf age
 		return agentworkflow.WorkflowResult{}, fmt.Errorf("agentworkflow builtin engine: no store configured")
 	}
 
-	runRow, err := e.store.GetWorkflowRun(runID)
+	runRow, err := e.store.GetWorkflowRun(ctx, runID)
 	if err != nil {
 		return agentworkflow.WorkflowResult{}, fmt.Errorf("agentworkflow: resume %s: %w", runID, err)
 	}
@@ -173,7 +173,7 @@ func (e *BuiltinWorkflowEngine) Resume(ctx context.Context, runID string, wf age
 	}
 	input := agentworkflow.WorkflowInput{Params: params}
 
-	persisted, err := e.store.ListWorkflowRunSteps(runID)
+	persisted, err := e.store.ListWorkflowRunSteps(ctx, runID)
 	if err != nil {
 		return agentworkflow.WorkflowResult{}, fmt.Errorf("agentworkflow: resume %s: list steps: %w", runID, err)
 	}
@@ -379,7 +379,8 @@ func (e *BuiltinWorkflowEngine) execute(
 					Output: "skipped: an upstream dependency failed or was skipped",
 				}
 				results[oc.stepID] = sr
-				if err := e.store.UpsertWorkflowRunStep(&store.WorkflowRunStepRow{
+				// Outcome bookkeeping must survive cancellation of the workflow it records.
+				if err := e.store.UpsertWorkflowRunStep(context.WithoutCancel(ctx), &store.WorkflowRunStepRow{
 					WorkflowRunID: runID, StepID: oc.stepID, Kind: string(byID[oc.stepID].Kind),
 					Status: "skipped", Output: sr.Output, IsError: true, CompletedAt: time.Now().UTC(),
 				}); err != nil {
@@ -426,7 +427,7 @@ func (e *BuiltinWorkflowEngine) finishRun(
 	if status == agentworkflow.RunStatusCompleted || status == agentworkflow.RunStatusFailed {
 		completedAt = time.Now().UTC()
 	}
-	if err := e.store.SetWorkflowRunStatus(runID, dbStatus, errMsg, completedAt); err != nil {
+	if err := e.store.SetWorkflowRunStatus(context.TODO() /* TODO(ctx-sweep): no ctx available at this call site */, runID, dbStatus, errMsg, completedAt); err != nil {
 		return agentworkflow.WorkflowResult{}, fmt.Errorf("agentworkflow: finalize run %s: %w", runID, err)
 	}
 
@@ -532,14 +533,14 @@ func (e *BuiltinWorkflowEngine) runStep(
 	input agentworkflow.WorkflowInput,
 	exec agentworkflow.StepExecutor,
 ) stepRunOutcome {
-	if err := e.store.UpsertWorkflowRunStep(&store.WorkflowRunStepRow{
+	if err := e.store.UpsertWorkflowRunStep(ctx, &store.WorkflowRunStepRow{
 		WorkflowRunID: runID, StepID: step.ID, Kind: string(step.Kind), Status: "running", StartedAt: time.Now().UTC(),
 	}); err != nil {
 		return stepRunOutcome{Err: fmt.Errorf("mark running: %w", err)}
 	}
 
 	if step.Kind == agentworkflow.StepKindGate {
-		if err := e.store.UpsertWorkflowRunStep(&store.WorkflowRunStepRow{
+		if err := e.store.UpsertWorkflowRunStep(ctx, &store.WorkflowRunStepRow{
 			WorkflowRunID: runID, StepID: step.ID, Kind: string(step.Kind), Status: "waiting_on_gate",
 		}); err != nil {
 			return stepRunOutcome{Err: fmt.Errorf("mark waiting_on_gate: %w", err)}
@@ -557,7 +558,7 @@ func (e *BuiltinWorkflowEngine) runStep(
 		// semantics — a crash between the "running" write above and this
 		// write) is trivially idempotent: it only ever writes the same
 		// waiting_on_flex status again.
-		if err := e.store.UpsertWorkflowRunStep(&store.WorkflowRunStepRow{
+		if err := e.store.UpsertWorkflowRunStep(ctx, &store.WorkflowRunStepRow{
 			WorkflowRunID: runID, StepID: step.ID, Kind: string(step.Kind), Status: "waiting_on_flex",
 		}); err != nil {
 			return stepRunOutcome{Err: fmt.Errorf("mark waiting_on_flex: %w", err)}
@@ -594,7 +595,8 @@ func (e *BuiltinWorkflowEngine) runStep(
 	if sr.IsError {
 		errMsg = sr.Output
 	}
-	if err := e.store.UpsertWorkflowRunStep(&store.WorkflowRunStepRow{
+	// Outcome bookkeeping must survive cancellation of the workflow step it records.
+	if err := e.store.UpsertWorkflowRunStep(context.WithoutCancel(ctx), &store.WorkflowRunStepRow{
 		WorkflowRunID: runID, StepID: step.ID, Kind: string(step.Kind), Status: status,
 		Output: sr.Output, IsError: sr.IsError, ToolCallsJSON: string(toolCallsJSON), VerifyJSON: verifyJSON,
 		Error: errMsg, CompletedAt: time.Now().UTC(),

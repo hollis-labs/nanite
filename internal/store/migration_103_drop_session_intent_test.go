@@ -29,10 +29,10 @@ func TestMigrate103DropsSessionIntentColumn(t *testing.T) {
 	// The sessions table must still be otherwise usable — dropping the
 	// column must not touch the rest of the schema or any existing rows.
 	sess := &Session{Title: "post-drop-probe"}
-	if err := s.CreateSession(sess); err != nil {
+	if err := s.CreateSession(context.Background(), sess); err != nil {
 		t.Fatalf("CreateSession after migration 103: %v", err)
 	}
-	got, err := s.GetSession(sess.ID)
+	got, err := s.GetSession(context.Background(), sess.ID)
 	if err != nil {
 		t.Fatalf("GetSession after migration 103: %v", err)
 	}
@@ -42,7 +42,7 @@ func TestMigrate103DropsSessionIntentColumn(t *testing.T) {
 
 	assertGooseHasNothingPending(t, s)
 
-	if err := s.migrate(); err != nil {
+	if err := s.migrate(context.Background()); err != nil {
 		t.Fatalf("re-migrate after column already dropped: %v", err)
 	}
 
@@ -104,7 +104,7 @@ func TestMigrate103DownReaddsSessionIntentColumn(t *testing.T) {
 	// classifier and its SetSessionIntent helper are both deleted), so this
 	// verifies the SQL-layer constraint itself.
 	sess := &Session{Title: "down-check-probe"}
-	if err := s.CreateSession(sess); err != nil {
+	if err := s.CreateSession(context.Background(), sess); err != nil {
 		t.Fatalf("CreateSession after down: %v", err)
 	}
 	if _, err := s.DB.Exec(`UPDATE sessions SET intent = 'long-running' WHERE id = ?`, sess.ID); err != nil {

@@ -61,15 +61,15 @@ func TestWorkflowContextAssembler_AssembleContext_ResolvesAgentAndSession(t *tes
 		SystemPrompt: "SENTINEL_AGENT_SYSTEM_PROMPT",
 		Status:       "active",
 	}
-	if err := s.CreateAgent(agentProfile); err != nil {
+	if err := s.CreateAgent(context.Background(), agentProfile); err != nil {
 		t.Fatalf("CreateAgent: %v", err)
 	}
 
 	sess := &store.Session{ID: "sess-workflow-1", Title: "test"}
-	if err := s.CreateSession(sess); err != nil {
+	if err := s.CreateSession(context.Background(), sess); err != nil {
 		t.Fatalf("CreateSession: %v", err)
 	}
-	if err := s.EnsureSessionAgent(sess.ID, agentProfile.ID, "default", true); err != nil {
+	if err := s.EnsureSessionAgent(context.Background(), sess.ID, agentProfile.ID, "default", true); err != nil {
 		t.Fatalf("EnsureSessionAgent: %v", err)
 	}
 
@@ -90,11 +90,11 @@ func TestWorkflowContextAssembler_AssembleContext_NoSessionBinding(t *testing.T)
 	s, sessions, agents, ctxSvc := newWorkflowContextAssemblerTestDeps(t)
 
 	agentProfile := &store.AgentProfile{ID: "agent-unbound", Name: "Unbound", Slug: "unbound", SystemPrompt: "unbound agent", Status: "active"}
-	if err := s.CreateAgent(agentProfile); err != nil {
+	if err := s.CreateAgent(context.Background(), agentProfile); err != nil {
 		t.Fatalf("CreateAgent: %v", err)
 	}
 	sess := &store.Session{ID: "sess-mode-3", Title: "test"}
-	if err := s.CreateSession(sess); err != nil {
+	if err := s.CreateSession(context.Background(), sess); err != nil {
 		t.Fatalf("CreateSession: %v", err)
 	}
 	// No EnsureSessionAgent call — the session has no primary-agent binding.

@@ -162,7 +162,7 @@ import (
 // is a local interface rather than a reuse of internal/skill/resolver.go's
 // identically-shaped SkillIndexStore.
 type SkillCatalogStore interface {
-	GetSkillBySlug(slug string) (*store.Skill, error)
+	GetSkillBySlug(ctx context.Context, slug string) (*store.Skill, error)
 }
 
 // SkillGrantStore is the narrow slice of *store.Store's API this file
@@ -226,7 +226,7 @@ func ResolvePlantableSkills(ctx context.Context, grants SkillGrantStore, catalog
 			// Ungranted / never-approved bare assignment — never plantable.
 			continue
 		}
-		sk, err := catalog.GetSkillBySlug(k.SkillName)
+		sk, err := catalog.GetSkillBySlug(ctx, k.SkillName)
 		if err != nil {
 			return nil, fmt.Errorf("agent: resolve plantable skills: look up skill %q: %w", k.SkillName, err)
 		}

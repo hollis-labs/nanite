@@ -26,15 +26,15 @@ func TestMigrate144WidensBothTablesWaitingOnLoopStatus(t *testing.T) {
 
 	for _, status := range []string{"running", "completed", "failed", "cancelled", "waiting_on_gate", "waiting_on_flex", "waiting_on_loop"} {
 		runID := "run-144-" + status
-		if err := s.CreateWorkflowRun(&WorkflowRunRow{ID: runID, DefinitionName: "loop-status-check", Status: status}); err != nil {
+		if err := s.CreateWorkflowRun(context.Background(), &WorkflowRunRow{ID: runID, DefinitionName: "loop-status-check", Status: status}); err != nil {
 			t.Fatalf("CreateWorkflowRun(status=%q): %v", status, err)
 		}
 	}
-	if err := s.CreateWorkflowRun(&WorkflowRunRow{ID: "run-144-bogus", DefinitionName: "loop-status-check", Status: "bogus"}); err == nil {
+	if err := s.CreateWorkflowRun(context.Background(), &WorkflowRunRow{ID: "run-144-bogus", DefinitionName: "loop-status-check", Status: "bogus"}); err == nil {
 		t.Fatal("CreateWorkflowRun(status=\"bogus\") succeeded, want CHECK violation")
 	}
 
-	if err := s.CreateWorkflowRun(&WorkflowRunRow{ID: "run-144-steps", DefinitionName: "loop-status-check", Status: "running"}); err != nil {
+	if err := s.CreateWorkflowRun(context.Background(), &WorkflowRunRow{ID: "run-144-steps", DefinitionName: "loop-status-check", Status: "running"}); err != nil {
 		t.Fatalf("CreateWorkflowRun: %v", err)
 	}
 	for _, status := range []string{"pending", "running", "completed", "failed", "waiting_on_gate", "waiting_on_flex", "waiting_on_loop", "skipped"} {
@@ -44,12 +44,12 @@ func TestMigrate144WidensBothTablesWaitingOnLoopStatus(t *testing.T) {
 			Kind:          "loop",
 			Status:        status,
 		}
-		if err := s.UpsertWorkflowRunStep(row); err != nil {
+		if err := s.UpsertWorkflowRunStep(context.Background(), row); err != nil {
 			t.Fatalf("UpsertWorkflowRunStep(status=%q): %v", status, err)
 		}
 	}
 	badStep := &WorkflowRunStepRow{WorkflowRunID: "run-144-steps", StepID: "step-bogus", Kind: "loop", Status: "bogus"}
-	if err := s.UpsertWorkflowRunStep(badStep); err == nil {
+	if err := s.UpsertWorkflowRunStep(context.Background(), badStep); err == nil {
 		t.Fatal("UpsertWorkflowRunStep(status=\"bogus\") succeeded, want CHECK violation")
 	}
 
@@ -65,10 +65,10 @@ func TestMigrate144WidensBothTablesWaitingOnLoopStatus(t *testing.T) {
 		WorkflowRunID: "run-144-steps", StepID: "step-loop-round-trip", Kind: "loop", Status: "waiting_on_loop",
 		LoopRunID: &loopRunID,
 	}
-	if err := s.UpsertWorkflowRunStep(waitingRow); err != nil {
+	if err := s.UpsertWorkflowRunStep(context.Background(), waitingRow); err != nil {
 		t.Fatalf("UpsertWorkflowRunStep with LoopRunID: %v", err)
 	}
-	got, err := s.GetWorkflowRunStepByLoopRunID(loopRunID)
+	got, err := s.GetWorkflowRunStepByLoopRunID(context.Background(), loopRunID)
 	if err != nil {
 		t.Fatalf("GetWorkflowRunStepByLoopRunID: %v", err)
 	}
@@ -78,17 +78,17 @@ func TestMigrate144WidensBothTablesWaitingOnLoopStatus(t *testing.T) {
 	if got.LoopRunID == nil || *got.LoopRunID != loopRunID {
 		t.Errorf("GetWorkflowRunStepByLoopRunID row LoopRunID = %v, want %q", got.LoopRunID, loopRunID)
 	}
-	if _, err := s.GetWorkflowRunStepByLoopRunID("no-such-loop-run"); err != ErrWorkflowRunStepNotFound {
+	if _, err := s.GetWorkflowRunStepByLoopRunID(context.Background(), "no-such-loop-run"); err != ErrWorkflowRunStepNotFound {
 		t.Errorf("GetWorkflowRunStepByLoopRunID(unknown) error = %v, want ErrWorkflowRunStepNotFound", err)
 	}
 
 	assertGooseHasNothingPending(t, s)
 
 	// Simulated restart: a second full migrate() must be a clean no-op.
-	if err := s.migrate(); err != nil {
+	if err := s.migrate(context.Background()); err != nil {
 		t.Fatalf("re-migrate after 144 already applied: %v", err)
 	}
-	stepsAfter, err := s.ListWorkflowRunSteps("run-144-steps")
+	stepsAfter, err := s.ListWorkflowRunSteps(context.Background(), "run-144-steps")
 	if err != nil {
 		t.Fatalf("ListWorkflowRunSteps after re-migrate: %v", err)
 	}
@@ -187,7 +187,7 @@ func TestRealBackupWorkflowRunWaitingRowsSurviveLoop144Migration(t *testing.T) {
 	if err != nil {
 		t.Fatalf("open+migrate scratch copy of real backup db: %v", err)
 	}
-	defer rs.Close()
+	defer rs.Close(context.Background())
 
 	type runRow struct{ id, status string }
 	type stepRow struct{ workflowRunID, stepID, kind, status string }
@@ -354,17 +354,17 @@ func TestRealBackupWorkflowRunWaitingRowsSurviveLoop144Migration(t *testing.T) {
 	// And the new capability actually works against this real, migrated
 	// copy: a waiting_on_loop row (both tables) and a loop_run_id value
 	// can now be inserted where they couldn't before.
-	if err := rs.CreateWorkflowRun(&WorkflowRunRow{ID: "post-144-loop-check", DefinitionName: "loop-check", Status: "waiting_on_loop"}); err != nil {
+	if err := rs.CreateWorkflowRun(context.Background(), &WorkflowRunRow{ID: "post-144-loop-check", DefinitionName: "loop-check", Status: "waiting_on_loop"}); err != nil {
 		t.Fatalf("CreateWorkflowRun(status=waiting_on_loop) on real backup copy: %v", err)
 	}
 	realLoopRunID := createTestLoopRunForMigration144(t, rs, "post-144-loop-check")
-	if err := rs.UpsertWorkflowRunStep(&WorkflowRunStepRow{
+	if err := rs.UpsertWorkflowRunStep(context.Background(), &WorkflowRunStepRow{
 		WorkflowRunID: "post-144-loop-check", StepID: "loop-step", Kind: "loop", Status: "waiting_on_loop",
 		LoopRunID: &realLoopRunID,
 	}); err != nil {
 		t.Fatalf("UpsertWorkflowRunStep(status=waiting_on_loop, LoopRunID set) on real backup copy: %v", err)
 	}
-	got, err := rs.GetWorkflowRunStepByLoopRunID(realLoopRunID)
+	got, err := rs.GetWorkflowRunStepByLoopRunID(context.Background(), realLoopRunID)
 	if err != nil {
 		t.Fatalf("GetWorkflowRunStepByLoopRunID on real backup copy: %v", err)
 	}

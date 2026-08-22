@@ -36,7 +36,7 @@ func TestUninstall_RemovesVendorAndIndex(t *testing.T) {
 	}
 
 	// Index row is gone.
-	sk, err := idx.GetSkillBySlug("sample-skill")
+	sk, err := idx.GetSkillBySlug(context.Background(), "sample-skill")
 	if err != nil {
 		t.Fatalf("GetSkillBySlug: %v", err)
 	}
@@ -56,7 +56,7 @@ func TestUninstall_SkipsVendorDeletion_WhenContentHashEmpty(t *testing.T) {
 	// A bare admin-CRUD row (task 02's POST /api/skills) never went through
 	// install/sync — ContentHash is empty, nothing vendored to delete.
 	sk := &store.Skill{Name: "Bare Row", Slug: "bare-row", Description: "no content"}
-	if err := idx.CreateSkill(sk); err != nil {
+	if err := idx.CreateSkill(context.Background(), sk); err != nil {
 		t.Fatalf("CreateSkill: %v", err)
 	}
 
@@ -69,7 +69,7 @@ func TestUninstall_SkipsVendorDeletion_WhenContentHashEmpty(t *testing.T) {
 		t.Error("expected VendorDeleted = false for a skill with no vendored content")
 	}
 
-	got, err := idx.GetSkillBySlug("bare-row")
+	got, err := idx.GetSkillBySlug(context.Background(), "bare-row")
 	if err != nil {
 		t.Fatalf("GetSkillBySlug: %v", err)
 	}
@@ -89,7 +89,7 @@ func TestUninstall_NilSkill_ClearError(t *testing.T) {
 func TestUninstall_ContentHashSetButVendorNil_ClearErrorNotPanic(t *testing.T) {
 	_, _, idx := newTestInstaller(t)
 	sk := &store.Skill{Name: "Ghost Vendor", Slug: "ghost-vendor", ContentHash: "skl-vendor-0000000000000000"}
-	if err := idx.CreateSkill(sk); err != nil {
+	if err := idx.CreateSkill(context.Background(), sk); err != nil {
 		t.Fatalf("CreateSkill: %v", err)
 	}
 
@@ -100,7 +100,7 @@ func TestUninstall_ContentHashSetButVendorNil_ClearErrorNotPanic(t *testing.T) {
 
 	// The index row must be left intact — a failed vendor-deletion attempt
 	// aborts the whole call rather than deleting the index row anyway.
-	got, err := idx.GetSkillBySlug("ghost-vendor")
+	got, err := idx.GetSkillBySlug(context.Background(), "ghost-vendor")
 	if err != nil {
 		t.Fatalf("GetSkillBySlug: %v", err)
 	}
@@ -118,7 +118,7 @@ func (fakeFailingVendor) Delete(string) error { return errors.New("boom") }
 func TestUninstall_VendorDeleteFailure_AbortsBeforeIndexDelete(t *testing.T) {
 	_, _, idx := newTestInstaller(t)
 	sk := &store.Skill{Name: "Stubborn Vendor", Slug: "stubborn-vendor", ContentHash: "skl-vendor-0000000000000001"}
-	if err := idx.CreateSkill(sk); err != nil {
+	if err := idx.CreateSkill(context.Background(), sk); err != nil {
 		t.Fatalf("CreateSkill: %v", err)
 	}
 
@@ -127,7 +127,7 @@ func TestUninstall_VendorDeleteFailure_AbortsBeforeIndexDelete(t *testing.T) {
 		t.Fatal("expected the vendor deletion failure to propagate")
 	}
 
-	got, err := idx.GetSkillBySlug("stubborn-vendor")
+	got, err := idx.GetSkillBySlug(context.Background(), "stubborn-vendor")
 	if err != nil {
 		t.Fatalf("GetSkillBySlug: %v", err)
 	}

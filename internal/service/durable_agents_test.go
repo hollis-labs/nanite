@@ -53,7 +53,7 @@ func newDurableAgentServiceTestStore(t *testing.T) *store.Store {
 	if err != nil {
 		t.Fatalf("store.New: %v", err)
 	}
-	t.Cleanup(func() { _ = st.Close() })
+	t.Cleanup(func() { _ = st.Close(context.Background()) })
 	return st
 }
 
@@ -67,7 +67,7 @@ func newDurableAgentServiceTestStore(t *testing.T) *store.Store {
 func TestDurableAgentServiceLifecycleRequests(t *testing.T) {
 	st := newDurableAgentServiceTestStore(t)
 	profile := &store.AgentProfile{Name: "Svc Agent", Slug: "svc-agent", SystemPrompt: "x"}
-	if err := st.CreateAgent(profile); err != nil {
+	if err := st.CreateAgent(context.Background(), profile); err != nil {
 		t.Fatalf("CreateAgent: %v", err)
 	}
 	svc := NewDurableAgentService(st)
@@ -88,10 +88,10 @@ func TestDurableAgentServiceLifecycleRequests(t *testing.T) {
 	// mirrors a real "sleeping instance that already has a session, wake
 	// it back up" scenario.
 	sess := &store.Session{Title: "svc instance session", Provider: "anthropic", Model: "model-a"}
-	if err := st.CreateSession(sess); err != nil {
+	if err := st.CreateSession(context.Background(), sess); err != nil {
 		t.Fatalf("CreateSession: %v", err)
 	}
-	if err := st.AttachDurableAgentInstanceSession(inst.ID, sess.ID, store.DurableAgentSessionRelationPrimary); err != nil {
+	if err := st.AttachDurableAgentInstanceSession(context.Background(), inst.ID, sess.ID, store.DurableAgentSessionRelationPrimary); err != nil {
 		t.Fatalf("AttachDurableAgentInstanceSession: %v", err)
 	}
 
@@ -131,7 +131,7 @@ func TestDurableAgentList_ReconcilesTaggedProfilesIntoInstances(t *testing.T) {
 		Class:        store.DurableAgentClassAdvisor,
 		DefaultState: store.DurableAgentStatusSleeping,
 	}
-	if err := st.CreateAgent(profile); err != nil {
+	if err := st.CreateAgent(context.Background(), profile); err != nil {
 		t.Fatalf("CreateAgent: %v", err)
 	}
 
@@ -170,7 +170,7 @@ func TestDurableAgentList_ReconcilesHarnessProfileWithCorrectLifecycleClass(t *t
 		Class:        store.DurableAgentClassHarness,
 		DefaultState: store.DurableAgentStatusSleeping,
 	}
-	if err := st.CreateAgent(profile); err != nil {
+	if err := st.CreateAgent(context.Background(), profile); err != nil {
 		t.Fatalf("CreateAgent: %v", err)
 	}
 
@@ -199,7 +199,7 @@ func TestDurableAgentList_DoesNotPromoteNonDurableProfiles(t *testing.T) {
 		Tags:         `["advisor"]`,
 		Class:        store.DurableAgentClassAdvisor,
 	}
-	if err := st.CreateAgent(profile); err != nil {
+	if err := st.CreateAgent(context.Background(), profile); err != nil {
 		t.Fatalf("CreateAgent: %v", err)
 	}
 
@@ -239,7 +239,7 @@ func TestDurableAgentLaunchPolicyByLifecycleClass(t *testing.T) {
 func TestDurableAgentStartCreatesOrReusesSession(t *testing.T) {
 	st := newDurableAgentServiceTestStore(t)
 	profile := &store.AgentProfile{Name: "Start Agent", Slug: "start-agent", SystemPrompt: "x"}
-	if err := st.CreateAgent(profile); err != nil {
+	if err := st.CreateAgent(context.Background(), profile); err != nil {
 		t.Fatalf("CreateAgent: %v", err)
 	}
 	svc := NewDurableAgentService(st)
@@ -300,7 +300,7 @@ func TestDurableAgentStartCreatesOrReusesSession(t *testing.T) {
 func TestDurableAgentProcessStartCreatesFreshWakeSession(t *testing.T) {
 	st := newDurableAgentServiceTestStore(t)
 	profile := &store.AgentProfile{Name: "Process Agent", Slug: "process-agent", SystemPrompt: "x"}
-	if err := st.CreateAgent(profile); err != nil {
+	if err := st.CreateAgent(context.Background(), profile); err != nil {
 		t.Fatalf("CreateAgent: %v", err)
 	}
 	svc := NewDurableAgentService(st)
@@ -336,7 +336,7 @@ func TestDurableAgentProcessStartCreatesFreshWakeSession(t *testing.T) {
 func TestDurableAgentResumeNoResumableSession(t *testing.T) {
 	st := newDurableAgentServiceTestStore(t)
 	profile := &store.AgentProfile{Name: "Resume Agent", Slug: "resume-agent", SystemPrompt: "x"}
-	if err := st.CreateAgent(profile); err != nil {
+	if err := st.CreateAgent(context.Background(), profile); err != nil {
 		t.Fatalf("CreateAgent: %v", err)
 	}
 	svc := NewDurableAgentService(st)
@@ -352,7 +352,7 @@ func TestDurableAgentResumeNoResumableSession(t *testing.T) {
 	if _, err := svc.Resume(context.Background(), inst.ID, DurableAgentStartRequest{}); err != ErrDurableAgentNoResumableSession {
 		t.Fatalf("Resume error = %v, want ErrDurableAgentNoResumableSession", err)
 	}
-	got, err := st.GetDurableAgentInstance(inst.ID)
+	got, err := st.GetDurableAgentInstance(context.Background(), inst.ID)
 	if err != nil {
 		t.Fatalf("GetDurableAgentInstance: %v", err)
 	}
@@ -375,7 +375,7 @@ func TestDurableAgentResumeNoResumableSession(t *testing.T) {
 func TestDurableAgentResumeArmsRecovery(t *testing.T) {
 	st := newDurableAgentServiceTestStore(t)
 	profile := &store.AgentProfile{Name: "Resume Recover Agent", Slug: "resume-recover-agent", SystemPrompt: "x"}
-	if err := st.CreateAgent(profile); err != nil {
+	if err := st.CreateAgent(context.Background(), profile); err != nil {
 		t.Fatalf("CreateAgent: %v", err)
 	}
 	runtime := &fakeDurableRuntimeController{}
@@ -431,11 +431,11 @@ func TestDurableAgentResumeArmsRecovery(t *testing.T) {
 func TestDurableAgentStopCallsRuntimeAndMarksStopped(t *testing.T) {
 	st := newDurableAgentServiceTestStore(t)
 	profile := &store.AgentProfile{Name: "Stop Agent", Slug: "stop-agent", SystemPrompt: "x"}
-	if err := st.CreateAgent(profile); err != nil {
+	if err := st.CreateAgent(context.Background(), profile); err != nil {
 		t.Fatalf("CreateAgent: %v", err)
 	}
 	sess := &store.Session{Title: "current", Provider: "anthropic", Model: "model-a"}
-	if err := st.CreateSession(sess); err != nil {
+	if err := st.CreateSession(context.Background(), sess); err != nil {
 		t.Fatalf("CreateSession: %v", err)
 	}
 	inst := &store.DurableAgentInstance{
@@ -446,7 +446,7 @@ func TestDurableAgentStopCallsRuntimeAndMarksStopped(t *testing.T) {
 		CurrentSessionID: sess.ID,
 		LaunchSourceType: store.DurableAgentLaunchDurableAdvisor,
 	}
-	if err := st.CreateDurableAgentInstance(inst); err != nil {
+	if err := st.CreateDurableAgentInstance(context.Background(), inst); err != nil {
 		t.Fatalf("CreateDurableAgentInstance: %v", err)
 	}
 	runtime := &fakeDurableRuntimeController{}
@@ -474,7 +474,7 @@ func TestDurableAgentStopCallsRuntimeAndMarksStopped(t *testing.T) {
 func TestDurableAgentStopWithoutCurrentSessionMarksStopped(t *testing.T) {
 	st := newDurableAgentServiceTestStore(t)
 	profile := &store.AgentProfile{Name: "No Current Agent", Slug: "no-current-agent", SystemPrompt: "x"}
-	if err := st.CreateAgent(profile); err != nil {
+	if err := st.CreateAgent(context.Background(), profile); err != nil {
 		t.Fatalf("CreateAgent: %v", err)
 	}
 	inst := &store.DurableAgentInstance{
@@ -484,7 +484,7 @@ func TestDurableAgentStopWithoutCurrentSessionMarksStopped(t *testing.T) {
 		Status:           store.DurableAgentStatusPaused,
 		LaunchSourceType: store.DurableAgentLaunchDurableAdvisor,
 	}
-	if err := st.CreateDurableAgentInstance(inst); err != nil {
+	if err := st.CreateDurableAgentInstance(context.Background(), inst); err != nil {
 		t.Fatalf("CreateDurableAgentInstance: %v", err)
 	}
 	runtime := &fakeDurableRuntimeController{}
@@ -504,11 +504,11 @@ func TestDurableAgentStopWithoutCurrentSessionMarksStopped(t *testing.T) {
 func TestDurableAgentStopRuntimeErrorMarksFailed(t *testing.T) {
 	st := newDurableAgentServiceTestStore(t)
 	profile := &store.AgentProfile{Name: "Fail Stop Agent", Slug: "fail-stop-agent", SystemPrompt: "x"}
-	if err := st.CreateAgent(profile); err != nil {
+	if err := st.CreateAgent(context.Background(), profile); err != nil {
 		t.Fatalf("CreateAgent: %v", err)
 	}
 	sess := &store.Session{Title: "current", Provider: "anthropic", Model: "model-a"}
-	if err := st.CreateSession(sess); err != nil {
+	if err := st.CreateSession(context.Background(), sess); err != nil {
 		t.Fatalf("CreateSession: %v", err)
 	}
 	inst := &store.DurableAgentInstance{
@@ -519,7 +519,7 @@ func TestDurableAgentStopRuntimeErrorMarksFailed(t *testing.T) {
 		CurrentSessionID: sess.ID,
 		LaunchSourceType: store.DurableAgentLaunchDurableAdvisor,
 	}
-	if err := st.CreateDurableAgentInstance(inst); err != nil {
+	if err := st.CreateDurableAgentInstance(context.Background(), inst); err != nil {
 		t.Fatalf("CreateDurableAgentInstance: %v", err)
 	}
 	runtimeErr := errors.New("runtime stop failed")
@@ -552,11 +552,11 @@ func durableAgentEventsContain(events []store.DurableAgentEvent, eventType strin
 func TestDurableAgentPausePreservesCurrentSession(t *testing.T) {
 	st := newDurableAgentServiceTestStore(t)
 	profile := &store.AgentProfile{Name: "Pause Agent", Slug: "pause-agent", SystemPrompt: "x"}
-	if err := st.CreateAgent(profile); err != nil {
+	if err := st.CreateAgent(context.Background(), profile); err != nil {
 		t.Fatalf("CreateAgent: %v", err)
 	}
 	sess := &store.Session{Title: "current", Provider: "anthropic", Model: "model-a"}
-	if err := st.CreateSession(sess); err != nil {
+	if err := st.CreateSession(context.Background(), sess); err != nil {
 		t.Fatalf("CreateSession: %v", err)
 	}
 	inst := &store.DurableAgentInstance{
@@ -567,10 +567,10 @@ func TestDurableAgentPausePreservesCurrentSession(t *testing.T) {
 		CurrentSessionID: sess.ID,
 		LaunchSourceType: store.DurableAgentLaunchDurableAdvisor,
 	}
-	if err := st.CreateDurableAgentInstance(inst); err != nil {
+	if err := st.CreateDurableAgentInstance(context.Background(), inst); err != nil {
 		t.Fatalf("CreateDurableAgentInstance: %v", err)
 	}
-	if err := st.AttachDurableAgentInstanceSession(inst.ID, sess.ID, store.DurableAgentSessionRelationPrimary); err != nil {
+	if err := st.AttachDurableAgentInstanceSession(context.Background(), inst.ID, sess.ID, store.DurableAgentSessionRelationPrimary); err != nil {
 		t.Fatalf("AttachDurableAgentInstanceSession: %v", err)
 	}
 	svc := NewDurableAgentService(st)

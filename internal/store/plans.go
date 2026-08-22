@@ -1,6 +1,7 @@
 package store
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"time"
@@ -64,7 +65,7 @@ func (p *Plan) SetPlanSteps(steps []PlanStep) error {
 }
 
 // CreatePlan inserts a new plan, auto-generating the ID if empty.
-func (s *Store) CreatePlan(p *Plan) error {
+func (s *Store) CreatePlan(ctx context.Context, p *Plan) error {
 	if p.ID == "" {
 		p.ID = uuid.New().String()
 	}
@@ -84,7 +85,7 @@ func (s *Store) CreatePlan(p *Plan) error {
 	p.CreatedAt = now
 	p.UpdatedAt = now
 
-	_, err := s.DB.Exec(
+	_, err := s.DB.ExecContext(ctx,
 		`INSERT INTO plans (id, scope, scope_id, title, description, status, steps, metadata, created_by, created_at, updated_at)
 		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		p.ID, p.Scope, p.ScopeID, p.Title, p.Description, p.Status,
@@ -97,9 +98,9 @@ func (s *Store) CreatePlan(p *Plan) error {
 }
 
 // GetPlan returns a single plan by ID.
-func (s *Store) GetPlan(id string) (*Plan, error) {
+func (s *Store) GetPlan(ctx context.Context, id string) (*Plan, error) {
 	var p Plan
-	err := s.DB.QueryRow(
+	err := s.DB.QueryRowContext(ctx,
 		`SELECT id, scope, scope_id, title, description, status, steps, metadata,
 		        created_by, created_at, updated_at
 		 FROM plans WHERE id = ?`, id,
@@ -114,7 +115,7 @@ func (s *Store) GetPlan(id string) (*Plan, error) {
 }
 
 // ListPlans returns plans matching the given filter.
-func (s *Store) ListPlans(f PlanFilter) ([]Plan, error) {
+func (s *Store) ListPlans(ctx context.Context, f PlanFilter) ([]Plan, error) {
 	query := `SELECT id, scope, scope_id, title, description, status, steps, metadata,
 	                 created_by, created_at, updated_at
 	          FROM plans WHERE 1=1`
@@ -135,7 +136,7 @@ func (s *Store) ListPlans(f PlanFilter) ([]Plan, error) {
 
 	query += ` ORDER BY created_at DESC`
 
-	rows, err := s.DB.Query(query, args...)
+	rows, err := s.DB.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, fmt.Errorf("list plans: %w", err)
 	}
@@ -156,9 +157,9 @@ func (s *Store) ListPlans(f PlanFilter) ([]Plan, error) {
 }
 
 // UpdatePlan updates mutable fields on a plan.
-func (s *Store) UpdatePlan(p *Plan) error {
+func (s *Store) UpdatePlan(ctx context.Context, p *Plan) error {
 	now := time.Now().UTC().Format(time.RFC3339)
-	_, err := s.DB.Exec(
+	_, err := s.DB.ExecContext(ctx,
 		`UPDATE plans SET title = ?, description = ?, status = ?, steps = ?,
 		        metadata = ?, updated_at = ?
 		 WHERE id = ?`,
@@ -181,11 +182,11 @@ func (s *Store) UpdatePlan(p *Plan) error {
 //
 // CW-20260430-0001 (SP1) — closes the c120 workaround where the agent
 // deleted and recreated a plan to add a single step.
-func (s *Store) AppendPlanSteps(planID string, newSteps []PlanStep) ([]PlanStep, error) {
+func (s *Store) AppendPlanSteps(ctx context.Context, planID string, newSteps []PlanStep) ([]PlanStep, error) {
 	if len(newSteps) == 0 {
 		return nil, fmt.Errorf("at least one step is required")
 	}
-	p, err := s.GetPlan(planID)
+	p, err := s.GetPlan(ctx, planID)
 	if err != nil {
 		return nil, err
 	}
@@ -230,7 +231,7 @@ func (s *Store) AppendPlanSteps(planID string, newSteps []PlanStep) ([]PlanStep,
 	if err := p.SetPlanSteps(combined); err != nil {
 		return nil, err
 	}
-	if err := s.UpdatePlan(p); err != nil {
+	if err := s.UpdatePlan(ctx, p); err != nil {
 		return nil, err
 	}
 	return appended, nil
@@ -275,8 +276,8 @@ func nextStepID(existing, pending []PlanStep) string {
 }
 
 // UpdatePlanStep updates a single step within a plan by step ID.
-func (s *Store) UpdatePlanStep(planID, stepID string, updates PlanStep) error {
-	p, err := s.GetPlan(planID)
+func (s *Store) UpdatePlanStep(ctx context.Context, planID, stepID string, updates PlanStep) error {
+	p, err := s.GetPlan(ctx, planID)
 	if err != nil {
 		return err
 	}
@@ -315,12 +316,12 @@ func (s *Store) UpdatePlanStep(planID, stepID string, updates PlanStep) error {
 	if err := p.SetPlanSteps(steps); err != nil {
 		return err
 	}
-	return s.UpdatePlan(p)
+	return s.UpdatePlan(ctx, p)
 }
 
 // DeletePlan removes a plan by ID.
-func (s *Store) DeletePlan(id string) error {
-	_, err := s.DB.Exec(`DELETE FROM plans WHERE id = ?`, id)
+func (s *Store) DeletePlan(ctx context.Context, id string) error {
+	_, err := s.DB.ExecContext(ctx, `DELETE FROM plans WHERE id = ?`, id)
 	if err != nil {
 		return fmt.Errorf("delete plan %s: %w", id, err)
 	}

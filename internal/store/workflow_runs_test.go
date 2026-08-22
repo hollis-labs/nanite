@@ -1,6 +1,7 @@
 package store
 
 import (
+	"context"
 	"errors"
 	"testing"
 	"time"
@@ -9,15 +10,15 @@ import (
 func TestWorkflowRun_CreateGetSetStatus(t *testing.T) {
 	s := newTestStore(t)
 
-	if _, err := s.GetWorkflowRun("missing"); !errors.Is(err, ErrWorkflowRunNotFound) {
+	if _, err := s.GetWorkflowRun(context.Background(), "missing"); !errors.Is(err, ErrWorkflowRunNotFound) {
 		t.Fatalf("GetWorkflowRun(missing) = %v, want ErrWorkflowRunNotFound", err)
 	}
 
-	if err := s.CreateWorkflowRun(&WorkflowRunRow{ID: "run-1", DefinitionName: "demo", InputJSON: `{"task_id":"T-1"}`}); err != nil {
+	if err := s.CreateWorkflowRun(context.Background(), &WorkflowRunRow{ID: "run-1", DefinitionName: "demo", InputJSON: `{"task_id":"T-1"}`}); err != nil {
 		t.Fatalf("CreateWorkflowRun: %v", err)
 	}
 
-	row, err := s.GetWorkflowRun("run-1")
+	row, err := s.GetWorkflowRun(context.Background(), "run-1")
 	if err != nil {
 		t.Fatalf("GetWorkflowRun: %v", err)
 	}
@@ -28,10 +29,10 @@ func TestWorkflowRun_CreateGetSetStatus(t *testing.T) {
 		t.Fatal("StartedAt not set")
 	}
 
-	if err := s.SetWorkflowRunStatus("run-1", "completed", "", row.StartedAt); err != nil {
+	if err := s.SetWorkflowRunStatus(context.Background(), "run-1", "completed", "", row.StartedAt); err != nil {
 		t.Fatalf("SetWorkflowRunStatus: %v", err)
 	}
-	row, err = s.GetWorkflowRun("run-1")
+	row, err = s.GetWorkflowRun(context.Background(), "run-1")
 	if err != nil {
 		t.Fatalf("GetWorkflowRun after status set: %v", err)
 	}
@@ -45,7 +46,7 @@ func TestWorkflowRun_CreateGetSetStatus(t *testing.T) {
 
 func TestWorkflowRun_SetStatusUnknownIDReturnsNotFound(t *testing.T) {
 	s := newTestStore(t)
-	err := s.SetWorkflowRunStatus("missing", "completed", "", time.Time{})
+	err := s.SetWorkflowRunStatus(context.Background(), "missing", "completed", "", time.Time{})
 	if !errors.Is(err, ErrWorkflowRunNotFound) {
 		t.Fatalf("SetWorkflowRunStatus(missing) = %v, want ErrWorkflowRunNotFound", err)
 	}
@@ -53,18 +54,18 @@ func TestWorkflowRun_SetStatusUnknownIDReturnsNotFound(t *testing.T) {
 
 func TestWorkflowRunStep_UpsertTransitionsAndList(t *testing.T) {
 	s := newTestStore(t)
-	if err := s.CreateWorkflowRun(&WorkflowRunRow{ID: "run-1", DefinitionName: "demo"}); err != nil {
+	if err := s.CreateWorkflowRun(context.Background(), &WorkflowRunRow{ID: "run-1", DefinitionName: "demo"}); err != nil {
 		t.Fatalf("CreateWorkflowRun: %v", err)
 	}
 
 	// Pre-register pending.
-	if err := s.UpsertWorkflowRunStep(&WorkflowRunStepRow{
+	if err := s.UpsertWorkflowRunStep(context.Background(), &WorkflowRunStepRow{
 		WorkflowRunID: "run-1", StepID: "fetch", Kind: "tool", Status: "pending",
 	}); err != nil {
 		t.Fatalf("UpsertWorkflowRunStep (pending): %v", err)
 	}
 
-	steps, err := s.ListWorkflowRunSteps("run-1")
+	steps, err := s.ListWorkflowRunSteps(context.Background(), "run-1")
 	if err != nil {
 		t.Fatalf("ListWorkflowRunSteps: %v", err)
 	}
@@ -73,19 +74,19 @@ func TestWorkflowRunStep_UpsertTransitionsAndList(t *testing.T) {
 	}
 
 	// Transition to running, then completed with output — same synthetic id.
-	if err := s.UpsertWorkflowRunStep(&WorkflowRunStepRow{
+	if err := s.UpsertWorkflowRunStep(context.Background(), &WorkflowRunStepRow{
 		WorkflowRunID: "run-1", StepID: "fetch", Kind: "tool", Status: "running",
 	}); err != nil {
 		t.Fatalf("UpsertWorkflowRunStep (running): %v", err)
 	}
-	if err := s.UpsertWorkflowRunStep(&WorkflowRunStepRow{
+	if err := s.UpsertWorkflowRunStep(context.Background(), &WorkflowRunStepRow{
 		WorkflowRunID: "run-1", StepID: "fetch", Kind: "tool", Status: "completed",
 		Output: "fetched-data", ToolCallsJSON: `[{"tool":"torque_task_get"}]`,
 	}); err != nil {
 		t.Fatalf("UpsertWorkflowRunStep (completed): %v", err)
 	}
 
-	steps, err = s.ListWorkflowRunSteps("run-1")
+	steps, err = s.ListWorkflowRunSteps(context.Background(), "run-1")
 	if err != nil {
 		t.Fatalf("ListWorkflowRunSteps after completion: %v", err)
 	}
@@ -102,15 +103,15 @@ func TestWorkflowRunStep_UpsertTransitionsAndList(t *testing.T) {
 
 func TestWorkflowRunStep_MultipleStepsPreserveOrder(t *testing.T) {
 	s := newTestStore(t)
-	if err := s.CreateWorkflowRun(&WorkflowRunRow{ID: "run-1", DefinitionName: "demo"}); err != nil {
+	if err := s.CreateWorkflowRun(context.Background(), &WorkflowRunRow{ID: "run-1", DefinitionName: "demo"}); err != nil {
 		t.Fatalf("CreateWorkflowRun: %v", err)
 	}
 	for _, id := range []string{"a", "b", "c"} {
-		if err := s.UpsertWorkflowRunStep(&WorkflowRunStepRow{WorkflowRunID: "run-1", StepID: id, Kind: "tool"}); err != nil {
+		if err := s.UpsertWorkflowRunStep(context.Background(), &WorkflowRunStepRow{WorkflowRunID: "run-1", StepID: id, Kind: "tool"}); err != nil {
 			t.Fatalf("UpsertWorkflowRunStep(%s): %v", id, err)
 		}
 	}
-	steps, err := s.ListWorkflowRunSteps("run-1")
+	steps, err := s.ListWorkflowRunSteps(context.Background(), "run-1")
 	if err != nil {
 		t.Fatalf("ListWorkflowRunSteps: %v", err)
 	}

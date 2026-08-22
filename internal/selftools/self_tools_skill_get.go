@@ -82,7 +82,7 @@ func (st *SelfToolsTransport) callSkillGet(ctx context.Context, args map[string]
 		return mcp.ErrorResult("skill_get: no calling agent in context"), nil
 	}
 
-	sk, err := st.Store.GetSkillBySlug(slug)
+	sk, err := st.Store.GetSkillBySlug(ctx, slug)
 	if err != nil {
 		return mcp.ErrorResult(fmt.Sprintf("skill_get: look up skill %q: %v", slug, err)), nil
 	}

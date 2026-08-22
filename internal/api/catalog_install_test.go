@@ -43,7 +43,7 @@ func setupCatalogTestState(t *testing.T) (*catalogState, string) {
 	if err != nil {
 		t.Fatalf("store.New: %v", err)
 	}
-	t.Cleanup(func() { s.Close() })
+	t.Cleanup(func() { s.Close(context.Background()) })
 
 	return &catalogState{
 		store:      s,
@@ -57,12 +57,12 @@ func setupCatalogTestState(t *testing.T) (*catalogState, string) {
 // srv.URL+"/catalog.yaml", optionally with a trusted public key.
 func addCatalogSource(t *testing.T, cs *catalogState, srv *httptest.Server, publicKeyHex string) *store.CatalogSource {
 	t.Helper()
-	src, err := cs.store.CreateCatalogSource("Test Source", srv.URL+"/catalog.yaml", "custom", 100)
+	src, err := cs.store.CreateCatalogSource(context.Background(), "Test Source", srv.URL+"/catalog.yaml", "custom", 100)
 	if err != nil {
 		t.Fatalf("CreateCatalogSource: %v", err)
 	}
 	if publicKeyHex != "" {
-		if err := cs.store.SetCatalogSourcePublicKey(src.ID, publicKeyHex); err != nil {
+		if err := cs.store.SetCatalogSourcePublicKey(context.Background(), src.ID, publicKeyHex); err != nil {
 			t.Fatalf("SetCatalogSourcePublicKey: %v", err)
 		}
 	}

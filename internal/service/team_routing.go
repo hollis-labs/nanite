@@ -691,7 +691,7 @@ func (svc *TeamRoutingService) resolveAgentSlugForSlot(ctx context.Context, runI
 	}
 	for _, m := range members {
 		if m.Status == store.TeamRunMemberStatusActive {
-			profile, err := svc.store.GetAgent(m.AgentID)
+			profile, err := svc.store.GetAgent(ctx, m.AgentID)
 			if err != nil {
 				return "", fmt.Errorf("look up resolved agent %s for team slot %q: %w", m.AgentID, slot.Name, err)
 			}
@@ -704,7 +704,7 @@ func (svc *TeamRoutingService) resolveAgentSlugForSlot(ctx context.Context, runI
 		if slot.AgentID == nil || *slot.AgentID == "" {
 			return "", fmt.Errorf("team slot %q: resolution=durable requires agent_id", slot.Name)
 		}
-		profile, err := svc.store.GetAgent(*slot.AgentID)
+		profile, err := svc.store.GetAgent(ctx, *slot.AgentID)
 		if err != nil {
 			return "", fmt.Errorf("team slot %q: durable agent_id %q: %w", slot.Name, *slot.AgentID, err)
 		}
@@ -713,14 +713,14 @@ func (svc *TeamRoutingService) resolveAgentSlugForSlot(ctx context.Context, runI
 		if slot.RoleSlug == "" {
 			return "", fmt.Errorf("team slot %q: resolution=fresh requires role_slug", slot.Name)
 		}
-		role, err := svc.store.GetRoleBySlug(slot.RoleSlug)
+		role, err := svc.store.GetRoleBySlug(ctx, slot.RoleSlug)
 		if err != nil {
 			return "", fmt.Errorf("team slot %q: look up role %q: %w", slot.Name, slot.RoleSlug, err)
 		}
 		if role == nil {
 			return "", fmt.Errorf("team slot %q: role_slug %q does not exist", slot.Name, slot.RoleSlug)
 		}
-		profiles, err := svc.store.ListAgentsByRoleID(role.ID)
+		profiles, err := svc.store.ListAgentsByRoleID(ctx, role.ID)
 		if err != nil {
 			return "", fmt.Errorf("team slot %q: list agents for role %q: %w", slot.Name, role.Slug, err)
 		}

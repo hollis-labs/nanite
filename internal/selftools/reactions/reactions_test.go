@@ -19,7 +19,7 @@ func newTestStore(t *testing.T) *store.Store {
 	if err != nil {
 		t.Fatalf("open store: %v", err)
 	}
-	t.Cleanup(func() { s.Close(); os.Remove(dbPath) })
+	t.Cleanup(func() { s.Close(context.Background()); os.Remove(dbPath) })
 	return s
 }
 

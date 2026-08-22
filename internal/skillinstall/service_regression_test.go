@@ -59,7 +59,7 @@ func TestInstall_ResultRoundTripsThroughSkillService(t *testing.T) {
 	}
 
 	// Confirm the delete actually took, at the same store the Installer used.
-	sk, err := idx.GetSkillBySlug("sample-skill")
+	sk, err := idx.GetSkillBySlug(context.Background(), "sample-skill")
 	if err != nil {
 		t.Fatalf("GetSkillBySlug after delete: %v", err)
 	}

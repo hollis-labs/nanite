@@ -51,7 +51,7 @@ func statusHandler(s *store.Store) CommandHandler {
 			return &CommandResult{Action: "error", Content: "No active session"}, nil
 		}
 
-		sess, err := s.GetSession(sessionID)
+		sess, err := s.GetSession(context.TODO() /* TODO(ctx-sweep): no ctx available at this call site */, sessionID)
 		if err != nil {
 			return nil, fmt.Errorf("session not found: %w", err)
 		}
@@ -74,8 +74,8 @@ func statusHandler(s *store.Store) CommandHandler {
 		b.WriteString(fmt.Sprintf("**Messages:** %d\n", sess.MessageCount))
 
 		// Agent info.
-		if sa, err := s.GetSessionPrimaryAgent(sessionID); err == nil {
-			if agent, err := s.GetAgent(sa.AgentID); err == nil {
+		if sa, err := s.GetSessionPrimaryAgent(context.TODO() /* TODO(ctx-sweep): no ctx available at this call site */, sessionID); err == nil {
+			if agent, err := s.GetAgent(context.TODO() /* TODO(ctx-sweep): no ctx available at this call site */, sa.AgentID); err == nil {
 				b.WriteString(fmt.Sprintf("**Agent:** %s", agent.Name))
 				if sa.Mode != "" {
 					b.WriteString(fmt.Sprintf(" (mode: %s)", sa.Mode))
@@ -85,7 +85,7 @@ func statusHandler(s *store.Store) CommandHandler {
 		}
 
 		// Usage stats.
-		if usage, err := s.GetSessionUsage(sessionID); err == nil && usage != nil {
+		if usage, err := s.GetSessionUsage(context.TODO() /* TODO(ctx-sweep): no ctx available at this call site */, sessionID); err == nil && usage != nil {
 			b.WriteString(fmt.Sprintf("\n**Token Usage**\n"))
 			b.WriteString(fmt.Sprintf("  Input: %d | Output: %d | Total: %d\n",
 				usage.InputTokens, usage.OutputTokens, usage.TotalTokens))
@@ -143,7 +143,7 @@ func providersHandler(s *store.Store, reg *provider.Registry) CommandHandler {
 		}
 
 		// DB-registered providers for additional context.
-		if dbProviders, err := s.ListProviders(); err == nil && len(dbProviders) > 0 {
+		if dbProviders, err := s.ListProviders(context.TODO() /* TODO(ctx-sweep): no ctx available at this call site */); err == nil && len(dbProviders) > 0 {
 			b.WriteString(fmt.Sprintf("\n**Configured Providers** (%d total)\n", len(dbProviders)))
 			for _, p := range dbProviders {
 				status := "enabled"
@@ -164,12 +164,12 @@ func exportHandler(s *store.Store) CommandHandler {
 			return &CommandResult{Action: "error", Content: "No active session"}, nil
 		}
 
-		sess, err := s.GetSession(sessionID)
+		sess, err := s.GetSession(context.TODO() /* TODO(ctx-sweep): no ctx available at this call site */, sessionID)
 		if err != nil {
 			return nil, fmt.Errorf("session not found: %w", err)
 		}
 
-		msgs, err := s.ListMessages(sessionID, 10000)
+		msgs, err := s.ListMessages(context.TODO() /* TODO(ctx-sweep): no ctx available at this call site */, sessionID, 10000)
 		if err != nil {
 			return nil, fmt.Errorf("failed to list messages: %w", err)
 		}
@@ -211,7 +211,7 @@ func searchHandler(s *store.Store) CommandHandler {
 			return &CommandResult{Action: "error", Content: "Usage: /search <query>"}, nil
 		}
 
-		results, err := s.SearchMessages(query, "", 20)
+		results, err := s.SearchMessages(context.TODO() /* TODO(ctx-sweep): no ctx available at this call site */, query, "", 20)
 		if err != nil {
 			return nil, fmt.Errorf("search failed: %w", err)
 		}

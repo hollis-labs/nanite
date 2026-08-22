@@ -12,7 +12,7 @@ import (
 // Returns all session-scoped + cross_session pinned items for a session.
 func (a *API) handleListPins(w http.ResponseWriter, r *http.Request) {
 	sessionID := r.PathValue("id")
-	pins, err := a.Services.Store.ListPinnedContent(sessionID)
+	pins, err := a.Services.Store.ListPinnedContent(r.Context(), sessionID)
 	if err != nil {
 		a.errorResp(w, http.StatusInternalServerError, "failed to list pins: "+err.Error())
 		return
@@ -27,7 +27,7 @@ func (a *API) handleListPins(w http.ResponseWriter, r *http.Request) {
 // Removes a pinned item by ID. Called by the UI Pins tab unpin button.
 func (a *API) handleDeletePin(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
-	if err := a.Services.Store.DeletePinnedContent(id); err != nil {
+	if err := a.Services.Store.DeletePinnedContent(r.Context(), id); err != nil {
 		a.errorResp(w, http.StatusInternalServerError, "failed to delete pin: "+err.Error())
 		return
 	}
@@ -51,7 +51,7 @@ func (a *API) handleUpdatePinScope(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	id := r.PathValue("id")
-	if err := a.Services.Store.UpdatePinScope(id, req.Scope, req.ProjectID); err != nil {
+	if err := a.Services.Store.UpdatePinScope(r.Context(), id, req.Scope, req.ProjectID); err != nil {
 		a.errorResp(w, http.StatusBadRequest, err.Error())
 		return
 	}

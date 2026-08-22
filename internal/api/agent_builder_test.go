@@ -2,6 +2,7 @@ package api
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -22,7 +23,7 @@ func countRows(t *testing.T, a *API, table string) int {
 func TestAgentBuilderDryRun_DoesNotMutateStore(t *testing.T) {
 	a, mux := newTestAPI(t)
 	profile := &store.AgentProfile{Name: "Builder Profile", Slug: "builder-profile", SystemPrompt: "x"}
-	if err := a.Services.Store.CreateAgent(profile); err != nil {
+	if err := a.Services.Store.CreateAgent(context.Background(), profile); err != nil {
 		t.Fatalf("CreateAgent: %v", err)
 	}
 
@@ -103,7 +104,7 @@ func TestAgentBuilderDryRun_DoesNotMutateStore(t *testing.T) {
 func TestAgentBuilderDryRun_RecipePlanAndNoMutation(t *testing.T) {
 	a, mux := newTestAPI(t)
 	profile := &store.AgentProfile{Name: "Recipe Builder", Slug: "recipe-builder", SystemPrompt: "x"}
-	if err := a.Services.Store.CreateAgent(profile); err != nil {
+	if err := a.Services.Store.CreateAgent(context.Background(), profile); err != nil {
 		t.Fatalf("CreateAgent: %v", err)
 	}
 
@@ -210,7 +211,7 @@ func TestAgentBuilderDryRun_UpdateProfileRejectsInternal(t *testing.T) {
 		SystemPrompt: "x",
 		Source:       "internal",
 	}
-	if err := a.Services.Store.CreateAgent(internalAgent); err != nil {
+	if err := a.Services.Store.CreateAgent(context.Background(), internalAgent); err != nil {
 		t.Fatalf("CreateAgent: %v", err)
 	}
 

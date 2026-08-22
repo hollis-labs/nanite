@@ -37,7 +37,7 @@ type toolSelectionFilterAgentReader struct {
 	agent *store.AgentProfile
 }
 
-func (f *toolSelectionFilterAgentReader) GetAgent(id string) (*store.AgentProfile, error) {
+func (f *toolSelectionFilterAgentReader) GetAgent(ctx context.Context, id string) (*store.AgentProfile, error) {
 	if f.agent != nil && id == f.agent.ID {
 		return f.agent, nil
 	}

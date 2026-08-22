@@ -109,23 +109,23 @@ type DurableAgentService interface {
 }
 
 type DurableAgentStore interface {
-	CreateDurableAgentInstance(inst *store.DurableAgentInstance) error
-	GetDurableAgentInstance(id string) (*store.DurableAgentInstance, error)
-	ListDurableAgentInstances(includeArchived bool) ([]store.DurableAgentInstance, error)
-	UpdateDurableAgentInstance(id string, upd store.DurableAgentInstanceUpdate) (*store.DurableAgentInstance, error)
-	SetDurableAgentInstanceStatus(id, status string) (*store.DurableAgentInstance, error)
-	SetDurableAgentInstanceLaunchState(id, status, sessionID, failureReason string) (*store.DurableAgentInstance, error)
-	ArchiveDurableAgentInstance(id string) (*store.DurableAgentInstance, error)
-	AttachDurableAgentInstanceSession(instanceID, sessionID, relation string) error
-	ListDurableAgentInstanceSessions(instanceID string) ([]store.DurableAgentInstanceSession, error)
-	ListDurableAgentInstanceSessionStates(instanceID string) ([]store.DurableAgentInstanceSessionState, error)
-	CreateDurableAgentEvent(event *store.DurableAgentEvent) error
-	ListDurableAgentEvents(instanceID string, limit int) ([]store.DurableAgentEvent, error)
-	GetAgent(id string) (*store.AgentProfile, error)
-	ListAgents() ([]store.AgentProfile, error)
-	GetSession(id string) (*store.Session, error)
-	CreateSession(sess *store.Session) error
-	EnsureSessionAgent(sessionID, agentID, mode string, isPrimary bool) error
+	CreateDurableAgentInstance(ctx context.Context, inst *store.DurableAgentInstance) error
+	GetDurableAgentInstance(ctx context.Context, id string) (*store.DurableAgentInstance, error)
+	ListDurableAgentInstances(ctx context.Context, includeArchived bool) ([]store.DurableAgentInstance, error)
+	UpdateDurableAgentInstance(ctx context.Context, id string, upd store.DurableAgentInstanceUpdate) (*store.DurableAgentInstance, error)
+	SetDurableAgentInstanceStatus(ctx context.Context, id, status string) (*store.DurableAgentInstance, error)
+	SetDurableAgentInstanceLaunchState(ctx context.Context, id, status, sessionID, failureReason string) (*store.DurableAgentInstance, error)
+	ArchiveDurableAgentInstance(ctx context.Context, id string) (*store.DurableAgentInstance, error)
+	AttachDurableAgentInstanceSession(ctx context.Context, instanceID, sessionID, relation string) error
+	ListDurableAgentInstanceSessions(ctx context.Context, instanceID string) ([]store.DurableAgentInstanceSession, error)
+	ListDurableAgentInstanceSessionStates(ctx context.Context, instanceID string) ([]store.DurableAgentInstanceSessionState, error)
+	CreateDurableAgentEvent(ctx context.Context, event *store.DurableAgentEvent) error
+	ListDurableAgentEvents(ctx context.Context, instanceID string, limit int) ([]store.DurableAgentEvent, error)
+	GetAgent(ctx context.Context, id string) (*store.AgentProfile, error)
+	ListAgents(ctx context.Context) ([]store.AgentProfile, error)
+	GetSession(ctx context.Context, id string) (*store.Session, error)
+	CreateSession(ctx context.Context, sess *store.Session) error
+	EnsureSessionAgent(ctx context.Context, sessionID, agentID, mode string, isPrimary bool) error
 }
 
 type durableAgentService struct {
@@ -142,7 +142,7 @@ func NewDurableAgentServiceWithRuntime(st DurableAgentStore, runtime DurableAgen
 }
 
 func (s *durableAgentService) Create(_ context.Context, inst *store.DurableAgentInstance) error {
-	if err := s.store.CreateDurableAgentInstance(inst); err != nil {
+	if err := s.store.CreateDurableAgentInstance(context.TODO() /* TODO(ctx-sweep): no ctx available at this call site */, inst); err != nil {
 		return err
 	}
 	s.recordEvent(&store.DurableAgentEvent{
@@ -156,22 +156,22 @@ func (s *durableAgentService) Create(_ context.Context, inst *store.DurableAgent
 }
 
 func (s *durableAgentService) Get(_ context.Context, id string) (*store.DurableAgentInstance, error) {
-	return s.store.GetDurableAgentInstance(id)
+	return s.store.GetDurableAgentInstance(context.TODO() /* TODO(ctx-sweep): no ctx available at this call site */, id)
 }
 
 func (s *durableAgentService) List(_ context.Context, includeArchived bool) ([]store.DurableAgentInstance, error) {
 	if err := s.reconcileProfileBackedInstances(); err != nil {
 		return nil, err
 	}
-	return s.store.ListDurableAgentInstances(includeArchived)
+	return s.store.ListDurableAgentInstances(context.TODO() /* TODO(ctx-sweep): no ctx available at this call site */, includeArchived)
 }
 
 func (s *durableAgentService) reconcileProfileBackedInstances() error {
-	profiles, err := s.store.ListAgents()
+	profiles, err := s.store.ListAgents(context.TODO() /* TODO(ctx-sweep): no ctx available at this call site */)
 	if err != nil {
 		return err
 	}
-	instances, err := s.store.ListDurableAgentInstances(true)
+	instances, err := s.store.ListDurableAgentInstances(context.TODO() /* TODO(ctx-sweep): no ctx available at this call site */, true)
 	if err != nil {
 		return err
 	}
@@ -194,7 +194,7 @@ func (s *durableAgentService) reconcileProfileBackedInstances() error {
 			continue
 		}
 		inst := durableAgentInstanceFromProfile(profile)
-		if err := s.store.CreateDurableAgentInstance(inst); err != nil {
+		if err := s.store.CreateDurableAgentInstance(context.TODO() /* TODO(ctx-sweep): no ctx available at this call site */, inst); err != nil {
 			return fmt.Errorf("reconcile durable agent instance for profile %s: %w", profile.ID, err)
 		}
 		byProfileID[profile.ID] = struct{}{}
@@ -282,11 +282,11 @@ func durableAgentInstanceFromProfile(profile store.AgentProfile) *store.DurableA
 }
 
 func (s *durableAgentService) Update(_ context.Context, id string, upd store.DurableAgentInstanceUpdate) (*store.DurableAgentInstance, error) {
-	before, err := s.store.GetDurableAgentInstance(id)
+	before, err := s.store.GetDurableAgentInstance(context.TODO() /* TODO(ctx-sweep): no ctx available at this call site */, id)
 	if err != nil {
 		return nil, err
 	}
-	updated, err := s.store.UpdateDurableAgentInstance(id, upd)
+	updated, err := s.store.UpdateDurableAgentInstance(context.TODO() /* TODO(ctx-sweep): no ctx available at this call site */, id, upd)
 	if err != nil {
 		return nil, err
 	}
@@ -301,11 +301,11 @@ func (s *durableAgentService) Update(_ context.Context, id string, upd store.Dur
 }
 
 func (s *durableAgentService) Archive(_ context.Context, id string) (*store.DurableAgentInstance, error) {
-	before, err := s.store.GetDurableAgentInstance(id)
+	before, err := s.store.GetDurableAgentInstance(context.TODO() /* TODO(ctx-sweep): no ctx available at this call site */, id)
 	if err != nil {
 		return nil, err
 	}
-	archived, err := s.store.ArchiveDurableAgentInstance(id)
+	archived, err := s.store.ArchiveDurableAgentInstance(context.TODO() /* TODO(ctx-sweep): no ctx available at this call site */, id)
 	if err != nil {
 		return nil, err
 	}
@@ -320,7 +320,7 @@ func (s *durableAgentService) Archive(_ context.Context, id string) (*store.Dura
 }
 
 func (s *durableAgentService) LaunchPlan(_ context.Context, id string, wake DurableAgentWakePayload) (DurableAgentLaunchPolicy, error) {
-	inst, err := s.store.GetDurableAgentInstance(id)
+	inst, err := s.store.GetDurableAgentInstance(context.TODO() /* TODO(ctx-sweep): no ctx available at this call site */, id)
 	if err != nil {
 		return DurableAgentLaunchPolicy{}, err
 	}
@@ -328,11 +328,11 @@ func (s *durableAgentService) LaunchPlan(_ context.Context, id string, wake Dura
 }
 
 func (s *durableAgentService) Start(ctx context.Context, id string, req DurableAgentStartRequest) (*DurableAgentLaunchResult, error) {
-	before, err := s.store.GetDurableAgentInstance(id)
+	before, err := s.store.GetDurableAgentInstance(ctx, id)
 	if err != nil {
 		return nil, err
 	}
-	inst, err := s.store.SetDurableAgentInstanceStatus(id, store.DurableAgentStatusStarting)
+	inst, err := s.store.SetDurableAgentInstanceStatus(ctx, id, store.DurableAgentStatusStarting)
 	if err != nil {
 		return nil, err
 	}
@@ -349,24 +349,24 @@ func (s *durableAgentService) Start(ctx context.Context, id string, req DurableA
 	}
 	policy, err := durableAgentLaunchPolicyFor(inst, wake)
 	if err != nil {
-		failed, _ := s.store.SetDurableAgentInstanceLaunchState(id, store.DurableAgentStatusFailed, inst.CurrentSessionID, err.Error())
+		failed, _ := s.store.SetDurableAgentInstanceLaunchState(ctx, id, store.DurableAgentStatusFailed, inst.CurrentSessionID, err.Error())
 		s.recordFailureEvent(id, store.DurableAgentEventStartFailed, inst.Status, failed, inst.CurrentSessionID, err)
 		return nil, err
 	}
 
 	session, reused, err := s.selectOrCreateLaunchSession(inst, policy, req)
 	if err != nil {
-		failed, _ := s.store.SetDurableAgentInstanceLaunchState(id, store.DurableAgentStatusFailed, inst.CurrentSessionID, err.Error())
+		failed, _ := s.store.SetDurableAgentInstanceLaunchState(ctx, id, store.DurableAgentStatusFailed, inst.CurrentSessionID, err.Error())
 		s.recordFailureEvent(id, store.DurableAgentEventStartFailed, inst.Status, failed, inst.CurrentSessionID, err)
 		return nil, err
 	}
-	if err := s.store.AttachDurableAgentInstanceSession(inst.ID, session.ID, policy.AttachmentRelation); err != nil {
-		failed, _ := s.store.SetDurableAgentInstanceLaunchState(id, store.DurableAgentStatusFailed, inst.CurrentSessionID, err.Error())
+	if err := s.store.AttachDurableAgentInstanceSession(ctx, inst.ID, session.ID, policy.AttachmentRelation); err != nil {
+		failed, _ := s.store.SetDurableAgentInstanceLaunchState(ctx, id, store.DurableAgentStatusFailed, inst.CurrentSessionID, err.Error())
 		s.recordFailureEvent(id, store.DurableAgentEventStartFailed, inst.Status, failed, session.ID, err)
 		return nil, err
 	}
 	s.recordSessionAttachedEvent(inst, session.ID, policy.AttachmentRelation)
-	active, err := s.store.SetDurableAgentInstanceLaunchState(id, store.DurableAgentStatusActive, session.ID, "")
+	active, err := s.store.SetDurableAgentInstanceLaunchState(ctx, id, store.DurableAgentStatusActive, session.ID, "")
 	if err != nil {
 		return nil, err
 	}
@@ -389,11 +389,11 @@ func (s *durableAgentService) Start(ctx context.Context, id string, req DurableA
 }
 
 func (s *durableAgentService) Resume(ctx context.Context, id string, req DurableAgentStartRequest) (*DurableAgentLaunchResult, error) {
-	before, err := s.store.GetDurableAgentInstance(id)
+	before, err := s.store.GetDurableAgentInstance(ctx, id)
 	if err != nil {
 		return nil, err
 	}
-	inst, err := s.store.SetDurableAgentInstanceStatus(id, store.DurableAgentStatusResumeRequested)
+	inst, err := s.store.SetDurableAgentInstanceStatus(ctx, id, store.DurableAgentStatusResumeRequested)
 	if err != nil {
 		return nil, err
 	}
@@ -410,23 +410,23 @@ func (s *durableAgentService) Resume(ctx context.Context, id string, req Durable
 	}
 	policy, err := durableAgentLaunchPolicyFor(inst, wake)
 	if err != nil {
-		failed, _ := s.store.SetDurableAgentInstanceLaunchState(id, store.DurableAgentStatusFailed, inst.CurrentSessionID, err.Error())
+		failed, _ := s.store.SetDurableAgentInstanceLaunchState(ctx, id, store.DurableAgentStatusFailed, inst.CurrentSessionID, err.Error())
 		s.recordFailureEvent(id, store.DurableAgentEventResumeFailed, inst.Status, failed, inst.CurrentSessionID, err)
 		return nil, err
 	}
 	session, err := s.latestAttachedSession(inst, false)
 	if err != nil {
-		failed, _ := s.store.SetDurableAgentInstanceLaunchState(id, store.DurableAgentStatusFailed, inst.CurrentSessionID, err.Error())
+		failed, _ := s.store.SetDurableAgentInstanceLaunchState(ctx, id, store.DurableAgentStatusFailed, inst.CurrentSessionID, err.Error())
 		s.recordFailureEvent(id, store.DurableAgentEventResumeFailed, inst.Status, failed, inst.CurrentSessionID, err)
 		return nil, err
 	}
 	if session == nil {
-		failed, _ := s.store.SetDurableAgentInstanceLaunchState(id, store.DurableAgentStatusFailed, inst.CurrentSessionID, ErrDurableAgentNoResumableSession.Error())
+		failed, _ := s.store.SetDurableAgentInstanceLaunchState(ctx, id, store.DurableAgentStatusFailed, inst.CurrentSessionID, ErrDurableAgentNoResumableSession.Error())
 		s.recordFailureEvent(id, store.DurableAgentEventResumeFailed, inst.Status, failed, inst.CurrentSessionID, ErrDurableAgentNoResumableSession)
 		return nil, ErrDurableAgentNoResumableSession
 	}
-	if err := s.store.AttachDurableAgentInstanceSession(inst.ID, session.ID, policy.AttachmentRelation); err != nil {
-		failed, _ := s.store.SetDurableAgentInstanceLaunchState(id, store.DurableAgentStatusFailed, inst.CurrentSessionID, err.Error())
+	if err := s.store.AttachDurableAgentInstanceSession(ctx, inst.ID, session.ID, policy.AttachmentRelation); err != nil {
+		failed, _ := s.store.SetDurableAgentInstanceLaunchState(ctx, id, store.DurableAgentStatusFailed, inst.CurrentSessionID, err.Error())
 		s.recordFailureEvent(id, store.DurableAgentEventResumeFailed, inst.Status, failed, session.ID, err)
 		return nil, err
 	}
@@ -450,7 +450,7 @@ func (s *durableAgentService) Resume(ctx context.Context, id string, req Durable
 		}
 	}
 
-	active, err := s.store.SetDurableAgentInstanceLaunchState(id, store.DurableAgentStatusActive, session.ID, "")
+	active, err := s.store.SetDurableAgentInstanceLaunchState(ctx, id, store.DurableAgentStatusActive, session.ID, "")
 	if err != nil {
 		return nil, err
 	}
@@ -497,7 +497,7 @@ func (s *durableAgentService) RequestStart(ctx context.Context, id string) (*sto
 		if result != nil && result.Instance != nil {
 			return result.Instance, err
 		}
-		inst, getErr := s.store.GetDurableAgentInstance(id)
+		inst, getErr := s.store.GetDurableAgentInstance(ctx, id)
 		if getErr == nil {
 			return inst, err
 		}
@@ -507,11 +507,11 @@ func (s *durableAgentService) RequestStart(ctx context.Context, id string) (*sto
 }
 
 func (s *durableAgentService) RequestStop(ctx context.Context, id string) (*store.DurableAgentInstance, error) {
-	before, err := s.store.GetDurableAgentInstance(id)
+	before, err := s.store.GetDurableAgentInstance(ctx, id)
 	if err != nil {
 		return nil, err
 	}
-	inst, err := s.store.SetDurableAgentInstanceStatus(id, store.DurableAgentStatusStopRequested)
+	inst, err := s.store.SetDurableAgentInstanceStatus(ctx, id, store.DurableAgentStatusStopRequested)
 	if err != nil {
 		return nil, err
 	}
@@ -524,7 +524,7 @@ func (s *durableAgentService) RequestStop(ctx context.Context, id string) (*stor
 	})
 	if inst.CurrentSessionID != "" && s.runtime != nil {
 		if err := s.runtime.StopSession(ctx, inst.CurrentSessionID); err != nil {
-			failed, setErr := s.store.SetDurableAgentInstanceLaunchState(id, store.DurableAgentStatusFailed, inst.CurrentSessionID, err.Error())
+			failed, setErr := s.store.SetDurableAgentInstanceLaunchState(ctx, id, store.DurableAgentStatusFailed, inst.CurrentSessionID, err.Error())
 			if setErr != nil {
 				return nil, setErr
 			}
@@ -540,7 +540,7 @@ func (s *durableAgentService) RequestStop(ctx context.Context, id string) (*stor
 			Source:       store.DurableAgentEventSourceRuntime,
 		})
 	}
-	stopped, err := s.store.SetDurableAgentInstanceLaunchState(id, store.DurableAgentStatusStopped, inst.CurrentSessionID, "")
+	stopped, err := s.store.SetDurableAgentInstanceLaunchState(ctx, id, store.DurableAgentStatusStopped, inst.CurrentSessionID, "")
 	if err != nil {
 		return nil, err
 	}
@@ -555,7 +555,7 @@ func (s *durableAgentService) RequestStop(ctx context.Context, id string) (*stor
 }
 
 func (s *durableAgentService) RequestPause(_ context.Context, id string) (*store.DurableAgentInstance, error) {
-	inst, err := s.store.GetDurableAgentInstance(id)
+	inst, err := s.store.GetDurableAgentInstance(context.TODO() /* TODO(ctx-sweep): no ctx available at this call site */, id)
 	if err != nil {
 		return nil, err
 	}
@@ -566,7 +566,7 @@ func (s *durableAgentService) RequestPause(_ context.Context, id string) (*store
 		StatusAfter:  inst.Status,
 		SessionID:    inst.CurrentSessionID,
 	})
-	paused, err := s.store.SetDurableAgentInstanceLaunchState(id, store.DurableAgentStatusPaused, inst.CurrentSessionID, "")
+	paused, err := s.store.SetDurableAgentInstanceLaunchState(context.TODO() /* TODO(ctx-sweep): no ctx available at this call site */, id, store.DurableAgentStatusPaused, inst.CurrentSessionID, "")
 	if err != nil {
 		return nil, err
 	}
@@ -586,7 +586,7 @@ func (s *durableAgentService) RequestResume(ctx context.Context, id string) (*st
 		if result != nil && result.Instance != nil {
 			return result.Instance, err
 		}
-		inst, getErr := s.store.GetDurableAgentInstance(id)
+		inst, getErr := s.store.GetDurableAgentInstance(ctx, id)
 		if getErr == nil {
 			return inst, err
 		}
@@ -596,11 +596,11 @@ func (s *durableAgentService) RequestResume(ctx context.Context, id string) (*st
 }
 
 func (s *durableAgentService) AttachSession(_ context.Context, instanceID, sessionID, relation string) error {
-	inst, err := s.store.GetDurableAgentInstance(instanceID)
+	inst, err := s.store.GetDurableAgentInstance(context.TODO() /* TODO(ctx-sweep): no ctx available at this call site */, instanceID)
 	if err != nil {
 		return err
 	}
-	if err := s.store.AttachDurableAgentInstanceSession(instanceID, sessionID, relation); err != nil {
+	if err := s.store.AttachDurableAgentInstanceSession(context.TODO() /* TODO(ctx-sweep): no ctx available at this call site */, instanceID, sessionID, relation); err != nil {
 		return err
 	}
 	s.recordSessionAttachedEvent(inst, sessionID, relation)
@@ -608,22 +608,22 @@ func (s *durableAgentService) AttachSession(_ context.Context, instanceID, sessi
 }
 
 func (s *durableAgentService) ListSessions(_ context.Context, instanceID string) ([]store.DurableAgentInstanceSession, error) {
-	return s.store.ListDurableAgentInstanceSessions(instanceID)
+	return s.store.ListDurableAgentInstanceSessions(context.TODO() /* TODO(ctx-sweep): no ctx available at this call site */, instanceID)
 }
 
 func (s *durableAgentService) ListSessionStates(_ context.Context, instanceID string) ([]store.DurableAgentInstanceSessionState, error) {
-	return s.store.ListDurableAgentInstanceSessionStates(instanceID)
+	return s.store.ListDurableAgentInstanceSessionStates(context.TODO() /* TODO(ctx-sweep): no ctx available at this call site */, instanceID)
 }
 
 func (s *durableAgentService) ListEvents(_ context.Context, instanceID string, limit int) ([]store.DurableAgentEvent, error) {
-	if _, err := s.store.GetDurableAgentInstance(instanceID); err != nil {
+	if _, err := s.store.GetDurableAgentInstance(context.TODO() /* TODO(ctx-sweep): no ctx available at this call site */, instanceID); err != nil {
 		return nil, err
 	}
-	return s.store.ListDurableAgentEvents(instanceID, limit)
+	return s.store.ListDurableAgentEvents(context.TODO() /* TODO(ctx-sweep): no ctx available at this call site */, instanceID, limit)
 }
 
 func (s *durableAgentService) recordEvent(event *store.DurableAgentEvent) {
-	_ = s.store.CreateDurableAgentEvent(event)
+	_ = s.store.CreateDurableAgentEvent(context.TODO() /* TODO(ctx-sweep): no ctx available at this call site */, event)
 }
 
 func (s *durableAgentService) recordSessionAttachedEvent(inst *store.DurableAgentInstance, sessionID, relation string) {
@@ -736,17 +736,17 @@ func (s *durableAgentService) selectOrCreateLaunchSession(inst *store.DurableAge
 		ContextID:   inst.ID,
 		Metadata:    string(metadata),
 	}
-	if err := s.store.CreateSession(sess); err != nil {
+	if err := s.store.CreateSession(context.TODO() /* TODO(ctx-sweep): no ctx available at this call site */, sess); err != nil {
 		return nil, false, fmt.Errorf("create durable agent session: %w", err)
 	}
-	if err := s.store.EnsureSessionAgent(sess.ID, inst.ProfileID, "default", true); err != nil {
+	if err := s.store.EnsureSessionAgent(context.TODO() /* TODO(ctx-sweep): no ctx available at this call site */, sess.ID, inst.ProfileID, "default", true); err != nil {
 		return nil, false, fmt.Errorf("attach durable agent profile to session: %w", err)
 	}
 	return sess, false, nil
 }
 
 func (s *durableAgentService) latestAttachedSession(inst *store.DurableAgentInstance, requireCompatible bool) (*store.Session, error) {
-	rels, err := s.store.ListDurableAgentInstanceSessions(inst.ID)
+	rels, err := s.store.ListDurableAgentInstanceSessions(context.TODO() /* TODO(ctx-sweep): no ctx available at this call site */, inst.ID)
 	if err != nil {
 		return nil, err
 	}
@@ -754,7 +754,7 @@ func (s *durableAgentService) latestAttachedSession(inst *store.DurableAgentInst
 		if rel.DetachedAt != nil {
 			continue
 		}
-		sess, err := s.store.GetSession(rel.SessionID)
+		sess, err := s.store.GetSession(context.TODO() /* TODO(ctx-sweep): no ctx available at this call site */, rel.SessionID)
 		if err != nil {
 			continue
 		}

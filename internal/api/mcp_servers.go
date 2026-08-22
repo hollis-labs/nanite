@@ -15,7 +15,7 @@ import (
 // handleListMCPServers returns all persisted MCP server configs.
 // GET /api/mcp-servers
 func (a *API) handleListMCPServers(w http.ResponseWriter, r *http.Request) {
-	servers, err := a.Services.Store.ListMCPServers()
+	servers, err := a.Services.Store.ListMCPServers(r.Context())
 	if err != nil {
 		a.errorResp(w, http.StatusInternalServerError, err.Error())
 		return
@@ -45,14 +45,14 @@ func (a *API) handleCreateMCPServer(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Check for duplicates.
-	existing, _ := a.Services.Store.GetMCPServer(cfg.Name)
+	existing, _ := a.Services.Store.GetMCPServer(r.Context(), cfg.Name)
 	if existing != nil {
 		a.errorResp(w, http.StatusConflict, "server with this name already exists")
 		return
 	}
 
 	cfg.Enabled = true
-	if err := a.Services.Store.CreateMCPServer(&cfg); err != nil {
+	if err := a.Services.Store.CreateMCPServer(r.Context(), &cfg); err != nil {
 		a.errorResp(w, http.StatusInternalServerError, err.Error())
 		return
 	}
@@ -73,7 +73,7 @@ func (a *API) handleCreateMCPServer(w http.ResponseWriter, r *http.Request) {
 func (a *API) handleUpdateMCPServer(w http.ResponseWriter, r *http.Request) {
 	name := r.PathValue("name")
 
-	existing, err := a.Services.Store.GetMCPServer(name)
+	existing, err := a.Services.Store.GetMCPServer(r.Context(), name)
 	if err != nil {
 		a.errorResp(w, http.StatusInternalServerError, err.Error())
 		return
@@ -101,7 +101,7 @@ func (a *API) handleUpdateMCPServer(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := a.Services.Store.UpdateMCPServer(&cfg); err != nil {
+	if err := a.Services.Store.UpdateMCPServer(r.Context(), &cfg); err != nil {
 		a.errorResp(w, http.StatusInternalServerError, err.Error())
 		return
 	}
@@ -121,7 +121,7 @@ func (a *API) handleUpdateMCPServer(w http.ResponseWriter, r *http.Request) {
 func (a *API) handleDeleteMCPServer(w http.ResponseWriter, r *http.Request) {
 	name := r.PathValue("name")
 
-	if err := a.Services.Store.DeleteMCPServer(name); err != nil {
+	if err := a.Services.Store.DeleteMCPServer(r.Context(), name); err != nil {
 		a.errorResp(w, http.StatusNotFound, err.Error())
 		return
 	}
@@ -151,7 +151,7 @@ func (a *API) handleImportMCPServers(w http.ResponseWriter, r *http.Request) {
 
 	// Register newly created servers with the MCP manager.
 	for _, name := range result.Created {
-		cfg, _ := a.Services.Store.GetMCPServer(name)
+		cfg, _ := a.Services.Store.GetMCPServer(r.Context(), name)
 		if cfg != nil {
 			a.registerMCPTransport(cfg)
 		}

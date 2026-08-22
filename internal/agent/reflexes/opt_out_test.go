@@ -22,7 +22,7 @@ import (
 
 func newOptOutTestAgent(t *testing.T, st *store.Store, id string) {
 	t.Helper()
-	if err := st.CreateAgent(&store.AgentProfile{
+	if err := st.CreateAgent(context.Background(), &store.AgentProfile{
 		ID: id, Name: id, Slug: id, Class: "process",
 		SystemPrompt: "test", Source: "test",
 	}); err != nil {

@@ -112,7 +112,7 @@ func TestMigrate125SeedsProvenanceAllowList(t *testing.T) {
 	assertGooseHasNothingPending(t, s)
 
 	// Simulated restart: a second full migrate() must be a clean no-op.
-	if err := s.migrate(); err != nil {
+	if err := s.migrate(context.Background()); err != nil {
 		t.Fatalf("re-migrate after 125 already applied: %v", err)
 	}
 }
@@ -220,14 +220,16 @@ func TestRealBackupAgentReflexesValidateAgainstProvenanceAllowList(t *testing.T)
 	if err != nil {
 		t.Fatalf("open+migrate scratch copy of real backup db: %v", err)
 	}
-	defer rs.Close()
+	defer rs.Close(context.
 
-	// Collect every row fully (and close the cursor) before checking each
-	// one against the allow-list — rs's connection pool is a single
-	// connection (sqlitekit.OpenSingle), so issuing a second query
-	// (ActionKindAllowsProvenanceTier) while this outer *sql.Rows is still
-	// open would deadlock waiting for a connection that can't free up
-	// until this cursor is fully drained/closed.
+		// Collect every row fully (and close the cursor) before checking each
+		// one against the allow-list — rs's connection pool is a single
+		// connection (sqlitekit.OpenSingle), so issuing a second query
+		// (ActionKindAllowsProvenanceTier) while this outer *sql.Rows is still
+		// open would deadlock waiting for a connection that can't free up
+		// until this cursor is fully drained/closed.
+		Background())
+
 	type reflexRow struct {
 		id, actionKind, tier string
 	}

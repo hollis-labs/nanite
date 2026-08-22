@@ -1,6 +1,7 @@
 package store
 
 import (
+	"context"
 	"errors"
 	"testing"
 )
@@ -13,7 +14,7 @@ func TestBottomDrawerPinnedCard_Lifecycle(t *testing.T) {
 	sessionID := "sess-drawer-pins"
 
 	// Step 1: lifecycle starts at zero — no rows.
-	got, err := s.ListBottomDrawerPinnedCards(sessionID)
+	got, err := s.ListBottomDrawerPinnedCards(context.Background(), sessionID)
 	if err != nil {
 		t.Fatalf("ListBottomDrawerPinnedCards: %v", err)
 	}
@@ -29,7 +30,7 @@ func TestBottomDrawerPinnedCard_Lifecycle(t *testing.T) {
 		Title:      "Search Results",
 		Payload:    `{"type":"info-card"}`,
 	}
-	if err := s.PinBottomDrawerCard(pin); err != nil {
+	if err := s.PinBottomDrawerCard(context.Background(), pin); err != nil {
 		t.Fatalf("PinBottomDrawerCard: %v", err)
 	}
 	if pin.ID == "" {
@@ -39,7 +40,7 @@ func TestBottomDrawerPinnedCard_Lifecycle(t *testing.T) {
 		t.Fatalf("expected CreatedAt to be stamped")
 	}
 
-	got, err = s.ListBottomDrawerPinnedCards(sessionID)
+	got, err = s.ListBottomDrawerPinnedCards(context.Background(), sessionID)
 	if err != nil {
 		t.Fatalf("ListBottomDrawerPinnedCards (after pin): %v", err)
 	}
@@ -54,10 +55,10 @@ func TestBottomDrawerPinnedCard_Lifecycle(t *testing.T) {
 	}
 
 	// Step 3: pinned → unpinned (delete).
-	if err := s.UnpinBottomDrawerCard(pin.ID); err != nil {
+	if err := s.UnpinBottomDrawerCard(context.Background(), pin.ID); err != nil {
 		t.Fatalf("UnpinBottomDrawerCard: %v", err)
 	}
-	got, err = s.ListBottomDrawerPinnedCards(sessionID)
+	got, err = s.ListBottomDrawerPinnedCards(context.Background(), sessionID)
 	if err != nil {
 		t.Fatalf("ListBottomDrawerPinnedCards (after unpin): %v", err)
 	}
@@ -71,10 +72,10 @@ func TestBottomDrawerPinnedCard_Lifecycle(t *testing.T) {
 		CardType:  "markdown",
 		Title:     "Re-pinned",
 	}
-	if err := s.PinBottomDrawerCard(pin2); err != nil {
+	if err := s.PinBottomDrawerCard(context.Background(), pin2); err != nil {
 		t.Fatalf("PinBottomDrawerCard (re-pin): %v", err)
 	}
-	got, err = s.ListBottomDrawerPinnedCards(sessionID)
+	got, err = s.ListBottomDrawerPinnedCards(context.Background(), sessionID)
 	if err != nil {
 		t.Fatalf("ListBottomDrawerPinnedCards (after re-pin): %v", err)
 	}
@@ -83,7 +84,7 @@ func TestBottomDrawerPinnedCard_Lifecycle(t *testing.T) {
 	}
 
 	// Cleanup for cap test below.
-	_ = s.UnpinBottomDrawerCard(pin2.ID)
+	_ = s.UnpinBottomDrawerCard(context.Background(), pin2.ID)
 }
 
 func TestBottomDrawerPinnedCard_CapEnforced(t *testing.T) {
@@ -97,13 +98,13 @@ func TestBottomDrawerPinnedCard_CapEnforced(t *testing.T) {
 			CardType:  "markdown",
 			Title:     "card",
 		}
-		if err := s.PinBottomDrawerCard(c); err != nil {
+		if err := s.PinBottomDrawerCard(context.Background(), c); err != nil {
 			t.Fatalf("pin %d: %v", i, err)
 		}
 	}
 
 	// Confirm count.
-	n, err := s.CountBottomDrawerPinnedCards(sessionID)
+	n, err := s.CountBottomDrawerPinnedCards(context.Background(), sessionID)
 	if err != nil {
 		t.Fatalf("CountBottomDrawerPinnedCards: %v", err)
 	}
@@ -117,7 +118,7 @@ func TestBottomDrawerPinnedCard_CapEnforced(t *testing.T) {
 		CardType:  "markdown",
 		Title:     "overflow",
 	}
-	err = s.PinBottomDrawerCard(overflow)
+	err = s.PinBottomDrawerCard(context.Background(), overflow)
 	if err == nil {
 		t.Fatalf("expected ErrBottomDrawerPinCapExceeded, got nil")
 	}
@@ -126,11 +127,11 @@ func TestBottomDrawerPinnedCard_CapEnforced(t *testing.T) {
 	}
 
 	// Unpinning one should let a new pin land.
-	all, _ := s.ListBottomDrawerPinnedCards(sessionID)
-	if err := s.UnpinBottomDrawerCard(all[0].ID); err != nil {
+	all, _ := s.ListBottomDrawerPinnedCards(context.Background(), sessionID)
+	if err := s.UnpinBottomDrawerCard(context.Background(), all[0].ID); err != nil {
 		t.Fatalf("unpin to free a slot: %v", err)
 	}
-	if err := s.PinBottomDrawerCard(overflow); err != nil {
+	if err := s.PinBottomDrawerCard(context.Background(), overflow); err != nil {
 		t.Fatalf("pin after unpin slot freed: %v", err)
 	}
 }
@@ -143,14 +144,14 @@ func TestBottomDrawerPinnedCard_PerSessionIsolation(t *testing.T) {
 	sessB := "sess-b"
 
 	for i := 0; i < 5; i++ {
-		_ = s.PinBottomDrawerCard(&BottomDrawerPinnedCard{
+		_ = s.PinBottomDrawerCard(context.Background(), &BottomDrawerPinnedCard{
 			SessionID: sessA,
 			CardType:  "markdown",
 		})
 	}
 
-	listA, _ := s.ListBottomDrawerPinnedCards(sessA)
-	listB, _ := s.ListBottomDrawerPinnedCards(sessB)
+	listA, _ := s.ListBottomDrawerPinnedCards(context.Background(), sessA)
+	listB, _ := s.ListBottomDrawerPinnedCards(context.Background(), sessB)
 	if len(listA) != 5 {
 		t.Fatalf("session A: expected 5 pins, got %d", len(listA))
 	}
@@ -160,14 +161,14 @@ func TestBottomDrawerPinnedCard_PerSessionIsolation(t *testing.T) {
 
 	// Session B can pin freely up to its own cap.
 	for i := 0; i < BottomDrawerPinCap; i++ {
-		if err := s.PinBottomDrawerCard(&BottomDrawerPinnedCard{
+		if err := s.PinBottomDrawerCard(context.Background(), &BottomDrawerPinnedCard{
 			SessionID: sessB,
 			CardType:  "markdown",
 		}); err != nil {
 			t.Fatalf("session B pin %d: %v", i, err)
 		}
 	}
-	cnt, _ := s.CountBottomDrawerPinnedCards(sessB)
+	cnt, _ := s.CountBottomDrawerPinnedCards(context.Background(), sessB)
 	if cnt != BottomDrawerPinCap {
 		t.Fatalf("session B: expected cap, got %d", cnt)
 	}

@@ -33,7 +33,7 @@ func TestSpawn_ReplyDelivery_ParentSlug_ToAgentIDResolution(t *testing.T) {
 	// real-world pattern where agent_profiles.ID is a generated UUID
 	// or prefixed ID (e.g. "agt-operator-001") but slug is the bare
 	// role name ("operator").
-	if err := st.CreateAgent(&store.AgentProfile{
+	if err := st.CreateAgent(context.Background(), &store.AgentProfile{
 		ID:     "agt-operator-001",
 		Slug:   "operator",
 		Name:   "Operator",

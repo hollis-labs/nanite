@@ -14,7 +14,7 @@ import (
 func TestConsumersMigration_SeedsLoomRow(t *testing.T) {
 	s := newTestStore(t)
 
-	loom, err := s.GetConsumerBySlug("loom")
+	loom, err := s.GetConsumerBySlug(context.Background(), "loom")
 	if err != nil {
 		t.Fatalf("GetConsumerBySlug(loom): %v", err)
 	}
@@ -29,10 +29,10 @@ func TestConsumersMigration_SeedsLoomRow(t *testing.T) {
 	}
 
 	// A re-migrate (simulated restart) must not duplicate the seed row.
-	if err := s.migrate(); err != nil {
+	if err := s.migrate(context.Background()); err != nil {
 		t.Fatalf("re-migrate: %v", err)
 	}
-	all, err := s.ListConsumers()
+	all, err := s.ListConsumers(context.Background())
 	if err != nil {
 		t.Fatalf("ListConsumers: %v", err)
 	}
@@ -53,7 +53,7 @@ func TestConsumersCRUD(t *testing.T) {
 	s := newTestStore(t)
 
 	c := &Consumer{Slug: "acme", Name: "Acme Corp"}
-	if err := s.CreateConsumer(c); err != nil {
+	if err := s.CreateConsumer(context.Background(), c); err != nil {
 		t.Fatalf("CreateConsumer: %v", err)
 	}
 	if c.ID == "" {
@@ -63,7 +63,7 @@ func TestConsumersCRUD(t *testing.T) {
 		t.Error("CreateConsumer did not stamp CreatedAt")
 	}
 
-	got, err := s.GetConsumer(c.ID)
+	got, err := s.GetConsumer(context.Background(), c.ID)
 	if err != nil {
 		t.Fatalf("GetConsumer: %v", err)
 	}
@@ -71,7 +71,7 @@ func TestConsumersCRUD(t *testing.T) {
 		t.Fatalf("GetConsumer round-trip: got %+v", got)
 	}
 
-	gotBySlug, err := s.GetConsumerBySlug("acme")
+	gotBySlug, err := s.GetConsumerBySlug(context.Background(), "acme")
 	if err != nil {
 		t.Fatalf("GetConsumerBySlug: %v", err)
 	}
@@ -80,10 +80,10 @@ func TestConsumersCRUD(t *testing.T) {
 	}
 
 	c.Name = "Acme Corporation"
-	if err := s.UpdateConsumer(c); err != nil {
+	if err := s.UpdateConsumer(context.Background(), c); err != nil {
 		t.Fatalf("UpdateConsumer: %v", err)
 	}
-	updated, err := s.GetConsumer(c.ID)
+	updated, err := s.GetConsumer(context.Background(), c.ID)
 	if err != nil {
 		t.Fatalf("GetConsumer after update: %v", err)
 	}
@@ -91,7 +91,7 @@ func TestConsumersCRUD(t *testing.T) {
 		t.Errorf("Name after update: got %q want %q", updated.Name, "Acme Corporation")
 	}
 
-	all, err := s.ListConsumers()
+	all, err := s.ListConsumers(context.Background())
 	if err != nil {
 		t.Fatalf("ListConsumers: %v", err)
 	}
@@ -105,10 +105,10 @@ func TestConsumersCRUD(t *testing.T) {
 		t.Error("ListConsumers did not include the created consumer")
 	}
 
-	if err := s.DeleteConsumer(c.ID); err != nil {
+	if err := s.DeleteConsumer(context.Background(), c.ID); err != nil {
 		t.Fatalf("DeleteConsumer: %v", err)
 	}
-	gone, err := s.GetConsumer(c.ID)
+	gone, err := s.GetConsumer(context.Background(), c.ID)
 	if err != nil {
 		t.Fatalf("GetConsumer after delete: %v", err)
 	}
@@ -116,7 +116,7 @@ func TestConsumersCRUD(t *testing.T) {
 		t.Error("expected consumer to be gone after DeleteConsumer")
 	}
 
-	if err := s.DeleteConsumer("does-not-exist"); err == nil {
+	if err := s.DeleteConsumer(context.Background(), "does-not-exist"); err == nil {
 		t.Error("expected error deleting a nonexistent consumer")
 	}
 }
@@ -126,10 +126,10 @@ func TestConsumersCRUD(t *testing.T) {
 func TestConsumersCreate_RequiresSlugAndName(t *testing.T) {
 	s := newTestStore(t)
 
-	if err := s.CreateConsumer(&Consumer{Name: "No Slug"}); err == nil {
+	if err := s.CreateConsumer(context.Background(), &Consumer{Name: "No Slug"}); err == nil {
 		t.Error("expected error creating a consumer without a slug")
 	}
-	if err := s.CreateConsumer(&Consumer{Slug: "no-name"}); err == nil {
+	if err := s.CreateConsumer(context.Background(), &Consumer{Slug: "no-name"}); err == nil {
 		t.Error("expected error creating a consumer without a name")
 	}
 }
@@ -141,7 +141,7 @@ func TestConsumersCreate_RequiresSlugAndName(t *testing.T) {
 func TestAgentProfile_ConsumerIDRoundTrip(t *testing.T) {
 	s := newTestStore(t)
 
-	loom, err := s.GetConsumerBySlug("loom")
+	loom, err := s.GetConsumerBySlug(context.Background(), "loom")
 	if err != nil || loom == nil {
 		t.Fatalf("GetConsumerBySlug(loom): %v, %+v", err, loom)
 	}
@@ -151,14 +151,14 @@ func TestAgentProfile_ConsumerIDRoundTrip(t *testing.T) {
 		Slug:         "curator-consumer-test",
 		SystemPrompt: "test",
 	}
-	if err := s.CreateAgent(a); err != nil {
+	if err := s.CreateAgent(context.Background(), a); err != nil {
 		t.Fatalf("CreateAgent: %v", err)
 	}
 	if a.ConsumerID != "" {
 		t.Errorf("default ConsumerID: got %q, want empty (operator-owned)", a.ConsumerID)
 	}
 
-	got, err := s.GetAgent(a.ID)
+	got, err := s.GetAgent(context.Background(), a.ID)
 	if err != nil {
 		t.Fatalf("GetAgent: %v", err)
 	}
@@ -167,11 +167,11 @@ func TestAgentProfile_ConsumerIDRoundTrip(t *testing.T) {
 	}
 
 	got.ConsumerID = loom.ID
-	if err := s.UpdateAgent(got); err != nil {
+	if err := s.UpdateAgent(context.Background(), got); err != nil {
 		t.Fatalf("UpdateAgent: %v", err)
 	}
 
-	tagged, err := s.GetAgent(a.ID)
+	tagged, err := s.GetAgent(context.Background(), a.ID)
 	if err != nil {
 		t.Fatalf("GetAgent after tagging: %v", err)
 	}
@@ -181,16 +181,16 @@ func TestAgentProfile_ConsumerIDRoundTrip(t *testing.T) {
 
 	// Deleting the referenced consumer while an agent still points at it
 	// must fail -- this codebase runs with PRAGMA foreign_keys=1.
-	if err := s.DeleteConsumer(loom.ID); err == nil {
+	if err := s.DeleteConsumer(context.Background(), loom.ID); err == nil {
 		t.Error("expected DeleteConsumer to fail while an agent_profiles row still references it")
 	}
 
 	// Clearing the tag first must allow the delete to proceed.
 	tagged.ConsumerID = ""
-	if err := s.UpdateAgent(tagged); err != nil {
+	if err := s.UpdateAgent(context.Background(), tagged); err != nil {
 		t.Fatalf("UpdateAgent (clear consumer_id): %v", err)
 	}
-	cleared, err := s.GetAgent(a.ID)
+	cleared, err := s.GetAgent(context.Background(), a.ID)
 	if err != nil {
 		t.Fatalf("GetAgent after clearing: %v", err)
 	}
@@ -206,13 +206,13 @@ func TestMigrate112DownRemovesConsumersAndColumn(t *testing.T) {
 	s := newTestStore(t)
 	ctx := context.Background()
 
-	loom, err := s.GetConsumerBySlug("loom")
+	loom, err := s.GetConsumerBySlug(context.Background(), "loom")
 	if err != nil || loom == nil {
 		t.Fatalf("GetConsumerBySlug(loom) before down: %v, %+v", err, loom)
 	}
 
 	a := &AgentProfile{Name: "Down Test", Slug: "down-test-consumer", SystemPrompt: "x", ConsumerID: loom.ID}
-	if err := s.CreateAgent(a); err != nil {
+	if err := s.CreateAgent(context.Background(), a); err != nil {
 		t.Fatalf("CreateAgent: %v", err)
 	}
 
@@ -268,7 +268,7 @@ func TestMigrate112DownRemovesConsumersAndColumn(t *testing.T) {
 	if !exists {
 		t.Error("agent_profiles.consumer_id missing after Up replayed 106")
 	}
-	loomAgain, err := s.GetConsumerBySlug("loom")
+	loomAgain, err := s.GetConsumerBySlug(context.Background(), "loom")
 	if err != nil {
 		t.Fatalf("GetConsumerBySlug(loom) after re-up: %v", err)
 	}

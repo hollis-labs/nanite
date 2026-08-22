@@ -1,6 +1,7 @@
 package store
 
 import (
+	"context"
 	"fmt"
 	"time"
 
@@ -21,8 +22,8 @@ type CatalogSource struct {
 }
 
 // ListCatalogSources returns all catalog sources ordered by priority descending.
-func (s *Store) ListCatalogSources() ([]CatalogSource, error) {
-	rows, err := s.DB.Query(`
+func (s *Store) ListCatalogSources(ctx context.Context) ([]CatalogSource, error) {
+	rows, err := s.DB.QueryContext(ctx, `
 		SELECT id, name, url, type, enabled, priority, public_key, created_at, updated_at
 		FROM catalog_sources
 		ORDER BY priority DESC, name ASC
@@ -46,7 +47,7 @@ func (s *Store) ListCatalogSources() ([]CatalogSource, error) {
 }
 
 // CreateCatalogSource adds a new catalog source.
-func (s *Store) CreateCatalogSource(name, url, sourceType string, priority int) (*CatalogSource, error) {
+func (s *Store) CreateCatalogSource(ctx context.Context, name, url, sourceType string, priority int) (*CatalogSource, error) {
 	id := uuid.NewString()
 	now := time.Now().UTC()
 
@@ -54,7 +55,7 @@ func (s *Store) CreateCatalogSource(name, url, sourceType string, priority int) 
 		sourceType = "custom"
 	}
 
-	_, err := s.DB.Exec(`
+	_, err := s.DB.ExecContext(ctx, `
 		INSERT INTO catalog_sources (id, name, url, type, enabled, priority, created_at, updated_at)
 		VALUES (?, ?, ?, ?, 1, ?, ?, ?)
 	`, id, name, url, sourceType, priority, now, now)
@@ -75,12 +76,12 @@ func (s *Store) CreateCatalogSource(name, url, sourceType string, priority int) 
 }
 
 // UpdateCatalogSource updates mutable fields of a catalog source.
-func (s *Store) UpdateCatalogSource(id, name, url string, enabled bool, priority int) error {
+func (s *Store) UpdateCatalogSource(ctx context.Context, id, name, url string, enabled bool, priority int) error {
 	enabledInt := 0
 	if enabled {
 		enabledInt = 1
 	}
-	res, err := s.DB.Exec(`
+	res, err := s.DB.ExecContext(ctx, `
 		UPDATE catalog_sources SET name=?, url=?, enabled=?, priority=?, updated_at=datetime('now')
 		WHERE id=?
 	`, name, url, enabledInt, priority, id)
@@ -95,8 +96,8 @@ func (s *Store) UpdateCatalogSource(id, name, url string, enabled bool, priority
 }
 
 // SetCatalogSourcePublicKey sets the trusted public key for a catalog source.
-func (s *Store) SetCatalogSourcePublicKey(id, publicKey string) error {
-	res, err := s.DB.Exec(`
+func (s *Store) SetCatalogSourcePublicKey(ctx context.Context, id, publicKey string) error {
+	res, err := s.DB.ExecContext(ctx, `
 		UPDATE catalog_sources SET public_key=?, updated_at=datetime('now') WHERE id=?
 	`, publicKey, id)
 	if err != nil {
@@ -111,8 +112,8 @@ func (s *Store) SetCatalogSourcePublicKey(id, publicKey string) error {
 
 // DeleteCatalogSource removes a catalog source. The official source can be
 // deleted but will be re-seeded on next migration run.
-func (s *Store) DeleteCatalogSource(id string) error {
-	res, err := s.DB.Exec(`DELETE FROM catalog_sources WHERE id=?`, id)
+func (s *Store) DeleteCatalogSource(ctx context.Context, id string) error {
+	res, err := s.DB.ExecContext(ctx, `DELETE FROM catalog_sources WHERE id=?`, id)
 	if err != nil {
 		return fmt.Errorf("delete catalog source: %w", err)
 	}
@@ -124,10 +125,10 @@ func (s *Store) DeleteCatalogSource(id string) error {
 }
 
 // GetCatalogSource returns a single catalog source by ID.
-func (s *Store) GetCatalogSource(id string) (*CatalogSource, error) {
+func (s *Store) GetCatalogSource(ctx context.Context, id string) (*CatalogSource, error) {
 	var cs CatalogSource
 	var enabled int
-	err := s.DB.QueryRow(`
+	err := s.DB.QueryRowContext(ctx, `
 		SELECT id, name, url, type, enabled, priority, public_key, created_at, updated_at
 		FROM catalog_sources WHERE id=?
 	`, id).Scan(&cs.ID, &cs.Name, &cs.URL, &cs.Type, &enabled, &cs.Priority, &cs.PublicKey, &cs.CreatedAt, &cs.UpdatedAt)

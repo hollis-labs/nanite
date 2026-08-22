@@ -28,7 +28,7 @@ func (f *fakeSkillStore) ListAgentKnownSkills(_ context.Context, agentID string)
 	return f.known[agentID], nil
 }
 
-func (f *fakeSkillStore) GetSkillBySlug(slug string) (*store.Skill, error) {
+func (f *fakeSkillStore) GetSkillBySlug(ctx context.Context, slug string) (*store.Skill, error) {
 	if f.getErr != nil {
 		return nil, f.getErr
 	}
@@ -74,8 +74,8 @@ func TestResolvePlantableSkills(t *testing.T) {
 		known: map[string][]store.AgentKnownSkill{
 			"agent-1": {
 				{AgentID: "agent-1", SkillName: "good", ApprovedContentHash: skillAddrGood},
-				{AgentID: "agent-1", SkillName: "revoked", ApprovedContentHash: ""},           // bare assignment, never approved
-				{AgentID: "agent-1", SkillName: "stale", ApprovedContentHash: skillAddrStale}, // stale vs. catalog's current hash
+				{AgentID: "agent-1", SkillName: "revoked", ApprovedContentHash: ""},            // bare assignment, never approved
+				{AgentID: "agent-1", SkillName: "stale", ApprovedContentHash: skillAddrStale},  // stale vs. catalog's current hash
 				{AgentID: "agent-1", SkillName: "missing", ApprovedContentHash: skillAddrGood}, // dangling — no catalog row
 			},
 		},

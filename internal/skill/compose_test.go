@@ -341,7 +341,7 @@ func TestMaterializeSkill_MultiLevelProvenanceChain_CrossesInlineAndFork(t *test
 // file's own DI need.
 type gatedSettingsReader struct{ us store.UserSettings }
 
-func (g gatedSettingsReader) GetUserSettings() (*store.UserSettings, error) {
+func (g gatedSettingsReader) GetUserSettings(ctx context.Context) (*store.UserSettings, error) {
 	cp := g.us
 	return &cp, nil
 }

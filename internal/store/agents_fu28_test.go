@@ -1,6 +1,7 @@
 package store
 
 import (
+	"context"
 	"encoding/json"
 	"regexp"
 	"strings"
@@ -14,7 +15,7 @@ import (
 func TestCreateAgent_FU28Defaults(t *testing.T) {
 	s := newTestStore(t)
 	a := &AgentProfile{Name: "FU28 Default", Slug: "fu28-default", SystemPrompt: "x"}
-	if err := s.CreateAgent(a); err != nil {
+	if err := s.CreateAgent(context.Background(), a); err != nil {
 		t.Fatalf("CreateAgent: %v", err)
 	}
 	if a.Class != "advisor" {
@@ -48,7 +49,7 @@ func TestCreateAgent_FU28Defaults(t *testing.T) {
 	}
 
 	// Round-trip via GetAgent to confirm the DB row was populated.
-	got, err := s.GetAgent(a.ID)
+	got, err := s.GetAgent(context.Background(), a.ID)
 	if err != nil {
 		t.Fatalf("GetAgent: %v", err)
 	}
@@ -63,7 +64,7 @@ func TestCreateAgent_FU28Defaults(t *testing.T) {
 func TestCreateAgent_FU28InvalidEnum(t *testing.T) {
 	s := newTestStore(t)
 	a := &AgentProfile{Name: "Bad", Slug: "bad-enum", SystemPrompt: "x", Class: "wizard"}
-	err := s.CreateAgent(a)
+	err := s.CreateAgent(context.Background(), a)
 	if err == nil || !strings.Contains(err.Error(), "class") {
 		t.Fatalf("expected class validation error, got: %v", err)
 	}
@@ -73,12 +74,12 @@ func TestCreateAgent_FU28InvalidEnum(t *testing.T) {
 func TestGetAgentByURN(t *testing.T) {
 	s := newTestStore(t)
 	a := &AgentProfile{Name: "URN", Slug: "urn-lookup", SystemPrompt: "x"}
-	if err := s.CreateAgent(a); err != nil {
+	if err := s.CreateAgent(context.Background(), a); err != nil {
 		t.Fatalf("CreateAgent: %v", err)
 	}
 
 	// Primary URN lookup.
-	got, ok, err := s.GetAgentByURN(a.URN)
+	got, ok, err := s.GetAgentByURN(context.Background(), a.URN)
 	if err != nil {
 		t.Fatalf("GetAgentByURN(primary): %v", err)
 	}
@@ -87,7 +88,7 @@ func TestGetAgentByURN(t *testing.T) {
 	}
 
 	// Slug-alias lookup.
-	got, ok, err = s.GetAgentByURN("msg://agent/agent-mux/urn-lookup")
+	got, ok, err = s.GetAgentByURN(context.Background(), "msg://agent/agent-mux/urn-lookup")
 	if err != nil {
 		t.Fatalf("GetAgentByURN(alias): %v", err)
 	}
@@ -96,7 +97,7 @@ func TestGetAgentByURN(t *testing.T) {
 	}
 
 	// Miss returns (nil, false, nil).
-	got, ok, err = s.GetAgentByURN("msg://agent/agent-mux/nope")
+	got, ok, err = s.GetAgentByURN(context.Background(), "msg://agent/agent-mux/nope")
 	if err != nil {
 		t.Fatalf("GetAgentByURN(miss): %v", err)
 	}
@@ -114,7 +115,7 @@ func TestListAgentsFilter(t *testing.T) {
 			Name: slug, Slug: slug, SystemPrompt: "x",
 			Class: class, ActivationMode: mode, Status: status,
 		}
-		if err := s.CreateAgent(a); err != nil {
+		if err := s.CreateAgent(context.Background(), a); err != nil {
 			t.Fatalf("CreateAgent %s: %v", slug, err)
 		}
 	}
@@ -123,7 +124,7 @@ func TestListAgentsFilter(t *testing.T) {
 	makeOne("filt-c", "advisor", "fresh-per-wake", "paused")
 
 	// Class filter.
-	got, err := s.ListAgentsFilter("advisor", "", "", nil)
+	got, err := s.ListAgentsFilter(context.Background(), "advisor", "", "", nil)
 	if err != nil {
 		t.Fatalf("filter class: %v", err)
 	}
@@ -137,7 +138,7 @@ func TestListAgentsFilter(t *testing.T) {
 	}
 
 	// Activation_mode filter.
-	got, err = s.ListAgentsFilter("", "fresh-per-wake", "", nil)
+	got, err = s.ListAgentsFilter(context.Background(), "", "fresh-per-wake", "", nil)
 	if err != nil {
 		t.Fatalf("filter mode: %v", err)
 	}
@@ -148,7 +149,7 @@ func TestListAgentsFilter(t *testing.T) {
 	}
 
 	// Combined: advisor + fresh-per-wake → only filt-c.
-	got, err = s.ListAgentsFilter("advisor", "fresh-per-wake", "", nil)
+	got, err = s.ListAgentsFilter(context.Background(), "advisor", "fresh-per-wake", "", nil)
 	if err != nil {
 		t.Fatalf("filter combo: %v", err)
 	}
@@ -170,14 +171,14 @@ func TestListAgentsFilter(t *testing.T) {
 func TestDeleteAgentByID(t *testing.T) {
 	s := newTestStore(t)
 	a := makeTestAgent(t, s, "delete-by-id")
-	if err := s.DeleteAgentByID(a.ID); err != nil {
+	if err := s.DeleteAgentByID(context.Background(), a.ID); err != nil {
 		t.Fatalf("DeleteAgentByID: %v", err)
 	}
-	if _, err := s.GetAgent(a.ID); err == nil {
+	if _, err := s.GetAgent(context.Background(), a.ID); err == nil {
 		t.Errorf("agent still present after delete")
 	}
 	// Delete on missing ID must not error.
-	if err := s.DeleteAgentByID("does-not-exist"); err != nil {
+	if err := s.DeleteAgentByID(context.Background(), "does-not-exist"); err != nil {
 		t.Errorf("delete missing ID returned error: %v", err)
 	}
 }
@@ -192,10 +193,10 @@ func TestCloneAgent(t *testing.T) {
 		Tags:         `["alpha"]`,
 		RoleTools:    `["read_file"]`,
 	}
-	if err := s.CreateAgent(src); err != nil {
+	if err := s.CreateAgent(context.Background(), src); err != nil {
 		t.Fatalf("CreateAgent src: %v", err)
 	}
-	cloned, err := s.CloneAgent(src.ID, "clone-dst", "Cloned Agent")
+	cloned, err := s.CloneAgent(context.Background(), src.ID, "clone-dst", "Cloned Agent")
 	if err != nil {
 		t.Fatalf("CloneAgent: %v", err)
 	}

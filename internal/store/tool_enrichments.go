@@ -1,6 +1,7 @@
 package store
 
 import (
+	"context"
 	"database/sql"
 	"errors"
 	"fmt"
@@ -21,10 +22,10 @@ type ToolEnrichment struct {
 
 // GetToolEnrichment loads the enrichment record for a tool by name.
 // Returns ErrToolEnrichmentNotFound if no row exists.
-func (s *Store) GetToolEnrichment(toolName string) (ToolEnrichment, error) {
+func (s *Store) GetToolEnrichment(ctx context.Context, toolName string) (ToolEnrichment, error) {
 	var rec ToolEnrichment
 	var updatedAtStr string
-	err := s.DB.QueryRow(
+	err := s.DB.QueryRowContext(ctx,
 		`SELECT tool_name, hints_json, updated_at FROM tool_enrichments WHERE tool_name = ?`,
 		toolName,
 	).Scan(&rec.ToolName, &rec.HintsJSON, &updatedAtStr)

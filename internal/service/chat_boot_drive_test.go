@@ -455,7 +455,7 @@ func (f *fakeSkillStoreForBootDrive) ListAgentKnownSkills(_ context.Context, age
 	return f.known[agentID], nil
 }
 
-func (f *fakeSkillStoreForBootDrive) GetSkillBySlug(slug string) (*store.Skill, error) {
+func (f *fakeSkillStoreForBootDrive) GetSkillBySlug(ctx context.Context, slug string) (*store.Skill, error) {
 	return f.skills[slug], nil
 }
 

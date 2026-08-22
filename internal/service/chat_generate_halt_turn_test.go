@@ -47,7 +47,7 @@ func (f *haltTestSessions) Create(context.Context, CreateSessionOpts) (*store.Se
 	panic("haltTestSessions: Create not implemented")
 }
 func (f *haltTestSessions) Get(_ context.Context, id string) (*store.Session, error) {
-	return f.st.GetSession(id)
+	return f.st.GetSession(context.Background(), id)
 }
 func (f *haltTestSessions) List(context.Context, bool) ([]store.Session, error) {
 	panic("haltTestSessions: List not implemented")
@@ -134,7 +134,7 @@ func TestGenerateResponse_HaltSessionReflex_AbortsTurnBeforeLLMCall(t *testing.T
 	if err != nil {
 		t.Fatalf("store.New: %v", err)
 	}
-	t.Cleanup(func() { _ = st.Close() })
+	t.Cleanup(func() { _ = st.Close(context.Background()) })
 
 	sessionID := "sess-halt-turn-sync-1"
 	agentID := "agent-halt-turn-sync-1"
@@ -146,7 +146,7 @@ func TestGenerateResponse_HaltSessionReflex_AbortsTurnBeforeLLMCall(t *testing.T
 		// task, not something this test needs to exercise.
 		Model: "mock-model",
 	}
-	if err := st.CreateSession(sess); err != nil {
+	if err := st.CreateSession(context.Background(), sess); err != nil {
 		t.Fatalf("CreateSession: %v", err)
 	}
 
@@ -192,7 +192,7 @@ func TestGenerateResponse_HaltSessionReflex_AbortsTurnBeforeLLMCall(t *testing.T
 	// this test proves it stays intact end to end, not just that a
 	// test-local reimplementation of it does.
 	reflexEngine.Executor.Halt = func(_ context.Context, sid, reason string, _ map[string]interface{}) error {
-		return st.MarkSessionHalted(sid, reason)
+		return st.MarkSessionHalted(context.Background(), sid, reason)
 	}
 
 	mockProv := &mockStreamProvider{
@@ -235,7 +235,7 @@ func TestGenerateResponse_HaltSessionReflex_AbortsTurnBeforeLLMCall(t *testing.T
 	// --- Half 2: the session row is marked halted by THIS turn, not a
 	// later request — MarkSessionHalted already ran synchronously inside
 	// evaluateAndInjectReflexes, before generateResponse returned above. ---
-	halt, err := st.GetSessionHalt(sessionID)
+	halt, err := st.GetSessionHalt(context.Background(), sessionID)
 	if err != nil {
 		t.Fatalf("GetSessionHalt: %v", err)
 	}
@@ -266,13 +266,13 @@ func TestGenerateResponse_NonHaltReflex_DoesNotAbortTurn(t *testing.T) {
 	if err != nil {
 		t.Fatalf("store.New: %v", err)
 	}
-	t.Cleanup(func() { _ = st.Close() })
+	t.Cleanup(func() { _ = st.Close(context.Background()) })
 
 	sessionID := "sess-halt-turn-sync-control-1"
 	agentID := "agent-halt-turn-sync-control-1"
 
 	sess := &store.Session{ID: sessionID, Model: "mock-model"}
-	if err := st.CreateSession(sess); err != nil {
+	if err := st.CreateSession(context.Background(), sess); err != nil {
 		t.Fatalf("CreateSession: %v", err)
 	}
 
@@ -302,7 +302,7 @@ func TestGenerateResponse_NonHaltReflex_DoesNotAbortTurn(t *testing.T) {
 
 	reflexEngine := reflexes.NewEngine(st, nil)
 	reflexEngine.Executor.Halt = func(_ context.Context, sid, reason string, _ map[string]interface{}) error {
-		return st.MarkSessionHalted(sid, reason)
+		return st.MarkSessionHalted(context.Background(), sid, reason)
 	}
 
 	mockProv := &mockStreamProvider{
@@ -337,7 +337,7 @@ func TestGenerateResponse_NonHaltReflex_DoesNotAbortTurn(t *testing.T) {
 		t.Errorf("mock provider StreamChat called %d times, want 1 — a non-halt reflex must not abort the turn", mockProv.callCount)
 	}
 
-	halt, err := st.GetSessionHalt(sessionID)
+	halt, err := st.GetSessionHalt(context.Background(), sessionID)
 	if err != nil {
 		t.Fatalf("GetSessionHalt: %v", err)
 	}

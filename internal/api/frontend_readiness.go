@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"net/http"
 	"strings"
 	"time"
@@ -103,7 +104,7 @@ func (a *API) handleStartSurfaceCapabilities(w http.ResponseWriter, r *http.Requ
 		a.errorResp(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	profiles, err := a.Services.Store.ListAgents()
+	profiles, err := a.Services.Store.ListAgents(r.Context())
 	if err != nil {
 		a.errorResp(w, http.StatusInternalServerError, err.Error())
 		return
@@ -155,7 +156,7 @@ func (a *API) handleGetSessionDetails(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *API) sessionDetails(id string) (sessionDetailsResponse, error) {
-	sess, err := a.Services.Store.GetSession(id)
+	sess, err := a.Services.Store.GetSession(context.TODO() /* TODO(ctx-sweep): no ctx available at this call site */, id)
 	if err != nil {
 		return sessionDetailsResponse{}, err
 	}
@@ -171,20 +172,20 @@ func (a *API) sessionDetails(id string) (sessionDetailsResponse, error) {
 		ImmutableStartFields: []string{"provider", "model", "runtime_kind", "recipe", "lifecycle_class", "work_root"},
 		Checkpoint:           checkpointDetail{Status: "unknown"},
 	}
-	if halt, err := a.Services.Store.GetSessionHalt(id); err == nil && halt != nil {
+	if halt, err := a.Services.Store.GetSessionHalt(context.TODO() /* TODO(ctx-sweep): no ctx available at this call site */, id); err == nil && halt != nil {
 		details.Halt = haltDetailFromStore(halt)
 	}
-	if primary, err := a.Services.Store.GetSessionPrimaryAgent(id); err == nil {
-		if agent, err := a.Services.Store.GetAgent(primary.AgentID); err == nil {
+	if primary, err := a.Services.Store.GetSessionPrimaryAgent(context.TODO() /* TODO(ctx-sweep): no ctx available at this call site */, id); err == nil {
+		if agent, err := a.Services.Store.GetAgent(context.TODO() /* TODO(ctx-sweep): no ctx available at this call site */, primary.AgentID); err == nil {
 			details.PrimaryAgent = agent
 		}
 	}
-	if rels, err := a.Services.Store.ListDurableAgentSessionStatesForSession(id); err == nil {
+	if rels, err := a.Services.Store.ListDurableAgentSessionStatesForSession(context.TODO() /* TODO(ctx-sweep): no ctx available at this call site */, id); err == nil {
 		details.DurableAttachments = rels
 		if len(rels) > 0 {
-			if inst, err := a.Services.Store.GetDurableAgentInstance(rels[0].InstanceID); err == nil {
+			if inst, err := a.Services.Store.GetDurableAgentInstance(context.TODO() /* TODO(ctx-sweep): no ctx available at this call site */, rels[0].InstanceID); err == nil {
 				details.CurrentDurableAgent = inst
-				if events, err := a.Services.Store.ListDurableAgentEvents(inst.ID, 5); err == nil {
+				if events, err := a.Services.Store.ListDurableAgentEvents(context.TODO() /* TODO(ctx-sweep): no ctx available at this call site */, inst.ID, 5); err == nil {
 					details.RecentDurableEvents = nonNilSlice(events)
 					if len(events) > 0 {
 						details.LastUsefulActivityAt = laterTimestamp(
@@ -196,10 +197,10 @@ func (a *API) sessionDetails(id string) (sessionDetailsResponse, error) {
 			}
 		}
 	}
-	if usage, err := a.Services.Store.GetSessionUsage(id); err == nil && usage != nil && usage.MessageCount > 0 {
+	if usage, err := a.Services.Store.GetSessionUsage(context.TODO() /* TODO(ctx-sweep): no ctx available at this call site */, id); err == nil && usage != nil && usage.MessageCount > 0 {
 		details.Usage = usage
 	}
-	if rows, err := a.Services.Store.ListAgentRuntimeRowsForSession(id); err == nil && len(rows) > 0 {
+	if rows, err := a.Services.Store.ListAgentRuntimeRowsForSession(context.TODO() /* TODO(ctx-sweep): no ctx available at this call site */, id); err == nil && len(rows) > 0 {
 		row := rows[0]
 		details.Runtime = sessionRuntimeDetail{
 			State:             normalizeRuntimeState(row.State),
@@ -310,7 +311,7 @@ func laterTimestamp(current, candidate string) string {
 }
 
 func (a *API) providersForStartSurface() ([]store.ProviderConfig, error) {
-	providers, err := a.Services.Store.ListProviders()
+	providers, err := a.Services.Store.ListProviders(context.TODO() /* TODO(ctx-sweep): no ctx available at this call site */)
 	if err != nil {
 		return nil, err
 	}
@@ -318,7 +319,7 @@ func (a *API) providersForStartSurface() ([]store.ProviderConfig, error) {
 }
 
 func (a *API) modelsForStartSurface() ([]store.Model, error) {
-	models, err := a.Services.Store.ListModels()
+	models, err := a.Services.Store.ListModels(context.TODO() /* TODO(ctx-sweep): no ctx available at this call site */)
 	if err != nil {
 		return nil, err
 	}

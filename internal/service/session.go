@@ -100,7 +100,7 @@ func (s *sessionServiceImpl) Create(ctx context.Context, opts CreateSessionOpts)
 		Model:     opts.Model,
 		Provider:  opts.Provider,
 	}
-	if err := s.writer.CreateSession(sess); err != nil {
+	if err := s.writer.CreateSession(ctx, sess); err != nil {
 		return nil, fmt.Errorf("create session: %w", err)
 	}
 
@@ -111,12 +111,12 @@ func (s *sessionServiceImpl) Create(ctx context.Context, opts CreateSessionOpts)
 	// on that column, so a bad value was never caught at write time).
 	agentID := opts.AgentID
 	if agentID == "" {
-		if settings, err := s.settings.GetUserSettings(); err == nil && settings.DefaultAgent != "" {
+		if settings, err := s.settings.GetUserSettings(ctx); err == nil && settings.DefaultAgent != "" {
 			agentID = settings.DefaultAgent
 		}
 	}
 	if agentID == "" && s.agentReader != nil {
-		if defaultAgent, err := s.agentReader.GetAgentBySlug("default"); err == nil && defaultAgent != nil {
+		if defaultAgent, err := s.agentReader.GetAgentBySlug(ctx, "default"); err == nil && defaultAgent != nil {
 			agentID = defaultAgent.ID
 		}
 	}
@@ -128,7 +128,7 @@ func (s *sessionServiceImpl) Create(ctx context.Context, opts CreateSessionOpts)
 	// agent_id — the session itself is already created and stays usable
 	// without a primary-agent binding.
 	if agentID != "" {
-		_ = s.agents.EnsureSessionAgent(sess.ID, agentID, "default", true)
+		_ = s.agents.EnsureSessionAgent(ctx, sess.ID, agentID, "default", true)
 	}
 
 	// Emit session start event.
@@ -140,7 +140,7 @@ func (s *sessionServiceImpl) Create(ctx context.Context, opts CreateSessionOpts)
 }
 
 func (s *sessionServiceImpl) Get(_ context.Context, id string) (*store.Session, error) {
-	sess, err := s.sessions.GetSession(id)
+	sess, err := s.sessions.GetSession(context.TODO() /* TODO(ctx-sweep): no ctx available at this call site */, id)
 	if err != nil {
 		return nil, fmt.Errorf("get session %s: %w", id, err)
 	}
@@ -148,15 +148,15 @@ func (s *sessionServiceImpl) Get(_ context.Context, id string) (*store.Session, 
 }
 
 func (s *sessionServiceImpl) List(_ context.Context, includeArchived bool) ([]store.Session, error) {
-	return s.sessions.ListSessions(includeArchived)
+	return s.sessions.ListSessions(context.TODO() /* TODO(ctx-sweep): no ctx available at this call site */, includeArchived)
 }
 
 func (s *sessionServiceImpl) Update(_ context.Context, sess *store.Session) error {
-	return s.writer.UpdateSession(sess)
+	return s.writer.UpdateSession(context.TODO() /* TODO(ctx-sweep): no ctx available at this call site */, sess)
 }
 
 func (s *sessionServiceImpl) Archive(ctx context.Context, id string) error {
-	if err := s.writer.ArchiveSession(id); err != nil {
+	if err := s.writer.ArchiveSession(ctx, id); err != nil {
 		return fmt.Errorf("archive session %s: %w", id, err)
 	}
 
@@ -176,11 +176,11 @@ func (s *sessionServiceImpl) Fork(_ context.Context, sourceID string, opts ForkO
 		Provider: opts.Provider,
 		Model:    opts.Model,
 	}
-	return s.writer.ForkSession(sourceID, overrides, opts.IncludeMessages)
+	return s.writer.ForkSession(context.TODO() /* TODO(ctx-sweep): no ctx available at this call site */, sourceID, overrides, opts.IncludeMessages)
 }
 
 func (s *sessionServiceImpl) ListMessages(_ context.Context, sessionID string, limit int) ([]store.Message, error) {
-	return s.sessions.ListMessages(sessionID, limit)
+	return s.sessions.ListMessages(context.TODO() /* TODO(ctx-sweep): no ctx available at this call site */, sessionID, limit)
 }
 
 func (s *sessionServiceImpl) Search(_ context.Context, query string, opts SearchOpts) ([]store.SearchResult, error) {
@@ -188,5 +188,5 @@ func (s *sessionServiceImpl) Search(_ context.Context, query string, opts Search
 	if limit <= 0 {
 		limit = 20
 	}
-	return s.sessions.SearchMessages(query, opts.ProjectID, limit)
+	return s.sessions.SearchMessages(context.TODO() /* TODO(ctx-sweep): no ctx available at this call site */, query, opts.ProjectID, limit)
 }

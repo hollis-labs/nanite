@@ -1,6 +1,7 @@
 package store
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"time"
@@ -33,8 +34,8 @@ type BottomDrawerPinnedCard struct {
 
 // ListBottomDrawerPinnedCards returns the session's pinned drawer cards in
 // position-asc, created-asc order.
-func (s *Store) ListBottomDrawerPinnedCards(sessionID string) ([]BottomDrawerPinnedCard, error) {
-	rows, err := s.DB.Query(
+func (s *Store) ListBottomDrawerPinnedCards(ctx context.Context, sessionID string) ([]BottomDrawerPinnedCard, error) {
+	rows, err := s.DB.QueryContext(ctx,
 		`SELECT id, session_id, card_type, content_ref, title, payload, position, created_at
 		   FROM bottom_drawer_pinned_cards
 		  WHERE session_id = ?
@@ -60,9 +61,9 @@ func (s *Store) ListBottomDrawerPinnedCards(sessionID string) ([]BottomDrawerPin
 
 // CountBottomDrawerPinnedCards returns the number of pins for a session.
 // Used by the cap-enforcement gate in PinBottomDrawerCard.
-func (s *Store) CountBottomDrawerPinnedCards(sessionID string) (int, error) {
+func (s *Store) CountBottomDrawerPinnedCards(ctx context.Context, sessionID string) (int, error) {
 	var n int
-	err := s.DB.QueryRow(
+	err := s.DB.QueryRowContext(ctx,
 		`SELECT COUNT(*) FROM bottom_drawer_pinned_cards WHERE session_id = ?`,
 		sessionID,
 	).Scan(&n)
@@ -80,7 +81,7 @@ func (s *Store) CountBottomDrawerPinnedCards(sessionID string) (int, error) {
 //
 // ID is generated when empty. Returns ErrBottomDrawerPinCapExceeded when the
 // session already has BottomDrawerPinCap pins (RowsAffected==0 path).
-func (s *Store) PinBottomDrawerCard(c *BottomDrawerPinnedCard) error {
+func (s *Store) PinBottomDrawerCard(ctx context.Context, c *BottomDrawerPinnedCard) error {
 	if c == nil {
 		return errors.New("nil pinned card")
 	}
@@ -100,7 +101,7 @@ func (s *Store) PinBottomDrawerCard(c *BottomDrawerPinnedCard) error {
 	now := time.Now().UTC().Format(time.RFC3339)
 	c.CreatedAt = now
 
-	result, err := s.DB.Exec(
+	result, err := s.DB.ExecContext(ctx,
 		`INSERT INTO bottom_drawer_pinned_cards
 		   (id, session_id, card_type, content_ref, title, payload, position, created_at)
 		 SELECT ?, ?, ?, ?, ?, ?,
@@ -123,7 +124,7 @@ func (s *Store) PinBottomDrawerCard(c *BottomDrawerPinnedCard) error {
 
 	// Read back the in-SQL position so the caller's struct reflects the
 	// stored value (used by API responses + tests).
-	if err := s.DB.QueryRow(
+	if err := s.DB.QueryRowContext(ctx,
 		`SELECT position FROM bottom_drawer_pinned_cards WHERE id = ?`,
 		c.ID,
 	).Scan(&c.Position); err != nil {
@@ -133,8 +134,8 @@ func (s *Store) PinBottomDrawerCard(c *BottomDrawerPinnedCard) error {
 }
 
 // UnpinBottomDrawerCard removes a pinned card by ID. No-op if missing.
-func (s *Store) UnpinBottomDrawerCard(id string) error {
-	_, err := s.DB.Exec(
+func (s *Store) UnpinBottomDrawerCard(ctx context.Context, id string) error {
+	_, err := s.DB.ExecContext(ctx,
 		`DELETE FROM bottom_drawer_pinned_cards WHERE id = ?`, id,
 	)
 	if err != nil {
@@ -144,9 +145,9 @@ func (s *Store) UnpinBottomDrawerCard(id string) error {
 }
 
 // GetBottomDrawerPinnedCard fetches a single pinned card by ID.
-func (s *Store) GetBottomDrawerPinnedCard(id string) (*BottomDrawerPinnedCard, error) {
+func (s *Store) GetBottomDrawerPinnedCard(ctx context.Context, id string) (*BottomDrawerPinnedCard, error) {
 	var c BottomDrawerPinnedCard
-	err := s.DB.QueryRow(
+	err := s.DB.QueryRowContext(ctx,
 		`SELECT id, session_id, card_type, content_ref, title, payload, position, created_at
 		   FROM bottom_drawer_pinned_cards WHERE id = ?`, id,
 	).Scan(&c.ID, &c.SessionID, &c.CardType, &c.ContentRef,

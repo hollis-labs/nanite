@@ -81,7 +81,7 @@ func resolveChatTarget(st *SelfToolsTransport, raw string) (*store.Session, *mcp
 	candidate = strings.ToLower(candidate)
 
 	if isShortCode(candidate) {
-		sess, err := st.Store.GetSessionByShortCode(candidate)
+		sess, err := st.Store.GetSessionByShortCode(context.TODO() /* TODO(ctx-sweep): no ctx available at this call site */, candidate)
 		if err != nil {
 			if errors.Is(err, sql.ErrNoRows) {
 				return nil, mcp.ErrorResult(fmt.Sprintf("no chat found with short_code %q (try the chat list — short codes look like c248)", raw))
@@ -92,7 +92,7 @@ func resolveChatTarget(st *SelfToolsTransport, raw string) (*store.Session, *mcp
 	}
 
 	// Treat as session UUID (or any other ID form).
-	sess, err := st.Store.GetSession(raw)
+	sess, err := st.Store.GetSession(context.TODO() /* TODO(ctx-sweep): no ctx available at this call site */, raw)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, mcp.ErrorResult(fmt.Sprintf("no chat found with session_id %q", raw))
@@ -209,7 +209,7 @@ func (st *SelfToolsTransport) callChatSearch(ctx context.Context, args map[strin
 	// arg — pass a high ceiling so we get everything; the session store query
 	// itself returns DESC-then-reversed so the slice is chronological.
 	const maxMessages = 10000
-	msgs, err := st.Store.ListMessages(sessionID, maxMessages)
+	msgs, err := st.Store.ListMessages(ctx, sessionID, maxMessages)
 	if err != nil {
 		return mcp.ErrorResult(fmt.Sprintf("list messages: %v", err)), nil
 	}
@@ -341,7 +341,7 @@ func (st *SelfToolsTransport) callChatGet(ctx context.Context, args map[string]a
 		}
 	}
 
-	page, err := st.Store.ListMessagesPaginated(sess.ID, limit, offset)
+	page, err := st.Store.ListMessagesPaginated(ctx, sess.ID, limit, offset)
 	if err != nil {
 		return mcp.ErrorResult(fmt.Sprintf("list messages for %s: %v", sess.ShortCode, err)), nil
 	}

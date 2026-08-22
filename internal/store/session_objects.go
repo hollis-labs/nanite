@@ -1,6 +1,7 @@
 package store
 
 import (
+	"context"
 	"crypto/rand"
 	"database/sql"
 	"errors"
@@ -46,7 +47,7 @@ type SessionObjectInput struct {
 // PutSessionObject inserts a new session object and returns the resulting row
 // (including the server-generated ULID). Rejects oversize payloads with
 // ErrSessionObjectTooLarge.
-func (s *Store) PutSessionObject(in SessionObjectInput) (SessionObject, error) {
+func (s *Store) PutSessionObject(ctx context.Context, in SessionObjectInput) (SessionObject, error) {
 	if in.SessionID == "" {
 		return SessionObject{}, fmt.Errorf("put session object: session_id is required")
 	}
@@ -64,7 +65,7 @@ func (s *Store) PutSessionObject(in SessionObjectInput) (SessionObject, error) {
 	id := newSessionObjectULID()
 	now := time.Now().UTC()
 
-	_, err := s.DB.Exec(
+	_, err := s.DB.ExecContext(ctx,
 		`INSERT INTO session_objects (id, session_id, content_type, byte_size, payload, created_at)
 		 VALUES (?, ?, ?, ?, ?, ?)`,
 		id, in.SessionID, ct, byteSize, in.Payload, now.Format(time.RFC3339),
@@ -86,13 +87,13 @@ func (s *Store) PutSessionObject(in SessionObjectInput) (SessionObject, error) {
 // GetSessionObject fetches a single row by the (session_id, id) tuple. D5:
 // both values are required and the lookup is strictly scoped — a mismatch on
 // either returns ErrSessionObjectNotFound with no fallback path.
-func (s *Store) GetSessionObject(sessionID, id string) (SessionObject, error) {
+func (s *Store) GetSessionObject(ctx context.Context, sessionID, id string) (SessionObject, error) {
 	if sessionID == "" || id == "" {
 		return SessionObject{}, ErrSessionObjectNotFound
 	}
 	var rec SessionObject
 	var createdAtStr string
-	err := s.DB.QueryRow(
+	err := s.DB.QueryRowContext(ctx,
 		`SELECT id, session_id, content_type, byte_size, payload, created_at
 		 FROM session_objects WHERE id = ? AND session_id = ?`,
 		id, sessionID,
@@ -115,8 +116,8 @@ func (s *Store) GetSessionObject(sessionID, id string) (SessionObject, error) {
 // ordered by created_at DESC. Cross-session rows are excluded by the WHERE
 // clause; no pagination in v1 (expected cardinality is low per session — card
 // pipeline writes one object per structured tool result).
-func (s *Store) ListSessionObjects(sessionID string) ([]SessionObject, error) {
-	rows, err := s.DB.Query(
+func (s *Store) ListSessionObjects(ctx context.Context, sessionID string) ([]SessionObject, error) {
+	rows, err := s.DB.QueryContext(ctx,
 		`SELECT id, session_id, content_type, byte_size, payload, created_at
 		 FROM session_objects WHERE session_id = ? ORDER BY created_at DESC, id DESC`,
 		sessionID,
@@ -148,8 +149,8 @@ func (s *Store) ListSessionObjects(sessionID string) ([]SessionObject, error) {
 // DELETE inside its transaction so archive + eviction are atomic (D5); this
 // method uses s.DB directly, so it must NOT be called from within an
 // in-progress transaction — inline the DELETE via tx.Exec instead.
-func (s *Store) EvictSessionObjects(sessionID string) (int, error) {
-	res, err := s.DB.Exec(`DELETE FROM session_objects WHERE session_id = ?`, sessionID)
+func (s *Store) EvictSessionObjects(ctx context.Context, sessionID string) (int, error) {
+	res, err := s.DB.ExecContext(ctx, `DELETE FROM session_objects WHERE session_id = ?`, sessionID)
 	if err != nil {
 		return 0, fmt.Errorf("evict session objects for %s: %w", sessionID, err)
 	}

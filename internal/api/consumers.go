@@ -18,7 +18,7 @@ import (
 // handleListConsumers returns all consumers.
 // GET /api/consumers
 func (a *API) handleListConsumers(w http.ResponseWriter, r *http.Request) {
-	consumers, err := a.Services.Store.ListConsumers()
+	consumers, err := a.Services.Store.ListConsumers(r.Context())
 	if err != nil {
 		a.errorResp(w, http.StatusInternalServerError, err.Error())
 		return
@@ -43,7 +43,7 @@ func (a *API) handleCreateConsumer(w http.ResponseWriter, r *http.Request) {
 		Slug: req.Slug,
 		Name: req.Name,
 	}
-	if err := a.Services.Store.CreateConsumer(consumer); err != nil {
+	if err := a.Services.Store.CreateConsumer(r.Context(), consumer); err != nil {
 		a.errorResp(w, http.StatusInternalServerError, err.Error())
 		return
 	}
@@ -54,7 +54,7 @@ func (a *API) handleCreateConsumer(w http.ResponseWriter, r *http.Request) {
 // GET /api/consumers/{id}
 func (a *API) handleGetConsumer(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
-	consumer, err := a.Services.Store.GetConsumer(id)
+	consumer, err := a.Services.Store.GetConsumer(r.Context(), id)
 	if err != nil {
 		a.errorResp(w, http.StatusInternalServerError, err.Error())
 		return
@@ -71,7 +71,7 @@ func (a *API) handleGetConsumer(w http.ResponseWriter, r *http.Request) {
 func (a *API) handleUpdateConsumer(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 
-	existing, err := a.Services.Store.GetConsumer(id)
+	existing, err := a.Services.Store.GetConsumer(r.Context(), id)
 	if err != nil {
 		a.errorResp(w, http.StatusInternalServerError, err.Error())
 		return
@@ -94,7 +94,7 @@ func (a *API) handleUpdateConsumer(w http.ResponseWriter, r *http.Request) {
 		existing.Name = *req.Name
 	}
 
-	if err := a.Services.Store.UpdateConsumer(existing); err != nil {
+	if err := a.Services.Store.UpdateConsumer(r.Context(), existing); err != nil {
 		a.errorResp(w, http.StatusInternalServerError, err.Error())
 		return
 	}
@@ -108,7 +108,7 @@ func (a *API) handleUpdateConsumer(w http.ResponseWriter, r *http.Request) {
 // DELETE /api/consumers/{id}
 func (a *API) handleDeleteConsumer(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
-	if err := a.Services.Store.DeleteConsumer(id); err != nil {
+	if err := a.Services.Store.DeleteConsumer(r.Context(), id); err != nil {
 		a.errorResp(w, http.StatusInternalServerError, err.Error())
 		return
 	}

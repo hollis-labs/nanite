@@ -255,7 +255,7 @@ func TestBuildReflexAgentSchedule_MalformedSpecs(t *testing.T) {
 func newReflexScheduleTestStore(t *testing.T, agentID string) *store.Store {
 	t.Helper()
 	st := newTestStore(t)
-	if err := st.CreateAgent(&store.AgentProfile{
+	if err := st.CreateAgent(context.Background(), &store.AgentProfile{
 		ID:           agentID,
 		Name:         "Reflex Schedule Test Agent",
 		Slug:         agentID,

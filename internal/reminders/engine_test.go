@@ -75,7 +75,7 @@ func TestEngine_TurnCount(t *testing.T) {
 	sessionID := "sess-tc-test"
 
 	trigJSON, _ := json.Marshal(reminders.Trigger{Type: reminders.TriggerTypeTurnCount, N: 3})
-	err := s.CreateReminder(store.Reminder{
+	err := s.CreateReminder(context.Background(), store.Reminder{
 		ID:          "r1",
 		SessionID:   sessionID,
 		Text:        "Review the plan",
@@ -127,7 +127,7 @@ func TestEngine_TimeTriggger_Past(t *testing.T) {
 	// At time in the past — should fire immediately on next EvalTurn.
 	past := time.Now().Add(-time.Minute).UTC().Format(time.RFC3339)
 	trigJSON, _ := json.Marshal(reminders.Trigger{Type: reminders.TriggerTypeTime, At: past})
-	err := s.CreateReminder(store.Reminder{
+	err := s.CreateReminder(context.Background(), store.Reminder{
 		ID:          "r-past",
 		SessionID:   sessionID,
 		Text:        "Past reminder",
@@ -153,7 +153,7 @@ func TestEngine_TimeTrigger_Future(t *testing.T) {
 
 	future := time.Now().Add(time.Hour).UTC().Format(time.RFC3339)
 	trigJSON, _ := json.Marshal(reminders.Trigger{Type: reminders.TriggerTypeTime, At: future})
-	err := s.CreateReminder(store.Reminder{
+	err := s.CreateReminder(context.Background(), store.Reminder{
 		ID:          "r-future",
 		SessionID:   sessionID,
 		Text:        "Future reminder",

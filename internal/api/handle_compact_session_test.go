@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -24,7 +25,7 @@ func TestHandleCompactSession_RunsPipelineAndPersists(t *testing.T) {
 		ID:    "compact-sess",
 		Title: "Compact Test",
 	}
-	if err := a.Services.Store.CreateSession(sess); err != nil {
+	if err := a.Services.Store.CreateSession(context.Background(), sess); err != nil {
 		t.Fatalf("CreateSession: %v", err)
 	}
 
@@ -37,7 +38,7 @@ func TestHandleCompactSession_RunsPipelineAndPersists(t *testing.T) {
 		if i%2 == 1 {
 			role = "assistant"
 		}
-		if err := a.Services.Store.CreateMessage(&store.Message{
+		if err := a.Services.Store.CreateMessage(context.Background(), &store.Message{
 			ID:        fmt.Sprintf("compact-msg-%d", i),
 			SessionID: sess.ID,
 			Role:      role,
@@ -75,7 +76,7 @@ func TestHandleCompactSession_RunsPipelineAndPersists(t *testing.T) {
 	// Verify that no message rows were marked is_compacted by the new path.
 	// The legacy handler set this flag on every row; the slot-based path no
 	// longer touches the column.
-	rows, err := a.Services.Store.ListMessages(sess.ID, 100)
+	rows, err := a.Services.Store.ListMessages(context.Background(), sess.ID, 100)
 	if err != nil {
 		t.Fatalf("ListMessages: %v", err)
 	}

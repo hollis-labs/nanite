@@ -40,7 +40,7 @@ func newTestStore(t *testing.T) *Store {
 		t.Fatalf("open test store: %v", err)
 	}
 	s := &Store{DB: db, dbPath: absPath}
-	t.Cleanup(func() { s.Close() })
+	t.Cleanup(func() { s.Close(context.Background()) })
 	return s
 }
 
@@ -58,7 +58,7 @@ func testStoreTemplate(t *testing.T) string {
 			testStoreTemplateErr = err
 			return
 		}
-		if err := s.Close(); err != nil {
+		if err := s.Close(context.Background()); err != nil {
 			testStoreTemplateErr = err
 			return
 		}
@@ -137,7 +137,7 @@ func TestNew(t *testing.T) {
 		t.Errorf("check workspaces absence: %v", err)
 	}
 
-	if err := s.Close(); err != nil {
+	if err := s.Close(context.Background()); err != nil {
 		t.Fatalf("Close() error: %v", err)
 	}
 }
@@ -146,12 +146,12 @@ func TestSeedIdempotent(t *testing.T) {
 	s := newTestStore(t)
 
 	// First seed should succeed.
-	if err := s.Seed(); err != nil {
+	if err := s.Seed(context.Background()); err != nil {
 		t.Fatalf("Seed() first call error: %v", err)
 	}
 
 	// Second seed should also succeed (no-op).
-	if err := s.Seed(); err != nil {
+	if err := s.Seed(context.Background()); err != nil {
 		t.Fatalf("Seed() second call error: %v", err)
 	}
 

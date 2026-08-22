@@ -20,7 +20,7 @@ import (
 func TestMigrate139WidensWorkflowRunStepsKindCheck(t *testing.T) {
 	s := newTestStore(t)
 
-	if err := s.CreateWorkflowRun(&WorkflowRunRow{ID: "run-139", DefinitionName: "loop-check", Status: "running"}); err != nil {
+	if err := s.CreateWorkflowRun(context.Background(), &WorkflowRunRow{ID: "run-139", DefinitionName: "loop-check", Status: "running"}); err != nil {
 		t.Fatalf("CreateWorkflowRun: %v", err)
 	}
 
@@ -31,7 +31,7 @@ func TestMigrate139WidensWorkflowRunStepsKindCheck(t *testing.T) {
 			Kind:          kind,
 			Status:        "pending",
 		}
-		if err := s.UpsertWorkflowRunStep(row); err != nil {
+		if err := s.UpsertWorkflowRunStep(context.Background(), row); err != nil {
 			t.Fatalf("UpsertWorkflowRunStep(kind=%q): %v", kind, err)
 		}
 	}
@@ -39,11 +39,11 @@ func TestMigrate139WidensWorkflowRunStepsKindCheck(t *testing.T) {
 	// A genuinely unknown kind must still be rejected by the CHECK — the
 	// widening is exactly (llm,tool,gate,flex,loop), not "anything goes".
 	badRow := &WorkflowRunStepRow{WorkflowRunID: "run-139", StepID: "step-bogus", Kind: "bogus", Status: "pending"}
-	if err := s.UpsertWorkflowRunStep(badRow); err == nil {
+	if err := s.UpsertWorkflowRunStep(context.Background(), badRow); err == nil {
 		t.Fatal("UpsertWorkflowRunStep(kind=\"bogus\") succeeded, want CHECK violation")
 	}
 
-	steps, err := s.ListWorkflowRunSteps("run-139")
+	steps, err := s.ListWorkflowRunSteps(context.Background(), "run-139")
 	if err != nil {
 		t.Fatalf("ListWorkflowRunSteps: %v", err)
 	}
@@ -64,10 +64,10 @@ func TestMigrate139WidensWorkflowRunStepsKindCheck(t *testing.T) {
 
 	// Simulated restart: a second full migrate() must be a clean no-op,
 	// and the loop row must still be there afterward.
-	if err := s.migrate(); err != nil {
+	if err := s.migrate(context.Background()); err != nil {
 		t.Fatalf("re-migrate after 139 already applied: %v", err)
 	}
-	stepsAfter, err := s.ListWorkflowRunSteps("run-139")
+	stepsAfter, err := s.ListWorkflowRunSteps(context.Background(), "run-139")
 	if err != nil {
 		t.Fatalf("ListWorkflowRunSteps after re-migrate: %v", err)
 	}
@@ -176,13 +176,15 @@ func TestRealBackupWorkflowRunStepsSurviveLoopKindMigration(t *testing.T) {
 	if err != nil {
 		t.Fatalf("open+migrate scratch copy of real backup db: %v", err)
 	}
-	defer rs.Close()
+	defer rs.Close(context.
 
-	// Collect every real, pre-existing row fully (and close the cursor)
-	// before issuing any further query, matching this package's
-	// established real-backup-test convention (rs's connection pool is a
-	// single connection — sqlitekit.OpenSingle — so a second query while
-	// this outer *sql.Rows is still open would deadlock).
+		// Collect every real, pre-existing row fully (and close the cursor)
+		// before issuing any further query, matching this package's
+		// established real-backup-test convention (rs's connection pool is a
+		// single connection — sqlitekit.OpenSingle — so a second query while
+		// this outer *sql.Rows is still open would deadlock).
+		Background())
+
 	type stepRow struct {
 		workflowRunID, stepID, kind, status string
 	}
@@ -242,7 +244,7 @@ func TestRealBackupWorkflowRunStepsSurviveLoopKindMigration(t *testing.T) {
 
 	const flexRunID = "real-backup-pre-139-flex-run"
 	const flexStepID = "flex-step-pre-139"
-	if err := rs.CreateWorkflowRun(&WorkflowRunRow{ID: flexRunID, DefinitionName: "pre-139-flex-check", Status: "waiting_on_flex"}); err != nil {
+	if err := rs.CreateWorkflowRun(context.Background(), &WorkflowRunRow{ID: flexRunID, DefinitionName: "pre-139-flex-check", Status: "waiting_on_flex"}); err != nil {
 		t.Fatalf("CreateWorkflowRun (pre-139 flex probe) on real backup copy: %v", err)
 	}
 
@@ -349,10 +351,10 @@ func TestRealBackupWorkflowRunStepsSurviveLoopKindMigration(t *testing.T) {
 
 	// And the new capability actually works against this real, migrated
 	// copy: a loop-kind row can now be inserted where it couldn't before.
-	if err := rs.CreateWorkflowRun(&WorkflowRunRow{ID: "post-139-loop-check", DefinitionName: "loop-check", Status: "running"}); err != nil {
+	if err := rs.CreateWorkflowRun(context.Background(), &WorkflowRunRow{ID: "post-139-loop-check", DefinitionName: "loop-check", Status: "running"}); err != nil {
 		t.Fatalf("CreateWorkflowRun on real backup copy: %v", err)
 	}
-	if err := rs.UpsertWorkflowRunStep(&WorkflowRunStepRow{
+	if err := rs.UpsertWorkflowRunStep(context.Background(), &WorkflowRunStepRow{
 		WorkflowRunID: "post-139-loop-check", StepID: "loop-step", Kind: "loop", Status: "pending",
 	}); err != nil {
 		t.Fatalf("UpsertWorkflowRunStep(kind=loop) on real backup copy: %v", err)

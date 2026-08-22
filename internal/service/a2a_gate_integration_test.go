@@ -62,11 +62,13 @@ func TestA2AGateIntegration(t *testing.T) {
 // waiting_on_gate status correctly derives to TaskStateInputRequired.
 func TestDeriveFromWorkflowRun_WaitingOnGate(t *testing.T) {
 	st := newTestStore(t)
-	defer st.Close()
+	defer st.Close(context.
 
-	// Create a workflow run in waiting_on_gate status.
+		// Create a workflow run in waiting_on_gate status.
+		Background())
+
 	runID := "run-gate-test"
-	if err := st.CreateWorkflowRun(&store.WorkflowRunRow{
+	if err := st.CreateWorkflowRun(context.Background(), &store.WorkflowRunRow{
 		ID:             runID,
 		DefinitionName: "test-workflow",
 		Status:         "waiting_on_gate",
@@ -82,7 +84,7 @@ func TestDeriveFromWorkflowRun_WaitingOnGate(t *testing.T) {
 		WorkflowRunID: sql.NullString{String: runID, Valid: true},
 		State:         a2a.TaskStateWorking, // Cached state, will be re-derived
 	}
-	if err := st.CreateA2ATask(task); err != nil {
+	if err := st.CreateA2ATask(context.Background(), task); err != nil {
 		t.Fatalf("CreateA2ATask: %v", err)
 	}
 
@@ -104,13 +106,13 @@ func TestDeriveFromWorkflowRun_WaitingOnGate(t *testing.T) {
 // waiting gate to completed and stores the input.
 func TestResolveGate_UpdatesStepStatus(t *testing.T) {
 	st := newTestStore(t)
-	defer st.Close()
+	defer st.Close(context.Background())
 
 	runID := "run-resolve-test"
 	stepID := "gate1"
 
 	// Create a workflow run.
-	if err := st.CreateWorkflowRun(&store.WorkflowRunRow{
+	if err := st.CreateWorkflowRun(context.Background(), &store.WorkflowRunRow{
 		ID:             runID,
 		DefinitionName: "test-workflow",
 		Status:         "running",
@@ -119,7 +121,7 @@ func TestResolveGate_UpdatesStepStatus(t *testing.T) {
 	}
 
 	// Create a gate step in waiting_on_gate status.
-	if err := st.UpsertWorkflowRunStep(&store.WorkflowRunStepRow{
+	if err := st.UpsertWorkflowRunStep(context.Background(), &store.WorkflowRunStepRow{
 		WorkflowRunID: runID,
 		StepID:        stepID,
 		Kind:          "gate",
@@ -130,12 +132,12 @@ func TestResolveGate_UpdatesStepStatus(t *testing.T) {
 
 	// Resolve the gate with input.
 	input := "user approved: proceed"
-	if err := st.ResolveGate(runID, stepID, input); err != nil {
+	if err := st.ResolveGate(context.Background(), runID, stepID, input); err != nil {
 		t.Fatalf("ResolveGate: %v", err)
 	}
 
 	// Verify the step is now completed with the input stored.
-	steps, err := st.ListWorkflowRunSteps(runID)
+	steps, err := st.ListWorkflowRunSteps(context.Background(), runID)
 	if err != nil {
 		t.Fatalf("ListWorkflowRunSteps: %v", err)
 	}
@@ -159,12 +161,12 @@ func TestResolveGate_UpdatesStepStatus(t *testing.T) {
 // correctly.
 func TestGetWaitingGates_ReturnsOnlyWaitingGates(t *testing.T) {
 	st := newTestStore(t)
-	defer st.Close()
+	defer st.Close(context.Background())
 
 	runID := "run-waiting-gates-test"
 
 	// Create a workflow run.
-	if err := st.CreateWorkflowRun(&store.WorkflowRunRow{
+	if err := st.CreateWorkflowRun(context.Background(), &store.WorkflowRunRow{
 		ID:             runID,
 		DefinitionName: "test-workflow",
 		Status:         "running",
@@ -180,13 +182,13 @@ func TestGetWaitingGates_ReturnsOnlyWaitingGates(t *testing.T) {
 	}
 
 	for _, step := range steps {
-		if err := st.UpsertWorkflowRunStep(&step); err != nil {
+		if err := st.UpsertWorkflowRunStep(context.Background(), &step); err != nil {
 			t.Fatalf("UpsertWorkflowRunStep(%s): %v", step.StepID, err)
 		}
 	}
 
 	// Get waiting gates.
-	waiting, err := st.GetWaitingGates(runID)
+	waiting, err := st.GetWaitingGates(context.Background(), runID)
 	if err != nil {
 		t.Fatalf("GetWaitingGates: %v", err)
 	}

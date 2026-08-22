@@ -55,7 +55,7 @@ type loopTestStore struct {
 }
 
 // LogEvent overrides the embedded nil pointer's method.
-func (*loopTestStore) LogEvent(_, _, _, _, _ string) {}
+func (*loopTestStore) LogEvent(ctx context.Context, _, _, _, _, _ string) {}
 
 // ─── Factory ──────────────────────────────────────────────────────────────────
 

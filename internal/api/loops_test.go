@@ -67,7 +67,7 @@ func newTestAPIWithLoopLauncher(t *testing.T) (*API, *http.ServeMux, *store.Stor
 func createLoopsAPITestAgentProfile(t *testing.T, st *store.Store, slug string) *store.AgentProfile {
 	t.Helper()
 	p := &store.AgentProfile{Name: slug, Slug: slug, SystemPrompt: "you are " + slug}
-	if err := st.CreateAgent(p); err != nil {
+	if err := st.CreateAgent(context.Background(), p); err != nil {
 		t.Fatalf("CreateAgent(%s): %v", slug, err)
 	}
 	return p

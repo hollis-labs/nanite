@@ -1,6 +1,7 @@
 package store
 
 import (
+	"context"
 	"testing"
 )
 
@@ -15,7 +16,7 @@ func TestCreateTodo(t *testing.T) {
 		Title:   "Fix the bug",
 		ScopeID: "sess-1",
 	}
-	if err := s.CreateTodo(todo); err != nil {
+	if err := s.CreateTodo(context.Background(), todo); err != nil {
 		t.Fatalf("CreateTodo: %v", err)
 	}
 
@@ -37,11 +38,11 @@ func TestGetTodo(t *testing.T) {
 	s := newTestStore(t)
 
 	todo := &Todo{Scope: TodoScopeProject, ScopeID: "proj-1", ProjectID: "proj-1", Title: "Write tests"}
-	if err := s.CreateTodo(todo); err != nil {
+	if err := s.CreateTodo(context.Background(), todo); err != nil {
 		t.Fatalf("CreateTodo: %v", err)
 	}
 
-	got, err := s.GetTodo(todo.ID)
+	got, err := s.GetTodo(context.Background(), todo.ID)
 	if err != nil {
 		t.Fatalf("GetTodo: %v", err)
 	}
@@ -84,13 +85,13 @@ func TestListTodosWithFilter(t *testing.T) {
 			ScopeID:   td.scopeID,
 			ProjectID: td.projectID,
 		}
-		if err := s.CreateTodo(todo); err != nil {
+		if err := s.CreateTodo(context.Background(), todo); err != nil {
 			t.Fatalf("CreateTodo %s: %v", td.title, err)
 		}
 	}
 
 	// Filter by scope=session.
-	todos, err := s.ListTodos(TodoFilter{Scope: TodoScopeSession})
+	todos, err := s.ListTodos(context.Background(), TodoFilter{Scope: TodoScopeSession})
 	if err != nil {
 		t.Fatalf("ListTodos session: %v", err)
 	}
@@ -99,7 +100,7 @@ func TestListTodosWithFilter(t *testing.T) {
 	}
 
 	// Filter by status.
-	todos, err = s.ListTodos(TodoFilter{Status: "pending"})
+	todos, err = s.ListTodos(context.Background(), TodoFilter{Status: "pending"})
 	if err != nil {
 		t.Fatalf("ListTodos pending: %v", err)
 	}
@@ -108,7 +109,7 @@ func TestListTodosWithFilter(t *testing.T) {
 	}
 
 	// Filter by scope + scope_id.
-	todos, err = s.ListTodos(TodoFilter{Scope: TodoScopeProject, ScopeID: "p1"})
+	todos, err = s.ListTodos(context.Background(), TodoFilter{Scope: TodoScopeProject, ScopeID: "p1"})
 	if err != nil {
 		t.Fatalf("ListTodos project p1: %v", err)
 	}
@@ -117,7 +118,7 @@ func TestListTodosWithFilter(t *testing.T) {
 	}
 
 	// Filter by project_id directly (D1 — convenience filter).
-	todos, err = s.ListTodos(TodoFilter{ProjectID: "p1"})
+	todos, err = s.ListTodos(context.Background(), TodoFilter{ProjectID: "p1"})
 	if err != nil {
 		t.Fatalf("ListTodos project_id p1: %v", err)
 	}
@@ -126,7 +127,7 @@ func TestListTodosWithFilter(t *testing.T) {
 	}
 
 	// Filter by priority.
-	todos, err = s.ListTodos(TodoFilter{Priority: "critical"})
+	todos, err = s.ListTodos(context.Background(), TodoFilter{Priority: "critical"})
 	if err != nil {
 		t.Fatalf("ListTodos critical: %v", err)
 	}
@@ -139,18 +140,18 @@ func TestUpdateTodo(t *testing.T) {
 	s := newTestStore(t)
 
 	todo := &Todo{Scope: TodoScopeSession, ScopeID: "sess-1", Title: "Original"}
-	if err := s.CreateTodo(todo); err != nil {
+	if err := s.CreateTodo(context.Background(), todo); err != nil {
 		t.Fatalf("CreateTodo: %v", err)
 	}
 
 	todo.Title = "Updated"
 	todo.Status = "in_progress"
 	todo.Priority = "high"
-	if err := s.UpdateTodo(todo); err != nil {
+	if err := s.UpdateTodo(context.Background(), todo); err != nil {
 		t.Fatalf("UpdateTodo: %v", err)
 	}
 
-	got, err := s.GetTodo(todo.ID)
+	got, err := s.GetTodo(context.Background(), todo.ID)
 	if err != nil {
 		t.Fatalf("GetTodo: %v", err)
 	}
@@ -170,29 +171,29 @@ func TestUpdateTodoScope_Promote(t *testing.T) {
 	s := newTestStore(t)
 
 	todo := &Todo{Scope: TodoScopeSession, ScopeID: "sess-1", Title: "promote me"}
-	if err := s.CreateTodo(todo); err != nil {
+	if err := s.CreateTodo(context.Background(), todo); err != nil {
 		t.Fatalf("CreateTodo: %v", err)
 	}
 
-	if err := s.UpdateTodoScope(todo.ID, TodoScopeProject, "proj-1", "proj-1"); err != nil {
+	if err := s.UpdateTodoScope(context.Background(), todo.ID, TodoScopeProject, "proj-1", "proj-1"); err != nil {
 		t.Fatalf("UpdateTodoScope promote: %v", err)
 	}
-	got, _ := s.GetTodo(todo.ID)
+	got, _ := s.GetTodo(context.Background(), todo.ID)
 	if got.Scope != TodoScopeProject || got.ProjectID != "proj-1" {
 		t.Errorf("after promote: expected scope=project + project_id=proj-1, got scope=%q project_id=%q", got.Scope, got.ProjectID)
 	}
 
 	// Demote back to session.
-	if err := s.UpdateTodoScope(todo.ID, TodoScopeSession, "sess-1", ""); err != nil {
+	if err := s.UpdateTodoScope(context.Background(), todo.ID, TodoScopeSession, "sess-1", ""); err != nil {
 		t.Fatalf("UpdateTodoScope demote: %v", err)
 	}
-	got2, _ := s.GetTodo(todo.ID)
+	got2, _ := s.GetTodo(context.Background(), todo.ID)
 	if got2.Scope != TodoScopeSession || got2.ProjectID != "" {
 		t.Errorf("after demote: expected scope=session, project_id cleared, got scope=%q project_id=%q", got2.Scope, got2.ProjectID)
 	}
 
 	// Project scope without project_id is rejected.
-	if err := s.UpdateTodoScope(todo.ID, TodoScopeProject, "proj-1", ""); err == nil {
+	if err := s.UpdateTodoScope(context.Background(), todo.ID, TodoScopeProject, "proj-1", ""); err == nil {
 		t.Error("expected error promoting to project without project_id, got nil")
 	}
 }
@@ -201,15 +202,15 @@ func TestDeleteTodo(t *testing.T) {
 	s := newTestStore(t)
 
 	todo := &Todo{Scope: TodoScopeSession, ScopeID: "sess-1", Title: "To delete"}
-	if err := s.CreateTodo(todo); err != nil {
+	if err := s.CreateTodo(context.Background(), todo); err != nil {
 		t.Fatalf("CreateTodo: %v", err)
 	}
 
-	if err := s.DeleteTodo(todo.ID); err != nil {
+	if err := s.DeleteTodo(context.Background(), todo.ID); err != nil {
 		t.Fatalf("DeleteTodo: %v", err)
 	}
 
-	_, err := s.GetTodo(todo.ID)
+	_, err := s.GetTodo(context.Background(), todo.ID)
 	if err == nil {
 		t.Error("expected error getting deleted todo")
 	}
@@ -219,20 +220,20 @@ func TestTodoParentChild(t *testing.T) {
 	s := newTestStore(t)
 
 	parent := &Todo{Scope: TodoScopeSession, ScopeID: "sess-1", Title: "Parent"}
-	if err := s.CreateTodo(parent); err != nil {
+	if err := s.CreateTodo(context.Background(), parent); err != nil {
 		t.Fatalf("CreateTodo parent: %v", err)
 	}
 
 	child1 := &Todo{Scope: TodoScopeSession, ScopeID: "sess-1", Title: "Child 1", ParentID: parent.ID}
 	child2 := &Todo{Scope: TodoScopeSession, ScopeID: "sess-1", Title: "Child 2", ParentID: parent.ID}
-	if err := s.CreateTodo(child1); err != nil {
+	if err := s.CreateTodo(context.Background(), child1); err != nil {
 		t.Fatalf("CreateTodo child1: %v", err)
 	}
-	if err := s.CreateTodo(child2); err != nil {
+	if err := s.CreateTodo(context.Background(), child2); err != nil {
 		t.Fatalf("CreateTodo child2: %v", err)
 	}
 
-	children, err := s.ListTodoChildren(parent.ID)
+	children, err := s.ListTodoChildren(context.Background(), parent.ID)
 	if err != nil {
 		t.Fatalf("ListTodoChildren: %v", err)
 	}
@@ -241,10 +242,10 @@ func TestTodoParentChild(t *testing.T) {
 	}
 
 	// Cascade delete: deleting parent should remove children.
-	if err := s.DeleteTodo(parent.ID); err != nil {
+	if err := s.DeleteTodo(context.Background(), parent.ID); err != nil {
 		t.Fatalf("DeleteTodo parent: %v", err)
 	}
-	children, err = s.ListTodoChildren(parent.ID)
+	children, err = s.ListTodoChildren(context.Background(), parent.ID)
 	if err != nil {
 		t.Fatalf("ListTodoChildren after delete: %v", err)
 	}

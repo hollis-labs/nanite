@@ -78,11 +78,14 @@ func newTestWorkflowStore(t *testing.T) *store.Store {
 	if err != nil {
 		t.Fatalf("store.New: %v", err)
 	}
-	t.Cleanup(func() { s.Close() })
+	t.Cleanup(func() {
+		s.Close(context.Background(
+
+		// --- tests ---
+		))
+	})
 	return s
 }
-
-// --- tests ---
 
 func TestBuiltinWorkflowEngine_RejectsInvalidDefinition(t *testing.T) {
 	eng := NewBuiltinWorkflowEngine(newTestWorkflowStore(t))
@@ -253,7 +256,7 @@ func TestBuiltinWorkflowEngine_GatePausesDependents(t *testing.T) {
 	if len(runs) != 1 {
 		t.Fatalf("len(runs) = %d, want 1", len(runs))
 	}
-	steps, err := runStore.ListWorkflowRunSteps(runs[0])
+	steps, err := runStore.ListWorkflowRunSteps(context.Background(), runs[0])
 	if err != nil {
 		t.Fatalf("ListWorkflowRunSteps: %v", err)
 	}
@@ -404,7 +407,7 @@ func TestBuiltinWorkflowEngine_FlexStepEntersWaitingState(t *testing.T) {
 	if len(runs) != 1 {
 		t.Fatalf("len(runs) = %d, want 1", len(runs))
 	}
-	steps, err := runStore.ListWorkflowRunSteps(runs[0])
+	steps, err := runStore.ListWorkflowRunSteps(context.Background(), runs[0])
 	if err != nil {
 		t.Fatalf("ListWorkflowRunSteps: %v", err)
 	}
@@ -481,15 +484,15 @@ func TestBuiltinWorkflowEngine_ResumeContinuesFromPersistedState(t *testing.T) {
 
 	// Seed persisted state as though a prior process completed step "a"
 	// and then crashed before starting "b".
-	if err := runStore.CreateWorkflowRun(&store.WorkflowRunRow{ID: "run-crash-1", DefinitionName: wf.Name, Status: "running"}); err != nil {
+	if err := runStore.CreateWorkflowRun(context.Background(), &store.WorkflowRunRow{ID: "run-crash-1", DefinitionName: wf.Name, Status: "running"}); err != nil {
 		t.Fatalf("CreateWorkflowRun: %v", err)
 	}
-	if err := runStore.UpsertWorkflowRunStep(&store.WorkflowRunStepRow{
+	if err := runStore.UpsertWorkflowRunStep(context.Background(), &store.WorkflowRunStepRow{
 		WorkflowRunID: "run-crash-1", StepID: "a", Kind: "tool", Status: "completed", Output: "persisted-value",
 	}); err != nil {
 		t.Fatalf("UpsertWorkflowRunStep(a): %v", err)
 	}
-	if err := runStore.UpsertWorkflowRunStep(&store.WorkflowRunStepRow{
+	if err := runStore.UpsertWorkflowRunStep(context.Background(), &store.WorkflowRunStepRow{
 		WorkflowRunID: "run-crash-1", StepID: "b", Kind: "tool", Status: "pending",
 	}); err != nil {
 		t.Fatalf("UpsertWorkflowRunStep(b): %v", err)
@@ -523,11 +526,11 @@ func TestBuiltinWorkflowEngine_ResumeRerunsInterruptedRunningStep(t *testing.T) 
 			{ID: "a", Kind: agentworkflow.StepKindTool, Config: map[string]any{"tool": "fetch"}},
 		},
 	}
-	if err := runStore.CreateWorkflowRun(&store.WorkflowRunRow{ID: "run-crash-2", DefinitionName: wf.Name, Status: "running"}); err != nil {
+	if err := runStore.CreateWorkflowRun(context.Background(), &store.WorkflowRunRow{ID: "run-crash-2", DefinitionName: wf.Name, Status: "running"}); err != nil {
 		t.Fatalf("CreateWorkflowRun: %v", err)
 	}
 	// "running" simulates a step that was mid-flight when the process died.
-	if err := runStore.UpsertWorkflowRunStep(&store.WorkflowRunStepRow{
+	if err := runStore.UpsertWorkflowRunStep(context.Background(), &store.WorkflowRunStepRow{
 		WorkflowRunID: "run-crash-2", StepID: "a", Kind: "tool", Status: "running",
 	}); err != nil {
 		t.Fatalf("UpsertWorkflowRunStep(a): %v", err)

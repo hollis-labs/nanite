@@ -83,8 +83,8 @@ func scanSkill(scanner interface{ Scan(...any) error }, sk *Skill) error {
 }
 
 // ListSkills returns all skills ordered by name.
-func (s *Store) ListSkills() ([]Skill, error) {
-	rows, err := s.DB.Query(`SELECT ` + skillColumns + ` FROM skills ORDER BY name`)
+func (s *Store) ListSkills(ctx context.Context) ([]Skill, error) {
+	rows, err := s.DB.QueryContext(ctx, `SELECT `+skillColumns+` FROM skills ORDER BY name`)
 	if err != nil {
 		return nil, fmt.Errorf("list skills: %w", err)
 	}
@@ -102,9 +102,9 @@ func (s *Store) ListSkills() ([]Skill, error) {
 }
 
 // GetSkill returns a skill by ID.
-func (s *Store) GetSkill(id string) (*Skill, error) {
+func (s *Store) GetSkill(ctx context.Context, id string) (*Skill, error) {
 	var sk Skill
-	row := s.DB.QueryRow(`SELECT `+skillColumns+` FROM skills WHERE id = ?`, id)
+	row := s.DB.QueryRowContext(ctx, `SELECT `+skillColumns+` FROM skills WHERE id = ?`, id)
 	if err := scanSkill(row, &sk); err == sql.ErrNoRows {
 		return nil, nil
 	} else if err != nil {
@@ -114,9 +114,9 @@ func (s *Store) GetSkill(id string) (*Skill, error) {
 }
 
 // GetSkillBySlug returns a skill by slug.
-func (s *Store) GetSkillBySlug(slug string) (*Skill, error) {
+func (s *Store) GetSkillBySlug(ctx context.Context, slug string) (*Skill, error) {
 	var sk Skill
-	row := s.DB.QueryRow(`SELECT `+skillColumns+` FROM skills WHERE slug = ?`, slug)
+	row := s.DB.QueryRowContext(ctx, `SELECT `+skillColumns+` FROM skills WHERE slug = ?`, slug)
 	if err := scanSkill(row, &sk); err == sql.ErrNoRows {
 		return nil, nil
 	} else if err != nil {
@@ -126,7 +126,7 @@ func (s *Store) GetSkillBySlug(slug string) (*Skill, error) {
 }
 
 // CreateSkill inserts a new skill index row.
-func (s *Store) CreateSkill(sk *Skill) error {
+func (s *Store) CreateSkill(ctx context.Context, sk *Skill) error {
 	if sk.ID == "" {
 		sk.ID = uuid.New().String()
 	}
@@ -144,7 +144,7 @@ func (s *Store) CreateSkill(sk *Skill) error {
 		sk.DeclaredDependencies = "[]"
 	}
 
-	_, err := s.DB.Exec(
+	_, err := s.DB.ExecContext(ctx,
 		`INSERT INTO skills (id, name, slug, description, category, icon, input_schema,
 		                     source_tier, content_hash, version, enabled,
 		                     declared_dependencies, installed_at, updated_at)
@@ -162,12 +162,12 @@ func (s *Store) CreateSkill(sk *Skill) error {
 }
 
 // UpdateSkill updates a skill's mutable fields.
-func (s *Store) UpdateSkill(sk *Skill) error {
+func (s *Store) UpdateSkill(ctx context.Context, sk *Skill) error {
 	now := time.Now().UTC().Format(time.RFC3339)
 	if sk.DeclaredDependencies == "" {
 		sk.DeclaredDependencies = "[]"
 	}
-	res, err := s.DB.Exec(
+	res, err := s.DB.ExecContext(ctx,
 		`UPDATE skills SET name = ?, slug = ?, description = ?, category = ?, icon = ?,
 		        input_schema = ?, source_tier = ?, content_hash = ?, version = ?, enabled = ?,
 		        declared_dependencies = ?, updated_at = ?
@@ -195,8 +195,8 @@ func (s *Store) UpdateSkill(sk *Skill) error {
 // seeder). Any remaining "can this skill be deleted" policy (e.g. a
 // plugin-owned SourceTier) belongs to task 12's real uninstall semantics,
 // not this bare index-row delete.
-func (s *Store) DeleteSkill(id string) error {
-	res, err := s.DB.Exec(`DELETE FROM skills WHERE id = ?`, id)
+func (s *Store) DeleteSkill(ctx context.Context, id string) error {
+	res, err := s.DB.ExecContext(ctx, `DELETE FROM skills WHERE id = ?`, id)
 	if err != nil {
 		return fmt.Errorf("delete skill %s: %w", id, err)
 	}
@@ -225,8 +225,8 @@ func (s *Store) DeleteSkill(id string) error {
 // doesn't match any current skill's slug is silently excluded, matching the
 // old table's FK-cascade behavior (an assignment to a since-deleted skill no
 // longer resolves).
-func (s *Store) ListAgentSkills(agentID string) ([]Skill, error) {
-	rows, err := s.DB.Query(
+func (s *Store) ListAgentSkills(ctx context.Context, agentID string) ([]Skill, error) {
+	rows, err := s.DB.QueryContext(ctx,
 		`SELECT `+skillColumns+`
 		 FROM skills sk
 		 JOIN agent_known_skills aks ON aks.skill_name = sk.slug
@@ -263,15 +263,15 @@ func (s *Store) ListAgentSkills(agentID string) ([]Skill, error) {
 // agent_known_skills.agent_id still carries the same REFERENCES
 // agent_profiles(id) the dropped table used to enforce, so an assignment
 // against a nonexistent agent_id is still rejected at the DB level.
-func (s *Store) AssignSkillToAgent(agentID, skillID, _ string) error {
-	sk, err := s.GetSkill(skillID)
+func (s *Store) AssignSkillToAgent(ctx context.Context, agentID, skillID, _ string) error {
+	sk, err := s.GetSkill(ctx, skillID)
 	if err != nil {
 		return fmt.Errorf("assign skill to agent: %w", err)
 	}
 	if sk == nil {
 		return fmt.Errorf("assign skill to agent: skill %q not found", skillID)
 	}
-	_, err = s.DB.Exec(
+	_, err = s.DB.ExecContext(ctx,
 		`INSERT INTO agent_known_skills (agent_id, skill_name) VALUES (?, ?)
 		 ON CONFLICT(agent_id, skill_name) DO NOTHING`,
 		agentID, sk.Slug,
@@ -303,8 +303,8 @@ func (s *Store) AssignSkillToAgent(agentID, skillID, _ string) error {
 // UI for this call regardless, so a silent no-op here is strictly safer
 // than either destroying grant data or leaving the caller with an
 // unactionable failure.
-func (s *Store) RemoveSkillFromAgent(agentID, skillID string) error {
-	sk, err := s.GetSkill(skillID)
+func (s *Store) RemoveSkillFromAgent(ctx context.Context, agentID, skillID string) error {
+	sk, err := s.GetSkill(ctx, skillID)
 	if err != nil {
 		return fmt.Errorf("remove skill from agent: %w", err)
 	}
@@ -321,7 +321,7 @@ func (s *Store) RemoveSkillFromAgent(agentID, skillID string) error {
 	if !existing.IsBareAssignment() {
 		return nil
 	}
-	res, err := s.DB.Exec(
+	res, err := s.DB.ExecContext(ctx,
 		`DELETE FROM agent_known_skills WHERE agent_id = ? AND skill_name = ?`,
 		agentID, sk.Slug,
 	)

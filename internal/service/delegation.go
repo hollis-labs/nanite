@@ -73,7 +73,7 @@ func (s *chatServiceImpl) DelegateTask(ctx context.Context, req chat.DelegationR
 		// CW-20260526-0003: resolver walks user_settings →
 		// providers.default_model. Worker sessions inherit the system
 		// default if neither the request nor the parent set one.
-		if _, rm, err := s.store.ResolveProviderAndModel("", ""); err == nil {
+		if _, rm, err := s.store.ResolveProviderAndModel(ctx, "", ""); err == nil {
 			model = rm
 		} else {
 			return nil, fmt.Errorf("delegation: %w", err)
@@ -89,12 +89,12 @@ func (s *chatServiceImpl) DelegateTask(ctx context.Context, req chat.DelegationR
 		Metadata: fmt.Sprintf(`{"delegation":true,"parent_session_id":%q,"task_title":%q}`,
 			req.ParentSessionID, req.Title),
 	}
-	if err := s.store.CreateSession(workerSession); err != nil {
+	if err := s.store.CreateSession(ctx, workerSession); err != nil {
 		return nil, fmt.Errorf("create worker session: %w", err)
 	}
 
 	// Assign agent to worker session.
-	if err := s.store.EnsureSessionAgent(workerSession.ID, agentID, mode, true); err != nil {
+	if err := s.store.EnsureSessionAgent(ctx, workerSession.ID, agentID, mode, true); err != nil {
 		return nil, fmt.Errorf("assign agent to worker: %w", err)
 	}
 
@@ -131,7 +131,7 @@ func (s *chatServiceImpl) DelegateTask(ctx context.Context, req chat.DelegationR
 		Content:   taskContent,
 		Metadata:  fmt.Sprintf(`{"source":"delegation","parent_session_id":%q}`, req.ParentSessionID),
 	}
-	if err := s.store.CreateMessage(userMsg); err != nil {
+	if err := s.store.CreateMessage(ctx, userMsg); err != nil {
 		return nil, fmt.Errorf("create delegation message: %w", err)
 	}
 

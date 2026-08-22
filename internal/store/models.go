@@ -1,6 +1,7 @@
 package store
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 
@@ -58,13 +59,13 @@ import (
 // Models whose registry Provider has no matching seededProviders row are
 // skipped (mirrors SeedProviders' skip-and-log behavior for the same
 // reason: a model catalog can outrun the provider rows we seed).
-func (s *Store) SyncModelsFromRegistry() (int, error) {
+func (s *Store) SyncModelsFromRegistry(ctx context.Context) (int, error) {
 	seeded := models.AllSeeded()
 	if len(seeded) == 0 {
 		return 0, nil
 	}
 
-	tx, err := s.DB.Begin()
+	tx, err := s.DB.BeginTx(ctx, nil)
 	if err != nil {
 		return 0, fmt.Errorf("begin tx: %w", err)
 	}
@@ -91,7 +92,7 @@ func (s *Store) SyncModelsFromRegistry() (int, error) {
 			return applied, fmt.Errorf("marshal pricing for %s: %w", current.ModelID, err)
 		}
 
-		res, err := tx.Exec(
+		res, err := tx.ExecContext(ctx,
 			`UPDATE models SET
 			     provider_id     = ?,
 			     model_id        = ?,
@@ -120,7 +121,7 @@ func (s *Store) SyncModelsFromRegistry() (int, error) {
 		// fresh, reconciling via the natural (provider_id, model_id) key
 		// with any row a different code path already created for the
 		// same provider+model pair rather than duplicating it.
-		if _, err := tx.Exec(
+		if _, err := tx.ExecContext(ctx,
 			`INSERT INTO models (id, provider_id, model_id, display_name, context_window, max_output, supports_tools, supports_vision, pricing, is_enabled)
 			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, TRUE)
 			 ON CONFLICT(provider_id, model_id) DO UPDATE SET

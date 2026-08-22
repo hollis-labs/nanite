@@ -19,7 +19,7 @@ func seedEnvelopeInstance(t *testing.T, a *API, sessionID, envelopeType string) 
 		EnvelopeType: envelopeType,
 		EnvelopeJSON: `{"kind":"envelope","version":1,"type":"` + envelopeType + `"}`,
 	}
-	if err := a.Services.Store.CreateEnvelopeInstance(inst); err != nil {
+	if err := a.Services.Store.CreateEnvelopeInstance(context.Background(), inst); err != nil {
 		t.Fatalf("CreateEnvelopeInstance: %v", err)
 	}
 	return inst
@@ -28,7 +28,7 @@ func seedEnvelopeInstance(t *testing.T, a *API, sessionID, envelopeType string) 
 func seedSessionForEnvelope(t *testing.T, a *API) string {
 	t.Helper()
 	sess := &store.Session{}
-	if err := a.Services.Store.CreateSession(sess); err != nil {
+	if err := a.Services.Store.CreateSession(context.Background(), sess); err != nil {
 		t.Fatalf("CreateSession: %v", err)
 	}
 	return sess.ID
@@ -66,13 +66,13 @@ func TestEnvelopeRespond_SubmittedDefaultHandler(t *testing.T) {
 	}
 
 	// Verify persistence on the instance.
-	got, _ := a.Services.Store.GetEnvelopeInstance(inst.ID)
+	got, _ := a.Services.Store.GetEnvelopeInstance(context.Background(), inst.ID)
 	if got.RespondedAt == nil || got.ResponseStatus != "submitted" {
 		t.Fatalf("instance not updated: %+v", got)
 	}
 
 	// Verify transcript message exists with envelope_response role.
-	msgs, _ := a.Services.Store.ListMessages(sessID, 10)
+	msgs, _ := a.Services.Store.ListMessages(context.Background(), sessID, 10)
 	if len(msgs) != 1 {
 		t.Fatalf("expected 1 message, got %d", len(msgs))
 	}
@@ -95,7 +95,7 @@ func TestEnvelopeRespond_CancelledAndPartial(t *testing.T) {
 		if w.Code != http.StatusOK {
 			t.Fatalf("%s: expected 200, got %d; body: %s", status, w.Code, w.Body.String())
 		}
-		got, _ := a.Services.Store.GetEnvelopeInstance(inst.ID)
+		got, _ := a.Services.Store.GetEnvelopeInstance(context.Background(), inst.ID)
 		if got.ResponseStatus != string(status) {
 			t.Fatalf("expected %s, got %s", status, got.ResponseStatus)
 		}
@@ -150,7 +150,7 @@ func TestEnvelopeRespond_SilentHandler(t *testing.T) {
 	if resp["follow_up"] != "done" {
 		t.Fatalf("expected follow_up=done, got %+v", resp)
 	}
-	msgs, _ := a.Services.Store.ListMessages(sessID, 10)
+	msgs, _ := a.Services.Store.ListMessages(context.Background(), sessID, 10)
 	if len(msgs) != 0 {
 		t.Fatalf("silent handler should not create transcript messages, got %d", len(msgs))
 	}

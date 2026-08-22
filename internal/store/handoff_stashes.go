@@ -1,6 +1,7 @@
 package store
 
 import (
+	"context"
 	"database/sql"
 	"errors"
 	"fmt"
@@ -20,7 +21,7 @@ type HandoffStash struct {
 
 // UpsertHandoffStash inserts or updates a handoff stash row identified by id.
 // On conflict the payload and created_at are updated in place.
-func (s *Store) UpsertHandoffStash(stash HandoffStash) error {
+func (s *Store) UpsertHandoffStash(ctx context.Context, stash HandoffStash) error {
 	if stash.ID == "" {
 		return fmt.Errorf("upsert handoff stash: id is required")
 	}
@@ -33,7 +34,7 @@ func (s *Store) UpsertHandoffStash(stash HandoffStash) error {
 	if stash.Payload == "" {
 		stash.Payload = "{}"
 	}
-	_, err := s.DB.Exec(
+	_, err := s.DB.ExecContext(ctx,
 		`INSERT INTO handoff_stashes (id, session_id, payload, created_at) VALUES (?, ?, ?, ?)
 		 ON CONFLICT(id) DO UPDATE SET payload = excluded.payload, created_at = excluded.created_at`,
 		stash.ID, stash.SessionID, stash.Payload, stash.CreatedAt,
@@ -46,9 +47,9 @@ func (s *Store) UpsertHandoffStash(stash HandoffStash) error {
 
 // GetHandoffStash retrieves a specific handoff stash by session_id and id.
 // Returns ErrHandoffStashNotFound if no matching row exists.
-func (s *Store) GetHandoffStash(sessionID, stashID string) (HandoffStash, error) {
+func (s *Store) GetHandoffStash(ctx context.Context, sessionID, stashID string) (HandoffStash, error) {
 	var hs HandoffStash
-	err := s.DB.QueryRow(
+	err := s.DB.QueryRowContext(ctx,
 		`SELECT id, session_id, payload, created_at
 		 FROM handoff_stashes WHERE session_id = ? AND id = ?`,
 		sessionID, stashID,
@@ -64,9 +65,9 @@ func (s *Store) GetHandoffStash(sessionID, stashID string) (HandoffStash, error)
 
 // GetLatestStashForSession returns the most recent handoff stash for a session
 // ordered by created_at DESC. Returns ErrHandoffStashNotFound if none exist.
-func (s *Store) GetLatestStashForSession(sessionID string) (HandoffStash, error) {
+func (s *Store) GetLatestStashForSession(ctx context.Context, sessionID string) (HandoffStash, error) {
 	var hs HandoffStash
-	err := s.DB.QueryRow(
+	err := s.DB.QueryRowContext(ctx,
 		`SELECT id, session_id, payload, created_at
 		 FROM handoff_stashes WHERE session_id = ?
 		 ORDER BY created_at DESC LIMIT 1`,

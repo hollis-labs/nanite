@@ -26,7 +26,7 @@ func TestBackfillAgentToolsFromLegacyColumns_ExplicitAllowlist(t *testing.T) {
 		SystemPrompt: "Test.",
 		Tools:        `["dev_read","dev_write"]`,
 	}
-	if err := st.CreateAgent(agent); err != nil {
+	if err := st.CreateAgent(context.Background(), agent); err != nil {
 		t.Fatalf("CreateAgent: %v", err)
 	}
 
@@ -73,7 +73,7 @@ func TestBackfillAgentToolsFromLegacyColumns_EmptyAllowlistGrantsFullCatalog(t *
 		// meaning "no restriction" per filterToolsByAllowlist's own
 		// documented behavior.
 	}
-	if err := st.CreateAgent(agent); err != nil {
+	if err := st.CreateAgent(context.Background(), agent); err != nil {
 		t.Fatalf("CreateAgent: %v", err)
 	}
 
@@ -113,7 +113,7 @@ func TestBackfillAgentToolsFromLegacyColumns_ToolPermissionsNoLongerNarrows(t *t
 		SystemPrompt:    "Test.",
 		ToolPermissions: `{"deny_list":["dev_bash"]}`,
 	}
-	if err := st.CreateAgent(agent); err != nil {
+	if err := st.CreateAgent(context.Background(), agent); err != nil {
 		t.Fatalf("CreateAgent: %v", err)
 	}
 
@@ -144,7 +144,7 @@ func TestBackfillAgentToolsFromLegacyColumns_RunsOncePerAgent(t *testing.T) {
 		SystemPrompt: "Test.",
 		Tools:        `["dev_read"]`,
 	}
-	if err := st.CreateAgent(agent); err != nil {
+	if err := st.CreateAgent(context.Background(), agent); err != nil {
 		t.Fatalf("CreateAgent: %v", err)
 	}
 

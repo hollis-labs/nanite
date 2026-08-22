@@ -19,7 +19,7 @@ func TestMCPServerTrust_DefaultsAndRoundTrip(t *testing.T) {
 		Command:       "echo",
 		Enabled:       true,
 	}
-	if err := s.CreateMCPServer(cfg); err != nil {
+	if err := s.CreateMCPServer(context.Background(), cfg); err != nil {
 		t.Fatalf("CreateMCPServer: %v", err)
 	}
 	if cfg.TrustTier != TrustTierThirdPartyHTTP {
@@ -29,7 +29,7 @@ func TestMCPServerTrust_DefaultsAndRoundTrip(t *testing.T) {
 		t.Errorf("default EnvAllowlist: got %q want %q", cfg.EnvAllowlist, "[]")
 	}
 
-	got, err := s.GetMCPServer("default-tier")
+	got, err := s.GetMCPServer(context.Background(), "default-tier")
 	if err != nil {
 		t.Fatalf("GetMCPServer: %v", err)
 	}
@@ -52,11 +52,11 @@ func TestMCPServerTrust_DefaultsAndRoundTrip(t *testing.T) {
 		TrustTier:     TrustTierBuiltin,
 		EnvAllowlist:  `["PATH","HOME","USER","LANG"]`,
 	}
-	if err2 := s.CreateMCPServer(explicit); err2 != nil {
+	if err2 := s.CreateMCPServer(context.Background(), explicit); err2 != nil {
 		t.Fatalf("CreateMCPServer explicit: %v", err2)
 	}
 
-	gotEx, err := s.GetMCPServer("explicit-tier")
+	gotEx, err := s.GetMCPServer(context.Background(), "explicit-tier")
 	if err != nil {
 		t.Fatalf("GetMCPServer explicit: %v", err)
 	}
@@ -70,11 +70,11 @@ func TestMCPServerTrust_DefaultsAndRoundTrip(t *testing.T) {
 	// Update should round-trip the new tier and allowlist.
 	gotEx.TrustTier = TrustTierPluginHTTP
 	gotEx.EnvAllowlist = `["PATH"]`
-	if err2 := s.UpdateMCPServer(gotEx); err2 != nil {
+	if err2 := s.UpdateMCPServer(context.Background(), gotEx); err2 != nil {
 		t.Fatalf("UpdateMCPServer: %v", err2)
 	}
 
-	gotUpd, err := s.GetMCPServer("explicit-tier")
+	gotUpd, err := s.GetMCPServer(context.Background(), "explicit-tier")
 	if err != nil {
 		t.Fatalf("GetMCPServer after update: %v", err)
 	}
@@ -86,7 +86,7 @@ func TestMCPServerTrust_DefaultsAndRoundTrip(t *testing.T) {
 	}
 
 	// List should also round-trip both rows with their respective values.
-	all, err := s.ListMCPServers()
+	all, err := s.ListMCPServers(context.Background())
 	if err != nil {
 		t.Fatalf("ListMCPServers: %v", err)
 	}
@@ -126,7 +126,7 @@ func TestMCPServerTrust_MigrationIdempotent(t *testing.T) {
 	if err != nil {
 		t.Fatalf("first New: %v", err)
 	}
-	if closeErr := s1.Close(); closeErr != nil {
+	if closeErr := s1.Close(context.Background()); closeErr != nil {
 		t.Fatalf("close s1: %v", closeErr)
 	}
 
@@ -134,9 +134,11 @@ func TestMCPServerTrust_MigrationIdempotent(t *testing.T) {
 	if err != nil {
 		t.Fatalf("second New (idempotent migrations): %v", err)
 	}
-	defer s2.Close()
+	defer s2.Close(context.
 
-	// Verify the columns exist.
+		// Verify the columns exist.
+		Background())
+
 	rows, err := s2.DB.Query("PRAGMA table_info(mcp_servers)")
 	if err != nil {
 		t.Fatalf("PRAGMA table_info: %v", err)

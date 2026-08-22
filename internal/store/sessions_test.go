@@ -1,6 +1,7 @@
 package store
 
 import (
+	"context"
 	"testing"
 	"time"
 )
@@ -9,7 +10,7 @@ func TestCreateSession(t *testing.T) {
 	s := newTestStore(t)
 
 	sess := &Session{}
-	if err := s.CreateSession(sess); err != nil {
+	if err := s.CreateSession(context.Background(), sess); err != nil {
 		t.Fatalf("CreateSession: %v", err)
 	}
 
@@ -31,11 +32,11 @@ func TestGetSession(t *testing.T) {
 	s := newTestStore(t)
 
 	sess := &Session{Title: "Test Chat"}
-	if err := s.CreateSession(sess); err != nil {
+	if err := s.CreateSession(context.Background(), sess); err != nil {
 		t.Fatalf("CreateSession: %v", err)
 	}
 
-	got, err := s.GetSession(sess.ID)
+	got, err := s.GetSession(context.Background(), sess.ID)
 	if err != nil {
 		t.Fatalf("GetSession: %v", err)
 	}
@@ -60,14 +61,14 @@ func TestListSessions(t *testing.T) {
 	// Create sessions with small delays to guarantee ordering.
 	for i := 0; i < 3; i++ {
 		sess := &Session{Title: "Chat"}
-		if err := s.CreateSession(sess); err != nil {
+		if err := s.CreateSession(context.Background(), sess); err != nil {
 			t.Fatalf("CreateSession %d: %v", i, err)
 		}
 		// Sleep briefly so last_activity differs.
 		time.Sleep(10 * time.Millisecond)
 	}
 
-	sessions, err := s.ListSessions()
+	sessions, err := s.ListSessions(context.Background())
 	if err != nil {
 		t.Fatalf("ListSessions: %v", err)
 	}
@@ -88,15 +89,15 @@ func TestArchiveSession(t *testing.T) {
 	s := newTestStore(t)
 
 	sess := &Session{}
-	if err := s.CreateSession(sess); err != nil {
+	if err := s.CreateSession(context.Background(), sess); err != nil {
 		t.Fatalf("CreateSession: %v", err)
 	}
 
-	if err := s.ArchiveSession(sess.ID); err != nil {
+	if err := s.ArchiveSession(context.Background(), sess.ID); err != nil {
 		t.Fatalf("ArchiveSession: %v", err)
 	}
 
-	got, err := s.GetSession(sess.ID)
+	got, err := s.GetSession(context.Background(), sess.ID)
 	if err != nil {
 		t.Fatalf("GetSession after archive: %v", err)
 	}
@@ -111,7 +112,7 @@ func TestNextShortCode(t *testing.T) {
 	expected := []string{"c1", "c2", "c3"}
 	for _, want := range expected {
 		sess := &Session{}
-		if err := s.CreateSession(sess); err != nil {
+		if err := s.CreateSession(context.Background(), sess); err != nil {
 			t.Fatalf("CreateSession: %v", err)
 		}
 		if sess.ShortCode != want {
@@ -124,12 +125,12 @@ func TestCreateMessage(t *testing.T) {
 	s := newTestStore(t)
 
 	sess := &Session{}
-	if err := s.CreateSession(sess); err != nil {
+	if err := s.CreateSession(context.Background(), sess); err != nil {
 		t.Fatalf("CreateSession: %v", err)
 	}
 
 	msg := &Message{SessionID: sess.ID, Role: "user", Content: "Hello"}
-	if err := s.CreateMessage(msg); err != nil {
+	if err := s.CreateMessage(context.Background(), msg); err != nil {
 		t.Fatalf("CreateMessage: %v", err)
 	}
 
@@ -138,7 +139,7 @@ func TestCreateMessage(t *testing.T) {
 	}
 
 	// Verify session message_count was incremented.
-	got, err := s.GetSession(sess.ID)
+	got, err := s.GetSession(context.Background(), sess.ID)
 	if err != nil {
 		t.Fatalf("GetSession: %v", err)
 	}
@@ -151,21 +152,21 @@ func TestListMessages(t *testing.T) {
 	s := newTestStore(t)
 
 	sess := &Session{}
-	if err := s.CreateSession(sess); err != nil {
+	if err := s.CreateSession(context.Background(), sess); err != nil {
 		t.Fatalf("CreateSession: %v", err)
 	}
 
 	// Create 5 messages.
 	for i := 0; i < 5; i++ {
 		msg := &Message{SessionID: sess.ID, Role: "user", Content: "msg"}
-		if err := s.CreateMessage(msg); err != nil {
+		if err := s.CreateMessage(context.Background(), msg); err != nil {
 			t.Fatalf("CreateMessage %d: %v", i, err)
 		}
 		time.Sleep(5 * time.Millisecond) // ensure distinct timestamps
 	}
 
 	// List with limit 3.
-	messages, err := s.ListMessages(sess.ID, 3)
+	messages, err := s.ListMessages(context.Background(), sess.ID, 3)
 	if err != nil {
 		t.Fatalf("ListMessages: %v", err)
 	}
@@ -188,16 +189,16 @@ func TestForkSession_AtomicMessages(t *testing.T) {
 	s := newTestStore(t)
 
 	src := &Session{Title: "Source"}
-	if err := s.CreateSession(src); err != nil {
+	if err := s.CreateSession(context.Background(), src); err != nil {
 		t.Fatalf("CreateSession src: %v", err)
 	}
 	for i := 0; i < 5; i++ {
-		if err := s.CreateMessage(&Message{SessionID: src.ID, Role: "user", Content: "m"}); err != nil {
+		if err := s.CreateMessage(context.Background(), &Message{SessionID: src.ID, Role: "user", Content: "m"}); err != nil {
 			t.Fatalf("CreateMessage %d: %v", i, err)
 		}
 	}
 
-	forked, err := s.ForkSession(src.ID, nil, true)
+	forked, err := s.ForkSession(context.Background(), src.ID, nil, true)
 	if err != nil {
 		t.Fatalf("ForkSession: %v", err)
 	}
@@ -208,7 +209,7 @@ func TestForkSession_AtomicMessages(t *testing.T) {
 		t.Errorf("expected MessageCount=5, got %d", forked.MessageCount)
 	}
 
-	got, err := s.ListMessages(forked.ID, 100)
+	got, err := s.ListMessages(context.Background(), forked.ID, 100)
 	if err != nil {
 		t.Fatalf("ListMessages on fork: %v", err)
 	}
@@ -217,7 +218,7 @@ func TestForkSession_AtomicMessages(t *testing.T) {
 	}
 
 	// Persisted message_count matches.
-	reloaded, err := s.GetSession(forked.ID)
+	reloaded, err := s.GetSession(context.Background(), forked.ID)
 	if err != nil {
 		t.Fatalf("GetSession fork: %v", err)
 	}
@@ -234,17 +235,17 @@ func TestCopyMessages_AtomicOnFailure(t *testing.T) {
 	s := newTestStore(t)
 
 	src := &Session{}
-	if err := s.CreateSession(src); err != nil {
+	if err := s.CreateSession(context.Background(), src); err != nil {
 		t.Fatalf("CreateSession: %v", err)
 	}
 	for i := 0; i < 3; i++ {
-		if err := s.CreateMessage(&Message{SessionID: src.ID, Role: "user", Content: "m"}); err != nil {
+		if err := s.CreateMessage(context.Background(), &Message{SessionID: src.ID, Role: "user", Content: "m"}); err != nil {
 			t.Fatalf("CreateMessage: %v", err)
 		}
 	}
 
 	bogusTarget := "no-such-session-id"
-	err := s.CopyMessages(src.ID, bogusTarget)
+	err := s.CopyMessages(context.Background(), src.ID, bogusTarget)
 	if err == nil {
 		t.Fatal("expected CopyMessages to fail for nonexistent target")
 	}
@@ -262,7 +263,7 @@ func TestCopyMessages_AtomicOnFailure(t *testing.T) {
 func TestListSessionsReturnsEmptyArray(t *testing.T) {
 	s := newTestStore(t)
 
-	sessions, err := s.ListSessions()
+	sessions, err := s.ListSessions(context.Background())
 	if err != nil {
 		t.Fatalf("ListSessions: %v", err)
 	}
@@ -285,22 +286,22 @@ func TestArchiveSession_EvictsSessionObjects(t *testing.T) {
 
 	// Put two objects on this session and one on a sibling session (control).
 	for i := 0; i < 2; i++ {
-		if _, err := s.PutSessionObject(SessionObjectInput{SessionID: sess.ID, Payload: `{}`}); err != nil {
+		if _, err := s.PutSessionObject(context.Background(), SessionObjectInput{SessionID: sess.ID, Payload: `{}`}); err != nil {
 			t.Fatalf("put %d on sess: %v", i, err)
 		}
 	}
 	sibling := makeTestSession(t, s)
-	siblingObj, err := s.PutSessionObject(SessionObjectInput{SessionID: sibling.ID, Payload: `{}`})
+	siblingObj, err := s.PutSessionObject(context.Background(), SessionObjectInput{SessionID: sibling.ID, Payload: `{}`})
 	if err != nil {
 		t.Fatalf("put on sibling: %v", err)
 	}
 
-	if err := s.ArchiveSession(sess.ID); err != nil {
+	if err := s.ArchiveSession(context.Background(), sess.ID); err != nil {
 		t.Fatalf("ArchiveSession: %v", err)
 	}
 
 	// Archived-session objects should be gone.
-	list, err := s.ListSessionObjects(sess.ID)
+	list, err := s.ListSessionObjects(context.Background(), sess.ID)
 	if err != nil {
 		t.Fatalf("list after archive: %v", err)
 	}
@@ -309,12 +310,12 @@ func TestArchiveSession_EvictsSessionObjects(t *testing.T) {
 	}
 
 	// Sibling-session objects must be untouched.
-	if _, err := s.GetSessionObject(sibling.ID, siblingObj.ID); err != nil {
+	if _, err := s.GetSessionObject(context.Background(), sibling.ID, siblingObj.ID); err != nil {
 		t.Errorf("sibling object should still be present: %v", err)
 	}
 
 	// Archive itself should still have succeeded.
-	got, err := s.GetSession(sess.ID)
+	got, err := s.GetSession(context.Background(), sess.ID)
 	if err != nil {
 		t.Fatalf("get archived session: %v", err)
 	}

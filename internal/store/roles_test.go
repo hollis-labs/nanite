@@ -1,6 +1,9 @@
 package store
 
-import "testing"
+import (
+	"context"
+	"testing"
+)
 
 func TestRoleCRUD(t *testing.T) {
 	s := newTestStore(t)
@@ -15,7 +18,7 @@ func TestRoleCRUD(t *testing.T) {
 		DefaultTools:    `["dev_read","dev_grep"]`,
 		DefaultSkills:   `["dev-read"]`,
 	}
-	if err := s.CreateRole(r); err != nil {
+	if err := s.CreateRole(context.Background(), r); err != nil {
 		t.Fatalf("CreateRole: %v", err)
 	}
 	if r.ID == "" {
@@ -25,7 +28,7 @@ func TestRoleCRUD(t *testing.T) {
 		t.Fatal("CreateRole did not stamp timestamps")
 	}
 
-	got, err := s.GetRole(r.ID)
+	got, err := s.GetRole(context.Background(), r.ID)
 	if err != nil {
 		t.Fatalf("GetRole: %v", err)
 	}
@@ -36,7 +39,7 @@ func TestRoleCRUD(t *testing.T) {
 		t.Errorf("GetRole mismatch: got %+v, want slug/prompt/class from %+v", got, r)
 	}
 
-	bySlug, err := s.GetRoleBySlug("sme")
+	bySlug, err := s.GetRoleBySlug(context.Background(), "sme")
 	if err != nil {
 		t.Fatalf("GetRoleBySlug: %v", err)
 	}
@@ -44,7 +47,7 @@ func TestRoleCRUD(t *testing.T) {
 		t.Fatalf("GetRoleBySlug: expected role %s, got %+v", r.ID, bySlug)
 	}
 
-	list, err := s.ListRoles()
+	list, err := s.ListRoles(context.Background())
 	if err != nil {
 		t.Fatalf("ListRoles: %v", err)
 	}
@@ -60,10 +63,10 @@ func TestRoleCRUD(t *testing.T) {
 
 	got.Name = "Renamed SME"
 	got.DefaultModel = "gpt-5"
-	if err := s.UpdateRole(got); err != nil {
+	if err := s.UpdateRole(context.Background(), got); err != nil {
 		t.Fatalf("UpdateRole: %v", err)
 	}
-	updated, err := s.GetRole(r.ID)
+	updated, err := s.GetRole(context.Background(), r.ID)
 	if err != nil {
 		t.Fatalf("GetRole after update: %v", err)
 	}
@@ -71,10 +74,10 @@ func TestRoleCRUD(t *testing.T) {
 		t.Errorf("UpdateRole did not persist: got %+v", updated)
 	}
 
-	if err := s.DeleteRole(r.ID); err != nil {
+	if err := s.DeleteRole(context.Background(), r.ID); err != nil {
 		t.Fatalf("DeleteRole: %v", err)
 	}
-	gone, err := s.GetRole(r.ID)
+	gone, err := s.GetRole(context.Background(), r.ID)
 	if err != nil {
 		t.Fatalf("GetRole after delete: %v", err)
 	}
@@ -87,11 +90,11 @@ func TestRoleCreate_Defaults(t *testing.T) {
 	s := newTestStore(t)
 
 	r := &Role{Slug: "minimal", Name: "Minimal Role"}
-	if err := s.CreateRole(r); err != nil {
+	if err := s.CreateRole(context.Background(), r); err != nil {
 		t.Fatalf("CreateRole: %v", err)
 	}
 
-	got, err := s.GetRole(r.ID)
+	got, err := s.GetRole(context.Background(), r.ID)
 	if err != nil {
 		t.Fatalf("GetRole: %v", err)
 	}
@@ -110,7 +113,7 @@ func TestRoleCreate_InvalidClassRejected(t *testing.T) {
 	s := newTestStore(t)
 
 	r := &Role{Slug: "bad-class", Name: "Bad Class", DefaultClass: "not-a-real-class"}
-	if err := s.CreateRole(r); err == nil {
+	if err := s.CreateRole(context.Background(), r); err == nil {
 		t.Fatal("expected CreateRole to reject an invalid default_class, got nil error")
 	}
 }
@@ -118,10 +121,10 @@ func TestRoleCreate_InvalidClassRejected(t *testing.T) {
 func TestRoleSlugUnique(t *testing.T) {
 	s := newTestStore(t)
 
-	if err := s.CreateRole(&Role{Slug: "dup", Name: "First"}); err != nil {
+	if err := s.CreateRole(context.Background(), &Role{Slug: "dup", Name: "First"}); err != nil {
 		t.Fatalf("CreateRole first: %v", err)
 	}
-	if err := s.CreateRole(&Role{Slug: "dup", Name: "Second"}); err == nil {
+	if err := s.CreateRole(context.Background(), &Role{Slug: "dup", Name: "Second"}); err == nil {
 		t.Fatal("expected CreateRole to reject a duplicate slug, got nil error")
 	}
 }

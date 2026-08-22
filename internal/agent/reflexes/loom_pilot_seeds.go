@@ -190,7 +190,7 @@ func SeedAgentReflexesBySlug(ctx context.Context, st *store.Store, seeds []Agent
 	}
 	inserted := 0
 	for _, s := range seeds {
-		profile, err := st.GetAgentBySlug(s.AgentSlug)
+		profile, err := st.GetAgentBySlug(ctx, s.AgentSlug)
 		if err != nil {
 			if errors.Is(err, sql.ErrNoRows) {
 				logger.Warn("reflex agent-seed: target agent not yet ingested, skipping",

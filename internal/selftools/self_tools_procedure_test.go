@@ -17,7 +17,7 @@ func TestProcedureGet_HappyPath(t *testing.T) {
 	s := newTestStore(t)
 	st := NewSelfToolsTransport(s)
 
-	if err := s.CreateAgent(&store.AgentProfile{ID: "agent-pm-1", Slug: "test-pm-1", Status: "active"}); err != nil {
+	if err := s.CreateAgent(context.Background(), &store.AgentProfile{ID: "agent-pm-1", Slug: "test-pm-1", Status: "active"}); err != nil {
 		t.Fatalf("seed agent: %v", err)
 	}
 	if err := s.InsertAgentProcedure(context.Background(), store.AgentProcedure{
@@ -49,10 +49,10 @@ func TestProcedureGet_ScopedToCallingAgent(t *testing.T) {
 	s := newTestStore(t)
 	st := NewSelfToolsTransport(s)
 
-	if err := s.CreateAgent(&store.AgentProfile{ID: "agent-pm-1", Slug: "test-pm-2", Status: "active"}); err != nil {
+	if err := s.CreateAgent(context.Background(), &store.AgentProfile{ID: "agent-pm-1", Slug: "test-pm-2", Status: "active"}); err != nil {
 		t.Fatalf("seed agent: %v", err)
 	}
-	if err := s.CreateAgent(&store.AgentProfile{ID: "agent-other", Slug: "test-other", Status: "active"}); err != nil {
+	if err := s.CreateAgent(context.Background(), &store.AgentProfile{ID: "agent-other", Slug: "test-other", Status: "active"}); err != nil {
 		t.Fatalf("seed agent: %v", err)
 	}
 	if err := s.InsertAgentProcedure(context.Background(), store.AgentProcedure{

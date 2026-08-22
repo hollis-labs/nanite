@@ -17,7 +17,7 @@ func newTestStore(t *testing.T) *store.Store {
 	if err != nil {
 		t.Fatalf("newTestStore: %v", err)
 	}
-	t.Cleanup(func() { s.Close() })
+	t.Cleanup(func() { s.Close(context.Background()) })
 	return s
 }
 
@@ -98,7 +98,7 @@ func TestAgentBuilder_FullFlow(t *testing.T) {
 	}
 
 	// Verify agent was created in the store.
-	agent, err := s.GetAgentBySlug("test-agent")
+	agent, err := s.GetAgentBySlug(context.Background(), "test-agent")
 	if err != nil {
 		t.Fatalf("get agent by slug: %v", err)
 	}
@@ -180,7 +180,7 @@ func TestSkillBuilder_FullFlow(t *testing.T) {
 	}
 
 	// Verify skill was created.
-	skill, err := s.GetSkillBySlug("code-review")
+	skill, err := s.GetSkillBySlug(context.Background(), "code-review")
 	if err != nil {
 		t.Fatalf("get skill by slug: %v", err)
 	}
@@ -333,7 +333,7 @@ func TestAgentBuilder_DefaultModel(t *testing.T) {
 		}
 	}
 
-	agent, err := s.GetAgentBySlug("default-model-agent")
+	agent, err := s.GetAgentBySlug(context.Background(), "default-model-agent")
 	if err != nil {
 		t.Fatalf("get agent: %v", err)
 	}

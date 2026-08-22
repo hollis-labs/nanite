@@ -50,7 +50,7 @@ func TestAssembleSlots_WorkspaceSlotShipsWalkUpContent(t *testing.T) {
 		t.Fatalf("store.New: %v", err)
 	}
 	sess := &store.Session{ID: "ws-sess"}
-	if err := s.CreateSession(sess); err != nil {
+	if err := s.CreateSession(context.Background(), sess); err != nil {
 		t.Fatalf("CreateSession: %v", err)
 	}
 
@@ -106,7 +106,7 @@ func TestAssembleSlots_WorkspaceSlotEmptyWithoutCache(t *testing.T) {
 		t.Fatalf("store.New: %v", err)
 	}
 	sess := &store.Session{ID: "ws-nil-sess"}
-	if err := s.CreateSession(sess); err != nil {
+	if err := s.CreateSession(context.Background(), sess); err != nil {
 		t.Fatalf("CreateSession: %v", err)
 	}
 
@@ -155,7 +155,7 @@ func TestAssembleSlots_WorkspaceSlotRefreshedAfterMtimeChange(t *testing.T) {
 		t.Fatalf("store.New: %v", err)
 	}
 	sess := &store.Session{ID: "ws-refresh-sess"}
-	if err := s.CreateSession(sess); err != nil {
+	if err := s.CreateSession(context.Background(), sess); err != nil {
 		t.Fatalf("CreateSession: %v", err)
 	}
 

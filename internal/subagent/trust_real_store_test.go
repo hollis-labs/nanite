@@ -47,7 +47,7 @@ func TestSpawn_RealStoreTrustResolver_EndToEnd(t *testing.T) {
 	untrustedProfile := &store.AgentProfile{
 		Name: "Untrusted Plugin", Slug: "untrusted-plugin", SystemPrompt: "x", Kind: "external",
 	}
-	if err := st.CreateAgent(untrustedProfile); err != nil {
+	if err := st.CreateAgent(context.Background(), untrustedProfile); err != nil {
 		t.Fatalf("create untrusted profile: %v", err)
 	}
 	if _, err := st.DB.Exec(`UPDATE agent_profiles SET default_trust_tier = 'untrusted' WHERE id = ?`, untrustedProfile.ID); err != nil {
@@ -58,7 +58,7 @@ func TestSpawn_RealStoreTrustResolver_EndToEnd(t *testing.T) {
 	normalProfile := &store.AgentProfile{
 		Name: "Normal Worker", Slug: "normal-worker", SystemPrompt: "x", Kind: "internal",
 	}
-	if err := st.CreateAgent(normalProfile); err != nil {
+	if err := st.CreateAgent(context.Background(), normalProfile); err != nil {
 		t.Fatalf("create normal profile: %v", err)
 	}
 
@@ -69,7 +69,7 @@ func TestSpawn_RealStoreTrustResolver_EndToEnd(t *testing.T) {
 	trustedProfile := &store.AgentProfile{
 		Name: "Trusted Internal Role", Slug: "trusted-internal-role", SystemPrompt: "x", Kind: "internal",
 	}
-	if err := st.CreateAgent(trustedProfile); err != nil {
+	if err := st.CreateAgent(context.Background(), trustedProfile); err != nil {
 		t.Fatalf("create trusted profile: %v", err)
 	}
 	if _, err := st.DB.Exec(`UPDATE agent_profiles SET default_trust_tier = 'trusted' WHERE id = ?`, trustedProfile.ID); err != nil {

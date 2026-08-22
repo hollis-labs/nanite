@@ -162,7 +162,7 @@ func TestUnloadPlugin_FullTeardown(t *testing.T) {
 	if err != nil {
 		t.Fatalf("store.New: %v", err)
 	}
-	t.Cleanup(func() { _ = db.Close() })
+	t.Cleanup(func() { _ = db.Close(context.Background()) })
 	host.SetStore(db)
 
 	const pluginID = "alpha"
@@ -375,7 +375,7 @@ func TestUnloadPlugin_FullTeardown(t *testing.T) {
 	if _, ok := host.configSchemaOwners[pluginID]; ok {
 		t.Error("config schema owner entry survived unload")
 	}
-	settings, err := db.GetPluginSettings(pluginID)
+	settings, err := db.GetPluginSettings(context.Background(), pluginID)
 	if err != nil {
 		t.Errorf("GetPluginSettings after unload: %v", err)
 	} else if len(settings.Schema) != 0 {

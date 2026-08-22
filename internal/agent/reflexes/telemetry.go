@@ -59,7 +59,7 @@ import (
 // exactly what telemetry needs, matching the same narrowing pattern
 // ActionKindLookup/CooldownFunc already use in resolve.go.
 type TraceStore interface {
-	LogEvent(sessionID, eventType, category, detail, metadata string)
+	LogEvent(ctx context.Context, sessionID, eventType, category, detail, metadata string)
 	BumpAgentReflexFired(ctx context.Context, id string, now time.Time) error
 }
 
@@ -275,7 +275,8 @@ func EmitFirings(
 		}
 
 		if ts != nil {
-			ts.LogEvent(state.SessionID, action.ActionKind, "reflex", r.Name, string(metaJSON))
+			// Outcome bookkeeping must survive cancellation of the reflex it records.
+			ts.LogEvent(context.WithoutCancel(ctx), state.SessionID, action.ActionKind, "reflex", r.Name, string(metaJSON))
 			if err := ts.BumpAgentReflexFired(ctx, r.ID, now); err != nil {
 				logger.Warn("reflexes.EmitFirings: bump fired_count failed",
 					"reflex", r.Name, "err", err)

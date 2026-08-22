@@ -44,11 +44,15 @@ func TestPhase5AgentProfiles_EndToEnd(t *testing.T) {
 	if err != nil {
 		t.Fatalf("store.New: %v", err)
 	}
-	t.Cleanup(func() { _ = st.Close() })
+	t.Cleanup(func() {
+		_ = st.Close(context.
 
-	// A real skill row for agent.skills to grant against.
+			// A real skill row for agent.skills to grant against.
+			Background())
+	})
+
 	skill := &store.Skill{Name: "Wiki Classify", Slug: "wiki-classify", Description: "test skill"}
-	if err := st.CreateSkill(skill); err != nil {
+	if err := st.CreateSkill(context.Background(), skill); err != nil {
 		t.Fatalf("CreateSkill: %v", err)
 	}
 
@@ -106,7 +110,7 @@ agent:
 
 	// --- install: agent appears and is dispatchable ---
 
-	agent, err := st.GetAgentBySlug("demo-curator")
+	agent, err := st.GetAgentBySlug(context.Background(), "demo-curator")
 	if err != nil {
 		t.Fatalf("GetAgentBySlug: %v", err)
 	}
@@ -126,7 +130,7 @@ agent:
 		t.Errorf("agent.ActivationMode = %q, want fresh-per-wake", agent.ActivationMode)
 	}
 
-	role, err := st.GetRole(agent.RoleID)
+	role, err := st.GetRole(context.Background(), agent.RoleID)
 	if err != nil {
 		t.Fatalf("GetRole: %v", err)
 	}
@@ -143,7 +147,7 @@ agent:
 		t.Errorf("agent.SystemPrompt = %q, want empty (deferred to role via cascade)", agent.SystemPrompt)
 	}
 
-	consumer, err := st.GetConsumer(agent.ConsumerID)
+	consumer, err := st.GetConsumer(context.Background(), agent.ConsumerID)
 	if err != nil {
 		t.Fatalf("GetConsumer: %v", err)
 	}
@@ -162,7 +166,7 @@ agent:
 		t.Errorf("granted tools = %v, want tool_list among them", grantedTools)
 	}
 
-	grantedSkills, err := st.ListAgentSkills(agent.ID)
+	grantedSkills, err := st.ListAgentSkills(context.Background(), agent.ID)
 	if err != nil {
 		t.Fatalf("ListAgentSkills: %v", err)
 	}
@@ -182,7 +186,7 @@ agent:
 	if err := applyManifestRegistrations(host, manifest, p, pluginDir); err != nil {
 		t.Fatalf("applyManifestRegistrations (second load): %v", err)
 	}
-	agentsAfterReload, err := st.ListAgentsByPluginID(pluginID)
+	agentsAfterReload, err := st.ListAgentsByPluginID(context.Background(), pluginID)
 	if err != nil {
 		t.Fatalf("ListAgentsByPluginID: %v", err)
 	}
@@ -207,15 +211,15 @@ agent:
 	if err := host.UnloadPlugin(pluginID); err != nil {
 		t.Fatalf("UnloadPlugin: %v", err)
 	}
-	if _, err := st.GetAgentBySlug("demo-curator"); err == nil {
+	if _, err := st.GetAgentBySlug(context.Background(), "demo-curator"); err == nil {
 		t.Errorf("agent %q still resolvable by slug after unload", "demo-curator")
 	}
-	if remainingAgents, err := st.ListAgentsByPluginID(pluginID); err != nil {
+	if remainingAgents, err := st.ListAgentsByPluginID(context.Background(), pluginID); err != nil {
 		t.Fatalf("ListAgentsByPluginID after unload: %v", err)
 	} else if len(remainingAgents) != 0 {
 		t.Errorf("plugin-owned agents survived unload: %+v", remainingAgents)
 	}
-	if remainingRoles, err := st.ListRolesByPluginID(pluginID); err != nil {
+	if remainingRoles, err := st.ListRolesByPluginID(context.Background(), pluginID); err != nil {
 		t.Fatalf("ListRolesByPluginID after unload: %v", err)
 	} else if len(remainingRoles) != 0 {
 		t.Errorf("plugin-owned roles survived unload: %+v", remainingRoles)
@@ -223,7 +227,7 @@ agent:
 	// Consumer rows are deliberately NOT swept (resolveOrCreateConsumer's
 	// doc comment) -- assert it survives, distinguishing "not swept" from
 	// "sweep silently failed."
-	if c, err := st.GetConsumerBySlug(pluginID); err != nil {
+	if c, err := st.GetConsumerBySlug(context.Background(), pluginID); err != nil {
 		t.Fatalf("GetConsumerBySlug after unload: %v", err)
 	} else if c == nil {
 		t.Errorf("consumer %q was unexpectedly swept on unload", pluginID)
@@ -243,7 +247,7 @@ func TestPhase5AgentProfiles_NoLegacyGrandfathering(t *testing.T) {
 	if err != nil {
 		t.Fatalf("store.New: %v", err)
 	}
-	t.Cleanup(func() { _ = st.Close() })
+	t.Cleanup(func() { _ = st.Close(context.Background()) })
 
 	pluginDir := t.TempDir()
 	if err := os.MkdirAll(filepath.Join(pluginDir, "agents"), 0o755); err != nil {
@@ -283,7 +287,7 @@ mcp_servers:
 	}
 
 	// No partial composition should have been constructed.
-	if agents, listErr := st.ListAgentsByPluginID(manifest.ID); listErr != nil {
+	if agents, listErr := st.ListAgentsByPluginID(context.Background(), manifest.ID); listErr != nil {
 		t.Fatalf("ListAgentsByPluginID: %v", listErr)
 	} else if len(agents) != 0 {
 		t.Errorf("a rejected agent-profile file still produced agent rows: %+v", agents)

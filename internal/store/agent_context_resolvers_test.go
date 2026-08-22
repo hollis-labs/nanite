@@ -156,7 +156,7 @@ func TestDeleteAgent_CascadesAgentContextResolvers(t *testing.T) {
 		t.Fatalf("InsertAgentContextResolver: %v", err)
 	}
 
-	if err := s.DeleteAgent(agent.Slug); err != nil {
+	if err := s.DeleteAgent(context.Background(), agent.Slug); err != nil {
 		t.Fatalf("DeleteAgent: %v", err)
 	}
 

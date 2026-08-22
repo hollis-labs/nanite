@@ -36,7 +36,7 @@ func TestHandleAssignAgentSkill_RejectsNonexistentAgent(t *testing.T) {
 		t.Fatalf("POST /api/agents/{id}/skills for nonexistent agent: expected 404, got %d; body: %s", w.Code, w.Body.String())
 	}
 
-	skills, err := a.Services.Store.ListAgentSkills("does-not-exist")
+	skills, err := a.Services.Store.ListAgentSkills(context.Background(), "does-not-exist")
 	if err != nil {
 		t.Fatalf("ListAgentSkills: %v", err)
 	}

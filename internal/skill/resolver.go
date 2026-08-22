@@ -93,7 +93,7 @@ type AgentContextResolverStore interface {
 // ResolveDependencyAddresses depends on. A real *store.Store satisfies
 // this directly.
 type SkillIndexStore interface {
-	GetSkillBySlug(slug string) (*store.Skill, error)
+	GetSkillBySlug(ctx context.Context, slug string) (*store.Skill, error)
 }
 
 // MissingSkillParameterError is returned by ResolveSkillParameters when one
@@ -324,7 +324,7 @@ func ResolveDependencyAddresses(idx SkillIndexStore, declaredDependenciesJSON st
 
 	out := make([]DependencyAddress, 0, len(slugs))
 	for _, slug := range slugs {
-		sk, err := idx.GetSkillBySlug(slug)
+		sk, err := idx.GetSkillBySlug(context.TODO() /* TODO(ctx-sweep): no ctx available at this call site */, slug)
 		if err != nil {
 			return nil, fmt.Errorf("skill: resolve declared dependency %q: %w", slug, err)
 		}

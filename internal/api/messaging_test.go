@@ -21,7 +21,7 @@ import (
 // fix pattern.
 func seedMessageInbox(t *testing.T, a *API) {
 	t.Helper()
-	if err := a.Services.Store.CreateAgent(&store.AgentProfile{
+	if err := a.Services.Store.CreateAgent(context.Background(), &store.AgentProfile{
 		ID:   "test-file-backend",
 		Slug: "test-file-backend",
 		Name: "Backend",
@@ -29,7 +29,7 @@ func seedMessageInbox(t *testing.T, a *API) {
 	}); err != nil {
 		t.Fatalf("CreateAgent: %v", err)
 	}
-	if err := a.Services.Store.CreateAgent(&store.AgentProfile{
+	if err := a.Services.Store.CreateAgent(context.Background(), &store.AgentProfile{
 		ID:   "test-file-frontend",
 		Slug: "test-file-frontend",
 		Name: "Frontend",

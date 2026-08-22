@@ -149,7 +149,7 @@ func TestWorkflowDefinitionsSmoke_LaunchesEndToEnd(t *testing.T) {
 		t.Fatalf("worker.VerifyResult = %+v, want a passed independent-reviewer verdict", worker.VerifyResult)
 	}
 
-	steps, err := st.ListWorkflowRunSteps(result.RunID)
+	steps, err := st.ListWorkflowRunSteps(context.Background(), result.RunID)
 	if err != nil {
 		t.Fatalf("ListWorkflowRunSteps: %v", err)
 	}

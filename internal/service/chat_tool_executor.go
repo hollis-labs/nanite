@@ -528,12 +528,14 @@ func (s *chatServiceImpl) executeSingleTool(
 		}
 	}
 
+	// Outcome bookkeeping must survive cancellation of the tool call it records.
+	toolOutcomeCtx := context.WithoutCancel(ctx)
 	if toolIsError {
 		resultText = chat.SanitizeToolError(resultText)
 		toolSpan.RecordError(fmt.Errorf("%s", resultText))
 		toolSpan.SetStatus(codes.Error, resultText)
 		slog.Warn("chat-service: tool failed", "tool", tu.Name, "content", resultText)
-		s.store.LogEvent(sessionID, "tool_error", "error",
+		s.store.LogEvent(toolOutcomeCtx, sessionID, "tool_error", "error",
 			fmt.Sprintf("%s: %s", tu.Name, resultText), "{}")
 		if s.events != nil {
 			s.events.EmitToolCall(ctx, sessionID, tu.Name, false, 0)
@@ -541,7 +543,7 @@ func (s *chatServiceImpl) executeSingleTool(
 		}
 	} else {
 		toolSpan.SetAttributes(attribute.Int("nanite.tool.result_len", len(resultText)))
-		s.store.LogEvent(sessionID, "tool_call", "tool",
+		s.store.LogEvent(toolOutcomeCtx, sessionID, "tool_call", "tool",
 			tu.Name, fmt.Sprintf(`{"result_len":%d,"agent_id":%q}`, len(resultText), agentID))
 		if s.events != nil {
 			s.events.EmitToolCall(ctx, sessionID, tu.Name, true, len(resultText))
@@ -784,7 +786,8 @@ func (s *chatServiceImpl) postProcessToolResults(
 			slog.Info("chat-service: tool result truncated",
 				"tool", tu.Name, "original_len", tr.OriginalLen,
 				"truncated_len", len(tr.Content), "path", tr.OutputPath)
-			s.store.LogEvent(sessionID, "tool_truncated", "context",
+			// Outcome bookkeeping must survive cancellation of the tool-result processing it records.
+			s.store.LogEvent(context.WithoutCancel(ctx), sessionID, "tool_truncated", "context",
 				tu.Name, fmt.Sprintf(`{"original_len":%d,"truncated_len":%d,"output_path":%q}`,
 					tr.OriginalLen, len(tr.Content), tr.OutputPath))
 		}

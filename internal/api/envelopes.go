@@ -48,7 +48,7 @@ func (a *API) handleEnvelopeRespond(w http.ResponseWriter, r *http.Request) {
 	}
 	resp.ID = envelopeID
 
-	inst, err := a.Services.Store.GetEnvelopeInstance(envelopeID)
+	inst, err := a.Services.Store.GetEnvelopeInstance(r.Context(), envelopeID)
 	if errors.Is(err, sql.ErrNoRows) {
 		a.errorResp(w, http.StatusNotFound, "envelope not found")
 		return
@@ -88,9 +88,9 @@ func (a *API) handleEnvelopeRespond(w http.ResponseWriter, r *http.Request) {
 	// Atomically claim the envelope before invoking the handler. Without
 	// this, concurrent submissions would each run the ResponseHandler
 	// (duplicating side effects) before one RecordResponse call wins.
-	if err := a.Services.Store.ClaimEnvelopeForResponse(envelopeID); err != nil {
+	if err := a.Services.Store.ClaimEnvelopeForResponse(r.Context(), envelopeID); err != nil {
 		if errors.Is(err, store.ErrEnvelopeAlreadyResponded) {
-			again, _ := a.Services.Store.GetEnvelopeInstance(envelopeID)
+			again, _ := a.Services.Store.GetEnvelopeInstance(r.Context(), envelopeID)
 			a.jsonResp(w, http.StatusConflict, map[string]any{
 				"error":           "envelope already responded",
 				"response_status": again.ResponseStatus,
@@ -110,11 +110,11 @@ func (a *API) handleEnvelopeRespond(w http.ResponseWriter, r *http.Request) {
 	result, err := handler.HandleResponse(ctx, *inst, resp)
 	if err != nil {
 		if errors.Is(ctx.Err(), context.DeadlineExceeded) {
-			_ = a.Services.Store.UpdateEnvelopeResponse(envelopeID, "failed", `{"reason":"handler_timeout"}`)
+			_ = a.Services.Store.UpdateEnvelopeResponse(ctx, envelopeID, "failed", `{"reason":"handler_timeout"}`)
 			a.errorResp(w, http.StatusGatewayTimeout, "response handler timed out")
 			return
 		}
-		_ = a.Services.Store.UpdateEnvelopeResponse(envelopeID, "failed", `{"reason":"handler_error"}`)
+		_ = a.Services.Store.UpdateEnvelopeResponse(ctx, envelopeID, "failed", `{"reason":"handler_error"}`)
 		a.errorResp(w, http.StatusInternalServerError, "handler: "+err.Error())
 		return
 	}
@@ -124,7 +124,7 @@ func (a *API) handleEnvelopeRespond(w http.ResponseWriter, r *http.Request) {
 		a.errorResp(w, http.StatusInternalServerError, "marshal response: "+err.Error())
 		return
 	}
-	if err := a.Services.Store.UpdateEnvelopeResponse(envelopeID, string(resp.Status), string(respJSON)); err != nil {
+	if err := a.Services.Store.UpdateEnvelopeResponse(ctx, envelopeID, string(resp.Status), string(respJSON)); err != nil {
 		a.errorResp(w, http.StatusInternalServerError, err.Error())
 		return
 	}
@@ -149,7 +149,7 @@ func (a *API) handleEnvelopeRespond(w http.ResponseWriter, r *http.Request) {
 			Role:      chat.RoleEnvelopeResponse,
 			Content:   chat.FormatEnvelopeResponseContent(inst.EnvelopeType, resp.Status, string(payloadJSON)),
 		}
-		if err := a.Services.Store.CreateMessage(msg); err != nil {
+		if err := a.Services.Store.CreateMessage(ctx, msg); err != nil {
 			a.errorResp(w, http.StatusInternalServerError, "persist message: "+err.Error())
 			return
 		}
@@ -250,7 +250,7 @@ func buildEnvelopeLookup(s *store.Store, messages []store.Message) map[string]*s
 		if id == "" || lookup[id] != nil {
 			return
 		}
-		inst, err := s.GetEnvelopeInstance(id)
+		inst, err := s.GetEnvelopeInstance(context.TODO() /* TODO(ctx-sweep): no ctx available at this call site */, id)
 		if err != nil {
 			if !errors.Is(err, sql.ErrNoRows) {
 				slog.Warn("buildEnvelopeLookup: GetEnvelopeInstance failed",
@@ -300,8 +300,8 @@ func buildEnvelopeLookup(s *store.Store, messages []store.Message) map[string]*s
 // Return contract:
 //   - (sid, true)  — present, string, non-empty: enforce match.
 //   - ("", true)   — present but not a non-empty string (number, object,
-//                    null, empty string): treat as mismatch so a forged body
-//                    can't bypass the check by using a wrong JSON type.
+//     null, empty string): treat as mismatch so a forged body
+//     can't bypass the check by using a wrong JSON type.
 //   - ("", false)  — absent (or the body isn't a JSON object): no enforcement.
 func extractSessionID(raw []byte) (string, bool) {
 	var probe map[string]json.RawMessage

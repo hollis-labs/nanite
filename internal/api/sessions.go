@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
 	"errors"
@@ -22,7 +23,7 @@ func (a *API) handleListSessions(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
 	includeArchived := q.Get("include_archived") == "true"
 
-	sessions, err := a.Services.Store.ListSessions(includeArchived)
+	sessions, err := a.Services.Store.ListSessions(r.Context(), includeArchived)
 	if err != nil {
 		a.errorResp(w, http.StatusInternalServerError, err.Error())
 		return
@@ -42,7 +43,7 @@ func (a *API) handleCreateSession(w http.ResponseWriter, r *http.Request) {
 		Model:     req.Model,
 		Provider:  req.Provider,
 	}
-	if err := a.Services.Store.CreateSession(sess); err != nil {
+	if err := a.Services.Store.CreateSession(r.Context(), sess); err != nil {
 		a.errorResp(w, http.StatusInternalServerError, err.Error())
 		return
 	}
@@ -56,12 +57,12 @@ func (a *API) handleCreateSession(w http.ResponseWriter, r *http.Request) {
 	// ever written here.
 	agentID := req.AgentID
 	if agentID == "" {
-		if settings, err := a.Services.Store.GetUserSettings(); err == nil && settings.DefaultAgent != "" {
+		if settings, err := a.Services.Store.GetUserSettings(r.Context()); err == nil && settings.DefaultAgent != "" {
 			agentID = settings.DefaultAgent
 		}
 	}
 	if agentID == "" {
-		if defaultAgent, err := a.Services.Store.GetAgentBySlug("default"); err == nil && defaultAgent != nil {
+		if defaultAgent, err := a.Services.Store.GetAgentBySlug(r.Context(), "default"); err == nil && defaultAgent != nil {
 			agentID = defaultAgent.ID
 		}
 	}
@@ -75,7 +76,7 @@ func (a *API) handleCreateSession(w http.ResponseWriter, r *http.Request) {
 	// binding; ResolveForSession's own two-hop fallback handles an unbound
 	// session gracefully on read.
 	if agentID != "" {
-		if err := a.Services.Store.EnsureSessionAgent(sess.ID, agentID, "default", true); err != nil {
+		if err := a.Services.Store.EnsureSessionAgent(r.Context(), sess.ID, agentID, "default", true); err != nil {
 			// Log but don't fail — session was created successfully.
 			_ = err
 		}
@@ -105,7 +106,7 @@ func (a *API) handleForkSession(w http.ResponseWriter, r *http.Request) {
 		Model:    req.Model,
 	}
 
-	newSess, err := a.Services.Store.ForkSession(sourceID, overrides, req.IncludeMessages)
+	newSess, err := a.Services.Store.ForkSession(r.Context(), sourceID, overrides, req.IncludeMessages)
 	if err != nil {
 		a.errorResp(w, http.StatusInternalServerError, err.Error())
 		return
@@ -116,14 +117,14 @@ func (a *API) handleForkSession(w http.ResponseWriter, r *http.Request) {
 
 func (a *API) handleGetSession(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
-	sess, err := a.Services.Store.GetSession(id)
+	sess, err := a.Services.Store.GetSession(r.Context(), id)
 	if err != nil {
 		a.errorResp(w, http.StatusNotFound, "session not found")
 		return
 	}
 
 	// Also return recent messages.
-	messages, err := a.Services.Store.ListMessages(id, 50)
+	messages, err := a.Services.Store.ListMessages(r.Context(), id, 50)
 	if err != nil {
 		a.errorResp(w, http.StatusInternalServerError, err.Error())
 		return
@@ -183,7 +184,7 @@ func (a *API) detectInterruptedTurn(sessionID string, sess *store.Session) map[s
 	// than relying on a caller-supplied slice (ListMessages returns DESC then
 	// reverses to ASC; with limit=1 the single returned element is the
 	// absolute-latest row).
-	tail, err := a.Services.Store.ListMessages(sessionID, 1)
+	tail, err := a.Services.Store.ListMessages(context.TODO() /* TODO(ctx-sweep): no ctx available at this call site */, sessionID, 1)
 	if err != nil || len(tail) == 0 {
 		return nil
 	}
@@ -237,7 +238,7 @@ func (a *API) logInterruptedTurnDetected(sessionID string, last store.Message, r
 	if err != nil {
 		blob = []byte("{}")
 	}
-	a.Services.Store.LogEvent(sessionID, "interrupted_turn_detected", "recovery",
+	a.Services.Store.LogEvent(context.TODO() /* TODO(ctx-sweep): no ctx available at this call site */, sessionID, "interrupted_turn_detected", "recovery",
 		fmt.Sprintf("interrupted turn detected: last message %s (%s) has no reply and no live stream", last.ID, last.Role),
 		string(blob))
 }
@@ -245,7 +246,7 @@ func (a *API) logInterruptedTurnDetected(sessionID string, last store.Message, r
 func (a *API) handleUpdateSession(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 
-	existing, err := a.Services.Store.GetSession(id)
+	existing, err := a.Services.Store.GetSession(r.Context(), id)
 	if err != nil {
 		a.errorResp(w, http.StatusNotFound, "session not found")
 		return
@@ -267,7 +268,7 @@ func (a *API) handleUpdateSession(w http.ResponseWriter, r *http.Request) {
 		existing.IsPinned = *req.IsPinned
 	}
 	if req.Provider != nil || req.Model != nil {
-		if msgs, err := a.Services.Store.ListMessages(id, 1); err == nil && len(msgs) > 0 {
+		if msgs, err := a.Services.Store.ListMessages(r.Context(), id, 1); err == nil && len(msgs) > 0 {
 			if req.Provider != nil && *req.Provider != existing.Provider {
 				a.errorResp(w, http.StatusBadRequest, "provider cannot be changed after the session has messages")
 				return
@@ -294,7 +295,7 @@ func (a *API) handleUpdateSession(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	if err := a.Services.Store.UpdateSession(existing); err != nil {
+	if err := a.Services.Store.UpdateSession(r.Context(), existing); err != nil {
 		a.errorResp(w, http.StatusInternalServerError, err.Error())
 		return
 	}
@@ -311,7 +312,7 @@ func (a *API) handleUpdateSession(w http.ResponseWriter, r *http.Request) {
 
 func (a *API) handleDeleteSession(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
-	if err := a.Services.Store.ArchiveSession(id); err != nil {
+	if err := a.Services.Store.ArchiveSession(r.Context(), id); err != nil {
 		a.errorResp(w, http.StatusInternalServerError, err.Error())
 		return
 	}
@@ -451,7 +452,7 @@ func (a *API) handleCompactSession(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	settings, _ := a.Services.Store.GetUserSettings()
+	settings, _ := a.Services.Store.GetUserSettings(ctx)
 	windowSize := 0
 	if settings != nil {
 		windowSize = settings.ContextWindowTokens
@@ -564,7 +565,7 @@ func (a *API) handleListSessionMessages(w http.ResponseWriter, r *http.Request) 
 				after = n
 			}
 		}
-		page, err := a.Services.Store.ListMessagesAroundID(sessionID, around, before, after)
+		page, err := a.Services.Store.ListMessagesAroundID(r.Context(), sessionID, around, before, after)
 		if err != nil {
 			a.errorResp(w, http.StatusInternalServerError, err.Error())
 			return
@@ -583,7 +584,7 @@ func (a *API) handleListSessionMessages(w http.ResponseWriter, r *http.Request) 
 		}
 	}
 
-	page, err := a.Services.Store.ListMessagesPaginated(sessionID, limit, offset)
+	page, err := a.Services.Store.ListMessagesPaginated(r.Context(), sessionID, limit, offset)
 	if err != nil {
 		a.errorResp(w, http.StatusInternalServerError, err.Error())
 		return
@@ -595,7 +596,7 @@ func (a *API) handleListSessionMessages(w http.ResponseWriter, r *http.Request) 
 
 func (a *API) handleListSessionPluginEnvelopes(w http.ResponseWriter, r *http.Request) {
 	sessionID := r.PathValue("id")
-	insts, err := a.Services.Store.ListEnvelopeInstancesBySession(sessionID)
+	insts, err := a.Services.Store.ListEnvelopeInstancesBySession(r.Context(), sessionID)
 	if err != nil {
 		a.errorResp(w, http.StatusInternalServerError, err.Error())
 		return

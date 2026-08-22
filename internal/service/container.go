@@ -621,7 +621,7 @@ func NewContainer(cfg ContainerConfig) (*Container, error) {
 		tasks = task.NewService(task.ServiceConfig{
 			Local: local,
 			Settings: func() string {
-				us, err := cfg.Store.GetUserSettings()
+				us, err := cfg.Store.GetUserSettings(context.TODO() /* TODO(ctx-sweep): no ctx available at this call site */)
 				if err != nil {
 					return task.BackendLocal
 				}
@@ -673,7 +673,7 @@ func NewContainer(cfg ContainerConfig) (*Container, error) {
 		// Embedder selection: resolve from user settings via selectEmbedder.
 		// No configured embedder = no-op (similarity recall unavailable).
 		var embedder embedcontracts.Embedder
-		us, usErr := cfg.Store.GetUserSettings()
+		us, usErr := cfg.Store.GetUserSettings(context.TODO() /* TODO(ctx-sweep): no ctx available at this call site */)
 		if usErr != nil {
 			slog.Warn("service container: user_settings read failed; embedder disabled", "err", usErr)
 			embeddingStatus = EmbeddingStatusDisabled
@@ -817,7 +817,7 @@ func NewContainer(cfg ContainerConfig) (*Container, error) {
 		// Primary-key fetch instead of the full project list — this
 		// resolver fires on every AssembleSlotSources call (per turn),
 		// so an O(N) scan would scale poorly as the project list grows.
-		project, err := cfg.Store.GetProject(session.ProjectID)
+		project, err := cfg.Store.GetProject(context.TODO() /* TODO(ctx-sweep): no ctx available at this call site */, session.ProjectID)
 		if err != nil {
 			// "Project not found" is non-fatal for slot assembly: the
 			// slot ships empty rather than failing the turn. Other
@@ -853,7 +853,7 @@ func NewContainer(cfg ContainerConfig) (*Container, error) {
 
 		// SessionSource — reads message history, always available.
 		sources = append(sources, contextbroker.NewSessionSource(func(sessionID string, limit int) ([]contextbroker.MessageSummary, error) {
-			msgs, err := cfg.Store.ListMessages(sessionID, limit)
+			msgs, err := cfg.Store.ListMessages(context.TODO() /* TODO(ctx-sweep): no ctx available at this call site */, sessionID, limit)
 			if err != nil {
 				return nil, err
 			}
@@ -897,7 +897,7 @@ func NewContainer(cfg ContainerConfig) (*Container, error) {
 		Classifier:   classifier,
 		Overrides:    overrideStore,
 		SettingsFunc: func() *store.UserSettings {
-			us, err := cfg.Store.GetUserSettings()
+			us, err := cfg.Store.GetUserSettings(context.TODO() /* TODO(ctx-sweep): no ctx available at this call site */)
 			if err != nil {
 				return nil
 			}
@@ -926,7 +926,7 @@ func NewContainer(cfg ContainerConfig) (*Container, error) {
 	// Permission engine. Yolo mode when developer_mode=1 so dev-mode sessions
 	// never hit approval prompts.
 	permissions := permission.NewEngine(permission.ModeDefault, nil)
-	if us, err := cfg.Store.GetUserSettings(); err == nil && us.DeveloperMode {
+	if us, err := cfg.Store.GetUserSettings(context.TODO() /* TODO(ctx-sweep): no ctx available at this call site */); err == nil && us.DeveloperMode {
 		permissions.SetMode(permission.ModeYolo)
 	}
 
@@ -953,7 +953,7 @@ func NewContainer(cfg ContainerConfig) (*Container, error) {
 	// I1 (CW-20260426-0004): inspector service — dev-mode only.
 	// Created unconditionally but only populated/queried when developer_mode=true.
 	var inspectorSvc *inspectsvc.Service
-	if us, err := cfg.Store.GetUserSettings(); err == nil && us.DeveloperMode {
+	if us, err := cfg.Store.GetUserSettings(catalogCtx); err == nil && us.DeveloperMode {
 		inspectorSvc = inspectsvc.NewService()
 		slog.Info("service container: inspector service enabled (developer_mode=true)")
 	}
@@ -980,7 +980,9 @@ func NewContainer(cfg ContainerConfig) (*Container, error) {
 		reflexEngine.SetPluginHooks(cfg.Plugins)
 	}
 	reflexEngine.Executor.Halt = func(ctx context.Context, sessionID, reason string, evidence map[string]interface{}) error {
-		if err := cfg.Store.MarkSessionHalted(sessionID, reason); err != nil {
+		// Outcome bookkeeping must survive cancellation of the halt operation it records.
+		persistCtx := context.WithoutCancel(ctx)
+		if err := cfg.Store.MarkSessionHalted(persistCtx, sessionID, reason); err != nil {
 			return err
 		}
 		metaBlob, _ := json.Marshal(map[string]interface{}{
@@ -988,7 +990,7 @@ func NewContainer(cfg ContainerConfig) (*Container, error) {
 			"reason":   reason,
 			"evidence": evidence,
 		})
-		cfg.Store.LogEvent(sessionID, "session_halted", "reflex", "reflex-fired halt", string(metaBlob))
+		cfg.Store.LogEvent(persistCtx, sessionID, "session_halted", "reflex", "reflex-fired halt", string(metaBlob))
 		return nil
 	}
 	// TASKS/scheduling/07-wire-add-schedule-reflex.md: closes
@@ -1038,7 +1040,7 @@ func NewContainer(cfg ContainerConfig) (*Container, error) {
 		PathGrants:       pathGrants,
 		Streams:          streams,
 		CLIAdapters:      cliAdapters,
-		DBPath:           cfg.Store.DBPath(),
+		DBPath:           cfg.Store.DBPath(catalogCtx),
 		MCP:              cfg.MCP,
 		Providers:        cfg.Providers,
 		APIBaseURL:       cfg.APIBaseURL,
@@ -1087,7 +1089,7 @@ func NewContainer(cfg ContainerConfig) (*Container, error) {
 		ModelCatalog:       modelCatalog,
 		SessionEventWriter: messagingSvc,
 		SubagentInbox:      messagingSvc,
-		DBPath:             cfg.Store.DBPath(),
+		DBPath:             cfg.Store.DBPath(catalogCtx),
 		AdapterRegistry:    adapterRegistry,
 		// I1 (CW-20260426-0004): inspector — nil when developer_mode=false.
 		Inspector: inspectorSvc,
@@ -1338,7 +1340,7 @@ func NewContainer(cfg ContainerConfig) (*Container, error) {
 		utilityProvider := cfg.UtilityProvider
 		utilityModel := cfg.UtilityModel
 		if utilityProvider == "" || utilityModel == "" {
-			if rp, rm, err := cfg.Store.ResolveProviderAndModel(utilityProvider, utilityModel); err == nil {
+			if rp, rm, err := cfg.Store.ResolveProviderAndModel(catalogCtx, utilityProvider, utilityModel); err == nil {
 				utilityProvider = rp
 				utilityModel = rm
 			}
@@ -1577,7 +1579,7 @@ func (c *Container) Shutdown() {
 // buildResultCache creates a ResultCache from UserSettings or defaults.
 func buildResultCache(s *store.Store) *tool.ResultCache {
 	cfg := tool.ResultCacheConfig{}
-	if us, err := s.GetUserSettings(); err == nil {
+	if us, err := s.GetUserSettings(context.TODO() /* TODO(ctx-sweep): no ctx available at this call site */); err == nil {
 		cfg.SoftTruncBytes = us.ToolResultSoftTruncBytes
 		cfg.HardCapBytes = us.ToolResultHardCapBytes
 		cfg.CacheTTLSeconds = us.ToolResultCacheTTLSeconds
@@ -1656,7 +1658,7 @@ func syncCatalogToRegistry(c *modelsdev.Client, st *store.Store) {
 	if st == nil {
 		return
 	}
-	if n, err := st.SyncModelsFromRegistry(); err != nil {
+	if n, err := st.SyncModelsFromRegistry(context.TODO() /* TODO(ctx-sweep): no ctx available at this call site */); err != nil {
 		slog.Warn("service container: models table sync from catalog failed", "err", err)
 	} else {
 		slog.Debug("service container: models table synced from catalog", "rows", n)

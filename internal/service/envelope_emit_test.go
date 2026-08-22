@@ -17,9 +17,13 @@ func TestApprovalEmitter_PersistsAndStreams(t *testing.T) {
 	if err != nil {
 		t.Fatalf("store.New: %v", err)
 	}
-	t.Cleanup(func() { _ = s.Close() })
+	t.Cleanup(func() {
+		_ = s.Close(context.
 
-	// Seed the session row required by envelope_instances FK.
+			// Seed the session row required by envelope_instances FK.
+			Background())
+	})
+
 	sessionID := "sess-emit-1"
 	if _, err := s.DB.Exec(
 		`INSERT INTO sessions (id, title, short_code, created_at) VALUES (?, ?, ?, CURRENT_TIMESTAMP)`,
@@ -52,7 +56,7 @@ func TestApprovalEmitter_PersistsAndStreams(t *testing.T) {
 	}
 
 	// Persistence: row exists with correct type + json.
-	inst, err := s.GetEnvelopeInstance(id)
+	inst, err := s.GetEnvelopeInstance(context.Background(), id)
 	if err != nil {
 		t.Fatalf("get instance: %v", err)
 	}

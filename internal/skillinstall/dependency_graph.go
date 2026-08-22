@@ -15,6 +15,7 @@ package skillinstall
 // to this task ("real cycle detection against already-installed
 // packages... is TASKS/skills/07's job, not this one's").
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"strings"
@@ -134,7 +135,7 @@ func checkDependencyGraph(index IndexStore, slug string, deps []string, maxDepth
 		}
 		visited[current] = true
 
-		sk, err := index.GetSkillBySlug(current)
+		sk, err := index.GetSkillBySlug(context.TODO() /* TODO(ctx-sweep): no ctx available at this call site */, current)
 		if err != nil {
 			return fmt.Errorf("skillinstall: dependency graph check: lookup %q: %w", current, err)
 		}

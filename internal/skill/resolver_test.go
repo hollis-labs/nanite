@@ -33,7 +33,7 @@ func newResolverTestStore(t *testing.T) *store.Store {
 	if err != nil {
 		t.Fatalf("store.New: %v", err)
 	}
-	t.Cleanup(func() { _ = s.Close() })
+	t.Cleanup(func() { _ = s.Close(context.Background()) })
 	return s
 }
 
@@ -77,7 +77,7 @@ func installFixture(t *testing.T, idx *store.Store, vendor *skillvendor.Store, d
 		}
 		sk.DeclaredDependencies = string(depsJSON)
 	}
-	if err := idx.CreateSkill(sk); err != nil {
+	if err := idx.CreateSkill(context.Background(), sk); err != nil {
 		t.Fatalf("CreateSkill(%s): %v", dir, err)
 	}
 	return sk
@@ -88,7 +88,7 @@ func TestResolveSkillParameters_DynamicBindingResolvesEndToEnd(t *testing.T) {
 	ctx := context.Background()
 
 	agent := &store.AgentProfile{Name: "Resolver Test Agent", Slug: "resolver-test-agent", SystemPrompt: "test"}
-	if err := s.CreateAgent(agent); err != nil {
+	if err := s.CreateAgent(context.Background(), agent); err != nil {
 		t.Fatalf("CreateAgent: %v", err)
 	}
 
@@ -123,7 +123,7 @@ func TestResolveSkillParameters_StaticArgOverridesDynamicBinding(t *testing.T) {
 	ctx := context.Background()
 
 	agent := &store.AgentProfile{Name: "Resolver Test Agent 2", Slug: "resolver-test-agent-2", SystemPrompt: "test"}
-	if err := s.CreateAgent(agent); err != nil {
+	if err := s.CreateAgent(context.Background(), agent); err != nil {
 		t.Fatalf("CreateAgent: %v", err)
 	}
 	if _, err := s.InsertAgentContextResolver(ctx, store.AgentContextResolver{
@@ -225,7 +225,7 @@ func TestResolveSkillParameters_MissingRequiredParameter_UnconfiguredResolverSlo
 	s := newResolverTestStore(t)
 	ctx := context.Background()
 	agent := &store.AgentProfile{Name: "Resolver Test Agent 3", Slug: "resolver-test-agent-3", SystemPrompt: "test"}
-	if err := s.CreateAgent(agent); err != nil {
+	if err := s.CreateAgent(context.Background(), agent); err != nil {
 		t.Fatalf("CreateAgent: %v", err)
 	}
 
@@ -281,7 +281,7 @@ func TestResolveSkillParameters_ResolverRowFailureAbortsWholeCall(t *testing.T) 
 	s := newResolverTestStore(t)
 	ctx := context.Background()
 	agent := &store.AgentProfile{Name: "Resolver Test Agent 4", Slug: "resolver-test-agent-4", SystemPrompt: "test"}
-	if err := s.CreateAgent(agent); err != nil {
+	if err := s.CreateAgent(context.Background(), agent); err != nil {
 		t.Fatalf("CreateAgent: %v", err)
 	}
 	if _, err := s.InsertAgentContextResolver(ctx, store.AgentContextResolver{

@@ -82,7 +82,7 @@ func newArtifactTestAPI(t *testing.T) (*API, string) {
 	if err != nil {
 		t.Fatalf("store.New: %v", err)
 	}
-	t.Cleanup(func() { s.Close() })
+	t.Cleanup(func() { s.Close(context.Background()) })
 
 	artifactsRoot := filepath.Join(dir, "artifacts")
 	if err := os.MkdirAll(artifactsRoot, 0o755); err != nil {
@@ -182,7 +182,7 @@ func TestDownloadDoesNotLeakAbsoluteEscapingPath(t *testing.T) {
 		SizeBytes:   int64(len("SENSITIVE-ABC")),
 		StoragePath: outside, // absolute — pathsafe re-roots under artifactsRoot
 	}
-	if err := a.Services.Store.CreateArtifact(art); err != nil {
+	if err := a.Services.Store.CreateArtifact(context.Background(), art); err != nil {
 		t.Fatalf("create artifact: %v", err)
 	}
 
@@ -212,7 +212,7 @@ func TestDownloadRejectsRelativeTraversalStoragePath(t *testing.T) {
 		SizeBytes:   0,
 		StoragePath: "../../etc/passwd",
 	}
-	if err := a.Services.Store.CreateArtifact(art); err != nil {
+	if err := a.Services.Store.CreateArtifact(context.Background(), art); err != nil {
 		t.Fatalf("create artifact: %v", err)
 	}
 

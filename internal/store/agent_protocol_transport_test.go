@@ -6,7 +6,10 @@ package store
 // architecture/17-acp.md calls for. Mirrors agents_composition_test.go's
 // existing RoleID/ModelID/RuntimeKind test shapes.
 
-import "testing"
+import (
+	"context"
+	"testing"
+)
 
 // TestCreateAgent_ProtocolTransportNullableRoundTrip confirms the two new
 // nullable columns round-trip correctly both when left unset (empty string
@@ -15,10 +18,10 @@ func TestCreateAgent_ProtocolTransportNullableRoundTrip(t *testing.T) {
 	s := newTestStore(t)
 
 	unset := &AgentProfile{Name: "Native", Slug: "native-protocol", SystemPrompt: "x"}
-	if err := s.CreateAgent(unset); err != nil {
+	if err := s.CreateAgent(context.Background(), unset); err != nil {
 		t.Fatalf("CreateAgent(unset): %v", err)
 	}
-	got, err := s.GetAgent(unset.ID)
+	got, err := s.GetAgent(context.Background(), unset.ID)
 	if err != nil {
 		t.Fatalf("GetAgent(unset): %v", err)
 	}
@@ -33,10 +36,10 @@ func TestCreateAgent_ProtocolTransportNullableRoundTrip(t *testing.T) {
 		Name: "ACP OpenCode", Slug: "acp-opencode", SystemPrompt: "x",
 		DefaultProvider: "opencode", Protocol: "acp", Transport: "stdio",
 	}
-	if err := s.CreateAgent(acpAgent); err != nil {
+	if err := s.CreateAgent(context.Background(), acpAgent); err != nil {
 		t.Fatalf("CreateAgent(acp): %v", err)
 	}
-	got, err = s.GetAgent(acpAgent.ID)
+	got, err = s.GetAgent(context.Background(), acpAgent.ID)
 	if err != nil {
 		t.Fatalf("GetAgent(acp): %v", err)
 	}
@@ -58,10 +61,10 @@ func TestCreateAgent_ProtocolTransportNullableRoundTrip(t *testing.T) {
 
 	// UpdateAgent must round-trip the same two columns.
 	got.Transport = "tcp"
-	if err := s.UpdateAgent(got); err != nil {
+	if err := s.UpdateAgent(context.Background(), got); err != nil {
 		t.Fatalf("UpdateAgent(transport=tcp): %v", err)
 	}
-	after, err := s.GetAgent(acpAgent.ID)
+	after, err := s.GetAgent(context.Background(), acpAgent.ID)
 	if err != nil {
 		t.Fatalf("GetAgent(after update): %v", err)
 	}
@@ -79,7 +82,7 @@ func TestCreateAgent_ProtocolTransportNullableRoundTrip(t *testing.T) {
 func TestCreateAgent_ProtocolInvalidRejected(t *testing.T) {
 	s := newTestStore(t)
 	a := &AgentProfile{Name: "Bad", Slug: "bad-protocol", SystemPrompt: "x", Protocol: "made-up"}
-	if err := s.CreateAgent(a); err == nil {
+	if err := s.CreateAgent(context.Background(), a); err == nil {
 		t.Fatal("CreateAgent with protocol='made-up' should have failed validation")
 	}
 }
@@ -103,7 +106,7 @@ func TestCreateAgent_TransportRequiresACPProtocol(t *testing.T) {
 			Name: "Bad Transport", Slug: "bad-transport-" + c.name, SystemPrompt: "x",
 			Protocol: c.protocol, Transport: "stdio",
 		}
-		if err := s.CreateAgent(a); err == nil {
+		if err := s.CreateAgent(context.Background(), a); err == nil {
 			t.Errorf("%s: CreateAgent with transport set but protocol=%q should have failed validation", c.name, c.protocol)
 		}
 	}
@@ -118,21 +121,21 @@ func TestUpdateAgentACPConfig_DirectWrite(t *testing.T) {
 	s := newTestStore(t)
 
 	untouched := &AgentProfile{Name: "Untouched", Slug: "untouched", SystemPrompt: "x"}
-	if err := s.CreateAgent(untouched); err != nil {
+	if err := s.CreateAgent(context.Background(), untouched); err != nil {
 		t.Fatalf("CreateAgent(untouched): %v", err)
 	}
 
 	target := &AgentProfile{Name: "Target", Slug: "acp-target", SystemPrompt: "x", DefaultProvider: "copilot"}
-	if err := s.CreateAgent(target); err != nil {
+	if err := s.CreateAgent(context.Background(), target); err != nil {
 		t.Fatalf("CreateAgent(target): %v", err)
 	}
 
 	protocol, transport := "acp", "tcp"
-	if err := s.UpdateAgentACPConfig(target.ID, &protocol, &transport); err != nil {
+	if err := s.UpdateAgentACPConfig(context.Background(), target.ID, &protocol, &transport); err != nil {
 		t.Fatalf("UpdateAgentACPConfig: %v", err)
 	}
 
-	got, err := s.GetAgent(target.ID)
+	got, err := s.GetAgent(context.Background(), target.ID)
 	if err != nil {
 		t.Fatalf("GetAgent(target): %v", err)
 	}
@@ -143,7 +146,7 @@ func TestUpdateAgentACPConfig_DirectWrite(t *testing.T) {
 		t.Errorf("target RuntimeKind = %q, want an existing value ('cli' or 'api'), no new value introduced", got.RuntimeKind)
 	}
 
-	other, err := s.GetAgent(untouched.ID)
+	other, err := s.GetAgent(context.Background(), untouched.ID)
 	if err != nil {
 		t.Fatalf("GetAgent(untouched): %v", err)
 	}
@@ -152,10 +155,10 @@ func TestUpdateAgentACPConfig_DirectWrite(t *testing.T) {
 	}
 
 	// nil pointers leave both columns untouched.
-	if err := s.UpdateAgentACPConfig(target.ID, nil, nil); err != nil {
+	if err := s.UpdateAgentACPConfig(context.Background(), target.ID, nil, nil); err != nil {
 		t.Fatalf("UpdateAgentACPConfig(nil, nil): %v", err)
 	}
-	still, err := s.GetAgent(target.ID)
+	still, err := s.GetAgent(context.Background(), target.ID)
 	if err != nil {
 		t.Fatalf("GetAgent(target, after nil-nil update): %v", err)
 	}
@@ -165,10 +168,10 @@ func TestUpdateAgentACPConfig_DirectWrite(t *testing.T) {
 
 	// Explicit empty-string pointers clear both columns back to "native".
 	empty := ""
-	if err := s.UpdateAgentACPConfig(target.ID, &empty, &empty); err != nil {
+	if err := s.UpdateAgentACPConfig(context.Background(), target.ID, &empty, &empty); err != nil {
 		t.Fatalf("UpdateAgentACPConfig(clear): %v", err)
 	}
-	cleared, err := s.GetAgent(target.ID)
+	cleared, err := s.GetAgent(context.Background(), target.ID)
 	if err != nil {
 		t.Fatalf("GetAgent(target, after clear): %v", err)
 	}
@@ -183,11 +186,11 @@ func TestUpdateAgentACPConfig_DirectWrite(t *testing.T) {
 func TestUpdateAgentACPConfig_RejectsInvalidTransportWithoutACP(t *testing.T) {
 	s := newTestStore(t)
 	target := &AgentProfile{Name: "Target", Slug: "acp-invalid-target", SystemPrompt: "x"}
-	if err := s.CreateAgent(target); err != nil {
+	if err := s.CreateAgent(context.Background(), target); err != nil {
 		t.Fatalf("CreateAgent: %v", err)
 	}
 	transport := "stdio"
-	if err := s.UpdateAgentACPConfig(target.ID, nil, &transport); err == nil {
+	if err := s.UpdateAgentACPConfig(context.Background(), target.ID, nil, &transport); err == nil {
 		t.Fatal("UpdateAgentACPConfig setting transport without protocol='acp' should have failed validation")
 	}
 }

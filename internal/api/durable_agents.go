@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
 	"errors"
@@ -63,7 +64,7 @@ func (a *API) handleCreateDurableAgent(w http.ResponseWriter, r *http.Request) {
 // still surfaces the more specific "profile not found" diagnostic rather
 // than a generic slug-format rejection.
 func (a *API) saveManagedDurableInstance(inst *store.DurableAgentInstance, archived bool) (*store.DurableAgentInstance, error) {
-	profile, err := a.Services.Store.GetAgent(inst.ProfileID)
+	profile, err := a.Services.Store.GetAgent(context.TODO() /* TODO(ctx-sweep): no ctx available at this call site */, inst.ProfileID)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			// CW-20260815-0009: this profile ID resolves via file discovery

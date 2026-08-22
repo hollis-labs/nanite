@@ -54,7 +54,7 @@ func TestMigrate145SeedsResumeLoopRunActionKind(t *testing.T) {
 	assertGooseHasNothingPending(t, s)
 
 	// Simulated restart: a second full migrate() must be a clean no-op.
-	if err := s.migrate(); err != nil {
+	if err := s.migrate(context.Background()); err != nil {
 		t.Fatalf("re-migrate after 145 already applied: %v", err)
 	}
 }
@@ -241,7 +241,7 @@ func TestRealBackupAgentReflexesSurviveResumeLoopRunMigration(t *testing.T) {
 	if err != nil {
 		t.Fatalf("open+migrate scratch copy of real backup db: %v", err)
 	}
-	defer rs.Close()
+	defer rs.Close(context.Background())
 
 	type reflexRow struct{ id, actionKind, name string }
 	var rows []reflexRow

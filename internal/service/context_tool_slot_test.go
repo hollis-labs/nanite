@@ -39,12 +39,12 @@ func newStubbedContextService(t *testing.T, classifier intent.Classifier, overri
 	if err != nil {
 		t.Fatalf("store.New: %v", err)
 	}
-	if err := s.Seed(); err != nil {
+	if err := s.Seed(context.Background()); err != nil {
 		t.Fatalf("seed: %v", err)
 	}
 	if !cacheEnabled {
 		// Turn off the default (enabled=1) to exercise the S3a passthrough.
-		if err := s.UpdateUserSettings(&store.UserSettings{ToolCacheEnabled: false}); err != nil {
+		if err := s.UpdateUserSettings(context.Background(), &store.UserSettings{ToolCacheEnabled: false}); err != nil {
 			t.Fatalf("UpdateUserSettings: %v", err)
 		}
 	}
@@ -58,7 +58,7 @@ func newStubbedContextService(t *testing.T, classifier intent.Classifier, overri
 		Classifier:   classifier,
 		Overrides:    overrides,
 		SettingsFunc: func() *store.UserSettings {
-			us, err := s.GetUserSettings()
+			us, err := s.GetUserSettings(context.Background())
 			if err != nil {
 				return nil
 			}
@@ -71,10 +71,10 @@ func newStubbedContextService(t *testing.T, classifier intent.Classifier, overri
 func seedSession(t *testing.T, s *store.Store, userTurn string) (*store.Session, *store.AgentProfile) {
 	t.Helper()
 	sess := &store.Session{ID: "s-s3b-" + userTurn[:min(8, len(userTurn))], Title: "S3bTest"}
-	if err := s.CreateSession(sess); err != nil {
+	if err := s.CreateSession(context.Background(), sess); err != nil {
 		t.Fatalf("CreateSession: %v", err)
 	}
-	if err := s.CreateMessage(&store.Message{
+	if err := s.CreateMessage(context.Background(), &store.Message{
 		ID:        "m-" + sess.ID,
 		SessionID: sess.ID,
 		Role:      "user",

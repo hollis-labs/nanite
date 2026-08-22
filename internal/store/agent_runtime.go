@@ -1,6 +1,7 @@
 package store
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
 	"errors"
@@ -60,7 +61,7 @@ const agentRuntimeColumns = `id, agent_profile, provider, runtime_kind, mode, wo
 // Idempotent on conflict: existing id triggers an update of the mutable
 // fields rather than failing — Boot may be retried on the same id when
 // transient setup errors get cleared upstream.
-func (s *Store) CreateAgentRuntimeRow(row *AgentRuntimeRow) error {
+func (s *Store) CreateAgentRuntimeRow(ctx context.Context, row *AgentRuntimeRow) error {
 	if row == nil {
 		return errors.New("CreateAgentRuntimeRow: nil row")
 	}
@@ -78,7 +79,7 @@ func (s *Store) CreateAgentRuntimeRow(row *AgentRuntimeRow) error {
 		row.RuntimeKind = "unknown"
 	}
 
-	_, err := s.DB.Exec(
+	_, err := s.DB.ExecContext(ctx,
 		`INSERT INTO agent_runtime (`+agentRuntimeColumns+`)
 		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		 ON CONFLICT(id) DO UPDATE SET
@@ -108,8 +109,8 @@ func (s *Store) CreateAgentRuntimeRow(row *AgentRuntimeRow) error {
 
 // MarkAgentRuntimeFailed transitions row.id to state="failed" with reason.
 // No-op on unknown id — prevents ghost rows from blocking happy-path Stop.
-func (s *Store) MarkAgentRuntimeFailed(id, reason string) error {
-	_, err := s.DB.Exec(
+func (s *Store) MarkAgentRuntimeFailed(ctx context.Context, id, reason string) error {
+	_, err := s.DB.ExecContext(ctx,
 		`UPDATE agent_runtime SET state = 'failed', failure_reason = ?, updated_at = ? WHERE id = ?`,
 		reason, time.Now().UTC().Format(time.RFC3339Nano), id,
 	)
@@ -121,8 +122,8 @@ func (s *Store) MarkAgentRuntimeFailed(id, reason string) error {
 
 // SetAgentRuntimeProviderSessionID records the adapter-supplied session id
 // (claude's session_id, codex's, etc.) as soon as the runtime reports it.
-func (s *Store) SetAgentRuntimeProviderSessionID(id, providerSessionID string) error {
-	_, err := s.DB.Exec(
+func (s *Store) SetAgentRuntimeProviderSessionID(ctx context.Context, id, providerSessionID string) error {
+	_, err := s.DB.ExecContext(ctx,
 		`UPDATE agent_runtime SET provider_session_id = ?, updated_at = ? WHERE id = ?`,
 		providerSessionID, time.Now().UTC().Format(time.RFC3339Nano), id,
 	)
@@ -138,9 +139,9 @@ func (s *Store) SetAgentRuntimeProviderSessionID(id, providerSessionID string) e
 // provider session after a host restart: the agent_runtime row persists (the
 // reaper only marks it orphaned), so the captured provider session id survives.
 // MUST be read BEFORE re-boot — CreateRuntimeRow upserts and clears the column.
-func (s *Store) AgentRuntimeProviderSessionID(id string) (string, error) {
+func (s *Store) AgentRuntimeProviderSessionID(ctx context.Context, id string) (string, error) {
 	var providerSessionID string
-	err := s.DB.QueryRow(
+	err := s.DB.QueryRowContext(ctx,
 		`SELECT COALESCE(provider_session_id, '') FROM agent_runtime WHERE id = ?`, id,
 	).Scan(&providerSessionID)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -155,8 +156,8 @@ func (s *Store) AgentRuntimeProviderSessionID(id string) (string, error) {
 // SetAgentRuntimeState transitions the row's state column. Used by the
 // state-sink adapter wired into agentsessions.Manager — every lib-emitted
 // state event (launching → running → done|failed) lands here.
-func (s *Store) SetAgentRuntimeState(id, state string, pid int) error {
-	_, err := s.DB.Exec(
+func (s *Store) SetAgentRuntimeState(ctx context.Context, id, state string, pid int) error {
+	_, err := s.DB.ExecContext(ctx,
 		`UPDATE agent_runtime SET state = ?, pid = ?, updated_at = ? WHERE id = ?`,
 		state, pid, time.Now().UTC().Format(time.RFC3339Nano), id,
 	)
@@ -169,8 +170,8 @@ func (s *Store) SetAgentRuntimeState(id, state string, pid int) error {
 // MarkAgentRuntimeOrphaned transitions the row to state="orphaned" with reason.
 // orphansweep.SweepOrphans calls this at daemon bootstrap for rows whose persisted PID
 // is no longer alive.
-func (s *Store) MarkAgentRuntimeOrphaned(id, reason string) error {
-	_, err := s.DB.Exec(
+func (s *Store) MarkAgentRuntimeOrphaned(ctx context.Context, id, reason string) error {
+	_, err := s.DB.ExecContext(ctx,
 		`UPDATE agent_runtime SET state = 'orphaned', failure_reason = ?, updated_at = ? WHERE id = ?`,
 		reason, time.Now().UTC().Format(time.RFC3339Nano), id,
 	)
@@ -182,9 +183,9 @@ func (s *Store) MarkAgentRuntimeOrphaned(id, reason string) error {
 
 // ListRunningAgentRuntimeRows returns rows in launching/running state for
 // orphansweep.SweepOrphans reconciliation at daemon bootstrap.
-func (s *Store) ListRunningAgentRuntimeRows() ([]*AgentRuntimeRow, error) {
-	rows, err := s.DB.Query(
-		`SELECT ` + agentRuntimeColumns + ` FROM agent_runtime
+func (s *Store) ListRunningAgentRuntimeRows(ctx context.Context) ([]*AgentRuntimeRow, error) {
+	rows, err := s.DB.QueryContext(ctx,
+		`SELECT `+agentRuntimeColumns+` FROM agent_runtime
 		 WHERE state IN ('launching','running') ORDER BY started_at`,
 	)
 	if err != nil {
@@ -203,8 +204,8 @@ func (s *Store) ListRunningAgentRuntimeRows() ([]*AgentRuntimeRow, error) {
 	return out, rows.Err()
 }
 
-func (s *Store) ListAgentRuntimeRowsForSession(sessionID string) ([]*AgentRuntimeRow, error) {
-	rows, err := s.DB.Query(
+func (s *Store) ListAgentRuntimeRowsForSession(ctx context.Context, sessionID string) ([]*AgentRuntimeRow, error) {
+	rows, err := s.DB.QueryContext(ctx,
 		`SELECT `+agentRuntimeColumns+` FROM agent_runtime
 		 WHERE parent_session_id = ? ORDER BY started_at DESC`, sessionID,
 	)
@@ -242,12 +243,12 @@ func (s *Store) ListAgentRuntimeRowsForSession(sessionID string) ([]*AgentRuntim
 // id will write an empty provider_session_id; that is a degenerate (not
 // resumable) checkpoint, not an error — the caller is expected to drive at
 // least one turn first (see spike-task-breakdown.md §5 "capture timing").
-func (s *Store) SaveAgentRuntimeCheckpoint(runtimeID string) (string, error) {
+func (s *Store) SaveAgentRuntimeCheckpoint(ctx context.Context, runtimeID string) (string, error) {
 	if runtimeID == "" {
 		return "", errors.New("SaveAgentRuntimeCheckpoint: empty runtimeID")
 	}
 	var providerSessionID string
-	err := s.DB.QueryRow(
+	err := s.DB.QueryRowContext(ctx,
 		`SELECT provider_session_id FROM agent_runtime WHERE id = ?`, runtimeID,
 	).Scan(&providerSessionID)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -257,7 +258,7 @@ func (s *Store) SaveAgentRuntimeCheckpoint(runtimeID string) (string, error) {
 		return "", fmt.Errorf("SaveAgentRuntimeCheckpoint: read runtime %s: %w", runtimeID, err)
 	}
 	checkpointID := ulid.Make().String()
-	_, err = s.DB.Exec(
+	_, err = s.DB.ExecContext(ctx,
 		`INSERT INTO agent_runtime_checkpoints (id, runtime_id, provider_session_id, captured_at)
 		 VALUES (?, ?, ?, ?)`,
 		checkpointID, runtimeID, providerSessionID,
@@ -271,8 +272,8 @@ func (s *Store) SaveAgentRuntimeCheckpoint(runtimeID string) (string, error) {
 
 // GetAgentRuntimeCheckpoint loads the resume payload for a checkpoint id.
 // Returns ErrAgentRuntimeCheckpointNotFound when the id is unknown.
-func (s *Store) GetAgentRuntimeCheckpoint(id string) (*AgentRuntimeCheckpoint, error) {
-	row := s.DB.QueryRow(
+func (s *Store) GetAgentRuntimeCheckpoint(ctx context.Context, id string) (*AgentRuntimeCheckpoint, error) {
+	row := s.DB.QueryRowContext(ctx,
 		`SELECT id, runtime_id, provider_session_id, captured_at
 		 FROM agent_runtime_checkpoints WHERE id = ?`, id,
 	)
@@ -302,12 +303,12 @@ func (s *Store) GetAgentRuntimeCheckpoint(id string) (*AgentRuntimeCheckpoint, e
 // with "No conversation found". Returns the workdir for the checkpoint's
 // originating runtime; ErrAgentRuntimeCheckpointNotFound when the
 // checkpoint id is unknown.
-func (s *Store) GetCheckpointBootDir(checkpointID string) (string, error) {
+func (s *Store) GetCheckpointBootDir(ctx context.Context, checkpointID string) (string, error) {
 	if checkpointID == "" {
 		return "", errors.New("GetCheckpointBootDir: empty checkpointID")
 	}
 	var workdir string
-	err := s.DB.QueryRow(
+	err := s.DB.QueryRowContext(ctx,
 		`SELECT r.workdir
 		   FROM agent_runtime_checkpoints c
 		   JOIN agent_runtime r ON r.id = c.runtime_id

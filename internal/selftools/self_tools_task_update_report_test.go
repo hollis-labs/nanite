@@ -146,7 +146,7 @@ func TestCallTaskUpdateReport_FullChain_RenderCardAndInternalAPICall(t *testing.
 
 	// (c) exactly two event_log rows at category="selftool_reaction",
 	// correctly distinguishing the two kinds.
-	events, err := s.ListEvents(reactions.CategorySelftoolReaction, 50)
+	events, err := s.ListEvents(context.Background(), reactions.CategorySelftoolReaction, 50)
 	if err != nil {
 		t.Fatalf("ListEvents(selftool_reaction): %v", err)
 	}
@@ -244,7 +244,7 @@ func TestCallTaskUpdateReport_NoReactionsConfigured_StillConfirmsAndNoEvents(t *
 		t.Errorf("no render_card reaction configured, but result carries a marker: %q", result.Content[0].Text)
 	}
 
-	events, err := s.ListEvents(reactions.CategorySelftoolReaction, 50)
+	events, err := s.ListEvents(context.Background(), reactions.CategorySelftoolReaction, 50)
 	if err != nil {
 		t.Fatalf("ListEvents(selftool_reaction): %v", err)
 	}

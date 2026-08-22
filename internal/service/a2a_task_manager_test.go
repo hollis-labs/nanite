@@ -20,7 +20,7 @@ func newA2ATaskManagerTestStore(t *testing.T) *store.Store {
 	if err != nil {
 		t.Fatalf("store.New: %v", err)
 	}
-	t.Cleanup(func() { s.Close() })
+	t.Cleanup(func() { s.Close(context.Background()) })
 	return s
 }
 
@@ -179,7 +179,7 @@ func TestTaskManager_deriveFromWorkflowRun(t *testing.T) {
 				DefinitionName: "test-workflow",
 				Status:         tt.runStatus,
 			}
-			if err := st.CreateWorkflowRun(run); err != nil {
+			if err := st.CreateWorkflowRun(context.Background(), run); err != nil {
 				t.Fatalf("failed to create workflow run: %v", err)
 			}
 
@@ -239,7 +239,7 @@ func TestTaskManager_deriveFromDurableInstance(t *testing.T) {
 			st := newA2ATaskManagerTestStore(t)
 
 			profile := &store.AgentProfile{Name: "A2A Test Agent", Slug: "a2a-test-agent", SystemPrompt: "x"}
-			if err := st.CreateAgent(profile); err != nil {
+			if err := st.CreateAgent(context.Background(), profile); err != nil {
 				t.Fatalf("CreateAgent: %v", err)
 			}
 
@@ -252,7 +252,7 @@ func TestTaskManager_deriveFromDurableInstance(t *testing.T) {
 				ProfileID:      profile.ID,
 				Status:         tt.instanceStatus,
 			}
-			if err := st.CreateDurableAgentInstance(inst); err != nil {
+			if err := st.CreateDurableAgentInstance(context.Background(), inst); err != nil {
 				t.Fatalf("failed to create durable instance: %v", err)
 			}
 
@@ -339,7 +339,7 @@ func TestTaskManager_CancelTask_InstanceTarget_Success(t *testing.T) {
 	st := newA2ATaskManagerTestStore(t)
 
 	profile := &store.AgentProfile{Name: "A2A Cancel Test Agent", Slug: "a2a-cancel-test-agent", SystemPrompt: "x"}
-	if err := st.CreateAgent(profile); err != nil {
+	if err := st.CreateAgent(context.Background(), profile); err != nil {
 		t.Fatalf("CreateAgent: %v", err)
 	}
 	inst := &store.DurableAgentInstance{
@@ -350,7 +350,7 @@ func TestTaskManager_CancelTask_InstanceTarget_Success(t *testing.T) {
 		ProfileID:      profile.ID,
 		Status:         store.DurableAgentStatusActive,
 	}
-	if err := st.CreateDurableAgentInstance(inst); err != nil {
+	if err := st.CreateDurableAgentInstance(context.Background(), inst); err != nil {
 		t.Fatalf("CreateDurableAgentInstance: %v", err)
 	}
 
@@ -362,7 +362,7 @@ func TestTaskManager_CancelTask_InstanceTarget_Success(t *testing.T) {
 		State:                  a2a.TaskStateWorking,
 		DurableAgentInstanceID: sql.NullString{String: inst.ID, Valid: true},
 	}
-	if err := st.CreateA2ATask(task); err != nil {
+	if err := st.CreateA2ATask(context.Background(), task); err != nil {
 		t.Fatalf("CreateA2ATask: %v", err)
 	}
 
@@ -386,7 +386,7 @@ func TestTaskManager_CancelTask_InstanceTarget_Success(t *testing.T) {
 	}
 
 	// Verify persisted.
-	persisted, err := st.GetA2ATask(task.ID)
+	persisted, err := st.GetA2ATask(context.Background(), task.ID)
 	if err != nil {
 		t.Fatalf("GetA2ATask: %v", err)
 	}
@@ -403,7 +403,7 @@ func TestTaskManager_CancelTask_WorkflowTarget_Unsupported(t *testing.T) {
 	st := newA2ATaskManagerTestStore(t)
 
 	runID := "run_cancel_test"
-	if err := st.CreateWorkflowRun(&store.WorkflowRunRow{
+	if err := st.CreateWorkflowRun(context.Background(), &store.WorkflowRunRow{
 		ID:             runID,
 		DefinitionName: "test-workflow",
 		Status:         "running",
@@ -419,7 +419,7 @@ func TestTaskManager_CancelTask_WorkflowTarget_Unsupported(t *testing.T) {
 		State:         a2a.TaskStateWorking,
 		WorkflowRunID: sql.NullString{String: runID, Valid: true},
 	}
-	if err := st.CreateA2ATask(task); err != nil {
+	if err := st.CreateA2ATask(context.Background(), task); err != nil {
 		t.Fatalf("CreateA2ATask: %v", err)
 	}
 
@@ -434,7 +434,7 @@ func TestTaskManager_CancelTask_WorkflowTarget_Unsupported(t *testing.T) {
 	}
 
 	// The task must not have been mutated into a fake 'canceled' state.
-	persisted, err := st.GetA2ATask(task.ID)
+	persisted, err := st.GetA2ATask(context.Background(), task.ID)
 	if err != nil {
 		t.Fatalf("GetA2ATask: %v", err)
 	}
@@ -473,7 +473,7 @@ func TestTaskManager_CancelTask_AlreadyCanceled_IsIdempotent(t *testing.T) {
 		Message:    "test message",
 		State:      a2a.TaskStateCanceled,
 	}
-	if err := st.CreateA2ATask(task); err != nil {
+	if err := st.CreateA2ATask(context.Background(), task); err != nil {
 		t.Fatalf("CreateA2ATask: %v", err)
 	}
 
@@ -504,7 +504,7 @@ func TestTaskManager_CancelTask_AlreadyCompleted_ReturnsError(t *testing.T) {
 	st := newA2ATaskManagerTestStore(t)
 
 	profile := &store.AgentProfile{Name: "A2A Cancel Completed Agent", Slug: "a2a-cancel-completed-agent", SystemPrompt: "x"}
-	if err := st.CreateAgent(profile); err != nil {
+	if err := st.CreateAgent(context.Background(), profile); err != nil {
 		t.Fatalf("CreateAgent: %v", err)
 	}
 	inst := &store.DurableAgentInstance{
@@ -515,7 +515,7 @@ func TestTaskManager_CancelTask_AlreadyCompleted_ReturnsError(t *testing.T) {
 		ProfileID:      profile.ID,
 		Status:         store.DurableAgentStatusStopped, // "turn finished" -> derives to Completed
 	}
-	if err := st.CreateDurableAgentInstance(inst); err != nil {
+	if err := st.CreateDurableAgentInstance(context.Background(), inst); err != nil {
 		t.Fatalf("CreateDurableAgentInstance: %v", err)
 	}
 
@@ -527,7 +527,7 @@ func TestTaskManager_CancelTask_AlreadyCompleted_ReturnsError(t *testing.T) {
 		State:                  a2a.TaskStateWorking, // stale cached state
 		DurableAgentInstanceID: sql.NullString{String: inst.ID, Valid: true},
 	}
-	if err := st.CreateA2ATask(task); err != nil {
+	if err := st.CreateA2ATask(context.Background(), task); err != nil {
 		t.Fatalf("CreateA2ATask: %v", err)
 	}
 

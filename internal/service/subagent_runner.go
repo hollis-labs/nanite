@@ -32,7 +32,7 @@ const fallbackRoleSlug = "worker"
 // caller identifies the runner emitting the warning (ChatRunner / BootRunner)
 // so alerting can attribute the drift correctly.
 func resolveRoleWithFallback(agents agentSlugResolver, slug, caller string) (*store.AgentProfile, error) {
-	agent, err := agents.GetAgentBySlug(slug)
+	agent, err := agents.GetAgentBySlug(context.TODO() /* TODO(ctx-sweep): no ctx available at this call site */, slug)
 	if err == nil {
 		return agent, nil
 	}
@@ -40,7 +40,7 @@ func resolveRoleWithFallback(agents agentSlugResolver, slug, caller string) (*st
 		return nil, fmt.Errorf("%w %q: %v", errRoleResolveFailed, slug, err)
 	}
 	// Unknown slug. Try the fallback before surfacing failure.
-	fallback, fbErr := agents.GetAgentBySlug(fallbackRoleSlug)
+	fallback, fbErr := agents.GetAgentBySlug(context.TODO() /* TODO(ctx-sweep): no ctx available at this call site */, fallbackRoleSlug)
 	if fbErr != nil {
 		// Fallback itself missing — the deployment is misconfigured;
 		// surface the ORIGINAL slug so logs point at the user's request.
@@ -349,16 +349,16 @@ var errRoleResolveFailed = errors.New("subagent runner: resolve role")
 // an agent profile by slug. Satisfied by any AgentReader in production;
 // lets test stubs implement only this method.
 type agentSlugResolver interface {
-	GetAgentBySlug(slug string) (*store.AgentProfile, error)
+	GetAgentBySlug(ctx context.Context, slug string) (*store.AgentProfile, error)
 }
 
 // sessionStoreForRunner is the narrow surface of *store.Store the
 // runner needs. Lets tests inject without spinning up sqlite.
 type sessionStoreForRunner interface {
-	CreateSession(*store.Session) error
-	GetSession(id string) (*store.Session, error)
-	EnsureSessionAgent(sessionID, agentID, mode string, isPrimary bool) error
-	CreateMessage(*store.Message) error
+	CreateSession(context.Context, *store.Session) error
+	GetSession(ctx context.Context, id string) (*store.Session, error)
+	EnsureSessionAgent(ctx context.Context, sessionID, agentID, mode string, isPrimary bool) error
+	CreateMessage(context.Context, *store.Message) error
 }
 
 // chatInvoker is the narrow surface the runner needs from
@@ -468,7 +468,7 @@ func (r *ChatRunner) resolveRole(slug string) (*store.AgentProfile, error) {
 //     spawned from an HTTP/provider-backed session does not silently fall back
 //     to the user's global default (for example pty).
 func (r *ChatRunner) createChildSession(ctx context.Context, run *subagent.Run, agent *store.AgentProfile) (string, error) {
-	parent, err := r.store.GetSession(run.ParentSessionID)
+	parent, err := r.store.GetSession(ctx, run.ParentSessionID)
 	if err != nil {
 		return "", fmt.Errorf("get parent session: %w", err)
 	}
@@ -481,7 +481,7 @@ func (r *ChatRunner) createChildSession(ctx context.Context, run *subagent.Run, 
 		provider = parent.Provider
 	}
 	childID := uuid.New().String()
-	if err := r.store.CreateSession(&store.Session{
+	if err := r.store.CreateSession(ctx, &store.Session{
 		ID:       childID,
 		Provider: provider,
 		Model:    agent.DefaultModel,
@@ -492,7 +492,7 @@ func (r *ChatRunner) createChildSession(ctx context.Context, run *subagent.Run, 
 	// Bind the child session to the resolved agent so generateResponse's
 	// ResolveForSession lookup finds it. Without this, chat_generate.go:88
 	// returns "Failed to resolve agent".
-	if err := r.store.EnsureSessionAgent(childID, agent.ID, "default", true); err != nil {
+	if err := r.store.EnsureSessionAgent(ctx, childID, agent.ID, "default", true); err != nil {
 		return "", fmt.Errorf("bind child session to agent: %w", err)
 	}
 	return childID, nil
@@ -618,7 +618,7 @@ func (r *ChatRunner) Run(ctx context.Context, run *subagent.Run) (*subagent.Resu
 		Role:      "user",
 		Content:   userPrompt,
 	}
-	if err := r.store.CreateMessage(userMsg); err != nil {
+	if err := r.store.CreateMessage(ctx, userMsg); err != nil {
 		return nil, fmt.Errorf("create user message: %w", err)
 	}
 

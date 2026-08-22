@@ -2,6 +2,7 @@ package api
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -43,7 +44,7 @@ func TestHandleCreateAgent_SetsCompositionFields(t *testing.T) {
 	a, mux := newTestAPI(t)
 
 	role := &store.Role{Slug: "composition-role", Name: "Composition Role", SystemPrompt: "You help."}
-	if err := a.Services.Store.CreateRole(role); err != nil {
+	if err := a.Services.Store.CreateRole(context.Background(), role); err != nil {
 		t.Fatalf("CreateRole: %v", err)
 	}
 	modelID := seedTestModel(t, a)
@@ -130,7 +131,7 @@ func TestHandleUpdateAgent_SetsAndClearsCompositionFields(t *testing.T) {
 	a, mux := newTestAPI(t)
 
 	role := &store.Role{Slug: "composition-role-2", Name: "Composition Role 2", SystemPrompt: "You help."}
-	if err := a.Services.Store.CreateRole(role); err != nil {
+	if err := a.Services.Store.CreateRole(context.Background(), role); err != nil {
 		t.Fatalf("CreateRole: %v", err)
 	}
 

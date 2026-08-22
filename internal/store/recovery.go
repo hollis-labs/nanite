@@ -1,6 +1,7 @@
 package store
 
 import (
+	"context"
 	"fmt"
 	"time"
 )
@@ -28,7 +29,7 @@ type RecoveryBreadcrumb struct {
 // WriteRecoveryBreadcrumb persists a breadcrumb row. Errors propagate
 // up to the broker, which logs but does not escalate — telemetry must
 // not crash recovery flow.
-func (s *Store) WriteRecoveryBreadcrumb(b *RecoveryBreadcrumb) error {
+func (s *Store) WriteRecoveryBreadcrumb(ctx context.Context, b *RecoveryBreadcrumb) error {
 	if b == nil {
 		return fmt.Errorf("WriteRecoveryBreadcrumb: nil breadcrumb")
 	}
@@ -39,7 +40,7 @@ func (s *Store) WriteRecoveryBreadcrumb(b *RecoveryBreadcrumb) error {
 	if ts.IsZero() {
 		ts = time.Now().UTC()
 	}
-	_, err := s.DB.Exec(
+	_, err := s.DB.ExecContext(ctx,
 		`INSERT INTO nanite_recovery_breadcrumbs
 		 (timestamp, session_id, class, cause, remediation, action, outcome, attempt_count, duration_ms, reason)
 		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
@@ -67,8 +68,8 @@ func (s *Store) WriteRecoveryBreadcrumb(b *RecoveryBreadcrumb) error {
 // retrying" before the agent.Boot replacement-dispatch fires.
 //
 // No-op on unknown id (mirrors MarkAgentRuntimeFailed's tolerance).
-func (s *Store) MarkAgentRuntimeRelaunching(id, reason string) error {
-	_, err := s.DB.Exec(
+func (s *Store) MarkAgentRuntimeRelaunching(ctx context.Context, id, reason string) error {
+	_, err := s.DB.ExecContext(ctx,
 		`UPDATE agent_runtime
 		 SET state = 'launching', failure_reason = ?, updated_at = ?
 		 WHERE id = ?`,
@@ -83,7 +84,7 @@ func (s *Store) MarkAgentRuntimeRelaunching(id, reason string) error {
 // ListRecoveryBreadcrumbsForSession returns all breadcrumbs for a
 // session_id, oldest-first. Used by postmortem CLI / future inspector
 // surfaces. Limit caps the row count; pass 0 for "no limit".
-func (s *Store) ListRecoveryBreadcrumbsForSession(sessionID string, limit int) ([]*RecoveryBreadcrumb, error) {
+func (s *Store) ListRecoveryBreadcrumbsForSession(ctx context.Context, sessionID string, limit int) ([]*RecoveryBreadcrumb, error) {
 	if sessionID == "" {
 		return nil, fmt.Errorf("ListRecoveryBreadcrumbsForSession: empty session_id")
 	}
@@ -96,7 +97,7 @@ func (s *Store) ListRecoveryBreadcrumbsForSession(sessionID string, limit int) (
 		q += " LIMIT ?"
 		args = append(args, limit)
 	}
-	rows, err := s.DB.Query(q, args...)
+	rows, err := s.DB.QueryContext(ctx, q, args...)
 	if err != nil {
 		return nil, fmt.Errorf("list recovery breadcrumbs: %w", err)
 	}

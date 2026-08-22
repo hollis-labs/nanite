@@ -66,7 +66,7 @@ func (s *skillServiceImpl) Get(_ context.Context, id string) (*store.Skill, erro
 			}
 		}
 	}
-	return s.skills.GetSkill(id)
+	return s.skills.GetSkill(context.TODO() /* TODO(ctx-sweep): no ctx available at this call site */, id)
 }
 
 func (s *skillServiceImpl) GetBySlug(_ context.Context, slug string) (*store.Skill, error) {
@@ -76,7 +76,7 @@ func (s *skillServiceImpl) GetBySlug(_ context.Context, slug string) (*store.Ski
 			return d.ToStoreSkill(), nil
 		}
 	}
-	return s.skills.GetSkillBySlug(slug)
+	return s.skills.GetSkillBySlug(context.TODO() /* TODO(ctx-sweep): no ctx available at this call site */, slug)
 }
 
 func (s *skillServiceImpl) List(_ context.Context) ([]store.Skill, error) {
@@ -95,7 +95,7 @@ func (s *skillServiceImpl) List(_ context.Context) ([]store.Skill, error) {
 	// store.Skill no longer has a ModeIDs field at all — dropped in full,
 	// see internal/store/skills.go's doc comment — so that backfill step is
 	// gone; the DB-vs-file-def merge below is otherwise unchanged.
-	dbSkills, err := s.skills.ListSkills()
+	dbSkills, err := s.skills.ListSkills(context.TODO() /* TODO(ctx-sweep): no ctx available at this call site */)
 	if err != nil {
 		return result, err // return file-based skills even if DB fails
 	}
@@ -123,21 +123,21 @@ func (s *skillServiceImpl) ListBySource(_ context.Context, source string) ([]sto
 }
 
 func (s *skillServiceImpl) Create(_ context.Context, sk *store.Skill) error {
-	return s.skills.CreateSkill(sk)
+	return s.skills.CreateSkill(context.TODO() /* TODO(ctx-sweep): no ctx available at this call site */, sk)
 }
 
 func (s *skillServiceImpl) Update(_ context.Context, sk *store.Skill) error {
 	if skill.IsFileBasedID(sk.ID) {
 		return fmt.Errorf("cannot update file-based skill %q — edit the .md file instead", sk.ID)
 	}
-	return s.skills.UpdateSkill(sk)
+	return s.skills.UpdateSkill(context.TODO() /* TODO(ctx-sweep): no ctx available at this call site */, sk)
 }
 
 func (s *skillServiceImpl) Delete(_ context.Context, id string) error {
 	if skill.IsFileBasedID(id) {
 		return fmt.Errorf("cannot delete file-based skill %q — remove the .md file instead", id)
 	}
-	return s.skills.DeleteSkill(id)
+	return s.skills.DeleteSkill(context.TODO() /* TODO(ctx-sweep): no ctx available at this call site */, id)
 }
 
 func (s *skillServiceImpl) GetDefinition(_ context.Context, slug string) *skill.Definition {

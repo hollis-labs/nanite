@@ -1,6 +1,7 @@
 package store
 
 import (
+	"context"
 	"os"
 	"strings"
 	"testing"
@@ -22,14 +23,14 @@ func TestDurableAgentInstanceCreateListGetArchive(t *testing.T) {
 		LaunchSourceType: DurableAgentLaunchDurableAdvisor,
 		WorkRoot:         "/tmp/torque-supervisor",
 	}
-	if err := s.CreateDurableAgentInstance(inst); err != nil {
+	if err := s.CreateDurableAgentInstance(context.Background(), inst); err != nil {
 		t.Fatalf("CreateDurableAgentInstance: %v", err)
 	}
 	if inst.ID == "" {
 		t.Fatal("expected generated id")
 	}
 
-	got, err := s.GetDurableAgentInstance(inst.ID)
+	got, err := s.GetDurableAgentInstance(context.Background(), inst.ID)
 	if err != nil {
 		t.Fatalf("GetDurableAgentInstance: %v", err)
 	}
@@ -37,7 +38,7 @@ func TestDurableAgentInstanceCreateListGetArchive(t *testing.T) {
 		t.Fatalf("immutable launch fields did not round-trip: %+v", got)
 	}
 
-	list, err := s.ListDurableAgentInstances(false)
+	list, err := s.ListDurableAgentInstances(context.Background(), false)
 	if err != nil {
 		t.Fatalf("ListDurableAgentInstances: %v", err)
 	}
@@ -45,14 +46,14 @@ func TestDurableAgentInstanceCreateListGetArchive(t *testing.T) {
 		t.Fatalf("active list length = %d, want 1", len(list))
 	}
 
-	archived, err := s.ArchiveDurableAgentInstance(inst.ID)
+	archived, err := s.ArchiveDurableAgentInstance(context.Background(), inst.ID)
 	if err != nil {
 		t.Fatalf("ArchiveDurableAgentInstance: %v", err)
 	}
 	if archived.Status != DurableAgentStatusArchived || archived.ArchivedAt == nil {
 		t.Fatalf("archive state = %+v", archived)
 	}
-	list, err = s.ListDurableAgentInstances(false)
+	list, err = s.ListDurableAgentInstances(context.Background(), false)
 	if err != nil {
 		t.Fatalf("ListDurableAgentInstances active after archive: %v", err)
 	}
@@ -65,7 +66,7 @@ func TestDurableAgentInstanceValidationAndImmutableUpdate(t *testing.T) {
 	s := newTestStore(t)
 	profile := makeTestAgent(t, s, "durable-validation")
 
-	err := s.CreateDurableAgentInstance(&DurableAgentInstance{
+	err := s.CreateDurableAgentInstance(context.Background(), &DurableAgentInstance{
 		Name:             "Bad",
 		Slug:             "bad-durable",
 		ProfileID:        profile.ID,
@@ -86,12 +87,12 @@ func TestDurableAgentInstanceValidationAndImmutableUpdate(t *testing.T) {
 		RuntimeKind:      "api",
 		LaunchSourceType: DurableAgentLaunchAPIChat,
 	}
-	if err := s.CreateDurableAgentInstance(inst); err != nil {
+	if err := s.CreateDurableAgentInstance(context.Background(), inst); err != nil {
 		t.Fatalf("CreateDurableAgentInstance: %v", err)
 	}
 	newName := "Stable Renamed"
 	newMeta := `{"note":"metadata only"}`
-	updated, err := s.UpdateDurableAgentInstance(inst.ID, DurableAgentInstanceUpdate{
+	updated, err := s.UpdateDurableAgentInstance(context.Background(), inst.ID, DurableAgentInstanceUpdate{
 		Name:         &newName,
 		MetadataJSON: &newMeta,
 	})
@@ -115,7 +116,7 @@ func TestDurableAgentInstanceSessionAttachment(t *testing.T) {
 		ProfileID:        profile.ID,
 		LaunchSourceType: DurableAgentLaunchAPIChat,
 	}
-	if err := s.CreateDurableAgentInstance(inst); err != nil {
+	if err := s.CreateDurableAgentInstance(context.Background(), inst); err != nil {
 		t.Fatalf("CreateDurableAgentInstance: %v", err)
 	}
 	if inst.LifecycleClass != DurableAgentClassAdvisor || inst.RuntimeKind != "api" || inst.Status != DurableAgentStatusSleeping {
@@ -125,21 +126,21 @@ func TestDurableAgentInstanceSessionAttachment(t *testing.T) {
 		t.Fatalf("launch state defaults = current_session_id %q failure_reason %q", inst.CurrentSessionID, inst.FailureReason)
 	}
 	sess := &Session{Title: "owned session", Provider: "anthropic", Model: "model-a"}
-	if err := s.CreateSession(sess); err != nil {
+	if err := s.CreateSession(context.Background(), sess); err != nil {
 		t.Fatalf("CreateSession: %v", err)
 	}
 
-	if err := s.AttachDurableAgentInstanceSession(inst.ID, sess.ID, DurableAgentSessionRelationWake); err != nil {
+	if err := s.AttachDurableAgentInstanceSession(context.Background(), inst.ID, sess.ID, DurableAgentSessionRelationWake); err != nil {
 		t.Fatalf("AttachDurableAgentInstanceSession: %v", err)
 	}
-	rels, err := s.ListDurableAgentInstanceSessions(inst.ID)
+	rels, err := s.ListDurableAgentInstanceSessions(context.Background(), inst.ID)
 	if err != nil {
 		t.Fatalf("ListDurableAgentInstanceSessions: %v", err)
 	}
 	if len(rels) != 1 || rels[0].SessionID != sess.ID || rels[0].Relation != DurableAgentSessionRelationWake {
 		t.Fatalf("relations = %+v", rels)
 	}
-	states, err := s.ListDurableAgentInstanceSessionStates(inst.ID)
+	states, err := s.ListDurableAgentInstanceSessionStates(context.Background(), inst.ID)
 	if err != nil {
 		t.Fatalf("ListDurableAgentInstanceSessionStates: %v", err)
 	}
@@ -157,7 +158,7 @@ func TestDurableAgentEventsCreateListOrdering(t *testing.T) {
 		ProfileID:        profile.ID,
 		LaunchSourceType: DurableAgentLaunchAPIChat,
 	}
-	if err := s.CreateDurableAgentInstance(inst); err != nil {
+	if err := s.CreateDurableAgentInstance(context.Background(), inst); err != nil {
 		t.Fatalf("CreateDurableAgentInstance: %v", err)
 	}
 	base := time.Date(2026, 5, 24, 12, 0, 0, 0, time.UTC)
@@ -167,11 +168,11 @@ func TestDurableAgentEventsCreateListOrdering(t *testing.T) {
 		{InstanceID: inst.ID, EventType: DurableAgentEventStartSucceeded, StatusBefore: DurableAgentStatusStarting, StatusAfter: DurableAgentStatusActive, CreatedAt: base.Add(2 * time.Minute)},
 	}
 	for i := range events {
-		if err := s.CreateDurableAgentEvent(&events[i]); err != nil {
+		if err := s.CreateDurableAgentEvent(context.Background(), &events[i]); err != nil {
 			t.Fatalf("CreateDurableAgentEvent %d: %v", i, err)
 		}
 	}
-	got, err := s.ListDurableAgentEvents(inst.ID, 2)
+	got, err := s.ListDurableAgentEvents(context.Background(), inst.ID, 2)
 	if err != nil {
 		t.Fatalf("ListDurableAgentEvents: %v", err)
 	}
@@ -208,7 +209,7 @@ func TestMigration085SeedsLegacyDurableAgentProfiles(t *testing.T) {
 		DefaultProvider: "",
 		DefaultModel:    "",
 	}
-	if err := s.CreateAgent(profile); err != nil {
+	if err := s.CreateAgent(context.Background(), profile); err != nil {
 		t.Fatalf("CreateAgent legacy profile: %v", err)
 	}
 	regular := &AgentProfile{
@@ -217,7 +218,7 @@ func TestMigration085SeedsLegacyDurableAgentProfiles(t *testing.T) {
 		SystemPrompt: "You are not durable.",
 		Tags:         `["advisor"]`,
 	}
-	if err := s.CreateAgent(regular); err != nil {
+	if err := s.CreateAgent(context.Background(), regular); err != nil {
 		t.Fatalf("CreateAgent regular profile: %v", err)
 	}
 
@@ -234,7 +235,7 @@ func TestMigration085SeedsLegacyDurableAgentProfiles(t *testing.T) {
 		t.Fatalf("exec migration 085 second run: %v", err)
 	}
 
-	list, err := s.ListDurableAgentInstances(false)
+	list, err := s.ListDurableAgentInstances(context.Background(), false)
 	if err != nil {
 		t.Fatalf("ListDurableAgentInstances: %v", err)
 	}

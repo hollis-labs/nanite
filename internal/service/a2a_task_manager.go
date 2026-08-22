@@ -134,7 +134,7 @@ func (tm *TaskManager) SubmitTask(ctx context.Context, req TaskSubmitRequest) (*
 		task.PushNotificationConfig = sql.NullString{String: string(configJSON), Valid: true}
 	}
 
-	if err := tm.store.CreateA2ATask(task); err != nil {
+	if err := tm.store.CreateA2ATask(ctx, task); err != nil {
 		return nil, fmt.Errorf("failed to create a2a_tasks record: %w", err)
 	}
 
@@ -160,7 +160,7 @@ func (tm *TaskManager) SubmitTask(ctx context.Context, req TaskSubmitRequest) (*
 
 	// Refresh the task state from the store (it may have been updated by the
 	// execution path already).
-	updatedTask, err := tm.store.GetA2ATask(taskID)
+	updatedTask, err := tm.store.GetA2ATask(ctx, taskID)
 	if err != nil {
 		tm.logger.Error("a2a: failed to refresh task after submission", "task_id", taskID, "error", err)
 		// Return the original state as a fallback.
@@ -225,7 +225,7 @@ func (tm *TaskManager) submitWorkflowTask(ctx context.Context, task *store.A2ATa
 	task.WorkflowRunID = sql.NullString{String: result.RunID, Valid: true}
 	task.State = a2a.TaskStateWorking
 
-	if err := tm.store.UpdateA2ATask(task); err != nil {
+	if err := tm.store.UpdateA2ATask(ctx, task); err != nil {
 		tm.logger.Error("a2a: failed to update task after workflow launch",
 			"task_id", task.ID,
 			"instance_id", result.InstanceID,
@@ -250,7 +250,7 @@ func (tm *TaskManager) submitInstanceTask(ctx context.Context, task *store.A2ATa
 	tm.logger.Info("a2a: routing to durable wake", "task_id", task.ID, "instance_id", instanceID)
 
 	// Verify the instance exists.
-	inst, err := tm.store.GetDurableAgentInstance(instanceID)
+	inst, err := tm.store.GetDurableAgentInstance(ctx, instanceID)
 	if err != nil {
 		return fmt.Errorf("failed to retrieve instance: %w", err)
 	}
@@ -289,7 +289,7 @@ func (tm *TaskManager) submitInstanceTask(ctx context.Context, task *store.A2ATa
 		)
 	}
 
-	if err := tm.store.UpdateA2ATask(task); err != nil {
+	if err := tm.store.UpdateA2ATask(ctx, task); err != nil {
 		tm.logger.Error("a2a: failed to update task after wake",
 			"task_id", task.ID,
 			"instance_id", instanceID,
@@ -309,7 +309,7 @@ func (tm *TaskManager) submitInstanceTask(ctx context.Context, task *store.A2ATa
 // GetTask retrieves an A2A task by ID and derives its current state from the
 // underlying execution (workflow run or durable instance status).
 func (tm *TaskManager) GetTask(ctx context.Context, taskID string) (*a2a.Task, error) {
-	storeTask, err := tm.store.GetA2ATask(taskID)
+	storeTask, err := tm.store.GetA2ATask(ctx, taskID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get task: %w", err)
 	}
@@ -328,7 +328,7 @@ func (tm *TaskManager) GetTask(ctx context.Context, taskID string) (*a2a.Task, e
 			"derived", derivedState,
 		)
 		storeTask.State = derivedState
-		if err := tm.store.UpdateA2ATask(storeTask); err != nil {
+		if err := tm.store.UpdateA2ATask(ctx, storeTask); err != nil {
 			tm.logger.Error("a2a: failed to update derived state", "task_id", taskID, "error", err)
 		} else if storeTask.PushNotificationConfig.Valid {
 			// Only enqueue push if the update succeeded
@@ -376,7 +376,7 @@ var ErrWorkflowCancelUnsupported = errors.New("workflow task cancellation not su
 // terminal states return an error rather than overwriting real completion
 // or failure information with a fake cancellation.
 func (tm *TaskManager) CancelTask(ctx context.Context, taskID string) (*a2a.Task, error) {
-	task, err := tm.store.GetA2ATask(taskID)
+	task, err := tm.store.GetA2ATask(ctx, taskID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get task: %w", err)
 	}
@@ -389,7 +389,7 @@ func (tm *TaskManager) CancelTask(ctx context.Context, taskID string) (*a2a.Task
 	current := tm.deriveTaskState(ctx, task)
 	if current != task.State {
 		task.State = current
-		if err := tm.store.UpdateA2ATask(task); err != nil {
+		if err := tm.store.UpdateA2ATask(ctx, task); err != nil {
 			tm.logger.Error("a2a: failed to persist derived state before cancel", "task_id", taskID, "error", err)
 		}
 	}
@@ -437,7 +437,7 @@ func (tm *TaskManager) CancelTask(ctx context.Context, taskID string) (*a2a.Task
 	oldState := task.State
 	task.State = a2a.TaskStateCanceled
 
-	if err := tm.store.UpdateA2ATask(task); err != nil {
+	if err := tm.store.UpdateA2ATask(ctx, task); err != nil {
 		return nil, fmt.Errorf("failed to update task state after cancel: %w", err)
 	}
 
@@ -487,7 +487,7 @@ func (tm *TaskManager) deriveTaskState(ctx context.Context, task *store.A2ATask)
 
 // deriveFromWorkflowRun derives TaskState from a workflow_runs row.
 func (tm *TaskManager) deriveFromWorkflowRun(ctx context.Context, runID string) a2a.TaskState {
-	run, err := tm.store.GetWorkflowRun(runID)
+	run, err := tm.store.GetWorkflowRun(ctx, runID)
 	if err != nil {
 		tm.logger.Error("a2a: failed to get workflow run for state derivation",
 			"run_id", runID,
@@ -545,7 +545,7 @@ func (tm *TaskManager) deriveFromWorkflowRun(ctx context.Context, runID string) 
 // Per design doc: non-workflow tasks have coarser semantics — working until the
 // woken session's turn finishes, then completed/failed.
 func (tm *TaskManager) deriveFromDurableInstance(ctx context.Context, instanceID string) a2a.TaskState {
-	inst, err := tm.store.GetDurableAgentInstance(instanceID)
+	inst, err := tm.store.GetDurableAgentInstance(ctx, instanceID)
 	if err != nil {
 		tm.logger.Error("a2a: failed to get durable instance for state derivation",
 			"instance_id", instanceID,
@@ -608,12 +608,14 @@ func (tm *TaskManager) createRejectedTask(taskID string, req TaskSubmitRequest, 
 		task.PushNotificationConfig = sql.NullString{String: string(configJSON), Valid: true}
 	}
 
-	return tm.store.CreateA2ATask(task)
+	return tm.store.CreateA2ATask(context.TODO(
+
+	// updateTaskStateFailed is a helper to update a task to failed state.
+	), task)
 }
 
-// updateTaskStateFailed is a helper to update a task to failed state.
 func (tm *TaskManager) updateTaskStateFailed(taskID, errorMsg string) {
-	task, err := tm.store.GetA2ATask(taskID)
+	task, err := tm.store.GetA2ATask(context.TODO() /* TODO(ctx-sweep): no ctx available at this call site */, taskID)
 	if err != nil {
 		tm.logger.Error("a2a: failed to get task for error update", "task_id", taskID, "error", err)
 		return
@@ -627,7 +629,7 @@ func (tm *TaskManager) updateTaskStateFailed(taskID, errorMsg string) {
 	task.State = a2a.TaskStateFailed
 	task.Error = sql.NullString{String: errorMsg, Valid: true}
 
-	if err := tm.store.UpdateA2ATask(task); err != nil {
+	if err := tm.store.UpdateA2ATask(context.TODO() /* TODO(ctx-sweep): no ctx available at this call site */, task); err != nil {
 		tm.logger.Error("a2a: failed to update task to failed state",
 			"task_id", taskID,
 			"error", err,
@@ -664,7 +666,7 @@ func (tm *TaskManager) PushNotifier() *A2APushNotifier {
 // For instance-backed tasks, this is a no-op (they don't have gates).
 // CW-20260814-0017: A2A gate ↔ input-required mapping.
 func (tm *TaskManager) ProvideTaskInput(ctx context.Context, taskID, input string) error {
-	task, err := tm.store.GetA2ATask(taskID)
+	task, err := tm.store.GetA2ATask(ctx, taskID)
 	if err != nil {
 		return fmt.Errorf("failed to get task: %w", err)
 	}
@@ -680,7 +682,7 @@ func (tm *TaskManager) ProvideTaskInput(ctx context.Context, taskID, input strin
 	runID := task.WorkflowRunID.String
 
 	// Get the waiting gate(s) for this workflow run.
-	gates, err := tm.store.GetWaitingGates(runID)
+	gates, err := tm.store.GetWaitingGates(ctx, runID)
 	if err != nil {
 		return fmt.Errorf("failed to get waiting gates: %w", err)
 	}
@@ -698,7 +700,7 @@ func (tm *TaskManager) ProvideTaskInput(ctx context.Context, taskID, input strin
 		"input", input,
 	)
 
-	if err := tm.store.ResolveGate(runID, gate.StepID, input); err != nil {
+	if err := tm.store.ResolveGate(ctx, runID, gate.StepID, input); err != nil {
 		return fmt.Errorf("failed to resolve gate: %w", err)
 	}
 
@@ -723,7 +725,7 @@ func (tm *TaskManager) resumeWorkflowRun(ctx context.Context, task *store.A2ATas
 	}
 
 	runID := task.WorkflowRunID.String
-	run, err := tm.store.GetWorkflowRun(runID)
+	run, err := tm.store.GetWorkflowRun(ctx, runID)
 	if err != nil {
 		return fmt.Errorf("failed to get workflow run: %w", err)
 	}

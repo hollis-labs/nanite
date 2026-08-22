@@ -1,6 +1,7 @@
 package store
 
 import (
+	"context"
 	"fmt"
 	"time"
 )
@@ -34,8 +35,8 @@ type Model struct {
 }
 
 // ListProviders returns all providers.
-func (s *Store) ListProviders() ([]ProviderConfig, error) {
-	rows, err := s.DB.Query(
+func (s *Store) ListProviders(ctx context.Context) ([]ProviderConfig, error) {
+	rows, err := s.DB.QueryContext(ctx,
 		`SELECT id, name, provider_type, is_enabled,
 		        settings, created_at, updated_at
 		 FROM providers ORDER BY name`,
@@ -60,8 +61,8 @@ func (s *Store) ListProviders() ([]ProviderConfig, error) {
 }
 
 // ListModels returns all models, joined with provider_type.
-func (s *Store) ListModels() ([]Model, error) {
-	rows, err := s.DB.Query(
+func (s *Store) ListModels(ctx context.Context) ([]Model, error) {
+	rows, err := s.DB.QueryContext(ctx,
 		`SELECT m.id, m.provider_id, m.model_id, m.display_name,
 		        COALESCE(m.context_window, 0), COALESCE(m.max_output, 0),
 		        m.supports_tools, m.supports_vision, m.is_enabled,
@@ -98,10 +99,10 @@ type ProviderUpdate struct {
 }
 
 // UpdateProvider updates mutable fields on a provider.
-func (s *Store) UpdateProvider(id string, u ProviderUpdate) error {
+func (s *Store) UpdateProvider(ctx context.Context, id string, u ProviderUpdate) error {
 	now := time.Now().UTC().Format(time.RFC3339)
 	if u.IsEnabled != nil {
-		if _, err := s.DB.Exec(
+		if _, err := s.DB.ExecContext(ctx,
 			`UPDATE providers SET is_enabled = ?, updated_at = ? WHERE id = ?`,
 			*u.IsEnabled, now, id,
 		); err != nil {
@@ -109,7 +110,7 @@ func (s *Store) UpdateProvider(id string, u ProviderUpdate) error {
 		}
 	}
 	if u.Settings != nil {
-		if _, err := s.DB.Exec(
+		if _, err := s.DB.ExecContext(ctx,
 			`UPDATE providers SET settings = ?, updated_at = ? WHERE id = ?`,
 			*u.Settings, now, id,
 		); err != nil {
@@ -120,9 +121,9 @@ func (s *Store) UpdateProvider(id string, u ProviderUpdate) error {
 }
 
 // GetProvider returns a single provider by ID.
-func (s *Store) GetProvider(id string) (*ProviderConfig, error) {
+func (s *Store) GetProvider(ctx context.Context, id string) (*ProviderConfig, error) {
 	var p ProviderConfig
-	err := s.DB.QueryRow(
+	err := s.DB.QueryRowContext(ctx,
 		`SELECT id, name, provider_type, is_enabled,
 		        settings, created_at, updated_at
 		 FROM providers WHERE id = ?`, id,

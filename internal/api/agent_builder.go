@@ -288,7 +288,7 @@ func (a *API) normalizeAgentBuilderProfile(req AgentBuilderDryRunRequest) (Agent
 		if strings.TrimSpace(input.ID) == "" {
 			errors = append(errors, "profile.id is required for update_profile dry-run")
 		} else {
-			existing, err = a.Services.Store.GetAgent(input.ID)
+			existing, err = a.Services.Store.GetAgent(context.TODO() /* TODO(ctx-sweep): no ctx available at this call site */, input.ID)
 			if err != nil {
 				errors = append(errors, fmt.Sprintf("profile %q not found", input.ID))
 			} else if existing.Source == "internal" {

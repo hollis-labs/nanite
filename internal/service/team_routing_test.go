@@ -31,15 +31,17 @@ import (
 type storeAgentResolver struct{ st *store.Store }
 
 func (r storeAgentResolver) Get(_ context.Context, id string) (*store.AgentProfile, error) {
-	return r.st.GetAgent(id)
+	return r.st.GetAgent(context.
+
+		// newTestMessagingService builds a real *messaging.Service against st's
+		// own underlying *sql.DB — mirrors container.go's own construction
+		// (messaging.NewSQLiteStore + messaging.NewService), using st itself as
+		// both AgentResolver (via storeAgentResolver) and AgentRegistrar (st.
+		// CreateAgent already matches messaging.AgentRegistrar's signature
+		// directly).
+		Background(), id)
 }
 
-// newTestMessagingService builds a real *messaging.Service against st's
-// own underlying *sql.DB — mirrors container.go's own construction
-// (messaging.NewSQLiteStore + messaging.NewService), using st itself as
-// both AgentResolver (via storeAgentResolver) and AgentRegistrar (st.
-// CreateAgent already matches messaging.AgentRegistrar's signature
-// directly).
 func newTestMessagingService(t *testing.T, st *store.Store) *messaging.Service {
 	t.Helper()
 	msgStore := messaging.NewSQLiteStore(st.DB)
@@ -899,7 +901,7 @@ func TestTeamRouting_ProvenanceTrace_EndToEnd(t *testing.T) {
 	if err != nil || len(archMembers) != 1 {
 		t.Fatalf("team_run_members for traced slot %q = %v (err=%v), want exactly 1", targetSlotName, archMembers, err)
 	}
-	archProfile, err := st.GetAgent(archMembers[0].AgentID)
+	archProfile, err := st.GetAgent(context.Background(), archMembers[0].AgentID)
 	if err != nil {
 		t.Fatalf("GetAgent(%s): %v", archMembers[0].AgentID, err)
 	}

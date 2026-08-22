@@ -163,7 +163,7 @@ func (a *API) handleListAgentTools(w http.ResponseWriter, r *http.Request) {
 // handleGetToolLoadPreferences returns the user's tool load type overrides.
 // GET /api/tools/load-preferences
 func (a *API) handleGetToolLoadPreferences(w http.ResponseWriter, r *http.Request) {
-	settings, err := a.Services.Store.GetUserSettings()
+	settings, err := a.Services.Store.GetUserSettings(r.Context())
 	if err != nil {
 		a.errorResp(w, http.StatusInternalServerError, err.Error())
 		return
@@ -196,7 +196,7 @@ func (a *API) handleUpdateToolLoadPreferences(w http.ResponseWriter, r *http.Req
 		}
 	}
 
-	settings, err := a.Services.Store.GetUserSettings()
+	settings, err := a.Services.Store.GetUserSettings(r.Context())
 	if err != nil {
 		a.errorResp(w, http.StatusInternalServerError, err.Error())
 		return
@@ -214,7 +214,7 @@ func (a *API) handleUpdateToolLoadPreferences(w http.ResponseWriter, r *http.Req
 		}
 	}
 
-	if err := a.Services.Store.UpdateUserSettings(settings); err != nil {
+	if err := a.Services.Store.UpdateUserSettings(r.Context(), settings); err != nil {
 		a.errorResp(w, http.StatusInternalServerError, err.Error())
 		return
 	}
@@ -234,7 +234,7 @@ func (a *API) handleListToolsWithLoadType(w http.ResponseWriter, r *http.Request
 	allTools := a.Services.MCP.GetAllToolsUnfiltered()
 
 	// Build the user-level override layer.
-	settings, err := a.Services.Store.GetUserSettings()
+	settings, err := a.Services.Store.GetUserSettings(r.Context())
 	if err != nil {
 		a.errorResp(w, http.StatusInternalServerError, err.Error())
 		return

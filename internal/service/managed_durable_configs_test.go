@@ -23,7 +23,7 @@ func TestSyncManagedDurableAgentSchedule_PreservesNonActiveStatus(t *testing.T) 
 	if err != nil {
 		t.Fatalf("store.New: %v", err)
 	}
-	t.Cleanup(func() { st.Close() })
+	t.Cleanup(func() { st.Close(context.Background()) })
 
 	sch := ManagedDurableAgentSchedule{
 		Name: "lint-and-export",
@@ -46,7 +46,7 @@ func TestSyncManagedDurableAgentSchedule_PreservesNonActiveStatus(t *testing.T) 
 			// schedule ID (derived from profileID+name) doesn't collide
 			// across subtests sharing this test's *testing.T store.
 			profileID := "profile-" + tc.name
-			if err := st.CreateAgent(&store.AgentProfile{
+			if err := st.CreateAgent(context.Background(), &store.AgentProfile{
 				ID:           profileID,
 				Name:         tc.name,
 				Slug:         tc.name,
@@ -157,8 +157,8 @@ func TestSaveManagedDurableAgentConfig_RejectsSlugTraversalOnCreate(t *testing.T
 	if err != nil {
 		t.Fatalf("store.New: %v", err)
 	}
-	t.Cleanup(func() { st.Close() })
-	if err := st.CreateAgent(&store.AgentProfile{ID: "profile-create-traversal", Name: "p", Slug: "p", SystemPrompt: "x", Source: "project"}); err != nil {
+	t.Cleanup(func() { st.Close(context.Background()) })
+	if err := st.CreateAgent(context.Background(), &store.AgentProfile{ID: "profile-create-traversal", Name: "p", Slug: "p", SystemPrompt: "x", Source: "project"}); err != nil {
 		t.Fatalf("CreateAgent: %v", err)
 	}
 	root := t.TempDir()
@@ -187,8 +187,8 @@ func TestSaveManagedDurableAgentConfig_RejectsSlugTraversalOnRenameShapedUpdate(
 	if err != nil {
 		t.Fatalf("store.New: %v", err)
 	}
-	t.Cleanup(func() { st.Close() })
-	if err := st.CreateAgent(&store.AgentProfile{ID: "profile-rename-traversal", Name: "p", Slug: "p", SystemPrompt: "x", Source: "project"}); err != nil {
+	t.Cleanup(func() { st.Close(context.Background()) })
+	if err := st.CreateAgent(context.Background(), &store.AgentProfile{ID: "profile-rename-traversal", Name: "p", Slug: "p", SystemPrompt: "x", Source: "project"}); err != nil {
 		t.Fatalf("CreateAgent: %v", err)
 	}
 	root := t.TempDir()

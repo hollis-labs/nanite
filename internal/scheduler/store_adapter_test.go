@@ -31,7 +31,7 @@ func newAdapterTestStore(t *testing.T) *store.Store {
 	if err != nil {
 		t.Fatalf("store.New: %v", err)
 	}
-	t.Cleanup(func() { s.Close() })
+	t.Cleanup(func() { s.Close(context.Background()) })
 	return s
 }
 
@@ -42,7 +42,7 @@ func makeAdapterTestAgent(t *testing.T, s *store.Store, slug string) *store.Agen
 		Slug:         slug,
 		SystemPrompt: "You are a test agent.",
 	}
-	if err := s.CreateAgent(a); err != nil {
+	if err := s.CreateAgent(context.Background(), a); err != nil {
 		t.Fatalf("CreateAgent: %v", err)
 	}
 	return a
@@ -55,7 +55,7 @@ func makeAdapterTestInstance(t *testing.T, s *store.Store, profileID, slug strin
 		Slug:      slug,
 		ProfileID: profileID,
 	}
-	if err := s.CreateDurableAgentInstance(inst); err != nil {
+	if err := s.CreateDurableAgentInstance(context.Background(), inst); err != nil {
 		t.Fatalf("CreateDurableAgentInstance: %v", err)
 	}
 	return inst

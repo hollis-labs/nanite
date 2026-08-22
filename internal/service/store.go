@@ -12,101 +12,101 @@ import (
 
 // SessionReader provides read access to sessions and messages.
 type SessionReader interface {
-	GetSession(id string) (*store.Session, error)
-	ListSessions(includeArchived ...bool) ([]store.Session, error)
-	ListMessages(sessionID string, limit int) ([]store.Message, error)
-	ListMessagesPaginated(sessionID string, limit, offset int) (*store.MessagePage, error)
-	ListMessagesAroundID(sessionID, messageID string, before, after int) (*store.MessagePage, error)
-	GetMessage(id string) (*store.Message, error)
-	SearchMessages(query, projectID string, limit int) ([]store.SearchResult, error)
+	GetSession(ctx context.Context, id string) (*store.Session, error)
+	ListSessions(ctx context.Context, includeArchived ...bool) ([]store.Session, error)
+	ListMessages(ctx context.Context, sessionID string, limit int) ([]store.Message, error)
+	ListMessagesPaginated(ctx context.Context, sessionID string, limit, offset int) (*store.MessagePage, error)
+	ListMessagesAroundID(ctx context.Context, sessionID, messageID string, before, after int) (*store.MessagePage, error)
+	GetMessage(ctx context.Context, id string) (*store.Message, error)
+	SearchMessages(ctx context.Context, query, projectID string, limit int) ([]store.SearchResult, error)
 }
 
 // SessionWriter provides write access to sessions and messages.
 type SessionWriter interface {
-	CreateSession(sess *store.Session) error
-	UpdateSession(sess *store.Session) error
-	UpdateSessionTags(id, tagsJSON string) error
-	UpdateSessionMetadata(id, metadataJSON string) error
-	ArchiveSession(id string) error
-	NextShortCode() (string, error)
-	CreateMessage(msg *store.Message) error
-	UpdateMessageContent(id, content string, isCompacted bool) error
-	ForkSession(sourceID string, overrides *store.Session, copyMessages bool) (*store.Session, error)
-	CopyMessages(sourceSessionID, targetSessionID string) error
+	CreateSession(ctx context.Context, sess *store.Session) error
+	UpdateSession(ctx context.Context, sess *store.Session) error
+	UpdateSessionTags(ctx context.Context, id, tagsJSON string) error
+	UpdateSessionMetadata(ctx context.Context, id, metadataJSON string) error
+	ArchiveSession(ctx context.Context, id string) error
+	NextShortCode(ctx context.Context) (string, error)
+	CreateMessage(ctx context.Context, msg *store.Message) error
+	UpdateMessageContent(ctx context.Context, id, content string, isCompacted bool) error
+	ForkSession(ctx context.Context, sourceID string, overrides *store.Session, copyMessages bool) (*store.Session, error)
+	CopyMessages(ctx context.Context, sourceSessionID, targetSessionID string) error
 }
 
 // AgentReader provides read access to agents, skills, and session-agent bindings.
 type AgentReader interface {
-	GetAgent(id string) (*store.AgentProfile, error)
-	GetAgentBySlug(slug string) (*store.AgentProfile, error)
-	ListAgents() ([]store.AgentProfile, error)
-	ListAgentsBySource(source string) ([]store.AgentProfile, error)
-	GetSessionPrimaryAgent(sessionID string) (*store.SessionAgent, error)
-	ListSessionAgents(sessionID string) ([]store.SessionAgent, error)
-	ListAgentSkills(agentID string) ([]store.Skill, error)
-	ListAgentProjects(agentID string) ([]store.Project, error)
-	ListProjectAgents(projectID string) ([]store.AgentProfile, error)
+	GetAgent(ctx context.Context, id string) (*store.AgentProfile, error)
+	GetAgentBySlug(ctx context.Context, slug string) (*store.AgentProfile, error)
+	ListAgents(ctx context.Context) ([]store.AgentProfile, error)
+	ListAgentsBySource(ctx context.Context, source string) ([]store.AgentProfile, error)
+	GetSessionPrimaryAgent(ctx context.Context, sessionID string) (*store.SessionAgent, error)
+	ListSessionAgents(ctx context.Context, sessionID string) ([]store.SessionAgent, error)
+	ListAgentSkills(ctx context.Context, agentID string) ([]store.Skill, error)
+	ListAgentProjects(ctx context.Context, agentID string) ([]store.Project, error)
+	ListProjectAgents(ctx context.Context, projectID string) ([]store.AgentProfile, error)
 	// GetRole backs roleForProfile's role -> agent -> task cascade lookup
 	// (02-add-agents-composition-columns.md). Returns (nil, nil) on a
 	// miss, matching store.Store.GetRole's own contract.
-	GetRole(id string) (*store.Role, error)
+	GetRole(ctx context.Context, id string) (*store.Role, error)
 }
 
 // AgentWriter provides write access to agents and session-agent bindings.
 type AgentWriter interface {
-	CreateAgent(a *store.AgentProfile) error
-	UpdateAgent(a *store.AgentProfile) error
-	DeleteAgent(slug string) error
-	UpsertAgentBySlug(a *store.AgentProfile) error
-	EnsureSessionAgent(sessionID, agentID, mode string, isPrimary bool) error
-	SetSessionAgentMode(sessionID, agentID, mode string) error
-	DeleteSessionAgent(sessionID, agentID string) error
-	AssignSkillToAgent(agentID, skillID, config string) error
-	RemoveSkillFromAgent(agentID, skillID string) error
-	AddAgentProject(agentID, projectID string) error
-	RemoveAgentProject(agentID, projectID string) error
+	CreateAgent(ctx context.Context, a *store.AgentProfile) error
+	UpdateAgent(ctx context.Context, a *store.AgentProfile) error
+	DeleteAgent(ctx context.Context, slug string) error
+	UpsertAgentBySlug(ctx context.Context, a *store.AgentProfile) error
+	EnsureSessionAgent(ctx context.Context, sessionID, agentID, mode string, isPrimary bool) error
+	SetSessionAgentMode(ctx context.Context, sessionID, agentID, mode string) error
+	DeleteSessionAgent(ctx context.Context, sessionID, agentID string) error
+	AssignSkillToAgent(ctx context.Context, agentID, skillID, config string) error
+	RemoveSkillFromAgent(ctx context.Context, agentID, skillID string) error
+	AddAgentProject(ctx context.Context, agentID, projectID string) error
+	RemoveAgentProject(ctx context.Context, agentID, projectID string) error
 }
 
 // ToolStore provides access to MCP server configs and the catalog.
 type ToolStore interface {
-	ListMCPServers() ([]store.MCPServerConfig, error)
-	GetMCPServer(name string) (*store.MCPServerConfig, error)
-	CreateMCPServer(cfg *store.MCPServerConfig) error
-	UpdateMCPServer(cfg *store.MCPServerConfig) error
-	DeleteMCPServer(name string) error
-	ListCatalogSources() ([]store.CatalogSource, error)
-	GetCatalogSource(id string) (*store.CatalogSource, error)
-	CreateCatalogSource(name, url, sourceType string, priority int) (*store.CatalogSource, error)
-	UpdateCatalogSource(id, name, url string, enabled bool, priority int) error
-	SetCatalogSourcePublicKey(id, publicKey string) error
-	DeleteCatalogSource(id string) error
+	ListMCPServers(ctx context.Context) ([]store.MCPServerConfig, error)
+	GetMCPServer(ctx context.Context, name string) (*store.MCPServerConfig, error)
+	CreateMCPServer(ctx context.Context, cfg *store.MCPServerConfig) error
+	UpdateMCPServer(ctx context.Context, cfg *store.MCPServerConfig) error
+	DeleteMCPServer(ctx context.Context, name string) error
+	ListCatalogSources(ctx context.Context) ([]store.CatalogSource, error)
+	GetCatalogSource(ctx context.Context, id string) (*store.CatalogSource, error)
+	CreateCatalogSource(ctx context.Context, name, url, sourceType string, priority int) (*store.CatalogSource, error)
+	UpdateCatalogSource(ctx context.Context, id, name, url string, enabled bool, priority int) error
+	SetCatalogSourcePublicKey(ctx context.Context, id, publicKey string) error
+	DeleteCatalogSource(ctx context.Context, id string) error
 }
 
 // UsageStore provides access to token usage, execution metrics, and event logs.
 type UsageStore interface {
-	RecordUsage(sessionID, messageID, model string, inputTokens, outputTokens, toolInputTokens, cacheCreationTokens, cacheReadTokens int) error
-	GetSessionUsage(sessionID string) (*store.SessionUsageSummary, error)
-	GetUsageSummary() (*store.UsageSummary, error)
-	RecordExecutionMetrics(m *store.ExecutionMetrics) error
-	GetSessionExecutionMetrics(sessionID string) ([]store.ExecutionMetrics, error)
-	GetRecentExecutionMetrics(limit int) ([]store.ExecutionMetrics, error)
-	GetUtilityCallSummary() ([]store.UtilityCallSummary, error)
-	GetUtilityCallLog(limit int) ([]store.ExecutionMetrics, error)
-	LogEvent(sessionID, eventType, category, detail, metadata string)
-	ListEvents(category string, limit int) ([]store.EventLog, error)
-	CountSessionToolCalls(sessionID string) int
+	RecordUsage(ctx context.Context, sessionID, messageID, model string, inputTokens, outputTokens, toolInputTokens, cacheCreationTokens, cacheReadTokens int) error
+	GetSessionUsage(ctx context.Context, sessionID string) (*store.SessionUsageSummary, error)
+	GetUsageSummary(ctx context.Context) (*store.UsageSummary, error)
+	RecordExecutionMetrics(ctx context.Context, m *store.ExecutionMetrics) error
+	GetSessionExecutionMetrics(ctx context.Context, sessionID string) ([]store.ExecutionMetrics, error)
+	GetRecentExecutionMetrics(ctx context.Context, limit int) ([]store.ExecutionMetrics, error)
+	GetUtilityCallSummary(ctx context.Context) ([]store.UtilityCallSummary, error)
+	GetUtilityCallLog(ctx context.Context, limit int) ([]store.ExecutionMetrics, error)
+	LogEvent(ctx context.Context, sessionID, eventType, category, detail, metadata string)
+	ListEvents(ctx context.Context, category string, limit int) ([]store.EventLog, error)
+	CountSessionToolCalls(ctx context.Context, sessionID string) int
 }
 
 // SettingsStore provides access to user settings and plugin settings.
 type SettingsStore interface {
-	GetUserSettings() (*store.UserSettings, error)
-	UpdateUserSettings(us *store.UserSettings) error
-	GetPluginSettings(pluginID string) (*store.PluginSettings, error)
-	UpsertPluginSettings(pluginID string, settings map[string]any) error
-	UpsertPluginSchema(pluginID string, schema []store.ConfigField) error
-	ListPluginSettings() ([]*store.PluginSettings, error)
-	UpdatePluginIcon(pluginID, icon string) error
-	GetPluginSettingValue(pluginID, key string) (string, error)
+	GetUserSettings(ctx context.Context) (*store.UserSettings, error)
+	UpdateUserSettings(ctx context.Context, us *store.UserSettings) error
+	GetPluginSettings(ctx context.Context, pluginID string) (*store.PluginSettings, error)
+	UpsertPluginSettings(ctx context.Context, pluginID string, settings map[string]any) error
+	UpsertPluginSchema(ctx context.Context, pluginID string, schema []store.ConfigField) error
+	ListPluginSettings(ctx context.Context) ([]*store.PluginSettings, error)
+	UpdatePluginIcon(ctx context.Context, pluginID, icon string) error
+	GetPluginSettingValue(ctx context.Context, pluginID, key string) (string, error)
 }
 
 // ProjectStore provides access to projects. Formerly WorkspaceStore —
@@ -114,65 +114,65 @@ type SettingsStore interface {
 // under a workspace_id) was retired in full (Phase 0 item 20,
 // TASKS/phase-0/20-retire-workspaces-and-instance-mechanism.md).
 type ProjectStore interface {
-	ListProjects() ([]store.Project, error)
-	GetProject(id string) (*store.Project, error)
-	CreateProject(p *store.Project) error
-	UpdateProject(p *store.Project) error
-	DeleteProject(id string) error
+	ListProjects(ctx context.Context) ([]store.Project, error)
+	GetProject(ctx context.Context, id string) (*store.Project, error)
+	CreateProject(ctx context.Context, p *store.Project) error
+	UpdateProject(ctx context.Context, p *store.Project) error
+	DeleteProject(ctx context.Context, id string) error
 }
 
 // BookmarkStore provides access to message bookmarks.
 type BookmarkStore interface {
-	ListBookmarks(sessionID string) ([]store.Bookmark, error)
-	GetBookmark(id string) (*store.Bookmark, error)
-	GetBookmarkByMessage(messageID string) (*store.Bookmark, error)
-	CreateBookmark(b *store.Bookmark) error
-	DeleteBookmark(id string) error
-	UpdateBookmarkNote(id, note string) error
+	ListBookmarks(ctx context.Context, sessionID string) ([]store.Bookmark, error)
+	GetBookmark(ctx context.Context, id string) (*store.Bookmark, error)
+	GetBookmarkByMessage(ctx context.Context, messageID string) (*store.Bookmark, error)
+	CreateBookmark(ctx context.Context, b *store.Bookmark) error
+	DeleteBookmark(ctx context.Context, id string) error
+	UpdateBookmarkNote(ctx context.Context, id, note string) error
 }
 
 // ArtifactStore provides access to session artifacts.
 type ArtifactStore interface {
-	ListArtifacts(sessionID string) ([]store.Artifact, error)
-	ListArtifactsByOrigin(sessionID, origin string) ([]store.Artifact, error)
+	ListArtifacts(ctx context.Context, sessionID string) ([]store.Artifact, error)
+	ListArtifactsByOrigin(ctx context.Context, sessionID, origin string) ([]store.Artifact, error)
 	// ListArtifactsByProject returns artifacts whose owning session belongs
 	// to the given project. F4 (CW-20260429-0004): backs the right-rail
 	// "This Project" inherited-artifacts section. excludeSessionID, when
 	// non-empty, excludes artifacts owned by that session from the result.
-	ListArtifactsByProject(projectID, excludeSessionID string) ([]store.Artifact, error)
-	CreateArtifact(a *store.Artifact) error
-	GetArtifact(id string) (*store.Artifact, error)
+	ListArtifactsByProject(ctx context.Context, projectID, excludeSessionID string) ([]store.Artifact, error)
+	CreateArtifact(ctx context.Context, a *store.Artifact) error
+	GetArtifact(ctx context.Context, id string) (*store.Artifact, error)
 }
 
 // SkillStore provides CRUD access to skills (independent of agent bindings).
 type SkillStore interface {
-	ListSkills() ([]store.Skill, error)
-	GetSkill(id string) (*store.Skill, error)
-	GetSkillBySlug(slug string) (*store.Skill, error)
-	CreateSkill(sk *store.Skill) error
-	UpdateSkill(sk *store.Skill) error
-	DeleteSkill(id string) error
+	ListSkills(ctx context.Context) ([]store.Skill, error)
+	GetSkill(ctx context.Context, id string) (*store.Skill, error)
+	GetSkillBySlug(ctx context.Context, slug string) (*store.Skill, error)
+	CreateSkill(ctx context.Context, sk *store.Skill) error
+	UpdateSkill(ctx context.Context, sk *store.Skill) error
+	DeleteSkill(ctx context.Context, id string) error
 }
 
 // TodoStore provides CRUD access to internal todos.
 type TodoStore interface {
-	CreateTodo(t *store.Todo) error
-	GetTodo(id string) (*store.Todo, error)
-	ListTodos(f store.TodoFilter) ([]store.Todo, error)
-	UpdateTodo(t *store.Todo) error
-	UpdateTodoScope(id, scope, scopeID, projectID string) error
-	DeleteTodo(id string) error
-	ListTodoChildren(parentID string) ([]store.Todo, error)
+	CreateTodo(ctx context.Context, t *store.Todo) error
+	GetTodo(ctx context.Context, id string) (*store.Todo, error)
+	ListTodos(ctx context.Context, f store.TodoFilter) ([]store.Todo, error)
+	UpdateTodo(ctx context.Context, t *store.Todo) error
+	UpdateTodoScope(ctx context.Context, id, scope, scopeID, projectID string) error
+	DeleteTodo(ctx context.Context, id string) error
+	ListTodoChildren(ctx context.Context, parentID string) ([]store.Todo, error)
 }
 
 // PlanStore provides CRUD access to internal plans.
 type PlanStore interface {
-	CreatePlan(p *store.Plan) error
-	GetPlan(id string) (*store.Plan, error)
-	ListPlans(f store.PlanFilter) ([]store.Plan, error)
-	UpdatePlan(p *store.Plan) error
-	UpdatePlanStep(planID, stepID string, updates store.PlanStep) error
-	DeletePlan(id string) error
+	CreatePlan(ctx context.Context, p *store.Plan) error
+	GetPlan(ctx context.Context, id string) (*store.Plan, error)
+	ListPlans(ctx context.Context, f store.PlanFilter) ([]store.Plan, error)
+	UpdatePlan(ctx context.Context, p *store.Plan) error
+	UpdatePlanStep(ctx context.Context, planID, stepID string, updates store.PlanStep) error
+	DeletePlan(ctx context.Context, id string) error
 }
 
 // DefaultResolver is the minimal interface exposed by store.Store for
@@ -181,55 +181,55 @@ type PlanStore interface {
 // interface instead of the full Store so they remain easy to fake in
 // tests. CW-20260526-0003.
 type DefaultResolver interface {
-	ResolveProviderAndModel(explicitProvider, explicitModel string) (string, string, error)
-	DefaultModelForProvider(providerType string) (string, error)
+	ResolveProviderAndModel(ctx context.Context, explicitProvider, explicitModel string) (string, string, error)
+	DefaultModelForProvider(ctx context.Context, providerType string) (string, error)
 }
 
 // ProviderStore provides access to provider and model configuration.
 type ProviderStore interface {
-	ListProviders() ([]store.ProviderConfig, error)
-	GetProvider(id string) (*store.ProviderConfig, error)
-	ListModels() ([]store.Model, error)
-	UpdateProvider(id string, u store.ProviderUpdate) error
+	ListProviders(ctx context.Context) ([]store.ProviderConfig, error)
+	GetProvider(ctx context.Context, id string) (*store.ProviderConfig, error)
+	ListModels(ctx context.Context) ([]store.Model, error)
+	UpdateProvider(ctx context.Context, id string, u store.ProviderUpdate) error
 
 	// DefaultModelForProvider returns providers.default_model for the
 	// given provider_type, or an ErrNoDefaultModel-wrapped error when
 	// no row supplies one (CW-20260526-0003).
-	DefaultModelForProvider(providerType string) (string, error)
+	DefaultModelForProvider(ctx context.Context, providerType string) (string, error)
 
 	// ResolveProviderAndModel walks explicit args →
 	// user_settings.default_{provider,model} → providers.default_model
 	// for the resolved provider_type, returning ErrNoDefaultModel when
 	// the chain is dry (CW-20260526-0003). This is the SSOT for
 	// "what provider+model should this call use?"
-	ResolveProviderAndModel(explicitProvider, explicitModel string) (string, string, error)
+	ResolveProviderAndModel(ctx context.Context, explicitProvider, explicitModel string) (string, string, error)
 }
 
 // HandoffStashStore covers session handoff stash persistence + retrieval
 // (P7, CW-20260420-0024 — write; Glass-4, CW-20260502-0015 — read).
 type HandoffStashStore interface {
-	UpsertHandoffStash(stash store.HandoffStash) error
-	GetHandoffStash(sessionID, stashID string) (store.HandoffStash, error)
-	GetLatestStashForSession(sessionID string) (store.HandoffStash, error)
+	UpsertHandoffStash(ctx context.Context, stash store.HandoffStash) error
+	GetHandoffStash(ctx context.Context, sessionID, stashID string) (store.HandoffStash, error)
+	GetLatestStashForSession(ctx context.Context, sessionID string) (store.HandoffStash, error)
 }
 
 // ReminderStore covers reminder persistence (J11, CW-20260426-0009; D1, CW-20260428-0014).
 type ReminderStore interface {
-	CreateReminder(r store.Reminder) error
-	GetReminder(id string) (store.Reminder, error)
-	ListUnfiredReminders(sessionID string) ([]store.Reminder, error)
-	MarkReminderFired(id string) error
-	UpdateReminderScope(id, scope, projectID string) error
-	DeleteReminder(id string) error
+	CreateReminder(ctx context.Context, r store.Reminder) error
+	GetReminder(ctx context.Context, id string) (store.Reminder, error)
+	ListUnfiredReminders(ctx context.Context, sessionID string) ([]store.Reminder, error)
+	MarkReminderFired(ctx context.Context, id string) error
+	UpdateReminderScope(ctx context.Context, id, scope, projectID string) error
+	DeleteReminder(ctx context.Context, id string) error
 }
 
 // PinnedContentStore covers pinned content persistence (J11, CW-20260426-0009; D1, CW-20260428-0014).
 type PinnedContentStore interface {
-	CreatePinnedContent(p store.PinnedContent) error
-	ListPinnedContent(sessionID string) ([]store.PinnedContent, error)
-	DeletePinnedContent(id string) error
-	UpdatePinScope(id, scope, projectID string) error
-	ClearSessionPins(sessionID string) error
+	CreatePinnedContent(ctx context.Context, p store.PinnedContent) error
+	ListPinnedContent(ctx context.Context, sessionID string) ([]store.PinnedContent, error)
+	DeletePinnedContent(ctx context.Context, id string) error
+	UpdatePinScope(ctx context.Context, id, scope, projectID string) error
+	ClearSessionPins(ctx context.Context, sessionID string) error
 }
 
 // CompactionEventStore covers structured compaction-event persistence and
@@ -245,8 +245,8 @@ type CompactionEventStore interface {
 // Services that need the full surface (e.g. the Container constructor) use this.
 // EnvelopeStore covers persistence for envelope instances emitted during a chat turn.
 type EnvelopeStore interface {
-	CreateEnvelopeInstance(inst *store.EnvelopeInstance) error
-	GetEnvelopeInstance(id string) (*store.EnvelopeInstance, error)
+	CreateEnvelopeInstance(ctx context.Context, inst *store.EnvelopeInstance) error
+	GetEnvelopeInstance(ctx context.Context, id string) (*store.EnvelopeInstance, error)
 }
 
 // SubagentRunsReader exposes the narrow query the chat loop needs to
@@ -257,7 +257,7 @@ type EnvelopeStore interface {
 // id + role + child_session_id for structured logging, or empty values
 // when there is no active subagent for the parent session.
 type SubagentRunsReader interface {
-	ActiveSubagentRunForParent(parentSessionID string) (id, role, childSessionID string, ok bool, err error)
+	ActiveSubagentRunForParent(ctx context.Context, parentSessionID string) (id, role, childSessionID string, ok bool, err error)
 }
 
 type Store interface {
@@ -285,14 +285,14 @@ type Store interface {
 	// AgentRuntimeProviderSessionID returns the captured provider session id
 	// for a chat session's runtime row, or "" when none. CW-20260525-0001
 	// Slice 3 — resume a CLI provider session after a host restart.
-	AgentRuntimeProviderSessionID(id string) (string, error)
+	AgentRuntimeProviderSessionID(ctx context.Context, id string) (string, error)
 
 	// SetAgentRuntimeProviderSessionID overwrites (or clears with "") the
 	// captured provider_session_id on a chat session's runtime row.
 	// CW-20260525-0001 Slice 3 follow-up — used by stale-resume detection
 	// to clear an expired id after a fast-exit-after-resume so the next
 	// turn cold-boots without --resume.
-	SetAgentRuntimeProviderSessionID(id, providerSessionID string) error
+	SetAgentRuntimeProviderSessionID(ctx context.Context, id, providerSessionID string) error
 
 	// ListEnabledAgentContextResolvers returns an agent's enabled
 	// cmd/http dynamic context resolvers (Phase 2 item 02,

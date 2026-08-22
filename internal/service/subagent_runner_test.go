@@ -397,7 +397,7 @@ type stubAgentReaderForRunner struct {
 	agents map[string]*store.AgentProfile
 }
 
-func (s *stubAgentReaderForRunner) GetAgentBySlug(slug string) (*store.AgentProfile, error) {
+func (s *stubAgentReaderForRunner) GetAgentBySlug(ctx context.Context, slug string) (*store.AgentProfile, error) {
 	a, ok := s.agents[slug]
 	if !ok {
 		// Mirror store.GetAgentBySlug — wrap sql.ErrNoRows with %w so
@@ -470,7 +470,9 @@ func TestChatRunner_ResolveRoleSurfacesNonNoRowsError(t *testing.T) {
 // errors with a silent fallback.
 type errAgentReader struct{ err error }
 
-func (e errAgentReader) GetAgentBySlug(string) (*store.AgentProfile, error) { return nil, e.err }
+func (e errAgentReader) GetAgentBySlug(context.Context, string) (*store.AgentProfile, error) {
+	return nil, e.err
+}
 
 func agentSlugOrEmpty(a *store.AgentProfile) string {
 	if a == nil {
@@ -492,24 +494,24 @@ type sessionAgentBinding struct {
 	isPrimary                bool
 }
 
-func (r *recordingSessionStore) CreateSession(s *store.Session) error {
+func (r *recordingSessionStore) CreateSession(ctx context.Context, s *store.Session) error {
 	r.created = append(r.created, s)
 	return nil
 }
 
-func (r *recordingSessionStore) GetSession(id string) (*store.Session, error) {
+func (r *recordingSessionStore) GetSession(ctx context.Context, id string) (*store.Session, error) {
 	if s, ok := r.parents[id]; ok {
 		return s, nil
 	}
 	return nil, fmt.Errorf("session not found: %s", id)
 }
 
-func (r *recordingSessionStore) EnsureSessionAgent(sessionID, agentID, mode string, isPrimary bool) error {
+func (r *recordingSessionStore) EnsureSessionAgent(ctx context.Context, sessionID, agentID, mode string, isPrimary bool) error {
 	r.bindings = append(r.bindings, sessionAgentBinding{sessionID, agentID, mode, isPrimary})
 	return nil
 }
 
-func (r *recordingSessionStore) CreateMessage(m *store.Message) error {
+func (r *recordingSessionStore) CreateMessage(ctx context.Context, m *store.Message) error {
 	r.messages = append(r.messages, m)
 	return nil
 }
@@ -717,15 +719,17 @@ type messageFailingStore struct {
 	createMessageErr error
 }
 
-func (m *messageFailingStore) CreateMessage(msg *store.Message) error {
+func (m *messageFailingStore) CreateMessage(ctx context.Context, msg *store.Message) error {
 	if m.createMessageErr != nil {
 		return m.createMessageErr
 	}
-	return m.recordingSessionStore.CreateMessage(msg)
+	return m.recordingSessionStore.CreateMessage(context.Background(
+
+	// TestChatRunner_ProviderOverride_UsesFallbackWhenEmpty verifies that
+	// when run.Provider is empty, createChildSession uses agent.DefaultProvider.
+	), msg)
 }
 
-// TestChatRunner_ProviderOverride_UsesFallbackWhenEmpty verifies that
-// when run.Provider is empty, createChildSession uses agent.DefaultProvider.
 func TestChatRunner_ProviderOverride_UsesFallbackWhenEmpty(t *testing.T) {
 	fake := &fakeChatService{events: []chat.StreamEvent{
 		{Type: "delta", Content: "done"},

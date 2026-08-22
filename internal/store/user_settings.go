@@ -1,6 +1,7 @@
 package store
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"time"
@@ -94,7 +95,7 @@ type UserSettings struct {
 }
 
 // GetUserSettings returns the singleton user settings row.
-func (s *Store) GetUserSettings() (*UserSettings, error) {
+func (s *Store) GetUserSettings(ctx context.Context) (*UserSettings, error) {
 	var chainJSON, provider, model, agent string
 	var utilProvider, utilModel, toolMode, settingsJSON string
 	var toolStreamBehavior string
@@ -115,7 +116,7 @@ func (s *Store) GetUserSettings() (*UserSettings, error) {
 	var subagentApprovalRequired bool
 	var subagentApprovalTimeoutSeconds int
 	var autoRepairPref string
-	err := s.DB.QueryRow(
+	err := s.DB.QueryRowContext(ctx,
 		`SELECT provider_fallback_chain, default_provider, default_model,
 		        default_agent, utility_provider, utility_model, tool_call_display_mode, settings,
 		        developer_mode, recover_mode, tool_stream_behavior, tool_drawer_retention,
@@ -204,7 +205,7 @@ func (s *Store) GetUserSettings() (*UserSettings, error) {
 }
 
 // UpdateUserSettings updates the singleton user settings row.
-func (s *Store) UpdateUserSettings(us *UserSettings) error {
+func (s *Store) UpdateUserSettings(ctx context.Context, us *UserSettings) error {
 	chain := us.ProviderFallbackChain
 	if chain == nil {
 		chain = []string{}
@@ -305,7 +306,7 @@ func (s *Store) UpdateUserSettings(us *UserSettings) error {
 	default:
 		return fmt.Errorf("update user settings: unknown auto_repair_pref %q (must be \"\", \"always\", or \"never\")", autoRepairPref)
 	}
-	_, err = s.DB.Exec(
+	_, err = s.DB.ExecContext(ctx,
 		`UPDATE user_settings SET
 			provider_fallback_chain = ?,
 			default_provider = ?,

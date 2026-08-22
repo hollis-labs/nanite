@@ -1,6 +1,7 @@
 package service
 
 import (
+	"context"
 	"os"
 	"sync"
 	"time"
@@ -53,7 +54,7 @@ func buildToolIntentClassifier(reg *provider.Registry, s *store.Store) intent.Cl
 	if s == nil {
 		return intent.NewBrokerClassifier(rules, nil)
 	}
-	us, err := s.GetUserSettings()
+	us, err := s.GetUserSettings(context.TODO() /* TODO(ctx-sweep): no ctx available at this call site */)
 	if err != nil || us == nil {
 		return intent.NewBrokerClassifier(rules, nil)
 	}
@@ -74,7 +75,7 @@ func buildToolIntentClassifier(reg *provider.Registry, s *store.Store) intent.Cl
 	// is intentional — the registry lookup below treats unknown providers
 	// as "no LLM classifier," and the broker-only path still works.
 	if provName == "" || model == "" {
-		if rp, rm, err := s.ResolveProviderAndModel(provName, model); err == nil {
+		if rp, rm, err := s.ResolveProviderAndModel(context.TODO() /* TODO(ctx-sweep): no ctx available at this call site */, provName, model); err == nil {
 			provName = rp
 			model = rm
 		}
@@ -132,14 +133,14 @@ func buildRepairConfig(reg *provider.Registry, s *store.Store, utilityProvider s
 		provName = utilityProvider
 	}
 	if provName == "" && s != nil {
-		if us, err := s.GetUserSettings(); err == nil && us != nil {
+		if us, err := s.GetUserSettings(context.TODO() /* TODO(ctx-sweep): no ctx available at this call site */); err == nil && us != nil {
 			if us.UtilityProvider != "" {
 				provName = us.UtilityProvider
 			}
 		}
 	}
 	if provName == "" && s != nil {
-		if rp, _, err := s.ResolveProviderAndModel("", ""); err == nil {
+		if rp, _, err := s.ResolveProviderAndModel(context.TODO() /* TODO(ctx-sweep): no ctx available at this call site */, "", ""); err == nil {
 			provName = rp
 		}
 	}

@@ -25,7 +25,7 @@ import (
 func TestEvaluateState_DispatchToAgent_ExcludedFromGenericPass(t *testing.T) {
 	ctx := context.Background()
 	st := newReflexTestStore(t)
-	if err := st.CreateAgent(&store.AgentProfile{
+	if err := st.CreateAgent(context.Background(), &store.AgentProfile{
 		ID:           "agent-dispatch-probe",
 		Name:         "Agent Dispatch Probe",
 		Slug:         "agent-dispatch-probe",
@@ -99,7 +99,7 @@ func TestEvaluateState_DispatchToAgent_ExcludedFromGenericPass(t *testing.T) {
 func TestEvaluateState_DispatchToAgent_DoesNotBlockOtherActionKinds(t *testing.T) {
 	ctx := context.Background()
 	st := newReflexTestStore(t)
-	if err := st.CreateAgent(&store.AgentProfile{
+	if err := st.CreateAgent(context.Background(), &store.AgentProfile{
 		ID:           "agent-mixed-probe",
 		Name:         "Agent Mixed Probe",
 		Slug:         "agent-mixed-probe",
@@ -201,7 +201,7 @@ func TestEvaluateState_DispatchToAgent_DoesNotBlockOtherActionKinds(t *testing.T
 func TestEvaluateState_DispatchToAgent_RunScopedRowAlsoExcludedFromGenericPass(t *testing.T) {
 	ctx := context.Background()
 	st := newReflexTestStore(t)
-	if err := st.CreateAgent(&store.AgentProfile{
+	if err := st.CreateAgent(context.Background(), &store.AgentProfile{
 		ID:           "agent-dispatch-run-scoped-probe",
 		Name:         "Agent Dispatch Run Scoped Probe",
 		Slug:         "agent-dispatch-run-scoped-probe",

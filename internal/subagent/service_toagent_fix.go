@@ -1,5 +1,7 @@
 package subagent
 
+import "context"
+
 // This file contains the ToAgentID identity-resolution fix (CW-20260815-0027),
 // mirroring the FromAgentID fix from CW-20260815-0023.
 
@@ -24,7 +26,7 @@ func (svc *Service) replyToAgentID(parentAgentID string) string {
 		// Try to resolve as a slug first. If parentAgentID is already a valid
 		// UUID or file-based ID, GetAgentBySlug will return no rows and we'll
 		// fall through to returning it unchanged.
-		if profile, err := svc.profiles.GetAgentBySlug(parentAgentID); err == nil && profile.ID != "" {
+		if profile, err := svc.profiles.GetAgentBySlug(context.TODO() /* TODO(ctx-sweep): no ctx available at this call site */, parentAgentID); err == nil && profile.ID != "" {
 			return profile.ID
 		}
 	}

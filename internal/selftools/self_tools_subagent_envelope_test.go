@@ -32,7 +32,7 @@ func gatedSubagentTestTransport(t *testing.T, runner subagent.Runner) *SelfTools
 	if err != nil {
 		t.Fatalf("store.New: %v", err)
 	}
-	t.Cleanup(func() { _ = s.Close(); _ = os.Remove(dbPath) })
+	t.Cleanup(func() { _ = s.Close(context.Background()); _ = os.Remove(dbPath) })
 
 	emitter := &gatedApprovalEmitter{}
 	settings := gatedSettingsReader{us: store.UserSettings{SubagentApprovalRequired: true}}
@@ -44,7 +44,7 @@ func gatedSubagentTestTransport(t *testing.T, runner subagent.Runner) *SelfTools
 // service's gating predicate fires.
 type gatedSettingsReader struct{ us store.UserSettings }
 
-func (g gatedSettingsReader) GetUserSettings() (*store.UserSettings, error) {
+func (g gatedSettingsReader) GetUserSettings(ctx context.Context) (*store.UserSettings, error) {
 	cp := g.us
 	return &cp, nil
 }
@@ -73,7 +73,7 @@ func newSubagentTestTransport(t *testing.T, runner subagent.Runner) *SelfToolsTr
 	if err != nil {
 		t.Fatalf("store.New: %v", err)
 	}
-	t.Cleanup(func() { _ = s.Close(); _ = os.Remove(dbPath) })
+	t.Cleanup(func() { _ = s.Close(context.Background()); _ = os.Remove(dbPath) })
 	svc := subagent.NewService(s.DB, runner, nil, nil, nil)
 	return &SelfToolsTransport{Store: s, Subagent: svc}
 }
@@ -486,7 +486,7 @@ func TestRecoverSyncSummary_StoreError_ReturnsError(t *testing.T) {
 
 	// Close the store so ListMessages fails with sql: database is closed —
 	// the exact backend-fault shape the round-1 fix targets.
-	if err := s.Close(); err != nil {
+	if err := s.Close(context.Background()); err != nil {
 		t.Fatalf("store.Close: %v", err)
 	}
 
@@ -570,7 +570,7 @@ func TestSyncSubagentEnvelope_RecoverSummaryError_EmitsInternalNotEmptyReply(t *
 	// "sql: database is closed" — production routes either to
 	// ErrorKindInternal. The round-1 #3 contract: NEVER
 	// ErrorKindEmptyReply for a backend fault.
-	if err := s.Close(); err != nil {
+	if err := s.Close(context.Background()); err != nil {
 		t.Fatalf("store.Close: %v", err)
 	}
 

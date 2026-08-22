@@ -1,6 +1,7 @@
 package store
 
 import (
+	"context"
 	"database/sql"
 	"errors"
 	"fmt"
@@ -31,14 +32,14 @@ var ErrEnvelopeAlreadyResponded = errors.New("envelope already responded")
 // CreateEnvelopeInstance persists a new envelope instance. If ID is empty, a
 // new UUIDv4 is generated and assigned on the passed-in pointer. The caller
 // should inject the resulting ID into the envelope JSON before streaming.
-func (s *Store) CreateEnvelopeInstance(inst *EnvelopeInstance) error {
+func (s *Store) CreateEnvelopeInstance(ctx context.Context, inst *EnvelopeInstance) error {
 	if inst.ID == "" {
 		inst.ID = uuid.NewString()
 	}
 	if inst.EmittedAt.IsZero() {
 		inst.EmittedAt = time.Now().UTC()
 	}
-	_, err := s.DB.Exec(
+	_, err := s.DB.ExecContext(ctx,
 		`INSERT INTO envelope_instances (id, session_id, envelope_type, envelope_json, emitted_at)
 		 VALUES (?, ?, ?, ?, ?)`,
 		inst.ID, inst.SessionID, inst.EnvelopeType, inst.EnvelopeJSON,
@@ -51,12 +52,12 @@ func (s *Store) CreateEnvelopeInstance(inst *EnvelopeInstance) error {
 }
 
 // GetEnvelopeInstance returns the instance by ID, or sql.ErrNoRows if missing.
-func (s *Store) GetEnvelopeInstance(id string) (*EnvelopeInstance, error) {
+func (s *Store) GetEnvelopeInstance(ctx context.Context, id string) (*EnvelopeInstance, error) {
 	var inst EnvelopeInstance
 	var emittedAt string
 	var respondedAt, responseStatus, responseJSON sql.NullString
 
-	err := s.DB.QueryRow(
+	err := s.DB.QueryRowContext(ctx,
 		`SELECT id, session_id, envelope_type, envelope_json, emitted_at,
 		        responded_at, response_status, response_json
 		 FROM envelope_instances WHERE id = ?`,
@@ -89,8 +90,8 @@ func (s *Store) GetEnvelopeInstance(id string) (*EnvelopeInstance, error) {
 
 // ListEnvelopeInstancesBySession returns every envelope instance for a session,
 // ordered by emitted_at ASC.
-func (s *Store) ListEnvelopeInstancesBySession(sessionID string) ([]EnvelopeInstance, error) {
-	rows, err := s.DB.Query(
+func (s *Store) ListEnvelopeInstancesBySession(ctx context.Context, sessionID string) ([]EnvelopeInstance, error) {
+	rows, err := s.DB.QueryContext(ctx,
 		`SELECT id, session_id, envelope_type, envelope_json, emitted_at,
 		        responded_at, response_status, response_json
 		   FROM envelope_instances
@@ -148,9 +149,9 @@ func (s *Store) ListEnvelopeInstancesBySession(sessionID string) ([]EnvelopeInst
 // ResponseHandler multiple times (which would duplicate side effects).
 // The final response_status + response_json are written via
 // UpdateEnvelopeResponse once the handler finishes.
-func (s *Store) ClaimEnvelopeForResponse(id string) error {
+func (s *Store) ClaimEnvelopeForResponse(ctx context.Context, id string) error {
 	now := time.Now().UTC().Format(time.RFC3339Nano)
-	res, err := s.DB.Exec(
+	res, err := s.DB.ExecContext(ctx,
 		`UPDATE envelope_instances
 		   SET responded_at = ?, response_status = 'handling'
 		 WHERE id = ? AND responded_at IS NULL`,
@@ -164,7 +165,7 @@ func (s *Store) ClaimEnvelopeForResponse(id string) error {
 		return fmt.Errorf("claim envelope for response: rows affected: %w", err)
 	}
 	if n == 0 {
-		existing, qerr := s.GetEnvelopeInstance(id)
+		existing, qerr := s.GetEnvelopeInstance(ctx, id)
 		if qerr != nil {
 			return qerr
 		}
@@ -180,8 +181,8 @@ func (s *Store) ClaimEnvelopeForResponse(id string) error {
 // envelope instance that has already been claimed via ClaimEnvelopeForResponse.
 // Safe to call unconditionally once the claim succeeds; the row is already
 // held by this caller.
-func (s *Store) UpdateEnvelopeResponse(id, status, responseJSON string) error {
-	_, err := s.DB.Exec(
+func (s *Store) UpdateEnvelopeResponse(ctx context.Context, id, status, responseJSON string) error {
+	_, err := s.DB.ExecContext(ctx,
 		`UPDATE envelope_instances
 		   SET response_status = ?, response_json = ?
 		 WHERE id = ?`,
@@ -202,9 +203,9 @@ func (s *Store) UpdateEnvelopeResponse(id, status, responseJSON string) error {
 // a handler between the claim and the final write. Request-handling code
 // should use ClaimEnvelopeForResponse + UpdateEnvelopeResponse to prevent
 // duplicate handler invocations under concurrent submissions.
-func (s *Store) RecordResponse(id, status, responseJSON string) error {
+func (s *Store) RecordResponse(ctx context.Context, id, status, responseJSON string) error {
 	now := time.Now().UTC().Format(time.RFC3339Nano)
-	res, err := s.DB.Exec(
+	res, err := s.DB.ExecContext(ctx,
 		`UPDATE envelope_instances
 		   SET responded_at = ?, response_status = ?, response_json = ?
 		 WHERE id = ? AND responded_at IS NULL`,
@@ -219,7 +220,7 @@ func (s *Store) RecordResponse(id, status, responseJSON string) error {
 	}
 	if n == 0 {
 		// Either row is missing or already responded. Distinguish by re-reading.
-		existing, qerr := s.GetEnvelopeInstance(id)
+		existing, qerr := s.GetEnvelopeInstance(ctx, id)
 		if qerr != nil {
 			return qerr
 		}

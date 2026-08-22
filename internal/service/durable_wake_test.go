@@ -11,7 +11,7 @@ import (
 func TestDurableWakeListDueAndDryRun(t *testing.T) {
 	st := newDurableAgentServiceTestStore(t)
 	profile := &store.AgentProfile{Name: "Wake Agent", Slug: "wake-agent", SystemPrompt: "x"}
-	if err := st.CreateAgent(profile); err != nil {
+	if err := st.CreateAgent(context.Background(), profile); err != nil {
 		t.Fatalf("CreateAgent: %v", err)
 	}
 	inst := &store.DurableAgentInstance{
@@ -23,7 +23,7 @@ func TestDurableWakeListDueAndDryRun(t *testing.T) {
 		Model:          "model-a",
 		RuntimeKind:    "api",
 	}
-	if err := st.CreateDurableAgentInstance(inst); err != nil {
+	if err := st.CreateDurableAgentInstance(context.Background(), inst); err != nil {
 		t.Fatalf("CreateDurableAgentInstance: %v", err)
 	}
 	ctx := context.Background()
@@ -80,11 +80,11 @@ func TestDurableWakeRunDueStartsAttachedSessionAndBumpsSchedule(t *testing.T) {
 	st := newDurableAgentServiceTestStore(t)
 	ctx := context.Background()
 	profile := &store.AgentProfile{Name: "Wake Start Agent", Slug: "wake-start-agent", SystemPrompt: "x"}
-	if err := st.CreateAgent(profile); err != nil {
+	if err := st.CreateAgent(context.Background(), profile); err != nil {
 		t.Fatalf("CreateAgent: %v", err)
 	}
 	seedSession := &store.Session{Provider: "anthropic", Model: "model-a"}
-	if err := st.CreateSession(seedSession); err != nil {
+	if err := st.CreateSession(context.Background(), seedSession); err != nil {
 		t.Fatalf("CreateSession: %v", err)
 	}
 	inst := &store.DurableAgentInstance{
@@ -97,10 +97,10 @@ func TestDurableWakeRunDueStartsAttachedSessionAndBumpsSchedule(t *testing.T) {
 		RuntimeKind:      "api",
 		CurrentSessionID: seedSession.ID,
 	}
-	if err := st.CreateDurableAgentInstance(inst); err != nil {
+	if err := st.CreateDurableAgentInstance(context.Background(), inst); err != nil {
 		t.Fatalf("CreateDurableAgentInstance: %v", err)
 	}
-	if err := st.AttachDurableAgentInstanceSession(inst.ID, seedSession.ID, store.DurableAgentSessionRelationWake); err != nil {
+	if err := st.AttachDurableAgentInstanceSession(context.Background(), inst.ID, seedSession.ID, store.DurableAgentSessionRelationWake); err != nil {
 		t.Fatalf("AttachDurableAgentInstanceSession: %v", err)
 	}
 	if err := st.InsertAgentSchedule(ctx, store.AgentSchedule{
@@ -148,7 +148,7 @@ func TestDurableWakeRunDueSkipsPausedAndActiveInstances(t *testing.T) {
 	st := newDurableAgentServiceTestStore(t)
 	ctx := context.Background()
 	profile := &store.AgentProfile{Name: "Wake Skip Agent", Slug: "wake-skip-agent", SystemPrompt: "x"}
-	if err := st.CreateAgent(profile); err != nil {
+	if err := st.CreateAgent(context.Background(), profile); err != nil {
 		t.Fatalf("CreateAgent: %v", err)
 	}
 	// "active" uses DurableAgentClassTemplate, not Process: per the
@@ -164,7 +164,7 @@ func TestDurableWakeRunDueSkipsPausedAndActiveInstances(t *testing.T) {
 		{Name: "active", Slug: "active", ProfileID: profile.ID, LifecycleClass: store.DurableAgentClassTemplate, Status: store.DurableAgentStatusActive},
 	}
 	for i := range instances {
-		if err := st.CreateDurableAgentInstance(&instances[i]); err != nil {
+		if err := st.CreateDurableAgentInstance(context.Background(), &instances[i]); err != nil {
 			t.Fatalf("CreateDurableAgentInstance %d: %v", i, err)
 		}
 	}
@@ -208,7 +208,7 @@ func TestDurableWakeNoAttachedSessionStillSucceeds(t *testing.T) {
 	st := newDurableAgentServiceTestStore(t)
 	ctx := context.Background()
 	profile := &store.AgentProfile{Name: "Wake Agent 2", Slug: "wake-agent-2", SystemPrompt: "x"}
-	if err := st.CreateAgent(profile); err != nil {
+	if err := st.CreateAgent(context.Background(), profile); err != nil {
 		t.Fatalf("CreateAgent: %v", err)
 	}
 	inst := &store.DurableAgentInstance{
@@ -220,7 +220,7 @@ func TestDurableWakeNoAttachedSessionStillSucceeds(t *testing.T) {
 		Model:          "model-a",
 		RuntimeKind:    "api",
 	}
-	if err := st.CreateDurableAgentInstance(inst); err != nil {
+	if err := st.CreateDurableAgentInstance(context.Background(), inst); err != nil {
 		t.Fatalf("CreateDurableAgentInstance: %v", err)
 	}
 
@@ -235,7 +235,7 @@ func TestDurableWakeNoAttachedSessionStillSucceeds(t *testing.T) {
 	if result.LaunchResult == nil || result.LaunchResult.Session == nil {
 		t.Fatalf("wake result missing launch_result/session: %+v", result)
 	}
-	events, err := st.ListDurableAgentEvents(inst.ID, 20)
+	events, err := st.ListDurableAgentEvents(context.Background(), inst.ID, 20)
 	if err != nil {
 		t.Fatalf("ListDurableAgentEvents: %v", err)
 	}
@@ -267,11 +267,11 @@ func TestDurableWakeProcessClassRewakeableWhileActive(t *testing.T) {
 	st := newDurableAgentServiceTestStore(t)
 	ctx := context.Background()
 	profile := &store.AgentProfile{Name: "Rewake Agent", Slug: "rewake-agent", SystemPrompt: "x", Class: "process", ActivationMode: "fresh-per-wake"}
-	if err := st.CreateAgent(profile); err != nil {
+	if err := st.CreateAgent(context.Background(), profile); err != nil {
 		t.Fatalf("CreateAgent: %v", err)
 	}
 	priorSession := &store.Session{Provider: "anthropic", Model: "model-a"}
-	if err := st.CreateSession(priorSession); err != nil {
+	if err := st.CreateSession(context.Background(), priorSession); err != nil {
 		t.Fatalf("CreateSession: %v", err)
 	}
 	inst := &store.DurableAgentInstance{
@@ -285,10 +285,10 @@ func TestDurableWakeProcessClassRewakeableWhileActive(t *testing.T) {
 		Status:           store.DurableAgentStatusActive,
 		CurrentSessionID: priorSession.ID,
 	}
-	if err := st.CreateDurableAgentInstance(inst); err != nil {
+	if err := st.CreateDurableAgentInstance(context.Background(), inst); err != nil {
 		t.Fatalf("CreateDurableAgentInstance: %v", err)
 	}
-	if err := st.AttachDurableAgentInstanceSession(inst.ID, priorSession.ID, store.DurableAgentSessionRelationWake); err != nil {
+	if err := st.AttachDurableAgentInstanceSession(context.Background(), inst.ID, priorSession.ID, store.DurableAgentSessionRelationWake); err != nil {
 		t.Fatalf("AttachDurableAgentInstanceSession: %v", err)
 	}
 
@@ -321,7 +321,7 @@ func TestDurableWakeAdvisorClassStillBlockedWhileActive(t *testing.T) {
 	st := newDurableAgentServiceTestStore(t)
 	ctx := context.Background()
 	profile := &store.AgentProfile{Name: "Advisor Agent", Slug: "advisor-agent", SystemPrompt: "x", Class: "advisor"}
-	if err := st.CreateAgent(profile); err != nil {
+	if err := st.CreateAgent(context.Background(), profile); err != nil {
 		t.Fatalf("CreateAgent: %v", err)
 	}
 	if profile.ActivationMode != "singleton" {
@@ -337,7 +337,7 @@ func TestDurableWakeAdvisorClassStillBlockedWhileActive(t *testing.T) {
 		RuntimeKind:    "api",
 		Status:         store.DurableAgentStatusActive,
 	}
-	if err := st.CreateDurableAgentInstance(inst); err != nil {
+	if err := st.CreateDurableAgentInstance(context.Background(), inst); err != nil {
 		t.Fatalf("CreateDurableAgentInstance: %v", err)
 	}
 
@@ -369,11 +369,11 @@ func TestDurableWakeTemplateClassRewakeableWhileActive(t *testing.T) {
 	st := newDurableAgentServiceTestStore(t)
 	ctx := context.Background()
 	profile := &store.AgentProfile{Name: "Template Rewake Agent", Slug: "template-rewake-agent", SystemPrompt: "x", Class: "template", ActivationMode: "fresh-per-wake"}
-	if err := st.CreateAgent(profile); err != nil {
+	if err := st.CreateAgent(context.Background(), profile); err != nil {
 		t.Fatalf("CreateAgent: %v", err)
 	}
 	priorSession := &store.Session{Provider: "anthropic", Model: "model-a"}
-	if err := st.CreateSession(priorSession); err != nil {
+	if err := st.CreateSession(context.Background(), priorSession); err != nil {
 		t.Fatalf("CreateSession: %v", err)
 	}
 	inst := &store.DurableAgentInstance{
@@ -387,10 +387,10 @@ func TestDurableWakeTemplateClassRewakeableWhileActive(t *testing.T) {
 		Status:           store.DurableAgentStatusActive,
 		CurrentSessionID: priorSession.ID,
 	}
-	if err := st.CreateDurableAgentInstance(inst); err != nil {
+	if err := st.CreateDurableAgentInstance(context.Background(), inst); err != nil {
 		t.Fatalf("CreateDurableAgentInstance: %v", err)
 	}
-	if err := st.AttachDurableAgentInstanceSession(inst.ID, priorSession.ID, store.DurableAgentSessionRelationWake); err != nil {
+	if err := st.AttachDurableAgentInstanceSession(context.Background(), inst.ID, priorSession.ID, store.DurableAgentSessionRelationWake); err != nil {
 		t.Fatalf("AttachDurableAgentInstanceSession: %v", err)
 	}
 

@@ -51,7 +51,7 @@ func TestMigrate115AddsOptOutColumnAndTable(t *testing.T) {
 
 	// The opt-out table exists and enforces its FKs / PK.
 	agent := &AgentProfile{Name: "Opt-Out Probe", Slug: "opt-out-probe", SystemPrompt: "x", Class: "process"}
-	if err := s.CreateAgent(agent); err != nil {
+	if err := s.CreateAgent(context.Background(), agent); err != nil {
 		t.Fatalf("CreateAgent: %v", err)
 	}
 	if err := s.SetAgentReflexOptOut(ctx, agent.ID, id); err != nil {
@@ -91,7 +91,7 @@ func TestMigrate115AddsOptOutColumnAndTable(t *testing.T) {
 	assertGooseHasNothingPending(t, s)
 
 	// Simulated restart: a second full migrate() must be a clean no-op.
-	if err := s.migrate(); err != nil {
+	if err := s.migrate(context.Background()); err != nil {
 		t.Fatalf("re-migrate after 115 already applied: %v", err)
 	}
 }
@@ -119,14 +119,14 @@ func TestMigrate115AgentDeleteCascadesOptOuts(t *testing.T) {
 	}
 
 	agent := &AgentProfile{Name: "Opt-Out Agent Delete Probe", Slug: "opt-out-agent-delete-probe", SystemPrompt: "x", Class: "process"}
-	if err := s.CreateAgent(agent); err != nil {
+	if err := s.CreateAgent(context.Background(), agent); err != nil {
 		t.Fatalf("CreateAgent: %v", err)
 	}
 	if err := s.SetAgentReflexOptOut(ctx, agent.ID, classReflexID); err != nil {
 		t.Fatalf("SetAgentReflexOptOut: %v", err)
 	}
 
-	if err := s.DeleteAgent(agent.Slug); err != nil {
+	if err := s.DeleteAgent(context.Background(), agent.Slug); err != nil {
 		t.Fatalf("DeleteAgent: %v", err)
 	}
 	var n int

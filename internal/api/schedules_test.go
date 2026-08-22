@@ -20,7 +20,7 @@ import (
 func createScheduleTestAgent(t *testing.T, a *API, slug string) *store.AgentProfile {
 	t.Helper()
 	agent := &store.AgentProfile{Name: "Schedule Agent " + slug, Slug: slug, SystemPrompt: "x", Class: "advisor"}
-	if err := a.Services.Store.CreateAgent(agent); err != nil {
+	if err := a.Services.Store.CreateAgent(context.Background(), agent); err != nil {
 		t.Fatalf("CreateAgent: %v", err)
 	}
 	return agent

@@ -23,7 +23,7 @@ func newTestAPI(t *testing.T) (*API, *http.ServeMux) {
 	if err != nil {
 		t.Fatalf("store.New: %v", err)
 	}
-	t.Cleanup(func() { s.Close() })
+	t.Cleanup(func() { s.Close(context.Background()) })
 
 	svc, err := service.NewContainer(service.ContainerConfig{
 		Store:             s,
@@ -96,7 +96,7 @@ func TestCreateAndListSessions(t *testing.T) {
 	a, mux := newTestAPI(t)
 
 	// Seed an agent so EnsureSessionAgent doesn't fail on FK constraint.
-	if err := a.Services.Store.CreateAgent(&store.AgentProfile{
+	if err := a.Services.Store.CreateAgent(context.Background(), &store.AgentProfile{
 		ID:           "mentat-001",
 		Name:         "Mentat",
 		Slug:         "mentat",

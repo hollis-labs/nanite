@@ -73,11 +73,11 @@ func newSeededStore(t *testing.T) *store.Store {
 	if err != nil {
 		t.Fatalf("store.New: %v", err)
 	}
-	t.Cleanup(func() { s.Close() })
-	if err := s.Seed(); err != nil {
+	t.Cleanup(func() { s.Close(context.Background()) })
+	if err := s.Seed(context.Background()); err != nil {
 		t.Fatalf("store.Seed: %v", err)
 	}
-	if err := s.SeedProviders(); err != nil {
+	if err := s.SeedProviders(context.Background()); err != nil {
 		t.Fatalf("store.SeedProviders: %v", err)
 	}
 	return s

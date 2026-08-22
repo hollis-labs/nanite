@@ -1,6 +1,7 @@
 package store
 
 import (
+	"context"
 	"database/sql"
 	"fmt"
 	"time"
@@ -45,9 +46,9 @@ const mcpServerColumns = `id, name, transport_type, command, url, args, env, ena
 	trust_tier, env_allowlist, created_at, updated_at`
 
 // ListMCPServers returns all MCP server configs ordered by name.
-func (s *Store) ListMCPServers() ([]MCPServerConfig, error) {
-	rows, err := s.DB.Query(
-		`SELECT ` + mcpServerColumns + ` FROM mcp_servers ORDER BY name`,
+func (s *Store) ListMCPServers(ctx context.Context) ([]MCPServerConfig, error) {
+	rows, err := s.DB.QueryContext(ctx,
+		`SELECT `+mcpServerColumns+` FROM mcp_servers ORDER BY name`,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("list mcp servers: %w", err)
@@ -69,9 +70,9 @@ func (s *Store) ListMCPServers() ([]MCPServerConfig, error) {
 }
 
 // GetMCPServer returns an MCP server config by name.
-func (s *Store) GetMCPServer(name string) (*MCPServerConfig, error) {
+func (s *Store) GetMCPServer(ctx context.Context, name string) (*MCPServerConfig, error) {
 	var cfg MCPServerConfig
-	err := s.DB.QueryRow(
+	err := s.DB.QueryRowContext(ctx,
 		`SELECT `+mcpServerColumns+` FROM mcp_servers WHERE name = ?`, name,
 	).Scan(&cfg.ID, &cfg.Name, &cfg.TransportType, &cfg.Command, &cfg.URL,
 		&cfg.Args, &cfg.Env, &cfg.Enabled,
@@ -87,7 +88,7 @@ func (s *Store) GetMCPServer(name string) (*MCPServerConfig, error) {
 }
 
 // CreateMCPServer inserts a new MCP server config.
-func (s *Store) CreateMCPServer(cfg *MCPServerConfig) error {
+func (s *Store) CreateMCPServer(ctx context.Context, cfg *MCPServerConfig) error {
 	if cfg.ID == "" {
 		cfg.ID = uuid.New().String()
 	}
@@ -105,7 +106,7 @@ func (s *Store) CreateMCPServer(cfg *MCPServerConfig) error {
 		cfg.EnvAllowlist = "[]"
 	}
 
-	_, err := s.DB.Exec(
+	_, err := s.DB.ExecContext(ctx,
 		`INSERT INTO mcp_servers (`+mcpServerColumns+`)
 		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		cfg.ID, cfg.Name, cfg.TransportType, cfg.Command, cfg.URL,
@@ -122,7 +123,7 @@ func (s *Store) CreateMCPServer(cfg *MCPServerConfig) error {
 }
 
 // UpdateMCPServer updates an MCP server config by name.
-func (s *Store) UpdateMCPServer(cfg *MCPServerConfig) error {
+func (s *Store) UpdateMCPServer(ctx context.Context, cfg *MCPServerConfig) error {
 	if cfg.TrustTier == "" {
 		cfg.TrustTier = TrustTierThirdPartyHTTP
 	}
@@ -130,7 +131,7 @@ func (s *Store) UpdateMCPServer(cfg *MCPServerConfig) error {
 		cfg.EnvAllowlist = "[]"
 	}
 	now := time.Now().UTC().Format(time.RFC3339)
-	res, err := s.DB.Exec(
+	res, err := s.DB.ExecContext(ctx,
 		`UPDATE mcp_servers SET transport_type = ?, command = ?, url = ?, args = ?, env = ?,
 			enabled = ?, trust_tier = ?, env_allowlist = ?, updated_at = ?
 		 WHERE name = ?`,
@@ -149,8 +150,8 @@ func (s *Store) UpdateMCPServer(cfg *MCPServerConfig) error {
 }
 
 // DeleteMCPServer removes an MCP server config by name.
-func (s *Store) DeleteMCPServer(name string) error {
-	res, err := s.DB.Exec(`DELETE FROM mcp_servers WHERE name = ?`, name)
+func (s *Store) DeleteMCPServer(ctx context.Context, name string) error {
+	res, err := s.DB.ExecContext(ctx, `DELETE FROM mcp_servers WHERE name = ?`, name)
 	if err != nil {
 		return fmt.Errorf("delete mcp server %s: %w", name, err)
 	}

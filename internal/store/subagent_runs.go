@@ -1,6 +1,7 @@
 package store
 
 import (
+	"context"
 	"database/sql"
 	"errors"
 	"fmt"
@@ -26,14 +27,14 @@ import (
 // belong on the subagent.Status API, not this hot-path classification.
 // "Most recent" is keyed by created_at DESC so the call site logs the
 // run most likely associated with the parent's current pause.
-func (s *Store) ActiveSubagentRunForParent(parentSessionID string) (id, role, childSessionID string, ok bool, err error) {
+func (s *Store) ActiveSubagentRunForParent(ctx context.Context, parentSessionID string) (id, role, childSessionID string, ok bool, err error) {
 	const q = `SELECT id, role, child_session_id
 	             FROM subagent_runs
 	            WHERE parent_session_id = ?
 	              AND status = 'running'
 	         ORDER BY created_at DESC
 	            LIMIT 1`
-	row := s.DB.QueryRow(q, parentSessionID)
+	row := s.DB.QueryRowContext(ctx, q, parentSessionID)
 	if scanErr := row.Scan(&id, &role, &childSessionID); scanErr != nil {
 		if errors.Is(scanErr, sql.ErrNoRows) {
 			return "", "", "", false, nil
@@ -60,13 +61,13 @@ func (s *Store) ActiveSubagentRunForParent(parentSessionID string) (id, role, ch
 // is treated as "no parent" so direct/test invocations are not blocked
 // by the cap (the cap fails open on an unknown caller; the spawn still
 // passes through trust + approval gating).
-func (s *Store) IsSubagentSession(sessionID string) (bool, error) {
+func (s *Store) IsSubagentSession(ctx context.Context, sessionID string) (bool, error) {
 	if sessionID == "" {
 		return false, nil
 	}
 	const q = `SELECT 1 FROM subagent_runs WHERE child_session_id = ? LIMIT 1`
 	var dummy int
-	err := s.DB.QueryRow(q, sessionID).Scan(&dummy)
+	err := s.DB.QueryRowContext(ctx, q, sessionID).Scan(&dummy)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return false, nil

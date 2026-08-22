@@ -24,7 +24,7 @@ type fakeProfileResolver struct {
 	errOverride error
 }
 
-func (f *fakeProfileResolver) GetAgentBySlug(slug string) (*store.AgentProfile, error) {
+func (f *fakeProfileResolver) GetAgentBySlug(ctx context.Context, slug string) (*store.AgentProfile, error) {
 	if f.errOverride != nil {
 		return nil, f.errOverride
 	}

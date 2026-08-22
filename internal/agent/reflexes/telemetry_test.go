@@ -32,7 +32,7 @@ import (
 func TestEmitFirings_InjectReminder_UnifiedTraceRecordAndTelemetry(t *testing.T) {
 	ctx := context.Background()
 	st := newReflexTestStore(t)
-	if err := st.CreateAgent(&store.AgentProfile{
+	if err := st.CreateAgent(context.Background(), &store.AgentProfile{
 		ID: "agent-telemetry-reminder", Name: "n", Slug: "agent-telemetry-reminder",
 		Class: "advisor", SystemPrompt: "test", Source: "test",
 	}); err != nil {
@@ -116,7 +116,7 @@ func TestEmitFirings_InjectReminder_UnifiedTraceRecordAndTelemetry(t *testing.T)
 func TestEmitFirings_ForceToolChoice_AlternativesConsideredPresent(t *testing.T) {
 	ctx := context.Background()
 	st := newReflexTestStore(t)
-	if err := st.CreateAgent(&store.AgentProfile{
+	if err := st.CreateAgent(context.Background(), &store.AgentProfile{
 		ID: "agent-telemetry-force", Name: "n", Slug: "agent-telemetry-force",
 		Class: "advisor", SystemPrompt: "test", Source: "test",
 	}); err != nil {
@@ -182,7 +182,7 @@ func TestEmitFirings_ForceToolChoice_AlternativesConsideredPresent(t *testing.T)
 func TestEmitFirings_HaltSession_UnifiedTraceRecordAndAlternatives(t *testing.T) {
 	ctx := context.Background()
 	st := newReflexTestStore(t)
-	if err := st.CreateAgent(&store.AgentProfile{
+	if err := st.CreateAgent(context.Background(), &store.AgentProfile{
 		ID: "agent-telemetry-halt", Name: "n", Slug: "agent-telemetry-halt",
 		Class: "advisor", SystemPrompt: "test", Source: "test",
 	}); err != nil {
@@ -246,7 +246,7 @@ func TestEmitFirings_HaltSession_UnifiedTraceRecordAndAlternatives(t *testing.T)
 // test if it's missing, and returns its decoded metadata.
 func findReflexTraceEvent(t *testing.T, st *store.Store, sessionID, actionKind string) map[string]any {
 	t.Helper()
-	events, err := st.ListEvents("reflex", 50)
+	events, err := st.ListEvents(context.Background(), "reflex", 50)
 	if err != nil {
 		t.Fatalf("ListEvents: %v", err)
 	}

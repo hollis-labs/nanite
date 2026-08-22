@@ -358,7 +358,8 @@ func (e *BuiltinWorkflowEngine) startLoopStep(ctx context.Context, runID string,
 			status = "failed"
 		}
 		loopRunID := result.LoopRunID
-		if err := e.store.UpsertWorkflowRunStep(&store.WorkflowRunStepRow{
+		// Outcome bookkeeping must survive cancellation of the loop launch it records.
+		if err := e.store.UpsertWorkflowRunStep(context.WithoutCancel(ctx), &store.WorkflowRunStepRow{
 			WorkflowRunID: runID, StepID: step.ID, Kind: string(step.Kind), Status: status,
 			Output: sr.Output, IsError: sr.IsError, LoopRunID: &loopRunID, CompletedAt: time.Now().UTC(),
 		}); err != nil {
@@ -368,7 +369,7 @@ func (e *BuiltinWorkflowEngine) startLoopStep(ctx context.Context, runID string,
 	}
 
 	loopRunID := result.LoopRunID
-	if err := e.store.UpsertWorkflowRunStep(&store.WorkflowRunStepRow{
+	if err := e.store.UpsertWorkflowRunStep(ctx, &store.WorkflowRunStepRow{
 		WorkflowRunID: runID, StepID: step.ID, Kind: string(step.Kind), Status: "waiting_on_loop",
 		LoopRunID: &loopRunID,
 	}); err != nil {
@@ -382,7 +383,8 @@ func (e *BuiltinWorkflowEngine) startLoopStep(ctx context.Context, runID string,
 // in startLoopStep.
 func (e *BuiltinWorkflowEngine) persistLoopStepFailure(runID string, step agentworkflow.StepDefinition, msg string) stepRunOutcome {
 	sr := agentworkflow.StepResult{StepID: step.ID, Kind: step.Kind, IsError: true, Output: msg}
-	if err := e.store.UpsertWorkflowRunStep(&store.WorkflowRunStepRow{
+	// Keep the terminal-write policy explicit when a real context is plumbed here.
+	if err := e.store.UpsertWorkflowRunStep(context.WithoutCancel(context.TODO() /* TODO(ctx-sweep): no ctx available at this call site */), &store.WorkflowRunStepRow{
 		WorkflowRunID: runID, StepID: step.ID, Kind: string(step.Kind), Status: "failed",
 		Output: sr.Output, IsError: true, CompletedAt: time.Now().UTC(),
 	}); err != nil {
@@ -405,7 +407,7 @@ func (e *BuiltinWorkflowEngine) persistLoopStepFailure(runID string, step agentw
 // ever change on a later retry and the run should fail cleanly rather than
 // wait forever.
 func (e *BuiltinWorkflowEngine) recheckLoopStep(ctx context.Context, runID string, step agentworkflow.StepDefinition) (resolved bool, sr agentworkflow.StepResult, err error) {
-	rows, listErr := e.store.ListWorkflowRunSteps(runID)
+	rows, listErr := e.store.ListWorkflowRunSteps(ctx, runID)
 	if listErr != nil {
 		return false, agentworkflow.StepResult{}, fmt.Errorf("loop step %q: list workflow_run_steps: %w", step.ID, listErr)
 	}
@@ -453,7 +455,8 @@ func (e *BuiltinWorkflowEngine) recheckLoopStep(ctx context.Context, runID strin
 	if loopRunID != "" {
 		upsert.LoopRunID = &loopRunID
 	}
-	if err := e.store.UpsertWorkflowRunStep(upsert); err != nil {
+	// Outcome bookkeeping must survive cancellation of the loop recheck it records.
+	if err := e.store.UpsertWorkflowRunStep(context.WithoutCancel(ctx), upsert); err != nil {
 		return false, agentworkflow.StepResult{}, fmt.Errorf("loop step %q: persist resolution: %w", step.ID, err)
 	}
 	return true, result, nil
@@ -465,8 +468,8 @@ func (e *BuiltinWorkflowEngine) recheckLoopStep(ctx context.Context, runID strin
 // find the outer step waiting on a terminal loop_run_id, then load its
 // parent workflow_runs row. *store.Store satisfies this structurally.
 type LoopStepOuterStore interface {
-	GetWorkflowRunStepByLoopRunID(loopRunID string) (*store.WorkflowRunStepRow, error)
-	GetWorkflowRun(id string) (*store.WorkflowRunRow, error)
+	GetWorkflowRunStepByLoopRunID(ctx context.Context, loopRunID string) (*store.WorkflowRunStepRow, error)
+	GetWorkflowRun(ctx context.Context, id string) (*store.WorkflowRunRow, error)
 }
 
 // LoopResumeNotifier implements internal/loop's OuterResumeNotifier
@@ -519,7 +522,7 @@ func (n *LoopResumeNotifier) NotifyLoopRunTerminal(ctx context.Context, loopRunI
 	if n == nil || n.store == nil || n.registry == nil || n.launcher == nil {
 		return fmt.Errorf("loop resume notifier: not fully configured")
 	}
-	stepRow, err := n.store.GetWorkflowRunStepByLoopRunID(loopRunID)
+	stepRow, err := n.store.GetWorkflowRunStepByLoopRunID(ctx, loopRunID)
 	if err != nil {
 		if errors.Is(err, store.ErrWorkflowRunStepNotFound) {
 			return nil // ordinary case -- see this method's own doc comment.
@@ -533,7 +536,7 @@ func (n *LoopResumeNotifier) NotifyLoopRunTerminal(ctx context.Context, loopRunI
 		return nil
 	}
 
-	runRow, err := n.store.GetWorkflowRun(stepRow.WorkflowRunID)
+	runRow, err := n.store.GetWorkflowRun(ctx, stepRow.WorkflowRunID)
 	if err != nil {
 		return fmt.Errorf("loop resume notifier: get outer workflow_run %s: %w", stepRow.WorkflowRunID, err)
 	}

@@ -10,7 +10,7 @@ import (
 
 func TestEnginePluginHooksAndActionFilter(t *testing.T) {
 	st := newReflexTestStore(t)
-	if err := st.CreateAgent(&store.AgentProfile{
+	if err := st.CreateAgent(context.Background(), &store.AgentProfile{
 		ID:           "agent-a",
 		Name:         "Agent A",
 		Slug:         "agent-a",

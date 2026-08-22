@@ -1,6 +1,7 @@
 package store
 
 import (
+	"context"
 	"encoding/json"
 	"testing"
 
@@ -19,7 +20,7 @@ func TestSyncModelsFromRegistry_UpsertsRealRows(t *testing.T) {
 	// before the container/model-catalog wiring): the providers row and
 	// baseline model row must exist before an ongoing sync can upsert
 	// against them.
-	if err := s.SeedProviders(); err != nil {
+	if err := s.SeedProviders(context.Background()); err != nil {
 		t.Fatalf("SeedProviders: %v", err)
 	}
 
@@ -54,7 +55,7 @@ func TestSyncModelsFromRegistry_UpsertsRealRows(t *testing.T) {
 		models.SyncFromCatalog(models.CatalogInput{})
 	})
 
-	n, err := s.SyncModelsFromRegistry()
+	n, err := s.SyncModelsFromRegistry(context.Background())
 	if err != nil {
 		t.Fatalf("SyncModelsFromRegistry: %v", err)
 	}
@@ -125,12 +126,12 @@ func TestSyncModelsFromRegistry_UpsertsRealRows(t *testing.T) {
 // rows or error out.
 func TestSyncModelsFromRegistry_Idempotent(t *testing.T) {
 	s := newTestStore(t)
-	if err := s.SeedProviders(); err != nil {
+	if err := s.SeedProviders(context.Background()); err != nil {
 		t.Fatalf("SeedProviders: %v", err)
 	}
 
 	for i := 0; i < 3; i++ {
-		if _, err := s.SyncModelsFromRegistry(); err != nil {
+		if _, err := s.SyncModelsFromRegistry(context.Background()); err != nil {
 			t.Fatalf("SyncModelsFromRegistry call %d: %v", i, err)
 		}
 	}
@@ -153,11 +154,11 @@ func TestSyncModelsFromRegistry_Idempotent(t *testing.T) {
 // skipped rather than causing an FK-constraint error.
 func TestSyncModelsFromRegistry_SkipsUnknownProvider(t *testing.T) {
 	s := newTestStore(t)
-	if err := s.SeedProviders(); err != nil {
+	if err := s.SeedProviders(context.Background()); err != nil {
 		t.Fatalf("SeedProviders: %v", err)
 	}
 
-	if _, err := s.SyncModelsFromRegistry(); err != nil {
+	if _, err := s.SyncModelsFromRegistry(context.Background()); err != nil {
 		t.Fatalf("SyncModelsFromRegistry: %v", err)
 	}
 
@@ -186,7 +187,7 @@ func TestSyncModelsFromRegistry_SkipsUnknownProvider(t *testing.T) {
 // insert a duplicate and not error out.
 func TestSyncModelsFromRegistry_ReconcilesRotatedModelID(t *testing.T) {
 	s := newTestStore(t)
-	if err := s.SeedProviders(); err != nil {
+	if err := s.SeedProviders(context.Background()); err != nil {
 		t.Fatalf("SeedProviders: %v", err)
 	}
 
@@ -207,7 +208,7 @@ func TestSyncModelsFromRegistry_ReconcilesRotatedModelID(t *testing.T) {
 		t.Fatalf("failed to set up stale row fixture: count=%d err=%v", staleCount, err)
 	}
 
-	if _, err := s.SyncModelsFromRegistry(); err != nil {
+	if _, err := s.SyncModelsFromRegistry(context.Background()); err != nil {
 		t.Fatalf("SyncModelsFromRegistry: %v", err)
 	}
 

@@ -131,7 +131,7 @@ func SyncManagedDurableAgentConfigs(st *store.Store, configRoot string) error {
 		}
 		seen[cfg.Slug] = struct{}{}
 	}
-	instances, err := st.ListDurableAgentInstances(true)
+	instances, err := st.ListDurableAgentInstances(context.TODO() /* TODO(ctx-sweep): no ctx available at this call site */, true)
 	if err != nil {
 		return err
 	}
@@ -149,7 +149,7 @@ func SyncManagedDurableAgentConfigs(st *store.Store, configRoot string) error {
 		if inst.Status == store.DurableAgentStatusArchived {
 			continue
 		}
-		if _, err := st.SyncDurableAgentInstanceConfig(&store.DurableAgentInstance{
+		if _, err := st.SyncDurableAgentInstanceConfig(context.TODO() /* TODO(ctx-sweep): no ctx available at this call site */, &store.DurableAgentInstance{
 			ID:               inst.ID,
 			Name:             inst.Name,
 			Slug:             inst.Slug,
@@ -173,7 +173,7 @@ func SyncManagedDurableAgentConfigs(st *store.Store, configRoot string) error {
 }
 
 func syncManagedDurableAgentConfig(st *store.Store, cfg ManagedDurableAgentConfig) (*store.DurableAgentInstance, error) {
-	profile, err := st.GetAgentBySlug(cfg.ProfileSlug)
+	profile, err := st.GetAgentBySlug(context.TODO() /* TODO(ctx-sweep): no ctx available at this call site */, cfg.ProfileSlug)
 	if err != nil {
 		return nil, fmt.Errorf("managed durable config %s profile %s: %w", cfg.Slug, cfg.ProfileSlug, err)
 	}
@@ -201,7 +201,7 @@ func syncManagedDurableAgentConfig(st *store.Store, cfg ManagedDurableAgentConfi
 		inst.Status = store.DurableAgentStatusArchived
 		inst.ArchivedAt = ptrTime(time.Now().UTC())
 	}
-	saved, err := st.SyncDurableAgentInstanceConfig(inst)
+	saved, err := st.SyncDurableAgentInstanceConfig(context.TODO() /* TODO(ctx-sweep): no ctx available at this call site */, inst)
 	if err != nil {
 		return nil, err
 	}
@@ -416,7 +416,7 @@ func SaveManagedAgentProfile(st *store.Store, configRoot string, profile *store.
 	if err := IngestAgentDefinition(st, def); err != nil {
 		return nil, err
 	}
-	return st.GetAgentBySlug(profile.Slug)
+	return st.GetAgentBySlug(context.TODO() /* TODO(ctx-sweep): no ctx available at this call site */, profile.Slug)
 }
 
 func SaveManagedDurableAgentConfig(st *store.Store, configRoot string, cfg ManagedDurableAgentConfig) (*store.DurableAgentInstance, error) {

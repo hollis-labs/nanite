@@ -115,7 +115,7 @@ func fireOnceThenReEvaluate(t *testing.T, engine *Engine, agentID, agentClass st
 func TestEvaluateState_DefaultCooldown_StillDebouncesAt15Minutes(t *testing.T) {
 	ctx := context.Background()
 	st := newReflexTestStore(t)
-	if err := st.CreateAgent(&store.AgentProfile{
+	if err := st.CreateAgent(context.Background(), &store.AgentProfile{
 		ID: "agent-default-cooldown", Name: "x", Slug: "agent-default-cooldown",
 		Class: "process", SystemPrompt: "test", Source: "test",
 	}); err != nil {
@@ -150,7 +150,7 @@ func TestEvaluateState_DefaultCooldown_StillDebouncesAt15Minutes(t *testing.T) {
 func TestEvaluateState_ReflexLevelZeroOverride_BypassesCooldown(t *testing.T) {
 	ctx := context.Background()
 	st := newReflexTestStore(t)
-	if err := st.CreateAgent(&store.AgentProfile{
+	if err := st.CreateAgent(context.Background(), &store.AgentProfile{
 		ID: "agent-zero-override", Name: "x", Slug: "agent-zero-override",
 		Class: "process", SystemPrompt: "test", Source: "test",
 	}); err != nil {
@@ -187,7 +187,7 @@ func TestEvaluateState_ReflexLevelZeroOverride_BypassesCooldown(t *testing.T) {
 func TestEvaluateState_ReflexLevelPositiveOverride_ShortensWindow(t *testing.T) {
 	ctx := context.Background()
 	st := newReflexTestStore(t)
-	if err := st.CreateAgent(&store.AgentProfile{
+	if err := st.CreateAgent(context.Background(), &store.AgentProfile{
 		ID: "agent-short-override", Name: "x", Slug: "agent-short-override",
 		Class: "process", SystemPrompt: "test", Source: "test",
 	}); err != nil {

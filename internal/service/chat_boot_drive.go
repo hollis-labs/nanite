@@ -163,7 +163,7 @@ func (s *chatServiceImpl) driveBootSession(
 		// Skipped for an intentional fresh reboot (recoverThisBoot=false).
 		usedResume := false
 		if recoverThisBoot && s.store != nil {
-			if pid, perr := s.store.AgentRuntimeProviderSessionID(sessionID); perr != nil {
+			if pid, perr := s.store.AgentRuntimeProviderSessionID(ctx, sessionID); perr != nil {
 				slog.Warn("driveBootSession: provider-session lookup failed", "session_id", sessionID, "err", perr)
 			} else if pid != "" {
 				bootOpts.ResumeProviderSessionID = pid
@@ -626,7 +626,7 @@ func (s *chatServiceImpl) observeSessionForRecovery(sess *runtimeagent.Session, 
 	// the recovery pack still plants host-side context. The 5s window keeps
 	// healthy mid-conversation errors from losing their valid resume id.
 	if usedResume && s.store != nil && time.Since(bootedAt) < staleResumeFastExitWindow {
-		if clearErr := s.store.SetAgentRuntimeProviderSessionID(sessionID, ""); clearErr != nil {
+		if clearErr := s.store.SetAgentRuntimeProviderSessionID(context.TODO() /* TODO(ctx-sweep): no ctx available at this call site */, sessionID, ""); clearErr != nil {
 			slog.Warn("recovery: clear stale provider_session_id failed",
 				"session_id", sessionID, "err", clearErr)
 		} else {

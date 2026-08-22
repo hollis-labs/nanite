@@ -216,9 +216,11 @@ func (r *RetryingRunner) Enqueue(ctx context.Context, job gosched.Job) error {
 	}
 
 	dispatchErr := r.Inner.Enqueue(ctx, job)
+	// Outcome bookkeeping must survive cancellation of the dispatch it records.
+	persistCtx := context.WithoutCancel(ctx)
 
 	if dispatchErr == nil {
-		bkErr := r.Runs.RecordScheduleRunAttempt(ctx, run.ID, store.ScheduleRunStatusSucceeded, "", nil)
+		bkErr := r.Runs.RecordScheduleRunAttempt(persistCtx, run.ID, store.ScheduleRunStatusSucceeded, "", nil)
 		if bkErr != nil {
 			r.logger().Error("scheduler: record schedule_runs success failed", "schedule_id", job.ScheduleID, "run_id", run.ID, "error", bkErr)
 		}
@@ -241,7 +243,7 @@ func (r *RetryingRunner) Enqueue(ctx context.Context, job gosched.Job) error {
 
 	if attemptCount >= maxRetries {
 		r.applyOnFail(ctx, job, onFail)
-		bkErr := r.Runs.RecordScheduleRunAttempt(ctx, run.ID, store.ScheduleRunStatusExhausted, dispatchErr.Error(), nil)
+		bkErr := r.Runs.RecordScheduleRunAttempt(persistCtx, run.ID, store.ScheduleRunStatusExhausted, dispatchErr.Error(), nil)
 		if bkErr != nil {
 			r.logger().Error("scheduler: record schedule_runs exhaustion failed", "schedule_id", job.ScheduleID, "run_id", run.ID, "error", bkErr)
 		}
@@ -253,7 +255,7 @@ func (r *RetryingRunner) Enqueue(ctx context.Context, job gosched.Job) error {
 	}
 
 	nextAt := r.now().Add(r.backoffDelay(attemptCount))
-	bkErr := r.Runs.RecordScheduleRunAttempt(ctx, run.ID, store.ScheduleRunStatusFailed, dispatchErr.Error(), &nextAt)
+	bkErr := r.Runs.RecordScheduleRunAttempt(persistCtx, run.ID, store.ScheduleRunStatusFailed, dispatchErr.Error(), &nextAt)
 	if bkErr != nil {
 		r.logger().Error("scheduler: record schedule_runs failure failed", "schedule_id", job.ScheduleID, "run_id", run.ID, "error", bkErr)
 	}

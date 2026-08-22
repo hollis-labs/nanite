@@ -17,7 +17,7 @@ import (
 // project-scoped reminders attached to the session's project.
 func (a *API) handleListReminders(w http.ResponseWriter, r *http.Request) {
 	sessionID := r.PathValue("id")
-	rems, err := a.Services.Store.ListUnfiredReminders(sessionID)
+	rems, err := a.Services.Store.ListUnfiredReminders(r.Context(), sessionID)
 	if err != nil {
 		a.errorResp(w, http.StatusInternalServerError, "failed to list reminders: "+err.Error())
 		return
@@ -31,7 +31,7 @@ func (a *API) handleListReminders(w http.ResponseWriter, r *http.Request) {
 // handleDeleteReminder — DELETE /api/reminders/{id}
 func (a *API) handleDeleteReminder(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
-	if err := a.Services.Store.DeleteReminder(id); err != nil {
+	if err := a.Services.Store.DeleteReminder(r.Context(), id); err != nil {
 		a.errorResp(w, http.StatusInternalServerError, "failed to delete reminder: "+err.Error())
 		return
 	}
@@ -55,11 +55,11 @@ func (a *API) handleUpdateReminderScope(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	id := r.PathValue("id")
-	if err := a.Services.Store.UpdateReminderScope(id, req.Scope, req.ProjectID); err != nil {
+	if err := a.Services.Store.UpdateReminderScope(r.Context(), id, req.Scope, req.ProjectID); err != nil {
 		a.errorResp(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	rem, err := a.Services.Store.GetReminder(id)
+	rem, err := a.Services.Store.GetReminder(r.Context(), id)
 	if err != nil {
 		a.errorResp(w, http.StatusInternalServerError, err.Error())
 		return

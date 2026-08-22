@@ -31,15 +31,15 @@ func TestListAgentSkills_ColumnAlignment(t *testing.T) {
 		ContentHash:          "skl-vendor-deadbeefcafefeed",
 		DeclaredDependencies: `["other-skill"]`,
 	}
-	if err := s.CreateSkill(sk); err != nil {
+	if err := s.CreateSkill(context.Background(), sk); err != nil {
 		t.Fatalf("CreateSkill: %v", err)
 	}
 
-	if err := s.AssignSkillToAgent(agent.ID, sk.ID, ""); err != nil {
+	if err := s.AssignSkillToAgent(context.Background(), agent.ID, sk.ID, ""); err != nil {
 		t.Fatalf("AssignSkillToAgent: %v", err)
 	}
 
-	list, err := s.ListAgentSkills(agent.ID)
+	list, err := s.ListAgentSkills(context.Background(), agent.ID)
 	if err != nil {
 		t.Fatalf("ListAgentSkills: %v", err)
 	}
@@ -101,11 +101,11 @@ func TestAssignSkillToAgent_RejectsOrphanedAgentID(t *testing.T) {
 	s := newTestStore(t)
 
 	sk := &Skill{Name: "FK Test Skill", Slug: "fk-test-skill"}
-	if err := s.CreateSkill(sk); err != nil {
+	if err := s.CreateSkill(context.Background(), sk); err != nil {
 		t.Fatalf("CreateSkill: %v", err)
 	}
 
-	if err := s.AssignSkillToAgent("agent-does-not-exist", sk.ID, ""); err == nil {
+	if err := s.AssignSkillToAgent(context.Background(), "agent-does-not-exist", sk.ID, ""); err == nil {
 		t.Fatal("expected AssignSkillToAgent to fail for a nonexistent agent_id, got nil error")
 	}
 }
@@ -121,14 +121,14 @@ func TestRemoveSkillFromAgent_DeletesBareAssignment(t *testing.T) {
 	agent := makeTestAgent(t, s, "remove-bare-assignment")
 
 	sk := &Skill{Name: "Bare Assignment Skill", Slug: "bare-assignment-skill"}
-	if err := s.CreateSkill(sk); err != nil {
+	if err := s.CreateSkill(context.Background(), sk); err != nil {
 		t.Fatalf("CreateSkill: %v", err)
 	}
-	if err := s.AssignSkillToAgent(agent.ID, sk.ID, ""); err != nil {
+	if err := s.AssignSkillToAgent(context.Background(), agent.ID, sk.ID, ""); err != nil {
 		t.Fatalf("AssignSkillToAgent: %v", err)
 	}
 
-	if err := s.RemoveSkillFromAgent(agent.ID, sk.ID); err != nil {
+	if err := s.RemoveSkillFromAgent(context.Background(), agent.ID, sk.ID); err != nil {
 		t.Fatalf("RemoveSkillFromAgent: %v", err)
 	}
 
@@ -151,7 +151,7 @@ func TestRemoveSkillFromAgent_PreservesKnownSkillGrantData(t *testing.T) {
 	agent := makeTestAgent(t, s, "remove-preserves-grant")
 
 	sk := &Skill{Name: "Granted Skill", Slug: "granted-skill"}
-	if err := s.CreateSkill(sk); err != nil {
+	if err := s.CreateSkill(context.Background(), sk); err != nil {
 		t.Fatalf("CreateSkill: %v", err)
 	}
 
@@ -176,7 +176,7 @@ func TestRemoveSkillFromAgent_PreservesKnownSkillGrantData(t *testing.T) {
 	// "unassign" semantics, and the frontend's removeSkillFromAgent call,
 	// which surfaces no error UI for this endpoint) without touching the
 	// grant data.
-	if err := s.RemoveSkillFromAgent(agent.ID, sk.ID); err != nil {
+	if err := s.RemoveSkillFromAgent(context.Background(), agent.ID, sk.ID); err != nil {
 		t.Fatalf("RemoveSkillFromAgent: expected nil (no-op) error, got %v", err)
 	}
 

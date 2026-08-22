@@ -81,11 +81,15 @@ func TestAttemptReflexDispatch_RealSeededReflex_ScopeTierOpenSubagent_RoutesToPl
 	if err != nil {
 		t.Fatalf("store.New: %v", err)
 	}
-	t.Cleanup(func() { _ = st.Close() })
+	t.Cleanup(func() {
+		_ = st.Close(context.
 
-	// Real seed data — the same call container.go makes at boot. Proves
-	// seeds.go's dispatch_to_agent_open_subagent entry (not a
-	// hand-authored test fixture) actually reproduces Rule 5.
+			// Real seed data — the same call container.go makes at boot. Proves
+			// seeds.go's dispatch_to_agent_open_subagent entry (not a
+			// hand-authored test fixture) actually reproduces Rule 5.
+			Background())
+	})
+
 	if _, err := reflexes.SeedBaseReflexes(context.Background(), st, nil); err != nil {
 		t.Fatalf("SeedBaseReflexes: %v", err)
 	}
@@ -184,7 +188,7 @@ func TestAttemptReflexDispatch_RealSeededReflex_ScopeTierOpenSubagent_RoutesToPl
 
 	// event_log — decision log §14 write-site-discipline: real structured
 	// reasoning, not a bare event name.
-	events, err := st.ListEvents("", 50)
+	events, err := st.ListEvents(context.Background(), "", 50)
 	if err != nil {
 		t.Fatalf("ListEvents: %v", err)
 	}
@@ -274,7 +278,7 @@ func TestAttemptReflexDispatch_RealSeededReflex_TierSmall_NoDispatch(t *testing.
 	if err != nil {
 		t.Fatalf("store.New: %v", err)
 	}
-	t.Cleanup(func() { _ = st.Close() })
+	t.Cleanup(func() { _ = st.Close(context.Background()) })
 
 	if _, err := reflexes.SeedBaseReflexes(context.Background(), st, nil); err != nil {
 		t.Fatalf("SeedBaseReflexes: %v", err)
@@ -320,7 +324,7 @@ func TestAttemptReflexDispatch_RealSeededReflex_TierSmall_NoDispatch(t *testing.
 	if len(tools.calls) != 0 {
 		t.Errorf("ToolService.Execute called %d times, want 0", len(tools.calls))
 	}
-	events, err := st.ListEvents("", 50)
+	events, err := st.ListEvents(context.Background(), "", 50)
 	if err != nil {
 		t.Fatalf("ListEvents: %v", err)
 	}

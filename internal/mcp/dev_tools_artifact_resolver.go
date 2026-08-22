@@ -8,6 +8,8 @@
 package mcp
 
 import (
+	"context"
+
 	"github.com/hollis-labs/nanite/internal/store"
 )
 
@@ -36,7 +38,7 @@ func (r *StoreArtifactResolver) GetArtifact(id string) (*ArtifactMeta, error) {
 	if r == nil || r.store == nil {
 		return nil, errResolverUnconfigured
 	}
-	a, err := r.store.GetArtifact(id)
+	a, err := r.store.GetArtifact(context.TODO() /* TODO(ctx-sweep): no ctx available at this call site */, id)
 	if err != nil {
 		return nil, err
 	}

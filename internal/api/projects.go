@@ -14,7 +14,7 @@ import (
 // NewProjectDialog.tsx, CreateProjectModal.tsx) actually call.
 
 func (a *API) handleListProjects(w http.ResponseWriter, r *http.Request) {
-	projects, err := a.Services.Store.ListProjects()
+	projects, err := a.Services.Store.ListProjects(r.Context())
 	if err != nil {
 		a.errorResp(w, http.StatusInternalServerError, err.Error())
 		return
@@ -39,7 +39,7 @@ func (a *API) handleCreateProject(w http.ResponseWriter, r *http.Request) {
 		Description: req.Description,
 		RepoPath:    req.RepoPath,
 	}
-	if err := a.Services.Store.CreateProject(p); err != nil {
+	if err := a.Services.Store.CreateProject(r.Context(), p); err != nil {
 		a.errorResp(w, http.StatusInternalServerError, err.Error())
 		return
 	}
@@ -49,7 +49,7 @@ func (a *API) handleCreateProject(w http.ResponseWriter, r *http.Request) {
 func (a *API) handleUpdateProject(w http.ResponseWriter, r *http.Request) {
 	pid := r.PathValue("pid")
 
-	existing, err := a.Services.Store.GetProject(pid)
+	existing, err := a.Services.Store.GetProject(r.Context(), pid)
 	if err != nil {
 		a.errorResp(w, http.StatusNotFound, "project not found")
 		return
@@ -77,7 +77,7 @@ func (a *API) handleUpdateProject(w http.ResponseWriter, r *http.Request) {
 		existing.SortOrder = *req.SortOrder
 	}
 
-	if err := a.Services.Store.UpdateProject(existing); err != nil {
+	if err := a.Services.Store.UpdateProject(r.Context(), existing); err != nil {
 		a.errorResp(w, http.StatusInternalServerError, err.Error())
 		return
 	}
@@ -87,12 +87,12 @@ func (a *API) handleUpdateProject(w http.ResponseWriter, r *http.Request) {
 func (a *API) handleDeleteProject(w http.ResponseWriter, r *http.Request) {
 	pid := r.PathValue("pid")
 
-	if _, err := a.Services.Store.GetProject(pid); err != nil {
+	if _, err := a.Services.Store.GetProject(r.Context(), pid); err != nil {
 		a.errorResp(w, http.StatusNotFound, "project not found")
 		return
 	}
 
-	if err := a.Services.Store.DeleteProject(pid); err != nil {
+	if err := a.Services.Store.DeleteProject(r.Context(), pid); err != nil {
 		a.errorResp(w, http.StatusInternalServerError, err.Error())
 		return
 	}

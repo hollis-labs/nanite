@@ -1,6 +1,7 @@
 package store
 
 import (
+	"context"
 	"fmt"
 	"time"
 
@@ -24,7 +25,7 @@ type Document struct {
 }
 
 // CreateDocument persists a new document.
-func (s *Store) CreateDocument(d *Document) error {
+func (s *Store) CreateDocument(ctx context.Context, d *Document) error {
 	if d.ID == "" {
 		d.ID = uuid.New().String()
 	}
@@ -36,7 +37,7 @@ func (s *Store) CreateDocument(d *Document) error {
 	}
 	d.SizeBytes = len(d.Content)
 
-	_, err := s.DB.Exec(`
+	_, err := s.DB.ExecContext(ctx, `
 		INSERT INTO documents
 			(id, session_id, name, mime_type, content, size_bytes,
 			 included, full_content, summary, created_at, updated_at)
@@ -52,10 +53,10 @@ func (s *Store) CreateDocument(d *Document) error {
 }
 
 // GetDocument fetches a single document by ID.
-func (s *Store) GetDocument(id string) (*Document, error) {
+func (s *Store) GetDocument(ctx context.Context, id string) (*Document, error) {
 	var d Document
 	var included, fullContent int
-	err := s.DB.QueryRow(`
+	err := s.DB.QueryRowContext(ctx, `
 		SELECT id, session_id, name, mime_type, content, size_bytes,
 		       included, full_content, summary, created_at, updated_at
 		FROM documents WHERE id = ?`, id).Scan(
@@ -71,8 +72,8 @@ func (s *Store) GetDocument(id string) (*Document, error) {
 }
 
 // ListDocuments returns all documents for a session, ordered by created_at DESC.
-func (s *Store) ListDocuments(sessionID string) ([]Document, error) {
-	rows, err := s.DB.Query(`
+func (s *Store) ListDocuments(ctx context.Context, sessionID string) ([]Document, error) {
+	rows, err := s.DB.QueryContext(ctx, `
 		SELECT id, session_id, name, mime_type, content, size_bytes,
 		       included, full_content, summary, created_at, updated_at
 		FROM documents
@@ -101,9 +102,9 @@ func (s *Store) ListDocuments(sessionID string) ([]Document, error) {
 }
 
 // UpdateDocumentToggles updates the include/full-content toggles and summary for a document.
-func (s *Store) UpdateDocumentToggles(id string, included, fullContent bool, summary string) error {
+func (s *Store) UpdateDocumentToggles(ctx context.Context, id string, included, fullContent bool, summary string) error {
 	now := time.Now().UTC().Format(time.RFC3339)
-	_, err := s.DB.Exec(`
+	_, err := s.DB.ExecContext(ctx, `
 		UPDATE documents
 		SET included = ?, full_content = ?, summary = ?, updated_at = ?
 		WHERE id = ?`,
@@ -116,8 +117,8 @@ func (s *Store) UpdateDocumentToggles(id string, included, fullContent bool, sum
 }
 
 // DeleteDocument removes a document by ID.
-func (s *Store) DeleteDocument(id string) error {
-	_, err := s.DB.Exec(`DELETE FROM documents WHERE id = ?`, id)
+func (s *Store) DeleteDocument(ctx context.Context, id string) error {
+	_, err := s.DB.ExecContext(ctx, `DELETE FROM documents WHERE id = ?`, id)
 	if err != nil {
 		return fmt.Errorf("delete document %s: %w", id, err)
 	}
@@ -128,8 +129,8 @@ func (s *Store) DeleteDocument(id string) error {
 // included in agent context. The returned slice excludes content when the
 // document is set to pointer mode (full_content=false) — callers use the
 // Summary field instead for pointer-style injection.
-func (s *Store) GetIncludedDocuments(sessionID string) ([]Document, error) {
-	rows, err := s.DB.Query(`
+func (s *Store) GetIncludedDocuments(ctx context.Context, sessionID string) ([]Document, error) {
+	rows, err := s.DB.QueryContext(ctx, `
 		SELECT id, session_id, name, mime_type, content, size_bytes,
 		       included, full_content, summary, created_at, updated_at
 		FROM documents
@@ -159,9 +160,9 @@ func (s *Store) GetIncludedDocuments(sessionID string) ([]Document, error) {
 
 // GetSessionContextPrompt returns the session-scoped user context prompt.
 // Returns empty string when not set.
-func (s *Store) GetSessionContextPrompt(sessionID string) (string, error) {
+func (s *Store) GetSessionContextPrompt(ctx context.Context, sessionID string) (string, error) {
 	var prompt string
-	err := s.DB.QueryRow(
+	err := s.DB.QueryRowContext(ctx,
 		`SELECT COALESCE(context_prompt,'') FROM sessions WHERE id = ?`, sessionID,
 	).Scan(&prompt)
 	if err != nil {
@@ -171,9 +172,9 @@ func (s *Store) GetSessionContextPrompt(sessionID string) (string, error) {
 }
 
 // SetSessionContextPrompt persists the session-scoped user context prompt.
-func (s *Store) SetSessionContextPrompt(sessionID, prompt string) error {
+func (s *Store) SetSessionContextPrompt(ctx context.Context, sessionID, prompt string) error {
 	now := time.Now().UTC().Format(time.RFC3339)
-	_, err := s.DB.Exec(
+	_, err := s.DB.ExecContext(ctx,
 		`UPDATE sessions SET context_prompt = ?, updated_at = ? WHERE id = ?`,
 		prompt, now, sessionID,
 	)

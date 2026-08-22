@@ -155,7 +155,7 @@ func adminExportDecisionTables(dbPath string, args []string) {
 				written++
 				continue
 			}
-			s.LogEvent(sessionID, spec.eventType, spec.category, detail, string(metaJSON))
+			s.LogEvent(ctx, sessionID, spec.eventType, spec.category, detail, string(metaJSON))
 			written++
 		}
 

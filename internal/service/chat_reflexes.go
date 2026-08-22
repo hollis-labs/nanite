@@ -21,7 +21,8 @@ func (s *chatServiceImpl) evaluateAndInjectReflexes(ctx context.Context, session
 	applied, err := s.reflexEngine.Evaluate(ctx, session.ID, agent.ID, class)
 	if err != nil {
 		if s.store != nil {
-			s.store.LogEvent(session.ID, "reflex_eval_error", "reflex", err.Error(), "{}")
+			// Outcome bookkeeping must survive cancellation of the reflex evaluation it records.
+			s.store.LogEvent(context.WithoutCancel(ctx), session.ID, "reflex_eval_error", "reflex", err.Error(), "{}")
 		}
 		return nil
 	}

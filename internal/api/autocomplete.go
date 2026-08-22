@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -135,16 +136,16 @@ func (a *API) handleAutocompleteFiles(w http.ResponseWriter, r *http.Request) {
 func resolveRoot(a *API, sessionID string) string {
 	if sessionID != "" {
 		// Look up session → project with repo_path.
-		session, err := a.Services.Store.GetSession(sessionID)
+		session, err := a.Services.Store.GetSession(context.TODO() /* TODO(ctx-sweep): no ctx available at this call site */, sessionID)
 		if err == nil && session != nil {
 			// If session has a project_id, use that project's repo_path.
 			if session.ProjectID != "" {
-				if p, err := a.Services.Store.GetProject(session.ProjectID); err == nil && p != nil && p.RepoPath != "" {
+				if p, err := a.Services.Store.GetProject(context.TODO() /* TODO(ctx-sweep): no ctx available at this call site */, session.ProjectID); err == nil && p != nil && p.RepoPath != "" {
 					return p.RepoPath
 				}
 			}
 			// Otherwise, try the first project with a repo_path.
-			projects, err := a.Services.Store.ListProjects()
+			projects, err := a.Services.Store.ListProjects(context.TODO() /* TODO(ctx-sweep): no ctx available at this call site */)
 			if err == nil {
 				for _, p := range projects {
 					if p.RepoPath != "" {

@@ -112,8 +112,8 @@ func resolveAllowUnsignedPlugins(dbPath string) bool {
 	if err != nil {
 		return false
 	}
-	defer s.Close()
-	us, err := s.GetUserSettings()
+	defer s.Close(context.TODO() /* TODO(ctx-sweep): no ctx available at this call site */)
+	us, err := s.GetUserSettings(context.TODO() /* TODO(ctx-sweep): no ctx available at this call site */)
 	if err != nil {
 		return false
 	}
@@ -187,11 +187,11 @@ func fetchCatalog(ctx context.Context, ring *catalog.KeyRing, catalogURL string)
 // this CLI consumes. Declared locally so catalog-file format changes are
 // centralized in one place.
 type catalogEntryLite struct {
-	Name         string `yaml:"name"`
-	ArchiveURL   string `yaml:"archive_url"`
-	Checksum     string `yaml:"checksum"`
-	Signature    string `yaml:"signature"`
-	SignerKeyID  string `yaml:"signer_key_id"`
+	Name        string `yaml:"name"`
+	ArchiveURL  string `yaml:"archive_url"`
+	Checksum    string `yaml:"checksum"`
+	Signature   string `yaml:"signature"`
+	SignerKeyID string `yaml:"signer_key_id"`
 }
 
 type catalogFileLite struct {

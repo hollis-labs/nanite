@@ -204,12 +204,12 @@ func upsertAgentDef(st *store.Store, def *agentpkg.Definition, bootPass bool) er
 	// frontmatter, not yet ingested).
 	var existing *store.AgentProfile
 	if def.ID != "" {
-		if row, err := st.GetAgent(def.ID); err == nil {
+		if row, err := st.GetAgent(context.TODO() /* TODO(ctx-sweep): no ctx available at this call site */, def.ID); err == nil {
 			existing = row
 		}
 	}
 	if existing == nil {
-		if row, err := st.GetAgentBySlug(def.Slug); err == nil {
+		if row, err := st.GetAgentBySlug(context.TODO() /* TODO(ctx-sweep): no ctx available at this call site */, def.Slug); err == nil {
 			existing = row
 		}
 	}
@@ -227,7 +227,7 @@ func upsertAgentDef(st *store.Store, def *agentpkg.Definition, bootPass bool) er
 		profile.Kind = "internal"
 		profile.CapabilitiesJSON = "[]"
 		profile.LimitsJSON = "{}"
-		if err := st.CreateAgent(profile); err != nil {
+		if err := st.CreateAgent(context.TODO() /* TODO(ctx-sweep): no ctx available at this call site */, profile); err != nil {
 			return fmt.Errorf("create: %w", err)
 		}
 	} else {
@@ -286,7 +286,7 @@ func upsertAgentDef(st *store.Store, def *agentpkg.Definition, bootPass bool) er
 		// restart. sourceChanged (below) carves out the one legitimate
 		// exception: a genuine provenance transition still syncs once.
 		if !(bootPass && existing.Source == profile.Source) {
-			if err := st.UpdateAgent(profile); err != nil {
+			if err := st.UpdateAgent(context.TODO() /* TODO(ctx-sweep): no ctx available at this call site */, profile); err != nil {
 				return fmt.Errorf("update: %w", err)
 			}
 		}
@@ -312,13 +312,13 @@ func upsertAgentDef(st *store.Store, def *agentpkg.Definition, bootPass bool) er
 	}
 
 	if freshContent && len(def.Procedures) > 0 {
-		row, err := st.GetAgentBySlug(def.Slug)
+		row, err := st.GetAgentBySlug(context.TODO() /* TODO(ctx-sweep): no ctx available at this call site */, def.Slug)
 		if err == nil && row != nil {
 			seedProcedures(context.Background(), st, row.ID, def.Procedures)
 		}
 	}
 	if freshContent && len(def.RoleTools) > 0 {
-		row, err := st.GetAgentBySlug(def.Slug)
+		row, err := st.GetAgentBySlug(context.TODO() /* TODO(ctx-sweep): no ctx available at this call site */, def.Slug)
 		if err == nil && row != nil {
 			seedRoleToolsFromIngest(context.Background(), st, row.ID, def.RoleTools)
 		}

@@ -30,7 +30,7 @@ func newTestPluginStateStore(t *testing.T) *store.Store {
 	SetPluginStateStore(s)
 	t.Cleanup(func() {
 		SetPluginStateStore(nil)
-		_ = s.Close()
+		_ = s.Close(context.Background())
 	})
 	return s
 }
@@ -39,11 +39,11 @@ func newTestPluginStateStore(t *testing.T) *store.Store {
 // builtin constructor for manage.go identity-resolution tests.
 type noopBuiltinPlugin struct{ id string }
 
-func (p *noopBuiltinPlugin) ID() string             { return p.id }
-func (p *noopBuiltinPlugin) Name() string           { return p.id }
-func (p *noopBuiltinPlugin) Version() string        { return "0.0.1" }
-func (p *noopBuiltinPlugin) Description() string    { return "" }
-func (p *noopBuiltinPlugin) Dependencies() []string { return nil }
+func (p *noopBuiltinPlugin) ID() string                 { return p.id }
+func (p *noopBuiltinPlugin) Name() string               { return p.id }
+func (p *noopBuiltinPlugin) Version() string            { return "0.0.1" }
+func (p *noopBuiltinPlugin) Description() string        { return "" }
+func (p *noopBuiltinPlugin) Dependencies() []string     { return nil }
 func (p *noopBuiltinPlugin) Load(h goplugin.Host) error { return nil }
 func (p *noopBuiltinPlugin) Unload() error              { return nil }
 func (p *noopBuiltinPlugin) Status() goplugin.PluginStatus {

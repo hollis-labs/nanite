@@ -25,7 +25,7 @@ type Store struct {
 }
 
 // DBPath returns the path to the SQLite database file.
-func (s *Store) DBPath() string {
+func (s *Store) DBPath(ctx context.Context) string {
 	return s.dbPath
 }
 
@@ -53,7 +53,7 @@ func New(ctx context.Context, dbPath string) (*Store, error) {
 	}
 
 	s := &Store{DB: db, dbPath: absPath}
-	if err := s.migrate(); err != nil {
+	if err := s.migrate(ctx); err != nil {
 		db.Close()
 		return nil, fmt.Errorf("migrate: %w", err)
 	}
@@ -73,7 +73,7 @@ func New(ctx context.Context, dbPath string) (*Store, error) {
 }
 
 // Close closes the underlying database connection.
-func (s *Store) Close() error {
+func (s *Store) Close(ctx context.Context) error {
 	return s.DB.Close()
 }
 
@@ -120,9 +120,7 @@ const legacyMigrationCutoverVersion = 94
 // has neither a goose ledger nor any of Nanite's application tables, so it
 // skips seeding entirely and runs every migration for real, starting from
 // version 1.
-func (s *Store) migrate() error {
-	ctx := context.Background()
-
+func (s *Store) migrate(ctx context.Context) error {
 	migrationsDir, err := fs.Sub(migrationsFS, "migrations")
 	if err != nil {
 		return fmt.Errorf("sub migrations fs: %w", err)

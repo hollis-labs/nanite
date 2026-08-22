@@ -1,6 +1,7 @@
 package store
 
 import (
+	"context"
 	"encoding/json"
 	"testing"
 )
@@ -13,7 +14,7 @@ func TestCreatePlan(t *testing.T) {
 		ScopeID: "proj-1",
 		Title:   "Refactoring plan",
 	}
-	if err := s.CreatePlan(plan); err != nil {
+	if err := s.CreatePlan(context.Background(), plan); err != nil {
 		t.Fatalf("CreatePlan: %v", err)
 	}
 
@@ -29,11 +30,11 @@ func TestGetPlan(t *testing.T) {
 	s := newTestStore(t)
 
 	plan := &Plan{Scope: "workspace", Title: "Migration plan"}
-	if err := s.CreatePlan(plan); err != nil {
+	if err := s.CreatePlan(context.Background(), plan); err != nil {
 		t.Fatalf("CreatePlan: %v", err)
 	}
 
-	got, err := s.GetPlan(plan.ID)
+	got, err := s.GetPlan(context.Background(), plan.ID)
 	if err != nil {
 		t.Fatalf("GetPlan: %v", err)
 	}
@@ -55,12 +56,12 @@ func TestListPlans(t *testing.T) {
 		{"Plan C", "workspace", "complete"},
 	} {
 		plan := &Plan{Scope: p.scope, Title: p.title, Status: p.status}
-		if err := s.CreatePlan(plan); err != nil {
+		if err := s.CreatePlan(context.Background(), plan); err != nil {
 			t.Fatalf("CreatePlan %s: %v", p.title, err)
 		}
 	}
 
-	plans, err := s.ListPlans(PlanFilter{Scope: "workspace"})
+	plans, err := s.ListPlans(context.Background(), PlanFilter{Scope: "workspace"})
 	if err != nil {
 		t.Fatalf("ListPlans: %v", err)
 	}
@@ -68,7 +69,7 @@ func TestListPlans(t *testing.T) {
 		t.Errorf("expected 2 workspace plans, got %d", len(plans))
 	}
 
-	plans, err = s.ListPlans(PlanFilter{Status: "proposed"})
+	plans, err = s.ListPlans(context.Background(), PlanFilter{Status: "proposed"})
 	if err != nil {
 		t.Fatalf("ListPlans proposed: %v", err)
 	}
@@ -81,17 +82,17 @@ func TestUpdatePlan(t *testing.T) {
 	s := newTestStore(t)
 
 	plan := &Plan{Scope: "workspace", Title: "Original"}
-	if err := s.CreatePlan(plan); err != nil {
+	if err := s.CreatePlan(context.Background(), plan); err != nil {
 		t.Fatalf("CreatePlan: %v", err)
 	}
 
 	plan.Title = "Updated"
 	plan.Status = "approved"
-	if err := s.UpdatePlan(plan); err != nil {
+	if err := s.UpdatePlan(context.Background(), plan); err != nil {
 		t.Fatalf("UpdatePlan: %v", err)
 	}
 
-	got, err := s.GetPlan(plan.ID)
+	got, err := s.GetPlan(context.Background(), plan.ID)
 	if err != nil {
 		t.Fatalf("GetPlan: %v", err)
 	}
@@ -117,16 +118,16 @@ func TestUpdatePlanStep(t *testing.T) {
 		Title: "Multi-step plan",
 		Steps: string(stepsJSON),
 	}
-	if err := s.CreatePlan(plan); err != nil {
+	if err := s.CreatePlan(context.Background(), plan); err != nil {
 		t.Fatalf("CreatePlan: %v", err)
 	}
 
 	// Update step-1 status.
-	if err := s.UpdatePlanStep(plan.ID, "step-1", PlanStep{Status: "done"}); err != nil {
+	if err := s.UpdatePlanStep(context.Background(), plan.ID, "step-1", PlanStep{Status: "done"}); err != nil {
 		t.Fatalf("UpdatePlanStep: %v", err)
 	}
 
-	got, err := s.GetPlan(plan.ID)
+	got, err := s.GetPlan(context.Background(), plan.ID)
 	if err != nil {
 		t.Fatalf("GetPlan: %v", err)
 	}
@@ -150,11 +151,11 @@ func TestUpdatePlanStepNotFound(t *testing.T) {
 	s := newTestStore(t)
 
 	plan := &Plan{Scope: "workspace", Title: "Plan", Steps: "[]"}
-	if err := s.CreatePlan(plan); err != nil {
+	if err := s.CreatePlan(context.Background(), plan); err != nil {
 		t.Fatalf("CreatePlan: %v", err)
 	}
 
-	err := s.UpdatePlanStep(plan.ID, "nonexistent", PlanStep{Status: "done"})
+	err := s.UpdatePlanStep(context.Background(), plan.ID, "nonexistent", PlanStep{Status: "done"})
 	if err == nil {
 		t.Error("expected error for nonexistent step")
 	}
@@ -173,11 +174,11 @@ func TestAppendPlanSteps_AutoAssignsSequentialIDs(t *testing.T) {
 	}
 	stepsJSON, _ := json.Marshal(steps)
 	plan := &Plan{Scope: "workspace", Title: "Append target", Steps: string(stepsJSON)}
-	if err := s.CreatePlan(plan); err != nil {
+	if err := s.CreatePlan(context.Background(), plan); err != nil {
 		t.Fatalf("CreatePlan: %v", err)
 	}
 
-	appended, err := s.AppendPlanSteps(plan.ID, []PlanStep{
+	appended, err := s.AppendPlanSteps(context.Background(), plan.ID, []PlanStep{
 		{Title: "New step A"},
 		{Title: "New step B", DependsOn: []string{"s4"}},
 	})
@@ -197,7 +198,7 @@ func TestAppendPlanSteps_AutoAssignsSequentialIDs(t *testing.T) {
 		t.Errorf("status default: got %q, want pending", appended[0].Status)
 	}
 
-	got, err := s.GetPlan(plan.ID)
+	got, err := s.GetPlan(context.Background(), plan.ID)
 	if err != nil {
 		t.Fatalf("GetPlan: %v", err)
 	}
@@ -221,17 +222,17 @@ func TestAppendPlanSteps_RejectsCollidingID(t *testing.T) {
 
 	stepsJSON, _ := json.Marshal([]PlanStep{{ID: "s1", Title: "Existing"}})
 	plan := &Plan{Scope: "workspace", Title: "Collision", Steps: string(stepsJSON)}
-	if err := s.CreatePlan(plan); err != nil {
+	if err := s.CreatePlan(context.Background(), plan); err != nil {
 		t.Fatalf("CreatePlan: %v", err)
 	}
 
-	_, err := s.AppendPlanSteps(plan.ID, []PlanStep{{ID: "s1", Title: "Duplicate"}})
+	_, err := s.AppendPlanSteps(context.Background(), plan.ID, []PlanStep{{ID: "s1", Title: "Duplicate"}})
 	if err == nil {
 		t.Fatal("expected collision error, got nil")
 	}
 
 	// Plan must still have exactly one step (no partial write).
-	got, _ := s.GetPlan(plan.ID)
+	got, _ := s.GetPlan(context.Background(), plan.ID)
 	gotSteps, _ := got.ParsePlanSteps()
 	if len(gotSteps) != 1 {
 		t.Errorf("expected 1 step after rejected append, got %d", len(gotSteps))
@@ -243,7 +244,7 @@ func TestAppendPlanSteps_RejectsCollidingID(t *testing.T) {
 func TestAppendPlanSteps_PlanNotFound(t *testing.T) {
 	s := newTestStore(t)
 
-	_, err := s.AppendPlanSteps("does-not-exist", []PlanStep{{Title: "x"}})
+	_, err := s.AppendPlanSteps(context.Background(), "does-not-exist", []PlanStep{{Title: "x"}})
 	if err == nil {
 		t.Fatal("expected error for missing plan")
 	}
@@ -254,10 +255,10 @@ func TestAppendPlanSteps_PlanNotFound(t *testing.T) {
 func TestAppendPlanSteps_RequiresTitle(t *testing.T) {
 	s := newTestStore(t)
 	plan := &Plan{Scope: "workspace", Title: "Title check"}
-	if err := s.CreatePlan(plan); err != nil {
+	if err := s.CreatePlan(context.Background(), plan); err != nil {
 		t.Fatalf("CreatePlan: %v", err)
 	}
-	_, err := s.AppendPlanSteps(plan.ID, []PlanStep{{Title: ""}})
+	_, err := s.AppendPlanSteps(context.Background(), plan.ID, []PlanStep{{Title: ""}})
 	if err == nil {
 		t.Fatal("expected title-required error")
 	}
@@ -271,10 +272,10 @@ func TestAppendPlanSteps_FallbackUUIDWhenNoNumericIDs(t *testing.T) {
 
 	stepsJSON, _ := json.Marshal([]PlanStep{{ID: "design-step", Title: "Design"}})
 	plan := &Plan{Scope: "workspace", Title: "UUID fallback", Steps: string(stepsJSON)}
-	if err := s.CreatePlan(plan); err != nil {
+	if err := s.CreatePlan(context.Background(), plan); err != nil {
 		t.Fatalf("CreatePlan: %v", err)
 	}
-	appended, err := s.AppendPlanSteps(plan.ID, []PlanStep{{Title: "Implement"}})
+	appended, err := s.AppendPlanSteps(context.Background(), plan.ID, []PlanStep{{Title: "Implement"}})
 	if err != nil {
 		t.Fatalf("AppendPlanSteps: %v", err)
 	}
@@ -290,15 +291,15 @@ func TestDeletePlan(t *testing.T) {
 	s := newTestStore(t)
 
 	plan := &Plan{Scope: "workspace", Title: "To delete"}
-	if err := s.CreatePlan(plan); err != nil {
+	if err := s.CreatePlan(context.Background(), plan); err != nil {
 		t.Fatalf("CreatePlan: %v", err)
 	}
 
-	if err := s.DeletePlan(plan.ID); err != nil {
+	if err := s.DeletePlan(context.Background(), plan.ID); err != nil {
 		t.Fatalf("DeletePlan: %v", err)
 	}
 
-	_, err := s.GetPlan(plan.ID)
+	_, err := s.GetPlan(context.Background(), plan.ID)
 	if err == nil {
 		t.Error("expected error getting deleted plan")
 	}

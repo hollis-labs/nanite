@@ -29,7 +29,7 @@ import (
 // the response degrades to the DB-only shape, keeping the test suite
 // stable.
 func (a *API) handleListProviders(w http.ResponseWriter, r *http.Request) {
-	dbProviders, err := a.Services.Store.ListProviders()
+	dbProviders, err := a.Services.Store.ListProviders(r.Context())
 	if err != nil {
 		a.errorResp(w, http.StatusInternalServerError, err.Error())
 		return
@@ -92,7 +92,7 @@ func catalogProviderRow(e providercatalog.Entry) store.ProviderConfig {
 // retire-boot-profile-catalog.md removed a second source that used to
 // live here — one synthesized model row per boot-profile catalog entry.
 func (a *API) handleListModels(w http.ResponseWriter, r *http.Request) {
-	models, err := a.Services.Store.ListModels()
+	models, err := a.Services.Store.ListModels(r.Context())
 	if err != nil {
 		a.errorResp(w, http.StatusInternalServerError, err.Error())
 		return

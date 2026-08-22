@@ -2,6 +2,7 @@ package api
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -14,7 +15,7 @@ import (
 // TestHandleCreateAgent_DefaultsSourceToUser is the regression pin for
 // PR-152 review round 1 (item C): when the caller omits `source`, the
 // handler must default it to "user" before inserting. Previously the
-// handler accepted the empty string and the row landed with source=''.
+// handler accepted the empty string and the row landed with source=”.
 func TestHandleCreateAgent_DefaultsSourceToUser(t *testing.T) {
 	_, mux := newTestAPI(t)
 
@@ -75,7 +76,7 @@ func TestHandleUpdateAgent_InternalRejectedAsHarnessOwned(t *testing.T) {
 	a, mux := newTestAPI(t)
 
 	// Seed an internal-source row with deliberately empty source_ref.
-	if err := a.Services.Store.CreateAgent(&store.AgentProfile{
+	if err := a.Services.Store.CreateAgent(context.Background(), &store.AgentProfile{
 		ID:           "test-internal-empty-ref",
 		Name:         "Test Internal",
 		Slug:         "test-internal-empty-ref",

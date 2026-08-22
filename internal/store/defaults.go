@@ -1,6 +1,7 @@
 package store
 
 import (
+	"context"
 	"database/sql"
 	"errors"
 	"fmt"
@@ -22,12 +23,12 @@ var ErrNoDefaultModel = errors.New("no default model configured")
 // Returns ErrNoDefaultModel wrapped in a contextual error when no row
 // supplies a value, so callers can pattern-match without losing the
 // "which provider was being looked up" detail.
-func (s *Store) DefaultModelForProvider(providerType string) (string, error) {
+func (s *Store) DefaultModelForProvider(ctx context.Context, providerType string) (string, error) {
 	if providerType == "" {
 		return "", fmt.Errorf("%w: empty provider_type", ErrNoDefaultModel)
 	}
 	var model string
-	err := s.DB.QueryRow(
+	err := s.DB.QueryRowContext(ctx,
 		`SELECT default_model FROM providers
 		 WHERE provider_type = ? AND COALESCE(default_model, '') <> ''
 		 ORDER BY id
@@ -71,12 +72,12 @@ func (s *Store) DefaultModelForProvider(providerType string) (string, error) {
 // hard-erroring on missing provider broke fresh installs (empty
 // user_settings) and the "session has model, downstream infers provider"
 // path.
-func (s *Store) ResolveProviderAndModel(explicitProvider, explicitModel string) (string, string, error) {
+func (s *Store) ResolveProviderAndModel(ctx context.Context, explicitProvider, explicitModel string) (string, string, error) {
 	provider := explicitProvider
 	model := explicitModel
 
 	if provider == "" || model == "" {
-		us, err := s.GetUserSettings()
+		us, err := s.GetUserSettings(ctx)
 		if err != nil {
 			return "", "", fmt.Errorf("resolve defaults: load user_settings: %w", err)
 		}
@@ -96,7 +97,7 @@ func (s *Store) ResolveProviderAndModel(explicitProvider, explicitModel string) 
 	}
 
 	if model == "" {
-		def, err := s.DefaultModelForProvider(provider)
+		def, err := s.DefaultModelForProvider(ctx, provider)
 		if err != nil {
 			return "", "", err
 		}

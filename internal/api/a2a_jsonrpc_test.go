@@ -121,7 +121,7 @@ func newTestTaskManager(t *testing.T) (*store.Store, *service.TaskManager) {
 	if err != nil {
 		t.Fatalf("store.New: %v", err)
 	}
-	t.Cleanup(func() { st.Close() })
+	t.Cleanup(func() { st.Close(context.Background()) })
 	tm := service.NewTaskManager(st, nil, nil, fakeInstanceCanceller{}, agentworkflow.NewRegistry(nil), nil)
 	return st, tm
 }
@@ -156,7 +156,7 @@ func TestA2AJSONRPC_HandleTaskCancel_Instance_Success(t *testing.T) {
 	api := &API{Services: &service.Container{TaskManager: tm}}
 
 	profile := &store.AgentProfile{Name: "A2A JSONRPC Cancel Test Agent", Slug: "a2a-jsonrpc-cancel-test-agent", SystemPrompt: "x"}
-	if err := st.CreateAgent(profile); err != nil {
+	if err := st.CreateAgent(context.Background(), profile); err != nil {
 		t.Fatalf("CreateAgent: %v", err)
 	}
 	inst := &store.DurableAgentInstance{
@@ -167,7 +167,7 @@ func TestA2AJSONRPC_HandleTaskCancel_Instance_Success(t *testing.T) {
 		ProfileID:      profile.ID,
 		Status:         store.DurableAgentStatusActive,
 	}
-	if err := st.CreateDurableAgentInstance(inst); err != nil {
+	if err := st.CreateDurableAgentInstance(context.Background(), inst); err != nil {
 		t.Fatalf("CreateDurableAgentInstance: %v", err)
 	}
 
@@ -179,7 +179,7 @@ func TestA2AJSONRPC_HandleTaskCancel_Instance_Success(t *testing.T) {
 		State:                  a2a.TaskStateWorking,
 		DurableAgentInstanceID: sql.NullString{String: inst.ID, Valid: true},
 	}
-	if err := st.CreateA2ATask(task); err != nil {
+	if err := st.CreateA2ATask(context.Background(), task); err != nil {
 		t.Fatalf("CreateA2ATask: %v", err)
 	}
 
@@ -214,7 +214,7 @@ func TestA2AJSONRPC_HandleTaskCancel_Workflow_Unsupported(t *testing.T) {
 	st, tm := newTestTaskManager(t)
 	api := &API{Services: &service.Container{TaskManager: tm}}
 
-	if err := st.CreateWorkflowRun(&store.WorkflowRunRow{
+	if err := st.CreateWorkflowRun(context.Background(), &store.WorkflowRunRow{
 		ID:             "run-cancel-1",
 		DefinitionName: "test-workflow",
 		Status:         "running",
@@ -229,7 +229,7 @@ func TestA2AJSONRPC_HandleTaskCancel_Workflow_Unsupported(t *testing.T) {
 		State:         a2a.TaskStateWorking,
 		WorkflowRunID: sql.NullString{String: "run-cancel-1", Valid: true},
 	}
-	if err := st.CreateA2ATask(task); err != nil {
+	if err := st.CreateA2ATask(context.Background(), task); err != nil {
 		t.Fatalf("CreateA2ATask: %v", err)
 	}
 

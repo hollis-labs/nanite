@@ -22,7 +22,7 @@ import (
 func TestAgentToolsGrant_SelectionAndExecutionBothAccept(t *testing.T) {
 	ctx := context.Background()
 	st := newTestStore(t)
-	t.Cleanup(func() { st.Close() })
+	t.Cleanup(func() { st.Close(context.Background()) })
 
 	agent := &store.AgentProfile{
 		Name:         "Grant Turn Agent",
@@ -34,7 +34,7 @@ func TestAgentToolsGrant_SelectionAndExecutionBothAccept(t *testing.T) {
 		// execution accept it.
 		Tools: `["some_other_legacy_tool"]`,
 	}
-	if err := st.CreateAgent(agent); err != nil {
+	if err := st.CreateAgent(context.Background(), agent); err != nil {
 		t.Fatalf("CreateAgent: %v", err)
 	}
 
@@ -90,14 +90,14 @@ func TestAgentToolsGrant_SelectionAndExecutionBothAccept(t *testing.T) {
 func TestEnforceExecutionRules_AgentToolsRejectsUngrantedTool(t *testing.T) {
 	ctx := context.Background()
 	st := newTestStore(t)
-	t.Cleanup(func() { st.Close() })
+	t.Cleanup(func() { st.Close(context.Background()) })
 
 	agent := &store.AgentProfile{
 		Name:         "Ungranted Agent",
 		Slug:         "ungranted-agent",
 		SystemPrompt: "You are a test agent.",
 	}
-	if err := st.CreateAgent(agent); err != nil {
+	if err := st.CreateAgent(context.Background(), agent); err != nil {
 		t.Fatalf("CreateAgent: %v", err)
 	}
 
@@ -119,14 +119,14 @@ func TestEnforceExecutionRules_AgentToolsRejectsUngrantedTool(t *testing.T) {
 func TestEnforceExecutionRules_AgentToolsAllowsAlwaysIncluded(t *testing.T) {
 	ctx := context.Background()
 	st := newTestStore(t)
-	t.Cleanup(func() { st.Close() })
+	t.Cleanup(func() { st.Close(context.Background()) })
 
 	agent := &store.AgentProfile{
 		Name:         "Always Included Agent",
 		Slug:         "always-included-agent",
 		SystemPrompt: "You are a test agent.",
 	}
-	if err := st.CreateAgent(agent); err != nil {
+	if err := st.CreateAgent(context.Background(), agent); err != nil {
 		t.Fatalf("CreateAgent: %v", err)
 	}
 	if _, err := st.UpsertKnownTool(ctx, "request_tools", "builtin", "available", "escape hatch"); err != nil {

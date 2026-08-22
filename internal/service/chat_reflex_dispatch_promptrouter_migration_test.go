@@ -110,12 +110,16 @@ func TestAttemptReflexDispatch_PromptrouterMigratedPhrases_FireExpectedTarget(t 
 			if err != nil {
 				t.Fatalf("store.New: %v", err)
 			}
-			t.Cleanup(func() { _ = st.Close() })
+			t.Cleanup(func() {
+				_ = st.Close(context.Background(
 
-			// Real seed data — the same call container.go makes at boot.
-			// Proves seeds.go's migrated entries (not a hand-authored
-			// test fixture) actually reproduce the old promptrouter
-			// catalog's dispatch target.
+				// Real seed data — the same call container.go makes at boot.
+				// Proves seeds.go's migrated entries (not a hand-authored
+				// test fixture) actually reproduce the old promptrouter
+				// catalog's dispatch target.
+				))
+			})
+
 			if _, err := reflexes.SeedBaseReflexes(context.Background(), st, nil); err != nil {
 				t.Fatalf("SeedBaseReflexes: %v", err)
 			}

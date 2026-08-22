@@ -1,6 +1,9 @@
 package store
 
-import "testing"
+import (
+	"context"
+	"testing"
+)
 
 // TestListArtifactsByProject exercises the project-inheritance lookup added
 // for F4 (CW-20260429-0004). The query joins artifacts to sessions on
@@ -59,13 +62,13 @@ func TestListArtifactsByProject(t *testing.T) {
 		{SessionID: "sess-sibling", Name: "sibling.txt", MimeType: "text/plain", StoragePath: "/tmp/b"},
 		{SessionID: "sess-other-project", Name: "other.txt", MimeType: "text/plain", StoragePath: "/tmp/c"},
 	} {
-		if err := s.CreateArtifact(a); err != nil {
+		if err := s.CreateArtifact(context.Background(), a); err != nil {
 			t.Fatalf("create artifact %s: %v", a.Name, err)
 		}
 	}
 
 	// 1. proj-A returns both same-project sessions' artifacts.
-	got, err := s.ListArtifactsByProject("proj-A", "")
+	got, err := s.ListArtifactsByProject(context.Background(), "proj-A", "")
 	if err != nil {
 		t.Fatalf("ListArtifactsByProject (no exclude): %v", err)
 	}
@@ -79,7 +82,7 @@ func TestListArtifactsByProject(t *testing.T) {
 	}
 
 	// 2. excluding sess-active leaves only the sibling's artifact.
-	got, err = s.ListArtifactsByProject("proj-A", "sess-active")
+	got, err = s.ListArtifactsByProject(context.Background(), "proj-A", "sess-active")
 	if err != nil {
 		t.Fatalf("ListArtifactsByProject (with exclude): %v", err)
 	}
@@ -91,7 +94,7 @@ func TestListArtifactsByProject(t *testing.T) {
 	}
 
 	// 3. empty project_id returns an empty slice (and never fires SQL).
-	got, err = s.ListArtifactsByProject("", "")
+	got, err = s.ListArtifactsByProject(context.Background(), "", "")
 	if err != nil {
 		t.Fatalf("ListArtifactsByProject (empty project): %v", err)
 	}

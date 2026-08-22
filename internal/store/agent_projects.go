@@ -1,6 +1,7 @@
 package store
 
 import (
+	"context"
 	"fmt"
 	"time"
 )
@@ -13,8 +14,8 @@ type AgentProject struct {
 }
 
 // ListAgentProjects returns all projects linked to an agent.
-func (s *Store) ListAgentProjects(agentID string) ([]Project, error) {
-	rows, err := s.DB.Query(
+func (s *Store) ListAgentProjects(ctx context.Context, agentID string) ([]Project, error) {
+	rows, err := s.DB.QueryContext(ctx,
 		`SELECT p.id, p.name, COALESCE(p.description,''), COALESCE(p.repo_path,''),
 		        p.settings, p.sort_order, p.created_at, p.updated_at
 		 FROM projects p
@@ -40,8 +41,8 @@ func (s *Store) ListAgentProjects(agentID string) ([]Project, error) {
 }
 
 // ListProjectAgents returns all agents linked to a project.
-func (s *Store) ListProjectAgents(projectID string) ([]AgentProfile, error) {
-	rows, err := s.DB.Query(
+func (s *Store) ListProjectAgents(ctx context.Context, projectID string) ([]AgentProfile, error) {
+	rows, err := s.DB.QueryContext(ctx,
 		`SELECT `+agentColumns+`
 		 FROM agent_profiles
 		 JOIN agent_projects ap ON agent_profiles.id = ap.agent_id
@@ -65,9 +66,9 @@ func (s *Store) ListProjectAgents(projectID string) ([]AgentProfile, error) {
 }
 
 // AddAgentProject links an agent to a project.
-func (s *Store) AddAgentProject(agentID, projectID string) error {
+func (s *Store) AddAgentProject(ctx context.Context, agentID, projectID string) error {
 	now := time.Now().UTC().Format(time.RFC3339)
-	_, err := s.DB.Exec(
+	_, err := s.DB.ExecContext(ctx,
 		`INSERT OR IGNORE INTO agent_projects (agent_id, project_id, created_at)
 		 VALUES (?, ?, ?)`,
 		agentID, projectID, now,
@@ -79,8 +80,8 @@ func (s *Store) AddAgentProject(agentID, projectID string) error {
 }
 
 // RemoveAgentProject unlinks an agent from a project.
-func (s *Store) RemoveAgentProject(agentID, projectID string) error {
-	res, err := s.DB.Exec(
+func (s *Store) RemoveAgentProject(ctx context.Context, agentID, projectID string) error {
+	res, err := s.DB.ExecContext(ctx,
 		`DELETE FROM agent_projects WHERE agent_id = ? AND project_id = ?`,
 		agentID, projectID,
 	)

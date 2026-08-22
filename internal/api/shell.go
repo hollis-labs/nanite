@@ -140,7 +140,7 @@ func (a *API) handleShellExec(w http.ResponseWriter, r *http.Request) {
 		Content:   content,
 		Metadata:  string(metaJSON),
 	}
-	if err := a.Services.Store.CreateMessage(msg); err != nil {
+	if err := a.Services.Store.CreateMessage(r.Context(), msg); err != nil {
 		a.errorResp(w, http.StatusInternalServerError, "persist shell output: "+err.Error())
 		return
 	}
@@ -219,7 +219,7 @@ func (a *API) handleShellInfo(w http.ResponseWriter, r *http.Request) {
 
 // sessionShellMode reads the shell_mode from session metadata, defaulting to "ask".
 func (a *API) sessionShellMode(sessionID string) shell.Mode {
-	sess, err := a.Services.Store.GetSession(sessionID)
+	sess, err := a.Services.Store.GetSession(context.TODO() /* TODO(ctx-sweep): no ctx available at this call site */, sessionID)
 	if err != nil {
 		return shell.ModeAsk
 	}
@@ -235,7 +235,7 @@ func (a *API) sessionShellMode(sessionID string) shell.Mode {
 
 // setSessionMetadataField merges a single key into the session's metadata JSON.
 func (a *API) setSessionMetadataField(sessionID, key string, value interface{}) error {
-	sess, err := a.Services.Store.GetSession(sessionID)
+	sess, err := a.Services.Store.GetSession(context.TODO() /* TODO(ctx-sweep): no ctx available at this call site */, sessionID)
 	if err != nil {
 		return fmt.Errorf("get session: %w", err)
 	}
@@ -250,7 +250,7 @@ func (a *API) setSessionMetadataField(sessionID, key string, value interface{}) 
 	if err != nil {
 		return fmt.Errorf("marshal metadata: %w", err)
 	}
-	return a.Services.Store.UpdateSessionMetadata(sessionID, string(out))
+	return a.Services.Store.UpdateSessionMetadata(context.TODO() /* TODO(ctx-sweep): no ctx available at this call site */, sessionID, string(out))
 }
 
 // resolveShellWorkDir determines the working directory for shell commands.
@@ -259,7 +259,7 @@ func (a *API) setSessionMetadataField(sessionID, key string, value interface{}) 
 // (workspaces.settings' project_dir) — the in-app `workspaces` table is
 // retired in full.
 func (a *API) resolveShellWorkDir(sessionID string) string {
-	sess, err := a.Services.Store.GetSession(sessionID)
+	sess, err := a.Services.Store.GetSession(context.TODO() /* TODO(ctx-sweep): no ctx available at this call site */, sessionID)
 	if err != nil {
 		return fallbackHomeDir()
 	}

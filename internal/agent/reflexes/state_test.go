@@ -9,13 +9,13 @@ import (
 
 func TestStateCollector_CollectsUserMessagesAndStructuredRefs(t *testing.T) {
 	st := newReflexTestStore(t)
-	if err := st.Seed(); err != nil {
+	if err := st.Seed(context.Background()); err != nil {
 		t.Fatalf("Seed: %v", err)
 	}
-	if err := st.CreateSession(&store.Session{ID: "sess-reflex", Title: "reflex"}); err != nil {
+	if err := st.CreateSession(context.Background(), &store.Session{ID: "sess-reflex", Title: "reflex"}); err != nil {
 		t.Fatalf("CreateSession: %v", err)
 	}
-	if err := st.CreateMessage(&store.Message{
+	if err := st.CreateMessage(context.Background(), &store.Message{
 		ID:        "u1",
 		SessionID: "sess-reflex",
 		Role:      "user",
@@ -23,7 +23,7 @@ func TestStateCollector_CollectsUserMessagesAndStructuredRefs(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("CreateMessage user: %v", err)
 	}
-	if err := st.CreateMessage(&store.Message{
+	if err := st.CreateMessage(context.Background(), &store.Message{
 		ID:        "a1",
 		SessionID: "sess-reflex",
 		Role:      "assistant",
@@ -31,7 +31,7 @@ func TestStateCollector_CollectsUserMessagesAndStructuredRefs(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("CreateMessage assistant: %v", err)
 	}
-	if err := st.RecordUsage("sess-reflex", "a1", "test-model", 11, 7, 0, 0, 0); err != nil {
+	if err := st.RecordUsage(context.Background(), "sess-reflex", "a1", "test-model", 11, 7, 0, 0, 0); err != nil {
 		t.Fatalf("RecordUsage: %v", err)
 	}
 
@@ -59,6 +59,6 @@ func newReflexTestStore(t *testing.T) *store.Store {
 	if err != nil {
 		t.Fatalf("store.New: %v", err)
 	}
-	t.Cleanup(func() { _ = st.Close() })
+	t.Cleanup(func() { _ = st.Close(context.Background()) })
 	return st
 }

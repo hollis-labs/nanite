@@ -384,7 +384,7 @@ func (tb *ToolClient) developerModeEnabled() bool {
 	if tb.Store == nil {
 		return false
 	}
-	us, err := tb.Store.GetUserSettings()
+	us, err := tb.Store.GetUserSettings(context.TODO() /* TODO(ctx-sweep): no ctx available at this call site */)
 	if err != nil {
 		slog.Warn("toolclient: could not read user_settings for developer_mode check; defaulting to false", "err", err)
 		return false

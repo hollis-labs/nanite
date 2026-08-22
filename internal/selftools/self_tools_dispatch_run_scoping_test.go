@@ -83,7 +83,7 @@ func TestMatchDispatchToAgentReflex_RunScopedReflex_IsolatedToItsOwnRun(t *testi
 	ctx := context.Background()
 	s := newTestStore(t)
 
-	if err := s.CreateAgent(&store.AgentProfile{
+	if err := s.CreateAgent(context.Background(), &store.AgentProfile{
 		ID:           "agent-run-scope-probe",
 		Name:         "Agent Run Scope Probe",
 		Slug:         "agent-run-scope-probe",
@@ -190,7 +190,7 @@ func TestMatchDispatchToAgentReflex_NoTeamRunMembersTable_DegradesGracefully(t *
 	s := newTestStore(t)
 	// Deliberately no team_run_members row inserted for this session.
 
-	if err := s.CreateAgent(&store.AgentProfile{
+	if err := s.CreateAgent(context.Background(), &store.AgentProfile{
 		ID:           "agent-no-team-table-mcp",
 		Name:         "Agent No Team Table MCP",
 		Slug:         "agent-no-team-table-mcp",

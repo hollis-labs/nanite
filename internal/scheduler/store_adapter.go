@@ -258,7 +258,7 @@ func (a *StoreAdapter) buildPayload(row store.AgentSchedule) ([]byte, error) {
 // instance with no visible error. Revisit if/when a real multi-instance-
 // per-profile durable_agent_wake schedule appears.
 func (a *StoreAdapter) resolveDurableAgentInstanceID(profileID string) (string, error) {
-	instances, err := a.Store.ListDurableAgentInstances(false)
+	instances, err := a.Store.ListDurableAgentInstances(context.TODO() /* TODO(ctx-sweep): no ctx available at this call site */, false)
 	if err != nil {
 		return "", fmt.Errorf("list durable_agent_instances: %w", err)
 	}

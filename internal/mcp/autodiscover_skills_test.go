@@ -17,19 +17,23 @@ func newAutoDiscoverTestStore(t *testing.T) *store.Store {
 	if err != nil {
 		t.Fatalf("store.New: %v", err)
 	}
-	t.Cleanup(func() { s.Close() })
+	t.Cleanup(func() {
+		s.Close(context.Background(
+
+		// TestAutoDiscover_NeverWritesSkillsTable is TASKS/skills/01's "Done means"
+		// verification: mcp.Manager.AutoDiscover's writes into the skills table
+		// (one row per newly visible tool, category="auto-discovered", plus a
+		// "removed":true flag for tools that disappear) are cut in full per
+		// docs/engineering/architecture/20-skills.md's "Scope: skills are authored
+		// packages only" section ("mcp.Manager.AutoDiscover's writes into the
+		// skills table stop entirely."). ListSkills() must return exactly what the
+		// test explicitly seeded — nothing added, nothing altered — after a fresh
+		// AutoDiscover run against a scratch DB with tools present.
+		))
+	})
 	return s
 }
 
-// TestAutoDiscover_NeverWritesSkillsTable is TASKS/skills/01's "Done means"
-// verification: mcp.Manager.AutoDiscover's writes into the skills table
-// (one row per newly visible tool, category="auto-discovered", plus a
-// "removed":true flag for tools that disappear) are cut in full per
-// docs/engineering/architecture/20-skills.md's "Scope: skills are authored
-// packages only" section ("mcp.Manager.AutoDiscover's writes into the
-// skills table stop entirely."). ListSkills() must return exactly what the
-// test explicitly seeded — nothing added, nothing altered — after a fresh
-// AutoDiscover run against a scratch DB with tools present.
 func TestAutoDiscover_NeverWritesSkillsTable(t *testing.T) {
 	st := newAutoDiscoverTestStore(t)
 
@@ -42,11 +46,11 @@ func TestAutoDiscover_NeverWritesSkillsTable(t *testing.T) {
 		Slug:     "old-tool",
 		Category: "auto-discovered",
 	}
-	if err := st.CreateSkill(preexisting); err != nil {
+	if err := st.CreateSkill(context.Background(), preexisting); err != nil {
 		t.Fatalf("seed preexisting skill: %v", err)
 	}
 
-	before, err := st.ListSkills()
+	before, err := st.ListSkills(context.Background())
 	if err != nil {
 		t.Fatalf("ListSkills (before): %v", err)
 	}
@@ -71,7 +75,7 @@ func TestAutoDiscover_NeverWritesSkillsTable(t *testing.T) {
 		t.Errorf("diff.Added: got %v, want 2 entries", diff.Added)
 	}
 
-	after, err := st.ListSkills()
+	after, err := st.ListSkills(context.Background())
 	if err != nil {
 		t.Fatalf("ListSkills (after): %v", err)
 	}
@@ -87,7 +91,7 @@ func TestAutoDiscover_NeverWritesSkillsTable(t *testing.T) {
 
 	// Explicitly confirm neither newly-discovered tool got a skill row.
 	for _, slug := range []string{"brand-new-tool", "another-new-tool"} {
-		sk, err := st.GetSkillBySlug(slug)
+		sk, err := st.GetSkillBySlug(context.Background(), slug)
 		if err != nil {
 			t.Fatalf("GetSkillBySlug(%q): %v", slug, err)
 		}

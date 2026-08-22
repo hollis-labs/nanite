@@ -1,6 +1,7 @@
 package store
 
 import (
+	"context"
 	"database/sql"
 	"fmt"
 	"time"
@@ -94,8 +95,8 @@ func scanRole(scanner interface{ Scan(...any) error }, r *Role) error {
 }
 
 // ListRoles returns all roles ordered by name.
-func (s *Store) ListRoles() ([]Role, error) {
-	rows, err := s.DB.Query(`SELECT ` + roleColumns + ` FROM roles ORDER BY name`)
+func (s *Store) ListRoles(ctx context.Context) ([]Role, error) {
+	rows, err := s.DB.QueryContext(ctx, `SELECT `+roleColumns+` FROM roles ORDER BY name`)
 	if err != nil {
 		return nil, fmt.Errorf("list roles: %w", err)
 	}
@@ -113,9 +114,9 @@ func (s *Store) ListRoles() ([]Role, error) {
 }
 
 // GetRole returns a role by ID, or nil if not found.
-func (s *Store) GetRole(id string) (*Role, error) {
+func (s *Store) GetRole(ctx context.Context, id string) (*Role, error) {
 	var r Role
-	row := s.DB.QueryRow(`SELECT `+roleColumns+` FROM roles WHERE id = ?`, id)
+	row := s.DB.QueryRowContext(ctx, `SELECT `+roleColumns+` FROM roles WHERE id = ?`, id)
 	if err := scanRole(row, &r); err == sql.ErrNoRows {
 		return nil, nil
 	} else if err != nil {
@@ -125,9 +126,9 @@ func (s *Store) GetRole(id string) (*Role, error) {
 }
 
 // GetRoleBySlug returns a role by slug, or nil if not found.
-func (s *Store) GetRoleBySlug(slug string) (*Role, error) {
+func (s *Store) GetRoleBySlug(ctx context.Context, slug string) (*Role, error) {
 	var r Role
-	row := s.DB.QueryRow(`SELECT `+roleColumns+` FROM roles WHERE slug = ?`, slug)
+	row := s.DB.QueryRowContext(ctx, `SELECT `+roleColumns+` FROM roles WHERE slug = ?`, slug)
 	if err := scanRole(row, &r); err == sql.ErrNoRows {
 		return nil, nil
 	} else if err != nil {
@@ -137,7 +138,7 @@ func (s *Store) GetRoleBySlug(slug string) (*Role, error) {
 }
 
 // CreateRole inserts a new role.
-func (s *Store) CreateRole(r *Role) error {
+func (s *Store) CreateRole(ctx context.Context, r *Role) error {
 	if r.ID == "" {
 		r.ID = uuid.New().String()
 	}
@@ -155,7 +156,7 @@ func (s *Store) CreateRole(r *Role) error {
 	}
 
 	now := time.Now().UTC().Format(time.RFC3339)
-	_, err := s.DB.Exec(
+	_, err := s.DB.ExecContext(ctx,
 		`INSERT INTO roles (id, slug, name, system_prompt, default_class, default_model, default_provider,
 		                    default_tools, default_skills, default_permissions, created_at, updated_at,
 		                    plugin_id)
@@ -173,7 +174,7 @@ func (s *Store) CreateRole(r *Role) error {
 }
 
 // UpdateRole updates a role's mutable fields.
-func (s *Store) UpdateRole(r *Role) error {
+func (s *Store) UpdateRole(ctx context.Context, r *Role) error {
 	if r.DefaultTools == "" {
 		r.DefaultTools = "[]"
 	}
@@ -188,7 +189,7 @@ func (s *Store) UpdateRole(r *Role) error {
 	}
 
 	now := time.Now().UTC().Format(time.RFC3339)
-	res, err := s.DB.Exec(
+	res, err := s.DB.ExecContext(ctx,
 		`UPDATE roles SET slug = ?, name = ?, system_prompt = ?, default_class = ?, default_model = ?,
 		        default_provider = ?, default_tools = ?, default_skills = ?, default_permissions = ?,
 		        updated_at = ?, plugin_id = ?
@@ -211,8 +212,8 @@ func (s *Store) UpdateRole(r *Role) error {
 // ListRolesByPluginID returns every roles row tagged with the given
 // plugin_id (see Role.PluginID's doc comment / migration 122). Used by
 // plugin.Host.UnloadPlugin's unload sweep.
-func (s *Store) ListRolesByPluginID(pluginID string) ([]Role, error) {
-	rows, err := s.DB.Query(`SELECT `+roleColumns+` FROM roles WHERE plugin_id = ? ORDER BY slug`, pluginID)
+func (s *Store) ListRolesByPluginID(ctx context.Context, pluginID string) ([]Role, error) {
+	rows, err := s.DB.QueryContext(ctx, `SELECT `+roleColumns+` FROM roles WHERE plugin_id = ? ORDER BY slug`, pluginID)
 	if err != nil {
 		return nil, fmt.Errorf("list roles by plugin_id: %w", err)
 	}
@@ -230,8 +231,8 @@ func (s *Store) ListRolesByPluginID(pluginID string) ([]Role, error) {
 }
 
 // DeleteRole removes a role by ID.
-func (s *Store) DeleteRole(id string) error {
-	res, err := s.DB.Exec(`DELETE FROM roles WHERE id = ?`, id)
+func (s *Store) DeleteRole(ctx context.Context, id string) error {
+	res, err := s.DB.ExecContext(ctx, `DELETE FROM roles WHERE id = ?`, id)
 	if err != nil {
 		return fmt.Errorf("delete role %s: %w", id, err)
 	}

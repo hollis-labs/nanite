@@ -1,6 +1,7 @@
 package store
 
 import (
+	"context"
 	"fmt"
 	"time"
 
@@ -32,8 +33,8 @@ type Artifact struct {
 }
 
 // ListArtifacts returns all artifacts for a session.
-func (s *Store) ListArtifacts(sessionID string) ([]Artifact, error) {
-	rows, err := s.DB.Query(
+func (s *Store) ListArtifacts(ctx context.Context, sessionID string) ([]Artifact, error) {
+	rows, err := s.DB.QueryContext(ctx,
 		`SELECT id, session_id, COALESCE(message_id,''), name, mime_type,
 		        COALESCE(size_bytes,0), storage_path, COALESCE(metadata,'{}'),
 		        COALESCE(origin,'uploaded'), COALESCE(source_tool_call_id,''),
@@ -62,8 +63,8 @@ func (s *Store) ListArtifacts(sessionID string) ([]Artifact, error) {
 }
 
 // ListArtifactsByOrigin returns artifacts for a session filtered by origin type.
-func (s *Store) ListArtifactsByOrigin(sessionID, origin string) ([]Artifact, error) {
-	rows, err := s.DB.Query(
+func (s *Store) ListArtifactsByOrigin(ctx context.Context, sessionID, origin string) ([]Artifact, error) {
+	rows, err := s.DB.QueryContext(ctx,
 		`SELECT id, session_id, COALESCE(message_id,''), name, mime_type,
 		        COALESCE(size_bytes,0), storage_path, COALESCE(metadata,'{}'),
 		        COALESCE(origin,'uploaded'), COALESCE(source_tool_call_id,''),
@@ -99,7 +100,7 @@ func (s *Store) ListArtifactsByOrigin(sessionID, origin string) ([]Artifact, err
 // When excludeSessionID is non-empty, artifacts owned by that session are
 // excluded from the result (the FE renders the active session in its own
 // "This Session" section already, so excluding here avoids double-counting).
-func (s *Store) ListArtifactsByProject(projectID, excludeSessionID string) ([]Artifact, error) {
+func (s *Store) ListArtifactsByProject(ctx context.Context, projectID, excludeSessionID string) ([]Artifact, error) {
 	if projectID == "" {
 		return []Artifact{}, nil
 	}
@@ -118,7 +119,7 @@ func (s *Store) ListArtifactsByProject(projectID, excludeSessionID string) ([]Ar
 	}
 	query += ` ORDER BY a.created_at DESC`
 
-	rows, err := s.DB.Query(query, args...)
+	rows, err := s.DB.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, fmt.Errorf("list artifacts by project: %w", err)
 	}
@@ -139,7 +140,7 @@ func (s *Store) ListArtifactsByProject(projectID, excludeSessionID string) ([]Ar
 }
 
 // CreateArtifact inserts a new artifact record.
-func (s *Store) CreateArtifact(a *Artifact) error {
+func (s *Store) CreateArtifact(ctx context.Context, a *Artifact) error {
 	if a.ID == "" {
 		a.ID = uuid.New().String()
 	}
@@ -152,7 +153,7 @@ func (s *Store) CreateArtifact(a *Artifact) error {
 	now := time.Now().UTC().Format(time.RFC3339)
 	a.CreatedAt = now
 
-	_, err := s.DB.Exec(
+	_, err := s.DB.ExecContext(ctx,
 		`INSERT INTO artifacts (id, session_id, message_id, name, mime_type, size_bytes,
 		        storage_path, metadata, origin, source_tool_call_id, source_agent_id,
 		        source_plugin_id, created_at)
@@ -169,9 +170,9 @@ func (s *Store) CreateArtifact(a *Artifact) error {
 }
 
 // GetArtifact returns a single artifact by ID.
-func (s *Store) GetArtifact(id string) (*Artifact, error) {
+func (s *Store) GetArtifact(ctx context.Context, id string) (*Artifact, error) {
 	var a Artifact
-	err := s.DB.QueryRow(
+	err := s.DB.QueryRowContext(ctx,
 		`SELECT id, session_id, COALESCE(message_id,''), name, mime_type,
 		        COALESCE(size_bytes,0), storage_path, COALESCE(metadata,'{}'),
 		        COALESCE(origin,'uploaded'), COALESCE(source_tool_call_id,''),

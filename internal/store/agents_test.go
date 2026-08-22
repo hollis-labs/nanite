@@ -12,7 +12,7 @@ func makeTestAgent(t *testing.T, s *Store, slug string) *AgentProfile {
 		Slug:         slug,
 		SystemPrompt: "You are a test agent.",
 	}
-	if err := s.CreateAgent(a); err != nil {
+	if err := s.CreateAgent(context.Background(), a); err != nil {
 		t.Fatalf("CreateAgent: %v", err)
 	}
 	return a
@@ -26,7 +26,7 @@ func TestCreateAgent(t *testing.T) {
 		Slug:         "bot",
 		SystemPrompt: "You are a bot.",
 	}
-	if err := s.CreateAgent(a); err != nil {
+	if err := s.CreateAgent(context.Background(), a); err != nil {
 		t.Fatalf("CreateAgent: %v", err)
 	}
 
@@ -48,14 +48,14 @@ func TestCreateAgent(t *testing.T) {
 func TestCreateAgent_ParentDispatchAllowlistDefault(t *testing.T) {
 	s := newTestStore(t)
 	a := &AgentProfile{Name: "Plain", Slug: "plain-bot", SystemPrompt: "x"}
-	if err := s.CreateAgent(a); err != nil {
+	if err := s.CreateAgent(context.Background(), a); err != nil {
 		t.Fatalf("CreateAgent: %v", err)
 	}
 	if a.ParentDispatchAllowlist != "[]" {
 		t.Errorf("ParentDispatchAllowlist = %q, want \"[]\" after default CreateAgent", a.ParentDispatchAllowlist)
 	}
 
-	got, err := s.GetAgent(a.ID)
+	got, err := s.GetAgent(context.Background(), a.ID)
 	if err != nil {
 		t.Fatalf("GetAgent: %v", err)
 	}
@@ -74,10 +74,10 @@ func TestCreateAgent_ParentDispatchAllowlistRoundTrip(t *testing.T) {
 		SystemPrompt:            "x",
 		ParentDispatchAllowlist: `["researcher","planner","worker"]`,
 	}
-	if err := s.CreateAgent(a); err != nil {
+	if err := s.CreateAgent(context.Background(), a); err != nil {
 		t.Fatalf("CreateAgent: %v", err)
 	}
-	got, err := s.GetAgent(a.ID)
+	got, err := s.GetAgent(context.Background(), a.ID)
 	if err != nil {
 		t.Fatalf("GetAgent: %v", err)
 	}
@@ -92,10 +92,10 @@ func TestUpdateAgent_ParentDispatchAllowlistPersists(t *testing.T) {
 	s := newTestStore(t)
 	a := makeTestAgent(t, s, "update-target")
 	a.ParentDispatchAllowlist = `["worker"]`
-	if err := s.UpdateAgent(a); err != nil {
+	if err := s.UpdateAgent(context.Background(), a); err != nil {
 		t.Fatalf("UpdateAgent: %v", err)
 	}
-	got, err := s.GetAgent(a.ID)
+	got, err := s.GetAgent(context.Background(), a.ID)
 	if err != nil {
 		t.Fatalf("GetAgent: %v", err)
 	}
@@ -108,7 +108,7 @@ func TestGetAgent(t *testing.T) {
 	s := newTestStore(t)
 	a := makeTestAgent(t, s, "get-agent")
 
-	got, err := s.GetAgent(a.ID)
+	got, err := s.GetAgent(context.Background(), a.ID)
 	if err != nil {
 		t.Fatalf("GetAgent: %v", err)
 	}
@@ -127,7 +127,7 @@ func TestGetAgentBySlug(t *testing.T) {
 	s := newTestStore(t)
 	a := makeTestAgent(t, s, "slug-test")
 
-	got, err := s.GetAgentBySlug("slug-test")
+	got, err := s.GetAgentBySlug(context.Background(), "slug-test")
 	if err != nil {
 		t.Fatalf("GetAgentBySlug: %v", err)
 	}
@@ -141,7 +141,7 @@ func TestListAgents(t *testing.T) {
 	// CW-20260512-0111: migration 060 seeds 4 internal profile rows
 	// (default, worker, planner, hint-selector). Capture the baseline
 	// after migrations, then assert the two newly-created rows on top.
-	baseline, err := s.ListAgents()
+	baseline, err := s.ListAgents(context.Background())
 	if err != nil {
 		t.Fatalf("ListAgents baseline: %v", err)
 	}
@@ -150,7 +150,7 @@ func TestListAgents(t *testing.T) {
 	makeTestAgent(t, s, "agent-a")
 	makeTestAgent(t, s, "agent-b")
 
-	agents, err := s.ListAgents()
+	agents, err := s.ListAgents(context.Background())
 	if err != nil {
 		t.Fatalf("ListAgents: %v", err)
 	}
@@ -164,22 +164,22 @@ func TestEnsureSessionAgent(t *testing.T) {
 	a := makeTestAgent(t, s, "ensure-agent")
 
 	sess := &Session{}
-	if err := s.CreateSession(sess); err != nil {
+	if err := s.CreateSession(context.Background(), sess); err != nil {
 		t.Fatalf("CreateSession: %v", err)
 	}
 
 	// First call: insert.
-	if err := s.EnsureSessionAgent(sess.ID, a.ID, "default", true); err != nil {
+	if err := s.EnsureSessionAgent(context.Background(), sess.ID, a.ID, "default", true); err != nil {
 		t.Fatalf("EnsureSessionAgent (insert): %v", err)
 	}
 
 	// Second call: upsert (should not error).
-	if err := s.EnsureSessionAgent(sess.ID, a.ID, "coder", true); err != nil {
+	if err := s.EnsureSessionAgent(context.Background(), sess.ID, a.ID, "coder", true); err != nil {
 		t.Fatalf("EnsureSessionAgent (upsert): %v", err)
 	}
 
 	// Verify mode was updated.
-	sa, err := s.GetSessionPrimaryAgent(sess.ID)
+	sa, err := s.GetSessionPrimaryAgent(context.Background(), sess.ID)
 	if err != nil {
 		t.Fatalf("GetSessionPrimaryAgent: %v", err)
 	}
@@ -193,15 +193,15 @@ func TestGetSessionPrimaryAgent(t *testing.T) {
 	a := makeTestAgent(t, s, "primary-agent")
 
 	sess := &Session{}
-	if err := s.CreateSession(sess); err != nil {
+	if err := s.CreateSession(context.Background(), sess); err != nil {
 		t.Fatalf("CreateSession: %v", err)
 	}
 
-	if err := s.EnsureSessionAgent(sess.ID, a.ID, "default", true); err != nil {
+	if err := s.EnsureSessionAgent(context.Background(), sess.ID, a.ID, "default", true); err != nil {
 		t.Fatalf("EnsureSessionAgent: %v", err)
 	}
 
-	sa, err := s.GetSessionPrimaryAgent(sess.ID)
+	sa, err := s.GetSessionPrimaryAgent(context.Background(), sess.ID)
 	if err != nil {
 		t.Fatalf("GetSessionPrimaryAgent: %v", err)
 	}
@@ -219,18 +219,18 @@ func TestListSessionAgents(t *testing.T) {
 	a2 := makeTestAgent(t, s, "list-sa-2")
 
 	sess := &Session{}
-	if err := s.CreateSession(sess); err != nil {
+	if err := s.CreateSession(context.Background(), sess); err != nil {
 		t.Fatalf("CreateSession: %v", err)
 	}
 
-	if err := s.EnsureSessionAgent(sess.ID, a1.ID, "default", true); err != nil {
+	if err := s.EnsureSessionAgent(context.Background(), sess.ID, a1.ID, "default", true); err != nil {
 		t.Fatalf("EnsureSessionAgent 1: %v", err)
 	}
-	if err := s.EnsureSessionAgent(sess.ID, a2.ID, "default", false); err != nil {
+	if err := s.EnsureSessionAgent(context.Background(), sess.ID, a2.ID, "default", false); err != nil {
 		t.Fatalf("EnsureSessionAgent 2: %v", err)
 	}
 
-	agents, err := s.ListSessionAgents(sess.ID)
+	agents, err := s.ListSessionAgents(context.Background(), sess.ID)
 	if err != nil {
 		t.Fatalf("ListSessionAgents: %v", err)
 	}
@@ -266,18 +266,18 @@ func TestDeleteAgent_NoPragmaToggle(t *testing.T) {
 
 	// session + message referencing the agent
 	sess := &Session{}
-	if err := s.CreateSession(sess); err != nil {
+	if err := s.CreateSession(context.Background(), sess); err != nil {
 		t.Fatalf("CreateSession: %v", err)
 	}
-	if err := s.EnsureSessionAgent(sess.ID, agent.ID, "default", true); err != nil {
+	if err := s.EnsureSessionAgent(context.Background(), sess.ID, agent.ID, "default", true); err != nil {
 		t.Fatalf("EnsureSessionAgent: %v", err)
 	}
 	msg := &Message{SessionID: sess.ID, AgentID: agent.ID, Role: "assistant", Content: "hi"}
-	if err := s.CreateMessage(msg); err != nil {
+	if err := s.CreateMessage(context.Background(), msg); err != nil {
 		t.Fatalf("CreateMessage: %v", err)
 	}
 
-	if err := s.DeleteAgent("del-agent"); err != nil {
+	if err := s.DeleteAgent(context.Background(), "del-agent"); err != nil {
 		t.Fatalf("DeleteAgent: %v", err)
 	}
 
@@ -325,7 +325,7 @@ func TestCreateAgent_RejectsUserSlug(t *testing.T) {
 		Slug: "user",
 		Name: "sneaky",
 	}
-	if err := s.CreateAgent(profile); err == nil {
+	if err := s.CreateAgent(context.Background(), profile); err == nil {
 		t.Fatal("expected error for slug=user, got nil")
 	}
 }
@@ -337,7 +337,7 @@ func TestCreateAgent_RejectsUserID(t *testing.T) {
 		Slug: "not-user",
 		Name: "also sneaky",
 	}
-	if err := s.CreateAgent(profile); err == nil {
+	if err := s.CreateAgent(context.Background(), profile); err == nil {
 		t.Fatal("expected error for id=user, got nil")
 	}
 }

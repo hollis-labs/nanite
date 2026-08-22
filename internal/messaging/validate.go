@@ -35,7 +35,7 @@ type AgentResolver interface {
 // *store.Store satisfies this structurally via its existing
 // CreateAgent method.
 type AgentRegistrar interface {
-	CreateAgent(a *store.AgentProfile) error
+	CreateAgent(ctx context.Context, a *store.AgentProfile) error
 }
 
 // ValidateAgentID checks that an agent_id is one of:

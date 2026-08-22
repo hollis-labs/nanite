@@ -65,7 +65,7 @@ func (cs *catalogState) errorResp(w http.ResponseWriter, status int, msg string)
 // --- Source management ---
 
 func (cs *catalogState) handleListSources(w http.ResponseWriter, r *http.Request) {
-	sources, err := cs.store.ListCatalogSources()
+	sources, err := cs.store.ListCatalogSources(r.Context())
 	if err != nil {
 		cs.errorResp(w, http.StatusInternalServerError, err.Error())
 		return
@@ -84,7 +84,7 @@ func (cs *catalogState) handleAddSource(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	src, err := cs.store.CreateCatalogSource(req.Name, req.URL, "custom", req.Priority)
+	src, err := cs.store.CreateCatalogSource(r.Context(), req.Name, req.URL, "custom", req.Priority)
 	if err != nil {
 		if strings.Contains(err.Error(), "UNIQUE constraint") {
 			cs.errorResp(w, http.StatusConflict, "a source with that URL already exists")
@@ -107,7 +107,7 @@ func (cs *catalogState) handleUpdateSource(w http.ResponseWriter, r *http.Reques
 	}
 
 	// Load current to fill in unchanged fields.
-	existing, err := cs.store.GetCatalogSource(id)
+	existing, err := cs.store.GetCatalogSource(r.Context(), id)
 	if err != nil {
 		cs.errorResp(w, http.StatusNotFound, "source not found")
 		return
@@ -130,7 +130,7 @@ func (cs *catalogState) handleUpdateSource(w http.ResponseWriter, r *http.Reques
 		priority = *req.Priority
 	}
 
-	if err := cs.store.UpdateCatalogSource(id, name, url, enabled, priority); err != nil {
+	if err := cs.store.UpdateCatalogSource(r.Context(), id, name, url, enabled, priority); err != nil {
 		cs.errorResp(w, http.StatusInternalServerError, err.Error())
 		return
 	}
@@ -141,7 +141,7 @@ func (cs *catalogState) handleUpdateSource(w http.ResponseWriter, r *http.Reques
 
 func (cs *catalogState) handleDeleteSource(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
-	if err := cs.store.DeleteCatalogSource(id); err != nil {
+	if err := cs.store.DeleteCatalogSource(r.Context(), id); err != nil {
 		cs.errorResp(w, http.StatusNotFound, err.Error())
 		return
 	}
@@ -169,7 +169,7 @@ func (cs *catalogState) handleSetSourceKey(w http.ResponseWriter, r *http.Reques
 		}
 	}
 
-	if err := cs.store.SetCatalogSourcePublicKey(id, req.PublicKey); err != nil {
+	if err := cs.store.SetCatalogSourcePublicKey(r.Context(), id, req.PublicKey); err != nil {
 		cs.errorResp(w, http.StatusNotFound, err.Error())
 		return
 	}
@@ -188,7 +188,7 @@ type catalogBrowseEntry struct {
 }
 
 func (cs *catalogState) handleBrowseCatalog(w http.ResponseWriter, r *http.Request) {
-	sources, err := cs.store.ListCatalogSources()
+	sources, err := cs.store.ListCatalogSources(r.Context())
 	if err != nil {
 		cs.errorResp(w, http.StatusInternalServerError, err.Error())
 		return
@@ -261,7 +261,7 @@ func (cs *catalogState) handleCatalogInstall(w http.ResponseWriter, r *http.Requ
 	}
 
 	// Look up in catalog.
-	sources, err := cs.store.ListCatalogSources()
+	sources, err := cs.store.ListCatalogSources(r.Context())
 	if err != nil {
 		cs.errorResp(w, http.StatusInternalServerError, err.Error())
 		return
@@ -347,7 +347,7 @@ func (cs *catalogState) handleCatalogInstall(w http.ResponseWriter, r *http.Requ
 	// failure fails safe to false (unsigned installs stay rejected), same as
 	// the CLI's resolveAllowUnsignedPlugins.
 	allowUnsigned := false
-	if us, err := cs.store.GetUserSettings(); err == nil {
+	if us, err := cs.store.GetUserSettings(r.Context()); err == nil {
 		allowUnsigned = us.AllowUnsignedPlugins
 	}
 

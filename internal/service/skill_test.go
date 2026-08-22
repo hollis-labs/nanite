@@ -19,7 +19,7 @@ func newMemSkillStore() *memSkillStore {
 	return &memSkillStore{skills: make(map[string]store.Skill)}
 }
 
-func (m *memSkillStore) ListSkills() ([]store.Skill, error) {
+func (m *memSkillStore) ListSkills(ctx context.Context) ([]store.Skill, error) {
 	out := make([]store.Skill, 0, len(m.skills))
 	for _, s := range m.skills {
 		out = append(out, s)
@@ -27,7 +27,7 @@ func (m *memSkillStore) ListSkills() ([]store.Skill, error) {
 	return out, nil
 }
 
-func (m *memSkillStore) GetSkill(id string) (*store.Skill, error) {
+func (m *memSkillStore) GetSkill(ctx context.Context, id string) (*store.Skill, error) {
 	s, ok := m.skills[id]
 	if !ok {
 		return nil, fmt.Errorf("skill %s not found", id)
@@ -35,7 +35,7 @@ func (m *memSkillStore) GetSkill(id string) (*store.Skill, error) {
 	return &s, nil
 }
 
-func (m *memSkillStore) GetSkillBySlug(slug string) (*store.Skill, error) {
+func (m *memSkillStore) GetSkillBySlug(ctx context.Context, slug string) (*store.Skill, error) {
 	for _, s := range m.skills {
 		if s.Slug == slug {
 			return &s, nil
@@ -44,12 +44,12 @@ func (m *memSkillStore) GetSkillBySlug(slug string) (*store.Skill, error) {
 	return nil, fmt.Errorf("skill with slug %s not found", slug)
 }
 
-func (m *memSkillStore) CreateSkill(sk *store.Skill) error {
+func (m *memSkillStore) CreateSkill(ctx context.Context, sk *store.Skill) error {
 	m.skills[sk.ID] = *sk
 	return nil
 }
 
-func (m *memSkillStore) UpdateSkill(sk *store.Skill) error {
+func (m *memSkillStore) UpdateSkill(ctx context.Context, sk *store.Skill) error {
 	if _, ok := m.skills[sk.ID]; !ok {
 		return fmt.Errorf("skill %s not found", sk.ID)
 	}
@@ -57,7 +57,7 @@ func (m *memSkillStore) UpdateSkill(sk *store.Skill) error {
 	return nil
 }
 
-func (m *memSkillStore) DeleteSkill(id string) error {
+func (m *memSkillStore) DeleteSkill(ctx context.Context, id string) error {
 	delete(m.skills, id)
 	return nil
 }

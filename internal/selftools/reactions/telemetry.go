@@ -65,7 +65,7 @@ const CategorySelftoolReaction = "selftool_reaction"
 // to bump, so adding an unused method here would only widen this
 // package's dependency surface for nothing.
 type TraceStore interface {
-	LogEvent(sessionID, eventType, category, detail, metadata string)
+	LogEvent(ctx context.Context, sessionID, eventType, category, detail, metadata string)
 }
 
 // traceRecord is the one consistent shape every fired (or
@@ -144,7 +144,8 @@ func EmitReactionTrace(ctx context.Context, ts TraceStore, toolCallID string, re
 			metaJSON = []byte("{}")
 		}
 
-		ts.LogEvent("", fr.Kind, CategorySelftoolReaction, result.ToolName, string(metaJSON))
+		// Outcome bookkeeping must survive cancellation of the reaction it records.
+		ts.LogEvent(context.WithoutCancel(ctx), "", fr.Kind, CategorySelftoolReaction, result.ToolName, string(metaJSON))
 	}
 
 	return nil

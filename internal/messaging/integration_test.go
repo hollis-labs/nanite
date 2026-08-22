@@ -19,10 +19,10 @@ func TestIntegration_HandoffFullFlow(t *testing.T) {
 	ctx := context.Background()
 
 	sess := newHandoffTestSession(t, parent)
-	if err := parent.EnsureSessionAgent(sess.ID, "file-backend", "default", true); err != nil {
+	if err := parent.EnsureSessionAgent(context.Background(), sess.ID, "file-backend", "default", true); err != nil {
 		t.Fatalf("EnsureSessionAgent backend: %v", err)
 	}
-	if err := parent.EnsureSessionAgent(sess.ID, "file-frontend", "default", false); err != nil {
+	if err := parent.EnsureSessionAgent(context.Background(), sess.ID, "file-frontend", "default", false); err != nil {
 		t.Fatalf("EnsureSessionAgent frontend: %v", err)
 	}
 
@@ -63,7 +63,7 @@ func TestIntegration_HandoffFullFlow(t *testing.T) {
 	}
 
 	// 5. Verify frontend is now primary.
-	primary, err := parent.GetSessionPrimaryAgent(sess.ID)
+	primary, err := parent.GetSessionPrimaryAgent(context.Background(), sess.ID)
 	if err != nil {
 		t.Fatalf("GetSessionPrimaryAgent: %v", err)
 	}

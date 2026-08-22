@@ -8,8 +8,8 @@ import (
 	"testing"
 
 	"github.com/hollis-labs/nanite/internal/config"
-	"github.com/hollis-labs/nanite/internal/contextbroker"
 	ctxpkg "github.com/hollis-labs/nanite/internal/context"
+	"github.com/hollis-labs/nanite/internal/contextbroker"
 	"github.com/hollis-labs/nanite/internal/mcp"
 	"github.com/hollis-labs/nanite/internal/store"
 )
@@ -45,14 +45,14 @@ func TestSlotStash_E2E_50KLineFile_StashAndDevRead(t *testing.T) {
 	if err != nil {
 		t.Fatalf("store.New: %v", err)
 	}
-	t.Cleanup(func() { s.Close() })
+	t.Cleanup(func() { s.Close(context.Background()) })
 
 	artifactsRoot := tmp + "/artifacts"
 	if err := os.MkdirAll(artifactsRoot, 0o755); err != nil {
 		t.Fatalf("mkdir artifacts: %v", err)
 	}
 
-	if err := s.CreateSession(&store.Session{ID: "e2e-sess"}); err != nil {
+	if err := s.CreateSession(context.Background(), &store.Session{ID: "e2e-sess"}); err != nil {
 		t.Fatalf("CreateSession: %v", err)
 	}
 
@@ -119,7 +119,7 @@ func TestSlotStash_E2E_50KLineFile_StashAndDevRead(t *testing.T) {
 	}
 
 	// --- 2. Artifact row exists ---------------------------------------
-	row, err := s.GetArtifact(ctxDec.ArtifactID)
+	row, err := s.GetArtifact(context.Background(), ctxDec.ArtifactID)
 	if err != nil {
 		t.Fatalf("GetArtifact: %v", err)
 	}
@@ -205,7 +205,7 @@ func TestSlotStash_E2E_50KLineFile_StashAndDevRead(t *testing.T) {
 	}
 
 	// Re-stash should be idempotent: still one row.
-	rows, err := s.ListArtifacts("e2e-sess")
+	rows, err := s.ListArtifacts(context.Background(), "e2e-sess")
 	if err != nil {
 		t.Fatalf("ListArtifacts: %v", err)
 	}

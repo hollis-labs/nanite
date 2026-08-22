@@ -277,13 +277,13 @@ func (h *Host) SweepPluginAgentProfiles(pluginID string) {
 		return
 	}
 
-	agents, err := st.ListAgentsByPluginID(pluginID)
+	agents, err := st.ListAgentsByPluginID(context.TODO() /* TODO(ctx-sweep): no ctx available at this call site */, pluginID)
 	if err != nil {
 		h.logger.Warn("plugin agent_profiles sweep: list plugin-owned agents failed", "plugin", pluginID, "error", err)
 	} else {
 		removed := 0
 		for _, a := range agents {
-			if err := st.DeleteAgentByID(a.ID); err != nil {
+			if err := st.DeleteAgentByID(context.TODO() /* TODO(ctx-sweep): no ctx available at this call site */, a.ID); err != nil {
 				h.logger.Warn("plugin agent_profiles sweep: delete plugin-owned agent failed",
 					"plugin", pluginID, "agent", a.Slug, "error", err)
 				continue
@@ -295,14 +295,14 @@ func (h *Host) SweepPluginAgentProfiles(pluginID string) {
 		}
 	}
 
-	roles, err := st.ListRolesByPluginID(pluginID)
+	roles, err := st.ListRolesByPluginID(context.TODO() /* TODO(ctx-sweep): no ctx available at this call site */, pluginID)
 	if err != nil {
 		h.logger.Warn("plugin agent_profiles sweep: list plugin-owned roles failed", "plugin", pluginID, "error", err)
 		return
 	}
 	removed := 0
 	for _, r := range roles {
-		n, err := st.CountAgentsByRoleID(r.ID)
+		n, err := st.CountAgentsByRoleID(context.TODO() /* TODO(ctx-sweep): no ctx available at this call site */, r.ID)
 		if err != nil {
 			h.logger.Warn("plugin agent_profiles sweep: count agents by role failed",
 				"plugin", pluginID, "role", r.Slug, "error", err)
@@ -314,7 +314,7 @@ func (h *Host) SweepPluginAgentProfiles(pluginID string) {
 			// reused, shared role) -- leave it in place.
 			continue
 		}
-		if err := st.DeleteRole(r.ID); err != nil {
+		if err := st.DeleteRole(context.TODO() /* TODO(ctx-sweep): no ctx available at this call site */, r.ID); err != nil {
 			h.logger.Warn("plugin agent_profiles sweep: delete plugin-owned role failed",
 				"plugin", pluginID, "role", r.Slug, "error", err)
 			continue
@@ -432,7 +432,7 @@ func applyPluginAgentProfile(ctx context.Context, host *Host, st *store.Store, p
 	// as "no existing row," since UpsertAgentBySlug below re-derives the
 	// same lookup internally and would otherwise mask a real DB error as a
 	// silent create anyway.
-	existing, lookupErr := st.GetAgentBySlug(doc.Agent.Slug)
+	existing, lookupErr := st.GetAgentBySlug(ctx, doc.Agent.Slug)
 	if lookupErr != nil {
 		existing = nil
 	}
@@ -484,7 +484,7 @@ func applyPluginAgentProfile(ctx context.Context, host *Host, st *store.Store, p
 		// and so a direct struct inspection before insert is never blank.
 		agentRow.Status = "active"
 	}
-	if err := st.UpsertAgentBySlug(&agentRow); err != nil {
+	if err := st.UpsertAgentBySlug(ctx, &agentRow); err != nil {
 		return fmt.Errorf("upsert agent %q: %w", doc.Agent.Slug, err)
 	}
 
@@ -504,7 +504,7 @@ func applyPluginAgentProfile(ctx context.Context, host *Host, st *store.Store, p
 	}
 
 	for _, skillSlug := range doc.Agent.Skills {
-		sk, err := st.GetSkillBySlug(skillSlug)
+		sk, err := st.GetSkillBySlug(ctx, skillSlug)
 		if err != nil {
 			return fmt.Errorf("look up skill %q: %w", skillSlug, err)
 		}
@@ -513,7 +513,7 @@ func applyPluginAgentProfile(ctx context.Context, host *Host, st *store.Store, p
 				"plugin", pluginID, "agent", agentRow.Slug, "skill", skillSlug)
 			continue
 		}
-		if err := st.AssignSkillToAgent(agentRow.ID, sk.ID, "{}"); err != nil {
+		if err := st.AssignSkillToAgent(ctx, agentRow.ID, sk.ID, "{}"); err != nil {
 			return fmt.Errorf("assign skill %q to agent %q: %w", skillSlug, agentRow.Slug, err)
 		}
 	}
@@ -532,7 +532,7 @@ func applyPluginAgentProfile(ctx context.Context, host *Host, st *store.Store, p
 //     plugin.Host.UnloadPlugin's sweep never deletes a role this plugin
 //     didn't actually create.
 func resolveOrCreatePluginRole(st *store.Store, pluginID string, r PluginAgentProfileRole) (*store.Role, error) {
-	existing, err := st.GetRoleBySlug(r.Slug)
+	existing, err := st.GetRoleBySlug(context.TODO() /* TODO(ctx-sweep): no ctx available at this call site */, r.Slug)
 	if err != nil {
 		return nil, fmt.Errorf("look up role by slug: %w", err)
 	}
@@ -543,7 +543,7 @@ func resolveOrCreatePluginRole(st *store.Store, pluginID string, r PluginAgentPr
 		existing.Name = r.Name
 		existing.SystemPrompt = r.SystemPrompt
 		existing.DefaultClass = r.Class
-		if err := st.UpdateRole(existing); err != nil {
+		if err := st.UpdateRole(context.TODO() /* TODO(ctx-sweep): no ctx available at this call site */, existing); err != nil {
 			return nil, fmt.Errorf("update role: %w", err)
 		}
 		return existing, nil
@@ -555,7 +555,7 @@ func resolveOrCreatePluginRole(st *store.Store, pluginID string, r PluginAgentPr
 		DefaultClass: r.Class,
 		PluginID:     pluginID,
 	}
-	if err := st.CreateRole(role); err != nil {
+	if err := st.CreateRole(context.TODO() /* TODO(ctx-sweep): no ctx available at this call site */, role); err != nil {
 		return nil, fmt.Errorf("create role: %w", err)
 	}
 	return role, nil
@@ -570,7 +570,7 @@ func resolveOrCreatePluginRole(st *store.Store, pluginID string, r PluginAgentPr
 // consumer row is inert; DeleteConsumer is still available via the
 // existing consumers API for an operator who wants to clean it up).
 func resolveOrCreateConsumer(st *store.Store, slug string) (*store.Consumer, error) {
-	existing, err := st.GetConsumerBySlug(slug)
+	existing, err := st.GetConsumerBySlug(context.TODO() /* TODO(ctx-sweep): no ctx available at this call site */, slug)
 	if err != nil {
 		return nil, fmt.Errorf("look up consumer by slug: %w", err)
 	}
@@ -581,7 +581,7 @@ func resolveOrCreateConsumer(st *store.Store, slug string) (*store.Consumer, err
 		Slug: slug,
 		Name: humanizeSlug(slug),
 	}
-	if err := st.CreateConsumer(c); err != nil {
+	if err := st.CreateConsumer(context.TODO() /* TODO(ctx-sweep): no ctx available at this call site */, c); err != nil {
 		return nil, fmt.Errorf("create consumer: %w", err)
 	}
 	return c, nil

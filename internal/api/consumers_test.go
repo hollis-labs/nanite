@@ -2,6 +2,7 @@ package api
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -170,7 +171,7 @@ func TestHandleDeleteConsumer_RejectsWhileReferenced(t *testing.T) {
 	}
 
 	// Sanity: verify against the store directly too.
-	if _, err := a.Services.Store.GetConsumer(consumer.ID); err != nil {
+	if _, err := a.Services.Store.GetConsumer(context.Background(), consumer.ID); err != nil {
 		t.Fatalf("GetConsumer after failed delete: %v", err)
 	}
 }

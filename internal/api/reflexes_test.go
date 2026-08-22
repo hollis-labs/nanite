@@ -15,7 +15,7 @@ import (
 func TestReflexesAPI_CreatePatchDeleteAgentReflex(t *testing.T) {
 	a, mux := newTestAPI(t)
 	agent := &store.AgentProfile{Name: "Reflex Agent", Slug: "reflex-agent", SystemPrompt: "x", Class: "advisor"}
-	if err := a.Services.Store.CreateAgent(agent); err != nil {
+	if err := a.Services.Store.CreateAgent(context.Background(), agent); err != nil {
 		t.Fatalf("CreateAgent: %v", err)
 	}
 
@@ -66,7 +66,7 @@ func TestReflexesAPI_CreatePatchDeleteAgentReflex(t *testing.T) {
 func TestReflexesAPI_ListWorksForInternalBuiltinAgent(t *testing.T) {
 	a, mux := newTestAPI(t)
 
-	defaultAgent, err := a.Services.Store.GetAgentBySlug("default")
+	defaultAgent, err := a.Services.Store.GetAgentBySlug(context.Background(), "default")
 	if err != nil || defaultAgent == nil {
 		t.Fatalf("GetAgentBySlug(default): %v", err)
 	}

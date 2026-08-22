@@ -1,6 +1,7 @@
 package store
 
 import (
+	"context"
 	"database/sql"
 	"fmt"
 	"time"
@@ -25,9 +26,9 @@ type Consumer struct {
 const consumerColumns = `id, slug, name, created_at`
 
 // ListConsumers returns all consumers ordered by slug.
-func (s *Store) ListConsumers() ([]Consumer, error) {
-	rows, err := s.DB.Query(
-		`SELECT ` + consumerColumns + ` FROM consumers ORDER BY slug`,
+func (s *Store) ListConsumers(ctx context.Context) ([]Consumer, error) {
+	rows, err := s.DB.QueryContext(ctx,
+		`SELECT `+consumerColumns+` FROM consumers ORDER BY slug`,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("list consumers: %w", err)
@@ -46,9 +47,9 @@ func (s *Store) ListConsumers() ([]Consumer, error) {
 }
 
 // GetConsumer returns a consumer by ID. Returns nil, nil if not found.
-func (s *Store) GetConsumer(id string) (*Consumer, error) {
+func (s *Store) GetConsumer(ctx context.Context, id string) (*Consumer, error) {
 	var c Consumer
-	err := s.DB.QueryRow(
+	err := s.DB.QueryRowContext(ctx,
 		`SELECT `+consumerColumns+` FROM consumers WHERE id = ?`, id,
 	).Scan(&c.ID, &c.Slug, &c.Name, &c.CreatedAt)
 	if err == sql.ErrNoRows {
@@ -61,9 +62,9 @@ func (s *Store) GetConsumer(id string) (*Consumer, error) {
 }
 
 // GetConsumerBySlug returns a consumer by slug. Returns nil, nil if not found.
-func (s *Store) GetConsumerBySlug(slug string) (*Consumer, error) {
+func (s *Store) GetConsumerBySlug(ctx context.Context, slug string) (*Consumer, error) {
 	var c Consumer
-	err := s.DB.QueryRow(
+	err := s.DB.QueryRowContext(ctx,
 		`SELECT `+consumerColumns+` FROM consumers WHERE slug = ?`, slug,
 	).Scan(&c.ID, &c.Slug, &c.Name, &c.CreatedAt)
 	if err == sql.ErrNoRows {
@@ -76,7 +77,7 @@ func (s *Store) GetConsumerBySlug(slug string) (*Consumer, error) {
 }
 
 // CreateConsumer inserts a new consumer, generating an ID if none is set.
-func (s *Store) CreateConsumer(c *Consumer) error {
+func (s *Store) CreateConsumer(ctx context.Context, c *Consumer) error {
 	if c.Slug == "" {
 		return fmt.Errorf("create consumer: slug is required")
 	}
@@ -88,7 +89,7 @@ func (s *Store) CreateConsumer(c *Consumer) error {
 	}
 	now := time.Now().UTC().Format(time.RFC3339)
 
-	_, err := s.DB.Exec(
+	_, err := s.DB.ExecContext(ctx,
 		`INSERT INTO consumers (`+consumerColumns+`) VALUES (?, ?, ?, ?)`,
 		c.ID, c.Slug, c.Name, now,
 	)
@@ -100,8 +101,8 @@ func (s *Store) CreateConsumer(c *Consumer) error {
 }
 
 // UpdateConsumer updates a consumer's slug/name by ID.
-func (s *Store) UpdateConsumer(c *Consumer) error {
-	res, err := s.DB.Exec(
+func (s *Store) UpdateConsumer(ctx context.Context, c *Consumer) error {
+	res, err := s.DB.ExecContext(ctx,
 		`UPDATE consumers SET slug = ?, name = ? WHERE id = ?`,
 		c.Slug, c.Name, c.ID,
 	)
@@ -121,8 +122,8 @@ func (s *Store) UpdateConsumer(c *Consumer) error {
 // agent_profiles.consumer_id row fails with a FOREIGN KEY constraint
 // error -- callers must nullify those rows first (via UpdateAgent) before
 // deleting the consumer they point at.
-func (s *Store) DeleteConsumer(id string) error {
-	res, err := s.DB.Exec(`DELETE FROM consumers WHERE id = ?`, id)
+func (s *Store) DeleteConsumer(ctx context.Context, id string) error {
+	res, err := s.DB.ExecContext(ctx, `DELETE FROM consumers WHERE id = ?`, id)
 	if err != nil {
 		return fmt.Errorf("delete consumer %s: %w", id, err)
 	}

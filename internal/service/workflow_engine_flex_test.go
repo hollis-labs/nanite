@@ -35,7 +35,7 @@ func makeFlexTestAgent(t *testing.T, s *store.Store, slug string) *store.AgentPr
 		Slug:         slug,
 		SystemPrompt: "test",
 	}
-	if err := s.CreateAgent(a); err != nil {
+	if err := s.CreateAgent(context.Background(), a); err != nil {
 		t.Fatalf("CreateAgent(%s): %v", slug, err)
 	}
 	return a
@@ -46,7 +46,7 @@ func makeFlexTestAgent(t *testing.T, s *store.Store, slug string) *store.AgentPr
 func makeFlexTestSession(t *testing.T, s *store.Store) *store.Session {
 	t.Helper()
 	sess := &store.Session{Status: "active"}
-	if err := s.CreateSession(sess); err != nil {
+	if err := s.CreateSession(context.Background(), sess); err != nil {
 		t.Fatalf("CreateSession: %v", err)
 	}
 	return sess
@@ -82,7 +82,7 @@ func fireSelfTool(t *testing.T, s *store.Store, sessionID, agentID, toolName str
 	if err != nil {
 		t.Fatalf("marshal tool_calls envelope: %v", err)
 	}
-	if err := s.CreateMessage(&store.Message{
+	if err := s.CreateMessage(context.Background(), &store.Message{
 		SessionID: sessionID, AgentID: agentID, Role: "assistant", Content: string(body),
 	}); err != nil {
 		t.Fatalf("CreateMessage(fireSelfTool): %v", err)
@@ -119,7 +119,7 @@ func onlyRunID(t *testing.T, s *store.Store) string {
 
 func flexStepRow(t *testing.T, s *store.Store, runID string) *store.WorkflowRunStepRow {
 	t.Helper()
-	steps, err := s.ListWorkflowRunSteps(runID)
+	steps, err := s.ListWorkflowRunSteps(context.Background(), runID)
 	if err != nil {
 		t.Fatalf("ListWorkflowRunSteps: %v", err)
 	}
@@ -374,13 +374,13 @@ func TestBuiltinWorkflowEngine_ResumeRestartMidFlexStep_DoesNotDoubleCountMember
 	)
 
 	const runID = "run-flex-crash-1"
-	if err := runStore.CreateWorkflowRun(&store.WorkflowRunRow{ID: runID, DefinitionName: wf.Name, Status: "running"}); err != nil {
+	if err := runStore.CreateWorkflowRun(context.Background(), &store.WorkflowRunRow{ID: runID, DefinitionName: wf.Name, Status: "running"}); err != nil {
 		t.Fatalf("CreateWorkflowRun: %v", err)
 	}
 	// Simulates a crash between runStep's "running" write and its
 	// "waiting_on_flex" write — exactly the interrupted-step shape
 	// Resume's own doc comment describes for llm/tool steps, now for flex.
-	if err := runStore.UpsertWorkflowRunStep(&store.WorkflowRunStepRow{
+	if err := runStore.UpsertWorkflowRunStep(context.Background(), &store.WorkflowRunStepRow{
 		WorkflowRunID: runID, StepID: "scope_work", Kind: "flex", Status: "running",
 	}); err != nil {
 		t.Fatalf("UpsertWorkflowRunStep: %v", err)

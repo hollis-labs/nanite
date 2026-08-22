@@ -52,7 +52,7 @@ func TestEmitReactionTrace_SuccessAndSkip_TwoRowsDistinguishedByOutcome(t *testi
 		t.Fatalf("EmitReactionTrace: %v", err)
 	}
 
-	events, err := s.ListEvents(CategorySelftoolReaction, 50)
+	events, err := s.ListEvents(context.Background(), CategorySelftoolReaction, 50)
 	if err != nil {
 		t.Fatalf("ListEvents(%q): %v", CategorySelftoolReaction, err)
 	}
@@ -122,7 +122,7 @@ func TestEmitReactionTrace_ReflexAndSelftoolReaction_IndependentlyQueryable(t *t
 	s := newTestStore(t)
 	ctx := context.Background()
 
-	s.LogEvent("sess-1", "dispatch_to_agent", "reflex", "some_reflex", `{"reflex_id":"r1"}`)
+	s.LogEvent(context.Background(), "sess-1", "dispatch_to_agent", "reflex", "some_reflex", `{"reflex_id":"r1"}`)
 
 	result := Result{
 		ToolName: "task_update_report",
@@ -140,7 +140,7 @@ func TestEmitReactionTrace_ReflexAndSelftoolReaction_IndependentlyQueryable(t *t
 		t.Fatalf("EmitReactionTrace: %v", err)
 	}
 
-	reflexEvents, err := s.ListEvents("reflex", 50)
+	reflexEvents, err := s.ListEvents(context.Background(), "reflex", 50)
 	if err != nil {
 		t.Fatalf("ListEvents(reflex): %v", err)
 	}
@@ -151,7 +151,7 @@ func TestEmitReactionTrace_ReflexAndSelftoolReaction_IndependentlyQueryable(t *t
 		t.Errorf("reflex event_type = %q, want %q", reflexEvents[0].EventType, "dispatch_to_agent")
 	}
 
-	reactionEvents, err := s.ListEvents(CategorySelftoolReaction, 50)
+	reactionEvents, err := s.ListEvents(context.Background(), CategorySelftoolReaction, 50)
 	if err != nil {
 		t.Fatalf("ListEvents(%q): %v", CategorySelftoolReaction, err)
 	}
@@ -177,7 +177,7 @@ func TestEmitReactionTrace_ReflexAndSelftoolReaction_IndependentlyQueryable(t *t
 
 	// An unfiltered read still sees both, unaffected by either stream's
 	// own filtered query.
-	all, err := s.ListEvents("", 50)
+	all, err := s.ListEvents(context.Background(), "", 50)
 	if err != nil {
 		t.Fatalf("ListEvents(\"\"): %v", err)
 	}

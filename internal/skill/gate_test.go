@@ -81,7 +81,7 @@ func newGateTestStore(t *testing.T) *store.Store {
 	if err != nil {
 		t.Fatalf("store.New: %v", err)
 	}
-	t.Cleanup(func() { _ = s.Close() })
+	t.Cleanup(func() { _ = s.Close(context.Background()) })
 	return s
 }
 
@@ -124,7 +124,7 @@ func installGateFixture(t *testing.T, idx *store.Store, vendor *skillvendor.Stor
 	sk := def.ToStoreSkill()
 	sk.ID = ""
 	sk.ContentHash = wr.Address
-	if err := idx.CreateSkill(sk); err != nil {
+	if err := idx.CreateSkill(context.Background(), sk); err != nil {
 		t.Fatalf("CreateSkill(%s): %v", dir, err)
 	}
 	return sk
@@ -147,7 +147,7 @@ func reinstallGateFixture(t *testing.T, idx *store.Store, vendor *skillvendor.St
 	}
 	existing.ContentHash = wr.Address
 	existing.Version++
-	if err := idx.UpdateSkill(existing); err != nil {
+	if err := idx.UpdateSkill(context.Background(), existing); err != nil {
 		t.Fatalf("UpdateSkill(%s): %v", dir, err)
 	}
 	return existing
@@ -156,7 +156,7 @@ func reinstallGateFixture(t *testing.T, idx *store.Store, vendor *skillvendor.St
 func makeGateTestAgent(t *testing.T, s *store.Store, slug string) *store.AgentProfile {
 	t.Helper()
 	a := &store.AgentProfile{Name: "Gate Test Agent " + slug, Slug: slug, SystemPrompt: "test"}
-	if err := s.CreateAgent(a); err != nil {
+	if err := s.CreateAgent(context.Background(), a); err != nil {
 		t.Fatalf("CreateAgent: %v", err)
 	}
 	return a
@@ -502,7 +502,7 @@ func TestFilterSecretEnv_StripsSecretsKeepsOrdinaryVars(t *testing.T) {
 // under the bare default capability posture (no FS, no Network, nothing
 // elevated) must NOT see a secret-shaped environment variable from the host
 // process's own environment, via an ordinary "compute" marker/script that
-// reads its own environment (`` !`env` `` / printenv-equivalent) — this is
+// reads its own environment (“ !`env` “ / printenv-equivalent) — this is
 // a real, unmocked test exercising the actual Gate.run/sandbox.Apply path
 // (not a unit test against filterSecretEnv in isolation), matching this
 // task's own established real-sandbox-test discipline.

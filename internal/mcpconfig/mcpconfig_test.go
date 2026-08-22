@@ -122,7 +122,7 @@ func TestImportAndExport_Roundtrip(t *testing.T) {
 	if err != nil {
 		t.Fatalf("open store: %v", err)
 	}
-	defer s.Close()
+	defer s.Close(context.Background())
 
 	input := `{
 		"mcpServers": {
@@ -206,7 +206,7 @@ func TestImport_EmptyEnvAndArgs(t *testing.T) {
 	if err != nil {
 		t.Fatalf("open store: %v", err)
 	}
-	defer s.Close()
+	defer s.Close(context.Background())
 
 	input := `{"mcpServers": {"minimal": {"command": "echo"}}}`
 
@@ -219,7 +219,7 @@ func TestImport_EmptyEnvAndArgs(t *testing.T) {
 	}
 
 	// Verify DB record has proper defaults
-	cfg, err := s.GetMCPServer("minimal")
+	cfg, err := s.GetMCPServer(context.Background(), "minimal")
 	if err != nil {
 		t.Fatalf("get: %v", err)
 	}

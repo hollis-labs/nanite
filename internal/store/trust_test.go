@@ -25,7 +25,7 @@ func seedAgent(t *testing.T, s *Store, agentKind string) (agentProfileID string)
 		SystemPrompt: "test",
 		Kind:         agentKind,
 	}
-	if err := s.CreateAgent(ap); err != nil {
+	if err := s.CreateAgent(context.Background(), ap); err != nil {
 		t.Fatalf("create agent: %v", err)
 	}
 	return ap.ID

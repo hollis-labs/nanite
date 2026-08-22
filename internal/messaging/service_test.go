@@ -22,7 +22,7 @@ func newTestMessagingStore(t *testing.T) (*SQLiteStore, *store.Store) {
 	if err != nil {
 		t.Fatalf("store.New: %v", err)
 	}
-	t.Cleanup(func() { _ = s.Close() })
+	t.Cleanup(func() { _ = s.Close(context.Background()) })
 	return NewSQLiteStore(s.DB), s
 }
 
@@ -79,7 +79,7 @@ func TestService_SendMessage_AutoRegistersUnknownFrom(t *testing.T) {
 	if out.FromAgentID != "new-agent" {
 		t.Errorf("FromAgentID = %q, want %q", out.FromAgentID, "new-agent")
 	}
-	got, err := parent.GetAgent("new-agent")
+	got, err := parent.GetAgent(context.Background(), "new-agent")
 	if err != nil {
 		t.Fatalf("GetAgent: %v", err)
 	}
@@ -109,7 +109,7 @@ func TestService_SendMessage_AutoRegisterAsCLI(t *testing.T) {
 	if _, err := svc.SendMessage(context.Background(), in); err != nil {
 		t.Fatalf("SendMessage: %v", err)
 	}
-	got, err := parent.GetAgent("cli-host-12345")
+	got, err := parent.GetAgent(context.Background(), "cli-host-12345")
 	if err != nil {
 		t.Fatalf("GetAgent: %v", err)
 	}
@@ -158,7 +158,7 @@ func TestService_SendMessage_AutoRegisterSkipsUserSentinel(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("SendMessage: %v", err)
 	}
-	if _, err := parent.GetAgent(UserSentinel); err == nil {
+	if _, err := parent.GetAgent(context.Background(), UserSentinel); err == nil {
 		t.Error("user sentinel should not produce an agent_profiles row")
 	}
 }

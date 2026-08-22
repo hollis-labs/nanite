@@ -161,7 +161,7 @@ func TestDeleteAgent_CascadesAgentToolsAndDispatchAllowlist(t *testing.T) {
 		t.Fatalf("GrantAgentDispatchTool: %v", err)
 	}
 
-	if err := s.DeleteAgent(agent.Slug); err != nil {
+	if err := s.DeleteAgent(context.Background(), agent.Slug); err != nil {
 		t.Fatalf("DeleteAgent: %v", err)
 	}
 

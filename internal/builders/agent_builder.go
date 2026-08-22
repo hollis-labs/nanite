@@ -1,6 +1,7 @@
 package builders
 
 import (
+	"context"
 	"fmt"
 	"regexp"
 	"strings"
@@ -38,7 +39,7 @@ func NewAgentBuilder(s *store.Store) *Builder {
 	// Resolver returns (provider, model, err) — we use the model for the
 	// UX hint. PR #220 review note: a previous draft showed the provider
 	// here, which was wrong.
-	resolvedProvider, resolvedModel, resolveErr := s.ResolveProviderAndModel("", "")
+	resolvedProvider, resolvedModel, resolveErr := s.ResolveProviderAndModel(context.TODO() /* TODO(ctx-sweep): no ctx available at this call site */, "", "")
 	var modelHint string
 	switch {
 	case resolveErr == nil && resolvedModel != "":
@@ -110,7 +111,7 @@ func NewAgentBuilder(s *store.Store) *Builder {
 				Description:  strings.TrimSpace(inputs["description"]),
 			}
 
-			if err := s.CreateAgent(agent); err != nil {
+			if err := s.CreateAgent(context.TODO() /* TODO(ctx-sweep): no ctx available at this call site */, agent); err != nil {
 				return nil, fmt.Errorf("create agent: %w", err)
 			}
 

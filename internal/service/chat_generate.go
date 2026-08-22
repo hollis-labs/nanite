@@ -255,7 +255,7 @@ func (s *chatServiceImpl) generateResponse(ctx context.Context, sessionID, assis
 		if explicitProvider == "" {
 			explicitProvider = agent.DefaultProvider
 		}
-		_, resolved, resolveErr := s.store.ResolveProviderAndModel(explicitProvider, "")
+		_, resolved, resolveErr := s.store.ResolveProviderAndModel(ctx, explicitProvider, "")
 		if resolveErr != nil {
 			ch <- chat.ErrorEvent(chat.ErrorCodeProviderError,
 				"No default model configured. Set providers.default_model or user_settings.default_model.",
@@ -728,7 +728,7 @@ func (s *chatServiceImpl) generateResponse(ctx context.Context, sessionID, assis
 	)
 
 	// Load per-tool cap from UserSettings.
-	if us, err := s.store.GetUserSettings(); err == nil && us.ToolPerTurnCap > 0 {
+	if us, err := s.store.GetUserSettings(ctx); err == nil && us.ToolPerTurnCap > 0 {
 		ls.limits.defaultPerToolCap = us.ToolPerTurnCap
 	}
 
@@ -1132,7 +1132,8 @@ func (s *chatServiceImpl) generateResponse(ctx context.Context, sessionID, assis
 				provSpan.End()
 				slog.Warn("chat-service: compact-recoverable recovery refused — surfacing unrecovered error",
 					"session_id", sessionID, "iter", ls.iteration, "trigger_kind", triggerKind, "err", err)
-				s.store.LogEvent(sessionID, "provider_error", "error",
+				// Outcome bookkeeping must survive cancellation of the provider request it records.
+				s.store.LogEvent(context.WithoutCancel(ctx), sessionID, "provider_error", "error",
 					fmt.Sprintf("iteration %d: %v (recovery refused, trigger=%s)", ls.iteration, err, triggerKind),
 					fmt.Sprintf(`{"model":%q,"tools":%d,"messages":%d,"trigger_kind":%q}`, model, len(tools), len(chatMessages), triggerKind))
 				if s.events != nil {
@@ -1191,7 +1192,8 @@ func (s *chatServiceImpl) generateResponse(ctx context.Context, sessionID, assis
 			provSpan.SetStatus(codes.Error, err.Error())
 			provSpan.End()
 			slog.Error("chat-service: provider stream error", "iter", ls.iteration, "err", err)
-			s.store.LogEvent(sessionID, "provider_error", "error",
+			// Outcome bookkeeping must survive cancellation of the provider request it records.
+			s.store.LogEvent(context.WithoutCancel(ctx), sessionID, "provider_error", "error",
 				fmt.Sprintf("iteration %d: %v", ls.iteration, err),
 				fmt.Sprintf(`{"model":%q,"tools":%d,"messages":%d}`, model, len(tools), len(chatMessages)))
 			if s.events != nil {
@@ -1499,7 +1501,8 @@ func (s *chatServiceImpl) generateResponse(ctx context.Context, sessionID, assis
 				"inactivity_window", streamInactivityWindow.String(),
 				"events_seen", diagProvEventCount,
 				"caller", string(dispatcher.CallerTypeFromContext(ctx)))
-			s.store.LogEvent(sessionID, "provider_stream_stalled", "error",
+			// Outcome bookkeeping must survive cancellation of the provider stream it records.
+			s.store.LogEvent(context.WithoutCancel(ctx), sessionID, "provider_stream_stalled", "error",
 				fmt.Sprintf("iteration %d: no provider events for %s", ls.iteration, streamInactivityWindow),
 				fmt.Sprintf(`{"model":%q,"inactivity_window_s":%d,"events_seen":%d}`,
 					model, int(streamInactivityWindow.Seconds()), diagProvEventCount))
@@ -1587,7 +1590,8 @@ func (s *chatServiceImpl) generateResponse(ctx context.Context, sessionID, assis
 				ls.wasTruncated = true
 				slog.Warn("chat-service: response truncated by max_tokens", "iter", ls.iteration)
 				ch <- chat.StreamEvent{Type: "status", Content: "Response was cut short due to length limits. Some content may be missing."}
-				s.store.LogEvent(sessionID, "max_tokens_truncation", "warning",
+				// Outcome bookkeeping must survive cancellation of the provider response it records.
+				s.store.LogEvent(context.WithoutCancel(ctx), sessionID, "max_tokens_truncation", "warning",
 					fmt.Sprintf("iteration %d: response truncated by max_tokens", ls.iteration),
 					fmt.Sprintf(`{"model":%q,"iteration":%d}`, model, ls.iteration))
 				ch <- chat.ErrorEnvelopeDelta(chat.ErrorCodeInternal, "Response truncated — hit output token limit", map[string]interface{}{
@@ -1761,9 +1765,11 @@ func (s *chatServiceImpl) generateResponse(ctx context.Context, sessionID, assis
 
 	// Parse envelopes.
 	envelopes, cleanContent, envErrors := chat.ParseEnvelopes(responseContent)
+	// Outcome bookkeeping must survive cancellation of the response parsing it records.
+	envelopeOutcomeCtx := context.WithoutCancel(ctx)
 	for _, envErr := range envErrors {
 		slog.Warn("chat-service: envelope error", "reason", envErr.Reason, "content", chat.TruncateStr(envErr.Raw, 200))
-		s.store.LogEvent(sessionID, "envelope_error", "warning",
+		s.store.LogEvent(envelopeOutcomeCtx, sessionID, "envelope_error", "warning",
 			envErr.Reason, fmt.Sprintf(`{"raw":%q}`, chat.TruncateStr(envErr.Raw, 500)))
 	}
 
@@ -1938,7 +1944,7 @@ func (s *chatServiceImpl) generateResponse(ctx context.Context, sessionID, assis
 		Role: "assistant", Content: structuredJSON, Envelope: envelopeJSON,
 		Metadata: msgMetadata,
 	}
-	if err := s.store.CreateMessage(assistantMsg); err != nil {
+	if err := s.store.CreateMessage(ctx, assistantMsg); err != nil {
 		slog.Error("chat-service: failed to save assistant message", "err", err)
 		ch <- chat.ErrorEvent(chat.ErrorCodeInternal, "Failed to save response", map[string]interface{}{"raw": err.Error()})
 		return
@@ -1948,13 +1954,16 @@ func (s *chatServiceImpl) generateResponse(ctx context.Context, sessionID, assis
 	// The ContextService interface method remains for one release so out-of-tree
 	// callers don't break; removal is a follow-up.
 
+	// Outcome bookkeeping must survive cancellation of the completed turn it records.
+	persistCtx := context.WithoutCancel(ctx)
+
 	// Record token usage.
 	if finalUsage != nil && (finalUsage.InputTokens > 0 || finalUsage.OutputTokens > 0) {
 		toolInputTokens := 0
 		if breakdown != nil {
 			toolInputTokens = breakdown.Tools
 		}
-		if err := s.store.RecordUsage(sessionID, assistantMsgID, model,
+		if err := s.store.RecordUsage(persistCtx, sessionID, assistantMsgID, model,
 			finalUsage.InputTokens, finalUsage.OutputTokens, toolInputTokens,
 			finalUsage.CacheCreationTokens, finalUsage.CacheReadTokens); err != nil {
 			slog.Warn("chat-service: failed to record token usage", "err", err)
@@ -1992,7 +2001,7 @@ func (s *chatServiceImpl) generateResponse(ctx context.Context, sessionID, assis
 			metrics.DebugSnapshots = string(snapJSON)
 		}
 	}
-	if err := s.store.RecordExecutionMetrics(metrics); err != nil {
+	if err := s.store.RecordExecutionMetrics(persistCtx, metrics); err != nil {
 		slog.Warn("chat-service: failed to record execution metrics", "err", err)
 	}
 
@@ -2093,7 +2102,7 @@ func (s *chatServiceImpl) persistPartialAssistantPreClassified(sessionID, assist
 		Content:   structuredJSON,
 		Metadata:  `{"had_error":true}`,
 	}
-	if err := s.store.CreateMessage(msg); err != nil {
+	if err := s.store.CreateMessage(context.TODO() /* TODO(ctx-sweep): no ctx available at this call site */, msg); err != nil {
 		slog.Warn("chat-service: persistPartialAssistant: failed to save partial message",
 			"session_id", sessionID, "msg_id", assistantMsgID, "err", err)
 	}
@@ -2130,7 +2139,7 @@ func (s *chatServiceImpl) persistPartialAssistantCancelled(sessionID, assistantM
 		// Metadata intentionally omitted (empty) — no `had_error` flag for
 		// an intentional cancel.
 	}
-	if err := s.store.CreateMessage(msg); err != nil {
+	if err := s.store.CreateMessage(context.TODO() /* TODO(ctx-sweep): no ctx available at this call site */, msg); err != nil {
 		slog.Warn("chat-service: persistPartialAssistantCancelled: failed to save partial message",
 			"session_id", sessionID, "msg_id", assistantMsgID, "err", err)
 	}
@@ -2193,7 +2202,7 @@ func (s *chatServiceImpl) suppressSurfaceIfSubagentCaused(parentSessionID, callS
 	if s.store == nil || parentSessionID == "" {
 		return false
 	}
-	runID, role, childSessionID, ok, err := s.store.ActiveSubagentRunForParent(parentSessionID)
+	runID, role, childSessionID, ok, err := s.store.ActiveSubagentRunForParent(context.TODO() /* TODO(ctx-sweep): no ctx available at this call site */, parentSessionID)
 	if err != nil {
 		// Fail open: a DB hiccup here must not silently drop a real
 		// parent-side error surface. Log it and let the caller emit
@@ -2271,7 +2280,7 @@ func (s *chatServiceImpl) recoverFromContextOverflow(
 	if result == nil || result.Window == nil {
 		return chatMessages, tools, false
 	}
-	settings, _ := s.store.GetUserSettings()
+	settings, _ := s.store.GetUserSettings(ctx)
 	if settings == nil || !settings.ContextOverflowRecovery {
 		slog.Info("chat-service: compact-recoverable recovery disabled by user setting",
 			"session_id", sessionID, "trigger_kind", triggerKind, "trigger", triggerMsg)
@@ -2289,7 +2298,7 @@ func (s *chatServiceImpl) recoverFromContextOverflow(
 	// Glass-4 stash itself is written proactively by the agent's
 	// `handoff_stash` self-tool during normal turns, OR (fallback) at
 	// compaction time below before stages run.
-	sess, _ := s.store.GetSession(sessionID)
+	sess, _ := s.store.GetSession(ctx, sessionID)
 
 	if _, err := s.ensureGlass4HandoffPreCompact(ctx, sess, chatMessages, ch); err != nil {
 		slog.Warn("chat-service: glass-4 pre-compaction handoff fallback failed (non-fatal)",
@@ -2507,7 +2516,7 @@ func slotBlocksFor(result *SlotAssemblyResult) []llmtypes.SlotBlock {
 // Priority: user_settings override → models.dev catalog → DefaultContextWindowSize.
 func (s *chatServiceImpl) contextWindowSize(providerName, model string) int {
 	if s.store != nil {
-		settings, err := s.store.GetUserSettings()
+		settings, err := s.store.GetUserSettings(context.TODO() /* TODO(ctx-sweep): no ctx available at this call site */)
 		if err == nil && settings != nil && settings.ContextWindowTokens > 0 {
 			return settings.ContextWindowTokens
 		}
@@ -2538,13 +2547,13 @@ func (s *chatServiceImpl) enforceBudgetOrCompact(
 		return chatMessages, tools
 	}
 
-	settings, _ := s.store.GetUserSettings()
+	settings, _ := s.store.GetUserSettings(ctx)
 	summarizer := s.buildSummarizer(settings)
 
 	// Glass-4 (CW-20260502-0015): universal for every session
 	// (28-cut-session-intent-classifier) — ensure a self-authored Glass-4
 	// handoff exists before this pre-loop compaction runs.
-	sess, _ := s.store.GetSession(sessionID)
+	sess, _ := s.store.GetSession(ctx, sessionID)
 
 	if _, err := s.ensureGlass4HandoffPreCompact(ctx, sess, chatMessages, ch); err != nil {
 		slog.Warn("chat-service: glass-4 pre-compaction handoff fallback failed (non-fatal)",
@@ -2713,7 +2722,7 @@ func BuildSummarizer(registry *provider.Registry, resolver DefaultResolver, sett
 		model = settings.SummarizerModel
 	}
 	if (provName == "" || model == "") && resolver != nil {
-		if rp, rm, err := resolver.ResolveProviderAndModel(provName, model); err == nil {
+		if rp, rm, err := resolver.ResolveProviderAndModel(context.TODO() /* TODO(ctx-sweep): no ctx available at this call site */, provName, model); err == nil {
 			provName = rp
 			model = rm
 		}
@@ -3101,7 +3110,7 @@ func (s *chatServiceImpl) maybeCreateAutoArtifact(sessionID, messageID, agentID 
 		StoragePath: filePath, Origin: store.ArtifactOriginAuto,
 		SourceToolCallID: tu.ID, SourceAgentID: agentID,
 	}
-	if err := s.store.CreateArtifact(artifact); err != nil {
+	if err := s.store.CreateArtifact(context.TODO() /* TODO(ctx-sweep): no ctx available at this call site */, artifact); err != nil {
 		slog.Warn("chat-service: auto-artifact creation failed", "path", filePath, "err", err)
 	}
 }
@@ -3134,7 +3143,7 @@ func (s *chatServiceImpl) retryEnvelopeCorrection(
 	)
 
 	slog.Info("chat-service: envelope retry", "session_id", sessionID)
-	s.store.LogEvent(sessionID, "envelope_retry", "info",
+	s.store.LogEvent(ctx, sessionID, "envelope_retry", "info",
 		"sending correction prompt", fmt.Sprintf(`{"reason":%q}`, errDetail.Reason))
 
 	retryCtx := ctx
@@ -3243,19 +3252,21 @@ func (s *chatServiceImpl) autoTitle(sessionID, userContent string) {
 		return
 	}
 
-	sess, err := s.store.GetSession(sessionID)
+	sess, err := s.store.GetSession(context.TODO() /* TODO(ctx-sweep): no ctx available at this call site */, sessionID)
 	if err != nil {
 		return
 	}
 	sess.Title = title
-	_ = s.store.UpdateSession(sess)
+	_ = s.store.UpdateSession(context.TODO(
+
+	// sanitizeAutoTitle normalises a raw utility-model response into a stored
+	// session title (CW-20260512-0004). Strips newlines, collapses whitespace,
+	// trims wrapping quotes/punctuation, and hard-caps length at autoTitleMaxLen.
+	// Returns "" when the input is empty after cleanup so the caller can fall
+	// back. This is the load-bearing guard — the prompt is best-effort.
+	), sess)
 }
 
-// sanitizeAutoTitle normalises a raw utility-model response into a stored
-// session title (CW-20260512-0004). Strips newlines, collapses whitespace,
-// trims wrapping quotes/punctuation, and hard-caps length at autoTitleMaxLen.
-// Returns "" when the input is empty after cleanup so the caller can fall
-// back. This is the load-bearing guard — the prompt is best-effort.
 func sanitizeAutoTitle(raw string) string {
 	if raw == "" {
 		return ""
@@ -3374,7 +3385,7 @@ func (s *chatServiceImpl) autoTags(sessionID string) {
 		return
 	}
 
-	msgs, err := s.store.ListMessages(sessionID, 10)
+	msgs, err := s.store.ListMessages(context.TODO() /* TODO(ctx-sweep): no ctx available at this call site */, sessionID, 10)
 	if err != nil || len(msgs) < 2 {
 		return
 	}
@@ -3412,7 +3423,7 @@ func (s *chatServiceImpl) autoTags(sessionID string) {
 		return
 	}
 	tagsJSON, _ := json.Marshal(tags)
-	_ = s.store.UpdateSessionTags(sessionID, string(tagsJSON))
+	_ = s.store.UpdateSessionTags(context.TODO() /* TODO(ctx-sweep): no ctx available at this call site */, sessionID, string(tagsJSON))
 }
 
 // recordUtilityMetrics records execution metrics for utility calls.
@@ -3431,7 +3442,7 @@ func (s *chatServiceImpl) recordUtilityMetrics(sessionID, callType string, durat
 		IsUtility:  true,
 		Error:      errMsg,
 	}
-	_ = s.store.RecordExecutionMetrics(m)
+	_ = s.store.RecordExecutionMetrics(context.TODO() /* TODO(ctx-sweep): no ctx available at this call site */, m)
 }
 
 // isAgentDebugEnabled checks the agent's settings JSON for a "debug" flag.
@@ -3448,7 +3459,7 @@ func isAgentDebugEnabled(settingsJSON string) bool {
 
 // isGlobalDebugMode checks the user_settings developer_mode flag.
 func (s *chatServiceImpl) isGlobalDebugMode() bool {
-	settings, err := s.store.GetUserSettings()
+	settings, err := s.store.GetUserSettings(context.TODO() /* TODO(ctx-sweep): no ctx available at this call site */)
 	if err != nil {
 		return false
 	}

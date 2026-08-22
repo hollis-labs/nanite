@@ -52,7 +52,7 @@ func (pn *A2APushNotifier) EnqueueDelivery(taskID string, state a2a.TaskState) e
 		UpdatedAt:    time.Now(),
 	}
 
-	if err := pn.store.CreateA2APushDelivery(delivery); err != nil {
+	if err := pn.store.CreateA2APushDelivery(context.TODO() /* TODO(ctx-sweep): no ctx available at this call site */, delivery); err != nil {
 		pn.logger.Error("a2a push: failed to enqueue delivery",
 			"task_id", taskID,
 			"state", state,
@@ -74,7 +74,7 @@ func (pn *A2APushNotifier) EnqueueDelivery(taskID string, state a2a.TaskState) e
 // that are due for retry. This is called by the background worker ticker.
 // Bounded retries: max 3 attempts, with exponential backoff.
 func (pn *A2APushNotifier) ProcessPendingDeliveries(ctx context.Context) error {
-	deliveries, err := pn.store.GetPendingPushDeliveries(time.Now())
+	deliveries, err := pn.store.GetPendingPushDeliveries(ctx, time.Now())
 	if err != nil {
 		return fmt.Errorf("failed to get pending deliveries: %w", err)
 	}
@@ -103,7 +103,7 @@ func (pn *A2APushNotifier) processDelivery(ctx context.Context, delivery *store.
 	const maxAttempts = 3
 
 	// Fetch the task to get the push config and current state.
-	task, err := pn.store.GetA2ATask(delivery.TaskID)
+	task, err := pn.store.GetA2ATask(ctx, delivery.TaskID)
 	if err != nil {
 		return fmt.Errorf("failed to get task: %w", err)
 	}
@@ -113,7 +113,7 @@ func (pn *A2APushNotifier) processDelivery(ctx context.Context, delivery *store.
 			"delivery_id", delivery.ID,
 		)
 		// Delete the delivery record since the task is gone.
-		return pn.store.DeleteA2APushDelivery(delivery.ID)
+		return pn.store.DeleteA2APushDelivery(ctx, delivery.ID)
 	}
 
 	// Parse the push notification config.
@@ -123,7 +123,7 @@ func (pn *A2APushNotifier) processDelivery(ctx context.Context, delivery *store.
 			"delivery_id", delivery.ID,
 		)
 		// Delete the delivery record since there's no config.
-		return pn.store.DeleteA2APushDelivery(delivery.ID)
+		return pn.store.DeleteA2APushDelivery(ctx, delivery.ID)
 	}
 
 	var config a2a.PushNotificationConfig
@@ -134,7 +134,7 @@ func (pn *A2APushNotifier) processDelivery(ctx context.Context, delivery *store.
 			"error", err,
 		)
 		// Delete the delivery record since the config is invalid.
-		return pn.store.DeleteA2APushDelivery(delivery.ID)
+		return pn.store.DeleteA2APushDelivery(ctx, delivery.ID)
 	}
 
 	// Prepare the notification payload.
@@ -176,7 +176,7 @@ func (pn *A2APushNotifier) processDelivery(ctx context.Context, delivery *store.
 				"attempts", delivery.AttemptCount,
 				"error", err,
 			)
-			return pn.store.DeleteA2APushDelivery(delivery.ID)
+			return pn.store.DeleteA2APushDelivery(ctx, delivery.ID)
 		}
 
 		// Exponential backoff: 1min, 5min, 15min
@@ -191,7 +191,7 @@ func (pn *A2APushNotifier) processDelivery(ctx context.Context, delivery *store.
 			"error", err,
 		)
 
-		return pn.store.UpdateA2APushDelivery(delivery)
+		return pn.store.UpdateA2APushDelivery(ctx, delivery)
 	}
 	defer resp.Body.Close()
 
@@ -207,7 +207,7 @@ func (pn *A2APushNotifier) processDelivery(ctx context.Context, delivery *store.
 				"attempts", delivery.AttemptCount,
 				"status", resp.StatusCode,
 			)
-			return pn.store.DeleteA2APushDelivery(delivery.ID)
+			return pn.store.DeleteA2APushDelivery(ctx, delivery.ID)
 		}
 
 		// Exponential backoff
@@ -222,7 +222,7 @@ func (pn *A2APushNotifier) processDelivery(ctx context.Context, delivery *store.
 			"next_retry", delivery.NextRetry,
 		)
 
-		return pn.store.UpdateA2APushDelivery(delivery)
+		return pn.store.UpdateA2APushDelivery(ctx, delivery)
 	}
 
 	// Success — delete the delivery record.
@@ -232,5 +232,5 @@ func (pn *A2APushNotifier) processDelivery(ctx context.Context, delivery *store.
 		"state", delivery.TargetState,
 	)
 
-	return pn.store.DeleteA2APushDelivery(delivery.ID)
+	return pn.store.DeleteA2APushDelivery(ctx, delivery.ID)
 }

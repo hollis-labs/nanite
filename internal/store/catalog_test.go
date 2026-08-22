@@ -10,14 +10,14 @@ func TestCatalogSourceCRUD(t *testing.T) {
 	if err != nil {
 		t.Fatalf("open db: %v", err)
 	}
-	defer s.Close()
+	defer s.Close(context.Background())
 
-	if err := s.Seed(); err != nil {
+	if err := s.Seed(context.Background()); err != nil {
 		t.Fatalf("seed: %v", err)
 	}
 
 	// Seed() inserts the official source.
-	sources, err := s.ListCatalogSources()
+	sources, err := s.ListCatalogSources(context.Background())
 	if err != nil {
 		t.Fatalf("list: %v", err)
 	}
@@ -32,7 +32,7 @@ func TestCatalogSourceCRUD(t *testing.T) {
 	}
 
 	// Create a custom source.
-	custom, err := s.CreateCatalogSource("My Fork", "https://example.com/catalog.yaml", "custom", 50)
+	custom, err := s.CreateCatalogSource(context.Background(), "My Fork", "https://example.com/catalog.yaml", "custom", 50)
 	if err != nil {
 		t.Fatalf("create: %v", err)
 	}
@@ -44,7 +44,7 @@ func TestCatalogSourceCRUD(t *testing.T) {
 	}
 
 	// List should now have 2 (official at priority 100 first, custom at 50).
-	sources, _ = s.ListCatalogSources()
+	sources, _ = s.ListCatalogSources(context.Background())
 	if len(sources) != 2 {
 		t.Fatalf("expected 2 sources, got %d", len(sources))
 	}
@@ -53,19 +53,19 @@ func TestCatalogSourceCRUD(t *testing.T) {
 	}
 
 	// Update custom source.
-	err = s.UpdateCatalogSource(custom.ID, "My Forked Catalog", custom.URL, true, 150)
+	err = s.UpdateCatalogSource(context.Background(), custom.ID, "My Forked Catalog", custom.URL, true, 150)
 	if err != nil {
 		t.Fatalf("update: %v", err)
 	}
 
 	// After update, custom should be first (priority 150 > 100).
-	sources, _ = s.ListCatalogSources()
+	sources, _ = s.ListCatalogSources(context.Background())
 	if sources[0].Name != "My Forked Catalog" {
 		t.Errorf("expected updated custom first, got %q", sources[0].Name)
 	}
 
 	// Get by ID.
-	got, err := s.GetCatalogSource(custom.ID)
+	got, err := s.GetCatalogSource(context.Background(), custom.ID)
 	if err != nil {
 		t.Fatalf("get: %v", err)
 	}
@@ -74,16 +74,16 @@ func TestCatalogSourceCRUD(t *testing.T) {
 	}
 
 	// Delete custom source.
-	if err := s.DeleteCatalogSource(custom.ID); err != nil {
+	if err := s.DeleteCatalogSource(context.Background(), custom.ID); err != nil {
 		t.Fatalf("delete: %v", err)
 	}
-	sources, _ = s.ListCatalogSources()
+	sources, _ = s.ListCatalogSources(context.Background())
 	if len(sources) != 1 {
 		t.Fatalf("expected 1 source after delete, got %d", len(sources))
 	}
 
 	// Delete nonexistent.
-	if err := s.DeleteCatalogSource("nonexistent"); err == nil {
+	if err := s.DeleteCatalogSource(context.Background(), "nonexistent"); err == nil {
 		t.Error("expected error deleting nonexistent source")
 	}
 }
@@ -93,14 +93,14 @@ func TestCatalogSourceDuplicateURL(t *testing.T) {
 	if err != nil {
 		t.Fatalf("open db: %v", err)
 	}
-	defer s.Close()
+	defer s.Close(context.Background())
 
-	_, err = s.CreateCatalogSource("Dup 1", "https://example.com/dup.yaml", "custom", 10)
+	_, err = s.CreateCatalogSource(context.Background(), "Dup 1", "https://example.com/dup.yaml", "custom", 10)
 	if err != nil {
 		t.Fatalf("create first: %v", err)
 	}
 
-	_, err = s.CreateCatalogSource("Dup 2", "https://example.com/dup.yaml", "custom", 20)
+	_, err = s.CreateCatalogSource(context.Background(), "Dup 2", "https://example.com/dup.yaml", "custom", 20)
 	if err == nil {
 		t.Error("expected error for duplicate URL")
 	}

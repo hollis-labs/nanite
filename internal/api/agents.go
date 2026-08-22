@@ -145,11 +145,11 @@ func (a *API) handleCreateAgent(w http.ResponseWriter, r *http.Request) {
 	// store.UpdateAgentComposition's doc comment), so they're set via a
 	// direct, separate DB write once the profile row exists.
 	if req.RoleID != "" || req.ConsumerID != "" || req.ModelID != "" {
-		if err := a.Services.Store.UpdateAgentComposition(res.Profile.ID, ptrOrNilString(req.RoleID), ptrOrNilString(req.ConsumerID), ptrOrNilString(req.ModelID)); err != nil {
+		if err := a.Services.Store.UpdateAgentComposition(r.Context(), res.Profile.ID, ptrOrNilString(req.RoleID), ptrOrNilString(req.ConsumerID), ptrOrNilString(req.ModelID)); err != nil {
 			a.errorResp(w, http.StatusBadRequest, err.Error())
 			return
 		}
-		if refreshed, err := a.Services.Store.GetAgent(res.Profile.ID); err == nil {
+		if refreshed, err := a.Services.Store.GetAgent(r.Context(), res.Profile.ID); err == nil {
 			res.Profile = refreshed
 		}
 	}
@@ -158,11 +158,11 @@ func (a *API) handleCreateAgent(w http.ResponseWriter, r *http.Request) {
 	// zero-frontmatter-representation shape as role_id/consumer_id/
 	// model_id immediately above.
 	if req.Protocol != "" || req.Transport != "" {
-		if err := a.Services.Store.UpdateAgentACPConfig(res.Profile.ID, ptrOrNilString(req.Protocol), ptrOrNilString(req.Transport)); err != nil {
+		if err := a.Services.Store.UpdateAgentACPConfig(r.Context(), res.Profile.ID, ptrOrNilString(req.Protocol), ptrOrNilString(req.Transport)); err != nil {
 			a.errorResp(w, http.StatusBadRequest, err.Error())
 			return
 		}
-		if refreshed, err := a.Services.Store.GetAgent(res.Profile.ID); err == nil {
+		if refreshed, err := a.Services.Store.GetAgent(r.Context(), res.Profile.ID); err == nil {
 			res.Profile = refreshed
 		}
 	}
@@ -349,22 +349,22 @@ func (a *API) handleUpdateAgent(w http.ResponseWriter, r *http.Request) {
 	// comment. Pointer semantics here (nil = untouched, non-nil = set or
 	// clear) match every other partial-update field on UpdateAgentRequest.
 	if req.RoleID != nil || req.ConsumerID != nil || req.ModelID != nil {
-		if err := a.Services.Store.UpdateAgentComposition(res.Profile.ID, req.RoleID, req.ConsumerID, req.ModelID); err != nil {
+		if err := a.Services.Store.UpdateAgentComposition(r.Context(), res.Profile.ID, req.RoleID, req.ConsumerID, req.ModelID); err != nil {
 			a.errorResp(w, http.StatusBadRequest, err.Error())
 			return
 		}
-		if refreshed, err := a.Services.Store.GetAgent(res.Profile.ID); err == nil {
+		if refreshed, err := a.Services.Store.GetAgent(r.Context(), res.Profile.ID); err == nil {
 			res.Profile = refreshed
 		}
 	}
 
 	// protocol/transport -- see handleCreateAgent's matching comment.
 	if req.Protocol != nil || req.Transport != nil {
-		if err := a.Services.Store.UpdateAgentACPConfig(res.Profile.ID, req.Protocol, req.Transport); err != nil {
+		if err := a.Services.Store.UpdateAgentACPConfig(r.Context(), res.Profile.ID, req.Protocol, req.Transport); err != nil {
 			a.errorResp(w, http.StatusBadRequest, err.Error())
 			return
 		}
-		if refreshed, err := a.Services.Store.GetAgent(res.Profile.ID); err == nil {
+		if refreshed, err := a.Services.Store.GetAgent(r.Context(), res.Profile.ID); err == nil {
 			res.Profile = refreshed
 		}
 	}
@@ -453,7 +453,7 @@ func (a *API) handleCopyAgentToManaged(w http.ResponseWriter, r *http.Request) {
 
 func (a *API) handleListSessionAgents(w http.ResponseWriter, r *http.Request) {
 	sessionID := r.PathValue("id")
-	agents, err := a.Services.Store.ListSessionAgents(sessionID)
+	agents, err := a.Services.Store.ListSessionAgents(r.Context(), sessionID)
 	if err != nil {
 		a.errorResp(w, http.StatusInternalServerError, err.Error())
 		return
@@ -475,7 +475,7 @@ func (a *API) handleAddSessionAgent(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Verify agent exists.
-	if _, err := a.Services.Store.GetAgent(req.AgentID); err != nil {
+	if _, err := a.Services.Store.GetAgent(r.Context(), req.AgentID); err != nil {
 		a.errorResp(w, http.StatusNotFound, "agent not found")
 		return
 	}
@@ -487,13 +487,13 @@ func (a *API) handleAddSessionAgent(w http.ResponseWriter, r *http.Request) {
 	// the previous agent ID so we can emit agent.switched.
 	var previousAgentID string
 	if isPrimary {
-		if cur, err := a.Services.Store.GetSessionPrimaryAgent(sessionID); err == nil {
+		if cur, err := a.Services.Store.GetSessionPrimaryAgent(r.Context(), sessionID); err == nil {
 			previousAgentID = cur.AgentID
-			_ = a.Services.Store.EnsureSessionAgent(sessionID, cur.AgentID, cur.Mode, false)
+			_ = a.Services.Store.EnsureSessionAgent(r.Context(), sessionID, cur.AgentID, cur.Mode, false)
 		}
 	}
 
-	if err := a.Services.Store.EnsureSessionAgent(sessionID, req.AgentID, mode, isPrimary); err != nil {
+	if err := a.Services.Store.EnsureSessionAgent(r.Context(), sessionID, req.AgentID, mode, isPrimary); err != nil {
 		a.errorResp(w, http.StatusInternalServerError, err.Error())
 		return
 	}
@@ -506,7 +506,7 @@ func (a *API) handleAddSessionAgent(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Return the updated agents list.
-	agents, err := a.Services.Store.ListSessionAgents(sessionID)
+	agents, err := a.Services.Store.ListSessionAgents(r.Context(), sessionID)
 	if err != nil {
 		a.errorResp(w, http.StatusInternalServerError, err.Error())
 		return
@@ -518,7 +518,7 @@ func (a *API) handleRemoveSessionAgent(w http.ResponseWriter, r *http.Request) {
 	sessionID := r.PathValue("id")
 	agentID := r.PathValue("agentId")
 
-	if err := a.Services.Store.DeleteSessionAgent(sessionID, agentID); err != nil {
+	if err := a.Services.Store.DeleteSessionAgent(r.Context(), sessionID, agentID); err != nil {
 		a.errorResp(w, http.StatusNotFound, "session agent not found")
 		return
 	}
@@ -529,7 +529,7 @@ func (a *API) handleRemoveSessionAgent(w http.ResponseWriter, r *http.Request) {
 
 func (a *API) handleListAgentProjects(w http.ResponseWriter, r *http.Request) {
 	agentID := r.PathValue("id")
-	projects, err := a.Services.Store.ListAgentProjects(agentID)
+	projects, err := a.Services.Store.ListAgentProjects(r.Context(), agentID)
 	if err != nil {
 		a.errorResp(w, http.StatusInternalServerError, err.Error())
 		return
@@ -554,17 +554,17 @@ func (a *API) handleAddAgentProject(w http.ResponseWriter, r *http.Request) {
 	// was no check here at all -- agent_projects.agent_id now carries a real
 	// FK to agent_profiles(id) (Phase 1 #05), so reject up front rather than
 	// letting the INSERT fail deeper in the store layer.
-	if _, err := a.Services.Store.GetAgent(agentID); err != nil {
+	if _, err := a.Services.Store.GetAgent(r.Context(), agentID); err != nil {
 		a.errorResp(w, http.StatusNotFound, "agent not found")
 		return
 	}
 
-	if err := a.Services.Store.AddAgentProject(agentID, req.ProjectID); err != nil {
+	if err := a.Services.Store.AddAgentProject(r.Context(), agentID, req.ProjectID); err != nil {
 		a.errorResp(w, http.StatusInternalServerError, err.Error())
 		return
 	}
 
-	projects, err := a.Services.Store.ListAgentProjects(agentID)
+	projects, err := a.Services.Store.ListAgentProjects(r.Context(), agentID)
 	if err != nil {
 		a.errorResp(w, http.StatusInternalServerError, err.Error())
 		return
@@ -576,7 +576,7 @@ func (a *API) handleRemoveAgentProject(w http.ResponseWriter, r *http.Request) {
 	agentID := r.PathValue("id")
 	projectID := r.PathValue("projectId")
 
-	if err := a.Services.Store.RemoveAgentProject(agentID, projectID); err != nil {
+	if err := a.Services.Store.RemoveAgentProject(r.Context(), agentID, projectID); err != nil {
 		a.errorResp(w, http.StatusNotFound, err.Error())
 		return
 	}
@@ -585,7 +585,7 @@ func (a *API) handleRemoveAgentProject(w http.ResponseWriter, r *http.Request) {
 
 func (a *API) handleListProjectAgents(w http.ResponseWriter, r *http.Request) {
 	projectID := r.PathValue("id")
-	agents, err := a.Services.Store.ListProjectAgents(projectID)
+	agents, err := a.Services.Store.ListProjectAgents(r.Context(), projectID)
 	if err != nil {
 		a.errorResp(w, http.StatusInternalServerError, err.Error())
 		return

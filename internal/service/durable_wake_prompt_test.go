@@ -16,7 +16,7 @@ import (
 func TestDurableAgentStartDeliversWakePromptAsUserTurn(t *testing.T) {
 	st := newDurableAgentServiceTestStore(t)
 	profile := &store.AgentProfile{Name: "Wake Prompt Agent", Slug: "wake-prompt-agent", SystemPrompt: "x"}
-	if err := st.CreateAgent(profile); err != nil {
+	if err := st.CreateAgent(context.Background(), profile); err != nil {
 		t.Fatalf("CreateAgent: %v", err)
 	}
 	runtime := &fakeDurableRuntimeController{}
@@ -55,7 +55,7 @@ func TestDurableAgentStartDeliversWakePromptAsUserTurn(t *testing.T) {
 func TestDurableAgentStartWithEmptyPromptDoesNotDeliverMessage(t *testing.T) {
 	st := newDurableAgentServiceTestStore(t)
 	profile := &store.AgentProfile{Name: "No Prompt Agent", Slug: "no-prompt-agent", SystemPrompt: "x"}
-	if err := st.CreateAgent(profile); err != nil {
+	if err := st.CreateAgent(context.Background(), profile); err != nil {
 		t.Fatalf("CreateAgent: %v", err)
 	}
 	runtime := &fakeDurableRuntimeController{}
@@ -89,7 +89,7 @@ func TestDurableAgentStartWithEmptyPromptDoesNotDeliverMessage(t *testing.T) {
 func TestDurableAgentResumeDeliversWakePromptAsUserTurn(t *testing.T) {
 	st := newDurableAgentServiceTestStore(t)
 	profile := &store.AgentProfile{Name: "Resume Prompt Agent", Slug: "resume-prompt-agent", SystemPrompt: "x"}
-	if err := st.CreateAgent(profile); err != nil {
+	if err := st.CreateAgent(context.Background(), profile); err != nil {
 		t.Fatalf("CreateAgent: %v", err)
 	}
 	runtime := &fakeDurableRuntimeController{}
@@ -142,7 +142,7 @@ func (f *fakeWakePromptChatService) HandleMessage(_ context.Context, sessionID, 
 		Role:      "user",
 		Content:   content,
 	}
-	if err := f.store.CreateMessage(msg); err != nil {
+	if err := f.store.CreateMessage(context.Background(), msg); err != nil {
 		return "", err
 	}
 	return msg.ID, nil
@@ -189,7 +189,7 @@ func (f *fakeWakePromptChatService) Shutdown() {}
 func TestDurableAgentWakeEndToEndPersistsPromptAsSessionMessage(t *testing.T) {
 	st := newDurableAgentServiceTestStore(t)
 	profile := &store.AgentProfile{Name: "E2E Wake Agent", Slug: "e2e-wake-agent", SystemPrompt: "x"}
-	if err := st.CreateAgent(profile); err != nil {
+	if err := st.CreateAgent(context.Background(), profile); err != nil {
 		t.Fatalf("CreateAgent: %v", err)
 	}
 
@@ -200,7 +200,7 @@ func TestDurableAgentWakeEndToEndPersistsPromptAsSessionMessage(t *testing.T) {
 	// Seed an attached session, matching how a real A2A-targeted instance
 	// would already have a primary session attached before it can be woken.
 	seedSession := &store.Session{Provider: "anthropic", Model: "model-a"}
-	if err := st.CreateSession(seedSession); err != nil {
+	if err := st.CreateSession(context.Background(), seedSession); err != nil {
 		t.Fatalf("CreateSession: %v", err)
 	}
 	inst := &store.DurableAgentInstance{
@@ -217,7 +217,7 @@ func TestDurableAgentWakeEndToEndPersistsPromptAsSessionMessage(t *testing.T) {
 	if err := durableSvc.Create(context.Background(), inst); err != nil {
 		t.Fatalf("Create: %v", err)
 	}
-	if err := st.AttachDurableAgentInstanceSession(inst.ID, seedSession.ID, store.DurableAgentSessionRelationPrimary); err != nil {
+	if err := st.AttachDurableAgentInstanceSession(context.Background(), inst.ID, seedSession.ID, store.DurableAgentSessionRelationPrimary); err != nil {
 		t.Fatalf("AttachDurableAgentInstanceSession: %v", err)
 	}
 
@@ -231,7 +231,7 @@ func TestDurableAgentWakeEndToEndPersistsPromptAsSessionMessage(t *testing.T) {
 		t.Fatalf("wake result = %+v", result)
 	}
 
-	messages, err := st.ListMessages(result.LaunchResult.Session.ID, 10)
+	messages, err := st.ListMessages(context.Background(), result.LaunchResult.Session.ID, 10)
 	if err != nil {
 		t.Fatalf("ListMessages: %v", err)
 	}

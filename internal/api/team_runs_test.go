@@ -79,7 +79,7 @@ func createTeamRunTestRoleBoundAgent(t *testing.T, st *store.Store, roleSlug str
 		DefaultProvider: "anthropic",
 		DefaultModel:    "claude-test-model",
 	}
-	if err := st.CreateRole(role); err != nil {
+	if err := st.CreateRole(context.Background(), role); err != nil {
 		t.Fatalf("CreateRole(%s): %v", roleSlug, err)
 	}
 	profile := &store.AgentProfile{
@@ -90,7 +90,7 @@ func createTeamRunTestRoleBoundAgent(t *testing.T, st *store.Store, roleSlug str
 		DefaultModel:    "claude-test-model",
 		RoleID:          role.ID,
 	}
-	if err := st.CreateAgent(profile); err != nil {
+	if err := st.CreateAgent(context.Background(), profile); err != nil {
 		t.Fatalf("CreateAgent(%s): %v", roleSlug, err)
 	}
 	return profile
@@ -164,7 +164,7 @@ func TestTeamRunLaunchAPI_EndToEnd_ReachesRealWorkflowRunAndTeamRunMembers(t *te
 
 	// A real workflow_runs row exists in the store, independent of what
 	// the HTTP response claims.
-	run, err := st.GetWorkflowRun(resp.WorkflowRunID)
+	run, err := st.GetWorkflowRun(context.Background(), resp.WorkflowRunID)
 	if err != nil {
 		t.Fatalf("GetWorkflowRun: %v", err)
 	}

@@ -301,7 +301,7 @@ type ApprovalEmitter interface {
 // SettingsReader returns the per-user settings. Container-injected so the
 // subagent package doesn't take a hard dep on the full Store.
 type SettingsReader interface {
-	GetUserSettings() (*store.UserSettings, error)
+	GetUserSettings(ctx context.Context) (*store.UserSettings, error)
 }
 
 // TrustResolverIface is the subset of dispatch.TrustResolver that the
@@ -311,7 +311,7 @@ type TrustResolverIface = dispatch.TrustResolver
 // EventLogger persists audit events for trust-bypassed dispatches.
 // *store.Store satisfies it; nil = audit logging skipped.
 type EventLogger interface {
-	LogEvent(sessionID, eventType, category, detail, metadata string)
+	LogEvent(ctx context.Context, sessionID, eventType, category, detail, metadata string)
 }
 
 // ParentageChecker reports whether a session is itself a spawned
@@ -323,7 +323,7 @@ type EventLogger interface {
 // Used by the recursion-depth cap (CW-20260516-0066): a caller that is
 // itself a subagent is rejected before it can spawn another.
 type ParentageChecker interface {
-	IsSubagentSession(sessionID string) (bool, error)
+	IsSubagentSession(ctx context.Context, sessionID string) (bool, error)
 }
 
 // ProfileResolver is the narrow surface the Spawn fail-fast gate uses
@@ -343,7 +343,7 @@ type ParentageChecker interface {
 // GetAgentBySlug already wraps with %w so this contract holds in
 // production.
 type ProfileResolver interface {
-	GetAgentBySlug(slug string) (*store.AgentProfile, error)
+	GetAgentBySlug(ctx context.Context, slug string) (*store.AgentProfile, error)
 }
 
 // replyFromAgentID resolves the agent identity a subagent reply should be
@@ -367,7 +367,7 @@ type ProfileResolver interface {
 // path.
 func (svc *Service) replyFromAgentID(role string) (id string, registerAs string) {
 	if svc.profiles != nil {
-		if profile, err := svc.profiles.GetAgentBySlug(role); err == nil && profile.ID != "" {
+		if profile, err := svc.profiles.GetAgentBySlug(context.TODO() /* TODO(ctx-sweep): no ctx available at this call site */, role); err == nil && profile.ID != "" {
 			return profile.ID, ""
 		}
 	}
@@ -650,7 +650,7 @@ func (svc *Service) Spawn(ctx context.Context, req SpawnRequest) (string, error)
 	// so the parent envelope distinguishes config faults from internal
 	// failures.
 	if svc.profiles != nil {
-		profile, lookupErr := svc.profiles.GetAgentBySlug(req.Role)
+		profile, lookupErr := svc.profiles.GetAgentBySlug(ctx, req.Role)
 		switch {
 		case lookupErr == nil:
 			if !profile.CanExecute && !isTextOnlyRole(req.Role) {
@@ -676,7 +676,7 @@ func (svc *Service) Spawn(ctx context.Context, req SpawnRequest) (string, error)
 	// orphaned run row. When no ParentageChecker is wired the cap is
 	// disabled (tests / direct invocations); production always wires it.
 	if svc.parentage != nil {
-		isChild, perr := svc.parentage.IsSubagentSession(req.ParentSessionID)
+		isChild, perr := svc.parentage.IsSubagentSession(ctx, req.ParentSessionID)
 		if perr != nil {
 			// Fail closed: if we cannot determine parentage we refuse the
 			// spawn rather than risk an unbounded recursive chain. A spawn
@@ -690,8 +690,8 @@ func (svc *Service) Spawn(ctx context.Context, req SpawnRequest) (string, error)
 					"role":              req.Role,
 					"mode":              mode,
 				})
-				svc.eventLogger.LogEvent(
-					req.ParentSessionID,
+				// Outcome bookkeeping must survive cancellation of the rejected spawn it records.
+				svc.eventLogger.LogEvent(context.WithoutCancel(ctx), req.ParentSessionID,
 					"subagent_recursion_blocked",
 					"trust",
 					fmt.Sprintf("rejected spawn of role=%s: caller is itself a subagent", req.Role),
@@ -794,8 +794,7 @@ func (svc *Service) Spawn(ctx context.Context, req SpawnRequest) (string, error)
 			"role":             req.Role,
 		})
 		if svc.eventLogger != nil {
-			svc.eventLogger.LogEvent(
-				req.ParentSessionID,
+			svc.eventLogger.LogEvent(ctx, req.ParentSessionID,
 				"trust_dispatch",
 				"trust",
 				fmt.Sprintf("role=%s tier=trusted bypass=approval", req.Role),
@@ -806,7 +805,7 @@ func (svc *Service) Spawn(ctx context.Context, req SpawnRequest) (string, error)
 		// TrustNormal path: evaluate the approval gate predicate.
 		gate := false
 		if svc.settings != nil {
-			us, err := svc.settings.GetUserSettings()
+			us, err := svc.settings.GetUserSettings(ctx)
 			if err != nil {
 				return "", fmt.Errorf("load settings: %w", err)
 			}
@@ -1039,7 +1038,7 @@ func (svc *Service) expireIfStale(ctx context.Context, runID string) (bool, erro
 	if svc.settings == nil {
 		return false, nil // no settings = gating off = nothing to expire
 	}
-	us, err := svc.settings.GetUserSettings()
+	us, err := svc.settings.GetUserSettings(ctx)
 	if err != nil {
 		return false, fmt.Errorf("load settings: %w", err)
 	}

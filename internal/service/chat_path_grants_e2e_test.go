@@ -40,7 +40,7 @@ import (
 // chat_tool_executor_loop_test.go.
 type e2eStore struct{ *store.Store }
 
-func (*e2eStore) LogEvent(_, _, _, _, _ string) {}
+func (*e2eStore) LogEvent(ctx context.Context, _, _, _, _, _ string) {}
 
 // safeBuf is a goroutine-safe slog sink.
 type safeBuf struct {

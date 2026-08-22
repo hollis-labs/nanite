@@ -303,7 +303,7 @@ func (r *BootRunner) persistChildSessionID(ctx context.Context, runID, childID s
 // nothing populates it from chat.generateResponse anymore — the typed
 // events surface through the bridge instead.
 func (r *BootRunner) createChildSession(ctx context.Context, run *subagent.Run, agent *store.AgentProfile) (string, error) {
-	parent, err := r.store.GetSession(run.ParentSessionID)
+	parent, err := r.store.GetSession(ctx, run.ParentSessionID)
 	if err != nil {
 		return "", fmt.Errorf("get parent session: %w", err)
 	}
@@ -315,7 +315,7 @@ func (r *BootRunner) createChildSession(ctx context.Context, run *subagent.Run, 
 		prov = parent.Provider
 	}
 	childID := uuid.New().String()
-	if err := r.store.CreateSession(&store.Session{
+	if err := r.store.CreateSession(ctx, &store.Session{
 		ID:       childID,
 		Provider: prov,
 		Model:    agent.DefaultModel,
@@ -323,7 +323,7 @@ func (r *BootRunner) createChildSession(ctx context.Context, run *subagent.Run, 
 	}); err != nil {
 		return "", fmt.Errorf("create child session: %w", err)
 	}
-	if err := r.store.EnsureSessionAgent(childID, agent.ID, "default", true); err != nil {
+	if err := r.store.EnsureSessionAgent(ctx, childID, agent.ID, "default", true); err != nil {
 		return "", fmt.Errorf("bind child session to agent: %w", err)
 	}
 	return childID, nil

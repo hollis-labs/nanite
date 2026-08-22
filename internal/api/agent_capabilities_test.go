@@ -149,13 +149,13 @@ func TestAgentCapabilitiesAPI_CreateKnownSkill_UpsertsOntoBareAssignment(t *test
 	})
 
 	sk := &store.Skill{Name: "Collision Skill", Slug: "collision-skill"}
-	if err := a.Services.Store.CreateSkill(sk); err != nil {
+	if err := a.Services.Store.CreateSkill(context.Background(), sk); err != nil {
 		t.Fatalf("CreateSkill: %v", err)
 	}
 
 	// Same-skill assignment via the unrelated /skills endpoint first —
 	// mirrors AgentBuilderWizard.tsx's assignBuilderCapabilities loop.
-	if err := a.Services.Store.AssignSkillToAgent(agentID, sk.ID, ""); err != nil {
+	if err := a.Services.Store.AssignSkillToAgent(context.Background(), agentID, sk.ID, ""); err != nil {
 		t.Fatalf("AssignSkillToAgent: %v", err)
 	}
 
@@ -386,7 +386,7 @@ func TestAgentCapabilitiesAPI_InternalAgentMutationsConflict(t *testing.T) {
 
 func seedCapabilityAgent(t *testing.T, a *API, profile store.AgentProfile) string {
 	t.Helper()
-	if err := a.Services.Store.CreateAgent(&profile); err != nil {
+	if err := a.Services.Store.CreateAgent(context.Background(), &profile); err != nil {
 		t.Fatalf("CreateAgent: %v", err)
 	}
 	return profile.ID

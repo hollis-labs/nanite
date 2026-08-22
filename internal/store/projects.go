@@ -1,6 +1,7 @@
 package store
 
 import (
+	"context"
 	"fmt"
 	"time"
 )
@@ -26,8 +27,8 @@ type Project struct {
 // ListProjects returns all projects, ordered by sort_order then name. No
 // longer workspace-scoped — there has only ever been one workspace in
 // practice (see migration 088_consolidate_personal_workspace.sql).
-func (s *Store) ListProjects() ([]Project, error) {
-	rows, err := s.DB.Query(
+func (s *Store) ListProjects(ctx context.Context) ([]Project, error) {
+	rows, err := s.DB.QueryContext(ctx,
 		`SELECT id, name, COALESCE(description,''), COALESCE(repo_path,''), settings, sort_order, created_at, updated_at FROM projects ORDER BY sort_order, name`,
 	)
 	if err != nil {
@@ -47,9 +48,9 @@ func (s *Store) ListProjects() ([]Project, error) {
 }
 
 // GetProject returns a single project by ID.
-func (s *Store) GetProject(id string) (*Project, error) {
+func (s *Store) GetProject(ctx context.Context, id string) (*Project, error) {
 	var p Project
-	err := s.DB.QueryRow(
+	err := s.DB.QueryRowContext(ctx,
 		`SELECT id, name, COALESCE(description,''), COALESCE(repo_path,''), settings, sort_order, created_at, updated_at FROM projects WHERE id = ?`, id,
 	).Scan(&p.ID, &p.Name, &p.Description, &p.RepoPath, &p.Settings, &p.SortOrder, &p.CreatedAt, &p.UpdatedAt)
 	if err != nil {
@@ -59,12 +60,12 @@ func (s *Store) GetProject(id string) (*Project, error) {
 }
 
 // CreateProject inserts a new project.
-func (s *Store) CreateProject(p *Project) error {
+func (s *Store) CreateProject(ctx context.Context, p *Project) error {
 	now := time.Now().UTC().Format(time.RFC3339)
 	if p.Settings == "" {
 		p.Settings = "{}"
 	}
-	_, err := s.DB.Exec(
+	_, err := s.DB.ExecContext(ctx,
 		`INSERT INTO projects (id, name, description, repo_path, settings, sort_order, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
 		p.ID, p.Name, p.Description, p.RepoPath, p.Settings, p.SortOrder, now, now,
 	)
@@ -77,9 +78,9 @@ func (s *Store) CreateProject(p *Project) error {
 }
 
 // UpdateProject updates an existing project.
-func (s *Store) UpdateProject(p *Project) error {
+func (s *Store) UpdateProject(ctx context.Context, p *Project) error {
 	now := time.Now().UTC().Format(time.RFC3339)
-	_, err := s.DB.Exec(
+	_, err := s.DB.ExecContext(ctx,
 		`UPDATE projects SET name = ?, description = ?, repo_path = ?, settings = ?, sort_order = ?, updated_at = ? WHERE id = ?`,
 		p.Name, p.Description, p.RepoPath, p.Settings, p.SortOrder, now, p.ID,
 	)
@@ -91,8 +92,8 @@ func (s *Store) UpdateProject(p *Project) error {
 }
 
 // DeleteProject deletes a project by ID.
-func (s *Store) DeleteProject(id string) error {
-	_, err := s.DB.Exec(`DELETE FROM projects WHERE id = ?`, id)
+func (s *Store) DeleteProject(ctx context.Context, id string) error {
+	_, err := s.DB.ExecContext(ctx, `DELETE FROM projects WHERE id = ?`, id)
 	if err != nil {
 		return fmt.Errorf("delete project %s: %w", id, err)
 	}

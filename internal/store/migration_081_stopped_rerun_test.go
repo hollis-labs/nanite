@@ -17,7 +17,7 @@ func TestMigration081_RerunAllowsStoppedStatus(t *testing.T) {
 	if err != nil {
 		t.Fatalf("store.New: %v", err)
 	}
-	defer s.Close()
+	defer s.Close(context.Background())
 
 	var profileID string
 	if err := s.DB.QueryRow(`SELECT id FROM agent_profiles ORDER BY id LIMIT 1`).Scan(&profileID); err != nil {
@@ -37,7 +37,7 @@ func TestMigration081_RerunAllowsStoppedStatus(t *testing.T) {
 		t.Fatalf("insert stopped durable instance: %v", err)
 	}
 
-	if err := s.migrate(); err != nil {
+	if err := s.migrate(context.Background()); err != nil {
 		t.Fatalf("rerun migrate with stopped durable instance: %v", err)
 	}
 }

@@ -2,6 +2,7 @@ package api
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -46,7 +47,7 @@ func TestAgentProjectScope_EndToEnd(t *testing.T) {
 	a, mux := newTestAPI(t)
 
 	agent := &store.AgentProfile{Name: "Scope Agent", Slug: "scope-agent", SystemPrompt: "x"}
-	if err := a.Services.Store.CreateAgent(agent); err != nil {
+	if err := a.Services.Store.CreateAgent(context.Background(), agent); err != nil {
 		t.Fatalf("CreateAgent: %v", err)
 	}
 

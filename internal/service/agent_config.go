@@ -1,6 +1,7 @@
 package service
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -109,7 +110,7 @@ func (s *AgentConfigService) Persisted(p *store.AgentProfile) bool {
 	if p == nil || strings.TrimSpace(p.Slug) == "" {
 		return false
 	}
-	row, err := s.store.GetAgentBySlug(p.Slug)
+	row, err := s.store.GetAgentBySlug(context.TODO() /* TODO(ctx-sweep): no ctx available at this call site */, p.Slug)
 	if err != nil || row == nil {
 		return false
 	}
@@ -240,7 +241,7 @@ func (s *AgentConfigService) Delete(profile *store.AgentProfile) error {
 			return fmt.Errorf("remove managed file: %w", err)
 		}
 	}
-	if err := s.store.DeleteAgent(profile.Slug); err != nil {
+	if err := s.store.DeleteAgent(context.TODO() /* TODO(ctx-sweep): no ctx available at this call site */, profile.Slug); err != nil {
 		return fmt.Errorf("delete agent projection: %w", err)
 	}
 	s.emit(profile.Slug, "deleted")
@@ -315,7 +316,7 @@ func (s *AgentConfigService) writeManaged(path, oldPath string, profile *store.A
 	if err := IngestAgentDefinition(s.store, def); err != nil {
 		return nil, err
 	}
-	saved, err := s.store.GetAgentBySlug(profile.Slug)
+	saved, err := s.store.GetAgentBySlug(context.TODO() /* TODO(ctx-sweep): no ctx available at this call site */, profile.Slug)
 	if err != nil {
 		return nil, err
 	}
@@ -332,7 +333,7 @@ func (s *AgentConfigService) writeManaged(path, oldPath string, profile *store.A
 // managed file already claims the slug.
 func (s *AgentConfigService) uniqueManagedSlug(base string) string {
 	taken := func(slug string) bool {
-		if row, err := s.store.GetAgentBySlug(slug); err == nil && row != nil {
+		if row, err := s.store.GetAgentBySlug(context.TODO() /* TODO(ctx-sweep): no ctx available at this call site */, slug); err == nil && row != nil {
 			return true
 		}
 		if path, err := agent.ManagedAgentPath(s.managedRoot, slug); err == nil {
@@ -381,7 +382,7 @@ func ReconcileManagedAgentIDs(st *store.Store, defs []*agent.Definition, classif
 			continue // defensive: never write outside a known writable root
 		}
 		id := uuid.New().String()
-		if existing, err := st.GetAgentBySlug(def.Slug); err == nil && existing != nil && existing.ID != "" {
+		if existing, err := st.GetAgentBySlug(context.TODO() /* TODO(ctx-sweep): no ctx available at this call site */, def.Slug); err == nil && existing != nil && existing.ID != "" {
 			id = existing.ID // adopt the existing projection's identity
 		}
 		if err := agent.InjectFrontmatterID(def.SourceRef, id); err != nil {

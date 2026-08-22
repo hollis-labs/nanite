@@ -25,7 +25,7 @@ func newContextResolverTestStore(t *testing.T) *store.Store {
 	if err != nil {
 		t.Fatalf("store.New: %v", err)
 	}
-	t.Cleanup(func() { st.Close() })
+	t.Cleanup(func() { st.Close(context.Background()) })
 	return st
 }
 
@@ -38,7 +38,7 @@ func TestResolveAgentContextForBoot_RealCmdResolverAgainstRealStore(t *testing.T
 	ctx := context.Background()
 
 	agent := &store.AgentProfile{Name: "Weather Agent", Slug: "weather-agent", SystemPrompt: "You help with weather."}
-	if err := st.CreateAgent(agent); err != nil {
+	if err := st.CreateAgent(context.Background(), agent); err != nil {
 		t.Fatalf("CreateAgent: %v", err)
 	}
 	if _, err := st.InsertAgentContextResolver(ctx, store.AgentContextResolver{
@@ -76,7 +76,7 @@ func TestResolveAgentContextForBoot_RealCmdResolverAgainstRealStore(t *testing.T
 
 	// No resolvers configured for a different agent -> nil, no error.
 	otherAgent := &store.AgentProfile{Name: "Plain Agent", Slug: "plain-agent", SystemPrompt: "x"}
-	if err := st.CreateAgent(otherAgent); err != nil {
+	if err := st.CreateAgent(context.Background(), otherAgent); err != nil {
 		t.Fatalf("CreateAgent (other): %v", err)
 	}
 	none, err := s.resolveAgentContextForBoot(ctx, otherAgent.ID, "")
@@ -97,7 +97,7 @@ func TestResolveAgentContextForBoot_ResolverFailureAbortsBoot(t *testing.T) {
 	ctx := context.Background()
 
 	agent := &store.AgentProfile{Name: "Broken Agent", Slug: "broken-agent", SystemPrompt: "x"}
-	if err := st.CreateAgent(agent); err != nil {
+	if err := st.CreateAgent(context.Background(), agent); err != nil {
 		t.Fatalf("CreateAgent: %v", err)
 	}
 	if _, err := st.InsertAgentContextResolver(ctx, store.AgentContextResolver{
@@ -128,7 +128,7 @@ func TestDynamicContext_FoldsIntoAssembledBootContent(t *testing.T) {
 	ctx := context.Background()
 
 	agent := &store.AgentProfile{Name: "Weather Agent", Slug: "weather-agent-2", SystemPrompt: "You help with weather."}
-	if err := st.CreateAgent(agent); err != nil {
+	if err := st.CreateAgent(context.Background(), agent); err != nil {
 		t.Fatalf("CreateAgent: %v", err)
 	}
 	if _, err := st.InsertAgentContextResolver(ctx, store.AgentContextResolver{

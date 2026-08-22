@@ -87,7 +87,7 @@ func newInvariantsFixture(t *testing.T) *invariantsFixture {
 	if err != nil {
 		t.Fatalf("store.New: %v", err)
 	}
-	t.Cleanup(func() { s.Close() })
+	t.Cleanup(func() { s.Close(context.Background()) })
 
 	agent := &store.AgentProfile{
 		ID:           "agent-inv",
@@ -96,7 +96,7 @@ func newInvariantsFixture(t *testing.T) *invariantsFixture {
 		Status:       "active",
 		SystemPrompt: "You are the invariants-test agent. Body content for SlotAgent.",
 	}
-	if err := s.CreateAgent(agent); err != nil {
+	if err := s.CreateAgent(context.Background(), agent); err != nil {
 		t.Fatalf("CreateAgent: %v", err)
 	}
 
@@ -104,10 +104,10 @@ func newInvariantsFixture(t *testing.T) *invariantsFixture {
 		ID:    "sess-inv",
 		Title: "Slot invariants session",
 	}
-	if err := s.CreateSession(sess); err != nil {
+	if err := s.CreateSession(context.Background(), sess); err != nil {
 		t.Fatalf("CreateSession: %v", err)
 	}
-	if err := s.CreateMessage(&store.Message{
+	if err := s.CreateMessage(context.Background(), &store.Message{
 		ID:        "msg-inv-1",
 		SessionID: sess.ID,
 		Role:      "user",

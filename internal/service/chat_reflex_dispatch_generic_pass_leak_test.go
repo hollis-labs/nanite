@@ -46,10 +46,14 @@ func TestGenericReflexPass_DoesNotDuplicateDispatchToAgentFiring(t *testing.T) {
 	if err != nil {
 		t.Fatalf("store.New: %v", err)
 	}
-	t.Cleanup(func() { _ = st.Close() })
+	t.Cleanup(func() {
+		_ = st.Close(context.
 
-	// Real seed data — the same call container.go makes at boot,
-	// including dispatch_to_agent_researcher_mention (seeds.go).
+			// Real seed data — the same call container.go makes at boot,
+			// including dispatch_to_agent_researcher_mention (seeds.go).
+			Background())
+	})
+
 	if _, err := reflexes.SeedBaseReflexes(ctx, st, nil); err != nil {
 		t.Fatalf("SeedBaseReflexes: %v", err)
 	}
@@ -71,18 +75,18 @@ func TestGenericReflexPass_DoesNotDuplicateDispatchToAgentFiring(t *testing.T) {
 		SystemPrompt: "test",
 		Source:       "test",
 	}
-	if err := st.CreateAgent(agent); err != nil {
+	if err := st.CreateAgent(context.Background(), agent); err != nil {
 		t.Fatalf("CreateAgent: %v", err)
 	}
 	session := &store.Session{ID: sessionID, Title: "generic pass leak probe"}
-	if err := st.CreateSession(session); err != nil {
+	if err := st.CreateSession(context.Background(), session); err != nil {
 		t.Fatalf("CreateSession: %v", err)
 	}
 	// Persisted BEFORE either pass runs, mirroring chat.go's
 	// CreateMessage(userMsg) call, which runs before generateResponse —
 	// StateCollector.Collect (the generic pass's state source) only ever
 	// sees already-committed rows.
-	if err := st.CreateMessage(&store.Message{
+	if err := st.CreateMessage(context.Background(), &store.Message{
 		ID:        userMsgID,
 		SessionID: sessionID,
 		Role:      "user",
@@ -167,7 +171,7 @@ func TestGenericReflexPass_DoesNotDuplicateDispatchToAgentFiring(t *testing.T) {
 		t.Errorf("FiredCount after dedicated pass = %d, want exactly 1 (one real dispatch, no duplicate from the generic pass)", afterDedicated.FiredCount)
 	}
 
-	events, err := st.ListEvents("", 50)
+	events, err := st.ListEvents(context.Background(), "", 50)
 	if err != nil {
 		t.Fatalf("ListEvents: %v", err)
 	}
@@ -219,7 +223,7 @@ func findAgentReflexByName(ctx context.Context, st *store.Store, name string) (*
 // literal, so a shape-agnostic count by reflex name is the stable check.
 func countEventLogRowsForReflex(t *testing.T, st *store.Store, reflexName string) int {
 	t.Helper()
-	events, err := st.ListEvents("", 100)
+	events, err := st.ListEvents(context.Background(), "", 100)
 	if err != nil {
 		t.Fatalf("ListEvents: %v", err)
 	}

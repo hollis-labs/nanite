@@ -1,6 +1,7 @@
 package store
 
 import (
+	"context"
 	"database/sql"
 	"fmt"
 	"strings"
@@ -15,7 +16,7 @@ import (
 // Returns the auto-assigned row ID so outcome write-back can reference it.
 // Errors are returned; callers should log and continue — grounding logging
 // must never gate the dispatch path.
-func (s *Store) LogGroundingConsultation(entry grounding.ConsultationEntry) (int64, error) {
+func (s *Store) LogGroundingConsultation(ctx context.Context, entry grounding.ConsultationEntry) (int64, error) {
 	consumed := 0
 	if entry.Consumed {
 		consumed = 1
@@ -33,7 +34,7 @@ func (s *Store) LogGroundingConsultation(entry grounding.ConsultationEntry) (int
 		turnID = sql.NullString{String: entry.TurnID, Valid: true}
 	}
 
-	res, err := s.DB.Exec(`
+	res, err := s.DB.ExecContext(ctx, `
 		INSERT INTO grounding_consultations
 			(session_id, turn_id, memory_key, namespace, summary, similarity, consumed)
 		VALUES (?, ?, ?, ?, ?, ?, ?)`,
@@ -58,10 +59,10 @@ func (s *Store) LogGroundingConsultation(entry grounding.ConsultationEntry) (int
 // LogGroundingOutcome persists one row to grounding_outcomes (migration 033).
 // It implements part of grounding.ConsultationLogger so *Store satisfies that
 // interface.
-func (s *Store) LogGroundingOutcome(outcome grounding.Outcome) error {
+func (s *Store) LogGroundingOutcome(ctx context.Context, outcome grounding.Outcome) error {
 	pruning := strings.Join(outcome.PruningWordsFound, ",")
 
-	_, err := s.DB.Exec(`
+	_, err := s.DB.ExecContext(ctx, `
 		INSERT INTO grounding_outcomes
 			(consultation_id, outcome_kind, follow_up_excerpt, seconds_since_ack, pruning_words)
 		VALUES (?, ?, ?, ?, ?)`,
@@ -93,8 +94,8 @@ type GroundingConsultationRow struct {
 
 // ListGroundingConsultations returns all rows for a session ordered by id asc.
 // Used in tests.
-func (s *Store) ListGroundingConsultations(sessionID string) ([]GroundingConsultationRow, error) {
-	rows, err := s.DB.Query(`
+func (s *Store) ListGroundingConsultations(ctx context.Context, sessionID string) ([]GroundingConsultationRow, error) {
+	rows, err := s.DB.QueryContext(ctx, `
 		SELECT id, session_id, COALESCE(turn_id,''), memory_key, namespace, summary,
 		       similarity, consumed, consulted_at
 		FROM grounding_consultations
@@ -140,8 +141,8 @@ type GroundingOutcomeRow struct {
 
 // ListGroundingOutcomes returns all outcome rows for a consultation ID.
 // Used in tests.
-func (s *Store) ListGroundingOutcomes(consultationID int64) ([]GroundingOutcomeRow, error) {
-	rows, err := s.DB.Query(`
+func (s *Store) ListGroundingOutcomes(ctx context.Context, consultationID int64) ([]GroundingOutcomeRow, error) {
+	rows, err := s.DB.QueryContext(ctx, `
 		SELECT id, consultation_id, outcome_kind, follow_up_excerpt,
 		       seconds_since_ack, pruning_words, recorded_at
 		FROM grounding_outcomes

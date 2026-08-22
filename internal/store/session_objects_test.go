@@ -1,6 +1,7 @@
 package store
 
 import (
+	"context"
 	"errors"
 	"testing"
 )
@@ -9,7 +10,7 @@ func TestSessionObject_PutAndGet(t *testing.T) {
 	s := newTestStore(t)
 	sess := makeTestSession(t, s)
 
-	obj, err := s.PutSessionObject(SessionObjectInput{
+	obj, err := s.PutSessionObject(context.Background(), SessionObjectInput{
 		SessionID:   sess.ID,
 		ContentType: "application/json",
 		Payload:     `{"kind":"card","text":"hello"}`,
@@ -30,7 +31,7 @@ func TestSessionObject_PutAndGet(t *testing.T) {
 		t.Error("expected CreatedAt to be populated")
 	}
 
-	got, err := s.GetSessionObject(sess.ID, obj.ID)
+	got, err := s.GetSessionObject(context.Background(), sess.ID, obj.ID)
 	if err != nil {
 		t.Fatalf("GetSessionObject: %v", err)
 	}
@@ -46,7 +47,7 @@ func TestSessionObject_GetNotFound(t *testing.T) {
 	s := newTestStore(t)
 	sess := makeTestSession(t, s)
 
-	_, err := s.GetSessionObject(sess.ID, "01HQ0000000000000000000000")
+	_, err := s.GetSessionObject(context.Background(), sess.ID, "01HQ0000000000000000000000")
 	if !errors.Is(err, ErrSessionObjectNotFound) {
 		t.Errorf("expected ErrSessionObjectNotFound, got %v", err)
 	}
@@ -59,7 +60,7 @@ func TestSessionObject_CrossSessionIsolation(t *testing.T) {
 	sessA := makeTestSession(t, s)
 	sessB := makeTestSession(t, s)
 
-	obj, err := s.PutSessionObject(SessionObjectInput{
+	obj, err := s.PutSessionObject(context.Background(), SessionObjectInput{
 		SessionID: sessA.ID,
 		Payload:   `{"a":1}`,
 	})
@@ -67,13 +68,13 @@ func TestSessionObject_CrossSessionIsolation(t *testing.T) {
 		t.Fatalf("PutSessionObject: %v", err)
 	}
 
-	_, err = s.GetSessionObject(sessB.ID, obj.ID)
+	_, err = s.GetSessionObject(context.Background(), sessB.ID, obj.ID)
 	if !errors.Is(err, ErrSessionObjectNotFound) {
 		t.Errorf("D5 violation: cross-session lookup must return ErrSessionObjectNotFound, got %v", err)
 	}
 
 	// Control: same id + owning session works.
-	if _, err := s.GetSessionObject(sessA.ID, obj.ID); err != nil {
+	if _, err := s.GetSessionObject(context.Background(), sessA.ID, obj.ID); err != nil {
 		t.Errorf("same-session lookup failed: %v", err)
 	}
 }
@@ -89,7 +90,7 @@ func TestSessionObject_SizeCapEnforced(t *testing.T) {
 	}
 	payload := `{"x":"` + string(big) + `"}`
 
-	_, err := s.PutSessionObject(SessionObjectInput{
+	_, err := s.PutSessionObject(context.Background(), SessionObjectInput{
 		SessionID: sess.ID,
 		Payload:   payload,
 	})
@@ -105,7 +106,7 @@ func TestSessionObject_List(t *testing.T) {
 	// Ordering determinism comes from the SQL tiebreak on `id DESC` — ULIDs
 	// are monotonic within a millisecond, so no sleep is needed between puts.
 	for i := 0; i < 3; i++ {
-		if _, err := s.PutSessionObject(SessionObjectInput{
+		if _, err := s.PutSessionObject(context.Background(), SessionObjectInput{
 			SessionID: sess.ID,
 			Payload:   `{}`,
 		}); err != nil {
@@ -113,7 +114,7 @@ func TestSessionObject_List(t *testing.T) {
 		}
 	}
 
-	list, err := s.ListSessionObjects(sess.ID)
+	list, err := s.ListSessionObjects(context.Background(), sess.ID)
 	if err != nil {
 		t.Fatalf("ListSessionObjects: %v", err)
 	}
@@ -133,14 +134,14 @@ func TestSessionObject_List_OtherSessionExcluded(t *testing.T) {
 	sessA := makeTestSession(t, s)
 	sessB := makeTestSession(t, s)
 
-	if _, err := s.PutSessionObject(SessionObjectInput{SessionID: sessA.ID, Payload: `{}`}); err != nil {
+	if _, err := s.PutSessionObject(context.Background(), SessionObjectInput{SessionID: sessA.ID, Payload: `{}`}); err != nil {
 		t.Fatalf("put A: %v", err)
 	}
-	if _, err := s.PutSessionObject(SessionObjectInput{SessionID: sessB.ID, Payload: `{}`}); err != nil {
+	if _, err := s.PutSessionObject(context.Background(), SessionObjectInput{SessionID: sessB.ID, Payload: `{}`}); err != nil {
 		t.Fatalf("put B: %v", err)
 	}
 
-	list, err := s.ListSessionObjects(sessA.ID)
+	list, err := s.ListSessionObjects(context.Background(), sessA.ID)
 	if err != nil {
 		t.Fatalf("list A: %v", err)
 	}
@@ -153,12 +154,12 @@ func TestSessionObject_EvictSessionObjects(t *testing.T) {
 	s := newTestStore(t)
 	sess := makeTestSession(t, s)
 
-	obj, err := s.PutSessionObject(SessionObjectInput{SessionID: sess.ID, Payload: `{}`})
+	obj, err := s.PutSessionObject(context.Background(), SessionObjectInput{SessionID: sess.ID, Payload: `{}`})
 	if err != nil {
 		t.Fatalf("put: %v", err)
 	}
 
-	n, err := s.EvictSessionObjects(sess.ID)
+	n, err := s.EvictSessionObjects(context.Background(), sess.ID)
 	if err != nil {
 		t.Fatalf("EvictSessionObjects: %v", err)
 	}
@@ -166,7 +167,7 @@ func TestSessionObject_EvictSessionObjects(t *testing.T) {
 		t.Errorf("expected 1 row evicted, got %d", n)
 	}
 
-	_, err = s.GetSessionObject(sess.ID, obj.ID)
+	_, err = s.GetSessionObject(context.Background(), sess.ID, obj.ID)
 	if !errors.Is(err, ErrSessionObjectNotFound) {
 		t.Errorf("expected not-found after evict, got %v", err)
 	}
@@ -174,7 +175,7 @@ func TestSessionObject_EvictSessionObjects(t *testing.T) {
 
 func TestSessionObject_PutSessionIDRequired(t *testing.T) {
 	s := newTestStore(t)
-	_, err := s.PutSessionObject(SessionObjectInput{SessionID: "", Payload: `{}`})
+	_, err := s.PutSessionObject(context.Background(), SessionObjectInput{SessionID: "", Payload: `{}`})
 	if err == nil {
 		t.Error("expected error on empty session_id")
 	}
@@ -183,7 +184,7 @@ func TestSessionObject_PutSessionIDRequired(t *testing.T) {
 func TestSessionObject_PutPayloadRequired(t *testing.T) {
 	s := newTestStore(t)
 	sess := makeTestSession(t, s)
-	_, err := s.PutSessionObject(SessionObjectInput{SessionID: sess.ID, Payload: ""})
+	_, err := s.PutSessionObject(context.Background(), SessionObjectInput{SessionID: sess.ID, Payload: ""})
 	if err == nil {
 		t.Error("expected error on empty payload")
 	}
@@ -200,7 +201,7 @@ func TestSessionObject_EndToEnd_ArchiveEvictsAndCrossSessionFails(t *testing.T) 
 	sessA := makeTestSession(t, s)
 	sessB := makeTestSession(t, s)
 
-	objA, err := s.PutSessionObject(SessionObjectInput{
+	objA, err := s.PutSessionObject(context.Background(), SessionObjectInput{
 		SessionID:   sessA.ID,
 		ContentType: "application/json",
 		Payload:     `{"kind":"card","id":"abc"}`,
@@ -208,7 +209,7 @@ func TestSessionObject_EndToEnd_ArchiveEvictsAndCrossSessionFails(t *testing.T) 
 	if err != nil {
 		t.Fatalf("put A: %v", err)
 	}
-	objB, err := s.PutSessionObject(SessionObjectInput{
+	objB, err := s.PutSessionObject(context.Background(), SessionObjectInput{
 		SessionID: sessB.ID,
 		Payload:   `{"keep":"me"}`,
 	})
@@ -217,23 +218,23 @@ func TestSessionObject_EndToEnd_ArchiveEvictsAndCrossSessionFails(t *testing.T) 
 	}
 
 	// 2. In-session lookup works; cross-session fails.
-	if _, err := s.GetSessionObject(sessA.ID, objA.ID); err != nil {
+	if _, err := s.GetSessionObject(context.Background(), sessA.ID, objA.ID); err != nil {
 		t.Fatalf("A lookup: %v", err)
 	}
-	if _, err := s.GetSessionObject(sessB.ID, objA.ID); !errors.Is(err, ErrSessionObjectNotFound) {
+	if _, err := s.GetSessionObject(context.Background(), sessB.ID, objA.ID); !errors.Is(err, ErrSessionObjectNotFound) {
 		t.Errorf("D5: cross-session lookup must fail, got %v", err)
 	}
 
 	// 3. Archive A.
-	if err := s.ArchiveSession(sessA.ID); err != nil {
+	if err := s.ArchiveSession(context.Background(), sessA.ID); err != nil {
 		t.Fatalf("archive A: %v", err)
 	}
 
 	// 4. A's object is unreachable from its own session; B's is untouched.
-	if _, err := s.GetSessionObject(sessA.ID, objA.ID); !errors.Is(err, ErrSessionObjectNotFound) {
+	if _, err := s.GetSessionObject(context.Background(), sessA.ID, objA.ID); !errors.Is(err, ErrSessionObjectNotFound) {
 		t.Errorf("post-archive: expected not-found for A's object, got %v", err)
 	}
-	if _, err := s.GetSessionObject(sessB.ID, objB.ID); err != nil {
+	if _, err := s.GetSessionObject(context.Background(), sessB.ID, objB.ID); err != nil {
 		t.Errorf("post-archive: B's object unexpectedly gone: %v", err)
 	}
 }
@@ -244,7 +245,7 @@ func makeTestSession(t *testing.T, s *Store) *Session {
 	sess := &Session{
 		Status: "active",
 	}
-	if err := s.CreateSession(sess); err != nil {
+	if err := s.CreateSession(context.Background(), sess); err != nil {
 		t.Fatalf("CreateSession: %v", err)
 	}
 	return sess

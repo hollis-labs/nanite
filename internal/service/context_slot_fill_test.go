@@ -27,10 +27,10 @@ func TestAssembleSlots_FillsAllSlotsFromRawSources(t *testing.T) {
 	svc := NewContextService(ContextServiceConfig{Client: client})
 
 	sess := &store.Session{ID: "slot-fill-sess", Title: "FillTest"}
-	if err := s.CreateSession(sess); err != nil {
+	if err := s.CreateSession(context.Background(), sess); err != nil {
 		t.Fatalf("CreateSession: %v", err)
 	}
-	if err := s.CreateMessage(&store.Message{
+	if err := s.CreateMessage(context.Background(), &store.Message{
 		ID:        "slot-fill-msg",
 		SessionID: sess.ID,
 		Role:      "user",
@@ -140,7 +140,7 @@ func TestAssembleSlots_NoToolsLeavesToolsSlotEmpty(t *testing.T) {
 	svc := NewContextService(ContextServiceConfig{Client: client})
 
 	sess := &store.Session{ID: "no-tools-sess"}
-	if err := s.CreateSession(sess); err != nil {
+	if err := s.CreateSession(context.Background(), sess); err != nil {
 		t.Fatalf("CreateSession: %v", err)
 	}
 	agent := &store.AgentProfile{ID: "no-tools-agent", Slug: "x", Status: "active"}

@@ -33,11 +33,15 @@ func TestAttemptReflexDispatch_KindLookupDegraded_LogsMultiCandidateCanary(t *te
 	if err != nil {
 		t.Fatalf("store.New: %v", err)
 	}
-	t.Cleanup(func() { _ = st.Close() })
+	t.Cleanup(func() {
+		_ = st.Close(context.
 
-	// Two real dispatch_to_agent rows, both matching the same
-	// user_regex_window trigger — same pattern
-	// chat_reflex_dispatch_cooldown_test.go's fixture uses.
+			// Two real dispatch_to_agent rows, both matching the same
+			// user_regex_window trigger — same pattern
+			// chat_reflex_dispatch_cooldown_test.go's fixture uses.
+			Background())
+	})
+
 	for i, name := range []string{"dispatch_multi_probe_a", "dispatch_multi_probe_b"} {
 		if _, err := st.InsertAgentReflex(context.Background(), store.AgentReflex{
 			ClassTag:    "advisor",

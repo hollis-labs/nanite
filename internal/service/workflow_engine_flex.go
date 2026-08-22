@@ -175,7 +175,8 @@ func (e *BuiltinWorkflowEngine) recheckFlexStep(ctx context.Context, runID strin
 	if sr.IsError {
 		status = "failed"
 	}
-	if err := e.store.UpsertWorkflowRunStep(&store.WorkflowRunStepRow{
+	// Outcome bookkeeping must survive cancellation of the flex evaluation it records.
+	if err := e.store.UpsertWorkflowRunStep(context.WithoutCancel(ctx), &store.WorkflowRunStepRow{
 		WorkflowRunID: runID, StepID: step.ID, Kind: string(step.Kind), Status: status,
 		Output: sr.Output, IsError: sr.IsError, CompletedAt: time.Now().UTC(),
 	}); err != nil {

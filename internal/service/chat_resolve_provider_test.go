@@ -120,12 +120,12 @@ func TestResolveProvider_CLIAgentProvider_ShortCircuits(t *testing.T) {
 
 func TestResolveProvider_FallbackChainCLI_ShortCircuits(t *testing.T) {
 	st := mustNewStoreForResolveTest(t)
-	us, err := st.GetUserSettings()
+	us, err := st.GetUserSettings(context.Background())
 	if err != nil {
 		t.Fatalf("GetUserSettings: %v", err)
 	}
 	us.ProviderFallbackChain = []string{"pty"}
-	if err := st.UpdateUserSettings(us); err != nil {
+	if err := st.UpdateUserSettings(context.Background(), us); err != nil {
 		t.Fatalf("UpdateUserSettings: %v", err)
 	}
 
@@ -159,13 +159,13 @@ func TestResolveProvider_FallbackChainCLI_ShortCircuits(t *testing.T) {
 // left over from before this app's API-first default).
 func TestResolveProvider_DefaultProviderWinsOverStaleFallbackChain(t *testing.T) {
 	st := mustNewStoreForResolveTest(t)
-	us, err := st.GetUserSettings()
+	us, err := st.GetUserSettings(context.Background())
 	if err != nil {
 		t.Fatalf("GetUserSettings: %v", err)
 	}
 	us.DefaultProvider = "anthropic"
 	us.ProviderFallbackChain = []string{"pty"}
-	if err := st.UpdateUserSettings(us); err != nil {
+	if err := st.UpdateUserSettings(context.Background(), us); err != nil {
 		t.Fatalf("UpdateUserSettings: %v", err)
 	}
 
@@ -191,12 +191,12 @@ func TestResolveProvider_DefaultProviderWinsOverStaleFallbackChain(t *testing.T)
 // through to a registered HTTP provider.
 func TestResolveProvider_DefaultProviderCLI_ShortCircuits(t *testing.T) {
 	st := mustNewStoreForResolveTest(t)
-	us, err := st.GetUserSettings()
+	us, err := st.GetUserSettings(context.Background())
 	if err != nil {
 		t.Fatalf("GetUserSettings: %v", err)
 	}
 	us.DefaultProvider = "pty"
-	if err := st.UpdateUserSettings(us); err != nil {
+	if err := st.UpdateUserSettings(context.Background(), us); err != nil {
 		t.Fatalf("UpdateUserSettings: %v", err)
 	}
 
@@ -244,12 +244,12 @@ func TestResolveProvider_FallbackChainNonCLIMiss_Warns(t *testing.T) {
 	logs := captureSlogOutput(t)
 
 	st := mustNewStoreForResolveTest(t)
-	us, err := st.GetUserSettings()
+	us, err := st.GetUserSettings(context.Background())
 	if err != nil {
 		t.Fatalf("GetUserSettings: %v", err)
 	}
 	us.ProviderFallbackChain = []string{"openai"} // non-CLI, will miss
-	if err := st.UpdateUserSettings(us); err != nil {
+	if err := st.UpdateUserSettings(context.Background(), us); err != nil {
 		t.Fatalf("UpdateUserSettings: %v", err)
 	}
 
@@ -333,12 +333,12 @@ func TestResolveProvider_NothingConfigured_NoSilentDefault(t *testing.T) {
 // not HTTP.
 func TestResolveProvider_CLIRuntimeKind_BareDefaultProvider_NeverRoutesHTTP(t *testing.T) {
 	st := mustNewStoreForResolveTest(t)
-	us, err := st.GetUserSettings()
+	us, err := st.GetUserSettings(context.Background())
 	if err != nil {
 		t.Fatalf("GetUserSettings: %v", err)
 	}
 	us.DefaultProvider = "anthropic"
-	if err := st.UpdateUserSettings(us); err != nil {
+	if err := st.UpdateUserSettings(context.Background(), us); err != nil {
 		t.Fatalf("UpdateUserSettings: %v", err)
 	}
 
@@ -365,12 +365,12 @@ func TestResolveProvider_CLIRuntimeKind_BareDefaultProvider_NeverRoutesHTTP(t *t
 // operator-level HTTP tiers once runtimeKind=="cli" is known.
 func TestResolveProvider_CLIRuntimeKind_NoAgentProviderAtAll_StillCLI(t *testing.T) {
 	st := mustNewStoreForResolveTest(t)
-	us, err := st.GetUserSettings()
+	us, err := st.GetUserSettings(context.Background())
 	if err != nil {
 		t.Fatalf("GetUserSettings: %v", err)
 	}
 	us.DefaultProvider = "anthropic"
-	if err := st.UpdateUserSettings(us); err != nil {
+	if err := st.UpdateUserSettings(context.Background(), us); err != nil {
 		t.Fatalf("UpdateUserSettings: %v", err)
 	}
 
@@ -396,12 +396,12 @@ func TestResolveProvider_CLIRuntimeKind_NoAgentProviderAtAll_StillCLI(t *testing
 // runtimeKind=="cli" changes behavior.
 func TestResolveProvider_APIRuntimeKind_BareDefaultProvider_StillResolvesHTTP(t *testing.T) {
 	st := mustNewStoreForResolveTest(t)
-	us, err := st.GetUserSettings()
+	us, err := st.GetUserSettings(context.Background())
 	if err != nil {
 		t.Fatalf("GetUserSettings: %v", err)
 	}
 	us.DefaultProvider = "anthropic"
-	if err := st.UpdateUserSettings(us); err != nil {
+	if err := st.UpdateUserSettings(context.Background(), us); err != nil {
 		t.Fatalf("UpdateUserSettings: %v", err)
 	}
 
@@ -442,7 +442,7 @@ func mustNewStoreForResolveTest(t *testing.T) *store.Store {
 	if err != nil {
 		t.Fatalf("store.New: %v", err)
 	}
-	t.Cleanup(func() { s.Close() })
+	t.Cleanup(func() { s.Close(context.Background()) })
 	if _, err := s.DB.Exec(`INSERT OR IGNORE INTO user_settings (id) VALUES (1)`); err != nil {
 		t.Fatalf("seed user_settings: %v", err)
 	}

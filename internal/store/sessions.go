@@ -1,6 +1,7 @@
 package store
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
 	"fmt"
@@ -60,7 +61,7 @@ type Message struct {
 // longer workspace-scoped (Phase 0 item 20, retire workspaces — there has
 // only ever been one workspace in practice). By default archived sessions
 // are excluded; set includeArchived to include them.
-func (s *Store) ListSessions(includeArchived ...bool) ([]Session, error) {
+func (s *Store) ListSessions(ctx context.Context, includeArchived ...bool) ([]Session, error) {
 	inclArchived := false
 	if len(includeArchived) > 0 {
 		inclArchived = includeArchived[0]
@@ -130,7 +131,7 @@ func (s *Store) ListSessions(includeArchived ...bool) ([]Session, error) {
 	}
 	query += ` ORDER BY sess.last_activity DESC`
 
-	rows, err := s.DB.Query(query)
+	rows, err := s.DB.QueryContext(ctx, query)
 	if err != nil {
 		return nil, fmt.Errorf("list sessions: %w", err)
 	}
@@ -165,7 +166,7 @@ func (s *Store) ListSessions(includeArchived ...bool) ([]Session, error) {
 }
 
 // GetSession returns a single session by ID.
-func (s *Store) GetSession(id string) (*Session, error) {
+func (s *Store) GetSession(ctx context.Context, id string) (*Session, error) {
 	var sess Session
 	var haltedAt sql.NullString
 	var haltedReason sql.NullString
@@ -174,7 +175,7 @@ func (s *Store) GetSession(id string) (*Session, error) {
 	var rootSessionID sql.NullString
 	var relation sql.NullString
 	var depth sql.NullInt64
-	err := s.DB.QueryRow(
+	err := s.DB.QueryRowContext(ctx,
 		`WITH RECURSIVE
 		 latest_subagent_edges AS (
 		   SELECT sr.parent_session_id, sr.child_session_id
@@ -284,12 +285,12 @@ func hydrateSessionOptionalFields(sess *Session, haltedAt sql.NullString, halted
 }
 
 // CreateSession inserts a new session, auto-generating ID and short_code.
-func (s *Store) CreateSession(sess *Session) error {
+func (s *Store) CreateSession(ctx context.Context, sess *Session) error {
 	if sess.ID == "" {
 		sess.ID = uuid.New().String()
 	}
 
-	code, err := s.NextShortCode()
+	code, err := s.NextShortCode(ctx)
 	if err != nil {
 		return fmt.Errorf("generate short code: %w", err)
 	}
@@ -303,7 +304,7 @@ func (s *Store) CreateSession(sess *Session) error {
 		sess.Metadata = "{}"
 	}
 
-	_, err = s.DB.Exec(
+	_, err = s.DB.ExecContext(ctx,
 		`INSERT INTO sessions (id, short_code, title, custom_name, project_id,
 		                       context_type, context_id, provider, model,
 		                       status, is_pinned, sort_order, message_count,
@@ -326,9 +327,9 @@ func (s *Store) CreateSession(sess *Session) error {
 }
 
 // UpdateSession updates mutable session fields.
-func (s *Store) UpdateSession(sess *Session) error {
+func (s *Store) UpdateSession(ctx context.Context, sess *Session) error {
 	now := time.Now().UTC().Format(time.RFC3339)
-	_, err := s.DB.Exec(
+	_, err := s.DB.ExecContext(ctx,
 		`UPDATE sessions SET title = ?, custom_name = ?, is_pinned = ?, model = ?, provider = ?, status = ?, updated_at = ? WHERE id = ?`,
 		sess.Title, sess.CustomName, sess.IsPinned, sess.Model, sess.Provider, sess.Status, now, sess.ID,
 	)
@@ -340,9 +341,9 @@ func (s *Store) UpdateSession(sess *Session) error {
 }
 
 // UpdateSessionTags sets the tags JSON array on a session.
-func (s *Store) UpdateSessionTags(id, tagsJSON string) error {
+func (s *Store) UpdateSessionTags(ctx context.Context, id, tagsJSON string) error {
 	now := time.Now().UTC().Format(time.RFC3339)
-	_, err := s.DB.Exec(
+	_, err := s.DB.ExecContext(ctx,
 		`UPDATE sessions SET tags = ?, updated_at = ? WHERE id = ?`,
 		tagsJSON, now, id,
 	)
@@ -353,9 +354,9 @@ func (s *Store) UpdateSessionTags(id, tagsJSON string) error {
 }
 
 // UpdateSessionMetadata sets the metadata JSON on a session.
-func (s *Store) UpdateSessionMetadata(id, metadataJSON string) error {
+func (s *Store) UpdateSessionMetadata(ctx context.Context, id, metadataJSON string) error {
 	now := time.Now().UTC().Format(time.RFC3339)
-	_, err := s.DB.Exec(
+	_, err := s.DB.ExecContext(ctx,
 		`UPDATE sessions SET metadata = ?, updated_at = ? WHERE id = ?`,
 		metadataJSON, now, id,
 	)
@@ -370,21 +371,21 @@ func (s *Store) UpdateSessionMetadata(id, metadataJSON string) error {
 // inside a single transaction so D5 (hard ephemeral: no cross-session lookup
 // and no orphan payloads on archived sessions) holds even under mid-operation
 // failure.
-func (s *Store) ArchiveSession(id string) error {
-	tx, err := s.DB.Begin()
+func (s *Store) ArchiveSession(ctx context.Context, id string) error {
+	tx, err := s.DB.BeginTx(ctx, nil)
 	if err != nil {
 		return fmt.Errorf("archive session %s: begin tx: %w", id, err)
 	}
 	defer tx.Rollback()
 
 	now := time.Now().UTC().Format(time.RFC3339)
-	if _, err := tx.Exec(
+	if _, err := tx.ExecContext(ctx,
 		`UPDATE sessions SET status = 'archived', updated_at = ? WHERE id = ?`,
 		now, id,
 	); err != nil {
 		return fmt.Errorf("archive session %s: update status: %w", id, err)
 	}
-	if _, err := tx.Exec(
+	if _, err := tx.ExecContext(ctx,
 		`DELETE FROM session_objects WHERE session_id = ?`, id,
 	); err != nil {
 		return fmt.Errorf("archive session %s: evict session objects: %w", id, err)
@@ -404,9 +405,9 @@ func (s *Store) ArchiveSession(id string) error {
 // the error for the surface they're presenting.
 //
 // CW-20260519-0063 (cross-session chat read self-tool).
-func (s *Store) GetSessionByShortCode(code string) (*Session, error) {
+func (s *Store) GetSessionByShortCode(ctx context.Context, code string) (*Session, error) {
 	var sess Session
-	err := s.DB.QueryRow(
+	err := s.DB.QueryRowContext(ctx,
 		`SELECT id, short_code, COALESCE(title,''), COALESCE(custom_name,''),
 		        COALESCE(project_id,''),
 		        COALESCE(context_type,''), COALESCE(context_id,''),
@@ -430,9 +431,9 @@ func (s *Store) GetSessionByShortCode(code string) (*Session, error) {
 }
 
 // NextShortCode returns the next available short code (c1, c2, ...).
-func (s *Store) NextShortCode() (string, error) {
+func (s *Store) NextShortCode(ctx context.Context) (string, error) {
 	var raw sql.NullString
-	err := s.DB.QueryRow(
+	err := s.DB.QueryRowContext(ctx,
 		`SELECT short_code FROM sessions ORDER BY CAST(SUBSTR(short_code, 2) AS INTEGER) DESC LIMIT 1`,
 	).Scan(&raw)
 	if err == sql.ErrNoRows || !raw.Valid {
@@ -451,8 +452,8 @@ func (s *Store) NextShortCode() (string, error) {
 }
 
 // ListMessages returns the latest N messages for a session, ordered by created_at ASC.
-func (s *Store) ListMessages(sessionID string, limit int) ([]Message, error) {
-	rows, err := s.DB.Query(
+func (s *Store) ListMessages(ctx context.Context, sessionID string, limit int) ([]Message, error) {
+	rows, err := s.DB.QueryContext(ctx,
 		`SELECT id, session_id, COALESCE(agent_id,''), role, content,
 		        COALESCE(envelope,''), COALESCE(metadata,'{}'),
 		        COALESCE(parent_id,''), is_compacted, created_at
@@ -496,15 +497,15 @@ type MessagePage struct {
 
 // ListMessagesPaginated returns a page of messages for a session with offset-based pagination.
 // Messages are returned in chronological order (created_at ASC).
-func (s *Store) ListMessagesPaginated(sessionID string, limit, offset int) (*MessagePage, error) {
+func (s *Store) ListMessagesPaginated(ctx context.Context, sessionID string, limit, offset int) (*MessagePage, error) {
 	var total int
-	if err := s.DB.QueryRow(
+	if err := s.DB.QueryRowContext(ctx,
 		`SELECT COUNT(*) FROM messages WHERE session_id = ?`, sessionID,
 	).Scan(&total); err != nil {
 		return nil, fmt.Errorf("count messages: %w", err)
 	}
 
-	rows, err := s.DB.Query(
+	rows, err := s.DB.QueryContext(ctx,
 		`SELECT id, session_id, COALESCE(agent_id,''), role, content,
 		        COALESCE(envelope,''), COALESCE(metadata,'{}'),
 		        COALESCE(parent_id,''), is_compacted, created_at
@@ -542,10 +543,10 @@ func (s *Store) ListMessagesPaginated(sessionID string, limit, offset int) (*Mes
 
 // ListMessagesAroundID returns a window of messages centered on a specific message ID.
 // Returns up to `before` messages before and `after` messages after the target, plus the target itself.
-func (s *Store) ListMessagesAroundID(sessionID, messageID string, before, after int) (*MessagePage, error) {
+func (s *Store) ListMessagesAroundID(ctx context.Context, sessionID, messageID string, before, after int) (*MessagePage, error) {
 	// Get the target message's created_at for windowing.
 	var targetCreatedAt string
-	if err := s.DB.QueryRow(
+	if err := s.DB.QueryRowContext(ctx,
 		`SELECT created_at FROM messages WHERE id = ? AND session_id = ?`,
 		messageID, sessionID,
 	).Scan(&targetCreatedAt); err != nil {
@@ -553,14 +554,14 @@ func (s *Store) ListMessagesAroundID(sessionID, messageID string, before, after 
 	}
 
 	var total int
-	if err := s.DB.QueryRow(
+	if err := s.DB.QueryRowContext(ctx,
 		`SELECT COUNT(*) FROM messages WHERE session_id = ?`, sessionID,
 	).Scan(&total); err != nil {
 		return nil, fmt.Errorf("count messages: %w", err)
 	}
 
 	// Fetch messages: `before` rows before target + target + `after` rows after target.
-	rows, err := s.DB.Query(
+	rows, err := s.DB.QueryContext(ctx,
 		`SELECT id, session_id, COALESCE(agent_id,''), role, content,
 		        COALESCE(envelope,''), COALESCE(metadata,'{}'),
 		        COALESCE(parent_id,''), is_compacted, created_at
@@ -612,9 +613,9 @@ func (s *Store) ListMessagesAroundID(sessionID, messageID string, before, after 
 }
 
 // GetMessage returns a single message by ID.
-func (s *Store) GetMessage(id string) (*Message, error) {
+func (s *Store) GetMessage(ctx context.Context, id string) (*Message, error) {
 	var m Message
-	err := s.DB.QueryRow(
+	err := s.DB.QueryRowContext(ctx,
 		`SELECT id, session_id, COALESCE(agent_id,''), role, content,
 		        COALESCE(envelope,''), COALESCE(metadata,'{}'),
 		        COALESCE(parent_id,''), is_compacted, created_at
@@ -630,7 +631,7 @@ func (s *Store) GetMessage(id string) (*Message, error) {
 }
 
 // CreateMessage inserts a new message and updates the session's message_count and last_activity.
-func (s *Store) CreateMessage(msg *Message) error {
+func (s *Store) CreateMessage(ctx context.Context, msg *Message) error {
 	if msg.ID == "" {
 		msg.ID = uuid.New().String()
 	}
@@ -640,13 +641,13 @@ func (s *Store) CreateMessage(msg *Message) error {
 	}
 	msg.CreatedAt = now
 
-	tx, err := s.DB.Begin()
+	tx, err := s.DB.BeginTx(ctx, nil)
 	if err != nil {
 		return fmt.Errorf("begin tx: %w", err)
 	}
 	defer tx.Rollback()
 
-	_, err = tx.Exec(
+	_, err = tx.ExecContext(ctx,
 		`INSERT INTO messages (id, session_id, agent_id, role, content, envelope, metadata, parent_id, is_compacted, created_at)
 		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		msg.ID, msg.SessionID, nullIfEmpty(msg.AgentID), msg.Role, msg.Content,
@@ -656,7 +657,7 @@ func (s *Store) CreateMessage(msg *Message) error {
 		return fmt.Errorf("insert message: %w", err)
 	}
 
-	_, err = tx.Exec(
+	_, err = tx.ExecContext(ctx,
 		`UPDATE sessions SET message_count = message_count + 1, last_activity = ?, updated_at = ? WHERE id = ?`,
 		now, now, msg.SessionID,
 	)
@@ -668,8 +669,8 @@ func (s *Store) CreateMessage(msg *Message) error {
 }
 
 // UpdateMessageContent updates a message's content and compaction flag.
-func (s *Store) UpdateMessageContent(id, content string, isCompacted bool) error {
-	_, err := s.DB.Exec(
+func (s *Store) UpdateMessageContent(ctx context.Context, id, content string, isCompacted bool) error {
+	_, err := s.DB.ExecContext(ctx,
 		`UPDATE messages SET content = ?, is_compacted = ? WHERE id = ?`,
 		content, isCompacted, id,
 	)
@@ -682,8 +683,8 @@ func (s *Store) UpdateMessageContent(id, content string, isCompacted bool) error
 // ForkSession creates a new session based on a source session, copying agents
 // and optionally messages. The entire operation runs inside a single
 // transaction — if any step fails, no partial child session is left behind.
-func (s *Store) ForkSession(sourceID string, overrides *Session, copyMessages bool) (*Session, error) {
-	src, err := s.GetSession(sourceID)
+func (s *Store) ForkSession(ctx context.Context, sourceID string, overrides *Session, copyMessages bool) (*Session, error) {
+	src, err := s.GetSession(ctx, sourceID)
 	if err != nil {
 		return nil, fmt.Errorf("load source session: %w", err)
 	}
@@ -724,7 +725,7 @@ func (s *Store) ForkSession(sourceID string, overrides *Session, copyMessages bo
 	// Read-side lookups (agents, messages) happen before the tx to keep the
 	// write transaction short and avoid read/write interleaving on the same
 	// connection.
-	agents, err := s.ListSessionAgents(sourceID)
+	agents, err := s.ListSessionAgents(ctx, sourceID)
 	if err != nil {
 		return nil, fmt.Errorf("list source agents: %w", err)
 	}
@@ -732,7 +733,7 @@ func (s *Store) ForkSession(sourceID string, overrides *Session, copyMessages bo
 	var msgs []Message
 	if copyMessages {
 		const maxMessages = 10000
-		msgs, err = s.ListMessages(sourceID, maxMessages)
+		msgs, err = s.ListMessages(ctx, sourceID, maxMessages)
 		if err != nil {
 			return nil, fmt.Errorf("list source messages: %w", err)
 		}
@@ -746,7 +747,7 @@ func (s *Store) ForkSession(sourceID string, overrides *Session, copyMessages bo
 	if newSess.ID == "" {
 		newSess.ID = uuid.New().String()
 	}
-	code, err := s.NextShortCode()
+	code, err := s.NextShortCode(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("generate short code: %w", err)
 	}
@@ -756,7 +757,7 @@ func (s *Store) ForkSession(sourceID string, overrides *Session, copyMessages bo
 	}
 	newSess.Metadata = forkSessionMetadata(src.Metadata, sourceID, copyMessages)
 
-	tx, err := s.DB.Begin()
+	tx, err := s.DB.BeginTx(ctx, nil)
 	if err != nil {
 		return nil, fmt.Errorf("begin fork tx: %w", err)
 	}
@@ -764,7 +765,7 @@ func (s *Store) ForkSession(sourceID string, overrides *Session, copyMessages bo
 
 	now := time.Now().UTC().Format(time.RFC3339)
 
-	if _, err := tx.Exec(
+	if _, err := tx.ExecContext(ctx,
 		`INSERT INTO sessions (id, short_code, title, custom_name, project_id,
 		                       context_type, context_id, provider, model,
 		                       status, is_pinned, sort_order, message_count,
@@ -782,7 +783,7 @@ func (s *Store) ForkSession(sourceID string, overrides *Session, copyMessages bo
 
 	// Copy session agents inside the tx.
 	for _, sa := range agents {
-		if _, err := tx.Exec(
+		if _, err := tx.ExecContext(ctx,
 			`INSERT INTO session_agents (session_id, agent_id, mode, joined_at, is_primary)
 			 VALUES (?, ?, ?, ?, ?)
 			 ON CONFLICT(session_id, agent_id) DO UPDATE SET mode = excluded.mode, is_primary = excluded.is_primary`,
@@ -796,7 +797,7 @@ func (s *Store) ForkSession(sourceID string, overrides *Session, copyMessages bo
 	// but all under a single tx + single final message_count update.
 	if copyMessages && len(msgs) > 0 {
 		for _, m := range msgs {
-			if _, err := tx.Exec(
+			if _, err := tx.ExecContext(ctx,
 				`INSERT INTO messages (id, session_id, agent_id, role, content, envelope, metadata, parent_id, is_compacted, created_at)
 				 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 				uuid.New().String(), newSess.ID, nullIfEmpty(m.AgentID), m.Role, m.Content,
@@ -807,7 +808,7 @@ func (s *Store) ForkSession(sourceID string, overrides *Session, copyMessages bo
 		}
 		// One UPDATE to set message_count to the actual copied count, avoiding
 		// N separate +1 updates.
-		if _, err := tx.Exec(
+		if _, err := tx.ExecContext(ctx,
 			`UPDATE sessions SET message_count = ?, last_activity = ?, updated_at = ? WHERE id = ?`,
 			len(msgs), now, now, newSess.ID,
 		); err != nil {
@@ -850,9 +851,9 @@ func forkSessionMetadata(sourceMetadata string, sourceID string, copyMessages bo
 // Returns an error if the source session exceeds the 10,000 message limit.
 // All inserts plus the final message_count update run inside a single
 // transaction, so a mid-copy failure leaves the target session unchanged.
-func (s *Store) CopyMessages(sourceSessionID, targetSessionID string) error {
+func (s *Store) CopyMessages(ctx context.Context, sourceSessionID, targetSessionID string) error {
 	const maxMessages = 10000
-	msgs, err := s.ListMessages(sourceSessionID, maxMessages)
+	msgs, err := s.ListMessages(ctx, sourceSessionID, maxMessages)
 	if err != nil {
 		return fmt.Errorf("list source messages: %w", err)
 	}
@@ -863,7 +864,7 @@ func (s *Store) CopyMessages(sourceSessionID, targetSessionID string) error {
 		return nil
 	}
 
-	tx, err := s.DB.Begin()
+	tx, err := s.DB.BeginTx(ctx, nil)
 	if err != nil {
 		return fmt.Errorf("begin copy tx: %w", err)
 	}
@@ -871,7 +872,7 @@ func (s *Store) CopyMessages(sourceSessionID, targetSessionID string) error {
 
 	now := time.Now().UTC().Format(time.RFC3339)
 	for _, m := range msgs {
-		if _, err := tx.Exec(
+		if _, err := tx.ExecContext(ctx,
 			`INSERT INTO messages (id, session_id, agent_id, role, content, envelope, metadata, parent_id, is_compacted, created_at)
 			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 			uuid.New().String(), targetSessionID, nullIfEmpty(m.AgentID), m.Role, m.Content,
@@ -881,7 +882,7 @@ func (s *Store) CopyMessages(sourceSessionID, targetSessionID string) error {
 		}
 	}
 
-	if _, err := tx.Exec(
+	if _, err := tx.ExecContext(ctx,
 		`UPDATE sessions SET message_count = message_count + ?, last_activity = ?, updated_at = ? WHERE id = ?`,
 		len(msgs), now, now, targetSessionID,
 	); err != nil {
@@ -907,7 +908,7 @@ type SearchResult struct {
 // Returns matches with surrounding snippet text. Optionally filters by
 // project. No longer workspace-scoped (Phase 0 item 20, retire workspaces
 // — there has only ever been one workspace in practice).
-func (s *Store) SearchMessages(query, projectID string, limit int) ([]SearchResult, error) {
+func (s *Store) SearchMessages(ctx context.Context, query, projectID string, limit int) ([]SearchResult, error) {
 	if limit <= 0 {
 		limit = 20
 	}
@@ -921,7 +922,7 @@ func (s *Store) SearchMessages(query, projectID string, limit int) ([]SearchResu
 	var err error
 
 	if projectID != "" {
-		rows, err = s.DB.Query(
+		rows, err = s.DB.QueryContext(ctx,
 			`SELECT m.id, m.session_id, m.role, m.content, m.created_at,
 			        COALESCE(s.title,''), s.short_code
 			 FROM messages m
@@ -933,7 +934,7 @@ func (s *Store) SearchMessages(query, projectID string, limit int) ([]SearchResu
 			projectID, likePattern, limit,
 		)
 	} else {
-		rows, err = s.DB.Query(
+		rows, err = s.DB.QueryContext(ctx,
 			`SELECT m.id, m.session_id, m.role, m.content, m.created_at,
 			        COALESCE(s.title,''), s.short_code
 			 FROM messages m

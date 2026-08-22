@@ -31,7 +31,7 @@ import (
 func TestFormatReflexReminder_ForceToolChoiceBug_ExactlyOneActionWins(t *testing.T) {
 	ctx := context.Background()
 	st := newTestStore(t)
-	if err := st.CreateAgent(&store.AgentProfile{
+	if err := st.CreateAgent(context.Background(), &store.AgentProfile{
 		ID:           "agent-force-tool-bug",
 		Name:         "Agent Force Tool Bug",
 		Slug:         "agent-force-tool-bug",
@@ -107,7 +107,7 @@ func TestFormatReflexReminder_ForceToolChoiceBug_ExactlyOneActionWins(t *testing
 func TestFormatReflexReminder_ForceToolChoiceBug_EqualPriority_EarlierCreatedAtWins(t *testing.T) {
 	ctx := context.Background()
 	st := newTestStore(t)
-	if err := st.CreateAgent(&store.AgentProfile{
+	if err := st.CreateAgent(context.Background(), &store.AgentProfile{
 		ID:           "agent-force-tool-tie",
 		Name:         "Agent Force Tool Tie",
 		Slug:         "agent-force-tool-tie",

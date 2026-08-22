@@ -168,7 +168,7 @@ func logReconciliation(deps *agent.Dependencies, row *agent.RuntimeRow, reason s
 	// ModeLongLived rows, or a scoped subagent/background run ID
 	// otherwise. event_log.session_id has no FK constraint, so this is
 	// always a safe, meaningful correlation key.
-	deps.Store.LogEvent(row.ID, "orphan_sweep_reconciled", "recovery", detail, string(blob))
+	deps.Store.LogEvent(context.TODO() /* TODO(ctx-sweep): no ctx available at this call site */, row.ID, "orphan_sweep_reconciled", "recovery", detail, string(blob))
 }
 
 // classifyForReconciliation is the pure decision function: given a row

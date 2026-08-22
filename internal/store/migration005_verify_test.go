@@ -14,7 +14,7 @@ func TestMigration005_MessagingSessionScoping(t *testing.T) {
 	if err != nil {
 		t.Fatalf("store.New failed: %v", err)
 	}
-	defer s.Close()
+	defer s.Close(context.Background())
 
 	db, err := sqlitekit.OpenSingle(context.Background(), dbPath, sqlitekit.OpenOptions{
 		Options: sqlitekit.WriterOptions(),

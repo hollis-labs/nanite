@@ -28,13 +28,13 @@ func TestWorkflowRun_LoopScope_RoundTrips(t *testing.T) {
 
 	// Plain run: both new fields left nil -- must persist and read back as
 	// NULL, the pre-existing shape every non-loop-launched run has today.
-	if err := s.CreateWorkflowRun(&WorkflowRunRow{
+	if err := s.CreateWorkflowRun(context.Background(), &WorkflowRunRow{
 		ID:             "run-loopscope-plain",
 		DefinitionName: "demo",
 	}); err != nil {
 		t.Fatalf("CreateWorkflowRun (plain): %v", err)
 	}
-	plain, err := s.GetWorkflowRun("run-loopscope-plain")
+	plain, err := s.GetWorkflowRun(context.Background(), "run-loopscope-plain")
 	if err != nil {
 		t.Fatalf("GetWorkflowRun (plain): %v", err)
 	}
@@ -50,7 +50,7 @@ func TestWorkflowRun_LoopScope_RoundTrips(t *testing.T) {
 	// values (even though no real caller does yet -- see this file's own
 	// doc comment).
 	iteration := 3
-	if err := s.CreateWorkflowRun(&WorkflowRunRow{
+	if err := s.CreateWorkflowRun(context.Background(), &WorkflowRunRow{
 		ID:             "run-loopscope-set",
 		DefinitionName: "demo",
 		LoopRunID:      &lr.ID,
@@ -58,7 +58,7 @@ func TestWorkflowRun_LoopScope_RoundTrips(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("CreateWorkflowRun (loop-scoped): %v", err)
 	}
-	scoped, err := s.GetWorkflowRun("run-loopscope-set")
+	scoped, err := s.GetWorkflowRun(context.Background(), "run-loopscope-set")
 	if err != nil {
 		t.Fatalf("GetWorkflowRun (loop-scoped): %v", err)
 	}
@@ -72,10 +72,10 @@ func TestWorkflowRun_LoopScope_RoundTrips(t *testing.T) {
 	// UpdateWorkflowRunLoopScope: the documented real call path (task 08's
 	// LoopEngine, after WorkflowLauncher.Launch returns) -- stamp an
 	// initially-unscoped row after the fact.
-	if err := s.UpdateWorkflowRunLoopScope("run-loopscope-plain", lr.ID, 7); err != nil {
+	if err := s.UpdateWorkflowRunLoopScope(context.Background(), "run-loopscope-plain", lr.ID, 7); err != nil {
 		t.Fatalf("UpdateWorkflowRunLoopScope: %v", err)
 	}
-	updated, err := s.GetWorkflowRun("run-loopscope-plain")
+	updated, err := s.GetWorkflowRun(context.Background(), "run-loopscope-plain")
 	if err != nil {
 		t.Fatalf("GetWorkflowRun after UpdateWorkflowRunLoopScope: %v", err)
 	}
@@ -86,11 +86,11 @@ func TestWorkflowRun_LoopScope_RoundTrips(t *testing.T) {
 		t.Errorf("updated.LoopIteration = %v, want 7", updated.LoopIteration)
 	}
 
-	if err := s.UpdateWorkflowRunLoopScope("missing-run", lr.ID, 1); !errors.Is(err, ErrWorkflowRunNotFound) {
+	if err := s.UpdateWorkflowRunLoopScope(context.Background(), "missing-run", lr.ID, 1); !errors.Is(err, ErrWorkflowRunNotFound) {
 		t.Errorf("UpdateWorkflowRunLoopScope(missing-run) = %v, want ErrWorkflowRunNotFound", err)
 	}
 
-	if err := s.UpdateWorkflowRunLoopScope("run-loopscope-plain", "", 1); err == nil {
+	if err := s.UpdateWorkflowRunLoopScope(context.Background(), "run-loopscope-plain", "", 1); err == nil {
 		t.Fatal("UpdateWorkflowRunLoopScope(empty loop_run_id) = nil error, want an error")
 	}
 }

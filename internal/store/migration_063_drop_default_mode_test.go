@@ -27,9 +27,11 @@ func TestMigration063_DropsDefaultModeColumn(t *testing.T) {
 	if err != nil {
 		t.Fatalf("store.New: %v", err)
 	}
-	defer s.Close()
+	defer s.Close(context.
 
-	// Verify the column is gone. PRAGMA table_info returns one row per column.
+		// Verify the column is gone. PRAGMA table_info returns one row per column.
+		Background())
+
 	rows, err := s.DB.Query(`PRAGMA table_info(agent_profiles)`)
 	if err != nil {
 		t.Fatalf("PRAGMA table_info: %v", err)
@@ -64,7 +66,7 @@ func TestMigration063_DropsDefaultModeColumn(t *testing.T) {
 	// for older versions; a buggy drop would lose rows.
 	canonical := []string{"default", "worker", "planner", "hint-selector"}
 	for _, slug := range canonical {
-		got, err := s.GetAgentBySlug(slug)
+		got, err := s.GetAgentBySlug(context.Background(), slug)
 		if err != nil {
 			t.Fatalf("post-063 GetAgentBySlug %q: %v (DROP COLUMN may have scrambled data)", slug, err)
 		}
@@ -86,10 +88,10 @@ func TestMigration063_DropsDefaultModeColumn(t *testing.T) {
 		SystemPrompt: "test agent",
 		Source:       "user",
 	}
-	if err := s.CreateAgent(fresh); err != nil {
+	if err := s.CreateAgent(context.Background(), fresh); err != nil {
 		t.Fatalf("CreateAgent on post-063 schema: %v", err)
 	}
-	got, err := s.GetAgentBySlug("round-trip-063")
+	got, err := s.GetAgentBySlug(context.Background(), "round-trip-063")
 	if err != nil {
 		t.Fatalf("GetAgentBySlug round-trip-063: %v", err)
 	}

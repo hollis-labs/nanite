@@ -86,7 +86,7 @@ func (s *todoServiceImpl) CreateTodo(_ context.Context, t *store.Todo) error {
 	}
 	// Validate parent exists if specified.
 	if t.ParentID != "" {
-		parent, err := s.todos.GetTodo(t.ParentID)
+		parent, err := s.todos.GetTodo(context.TODO() /* TODO(ctx-sweep): no ctx available at this call site */, t.ParentID)
 		if err != nil {
 			return fmt.Errorf("parent_id %q not found: %w", t.ParentID, err)
 		}
@@ -95,19 +95,19 @@ func (s *todoServiceImpl) CreateTodo(_ context.Context, t *store.Todo) error {
 			return fmt.Errorf("parent todo must be in the same scope")
 		}
 	}
-	return s.todos.CreateTodo(t)
+	return s.todos.CreateTodo(context.TODO() /* TODO(ctx-sweep): no ctx available at this call site */, t)
 }
 
 func (s *todoServiceImpl) GetTodo(_ context.Context, id string) (*store.Todo, error) {
-	return s.todos.GetTodo(id)
+	return s.todos.GetTodo(context.TODO() /* TODO(ctx-sweep): no ctx available at this call site */, id)
 }
 
 func (s *todoServiceImpl) ListTodos(_ context.Context, f store.TodoFilter) ([]store.Todo, error) {
-	return s.todos.ListTodos(f)
+	return s.todos.ListTodos(context.TODO() /* TODO(ctx-sweep): no ctx available at this call site */, f)
 }
 
 func (s *todoServiceImpl) UpdateTodo(_ context.Context, id string, updates TodoUpdates) (*store.Todo, error) {
-	existing, err := s.todos.GetTodo(id)
+	existing, err := s.todos.GetTodo(context.TODO() /* TODO(ctx-sweep): no ctx available at this call site */, id)
 	if err != nil {
 		return nil, fmt.Errorf("todo not found: %w", err)
 	}
@@ -135,7 +135,7 @@ func (s *todoServiceImpl) UpdateTodo(_ context.Context, id string, updates TodoU
 	if updates.Metadata != nil {
 		existing.Metadata = *updates.Metadata
 	}
-	if err := s.todos.UpdateTodo(existing); err != nil {
+	if err := s.todos.UpdateTodo(context.TODO() /* TODO(ctx-sweep): no ctx available at this call site */, existing); err != nil {
 		return nil, err
 	}
 	return existing, nil
@@ -156,18 +156,18 @@ func (s *todoServiceImpl) UpdateTodoScope(_ context.Context, id, scope, scopeID,
 	if scope == store.TodoScopeProject && scopeID == "" {
 		scopeID = projectID
 	}
-	if err := s.todos.UpdateTodoScope(id, scope, scopeID, projectID); err != nil {
+	if err := s.todos.UpdateTodoScope(context.TODO() /* TODO(ctx-sweep): no ctx available at this call site */, id, scope, scopeID, projectID); err != nil {
 		return nil, err
 	}
-	return s.todos.GetTodo(id)
+	return s.todos.GetTodo(context.TODO() /* TODO(ctx-sweep): no ctx available at this call site */, id)
 }
 
 func (s *todoServiceImpl) DeleteTodo(_ context.Context, id string) error {
-	return s.todos.DeleteTodo(id)
+	return s.todos.DeleteTodo(context.TODO() /* TODO(ctx-sweep): no ctx available at this call site */, id)
 }
 
 func (s *todoServiceImpl) ListTodoChildren(_ context.Context, parentID string) ([]store.Todo, error) {
-	return s.todos.ListTodoChildren(parentID)
+	return s.todos.ListTodoChildren(context.TODO() /* TODO(ctx-sweep): no ctx available at this call site */, parentID)
 }
 
 // --- Plan operations ---
@@ -185,19 +185,19 @@ func (s *todoServiceImpl) CreatePlan(_ context.Context, p *store.Plan) error {
 	if p.Scope != "workspace" && p.ScopeID == "" {
 		return fmt.Errorf("scope_id is required for scope %q", p.Scope)
 	}
-	return s.plans.CreatePlan(p)
+	return s.plans.CreatePlan(context.TODO() /* TODO(ctx-sweep): no ctx available at this call site */, p)
 }
 
 func (s *todoServiceImpl) GetPlan(_ context.Context, id string) (*store.Plan, error) {
-	return s.plans.GetPlan(id)
+	return s.plans.GetPlan(context.TODO() /* TODO(ctx-sweep): no ctx available at this call site */, id)
 }
 
 func (s *todoServiceImpl) ListPlans(_ context.Context, f store.PlanFilter) ([]store.Plan, error) {
-	return s.plans.ListPlans(f)
+	return s.plans.ListPlans(context.TODO() /* TODO(ctx-sweep): no ctx available at this call site */, f)
 }
 
 func (s *todoServiceImpl) UpdatePlan(_ context.Context, id string, updates PlanUpdates) (*store.Plan, error) {
-	existing, err := s.plans.GetPlan(id)
+	existing, err := s.plans.GetPlan(context.TODO() /* TODO(ctx-sweep): no ctx available at this call site */, id)
 	if err != nil {
 		return nil, fmt.Errorf("plan not found: %w", err)
 	}
@@ -219,23 +219,25 @@ func (s *todoServiceImpl) UpdatePlan(_ context.Context, id string, updates PlanU
 	if updates.Metadata != nil {
 		existing.Metadata = *updates.Metadata
 	}
-	if err := s.plans.UpdatePlan(existing); err != nil {
+	if err := s.plans.UpdatePlan(context.TODO() /* TODO(ctx-sweep): no ctx available at this call site */, existing); err != nil {
 		return nil, err
 	}
 	return existing, nil
 }
 
 func (s *todoServiceImpl) UpdatePlanStep(_ context.Context, planID, stepID string, updates store.PlanStep) error {
-	return s.plans.UpdatePlanStep(planID, stepID, updates)
+	return s.plans.UpdatePlanStep(context.TODO() /* TODO(ctx-sweep): no ctx available at this call site */, planID, stepID, updates)
 }
 
 func (s *todoServiceImpl) DeletePlan(_ context.Context, id string) error {
-	return s.plans.DeletePlan(id)
+	return s.plans.DeletePlan(context.
+
+		// ApprovePlan transitions a plan from proposed to approved and optionally creates todos from steps.
+		TODO(), id)
 }
 
-// ApprovePlan transitions a plan from proposed to approved and optionally creates todos from steps.
 func (s *todoServiceImpl) ApprovePlan(_ context.Context, id string, createTodos bool) (*store.Plan, error) {
-	plan, err := s.plans.GetPlan(id)
+	plan, err := s.plans.GetPlan(context.TODO() /* TODO(ctx-sweep): no ctx available at this call site */, id)
 	if err != nil {
 		return nil, fmt.Errorf("plan not found: %w", err)
 	}
@@ -261,7 +263,7 @@ func (s *todoServiceImpl) ApprovePlan(_ context.Context, id string, createTodos 
 				Description: step.Acceptance,
 				CreatedBy:   plan.CreatedBy,
 			}
-			if err := s.todos.CreateTodo(todo); err != nil {
+			if err := s.todos.CreateTodo(context.TODO() /* TODO(ctx-sweep): no ctx available at this call site */, todo); err != nil {
 				return nil, fmt.Errorf("create todo for step %s: %w", step.ID, err)
 			}
 			steps[i].TodoID = todo.ID
@@ -271,7 +273,7 @@ func (s *todoServiceImpl) ApprovePlan(_ context.Context, id string, createTodos 
 		}
 	}
 
-	if err := s.plans.UpdatePlan(plan); err != nil {
+	if err := s.plans.UpdatePlan(context.TODO() /* TODO(ctx-sweep): no ctx available at this call site */, plan); err != nil {
 		return nil, err
 	}
 	return plan, nil
@@ -303,4 +305,3 @@ func validPriority(s string) bool {
 func validPlanStatus(s string) bool {
 	return s == "proposed" || s == "approved" || s == "in_progress" || s == "complete" || s == "abandoned"
 }
-

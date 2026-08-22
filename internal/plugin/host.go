@@ -663,7 +663,7 @@ func (h *Host) GetConfig(key string) (string, error) {
 
 	// Try DB (if store is available).
 	if s != nil && id != "" {
-		if val, err := s.GetPluginSettingValue(id, key); err == nil && val != "" {
+		if val, err := s.GetPluginSettingValue(context.TODO() /* TODO(ctx-sweep): no ctx available at this call site */, id, key); err == nil && val != "" {
 			return val, nil
 		}
 	}
@@ -690,7 +690,7 @@ func (h *Host) SetConfig(key string, value string) error {
 	}
 
 	// Read existing settings, merge, write back.
-	existing, err := s.GetPluginSettings(id)
+	existing, err := s.GetPluginSettings(context.TODO() /* TODO(ctx-sweep): no ctx available at this call site */, id)
 	settings := make(map[string]any)
 	if err == nil && existing != nil {
 		settings = existing.Settings
@@ -699,7 +699,7 @@ func (h *Host) SetConfig(key string, value string) error {
 		settings = make(map[string]any)
 	}
 	settings[key] = value
-	if err := s.UpsertPluginSettings(id, settings); err != nil {
+	if err := s.UpsertPluginSettings(context.TODO() /* TODO(ctx-sweep): no ctx available at this call site */, id, settings); err != nil {
 		return err
 	}
 
@@ -739,7 +739,7 @@ func (h *Host) RegisterConfigSchema(fields []plugin.ConfigFieldDef) error {
 			Component:   f.Component,
 		}
 	}
-	if err := s.UpsertPluginSchema(id, storeFields); err != nil {
+	if err := s.UpsertPluginSchema(context.TODO() /* TODO(ctx-sweep): no ctx available at this call site */, id, storeFields); err != nil {
 		return err
 	}
 	// Record that this plugin has a persisted config schema so UnloadPlugin
@@ -1173,7 +1173,7 @@ func (h *Host) PlaceArtifact(sessionID, messageID, name, mimeType, storagePath s
 		Origin:         store.ArtifactOriginPlaced,
 		SourcePluginID: pluginID,
 	}
-	return s.CreateArtifact(artifact)
+	return s.CreateArtifact(context.TODO() /* TODO(ctx-sweep): no ctx available at this call site */, artifact)
 }
 
 // LoadPlugin loads a plugin into the host.
@@ -1557,7 +1557,7 @@ func (h *Host) UnloadPlugin(id string) error {
 	// own DB I/O; absent store (CLI host with no store) is fine — the
 	// configSchemaOwners side map was never populated either.
 	if clearSchemaPluginID != "" && storeRef != nil {
-		if err := storeRef.ClearPluginSchema(clearSchemaPluginID); err != nil {
+		if err := storeRef.ClearPluginSchema(context.TODO() /* TODO(ctx-sweep): no ctx available at this call site */, clearSchemaPluginID); err != nil {
 			h.logger.Warn("plugin unload: clear config schema failed", "plugin", id, "error", err)
 		} else {
 			h.logger.Debug("plugin unload: cleared config schema", "plugin", id)

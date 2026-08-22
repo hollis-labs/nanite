@@ -49,7 +49,7 @@ type eventLogCall struct {
 	metadata  string
 }
 
-func (l *stubEventLogger) LogEvent(sessionID, eventType, category, detail, metadata string) {
+func (l *stubEventLogger) LogEvent(ctx context.Context, sessionID, eventType, category, detail, metadata string) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	l.calls = append(l.calls, eventLogCall{sessionID, eventType, category, detail, metadata})

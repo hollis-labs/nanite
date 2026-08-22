@@ -572,7 +572,7 @@ func (e *LoopEngine) launchIteration(ctx context.Context, lr *store.LoopRun, def
 	if launchResult == nil || launchResult.RunID == "" {
 		return nil, nil, fmt.Errorf("loop: launch iteration %d: launcher returned no run id", iterationNumber)
 	}
-	if err := e.store.UpdateWorkflowRunLoopScope(launchResult.RunID, lr.ID, iterationNumber); err != nil {
+	if err := e.store.UpdateWorkflowRunLoopScope(ctx, launchResult.RunID, lr.ID, iterationNumber); err != nil {
 		return nil, launchResult, fmt.Errorf("loop: scope workflow run %s to loop_run %s: %w", launchResult.RunID, lr.ID, err)
 	}
 
@@ -635,7 +635,8 @@ func (e *LoopEngine) evaluateDecideAndAct(
 		return LoopResult{}, true, priorHistory, fmt.Errorf("loop: decide iteration %d: %w", iterRow.IterationNumber, err)
 	}
 
-	if err := e.store.CompleteLoopRunIteration(ctx, iterRow.ID, launchResult.RunID, string(decision.Kind), progressState, evaluation); err != nil {
+	// Outcome bookkeeping must survive cancellation of the loop iteration it records.
+	if err := e.store.CompleteLoopRunIteration(context.WithoutCancel(ctx), iterRow.ID, launchResult.RunID, string(decision.Kind), progressState, evaluation); err != nil {
 		return LoopResult{}, true, priorHistory, fmt.Errorf("loop: complete loop_run_iteration %d: %w", iterRow.IterationNumber, err)
 	}
 	thisIteration.Decision = string(decision.Kind)
@@ -772,7 +773,7 @@ func (e *LoopEngine) resumeBlockedIteration(ctx context.Context, lr *store.LoopR
 		return LoopResult{}, fmt.Errorf("loop: resume %s: status is %q but the most recent iteration %d is not a genuinely in-flight workflow run", lr.ID, lr.Status, last.IterationNumber)
 	}
 
-	runRow, err := e.store.GetWorkflowRun(last.WorkflowRunID)
+	runRow, err := e.store.GetWorkflowRun(ctx, last.WorkflowRunID)
 	if err != nil {
 		return LoopResult{}, fmt.Errorf("loop: resume %s: load workflow run %s: %w", lr.ID, last.WorkflowRunID, err)
 	}

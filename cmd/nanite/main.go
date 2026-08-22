@@ -179,13 +179,13 @@ func cmdServe(args []string) {
 	if err != nil {
 		slogx.Fatal("failed to open store", "err", err)
 	}
-	defer s.Close()
+	defer s.Close(otelCtx)
 
 	// Seed default data.
-	if err := s.Seed(); err != nil {
+	if err := s.Seed(otelCtx); err != nil {
 		slogx.Fatal("failed to seed database", "err", err)
 	}
-	if err := s.SeedProviders(); err != nil {
+	if err := s.SeedProviders(otelCtx); err != nil {
 		slogx.Fatal("failed to seed providers", "err", err)
 	}
 
@@ -239,7 +239,7 @@ func cmdServe(args []string) {
 	// envelope validator — acceptable because this is a developer-tooling
 	// knob, not a runtime-tunable behavior.
 	envelopeValidatorDevMode := false
-	if settings, err := s.GetUserSettings(); err != nil {
+	if settings, err := s.GetUserSettings(envelopeCtx); err != nil {
 		slog.Warn("envelope validator dev mode: failed to read user settings at startup; defaulting to production-strict", "error", err)
 	} else {
 		envelopeValidatorDevMode = settings.DeveloperMode
@@ -274,12 +274,12 @@ func cmdServe(args []string) {
 	// crashing — the chat-service config still validates each utility call
 	// site individually.
 	utilityProvider, utilityModel := "", ""
-	if settings, err := s.GetUserSettings(); err == nil {
+	if settings, err := s.GetUserSettings(envelopeCtx); err == nil {
 		utilityProvider = settings.UtilityProvider
 		utilityModel = settings.UtilityModel
 	}
 	if utilityProvider == "" || utilityModel == "" {
-		if rp, rm, err := s.ResolveProviderAndModel(utilityProvider, utilityModel); err == nil {
+		if rp, rm, err := s.ResolveProviderAndModel(envelopeCtx, utilityProvider, utilityModel); err == nil {
 			utilityProvider = rp
 			utilityModel = rm
 		}
@@ -1293,7 +1293,7 @@ func discoverAndLoadPlugins(pluginHost *plugin.Host, mcpManager *mcp.Manager, s 
 // loadPersistedMCPServers loads user-configured MCP servers from the database
 // and registers them with the MCP manager.
 func loadPersistedMCPServers(s *store.Store, m *mcp.Manager) {
-	servers, err := s.ListMCPServers()
+	servers, err := s.ListMCPServers(context.TODO() /* TODO(ctx-sweep): no ctx available at this call site */)
 	if err != nil {
 		slog.Warn("failed to load persisted MCP servers", "err", err)
 		return
@@ -1430,7 +1430,7 @@ func cmdMCPServe(args []string) {
 		fmt.Fprintf(os.Stderr, "%s mcp: open db: %v\n", brand.BinaryName, err)
 		os.Exit(1)
 	}
-	defer s.Close()
+	defer s.Close(context.TODO() /* TODO(ctx-sweep): no ctx available at this call site */)
 
 	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGTERM, syscall.SIGINT)
 	defer cancel()

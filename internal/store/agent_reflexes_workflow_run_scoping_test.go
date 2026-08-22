@@ -16,12 +16,12 @@ import (
 // ListAgentReflexesForWorkflowRun exactly as inserted, and that the
 // pre-existing "global" shape (WorkflowRunID left empty) is unchanged —
 // InsertAgentReflex's nullIfEmpty(row.WorkflowRunID) persists NULL, and
-// scanAgentReflex's COALESCE(workflow_run_id,'') reads it back as "".
+// scanAgentReflex's COALESCE(workflow_run_id,”) reads it back as "".
 func TestAgentReflex_WorkflowRunID_RoundTrips(t *testing.T) {
 	ctx := context.Background()
 	s := newTestStore(t)
 
-	if err := s.CreateAgent(&AgentProfile{
+	if err := s.CreateAgent(context.Background(), &AgentProfile{
 		ID:           "agent-wfr-roundtrip",
 		Name:         "Agent WFR Roundtrip",
 		Slug:         "agent-wfr-roundtrip",

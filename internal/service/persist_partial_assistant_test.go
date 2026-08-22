@@ -35,18 +35,18 @@ type capturingStore struct {
 	activeRunFn func(parentSessionID string) (id, role, child string, ok bool, err error)
 }
 
-func (c *capturingStore) CreateMessage(msg *store.Message) error {
+func (c *capturingStore) CreateMessage(ctx context.Context, msg *store.Message) error {
 	c.lastMsg = msg
 	c.callCount++
 	return nil
 }
 
-func (c *capturingStore) ActiveSubagentRunForParent(parentSessionID string) (id, role, child string, ok bool, err error) {
+func (c *capturingStore) ActiveSubagentRunForParent(ctx context.Context, parentSessionID string) (id, role, child string, ok bool, err error) {
 	c.lookupCallCount++
 	if c.activeRunFn != nil {
 		return c.activeRunFn(parentSessionID)
 	}
-	return c.minimalStore.ActiveSubagentRunForParent(parentSessionID)
+	return c.minimalStore.ActiveSubagentRunForParent(context.Background(), parentSessionID)
 }
 
 // TestPersistPartialAssistant_StoresRow verifies that persistPartialAssistant
@@ -130,10 +130,10 @@ func TestF4Persistence_NarrationInMetadataThinking(t *testing.T) {
 	if err != nil {
 		t.Fatalf("store.New: %v", err)
 	}
-	t.Cleanup(func() { s.Close() })
+	t.Cleanup(func() { s.Close(context.Background()) })
 
 	sess := &store.Session{ID: "sess-f4", Status: "active"}
-	if err := s.CreateSession(sess); err != nil {
+	if err := s.CreateSession(context.Background(), sess); err != nil {
 		t.Fatalf("CreateSession: %v", err)
 	}
 
@@ -154,12 +154,12 @@ func TestF4Persistence_NarrationInMetadataThinking(t *testing.T) {
 		Content:   finalText,
 		Metadata:  string(metaJSON),
 	}
-	if err := s.CreateMessage(msg); err != nil {
+	if err := s.CreateMessage(context.Background(), msg); err != nil {
 		t.Fatalf("CreateMessage: %v", err)
 	}
 
 	// Read it back and verify both fields.
-	got, err := s.GetMessage("msg-f4")
+	got, err := s.GetMessage(context.Background(), "msg-f4")
 	if err != nil {
 		t.Fatalf("GetMessage: %v", err)
 	}
@@ -186,11 +186,15 @@ func TestPersistPartialAssistant_RealStore(t *testing.T) {
 	if err != nil {
 		t.Fatalf("store.New: %v", err)
 	}
-	t.Cleanup(func() { s.Close() })
+	t.Cleanup(func() {
+		s.Close(context.
 
-	// Create a session so the FK constraint in CreateMessage succeeds.
+			// Create a session so the FK constraint in CreateMessage succeeds.
+			Background())
+	})
+
 	sess := &store.Session{ID: "test-session", Status: "active"}
-	if err := s.CreateSession(sess); err != nil {
+	if err := s.CreateSession(context.Background(), sess); err != nil {
 		t.Fatalf("CreateSession: %v", err)
 	}
 
@@ -199,7 +203,7 @@ func TestPersistPartialAssistant_RealStore(t *testing.T) {
 	svc.persistPartialAssistant("test-session", msgID, "test-agent", "hello from error path")
 
 	// Verify row exists and has had_error metadata.
-	msg, err := s.GetMessage(msgID)
+	msg, err := s.GetMessage(context.Background(), msgID)
 	if err != nil {
 		t.Fatalf("GetMessage: %v — row was not persisted", err)
 	}
@@ -495,10 +499,10 @@ func TestPersistPartialAssistantCancelled_RealStore(t *testing.T) {
 	if err != nil {
 		t.Fatalf("store.New: %v", err)
 	}
-	t.Cleanup(func() { s.Close() })
+	t.Cleanup(func() { s.Close(context.Background()) })
 
 	sess := &store.Session{ID: "test-session", Status: "active"}
-	if err := s.CreateSession(sess); err != nil {
+	if err := s.CreateSession(context.Background(), sess); err != nil {
 		t.Fatalf("CreateSession: %v", err)
 	}
 
@@ -506,7 +510,7 @@ func TestPersistPartialAssistantCancelled_RealStore(t *testing.T) {
 	const msgID = "test-msg-cancel"
 	svc.persistPartialAssistantCancelled("test-session", msgID, "test-agent", "hello from cancel path")
 
-	msg, err := s.GetMessage(msgID)
+	msg, err := s.GetMessage(context.Background(), msgID)
 	if err != nil {
 		t.Fatalf("GetMessage: %v — cancel-path row was not persisted", err)
 	}

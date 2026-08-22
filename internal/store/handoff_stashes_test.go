@@ -1,6 +1,7 @@
 package store
 
 import (
+	"context"
 	"errors"
 	"testing"
 
@@ -18,11 +19,11 @@ func TestHandoffStash_UpsertAndGet(t *testing.T) {
 		CreatedAt: "2026-04-20T10:00:00Z",
 	}
 
-	if err := s.UpsertHandoffStash(stash); err != nil {
+	if err := s.UpsertHandoffStash(context.Background(), stash); err != nil {
 		t.Fatalf("upsert: %v", err)
 	}
 
-	got, err := s.GetHandoffStash(stash.SessionID, stash.ID)
+	got, err := s.GetHandoffStash(context.Background(), stash.SessionID, stash.ID)
 	if err != nil {
 		t.Fatalf("get: %v", err)
 	}
@@ -49,14 +50,14 @@ func TestHandoffStash_Upsert_UpdatesPayload(t *testing.T) {
 		Payload:   `{"decisions_locked":["v2"],"open_questions":[],"active_file_refs":[],"active_ticket_ids":[],"should_reread":[]}`,
 		CreatedAt: "2026-04-20T11:00:00Z"}
 
-	if err := s.UpsertHandoffStash(first); err != nil {
+	if err := s.UpsertHandoffStash(context.Background(), first); err != nil {
 		t.Fatalf("first upsert: %v", err)
 	}
-	if err := s.UpsertHandoffStash(second); err != nil {
+	if err := s.UpsertHandoffStash(context.Background(), second); err != nil {
 		t.Fatalf("second upsert: %v", err)
 	}
 
-	got, err := s.GetHandoffStash(sess.ID, id)
+	got, err := s.GetHandoffStash(context.Background(), sess.ID, id)
 	if err != nil {
 		t.Fatalf("get: %v", err)
 	}
@@ -76,14 +77,14 @@ func TestHandoffStash_GetLatestStashForSession(t *testing.T) {
 		Payload:   `{"decisions_locked":["newer"],"open_questions":[],"active_file_refs":[],"active_ticket_ids":[],"should_reread":[]}`,
 		CreatedAt: "2026-04-20T11:00:00Z"}
 
-	if err := s.UpsertHandoffStash(older); err != nil {
+	if err := s.UpsertHandoffStash(context.Background(), older); err != nil {
 		t.Fatalf("upsert older: %v", err)
 	}
-	if err := s.UpsertHandoffStash(newer); err != nil {
+	if err := s.UpsertHandoffStash(context.Background(), newer); err != nil {
 		t.Fatalf("upsert newer: %v", err)
 	}
 
-	got, err := s.GetLatestStashForSession(sess.ID)
+	got, err := s.GetLatestStashForSession(context.Background(), sess.ID)
 	if err != nil {
 		t.Fatalf("get latest: %v", err)
 	}
@@ -94,7 +95,7 @@ func TestHandoffStash_GetLatestStashForSession(t *testing.T) {
 
 func TestHandoffStash_GetNotFound(t *testing.T) {
 	s := newTestStore(t)
-	_, err := s.GetHandoffStash("no-such-session", "no-such-id")
+	_, err := s.GetHandoffStash(context.Background(), "no-such-session", "no-such-id")
 	if !errors.Is(err, ErrHandoffStashNotFound) {
 		t.Errorf("expected ErrHandoffStashNotFound, got %v", err)
 	}
@@ -102,7 +103,7 @@ func TestHandoffStash_GetNotFound(t *testing.T) {
 
 func TestHandoffStash_GetLatestNotFound(t *testing.T) {
 	s := newTestStore(t)
-	_, err := s.GetLatestStashForSession("empty-session")
+	_, err := s.GetLatestStashForSession(context.Background(), "empty-session")
 	if !errors.Is(err, ErrHandoffStashNotFound) {
 		t.Errorf("expected ErrHandoffStashNotFound, got %v", err)
 	}
@@ -110,7 +111,7 @@ func TestHandoffStash_GetLatestNotFound(t *testing.T) {
 
 func TestHandoffStash_Upsert_EmptyID(t *testing.T) {
 	s := newTestStore(t)
-	err := s.UpsertHandoffStash(HandoffStash{
+	err := s.UpsertHandoffStash(context.Background(), HandoffStash{
 		ID: "", SessionID: "sess-x",
 		Payload:   "{}",
 		CreatedAt: "2026-04-20T00:00:00Z",
@@ -122,7 +123,7 @@ func TestHandoffStash_Upsert_EmptyID(t *testing.T) {
 
 func TestHandoffStash_Upsert_EmptySessionID(t *testing.T) {
 	s := newTestStore(t)
-	err := s.UpsertHandoffStash(HandoffStash{
+	err := s.UpsertHandoffStash(context.Background(), HandoffStash{
 		ID: "some-id", SessionID: "",
 		Payload:   "{}",
 		CreatedAt: "2026-04-20T00:00:00Z",

@@ -18,11 +18,11 @@ import (
 func TestAssembleSlotSources_PermissionsSlot_EmptyWhenNothingConfigured(t *testing.T) {
 	cb, s := newTestBroker(t)
 	sess := &store.Session{}
-	if err := s.CreateSession(sess); err != nil {
+	if err := s.CreateSession(context.Background(), sess); err != nil {
 		t.Fatalf("CreateSession: %v", err)
 	}
 	agent := &store.AgentProfile{Name: "T", Slug: "test"}
-	if err := s.CreateAgent(agent); err != nil {
+	if err := s.CreateAgent(context.Background(), agent); err != nil {
 		t.Fatalf("CreateAgent: %v", err)
 	}
 
@@ -47,7 +47,7 @@ func TestAssembleSlotSources_PermissionsSlot_BinaryAllowList(t *testing.T) {
 	}
 
 	sess := &store.Session{}
-	if err := s.CreateSession(sess); err != nil {
+	if err := s.CreateSession(context.Background(), sess); err != nil {
 		t.Fatalf("CreateSession: %v", err)
 	}
 	// Slug intentionally empty: this test exercises the GENERIC scope-qualifier
@@ -55,7 +55,7 @@ func TestAssembleSlotSources_PermissionsSlot_BinaryAllowList(t *testing.T) {
 	// "default" itself would now collide with the seed row from migration 060
 	// (CW-20260512-0111, internal profiles file source-of-truth).
 	agent := &store.AgentProfile{Name: "default"}
-	if err := s.CreateAgent(agent); err != nil {
+	if err := s.CreateAgent(context.Background(), agent); err != nil {
 		t.Fatalf("CreateAgent: %v", err)
 	}
 
@@ -88,11 +88,11 @@ func TestAssembleSlotSources_PermissionsSlot_SubagentScope(t *testing.T) {
 	cb.DevToolsAllowedPaths = []string{"/Users/u/Projects-apps/nanite"}
 
 	sess := &store.Session{}
-	if err := s.CreateSession(sess); err != nil {
+	if err := s.CreateSession(context.Background(), sess); err != nil {
 		t.Fatalf("CreateSession: %v", err)
 	}
 	agent := &store.AgentProfile{Name: "researcher", Slug: "researcher-test"}
-	if err := s.CreateAgent(agent); err != nil {
+	if err := s.CreateAgent(context.Background(), agent); err != nil {
 		t.Fatalf("CreateAgent: %v", err)
 	}
 
@@ -113,14 +113,14 @@ func TestAssembleSlotSources_PermissionsSlot_SessionGrants(t *testing.T) {
 	cb.PathGrants = permission.NewPathGrants()
 
 	sess := &store.Session{}
-	if err := s.CreateSession(sess); err != nil {
+	if err := s.CreateSession(context.Background(), sess); err != nil {
 		t.Fatalf("CreateSession: %v", err)
 	}
 	// Empty Slug avoids the migration-060 seed-row UNIQUE collision (see
 	// BinaryAllowList test above); behaviorally identical to slug "default"
 	// for the renderer's generic-phrasing branch.
 	agent := &store.AgentProfile{Name: "default"}
-	if err := s.CreateAgent(agent); err != nil {
+	if err := s.CreateAgent(context.Background(), agent); err != nil {
 		t.Fatalf("CreateAgent: %v", err)
 	}
 
@@ -149,15 +149,15 @@ func TestAssembleSlotSources_PermissionsSlot_LineageGrants(t *testing.T) {
 	cb.PathGrants = permission.NewPathGrants()
 
 	parentSess := &store.Session{}
-	if err := s.CreateSession(parentSess); err != nil {
+	if err := s.CreateSession(context.Background(), parentSess); err != nil {
 		t.Fatalf("CreateSession parent: %v", err)
 	}
 	childSess := &store.Session{}
-	if err := s.CreateSession(childSess); err != nil {
+	if err := s.CreateSession(context.Background(), childSess); err != nil {
 		t.Fatalf("CreateSession child: %v", err)
 	}
 	agent := &store.AgentProfile{Name: "researcher", Slug: "researcher-test"}
-	if err := s.CreateAgent(agent); err != nil {
+	if err := s.CreateAgent(context.Background(), agent); err != nil {
 		t.Fatalf("CreateAgent: %v", err)
 	}
 
@@ -207,15 +207,15 @@ func TestAssembleSlotSources_PermissionsSlot_c160_RegressionRepro(t *testing.T) 
 	cb.DevToolsAllowedPaths = []string{"/Users/u/Projects-apps/nanite"}
 
 	parentSess := &store.Session{}
-	if err := s.CreateSession(parentSess); err != nil {
+	if err := s.CreateSession(context.Background(), parentSess); err != nil {
 		t.Fatalf("CreateSession parent: %v", err)
 	}
 	childSess := &store.Session{}
-	if err := s.CreateSession(childSess); err != nil {
+	if err := s.CreateSession(context.Background(), childSess); err != nil {
 		t.Fatalf("CreateSession child: %v", err)
 	}
 	researcher := &store.AgentProfile{Name: "researcher", Slug: "researcher-test"}
-	if err := s.CreateAgent(researcher); err != nil {
+	if err := s.CreateAgent(context.Background(), researcher); err != nil {
 		t.Fatalf("CreateAgent: %v", err)
 	}
 
@@ -283,11 +283,11 @@ func TestAssembleSlotSources_PermissionsSlot_W3ForwardedDeniesRendered(t *testin
 	cb.PathGrants = permission.NewPathGrants()
 
 	childSess := &store.Session{}
-	if err := s.CreateSession(childSess); err != nil {
+	if err := s.CreateSession(context.Background(), childSess); err != nil {
 		t.Fatalf("CreateSession: %v", err)
 	}
 	researcher := &store.AgentProfile{Name: "researcher", Slug: "researcher-test"}
-	if err := s.CreateAgent(researcher); err != nil {
+	if err := s.CreateAgent(context.Background(), researcher); err != nil {
 		t.Fatalf("CreateAgent: %v", err)
 	}
 
@@ -343,13 +343,13 @@ func TestAssembleSlotSources_PermissionsSlot_DeterministicAcrossTurns(t *testing
 	cb.PathGrants = permission.NewPathGrants()
 
 	sess := &store.Session{}
-	if err := s.CreateSession(sess); err != nil {
+	if err := s.CreateSession(context.Background(), sess); err != nil {
 		t.Fatalf("CreateSession: %v", err)
 	}
 	// Empty Slug — same reason as BinaryAllowList test (migration-060 seed
 	// collision with slug "default"). Generic-phrasing branch still fires.
 	agent := &store.AgentProfile{Name: "default"}
-	if err := s.CreateAgent(agent); err != nil {
+	if err := s.CreateAgent(context.Background(), agent); err != nil {
 		t.Fatalf("CreateAgent: %v", err)
 	}
 	cb.PathGrants.RegisterFromUserMessage(sess.ID, "look at /tmp/some/path.go")

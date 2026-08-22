@@ -17,7 +17,7 @@ import (
 // handleListRoles returns all roles.
 // GET /api/roles
 func (a *API) handleListRoles(w http.ResponseWriter, r *http.Request) {
-	roles, err := a.Services.Store.ListRoles()
+	roles, err := a.Services.Store.ListRoles(r.Context())
 	if err != nil {
 		a.errorResp(w, http.StatusInternalServerError, err.Error())
 		return
@@ -49,7 +49,7 @@ func (a *API) handleCreateRole(w http.ResponseWriter, r *http.Request) {
 		DefaultSkills:      req.DefaultSkills,
 		DefaultPermissions: req.DefaultPermissions,
 	}
-	if err := a.Services.Store.CreateRole(role); err != nil {
+	if err := a.Services.Store.CreateRole(r.Context(), role); err != nil {
 		a.errorResp(w, http.StatusInternalServerError, err.Error())
 		return
 	}
@@ -60,7 +60,7 @@ func (a *API) handleCreateRole(w http.ResponseWriter, r *http.Request) {
 // GET /api/roles/{id}
 func (a *API) handleGetRole(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
-	role, err := a.Services.Store.GetRole(id)
+	role, err := a.Services.Store.GetRole(r.Context(), id)
 	if err != nil {
 		a.errorResp(w, http.StatusInternalServerError, err.Error())
 		return
@@ -77,7 +77,7 @@ func (a *API) handleGetRole(w http.ResponseWriter, r *http.Request) {
 func (a *API) handleUpdateRole(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 
-	existing, err := a.Services.Store.GetRole(id)
+	existing, err := a.Services.Store.GetRole(r.Context(), id)
 	if err != nil {
 		a.errorResp(w, http.StatusInternalServerError, err.Error())
 		return
@@ -121,7 +121,7 @@ func (a *API) handleUpdateRole(w http.ResponseWriter, r *http.Request) {
 		existing.DefaultPermissions = *req.DefaultPermissions
 	}
 
-	if err := a.Services.Store.UpdateRole(existing); err != nil {
+	if err := a.Services.Store.UpdateRole(r.Context(), existing); err != nil {
 		a.errorResp(w, http.StatusInternalServerError, err.Error())
 		return
 	}
@@ -132,7 +132,7 @@ func (a *API) handleUpdateRole(w http.ResponseWriter, r *http.Request) {
 // DELETE /api/roles/{id}
 func (a *API) handleDeleteRole(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
-	if err := a.Services.Store.DeleteRole(id); err != nil {
+	if err := a.Services.Store.DeleteRole(r.Context(), id); err != nil {
 		a.errorResp(w, http.StatusInternalServerError, err.Error())
 		return
 	}

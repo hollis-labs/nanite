@@ -1,6 +1,9 @@
 package store
 
-import "fmt"
+import (
+	"context"
+	"fmt"
+)
 
 // ExecutionMetrics captures the full context of an LLM call for observability.
 type ExecutionMetrics struct {
@@ -64,9 +67,9 @@ func scanExecutionMetrics(rows interface{ Scan(...any) error }) (ExecutionMetric
 }
 
 // RecordExecutionMetrics inserts an execution metrics record.
-func (s *Store) RecordExecutionMetrics(m *ExecutionMetrics) error {
+func (s *Store) RecordExecutionMetrics(ctx context.Context, m *ExecutionMetrics) error {
 	m.EstimatedCostUSD = estimateCost(m.Model, m.InputTokens, m.OutputTokens)
-	_, err := s.DB.Exec(
+	_, err := s.DB.ExecContext(ctx,
 		`INSERT INTO execution_metrics
 			(session_id, message_id, provider, adapter, model,
 			 agent_id, agent_slug, mode, duration_ms,
@@ -89,8 +92,8 @@ func (s *Store) RecordExecutionMetrics(m *ExecutionMetrics) error {
 }
 
 // GetSessionExecutionMetrics returns all execution metrics for a session.
-func (s *Store) GetSessionExecutionMetrics(sessionID string) ([]ExecutionMetrics, error) {
-	rows, err := s.DB.Query(
+func (s *Store) GetSessionExecutionMetrics(ctx context.Context, sessionID string) ([]ExecutionMetrics, error) {
+	rows, err := s.DB.QueryContext(ctx,
 		`SELECT `+executionMetricsCols+` FROM execution_metrics WHERE session_id = ? ORDER BY created_at DESC`,
 		sessionID,
 	)
@@ -111,11 +114,11 @@ func (s *Store) GetSessionExecutionMetrics(sessionID string) ([]ExecutionMetrics
 }
 
 // GetRecentExecutionMetrics returns the most recent execution metrics across all sessions.
-func (s *Store) GetRecentExecutionMetrics(limit int) ([]ExecutionMetrics, error) {
+func (s *Store) GetRecentExecutionMetrics(ctx context.Context, limit int) ([]ExecutionMetrics, error) {
 	if limit <= 0 {
 		limit = 50
 	}
-	rows, err := s.DB.Query(
+	rows, err := s.DB.QueryContext(ctx,
 		`SELECT `+executionMetricsCols+` FROM execution_metrics ORDER BY created_at DESC LIMIT ?`,
 		limit,
 	)
@@ -136,8 +139,8 @@ func (s *Store) GetRecentExecutionMetrics(limit int) ([]ExecutionMetrics, error)
 }
 
 // GetUtilityCallSummary returns aggregated utility call stats grouped by provider, model, and call type.
-func (s *Store) GetUtilityCallSummary() ([]UtilityCallSummary, error) {
-	rows, err := s.DB.Query(
+func (s *Store) GetUtilityCallSummary(ctx context.Context) ([]UtilityCallSummary, error) {
+	rows, err := s.DB.QueryContext(ctx,
 		`SELECT provider, model, message_id AS call_type,
 		        COUNT(*) AS call_count,
 		        CAST(AVG(duration_ms) AS INTEGER) AS avg_duration,
@@ -179,9 +182,9 @@ type SessionToolTokenSummary struct {
 
 // GetSessionToolTokenSummary returns aggregated token data from execution metrics
 // for LLM calls that included tool calls, giving actual token costs instead of estimates.
-func (s *Store) GetSessionToolTokenSummary(sessionID string) (*SessionToolTokenSummary, error) {
+func (s *Store) GetSessionToolTokenSummary(ctx context.Context, sessionID string) (*SessionToolTokenSummary, error) {
 	var summary SessionToolTokenSummary
-	err := s.DB.QueryRow(
+	err := s.DB.QueryRowContext(ctx,
 		`SELECT COALESCE(SUM(input_tokens),0), COALESCE(SUM(output_tokens),0), COALESCE(SUM(tool_calls),0)
 		 FROM execution_metrics
 		 WHERE session_id = ? AND tool_calls > 0 AND is_utility = FALSE`,
@@ -194,11 +197,11 @@ func (s *Store) GetSessionToolTokenSummary(sessionID string) (*SessionToolTokenS
 }
 
 // GetUtilityCallLog returns recent individual utility call records.
-func (s *Store) GetUtilityCallLog(limit int) ([]ExecutionMetrics, error) {
+func (s *Store) GetUtilityCallLog(ctx context.Context, limit int) ([]ExecutionMetrics, error) {
 	if limit <= 0 {
 		limit = 50
 	}
-	rows, err := s.DB.Query(
+	rows, err := s.DB.QueryContext(ctx,
 		`SELECT `+executionMetricsCols+` FROM execution_metrics WHERE is_utility = TRUE ORDER BY created_at DESC LIMIT ?`,
 		limit,
 	)

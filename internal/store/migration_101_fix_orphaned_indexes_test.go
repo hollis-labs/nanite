@@ -78,7 +78,7 @@ func TestMigrateCreatesOrphanedIndexesAndTrigger(t *testing.T) {
 
 	assertGooseHasNothingPending(t, s)
 
-	if err := s.migrate(); err != nil {
+	if err := s.migrate(context.Background()); err != nil {
 		t.Fatalf("re-migrate after indexes/trigger already created: %v", err)
 	}
 

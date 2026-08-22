@@ -19,7 +19,7 @@ func TestMigrate105NarrowsSessionStatusCheck(t *testing.T) {
 	s := newTestStore(t)
 
 	sess := &Session{Title: "status-check-probe"}
-	if err := s.CreateSession(sess); err != nil {
+	if err := s.CreateSession(context.Background(), sess); err != nil {
 		t.Fatalf("CreateSession after migration 105: %v", err)
 	}
 
@@ -48,10 +48,10 @@ func TestMigrate105NarrowsSessionStatusCheck(t *testing.T) {
 	// halted_at/halted_reason must be untouched by this migration — the
 	// monitor-loop halt mechanism (a distinct concept from the status enum
 	// despite the shared word "halted") must keep working identically.
-	if err := s.MarkSessionHalted(sess.ID, "circuit breaker tripped"); err != nil {
+	if err := s.MarkSessionHalted(context.Background(), sess.ID, "circuit breaker tripped"); err != nil {
 		t.Fatalf("MarkSessionHalted after migration 105: %v", err)
 	}
-	halt, err := s.GetSessionHalt(sess.ID)
+	halt, err := s.GetSessionHalt(context.Background(), sess.ID)
 	if err != nil {
 		t.Fatalf("GetSessionHalt after migration 105: %v", err)
 	}
@@ -61,10 +61,10 @@ func TestMigrate105NarrowsSessionStatusCheck(t *testing.T) {
 	if halt.HaltedReason == nil || *halt.HaltedReason != "circuit breaker tripped" {
 		t.Errorf("halted_reason round-trip: got %v, want %q", halt.HaltedReason, "circuit breaker tripped")
 	}
-	if err := s.ClearSessionHalt(sess.ID); err != nil {
+	if err := s.ClearSessionHalt(context.Background(), sess.ID); err != nil {
 		t.Fatalf("ClearSessionHalt after migration 105: %v", err)
 	}
-	halt, err = s.GetSessionHalt(sess.ID)
+	halt, err = s.GetSessionHalt(context.Background(), sess.ID)
 	if err != nil {
 		t.Fatalf("GetSessionHalt after clear: %v", err)
 	}
@@ -76,7 +76,7 @@ func TestMigrate105NarrowsSessionStatusCheck(t *testing.T) {
 
 	// Simulated restart: a second full migrate() must be a clean no-op and
 	// the narrowed constraint must still hold afterward.
-	if err := s.migrate(); err != nil {
+	if err := s.migrate(context.Background()); err != nil {
 		t.Fatalf("re-migrate after 105 already applied: %v", err)
 	}
 	if _, err := s.DB.Exec(`UPDATE sessions SET status = 'terminated' WHERE id = ?`, sess.ID); err == nil {
@@ -94,7 +94,7 @@ func TestMigrate105DownWidensSessionStatusCheck(t *testing.T) {
 	ctx := context.Background()
 
 	sess := &Session{Title: "down-check-probe"}
-	if err := s.CreateSession(sess); err != nil {
+	if err := s.CreateSession(context.Background(), sess); err != nil {
 		t.Fatalf("CreateSession before down: %v", err)
 	}
 
@@ -127,10 +127,10 @@ func TestMigrate105DownWidensSessionStatusCheck(t *testing.T) {
 	}
 
 	// halted_at/halted_reason must survive the Down rebuild too.
-	if err := s.MarkSessionHalted(sess.ID, "post-down probe"); err != nil {
+	if err := s.MarkSessionHalted(context.Background(), sess.ID, "post-down probe"); err != nil {
 		t.Fatalf("MarkSessionHalted after down: %v", err)
 	}
-	halt, err := s.GetSessionHalt(sess.ID)
+	halt, err := s.GetSessionHalt(context.Background(), sess.ID)
 	if err != nil {
 		t.Fatalf("GetSessionHalt after down: %v", err)
 	}

@@ -27,6 +27,7 @@
 package reminders
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"log/slog"
@@ -111,7 +112,7 @@ func (e *Engine) RegisterTurnCount(reminderID string, creationTurn int) {
 // currentTurn is the monotonic session turn counter at the start of this turn.
 // Callers must increment the turn counter before calling EvalTurn.
 func (e *Engine) EvalTurn(sessionID string, currentTurn int) ([]store.Reminder, error) {
-	unfired, err := e.store.ListUnfiredReminders(sessionID)
+	unfired, err := e.store.ListUnfiredReminders(context.TODO() /* TODO(ctx-sweep): no ctx available at this call site */, sessionID)
 	if err != nil {
 		return nil, fmt.Errorf("reminders engine: %w", err)
 	}
@@ -154,7 +155,7 @@ func (e *Engine) EvalTurn(sessionID string, currentTurn int) ([]store.Reminder, 
 			continue
 		}
 
-		if markErr := e.store.MarkReminderFired(r.ID); markErr != nil {
+		if markErr := e.store.MarkReminderFired(context.TODO() /* TODO(ctx-sweep): no ctx available at this call site */, r.ID); markErr != nil {
 			slog.Warn("reminders engine: failed to mark reminder fired",
 				"reminder_id", r.ID, "err", markErr)
 			continue

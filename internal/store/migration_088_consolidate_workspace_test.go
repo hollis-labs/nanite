@@ -28,7 +28,7 @@ func TestMigration088_IdempotentReRun(t *testing.T) {
 	if err != nil {
 		t.Fatalf("New first call: %v", err)
 	}
-	if err := s1.Close(); err != nil {
+	if err := s1.Close(context.Background()); err != nil {
 		t.Fatalf("Close first call: %v", err)
 	}
 
@@ -36,7 +36,7 @@ func TestMigration088_IdempotentReRun(t *testing.T) {
 	if err != nil {
 		t.Fatalf("New second call (re-open, goose ledger already applied): %v", err)
 	}
-	if err := s2.Close(); err != nil {
+	if err := s2.Close(context.Background()); err != nil {
 		t.Fatalf("Close second call: %v", err)
 	}
 
@@ -44,5 +44,5 @@ func TestMigration088_IdempotentReRun(t *testing.T) {
 	if err != nil {
 		t.Fatalf("New third call (re-open again): %v", err)
 	}
-	defer s3.Close()
+	defer s3.Close(context.Background())
 }

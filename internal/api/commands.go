@@ -52,7 +52,7 @@ func (a *API) handleExecuteCommand(w http.ResponseWriter, r *http.Request) {
 			Role:      "system",
 			Content:   result.Content,
 		}
-		if err := a.Services.Store.CreateMessage(msg); err == nil {
+		if err := a.Services.Store.CreateMessage(r.Context(), msg); err == nil {
 			result.MessageID = msg.ID
 		}
 	}

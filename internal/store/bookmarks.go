@@ -1,6 +1,7 @@
 package store
 
 import (
+	"context"
 	"fmt"
 	"time"
 
@@ -18,8 +19,8 @@ type Bookmark struct {
 }
 
 // ListBookmarks returns all bookmarks for a session.
-func (s *Store) ListBookmarks(sessionID string) ([]Bookmark, error) {
-	rows, err := s.DB.Query(
+func (s *Store) ListBookmarks(ctx context.Context, sessionID string) ([]Bookmark, error) {
+	rows, err := s.DB.QueryContext(ctx,
 		`SELECT id, message_id, session_id, COALESCE(note,''), COALESCE(tags,'[]'), created_at
 		 FROM bookmarks WHERE session_id = ?
 		 ORDER BY created_at DESC`,
@@ -42,7 +43,7 @@ func (s *Store) ListBookmarks(sessionID string) ([]Bookmark, error) {
 }
 
 // CreateBookmark inserts a new bookmark.
-func (s *Store) CreateBookmark(b *Bookmark) error {
+func (s *Store) CreateBookmark(ctx context.Context, b *Bookmark) error {
 	if b.ID == "" {
 		b.ID = uuid.New().String()
 	}
@@ -52,7 +53,7 @@ func (s *Store) CreateBookmark(b *Bookmark) error {
 	now := time.Now().UTC().Format(time.RFC3339)
 	b.CreatedAt = now
 
-	_, err := s.DB.Exec(
+	_, err := s.DB.ExecContext(ctx,
 		`INSERT INTO bookmarks (id, message_id, session_id, note, tags, created_at)
 		 VALUES (?, ?, ?, ?, ?, ?)`,
 		b.ID, b.MessageID, b.SessionID, nullIfEmpty(b.Note), b.Tags, now,
@@ -64,8 +65,8 @@ func (s *Store) CreateBookmark(b *Bookmark) error {
 }
 
 // DeleteBookmark removes a bookmark by ID.
-func (s *Store) DeleteBookmark(id string) error {
-	_, err := s.DB.Exec(`DELETE FROM bookmarks WHERE id = ?`, id)
+func (s *Store) DeleteBookmark(ctx context.Context, id string) error {
+	_, err := s.DB.ExecContext(ctx, `DELETE FROM bookmarks WHERE id = ?`, id)
 	if err != nil {
 		return fmt.Errorf("delete bookmark: %w", err)
 	}
@@ -73,9 +74,9 @@ func (s *Store) DeleteBookmark(id string) error {
 }
 
 // GetBookmark returns a bookmark by ID.
-func (s *Store) GetBookmark(id string) (*Bookmark, error) {
+func (s *Store) GetBookmark(ctx context.Context, id string) (*Bookmark, error) {
 	var b Bookmark
-	err := s.DB.QueryRow(
+	err := s.DB.QueryRowContext(ctx,
 		`SELECT id, message_id, session_id, COALESCE(note,''), COALESCE(tags,'[]'), created_at
 		 FROM bookmarks WHERE id = ?`,
 		id,
@@ -87,8 +88,8 @@ func (s *Store) GetBookmark(id string) (*Bookmark, error) {
 }
 
 // UpdateBookmarkNote updates the note (title) on a bookmark.
-func (s *Store) UpdateBookmarkNote(id, note string) error {
-	_, err := s.DB.Exec(`UPDATE bookmarks SET note = ? WHERE id = ?`, note, id)
+func (s *Store) UpdateBookmarkNote(ctx context.Context, id, note string) error {
+	_, err := s.DB.ExecContext(ctx, `UPDATE bookmarks SET note = ? WHERE id = ?`, note, id)
 	if err != nil {
 		return fmt.Errorf("update bookmark note %s: %w", id, err)
 	}
@@ -96,9 +97,9 @@ func (s *Store) UpdateBookmarkNote(id, note string) error {
 }
 
 // GetBookmarkByMessage returns a bookmark for a specific message, or nil if none exists.
-func (s *Store) GetBookmarkByMessage(messageID string) (*Bookmark, error) {
+func (s *Store) GetBookmarkByMessage(ctx context.Context, messageID string) (*Bookmark, error) {
 	var b Bookmark
-	err := s.DB.QueryRow(
+	err := s.DB.QueryRowContext(ctx,
 		`SELECT id, message_id, session_id, COALESCE(note,''), COALESCE(tags,'[]'), created_at
 		 FROM bookmarks WHERE message_id = ?`,
 		messageID,

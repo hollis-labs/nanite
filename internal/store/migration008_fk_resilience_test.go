@@ -24,7 +24,7 @@ func TestMigration008_SurvivesBookmarkFK(t *testing.T) {
 
 	// Re-run migrate() — simulates the next boot. Every boot re-runs all
 	// migrations because there is no schema_migrations table.
-	if err := s.migrate(); err != nil {
+	if err := s.migrate(context.Background()); err != nil {
 		t.Fatalf("migrate with bookmark→message FK should succeed, got: %v", err)
 	}
 
@@ -98,7 +98,7 @@ func TestMigration008_SurvivesOrphanMessage(t *testing.T) {
 		t.Fatal("test setup failed: expected 1 orphan message")
 	}
 
-	if err := s.migrate(); err != nil {
+	if err := s.migrate(context.Background()); err != nil {
 		t.Fatalf("migrate with orphan message should succeed, got: %v", err)
 	}
 }

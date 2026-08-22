@@ -58,7 +58,7 @@ type fakeMessageReader struct {
 	err       error
 }
 
-func (f *fakeMessageReader) ListMessages(sessionID string, _ int) ([]store.Message, error) {
+func (f *fakeMessageReader) ListMessages(ctx context.Context, sessionID string, _ int) ([]store.Message, error) {
 	if f.err != nil {
 		return nil, f.err
 	}
@@ -226,4 +226,3 @@ func TestDispatchSpawner_NilMessageReader(t *testing.T) {
 		t.Errorf("Summary = %q, want empty (nil messages reader)", got.Summary)
 	}
 }
-

@@ -1,6 +1,7 @@
 package store
 
 import (
+	"context"
 	"math"
 	"testing"
 )
@@ -9,11 +10,11 @@ func TestRecordUsage(t *testing.T) {
 	s := newTestStore(t)
 
 	sess := &Session{}
-	if err := s.CreateSession(sess); err != nil {
+	if err := s.CreateSession(context.Background(), sess); err != nil {
 		t.Fatalf("CreateSession: %v", err)
 	}
 
-	err := s.RecordUsage(sess.ID, "msg-1", "claude-sonnet-4-20250514", 1000, 500, 0, 0, 0)
+	err := s.RecordUsage(context.Background(), sess.ID, "msg-1", "claude-sonnet-4-20250514", 1000, 500, 0, 0, 0)
 	if err != nil {
 		t.Fatalf("RecordUsage: %v", err)
 	}
@@ -47,19 +48,19 @@ func TestGetSessionUsage(t *testing.T) {
 	s := newTestStore(t)
 
 	sess := &Session{}
-	if err := s.CreateSession(sess); err != nil {
+	if err := s.CreateSession(context.Background(), sess); err != nil {
 		t.Fatalf("CreateSession: %v", err)
 	}
 
 	// Record multiple usage entries.
-	if err := s.RecordUsage(sess.ID, "msg-1", "claude-sonnet-4-20250514", 1000, 500, 0, 0, 0); err != nil {
+	if err := s.RecordUsage(context.Background(), sess.ID, "msg-1", "claude-sonnet-4-20250514", 1000, 500, 0, 0, 0); err != nil {
 		t.Fatalf("RecordUsage 1: %v", err)
 	}
-	if err := s.RecordUsage(sess.ID, "msg-2", "claude-sonnet-4-20250514", 2000, 800, 200, 0, 0); err != nil {
+	if err := s.RecordUsage(context.Background(), sess.ID, "msg-2", "claude-sonnet-4-20250514", 2000, 800, 200, 0, 0); err != nil {
 		t.Fatalf("RecordUsage 2: %v", err)
 	}
 
-	summary, err := s.GetSessionUsage(sess.ID)
+	summary, err := s.GetSessionUsage(context.Background(), sess.ID)
 	if err != nil {
 		t.Fatalf("GetSessionUsage: %v", err)
 	}
@@ -84,7 +85,7 @@ func TestGetSessionUsage(t *testing.T) {
 func TestGetSessionUsageEmpty(t *testing.T) {
 	s := newTestStore(t)
 
-	summary, err := s.GetSessionUsage("nonexistent")
+	summary, err := s.GetSessionUsage(context.Background(), "nonexistent")
 	if err != nil {
 		t.Fatalf("GetSessionUsage: %v", err)
 	}
@@ -98,19 +99,19 @@ func TestGetUsageSummary(t *testing.T) {
 	s := newTestStore(t)
 
 	sess := &Session{}
-	if err := s.CreateSession(sess); err != nil {
+	if err := s.CreateSession(context.Background(), sess); err != nil {
 		t.Fatalf("CreateSession: %v", err)
 	}
 
 	// Record usage for two different models.
-	if err := s.RecordUsage(sess.ID, "msg-1", "claude-sonnet-4-20250514", 1000, 500, 0, 0, 0); err != nil {
+	if err := s.RecordUsage(context.Background(), sess.ID, "msg-1", "claude-sonnet-4-20250514", 1000, 500, 0, 0, 0); err != nil {
 		t.Fatalf("RecordUsage 1: %v", err)
 	}
-	if err := s.RecordUsage(sess.ID, "msg-2", "claude-opus-4-20250514", 500, 200, 0, 0, 0); err != nil {
+	if err := s.RecordUsage(context.Background(), sess.ID, "msg-2", "claude-opus-4-20250514", 500, 200, 0, 0, 0); err != nil {
 		t.Fatalf("RecordUsage 2: %v", err)
 	}
 
-	summary, err := s.GetUsageSummary()
+	summary, err := s.GetUsageSummary(context.Background())
 	if err != nil {
 		t.Fatalf("GetUsageSummary: %v", err)
 	}
@@ -129,7 +130,7 @@ func TestGetUsageSummary(t *testing.T) {
 func TestGetUsageSummaryEmpty(t *testing.T) {
 	s := newTestStore(t)
 
-	summary, err := s.GetUsageSummary()
+	summary, err := s.GetUsageSummary(context.Background())
 	if err != nil {
 		t.Fatalf("GetUsageSummary: %v", err)
 	}

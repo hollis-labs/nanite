@@ -144,12 +144,16 @@ type minimalStore struct {
 
 // AgentRuntimeProviderSessionID satisfies the Store interface for the test
 // fakes (minimalStore + its embedders). Returns no captured session by default.
-func (m *minimalStore) AgentRuntimeProviderSessionID(string) (string, error) { return "", nil }
+func (m *minimalStore) AgentRuntimeProviderSessionID(context.Context, string) (string, error) {
+	return "", nil
+}
 
 // SetAgentRuntimeProviderSessionID satisfies the Store interface for the test
 // fakes. No-op by default; tests that need to assert the clear path can
 // override on a per-test stub.
-func (m *minimalStore) SetAgentRuntimeProviderSessionID(string, string) error { return nil }
+func (m *minimalStore) SetAgentRuntimeProviderSessionID(context.Context, string, string) error {
+	return nil
+}
 
 // ListEnabledAgentContextResolvers satisfies the Store interface for the
 // test fakes (Phase 2 item 02,
@@ -164,43 +168,57 @@ func (m *minimalStore) ListEnabledAgentContextResolvers(context.Context, string)
 // embed a custom reader instead.
 type stubSubagentRunsReader struct{}
 
-func (stubSubagentRunsReader) ActiveSubagentRunForParent(string) (id, role, child string, ok bool, err error) {
+func (stubSubagentRunsReader) ActiveSubagentRunForParent(context.Context, string) (id, role, child string, ok bool, err error) {
 	return "", "", "", false, nil
 }
 
 type stubEnvelopeStore struct{}
 
-func (stubEnvelopeStore) CreateEnvelopeInstance(inst *store.EnvelopeInstance) error { return nil }
-func (stubEnvelopeStore) GetEnvelopeInstance(id string) (*store.EnvelopeInstance, error) {
+func (stubEnvelopeStore) CreateEnvelopeInstance(ctx context.Context, inst *store.EnvelopeInstance) error {
+	return nil
+}
+func (stubEnvelopeStore) GetEnvelopeInstance(ctx context.Context, id string) (*store.EnvelopeInstance, error) {
 	return nil, fmt.Errorf("not found")
 }
 
 type stubReminderStore struct{}
 
-func (stubReminderStore) CreateReminder(store.Reminder) error                   { return nil }
-func (stubReminderStore) GetReminder(string) (store.Reminder, error)            { return store.Reminder{}, nil }
-func (stubReminderStore) ListUnfiredReminders(string) ([]store.Reminder, error) { return nil, nil }
-func (stubReminderStore) MarkReminderFired(string) error                        { return nil }
-func (stubReminderStore) UpdateReminderScope(string, string, string) error      { return nil }
-func (stubReminderStore) DeleteReminder(string) error                           { return nil }
+func (stubReminderStore) CreateReminder(context.Context, store.Reminder) error { return nil }
+func (stubReminderStore) GetReminder(context.Context, string) (store.Reminder, error) {
+	return store.Reminder{}, nil
+}
+func (stubReminderStore) ListUnfiredReminders(context.Context, string) ([]store.Reminder, error) {
+	return nil, nil
+}
+func (stubReminderStore) MarkReminderFired(context.Context, string) error { return nil }
+func (stubReminderStore) UpdateReminderScope(context.Context, string, string, string) error {
+	return nil
+}
+func (stubReminderStore) DeleteReminder(context.Context, string) error { return nil }
 
 type stubPinnedContentStore struct{}
 
-func (stubPinnedContentStore) CreatePinnedContent(store.PinnedContent) error { return nil }
-func (stubPinnedContentStore) ListPinnedContent(string) ([]store.PinnedContent, error) {
+func (stubPinnedContentStore) CreatePinnedContent(context.Context, store.PinnedContent) error {
+	return nil
+}
+func (stubPinnedContentStore) ListPinnedContent(context.Context, string) ([]store.PinnedContent, error) {
 	return nil, nil
 }
-func (stubPinnedContentStore) DeletePinnedContent(string) error            { return nil }
-func (stubPinnedContentStore) UpdatePinScope(string, string, string) error { return nil }
-func (stubPinnedContentStore) ClearSessionPins(string) error               { return nil }
+func (stubPinnedContentStore) DeletePinnedContent(context.Context, string) error { return nil }
+func (stubPinnedContentStore) UpdatePinScope(context.Context, string, string, string) error {
+	return nil
+}
+func (stubPinnedContentStore) ClearSessionPins(context.Context, string) error { return nil }
 
 type stubHandoffStashStore struct{}
 
-func (stubHandoffStashStore) UpsertHandoffStash(store.HandoffStash) error { return nil }
-func (stubHandoffStashStore) GetHandoffStash(string, string) (store.HandoffStash, error) {
+func (stubHandoffStashStore) UpsertHandoffStash(context.Context, store.HandoffStash) error {
+	return nil
+}
+func (stubHandoffStashStore) GetHandoffStash(context.Context, string, string) (store.HandoffStash, error) {
 	return store.HandoffStash{}, store.ErrHandoffStashNotFound
 }
-func (stubHandoffStashStore) GetLatestStashForSession(string) (store.HandoffStash, error) {
+func (stubHandoffStashStore) GetLatestStashForSession(context.Context, string) (store.HandoffStash, error) {
 	return store.HandoffStash{}, store.ErrHandoffStashNotFound
 }
 
@@ -219,54 +237,70 @@ func (stubCompactionEventStore) ListCompactionEventsBySession(context.Context, s
 // Stubs to satisfy the Store composite interface for tests.
 type stubSessionStore struct{}
 
-func (stubSessionStore) GetSession(string) (*store.Session, error) {
+func (stubSessionStore) GetSession(context.Context, string) (*store.Session, error) {
 	return nil, fmt.Errorf("not found")
 }
-func (stubSessionStore) ListSessions(...bool) ([]store.Session, error)     { return nil, nil }
-func (stubSessionStore) ListMessages(string, int) ([]store.Message, error) { return nil, nil }
-func (stubSessionStore) ListMessagesPaginated(string, int, int) (*store.MessagePage, error) {
+func (stubSessionStore) ListSessions(context.Context, ...bool) ([]store.Session, error) {
 	return nil, nil
 }
-func (stubSessionStore) ListMessagesAroundID(string, string, int, int) (*store.MessagePage, error) {
+func (stubSessionStore) ListMessages(context.Context, string, int) ([]store.Message, error) {
 	return nil, nil
 }
-func (stubSessionStore) GetMessage(string) (*store.Message, error) {
+func (stubSessionStore) ListMessagesPaginated(context.Context, string, int, int) (*store.MessagePage, error) {
+	return nil, nil
+}
+func (stubSessionStore) ListMessagesAroundID(context.Context, string, string, int, int) (*store.MessagePage, error) {
+	return nil, nil
+}
+func (stubSessionStore) GetMessage(context.Context, string) (*store.Message, error) {
 	return nil, fmt.Errorf("not found")
 }
-func (stubSessionStore) SearchMessages(string, string, int) ([]store.SearchResult, error) {
+func (stubSessionStore) SearchMessages(context.Context, string, string, int) ([]store.SearchResult, error) {
 	return nil, nil
 }
-func (stubSessionStore) CreateSession(*store.Session) error              { return nil }
-func (stubSessionStore) UpdateSession(*store.Session) error              { return nil }
-func (stubSessionStore) UpdateSessionTags(string, string) error          { return nil }
-func (stubSessionStore) UpdateSessionMetadata(string, string) error      { return nil }
-func (stubSessionStore) ArchiveSession(string) error                     { return nil }
-func (stubSessionStore) NextShortCode() (string, error)                  { return "", nil }
-func (stubSessionStore) CreateMessage(*store.Message) error              { return nil }
-func (stubSessionStore) UpdateMessageContent(string, string, bool) error { return nil }
-func (stubSessionStore) ForkSession(string, *store.Session, bool) (*store.Session, error) {
+func (stubSessionStore) CreateSession(context.Context, *store.Session) error              { return nil }
+func (stubSessionStore) UpdateSession(context.Context, *store.Session) error              { return nil }
+func (stubSessionStore) UpdateSessionTags(context.Context, string, string) error          { return nil }
+func (stubSessionStore) UpdateSessionMetadata(context.Context, string, string) error      { return nil }
+func (stubSessionStore) ArchiveSession(context.Context, string) error                     { return nil }
+func (stubSessionStore) NextShortCode(ctx context.Context) (string, error)                { return "", nil }
+func (stubSessionStore) CreateMessage(context.Context, *store.Message) error              { return nil }
+func (stubSessionStore) UpdateMessageContent(context.Context, string, string, bool) error { return nil }
+func (stubSessionStore) ForkSession(context.Context, string, *store.Session, bool) (*store.Session, error) {
 	return nil, nil
 }
-func (stubSessionStore) CopyMessages(string, string) error { return nil }
+func (stubSessionStore) CopyMessages(context.Context, string, string) error { return nil }
 
 type stubAgentReaderStore struct{}
 
-func (stubAgentReaderStore) GetAgent(string) (*store.AgentProfile, error) {
+func (stubAgentReaderStore) GetAgent(context.Context, string) (*store.AgentProfile, error) {
 	return nil, fmt.Errorf("not found")
 }
-func (stubAgentReaderStore) GetAgentBySlug(string) (*store.AgentProfile, error) {
+func (stubAgentReaderStore) GetAgentBySlug(context.Context, string) (*store.AgentProfile, error) {
 	return nil, fmt.Errorf("not found")
 }
-func (stubAgentReaderStore) ListAgents() ([]store.AgentProfile, error)               { return nil, nil }
-func (stubAgentReaderStore) ListAgentsBySource(string) ([]store.AgentProfile, error) { return nil, nil }
-func (stubAgentReaderStore) GetSessionPrimaryAgent(string) (*store.SessionAgent, error) {
+func (stubAgentReaderStore) ListAgents(ctx context.Context) ([]store.AgentProfile, error) {
+	return nil, nil
+}
+func (stubAgentReaderStore) ListAgentsBySource(context.Context, string) ([]store.AgentProfile, error) {
+	return nil, nil
+}
+func (stubAgentReaderStore) GetSessionPrimaryAgent(context.Context, string) (*store.SessionAgent, error) {
 	return nil, fmt.Errorf("not found")
 }
-func (stubAgentReaderStore) ListSessionAgents(string) ([]store.SessionAgent, error) { return nil, nil }
-func (stubAgentReaderStore) ListAgentSkills(string) ([]store.Skill, error)          { return nil, nil }
-func (stubAgentReaderStore) ListAgentProjects(string) ([]store.Project, error)      { return nil, nil }
-func (stubAgentReaderStore) ListProjectAgents(string) ([]store.AgentProfile, error) { return nil, nil }
-func (stubAgentReaderStore) GetRole(string) (*store.Role, error)                    { return nil, nil }
+func (stubAgentReaderStore) ListSessionAgents(context.Context, string) ([]store.SessionAgent, error) {
+	return nil, nil
+}
+func (stubAgentReaderStore) ListAgentSkills(context.Context, string) ([]store.Skill, error) {
+	return nil, nil
+}
+func (stubAgentReaderStore) ListAgentProjects(context.Context, string) ([]store.Project, error) {
+	return nil, nil
+}
+func (stubAgentReaderStore) ListProjectAgents(context.Context, string) ([]store.AgentProfile, error) {
+	return nil, nil
+}
+func (stubAgentReaderStore) GetRole(context.Context, string) (*store.Role, error) { return nil, nil }
 
 // ListAgentToolNames and ListAlwaysIncludedKnownTools satisfy the Store
 // interface's Phase 5 item 01 additions (TASKS/phase-5/01-build-assignment-
@@ -282,119 +316,175 @@ func (stubAgentReaderStore) ListAlwaysIncludedKnownTools(context.Context) ([]sto
 
 type stubAgentWriterStore struct{}
 
-func (stubAgentWriterStore) CreateAgent(*store.AgentProfile) error                 { return nil }
-func (stubAgentWriterStore) UpdateAgent(*store.AgentProfile) error                 { return nil }
-func (stubAgentWriterStore) DeleteAgent(string) error                              { return nil }
-func (stubAgentWriterStore) UpsertAgentBySlug(*store.AgentProfile) error           { return nil }
-func (stubAgentWriterStore) EnsureSessionAgent(string, string, string, bool) error { return nil }
-func (stubAgentWriterStore) SetSessionAgentMode(string, string, string) error      { return nil }
-func (stubAgentWriterStore) DeleteSessionAgent(string, string) error               { return nil }
-func (stubAgentWriterStore) AssignSkillToAgent(string, string, string) error       { return nil }
-func (stubAgentWriterStore) RemoveSkillFromAgent(string, string) error             { return nil }
-func (stubAgentWriterStore) AddAgentProject(string, string) error                  { return nil }
-func (stubAgentWriterStore) RemoveAgentProject(string, string) error               { return nil }
+func (stubAgentWriterStore) CreateAgent(context.Context, *store.AgentProfile) error       { return nil }
+func (stubAgentWriterStore) UpdateAgent(context.Context, *store.AgentProfile) error       { return nil }
+func (stubAgentWriterStore) DeleteAgent(context.Context, string) error                    { return nil }
+func (stubAgentWriterStore) UpsertAgentBySlug(context.Context, *store.AgentProfile) error { return nil }
+func (stubAgentWriterStore) EnsureSessionAgent(context.Context, string, string, string, bool) error {
+	return nil
+}
+func (stubAgentWriterStore) SetSessionAgentMode(context.Context, string, string, string) error {
+	return nil
+}
+func (stubAgentWriterStore) DeleteSessionAgent(context.Context, string, string) error { return nil }
+func (stubAgentWriterStore) AssignSkillToAgent(context.Context, string, string, string) error {
+	return nil
+}
+func (stubAgentWriterStore) RemoveSkillFromAgent(context.Context, string, string) error { return nil }
+func (stubAgentWriterStore) AddAgentProject(context.Context, string, string) error      { return nil }
+func (stubAgentWriterStore) RemoveAgentProject(context.Context, string, string) error   { return nil }
 
 type stubToolStore struct{}
 
-func (stubToolStore) ListMCPServers() ([]store.MCPServerConfig, error)      { return nil, nil }
-func (stubToolStore) GetMCPServer(string) (*store.MCPServerConfig, error)   { return nil, nil }
-func (stubToolStore) CreateMCPServer(*store.MCPServerConfig) error          { return nil }
-func (stubToolStore) UpdateMCPServer(*store.MCPServerConfig) error          { return nil }
-func (stubToolStore) DeleteMCPServer(string) error                          { return nil }
-func (stubToolStore) ListCatalogSources() ([]store.CatalogSource, error)    { return nil, nil }
-func (stubToolStore) GetCatalogSource(string) (*store.CatalogSource, error) { return nil, nil }
-func (stubToolStore) CreateCatalogSource(string, string, string, int) (*store.CatalogSource, error) {
+func (stubToolStore) ListMCPServers(ctx context.Context) ([]store.MCPServerConfig, error) {
 	return nil, nil
 }
-func (stubToolStore) UpdateCatalogSource(string, string, string, bool, int) error { return nil }
-func (stubToolStore) SetCatalogSourcePublicKey(string, string) error              { return nil }
-func (stubToolStore) DeleteCatalogSource(string) error                            { return nil }
+func (stubToolStore) GetMCPServer(context.Context, string) (*store.MCPServerConfig, error) {
+	return nil, nil
+}
+func (stubToolStore) CreateMCPServer(context.Context, *store.MCPServerConfig) error { return nil }
+func (stubToolStore) UpdateMCPServer(context.Context, *store.MCPServerConfig) error { return nil }
+func (stubToolStore) DeleteMCPServer(context.Context, string) error                 { return nil }
+func (stubToolStore) ListCatalogSources(ctx context.Context) ([]store.CatalogSource, error) {
+	return nil, nil
+}
+func (stubToolStore) GetCatalogSource(context.Context, string) (*store.CatalogSource, error) {
+	return nil, nil
+}
+func (stubToolStore) CreateCatalogSource(context.Context, string, string, string, int) (*store.CatalogSource, error) {
+	return nil, nil
+}
+func (stubToolStore) UpdateCatalogSource(context.Context, string, string, string, bool, int) error {
+	return nil
+}
+func (stubToolStore) SetCatalogSourcePublicKey(context.Context, string, string) error { return nil }
+func (stubToolStore) DeleteCatalogSource(context.Context, string) error               { return nil }
 
 type stubUsageStore struct{}
 
-func (stubUsageStore) RecordUsage(string, string, string, int, int, int, int, int) error { return nil }
-func (stubUsageStore) GetSessionUsage(string) (*store.SessionUsageSummary, error)        { return nil, nil }
-func (stubUsageStore) GetUsageSummary() (*store.UsageSummary, error)                     { return nil, nil }
-func (stubUsageStore) RecordExecutionMetrics(*store.ExecutionMetrics) error              { return nil }
-func (stubUsageStore) GetSessionExecutionMetrics(string) ([]store.ExecutionMetrics, error) {
+func (stubUsageStore) RecordUsage(context.Context, string, string, string, int, int, int, int, int) error {
+	return nil
+}
+func (stubUsageStore) GetSessionUsage(context.Context, string) (*store.SessionUsageSummary, error) {
 	return nil, nil
 }
-func (stubUsageStore) GetRecentExecutionMetrics(int) ([]store.ExecutionMetrics, error) {
+func (stubUsageStore) GetUsageSummary(ctx context.Context) (*store.UsageSummary, error) {
 	return nil, nil
 }
-func (stubUsageStore) GetUtilityCallSummary() ([]store.UtilityCallSummary, error) { return nil, nil }
-func (stubUsageStore) GetUtilityCallLog(int) ([]store.ExecutionMetrics, error)    { return nil, nil }
-func (stubUsageStore) LogEvent(string, string, string, string, string)            {}
-func (stubUsageStore) ListEvents(string, int) ([]store.EventLog, error)           { return nil, nil }
-func (stubUsageStore) CountSessionToolCalls(string) int { return 0 }
+func (stubUsageStore) RecordExecutionMetrics(context.Context, *store.ExecutionMetrics) error {
+	return nil
+}
+func (stubUsageStore) GetSessionExecutionMetrics(context.Context, string) ([]store.ExecutionMetrics, error) {
+	return nil, nil
+}
+func (stubUsageStore) GetRecentExecutionMetrics(context.Context, int) ([]store.ExecutionMetrics, error) {
+	return nil, nil
+}
+func (stubUsageStore) GetUtilityCallSummary(ctx context.Context) ([]store.UtilityCallSummary, error) {
+	return nil, nil
+}
+func (stubUsageStore) GetUtilityCallLog(context.Context, int) ([]store.ExecutionMetrics, error) {
+	return nil, nil
+}
+func (stubUsageStore) LogEvent(context.Context, string, string, string, string, string) {}
+func (stubUsageStore) ListEvents(context.Context, string, int) ([]store.EventLog, error) {
+	return nil, nil
+}
+func (stubUsageStore) CountSessionToolCalls(context.Context, string) int { return 0 }
 
 type stubProjectStore struct{}
 
-func (stubProjectStore) ListProjects() ([]store.Project, error)    { return nil, nil }
-func (stubProjectStore) GetProject(string) (*store.Project, error) { return nil, nil }
-func (stubProjectStore) CreateProject(*store.Project) error        { return nil }
-func (stubProjectStore) UpdateProject(*store.Project) error        { return nil }
-func (stubProjectStore) DeleteProject(string) error                { return nil }
+func (stubProjectStore) ListProjects(ctx context.Context) ([]store.Project, error)  { return nil, nil }
+func (stubProjectStore) GetProject(context.Context, string) (*store.Project, error) { return nil, nil }
+func (stubProjectStore) CreateProject(context.Context, *store.Project) error        { return nil }
+func (stubProjectStore) UpdateProject(context.Context, *store.Project) error        { return nil }
+func (stubProjectStore) DeleteProject(context.Context, string) error                { return nil }
 
 type stubBookmarkStore struct{}
 
-func (stubBookmarkStore) ListBookmarks(string) ([]store.Bookmark, error)       { return nil, nil }
-func (stubBookmarkStore) GetBookmark(string) (*store.Bookmark, error)          { return nil, nil }
-func (stubBookmarkStore) GetBookmarkByMessage(string) (*store.Bookmark, error) { return nil, nil }
-func (stubBookmarkStore) CreateBookmark(*store.Bookmark) error                 { return nil }
-func (stubBookmarkStore) DeleteBookmark(string) error                          { return nil }
-func (stubBookmarkStore) UpdateBookmarkNote(string, string) error              { return nil }
+func (stubBookmarkStore) ListBookmarks(context.Context, string) ([]store.Bookmark, error) {
+	return nil, nil
+}
+func (stubBookmarkStore) GetBookmark(context.Context, string) (*store.Bookmark, error) {
+	return nil, nil
+}
+func (stubBookmarkStore) GetBookmarkByMessage(context.Context, string) (*store.Bookmark, error) {
+	return nil, nil
+}
+func (stubBookmarkStore) CreateBookmark(context.Context, *store.Bookmark) error    { return nil }
+func (stubBookmarkStore) DeleteBookmark(context.Context, string) error             { return nil }
+func (stubBookmarkStore) UpdateBookmarkNote(context.Context, string, string) error { return nil }
 
 type stubArtifactStore struct{}
 
-func (stubArtifactStore) ListArtifacts(string) ([]store.Artifact, error) { return nil, nil }
-func (stubArtifactStore) ListArtifactsByOrigin(string, string) ([]store.Artifact, error) {
+func (stubArtifactStore) ListArtifacts(context.Context, string) ([]store.Artifact, error) {
 	return nil, nil
 }
-func (stubArtifactStore) ListArtifactsByProject(string, string) ([]store.Artifact, error) {
+func (stubArtifactStore) ListArtifactsByOrigin(context.Context, string, string) ([]store.Artifact, error) {
 	return nil, nil
 }
-func (stubArtifactStore) CreateArtifact(*store.Artifact) error        { return nil }
-func (stubArtifactStore) GetArtifact(string) (*store.Artifact, error) { return nil, nil }
+func (stubArtifactStore) ListArtifactsByProject(context.Context, string, string) ([]store.Artifact, error) {
+	return nil, nil
+}
+func (stubArtifactStore) CreateArtifact(context.Context, *store.Artifact) error { return nil }
+func (stubArtifactStore) GetArtifact(context.Context, string) (*store.Artifact, error) {
+	return nil, nil
+}
 
 type stubSkillStore struct{}
 
-func (stubSkillStore) ListSkills() ([]store.Skill, error)          { return nil, nil }
-func (stubSkillStore) GetSkill(string) (*store.Skill, error)       { return nil, nil }
-func (stubSkillStore) GetSkillBySlug(string) (*store.Skill, error) { return nil, nil }
-func (stubSkillStore) CreateSkill(*store.Skill) error              { return nil }
-func (stubSkillStore) UpdateSkill(*store.Skill) error              { return nil }
-func (stubSkillStore) DeleteSkill(string) error                    { return nil }
+func (stubSkillStore) ListSkills(ctx context.Context) ([]store.Skill, error)        { return nil, nil }
+func (stubSkillStore) GetSkill(context.Context, string) (*store.Skill, error)       { return nil, nil }
+func (stubSkillStore) GetSkillBySlug(context.Context, string) (*store.Skill, error) { return nil, nil }
+func (stubSkillStore) CreateSkill(context.Context, *store.Skill) error              { return nil }
+func (stubSkillStore) UpdateSkill(context.Context, *store.Skill) error              { return nil }
+func (stubSkillStore) DeleteSkill(context.Context, string) error                    { return nil }
 
 type stubProviderStore struct{}
 
-func (stubProviderStore) ListProviders() ([]store.ProviderConfig, error)    { return nil, nil }
-func (stubProviderStore) GetProvider(string) (*store.ProviderConfig, error) { return nil, nil }
-func (stubProviderStore) ListModels() ([]store.Model, error)                { return nil, nil }
-func (stubProviderStore) UpdateProvider(string, store.ProviderUpdate) error { return nil }
-func (stubProviderStore) DefaultModelForProvider(string) (string, error)    { return "", nil }
-func (stubProviderStore) ResolveProviderAndModel(explicitProvider, explicitModel string) (string, string, error) {
+func (stubProviderStore) ListProviders(ctx context.Context) ([]store.ProviderConfig, error) {
+	return nil, nil
+}
+func (stubProviderStore) GetProvider(context.Context, string) (*store.ProviderConfig, error) {
+	return nil, nil
+}
+func (stubProviderStore) ListModels(ctx context.Context) ([]store.Model, error) { return nil, nil }
+func (stubProviderStore) UpdateProvider(context.Context, string, store.ProviderUpdate) error {
+	return nil
+}
+func (stubProviderStore) DefaultModelForProvider(context.Context, string) (string, error) {
+	return "", nil
+}
+func (stubProviderStore) ResolveProviderAndModel(ctx context.Context, explicitProvider, explicitModel string) (string, string, error) {
 	return explicitProvider, explicitModel, nil
 }
 
 type stubTodoStore struct{}
 
-func (stubTodoStore) CreateTodo(*store.Todo) error                         { return nil }
-func (stubTodoStore) GetTodo(string) (*store.Todo, error)                  { return nil, nil }
-func (stubTodoStore) ListTodos(store.TodoFilter) ([]store.Todo, error)     { return nil, nil }
-func (stubTodoStore) UpdateTodo(*store.Todo) error                         { return nil }
-func (stubTodoStore) UpdateTodoScope(string, string, string, string) error { return nil }
-func (stubTodoStore) DeleteTodo(string) error                              { return nil }
-func (stubTodoStore) ListTodoChildren(string) ([]store.Todo, error)        { return nil, nil }
+func (stubTodoStore) CreateTodo(context.Context, *store.Todo) error        { return nil }
+func (stubTodoStore) GetTodo(context.Context, string) (*store.Todo, error) { return nil, nil }
+func (stubTodoStore) ListTodos(context.Context, store.TodoFilter) ([]store.Todo, error) {
+	return nil, nil
+}
+func (stubTodoStore) UpdateTodo(context.Context, *store.Todo) error { return nil }
+func (stubTodoStore) UpdateTodoScope(context.Context, string, string, string, string) error {
+	return nil
+}
+func (stubTodoStore) DeleteTodo(context.Context, string) error                       { return nil }
+func (stubTodoStore) ListTodoChildren(context.Context, string) ([]store.Todo, error) { return nil, nil }
 
 type stubPlanStore struct{}
 
-func (stubPlanStore) CreatePlan(*store.Plan) error                        { return nil }
-func (stubPlanStore) GetPlan(string) (*store.Plan, error)                 { return nil, nil }
-func (stubPlanStore) ListPlans(store.PlanFilter) ([]store.Plan, error)    { return nil, nil }
-func (stubPlanStore) UpdatePlan(*store.Plan) error                        { return nil }
-func (stubPlanStore) UpdatePlanStep(string, string, store.PlanStep) error { return nil }
-func (stubPlanStore) DeletePlan(string) error                             { return nil }
+func (stubPlanStore) CreatePlan(context.Context, *store.Plan) error        { return nil }
+func (stubPlanStore) GetPlan(context.Context, string) (*store.Plan, error) { return nil, nil }
+func (stubPlanStore) ListPlans(context.Context, store.PlanFilter) ([]store.Plan, error) {
+	return nil, nil
+}
+func (stubPlanStore) UpdatePlan(context.Context, *store.Plan) error { return nil }
+func (stubPlanStore) UpdatePlanStep(context.Context, string, string, store.PlanStep) error {
+	return nil
+}
+func (stubPlanStore) DeletePlan(context.Context, string) error { return nil }
 
 func TestChatService_ResolveProvider(t *testing.T) {
 	reg := provider.NewRegistry()

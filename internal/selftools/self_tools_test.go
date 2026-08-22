@@ -18,7 +18,7 @@ func newTestStore(t *testing.T) *store.Store {
 	if err != nil {
 		t.Fatalf("open store: %v", err)
 	}
-	t.Cleanup(func() { s.Close(); os.Remove(dbPath) })
+	t.Cleanup(func() { s.Close(context.Background()); os.Remove(dbPath) })
 	return s
 }
 
@@ -79,12 +79,12 @@ func TestSelfToolsTransport_ListSkills(t *testing.T) {
 
 	// Seed two skills in different categories directly through the store
 	// (skill_create no longer exists as a self-tool).
-	if err := st.Store.CreateSkill(&store.Skill{
+	if err := st.Store.CreateSkill(context.Background(), &store.Skill{
 		Name: "Skill A", Slug: "skill-a", Description: "cat-x skill", Category: "cat-x",
 	}); err != nil {
 		t.Fatalf("seed skill-a: %v", err)
 	}
-	if err := st.Store.CreateSkill(&store.Skill{
+	if err := st.Store.CreateSkill(context.Background(), &store.Skill{
 		Name: "Skill B", Slug: "skill-b", Description: "cat-y skill", Category: "cat-y",
 	}); err != nil {
 		t.Fatalf("seed skill-b: %v", err)
@@ -157,7 +157,7 @@ func TestSelfToolsTransport_DeleteSkill(t *testing.T) {
 	// Seed a skill directly through the store (skill_create no longer
 	// exists as a self-tool).
 	seed := &store.Skill{Name: "To Delete", Slug: "to-delete", Description: "Will be deleted"}
-	if err := st.Store.CreateSkill(seed); err != nil {
+	if err := st.Store.CreateSkill(context.Background(), seed); err != nil {
 		t.Fatalf("seed skill: %v", err)
 	}
 	skillID := seed.ID
@@ -172,7 +172,7 @@ func TestSelfToolsTransport_DeleteSkill(t *testing.T) {
 	}
 
 	// Verify it's gone.
-	sk, _ := st.Store.GetSkill(skillID)
+	sk, _ := st.Store.GetSkill(context.Background(), skillID)
 	if sk != nil {
 		t.Error("skill should have been deleted")
 	}
@@ -231,7 +231,7 @@ func TestSelfToolsTransport_WorkBroadcast(t *testing.T) {
 		t.Fatalf("expected 2 broadcasts after plan_create, got %d", b.calls)
 	}
 
-	plans, _ := st.Store.ListPlans(store.PlanFilter{Scope: "session", ScopeID: "sess-wire"})
+	plans, _ := st.Store.ListPlans(context.Background(), store.PlanFilter{Scope: "session", ScopeID: "sess-wire"})
 	if len(plans) != 1 {
 		t.Fatalf("expected 1 plan, got %d", len(plans))
 	}
@@ -307,7 +307,7 @@ func TestSelfToolsTransport_PlanCreate_AutoFillsSessionIDFromCtx(t *testing.T) {
 	if err != nil || r.IsError {
 		t.Fatalf("plan_create failed: %v / %s", err, r.Content[0].Text)
 	}
-	plans, _ := st.Store.ListPlans(store.PlanFilter{Scope: "session", ScopeID: "ctx-session-xyz"})
+	plans, _ := st.Store.ListPlans(context.Background(), store.PlanFilter{Scope: "session", ScopeID: "ctx-session-xyz"})
 	if len(plans) != 1 {
 		t.Fatalf("expected 1 plan with ctx scope_id, got %d", len(plans))
 	}
@@ -347,7 +347,7 @@ func TestSelfToolsTransport_PlanStepAdd_HappyPath(t *testing.T) {
 	if err != nil || createRes.IsError {
 		t.Fatalf("plan_create failed: %v / %s", err, createRes.Content[0].Text)
 	}
-	plans, _ := st.Store.ListPlans(store.PlanFilter{Scope: "workspace"})
+	plans, _ := st.Store.ListPlans(context.Background(), store.PlanFilter{Scope: "workspace"})
 	if len(plans) != 1 {
 		t.Fatalf("expected 1 plan, got %d", len(plans))
 	}
@@ -373,7 +373,7 @@ func TestSelfToolsTransport_PlanStepAdd_HappyPath(t *testing.T) {
 	}
 
 	// Existing step is preserved; new steps appended at the tail with s2/s3 ids.
-	got, err := st.Store.GetPlan(planID)
+	got, err := st.Store.GetPlan(context.Background(), planID)
 	if err != nil {
 		t.Fatalf("GetPlan: %v", err)
 	}
@@ -563,7 +563,7 @@ func TestSelfToolsTransport_PlanCRUD(t *testing.T) {
 		t.Fatalf("plan_create failed: %v / %s", err, createResult.Content[0].Text)
 	}
 
-	plans, err := st.Store.ListPlans(store.PlanFilter{Scope: "session", ScopeID: "sess-1"})
+	plans, err := st.Store.ListPlans(context.Background(), store.PlanFilter{Scope: "session", ScopeID: "sess-1"})
 	if err != nil || len(plans) != 1 {
 		t.Fatalf("expected 1 plan after create, got %d (err=%v)", len(plans), err)
 	}
@@ -587,7 +587,7 @@ func TestSelfToolsTransport_PlanCRUD(t *testing.T) {
 		t.Fatalf("plan_delete failed: %s", delResult.Content[0].Text)
 	}
 
-	plans, _ = st.Store.ListPlans(store.PlanFilter{Scope: "session", ScopeID: "sess-1"})
+	plans, _ = st.Store.ListPlans(context.Background(), store.PlanFilter{Scope: "session", ScopeID: "sess-1"})
 	if len(plans) != 0 {
 		t.Fatalf("expected 0 plans after delete, got %d", len(plans))
 	}

@@ -15,7 +15,7 @@ import (
 func newHandoffTestSession(t *testing.T, s *store.Store) *store.Session {
 	t.Helper()
 	sess := &store.Session{}
-	if err := s.CreateSession(sess); err != nil {
+	if err := s.CreateSession(context.Background(), sess); err != nil {
 		t.Fatalf("CreateSession: %v", err)
 	}
 	return sess
@@ -25,7 +25,7 @@ func TestHandoff_FullFlow(t *testing.T) {
 	svc, _, parent := newTestService(t, "file-backend", "file-frontend")
 
 	sess := newHandoffTestSession(t, parent)
-	if err := parent.EnsureSessionAgent(sess.ID, "file-backend", "default", true); err != nil {
+	if err := parent.EnsureSessionAgent(context.Background(), sess.ID, "file-backend", "default", true); err != nil {
 		t.Fatalf("EnsureSessionAgent: %v", err)
 	}
 
@@ -46,7 +46,7 @@ func TestHandoff_FullFlow(t *testing.T) {
 	// where the "clear primary" UPDATE silently fails to demote the old
 	// primary — GetSessionPrimaryAgent alone can't see that bug because it
 	// would still return one of the two matching rows.
-	agents, err := parent.ListSessionAgents(sess.ID)
+	agents, err := parent.ListSessionAgents(context.Background(), sess.ID)
 	if err != nil {
 		t.Fatalf("ListSessionAgents: %v", err)
 	}
@@ -68,7 +68,7 @@ func TestHandoff_DoubleRequest(t *testing.T) {
 	svc, _, parent := newTestService(t, "file-a", "file-b", "file-c")
 
 	sess := newHandoffTestSession(t, parent)
-	if err := parent.EnsureSessionAgent(sess.ID, "file-a", "default", true); err != nil {
+	if err := parent.EnsureSessionAgent(context.Background(), sess.ID, "file-a", "default", true); err != nil {
 		t.Fatalf("EnsureSessionAgent: %v", err)
 	}
 
@@ -98,7 +98,7 @@ func TestHandoff_ApproveCompleted_Idempotent(t *testing.T) {
 	svc, _, parent := newTestService(t, "file-a", "file-b")
 
 	sess := newHandoffTestSession(t, parent)
-	if err := parent.EnsureSessionAgent(sess.ID, "file-a", "default", true); err != nil {
+	if err := parent.EnsureSessionAgent(context.Background(), sess.ID, "file-a", "default", true); err != nil {
 		t.Fatalf("EnsureSessionAgent: %v", err)
 	}
 
@@ -118,7 +118,7 @@ func TestHandoff_ApproveRejected_Errors(t *testing.T) {
 	svc, _, parent := newTestService(t, "file-a", "file-b")
 
 	sess := newHandoffTestSession(t, parent)
-	if err := parent.EnsureSessionAgent(sess.ID, "file-a", "default", true); err != nil {
+	if err := parent.EnsureSessionAgent(context.Background(), sess.ID, "file-a", "default", true); err != nil {
 		t.Fatalf("EnsureSessionAgent: %v", err)
 	}
 
@@ -159,7 +159,7 @@ func TestHandoff_OrphanClaim(t *testing.T) {
 	}
 
 	// Verify frontend is now primary.
-	primary, err := parent.GetSessionPrimaryAgent(sess.ID)
+	primary, err := parent.GetSessionPrimaryAgent(context.Background(), sess.ID)
 	if err != nil {
 		t.Fatalf("GetSessionPrimaryAgent: %v", err)
 	}

@@ -562,12 +562,12 @@ func (l *TeamRunLauncher) resolveDurableMember(ctx context.Context, slot store.T
 	}
 	profileID := *slot.AgentID
 
-	profile, err := l.store.GetAgent(profileID)
+	profile, err := l.store.GetAgent(ctx, profileID)
 	if err != nil {
 		return "", "", fmt.Errorf("team slot %q: durable agent_id %q: %w", slot.Name, profileID, err)
 	}
 
-	inst, err := l.store.GetDurableAgentInstanceByProfileID(profileID)
+	inst, err := l.store.GetDurableAgentInstanceByProfileID(ctx, profileID)
 	isNewInstance := false
 	if err != nil {
 		if !errors.Is(err, store.ErrDurableAgentInstanceNotFound) {
@@ -642,7 +642,7 @@ func (l *TeamRunLauncher) resolveFreshMember(ctx context.Context, slot store.Tea
 	if slot.RoleSlug == "" {
 		return "", "", fmt.Errorf("team slot %q: resolution=fresh requires role_slug", slot.Name)
 	}
-	role, err := l.store.GetRoleBySlug(slot.RoleSlug)
+	role, err := l.store.GetRoleBySlug(ctx, slot.RoleSlug)
 	if err != nil {
 		return "", "", fmt.Errorf("team slot %q: look up role %q: %w", slot.Name, slot.RoleSlug, err)
 	}
@@ -650,7 +650,7 @@ func (l *TeamRunLauncher) resolveFreshMember(ctx context.Context, slot store.Tea
 		return "", "", fmt.Errorf("team slot %q: role_slug %q does not exist", slot.Name, slot.RoleSlug)
 	}
 
-	profiles, err := l.store.ListAgentsByRoleID(role.ID)
+	profiles, err := l.store.ListAgentsByRoleID(ctx, role.ID)
 	if err != nil {
 		return "", "", fmt.Errorf("team slot %q: list agents for role %q: %w", slot.Name, role.Slug, err)
 	}
@@ -669,10 +669,10 @@ func (l *TeamRunLauncher) resolveFreshMember(ctx context.Context, slot store.Tea
 		ContextType: "team_slot",
 		ContextID:   slot.Name,
 	}
-	if err := l.store.CreateSession(sess); err != nil {
+	if err := l.store.CreateSession(ctx, sess); err != nil {
 		return "", "", fmt.Errorf("team slot %q: create session: %w", slot.Name, err)
 	}
-	if err := l.store.EnsureSessionAgent(sess.ID, profile.ID, "team_slot", true); err != nil {
+	if err := l.store.EnsureSessionAgent(ctx, sess.ID, profile.ID, "team_slot", true); err != nil {
 		return "", "", fmt.Errorf("team slot %q: attach agent %q to session %s: %w", slot.Name, profile.ID, sess.ID, err)
 	}
 	return profile.ID, sess.ID, nil

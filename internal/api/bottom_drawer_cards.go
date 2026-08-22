@@ -23,7 +23,7 @@ type pinDrawerCardRequest struct {
 // handleListBottomDrawerCards — GET /api/sessions/{id}/drawer-cards
 func (a *API) handleListBottomDrawerCards(w http.ResponseWriter, r *http.Request) {
 	sessionID := r.PathValue("id")
-	cards, err := a.Services.Store.ListBottomDrawerPinnedCards(sessionID)
+	cards, err := a.Services.Store.ListBottomDrawerPinnedCards(r.Context(), sessionID)
 	if err != nil {
 		a.errorResp(w, http.StatusInternalServerError, "failed to list drawer cards: "+err.Error())
 		return
@@ -57,7 +57,7 @@ func (a *API) handlePinBottomDrawerCard(w http.ResponseWriter, r *http.Request) 
 		Title:      req.Title,
 		Payload:    req.Payload,
 	}
-	err := a.Services.Store.PinBottomDrawerCard(card)
+	err := a.Services.Store.PinBottomDrawerCard(r.Context(), card)
 	if errors.Is(err, store.ErrBottomDrawerPinCapExceeded) {
 		a.errorResp(w, http.StatusConflict, "pin cap exceeded; unpin one first")
 		return
@@ -72,7 +72,7 @@ func (a *API) handlePinBottomDrawerCard(w http.ResponseWriter, r *http.Request) 
 // handleUnpinBottomDrawerCard — DELETE /api/drawer-cards/{id}
 func (a *API) handleUnpinBottomDrawerCard(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
-	if err := a.Services.Store.UnpinBottomDrawerCard(id); err != nil {
+	if err := a.Services.Store.UnpinBottomDrawerCard(r.Context(), id); err != nil {
 		a.errorResp(w, http.StatusInternalServerError, "failed to unpin drawer card: "+err.Error())
 		return
 	}

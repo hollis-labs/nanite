@@ -64,7 +64,7 @@ func newTestSlotResult(t *testing.T, sessionID string) *SlotAssemblyResult {
 	t.Cleanup(func() { _ = s.DB.Close() })
 
 	sess := &store.Session{ID: sessionID, Title: "SubagentInboxInjectionTest"}
-	if err := s.CreateSession(sess); err != nil {
+	if err := s.CreateSession(context.Background(), sess); err != nil {
 		t.Fatalf("CreateSession: %v", err)
 	}
 

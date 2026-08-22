@@ -61,7 +61,7 @@ func (e *ApprovalEmitterImpl) Emit(ctx context.Context, sessionID, envelopeType 
 		EnvelopeType: envelopeType,
 		EnvelopeJSON: string(payload),
 	}
-	if err := e.store.CreateEnvelopeInstance(inst); err != nil {
+	if err := e.store.CreateEnvelopeInstance(ctx, inst); err != nil {
 		return "", fmt.Errorf("create envelope instance: %w", err)
 	}
 

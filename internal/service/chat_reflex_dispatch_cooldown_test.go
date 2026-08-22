@@ -31,7 +31,7 @@ func TestAttemptReflexDispatch_RecurrenceOverride_SuppressesRefire(t *testing.T)
 	if err != nil {
 		t.Fatalf("store.New: %v", err)
 	}
-	t.Cleanup(func() { _ = st.Close() })
+	t.Cleanup(func() { _ = st.Close(context.Background()) })
 
 	override := int64(3600) // one hour -- long enough that any realistic
 	// test runtime falls well inside it.

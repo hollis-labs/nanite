@@ -116,7 +116,7 @@ const (
 // oversight). *store.Store (internal/store/events.go) satisfies this
 // directly.
 type TraceStore interface {
-	LogEvent(sessionID, eventType, category, detail, metadata string)
+	LogEvent(ctx context.Context, sessionID, eventType, category, detail, metadata string)
 }
 
 // traceRecord is the one consistent shape every EmitScheduleFireTrace row
@@ -242,5 +242,6 @@ func EmitScheduleFireTrace(ctx context.Context, ts TraceStore, logger *slog.Logg
 		detail = in.Job.ScheduleID
 	}
 
-	ts.LogEvent("", in.Job.JobType, CategoryScheduleFire, detail, string(metaJSON))
+	// Outcome bookkeeping must survive cancellation of the dispatch it records.
+	ts.LogEvent(context.WithoutCancel(ctx), "", in.Job.JobType, CategoryScheduleFire, detail, string(metaJSON))
 }

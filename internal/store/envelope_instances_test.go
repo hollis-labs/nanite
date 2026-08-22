@@ -1,6 +1,7 @@
 package store
 
 import (
+	"context"
 	"database/sql"
 	"errors"
 	"testing"
@@ -27,7 +28,7 @@ func TestEnvelopeInstance_CreateAndGet(t *testing.T) {
 		EnvelopeType: "metric-card",
 		EnvelopeJSON: `{"kind":"envelope","version":1,"type":"metric-card"}`,
 	}
-	if err := s.CreateEnvelopeInstance(inst); err != nil {
+	if err := s.CreateEnvelopeInstance(context.Background(), inst); err != nil {
 		t.Fatalf("create: %v", err)
 	}
 	if inst.ID == "" {
@@ -37,7 +38,7 @@ func TestEnvelopeInstance_CreateAndGet(t *testing.T) {
 		t.Fatal("expected emitted_at to be assigned")
 	}
 
-	got, err := s.GetEnvelopeInstance(inst.ID)
+	got, err := s.GetEnvelopeInstance(context.Background(), inst.ID)
 	if err != nil {
 		t.Fatalf("get: %v", err)
 	}
@@ -58,16 +59,16 @@ func TestEnvelopeInstance_RecordResponse(t *testing.T) {
 		EnvelopeType: "collect_feedback",
 		EnvelopeJSON: `{}`,
 	}
-	if err := s.CreateEnvelopeInstance(inst); err != nil {
+	if err := s.CreateEnvelopeInstance(context.Background(), inst); err != nil {
 		t.Fatalf("create: %v", err)
 	}
 
 	respJSON := `{"v":1,"kind":"collect_feedback","id":"` + inst.ID + `","status":"submitted"}`
-	if err := s.RecordResponse(inst.ID, "submitted", respJSON); err != nil {
+	if err := s.RecordResponse(context.Background(), inst.ID, "submitted", respJSON); err != nil {
 		t.Fatalf("record: %v", err)
 	}
 
-	got, err := s.GetEnvelopeInstance(inst.ID)
+	got, err := s.GetEnvelopeInstance(context.Background(), inst.ID)
 	if err != nil {
 		t.Fatalf("get: %v", err)
 	}
@@ -87,13 +88,13 @@ func TestEnvelopeInstance_DuplicateResponseRejected(t *testing.T) {
 	seedEnvelopeTestSession(t, s, "s")
 
 	inst := &EnvelopeInstance{SessionID: "s", EnvelopeType: "t", EnvelopeJSON: "{}"}
-	if err := s.CreateEnvelopeInstance(inst); err != nil {
+	if err := s.CreateEnvelopeInstance(context.Background(), inst); err != nil {
 		t.Fatalf("create: %v", err)
 	}
-	if err := s.RecordResponse(inst.ID, "submitted", `{"v":1}`); err != nil {
+	if err := s.RecordResponse(context.Background(), inst.ID, "submitted", `{"v":1}`); err != nil {
 		t.Fatalf("first record: %v", err)
 	}
-	err := s.RecordResponse(inst.ID, "submitted", `{"v":1}`)
+	err := s.RecordResponse(context.Background(), inst.ID, "submitted", `{"v":1}`)
 	if !errors.Is(err, ErrEnvelopeAlreadyResponded) {
 		t.Fatalf("expected ErrEnvelopeAlreadyResponded, got %v", err)
 	}
@@ -101,7 +102,7 @@ func TestEnvelopeInstance_DuplicateResponseRejected(t *testing.T) {
 
 func TestEnvelopeInstance_GetMissing(t *testing.T) {
 	s := newTestStore(t)
-	_, err := s.GetEnvelopeInstance("nope")
+	_, err := s.GetEnvelopeInstance(context.Background(), "nope")
 	if !errors.Is(err, sql.ErrNoRows) {
 		t.Fatalf("expected sql.ErrNoRows, got %v", err)
 	}

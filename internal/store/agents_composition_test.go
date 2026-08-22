@@ -1,20 +1,23 @@
 package store
 
-import "testing"
+import (
+	"context"
+	"testing"
+)
 
 // TestCreateAgent_RoleIDModelIDNullableRoundTrip confirms the two new
 // nullable FK columns (TASKS/phase-1/02-add-agents-composition-columns.md)
 // round-trip correctly both when left unset (empty string in, empty string
-// out -- nullIfEmpty on the write path, COALESCE(...,'') on the read path)
+// out -- nullIfEmpty on the write path, COALESCE(...,”) on the read path)
 // and when explicitly set to a real value.
 func TestCreateAgent_RoleIDModelIDNullableRoundTrip(t *testing.T) {
 	s := newTestStore(t)
 
 	unset := &AgentProfile{Name: "No FKs", Slug: "no-fks", SystemPrompt: "x"}
-	if err := s.CreateAgent(unset); err != nil {
+	if err := s.CreateAgent(context.Background(), unset); err != nil {
 		t.Fatalf("CreateAgent(unset): %v", err)
 	}
-	got, err := s.GetAgent(unset.ID)
+	got, err := s.GetAgent(context.Background(), unset.ID)
 	if err != nil {
 		t.Fatalf("GetAgent(unset): %v", err)
 	}
@@ -26,7 +29,7 @@ func TestCreateAgent_RoleIDModelIDNullableRoundTrip(t *testing.T) {
 	}
 
 	role := &Role{Slug: "sme-role", Name: "SME"}
-	if err := s.CreateRole(role); err != nil {
+	if err := s.CreateRole(context.Background(), role); err != nil {
 		t.Fatalf("CreateRole: %v", err)
 	}
 
@@ -44,10 +47,10 @@ func TestCreateAgent_RoleIDModelIDNullableRoundTrip(t *testing.T) {
 		Name: "With FKs", Slug: "with-fks", SystemPrompt: "x",
 		RoleID: role.ID, ModelID: "claude-sonnet",
 	}
-	if err := s.CreateAgent(bound); err != nil {
+	if err := s.CreateAgent(context.Background(), bound); err != nil {
 		t.Fatalf("CreateAgent(bound): %v", err)
 	}
-	got, err = s.GetAgent(bound.ID)
+	got, err = s.GetAgent(context.Background(), bound.ID)
 	if err != nil {
 		t.Fatalf("GetAgent(bound): %v", err)
 	}
@@ -60,10 +63,10 @@ func TestCreateAgent_RoleIDModelIDNullableRoundTrip(t *testing.T) {
 
 	// UpdateAgent must round-trip the same two columns.
 	got.ModelID = ""
-	if err := s.UpdateAgent(got); err != nil {
+	if err := s.UpdateAgent(context.Background(), got); err != nil {
 		t.Fatalf("UpdateAgent: %v", err)
 	}
-	after, err := s.GetAgent(bound.ID)
+	after, err := s.GetAgent(context.Background(), bound.ID)
 	if err != nil {
 		t.Fatalf("GetAgent(after update): %v", err)
 	}
@@ -99,13 +102,13 @@ func TestCreateAgent_RuntimeKindDefaultedFromProvider(t *testing.T) {
 			Name: "RK", Slug: "rk-" + string(rune('a'+i)), SystemPrompt: "x",
 			DefaultProvider: c.provider,
 		}
-		if err := s.CreateAgent(a); err != nil {
+		if err := s.CreateAgent(context.Background(), a); err != nil {
 			t.Fatalf("CreateAgent(provider=%q): %v", c.provider, err)
 		}
 		if a.RuntimeKind != c.want {
 			t.Errorf("provider %q: RuntimeKind = %q, want %q", c.provider, a.RuntimeKind, c.want)
 		}
-		got, err := s.GetAgent(a.ID)
+		got, err := s.GetAgent(context.Background(), a.ID)
 		if err != nil {
 			t.Fatalf("GetAgent: %v", err)
 		}
@@ -121,7 +124,7 @@ func TestCreateAgent_RuntimeKindDefaultedFromProvider(t *testing.T) {
 func TestCreateAgent_RuntimeKindInvalidRejected(t *testing.T) {
 	s := newTestStore(t)
 	a := &AgentProfile{Name: "Bad RK", Slug: "bad-rk", SystemPrompt: "x", RuntimeKind: "pty"}
-	err := s.CreateAgent(a)
+	err := s.CreateAgent(context.Background(), a)
 	if err == nil {
 		t.Fatal("expected validation error for runtime_kind='pty', got nil")
 	}
@@ -177,7 +180,7 @@ func TestDefaultActivationModeForClass(t *testing.T) {
 func TestCreateAgent_ActivationModeDefaultsFromClass(t *testing.T) {
 	s := newTestStore(t)
 	a := &AgentProfile{Name: "Process Agent", Slug: "process-agent-default", SystemPrompt: "x", Class: "process"}
-	if err := s.CreateAgent(a); err != nil {
+	if err := s.CreateAgent(context.Background(), a); err != nil {
 		t.Fatalf("CreateAgent: %v", err)
 	}
 	if a.ActivationMode != "fresh-per-wake" {

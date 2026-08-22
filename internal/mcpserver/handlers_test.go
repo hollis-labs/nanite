@@ -24,7 +24,7 @@ func newTestServer(t *testing.T) *Server {
 		t.Fatalf("open store: %v", err)
 	}
 	t.Cleanup(func() {
-		s.Close()
+		s.Close(context.Background())
 		os.Remove(dbPath)
 	})
 	return New(s, "test-session", nil, "", "", nil)

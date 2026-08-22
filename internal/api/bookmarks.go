@@ -15,7 +15,7 @@ import (
 func (a *API) handleListBookmarks(w http.ResponseWriter, r *http.Request) {
 	sessionID := r.PathValue("id")
 
-	bookmarks, err := a.Services.Store.ListBookmarks(sessionID)
+	bookmarks, err := a.Services.Store.ListBookmarks(r.Context(), sessionID)
 	if err != nil {
 		a.errorResp(w, http.StatusInternalServerError, err.Error())
 		return
@@ -42,7 +42,7 @@ func (a *API) handleCreateBookmark(w http.ResponseWriter, r *http.Request) {
 		SessionID: req.SessionID,
 		Note:      req.Note,
 	}
-	if err := a.Services.Store.CreateBookmark(b); err != nil {
+	if err := a.Services.Store.CreateBookmark(r.Context(), b); err != nil {
 		a.errorResp(w, http.StatusInternalServerError, err.Error())
 		return
 	}
@@ -61,13 +61,13 @@ func (a *API) handleDeleteBookmark(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 
 	// Look up bookmark before deleting so we can emit the event with context.
-	bookmark, err := a.Services.Store.GetBookmark(id)
+	bookmark, err := a.Services.Store.GetBookmark(r.Context(), id)
 	if err != nil {
 		a.errorResp(w, http.StatusNotFound, err.Error())
 		return
 	}
 
-	if err := a.Services.Store.DeleteBookmark(id); err != nil {
+	if err := a.Services.Store.DeleteBookmark(r.Context(), id); err != nil {
 		a.errorResp(w, http.StatusInternalServerError, err.Error())
 		return
 	}
@@ -86,7 +86,7 @@ func (a *API) handleToggleBookmark(w http.ResponseWriter, r *http.Request) {
 	messageID := r.PathValue("id")
 
 	// Check if bookmark exists for this message.
-	existing, err := a.Services.Store.GetBookmarkByMessage(messageID)
+	existing, err := a.Services.Store.GetBookmarkByMessage(r.Context(), messageID)
 	if err != nil && err != sql.ErrNoRows {
 		a.errorResp(w, http.StatusInternalServerError, err.Error())
 		return
@@ -94,7 +94,7 @@ func (a *API) handleToggleBookmark(w http.ResponseWriter, r *http.Request) {
 
 	if existing != nil {
 		// Delete existing bookmark.
-		if err := a.Services.Store.DeleteBookmark(existing.ID); err != nil {
+		if err := a.Services.Store.DeleteBookmark(r.Context(), existing.ID); err != nil {
 			a.errorResp(w, http.StatusInternalServerError, err.Error())
 			return
 		}
@@ -114,7 +114,7 @@ func (a *API) handleToggleBookmark(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Need session_id from the message.
-	msg, err := a.Services.Store.GetMessage(messageID)
+	msg, err := a.Services.Store.GetMessage(r.Context(), messageID)
 	if err != nil {
 		a.errorResp(w, http.StatusNotFound, "message not found")
 		return
@@ -124,7 +124,7 @@ func (a *API) handleToggleBookmark(w http.ResponseWriter, r *http.Request) {
 		MessageID: messageID,
 		SessionID: msg.SessionID,
 	}
-	if err := a.Services.Store.CreateBookmark(b); err != nil {
+	if err := a.Services.Store.CreateBookmark(r.Context(), b); err != nil {
 		a.errorResp(w, http.StatusInternalServerError, err.Error())
 		return
 	}
@@ -145,14 +145,14 @@ func (a *API) handleToggleBookmark(w http.ResponseWriter, r *http.Request) {
 func (a *API) handleAutotitleBookmark(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 
-	bookmark, err := a.Services.Store.GetBookmark(id)
+	bookmark, err := a.Services.Store.GetBookmark(r.Context(), id)
 	if err != nil {
 		a.errorResp(w, http.StatusNotFound, "bookmark not found")
 		return
 	}
 
 	// Get the bookmarked message content.
-	msg, err := a.Services.Store.GetMessage(bookmark.MessageID)
+	msg, err := a.Services.Store.GetMessage(r.Context(), bookmark.MessageID)
 	if err != nil {
 		a.errorResp(w, http.StatusNotFound, "bookmarked message not found")
 		return
@@ -188,7 +188,7 @@ func (a *API) handleAutotitleBookmark(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := a.Services.Store.UpdateBookmarkNote(id, title); err != nil {
+	if err := a.Services.Store.UpdateBookmarkNote(ctx, id, title); err != nil {
 		a.errorResp(w, http.StatusInternalServerError, err.Error())
 		return
 	}

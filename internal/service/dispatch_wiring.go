@@ -24,7 +24,7 @@ type SubagentSpawner interface {
 // the assistant text from a completed sync subagent run. *store.Store
 // satisfies it.
 type MessageReader interface {
-	ListMessages(sessionID string, limit int) ([]store.Message, error)
+	ListMessages(ctx context.Context, sessionID string, limit int) ([]store.Message, error)
 }
 
 // dispatchSpawner adapts the subagent.Service Spawn flow to the
@@ -131,7 +131,7 @@ func (d *dispatchSpawner) recoverSummary(run *subagent.Run) string {
 	if d.messages == nil || run == nil || run.ChildSessionID == "" {
 		return ""
 	}
-	msgs, err := d.messages.ListMessages(run.ChildSessionID, 20)
+	msgs, err := d.messages.ListMessages(context.TODO() /* TODO(ctx-sweep): no ctx available at this call site */, run.ChildSessionID, 20)
 	if err != nil {
 		return ""
 	}

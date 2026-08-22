@@ -13,7 +13,7 @@ import (
 func makeTestWorkflowRun(t *testing.T, s *Store) string {
 	t.Helper()
 	id := "wfr-" + ulid.Make().String()
-	if err := s.CreateWorkflowRun(&WorkflowRunRow{ID: id}); err != nil {
+	if err := s.CreateWorkflowRun(context.Background(), &WorkflowRunRow{ID: id}); err != nil {
 		t.Fatalf("CreateWorkflowRun: %v", err)
 	}
 	return id
@@ -180,10 +180,10 @@ func TestTeamRunMember_InsertValidation(t *testing.T) {
 	runID := makeTestWorkflowRun(t, s)
 
 	cases := []TeamRunMember{
-		{SlotName: "engineer", AgentID: agent.ID, SessionID: session.ID},               // missing WorkflowRunID
-		{WorkflowRunID: runID, AgentID: agent.ID, SessionID: session.ID},               // missing SlotName
-		{WorkflowRunID: runID, SlotName: "engineer", SessionID: session.ID},            // missing AgentID
-		{WorkflowRunID: runID, SlotName: "engineer", AgentID: agent.ID},                // missing SessionID
+		{SlotName: "engineer", AgentID: agent.ID, SessionID: session.ID},    // missing WorkflowRunID
+		{WorkflowRunID: runID, AgentID: agent.ID, SessionID: session.ID},    // missing SlotName
+		{WorkflowRunID: runID, SlotName: "engineer", SessionID: session.ID}, // missing AgentID
+		{WorkflowRunID: runID, SlotName: "engineer", AgentID: agent.ID},     // missing SessionID
 	}
 	for i, c := range cases {
 		if _, err := s.InsertTeamRunMember(ctx, c); err == nil {

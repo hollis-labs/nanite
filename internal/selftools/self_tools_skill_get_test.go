@@ -52,7 +52,7 @@ func newSkillGetTestStore(t *testing.T) *store.Store {
 	if err != nil {
 		t.Fatalf("store.New: %v", err)
 	}
-	t.Cleanup(func() { _ = s.Close() })
+	t.Cleanup(func() { _ = s.Close(context.Background()) })
 	return s
 }
 
@@ -67,7 +67,7 @@ func newSkillGetTestVendor(t *testing.T) *skillvendor.Store {
 
 // writeSkillGetFixture writes a real SKILL.md package to a fresh temp
 // directory: one required `who` parameter (proves static-arg substitution),
-// plus a real, non-fenced `` !`cmd` `` marker (proves the Gate/sandbox
+// plus a real, non-fenced “ !`cmd` “ marker (proves the Gate/sandbox
 // execution leg, not just composition/parameter resolution).
 func writeSkillGetFixture(t *testing.T, slug string) string {
 	t.Helper()
@@ -101,7 +101,7 @@ func installSkillGetFixture(t *testing.T, idx *store.Store, vendor *skillvendor.
 	sk := def.ToStoreSkill()
 	sk.ID = ""
 	sk.ContentHash = wr.Address
-	if err := idx.CreateSkill(sk); err != nil {
+	if err := idx.CreateSkill(context.Background(), sk); err != nil {
 		t.Fatalf("CreateSkill(%s): %v", dir, err)
 	}
 	return sk
@@ -127,7 +127,7 @@ func reinstallSkillGetFixture(t *testing.T, idx *store.Store, vendor *skillvendo
 	}
 	existing.ContentHash = wr.Address
 	existing.Version++
-	if err := idx.UpdateSkill(existing); err != nil {
+	if err := idx.UpdateSkill(context.Background(), existing); err != nil {
 		t.Fatalf("UpdateSkill(%s): %v", dir, err)
 	}
 	return existing
@@ -136,7 +136,7 @@ func reinstallSkillGetFixture(t *testing.T, idx *store.Store, vendor *skillvendo
 func makeSkillGetTestAgent(t *testing.T, s *store.Store, slug string) *store.AgentProfile {
 	t.Helper()
 	a := &store.AgentProfile{Name: "Skill Get Test Agent " + slug, Slug: slug, SystemPrompt: "test"}
-	if err := s.CreateAgent(a); err != nil {
+	if err := s.CreateAgent(context.Background(), a); err != nil {
 		t.Fatalf("CreateAgent: %v", err)
 	}
 	return a
@@ -324,7 +324,7 @@ func TestCallSkillGet_DisabledSkill_Refused(t *testing.T) {
 	dir := writeSkillGetFixture(t, "skill-get-disabled")
 	sk := installSkillGetFixture(t, idx, vendor, dir)
 	sk.Enabled = false
-	if err := idx.UpdateSkill(sk); err != nil {
+	if err := idx.UpdateSkill(context.Background(), sk); err != nil {
 		t.Fatalf("UpdateSkill (disable): %v", err)
 	}
 	agent := makeSkillGetTestAgent(t, idx, "skill-get-disabled-agent")

@@ -1,6 +1,7 @@
 package store
 
 import (
+	"context"
 	"crypto/rand"
 	"encoding/base32"
 	"encoding/json"
@@ -424,9 +425,9 @@ func scanAgent(scanner interface{ Scan(...any) error }, a *AgentProfile) error {
 }
 
 // GetAgentBySlug returns an agent profile by its slug.
-func (s *Store) GetAgentBySlug(slug string) (*AgentProfile, error) {
+func (s *Store) GetAgentBySlug(ctx context.Context, slug string) (*AgentProfile, error) {
 	var a AgentProfile
-	row := s.DB.QueryRow(`SELECT `+agentColumns+` FROM agent_profiles WHERE slug = ?`, slug)
+	row := s.DB.QueryRowContext(ctx, `SELECT `+agentColumns+` FROM agent_profiles WHERE slug = ?`, slug)
 	if err := scanAgent(row, &a); err != nil {
 		return nil, fmt.Errorf("get agent by slug %s: %w", slug, err)
 	}
@@ -434,9 +435,9 @@ func (s *Store) GetAgentBySlug(slug string) (*AgentProfile, error) {
 }
 
 // GetAgent returns an agent profile by ID.
-func (s *Store) GetAgent(id string) (*AgentProfile, error) {
+func (s *Store) GetAgent(ctx context.Context, id string) (*AgentProfile, error) {
 	var a AgentProfile
-	row := s.DB.QueryRow(`SELECT `+agentColumns+` FROM agent_profiles WHERE id = ?`, id)
+	row := s.DB.QueryRowContext(ctx, `SELECT `+agentColumns+` FROM agent_profiles WHERE id = ?`, id)
 	if err := scanAgent(row, &a); err != nil {
 		return nil, fmt.Errorf("get agent %s: %w", id, err)
 	}
@@ -444,7 +445,7 @@ func (s *Store) GetAgent(id string) (*AgentProfile, error) {
 }
 
 // CreateAgent inserts a new agent profile.
-func (s *Store) CreateAgent(a *AgentProfile) error {
+func (s *Store) CreateAgent(ctx context.Context, a *AgentProfile) error {
 	if a.Slug == "user" {
 		return fmt.Errorf("agent slug %q is reserved (messaging user sentinel)", a.Slug)
 	}
@@ -542,7 +543,7 @@ func (s *Store) CreateAgent(a *AgentProfile) error {
 		return fmt.Errorf("create agent: %w", err)
 	}
 
-	_, err := s.DB.Exec(
+	_, err := s.DB.ExecContext(ctx,
 		`INSERT INTO agent_profiles (id, name, slug, avatar, system_prompt, description,
 		                              modes, default_model, default_provider,
 		                              mcp_servers, tool_permissions, can_execute, settings,
@@ -610,13 +611,13 @@ func (s *Store) CreateAgent(a *AgentProfile) error {
 // agent_known_skills is now the sole per-agent skill attachment table, and
 // its own cleanup line below already covers it.
 // Messages have their agent_id nullified to preserve user data.
-func (s *Store) DeleteAgent(slug string) error {
-	agent, err := s.GetAgentBySlug(slug)
+func (s *Store) DeleteAgent(ctx context.Context, slug string) error {
+	agent, err := s.GetAgentBySlug(ctx, slug)
 	if err != nil {
 		return nil // agent doesn't exist — nothing to delete
 	}
 
-	tx, err := s.DB.Begin()
+	tx, err := s.DB.BeginTx(ctx, nil)
 	if err != nil {
 		return fmt.Errorf("begin tx: %w", err)
 	}
@@ -657,17 +658,17 @@ func (s *Store) DeleteAgent(slug string) error {
 		"DELETE FROM durable_agent_instances WHERE profile_id = ?",
 	}
 	for _, q := range cleanups {
-		if _, err := tx.Exec(q, agent.ID); err != nil {
+		if _, err := tx.ExecContext(ctx, q, agent.ID); err != nil {
 			return fmt.Errorf("cleanup agent references (%s): %w", q, err)
 		}
 	}
 
 	// Nullify agent_id on messages (preserve messages, just unlink the agent).
-	if _, err := tx.Exec("UPDATE messages SET agent_id = NULL WHERE agent_id = ?", agent.ID); err != nil {
+	if _, err := tx.ExecContext(ctx, "UPDATE messages SET agent_id = NULL WHERE agent_id = ?", agent.ID); err != nil {
 		return fmt.Errorf("nullify messages for agent %s: %w", slug, err)
 	}
 
-	if _, err := tx.Exec("DELETE FROM agent_profiles WHERE id = ?", agent.ID); err != nil {
+	if _, err := tx.ExecContext(ctx, "DELETE FROM agent_profiles WHERE id = ?", agent.ID); err != nil {
 		return fmt.Errorf("delete agent %s: %w", slug, err)
 	}
 
@@ -676,7 +677,7 @@ func (s *Store) DeleteAgent(slug string) error {
 
 // UpdateAgent updates mutable fields on an agent profile.
 // It recomputes agent_hash and bumps version if content fields changed.
-func (s *Store) UpdateAgent(a *AgentProfile) error {
+func (s *Store) UpdateAgent(ctx context.Context, a *AgentProfile) error {
 	now := time.Now().UTC().Format(time.RFC3339)
 
 	// Recompute hash; bump version if content changed.
@@ -721,7 +722,7 @@ func (s *Store) UpdateAgent(a *AgentProfile) error {
 	// Wave 2 cleanup (CW-20260512-0112: DELETE WHERE source != 'internal')
 	// would wipe rows whose body was re-synced from internal/agent/builtin/
 	// profiles/*.md but whose source column never flipped.
-	_, err := s.DB.Exec(
+	_, err := s.DB.ExecContext(ctx,
 		`UPDATE agent_profiles SET name = ?, slug = ?, avatar = ?, system_prompt = ?, description = ?,
 		        modes = ?, default_model = ?, default_provider = ?,
 		        mcp_servers = ?, tool_permissions = ?, can_execute = ?, settings = ?,
@@ -785,7 +786,7 @@ func (s *Store) UpdateAgent(a *AgentProfile) error {
 // non-empty value must reference a real roles/consumers/models row --
 // enforced by the column's own FK constraint (this codebase runs with
 // PRAGMA foreign_keys=1) and surfaced here as a wrapped error.
-func (s *Store) UpdateAgentComposition(agentID string, roleID, consumerID, modelID *string) error {
+func (s *Store) UpdateAgentComposition(ctx context.Context, agentID string, roleID, consumerID, modelID *string) error {
 	if agentID == "" {
 		return fmt.Errorf("update agent composition: agent_id is required")
 	}
@@ -808,7 +809,7 @@ func (s *Store) UpdateAgentComposition(agentID string, roleID, consumerID, model
 	}
 	args = append(args, agentID)
 	query := "UPDATE agent_profiles SET " + strings.Join(sets, ", ") + " WHERE id = ?"
-	res, err := s.DB.Exec(query, args...)
+	res, err := s.DB.ExecContext(ctx, query, args...)
 	if err != nil {
 		return fmt.Errorf("update agent composition: %w", err)
 	}
@@ -838,12 +839,12 @@ func (s *Store) UpdateAgentComposition(agentID string, roleID, consumerID, model
 // write, so a caller of this narrower path gets the identical rejection
 // for an invalid value (or an explicit transport set without protocol=
 // "acp") instead of a raw CHECK-constraint failure.
-func (s *Store) UpdateAgentACPConfig(agentID string, protocol, transport *string) error {
+func (s *Store) UpdateAgentACPConfig(ctx context.Context, agentID string, protocol, transport *string) error {
 	if agentID == "" {
 		return fmt.Errorf("update agent acp config: agent_id is required")
 	}
 	if protocol != nil || transport != nil {
-		existing, err := s.GetAgent(agentID)
+		existing, err := s.GetAgent(ctx, agentID)
 		if err != nil {
 			return fmt.Errorf("update agent acp config: %w", err)
 		}
@@ -874,7 +875,7 @@ func (s *Store) UpdateAgentACPConfig(agentID string, protocol, transport *string
 	}
 	args = append(args, agentID)
 	query := "UPDATE agent_profiles SET " + strings.Join(sets, ", ") + " WHERE id = ?"
-	res, err := s.DB.Exec(query, args...)
+	res, err := s.DB.ExecContext(ctx, query, args...)
 	if err != nil {
 		return fmt.Errorf("update agent acp config: %w", err)
 	}
@@ -898,9 +899,9 @@ type SessionAgent struct {
 }
 
 // GetSessionPrimaryAgent returns the primary agent for a session.
-func (s *Store) GetSessionPrimaryAgent(sessionID string) (*SessionAgent, error) {
+func (s *Store) GetSessionPrimaryAgent(ctx context.Context, sessionID string) (*SessionAgent, error) {
 	var sa SessionAgent
-	err := s.DB.QueryRow(
+	err := s.DB.QueryRowContext(ctx,
 		`SELECT session_id, agent_id, mode, joined_at, is_primary
 		 FROM session_agents WHERE session_id = ? AND is_primary = TRUE`, sessionID,
 	).Scan(&sa.SessionID, &sa.AgentID, &sa.Mode, &sa.JoinedAt, &sa.IsPrimary)
@@ -911,8 +912,8 @@ func (s *Store) GetSessionPrimaryAgent(sessionID string) (*SessionAgent, error) 
 }
 
 // SetSessionAgentMode updates the mode for a specific agent in a session.
-func (s *Store) SetSessionAgentMode(sessionID, agentID, mode string) error {
-	_, err := s.DB.Exec(
+func (s *Store) SetSessionAgentMode(ctx context.Context, sessionID, agentID, mode string) error {
+	_, err := s.DB.ExecContext(ctx,
 		`UPDATE session_agents SET mode = ? WHERE session_id = ? AND agent_id = ?`,
 		mode, sessionID, agentID,
 	)
@@ -923,9 +924,9 @@ func (s *Store) SetSessionAgentMode(sessionID, agentID, mode string) error {
 }
 
 // EnsureSessionAgent upserts a session_agents record.
-func (s *Store) EnsureSessionAgent(sessionID, agentID, mode string, isPrimary bool) error {
+func (s *Store) EnsureSessionAgent(ctx context.Context, sessionID, agentID, mode string, isPrimary bool) error {
 	now := time.Now().UTC().Format(time.RFC3339)
-	_, err := s.DB.Exec(
+	_, err := s.DB.ExecContext(ctx,
 		`INSERT INTO session_agents (session_id, agent_id, mode, joined_at, is_primary)
 		 VALUES (?, ?, ?, ?, ?)
 		 ON CONFLICT(session_id, agent_id) DO UPDATE SET mode = excluded.mode, is_primary = excluded.is_primary`,
@@ -938,8 +939,8 @@ func (s *Store) EnsureSessionAgent(sessionID, agentID, mode string, isPrimary bo
 }
 
 // ListSessionAgents returns all agents in a given session.
-func (s *Store) ListSessionAgents(sessionID string) ([]SessionAgent, error) {
-	rows, err := s.DB.Query(
+func (s *Store) ListSessionAgents(ctx context.Context, sessionID string) ([]SessionAgent, error) {
+	rows, err := s.DB.QueryContext(ctx,
 		`SELECT session_id, agent_id, mode, joined_at, is_primary
 		 FROM session_agents WHERE session_id = ?
 		 ORDER BY joined_at`, sessionID,
@@ -962,8 +963,8 @@ func (s *Store) ListSessionAgents(sessionID string) ([]SessionAgent, error) {
 
 // DeleteSessionAgent removes an agent from a session.
 // Returns an error if the row does not exist.
-func (s *Store) DeleteSessionAgent(sessionID, agentID string) error {
-	res, err := s.DB.Exec(
+func (s *Store) DeleteSessionAgent(ctx context.Context, sessionID, agentID string) error {
+	res, err := s.DB.ExecContext(ctx,
 		`DELETE FROM session_agents WHERE session_id = ? AND agent_id = ?`,
 		sessionID, agentID,
 	)
@@ -981,8 +982,8 @@ func (s *Store) DeleteSessionAgent(sessionID, agentID string) error {
 }
 
 // ListAgents returns all agent profiles.
-func (s *Store) ListAgents() ([]AgentProfile, error) {
-	rows, err := s.DB.Query(`SELECT ` + agentColumns + ` FROM agent_profiles ORDER BY name`)
+func (s *Store) ListAgents(ctx context.Context) ([]AgentProfile, error) {
+	rows, err := s.DB.QueryContext(ctx, `SELECT `+agentColumns+` FROM agent_profiles ORDER BY name`)
 	if err != nil {
 		return nil, fmt.Errorf("list agents: %w", err)
 	}
@@ -1000,8 +1001,8 @@ func (s *Store) ListAgents() ([]AgentProfile, error) {
 }
 
 // ListAgentsBySource returns all agent profiles with the given source.
-func (s *Store) ListAgentsBySource(source string) ([]AgentProfile, error) {
-	rows, err := s.DB.Query(`SELECT `+agentColumns+` FROM agent_profiles WHERE source = ? ORDER BY name`, source)
+func (s *Store) ListAgentsBySource(ctx context.Context, source string) ([]AgentProfile, error) {
+	rows, err := s.DB.QueryContext(ctx, `SELECT `+agentColumns+` FROM agent_profiles WHERE source = ? ORDER BY name`, source)
 	if err != nil {
 		return nil, fmt.Errorf("list agents by source: %w", err)
 	}
@@ -1029,8 +1030,8 @@ func (s *Store) ListAgentsBySource(source string) ([]AgentProfile, error) {
 // mirroring CountAgentsByRoleID's existing role_id lookup shape (used
 // today only as a plugin-unload deletion guard) but returning full rows
 // instead of a count.
-func (s *Store) ListAgentsByRoleID(roleID string) ([]AgentProfile, error) {
-	rows, err := s.DB.Query(`SELECT `+agentColumns+` FROM agent_profiles WHERE role_id = ? ORDER BY name`, roleID)
+func (s *Store) ListAgentsByRoleID(ctx context.Context, roleID string) ([]AgentProfile, error) {
+	rows, err := s.DB.QueryContext(ctx, `SELECT `+agentColumns+` FROM agent_profiles WHERE role_id = ? ORDER BY name`, roleID)
 	if err != nil {
 		return nil, fmt.Errorf("list agents by role_id: %w", err)
 	}
@@ -1055,8 +1056,8 @@ func (s *Store) ListAgentsByRoleID(roleID string) ([]AgentProfile, error) {
 // authoritative rather than an in-memory host-side map so the sweep is
 // correct even for a plugin uninstalled while disabled (never loaded into
 // the current host process at all).
-func (s *Store) ListAgentsByPluginID(pluginID string) ([]AgentProfile, error) {
-	rows, err := s.DB.Query(`SELECT `+agentColumns+` FROM agent_profiles WHERE plugin_id = ? ORDER BY slug`, pluginID)
+func (s *Store) ListAgentsByPluginID(ctx context.Context, pluginID string) ([]AgentProfile, error) {
+	rows, err := s.DB.QueryContext(ctx, `SELECT `+agentColumns+` FROM agent_profiles WHERE plugin_id = ? ORDER BY slug`, pluginID)
 	if err != nil {
 		return nil, fmt.Errorf("list agents by plugin_id: %w", err)
 	}
@@ -1079,9 +1080,9 @@ func (s *Store) ListAgentsByPluginID(pluginID string) ([]AgentProfile, error) {
 // (e.g. an operator or a different plugin bound to a reused, shared role --
 // see agent_profiles.go's resolveOrCreatePluginRole) is never removed out
 // from under it.
-func (s *Store) CountAgentsByRoleID(roleID string) (int, error) {
+func (s *Store) CountAgentsByRoleID(ctx context.Context, roleID string) (int, error) {
 	var n int
-	if err := s.DB.QueryRow(`SELECT COUNT(*) FROM agent_profiles WHERE role_id = ?`, roleID).Scan(&n); err != nil {
+	if err := s.DB.QueryRowContext(ctx, `SELECT COUNT(*) FROM agent_profiles WHERE role_id = ?`, roleID).Scan(&n); err != nil {
 		return 0, fmt.Errorf("count agents by role_id: %w", err)
 	}
 	return n, nil
@@ -1089,11 +1090,11 @@ func (s *Store) CountAgentsByRoleID(roleID string) (int, error) {
 
 // UpsertAgentBySlug inserts or updates an agent profile by slug.
 // Used by framework sync plugins (agentrc, etc.) to keep DB in sync with config.
-func (s *Store) UpsertAgentBySlug(a *AgentProfile) error {
-	existing, err := s.GetAgentBySlug(a.Slug)
+func (s *Store) UpsertAgentBySlug(ctx context.Context, a *AgentProfile) error {
+	existing, err := s.GetAgentBySlug(ctx, a.Slug)
 	if err != nil {
 		// Not found — create.
-		return s.CreateAgent(a)
+		return s.CreateAgent(ctx, a)
 	}
 	// Found — update, preserving the ID.
 	a.ID = existing.ID
@@ -1107,26 +1108,26 @@ func (s *Store) UpsertAgentBySlug(a *AgentProfile) error {
 	if a.URNAliases == "" || a.URNAliases == "[]" {
 		a.URNAliases = existing.URNAliases
 	}
-	return s.UpdateAgent(a)
+	return s.UpdateAgent(ctx, a)
 }
 
 // GetAgentByURN resolves an URN against agent_profiles, checking both
 // the primary urn column AND the urn_aliases JSON array. Returns
 // (agent, true) on hit, (nil, false) on miss. FU-28.
-func (s *Store) GetAgentByURN(urn string) (*AgentProfile, bool, error) {
+func (s *Store) GetAgentByURN(ctx context.Context, urn string) (*AgentProfile, bool, error) {
 	if urn == "" {
 		return nil, false, nil
 	}
 	// First try the primary urn column (indexed by migration 070).
 	var a AgentProfile
-	row := s.DB.QueryRow(`SELECT `+agentColumns+` FROM agent_profiles WHERE urn = ?`, urn)
+	row := s.DB.QueryRowContext(ctx, `SELECT `+agentColumns+` FROM agent_profiles WHERE urn = ?`, urn)
 	if err := scanAgent(row, &a); err == nil {
 		return &a, true, nil
 	}
 	// Fall back to alias lookup. The urn_aliases column is a JSON array
 	// of strings; SQLite's LIKE pattern matches the quoted form.
 	pattern := `%"` + urn + `"%`
-	rows, err := s.DB.Query(`SELECT `+agentColumns+` FROM agent_profiles WHERE urn_aliases LIKE ?`, pattern)
+	rows, err := s.DB.QueryContext(ctx, `SELECT `+agentColumns+` FROM agent_profiles WHERE urn_aliases LIKE ?`, pattern)
 	if err != nil {
 		return nil, false, fmt.Errorf("get agent by urn alias %s: %w", urn, err)
 	}
@@ -1158,7 +1159,7 @@ func (s *Store) GetAgentByURN(urn string) (*AgentProfile, bool, error) {
 // filters. Empty string means no filter on that axis. tagsAny: empty
 // slice means no tag filter; non-empty matches rows that carry ANY of
 // the supplied tags. Returns sorted by slug ASC. FU-28.
-func (s *Store) ListAgentsFilter(class, activationMode, status string, tagsAny []string) ([]AgentProfile, error) {
+func (s *Store) ListAgentsFilter(ctx context.Context, class, activationMode, status string, tagsAny []string) ([]AgentProfile, error) {
 	var clauses []string
 	var args []any
 	if class != "" {
@@ -1194,7 +1195,7 @@ func (s *Store) ListAgentsFilter(class, activationMode, status string, tagsAny [
 		query += " WHERE " + strings.Join(clauses, " AND ")
 	}
 	query += " ORDER BY slug ASC"
-	rows, err := s.DB.Query(query, args...)
+	rows, err := s.DB.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, fmt.Errorf("list agents filter: %w", err)
 	}
@@ -1214,20 +1215,20 @@ func (s *Store) ListAgentsFilter(class, activationMode, status string, tagsAny [
 // (slug-based) but for direct-ID callers. Returns nil if the row
 // didn't exist. Tombstones for durable=1 rows are deferred future work;
 // today a DELETE wipes the row regardless of durable. FU-28.
-func (s *Store) DeleteAgentByID(id string) error {
-	a, err := s.GetAgent(id)
+func (s *Store) DeleteAgentByID(ctx context.Context, id string) error {
+	a, err := s.GetAgent(ctx, id)
 	if err != nil {
 		return nil
 	}
-	return s.DeleteAgent(a.Slug)
+	return s.DeleteAgent(ctx, a.Slug)
 }
 
 // CloneAgent copies an existing agent profile under a new slug + name,
 // mints a fresh URN, resets agent_hash + version=1, and returns the new
 // AgentProfile. Tags, role_tools, system_prompt are copied verbatim.
 // FU-28.
-func (s *Store) CloneAgent(srcID, newSlug, newName string) (*AgentProfile, error) {
-	src, err := s.GetAgent(srcID)
+func (s *Store) CloneAgent(ctx context.Context, srcID, newSlug, newName string) (*AgentProfile, error) {
+	src, err := s.GetAgent(ctx, srcID)
 	if err != nil {
 		return nil, fmt.Errorf("clone agent: lookup source %s: %w", srcID, err)
 	}
@@ -1250,7 +1251,7 @@ func (s *Store) CloneAgent(srcID, newSlug, newName string) (*AgentProfile, error
 	clone.Source = "user"
 	clone.SourceRef = ""
 	clone.ImportedAt = ""
-	if err := s.CreateAgent(&clone); err != nil {
+	if err := s.CreateAgent(ctx, &clone); err != nil {
 		return nil, fmt.Errorf("clone agent: create: %w", err)
 	}
 	return &clone, nil
@@ -1258,8 +1259,8 @@ func (s *Store) CloneAgent(srcID, newSlug, newName string) (*AgentProfile, error
 
 // ListSessionsByAgentID returns all sessions linked to an agent via
 // the session_agents junction table, ordered by joined_at DESC. FU-28.
-func (s *Store) ListSessionsByAgentID(agentID string) ([]SessionAgent, error) {
-	rows, err := s.DB.Query(
+func (s *Store) ListSessionsByAgentID(ctx context.Context, agentID string) ([]SessionAgent, error) {
+	rows, err := s.DB.QueryContext(ctx,
 		`SELECT sa.session_id, sa.agent_id, sa.mode, sa.joined_at, sa.is_primary
 		 FROM session_agents sa
 		 WHERE sa.agent_id = ?
@@ -1283,8 +1284,8 @@ func (s *Store) ListSessionsByAgentID(agentID string) ([]SessionAgent, error) {
 // SetSessionStatusByAgentID updates sessions.status for every session
 // linked to the given agent. Returns the number of rows updated.
 // Spike-scope helper for FU-28 wake/sleep/shutdown handlers. FU-28.
-func (s *Store) SetSessionStatusByAgentID(agentID, status string) (int64, error) {
-	res, err := s.DB.Exec(
+func (s *Store) SetSessionStatusByAgentID(ctx context.Context, agentID, status string) (int64, error) {
+	res, err := s.DB.ExecContext(ctx,
 		`UPDATE sessions SET status = ?, updated_at = CURRENT_TIMESTAMP
 		 WHERE id IN (SELECT session_id FROM session_agents WHERE agent_id = ?)`,
 		status, agentID,

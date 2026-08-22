@@ -128,7 +128,7 @@ func TestSelectForAgent_LateAlphabetAllowlistedToolSurvivesCap(t *testing.T) {
 	}
 
 	agent := &store.AgentProfile{Name: "Orchestrator", Slug: "orchestrator", SystemPrompt: "Test."}
-	if err := st.CreateAgent(agent); err != nil {
+	if err := st.CreateAgent(context.Background(), agent); err != nil {
 		t.Fatalf("CreateAgent: %v", err)
 	}
 	if err := st.GrantAgentTool(ctx, agent.ID, wantedTool.ID, "explicit"); err != nil {
@@ -184,7 +184,7 @@ func TestSelectForAgent_AlwaysIncludedSurvivesZeroGrants(t *testing.T) {
 	SyncKnownTools(ctx, st, append(append([]llmtypes.ToolDefinition{}, catalog...), toolclient.RequestToolsMetaTool()), func(string) bool { return true })
 
 	agent := &store.AgentProfile{Name: "Fresh", Slug: "fresh-agent", SystemPrompt: "Test."}
-	if err := st.CreateAgent(agent); err != nil {
+	if err := st.CreateAgent(context.Background(), agent); err != nil {
 		t.Fatalf("CreateAgent: %v", err)
 	}
 	// Deliberately NO agent_tools grants and NO legacy backfill run.
@@ -226,7 +226,7 @@ func TestFilterToolsByAgentTools(t *testing.T) {
 	SyncKnownTools(ctx, st, catalog, func(string) bool { return true })
 
 	agent := &store.AgentProfile{Name: "Grants", Slug: "grants-agent", SystemPrompt: "Test."}
-	if err := st.CreateAgent(agent); err != nil {
+	if err := st.CreateAgent(context.Background(), agent); err != nil {
 		t.Fatalf("CreateAgent: %v", err)
 	}
 	createTool, err := st.GetKnownToolByName(ctx, "engine_task_create")
@@ -249,7 +249,7 @@ func TestFilterToolsByAgentTools(t *testing.T) {
 
 	// Zero grants -> zero tools (no live "unrestricted" bypass, item 4).
 	other := &store.AgentProfile{Name: "NoGrants", Slug: "no-grants-agent", SystemPrompt: "Test."}
-	if err := st.CreateAgent(other); err != nil {
+	if err := st.CreateAgent(context.Background(), other); err != nil {
 		t.Fatalf("CreateAgent: %v", err)
 	}
 	if got := filterToolsByAgentTools(ctx, st, other.ID, catalog); len(got) != 0 {

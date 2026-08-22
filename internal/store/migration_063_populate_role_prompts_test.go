@@ -40,7 +40,7 @@ func TestMigration063_SeedsFiveRolePrompts(t *testing.T) {
 	if err != nil {
 		t.Fatalf("store.New: %v", err)
 	}
-	defer s.Close()
+	defer s.Close(context.Background())
 
 	type want struct {
 		slug           string
@@ -86,7 +86,7 @@ func TestMigration063_SeedsFiveRolePrompts(t *testing.T) {
 	}
 
 	for _, c := range cases {
-		got, err := s.GetAgentBySlug(c.slug)
+		got, err := s.GetAgentBySlug(context.Background(), c.slug)
 		if err != nil {
 			t.Errorf("GetAgentBySlug %q after migration 063: %v", c.slug, err)
 			continue
@@ -146,9 +146,9 @@ func TestMigration063_AnalystDeniesAllTools(t *testing.T) {
 	if err != nil {
 		t.Fatalf("store.New: %v", err)
 	}
-	defer s.Close()
+	defer s.Close(context.Background())
 
-	got, err := s.GetAgentBySlug("analyst")
+	got, err := s.GetAgentBySlug(context.Background(), "analyst")
 	if err != nil {
 		t.Fatalf("GetAgentBySlug analyst: %v", err)
 	}
@@ -201,9 +201,11 @@ func TestMigration063_RolePromptsExcludeUniversalRules(t *testing.T) {
 	if err != nil {
 		t.Fatalf("store.New: %v", err)
 	}
-	defer s.Close()
+	defer s.Close(context.
 
-	// Sentinels lifted verbatim from internal/chat/universal_rules.go.
+		// Sentinels lifted verbatim from internal/chat/universal_rules.go.
+		Background())
+
 	universalSentinels := []string{
 		"## Universal rules",
 		"Refuse rather than fabricate",
@@ -213,7 +215,7 @@ func TestMigration063_RolePromptsExcludeUniversalRules(t *testing.T) {
 	}
 
 	for _, slug := range []string{"researcher", "analyst", "file-backend", "backend", "background-job"} {
-		got, err := s.GetAgentBySlug(slug)
+		got, err := s.GetAgentBySlug(context.Background(), slug)
 		if err != nil {
 			t.Errorf("GetAgentBySlug %q: %v", slug, err)
 			continue

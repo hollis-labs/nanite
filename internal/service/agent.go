@@ -81,45 +81,47 @@ func NewAgentService(cfg AgentServiceConfig) AgentService {
 }
 
 func (s *agentServiceImpl) Get(_ context.Context, id string) (*store.AgentProfile, error) {
-	return s.agents.GetAgent(id)
+	return s.agents.GetAgent(context.TODO() /* TODO(ctx-sweep): no ctx available at this call site */, id)
 }
 
 func (s *agentServiceImpl) GetBySlug(_ context.Context, slug string) (*store.AgentProfile, error) {
-	return s.agents.GetAgentBySlug(slug)
+	return s.agents.GetAgentBySlug(context.TODO() /* TODO(ctx-sweep): no ctx available at this call site */, slug)
 }
 
 func (s *agentServiceImpl) List(_ context.Context) ([]store.AgentProfile, error) {
-	return s.agents.ListAgents()
+	return s.agents.ListAgents(context.TODO() /* TODO(ctx-sweep): no ctx available at this call site */)
 }
 
 func (s *agentServiceImpl) Create(_ context.Context, agent *store.AgentProfile) error {
-	return s.writers.CreateAgent(agent)
+	return s.writers.CreateAgent(context.TODO() /* TODO(ctx-sweep): no ctx available at this call site */, agent)
 }
 
 func (s *agentServiceImpl) Update(_ context.Context, agent *store.AgentProfile) error {
-	return s.writers.UpdateAgent(agent)
+	return s.writers.UpdateAgent(context.TODO() /* TODO(ctx-sweep): no ctx available at this call site */, agent)
 }
 
 func (s *agentServiceImpl) Delete(_ context.Context, id string) error {
-	return s.writers.DeleteAgent(id)
+	return s.writers.DeleteAgent(context.
+
+		// ResolveForSession implements the agent resolution fallback chain previously
+		// inlined in engine.go generateResponse (lines 446-495):
+		//
+		//  1. Look up the session's primary agent binding (session_agents table).
+		//  2. If no binding exists, check user_settings.default_agent.
+		//  3. If still empty, fall back to the hardcoded default slug ("default").
+		//  4. Auto-assign the resolved agent to the session.
+		//  5. Load the agent profile by ID, falling back to slug lookup.
+		//  6. Reject disabled agents.
+		//  7. Apply the role -> agent -> task cascade (Phase 1 item 01) to
+		//     system_prompt/class/model/provider.
+		//
+		// Phase 0 item 21 ("Cut Modes, in full") removed the step that used to be
+		// numbered 7 here ("load the agent mode") — Legacy Agent Mode is gone, so
+		// ResolveForSession no longer returns a *store.AgentMode second value. The
+		// cascade step above reuses that freed slot.
+		TODO(), id)
 }
 
-// ResolveForSession implements the agent resolution fallback chain previously
-// inlined in engine.go generateResponse (lines 446-495):
-//
-//  1. Look up the session's primary agent binding (session_agents table).
-//  2. If no binding exists, check user_settings.default_agent.
-//  3. If still empty, fall back to the hardcoded default slug ("default").
-//  4. Auto-assign the resolved agent to the session.
-//  5. Load the agent profile by ID, falling back to slug lookup.
-//  6. Reject disabled agents.
-//  7. Apply the role -> agent -> task cascade (Phase 1 item 01) to
-//     system_prompt/class/model/provider.
-//
-// Phase 0 item 21 ("Cut Modes, in full") removed the step that used to be
-// numbered 7 here ("load the agent mode") — Legacy Agent Mode is gone, so
-// ResolveForSession no longer returns a *store.AgentMode second value. The
-// cascade step above reuses that freed slot.
 func (s *agentServiceImpl) ResolveForSession(ctx context.Context, sessionID string) (*store.AgentProfile, error) {
 	return s.resolveForSession(ctx, sessionID, true)
 }
@@ -185,7 +187,7 @@ func (s *agentServiceImpl) resolveForSession(ctx context.Context, sessionID stri
 	// scope; resolveBinding's own fallback ("default") threads through
 	// unchanged.
 	if autoAssigned && allowAutoAssign {
-		if err := s.writers.EnsureSessionAgent(sessionID, resolved.ID, modeName, true); err != nil {
+		if err := s.writers.EnsureSessionAgent(ctx, sessionID, resolved.ID, modeName, true); err != nil {
 			slog.Warn("agent-service: failed to auto-assign agent", "agent", resolved.ID, "session_id", sessionID, "err", err)
 		}
 		if s.events != nil {
@@ -199,14 +201,14 @@ func (s *agentServiceImpl) resolveForSession(ctx context.Context, sessionID stri
 // resolveBinding determines the agent ID and mode for a session.
 // Returns the resolved agentID, modeName, and whether auto-assignment is needed.
 func (s *agentServiceImpl) resolveBinding(sessionID string) (agentID, modeName string, autoAssigned bool) {
-	sa, err := s.agents.GetSessionPrimaryAgent(sessionID)
+	sa, err := s.agents.GetSessionPrimaryAgent(context.TODO() /* TODO(ctx-sweep): no ctx available at this call site */, sessionID)
 	if err == nil {
 		return sa.AgentID, sa.Mode, false
 	}
 
 	// No binding — check user settings for a configured default.
 	if s.settings != nil {
-		if us, err := s.settings.GetUserSettings(); err == nil && us.DefaultAgent != "" {
+		if us, err := s.settings.GetUserSettings(context.TODO() /* TODO(ctx-sweep): no ctx available at this call site */); err == nil && us.DefaultAgent != "" {
 			slog.Info("agent-service: no primary agent, using settings default", "session_id", sessionID, "agent", us.DefaultAgent)
 			return us.DefaultAgent, "default", true
 		}
@@ -231,7 +233,7 @@ func (s *agentServiceImpl) roleForProfile(_ context.Context, profile *store.Agen
 	if profile == nil || profile.RoleID == "" {
 		return nil
 	}
-	role, err := s.agents.GetRole(profile.RoleID)
+	role, err := s.agents.GetRole(context.TODO() /* TODO(ctx-sweep): no ctx available at this call site */, profile.RoleID)
 	if err != nil || role == nil {
 		return nil
 	}

@@ -143,7 +143,7 @@ type RepairConfig struct {
 // UserSettingsReader is the narrow surface RepairConfig needs to read
 // the auto_repair_pref column. *store.Store satisfies it.
 type UserSettingsReader interface {
-	GetUserSettings() (*store.UserSettings, error)
+	GetUserSettings(ctx context.Context) (*store.UserSettings, error)
 }
 
 // NewToolService creates a ToolService. Both toolClient and mcpManager may be
@@ -189,7 +189,7 @@ func (s *toolServiceImpl) SelectForAgent(ctx context.Context, sessionID, agentID
 	// If no MCP tools from the broker, try direct discovery from agent's configured servers.
 	mcpCount := countMCPOriginTools(s.toolClient, allTools)
 	if mcpCount == 0 && s.mcpManager != nil && s.agents != nil {
-		agent, err := s.agents.GetAgent(agentID)
+		agent, err := s.agents.GetAgent(ctx, agentID)
 		if err == nil {
 			allTools, seen = s.discoverAgentMCPTools(ctx, agent.MCPServers, allTools, seen)
 		}
@@ -207,7 +207,7 @@ func (s *toolServiceImpl) SelectForAgent(ctx context.Context, sessionID, agentID
 	var callerDispatchAllowlist []string
 	var dbAgent *store.AgentProfile
 	if s.agents != nil {
-		if agent, err := s.agents.GetAgent(agentID); err == nil {
+		if agent, err := s.agents.GetAgent(ctx, agentID); err == nil {
 			dbAgent = agent
 		}
 	}
@@ -438,7 +438,7 @@ func (s *toolServiceImpl) attemptRepair(ctx context.Context, agentID, toolName s
 	}
 	// Gate 3: user pref (auto_repair_pref). "never" disables.
 	if s.repairConfig.SettingsReader != nil {
-		us, err := s.repairConfig.SettingsReader.GetUserSettings()
+		us, err := s.repairConfig.SettingsReader.GetUserSettings(ctx)
 		if err == nil && us != nil && us.AutoRepairPref == "never" {
 			return &ToolResult{Output: buildAgentErrorEnvelope(rec), IsError: true}
 		}

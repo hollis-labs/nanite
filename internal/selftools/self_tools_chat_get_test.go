@@ -16,7 +16,7 @@ import (
 func seedSessionByID(t *testing.T, st *SelfToolsTransport, id string) string {
 	t.Helper()
 	sess := &store.Session{ID: id, Title: "Session " + id}
-	if err := st.Store.CreateSession(sess); err != nil {
+	if err := st.Store.CreateSession(context.Background(), sess); err != nil {
 		t.Fatalf("seed session %s: %v", id, err)
 	}
 	return sess.ShortCode

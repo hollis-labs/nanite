@@ -29,7 +29,7 @@ import (
 func TestEvaluateState_HaltSessionPreemptsInjectReminder_SamePass(t *testing.T) {
 	ctx := context.Background()
 	st := newReflexTestStore(t)
-	if err := st.CreateAgent(&store.AgentProfile{
+	if err := st.CreateAgent(context.Background(), &store.AgentProfile{
 		ID:           "agent-halt-preempt",
 		Name:         "Agent Halt Preempt",
 		Slug:         "agent-halt-preempt",

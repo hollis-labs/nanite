@@ -43,7 +43,7 @@ func TestHandleRebootSessionAgent_UnknownSession(t *testing.T) {
 func TestHandleRebootSessionAgent_HappyPath(t *testing.T) {
 	a, mux := newTestAPI(t)
 	sess := &store.Session{ID: "reboot-sess", Title: "Reboot Test"}
-	if err := a.Services.Store.CreateSession(sess); err != nil {
+	if err := a.Services.Store.CreateSession(context.Background(), sess); err != nil {
 		t.Fatalf("CreateSession: %v", err)
 	}
 
@@ -85,7 +85,7 @@ func TestHandleRebootSessionAgent_HappyPath(t *testing.T) {
 func TestHandleRebootSessionAgent_BusyReturns409(t *testing.T) {
 	a, mux := newTestAPI(t)
 	sess := &store.Session{ID: "reboot-busy", Title: "Reboot Busy"}
-	if err := a.Services.Store.CreateSession(sess); err != nil {
+	if err := a.Services.Store.CreateSession(context.Background(), sess); err != nil {
 		t.Fatalf("CreateSession: %v", err)
 	}
 	a.Services.Chat = &rebootChatStub{

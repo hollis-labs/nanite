@@ -152,7 +152,7 @@ func (st *SelfToolsTransport) callHandoffStash(ctx context.Context, args map[str
 		return mcp.ErrorResult(fmt.Sprintf("handoff_stash: %v", err)), nil
 	}
 	stashID := uuid.New().String()
-	if err := st.Store.UpsertHandoffStash(store.HandoffStash{
+	if err := st.Store.UpsertHandoffStash(ctx, store.HandoffStash{
 		ID:        stashID,
 		SessionID: sessionID,
 		Payload:   string(envelopeBytes),
@@ -191,7 +191,7 @@ func (st *SelfToolsTransport) callHandoffPointersExpand(ctx context.Context, arg
 		return mcp.ErrorResult("cache_key is required"), nil
 	}
 
-	row, err := st.Store.GetHandoffStash(sessionID, cacheKey)
+	row, err := st.Store.GetHandoffStash(ctx, sessionID, cacheKey)
 	if err != nil {
 		return mcp.ErrorResult(fmt.Sprintf("handoff_pointers_expand: %v", err)), nil
 	}

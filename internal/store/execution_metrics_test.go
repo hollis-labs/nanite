@@ -11,7 +11,7 @@ func TestRecordExecutionMetrics(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer s.Close()
+	defer s.Close(context.Background())
 
 	m := &ExecutionMetrics{
 		SessionID:       "sess-1",
@@ -32,7 +32,7 @@ func TestRecordExecutionMetrics(t *testing.T) {
 		StopReason:      "end_turn",
 	}
 
-	if err := s.RecordExecutionMetrics(m); err != nil {
+	if err := s.RecordExecutionMetrics(context.Background(), m); err != nil {
 		t.Fatalf("RecordExecutionMetrics: %v", err)
 	}
 
@@ -47,9 +47,11 @@ func TestGetSessionExecutionMetrics(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer s.Close()
+	defer s.Close(context.
 
-	// Record two metrics for the same session.
+		// Record two metrics for the same session.
+		Background())
+
 	for i, msgID := range []string{"msg-1", "msg-2"} {
 		m := &ExecutionMetrics{
 			SessionID:  "sess-1",
@@ -59,13 +61,13 @@ func TestGetSessionExecutionMetrics(t *testing.T) {
 			Model:      "claude-sonnet-4-20250514",
 			DurationMs: int64((i + 1) * 1000),
 		}
-		if err := s.RecordExecutionMetrics(m); err != nil {
+		if err := s.RecordExecutionMetrics(context.Background(), m); err != nil {
 			t.Fatalf("record %d: %v", i, err)
 		}
 	}
 
 	// Record one for a different session.
-	if err := s.RecordExecutionMetrics(&ExecutionMetrics{
+	if err := s.RecordExecutionMetrics(context.Background(), &ExecutionMetrics{
 		SessionID: "sess-2",
 		MessageID: "msg-3",
 		Provider:  "ollama",
@@ -74,7 +76,7 @@ func TestGetSessionExecutionMetrics(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	metrics, err := s.GetSessionExecutionMetrics("sess-1")
+	metrics, err := s.GetSessionExecutionMetrics(context.Background(), "sess-1")
 	if err != nil {
 		t.Fatalf("GetSessionExecutionMetrics: %v", err)
 	}
@@ -93,10 +95,10 @@ func TestGetRecentExecutionMetrics(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer s.Close()
+	defer s.Close(context.Background())
 
 	for i, msgID := range []string{"msg-1", "msg-2", "msg-3"} {
-		if err := s.RecordExecutionMetrics(&ExecutionMetrics{
+		if err := s.RecordExecutionMetrics(context.Background(), &ExecutionMetrics{
 			SessionID:  "sess-1",
 			MessageID:  msgID,
 			Provider:   "anthropic",
@@ -106,7 +108,7 @@ func TestGetRecentExecutionMetrics(t *testing.T) {
 		}
 	}
 
-	metrics, err := s.GetRecentExecutionMetrics(2)
+	metrics, err := s.GetRecentExecutionMetrics(context.Background(), 2)
 	if err != nil {
 		t.Fatalf("GetRecentExecutionMetrics: %v", err)
 	}
@@ -120,11 +122,13 @@ func TestGetUtilityCallSummary(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer s.Close()
+	defer s.Close(context.
 
-	// Record utility calls from two providers.
+		// Record utility calls from two providers.
+		Background())
+
 	for i := 0; i < 3; i++ {
-		s.RecordExecutionMetrics(&ExecutionMetrics{
+		s.RecordExecutionMetrics(context.Background(), &ExecutionMetrics{
 			SessionID:  "sess-1",
 			MessageID:  "autoTitle",
 			Provider:   "anthropic",
@@ -133,7 +137,7 @@ func TestGetUtilityCallSummary(t *testing.T) {
 			IsUtility:  true,
 		})
 	}
-	s.RecordExecutionMetrics(&ExecutionMetrics{
+	s.RecordExecutionMetrics(context.Background(), &ExecutionMetrics{
 		SessionID:  "sess-2",
 		MessageID:  "autoTitle",
 		Provider:   "ollama",
@@ -143,7 +147,7 @@ func TestGetUtilityCallSummary(t *testing.T) {
 		Error:      "timeout",
 	})
 	// Non-utility call should be excluded.
-	s.RecordExecutionMetrics(&ExecutionMetrics{
+	s.RecordExecutionMetrics(context.Background(), &ExecutionMetrics{
 		SessionID:  "sess-1",
 		MessageID:  "msg-1",
 		Provider:   "anthropic",
@@ -151,7 +155,7 @@ func TestGetUtilityCallSummary(t *testing.T) {
 		IsUtility:  false,
 	})
 
-	summary, err := s.GetUtilityCallSummary()
+	summary, err := s.GetUtilityCallSummary(context.Background())
 	if err != nil {
 		t.Fatalf("GetUtilityCallSummary: %v", err)
 	}
@@ -176,20 +180,20 @@ func TestGetUtilityCallLog(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer s.Close()
+	defer s.Close(context.Background())
 
-	s.RecordExecutionMetrics(&ExecutionMetrics{
+	s.RecordExecutionMetrics(context.Background(), &ExecutionMetrics{
 		SessionID: "sess-1", MessageID: "autoTitle", Provider: "anthropic", IsUtility: true,
 	})
-	s.RecordExecutionMetrics(&ExecutionMetrics{
+	s.RecordExecutionMetrics(context.Background(), &ExecutionMetrics{
 		SessionID: "sess-1", MessageID: "autoTags", Provider: "anthropic", IsUtility: true,
 	})
 	// Non-utility — should be excluded.
-	s.RecordExecutionMetrics(&ExecutionMetrics{
+	s.RecordExecutionMetrics(context.Background(), &ExecutionMetrics{
 		SessionID: "sess-1", MessageID: "msg-1", Provider: "anthropic", IsUtility: false,
 	})
 
-	log, err := s.GetUtilityCallLog(10)
+	log, err := s.GetUtilityCallLog(context.Background(), 10)
 	if err != nil {
 		t.Fatalf("GetUtilityCallLog: %v", err)
 	}
@@ -208,7 +212,7 @@ func TestExecutionMetrics_PTYAdapter(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer s.Close()
+	defer s.Close(context.Background())
 
 	m := &ExecutionMetrics{
 		SessionID:      "sess-1",
@@ -220,11 +224,11 @@ func TestExecutionMetrics_PTYAdapter(t *testing.T) {
 		ToolIterations: 0,
 		ToolCalls:      0,
 	}
-	if err := s.RecordExecutionMetrics(m); err != nil {
+	if err := s.RecordExecutionMetrics(context.Background(), m); err != nil {
 		t.Fatalf("record: %v", err)
 	}
 
-	metrics, err := s.GetSessionExecutionMetrics("sess-1")
+	metrics, err := s.GetSessionExecutionMetrics(context.Background(), "sess-1")
 	if err != nil {
 		t.Fatal(err)
 	}

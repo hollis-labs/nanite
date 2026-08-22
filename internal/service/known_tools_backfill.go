@@ -63,7 +63,7 @@ func BackfillAgentToolsFromLegacyColumns(ctx context.Context, st *store.Store) (
 		allNames = append(allNames, kt.Name)
 	}
 
-	agents, err := st.ListAgents()
+	agents, err := st.ListAgents(ctx)
 	if err != nil {
 		return 0, err
 	}

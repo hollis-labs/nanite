@@ -75,7 +75,7 @@ func (st *SelfToolsTransport) callSetReminder(ctx context.Context, args map[stri
 		Text:        text,
 		TriggerJSON: triggerJSON,
 	}
-	if err := st.Store.CreateReminder(r); err != nil {
+	if err := st.Store.CreateReminder(ctx, r); err != nil {
 		return mcp.ErrorResult(fmt.Sprintf("set_reminder: %v", err)), nil
 	}
 
@@ -148,7 +148,7 @@ func (st *SelfToolsTransport) callPin(ctx context.Context, args map[string]any) 
 	// pin is project-scoped — UI displays it under "by <session>".
 	p.SessionID = &sessionID
 
-	if err := st.Store.CreatePinnedContent(p); err != nil {
+	if err := st.Store.CreatePinnedContent(ctx, p); err != nil {
 		return mcp.ErrorResult(fmt.Sprintf("pin: %v", err)), nil
 	}
 
@@ -163,7 +163,7 @@ func (st *SelfToolsTransport) callUnpin(_ context.Context, args map[string]any) 
 	if id == "" {
 		return mcp.ErrorResult("pin_id is required"), nil
 	}
-	if err := st.Store.DeletePinnedContent(id); err != nil {
+	if err := st.Store.DeletePinnedContent(context.TODO() /* TODO(ctx-sweep): no ctx available at this call site */, id); err != nil {
 		return mcp.ErrorResult(fmt.Sprintf("unpin: %v", err)), nil
 	}
 	return mcp.TextResult(fmt.Sprintf(`{"pin_id":%q,"status":"unpinned"}`, id)), nil

@@ -1,6 +1,7 @@
 package store
 
 import (
+	"context"
 	"testing"
 )
 
@@ -23,7 +24,7 @@ func TestDocumentsCRUD(t *testing.T) {
 		Content:   "# Hello",
 		MimeType:  "text/markdown",
 	}
-	if err := s.CreateDocument(doc); err != nil {
+	if err := s.CreateDocument(context.Background(), doc); err != nil {
 		t.Fatalf("CreateDocument: %v", err)
 	}
 	if doc.ID == "" {
@@ -31,7 +32,7 @@ func TestDocumentsCRUD(t *testing.T) {
 	}
 
 	// Get
-	got, err := s.GetDocument(doc.ID)
+	got, err := s.GetDocument(context.Background(), doc.ID)
 	if err != nil {
 		t.Fatalf("GetDocument: %v", err)
 	}
@@ -46,7 +47,7 @@ func TestDocumentsCRUD(t *testing.T) {
 	}
 
 	// List
-	docs, err := s.ListDocuments(sessionID)
+	docs, err := s.ListDocuments(context.Background(), sessionID)
 	if err != nil {
 		t.Fatalf("ListDocuments: %v", err)
 	}
@@ -55,10 +56,10 @@ func TestDocumentsCRUD(t *testing.T) {
 	}
 
 	// UpdateToggles
-	if err := s.UpdateDocumentToggles(doc.ID, true, false, "summary text"); err != nil {
+	if err := s.UpdateDocumentToggles(context.Background(), doc.ID, true, false, "summary text"); err != nil {
 		t.Fatalf("UpdateDocumentToggles: %v", err)
 	}
-	got, _ = s.GetDocument(doc.ID)
+	got, _ = s.GetDocument(context.Background(), doc.ID)
 	if !got.Included {
 		t.Error("expected Included=true after update")
 	}
@@ -67,7 +68,7 @@ func TestDocumentsCRUD(t *testing.T) {
 	}
 
 	// GetIncludedDocuments — returns only included docs.
-	included, err := s.GetIncludedDocuments(sessionID)
+	included, err := s.GetIncludedDocuments(context.Background(), sessionID)
 	if err != nil {
 		t.Fatalf("GetIncludedDocuments: %v", err)
 	}
@@ -76,17 +77,17 @@ func TestDocumentsCRUD(t *testing.T) {
 	}
 
 	// Exclude again.
-	_ = s.UpdateDocumentToggles(doc.ID, false, false, "")
-	included, _ = s.GetIncludedDocuments(sessionID)
+	_ = s.UpdateDocumentToggles(context.Background(), doc.ID, false, false, "")
+	included, _ = s.GetIncludedDocuments(context.Background(), sessionID)
 	if len(included) != 0 {
 		t.Errorf("GetIncludedDocuments after exclude: got %d want 0", len(included))
 	}
 
 	// Delete
-	if err := s.DeleteDocument(doc.ID); err != nil {
+	if err := s.DeleteDocument(context.Background(), doc.ID); err != nil {
 		t.Fatalf("DeleteDocument: %v", err)
 	}
-	docs, _ = s.ListDocuments(sessionID)
+	docs, _ = s.ListDocuments(context.Background(), sessionID)
 	if len(docs) != 0 {
 		t.Errorf("ListDocuments after delete: got %d want 0", len(docs))
 	}
@@ -98,7 +99,7 @@ func TestSessionContextPrompt(t *testing.T) {
 	sessionID := makeDocumentTestSession(t, s)
 
 	// Default is empty.
-	prompt, err := s.GetSessionContextPrompt(sessionID)
+	prompt, err := s.GetSessionContextPrompt(context.Background(), sessionID)
 	if err != nil {
 		t.Fatalf("GetSessionContextPrompt (default): %v", err)
 	}
@@ -108,12 +109,12 @@ func TestSessionContextPrompt(t *testing.T) {
 
 	// Set.
 	want := "## Skills\nUse /capture-decision for design decisions."
-	if err := s.SetSessionContextPrompt(sessionID, want); err != nil {
+	if err := s.SetSessionContextPrompt(context.Background(), sessionID, want); err != nil {
 		t.Fatalf("SetSessionContextPrompt: %v", err)
 	}
 
 	// Get after set.
-	got, err := s.GetSessionContextPrompt(sessionID)
+	got, err := s.GetSessionContextPrompt(context.Background(), sessionID)
 	if err != nil {
 		t.Fatalf("GetSessionContextPrompt (after set): %v", err)
 	}
@@ -122,10 +123,10 @@ func TestSessionContextPrompt(t *testing.T) {
 	}
 
 	// Overwrite.
-	if err := s.SetSessionContextPrompt(sessionID, ""); err != nil {
+	if err := s.SetSessionContextPrompt(context.Background(), sessionID, ""); err != nil {
 		t.Fatalf("SetSessionContextPrompt (clear): %v", err)
 	}
-	got, _ = s.GetSessionContextPrompt(sessionID)
+	got, _ = s.GetSessionContextPrompt(context.Background(), sessionID)
 	if got != "" {
 		t.Errorf("expected empty after clear, got %q", got)
 	}
@@ -143,12 +144,12 @@ func TestDocumentsExcludedByDefault(t *testing.T) {
 			Name:      "doc",
 			Content:   "content",
 		}
-		if err := s.CreateDocument(doc); err != nil {
+		if err := s.CreateDocument(context.Background(), doc); err != nil {
 			t.Fatalf("CreateDocument %d: %v", i, err)
 		}
 	}
 
-	included, err := s.GetIncludedDocuments(sessionID)
+	included, err := s.GetIncludedDocuments(context.Background(), sessionID)
 	if err != nil {
 		t.Fatalf("GetIncludedDocuments: %v", err)
 	}

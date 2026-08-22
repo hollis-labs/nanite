@@ -30,6 +30,7 @@ package skillinstall
 // once a specific row is confirmed: delete the vendored copy (when one
 // exists) before removing the index row, never the other order.
 import (
+	"context"
 	"errors"
 	"fmt"
 
@@ -39,7 +40,7 @@ import (
 // UninstallIndexStore is the narrow slice of *store.Store's API Uninstall
 // depends on to remove a skill's index row once resolved.
 type UninstallIndexStore interface {
-	DeleteSkill(id string) error
+	DeleteSkill(ctx context.Context, id string) error
 }
 
 // UninstallVendorer is the narrow slice of *internal/skillvendor.(*Store)'s
@@ -106,7 +107,7 @@ func (u *Uninstaller) Uninstall(sk *store.Skill) (UninstallResult, error) {
 		vendorDeleted = true
 	}
 
-	if err := u.Index.DeleteSkill(sk.ID); err != nil {
+	if err := u.Index.DeleteSkill(context.TODO() /* TODO(ctx-sweep): no ctx available at this call site */, sk.ID); err != nil {
 		return UninstallResult{}, fmt.Errorf("skillinstall: delete index row for skill %q: %w", sk.Slug, err)
 	}
 

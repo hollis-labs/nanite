@@ -1,6 +1,7 @@
 package store
 
 import (
+	"context"
 	"testing"
 )
 
@@ -150,7 +151,7 @@ func TestMigration019_RerunPreservesBothUserSettingsColumns(t *testing.T) {
 	// Second migrate() call: goose sees migration 019 already applied and
 	// does nothing. The columns/values below must still be exactly what
 	// the first (real) application of 019 produced.
-	if err := s.migrate(); err != nil {
+	if err := s.migrate(context.Background()); err != nil {
 		t.Fatalf("second migrate: %v", err)
 	}
 

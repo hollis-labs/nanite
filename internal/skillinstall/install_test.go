@@ -29,7 +29,7 @@ func newTestInstaller(t *testing.T) (*Installer, *skillvendor.Store, *store.Stor
 	if err != nil {
 		t.Fatalf("store.New: %v", err)
 	}
-	t.Cleanup(func() { idx.Close() })
+	t.Cleanup(func() { idx.Close(context.Background()) })
 
 	inst := &Installer{Vendor: vendor, Index: idx}
 	return inst, vendor, idx
@@ -110,7 +110,7 @@ func TestInstall_EndToEnd(t *testing.T) {
 	}
 
 	// Index row is present and matches.
-	sk, err := idx.GetSkillBySlug("sample-skill")
+	sk, err := idx.GetSkillBySlug(context.Background(), "sample-skill")
 	if err != nil {
 		t.Fatalf("GetSkillBySlug: %v", err)
 	}
@@ -158,7 +158,7 @@ func TestInstall_MalformedPackage_MissingScript(t *testing.T) {
 	}
 
 	// No partial indexing.
-	sk, err := idx.GetSkillBySlug("malformed-missing-script")
+	sk, err := idx.GetSkillBySlug(context.Background(), "malformed-missing-script")
 	if err != nil {
 		t.Fatalf("GetSkillBySlug: %v", err)
 	}
@@ -175,7 +175,7 @@ func TestInstall_MalformedFrontmatter_FailsCleanly(t *testing.T) {
 		t.Fatal("expected an error for frontmatter missing the required name field")
 	}
 
-	sk, err := idx.GetSkillBySlug("malformed-frontmatter")
+	sk, err := idx.GetSkillBySlug(context.Background(), "malformed-frontmatter")
 	if err != nil {
 		t.Fatalf("GetSkillBySlug: %v", err)
 	}
@@ -208,7 +208,7 @@ func TestInstall_Resync_IdenticalContent_IsIdempotent(t *testing.T) {
 		t.Errorf("Version should not bump on an unchanged resync, got %d", second.Skill.Version)
 	}
 
-	sk, err := idx.GetSkillBySlug("sample-skill")
+	sk, err := idx.GetSkillBySlug(context.Background(), "sample-skill")
 	if err != nil {
 		t.Fatalf("GetSkillBySlug: %v", err)
 	}
@@ -251,7 +251,7 @@ func TestInstall_Resync_ChangedContent_NewAddressAndVersionBump(t *testing.T) {
 		t.Errorf("resync should update the existing row, not create a new one: %q vs %q", second.Skill.ID, first.Skill.ID)
 	}
 
-	sk, err := idx.GetSkillBySlug("sample-skill")
+	sk, err := idx.GetSkillBySlug(context.Background(), "sample-skill")
 	if err != nil {
 		t.Fatalf("GetSkillBySlug: %v", err)
 	}
@@ -285,7 +285,7 @@ func TestInstall_RequiresExplicitSourcePath(t *testing.T) {
 		t.Errorf("empty-Source install should touch nothing on disk, found %d entries", len(entries))
 	}
 
-	skills, err := idx.ListSkills()
+	skills, err := idx.ListSkills(context.Background())
 	if err != nil {
 		t.Fatalf("ListSkills: %v", err)
 	}
@@ -317,15 +317,15 @@ type fakeIndex struct {
 	createErr error
 }
 
-func (f *fakeIndex) GetSkillBySlug(_ string) (*store.Skill, error) {
+func (f *fakeIndex) GetSkillBySlug(ctx context.Context, _ string) (*store.Skill, error) {
 	return nil, f.getErr
 }
 
-func (f *fakeIndex) CreateSkill(_ *store.Skill) error {
+func (f *fakeIndex) CreateSkill(ctx context.Context, _ *store.Skill) error {
 	return f.createErr
 }
 
-func (f *fakeIndex) UpdateSkill(_ *store.Skill) error {
+func (f *fakeIndex) UpdateSkill(ctx context.Context, _ *store.Skill) error {
 	return errors.New("fakeIndex: UpdateSkill not expected in this test")
 }
 

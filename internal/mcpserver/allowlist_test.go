@@ -21,7 +21,7 @@ func newAllowlistedTestServer(t *testing.T, allowlist []string) *Server {
 	if err != nil {
 		t.Fatalf("open store: %v", err)
 	}
-	t.Cleanup(func() { s.Close() })
+	t.Cleanup(func() { s.Close(context.Background()) })
 	return New(s, "test-session", nil, "", "", allowlist)
 }
 

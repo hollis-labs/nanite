@@ -1,6 +1,7 @@
 package store
 
 import (
+	"context"
 	"fmt"
 	"log/slog"
 
@@ -16,16 +17,16 @@ import (
 // table is retired in full. user_settings is a genuine singleton (its
 // only row, id=1, is inserted unconditionally at the end of this same
 // seed transaction below), so its presence is the new gate.
-func (s *Store) Seed() error {
+func (s *Store) Seed(ctx context.Context) error {
 	var count int
-	if err := s.DB.QueryRow("SELECT COUNT(*) FROM user_settings").Scan(&count); err != nil {
+	if err := s.DB.QueryRowContext(ctx, "SELECT COUNT(*) FROM user_settings").Scan(&count); err != nil {
 		return fmt.Errorf("check user_settings: %w", err)
 	}
 	if count > 0 {
 		return nil // already seeded
 	}
 
-	tx, err := s.DB.Begin()
+	tx, err := s.DB.BeginTx(ctx, nil)
 	if err != nil {
 		return fmt.Errorf("begin tx: %w", err)
 	}
@@ -39,7 +40,7 @@ func (s *Store) Seed() error {
 	// for "anthropic" lives in exactly one place; runtime resolution reads
 	// from the providers row, not from a Go literal (CW-20260526-0003).
 	providerID := "anthropic-001"
-	if _, err := tx.Exec(
+	if _, err := tx.ExecContext(ctx,
 		`INSERT INTO providers (id, name, provider_type, default_model)
 		 VALUES (?, ?, ?, ?)`,
 		providerID, "Anthropic", seedcatalog.DefaultProviderType,
@@ -52,7 +53,7 @@ func (s *Store) Seed() error {
 	// Pulled from the canonical registry so seed data can never drift from
 	// the pricing/capabilities map consumed by usage.go, cost_monitor, etc.
 	if def, ok := models.ByModelID(seedcatalog.DefaultChatModelID); ok {
-		if _, err := tx.Exec(
+		if _, err := tx.ExecContext(ctx,
 			`INSERT INTO models (id, provider_id, model_id, display_name, context_window, max_output, supports_tools)
 			 VALUES (?, ?, ?, ?, ?, ?, ?)`,
 			def.ID, providerID, def.ModelID, def.DisplayName,
@@ -65,7 +66,7 @@ func (s *Store) Seed() error {
 	// --- Provider: PTY (Claude CLI) ---
 	// Use INSERT OR IGNORE — migrations 010/011 may have already created these rows.
 	ptyProviderID := "pty-001"
-	if _, err := tx.Exec(
+	if _, err := tx.ExecContext(ctx,
 		`INSERT OR IGNORE INTO providers (id, name, provider_type)
 		 VALUES (?, ?, ?)`,
 		ptyProviderID, "Claude CLI (PTY)", "pty",
@@ -74,7 +75,7 @@ func (s *Store) Seed() error {
 	}
 
 	// --- Model: Claude CLI ---
-	if _, err := tx.Exec(
+	if _, err := tx.ExecContext(ctx,
 		`INSERT OR IGNORE INTO models (id, provider_id, model_id, display_name, context_window, max_output, supports_tools)
 		 VALUES (?, ?, ?, ?, ?, ?, ?)`,
 		"claude-cli", ptyProviderID, "claude-cli", "Claude CLI",
@@ -85,7 +86,7 @@ func (s *Store) Seed() error {
 
 	// --- Provider: PTY (Codex CLI) ---
 	codexProviderID := "pty-codex-001"
-	if _, err := tx.Exec(
+	if _, err := tx.ExecContext(ctx,
 		`INSERT OR IGNORE INTO providers (id, name, provider_type)
 		 VALUES (?, ?, ?)`,
 		codexProviderID, "Codex CLI (PTY)", "pty-codex",
@@ -93,7 +94,7 @@ func (s *Store) Seed() error {
 		return fmt.Errorf("insert codex provider: %w", err)
 	}
 
-	if _, err := tx.Exec(
+	if _, err := tx.ExecContext(ctx,
 		`INSERT OR IGNORE INTO models (id, provider_id, model_id, display_name, context_window, max_output, supports_tools)
 		 VALUES (?, ?, ?, ?, ?, ?, ?)`,
 		"codex-cli", codexProviderID, "codex-cli", "Codex CLI",
@@ -104,7 +105,7 @@ func (s *Store) Seed() error {
 
 	// --- Provider: PTY (Gemini CLI) ---
 	geminiProviderID := "pty-gemini-001"
-	if _, err := tx.Exec(
+	if _, err := tx.ExecContext(ctx,
 		`INSERT OR IGNORE INTO providers (id, name, provider_type)
 		 VALUES (?, ?, ?)`,
 		geminiProviderID, "Gemini CLI (PTY)", "pty-gemini",
@@ -112,7 +113,7 @@ func (s *Store) Seed() error {
 		return fmt.Errorf("insert gemini provider: %w", err)
 	}
 
-	if _, err := tx.Exec(
+	if _, err := tx.ExecContext(ctx,
 		`INSERT OR IGNORE INTO models (id, provider_id, model_id, display_name, context_window, max_output, supports_tools)
 		 VALUES (?, ?, ?, ?, ?, ?, ?)`,
 		"gemini-cli", geminiProviderID, "gemini-cli", "Gemini CLI",
@@ -123,7 +124,7 @@ func (s *Store) Seed() error {
 
 	// --- Provider: PTY (Copilot CLI) ---
 	copilotProviderID := "pty-copilot-001"
-	if _, err := tx.Exec(
+	if _, err := tx.ExecContext(ctx,
 		`INSERT OR IGNORE INTO providers (id, name, provider_type)
 		 VALUES (?, ?, ?)`,
 		copilotProviderID, "GitHub Copilot CLI (PTY)", "pty-copilot",
@@ -131,7 +132,7 @@ func (s *Store) Seed() error {
 		return fmt.Errorf("insert copilot provider: %w", err)
 	}
 
-	if _, err := tx.Exec(
+	if _, err := tx.ExecContext(ctx,
 		`INSERT OR IGNORE INTO models (id, provider_id, model_id, display_name, context_window, max_output, supports_tools)
 		 VALUES (?, ?, ?, ?, ?, ?, ?)`,
 		"copilot-cli", copilotProviderID, "copilot-cli", "Copilot CLI",
@@ -142,7 +143,7 @@ func (s *Store) Seed() error {
 
 	// --- Provider: PTY (Aider CLI) ---
 	aiderProviderID := "pty-aider-001"
-	if _, err := tx.Exec(
+	if _, err := tx.ExecContext(ctx,
 		`INSERT OR IGNORE INTO providers (id, name, provider_type)
 		 VALUES (?, ?, ?)`,
 		aiderProviderID, "Aider CLI (PTY)", "pty-aider",
@@ -150,7 +151,7 @@ func (s *Store) Seed() error {
 		return fmt.Errorf("insert aider provider: %w", err)
 	}
 
-	if _, err := tx.Exec(
+	if _, err := tx.ExecContext(ctx,
 		`INSERT OR IGNORE INTO models (id, provider_id, model_id, display_name, context_window, max_output, supports_tools)
 		 VALUES (?, ?, ?, ?, ?, ?, ?)`,
 		"aider-cli", aiderProviderID, "aider-cli", "Aider CLI",
@@ -167,12 +168,12 @@ func (s *Store) Seed() error {
 	// followups.nanite.cw_20260508_0010.seed_registry_dead_cli_entries.
 
 	// --- User settings singleton ---
-	if _, err := tx.Exec(`INSERT OR IGNORE INTO user_settings (id) VALUES (1)`); err != nil {
+	if _, err := tx.ExecContext(ctx, `INSERT OR IGNORE INTO user_settings (id) VALUES (1)`); err != nil {
 		return fmt.Errorf("insert user_settings: %w", err)
 	}
 
 	// --- Catalog sources ---
-	if _, err := tx.Exec(
+	if _, err := tx.ExecContext(ctx,
 		`INSERT OR IGNORE INTO catalog_sources (id, name, url, type, priority)
 		 VALUES (?, ?, ?, ?, ?)`,
 		"official", "Hollis Labs",
@@ -217,18 +218,18 @@ func providerIDForType(t string) string {
 // boot — uses INSERT OR IGNORE so existing rows are untouched. The model
 // catalog is pulled from pkg/models.AllSeeded() so pricing and capability
 // updates live in exactly one place.
-func (s *Store) SeedProviders() error {
+func (s *Store) SeedProviders(ctx context.Context) error {
 	providers := seededProviders
 	seeded := models.AllSeeded()
 
-	tx, err := s.DB.Begin()
+	tx, err := s.DB.BeginTx(ctx, nil)
 	if err != nil {
 		return fmt.Errorf("begin tx: %w", err)
 	}
 	defer tx.Rollback()
 
 	for _, p := range providers {
-		if _, err := tx.Exec(
+		if _, err := tx.ExecContext(ctx,
 			`INSERT OR IGNORE INTO providers (id, name, provider_type, default_model)
 			 VALUES (?, ?, ?, ?)`,
 			p.id, p.name, p.provType, seedcatalog.ProviderDefaultModels[p.provType],
@@ -240,7 +241,7 @@ func (s *Store) SeedProviders() error {
 		// only runs when the cell is empty AND we know a seed value for
 		// the provider_type — operator overrides are preserved.
 		if def, ok := seedcatalog.ProviderDefaultModels[p.provType]; ok {
-			if _, err := tx.Exec(
+			if _, err := tx.ExecContext(ctx,
 				`UPDATE providers SET default_model = ?
 				 WHERE id = ? AND COALESCE(default_model, '') = ''`,
 				def, p.id,
@@ -262,7 +263,7 @@ func (s *Store) SeedProviders() error {
 			skippedByProvider[m.Provider]++
 			continue
 		}
-		if _, err := tx.Exec(
+		if _, err := tx.ExecContext(ctx,
 			`INSERT OR IGNORE INTO models (id, provider_id, model_id, display_name, context_window, max_output, supports_tools)
 			 VALUES (?, ?, ?, ?, ?, ?, ?)`,
 			m.ID, providerID, m.ModelID, m.DisplayName, m.ContextWindow, m.MaxOutput, m.Capabilities.SupportsToolCalling,

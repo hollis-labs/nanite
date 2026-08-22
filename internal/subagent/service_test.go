@@ -31,7 +31,7 @@ func newTestDB(t *testing.T) (*sql.DB, *store.Store) {
 	if err != nil {
 		t.Fatalf("store.New: %v", err)
 	}
-	t.Cleanup(func() { _ = s.Close(); _ = os.Remove(dbPath) })
+	t.Cleanup(func() { _ = s.Close(context.Background()); _ = os.Remove(dbPath) })
 	return s.DB, s
 }
 
@@ -88,7 +88,9 @@ func (e *stubEmitter) Last() emitCall {
 // stubSettings returns fixed UserSettings.
 type stubSettings struct{ us store.UserSettings }
 
-func (s stubSettings) GetUserSettings() (*store.UserSettings, error) { return &s.us, nil }
+func (s stubSettings) GetUserSettings(ctx context.Context) (*store.UserSettings, error) {
+	return &s.us, nil
+}
 
 // notCalledRunner fails the test if Run is invoked.
 type notCalledRunner struct{ t *testing.T }
@@ -985,19 +987,21 @@ func TestReject_NotPending(t *testing.T) {
 type storeAgentResolver struct{ st *store.Store }
 
 func (r storeAgentResolver) Get(_ context.Context, id string) (*store.AgentProfile, error) {
-	return r.st.GetAgent(id)
+	return r.st.GetAgent(context.
+
+		// TestSpawn_ReplyDelivery_ExistingRoleSlug_NoAutoRegisterCollision is the
+		// regression pin for CW-20260815-0023: reply delivery used to pass the bare
+		// role string (e.g. "worker") as FromAgentID with RegisterAs="external".
+		// Since every dispatchable role already has an agent_profiles row (Spawn's
+		// own GetAgentBySlug gate requires it) whose real ID is never equal to its
+		// slug, messaging's auto-register path would try to INSERT a brand-new row
+		// with Slug=role and collide with the UNIQUE constraint on the existing
+		// row — on every single reply, not just repeated ones. Spawns two children
+		// with the SAME role in sequence (mirrors the ticket's ask) against a REAL
+		// messaging.Service (not a stub) so the actual DB constraint is exercised.
+		Background(), id)
 }
 
-// TestSpawn_ReplyDelivery_ExistingRoleSlug_NoAutoRegisterCollision is the
-// regression pin for CW-20260815-0023: reply delivery used to pass the bare
-// role string (e.g. "worker") as FromAgentID with RegisterAs="external".
-// Since every dispatchable role already has an agent_profiles row (Spawn's
-// own GetAgentBySlug gate requires it) whose real ID is never equal to its
-// slug, messaging's auto-register path would try to INSERT a brand-new row
-// with Slug=role and collide with the UNIQUE constraint on the existing
-// row — on every single reply, not just repeated ones. Spawns two children
-// with the SAME role in sequence (mirrors the ticket's ask) against a REAL
-// messaging.Service (not a stub) so the actual DB constraint is exercised.
 func TestSpawn_ReplyDelivery_ExistingRoleSlug_NoAutoRegisterCollision(t *testing.T) {
 	db, st := newTestDB(t)
 
@@ -1006,7 +1010,7 @@ func TestSpawn_ReplyDelivery_ExistingRoleSlug_NoAutoRegisterCollision(t *testing
 	// 060) — the exact real-world shape this bug depends on: a role
 	// whose agent_profiles.id is never equal to its slug. No manual seed
 	// needed/possible here (it would collide with the migration's row).
-	if err := st.CreateAgent(&store.AgentProfile{
+	if err := st.CreateAgent(context.Background(), &store.AgentProfile{
 		ID:     "parent-1",
 		Slug:   "parent-1",
 		Name:   "Parent",
@@ -1066,10 +1070,10 @@ func TestSpawn_ReplyDelivery_ExistingRoleSlug_NoAutoRegisterCollision(t *testing
 
 	// No phantom row with id="worker" should ever have been created by a
 	// (would-be) failed auto-register attempt.
-	if _, err := st.GetAgent("worker"); err == nil {
+	if _, err := st.GetAgent(context.Background(), "worker"); err == nil {
 		t.Error(`a spurious agent_profiles row with id="worker" was created — auto-register should never have been attempted for an already-known role`)
 	}
-	real, err := st.GetAgent("blt-worker-001")
+	real, err := st.GetAgent(context.Background(), "blt-worker-001")
 	if err != nil {
 		t.Fatalf("real worker profile missing: %v", err)
 	}

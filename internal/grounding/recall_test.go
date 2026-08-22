@@ -15,13 +15,13 @@ type stubLogger struct {
 	nextID        int64
 }
 
-func (l *stubLogger) LogGroundingConsultation(entry grounding.ConsultationEntry) (int64, error) {
+func (l *stubLogger) LogGroundingConsultation(ctx context.Context, entry grounding.ConsultationEntry) (int64, error) {
 	l.consultations = append(l.consultations, entry)
 	l.nextID++
 	return l.nextID, nil
 }
 
-func (l *stubLogger) LogGroundingOutcome(outcome grounding.Outcome) error {
+func (l *stubLogger) LogGroundingOutcome(ctx context.Context, outcome grounding.Outcome) error {
 	l.outcomes = append(l.outcomes, outcome)
 	return nil
 }
@@ -130,8 +130,8 @@ func TestSystemPromptBlock_WithHits(t *testing.T) {
 // TestLogConsultations_NilLogger verifies no panic when logger is nil.
 func TestLogConsultations_NilLogger(t *testing.T) {
 	result := grounding.GroundingResult{
-		Enabled: true,
-		Hits:    []grounding.MemoryHit{{MemoryKey: "k1", Similarity: 0.8}},
+		Enabled:  true,
+		Hits:     []grounding.MemoryHit{{MemoryKey: "k1", Similarity: 0.8}},
 		Surfaced: []grounding.MemoryHit{{MemoryKey: "k1", Similarity: 0.8}},
 	}
 	// Should not panic.
@@ -162,10 +162,10 @@ func TestLogConsultations_MarksConsumedCorrectly(t *testing.T) {
 	hit2 := grounding.MemoryHit{MemoryKey: "k2", Summary: "s2", Similarity: 0.3} // below threshold
 
 	result := grounding.GroundingResult{
-		Enabled:    true,
-		Hits:       []grounding.MemoryHit{hit1, hit2},
-		Surfaced:   []grounding.MemoryHit{hit1}, // only k1 surfaced
-		SessionID:  "sess-3",
+		Enabled:   true,
+		Hits:      []grounding.MemoryHit{hit1, hit2},
+		Surfaced:  []grounding.MemoryHit{hit1}, // only k1 surfaced
+		SessionID: "sess-3",
 	}
 
 	ids := grounding.LogConsultations(logger, result, "turn-1")

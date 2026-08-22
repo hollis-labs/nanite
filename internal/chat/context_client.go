@@ -252,7 +252,7 @@ func (cb *ContextClient) AssembleSlotSources(ctx context.Context, session *store
 	}
 
 	// Conversation messages.
-	messages, err := cb.Store.ListMessages(session.ID, 200)
+	messages, err := cb.Store.ListMessages(ctx, session.ID, 200)
 	if err != nil {
 		return nil, err
 	}
@@ -325,12 +325,12 @@ func buildUserContextSlot(s *store.Store, sessionID string) string {
 	var parts []string
 
 	// Session context prompt.
-	if prompt, err := s.GetSessionContextPrompt(sessionID); err == nil && strings.TrimSpace(prompt) != "" {
+	if prompt, err := s.GetSessionContextPrompt(context.TODO() /* TODO(ctx-sweep): no ctx available at this call site */, sessionID); err == nil && strings.TrimSpace(prompt) != "" {
 		parts = append(parts, "## Session Context\n"+strings.TrimSpace(prompt))
 	}
 
 	// Included documents.
-	if docs, err := s.GetIncludedDocuments(sessionID); err == nil && len(docs) > 0 {
+	if docs, err := s.GetIncludedDocuments(context.TODO() /* TODO(ctx-sweep): no ctx available at this call site */, sessionID); err == nil && len(docs) > 0 {
 		var docParts []string
 		for _, doc := range docs {
 			if doc.FullContent {
@@ -353,7 +353,7 @@ func buildUserContextSlot(s *store.Store, sessionID string) string {
 	// Budget: 2000 tokens shared with the above. Oldest pins truncate first.
 	// Turn-scoped pins are ephemeral and not persisted here — they are injected
 	// directly into the turn context by the reminder engine.
-	if pins, err := s.ListPinnedContent(sessionID); err == nil && len(pins) > 0 {
+	if pins, err := s.ListPinnedContent(context.TODO() /* TODO(ctx-sweep): no ctx available at this call site */, sessionID); err == nil && len(pins) > 0 {
 		var pinParts []string
 		for _, pin := range pins {
 			label := "[pinned]"
@@ -524,7 +524,7 @@ func (cb *ContextClient) buildWorkspaceSlotContent(ctx context.Context, session 
 // "explicitly off" (skip).
 func (cb *ContextClient) deriveIntent(session *store.Session, agent *store.AgentProfile) contextbroker.Intent {
 	var msgs []store.Message
-	if loaded, err := cb.Store.ListMessages(session.ID, 5); err == nil {
+	if loaded, err := cb.Store.ListMessages(context.TODO() /* TODO(ctx-sweep): no ctx available at this call site */, session.ID, 5); err == nil {
 		msgs = loaded
 	}
 	return cb.deriveIntentFromMessages(session, agent, msgs)

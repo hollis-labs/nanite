@@ -266,7 +266,7 @@ func (st *SelfToolsTransport) resolveSelfScheduleAgentID(ctx context.Context) (s
 	if st.Store == nil {
 		return "", errors.New("store not configured")
 	}
-	sa, err := st.Store.GetSessionPrimaryAgent(sessionID)
+	sa, err := st.Store.GetSessionPrimaryAgent(ctx, sessionID)
 	if err != nil {
 		return "", fmt.Errorf("resolve calling agent from session %s: %w", sessionID, err)
 	}

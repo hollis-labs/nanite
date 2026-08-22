@@ -5,7 +5,7 @@ import "net/http"
 func (a *API) handleGetSessionUsage(w http.ResponseWriter, r *http.Request) {
 	sessionID := r.PathValue("id")
 
-	summary, err := a.Services.Store.GetSessionUsage(sessionID)
+	summary, err := a.Services.Store.GetSessionUsage(r.Context(), sessionID)
 	if err != nil {
 		a.errorResp(w, http.StatusInternalServerError, err.Error())
 		return
@@ -14,7 +14,7 @@ func (a *API) handleGetSessionUsage(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *API) handleGetUsageSummary(w http.ResponseWriter, r *http.Request) {
-	summary, err := a.Services.Store.GetUsageSummary()
+	summary, err := a.Services.Store.GetUsageSummary(r.Context())
 	if err != nil {
 		a.errorResp(w, http.StatusInternalServerError, err.Error())
 		return

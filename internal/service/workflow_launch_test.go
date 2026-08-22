@@ -60,10 +60,10 @@ func newWorkflowLaunchTestFixture(t *testing.T) (*store.Store, *store.AgentProfi
 	if err != nil {
 		t.Fatalf("store.New: %v", err)
 	}
-	t.Cleanup(func() { _ = st.Close() })
+	t.Cleanup(func() { _ = st.Close(context.Background()) })
 
 	profile := &store.AgentProfile{Name: "Workflow Runner", Slug: "workflow-runner", SystemPrompt: "x"}
-	if err := st.CreateAgent(profile); err != nil {
+	if err := st.CreateAgent(context.Background(), profile); err != nil {
 		t.Fatalf("CreateAgent: %v", err)
 	}
 	return st, profile
@@ -100,7 +100,7 @@ func TestWorkflowLauncher_Launch_Success(t *testing.T) {
 
 	// The instance was created as a template-class durable agent, sourced
 	// from the workflow name, and finalized to stopped after the run.
-	inst, err := st.GetDurableAgentInstance(result.InstanceID)
+	inst, err := st.GetDurableAgentInstance(context.Background(), result.InstanceID)
 	if err != nil {
 		t.Fatalf("GetDurableAgentInstance: %v", err)
 	}
@@ -217,7 +217,7 @@ func TestWorkflowLauncher_Launch_RespectsTimeout(t *testing.T) {
 
 	// Even though the run failed, the instance must still be finalized —
 	// not left dangling in "active" because the step timed out.
-	insts, err := st.ListDurableAgentInstances(false)
+	insts, err := st.ListDurableAgentInstances(context.Background(), false)
 	if err != nil {
 		t.Fatalf("ListDurableAgentInstances: %v", err)
 	}
@@ -226,6 +226,43 @@ func TestWorkflowLauncher_Launch_RespectsTimeout(t *testing.T) {
 	}
 	if insts[0].Status != store.DurableAgentStatusStopped {
 		t.Errorf("Status = %q, want stopped", insts[0].Status)
+	}
+}
+
+func TestBuiltinWorkflowEngine_PersistWorkflowRunStepOutcome_SurvivesCancelledContext(t *testing.T) {
+	st, _ := newWorkflowLaunchTestFixture(t)
+	runID := "cancelled-outcome-run"
+	if err := st.CreateWorkflowRun(context.Background(), &store.WorkflowRunRow{
+		ID: runID, DefinitionName: "cancelled-outcome", Status: "running", InputJSON: "{}",
+	}); err != nil {
+		t.Fatalf("CreateWorkflowRun: %v", err)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	exec := &fakeStepExecutor{
+		toolFunc: func(agentworkflow.ToolStepRequest) (agentworkflow.ToolStepResult, error) {
+			cancel()
+			return agentworkflow.ToolStepResult{}, context.Canceled
+		},
+	}
+	engine := NewBuiltinWorkflowEngine(st)
+	outcome := engine.runStep(ctx, runID, singleToolStepWorkflow("cancelled-outcome").Steps[0], nil, agentworkflow.WorkflowInput{}, exec)
+	if outcome.Err != nil {
+		t.Fatalf("runStep: %v", outcome.Err)
+	}
+	if !outcome.Result.IsError {
+		t.Fatalf("runStep result = %+v, want cancellation error outcome", outcome.Result)
+	}
+
+	rows, err := st.ListWorkflowRunSteps(context.Background(), runID)
+	if err != nil {
+		t.Fatalf("ListWorkflowRunSteps: %v", err)
+	}
+	if len(rows) != 1 {
+		t.Fatalf("len(rows) = %d, want 1", len(rows))
+	}
+	if rows[0].Status != "failed" || !rows[0].IsError || !strings.Contains(rows[0].Output, context.Canceled.Error()) {
+		t.Fatalf("persisted row = %+v, want failed cancellation outcome", rows[0])
 	}
 }
 
@@ -251,7 +288,7 @@ func TestWorkflowLauncher_Launch_StampsParentSessionIDInName(t *testing.T) {
 		t.Fatalf("Launch: %v", err)
 	}
 
-	inst, err := st.GetDurableAgentInstance(result.InstanceID)
+	inst, err := st.GetDurableAgentInstance(context.Background(), result.InstanceID)
 	if err != nil {
 		t.Fatalf("GetDurableAgentInstance: %v", err)
 	}
@@ -282,7 +319,7 @@ func TestWorkflowLauncher_Launch_EngineInfraError_OmitsEmptyRunID(t *testing.T) 
 		t.Fatalf("err = %v, want simulated infra failure", err)
 	}
 
-	insts, err := st.ListDurableAgentInstances(false)
+	insts, err := st.ListDurableAgentInstances(context.Background(), false)
 	if err != nil {
 		t.Fatalf("ListDurableAgentInstances: %v", err)
 	}

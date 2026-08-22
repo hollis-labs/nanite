@@ -1,6 +1,7 @@
 package store
 
 import (
+	"context"
 	"errors"
 	"testing"
 	"time"
@@ -21,7 +22,7 @@ func TestToolEnrichment_Get(t *testing.T) {
 		t.Fatalf("insert tool_enrichments: %v", err)
 	}
 
-	got, err := s.GetToolEnrichment("test_tool")
+	got, err := s.GetToolEnrichment(context.Background(), "test_tool")
 	if err != nil {
 		t.Fatalf("GetToolEnrichment: %v", err)
 	}
@@ -35,7 +36,7 @@ func TestToolEnrichment_Get(t *testing.T) {
 
 func TestToolEnrichment_GetNotFound(t *testing.T) {
 	s := newTestStore(t)
-	_, err := s.GetToolEnrichment("nonexistent_tool")
+	_, err := s.GetToolEnrichment(context.Background(), "nonexistent_tool")
 	if !errors.Is(err, ErrToolEnrichmentNotFound) {
 		t.Errorf("expected ErrToolEnrichmentNotFound, got %v", err)
 	}
@@ -56,7 +57,7 @@ func TestToolEnrichment_NanoPrecisionRoundTrip(t *testing.T) {
 		t.Fatalf("insert tool_enrichments: %v", err)
 	}
 
-	got, err := s.GetToolEnrichment("nano_tool")
+	got, err := s.GetToolEnrichment(context.Background(), "nano_tool")
 	if err != nil {
 		t.Fatalf("GetToolEnrichment with nano-precision stamp failed: %v", err)
 	}
@@ -81,7 +82,7 @@ func TestToolEnrichment_ExternalWriterCompat(t *testing.T) {
 		t.Fatalf("direct INSERT: %v", err)
 	}
 
-	got, err := s.GetToolEnrichment("external_tool")
+	got, err := s.GetToolEnrichment(context.Background(), "external_tool")
 	if err != nil {
 		t.Fatalf("GetToolEnrichment rejected RFC3339Nano string: %v", err)
 	}

@@ -114,7 +114,7 @@ func TestManagedAgentLifecycle(t *testing.T) {
 		t.Fatal("revision token should change after edit")
 	}
 	// DB projection reflects the edit immediately (no restart).
-	if got, err := a.Services.Store.GetAgentBySlug("atlas-curator"); err != nil || got.Description != "Curates the atlas knowledge base" {
+	if got, err := a.Services.Store.GetAgentBySlug(context.Background(), "atlas-curator"); err != nil || got.Description != "Curates the atlas knowledge base" {
 		t.Fatalf("DB projection stale after edit: %+v err=%v", got, err)
 	}
 	// File reflects the edit.
@@ -139,7 +139,7 @@ func TestManagedAgentLifecycle(t *testing.T) {
 	if _, err := os.Stat(path); !os.IsNotExist(err) {
 		t.Fatalf("managed file still present after delete: %v", err)
 	}
-	if _, err := a.Services.Store.GetAgentBySlug("atlas-curator"); err == nil {
+	if _, err := a.Services.Store.GetAgentBySlug(context.Background(), "atlas-curator"); err == nil {
 		t.Fatal("DB row still present after delete")
 	}
 	reflexes, _ := a.Services.Store.ListAgentReflexesForAgent(context.Background(), created.ID, "")
@@ -237,7 +237,7 @@ func TestCopyPluginAgentToManaged(t *testing.T) {
 	a, mux := newTestAPI(t)
 	// Seed a plugin (read-only) agent directly in the projection.
 	plugin := storeAgent("giphy-helper", "Giphy Helper", "plugin")
-	if err := a.Services.Store.CreateAgent(plugin); err != nil {
+	if err := a.Services.Store.CreateAgent(context.Background(), plugin); err != nil {
 		t.Fatalf("seed plugin agent: %v", err)
 	}
 
@@ -272,7 +272,7 @@ func TestCopyPluginAgentToManaged(t *testing.T) {
 		t.Fatalf("copied managed file not written: %v", err)
 	}
 	// The original read-only plugin agent must remain intact.
-	if orig, err := a.Services.Store.GetAgent(plugin.ID); err != nil || orig.Source != "plugin" {
+	if orig, err := a.Services.Store.GetAgent(context.Background(), plugin.ID); err != nil || orig.Source != "plugin" {
 		t.Fatalf("original plugin agent was clobbered: %+v err=%v", orig, err)
 	}
 }

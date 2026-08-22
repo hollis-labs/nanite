@@ -131,7 +131,7 @@ func TestStepKindLoop_OuterWorkflowRun_ResolvesViaRealPush_NotManualResume(t *te
 	}
 	outerRunID := result.RunID
 
-	steps, err := st.ListWorkflowRunSteps(outerRunID)
+	steps, err := st.ListWorkflowRunSteps(context.Background(), outerRunID)
 	if err != nil {
 		t.Fatalf("ListWorkflowRunSteps: %v", err)
 	}
@@ -162,7 +162,7 @@ func TestStepKindLoop_OuterWorkflowRun_ResolvesViaRealPush_NotManualResume(t *te
 
 	// Confirm the outer workflow_runs row itself is also genuinely
 	// persisted as waiting_on_loop, not just the in-memory WorkflowResult.
-	outerRunRow, err := st.GetWorkflowRun(outerRunID)
+	outerRunRow, err := st.GetWorkflowRun(context.Background(), outerRunID)
 	if err != nil {
 		t.Fatalf("GetWorkflowRun(outer): %v", err)
 	}
@@ -185,7 +185,7 @@ func TestStepKindLoop_OuterWorkflowRun_ResolvesViaRealPush_NotManualResume(t *te
 		t.Fatal("iteration 1 has no workflow_run_id")
 	}
 
-	if err := st.ResolveGate(innerRunID, "approve", "approved"); err != nil {
+	if err := st.ResolveGate(context.Background(), innerRunID, "approve", "approved"); err != nil {
 		t.Fatalf("ResolveGate: %v", err)
 	}
 	if err := st.RecordGoalEvidence(ctx, &store.GoalEvidence{
@@ -212,7 +212,7 @@ func TestStepKindLoop_OuterWorkflowRun_ResolvesViaRealPush_NotManualResume(t *te
 	// builtin.Resume internally) — this test never calls
 	// builtin.Resume/loopEngine.Run again on the outer run itself. ---
 
-	outerRunAfter, err := st.GetWorkflowRun(outerRunID)
+	outerRunAfter, err := st.GetWorkflowRun(context.Background(), outerRunID)
 	if err != nil {
 		t.Fatalf("GetWorkflowRun(outer) after loop terminal: %v", err)
 	}
@@ -220,7 +220,7 @@ func TestStepKindLoop_OuterWorkflowRun_ResolvesViaRealPush_NotManualResume(t *te
 		t.Fatalf("outer workflow_runs.status after the real push = %q, want completed — the outer run never left waiting_on_loop via the notifier", outerRunAfter.Status)
 	}
 
-	stepsAfter, err := st.ListWorkflowRunSteps(outerRunID)
+	stepsAfter, err := st.ListWorkflowRunSteps(context.Background(), outerRunID)
 	if err != nil {
 		t.Fatalf("ListWorkflowRunSteps after loop terminal: %v", err)
 	}

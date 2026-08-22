@@ -74,10 +74,10 @@ func TestRecoverFromContextOverflow_DisabledFlag(t *testing.T) {
 	if err != nil {
 		t.Fatalf("store.New: %v", err)
 	}
-	if err := s.Seed(); err != nil {
+	if err := s.Seed(context.Background()); err != nil {
 		t.Fatalf("seed: %v", err)
 	}
-	if err := s.UpdateUserSettings(&store.UserSettings{ContextOverflowRecovery: false}); err != nil {
+	if err := s.UpdateUserSettings(context.Background(), &store.UserSettings{ContextOverflowRecovery: false}); err != nil {
 		t.Fatalf("UpdateUserSettings: %v", err)
 	}
 
@@ -114,11 +114,11 @@ func TestRecoverFromContextOverflow_NoSummarizerSkips(t *testing.T) {
 	if err != nil {
 		t.Fatalf("store.New: %v", err)
 	}
-	if err := s.Seed(); err != nil {
+	if err := s.Seed(context.Background()); err != nil {
 		t.Fatalf("seed: %v", err)
 	}
 	// Flag enabled, but no provider.Registry is wired → buildSummarizer returns nil.
-	if err := s.UpdateUserSettings(&store.UserSettings{ContextOverflowRecovery: true}); err != nil {
+	if err := s.UpdateUserSettings(context.Background(), &store.UserSettings{ContextOverflowRecovery: true}); err != nil {
 		t.Fatalf("UpdateUserSettings: %v", err)
 	}
 

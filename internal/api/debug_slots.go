@@ -28,7 +28,7 @@ func (a *API) handleDebugSlots(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Get the most recent execution metrics for this session.
-	metrics, err := a.Services.Store.GetSessionExecutionMetrics(sessionID)
+	metrics, err := a.Services.Store.GetSessionExecutionMetrics(r.Context(), sessionID)
 	if err != nil {
 		a.errorResp(w, http.StatusInternalServerError, "failed to load execution metrics")
 		return

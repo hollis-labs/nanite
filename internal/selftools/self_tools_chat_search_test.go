@@ -20,7 +20,7 @@ func seedMessage(t *testing.T, s *store.Store, sessionID, role, content string, 
 		IsCompacted: isCompacted,
 		Metadata:    "{}",
 	}
-	if err := s.CreateMessage(msg); err != nil {
+	if err := s.CreateMessage(context.Background(), msg); err != nil {
 		t.Fatalf("seed message: %v", err)
 	}
 	return msg
@@ -34,7 +34,7 @@ func seedSession(t *testing.T, s *store.Store, id string) {
 		Title:  "Test Session " + id,
 		Status: "active",
 	}
-	if err := s.CreateSession(sess); err != nil {
+	if err := s.CreateSession(context.Background(), sess); err != nil {
 		t.Fatalf("seed session: %v", err)
 	}
 }

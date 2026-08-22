@@ -38,12 +38,14 @@ func TestMigration062_EjectsNonInternalProfiles(t *testing.T) {
 	if err != nil {
 		t.Fatalf("store.New: %v", err)
 	}
-	defer s.Close()
+	defer s.Close(context.
 
-	// Capture the post-migration baseline BEFORE any fixtures land. Future
-	// migrations may seed additional internal profiles; this baseline floats
-	// with them so the test does not need updates when W4 (or later) adds
-	// rows to the migration-061 seed.
+		// Capture the post-migration baseline BEFORE any fixtures land. Future
+		// migrations may seed additional internal profiles; this baseline floats
+		// with them so the test does not need updates when W4 (or later) adds
+		// rows to the migration-061 seed.
+		Background())
+
 	var baselineCount int
 	if err := s.DB.QueryRow(`SELECT COUNT(*) FROM agent_profiles`).Scan(&baselineCount); err != nil {
 		t.Fatalf("baseline count: %v", err)
@@ -56,7 +58,7 @@ func TestMigration062_EjectsNonInternalProfiles(t *testing.T) {
 	// and the (just-run) migration 062 should not have touched them.
 	canonical := []string{"default", "worker", "planner", "hint-selector"}
 	for _, slug := range canonical {
-		got, err := s.GetAgentBySlug(slug)
+		got, err := s.GetAgentBySlug(context.Background(), slug)
 		if err != nil {
 			t.Fatalf("post-migration GetAgentBySlug %q: %v", slug, err)
 		}

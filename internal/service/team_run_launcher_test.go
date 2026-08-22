@@ -60,7 +60,7 @@ func createTestRoleBoundAgent(t *testing.T, st *store.Store, roleSlug string) *s
 		DefaultProvider: "anthropic",
 		DefaultModel:    "claude-test-model",
 	}
-	if err := st.CreateRole(role); err != nil {
+	if err := st.CreateRole(context.Background(), role); err != nil {
 		t.Fatalf("CreateRole(%s): %v", roleSlug, err)
 	}
 	profile := &store.AgentProfile{
@@ -71,7 +71,7 @@ func createTestRoleBoundAgent(t *testing.T, st *store.Store, roleSlug string) *s
 		DefaultModel:    "claude-test-model",
 		RoleID:          role.ID,
 	}
-	if err := st.CreateAgent(profile); err != nil {
+	if err := st.CreateAgent(context.Background(), profile); err != nil {
 		t.Fatalf("CreateAgent(%s): %v", roleSlug, err)
 	}
 	return profile
@@ -89,7 +89,7 @@ func createTestDurableCandidateAgent(t *testing.T, st *store.Store, slug string)
 		Slug:         slug,
 		SystemPrompt: "you are " + slug,
 	}
-	if err := st.CreateAgent(profile); err != nil {
+	if err := st.CreateAgent(context.Background(), profile); err != nil {
 		t.Fatalf("CreateAgent(%s): %v", slug, err)
 	}
 	return profile
@@ -181,7 +181,7 @@ func TestLaunchTeamRun_SMEExample_ReachesFirstFlexStepWaiting(t *testing.T) {
 	}
 
 	// A real workflow_runs row exists.
-	run, err := st.GetWorkflowRun(result.RunID)
+	run, err := st.GetWorkflowRun(context.Background(), result.RunID)
 	if err != nil {
 		t.Fatalf("GetWorkflowRun: %v", err)
 	}
@@ -191,7 +191,7 @@ func TestLaunchTeamRun_SMEExample_ReachesFirstFlexStepWaiting(t *testing.T) {
 
 	// The first phase (scope_work) is a real, persisted waiting_on_flex
 	// step.
-	steps, err := st.ListWorkflowRunSteps(result.RunID)
+	steps, err := st.ListWorkflowRunSteps(context.Background(), result.RunID)
 	if err != nil {
 		t.Fatalf("ListWorkflowRunSteps: %v", err)
 	}
@@ -590,7 +590,7 @@ func TestResolveDurableMember_NewInstance_CallsStart_NotGatedOnDurableFlag(t *te
 		t.Fatal("sessionID is empty")
 	}
 
-	inst, err := st.GetDurableAgentInstanceByProfileID(profile.ID)
+	inst, err := st.GetDurableAgentInstanceByProfileID(context.Background(), profile.ID)
 	if err != nil {
 		t.Fatalf("GetDurableAgentInstanceByProfileID: %v", err)
 	}

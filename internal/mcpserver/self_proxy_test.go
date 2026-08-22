@@ -19,13 +19,17 @@ func newProxyTestStore(t *testing.T) *store.Store {
 	if err != nil {
 		t.Fatalf("open store: %v", err)
 	}
-	t.Cleanup(func() { s.Close() })
+	t.Cleanup(func() {
+		s.Close(context.Background(
+
+		// TestSelfToolProxy_ForwardsCall pins that the proxy POSTs {session_id,
+		// name, args} to /api/tools/call on the configured API server and decodes
+		// the ToolResult it gets back — the CLI-launch self-tools proxy contract.
+		))
+	})
 	return s
 }
 
-// TestSelfToolProxy_ForwardsCall pins that the proxy POSTs {session_id,
-// name, args} to /api/tools/call on the configured API server and decodes
-// the ToolResult it gets back — the CLI-launch self-tools proxy contract.
 func TestSelfToolProxy_ForwardsCall(t *testing.T) {
 	var gotPath, gotSession, gotName string
 	var gotArgs map[string]any

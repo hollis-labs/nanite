@@ -190,14 +190,16 @@ func (st *SelfToolsTransport) callExecuteTask(ctx context.Context, args map[stri
 					`{"error":%q,"reflex_match_id":%q}`,
 					derr.Error(), brokerInput.ReflexMatchID,
 				)
-				st.Store.LogEvent(sessionID, "broker_decision_error", "error", derr.Error(), meta)
+				// Outcome bookkeeping must survive cancellation of the broker decision it records.
+				st.Store.LogEvent(context.WithoutCancel(ctx), sessionID, "broker_decision_error", "error", derr.Error(), meta)
 			}
 		case st.Store != nil:
 			meta := fmt.Sprintf(
 				`{"agent_profile":%q,"reason":%q,"confidence":%g,"reflex_match_id":%q}`,
 				decision.AgentProfile, decision.Reason, decision.Confidence, brokerInput.ReflexMatchID,
 			)
-			st.Store.LogEvent(sessionID, "broker_decision", "info", decision.Reason, meta)
+			// Outcome bookkeeping must survive cancellation of the broker decision it records.
+			st.Store.LogEvent(context.WithoutCancel(ctx), sessionID, "broker_decision", "info", decision.Reason, meta)
 		}
 	}
 
@@ -271,7 +273,7 @@ func (st *SelfToolsTransport) recursionBlocked(ctx context.Context) (bool, error
 		// Fail open here — the subagent.Service guard is the backstop.
 		return false, nil
 	}
-	isChild, err := st.Store.IsSubagentSession(callerSessionID)
+	isChild, err := st.Store.IsSubagentSession(ctx, callerSessionID)
 	if err != nil {
 		// Fail closed: an unverifiable parentage means we refuse rather
 		// than risk an unbounded recursive spawn chain.
@@ -331,7 +333,7 @@ func (st *SelfToolsTransport) matchDispatchToAgentReflex(ctx context.Context, se
 
 	class := ""
 	if agentProfileID != "" {
-		if ap, err := st.Store.GetAgent(agentProfileID); err == nil && ap != nil {
+		if ap, err := st.Store.GetAgent(ctx, agentProfileID); err == nil && ap != nil {
 			class = ap.Class
 		}
 	}

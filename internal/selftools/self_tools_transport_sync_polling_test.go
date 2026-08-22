@@ -82,7 +82,7 @@ func newSyncPollingTestService(t *testing.T, delay time.Duration) (*subagent.Ser
 	if err != nil {
 		t.Fatalf("store.New: %v", err)
 	}
-	t.Cleanup(func() { s.Close() })
+	t.Cleanup(func() { s.Close(context.Background()) })
 
 	runner := &delayedCompletionRunner{db: s.DB, delay: delay}
 	svc := subagent.NewService(s.DB, runner, nil, nil, nil)
@@ -238,7 +238,7 @@ func TestSyncSubagentEnvelope_StatusError_ReturnsInternal(t *testing.T) {
 		t.Fatalf("Spawn: %v", err)
 	}
 
-	if err := s.Close(); err != nil {
+	if err := s.Close(context.Background()); err != nil {
 		t.Fatalf("Close: %v", err)
 	}
 

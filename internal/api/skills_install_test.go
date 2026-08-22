@@ -57,7 +57,7 @@ func newSkillsTestAPI(t *testing.T) (*API, *http.ServeMux) {
 	if err != nil {
 		t.Fatalf("store.New: %v", err)
 	}
-	t.Cleanup(func() { s.Close() })
+	t.Cleanup(func() { s.Close(context.Background()) })
 
 	appCfg := config.DefaultAppConfig()
 	appCfg.Skills.VendorStorageDir = filepath.Join(root, "skills-vendor")
@@ -234,7 +234,7 @@ func TestHandleSyncSkill_SlugMismatch(t *testing.T) {
 		t.Fatalf("expected 409 for a sync slug mismatch, got %d; body: %s", w.Code, w.Body.String())
 	}
 
-	got, err := a.Services.Store.GetSkillBySlug("other-skill")
+	got, err := a.Services.Store.GetSkillBySlug(context.Background(), "other-skill")
 	if err != nil {
 		t.Fatalf("GetSkillBySlug(other-skill): %v", err)
 	}
@@ -243,7 +243,7 @@ func TestHandleSyncSkill_SlugMismatch(t *testing.T) {
 	}
 
 	// The target row itself must also be untouched.
-	unchanged, err := a.Services.Store.GetSkillBySlug("sample-skill")
+	unchanged, err := a.Services.Store.GetSkillBySlug(context.Background(), "sample-skill")
 	if err != nil {
 		t.Fatalf("GetSkillBySlug(sample-skill): %v", err)
 	}

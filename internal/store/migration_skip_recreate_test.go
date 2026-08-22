@@ -49,7 +49,7 @@ func TestMigrateSkipsRecreateOnceTableIsCurrent(t *testing.T) {
 
 	// Simulate a restart: migrate() re-runs goose's Up() against the same
 	// database, exactly as it does on every real boot.
-	if err := s.migrate(); err != nil {
+	if err := s.migrate(context.Background()); err != nil {
 		t.Fatalf("re-migrate after a real 'stalled' row exists: %v", err)
 	}
 
@@ -136,7 +136,7 @@ func TestMigrateDoesNotReRecreateLegacyRenameMigrations(t *testing.T) {
 
 	assertGooseHasNothingPending(t, s)
 
-	if err := s.migrate(); err != nil {
+	if err := s.migrate(context.Background()); err != nil {
 		t.Fatalf("re-migrate after a real 'turn'-scoped todo exists: %v", err)
 	}
 
@@ -230,7 +230,7 @@ func TestMigrateDropsLegacyRenameTables(t *testing.T) {
 
 	assertGooseHasNothingPending(t, s)
 
-	if err := s.migrate(); err != nil {
+	if err := s.migrate(context.Background()); err != nil {
 		t.Fatalf("re-migrate after legacy tables already dropped: %v", err)
 	}
 

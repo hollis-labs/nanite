@@ -2,6 +2,7 @@ package api
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"net/http/httptest"
 	"os"
@@ -52,7 +53,7 @@ func TestHandleShellExec_YOLOMode_SandboxIsolatedFalse(t *testing.T) {
 		Title:    "Shell YOLO Test",
 		Metadata: `{"shell_mode":"yolo"}`,
 	}
-	if err := a.Services.Store.CreateSession(sess); err != nil {
+	if err := a.Services.Store.CreateSession(context.Background(), sess); err != nil {
 		t.Fatalf("CreateSession: %v", err)
 	}
 
@@ -101,7 +102,7 @@ func TestHandleShellExec_SessionMode_SandboxIsolatedTrue(t *testing.T) {
 		Title:    "Shell Session Mode Test",
 		Metadata: `{"shell_mode":"session"}`,
 	}
-	if err := a.Services.Store.CreateSession(sess); err != nil {
+	if err := a.Services.Store.CreateSession(context.Background(), sess); err != nil {
 		t.Fatalf("CreateSession: %v", err)
 	}
 

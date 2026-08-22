@@ -39,28 +39,28 @@ func (s *stubAgentReader) addRole(r *store.Role) {
 
 // GetRole mirrors store.Store.GetRole's contract: (nil, nil) on a miss,
 // never an error for "not found".
-func (s *stubAgentReader) GetRole(id string) (*store.Role, error) {
+func (s *stubAgentReader) GetRole(ctx context.Context, id string) (*store.Role, error) {
 	if r, ok := s.roles[id]; ok {
 		return r, nil
 	}
 	return nil, nil
 }
 
-func (s *stubAgentReader) GetAgent(id string) (*store.AgentProfile, error) {
+func (s *stubAgentReader) GetAgent(ctx context.Context, id string) (*store.AgentProfile, error) {
 	if a, ok := s.agents[id]; ok {
 		return a, nil
 	}
 	return nil, fmt.Errorf("not found")
 }
 
-func (s *stubAgentReader) GetAgentBySlug(slug string) (*store.AgentProfile, error) {
+func (s *stubAgentReader) GetAgentBySlug(ctx context.Context, slug string) (*store.AgentProfile, error) {
 	if a, ok := s.slugIndex[slug]; ok {
 		return a, nil
 	}
 	return nil, fmt.Errorf("not found")
 }
 
-func (s *stubAgentReader) ListAgents() ([]store.AgentProfile, error) {
+func (s *stubAgentReader) ListAgents(ctx context.Context) ([]store.AgentProfile, error) {
 	out := make([]store.AgentProfile, 0, len(s.agents))
 	for _, a := range s.agents {
 		out = append(out, *a)
@@ -68,21 +68,29 @@ func (s *stubAgentReader) ListAgents() ([]store.AgentProfile, error) {
 	return out, nil
 }
 
-func (s *stubAgentReader) ListAgentsBySource(string) ([]store.AgentProfile, error) {
+func (s *stubAgentReader) ListAgentsBySource(context.Context, string) ([]store.AgentProfile, error) {
 	return nil, nil
 }
 
-func (s *stubAgentReader) GetSessionPrimaryAgent(sessionID string) (*store.SessionAgent, error) {
+func (s *stubAgentReader) GetSessionPrimaryAgent(ctx context.Context, sessionID string) (*store.SessionAgent, error) {
 	if sa, ok := s.sessionBind[sessionID]; ok {
 		return sa, nil
 	}
 	return nil, fmt.Errorf("no primary agent")
 }
 
-func (s *stubAgentReader) ListSessionAgents(string) ([]store.SessionAgent, error) { return nil, nil }
-func (s *stubAgentReader) ListAgentSkills(string) ([]store.Skill, error)          { return nil, nil }
-func (s *stubAgentReader) ListAgentProjects(string) ([]store.Project, error)      { return nil, nil }
-func (s *stubAgentReader) ListProjectAgents(string) ([]store.AgentProfile, error) { return nil, nil }
+func (s *stubAgentReader) ListSessionAgents(context.Context, string) ([]store.SessionAgent, error) {
+	return nil, nil
+}
+func (s *stubAgentReader) ListAgentSkills(context.Context, string) ([]store.Skill, error) {
+	return nil, nil
+}
+func (s *stubAgentReader) ListAgentProjects(context.Context, string) ([]store.Project, error) {
+	return nil, nil
+}
+func (s *stubAgentReader) ListProjectAgents(context.Context, string) ([]store.AgentProfile, error) {
+	return nil, nil
+}
 
 type stubAgentWriter struct {
 	created []store.AgentProfile
@@ -90,41 +98,55 @@ type stubAgentWriter struct {
 	ensured []string // sessionIDs that got EnsureSessionAgent
 }
 
-func (s *stubAgentWriter) CreateAgent(a *store.AgentProfile) error {
+func (s *stubAgentWriter) CreateAgent(ctx context.Context, a *store.AgentProfile) error {
 	s.created = append(s.created, *a)
 	return nil
 }
-func (s *stubAgentWriter) UpdateAgent(*store.AgentProfile) error { return nil }
-func (s *stubAgentWriter) DeleteAgent(slug string) error {
+func (s *stubAgentWriter) UpdateAgent(context.Context, *store.AgentProfile) error { return nil }
+func (s *stubAgentWriter) DeleteAgent(ctx context.Context, slug string) error {
 	s.deleted = append(s.deleted, slug)
 	return nil
 }
-func (s *stubAgentWriter) UpsertAgentBySlug(*store.AgentProfile) error { return nil }
-func (s *stubAgentWriter) EnsureSessionAgent(sid, _, _ string, _ bool) error {
+func (s *stubAgentWriter) UpsertAgentBySlug(context.Context, *store.AgentProfile) error { return nil }
+func (s *stubAgentWriter) EnsureSessionAgent(ctx context.Context, sid, _, _ string, _ bool) error {
 	s.ensured = append(s.ensured, sid)
 	return nil
 }
-func (s *stubAgentWriter) SetSessionAgentMode(string, string, string) error { return nil }
-func (s *stubAgentWriter) DeleteSessionAgent(string, string) error          { return nil }
-func (s *stubAgentWriter) AssignSkillToAgent(string, string, string) error  { return nil }
-func (s *stubAgentWriter) RemoveSkillFromAgent(string, string) error        { return nil }
-func (s *stubAgentWriter) AddAgentProject(string, string) error             { return nil }
-func (s *stubAgentWriter) RemoveAgentProject(string, string) error          { return nil }
+func (s *stubAgentWriter) SetSessionAgentMode(context.Context, string, string, string) error {
+	return nil
+}
+func (s *stubAgentWriter) DeleteSessionAgent(context.Context, string, string) error { return nil }
+func (s *stubAgentWriter) AssignSkillToAgent(context.Context, string, string, string) error {
+	return nil
+}
+func (s *stubAgentWriter) RemoveSkillFromAgent(context.Context, string, string) error { return nil }
+func (s *stubAgentWriter) AddAgentProject(context.Context, string, string) error      { return nil }
+func (s *stubAgentWriter) RemoveAgentProject(context.Context, string, string) error   { return nil }
 
 type stubSettings struct {
 	defaultAgent string
 }
 
-func (s *stubSettings) GetUserSettings() (*store.UserSettings, error) {
+func (s *stubSettings) GetUserSettings(ctx context.Context) (*store.UserSettings, error) {
 	return &store.UserSettings{DefaultAgent: s.defaultAgent}, nil
 }
-func (s *stubSettings) UpdateUserSettings(*store.UserSettings) error            { return nil }
-func (s *stubSettings) GetPluginSettings(string) (*store.PluginSettings, error) { return nil, nil }
-func (s *stubSettings) UpsertPluginSettings(string, map[string]any) error       { return nil }
-func (s *stubSettings) UpsertPluginSchema(string, []store.ConfigField) error    { return nil }
-func (s *stubSettings) ListPluginSettings() ([]*store.PluginSettings, error)    { return nil, nil }
-func (s *stubSettings) UpdatePluginIcon(string, string) error                   { return nil }
-func (s *stubSettings) GetPluginSettingValue(string, string) (string, error)    { return "", nil }
+func (s *stubSettings) UpdateUserSettings(context.Context, *store.UserSettings) error { return nil }
+func (s *stubSettings) GetPluginSettings(context.Context, string) (*store.PluginSettings, error) {
+	return nil, nil
+}
+func (s *stubSettings) UpsertPluginSettings(context.Context, string, map[string]any) error {
+	return nil
+}
+func (s *stubSettings) UpsertPluginSchema(context.Context, string, []store.ConfigField) error {
+	return nil
+}
+func (s *stubSettings) ListPluginSettings(ctx context.Context) ([]*store.PluginSettings, error) {
+	return nil, nil
+}
+func (s *stubSettings) UpdatePluginIcon(context.Context, string, string) error { return nil }
+func (s *stubSettings) GetPluginSettingValue(context.Context, string, string) (string, error) {
+	return "", nil
+}
 
 // --- tests ---
 

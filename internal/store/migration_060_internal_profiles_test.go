@@ -22,11 +22,11 @@ func TestMigration060_SeedsFourInternalProfilesAndFlipsSource(t *testing.T) {
 	if err != nil {
 		t.Fatalf("store.New: %v", err)
 	}
-	defer s.Close()
+	defer s.Close(context.Background())
 
 	wantSlugs := []string{"default", "worker", "planner", "hint-selector"}
 	for _, slug := range wantSlugs {
-		got, err := s.GetAgentBySlug(slug)
+		got, err := s.GetAgentBySlug(context.Background(), slug)
 		if err != nil {
 			t.Fatalf("GetAgentBySlug %q after migration 060: %v", slug, err)
 		}
@@ -43,7 +43,7 @@ func TestMigration060_SeedsFourInternalProfilesAndFlipsSource(t *testing.T) {
 	}
 
 	// Worker body must NOT carry execute-or-bust framing.
-	worker, _ := s.GetAgentBySlug("worker")
+	worker, _ := s.GetAgentBySlug(context.Background(), "worker")
 	if strings.Contains(worker.SystemPrompt, "Your job is to execute, not converse") {
 		t.Error("worker body in migration 060 reintroduces the c160 fabrication-chain execute-or-bust framing")
 	}
@@ -53,7 +53,7 @@ func TestMigration060_SeedsFourInternalProfilesAndFlipsSource(t *testing.T) {
 
 	// Default body must NOT carry the universal Grounding section (those
 	// rules moved to internal/chat/universal_rules.go in CW-20260512-0100).
-	def, _ := s.GetAgentBySlug("default")
+	def, _ := s.GetAgentBySlug(context.Background(), "default")
 	if strings.Contains(def.SystemPrompt, "## Grounding") {
 		t.Error("default body in migration 060 reintroduces ## Grounding — universal rules layer owns it")
 	}

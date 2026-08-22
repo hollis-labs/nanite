@@ -28,11 +28,11 @@ func (sc *StateCollector) Collect(ctx context.Context, sessionID, agentID, agent
 		return State{}, fmt.Errorf("StateCollector: Store is nil")
 	}
 
-	msgs, err := sc.Store.LastNAssistantMessages(sessionID, window)
+	msgs, err := sc.Store.LastNAssistantMessages(ctx, sessionID, window)
 	if err != nil {
 		return State{}, fmt.Errorf("collect last messages: %w", err)
 	}
-	usages, err := sc.Store.LastNTokenUsage(sessionID, window)
+	usages, err := sc.Store.LastNTokenUsage(ctx, sessionID, window)
 	if err != nil {
 		return State{}, fmt.Errorf("collect token usage: %w", err)
 	}
@@ -59,7 +59,7 @@ func (sc *StateCollector) Collect(ctx context.Context, sessionID, agentID, agent
 			ms.OutputTokens = u.OutputTokens
 			ms.CacheRead = u.CacheReadTokens
 		}
-		if n, err := sc.Store.ToolCallsForMessage(m.ID); err == nil {
+		if n, err := sc.Store.ToolCallsForMessage(ctx, m.ID); err == nil {
 			ms.ToolCalls = n
 		}
 		signals = append(signals, ms)

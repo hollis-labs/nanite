@@ -1,6 +1,7 @@
 package store
 
 import (
+	"context"
 	"database/sql"
 	"errors"
 	"fmt"
@@ -100,7 +101,7 @@ const workflowRunColumns = `id, definition_name, status, input_json, error, star
 // expected to call UpdateWorkflowRunLoopScope (below) right after
 // WorkflowLauncher.Launch returns its WorkflowLaunchResult.RunID instead --
 // see this task's Work Log for the full reasoning.
-func (s *Store) CreateWorkflowRun(row *WorkflowRunRow) error {
+func (s *Store) CreateWorkflowRun(ctx context.Context, row *WorkflowRunRow) error {
 	if row == nil {
 		return errors.New("CreateWorkflowRun: nil row")
 	}
@@ -118,7 +119,7 @@ func (s *Store) CreateWorkflowRun(row *WorkflowRunRow) error {
 	}
 	row.UpdatedAt = row.StartedAt
 
-	_, err := s.DB.Exec(
+	_, err := s.DB.ExecContext(ctx,
 		`INSERT INTO workflow_runs (`+workflowRunColumns+`)
 		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		row.ID, row.DefinitionName, row.Status, row.InputJSON, row.Error,
@@ -145,14 +146,14 @@ func (s *Store) CreateWorkflowRun(row *WorkflowRunRow) error {
 // always a caller bug, not a valid "clear the scope" request. Returns
 // ErrWorkflowRunNotFound when id doesn't match any row, matching this
 // file's SetWorkflowRunStatus convention.
-func (s *Store) UpdateWorkflowRunLoopScope(id, loopRunID string, loopIteration int) error {
+func (s *Store) UpdateWorkflowRunLoopScope(ctx context.Context, id, loopRunID string, loopIteration int) error {
 	if id == "" {
 		return errors.New("UpdateWorkflowRunLoopScope: empty id")
 	}
 	if loopRunID == "" {
 		return errors.New("UpdateWorkflowRunLoopScope: empty loop_run_id")
 	}
-	res, err := s.DB.Exec(
+	res, err := s.DB.ExecContext(ctx,
 		`UPDATE workflow_runs SET loop_run_id = ?, loop_iteration = ?, updated_at = ? WHERE id = ?`,
 		loopRunID, loopIteration, formatTimeRFC3339Nano(time.Now().UTC()), id,
 	)
@@ -176,8 +177,8 @@ func (s *Store) UpdateWorkflowRunLoopScope(id, loopRunID string, loopIteration i
 // codebase's dominant store convention of surfacing a no-op update as an
 // explicit error rather than succeeding silently, so a caller (the engine)
 // can never mistake "nothing updated" for "run finalized."
-func (s *Store) SetWorkflowRunStatus(id, status, errMsg string, completedAt time.Time) error {
-	res, err := s.DB.Exec(
+func (s *Store) SetWorkflowRunStatus(ctx context.Context, id, status, errMsg string, completedAt time.Time) error {
+	res, err := s.DB.ExecContext(ctx,
 		`UPDATE workflow_runs SET status = ?, error = ?, completed_at = ?, updated_at = ? WHERE id = ?`,
 		status, errMsg, formatTimeRFC3339NanoOrEmpty(completedAt), formatTimeRFC3339Nano(time.Now().UTC()), id,
 	)
@@ -196,8 +197,8 @@ func (s *Store) SetWorkflowRunStatus(id, status, errMsg string, completedAt time
 
 // GetWorkflowRun loads a run row by id. Returns ErrWorkflowRunNotFound when
 // unknown.
-func (s *Store) GetWorkflowRun(id string) (*WorkflowRunRow, error) {
-	row := s.DB.QueryRow(`SELECT `+workflowRunColumns+` FROM workflow_runs WHERE id = ?`, id)
+func (s *Store) GetWorkflowRun(ctx context.Context, id string) (*WorkflowRunRow, error) {
+	row := s.DB.QueryRowContext(ctx, `SELECT `+workflowRunColumns+` FROM workflow_runs WHERE id = ?`, id)
 	r, err := scanWorkflowRunRow(row)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrWorkflowRunNotFound
@@ -248,7 +249,7 @@ func workflowRunStepID(runID, stepID string) string {
 // this on every status transition (pending -> running -> terminal) so a
 // crash at any point leaves the store reflecting the step's last known
 // state — the crash-durability requirement.
-func (s *Store) UpsertWorkflowRunStep(row *WorkflowRunStepRow) error {
+func (s *Store) UpsertWorkflowRunStep(ctx context.Context, row *WorkflowRunStepRow) error {
 	if row == nil {
 		return errors.New("UpsertWorkflowRunStep: nil row")
 	}
@@ -266,7 +267,7 @@ func (s *Store) UpsertWorkflowRunStep(row *WorkflowRunStepRow) error {
 	}
 	row.UpdatedAt = time.Now().UTC()
 
-	_, err := s.DB.Exec(
+	_, err := s.DB.ExecContext(ctx,
 		`INSERT INTO workflow_run_steps (`+workflowRunStepColumns+`)
 		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		 ON CONFLICT(id) DO UPDATE SET
@@ -298,8 +299,8 @@ func (s *Store) UpsertWorkflowRunStep(row *WorkflowRunStepRow) error {
 // progressed past pending and so can't be used to order the full set.
 // Resume uses this to rebuild in-memory step results from persisted state
 // before continuing execution.
-func (s *Store) ListWorkflowRunSteps(runID string) ([]*WorkflowRunStepRow, error) {
-	rows, err := s.DB.Query(
+func (s *Store) ListWorkflowRunSteps(ctx context.Context, runID string) ([]*WorkflowRunStepRow, error) {
+	rows, err := s.DB.QueryContext(ctx,
 		`SELECT `+workflowRunStepColumns+` FROM workflow_run_steps WHERE workflow_run_id = ? ORDER BY rowid`,
 		runID,
 	)
@@ -352,11 +353,11 @@ func scanWorkflowRunStepRow(scanner interface{ Scan(...any) error }) (*WorkflowR
 // Intended caller: service.LoopResumeNotifier.NotifyLoopRunTerminal, the
 // real push a terminal LoopRun uses to find and resume its specific outer
 // WorkflowRun.
-func (s *Store) GetWorkflowRunStepByLoopRunID(loopRunID string) (*WorkflowRunStepRow, error) {
+func (s *Store) GetWorkflowRunStepByLoopRunID(ctx context.Context, loopRunID string) (*WorkflowRunStepRow, error) {
 	if loopRunID == "" {
 		return nil, errors.New("GetWorkflowRunStepByLoopRunID: empty loop_run_id")
 	}
-	row := s.DB.QueryRow(
+	row := s.DB.QueryRowContext(ctx,
 		`SELECT `+workflowRunStepColumns+` FROM workflow_run_steps WHERE loop_run_id = ? LIMIT 1`,
 		loopRunID,
 	)
@@ -399,7 +400,7 @@ func parseTimeRFC3339Nano(s string) time.Time {
 // completed. This is called when external input (e.g., from A2A task input)
 // resolves a paused gate, allowing the workflow to resume.
 // CW-20260814-0017: A2A gate ↔ input-required mapping.
-func (s *Store) ResolveGate(runID, stepID, input string) error {
+func (s *Store) ResolveGate(ctx context.Context, runID, stepID, input string) error {
 	if runID == "" || stepID == "" {
 		return errors.New("ResolveGate: runID and stepID are required")
 	}
@@ -407,7 +408,7 @@ func (s *Store) ResolveGate(runID, stepID, input string) error {
 	id := workflowRunStepID(runID, stepID)
 	now := time.Now().UTC()
 
-	result, err := s.DB.Exec(
+	result, err := s.DB.ExecContext(ctx,
 		`UPDATE workflow_run_steps
 		 SET gate_input = ?,
 		     status = 'completed',
@@ -438,8 +439,8 @@ func (s *Store) ResolveGate(runID, stepID, input string) error {
 
 // GetWaitingGates returns all gate steps in waiting_on_gate status for a run.
 // CW-20260814-0017: used to surface gate context in A2A Task state.
-func (s *Store) GetWaitingGates(runID string) ([]*WorkflowRunStepRow, error) {
-	rows, err := s.DB.Query(
+func (s *Store) GetWaitingGates(ctx context.Context, runID string) ([]*WorkflowRunStepRow, error) {
+	rows, err := s.DB.QueryContext(ctx,
 		`SELECT `+workflowRunStepColumns+` FROM workflow_run_steps
 		 WHERE workflow_run_id = ? AND kind = 'gate' AND status = 'waiting_on_gate'
 		 ORDER BY rowid`,

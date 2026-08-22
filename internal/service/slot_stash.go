@@ -177,7 +177,7 @@ func (a *artifactStasher) StashSlot(ctx context.Context, req contextbroker.Stash
 	// the same path (idempotent — content-addressed → identical bytes)
 	// so the pointer envelope remains addressable. The DB row is left
 	// untouched in the recovery case.
-	if existing, err := a.store.GetArtifact(artifactID); err == nil && existing != nil {
+	if existing, err := a.store.GetArtifact(ctx, artifactID); err == nil && existing != nil {
 		recoveryPath := existing.StoragePath
 		if recoveryPath == "" {
 			recoveryPath = storagePath
@@ -231,7 +231,7 @@ func (a *artifactStasher) StashSlot(ctx context.Context, req contextbroker.Stash
 		SourceAgentID: a.sourceAgentID,
 		Metadata:      fmt.Sprintf(`{"slot":%q,"tokens":%d,"source":"context-broker"}`, req.SlotName, req.Tokens),
 	}
-	if err := a.store.CreateArtifact(artifact); err != nil {
+	if err := a.store.CreateArtifact(ctx, artifact); err != nil {
 		// Reviewer feedback (CW-20260512-0110 Comment 2): the
 		// deterministic artifact_id means two concurrent stashes of the
 		// same (session, slot, content) tuple race on INSERT. Both
@@ -248,7 +248,7 @@ func (a *artifactStasher) StashSlot(ctx context.Context, req contextbroker.Stash
 		// (the one *this* goroutine performed before INSERT) is left
 		// in place since it's content-identical to the winner's — no
 		// cleanup needed.
-		if existing, getErr := a.store.GetArtifact(artifactID); getErr == nil && existing != nil {
+		if existing, getErr := a.store.GetArtifact(ctx, artifactID); getErr == nil && existing != nil {
 			recoveryPath := existing.StoragePath
 			if recoveryPath == "" {
 				recoveryPath = storagePath
@@ -334,11 +334,13 @@ func (a *artifactStasher) StashSlot(ctx context.Context, req contextbroker.Stash
 // Note on durability: the artifactStasher's contract is "FS-first, DB-
 // second, idempotency re-write reconciles" — see the package-level
 // atomicity discussion. We intentionally do NOT f.Sync() here because:
-//   (a) a crash between FS-write and DB-insert produces an orphan file
-//       that the next stash of the same content rewrites identically
-//       (orphans are harmless), and
-//   (b) a crash after DB-insert leaves both file and row consistent on
-//       any reasonable filesystem with default journaling.
+//
+//	(a) a crash between FS-write and DB-insert produces an orphan file
+//	    that the next stash of the same content rewrites identically
+//	    (orphans are harmless), and
+//	(b) a crash after DB-insert leaves both file and row consistent on
+//	    any reasonable filesystem with default journaling.
+//
 // Adding fsync would impose a per-stash latency cost without changing
 // the recovery semantics the broker relies on.
 func writeStashFile(path, content string) error {

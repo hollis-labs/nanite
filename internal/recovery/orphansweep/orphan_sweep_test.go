@@ -92,7 +92,7 @@ func (f *fakeRuntimeStore) ListRunningRows() ([]*agent.RuntimeRow, error) {
 	return out, nil
 }
 
-func (f *fakeRuntimeStore) LogEvent(sessionID, eventType, category, detail, metadata string) {
+func (f *fakeRuntimeStore) LogEvent(ctx context.Context, sessionID, eventType, category, detail, metadata string) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.events = append(f.events, fakeLoggedEvent{

@@ -24,7 +24,7 @@ func newStasherForTest(t *testing.T) (contextbroker.SlotStasher, *store.Store, s
 	if err != nil {
 		t.Fatalf("store.New: %v", err)
 	}
-	t.Cleanup(func() { s.Close() })
+	t.Cleanup(func() { s.Close(context.Background()) })
 
 	artifactsRoot := tmp + "/artifacts"
 	if err := os.MkdirAll(artifactsRoot, 0o755); err != nil {
@@ -48,7 +48,7 @@ func newStasherForTest(t *testing.T) (contextbroker.SlotStasher, *store.Store, s
 // satisfied. Returns the session ID.
 func newSessionForStashTest(t *testing.T, s *store.Store, id string) {
 	t.Helper()
-	if err := s.CreateSession(&store.Session{ID: id}); err != nil {
+	if err := s.CreateSession(context.Background(), &store.Session{ID: id}); err != nil {
 		t.Fatalf("CreateSession: %v", err)
 	}
 }
@@ -81,7 +81,7 @@ func TestArtifactStasher_StashAndRetrieve(t *testing.T) {
 	}
 
 	// Row exists.
-	row, err := s.GetArtifact(res.ArtifactID)
+	row, err := s.GetArtifact(context.Background(), res.ArtifactID)
 	if err != nil {
 		t.Fatalf("GetArtifact: %v", err)
 	}
@@ -156,7 +156,7 @@ func TestArtifactStasher_Idempotent(t *testing.T) {
 	}
 
 	// Confirm exactly one row exists for this session.
-	rows, err := s.ListArtifacts("sess-idem")
+	rows, err := s.ListArtifacts(context.Background(), "sess-idem")
 	if err != nil {
 		t.Fatalf("ListArtifacts: %v", err)
 	}
@@ -275,7 +275,7 @@ func TestArtifactStasher_AtomicityOnFSWriteFailure(t *testing.T) {
 	if err != nil {
 		t.Fatalf("store: %v", err)
 	}
-	t.Cleanup(func() { s.Close() })
+	t.Cleanup(func() { s.Close(context.Background()) })
 	newSessionForStashTest(t, s, "sess-fs-fail")
 
 	// Use a path that ResolveUnder will accept but MkdirAll cannot
@@ -301,7 +301,7 @@ func TestArtifactStasher_AtomicityOnFSWriteFailure(t *testing.T) {
 
 	// No DB row should have been created for this content.
 	id := contextbroker.DeterministicArtifactID("sess-fs-fail", "memory", "x")
-	if row, _ := s.GetArtifact(id); row != nil {
+	if row, _ := s.GetArtifact(context.Background(), id); row != nil {
 		t.Errorf("DB row leaked despite FS failure: %+v", row)
 	}
 }
@@ -333,7 +333,7 @@ func TestArtifactStasher_RecoversFromMissingFile(t *testing.T) {
 	}
 
 	// Manually delete the on-disk file to simulate disk-loss.
-	row, err := s.GetArtifact(res1.ArtifactID)
+	row, err := s.GetArtifact(context.Background(), res1.ArtifactID)
 	if err != nil {
 		t.Fatalf("GetArtifact: %v", err)
 	}
@@ -465,7 +465,7 @@ func TestArtifactStasher_ConcurrentStashes_NoInlineFallback(t *testing.T) {
 		t.Errorf("concurrent stashes should all return the same artifact_id; got %d distinct IDs: %v", len(ids), ids)
 	}
 	// Exactly one DB row regardless of how many goroutines raced.
-	rows, err := s.ListArtifacts("sess-concurrent")
+	rows, err := s.ListArtifacts(context.Background(), "sess-concurrent")
 	if err != nil {
 		t.Fatalf("ListArtifacts: %v", err)
 	}
@@ -496,7 +496,7 @@ func TestArtifactStasher_ConcurrentStashes_WithMissingFile(t *testing.T) {
 	if err != nil {
 		t.Fatalf("seed stash: %v", err)
 	}
-	row, err := s.GetArtifact(first.ArtifactID)
+	row, err := s.GetArtifact(context.Background(), first.ArtifactID)
 	if err != nil {
 		t.Fatalf("GetArtifact: %v", err)
 	}

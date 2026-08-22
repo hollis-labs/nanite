@@ -88,7 +88,7 @@ func TestAssembleSlotSources_UniversalRulesInSlotUniversal(t *testing.T) {
 
 	session := &store.Session{}
 	// Persist the session so ListMessages doesn't trip on a missing FK.
-	if err := st.CreateSession(session); err != nil {
+	if err := st.CreateSession(context.Background(), session); err != nil {
 		t.Fatalf("CreateSession: %v", err)
 	}
 
@@ -166,7 +166,7 @@ func TestAssembleSlotSources_UniversalSlotEmittedForSubagentDispatch(t *testing.
 	// Sub-session shape — workspace optional; the slot must populate even
 	// without one.
 	session := &store.Session{}
-	if err := st.CreateSession(session); err != nil {
+	if err := st.CreateSession(context.Background(), session); err != nil {
 		t.Fatalf("CreateSession: %v", err)
 	}
 

@@ -20,7 +20,7 @@ func makeTestAgentProfile(t *testing.T, s *store.Store, slug string) *store.Agen
 		Slug:         slug,
 		SystemPrompt: "You are a test agent.",
 	}
-	if err := s.CreateAgent(a); err != nil {
+	if err := s.CreateAgent(context.Background(), a); err != nil {
 		t.Fatalf("CreateAgent: %v", err)
 	}
 	return a
@@ -33,10 +33,10 @@ func makeTestAgentProfile(t *testing.T, s *store.Store, slug string) *store.Agen
 func makeTestSessionWithPrimaryAgent(t *testing.T, s *store.Store, agentID string) *store.Session {
 	t.Helper()
 	sess := &store.Session{}
-	if err := s.CreateSession(sess); err != nil {
+	if err := s.CreateSession(context.Background(), sess); err != nil {
 		t.Fatalf("CreateSession: %v", err)
 	}
-	if err := s.EnsureSessionAgent(sess.ID, agentID, "default", true); err != nil {
+	if err := s.EnsureSessionAgent(context.Background(), sess.ID, agentID, "default", true); err != nil {
 		t.Fatalf("EnsureSessionAgent: %v", err)
 	}
 	return sess

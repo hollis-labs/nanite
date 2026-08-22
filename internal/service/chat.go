@@ -408,7 +408,7 @@ func NewChatService(cfg ChatServiceConfig) ChatService {
 	up := cfg.UtilityProvider
 	um := cfg.UtilityModel
 	if (up == "" || um == "") && cfg.Store != nil {
-		if resolvedProv, resolvedModel, err := cfg.Store.ResolveProviderAndModel(up, um); err == nil {
+		if resolvedProv, resolvedModel, err := cfg.Store.ResolveProviderAndModel(context.TODO() /* TODO(ctx-sweep): no ctx available at this call site */, up, um); err == nil {
 			up = resolvedProv
 			um = resolvedModel
 		}
@@ -676,7 +676,7 @@ func (s *chatServiceImpl) HandleMessage(ctx context.Context, sessionID, content 
 		Role:      "user",
 		Content:   content,
 	}
-	if err := s.store.CreateMessage(userMsg); err != nil {
+	if err := s.store.CreateMessage(ctx, userMsg); err != nil {
 		return "", fmt.Errorf("create user message: %w", err)
 	}
 
@@ -758,7 +758,7 @@ func (s *chatServiceImpl) RetryLastMessage(ctx context.Context, sessionID string
 	}
 
 	// Find the last user message.
-	msgs, err := s.store.ListMessages(sessionID, 50)
+	msgs, err := s.store.ListMessages(ctx, sessionID, 50)
 	if err != nil {
 		return "", fmt.Errorf("list messages for retry: %w", err)
 	}
@@ -800,7 +800,7 @@ func (s *chatServiceImpl) SendAgentMessage(ctx context.Context, fromSessionID, t
 		Content:   content,
 		Metadata:  fmt.Sprintf(`{"source":"agent","from_session":"%s","from_agent":"%s"}`, fromSessionID, fromAgentID),
 	}
-	if err := s.store.CreateMessage(msg); err != nil {
+	if err := s.store.CreateMessage(ctx, msg); err != nil {
 		return "", fmt.Errorf("create agent message: %w", err)
 	}
 
@@ -870,7 +870,7 @@ func (s *chatServiceImpl) TriggerHarnessTurn(ctx context.Context, sessionID, rea
 		Content:   content,
 		Metadata:  fmt.Sprintf(`{"source":"harness","triggered_by":%q,"run_id":%q}`, reason, runID),
 	}
-	if err := s.store.CreateMessage(msg); err != nil {
+	if err := s.store.CreateMessage(ctx, msg); err != nil {
 		s.deregisterGeneration(sessionID, assistantMsgID)
 		cancel()
 		return "", fmt.Errorf("create harness-triggered message: %w", err)
@@ -929,7 +929,7 @@ func (s *chatServiceImpl) TriggerMessageWake(ctx context.Context, sessionID stri
 		Content:   content,
 		Metadata:  fmt.Sprintf(`{"source":"agent_message","from_session":%q,"from_agent":%q,"message_id":%q}`, msg.FromSessionID, msg.FromAgentID, msg.ID),
 	}
-	if err := s.store.CreateMessage(newMsg); err != nil {
+	if err := s.store.CreateMessage(ctx, newMsg); err != nil {
 		s.deregisterGeneration(sessionID, assistantMsgID)
 		cancel()
 		return "", fmt.Errorf("create message-wake turn: %w", err)
@@ -1171,7 +1171,7 @@ func (s *chatServiceImpl) resolveProvider(sessionID, sessionProvider, agentProvi
 	// --- Step 1: sessionProvider (explicit per-session override) ---
 	if sessionProvider != "" {
 		runtimeProvider := sessionProvider
-		if stored, err := s.store.GetProvider(sessionProvider); err == nil && stored != nil && stored.ProviderType != "" {
+		if stored, err := s.store.GetProvider(context.TODO() /* TODO(ctx-sweep): no ctx available at this call site */, sessionProvider); err == nil && stored != nil && stored.ProviderType != "" {
 			runtimeProvider = stored.ProviderType
 		}
 		if chat.IsCLIProvider(runtimeProvider) {
@@ -1243,7 +1243,7 @@ func (s *chatServiceImpl) resolveProvider(sessionID, sessionProvider, agentProvi
 	// existing agent rows resolves through this tier today (all have
 	// default_provider=""), so removing it would be a behavior change,
 	// not a resolution-mechanism swap. ---
-	if us, err := s.store.GetUserSettings(); err == nil {
+	if us, err := s.store.GetUserSettings(context.TODO() /* TODO(ctx-sweep): no ctx available at this call site */); err == nil {
 		if us.DefaultProvider != "" {
 			if name, p, ok := s.tryProviderCandidate(sessionID, requested, us.DefaultProvider,
 				"chat-service: user_settings.default_provider not registered, falling through"); ok {

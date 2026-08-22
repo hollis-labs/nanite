@@ -13,7 +13,7 @@ type stubParentage struct {
 	err           error
 }
 
-func (p stubParentage) IsSubagentSession(sessionID string) (bool, error) {
+func (p stubParentage) IsSubagentSession(ctx context.Context, sessionID string) (bool, error) {
 	if p.err != nil {
 		return false, p.err
 	}

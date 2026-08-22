@@ -1,6 +1,7 @@
 package selftools
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"strings"
@@ -136,10 +137,10 @@ func (st *SelfToolsTransport) callAgentSourceResolve(args map[string]any) (*mcp.
 // lookup on either path returns nil rather than an error so the caller
 // emits a single clean not-found message.
 func resolveAgentByRef(s *store.Store, ref string) *store.AgentProfile {
-	if a, err := s.GetAgentBySlug(ref); err == nil && a != nil {
+	if a, err := s.GetAgentBySlug(context.TODO() /* TODO(ctx-sweep): no ctx available at this call site */, ref); err == nil && a != nil {
 		return a
 	}
-	if a, err := s.GetAgent(ref); err == nil && a != nil {
+	if a, err := s.GetAgent(context.TODO() /* TODO(ctx-sweep): no ctx available at this call site */, ref); err == nil && a != nil {
 		return a
 	}
 	return nil

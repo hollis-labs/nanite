@@ -28,7 +28,7 @@ func secretFieldKeys(schema []store.ConfigField) map[string]bool {
 func (a *API) handleGetPluginConfig(w http.ResponseWriter, r *http.Request) {
 	pluginID := r.PathValue("id")
 
-	settings, err := a.Services.Store.GetPluginSettings(pluginID)
+	settings, err := a.Services.Store.GetPluginSettings(r.Context(), pluginID)
 	if err != nil {
 		// No settings saved yet — return empty defaults.
 		a.jsonResp(w, http.StatusOK, map[string]any{
@@ -63,7 +63,7 @@ func (a *API) handleUpdatePluginConfig(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Load existing settings + schema to identify secret fields.
-	existing, err := a.Services.Store.GetPluginSettings(pluginID)
+	existing, err := a.Services.Store.GetPluginSettings(r.Context(), pluginID)
 	var secKeys map[string]bool
 	if err == nil && existing != nil {
 		secKeys = secretFieldKeys(existing.Schema)
@@ -94,7 +94,7 @@ func (a *API) handleUpdatePluginConfig(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	if err := a.Services.Store.UpsertPluginSettings(pluginID, dbSettings); err != nil {
+	if err := a.Services.Store.UpsertPluginSettings(r.Context(), pluginID, dbSettings); err != nil {
 		a.errorResp(w, http.StatusInternalServerError, "failed to save plugin config")
 		return
 	}
@@ -110,7 +110,7 @@ func (a *API) handleUpdatePluginConfig(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Return the full settings after merge.
-	updated, err := a.Services.Store.GetPluginSettings(pluginID)
+	updated, err := a.Services.Store.GetPluginSettings(r.Context(), pluginID)
 	if err != nil {
 		a.jsonResp(w, http.StatusOK, map[string]any{"plugin_id": pluginID, "settings": dbSettings})
 		return
@@ -131,7 +131,7 @@ func (a *API) handleUpdatePluginConfig(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *API) handleListPluginSettings(w http.ResponseWriter, r *http.Request) {
-	settings, err := a.Services.Store.ListPluginSettings()
+	settings, err := a.Services.Store.ListPluginSettings(r.Context())
 	if err != nil {
 		a.errorResp(w, http.StatusInternalServerError, "failed to list plugin settings")
 		return

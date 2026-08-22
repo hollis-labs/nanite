@@ -42,7 +42,7 @@ func TestMigration063_Idempotent_NoTxLeak(t *testing.T) {
 	// transaction on the FIRST boot (a future regression we don't have
 	// today), Close will fail with the open transaction in flight and
 	// the second New below would otherwise return a misleading error.
-	if err := s1.Close(); err != nil {
+	if err := s1.Close(context.Background()); err != nil {
 		t.Fatalf("first Close (open transaction leaked from migrations?): %v", err)
 	}
 
@@ -50,11 +50,13 @@ func TestMigration063_Idempotent_NoTxLeak(t *testing.T) {
 	if err != nil {
 		t.Fatalf("second New (post-063 re-run): %v", err)
 	}
-	defer s2.Close()
+	defer s2.Close(context.
 
-	// Mirror SeedProviders' first move: open a transaction on the
-	// shared pool. Pre-fix this errors with "cannot start a
-	// transaction within a transaction"; post-fix it succeeds.
+		// Mirror SeedProviders' first move: open a transaction on the
+		// shared pool. Pre-fix this errors with "cannot start a
+		// transaction within a transaction"; post-fix it succeeds.
+		Background())
+
 	tx, err := s2.DB.Begin()
 	if err != nil {
 		if strings.Contains(err.Error(), "transaction within a transaction") {

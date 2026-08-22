@@ -58,18 +58,18 @@ type DurableAgentWakeService interface {
 }
 
 type durableWakeStore interface {
-	ListDurableAgentInstances(includeArchived bool) ([]store.DurableAgentInstance, error)
-	GetDurableAgentInstance(id string) (*store.DurableAgentInstance, error)
+	ListDurableAgentInstances(ctx context.Context, includeArchived bool) ([]store.DurableAgentInstance, error)
+	GetDurableAgentInstance(ctx context.Context, id string) (*store.DurableAgentInstance, error)
 	ListAgentSchedules(ctx context.Context, agentID string) ([]store.AgentSchedule, error)
 	UpdateAgentScheduleStatus(ctx context.Context, id, status string) error
 	BumpAgentScheduleFireCount(ctx context.Context, id string, now time.Time) error
-	ListDurableAgentInstanceSessions(instanceID string) ([]store.DurableAgentInstanceSession, error)
-	GetSession(id string) (*store.Session, error)
-	CreateDurableAgentEvent(event *store.DurableAgentEvent) error
+	ListDurableAgentInstanceSessions(ctx context.Context, instanceID string) ([]store.DurableAgentInstanceSession, error)
+	GetSession(ctx context.Context, id string) (*store.Session, error)
+	CreateDurableAgentEvent(ctx context.Context, event *store.DurableAgentEvent) error
 	// GetAgent backs activationModeForInstance's lookup of the
 	// composition-level activation_mode wakeSkipReason now reads (Phase 1
 	// item 02, TASKS/phase-1/02-add-agents-composition-columns.md).
-	GetAgent(id string) (*store.AgentProfile, error)
+	GetAgent(ctx context.Context, id string) (*store.AgentProfile, error)
 }
 
 type durableWakeService struct {
@@ -82,7 +82,7 @@ func NewDurableAgentWakeService(st durableWakeStore, durable DurableAgentService
 }
 
 func (s *durableWakeService) ListDue(ctx context.Context, now time.Time) ([]DurableAgentWakeDueItem, error) {
-	instances, err := s.store.ListDurableAgentInstances(false)
+	instances, err := s.store.ListDurableAgentInstances(ctx, false)
 	if err != nil {
 		return nil, err
 	}
@@ -255,7 +255,7 @@ func (s *durableWakeService) RunDue(ctx context.Context, req DurableAgentWakeRun
 // surface rather than attempting a full durable-agent lifecycle
 // completion-tracking redesign, which is out of this task's scope.
 func (s *durableWakeService) Wake(ctx context.Context, instanceID string, req DurableAgentWakeRequest) (*DurableAgentWakeResult, error) {
-	inst, err := s.store.GetDurableAgentInstance(instanceID)
+	inst, err := s.store.GetDurableAgentInstance(ctx, instanceID)
 	if err != nil {
 		return nil, err
 	}
@@ -333,7 +333,7 @@ func (s *durableWakeService) Wake(ctx context.Context, instanceID string, req Du
 }
 
 func (s *durableWakeService) ListSchedules(ctx context.Context, instanceID string) ([]store.AgentSchedule, error) {
-	inst, err := s.store.GetDurableAgentInstance(instanceID)
+	inst, err := s.store.GetDurableAgentInstance(ctx, instanceID)
 	if err != nil {
 		return nil, err
 	}
@@ -341,7 +341,7 @@ func (s *durableWakeService) ListSchedules(ctx context.Context, instanceID strin
 }
 
 func (s *durableWakeService) UpdateScheduleStatus(ctx context.Context, instanceID, scheduleID, status string) error {
-	if _, err := s.store.GetDurableAgentInstance(instanceID); err != nil {
+	if _, err := s.store.GetDurableAgentInstance(ctx, instanceID); err != nil {
 		return err
 	}
 	return s.store.UpdateAgentScheduleStatus(ctx, scheduleID, status)
@@ -349,11 +349,11 @@ func (s *durableWakeService) UpdateScheduleStatus(ctx context.Context, instanceI
 
 func (s *durableWakeService) resolveWakeScope(inst *store.DurableAgentInstance) (*store.Session, error) {
 	if inst.CurrentSessionID != "" {
-		if sess, err := s.store.GetSession(inst.CurrentSessionID); err == nil && sess != nil {
+		if sess, err := s.store.GetSession(context.TODO() /* TODO(ctx-sweep): no ctx available at this call site */, inst.CurrentSessionID); err == nil && sess != nil {
 			return sess, nil
 		}
 	}
-	rels, err := s.store.ListDurableAgentInstanceSessions(inst.ID)
+	rels, err := s.store.ListDurableAgentInstanceSessions(context.TODO() /* TODO(ctx-sweep): no ctx available at this call site */, inst.ID)
 	if err != nil {
 		return nil, err
 	}
@@ -361,7 +361,7 @@ func (s *durableWakeService) resolveWakeScope(inst *store.DurableAgentInstance) 
 		if rel.DetachedAt != nil {
 			continue
 		}
-		sess, err := s.store.GetSession(rel.SessionID)
+		sess, err := s.store.GetSession(context.TODO() /* TODO(ctx-sweep): no ctx available at this call site */, rel.SessionID)
 		if err == nil && sess != nil {
 			return sess, nil
 		}
@@ -392,7 +392,7 @@ func (s *durableWakeService) activationModeForInstance(inst *store.DurableAgentI
 	if inst == nil || inst.ProfileID == "" {
 		return ""
 	}
-	profile, err := s.store.GetAgent(inst.ProfileID)
+	profile, err := s.store.GetAgent(context.TODO() /* TODO(ctx-sweep): no ctx available at this call site */, inst.ProfileID)
 	if err != nil || profile == nil {
 		return ""
 	}
@@ -512,7 +512,7 @@ func scheduleDueByNextRun(schedule store.AgentSchedule, now time.Time) bool {
 }
 
 func (s *durableWakeService) recordWakeEvent(instanceID, eventType, sessionID, message string, metadata map[string]string) {
-	_ = s.store.CreateDurableAgentEvent(&store.DurableAgentEvent{
+	_ = s.store.CreateDurableAgentEvent(context.TODO() /* TODO(ctx-sweep): no ctx available at this call site */, &store.DurableAgentEvent{
 		InstanceID:   instanceID,
 		EventType:    eventType,
 		SessionID:    sessionID,

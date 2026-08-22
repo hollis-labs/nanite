@@ -31,14 +31,14 @@ import (
 // slug. When true, the appearance in the audit means the role is
 // known but its runs landed in failure paths the audit surfaces.
 type RoleAuditEntry struct {
-	Role            string `json:"role"`
-	TotalRuns       int    `json:"total_runs"`
-	OrphanFailures  int    `json:"orphan_failures"`
-	ConfigFailures  int    `json:"config_failures"`
-	OtherFailures   int    `json:"other_failures"`
-	HasProfile      bool   `json:"has_profile"`
-	ProfileCanExec  bool   `json:"profile_can_execute"`
-	InTextOnlyList  bool   `json:"in_text_only_whitelist"`
+	Role           string `json:"role"`
+	TotalRuns      int    `json:"total_runs"`
+	OrphanFailures int    `json:"orphan_failures"`
+	ConfigFailures int    `json:"config_failures"`
+	OtherFailures  int    `json:"other_failures"`
+	HasProfile     bool   `json:"has_profile"`
+	ProfileCanExec bool   `json:"profile_can_execute"`
+	InTextOnlyList bool   `json:"in_text_only_whitelist"`
 }
 
 // AuditUnknownRoles scans subagent_runs and returns one RoleAuditEntry
@@ -127,7 +127,7 @@ func (svc *Service) AuditUnknownRoles(ctx context.Context) ([]RoleAuditEntry, er
 	// fields stay zero-valued.
 	if svc.profiles != nil {
 		for i := range out {
-			profile, lerr := svc.profiles.GetAgentBySlug(out[i].Role)
+			profile, lerr := svc.profiles.GetAgentBySlug(ctx, out[i].Role)
 			if lerr == nil && profile != nil {
 				out[i].HasProfile = true
 				out[i].ProfileCanExec = profile.CanExecute

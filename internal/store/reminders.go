@@ -1,6 +1,7 @@
 package store
 
 import (
+	"context"
 	"database/sql"
 	"errors"
 	"fmt"
@@ -43,7 +44,7 @@ type Reminder struct {
 }
 
 // CreateReminder inserts a new reminder row.
-func (s *Store) CreateReminder(r Reminder) error {
+func (s *Store) CreateReminder(ctx context.Context, r Reminder) error {
 	if r.ID == "" {
 		return fmt.Errorf("create reminder: id is required")
 	}
@@ -64,7 +65,7 @@ func (s *Store) CreateReminder(r Reminder) error {
 	if r.TriggerJSON == "" {
 		r.TriggerJSON = "{}"
 	}
-	_, err := s.DB.Exec(
+	_, err := s.DB.ExecContext(ctx,
 		`INSERT INTO reminders (id, session_id, scope, project_id, text, trigger_json, created_at, updated_at)
 		 VALUES (?, ?, ?, ?, ?, ?, strftime('%Y-%m-%dT%H:%M:%SZ','now'), strftime('%Y-%m-%dT%H:%M:%SZ','now'))`,
 		r.ID, r.SessionID, r.Scope, nullIfEmpty(r.ProjectID), r.Text, r.TriggerJSON,
@@ -76,11 +77,11 @@ func (s *Store) CreateReminder(r Reminder) error {
 }
 
 // GetReminder fetches one reminder by ID.
-func (s *Store) GetReminder(id string) (Reminder, error) {
+func (s *Store) GetReminder(ctx context.Context, id string) (Reminder, error) {
 	var r Reminder
 	var firedAt sql.NullString
 	var projectID sql.NullString
-	err := s.DB.QueryRow(
+	err := s.DB.QueryRowContext(ctx,
 		`SELECT id, session_id, scope, project_id, text, trigger_json, fired_at, created_at, updated_at
 		 FROM reminders WHERE id = ?`, id,
 	).Scan(&r.ID, &r.SessionID, &r.Scope, &projectID, &r.Text, &r.TriggerJSON, &firedAt, &r.CreatedAt, &r.UpdatedAt)
@@ -103,11 +104,11 @@ func (s *Store) GetReminder(id string) (Reminder, error) {
 // project-scoped reminders attached to the session's project. The session ID
 // is mapped to its project_id at query time so any session in the project sees
 // project-scoped reminders set elsewhere.
-func (s *Store) ListUnfiredReminders(sessionID string) ([]Reminder, error) {
+func (s *Store) ListUnfiredReminders(ctx context.Context, sessionID string) ([]Reminder, error) {
 	// Resolve the session's project ID, if any. A session without a project
 	// only sees its own session-scoped reminders.
 	var projectID sql.NullString
-	if err := s.DB.QueryRow(
+	if err := s.DB.QueryRowContext(ctx,
 		`SELECT project_id FROM sessions WHERE id = ?`, sessionID,
 	).Scan(&projectID); err != nil && !errors.Is(err, sql.ErrNoRows) {
 		return nil, fmt.Errorf("list unfired reminders: lookup session project: %w", err)
@@ -116,7 +117,7 @@ func (s *Store) ListUnfiredReminders(sessionID string) ([]Reminder, error) {
 	var rows *sql.Rows
 	var err error
 	if projectID.Valid && projectID.String != "" {
-		rows, err = s.DB.Query(
+		rows, err = s.DB.QueryContext(ctx,
 			`SELECT id, session_id, scope, project_id, text, trigger_json, fired_at, created_at, updated_at
 			 FROM reminders
 			 WHERE fired_at IS NULL
@@ -128,7 +129,7 @@ func (s *Store) ListUnfiredReminders(sessionID string) ([]Reminder, error) {
 			sessionID, projectID.String,
 		)
 	} else {
-		rows, err = s.DB.Query(
+		rows, err = s.DB.QueryContext(ctx,
 			`SELECT id, session_id, scope, project_id, text, trigger_json, fired_at, created_at, updated_at
 			 FROM reminders
 			 WHERE fired_at IS NULL
@@ -161,8 +162,8 @@ func (s *Store) ListUnfiredReminders(sessionID string) ([]Reminder, error) {
 }
 
 // MarkReminderFired sets fired_at to now for the given reminder ID.
-func (s *Store) MarkReminderFired(id string) error {
-	_, err := s.DB.Exec(
+func (s *Store) MarkReminderFired(ctx context.Context, id string) error {
+	_, err := s.DB.ExecContext(ctx,
 		`UPDATE reminders SET fired_at = strftime('%Y-%m-%dT%H:%M:%SZ','now'),
 		 updated_at = strftime('%Y-%m-%dT%H:%M:%SZ','now')
 		 WHERE id = ? AND fired_at IS NULL`, id,
@@ -176,7 +177,7 @@ func (s *Store) MarkReminderFired(id string) error {
 // UpdateReminderScope changes the scope (and optional project_id) for an
 // existing reminder. Used by the FE promote/demote actions (D2). Validates
 // that project scope carries a project_id.
-func (s *Store) UpdateReminderScope(id, scope, projectID string) error {
+func (s *Store) UpdateReminderScope(ctx context.Context, id, scope, projectID string) error {
 	switch scope {
 	case ReminderScopeTurn, ReminderScopeSession, ReminderScopeProject:
 	default:
@@ -185,7 +186,7 @@ func (s *Store) UpdateReminderScope(id, scope, projectID string) error {
 	if scope == ReminderScopeProject && projectID == "" {
 		return fmt.Errorf("update reminder scope: project_id is required for scope=project")
 	}
-	_, err := s.DB.Exec(
+	_, err := s.DB.ExecContext(ctx,
 		`UPDATE reminders SET scope = ?, project_id = ?,
 		 updated_at = strftime('%Y-%m-%dT%H:%M:%SZ','now')
 		 WHERE id = ?`,
@@ -198,8 +199,8 @@ func (s *Store) UpdateReminderScope(id, scope, projectID string) error {
 }
 
 // DeleteReminder deletes a reminder by ID.
-func (s *Store) DeleteReminder(id string) error {
-	_, err := s.DB.Exec(`DELETE FROM reminders WHERE id = ?`, id)
+func (s *Store) DeleteReminder(ctx context.Context, id string) error {
+	_, err := s.DB.ExecContext(ctx, `DELETE FROM reminders WHERE id = ?`, id)
 	if err != nil {
 		return fmt.Errorf("delete reminder: %w", err)
 	}

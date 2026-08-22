@@ -1,6 +1,7 @@
 package store
 
 import (
+	"context"
 	"database/sql"
 	"fmt"
 	"strings"
@@ -57,7 +58,7 @@ type TodoFilter struct {
 }
 
 // CreateTodo inserts a new todo, auto-generating the ID if empty.
-func (s *Store) CreateTodo(t *Todo) error {
+func (s *Store) CreateTodo(ctx context.Context, t *Todo) error {
 	if t.ID == "" {
 		t.ID = uuid.New().String()
 	}
@@ -87,7 +88,7 @@ func (s *Store) CreateTodo(t *Todo) error {
 	t.CreatedAt = now
 	t.UpdatedAt = now
 
-	_, err := s.DB.Exec(
+	_, err := s.DB.ExecContext(ctx,
 		`INSERT INTO todos (id, scope, scope_id, project_id, parent_id, title, description, status, priority, labels, metadata, created_by, created_at, updated_at)
 		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		t.ID, t.Scope, t.ScopeID, nullIfEmpty(t.ProjectID), nullIfEmpty(t.ParentID),
@@ -101,10 +102,10 @@ func (s *Store) CreateTodo(t *Todo) error {
 }
 
 // GetTodo returns a single todo by ID.
-func (s *Store) GetTodo(id string) (*Todo, error) {
+func (s *Store) GetTodo(ctx context.Context, id string) (*Todo, error) {
 	var t Todo
 	var projectID sql.NullString
-	err := s.DB.QueryRow(
+	err := s.DB.QueryRowContext(ctx,
 		`SELECT id, scope, scope_id, project_id, COALESCE(parent_id,''), title, description,
 		        status, priority, labels, metadata, created_by, created_at, updated_at
 		 FROM todos WHERE id = ?`, id,
@@ -125,7 +126,7 @@ func (s *Store) GetTodo(id string) (*Todo, error) {
 // ProjectID without Scope, both project-scoped todos for the project AND
 // session/turn-scoped todos whose originating session belongs to that
 // project are returned — this powers the "This Project" surface (D2).
-func (s *Store) ListTodos(f TodoFilter) ([]Todo, error) {
+func (s *Store) ListTodos(ctx context.Context, f TodoFilter) ([]Todo, error) {
 	query := `SELECT id, scope, scope_id, project_id, COALESCE(parent_id,''), title, description,
 	                 status, priority, labels, metadata, created_by, created_at, updated_at
 	          FROM todos WHERE 1=1`
@@ -172,7 +173,7 @@ func (s *Store) ListTodos(f TodoFilter) ([]Todo, error) {
 
 	query += ` ORDER BY created_at DESC`
 
-	rows, err := s.DB.Query(query, args...)
+	rows, err := s.DB.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, fmt.Errorf("list todos: %w", err)
 	}
@@ -198,9 +199,9 @@ func (s *Store) ListTodos(f TodoFilter) ([]Todo, error) {
 
 // UpdateTodo updates mutable fields on a todo. Only non-empty fields are changed.
 // Scope and project_id may be promoted/demoted via UpdateTodoScope (D2).
-func (s *Store) UpdateTodo(t *Todo) error {
+func (s *Store) UpdateTodo(ctx context.Context, t *Todo) error {
 	now := time.Now().UTC().Format(time.RFC3339)
-	_, err := s.DB.Exec(
+	_, err := s.DB.ExecContext(ctx,
 		`UPDATE todos SET title = ?, description = ?, status = ?, priority = ?,
 		        labels = ?, metadata = ?, updated_at = ?
 		 WHERE id = ?`,
@@ -216,7 +217,7 @@ func (s *Store) UpdateTodo(t *Todo) error {
 
 // UpdateTodoScope promotes/demotes a todo between session and project scope
 // (D2, CW-20260428-0015). Validates that project scope carries a project_id.
-func (s *Store) UpdateTodoScope(id, scope, scopeID, projectID string) error {
+func (s *Store) UpdateTodoScope(ctx context.Context, id, scope, scopeID, projectID string) error {
 	switch scope {
 	case TodoScopeTurn, TodoScopeSession, TodoScopeProject:
 	default:
@@ -232,7 +233,7 @@ func (s *Store) UpdateTodoScope(id, scope, scopeID, projectID string) error {
 		// Mirror project_id into scope_id so legacy filter paths still work.
 		scopeID = projectID
 	}
-	_, err := s.DB.Exec(
+	_, err := s.DB.ExecContext(ctx,
 		`UPDATE todos SET scope = ?, scope_id = ?, project_id = ?,
 		        updated_at = strftime('%Y-%m-%dT%H:%M:%SZ','now')
 		 WHERE id = ?`,
@@ -245,8 +246,8 @@ func (s *Store) UpdateTodoScope(id, scope, scopeID, projectID string) error {
 }
 
 // DeleteTodo removes a todo by ID. Children are cascade-deleted by the schema.
-func (s *Store) DeleteTodo(id string) error {
-	_, err := s.DB.Exec(`DELETE FROM todos WHERE id = ?`, id)
+func (s *Store) DeleteTodo(ctx context.Context, id string) error {
+	_, err := s.DB.ExecContext(ctx, `DELETE FROM todos WHERE id = ?`, id)
 	if err != nil {
 		return fmt.Errorf("delete todo %s: %w", id, err)
 	}
@@ -254,6 +255,6 @@ func (s *Store) DeleteTodo(id string) error {
 }
 
 // ListTodoChildren returns direct children of a todo.
-func (s *Store) ListTodoChildren(parentID string) ([]Todo, error) {
-	return s.ListTodos(TodoFilter{ParentID: parentID})
+func (s *Store) ListTodoChildren(ctx context.Context, parentID string) ([]Todo, error) {
+	return s.ListTodos(ctx, TodoFilter{ParentID: parentID})
 }

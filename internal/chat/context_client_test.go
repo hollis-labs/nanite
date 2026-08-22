@@ -18,7 +18,7 @@ func newTestBroker(t *testing.T) (*ContextClient, *store.Store) {
 	if err != nil {
 		t.Fatalf("store.New: %v", err)
 	}
-	t.Cleanup(func() { s.Close() })
+	t.Cleanup(func() { s.Close(context.Background()) })
 	return NewContextClient(s), s
 }
 
@@ -57,7 +57,7 @@ func TestAssembleSlotSources_AgentPromptAndMessageCount(t *testing.T) {
 
 	// Set up session, agent.
 	sess := &store.Session{}
-	if err := s.CreateSession(sess); err != nil {
+	if err := s.CreateSession(context.Background(), sess); err != nil {
 		t.Fatalf("CreateSession: %v", err)
 	}
 
@@ -66,14 +66,14 @@ func TestAssembleSlotSources_AgentPromptAndMessageCount(t *testing.T) {
 		Slug:         "test",
 		SystemPrompt: "You are a test agent.",
 	}
-	if err := s.CreateAgent(agent); err != nil {
+	if err := s.CreateAgent(context.Background(), agent); err != nil {
 		t.Fatalf("CreateAgent: %v", err)
 	}
 
 	// Add a few messages.
 	for i := 0; i < 3; i++ {
 		msg := &store.Message{SessionID: sess.ID, Role: "user", Content: "test message"}
-		if err := s.CreateMessage(msg); err != nil {
+		if err := s.CreateMessage(context.Background(), msg); err != nil {
 			t.Fatalf("CreateMessage: %v", err)
 		}
 	}
@@ -109,16 +109,16 @@ func TestAssembleSlotSources_ExcludesEnvelopeDataFromReplayedHistory(t *testing.
 	cb, s := newTestBroker(t)
 
 	sess := &store.Session{}
-	if err := s.CreateSession(sess); err != nil {
+	if err := s.CreateSession(context.Background(), sess); err != nil {
 		t.Fatalf("CreateSession: %v", err)
 	}
 	agent := &store.AgentProfile{Name: "Test", Slug: "test", SystemPrompt: "You are a test agent."}
-	if err := s.CreateAgent(agent); err != nil {
+	if err := s.CreateAgent(context.Background(), agent); err != nil {
 		t.Fatalf("CreateAgent: %v", err)
 	}
 
 	// User turn.
-	if err := s.CreateMessage(&store.Message{SessionID: sess.ID, Role: "user", Content: "show me the table"}); err != nil {
+	if err := s.CreateMessage(context.Background(), &store.Message{SessionID: sess.ID, Role: "user", Content: "show me the table"}); err != nil {
 		t.Fatalf("CreateMessage(user): %v", err)
 	}
 
@@ -141,7 +141,7 @@ func TestAssembleSlotSources_ExcludesEnvelopeDataFromReplayedHistory(t *testing.
 		false, false,
 	)
 	assistantContent := structured.MarshalContent()
-	if err := s.CreateMessage(&store.Message{SessionID: sess.ID, Role: "assistant", Content: assistantContent}); err != nil {
+	if err := s.CreateMessage(context.Background(), &store.Message{SessionID: sess.ID, Role: "assistant", Content: assistantContent}); err != nil {
 		t.Fatalf("CreateMessage(assistant): %v", err)
 	}
 
@@ -164,7 +164,7 @@ func TestAssembleSlotSources_ExcludesEnvelopeDataFromReplayedHistory(t *testing.
 	// Sanity: the raw persisted row (as ListMessages would return it before
 	// replayContent runs) still carries the full payload — this test is
 	// verifying what gets REPLAYED, not that storage itself changed.
-	stored, err := s.ListMessages(sess.ID, 200)
+	stored, err := s.ListMessages(context.Background(), sess.ID, 200)
 	if err != nil {
 		t.Fatalf("ListMessages: %v", err)
 	}

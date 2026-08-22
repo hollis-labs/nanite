@@ -1,6 +1,9 @@
 package store
 
-import "testing"
+import (
+	"context"
+	"testing"
+)
 
 // TestAgentProjects_FKRejectsOrphanedAgentID pins the "Done means"
 // verification for Phase 1 #05 (migration 113): agent_projects.agent_id must
@@ -21,11 +24,11 @@ func TestAgentProjects_FKRejectsOrphanedAgentID(t *testing.T) {
 	s := newTestStore(t)
 
 	proj := &Project{ID: "proj-fk-test", Name: "FK Test Project"}
-	if err := s.CreateProject(proj); err != nil {
+	if err := s.CreateProject(context.Background(), proj); err != nil {
 		t.Fatalf("CreateProject: %v", err)
 	}
 
-	if err := s.AddAgentProject("agent-does-not-exist", proj.ID); err == nil {
+	if err := s.AddAgentProject(context.Background(), "agent-does-not-exist", proj.ID); err == nil {
 		t.Fatal("expected AddAgentProject to fail for a nonexistent agent_id, got nil error")
 	}
 }
@@ -39,10 +42,10 @@ func TestAgentProjects_FKCascadesOnAgentDelete(t *testing.T) {
 	agent := makeTestAgent(t, s, "fk-cascade-projects")
 
 	proj := &Project{ID: "proj-fk-cascade", Name: "FK Cascade Project"}
-	if err := s.CreateProject(proj); err != nil {
+	if err := s.CreateProject(context.Background(), proj); err != nil {
 		t.Fatalf("CreateProject: %v", err)
 	}
-	if err := s.AddAgentProject(agent.ID, proj.ID); err != nil {
+	if err := s.AddAgentProject(context.Background(), agent.ID, proj.ID); err != nil {
 		t.Fatalf("AddAgentProject: %v", err)
 	}
 
@@ -50,7 +53,7 @@ func TestAgentProjects_FKCascadesOnAgentDelete(t *testing.T) {
 		t.Fatalf("delete agent_profiles row directly: %v", err)
 	}
 
-	list, err := s.ListAgentProjects(agent.ID)
+	list, err := s.ListAgentProjects(context.Background(), agent.ID)
 	if err != nil {
 		t.Fatalf("ListAgentProjects: %v", err)
 	}

@@ -3,6 +3,7 @@
 package mcpconfig
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"sort"
@@ -102,7 +103,7 @@ func Import(s *store.Store, data []byte) (*ImportResult, error) {
 	result := &ImportResult{}
 
 	for i := range configs {
-		existing, err := s.GetMCPServer(configs[i].Name)
+		existing, err := s.GetMCPServer(context.TODO() /* TODO(ctx-sweep): no ctx available at this call site */, configs[i].Name)
 		if err != nil {
 			return nil, fmt.Errorf("check existing server %q: %w", configs[i].Name, err)
 		}
@@ -110,7 +111,7 @@ func Import(s *store.Store, data []byte) (*ImportResult, error) {
 			result.Skipped = append(result.Skipped, configs[i].Name)
 			continue
 		}
-		if err := s.CreateMCPServer(&configs[i]); err != nil {
+		if err := s.CreateMCPServer(context.TODO() /* TODO(ctx-sweep): no ctx available at this call site */, &configs[i]); err != nil {
 			return nil, fmt.Errorf("create server %q: %w", configs[i].Name, err)
 		}
 		result.Created = append(result.Created, configs[i].Name)
@@ -122,7 +123,7 @@ func Import(s *store.Store, data []byte) (*ImportResult, error) {
 // Export reads all MCP server configs from the store and returns a
 // ClaudeCodeConfig suitable for writing as .mcp.json.
 func Export(s *store.Store) (*ClaudeCodeConfig, error) {
-	servers, err := s.ListMCPServers()
+	servers, err := s.ListMCPServers(context.TODO() /* TODO(ctx-sweep): no ctx available at this call site */)
 	if err != nil {
 		return nil, fmt.Errorf("export mcp config: %w", err)
 	}

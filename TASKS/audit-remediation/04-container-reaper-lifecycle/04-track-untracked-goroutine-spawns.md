@@ -1,7 +1,7 @@
 # Fix DelegateAndAggregate's unbounded collector hang and decide a package-wide policy for untracked safego.Go spawns
 
 **Phase:** Wave 2 — Correctness, lifecycle, concurrency (audit-remediation batch, sequenced 2026-08-21 — see the sequencing block below)
-**Status:** implemented
+**Status:** reviewed
 **Depends on:** none as a hard blocker. Cross-reference only: this task's untracked spawns (`GO-SVCCORE-002`) are a *candidate* cause for task 03's investigation (`GO-SVCCORE-006`) — task 03 does not depend on this task landing first, but if task 03's investigation lands first and confirms candidate 2 (untracked-goroutine accumulation), that strengthens the case for prioritizing the `GO-SVCCORE-002` half of this task.
 **Touches:** `internal/service/delegation.go` (`DelegateAndAggregate`, for GO-SVCCORE-001), `internal/service/events_composite.go` (~18 `safego.Go` sites, for GO-SVCCORE-002), `internal/service/agent_deps.go` (see drift note below), and `internal/service/container.go:1184-1194` (the existing precedent comment to read, not necessarily to edit — **Wave 0 revalidation (2026-08-22) note:** shifted +51 lines from the audit-era `1133-1143` by unrelated additive changes earlier in the file (`TASKS/skills/` wiring a `SkillVendor` field, the loop-batch wiring a `ReflexEngine` field); the comment's own text is byte-identical, confirmed by direct diff against the audited commit).
 **Requires architect decision:** **true for the GO-SVCCORE-002 half** (package-wide policy call — see below). **False for the GO-SVCCORE-001 half** (clear fix direction with a concrete sibling pattern to follow) — but see the pre-implementation check noted under that finding before starting.
@@ -140,4 +140,17 @@ Part A: low risk, additive safety-valve logic on an existing collector loop. Par
 
 ## Review notes
 
-<!-- Reviewer fills this in. -->
+- PASS (2026-08-22, after two correction cycles): final fresh review confirmed
+  AD-26's exact inventory—34 base sites, 23 migrated to lifecycle ownership,
+  and 11 deliberately retained (`10` bounded ActivityEmitter sends plus one
+  synchronously joined tool child).
+- Independent mutation analysis confirms the admission regression fails if
+  `admissionMu` unlocks before `WaitGroup.Add`; 100 race repetitions passed in
+  the fixed state. Nil-owner delegation passed 100 race repetitions and now
+  handles pre-cancel, mid-sequence cancel, panic conversion, and ordered success
+  without creating an unowned goroutine.
+- Plugin shutdown regressions passed 20 race repetitions: failed, panicking, or
+  late Chat drain permanently skips unload, and an admitted unload is joined
+  before `Container.Shutdown` returns. Focused lifecycle/service build, vet,
+  test, and race checks passed; one redundant combined service race run was
+  interrupted under host contention after all targeted gates were green.

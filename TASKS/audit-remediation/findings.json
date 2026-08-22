@@ -635,7 +635,7 @@
       "false_positive_considerations": "Only reachable if worker.Manager.SpawnFull (or the closure) can actually panic in practice -- not independently verified.",
       "task_file": "TASKS/audit-remediation/04-container-reaper-lifecycle/04-track-untracked-goroutine-spawns.md",
       "disposition": "remediate",
-      "task_status": "not-started",
+      "task_status": "reviewed",
       "revalidation_note": "Confirmed unchanged: delegation.go:349-386 (exact match to audit citation) still has an unconditional blocking `ir := <-ch` receive in DelegateAndAggregate's collector with no select/timeout/ctx.Done, unlike DelegateTask."
     },
     {
@@ -662,7 +662,7 @@
       "report_section": "\u00a78.3",
       "task_file": "TASKS/audit-remediation/04-container-reaper-lifecycle/04-track-untracked-goroutine-spawns.md",
       "disposition": "remediate",
-      "task_status": "not-started",
+      "task_status": "reviewed",
       "revalidation_note": "Confirmed still open: the wake-reactor's migration to `*lifecycle.Manager` (container.go, now at lines 1184-1194 -- shifted +51 lines from the audit's 1133-1143 by unrelated additive changes, comment text itself byte-identical) remains the only migrated site; events_composite.go still has exactly 18 safego.Go sites (re-confirmed via grep) and agent_deps.go still has zero (task file 04/04's own drift note, written at task-authoring time, is still accurate at this HEAD). Corrected the task file's container.go line citation."
     },
     {

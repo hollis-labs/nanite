@@ -37,11 +37,16 @@ type Manager struct {
 	cancel context.CancelFunc
 
 	wg sync.WaitGroup
+	// admissionMu serializes the closed transition with WaitGroup admission.
+	// WaitGroup.Add must not race with Shutdown's Wait after the count can be
+	// observed as zero; otherwise Shutdown may return before an admitted
+	// goroutine is actually tracked.
+	admissionMu sync.Mutex
 
 	// active counts currently-running goroutines (for diagnostics).
 	active atomic.Int64
 
-	closed atomic.Bool
+	closed bool
 }
 
 // NewManager returns a new Manager rooted at the background context.
@@ -76,11 +81,14 @@ func (m *Manager) Active() int64 { return m.active.Load() }
 //
 // If the manager is already closed, Go returns without spawning.
 func (m *Manager) Go(label string, fn func(ctx context.Context)) {
-	if m.closed.Load() {
+	m.admissionMu.Lock()
+	if m.closed {
+		m.admissionMu.Unlock()
 		return
 	}
 	m.wg.Add(1)
 	m.active.Add(1)
+	m.admissionMu.Unlock()
 	safego.Go(m.ctx, m.label+"."+label, func() {
 		defer m.wg.Done()
 		defer m.active.Add(-1)
@@ -95,7 +103,9 @@ func (m *Manager) Go(label string, fn func(ctx context.Context)) {
 // Shutdown is idempotent; the second call waits on the same WaitGroup and
 // returns immediately once all goroutines have completed.
 func (m *Manager) Shutdown(maxWait time.Duration) error {
-	m.closed.Store(true)
+	m.admissionMu.Lock()
+	m.closed = true
+	m.admissionMu.Unlock()
 
 	ctx, span := tracer.Start(m.ctx, "lifecycle.shutdown",
 		trace.WithAttributes(

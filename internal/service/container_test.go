@@ -12,7 +12,9 @@ import (
 	"time"
 
 	"github.com/hollis-labs/go-providers/provider"
+	hostplugin "github.com/hollis-labs/nanite/internal/plugin"
 	"github.com/hollis-labs/nanite/internal/store"
+	pluginsdk "github.com/hollis-labs/plugin-sdk"
 )
 
 type blockingShutdownChatService struct {
@@ -21,6 +23,21 @@ type blockingShutdownChatService struct {
 	started       chan struct{}
 	release       chan struct{}
 	startedOnce   sync.Once
+}
+
+type shutdownOrderingPlugin struct {
+	unloaded atomic.Bool
+}
+
+func (*shutdownOrderingPlugin) ID() string                { return "shutdown-ordering" }
+func (*shutdownOrderingPlugin) Name() string              { return "shutdown-ordering" }
+func (*shutdownOrderingPlugin) Version() string           { return "test" }
+func (*shutdownOrderingPlugin) Description() string       { return "test" }
+func (*shutdownOrderingPlugin) Dependencies() []string    { return nil }
+func (*shutdownOrderingPlugin) Load(pluginsdk.Host) error { return nil }
+func (p *shutdownOrderingPlugin) Unload() error           { p.unloaded.Store(true); return nil }
+func (*shutdownOrderingPlugin) Status() pluginsdk.PluginStatus {
+	return pluginsdk.PluginStatus{Loaded: true}
 }
 
 func (s *blockingShutdownChatService) Shutdown() {
@@ -95,6 +112,41 @@ func TestContainer_ShutdownIsIdempotent(t *testing.T) {
 
 	if got := chatService.shutdownCalls.Load(); got != 1 {
 		t.Fatalf("chat Shutdown calls = %d, want 1", got)
+	}
+}
+
+func TestContainer_ShutdownDrainsChatBeforeUnloadingPlugins(t *testing.T) {
+	chatService := &blockingShutdownChatService{
+		started: make(chan struct{}),
+		release: make(chan struct{}),
+	}
+	host := hostplugin.NewHost(nil, hostplugin.NewLogger("shutdown-order-test"))
+	p := &shutdownOrderingPlugin{}
+	if err := host.LoadPlugin(p); err != nil {
+		t.Fatalf("LoadPlugin: %v", err)
+	}
+	container := &Container{Chat: chatService, Plugins: host}
+
+	done := make(chan struct{})
+	go func() { container.Shutdown(); close(done) }()
+	select {
+	case <-chatService.started:
+	case <-time.After(time.Second):
+		t.Fatal("shutdown did not reach chat")
+	}
+	time.Sleep(25 * time.Millisecond)
+	if p.unloaded.Load() {
+		t.Fatal("plugin unloaded before chat lifecycle drained")
+	}
+
+	close(chatService.release)
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("container shutdown did not complete")
+	}
+	if !p.unloaded.Load() {
+		t.Fatal("plugin host was not shut down after chat drained")
 	}
 }
 

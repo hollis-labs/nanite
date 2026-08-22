@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/hollis-labs/nanite/internal/chat"
+	"github.com/hollis-labs/nanite/internal/lifecycle"
 	"github.com/hollis-labs/nanite/internal/messaging"
 	"github.com/hollis-labs/nanite/internal/safego"
 )
@@ -19,11 +20,23 @@ type CompositeEmitter struct {
 	activity      *chat.ActivityEmitter
 	plugin        PluginEventSink
 	sessionWriter SessionEventWriter
+	lifecycle     *lifecycle.Manager
 }
 
 // NewCompositeEmitter creates a composite emitter. Any argument may be nil.
-func NewCompositeEmitter(activity *chat.ActivityEmitter, plugin PluginEventSink) *CompositeEmitter {
-	return &CompositeEmitter{activity: activity, plugin: plugin}
+func NewCompositeEmitter(activity *chat.ActivityEmitter, plugin PluginEventSink, lifecycleManager *lifecycle.Manager) *CompositeEmitter {
+	return &CompositeEmitter{activity: activity, plugin: plugin, lifecycle: lifecycleManager}
+}
+
+// emitPlugin schedules a plugin-contract callback on the chat lifecycle. The
+// composition root always supplies the manager; focused unit-test emitters
+// without one execute inline rather than creating an unowned fallback spawn.
+func (c *CompositeEmitter) emitPlugin(label string, fn func()) {
+	if c.lifecycle == nil {
+		fn()
+		return
+	}
+	c.lifecycle.Go("events.plugin."+label, func(context.Context) { fn() })
 }
 
 // WithSessionWriter attaches a SessionEventWriter so compaction events are
@@ -43,7 +56,7 @@ func (c *CompositeEmitter) EmitSessionStart(ctx context.Context, sessionID, agen
 		})
 	}
 	if c.plugin != nil {
-		safego.Go(ctx, "service.events.plugin.session-start", func() {
+		c.emitPlugin("session-start", func() {
 			c.plugin.EmitSessionStart(sessionID, agentID, mode)
 		})
 	}
@@ -56,7 +69,7 @@ func (c *CompositeEmitter) EmitSessionEnd(ctx context.Context, sessionID string)
 		})
 	}
 	if c.plugin != nil {
-		safego.Go(ctx, "service.events.plugin.session-end", func() {
+		c.emitPlugin("session-end", func() {
 			c.plugin.EmitSessionEnd(sessionID)
 		})
 	}
@@ -77,7 +90,7 @@ func (c *CompositeEmitter) EmitResponseComplete(ctx context.Context, sessionID, 
 		})
 	}
 	if c.plugin != nil {
-		safego.Go(ctx, "service.events.plugin.message-sent", func() {
+		c.emitPlugin("message-sent", func() {
 			c.plugin.EmitMessageSent(sessionID, "", "", "assistant", inputTokens+outputTokens)
 		})
 	}
@@ -91,7 +104,7 @@ func (c *CompositeEmitter) EmitToolCall(ctx context.Context, sessionID, toolName
 	}
 	if c.plugin != nil {
 		if success {
-			safego.Go(ctx, "service.events.plugin.tool-called", func() {
+			c.emitPlugin("tool-called", func() {
 				c.plugin.EmitToolCalled(sessionID, toolName, nil, nil)
 			})
 		}
@@ -100,7 +113,7 @@ func (c *CompositeEmitter) EmitToolCall(ctx context.Context, sessionID, toolName
 
 func (c *CompositeEmitter) EmitToolFailed(ctx context.Context, sessionID, toolName string, args any, err string) {
 	if c.plugin != nil {
-		safego.Go(ctx, "service.events.plugin.tool-failed", func() {
+		c.emitPlugin("tool-failed", func() {
 			c.plugin.EmitToolFailed(sessionID, toolName, args, err)
 		})
 	}
@@ -140,7 +153,7 @@ func (c *CompositeEmitter) EmitError(ctx context.Context, sessionID, errorType, 
 
 func (c *CompositeEmitter) EmitMessageReceived(ctx context.Context, sessionID, messageID, contentPreview string, elapsed int64) {
 	if c.plugin != nil {
-		safego.Go(ctx, "service.events.plugin.message-received", func() {
+		c.emitPlugin("message-received", func() {
 			c.plugin.EmitMessageReceived(sessionID, messageID, contentPreview, elapsed)
 		})
 	}
@@ -155,7 +168,7 @@ func (c *CompositeEmitter) EmitPreCompact(ctx context.Context, sessionID string,
 	// Plugin pre-compact hook: plugins can extract ADR, memories, etc.
 	// before the raw content is replaced.
 	if c.plugin != nil {
-		safego.Go(ctx, "service.events.plugin.pre-compact", func() {
+		c.emitPlugin("pre-compact", func() {
 			c.plugin.EmitPreHook("context.pre_compact", sessionID, map[string]any{
 				"message_count": messageCount,
 				"reason":        reason,
@@ -178,7 +191,7 @@ func (c *CompositeEmitter) EmitPreCompact(ctx context.Context, sessionID string,
 func (c *CompositeEmitter) EmitPostCompact(ctx context.Context, sessionID string, tokensSaved int, stagesApplied []string) {
 	// Post-compact is informational — no pre-hook cancellation.
 	if c.plugin != nil {
-		safego.Go(ctx, "service.events.plugin.context-compacted", func() {
+		c.emitPlugin("context-compacted", func() {
 			c.plugin.EmitContextCompacted(sessionID, tokensSaved, stagesApplied)
 		})
 	}

@@ -219,7 +219,7 @@ func TestRecoverFromContextOverflow_WithEventsNilResult(t *testing.T) {
 // post-compact payload.
 func TestCompositeEmitter_SessionEventsOrdering(t *testing.T) {
 	writer := &captureSessionEventWriter{}
-	emitter := NewCompositeEmitter(nil, nil).WithSessionWriter(writer)
+	emitter := NewCompositeEmitter(nil, nil, nil).WithSessionWriter(writer)
 
 	ctx := context.Background()
 	emitter.EmitPreCompact(ctx, "sess-2", 7, compactTriggerContextOverflow)

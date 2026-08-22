@@ -14,11 +14,81 @@ import (
 
 	"github.com/hollis-labs/nanite/internal/chat"
 	"github.com/hollis-labs/nanite/internal/dispatcher"
-	"github.com/hollis-labs/nanite/internal/safego"
+	"github.com/hollis-labs/nanite/internal/lifecycle"
 	"github.com/hollis-labs/nanite/internal/store"
 	"github.com/hollis-labs/nanite/internal/task"
 	"github.com/hollis-labs/nanite/internal/worker"
 )
+
+// fullWorkerSpawner is the narrow worker-manager surface orchestration needs.
+// Keeping the dependency narrow also makes panic-before-result regressions
+// directly injectable without constructing a complete worker manager.
+type fullWorkerSpawner interface {
+	SpawnFull(context.Context, worker.SpawnRequest) (*worker.Result, error)
+}
+
+func delegateSubTasks(ctx context.Context, owner *lifecycle.Manager, workers fullWorkerSpawner, subTasks []chat.SubTask, parentSessionID, model string) ([]chat.SubTaskResult, error) {
+	type indexedResult struct {
+		idx    int
+		result chat.SubTaskResult
+	}
+	ch := make(chan indexedResult, len(subTasks))
+
+	for i, st := range subTasks {
+		idx := i
+		sub := st
+		owner.Go("delegation.delegateAndAggregate.spawnWorker", func(ownerCtx context.Context) {
+			// Always publish exactly one result, including a synthetic error
+			// when SpawnFull (or closure bookkeeping) panics pre-send.
+			defer func() {
+				if recovered := recover(); recovered != nil {
+					slog.Error("delegation: worker panicked before publishing result",
+						"idx", idx+1, "title", sub.Title, "panic", recovered)
+					ch <- indexedResult{idx: idx, result: chat.SubTaskResult{
+						Title: sub.Title,
+						Error: fmt.Sprintf("worker panicked: %v", recovered),
+					}}
+				}
+			}()
+			workerCtx, cancel := context.WithCancel(ctx)
+			stopOwnerCancel := context.AfterFunc(ownerCtx, cancel)
+			defer func() {
+				stopOwnerCancel()
+				cancel()
+			}()
+			slog.Info("delegation: spawning worker", "idx", idx+1, "total", len(subTasks), "title", sub.Title)
+			wr, err := workers.SpawnFull(workerCtx, worker.SpawnRequest{
+				ParentSessionID: parentSessionID,
+				Title:           sub.Title,
+				Description:     sub.Description,
+				Model:           model,
+			})
+			r := chat.SubTaskResult{Title: sub.Title}
+			if err != nil {
+				r.Error = err.Error()
+			} else {
+				r.Output = wr.Content
+				if !wr.Success {
+					r.Error = wr.Error
+				}
+			}
+			ch <- indexedResult{idx: idx, result: r}
+		})
+	}
+
+	results := make([]chat.SubTaskResult, len(subTasks))
+	for range subTasks {
+		select {
+		case ir := <-ch:
+			results[ir.idx] = ir.result
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		case <-owner.Context().Done():
+			return nil, context.Canceled
+		}
+	}
+	return results, nil
+}
 
 // DelegateTask implements ChatService. It spawns a worker session, sends the
 // task, waits for completion, and returns the result.
@@ -164,8 +234,14 @@ func (s *chatServiceImpl) DelegateTask(ctx context.Context, req chat.DelegationR
 	// (programmer-only path) is fatal for the delegation — close ch
 	// so the drain loop below terminates rather than blocking until
 	// the 5-minute timeout.
-	safego.Go(ctx, "service.delegation.delegateTask.dispatch", func() {
-		if err := s.dispatcher.Run(ctx, dispatcher.Request{
+	s.goTracked("delegation.delegateTask.dispatch", func(ownerCtx context.Context) {
+		dispatchCtx, cancel := context.WithCancel(ctx)
+		stopOwnerCancel := context.AfterFunc(ownerCtx, cancel)
+		defer func() {
+			stopOwnerCancel()
+			cancel()
+		}()
+		if err := s.dispatcher.Run(dispatchCtx, dispatcher.Request{
 			SessionID:      runReq.TargetSessionID,
 			AssistantMsgID: assistantMsgID,
 			UserContent:    runReq.Prompt,
@@ -295,6 +371,12 @@ func (s *chatServiceImpl) DelegateTask(ctx context.Context, req chat.DelegationR
 				_ = s.tasks.Cancel(ctx, trackedTask.ID)
 			}
 			return result, nil
+
+		case <-s.trackedDone():
+			result.Content = content.String()
+			result.Success = false
+			result.Error = "delegation stopped during shutdown"
+			return result, nil
 		}
 	}
 }
@@ -347,42 +429,9 @@ func (s *chatServiceImpl) DelegateAndAggregate(ctx context.Context, parentSessio
 	// available, fall back to sequential delegation otherwise.
 	var results []chat.SubTaskResult
 	if s.workers != nil {
-		// Concurrent execution via worker manager.
-		type indexedResult struct {
-			idx    int
-			result chat.SubTaskResult
-		}
-		ch := make(chan indexedResult, len(decomposition.SubTasks))
-
-		for i, st := range decomposition.SubTasks {
-			idx := i
-			sub := st
-			safego.Go(ctx, "service.delegation.delegateAndAggregate.spawnWorker", func() {
-				slog.Info("delegation: spawning worker", "idx", idx+1, "total", len(decomposition.SubTasks), "title", sub.Title)
-				wr, err := s.workers.SpawnFull(ctx, worker.SpawnRequest{
-					ParentSessionID: parentSessionID,
-					Title:           sub.Title,
-					Description:     sub.Description,
-					Model:           model,
-				})
-				r := chat.SubTaskResult{Title: sub.Title}
-				if err != nil {
-					r.Error = err.Error()
-				} else {
-					r.Output = wr.Content
-					if !wr.Success {
-						r.Error = wr.Error
-					}
-				}
-				ch <- indexedResult{idx: idx, result: r}
-			})
-		}
-
-		// Collect results in order.
-		results = make([]chat.SubTaskResult, len(decomposition.SubTasks))
-		for range decomposition.SubTasks {
-			ir := <-ch
-			results[ir.idx] = ir.result
+		results, err = delegateSubTasks(ctx, s.lifecycle, s.workers, decomposition.SubTasks, parentSessionID, model)
+		if err != nil {
+			return nil, err
 		}
 	} else {
 		// Sequential fallback via direct delegation.

@@ -1,7 +1,7 @@
 # Decide and fix `cmdServe`'s `slogx.Fatal` bypassing deferred startup cleanup
 
 **Phase:** Wave 2 — Correctness, lifecycle, concurrency
-**Status:** not-started
+**Status:** implemented
 **Depends on:** none
 **Touches:** `cmd/nanite/main.go` (`cmdServe`'s `slogx.Fatal` call sites, and possibly `cmdServe`'s own signature plus `main()`'s `case "serve":` branch, depending on which direction is chosen — see below). Possibly `internal/slogx/slogx.go` (`Fatal`, `FatalContext`) if the cleanup-hook direction is chosen. **This task requires an architect decision before implementation** — see Context and What to do.
 
@@ -139,7 +139,37 @@ Direction A: low-medium risk — changing `cmdServe`'s signature from `func(args
 
 ## Work log
 
-<!-- Worker fills in: what was actually done, any deviation from plan and why, which direction was chosen and by whom. -->
+- Implemented architect-approved AD-17 Direction A: `cmdServe` now returns an
+  `error`, and `main()`'s `serve` branch performs the process exit only after
+  `cmdServe` has returned and its registered defers have run.
+- Re-derived the current source surface before editing: there were exactly
+  seven `slogx.Fatal` calls in `cmdServe` (store open, database seed, provider
+  seed, envelope registry load, service-container construction, workflow
+  registry load, and HTTP server exit). Converted all seven. Each path keeps
+  its existing structured log message and `err` attribute, then returns a
+  contextual `%w`-wrapped error. No `slogx.Fatal` call remains in `main.go`;
+  the intentionally out-of-scope sites in `message_cmd.go` and
+  `plugin_cmd.go` were untouched.
+- Added `TestCmdServeStartupFailureReturns`, which drives the real startup path
+  with a directory supplied as the SQLite database file. The failure occurs
+  after the log-handler and OTel defers are registered and proves `cmdServe`
+  returns normally with the original store-open context instead of exiting
+  the test process. No dependency-injection seam or composition-root refactor
+  was needed.
+- Pre-fix proof: the desired regression initially failed to build with
+  `cmdServe(...)(no value) used as value`, directly demonstrating that the
+  startup command could not return its failure to its caller before this
+  change. Under the old function body the exercised store failure terminated
+  via `slogx.Fatal`/`os.Exit(1)`.
+- Verification passed: `go test ./cmd/nanite -run
+  '^TestCmdServeStartupFailureReturns$' -count=1 -v`; `go test -race
+  ./cmd/nanite -run '^TestCmdServeStartupFailureReturns$' -count=5`; `go test
+  ./cmd/nanite/... -count=1`; `go build ./cmd/nanite/...`; `go vet ./...`; and
+  `go test ./... -count=1`.
+- Deviation from the task's example seam: none was added because a stable,
+  real `store.New` failure is reachable directly. Success remains a nil return
+  if `ListenAndServe` ever returns nil; every current abnormal server return is
+  logged and propagated as an error.
 
 ## Review notes
 

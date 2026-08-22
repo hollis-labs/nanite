@@ -69,7 +69,9 @@ func main() {
 
 	switch os.Args[1] {
 	case "serve":
-		cmdServe(os.Args[2:])
+		if err := cmdServe(os.Args[2:]); err != nil {
+			os.Exit(1)
+		}
 	case "chat":
 		cmdChat(os.Args[2:])
 	case "plugin":
@@ -94,7 +96,7 @@ func main() {
 	}
 }
 
-func cmdServe(args []string) {
+func cmdServe(args []string) error {
 	fs := flag.NewFlagSet("serve", flag.ExitOnError)
 	port := fs.Int("port", 8090, "HTTP listen port")
 	// --db default is empty: an unset flag resolves the database path via
@@ -177,16 +179,19 @@ func cmdServe(args []string) {
 	// Open store and run migrations.
 	s, err := store.New(context.Background(), *dbPath)
 	if err != nil {
-		slogx.Fatal("failed to open store", "err", err)
+		slog.Error("failed to open store", "err", err)
+		return fmt.Errorf("failed to open store: %w", err)
 	}
 	defer s.Close(otelCtx)
 
 	// Seed default data.
 	if err := s.Seed(otelCtx); err != nil {
-		slogx.Fatal("failed to seed database", "err", err)
+		slog.Error("failed to seed database", "err", err)
+		return fmt.Errorf("failed to seed database: %w", err)
 	}
 	if err := s.SeedProviders(otelCtx); err != nil {
-		slogx.Fatal("failed to seed providers", "err", err)
+		slog.Error("failed to seed providers", "err", err)
+		return fmt.Errorf("failed to seed providers: %w", err)
 	}
 
 	// Load the canonical envelope catalog from go-envelopes (lib v0.1.0).
@@ -196,7 +201,8 @@ func cmdServe(args []string) {
 	envReg, err := envelopes.LoadCore(envelopeCtx)
 	envelopeCancel()
 	if err != nil {
-		slogx.Fatal("envelope registry load failed", "err", err)
+		slog.Error("envelope registry load failed", "err", err)
+		return fmt.Errorf("envelope registry load failed: %w", err)
 	}
 	chat.SetEnvelopeRegistry(envReg)
 	envelope.SetEnvelopeRegistry(envReg)
@@ -403,7 +409,8 @@ func cmdServe(args []string) {
 		DurableAgentRecipeCatalogPaths: appCfg.Recipes.CatalogPaths,
 	})
 	if err != nil {
-		slogx.Fatal("failed to create service container", "err", err)
+		slog.Error("failed to create service container", "err", err)
+		return fmt.Errorf("failed to create service container: %w", err)
 	}
 
 	// CW-20260813-0011: wire the StepExecutor implementation
@@ -430,7 +437,8 @@ func cmdServe(args []string) {
 	// workflow_definitions_path is unset.
 	workflowDefinitionsRegistry, err := agentworkflow.LoadRegistryDir(resolveWorkflowDefinitionsPath(cfg))
 	if err != nil {
-		slogx.Fatal("failed to load workflow definitions registry", "err", err)
+		slog.Error("failed to load workflow definitions registry", "err", err)
+		return fmt.Errorf("failed to load workflow definitions registry: %w", err)
 	}
 	slog.Info("workflow definitions registry loaded",
 		"path", resolveWorkflowDefinitionsPath(cfg), "count", len(workflowDefinitionsRegistry.Names()))
@@ -821,8 +829,10 @@ func cmdServe(args []string) {
 	srv.SetPluginsDir(pluginsDir)
 
 	if err := srv.ListenAndServe(); err != nil {
-		slogx.Fatal("server error", "err", err)
+		slog.Error("server error", "err", err)
+		return fmt.Errorf("server error: %w", err)
 	}
+	return nil
 }
 
 // initProviders constructs the provider.Registry plus the slice of go-providers

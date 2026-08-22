@@ -1,7 +1,7 @@
 # API-direct delivery — `skill_get` self-tool
 
 **Phase:** 6 — Delivery (`TASKS/skills`)
-**Status:** implemented
+**Status:** reviewed
 **Depends on:** `06`, `07`, `08`, `09` (the full Resolver → Materializer → Policy/Sandbox
 pipeline this self-tool is the entry point into)
 **Touches:** `internal/selftools/self_tools.go` (new `skill_get` `InputSchema`),
@@ -328,4 +328,46 @@ as a candidate follow-up rather than a unilateral scope expansion. None of these
 task asked for.
 
 ## Review notes
-<Reviewer fills this in: pass/fail, what was checked, anything fixed and how.>
+
+**PASS.** Fresh reviewer with no shared context independently verified against `main` commit
+`ba481a77`, not just against the Work Log's own claims.
+
+- **Order of operations** traced directly in `self_tools_skill_get.go`: slug/arg validation →
+  ctx-authoritative `agentID` (no arg override, matching `procedure_get`'s precedent) → catalog
+  lookup (metadata-only errors, no body content) → unconditional `Gate.Authorize` → only then
+  `loadRootSkillDefinition` reads vendored bytes → `MaterializeSkill` → `ResolveInlineMarkers`.
+  Confirmed the grant check genuinely gates all content, including the marker-free-skill case
+  that would otherwise never reach `ExecuteGated` at all.
+- **`Gate.Authorize` extraction** in `internal/skill/gate.go` diffed directly against the
+  pre-task version: confirmed byte-for-byte behavior-preserving (`ExecuteGated` now calls
+  `Authorize` internally, which does exactly the same `authorize`+`logDecision` calls as before).
+  `gate_test.go` untouched and all `TestExecuteGated_*` assertions still pass.
+- **`fork_role`/`fork_timeout_seconds` privilege-escalation question** chased directly: confirmed
+  `AgentProfileID` is sourced from the *calling* agent's own ctx-derived identity, consistent with
+  the same established convention already used by `self_tools_workflow_run.go` and
+  `self_tools_dispatch.go` (both real production callers of the identical trust-resolution
+  mechanism) — not a deviation or new escalation path. One observation surfaced for awareness,
+  not a task-11 bug: any agent with `skill_get` plus a grant on a `fork`-composed skill can
+  trigger a real `subagent.Service.Spawn`, independent of whether `subagent_spawn` is separately
+  on that agent's own tool allowlist — this is an inherited property of task 07's `compose.go`
+  design, not something this task introduced. Logged in `TASKS/ESCALATIONS.md` as an observation
+  for the batch's broader review, not a blocker.
+- **Denial paths** — read `self_tools_skill_get_test.go`'s actual assertions directly: they check
+  specific substrings matching `gate.go`'s typed `GrantRequiredError`/`ReapprovalRequiredError`
+  text (no-grant, bare-assignment, hash-mismatch), not generic `err != nil`. Ran independently
+  with `-count=1`: all pass.
+- **`ingest_test.go` placeholder swap** confirmed consistent on both sides (Tools slice + log
+  assertion) and `skill_frobnicate` confirmed via grep to not collide with any real tool name.
+- **Golden example fixture** confirmed to satisfy the real repo-wide invariant
+  (`TestNaniteToolDescribe_AllSelfToolsHaveExamples`), not just inert JSON.
+- **Fork composition sourcing** confirmed real (`ParentSessionID`/`ParentAgentID` from the actual
+  production tool-call path, not test-only), and the no-default-`ForkRole` design gap confirmed
+  honestly flagged rather than silently guessed.
+- **Build/vet/test**: `go build ./cmd/nanite/` clean; `go vet ./...` shows only the pre-existing,
+  unrelated `internal/service/container.go` finding (confirmed untouched by this diff);
+  `go test -count=1 ./internal/selftools/... ./internal/skill/... ./internal/service/...` all pass.
+- **Wiring reachability** confirmed real: `cmd/nanite/main.go`'s `SkillVendor` wiring connects to
+  a genuinely live, non-nil store under normal boot (nil only on an actual storage-init failure,
+  an existing documented degrade-not-crash pattern) — this is real, reachable production code.
+
+No bugs found. Task closed.

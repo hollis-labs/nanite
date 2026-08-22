@@ -1,7 +1,7 @@
 # Add an idempotency guard to `service.Container.Shutdown`
 
 **Phase:** Wave 2 — Correctness, lifecycle, concurrency
-**Status:** not-started
+**Status:** implemented
 **Depends on:** none
 **Touches:** `internal/service/container.go` (`Container` struct fields, `Container.Shutdown`). No other package needs changes.
 
@@ -100,7 +100,28 @@ Very low risk — wrapping an existing function body in `sync.Once` does not cha
 
 ## Work log
 
-<!-- Worker fills in: what was actually done, any deviation from plan and why. -->
+- 2026-08-22: Re-derived the target against the post-`06/03`, post-`04/01`
+  branch: `Container.Shutdown` begins at `internal/service/container.go:1492`.
+- Added `Container.shutdownOnce sync.Once` beside the container-owned lifecycle
+  state and wrapped the complete existing `Shutdown` body in
+  `shutdownOnce.Do`. Single-call shutdown order and timeout behavior are
+  unchanged; concurrent callers wait for the first call to finish, and later
+  callers return without re-running subsystem shutdowns.
+- Added `TestContainer_ShutdownIsIdempotent`. Its blocking `ChatService` test
+  double makes the concurrency behavior observable: a concurrent second call
+  cannot return while the first call is in flight, both calls complete after
+  release, a subsequent sequential call returns promptly, and the subsystem
+  `Shutdown` call count remains exactly one.
+- Verification passed:
+  - `go test ./internal/service/... -race -run 'TestContainer_ShutdownIsIdempotent' -count=20 -v`
+  - `go build ./internal/service/...`
+  - `go vet ./internal/service/...`
+  - `go test ./internal/service/... -race -run 'TestContainer' -v`
+  - `go build ./cmd/nanite/`
+  - `go vet ./...`
+  - `go test ./...`
+- No deviations. `internal/lifecycle/lifecycle.go`, subsystem shutdown
+  implementations, and `internal/runtime/agent/manager.go` were not modified.
 
 ## Review notes
 

@@ -282,6 +282,9 @@ type Container struct {
 	runtimeReaper *orphansweep.RuntimeReaper
 	// stopRuntimeReaper cancels the runtime reaper's bound context.
 	stopRuntimeReaper context.CancelFunc
+
+	// shutdownOnce makes Shutdown safe for sequential and concurrent callers.
+	shutdownOnce sync.Once
 }
 
 // ContainerConfig holds all the external dependencies needed to construct
@@ -1490,6 +1493,10 @@ const containerShutdownMaxWait = 10 * time.Second
 // cannot stall the others indefinitely. Returns when all subsystems have
 // exited or the ceiling is hit, whichever comes first.
 func (c *Container) Shutdown() {
+	c.shutdownOnce.Do(c.shutdown)
+}
+
+func (c *Container) shutdown() {
 	var wg sync.WaitGroup
 
 	run := func(label string, fn func()) {

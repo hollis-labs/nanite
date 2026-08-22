@@ -78,6 +78,72 @@ regression test, re-traced the logic by hand, re-grepped for a claimed-absent
 pattern) rather than just restating the worker's own claims.>
 ```
 
+## Numeric claims — the most reliable source of drift in this process
+
+Five separate count errors surfaced across Waves 0-2, in task files, kickoffs,
+handoffs, and summaries alike. The lists were correct every time; only the
+prose summarising them drifted. They split into two kinds, and the two need
+different defences.
+
+### Kind 1 — wrong at the source
+
+The number faithfully reports a bad command. Re-reading the prose never catches
+this, because the prose is accurate about a measurement that was wrong.
+
+- A task file's completeness grep used `'^func \(s \*Store\) [A-Z][A-Za-z0-9]*\('`
+  — the pattern ends at the opening paren, so it counted **all 371** exported
+  methods rather than the **237** lacking a context. Everything downstream
+  inherited it, including a fabricated "target: 505".
+- The same file's oracle used `grep -rhoE '\.Exec\(' … | grep -v _test`.
+  With `-h -o`, filenames are stripped *before* the filter, so `grep -v _test`
+  matched against `".Exec("` and excluded nothing. Use
+  `--include`/`--exclude` instead.
+
+- A planning doc reported the audit's rescued evidence as "~16 MB, 30 files"
+  from `du -sh` on the source directory; the real figure was **8.0 MB, 29
+  files**. `du` reports allocated disk blocks, not summed file sizes, and the
+  directory listing included `.`/`..`. A different flavour of the same fault:
+  the command ran fine and answered a slightly different question than the one
+  being asked.
+
+**Defence: ship the command next to the number**, so verifying is a paste
+rather than an investigation — and sanity-check the command itself against a
+case whose answer you already know. In the first example above, the number that
+caught the error was found by an executing agent *because the command was
+printed in the task file*. That is the mechanism working.
+
+### Kind 2 — right once, then copied
+
+A correct count restated in prose in several places, where one restatement gets
+reframed and the rest inherit it.
+
+- A kickoff said "twelve tasks" in four places while listing thirteen. The
+  off-by-one entered through a framing choice elsewhere in the same file
+  ("`06/03` is a thirteenth, out-of-wave task"), which implied the in-wave set
+  was twelve.
+- The same kickoff said the sweep rewrote "six of the eight" files it touches;
+  the real figure was seven of nine.
+
+Restating a number reads as emphasis, not as an independent unverified claim —
+which is exactly why it does not feel like duplication while writing it.
+
+**Defence: state a count once and reference it thereafter.** Put it in the
+table that is derived from the list, and elsewhere say "the task list above"
+rather than repeating the figure. Where a number must appear twice, mark one
+authoritative in the text — *"count from this list; if any other number
+appears below, this line wins."*
+
+### The short version
+
+Derive every number from a command at the moment you write it. Never recall one
+from earlier in the same document, and never carry one across documents.
+
+*(This section's first draft said "five separate count errors" while listing
+four — written by the same author who had just spent a session finding the
+other five. The pull toward a round summarising number is strong enough to
+survive knowing about it, which is the argument for deriving rather than
+resolving to be careful.)*
+
 ## Patterns worth carrying forward, observed repeatedly
 
 - **A task whose scope turns out bigger than expected doesn't get silently

@@ -46,11 +46,13 @@ import (
 //
 // Lifecycle:
 //
-//	pending → running → succeeded | failed | cancelled
+//	pending → running → (succeeded | failed | cancelled) → expired
 //
 // `pending` is a brief window between Submit and the Backend's Start
 // returning a job_id. Once Start returns, the service flips to running
-// and tracks the job until Backend completion or Cancel.
+// and tracks the job until Backend completion or Cancel. Expired is a
+// retention state: the job was known, but its terminal result has been
+// evicted from the in-memory registry.
 type JobStatus string
 
 const (
@@ -59,11 +61,12 @@ const (
 	StatusSucceeded JobStatus = "succeeded"
 	StatusFailed    JobStatus = "failed"
 	StatusCancelled JobStatus = "cancelled"
+	StatusExpired   JobStatus = "expired"
 )
 
 // IsTerminal reports whether s is a terminal lifecycle state.
 func (s JobStatus) IsTerminal() bool {
-	return s == StatusSucceeded || s == StatusFailed || s == StatusCancelled
+	return s == StatusSucceeded || s == StatusFailed || s == StatusCancelled || s == StatusExpired
 }
 
 // JobBudget bounds a job's runtime + output. Zero values mean "use

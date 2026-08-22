@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -51,9 +52,26 @@ type Service struct {
 	// dispatch system, not the originating agent. Set at construction.
 	senderAgentID string
 
-	mu   sync.Mutex
-	jobs map[string]*jobRecord
+	mu          sync.Mutex
+	jobs        map[string]*jobRecord
+	jobIDPrefix string
+	retention   completedJobRetention
 }
+
+// completedJobRetention bounds terminal result records. A day gives
+// poll-based consumers a conservative retrieval window, while the hard
+// count prevents a burst from retaining more than roughly 100 MiB of
+// captured output (each result is independently capped at 1 MiB).
+type completedJobRetention struct {
+	ttl          time.Duration
+	maxCompleted int
+	now          func() time.Time
+}
+
+const (
+	defaultCompletedJobTTL          = 24 * time.Hour
+	defaultMaxRetainedCompletedJobs = 100
+)
 
 // SenderAgentID is the canonical from_agent_id stamped on the
 // completion envelope. Other systems (subagent, inbox UI) recognize
@@ -65,11 +83,26 @@ const SenderAgentID = "background-job"
 // are required for production wiring; nil values surface as Submit
 // errors rather than panics.
 func NewService(backend Backend, messenger Messenger) *Service {
+	return newServiceWithRetention(backend, messenger, completedJobRetention{
+		ttl:          defaultCompletedJobTTL,
+		maxCompleted: defaultMaxRetainedCompletedJobs,
+		now:          time.Now,
+	})
+}
+
+// newServiceWithRetention is the deterministic test seam for retention.
+// Production always uses the conservative defaults in NewService.
+func newServiceWithRetention(backend Backend, messenger Messenger, retention completedJobRetention) *Service {
+	if retention.now == nil {
+		retention.now = time.Now
+	}
 	return &Service{
 		backend:       backend,
 		messenger:     messenger,
 		senderAgentID: SenderAgentID,
 		jobs:          make(map[string]*jobRecord),
+		jobIDPrefix:   uuid.NewString(),
+		retention:     retention,
 	}
 }
 
@@ -108,9 +141,9 @@ func (svc *Service) Submit(ctx context.Context, pattern classify.ExecutionPatter
 		req.Budget.MaxOutputBytes = DefaultMaxOutputBytes
 	}
 
-	jobID := uuid.New().String()
-
 	svc.mu.Lock()
+	svc.pruneCompletedLocked(svc.now())
+	jobID := svc.jobIDPrefix + ":" + uuid.NewString()
 	svc.jobs[jobID] = &jobRecord{
 		id:     jobID,
 		req:    req,
@@ -142,27 +175,33 @@ func (svc *Service) Submit(ctx context.Context, pattern classify.ExecutionPatter
 	return jobID, nil
 }
 
-// Status returns the current lifecycle state of jobID. ErrUnknownJob
-// when no record exists.
+// Status returns the current lifecycle state of jobID. A known job whose
+// terminal record was evicted returns StatusExpired with ErrExpiredJob;
+// an id never issued by this service instance returns ErrUnknownJob.
 func (svc *Service) Status(jobID string) (JobStatus, error) {
 	svc.mu.Lock()
 	defer svc.mu.Unlock()
+	svc.pruneCompletedLocked(svc.now())
 	rec, ok := svc.jobs[jobID]
 	if !ok {
-		return "", ErrUnknownJob
+		return svc.missingJobResultLocked(jobID)
 	}
 	return rec.status, nil
 }
 
 // Result returns the full result for a terminal job. Returns
-// ErrUnknownJob for unknown ids; returns a JobResult with the current
-// (possibly non-terminal) status for in-flight jobs so callers can
-// poll without a status branch.
+// ErrExpiredJob with StatusExpired for an evicted result, ErrUnknownJob
+// for an id never issued by this service instance, or a JobResult with
+// the current (possibly non-terminal) status for an in-flight job.
 func (svc *Service) Result(jobID string) (JobResult, error) {
 	svc.mu.Lock()
 	defer svc.mu.Unlock()
+	svc.pruneCompletedLocked(svc.now())
 	rec, ok := svc.jobs[jobID]
 	if !ok {
+		if svc.isIssuedJobIDLocked(jobID) {
+			return JobResult{JobID: jobID, Status: StatusExpired}, ErrExpiredJob
+		}
 		return JobResult{}, ErrUnknownJob
 	}
 	out := JobResult{
@@ -223,7 +262,7 @@ func (svc *Service) onBackendComplete(jobID string, completion BackendCompletion
 	}
 	rec.completedAt = completion.CompletedAt
 	if rec.completedAt.IsZero() {
-		rec.completedAt = time.Now().UTC()
+		rec.completedAt = svc.now()
 	}
 	req := rec.req
 	finalResult := JobResult{
@@ -237,7 +276,69 @@ func (svc *Service) onBackendComplete(jobID string, completion BackendCompletion
 	if rec.err != nil {
 		finalResult.Error = rec.err.Error()
 	}
+	svc.pruneCompletedLocked(svc.now())
 	svc.mu.Unlock()
 
 	svc.postCompletionEnvelope(req, finalResult)
+}
+
+func (svc *Service) now() time.Time {
+	return svc.retention.now().UTC()
+}
+
+// missingJobResultLocked distinguishes an evicted job from an arbitrary id
+// without retaining an unbounded tombstone map. Job ids carry a random,
+// per-Service prefix; any absent id bearing this instance's unguessable prefix
+// was issued here and has since left the registry. The suffix stays opaque to
+// callers and preserves the process-restart boundary of this in-memory API.
+func (svc *Service) missingJobResultLocked(jobID string) (JobStatus, error) {
+	if svc.isIssuedJobIDLocked(jobID) {
+		return StatusExpired, ErrExpiredJob
+	}
+	return "", ErrUnknownJob
+}
+
+func (svc *Service) isIssuedJobIDLocked(jobID string) bool {
+	prefix, suffix, ok := strings.Cut(jobID, ":")
+	if !ok || prefix != svc.jobIDPrefix {
+		return false
+	}
+	_, err := uuid.Parse(suffix)
+	return err == nil
+}
+
+// pruneCompletedLocked applies TTL first, then evicts the oldest completed
+// records until the retained completed count is within the hard ceiling.
+// Pending and running jobs are never candidates, even when they are older
+// than the TTL or the completed-result cap is already full.
+func (svc *Service) pruneCompletedLocked(now time.Time) {
+	type completedRecord struct {
+		id          string
+		completedAt time.Time
+	}
+
+	completed := make([]completedRecord, 0, len(svc.jobs))
+	for id, rec := range svc.jobs {
+		if !rec.status.IsTerminal() {
+			continue
+		}
+		if svc.retention.ttl > 0 && !rec.completedAt.IsZero() && !now.Before(rec.completedAt.Add(svc.retention.ttl)) {
+			delete(svc.jobs, id)
+			continue
+		}
+		completed = append(completed, completedRecord{id: id, completedAt: rec.completedAt})
+	}
+
+	if svc.retention.maxCompleted < 0 || len(completed) <= svc.retention.maxCompleted {
+		return
+	}
+	sort.Slice(completed, func(i, j int) bool {
+		if completed[i].completedAt.Equal(completed[j].completedAt) {
+			return completed[i].id < completed[j].id
+		}
+		return completed[i].completedAt.Before(completed[j].completedAt)
+	})
+	for _, rec := range completed[:len(completed)-svc.retention.maxCompleted] {
+		delete(svc.jobs, rec.id)
+	}
 }

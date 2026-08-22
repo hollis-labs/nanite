@@ -308,16 +308,41 @@ func TestPTYBackend_NoOrphanZombies(t *testing.T) {
 	if err := be.Start(context.Background(), "job-z", req, cap.callback); err != nil {
 		t.Fatalf("Start: %v", err)
 	}
-	cap.wait(t, 5*time.Second)
-
-	// Lookup pid via the recorded job and assert it's reaped.
 	be.mu.Lock()
 	pid := be.jobs["job-z"].cmd.Process.Pid
 	be.mu.Unlock()
-	// Process should be reaped — Kill(pid, 0) returns ESRCH.
+	cap.wait(t, 5*time.Second)
+
+	// The process should be reaped even though the backend's process
+	// record has already been released after completion. Kill(pid, 0)
+	// returns ESRCH once the kernel has cleaned it up.
 	err := syscall.Kill(pid, 0)
 	if err != syscall.ESRCH {
 		t.Fatalf("kill(%d, 0) = %v; want ESRCH (process should be reaped)", pid, err)
+	}
+}
+
+func TestPTYBackend_RemovesCompletedJobRecord(t *testing.T) {
+	skipIfWindows(t)
+	t.Parallel()
+
+	be := NewPTYBackend()
+	cap := newCapture()
+	req := JobRequest{
+		Task:                 "true",
+		Budget:               JobBudget{WallClockSeconds: 5, MaxOutputBytes: DefaultMaxOutputBytes},
+		OriginatingSessionID: "s",
+		OriginatingAgentID:   "a",
+	}
+	if err := be.Start(context.Background(), "job-retention", req, cap.callback); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	cap.wait(t, 5*time.Second)
+
+	be.mu.Lock()
+	defer be.mu.Unlock()
+	if _, ok := be.jobs["job-retention"]; ok {
+		t.Fatal("completed backend job remains retained")
 	}
 }
 

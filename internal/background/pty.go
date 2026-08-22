@@ -173,8 +173,9 @@ func (b *PTYBackend) Start(ctx context.Context, jobID string, req JobRequest, on
 	)
 
 	// Reaper goroutine. Captures output, Wait()s the child, decides
-	// terminal status, fires onComplete exactly once, and clears
-	// the in-memory record.
+	// terminal status, fires onComplete exactly once, and removes
+	// the backend's internal process record. Service owns retained
+	// result/status history after the callback.
 	go func() {
 		defer close(job.done)
 		defer wallClockTimer.Stop()
@@ -201,6 +202,9 @@ func (b *PTYBackend) Start(ctx context.Context, jobID string, req JobRequest, on
 
 		b.mu.Lock()
 		job.status = status
+		if b.jobs[jobID] == job {
+			delete(b.jobs, jobID)
+		}
 		b.mu.Unlock()
 
 		onComplete(jobID, BackendCompletion{
@@ -216,10 +220,10 @@ func (b *PTYBackend) Start(ctx context.Context, jobID string, req JobRequest, on
 	return nil
 }
 
-// Status returns the lifecycle state of jobID. ErrUnknownJob when
-// the backend has no record (job either never existed or was reaped
-// out of the map after completion — the Service maintains its own
-// authoritative record either way).
+// Status returns the lifecycle state of a running job. PTYBackend removes
+// its process record as the job completes; retained terminal status
+// and explicit expiry semantics belong to Service, the caller-facing source
+// of truth. ErrUnknownJob therefore means this backend has no active record.
 func (b *PTYBackend) Status(jobID string) (JobStatus, error) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
@@ -374,4 +378,3 @@ func killProcessGroup(pgid int, sig syscall.Signal) error {
 	}
 	return nil
 }
-

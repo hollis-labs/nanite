@@ -24,6 +24,7 @@ import (
 	"context"
 	"errors"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -421,6 +422,167 @@ func TestLoopEngine_Run_InlineGoalSpec_CreatesGoalAndFailsOnBudgetExhausted(t *t
 	}
 	if goal.Intent != "an inline goal" {
 		t.Fatalf("goal.Intent = %q, want %q", goal.Intent, "an inline goal")
+	}
+}
+
+// --- Review fix: caller-context death must not be mistaken for genuine
+// budget.MaxRuntimeSeconds exhaustion (engine.go's driveIterations loop-top
+// check) ---
+//
+// A code-review pass on this task found that the loop-top check originally
+// read bare `runCtx.Err() != nil` and, on any non-nil error, unconditionally
+// called escalateOnBoundedContextExceeded -- collapsing two different causes
+// (the MaxRuntimeSeconds-derived deadline genuinely elapsing, vs. the
+// caller's own ctx dying for an unrelated reason, e.g. an HTTP handler's
+// r.Context() on client disconnect) into one "budget exhausted" diagnosis.
+// See engine.go's own "Review fix" doc comment for the full writeup.
+//
+// This test calls driveIterations directly rather than through the public
+// Run/Resume entry points, and constructs the Goal/LoopRun rows directly
+// via the store first (mirroring this file's own existing precedent in
+// TestLoopEngine_Run_RejectsSecondActiveLoopRunForSameGoal, which already
+// constructs a store.LoopRun by hand rather than through Run) -- a real,
+// confirmed correction to a literal reading of "pass an already-canceled ctx
+// into Run": Run's own setup (GetGoal/CreateGoal/ListLoopRuns/CreateLoopRun)
+// forwards that same ctx straight into real ExecContext/QueryRowContext SQL
+// calls, and modernc.org/sqlite (confirmed directly, scratch experiment)
+// fails those immediately given an already-dead ctx -- so an already-dead
+// ctx handed to Run surfaces as a plain setup-phase error before ever
+// reaching driveIterations at all, exercising nothing this fix touches (the
+// pre-fix code would behave identically in that scenario, making it a
+// false-negative-prone regression test). A wall-clock short-deadline
+// alternative that lets Run's setup complete and then expires was also
+// considered and rejected as unreliable: an iteration cycle has roughly half
+// a dozen other ctx-consuming DB checkpoints besides the loop-top check
+// itself, so a real timer landing exactly on the loop-top check rather than
+// mid-iteration is not the statistically favored outcome -- it would not
+// reliably catch the bug on every run. Calling driveIterations directly with
+// an already-dead ctx is deterministic: nothing before the loop-top check
+// touches ctx, so it is the first and only thing that can observe the death.
+func TestLoopEngine_DriveIterations_CallerContextDead_DoesNotEscalateOrFailBudget(t *testing.T) {
+	tests := []struct {
+		name      string
+		budget    store.Budget
+		deadCtx   func() (context.Context, context.CancelFunc)
+		wantErrIs error
+	}{
+		{
+			// budget.MaxRuntimeSeconds == 0 ("no cap") -- runCtx := ctx is a
+			// literal alias (engine.go), so the pre-fix bug fired purely off
+			// the caller's own already-canceled context, with zero budget
+			// logic involved. OnExhausted: fail exercises the worst case
+			// from the bug report: an irreversible failed status persisted
+			// on a LoopRun that never exhausted anything.
+			name:   "MaxRuntimeSecondsUnset_CallerContextCanceled",
+			budget: store.Budget{MaxIterations: 5, OnExhausted: store.LoopRunOnExhaustedFail},
+			deadCtx: func() (context.Context, context.CancelFunc) {
+				ctx, cancel := context.WithCancel(context.Background())
+				cancel()
+				return ctx, cancel
+			},
+			wantErrIs: context.Canceled,
+		},
+		{
+			// budget.MaxRuntimeSeconds set larger than the parent's own
+			// (already-expired) effective deadline -- runCtx is a genuine
+			// derived child (context.WithTimeout(ctx, 3600s)), but since the
+			// parent ctx is already past its own deadline when the child is
+			// created, the child inherits that expiry immediately (Go's
+			// context package propagates an already-dead parent's error to
+			// a newly created child synchronously). Confirms the fix checks
+			// the caller's ctx first regardless of whether MaxRuntimeSeconds
+			// is configured at all.
+			name:   "MaxRuntimeSecondsSetLarger_CallerContextDeadlineExceeded",
+			budget: store.Budget{MaxIterations: 5, MaxRuntimeSeconds: 3600, OnExhausted: store.LoopRunOnExhaustedEscalate},
+			deadCtx: func() (context.Context, context.CancelFunc) {
+				return context.WithDeadline(context.Background(), time.Now().Add(-1*time.Hour))
+			},
+			wantErrIs: context.DeadlineExceeded,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ctx := context.Background()
+			exec := &fakeStepExecutor{}
+			st, _, eng := newLoopEngineTestFixtures(t, exec)
+
+			goal := store.Goal{Intent: "must not be silently escalated by a dead caller ctx"}
+			if err := st.CreateGoal(ctx, &goal); err != nil {
+				t.Fatalf("CreateGoal: %v", err)
+			}
+
+			lr := &store.LoopRun{GoalID: goal.ID, DefinitionName: "unused-in-this-test", Status: store.LoopRunStatusRunning}
+			if err := lr.SetBudget(tt.budget); err != nil {
+				t.Fatalf("SetBudget: %v", err)
+			}
+			if err := st.CreateLoopRun(ctx, lr); err != nil {
+				t.Fatalf("CreateLoopRun: %v", err)
+			}
+
+			deadCtx, cancel := tt.deadCtx()
+			defer cancel()
+			if deadCtx.Err() == nil {
+				t.Fatal("test setup bug: deadCtx must already be dead before calling driveIterations")
+			}
+
+			result, err := eng.driveIterations(deadCtx, lr, goal, lr.DefinitionName, loopRunPersistentConfig{}, nil)
+
+			if err == nil {
+				t.Fatal("driveIterations: expected a plain error from the dead caller ctx, got nil")
+			}
+			if !errors.Is(err, tt.wantErrIs) {
+				t.Fatalf("driveIterations error = %v, want it to wrap %v", err, tt.wantErrIs)
+			}
+			// The real discriminator between the pre-fix and post-fix
+			// behavior: with ctx already dead, escalateOnBoundedContextExceeded's
+			// OWN UpdateLoopRunStatus(ctx, ...) call (engine.go) would ALSO be
+			// given that same dead ctx and would ALSO fail (confirmed directly:
+			// modernc.org/sqlite's ExecContext returns ctx.Err() immediately for
+			// an already-dead context) -- so loop_runs.status ends up unchanged
+			// either way in this exact scenario, and asserting only on the
+			// persisted status (below) would pass against the pre-fix code too.
+			// What actually differs is the DIAGNOSIS in the returned error: the
+			// pre-fix code unconditionally calls escalateOnBoundedContextExceeded
+			// and its error literally claims "max_runtime_seconds exceeded" even
+			// though the real cause was the caller's own ctx dying -- a
+			// misdiagnosis that matters even when the erroneous write happens to
+			// fail closed here, since nothing about that outcome is guaranteed by
+			// the fix itself (it depends on DB-driver ctx-checking behavior, not
+			// on this file's own control flow being correct). The fixed code's
+			// error never claims a runtime-budget cause.
+			if strings.Contains(err.Error(), "max_runtime_seconds") {
+				t.Fatalf("driveIterations error = %v, must not misdiagnose a caller-context death as max_runtime_seconds exhaustion", err)
+			}
+			if !strings.Contains(err.Error(), "caller context canceled") {
+				t.Fatalf("driveIterations error = %v, want it to identify the caller's own context as the cause", err)
+			}
+			if (result != LoopResult{}) {
+				t.Fatalf("driveIterations result = %+v, want a zero-value LoopResult (not a budget-exhaustion decision)", result)
+			}
+			if exec.calls != 0 {
+				t.Fatalf("exec.calls = %d, want 0 -- a dead caller ctx must be caught before any iteration launches", exec.calls)
+			}
+
+			persisted, err := st.GetLoopRun(ctx, lr.ID)
+			if err != nil {
+				t.Fatalf("GetLoopRun: %v", err)
+			}
+			if persisted.Status != store.LoopRunStatusRunning {
+				t.Fatalf("loop_run status = %q, want unchanged %q -- a caller-context death must not be persisted as budget exhaustion", persisted.Status, store.LoopRunStatusRunning)
+			}
+			if persisted.CompletedAt != "" {
+				t.Fatalf("loop_run completed_at = %q, want empty -- a caller-context death must never set a terminal timestamp", persisted.CompletedAt)
+			}
+
+			iterations, err := st.ListLoopRunIterations(ctx, lr.ID)
+			if err != nil {
+				t.Fatalf("ListLoopRunIterations: %v", err)
+			}
+			if len(iterations) != 0 {
+				t.Fatalf("len(iterations) = %d, want 0 -- no iteration should have launched", len(iterations))
+			}
+		})
 	}
 }
 

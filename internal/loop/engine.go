@@ -139,6 +139,50 @@ package loop
 // require -- the common, tested path (the check firing between
 // iterations) is what "Done means" asks for.
 //
+// # Review fix: distinguishing a caller-context death from genuine
+// MaxRuntimeSeconds exhaustion at the loop-top check
+//
+// A review of this task found that the loop-top check above originally read
+// bare `runCtx.Err() != nil` and, on any non-nil error, unconditionally
+// called escalateOnBoundedContextExceeded -- treating the event as "this
+// LoopRun's own budget exhausted" no matter the real cause. runCtx.Err()
+// alone cannot distinguish the budget.MaxRuntimeSeconds-derived deadline
+// above genuinely elapsing from the caller-supplied ctx itself dying for an
+// unrelated reason (an HTTP handler's request context on client disconnect,
+// a reverse-proxy timeout, a graceful-shutdown cancellation). This was worst
+// when budget.MaxRuntimeSeconds == 0 ("no cap," this file's own documented
+// "run until COMPLETE/FAIL" configuration): runCtx := ctx is then a literal
+// alias, not a derived child context, so the check fired purely off the
+// caller's own context lifecycle -- silently imposing a hidden ceiling this
+// file explicitly promises not to impose -- and, with
+// budget.OnExhausted == "fail", the pre-fix code would still misdiagnose the
+// event as budget exhaustion and attempt to persist a failed status on a
+// LoopRun that never actually exhausted anything (e.g. task 10's future
+// escalation-resolution endpoint calling Run/Resume with r.Context(), per
+// the idiomatic Go HTTP pattern). Note one nuance confirmed while writing
+// the regression test: escalateOnBoundedContextExceeded's own
+// UpdateLoopRunStatus call is itself given the same dead ctx, so with THIS
+// store's driver (modernc.org/sqlite) that write also fails closed rather
+// than actually corrupting loop_runs.status -- the persisted row often ends
+// up unchanged either way. That does not make the pre-fix bug harmless: (1)
+// nothing about this file's own control flow guarantees that outcome, only
+// an incidental property of one DB driver's ctx-checking, so it is not a
+// safety net to design around; (2) the pre-fix code's returned error still
+// misdiagnoses the cause (literally claims "max_runtime_seconds exceeded"
+// when it did not), which matters for logs/monitoring even when the write
+// itself is blocked. Fixed by checking ctx.Err() first: if the
+// caller's own context already died, that is never genuine budget
+// exhaustion regardless of whether MaxRuntimeSeconds is set, so this
+// propagates a plain error without touching loop_runs.status at all --
+// exactly the same treatment the "Known limitation" comment above already
+// gives a context deadline expiring mid-Launch/mid-Decide, just applied at
+// the loop-top check instead of mid-call. Only once ctx.Err() is nil does a
+// non-nil runCtx.Err() unambiguously mean the derived MaxRuntimeSeconds
+// timeout itself fired. Regression test:
+// TestLoopEngine_DriveIterations_CallerContextDead_DoesNotEscalateOrFailBudget
+// (engine_test.go) -- see that test's own doc comment for why it calls
+// driveIterations directly rather than through Run/Resume.
+//
 // # v1 scope: REPLAN relaunches the same WorkflowDefinition as CONTINUE/RETRY
 //
 // See types.go's own LoopDefinition doc comment -- 21-loops.md's own "What
@@ -408,6 +452,32 @@ func (e *LoopEngine) driveIterations(ctx context.Context, lr *store.LoopRun, goa
 	}
 
 	for {
+		// runCtx.Err() != nil alone cannot tell apart two different causes:
+		// (1) the budget.MaxRuntimeSeconds-derived deadline above genuinely
+		// elapsing -- real budget exhaustion, correct to call
+		// escalateOnBoundedContextExceeded and persist loop_runs.status; or
+		// (2) the caller-supplied ctx itself dying for a reason that has
+		// nothing to do with this LoopRun's budget (an HTTP handler's
+		// request context on client disconnect, a reverse-proxy timeout, a
+		// graceful-shutdown cancellation, ...). When budget.MaxRuntimeSeconds
+		// is 0 ("no cap"), runCtx is a literal alias of ctx (see above), so
+		// collapsing these two would silently impose a hidden ceiling on a
+		// LoopRun this file itself documents as "run until COMPLETE/FAIL."
+		// Checking ctx.Err() first disambiguates: if the caller's own ctx
+		// already died, that is never genuine budget exhaustion, regardless
+		// of whether MaxRuntimeSeconds is set -- propagate a plain error
+		// without mutating loop_runs.status (do not call
+		// UpdateLoopRunStatus with the now-dead ctx; it would likely fail
+		// anyway). This is the same category of event this file's own
+		// "Known limitation" comment above already accepts for a context
+		// deadline expiring mid-Launch/mid-Decide -- a plain propagated
+		// error, not a persisted status -- just caught here at the loop-top
+		// check instead of mid-call. Only once ctx.Err() is confirmed nil do
+		// we know a non-nil runCtx.Err() can only be the derived
+		// MaxRuntimeSeconds timeout genuinely firing.
+		if ctx.Err() != nil {
+			return LoopResult{}, fmt.Errorf("loop: run %s: caller context canceled: %w", lr.ID, ctx.Err())
+		}
 		if runCtx.Err() != nil {
 			return e.escalateOnBoundedContextExceeded(ctx, lr, budget)
 		}

@@ -268,5 +268,87 @@ task — zero files besides `internal/loop/*` changed). `go test ./...` — ever
 output, read directly from a file the test run was redirected to (not trusted via `$?` alone,
 per this batch's own standing instruction).
 
+## Review-found bug fix (2026-08-21)
+
+A review of this task, prior to marking it `reviewed`, found a real correctness bug in
+`driveIterations`'s loop-top check (`internal/loop/engine.go`): the original code read bare
+`if runCtx.Err() != nil { return e.escalateOnBoundedContextExceeded(ctx, lr, budget) }`.
+`runCtx.Err() != nil` cannot distinguish (1) the genuine `budget.MaxRuntimeSeconds`-derived
+deadline elapsing (the case this check exists to guard against) from (2) the caller-supplied
+`ctx` itself dying for a reason unrelated to this LoopRun's own budget (an HTTP handler's
+`r.Context()` on client disconnect, a reverse-proxy timeout, a graceful-shutdown cancellation).
+Both collapsed into the same "budget exhausted" diagnosis. This was worst when
+`budget.MaxRuntimeSeconds == 0` ("no cap", this file's own documented "run until
+COMPLETE/FAIL" configuration): `runCtx := ctx` is then a literal alias, not a derived child
+context, so the check fired purely off the caller's own context lifecycle, silently violating
+the file's own "no hidden ceiling on an unbounded loop" promise.
+
+**Fix:** `driveIterations`'s loop-top check now checks `ctx.Err() != nil` first (the caller's
+own context) and, if so, returns a plain propagated error without calling
+`e.store.UpdateLoopRunStatus` at all — consistent with the file's pre-existing "Known
+limitation" doc comment, which already accepted a context deadline expiring mid-Launch/
+mid-Decide as a plain error rather than a persisted status; this extends the same treatment to
+the loop-top check. Only once `ctx.Err()` is confirmed nil does a non-nil `runCtx.Err()`
+unambiguously mean the derived `MaxRuntimeSeconds` timeout genuinely fired, correctly still
+calling `escalateOnBoundedContextExceeded`. Documented at length in `engine.go`'s own
+package-level doc comment (new "Review fix" section) and inline above the check itself.
+
+**A real nuance found while building the regression test, also documented in `engine.go`:**
+with `ctx` already fully dead, `escalateOnBoundedContextExceeded`'s own `UpdateLoopRunStatus(ctx,
+...)` call is handed that same dead `ctx` and (confirmed directly against this store's real
+driver, `modernc.org/sqlite`: an already-canceled/expired `ctx` makes `ExecContext`/
+`QueryRowContext` fail immediately) also fails — so in this specific store implementation,
+`loop_runs.status` often ends up unchanged either way, pre-fix or post-fix, once `ctx` is fully
+dead by the time the check runs. This does NOT make the pre-fix bug harmless: (1) that outcome
+is an incidental property of one DB driver's own ctx-checking, not something the loop engine's
+own control flow guarantees — not a safety net to rely on; (2) the pre-fix code's returned error
+still misdiagnoses the cause (it literally reads "max_runtime_seconds exceeded" even when the
+real cause was the caller's own context dying), which matters for logs/monitoring/alerting even
+when the erroneous write itself happens to fail closed. The regression test below asserts on
+this error-message diagnosis specifically, since it is what actually, deterministically differs
+between the pre-fix and post-fix code in this exact scenario — the persisted-status assertion
+alone was empirically confirmed (by temporarily reverting the fix and re-running the test) to
+NOT discriminate the two, for the reason just given.
+
+**Regression test:** `TestLoopEngine_DriveIterations_CallerContextDead_DoesNotEscalateOrFailBudget`
+(`internal/loop/engine_test.go`), two subtests (`MaxRuntimeSecondsUnset_CallerContextCanceled`,
+`MaxRuntimeSecondsSetLarger_CallerContextDeadlineExceeded`) covering both the aliased
+(`MaxRuntimeSeconds == 0`) and derived-child (`MaxRuntimeSeconds` set larger than the parent's
+own already-expired deadline) cases the task asked for. **Deviation from the task's literal test
+wording, confirmed and logged, not escalated:** the task said "passes an already-canceled ...
+parent ctx into `Run`" — confirmed directly that this is not actually reachable as a meaningful
+regression test: `Run`'s own setup (`resolveGoal`→`GetGoal`/`CreateGoal`, `ListLoopRuns`,
+`CreateLoopRun`) forwards that same `ctx` straight into real `ExecContext`/`QueryRowContext`
+calls, which fail immediately given an already-dead `ctx` (confirmed via a scratch experiment
+against the real `modernc.org/sqlite` driver) — so an already-dead `ctx` handed to `Run` surfaces
+as a plain setup-phase error before ever reaching `driveIterations`, exercising nothing the fix
+touches (the pre-fix code behaves identically in that scenario — a false-negative-prone test). A
+wall-clock short-deadline alternative that lets `Run`'s setup complete and then expires was also
+considered and rejected as unreliable: an iteration cycle has roughly half a dozen other
+ctx-consuming DB checkpoints besides the loop-top check itself, so a real timer is not
+statistically favored to land exactly on the loop-top check rather than mid-iteration — it would
+not reliably catch the bug on every run (confirmed by design, not just asserted). The test
+instead calls `driveIterations` directly (accessible since `engine_test.go` is `package loop`,
+not `loop_test`) with the Goal/LoopRun rows constructed directly via the store first — mirroring
+this same test file's own pre-existing precedent in
+`TestLoopEngine_Run_RejectsSecondActiveLoopRunForSameGoal`, which already constructs a
+`store.LoopRun` by hand rather than through `Run`. This is deterministic (nothing before the
+loop-top check touches `ctx`, so it is the first and only thing that can observe the death) and
+directly exercises the exact fixed code path, whereas a literal `Run`-level test would not.
+Verified the test is a genuine regression test, not a vacuously-passing one: temporarily reverted
+the fix, re-ran the test, confirmed both subtests fail with the pre-fix code's misdiagnosing
+error message (`"...max_runtime_seconds exceeded, and updating loop_run status failed:
+...context canceled"` / `...context deadline exceeded`); restored the fix, re-ran, confirmed both
+pass.
+
+**Verification (all read directly from un-piped, file-redirected output, exit codes checked
+immediately, per this batch's standing instruction):** `go build ./cmd/nanite/` — exit 0, no
+output. `go vet ./...` — same four pre-existing, unrelated failures as before this fix
+(`internal/service/container.go:1180/1200/1260`, `stopReaper`/`stopRuntimeReaper` possible
+context leak; `git status`/`git diff --stat` confirm only `internal/loop/engine.go` and
+`internal/loop/engine_test.go` changed by this fix). `go test ./...` — exit 0, every package
+`ok` or `[no test files]`, zero `FAIL` lines anywhere in the full output, including
+`ok github.com/hollis-labs/nanite/internal/loop 2.182s` (freshly run, not cached).
+
 ## Review notes
 <Reviewer fills this in: pass/fail, what was checked, anything fixed and how.>

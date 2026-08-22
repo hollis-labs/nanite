@@ -1,7 +1,7 @@
 # `LoopLauncher` + CRUD/launch/escalation-resolution API
 
 **Phase:** 3 — Trigger surface (`TASKS/loops`)
-**Status:** implemented
+**Status:** reviewed
 **Depends on:** `08-loop-engine-core.md`
 **Touches:** new `internal/loop/launcher.go`, new `internal/api/loops.go`, `internal/api/api.go`
 (route registration).
@@ -234,4 +234,35 @@ behavior, not a bug in `LoopLauncher`/`LoopEngine` itself.
   reusable pattern for future Loop-related dogfeeding that needs zero LLM credentials.
 
 ## Review notes
-<Reviewer fills this in: pass/fail, what was checked, anything fixed and how.>
+
+PASS on content/logic — thorough static read-through covering: no duplicated
+one-active-LoopRun-per-goal/GoalID-union enforcement (both left entirely to `LoopEngine.Run`);
+`Cancel`'s outer-notify call is real and necessary (confirmed `notifyOuterOnTerminal` treats
+`cancelled` as terminal); `ResolveEscalation`'s `waiting_on_escalation` precondition applies
+uniformly across all four modes; `Replan` genuinely reuses `LoopEngine`'s own unexported
+`applyRearchitect` rather than duplicating REARCHITECT logic; the auth-model claim confirmed
+directly against `internal/server/server.go`'s real middleware chain (no separate/unguarded
+route path); error-code mapping is sensible and consistent (`ErrLoopRunAlreadyActive`→409,
+not-found→404, validation→400, unwired launcher→503, all `%w`-wrapped for `errors.Is`); Goal
+`status` PATCH correctly routes through `UpdateGoalStatus`, not `UpdateGoal`; the "infinite
+CONTINUE" issue is confirmed genuine, intentional zero-value-Budget "no cap" semantics, not a
+production bug — the fix that landed is test-side only (bounding the affected tests), no
+change to `decide.go`/`engine.go`. `ResolveEscalation` genuinely follows the cited A2A
+`ProvideTaskInput`/`resumeWorkflowRun` precedent shape. `cmd/nanite/main.go` wiring confirmed:
+one `loopEngine` instance shared across `RunnerAdapter.Loops` and `LoopLauncher`, no drift
+risk. Test counts (13 in `launcher_test.go`, 18 in `loops_test.go`) match the Work Log's claims
+exactly.
+
+One non-blocking observation: `Cancel` has no precondition on the LoopRun's current status
+(will overwrite an already-`completed`/`failed` row to `cancelled`) — idempotency-safe at the
+notify layer, not a functional bug, but a slightly odd operator-facing behavior worth a future
+follow-up note, not a blocker.
+
+The reviewer's own Bash tool failed entirely this session (a sandbox misconfiguration
+unrelated to this task), so it could not independently run `go build`/`go vet`/`go test`/`git
+status`. The Orchestrator ran all four directly against this exact merged commit beforehand:
+`go build ./cmd/nanite/` exit 0; `go vet ./...` exit 1 with only the same pre-existing,
+unrelated `internal/service/container.go` findings; `go test -count=1 ./...` exit 0, 93
+packages, zero `FAIL`/`panic` (real exit codes, not piped); `git status --short` clean, no
+stray scratch artifacts. Folding that verification in here to close out this task's Done-means
+in full.

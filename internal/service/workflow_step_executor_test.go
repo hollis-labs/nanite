@@ -640,3 +640,114 @@ func TestExecuteLLMStep_EnableContextAssembly_PropagatesAssemblerError(t *testin
 		t.Fatalf("expected the assembler's error to propagate, got %v", err)
 	}
 }
+
+// --- Verify: mode engine, tests_pass / lint_pass (TASKS/loops/07) ---
+
+func TestVerify_ModeEngine_TestsPass_PassesOnCleanOutput(t *testing.T) {
+	exec := NewWorkflowStepExecutor(&fakeWorkflowToolService{}, &fakeProviderResolver{}, nil)
+
+	result, err := exec.Verify(context.Background(), agentworkflow.VerifyRequest{
+		VerifySpec: agentworkflow.VerifySpec{Mode: agentworkflow.VerifyModeEngine, EngineCheck: "tests_pass"},
+		Subject:    agentworkflow.VerifySubject{Output: "ok  	github.com/hollis-labs/nanite/internal/loop	0.412s"},
+	})
+	if err != nil {
+		t.Fatalf("Verify returned error: %v", err)
+	}
+	if !result.Passed {
+		t.Fatalf("expected Passed=true, reason=%q", result.Reason)
+	}
+}
+
+func TestVerify_ModeEngine_TestsPass_FailsOnFailMarker(t *testing.T) {
+	exec := NewWorkflowStepExecutor(&fakeWorkflowToolService{}, &fakeProviderResolver{}, nil)
+
+	result, err := exec.Verify(context.Background(), agentworkflow.VerifyRequest{
+		VerifySpec: agentworkflow.VerifySpec{Mode: agentworkflow.VerifyModeEngine, EngineCheck: "tests_pass"},
+		Subject:    agentworkflow.VerifySubject{Output: "--- FAIL: TestDecide_GoalMet (0.00s)\nFAIL"},
+	})
+	if err != nil {
+		t.Fatalf("Verify returned error: %v", err)
+	}
+	if result.Passed {
+		t.Fatal("expected Passed=false when output contains the FAIL marker")
+	}
+}
+
+func TestVerify_ModeEngine_TestsPass_FailsOnSubjectError(t *testing.T) {
+	exec := NewWorkflowStepExecutor(&fakeWorkflowToolService{}, &fakeProviderResolver{}, nil)
+
+	result, err := exec.Verify(context.Background(), agentworkflow.VerifyRequest{
+		VerifySpec: agentworkflow.VerifySpec{Mode: agentworkflow.VerifyModeEngine, EngineCheck: "tests_pass"},
+		Subject:    agentworkflow.VerifySubject{IsError: true, Output: "ok"},
+	})
+	if err != nil {
+		t.Fatalf("Verify returned error: %v", err)
+	}
+	if result.Passed {
+		t.Fatal("expected Passed=false when the subject step itself errored")
+	}
+}
+
+func TestVerify_ModeEngine_TestsPass_CustomFailMarker(t *testing.T) {
+	exec := NewWorkflowStepExecutor(&fakeWorkflowToolService{}, &fakeProviderResolver{}, nil)
+
+	result, err := exec.Verify(context.Background(), agentworkflow.VerifyRequest{
+		VerifySpec: agentworkflow.VerifySpec{
+			Mode:         agentworkflow.VerifyModeEngine,
+			EngineCheck:  "tests_pass",
+			EngineParams: map[string]any{"fail_marker": "FAILURES!!!"},
+		},
+		Subject: agentworkflow.VerifySubject{Output: "1 failed, 4 passed"},
+	})
+	if err != nil {
+		t.Fatalf("Verify returned error: %v", err)
+	}
+	if !result.Passed {
+		t.Fatalf("expected Passed=true (custom fail_marker not present), reason=%q", result.Reason)
+	}
+}
+
+func TestVerify_ModeEngine_LintPass_PassesOnCleanOutput(t *testing.T) {
+	exec := NewWorkflowStepExecutor(&fakeWorkflowToolService{}, &fakeProviderResolver{}, nil)
+
+	result, err := exec.Verify(context.Background(), agentworkflow.VerifyRequest{
+		VerifySpec: agentworkflow.VerifySpec{Mode: agentworkflow.VerifyModeEngine, EngineCheck: "lint_pass"},
+		Subject:    agentworkflow.VerifySubject{Output: ""},
+	})
+	if err != nil {
+		t.Fatalf("Verify returned error: %v", err)
+	}
+	if !result.Passed {
+		t.Fatalf("expected Passed=true, reason=%q", result.Reason)
+	}
+}
+
+func TestVerify_ModeEngine_LintPass_FailsOnFailMarker_CaseInsensitive(t *testing.T) {
+	exec := NewWorkflowStepExecutor(&fakeWorkflowToolService{}, &fakeProviderResolver{}, nil)
+
+	result, err := exec.Verify(context.Background(), agentworkflow.VerifyRequest{
+		VerifySpec: agentworkflow.VerifySpec{Mode: agentworkflow.VerifyModeEngine, EngineCheck: "lint_pass"},
+		Subject:    agentworkflow.VerifySubject{Output: "main.go:12:2: ERROR: unused import"},
+	})
+	if err != nil {
+		t.Fatalf("Verify returned error: %v", err)
+	}
+	if result.Passed {
+		t.Fatal("expected Passed=false when output contains the (case-insensitive) failure marker")
+	}
+}
+
+func TestVerify_ModeEngine_LintPass_FailsOnSubjectError(t *testing.T) {
+	exec := NewWorkflowStepExecutor(&fakeWorkflowToolService{}, &fakeProviderResolver{}, nil)
+
+	result, err := exec.Verify(context.Background(), agentworkflow.VerifyRequest{
+		VerifySpec: agentworkflow.VerifySpec{Mode: agentworkflow.VerifyModeEngine, EngineCheck: "lint_pass"},
+		Subject:    agentworkflow.VerifySubject{IsError: true},
+	})
+	if err != nil {
+		t.Fatalf("Verify returned error: %v", err)
+	}
+	if result.Passed {
+		t.Fatal("expected Passed=false when the subject step itself errored")
+	}
+}

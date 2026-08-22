@@ -73,6 +73,50 @@ var workflowEngineChecks = map[string]workflowEngineCheck{
 		}
 		return false, fmt.Sprintf("output does not contain %q", substr)
 	},
+	// tests_pass and lint_pass -- TASKS/loops/07-loop-continuation-policy.md
+	// -- added for the loop engine's per-iteration Verify step
+	// (docs/engineering/architecture/21-loops.md: "Growing the deterministic
+	// check registry ... with loop-relevant checks (tests_pass, lint_pass,
+	// and similar) is the same 'start narrow, grow as real workflows need
+	// more' registry Verify already uses"). Deliberately reuse exactly the
+	// two signals VerifySubject already carries -- IsError and Output --
+	// rather than inventing a new subsystem for "did tests/lint pass": a
+	// subject step whose Output contains failMarker (default "FAIL" for
+	// tests_pass, matching `go test`'s own top-level "FAIL" summary line;
+	// default "error" for lint_pass, matching most linters' per-finding
+	// prefix), case-sensitively for tests_pass and case-insensitively for
+	// lint_pass (a linter's own summary rarely capitalizes "error"
+	// consistently the way go test's "FAIL" is fixed), is not considered
+	// passing regardless of IsError. Callers with a different tool's own
+	// failure-marker convention can override it via the "fail_marker" param,
+	// the same override-a-param shape output_contains already uses for its
+	// "substring" param.
+	"tests_pass": func(subject agentworkflow.VerifySubject, params map[string]any) (bool, string) {
+		if subject.IsError {
+			return false, "subject step returned an error"
+		}
+		failMarker, _ := params["fail_marker"].(string)
+		if failMarker == "" {
+			failMarker = "FAIL"
+		}
+		if strings.Contains(subject.Output, failMarker) {
+			return false, fmt.Sprintf("output contains failure marker %q", failMarker)
+		}
+		return true, fmt.Sprintf("subject step did not error and output has no failure marker %q", failMarker)
+	},
+	"lint_pass": func(subject agentworkflow.VerifySubject, params map[string]any) (bool, string) {
+		if subject.IsError {
+			return false, "subject step returned an error"
+		}
+		failMarker, _ := params["fail_marker"].(string)
+		if failMarker == "" {
+			failMarker = "error"
+		}
+		if strings.Contains(strings.ToLower(subject.Output), strings.ToLower(failMarker)) {
+			return false, fmt.Sprintf("output contains failure marker %q", failMarker)
+		}
+		return true, fmt.Sprintf("subject step did not error and output has no failure marker %q", failMarker)
+	},
 }
 
 // workflowStepExecutor is the real, single implementation of

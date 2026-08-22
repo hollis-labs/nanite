@@ -1,7 +1,7 @@
 # Continuation policy — the `decide()` function
 
 **Phase:** 2 — Runtime engine (`TASKS/loops`)
-**Status:** not-started
+**Status:** implemented
 **Depends on:** `01-goals-schema.md`, `02-goal-evidence-schema.md`,
 `03-loop-runs-schema.md`, `04-loop-run-iterations-schema.md`
 **Touches:** new `internal/loop/decide.go` (new package — first file in it; needs a
@@ -133,8 +133,163 @@ itself.
 - `go build ./cmd/nanite/`, `go vet ./...`, `go test ./...` pass.
 
 ## Work log
-<Worker fills this in as it goes: what was actually done, any deviation from plan and why,
-anything escalated.>
+
+**Built:**
+
+- `internal/loop/doc.go` — package doc with the required three-way
+  disambiguation (`internal/loopdetect`, legacy `internal/workflow.LoopStep`,
+  and a note that this package's own docs cite `agentworkflow/dag.go`/
+  `types.go`, not `agentworkflow/doc.go`, for the "DAG only, no cycles"
+  claim — verified both files actually carry that exact phrase before
+  citing them).
+- `internal/loop/decide.go` — `Decide(ctx, exec, goal, evidence, evaluation,
+  history, budget, policy) (Decision, error)`, plus:
+  - `Goal`, `GoalEvidence`, `Evaluation`, `Budget`, `IterationResult` as
+    direct type aliases onto `store.Goal`/`store.GoalEvidence`/
+    `store.Evaluation`/`store.Budget`/`store.LoopRunIteration` — chose
+    aliasing over re-declaring parallel types (the task left this an open
+    choice) because `IterationResult = store.LoopRunIteration` already
+    carries exactly the `IterationNumber`/`Decision`/`ProgressState`/
+    `Evaluation()` shape `Decide` needs, and `Goal`'s
+    `AcceptanceCriteria()`/`Constraints()`/`Invariants()` accessors are
+    reused as-is by `evidenceSatisfiesGoal` below.
+  - `DecisionKind` (new type, 8 constants mirrored 1:1 from
+    `store.LoopRunIterationDecision*`) and `Decision{Kind, Reason,
+    Revision *GoalRevision}` (a struct, not a bare string) — the struct
+    shape is what makes REARCHITECT's revision payload representable at
+    all; see the deviation note below.
+  - Branch 1 (`goal_met`): `evidenceSatisfiesGoal` re-implements task 02's
+    `EvaluateGoalEvidence`/`EvidenceSatisfiesGoal` formula locally against
+    an already-loaded `Goal` + already-queried `[]GoalEvidence`, rather than
+    calling `store.EvaluateGoalEvidence` (which always does its own
+    `GetGoal`/`ListGoalEvidence` DB reads) — this is the one place `Decide`
+    duplicates ~15 lines of logic from `internal/store/goal_evidence.go`
+    rather than reusing it, a deliberate trade-off to keep `Decide` DB-free
+    per the task's own instruction ("prefer the caller doing the
+    evidence-walk query... keeping Decide DB-free apart from the one LLM
+    call"); the task's Touches section does not include modifying
+    `internal/store`, so exposing a DB-free variant there was not an option.
+  - Branch 2 (budget exhausted): checks all three `Budget` thresholds the
+    task names (`MaxIterations`, `MaxFailures`, `MaxRuntimeSeconds`), not
+    just `MaxIterations` — `current_iteration` is `len(history)` (history is
+    expected to include the just-finished iteration Decide is deciding, see
+    the "history shape" design note below); a "failure" for `MaxFailures`
+    purposes is my own design call, documented inline: a history entry
+    classified `store.LoopRunIterationProgressRegression` (closest existing
+    classification to "a failure," distinct from the more neutral
+    `NO_PROGRESS`/`BLOCKED` stalls branch 3 already handles); runtime is
+    wall-clock elapsed from the first history entry's `StartedAt` to the
+    last entry's `CompletedAt` (or now, if still in flight). A zero/unset
+    threshold means "no cap on that dimension" (a `Budget{}` zero value must
+    not read as "already exhausted at iteration 1") — verified by a
+    dedicated test. `OnExhausted` empty defaults to `escalate`, mirroring
+    `LoopRun.SetBudget`'s own default.
+  - Branch 3 (no-progress streak): `noProgressStreak` walks history from the
+    most recent entry backward, counting consecutive
+    `LoopRunIterationProgressNoProgress` entries, stopping at the first
+    non-match (including `REGRESSION`/`BLOCKED` — deliberately not folded
+    in; `21-loops.md` itself calls the v1 streak counter "minimal," deeper
+    heuristics deferred, and `REGRESSION` already has its own
+    `MaxFailures` accounting in branch 2). When the streak reaches
+    `budget.MaxNoProgressIterations`, `decideByReasoning` builds an
+    `agentworkflow.LLMStepRequest` and calls `exec.ExecuteLLMStep` — the
+    exact `VerifyModeAgent`/`verifyAgent` call shape the task names,
+    confirmed by direct reading of `workflow_step_executor.go:355`.
+  - The reasoning-fallback output contract is a strict single JSON object
+    (`{"decision": "...", "reason": "...", "revised_desired_state": [...],
+    "revised_acceptance_criteria": [...]}`), parsed defensively
+    (`parseReasoningVerdict`): locates the first `{`...`}` span, decodes it,
+    lower-cases and validates `decision` against exactly the six
+    reasoning-eligible `DecisionKind` values (`RETRY|REPLAN|REARCHITECT|
+    WAIT|ESCALATE|FAIL` — the design doc's own list in this task's Context
+    section names six values, though the "Done means" section's prose calls
+    it "five"; treated as a minor off-by-one in the task's own authoring,
+    not a real discrepancy to resolve — all six are implemented and each is
+    individually unit-tested). `revised_desired_state`/
+    `revised_acceptance_criteria` are only read into a `GoalRevision` when
+    `decision == "rearchitect"`.
+  - **Malformed-response fail-safe, as pre-authorized by this task's own
+    dispatch instructions**: an unparseable JSON body, a `decision` value
+    outside the six reasoning-eligible values, or a nil/misconfigured
+    `StepExecutor`/`ContinuationPolicy` all return a non-nil `error` (zero
+    `Decision`) rather than defaulting to `DecisionContinue` or any other
+    value. Chosen over escalating internally because `Decide` staying a
+    pure-ish function whose caller (task 08) owns reacting to a hard failure
+    is more consistent with every other error path in this file and with
+    `StepExecutor`'s own convention of surfacing failures as errors, not
+    absorbing them into a result value. Verified with dedicated tests
+    (invalid JSON, unknown decision, `CONTINUE`/`COMPLETE` explicitly
+    rejected as reasoning-fallback outputs, `ExecuteLLMStep` error
+    propagation, nil executor, missing policy provider/model) — none of
+    them ever produce `DecisionContinue`.
+- `internal/service/workflow_step_executor.go` — added `"tests_pass"` and
+  `"lint_pass"` to `workflowEngineChecks` (same
+  `func(VerifySubject, map[string]any) (bool, string)` signature the three
+  existing entries use). Both reuse only `VerifySubject.IsError`/`.Output`
+  (no new subsystem): fail if `IsError`, else fail if `Output` contains a
+  configurable `fail_marker` param (default `"FAIL"` for `tests_pass`,
+  matching `go test`'s own top-level summary line; default `"error"` for
+  `lint_pass`, matched case-insensitively). Six new unit tests in
+  `workflow_step_executor_test.go` (clean pass, fail-marker match, subject
+  error, and a custom-marker override for `tests_pass`; clean pass,
+  case-insensitive fail-marker match, and subject error for `lint_pass`).
+  This file is listed in the task's own Touches line as "read-only
+  reference," which describes `Decide`'s read-only *use* of the
+  `ExecuteLLMStep` call shape as a template — the task's own "What to do"
+  #4 explicitly requires this file's `workflowEngineChecks` map to grow, so
+  this edit is the task's own instruction, not scope creep beyond it.
+
+**Two documented signature deviations from the design doc's bare
+illustrative sketch** (`decide(goal, evaluation, history, budget) Decision`)
+— the task pre-authorized one (`ctx`/`exec`) and I made a second, load-bearing
+one myself, both documented in `decide.go`'s own top-of-file comment and
+`Decide`'s doc comment, not just here:
+
+1. `ctx context.Context, exec agentworkflow.StepExecutor` — exactly as the
+   task calls out as expected, needed for the reasoning-fallback branch's
+   `ExecuteLLMStep` call.
+2. `policy ContinuationPolicy` (new type: `Provider`, `Model`, `AgentID`,
+   `SessionID`, `Tools []string`) — **not explicitly named in the task's own
+   given signature, added because the reasoning-fallback branch's
+   `LLMStepRequest` hard-requires a real `Provider`/`Model`
+   (`ExecuteLLMStep` errors without them) and no other given parameter
+   carries that.** This is exactly the placeholder
+   `internal/store/loop_runs.go`'s own `LoopRun.ContinuationPolicyJSON`
+   doc comment names this task as the owner of ("task 07 defines and
+   consumes its real shape without this table needing to be revisited") —
+   I judged completing that reserved shape to be fulfilling the task's own
+   instruction (build a real, callable, non-decorative `Decide`) rather than
+   reopening its settled decision, per this dispatch's own "Decision vs.
+   rationale" guidance. Documented in-code and here rather than left
+   silent.
+
+**Malformed-LLM-response fail-safe question** (flagged in this task's "Done
+means" as the implementer's call): resolved as **return a non-nil error**,
+per the reasoning given directly in this task's own dispatch instructions
+(more consistent with `Decide` staying a pure-ish function whose caller,
+task 08, handles the ESCALATE/error path explicitly) — implemented exactly
+that way, tested, and documented in `parseReasoningVerdict`'s doc comment.
+
+**Not done / left for task 08 (by design, per this task's own scope):**
+`Decide` never queries `internal/store`, never calls `UpdateGoal` for a
+REARCHITECT revision, never writes `loop_run_iterations`/`loop_runs` rows,
+and never computes the per-iteration `Evaluation`/`ProgressState` rollup
+from `Verify` results — all explicitly task 08's job per this task's own
+Context section.
+
+**Verification:** `go build ./cmd/nanite/`, `go vet ./...`, and
+`go test ./... -count=1` all read directly from their own real, unpiped
+output (redirected to files, checked by reading the file content, never
+through a masked pipe). `go build`/`go test` are fully clean across the
+whole repo (every package `ok`, including the new `internal/loop` package
+and the two new `internal/service` test additions). `go vet ./...` reports
+exactly the same two pre-existing, unrelated `internal/service/container.go`
+findings (`stopReaper`/`stopRuntimeReaper` context-leak warnings) documented
+repeatedly across this project's own `TASKS/ESCALATIONS.md` as predating
+every batch back through Phase 1 — confirmed pre-existing here too by
+`git log -1 -- internal/service/container.go` (last touched by an unrelated
+Phase 6 task) and by `container.go` not appearing in `git status` against
+this worktree's own changes.
 
 ## Review notes
 <Reviewer fills this in: pass/fail, what was checked, anything fixed and how.>

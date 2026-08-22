@@ -760,6 +760,17 @@ func cmdServe(args []string) {
 	// so a CLI-launched chat agent's `nanite mcp` subprocess can forward
 	// self-tool calls into this running harness.
 	a.SetSelfTools(selfTools)
+	// TASKS/loops/10-loop-launcher-and-api.md: wire the "Manual/API launch"
+	// and "Human resolution of waiting_on_escalation" trigger surfaces
+	// behind POST /api/loops and its /cancel, /resolve actions. Reuses the
+	// same loopEngine instance StepKindLoop support was wired onto above
+	// (workflowEngine.WithLoopSupport) -- a Manual/API-launched LoopRun and
+	// a StepKindLoop-launched one share one engine, exactly as
+	// TeamRunLauncher/AgentCardGenerator above share one
+	// workflowDefinitionsRegistry instance. Not stored on
+	// service.Container itself -- see internal/api/api.go's own
+	// loopLauncher field doc comment for the import-cycle reason.
+	a.SetLoopLauncher(loop.NewLoopLauncher(loopEngine, container.Store))
 
 	// Lifecycle manager for long-running daemon goroutines (cleanup,
 	// snapshots, reapers). Owned by cmdServe; shut down on signal before

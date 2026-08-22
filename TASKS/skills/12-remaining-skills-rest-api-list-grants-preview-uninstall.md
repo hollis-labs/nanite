@@ -1,7 +1,7 @@
 # Remaining REST surface: list/get, assign/revoke, grants/policy view, invoke/preview, uninstall
 
 **Phase:** 7 — Remaining REST API surface (`TASKS/skills`)
-**Status:** fix-required (minor, non-blocking)
+**Status:** implemented
 **Depends on:** `02`, `05` (install pipeline this uninstall path mirrors), `09` (grant-state
 model this task exposes read/write access to)
 **Touches:** `internal/api/skills.go` (extends whatever task `05` started), `internal/api/api.go`
@@ -317,3 +317,67 @@ security regression. Full details logged in `TASKS/ESCALATIONS.md`'s 2026-08-22 
    panic.
 3. Re-run `go build ./cmd/nanite/`, `go vet ./...`, `go test ./...` — all must pass.
 4. Update this file's own Work Log with what was fixed, and set Status to `implemented`.
+
+### Fix Work Log (2026-08-22)
+
+**Fix 1 — corrected the access-control doc comment above `handleGrantAgentSkill`
+(`internal/api/skills.go`).** Independently re-verified both cited `TASKS/ESCALATIONS.md` entries
+before touching anything: the `2026-08-22 — Task \`11\` review: PASS` entry is entirely about
+fork-composition privilege inheritance (a `subagent.Service.Spawn` observation), and the
+`2026-08-22 — Task \`10\` review: FAIL` entry is about `Skill.Slug`/`ContentHash` being
+REST-settable while `agent_known_skills.approved_content_hash` wasn't yet (an exploitability-bound
+claim) — neither entry says or implies "no per-caller-identity access-control convention anywhere
+in this codebase." Also independently confirmed `internal/server/caller_identity.go`'s
+`callerIdentityMiddleware` is real and wired into the request chain, and that its
+`messaging.CallerIdentity`/`CallerFromCtx` contract is genuinely consumed — by
+`internal/api/messaging.go`'s handlers only (`grep` confirmed zero references to
+`CallerFromCtx`/`CallerIdentity` in `agent_capabilities.go` or `agents.go`), which in turn feed
+`internal/messaging/service.go`'s own authz checks (Inbox caller-match, Thread participant filter,
+Ack/Resolve recipient check, UnreadCount caller-match). Rewrote the comment to state the accurate,
+narrower claim: no comparable agent-mutating endpoint in this codebase
+(`internal/api/agent_capabilities.go`, `internal/api/agents.go`) gates on caller identity — all of
+them, including `requireMutableAgent`, gate only on which agent record may be mutated, never on who
+the caller is — and to explicitly note that `caller_identity.go`'s middleware is a real mechanism
+that simply was never extended to agent-mutation endpoints, rather than implying no such mechanism
+exists anywhere. Removed the task-10/11 attribution entirely rather than re-citing them for a
+narrower claim they still don't make. The practical conclusion (this endpoint is exactly as exposed
+as its siblings) is unchanged, since that part was already independently confirmed correct by the
+task-12 review itself.
+
+**Fix 2 — added `TestHandleDeleteSkill_TypedNilVendor_ClearErrorNotPanic`
+(`internal/api/skills_lifecycle_test.go`).** The test installs a real skill (non-empty
+`ContentHash`), sets `a.Services.SkillVendor` — declared as concrete `*skillvendor.Store`, per
+`internal/service/container.go` — to a `var nilVendor *skillvendor.Store` (a genuinely typed nil,
+not the untyped `nil` literal the pre-existing `TestUninstall_ContentHashSetButVendorNil_
+ClearErrorNotPanic` in `internal/skillinstall/uninstall_test.go` already covers at the
+`Uninstaller`-only level), then calls the real `DELETE /api/skills/{slug}` REST handler and asserts:
+(1) the response is a clean non-200 JSON error body via the existing `decodeErrorMessage` helper
+(no panic — `httptest.ResponseRecorder.Code` would never be set if the handler panicked before
+writing), (2) the error message is non-empty, and (3) the skill's index row is still present
+afterward (an aborted uninstall must never delete the index row when vendor deletion fails, per
+`Uninstaller`'s own vendor-before-index ordering contract). Confirmed the test is a genuine
+regression guard, not a vacuous pass, via a real mutation test: temporarily reverted
+`handleDeleteSkill`'s guard to the unguarded `Uninstaller{Vendor: a.Services.SkillVendor, ...}`
+form the fix-required item warns a future edit might reintroduce, re-ran only the new test, and
+confirmed it fails with a genuine `nil pointer dereference` panic inside
+`skillvendor.(*Store).Delete` (at the exact `s.root` field access the guard's own doc comment
+predicts) rather than a silent pass; reverted the mutation immediately afterward and reconfirmed
+the guarded code passes cleanly. `callDeleteSkill` (`internal/selftools/self_tools_transport.go`)
+shares the byte-identical guard pattern (confirmed by direct read) and was left untouched per the
+fix-required item's "REST path is the minimum required assertion" — no additional self-tool-level
+test was added, since the REST-level test already proves the shared `skillinstall.Uninstaller`
+construction path used by both callers.
+
+**Verification.** `go build ./cmd/nanite/` clean. `go vet ./...` shows only the pre-existing,
+unrelated `internal/service/container.go` `stopReaper`/`stopRuntimeReaper` finding (confirmed by
+five prior reviewers across this batch to predate and be unrelated to Skills-batch work — not
+touched). `go test ./...` — all packages pass, including the new test and the full pre-existing
+`internal/api`, `internal/skillinstall`, and `internal/selftools` suites. `git status --short`
+after these changes shows only `internal/api/skills.go` and `internal/api/skills_lifecycle_test.go`
+touched by this session — the pre-existing unrelated repo state (`TASKS/INDEX.md`,
+`TASKS/audit-remediation/...`, `docs/engineering/orchestrator-kickoffs/audit-remediation-w0.md`)
+noted in the original Work Log was present before this session started and was not read or
+modified. No `git stash` used at any point. This closes finding (1) and (2) from the task-12 review
+in `TASKS/ESCALATIONS.md`'s `2026-08-22 — Task \`12\` review` entry; findings (3) and (4) remain
+filed follow-up candidates, untouched, per the fix-required scope. This was the final task in the
+12-task Skills batch — the batch is now fully closed.

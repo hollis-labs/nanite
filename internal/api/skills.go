@@ -473,28 +473,37 @@ func (a *API) handleSyncSkill(w http.ResponseWriter, r *http.Request) {
 // A parallel /grant sub-route keeps this security-sensitive action behind
 // its own explicit, single-purpose endpoint instead.
 //
-// Access-control note (flagged explicitly by two independent prior
-// reviewers in this batch — task 10's and task 11's own review notes, both
-// in TASKS/ESCALATIONS.md): this codebase's REST API has exactly ONE
-// caller-authentication mechanism anywhere — internal/server's optional,
-// coarse HTTP Basic Auth (NANITE_AUTH_USER/PASSWORD; a no-op "local dev
-// mode" when unset, per basicAuthMiddleware's own doc comment), gating the
-// WHOLE /api/ surface as a single on/off switch, not anything specific to
-// agent-mutating endpoints. There is no per-caller-identity/permission
-// check anywhere in internal/api deciding WHO may mutate a given agent's
-// records. requireMutableAgent (agent_capabilities.go) — reused below for
-// consistency with every sibling agent-mutating endpoint (known-tools,
-// known-skills, procedures, knowledge seeds) — gates WHICH agent record
-// may be mutated (a managed/editable profile vs. an embedded/plugin/
-// vendor-owned one), not WHO the caller is. This handler follows that one
-// real, existing convention because it is the only one this codebase's
-// agent-mutating endpoints have ever had; it does not, and structurally
-// cannot, add caller-identity-based access control that has no precedent
-// anywhere else in this API. Flagging this explicitly per this task's own
-// instruction rather than silently assuming it's fine: granting a skill
-// capability over REST is now reachable by anything that can reach this
-// process's HTTP port at all, exactly as every other agent-mutating
-// endpoint already is.
+// Access-control note (flagged explicitly per this task's own instruction
+// to note rather than silently assume it's fine): this codebase's REST API
+// has exactly ONE caller-authentication mechanism gating the whole /api/
+// surface — internal/server's optional, coarse HTTP Basic Auth
+// (NANITE_AUTH_USER/PASSWORD; a no-op "local dev mode" when unset, per
+// basicAuthMiddleware's own doc comment) — a single on/off switch for
+// whether anyone unauthenticated may call at all, not anything specific to
+// agent-mutating endpoints. No comparable agent-mutating endpoint in this
+// codebase (internal/api/agent_capabilities.go, internal/api/agents.go)
+// gates on caller identity either: every one of them, including
+// requireMutableAgent (agent_capabilities.go, reused below for consistency
+// with every sibling agent-mutating endpoint — known-tools, known-skills,
+// procedures, knowledge seeds) — gates only on WHICH agent record may be
+// mutated (a managed/editable profile vs. an embedded/plugin/vendor-owned
+// one), never on WHO the caller is. This handler follows that same
+// convention rather than inventing new access control that has no
+// precedent among its siblings.
+//
+// Note: internal/server/caller_identity.go's callerIdentityMiddleware IS a
+// real, wired-in caller-identity mechanism — internal/messaging's own authz
+// checks (Inbox caller-match, Thread participant filter, Ack/Resolve
+// recipient check, UnreadCount caller-match), consumed via
+// internal/api/messaging.go's handlers, already rely on it. It is simply
+// never applied to agent-mutation endpoints (this file,
+// agent_capabilities.go, agents.go). So the accurate statement is not "no
+// per-caller-identity access-control convention exists anywhere in this
+// codebase" — it is "the one that exists was never extended to
+// agent-mutating endpoints." The practical consequence is unchanged:
+// granting a skill capability over REST is reachable by anything that can
+// reach this process's HTTP port at all, exactly as every other
+// agent-mutating endpoint already is.
 
 // handleGrantAgentSkill implements POST /api/agents/{id}/skills/{slug}/grant
 // — the real assign-with-approval action: ApprovedContentHash is always

@@ -19,6 +19,7 @@ import (
 	"testing"
 
 	"github.com/hollis-labs/nanite/internal/selftools"
+	"github.com/hollis-labs/nanite/internal/skillvendor"
 	"github.com/hollis-labs/nanite/internal/store"
 )
 
@@ -142,6 +143,64 @@ func TestHandleDeleteSkill_RealUninstall(t *testing.T) {
 	w2 := deleteJSON(t, mux, "/api/skills/"+installed.Skill.Slug)
 	if w2.Code != http.StatusNotFound {
 		t.Fatalf("DELETE again: expected 404, got %d; body: %s", w2.Code, w2.Body.String())
+	}
+}
+
+// TestHandleDeleteSkill_TypedNilVendor_ClearErrorNotPanic exercises
+// handleDeleteSkill's typed-nil guard for real, through the actual REST call
+// path — TASKS/skills/12's fix-required item 2. a.Services.SkillVendor is
+// declared as a concrete *skillvendor.Store, not an interface; assigning a
+// nil value of that concrete type (as an unwired container or a test
+// harness that never sets the field would produce) is a genuinely typed
+// nil, distinct from an untyped `nil` literal handed straight to
+// skillinstall.Uninstaller{Vendor: nil} the way
+// TestUninstall_ContentHashSetButVendorNil_ClearErrorNotPanic
+// (internal/skillinstall/uninstall_test.go) does. Without
+// handleDeleteSkill's "var vendor skillinstall.UninstallVendorer; if
+// a.Services.SkillVendor != nil { vendor = a.Services.SkillVendor }" guard,
+// assigning a.Services.SkillVendor directly into the UninstallVendorer
+// interface field would wrap this nil *skillvendor.Store in a non-nil
+// interface value, defeating Uninstaller's own "u.Vendor == nil" check and
+// causing a nil-pointer panic inside skillvendor.(*Store).Delete (which
+// dereferences its receiver's root field immediately). This test proves the
+// guard is genuinely in effect: a skill with a real ContentHash, deleted
+// while SkillVendor is a typed nil, must come back as a clean error
+// response, never a panic.
+func TestHandleDeleteSkill_TypedNilVendor_ClearErrorNotPanic(t *testing.T) {
+	a, mux := newSkillsTestAPI(t)
+
+	installed := decodeInstallResponse(t, postSkillJSON(t, mux, "/api/skills/install", map[string]string{
+		"path": skillFixture(t, "sample-skill"),
+	}))
+	if installed.Skill.ContentHash == "" {
+		t.Fatal("expected the installed skill to have a non-empty ContentHash")
+	}
+
+	// Simulate an unwired-but-present vendor field: a genuinely typed nil
+	// (*skillvendor.Store)(nil), not merely an absent/zero-value interface.
+	var nilVendor *skillvendor.Store
+	a.Services.SkillVendor = nilVendor
+
+	w := deleteJSON(t, mux, "/api/skills/"+installed.Skill.Slug)
+	if w.Code == 0 {
+		t.Fatal("handler did not write a response — likely panicked")
+	}
+	if w.Code == http.StatusOK {
+		t.Fatalf("expected a clean error, not a successful delete, with a typed-nil vendor; got 200: %s", w.Body.String())
+	}
+	if msg := decodeErrorMessage(t, w); msg == "" {
+		t.Errorf("expected a non-empty error message, got status %d with empty body", w.Code)
+	}
+
+	// The index row must be left intact — a failed vendor-deletion attempt
+	// aborts the whole call rather than deleting the index row anyway,
+	// matching Uninstaller's own vendor-before-index ordering contract.
+	got, err := a.Services.Store.GetSkillBySlug(installed.Skill.Slug)
+	if err != nil {
+		t.Fatalf("GetSkillBySlug: %v", err)
+	}
+	if got == nil {
+		t.Error("expected the index row to still exist after an aborted uninstall")
 	}
 }
 

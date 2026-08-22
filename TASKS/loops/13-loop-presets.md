@@ -1,7 +1,7 @@
 # Presets — Go-coded `LoopPreset` registry, `ralph` built end-to-end
 
 **Phase:** 4 — Presets (`TASKS/loops`)
-**Status:** implemented
+**Status:** reviewed
 **Depends on:** `07-loop-continuation-policy.md`, `08-loop-engine-core.md`,
 `10-loop-launcher-and-api.md`
 **Touches:** new `internal/loop/presets.go`.
@@ -258,4 +258,31 @@ No `git stash`/`git stash pop` was run at any point (only a read-only `git stash
 confirm no stash was ever touched by this session).
 
 ## Review notes
-<Reviewer fills this in: pass/fail, what was checked, anything fixed and how.>
+
+PASS. Every claim in this task's own Work Log independently re-verified against actual code,
+not just doc comments: `decide.go`'s branch-3 guard (`MaxNoProgressIterations > 0 && streak
+>=`) confirmed to make `0` a structural, not probabilistic, guarantee; `classifyIterationProgress`
+confirmed to make `NO_PROGRESS` combinatorially unreachable for Ralph's one-step-no-verify
+shape; `decideByReasoning`'s Provider/Model check confirmed to fail loudly (a real error, not
+a panic or silent misbehavior) if a caller ever raised `MaxNoProgressIterations` above 0
+without a real `ContinuationPolicy`; the `{{input.*}}` templating chain traced end-to-end from
+`LoopInput.WorkflowParams` through `loopRunPersistentConfig` to each iteration's own
+`WorkflowInput.Params`, confirmed fresh-resolved per iteration, not cached; the idempotent-
+registration guard confirmed load-bearing against `Registry.Register`'s real duplicate-name
+error; the collision check independently re-run and confirmed accurate (no real
+`WorkflowDefinition` name collision with any of the seven preset names); stub-vs-placeholder
+ordering confirmed correct (`implemented()` checked before any registry call);
+`isZeroContinuationPolicy` confirmed to check all five real fields. All 7 new tests re-run
+individually and confirmed genuine (real SQLite-backed engine execution, not no-ops), including
+both halves of the required two-case Ralph termination test reaching genuinely different
+terminal states. No architecture drift (no `LoopPresetEngine`-style over-abstraction; presets
+stay pure data per the design doc's own "no per-preset engine" framing) and no eliminated-
+pattern regression (no silent fail-open, no hardcoded-value duplication, feature genuinely
+reachable via the real `/api/loops` REST surface, not just internal Go callers).
+
+`go build ./cmd/nanite/`: exit 0. `go vet ./...`: exit 1, only the same pre-existing,
+unrelated `internal/service/container.go` findings (confirmed via `git log` to predate this
+task's commits). `go test -count=1 ./...`: exit 0, zero `FAIL`/`panic` across the full suite,
+real exit codes throughout, never piped/masked.
+
+This closes out the entire `TASKS/loops` batch — all 13 tasks across 4 phases now `reviewed`.

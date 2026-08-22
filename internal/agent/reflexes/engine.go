@@ -186,9 +186,22 @@ func (e *Engine) EvaluateState(ctx context.Context, agentID, agentClass string, 
 	// affect the query itself — Store.ListAgentReflexesForAgent still
 	// returns dispatch_to_agent rows; the dedicated call sites above share
 	// that same query and need them.
+	//
+	// TASKS/loops/11-loop-event-predicate-trigger.md: resume_loop_run rows
+	// are filtered out here for the identical reason, not merely a similar
+	// one — Executor.Apply's resume_loop_run case (executor.go) is also a
+	// documented no-op, because the real effect (LoopEngine.Resume) needs
+	// internal/loop, which this package cannot import without cycling
+	// through internal/service back to this package. resume_loop_run's own
+	// real evaluation cadence is internal/service/loop_resume_reflex.go's
+	// EvaluateLoopRunResumeReflexes (a dedicated call site, mirroring
+	// attemptReflexDispatch), driven in practice by a scheduled tick, not
+	// this per-turn pass — see that task's Work Log for why the per-turn
+	// pass is structurally the wrong cadence for this kind (a WAIT-parked
+	// LoopRun routinely has no live chat turn to piggyback on).
 	candidates := make([]store.AgentReflex, 0, len(reflexRows))
 	for _, r := range reflexRows {
-		if r.ActionKind == store.ReflexActionDispatchToAgent {
+		if r.ActionKind == store.ReflexActionDispatchToAgent || r.ActionKind == store.ReflexActionResumeLoopRun {
 			continue
 		}
 		candidates = append(candidates, r)

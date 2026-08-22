@@ -58,8 +58,16 @@ func TestMigrate124SeedsTaxonomyLookupTables(t *testing.T) {
 		t.Errorf("reflex_provenance_tiers = %v, want %v", tiers, wantTiers)
 	}
 
-	// reflex_action_kinds: exactly six rows, matching the design doc's
-	// per-kind reclassification table byte-for-byte.
+	// reflex_action_kinds: exactly six rows as of migration 124 itself,
+	// matching the design doc's per-kind reclassification table
+	// byte-for-byte. This test runs against the fully-migrated live
+	// schema (newTestStore applies every migration, not just 124 in
+	// isolation), so the row count below is 124's own six plus every
+	// action kind a later migration has since added — currently just
+	// TASKS/loops/11-loop-event-predicate-trigger.md's resume_loop_run
+	// (migration 142_agent_reflex_resume_loop_run.sql). Bump this count
+	// (and wantKinds below) again the next time a migration adds another
+	// action kind.
 	wantKinds := map[string]ReflexActionKind{
 		"inject_reminder":   {Name: "inject_reminder", Category: "system_message", CombiningAlgorithm: "all_applicable", DefaultRecurrenceSeconds: nil},
 		"force_tool_choice": {Name: "force_tool_choice", Category: "system_message", CombiningAlgorithm: "first_applicable", DefaultRecurrenceSeconds: nil},
@@ -69,13 +77,14 @@ func TestMigrate124SeedsTaxonomyLookupTables(t *testing.T) {
 	}
 	zero := int64(0)
 	wantKinds["dispatch_to_agent"] = ReflexActionKind{Name: "dispatch_to_agent", Category: "execute_action", CombiningAlgorithm: "first_applicable", DefaultRecurrenceSeconds: &zero}
+	wantKinds["resume_loop_run"] = ReflexActionKind{Name: "resume_loop_run", Category: "execute_action", CombiningAlgorithm: "all_applicable", DefaultRecurrenceSeconds: &zero}
 
 	var kindCount int
 	if err := s.DB.QueryRowContext(ctx, `SELECT COUNT(*) FROM reflex_action_kinds`).Scan(&kindCount); err != nil {
 		t.Fatalf("count reflex_action_kinds: %v", err)
 	}
-	if kindCount != 6 {
-		t.Fatalf("reflex_action_kinds row count = %d, want 6", kindCount)
+	if kindCount != 7 {
+		t.Fatalf("reflex_action_kinds row count = %d, want 7", kindCount)
 	}
 
 	for name, want := range wantKinds {

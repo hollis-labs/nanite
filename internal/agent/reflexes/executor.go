@@ -132,6 +132,28 @@ func (e *Executor) Apply(ctx context.Context, reflex store.AgentReflex, state St
 		// fire, and bumped fired_count/emitted plugin hooks for a dispatch
 		// that never actually happened.
 		return applied, nil
+	case store.ReflexActionResumeLoopRun:
+		// TASKS/loops/11-loop-event-predicate-trigger.md -- same shape as
+		// ReflexActionDispatchToAgent immediately above, and for the
+		// identical reason: the real effect (calling
+		// internal/loop.LoopEngine.Resume) needs a subsystem this package
+		// deliberately does not depend on (internal/loop imports
+		// internal/service, which imports this package -- a direct
+		// internal/agent/reflexes -> internal/loop import would cycle).
+		// applied.Spec already carries the parsed action_spec
+		// (loop_run_id) from the generic unmarshal at the top of this
+		// function -- no extra parsing needed here. The real resume call
+		// happens in internal/service/loop_resume_reflex.go's
+		// EvaluateLoopRunResumeReflexes, a dedicated call site (mirroring
+		// attemptReflexDispatch, chat_reflex_dispatch.go) that calls
+		// Resolve() itself and then, for whichever candidate fires, calls
+		// a LoopRunResumer (backed by *loop.LoopEngine) directly -- not
+		// through this no-op. Engine.EvaluateState (engine.go) filters
+		// resume_loop_run out of its own candidate list before Resolve()
+		// ever sees it, for the same "no-op treated as a real fire would
+		// falsely bump fired_count / emit telemetry" reason Phase 4 item
+		// 09 fixed for dispatch_to_agent.
+		return applied, nil
 	default:
 		return applied, fmt.Errorf("unknown action_kind %q", reflex.ActionKind)
 	}

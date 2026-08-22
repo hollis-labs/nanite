@@ -2334,8 +2334,11 @@ func (st *SelfToolsTransport) callBackgroundStatus(_ context.Context, args map[s
 		return mcp.ErrorResult("job_id is required"), nil
 	}
 	res, err := st.Background.Result(jobID)
-	if err != nil {
+	if err != nil && !errors.Is(err, background.ErrExpiredJob) {
 		return mcp.ErrorResult(fmt.Sprintf("background status: %v", err)), nil
+	}
+	if errors.Is(err, background.ErrExpiredJob) && res.Error == "" {
+		res.Error = err.Error()
 	}
 	data, err := json.Marshal(res)
 	if err != nil {

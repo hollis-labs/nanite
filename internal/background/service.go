@@ -2,6 +2,10 @@ package background
 
 import (
 	"context"
+	"crypto/hmac"
+	"crypto/rand"
+	"crypto/sha256"
+	"encoding/base64"
 	"fmt"
 	"log/slog"
 	"sort"
@@ -54,7 +58,7 @@ type Service struct {
 
 	mu          sync.Mutex
 	jobs        map[string]*jobRecord
-	jobIDPrefix string
+	jobIDSecret [sha256.Size]byte
 	retention   completedJobRetention
 }
 
@@ -71,6 +75,7 @@ type completedJobRetention struct {
 const (
 	defaultCompletedJobTTL          = 24 * time.Hour
 	defaultMaxRetainedCompletedJobs = 100
+	jobIDTokenVersion               = "bg1"
 )
 
 // SenderAgentID is the canonical from_agent_id stamped on the
@@ -101,9 +106,20 @@ func newServiceWithRetention(backend Backend, messenger Messenger, retention com
 		messenger:     messenger,
 		senderAgentID: SenderAgentID,
 		jobs:          make(map[string]*jobRecord),
-		jobIDPrefix:   uuid.NewString(),
+		jobIDSecret:   newJobIDSecret(),
 		retention:     retention,
 	}
+}
+
+func newJobIDSecret() [sha256.Size]byte {
+	var secret [sha256.Size]byte
+	if _, err := rand.Read(secret[:]); err != nil {
+		// NewService cannot return an error without breaking its public API.
+		// Continuing without a secret would collapse expired-vs-unknown
+		// integrity, so fail closed during construction instead.
+		panic(fmt.Sprintf("background: generate job id secret: %v", err))
+	}
+	return secret
 }
 
 // Submit validates that pattern is PatternBackground (D5 gate),
@@ -143,7 +159,7 @@ func (svc *Service) Submit(ctx context.Context, pattern classify.ExecutionPatter
 
 	svc.mu.Lock()
 	svc.pruneCompletedLocked(svc.now())
-	jobID := svc.jobIDPrefix + ":" + uuid.NewString()
+	jobID := svc.newJobID()
 	svc.jobs[jobID] = &jobRecord{
 		id:     jobID,
 		req:    req,
@@ -287,10 +303,11 @@ func (svc *Service) now() time.Time {
 }
 
 // missingJobResultLocked distinguishes an evicted job from an arbitrary id
-// without retaining an unbounded tombstone map. Job ids carry a random,
-// per-Service prefix; any absent id bearing this instance's unguessable prefix
-// was issued here and has since left the registry. The suffix stays opaque to
-// callers and preserves the process-restart boundary of this in-memory API.
+// without retaining an unbounded tombstone map. Job ids carry an HMAC made
+// with a random per-Service secret, so an absent authenticated id was issued by
+// this Service and has since left the registry. The secret is never present in
+// the token, and replacing the Service establishes the in-memory restart
+// boundary: tokens from an earlier instance no longer authenticate.
 func (svc *Service) missingJobResultLocked(jobID string) (JobStatus, error) {
 	if svc.isIssuedJobIDLocked(jobID) {
 		return StatusExpired, ErrExpiredJob
@@ -299,12 +316,39 @@ func (svc *Service) missingJobResultLocked(jobID string) (JobStatus, error) {
 }
 
 func (svc *Service) isIssuedJobIDLocked(jobID string) bool {
-	prefix, suffix, ok := strings.Cut(jobID, ":")
-	if !ok || prefix != svc.jobIDPrefix {
+	version, remainder, ok := strings.Cut(jobID, ":")
+	if !ok || version != jobIDTokenVersion {
 		return false
 	}
-	_, err := uuid.Parse(suffix)
-	return err == nil
+	nonceText, tagText, ok := strings.Cut(remainder, ":")
+	if !ok || strings.Contains(tagText, ":") {
+		return false
+	}
+	nonce, err := uuid.Parse(nonceText)
+	if err != nil || nonce.String() != nonceText {
+		return false
+	}
+	if len(tagText) != base64.RawURLEncoding.EncodedLen(sha256.Size) {
+		return false
+	}
+	tag, err := base64.RawURLEncoding.DecodeString(tagText)
+	if err != nil || len(tag) != sha256.Size {
+		return false
+	}
+	payload := version + ":" + nonceText
+	return hmac.Equal(tag, svc.signJobID(payload))
+}
+
+func (svc *Service) newJobID() string {
+	payload := jobIDTokenVersion + ":" + uuid.NewString()
+	tag := base64.RawURLEncoding.EncodeToString(svc.signJobID(payload))
+	return payload + ":" + tag
+}
+
+func (svc *Service) signJobID(payload string) []byte {
+	mac := hmac.New(sha256.New, svc.jobIDSecret[:])
+	_, _ = mac.Write([]byte(payload))
+	return mac.Sum(nil)
 }
 
 // pruneCompletedLocked applies TTL first, then evicts the oldest completed

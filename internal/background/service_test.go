@@ -566,6 +566,68 @@ func TestCompletedJobRetention_HardCapEvictsOldestCompleted(t *testing.T) {
 	}
 }
 
+func TestCompletedJobRetention_ForgedSuffixWithObservedTokenIsUnknown(t *testing.T) {
+	svc, backend, _, clock := newRetentionTestService(0, time.Hour)
+	id := submitRetentionJob(t, svc)
+	completeRetentionJob(backend, clock, id, "done")
+	assertExpiredJob(t, svc, id)
+
+	parts := strings.Split(id, ":")
+	if len(parts) < 2 {
+		t.Fatalf("issued job id %q has no replaceable nonce segment", id)
+	}
+	parts[1] = "00000000-0000-4000-8000-000000000000"
+	forgedID := strings.Join(parts, ":")
+	if forgedID == id {
+		parts[1] = "00000000-0000-4000-8000-000000000001"
+		forgedID = strings.Join(parts, ":")
+	}
+	assertUnknownJob(t, svc, forgedID)
+}
+
+func TestCompletedJobRetention_AlteredAuthenticationTagIsUnknown(t *testing.T) {
+	svc, backend, _, clock := newRetentionTestService(0, time.Hour)
+	id := submitRetentionJob(t, svc)
+	completeRetentionJob(backend, clock, id, "done")
+
+	parts := strings.Split(id, ":")
+	if len(parts) != 3 || parts[2] == "" {
+		t.Fatalf("issued job id %q does not contain the expected authentication tag", id)
+	}
+	if parts[2][0] == 'A' {
+		parts[2] = "B" + parts[2][1:]
+	} else {
+		parts[2] = "A" + parts[2][1:]
+	}
+	assertUnknownJob(t, svc, strings.Join(parts, ":"))
+}
+
+func TestCompletedJobRetention_MalformedTokensAreUnknown(t *testing.T) {
+	svc, _, _, _ := newRetentionTestService(0, time.Hour)
+	for _, jobID := range []string{
+		"",
+		"bg1",
+		"bg1:not-a-uuid:not-a-tag",
+		"bg1:00000000-0000-4000-8000-000000000000",
+		"bg1:00000000-0000-4000-8000-000000000000:not-base64!",
+		"bg1:00000000-0000-4000-8000-000000000000:AA:extra",
+	} {
+		t.Run(jobID, func(t *testing.T) {
+			assertUnknownJob(t, svc, jobID)
+		})
+	}
+}
+
+func TestCompletedJobRetention_PreviousServiceTokenIsUnknown(t *testing.T) {
+	oldService, backend, _, clock := newRetentionTestService(0, time.Hour)
+	id := submitRetentionJob(t, oldService)
+	completeRetentionJob(backend, clock, id, "done")
+	assertExpiredJob(t, oldService, id)
+
+	newService, _, _, _ := newRetentionTestService(0, time.Hour)
+	assertUnknownJob(t, newService, id)
+}
+
 func TestCompletedJobRetention_NeverEvictsActiveJob(t *testing.T) {
 	svc, backend, _, clock := newRetentionTestService(1, time.Minute)
 	activeID := submitRetentionJob(t, svc)
@@ -604,5 +666,17 @@ func TestCompletedJobRetention_LateDuplicateCompletionAfterEvictionIsSafe(t *tes
 	assertExpiredJob(t, svc, id)
 	if got := len(messenger.captured()); got != 1 {
 		t.Fatalf("completion envelopes = %d; want 1 after late duplicate", got)
+	}
+}
+
+func assertUnknownJob(t *testing.T, svc *Service, id string) {
+	t.Helper()
+	status, err := svc.Status(id)
+	if status != "" || !errors.Is(err, ErrUnknownJob) {
+		t.Fatalf("Status(%q) = (%q, %v); want empty status and ErrUnknownJob", id, status, err)
+	}
+	result, err := svc.Result(id)
+	if result != (JobResult{}) || !errors.Is(err, ErrUnknownJob) {
+		t.Fatalf("Result(%q) = (%+v, %v); want zero result and ErrUnknownJob", id, result, err)
 	}
 }

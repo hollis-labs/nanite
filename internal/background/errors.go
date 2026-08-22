@@ -2,8 +2,10 @@ package background
 
 import "errors"
 
-// ErrUnknownJob is returned by Backend.Status / Service.Status when
-// the queried job id was never issued by this service instance.
+// ErrUnknownJob is returned by Backend.Status when the backend has no active
+// process record. Service.Status and Service.Result use it more narrowly when
+// the queried id cannot be authenticated as one this Service instance issued;
+// an authenticated id whose retained result was evicted returns ErrExpiredJob.
 // Idempotent Cancel returns nil for unknown ids.
 var ErrUnknownJob = errors.New("background: unknown job id")
 

@@ -144,10 +144,10 @@ Direction A carries real risk of evicting a job result before a caller has polle
   injectable through an unexported test constructor, so TTL and count behavior
   are deterministic without sleeps.
 - `Status` and `Result` now distinguish eviction from a never-issued id with
-  `StatusExpired` plus `ErrExpiredJob`. Issued ids carry a random per-service
-  prefix, which lets missing ids be classified without replacing the bounded
-  result registry with an unbounded tombstone map. The `background_status`
-  tool description includes the new state/error contract.
+  `StatusExpired` plus `ErrExpiredJob`. Issued ids carry a per-Service
+  HMAC-authenticated token, which lets missing ids be classified without
+  replacing the bounded result registry with an unbounded tombstone map. The
+  `background_status` tool description includes the new state/error contract.
 - Caller trace: production constructs exactly one `Service`/`PTYBackend` pair
   in `internal/service/container.go`; the `background_job` and
   `background_status` self-tools call `Service.Submit` and `Service.Result`.
@@ -166,11 +166,27 @@ Direction A carries real risk of evicting a job result before a caller has polle
   active jobs, late/duplicate completion after eviction, and backend process
   record cleanup. Pre-fix proof: the new backend cleanup regression failed with
   `completed backend job remains retained` before the production change.
-- Verification: `go build ./internal/background/...`,
-  `go vet ./internal/background/...`, and
-  `go test -race ./internal/background/... -count=1 -v` pass; focused
-  `internal/selftools` compilation passes; full `go build ./cmd/nanite/`,
-  `go vet ./...`, and `go test ./...` pass.
+- Verification: targeted authenticated-token and production self-tool
+  regressions pass under `-race -count=20`; `go build`/`go vet` for
+  `internal/background/...` and `internal/selftools/...`, full
+  `go test -race ./internal/background/...`, and full
+  `go test ./internal/selftools/...` pass. Repository baselines
+  `go build ./cmd/nanite/`, `go vet ./...`, and `go test ./...` pass. After a
+  final allocation-bounding parser refinement, focused race/build/vet checks
+  were rerun on the final diff; repeating the broad service-containing suite
+  was deferred to keep the isolated `04/03` timing investigation uncontended.
+- 2026-08-22 review correction: the per-Service prefix was disclosed in every
+  returned id, so a caller could combine that prefix with any valid UUID and
+  make a never-issued id read as expired. Replaced it with a versioned UUID
+  token authenticated by HMAC-SHA-256 under a random secret held only by the
+  Service. Missing valid tokens still classify as expired without tombstones;
+  altered suffixes/tags, malformed values, and tokens from an earlier Service
+  instance classify as unknown. Verification uses constant-time `hmac.Equal`.
+- The production `background_status` handler now preserves `ErrExpiredJob` as
+  a normal structured terminal result (`status=expired`, with the expiry text
+  in `error`) instead of discarding the typed result as an MCP tool error.
+  Unknown ids remain tool errors. Focused regressions reproduced both review
+  failures before the correction and cover the public self-tool surface.
 
 ## Review notes
 

@@ -91,6 +91,19 @@ type ExecResult struct {
 	Stderr   string `json:"stderr"`
 	ExitCode int    `json:"exit_code"`
 	TimedOut bool   `json:"timed_out"`
+
+	// SandboxIsolated reports whether real OS-level sandbox isolation
+	// (seatbelt on darwin, bwrap on linux) was actually applied to this
+	// execution. Always true on darwin (sandbox-exec ships with the OS)
+	// and true on linux whenever bwrap was found. False ONLY when the
+	// platform's isolation tool was unavailable AND the operator
+	// explicitly opted in to degraded execution via
+	// NANITE_ALLOW_UNSANDBOXED_AGENT_EXEC=1 — by default (AD-01,
+	// TASKS/audit-remediation/ARCHITECT-DECISIONS.md), a missing
+	// isolation tool is a hard error and AgentExec/UserExec never return
+	// an ExecResult at all, so this field can never silently read "true
+	// shaped" for an unsandboxed run. See internal/sandbox/degraded.go.
+	SandboxIsolated bool `json:"sandbox_isolated"`
 }
 
 // AgentExec runs a command in the agent sandbox with full isolation:
@@ -117,16 +130,23 @@ func AgentExec(opts AgentExecOpts) (*ExecResult, error) {
 
 	// 4. Start network proxy if domains are allowed.
 	var proxy *Proxy
+	var proxyAddr string
 	if len(opts.NetworkAllow) > 0 {
 		proxy = NewProxy(opts.NetworkAllow)
 		if err := proxy.Start(); err != nil {
 			return nil, fmt.Errorf("sandbox: start proxy: %w", err)
 		}
 		defer proxy.Stop()
+		proxyAddr = proxy.Addr
 
 		// Inject proxy env vars so sandboxed tools (curl, wget, pip, npm, go)
-		// route traffic through the allowlisted proxy.
-		proxyURL := "http://" + proxy.Addr
+		// route traffic through the allowlisted proxy. AD-02
+		// (TASKS/audit-remediation/ARCHITECT-DECISIONS.md): on linux this
+		// address is reachable from inside the sandbox's own (now always
+		// unshared) network namespace via the netns bridge applyOSSandbox
+		// wires below — see netns_bridge_linux.go. These env vars need no
+		// change; they already point at the right host:port.
+		proxyURL := "http://" + proxyAddr
 		env = append(env,
 			"HTTP_PROXY="+proxyURL,
 			"HTTPS_PROXY="+proxyURL,
@@ -154,8 +174,14 @@ func AgentExec(opts AgentExecOpts) (*ExecResult, error) {
 	}
 	cmd.Env = env
 
-	// Apply OS-level sandbox (no-op on unsupported platforms).
-	cleanup, err := applyOSSandbox(cmd, sandboxDir, opts.WorkingDir, opts.NetworkAllow)
+	// Apply OS-level sandbox. AD-01 (TASKS/audit-remediation/
+	// ARCHITECT-DECISIONS.md): on Linux without bwrap and on platforms
+	// with no OS sandbox at all, this now returns a non-nil error by
+	// default (fail closed) instead of silently succeeding unsandboxed —
+	// unless the operator opted in via NANITE_ALLOW_UNSANDBOXED_AGENT_EXEC,
+	// in which case it succeeds with isolated=false and this function
+	// still surfaces that on the returned ExecResult.
+	cleanup, isolated, err := applyOSSandbox(cmd, sandboxDir, opts.WorkingDir, opts.NetworkAllow, proxyAddr)
 	if err != nil {
 		return nil, fmt.Errorf("sandbox: os-level setup: %w", err)
 	}
@@ -169,7 +195,11 @@ func AgentExec(opts AgentExecOpts) (*ExecResult, error) {
 	// stdio pipe.
 	setProcessGroupKill(cmd)
 
-	return runCmd(ctx, cmd, timeout)
+	result, runErr := runCmd(ctx, cmd, timeout)
+	if result != nil {
+		result.SandboxIsolated = isolated
+	}
+	return result, runErr
 }
 
 // UserExec runs a user-initiated command with guardrails: denylist enforcement
@@ -198,19 +228,34 @@ func UserExec(opts UserExecOpts) (*ExecResult, error) {
 
 	// Apply OS-level sandbox when requested (session/ask modes). UserExec
 	// already runs in the user's chosen directory; no extra write-allow
-	// path is needed because opts.Dir is itself the writable root.
+	// path is needed because opts.Dir is itself the writable root. UserExec
+	// never configures a network allowlist, so proxyAddr is always empty —
+	// the AD-02 netns bridge never engages here.
+	//
+	// AD-01: when opts.Sandboxed is true and the platform's isolation tool
+	// is unavailable, this now fails closed by default (see AgentExec's
+	// comment above for the full policy). When opts.Sandboxed is false
+	// (YOLO mode), applyOSSandbox is never called at all — that is an
+	// explicit, already-disclosed user opt-out, a different case in kind
+	// from a silent degradation, per this task's own scope notes.
+	var isolated bool
 	if opts.Sandboxed {
-		cleanup, err := applyOSSandbox(cmd, opts.Dir, "", nil)
+		cleanup, isolatedVerdict, err := applyOSSandbox(cmd, opts.Dir, "", nil, "")
 		if err != nil {
 			return nil, fmt.Errorf("sandbox: os-level setup: %w", err)
 		}
 		defer cleanup()
+		isolated = isolatedVerdict
 	}
 
 	// See AgentExec: process group + signal cascade to reap grandchildren.
 	setProcessGroupKill(cmd)
 
-	return runCmd(ctx, cmd, timeout)
+	result, runErr := runCmd(ctx, cmd, timeout)
+	if result != nil {
+		result.SandboxIsolated = isolated
+	}
+	return result, runErr
 }
 
 // runCmd executes a command and captures stdout/stderr with size limits.

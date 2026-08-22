@@ -3,12 +3,35 @@ package mcp
 import (
 	"context"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strings"
 	"testing"
 	"time"
 )
+
+// skipIfNoOSSandbox skips a test on Linux when bwrap is unavailable and the
+// AD-01 degraded-mode opt-in (TASKS/audit-remediation/
+// ARCHITECT-DECISIONS.md) is not set. sandbox.AgentExec now fails closed by
+// default in that case (previously it silently fell back to Tier 1 only —
+// the exact GO-SEC4-001 finding this fix closes), so dev_bash/code_execute
+// tests that exercise a real command through the sandbox need this guard
+// the same way internal/sandbox's own exec_test.go does. darwin (seatbelt
+// always present) and a Linux host WITH bwrap installed are unaffected.
+func skipIfNoOSSandbox(t *testing.T) {
+	t.Helper()
+	if runtime.GOOS != "linux" {
+		return
+	}
+	switch strings.ToLower(strings.TrimSpace(os.Getenv("NANITE_ALLOW_UNSANDBOXED_AGENT_EXEC"))) {
+	case "1", "true", "yes":
+		return
+	}
+	if _, err := exec.LookPath("bwrap"); err != nil {
+		t.Skip("bwrap not installed and NANITE_ALLOW_UNSANDBOXED_AGENT_EXEC not set — sandbox.AgentExec now fails closed (AD-01); see internal/sandbox/os_linux_test.go for the dedicated fail-closed/degraded regression tests")
+	}
+}
 
 func tempDevTools(t *testing.T) (*DevToolsTransport, string) {
 	t.Helper()
@@ -28,6 +51,7 @@ func TestDevBash_Execute(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("bash tests require unix shell")
 	}
+	skipIfNoOSSandbox(t)
 	dt, _ := tempDevTools(t)
 	result, err := dt.CallTool(context.Background(), "dev_bash", map[string]any{
 		"command": "echo hello world",

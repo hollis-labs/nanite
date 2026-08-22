@@ -1,7 +1,7 @@
 # Sandbox must not silently degrade to unisolated execution when `bwrap` is absent on Linux
 
 **Phase:** Wave 1 — Release-blocking trust boundaries (per remediation guide §4)
-**Status:** not-started
+**Status:** implemented
 **Depends on:** none within this batch (sequencing note: this task's outcome — whether
 `ExecResult`/`AgentExec` grows an observable "sandbox applied" signal — is a natural
 prerequisite for anything in `08-remaining-security-hardening/` or future work that wants
@@ -518,32 +518,402 @@ Observable behavior required for PASS:
 
 ### Done means
 
-- [ ] Architect decision recorded (Option A or B for GO-SEC4-001; enforce or
+- [x] Architect decision recorded (Option A or B for GO-SEC4-001; enforce or
       document for GO-SEC4-002) before implementation begins.
-- [ ] `applyOSSandbox` on Linux no longer returns a success-shaped result
+- [x] `applyOSSandbox` on Linux no longer returns a success-shaped result
       when `bwrap` is absent without an explicit, observable signal
       distinguishing that outcome from real isolation (per whichever option
       was chosen).
-- [ ] GO-SEC4-002's network-allowlist gap is either enforced at the
+- [x] GO-SEC4-002's network-allowlist gap is either enforced at the
       namespace level or explicitly, visibly documented/gated as a
       reduced-guarantee mode — not left as an undisclosed assumption.
-- [ ] GO-SEC4-006's denylist is either meaningfully hardened or explicitly
+- [x] GO-SEC4-006's denylist is either meaningfully hardened or explicitly
       reframed in code comments/docs as advisory/defense-in-depth, not
       described as a real security boundary it isn't.
-- [ ] All four production callers (`dev_bash`, `code_execute`, `ShellStep`,
+- [x] All four production callers (`dev_bash`, `code_execute`, `ShellStep`,
       `handleShellExec`) build, pass existing tests, and correctly handle
       the new signal/error shape.
-- [ ] New regression tests exist for: bwrap-present vs. bwrap-absent
+- [x] New regression tests exist for: bwrap-present vs. bwrap-absent
       producing observably different outcomes; the network-allowlist
       decision; the denylist decision.
-- [ ] `go build ./...`, `go vet ./...`, `go test ./...`, and
+- [x] `go build ./...`, `go vet ./...`, `go test ./...`, and
       `go test -race ./internal/sandbox/...` all pass.
-- [ ] The prior silent-fallback behavior is provably unreachable (a test
-      exists that would fail if it regressed).
+- [x] The prior silent-fallback behavior is provably unreachable (a test
+      exists that would fail if it regressed — and, more strongly, the old
+      two-return-value success shape can no longer even compile against
+      `applyOSSandbox`'s new three-return signature).
 
 ## Work log
 
-<Worker fills this in.>
+**Status: implemented.**
+
+### Summary
+
+Implemented both AD-01 (fail closed on missing `bwrap`/no-OS-sandbox
+platform, with an explicit `NANITE_ALLOW_UNSANDBOXED_AGENT_EXEC=1` opt-in
+to degrade, logged every time — no more `sync.Once`) and AD-02 (made
+`--unshare-net` unconditional on Linux; when `NetworkAllow` is non-empty, a
+new namespace-crossing relay — the "netns bridge" — gives the sandboxed
+process a route to the still-unmodified, still-host-netns allowlist
+`Proxy`, closing the inversion where a configured allowlist used to be
+*weaker* than no allowlist at all). Also resolved GO-SEC4-006
+(reframed the denylist as advisory/defense-in-depth, with a locked-in
+regression test recording exactly which bypass classes are accepted-
+uncaught) per the task file's own lower-stakes framing for that finding.
+
+### Mid-task design sketch (recorded before writing the bulk of the AD-02 implementation)
+
+Before writing `netns_bridge_linux.go`, I worked out the mechanism as
+follows (this is the actual reasoning used, not reconstructed after the
+fact):
+
+1. **Ruled out**: pre-binding a TCP listening socket in the host netns and
+   handing its fd across `unshare(CLONE_NEWNET)` doesn't help the
+   sandboxed *client* — a fresh `connect()` call from inside the new netns
+   is governed by that netns's own routing/interfaces regardless of what
+   fd some other process holds open; an inherited fd's *creation-time*
+   netns only matters for continued I/O on that same fd, not for a new
+   peer's ability to reach it via a fresh connect().
+2. **Confirmed workable**: a byte-relay that crosses the namespace
+   boundary via a channel that does NOT depend on IP routing — an
+   AF_UNIX socket at a filesystem path visible in the sandbox's *mount*
+   namespace (independent of its *network* namespace) — combined with a
+   loopback listener created *fresh, from inside* the already-unshared
+   netns (so it's genuinely local to that netns, not borrowed from the
+   host). This only needs to carry the same HTTP(S)-proxy-shaped byte
+   stream the existing `Proxy` already mediates, not general raw socket
+   access — so no userspace TCP/IP stack (slirp4netns-style) is needed,
+   just a dumb byte-for-byte pipe.
+3. **Confirmed via existing precedent**, not just first-principles: the
+   sibling `github.com/hollis-labs/go-sandbox` module (already a
+   dependency of this repo, for the unrelated Skill capability gate) has
+   an already-built, already-integration-tested loopback-forwarder doing
+   exactly this — a re-exec trampoline (`init()`-time catch, before the
+   binary's own `main()` runs) that brings the namespace-local `lo`
+   device up (bwrap's `--unshare-net` leaves it present but
+   administratively down) and bridges a forwarded port through a
+   Unix-domain socket. Its own doc comments cite this exact repo's
+   `2026-04-10` audit and literally say "extracted from nanite" — meaning
+   this pattern was *already* validated end-to-end by the same
+   organization, just never wired back into `internal/sandbox` itself.
+   I did not adopt `go-sandbox` as a dependency here (that would be a
+   larger, separate "share vs. duplicate implementation" call this task
+   doesn't authorize — see AD-19, still open) — I ported the *technique*
+   directly into `internal/sandbox/netns_bridge_linux.go`, adapted to
+   this package's own `Proxy`/`AgentExecOpts` shapes.
+4. **Design chosen**: two re-exec identities of the Nanite binary itself
+   (a "helper" that brings `lo` up and execs the real wrapped command in
+   place, and a "supervisor" it spawns as a genuine child process — never
+   a bare `fork()`, unsafe in a multithreaded Go runtime) plus a
+   host-side listener on a short-lived Unix-domain socket that dials
+   straight back to the real `Proxy` on the host's own, unmodified
+   loopback. To remove a startup race (client requests arriving before
+   the supervisor is listening), the *helper* binds the loopback TCP
+   listener itself (synchronously, before spawning anything), then hands
+   the already-listening socket to the supervisor via `cmd.ExtraFiles` —
+   the kernel already queues connections into the accept backlog the
+   moment `listen()` returns, so there's no window where `HTTP_PROXY`
+   points at a port nothing is listening on yet.
+
+### AD-01 implementation
+
+- `internal/sandbox/degraded.go` (new): `allowUnsandboxedExec()` (parses
+  `NANITE_ALLOW_UNSANDBOXED_AGENT_EXEC`) and `resolveIsolationVerdict()` —
+  the pure decision function (available → isolated; unavailable+no opt-in
+  → error; unavailable+opt-in → degraded+warn message) factored out so
+  it's portable-testable on any platform, not gated behind a Linux build
+  tag. `logDegraded()` logs unconditionally, every call — no `sync.Once`.
+- Chose an env var (not a new `internal/config.AppConfig` field) for the
+  opt-in knob: matches this codebase's existing, established pattern for
+  exactly this kind of operator toggle (`NANITE_DEVMODE`,
+  `NANITE_GROUNDING_ENABLED`, `NANITE_AUTO_REPAIR`, all read directly via
+  `os.Getenv` in their owning package), keeps the change inside this
+  task's own stated "Touches" list, and is literally the exact mechanism
+  the task file's own Option A "Cons" section named
+  (`NANITE_ALLOW_UNSANDBOXED_AGENT_EXEC=1`).
+- `os_linux.go`: deleted `bwrapWarnOnce` (`sync.Once`); `applyOSSandbox`
+  signature changed to `(cleanup func(), isolated bool, err error)`;
+  missing `bwrap` now routes through `resolveIsolationVerdict`.
+- `os_other.go` (Windows/BSD/etc.): same class, same treatment, per the
+  decided banner ("Scope is `os_linux.go` + `os_other.go` — same
+  fail-open shape, same `sync.Once`") — deleted `osWarnOnce`, same
+  fail-closed-with-opt-in policy.
+- `os_darwin.go`: signature updated for parity (accepts `proxyAddr`,
+  returns `isolated`); behavior unchanged — always `isolated=true` on
+  success, since macOS has no "tool missing" case in scope here (that's
+  the separate, out-of-scope GO-SEC4-005/AD-03 gap).
+- `exec.go`: `ExecResult` gains `SandboxIsolated bool`
+  (`json:"sandbox_isolated"`); `AgentExec`/`UserExec` thread the new
+  return value through and set it on the returned result. The existing
+  `if err != nil { return nil, fmt.Errorf(...) }` branch at both call
+  sites needed no new control flow, exactly as the task file's "Proposed
+  direction" section anticipated — only the fallback's classification
+  changed from success-shaped to error-shaped, plus the new signal.
+- All four production callers updated to surface `SandboxIsolated`
+  visibly (not just in a server-side log) when it reads `false`:
+  `dev_bash`/`code_execute` prepend a `[sandbox: ... degraded mode]` line
+  to the tool result text (agent-controlled call sites — the "Desired
+  invariant" section is explicit that a human can't see server logs
+  through these); `ShellStep` adds `"sandbox_isolated"` to its
+  `StepOutput.Data` map; `handleShellExec` adds `"sandbox_isolated"` to
+  both the persisted message metadata and the JSON response, and only
+  prepends the degraded-mode warning to message content when
+  `Sandboxed: true` was actually requested (YOLO mode's `false` is an
+  already-disclosed opt-out, not a degradation — per the task file's own
+  explicit instruction to treat that case differently).
+
+### AD-02 implementation
+
+- `internal/sandbox/netns_bridge_linux.go` (new): implements the design
+  sketch above. `--unshare-net` is now unconditional in `os_linux.go`;
+  when `networkAllow` is non-empty and a `proxyAddr` was passed in, the
+  bwrap payload is rewritten to route through the trampoline instead of
+  the caller's raw command.
+- `exec.go`'s `AgentExec` now captures `proxy.Addr` (already available
+  before `applyOSSandbox` runs, since the proxy is started earlier) and
+  passes it through; `UserExec` never configures `NetworkAllow`, so it
+  always passes an empty `proxyAddr` and never engages the bridge.
+- `applyOSSandbox`'s exported hardening-posture doc comment records the
+  inversion this closes and cross-references AD-02's decision record.
+
+### Bugs found and fixed during real-Linux verification (in scope: same function, blocking clean verification of this task's own changes)
+
+Three issues surfaced only once the real bwrap path was actually exercised
+on Linux — confirming the task file's own warning that darwin proves
+nothing here. All three are documented in code comments at their fix
+site (`os_linux.go`, `netns_bridge_linux.go`):
+
+1. **Pre-existing bug, not introduced by this task**: `applyOSSandbox`
+   never passed `--chdir` to bwrap, so the sandboxed process's cwd was
+   silently always `/` regardless of `cmd.Dir` — `AgentExec`'s documented
+   CWD contract never actually held on real Linux+bwrap. Never caught
+   because darwin's seatbelt wrapper doesn't reset cwd the way bwrap's
+   own mount-namespace setup does. Fixed by adding `--chdir` targeting
+   the already-`filepath.Abs`-cleaned `absDir`/`absExtra` (not the
+   caller's raw `cmd.Dir` — using the raw form produced "bwrap: Can't
+   chdir to `<path>`: No such file or directory" for a path that *was*
+   correctly bound, just spelled differently).
+2. **Pre-existing bug, not introduced by this task**: `--bind absDir
+   absDir` was issued *before* `--tmpfs /tmp` in the bwrap arg list.
+   Since bwrap applies mounts in argument order, whenever `sandboxDir`
+   happens to be a subpath of `/tmp` (never true in production —
+   `$HOME/.nanite/sandboxes/...` — but true for any test whose `$HOME` is
+   itself a `t.TempDir()`), the later blanket `--tmpfs /tmp` silently
+   shadowed the earlier, more specific bind. Fixed by reordering: tmpfs
+   first, writable binds after — the same "more specific bind wins"
+   pattern already used correctly elsewhere in this function.
+3. **New bug in this task's own AD-02 code**: the netns bridge's
+   Unix-domain socket path (originally nested under
+   `sandboxDir/.sandbox/netns-bridge-<rand>/`) can exceed Linux's
+   108-byte `AF_UNIX` `sun_path` limit — confirmed directly (`listen
+   unix ...: bind: invalid argument`) with a sufficiently long test name.
+   Fixed by moving the bridge dir to a short, fixed root (`/tmp`,
+   `netnsBridgeRoot`) instead of nesting it under the caller's
+   (unbounded-length) `sandboxDir`, with an explicit `--bind` added since
+   it's no longer automatically covered by the sandboxDir bind.
+
+### GO-SEC4-006 (denylist) direction
+
+Chose the cheaper of the two named options: reframed `denylist.go` as
+advisory/defense-in-depth in a package-level doc comment (not a hard
+security boundary), rather than replacing substring matching with a real
+shell tokenizer (`mvdan.cc/sh`, not currently a dependency — would add a
+new external dependency for a control that, even fully hardened, still
+wouldn't be the primary boundary). Added
+`TestCheckDenylist_KnownBypassClasses` (`denylist_test.go`) as a
+locked-in, executable record of exactly which bypass shapes (whitespace
+variation, flag reordering, long-form-flag substitution, variable
+indirection, base64-encoded payloads) are accepted-uncaught, so the
+"advisory" framing can't silently drift from what the code actually does.
+Cross-referenced from `os_linux.go`'s/`degraded.go`'s comments per the
+AD-01 decision's own instruction ("`GO-SEC4-006` should be re-weighted
+accordingly and its task cross-referenced from `02/01`").
+
+### Deviation from the task file's own scope note
+
+The task file's "Scope" section suggested `os_other.go` might warrant
+different treatment than `os_linux.go` ("verify whether the chosen
+fail-closed/opt-in mechanism should also apply here, or whether 'no OS
+sandbox exists on this platform at all' legitimately warrants different
+handling"). The AD-01 decided banner resolves this explicitly in favor of
+identical treatment ("Scope is `os_linux.go` + `os_other.go` — same
+fail-open shape, same `sync.Once`"), which is what I implemented — no
+special-casing. Noting this because the task file's own prose and the
+banner's instruction differ; the banner wins per its own framing
+("this banner as the instruction where they differ").
+
+### Test coverage added
+
+- `internal/sandbox/degraded_test.go` (no build tag, portable — runs on
+  darwin): `allowUnsandboxedExec()` env-var parsing;
+  `resolveIsolationVerdict()`'s full truth table (available; unavailable+
+  no opt-in → error naming the remediation path; unavailable+opt-in →
+  degraded+non-empty warn message). This is the "mocked exec.LookPath"
+  portable unit test the task file's own "Tests required" section
+  specifies — implemented as testing the *decision function*
+  `applyOSSandbox` delegates to, rather than literally mocking the
+  `exec.LookPath` free function, since the actual tool-detection code is
+  inherently platform/build-tag gated and can't run on darwin at all.
+- `internal/sandbox/os_linux_test.go` (linux-gated, real bwrap execution):
+  rewrote `TestBwrapArgs_UnshareNetConditional` →
+  `TestBwrapArgs_UnshareNetUnconditional` (asserts the inversion is
+  gone — `--unshare-net` present regardless of `networkAllow`, and the
+  bwrap payload routes through the netns-bridge trampoline when an
+  allowlist is configured); added `TestApplyOSSandbox_
+  FailsClosedWithoutBwrap` and `TestApplyOSSandbox_DegradesWithOptIn`
+  (PATH-manipulation technique, per the task file's own suggestion);
+  `TestNetnsBridge_ForwardsToHostProxy` and `TestNetnsBridge_
+  HostArbitraryPortStillBlocked` (real end-to-end AD-02 integration
+  tests — curl through the bridge to a real HTTP listener standing in
+  for Proxy's own upstream dial, plus confirming an arbitrary
+  non-forwarded host port stays unreachable); `TestAgentExec_
+  SandboxIsolatedField_Degraded`. Added `skipIfNoOSSandbox`-style guards
+  to every pre-existing `TestAgentExec_*` test in `exec_test.go` that
+  exercises a real command through the sandbox (all of them now correctly
+  fail closed on a bwrap-less Linux host, which is intended per AD-01 —
+  the guard keeps `go test ./internal/sandbox/...`'s default run
+  meaningful in that environment rather than uniformly red for a reason
+  that's already known and accepted).
+- Mirrored the same `skipIfNoOSSandbox` guard, for the same reason, in
+  the three caller packages' own pre-existing real-exec tests:
+  `internal/mcp/dev_tools_test.go` (`TestDevBash_Execute`),
+  `internal/mcp/code_exec_tools_test.go` (five `TestCodeExecute_*`
+  tests), `internal/workflow/workflow_test.go`
+  (`TestShellStep_BasicCommand`).
+- `internal/api/shell_test.go` (new file — `handleShellExec` had zero
+  existing test coverage before this task): `TestHandleShellExec_
+  YOLOMode_SandboxIsolatedFalse` (opt-out case, unaffected by bwrap
+  availability) and `TestHandleShellExec_SessionMode_
+  SandboxIsolatedTrue` (Sandboxed: true path, guarded the same way,
+  confirmed passing end-to-end through the real HTTP handler on real
+  Linux+bwrap).
+- `internal/sandbox/denylist_test.go` (new): GO-SEC4-006's bypass-class
+  and still-caught-literal-matches regression tests, described above.
+
+### Real-Linux evidence (required, not optional per this task's kickoff)
+
+No local Docker or DigitalOcean credentials were available in this
+environment (`docker` CLI absent; `~/.docker`'s cask-installed Docker
+Desktop app was missing from `/Applications` despite stale Caskroom
+metadata; `cerberus server list` failed with `credential_missing` for
+DigitalOcean; no `server`-type resource was registered in Cerberus's own
+registry — everything registered was `type=process`/`connector=local`
+macOS launchd). Per this task's own instruction to use real infrastructure
+rather than declare this unverifiable, installed `colima`+`docker` (CLI)
+via Homebrew (`brew install colima docker` — lightweight, no GUI/kernel
+extension, standard for headless Docker-on-Mac) and started a real Linux
+VM (`colima start --cpu 2 --memory 4 --disk 20`, `vz` driver, Ubuntu
+6.8.0 kernel, confirmed via `uname -a` inside a container: `Linux
+<hostname> 6.8.0-117-generic #117-Ubuntu SMP ... aarch64 Linux`).
+
+**Container 1 — `golang:1.25-alpine` (matches the repo's own `Dockerfile`
+`go-build` stage) with `bwrap` absent (Alpine does not ship it):**
+
+```
+$ which bwrap; echo BWRAP_LOOKUP_EXIT=$?
+BWRAP_LOOKUP_EXIT=1
+
+$ go test ./internal/sandbox/... ./internal/mcp/... ./internal/workflow/... ./internal/api/... -run 'Exec|Sandbox|Shell' -v
+...
+--- PASS: TestApplyOSSandbox_FailsClosedWithoutBwrap (0.00s)
+--- PASS: TestApplyOSSandbox_DegradesWithOptIn (0.00s)
+--- PASS: TestAgentExec_SandboxIsolatedField_Degraded (0.00s)
+--- SKIP: TestAgentExec_BasicCommand / TestAgentExec_Timeout / ... (bwrap-requiring pre-existing tests — expected, guarded)
+ok  	github.com/hollis-labs/nanite/internal/sandbox	0.011s
+ok  	github.com/hollis-labs/nanite/internal/mcp	0.023s
+ok  	github.com/hollis-labs/nanite/internal/workflow	0.003s
+ok  	github.com/hollis-labs/nanite/internal/api	0.413s
+```
+
+Confirmed the actual production error surfaced through each of the four
+callers, e.g. (`TestDevBash_Execute`, before the guard was added, to
+prove the real fail-closed error shape end-to-end):
+
+```
+dev_tools_test.go:39: unexpected error: sandbox error: sandbox: os-level
+setup: sandbox: bwrap not found — install bubblewrap for OS-level
+isolation — OS-level isolation is required; install it, or set
+NANITE_ALLOW_UNSANDBOXED_AGENT_EXEC=1 to explicitly accept unisolated
+execution (not recommended: the command denylist becomes the only
+remaining control, see GO-SEC4-006)
+```
+
+and via the real HTTP handler (`TestHandleShellExec_SessionMode_...`,
+before its own guard was added):
+
+```
+shell_test.go:87: expected 200, got 500: {"error":"sandbox: os-level
+setup: sandbox: bwrap not found ... NANITE_ALLOW_UNSANDBOXED_AGENT_EXEC=1
+..."}
+```
+
+**Container 2 — same image, `apk add bubblewrap` (0.11.2), run
+`--privileged` (needed for nested procfs mount inside this specific
+Docker-in-VM setup — a plain `--cap-add SYS_ADMIN` was insufficient
+here):**
+
+```
+$ apk add --no-cache bubblewrap; which bwrap && bwrap --version
+/usr/bin/bwrap
+bubblewrap 0.11.2
+
+$ go test ./internal/sandbox/... -v          (3x repeated, -count=1, to rule out flakiness)
+ok  	github.com/hollis-labs/nanite/internal/sandbox	1.102s
+ok  	github.com/hollis-labs/nanite/internal/sandbox	1.178s
+ok  	github.com/hollis-labs/nanite/internal/sandbox	1.127s
+
+$ go test -race ./internal/sandbox/...
+ok  	github.com/hollis-labs/nanite/internal/sandbox	2.183s
+
+$ go test ./internal/mcp/... ./internal/workflow/... ./internal/api/... -count=1
+ok  	github.com/hollis-labs/nanite/internal/mcp	15.640s
+ok  	github.com/hollis-labs/nanite/internal/workflow	0.062s
+ok  	github.com/hollis-labs/nanite/internal/api	69.895s
+```
+
+All tests pass with bwrap present, including `TestBwrapIsolation_
+ProcCannotSeeHostPID1` (real namespace isolation, pre-existing test),
+`TestNetnsBridge_ForwardsToHostProxy`/`TestNetnsBridge_
+HostArbitraryPortStillBlocked` (real AD-02 end-to-end proof — a
+sandboxed `curl` reaches the forwarded proxy port and nothing else on the
+host's loopback), and `TestHandleShellExec_SessionMode_
+SandboxIsolatedTrue` (real isolation confirmed through the full HTTP
+handler stack). Re-ran the bwrap-absent suite once more after all fixes
+landed to confirm the reordering/chdir fixes didn't regress the
+fail-closed path — still green.
+
+Colima/the containers were torn down (`colima stop`) after verification
+completed; no lingering infrastructure left running.
+
+### Baseline checks (darwin, this worktree)
+
+```
+$ go build ./cmd/nanite/     # exit 0
+$ go build ./...             # exit 0
+$ go vet ./...                # 4 findings, all in internal/service/container.go
+                               # (stopReaper/stopRuntimeReaper context-leak — pre-existing,
+                               # confirmed via `git status --short` that file is untouched
+                               # by this task; out of scope)
+$ go test ./...              # 0 failures, full repo, run twice across the session
+$ GOOS=linux go build ./internal/sandbox/...   # exit 0
+$ GOOS=linux go vet ./internal/sandbox/...     # exit 0 (after retrying past two transient
+                                                 # shared-GOCACHE races from concurrent
+                                                 # worktree builds on this machine)
+```
+
+### Environment note (not a code finding, logged for the next worker who
+hits this)
+
+The shared `go-build` cache (`~/Library/Caches/go-build`, `GOCACHE`) grew
+to 93G during this session and exhausted the machine's disk (`df` showed
+301Mi free on a nominally-460Gi volume — this environment's real
+constraint is a shared APFS container quota, not literal disk size).
+Ran `go clean -cache` (the standard, Go-recommended, non-destructive
+remedy — purely a perf cache, regenerated on demand, no semantic content
+at risk, unlike the shared `git stash` this project's process doc
+specifically prohibits) to recover ~75G and unblock further builds.
+Flagging in case this recurs for a concurrently-running sibling worktree
+agent on the same machine.
 
 ## Review notes
 

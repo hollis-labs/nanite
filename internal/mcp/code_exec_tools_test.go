@@ -8,6 +8,7 @@ import (
 )
 
 func TestCodeExecute_Shell(t *testing.T) {
+	skipIfNoOSSandbox(t)
 	tmpHome := t.TempDir()
 	t.Setenv("HOME", tmpHome)
 
@@ -28,6 +29,7 @@ func TestCodeExecute_Shell(t *testing.T) {
 }
 
 func TestCodeExecute_ShellDefault(t *testing.T) {
+	skipIfNoOSSandbox(t)
 	tmpHome := t.TempDir()
 	t.Setenv("HOME", tmpHome)
 
@@ -47,6 +49,7 @@ func TestCodeExecute_ShellDefault(t *testing.T) {
 }
 
 func TestCodeExecute_Timeout(t *testing.T) {
+	skipIfNoOSSandbox(t)
 	tmpHome := t.TempDir()
 	t.Setenv("HOME", tmpHome)
 
@@ -71,6 +74,7 @@ func TestCodeExecute_Python(t *testing.T) {
 	if _, err := exec.LookPath("python3"); err != nil {
 		t.Skip("python3 not available")
 	}
+	skipIfNoOSSandbox(t)
 
 	tmpHome := t.TempDir()
 	t.Setenv("HOME", tmpHome)
@@ -92,6 +96,7 @@ func TestCodeExecute_Python(t *testing.T) {
 }
 
 func TestCodeExecute_ExitCode(t *testing.T) {
+	skipIfNoOSSandbox(t)
 	tmpHome := t.TempDir()
 	t.Setenv("HOME", tmpHome)
 
@@ -109,6 +114,7 @@ func TestCodeExecute_ExitCode(t *testing.T) {
 }
 
 func TestCodeExecute_LargeOutput(t *testing.T) {
+	skipIfNoOSSandbox(t)
 	tmpHome := t.TempDir()
 	t.Setenv("HOME", tmpHome)
 

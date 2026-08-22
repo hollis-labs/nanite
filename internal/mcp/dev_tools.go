@@ -1235,6 +1235,17 @@ func (d *DevToolsTransport) callBash(ctx context.Context, args map[string]any) (
 	stderrStr := capOutput(result.Stderr, devBashStreamCap)
 
 	var sb strings.Builder
+	// AD-01 (TASKS/audit-remediation/ARCHITECT-DECISIONS.md): dev_bash is
+	// one of the agent-controlled call sites this task's "Desired
+	// invariant" names explicitly — the caller here is an LLM agent, not
+	// a human who already knows whether they opted into degraded
+	// execution, so a degraded run must be visible in the tool result
+	// itself, not just the server-side warn log. By default (fail
+	// closed) this branch is unreachable; it can only fire when an
+	// operator has explicitly set NANITE_ALLOW_UNSANDBOXED_AGENT_EXEC=1.
+	if !result.SandboxIsolated {
+		sb.WriteString("[sandbox: OS-level isolation NOT applied — running in degraded mode]\n")
+	}
 	if stdoutStr != "" {
 		sb.WriteString(stdoutStr)
 	}

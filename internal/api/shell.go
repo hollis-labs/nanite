@@ -103,6 +103,20 @@ func (a *API) handleShellExec(w http.ResponseWriter, r *http.Request) {
 	exitCode = result.ExitCode
 	timedOut = result.TimedOut
 
+	// AD-01 (TASKS/audit-remediation/ARCHITECT-DECISIONS.md): a user in
+	// YOLO mode has already explicitly opted out of the OS sandbox
+	// (Sandboxed: false above), so result.SandboxIsolated reading false
+	// there is expected, not a degradation signal — UserExec never even
+	// calls applyOSSandbox in that case. It's the Sandboxed: true case
+	// (ask/session modes) where SandboxIsolated=false means the operator
+	// has set NANITE_ALLOW_UNSANDBOXED_AGENT_EXEC=1 and this specific
+	// exec ran without real isolation; that's the case worth flagging in
+	// the message content the LLM/user actually sees.
+	degraded := mode != shell.ModeYOLO && !result.SandboxIsolated
+	if degraded {
+		output = "[sandbox: OS-level isolation NOT applied — running in degraded mode]\n" + output
+	}
+
 	// Build the message content the LLM will see.
 	content := fmt.Sprintf("$ %s\n%s", req.Command, output)
 
@@ -110,9 +124,10 @@ func (a *API) handleShellExec(w http.ResponseWriter, r *http.Request) {
 	meta := map[string]interface{}{
 		"type": "shell_exec",
 		"shell_exec": map[string]interface{}{
-			"command":   req.Command,
-			"exit_code": exitCode,
-			"timed_out": timedOut,
+			"command":          req.Command,
+			"exit_code":        exitCode,
+			"timed_out":        timedOut,
+			"sandbox_isolated": result.SandboxIsolated,
 		},
 	}
 	metaJSON, _ := json.Marshal(meta)
@@ -131,11 +146,12 @@ func (a *API) handleShellExec(w http.ResponseWriter, r *http.Request) {
 	}
 
 	a.jsonResp(w, http.StatusOK, map[string]interface{}{
-		"message_id": msg.ID,
-		"command":    req.Command,
-		"output":     output,
-		"exit_code":  exitCode,
-		"timed_out":  timedOut,
+		"message_id":       msg.ID,
+		"command":          req.Command,
+		"output":           output,
+		"exit_code":        exitCode,
+		"timed_out":        timedOut,
+		"sandbox_isolated": result.SandboxIsolated,
 	})
 }
 

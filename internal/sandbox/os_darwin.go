@@ -140,23 +140,35 @@ func seatbeltProfile(sandboxDir string, extraWritePath string, networkAllow []st
 // CW-20260504-0003: extraWritePath, when non-empty, is added to the seatbelt
 // profile's file-write allow list (in addition to sandboxDir + /tmp).
 // Pass an empty string to preserve legacy sandbox-only write behavior.
-func applyOSSandbox(cmd *exec.Cmd, sandboxDir string, extraWritePath string, networkAllow []string) (cleanup func(), err error) {
+//
+// AD-01/AD-02 (TASKS/audit-remediation/ARCHITECT-DECISIONS.md, decided
+// 2026-08-22): macOS is explicitly out of scope for both — sandbox-exec
+// ships with the OS (no "tool missing" fail-open case exists here the way
+// bwrap's absence does on Linux), and seatbelt's `(deny network-outbound)`
+// / `(deny network-inbound)` pair is already kernel-enforced regardless of
+// proxy mode, so there is no host-netns/allowlist inversion to fix. The
+// proxyAddr parameter exists only for call-signature parity with
+// os_linux.go/os_other.go; it is intentionally unused here. isolated is
+// always true on success — real seatbelt isolation was applied.
+func applyOSSandbox(cmd *exec.Cmd, sandboxDir string, extraWritePath string, networkAllow []string, proxyAddr string) (cleanup func(), isolated bool, err error) {
+	_ = proxyAddr
+
 	profile, err := seatbeltProfile(sandboxDir, extraWritePath, networkAllow)
 	if err != nil {
-		return nil, fmt.Errorf("build seatbelt profile: %w", err)
+		return nil, false, fmt.Errorf("build seatbelt profile: %w", err)
 	}
 
 	// Write profile to a temp file (sandbox-exec -f requires a file path).
 	f, err := os.CreateTemp("", "nanite-seatbelt-*.sb")
 	if err != nil {
-		return nil, fmt.Errorf("create seatbelt profile: %w", err)
+		return nil, false, fmt.Errorf("create seatbelt profile: %w", err)
 	}
 	profilePath := f.Name()
 
 	if _, err := f.WriteString(profile); err != nil {
 		f.Close()
 		os.Remove(profilePath)
-		return nil, fmt.Errorf("write seatbelt profile: %w", err)
+		return nil, false, fmt.Errorf("write seatbelt profile: %w", err)
 	}
 	f.Close()
 
@@ -171,5 +183,5 @@ func applyOSSandbox(cmd *exec.Cmd, sandboxDir string, extraWritePath string, net
 	newArgs = append(newArgs, origArgs...)
 	cmd.Args = newArgs
 
-	return func() { os.Remove(profilePath) }, nil
+	return func() { os.Remove(profilePath) }, true, nil
 }

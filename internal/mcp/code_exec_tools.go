@@ -151,6 +151,9 @@ func (c *CodeExecTransport) callCodeExecute(args map[string]any) (*ToolResult, e
 func formatExecResult(result *sandbox.ExecResult) *ToolResult {
 	if result.TimedOut {
 		var sb strings.Builder
+		if !result.SandboxIsolated {
+			sb.WriteString("[sandbox: OS-level isolation NOT applied — running in degraded mode]\n")
+		}
 		sb.WriteString("Execution timed out.\n")
 		if result.Stdout != "" {
 			sb.WriteString("\n--- stdout (partial) ---\n")
@@ -164,6 +167,16 @@ func formatExecResult(result *sandbox.ExecResult) *ToolResult {
 	}
 
 	var sb strings.Builder
+
+	// AD-01 (TASKS/audit-remediation/ARCHITECT-DECISIONS.md): code_execute
+	// is an agent-controlled call site — the caller cannot see server-side
+	// warn logs, so a degraded run must be visible in the tool result
+	// itself. By default this is unreachable (fail closed); it can only
+	// fire when an operator has explicitly set
+	// NANITE_ALLOW_UNSANDBOXED_AGENT_EXEC=1.
+	if !result.SandboxIsolated {
+		sb.WriteString("[sandbox: OS-level isolation NOT applied — running in degraded mode]\n")
+	}
 
 	if result.Stdout != "" {
 		sb.WriteString(result.Stdout)

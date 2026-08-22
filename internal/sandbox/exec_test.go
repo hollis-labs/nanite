@@ -2,12 +2,41 @@ package sandbox
 
 import (
 	"os"
+	"os/exec"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
 )
 
+// skipIfNoOSSandbox skips a test on Linux when bwrap is unavailable and the
+// AD-01 degraded-mode opt-in is not set (TASKS/audit-remediation/
+// ARCHITECT-DECISIONS.md). Every test below that calls AgentExec (which
+// unconditionally requires OS-level isolation, per AD-01's fail-closed
+// default) needs this guard now that a missing bwrap is a hard error
+// instead of a silent Tier-1-only fallback — these tests are about
+// AgentExec's other guarantees (denylist, env filtering, CWD, timeout),
+// not about proving isolation succeeded, so skipping here (rather than
+// asserting the fail-closed error) is correct: os_linux_test.go's own
+// TestApplyOSSandbox_FailsClosedWithoutBwrap /
+// TestApplyOSSandbox_DegradesWithOptIn already cover that behavior
+// directly. darwin is never affected (seatbelt always present); a Linux
+// host WITH bwrap installed is never affected either.
+func skipIfNoOSSandbox(t *testing.T) {
+	t.Helper()
+	if runtime.GOOS != "linux" {
+		return
+	}
+	if allowUnsandboxedExec() {
+		return
+	}
+	if _, err := exec.LookPath("bwrap"); err != nil {
+		t.Skip("bwrap not installed and NANITE_ALLOW_UNSANDBOXED_AGENT_EXEC not set — AgentExec now fails closed (AD-01); see os_linux_test.go for the dedicated fail-closed/degraded regression tests")
+	}
+}
+
 func TestAgentExec_BasicCommand(t *testing.T) {
+	skipIfNoOSSandbox(t)
 	tmpHome := t.TempDir()
 	t.Setenv("HOME", tmpHome)
 
@@ -49,6 +78,7 @@ func TestAgentExec_DenylistBlocked(t *testing.T) {
 }
 
 func TestAgentExec_Timeout(t *testing.T) {
+	skipIfNoOSSandbox(t)
 	tmpHome := t.TempDir()
 	t.Setenv("HOME", tmpHome)
 
@@ -70,6 +100,7 @@ func TestAgentExec_Timeout(t *testing.T) {
 }
 
 func TestAgentExec_EnvFiltering(t *testing.T) {
+	skipIfNoOSSandbox(t)
 	tmpHome := t.TempDir()
 	t.Setenv("HOME", tmpHome)
 	t.Setenv("ANTHROPIC_API_KEY", "sk-secret-12345")
@@ -91,6 +122,7 @@ func TestAgentExec_EnvFiltering(t *testing.T) {
 }
 
 func TestAgentExec_CWDRestricted(t *testing.T) {
+	skipIfNoOSSandbox(t)
 	tmpHome := t.TempDir()
 	t.Setenv("HOME", tmpHome)
 
@@ -113,6 +145,7 @@ func TestAgentExec_CWDRestricted(t *testing.T) {
 }
 
 func TestAgentExec_ExtraEnvFiltered(t *testing.T) {
+	skipIfNoOSSandbox(t)
 	tmpHome := t.TempDir()
 	t.Setenv("HOME", tmpHome)
 
@@ -261,6 +294,7 @@ func TestIsSecretKey(t *testing.T) {
 // dir wins over sandboxDir. The OS sandbox profile is widened to permit
 // reads under that dir (already true on darwin; bind-mounted on linux).
 func TestAgentExec_HonorsWorkingDir(t *testing.T) {
+	skipIfNoOSSandbox(t)
 	tmpHome := t.TempDir()
 	t.Setenv("HOME", tmpHome)
 
@@ -287,6 +321,7 @@ func TestAgentExec_HonorsWorkingDir(t *testing.T) {
 // TestAgentExec_CWDRestricted but with the field explicitly empty so
 // the regression is locked against future field additions.
 func TestAgentExec_EmptyWorkingDir_FallsBackToSandboxDir(t *testing.T) {
+	skipIfNoOSSandbox(t)
 	tmpHome := t.TempDir()
 	t.Setenv("HOME", tmpHome)
 
@@ -311,6 +346,7 @@ func TestAgentExec_EmptyWorkingDir_FallsBackToSandboxDir(t *testing.T) {
 // can read files under that dir. We write a fixture file in workDir
 // then cat it; success proves the read-allow path works.
 func TestAgentExec_WorkingDir_AllowsReads(t *testing.T) {
+	skipIfNoOSSandbox(t)
 	tmpHome := t.TempDir()
 	t.Setenv("HOME", tmpHome)
 

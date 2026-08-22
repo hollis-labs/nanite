@@ -3,12 +3,36 @@ package workflow
 import (
 	"context"
 	"fmt"
+	"os"
+	"os/exec"
+	"runtime"
 	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
 )
+
+// skipIfNoOSSandbox skips a test on Linux when bwrap is unavailable and the
+// AD-01 degraded-mode opt-in (TASKS/audit-remediation/
+// ARCHITECT-DECISIONS.md) is not set. sandbox.AgentExec (which ShellStep
+// calls) now fails closed by default in that case — previously it silently
+// fell back to Tier 1 only (GO-SEC4-001, the finding this fix closes).
+// darwin (seatbelt always present) and a Linux host WITH bwrap installed
+// are unaffected.
+func skipIfNoOSSandbox(t *testing.T) {
+	t.Helper()
+	if runtime.GOOS != "linux" {
+		return
+	}
+	switch strings.ToLower(strings.TrimSpace(os.Getenv("NANITE_ALLOW_UNSANDBOXED_AGENT_EXEC"))) {
+	case "1", "true", "yes":
+		return
+	}
+	if _, err := exec.LookPath("bwrap"); err != nil {
+		t.Skip("bwrap not installed and NANITE_ALLOW_UNSANDBOXED_AGENT_EXEC not set — sandbox.AgentExec now fails closed (AD-01); see internal/sandbox/os_linux_test.go for the dedicated fail-closed/degraded regression tests")
+	}
+}
 
 func TestPipeline_LinearSequence(t *testing.T) {
 	var order []string
@@ -631,6 +655,7 @@ steps:
 }
 
 func TestShellStep_BasicCommand(t *testing.T) {
+	skipIfNoOSSandbox(t)
 	step := &ShellStep{
 		Command: "echo",
 		Args:    []string{"hello", "world"},

@@ -47,6 +47,14 @@ func (s *ShellStep) Execute(ctx context.Context, input StepInput) (*StepOutput, 
 			"stderr":    result.Stderr,
 			"exit_code": result.ExitCode,
 			"timed_out": result.TimedOut,
+			// AD-01 (TASKS/audit-remediation/ARCHITECT-DECISIONS.md):
+			// surfaces whether real OS-level sandbox isolation was
+			// applied to this step. By default (fail closed) a
+			// workflow-defined shell step never runs at all without it
+			// — sandbox.AgentExec returns an error instead — so this is
+			// almost always true; false only appears when an operator
+			// has explicitly set NANITE_ALLOW_UNSANDBOXED_AGENT_EXEC=1.
+			"sandbox_isolated": result.SandboxIsolated,
 		},
 		Stdout:   result.Stdout,
 		Stderr:   result.Stderr,

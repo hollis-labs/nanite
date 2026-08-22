@@ -2,7 +2,7 @@ package subagent
 
 // service_fanout_test.go — G3 fan-out semaphore tests (CW-20260426-0003)
 //
-// Nine cases:
+// Ten cases:
 //  1. Under-cap parallelism: N=3 spawns complete in ≈ slowest single, not sum.
 //  2. At-cap with queueing: N=5 with cap=3; first 3 run concurrently, last 2
 //     queue; total ≈ 2× single duration.
@@ -15,6 +15,7 @@ package subagent
 //  7. Approval cannot expose running before its cancellation owner is installed.
 //  8. Request cancellation after approval transition does not strand the run.
 //  9. Concurrent duplicate approvals/cancellations create at most one runner.
+//  10. Approval/cancellation events remain ordered with one terminal emit.
 
 import (
 	"context"
@@ -143,6 +144,55 @@ func (s *cancellingRunningSink) SubagentStatusChanged(_ string, payload []byte) 
 	if err := json.Unmarshal(payload, &event); err == nil && event.Status == StatusRunning {
 		s.cancel()
 	}
+}
+
+// blockingOrderedSink lets a test pause delivery of a running event while a
+// concurrent cancellation commits. Events are recorded only after the pause,
+// making a stale running emission after the terminal cancellation observable.
+type blockingOrderedSink struct {
+	mu             sync.Mutex
+	events         map[string][]string
+	runningEntered chan string
+	releaseRunning chan struct{}
+}
+
+func newBlockingOrderedSink(blockRunning bool) *blockingOrderedSink {
+	s := &blockingOrderedSink{
+		events:         make(map[string][]string),
+		runningEntered: make(chan string, 1),
+	}
+	if blockRunning {
+		s.releaseRunning = make(chan struct{})
+	}
+	return s
+}
+
+func (s *blockingOrderedSink) SubagentStatusChanged(_ string, payload []byte) {
+	var event struct {
+		RunID  string `json:"run_id"`
+		Status string `json:"status"`
+	}
+	if err := json.Unmarshal(payload, &event); err != nil {
+		return
+	}
+	if event.Status == StatusRunning {
+		select {
+		case s.runningEntered <- event.RunID:
+		default:
+		}
+		if s.releaseRunning != nil {
+			<-s.releaseRunning
+		}
+	}
+	s.mu.Lock()
+	s.events[event.RunID] = append(s.events[event.RunID], event.Status)
+	s.mu.Unlock()
+}
+
+func (s *blockingOrderedSink) statuses(runID string) []string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return append([]string(nil), s.events[runID]...)
 }
 
 // TestFanout_UnderCap_RunsConcurrently dispatches 3 spawns (= cap) with
@@ -546,8 +596,8 @@ func TestFanout_OperatorCancelWhileQueuedPreventsRunner(t *testing.T) {
 		t.Fatalf("runners started while filling cap = %d, want %d", got, spawnFanoutCap)
 	}
 
-	runningIDs := make(chan string, 1)
-	svc.SetStreamSink(&runningRunSink{runIDs: runningIDs})
+	sink := newBlockingOrderedSink(false)
+	svc.SetStreamSink(sink)
 	extraDone := make(chan error, 1)
 	go func() {
 		_, err := svc.Spawn(context.Background(), SpawnRequest{
@@ -562,7 +612,7 @@ func TestFanout_OperatorCancelWhileQueuedPreventsRunner(t *testing.T) {
 
 	var queuedRunID string
 	select {
-	case queuedRunID = <-runningIDs:
+	case queuedRunID = <-sink.runningEntered:
 	case <-time.After(2 * time.Second):
 		t.Fatal("queued run did not emit its running transition")
 	}
@@ -598,9 +648,106 @@ func TestFanout_OperatorCancelWhileQueuedPreventsRunner(t *testing.T) {
 	if err != nil {
 		t.Fatalf("status queued run: %v", err)
 	}
-	if run.Status != StatusCancelled {
-		t.Fatalf("queued run status = %q, want %q", run.Status, StatusCancelled)
+	if run.Status != StatusCancelled || run.CompletedAt == "" {
+		t.Fatalf("queued run = status %q completed_at %q; want completed cancellation",
+			run.Status, run.CompletedAt)
 	}
+	statuses := sink.statuses(queuedRunID)
+	terminalCount := 0
+	for _, status := range statuses {
+		if status == StatusCancelled {
+			terminalCount++
+		}
+	}
+	if terminalCount != 1 {
+		t.Fatalf("queued run events = %v; want exactly one cancelled terminal event", statuses)
+	}
+	if statuses[len(statuses)-1] != StatusCancelled {
+		t.Fatalf("queued run events = %v; terminal cancellation must be last", statuses)
+	}
+}
+
+func TestApprove_CancelEmissionOrdering(t *testing.T) {
+	db, _ := newTestDB(t)
+	runner := newControlledRunner()
+	defer runner.release()
+	settings := stubSettings{us: store.UserSettings{
+		SubagentApprovalRequired:       true,
+		SubagentApprovalTimeoutSeconds: 3600,
+	}}
+	svc := NewService(db, runner, &stubPoster{}, &stubEmitter{}, settings)
+	runID, err := svc.Spawn(context.Background(), SpawnRequest{
+		ParentSessionID: "sess-approve-cancel-order",
+		ParentAgentID:   "parent-agent",
+		Role:            "worker-role",
+		Prompt:          "serialize approval and cancellation events",
+		Mode:            ModeAsync,
+	})
+	if err != nil {
+		t.Fatalf("spawn gated run: %v", err)
+	}
+
+	sink := newBlockingOrderedSink(true)
+	svc.SetStreamSink(sink)
+	approveDone := make(chan error, 1)
+	go func() { approveDone <- svc.Approve(context.Background(), runID) }()
+
+	select {
+	case emittedRunID := <-sink.runningEntered:
+		if emittedRunID != runID {
+			t.Fatalf("running event run_id = %q, want %q", emittedRunID, runID)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("approval did not begin its running emission")
+	}
+	if err := svc.Cancel(context.Background(), runID); err != nil {
+		t.Fatalf("cancel approved run: %v", err)
+	}
+	close(sink.releaseRunning)
+	select {
+	case err := <-approveDone:
+		if err != nil {
+			t.Fatalf("approve: %v", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("approve did not return after running event was released")
+	}
+
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		if len(sink.statuses(runID)) >= 2 {
+			break
+		}
+		time.Sleep(time.Millisecond)
+	}
+	statuses := sink.statuses(runID)
+	terminalCount := 0
+	for _, status := range statuses {
+		if status == StatusCancelled {
+			terminalCount++
+		}
+	}
+	if terminalCount != 1 {
+		t.Fatalf("approval/cancel events = %v; want exactly one cancelled terminal event", statuses)
+	}
+	if statuses[len(statuses)-1] != StatusCancelled {
+		t.Fatalf("approval/cancel events = %v; stale running event followed cancellation", statuses)
+	}
+	if got := runner.started.Load(); got != 0 {
+		t.Fatalf("runner.started = %d, want 0", got)
+	}
+	run, err := svc.Status(context.Background(), runID)
+	if err != nil {
+		t.Fatalf("status cancelled approval: %v", err)
+	}
+	if run.Status != StatusCancelled || run.CompletedAt == "" {
+		t.Fatalf("approved run = status %q completed_at %q; want completed cancellation",
+			run.Status, run.CompletedAt)
+	}
+	// Approve launches the cancelled queue wait after its ordered running emit
+	// drains. Give that cleanup goroutine time to observe the cancelled owner
+	// before newTestDB closes the database at test cleanup.
+	time.Sleep(25 * time.Millisecond)
 }
 
 // TestApprove_HandoffPrecedesRunningTransition holds the handoff mutex until

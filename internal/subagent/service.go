@@ -397,6 +397,15 @@ type Service struct {
 	cancelMu  sync.Mutex
 	cancelers map[string]*spawnSlotWait
 
+	// statusEmitMu protects the small FIFO used by lifecycle transitions that
+	// must publish in the same order they commit. The queue is drained without
+	// holding cancelMu or statusEmitMu, so a stream callback may safely call
+	// back into Cancel without deadlocking or reordering a later terminal event
+	// ahead of the running event that made the run observable.
+	statusEmitMu       sync.Mutex
+	statusEmitQueue    []statusEmission
+	statusEmitDraining bool
+
 	// spawnSem is a buffered-channel semaphore that bounds the number of
 	// Spawn invocations with an in-flight runner to spawnFanoutCap.
 	// Sends acquire a slot; receives release it. FIFO ordering is a
@@ -466,8 +475,23 @@ func (svc *Service) SetCompletionReactor(r CompletionReactor) { svc.reactor = r 
 // transition pass "", for terminal transitions pass result.Summary
 // (or "" on failure).
 func (svc *Service) emitStatus(run *Run, summaryPreview string) {
-	if svc.streamSink == nil {
+	event := svc.prepareStatusEmission(run, summaryPreview)
+	if event == nil {
 		return
+	}
+	event.sink.SubagentStatusChanged(event.parentSessionID, event.payload)
+}
+
+type statusEmission struct {
+	sink            SubagentStreamSink
+	parentSessionID string
+	payload         []byte
+}
+
+func (svc *Service) prepareStatusEmission(run *Run, summaryPreview string) *statusEmission {
+	sink := svc.streamSink
+	if sink == nil {
+		return nil
 	}
 	payload, err := json.Marshal(map[string]any{
 		"run_id":           run.ID,
@@ -479,9 +503,54 @@ func (svc *Service) emitStatus(run *Run, summaryPreview string) {
 	})
 	if err != nil {
 		slog.Warn("subagent: marshal status payload", "err", err, "run_id", run.ID)
+		return nil
+	}
+	return &statusEmission{sink: sink, parentSessionID: run.ParentSessionID, payload: payload}
+}
+
+// enqueueStatusEmission records a fully-materialized status event. Callers
+// that need transition ordering enqueue while holding cancelMu, then release
+// cancelMu before draining. This reserves event order at the same boundary as
+// the durable transition without ever invoking callbacks under a lifecycle
+// lock.
+func (svc *Service) enqueueStatusEmission(run *Run, summaryPreview string) bool {
+	event := svc.prepareStatusEmission(run, summaryPreview)
+	if event == nil {
+		return false
+	}
+	svc.statusEmitMu.Lock()
+	svc.statusEmitQueue = append(svc.statusEmitQueue, *event)
+	svc.statusEmitMu.Unlock()
+	return true
+}
+
+// drainStatusEmissions delivers queued events FIFO. Reentrant drains simply
+// return; the active drainer observes any event appended by the callback on
+// its next iteration. Neither lifecycle nor queue locks are held while the
+// external sink runs.
+func (svc *Service) drainStatusEmissions() {
+	svc.statusEmitMu.Lock()
+	if svc.statusEmitDraining {
+		svc.statusEmitMu.Unlock()
 		return
 	}
-	svc.streamSink.SubagentStatusChanged(run.ParentSessionID, payload)
+	svc.statusEmitDraining = true
+	svc.statusEmitMu.Unlock()
+
+	for {
+		svc.statusEmitMu.Lock()
+		if len(svc.statusEmitQueue) == 0 {
+			svc.statusEmitDraining = false
+			svc.statusEmitMu.Unlock()
+			return
+		}
+		event := svc.statusEmitQueue[0]
+		svc.statusEmitQueue[0] = statusEmission{}
+		svc.statusEmitQueue = svc.statusEmitQueue[1:]
+		svc.statusEmitMu.Unlock()
+
+		event.sink.SubagentStatusChanged(event.parentSessionID, event.payload)
+	}
 }
 
 // stampActivity persists a fresh last_activity_at for runID so the
@@ -945,14 +1014,14 @@ func (svc *Service) Status(ctx context.Context, runID string) (*Run, error) {
 }
 
 // Cancel marks a run as cancelled and unblocks its runner. Ordering
-// is load-bearing: on the success path we UPDATE the DB row to
-// cancelled FIRST, then invoke the registered CancelFunc. This makes
+// is load-bearing: on the success path we UPDATE the DB row to a complete
+// cancelled terminal state FIRST, reserve its terminal event, then invoke the
+// registered CancelFunc. This makes
 // cancellation deterministic — a concurrent finalizeRun from the
 // unblocked runner sees status = cancelled (not in the (running,
 // requested, approved) guard set) and no-ops. finalizeRun's re-read
-// branch then patches the in-memory Run so the G-5 terminal emit
-// reports "cancelled" (not the "failed" that execute writes after
-// ctx.Err()).
+// branch patches the in-memory Run but suppresses its own emit because Cancel
+// owns the authoritative terminal event.
 //
 // The cancellation owner is invoked before returning even if the DB UPDATE
 // errors (e.g., caller ctx times out). We'd rather return the error to the
@@ -969,14 +1038,38 @@ func (svc *Service) Cancel(ctx context.Context, runID string) error {
 	// plus owner installation, so Cancel observes either the wholly requested
 	// state or the wholly handed-off running state, never the gap between them.
 	svc.cancelMu.Lock()
-	defer svc.cancelMu.Unlock()
-	_, err := svc.db.ExecContext(ctx,
-		`UPDATE subagent_runs SET status = ? WHERE id = ? AND status IN (?,?,?)`,
-		StatusCancelled, runID, StatusRequested, StatusApproved, StatusRunning,
-	)
+	run, loadErr := svc.Status(ctx, runID)
+	now := time.Now().UTC().Format(time.RFC3339Nano)
+	var terminalQueued bool
+	var err error
+	if loadErr == nil {
+		var res sql.Result
+		res, err = svc.db.ExecContext(ctx,
+			`UPDATE subagent_runs
+			    SET status = ?, completed_at = ?
+			  WHERE id = ? AND status IN (?,?,?)`,
+			StatusCancelled, now, runID, StatusRequested, StatusApproved, StatusRunning,
+		)
+		if err == nil {
+			var affected int64
+			affected, err = res.RowsAffected()
+			if err == nil && affected > 0 {
+				run.Status = StatusCancelled
+				run.CompletedAt = now
+				run.Error = ""
+				terminalQueued = svc.enqueueStatusEmission(run, "")
+			}
+		}
+	} else if !errors.Is(loadErr, sql.ErrNoRows) {
+		err = loadErr
+	}
 	if owner, ok := svc.cancelers[runID]; ok {
 		owner.cancel()
 		delete(svc.cancelers, runID)
+	}
+	svc.cancelMu.Unlock()
+	if terminalQueued {
+		svc.drainStatusEmissions()
 	}
 	if err != nil {
 		return fmt.Errorf("cancel run: %w", err)
@@ -1118,6 +1211,7 @@ func (svc *Service) Approve(ctx context.Context, runID string) error {
 				run.ApprovedBy = ""
 				run.StartedAt = now
 				slotWait = svc.registerSpawnSlotWaitLocked(context.Background(), run.ID)
+				svc.enqueueStatusEmission(run, "")
 			}
 		}
 	}
@@ -1132,7 +1226,7 @@ func (svc *Service) Approve(ctx context.Context, runID string) error {
 	// Ownership is installed before publishing the running transition. Approve
 	// acquires capacity in the background so its HTTP caller remains fast, but
 	// Cancel can stop that queued wait from the moment the run is observable.
-	svc.emitStatus(run, "")
+	svc.drainStatusEmissions()
 
 	// Acquire inside the dispatched goroutine so approval responses do not
 	// inherit queue latency. The same semaphore and cancellation registration
@@ -1416,8 +1510,12 @@ func (svc *Service) execute(ctx context.Context, run *Run, parentAgentID string)
 	finalCtx, finalCancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer finalCancel()
 
-	if err := svc.finalizeRun(finalCtx, run); err != nil {
+	emitTerminal, err := svc.finalizeRun(finalCtx, run)
+	if err != nil {
 		slog.Warn("subagent: finalize run", "err", err, "run_id", run.ID)
+		// Preserve the prior best-effort behavior on a persistence failure: the
+		// event still reports the runner outcome even though the row write failed.
+		emitTerminal = true
 	}
 
 	// G-5: emit terminal event after finalizeRun commits, before the
@@ -1427,7 +1525,9 @@ func (svc *Service) execute(ctx context.Context, run *Run, parentAgentID string)
 	if result != nil {
 		terminalPreview = result.Summary
 	}
-	svc.emitStatus(run, terminalPreview)
+	if emitTerminal {
+		svc.emitStatus(run, terminalPreview)
+	}
 
 	// CW-20260519-0066: subagent → parent envelope hop. A subagent that
 	// produced a structured envelope (a plan-review / approval / proposal
@@ -1791,7 +1891,7 @@ func (svc *Service) insertRun(ctx context.Context, r *Run) error {
 // chain audit trail survives the final UPDATE. AttemptsJSON is
 // recorded incrementally by persistRetryCheckpoint between attempts;
 // this just makes sure the final row reflects the full history.
-func (svc *Service) finalizeRun(ctx context.Context, r *Run) error {
+func (svc *Service) finalizeRun(ctx context.Context, r *Run) (bool, error) {
 	attempts := r.AttemptsJSON
 	if attempts == "" {
 		attempts = "[]"
@@ -1806,7 +1906,7 @@ func (svc *Service) finalizeRun(ctx context.Context, r *Run) error {
 		r.ID, StatusRunning, StatusRequested, StatusApproved,
 	)
 	if err != nil {
-		return err
+		return false, err
 	}
 	// Zero rows updated means a concurrent Cancel (or another
 	// terminal transition) already wrote a terminal state. That's
@@ -1828,8 +1928,9 @@ func (svc *Service) finalizeRun(ctx context.Context, r *Run) error {
 				r.Error = ""
 			}
 		}
+		return false, nil
 	}
-	return nil
+	return true, nil
 }
 
 // shouldRetry decides whether execute's loop should run another

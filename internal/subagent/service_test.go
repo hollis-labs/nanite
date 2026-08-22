@@ -618,11 +618,9 @@ func TestSpawn_EmitsTerminalEventOnFailure(t *testing.T) {
 	}
 }
 
-// TestSpawn_EmitsTerminalEventOnCancelled verifies the terminal event
-// payload reports the DB-authoritative "cancelled" status, not the
-// in-memory "failed" that execute sets after the runner returns
-// ctx.Err(). finalizeRun's 0-rows-affected branch re-reads the row and
-// patches run.Status before the emit.
+// TestSpawn_EmitsTerminalEventOnCancelled verifies Cancel owns exactly one
+// terminal event with the DB-authoritative "cancelled" status. The runner's
+// later finalizeRun reconciliation must not emit a duplicate terminal event.
 func TestSpawn_EmitsTerminalEventOnCancelled(t *testing.T) {
 	db, _ := newTestDB(t)
 	sink := &recordingSink{}
@@ -658,8 +656,9 @@ func TestSpawn_EmitsTerminalEventOnCancelled(t *testing.T) {
 		t.Fatal("runner did not exit within 500ms of Cancel")
 	}
 
-	// Wait for the terminal emit to land (it fires from the runner
-	// goroutine after finalizeRun, which re-reads the cancelled row).
+	// Cancel emits synchronously in the uncontended path. Leave time for the
+	// runner's finalize path to run too, so a duplicate terminal event cannot
+	// hide behind the first successful assertion.
 	deadline := time.Now().Add(500 * time.Millisecond)
 	for time.Now().Before(deadline) {
 		if len(sink.snapshot()) >= 2 {
@@ -667,10 +666,11 @@ func TestSpawn_EmitsTerminalEventOnCancelled(t *testing.T) {
 		}
 		time.Sleep(10 * time.Millisecond)
 	}
+	time.Sleep(25 * time.Millisecond)
 
 	events := sink.snapshot()
-	if len(events) < 2 {
-		t.Fatalf("expected >= 2 events (running + terminal), got %d", len(events))
+	if len(events) != 2 {
+		t.Fatalf("events = %v; want exactly running + one terminal cancellation", events)
 	}
 	terminal := events[len(events)-1]
 	if got := terminal.Payload["status"]; got != "cancelled" {

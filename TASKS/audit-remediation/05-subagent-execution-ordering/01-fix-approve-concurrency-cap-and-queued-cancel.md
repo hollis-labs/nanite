@@ -595,6 +595,30 @@ Observable behavior required for PASS:
   `running` while the owner mutex was held; both caller-cancel and capacity-
   timeout queue tests failed with `status="running" completed_at=""`. The
   disposable worktree was removed after capturing the failures.
+- 2026-08-22 second review correction — Made `Cancel` own the complete
+  authoritative cancelled transition: its guarded update now stamps
+  `completed_at`, reserves exactly one immutable terminal event, and only then
+  invokes/removes the lifecycle owner. `finalizeRun` reports whether it won its
+  guarded transition so a cancelled runner's later reconciliation updates the
+  in-memory status without emitting a duplicate terminal event.
+- Approval now reserves its running event inside the same `cancelMu` critical
+  section as requested→running and cancellation-owner installation. A small
+  FIFO preserves that transition order while invoking stream callbacks with no
+  lifecycle or queue mutex held; a concurrent/reentrant `Cancel` therefore
+  queues behind running and terminal cancelled remains the last event without
+  callback deadlock risk.
+- Added deterministic coverage for queued operator cancellation's full durable
+  and event postconditions (`cancelled`, non-empty `completed_at`, runner never
+  invoked, exactly one terminal cancelled event) and for approval/cancellation
+  emission ordering with the running callback deliberately paused. The
+  pre-fix focused run failed with `completed_at=""` and events `[running]`;
+  after the fix the two new regressions plus the in-flight exactly-once emit
+  regression passed 100 non-race repetitions (88.853s) and 20 race repetitions
+  (533.604s). `go build ./internal/subagent/...`, `go vet
+  ./internal/subagent/...`, and the full non-race package suite (25.197s) also
+  passed. The already-clean 842.432s full package race gate from the preceding
+  correction was not repeated for this narrow delta while another exact gate
+  had quiet-host priority.
 
 ## Review notes
 

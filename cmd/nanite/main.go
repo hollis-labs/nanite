@@ -38,6 +38,7 @@ import (
 	"github.com/hollis-labs/nanite/internal/lifecycle"
 	nllmanthropic "github.com/hollis-labs/nanite/internal/llm/anthropic"
 	nllmopenai "github.com/hollis-labs/nanite/internal/llm/openai"
+	"github.com/hollis-labs/nanite/internal/loop"
 	"github.com/hollis-labs/nanite/internal/mcp"
 	"github.com/hollis-labs/nanite/internal/mcpserver"
 	"github.com/hollis-labs/nanite/internal/plugin"
@@ -502,6 +503,23 @@ func cmdServe(args []string) {
 	// callWorkflowRun can look up a named workflow's required inputs
 	// ahead of Launch — see WorkflowRegistry's doc comment.
 	selfTools.WorkflowRegistry = workflowDefinitionsRegistry
+
+	// TASKS/loops/09-stepkindloop-executor-and-waiting-status.md: wire
+	// StepKindLoop (a Workflow containing a Loop, docs/engineering/
+	// architecture/21-loops.md Decision 1) support. loopEngine reuses the
+	// exact same workflowDefinitionsRegistry/workflowLauncher pair every
+	// other workflow-launching path above shares — a loop iteration is
+	// just an ordinary WorkflowDefinition, launched the same way. The
+	// notifier is the real push mechanism: the moment a LoopRun launched
+	// from a StepKindLoop step reaches a terminal state, it resumes the
+	// specific outer WorkflowRun waiting on it directly, rather than
+	// leaving that to a lazy re-check some unrelated caller might never
+	// trigger (see workflow_engine_loop.go's own package doc comment for
+	// the full import-cycle reasoning behind this two-interface shape).
+	loopEngine := loop.NewLoopEngine(container.Store, workflowDefinitionsRegistry, workflowLauncher)
+	loopResumeNotifier := service.NewLoopResumeNotifier(container.Store, workflowDefinitionsRegistry, workflowLauncher)
+	loopEngine.WithOuterResumeNotifier(loopResumeNotifier)
+	workflowEngine.WithLoopSupport(container.Store, loopEngine)
 
 	// CW-20260814-0014: A2A Agent Card generator for /.well-known/agent-card.json
 	// Uses the workflow registry to derive skills. TASKS/phase-2/04-

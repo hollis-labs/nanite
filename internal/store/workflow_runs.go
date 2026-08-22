@@ -57,10 +57,30 @@ type WorkflowRunStepRow struct {
 	StartedAt     time.Time
 	CompletedAt   time.Time
 	UpdatedAt     time.Time
+
+	// LoopRunID is set only for a StepKindLoop step (TASKS/loops/
+	// 09-stepkindloop-executor-and-waiting-status.md): the loop_runs.id of
+	// the contained LoopRun this step launched, recorded as soon as
+	// LoopEngine.Run returns a loop_run_id (whether the step then resolves
+	// immediately or parks itself waiting_on_loop). REFERENCES
+	// loop_runs(id). nil for every non-loop step, and nil for a loop step
+	// that hasn't launched yet. This is the reverse direction from
+	// WorkflowRunRow.LoopRunID (migration 140: "given a WorkflowRun, what
+	// loop is it in," set when a run itself IS one loop iteration) — this
+	// field answers "given a WorkflowRun's own STEP, what loop did it
+	// launch," and is what GetWorkflowRunStepByLoopRunID looks up by.
+	LoopRunID *string
 }
 
 // ErrWorkflowRunNotFound signals an unknown workflow_runs.id.
 var ErrWorkflowRunNotFound = errors.New("workflow_runs: not found")
+
+// ErrWorkflowRunStepNotFound signals no workflow_run_steps row matched a
+// lookup — e.g. GetWorkflowRunStepByLoopRunID for a loop_run_id no step
+// references (the ordinary case for the overwhelming majority of
+// LoopRuns, which are launched directly rather than from a StepKindLoop
+// step — docs/engineering/architecture/21-loops.md's "Trigger surface").
+var ErrWorkflowRunStepNotFound = errors.New("workflow_run_steps: not found")
 
 const workflowRunColumns = `id, definition_name, status, input_json, error, started_at, completed_at, updated_at, loop_run_id, loop_iteration`
 
@@ -214,7 +234,7 @@ func scanWorkflowRunRow(scanner interface{ Scan(...any) error }) (*WorkflowRunRo
 	return r, nil
 }
 
-const workflowRunStepColumns = `id, workflow_run_id, step_id, kind, status, output, is_error, tool_calls_json, verify_json, error, gate_input, started_at, completed_at, updated_at`
+const workflowRunStepColumns = `id, workflow_run_id, step_id, kind, status, output, is_error, tool_calls_json, verify_json, error, gate_input, started_at, completed_at, updated_at, loop_run_id`
 
 // workflowRunStepID builds the deterministic synthetic PK for a
 // (workflow_run_id, step_id) pair — stable and collision-free without
@@ -248,7 +268,7 @@ func (s *Store) UpsertWorkflowRunStep(row *WorkflowRunStepRow) error {
 
 	_, err := s.DB.Exec(
 		`INSERT INTO workflow_run_steps (`+workflowRunStepColumns+`)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		 ON CONFLICT(id) DO UPDATE SET
 		     kind = excluded.kind,
 		     status = excluded.status,
@@ -260,11 +280,12 @@ func (s *Store) UpsertWorkflowRunStep(row *WorkflowRunStepRow) error {
 		     gate_input = excluded.gate_input,
 		     started_at = CASE WHEN excluded.started_at = '' THEN workflow_run_steps.started_at ELSE excluded.started_at END,
 		     completed_at = excluded.completed_at,
-		     updated_at = excluded.updated_at`,
+		     updated_at = excluded.updated_at,
+		     loop_run_id = excluded.loop_run_id`,
 		row.ID, row.WorkflowRunID, row.StepID, row.Kind, row.Status, row.Output, row.IsError,
 		row.ToolCallsJSON, row.VerifyJSON, row.Error, row.GateInput,
 		formatTimeRFC3339NanoOrEmpty(row.StartedAt), formatTimeRFC3339NanoOrEmpty(row.CompletedAt),
-		formatTimeRFC3339Nano(row.UpdatedAt),
+		formatTimeRFC3339Nano(row.UpdatedAt), row.LoopRunID,
 	)
 	if err != nil {
 		return fmt.Errorf("upsert workflow_run_steps %s: %w", row.ID, err)
@@ -301,9 +322,11 @@ func (s *Store) ListWorkflowRunSteps(runID string) ([]*WorkflowRunStepRow, error
 func scanWorkflowRunStepRow(scanner interface{ Scan(...any) error }) (*WorkflowRunStepRow, error) {
 	r := &WorkflowRunStepRow{}
 	var startedAt, completedAt, updatedAt string
+	var loopRunID sql.NullString
 	err := scanner.Scan(
 		&r.ID, &r.WorkflowRunID, &r.StepID, &r.Kind, &r.Status, &r.Output, &r.IsError,
 		&r.ToolCallsJSON, &r.VerifyJSON, &r.Error, &r.GateInput, &startedAt, &completedAt, &updatedAt,
+		&loopRunID,
 	)
 	if err != nil {
 		return nil, err
@@ -311,6 +334,39 @@ func scanWorkflowRunStepRow(scanner interface{ Scan(...any) error }) (*WorkflowR
 	r.StartedAt = parseTimeRFC3339Nano(startedAt)
 	r.CompletedAt = parseTimeRFC3339Nano(completedAt)
 	r.UpdatedAt = parseTimeRFC3339Nano(updatedAt)
+	if loopRunID.Valid {
+		v := loopRunID.String
+		r.LoopRunID = &v
+	}
+	return r, nil
+}
+
+// GetWorkflowRunStepByLoopRunID finds the (at most one) workflow_run_steps
+// row whose loop_run_id column matches loopRunID — the outer StepKindLoop
+// step waiting on a given contained LoopRun, if this LoopRun was ever
+// launched from one (TASKS/loops/09-stepkindloop-executor-and-waiting-
+// status.md). Returns ErrWorkflowRunStepNotFound when no such row exists —
+// the ordinary case for the overwhelming majority of LoopRuns, which are
+// launched directly (Manual/API launch), not from a StepKindLoop step at
+// all (docs/engineering/architecture/21-loops.md's "Trigger surface").
+// Intended caller: service.LoopResumeNotifier.NotifyLoopRunTerminal, the
+// real push a terminal LoopRun uses to find and resume its specific outer
+// WorkflowRun.
+func (s *Store) GetWorkflowRunStepByLoopRunID(loopRunID string) (*WorkflowRunStepRow, error) {
+	if loopRunID == "" {
+		return nil, errors.New("GetWorkflowRunStepByLoopRunID: empty loop_run_id")
+	}
+	row := s.DB.QueryRow(
+		`SELECT `+workflowRunStepColumns+` FROM workflow_run_steps WHERE loop_run_id = ? LIMIT 1`,
+		loopRunID,
+	)
+	r, err := scanWorkflowRunStepRow(row)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, ErrWorkflowRunStepNotFound
+	}
+	if err != nil {
+		return nil, fmt.Errorf("get workflow_run_steps by loop_run_id %s: %w", loopRunID, err)
+	}
 	return r, nil
 }
 

@@ -22,7 +22,7 @@ func Validate(wf WorkflowDefinition) error {
 			return fmt.Errorf("agentworkflow: workflow %q has a step with an empty id", wf.Name)
 		}
 		switch s.Kind {
-		case StepKindLLM, StepKindTool, StepKindGate, StepKindFlex:
+		case StepKindLLM, StepKindTool, StepKindGate, StepKindFlex, StepKindLoop:
 		default:
 			return fmt.Errorf("agentworkflow: step %q has unknown kind %q", s.ID, s.Kind)
 		}

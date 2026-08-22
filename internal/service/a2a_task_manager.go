@@ -510,8 +510,20 @@ func (tm *TaskManager) deriveFromWorkflowRun(ctx context.Context, runID string) 
 	// self-organizing against a live exit trigger, not blocked on a
 	// human, and migration 133 exists specifically so this distinction is
 	// real at the DB layer, not just documented here.
+	// TASKS/loops/09-stepkindloop-executor-and-waiting-status.md:
+	// waiting_on_loop → working, by the same reasoning — a loop-waiting
+	// run is a contained LoopRun making progress toward its goal, not
+	// blocked on a human, and is "the least human-attention-demanding
+	// kind" of the three waiting states per
+	// docs/engineering/architecture/21-loops.md Decision 1. This
+	// deliberately does NOT special-case a LoopRun that has itself
+	// escalated (loop_runs.status = 'waiting_on_escalation'): that is a
+	// real, separate signal surfaced via the LoopRun's own status (a
+	// future task's job, once a LoopRun escalation surface exists), not
+	// overloaded onto this outer WorkflowRun's A2A TaskState — the
+	// documented resolution this task's Context section asked for.
 	switch run.Status {
-	case "running", "waiting_on_flex":
+	case "running", "waiting_on_flex", "waiting_on_loop":
 		return a2a.TaskStateWorking
 	case "waiting_on_gate":
 		return a2a.TaskStateInputRequired

@@ -346,10 +346,11 @@ func (l *TeamRunLauncher) LaunchTeamRun(ctx context.Context, teamID string, over
 
 // isTerminalRunStatus reports whether status is one of the built-in
 // engine's real terminal states (agentworkflow.RunStatusCompleted/Failed/
-// Cancelled) — as opposed to RunStatusWaiting/RunStatusWaitingOnFlex, which
-// mean the run made all the progress it currently can but is not done: a
-// later external Resume call will still need to look its compiled
-// definition up by name. See this file's own Unregister call site, above.
+// Cancelled) — as opposed to RunStatusWaiting/RunStatusWaitingOnFlex/
+// RunStatusWaitingOnLoop, which mean the run made all the progress it
+// currently can but is not done: a later external Resume call will still
+// need to look its compiled definition up by name. See this file's own
+// Unregister call site, above.
 func isTerminalRunStatus(status agentworkflow.RunStatus) bool {
 	switch status {
 	case agentworkflow.RunStatusCompleted, agentworkflow.RunStatusFailed, agentworkflow.RunStatusCancelled:

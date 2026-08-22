@@ -16,8 +16,13 @@ group — that work is deliberately deferred to a planner pass.
    package-cluster reviews, ~150 pages of evidence). Every task file below
    cites the specific `§8.N` section(s) it draws from — read those sections,
    not the whole report, unless you need the cross-cluster synthesis in `§9`.
-2. **`docs/audits/2026-08-21-go-quality/findings.json`** — the machine-readable
-   catalog (113 findings, guide §26 schema) the audit produced.
+2. **`findings.json`** (this folder) — the **working tracking copy** of the
+   machine-readable catalog. See "Tracking progress" below before editing it.
+   `docs/audits/2026-08-21-go-quality/findings.json` is the **pristine**
+   original (113 findings, guide §26 schema) the audit produced — leave that
+   copy untouched forever, per the remediation guide's Wave 0 instruction to
+   "preserve original audit state in the JSON catalog." This folder's copy is
+   the one that's meant to be mutated as work lands.
 3. **`~/dev/chrispian/inbox/nanite-audit-triage-remediation-planning-guide.md`**
    — the advisor's remediation-planning guide this task inventory follows.
    Its "Proposed remediation waves" (§4) is the direct source for this folder's
@@ -104,10 +109,13 @@ Every task file:
 
 - **Sequencing/wave assignment as a commitment** — the folder numbering
   mirrors the guide's suggested order but is not binding.
-- **The finding disposition table** (guide §4 output C) — deciding
+- **The finding disposition table** (guide §4 output C) — `findings.json`
+  (this folder) has the `disposition` field scaffolded on every finding, but
+  every value is currently the placeholder `remediate`; actually deciding
   `already-resolved` / `accepted-risk` / `false-positive` / `superseded` /
   `defer` / `needs-more-evidence` per finding requires the Wave-0
-  HEAD-vs-audit-commit revalidation this pass didn't do.
+  HEAD-vs-audit-commit revalidation this pass didn't do. See "Tracking
+  progress" above.
 - **The dependency ordering YAML** (guide §5) per task — `depends_on: /
   blocks: / can_parallelize_with:` needs cross-folder analysis.
 - **`TASKS/INDEX.md` entry** — not added yet; a planner pass should add one
@@ -119,11 +127,60 @@ Every task file:
   wire/defer/retire calls and the other ~9 items the remediation guide's §9
   names as required architect decisions are queued, not made.
 
+## Tracking progress — `findings.json`
+
+`findings.json` (this folder) is `docs/audits/2026-08-21-go-quality/findings.json`
+plus three added fields per finding, meant to be updated in place as
+remediation actually happens:
+
+- **`task_file`** — the exact path (relative to `TASKS/audit-remediation/`)
+  of the task that addresses this finding. Pre-populated from
+  `FINDING-INDEX.md`'s mapping; should not need to change unless a planner
+  splits/merges/renames a task file, in which case update both this field
+  and `FINDING-INDEX.md` together so they don't drift apart.
+- **`disposition`** — one of `allowed_dispositions` (top of the file):
+  `remediate | already-resolved | accepted-risk | false-positive |
+  superseded | defer | retire-feature | needs-architect-decision |
+  needs-more-evidence`. Every finding currently defaults to `remediate`
+  because this task-creation pass did **not** do the Wave-0
+  HEAD-vs-`8feeee5c` revalidation — the planner's first real edit to this
+  file should be walking the 113 findings against current source and
+  correcting dispositions before doing anything else (some may already be
+  `already-resolved` from dev work that landed since the audit). This field
+  is what eventually becomes the guide's §4 output-format-C disposition
+  table — filling it in here *is* producing that table, not a separate step.
+- **`task_status`** — one of `allowed_task_statuses` (top of the file):
+  `not-started | in-progress | implemented | validated | reviewed | done`.
+  **Must mirror the `**Status:**` line at the top of the finding's own
+  `task_file`** — when a worker/reviewer updates a task file's Status line
+  (per this project's normal task-lifecycle convention), update this field
+  to match in the same pass. This field is what lets anyone answer "how much
+  of the audit is actually closed" by reading one JSON file instead of
+  opening 61 task files, and lets a future `docs/audits/<new-date>/`
+  re-audit diff cleanly against a known remediation state.
+
+Both `disposition` and `task_status` are independent axes — a finding can be
+`disposition: defer` with `task_status: not-started` (an island the architect
+chose not to wire yet) or `disposition: remediate` with `task_status: done`
+(fixed and closed). Don't conflate them: `disposition` is "what should happen
+to this finding," `task_status` is "how far along that is."
+
+When a batch of tasks lands, update this file's `findings` array for every
+finding that task addressed — a task file addressing 3 findings (e.g.
+`GO-PLUGIN-001/002/003`) means updating all 3 entries, even if they resolve
+together in one PR. Do not edit `docs/audits/2026-08-21-go-quality/findings.json`
+to match — that file stays frozen as the original audit snapshot so a future
+re-audit has something stable to diff against.
+
 ## Recommended next step
 
 Boot a Planner session (or the operator, directly) against this folder plus
 the remediation guide, to: (1) do the Wave-0 HEAD-vs-`8feeee5c` revalidation,
-(2) produce the finding disposition table, (3) sequence these 61 tasks into
-an actual batch `README.md` with dependency ordering and a parallelization
-plan, and (4) resolve the architect-decision queue before any task is
-dispatched to a worker.
+(2) update `findings.json`'s `disposition` field per finding as that
+revalidation proceeds — this **is** producing the disposition table, not a
+separate deliverable, (3) sequence these 61 tasks into an actual batch
+`README.md` with dependency ordering and a parallelization plan, and
+(4) resolve the architect-decision queue before any task is dispatched to a
+worker. As work subsequently lands, keep `findings.json`'s `task_status`
+field in sync with each task file's own `**Status:**` line — see "Tracking
+progress" above.

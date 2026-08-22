@@ -1,7 +1,7 @@
 # Route `Approve()` through the spawn concurrency cap; make a queued-run `Cancel()` actually stop the run
 
 **Phase:** Wave 2 — Correctness, lifecycle, concurrency (per remediation guide §4)
-**Status:** implemented
+**Status:** reviewed
 **Depends on:** none within this batch (single-task folder; no sibling task in
 `05-subagent-execution-ordering/` to sequence against).
 **Touches:** `internal/subagent/service.go` (`Spawn`, `Approve`, `Cancel`,
@@ -639,4 +639,19 @@ Observable behavior required for PASS:
 
 ## Review notes
 
-<Reviewer fills this in.>
+- PASS (2026-08-22): final independent review verified that every runner entry
+  obeys the shared fan-out cap, cancellation ownership is installed at the
+  durable transition, and operator/caller/capacity cancellation cannot invoke a
+  queued runner or strand a running row. Cancel owns `cancelled`,
+  `completed_at`, and exactly one terminal event; guarded finalization cannot
+  duplicate it.
+- Earlier reviews found and drove corrections for the transition-without-owner
+  gap, abandoned running rows, missing operator-cancel terminal bookkeeping,
+  stale running-event ordering, and a service-global emission FIFO that could
+  reorder unrelated runs or wedge on callback panic.
+- The final per-run queue/barrier is bounded to the immutable running event and
+  at most one guarded terminal event. Approval drains its own running event
+  before launch; reentrant cancellation does not wait on itself; callback
+  panics are contained; unrelated runs share no lock or backlog. Independent
+  adversarial tests passed 20 times non-race and three times under race, and
+  the full non-race subagent package, build, vet, and diff checks passed.

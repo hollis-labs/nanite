@@ -1043,7 +1043,7 @@ must not be dispatched.
 | `04/03` | `04-container-reaper-lifecycle/03-investigate-internal-service-race-timeout.md` | reviewed | `04/02` | — |
 | `04/04` | `04-container-reaper-lifecycle/04-track-untracked-goroutine-spawns.md` | reviewed | `00/01` | — |
 | `04/05` | `04-container-reaper-lifecycle/05-close-untested-service-config-functions.md` | reviewed | `00/01` | — |
-| `05/01` | `05-subagent-execution-ordering/01-fix-approve-concurrency-cap-and-queued-cancel.md` | not-started | `00/01` | — |
+| `05/01` | `05-subagent-execution-ordering/01-fix-approve-concurrency-cap-and-queued-cancel.md` | reviewed | `00/01` | — |
 
 ### Wave 2b — Store correctness + runtime lifecycle
 

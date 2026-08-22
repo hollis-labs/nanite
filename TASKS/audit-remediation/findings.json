@@ -2203,7 +2203,7 @@
       "report_section": "\u00a78.10",
       "task_file": "TASKS/audit-remediation/05-subagent-execution-ordering/01-fix-approve-concurrency-cap-and-queued-cancel.md",
       "disposition": "remediate",
-      "task_status": "not-started",
+      "task_status": "reviewed",
       "revalidation_note": "Confirmed still open: Approve (service.go:1087-1123) launches `safego.Go(...){ svc.execute(...) }` directly with no call to acquireSpawnSlot anywhere in the function, while Spawn's ungated paths (:891,:909) both call it first. Unambiguous bug; fix is a simple routing change."
     },
     {
@@ -2233,7 +2233,7 @@
       "false_positive_considerations": "Data integrity is not at risk -- finalizeRun's reconciliation correctly prevents a stale/wrong terminal status; only the run itself proceeds when it shouldn't.",
       "task_file": "TASKS/audit-remediation/05-subagent-execution-ordering/01-fix-approve-concurrency-cap-and-queued-cancel.md",
       "disposition": "remediate",
-      "task_status": "not-started",
+      "task_status": "reviewed",
       "revalidation_note": "Confirmed still open: in Spawn (service.go:868-919), `run.Status = StatusRunning` and `svc.emitStatus(run, \"\")` (the running broadcast) both happen at :871/:879, before `acquireSpawnSlot` at :891/:909, and `svc.cancelers[run.ID]` is only registered after the slot is acquired (:895-897, :913-915) -- a run canceled while queued has no registered canceler yet."
     },
     {

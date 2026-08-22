@@ -43,12 +43,25 @@ func TestGoAdmissionGateCoversWaitGroupAdd(t *testing.T) {
 	gapReached := make(chan struct{})
 	releaseAdd := make(chan struct{})
 	workStarted := make(chan struct{})
-	m.testBeforeAdmissionAdd = func() {
+	var shutdownReturned atomic.Bool
+	var workStartedAfterReturn atomic.Bool
+	m.testAdmissionAdd = func(add func()) {
 		close(gapReached)
 		<-releaseAdd
+		add()
 	}
+	t.Cleanup(func() {
+		select {
+		case <-releaseAdd:
+		default:
+			close(releaseAdd)
+		}
+	})
 
 	go m.Go("racer", func(ctx context.Context) {
+		if shutdownReturned.Load() {
+			workStartedAfterReturn.Store(true)
+		}
 		close(workStarted)
 		<-ctx.Done()
 	})
@@ -62,7 +75,23 @@ func TestGoAdmissionGateCoversWaitGroupAdd(t *testing.T) {
 	}
 
 	shutdownDone := make(chan error, 1)
-	go func() { shutdownDone <- m.Shutdown(time.Second) }()
+	shutdownStarted := make(chan struct{})
+	go func() {
+		close(shutdownStarted)
+		err := m.Shutdown(time.Second)
+		shutdownReturned.Store(true)
+		shutdownDone <- err
+	}()
+	<-shutdownStarted
+
+	// The work item has passed the closed check and is therefore admitted, but
+	// it has not reached WaitGroup.Add yet. Shutdown must not be able to return
+	// from this state.
+	select {
+	case err := <-shutdownDone:
+		t.Fatalf("shutdown returned before admitted work was counted: %v", err)
+	case <-time.After(50 * time.Millisecond):
+	}
 	close(releaseAdd)
 
 	select {
@@ -72,6 +101,9 @@ func TestGoAdmissionGateCoversWaitGroupAdd(t *testing.T) {
 	}
 	if err := <-shutdownDone; err != nil {
 		t.Fatalf("shutdown: %v", err)
+	}
+	if workStartedAfterReturn.Load() {
+		t.Fatal("admitted work started after Shutdown returned")
 	}
 }
 

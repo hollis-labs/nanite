@@ -1213,6 +1213,12 @@ func NewContainer(cfg ContainerConfig) (*Container, error) {
 	// Bound to a dedicated cancel func so Shutdown can stop it before
 	// the DB closes; goroutine exits on ctx.Done OR Reaper.Stop.
 	reaperCtx, stopReaper := context.WithCancel(context.Background())
+	containerCommitted := false
+	defer func() {
+		if !containerCommitted {
+			stopReaper()
+		}
+	}()
 	subagentReaper := subagent.NewReaper(cfg.Store.DB, subagent.ReaperOptions{})
 	subagentReaper.Start(reaperCtx)
 	slog.Info("service container: subagent reaper started",
@@ -1233,6 +1239,11 @@ func NewContainer(cfg ContainerConfig) (*Container, error) {
 	// before the chat layer starts serving requests; periodic reaper
 	// then catches mid-run deaths on the configured interval.
 	runtimeReaperCtx, stopRuntimeReaper := context.WithCancel(context.Background())
+	defer func() {
+		if !containerCommitted {
+			stopRuntimeReaper()
+		}
+	}()
 	runtimeReaper := orphansweep.NewRuntimeReaper(agentDeps, orphansweep.RuntimeReaperOptions{})
 	// PR #213 review: bound the startup sweep to runtimeReaperCtx (so Shutdown
 	// during container build can cancel it) and to a 30s wall clock (so a
@@ -1394,7 +1405,7 @@ func NewContainer(cfg ContainerConfig) (*Container, error) {
 
 	slog.Info("service container: all services wired")
 
-	return &Container{
+	container := &Container{
 		Sessions:            sessions,
 		Agents:              agents,
 		Skills:              skills,
@@ -1453,7 +1464,9 @@ func NewContainer(cfg ContainerConfig) (*Container, error) {
 		stopSubagentReaper:  stopReaper,
 		runtimeReaper:       runtimeReaper,
 		stopRuntimeReaper:   stopRuntimeReaper,
-	}, nil
+	}
+	containerCommitted = true
+	return container, nil
 }
 
 // RefreshUtilitySettings updates the utility provider/model on the running

@@ -85,7 +85,7 @@ func TestEvaluateLoopRunResumeReflexes_TriggerFalse_DoesNotResume(t *testing.T) 
 	engine := newTestReflexEngineForLoopResume(t, st)
 	resumer := &fakeLoopRunResumer{}
 
-	fired, err := EvaluateLoopRunResumeReflexes(context.Background(), engine, resumer, loopRunID, reflexes.State{
+	fired, hadCandidates, err := EvaluateLoopRunResumeReflexes(context.Background(), engine, resumer, loopRunID, reflexes.State{
 		SessionID: "", // no live chat session -- the whole point of this trigger kind
 	})
 	if err != nil {
@@ -93,6 +93,9 @@ func TestEvaluateLoopRunResumeReflexes_TriggerFalse_DoesNotResume(t *testing.T) 
 	}
 	if fired {
 		t.Error("fired = true, want false (event has not occurred)")
+	}
+	if !hadCandidates {
+		t.Error("hadCandidates = false, want true (a resume_loop_run reflex is attached, it just hasn't fired)")
 	}
 	if len(resumer.calls) != 0 {
 		t.Errorf("resumer.calls = %v, want none", resumer.calls)
@@ -111,7 +114,7 @@ func TestEvaluateLoopRunResumeReflexes_TriggerTrue_CallsResume(t *testing.T) {
 	engine := newTestReflexEngineForLoopResume(t, st)
 	resumer := &fakeLoopRunResumer{}
 
-	fired, err := EvaluateLoopRunResumeReflexes(context.Background(), engine, resumer, loopRunID, reflexes.State{
+	fired, hadCandidates, err := EvaluateLoopRunResumeReflexes(context.Background(), engine, resumer, loopRunID, reflexes.State{
 		Events: []reflexes.EventSignal{{EventType: "external_check_passed", Category: "test"}},
 	})
 	if err != nil {
@@ -119,6 +122,9 @@ func TestEvaluateLoopRunResumeReflexes_TriggerTrue_CallsResume(t *testing.T) {
 	}
 	if !fired {
 		t.Fatal("fired = false, want true (event occurred)")
+	}
+	if !hadCandidates {
+		t.Error("hadCandidates = false, want true")
 	}
 	if len(resumer.calls) != 1 || resumer.calls[0] != loopRunID {
 		t.Fatalf("resumer.calls = %v, want exactly [%s]", resumer.calls, loopRunID)
@@ -160,7 +166,7 @@ func TestEvaluateLoopRunResumeReflexes_NotWaitingOnEscalation_IsANoOp(t *testing
 	engine := newTestReflexEngineForLoopResume(t, st)
 	resumer := &fakeLoopRunResumer{}
 
-	fired, err := EvaluateLoopRunResumeReflexes(ctx, engine, resumer, lr.ID, reflexes.State{
+	fired, hadCandidates, err := EvaluateLoopRunResumeReflexes(ctx, engine, resumer, lr.ID, reflexes.State{
 		Events: []reflexes.EventSignal{{EventType: "external_check_passed"}},
 	})
 	if err != nil {
@@ -168,6 +174,9 @@ func TestEvaluateLoopRunResumeReflexes_NotWaitingOnEscalation_IsANoOp(t *testing
 	}
 	if fired {
 		t.Error("fired = true, want false (loop run is not waiting_on_escalation)")
+	}
+	if hadCandidates {
+		t.Error("hadCandidates = true, want false (the status guard returns before candidates are even listed)")
 	}
 	if len(resumer.calls) != 0 {
 		t.Errorf("resumer.calls = %v, want none", resumer.calls)
@@ -187,11 +196,14 @@ func TestEvaluateLoopRunResumeReflexes_ResumerError_IsSurfaced(t *testing.T) {
 	wantErr := errors.New("boom")
 	resumer := &fakeLoopRunResumer{err: wantErr}
 
-	fired, err := EvaluateLoopRunResumeReflexes(context.Background(), engine, resumer, loopRunID, reflexes.State{
+	fired, hadCandidates, err := EvaluateLoopRunResumeReflexes(context.Background(), engine, resumer, loopRunID, reflexes.State{
 		Events: []reflexes.EventSignal{{EventType: "external_check_passed"}},
 	})
 	if !fired {
 		t.Error("fired = false, want true (the candidate did fire; the resumer call is what failed)")
+	}
+	if !hadCandidates {
+		t.Error("hadCandidates = false, want true")
 	}
 	if err == nil {
 		t.Fatal("err = nil, want the resumer's error to be surfaced")
@@ -210,12 +222,15 @@ func TestEvaluateLoopRunResumeReflexes_NoCandidates_IsANoOp(t *testing.T) {
 	engine := newTestReflexEngineForLoopResume(t, st)
 	resumer := &fakeLoopRunResumer{}
 
-	fired, err := EvaluateLoopRunResumeReflexes(context.Background(), engine, resumer, loopRunID, reflexes.State{})
+	fired, hadCandidates, err := EvaluateLoopRunResumeReflexes(context.Background(), engine, resumer, loopRunID, reflexes.State{})
 	if err != nil {
 		t.Fatalf("EvaluateLoopRunResumeReflexes: %v", err)
 	}
 	if fired {
 		t.Error("fired = true, want false (no candidates)")
+	}
+	if hadCandidates {
+		t.Error("hadCandidates = true, want false (zero resume_loop_run reflexes attached)")
 	}
 }
 
@@ -227,13 +242,13 @@ func TestEvaluateLoopRunResumeReflexes_ArgumentGuards(t *testing.T) {
 	resumer := &fakeLoopRunResumer{}
 	ctx := context.Background()
 
-	if _, err := EvaluateLoopRunResumeReflexes(ctx, nil, resumer, "lr-1", reflexes.State{}); err == nil {
+	if _, _, err := EvaluateLoopRunResumeReflexes(ctx, nil, resumer, "lr-1", reflexes.State{}); err == nil {
 		t.Error("nil reflexEngine: want error, got nil")
 	}
-	if _, err := EvaluateLoopRunResumeReflexes(ctx, engine, nil, "lr-1", reflexes.State{}); err == nil {
+	if _, _, err := EvaluateLoopRunResumeReflexes(ctx, engine, nil, "lr-1", reflexes.State{}); err == nil {
 		t.Error("nil resumer: want error, got nil")
 	}
-	if _, err := EvaluateLoopRunResumeReflexes(ctx, engine, resumer, "", reflexes.State{}); err == nil {
+	if _, _, err := EvaluateLoopRunResumeReflexes(ctx, engine, resumer, "", reflexes.State{}); err == nil {
 		t.Error("empty loop_run_id: want error, got nil")
 	}
 }

@@ -217,6 +217,17 @@ type Container struct {
 	// by sessionID inside the Engine.
 	ReminderEngine *reminders.Engine
 
+	// ReflexEngine is the FU-30 DB-backed agent reflex engine, constructed
+	// inside NewContainer and also handed to NewChatService via
+	// ChatServiceConfig.ReflexEngine — this field exists so main.go's own
+	// later wiring can reuse the exact same instance instead of
+	// constructing a second *reflexes.Engine. Loops/
+	// 11-loop-event-predicate-trigger.md + 12-loop-run-tick-scheduled-
+	// trigger.md integration fix: internal/loop's tick-resume bridge
+	// (tick_resume.go) needs this same engine to evaluate resume_loop_run
+	// reflexes from the scheduler's loop_run_tick job type. Always non-nil.
+	ReflexEngine *reflexes.Engine
+
 	// AgentCardGenerator builds A2A Agent Cards from workflow registry + boot profiles
 	// (CW-20260814-0014). Serves /.well-known/agent-card.json.
 	AgentCardGenerator *AgentCardGenerator
@@ -1405,6 +1416,7 @@ func NewContainer(cfg ContainerConfig) (*Container, error) {
 		Inspector:              inspectorSvc,
 		LoopDetector:           loopDetector,
 		ReminderEngine:         reminderEngine,
+		ReflexEngine:           reflexEngine,
 		RunStore:               runStore,
 		WorkflowBroadcaster:    workflowBroadcaster,
 		AppConfig:              cfg.AppConfig,

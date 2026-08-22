@@ -116,12 +116,15 @@ func TestResumeLoopRunReflex_FiresLoopEngineResume_ViaRealEvaluationCadence(t *t
 	// and LoopEngine.Resume must genuinely NOT be called as a result. The
 	// only way to observe this from outside is that the LoopRun's own
 	// persisted state does not move.
-	fired, err := service.EvaluateLoopRunResumeReflexes(ctx, reflexEngine, eng, loopRunID, reflexes.State{})
+	fired, hadCandidates, err := service.EvaluateLoopRunResumeReflexes(ctx, reflexEngine, eng, loopRunID, reflexes.State{})
 	if err != nil {
 		t.Fatalf("EvaluateLoopRunResumeReflexes (condition not yet true): %v", err)
 	}
 	if fired {
 		t.Fatal("fired = true before the external condition occurred, want false")
+	}
+	if !hadCandidates {
+		t.Fatal("hadCandidates = false, want true (a resume_loop_run reflex is attached to this loop run)")
 	}
 	stillWaiting, err := st.GetLoopRun(ctx, loopRunID)
 	if err != nil {
@@ -135,7 +138,7 @@ func TestResumeLoopRunReflex_FiresLoopEngineResume_ViaRealEvaluationCadence(t *t
 	// evaluation cadence" this task's own item 3 investigation identified
 	// (a scheduled tick's own eventual call, in production) -- the test
 	// never calls eng.Resume or eng.ResumeLoopRun directly.
-	fired, err = service.EvaluateLoopRunResumeReflexes(ctx, reflexEngine, eng, loopRunID, reflexes.State{
+	fired, hadCandidates, err = service.EvaluateLoopRunResumeReflexes(ctx, reflexEngine, eng, loopRunID, reflexes.State{
 		Events: []reflexes.EventSignal{{EventType: "external_check_passed", Category: "test"}},
 	})
 	if err != nil {
@@ -143,6 +146,9 @@ func TestResumeLoopRunReflex_FiresLoopEngineResume_ViaRealEvaluationCadence(t *t
 	}
 	if !fired {
 		t.Fatal("fired = false once the external condition occurred, want true")
+	}
+	if !hadCandidates {
+		t.Fatal("hadCandidates = false, want true")
 	}
 
 	// Prove LoopEngine.Resume genuinely ran a further iteration: the

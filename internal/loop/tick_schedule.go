@@ -39,16 +39,30 @@ package loop
 // not-started as of this implementation, confirmed directly. Rather than
 // invent preset infrastructure this task was never scoped to build, every
 // DecisionWait is treated as the polling case. This is the conservative
-// direction: a spurious extra tick against a WAIT that was never really
-// meant to be auto-polled is a cheap no-op (RunnerAdapter.
-// isResumableLoopRunStatus / enqueueLoopRunTick, internal/scheduler/
-// runner_adapter.go, this same task); the opposite failure -- a
-// durable-preset WAIT that never gets ticked because no marker matched --
-// is exactly the "no real creator" gap item 5 was written to close. Real
-// follow-up candidate for task 13: once a genuine polling-cadence field
-// exists on ContinuationPolicy or Budget, narrow this gate and let the
-// preset supply its own interval instead of defaultLoopRunTickPollInterval
-// below.
+// direction: the opposite failure -- a durable-preset WAIT that never gets
+// ticked because no marker matched -- is exactly the "no real creator" gap
+// item 5 was written to close. Real follow-up candidate for task 13: once a
+// genuine polling-cadence field exists on ContinuationPolicy or Budget,
+// narrow this gate and let the preset supply its own interval instead of
+// defaultLoopRunTickPollInterval below.
+//
+// A spurious extra tick against a WAIT that was never really meant to be
+// auto-polled IS a cheap no-op -- but only as of the Loops/11+12
+// integration fix (TASKS/ESCALATIONS.md's 2026-08-21 entry), not before it.
+// Before that fix, RunnerAdapter.Loops was wired directly to *LoopEngine's
+// bare Resume, which blind-resumes unconditionally once
+// isResumableLoopRunStatus (enqueueLoopRunTick, internal/scheduler/
+// runner_adapter.go) passes -- a resume_loop_run reflex's own trigger-spec
+// predicate (task 11) was never actually consulted by anything reachable
+// from this path, so a spurious tick was never really a no-op at all, it
+// just always resumed. The guard now genuinely holds because
+// RunnerAdapter.Loops is wired to internal/loop.TickResumeBridge
+// (tick_resume.go), which checks for an attached resume_loop_run reflex
+// first -- fired advances the LoopRun (as expected), attached-but-not-fired
+// leaves it untouched (the real no-op this comment originally, prematurely,
+// claimed), and no-reflex-attached-at-all falls back to the same blind
+// Resume this file's own scheduleLoopRunTick has always scheduled a tick
+// for.
 //
 // Deterministic schedule ID (loopRunTickScheduleID, not a fresh ID per
 // call): store.InsertAgentSchedule is INSERT OR REPLACE keyed on id, so a

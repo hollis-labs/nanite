@@ -519,6 +519,22 @@ func cmdServe(args []string) {
 	loopEngine := loop.NewLoopEngine(container.Store, workflowDefinitionsRegistry, workflowLauncher)
 	loopResumeNotifier := service.NewLoopResumeNotifier(container.Store, workflowDefinitionsRegistry, workflowLauncher)
 	loopEngine.WithOuterResumeNotifier(loopResumeNotifier)
+
+	// Integration fix, TASKS/ESCALATIONS.md's 2026-08-21 entry ("Phase 3's
+	// two parallel trigger tasks (11, 12) built compatible but disconnected
+	// mechanisms"): task 12 originally wired RunnerAdapter.Loops directly to
+	// loopEngine, whose bare Resume() blind-resumes a waiting LoopRun
+	// without ever consulting task 11's resume_loop_run reflex evaluation
+	// entry point (service.EvaluateLoopRunResumeReflexes) -- meaning a
+	// resume_loop_run reflex's own trigger-spec predicate was never actually
+	// checked by anything reachable from production wiring. loopTickResumeBridge
+	// (internal/loop/tick_resume.go) closes that gap: it checks for an
+	// attached resume_loop_run reflex first and only falls back to a direct
+	// loopEngine.Resume when none is attached. container.ReflexEngine is the
+	// SAME *reflexes.Engine instance service.NewContainer already built and
+	// wired into the chat-turn reflex-evaluation path (container.go's FU-30
+	// wiring) -- reused here, not constructed a second time.
+	loopTickResumeBridge := loop.NewTickResumeBridge(loopEngine, container.ReflexEngine)
 	workflowEngine.WithLoopSupport(container.Store, loopEngine)
 
 	// CW-20260814-0014: A2A Agent Card generator for /.well-known/agent-card.json
@@ -581,33 +597,33 @@ func cmdServe(args []string) {
 	// only set from main.go rather than built inside NewContainer.
 	//
 	// ReflexLookup/ReflexExecutor (the reflex_dispatch job type) are left
-	// unconfigured: reflexes.Executor isn't exposed on *service.Container
-	// today (only reachable internally via chat.Config, inside
-	// NewContainer), and nothing in this codebase produces an
-	// agent_schedules row with job_type=reflex_dispatch yet (TASKS/
-	// scheduling/07-wire-add-schedule-reflex.md, not yet built, is the
-	// first real producer). RunnerAdapter treats a nil ReflexExecutor as
-	// "not configured" (a clear per-firing error, not a panic) rather than
-	// silently no-oping, so this is a documented, safe gap for a future
-	// task to close, not a silent one.
+	// unconfigured: nothing in this codebase produces an agent_schedules row
+	// with job_type=reflex_dispatch yet (TASKS/scheduling/
+	// 07-wire-add-schedule-reflex.md, not yet built, is the first real
+	// producer) -- container.ReflexEngine (below) now exposes the same
+	// *reflexes.Engine/*reflexes.Executor pair that job type would need, but
+	// wiring it in is still that task's job, not this one's. RunnerAdapter
+	// treats a nil ReflexExecutor as "not configured" (a clear per-firing
+	// error, not a panic) rather than silently no-oping, so this is a
+	// documented, safe gap for a future task to close, not a silent one.
 	//
 	// Loops/LoopRunLookup (the loop_run_tick job type, TASKS/loops/
-	// 12-loop-run-tick-scheduled-trigger.md) ARE configured here, unlike
-	// ReflexLookup/ReflexExecutor above: loopEngine (constructed just above
-	// for StepKindLoop support, TASKS/loops/09) already satisfies
-	// scheduler.LoopResumer directly, and container.Store.GetLoopRun
-	// already satisfies scheduler.LoopRunLookup's func-type shape --
-	// nothing new to build here, both dependencies are already in scope by
-	// this point in the boot sequence. See internal/loop/tick_schedule.go
-	// (this same task) for the one real producer of a loop_run_tick
-	// agent_schedules row: evaluateDecideAndAct's DecisionWait branch
-	// (internal/loop/engine.go).
+	// 12-loop-run-tick-scheduled-trigger.md, integration-fixed per
+	// TASKS/ESCALATIONS.md's 2026-08-21 entry) ARE configured here, unlike
+	// ReflexLookup/ReflexExecutor above: loopTickResumeBridge (constructed
+	// just above) satisfies scheduler.LoopResumer directly, and
+	// container.Store.GetLoopRun already satisfies scheduler.LoopRunLookup's
+	// func-type shape -- nothing new to build here, both dependencies are
+	// already in scope by this point in the boot sequence. See
+	// internal/loop/tick_schedule.go for the one real producer of a
+	// loop_run_tick agent_schedules row: evaluateDecideAndAct's DecisionWait
+	// branch (internal/loop/engine.go).
 	scheduleStoreAdapter := &scheduler.StoreAdapter{Store: s, Logger: slog.Default()}
 	scheduleRunnerAdapter := &scheduler.RunnerAdapter{
 		Wake:          container.DurableWake,
 		Workflows:     workflowLauncher,
 		Commands:      container.Tools,
-		Loops:         loopEngine,
+		Loops:         loopTickResumeBridge,
 		LoopRunLookup: s.GetLoopRun,
 	}
 	scheduleRetryingRunner := &scheduler.RetryingRunner{

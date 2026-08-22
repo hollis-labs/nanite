@@ -4,6 +4,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -134,6 +135,17 @@ func TestCleanupOrphaned(t *testing.T) {
 	mgr.Create("active-session")
 	mgr.Create("orphan-session")
 
+	orphanBranch := "worker-orphan-session"
+	cmd := exec.Command("git", "branch", "--list", orphanBranch)
+	cmd.Dir = repoDir
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("list orphan branch before cleanup: %s: %v", out, err)
+	}
+	if strings.TrimSpace(string(out)) == "" {
+		t.Fatalf("orphan branch %q should exist before cleanup", orphanBranch)
+	}
+
 	// Only active-session is in the active set.
 	active := map[string]bool{"active-session": true}
 	cleaned, err := mgr.CleanupOrphaned(active)
@@ -150,6 +162,16 @@ func TestCleanupOrphaned(t *testing.T) {
 	}
 	if list[0].SessionID != "active-session" {
 		t.Errorf("remaining session = %q, want active-session", list[0].SessionID)
+	}
+
+	cmd = exec.Command("git", "branch", "--list", orphanBranch)
+	cmd.Dir = repoDir
+	out, err = cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("list orphan branch after cleanup: %s: %v", out, err)
+	}
+	if strings.TrimSpace(string(out)) != "" {
+		t.Errorf("orphan branch %q should be deleted after cleanup; git branch output: %q", orphanBranch, strings.TrimSpace(string(out)))
 	}
 
 	// Cleanup remaining.

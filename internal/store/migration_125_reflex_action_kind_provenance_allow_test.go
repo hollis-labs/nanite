@@ -8,10 +8,18 @@ import (
 	"testing"
 )
 
-// wantProvenanceAllow is the exact 16-row allow-list
+// wantProvenanceAllow is the exact allow-list
 // TASKS/reflex-taxonomy/05-provenance-tier-enforcement.md specifies: every
 // one of the 6 action kinds x 3 provenance tiers, except
-// (halt_session, plugin) and (dispatch_to_agent, plugin).
+// (halt_session, plugin) and (dispatch_to_agent, plugin) -- plus every
+// later migration's own additions to the same table. This test runs
+// against the fully-migrated live schema (newTestStore applies every
+// migration, not just 125 in isolation), so it also covers
+// TASKS/loops/11-loop-event-predicate-trigger.md's migration
+// 142_agent_reflex_resume_loop_run.sql, which adds resume_loop_run x
+// {system, operator} (not plugin, mirroring halt_session/
+// dispatch_to_agent's own restriction). Bump this map (and the row-count
+// checks below) again the next time a migration adds another action kind.
 var wantProvenanceAllow = map[[2]string]bool{
 	{"inject_reminder", "system"}:     true,
 	{"inject_reminder", "operator"}:   true,
@@ -31,13 +39,19 @@ var wantProvenanceAllow = map[[2]string]bool{
 	{"dispatch_to_agent", "system"}:   true,
 	{"dispatch_to_agent", "operator"}: true,
 	{"dispatch_to_agent", "plugin"}:   false, // deliberately denied
+	{"resume_loop_run", "system"}:     true,
+	{"resume_loop_run", "operator"}:   true,
+	{"resume_loop_run", "plugin"}:     false, // deliberately denied
 }
 
 // TestMigrate125SeedsProvenanceAllowList is the regression test for
 // TASKS/reflex-taxonomy/05-provenance-tier-enforcement.md: exactly 16
-// allowed (kind, tier) rows, matching the design doc's two named
-// "obvious candidates" for exclusion (halt_session/dispatch_to_agent away
-// from plugin-tier), byte-for-byte.
+// allowed (kind, tier) rows as of migration 125 itself (plus 2 more from
+// migration 142's own resume_loop_run x {system, operator} addition, 18
+// total as of this fully-migrated schema), matching the design doc's two
+// named "obvious candidates" for exclusion (halt_session/dispatch_to_agent
+// away from plugin-tier) plus 142's own resume_loop_run exclusion,
+// byte-for-byte.
 func TestMigrate125SeedsProvenanceAllowList(t *testing.T) {
 	s := newTestStore(t)
 	ctx := context.Background()
@@ -66,16 +80,16 @@ func TestMigrate125SeedsProvenanceAllowList(t *testing.T) {
 	}
 	sort.Strings(wantAllowed)
 
-	if len(got) != 16 {
-		t.Fatalf("reflex_action_kind_provenance_allow row count = %d, want 16 (got rows: %v)", len(got), got)
+	if len(got) != 18 {
+		t.Fatalf("reflex_action_kind_provenance_allow row count = %d, want 18 (got rows: %v)", len(got), got)
 	}
 	if !equalStrings(got, wantAllowed) {
 		t.Errorf("reflex_action_kind_provenance_allow rows = %v, want %v", got, wantAllowed)
 	}
 
-	// Round-trip every one of the 18 (kind, tier) combinations through
-	// ActionKindAllowsProvenanceTier, confirming both the 16 allowed and
-	// the 2 deliberately-denied pairs resolve as expected.
+	// Round-trip every one of the 21 (kind, tier) combinations through
+	// ActionKindAllowsProvenanceTier, confirming both the 18 allowed and
+	// the 3 deliberately-denied pairs resolve as expected.
 	for pair, wantAllow := range wantProvenanceAllow {
 		allowed, err := s.ActionKindAllowsProvenanceTier(ctx, pair[0], pair[1])
 		if err != nil {

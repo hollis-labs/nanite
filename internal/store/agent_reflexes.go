@@ -49,6 +49,27 @@ const (
 	// scope_tier/execution_pattern predicate kinds for the trigger shape
 	// the migrated Rule 5 seed uses.
 	ReflexActionDispatchToAgent = "dispatch_to_agent"
+	// ReflexActionResumeLoopRun (TASKS/loops/11-loop-event-predicate-trigger.md)
+	// resumes a specific, WAIT-parked LoopRun (internal/loop) when its
+	// event/predicate trigger fires — the "Event/predicate" trigger
+	// surface docs/engineering/architecture/21-loops.md names, realized
+	// as a real, named action kind rather than a generic `callback`
+	// (docs/engineering/architecture/10-reflex-action-taxonomy.md:120
+	// explicitly rejects that shape). action_spec shape: {"loop_run_id":
+	// string (required)} — a reflex row scoped to resuming exactly one
+	// LoopRun, created by the loop runtime (not authored ad hoc by a
+	// human the way most reflexes are) when that LoopRun transitions to
+	// loop_runs.status = 'waiting_on_escalation' with an event/predicate
+	// resume condition. Its own trigger_kind/trigger_spec columns reuse
+	// the existing predicate/event/interval AST unchanged
+	// (internal/agent/reflexes/evaluator.go's EvaluateTrigger). See
+	// internal/agent/reflexes/executor.go's Apply (documented no-op, same
+	// shape as ReflexActionDispatchToAgent — the real effect needs
+	// internal/loop, which this package deliberately does not depend on)
+	// and internal/service/loop_resume_reflex.go's
+	// EvaluateLoopRunResumeReflexes for the real handler + evaluation
+	// entry point.
+	ReflexActionResumeLoopRun = "resume_loop_run"
 
 	ReflexStatusActive  = "active"
 	ReflexStatusPaused  = "paused"
@@ -386,6 +407,51 @@ func (s *Store) ListAgentReflexesForWorkflowRun(ctx context.Context, runID, agen
 	)
 	if err != nil {
 		return nil, fmt.Errorf("list agent_reflexes for workflow run: %w", err)
+	}
+	defer rows.Close()
+	out := make([]AgentReflex, 0)
+	for rows.Next() {
+		var r AgentReflex
+		if err := scanAgentReflex(rows, &r); err != nil {
+			return nil, fmt.Errorf("scan agent_reflexes: %w", err)
+		}
+		out = append(out, r)
+	}
+	return out, rows.Err()
+}
+
+// ListAgentReflexesForLoopRun returns the active resume_loop_run reflex
+// row(s) scoped to loopRunID — TASKS/loops/11-loop-event-predicate-trigger.md.
+// Unlike ListAgentReflexesForWorkflowRun's workflow_run_id column
+// (migration 131), a resume_loop_run reflex is scoped via its own
+// action_spec JSON ({"loop_run_id": "<id>"}), not a dedicated column —
+// LoopRun is a peer entity to WorkflowRun (docs/engineering/architecture/
+// 21-loops.md's Decision 1), so workflow_run_id's FK to workflow_runs(id)
+// does not fit a loop_runs.id value, and this task's own scope adds no
+// new agent_reflexes column for it (only the new action kind — see
+// ReflexActionResumeLoopRun's own doc comment). Filters to
+// action_kind = 'resume_loop_run' unconditionally — a caller resuming one
+// specific LoopRun only ever cares about that one kind, unlike the
+// broader agent/class-bound candidate sets ListAgentReflexesForAgent/
+// ListAgentReflexesForWorkflowRun return. Relies on SQLite's built-in
+// json_extract (core since SQLite 3.38, well below modernc.org/sqlite's
+// bundled version) — no other query in this file needed it before this
+// task.
+func (s *Store) ListAgentReflexesForLoopRun(ctx context.Context, loopRunID string) ([]AgentReflex, error) {
+	if loopRunID == "" {
+		return nil, nil
+	}
+	rows, err := s.DB.QueryContext(ctx,
+		`SELECT `+agentReflexColumns+`
+		 FROM agent_reflexes
+		 WHERE status = 'active'
+		   AND action_kind = ?
+		   AND json_extract(action_spec, '$.loop_run_id') = ?
+		 ORDER BY priority DESC, created_at ASC`,
+		ReflexActionResumeLoopRun, loopRunID,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("list agent_reflexes for loop run: %w", err)
 	}
 	defer rows.Close()
 	out := make([]AgentReflex, 0)

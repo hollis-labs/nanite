@@ -318,7 +318,7 @@ func (a *API) validateReflexDefinition(ctx context.Context, row store.AgentRefle
 	switch row.ActionKind {
 	case store.ReflexActionInjectReminder, store.ReflexActionForceToolChoice,
 		store.ReflexActionSendMessage, store.ReflexActionHaltSession, store.ReflexActionAddSchedule,
-		store.ReflexActionDispatchToAgent:
+		store.ReflexActionDispatchToAgent, store.ReflexActionResumeLoopRun:
 	default:
 		validActionKind = false
 		errs = append(errs, fmt.Sprintf("invalid action_kind %q", row.ActionKind))
@@ -359,6 +359,16 @@ func (a *API) validateReflexDefinition(ctx context.Context, row store.AgentRefle
 			slug, _ := spec["agent_slug"].(string)
 			if slug == "" {
 				errs = append(errs, "action_spec: dispatch_to_agent requires a non-empty agent_slug")
+			}
+		} else if row.ActionKind == store.ReflexActionResumeLoopRun {
+			// resume_loop_run's config shape (TASKS/loops/
+			// 11-loop-event-predicate-trigger.md, store.
+			// ReflexActionResumeLoopRun's own doc comment): loop_run_id is
+			// the one required field — Store.ListAgentReflexesForLoopRun
+			// reads it back via json_extract against exactly this key.
+			loopRunID, _ := spec["loop_run_id"].(string)
+			if loopRunID == "" {
+				errs = append(errs, "action_spec: resume_loop_run requires a non-empty loop_run_id")
 			}
 		}
 	}

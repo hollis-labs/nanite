@@ -703,7 +703,7 @@ reasoning.
 | `06-build-skill-resolver-and-parameter-binding` | 4 | reviewed | `02`, `03`, `04` |
 | `07-implement-inline-fork-composition-semantics` | 4 | reviewed | `04`, `06` |
 | `08-rebuild-inline-marker-and-scripts-execution` | 4 | reviewed | `06` |
-| `09-sandbox-and-capability-policy-gate-for-skill-execution` | 5 | in-progress (review found a real secret-leakage bug, fix dispatched) | `02`, `08` |
+| `09-sandbox-and-capability-policy-gate-for-skill-execution` | 5 | implemented (fix landed, re-review pending) | `02`, `08` |
 | `10-cli-hosted-native-skill-delivery-boot-dir-planting` | 6 | not-started | `02`, `03` |
 | `11-api-direct-skill-get-self-tool` | 6 | not-started | `06`, `07`, `08`, `09` |
 | `12-remaining-skills-rest-api-list-grants-preview-uninstall` | 7 | not-started | `02`, `05`, `09` |

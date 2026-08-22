@@ -1,7 +1,7 @@
 # Goal evidence schema — `goal_evidence` thin pointer table
 
 **Phase:** 1 — Schema & storage foundation (`TASKS/loops`)
-**Status:** implemented
+**Status:** reviewed
 **Depends on:** `01-goals-schema.md` (`goal_id` FK)
 **Touches:** `internal/store/migrations/` (new migration), `internal/store/goals.go` or a
 new `internal/store/goal_evidence.go` (Go types, CRUD).
@@ -189,4 +189,11 @@ worktree) — not introduced here. `go test ./...` — all packages pass, includ
 pop` at any point, per this task's explicit instruction.
 
 ## Review notes
-<Reviewer fills this in: pass/fail, what was checked, anything fixed and how.>
+
+Prior reviewer's substantive findings on this task's own diff (schema shape, FK usage,
+evidence-walk formula, test coverage) stand — no re-review of that content performed here.
+This pass confirmed the merged-tree `makeTestGoal` duplicate-declaration fix (commit
+`d6da6efe`, which kept the definition in this file's `goal_evidence_test.go:22`):
+`go vet ./internal/store/...` clean, `go test -count=1 ./internal/store/...` passes (15.5s,
+non-cached), and `go test -count=1 ./...` passes across all 92 packages (non-cached,
+exit-code verified, no `FAIL`/`panic` in output).

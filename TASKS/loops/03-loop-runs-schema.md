@@ -1,7 +1,7 @@
 # LoopRun schema — `loop_runs` table, Go types, store CRUD
 
 **Phase:** 1 — Schema & storage foundation (`TASKS/loops`)
-**Status:** implemented
+**Status:** reviewed
 **Depends on:** `01-goals-schema.md` (`goal_id NOT NULL` FK)
 **Touches:** `internal/store/migrations/` (new migration), `internal/store/loop_runs.go`
 (new — `LoopRun` struct, CRUD).
@@ -197,4 +197,12 @@ No engine, launcher, or continuation-policy logic was added -- this task is stor
 per its own "Done means" scope fence.
 
 ## Review notes
-<Reviewer fills this in: pass/fail, what was checked, anything fixed and how.>
+
+Prior reviewer's substantive findings on this task's own diff (loop_runs schema, enum
+vocabularies, store CRUD, test coverage) stand — no re-review of that content performed
+here. This pass confirmed the merged-tree `makeTestGoal` duplicate was removed from this
+file's `loop_runs_test.go` (commit `d6da6efe`; the surviving definition lives in
+`goal_evidence_test.go` per task 02): `go vet ./internal/store/...` clean,
+`go test -count=1 ./internal/store/...` passes (15.5s, non-cached), and
+`go test -count=1 ./...` passes across all 92 packages (non-cached, exit-code verified, no
+`FAIL`/`panic` in output).

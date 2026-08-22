@@ -1,7 +1,7 @@
 # Install/sync REST API + CLI command
 
 **Phase:** 3 — Explicit install/sync (`TASKS/skills`)
-**Status:** in-progress — review PASS on behavior, real test-coverage gap found, fix required (see "Fix required" section below)
+**Status:** implemented
 **Depends on:** `04`
 **Touches:** `internal/api/skills.go` (new file, or extend an existing skill-admin API file if
 one exists — grep `internal/api/` for existing skill routes before creating a duplicate),
@@ -263,6 +263,96 @@ bonus — but don't let it block or complicate the core coverage task if the fix
 straightforward.
 
 Re-verify `go build`/`go vet`/`go test ./internal/api/...` (and the full suite) clean when done.
+
+## Work log — 2026-08-21 (test-coverage fix)
+
+Closed the gap described above. Added `internal/api/skills_install_test.go`
+(new file, alongside the existing `skills_test.go` — the task's own text
+allowed either; a new file reads more cleanly since this is a distinct,
+sizeable cluster of coverage rather than an extension of the existing
+single-test file).
+
+**Fixture reuse, no new `testdata/` convention.** Confirmed `internal/api`
+has no pre-existing `testdata/` directory (`find internal/api -iname
+testdata` returns nothing) — so rather than inventing one, the tests
+reference `internal/skillinstall/testdata/fixtures/{sample-skill,
+malformed-frontmatter,malformed-missing-script}` directly via a small
+`skillFixture(t, name)` helper that resolves `../skillinstall/testdata/
+fixtures/<name>` to an absolute path and `t.Fatal`s if it's missing (a
+should-never-happen guard against a future rename of task 04's fixtures
+silently turning these tests into false negatives-that-look-like-passes).
+
+**New helper, not a modification of `newTestAPI`.** Added
+`newSkillsTestAPI(t)` in the new file rather than changing the shared
+`newTestAPI` in `api_test.go` (used by 35+ sibling tests) — mirrors
+`artifacts_test.go`'s own `newArtifactTestAPI`, which already establishes
+this package's convention of a test-local variant when a handler under
+test needs its own `AppConfig` override rather than reusing the zero-config
+shared helper.
+
+**Took the "welcome bonus"** (`container.go`'s `SkillVendor` test-side-effect,
+flagged as optional/non-blocking): `newSkillsTestAPI` sets
+`AppConfig.Skills.VendorStorageDir = filepath.Join(root, "skills-vendor")`
+(`root` being the test's own `t.TempDir()`) in the `ContainerConfig` passed
+to `service.NewContainer` — the same one-line pattern
+`newArtifactTestAPI` already uses for `AppConfig.Artifacts.StorageDir`.
+Confirmed via `find internal/api -iname data -maxdepth 2` after running the
+new tests that no `internal/api/data/skills/` directory was created (only
+the pre-existing, unrelated `internal/api/data/artifacts/` from other
+tests' own un-scoped runs remains) — the side effect this task's Work Log
+flagged is fully closed for the skills vendor store, without touching
+`container.go` itself or any other package's tests.
+
+**Coverage added** (all 7 new test functions/subtests, all against real
+`httptest` requests through the real `mux` `RegisterRoutes` wires up, per
+`newSkillsTestAPI`):
+
+1. `TestHandleInstallSkill_Success` — `POST /api/skills/install` against
+   `sample-skill` → 201; asserts `skill.slug == "sample-skill"`, a non-empty
+   `skill.id` and `address`, and `reused == false` on a first install into a
+   brand-new vendor root.
+2. `TestHandleInstallSkill_MalformedPackage` — table test over
+   `malformed-frontmatter` and `malformed-missing-script` → both 422 (not
+   500, not a panic), with a non-empty JSON `error` message.
+3. `TestHandleInstallSkill_VendorNil` / `TestHandleSyncSkill_VendorNil` —
+   set `a.Services.SkillVendor = nil` directly on the test API instance
+   (simpler than trying to force `skillvendor.New` to fail via an
+   unwritable root, and exactly what the task's own text suggested as
+   acceptable) → 503 from both endpoints.
+4. `TestHandleSyncSkill_UnknownSlug` — sync against a slug with no index
+   row → 404.
+5. `TestHandleSyncSkill_SlugMismatch` — installs `sample-skill` for real
+   first, then POSTs to `/api/skills/sample-skill/sync` with a body `path`
+   pointing at a second, freshly-written minimal package
+   (`writeMinimalSkillPackage` — just enough frontmatter for
+   `skill.ParsePackageDir` to succeed, since the mismatch guard runs before
+   task 04's Validator ever sees the package) declaring slug
+   `other-skill` → asserts 409, then asserts via
+   `a.Services.Store.GetSkillBySlug("other-skill")` that no row was created
+   as a side effect, *and* (a check beyond the task's minimum ask) that the
+   `sample-skill` row's own `ContentHash`/`Version` are unchanged by the
+   rejected attempt — the guard must be a no-op on the existing row too, not
+   just a no-op on creating a new one.
+6. `TestHandleSyncSkill_IdempotentReuse` — installs `sample-skill`, then
+   syncs the identical fixture path again → 200, `reused == true`, and the
+   same vendored `address` both times.
+
+No production logic changed — `internal/api/skills.go`,
+`internal/api/types.go`, `internal/api/api.go`, and `internal/service/
+container.go` are untouched by this fix; only the new test file was added.
+No bugs found while writing these tests (the "Fix required" section's own
+description of the 422/500 `lastState` classification and the slug-match
+guard both held up exactly as documented against real HTTP requests).
+
+**Build/test.** `go build ./cmd/nanite/` clean. `go vet ./...` reproduces
+only the same two pre-existing `stopReaper`/`stopRuntimeReaper` lostcancel
+warnings in `internal/service/container.go` already noted in this task's
+original Work Log (confirmed again via `git diff` to be outside every file
+this fix touched). `go test ./internal/api/...` and the full `go test
+./... -count=1` both pass with zero failures across every package,
+including the 7 new tests.
+
+Status set back to `implemented`. No escalations raised by this fix.
 
 ## Review notes
 <Reviewer fills this in: pass/fail, what was checked, anything fixed and how.>

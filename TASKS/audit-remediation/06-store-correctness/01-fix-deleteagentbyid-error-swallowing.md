@@ -1,7 +1,7 @@
 # Fix `DeleteAgentByID` swallowing every `GetAgent` error, not just not-found
 
 **Phase:** Wave 2 — Correctness, lifecycle, concurrency
-**Status:** not-started
+**Status:** implemented
 **Depends on:** none
 **Touches:** `internal/store/agents.go` (`DeleteAgentByID`, `GetAgent`); test file `internal/store/agents_fu28_test.go`. No other packages need code changes — `internal/plugin/agent_profiles.go`'s `SweepPluginAgentProfiles` is the real production caller this fix protects, but it calls `DeleteAgentByID` through its existing signature and needs no change itself (see Scope below for why).
 
@@ -174,7 +174,27 @@ Low risk, narrowly scoped to one method plus one doc comment. The only behaviora
 
 ## Work log
 
-<!-- Worker fills in: what was actually done, any deviation and why. -->
+- 2026-08-22: Re-derived the post-`06/03` signatures from current code:
+  `DeleteAgentByID`, `GetAgent`, and `DeleteAgent` all take the existing
+  `context.Context`. Kept that context threaded through without changing
+  `GetAgent` or `SweepPluginAgentProfiles`.
+- Updated `DeleteAgentByID` to return `nil` only when the wrapped lookup error
+  satisfies `errors.Is(err, sql.ErrNoRows)`. Other lookup errors now propagate
+  with the operation and agent ID in the error context; delete errors continue
+  to propagate unchanged. Updated the method comment to state that contract
+  while preserving the FU-28 tombstone note.
+- Added `TestDeleteAgentByIDPropagatesLookupError`, using a closed real SQLite
+  test database to force a driver-level lookup error. Before the production
+  fix, `go test ./internal/store/... -run 'TestDeleteAgentByID' -count=1 -v`
+  failed at the new assertion because `DeleteAgentByID` returned `nil`; after
+  the fix, both the new failure-path test and the existing delete/not-found
+  regression test passed.
+- Verification passed: `go build ./internal/store/... ./internal/plugin/...`;
+  `go vet ./internal/store/... ./internal/plugin/...`; `go test
+  ./internal/store/... -count=1`; `golangci-lint run ./internal/store/...
+  --enable-only nilerr` (`0 issues`); worker baseline `go build
+  ./cmd/nanite/`, `go vet ./...`, and `go test ./...`.
+- Deviations: none.
 
 ## Review notes
 

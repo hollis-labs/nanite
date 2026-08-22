@@ -3,8 +3,10 @@ package store
 import (
 	"context"
 	"crypto/rand"
+	"database/sql"
 	"encoding/base32"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -1212,13 +1214,17 @@ func (s *Store) ListAgentsFilter(ctx context.Context, class, activationMode, sta
 }
 
 // DeleteAgentByID removes an agent profile by ID. Mirrors DeleteAgent
-// (slug-based) but for direct-ID callers. Returns nil if the row
-// didn't exist. Tombstones for durable=1 rows are deferred future work;
-// today a DELETE wipes the row regardless of durable. FU-28.
+// (slug-based) but for direct-ID callers. Returns nil only when the row
+// genuinely does not exist; all other lookup and delete errors propagate.
+// Tombstones for durable=1 rows are deferred future work; today a DELETE
+// wipes the row regardless of durable. FU-28.
 func (s *Store) DeleteAgentByID(ctx context.Context, id string) error {
 	a, err := s.GetAgent(ctx, id)
 	if err != nil {
-		return nil
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil
+		}
+		return fmt.Errorf("delete agent by id %s: %w", id, err)
 	}
 	return s.DeleteAgent(ctx, a.Slug)
 }

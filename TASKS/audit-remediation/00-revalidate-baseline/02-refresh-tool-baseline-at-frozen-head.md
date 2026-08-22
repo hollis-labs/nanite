@@ -5,8 +5,8 @@
 **Depends on:** none. **Step 1 is urgent and should run before anything else in this batch — see the banner below.** Steps 2+ are hard-gated on the dev freeze, same as `00/01`.
 **Blocks:** every task in `01/` through `13/`, jointly with `00/01`. Specifically blocks `08/03` (G304 triage), `08/08` (dependency bumps), `13/01` (dead-code removal), and `13/03` (gofmt backlog), whose scopes are *defined by counts this task refreshes*.
 **Parallelizable with:** `00/01` — different tooling, no overlapping writes except the final `findings.json` merge (see Non-goals).
-**Touches:** `docs/audits/2026-08-21-go-quality/raw/` (new — evidence rescue), `docs/audits/2026-08-21-go-quality/raw-<FROZEN-SHA>/` (new — refreshed baseline), `.gitignore` (a narrow negation rule, see Step 1), and the count-bearing lines in the `## Context` of `08/03`, `08/08`, `13/01`, `13/03`. **No production code changes whatsoever.**
-**requires_architect_decision:** ~~true~~ **resolved** — AD-23 decided *accept* on 2026-08-21; step 1 is done bar the commit. Steps 2-4 need no decision.
+**Touches:** `docs/audits/2026-08-21-go-quality/raw/` (new — evidence rescue), `docs/audits/2026-08-21-go-quality/raw-<FROZEN-SHA>/` (new — refreshed baseline), `.gitignore` (a narrow negation rule, see Step 1), and the count-bearing lines in the `## Context` of `08/03`, `08/08`, `13/01`, `13/03`, `11/13`. **No production code changes whatsoever.**
+**requires_architect_decision:** ~~true~~ **resolved** — AD-23 decided *accept* on 2026-08-21; step 1 is done and committed (`e02f52c9`). Steps 2-4 need no decision.
 **requires_security_review:** false
 **requires_regression_test:** false
 
@@ -19,10 +19,10 @@
 > at `.gitignore:88-91`. Verified: all 29 files stage (21 of 29 would have been
 > silently skipped without the negation), and all 14 `raw/` paths cited by
 > `REPORT.md` and the task files resolve. **AD-23 is decided: accept.**
-> The one thing still outstanding is that it is **uncommitted** — confirm it is
-> in git history before treating this step as closed. The original hazard
-> description follows, retained because it explains why the negation rule
-> exists and must not be removed.
+> **Committed** in `e02f52c9` ("docs/audits: rescue the go-quality audit's raw
+> evidence into the repo") — confirmed via `git log --oneline -- docs/audits/2026-08-21-go-quality/raw/`.
+> The original hazard description follows, retained because it explains why
+> the negation rule exists and must not be removed.
 >
 > `REPORT.md` cites `raw/<file>` as the backing evidence for essentially every
 > finding — its own line 8 says *"Raw tool output backing every finding below
@@ -235,8 +235,7 @@ Do not delete the original figure. The delta is the interesting part.
 
 - ~~`docs/audits/2026-08-21-go-quality/raw/` exists with the cited evidence
   subset and `git check-ignore` returns nothing for its `*.log` files~~ —
-  **done 2026-08-21.** Remaining: confirm it is **committed**. Until it is in
-  history, the rescue has not actually happened.
+  **done and committed** (`e02f52c9`, 2026-08-21).
 - `docs/audits/2026-08-21-go-quality/raw-<FROZEN>/` contains a refreshed run of
   every tool listed in Step 2, or a `MISSING.txt` naming each one that could
   not run and why.

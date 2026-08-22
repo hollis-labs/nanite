@@ -34,7 +34,7 @@ sign-off block lives here instead:
 | **Task inventory** | Created by a dedicated task-creation pass (61 files), merged in `8258176e` |
 | **Planned** | 2026-08-21 — this pass: sequencing, dependency ordering, parallelization, Wave 0 gate, architect-decision queue, prevention table |
 | **Approved for implementation** | ☐ **Not yet.** Operator sign-off required before any dispatch. |
-| **Blocking prerequisites** | (1) ~~The dev freeze (AD-24)~~ — **decided and in effect 2026-08-21**, see below. (2) Wave 0 complete, **including AD-01 through AD-04 decided**. (3) ~~AD-23~~ decided *accept* — evidence rescued, pending commit. |
+| **Blocking prerequisites** | (1) ~~The dev freeze (AD-24)~~ — **decided and in effect 2026-08-21**, see below. (2) Wave 0 complete, **including AD-01 through AD-04 decided**. (3) ~~AD-23~~ decided *accept* — evidence rescued and committed (`e02f52c9`). |
 
 An Orchestrator reading this file must treat an unchecked approval box as a
 hard stop, and confirm with the operator directly rather than inferring
@@ -243,7 +243,7 @@ rewrite both trackers for no functional gain.
 | Task | Depends on | Gated on | Notes |
 |---|---|---|---|
 | `00/01` revalidate findings against HEAD | dev freeze | — | Sets all 113 dispositions. **Blocks the entire batch.** Must deliver an **interim critical/high report** before the full sweep finishes — AD-01–AD-04 are decided from it |
-| `00/02` rescue evidence + refresh tool baseline | dev freeze (step 1: none) | AD-23 ✅ | Step 1 **done 2026-08-21**, pending commit |
+| `00/02` rescue evidence + refresh tool baseline | dev freeze (step 1: none) | AD-23 ✅ | Step 1 **done and committed** (`e02f52c9`, 2026-08-21) |
 | *(operator track)* decide **AD-01–AD-04** | `00/01`'s interim report | — | Moved from Wave 1 by operator direction. Wave 1 does not dispatch until all four are `decided` |
 
 **Why AD-01–AD-04 moved into Wave 0.** Nothing about them depends on Wave 0's

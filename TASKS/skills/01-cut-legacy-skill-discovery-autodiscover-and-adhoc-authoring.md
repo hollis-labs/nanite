@@ -315,4 +315,9 @@ finding was a direct, mechanical consequence of "skill_create/skill_update are d
 not a new design question.
 
 ## Review notes
-<Reviewer fills this in: pass/fail, what was checked, anything fixed and how.>
+
+**PASS (fresh reviewer, 2026-08-21, no shared context with the worker).** Independently re-verified every Done-means item: build/vet/test clean (the two `container.go` vet findings confirmed pre-existing via a real pre-commit worktree checkout, not just `git blame`); `AutoDiscover`'s Added/Removed diffing logic intact, only the row-write side effect removed; the new `TestAutoDiscover_NeverWritesSkillsTable` genuinely proves no-write/no-mutation, not just asserting it; `skill_create`/`skill_update` fully gone, `skill_list`/`skill_delete` compile and behave unchanged; `store.CreateSkill`/`UpdateSkill`'s remaining callers real (found a third live caller beyond the Work Log's two: `internal/api/skills.go`'s admin CRUD handlers); `parser.go`'s `Context` field correctly left untouched. All test-file diffs read in full and confirmed to correspond exactly to deleted production code.
+
+**One real finding, not blocking this task** — see `TASKS/ESCALATIONS.md`'s 2026-08-21 entry for the full record: `20-skills.md`'s "invocation gap" section's claim that no skill content had ever reached a model was not accurate as an audit of the pre-cut code (the 8 builtins had a real, narrow, working chat-slash-command invocation path). Task `01`'s own action (cutting the builtins) is correct and not reopened — the doc's stated *rationale* being incomplete doesn't undo the decision, per this project's "correct the record, keep the decision" rule. Doc corrected in place by the Orchestrator; a follow-up to remove the now-fully-dead `RegisterSkillCommands`/`ChatComposer` skill-slash-command scaffolding is logged for a future batch, not filed as a task here.
+
+Status: `reviewed`.

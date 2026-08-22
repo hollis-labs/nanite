@@ -1,7 +1,7 @@
 package store
 
 // TASKS/loops/04-loop-run-iterations-schema.md -- Go-side storage for the
-// loop_run_iterations table migration 139_loop_run_iterations.sql adds. See
+// loop_run_iterations table migration 142_loop_run_iterations.sql adds. See
 // docs/engineering/architecture/21-loops.md's per-iteration history section
 // for the design this table encodes: "New, thin (loop_run_iterations) --
 // same shape as Scheduling's illustrative schedule_runs: one row per
@@ -34,7 +34,7 @@ import (
 // cannot be located.
 var ErrLoopRunIterationNotFound = errors.New("loop run iteration not found")
 
-// loop_run_iterations.decision vocabulary -- migration 139's CHECK
+// loop_run_iterations.decision vocabulary -- migration 142's CHECK
 // constraint, taken verbatim from 21-loops.md's continuation-policy decision
 // enum (CONTINUE | RETRY | REPLAN | REARCHITECT | WAIT | ESCALATE | COMPLETE
 // | FAIL).
@@ -61,7 +61,7 @@ var validLoopRunIterationDecisions = map[string]bool{
 }
 
 // validateLoopRunIterationDecision checks decision against the enum
-// migration 139's DB CHECK constraint also enforces -- same Go-layer-
+// migration 142's DB CHECK constraint also enforces -- same Go-layer-
 // validation-over-a-DB-CHECK-constraint approach loop_runs.go's
 // validateLoopRunStatus uses, giving a typed Go error instead of a raw
 // sqlite CHECK-violation error.
@@ -72,7 +72,7 @@ func validateLoopRunIterationDecision(decision string) error {
 	return nil
 }
 
-// loop_run_iterations.progress_state vocabulary -- migration 139's CHECK
+// loop_run_iterations.progress_state vocabulary -- migration 142's CHECK
 // constraint, taken verbatim from 21-loops.md's IterationResult.progress
 // rollup enum (PROGRESS | NO_PROGRESS | REGRESSION | BLOCKED | GOAL_MET).
 const (
@@ -152,7 +152,7 @@ type LoopRunIteration struct {
 
 	// IterationNumber is this iteration's 1-based sequence number within
 	// LoopRunID -- 21-loops.md's illustrative `iteration_number: 1`.
-	// Unique together with LoopRunID (migration 139's
+	// Unique together with LoopRunID (migration 142's
 	// idx_loop_run_iterations_seq unique index).
 	IterationNumber int `json:"iteration_number"`
 
@@ -223,7 +223,7 @@ func scanLoopRunIteration(scanner interface{ Scan(...any) error }, li *LoopRunIt
 // CreateLoopRunIteration validates whichever of Decision/ProgressState are
 // non-empty rather than requiring the in-flight shape. Generates an ID via
 // uuid.New() if li.ID is empty, and defaults EvaluationJSON to "{}" if left
-// empty (matching migration 139's column DEFAULT, replicated here because
+// empty (matching migration 142's column DEFAULT, replicated here because
 // every value is passed explicitly in this INSERT so SQLite's column
 // DEFAULT never actually applies -- same trade-off loop_runs.go's
 // CreateLoopRun documents for its own JSON defaults). LoopRunID and a real

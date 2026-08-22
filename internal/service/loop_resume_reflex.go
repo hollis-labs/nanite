@@ -156,7 +156,7 @@ func EvaluateLoopRunResumeReflexes(
 	// inheriting it from EvaluateState's loop (chat_reflex_dispatch.go's
 	// own design note 2): this is a dedicated call site, not
 	// EvaluateState. resume_loop_run's kind-level default is seeded 0 (no
-	// cooldown, migration 142) -- a scheduled tick re-checking a
+	// cooldown, migration 145) -- a scheduled tick re-checking a
 	// still-waiting LoopRun needs every invocation to genuinely
 	// re-evaluate the trigger.
 	now := time.Now()

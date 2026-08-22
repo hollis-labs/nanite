@@ -55,7 +55,7 @@ const (
 // ready for TASKS/scheduling/03-runner-adapter-and-job-taxonomy.md.
 //
 // ScheduleJobTypeLoopRunTick is the fifth value, added by
-// TASKS/loops/12-loop-run-tick-scheduled-trigger.md (migration 143 widens
+// TASKS/loops/12-loop-run-tick-scheduled-trigger.md (migration 146 widens
 // the agent_schedules.job_type CHECK to match). Deliberately a second,
 // independently-declared constant with the same string value as
 // internal/scheduler.JobTypeLoopRunTick, not a shared alias -- mirrors this

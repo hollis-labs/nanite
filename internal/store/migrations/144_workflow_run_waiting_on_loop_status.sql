@@ -1,6 +1,6 @@
 -- +goose Up
 -- +goose NO TRANSACTION
--- 141_workflow_run_waiting_on_loop_status.sql
+-- 144_workflow_run_waiting_on_loop_status.sql
 -- TASKS/loops/09-stepkindloop-executor-and-waiting-status.md.
 --
 -- Widens workflow_runs.status and workflow_run_steps.status's CHECK
@@ -20,7 +20,7 @@
 -- agents-self-organizing flex phase, when it's actually neither.
 --
 -- Also adds workflow_run_steps.loop_run_id (nullable, REFERENCES
--- loop_runs(id), same shape as migration 140's workflow_runs.loop_run_id)
+-- loop_runs(id), same shape as migration 143's workflow_runs.loop_run_id)
 -- -- this task's own documented "your call" resolution for "where does the
 -- loop_run_id get recorded on the step": a real column, not a JSON field,
 -- since the step needs it looked up in both directions (given the step,
@@ -34,13 +34,13 @@
 -- workflow_run_steps rebuild is free at that point, not a second
 -- rename-recreate-copy pass. workflow_runs does NOT get an equivalent new
 -- column here: it already has loop_run_id/loop_iteration from migration
--- 140 (added when a WorkflowRun IS one loop iteration; this task's new
+-- 143 (added when a WorkflowRun IS one loop iteration; this task's new
 -- column is the opposite direction -- when a WorkflowRun's own STEP
 -- launched a loop) and both are carried through this rebuild unchanged.
 --
 -- SQLite cannot ALTER a CHECK constraint in place, so both tables are
 -- rebuilt via the same rename-recreate-copy pattern migrations
--- 130/133/136 already used. workflow_runs has real incoming FK references
+-- 130/133/139 already used. workflow_runs has real incoming FK references
 -- (089_a2a_tasks.sql, 129_team_run_members.sql, 131_agent_reflexes_
 -- workflow_run_scoping.sql) -- PRAGMA foreign_keys = OFF for the whole
 -- rebuild (both tables) means none of those are enforced/cascaded
@@ -49,11 +49,11 @@
 -- doc comment gives).
 --
 -- Column shape for both tables is copied verbatim from their current live
--- shape: workflow_runs per migration 140 (133's rebuilt shape plus 140's
+-- shape: workflow_runs per migration 143 (133's rebuilt shape plus 143's
 -- loop_run_id/loop_iteration ADD COLUMNs); workflow_run_steps per migration
--- 136 (133's rebuilt shape plus 136's kind widening), plus this migration's
+-- 139 (133's rebuilt shape plus 139's kind widening), plus this migration's
 -- own new loop_run_id column. Confirmed directly against the migrations
--- ledger (no migration after 136/140 touches either table's shape before
+-- ledger (no migration after 139/143 touches either table's shape before
 -- this one) rather than reconstructed from memory alone.
 
 PRAGMA foreign_keys = OFF;
@@ -135,9 +135,9 @@ END;
 PRAGMA foreign_keys = ON;
 
 -- +goose Down
--- Rebuilds both tables with the pre-loop-waiting-status CHECKs (133/136's
+-- Rebuilds both tables with the pre-loop-waiting-status CHECKs (133/139's
 -- shape) and drops workflow_run_steps.loop_run_id. Structure-only, matching
--- 130/133/136's own downgrade precedent: any waiting_on_loop row, or any
+-- 130/133/139's own downgrade precedent: any waiting_on_loop row, or any
 -- row with a non-NULL loop_run_id, inserted after the Up migration would
 -- either violate this narrower CHECK or simply lose that column's value on
 -- re-insert; a genuine downgrade scenario is expected to have none

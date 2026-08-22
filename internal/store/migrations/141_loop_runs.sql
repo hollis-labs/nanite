@@ -13,7 +13,7 @@
 -- execution engine.
 --
 -- goal_id NOT NULL REFERENCES goals(id) -- "a loop_runs row always has
--- exactly one goal_id" (21-loops.md's Decision 2), landed by migration 135
+-- exactly one goal_id" (21-loops.md's Decision 2), landed by migration 138
 -- (TASKS/loops/01-goals-schema.md).
 --
 -- status CHECK values (running|completed|failed|cancelled|waiting_on_gate|
@@ -49,8 +49,8 @@
 -- check is simpler. See this task's Context section for the full reasoning.
 --
 -- Brand-new table, nothing to rebuild -- plain transactional CREATE TABLE,
--- matching 128_teams.sql's and 135_goals.sql's own precedent (not the
--- NO TRANSACTION / PRAGMA foreign_keys rebuild dance 124/127/130/133/136
+-- matching 128_teams.sql's and 138_goals.sql's own precedent (not the
+-- NO TRANSACTION / PRAGMA foreign_keys rebuild dance 124/127/130/133/139
 -- needed only to widen a CHECK on an already-populated table).
 
 -- +goose Up

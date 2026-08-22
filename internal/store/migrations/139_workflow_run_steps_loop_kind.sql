@@ -1,6 +1,6 @@
 -- +goose Up
 -- +goose NO TRANSACTION
--- 136_workflow_run_steps_loop_kind.sql
+-- 139_workflow_run_steps_loop_kind.sql
 -- TASKS/loops/06-stepkindloop-schema.md: widens workflow_run_steps.kind's
 -- CHECK constraint to accept the new StepKindLoop ('loop') value
 -- (internal/agentworkflow/types.go) needed by

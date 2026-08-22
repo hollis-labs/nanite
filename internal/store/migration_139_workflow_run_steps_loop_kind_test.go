@@ -11,22 +11,22 @@ import (
 	"github.com/pressly/goose/v3"
 )
 
-// TestMigrate136WidensWorkflowRunStepsKindCheck is the regression test for
+// TestMigrate139WidensWorkflowRunStepsKindCheck is the regression test for
 // TASKS/loops/06-stepkindloop-schema.md: inserting a workflow_run_steps row
 // with kind='loop' must succeed post-migration where it previously violated
 // 130/133's CHECK(kind IN ('llm','tool','gate','flex')), and every
 // pre-existing kind value (including 'flex', added by 130) must keep
 // working unaffected by the table rebuild.
-func TestMigrate136WidensWorkflowRunStepsKindCheck(t *testing.T) {
+func TestMigrate139WidensWorkflowRunStepsKindCheck(t *testing.T) {
 	s := newTestStore(t)
 
-	if err := s.CreateWorkflowRun(&WorkflowRunRow{ID: "run-136", DefinitionName: "loop-check", Status: "running"}); err != nil {
+	if err := s.CreateWorkflowRun(&WorkflowRunRow{ID: "run-139", DefinitionName: "loop-check", Status: "running"}); err != nil {
 		t.Fatalf("CreateWorkflowRun: %v", err)
 	}
 
 	for _, kind := range []string{"llm", "tool", "gate", "flex", "loop"} {
 		row := &WorkflowRunStepRow{
-			WorkflowRunID: "run-136",
+			WorkflowRunID: "run-139",
 			StepID:        "step-" + kind,
 			Kind:          kind,
 			Status:        "pending",
@@ -38,12 +38,12 @@ func TestMigrate136WidensWorkflowRunStepsKindCheck(t *testing.T) {
 
 	// A genuinely unknown kind must still be rejected by the CHECK — the
 	// widening is exactly (llm,tool,gate,flex,loop), not "anything goes".
-	badRow := &WorkflowRunStepRow{WorkflowRunID: "run-136", StepID: "step-bogus", Kind: "bogus", Status: "pending"}
+	badRow := &WorkflowRunStepRow{WorkflowRunID: "run-139", StepID: "step-bogus", Kind: "bogus", Status: "pending"}
 	if err := s.UpsertWorkflowRunStep(badRow); err == nil {
 		t.Fatal("UpsertWorkflowRunStep(kind=\"bogus\") succeeded, want CHECK violation")
 	}
 
-	steps, err := s.ListWorkflowRunSteps("run-136")
+	steps, err := s.ListWorkflowRunSteps("run-139")
 	if err != nil {
 		t.Fatalf("ListWorkflowRunSteps: %v", err)
 	}
@@ -65,9 +65,9 @@ func TestMigrate136WidensWorkflowRunStepsKindCheck(t *testing.T) {
 	// Simulated restart: a second full migrate() must be a clean no-op,
 	// and the loop row must still be there afterward.
 	if err := s.migrate(); err != nil {
-		t.Fatalf("re-migrate after 136 already applied: %v", err)
+		t.Fatalf("re-migrate after 139 already applied: %v", err)
 	}
-	stepsAfter, err := s.ListWorkflowRunSteps("run-136")
+	stepsAfter, err := s.ListWorkflowRunSteps("run-139")
 	if err != nil {
 		t.Fatalf("ListWorkflowRunSteps after re-migrate: %v", err)
 	}
@@ -76,12 +76,12 @@ func TestMigrate136WidensWorkflowRunStepsKindCheck(t *testing.T) {
 	}
 }
 
-// TestMigrate136PreservesWorkflowRunStepsIndexes confirms the table rebuild
+// TestMigrate139PreservesWorkflowRunStepsIndexes confirms the table rebuild
 // (rename-recreate-copy, same pattern as 130/133) leaves both original
 // indexes in place with their original definitions — in particular the
 // UNIQUE (workflow_run_id, step_id) index this task's Done-means (mirroring
 // task 03/06's own) needs to survive exactly.
-func TestMigrate136PreservesWorkflowRunStepsIndexes(t *testing.T) {
+func TestMigrate139PreservesWorkflowRunStepsIndexes(t *testing.T) {
 	s := newTestStore(t)
 
 	rows, err := s.DB.Query(`SELECT name, sql FROM sqlite_master WHERE type = 'index' AND tbl_name = 'workflow_run_steps' AND sql IS NOT NULL ORDER BY name`)
@@ -104,7 +104,7 @@ func TestMigrate136PreservesWorkflowRunStepsIndexes(t *testing.T) {
 
 	uniqueSQL, ok := found["idx_workflow_run_steps_run_step"]
 	if !ok {
-		t.Fatal("idx_workflow_run_steps_run_step index missing after migration 136's rebuild")
+		t.Fatal("idx_workflow_run_steps_run_step index missing after migration 139's rebuild")
 	}
 	if !strings.Contains(uniqueSQL, "UNIQUE") || !strings.Contains(uniqueSQL, "workflow_run_id") || !strings.Contains(uniqueSQL, "step_id") {
 		t.Errorf("idx_workflow_run_steps_run_step sql = %q, want a UNIQUE index on (workflow_run_id, step_id)", uniqueSQL)
@@ -112,7 +112,7 @@ func TestMigrate136PreservesWorkflowRunStepsIndexes(t *testing.T) {
 
 	statusSQL, ok := found["idx_workflow_run_steps_status"]
 	if !ok {
-		t.Fatal("idx_workflow_run_steps_status index missing after migration 136's rebuild")
+		t.Fatal("idx_workflow_run_steps_status index missing after migration 139's rebuild")
 	}
 	if !strings.Contains(statusSQL, "workflow_run_id") || !strings.Contains(statusSQL, "status") {
 		t.Errorf("idx_workflow_run_steps_status sql = %q, want an index on (workflow_run_id, status)", statusSQL)
@@ -124,17 +124,17 @@ func TestMigrate136PreservesWorkflowRunStepsIndexes(t *testing.T) {
 // EXECUTION-PROCESS.md's schema-migration testing requirement and this
 // task's own Done-means both require: every real, pre-existing
 // workflow_run_steps row from an actual production backup must survive
-// migration 136's table rebuild intact, AND — since this task's Done-means
+// migration 139's table rebuild intact, AND — since this task's Done-means
 // specifically requires verifying preservation of a *flex*-kind row across
 // the rebuild — a synthetic flex-kind row is inserted directly against the
-// real backup copy immediately before migration 136 runs (goose UpTo(134)
-// then UpTo(136), rather than one full migrate() in a single step), because
+// real backup copy immediately before migration 139 runs (goose UpTo(134)
+// then UpTo(139), rather than one full migrate() in a single step), because
 // the one real backup available on this machine
 // (main.db.pre-execution-backup-20260818-132726) predates
 // 130_workflow_run_steps_flex_kind.sql — its on-disk kind CHECK is still
 // the original 3-value ('llm','tool','gate') and it has zero flex rows of
 // its own (confirmed by direct inspection this session). Splitting the
-// migration run at the 134/136 boundary lets this test exercise the exact
+// migration run at the 134/139 boundary lets this test exercise the exact
 // scenario the Done-means describes — "a real backup copy... with real
 // flex-kind rows already present" — using this machine's only real backup
 // as the base, rather than skip the flex-preservation requirement entirely
@@ -208,29 +208,29 @@ func TestRealBackupWorkflowRunStepsSurviveLoopKindMigration(t *testing.T) {
 		t.Fatal("real backup workflow_run_steps row count = 0, want > 0 (spot-check requires real pre-existing rows, not an empty/synthetic db)")
 	}
 	realRowCount := len(realRowsBefore)
-	t.Logf("real backup copy has %d pre-existing workflow_run_steps rows before the 134->136 boundary replay", realRowCount)
+	t.Logf("real backup copy has %d pre-existing workflow_run_steps rows before the 134->139 boundary replay", realRowCount)
 
-	// rs.New() already ran every migration, including 136, in one Up()
+	// rs.New() already ran every migration, including 139, in one Up()
 	// call — there was never a moment mid-run where the real backup's rows
-	// coexisted with a flex row before 136's rebuild. Roll the schema back
-	// to immediately before 136 (goose DownTo 134), insert a synthetic
+	// coexisted with a flex row before 139's rebuild. Roll the schema back
+	// to immediately before 139 (goose DownTo 134), insert a synthetic
 	// flex-kind row (kind='flex' is legal at that schema version, per 130),
-	// then replay forward past 136 — this is the actual "flex row already
+	// then replay forward past 139 — this is the actual "flex row already
 	// present when the widening migration's rebuild runs" scenario the
 	// Done-means describes.
 	//
 	// The flexRunID parent workflow_runs row is created *before* DownTo(134)
 	// runs, while rs is still at head schema (via CreateWorkflowRun, which
 	// is coupled to the current WorkflowRunRow shape) — TASKS/loops/
-	// 05-workflow-runs-loop-scoping-columns.md's migration 140 added
+	// 05-workflow-runs-loop-scoping-columns.md's migration 143 added
 	// workflow_runs.loop_run_id/loop_iteration after this task's own
-	// migration 136 landed, so CreateWorkflowRun can no longer be called
-	// against a schema rolled back below 140 (it unconditionally inserts
-	// those two columns). ALTER TABLE ... DROP COLUMN (140's Down) removes
+	// migration 139 landed, so CreateWorkflowRun can no longer be called
+	// against a schema rolled back below 143 (it unconditionally inserts
+	// those two columns). ALTER TABLE ... DROP COLUMN (143's Down) removes
 	// only those two columns, not the row itself, so the row survives
 	// DownTo(134) intact and is still a valid FK target for the
 	// workflow_run_steps insert below, which is unaffected either way
-	// (migration 136 never touches workflow_runs).
+	// (migration 139 never touches workflow_runs).
 	migrationsDir, err := fs.Sub(migrationsFS, "migrations")
 	if err != nil {
 		t.Fatalf("sub migrations fs: %v", err)
@@ -240,42 +240,42 @@ func TestRealBackupWorkflowRunStepsSurviveLoopKindMigration(t *testing.T) {
 		t.Fatalf("construct goose provider: %v", err)
 	}
 
-	const flexRunID = "real-backup-pre-136-flex-run"
-	const flexStepID = "flex-step-pre-136"
-	if err := rs.CreateWorkflowRun(&WorkflowRunRow{ID: flexRunID, DefinitionName: "pre-136-flex-check", Status: "waiting_on_flex"}); err != nil {
-		t.Fatalf("CreateWorkflowRun (pre-136 flex probe) on real backup copy: %v", err)
+	const flexRunID = "real-backup-pre-139-flex-run"
+	const flexStepID = "flex-step-pre-139"
+	if err := rs.CreateWorkflowRun(&WorkflowRunRow{ID: flexRunID, DefinitionName: "pre-139-flex-check", Status: "waiting_on_flex"}); err != nil {
+		t.Fatalf("CreateWorkflowRun (pre-139 flex probe) on real backup copy: %v", err)
 	}
 
 	if _, err := provider.DownTo(ctx, 134); err != nil {
-		t.Fatalf("goose DownTo 134 (reverse migration 136 on real backup copy): %v", err)
+		t.Fatalf("goose DownTo 134 (reverse migration 139 on real backup copy): %v", err)
 	}
 
 	// Inserted via raw SQL, not the Go UpsertWorkflowRunStep helper: task
 	// 09 (TASKS/loops/09-stepkindloop-executor-and-waiting-status.md)
 	// widened workflowRunStepColumns to always include the new
-	// workflow_run_steps.loop_run_id column it added in migration 141 —
+	// workflow_run_steps.loop_run_id column it added in migration 144 —
 	// that helper's INSERT statement is written against this worktree's
 	// HEAD schema and fails against the intentionally-rolled-back schema
 	// version 134 this test runs at here (no loop_run_id column exists
 	// yet at that version). The row shape below matches 133's own rebuilt
 	// CREATE TABLE exactly (the live schema at version 134 — no 'loop'
-	// kind, no loop_run_id column, both added later by 136/141).
+	// kind, no loop_run_id column, both added later by 139/144).
 	if _, err := rs.DB.ExecContext(ctx, `
 		INSERT INTO workflow_run_steps
 			(id, workflow_run_id, step_id, kind, status, output, is_error, tool_calls_json, verify_json, error, started_at, completed_at, updated_at, gate_input)
 		VALUES (?, ?, ?, 'flex', 'waiting_on_flex', ?, 0, '[]', '', '', '', '', datetime('now'), '')`,
-		flexRunID+":"+flexStepID, flexRunID, flexStepID, "flex row inserted before migration 136's rebuild",
+		flexRunID+":"+flexStepID, flexRunID, flexStepID, "flex row inserted before migration 139's rebuild",
 	); err != nil {
 		t.Fatalf("insert synthetic flex row on real backup copy at schema version 134: %v", err)
 	}
 
-	// Replay all the way back to this worktree's head (not just UpTo(136))
+	// Replay all the way back to this worktree's head (not just UpTo(139))
 	// so the "new capability" CreateWorkflowRun call below (which needs
-	// migration 140's columns) succeeds too — none of 137-140 touch
-	// workflow_run_steps, so this doesn't weaken the 136-rebuild-specific
+	// migration 143's columns) succeeds too — none of 140-143 touch
+	// workflow_run_steps, so this doesn't weaken the 139-rebuild-specific
 	// assertions that follow.
 	if _, err := provider.Up(ctx); err != nil {
-		t.Fatalf("goose Up (replay forward past migration 136 over real backup copy + synthetic flex row): %v", err)
+		t.Fatalf("goose Up (replay forward past migration 139 over real backup copy + synthetic flex row): %v", err)
 	}
 
 	// Every real, pre-existing row must still be there, with a valid kind
@@ -284,24 +284,24 @@ func TestRealBackupWorkflowRunStepsSurviveLoopKindMigration(t *testing.T) {
 	var realRowsAfter []stepRow
 	rowsAfter, err := rs.DB.QueryContext(ctx, `SELECT workflow_run_id, step_id, kind, status FROM workflow_run_steps`)
 	if err != nil {
-		t.Fatalf("query workflow_run_steps after migration 136: %v", err)
+		t.Fatalf("query workflow_run_steps after migration 139: %v", err)
 	}
 	for rowsAfter.Next() {
 		var r stepRow
 		if err := rowsAfter.Scan(&r.workflowRunID, &r.stepID, &r.kind, &r.status); err != nil {
 			rowsAfter.Close()
-			t.Fatalf("scan workflow_run_steps row after migration 136: %v", err)
+			t.Fatalf("scan workflow_run_steps row after migration 139: %v", err)
 		}
 		realRowsAfter = append(realRowsAfter, r)
 	}
 	rowsAfterErr := rowsAfter.Err()
 	rowsAfter.Close()
 	if rowsAfterErr != nil {
-		t.Fatalf("iterate workflow_run_steps rows after migration 136: %v", rowsAfterErr)
+		t.Fatalf("iterate workflow_run_steps rows after migration 139: %v", rowsAfterErr)
 	}
 
 	if len(realRowsAfter) != realRowCount+1 {
-		t.Fatalf("row count after migration 136 rebuild = %d, want %d (the %d real backup rows plus the synthetic flex row) — the rebuild lost or duplicated rows",
+		t.Fatalf("row count after migration 139 rebuild = %d, want %d (the %d real backup rows plus the synthetic flex row) — the rebuild lost or duplicated rows",
 			len(realRowsAfter), realRowCount+1, realRowCount)
 	}
 
@@ -309,10 +309,10 @@ func TestRealBackupWorkflowRunStepsSurviveLoopKindMigration(t *testing.T) {
 	byKey := map[string]stepRow{}
 	for _, r := range realRowsAfter {
 		if !validKinds[r.kind] {
-			t.Errorf("row (run=%s, step=%s) has kind=%q after migration 136 — not one of llm/tool/gate/flex/loop, table rebuild likely corrupted it", r.workflowRunID, r.stepID, r.kind)
+			t.Errorf("row (run=%s, step=%s) has kind=%q after migration 139 — not one of llm/tool/gate/flex/loop, table rebuild likely corrupted it", r.workflowRunID, r.stepID, r.kind)
 		}
 		if r.status == "" {
-			t.Errorf("row (run=%s, step=%s) has empty status after migration 136 — likely lost across the table rebuild", r.workflowRunID, r.stepID)
+			t.Errorf("row (run=%s, step=%s) has empty status after migration 139 — likely lost across the table rebuild", r.workflowRunID, r.stepID)
 		}
 		byKey[r.workflowRunID+"/"+r.stepID] = r
 	}
@@ -322,11 +322,11 @@ func TestRealBackupWorkflowRunStepsSurviveLoopKindMigration(t *testing.T) {
 	for _, want := range realRowsBefore {
 		got, ok := byKey[want.workflowRunID+"/"+want.stepID]
 		if !ok {
-			t.Errorf("real backup row (run=%s, step=%s, kind=%s) missing after migration 136's rebuild", want.workflowRunID, want.stepID, want.kind)
+			t.Errorf("real backup row (run=%s, step=%s, kind=%s) missing after migration 139's rebuild", want.workflowRunID, want.stepID, want.kind)
 			continue
 		}
 		if got.kind != want.kind || got.status != want.status {
-			t.Errorf("real backup row (run=%s, step=%s) changed across migration 136's rebuild: before kind=%s status=%s, after kind=%s status=%s",
+			t.Errorf("real backup row (run=%s, step=%s) changed across migration 139's rebuild: before kind=%s status=%s, after kind=%s status=%s",
 				want.workflowRunID, want.stepID, want.kind, want.status, got.kind, got.status)
 		}
 	}
@@ -339,21 +339,21 @@ func TestRealBackupWorkflowRunStepsSurviveLoopKindMigration(t *testing.T) {
 		`SELECT output FROM workflow_run_steps WHERE workflow_run_id = ? AND step_id = ?`,
 		flexRunID, flexStepID,
 	).Scan(&flexOutput); err != nil {
-		t.Fatalf("read back pre-136 flex row after migration 136's rebuild: %v", err)
+		t.Fatalf("read back pre-139 flex row after migration 139's rebuild: %v", err)
 	}
-	if flexOutput != "flex row inserted before migration 136's rebuild" {
-		t.Errorf("pre-136 flex row's output column changed across the rebuild: got %q", flexOutput)
+	if flexOutput != "flex row inserted before migration 139's rebuild" {
+		t.Errorf("pre-139 flex row's output column changed across the rebuild: got %q", flexOutput)
 	}
 
-	t.Logf("verified %d real workflow_run_steps rows plus 1 pre-existing synthetic flex row all survive migration 136's table rebuild with a valid kind/status", realRowCount)
+	t.Logf("verified %d real workflow_run_steps rows plus 1 pre-existing synthetic flex row all survive migration 139's table rebuild with a valid kind/status", realRowCount)
 
 	// And the new capability actually works against this real, migrated
 	// copy: a loop-kind row can now be inserted where it couldn't before.
-	if err := rs.CreateWorkflowRun(&WorkflowRunRow{ID: "post-136-loop-check", DefinitionName: "loop-check", Status: "running"}); err != nil {
+	if err := rs.CreateWorkflowRun(&WorkflowRunRow{ID: "post-139-loop-check", DefinitionName: "loop-check", Status: "running"}); err != nil {
 		t.Fatalf("CreateWorkflowRun on real backup copy: %v", err)
 	}
 	if err := rs.UpsertWorkflowRunStep(&WorkflowRunStepRow{
-		WorkflowRunID: "post-136-loop-check", StepID: "loop-step", Kind: "loop", Status: "pending",
+		WorkflowRunID: "post-139-loop-check", StepID: "loop-step", Kind: "loop", Status: "pending",
 	}); err != nil {
 		t.Fatalf("UpsertWorkflowRunStep(kind=loop) on real backup copy: %v", err)
 	}

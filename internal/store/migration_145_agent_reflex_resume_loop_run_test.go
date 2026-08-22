@@ -10,13 +10,13 @@ import (
 	"github.com/pressly/goose/v3"
 )
 
-// TestMigrate142SeedsResumeLoopRunActionKind is the regression test for
+// TestMigrate145SeedsResumeLoopRunActionKind is the regression test for
 // TASKS/loops/11-loop-event-predicate-trigger.md: reflex_action_kinds
 // gets a new resume_loop_run row (execute_action / all_applicable / no
 // cooldown), and reflex_action_kind_provenance_allow gets
 // resume_loop_run x {system, operator} (not plugin), matching this
 // migration's own doc comment byte-for-byte.
-func TestMigrate142SeedsResumeLoopRunActionKind(t *testing.T) {
+func TestMigrate145SeedsResumeLoopRunActionKind(t *testing.T) {
 	s := newTestStore(t)
 	ctx := context.Background()
 
@@ -55,16 +55,16 @@ func TestMigrate142SeedsResumeLoopRunActionKind(t *testing.T) {
 
 	// Simulated restart: a second full migrate() must be a clean no-op.
 	if err := s.migrate(); err != nil {
-		t.Fatalf("re-migrate after 142 already applied: %v", err)
+		t.Fatalf("re-migrate after 145 already applied: %v", err)
 	}
 }
 
-// TestMigrate142WidensActionKindCheckAndRoundTrips confirms the actual
+// TestMigrate145WidensActionKindCheckAndRoundTrips confirms the actual
 // widened constraint: an agent_reflexes row with
 // action_kind='resume_loop_run' can be inserted and read back (previously
 // a CHECK violation against 131's six-value list), and an unrecognized
 // action_kind still fails (the CHECK/FK didn't just get dropped).
-func TestMigrate142WidensActionKindCheckAndRoundTrips(t *testing.T) {
+func TestMigrate145WidensActionKindCheckAndRoundTrips(t *testing.T) {
 	s := newTestStore(t)
 	ctx := context.Background()
 
@@ -118,12 +118,12 @@ func TestMigrate142WidensActionKindCheckAndRoundTrips(t *testing.T) {
 	}
 }
 
-// TestMigrate142PreservesExistingRowsAcrossRebuild rolls the schema back to
-// just before 142, inserts a probe row under 131's own (pre-142) six-value
-// CHECK, replays 142's Up, and confirms the pre-existing row survives the
+// TestMigrate145PreservesExistingRowsAcrossRebuild rolls the schema back to
+// just before 145, inserts a probe row under 131's own (pre-145) six-value
+// CHECK, replays 145's Up, and confirms the pre-existing row survives the
 // rebuild unchanged — same technique as 124's own
 // TestMigrate124BackfillsProvenanceTierFromCreatedBy.
-func TestMigrate142PreservesExistingRowsAcrossRebuild(t *testing.T) {
+func TestMigrate145PreservesExistingRowsAcrossRebuild(t *testing.T) {
 	s := newTestStore(t)
 	ctx := context.Background()
 
@@ -136,14 +136,14 @@ func TestMigrate142PreservesExistingRowsAcrossRebuild(t *testing.T) {
 		t.Fatalf("construct goose provider: %v", err)
 	}
 
-	if _, err := provider.DownTo(ctx, 141); err != nil {
-		t.Fatalf("goose DownTo 141 (reverse migration 142): %v", err)
+	if _, err := provider.DownTo(ctx, 144); err != nil {
+		t.Fatalf("goose DownTo 144 (reverse migration 145): %v", err)
 	}
 
-	// Pre-142 shape still has the 131-era six-value CHECK -- confirm
+	// Pre-145 shape still has the 131-era six-value CHECK -- confirm
 	// resume_loop_run is rejected here, then insert a probe row under an
-	// already-existing kind (raw SQL against the exact pre-142 column
-	// list, matching 141's own test file's technique for inserting against
+	// already-existing kind (raw SQL against the exact pre-145 column
+	// list, matching 144's own test file's technique for inserting against
 	// a rolled-back schema).
 	if _, err := s.DB.ExecContext(ctx,
 		`INSERT INTO agent_reflexes
@@ -151,12 +151,12 @@ func TestMigrate142PreservesExistingRowsAcrossRebuild(t *testing.T) {
 		     action_kind, action_spec, status, priority, fired_count,
 		     last_fired_at, created_at, created_by, opt_out_allowed,
 		     provenance_tier, recurrence_override_seconds, workflow_run_id)
-		 VALUES ('rfx-142-probe', NULL, 'process', 'pre-142-probe', 'event', '{"name":"probe"}',
+		 VALUES ('rfx-145-probe', NULL, 'process', 'pre-145-probe', 'event', '{"name":"probe"}',
 		         'halt_session', '{"reason":"probe"}', 'active', 0, 0,
 		         NULL, datetime('now'), 'system', 0,
 		         'system', NULL, NULL)`,
 	); err != nil {
-		t.Fatalf("insert pre-142 probe row: %v", err)
+		t.Fatalf("insert pre-145 probe row: %v", err)
 	}
 	if _, err := s.DB.ExecContext(ctx,
 		`INSERT INTO agent_reflexes
@@ -164,29 +164,29 @@ func TestMigrate142PreservesExistingRowsAcrossRebuild(t *testing.T) {
 		     action_kind, action_spec, status, priority, fired_count,
 		     last_fired_at, created_at, created_by, opt_out_allowed,
 		     provenance_tier, recurrence_override_seconds, workflow_run_id)
-		 VALUES ('rfx-142-bogus', NULL, 'process', 'pre-142-bogus', 'event', '{"name":"probe"}',
+		 VALUES ('rfx-145-bogus', NULL, 'process', 'pre-145-bogus', 'event', '{"name":"probe"}',
 		         'resume_loop_run', '{"loop_run_id":"lr-x"}', 'active', 0, 0,
 		         NULL, datetime('now'), 'system', 0,
 		         'system', NULL, NULL)`,
 	); err == nil {
-		t.Fatal("insert pre-142 row with action_kind=resume_loop_run succeeded, want CHECK/FK violation against the pre-142 six-value constraint")
+		t.Fatal("insert pre-145 row with action_kind=resume_loop_run succeeded, want CHECK/FK violation against the pre-145 six-value constraint")
 	}
 
 	if _, err := provider.Up(ctx); err != nil {
-		t.Fatalf("goose Up (replay migration 142): %v", err)
+		t.Fatalf("goose Up (replay migration 145): %v", err)
 	}
 
-	row, err := s.GetAgentReflex(ctx, "rfx-142-probe")
+	row, err := s.GetAgentReflex(ctx, "rfx-145-probe")
 	if err != nil {
-		t.Fatalf("GetAgentReflex(pre-142 probe row) after migration 142: %v", err)
+		t.Fatalf("GetAgentReflex(pre-145 probe row) after migration 145: %v", err)
 	}
-	if row.ActionKind != ReflexActionHaltSession || row.Name != "pre-142-probe" {
-		t.Errorf("pre-142 probe row changed across migration 142's rebuild: %+v", row)
+	if row.ActionKind != ReflexActionHaltSession || row.Name != "pre-145-probe" {
+		t.Errorf("pre-145 probe row changed across migration 145's rebuild: %+v", row)
 	}
 
-	// And the new capability actually works now that 142 has run.
+	// And the new capability actually works now that 145 has run.
 	newID, err := s.InsertAgentReflex(ctx, AgentReflex{
-		Name:        "post-142-probe",
+		Name:        "post-145-probe",
 		ClassTag:    "process",
 		TriggerKind: ReflexTriggerEvent,
 		TriggerSpec: `{"name":"probe"}`,
@@ -195,10 +195,10 @@ func TestMigrate142PreservesExistingRowsAcrossRebuild(t *testing.T) {
 		CreatedBy:   "system",
 	})
 	if err != nil {
-		t.Fatalf("InsertAgentReflex(resume_loop_run) after migration 142: %v", err)
+		t.Fatalf("InsertAgentReflex(resume_loop_run) after migration 145: %v", err)
 	}
 	if _, err := s.GetAgentReflex(ctx, newID); err != nil {
-		t.Fatalf("GetAgentReflex(post-142 probe row): %v", err)
+		t.Fatalf("GetAgentReflex(post-145 probe row): %v", err)
 	}
 }
 
@@ -206,7 +206,7 @@ func TestMigrate142PreservesExistingRowsAcrossRebuild(t *testing.T) {
 // lost, no false-positive rejection of already-live data" check
 // EXECUTION-PROCESS.md's schema-migration testing requirement calls for:
 // every real, pre-existing agent_reflexes row from an actual production
-// backup must survive migration 142's table rebuild intact. Per
+// backup must survive migration 145's table rebuild intact. Per
 // EXECUTION-PROCESS.md, the real backup file is never opened in place —
 // it is copied into t.TempDir() before store.New ever touches it. Skips
 // (rather than fails) when the backup isn't present on this machine.
@@ -270,15 +270,15 @@ func TestRealBackupAgentReflexesSurviveResumeLoopRunMigration(t *testing.T) {
 		case ReflexActionInjectReminder, ReflexActionForceToolChoice, ReflexActionSendMessage,
 			ReflexActionHaltSession, ReflexActionAddSchedule, ReflexActionDispatchToAgent, ReflexActionResumeLoopRun:
 		default:
-			t.Errorf("real backup agent_reflexes row %s (name=%q) has unrecognized action_kind %q after migration 142 -- data corrupted by the rebuild", row.id, row.name, row.actionKind)
+			t.Errorf("real backup agent_reflexes row %s (name=%q) has unrecognized action_kind %q after migration 145 -- data corrupted by the rebuild", row.id, row.name, row.actionKind)
 		}
 	}
-	t.Logf("verified %d real agent_reflexes rows from backup survive migration 142's rebuild with their action_kind intact", len(rows))
+	t.Logf("verified %d real agent_reflexes rows from backup survive migration 145's rebuild with their action_kind intact", len(rows))
 
 	// And the new capability actually works against this real, migrated
 	// copy.
 	if _, err := rs.InsertAgentReflex(ctx, AgentReflex{
-		Name:        "post-142-real-backup-probe",
+		Name:        "post-145-real-backup-probe",
 		ClassTag:    "process",
 		TriggerKind: ReflexTriggerEvent,
 		TriggerSpec: `{"name":"probe"}`,

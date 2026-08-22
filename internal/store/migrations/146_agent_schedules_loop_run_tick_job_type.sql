@@ -1,6 +1,6 @@
 -- +goose Up
 -- +goose NO TRANSACTION
--- 143_agent_schedules_loop_run_tick_job_type.sql
+-- 146_agent_schedules_loop_run_tick_job_type.sql
 -- TASKS/loops/12-loop-run-tick-scheduled-trigger.md.
 --
 -- Widens agent_schedules.job_type's CHECK constraint (migration 127) from
@@ -16,24 +16,27 @@
 -- changes; this migration is the DB-side CHECK widening those two files'
 -- own job_type strings need in order to ever be persisted at all.
 --
--- Migration-number note: this task's own dispatch-time assignment is 143,
--- not the next sequential-looking number after 138-141 -- a sibling task in
--- this same parallel batch (TASKS/loops/11) is concurrently assigned 142 in
+-- Migration-number note: this task's own dispatch-time assignment is 143
+-- (since renumbered to 146; see TASKS/loops/HANDOFF.md's 2026-08-22
+-- renumbering note),
+-- not the next sequential-looking number after 141-144 -- a sibling task in
+-- this same parallel batch (TASKS/loops/11) is concurrently assigned 142
+-- (now 145) in
 -- an isolated worktree off the same base, to avoid the exact same-wave
 -- numbering collision this batch has already hit twice. Confirmed directly
 -- via `ls internal/store/migrations/ | sort -t_ -k1 -n | tail` before
 -- writing this file: no 142_*.sql or 143_*.sql exists in this worktree at
--- write time.
+-- write time (now 145_*.sql / 146_*.sql).
 --
 -- SQLite cannot ALTER a CHECK constraint in place, so agent_schedules is
 -- rebuilt via the same rename-recreate-copy pattern migration 127 itself
--- used (and 130/133/136/141 reused for other tables) -- every column and
+-- used (and 130/133/139/144 reused for other tables) -- every column and
 -- every other CHECK/DEFAULT is copied verbatim from 127's shape; only the
 -- job_type CHECK's value list changes. schedule_runs (127) has a real FK
 -- into agent_schedules(id) -- PRAGMA foreign_keys = OFF for the rebuild
 -- means that FK isn't enforced/cascaded mid-migration, and by commit time
 -- agent_schedules exists again with identical row ids, so referential
--- integrity is intact (same reasoning 127/133/141's own doc comments give
+-- integrity is intact (same reasoning 127/133/144's own doc comments give
 -- for their own rebuilds). schedule_runs itself is untouched -- this
 -- migration does not recreate it.
 
@@ -95,7 +98,7 @@ PRAGMA foreign_keys = ON;
 
 -- +goose Down
 -- Rebuilds agent_schedules with the pre-loop_run_tick four-value job_type
--- CHECK (127's shape). Structure-only, matching 127/133/136/141's own
+-- CHECK (127's shape). Structure-only, matching 127/133/139/144's own
 -- downgrade precedent: any row inserted with job_type='loop_run_tick' after
 -- the Up migration would violate this narrower CHECK on re-insert -- a
 -- genuine downgrade scenario is expected to have none of consequence (this

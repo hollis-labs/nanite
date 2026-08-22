@@ -91,7 +91,7 @@ func TestResumeLoopRunReflex_FiresLoopEngineResume_ViaRealEvaluationCadence(t *t
 	loopRunID := result.LoopRunID
 
 	// Attach a real resume_loop_run reflex to this specific LoopRun --
-	// task 08/10's own job in production (see migration 142's doc
+	// task 08/10's own job in production (see migration 145's doc
 	// comment); this test creates the row directly via InsertAgentReflex,
 	// the same way every other reflex-fixture test in this codebase seeds
 	// a candidate row, since authoring the row itself is out of this

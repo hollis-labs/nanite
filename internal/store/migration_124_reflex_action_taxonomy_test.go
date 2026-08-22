@@ -65,7 +65,7 @@ func TestMigrate124SeedsTaxonomyLookupTables(t *testing.T) {
 	// isolation), so the row count below is 124's own six plus every
 	// action kind a later migration has since added — currently just
 	// TASKS/loops/11-loop-event-predicate-trigger.md's resume_loop_run
-	// (migration 142_agent_reflex_resume_loop_run.sql). Bump this count
+	// (migration 145_agent_reflex_resume_loop_run.sql). Bump this count
 	// (and wantKinds below) again the next time a migration adds another
 	// action kind.
 	wantKinds := map[string]ReflexActionKind{

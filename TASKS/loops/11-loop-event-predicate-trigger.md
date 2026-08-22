@@ -102,10 +102,12 @@ different subsystem (`LoopEngine.Resume`, task `08`) rather than affecting the c
 
 ## Work log
 
-**Migration number.** Used `142` exactly as the dispatch instruction required. Confirmed
-`ls internal/store/migrations/ | sort -t_ -k1 -n | tail -6` showed `141_workflow_run_waiting_on_loop_status.sql`
+**Migration number.** Used `142` (since renumbered to `145`; see
+`TASKS/loops/HANDOFF.md`'s 2026-08-22 renumbering note) exactly as the dispatch instruction
+required. Confirmed `ls internal/store/migrations/ | sort -t_ -k1 -n | tail -6` showed
+`141_workflow_run_waiting_on_loop_status.sql` (now `144_workflow_run_waiting_on_loop_status.sql`)
 as the highest landed migration at dispatch time and no `142_*.sql` already present. File:
-`internal/store/migrations/142_agent_reflex_resume_loop_run.sql`.
+`internal/store/migrations/145_agent_reflex_resume_loop_run.sql`.
 
 **Real correction found this session (item 3's own kind of finding, not a design reopening)
 — "WAIT status" is the collapsed `waiting_on_escalation` literal, not a distinct one.**
@@ -132,7 +134,7 @@ which is the *other* pause bucket and means something structurally different —
 iteration's own inner WorkflowRun is blocked on a gate/flex step, which an event/predicate
 `resume_loop_run` reflex was never meant to resolve).
 
-**1. New migration (`142_agent_reflex_resume_loop_run.sql`).** Confirmed the real mechanism
+**1. New migration (`145_agent_reflex_resume_loop_run.sql`).** Confirmed the real mechanism
 first: `agent_reflexes.action_kind` is a `TEXT` column with both a `CHECK (action_kind IN
 (...))` *and* a `REFERENCES reflex_action_kinds(name)` FK (added together by migration
 `124_reflex_action_taxonomy.sql`) — `119_agent_reflex_dispatch_to_agent.sql` is the
@@ -140,7 +142,7 @@ pre-taxonomy precedent for the CHECK alone; `124` is the exact shape to copy for
 confirmed `agent_reflexes` gained a further column since 124/131 that a rebuild must now
 carry: `workflow_run_id` (migration `131_agent_reflexes_workflow_run_scoping.sql`, a plain
 `ALTER TABLE ADD COLUMN`, no rebuild needed at the time) — this is the *first* rebuild of
-this table since that column was added, so `142`'s `CREATE TABLE agent_reflexes_new` is the
+this table since that column was added, so `145`'s `CREATE TABLE agent_reflexes_new` is the
 first to include it. Same `PRAGMA foreign_keys=OFF` / rename-recreate-copy pattern as
 119/124/131 for the table itself, plus new seed rows: `reflex_action_kinds` gets
 `('resume_loop_run', 'execute_action', 'all_applicable', 0)` and
@@ -158,13 +160,13 @@ a real backup copy (`~/.local/share/nanite/workspaces/default/backups/main.db.pr
 copied into a scratch path first): every real pre-existing `agent_reflexes` row (14+ rows)
 survives the rebuild with its `action_kind` intact, and a genuine `resume_loop_run` row can
 be inserted against the migrated copy — `TestRealBackupAgentReflexesSurviveResumeLoopRunMigration`
-(`internal/store/migration_142_agent_reflex_resume_loop_run_test.go`). Also added a
-`goose DownTo(141)` + raw-SQL-probe-row + `Up()` replay test
-(`TestMigrate142PreservesExistingRowsAcrossRebuild`, same technique as 124's own
-`TestMigrate124BackfillsProvenanceTierFromCreatedBy`) confirming a pre-142 row survives
-unchanged and that `resume_loop_run` is genuinely rejected pre-142 / accepted post-142.
+(`internal/store/migration_145_agent_reflex_resume_loop_run_test.go`). Also added a
+`goose DownTo(144)` + raw-SQL-probe-row + `Up()` replay test
+(`TestMigrate145PreservesExistingRowsAcrossRebuild`, same technique as 124's own
+`TestMigrate124BackfillsProvenanceTierFromCreatedBy`) confirming a pre-145 row survives
+unchanged and that `resume_loop_run` is genuinely rejected pre-145 / accepted post-145.
 **Collateral fix, mechanical, not a design question** (same class as task 09's own
-migration-136 collateral fix): `migration_124_reflex_action_taxonomy_test.go` and
+migration-139 collateral fix): `migration_124_reflex_action_taxonomy_test.go` and
 `migration_125_reflex_action_kind_provenance_allow_test.go` both hardcode exact row counts
 (6 kinds, 16 allowed pairs) that these tests check against the *fully-migrated* live schema,
 not migration 124/125 in isolation — bumped to 7/18 (and added `resume_loop_run` to both
@@ -259,7 +261,7 @@ insufficient, for `resume_loop_run` — the sole real cadence is whatever explic
      session-scoped — every field (`Messages`, `UserMessages`, `MailUnreadCount`, `Events`,
      `TickN`) is built from a `sessionID`-keyed query (`LastNAssistantMessages`,
      `recentMessagesByRole`, `agent_messages.to_session_id`, `event_log.session_id`,
-     `sessions.message_count`). `loop_runs` (migration `138_loop_runs.sql`) has no
+     `sessions.message_count`). `loop_runs` (migration `141_loop_runs.sql`) has no
      `session_id` column at all — a `LoopRun` is a peer entity to `WorkflowRun`, not itself a
      chat session, and its `waiting_on_escalation` pause can span (per the design doc's own
      framing) far more than one chat turn, up to and including zero live chat turns for the
@@ -347,7 +349,7 @@ by months, commits `76df826a3`/`7a0e37936`), `go test ./...` exit 0 across all p
 
 ## Review notes
 
-PASS. Reviewed migration 142, the `engine.go`/`executor.go` diffs, `api/reflexes.go`'s
+PASS. Reviewed migration 145, the `engine.go`/`executor.go` diffs, `api/reflexes.go`'s
 validation diff, `store/agent_reflexes.go`'s `ListAgentReflexesForLoopRun`,
 `loop_resume_reflex.go`, `reflex_resume.go`, and both test files in full. Confirmed the
 no-op/real-handler split genuinely mirrors `dispatch_to_agent`, the `waiting_on_escalation`

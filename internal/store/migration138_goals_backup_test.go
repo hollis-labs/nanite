@@ -57,7 +57,7 @@ func TestRealBackupGoalsMigrationAppliesCleanly(t *testing.T) {
 	ctx := context.Background()
 	rs, err := New(ctx, absPath)
 	if err != nil {
-		t.Fatalf("open+migrate scratch copy of real backup db (migration 135 goals): %v", err)
+		t.Fatalf("open+migrate scratch copy of real backup db (migration 138 goals): %v", err)
 	}
 	defer rs.Close()
 

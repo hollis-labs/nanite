@@ -11,16 +11,19 @@
 -- pointer back to the real per-step verify records.
 --
 -- Migration-number note: per this batch's dispatch instructions, this task
--- uses migration number 139 explicitly assigned by the orchestrator (NOT
+-- uses migration number 139 (since renumbered to 142; see
+-- TASKS/loops/HANDOFF.md's 2026-08-22 renumbering note) explicitly assigned
+-- by the orchestrator (NOT
 -- the task file's own provisional "141" placeholder, and NOT a number
 -- re-derived by this worker) -- a sibling worker in a separate isolated
--- worktree off the same base is concurrently assigned 140 for task 05, to
+-- worktree off the same base is concurrently assigned 140 (now 143) for
+-- task 05, to
 -- avoid the numbering collisions two prior waves in this batch hit when
 -- parallel workers each independently "confirmed" the same next-available
 -- number in their own isolated worktree. Confirmed via
 -- `ls internal/store/migrations/139_*` returning no match in this worktree
 -- immediately before writing this file -- the latest migration actually on
--- disk here is 138_loop_runs.sql (task 03).
+-- disk here is 138_loop_runs.sql (now 141_loop_runs.sql) (task 03).
 --
 -- decision/progress_state/workflow_run_id are all nullable -- per this
 -- task's own "What to do" §1: task 08 creates a row when an iteration
@@ -45,17 +48,17 @@
 -- real workflow_runs row.
 --
 -- No FK from loop_run_id to loop_runs(id) is skipped -- unlike
--- goal_evidence.loop_run_id (migration 137, deliberately unenforced because
+-- goal_evidence.loop_run_id (migration 140, deliberately unenforced because
 -- that table can legitimately point at a loop_run_id that lands in a
 -- migration ordered later than itself), loop_run_iterations always follows
--- loop_runs (138 < 139) and every row here is created only once its parent
+-- loop_runs (141 < 142) and every row here is created only once its parent
 -- loop_runs row already exists (task 08's launcher), so the ordinary
 -- REFERENCES loop_runs(id) constraint applies with no special-casing,
 -- matching 132_team_authority_grants.sql's own normalized-sub-table-
 -- pointing-at-a-parent-definition-row precedent this task cites.
 --
 -- Brand-new table, nothing to rebuild -- plain transactional CREATE TABLE,
--- matching 128_teams.sql's / 135_goals.sql's / 138_loop_runs.sql's own
+-- matching 128_teams.sql's / 138_goals.sql's / 141_loop_runs.sql's own
 -- precedent (no existing rows to preserve, so no PRAGMA foreign_keys /
 -- rename-recreate-copy rebuild dance is needed).
 

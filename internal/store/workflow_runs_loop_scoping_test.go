@@ -1,7 +1,7 @@
 package store
 
 // Regression coverage for TASKS/loops/05-workflow-runs-loop-scoping-columns.md's
-// schema piece: migration 140_workflow_runs_loop_scoping.sql's nullable
+// schema piece: migration 143_workflow_runs_loop_scoping.sql's nullable
 // workflow_runs.loop_run_id/loop_iteration columns.
 
 import (

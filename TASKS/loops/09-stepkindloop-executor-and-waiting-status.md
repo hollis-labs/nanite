@@ -123,10 +123,12 @@ container-build time, avoiding the cycle. Document your actual resolution.
 
 ## Work log
 
-**Migration number.** Used `141` exactly as the dispatch instruction required (confirmed
-`ls internal/store/migrations/ | sort -t_ -k1 -n | tail -3` showed `140_workflow_runs_loop_scoping.sql`
-as the highest landed migration; no `141_*` existed yet). File:
-`internal/store/migrations/141_workflow_run_waiting_on_loop_status.sql`. Widens
+**Migration number.** Used `141` (since renumbered to `144`; see
+`TASKS/loops/HANDOFF.md`'s 2026-08-22 renumbering note) exactly as the dispatch instruction
+required (confirmed `ls internal/store/migrations/ | sort -t_ -k1 -n | tail -3` showed
+`140_workflow_runs_loop_scoping.sql` (now `143_workflow_runs_loop_scoping.sql`) as the
+highest landed migration; no `141_*` existed yet). File:
+`internal/store/migrations/144_workflow_run_waiting_on_loop_status.sql`. Widens
 `workflow_runs.status` and `workflow_run_steps.status` CHECKs to add `'waiting_on_loop'`
 (mirroring 133's exact dual-table rebuild pattern, in one migration as 133 established), and —
 bundled into the same rebuild since `workflow_run_steps` was already being rebuilt for the
@@ -138,18 +140,18 @@ terminal loop_run_id, find the step waiting on it, `GetWorkflowRunStepByLoopRunI
 against a real production backup copy
 (`~/.local/share/nanite/workspaces/default/backups/main.db.pre-execution-backup-20260818-132726`,
 copied into a scratch path first, per EXECUTION-PROCESS.md): that backup predates migration 130
-entirely (zero gate/flex waiting rows of its own — same finding migration 136's own test
+entirely (zero gate/flex waiting rows of its own — same finding migration 139's own test
 already documented), so the "existing flex/gate waiting rows survive" requirement was verified
-the same way migration 136's test precedent handles this: `goose DownTo(140)`, insert synthetic
+the same way migration 139's test precedent handles this: `goose DownTo(143)`, insert synthetic
 `waiting_on_gate`/`waiting_on_flex` rows via raw SQL (not the Go helpers — see below), then
-`Up()` to replay through 141, confirming every real pre-existing row plus both synthetic rows
+`Up()` to replay through 144, confirming every real pre-existing row plus both synthetic rows
 survive unchanged, and that `waiting_on_loop`/`loop_run_id` are now usable. Test:
-`internal/store/migration_141_workflow_run_waiting_on_loop_status_test.go`.
+`internal/store/migration_144_workflow_run_waiting_on_loop_status_test.go`.
 
 **Real gap found and fixed in already-landed schema-task scope, not just this task's own
 work.** `agentworkflow.Validate` (`internal/agentworkflow/validate.go`) still rejected
 `StepKindLoop` in its step-kind switch — task 06 ("schema/const half") added the DB-level
-`kind='loop'` CHECK widening (migration 136) and the `StepKindLoop` constant, but never updated
+`kind='loop'` CHECK widening (migration 139) and the `StepKindLoop` constant, but never updated
 `Validate`'s own switch, so a `WorkflowDefinition` with a loop step would have failed
 `agentworkflow.Validate(wf)` before ever reaching the engine, making `StepKindLoop` completely
 unusable regardless of how correct this task's own runtime logic is. Fixed by adding
@@ -218,7 +220,7 @@ through `resolveStepConfig`'s `{{ }}` templating, matching `StepKindGate`/`StepK
 precedent (neither templates its Config either). Tested in `TestParseLoopStepConfig` (8 sub-cases).
 
 **Where `loop_run_id` gets recorded on the step (item 4, second half).** A real column,
-`workflow_run_steps.loop_run_id` (migration 141), populated on every write from the moment
+`workflow_run_steps.loop_run_id` (migration 144), populated on every write from the moment
 `LoopEngine.Run` first returns a `loop_run_id` (whether the step then resolves immediately or
 parks `waiting_on_loop`) through to its terminal resolution — see migration's own doc comment
 for the "why a column, not JSON" reasoning (bidirectional lookup: step→loop_run_id via the row;
@@ -272,13 +274,13 @@ attaches loop support to the one shared `BuiltinWorkflowEngine` instance.
 
 **Collateral fix to a pre-existing migration-boundary test.** Widening
 `workflowRunStepColumns`/`UpsertWorkflowRunStep` to always include the new `loop_run_id` column
-broke `internal/store/migration_136_workflow_run_steps_loop_kind_test.go`'s
+broke `internal/store/migration_139_workflow_run_steps_loop_kind_test.go`'s
 `TestRealBackupWorkflowRunStepsSurviveLoopKindMigration`, which calls the Go `UpsertWorkflowRunStep`
 helper directly against a database intentionally rolled back to schema version 134 (before
 `loop_run_id` existed) — the helper's INSERT statement is written against this worktree's head
 schema and failed with "no such column: loop_run_id" at that rolled-back version. Fixed by
 switching that one synthetic-row insertion to raw SQL matching the literal schema at version
-134 (matching the same technique this task's own new migration-141 test already uses for its
+134 (matching the same technique this task's own new migration-144 test already uses for its
 synthetic rows). Confirmed the fix doesn't weaken that test's own assertions — same row shape,
 same table, only the insertion mechanism changed.
 
@@ -315,7 +317,7 @@ of whatever the notifier already attempted), the end-to-end integration test (re
 confirmed it never calls `.Resume()`/`.Run()` on the outer `WorkflowRun` — only on the inner
 `LoopRun` — and asserts the outer run's `completed` transition against real persisted state),
 all cross-cutting edits to already-shipped Teams/A2A code (both purely additive, no existing
-case altered), the migration-136 collateral fix (assertions byte-for-byte unchanged), and
+case altered), the migration-139 collateral fix (assertions byte-for-byte unchanged), and
 `cmd/nanite/main.go`'s wiring (reuses the same registry/launcher/store instances, both
 `WithLoopSupport`/`WithOuterResumeNotifier` genuinely called).
 

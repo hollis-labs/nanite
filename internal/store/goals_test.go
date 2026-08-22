@@ -320,7 +320,7 @@ func TestGoal_StatusValidation(t *testing.T) {
 	}
 }
 
-// TestGoal_StatusCheckConstraint confirms migration 135's DB-level CHECK
+// TestGoal_StatusCheckConstraint confirms migration 138's DB-level CHECK
 // constraint rejects an invalid status even bypassing Go-layer validation
 // (a raw INSERT), mirroring TestAgentSchedule_ScheduleKindCheckRejectsRetiredValues's
 // own "confirm the DB, not just the Go layer, enforces this" discipline.

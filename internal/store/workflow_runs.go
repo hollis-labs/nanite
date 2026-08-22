@@ -21,7 +21,7 @@ type WorkflowRunRow struct {
 
 	// LoopRunID scopes this WorkflowRun to one loop_runs.id when it was
 	// launched as one iteration of a Loop (docs/engineering/architecture/
-	// 21-loops.md's schema-ledger line, migration 140,
+	// 21-loops.md's schema-ledger line, migration 143,
 	// TASKS/loops/05-workflow-runs-loop-scoping-columns.md). REFERENCES
 	// loop_runs(id). nil for every ordinary, non-loop-launched run --
 	// which is every run today: nothing in this codebase sets this field
@@ -65,7 +65,7 @@ type WorkflowRunStepRow struct {
 	// immediately or parks itself waiting_on_loop). REFERENCES
 	// loop_runs(id). nil for every non-loop step, and nil for a loop step
 	// that hasn't launched yet. This is the reverse direction from
-	// WorkflowRunRow.LoopRunID (migration 140: "given a WorkflowRun, what
+	// WorkflowRunRow.LoopRunID (migration 143: "given a WorkflowRun, what
 	// loop is it in," set when a run itself IS one loop iteration) — this
 	// field answers "given a WorkflowRun's own STEP, what loop did it
 	// launch," and is what GetWorkflowRunStepByLoopRunID looks up by.

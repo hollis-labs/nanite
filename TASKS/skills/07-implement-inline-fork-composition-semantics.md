@@ -1,7 +1,7 @@
 # Implement `inline`/`fork` composition semantics + install-time cycle detection
 
 **Phase:** 4 — Materialization pipeline (`TASKS/skills`)
-**Status:** in-progress — review found a production-blocking bug, fix required (see "Fix required" section below)
+**Status:** implemented
 **Depends on:** `04` (install-time dependency graph), `06` (Resolver's nested-dependency address
 lookup)
 **Touches:** new file `internal/skill/compose.go`, `internal/skillinstall/` (task `04`'s
@@ -284,6 +284,82 @@ future task to adopt, rename, or extend rather than silently re-guessing. The on
 question the task file raised — whether a real subagent/fork entry point exists at all — resolved to
 "yes, it exists and is directly usable" after the required grep, so no escalation was warranted per
 the dispatch note's own explicit instruction to only escalate if it turned out not to exist.
+
+**Fix-required work log entry, 2026-08-21 — production-blocking bug fixed.** Implemented all five
+numbered items from the "Fix required" section below, in `internal/skill/compose.go` and
+`internal/skill/compose_test.go` only (no other files touched).
+
+1. **Corrected `runFork`'s doc comment.** Removed the "ModeSync already blocks Spawn until the run
+   is terminal... bar a vanishingly rare race" claim outright — added a "Correction (fresh-reviewer
+   fix, 2026-08-21...)" block stating plainly that `internal/subagent/service.go`'s `Spawn`, whenever
+   trust doesn't resolve to `TrustTrusted` and the approval gate fires
+   (`SubagentApprovalRequired && !DeveloperMode` — the documented **production default**, since
+   `SubagentApprovalRequired` defaults to `true` — or `Mode == ModeInteractive`), takes a distinct,
+   deterministic control-flow path that returns `StatusRequested` *before* ever reaching `ModeSync`'s
+   blocking-exec branch. This is the common case for any non-trusted role in a default deployment,
+   not an edge case.
+2. **`ForkPendingApprovalError{Slug, RunID, EnvelopeInstanceID, Status}`** — a new typed error
+   (not a bare sentinel, since the task's own instruction was "carrying enough identifying
+   information... at minimum the run ID," and a sentinel `var` can't carry per-call fields). `runFork`
+   now checks `run.Status == subagent.StatusRequested || run.Status == subagent.StatusApproved`
+   immediately after the nil-run check and *before* the pre-existing generic
+   `!subagent.IsTerminalStatus` branch (those two statuses are themselves non-terminal per
+   `subagent.IsTerminalStatus`, so the new check has to come first or it would never fire — the old
+   generic branch would swallow it). Doc comment on the new type mirrors
+   `subagent/envelope.go`'s `EnvelopeFromRun` "this is NOT a failure... pending-approval IS the
+   design" framing, then explicitly contrasts it with composition's own constraint: unlike a chat-turn
+   reply, `MaterializeSkill` cannot defer producing content until a human approves later — there is no
+   "materialize now, backfill after approval" mechanism anywhere in this pipeline — so the composition
+   attempt still fails, but now with a typed, `errors.As`-able reason (`Slug`/`RunID`/
+   `EnvelopeInstanceID`/`Status`) instead of the old opaque "did not terminate synchronously" string. A
+   future caller (task `11`'s `skill_get` self-tool) can `errors.As` through the wrapping
+   `*CompositionError` (its `Unwrap` already supports this — verified directly, no change needed
+   there) to build real UX around "this fork composition is waiting on a human."
+3. **`forkResultText` partial-capture fix.** Added a `Partial bool \`json:"partial"\`` field to the
+   local decode struct and changed the extraction condition to `!payload.Partial && payload.Summary
+   != ""` — mirrors `internal/subagent/service.go`'s own `extractLiftableEnvelopes` discriminator
+   (`obj.Partial`) for the exact same `{"partial":true,"summary":...,"envelope":{...},"tools":{...}}`
+   shape. A partial-capture-shaped `ResultJSON` now falls through to the verbatim-JSON return instead
+   of being reduced to just its `summary` string, matching the function's own pre-existing doc-comment
+   promise ("folded back verbatim... since 'the result' isn't necessarily prose").
+4. **Regression tests added to `internal/skill/compose_test.go`** (six new tests: `gatedSettingsReader`
+   / `gatedApprovalEmitter` / `gatedNotCalledRunner` test-double types plus four `Test...` functions):
+   - `TestMaterializeSkill_Fork_PendingApproval_ReturnsDistinguishableError` — constructed exactly the
+     way the reviewer's own scratch test was and the way `internal/selftools`'s own established
+     gated-test pattern does (`self_tools_subagent_envelope_test.go`'s `gatedSettingsReader`/
+     `gatedApprovalEmitter`, reproduced here for this package's own DI need): a real
+     `*subagent.Service` backed by a real (non-mocked) `idx.DB`, `SubagentApprovalRequired: true`
+     settings, and a `gatedNotCalledRunner` that fails the test outright if the runner is ever
+     invoked. Asserts the returned error `errors.As`s to `*ForkPendingApprovalError` with a non-empty
+     `RunID` and `EnvelopeInstanceID`, `Status == subagent.StatusRequested`, `Slug ==
+     "compose-fork-child"`, and that the error message no longer contains the old "did not terminate
+     synchronously" phrasing.
+   - `TestForkResultText_PartialCaptureShape_FoldsBackVerbatim` — a genuine
+     `{"partial":true,"summary":...,"envelope":{...},"tools":{...}}` `ResultJSON` must fold back
+     verbatim (envelope/tools fields intact), not just the extracted `summary`.
+   - `TestForkResultText_PlainSummaryShape_StillExtractsSummary` — an added companion guard (not
+     explicitly requested, but cheap insurance) confirming the fix didn't regress the original,
+     non-partial `{"summary":...}` fallback shape's extraction behavior.
+   - **Verified both new tests are load-bearing, not vacuous**: temporarily reverted each specific fix
+     in isolation (the `StatusRequested`/`StatusApproved` special-case branch, then separately the
+     `Partial` discriminator check) via scratch, in-place edits — restored immediately after, no
+     `git stash` used at any point, consistent with this batch's own process rule. Confirmed each
+     reverted state makes its own new regression test fail with exactly the old, pre-fix symptom
+     (`*skill.CompositionError` wrapping the generic "did not terminate synchronously" message for
+     item 2; `forkResultText` returning only the truncated summary, dropping `envelope`/`tools`, for
+     item 3), then confirmed both pass again once restored.
+5. **Re-verification.** `go build ./cmd/nanite/` clean. `go vet ./...` — same two pre-existing,
+   unrelated `internal/service/container.go` `stopReaper`/`stopRuntimeReaper` findings every prior
+   task in this batch (including this task's own original landing) already confirmed via `git blame`
+   predate this batch — untouched by this fix. `go test ./internal/skill/... ./internal/skillinstall/...
+   -race -count=1` — all pass (skill: 120.0s including the two new tests; skillinstall: 82.9s,
+   unaffected since this fix touched no `skillinstall` file). `go test ./...` (full repo suite) run
+   for extra confidence beyond the fix section's own explicit ask — exit code 0, no regressions
+   anywhere else in the tree.
+
+`git status --short` after this fix: only `internal/skill/compose.go` (modified) and
+`internal/skill/compose_test.go` (modified) — no other files touched, no stray writes, no schema
+migration involved.
 
 ## Fix required (fresh reviewer, 2026-08-21 — see `TASKS/ESCALATIONS.md`'s matching entry)
 

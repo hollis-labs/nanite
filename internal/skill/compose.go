@@ -464,10 +464,32 @@ func loadDependencyDefinition(vendor VendorReader, rd DependencyAddress) (*Defin
 // returned only a Result.Summary, or the runner's own structured
 // ResultJSON verbatim otherwise), retrieved through the public,
 // already-live Status(ctx, runID) API — not a private,
-// child-session-message-scraping heuristic. subagent.Service's own
-// ModeSync branch already blocks Spawn until the run is terminal, so by
-// the time Spawn returns, Status's row is (bar a vanishingly rare race)
-// already final.
+// child-session-message-scraping heuristic.
+//
+// Correction (fresh-reviewer fix, 2026-08-21 — a prior draft of this
+// comment claimed ModeSync's Spawn "already blocks until the run is
+// terminal... bar a vanishingly rare race." That was flat wrong, not a
+// rare race: internal/subagent/service.go's Spawn, whenever trust
+// doesn't resolve to TrustTrusted AND the approval gate fires
+// (SubagentApprovalRequired && !DeveloperMode — the documented
+// PRODUCTION DEFAULT, since SubagentApprovalRequired defaults to true —
+// or Mode == ModeInteractive), inserts the run as StatusRequested and
+// returns *before ever reaching* the ModeSync blocking-exec branch. This
+// is a distinct, deterministic control-flow path that every non-trusted
+// fork composition takes in a default deployment, not an edge case to
+// shrug off. Status's row can therefore come back non-terminal
+// (StatusRequested or StatusApproved) as the common case, not the
+// exception — handled explicitly below via ForkPendingApprovalError,
+// mirroring internal/subagent/envelope.go's EnvelopeFromRun own "this is
+// NOT a failure, pending-approval IS the design" framing for the exact
+// same Spawn/Status API's sibling caller (callSpawnSubagent). Unlike
+// that caller, composition cannot treat this as a success with
+// placeholder content — MaterializeSkill must return complete,
+// materialized text for splicing *now*, and there is no "materialize
+// later when the human approves" mechanism in this pipeline — so this
+// path still fails the composition attempt, but with a typed,
+// attributable reason a caller can act on instead of an opaque generic
+// error.
 func runFork(ctx context.Context, deps MaterializerDeps, slug, materializedContent string, input MaterializeInput) (string, error) {
 	if deps.Subagent == nil {
 		return "", fmt.Errorf("fork composition for skill %q: %w", slug, ErrForkNotConfigured)
@@ -500,6 +522,14 @@ func runFork(ctx context.Context, deps MaterializerDeps, slug, materializedConte
 	if run == nil {
 		return "", fmt.Errorf("fork subagent run %q not found after spawn", runID)
 	}
+	if run.Status == subagent.StatusRequested || run.Status == subagent.StatusApproved {
+		return "", &ForkPendingApprovalError{
+			Slug:               slug,
+			RunID:              runID,
+			EnvelopeInstanceID: run.EnvelopeInstanceID,
+			Status:             run.Status,
+		}
+	}
 	if !subagent.IsTerminalStatus(run.Status) {
 		return "", fmt.Errorf("fork subagent run %q for skill %q did not terminate synchronously (status=%s)", runID, slug, run.Status)
 	}
@@ -526,14 +556,31 @@ func runFork(ctx context.Context, deps MaterializerDeps, slug, materializedConte
 // returned a genuinely structured ResultJSON (not that fallback shape),
 // it's folded back verbatim rather than discarded, since "the result"
 // isn't necessarily prose.
+//
+// Correction (fresh-reviewer fix, 2026-08-21): a prior draft's
+// discriminator ("does this JSON have a non-empty top-level `summary`
+// string?") also matched internal/subagent's own documented
+// partial-capture shape — {"partial":true,"summary":...,
+// "envelope":{...},"tools":{...}} (see service.go's
+// extractLiftableEnvelopes) — emitted when a subagent run is cut
+// mid-task but still captured real state. That shape also carries a
+// top-level `summary` string, so the prior code matched it and
+// discarded everything but the truncated summary, silently dropping the
+// `envelope`/`tools` fields a genuinely structured partial result
+// carries. Fixed by checking the same `partial` discriminator field
+// extractLiftableEnvelopes itself keys off of: only take the
+// plain-summary shortcut when the payload is NOT partial-capture-shaped,
+// so a real partial-capture result falls through and folds back
+// verbatim, matching this function's own doc-comment promise.
 func forkResultText(run *subagent.Run) (string, bool) {
 	if run == nil || run.ResultJSON == "" || run.ResultJSON == "{}" {
 		return "", false
 	}
 	var payload struct {
+		Partial bool   `json:"partial"`
 		Summary string `json:"summary"`
 	}
-	if err := json.Unmarshal([]byte(run.ResultJSON), &payload); err == nil && payload.Summary != "" {
+	if err := json.Unmarshal([]byte(run.ResultJSON), &payload); err == nil && !payload.Partial && payload.Summary != "" {
 		return payload.Summary, true
 	}
 	return run.ResultJSON, true
@@ -547,3 +594,52 @@ func forkResultText(run *subagent.Run) (string, bool) {
 // caller (task 09, or task 11's self-tool) that wants to branch on this
 // specific cause without string-matching an error message.
 var ErrForkNotConfigured = errors.New("skill: fork composition dependency not configured")
+
+// ForkPendingApprovalError is returned (wrapped in a *CompositionError)
+// when a fork-composed dependency's spawned subagent run landed in
+// StatusRequested or StatusApproved instead of ever executing — i.e. the
+// spawn is gated on human approval under this deployment's trust/
+// approval policy (subagent.Service.Spawn's gate: trust isn't
+// TrustTrusted AND SubagentApprovalRequired && !DeveloperMode, or
+// ModeInteractive). SubagentApprovalRequired defaults to true in
+// production, so this is a common, by-design outcome for any
+// non-trusted role — not a rare failure mode.
+//
+// This mirrors internal/subagent/envelope.go's EnvelopeFromRun handling
+// of the exact same non-terminal statuses for the sibling
+// subagent_spawn self-tool caller ("this is NOT a failure... pending-
+// approval IS the design"). The distinction here: EnvelopeFromRun's
+// caller (a chat turn) can map this to Success=true and let the real
+// reply land asynchronously later. Skill composition cannot — a
+// MaterializeSkill call must return complete, final materialized
+// content for splicing into the parent's output in one synchronous
+// call, and there is no "materialize now, backfill the fork's content
+// once a human approves" mechanism anywhere in this pipeline. So this
+// composition attempt still fails, but with a typed, actionable reason
+// (rather than an opaque "did not terminate synchronously" message) that
+// a future caller (e.g. task 11's skill_get self-tool) can errors.As
+// against to build real UX around "this fork composition is waiting on
+// a human," including enough identifying information (RunID,
+// EnvelopeInstanceID) to point the user at the pending approval.
+type ForkPendingApprovalError struct {
+	// Slug is the fork-composed dependency's own slug (the skill whose
+	// delegated invocation is pending, not necessarily the top-level
+	// materialized skill).
+	Slug string
+	// RunID is the subagent run's id (subagent_runs.id) — usable with
+	// subagent_status / Service.Status to poll for the eventual outcome
+	// once approved.
+	RunID string
+	// EnvelopeInstanceID is the approval-card envelope instance id
+	// emitted for a human to act on (empty if, unusually, the run
+	// reached StatusRequested/StatusApproved without one — should not
+	// happen via Service.Spawn's own gated path, but not assumed here).
+	EnvelopeInstanceID string
+	// Status is the run's actual non-terminal status at the time of the
+	// check — subagent.StatusRequested or subagent.StatusApproved.
+	Status string
+}
+
+func (e *ForkPendingApprovalError) Error() string {
+	return fmt.Sprintf("fork subagent run %q for skill %q is pending human approval (status=%s); no materialized content available yet", e.RunID, e.Slug, e.Status)
+}

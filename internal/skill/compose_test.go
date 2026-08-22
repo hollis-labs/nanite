@@ -19,6 +19,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -330,6 +331,142 @@ func TestMaterializeSkill_MultiLevelProvenanceChain_CrossesInlineAndFork(t *test
 		}
 	}
 	t.Logf("full materialized output:\n%s", result.Content)
+}
+
+// gatedSettingsReader forces SubagentApprovalRequired=true so
+// subagent.Service's approval-gate predicate fires — mirrors
+// internal/selftools's own established gated-test construction pattern
+// (self_tools_subagent_envelope_test.go's gatedSettingsReader),
+// reproduced here (rather than exported cross-package) purely for this
+// file's own DI need.
+type gatedSettingsReader struct{ us store.UserSettings }
+
+func (g gatedSettingsReader) GetUserSettings() (*store.UserSettings, error) {
+	cp := g.us
+	return &cp, nil
+}
+
+// gatedApprovalEmitter records emit calls and returns a stable envelope
+// id, letting Spawn's gated path complete without a real approval
+// substrate.
+type gatedApprovalEmitter struct{ count int }
+
+func (e *gatedApprovalEmitter) Emit(_ context.Context, _, _ string, _ []byte) (string, error) {
+	e.count++
+	return fmt.Sprintf("env-%d", e.count), nil
+}
+
+// gatedNotCalledRunner fails the test if Run is ever invoked — the
+// gated path must accept the spawn and stop at StatusRequested without
+// ever reaching the runner.
+type gatedNotCalledRunner struct{ t *testing.T }
+
+func (r *gatedNotCalledRunner) Run(_ context.Context, _ *subagent.Run) (*subagent.Result, error) {
+	r.t.Fatal("runner must not be invoked while the fork subagent spawn is pending approval")
+	return nil, nil
+}
+
+// TestMaterializeSkill_Fork_PendingApproval_ReturnsDistinguishableError
+// reproduces, as a real regression test, the fresh-reviewer-found
+// production-blocking bug directly: constructed the same way the
+// reviewer's own scratch test was (a real *subagent.Service with
+// SubagentApprovalRequired: true, mirroring internal/selftools's own
+// gated-test pattern), Spawn's gated path inserts the run as
+// StatusRequested and returns *before ever reaching* ModeSync's
+// blocking-exec branch — a deterministic control-flow path under the
+// documented production default, not a rare race. runFork must surface
+// this as a distinguishable *ForkPendingApprovalError a caller can
+// errors.As against, never the old opaque "did not terminate
+// synchronously" message.
+func TestMaterializeSkill_Fork_PendingApproval_ReturnsDistinguishableError(t *testing.T) {
+	idx := newResolverTestStore(t)
+	vendor := newResolverTestVendor(t)
+
+	installFixture(t, idx, vendor, filepath.Join(composeFixturesDir, "compose-fork-child"))
+	installFixture(t, idx, vendor, filepath.Join(composeFixturesDir, "compose-fork-parent"))
+
+	runner := &gatedNotCalledRunner{t: t}
+	emitter := &gatedApprovalEmitter{}
+	settings := gatedSettingsReader{us: store.UserSettings{SubagentApprovalRequired: true}}
+	svc := subagent.NewService(idx.DB, runner, nil, emitter, settings)
+
+	parent := parseFixtureDef(t, "compose-fork-parent")
+
+	_, err := MaterializeSkill(context.Background(), MaterializerDeps{
+		Index:    idx,
+		Vendor:   vendor,
+		Subagent: svc,
+	}, parent, MaterializeInput{
+		ParentSessionID: "sess-pending-approval",
+		ParentAgentID:   "agent-pending-approval",
+		ForkRole:        "fork-composed-worker",
+	})
+	if err == nil {
+		t.Fatal("expected a materialization failure for a fork subagent pending human approval")
+	}
+
+	var pendingErr *ForkPendingApprovalError
+	if !errors.As(err, &pendingErr) {
+		t.Fatalf("expected a *ForkPendingApprovalError in the error chain, got %T: %v", err, err)
+	}
+	if pendingErr.RunID == "" {
+		t.Error("ForkPendingApprovalError.RunID must not be empty")
+	}
+	if pendingErr.EnvelopeInstanceID == "" {
+		t.Error("ForkPendingApprovalError.EnvelopeInstanceID must not be empty (the approval envelope actually emitted)")
+	}
+	if pendingErr.Status != subagent.StatusRequested {
+		t.Errorf("ForkPendingApprovalError.Status = %q, want %q", pendingErr.Status, subagent.StatusRequested)
+	}
+	if pendingErr.Slug != "compose-fork-child" {
+		t.Errorf("ForkPendingApprovalError.Slug = %q, want %q", pendingErr.Slug, "compose-fork-child")
+	}
+	if strings.Contains(err.Error(), "did not terminate synchronously") {
+		t.Errorf("error still uses the old generic, indistinguishable phrasing: %v", err)
+	}
+}
+
+// TestForkResultText_PartialCaptureShape_FoldsBackVerbatim is the
+// second regression test the fresh-reviewer fix calls for: a genuinely
+// structured partial-capture ResultJSON
+// ({"partial":true,"summary":...,"envelope":{...}}, internal/subagent's
+// own documented shape for a run cut mid-task but with real captured
+// state) must fold back verbatim — envelope/tools fields intact — not
+// be reduced to just its top-level `summary` string the way a prior
+// draft's discriminator (any JSON with a non-empty `summary`) would
+// have done.
+func TestForkResultText_PartialCaptureShape_FoldsBackVerbatim(t *testing.T) {
+	raw := `{"partial":true,"summary":"cut short mid-task","envelope":{"kind":"envelope","type":"plan-review","data":{"plan":"do the thing"}},"tools":{"calls":3}}`
+	run := &subagent.Run{Status: subagent.StatusCompleted, ResultJSON: raw}
+
+	result, ok := forkResultText(run)
+	if !ok {
+		t.Fatal("forkResultText returned ok=false for a genuine partial-capture ResultJSON")
+	}
+	if result != raw {
+		t.Errorf("forkResultText = %q, want the full partial-capture JSON verbatim: %q", result, raw)
+	}
+	if !strings.Contains(result, `"envelope"`) || !strings.Contains(result, `"tools"`) {
+		t.Errorf("forkResultText dropped the envelope/tools fields, keeping only the truncated summary: %q", result)
+	}
+}
+
+// TestForkResultText_PlainSummaryShape_StillExtractsSummary is a
+// companion guard confirming the fix didn't regress the original,
+// non-partial {"summary": ...} fallback shape (structuredResultJSON's
+// own wrapper for a runner that returned only a Result.Summary) — that
+// shape has no `partial` key at all, so it must still take the
+// plain-summary extraction path.
+func TestForkResultText_PlainSummaryShape_StillExtractsSummary(t *testing.T) {
+	run := &subagent.Run{Status: subagent.StatusCompleted, ResultJSON: `{"summary":"the child's reply"}`}
+
+	result, ok := forkResultText(run)
+	if !ok {
+		t.Fatal("forkResultText returned ok=false for a plain {\"summary\":...} ResultJSON")
+	}
+	if result != "the child's reply" {
+		t.Errorf("forkResultText = %q, want just the extracted summary %q", result, "the child's reply")
+	}
 }
 
 // Sanity: *store.Store really does satisfy every narrow interface this

@@ -762,7 +762,7 @@ resolution of every item on the design doc's own "What this session did not deci
 | `10-loop-launcher-and-api` | 3 | reviewed | `08` |
 | `11-loop-event-predicate-trigger` | 3 | reviewed (migration 142) | `08` |
 | `12-loop-run-tick-scheduled-trigger` | 3 | reviewed (migration 143) | `08` |
-| `13-loop-presets` | 4 | not-started | `07`, `08`, `10` |
+| `13-loop-presets` | 4 | implemented | `07`, `08`, `10` |
 
 **Two real, load-bearing corrections this planning session's own research found against the
 actual code, neither anticipated by the design doc, both logged in full in

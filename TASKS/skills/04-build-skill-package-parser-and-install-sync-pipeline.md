@@ -1,7 +1,7 @@
 # Build the real SKILL.md package parser and explicit install/sync pipeline
 
 **Phase:** 3 — Explicit install/sync (`TASKS/skills`)
-**Status:** implemented
+**Status:** in-progress — review found a real bug, fix required (see "Fix required" section below)
 **Depends on:** `02`, `03`
 **Touches:** `internal/skill/parser.go` (extend `Definition` to recognize `scripts:`/
 `references:`/`assets:` directory conventions and a new `parameters:` frontmatter field), new
@@ -297,6 +297,58 @@ discipline for schema or live-server verification doesn't apply here.
 `git status --short` after all changes: only `internal/skill/{convert,parser}.go` and their
 `_test.go` files modified, plus the new `internal/skillinstall/` directory added — no other files
 touched, no stray writes.
+
+## Fix required (fresh reviewer, 2026-08-21 — see `TASKS/ESCALATIONS.md`'s matching entry)
+
+**Bug, reproduced directly:** `internal/skillinstall.upsertIndex` builds the row to persist via
+`def.ToStoreSkill()` (`internal/skill/convert.go`), which unconditionally sets
+`ID: "file-" + d.Slug`. That ID is passed straight into the real `store.Store.CreateSkill`, which
+only mints a UUID `if sk.ID == ""` — so **every skill installed through this pipeline gets a real,
+permanent primary key of the form `file-<slug>`**. That exact prefix is `skill.IsFileBasedID`'s
+sentinel for the old, pre-redesign virtual/ephemeral file-based skill rows;
+`skillServiceImpl.Update`/`Delete` (`internal/service/skill.go`) hard-reject any ID matching it —
+and both are wired to live, routed REST endpoints (`PUT`/`DELETE /api/skills/{id}`,
+`internal/api/skills.go`, routed at `internal/api/api.go:357-358`). Reviewer reproduced directly:
+an installed skill's `Update`/`Delete` calls both return `"cannot update/delete file-based skill
+... edit/remove the .md file instead"`. 100%-reproduction-rate: `ToStoreSkill()`'s ID assignment
+is unconditional, and once set at first `CreateSkill` it's carried forward on every re-sync
+(`upsertIndex`'s `updated := *existing` path never touches `ID`).
+
+**Root cause:** `ToStoreSkill()` was written for a different, currently-always-inert caller
+(`skillServiceImpl`'s file-def merge, where `fileDefs` is permanently `nil` per task `01`'s own
+doc comment) that only ever produced ephemeral, never-persisted `store.Skill` *views* — never
+previously fed into a real `CreateSkill` call. This task is the first real caller to route a
+`ToStoreSkill()` result into persistence, repurposing a previously-inert ID convention into
+something that now collides with a live guard elsewhere.
+
+**What to do:**
+
+1. In `internal/skillinstall.upsertIndex`, do not let a genuinely new install inherit
+   `ToStoreSkill()`'s deterministic `file-<slug>` ID. Clear `fresh.ID` (set it to `""`) before the
+   `existing == nil` branch's `CreateSkill(fresh)` call, so `store.Store.CreateSkill`'s own
+   `if sk.ID == "" { sk.ID = uuid.New().String() }` fallback mints a real UUID — matching how
+   every other real `CreateSkill` caller in this codebase already gets its ID. The `existing != nil`
+   (re-sync) branch is unaffected — it already preserves `existing.ID` via `updated := *existing`
+   and never copies `fresh.ID` onto it; leave that path exactly as it is.
+2. Decide, and document your reasoning, on whether `ToStoreSkill()` itself should stop setting a
+   deterministic `file-`-prefixed ID at all (since its one other, currently-inert caller doesn't
+   actually need one persisted anywhere), versus just clearing it at this one call site. Either is
+   acceptable — pick whichever leaves the codebase clearer, and note the choice in your Work Log.
+   Don't silently change `ToStoreSkill()`'s behavior without saying so, since `internal/skill`'s
+   own tests assert its current ID convention.
+3. Add a regression test that goes one layer higher than the existing `internal/skillinstall`
+   tests (which only exercise direct `store.Store` calls): install a package via `Installer.Install`,
+   then round-trip the resulting skill through `service.SkillService.Update` and `.Delete` (the
+   actual live REST-endpoint-facing service layer, `internal/service/skill.go`) and confirm neither
+   call hits the `IsFileBasedID` rejection. This is the layer the bug was actually caught at, and
+   the layer that must stay covered so this collision class can't reappear silently.
+4. Minor, non-blocking wording fix noted by the reviewer: the Work Log's claim that
+   `ParameterSpec.ResolverSlot` is "named to match `store.AgentContextResolver.SlotName` exactly"
+   is imprecise — they're different Go identifiers with different YAML tags (a semantic
+   correlation for task `06`'s future binding, not a literal name match). Correct this wording in
+   your new Work Log entry; no code change needed for it.
+5. Re-verify `go build`/`go vet`/`go test ./...` clean, plus `go test ./internal/skillinstall/...
+   -race -count=1` and the new `SkillService`-level regression test specifically.
 
 ## Review notes
 <Reviewer fills this in: pass/fail, what was checked, anything fixed and how.>

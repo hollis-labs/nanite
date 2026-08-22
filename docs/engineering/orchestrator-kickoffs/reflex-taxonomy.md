@@ -18,6 +18,11 @@
 > Recorded as **AD-24** in `TASKS/audit-remediation/ARCHITECT-DECISIONS.md`,
 > with the full freeze rules at the top of `TASKS/INDEX.md`. Remove this banner
 > only when the operator lifts the freeze.
+>
+> **Copying this file as a template for a new kickoff? Do not copy this
+> banner.** It applies to *this* parked batch, not to whatever you are
+> writing. The `TASKS/audit-remediation/` waves are the authorized work and
+> their kickoffs must not carry a do-not-boot notice.
 
 ---
 

@@ -81,6 +81,21 @@ type LoopRunResumer interface {
 // matching Resolve()'s own "one candidate's failure does not abort the
 // rest of the pass" posture.
 //
+// hadCandidates distinguishes "zero resume_loop_run reflexes are attached
+// to this LoopRun at all" (hadCandidates=false) from "at least one is
+// attached, but none of them fired this call" (hadCandidates=true,
+// fired=false) -- a distinction fired alone cannot make, since both cases
+// return fired=false. This exists specifically for internal/loop's
+// tick-resume bridge (tick_resume.go, the Loops/11+12 integration fix):
+// a caller wired to only blind-resume when NO reflex is attached at all
+// (preserving the "durable preset, just retry" default) needs to tell
+// "nothing is gating this WAIT" apart from "a reflex is gating it and its
+// trigger just hasn't fired yet" -- blind-resuming in the latter case
+// would bypass the very predicate the reflex exists to enforce. Before
+// this fix, both cases were indistinguishable (bare fired=false), which
+// is exactly what let the resume_loop_run reflex path go uncalled by any
+// production caller -- see TASKS/ESCALATIONS.md's 2026-08-21 entry.
+//
 // Guarded to only proceed when loopRunID's own loop_runs.status is
 // currently store.LoopRunStatusWaitingOnEscalation -- the status a
 // DecisionWait (or DecisionEscalate) decision persists (internal/loop/
@@ -93,43 +108,47 @@ type LoopRunResumer interface {
 // driveIterations), but firing an external-condition reflex at an
 // inner-gate pause would be resuming the wrong thing for the wrong
 // reason. Any other status (already resumed past waiting, terminal, or
-// waiting_on_gate) is a harmless no-op — fired=false, err=nil — since a
-// scheduled caller may legitimately race against this LoopRun's own
-// concurrent resolution (e.g. two ticks in flight, or a human resolving
-// the escalation through a different path first).
+// waiting_on_gate) is a harmless no-op — fired=false, hadCandidates=false,
+// err=nil — since a scheduled caller may legitimately race against this
+// LoopRun's own concurrent resolution (e.g. two ticks in flight, or a
+// human resolving the escalation through a different path first), and
+// (for waiting_on_gate specifically) hadCandidates=false is also exactly
+// right for the tick-resume bridge above: a gate-block was never this
+// reflex kind's concern in the first place, so the bridge should treat it
+// identically to "no reflex attached" and fall back to a direct resume.
 func EvaluateLoopRunResumeReflexes(
 	ctx context.Context,
 	reflexEngine *reflexes.Engine,
 	resumer LoopRunResumer,
 	loopRunID string,
 	state reflexes.State,
-) (fired bool, err error) {
+) (fired bool, hadCandidates bool, err error) {
 	if reflexEngine == nil || reflexEngine.Store == nil {
-		return false, fmt.Errorf("EvaluateLoopRunResumeReflexes: reflex engine is not configured")
+		return false, false, fmt.Errorf("EvaluateLoopRunResumeReflexes: reflex engine is not configured")
 	}
 	if resumer == nil {
-		return false, fmt.Errorf("EvaluateLoopRunResumeReflexes: resumer is nil")
+		return false, false, fmt.Errorf("EvaluateLoopRunResumeReflexes: resumer is nil")
 	}
 	if loopRunID == "" {
-		return false, fmt.Errorf("EvaluateLoopRunResumeReflexes: loop_run_id is required")
+		return false, false, fmt.Errorf("EvaluateLoopRunResumeReflexes: loop_run_id is required")
 	}
 
 	lr, lerr := reflexEngine.Store.GetLoopRun(ctx, loopRunID)
 	if lerr != nil {
-		return false, fmt.Errorf("EvaluateLoopRunResumeReflexes: get loop run %s: %w", loopRunID, lerr)
+		return false, false, fmt.Errorf("EvaluateLoopRunResumeReflexes: get loop run %s: %w", loopRunID, lerr)
 	}
 	if lr.Status != store.LoopRunStatusWaitingOnEscalation {
 		reflexEngine.Logger.Info("resume_loop_run: loop run is not waiting_on_escalation, skipping evaluation",
 			"loop_run_id", loopRunID, "status", lr.Status)
-		return false, nil
+		return false, false, nil
 	}
 
 	candidates, lerr := reflexEngine.Store.ListAgentReflexesForLoopRun(ctx, loopRunID)
 	if lerr != nil {
-		return false, fmt.Errorf("EvaluateLoopRunResumeReflexes: list candidates for loop run %s: %w", loopRunID, lerr)
+		return false, false, fmt.Errorf("EvaluateLoopRunResumeReflexes: list candidates for loop run %s: %w", loopRunID, lerr)
 	}
 	if len(candidates) == 0 {
-		return false, nil
+		return false, false, nil
 	}
 
 	// Facet 4 recurrence cascade, applied explicitly here for the same
@@ -154,7 +173,10 @@ func EvaluateLoopRunResumeReflexes(
 
 	resolved, outcomes, resolveErr := reflexes.Resolve(ctx, candidates, state, reflexEngine.Executor, cooldownFn, kindLookup)
 	if resolveErr != nil {
-		return false, fmt.Errorf("EvaluateLoopRunResumeReflexes: resolve loop run %s: %w", loopRunID, resolveErr)
+		// candidates is already confirmed non-empty above -- a resolve-time
+		// error is not the same thing as "no candidates," so hadCandidates
+		// is still true here even though this call is failing.
+		return false, true, fmt.Errorf("EvaluateLoopRunResumeReflexes: resolve loop run %s: %w", loopRunID, resolveErr)
 	}
 	for _, oc := range outcomes {
 		if oc.TriggerError != "" {
@@ -179,7 +201,10 @@ func EvaluateLoopRunResumeReflexes(
 	}, reflexEngine.Logger)
 
 	if len(resolved.Actions) == 0 {
-		return false, nil
+		// A reflex is attached (candidates non-empty above) but its trigger
+		// did not fire this call -- hadCandidates=true tells the tick-resume
+		// bridge NOT to blind-resume over this still-gated WAIT.
+		return false, true, nil
 	}
 
 	var firstErr error
@@ -205,5 +230,5 @@ func EvaluateLoopRunResumeReflexes(
 		reflexEngine.Logger.Info("resume_loop_run: LoopEngine.Resume called", "loop_run_id", targetLoopRunID)
 	}
 
-	return true, firstErr
+	return true, true, firstErr
 }

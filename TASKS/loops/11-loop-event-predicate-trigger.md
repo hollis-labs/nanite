@@ -320,6 +320,31 @@ the collapsed `waiting_on_escalation` literal, not a distinct one) does not chan
 built, only which literal `EvaluateLoopRunResumeReflexes` checks — noted per this project's
 "note the correction, do the task anyway" policy, not escalated.
 
+**2026-08-21/22 integration fix (post-merge, not a re-opening of this task's own scope).**
+`TASKS/ESCALATIONS.md`'s 2026-08-21 entry ("Phase 3's two parallel trigger tasks (`11`, `12`)
+built compatible but disconnected mechanisms") confirmed what this task's own item-3
+investigation above already predicted structurally but couldn't verify against task `12`'s
+code (concurrent, isolated worktree): task `12`'s `enqueueLoopRunTick` wired
+`RunnerAdapter.Loops` directly to `*LoopEngine`'s bare `Resume`, never calling
+`EvaluateLoopRunResumeReflexes` — this task's entire `resume_loop_run` reflex path was real,
+correct, fully unit-tested, and completely unreachable from any production caller. See task
+`12`'s own Work Log below for the fix from that task's side; from this task's side, the fix
+changed `EvaluateLoopRunResumeReflexes`'s return signature from `(fired bool, err error)` to
+`(fired bool, hadCandidates bool, err error)` (`internal/service/loop_resume_reflex.go`) so a
+caller can distinguish "no `resume_loop_run` reflex attached at all" from "one is attached,
+its trigger just hasn't fired yet" — a distinction the original `(false, nil)`-for-both shape
+could not make, and the exact gap that let the wiring bug go undetected. All of this task's
+own test call sites (`loop_resume_reflex_test.go`, `reflex_resume_test.go`) were updated for
+the new 3-value return; no existing test's assertions changed in substance, only the added
+`hadCandidates` check per case. The real bridging fix — `internal/loop/tick_resume.go`'s
+`TickResumeBridge`, now what `cmd/nanite/main.go` wires as `RunnerAdapter.Loops` — and its
+new end-to-end test (`internal/loop/tick_resume_test.go`) live in task `12`'s file/side of
+this shared fix; both task files cross-reference each other. Re-verified after the fix:
+`go build ./cmd/nanite/` exit 0, `go vet ./...` exit 1 with only the same pre-existing
+`container.go` lostcancel warnings noted above (confirmed via `git blame` to predate this fix
+by months, commits `76df826a3`/`7a0e37936`), `go test ./...` exit 0 across all packages
+(direct log read, not a piped/masked exit code).
+
 ## Review notes
 
 PASS. Reviewed migration 142, the `engine.go`/`executor.go` diffs, `api/reflexes.go`'s

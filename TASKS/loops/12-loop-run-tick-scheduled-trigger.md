@@ -254,5 +254,69 @@ no-match behavior, not a test failure): every one of the 105 listed packages pri
 `ok github.com/hollis-labs/nanite/internal/loop 13.684s` and
 `ok github.com/hollis-labs/nanite/internal/scheduler 28.118s` (both freshly run, not cached).
 
+**2026-08-21/22 integration fix (post-merge, not a re-opening of this task's own scope).**
+`TASKS/ESCALATIONS.md`'s 2026-08-21 entry ("Phase 3's two parallel trigger tasks (`11`, `12`)
+built compatible but disconnected mechanisms"): this task's `enqueueLoopRunTick` (unchanged by
+this fix — it already did the right thing, checking status then calling `r.Loops.Resume`) was
+wired to `RunnerAdapter.Loops = loopEngine` in `cmd/nanite/main.go` — a bare `*LoopEngine`
+whose `Resume` blind-resumes unconditionally, never consulting task `11`'s `resume_loop_run`
+reflex evaluation entry point (`service.EvaluateLoopRunResumeReflexes`). Built genuinely in
+parallel, isolated worktrees, this task's own file had no way to see task `11`'s final reflex
+mechanism, and task `11` had no way to see this task's own `RunnerAdapter.Loops` wiring — the
+result was two individually-correct, well-tested mechanisms with no code path connecting them.
+See task `11`'s own Work Log above for the shared return-signature change on
+`EvaluateLoopRunResumeReflexes` (`(fired, err)` → `(fired, hadCandidates, err)`) this fix
+depends on.
+
+**The fix, entirely additive to this task's own files, no changes to `enqueueLoopRunTick`
+itself (per the fix's own explicit "what not to do"):**
+- New `internal/loop/tick_resume.go`: `TickResumeBridge` wraps a `*LoopEngine` and a
+  `*reflexes.Engine`, implements `scheduler.LoopResumer`'s exact
+  `Resume(ctx, loopRunID string) (LoopResult, error)` shape structurally (no import of
+  `internal/scheduler` — that would cycle back into `internal/loop`). Its `Resume` calls
+  `service.EvaluateLoopRunResumeReflexes` with a headless `reflexes.State{}` first: `fired`
+  means the resume already happened inside that call (re-fetches the LoopRun row for the
+  return value, does not call `Resume` again); `hadCandidates && !fired` means a
+  `resume_loop_run` reflex is attached but hasn't triggered yet (returns the still-waiting
+  state untouched, deliberately does NOT blind-resume); `!hadCandidates` (no reflex attached
+  at all — the plain durable-preset/just-retry case this task originally scoped) falls back to
+  a direct `Engine.Resume` call, preserving this task's original default behavior exactly.
+- `cmd/nanite/main.go`: `RunnerAdapter.Loops` now wired to
+  `loop.NewTickResumeBridge(loopEngine, container.ReflexEngine)` instead of the bare
+  `loopEngine`. `container.ReflexEngine` is a new exported field on `*service.Container`
+  (`internal/service/container.go`) — the fix's one real correction to its own stated plan:
+  the plan assumed "whatever `*reflexes.Engine` reference already exists in `main.go`," but
+  verification found no such reference existed outside `service.NewContainer`'s own local
+  scope (the FU-30 reflex engine built at container.go:950 was passed into `ChatServiceConfig`
+  but never attached to the returned `*Container`). Exposing it as a new field — the same
+  already-established pattern `ReminderEngine`/`LoopDetector` use for engines built inside
+  `NewContainer` but needed by later main.go wiring — is the minimal fix consistent with the
+  plan's actual intent ("reuse the one real instance, don't construct a second"), corrected
+  here rather than treated as a blocker.
+- New end-to-end test `internal/loop/tick_resume_test.go`, three real scenarios against a
+  genuine `waiting_on_escalation` LoopRun (same `Budget{MaxIterations: 2}` →
+  `waiting_on_escalation` → real Resume-driven 3rd-iteration-completes-the-goal setup task
+  `11`'s own `reflex_resume_test.go` established): an attached reflex whose trigger evaluates
+  false via the bridge's real headless state (`scope_tier` predicate node compared against a
+  non-matching value — chosen because the bridge's fixed `Resume(ctx, loopRunID)` signature,
+  matching `scheduler.LoopResumer` exactly, leaves no way to inject a live `State.Events`
+  signal the way task `11`'s own direct-call test could) does not resume; the same predicate
+  compared against its default empty value (`evalStringEquals`'s documented trivial-match
+  behavior against an unset signal) genuinely resumes via the reflex path (confirmed via
+  re-fetched LoopRun state reaching `completed` and the reflex's own `fired_count`
+  incrementing); no reflex attached at all falls back to a direct blind resume, reaching the
+  same real `completed` state.
+
+**Verification, re-run after the fix (again read directly from real command output, exit
+codes checked immediately, never via a piped/masked exit code):** `go build ./cmd/nanite/` —
+exit 0. `go vet ./...` — exit 1, the same four pre-existing `internal/service/container.go`
+lostcancel findings this task's own Work Log already documented above, confirmed via
+`git blame` to trace to commits `76df826a3`/`7a0e37936` (months before this fix), unrelated to
+any file this fix touched. `go test ./...` — exit 0, every package `ok` or
+`[no test files]`, zero `FAIL` lines, including
+`ok github.com/hollis-labs/nanite/internal/loop 29.429s` (fresh, includes the three new
+`TestTickResumeBridge_*` tests) and `ok github.com/hollis-labs/nanite/internal/service
+118.050s` (the new `container.ReflexEngine` field's package).
+
 ## Review notes
 <Reviewer fills this in: pass/fail, what was checked, anything fixed and how.>

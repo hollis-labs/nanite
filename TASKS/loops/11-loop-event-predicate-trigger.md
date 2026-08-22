@@ -369,3 +369,12 @@ The known `11`/`12` scheduled-tick wiring gap (see `TASKS/ESCALATIONS.md`'s most
 is tracked and being fixed separately — it reflects a cross-task integration seam neither
 task's own file anticipated, not a defect in this task's own implementation, which is complete
 and correct on its own terms.
+
+**2026-08-22 addendum**: the 11/12 integration fix (`internal/loop/tick_resume.go`'s
+`TickResumeBridge`, and the `EvaluateLoopRunResumeReflexes` signature change to
+`(fired, hadCandidates, err)`) has landed and been independently re-reviewed. Confirmed sound:
+no double-resume when a reflex fires, no blind-resume over a reflex whose trigger hasn't fired
+yet (the exact bug), real end-to-end test coverage, no import cycle, a single shared
+`ReflexEngine` instance. `go build`/`go vet`/`go test` all verified with real exit codes. This
+task's own `resume_loop_run` mechanism is now genuinely reachable in production, not just
+correct in isolation.

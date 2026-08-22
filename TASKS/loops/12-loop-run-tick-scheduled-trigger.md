@@ -1,7 +1,7 @@
 # Scheduled trigger — new `loop_run_tick` `JobType`
 
 **Phase:** 3 — Trigger surface (`TASKS/loops`)
-**Status:** implemented
+**Status:** reviewed
 **Depends on:** `08-loop-engine-core.md`
 **Touches:** `internal/scheduler/runner_adapter.go` (new `JobType` const, new payload
 struct, new dispatch case), `internal/scheduler/store_adapter.go` (matching switch on the
@@ -319,4 +319,33 @@ any file this fix touched. `go test ./...` — exit 0, every package `ok` or
 118.050s` (the new `container.ReflexEngine` field's package).
 
 ## Review notes
-<Reviewer fills this in: pass/fail, what was checked, anything fixed and how.>
+
+**First pass (2026-08-21, pre-fix)**: dispatch plumbing (`JobTypeLoopRunTick`, the no-op
+guard, the deterministic dedup, wiring) all confirmed correct and well-tested. One real
+finding: `tick_schedule.go`'s "deliberately not gated on a durable preset marker" doc comment
+overstated that a spurious tick was always a cheap no-op — true only once a reflex predicate
+actually gets evaluated, which nothing did at the time. A second, separate, non-blocking
+finding was also surfaced: `decide.go`'s `WAIT`/`ESCALATE` reasoning-fallback prompt has no
+differentiation criteria, and this task is the first to attach a real behavioral consequence
+(auto-resume) to that distinction. Not marked `reviewed` pending the doc-comment fix.
+
+**Resolution**: the doc-comment overstatement is fixed as part of the 2026-08-21/22
+integration fix documented above in this file's own Work Log — the bridge now genuinely makes
+a spurious tick a no-op by checking for an attached reflex first, so the comment's corrected
+claim is now accurate. The `WAIT`/`ESCALATE` prompt-ambiguity finding is deliberately **not**
+fixed here — logged in `TASKS/ESCALATIONS.md` as an explicit, named follow-up candidate for
+task `13` or a fast-follow, per that entry's own reasoning (a real behavior change to an
+already-reviewed LLM prompt deserves its own dedicated review, not a bundled side-fix; no live
+traffic depends on this yet).
+
+**Second pass (2026-08-22, post-fix)**: a fresh reviewer independently re-verified the
+integration fix in full (`internal/loop/tick_resume.go`'s three-case control flow, the
+`EvaluateLoopRunResumeReflexes` signature change and all its call sites, the three new
+end-to-end tests, the `container.go`/`main.go` wiring, the import-cycle claim, and the
+corrected doc comment) and confirmed it sound — no double-resume, no blind-resume-over-an-
+unfired-reflex regression, single shared `ReflexEngine` instance, no import cycle. `go
+build`/`go vet`/`go test` all verified with real, unmasked exit codes both before and after the
+fix. This task's own "Done means" are now fully satisfied: the real creator (task `08`'s
+`DecisionWait` branch via `tick_schedule.go`) exists, dispatch plumbing is tested, and the
+mechanism is now genuinely reachable end-to-end via the real evaluation cadence, not just
+unit-tested in isolation.

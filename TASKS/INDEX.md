@@ -750,12 +750,12 @@ resolution of every item on the design doc's own "What this session did not deci
 
 | Task | Phase | Status | Depends on |
 |---|---|---|---|
-| `01-goals-schema` | 1 | not-started | none |
+| `01-goals-schema` | 1 | implemented (migration 135) | none |
 | `02-goal-evidence-schema` | 1 | not-started | `01` |
 | `03-loop-runs-schema` | 1 | not-started | `01` |
 | `04-loop-run-iterations-schema` | 1 | not-started | `03` |
 | `05-workflow-runs-loop-scoping-columns` | 1 | not-started | `03` |
-| `06-stepkindloop-schema` | 1 | not-started | none |
+| `06-stepkindloop-schema` | 1 | implemented (migration 136) | none |
 | `07-loop-continuation-policy` | 2 | not-started | `01`, `02`, `03`, `04` |
 | `08-loop-engine-core` | 2 | not-started | `03`, `04`, `07` |
 | `09-stepkindloop-executor-and-waiting-status` | 2 | not-started | `06`, `08` |

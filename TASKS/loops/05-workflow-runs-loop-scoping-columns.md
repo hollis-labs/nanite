@@ -1,7 +1,7 @@
 # `workflow_runs` loop-scoping columns — `loop_run_id`, `loop_iteration`
 
 **Phase:** 1 — Schema & storage foundation (`TASKS/loops`)
-**Status:** implemented
+**Status:** reviewed
 **Depends on:** `03-loop-runs-schema.md` (`loop_run_id`'s FK target must exist before this
 migration runs)
 **Touches:** `internal/store/migrations/` (new migration), `internal/store/workflow_runs.go`
@@ -170,4 +170,62 @@ untouched by this task), not `git stash`, per this dispatch's explicit prohibiti
 redirected to a file, `$?` read immediately after).
 
 ## Review notes
-<Reviewer fills this in: pass/fail, what was checked, anything fixed and how.>
+
+**Pass.** Fresh review (independent, no shared context with the implementing worker), Wave 3
+of the Loops batch, closing out Phase 1.
+
+Checked:
+- Migration `140_workflow_runs_loop_scoping.sql`: plain nullable `ADD COLUMN`s
+  (`loop_run_id TEXT REFERENCES loop_runs(id)`, `loop_iteration INTEGER`) plus one composite
+  index, mirroring `131_agent_reflexes_workflow_run_scoping.sql` exactly — correct choice,
+  no rebuild dance needed since neither column carries a `CHECK`.
+- FK enforcement independently re-verified myself (not just trusting the Work Log's real-backup
+  claim): wrote and ran a throwaway test calling `CreateWorkflowRun` with a bogus
+  `LoopRunID`, confirmed it fails with a real SQLite `FOREIGN KEY constraint failed` error
+  (deleted after verification, `git status` clean).
+- `WorkflowRunRow` (confirmed the real name — no `WorkflowRun` struct exists anywhere in the
+  tree) gets `LoopRunID *string`/`LoopIteration *int`, pointer-shaped because `0` is a
+  legitimate iteration number. `database/sql`'s default parameter converter dereferences
+  non-nil pointers and converts nil to `NULL` automatically — confirmed this needs no
+  `nullIfEmpty`-style helper on the write side, and the round-trip test
+  (`TestWorkflowRun_LoopScope_RoundTrips`) confirms both the plain-nil and both-set shapes
+  read back correctly, plus `UpdateWorkflowRunLoopScope`'s stamp-after-the-fact path.
+- The `WorkflowLaunchRequest`/`Launch` finding is real, not a misdiagnosis: independently
+  traced `internal/service/workflow_launch.go`'s `Launch` (calls `engine.Run(...)` against the
+  engine-agnostic `agentworkflow.WorkflowEngine` interface, returns
+  `WorkflowLaunchResult{RunID: result.RunID}`) and `internal/service/workflow_engine.go`'s
+  `BuiltinWorkflowEngine.Run` (the function that actually calls `store.CreateWorkflowRun`,
+  several layers below `Launch`). Confirmed `agentworkflow.WorkflowInput` (`types.go:338`)
+  genuinely carries only `Params`/`SessionID` — no loop-scoping concept — so extending it would
+  be materially bigger than this task's scope. `UpdateWorkflowRunLoopScope` is a well-reasoned,
+  correctly-scoped follow-up setter for task `08` to call after `Launch` returns; task `08` is
+  not left blocked or confused — both `CreateWorkflowRun`'s and `UpdateWorkflowRunLoopScope`'s
+  doc comments spell out the intended call shape directly.
+- Independently re-reviewed the cross-task edit to `migration_136_workflow_run_steps_loop_kind_test.go`
+  (already-reviewed code from task `06`): moving the `flexRunID` parent-row `CreateWorkflowRun`
+  call to *before* `DownTo(134)` (so it runs at head schema, before migration 140 is reversed)
+  and replacing `provider.UpTo(ctx, 136)` with `provider.Up(ctx)` (so the later
+  "new capability" `CreateWorkflowRun` call, which needs migration 140's columns, also
+  succeeds) is a legitimate, narrow reordering. Confirmed none of migrations 137-140 touch
+  `workflow_run_steps`, so the 136-rebuild-specific assertions (row-count preservation,
+  kind/status spot-checks) are unaffected. Re-ran the full file directly
+  (`TestMigrate136WidensWorkflowRunStepsKindCheck`, `TestMigrate136PreservesWorkflowRunStepsIndexes`,
+  `TestRealBackupWorkflowRunStepsSurviveLoopKindMigration`) — all pass.
+- Phase 1 close-out sanity check: `ls internal/store/migrations/` shows a contiguous
+  `135`-`140` sequence, no gaps or duplicates.
+- Ran `go build ./cmd/nanite/` (clean), `go vet ./...` (clean except the two pre-existing,
+  unrelated `internal/service/container.go` findings, confirmed untouched by this task via
+  `git diff HEAD`), and the full `go test ./...` (89 packages `ok`, zero `FAIL`/`panic` lines,
+  real exit code 0 checked directly from a file redirect, never through a pipe).
+
+**Consistency note, not a finding against this task specifically:** task `05` also has no
+permanent real-backup test file for migration 140 (a throwaway `cmd/` program instead, per its
+Work Log) — but this is consistent with its own cited precedent: migration `131`
+(`agent_reflexes_workflow_run_scoping`), the direct model this task mirrors, likewise has no
+permanent real-backup test file, only an ordinary round-trip regression test. Plain nullable
+`ADD COLUMN` migrations with no `CHECK`/rebuild have apparently never gotten the permanent-
+backup-test treatment in this codebase — this is a different, lower-risk category from the
+`CREATE TABLE`s task `04`'s note above concerns, and task `05`'s choice is correctly aligned
+with its own precedent, not a new gap.
+
+No issues found. Marking `reviewed`.

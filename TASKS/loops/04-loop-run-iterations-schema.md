@@ -1,7 +1,7 @@
 # Loop run iterations schema — `loop_run_iterations` append-only table
 
 **Phase:** 1 — Schema & storage foundation (`TASKS/loops`)
-**Status:** implemented
+**Status:** reviewed
 **Depends on:** `03-loop-runs-schema.md` (`loop_run_id` FK)
 **Touches:** `internal/store/migrations/` (new migration), `internal/store/loop_runs.go` or
 a new `internal/store/loop_run_iterations.go` (Go types, CRUD).
@@ -169,4 +169,56 @@ pipe):**
   deliverable.
 
 ## Review notes
-<Reviewer fills this in: pass/fail, what was checked, anything fixed and how.>
+
+**Pass.** Fresh review (independent, no shared context with the implementing worker), Wave 3
+of the Loops batch, closing out Phase 1.
+
+Checked:
+- Migration `139_loop_run_iterations.sql`: `CREATE TABLE IF NOT EXISTS loop_run_iterations`
+  matches the illustrative DDL (decision/progress_state CHECK enums, nullable
+  `workflow_run_id`/`decision`/`progress_state`, `evaluation_json` default `'{}'`). Confirmed
+  `loop_run_id REFERENCES loop_runs(id)` is an ordinary enforced FK (not the
+  `goal_evidence`-style deliberately-unenforced pointer) and that this is the correct call
+  given migration ordering (139 lands strictly after 138).
+- `idx_loop_run_iterations_seq` uniqueness is genuinely enforced —
+  `TestLoopRunIteration_UniqueSeqConstraint` inserts a duplicate `(loop_run_id,
+  iteration_number)` pair and confirms the second insert fails; a different `loop_run_id`
+  reusing the same `iteration_number` succeeds, confirming the index is scoped per
+  `loop_run_id` as intended.
+- The in-flight → complete lifecycle matches `21-loops.md`'s own illustrative example
+  (iteration 3, `decision: null # in flight`) exactly:
+  `TestLoopRunIteration_RoundTrip` creates a row with `workflow_run_id`/`decision`/
+  `progress_state` all empty, then `CompleteLoopRunIteration` fills them in;
+  `TestLoopRunIteration_ListOrderedWithInFlightRow` exercises a completed row and a
+  still-in-flight row coexisting, ordered correctly by `iteration_number`.
+- FK enforcement independently re-verified for both `loop_run_id` (bogus id rejected) and
+  `workflow_run_id` (bogus id rejected at `CompleteLoopRunIteration` time) — both covered by
+  dedicated regression tests (`TestLoopRunIteration_LoopRunFKEnforced`/
+  `_WorkflowRunFKEnforced`), both re-run directly and confirmed passing.
+- `Evaluation` struct/JSON round-trip, decision/progress_state enum validation at both
+  `Create`/`Complete`, and not-found handling all covered and passing.
+- No naming collisions: no other `type Evaluation struct` exists in the tree; `LoopRunIteration`
+  vocabulary matches `21-loops.md`/`GLOSSARY.md` (`LoopRun` entry) with no new ambiguous terms.
+- Ran `go build ./cmd/nanite/` (clean), `go vet ./...` (clean except the two pre-existing,
+  unrelated `internal/service/container.go` `stopReaper`/`stopRuntimeReaper` findings —
+  confirmed via `git diff HEAD -- internal/service/container.go` producing zero output, so
+  untouched by this task), and the full `go test ./...` (89 packages `ok`, zero `FAIL`/`panic`
+  lines, real exit code 0 checked directly from a file redirect, never through a pipe to
+  `tail`). Also ran this task's own `internal/store` tests targeted and verbose to confirm
+  each of the 7 new `TestLoopRunIteration_*` cases individually passes.
+
+**Consistency-gap note, not a blocking finding:** this is the second Phase 1 task in this
+batch (after task `03`) to skip a permanent `migration_139_..._backup_test.go` in favor of a
+throwaway, deleted verification script — see this task's own Work Log for the real-backup
+exercise performed. Both `03` and `04` are brand-new `CREATE TABLE IF NOT EXISTS` migrations
+with no existing rows to preserve and no rebuild dance, which is a materially lower-risk
+migration shape than the rename-recreate-copy rebuilds (`130`/`133`/`136`) that motivated the
+permanent-backup-test convention in the first place — so the judgment call is defensible on
+its own terms each time. But now that it's happened twice in a row for the same migration
+shape, it's worth the Orchestrator writing down explicitly (e.g. in
+`EXECUTION-PROCESS.md` or `TASKS/ESCALATIONS.md`) that a brand-new, no-rebuild `CREATE TABLE`
+migration does not require a permanent real-backup test file — a throwaway, Work-Log-documented
+verification is sufficient — so future workers/reviewers don't re-litigate this from scratch
+each time it comes up. Not asking for a fix to this task.
+
+No issues found. Marking `reviewed`.

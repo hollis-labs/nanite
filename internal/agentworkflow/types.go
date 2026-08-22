@@ -31,6 +31,20 @@ const (
 	// behavior (the wait/resume body, exit-trigger evaluation) is task
 	// 06's job, not implemented here.
 	StepKindFlex StepKind = "flex"
+	// StepKindLoop lets a Workflow contain a Loop
+	// (docs/engineering/architecture/21-loops.md, Decision 1 — "one new,
+	// thin step kind"). Verbatim from that doc: "It reuses the identical
+	// pause/external-resolve/Resume plumbing StepKindFlex already reused
+	// from StepKindGate — a StepKindLoop step returns a waiting status
+	// when it starts, and something external (the contained LoopRun
+	// reaching a terminal state) is what calls Resume on the outer
+	// workflow. This is not new engine behavior, just the third reuse of
+	// a pattern the engine already has twice." This constant (plus the
+	// matching workflow_run_steps.kind CHECK widening, migration 135) is
+	// the schema/const half of TASKS/loops/06-stepkindloop-schema.md;
+	// real loop-step execution behavior (the wait/resume body, launching
+	// the contained LoopRun) is task 09's job, not implemented here.
+	StepKindLoop StepKind = "loop"
 )
 
 // VerifyMode selects how a step's output is checked. Verify is a modifier

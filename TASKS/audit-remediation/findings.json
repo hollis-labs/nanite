@@ -765,7 +765,7 @@
       "report_section": "\u00a78.3, corrects GO-TEST-001's scope",
       "task_file": "TASKS/audit-remediation/04-container-reaper-lifecycle/03-investigate-internal-service-race-timeout.md",
       "disposition": "remediate",
-      "task_status": "not-started",
+      "task_status": "reviewed",
       "revalidation_note": "Confirmed still accurate: `grep -rl NewContainer internal/service/*_test.go` returns zero of 128 test files (audit said 126 -- grew with skills/loops test additions, still zero). The investigation this task calls for is still needed."
     },
     {

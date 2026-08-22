@@ -1,0 +1,130 @@
+=== govet/shadow sample (20, varied files) ===
+  cmd/nanite/main.go:182: shadow: declaration of "err" shadows declaration at line 175
+      src: if err := s.Seed(); err != nil {
+  cmd/nanite/main.go:185: shadow: declaration of "err" shadows declaration at line 175
+      src: if err := s.SeedProviders(); err != nil {
+  cmd/nanite/main.go:216: shadow: declaration of "err" shadows declaration at line 175
+      src: if n, err := envelope.RegisterOrphans(envReg); err != nil {
+  cmd/nanite/main.go:239: shadow: declaration of "err" shadows declaration at line 175
+      src: if settings, err := s.GetUserSettings(); err != nil {
+  cmd/nanite/main.go:274: shadow: declaration of "err" shadows declaration at line 175
+      src: if settings, err := s.GetUserSettings(); err == nil {
+  cmd/nanite/main.go:279: shadow: declaration of "err" shadows declaration at line 175
+      src: if rp, rm, err := s.ResolveProviderAndModel(utilityProvider, utilityModel); err == nil {
+  cmd/nanite/main.go:288: shadow: declaration of "err" shadows declaration at line 175
+      src: if n, err := strconv.Atoi(maxProcs); err == nil && n >= 0 {
+  cmd/nanite/plugin_cmd.go:300: shadow: declaration of "err" shadows declaration at line 294
+      src: if _, err := os.Stat(manifestPath); err != nil {
+  internal/agent/managed_section_test.go:123: shadow: declaration of "err" shadows declaration at line 118
+      src: if err := WriteManagedSection(path, "same content"); err != nil {
+  internal/agent/reflexes/loom_pilot_seeds_test.go:103: shadow: declaration of "err" shadows declaration at line 56
+      src: if err := st.BumpAgentReflexFired(ctx, fired.ID, now); err != nil {
+  internal/agent/reflexes/opt_out_test.go:55: shadow: declaration of "err" shadows declaration at line 41
+      src: if err := st.SetAgentReflexOptOut(ctx, "agent-required-probe", requiredID); err != nil {
+  internal/agent/reflexes/opt_out_test.go:92: shadow: declaration of "err" shadows declaration at line 80
+      src: if err := st.SetAgentReflexOptOut(ctx, "agent-permissive-probe", permissiveID); err != nil {
+  internal/agent/reflexes/opt_out_test.go:129: shadow: declaration of "err" shadows declaration at line 117
+      src: if err := st.SetAgentReflexOptOut(ctx, "agent-clear-probe", permissiveID); err != nil {
+  internal/agent/reflexes/opt_out_test.go:132: shadow: declaration of "err" shadows declaration at line 117
+      src: if err := st.ClearAgentReflexOptOut(ctx, "agent-clear-probe", permissiveID); err != nil {
+  internal/agent/reflexes/opt_out_test.go:170: shadow: declaration of "err" shadows declaration at line 158
+      src: if err := st.SetAgentReflexOptOut(ctx, "agent-a", permissiveID); err != nil {
+  internal/agent/reflexes/recurrence_test.go:240: shadow: declaration of "err" shadows declaration at line 197
+      src: if err := st.UpdateAgentReflex(ctx, *row); err != nil {
+  internal/agent/reflexes/state.go:62: shadow: declaration of "err" shadows declaration at line 31
+      src: if n, err := sc.Store.ToolCallsForMessage(m.ID); err == nil {
+  internal/api/agent_capabilities.go:111: shadow: declaration of "err" shadows declaration at line 101
+      src: if err := a.decode(r, &req); err != nil {
+  internal/api/agent_capabilities.go:134: shadow: declaration of "err" shadows declaration at line 101
+      src: if err := a.Services.Store.InsertAgentKnownTool(r.Context(), row); err != nil {
+  internal/api/agent_capabilities.go:266: shadow: declaration of "err" shadows declaration at line 256
+      src: if err := a.decode(r, &req); err != nil {
+  variable-name distribution across all 502:
+     502  err
+
+=== errcheck in internal/store: function name distribution ===
+      93  rows.Close
+       9  tx.Rollback
+       2  json.Unmarshal
+       2  db.Close
+  total: 106
+
+=== errcheck in internal/api: function name distribution ===
+       7  tmpFile.Close
+       6  (*encoding/json.Encoder).Encode
+       6  os.RemoveAll
+       4  os.MkdirAll
+       3  f.Close
+       3  a.Services.MCP.AutoDiscover
+       3  json.Unmarshal
+       2  file.Close
+       2  os.Remove
+       2  rc.Close
+       1  r.Body.Close
+       1  io.Copy
+       1  dst.Close
+       1  filepath.Walk
+       1  resp.Body.Close
+       1  os.WriteFile
+       1  w.Write
+       1  in.Close
+       1  out.Close
+       1  gz.Close
+       1  zr.Close
+
+=== gosec G304 sample (10) ===
+  cmd/nanite/mcp_cmd.go:32
+      src: data, err := os.ReadFile(filePath)
+  cmd/nanite/plugin_cmd.go:482
+      src: in, err := os.Open(src)
+  cmd/nanite/plugin_cmd.go:491
+      src: out, err := os.OpenFile(dst, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, info.Mode()&os.ModePerm)
+  cmd/nanite/plugin_logs.go:22
+      src: f, err := os.Open(logPath)
+  cmd/nanite/serve_autostart.go:82
+      src: lockFile, err := os.OpenFile(lockPath, os.O_CREATE|os.O_RDWR, 0o644)
+  cmd/nanite/serve_autostart.go:202
+      src: logFile, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
+  internal/agent/managed_files.go:151
+      src: raw, err := os.ReadFile(path)
+  internal/agent/managed_files.go:180
+      src: raw, err := os.ReadFile(path)
+  internal/agent/managed_section.go:33
+      src: data, err := os.ReadFile(path)
+  internal/agent/managed_section.go:87
+      src: data, err := os.ReadFile(path)
+
+=== gosec G306 sample (10) ===
+  cmd/nanite/mcp_cmd.go:105
+      src: if err := os.WriteFile(outPath, data, 0644); err != nil {
+  cmd/nanite/plugin_cmd_test.go:123
+      src: if err := os.WriteFile(path, []byte(content), 0644); err != nil {
+  internal/agent/discovery_test.go:56
+      src: if err := os.WriteFile(filepath.Join(dir, filename), []byte(content), 0644); err != nil {
+  internal/agent/discovery_test.go:86
+      src: if err := os.WriteFile(cliPath, []byte(content), 0644); err != nil {
+  internal/agent/discovery_test.go:122
+      src: if err := os.WriteFile(cliPath, []byte(content), 0644); err != nil {
+  internal/agent/discovery_test.go:237
+      src: if err := os.WriteFile(filepath.Join(dir, "bad.md"), []byte("no frontmatter"), 0644); err != nil {
+  internal/agent/discovery_test.go:242
+      src: if err := os.WriteFile(filepath.Join(dir, "notes.txt"), []byte("not an agent"), 0644); err != nil {
+  internal/agent/loader_test.go:75
+      src: if err := os.WriteFile(filepath.Join(agentsDir, "researcher.md"), []byte(content), 0o644); err != nil {
+  internal/agent/managed_section_atomicity_test.go:35
+      src: if err := os.WriteFile(filepath.Join(target, "child"), []byte("x"), 0o644); err != nil {
+  internal/agent/managed_section_atomicity_test.go:75
+      src: if err := os.WriteFile(target, []byte(seed), 0o644); err != nil {
+
+=== govet/lostcancel (all 4) ===
+  internal/service/container.go:1162: lostcancel: the stopReaper function is not used on all paths (possible context leak)
+  internal/service/container.go:1182: lostcancel: the stopRuntimeReaper function is not used on all paths (possible context leak)
+  internal/service/container.go:1242: lostcancel: this return statement may be reached without using the stopReaper var defined on line 1162
+  internal/service/container.go:1242: lostcancel: this return statement may be reached without using the stopRuntimeReaper var defined on line 1182
+
+=== govet/unusedwrite in internal/a2a (13) ===
+  internal/a2a/a2a_test.go:65: unusedwrite: unused write to field Method
+  internal/a2a/a2a_test.go:66: unusedwrite: unused write to field Params
+  internal/a2a/a2a_test.go:70: unusedwrite: unused write to field ID
+  internal/a2a/a2a_test.go:79: unusedwrite: unused write to field JSONRPC
+  internal/a2a/a2a_test.go:80: unusedwrite: unused write to field Result

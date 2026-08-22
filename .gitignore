@@ -79,3 +79,13 @@ ui/vite.config.ts.timestamp-*.js
 
 # Visual brainstorming companion sessions
 .superpowers/
+
+# Audit evidence — REPORT.md cites these files by path as the backing evidence
+# for every finding. The global *.log / *.out ignores would otherwise silently
+# drop the entire evidence chain (21 of 29 files), leaving the citations
+# dangling. This output cannot be regenerated: it was measured against a
+# working tree at the audited commit that no longer exists.
+!docs/audits/**/raw/*.log
+!docs/audits/**/raw/*.out
+!docs/audits/**/raw-*/*.log
+!docs/audits/**/raw-*/*.out

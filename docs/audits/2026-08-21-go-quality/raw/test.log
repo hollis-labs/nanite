@@ -1,0 +1,104 @@
+ok  	github.com/hollis-labs/nanite/cmd/nanite	5.386s
+?   	github.com/hollis-labs/nanite/cmd/nanite-agent	[no test files]
+ok  	github.com/hollis-labs/nanite/internal/a2a	0.521s
+ok  	github.com/hollis-labs/nanite/internal/agent	7.106s
+ok  	github.com/hollis-labs/nanite/internal/agent/builtin	0.527s
+ok  	github.com/hollis-labs/nanite/internal/agent/override	0.332s
+ok  	github.com/hollis-labs/nanite/internal/agent/reflexes	132.473s
+ok  	github.com/hollis-labs/nanite/internal/agentvalidation	0.908s
+ok  	github.com/hollis-labs/nanite/internal/agentworkflow	0.539s
+ok  	github.com/hollis-labs/nanite/internal/api	301.743s
+ok  	github.com/hollis-labs/nanite/internal/assets	1.109s
+ok  	github.com/hollis-labs/nanite/internal/background	5.334s
+?   	github.com/hollis-labs/nanite/internal/brand	[no test files]
+ok  	github.com/hollis-labs/nanite/internal/builders	72.584s
+ok  	github.com/hollis-labs/nanite/internal/chat	145.798s
+ok  	github.com/hollis-labs/nanite/internal/classify	0.293s
+?   	github.com/hollis-labs/nanite/internal/cli/installcmd	[no test files]
+ok  	github.com/hollis-labs/nanite/internal/config	0.249s
+ok  	github.com/hollis-labs/nanite/internal/context	0.346s
+ok  	github.com/hollis-labs/nanite/internal/contextbroker	2.890s
+ok  	github.com/hollis-labs/nanite/internal/coordination	7.002s
+ok  	github.com/hollis-labs/nanite/internal/crossapp	1.054s
+ok  	github.com/hollis-labs/nanite/internal/describer	1.147s
+ok  	github.com/hollis-labs/nanite/internal/dispatch	1.142s
+ok  	github.com/hollis-labs/nanite/internal/dispatcher	0.889s
+ok  	github.com/hollis-labs/nanite/internal/effort	0.768s
+ok  	github.com/hollis-labs/nanite/internal/elicitation	0.997s
+ok  	github.com/hollis-labs/nanite/internal/envelope	1.119s
+ok  	github.com/hollis-labs/nanite/internal/executor/envelope_render	0.611s
+ok  	github.com/hollis-labs/nanite/internal/filter	0.282s
+ok  	github.com/hollis-labs/nanite/internal/fsutil	1.857s
+ok  	github.com/hollis-labs/nanite/internal/grounding	0.330s
+ok  	github.com/hollis-labs/nanite/internal/inspector	0.426s
+ok  	github.com/hollis-labs/nanite/internal/learnings	1.490s
+ok  	github.com/hollis-labs/nanite/internal/lifecycle	0.944s
+ok  	github.com/hollis-labs/nanite/internal/llm/anthropic	0.980s
+ok  	github.com/hollis-labs/nanite/internal/llm/openai	0.980s
+ok  	github.com/hollis-labs/nanite/internal/loopdetect	0.484s
+ok  	github.com/hollis-labs/nanite/internal/mcp	26.992s
+ok  	github.com/hollis-labs/nanite/internal/mcpconfig	10.977s
+ok  	github.com/hollis-labs/nanite/internal/mcpserver	94.566s
+ok  	github.com/hollis-labs/nanite/internal/memory	4.624s
+ok  	github.com/hollis-labs/nanite/internal/messaging	186.721s
+ok  	github.com/hollis-labs/nanite/internal/otel	0.513s
+ok  	github.com/hollis-labs/nanite/internal/pathsafe	0.324s
+ok  	github.com/hollis-labs/nanite/internal/permission	0.670s
+ok  	github.com/hollis-labs/nanite/internal/plugin	91.329s
+?   	github.com/hollis-labs/nanite/internal/plugin/allplugins	[no test files]
+ok  	github.com/hollis-labs/nanite/internal/plugin/builtin/adapter-claude	0.874s
+ok  	github.com/hollis-labs/nanite/internal/plugin/builtin/adapter-codex	0.533s
+ok  	github.com/hollis-labs/nanite/internal/plugin/builtin/adapter-gemini	0.375s
+ok  	github.com/hollis-labs/nanite/internal/plugin/builtin/adapter-nanite-native	0.441s
+ok  	github.com/hollis-labs/nanite/internal/plugin/builtin/adapter-opencode	2.177s
+ok  	github.com/hollis-labs/nanite/internal/plugin/builtin/agentwidgets	0.375s
+ok  	github.com/hollis-labs/nanite/internal/plugin/builtin/bookmarks	0.341s
+?   	github.com/hollis-labs/nanite/internal/plugin/builtin/card-rules-demo	[no test files]
+ok  	github.com/hollis-labs/nanite/internal/plugin/builtin/contextwidgets	0.392s
+ok  	github.com/hollis-labs/nanite/internal/plugin/builtin/debugwidgets	0.399s
+ok  	github.com/hollis-labs/nanite/internal/plugin/builtin/observabilitywidgets	0.568s
+ok  	github.com/hollis-labs/nanite/internal/plugin/catalog	9.173s
+ok  	github.com/hollis-labs/nanite/internal/plugin/devmode	0.386s
+ok  	github.com/hollis-labs/nanite/internal/plugin/install	3.555s
+ok  	github.com/hollis-labs/nanite/internal/plugin/scaffold	2.793s
+ok  	github.com/hollis-labs/nanite/internal/plugin/subprocess	1.085s
+ok  	github.com/hollis-labs/nanite/internal/providercatalog	0.227s
+ok  	github.com/hollis-labs/nanite/internal/recover	0.397s
+ok  	github.com/hollis-labs/nanite/internal/recovery	0.664s
+ok  	github.com/hollis-labs/nanite/internal/recovery/broker	0.809s
+ok  	github.com/hollis-labs/nanite/internal/recovery/orphansweep	1.241s
+ok  	github.com/hollis-labs/nanite/internal/recovery/pack	0.430s
+ok  	github.com/hollis-labs/nanite/internal/reminders	38.515s
+ok  	github.com/hollis-labs/nanite/internal/runtime/agent	21.479s
+ok  	github.com/hollis-labs/nanite/internal/safego	0.453s
+ok  	github.com/hollis-labs/nanite/internal/sandbox	6.191s
+ok  	github.com/hollis-labs/nanite/internal/scheduler	104.752s
+?   	github.com/hollis-labs/nanite/internal/secrets	[no test files]
+ok  	github.com/hollis-labs/nanite/internal/selftools	205.161s
+ok  	github.com/hollis-labs/nanite/internal/selftools/reactions	34.814s
+ok  	github.com/hollis-labs/nanite/internal/server	1.990s
+ok  	github.com/hollis-labs/nanite/internal/service	235.950s
+ok  	github.com/hollis-labs/nanite/internal/service/install	4.645s
+ok  	github.com/hollis-labs/nanite/internal/shell	1.278s
+ok  	github.com/hollis-labs/nanite/internal/skill	1.008s
+ok  	github.com/hollis-labs/nanite/internal/skillvendor	3.308s
+ok  	github.com/hollis-labs/nanite/internal/slogx	0.385s
+ok  	github.com/hollis-labs/nanite/internal/store	80.205s
+?   	github.com/hollis-labs/nanite/internal/store/seedcatalog	[no test files]
+ok  	github.com/hollis-labs/nanite/internal/subagent	117.402s
+ok  	github.com/hollis-labs/nanite/internal/task	2.608s
+ok  	github.com/hollis-labs/nanite/internal/tool	0.762s
+ok  	github.com/hollis-labs/nanite/internal/tool/intent	1.503s
+ok  	github.com/hollis-labs/nanite/internal/tool/stash	1.154s
+ok  	github.com/hollis-labs/nanite/internal/toolclient	15.254s
+ok  	github.com/hollis-labs/nanite/internal/truncate	2.158s
+?   	github.com/hollis-labs/nanite/internal/version	[no test files]
+ok  	github.com/hollis-labs/nanite/internal/worker	4.092s
+ok  	github.com/hollis-labs/nanite/internal/workflow	0.382s
+ok  	github.com/hollis-labs/nanite/internal/workflowrunner	2.135s
+ok  	github.com/hollis-labs/nanite/internal/workspace	0.221s
+ok  	github.com/hollis-labs/nanite/internal/worktree	1.530s
+?   	github.com/hollis-labs/nanite/pkg/models	[no test files]
+?   	github.com/hollis-labs/nanite/pkg/plugin	[no test files]
+?   	github.com/hollis-labs/nanite/scripts/verify-catalog	[no test files]
+EXIT:0

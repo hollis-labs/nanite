@@ -3,7 +3,7 @@
 **Phase:** Wave 2 — Correctness, lifecycle, concurrency (audit-remediation batch, sequenced 2026-08-21 — see the sequencing block below)
 **Status:** not-started
 **Depends on:** none as a hard blocker. Cross-reference only: this task's untracked spawns (`GO-SVCCORE-002`) are a *candidate* cause for task 03's investigation (`GO-SVCCORE-006`) — task 03 does not depend on this task landing first, but if task 03's investigation lands first and confirms candidate 2 (untracked-goroutine accumulation), that strengthens the case for prioritizing the `GO-SVCCORE-002` half of this task.
-**Touches:** `internal/service/delegation.go` (`DelegateAndAggregate`, for GO-SVCCORE-001), `internal/service/events_composite.go` (~18 `safego.Go` sites, for GO-SVCCORE-002), `internal/service/agent_deps.go` (see drift note below), and `internal/service/container.go:1133-1143` (the existing precedent comment to read, not necessarily to edit).
+**Touches:** `internal/service/delegation.go` (`DelegateAndAggregate`, for GO-SVCCORE-001), `internal/service/events_composite.go` (~18 `safego.Go` sites, for GO-SVCCORE-002), `internal/service/agent_deps.go` (see drift note below), and `internal/service/container.go:1184-1194` (the existing precedent comment to read, not necessarily to edit — **Wave 0 revalidation (2026-08-22) note:** shifted +51 lines from the audit-era `1133-1143` by unrelated additive changes earlier in the file (`TASKS/skills/` wiring a `SkillVendor` field, the loop-batch wiring a `ReflexEngine` field); the comment's own text is byte-identical, confirmed by direct diff against the audited commit).
 **Requires architect decision:** **true for the GO-SVCCORE-002 half** (package-wide policy call — see below). **False for the GO-SVCCORE-001 half** (clear fix direction with a concrete sibling pattern to follow) — but see the pre-implementation check noted under that finding before starting.
 
 > **Planner sequencing (added 2026-08-21).** Supersedes the `**Depends on:**`
@@ -72,7 +72,7 @@ The audit's own false-positive-considerations note for `GO-SVCCORE-001` states: 
 
 None of these ~18-20 spawns are drainable by `Container.Shutdown()` — they are bare `go func(){...}()`-equivalent fire-and-forget calls, so a burst of in-flight event/plugin-hook dispatches at shutdown time can continue running past `Shutdown()` returning.
 
-**The codebase already knows this pattern matters and has a real precedent for fixing it.** One specific wake-reactor spawn was deliberately migrated off `safego.Go` onto a tracked `*lifecycle.Manager` after a PR review flagged exactly this risk — see `internal/service/container.go:1133-1143` (confirmed current), which reads in full:
+**The codebase already knows this pattern matters and has a real precedent for fixing it.** One specific wake-reactor spawn was deliberately migrated off `safego.Go` onto a tracked `*lifecycle.Manager` after a PR review flagged exactly this risk — see `internal/service/container.go:1184-1194` (confirmed current), which reads in full:
 ```go
 // Copilot PR #258 review: wire the wake-reactor goroutine spawn onto
 // a tracked *lifecycle.Manager instead of the untracked safego.Go
@@ -96,7 +96,7 @@ This is **not** a mechanical fix like Part A. It requires a judgment call about 
 
 ### Proposed direction (for the architect decision, not a mandate)
 - Audit each of the ~18-20 sites (re-verify the real current total first, per the drift note above) against a simple test: "if this goroutine is still running when `Shutdown()` returns, does anything break, get lost, or corrupt state?" Event/plugin-hook dispatches that only log or emit best-effort telemetry are plausibly safe to leave untracked; anything that writes to a store or triggers user-visible side effects mid-shutdown is a stronger migration candidate.
-- If the decision is "migrate a subset," the mechanism is proven: route those sites through `chatServiceImpl.lifecycle.Go(...)` the same way the wake-reactor spawn does, following `container.go:1133-1143`'s own reasoning for why reusing `chatSvcImpl`'s existing manager (rather than constructing a second one) is the right scope.
+- If the decision is "migrate a subset," the mechanism is proven: route those sites through `chatServiceImpl.lifecycle.Go(...)` the same way the wake-reactor spawn does, following `container.go:1184-1194`'s own reasoning for why reusing `chatSvcImpl`'s existing manager (rather than constructing a second one) is the right scope.
 - If the decision is "none of these need tracking, they're all genuinely disposable," that's also an acceptable outcome — but should be recorded explicitly (e.g. a short package-doc note near `safego.Go`'s own doc comment, or in this task's Work Log) so a future reader doesn't re-flag the same ~18 sites as an open question again.
 
 ### Non-goals

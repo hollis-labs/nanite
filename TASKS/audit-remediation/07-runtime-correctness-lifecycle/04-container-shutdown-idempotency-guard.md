@@ -25,13 +25,13 @@
 
 ### Root cause
 
-`Container.Shutdown` (`internal/service/container.go:1424` onward) has **no idempotency guard at all** — no `sync.Once`, no atomic/boolean "already shut down" flag, no early-return check. It fans out to multiple subsystem-`Shutdown`/`Stop` calls in parallel goroutines (the `run` helper, `container.go:1427-1439`, with a per-subsystem panic-recovery wrapper) plus several synchronous stop calls before that (`c.stopModelCatalog()`, `c.Engine.Stop()`, `c.stopSubagentReaper()`/`c.subagentReaper.Stop()`, `c.stopRuntimeReaper()`/`c.runtimeReaper.Stop()` — `container.go:1441-1475`). Nothing prevents `Shutdown` from being invoked a second time, which would re-trigger every one of those calls again. Whether a second invocation is actually safe depends entirely on each individual subsystem's own idempotency — not exhaustively audited here — which is exactly why the guide's own lifecycle-invariant question ("can Stop be called twice?") has a genuinely undefended answer for `Container` today.
+`Container.Shutdown` (`internal/service/container.go:1477` onward — **Wave 0 revalidation (2026-08-22): shifted +53 lines from the audit-era `1424`** by unrelated additive changes earlier in the file, `TASKS/skills/`'s `SkillVendor` field and the loop-batch's `ReflexEngine` field; the function's own body is otherwise unchanged) has **no idempotency guard at all** — no `sync.Once`, no atomic/boolean "already shut down" flag, no early-return check. It fans out to multiple subsystem-`Shutdown`/`Stop` calls in parallel goroutines (the `run` helper, `container.go:1480-1492` (was `1427-1439`), with a per-subsystem panic-recovery wrapper) plus several synchronous stop calls before that (`c.stopModelCatalog()`, `c.Engine.Stop()`, `c.stopSubagentReaper()`/`c.subagentReaper.Stop()`, `c.stopRuntimeReaper()`/`c.runtimeReaper.Stop()` — `container.go:1494-1528` (was `1441-1475`)). Nothing prevents `Shutdown` from being invoked a second time, which would re-trigger every one of those calls again. Whether a second invocation is actually safe depends entirely on each individual subsystem's own idempotency — not exhaustively audited here — which is exactly why the guide's own lifecycle-invariant question ("can Stop be called twice?") has a genuinely undefended answer for `Container` today.
 
 This is in direct contrast to its sibling, `internal/lifecycle.Manager.Shutdown` (`internal/lifecycle/lifecycle.go:97-140`), which `REPORT.md` §8.13 names explicitly as **"the reference implementation the rest of the codebase should be measured against (correct, idempotent, well-documented shutdown)."** `lifecycle.Manager.Shutdown`'s own doc comment states: "Shutdown is idempotent; the second call waits on the same WaitGroup and returns immediately once all goroutines have completed" (`lifecycle.go:95-96`), backed by `m.closed.Store(true)` recorded at entry (`lifecycle.go:98`) plus reliance on `context.CancelFunc` and `sync.WaitGroup.Wait()`'s own natural safety on repeated calls.
 
 ### Currently dormant, not an active bug
 
-`Container.Shutdown` has exactly **one** production call site, `cmd/nanite/main.go:747`, inside the SIGINT/SIGTERM signal handler:
+`Container.Shutdown` has exactly **one** production call site, `cmd/nanite/main.go:809` (was `747`; shifted +62 lines by unrelated intervening changes, same drift class as above), inside the SIGINT/SIGTERM signal handler:
 
 ```go
 safego.Go(context.Background(), "cmd.nanite.signal-handler", func() {
@@ -47,7 +47,7 @@ safego.Go(context.Background(), "cmd.nanite.signal-handler", func() {
 })
 ```
 
-(`main.go:739-749`). This goroutine body runs at most once by construction — a single blocking `<-sigCh` receive on a channel registered once via `signal.Notify` — so `Container.Shutdown()` fires exactly once in the current call graph. This finding is flagged because the guardrail question is legitimate and currently undefended, not because there is an observed double-shutdown bug today.
+(`main.go:801-811`, was `739-749`). This goroutine body runs at most once by construction — a single blocking `<-sigCh` receive on a channel registered once via `signal.Notify` — so `Container.Shutdown()` fires exactly once in the current call graph. This finding is flagged because the guardrail question is legitimate and currently undefended, not because there is an observed double-shutdown bug today.
 
 ### Related, smaller observation (context only — not part of this task's scope)
 
@@ -61,7 +61,7 @@ safego.Go(context.Background(), "cmd.nanite.signal-handler", func() {
 
 1. Add a guard field to the `Container` struct — a `sync.Once` is the simplest, most idiomatic fit: wrap the entire existing `Shutdown` body in `c.shutdownOnce.Do(func() { ... })`. Unlike `lifecycle.Manager.Shutdown`, `Container.Shutdown` has no legitimate reason for a second caller to block until the first call's fan-out completes and then re-run any of it — `sync.Once` already gives any second caller safe blocking-until-first-call-completes semantics for free, with less code than replicating `lifecycle.Manager`'s closed-flag-plus-naturally-idempotent-primitives approach.
 2. Locate the `Container` struct's field declarations (earlier in `container.go`) and add the new field in a sensible location near other lifecycle-related state, if any exists there already.
-3. Re-verify `container.go:1424` is still `Shutdown`'s current start line before editing — cited from direct reading during this task's authoring pass; confirm no drift since.
+3. `container.go:1424` drifted to `1477` as of Wave 0 revalidation (2026-08-22) — re-verify again before editing if further time has passed, since intervening work may shift it again.
 4. Do not modify `internal/lifecycle/lifecycle.go` — `Manager.Shutdown` is already correct and is the reference this task is matching, not changing.
 5. Do not modify `internal/runtime/agent/manager.go`'s `Session.Stop` — see the "related, smaller observation" above; explicitly out of scope for this task.
 

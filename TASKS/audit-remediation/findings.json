@@ -55,7 +55,8 @@
       "false_positive_considerations": "If NewContainer failures are effectively fatal (process exits immediately), the leak is real but inconsequential in practice.",
       "task_file": "TASKS/audit-remediation/04-container-reaper-lifecycle/01-fix-container-constructor-partial-failure-cleanup.md",
       "disposition": "remediate",
-      "task_status": "not-started"
+      "task_status": "not-started",
+      "revalidation_note": "Confirmed still open: container.go changed since the audit (additive SkillVendor/ReflexEngine wiring), but the bug is intact -- exactly 2 return-nil-err paths exist between reaper start (line 1213) and struct assembly (durableAgentRecipes err at :1291-1293, SyncManagedDurableAgentConfigs err at :1295-1297, shifted from the audit's 1242/1246), and neither calls stopReaper()/stopRuntimeReaper(). Matches the finding's recommended fix pattern (mirror stopCatalog()) exactly."
     },
     {
       "id": "GO-SEC-001",
@@ -83,7 +84,8 @@
       "false_positive_considerations": "Reachability requires OTel export enabled at runtime and a malicious/misbehaving collector endpoint.",
       "task_file": "TASKS/audit-remediation/08-remaining-security-hardening/08-dependency-toolchain-vuln-bumps.md",
       "disposition": "remediate",
-      "task_status": "not-started"
+      "task_status": "not-started",
+      "revalidation_note": "govulncheck reachable-vuln count is 00/02-refreshed: 14 (13 stdlib + 1 module, GO-2026-4985) at both the audit and frozen HEAD -- identical vulnerability-ID set per raw-1d3bfd96/DELTA.md. otlptracehttp v1.41.0 finding still applies; standard dependency bump, no architect input needed."
     },
     {
       "id": "GO-SEC-002",
@@ -107,7 +109,8 @@
       "report_section": "\u00a73",
       "task_file": "TASKS/audit-remediation/08-remaining-security-hardening/08-dependency-toolchain-vuln-bumps.md",
       "disposition": "remediate",
-      "task_status": "not-started"
+      "task_status": "not-started",
+      "revalidation_note": "govulncheck's 13-stdlib-vuln count is unaffected by the go1.26.2 toolchain pin -- 00/02's DELTA.md confirms the identical 14-vulnerability-ID set (13 stdlib + 1 module) at both the audit and frozen HEAD. Standard toolchain bump, no architect input needed."
     },
     {
       "id": "GO-HYG-001",
@@ -133,8 +136,9 @@
       "report_section": "\u00a73",
       "false_positive_considerations": "Possible the project plans a separate CI system outside GitHub Actions that already runs make lint; no evidence of one found in-repo.",
       "task_file": "TASKS/audit-remediation/12-quality-ratchet-and-standards/01-full-repo-scheduled-lint-gate.md",
-      "disposition": "remediate",
-      "task_status": "not-started"
+      "disposition": "needs-architect-decision",
+      "task_status": "not-started",
+      "revalidation_note": "Confirmed still accurate and refreshed by 00/02: lefthook.yml's pre-commit still runs `golangci-lint run --new` (changed-lines only); no .github/workflows exists; `make lint`'s uncapped run total moved from 2,338 (audit-era baseline log) to a larger total at frozen HEAD (raw-1d3bfd96/golangci-baseline.log, per DELTA.md's per-linter table showing across-the-board increases). AD-21 (which lint classes become blocking) is this finding's own explicit gate on task 12/01."
     },
     {
       "id": "GO-SEC-003",
@@ -167,7 +171,8 @@
       "false_positive_considerations": "gosec's G304 rule fires on any variable-driven file open regardless of whether the variable is already constrained; a meaningful fraction of the 68 are plausibly already safe by construction.",
       "task_file": "TASKS/audit-remediation/08-remaining-security-hardening/03-triage-remaining-gosec-g304-sites.md",
       "disposition": "remediate",
-      "task_status": "not-started"
+      "task_status": "not-started",
+      "revalidation_note": "gosec G304 production-site count is a 00/02-refreshed metric: 68 (audit) -> 70 (frozen HEAD 1d3bfd96), per docs/audits/2026-08-21-go-quality/raw-1d3bfd96/DELTA.md -- did not hand-recompute. Task 08/03's scope (triage the refreshed list) is unaffected by the +2 delta."
     },
     {
       "id": "GO-TEST-001",
@@ -198,7 +203,8 @@
       "report_section": "\u00a73, extended by \u00a78.3 (GO-SVCCORE-006)",
       "task_file": "TASKS/audit-remediation/04-container-reaper-lifecycle/02-fix-api-test-container-shutdown-leak.md",
       "disposition": "remediate",
-      "task_status": "not-started"
+      "task_status": "not-started",
+      "revalidation_note": "Confirmed still open: grepped all 6 cited internal/api test files -- every one calls service.NewContainer and t.Cleanup(func(){ s.Close() }) for the store, none call svc.Shutdown(). Files unchanged since the audit."
     },
     {
       "id": "GO-DEP-001",
@@ -227,8 +233,9 @@
         "loc": 31654
       },
       "task_file": "TASKS/audit-remediation/10-architectural-concentration/03-container-and-store-review-note.md",
-      "disposition": "remediate",
-      "task_status": "not-started"
+      "disposition": "false-positive",
+      "task_status": "not-started",
+      "revalidation_note": "Engages with the audit's own evidence: Container (container.go) is confirmed still wiring-only (RefreshUtilitySettings, Shutdown -- still just 2 methods; the file grew via additive fields like SkillVendor/ReflexEngine, which doesn't change the method count). The finding's own conclusion is explicit -- \"no decomposition of Container itself is warranted, it is a legitimate composition root\" -- i.e. the audit itself judged the god-object framing does not apply here; false-positive reflects that conclusion, not a Wave-0 disagreement with new evidence."
     },
     {
       "id": "GO-DEP-002",
@@ -258,8 +265,9 @@
         "method_count": 349
       },
       "task_file": "TASKS/audit-remediation/10-architectural-concentration/03-container-and-store-review-note.md",
-      "disposition": "remediate",
-      "task_status": "not-started"
+      "disposition": "needs-architect-decision",
+      "task_status": "not-started",
+      "revalidation_note": "internal/store/store.go and the *Store fan-in pattern are unchanged in substance (76+ direct-reference count not hand-recomputed per the guide's own instruction not to chase this metric). Task 10/03 is explicitly a review-note-only task (no code changes) and AD-14 gates it precisely because the guide directs \"not a mandatory split\" -- whether any narrow interface is warranted at all is the open question, not an agreed fix's shape."
     },
     {
       "id": "GO-STORE-001",
@@ -284,8 +292,9 @@
       "report_section": "\u00a78.1",
       "false_positive_considerations": "A single shared persistence facade is a defensible, normal choice at this scale.",
       "task_file": "TASKS/audit-remediation/10-architectural-concentration/03-container-and-store-review-note.md",
-      "disposition": "remediate",
-      "task_status": "not-started"
+      "disposition": "needs-architect-decision",
+      "task_status": "not-started",
+      "revalidation_note": "Same package/evidence as GO-DEP-002 (both surfaced by task 10/03's gravitational-package review). Confirmed dispatch.TrustResolver and grounding.ConsultationLogger still exist as the narrow consumer-defined-interface counter-examples cited. AD-14 decides whether/where more of this pattern is warranted."
     },
     {
       "id": "GO-STORE-002",
@@ -311,8 +320,9 @@
       },
       "false_positive_considerations": "File-per-domain-concept within one package is the guide's own example of a healthy large package.",
       "task_file": "TASKS/audit-remediation/10-architectural-concentration/03-container-and-store-review-note.md",
-      "disposition": "remediate",
-      "task_status": "not-started"
+      "disposition": "false-positive",
+      "task_status": "not-started",
+      "revalidation_note": "Engages with the audit's own false_positive_considerations verbatim: \"file-per-domain-concept within one package is the guide's own example of a healthy large package.\" *Store's method count wasn't hand-recomputed (guide instruction: don't chase this metric), but the qualitative shape (many domain files, each individually cohesive) is unchanged and the audit's own recommendation is \"do not split merely for size... otherwise an observation only.\""
     },
     {
       "id": "GO-STORE-003",
@@ -341,7 +351,8 @@
       "report_section": "\u00a78.1",
       "task_file": "TASKS/audit-remediation/06-store-correctness/01-fix-deleteagentbyid-error-swallowing.md",
       "disposition": "remediate",
-      "task_status": "not-started"
+      "task_status": "not-started",
+      "revalidation_note": "Confirmed still open, functionally byte-identical: DeleteAgentByID now sits at agents.go:1217-1223 (shifted +2 lines from the audit's 1211-1221 by an unrelated doc-comment edit above it in the file, commit e1ba2ac6 -- the function's own text is unchanged) and is still exactly 'a, err := s.GetAgent(id); if err != nil { return nil }; return s.DeleteAgent(a.Slug)', swallowing every GetAgent error rather than just sql.ErrNoRows. Host.SweepPluginAgentProfiles (internal/plugin/agent_profiles.go:286) is confirmed still the real production caller relying on this. Corrected the task file's stale line-number citations (1211-1214/1211-1221 -> 1213-1216/1213-1223) -- stale-line-numbers-only case, no scope change."
     },
     {
       "id": "GO-STORE-004",
@@ -365,7 +376,8 @@
       "report_section": "\u00a78.1",
       "task_file": "TASKS/audit-remediation/06-store-correctness/02-triage-store-context-and-transaction-gaps.md",
       "disposition": "remediate",
-      "task_status": "not-started"
+      "task_status": "not-started",
+      "revalidation_note": "Confirmed still open and unchanged: GetPluginSettings checks its json.Unmarshal errors (plugin_settings.go:48-53) but ListPluginSettings's identical unmarshal calls in its scan loop do not. Task file 06/02 explicitly marks this sub-section `requires_architect_decision: false` -- a clear, small, mechanical fix, independent of the sub-file's overall AD-14 gate (which applies only to the GO-STORE-005 sub-section)."
     },
     {
       "id": "GO-STORE-005",
@@ -390,8 +402,9 @@
       "report_section": "\u00a78.1",
       "false_positive_considerations": "May be an intentional, not-yet-reached migration backlog rather than an oversight.",
       "task_file": "TASKS/audit-remediation/06-store-correctness/02-triage-store-context-and-transaction-gaps.md",
-      "disposition": "remediate",
-      "task_status": "not-started"
+      "disposition": "needs-architect-decision",
+      "task_status": "not-started",
+      "revalidation_note": "Confirmed unchanged: `grep -c 'ctx context.Context'` returns 0 for both sessions.go and agents.go, 6 for teams.go -- matches the finding exactly. This is the specific sub-question AD-14 (\"how far to narrow internal/store dependencies\") is scoped to decide; task file 06/02 itself flags this sub-section's `requires_architect_decision: true` as \"the one piece of this task file that is genuinely an architect decision.\""
     },
     {
       "id": "GO-STORE-006",
@@ -415,8 +428,9 @@
       "report_section": "\u00a78.1",
       "false_positive_considerations": "Caller concurrency was not traced within budget; confidence is medium specifically for this reason.",
       "task_file": "TASKS/audit-remediation/06-store-correctness/02-triage-store-context-and-transaction-gaps.md",
-      "disposition": "remediate",
-      "task_status": "not-started"
+      "disposition": "needs-more-evidence",
+      "task_status": "not-started",
+      "revalidation_note": "SyncDurableAgentInstanceConfig (durable_agents.go:301, exact match to audit citation) still reads-then-branches-then-writes with no transaction wrapper. Task file 06/02 itself flags this sub-section's fix as `requires_architect_decision: false for the fix itself, but this task's first step is a caller-concurrency trace, not an architect decision -- the audit explicitly could not complete this trace within its budget.` What would settle it: tracing whether any real caller can invoke this with the same slug concurrently; if yes, wrap in a transaction or adopt the sibling self-checking-WHERE-clause idiom."
     },
     {
       "id": "GO-STORE-007",
@@ -443,7 +457,8 @@
       "false_positive_considerations": "Repeated boilerplate that is individually correct and readable is a legitimate design choice; no bug found riding on this duplication.",
       "task_file": "TASKS/audit-remediation/11-semantic-duplication-migration-drift/13-store-scan-loop-duplication.md",
       "disposition": "remediate",
-      "task_status": "not-started"
+      "task_status": "not-started",
+      "revalidation_note": "Scan-loop duplication count is 00/02-refreshed: dupl hits inside internal/store went from 41 (audit) to 40 (frozen HEAD), but spread across 22 files instead of ~20 -- per raw-1d3bfd96/DELTA.md, \"the duplication didn't shrink, it spread.\" Did not hand-recompute; task 11/13's own framing (optional generic scanRows helper, every site individually correct) is unaffected."
     },
     {
       "id": "GO-STORE-008",
@@ -467,8 +482,9 @@
       "requires_architect_decision": true,
       "report_section": "\u00a78.1",
       "task_file": "TASKS/audit-remediation/13-mechanical-cleanup/01-confirmed-dead-code-removal.md",
-      "disposition": "remediate",
-      "task_status": "not-started"
+      "disposition": "needs-architect-decision",
+      "task_status": "not-started",
+      "revalidation_note": "Confirmed still dead: skill_mode_filter.go and skills_source.go both still exist, untouched by the intervening skills-index redesign (migrations 136/137, TASKS/skills/02) that reworked the rest of the skills subsystem around them -- circumstantial evidence they're now doubly orphaned, but not certain. Task file itself sets `requires_architect_decision: true` (\"owner to confirm whether still needed\"); genuinely a wire-vs-retire-shaped question, not just cleanup mechanics."
     },
     {
       "id": "GO-STORE-009",
@@ -488,8 +504,9 @@
       "requires_architect_decision": true,
       "report_section": "\u00a78.1",
       "task_file": "TASKS/audit-remediation/13-mechanical-cleanup/02-stale-comments-and-docs-cleanup.md",
-      "disposition": "remediate",
-      "task_status": "not-started"
+      "disposition": "needs-architect-decision",
+      "task_status": "not-started",
+      "revalidation_note": "Confirmed still pervasive across internal/store/*.go (CW-YYYYMMDD-NNNN and TASKS/*.md references embedded in comments) -- not hand-recounted per the guide's own instruction not to chase LOC/count metrics for their own sake. Genuinely an architect-scoped trim-pass question (which comments are pure task-ID citation vs. load-bearing invariant documentation), per the finding's own requires_architect_decision:true."
     },
     {
       "id": "GO-INFRA-001",
@@ -514,8 +531,9 @@
       "requires_architect_decision": true,
       "report_section": "\u00a78.2",
       "task_file": "TASKS/audit-remediation/11-semantic-duplication-migration-drift/08-config-package-naming-collision.md",
-      "disposition": "remediate",
-      "task_status": "not-started"
+      "disposition": "needs-architect-decision",
+      "task_status": "not-started",
+      "revalidation_note": "Confirmed both Config (config.go:23, reads project-root nanite.yaml) and AppConfig (appconfig.go:12, reads config/nanite.yaml) still exist as described. Task file 11/08's own Gated-on (AD-20) frames the blast radius itself -- two-line rename vs. tree-wide sweep across every caller -- as the undetermined question, not merely the mechanics of an agreed rename."
     },
     {
       "id": "GO-INFRA-002",
@@ -538,7 +556,8 @@
       "report_section": "\u00a78.2",
       "task_file": "TASKS/audit-remediation/11-semantic-duplication-migration-drift/04-traffic-light-calculation-duplication.md",
       "disposition": "remediate",
-      "task_status": "not-started"
+      "task_status": "not-started",
+      "revalidation_note": "Confirmed both implementations still exist: inspector.trafficLight (service.go:268) and internal/service/inspector_producers.go's trafficLightFor (line 56), the latter a byte-for-byte reimplementation created only because the former is unexported. Concrete, no architect input needed."
     },
     {
       "id": "GO-INFRA-003",
@@ -562,7 +581,8 @@
       "false_positive_considerations": "Sibling LocalBackend.List/Snapshot already treat similar failures as skip-and-continue without logging, so this may be a deliberate 'best-effort restore' convention.",
       "task_file": "TASKS/audit-remediation/13-mechanical-cleanup/04-low-risk-error-handling-batch.md",
       "disposition": "remediate",
-      "task_status": "not-started"
+      "task_status": "not-started",
+      "revalidation_note": "Confirmed still open: internal/task/snapshot.go's scanTask still discards json.Unmarshal (line 110) and time.Parse (lines 114-115, 117) errors during Restore. Add-a-log-line fix, no architect input needed; the false_positive_considerations note (sibling backends already treat this as best-effort) doesn't change that a log line costs nothing."
     },
     {
       "id": "GO-INFRA-004",
@@ -587,8 +607,9 @@
       "report_section": "\u00a78.2",
       "false_positive_considerations": "A comment at stream.go:104-105 suggests the early return may be a deliberate 'fail loud' choice, not an oversight.",
       "task_file": "TASKS/audit-remediation/11-semantic-duplication-migration-drift/06-provider-streaming-error-handling-divergence.md",
-      "disposition": "remediate",
-      "task_status": "not-started"
+      "disposition": "needs-architect-decision",
+      "task_status": "not-started",
+      "revalidation_note": "Confirmed both stream-error paths still exist with the divergent shapes described (openai/stream.go's EventError-then-return vs. anthropic/stream.go's graceful-fallback path); no commits touched either file since the audit. Task file 11/06 is explicitly gated on AD-19 and flags this may be \"legitimately independent\" -- classify before collapsing, per its own text."
     },
     {
       "id": "GO-SVCCORE-001",
@@ -614,7 +635,8 @@
       "false_positive_considerations": "Only reachable if worker.Manager.SpawnFull (or the closure) can actually panic in practice -- not independently verified.",
       "task_file": "TASKS/audit-remediation/04-container-reaper-lifecycle/04-track-untracked-goroutine-spawns.md",
       "disposition": "remediate",
-      "task_status": "not-started"
+      "task_status": "not-started",
+      "revalidation_note": "Confirmed unchanged: delegation.go:349-386 (exact match to audit citation) still has an unconditional blocking `ir := <-ch` receive in DelegateAndAggregate's collector with no select/timeout/ctx.Done, unlike DelegateTask."
     },
     {
       "id": "GO-SVCCORE-002",
@@ -640,7 +662,8 @@
       "report_section": "\u00a78.3",
       "task_file": "TASKS/audit-remediation/04-container-reaper-lifecycle/04-track-untracked-goroutine-spawns.md",
       "disposition": "remediate",
-      "task_status": "not-started"
+      "task_status": "not-started",
+      "revalidation_note": "Confirmed still open: the wake-reactor's migration to `*lifecycle.Manager` (container.go, now at lines 1184-1194 -- shifted +51 lines from the audit's 1133-1143 by unrelated additive changes, comment text itself byte-identical) remains the only migrated site; events_composite.go still has exactly 18 safego.Go sites (re-confirmed via grep) and agent_deps.go still has zero (task file 04/04's own drift note, written at task-authoring time, is still accurate at this HEAD). Corrected the task file's container.go line citation."
     },
     {
       "id": "GO-SVCCORE-003",
@@ -669,7 +692,8 @@
       "false_positive_considerations": "Blast radius is bounded -- only strips Nanite's own previously-written managed markers, not arbitrary user content.",
       "task_file": "TASKS/audit-remediation/13-mechanical-cleanup/02-stale-comments-and-docs-cleanup.md",
       "disposition": "remediate",
-      "task_status": "not-started"
+      "task_status": "not-started",
+      "revalidation_note": "Confirmed still open: cleanupRemovedAdapters's doc comment (adapter_cleanup.go:32) still claims \"rollback is handled by the existing snapshotAdapterTargets() pass\" but grep confirms snapshotAdapterTargets is never called anywhere in the codebase (only defined, in adapters.go:116), and no `Rollback` function exists outside an unrelated `tx.Rollback()` DB-transaction call in internal/messaging/handoff.go."
     },
     {
       "id": "GO-SVCCORE-004",
@@ -694,7 +718,8 @@
       "false_positive_considerations": "A2A endpoint's auth boundary (whether only trusted peer agents can submit tasks) was not independently verified.",
       "task_file": "TASKS/audit-remediation/08-remaining-security-hardening/01-a2a-webhook-url-validation.md",
       "disposition": "remediate",
-      "task_status": "not-started"
+      "task_status": "not-started",
+      "revalidation_note": "Confirmed still open: a2a_push_notifier.go's processDelivery builds `http.NewRequestWithContext(ctx, http.MethodPost, config.URL, ...)` (line 153) directly from the caller-supplied PushNotificationConfig with no scheme/host validation anywhere in the function. a2a_task_manager.go changed since the audit but only in an unrelated workflow-status-mapping switch (loops-batch); the push-notifier vulnerability is untouched."
     },
     {
       "id": "GO-SVCCORE-005",
@@ -715,7 +740,8 @@
       "report_section": "\u00a78.3",
       "task_file": "TASKS/audit-remediation/12-quality-ratchet-and-standards/01-full-repo-scheduled-lint-gate.md",
       "disposition": "remediate",
-      "task_status": "not-started"
+      "task_status": "not-started",
+      "revalidation_note": "Confirmed still open: recovery_envelope_sink.go's `//nolint:gosec` suppression is unchanged; this syntax is golangci-lint-only and a bare `gosec ./...` run (as the guide's own scheduled-gate design calls for) would still flag it. Concrete doc/comment fix, independent of AD-21's blocking-classes policy question."
     },
     {
       "id": "GO-SVCCORE-006",
@@ -739,7 +765,8 @@
       "report_section": "\u00a78.3, corrects GO-TEST-001's scope",
       "task_file": "TASKS/audit-remediation/04-container-reaper-lifecycle/03-investigate-internal-service-race-timeout.md",
       "disposition": "remediate",
-      "task_status": "not-started"
+      "task_status": "not-started",
+      "revalidation_note": "Confirmed still accurate: `grep -rl NewContainer internal/service/*_test.go` returns zero of 128 test files (audit said 126 -- grew with skills/loops test additions, still zero). The investigation this task calls for is still needed."
     },
     {
       "id": "GO-SVCCORE-007",
@@ -759,8 +786,9 @@
       "requires_architect_decision": false,
       "report_section": "\u00a78.3",
       "task_file": "TASKS/audit-remediation/13-mechanical-cleanup/01-confirmed-dead-code-removal.md",
-      "disposition": "remediate",
-      "task_status": "not-started"
+      "disposition": "defer",
+      "task_status": "not-started",
+      "revalidation_note": "Confirmed WithAgentCycleKindForAPI's context value still has 2 real writers (internal/api) and zero readers, self-documented as intentional forward-looking scaffolding. Finding's own recommendation: leave as documented scaffolding or note it explicitly -- no immediate action required."
     },
     {
       "id": "GO-SVCCORE-008",
@@ -784,7 +812,8 @@
       "report_section": "\u00a78.3",
       "task_file": "TASKS/audit-remediation/13-mechanical-cleanup/03-naming-and-formatting-fixes.md",
       "disposition": "remediate",
-      "task_status": "not-started"
+      "task_status": "not-started",
+      "revalidation_note": "Confirmed still open, exact line match: adapters.go:159's `any := false` still shadows the builtin. Trivial rename, no architect input needed."
     },
     {
       "id": "GO-SVCCORE-009",
@@ -807,8 +836,9 @@
       "requires_architect_decision": false,
       "report_section": "\u00a78.3",
       "task_file": "TASKS/audit-remediation/13-mechanical-cleanup/02-stale-comments-and-docs-cleanup.md",
-      "disposition": "remediate",
-      "task_status": "not-started"
+      "disposition": "defer",
+      "task_status": "not-started",
+      "revalidation_note": "Confirmed the 4 cited files (ingest.go, known_tools_backfill.go, cli_structured_input_fallback.go, agent_deps.go) still carry long task-ID/PR-review-history comments. Finding's own recommendation: \"no immediate action; candidate for a future documentation-consolidation pass.\""
     },
     {
       "id": "GO-SVCEXEC-001",
@@ -839,7 +869,8 @@
       },
       "task_file": "TASKS/audit-remediation/10-architectural-concentration/01-chatserviceimpl-generateresponse-decomposition.md",
       "disposition": "remediate",
-      "task_status": "not-started"
+      "task_status": "not-started",
+      "revalidation_note": "Confirmed unchanged: internal/service/chat_generate.go has zero commits since 8feeee5c (byte-identical). generateResponse still spans chat_generate.go:122-2028 (~1906 lines), one unbroken function, exactly matching task file 10/01's own citation. 00/02's refreshed tool baseline (docs/audits/2026-08-21-go-quality/raw-1d3bfd96/DELTA.md) shows gocognit/cyclop/maintidx totals all moved worse repo-wide since the audit (gocognit 227->243, cyclop 250->275, maintidx 25->30), consistent with this finding not having improved."
     },
     {
       "id": "GO-SVCEXEC-002",
@@ -868,7 +899,8 @@
       },
       "task_file": "TASKS/audit-remediation/10-architectural-concentration/01-chatserviceimpl-generateresponse-decomposition.md",
       "disposition": "remediate",
-      "task_status": "not-started"
+      "task_status": "not-started",
+      "revalidation_note": "Confirmed unchanged: internal/service/chat.go has zero commits since 8feeee5c (byte-identical). chatServiceImpl struct still spans chat.go:214-392, matching task file 10/01's citation exactly; the 52-field/84-method counts are unaffected since the file is byte-identical to the audited commit."
     },
     {
       "id": "GO-SVCEXEC-003",
@@ -895,8 +927,9 @@
       "requires_architect_decision": true,
       "report_section": "\u00a78.4",
       "task_file": "TASKS/audit-remediation/09-production-islands/03-team-semantic-routing.md",
-      "disposition": "remediate",
-      "task_status": "not-started"
+      "disposition": "needs-architect-decision",
+      "task_status": "not-started",
+      "revalidation_note": "Confirmed still unwired: `InstallTeamRunRouting(` is referenced only inside its own defining file (team_routing.go); handleLaunchTeam calls only LaunchTeamRun. Wire/defer/retire is AD-08's explicit call."
     },
     {
       "id": "GO-SVCEXEC-004",
@@ -920,8 +953,9 @@
       "requires_architect_decision": true,
       "report_section": "\u00a78.4",
       "task_file": "TASKS/audit-remediation/11-semantic-duplication-migration-drift/01-subagent-completion-vs-message-wake-policy.md",
-      "disposition": "remediate",
-      "task_status": "not-started"
+      "disposition": "needs-architect-decision",
+      "task_status": "not-started",
+      "revalidation_note": "Confirmed still open: messaging_reactor.go's resolveMessageWakePolicy still calls override.Resolve (line 145); subagent_reactor.go's resolveSubagentCompletionPolicy (line 77) still hand-rolls the identical session-override -> agent-constraint -> global-default walk without it. Task file 11/01 is gated on AD-19 (share-implementation vs. parity-test), which is the genuine open question here, not the specific migration mechanics."
     },
     {
       "id": "GO-SVCEXEC-005",
@@ -948,7 +982,8 @@
       "report_section": "\u00a78.4",
       "task_file": "TASKS/audit-remediation/04-container-reaper-lifecycle/05-close-untested-service-config-functions.md",
       "disposition": "remediate",
-      "task_status": "not-started"
+      "task_status": "not-started",
+      "revalidation_note": "Confirmed: buildRepairConfig (tool_cache_wiring.go:113) and discoverManagedDurableAgentConfigs (managed_durable_configs.go:311) both still exist; grep across all internal/service *_test.go files finds zero references to either name."
     },
     {
       "id": "GO-SVCEXEC-006",
@@ -971,7 +1006,8 @@
       "report_section": "\u00a78.4",
       "task_file": "TASKS/audit-remediation/13-mechanical-cleanup/04-low-risk-error-handling-batch.md",
       "disposition": "remediate",
-      "task_status": "not-started"
+      "task_status": "not-started",
+      "revalidation_note": "Confirmed still open: durable_wake.go's best-effort UpdateAgentScheduleStatus(...Expired) call is still wrapped in `_ = s.store...` with no logging on failure. Add-a-log-line fix, no architect input needed."
     },
     {
       "id": "GO-SVCEXEC-007",
@@ -992,8 +1028,9 @@
       "requires_architect_decision": false,
       "report_section": "\u00a78.4",
       "task_file": "TASKS/audit-remediation/13-mechanical-cleanup/02-stale-comments-and-docs-cleanup.md",
-      "disposition": "remediate",
-      "task_status": "not-started"
+      "disposition": "defer",
+      "task_status": "not-started",
+      "revalidation_note": "Confirmed the long package-header/justification comments still exist at roughly the described scale (chat_reflex_dispatch.go 467 lines, team_routing.go 771 lines, both unchanged since the audit). The finding's own recommendation is \"no specific edit proposed... worth an architect pass\" -- no immediate action, deferred pending any future house-style decision from 12/02's engineering-standards work."
     },
     {
       "id": "GO-API-001",
@@ -1017,8 +1054,9 @@
       "report_section": "\u00a78.5",
       "false_positive_considerations": "In a single-operator local deployment, 'authenticated caller' and 'the person who set repo_path' are the same person.",
       "task_file": "TASKS/audit-remediation/08-remaining-security-hardening/09-autocomplete-and-artifact-path-hardening.md",
-      "disposition": "remediate",
-      "task_status": "not-started"
+      "disposition": "needs-architect-decision",
+      "task_status": "not-started",
+      "revalidation_note": "Confirmed still open: resolveRoot (autocomplete.go:135-164, exact match) has no validation on project.RepoPath before the directory walk. The finding's own false_positive_considerations (\"in a single-operator local deployment, authenticated caller and the person who set repo_path are the same person\") squarely questions whether this is worth constraining at all -- a genuine disposition-level question, not just an implementation detail."
     },
     {
       "id": "GO-API-002",
@@ -1044,7 +1082,8 @@
       "report_section": "\u00a78.5",
       "task_file": "TASKS/audit-remediation/08-remaining-security-hardening/09-autocomplete-and-artifact-path-hardening.md",
       "disposition": "remediate",
-      "task_status": "not-started"
+      "task_status": "not-started",
+      "revalidation_note": "Confirmed still open: handlePlaceArtifact accepts an unvalidated StoragePath at write time, unlike sibling handleUploadArtifact's pathsafe.ResolveUnder-based confinement. Concrete, low-risk, no-architect-needed fix (apply the same existing pattern)."
     },
     {
       "id": "GO-API-003",
@@ -1067,8 +1106,9 @@
       "report_section": "\u00a78.5",
       "false_positive_considerations": "Adding a catalog source is itself an explicit, privileged, operator-initiated action.",
       "task_file": "TASKS/audit-remediation/08-remaining-security-hardening/09-autocomplete-and-artifact-path-hardening.md",
-      "disposition": "remediate",
-      "task_status": "not-started"
+      "disposition": "needs-architect-decision",
+      "task_status": "not-started",
+      "revalidation_note": "Confirmed still open: handleCatalogInstall's archive download still uses http.DefaultClient with no explicit timeout or host/scheme allowlist beyond http/https. The finding's own false_positive_considerations (\"adding a catalog source is itself an explicit, privileged, operator-initiated action\") leaves genuinely open whether a host allowlist is warranted at all versus just adding a timeout -- the timeout half is uncontroversial but the disposition as a whole (accept current trust model vs. add restriction) needs architect judgment, consistent with AD-04's confinement-mechanism scope for this same file."
     },
     {
       "id": "GO-API-004",
@@ -1093,7 +1133,8 @@
       "report_section": "\u00a78.5",
       "task_file": "TASKS/audit-remediation/08-remaining-security-hardening/10-api-validation-duplication-and-pagination-bug.md",
       "disposition": "remediate",
-      "task_status": "not-started"
+      "task_status": "not-started",
+      "revalidation_note": "Confirmed schedules.go:117-137's self-documenting comment (naming schedules/settings validation duplication across 3 producers) is unchanged. Wave-0 finding: the comment's own precondition (\"07/08 both in flight, neither has landed\") is now factually resolved -- all 3 producers (HTTP handler, internal/agent/reflexes/executor.go's ReflexActionAddSchedule case, internal/selftools/self_tools_schedule_create.go's callScheduleCreate) now exist in current source, confirmed by grep. Corrected task file 08/10's Context with this affirmative resolution -- the task is now shovel-ready, not blocked."
     },
     {
       "id": "GO-API-005",
@@ -1118,7 +1159,8 @@
       "report_section": "\u00a78.5",
       "task_file": "TASKS/audit-remediation/08-remaining-security-hardening/10-api-validation-duplication-and-pagination-bug.md",
       "disposition": "remediate",
-      "task_status": "not-started"
+      "task_status": "not-started",
+      "revalidation_note": "Confirmed still open, exact citation match: memories.go still sets `opts.Limit = limit + offset` (line 96) before applying status/q filters (:116-137), then reports `\"total\": len(out)` (line 151) -- the post-filter count, not a real match count."
     },
     {
       "id": "GO-API-006",
@@ -1143,7 +1185,8 @@
       "report_section": "\u00a78.5",
       "task_file": "TASKS/audit-remediation/11-semantic-duplication-migration-drift/15-api-response-boilerplate-duplication.md",
       "disposition": "remediate",
-      "task_status": "not-started"
+      "task_status": "not-started",
+      "revalidation_note": "Confirmed a.decode (api.go:607) still exists as the shared helper 3 API-receiver call sites bypass. api.go changed since the audit but only via purely additive Loop-launcher wiring (SetLoopLauncher etc.), unrelated to this finding's decode-boilerplate claim."
     },
     {
       "id": "GO-API-007",
@@ -1168,8 +1211,9 @@
       "report_section": "\u00a78.5",
       "false_positive_considerations": "Possibly deliberate protocol-stability choice insulating an external control-plane contract from internal refactors -- no comment states this rationale though.",
       "task_file": "TASKS/audit-remediation/11-semantic-duplication-migration-drift/02-harness-v1-vs-native-durable-agent-handlers.md",
-      "disposition": "remediate",
-      "task_status": "not-started"
+      "disposition": "needs-architect-decision",
+      "task_status": "not-started",
+      "revalidation_note": "Confirmed both handler families still exist with real independent bodies (harness_v1.go's handleHarnessV1* functions, durable_agents.go's native handlers) -- no commits touched either file since the audit. Task file 11/02 is gated on AD-19 (collapse vs. parity test); its own false_positive_considerations flags a plausible deliberate protocol-stability rationale, reinforcing that the disposition itself is undecided."
     },
     {
       "id": "GO-API-008",
@@ -1194,7 +1238,8 @@
       "false_positive_considerations": "Requires an already-installed plugin (privileged action, subject to signature verification elsewhere).",
       "task_file": "TASKS/audit-remediation/08-remaining-security-hardening/09-autocomplete-and-artifact-path-hardening.md",
       "disposition": "remediate",
-      "task_status": "not-started"
+      "task_status": "not-started",
+      "revalidation_note": "Confirmed still open, exact citation match: the plugin-UI static route (plugins.go:107-120) still hand-rolls filepath.Clean+strings.HasPrefix confinement instead of pathsafe.ResolveUnder, with no EvalSymlinks call. Concrete, low-risk fix, consistency-only change."
     },
     {
       "id": "GO-API-009",
@@ -1214,8 +1259,9 @@
       "requires_architect_decision": false,
       "report_section": "\u00a78.5",
       "task_file": "TASKS/audit-remediation/11-semantic-duplication-migration-drift/15-api-response-boilerplate-duplication.md",
-      "disposition": "remediate",
-      "task_status": "not-started"
+      "disposition": "defer",
+      "task_status": "not-started",
+      "revalidation_note": "Confirmed agent_capabilities.go still has the described 4 parallel CRUD families with dupl-flagged pairs. Finding's own recommendation: \"judgment call... not required.\" No immediate action."
     },
     {
       "id": "GO-API-010",
@@ -1236,7 +1282,8 @@
       "report_section": "\u00a78.5",
       "task_file": "TASKS/audit-remediation/13-mechanical-cleanup/04-low-risk-error-handling-batch.md",
       "disposition": "remediate",
-      "task_status": "not-started"
+      "task_status": "not-started",
+      "revalidation_note": "Confirmed still open: bookmarks.go:90 still compares `err != sql.ErrNoRows` directly instead of errors.Is. One-line fix, no architect input needed."
     },
     {
       "id": "GO-PLUGIN-001",
@@ -1269,7 +1316,8 @@
       "report_section": "\u00a78.6",
       "task_file": "TASKS/audit-remediation/01-plugin-install-convergence/01-unify-plugin-catalog-install-pipeline.md",
       "disposition": "remediate",
-      "task_status": "not-started"
+      "task_status": "not-started",
+      "revalidation_note": "Confirmed still open at HEAD 531dcfcc -- internal/api/catalog.go, internal/plugin/catalog.go, and internal/plugin/signature.go are byte-identical to the audited commit 8feeee5c (zero commits touched them in between). handleCatalogInstall (catalog.go:248-452) only calls VerifySignature when sourcePublicKey != \"\" and entry.Signature != \"\" (catalog.go:365-371); the seeded 'official' catalog source's INSERT (internal/store/seed.go:176-183) never sets public_key, so sourcePublicKey==\"\" out of the box and verification silently skips (no log line on that branch). Disposition is remediate because the bug itself is unambiguous (AD-04's own framing: 'the direction is not in doubt'); AD-04 decides only the convergence shape, not whether to fix."
     },
     {
       "id": "GO-PLUGIN-002",
@@ -1296,7 +1344,8 @@
       "false_positive_considerations": "The archive-extraction step itself IS soundly defended -- the vulnerable point is specifically the final copyDir from the safely-extracted temp dir to the unguarded final target.",
       "task_file": "TASKS/audit-remediation/01-plugin-install-convergence/01-unify-plugin-catalog-install-pipeline.md",
       "disposition": "remediate",
-      "task_status": "not-started"
+      "task_status": "not-started",
+      "revalidation_note": "Confirmed still open, exact line match: internal/api/catalog.go:301 is still a bare target := filepath.Join(cs.pluginsDir, entry.Name) (entry.Name from untrusted catalog.yaml), then copyDir(pluginRoot, target) at :427 with no confinement check in between. Sibling handlers in internal/api/plugins.go use pathsafe.ResolveUnder at 4 call sites (327/416/537/711, confirmed by grep). .golangci.yml:184's forbidigo path-except for the ResolveUnder rule still reads (internal/sandbox/|internal/mcp/|internal/service/install/) at HEAD -- internal/api/ is still not in it, so PREVENTION.md's headline finding is unchanged. Zero commits touched catalog.go since 8feeee5c. Remediate (not needs-architect-decision): the bug is unambiguous; AD-04 picks which confinement mechanism becomes canonical, not whether to fix it."
     },
     {
       "id": "GO-PLUGIN-003",
@@ -1321,7 +1370,8 @@
       "report_section": "\u00a78.6",
       "task_file": "TASKS/audit-remediation/01-plugin-install-convergence/01-unify-plugin-catalog-install-pipeline.md",
       "disposition": "remediate",
-      "task_status": "not-started"
+      "task_status": "not-started",
+      "revalidation_note": "Confirmed both pipelines still coexist unchanged: the weaker CatalogFetcher/VerifyChecksum/VerifySignature path (internal/plugin/catalog.go:246, internal/plugin/signature.go) still feeds handleCatalogInstall exclusively, and the stronger devmode-gated internal/plugin/install.Installer state machine (install.go:116 struct, :153 Install method) still only serves the CLI path -- zero commits touched internal/plugin/ (catalog/signature) or internal/plugin/install/ since 8feeee5c (the one commit touching internal/plugin/, e1ba2ac6, only edited agent_profiles.go doc comments, unrelated). requires_architect_decision:true (already set) is correct and consistent: ARCHITECT-DECISIONS.md's own AD-04 framing says 'the direction is not in doubt -- converge,' so remediate is the disposition; AD-04 decides the concrete integration shape (constructor, Loader, confinement mechanism, how much of CatalogFetcher survives)."
     },
     {
       "id": "GO-PLUGIN-004",
@@ -1351,7 +1401,8 @@
       },
       "task_file": "TASKS/audit-remediation/13-mechanical-cleanup/05-low-risk-hygiene-and-lock-scope-batch.md",
       "disposition": "remediate",
-      "task_status": "not-started"
+      "task_status": "not-started",
+      "revalidation_note": "Confirmed UnloadPlugin (host.go:1240, exact match to audit's function-start citation) is unchanged. Complexity classification (essential vs. accidental extraction candidates) and the narrow TOCTOU gap both still apply as described; task file 13/05's Gated-on is none."
     },
     {
       "id": "GO-PLUGIN-005",
@@ -1376,7 +1427,8 @@
       },
       "task_file": "TASKS/audit-remediation/13-mechanical-cleanup/05-low-risk-hygiene-and-lock-scope-batch.md",
       "disposition": "remediate",
-      "task_status": "not-started"
+      "task_status": "not-started",
+      "revalidation_note": "Confirmed validateCrossRefs (validate.go:255) still exists with the described mechanically-repetitive shape. Optional generic-helper extraction; not urgent, no architect input needed for the finding itself."
     },
     {
       "id": "GO-PLUGIN-006",
@@ -1403,8 +1455,9 @@
         "method_count": 123
       },
       "task_file": "TASKS/audit-remediation/10-architectural-concentration/03-container-and-store-review-note.md",
-      "disposition": "remediate",
-      "task_status": "not-started"
+      "disposition": "defer",
+      "task_status": "not-started",
+      "revalidation_note": "Confirmed Host (plugin/host.go) still spans the described 38-field/123-method footprint with the established sub-registry extraction pattern (cardRulesRegistry, panelRegistry, FilterRegistry, MutablePluginMux) still partially applied. Recommendation leaves the extension optional (\"if the architect wants to reduce Host's footprint\") -- deferred, no immediate action, revisit if Host's growth becomes a live pain point."
     },
     {
       "id": "GO-PLUGIN-007",
@@ -1428,7 +1481,8 @@
       "report_section": "\u00a78.6",
       "task_file": "TASKS/audit-remediation/11-semantic-duplication-migration-drift/14-adapter-plugin-boilerplate-duplication.md",
       "disposition": "remediate",
-      "task_status": "not-started"
+      "task_status": "not-started",
+      "revalidation_note": "Confirmed all 4 adapter directories still exist (adapter-claude, adapter-codex, adapter-gemini, adapter-opencode) alongside the newer adapter-nanite-native. No commits touched these since the audit. Optional shared-helper extraction, no architect input needed."
     },
     {
       "id": "GO-PLUGIN-008",
@@ -1455,7 +1509,8 @@
       "false_positive_considerations": "Opposite-direction of a security risk (stricter than documented, not weaker).",
       "task_file": "TASKS/audit-remediation/01-plugin-install-convergence/02-wire-allow-unsigned-plugins-setting.md",
       "disposition": "remediate",
-      "task_status": "not-started"
+      "task_status": "not-started",
+      "revalidation_note": "Confirmed still unwired: grep for `AllowUnsigned: true` across the tree returns zero production assignments; user_settings.allow_unsigned_plugins is stored/API-exposed but never read into SignatureVerifier construction. Opposite-direction risk (stricter than documented), simple wiring fix, no architect input needed."
     },
     {
       "id": "GO-MCPTOOL-001",
@@ -1483,8 +1538,9 @@
       "requires_architect_decision": true,
       "report_section": "\u00a78.7",
       "task_file": "TASKS/audit-remediation/09-production-islands/04-tool-builder-yaml-architecture.md",
-      "disposition": "remediate",
-      "task_status": "not-started"
+      "disposition": "needs-architect-decision",
+      "task_status": "not-started",
+      "revalidation_note": "Confirmed still dead: zero production callers of tool.NewBuilder/tool.Register/adapt.Convert-style symbols outside internal/tool/ itself and its own tests. Wire/defer/retire is AD-09's explicit call; AD-09's outcome also changes 13/01's scope per the batch README."
     },
     {
       "id": "GO-MCPTOOL-002",
@@ -1513,8 +1569,9 @@
       "requires_architect_decision": true,
       "report_section": "\u00a78.7",
       "task_file": "TASKS/audit-remediation/09-production-islands/05-reasoning-augmented-tool-selection.md",
-      "disposition": "remediate",
-      "task_status": "not-started"
+      "disposition": "needs-architect-decision",
+      "task_status": "not-started",
+      "revalidation_note": "Confirmed still dead: zero production callers of SelectToolsAugmented/RankTools/SelectWithSignals outside internal/toolclient/ and its own tests. Wire/defer/retire is AD-10's explicit call."
     },
     {
       "id": "GO-MCPTOOL-003",
@@ -1535,8 +1592,9 @@
       "requires_architect_decision": false,
       "report_section": "\u00a78.7",
       "task_file": "TASKS/audit-remediation/09-production-islands/06-curated-tool-knowledge-matcher.md",
-      "disposition": "remediate",
-      "task_status": "not-started"
+      "disposition": "needs-architect-decision",
+      "task_status": "not-started",
+      "revalidation_note": "Confirmed still dead: zero production callers of tool_knowledge.go's curated-catalog matcher anywhere outside its own file and tests. Same catalog-gap correction as GO-MEM-002 above (per this task's dispatch instructions and ARCHITECT-DECISIONS.md's \"gap worth naming\"): not flagged `requires_architect_decision: true` in findings.json despite being one of the six AD-06..AD-11 wire/defer/retire islands (AD-11 here). Setting disposition to needs-architect-decision to bring the catalog into line."
     },
     {
       "id": "GO-MCPTOOL-004",
@@ -1557,8 +1615,9 @@
       "requires_architect_decision": true,
       "report_section": "\u00a78.7",
       "task_file": "TASKS/audit-remediation/11-semantic-duplication-migration-drift/09-elicitation-client-side-duplication-and-dead-doc.md",
-      "disposition": "remediate",
-      "task_status": "not-started"
+      "disposition": "needs-architect-decision",
+      "task_status": "not-started",
+      "revalidation_note": "Confirmed: `ClientElicitMiddleware` appears exactly once in the tree, in elicitation.go's own package-doc comment (line 13) -- no type/function definition anywhere. Task file 11/09 is gated on AD-19 (build the missing middleware vs. delete the dead client-side functions and correct the doc) -- genuinely a wire-vs-retire-shaped disposition question, not an implementation detail."
     },
     {
       "id": "GO-MCPTOOL-005",
@@ -1579,8 +1638,9 @@
       "requires_architect_decision": false,
       "report_section": "\u00a78.7",
       "task_file": "TASKS/audit-remediation/13-mechanical-cleanup/01-confirmed-dead-code-removal.md",
-      "disposition": "remediate",
-      "task_status": "not-started"
+      "disposition": "defer",
+      "task_status": "not-started",
+      "revalidation_note": "Confirmed the per-turn tool-name context write (internal/mcp/tool_ctx.go) still has a real production writer and no reader, with the write side's own comment framing this as deliberate scaffolding. No immediate action; optional removal or doc-tracking per the finding's own recommendation."
     },
     {
       "id": "GO-MCPTOOL-006",
@@ -1607,7 +1667,8 @@
       },
       "task_file": "TASKS/audit-remediation/10-architectural-concentration/02-selftoolstransport-decomposition.md",
       "disposition": "remediate",
-      "task_status": "not-started"
+      "task_status": "not-started",
+      "revalidation_note": "Confirmed still a god-object, slightly worse: self_tools_transport.go grew from 2,431 to 2,493 lines since the audit (unrelated additive changes), and method count grew from 81 to 82 (`grep -c '^func (.*\\*SelfToolsTransport)'` across the package). The god-object finding itself is unambiguous (parallel to GO-SVCEXEC-001/002's treatment) -- AD-13 decides only the decomposition boundaries, per the guide's explicit framing (\"do not split solely to reduce field/method counts\") which presupposes a split is warranted, not whether one is."
     },
     {
       "id": "GO-MCPTOOL-007",
@@ -1635,8 +1696,9 @@
         "method_count": 26
       },
       "task_file": "TASKS/audit-remediation/10-architectural-concentration/02-selftoolstransport-decomposition.md",
-      "disposition": "remediate",
-      "task_status": "not-started"
+      "disposition": "defer",
+      "task_status": "not-started",
+      "revalidation_note": "Confirmed ToolClient (broker.go/intent.go/ranking.go/meta_tools.go) still spans the described method/file footprint. The finding's own recommendation is \"no action implied; record for the architect's holistic pass\" -- folded into AD-13's SelfToolsTransport-cluster review rather than a standalone fix."
     },
     {
       "id": "GO-MCPTOOL-008",
@@ -1662,7 +1724,8 @@
       "false_positive_considerations": "Requires either write access to the granted directory or a pre-existing malicious symlink -- a local-filesystem TOCTOU class, not remotely triggerable via MCP input.",
       "task_file": "TASKS/audit-remediation/08-remaining-security-hardening/02-mcp-dev-grep-symlink-toctou.md",
       "disposition": "remediate",
-      "task_status": "not-started"
+      "task_status": "not-started",
+      "revalidation_note": "Confirmed still open: callGrep (dev_tools.go:690, exact match to audit's function-start citation) calls resolveAllowed once before filepath.Walk (:740) but the walk callback's os.Open (:779, exact match) has no per-entry symlink re-validation."
     },
     {
       "id": "GO-MCPTOOL-009",
@@ -1686,7 +1749,8 @@
       "report_section": "\u00a78.7",
       "task_file": "TASKS/audit-remediation/13-mechanical-cleanup/05-low-risk-hygiene-and-lock-scope-batch.md",
       "disposition": "remediate",
-      "task_status": "not-started"
+      "task_status": "not-started",
+      "revalidation_note": "Confirmed still open: Manager.RemoveServer (manager.go:166-168) still holds `defer m.mu.Unlock()` for the whole function, including the transport `Close()` call at line 177 that can block on subprocess kill+reap."
     },
     {
       "id": "GO-MCPTOOL-010",
@@ -1707,8 +1771,9 @@
       "requires_architect_decision": false,
       "report_section": "\u00a78.7",
       "task_file": "TASKS/audit-remediation/11-semantic-duplication-migration-drift/11-dispatch-reflex-double-evaluation.md",
-      "disposition": "remediate",
-      "task_status": "not-started"
+      "disposition": "defer",
+      "task_status": "not-started",
+      "revalidation_note": "Confirmed both evaluators (self_tools_dispatch.go, chat_reflex_dispatch.go) still independently evaluate dispatch_to_agent reflex rows, with the code's own comment still arguing this is intentional. No confirmed defect; deferred pending an optional parity test, per the finding's own \"record for architect awareness\" recommendation."
     },
     {
       "id": "GO-MCPTOOL-011",
@@ -1731,7 +1796,8 @@
       "report_section": "\u00a78.7",
       "task_file": "TASKS/audit-remediation/11-semantic-duplication-migration-drift/12-devservername-constant-duplication.md",
       "disposition": "remediate",
-      "task_status": "not-started"
+      "task_status": "not-started",
+      "revalidation_note": "Confirmed both independent declarations still exist: internal/mcp/naming.go's DevServerName = \"dev\" (line 36) and internal/toolclient/broker.go's separate const DevServerName = \"dev\" (line 359), despite the latter already importing the former's package. Two-line fix, no architect input needed."
     },
     {
       "id": "GO-MCPTOOL-012",
@@ -1751,8 +1817,9 @@
       "requires_architect_decision": false,
       "report_section": "\u00a78.7",
       "task_file": "TASKS/audit-remediation/11-semantic-duplication-migration-drift/05-mcp-result-processing-tail-duplication.md",
-      "disposition": "remediate",
-      "task_status": "not-started"
+      "disposition": "needs-architect-decision",
+      "task_status": "not-started",
+      "revalidation_note": "Confirmed both Manager.ExecuteTool (manager.go:697) and ExecuteToolOnServer (manager.go:781) still exist with the described duplicated result-processing tail. Task file 11/05 is gated on AD-19 (share vs. parity test)."
     },
     {
       "id": "GO-MCPTOOL-013",
@@ -1775,7 +1842,8 @@
       "report_section": "\u00a78.7",
       "task_file": "TASKS/audit-remediation/13-mechanical-cleanup/04-low-risk-error-handling-batch.md",
       "disposition": "remediate",
-      "task_status": "not-started"
+      "task_status": "not-started",
+      "revalidation_note": "Confirmed still open: mcpconfig.Export still has two unchecked json.Unmarshal calls on Args/Env (lines ~145/150). Same class as the already-tracked errcheck cluster; add-warn-log fix, no architect input needed."
     },
     {
       "id": "GO-AGENT-001",
@@ -1810,7 +1878,8 @@
       "false_positive_considerations": "The final path component is always .md-suffixed, constraining (not eliminating) real-world impact. HTTP-layer auth boundary on POST/PUT /api/agents was not independently verified.",
       "task_file": "TASKS/audit-remediation/03-agent-slug-traversal/01-canonical-slug-path-validation.md",
       "disposition": "remediate",
-      "task_status": "not-started"
+      "task_status": "not-started",
+      "revalidation_note": "Confirmed still open, zero drift -- no commits touched managed_files.go, validation.go, agent_config.go, or api/agents.go since 8feeee5c. ManagedAgentPath (managed_files.go:87-95) is still a plain filepath.Join(configRoot, \"agents\", slug+\".md\") with no allow-list; grep confirms 'Slug' is never referenced anywhere in internal/agentvalidation/validation.go. AgentConfigService.Create (agent_config.go:145) has an os.Stat exists-guard, but Update's rename path (agent_config.go:176-197, both the DB-only-materialize branch at :176 and the file-rename branch at :193) computes dest and calls writeManaged with no exists-check at all -- confirmed by direct read, matching the finding's overwrite claim exactly. slugRegexp still exists only in internal/builders/agent_builder.go:12, gating the wizard, not the CRUD endpoints."
     },
     {
       "id": "GO-AGENT-002",
@@ -1834,7 +1903,8 @@
       "report_section": "\u00a78.8",
       "task_file": "TASKS/audit-remediation/03-agent-slug-traversal/01-canonical-slug-path-validation.md",
       "disposition": "remediate",
-      "task_status": "not-started"
+      "task_status": "not-started",
+      "revalidation_note": "Confirmed 0% coverage still holds: no managed_files_test.go or source_class_test.go exists in internal/agent/, and a grep for ManagedAgentPath/IsWritablePath/WriteManagedAgentProfile across every *_test.go in internal/agent, internal/service, internal/api returns zero hits. Directly tied to GO-AGENT-001, confirmed still open above."
     },
     {
       "id": "GO-AGENT-003",
@@ -1856,7 +1926,8 @@
       "report_section": "\u00a78.8",
       "task_file": "TASKS/audit-remediation/13-mechanical-cleanup/01-confirmed-dead-code-removal.md",
       "disposition": "remediate",
-      "task_status": "not-started"
+      "task_status": "not-started",
+      "revalidation_note": "Confirmed still dead: zero external callers of EnsureManagedDirs/UserManagedAgentPath anywhere in the tree outside managed_files.go itself. Mechanical, no architect input needed per the finding's own requires_architect_decision:false."
     },
     {
       "id": "GO-AGENT-004",
@@ -1877,7 +1948,8 @@
       "report_section": "\u00a78.8",
       "task_file": "TASKS/audit-remediation/13-mechanical-cleanup/03-naming-and-formatting-fixes.md",
       "disposition": "remediate",
-      "task_status": "not-started"
+      "task_status": "not-started",
+      "revalidation_note": "Confirmed still stale: permissions_test.go's only tests are TestParseMD_ParentDispatchAllowlist and two ParentDispatchAllowlist-marshaling tests -- nothing tests permissions. Trivial rename, no architect input needed."
     },
     {
       "id": "GO-AGENT-005",
@@ -1900,7 +1972,8 @@
       "report_section": "\u00a78.8",
       "task_file": "TASKS/audit-remediation/13-mechanical-cleanup/05-low-risk-hygiene-and-lock-scope-batch.md",
       "disposition": "remediate",
-      "task_status": "not-started"
+      "task_status": "not-started",
+      "revalidation_note": "Confirmed still open: embed_mux_devmode.go:21 still stamps `def.Source = \"builtin\"`, the legacy value the sibling package's own doc says is retired. One-line fix, no architect input needed."
     },
     {
       "id": "GO-CHAT-001",
@@ -1923,8 +1996,9 @@
       "requires_architect_decision": false,
       "report_section": "\u00a78.9",
       "task_file": "TASKS/audit-remediation/11-semantic-duplication-migration-drift/10-envelope-registry-triplication.md",
-      "disposition": "remediate",
-      "task_status": "not-started"
+      "disposition": "needs-architect-decision",
+      "task_status": "not-started",
+      "revalidation_note": "Confirmed at least 2 of the 3 independent Registry copies still exist (chat/envelope.go's SetEnvelopeRegistry/EnvelopeRegistry, envelope/validator.go's SetEnvelopeRegistry/getEnvelopeRegistry, both unchanged). Task file 11/10 is gated on AD-19 (collapse to one holder vs. keep three with enforced sync)."
     },
     {
       "id": "GO-CHAT-002",
@@ -1946,7 +2020,8 @@
       "report_section": "\u00a78.9",
       "task_file": "TASKS/audit-remediation/11-semantic-duplication-migration-drift/03-structuredmessage-unwrap-duplication.md",
       "disposition": "remediate",
-      "task_status": "not-started"
+      "task_status": "not-started",
+      "revalidation_note": "Confirmed both implementations still exist unchanged: chat.replayContent (structured.go:132) and recovery/pack.MessagePlainText (pack.go:44). Task file 11/03's own Gated-on field is explicitly \"none\" (unlike its AD-19-gated siblings in this folder) -- this is a self-contained mechanical fix, not an open share-vs-parity-test policy question."
     },
     {
       "id": "GO-CHAT-003",
@@ -1968,7 +2043,8 @@
       "report_section": "\u00a78.9",
       "task_file": "TASKS/audit-remediation/13-mechanical-cleanup/05-low-risk-hygiene-and-lock-scope-batch.md",
       "disposition": "remediate",
-      "task_status": "not-started"
+      "task_status": "not-started",
+      "revalidation_note": "Confirmed still open: internal/elicitation/service_test_helpers.go still lacks the `_test.go` suffix (so it compiles into the production binary) and still defines elicitWithDuration as a near-duplicate of Elicit's body. Rename fix, no architect input needed."
     },
     {
       "id": "GO-CHAT-004",
@@ -1989,8 +2065,9 @@
       "requires_architect_decision": true,
       "report_section": "\u00a78.9",
       "task_file": "TASKS/audit-remediation/11-semantic-duplication-migration-drift/09-elicitation-client-side-duplication-and-dead-doc.md",
-      "disposition": "remediate",
-      "task_status": "not-started"
+      "disposition": "needs-architect-decision",
+      "task_status": "not-started",
+      "revalidation_note": "Confirmed both ElicitUserInput (elicitation.go:82) and routeClientElicitation (elicitation.go:165) still exist with the described near-duplicate bodies and inconsistent context.Canceled handling. Same task file (11/09), same AD-19 gate as GO-MCPTOOL-004."
     },
     {
       "id": "GO-CHAT-005",
@@ -2011,7 +2088,8 @@
       "report_section": "\u00a78.9",
       "task_file": "TASKS/audit-remediation/13-mechanical-cleanup/01-confirmed-dead-code-removal.md",
       "disposition": "remediate",
-      "task_status": "not-started"
+      "task_status": "not-started",
+      "revalidation_note": "Confirmed still dead: zero references to PrefixLock/PrefixState/LockTTL anywhere outside coordination/keys.go itself."
     },
     {
       "id": "GO-CHAT-006",
@@ -2033,7 +2111,8 @@
       "report_section": "\u00a78.9",
       "task_file": "TASKS/audit-remediation/13-mechanical-cleanup/02-stale-comments-and-docs-cleanup.md",
       "disposition": "remediate",
-      "task_status": "not-started"
+      "task_status": "not-started",
+      "revalidation_note": "Confirmed still open: hint_catalog.go's package doc still claims the loader reads config/think-hints/hints.yaml, but the actual `//go:embed hints/*.yaml` directive (line 62) embeds a different path. Currently byte-identical files per the finding, but no build step keeps them in sync -- concrete comment-or-generate-step fix, no architect input needed."
     },
     {
       "id": "GO-CHAT-007",
@@ -2051,8 +2130,9 @@
       "requires_architect_decision": false,
       "report_section": "\u00a78.9",
       "task_file": "TASKS/audit-remediation/13-mechanical-cleanup/03-naming-and-formatting-fixes.md",
-      "disposition": "remediate",
-      "task_status": "not-started"
+      "disposition": "needs-architect-decision",
+      "task_status": "not-started",
+      "revalidation_note": "gofmt count is 00/02-refreshed: 130 files fail gofmt -l at frozen HEAD (was 122 at the audit, +8), per raw-1d3bfd96/DELTA.md and gofmt-l.txt -- did not hand-recompute. This finding's own task file (13/03) frames the 12-vs-130-file scope choice as recorded in the Work Log once decided, and the batch's AD-22 (repo-wide gofmt sweep: now/never/ratchet-only, sequencing hazard against every other open worktree) is the gate for that scope decision."
     },
     {
       "id": "GO-CHAT-008",
@@ -2073,8 +2153,9 @@
       "requires_architect_decision": true,
       "report_section": "\u00a78.9",
       "task_file": "TASKS/audit-remediation/13-mechanical-cleanup/05-low-risk-hygiene-and-lock-scope-batch.md",
-      "disposition": "remediate",
-      "task_status": "not-started"
+      "disposition": "needs-architect-decision",
+      "task_status": "not-started",
+      "revalidation_note": "Confirmed internal/chat's wide fan-out (11 internal-package imports) still mixes wire-vocabulary types with subsystem-specific response-handler wiring in one package. Finding's own requires_architect_decision:true and recommendation (\"consider whether subsystem-specific response handlers belong in their own subpackage\") is a genuine open architecture question, not a settled fix."
     },
     {
       "id": "GO-CHAT-009",
@@ -2094,8 +2175,9 @@
       "requires_architect_decision": false,
       "report_section": "\u00a78.9",
       "task_file": "TASKS/audit-remediation/13-mechanical-cleanup/05-low-risk-hygiene-and-lock-scope-batch.md",
-      "disposition": "remediate",
-      "task_status": "not-started"
+      "disposition": "defer",
+      "task_status": "not-started",
+      "revalidation_note": "Confirmed elicitation/service.go's Elicit still has the described three-way select shape. Finding's own recommendation: \"none recommended; recorded for completeness\" -- theoretical, negligible at production's 5-minute default timeout, no action needed."
     },
     {
       "id": "GO-EXEC-001",
@@ -2121,7 +2203,8 @@
       "report_section": "\u00a78.10",
       "task_file": "TASKS/audit-remediation/05-subagent-execution-ordering/01-fix-approve-concurrency-cap-and-queued-cancel.md",
       "disposition": "remediate",
-      "task_status": "not-started"
+      "task_status": "not-started",
+      "revalidation_note": "Confirmed still open: Approve (service.go:1087-1123) launches `safego.Go(...){ svc.execute(...) }` directly with no call to acquireSpawnSlot anywhere in the function, while Spawn's ungated paths (:891,:909) both call it first. Unambiguous bug; fix is a simple routing change."
     },
     {
       "id": "GO-EXEC-002",
@@ -2150,7 +2233,8 @@
       "false_positive_considerations": "Data integrity is not at risk -- finalizeRun's reconciliation correctly prevents a stale/wrong terminal status; only the run itself proceeds when it shouldn't.",
       "task_file": "TASKS/audit-remediation/05-subagent-execution-ordering/01-fix-approve-concurrency-cap-and-queued-cancel.md",
       "disposition": "remediate",
-      "task_status": "not-started"
+      "task_status": "not-started",
+      "revalidation_note": "Confirmed still open: in Spawn (service.go:868-919), `run.Status = StatusRunning` and `svc.emitStatus(run, \"\")` (the running broadcast) both happen at :871/:879, before `acquireSpawnSlot` at :891/:909, and `svc.cancelers[run.ID]` is only registered after the slot is acquired (:895-897, :913-915) -- a run canceled while queued has no registered canceler yet."
     },
     {
       "id": "GO-EXEC-003",
@@ -2168,8 +2252,9 @@
       "requires_architect_decision": false,
       "report_section": "\u00a78.10",
       "task_file": "TASKS/audit-remediation/11-semantic-duplication-migration-drift/16-workflow-naming-and-dispatch-naming-collisions.md",
-      "disposition": "remediate",
-      "task_status": "not-started"
+      "disposition": "defer",
+      "task_status": "not-started",
+      "revalidation_note": "Confirmed internal/dispatch, internal/dispatcher, and the workflow-branded packages still exist as three distinct, well-documented execution models (agentworkflow/doc.go still explains the deliberate non-nesting). Finding's own conclusion: \"no action required beyond continued awareness.\""
     },
     {
       "id": "GO-EXEC-004",
@@ -2187,8 +2272,9 @@
       "requires_architect_decision": false,
       "report_section": "\u00a78.10",
       "task_file": "TASKS/audit-remediation/11-semantic-duplication-migration-drift/16-workflow-naming-and-dispatch-naming-collisions.md",
-      "disposition": "remediate",
-      "task_status": "not-started"
+      "disposition": "defer",
+      "task_status": "not-started",
+      "revalidation_note": "Confirmed both internal/dispatch and internal/dispatcher packages still exist as distinct, real packages with their own files. The audit's own recommendation already concludes \"no rename recommended without architect review; flagged for awareness only\" -- there is no live defect to remediate, just a naming-similarity observation the audit itself judged non-actionable. Deferred with the trigger being any future package-rename effort that happens to touch either name."
     },
     {
       "id": "GO-MEM-001",
@@ -2212,8 +2298,9 @@
       "requires_architect_decision": true,
       "report_section": "\u00a78.11",
       "task_file": "TASKS/audit-remediation/09-production-islands/01-grounding-memory-recall.md",
-      "disposition": "remediate",
-      "task_status": "not-started"
+      "disposition": "needs-architect-decision",
+      "task_status": "not-started",
+      "revalidation_note": "Confirmed still unwired: zero hits for `GroundingRecaller =` / `GroundingLogger =` anywhere in the tree, and container.go (despite substantial unrelated additive changes since the audit) has zero references to Grounding at all. Wire/defer/retire is AD-06's explicit call."
     },
     {
       "id": "GO-MEM-002",
@@ -2239,8 +2326,9 @@
       "requires_architect_decision": false,
       "report_section": "\u00a78.11",
       "task_file": "TASKS/audit-remediation/09-production-islands/02-hadron-context-gate.md",
-      "disposition": "remediate",
-      "task_status": "not-started"
+      "disposition": "needs-architect-decision",
+      "task_status": "not-started",
+      "revalidation_note": "Confirmed still unwired: zero hits for HadronBlueprintGate construction/registration anywhere in the composition root. Per this task's dispatch instructions and the batch's own ARCHITECT-DECISIONS.md \"gap worth naming\" / ESCALATIONS.md correction: this finding is not flagged `requires_architect_decision: true` in findings.json even though it is squarely one of the six wire/defer/retire islands the remediation guide's \u00a74 Wave 4 requires a decision for (AD-07). Setting disposition to needs-architect-decision brings the catalog in line with that guide requirement and with task file 09/02's own explicit note about this exact gap."
     },
     {
       "id": "GO-MEM-003",
@@ -2263,7 +2351,8 @@
       "report_section": "\u00a78.11",
       "task_file": "TASKS/audit-remediation/13-mechanical-cleanup/01-confirmed-dead-code-removal.md",
       "disposition": "remediate",
-      "task_status": "not-started"
+      "task_status": "not-started",
+      "revalidation_note": "Confirmed still true: zero external callers of BudgetForIntent/IntentSourcePriority, and DefaultBudget's SourceWeights (contextbroker/broker.go) still carries the inert \"engine\": 0.15 entry with no backing ContextSource."
     },
     {
       "id": "GO-MEM-004",
@@ -2286,8 +2375,9 @@
       "requires_architect_decision": true,
       "report_section": "\u00a78.11",
       "task_file": "TASKS/audit-remediation/13-mechanical-cleanup/05-low-risk-hygiene-and-lock-scope-batch.md",
-      "disposition": "remediate",
-      "task_status": "not-started"
+      "disposition": "needs-architect-decision",
+      "task_status": "not-started",
+      "revalidation_note": "Confirmed the three contextbroker sources (source_pcc.go, source_memory.go, source_conduit.go) still compute Relevance independently with no shared normalization contract. Finding's own requires_architect_decision:true and recommendation (\"document/enforce a shared relevance-normalization contract\") is a genuine open design question."
     },
     {
       "id": "GO-MEM-005",
@@ -2308,8 +2398,9 @@
       "requires_architect_decision": true,
       "report_section": "\u00a78.11",
       "task_file": "TASKS/audit-remediation/13-mechanical-cleanup/05-low-risk-hygiene-and-lock-scope-batch.md",
-      "disposition": "remediate",
-      "task_status": "not-started"
+      "disposition": "needs-architect-decision",
+      "task_status": "not-started",
+      "revalidation_note": "Confirmed the two independent token-estimation formulas (internal/context/tokens.go, internal/contextbroker/broker.go) still exist with the described floor-vs-round-up divergence. Finding's own requires_architect_decision:true and recommendation (converging would need a new shared lower-level package, given contextbroker's deliberate one-way dependency away from internal/context) is a genuine open design question."
     },
     {
       "id": "GO-MEM-006",
@@ -2331,7 +2422,8 @@
       "report_section": "\u00a78.11",
       "task_file": "TASKS/audit-remediation/13-mechanical-cleanup/05-low-risk-hygiene-and-lock-scope-batch.md",
       "disposition": "remediate",
-      "task_status": "not-started"
+      "task_status": "not-started",
+      "revalidation_note": "Confirmed still open: zero production callers of Detector.Reset anywhere in loopdetect or its callers, so Detector.windows still has no production eviction path."
     },
     {
       "id": "GO-MEM-007",
@@ -2353,7 +2445,8 @@
       "report_section": "\u00a78.11",
       "task_file": "TASKS/audit-remediation/13-mechanical-cleanup/01-confirmed-dead-code-removal.md",
       "disposition": "remediate",
-      "task_status": "not-started"
+      "task_status": "not-started",
+      "revalidation_note": "Confirmed still dead in production: SweepOrphans (orphan_sweep.go:71) has zero callers outside its own definition; RuntimeReaper.SweepOnce calls the inner function directly, bypassing the wrapper, exactly as described."
     },
     {
       "id": "GO-MEM-008",
@@ -2373,8 +2466,9 @@
       "requires_architect_decision": false,
       "report_section": "\u00a78.11",
       "task_file": "TASKS/audit-remediation/13-mechanical-cleanup/01-confirmed-dead-code-removal.md",
-      "disposition": "remediate",
-      "task_status": "not-started"
+      "disposition": "false-positive",
+      "task_status": "not-started",
+      "revalidation_note": "Engages directly with the audit's own conclusion: recovery/broker's With* constructor options (confirmed still present, e.g. WithMaxRetries/WithRemediationTimeout/WithReplacementSessionHook) and the equivalent Set* post-construction setters (SetReplacementSessionHook, SetHTTPRetry) both still exist for the documented late-binding reason. The finding's own recommendation states this explicitly: \"no action needed; example of the guide's own 'reported dead != remove' guardrail working correctly.\""
     },
     {
       "id": "GO-MEM-009",
@@ -2396,7 +2490,8 @@
       "false_positive_considerations": "Low risk in practice -- local SQLite call, bounded.",
       "task_file": "TASKS/audit-remediation/13-mechanical-cleanup/05-low-risk-hygiene-and-lock-scope-batch.md",
       "disposition": "remediate",
-      "task_status": "not-started"
+      "task_status": "not-started",
+      "revalidation_note": "Confirmed still open: RuntimeReaper's SweepOrphans (orphan_sweep.go:81) still has `_ = ctx`, discarding the context parameter so an in-flight DB call cannot be canceled by shutdown."
     },
     {
       "id": "GO-SEC4-001",
@@ -2424,7 +2519,8 @@
       "false_positive_considerations": "None -- direct re-confirmation against current source.",
       "task_file": "TASKS/audit-remediation/02-linux-sandbox-fail-open/01-sandbox-fail-closed-without-bwrap.md",
       "disposition": "remediate",
-      "task_status": "not-started"
+      "task_status": "not-started",
+      "revalidation_note": "Confirmed unchanged and still open: internal/sandbox/ has zero commits since 8feeee5c. os_linux.go:64-71 is an exact match to the audit's citation -- exec.LookPath(\"bwrap\") failure logs a warn-once (line 67-69) and returns func(){}, nil (line 70), a success shape; AgentExec (exec.go:158-161) checks the returned err (always nil on this path) and proceeds unsandboxed with no observable signal. os_other.go (non-darwin/linux) has the identical shape at lines 18-24. Disposition is remediate, not needs-architect-decision: the task's own desired invariant is unconditional ('Nanite must not report sandboxed execution as successfully isolated when required OS isolation is absent') -- AD-01 picks fail-closed vs. visible-opt-in, both of which are fixes, not an accept-as-is option."
     },
     {
       "id": "GO-SEC4-002",
@@ -2447,8 +2543,9 @@
       "report_section": "\u00a78.12",
       "false_positive_considerations": "macOS is unaffected -- seatbelt's network-outbound deny is real and kernel-enforced.",
       "task_file": "TASKS/audit-remediation/02-linux-sandbox-fail-open/01-sandbox-fail-closed-without-bwrap.md",
-      "disposition": "remediate",
-      "task_status": "not-started"
+      "disposition": "needs-architect-decision",
+      "task_status": "not-started",
+      "revalidation_note": "Confirmed unchanged: os_linux.go:132-148 exact match to citation -- --unshare-net only applied 'if len(networkAllow) == 0' (line 146); when a network allowlist is configured the sandboxed process keeps the host netns and confinement is HTTP(S)_PROXY-convention-only, exactly as the finding states. Unlike GO-SEC4-001, the task file itself (02/01) frames this finding's outcome as genuinely open both ways: 'should each end up either genuinely fixed, or explicitly and visibly documented as an accepted reduced-guarantee mode' -- whether the disposition is remediate (namespace-level enforcement) or an accepted/disclosed tradeoff is exactly what AD-02 must decide, so needs-architect-decision is the correct value here (not remediate)."
     },
     {
       "id": "GO-SEC4-003",
@@ -2476,8 +2573,9 @@
       "report_section": "\u00a78.12",
       "false_positive_considerations": "PathGrants' own documented design philosophy ('explicit-mention auto-grant, no nag-again') may mean this is a stale-comment issue, not a live regression.",
       "task_file": "TASKS/audit-remediation/08-remaining-security-hardening/04-permission-default-mode-write-gap.md",
-      "disposition": "remediate",
-      "task_status": "not-started"
+      "disposition": "needs-architect-decision",
+      "task_status": "not-started",
+      "revalidation_note": "Confirmed still open: permission/engine.go's defaultDecision (ModeDefault branch, :171-179) falls through to Allow when a tool is neither IsReadOnly nor IsDestructive; internal/service/tool.go's GetToolMeta (:716-737) confirms dev_write/dev_edit match neither the read-only suffix set nor the destructive substring set, so both resolve {false,false} -> Allow. Genuinely open whether this is a bug or PathGrants-governs-writability-by-design (the finding's own false_positive_considerations and the task file's \"confirm intended architecture with the architect before changing\" both frame the disposition itself, not just the fix, as unresolved."
     },
     {
       "id": "GO-SEC4-004",
@@ -2501,7 +2599,8 @@
       "false_positive_considerations": "Highest-risk surface is AgentExec (agent/LLM-influenced code), not UserExec (user's own shell).",
       "task_file": "TASKS/audit-remediation/08-remaining-security-hardening/05-secret-key-heuristic-hardening.md",
       "disposition": "remediate",
-      "task_status": "not-started"
+      "task_status": "not-started",
+      "revalidation_note": "Confirmed unchanged: secretKeyPatterns (exec.go:37-44) is still exactly {KEY, SECRET, TOKEN, PASSWORD, CREDENTIAL, AUTH} -- DATABASE_URL, REDIS_URL, SLACK_WEBHOOK_URL, GH_PAT all still slip through isSecretKey's substring check."
     },
     {
       "id": "GO-SEC4-005",
@@ -2521,8 +2620,9 @@
       "requires_architect_decision": true,
       "report_section": "\u00a78.12",
       "task_file": "TASKS/audit-remediation/02-linux-sandbox-fail-open/02-macos-seatbelt-read-boundary-disclosure.md",
-      "disposition": "remediate",
-      "task_status": "not-started"
+      "disposition": "needs-architect-decision",
+      "task_status": "not-started",
+      "revalidation_note": "Confirmed unchanged: (allow default) at os_darwin.go:98 is byte-identical to the audited commit (internal/sandbox/ has zero commits since 8feeee5c) -- file reads, mach-IPC, and process-inspection remain unrestricted by design, exactly as the finding describes. Also confirmed the disclosure gap task file 02/02 identifies is still real and uncorrected: docs/hardening-phase-plan.md:136-142 still describes Tier 2 macOS as 'Read/write within sandbox CWD only' and 'No process inspection, no signal sending to non-child processes,' which the shipped code does not provide. Pulled forward out of severity order per the task's own instruction. needs-architect-decision because the disposition itself -- narrow the profile (remediate) vs. confirm-and-disclose the existing tradeoff (closer to accepted-risk) -- is exactly AD-03's question, not an implementation detail of an already-settled 'must fix' finding."
     },
     {
       "id": "GO-SEC4-006",
@@ -2545,7 +2645,8 @@
       "report_section": "\u00a78.12",
       "task_file": "TASKS/audit-remediation/02-linux-sandbox-fail-open/01-sandbox-fail-closed-without-bwrap.md",
       "disposition": "remediate",
-      "task_status": "not-started"
+      "task_status": "not-started",
+      "revalidation_note": "Confirmed unchanged (internal/sandbox/ has zero commits since the audit): CheckDenylist (denylist.go) is still a case-insensitive substring match, still trivially defeated by whitespace/reordering/interpreter-wrapping. The recommended fix (reframe as advisory in comments, or improve tokenization) needs no architect input distinct from AD-01/AD-02's own questions."
     },
     {
       "id": "GO-SEC4-007",
@@ -2567,8 +2668,9 @@
       "requires_architect_decision": false,
       "report_section": "\u00a78.12",
       "task_file": "TASKS/audit-remediation/11-semantic-duplication-migration-drift/07-ssrf-cidr-denylist-duplication.md",
-      "disposition": "remediate",
-      "task_status": "not-started"
+      "disposition": "needs-architect-decision",
+      "task_status": "not-started",
+      "revalidation_note": "Confirmed the CIDR denylist still exists independently in internal/sandbox/proxy.go and internal/mcp/general_tools.go with no shared source or parity test. Task file 11/07's own Gated-on field is AD-19 despite findings.json's requires_architect_decision:false -- following the task file (the authoritative per-task dispatch signal) rather than the finding-catalog flag, since AD-19's collapse-vs-parity-test question applies here as directly as to its siblings in this folder."
     },
     {
       "id": "GO-SEC4-008",
@@ -2589,7 +2691,8 @@
       "report_section": "\u00a78.12",
       "task_file": "TASKS/audit-remediation/08-remaining-security-hardening/06-sandbox-proxy-header-timeout.md",
       "disposition": "remediate",
-      "task_status": "not-started"
+      "task_status": "not-started",
+      "revalidation_note": "Confirmed still open: internal/sandbox/proxy.go's http.Server construction (line 156-158) sets only Handler, no ReadHeaderTimeout. One-line fix, no architect input needed."
     },
     {
       "id": "GO-SEC4-009",
@@ -2611,7 +2714,8 @@
       "report_section": "\u00a78.12",
       "task_file": "TASKS/audit-remediation/12-quality-ratchet-and-standards/03-goroutine-lint-coverage-gap.md",
       "disposition": "remediate",
-      "task_status": "not-started"
+      "task_status": "not-started",
+      "revalidation_note": "Confirmed still open: Makefile's lint-goroutines target (lines 74-81) still scans only {internal/plugin, internal/worker, internal/mcp, internal/service, internal/server, internal/api, internal/memory, internal/workflow} with the non-fatal `-` grep prefix; the trust-boundary cluster packages this finding names are still absent from that list. Concrete Makefile fix, no architect input needed."
     },
     {
       "id": "GO-SEC4-010",
@@ -2632,7 +2736,8 @@
       "report_section": "\u00a78.12",
       "task_file": "TASKS/audit-remediation/13-mechanical-cleanup/04-low-risk-error-handling-batch.md",
       "disposition": "remediate",
-      "task_status": "not-started"
+      "task_status": "not-started",
+      "revalidation_note": "Confirmed still open: secrets.Get (keyring.go:24) still collapses key-not-found and keychain-access-error into an identical silent empty-string return, unlike Delete's logged failure path. Add-a-log-line fix, no architect input needed."
     },
     {
       "id": "GO-RUNTIME-001",
@@ -2658,7 +2763,8 @@
       "false_positive_considerations": "Bounded blast radius -- process always terminates immediately after, no accumulating leak.",
       "task_file": "TASKS/audit-remediation/07-runtime-correctness-lifecycle/02-fix-cmdserve-fatal-cleanup-bypass.md",
       "disposition": "remediate",
-      "task_status": "not-started"
+      "task_status": "not-started",
+      "revalidation_note": "Confirmed still open: slogx.Fatal (slogx.go:138-141) still calls os.Exit(1) directly, bypassing deferred cleanup; cmd/nanite/main.go still has 7 slogx.Fatal call sites. AD-17 decides only the implementation shape (signature change vs. cleanup-hook mechanism), not whether cleanup-bypass is a real gap -- parallel to how AD-01 was treated for GO-SEC4-001 in Part 1."
     },
     {
       "id": "GO-RUNTIME-002",
@@ -2683,8 +2789,9 @@
       "report_section": "\u00a78.13",
       "false_positive_considerations": "Substantial documented-intent caveat: an architect may reasonably judge the current tradeoff acceptable for this product's deployment model.",
       "task_file": "TASKS/audit-remediation/08-remaining-security-hardening/07-server-auth-bind-tls-posture.md",
-      "disposition": "remediate",
-      "task_status": "not-started"
+      "disposition": "needs-architect-decision",
+      "task_status": "not-started",
+      "revalidation_note": "Confirmed unchanged: internal/server/ has zero commits since 8feeee5c. auth.go:15-22 still no-ops (basicAuthMiddleware returns next unmodified) when NANITE_AUTH_USER/PASSWORD are unset; server.go:163-174 still binds to fmt.Sprintf(\":%d\", s.port) (all interfaces, no loopback-only option in config) and serves via plain httpSrv.ListenAndServe() (no TLS anywhere); the one startup log line (server.go:164, slog.Info(\"nanite listening\", \"addr\", addr, \"dev\", s.dev)) reports addr and dev-mode but never auth status. caller_identity.go:14-22 still documents this as the intentional single-user-local-app tradeoff. needs-architect-decision (not remediate): the task file's own 'What to do' names 4 live options including (d) 'explicitly accept the current tradeoff as-is and formally close this finding as accepted-risk' as a legitimate outcome -- the disposition itself, not just the implementation, is AD-15's call."
     },
     {
       "id": "GO-RUNTIME-003",
@@ -2712,7 +2819,8 @@
       "report_section": "\u00a78.13",
       "task_file": "TASKS/audit-remediation/07-runtime-correctness-lifecycle/01-fix-worktree-orphan-branch-cleanup.md",
       "disposition": "remediate",
-      "task_status": "not-started"
+      "task_status": "not-started",
+      "revalidation_note": "Confirmed still open and unchanged: manager.go:86 (Create) uses the full `sessionID` for the branch name, while CleanupOrphaned (manager.go:166-170) truncates to 8 chars before building `branch := \"worker-\" + short` -- the two never match, so the orphan branch is never actually deleted. No commits touched internal/worktree/ since the audit."
     },
     {
       "id": "GO-RUNTIME-004",
@@ -2735,8 +2843,9 @@
       "report_section": "\u00a78.13",
       "false_positive_considerations": "Real-world impact scales with background_job submission volume, which was not measured.",
       "task_file": "TASKS/audit-remediation/07-runtime-correctness-lifecycle/03-bound-background-job-registry-growth.md",
-      "disposition": "remediate",
-      "task_status": "not-started"
+      "disposition": "needs-architect-decision",
+      "task_status": "not-started",
+      "revalidation_note": "Confirmed unchanged: the only `delete(svc.jobs, jobID)` in internal/background/service.go is on the immediate backend.Start failure path (line 126); every job that starts successfully stays in the map forever. The doc-comment falsely claiming reaping is unconditionally required per AD-18, but the actual retention policy (TTL/LRU/persist-and-evict/accept) is AD-18's open question -- task file 07/03 explicitly separates the two."
     },
     {
       "id": "GO-RUNTIME-005",
@@ -2760,7 +2869,8 @@
       "report_section": "\u00a78.13",
       "task_file": "TASKS/audit-remediation/07-runtime-correctness-lifecycle/04-container-shutdown-idempotency-guard.md",
       "disposition": "remediate",
-      "task_status": "not-started"
+      "task_status": "not-started",
+      "revalidation_note": "Confirmed still open: Container.Shutdown (container.go:1477, current) has no sync.Once/atomic-bool idempotency guard at its top, unlike lifecycle.Manager.Shutdown's established pattern. Simple, no-architect-needed consistency fix; currently dormant per the finding's own note (one production call site)."
     },
     {
       "id": "GO-RUNTIME-006",
@@ -2781,8 +2891,9 @@
       "requires_architect_decision": false,
       "report_section": "\u00a78.13",
       "task_file": "TASKS/audit-remediation/13-mechanical-cleanup/02-stale-comments-and-docs-cleanup.md",
-      "disposition": "remediate",
-      "task_status": "not-started"
+      "disposition": "defer",
+      "task_status": "not-started",
+      "revalidation_note": "Confirmed cmdServe (cmd/nanite/main.go) and agent.Boot (runtime/agent/agent.go) both still carry the described comment-density pattern. Finding's own recommendation: an architect-level pass could migrate history to docs/decisions/, but this is explicitly not a mechanical-stripping task and requires_architect_decision is false (no blocking decision needed) -- deferred, no immediate action."
     },
     {
       "id": "GO-RUNTIME-007",
@@ -2807,7 +2918,8 @@
       "report_section": "\u00a78.13",
       "task_file": "TASKS/audit-remediation/07-runtime-correctness-lifecycle/05-fix-mcp-config-silent-decode-errors.md",
       "disposition": "remediate",
-      "task_status": "not-started"
+      "task_status": "not-started",
+      "revalidation_note": "Confirmed still open: loadPersistedMCPServers (cmd/nanite/main.go:1295, shifted from the audit's 1233 by unrelated file growth) still discards the Args/Env json.Unmarshal errors at lines 1310/1314 while correctly warn-logging the EnvAllowlist error right next to them at 1317-1323."
     },
     {
       "id": "GO-RUNTIME-008",
@@ -2835,8 +2947,10 @@
         "loc": 234
       },
       "task_file": "TASKS/audit-remediation/13-mechanical-cleanup/05-low-risk-hygiene-and-lock-scope-batch.md",
-      "disposition": "remediate",
-      "task_status": "not-started"
+      "disposition": "false-positive",
+      "task_status": "not-started",
+      "revalidation_note": "Engages with the audit's own conclusion: agent.Boot (runtime/agent/agent.go:323, confirmed current) is still the second-highest-complexity function in the codebase, but the finding's own recommendation is explicit -- \"no fix required, essential complexity, correctly handled\" (same shape as cmdServe, a correctly-applied cleanup closure at every early-return point). The audit itself judged this not a defect, matching the false-positive disposition rather than a live remediation item."
     }
-  ]
+  ],
+  "revalidated_at_commit": "531dcfccbbf870fcbe80b269546bb8b28622a8f0"
 }

@@ -25,11 +25,11 @@
 
 ### Root cause
 
-`DeleteAgentByID` was written on the assumption that `GetAgent` returning an error always means "no such row" — a legitimate case where a no-op delete is the documented, correct behavior (see the method's own doc comment, `internal/store/agents.go:1211-1214`). But `GetAgent` (`internal/store/agents.go:437-444`) wraps *every* `Scan` error identically with `fmt.Errorf("get agent %s: %w", id, err)`, whether the underlying cause is `sql.ErrNoRows` or a genuine driver/I-O failure (closed connection, disk error, canceled context, etc.). `DeleteAgentByID` never branches on *which* error it got — it treats the mere presence of an error as proof the row doesn't exist. This is a single missing `errors.Is(err, sql.ErrNoRows)` check, not a design flaw in the no-op contract itself.
+`DeleteAgentByID` was written on the assumption that `GetAgent` returning an error always means "no such row" — a legitimate case where a no-op delete is the documented, correct behavior (see the method's own doc comment, `internal/store/agents.go:1213-1216` — **Wave 0 revalidation (2026-08-22) note:** shifted +2 lines from the audit-era `1211-1214` by an unrelated doc-comment edit landed above it in the file by `e1ba2ac6`; the function itself is byte-identical to the audited commit). But `GetAgent` (`internal/store/agents.go:437-444`) wraps *every* `Scan` error identically with `fmt.Errorf("get agent %s: %w", id, err)`, whether the underlying cause is `sql.ErrNoRows` or a genuine driver/I-O failure (closed connection, disk error, canceled context, etc.). `DeleteAgentByID` never branches on *which* error it got — it treats the mere presence of an error as proof the row doesn't exist. This is a single missing `errors.Is(err, sql.ErrNoRows)` check, not a design flaw in the no-op contract itself.
 
 ### Current behavior
 
-`internal/store/agents.go:1211-1221`:
+`internal/store/agents.go:1213-1223` (was `1211-1221` at the audited commit; see Wave 0 revalidation note above):
 
 ```go
 // DeleteAgentByID removes an agent profile by ID. Mirrors DeleteAgent
@@ -102,7 +102,7 @@ Today, if the `GetAgent` lookup inside `DeleteAgentByID` fails for a transient r
 
 2. Do **not** change `GetAgent`'s own error-wrapping behavior (`fmt.Errorf("get agent %s: %w", id, err)`) — it already preserves `sql.ErrNoRows` through the `%w` wrap, which is exactly what `errors.Is` needs downstream. Confirm this by reading the current `GetAgent` body before editing, in case it has changed since the audit — the audit's own pointer (`agents.go:437-444`) may have drifted if other work landed on this file first.
 
-3. Update the doc comment on `DeleteAgentByID` (`agents.go:1211-1214`) to state the corrected contract explicitly: no-op only on genuine not-found; any other lookup or delete error propagates. Keep the existing FU-28 tombstone note — it's unrelated to this fix and still accurate.
+3. Update the doc comment on `DeleteAgentByID` (`agents.go:1213-1216`) to state the corrected contract explicitly: no-op only on genuine not-found; any other lookup or delete error propagates. Keep the existing FU-28 tombstone note — it's unrelated to this fix and still accurate.
 
 4. Do not touch `SweepPluginAgentProfiles` (`internal/plugin/agent_profiles.go`) — its existing `if err != nil { h.logger.Warn(...); continue }` handling around the `DeleteAgentByID` call already does the right thing once `DeleteAgentByID` starts returning real errors. No caller-side change is needed; this is purely a fix at the source of the bad signal, per the guide's principle of enumerating every caller of a corrected primitive to confirm none of them need extra handling — `SweepPluginAgentProfiles` is the only production caller (`internal/plugin/agent_profiles.go:286`) and it already handles a non-nil return correctly.
 

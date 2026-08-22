@@ -34,23 +34,23 @@ func Fatal(msg string, args ...any) {
 }
 ```
 
-`os.Exit(1)` terminates the process immediately and — per Go's own runtime semantics — never runs any `defer` registered anywhere on the calling goroutine's stack. `cmdServe` (`cmd/nanite/main.go:94-764`) registers several defers over the course of its ~670-line body: `defer logCloser.Close()` (line 140, only if the structured-logging handler initialized successfully), `defer otelShutdown(otelCtx)` (line 171, only if OTel init succeeded), `defer s.Close()` (line 179, the SQLite store), and `defer coordStore.Close()` (line 328, the Badger coordination store, only if it opened successfully). Every `slogx.Fatal` call that fires after one of these defers is registered silently skips it — the code visually promises cleanup via `defer` that never actually executes on these paths.
+`os.Exit(1)` terminates the process immediately and — per Go's own runtime semantics — never runs any `defer` registered anywhere on the calling goroutine's stack. `cmdServe` (`cmd/nanite/main.go:97-826`, was `94-764` — **Wave 0 revalidation (2026-08-22):** shifted and grew from intervening changes, see below) registers several defers over the course of its body: `defer logCloser.Close()` (line 143, was `140`, only if the structured-logging handler initialized successfully), `defer otelShutdown(otelCtx)` (line 174, was `171`, only if OTel init succeeded), `defer s.Close()` (line 182, was `179`, the SQLite store), and `defer coordStore.Close()` (line 331, was `328`, the Badger coordination store, only if it opened successfully). Every `slogx.Fatal` call that fires after one of these defers is registered silently skips it — the code visually promises cleanup via `defer` that never actually executes on these paths.
 
 ### Current behavior
 
-Grepping `cmd/nanite/main.go` for `slogx.Fatal(` finds **7** call sites, all within `cmdServe`'s body (function spans lines 94-764): lines 177, 183, 186, 196, 403, 430, 762. `REPORT.md` §8.13 and `findings.json`'s summary for `GO-RUNTIME-001` both describe this as "**5** real startup-failure call sites" without enumerating which five. **This is a real discrepancy this task's authoring pass could not resolve** — treat "5" as the audit's own approximate count and "7" as this task's own directly-observed one; whoever implements this must re-derive the current, real list of call sites from source (`grep -n "slogx.Fatal(" cmd/nanite/main.go`) rather than trusting either number blindly, since unrelated churn may also have changed the count since the audit commit (`8feeee5c`).
+Grepping `cmd/nanite/main.go` for `slogx.Fatal(` still finds **7** call sites (re-verified at Wave 0, 2026-08-22), all within `cmdServe`'s body: lines 180, 186, 189, 199, 406, 433, 824 (was 177, 183, 186, 196, 403, 430, 762 at this task's authoring time — the first six drifted by a uniform +3 from unrelated additions earlier in the file; the seventh, `srv.ListenAndServe()`'s error site, drifted by +62 because `cmdServe` grew a substantial amount of workflow/loop-engine wiring between it and the sixth site). `REPORT.md` §8.13 and `findings.json`'s summary for `GO-RUNTIME-001` both describe this as "**5** real startup-failure call sites" without enumerating which five. **This is a real discrepancy this task's authoring pass could not resolve** — treat "5" as the audit's own approximate count and "7" as this task's own directly-observed one (independently reconfirmed at Wave 0); whoever implements this must re-derive the current, real list of call sites from source (`grep -n "slogx.Fatal(" cmd/nanite/main.go`) rather than trusting any of these numbers blindly, since unrelated churn may also have changed the count again since this revalidation.
 
-Per-site blast radius, traced by defer-registration position (verified by direct reading during this task's authoring pass):
+Per-site blast radius, traced by defer-registration position (verified by direct reading during this task's authoring pass; line numbers refreshed at Wave 0, 2026-08-22 — see drift note above):
 
-| Line | Failure | Defers already registered at this point (bypassed) |
+| Line (was) | Failure | Defers already registered at this point (bypassed) |
 |---|---|---|
-| 177 | `store.New` fails | log-handler close (140), OTel flush (171) — no store to close yet |
-| 183 | `s.Seed()` fails | + SQLite store close (179) |
-| 186 | `s.SeedProviders()` fails | + SQLite store close (179) |
-| 196 | `envelopes.LoadCore` fails | + SQLite store close (179) |
-| 403 | `service.NewContainer` fails | + Badger coordination-store close (328) — **all four** named cleanups |
-| 430 | `agentworkflow.LoadRegistryDir` fails | all four |
-| 762 | `srv.ListenAndServe()` returns an error | all four (last statement in `cmdServe`) |
+| 180 (177) | `store.New` fails | log-handler close (143, was 140), OTel flush (174, was 171) — no store to close yet |
+| 186 (183) | `s.Seed()` fails | + SQLite store close (182, was 179) |
+| 189 (186) | `s.SeedProviders()` fails | + SQLite store close (182, was 179) |
+| 199 (196) | `envelopes.LoadCore` fails | + SQLite store close (182, was 179) |
+| 406 (403) | `service.NewContainer` fails | + Badger coordination-store close (331, was 328) — **all four** named cleanups |
+| 433 (430) | `agentworkflow.LoadRegistryDir` fails (current message: `"failed to load workflow definitions registry"`) | all four |
+| 824 (762) | `srv.ListenAndServe()` returns an error | all four (last statement in `cmdServe`) — the **+62-line** outlier shift (vs. the uniform +3 for the other six) comes from workflow/loop-engine wiring added between this site and the previous one |
 
 Bounded blast radius, as `findings.json`'s `false_positive_considerations` states: "process always terminates immediately after, no accumulating leak" — `os.Exit(1)` tears down the entire process, so nothing survives past that instant (no goroutine keeps running, no descriptor persists beyond process lifetime). The defect is a gap between the code's own apparent promise (`defer`) and what actually executes — unflushed OTel spans/logs at the moment of the fatal error, and a SQLite/Badger store possibly left without a clean-close marker on disk — not a leak that compounds over time.
 

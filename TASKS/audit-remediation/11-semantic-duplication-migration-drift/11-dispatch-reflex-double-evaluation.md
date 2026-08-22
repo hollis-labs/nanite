@@ -7,6 +7,17 @@
 
 `requires_architect_decision: false` — low priority, informational finding; the two evaluation points themselves are confirmed intentional and are not being merged.
 
+> **Planner sequencing (added 2026-08-21).** Supersedes the `**Depends on:**`
+> line above wherever they differ — that line predates cross-folder analysis.
+> Authoritative copy of this table: `TASKS/audit-remediation/README.md`.
+>
+> - **Wave:** 6 — semantic duplication and migration drift · **Dispatch unit:** `W6a`
+> - **Depends on:** `10/01`, `10/02`, `09/01`
+> - **Blocks:** none
+> - **Parallel-safe with:** `11/06`, `11/07`, `11/09`
+> - **Gated on:** AD-19
+> - **requires_security_review:** false · **requires_regression_test:** true
+
 ## Context
 
 ### Findings addressed

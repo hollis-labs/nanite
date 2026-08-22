@@ -1,9 +1,20 @@
 # Trivial naming fixes and repo-wide gofmt backlog
 
-**Phase:** Wave 8 — Mechanical cleanup (audit-remediation batch, unsequenced — see folder README)
+**Phase:** Wave 8 — Mechanical cleanup (audit-remediation batch, sequenced 2026-08-21 — see the sequencing block below)
 **Status:** not-started
 **Depends on:** none within this batch.
 **Touches:** `internal/service/install/adapters.go`, `internal/agent/permissions_test.go`, and (if the repo-wide gofmt option below is taken) all 122 files currently failing `gofmt -l` per `GO-HYG-001`'s baseline (`raw/golangci-baseline.log`), not just the 12 named by `GO-CHAT-007`.
+
+> **Planner sequencing (added 2026-08-21).** Supersedes the `**Depends on:**`
+> line above wherever they differ — that line predates cross-folder analysis.
+> Authoritative copy of this table: `TASKS/audit-remediation/README.md`.
+>
+> - **Wave:** 8 — mechanical cleanup · **Dispatch unit:** `W8`
+> - **Depends on:** **every other task in the batch**
+> - **Blocks:** none
+> - **Parallel-safe with:** **none. This runs absolutely last, alone, with no other worktree open in the repository.** If AD-22 selects the repo-wide sweep it rewrites 122 files (audited-commit count; `00/02` refreshes it) and conflicts with every outstanding branch.
+> - **Gated on:** AD-22 — now, never, or ratchet-only.
+> - **requires_security_review:** false · **requires_regression_test:** false
 
 ## Context
 

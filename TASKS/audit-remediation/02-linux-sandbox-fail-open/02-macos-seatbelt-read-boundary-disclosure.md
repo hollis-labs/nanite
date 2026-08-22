@@ -21,6 +21,17 @@ requires_security_review: false
 requires_regression_test: false
 ```
 
+> **Planner sequencing (added 2026-08-21).** Supersedes the `**Depends on:**`
+> line above wherever they differ — that line predates cross-folder analysis.
+> Authoritative copy of this table: `TASKS/audit-remediation/README.md`.
+>
+> - **Wave:** 1 — release-blocking trust boundaries · **Dispatch unit:** `W1`
+> - **Depends on:** `00/01`
+> - **Blocks:** none
+> - **Parallel-safe with:** all of Wave 1
+> - **Gated on:** AD-03 — determines whether this stays docs-only or narrows the tradeoff in code.
+> - **requires_security_review:** true · **requires_regression_test:** false
+
 ## Context
 
 ### Finding addressed

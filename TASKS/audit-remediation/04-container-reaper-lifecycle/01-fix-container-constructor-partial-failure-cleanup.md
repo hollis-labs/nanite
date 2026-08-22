@@ -1,10 +1,21 @@
 # Fix Container constructor partial-failure cleanup (reaper goroutines leak on NewContainer error paths)
 
-**Phase:** Wave 2 — Correctness, lifecycle, concurrency (audit-remediation batch, unsequenced — see folder README)
+**Phase:** Wave 2 — Correctness, lifecycle, concurrency (audit-remediation batch, sequenced 2026-08-21 — see the sequencing block below)
 **Status:** not-started
 **Depends on:** none — self-contained within `internal/service/container.go`'s `NewContainer`.
 **Touches:** `internal/service/container.go` (`NewContainer` only; no other symbol).
 **Requires architect decision:** false. Note: `findings.json`'s raw entry for `GO-LIFE-001` carries `requires_architect_decision: true`, but its own `recommendation` text is a concrete mechanical direction ("match the existing `stopCatalog()` cleanup pattern already present at both flagged sites"), not an open design question — this task file sets the flag to `false` per this batch's own stated convention (README.md: "flags `requires_architect_decision: true` wherever the underlying finding's recommendation was 'architect decision' in the audit"). Flagging this explicitly in case the `true` value in `findings.json` is a data-entry inconsistency rather than deliberate signal; a planner should treat `false` as this task's working assumption but can override.
+
+> **Planner sequencing (added 2026-08-21).** Supersedes the `**Depends on:**`
+> line above wherever they differ — that line predates cross-folder analysis.
+> Authoritative copy of this table: `TASKS/audit-remediation/README.md`.
+>
+> - **Wave:** 2 — correctness, lifecycle, concurrency · **Dispatch unit:** `W2a`
+> - **Depends on:** `00/01`
+> - **Blocks:** `07/04`, `09/01`, `09/02` — all three edit `internal/service/container.go` after this
+> - **Parallel-safe with:** `04/02`, `04/04`, `04/05`, `05/01`
+> - **Gated on:** none
+> - **requires_security_review:** false · **requires_regression_test:** true
 
 ## Context
 

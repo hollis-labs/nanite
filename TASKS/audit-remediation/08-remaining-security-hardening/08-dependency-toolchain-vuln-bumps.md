@@ -1,10 +1,21 @@
 # Dependency and toolchain version bumps for reachable CVEs
 
-**Phase:** Wave 3 — Remaining security hardening (guide §4; unsequenced — see folder README)
+**Phase:** Wave 3 — Remaining security hardening (guide §4; sequenced 2026-08-21 — see the sequencing block below)
 **Status:** not-started
 **Depends on:** none
 **Touches:** `go.mod`, `go.sum`, the toolchain/`go` directive in `go.mod`
 **Requires architect decision:** false (matches `findings.json` for both findings)
+
+> **Planner sequencing (added 2026-08-21).** Supersedes the `**Depends on:**`
+> line above wherever they differ — that line predates cross-folder analysis.
+> Authoritative copy of this table: `TASKS/audit-remediation/README.md`.
+>
+> - **Wave:** 3 — remaining security hardening · **Dispatch unit:** `W3`
+> - **Depends on:** `00/02` (refreshed `govulncheck` output)
+> - **Blocks:** none
+> - **Parallel-safe with:** **none — runs alone.** It rewrites `go.mod`/`go.sum`, which every other open worktree also carries; a parallel run guarantees a conflict in every branch. The guide's "independent dependency upgrades can run in parallel" does not survive contact with worktree-based dispatch.
+> - **Gated on:** none
+> - **requires_security_review:** true · **requires_regression_test:** false
 
 ## Findings addressed
 

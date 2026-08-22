@@ -10,6 +10,17 @@ requires_architect_decision: true
 requires_regression_test: true
 ```
 
+> **Planner sequencing (added 2026-08-21).** Supersedes the `**Depends on:**`
+> line above wherever they differ — that line predates cross-folder analysis.
+> Authoritative copy of this table: `TASKS/audit-remediation/README.md`.
+>
+> - **Wave:** 6 — semantic duplication and migration drift · **Dispatch unit:** `W6a`
+> - **Depends on:** Wave 5 complete
+> - **Blocks:** none
+> - **Parallel-safe with:** `11/01`, `11/02`, `11/07`, `11/09`
+> - **Gated on:** AD-19 — this one may be **legitimately independent**; classify before collapsing. Two providers' streaming error handling can differ for real reasons.
+> - **requires_security_review:** false · **requires_regression_test:** true
+
 ## Context
 
 ### Findings addressed

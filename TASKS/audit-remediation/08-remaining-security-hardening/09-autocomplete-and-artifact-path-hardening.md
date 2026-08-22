@@ -1,10 +1,21 @@
 # Autocomplete repo_path exposure, artifact write-path confinement, catalog fetch timeout, plugin-UI symlink gap
 
-**Phase:** Wave 3 — Remaining security hardening (guide §4; unsequenced — see folder README)
+**Phase:** Wave 3 — Remaining security hardening (guide §4; sequenced 2026-08-21 — see the sequencing block below)
 **Status:** not-started
 **Depends on:** none
 **Touches:** `internal/api/autocomplete.go` (`resolveRoot`), `internal/api/projects.go` (`handleCreateProject`/`handleUpdateProject`), `internal/api/artifacts.go` (`handlePlaceArtifact`), `internal/api/catalog.go` (`handleCatalogInstall`), `internal/api/plugins.go` (plugin-UI static-file route, lines 107-120), `internal/pathsafe` (`ResolveUnder` — reused, not modified)
 **Requires architect decision:** **mixed — see per-finding note below**
+
+> **Planner sequencing (added 2026-08-21).** Supersedes the `**Depends on:**`
+> line above wherever they differ — that line predates cross-folder analysis.
+> Authoritative copy of this table: `TASKS/audit-remediation/README.md`.
+>
+> - **Wave:** 3 — remaining security hardening · **Dispatch unit:** `W3`
+> - **Depends on:** `01/01` — that task rewrites `handleCatalogInstall`, which this task also hardens
+> - **Blocks:** `11/15`
+> - **Parallel-safe with:** `08/01`–`08/06`
+> - **Gated on:** AD-04 — specifically the canonical-confinement sub-question. If `01/01` and this task pick different mechanisms for the same file, the batch has reintroduced the inconsistency it exists to remove.
+> - **requires_security_review:** true · **requires_regression_test:** true
 
 ## Findings addressed
 

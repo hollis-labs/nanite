@@ -7,6 +7,17 @@
 
 `requires_architect_decision: false` — optional cleanup, no design ambiguity, low priority.
 
+> **Planner sequencing (added 2026-08-21).** Supersedes the `**Depends on:**`
+> line above wherever they differ — that line predates cross-folder analysis.
+> Authoritative copy of this table: `TASKS/audit-remediation/README.md`.
+>
+> - **Wave:** 6 — semantic duplication and migration drift · **Dispatch unit:** `W6b`
+> - **Depends on:** Wave 6a complete
+> - **Blocks:** none
+> - **Parallel-safe with:** `11/03`, `11/04`, `11/12`, `11/16`
+> - **Gated on:** none
+> - **requires_security_review:** false · **requires_regression_test:** true
+
 ## Context
 
 ### Findings addressed

@@ -1,10 +1,21 @@
 # [INVESTIGATION, NOT A KNOWN FIX] Determine why internal/service's own `go test -race` times out
 
-**Phase:** Wave 2 — Correctness, lifecycle, concurrency (audit-remediation batch, unsequenced — see folder README)
+**Phase:** Wave 2 — Correctness, lifecycle, concurrency (audit-remediation batch, sequenced 2026-08-21 — see the sequencing block below)
 **Status:** not-started
 **Depends on:** none as a hard blocker, but land after task 02 (`02-fix-api-test-container-shutdown-leak.md`) if convenient — not because this task needs task 02's code, but because task 02's fix removes one theoretical confound from `internal/api` + `internal/service`'s *combined* 25-minute timeout dump (see Context) before this investigation draws conclusions. Sequencing-only.
 **Touches:** No source changes expected as the primary deliverable of this task — see "What to do." If root-causing points to a concrete fix, that fix's scope depends entirely on what's found and is not knowable in advance.
 **Requires architect decision:** false — but this is flagged explicitly as an **investigation task, not an implementation task**. Do not estimate or dispatch this like a task with a known fix; the deliverable is a root-cause determination backed by real evidence, and a *possible* follow-up fix task, not a guaranteed patch in this task itself.
+
+> **Planner sequencing (added 2026-08-21).** Supersedes the `**Depends on:**`
+> line above wherever they differ — that line predates cross-folder analysis.
+> Authoritative copy of this table: `TASKS/audit-remediation/README.md`.
+>
+> - **Wave:** 2 — correctness, lifecycle, concurrency · **Dispatch unit:** `W2a`
+> - **Depends on:** `04/02` — **hard dependency, not sequencing.** Investigating a race timeout against a baseline with known un-shutdown test containers measures the wrong thing.
+> - **Blocks:** none
+> - **Parallel-safe with:** none in-wave
+> - **Gated on:** none
+> - **requires_security_review:** false · **requires_regression_test:** false
 
 ## Context
 

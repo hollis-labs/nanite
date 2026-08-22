@@ -1,9 +1,20 @@
 # Low-risk hygiene grab-bag: 12 findings with no shared root cause, each too small for its own task
 
-**Phase:** Wave 8 — Mechanical cleanup (audit-remediation batch, unsequenced — see folder README)
+**Phase:** Wave 8 — Mechanical cleanup (audit-remediation batch, sequenced 2026-08-21 — see the sequencing block below)
 **Status:** not-started
 **Depends on:** none within this batch.
 **Touches:** `internal/mcp/manager.go`, `internal/plugin/install/validate.go`, `internal/agent/builtin/embed_mux_devmode.go`, `internal/agent/builtin/profiles.go`, `internal/contextbroker/source_pcc.go`, `internal/contextbroker/source_memory.go`, `internal/contextbroker/source_conduit.go`, `internal/context/tokens.go`, `internal/contextbroker/broker.go`, `internal/loopdetect/detector.go`, `internal/recovery/orphansweep/orphan_sweep.go`, `internal/elicitation/service_test_helpers.go`, `internal/chat` (architecture note only, no required edit), `internal/elicitation/service.go`, `internal/plugin/host.go`.
+
+> **Planner sequencing (added 2026-08-21).** Supersedes the `**Depends on:**`
+> line above wherever they differ — that line predates cross-folder analysis.
+> Authoritative copy of this table: `TASKS/audit-remediation/README.md`.
+>
+> - **Wave:** 8 — mechanical cleanup · **Dispatch unit:** `W8`
+> - **Depends on:** `11/05`, `11/10`, `09/02`
+> - **Blocks:** none
+> - **Parallel-safe with:** `13/01`, `13/04`
+> - **Gated on:** none
+> - **requires_security_review:** false · **requires_regression_test:** true
 
 ## Context
 

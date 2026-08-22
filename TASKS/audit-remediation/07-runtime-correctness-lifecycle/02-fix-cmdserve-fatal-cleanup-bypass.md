@@ -5,6 +5,17 @@
 **Depends on:** none
 **Touches:** `cmd/nanite/main.go` (`cmdServe`'s `slogx.Fatal` call sites, and possibly `cmdServe`'s own signature plus `main()`'s `case "serve":` branch, depending on which direction is chosen — see below). Possibly `internal/slogx/slogx.go` (`Fatal`, `FatalContext`) if the cleanup-hook direction is chosen. **This task requires an architect decision before implementation** — see Context and What to do.
 
+> **Planner sequencing (added 2026-08-21).** Supersedes the `**Depends on:**`
+> line above wherever they differ — that line predates cross-folder analysis.
+> Authoritative copy of this table: `TASKS/audit-remediation/README.md`.
+>
+> - **Wave:** 2 — correctness, lifecycle, concurrency · **Dispatch unit:** `W2b`
+> - **Depends on:** `00/01`
+> - **Blocks:** `07/05`, `08/07`, `11/10` — all three edit `cmd/nanite/main.go` after this
+> - **Parallel-safe with:** `06/01`, `07/01`, `07/03`
+> - **Gated on:** AD-17 (signature change vs. slogx cleanup hook)
+> - **requires_security_review:** false · **requires_regression_test:** true
+
 ## Context
 
 `requires_architect_decision: true` — the remediation guide's own recommendation offers two directions (replace `slogx.Fatal` with return/structured-error propagation at these sites, **or** make `slogx.Fatal` itself accept a cleanup-hook slice), and this task's own investigation found `slogx.Fatal` has real call sites well beyond `cmdServe` — a scope question the audit did not resolve and that materially affects which direction is cheaper/safer. Per this project's guardrails, an implementation agent must not silently pick one direction; an architect (or the operator) must decide first.

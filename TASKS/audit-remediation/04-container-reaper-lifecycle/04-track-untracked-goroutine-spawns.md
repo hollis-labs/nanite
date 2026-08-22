@@ -1,10 +1,21 @@
 # Fix DelegateAndAggregate's unbounded collector hang and decide a package-wide policy for untracked safego.Go spawns
 
-**Phase:** Wave 2 — Correctness, lifecycle, concurrency (audit-remediation batch, unsequenced — see folder README)
+**Phase:** Wave 2 — Correctness, lifecycle, concurrency (audit-remediation batch, sequenced 2026-08-21 — see the sequencing block below)
 **Status:** not-started
 **Depends on:** none as a hard blocker. Cross-reference only: this task's untracked spawns (`GO-SVCCORE-002`) are a *candidate* cause for task 03's investigation (`GO-SVCCORE-006`) — task 03 does not depend on this task landing first, but if task 03's investigation lands first and confirms candidate 2 (untracked-goroutine accumulation), that strengthens the case for prioritizing the `GO-SVCCORE-002` half of this task.
 **Touches:** `internal/service/delegation.go` (`DelegateAndAggregate`, for GO-SVCCORE-001), `internal/service/events_composite.go` (~18 `safego.Go` sites, for GO-SVCCORE-002), `internal/service/agent_deps.go` (see drift note below), and `internal/service/container.go:1133-1143` (the existing precedent comment to read, not necessarily to edit).
 **Requires architect decision:** **true for the GO-SVCCORE-002 half** (package-wide policy call — see below). **False for the GO-SVCCORE-001 half** (clear fix direction with a concrete sibling pattern to follow) — but see the pre-implementation check noted under that finding before starting.
+
+> **Planner sequencing (added 2026-08-21).** Supersedes the `**Depends on:**`
+> line above wherever they differ — that line predates cross-folder analysis.
+> Authoritative copy of this table: `TASKS/audit-remediation/README.md`.
+>
+> - **Wave:** 2 — correctness, lifecycle, concurrency · **Dispatch unit:** `W2a`
+> - **Depends on:** `00/01`
+> - **Blocks:** `12/03` — that task lints the `safego` adoption this one performs
+> - **Parallel-safe with:** `04/01`, `04/02`, `04/05`, `05/01`
+> - **Gated on:** none
+> - **requires_security_review:** false · **requires_regression_test:** true
 
 ## Context
 

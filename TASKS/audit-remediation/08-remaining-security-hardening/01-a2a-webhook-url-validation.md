@@ -1,10 +1,21 @@
 # A2A push-notification webhook URL has no SSRF validation
 
-**Phase:** Wave 3 — Remaining security hardening (guide §4; this task-creation batch is unsequenced — see folder README)
+**Phase:** Wave 3 — Remaining security hardening (guide §4; this task-creation batch is sequenced 2026-08-21 — see the sequencing block below)
 **Status:** not-started
 **Depends on:** none
 **Touches:** `internal/service/a2a_push_notifier.go`, `internal/service/a2a_task_manager.go` (`TaskSubmitRequest`/`PushNotificationConfig` types); possibly a shared SSRF-CIDR-check helper if one is reused instead of written fresh (see Non-goals)
 **Requires architect decision:** false — but see the divergence note below and the mandatory pre-step; do not treat "false" as "skip verification"
+
+> **Planner sequencing (added 2026-08-21).** Supersedes the `**Depends on:**`
+> line above wherever they differ — that line predates cross-folder analysis.
+> Authoritative copy of this table: `TASKS/audit-remediation/README.md`.
+>
+> - **Wave:** 3 — remaining security hardening · **Dispatch unit:** `W3`
+> - **Depends on:** Wave 2 complete
+> - **Blocks:** `11/07` — that task deduplicates the SSRF CIDR logic this one may introduce or reuse
+> - **Parallel-safe with:** `08/02`, `08/03`, `08/04`, `08/06`, `08/10`
+> - **Gated on:** none
+> - **requires_security_review:** true · **requires_regression_test:** true
 
 ## Findings addressed
 

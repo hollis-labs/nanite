@@ -5,6 +5,17 @@
 **Depends on:** none
 **Touches:** `internal/background/service.go` (`Service`, `jobRecord`, `Submit`, `onBackendComplete`, `Status`, `Result`); `internal/background/pty.go` (`PTYBackend`, `ptyJob`, `Status`'s doc comment). **This task requires an architect decision before the retention-policy half is implemented** — see Context and What to do. The doc-comment fix is required regardless of that decision.
 
+> **Planner sequencing (added 2026-08-21).** Supersedes the `**Depends on:**`
+> line above wherever they differ — that line predates cross-folder analysis.
+> Authoritative copy of this table: `TASKS/audit-remediation/README.md`.
+>
+> - **Wave:** 2 — correctness, lifecycle, concurrency · **Dispatch unit:** `W2b`
+> - **Depends on:** `00/01`
+> - **Blocks:** none
+> - **Parallel-safe with:** `06/01`, `07/01`, `07/02`
+> - **Gated on:** AD-18 — **retention half only.** The doc-comment fix is required regardless and is not gated.
+> - **requires_security_review:** false · **requires_regression_test:** true
+
 ## Context
 
 `requires_architect_decision: true` — either add a TTL/LRU eviction policy, or explicitly accept unbounded retention as intentional for this package's current MVP scope. Either way, `PTYBackend.Status`'s doc comment must be corrected — it currently states something the code does not do.

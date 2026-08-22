@@ -5,6 +5,17 @@
 **Depends on:** none
 **Touches:** `internal/service/container.go` (`Container` struct fields, `Container.Shutdown`). No other package needs changes.
 
+> **Planner sequencing (added 2026-08-21).** Supersedes the `**Depends on:**`
+> line above wherever they differ — that line predates cross-folder analysis.
+> Authoritative copy of this table: `TASKS/audit-remediation/README.md`.
+>
+> - **Wave:** 2 — correctness, lifecycle, concurrency · **Dispatch unit:** `W2b`
+> - **Depends on:** `04/01` (same file, `internal/service/container.go`)
+> - **Blocks:** `09/01`, `09/02`
+> - **Parallel-safe with:** none
+> - **Gated on:** none
+> - **requires_security_review:** false · **requires_regression_test:** true
+
 ## Context
 
 `requires_architect_decision: false` — a small, low-risk, defense-in-depth addition that mirrors a pattern already correctly implemented elsewhere in this codebase (`internal/lifecycle.Manager.Shutdown`). No design ambiguity.

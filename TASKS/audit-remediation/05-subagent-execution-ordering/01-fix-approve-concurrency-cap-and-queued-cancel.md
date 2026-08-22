@@ -14,6 +14,17 @@ requires_architect_decision: false
 requires_regression_test: true
 ```
 
+> **Planner sequencing (added 2026-08-21).** Supersedes the `**Depends on:**`
+> line above wherever they differ — that line predates cross-folder analysis.
+> Authoritative copy of this table: `TASKS/audit-remediation/README.md`.
+>
+> - **Wave:** 2 — correctness, lifecycle, concurrency · **Dispatch unit:** `W2a`
+> - **Depends on:** `00/01`
+> - **Blocks:** none
+> - **Parallel-safe with:** all of W2a — `internal/subagent` is disjoint from every other Wave 2 task
+> - **Gated on:** none
+> - **requires_security_review:** false · **requires_regression_test:** true
+
 ## Context
 
 ### Findings addressed

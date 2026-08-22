@@ -1,10 +1,21 @@
 # Fix internal/api test suites' Container shutdown leak (no test calls Container.Shutdown())
 
-**Phase:** Wave 2 — Correctness, lifecycle, concurrency (audit-remediation batch, unsequenced — see folder README)
+**Phase:** Wave 2 — Correctness, lifecycle, concurrency (audit-remediation batch, sequenced 2026-08-21 — see the sequencing block below)
 **Status:** not-started
 **Depends on:** none — a test-only, mechanical change independent of task 01 in this folder (constructor cleanup) and task 03 (a *different*, unsolved problem — see below).
 **Touches:** `internal/api/artifacts_test.go`, `internal/api/loom_curator_wake_test.go`, `internal/api/providers_test.go` (4 call sites), `internal/api/tools_call_test.go`, `internal/api/recovery_test.go`, `internal/api/api_test.go`. Possibly `internal/service`'s own test suite, per the audit's recommendation — see "Scope" below for why this task treats that as **out of scope in practice**, deferred to task 03.
 **Requires architect decision:** false — mechanical test-hygiene fix, no design ambiguity.
+
+> **Planner sequencing (added 2026-08-21).** Supersedes the `**Depends on:**`
+> line above wherever they differ — that line predates cross-folder analysis.
+> Authoritative copy of this table: `TASKS/audit-remediation/README.md`.
+>
+> - **Wave:** 2 — correctness, lifecycle, concurrency · **Dispatch unit:** `W2a`
+> - **Depends on:** `00/01`
+> - **Blocks:** `04/03`
+> - **Parallel-safe with:** `04/01`, `04/04`, `04/05`, `05/01`
+> - **Gated on:** none
+> - **requires_security_review:** false · **requires_regression_test:** true
 
 ## Context
 

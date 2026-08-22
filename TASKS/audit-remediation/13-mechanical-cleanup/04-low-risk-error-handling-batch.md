@@ -1,9 +1,20 @@
 # Low-risk error-handling gaps: silently discarded/unlogged errors across 5 unrelated files
 
-**Phase:** Wave 8 — Mechanical cleanup (audit-remediation batch, unsequenced — see folder README)
+**Phase:** Wave 8 — Mechanical cleanup (audit-remediation batch, sequenced 2026-08-21 — see the sequencing block below)
 **Status:** not-started
 **Depends on:** none within this batch.
 **Touches:** `internal/task/snapshot.go`, `internal/api/bookmarks.go`, `internal/secrets/keyring.go`, `internal/service/durable_wake.go`, `internal/mcpconfig/mcpconfig.go`.
+
+> **Planner sequencing (added 2026-08-21).** Supersedes the `**Depends on:**`
+> line above wherever they differ — that line predates cross-folder analysis.
+> Authoritative copy of this table: `TASKS/audit-remediation/README.md`.
+>
+> - **Wave:** 8 — mechanical cleanup · **Dispatch unit:** `W8`
+> - **Depends on:** Wave 7 complete
+> - **Blocks:** none
+> - **Parallel-safe with:** `13/01`, `13/05`
+> - **Gated on:** none
+> - **requires_security_review:** false · **requires_regression_test:** true
 
 ## Context
 

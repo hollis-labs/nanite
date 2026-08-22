@@ -1,10 +1,21 @@
 # permission.Engine's ModeDefault may not prompt before non-destructive writes — ambiguous, needs architect call
 
-**Phase:** Wave 3 — Remaining security hardening (guide §4; unsequenced — see folder README)
+**Phase:** Wave 3 — Remaining security hardening (guide §4; sequenced 2026-08-21 — see the sequencing block below)
 **Status:** not-started
 **Depends on:** none
 **Touches:** `internal/permission/engine.go` (`Engine.Check`, `defaultDecision`), `internal/permission/engine_test.go`, `internal/service/tool.go` (name-heuristic classification consumed by `Check`)
 **Requires architect decision:** true (matches `findings.json`)
+
+> **Planner sequencing (added 2026-08-21).** Supersedes the `**Depends on:**`
+> line above wherever they differ — that line predates cross-folder analysis.
+> Authoritative copy of this table: `TASKS/audit-remediation/README.md`.
+>
+> - **Wave:** 3 — remaining security hardening · **Dispatch unit:** `W3`
+> - **Depends on:** Wave 2 complete
+> - **Blocks:** none
+> - **Parallel-safe with:** `08/01`, `08/02`, `08/03`, `08/06`, `08/10`
+> - **Gated on:** AD-16 (default file/directory permission policy)
+> - **requires_security_review:** true · **requires_regression_test:** true
 
 ## Findings addressed
 

@@ -6,6 +6,17 @@
 **Touches:** `internal/service/chat_generate.go` (`generateResponse` and its private helpers), `internal/service/chat.go` (`chatServiceImpl` struct definition and its 84 methods, spread across this file and others in the package), new characterization/regression test files under `internal/service/` (exact filenames TBD by the worker — likely `chat_generate_characterization_test.go` plus targeted additions to existing `chat_generate_*_test.go` files for the coverage-gap branches). Read-only reference: `internal/service/stream.go` (`StreamManager` — the in-repo precedent for this exact kind of extraction).
 **requires_architect_decision:** true — per the remediation guide's §9 decision queue item 5 ("`chatServiceImpl` decomposition boundaries"). This task's own deliverable (the responsibility map + phase-boundary proposal) is explicitly the input to that decision, not a substitute for it. No extraction may begin — in this task or any follow-on task — until an architect has reviewed and signed off on the proposed boundaries.
 
+> **Planner sequencing (added 2026-08-21).** Supersedes the `**Depends on:**`
+> line above wherever they differ — that line predates cross-folder analysis.
+> Authoritative copy of this table: `TASKS/audit-remediation/README.md`.
+>
+> - **Wave:** 5 — architectural concentration · **Dispatch unit:** `W5`
+> - **Depends on:** Wave 4 complete
+> - **Blocks:** `11/01`, `11/04`, `11/11`
+> - **Parallel-safe with:** **none — this task takes an exclusive lock on `internal/service`.** It is a multi-phase extraction of an 84-method type, done one phase at a time with behavior re-verified after each; any concurrent edit to the package invalidates its characterization tests.
+> - **Gated on:** AD-12 — and note the decision has a **prerequisite deliverable**: the responsibility map. Do not decide the extraction boundaries before it exists.
+> - **requires_security_review:** false · **requires_regression_test:** true
+
 ## Context
 
 This is the single largest architecture task in the whole remediation batch. It addresses the two highest-severity, highest-evidence architectural findings the audit produced anywhere in the codebase.

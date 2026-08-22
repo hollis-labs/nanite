@@ -14,6 +14,17 @@ requires_security_review: false
 requires_regression_test: true
 ```
 
+> **Planner sequencing (added 2026-08-21).** Supersedes the `**Depends on:**`
+> line above wherever they differ — that line predates cross-folder analysis.
+> Authoritative copy of this table: `TASKS/audit-remediation/README.md`.
+>
+> - **Wave:** 4 — production islands · **Dispatch unit:** `W4`
+> - **Depends on:** `04/01`, `07/04`, and `00/01`'s reachability report
+> - **Blocks:** `13/01`, `13/05` (both touch `internal/contextbroker`)
+> - **Parallel-safe with:** `09/03`–`09/06`. **Not** `09/01` — both wire into `container.go`.
+> - **Gated on:** AD-07 (wire / defer / retire). Note this finding is **not** flagged `requires_architect_decision` in `findings.json` — see the batch README's correction 4.
+> - **requires_security_review:** false · **requires_regression_test:** true
+
 ## Context
 
 ### Findings addressed

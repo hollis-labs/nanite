@@ -5,6 +5,17 @@
 **Depends on:** N/A — no implementation task lives in this file.
 **Touches:** nothing directly; this file exists so the finding stays visible in this folder's classification table.
 
+> **Planner sequencing (added 2026-08-21).** Supersedes the `**Depends on:**`
+> line above wherever they differ — that line predates cross-folder analysis.
+> Authoritative copy of this table: `TASKS/audit-remediation/README.md`.
+>
+> - **Wave:** 6 — semantic duplication and migration drift · **Dispatch unit:** `W6a`
+> - **Depends on:** `08/01`
+> - **Blocks:** none
+> - **Parallel-safe with:** `11/01`, `11/02`, `11/06`, `11/09`
+> - **Gated on:** AD-19
+> - **requires_security_review:** true · **requires_regression_test:** false
+
 ## Purpose of this file
 
 **This is not an implementation task.** `GO-SEC4-007` — the duplicated SSRF CIDR denylist between `internal/sandbox/proxy.go` and `internal/mcp/general_tools.go` — is a real Wave 6 duplication finding thematically, but it is implemented as a security-hardening task in `TASKS/audit-remediation/08-remaining-security-hardening/`, alongside that folder's other trust-boundary findings (see that folder's own README once its task files are written — the exact filename for this specific finding was not available at the time this task-creation pass ran, since `08-remaining-security-hardening/` was empty when this folder was written). Per this batch's own "no finding should disappear merely because it was grouped" rule (remediation guide §4 Output C), this file's only job is to keep `GO-SEC4-007` visible in this folder's classification table (see this folder's `README.md`) even though its actual remediation work is tracked elsewhere.

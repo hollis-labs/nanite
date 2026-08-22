@@ -14,6 +14,17 @@ or another system entirely — **undetermined, see `requires_architect_decision`
 below**). This task's own output is new config/workflow file(s) plus a short
 runbook note; it does not touch any Go source.
 
+> **Planner sequencing (added 2026-08-21).** Supersedes the `**Depends on:**`
+> line above wherever they differ — that line predates cross-folder analysis.
+> Authoritative copy of this table: `TASKS/audit-remediation/README.md`.
+>
+> - **Wave:** 7 — quality ratchet · **Dispatch unit:** `W7`
+> - **Depends on:** Wave 6 complete, and `00/02` for the frozen-HEAD baseline numbers
+> - **Blocks:** none
+> - **Parallel-safe with:** `12/03`
+> - **Gated on:** AD-21 — which historical lint classes become blocking. Constraint from the guide: baseline history, reject regressions; do **not** require the backlog to reach zero first.
+> - **requires_security_review:** false · **requires_regression_test:** false
+
 ## Context
 
 `requires_architect_decision: true`. Two independent open questions block

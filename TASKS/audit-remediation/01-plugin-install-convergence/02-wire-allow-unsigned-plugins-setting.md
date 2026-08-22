@@ -6,6 +6,17 @@
 **Touches:** `cmd/nanite/plugin_install_flow.go` (`buildInstaller`), `internal/plugin/install/verify.go` (`SignatureVerifier.AllowUnsigned` doc comment, if the setting is retired rather than wired), `internal/plugin/devmode/devmode_on.go` / `devmode_off.go` (doc comments only, if behavior changes), `internal/store/user_settings.go` (reference only — the storage/API-exposure side is already correct and out of scope), `internal/api/settings.go` (reference only, same reason)
 **requires_architect_decision:** true — is this dev-workflow opt-in still wanted at all, given task 01 in this folder is converging every plugin-install entry point onto a fail-closed pipeline? Wiring a bypass and simultaneously hardening the rest of the system in the same wave is a real tension worth an explicit call, not a default "wire it because the doc comment says so."
 
+> **Planner sequencing (added 2026-08-21).** Supersedes the `**Depends on:**`
+> line above wherever they differ — that line predates cross-folder analysis.
+> Authoritative copy of this table: `TASKS/audit-remediation/README.md`.
+>
+> - **Wave:** 1 — release-blocking trust boundaries · **Dispatch unit:** `W1`
+> - **Depends on:** `01/01` — sequencing, not compilation: both edit the same `SignatureVerifier` construction site, and one pass avoids two conflicting edits
+> - **Blocks:** none
+> - **Parallel-safe with:** none in-wave (follows `01/01`)
+> - **Gated on:** none
+> - **requires_security_review:** true · **requires_regression_test:** true
+
 ## Context
 
 ### Finding addressed

@@ -1,10 +1,21 @@
 # Transport-layer validation duplication (schedules/settings) and a memories-pagination correctness bug
 
-**Phase:** Wave 3 — Remaining security hardening (guide §4; unsequenced — see folder README)
+**Phase:** Wave 3 — Remaining security hardening (guide §4; sequenced 2026-08-21 — see the sequencing block below)
 **Status:** not-started
 **Depends on:** none
 **Touches:** `internal/api/schedules.go`, `internal/api/settings.go` (GO-API-004); `internal/api/memories.go`, `internal/memory` package (`RecallOpts`/`Recall`) (GO-API-005)
 **Requires architect decision:** **mixed** — GO-API-004: false (task-authoring call, see divergence note); GO-API-005: false (matches `findings.json`)
+
+> **Planner sequencing (added 2026-08-21).** Supersedes the `**Depends on:**`
+> line above wherever they differ — that line predates cross-folder analysis.
+> Authoritative copy of this table: `TASKS/audit-remediation/README.md`.
+>
+> - **Wave:** 3 — remaining security hardening · **Dispatch unit:** `W3`
+> - **Depends on:** Wave 2 complete
+> - **Blocks:** `11/15`
+> - **Parallel-safe with:** `08/01`–`08/06`
+> - **Gated on:** none
+> - **requires_security_review:** false · **requires_regression_test:** true
 
 ## Findings addressed
 

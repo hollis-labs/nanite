@@ -7,6 +7,17 @@
 
 `requires_architect_decision: false` — low-risk, low-priority, no urgent behavioral concern today; recorded for architect awareness rather than requiring sign-off before proceeding, but see "Risk / rollback" for why this is still worth deliberate handling rather than a purely mechanical pass.
 
+> **Planner sequencing (added 2026-08-21).** Supersedes the `**Depends on:**`
+> line above wherever they differ — that line predates cross-folder analysis.
+> Authoritative copy of this table: `TASKS/audit-remediation/README.md`.
+>
+> - **Wave:** 6 — semantic duplication and migration drift · **Dispatch unit:** `W6a`
+> - **Depends on:** `07/02`, `07/05`, `08/07` — all three edit `cmd/nanite/main.go` first
+> - **Blocks:** `13/05`
+> - **Parallel-safe with:** `11/06`, `11/07`, `11/09`
+> - **Gated on:** AD-19
+> - **requires_security_review:** false · **requires_regression_test:** true
+
 ## Context
 
 ### Findings addressed

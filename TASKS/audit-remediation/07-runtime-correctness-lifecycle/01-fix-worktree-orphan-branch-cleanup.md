@@ -5,6 +5,17 @@
 **Depends on:** none
 **Touches:** `internal/worktree/manager.go` (`Create`, `CleanupOrphaned`); `internal/worktree/manager_test.go` (`TestCleanupOrphaned`). No other packages need code changes — `CleanupOrphaned` has exactly one production caller (see Context) and its call signature does not change.
 
+> **Planner sequencing (added 2026-08-21).** Supersedes the `**Depends on:**`
+> line above wherever they differ — that line predates cross-folder analysis.
+> Authoritative copy of this table: `TASKS/audit-remediation/README.md`.
+>
+> - **Wave:** 2 — correctness, lifecycle, concurrency · **Dispatch unit:** `W2b`
+> - **Depends on:** `00/01`
+> - **Blocks:** none
+> - **Parallel-safe with:** all of W2b — `internal/worktree` is disjoint
+> - **Gated on:** none
+> - **requires_security_review:** false · **requires_regression_test:** true
+
 ## Context
 
 `requires_architect_decision: false` — a clear, small, well-understood bug fix with no design ambiguity. Per the remediation guide's own explicit instruction for this folder's grouping ("Runtime correctness/lifecycle... Prioritize observable behavioral defects such as wrong orphan branch cleanup and unbounded retained job state over informational idempotency/comment issues"), this is the **highest-priority task in this folder** — the clearest real, observable behavioral defect among the five findings reviewed together here.

@@ -1,10 +1,21 @@
 # Add unit tests for buildRepairConfig and discoverManagedDurableAgentConfigs (both 0.0% covered)
 
-**Phase:** Wave 2 — Correctness, lifecycle, concurrency (audit-remediation batch, unsequenced — see folder README)
+**Phase:** Wave 2 — Correctness, lifecycle, concurrency (audit-remediation batch, sequenced 2026-08-21 — see the sequencing block below)
 **Status:** not-started
 **Depends on:** none — independently landable, pure test-debt closure.
 **Touches:** New/expanded test files for `internal/service/tool_cache_wiring.go` (`buildRepairConfig`) and `internal/service/managed_durable_configs.go` (`discoverManagedDurableAgentConfigs`). No production code changes expected.
 **Requires architect decision:** false — pure test-debt closure, no design ambiguity.
+
+> **Planner sequencing (added 2026-08-21).** Supersedes the `**Depends on:**`
+> line above wherever they differ — that line predates cross-folder analysis.
+> Authoritative copy of this table: `TASKS/audit-remediation/README.md`.
+>
+> - **Wave:** 2 — correctness, lifecycle, concurrency · **Dispatch unit:** `W2a`
+> - **Depends on:** `00/01`
+> - **Blocks:** none
+> - **Parallel-safe with:** all of W2a — test-only
+> - **Gated on:** none
+> - **requires_security_review:** false · **requires_regression_test:** true
 
 ## Context
 

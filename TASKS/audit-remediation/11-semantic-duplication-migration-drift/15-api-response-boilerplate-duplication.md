@@ -7,6 +7,17 @@
 
 `requires_architect_decision: false` — both bundled findings are low-priority mechanical cleanup with no semantic-divergence risk.
 
+> **Planner sequencing (added 2026-08-21).** Supersedes the `**Depends on:**`
+> line above wherever they differ — that line predates cross-folder analysis.
+> Authoritative copy of this table: `TASKS/audit-remediation/README.md`.
+>
+> - **Wave:** 6 — semantic duplication and migration drift · **Dispatch unit:** `W6b`
+> - **Depends on:** `01/01`, `08/09`, `08/10`
+> - **Blocks:** none
+> - **Parallel-safe with:** **wants `internal/api` to itself**
+> - **Gated on:** none
+> - **requires_security_review:** false · **requires_regression_test:** true
+
 ## Context
 
 ### Findings addressed

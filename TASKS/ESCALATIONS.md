@@ -894,3 +894,159 @@ Fresh re-reviewer empirically verified the byte-vs-rune safety claim (a scratch 
 Fresh re-reviewer independently mutation-tested the fix (temporarily removed it, confirmed the shipped regression test fails with exactly the pre-fix symptom, restored cleanly), traced `subagent.Service.Spawn`'s gated path directly to confirm the new error's `RunID`/`EnvelopeInstanceID` fields are real values, and confirmed no regression anywhere (full `-race` runs on both `internal/skill` and `internal/skillinstall`). Full build/vet/test clean. **Task `07` is fully closed: implemented, validated, reviewed.**
 
 **Phase 4 (tasks `06`, `07`, `08`) and Wave 5 are now fully closed.** Wave 6 (`09`, solo — the sandbox/capability-policy gate everything downstream routes through) is unblocked.
+
+## 2026-08-21 — Audit Remediation planning pass: the audit's raw evidence never landed on `main` and is one `git worktree prune` from permanent loss
+
+**Raised by:** the Audit Remediation planning session's own verification pass (step 6 of the
+kickoff-author checklist — "check current repo state directly, never trust a doc's claim alone").
+**Question / mismatch:** `docs/audits/2026-08-21-go-quality/REPORT.md:8` states *"Raw tool output
+backing every finding below lives in `raw/`."* That directory does not exist on `main`. It exists
+only in `.claude/worktrees/go-quality-audit/docs/audits/2026-08-21-go-quality/raw/` (29 files,
+8.0 MB), where `git status` reports it untracked and `git check-ignore -v` confirms the cause:
+`/Users/chrispian/.gitignore:11:*.log`. The merge commit `8258176e` brought `REPORT.md` and
+`findings.json` onto `main`; the evidence they cite did not come with them. Roughly 8 MB of it is
+cited directly by `REPORT.md` (`govulncheck.log`, `golangci-baseline.json`, `deadcode.log`,
+`gosec.json`, `fanin-fanout.tsv`, `complexity-summary.txt`, …), and it **cannot be regenerated** —
+it was measured against a working tree at `8feeee5c` that no longer exists.
+**Resolution:** Not resolved by this planning pass — it needs an operator decision on repo weight
+(logged as **AD-23** in `TASKS/audit-remediation/ARCHITECT-DECISIONS.md`) and it is a *write*, which
+a planning pass does not make. Written up as step 1 of task `00/02`
+(`00-revalidate-baseline/02-refresh-tool-baseline-at-frozen-head.md`), with the copy commands, the
+narrow `.gitignore` negation rule (`!docs/audits/**/raw/*.log`), a `git check-ignore` verification
+step, and an explicit fallback if AD-23 is declined (durable external copy whose absolute path is
+recorded in `REPORT.md:8` — an unrecorded copy on one machine is not an acceptable outcome).
+**Follow-up:** **Time-sensitive and independent of everything else in the batch.** Task `00/02`
+step 1 is deliberately written to run *before* the dev freeze rather than waiting for Wave 0's own
+gate, precisely so a routine worktree cleanup cannot destroy the evidence chain for 113 findings.
+
+## 2026-08-21 — Audit Remediation planning pass: the lint rule that would have caught the batch's most severe finding exists, and was scoped away from the package where the bug lived
+
+**Question / mismatch:** `.golangci.yml:88-103` enables `forbidigo` with
+`- pattern: '^filepath\.Join$'` / `msg: "use internal/pathsafe.ResolveUnder to prevent path
+traversal (Phase 1 Wave 1)"`. `.golangci.yml:180-184` then silences it:
+`- text: 'ResolveUnder' / linters: [forbidigo] / path-except: '(internal/sandbox/|internal/mcp/|internal/service/install/)'`.
+`GO-PLUGIN-002` (critical — unconfined path-traversal write) is a bare
+`filepath.Join(cs.pluginsDir, entry.Name)` at `internal/api/catalog.go:301`. `internal/api/` is not
+in that `path-except` list, so the rule was silenced exactly where untrusted HTTP input becomes a
+filesystem path. The rule was correct, present, and configured not to look there. The exclusion's
+own comment is honest about intent — a deliberate "Phase 1 Wave 1 adoption scope (2026-04-12)"
+choice to surface a bounded worklist without churning unrelated packages — so this is not a
+mistake so much as a rule that expired silently for want of a widening mechanism.
+
+A second instance of the same class, found in the same pass: `GO-STORE-003` (high —
+`DeleteAgentByID` cannot distinguish not-found from a real DB error) was **already in the lint
+output**, attributed by `REPORT.md:693` to golangci's `nilerr` linter at
+`raw/golangci-baseline.log:6421`. `nilerr` is enabled today. It never gated because the pre-commit
+hook runs `golangci-lint run --new` (`lefthook.yml`) — changed code only, which structurally cannot
+surface a pre-existing finding in untouched code.
+**Resolution:** No code fix in this pass (planning only). Both instances are written up as the
+headline analysis in `TASKS/audit-remediation/PREVENTION.md`, which is the specification `12/01`
+(full-repo scheduled lint gate) and `12/02` (engineering standards docs) implement against. The
+concrete narrowest fix — widening the `ResolveUnder` `path-except` to include `internal/api/` — is
+assigned to `08/09` and `12/01`. `12/02` was **pulled forward from the guide's Wave 7 into Wave 1**
+by this planning pass so the six named standards are citable by the remediation tasks they are
+meant to govern, rather than written down after the fact.
+**Follow-up:** The generalizable rule, recorded in `PREVENTION.md`: *an adoption-scoped lint rule
+with no widening trigger is a rule that expires silently.* Any new path-scoped rule this batch adds
+must record its widening trigger alongside it, or it reproduces this exact failure.
+
+## 2026-08-21 — Audit Remediation planning pass: two of the six production islands are not flagged as needing an architect decision
+
+**Question / mismatch:** The remediation guide's §4 Wave 4 table lists six production islands, each
+requiring an explicit wire/defer/retire call. Direct query over
+`TASKS/audit-remediation/findings.json` shows 44 of 113 findings carry
+`requires_architect_decision: true` — and `GO-MEM-002` (Hadron context gate) and `GO-MCPTOOL-003`
+(curated tool-knowledge matcher) are **not** among them, despite being islands 2 and 6. Left
+uncorrected, a mechanical "dispatch everything not flagged" reading would send two
+wire/defer/retire decisions to a worker to answer by implication.
+**Resolution:** Both are in the decision queue regardless, as **AD-07** and **AD-11** in
+`TASKS/audit-remediation/ARCHITECT-DECISIONS.md`, on the grounds that the guide's blanket
+requirement (*"For every 'island,' explicitly choose: wire / defer / retire"*) is the stronger
+authority over an individual finding's flag. Their task files (`09/02`, `09/06`) each carry the
+discrepancy in their sequencing block so a dispatcher sees it locally.
+**Follow-up:** Wave 0 (`00/01`) should set both findings to `disposition: needs-architect-decision`
+to bring the catalog into line with the queue. Noted in the batch README as correction 4.
+
+## 2026-08-21 — Audit Remediation planning pass: batch dispatched as eleven units rather than one, and a deliberate deviation from the guide's wave ordering
+
+**Question / mismatch:** Every prior sibling batch was dispatched as a single Orchestrator session
+with a single kickoff prompt; the largest was `TASKS/skills/` at 12 tasks. Audit Remediation is 63
+task files (61 inherited from the task-creation pass, plus 2 new Wave 0 tasks). No Orchestrator in
+this project's history has held anything near that, and the failure mode — tracking drift, tasks
+silently skipped, `INDEX.md` going stale mid-batch — is well attested here.
+**Resolution:** Operator decision (2026-08-21): one batch, one `TASKS/INDEX.md` section, one
+`findings.json` tracker, but **eleven dispatch units** (`W0`, `W1`, `W2a`, `W2b`, `W3`, `W4`, `W5`,
+`W6a`, `W6b`, `W7`, `W8`), each 2–10 tasks, each getting its own kickoff prompt when its turn
+comes. Wave 2 and Wave 6 are split because 13 and 16 tasks respectively exceed what has executed
+cleanly. Folder-scoped task numbering (`NN/MM`) was retained rather than flattened to `01`–`63`,
+because `findings.json`'s `task_file` field and every row of `FINDING-INDEX.md` already address
+tasks by folder path.
+
+Two deliberate deviations from the remediation guide's own ordering, both recorded in the batch
+README rather than applied silently: (1) `12/02` (engineering standards docs) moved from Wave 7 to
+Wave 1 — doc-only, collides with nothing, and its content is already specified by `PREVENTION.md`;
+(2) `08/08` (dependency bumps) is marked **runs alone** despite the guide's "independent dependency
+upgrades can run in parallel," because it rewrites `go.mod`/`go.sum`, which every concurrent
+worktree also carries. The guide's advice assumes branch-per-task, not worktree-per-task.
+**Follow-up:** Kickoff prompts are **not** written by this pass — that is the kickoff-prompt
+author's role, one per unit, as each becomes dispatchable. Nothing dispatches until the dev freeze
+is in effect (**AD-24**), Wave 0 has closed, and the operator has checked the approval box in the
+batch README's `## Status` block.
+
+## 2026-08-21 — AD-24 decided: repo-wide development freeze, operator-gated resumption, no derived exit trigger
+
+**Raised by:** the audit-remediation planning session, as the batch's own blocking prerequisite.
+**Question / mismatch:** The planning pass could sequence the batch but could not answer two things
+only the operator can: how wide the freeze reaches, and what ends it. Left open, both had obvious
+wrong answers an agent would reach on its own — "freeze only the audited packages" (which leaves
+`internal/store`/`internal/service`/`internal/api` moving under Wave 0's feet via any batch that
+happens to touch them) and "resume when all critical/high are closed" (a derived trigger an agent
+would fire for itself).
+**Resolution:** Operator decision, stated directly:
+
+- **Scope: ALL tasks freeze**, every batch and every phase, not scoped to audited packages or to
+  this batch's dependencies. The six planned-but-undispatched sibling batches (Plugin System, Loops,
+  Turn vs. Run, Feedback-Carrying Denial, Code Mode, Filesystem Snapshots) freeze with everything
+  else.
+- **`TASKS/audit-remediation/` is priority #1** and the only authorized work.
+- **Exceptions require explicit operator authorization, case by case**; the operator states one is
+  unlikely. An agent must never self-authorize, and must not treat small size, low risk, "it's only
+  docs," or "this batch was already planned" as qualifying.
+- **Exit: the operator is the gate.** Explicitly **not** automatic on any condition — not a wave
+  boundary, not "all critical/high closed," not a green test run, not `INDEX.md` showing a batch
+  complete. There is no derived trigger.
+- **In-flight work finishes** (two batches, in their home stretch at the time); nothing new starts.
+
+Recorded in four places chosen so an agent hits it before it can act: a banner at the **top of
+`TASKS/INDEX.md`** (the live tracker every Orchestrator reads, placed above every section's own
+"ready to dispatch" language); a banner at the **top of all 18 files in
+`docs/engineering/orchestrator-kickoffs/`** (the real boot artifacts — a kickoff prompt pasted into
+a plain session is how a batch actually starts, so this is the highest-leverage interception point);
+the batch `README.md`'s Status block; and AD-24 in `ARCHITECT-DECISIONS.md`.
+**Follow-up:** The banners must be removed when the operator lifts the freeze — they say so
+themselves. Deliberately **not** added to `docs/engineering/EXECUTION-PROCESS.md`: that file is the
+permanent operating procedure, and a temporal rule written into it would outlive the freeze and
+become a stale permanent instruction.
+
+## 2026-08-21 — AD-01 through AD-04 moved from Wave 1 into Wave 0, gated on an interim revalidation report
+
+**Question / mismatch:** The four release-blocking Wave 1 tasks (`01/01`, `01/02`, `02/01`, `02/02`)
+are each gated on an architect decision. Filed as Wave 1 decisions, they would be made when Wave 1
+was scheduled — which meant Wave 1's dispatch waited on decisions that had not been started, behind
+a Wave 0 revalidation that was never going to answer them. The inverse error was equally available:
+deciding them immediately, against audit-era evidence that is 40 commits / 156 files / +24,891 lines
+stale — the exact mistake the guide's Wave 0 exists to prevent.
+**Resolution:** Operator direction — resolve AD-01 through AD-04 **during the Wave 0 window**, as an
+operator-owned third track alongside `00/01` and `00/02`. The dependency that makes this sound is
+narrower than "Wave 0 complete": these decisions need only their own findings revalidated
+(`GO-PLUGIN-001/002/003`, `GO-SEC4-001/002/006` — all in the critical/high tranche `00/01` already
+processes first — plus `GO-SEC4-005`). So `00/01` gained a hard requirement: **deliver an interim
+critical/high report the moment it exists, rather than holding results until the full 113-finding
+sweep finishes**, and pull `GO-SEC4-005` forward out of severity order because AD-03 needs it and it
+is only low severity. Ordering is now: `00/01` interim report → operator decides AD-01–AD-04 → rest
+of Wave 0 → Wave 1 dispatchable.
+**Follow-up:** AD-05 (provision a real signing key for the default seeded catalog source) stays a
+Wave 1 follow-up and gates nothing — it is potentially external work (key generation, distribution,
+rotation policy) and `01/01` is instructed not to silently scope it in or out. Wave 1's dispatch
+precondition is now "W0 closed **and** AD-01–AD-04 all `decided`," recorded in the batch README's
+dispatch table.

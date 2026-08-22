@@ -1,12 +1,23 @@
 # Secret-key-name substring heuristic misses common credential-bearing env var names
 
-**Phase:** Wave 3 — Remaining security hardening (guide §4; unsequenced — see folder README)
+**Phase:** Wave 3 — Remaining security hardening (guide §4; sequenced 2026-08-21 — see the sequencing block below)
 **Status:** not-started
 **Depends on:** none
 **Touches:** `internal/sandbox/exec.go` (`isSecretKey` and its call sites in the AgentExec/UserExec environment-overlay construction path)
 **Requires architect decision:** false
 
 > **Divergence from `findings.json`:** the catalog flags this finding's `requires_architect_decision` as `true`. This task sets it to `false` because the audit itself already names two concrete, sufficient directions (see Proposed direction below) — the remaining choice is an implementation-level tradeoff an implementer can make, not an open architectural question. Escalate if a reviewer disagrees.
+
+> **Planner sequencing (added 2026-08-21).** Supersedes the `**Depends on:**`
+> line above wherever they differ — that line predates cross-folder analysis.
+> Authoritative copy of this table: `TASKS/audit-remediation/README.md`.
+>
+> - **Wave:** 3 — remaining security hardening · **Dispatch unit:** `W3`
+> - **Depends on:** `02/01` (same file, `internal/sandbox/exec.go`)
+> - **Blocks:** none
+> - **Parallel-safe with:** `08/01`–`08/04`, `08/06`, `08/10`
+> - **Gated on:** none
+> - **requires_security_review:** true · **requires_regression_test:** true
 
 ## Findings addressed
 

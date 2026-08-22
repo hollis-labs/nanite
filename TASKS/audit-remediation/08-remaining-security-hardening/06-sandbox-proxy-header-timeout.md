@@ -1,12 +1,23 @@
 # Sandbox proxy's http.Server has no ReadHeaderTimeout
 
-**Phase:** Wave 3 — Remaining security hardening (guide §4; unsequenced — see folder README)
+**Phase:** Wave 3 — Remaining security hardening (guide §4; sequenced 2026-08-21 — see the sequencing block below)
 **Status:** not-started
 **Depends on:** none
 **Touches:** `internal/sandbox/proxy.go`
 **Requires architect decision:** false (matches `findings.json`)
 
 This is **the smallest task in this folder** — a single missing `http.Server` field.
+
+> **Planner sequencing (added 2026-08-21).** Supersedes the `**Depends on:**`
+> line above wherever they differ — that line predates cross-folder analysis.
+> Authoritative copy of this table: `TASKS/audit-remediation/README.md`.
+>
+> - **Wave:** 3 — remaining security hardening · **Dispatch unit:** `W3`
+> - **Depends on:** Wave 2 complete
+> - **Blocks:** none
+> - **Parallel-safe with:** `08/01`–`08/05`, `08/10`
+> - **Gated on:** none
+> - **requires_security_review:** true · **requires_regression_test:** true
 
 ## Findings addressed
 

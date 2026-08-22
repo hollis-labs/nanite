@@ -1,9 +1,20 @@
 # Remove confirmed dead code across 7 packages (deadcode-tool-verified)
 
-**Phase:** Wave 8 — Mechanical cleanup (audit-remediation batch, unsequenced — see folder README)
+**Phase:** Wave 8 — Mechanical cleanup (audit-remediation batch, sequenced 2026-08-21 — see the sequencing block below)
 **Status:** not-started
 **Depends on:** none within this batch.
 **Touches:** `internal/store/skill_mode_filter.go`, `internal/store/skills_source.go`, `internal/agent/managed_files.go`, `internal/agentvalidation/validation.go`, `internal/contextbroker/intent.go`, `internal/contextbroker/broker.go`, `internal/recovery/orphansweep/orphan_sweep.go`, `internal/runtime/agent/deps.go` (comment only), `internal/store/agent_runtime.go` (comment only), `internal/service/agent_cycles.go`, `internal/mcp/tool_ctx.go`, `internal/coordination/keys.go`, `internal/recovery/broker/broker.go` (review only, no edit expected).
+
+> **Planner sequencing (added 2026-08-21).** Supersedes the `**Depends on:**`
+> line above wherever they differ — that line predates cross-folder analysis.
+> Authoritative copy of this table: `TASKS/audit-remediation/README.md`.
+>
+> - **Wave:** 8 — mechanical cleanup · **Dispatch unit:** `W8`
+> - **Depends on:** `09/02`, `09/04`, `03/01`, and `00/02` for the refreshed `deadcode` list
+> - **Blocks:** none
+> - **Parallel-safe with:** `13/04`, `13/05`. **Not** `11/13` — both touch `internal/store`.
+> - **Gated on:** AD-09 and AD-07 both **change this task's scope** rather than merely gating it: a retired island's files become dead-code removal here, a wired island's files must not be touched.
+> - **requires_security_review:** false · **requires_regression_test:** false
 
 ## Context
 

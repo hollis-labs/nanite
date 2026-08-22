@@ -6,6 +6,17 @@
 **Touches:** nothing. This file recommends **no code changes** to `internal/service/container.go`, `internal/store/*.go`, or `internal/plugin/host.go`. It exists purely so the underlying findings have a documented disposition instead of silently disappearing from tracking.
 **requires_architect_decision:** true — but the expected/likely outcome is **no action**. This is not a decision queued because the direction is unclear; it is queued because the remediation guide requires every finding to reach an explicit disposition (§4 Wave 5, §7 output C), and "confirmed, no action needed" is itself a disposition an architect must actually make, not one this planning pass can make unilaterally on the architect's behalf.
 
+> **Planner sequencing (added 2026-08-21).** Supersedes the `**Depends on:**`
+> line above wherever they differ — that line predates cross-folder analysis.
+> Authoritative copy of this table: `TASKS/audit-remediation/README.md`.
+>
+> - **Wave:** 5 — architectural concentration · **Dispatch unit:** `W5`
+> - **Depends on:** none
+> - **Blocks:** none
+> - **Parallel-safe with:** anything — this task writes no code
+> - **Gated on:** AD-14
+> - **requires_security_review:** false · **requires_regression_test:** false
+
 ## Context
 
 This file is deliberately **not shaped like a work task**. Files `01` and `02` in this same folder (`01-chatserviceimpl-generateresponse-decomposition.md`, `02-selftoolstransport-decomposition.md`) are real decomposition-planning work with concrete deliverables (a responsibility map, a phase-boundary proposal, characterization tests). This file is the opposite: a **documented decision not to do a category of work**, covering three findings whose own audit evidence and the remediation guide's own explicit instructions both say a refactor would be the wrong call. It exists in this folder — rather than being silently dropped — specifically because this batch's own README and `FINDING-INDEX.md` require every one of the audit's 113 findings to map to exactly one task file with a real disposition; a god-object-shaped finding that turns out not to warrant action still needs a place to live where a future reader can see it was actually reviewed, not missed.

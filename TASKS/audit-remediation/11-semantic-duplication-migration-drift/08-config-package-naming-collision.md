@@ -9,6 +9,17 @@
 requires_architect_decision: true
 ```
 
+> **Planner sequencing (added 2026-08-21).** Supersedes the `**Depends on:**`
+> line above wherever they differ — that line predates cross-folder analysis.
+> Authoritative copy of this table: `TASKS/audit-remediation/README.md`.
+>
+> - **Wave:** 6 — semantic duplication and migration drift · **Dispatch unit:** `W6a`
+> - **Depends on:** Wave 5 complete
+> - **Blocks:** none
+> - **Parallel-safe with:** **none if AD-20 selects the tree-wide rename** — this task's own Touches warns it may reach every caller of `config.Config` and `config.AppConfig`. Otherwise parallel with all of Wave 6a.
+> - **Gated on:** AD-20 — decide before scheduling the wave, not during it: the answer is the difference between a two-line rename and a tree-wide sweep.
+> - **requires_security_review:** false · **requires_regression_test:** true
+
 ## Context
 
 ### Findings addressed

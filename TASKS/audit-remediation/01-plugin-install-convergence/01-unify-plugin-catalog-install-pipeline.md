@@ -6,6 +6,17 @@
 **Touches:** `internal/api/catalog.go`, `internal/api/plugins.go` (read-only reference for the already-fixed pattern), `internal/plugin/catalog.go`, `internal/plugin/signature.go`, `internal/plugin/catalog/` (`fetch.go`, `trust.go`, `trustedkeys.go`), `internal/plugin/install/` (`install.go`, `verify.go`, `staging.go`, `extract.go`, `download.go`), `cmd/nanite/plugin_install_flow.go` (reference only — do not change the CLI path's behavior), `internal/plugin/devmode/` (reference only)
 **requires_architect_decision:** true — flagged per the remediation guide's §9 decision queue. The direction (converge onto the CLI's pipeline) is not in serious doubt given the audit's evidence, but the blast radius (this is the single most severe finding in the whole audit, touches a user-facing "Plugin Manager" flow, and requires deciding exactly how catalog-sourced archives map onto the CLI's `install.Source`/`Handle`/`Installer` abstractions) means an architect should sign off on the concrete integration shape before a worker starts, not discover it mid-implementation.
 
+> **Planner sequencing (added 2026-08-21).** Supersedes the `**Depends on:**`
+> line above wherever they differ — that line predates cross-folder analysis.
+> Authoritative copy of this table: `TASKS/audit-remediation/README.md`.
+>
+> - **Wave:** 1 — release-blocking trust boundaries · **Dispatch unit:** `W1`
+> - **Depends on:** `00/01`, `00/02`
+> - **Blocks:** `01/02`, `08/09`, `11/15`
+> - **Parallel-safe with:** `02/01`, `02/02`, `03/01`, `12/02`
+> - **Gated on:** AD-04 (concrete integration shape). AD-05 is a follow-up, not a blocker.
+> - **requires_security_review:** true · **requires_regression_test:** true
+
 ## Context
 
 ### Findings addressed

@@ -6,12 +6,21 @@ and every task file below traces back to at least one real finding (the two
 `quality-ratchet` standards-doc tasks are guide-derived, not finding-derived, and are
 marked as such). No finding was dropped or silently absorbed into a grouping.
 
-This is **not** the disposition table the remediation guide's §4 output format C asks
+This is **not** the disposition table the remediation guide's §7 output format C asks
 for (`remediate | already-resolved | accepted-risk | false-positive | superseded | defer |
-retire | needs-architect-decision | needs-more-evidence`) — that decision-making is the
-planner's job, per the operator's instruction. Every finding here defaults to `remediate`
-(a task exists for it); the planner should revise dispositions after re-validating against
-current HEAD (some may already be fixed — see the guide's Wave 0).
+retire | needs-architect-decision | needs-more-evidence`). That table is the `disposition`
+field in `findings.json`, and filling it in is the job of task
+**`00-revalidate-baseline/01-revalidate-findings-against-head.md`** — the batch's Wave 0
+gate, which nothing else dispatches ahead of. Every finding here still defaults to
+`remediate`, which is a placeholder inherited from the task-creation pass, not a judgment
+anyone made; some findings may already be fixed by the 40 commits that landed between the
+audited commit `8feeee5c` and current HEAD.
+
+**Sequencing was added on 2026-08-21** by a planning pass. Wave assignment, cross-folder
+dependencies, parallelization, and architect-decision gating live in `README.md`
+(authoritative) and are mirrored into each task file's own "Planner sequencing" block.
+The decision queue is `ARCHITECT-DECISIONS.md`; the guide's output-format D
+(prevention/rules table) is `PREVENTION.md`.
 
 | Finding | Severity | Task file |
 |---|---|---|

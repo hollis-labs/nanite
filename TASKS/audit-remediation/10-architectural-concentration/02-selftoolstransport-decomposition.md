@@ -6,6 +6,17 @@
 **Touches:** `internal/selftools/self_tools_transport.go` (`SelfToolsTransport` struct and `CallTool` switch), the other files implementing `SelfToolsTransport`'s handler methods in `internal/selftools/` (exact file list to be confirmed by the worker — the type's 81 methods are not all in one file). Read-only reference: `internal/toolclient/broker.go`, `internal/toolclient/intent.go`, `internal/toolclient/ranking.go`, `internal/toolclient/meta_tools.go` (`ToolClient` — a separate type, covered as the second finding in this same file, see below).
 **requires_architect_decision:** true — per the remediation guide's §9 decision queue item 6 ("`SelfToolsTransport` decomposition boundaries").
 
+> **Planner sequencing (added 2026-08-21).** Supersedes the `**Depends on:**`
+> line above wherever they differ — that line predates cross-folder analysis.
+> Authoritative copy of this table: `TASKS/audit-remediation/README.md`.
+>
+> - **Wave:** 5 — architectural concentration · **Dispatch unit:** `W5`
+> - **Depends on:** `09/01` (same file's fields)
+> - **Blocks:** `11/11`
+> - **Parallel-safe with:** `10/03` only
+> - **Gated on:** AD-13. Constraint worth restating: *do not split solely to reduce field/method counts.*
+> - **requires_security_review:** false · **requires_regression_test:** true
+
 ## Context
 
 ### Findings addressed

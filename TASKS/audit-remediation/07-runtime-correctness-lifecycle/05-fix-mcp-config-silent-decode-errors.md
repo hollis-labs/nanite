@@ -5,6 +5,17 @@
 **Depends on:** none
 **Touches:** `cmd/nanite/main.go` (`loadPersistedMCPServers`, lines 1233-1277). No other files need changes.
 
+> **Planner sequencing (added 2026-08-21).** Supersedes the `**Depends on:**`
+> line above wherever they differ — that line predates cross-folder analysis.
+> Authoritative copy of this table: `TASKS/audit-remediation/README.md`.
+>
+> - **Wave:** 2 — correctness, lifecycle, concurrency · **Dispatch unit:** `W2b`
+> - **Depends on:** `07/02` (same file, `cmd/nanite/main.go`)
+> - **Blocks:** `11/10`
+> - **Parallel-safe with:** none
+> - **Gated on:** none
+> - **requires_security_review:** false · **requires_regression_test:** true
+
 ## Context
 
 `requires_architect_decision: false` — a same-file, same-pattern, low-risk fix. The correct pattern already exists three lines away in the same function; this task applies it to the two sites that are missing it.

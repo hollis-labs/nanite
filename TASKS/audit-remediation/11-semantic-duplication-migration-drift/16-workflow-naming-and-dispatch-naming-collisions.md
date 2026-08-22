@@ -7,6 +7,17 @@
 
 `requires_architect_decision: false` — no action required beyond continued awareness.
 
+> **Planner sequencing (added 2026-08-21).** Supersedes the `**Depends on:**`
+> line above wherever they differ — that line predates cross-folder analysis.
+> Authoritative copy of this table: `TASKS/audit-remediation/README.md`.
+>
+> - **Wave:** 6 — semantic duplication and migration drift · **Dispatch unit:** `W6b`
+> - **Depends on:** Wave 6a complete
+> - **Blocks:** none
+> - **Parallel-safe with:** anything — no code change proposed
+> - **Gated on:** none
+> - **requires_security_review:** false · **requires_regression_test:** false
+
 ## Context
 
 ### Findings addressed

@@ -1,10 +1,21 @@
 # Triage the remaining gosec G304 path-traversal-via-variable sites
 
-**Phase:** Wave 3 — Remaining security hardening (guide §4; unsequenced — see folder README)
+**Phase:** Wave 3 — Remaining security hardening (guide §4; sequenced 2026-08-21 — see the sequencing block below)
 **Status:** not-started
 **Depends on:** sequencing only — should be read alongside `TASKS/audit-remediation/03-agent-slug-traversal/01-canonical-slug-path-validation.md` (that folder was empty at the time this task was authored; the cross-reference below is written against the finding it's expected to cover). Not a hard blocking dependency — this task's own list-production step (Step 1) simply must exclude that task's scope rather than re-analyze it.
 **Touches:** repo-wide read-only triage first; downstream code touches are **not yet known** — they depend entirely on Step 1's filtered list. Do not assume a package list before that list exists.
 **Requires architect decision:** true (matches `findings.json`) — per the audit's own recommendation: "have the architect (or whoever owns the Phase-1-Wave-1 migration) walk the [filtered] list."
+
+> **Planner sequencing (added 2026-08-21).** Supersedes the `**Depends on:**`
+> line above wherever they differ — that line predates cross-folder analysis.
+> Authoritative copy of this table: `TASKS/audit-remediation/README.md`.
+>
+> - **Wave:** 3 — remaining security hardening · **Dispatch unit:** `W3`
+> - **Depends on:** `00/02` — this task's scope **is** the refreshed G304 count; the audited figure (68 production sites) is stale by 40 commits
+> - **Blocks:** none
+> - **Parallel-safe with:** `08/01`, `08/02`, `08/04`, `08/06`, `08/10`
+> - **Gated on:** none
+> - **requires_security_review:** true · **requires_regression_test:** true
 
 ## Findings addressed
 

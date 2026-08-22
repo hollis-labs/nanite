@@ -1,9 +1,20 @@
 # Trim/correct stale comments and package docs across 6 findings — scoped trim, not blanket removal
 
-**Phase:** Wave 8 — Mechanical cleanup (audit-remediation batch, unsequenced — see folder README)
+**Phase:** Wave 8 — Mechanical cleanup (audit-remediation batch, sequenced 2026-08-21 — see the sequencing block below)
 **Status:** not-started
 **Depends on:** none within this batch.
 **Touches:** `internal/store/*.go` (25+ files, comment-only), `internal/service/ingest.go`, `internal/service/known_tools_backfill.go`, `internal/service/cli_structured_input_fallback.go`, `internal/service/agent_deps.go`, `internal/service/chat_reflex_dispatch.go`, `internal/service/team_routing.go`, `cmd/nanite/main.go`, `internal/runtime/agent/agent.go`, `internal/chat/hint_catalog.go`, `internal/service/install/adapters.go`, `internal/service/install/adapter_cleanup.go`.
+
+> **Planner sequencing (added 2026-08-21).** Supersedes the `**Depends on:**`
+> line above wherever they differ — that line predates cross-folder analysis.
+> Authoritative copy of this table: `TASKS/audit-remediation/README.md`.
+>
+> - **Wave:** 8 — mechanical cleanup · **Dispatch unit:** `W8`
+> - **Depends on:** Wave 7 complete
+> - **Blocks:** none
+> - **Parallel-safe with:** **none — broad touch across `internal/store` (25+ files), `internal/service`, and `cmd/nanite/main.go`.** Runs after everything except `13/03`.
+> - **Gated on:** none
+> - **requires_security_review:** false · **requires_regression_test:** false
 
 ## Context
 

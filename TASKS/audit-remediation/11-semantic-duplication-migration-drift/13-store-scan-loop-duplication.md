@@ -7,6 +7,17 @@
 
 `requires_architect_decision: false` — explicitly optional; do not treat this as must-fix.
 
+> **Planner sequencing (added 2026-08-21).** Supersedes the `**Depends on:**`
+> line above wherever they differ — that line predates cross-folder analysis.
+> Authoritative copy of this table: `TASKS/audit-remediation/README.md`.
+>
+> - **Wave:** 6 — semantic duplication and migration drift · **Dispatch unit:** `W6b`
+> - **Depends on:** `06/01`, `06/02`
+> - **Blocks:** none
+> - **Parallel-safe with:** **wants `internal/store` to itself** — not concurrent with `13/01` or `13/02`, which also touch the package
+> - **Gated on:** none
+> - **requires_security_review:** false · **requires_regression_test:** true
+
 ## Context
 
 ### Findings addressed

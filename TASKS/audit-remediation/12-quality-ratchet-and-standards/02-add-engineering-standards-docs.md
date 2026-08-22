@@ -11,6 +11,17 @@ citable evidence, which they already do as of this batch.
 content; the file currently exists as an intentionally sparse "stub" per its
 own header, so this task is additive, not a rewrite of existing content).
 
+> **Planner sequencing (added 2026-08-21).** Supersedes the `**Depends on:**`
+> line above wherever they differ — that line predates cross-folder analysis.
+> Authoritative copy of this table: `TASKS/audit-remediation/README.md`.
+>
+> - **Wave:** Wave 1 (pulled forward from the guide's Wave 7 — see the batch README) · **Dispatch unit:** `W1`
+> - **Depends on:** `00/01`
+> - **Blocks:** none
+> - **Parallel-safe with:** all of Wave 1 — docs-only, collides with nothing
+> - **Gated on:** none
+> - **requires_security_review:** false · **requires_regression_test:** false
+
 ## Context
 
 `requires_architect_decision: false` — these six standards are already fully

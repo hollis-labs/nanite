@@ -17,6 +17,17 @@ requires_security_review: true
 requires_regression_test: true
 ```
 
+> **Planner sequencing (added 2026-08-21).** Supersedes the `**Depends on:**`
+> line above wherever they differ — that line predates cross-folder analysis.
+> Authoritative copy of this table: `TASKS/audit-remediation/README.md`.
+>
+> - **Wave:** 1 — release-blocking trust boundaries · **Dispatch unit:** `W1`
+> - **Depends on:** `00/01`, `00/02`
+> - **Blocks:** `08/05` (same file, `internal/sandbox/exec.go`)
+> - **Parallel-safe with:** `01/01`, `01/02`, `02/02`, `03/01`, `12/02`
+> - **Gated on:** AD-01 (fail-closed vs. visible opt-in) **and** AD-02 (network allowlist level) — decide both together; an inconsistent pair is worse than either coherent answer.
+> - **requires_security_review:** true · **requires_regression_test:** true
+
 ## Context
 
 ### Findings addressed

@@ -20,6 +20,17 @@ requires_security_review: false
 requires_regression_test: true
 ```
 
+> **Planner sequencing (added 2026-08-21).** Supersedes the `**Depends on:**`
+> line above wherever they differ — that line predates cross-folder analysis.
+> Authoritative copy of this table: `TASKS/audit-remediation/README.md`.
+>
+> - **Wave:** 4 — production islands · **Dispatch unit:** `W4`
+> - **Depends on:** `00/01`'s reachability report
+> - **Blocks:** `11/05` (shares `internal/mcp/manager.go`), `13/01` — **this task's outcome changes `13/01`'s scope**: retired files become dead-code removal, wired files must not be touched
+> - **Parallel-safe with:** `09/01`, `09/02`, `09/03`, `09/05`, `09/06`
+> - **Gated on:** AD-09 (wire / defer / retire)
+> - **requires_security_review:** false · **requires_regression_test:** true
+
 ## Context
 
 ### Findings addressed

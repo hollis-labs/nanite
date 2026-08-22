@@ -1,10 +1,21 @@
 # Default auth/bind/TLS posture — no enforcement or signal toward the documented local-only tradeoff
 
-**Phase:** Wave 3 — Remaining security hardening (guide §4; unsequenced — see folder README)
+**Phase:** Wave 3 — Remaining security hardening (guide §4; sequenced 2026-08-21 — see the sequencing block below)
 **Status:** not-started
 **Depends on:** none
 **Touches:** `internal/server/auth.go`, `internal/server/server.go`, `internal/server/caller_identity.go`; likely `internal/config` (any new bind-address/TLS/warning config options); `cmd/nanite/main.go`/`cmdServe` (composition-root wiring, per report §8.13)
 **Requires architect decision:** true — this is explicitly named in the guide's §9 architect-decision-queue as **item 3** ("Default auth/bind/TLS/warning posture")
+
+> **Planner sequencing (added 2026-08-21).** Supersedes the `**Depends on:**`
+> line above wherever they differ — that line predates cross-folder analysis.
+> Authoritative copy of this table: `TASKS/audit-remediation/README.md`.
+>
+> - **Wave:** 3 — remaining security hardening · **Dispatch unit:** `W3`
+> - **Depends on:** `07/02` (same file and function, `cmdServe`)
+> - **Blocks:** `11/10`
+> - **Parallel-safe with:** `08/01`–`08/06`
+> - **Gated on:** AD-15 (default auth/bind/TLS/warning posture) — a product decision as much as a security one
+> - **requires_security_review:** true · **requires_regression_test:** true
 
 ## Findings addressed
 

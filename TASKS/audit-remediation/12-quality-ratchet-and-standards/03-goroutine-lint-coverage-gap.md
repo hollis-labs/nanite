@@ -5,6 +5,17 @@
 **Depends on:** none.
 **Touches:** `Makefile` (`lint-goroutines` target only, `Makefile:74-81`).
 
+> **Planner sequencing (added 2026-08-21).** Supersedes the `**Depends on:**`
+> line above wherever they differ — that line predates cross-folder analysis.
+> Authoritative copy of this table: `TASKS/audit-remediation/README.md`.
+>
+> - **Wave:** 7 — quality ratchet · **Dispatch unit:** `W7`
+> - **Depends on:** `04/04` — that task performs the `safego` adoption this one lints
+> - **Blocks:** none
+> - **Parallel-safe with:** `12/01`
+> - **Gated on:** none
+> - **requires_security_review:** false · **requires_regression_test:** true
+
 ## Context
 
 `requires_architect_decision: false` — this is a small, mechanical, one-

@@ -37,5 +37,8 @@ config-decode failure, respectively — real, but none as sharply "this runs
 on every boot and silently does the wrong thing" as task 01. This ordering
 is this folder's own internal priority signal only; it is not a commitment
 about where this folder sits relative to the other twelve `audit-remediation/`
-folders — that cross-folder sequencing is explicit planner work, per the
-parent `TASKS/audit-remediation/README.md`.
+folders. **That cross-folder sequencing was done on 2026-08-21** — see the
+parent `TASKS/audit-remediation/README.md` for the authoritative wave/dependency
+tables, and each task file's own "Planner sequencing" block for its local copy.
+This folder's five tasks split across dispatch unit `W2b` (`07/01`-`07/05`),
+with `07/02` gated on **AD-17** and `07/03`'s retention half on **AD-18**.

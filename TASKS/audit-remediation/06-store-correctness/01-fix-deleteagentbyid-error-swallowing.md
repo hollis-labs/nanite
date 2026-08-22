@@ -5,6 +5,17 @@
 **Depends on:** none
 **Touches:** `internal/store/agents.go` (`DeleteAgentByID`, `GetAgent`); test file `internal/store/agents_fu28_test.go`. No other packages need code changes — `internal/plugin/agent_profiles.go`'s `SweepPluginAgentProfiles` is the real production caller this fix protects, but it calls `DeleteAgentByID` through its existing signature and needs no change itself (see Scope below for why).
 
+> **Planner sequencing (added 2026-08-21).** Supersedes the `**Depends on:**`
+> line above wherever they differ — that line predates cross-folder analysis.
+> Authoritative copy of this table: `TASKS/audit-remediation/README.md`.
+>
+> - **Wave:** 2 — correctness, lifecycle, concurrency · **Dispatch unit:** `W2b`
+> - **Depends on:** `00/01`
+> - **Blocks:** `06/02`, `11/13`
+> - **Parallel-safe with:** `07/01`, `07/02`, `07/03`
+> - **Gated on:** none
+> - **requires_security_review:** false · **requires_regression_test:** true
+
 ## Context
 
 `requires_architect_decision: false` — this is a clear, high-priority bug fix with no design ambiguity. It is the single sharpest correctness finding the audit produced against `internal/store` and is flagged **release-priority within Wave 2** by the remediation guide's own "Store correctness" section: *"Prioritize `GO-STORE-003`: distinguish true not-found from real DB errors in `DeleteAgentByID`. Then triage `GO-STORE-004/005/006`. Do not turn this into a repository-wide Store abstraction rewrite."* This task is that prioritized fix; task `02-triage-store-context-and-transaction-gaps.md` in this same folder covers the other three.

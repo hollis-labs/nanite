@@ -42,10 +42,11 @@ type Manager struct {
 	// observed as zero; otherwise Shutdown may return before an admitted
 	// goroutine is actually tracked.
 	admissionMu sync.Mutex
-	// testBeforeAdmissionAdd is a narrow deterministic test seam. When set,
-	// Go invokes it after the closed check and while admissionMu is still held,
-	// immediately before WaitGroup.Add. Production managers leave it nil.
-	testBeforeAdmissionAdd func()
+	// testAdmissionAdd is a narrow deterministic test seam. When set, Go gives
+	// it the function that counts an admitted work item; the seam controls when
+	// that function runs while admissionMu must remain held. Production
+	// managers leave it nil and count admission directly.
+	testAdmissionAdd func(add func())
 
 	// active counts currently-running goroutines (for diagnostics).
 	active atomic.Int64
@@ -90,11 +91,15 @@ func (m *Manager) Go(label string, fn func(ctx context.Context)) {
 		m.admissionMu.Unlock()
 		return
 	}
-	if m.testBeforeAdmissionAdd != nil {
-		m.testBeforeAdmissionAdd()
+	add := func() {
+		m.wg.Add(1)
+		m.active.Add(1)
 	}
-	m.wg.Add(1)
-	m.active.Add(1)
+	if m.testAdmissionAdd != nil {
+		m.testAdmissionAdd(add)
+	} else {
+		add()
+	}
 	m.admissionMu.Unlock()
 	safego.Go(m.ctx, m.label+"."+label, func() {
 		defer m.wg.Done()

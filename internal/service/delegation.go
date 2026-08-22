@@ -33,6 +33,7 @@ func delegateSubTasks(ctx context.Context, owner *lifecycle.Manager, workers ful
 		result chat.SubTaskResult
 	}
 	ch := make(chan indexedResult, len(subTasks))
+	results := make([]chat.SubTaskResult, len(subTasks))
 
 	for i, st := range subTasks {
 		idx := i
@@ -83,8 +84,18 @@ func delegateSubTasks(ctx context.Context, owner *lifecycle.Manager, workers ful
 		if owner == nil {
 			// Bare chatServiceImpl values are common in focused unit tests. Match
 			// goTracked's ownership rule: execute inline rather than creating an
-			// unowned manager or goroutine.
-			ch <- execute(nil)
+			// unowned manager or goroutine. Check cancellation before every
+			// invocation and again after it returns. An inline worker cannot be
+			// preempted if it ignores ctx, but cancellation still prevents every
+			// later task from starting and deterministically wins over success.
+			if err := ctx.Err(); err != nil {
+				return nil, err
+			}
+			ir := execute(nil)
+			results[ir.idx] = ir.result
+			if err := ctx.Err(); err != nil {
+				return nil, err
+			}
 			continue
 		}
 		owner.Go("delegation.delegateAndAggregate.spawnWorker", func(ownerCtx context.Context) {
@@ -92,7 +103,9 @@ func delegateSubTasks(ctx context.Context, owner *lifecycle.Manager, workers ful
 		})
 	}
 
-	results := make([]chat.SubTaskResult, len(subTasks))
+	if owner == nil {
+		return results, nil
+	}
 	var ownerDone <-chan struct{}
 	if owner != nil {
 		ownerDone = owner.Context().Done()

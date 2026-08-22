@@ -1,0 +1,29 @@
+Wave 0 / 00-02 tool-availability check — frozen HEAD 1d3bfd96 (2026-08-22)
+
+No tools were missing. Every tool listed in the task's Step 2 command block was
+present and ran to completion in this environment. Recorded here anyway per
+the task file's instruction to record tool availability explicitly rather
+than silently assuming it, plus exact versions for future reproducibility
+(REPORT.md's own raw/ evidence set does not record tool versions):
+
+  go              go1.26.2 darwin/arm64            (/Users/chrispian/.local/share/mise/installs/go/1.25.3/bin/go)
+  gofmt           (bundled with the above go toolchain)
+  golangci-lint   2.11.4 (built with go1.26.1)      (/Users/chrispian/go/bin/golangci-lint)
+  gosec           dev (no git tag / build date recorded by `gosec --version`)
+  govulncheck     govulncheck@v1.2.0, vuln DB updated 2026-08-21T20:38:00Z
+  deadcode        (golang.org/x/tools/cmd/deadcode, no --version flag; ran clean, exit 0)
+
+Notable non-blocking tooling quirk (recorded for the next worker who hits it,
+not a finding about the codebase): `golangci-lint run -c <config> --output.json.path <relative-path>`
+resolves the relative output path against the **directory containing the `-c`
+config file** (here, `docs/audits/2026-08-21-go-quality/`), not the shell's
+invocation cwd — this also explains why every issue's file path in
+`golangci-baseline.log` is prefixed `../../../` (three levels back up to the
+repo root from the config file's directory). A first attempt using a
+shell-cwd-relative path (`docs/audits/2026-08-21-go-quality/raw-1d3bfd96/golangci-baseline.json`)
+silently wrote to a nested, duplicated path instead
+(`docs/audits/2026-08-21-go-quality/docs/audits/2026-08-21-go-quality/raw-1d3bfd96/...`)
+— caught via `git status` showing an unexpected untracked `docs/audits/2026-08-21-go-quality/docs/`
+directory, which was deleted before committing. Using an absolute path for
+`--output.json.path` avoided the issue; `golangci-baseline.json` in this
+directory was produced that way.

@@ -1,0 +1,4 @@
+internal/service/container.go:1213:2: the stopReaper function is not used on all paths (possible context leak)
+internal/service/container.go:1293:3: this return statement may be reached without using the stopReaper var defined on line 1213
+internal/service/container.go:1233:2: the stopRuntimeReaper function is not used on all paths (possible context leak)
+internal/service/container.go:1293:3: this return statement may be reached without using the stopRuntimeReaper var defined on line 1233

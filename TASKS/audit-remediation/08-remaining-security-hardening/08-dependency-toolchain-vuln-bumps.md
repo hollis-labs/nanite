@@ -30,6 +30,8 @@ Both are standard, low-risk, mechanical version bumps — no architect judgment 
 
 **GO-SEC-002:** `go.mod` pins the Go toolchain at `go 1.26.2`; `govulncheck` reports **13 distinct reachable stdlib vulnerabilities** fixed across go1.26.3–go1.26.6 (GO-2026-6218, 6091, 6090, 6089, 5972, 5856, 5039, 5037, 5026, 4982, 4980, 4971, 4918), spanning TLS handshake limits, an HTTP/2 SETTINGS-frame infinite loop, `html/template` XSS-escaper bypasses, `textproto`, `x509`, `asn1`, and more — all reported reachable from application code, not just theoretical stdlib surface.
 
+**Refreshed at frozen HEAD `1d3bfd96` by `00/02`** (`docs/audits/2026-08-21-go-quality/raw-1d3bfd96/DELTA.md`, raw: `raw-1d3bfd96/govulncheck.log`): `govulncheck ./...` still reports **exactly the same 14 reachable vulnerabilities** — the identical 13 stdlib IDs listed above plus the same GO-2026-4985 module vuln — as at the audited commit `8feeee5c` (`raw/govulncheck.log`). Zero drift across 40 commits; this task's scope is unchanged and still fully current.
+
 ## What to do
 
 1. Bump `go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracehttp` to `>= v1.43.0`. The audit recommends bumping sibling `otel` modules for consistency at the same time — check `go.mod` for other `go.opentelemetry.io/otel/*` modules and align versions together rather than bumping only the one flagged module in isolation, to avoid a split-version otel dependency graph.

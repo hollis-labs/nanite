@@ -1,7 +1,7 @@
 # Rescue the audit's raw evidence, then refresh the tool baseline at frozen HEAD
 
 **Phase:** Audit remediation — Wave 0 (revalidate the baseline)
-**Status:** not-started
+**Status:** implemented
 **Depends on:** none. **Step 1 is urgent and should run before anything else in this batch — see the banner below.** Steps 2+ are hard-gated on the dev freeze, same as `00/01`.
 **Blocks:** every task in `01/` through `13/`, jointly with `00/01`. Specifically blocks `08/03` (G304 triage), `08/08` (dependency bumps), `13/01` (dead-code removal), and `13/03` (gofmt backlog), whose scopes are *defined by counts this task refreshes*.
 **Parallelizable with:** `00/01` — different tooling, no overlapping writes except the final `findings.json` merge (see Non-goals).
@@ -248,5 +248,97 @@ Do not delete the original figure. The delta is the interesting part.
   verify with `git status`.
 
 ## Work log
+
+**2026-08-22 — Steps 0, 2-4 executed (Step 1 was already done, confirmed only).**
+
+**Step 0 — freeze confirmed.** `git log --oneline -5` and `git status --short`
+in this worktree matched `main` exactly (`git status` clean, `HEAD` =
+`1d3bfd96e067de0e1d5b2edf9afe2c968b43ed24`, short `1d3bfd96`). `git worktree
+list` showed dozens of parallel worktrees but this one is on the `main`
+branch's actual current tip, not a stale copy. Used `1d3bfd96` as the
+directory suffix throughout.
+
+**Step 1 — confirmed done, not redone.** `git log --oneline -- docs/audits/2026-08-21-go-quality/raw/`
+shows `e02f52c9` ("docs/audits: rescue the go-quality audit's raw evidence
+into the repo"), and `git merge-base --is-ancestor e02f52c9 HEAD` confirms it
+is an ancestor of the frozen HEAD used here. Did not re-run the copy commands
+or touch `.gitignore`.
+
+**Step 2 — refreshed tool baseline.** All 9 commands from the task file ran
+successfully against `1d3bfd96` into `docs/audits/2026-08-21-go-quality/raw-1d3bfd96/`.
+No tool was missing (`gofmt`, `go vet`, `golangci-lint 2.11.4`, `gosec`,
+`govulncheck@v1.2.0`, `deadcode`, `go mod verify`, `go mod tidy -diff` — all
+present; versions recorded in `raw-1d3bfd96/MISSING.txt` per the task's
+"record it even if nothing's missing" instruction). One real tooling gotcha
+hit and recorded in `MISSING.txt`: `golangci-lint run -c <config>
+--output.json.path <relative-path>` resolves the relative path against the
+`-c` config file's directory (`docs/audits/2026-08-21-go-quality/`), not the
+shell's cwd — a first attempt using a cwd-relative path silently wrote to a
+nested duplicated path (`docs/audits/2026-08-21-go-quality/docs/audits/2026-08-21-go-quality/raw-1d3bfd96/...`),
+caught via an unexpected untracked `docs/audits/2026-08-21-go-quality/docs/`
+directory in `git status` and deleted before committing. Switched to an
+absolute `--output.json.path`, which worked. This also explains why every
+issue path inside `golangci-baseline.log`/`.json` is prefixed `../../../`
+(three levels from the config file's directory back to the repo root) — a
+cosmetic artifact of the config-relative path resolution, not a real nested
+module.
+
+**Step 3 — `DELTA.md` written** (`docs/audits/2026-08-21-go-quality/raw-1d3bfd96/DELTA.md`),
+every `?` cell filled with a real number. Headline deltas (full numbers in
+`DELTA.md`, not repeated in full here):
+
+- `gofmt -l` (excluding `ui/`): 122 -> **130** (**+8**)
+- gosec G304 production: 68 -> **70** (**+2**)
+- govulncheck reachable vulns: 14 -> **14**, identical vulnerability-ID set (**0** drift)
+- `deadcode` unreachable symbols, whole repo: 214 -> **202** (**-12**)
+- `deadcode` unreachable symbols, `GO-STORE-008`'s specific 4: **4/4 still confirmed**, same lines (**0** drift)
+- `dupl` hits in `internal/store`: 41 hits/~20 files -> **40 hits / 22 files** (**-1 hit, +2 files** — the duplication spread, not shrank)
+- Full `audit-golangci.yml` per-linter total (apples-to-apples, same config both times — corrected to compare against `raw/golangci-audit-complexity.log`'s 3,315, not `raw/golangci-baseline.log`'s 2,338, since the latter used the project's plain `.golangci.yml` without the complexity/dup linters): 3,315 -> **3,556** (**+241**)
+
+**Regression signal, per the task's explicit "call out counts that went up"
+instruction:** essentially every measure moved **up**, not down —
+`gofmt -l` (+8), gosec G304 production (+2), `errcheck` (+10), `staticcheck`
+(+1), `revive` (+2), `gosec` total (+35), and especially **`govet` (530 ->
+626, +96, the largest single jump)** and the complexity linters (`cyclop`
++25, `gocognit` +16, `gocyclo` +25). `nestif` (-1) and the `dupl`-in-`internal/store`
+hit count (-1, but +2 files) are the only non-increases, both noise-level.
+This is real ammunition for `12/01`'s lint-gate/ratchet task — the backlog
+grew during the pre-freeze development window exactly as `GO-HYG-001`
+predicted it would with no enforcement point. Flagged in `DELTA.md`'s "Read on
+the deltas" section; no disposition set, per this task's Non-goals — that
+call belongs to `00/01`/`12/01`.
+
+Also noted (not fixed, not escalated — it's the same pre-existing finding,
+not a new one): `raw-1d3bfd96/vet.log`'s 4 lines are the identical
+`GO-LIFE-001` `stopReaper`/`stopRuntimeReaper` context-leak finding the audit
+already found in `internal/service/container.go`, just at shifted line
+numbers (1213/1233/1293 now vs. 1162/1182/1242 at audit time) — confirmed
+same function names, same finding shape, so no `ESCALATIONS.md` entry was
+needed.
+
+Also noted, not fixed (a pre-existing internal inconsistency in the *original*
+audit's own materials, not something this task's refresh introduced):
+`REPORT.md:437`'s prose says "nestif 59" but the raw evidence file it itself
+cites (`raw/golangci-audit-complexity.log`'s own tool-generated summary)
+actually says `nestif: 64`. Recorded in `DELTA.md` with a footnote; `REPORT.md`
+was **not** edited (out of scope — its body is frozen except the Step-1
+fallback case, which didn't apply here).
+
+**Step 4 — 5 task files amended**, refreshed count quoted with the original
+preserved in parentheses in every case:
+
+- `08/03` (`## Context`): 68 -> 70 production G304 sites.
+- `08/08` (`## Context`): added a refreshed-govulncheck paragraph confirming the same 14/13+1 vulnerability set, zero drift (no original number to replace since the finding was already exact).
+- `13/01` (`## Context`): added a paragraph confirming `GO-STORE-008`'s 4 symbols are still all unreachable at the same lines, plus the whole-repo 214 -> 202 deadcode-line context (not bucket-specific, but the tool this task's Bucket-A disposition depends on).
+- `11/13` (`## Context` -> `### Root cause`): 41 hits/~20 files -> 40 hits/22 files, with an explicit "spread, not shrank" callout.
+- `13/03`: **deviation** — this file has no literal `## Context` H2 heading (unlike the other 4), despite both this task's own "Touches" line and the `00/` README's task table saying "the `## Context` of ... `13/03`". Rather than force a new heading into a file that wasn't asked to be restructured, amended the count-bearing prose in place: the `**Touches:**` line, the `GO-CHAT-007` table cell in "What to do", and the sequencing block's "Parallel-safe with" line (122 -> 130 in all three places, original preserved in parentheses). This is the one place this task's edits go slightly beyond a literal "`## Context`" scope, done for consistency within a single file rather than leaving two of its three stale-122 references un-refreshed while fixing the third.
+
+Verified `git status --short docs/audits/2026-08-21-go-quality/findings.json`
+returns nothing (untouched) before finishing. Final `git status --short`
+shows exactly the 5 amended task files plus the new, untracked
+`docs/audits/2026-08-21-go-quality/raw-1d3bfd96/` directory — nothing else.
+`go build ./cmd/nanite/` passes at `1d3bfd96` after all edits (edits were
+docs/task-file only, so this is a sanity check, not an expected-to-fail
+gate).
 
 ## Review notes

@@ -1,7 +1,7 @@
 # Build the real SKILL.md package parser and explicit install/sync pipeline
 
 **Phase:** 3 — Explicit install/sync (`TASKS/skills`)
-**Status:** in-progress — review found a real bug, fix required (see "Fix required" section below)
+**Status:** implemented
 **Depends on:** `02`, `03`
 **Touches:** `internal/skill/parser.go` (extend `Definition` to recognize `scripts:`/
 `references:`/`assets:` directory conventions and a new `parameters:` frontmatter field), new
@@ -349,6 +349,85 @@ something that now collides with a live guard elsewhere.
    your new Work Log entry; no code change needed for it.
 5. Re-verify `go build`/`go vet`/`go test ./...` clean, plus `go test ./internal/skillinstall/...
    -race -count=1` and the new `SkillService`-level regression test specifically.
+
+## Fix applied (2026-08-21)
+
+**1. Call-site fix (`internal/skillinstall.upsertIndex`, `internal/skillinstall/install.go`).**
+Cleared `fresh.ID = ""` immediately after `fresh := def.ToStoreSkill()`, before the
+`existing == nil` branch's `CreateSkill(fresh)` call, with an inline comment explaining why (the
+`file-<slug>` sentinel is reserved for the old virtual/ephemeral file-based rows, and this is a
+real, persisted `CreateSkill`, not one of those). `store.Store.CreateSkill` mutates its `*Skill`
+argument in place (`if sk.ID == "" { sk.ID = uuid.New().String() }`, confirmed by reading
+`internal/store/skills.go:129-133`), so `fresh.ID` holds the real minted UUID by the time
+`upsertIndex` returns it — no double-assignment or extra plumbing needed. The `existing != nil`
+(re-sync) branch was already unaffected — verified by inspection — since it builds `updated :=
+*existing` and never copies `fresh.ID` onto it; left untouched, per the fix instructions.
+
+**2. Decision on `ToStoreSkill()` itself: left unchanged, fix scoped to the one call site.**
+Considered removing the deterministic `file-<slug>` ID from `ToStoreSkill()` entirely, per the
+fix instructions' explicit menu of "either is acceptable." Checked the ID convention's other real
+consumer first: `skillServiceImpl.Get` (`internal/service/skill.go:59-70`) checks
+`skill.IsFileBasedID(id)` and, if true, extracts the slug via `skill.SlugFromFileID(id)` and looks
+it up by slug in `fileDefs`, returning `d.ToStoreSkill()` — i.e. `Get`-by-ID for a virtual
+file-based row depends on `ToStoreSkill()` producing an ID that round-trips back through
+`SlugFromFileID`. That path is currently dormant only because `SkillServiceConfig.FileSkills` is
+permanently `nil` in production (task `01`'s doc comment on `SkillServiceConfig`, still accurate)
+— it is not dead code, and `internal/skill/convert_test.go`'s `TestToStoreSkill` explicitly
+asserts `sk.ID == "file-go-lint"`, `TestIsFileBasedID`/`TestSlugFromFileID` assert the matching
+prefix/strip behavior. Stripping the ID from `ToStoreSkill()` would silently break that
+still-designed (if currently unreachable) `Get`-by-ID contract the moment `FileSkills` is ever
+populated again, and would require rewriting three passing, intentional assertions in a test file
+this task didn't otherwise need to touch. Clearing the ID at the one call site that actually feeds
+a real, permanent-primary-key `CreateSkill` (`internal/skillinstall.upsertIndex`) is narrower,
+leaves `ToStoreSkill()`'s existing, tested, and still-load-bearing-elsewhere contract completely
+intact, and is exactly what the fix instructions' item 1 already directs — so no change to
+`internal/skill/convert.go` was made.
+
+**3. Regression test.** Added `TestInstall_ResultRoundTripsThroughSkillService`
+(`internal/skillinstall/service_regression_test.go`): installs the existing `sample-skill`
+fixture via `Installer.Install` (reusing `newTestInstaller`'s real `*skillvendor.Store` +
+`*store.Store`, matching this package's existing test convention), asserts
+`skill.IsFileBasedID(result.Skill.ID)` is false, then constructs a real
+`service.NewSkillService(service.SkillServiceConfig{Skills: idx, FileSkills: nil})` against the
+*same* `*store.Store` instance the `Installer`'s `Index` field used (not a second, disconnected
+store), and round-trips the installed row through `SkillService.Get` → mutate → `.Update` →
+`.Delete`, asserting neither service call returns the `IsFileBasedID` rejection error, and
+confirming the row is actually gone afterward via `idx.GetSkillBySlug`. `*store.Store` satisfies
+`service.SkillStore` directly (verified against `internal/service/store.go:147-154`'s interface
+shape — `ListSkills/GetSkill/GetSkillBySlug/CreateSkill/UpdateSkill/DeleteSkill`, all already
+implemented on `*store.Store` per `internal/store/skills.go`), so no adapter/wrapper was needed.
+Confirmed no import cycle: `internal/service` does not import `internal/skillinstall` anywhere
+(grepped before adding the import), so this package's test binary importing `internal/service`
+is safe.
+
+**4. Wording correction (Work Log, task's original "2. `internal/skillinstall/` package" entry,
+"Coordination notes for tasks `06`/`07`" bullet).** The claim that `ParameterSpec.ResolverSlot` is
+"named to match `store.AgentContextResolver.SlotName` (`internal/store/agent_context_resolvers.go`)
+exactly, so task `06` can look the row up by that string with no translation layer" overstates the
+match: `ParameterSpec.ResolverSlot` and `store.AgentContextResolver.SlotName` are different Go
+identifiers with different YAML/JSON tags — the correspondence is semantic (both name the same
+kind of thing: an `agent_context_resolvers` row's slot name, as a plain string value task `06`'s
+Resolver reads and looks up by), not a literal field-name match. Left the original entry's text
+unedited above (append-only Work Log discipline) and recording the correction here instead, per
+the fix instructions' item 4 ("no code change needed for it").
+
+**5. Verification.**
+- `go build ./cmd/nanite/` — clean.
+- `go vet ./...` — clean except the same two pre-existing `internal/service/container.go`
+  `stopReaper`/`stopRuntimeReaper` findings tasks `01`/`02`/`03` already confirmed (via `git blame`)
+  predate this batch — unchanged by this fix.
+- `go test ./...` — full suite green (98 packages, 0 failures), including
+  `internal/skillinstall` (9 tests, up from 8 — the new regression test), `internal/skill`, and
+  `internal/service`.
+- `go test ./internal/skillinstall/... -race -count=1` — all 9 tests pass under the race
+  detector, including `TestInstall_ResultRoundTripsThroughSkillService`.
+- `go test ./internal/skillinstall/... -race -count=1 -run
+  TestInstall_ResultRoundTripsThroughSkillService -v` — passes in isolation.
+
+`git status --short` after the fix: only `internal/skillinstall/install.go` (modified) and the new
+`internal/skillinstall/service_regression_test.go` — no other files touched, no stray writes. No
+schema migration involved, so no backup-copy dogfeed against
+`~/.local/share/nanite/workspaces/default/backups/` was needed for this fix.
 
 ## Review notes
 <Reviewer fills this in: pass/fail, what was checked, anything fixed and how.>

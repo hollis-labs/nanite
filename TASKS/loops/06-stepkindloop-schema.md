@@ -1,7 +1,7 @@
 # `StepKindLoop` schema — widen `workflow_run_steps.kind` CHECK
 
 **Phase:** 1 — Schema & storage foundation (`TASKS/loops`)
-**Status:** not-started
+**Status:** implemented
 **Depends on:** none (parallel-safe — different table/column than tasks `01`-`05`)
 **Touches:** `internal/store/migrations/` (new migration), `internal/agentworkflow/types.go`
 (new `StepKind` constant only — no executor logic).
@@ -66,8 +66,94 @@ ALTER COLUMN` for CHECK constraints, so this rebuild is the only way to widen on
 - `go build ./cmd/nanite/`, `go vet ./...`, `go test ./...` pass.
 
 ## Work log
-<Worker fills this in as it goes: what was actually done, any deviation from plan and why,
-anything escalated.>
+
+**Migration number.** Ran `ls internal/store/migrations/ | sort -t_ -k1 -n | tail -8` at
+dispatch time in this worktree: the highest landed migration was `134_agent_profiles_protocol_transport.sql`.
+Used **`136`** (`136_workflow_run_steps_loop_kind.sql`), not the task file's provisional `143` —
+per the task's own instruction to trust the worktree's real next-available number over the
+provisional one. `TASKS/loops/01`-`05` were not present as landed migrations in this worktree at
+dispatch time (they're being claimed in a sibling worktree per the task file's own note), so no
+intra-batch collision was observed from this worktree's vantage point.
+
+**Current `workflow_run_steps` schema, confirmed before writing the migration.** Grepped
+`internal/store/migrations/*.sql` for every migration touching `workflow_run_steps` shape:
+`051_agent_workflows.sql` (original `CREATE TABLE`), `091_workflow_gate_input.sql` (`ALTER TABLE
+ADD COLUMN gate_input`), `130_workflow_run_steps_flex_kind.sql` (kind CHECK widened to include
+`'flex'`), `133_workflow_run_flex_waiting_status.sql` (status CHECK widened to include
+`'waiting_on_flex'`, also rebuilding `workflow_runs`). `134_agent_profiles_protocol_transport.sql`
+(the last-landed migration) only touches `agent_profiles` — confirmed it does not touch
+`workflow_run_steps`. So the live column list and both CHECKs going into `136` are exactly `133`'s
+rebuilt shape: `id, workflow_run_id, step_id, kind CHECK(llm|tool|gate|flex), status
+CHECK(pending|running|completed|failed|waiting_on_gate|waiting_on_flex|skipped), output, is_error,
+tool_calls_json, verify_json, error, started_at, completed_at, updated_at, gate_input` — verified
+directly against a real backup DB copy (`sqlite3 <scratch-copy> ".schema workflow_run_steps"`),
+not just the migration ledger. `136` widens only the `kind` CHECK to add `'loop'`; the `status`
+CHECK is carried forward byte-for-byte unchanged, per this task's explicit "do not add
+`RunStatusWaitingOnLoop`/status-CHECK widening here" scope fence (that's task `09`'s job).
+
+**Migration** — `internal/store/migrations/136_workflow_run_steps_loop_kind.sql`, copying
+`130`'s rename-recreate-copy rebuild pattern exactly (`PRAGMA foreign_keys = OFF`, build
+`workflow_run_steps_new` with the widened CHECK, copy every row, drop old, rename new → old,
+recreate both original indexes, `PRAGMA foreign_keys = ON`). Down migration rebuilds back to the
+immediately-prior (post-133) 4-value kind CHECK, matching `130`/`133`'s own downgrade precedent of
+restoring the prior state rather than the full history.
+
+**Go constant** — added `StepKindLoop StepKind = "loop"` to `internal/agentworkflow/types.go`,
+directly after the existing `StepKindFlex` block, in the same doc-comment style (citing
+`docs/engineering/architecture/21-loops.md` Decision 1 verbatim, same as `StepKindFlex` cites
+`15-teams.md`). No struct fields, no executor wiring, no other reference added — confirmed nothing
+else in the tree references `StepKindLoop` yet (expected; task `09` is the first real consumer).
+
+**GLOSSARY check.** `StepKindLoop` and `RunStatusWaitingOnLoop` are already named and described in
+`docs/engineering/GLOSSARY.md`'s `LoopRun` entry (pre-existing from the Loops design session) —
+no new-name collision to resolve; this task's constant just makes the already-documented name
+real Go code.
+
+**Testing against a real backup DB copy.** `~/.local/share/nanite/workspaces/default/backups/`
+has exactly one backup on this machine
+(`main.db.pre-execution-backup-20260818-132726`, dated 2026-08-18, before this session's Loops
+design work). Copied it into an isolated scratch path (never opened in place), and confirmed via
+direct `sqlite3 <copy> ".schema workflow_run_steps"` / `SELECT kind, count(*) ... GROUP BY kind`
+that this backup **predates migration 130** — its on-disk `kind` CHECK is still the original
+3-value `('llm','tool','gate')`, and it has zero `flex`-kind rows (2 real rows total: one `llm`,
+one `gate`). The live `~/.local/share/nanite/workspaces/default/main.db` was also spot-checked
+(copied to scratch, non-destructively) for the same reason and has the identical 2 rows, 0 flex —
+`StepKindFlex` genuinely has no real callers yet anywhere on this machine, consistent with
+migration 130's own doc comment ("no live callers yet").
+
+Because the Done-means explicitly requires verifying the rebuild preserves **real flex-kind
+rows already present** by row count and a spot-check, and no backup on this machine has any, the
+regression test (`internal/store/migration_136_workflow_run_steps_loop_kind_test.go`,
+`TestRealBackupWorkflowRunStepsSurviveLoopKindMigration`) reconstructs the actual scenario the
+Done-means describes directly against the real backup copy: it opens the copy via `store.New`
+(full migrate, including 136), uses goose's `Provider.DownTo(134)` to roll the schema back to
+immediately before migration 136 (same technique migration `105`'s own regression test uses for
+its Down half), inserts a synthetic `flex`-kind row at that schema version (legal there, per
+migration 130), then `Provider.UpTo(136)` to replay migration 136's rebuild over the real
+backup's 2 pre-existing rows plus this now-present flex row. Verified: exact row count
+(2 real + 1 synthetic = 3) preserved, every original row's `(workflow_run_id, step_id, kind,
+status)` unchanged, and the flex row's `output` column spot-checked byte-for-byte before/after
+the rebuild. A `loop`-kind row insert is then demonstrated to work against the same real,
+migrated backup copy. This is a deliberate adaptation of the Done-means' literal wording to what
+this machine's actual backup data supports — noted here rather than silently skipped, per
+EXECUTION-PROCESS.md's real-backup-testing requirement.
+
+Two more tests added alongside it, mirroring migration `130`'s own test file structure exactly:
+`TestMigrate136WidensWorkflowRunStepsKindCheck` (isolated in-memory-equivalent store; all five
+kinds — `llm`/`tool`/`gate`/`flex`/`loop` — round-trip; a bogus kind is still rejected; a
+re-`migrate()` no-op leaves rows intact) and `TestMigrate136PreservesWorkflowRunStepsIndexes`
+(both original indexes, including the load-bearing `UNIQUE (workflow_run_id, step_id)` index,
+survive the rebuild with their original definitions).
+
+**Baseline checks.** `go build ./cmd/nanite/` passes. `go vet ./...` reports four pre-existing
+findings in `internal/service/container.go` (`stopReaper`/`stopRuntimeReaper` possible context
+leak) — confirmed pre-existing and unrelated to this task by stashing this task's changes and
+re-running `go vet ./...`, which reproduces the identical four findings on the unmodified base
+branch. `go test ./...` passes in full (93 packages, all `ok`, including
+`internal/store` and `internal/agentworkflow`).
+
+No deviations from the task's own instructions beyond the real-backup-flex-row adaptation
+documented above, and using `136` in place of the provisional `143`.
 
 ## Review notes
 <Reviewer fills this in: pass/fail, what was checked, anything fixed and how.>

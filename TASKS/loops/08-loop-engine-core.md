@@ -1,7 +1,7 @@
 # LoopEngine core — `internal/loop.LoopEngine.Run`/`.Resume`
 
 **Phase:** 2 — Runtime engine (`TASKS/loops`)
-**Status:** implemented
+**Status:** reviewed
 **Depends on:** `03-loop-runs-schema.md`, `04-loop-run-iterations-schema.md`,
 `07-loop-continuation-policy.md`
 **Touches:** new `internal/loop/engine.go`, `internal/service/workflow_launch.go`
@@ -351,4 +351,24 @@ context leak; `git status`/`git diff --stat` confirm only `internal/loop/engine.
 `ok github.com/hollis-labs/nanite/internal/loop 2.182s` (freshly run, not cached).
 
 ## Review notes
-<Reviewer fills this in: pass/fail, what was checked, anything fixed and how.>
+
+The prior reviewer's substantive findings on the rest of this task stand (evidence-formula
+duplication resolution, `loopRunPersistentConfig`, one-active-LoopRun-per-goal enforcement,
+WAIT/ESCALATE status collapse, `resumeBlockedIteration`'s in-flight detection, `MaxIterations`
+non-duplication, REPLAN v1 scope, `classifyIterationProgress`) — that was the sole real
+blocker, everything else already checked out.
+
+This pass specifically re-confirmed the context-cancellation/budget-exhaustion conflation fix
+in `driveIterations` is correct: `ctx.Err()` is checked before `runCtx.Err()`, and the
+caller-context-death branch returns a plain error without any `UpdateLoopRunStatus` call —
+only once `ctx.Err()` is confirmed nil does a non-nil `runCtx.Err()` unambiguously mean the
+derived `MaxRuntimeSeconds` timeout genuinely fired. The new regression test
+(`TestLoopEngine_DriveIterations_CallerContextDead_DoesNotEscalateOrFailBudget`) is genuine,
+not vacuous — it asserts on the actual persisted `loop_runs.status` via a fresh `GetLoopRun`
+call (confirmed `LoopRunStatusRunning`, unchanged), not just the return value, plus zero
+iterations launched and no terminal timestamp set. Diff scope confirmed exactly 2 hunks in
+`engine.go` (doc comment + the fix) and a pure addition in `engine_test.go`.
+
+`go build ./cmd/nanite/`, `go vet ./internal/loop/...`, and `go test -count=1 ./...` all
+green with real, unmasked exit codes (repo-wide `go vet ./...` has the same 4 pre-existing,
+unrelated `internal/service/container.go` findings, confirmed untouched by this task).

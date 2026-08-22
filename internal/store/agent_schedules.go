@@ -53,11 +53,23 @@ const (
 // "The Runner adapter and job taxonomy" table. durable_agent_wake is the
 // only value with a live dispatch path today; the other three are schema-
 // ready for TASKS/scheduling/03-runner-adapter-and-job-taxonomy.md.
+//
+// ScheduleJobTypeLoopRunTick is the fifth value, added by
+// TASKS/loops/12-loop-run-tick-scheduled-trigger.md (migration 143 widens
+// the agent_schedules.job_type CHECK to match). Deliberately a second,
+// independently-declared constant with the same string value as
+// internal/scheduler.JobTypeLoopRunTick, not a shared alias -- mirrors this
+// file's own pre-existing convention for the other four job types
+// (ScheduleJobTypeDurableAgentWake / internal/scheduler.JobTypeDurableAgentWake,
+// etc.): internal/scheduler already imports internal/store, so the reverse
+// import would be a cycle, and this package has no dependency on
+// internal/scheduler's own dispatch layer to justify one.
 const (
 	ScheduleJobTypeDurableAgentWake = "durable_agent_wake"
 	ScheduleJobTypeAgentWorkflowRun = "agent_workflow_run"
 	ScheduleJobTypeCommandRun       = "command_run"
 	ScheduleJobTypeReflexDispatch   = "reflex_dispatch"
+	ScheduleJobTypeLoopRunTick      = "loop_run_tick"
 )
 
 // AgentSchedule is one row in the agent_schedules table -- a per-agent

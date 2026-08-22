@@ -22,6 +22,7 @@ import (
 	gosched "github.com/hollis-labs/go-scheduler"
 
 	"github.com/hollis-labs/nanite/internal/agent/reflexes"
+	"github.com/hollis-labs/nanite/internal/loop"
 	"github.com/hollis-labs/nanite/internal/service"
 	"github.com/hollis-labs/nanite/internal/store"
 )
@@ -30,11 +31,21 @@ import (
 // RunnerAdapter.Enqueue switches on, and the exact strings 02's Store
 // adapter must stamp onto gosched.Schedule.JobType per agent_schedules
 // row so the two sides agree without either importing the other.
+//
+// JobTypeLoopRunTick is the fifth value, added by TASKS/loops/
+// 12-loop-run-tick-scheduled-trigger.md -- docs/engineering/architecture/
+// 21-loops.md's "Trigger surface" section: "a new loop_run_tick JobType...
+// for a 'durable'-preset loop or a WAIT-status loop polling an external
+// condition." internal/store's own ScheduleJobTypeLoopRunTick
+// (agent_schedules.go) carries the identical string, independently
+// declared -- see that constant's own doc comment for why this is a
+// deliberate duplication, not a shared alias.
 const (
 	JobTypeDurableAgentWake = "durable_agent_wake"
 	JobTypeAgentWorkflowRun = "agent_workflow_run"
 	JobTypeCommandRun       = "command_run"
 	JobTypeReflexDispatch   = "reflex_dispatch"
+	JobTypeLoopRunTick      = "loop_run_tick"
 )
 
 // --- Payload shapes -------------------------------------------------------
@@ -111,6 +122,16 @@ type ReflexDispatchPayload struct {
 	SessionID string `json:"session_id,omitempty"`
 }
 
+// LoopRunTickPayload is job.Payload's JSON shape for JobTypeLoopRunTick --
+// this planning session's decision (TASKS/loops/
+// 12-loop-run-tick-scheduled-trigger.md's own Context), matching the other
+// four payload structs' exact convention: one required identifier field, no
+// omitempty fields needed since a tick has exactly one job -- re-checking
+// one specific LoopRun's resume condition.
+type LoopRunTickPayload struct {
+	LoopRunID string `json:"loop_run_id"`
+}
+
 // --- Narrow dependency interfaces -----------------------------------------
 //
 // Every dependency RunnerAdapter needs is accepted as a narrow interface
@@ -155,6 +176,26 @@ type CommandExecutor interface {
 // ActionKindLookup/CooldownFunc convention for a single-method narrowing.
 type ReflexLookup func(ctx context.Context, id string) (*store.AgentReflex, error)
 
+// LoopResumer is the narrow surface RunnerAdapter needs from
+// *loop.LoopEngine for loop_run_tick dispatch -- just Resume, per this job
+// type's own task instruction not to require the full LoopEngine surface
+// when only Resume is called here. Signature matches
+// *loop.LoopEngine.Resume exactly (internal/loop/engine.go, task 08,
+// confirmed directly against the real code before writing this file, not
+// assumed from the design doc's bare `Resume(ctx, loopRunID) error`
+// paraphrase).
+type LoopResumer interface {
+	Resume(ctx context.Context, loopRunID string) (loop.LoopResult, error)
+}
+
+// LoopRunLookup resolves one loop_runs row by ID -- the narrow persistence
+// surface loop_run_tick needs to check a LoopRun's current status *before*
+// calling Resume (see enqueueLoopRunTick's own doc comment for the no-op
+// guard this makes possible). A func type, not an interface, matching
+// ReflexLookup's own convention immediately above for a single-method
+// narrowing. store.Store.GetLoopRun satisfies this today.
+type LoopRunLookup func(ctx context.Context, id string) (*store.LoopRun, error)
+
 // RunnerAdapter implements gosched.Runner over Nanite's own dispatch
 // targets, following Hadron's runnerAdapter pattern (adapter.go): decode
 // Job.Payload per Job.JobType, dispatch to the matching narrow
@@ -172,6 +213,8 @@ type RunnerAdapter struct {
 	Commands       CommandExecutor
 	ReflexLookup   ReflexLookup
 	ReflexExecutor *reflexes.Executor
+	Loops          LoopResumer
+	LoopRunLookup  LoopRunLookup
 }
 
 var _ gosched.Runner = (*RunnerAdapter)(nil)
@@ -196,6 +239,8 @@ func (r *RunnerAdapter) Enqueue(ctx context.Context, job gosched.Job) error {
 		return r.enqueueCommandRun(ctx, job)
 	case JobTypeReflexDispatch:
 		return r.enqueueReflexDispatch(ctx, job)
+	case JobTypeLoopRunTick:
+		return r.enqueueLoopRunTick(ctx, job)
 	default:
 		return fmt.Errorf("scheduler: unknown job type %q (run %s)", job.JobType, job.RunID)
 	}
@@ -369,4 +414,71 @@ func (r *RunnerAdapter) enqueueReflexDispatch(ctx context.Context, job gosched.J
 		return fmt.Errorf("scheduler: reflex_dispatch apply reflex %s (run %s): %w", payload.ReflexID, job.RunID, err)
 	}
 	return nil
+}
+
+// enqueueLoopRunTick decodes a LoopRunTickPayload and calls
+// LoopResumer.Resume directly -- TASKS/loops/
+// 12-loop-run-tick-scheduled-trigger.md.
+//
+// Duplicate-run / stale-tick guard: unlike the other four job types (none
+// of which have a real "already running" signal to guard against, per this
+// file's own package doc comment), loop_run_tick's dispatch target
+// (*loop.LoopEngine.Resume) is NOT safe to call unconditionally -- Resume's
+// own switch (engine.go) returns a hard error for any LoopRun status other
+// than waiting_on_gate/waiting_on_escalation. A tick firing against a
+// LoopRun that has since completed on its own (e.g. a reflex or an operator
+// already resumed it before this tick's own next_run arrived), or one still
+// mid-iteration (running), would otherwise surface as a spurious dispatch
+// error with nothing actually wrong. This task's own recommendation:
+// "a duplicate tick against an already-non-WAITing LoopRun should be a
+// cheap no-op, not an error" -- isResumableLoopRunStatus below is that
+// guard, checked via LoopRunLookup before Resume is ever called. This is
+// deliberately NOT the same thing as the go-scheduler-level
+// ErrDuplicateJob translation this file's package doc comment says none of
+// the five job types perform (go-scheduler's own CAS claim on the
+// agent_schedules row already prevents two concurrent ticks from firing
+// the same schedule row twice) -- this guard is a LoopRun-domain business
+// rule (an already-resolved LoopRun has nothing left to tick), not a
+// schedule-firing concurrency concern.
+func (r *RunnerAdapter) enqueueLoopRunTick(ctx context.Context, job gosched.Job) error {
+	if r.Loops == nil || r.LoopRunLookup == nil {
+		return fmt.Errorf("scheduler: loop_run_tick dispatch not configured (run %s)", job.RunID)
+	}
+	var payload LoopRunTickPayload
+	if err := json.Unmarshal(job.Payload, &payload); err != nil {
+		return fmt.Errorf("scheduler: decode loop_run_tick payload (run %s): %w", job.RunID, err)
+	}
+	if payload.LoopRunID == "" {
+		return fmt.Errorf("scheduler: loop_run_tick payload missing loop_run_id (run %s)", job.RunID)
+	}
+
+	lr, err := r.LoopRunLookup(ctx, payload.LoopRunID)
+	if err != nil {
+		return fmt.Errorf("scheduler: loop_run_tick lookup loop_run %s (run %s): %w", payload.LoopRunID, job.RunID, err)
+	}
+	if lr == nil || !isResumableLoopRunStatus(lr.Status) {
+		// Cheap no-op, not an error -- see this function's own doc comment.
+		return nil
+	}
+
+	if _, err := r.Loops.Resume(ctx, payload.LoopRunID); err != nil {
+		return fmt.Errorf("scheduler: loop_run_tick resume loop_run %s (run %s): %w", payload.LoopRunID, job.RunID, err)
+	}
+	return nil
+}
+
+// isResumableLoopRunStatus reports whether status is one of the two
+// loop_runs.status values *loop.LoopEngine.Resume actually knows how to
+// resume (engine.go's own switch) -- everything else (running, completed,
+// failed, cancelled) is "already terminal or not actually WAITing" per this
+// task's own no-op guard wording, including LoopRunStatusRunning: a tick
+// landing while another Resume/Run call is already mid-iteration for this
+// same LoopRun has nothing useful to do either.
+func isResumableLoopRunStatus(status string) bool {
+	switch status {
+	case store.LoopRunStatusWaitingOnGate, store.LoopRunStatusWaitingOnEscalation:
+		return true
+	default:
+		return false
+	}
 }

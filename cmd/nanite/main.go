@@ -590,11 +590,25 @@ func cmdServe(args []string) {
 	// "not configured" (a clear per-firing error, not a panic) rather than
 	// silently no-oping, so this is a documented, safe gap for a future
 	// task to close, not a silent one.
+	//
+	// Loops/LoopRunLookup (the loop_run_tick job type, TASKS/loops/
+	// 12-loop-run-tick-scheduled-trigger.md) ARE configured here, unlike
+	// ReflexLookup/ReflexExecutor above: loopEngine (constructed just above
+	// for StepKindLoop support, TASKS/loops/09) already satisfies
+	// scheduler.LoopResumer directly, and container.Store.GetLoopRun
+	// already satisfies scheduler.LoopRunLookup's func-type shape --
+	// nothing new to build here, both dependencies are already in scope by
+	// this point in the boot sequence. See internal/loop/tick_schedule.go
+	// (this same task) for the one real producer of a loop_run_tick
+	// agent_schedules row: evaluateDecideAndAct's DecisionWait branch
+	// (internal/loop/engine.go).
 	scheduleStoreAdapter := &scheduler.StoreAdapter{Store: s, Logger: slog.Default()}
 	scheduleRunnerAdapter := &scheduler.RunnerAdapter{
-		Wake:      container.DurableWake,
-		Workflows: workflowLauncher,
-		Commands:  container.Tools,
+		Wake:          container.DurableWake,
+		Workflows:     workflowLauncher,
+		Commands:      container.Tools,
+		Loops:         loopEngine,
+		LoopRunLookup: s.GetLoopRun,
 	}
 	scheduleRetryingRunner := &scheduler.RetryingRunner{
 		Inner:     scheduleRunnerAdapter,

@@ -190,13 +190,18 @@ func (a *StoreAdapter) toSchedule(row store.AgentSchedule) (gosched.Schedule, er
 // "" and projectID == ""), so duplicating that fallback here would just be
 // a second, driftable copy of logic Wake already owns.
 //
-// agent_workflow_run / command_run / reflex_dispatch: job_payload already
-// holds the JSON (pass-through, not parse-and-repack -- validated via
-// json.Valid so a corrupt row is skipped by ListDueSchedules rather than
-// handed to the Runner as garbage, but never re-marshaled, since re-
-// marshaling a byte-identical JSON object buys nothing and risks silently
-// reordering/dropping fields RunnerAdapter's own struct doesn't know
-// about).
+// agent_workflow_run / command_run / reflex_dispatch / loop_run_tick:
+// job_payload already holds the JSON (pass-through, not parse-and-repack --
+// validated via json.Valid so a corrupt row is skipped by ListDueSchedules
+// rather than handed to the Runner as garbage, but never re-marshaled,
+// since re-marshaling a byte-identical JSON object buys nothing and risks
+// silently reordering/dropping fields RunnerAdapter's own struct doesn't
+// know about). loop_run_tick (TASKS/loops/
+// 12-loop-run-tick-scheduled-trigger.md) follows this same fifth-column
+// convention exactly -- its LoopRunTickPayload{LoopRunID} is exactly as
+// simple as the other three pass-through shapes, with no producer-specific
+// resolution step (unlike durable_agent_wake's instance-id resolution
+// above).
 func (a *StoreAdapter) buildPayload(row store.AgentSchedule) ([]byte, error) {
 	switch row.JobType {
 	case JobTypeDurableAgentWake:
@@ -213,7 +218,7 @@ func (a *StoreAdapter) buildPayload(row store.AgentSchedule) ([]byte, error) {
 			return nil, fmt.Errorf("encode durable_agent_wake payload: %w", err)
 		}
 		return b, nil
-	case JobTypeAgentWorkflowRun, JobTypeCommandRun, JobTypeReflexDispatch:
+	case JobTypeAgentWorkflowRun, JobTypeCommandRun, JobTypeReflexDispatch, JobTypeLoopRunTick:
 		raw := row.JobPayload
 		if raw == "" {
 			raw = "{}"

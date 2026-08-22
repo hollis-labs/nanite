@@ -263,6 +263,13 @@ func TestStoreAdapter_ListDueSchedules_PassThroughJobPayload(t *testing.T) {
 		JobPayload: `{"reflex_id":"rfx-42"}`,
 		NextRun:    due,
 	})
+	mustInsertSchedule(t, s, store.AgentSchedule{
+		ID: "loop-tick-1", AgentID: agent.ID, Name: "loop-tick-1",
+		ScheduleKind: store.ScheduleKindOneShot, Body: "b",
+		JobType:    store.ScheduleJobTypeLoopRunTick,
+		JobPayload: `{"loop_run_id":"lr-42"}`,
+		NextRun:    due,
+	})
 
 	adapter := &StoreAdapter{Store: s, Logger: slog.Default()}
 	got, err := adapter.ListDueSchedules(ctx, now, 10)
@@ -273,8 +280,8 @@ func TestStoreAdapter_ListDueSchedules_PassThroughJobPayload(t *testing.T) {
 	for _, sched := range got {
 		byID[sched.ID] = sched
 	}
-	if len(byID) != 3 {
-		t.Fatalf("ListDueSchedules = %d rows, want 3", len(byID))
+	if len(byID) != 4 {
+		t.Fatalf("ListDueSchedules = %d rows, want 4", len(byID))
 	}
 
 	var wf AgentWorkflowRunPayload
@@ -299,6 +306,14 @@ func TestStoreAdapter_ListDueSchedules_PassThroughJobPayload(t *testing.T) {
 	}
 	if rfx.ReflexID != "rfx-42" {
 		t.Errorf("reflex_dispatch payload = %+v, want ReflexID rfx-42", rfx)
+	}
+
+	var tick LoopRunTickPayload
+	if err := json.Unmarshal(byID["loop-tick-1"].Payload, &tick); err != nil {
+		t.Fatalf("decode loop_run_tick payload: %v", err)
+	}
+	if tick.LoopRunID != "lr-42" {
+		t.Errorf("loop_run_tick payload = %+v, want LoopRunID lr-42", tick)
 	}
 }
 
@@ -345,6 +360,13 @@ func TestStoreAdapter_Payload_CompatibleWithRunnerAdapter_AllJobTypes(t *testing
 		JobPayload: `{"reflex_id":"rfx-1"}`,
 		NextRun:    due,
 	})
+	mustInsertSchedule(t, s, store.AgentSchedule{
+		ID: "compat-loop-tick", AgentID: agent.ID, Name: "compat-loop-tick",
+		ScheduleKind: store.ScheduleKindOneShot, Body: "b",
+		JobType:    store.ScheduleJobTypeLoopRunTick,
+		JobPayload: `{"loop_run_id":"lr-1"}`,
+		NextRun:    due,
+	})
 
 	adapter := &StoreAdapter{Store: s, Logger: slog.Default()}
 	due2, err := adapter.ListDueSchedules(ctx, now, 10)
@@ -355,8 +377,8 @@ func TestStoreAdapter_Payload_CompatibleWithRunnerAdapter_AllJobTypes(t *testing
 	for _, sched := range due2 {
 		byID[sched.ID] = sched
 	}
-	if len(byID) != 4 {
-		t.Fatalf("ListDueSchedules = %d rows, want 4", len(byID))
+	if len(byID) != 5 {
+		t.Fatalf("ListDueSchedules = %d rows, want 5", len(byID))
 	}
 
 	waker := &fakeDurableAgentWaker{}
@@ -366,19 +388,23 @@ func TestStoreAdapter_Payload_CompatibleWithRunnerAdapter_AllJobTypes(t *testing
 		ID: "rfx-1", AgentID: agent.ID, ActionKind: store.ReflexActionInjectReminder,
 		Status: store.ReflexStatusActive,
 	}
+	resumer := &fakeLoopResumer{}
 	runner := &RunnerAdapter{
 		Wake:           waker,
 		Workflows:      launcher,
 		Commands:       exec,
 		ReflexLookup:   fakeReflexLookupFor(map[string]*store.AgentReflex{"rfx-1": reflex}),
 		ReflexExecutor: testExecutor(),
+		Loops:          resumer,
+		LoopRunLookup:  fakeLoopRunLookupFor(map[string]*store.LoopRun{"lr-1": {ID: "lr-1", Status: store.LoopRunStatusWaitingOnEscalation}}),
 	}
 
 	for schedID, wantJobType := range map[string]string{
-		"compat-wake": JobTypeDurableAgentWake,
-		"compat-wf":   JobTypeAgentWorkflowRun,
-		"compat-cmd":  JobTypeCommandRun,
-		"compat-rfx":  JobTypeReflexDispatch,
+		"compat-wake":      JobTypeDurableAgentWake,
+		"compat-wf":        JobTypeAgentWorkflowRun,
+		"compat-cmd":       JobTypeCommandRun,
+		"compat-rfx":       JobTypeReflexDispatch,
+		"compat-loop-tick": JobTypeLoopRunTick,
 	} {
 		sched := byID[schedID]
 		if sched.JobType != wantJobType {
@@ -404,6 +430,9 @@ func TestStoreAdapter_Payload_CompatibleWithRunnerAdapter_AllJobTypes(t *testing
 	}
 	if !exec.called || exec.gotTool != "lint" {
 		t.Errorf("Execute: called=%v gotTool=%q", exec.called, exec.gotTool)
+	}
+	if !resumer.called || resumer.gotLoopRunID != "lr-1" {
+		t.Errorf("Resume: called=%v gotLoopRunID=%q, want called with lr-1", resumer.called, resumer.gotLoopRunID)
 	}
 }
 

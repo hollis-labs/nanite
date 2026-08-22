@@ -1,7 +1,7 @@
 # Codify the remediation guide's 6 named engineering standards in the project's standards doc
 
 **Phase:** Wave 7 — Quality ratchet
-**Status:** implemented
+**Status:** reviewed
 **Depends on:** none. Sequencing-only note: this task is easiest to write
 well *after* the other 12 folders' worth of task files exist (it cites them
 for traceability), but it does not technically require any of that work to

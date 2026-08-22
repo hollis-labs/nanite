@@ -1,7 +1,7 @@
 # Confirm and disclose the macOS seatbelt read/process-inspection boundary tradeoff
 
 **Phase:** Wave 1 — Release-blocking trust boundaries (per remediation guide §4)
-**Status:** implemented
+**Status:** reviewed
 **Depends on:** none within this batch. Conceptually pairs with
 `01-sandbox-fail-closed-without-bwrap.md` in this same folder (both findings
 leave the *read*/network boundary less enforced than a naive reading of

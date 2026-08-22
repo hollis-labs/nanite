@@ -1,7 +1,7 @@
 # Wire (or retire) the allow_unsigned_plugins setting's promised CLI effect
 
 **Phase:** Audit remediation — Wave 1 (release-blocking trust boundaries)
-**Status:** implemented
+**Status:** reviewed
 **Depends on:** `01-unify-plugin-catalog-install-pipeline.md` (this folder) — **sequencing only**, not a technical/compile dependency. See Context below for why sequencing (not blocking) is the right relationship.
 **Touches:** `cmd/nanite/plugin_install_flow.go` (`buildInstaller`), `internal/plugin/install/verify.go` (`SignatureVerifier.AllowUnsigned` doc comment, if the setting is retired rather than wired), `internal/plugin/devmode/devmode_on.go` / `devmode_off.go` (doc comments only, if behavior changes), `internal/store/user_settings.go` (reference only — the storage/API-exposure side is already correct and out of scope), `internal/api/settings.go` (reference only, same reason)
 

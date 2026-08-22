@@ -1,7 +1,7 @@
 # Sandbox must not silently degrade to unisolated execution when `bwrap` is absent on Linux
 
 **Phase:** Wave 1 — Release-blocking trust boundaries (per remediation guide §4)
-**Status:** implemented
+**Status:** reviewed
 **Depends on:** none within this batch (sequencing note: this task's outcome — whether
 `ExecResult`/`AgentExec` grows an observable "sandbox applied" signal — is a natural
 prerequisite for anything in `08-remaining-security-hardening/` or future work that wants

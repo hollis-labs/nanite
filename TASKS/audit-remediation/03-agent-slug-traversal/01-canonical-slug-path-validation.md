@@ -1,7 +1,7 @@
 # Canonical slug path validation for agent-managed file writes
 
 **Phase:** Wave 1 — Release-blocking trust boundaries (remediation guide §4)
-**Status:** implemented
+**Status:** reviewed
 **Depends on:** none
 **Touches:** `internal/agent/managed_files.go`, `internal/agent/source_class.go`,
 `internal/agentvalidation/validation.go`, `internal/service/agent_config.go`,

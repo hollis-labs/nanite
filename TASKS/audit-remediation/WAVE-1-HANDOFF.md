@@ -385,3 +385,40 @@ value:
   (tracked separately as `GO-LIFE-001`, `04/01`-adjacent) — every Wave 1
   Work Log independently confirmed these predate and are untouched by this
   wave's diffs.
+
+## Tracking correction applied after Wave 1 closed (2026-08-22)
+
+Two bookkeeping gaps were found post-wave and fixed in a follow-up commit. Both
+are the same class as the missing-`## Review notes` gap Wave 1 self-reported —
+substantive work genuinely complete, tracking state not advanced to match.
+**Wave 2 should close both loops as part of its own wrap-up, not after it.**
+
+1. **All six task files still read `**Status:** implemented`** despite real,
+   independent reviews with PASS verdicts recorded in their `## Review notes`.
+   Advanced to `reviewed`. Wave 0's precedent is the one to copy — commit
+   `e3980e9b` explicitly marked its tasks `reviewed` when the review passed.
+
+2. **`findings.json`'s `task_status` was `not-started` for all 113 findings**,
+   including the ten Wave 1 closed. Synced to `reviewed` for
+   `GO-PLUGIN-001/002/003/008`, `GO-SEC4-001/002/005/006`, and
+   `GO-AGENT-001/002`. (`12/02` is guide-derived and maps to no finding.)
+
+The second matters more than it looks. Per the batch README and `findings.json`'s
+own docs, that field exists so anyone can *"answer 'how much of the audit is
+actually closed' by reading one JSON file instead of opening 61 task files,"* and
+so a future re-audit can *"diff cleanly against a known remediation state."*
+Left unsynced, the catalog reported 0% of the audit closed while ten findings
+were done — which is exactly what a Wave 2 kickoff author or a re-audit would
+have read.
+
+Current state: **10 of 113 findings `reviewed`, 103 `not-started`.**
+
+### Also worth knowing for Wave 2
+
+`go vet ./...` is **not** clean — it reports 4 findings, all in
+`internal/service/container.go` (`stopReaper`/`stopRuntimeReaper` not used on
+all paths). This is **`GO-LIFE-001`, catalogued and assigned to `04/01`**, which
+is Wave 2a's own first task. It is pre-existing, not a Wave 1 regression, and
+Wave 0 already corrected its line-number citations (audit: 1162/1182 and
+1242/1246 → current: 1213/1233 and 1291-1293/1295-1297). Do not treat a
+non-green `go vet` at Wave 2 start as a blocker — closing it *is* `04/01`.

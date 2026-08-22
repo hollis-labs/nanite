@@ -340,7 +340,39 @@ generation, distribution, rotation policy) — hence a separate decision.
 
 ### AD-26 — Untracked `safego.Go` spawns: adopt an owner, or accept fire-and-forget
 
-**Status:** open · **Gates:** `04/04` Part B · **Findings:** GO-SVCCORE-002
+**Status:** decided · **Gates:** `04/04` Part B · **Findings:** GO-SVCCORE-002
+
+> **Decided (2026-08-22): selective lifecycle tracking, plus gate hardening.**
+>
+> `safego.Go` is allowed in `internal/service` only for bounded, best-effort
+> external telemetry that may be abandoned without affecting Nanite state,
+> and for child goroutines synchronously joined by their caller. Asynchronous
+> work that mutates state, drives recovery or worker execution, or invokes
+> the plugin extension contract must have a lifecycle owner and observe that
+> owner's shutdown context where its API permits.
+>
+> The current-HEAD audit found **34** sites across seven files, not the task
+> file's stale ~18–20 estimate: track 23 asynchronous sites (17 plugin-event
+> dispatches, 2 auto-title/tag jobs, 2 recovery jobs, and 2 delegation/worker
+> jobs); explicitly retain 10 bounded `ActivityEmitter` HTTP telemetry sends
+> as fire-and-forget; and leave the single concurrent tool-batch child
+> unchanged because its caller synchronously joins it and its parent is
+> already lifecycle-tracked.
+>
+> Part B also hardens `lifecycle.Manager.Go`'s spawn-vs-shutdown gate. Its
+> current separate `closed` check and `WaitGroup.Add` allow a goroutine to
+> pass the check, pause while `Shutdown` observes zero work and returns, then
+> add and spawn afterward. The closed transition and admission/Add operation
+> must be serialized and covered by a race regression test; otherwise moving
+> call sites onto the manager does not establish the promised drain boundary.
+>
+> Direct chat work is owned by `chatServiceImpl.lifecycle`. Composite plugin
+> dispatch receives that same manager through composition-root wiring,
+> following the existing wake-reactor precedent. The implementation must
+> verify plugin-host shutdown ordering; `Container.Shutdown` currently does
+> not call `Plugins.Shutdown`, so any remaining host-lifecycle gap is either
+> closed in the smallest safe way needed for the drain invariant or recorded
+> as an explicit follow-up rather than hidden inside the migration.
 
 **Found by the Wave 2 kickoff author, 2026-08-21** — the same class of gap as
 AD-25: `GO-SVCCORE-002` carries `requires_architect_decision: true` in

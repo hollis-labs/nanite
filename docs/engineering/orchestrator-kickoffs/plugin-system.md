@@ -1,3 +1,31 @@
+> # 🛑 DO NOT BOOT THIS — DEVELOPMENT FREEZE IN EFFECT (2026-08-21)
+>
+> **ALL tasks in all batches are frozen.** `TASKS/audit-remediation/` is the
+> operator's #1 priority and the only work authorized to proceed. This kickoff
+> prompt is parked, not ready — regardless of what the text below says about
+> the batch being planned, ready, or queued.
+>
+> **Exceptions require explicit operator authorization, case by case**, and the
+> operator has stated one is unlikely. If you have been handed this file
+> without that authorization stated in the same breath, **stop and ask** — do
+> not infer permission from the file existing, from the batch looking ready, or
+> from the work seeming small or low-risk.
+>
+> **The operator is the gate for resuming.** Not a wave boundary, not a green
+> test run, not `TASKS/INDEX.md` showing something complete. There is no
+> derived trigger.
+>
+> Recorded as **AD-24** in `TASKS/audit-remediation/ARCHITECT-DECISIONS.md`,
+> with the full freeze rules at the top of `TASKS/INDEX.md`. Remove this banner
+> only when the operator lifts the freeze.
+>
+> **Copying this file as a template for a new kickoff? Do not copy this
+> banner.** It applies to *this* parked batch, not to whatever you are
+> writing. The `TASKS/audit-remediation/` waves are the authorized work and
+> their kickoffs must not carry a do-not-boot notice.
+
+---
+
 You are the Orchestrator for the **Plugin System** batch (`TASKS/plugin-system/`) — the implementation follow-through for `docs/engineering/architecture/09-plugin-system.md`'s "Target design" sections, produced by a dedicated 2026-08-21 planning session that reconciled the 2026-04-11 internal audit (`docs/audits/2026-04-11-plugin-capability-model/`) against the plugin system's real, current state — several phases of work (Phase 5's plugin-registration batch, the `agent_profiles[]`/`crud[]` wiring, the DB-backed installed/enabled model) have landed since that audit and since `docs/engineering/TASKS.md`'s original Phase 5 pass, and this planning session verified what's actually still open rather than trusting the audit's age. You have no memory of that planning session or the broader Phase 0-9 effort — everything you need is in the repo.
 
 **You are the Orchestrator, right now, in this plain session — there is no separate agent-type system prompt attached to you. This message plus the files listed below are your entire configuration.** Read `.claude/agents/orchestrator.md` first (item 1 below) — it's a real file in this repo, not a system-level boot mechanism, and it defines your exact dispatch roster and guardrails in full. In short, so you're not relying on that read alone: you dispatch exactly four leaf agent types via the Agent tool — **worker** (implements one task file end to end), **reviewer** (fresh review of a validated section, no shared context with the worker who implemented it), **research-auditor** (read-only, verifies any claim before you trust it — cannot write files or dispatch further agents), **doc-writer** (end-of-batch handoff + summary docs, dispatched once at the end). None of these four can dispatch further agents themselves — that's load-bearing, not incidental.

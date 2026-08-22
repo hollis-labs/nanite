@@ -1,5 +1,35 @@
 # Execution Index
 
+> # 🛑 DEVELOPMENT FREEZE IN EFFECT — 2026-08-21
+>
+> **ALL tasks are frozen, in every batch and every phase.** Not scoped to
+> audited packages, not scoped to `TASKS/audit-remediation/`. Every `TASKS/`
+> folder tracked in this file is frozen: Phase 0-9, and every sibling batch
+> (`filesystem-snapshots`, `plugin-system`, `loops`, `turn-vs-run`,
+> `feedback-carrying-denial`, `code-mode`, `skills`, and the rest).
+>
+> **`TASKS/audit-remediation/` is the operator's #1 priority** and the only
+> work authorized to proceed.
+>
+> **Exceptions require explicit operator authorization, case by case.** The
+> operator has stated an exception is unlikely. Do not infer one. "This task
+> is tiny," "this is only a doc change," "this unblocks something else," and
+> "this batch was already planned" are **not** exceptions.
+>
+> **The operator is the gate for resuming.** Resumption is *not* automatic on
+> any condition — not a wave boundary, not "all critical/high findings
+> closed," not a green test run, not this file showing a batch complete. Work
+> resumes when the operator says it resumes, and by no other trigger.
+>
+> **In-flight work at the time of the freeze** (two batches, in their home
+> stretch as of 2026-08-21) finishes. Nothing new starts.
+>
+> Recorded as **AD-24** in `TASKS/audit-remediation/ARCHITECT-DECISIONS.md`
+> and in `TASKS/ESCALATIONS.md`'s 2026-08-21 freeze entry. If you are an
+> Orchestrator booting against any section of this file, this banner overrides
+> that section's own "not yet dispatched, ready to go" language.
+
+
 Live tracker for `docs/engineering/TASKS.md`'s execution, per `docs/engineering/EXECUTION-PROCESS.md`. Phase 0 is planned in full below (34 task files, tracked by the Phase 0 Orchestrator session). Phase 1 (Agent Construction) is tracked separately, pending a merge from the `phase-1-execution` worktree into `main` — see `PHASE-0-1-AUDIT-FOLLOWUPS.md`. Phases 2-9 (36 task files across 8 phases) are planned in full below, tracked by this Planner session — see `docs/engineering/PLANNER-KICKOFF-PROMPT.md`. **Resequenced 2026-08-19**: the original Phases 1-6 grouping was reviewed and reorganized into this Phase 2-9 layout, with two real Phase 0/Phase 1 gaps folded in as new tasks (`TASKS/phase-2/05`, `TASKS/phase-2/06`) — see `PHASE-0-1-AUDIT-FOLLOWUPS.md`'s reconciliation note for the full record. **Section ownership**: the Phase 0 Orchestrator session owns the "Phase 0 — task table" and its "Parallelization plan"; this Planner session owns everything from "Phase 1 — Agent Construction" onward. Cross-section edits are coordinated by message between the two sessions, not blind overwrites.
 
 **Process note on Phases 1-6's planning**: several research forks dispatched for this pass drifted into believing they were the Planner and self-dispatched unauthorized further agents (the same failure mode as Phase 0's first planning pass) — see `TASKS/ESCALATIONS.md`'s "second occurrence" entry. Every file that landed via an unauthorized path was individually audited against this session's own independently-gathered research before being kept.
@@ -665,18 +695,18 @@ reasoning.
 
 | Task | Phase | Status | Depends on |
 |---|---|---|---|
-| `01-cut-legacy-skill-discovery-autodiscover-and-adhoc-authoring` | 1 | in-progress | none |
-| `02-redesign-skills-index-schema-and-extend-agent-known-skills` | 2 | not-started | `01` |
-| `03-build-content-addressed-vendored-skill-store` | 2 | implemented | none |
-| `04-build-skill-package-parser-and-install-sync-pipeline` | 3 | not-started | `02`, `03` |
-| `05-install-sync-rest-api-and-cli-command` | 3 | not-started | `04` |
-| `06-build-skill-resolver-and-parameter-binding` | 4 | not-started | `02`, `03`, `04` |
-| `07-implement-inline-fork-composition-semantics` | 4 | not-started | `04`, `06` |
-| `08-rebuild-inline-marker-and-scripts-execution` | 4 | not-started | `06` |
-| `09-sandbox-and-capability-policy-gate-for-skill-execution` | 5 | not-started | `02`, `08` |
-| `10-cli-hosted-native-skill-delivery-boot-dir-planting` | 6 | not-started | `02`, `03` |
-| `11-api-direct-skill-get-self-tool` | 6 | not-started | `06`, `07`, `08`, `09` |
-| `12-remaining-skills-rest-api-list-grants-preview-uninstall` | 7 | not-started | `02`, `05`, `09` |
+| `01-cut-legacy-skill-discovery-autodiscover-and-adhoc-authoring` | 1 | reviewed | none |
+| `02-redesign-skills-index-schema-and-extend-agent-known-skills` | 2 | reviewed | `01` |
+| `03-build-content-addressed-vendored-skill-store` | 2 | reviewed | none |
+| `04-build-skill-package-parser-and-install-sync-pipeline` | 3 | reviewed | `02`, `03` |
+| `05-install-sync-rest-api-and-cli-command` | 3 | reviewed | `04` |
+| `06-build-skill-resolver-and-parameter-binding` | 4 | reviewed | `02`, `03`, `04` |
+| `07-implement-inline-fork-composition-semantics` | 4 | reviewed | `04`, `06` |
+| `08-rebuild-inline-marker-and-scripts-execution` | 4 | reviewed | `06` |
+| `09-sandbox-and-capability-policy-gate-for-skill-execution` | 5 | reviewed | `02`, `08` |
+| `10-cli-hosted-native-skill-delivery-boot-dir-planting` | 6 | reviewed | `02`, `03` |
+| `11-api-direct-skill-get-self-tool` | 6 | reviewed | `06`, `07`, `08`, `09` |
+| `12-remaining-skills-rest-api-list-grants-preview-uninstall` | 7 | reviewed | `02`, `05`, `09` |
 
 **Three real, load-bearing corrections/decisions this planning session's own research made,
 each logged in full in `TASKS/ESCALATIONS.md`'s 2026-08-21 entry, not silently baked into a
@@ -732,9 +762,16 @@ not designed by `20-skills.md`); wiring `wrapper.Config.Policy`/`policy.Engine` 
 for the first time; reviving `internal/skillbroker`'s rule-matching layer (cut in full,
 `TASKS/phase-0/22`, not reproposed here).
 
-**Planned 2026-08-21, not yet dispatched.** Per `EXECUTION-PROCESS.md`'s Phase A discipline,
-this is the planning checkpoint — present to the operator for review before any worker is
-dispatched.
+**Executing.** Operator sign-off recorded in `docs/engineering/architecture/20-skills.md`'s
+`## Status` section, 2026-08-21. **All 8 waves (tasks `01`-`12`) are implemented, validated,
+and reviewed. The batch is fully complete.** Fresh independent review found and fixed seven real
+bugs across `02`/`04`/`05`/`06`/`07`/`08`/`09`, one high-severity path-traversal bug in `10`
+(fixed in one round, fuzz-verified against ~25 adversarial slugs), and two minor accuracy
+findings in `12` (fixed in one round, mutation-tested) — every fix independently re-reviewed
+PASS. Full detail in `TASKS/ESCALATIONS.md`'s 2026-08-21/22 entries. Two genuine follow-up
+candidates remain filed, not fixed, as explicitly out of scope: a production-inert typed-nil
+hazard in `11`'s fork-composition wiring, and `12`'s preview endpoint's inability to
+materialize `fork`-composed skills (a structural "no live session" limitation, not a bug).
 
 ## Loops (`TASKS/loops/`, outside the Phase 0-9 sequence)
 
@@ -950,3 +987,216 @@ CRUD/admin UI for authoring these reflexes.
 **Planned 2026-08-21, not yet dispatched.** Per `EXECUTION-PROCESS.md`'s Phase A discipline,
 this is the planning checkpoint — present to the operator for review before any worker is
 dispatched.
+
+## Audit Remediation (`TASKS/audit-remediation/`, outside the Phase 0-9 sequence)
+
+Implements the remediation program derived from `docs/audits/2026-08-21-go-quality/REPORT.md` — a
+13-package-cluster Go quality/architecture audit run against commit `8feeee5c` (2026-08-21) — as
+sequenced by `docs/audits/2026-08-21-go-quality/REMEDIATION-GUIDE.md` (the advisor's planning guide,
+vendored into the repo by this batch's planning pass; it previously lived only at
+`~/dev/chrispian/inbox/`, outside the repository). A sibling to `TASKS/reflex-taxonomy/`,
+`TASKS/harness-reactive-self-tools/`, `TASKS/scheduling/`, `TASKS/teams/`, `TASKS/agent-host-acp/`,
+`TASKS/filesystem-snapshots/`, `TASKS/plugin-system/`, `TASKS/skills/`, `TASKS/loops/`,
+`TASKS/turn-vs-run/`, `TASKS/feedback-carrying-denial/`, and `TASKS/code-mode/`.
+
+**63 task files, 113 findings, 9 waves.** Task inventory (61 files) created by a dedicated
+task-creation pass, merged in `8258176e`; sequencing, dependency ordering, parallelization, the
+Wave 0 gate (2 new task files), the architect-decision queue, and the prevention table added by a
+planning pass on 2026-08-21.
+
+**This batch is dispatched as eleven units, not one.** At 63 tasks it exceeds anything this process
+has run (previous maximum: `TASKS/skills/` at 12). One batch, one INDEX section, one `findings.json`
+tracker — but eleven kickoff prompts, each covering 2-10 tasks, written one at a time as each unit
+becomes dispatchable. Task IDs are `<folder>/<file>`; folder-scoped numbering was retained rather
+than flattened to `01`-`63` because `findings.json`'s `task_file` field and every row of
+`FINDING-INDEX.md` already address tasks by folder path.
+
+**Severity distribution:** 3 critical, 8 high, 33 medium, 45 low, 24 informational. **44 of 113
+findings carry `requires_architect_decision: true`** — collected into 24 decisions in
+`TASKS/audit-remediation/ARCHITECT-DECISIONS.md`. A task whose `Gated on` decision is still `open`
+must not be dispatched.
+
+### Wave 0 — Revalidate the baseline (gates the entire batch)
+
+| Task | File | Status | Depends on | Gated on |
+|---|---|---|---|---|
+| `00/01` | `00-revalidate-baseline/01-revalidate-findings-against-head.md` | not-started | dev freeze | — |
+| `00/02` | `00-revalidate-baseline/02-refresh-tool-baseline-at-frozen-head.md` | not-started | dev freeze (step 1: none) | AD-23 |
+
+### Wave 1 — Release-blocking trust boundaries
+
+| Task | File | Status | Depends on | Gated on |
+|---|---|---|---|---|
+| `01/01` | `01-plugin-install-convergence/01-unify-plugin-catalog-install-pipeline.md` | not-started | `00/01`, `00/02` | AD-04 |
+| `01/02` | `01-plugin-install-convergence/02-wire-allow-unsigned-plugins-setting.md` | not-started | `01/01` | — |
+| `02/01` | `02-linux-sandbox-fail-open/01-sandbox-fail-closed-without-bwrap.md` | not-started | `00/01`, `00/02` | AD-01, AD-02 |
+| `02/02` | `02-linux-sandbox-fail-open/02-macos-seatbelt-read-boundary-disclosure.md` | not-started | `00/01` | AD-03 |
+| `03/01` | `03-agent-slug-traversal/01-canonical-slug-path-validation.md` | not-started | `00/01`, `00/02` | — |
+| `12/02` | `12-quality-ratchet-and-standards/02-add-engineering-standards-docs.md` | not-started | `00/01` | — |
+
+### Wave 2a — Container/reaper lifecycle + subagent ordering
+
+| Task | File | Status | Depends on | Gated on |
+|---|---|---|---|---|
+| `04/01` | `04-container-reaper-lifecycle/01-fix-container-constructor-partial-failure-cleanup.md` | not-started | `00/01` | — |
+| `04/02` | `04-container-reaper-lifecycle/02-fix-api-test-container-shutdown-leak.md` | not-started | `00/01` | — |
+| `04/03` | `04-container-reaper-lifecycle/03-investigate-internal-service-race-timeout.md` | not-started | `04/02` | — |
+| `04/04` | `04-container-reaper-lifecycle/04-track-untracked-goroutine-spawns.md` | not-started | `00/01` | — |
+| `04/05` | `04-container-reaper-lifecycle/05-close-untested-service-config-functions.md` | not-started | `00/01` | — |
+| `05/01` | `05-subagent-execution-ordering/01-fix-approve-concurrency-cap-and-queued-cancel.md` | not-started | `00/01` | — |
+
+### Wave 2b — Store correctness + runtime lifecycle
+
+| Task | File | Status | Depends on | Gated on |
+|---|---|---|---|---|
+| `06/01` | `06-store-correctness/01-fix-deleteagentbyid-error-swallowing.md` | not-started | `00/01` | — |
+| `06/02` | `06-store-correctness/02-triage-store-context-and-transaction-gaps.md` | not-started | `06/01` | AD-14 |
+| `07/01` | `07-runtime-correctness-lifecycle/01-fix-worktree-orphan-branch-cleanup.md` | not-started | `00/01` | — |
+| `07/02` | `07-runtime-correctness-lifecycle/02-fix-cmdserve-fatal-cleanup-bypass.md` | not-started | `00/01` | AD-17 |
+| `07/03` | `07-runtime-correctness-lifecycle/03-bound-background-job-registry-growth.md` | not-started | `00/01` | AD-18 |
+| `07/04` | `07-runtime-correctness-lifecycle/04-container-shutdown-idempotency-guard.md` | not-started | `04/01` | — |
+| `07/05` | `07-runtime-correctness-lifecycle/05-fix-mcp-config-silent-decode-errors.md` | not-started | `07/02` | — |
+
+### Wave 3 — Remaining security hardening
+
+| Task | File | Status | Depends on | Gated on |
+|---|---|---|---|---|
+| `08/01` | `08-remaining-security-hardening/01-a2a-webhook-url-validation.md` | not-started | Wave 2 complete | — |
+| `08/02` | `08-remaining-security-hardening/02-mcp-dev-grep-symlink-toctou.md` | not-started | Wave 2 complete | — |
+| `08/03` | `08-remaining-security-hardening/03-triage-remaining-gosec-g304-sites.md` | not-started | `00/02` | — |
+| `08/04` | `08-remaining-security-hardening/04-permission-default-mode-write-gap.md` | not-started | Wave 2 complete | AD-16 |
+| `08/05` | `08-remaining-security-hardening/05-secret-key-heuristic-hardening.md` | not-started | `02/01` | — |
+| `08/06` | `08-remaining-security-hardening/06-sandbox-proxy-header-timeout.md` | not-started | Wave 2 complete | — |
+| `08/07` | `08-remaining-security-hardening/07-server-auth-bind-tls-posture.md` | not-started | `07/02` | AD-15 |
+| `08/08` | `08-remaining-security-hardening/08-dependency-toolchain-vuln-bumps.md` | not-started | `00/02` | — |
+| `08/09` | `08-remaining-security-hardening/09-autocomplete-and-artifact-path-hardening.md` | not-started | `01/01` | AD-04 |
+| `08/10` | `08-remaining-security-hardening/10-api-validation-duplication-and-pagination-bug.md` | not-started | Wave 2 complete | — |
+
+### Wave 4 — Production islands
+
+| Task | File | Status | Depends on | Gated on |
+|---|---|---|---|---|
+| `09/01` | `09-production-islands/01-grounding-memory-recall.md` | not-started | `04/01`, `07/04`, and `00/01`'s reachability report | AD-06 |
+| `09/02` | `09-production-islands/02-hadron-context-gate.md` | not-started | `04/01`, `07/04`, and `00/01`'s reachability report | AD-07 |
+| `09/03` | `09-production-islands/03-team-semantic-routing.md` | not-started | `00/01`'s reachability report | AD-08 |
+| `09/04` | `09-production-islands/04-tool-builder-yaml-architecture.md` | not-started | `00/01`'s reachability report | AD-09 |
+| `09/05` | `09-production-islands/05-reasoning-augmented-tool-selection.md` | not-started | `00/01`'s reachability report | AD-10 |
+| `09/06` | `09-production-islands/06-curated-tool-knowledge-matcher.md` | not-started | `00/01`'s reachability report | AD-11 |
+
+### Wave 5 — Architectural concentration
+
+| Task | File | Status | Depends on | Gated on |
+|---|---|---|---|---|
+| `10/01` | `10-architectural-concentration/01-chatserviceimpl-generateresponse-decomposition.md` | not-started | Wave 4 complete | AD-12 |
+| `10/02` | `10-architectural-concentration/02-selftoolstransport-decomposition.md` | not-started | `09/01` | AD-13 |
+| `10/03` | `10-architectural-concentration/03-container-and-store-review-note.md` | not-started | none | AD-14 |
+
+### Wave 6a — Semantic divergence and migration drift
+
+| Task | File | Status | Depends on | Gated on |
+|---|---|---|---|---|
+| `11/01` | `11-semantic-duplication-migration-drift/01-subagent-completion-vs-message-wake-policy.md` | not-started | `10/01` | AD-19 |
+| `11/02` | `11-semantic-duplication-migration-drift/02-harness-v1-vs-native-durable-agent-handlers.md` | not-started | `03/01` | AD-19 |
+| `11/05` | `11-semantic-duplication-migration-drift/05-mcp-result-processing-tail-duplication.md` | not-started | `09/04` | AD-19 |
+| `11/06` | `11-semantic-duplication-migration-drift/06-provider-streaming-error-handling-divergence.md` | not-started | Wave 5 complete | AD-19 |
+| `11/07` | `11-semantic-duplication-migration-drift/07-ssrf-cidr-denylist-duplication.md` | not-started | `08/01` | AD-19 |
+| `11/08` | `11-semantic-duplication-migration-drift/08-config-package-naming-collision.md` | not-started | Wave 5 complete | AD-20 |
+| `11/09` | `11-semantic-duplication-migration-drift/09-elicitation-client-side-duplication-and-dead-doc.md` | not-started | Wave 5 complete | AD-19 |
+| `11/10` | `11-semantic-duplication-migration-drift/10-envelope-registry-triplication.md` | not-started | `07/02`, `07/05`, `08/07` | AD-19 |
+| `11/11` | `11-semantic-duplication-migration-drift/11-dispatch-reflex-double-evaluation.md` | not-started | `10/01`, `10/02`, `09/01` | AD-19 |
+
+### Wave 6b — Mechanical and boilerplate duplication
+
+| Task | File | Status | Depends on | Gated on |
+|---|---|---|---|---|
+| `11/03` | `11-semantic-duplication-migration-drift/03-structuredmessage-unwrap-duplication.md` | not-started | Wave 6a complete | — |
+| `11/04` | `11-semantic-duplication-migration-drift/04-traffic-light-calculation-duplication.md` | not-started | `10/01` | — |
+| `11/12` | `11-semantic-duplication-migration-drift/12-devservername-constant-duplication.md` | not-started | `09/05` | — |
+| `11/13` | `11-semantic-duplication-migration-drift/13-store-scan-loop-duplication.md` | not-started | `06/01`, `06/02` | — |
+| `11/14` | `11-semantic-duplication-migration-drift/14-adapter-plugin-boilerplate-duplication.md` | not-started | Wave 6a complete | — |
+| `11/15` | `11-semantic-duplication-migration-drift/15-api-response-boilerplate-duplication.md` | not-started | `01/01`, `08/09`, `08/10` | — |
+| `11/16` | `11-semantic-duplication-migration-drift/16-workflow-naming-and-dispatch-naming-collisions.md` | not-started | Wave 6a complete | — |
+
+### Wave 7 — Quality ratchet
+
+| Task | File | Status | Depends on | Gated on |
+|---|---|---|---|---|
+| `12/01` | `12-quality-ratchet-and-standards/01-full-repo-scheduled-lint-gate.md` | not-started | Wave 6 complete, `00/02` | AD-21 |
+| `12/03` | `12-quality-ratchet-and-standards/03-goroutine-lint-coverage-gap.md` | not-started | `04/04` | — |
+
+### Wave 8 — Mechanical cleanup
+
+| Task | File | Status | Depends on | Gated on |
+|---|---|---|---|---|
+| `13/01` | `13-mechanical-cleanup/01-confirmed-dead-code-removal.md` | not-started | `09/02`, `09/04`, `03/01`, `00/02` | AD-09, AD-07 — **scope-changing, not merely gating** |
+| `13/02` | `13-mechanical-cleanup/02-stale-comments-and-docs-cleanup.md` | not-started | Wave 7 complete | — |
+| `13/03` | `13-mechanical-cleanup/03-naming-and-formatting-fixes.md` | not-started | **every other task in the batch** | AD-22 |
+| `13/04` | `13-mechanical-cleanup/04-low-risk-error-handling-batch.md` | not-started | Wave 7 complete | — |
+| `13/05` | `13-mechanical-cleanup/05-low-risk-hygiene-and-lock-scope-batch.md` | not-started | `11/05`, `11/10`, `09/02` | — |
+
+### Load-bearing corrections found by the planning pass — real findings, not assumed
+
+**The audit's raw evidence never landed on `main`.** `REPORT.md:8` states *"Raw tool output backing
+every finding below lives in `raw/`."* That directory does not exist on `main` — it exists only in
+`.claude/worktrees/go-quality-audit/docs/audits/2026-08-21-go-quality/raw/` (29 files, 8.0 MB),
+untracked, with `git check-ignore -v` confirming the cause: `/Users/chrispian/.gitignore:11:*.log`.
+The merge commit `8258176e` brought `REPORT.md` and `findings.json` across; the evidence they cite
+did not. It cannot be regenerated — it was measured against a working tree at `8feeee5c` that no
+longer exists. **Time-sensitive:** task `00/02` step 1 is written to run *before* the dev freeze so a
+routine `git worktree prune` cannot destroy the evidence chain for 113 findings. Logged as AD-23.
+
+**The lint rule that would have caught the most severe finding exists, and was scoped away from the
+package where the bug lived.** `.golangci.yml:88-103` forbids `filepath.Join` with the message *"use
+internal/pathsafe.ResolveUnder to prevent path traversal"*; `.golangci.yml:180-184` silences it
+outside `(internal/sandbox/|internal/mcp/|internal/service/install/)`. `GO-PLUGIN-002` (critical,
+unconfined path-traversal write) is a bare `filepath.Join(cs.pluginsDir, entry.Name)` at
+`internal/api/catalog.go:301` — a package not in that list. Widening that one `path-except` to
+include `internal/api/` is the highest value-per-line change in the batch (`08/09`, `12/01`).
+
+**`GO-STORE-003` was already in the lint output and nobody saw it.** `REPORT.md:693` attributes the
+high-severity `DeleteAgentByID` finding to golangci's `nilerr` linter at
+`raw/golangci-baseline.log:6421`. `nilerr` is enabled today; it never gated because the pre-commit
+hook runs `golangci-lint run --new` (`lefthook.yml`) — changed code only, which structurally cannot
+surface a pre-existing finding in untouched code. This is the concrete argument for `12/01`.
+
+**Two of the six production islands aren't flagged as needing a decision.** `GO-MEM-002` (Hadron
+context gate) and `GO-MCPTOOL-003` (curated tool-knowledge matcher) carry
+`requires_architect_decision: false` in `findings.json` despite the guide requiring a
+wire/defer/retire call for all six islands. Both are in the queue anyway (AD-07, AD-11); Wave 0
+should correct the catalog.
+
+### Deliberate deviations from the remediation guide's ordering
+
+**`12/02` (engineering standards docs) pulled forward from Wave 7 to Wave 1** — doc-only, collides
+with nothing, and its content is already specified by `TASKS/audit-remediation/PREVENTION.md`.
+Landing it first makes the six named standards citable by the remediation tasks meant to be governed
+by them, instead of written down after the work they were supposed to govern.
+
+**`08/08` (dependency bumps) marked "runs alone"** despite the guide's *"independent dependency
+upgrades and isolated tests can run in parallel."* It rewrites `go.mod`/`go.sum`, which every
+concurrent worktree also carries. The guide's advice assumes branch-per-task, not worktree-per-task.
+
+**`13/03` (repo-wide gofmt) must be the last thing that lands, alone, with no other worktree open.**
+If AD-22 selects the full sweep it rewrites 122 files (audited-commit count; `00/02` refreshes it)
+and conflicts with every outstanding branch in the repository.
+
+### Scope fence
+
+Does **not** re-audit (new defects go to `ESCALATIONS.md`, not `findings.json`); does not refactor
+`Container` (wiring-only with two methods — 60 fields is not itself a defect); does not split
+`internal/store` (gravitational-package review, not mandatory split); does not delete islands on
+reachability evidence alone; does not chase metrics (no splitting a type to reduce field/method
+counts, no duplication work justified by LOC reduction); does not require the historical lint
+backlog to reach zero before the ratchet lands; touches no frontend — all 113 findings are Go.
+
+**Migration numbering: this batch claims none and needs none.** All findings are Go-level. Highest
+migration on disk at planning time is `137` (`TASKS/skills/`). `135` remains unclaimed by
+`TASKS/plugin-system/`, which was never dispatched — that gap is not this batch's to fill. If an
+architect decision turns a task schema-touching (`07/03`'s retention policy is the one plausible
+candidate), re-list `internal/store/migrations/` at that moment and claim the next free number then.
+
+**Planned 2026-08-21, not yet dispatched.** Per `EXECUTION-PROCESS.md`'s Phase A discipline, this is
+the planning checkpoint. Three blocking prerequisites before any dispatch: (1) the dev freeze is in
+effect (AD-24); (2) Wave 0 is closed; (3) the operator has checked the approval box in the batch
+README's `## Status` block. AD-23 (rescue the audit evidence) is urgent and **independent of all
+three** — it should be decided and acted on immediately.

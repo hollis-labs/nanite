@@ -22,71 +22,92 @@ func SlugFromFileID(id string) string {
 	return id[len(fileIDPrefix):]
 }
 
-// ToStoreSkill converts a Definition to a store.Skill.
+// ToStoreSkill converts a Definition to a store.Skill index row.
 // The ID is deterministic: "file-{slug}".
 //
-// E2 (CW-20260428-0017): mode_ids is left empty here because resolving
-// mode slugs → mode IDs requires DB access. The ingestion path in
-// service/ingest.go resolves and persists the IDs; for the in-memory
-// file-def path, callers (e.g. SkillService) can populate mode_ids
-// after construction via a slug → ID resolver. ModeSlugs is exposed in
-// Settings JSON so the FE can render mode tags directly from file defs
-// even before ingestion completes.
+// TASKS/skills/02: this shrinks significantly against the redesigned,
+// index-only store.Skill shape (docs/engineering/architecture/20-skills.md's
+// "The model: DB is an index, a vendored store is content") — the body
+// (Prompt), tool bindings, and the free-form execution-config blob (former
+// Settings: model/effort/context/argument-hint) no longer have anywhere to
+// live on this struct at all; that content stays in the file/vendored
+// package itself, read live at materialization time (task 06/08), never
+// flattened into this row. This function now produces only what an
+// index-only row can hold: identity, category, source tier, and enablement.
 func (d *Definition) ToStoreSkill() *store.Skill {
 	now := time.Now().UTC().Format(time.RFC3339)
 
-	sk := &store.Skill{
-		ID:          fileIDPrefix + d.Slug,
-		Name:        d.Name,
-		Slug:        d.Slug,
-		Description: d.Description,
-		Category:    categoryFromTags(d.Tags),
-		IsBuiltin:   true,
-		Icon:        "",
-		CreatedAt:   now,
-		UpdatedAt:   now,
-		ModeIDs:     "[]",
+	return &store.Skill{
+		ID:                   fileIDPrefix + d.Slug,
+		Name:                 d.Name,
+		Slug:                 d.Slug,
+		Description:          d.Description,
+		Category:             categoryFromTags(d.Tags),
+		Icon:                 "",
+		InputSchema:          inputSchemaFromParameters(d.Parameters),
+		SourceTier:           sourceTierFromDefinition(d),
+		Version:              1,
+		Enabled:              true,
+		DeclaredDependencies: "[]",
+		InstalledAt:          now,
+		UpdatedAt:            now,
+	}
+}
+
+// inputSchemaFromParameters builds a minimal JSON Schema object describing
+// a skill's declared Parameters — TASKS/skills/02's own note on
+// store.Skill.InputSchema: "schema for declared parameters, now sourced
+// from the package's own frontmatter via task 04's parser, not
+// agent-authored." Returns "{}" (matching the pre-parameters default) when
+// the skill declares no parameters at all, so a skill with no
+// `parameters:` frontmatter round-trips identically to before this field
+// existed.
+func inputSchemaFromParameters(params []ParameterSpec) string {
+	if len(params) == 0 {
+		return "{}"
 	}
 
-	// ToolBindings as JSON array.
-	sk.ToolBindings = marshalSlice(d.AllowedTools)
+	properties := make(map[string]any, len(params))
+	required := make([]string, 0, len(params))
+	for _, p := range params {
+		prop := map[string]any{"type": "string"}
+		if p.Description != "" {
+			prop["description"] = p.Description
+		}
+		properties[p.Name] = prop
+		if p.Required {
+			required = append(required, p.Name)
+		}
+	}
 
-	// InputSchema — skills use argument-hint, not JSON Schema.
-	sk.InputSchema = "{}"
+	schema := map[string]any{
+		"type":       "object",
+		"properties": properties,
+	}
+	if len(required) > 0 {
+		schema["required"] = required
+	}
 
-	// Settings: store skill-specific fields for API consumers.
-	settings := map[string]any{}
-	if d.Model != "" {
-		settings["model"] = d.Model
+	data, err := json.Marshal(schema)
+	if err != nil {
+		// Marshal of a map[string]any built entirely from strings/bools
+		// cannot realistically fail; fall back to the pre-parameters
+		// default rather than propagating an error from a conversion
+		// function with no error return.
+		return "{}"
 	}
-	if d.Effort != "" {
-		settings["effort"] = d.Effort
-	}
-	if d.Context != "" {
-		settings["context"] = d.Context
-	}
-	if d.ArgumentHint != "" {
-		settings["argument_hint"] = d.ArgumentHint
-	}
-	if len(d.BrokerHints) > 0 {
-		settings["broker_hints"] = d.BrokerHints
-	}
-	if d.Source != "" {
-		settings["source"] = d.Source
-	}
-	if d.SourceRef != "" {
-		settings["source_ref"] = d.SourceRef
-	}
-	// E2: surface raw mode slugs in settings for FE rendering. The DB-side
-	// mode_ids column carries resolved IDs; this carries the slug list so
-	// the UI can render tags without joining back to modes.
-	if len(d.Modes) > 0 {
-		settings["mode_slugs"] = d.Modes
-	}
-	sk.Settings = marshalJSONOr(settings, "{}")
-	sk.Prompt = d.Prompt
+	return string(data)
+}
 
-	return sk
+// sourceTierFromDefinition maps the file-based Definition's Source field
+// (set by the loader, not parsed from frontmatter — "builtin", "project",
+// "user", "plugin", "nanite", "claude") onto SourceTier, defaulting to
+// "user" when unset, matching store.Skill.CreateSkill's own default.
+func sourceTierFromDefinition(d *Definition) string {
+	if d.Source == "" {
+		return "user"
+	}
+	return d.Source
 }
 
 // categoryFromTags returns the first tag as the category, or empty string.
@@ -95,28 +116,4 @@ func categoryFromTags(tags []string) string {
 		return tags[0]
 	}
 	return ""
-}
-
-// marshalSlice marshals a string slice to JSON, normalizing nil to "[]".
-func marshalSlice(v []string) string {
-	if v == nil {
-		return "[]"
-	}
-	b, err := json.Marshal(v)
-	if err != nil {
-		return "[]"
-	}
-	return string(b)
-}
-
-// marshalJSONOr marshals v to JSON, returning fallback on error or nil input.
-func marshalJSONOr(v any, fallback string) string {
-	if v == nil {
-		return fallback
-	}
-	b, err := json.Marshal(v)
-	if err != nil {
-		return fallback
-	}
-	return string(b)
 }

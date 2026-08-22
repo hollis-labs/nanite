@@ -1,109 +1,136 @@
-# Where we are (2026-08-21, later)
+# Where we are (2026-08-21, audit-remediation planning session)
 
 Picking this up after compaction: read this whole file first, then the
 pointers it names. This replaces the earlier 2026-08-21 version — everything
 below is current as of a fresh check just before this doc was written.
 
-## Headline: Agent Host + ACP is DONE — the biggest sibling batch yet, and seven more are planned behind it
+## Headline: repo-wide dev freeze is IN EFFECT; audit remediation is the only authorized work
 
-**Agent Host + ACP** (`TASKS/agent-host-acp/`) landed and closed today.
-Confirmed via git log and `TASKS/INDEX.md`: what started as a 17-task plan
-grew to **24 real tasks** — five extra fix tasks (`18`-`22`) landed during
-Phase 2's dogfeed validation, most touching sibling repos, plus one
-post-handoff fix (`23`, wiring the Claude/Codex/Pi ACP bridge adapters into
-actual dispatch — found after the first HANDOFF/SUMMARY pass, both docs
-regenerated). All committed **directly to `main`, no PR** — matching
-Scheduling/Teams' pattern — and confirmed **already pushed to `origin/main`**
-(`git log origin/main..HEAD` is empty; nothing is stranded locally).
+> **🛑 ALL tasks in all batches are frozen (AD-24, decided 2026-08-21).**
+> Not scoped to audited packages. Every `TASKS/` folder — Phase 0-9 and every
+> sibling batch — is frozen. **`TASKS/audit-remediation/` is priority #1 and
+> the only authorized work.** Exceptions need explicit operator authorization,
+> case by case; the operator has said one is unlikely, and an agent must never
+> self-authorize. **The operator is the gate for resuming** — not a wave
+> boundary, not "all critical/high closed," not a green test run. No derived
+> trigger exists. In-flight work at freeze time finished; nothing new starts.
+>
+> Enforced where an agent will actually hit it: a banner at the top of
+> `TASKS/INDEX.md`, and a `DO NOT BOOT THIS` banner on **all 18 files in
+> `docs/engineering/orchestrator-kickoffs/`** — those are the real boot
+> artifacts, since a kickoff pasted into a plain session is how a batch starts.
+> Both must be removed when the freeze lifts.
 
-Real cross-repo work, not just Nanite: `libs/go-agent-wrapper` went from
-`v0.1.0`-pinned to `v0.7.0` over the course of this batch; `libs/agentkit`
-got a real bug fix (legacy waiter swallowing exit errors, tagged `v0.5.0`,
-operator-approved cross-portfolio fix); `libs/go-providers` got a real fix
-(Codex missing `--skip-git-repo-check`, tagged `v0.24.0`). `go-agent-wrapper`
-went from zero adopters anywhere in the portfolio to Nanite's full production
-host, with Claude/Codex/Pi driven over ACP via per-provider bridges (`12`'s
-operator-approved decision: per-provider bridges over `beyond5959/acp-adapter`),
-plus native ACP for OpenCode and Copilot CLI. Full detail:
-`TASKS/agent-host-acp/HANDOFF.md`, `TASKS/agent-host-acp/SUMMARY.md`.
+**`TASKS/audit-remediation/` is now a fully sequenced batch** — 63 task files,
+113 findings, 9 waves, dispatched as **eleven units** rather than one (at 63
+tasks it is 5x the largest batch this process has ever run). Planned this
+session; **nothing dispatched, nothing committed to production code.**
 
-**Seven more sibling batches are fully planned and ready for you to review**,
-none dispatched yet: **Filesystem Snapshots**, **Plugin System**, **Skills**,
-**Loops**, **Turn vs. Run**, **Feedback-Carrying Denial**, **Code Mode** — all
-in `TASKS/INDEX.md`, all `not-started`. I've written orchestrator kickoff
-prompts for six of these seven (all but Filesystem Snapshots, which hasn't
-been asked for yet) plus **Phase 6** (a real numbered Phase 0-9 phase, not a
-sibling batch — first real use of the master template since it was fixed).
-**None of the seven kickoff prompts are committed yet** — see "Uncommitted
-right now" below.
+### What blocks dispatch now
 
-## Uncommitted right now (7 kickoff prompts, 6 new TASKS/ folders, ~9 architecture docs)
+**AD-23 and AD-24 are both decided.** What remains:
 
-Nothing here is lost — just staged in the working tree, not yet in git
-history. Confirm with the operator before committing (last time, "commit
-everything" was an explicit instruction, not a default).
+1. **Wave 0** (`00/01`, `00/02`) — 40 commits / 156 files / +24,891 lines
+   landed between the audited commit and HEAD. All 113 findings still carry
+   `disposition: remediate`, a placeholder rather than a judgment. Wave 0 sets
+   real dispositions and refreshes the count-bearing measurements. Nothing in
+   `01/`-`13/` dispatches until it closes.
+2. **AD-01 through AD-04, now Wave 0 decisions** (moved from Wave 1 by
+   operator direction). `00/01` must deliver an **interim critical/high report
+   before finishing the full 113-finding sweep** — the operator decides these
+   four from it, against revalidated evidence rather than 40-commit-stale
+   audit-era evidence. `GO-SEC4-005` gets pulled forward out of severity order
+   because AD-03 needs it. Wave 1 dispatches only once all four are `decided`.
+3. **Commit everything** — see "Uncommitted right now." The evidence rescue in
+   particular is not complete until it is in git history.
 
-**Kickoff prompts** (`docs/engineering/orchestrator-kickoffs/`): `phase-6.md`,
-`plugin-system.md`, `skills.md` (patched to match standard — see below),
-`loops.md` (patched with a mandatory pre-flight gate — see below),
-`turn-vs-run.md`, `feedback-carrying-denial.md`, `code-mode.md`.
+**AD-23 is done.** The evidence is at `docs/audits/2026-08-21-go-quality/raw/`
+(29 files, 8.0 MB — a full copy, `diff`-verified against the source), with a
+narrow `.gitignore` negation at `.gitignore:88-91` without which 21 of the 29
+files would still be silently skipped by the global `*.log`/`*.out` rules. All
+14 `raw/` paths cited by `REPORT.md` and the task files resolve.
 
-**New `TASKS/` folders** (all sibling batches, all `not-started`):
-`plugin-system/` (7 tasks), `skills/` (12 tasks), `loops/` (13 tasks),
-`turn-vs-run/` (4 tasks), `feedback-carrying-denial/` (6 tasks), `code-mode/`
-(3 tasks). `filesystem-snapshots/` (3 tasks) also exists, planned earlier,
-no kickoff written for it yet — not asked for.
+### What this session produced
 
-**New/modified architecture docs**: `20-skills.md`, `21-loops.md`,
-`22-turn-vs-run.md`, `23-feedback-carrying-denial.md`, `27-code-mode.md` are
-new and each carry real "Approved for implementation, 2026-08-21" status
-lines (verified directly, not assumed — see per-batch detail below).
-`24-typed-corruption-recovery-taxonomy.md` is new but **deliberately
-untouched — still correctly documented as "decided to wait,"** not a
-batch, not actionable. `19-api-cli-runtime-parity.md`, `25-plugin-conformance-harness.md`,
-`26-architecture-enforcement-tests.md` are also new — **I have not reviewed
-these three or `docs/engineering/engineering-principles-draft.md`/
-`docs/launch-site/` at all**; flagging their existence, not their content.
-`09-plugin-system.md`, `16-agent-host.md`, `17-acp.md`,
-`06-session-lifecycle-and-recovery.md`, `00-overview.md`, `GLOSSARY.md` all
-have small in-place corrections from various planning passes.
-`TASKS/phase-5/06-make-http-middleware-plugin-extensible.md` is modified —
-marked superseded by `TASKS/plugin-system/07`.
+All under `TASKS/audit-remediation/`, all uncommitted:
 
-## A real, already-known migration-number collision (flagged, not yet hit)
+- **`README.md`** — rewritten from an inventory note into a real batch README
+  (template 02 shape): `## Status` sign-off block, wave/dependency tables for
+  all 63 tasks, parallelization plan cross-checked against every task's real
+  `Touches` list, migration-numbering statement, scope fence.
+- **`ARCHITECT-DECISIONS.md`** — new. 24 decisions (guide §9's ten, the six
+  island wire/defer/retire calls, plus nine surfaced by task files and this
+  pass). 44 of 113 findings carry `requires_architect_decision: true` and had
+  no queue anywhere before this.
+- **`PREVENTION.md`** — new. The guide's output-format D. Its headline: **the
+  lint rule that would have caught the batch's most severe finding already
+  exists and was scoped away from the package where the bug lived.**
+  `.golangci.yml:88-103` forbids `filepath.Join` in favour of
+  `pathsafe.ResolveUnder`; `.golangci.yml:180-184` silences it outside
+  `sandbox|mcp|service/install`. `GO-PLUGIN-002` (critical) is a bare
+  `filepath.Join` at `internal/api/catalog.go:301`. Same class:
+  `GO-STORE-003` (high) was already in `nilerr` output — invisible because the
+  pre-commit hook runs `golangci-lint run --new`.
+- **`00-revalidate-baseline/`** — new folder, 2 task files, the batch gate.
+- **61 task files** — each gained a "Planner sequencing" block (wave, dispatch
+  unit, cross-folder depends/blocks, parallel-safety, `AD-NN` gate,
+  security-review and regression-test flags).
+- **`docs/audits/2026-08-21-go-quality/REMEDIATION-GUIDE.md`** — the advisor's
+  guide, vendored into the repo. It previously lived only at
+  `~/dev/chrispian/inbox/`, unreadable by a context-free Orchestrator, while
+  being a primary source of truth for the batch.
+- **`TASKS/INDEX.md`** section and **four `TASKS/ESCALATIONS.md`** entries.
 
-`TASKS/loops` (task `09`, its `RunStatusWaitingOnLoop` status-CHECK) and
-`TASKS/code-mode` (task `03`, its new reflex action kind) **both provisionally
-claim migration `144`** — a genuine arithmetic drift between two sibling
-planning docs, not a hypothetical future race. Code Mode's kickoff prompt
-flags this explicitly and tells its orchestrator to expect `144` is already
-Loops' and land at `145`+ instead. Current real highest migration on disk is
-still `134` (landed by Agent Host + ACP's own task `11`) — nothing else has
-landed since, so `plugin-system` (`135`), `skills` (`136`-`137`), and `loops`
-(`138`-`144`) are all still open claims, in that order, if dispatched in
-that order.
+**Kickoff prompts are not written** — that is the kickoff-prompt author's
+role, one per dispatch unit, as each becomes dispatchable.
 
-## The `skills.md` and `loops.md` kickoffs got real corrections after first-draft review
+## Headline: Skills is executing right now; six more batches are planned behind it
 
-- **`skills.md`**: was originally drafted by a planner session (not me),
-  matched my pattern closely but was missing the standard "entire
-  configuration" sentence, the anti-recursion paragraph's trailing clause,
-  and — the real gap — the "verify before trusting" pre-flight paragraph.
-  Traced why: `20-skills.md` genuinely has no `## Status` section and no
-  "operator-signed-off" language anywhere, unlike every sibling's design
-  doc. Patched in a paragraph requiring the orchestrator to confirm approval
-  with the operator directly before dispatching anything, rather than
-  treating "the design doc exists" as equivalent to sign-off.
-- **`loops.md`**: at the operator's explicit request, the `LoopRun`-vs-
-  `WorkflowRun` entity-relationship distinction (a new peer entity, the
-  opposite of Teams' `TeamRun`-IS-a-`WorkflowRun` collapse, even though
-  Loop's engine/launcher reuses Teams' code as its structural template) is
-  now a **mandatory pre-flight gate** the orchestrator must resolve — via a
-  research-auditor cross-check of the design doc against the real Teams
-  precedent code — before dispatching any Phase 1 worker, not a note to
-  notice mid-implementation.
+**`TASKS/skills/` is actively in progress** (kicked off by the operator right
+before this doc was written) — 4 of 12 tasks `reviewed` (Phase 1 + Phase 2:
+`01`-`04`), two real bugs already found and fixed mid-flight (`02`'s
+`agent_skills`/`agent_known_skills` collision, `04`'s `file-<slug>` ID colliding
+with the retired file-based-skill sentinel — both re-reviewed clean). Next up
+in the batch: `05` (install/sync REST API + CLI). Migrations `136`/`137`
+landed as planned; `135` (Plugin System's claim) is still unclaimed — Plugin
+System hasn't been dispatched yet. **Don't assume Skills is done — check
+`TASKS/INDEX.md`'s "Skills" section for real current status before reporting
+on it.**
 
-## Batch detail — everything landed so far
+**Filesystem Snapshots is queued to run right after Skills finishes** — the
+operator's own plan, stated directly. Real status, corrected from an earlier
+mistaken belief it was already done: **1 of 3 tasks complete.** `01` (host
+mechanism, `libs/go-agent-wrapper`) is `implemented`. `02` (Nanite capture
+policy/wiring) and `03` (diff/preview/restore API) are `not-started` — they
+were paused mid-batch to avoid a real merge collision with
+`agent-host-acp/06`'s rewrite of `agent.go`; that blocker is now cleared
+(agent-host-acp is fully done), but `02`/`03` were never actually resumed.
+Kickoff prompt is ready and makes this 1/3 status impossible to miss:
+`docs/engineering/orchestrator-kickoffs/filesystem-snapshots.md`.
+
+**Six more sibling batches are fully planned, not yet dispatched**: Plugin
+System, Loops, Turn vs. Run, Feedback-Carrying Denial, Code Mode (kickoffs
+written for all five), plus Filesystem Snapshots above. All in
+`TASKS/INDEX.md`, all `not-started` except where noted.
+
+## New this session: the whole process is now documented as a reusable template package
+
+`docs/engineering/templates/` — **not yet committed**, 7 files. Written because
+the sibling-batch pattern (now 11 of the last 13 real batches) was never
+formally templated anywhere — only the original numbered-phase flow had
+templates (`EXECUTION-PROCESS.md`, `ORCHESTRATOR-KICKOFF-TEMPLATE.md`,
+`PLANNER-KICKOFF-PROMPT.md`). Contents: `README.md` (the full five-role chain,
+both pipeline variants, the confirmed "plain session, no subagent_type" boot
+mechanism, **this role's own process documented as an explicit 11-step
+checklist for the first time**, tracking discipline, a numbered
+bootstrap-from-zero sequence), plus one template file each for an
+architecture doc's `## Status` block, a batch `README.md`, a task file, an
+`INDEX.md` section, an `ESCALATIONS.md` entry, and the general-purpose
+sibling-batch kickoff prompt (extracted from all dozen real ones written so
+far). Read `docs/engineering/templates/README.md` first if picking this back
+up — it's the anchor document.
+
+## Landed and complete
 
 | Batch | Design doc | Landed | How |
 |---|---|---|---|
@@ -111,10 +138,48 @@ that order.
 | Harness-Reactive Self-Tools | `11-harness-reactive-self-tools.md` | ✅ | PR #264, merged |
 | Scheduling | `12-scheduling.md` | ✅ | direct commits to `main`, no PR |
 | Teams | `15-teams.md` | ✅ | direct commits to `main`, no PR |
-| Agent Host + ACP | `16-agent-host.md` + `17-acp.md` | ✅ (just now) | direct commits to `main`, no PR, pushed |
+| Agent Host + ACP | `16-agent-host.md` + `17-acp.md` | ✅ | 24 tasks (grew from 17), direct commits, pushed |
+| Phase 6 — Envelopes & Cards | (numbered phase, `08-cards.md`) | ✅ | 6 tasks, direct commits — first real use of the numbered-phase kickoff template since it was fixed |
 
-The kickoff-prompt pattern has now held clean across five real runs in a
-row with no repeat of the original nested-orchestrator bug.
+The kickoff-prompt pattern has now held clean across six real runs in a row
+with no repeat of the original nested-orchestrator bug.
+
+## In progress / queued
+
+| Batch | Status | Kickoff ready? |
+|---|---|---|
+| Skills | **executing now**, 4/12 reviewed | used already |
+| Filesystem Snapshots | 1/3 done, paused — queued next | ✅ `filesystem-snapshots.md` |
+| Plugin System | not-started | ✅ `plugin-system.md` |
+| Loops | not-started | ✅ `loops.md` (has a mandatory `LoopRun`-vs-`WorkflowRun` pre-flight gate) |
+| Turn vs. Run | not-started | ✅ `turn-vs-run.md` |
+| Feedback-Carrying Denial | not-started | ✅ `feedback-carrying-denial.md` |
+| Code Mode | not-started | ✅ `code-mode.md` (real migration-`144` collision with Loops flagged) |
+
+## Torque
+
+`CW-20260819-0004` — **confirmed `done`.** The earlier blocking Torque server
+bug (`SQL logic error: no such column: depends_on` on any status transition)
+is fixed — operator reported it, Torque team fixed it, MCP reconnected and
+verified working again same day. No outstanding Torque blockers right now.
+
+`CW-20260820-0001` through `-0008` (Memory & Knowledge Tools follow-ups) and
+the rest of the `CW-20260819-*` series remain `todo`/`manual`, untouched since
+filing.
+
+## Uncommitted right now
+
+`docs/engineering/templates/` (7 files, from the prior session),
+`docs/engineering/orchestrator-kickoffs/filesystem-snapshots.md`, and **this
+session's entire audit-remediation planning output** (see the headline
+section): the rewritten batch `README.md`, `ARCHITECT-DECISIONS.md`,
+`PREVENTION.md`, `00-revalidate-baseline/` (2 files), sequencing blocks on 61
+task files, `REMEDIATION-GUIDE.md`, plus the `TASKS/INDEX.md` section and four
+`TASKS/ESCALATIONS.md` entries. **No production code touched.**
+
+Everything else staged before (the six other kickoff prompts, six new `TASKS/`
+folders, ~9 new/modified architecture docs, `phase-6` work) landed in a single
+`Doc sync` commit (`54015aed`) two handoffs ago.
 
 ## Headline status — Phase 0-9 (the original architecture-review sequence)
 
@@ -123,66 +188,69 @@ forward as-is:
 
 - **Phase 0, Phase 1**: done, merged to `main`.
 - **Phases 2-5**: executed and `reviewed` (closed), except `phase-5/06`
-  (now superseded by `plugin-system/07`, see above).
+  (superseded by `plugin-system/07`).
+- **Phase 6**: done (see table above).
 - **Still open, still need your review**: `TASKS/phase-2/07-audit-agent-roster.md`
   — `not-started`.
 - **CLI-vs-API**: resolved — keep both, app default CLI, overridable
   system-wide and per-agent. `TASKS/phase-8/01-set-default-runtime-kind.md`.
-- **Phase 6**: kickoff written (`docs/engineering/orchestrator-kickoffs/phase-6.md`),
-  not dispatched. **Phases 7, 9**: not started, unchanged.
+- **Phases 7, 9**: not started, unchanged.
 - **Phase 8**: `01` re-scoped; `02`-`05` not started; `06`/`07` planned, not
   started.
 
-## Torque — one real blocker, status unknown
+## A real migration-number collision, still not yet hit
 
-`CW-20260819-0004` ("build a scheduler," superseded by the landed Scheduling
-batch): I added a comment documenting the supersession, but every attempt to
-transition its status failed with a genuine Torque server bug
-(`SQL logic error: no such column: depends_on`) — reproduced on both single
-and bulk transition, and on `todo→doing` as well as `todo→done`, so it's not
-FSM-specific. You said Torque pushed an update the same day and you'd report
-the bug and have them fix it — **not re-verified since**; retry the
-transition once you confirm the fix landed.
-
-`CW-20260820-0001` through `-0008` (Memory & Knowledge Tools follow-ups) and
-the rest of the `CW-20260819-*` series remain `todo`/`manual`, untouched
-since filing.
+`TASKS/loops` (task `09`) and `TASKS/code-mode` (task `03`) both provisionally
+claim migration `144` — a genuine arithmetic drift between two sibling
+planning docs. Both kickoffs already flag this explicitly. Real current
+ceiling on disk: `137` (Skills' own `02`). `135` (Plugin System) and `138`-`144`
+(Loops) are the next real claims in sequence if those batches run before
+Code Mode.
 
 ## Key pointers
 
-- `TASKS/INDEX.md` — live status tracker, always re-read fresh; has full
-  per-task detail for all five completed sibling batches plus all seven
-  planned-not-dispatched ones.
-- `TASKS/ESCALATIONS.md` — escalation log; latest real entries are each new
-  batch's own planning-pass findings (2026-08-21 entries for Loops, Skills,
-  Plugin System, Turn vs. Run, Feedback-Carrying Denial, Code Mode).
-- `docs/engineering/orchestrator-kickoffs/` — nine files now: the five for
-  landed batches (kept for reference/pattern), plus `phase-6.md`,
-  `plugin-system.md`, `skills.md`, `loops.md`, `turn-vs-run.md`,
-  `feedback-carrying-denial.md`, `code-mode.md` for what's queued next.
-  `ORCHESTRATOR-KICKOFF-TEMPLATE.md` is the Phase 0-9-specific variant,
-  used for real for the first time on `phase-6.md`.
-- Torque: project `PRJ-20260417-0002`.
+- `TASKS/INDEX.md` — live status tracker, always re-read fresh.
+- `TASKS/ESCALATIONS.md` — escalation log; latest real entries are each
+  batch's own 2026-08-21 planning-pass findings, plus Skills' two mid-flight
+  bug-fix entries.
+- `docs/engineering/orchestrator-kickoffs/` — thirteen files now: six for
+  landed/executing batches (kept for reference/pattern — includes `skills.md`,
+  already used), plus `filesystem-snapshots.md`, `plugin-system.md`,
+  `loops.md`, `turn-vs-run.md`, `feedback-carrying-denial.md`, `code-mode.md`
+  for what's queued next.
+- `docs/engineering/templates/` — the process-documentation package, still
+  not committed. Start here if reviving this process cold.
+- `TASKS/audit-remediation/README.md` — the batch's authoritative wave,
+  dependency, and parallelization tables. Its `## Status` block carries the
+  operator sign-off gate; an unchecked box is a hard stop.
+- `TASKS/audit-remediation/ARCHITECT-DECISIONS.md` — 24 open decisions. A task
+  whose `Gated on` decision is still `open` must not be dispatched.
+- Torque: project `PRJ-20260417-0002`, no outstanding tool blockers.
 
 ## What's next
 
 Most concrete open items, roughly in likely order:
-1. **Decide whether to commit the seven uncommitted kickoff prompts + six
-   new `TASKS/` folders + new architecture docs** — everything is staged and
-   ready, just waiting on the word, same as agent-host-acp's planning
-   baseline was before it got committed and dispatched.
-2. **Pick which of the seven planned batches to dispatch next**, and in what
-   order — `plugin-system`/`skills`/`loops` have real sequential migration
-   claims (`135`, `136`-`137`, `138`-`144`) that get simpler to reason about
-   if run in that order rather than interleaved; `turn-vs-run` and
-   `feedback-carrying-denial` need no migrations at all, so they're free to
-   run anytime without numbering coordination.
-3. **Confirm the Torque transition bug is fixed**, then close out
-   `CW-20260819-0004` for real.
-4. `TASKS/phase-2/07-audit-agent-roster.md` — still open, still needs your
-   review.
-5. Review the three unreviewed-by-me new architecture docs
+1. **Commit this session's work**, evidence rescue first and as its own
+   commit — until it is in history the rescue has not actually happened.
+2. **Dispatch Wave 0** (`00/01` + `00/02`). The freeze is in effect and the
+   in-flight batches are done, so the precondition is met.
+3. **Decide AD-01 through AD-04** off `00/01`'s interim critical/high report,
+   then Wave 1 becomes dispatchable.
+4. ~~Filesystem Snapshots~~ — **frozen**, along with every other batch. Its
+   kickoff carries a `DO NOT BOOT THIS` banner. Re-slot only when the operator
+   lifts the freeze.
+5. **Commit `docs/engineering/templates/`** whenever convenient — nothing blocks this, just hasn't been asked
+   for yet.
+6. ~~**Pick the order for the remaining planned batches**~~ — moot until the
+   freeze lifts; kept for when it does. (Plugin System,
+   Loops, Turn vs. Run, Feedback-Carrying Denial, Code Mode) — Plugin System
+   should probably run before Loops/Code Mode given the migration sequencing
+   above, but Turn vs. Run and Feedback-Carrying Denial need no migrations at
+   all and are free to run anytime.
+7. `TASKS/phase-2/07-audit-agent-roster.md` — still open, still needs review.
+8. Review the architecture docs never looked at yet
    (`19-api-cli-runtime-parity.md`, `25-plugin-conformance-harness.md`,
-   `26-architecture-enforcement-tests.md`) and `engineering-principles-draft.md`/
-   `docs/launch-site/` whenever you want them looked at — nothing done on
-   these yet.
+   `26-architecture-enforcement-tests.md` — note this one is now cited by
+   `PREVENTION.md` as the source of the in-repo enforceable-rule precedent) and
+   `docs/engineering/engineering-principles-draft.md`/`docs/launch-site/`
+   whenever wanted — still untouched.

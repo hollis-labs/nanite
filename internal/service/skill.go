@@ -36,9 +36,16 @@ type skillServiceImpl struct {
 }
 
 // SkillServiceConfig holds dependencies for constructing a SkillService.
+//
+// TASKS/skills/01: FileSkills' former source (skill.Discover() + the 8
+// embedded builtin skills) is cut in full — see
+// docs/engineering/architecture/20-skills.md's "Migration" section. The
+// container currently always passes nil here; a future non-file source
+// (the install/sync pipeline, TASKS/skills/04-05) is a candidate to feed it
+// again, out of this task's scope.
 type SkillServiceConfig struct {
 	Skills     SkillStore
-	FileSkills []*skill.Definition // from skill.Discover() + builtin
+	FileSkills []*skill.Definition
 }
 
 // NewSkillService creates a SkillService from its required dependencies.
@@ -82,21 +89,15 @@ func (s *skillServiceImpl) List(_ context.Context) ([]store.Skill, error) {
 	}
 
 	// Append DB skills whose slug is not already present.
+	//
+	// TASKS/skills/02: this used to also backfill mode_ids (an E2-era,
+	// now-cut steering-modes field) from the DB row onto file-def rows.
+	// store.Skill no longer has a ModeIDs field at all — dropped in full,
+	// see internal/store/skills.go's doc comment — so that backfill step is
+	// gone; the DB-vs-file-def merge below is otherwise unchanged.
 	dbSkills, err := s.skills.ListSkills()
 	if err != nil {
 		return result, err // return file-based skills even if DB fails
-	}
-	// E2 (CW-20260428-0017): backfill mode_ids on file-def rows from the DB.
-	// The DB row carries resolved mode IDs (translated from slugs at ingest),
-	// which the FE needs for "active for current mode" filtering.
-	dbBySlug := make(map[string]store.Skill, len(dbSkills))
-	for _, sk := range dbSkills {
-		dbBySlug[sk.Slug] = sk
-	}
-	for i := range result {
-		if dbSk, ok := dbBySlug[result[i].Slug]; ok {
-			result[i].ModeIDs = dbSk.ModeIDs
-		}
 	}
 	for _, sk := range dbSkills {
 		if !seen[sk.Slug] {

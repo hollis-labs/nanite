@@ -63,7 +63,7 @@ import (
 func main() {
 	if len(os.Args) < 2 {
 		fmt.Fprintf(os.Stderr, "usage: %s <command>\n", brand.BinaryName)
-		fmt.Fprintln(os.Stderr, "commands: serve, chat, plugin, mcp, message, admin, path, version (framework-injection moved to `nanite-agent init`)")
+		fmt.Fprintln(os.Stderr, "commands: serve, chat, plugin, mcp, skill, message, admin, path, version (framework-injection moved to `nanite-agent init`)")
 		os.Exit(1)
 	}
 
@@ -76,6 +76,8 @@ func main() {
 		cmdPlugin(os.Args[2:])
 	case "mcp":
 		cmdMCP(os.Args[2:])
+	case "skill":
+		cmdSkill(os.Args[2:])
 	case "install":
 		cmdInstall(os.Args[2:])
 	case "message":
@@ -674,6 +676,7 @@ func cmdServe(args []string) {
 	selfTools.TodoStore = s
 	selfTools.Messaging = container.Messaging
 	selfTools.Subagent = container.Subagent
+	selfTools.SkillVendor = container.SkillVendor
 	selfTools.Background = container.Background
 	selfTools.Work = container.Streams
 	// Task 34: wire the shared managed-agent write path's classifier so

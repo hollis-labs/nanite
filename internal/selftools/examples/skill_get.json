@@ -1,0 +1,17 @@
+[
+  {
+    "title": "Fetch a granted skill's full content",
+    "args": { "slug": "release-review" },
+    "notes": "Returns the skill's fully materialized text (parameters resolved, inline dependencies spliced in, markers executed) — the real content behind the one-line teaser you already see in your skill catalog. Requires an approved grant for this exact slug."
+  },
+  {
+    "title": "Fetch a skill with static parameter arguments",
+    "args": { "slug": "changelog-summary", "params": { "since": "v1.2.0" } },
+    "notes": "A value in params overrides that same parameter's agent_context_resolvers dynamic binding, when both exist."
+  },
+  {
+    "title": "Fetch a skill that composes a fork-mode dependency",
+    "args": { "slug": "release-review", "fork_role": "worker" },
+    "notes": "fork_role is required only when the skill (or one of its composed dependencies) declares fork-mode composition — there is no default role. A pending-approval response names a run_id to poll via subagent_status before retrying."
+  }
+]

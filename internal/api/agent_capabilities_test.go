@@ -129,6 +129,67 @@ func TestAgentCapabilitiesAPI_KnownSkillsCRUD(t *testing.T) {
 	}
 }
 
+// TestAgentCapabilitiesAPI_CreateKnownSkill_UpsertsOntoBareAssignment
+// reproduces the fresh reviewer's first finding directly (TASKS/skills/02's
+// fix-required section, 2026-08-21): AssignSkillToAgent (POST
+// /api/agents/{id}/skills, the Wizard's own "Assigned Skills" step) and
+// handleCreateAgentKnownSkill (POST /api/agents/{id}/known-skills) now share
+// agent_known_skills' (agent_id, skill_name) row space. Assigning a skill
+// via the first endpoint, then creating a known-skill entry for the exact
+// same skill via the second, must succeed (upserting onto the bare row) —
+// not 409, which is what AgentBuilderWizard.tsx's own submit flow does for
+// a skill it lists in both assigned_skill_ids/assigned_skill_slugs and
+// known_skills.
+func TestAgentCapabilitiesAPI_CreateKnownSkill_UpsertsOntoBareAssignment(t *testing.T) {
+	a, mux := newTestAPI(t)
+	agentID := seedCapabilityAgent(t, a, store.AgentProfile{
+		Name:         "Collision Agent",
+		Slug:         "collision-agent",
+		SystemPrompt: "x",
+	})
+
+	sk := &store.Skill{Name: "Collision Skill", Slug: "collision-skill"}
+	if err := a.Services.Store.CreateSkill(sk); err != nil {
+		t.Fatalf("CreateSkill: %v", err)
+	}
+
+	// Same-skill assignment via the unrelated /skills endpoint first —
+	// mirrors AgentBuilderWizard.tsx's assignBuilderCapabilities loop.
+	if err := a.Services.Store.AssignSkillToAgent(agentID, sk.ID, ""); err != nil {
+		t.Fatalf("AssignSkillToAgent: %v", err)
+	}
+
+	req := httptest.NewRequest("POST", "/api/agents/"+agentID+"/known-skills", bytes.NewBufferString(`{
+		"skill_name":"collision-skill",
+		"pinned":true,
+		"reason":"role carry"
+	}`))
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, req)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("create known skill onto bare assignment: got %d, want 201; body=%s", w.Code, w.Body.String())
+	}
+
+	row, err := a.Services.Store.GetAgentKnownSkill(context.Background(), agentID, "collision-skill")
+	if err != nil {
+		t.Fatalf("GetAgentKnownSkill: %v", err)
+	}
+	if !row.Pinned || row.Reason != "role carry" {
+		t.Fatalf("known skill row not upserted correctly: %+v", row)
+	}
+
+	// A second create against the now-real known-skill row must still 409 —
+	// the fix only relaxes the bare-row case, not genuine duplicate creates.
+	req = httptest.NewRequest("POST", "/api/agents/"+agentID+"/known-skills", bytes.NewBufferString(`{
+		"skill_name":"collision-skill"
+	}`))
+	w = httptest.NewRecorder()
+	mux.ServeHTTP(w, req)
+	if w.Code != http.StatusConflict {
+		t.Fatalf("create known skill onto real grant row: got %d, want 409; body=%s", w.Code, w.Body.String())
+	}
+}
+
 func TestAgentCapabilitiesAPI_ProceduresCRUD(t *testing.T) {
 	a, mux := newTestAPI(t)
 	agentID := seedCapabilityAgent(t, a, store.AgentProfile{

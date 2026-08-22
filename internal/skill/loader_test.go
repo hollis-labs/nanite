@@ -73,41 +73,11 @@ func TestWriteUserSkillFile_RejectsTraversalSlugs(t *testing.T) {
 	}
 }
 
-// TestDropAndLoad_UserTierNoLongerDiscovered is TASKS/phase-1/08's negative
-// verification for the ~/.nanite/skills/ (user) tier, superseding the old
-// J6 acceptance test of the same drop flow (which asserted the file WAS
-// discovered — exactly the behavior this task cuts). EnsureHomeDirs still
-// creates the directory on first run (unaffected, still exercised here to
-// prove the two behaviors are independent), but a file dropped into it is
-// no longer picked up by Discover() — DiscoverOptions doesn't even carry a
-// HomeDir field to point at it anymore.
-func TestDropAndLoad_UserTierNoLongerDiscovered(t *testing.T) {
-	home := t.TempDir()
-
-	// Step 1: ensure dirs (mirrors what NewContainer calls at startup).
-	if err := EnsureHomeDirs(home); err != nil {
-		t.Fatalf("EnsureHomeDirs: %v", err)
-	}
-
-	// Step 2: drop a skill file, same as the old J6 flow.
-	skillsDir := filepath.Join(home, ".nanite", "skills")
-	content := `---
-name: Summarise
-slug: summarise
-description: Summarise the current conversation
----
-Summarise everything discussed so far in three bullet points.
-`
-	if err := os.WriteFile(filepath.Join(skillsDir, "summarise.md"), []byte(content), 0o644); err != nil {
-		t.Fatalf("write skill file: %v", err)
-	}
-
-	// Step 3: discover — must find nothing; the user tier is cut in full.
-	defs, err := Discover(DiscoverOptions{})
-	if err != nil {
-		t.Fatalf("Discover: %v", err)
-	}
-	if len(defs) != 0 {
-		t.Fatalf("got %d defs, want 0 (user skill tier is cut)", len(defs))
-	}
-}
+// TASKS/skills/01: TestDropAndLoad_UserTierNoLongerDiscovered (TASKS/
+// phase-1/08's negative verification that a file dropped into
+// ~/.nanite/skills/ is not picked up by Discover()) is deleted along with
+// Discover/DiscoverOptions themselves — see
+// docs/engineering/architecture/20-skills.md's "Migration: clean slate, no
+// carried-forward content" section. There is no more Discover() to call a
+// negative check against; EnsureHomeDirs (exercised by the two tests above)
+// is unaffected and stays.

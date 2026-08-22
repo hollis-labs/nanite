@@ -217,10 +217,8 @@ func (a *API) handleCreateAgentKnownSkill(w http.ResponseWriter, r *http.Request
 		a.errorResp(w, http.StatusBadRequest, "skill_name is required")
 		return
 	}
-	if existing, err := a.Services.Store.GetAgentKnownSkill(r.Context(), agent.ID, req.SkillName); err == nil && existing != nil {
-		a.errorResp(w, http.StatusConflict, "known skill already exists")
-		return
-	} else if err != nil && !errors.Is(err, store.ErrAgentKnownSkillNotFound) {
+	existing, err := a.Services.Store.GetAgentKnownSkill(r.Context(), agent.ID, req.SkillName)
+	if err != nil && !errors.Is(err, store.ErrAgentKnownSkillNotFound) {
 		a.errorResp(w, http.StatusInternalServerError, err.Error())
 		return
 	}
@@ -230,6 +228,26 @@ func (a *API) handleCreateAgentKnownSkill(w http.ResponseWriter, r *http.Request
 		Pinned:     req.Pinned,
 		TTLSeconds: req.TTLSeconds,
 		Reason:     req.Reason,
+	}
+	if existing != nil {
+		// TASKS/skills/02's fix-required section: AssignSkillToAgent
+		// (POST /api/agents/{id}/skills, the Wizard's unrelated "Assigned
+		// Skills" step) and this handler now share the same
+		// agent_known_skills row space, keyed by (agent_id, skill_name). A
+		// bare row left by that other endpoint carries no known-skill data
+		// of its own — upsert onto it (preserving its original
+		// ActivationCount/LastUsedAt/AddedAt, the same fields
+		// handleUpdateAgentKnownSkill already carries forward for a real
+		// edit) instead of conflicting. A row that already carries real
+		// known-skill data is a genuine duplicate create attempt — 409
+		// stays correct and unchanged for that case.
+		if !existing.IsBareAssignment() {
+			a.errorResp(w, http.StatusConflict, "known skill already exists")
+			return
+		}
+		row.ActivationCount = existing.ActivationCount
+		row.LastUsedAt = existing.LastUsedAt
+		row.AddedAt = existing.AddedAt
 	}
 	if err := a.Services.Store.InsertAgentKnownSkill(r.Context(), row); err != nil {
 		a.errorResp(w, http.StatusBadRequest, err.Error())
@@ -284,6 +302,16 @@ func (a *API) handleUpdateAgentKnownSkill(w http.ResponseWriter, r *http.Request
 		AddedAt:         current.AddedAt,
 		TTLSeconds:      req.TTLSeconds,
 		Reason:          req.Reason,
+		// TASKS/skills/02: this handler's request shape (AgentKnownSkillUpsertRequest)
+		// has no grant-state fields — carry the current row's values forward
+		// the same way ActivationCount/LastUsedAt/AddedAt already are, so a
+		// plain Panel field edit (pinned/ttl/reason) can never silently wipe
+		// a grant a future task 09 workflow set via InsertAgentKnownSkill
+		// directly.
+		ApprovedContentHash: current.ApprovedContentHash,
+		GrantedAt:           current.GrantedAt,
+		GrantedBy:           current.GrantedBy,
+		CapabilitiesGranted: current.CapabilitiesGranted,
 	}
 	if err := a.Services.Store.InsertAgentKnownSkill(r.Context(), row); err != nil {
 		a.errorResp(w, http.StatusBadRequest, err.Error())

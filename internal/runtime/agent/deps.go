@@ -120,6 +120,16 @@ type Dependencies struct {
 	// AllowLoopback, FS allowlists, and ModeBackground/WideOpen overrides.
 	SandboxBaseProfile sandbox.Profile
 
+	// Skills resolves an agent's plantable skill set (grant + catalog
+	// lookups) for skill_plant.go's CLI-hosted native skill delivery
+	// (TASKS/skills/10). nil disables skill planting entirely — see
+	// SetupParams.Skills' doc comment.
+	Skills SkillStore
+
+	// SkillVendor reads a plantable skill's vendored file tree for
+	// skill_plant.go. nil disables skill planting, same as a nil Skills.
+	SkillVendor SkillVendorReader
+
 	// liveSessions tracks sessions currently driven through
 	// wrapper.Wrapper.Run, keyed by runtime/session id, populated by Boot
 	// once a session is confirmed started and cleared once its owning

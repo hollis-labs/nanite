@@ -2,6 +2,7 @@ package api
 
 import (
 	"github.com/hollis-labs/nanite/internal/service"
+	"github.com/hollis-labs/nanite/internal/skill"
 	"github.com/hollis-labs/nanite/internal/store"
 )
 
@@ -632,32 +633,131 @@ type UpdateProjectRequest struct {
 }
 
 // --- Skills ---
+//
+// TASKS/skills/02: request shapes follow store.Skill's redesigned,
+// index-only shape (docs/engineering/architecture/20-skills.md's "The
+// model: DB is an index, a vendored store is content") — ToolBindings and
+// Settings are dropped (no field on store.Skill to map them onto anymore).
+// This is still the bare admin-CRUD surface over the index row, not the
+// real authored-package install/sync path (tasks 04/05 own that) or the
+// remaining REST surface (list/grants/preview/uninstall, task 12) — the
+// full redesign of this handler's contract is explicitly later work.
 
 type CreateSkillRequest struct {
-	Name         string `json:"name"`
-	Slug         string `json:"slug"`
-	Description  string `json:"description"`
-	Category     string `json:"category"`
-	ToolBindings string `json:"tool_bindings"`
-	InputSchema  string `json:"input_schema"`
-	Settings     string `json:"settings"`
-	Icon         string `json:"icon"`
+	Name                 string `json:"name"`
+	Slug                 string `json:"slug"`
+	Description          string `json:"description"`
+	Category             string `json:"category"`
+	Icon                 string `json:"icon"`
+	InputSchema          string `json:"input_schema"`
+	SourceTier           string `json:"source_tier"`
+	ContentHash          string `json:"content_hash"`
+	DeclaredDependencies string `json:"declared_dependencies"`
+	Enabled              *bool  `json:"enabled"`
 }
 
 type UpdateSkillRequest struct {
-	Name         *string `json:"name"`
-	Slug         *string `json:"slug"`
-	Description  *string `json:"description"`
-	Category     *string `json:"category"`
-	ToolBindings *string `json:"tool_bindings"`
-	InputSchema  *string `json:"input_schema"`
-	Settings     *string `json:"settings"`
-	Icon         *string `json:"icon"`
+	Name                 *string `json:"name"`
+	Slug                 *string `json:"slug"`
+	Description          *string `json:"description"`
+	Category             *string `json:"category"`
+	Icon                 *string `json:"icon"`
+	InputSchema          *string `json:"input_schema"`
+	SourceTier           *string `json:"source_tier"`
+	ContentHash          *string `json:"content_hash"`
+	DeclaredDependencies *string `json:"declared_dependencies"`
+	Enabled              *bool   `json:"enabled"`
 }
 
 type AssignAgentSkillRequest struct {
 	SkillID string `json:"skill_id"`
 	Config  string `json:"config"`
+}
+
+// InstallSkillRequest is the body for POST /api/skills/install and
+// POST /api/skills/{slug}/sync (TASKS/skills/05 -- the REST trigger for
+// task 04's internal/skillinstall.Installer pipeline). Path-only for this
+// batch: TASKS/skills/README.md's ecosystem-format-adaptation scope fence
+// covers upload support, deferred to a later batch (see task 05's Work Log).
+type InstallSkillRequest struct {
+	Path string `json:"path"`
+}
+
+// InstallSkillResponse is the shared success shape for install and sync --
+// the resulting index row plus the vendored-store address it now points at.
+type InstallSkillResponse struct {
+	Skill   store.Skill `json:"skill"`
+	Address string      `json:"address"`
+	Reused  bool        `json:"reused"`
+}
+
+// TASKS/skills/12: the remaining REST surface docs/engineering/
+// architecture/20-skills.md's "API surface" section names beyond
+// install/sync (task 05) -- grant/revoke, grants/policy view, and
+// invoke/preview. See internal/api/skills.go's doc comments above
+// handleGrantAgentSkill/handleGetAgentSkillGrant/handlePreviewSkill for
+// the full reasoning behind each shape below.
+
+// AgentSkillGrantRequest is the body for
+// POST /api/agents/{id}/skills/{slug}/grant -- the actual capability-grant
+// action, distinct from AssignAgentSkillRequest above (which only manages
+// bare (agent_id, skill_name) row existence, task 02's "Assigned Skills"
+// step, with no grant-state opinion at all). ApprovedContentHash and
+// GrantedAt are never caller-supplied: the server always derives
+// ApprovedContentHash from the skill's own current vendored ContentHash at
+// call time and GrantedAt from the request's own timestamp, matching
+// docs/engineering/architecture/20-skills.md's "Trust invalidation is the
+// vendored content hash" model -- a grant is always an approval of "the
+// skill's content as of right now," never a caller-asserted hash.
+type AgentSkillGrantRequest struct {
+	GrantedBy    string              `json:"granted_by"`
+	Capabilities *skill.Capabilities `json:"capabilities,omitempty"`
+}
+
+// AgentSkillGrantView is the response for both POST and GET
+// /api/agents/{id}/skills/{slug}/grant -- the grants/policy view
+// docs/engineering/architecture/20-skills.md's "API surface" section
+// describes: "what capabilities a skill's materializer is approved for,
+// and whether that approval is still valid against the skill's current
+// vendored hash." Status reuses internal/skill.Gate.Authorize's own
+// decision classification (tasks 09/11) rather than re-deriving it:
+// "approved" | "grant_required" | "reapproval_required".
+type AgentSkillGrantView struct {
+	AgentID   string `json:"agent_id"`
+	SkillSlug string `json:"skill_slug"`
+
+	Status  string `json:"status"`
+	Message string `json:"message,omitempty"`
+
+	ApprovedContentHash string `json:"approved_content_hash,omitempty"`
+	CurrentContentHash  string `json:"current_content_hash"`
+	GrantedAt           string `json:"granted_at,omitempty"`
+	GrantedBy           string `json:"granted_by,omitempty"`
+
+	Capabilities *skill.Capabilities `json:"capabilities,omitempty"`
+}
+
+// SkillPreviewRequest is the body for POST /api/skills/{slug}/preview --
+// invoke/preview materialization outside a live agent turn. AgentID is
+// required: this endpoint runs the exact same Resolver -> Materializer ->
+// Policy/Sandbox pipeline (and the same top-level Gate.Authorize grant
+// check) the skill_get self-tool runs for a real agent turn -- see
+// internal/api/skills.go's handlePreviewSkill doc comment for the full
+// reasoning behind not bypassing the grant check here. AgentID must
+// already carry an approved grant for the previewed skill (see POST
+// /api/agents/{id}/skills/{slug}/grant, above).
+type SkillPreviewRequest struct {
+	AgentID            string            `json:"agent_id"`
+	Params             map[string]string `json:"params,omitempty"`
+	ForkRole           string            `json:"fork_role,omitempty"`
+	ForkTimeoutSeconds int               `json:"fork_timeout_seconds,omitempty"`
+}
+
+// SkillPreviewResponse is the successful response body for
+// POST /api/skills/{slug}/preview.
+type SkillPreviewResponse struct {
+	Slug    string `json:"slug"`
+	Content string `json:"content"`
 }
 
 // --- Approvals ---

@@ -78,6 +78,18 @@ func claudePlantSpec(params SetupParams) (plant.Spec, error) {
 		files[relPath] = content
 	}
 
+	// TASKS/skills/10: plant this agent's plantable skill set at claude's
+	// native .claude/skills/<slug>/ convention. No-op when params carries
+	// no skill wiring (params.Skills / params.SkillVendor nil) or the
+	// agent has no plantable skills — see skill_plant.go.
+	skillFiles, err := skillFilesForProvider(context.Background(), "claude", params)
+	if err != nil {
+		return plant.Spec{}, err
+	}
+	for relPath, content := range skillFiles {
+		files[relPath] = content
+	}
+
 	mcp, err := mcpConfigBytes(params)
 	if err != nil {
 		return plant.Spec{}, err

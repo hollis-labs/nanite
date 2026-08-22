@@ -121,6 +121,8 @@ func composeBootdirParams(deps *Dependencies, opts Options, profile *store.Agent
 	}
 	if deps != nil {
 		params.CLIWritableRoots = effectiveCLIWritableRoots(deps, sessID)
+		params.Skills = deps.Skills
+		params.SkillVendor = deps.SkillVendor
 	}
 	return layout, params
 }
@@ -230,6 +232,19 @@ type SetupParams struct {
 	// dev_tools_allowed_paths config setting (CW-20260518-0075). Empty
 	// leaves the agent confined to its boot dir cwd.
 	CLIWritableRoots []string
+
+	// Skills resolves AgentProfile's plantable skill set (grant +
+	// catalog lookups) for skill_plant.go's CLI-hosted native skill
+	// delivery (TASKS/skills/10). nil disables skill planting entirely
+	// (skillFilesForProvider's own "nothing to plant" contract) — a
+	// composition root that hasn't wired skill support sees no skill
+	// files planted, not an error.
+	Skills SkillStore
+
+	// SkillVendor reads a plantable skill's vendored file tree
+	// (internal/skillvendor.Store.ReadFiles) for skill_plant.go. nil
+	// disables skill planting, same as a nil Skills.
+	SkillVendor SkillVendorReader
 }
 
 // bootdirLayoutFor returns the Layout for the named provider. Unsupported

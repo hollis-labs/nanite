@@ -1,7 +1,7 @@
 # Cut legacy skill discovery, auto-discovery, dead markers, and ad-hoc authoring
 
 **Phase:** 1 — Clean-slate cut (`TASKS/skills`)
-**Status:** not-started
+**Status:** implemented
 **Depends on:** none
 **Touches:** `internal/service/ingest.go` (`AutoIngestSkills`, `upsertSkillDef`),
 `internal/service/container.go` (~line 553-575, the discovery/builtin/ingest call site),
@@ -156,8 +156,168 @@ batch's planning session (2026-08-21), not assumed from the architecture doc's o
   zero skill rows seeded from builtins or auto-discovery — only whatever tests explicitly insert.
 
 ## Work log
-<Worker fills this in as it goes: what was actually done, any deviation from plan and why,
-anything escalated.>
+
+Implemented per the "What to do" list, in order, with a few discovered-but-adjacent findings
+handled as noted below. `go build ./cmd/nanite/`, `go vet ./...`, and `go test ./...` all pass
+(only pre-existing, unrelated `stopReaper`/`stopRuntimeReaper` vet findings in `container.go`
+remain — confirmed pre-existing by diffing against a throwaway commit of the pre-task tree).
+
+1. **`skill.Discover`/`DiscoverOptions`** — deleted `internal/skill/discovery.go` and
+   `internal/skill/discovery_test.go` outright. Confirmed via grep no other caller existed
+   besides `container.go`'s call site (removed below) and `internal/skill/loader_test.go`'s
+   `TestDropAndLoad_UserTierNoLongerDiscovered`, which I also had to delete (not originally
+   listed in the task's touch list, but it directly called `Discover(DiscoverOptions{})` and
+   would not compile once that function was gone — the other three tests in `loader_test.go`
+   (`EnsureHomeDirs`/`WriteUserSkillFile` coverage) are untouched and still pass).
+
+2. **`AutoIngestSkills`/`upsertSkillDef`** — deleted from `internal/service/ingest.go`, along
+   with `resolveSkillModeIDs` (confirmed via grep it had exactly one caller, `upsertSkillDef`,
+   with no other production or test caller). `store.ParseSkillModeIDs`/`MarshalSkillModeIDs`/
+   `SkillMatchesMode` are left untouched — they're already documented in
+   `internal/store/skill_mode_filter.go` as surviving, independently-useful primitives with no
+   other production caller today, and touching them isn't in this task's scope.
+   `container.go`'s call site (the `skillDefs := skill.Discover(...)` /
+   `skillbuiltin.BuiltinSkills()` / `AutoIngestSkills(cfg.Store, skillDefs)` block, ~lines
+   553-575) is replaced with a comment and `NewSkillService(SkillServiceConfig{Skills:
+   cfg.Store, FileSkills: nil})` — the `skillbuiltin` import is removed; the `skill` import
+   stays (still used by `skill.EnsureHomeDirs("")`, untouched, out of scope). Updated
+   `ingest.go`'s and `ingest_test.go`'s top-of-file doc comments (they explicitly described the
+   now-deleted skill-side pass) and removed the now-unused `skillpkg` import from both files.
+   `ingest_test.go`: deleted every `AutoIngestSkills`/`upsertSkillDef`-only test
+   (insert/idempotent/content-freeze/provenance-transition/empty-defs/mode-slug-storage); trimmed
+   `TestAutoIngestAgents_RolesTableUntouched` down to its agent-only assertion (it previously also
+   ran `AutoIngestSkills` as a second negative check).
+
+3. **`internal/skill/builtin/`** — deleted in full (8 `.md` files + `embed.go`).
+   **`internal/store/skills.go`**'s `BuiltinSkills` var + `SeedBuiltinSkills()` — deleted;
+   confirmed via grep `SeedBuiltinSkills` had zero callers anywhere before deleting.
+
+4. **`mcp.Manager.AutoDiscover`** — removed exactly the `store.Skill{}` construction +
+   `s.CreateSkill(...)` block and the `"removed":true` Settings rewrite + `s.UpdateSkill(sk)`
+   block, per the task's precise line-range description. Kept the diffing logic (existingSlugs
+   lookup via `s.ListSkills()`, the added/removed comparison loops, `diff.Added`/`diff.Removed`
+   population, log lines) — `AutoDiscover`'s return value/`DiscoveryDiff` shape is unchanged, it
+   simply no longer persists anything. Had to change `for uniform, entry := range currentTools`
+   to `for uniform := range currentTools` in the added-tools loop since `entry` became unused
+   once the `store.Skill{}` construction (its only use) was removed. Reworded the
+   "auto-discovered new tool → skill" log line to "auto-discovered new tool" since no skill is
+   created anymore — a one-word wording fix, not a behavior change.
+   **New test**: `internal/mcp/autodiscover_skills_test.go`'s
+   `TestAutoDiscover_NeverWritesSkillsTable` — seeds one pre-existing `auto-discovered` skill row,
+   runs `AutoDiscover` against a scratch DB with two never-before-seen tools present, and asserts
+   (a) `diff.Added` still reports both new tools (diffing logic intact), (b) `ListSkills()`'s row
+   count and the pre-existing row's `Settings`/`UpdatedAt` are byte-identical before and after
+   (no mutation), and (c) no skill row exists for either newly-discovered tool's slug.
+
+5. **`internal/skill/context.go`** — deleted in full (marker regex, timeout const,
+   `ResolveDynamicContext`, `runContextCommand`) along with `context_test.go`. The `Context`
+   field itself (`Definition.Context`, `Settings["context"]` fold in `convert.go`) is untouched
+   per the task's explicit instruction — only the dead execution logic is cut here.
+
+6. **`BrokerHints`** — removed from `skill.Definition` (`parser.go`) and its
+   `Settings["broker_hints"]` fold (`convert.go`). Removed the one test fixture/assertion pair in
+   `parser_test.go` (frontmatter `broker-hints: [code]` line + the `def.BrokerHints` assertion)
+   and the one field literal in `convert_test.go`. Confirmed via grep zero remaining references
+   anywhere in `internal/`.
+
+7. **`skill_create`/`skill_update`** — deleted both `InputSchema` block definitions from
+   `internal/selftools/self_tools.go`, both dispatch cases and both handler functions
+   (`callCreateSkill`/`callUpdateSkill`) from `self_tools_transport.go`. Checked
+   `store.CreateSkill`/`store.UpdateSkill` for remaining callers before touching them: both still
+   have one each (`internal/builders/skill_builder.go`'s `NewSkillBuilder` for `CreateSkill`;
+   `internal/service/skill.go`'s `SkillService.Update` for `UpdateSkill`) — kept both store
+   functions untouched, per the task's own explicit guidance to check first.
+   `skill_list`/`skill_delete` are untouched and still compile against the pre-`02` schema, as
+   instructed.
+
+   **Adjacent findings absorbed as part of "delete in full," not scope creep** — three more
+   places in `internal/selftools/` (in scope per the task's own Done-means grep, which is scoped
+   to the whole directory, not just the two named files) and two more files outside it directly
+   *advertised* `skill_create` as a real, callable tool; leaving them would mean an LLM (or a
+   test) could still be told the tool exists after it no longer does:
+   - `self_tools_describe.go`'s `describeRelations` map had `"skill_create"` as its own entry
+     (with `skill_update`/`skill_delete` cross-refs) and both `skill_list`'s and `skill_update`'s
+     entries pointed back at it. Removed the `skill_create`/`skill_update` entries and trimmed
+     `skill_list`'s/`skill_delete`'s `relatedTools` down to just each other.
+   - `self_tools.go`'s `builder_start` description said "use agent_create or skill_create
+     directly" — trimmed to "use agent_create directly" (skill_create is gone; the builder
+     wizard's own skill-creation path via `internal/builders/skill_builder.go` is untouched and
+     out of scope, see Escalation note below).
+   - `internal/mcpserver/allowlist_test.go`'s two allowlist-catalog tests used `skill_create` as
+     an example self-tool name (one asserting absence from a narrow allowlist, one asserting
+     presence in the unrestricted catalog) — the presence assertion was a real, failing test
+     (`go test ./...` caught it immediately). Swapped both occurrences to `agent_create`, another
+     still-live self-tool with the same required-fields/allowlist shape.
+   - `internal/toolclient/tool_knowledge.go`'s `DefaultToolKnowledge()` had a `skill_create`
+     knowledge-base entry recommending it by use-case keywords to a reasoning broker — a real,
+     live-facing bug-in-waiting (a broker recommending a tool that fails with "unknown tool" at
+     dispatch), not just a doc comment. Removed the entry.
+   - Left untouched (out of this task's named scope, confirmed harmless — static lookup maps or
+     synthetic test fixtures, not asserting the tool exists or is dispatchable, `go test ./...`
+     confirmed nothing else broke): `internal/service/tool_concurrency_classification.go`,
+     `internal/service/chat_scratchpad_test.go`, `internal/tool/register.go`,
+     `internal/tool/stash/categories.go`, `internal/toolclient/render_descriptions_test.go`.
+
+8. **Test files** — in addition to the deletions/edits already listed above:
+   `self_tools_test.go`: removed `TestSelfToolsTransport_CreateSkill` and
+   `TestSelfToolsTransport_CreateSkill_MissingFields` outright (skill_create round-trip/validation
+   coverage, no longer possible); rewired `TestSelfToolsTransport_ListSkills` and
+   `TestSelfToolsTransport_DeleteSkill` to seed fixture rows via `st.Store.CreateSkill` directly
+   instead of the deleted self-tool, keeping `skill_list`/`skill_delete` coverage intact; removed
+   `skill_create`/`skill_update` from the `TestSelfToolsTransport_ListTools` expected-tools map.
+   `self_tools_validate_test.go`: `TestValidate_NonEnvelopeSelfTool`/`_HappyPath` exercised the
+   generic non-envelope-tool validation path using `skill_create` as the example
+   three-required-fields tool — retargeted both at `agent_create` (name/slug/system_prompt),
+   another still-live self-tool with the same shape, rather than deleting this coverage outright.
+
+9. **GLOSSARY.md** — checked per standing discipline; no new name introduced (subtraction-only
+   task, as expected).
+
+**Verification beyond build/vet/test**: built a fresh binary and ran a real
+`nanite serve -db <scratch-path>` from an isolated scratch directory (binary + DB both under the
+session scratchpad, never a real tracked path), confirmed via the boot log that `AutoIngestAgents`
+and `mcp.Manager.AutoDiscover` both ran normally (9 agents ingested, 84 tools discovered/added),
+then queried the scratch DB directly: `SELECT COUNT(*) FROM skills` returned `0`. Killed the
+background process immediately after capturing the log/DB state. Noted for the record: the
+process's `-db` flag correctly isolated the SQLite DB, but `config.ResolveLayout()`'s
+XDG-derived StateDir (`~/.local/state/nanite/{coordination,worktrees}`) is independent of `-db`
+and pointed at the real, already-running production paths regardless — the coordination store
+safely failed to acquire its lock (already held by the real running `nanite-api-service`),
+confirming no interference occurred, but this is worth flagging for any future task's live-verify
+recipe: `-db` alone does not fully isolate a `nanite serve` boot from shared machine-level state.
+Ran `git status --short` immediately after, per standing discipline — confirmed only the files
+listed in this Work Log were touched, no accidental writes to any real tracked file.
+
+**Process deviation, self-caught**: used `git stash`/`git stash pop` once, briefly, to diff
+`go vet` output against the pre-task tree (confirming the two `stopReaper`/`stopRuntimeReaper`
+findings pre-existed). `EXECUTION-PROCESS.md`'s "Promote recommendations, don't just log them"
+section explicitly documents this as a known footgun ("No repo-global git stash... use a
+worktree-scoped mechanism instead"). The stash was popped back within the same command, before any
+other operation ran, so no actual collision occurred, but it should not have been used at all —
+noted here rather than silently repeating the same documented mistake a third time. Avoided any
+further stash use for the remainder of this task.
+
+**Correction to the task's Context section, per worker step 7**: the Context section states the
+`internal/skill/builtin/`+`skill.Discover()`+`AutoIngestSkills` cut and the `mcp.Manager.
+AutoDiscover` skills-table-write cut are independent, narrowly-scoped removals. In practice both
+are more entangled with adjacent, still-live "does this tool exist" surfaces than the Context
+section's own citations suggested (the `describeRelations` map, the tool-knowledge broker catalog,
+and a real failing allowlist test all still asserted `skill_create` existed) — none of this
+changes the decided action (still a full, clean deletion), it just means "delete in full" reached
+slightly further than the task's own file list to keep the deletion actually complete rather than
+leaving live-facing dangling references. Logged here per standing discipline rather than treated
+as a stop condition, since none of the additional edits contradicted the task's instruction or
+required a design decision beyond "also remove this same now-dead name here."
+
+**Not escalated to `TASKS/ESCALATIONS.md`**: none of the above rose to the "genuine unknown"
+bar (ambiguous instruction, zero doc coverage, or item-vs-item contradiction) — each adjacent
+finding was a direct, mechanical consequence of "skill_create/skill_update are deleted in full,"
+not a new design question.
 
 ## Review notes
-<Reviewer fills this in: pass/fail, what was checked, anything fixed and how.>
+
+**PASS (fresh reviewer, 2026-08-21, no shared context with the worker).** Independently re-verified every Done-means item: build/vet/test clean (the two `container.go` vet findings confirmed pre-existing via a real pre-commit worktree checkout, not just `git blame`); `AutoDiscover`'s Added/Removed diffing logic intact, only the row-write side effect removed; the new `TestAutoDiscover_NeverWritesSkillsTable` genuinely proves no-write/no-mutation, not just asserting it; `skill_create`/`skill_update` fully gone, `skill_list`/`skill_delete` compile and behave unchanged; `store.CreateSkill`/`UpdateSkill`'s remaining callers real (found a third live caller beyond the Work Log's two: `internal/api/skills.go`'s admin CRUD handlers); `parser.go`'s `Context` field correctly left untouched. All test-file diffs read in full and confirmed to correspond exactly to deleted production code.
+
+**One real finding, not blocking this task** — see `TASKS/ESCALATIONS.md`'s 2026-08-21 entry for the full record: `20-skills.md`'s "invocation gap" section's claim that no skill content had ever reached a model was not accurate as an audit of the pre-cut code (the 8 builtins had a real, narrow, working chat-slash-command invocation path). Task `01`'s own action (cutting the builtins) is correct and not reopened — the doc's stated *rationale* being incomplete doesn't undo the decision, per this project's "correct the record, keep the decision" rule. Doc corrected in place by the Orchestrator; a follow-up to remove the now-fully-dead `RegisterSkillCommands`/`ChatComposer` skill-slash-command scaffolding is logged for a future batch, not filed as a task here.
+
+Status: `reviewed`.

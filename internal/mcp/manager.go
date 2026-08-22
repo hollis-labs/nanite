@@ -918,9 +918,20 @@ type DiscoveryDiff struct {
 	Total   int      `json:"total"`
 }
 
-// AutoDiscover runs tool discovery and syncs results with the skills table.
-// New tools get auto-created as skills (category="auto-discovered"),
-// and tools that have disappeared are flagged.
+// AutoDiscover runs tool discovery and diffs the result against the skills
+// table's existing auto-discovered rows.
+//
+// TASKS/skills/01: this used to also create/flag skills rows as a side
+// effect (one row per newly visible tool, category="auto-discovered"; a
+// "removed":true settings flag for tools that disappeared) — that write
+// path is cut in full per docs/engineering/architecture/20-skills.md's
+// "Scope: skills are authored packages only" section ("mcp.Manager.
+// AutoDiscover's writes into the skills table stop entirely. Tool
+// visibility, permissions, and allowlisting remain exactly what they
+// already are — a tool-catalog concern... untouched by this redesign.").
+// The diffing logic below (Added/Removed/Total, computed against whatever
+// auto-discovered rows already exist in the DB from before this cut) is
+// otherwise unchanged.
 func (m *Manager) AutoDiscover(ctx context.Context, s *store.Store) (*DiscoveryDiff, error) {
 	// Run standard discovery first.
 	if err := m.DiscoverTools(ctx); err != nil {
@@ -951,33 +962,25 @@ func (m *Manager) AutoDiscover(ctx context.Context, s *store.Store) (*DiscoveryD
 		existingSlugs[existingSkills[i].Slug] = &existingSkills[i]
 	}
 
-	// Create skills for new tools. The skill slug is derived from the
-	// uniform agent-facing name; tool_bindings record the same uniform
-	// name so callers that resolve the binding can dispatch directly.
-	for uniform, entry := range currentTools {
+	// Diff new tools against existing auto-discovered skill rows. TASKS/
+	// skills/01 cut the store.Skill{}+CreateSkill write that used to happen
+	// here — the slug comparison against existingSlugs still reports newly
+	// visible tools via diff.Added, it just no longer persists a row for
+	// them.
+	for uniform := range currentTools {
 		slug := toolNameToSlug(uniform)
 		if _, exists := existingSlugs[slug]; exists {
 			continue
 		}
-
-		sk := &store.Skill{
-			Name:         entry.tool.Name,
-			Slug:         slug,
-			Description:  entry.tool.Description,
-			Category:     "auto-discovered",
-			ToolBindings: fmt.Sprintf(`[%q]`, uniform),
-			IsBuiltin:    false,
-			Settings:     fmt.Sprintf(`{"server":%q,"auto_discovered":true}`, entry.serverName),
-		}
-		if err := s.CreateSkill(sk); err != nil {
-			slog.Warn("mcp: auto-discover failed to create skill", "slug", slug, "err", err)
-			continue
-		}
 		diff.Added = append(diff.Added, uniform)
-		slog.Info("mcp: auto-discovered new tool → skill", "slug", slug)
+		slog.Info("mcp: auto-discovered new tool", "slug", slug)
 	}
 
-	// Flag removed tools by updating their settings.
+	// Diff removed tools against existing auto-discovered skill rows. TASKS/
+	// skills/01 cut the "removed":true Settings rewrite + UpdateSkill write
+	// that used to happen here — diff.Removed still reports tools that
+	// disappeared, it just no longer flags the (now permanently
+	// unmaintained) DB row.
 	for slug, sk := range existingSlugs {
 		if sk.Category != "auto-discovered" {
 			continue
@@ -991,11 +994,6 @@ func (m *Manager) AutoDiscover(ctx context.Context, s *store.Store) (*DiscoveryD
 			}
 		}
 		if !found {
-			// Mark as removed in settings.
-			sk.Settings = strings.Replace(sk.Settings, `"auto_discovered":true`, `"auto_discovered":true,"removed":true`, 1)
-			if err := s.UpdateSkill(sk); err != nil {
-				slog.Warn("mcp: auto-discover failed to flag removed skill", "slug", slug, "err", err)
-			}
 			diff.Removed = append(diff.Removed, slug)
 			slog.Info("mcp: auto-discover flagged removed tool", "slug", slug)
 		}

@@ -37,9 +37,7 @@ func TestSelfToolsTransport_ListTools(t *testing.T) {
 	}
 
 	expected := map[string]bool{
-		"skill_create":    false,
 		"skill_list":      false,
-		"skill_update":    false,
 		"skill_delete":    false,
 		"agent_create":    false,
 		"agent_list":      false,
@@ -68,58 +66,29 @@ func TestSelfToolsTransport_ListTools(t *testing.T) {
 	}
 }
 
-// TestSelfToolsTransport_CreateSkill tests the round-trip create and verify.
-func TestSelfToolsTransport_CreateSkill(t *testing.T) {
-	st := newSelfTools(t)
-	ctx := context.Background()
-
-	// Create a skill.
-	result, err := st.CallTool(ctx, "skill_create", map[string]any{
-		"name":        "Test Skill",
-		"slug":        "test-skill",
-		"description": "A test skill for unit testing",
-		"category":    "testing",
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if result.IsError {
-		t.Fatalf("unexpected error: %s", result.Content[0].Text)
-	}
-	if !strings.Contains(result.Content[0].Text, "Created skill") {
-		t.Errorf("expected creation confirmation, got: %s", result.Content[0].Text)
-	}
-
-	// List skills and verify it appears.
-	listResult, err := st.CallTool(ctx, "skill_list", map[string]any{
-		"category": "testing",
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if listResult.IsError {
-		t.Fatalf("unexpected error: %s", listResult.Content[0].Text)
-	}
-	if !strings.Contains(listResult.Content[0].Text, "Test Skill") {
-		t.Errorf("expected skill in list, got: %s", listResult.Content[0].Text)
-	}
-	if !strings.Contains(listResult.Content[0].Text, "test-skill") {
-		t.Errorf("expected slug in list, got: %s", listResult.Content[0].Text)
-	}
-}
+// TASKS/skills/01: TestSelfToolsTransport_CreateSkill (the skill_create
+// round-trip test) is deleted along with skill_create itself — see
+// docs/engineering/architecture/20-skills.md's "Scope: skills are authored
+// packages only" section. skill_list is still exercised below, seeded via
+// store.CreateSkill directly instead of the now-deleted self-tool.
 
 // TestSelfToolsTransport_ListSkills verifies filtering by category.
 func TestSelfToolsTransport_ListSkills(t *testing.T) {
 	st := newSelfTools(t)
 	ctx := context.Background()
 
-	// Create two skills in different categories.
-	st.CallTool(ctx, "skill_create", map[string]any{
-		"name": "Skill A", "slug": "skill-a", "description": "cat-x skill", "category": "cat-x",
-	})
-	st.CallTool(ctx, "skill_create", map[string]any{
-		"name": "Skill B", "slug": "skill-b", "description": "cat-y skill", "category": "cat-y",
-	})
+	// Seed two skills in different categories directly through the store
+	// (skill_create no longer exists as a self-tool).
+	if err := st.Store.CreateSkill(&store.Skill{
+		Name: "Skill A", Slug: "skill-a", Description: "cat-x skill", Category: "cat-x",
+	}); err != nil {
+		t.Fatalf("seed skill-a: %v", err)
+	}
+	if err := st.Store.CreateSkill(&store.Skill{
+		Name: "Skill B", Slug: "skill-b", Description: "cat-y skill", Category: "cat-y",
+	}); err != nil {
+		t.Fatalf("seed skill-b: %v", err)
+	}
 
 	// List all.
 	allResult, _ := st.CallTool(ctx, "skill_list", map[string]any{})
@@ -175,43 +144,25 @@ func TestSelfToolsTransport_CreateAgent(t *testing.T) {
 	}
 }
 
-// TestSelfToolsTransport_CreateSkill_MissingFields verifies validation.
-func TestSelfToolsTransport_CreateSkill_MissingFields(t *testing.T) {
-	st := newSelfTools(t)
-	ctx := context.Background()
-
-	result, _ := st.CallTool(ctx, "skill_create", map[string]any{
-		"name": "Only Name",
-	})
-	if !result.IsError {
-		t.Fatal("expected error for missing required fields")
-	}
-}
+// TASKS/skills/01: TestSelfToolsTransport_CreateSkill_MissingFields (the
+// skill_create input-validation test) is deleted along with skill_create
+// itself. skill_delete is still exercised below, seeded via
+// store.CreateSkill directly instead of the now-deleted self-tool.
 
 // TestSelfToolsTransport_DeleteSkill tests skill deletion.
 func TestSelfToolsTransport_DeleteSkill(t *testing.T) {
 	st := newSelfTools(t)
 	ctx := context.Background()
 
-	// Create a skill first.
-	createResult, _ := st.CallTool(ctx, "skill_create", map[string]any{
-		"name": "To Delete", "slug": "to-delete", "description": "Will be deleted",
-	})
-	if createResult.IsError {
-		t.Fatalf("create failed: %s", createResult.Content[0].Text)
+	// Seed a skill directly through the store (skill_create no longer
+	// exists as a self-tool).
+	seed := &store.Skill{Name: "To Delete", Slug: "to-delete", Description: "Will be deleted"}
+	if err := st.Store.CreateSkill(seed); err != nil {
+		t.Fatalf("seed skill: %v", err)
 	}
-
-	// Extract the ID from the list.
-	skills, _ := st.Store.ListSkills()
-	var skillID string
-	for _, sk := range skills {
-		if sk.Slug == "to-delete" {
-			skillID = sk.ID
-			break
-		}
-	}
+	skillID := seed.ID
 	if skillID == "" {
-		t.Fatal("could not find created skill")
+		t.Fatal("expected CreateSkill to populate an ID")
 	}
 
 	// Delete it.

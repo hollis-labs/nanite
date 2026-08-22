@@ -63,25 +63,6 @@ func selfToolDefinitions() []mcp.Tool {
 		// 08-agent-self-tool.md).
 		scheduleCreateToolDefinition(),
 		{
-			Name: "skill_create",
-			Description: "Create a new skill that binds a set of tool names to a named category.\n\n" +
-				"**When to use:** When the user asks to define a new skill, workflow, or named capability that groups related tools.\n\n" +
-				"**When NOT to use:** Do not create duplicate slugs — use skill_update to modify an existing one.\n\n" +
-				"**Output shape:** \"Created skill <name> (<id>)\" on success. Use skill_list to verify afterward.",
-			InputSchema: map[string]any{
-				"type": "object",
-				"properties": map[string]any{
-					"name":          map[string]any{"type": "string", "description": "Human-readable skill name"},
-					"slug":          map[string]any{"type": "string", "description": "URL-safe slug (unique)"},
-					"description":   map[string]any{"type": "string", "description": "What this skill does"},
-					"category":      map[string]any{"type": "string", "description": "Category (e.g. dev, general, custom)"},
-					"tool_bindings": map[string]any{"type": "string", "description": "JSON array of tool names this skill binds"},
-					"input_schema":  map[string]any{"type": "string", "description": "JSON schema for skill inputs (optional)"},
-				},
-				"required": []string{"name", "slug", "description"},
-			},
-		},
-		{
 			Name: "skill_list",
 			// Description is the canonical base string declared once in
 			// self_tools_describer.go (skillListBaseDescription). The
@@ -99,37 +80,61 @@ func selfToolDefinitions() []mcp.Tool {
 			},
 		},
 		{
-			Name: "skill_update",
-			Description: "Update an existing skill by ID. Only the fields you provide are changed (partial update).\n\n" +
-				"**When to use:** When the user asks to rename, re-categorize, or change the tool bindings of an existing skill.\n\n" +
-				"**Required context:** You need the skill ID — get it from skill_list first if you only have the name or slug.\n\n" +
-				"**Output shape:** \"Updated skill <id>\" on success.",
+			Name: "skill_delete",
+			Description: "Permanently uninstall a skill: removes both its skill-catalog index row AND its vendored " +
+				"package copy (SKILL.md body, scripts/, references/, assets/). Irreversible — a deleted skill must be " +
+				"reinstalled from its original source package to come back, and any agent grant approved against it " +
+				"is orphaned (silently excluded from that agent's skill list, per this batch's existing " +
+				"since-deleted-dependency convention) rather than automatically cleaned up.\n\n" +
+				"**When to use:** When the user explicitly asks to remove/uninstall a skill.\n\n" +
+				"**Required context:** Provide either `slug` (preferred — from skill_list's output) or `id` " +
+				"(the skill's catalog row ID) if you only have that.\n\n" +
+				"**Output shape:** \"Deleted skill <id> (slug=<slug>, vendor_deleted=<bool>)\" on success — " +
+				"vendor_deleted is false only for a skill that was never installed/vendored (a bare admin-created " +
+				"row with no content). Returns an error if the skill is not found.",
 			InputSchema: map[string]any{
 				"type": "object",
 				"properties": map[string]any{
-					"id":            map[string]any{"type": "string", "description": "Skill ID to update"},
-					"name":          map[string]any{"type": "string", "description": "New name (optional)"},
-					"slug":          map[string]any{"type": "string", "description": "New slug (optional)"},
-					"description":   map[string]any{"type": "string", "description": "New description (optional)"},
-					"category":      map[string]any{"type": "string", "description": "New category (optional)"},
-					"tool_bindings": map[string]any{"type": "string", "description": "New tool bindings JSON array (optional)"},
-					"input_schema":  map[string]any{"type": "string", "description": "New input schema JSON (optional)"},
+					"slug": map[string]any{"type": "string", "description": "Skill slug to delete (preferred)"},
+					"id":   map[string]any{"type": "string", "description": "Skill catalog row ID to delete (fallback, if slug is unknown)"},
 				},
-				"required": []string{"id"},
 			},
 		},
+		// TASKS/skills/11: skill_get — the real entry point into the Resolver
+		// -> Materializer -> Policy/Sandbox -> Materialized Skill pipeline
+		// (docs/engineering/architecture/20-skills.md's "The invocation gap").
+		// The skill_list catalog teaser above stays a lightweight name/
+		// description listing by design; this is the tool an agent calls to
+		// get a granted skill's actual, fully materialized content.
 		{
-			Name: "skill_delete",
-			Description: "Permanently delete a skill by ID. Irreversible. Only non-builtin skills can be deleted.\n\n" +
-				"**When to use:** When the user explicitly asks to remove a custom skill.\n\n" +
-				"**Required context:** You need the skill ID — get it from skill_list if you only have the name.\n\n" +
-				"**Output shape:** \"Deleted skill <id>\" on success. Returns an error if the skill is builtin or not found.",
+			Name: "skill_get",
+			Description: "Fetch a granted skill's fully materialized content by slug.\n\n" +
+				"**What this does:** resolves the skill's declared parameters (your `params` argument, or an agent_context_resolvers dynamic binding), splices in any `inline`-composed dependency's own materialized content, delegates any `fork`-composed dependency to a real subagent turn and folds back its result, then executes any `` !`cmd` `` inline marker in the resulting text through the same capability/sandbox gate every skill execution routes through. What comes back is ready-to-read instructional content — not JSON, not a summary.\n\n" +
+				"**When to use:** When the skill catalog already in your context (name + description only, by design) names a skill relevant to the current task and you need its actual content, not just the one-line teaser.\n\n" +
+				"**Grant required:** you must be explicitly granted this skill, and the grant must be approved against the skill's current installed content. An ungranted skill, or one whose approval is stale (the skill was re-installed since you were approved), is refused with a clear error — never silently empty or partial content.\n\n" +
+				"**Fork composition:** if this skill composes a `fork`-mode dependency, pass `fork_role` naming the role slug the delegated subagent should run as — there is no default role, since only the caller knows what role fits. A fork delegation that requires human approval under this deployment's trust policy comes back as a clear pending-approval error naming a run_id — poll `subagent_status(run_id=...)` once it's approved, then call skill_get again.\n\n" +
+				"**Output shape:** the skill's final materialized text on success. On denial or failure, a clear error string naming the specific reason (not-granted / re-approval-required / pending-approval / execution failure) — never a bare \"failed\".",
 			InputSchema: map[string]any{
 				"type": "object",
 				"properties": map[string]any{
-					"id": map[string]any{"type": "string", "description": "Skill ID to delete"},
+					"slug": map[string]any{
+						"type":        "string",
+						"description": "The skill's slug — from skill_list's output or your boot context's skill catalog block.",
+					},
+					"params": map[string]any{
+						"type":        "object",
+						"description": "Optional static invocation arguments, keyed by the skill's declared parameter names. A value supplied here always overrides that same parameter's agent_context_resolvers dynamic binding, when both exist.",
+					},
+					"fork_role": map[string]any{
+						"type":        "string",
+						"description": "Role slug to boot a fork-composed nested dependency's delegated subagent with. Required only when this skill (or a dependency it composes) actually declares a fork-mode dependency; omit otherwise.",
+					},
+					"fork_timeout_seconds": map[string]any{
+						"type":        "integer",
+						"description": "Optional wall-clock cap for a fork-composed dependency's delegated subagent run. 0 uses the subagent service's own default.",
+					},
 				},
-				"required": []string{"id"},
+				"required": []string{"slug"},
 			},
 		},
 		{
@@ -295,7 +300,7 @@ func selfToolDefinitions() []mcp.Tool {
 			Name: "builder_start",
 			Description: "Start a step-by-step creation wizard for a new agent or skill.\n\n" +
 				"**When to use:** When the user wants to interactively create a new agent or skill and you want to gather the required fields one step at a time.\n\n" +
-				"**When NOT to use:** NOT for asking arbitrary questions — this builder only drives entity creation (agent / skill). Do not call this for read or update operations. If you already have all required fields, use agent_create or skill_create directly.\n\n" +
+				"**When NOT to use:** NOT for asking arbitrary questions — this builder only drives entity creation (agent / skill). Do not call this for read or update operations. If you already have all required fields for an agent, use agent_create directly.\n\n" +
 				"**Required context:** You MUST supply builder_name. Omit it only to list available builder types.\n\n" +
 				"**Output shape:** Returns the first step prompt. Pass the response to builder_step to advance through subsequent steps.\n\n" +
 				"**Chaining:** Always follow with builder_step for each subsequent step until the builder signals completion.",

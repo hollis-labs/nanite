@@ -1,0 +1,378 @@
+Error: Exit code 1
+# github.com/hollis-labs/nanite/cmd/nanite-agent
+# internal/coverage/rtcov
+compile: version "go1.26.2" does not match go tool version "go1.25.3"
+# internal/godebugs
+compile: version "go1.26.2" does not match go tool version "go1.25.3"
+# internal/profilerecord
+compile: version "go1.26.2" does not match go tool version "go1.25.3"
+# internal/unsafeheader
+compile: version "go1.26.2" does not match go tool version "go1.25.3"
+# internal/goarch
+compile: version "go1.26.2" does not match go tool version "go1.25.3"
+# internal/byteorder
+compile: version "go1.26.2" does not match go tool version "go1.25.3"
+# internal/asan
+compile: version "go1.26.2" does not match go tool version "go1.25.3"
+# internal/goos
+compile: version "go1.26.2" does not match go tool version "go1.25.3"
+# internal/goexperiment
+compile: version "go1.26.2" does not match go tool version "go1.25.3"
+# internal/trace/tracev2
+compile: version "go1.26.2" does not match go tool version "go1.25.3"
+# internal/runtime/pprof/label
+compile: version "go1.26.2" does not match go tool version "go1.25.3"
+# internal/msan
+compile: version "go1.26.2" does not match go tool version "go1.25.3"
+# cmp
+compile: version "go1.26.2" does not match go tool version "go1.25.3"
+# unicode
+compile: version "go1.26.2" does not match go tool version "go1.25.3"
+# math/bits
+compile: version "go1.26.2" does not match go tool version "go1.25.3"
+# log/internal
+compile: version "go1.26.2" does not match go tool version "go1.25.3"
+# unicode/utf8
+compile: version "go1.26.2" does not match go tool version "go1.25.3"
+# internal/coverage/uleb128
+compile: version "go1.26.2" does not match go tool version "go1.25.3"
+# internal/coverage/calloc
+compile: version "go1.26.2" does not match go tool version "go1.25.3"
+# sync/atomic
+compile: version "go1.26.2" does not match go tool version "go1.25.3"
+# internal/coverage
+compile: version "go1.26.2" does not match go tool version "go1.25.3"
+# internal/cpu
+compile: version "go1.26.2" does not match go tool version "go1.25.3"
+# encoding
+compile: version "go1.26.2" does not match go tool version "go1.25.3"
+# github.com/hollis-labs/nanite/internal/brand
+# internal/coverage/rtcov
+compile: version "go1.26.2" does not match go tool version "go1.25.3"
+# internal/unsafeheader
+compile: version "go1.26.2" does not match go tool version "go1.25.3"
+# internal/goarch
+compile: version "go1.26.2" does not match go tool version "go1.25.3"
+# internal/godebugs
+compile: version "go1.26.2" does not match go tool version "go1.25.3"
+# internal/goexperiment
+compile: version "go1.26.2" does not match go tool version "go1.25.3"
+# internal/profilerecord
+compile: version "go1.26.2" does not match go tool version "go1.25.3"
+# internal/goos
+compile: version "go1.26.2" does not match go tool version "go1.25.3"
+# internal/asan
+compile: version "go1.26.2" does not match go tool version "go1.25.3"
+# internal/byteorder
+compile: version "go1.26.2" does not match go tool version "go1.25.3"
+# log/internal
+compile: version "go1.26.2" does not match go tool version "go1.25.3"
+# unicode/utf8
+compile: version "go1.26.2" does not match go tool version "go1.25.3"
+# internal/cpu
+compile: version "go1.26.2" does not match go tool version "go1.25.3"
+# unicode
+compile: version "go1.26.2" does not match go tool version "go1.25.3"
+# cmp
+compile: version "go1.26.2" does not match go tool version "go1.25.3"
+# math/bits
+compile: version "go1.26.2" does not match go tool version "go1.25.3"
+# internal/runtime/pprof/label
+compile: version "go1.26.2" does not match go tool version "go1.25.3"
+# internal/msan
+compile: version "go1.26.2" does not match go tool version "go1.25.3"
+# internal/trace/tracev2
+compile: version "go1.26.2" does not match go tool version "go1.25.3"
+# encoding
+compile: version "go1.26.2" does not match go tool version "go1.25.3"
+# internal/coverage/calloc
+compile: version "go1.26.2" does not match go tool version "go1.25.3"
+# sync/atomic
+compile: version "go1.26.2" does not match go tool version "go1.25.3"
+# internal/coverage
+compile: version "go1.26.2" does not match go tool version "go1.25.3"
+# internal/coverage/uleb128
+compile: version "go1.26.2" does not match go tool version "go1.25.3"
+# github.com/hollis-labs/nanite/internal/cli/installcmd
+# internal/goarch
+compile: version "go1.26.2" does not match go tool version "go1.25.3"
+# internal/byteorder
+compile: version "go1.26.2" does not match go tool version "go1.25.3"
+# internal/unsafeheader
+compile: version "go1.26.2" does not match go tool version "go1.25.3"
+# internal/asan
+compile: version "go1.26.2" does not match go tool version "go1.25.3"
+# internal/godebugs
+compile: version "go1.26.2" does not match go tool version "go1.25.3"
+# internal/goos
+compile: version "go1.26.2" does not match go tool version "go1.25.3"
+# internal/coverage/rtcov
+compile: version "go1.26.2" does not match go tool version "go1.25.3"
+# internal/runtime/pprof/label
+compile: version "go1.26.2" does not match go tool version "go1.25.3"
+# internal/msan
+compile: version "go1.26.2" does not match go tool version "go1.25.3"
+# internal/goexperiment
+compile: version "go1.26.2" does not match go tool version "go1.25.3"
+# internal/profilerecord
+compile: version "go1.26.2" does not match go tool version "go1.25.3"
+# internal/trace/tracev2
+compile: version "go1.26.2" does not match go tool version "go1.25.3"
+# math/bits
+compile: version "go1.26.2" does not match go tool version "go1.25.3"
+# internal/cpu
+compile: version "go1.26.2" does not match go tool version "go1.25.3"
+# unicode
+compile: version "go1.26.2" does not match go tool version "go1.25.3"
+# cmp
+compile: version "go1.26.2" does not match go tool version "go1.25.3"
+# unicode/utf8
+compile: version "go1.26.2" does not match go tool version "go1.25.3"
+# internal/coverage/uleb128
+compile: version "go1.26.2" does not match go tool version "go1.25.3"
+# log/internal
+compile: version "go1.26.2" does not match go tool version "go1.25.3"
+# internal/coverage
+compile: version "go1.26.2" does not match go tool version "go1.25.3"
+# sync/atomic
+compile: version "go1.26.2" does not match go tool version "go1.25.3"
+# internal/coverage/calloc
+compile: version "go1.26.2" does not match go tool version "go1.25.3"
+# encoding
+compile: version "go1.26.2" does not match go tool version "go1.25.3"
+# github.com/hollis-labs/nanite/internal/plugin/builtin/card-rules-demo
+# internal/goos
+compile: version "go1.26.2" does not match go tool version "go1.25.3"
+# internal/goexperiment
+compile: version "go1.26.2" does not match go tool version "go1.25.3"
+# internal/unsafeheader
+compile: version "go1.26.2" does not match go tool version "go1.25.3"
+# internal/asan
+compile: version "go1.26.2" does not match go tool version "go1.25.3"
+# internal/byteorder
+compile: version "go1.26.2" does not match go tool version "go1.25.3"
+# internal/profilerecord
+compile: version "go1.26.2" does not match go tool version "go1.25.3"
+# internal/godebugs
+compile: version "go1.26.2" does not match go tool version "go1.25.3"
+# internal/coverage/rtcov
+compile: version "go1.26.2" does not match go tool version "go1.25.3"
+# internal/goarch
+compile: version "go1.26.2" does not match go tool version "go1.25.3"
+# internal/msan
+compile: version "go1.26.2" does not match go tool version "go1.25.3"
+# internal/runtime/pprof/label
+compile: version "go1.26.2" does not match go tool version "go1.25.3"
+# math/bits
+compile: version "go1.26.2" does not match go tool version "go1.25.3"
+# internal/trace/tracev2
+compile: version "go1.26.2" does not match go tool version "go1.25.3"
+# unicode/utf8
+compile: version "go1.26.2" does not match go tool version "go1.25.3"
+# internal/cpu
+compile: version "go1.26.2" does not match go tool version "go1.25.3"
+# log/internal
+compile: version "go1.26.2" does not match go tool version "go1.25.3"
+# unicode
+compile: version "go1.26.2" does not match go tool version "go1.25.3"
+# internal/coverage/uleb128
+compile: version "go1.26.2" does not match go tool version "go1.25.3"
+# encoding
+compile: version "go1.26.2" does not match go tool version "go1.25.3"
+# cmp
+compile: version "go1.26.2" does not match go tool version "go1.25.3"
+# internal/coverage/calloc
+compile: version "go1.26.2" does not match go tool version "go1.25.3"
+# internal/coverage
+compile: version "go1.26.2" does not match go tool version "go1.25.3"
+# sync/atomic
+compile: version "go1.26.2" does not match go tool version "go1.25.3"
+# github.com/hollis-labs/nanite/internal/secrets
+# internal/asan
+compile: version "go1.26.2" does not match go tool version "go1.25.3"
+# internal/profilerecord
+compile: version "go1.26.2" does not match go tool version "go1.25.3"
+# internal/godebugs
+compile: version "go1.26.2" does not match go tool version "go1.25.3"
+# internal/unsafeheader
+compile: version "go1.26.2" does not match go tool version "go1.25.3"
+# internal/goos
+compile: version "go1.26.2" does not match go tool version "go1.25.3"
+# internal/coverage/rtcov
+compile: version "go1.26.2" does not match go tool version "go1.25.3"
+# internal/byteorder
+compile: version "go1.26.2" does not match go tool version "go1.25.3"
+# internal/goarch
+compile: version "go1.26.2" does not match go tool version "go1.25.3"
+# internal/goexperiment
+compile: version "go1.26.2" does not match go tool version "go1.25.3"
+# unicode/utf8
+compile: version "go1.26.2" does not match go tool version "go1.25.3"
+# internal/trace/tracev2
+compile: version "go1.26.2" does not match go tool version "go1.25.3"
+# internal/msan
+compile: version "go1.26.2" does not match go tool version "go1.25.3"
+# unicode
+compile: version "go1.26.2" does not match go tool version "go1.25.3"
+# internal/runtime/pprof/label
+compile: version "go1.26.2" does not match go tool version "go1.25.3"
+# math/bits
+compile: version "go1.26.2" does not match go tool version "go1.25.3"
+# cmp
+compile: version "go1.26.2" does not match go tool version "go1.25.3"
+# internal/cpu
+compile: version "go1.26.2" does not match go tool version "go1.25.3"
+# log/internal
+compile: version "go1.26.2" does not match go tool version "go1.25.3"
+# internal/coverage/calloc
+compile: version "go1.26.2" does not match go tool version "go1.25.3"
+# encoding
+compile: version "go1.26.2" does not match go tool version "go1.25.3"
+# internal/coverage/uleb128
+compile: version "go1.26.2" does not match go tool version "go1.25.3"
+# sync/atomic
+compile: version "go1.26.2" does not match go tool version "go1.25.3"
+# internal/coverage
+compile: version "go1.26.2" does not match go tool version "go1.25.3"
+# github.com/hollis-labs/nanite/internal/version
+# internal/unsafeheader
+compile: version "go1.26.2" does not match go tool version "go1.25.3"
+# internal/profilerecord
+compile: version "go1.26.2" does not match go tool version "go1.25.3"
+# internal/goarch
+compile: version "go1.26.2" does not match go tool version "go1.25.3"
+# internal/byteorder
+compile: version "go1.26.2" does not match go tool version "go1.25.3"
+# internal/goos
+compile: version "go1.26.2" does not match go tool version "go1.25.3"
+# internal/goexperiment
+compile: version "go1.26.2" does not match go tool version "go1.25.3"
+# internal/coverage/rtcov
+compile: version "go1.26.2" does not match go tool version "go1.25.3"
+# internal/godebugs
+compile: version "go1.26.2" does not match go tool version "go1.25.3"
+# internal/asan
+compile: version "go1.26.2" does not match go tool version "go1.25.3"
+# internal/msan
+compile: version "go1.26.2" does not match go tool version "go1.25.3"
+# internal/trace/tracev2
+compile: version "go1.26.2" does not match go tool version "go1.25.3"
+# internal/runtime/pprof/label
+compile: version "go1.26.2" does not match go tool version "go1.25.3"
+# cmp
+compile: version "go1.26.2" does not match go tool version "go1.25.3"
+# math/bits
+compile: version "go1.26.2" does not match go tool version "go1.25.3"
+# internal/cpu
+compile: version "go1.26.2" does not match go tool version "go1.25.3"
+# internal/coverage/uleb128
+compile: version "go1.26.2" does not match go tool version "go1.25.3"
+# unicode
+compile: version "go1.26.2" does not match go tool version "go1.25.3"
+# log/internal
+compile: version "go1.26.2" does not match go tool version "go1.25.3"
+# unicode/utf8
+compile: version "go1.26.2" does not match go tool version "go1.25.3"
+# internal/coverage/calloc
+compile: version "go1.26.2" does not match go tool version "go1.25.3"
+# encoding
+compile: version "go1.26.2" does not match go tool version "go1.25.3"
+# internal/coverage
+compile: version "go1.26.2" does not match go tool version "go1.25.3"
+# sync/atomic
+compile: version "go1.26.2" does not match go tool version "go1.25.3"
+# github.com/hollis-labs/nanite/pkg/models
+# internal/unsafeheader
+compile: version "go1.26.2" does not match go tool version "go1.25.3"
+# internal/coverage/rtcov
+compile: version "go1.26.2" does not match go tool version "go1.25.3"
+# internal/byteorder
+compile: version "go1.26.2" does not match go tool version "go1.25.3"
+# internal/goos
+compile: version "go1.26.2" does not match go tool version "go1.25.3"
+# internal/asan
+compile: version "go1.26.2" does not match go tool version "go1.25.3"
+# internal/profilerecord
+compile: version "go1.26.2" does not match go tool version "go1.25.3"
+# internal/goexperiment
+compile: version "go1.26.2" does not match go tool version "go1.25.3"
+# internal/msan
+compile: version "go1.26.2" does not match go tool version "go1.25.3"
+# internal/goarch
+compile: version "go1.26.2" does not match go tool version "go1.25.3"
+# internal/runtime/pprof/label
+compile: version "go1.26.2" does not match go tool version "go1.25.3"
+# internal/godebugs
+compile: version "go1.26.2" does not match go tool version "go1.25.3"
+# unicode/utf8
+compile: version "go1.26.2" does not match go tool version "go1.25.3"
+# internal/cpu
+compile: version "go1.26.2" does not match go tool version "go1.25.3"
+# math/bits
+compile: version "go1.26.2" does not match go tool version "go1.25.3"
+# internal/trace/tracev2
+compile: version "go1.26.2" does not match go tool version "go1.25.3"
+# cmp
+compile: version "go1.26.2" does not match go tool version "go1.25.3"
+# unicode
+compile: version "go1.26.2" does not match go tool version "go1.25.3"
+# sync/atomic
+compile: version "go1.26.2" does not match go tool version "go1.25.3"
+# log/internal
+compile: version "go1.26.2" does not match go tool version "go1.25.3"
+# internal/coverage
+compile: version "go1.26.2" does not match go tool version "go1.25.3"
+# internal/coverage/uleb128
+compile: version "go1.26.2" does not match go tool version "go1.25.3"
+# encoding
+compile: version "go1.26.2" does not match go tool version "go1.25.3"
+# internal/coverage/calloc
+compile: version "go1.26.2" does not match go tool version "go1.25.3"
+# github.com/hollis-labs/nanite/scripts/verify-catalog
+# internal/byteorder
+compile: version "go1.26.2" does not match go tool version "go1.25.3"
+# internal/godebugs
+compile: version "go1.26.2" does not match go tool version "go1.25.3"
+# internal/goarch
+compile: version "go1.26.2" does not match go tool version "go1.25.3"
+# internal/unsafeheader
+compile: version "go1.26.2" does not match go tool version "go1.25.3"
+# internal/coverage/rtcov
+compile: version "go1.26.2" does not match go tool version "go1.25.3"
+# internal/profilerecord
+compile: version "go1.26.2" does not match go tool version "go1.25.3"
+# internal/goexperiment
+compile: version "go1.26.2" does not match go tool version "go1.25.3"
+# internal/asan
+compile: version "go1.26.2" does not match go tool version "go1.25.3"
+# internal/trace/tracev2
+compile: version "go1.26.2" does not match go tool version "go1.25.3"
+# math/bits
+compile: version "go1.26.2" does not match go tool version "go1.25.3"
+# internal/msan
+compile: version "go1.26.2" does not match go tool version "go1.25.3"
+# internal/goos
+compile: version "go1.26.2" does not match go tool version "go1.25.3"
+# internal/runtime/pprof/label
+compile: version "go1.26.2" does not match go tool version "go1.25.3"
+# internal/cpu
+compile: version "go1.26.2" does not match go tool version "go1.25.3"
+# unicode/utf8
+compile: version "go1.26.2" does not match go tool version "go1.25.3"
+# cmp
+compile: version "go1.26.2" does not match go tool version "go1.25.3"
+# internal/coverage
+compile: version "go1.26.2" does not match go tool version "go1.25.3"
+# internal/coverage/calloc
+compile: version "go1.26.2" does not match go tool version "go1.25.3"
+# internal/coverage/uleb128
+compile: version "go1.26.2" does not match go tool version "go1.25.3"
+# encoding
+compile: version "go1.26.2" does not match go tool version "go1.25.3"
+# log/internal
+compile: version "go1.26.2" does not match go tool version "go1.25.3"
+# unicode
+compile: version "go1.26.2" does not match go tool version "go1.25.3"
+# sync/atomic
+compile: version "go1.26.2" does not match go tool version "go1.25.3"
+EXIT:0

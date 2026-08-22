@@ -1,9 +1,12 @@
 package service
 
 import (
+	"bytes"
 	"context"
+	"log/slog"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -11,8 +14,30 @@ import (
 	llmtypes "github.com/hollis-labs/go-llm-types"
 	ctxpkg "github.com/hollis-labs/nanite/internal/context"
 	runtimeagent "github.com/hollis-labs/nanite/internal/runtime/agent"
+	"github.com/hollis-labs/nanite/internal/skillvendor"
 	"github.com/hollis-labs/nanite/internal/store"
 )
+
+// syncBuffer is a goroutine-safe bytes.Buffer wrapper, used below to
+// capture slog output for the ACP skill-replant-guard regression test —
+// driveBootSession's SendInput-failure path logs from a background
+// goroutine, so a bare bytes.Buffer would race under `go test -race`.
+type syncBuffer struct {
+	mu  sync.Mutex
+	buf bytes.Buffer
+}
+
+func (b *syncBuffer) Write(p []byte) (int, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.Write(p)
+}
+
+func (b *syncBuffer) String() string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.String()
+}
 
 // TestAgentEventBridge_RouterBindForwardsEvents verifies that when a
 // per-session router is bound, runtime StreamEvents reach the bound turnCh
@@ -315,6 +340,131 @@ func TestDriveBootSession_IterationGreaterThanZero(t *testing.T) {
 	if _, ok := <-ch; ok {
 		t.Fatal("expected immediately-closed chan for iteration > 0")
 	}
+}
+
+// TestDriveBootSession_ACPSessionSkipsSkillReplant is the regression test
+// for TASKS/skills/10's Fix-required item 2 / ESCALATIONS.md's 2026-08-22
+// MEDIUM finding: an ACP-protocol session (internal/runtime/agent/
+// agent_acp.go's bootACP leaves Session.BootDir permanently empty by
+// design) must not trigger driveBootSession's per-turn
+// runtimeagent.PlantAgentSkillFiles call AT ALL — not merely "doesn't
+// error."
+//
+// This exploits PlantAgentSkillFiles' own deterministic "empty bootDir"
+// guard as the observable signal, using the real (unmocked)
+// implementation: pre-fix, the call fired unconditionally every turn and
+// its resulting error surfaced as a slog.Warn("driveBootSession: skill
+// replant failed", ...); post-fix, the call site is guarded on
+// sess.BootDir != "" so that warning can never fire for this session
+// shape. The call site is synchronous within driveBootSession (runs
+// before the function returns), so no goroutine-timing race is needed to
+// observe it.
+func TestDriveBootSession_ACPSessionSkipsSkillReplant(t *testing.T) {
+	buf := &syncBuffer{}
+	prevLogger := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(buf, nil)))
+	t.Cleanup(func() { slog.SetDefault(prevLogger) })
+
+	s := &chatServiceImpl{
+		agentDeps:        &runtimeagent.Dependencies{},
+		agentEventBridge: &agentEventBridge{streams: NewStreamManager()},
+	}
+	sessionID := "sess-acp-guard-1"
+	// ACP-shaped active session: real Provider, permanently empty
+	// BootDir — exactly the shape agent_acp.go's bootACP leaves Session
+	// in. Pre-registering it in activeSessions routes driveBootSession
+	// into its "already active" branch (the one containing the guarded
+	// call), skipping the cold-boot path entirely.
+	s.activeSessions.Store(sessionID, &runtimeagent.Session{Provider: "claude-acp", BootDir: ""})
+
+	agent := &store.AgentProfile{ID: "agent-acp-guard-1", Slug: "acp-agent"}
+	cw := ctxpkg.NewContextWindow(200_000, ctxpkg.DefaultEstimator{})
+	slotResult := &SlotAssemblyResult{Window: cw}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	if _, err := s.driveBootSession(ctx, sessionID, &store.Session{}, agent, slotResult, "hello", 0, ""); err != nil {
+		t.Fatalf("driveBootSession: %v", err)
+	}
+
+	if got := buf.String(); strings.Contains(got, "driveBootSession: skill replant failed") {
+		t.Fatalf("PlantAgentSkillFiles was invoked for an ACP-shaped session (empty BootDir) — guard did not skip it; log:\n%s", got)
+	}
+}
+
+// TestDriveBootSession_RealBootDirStillTriggersSkillReplant is the
+// positive control for the ACP guard above: a session with a genuine,
+// non-empty BootDir must still reach the PlantAgentSkillFiles call site
+// every turn (proving the sess.BootDir != "" guard doesn't overzealously
+// suppress the legitimate case too). Wires a real granted skill through
+// runtimeagent.Dependencies.Skills/SkillVendor and asserts the file
+// actually lands on disk in the boot dir.
+func TestDriveBootSession_RealBootDirStillTriggersSkillReplant(t *testing.T) {
+	bootDir := t.TempDir()
+
+	vendor := &fakeSkillVendorForBootDrive{files: map[string]skillvendor.FileMap{
+		"skl-addr-1": {"SKILL.md": []byte("# real skill\n")},
+	}}
+	skillsStore := &fakeSkillStoreForBootDrive{
+		skills: map[string]*store.Skill{"demo": {Slug: "demo", ContentHash: "skl-addr-1"}},
+		known: map[string][]store.AgentKnownSkill{
+			"agent-realboot-1": {
+				{AgentID: "agent-realboot-1", SkillName: "demo", ApprovedContentHash: "skl-addr-1"},
+			},
+		},
+	}
+
+	s := &chatServiceImpl{
+		agentDeps: &runtimeagent.Dependencies{
+			Skills:      skillsStore,
+			SkillVendor: vendor,
+		},
+		agentEventBridge: &agentEventBridge{streams: NewStreamManager()},
+	}
+	sessionID := "sess-realboot-1"
+	s.activeSessions.Store(sessionID, &runtimeagent.Session{Provider: "claude", BootDir: bootDir})
+
+	agent := &store.AgentProfile{ID: "agent-realboot-1", Slug: "realboot-agent"}
+	cw := ctxpkg.NewContextWindow(200_000, ctxpkg.DefaultEstimator{})
+	slotResult := &SlotAssemblyResult{Window: cw}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	if _, err := s.driveBootSession(ctx, sessionID, &store.Session{}, agent, slotResult, "hello", 0, ""); err != nil {
+		t.Fatalf("driveBootSession: %v", err)
+	}
+
+	if _, err := os.ReadFile(filepath.Join(bootDir, ".claude/skills/demo/SKILL.md")); err != nil {
+		t.Fatalf("expected skill replanted into real boot dir, read failed: %v", err)
+	}
+}
+
+// fakeSkillStoreForBootDrive/fakeSkillVendorForBootDrive satisfy
+// runtimeagent.SkillStore/SkillVendorReader for
+// TestDriveBootSession_RealBootDirStillTriggersSkillReplant without
+// depending on internal/runtime/agent's own unexported test doubles
+// (different package).
+type fakeSkillStoreForBootDrive struct {
+	skills map[string]*store.Skill
+	known  map[string][]store.AgentKnownSkill
+}
+
+func (f *fakeSkillStoreForBootDrive) ListAgentKnownSkills(_ context.Context, agentID string) ([]store.AgentKnownSkill, error) {
+	return f.known[agentID], nil
+}
+
+func (f *fakeSkillStoreForBootDrive) GetSkillBySlug(slug string) (*store.Skill, error) {
+	return f.skills[slug], nil
+}
+
+type fakeSkillVendorForBootDrive struct {
+	files map[string]skillvendor.FileMap
+}
+
+func (f *fakeSkillVendorForBootDrive) ReadFiles(address string) (skillvendor.FileMap, error) {
+	return f.files[address], nil
 }
 
 // TestAgentEventBridge_SynchronousTurnReachesTurnCh is the CW-20260518-0074

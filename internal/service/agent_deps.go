@@ -22,6 +22,7 @@ import (
 	"github.com/hollis-labs/nanite/internal/permission"
 	"github.com/hollis-labs/nanite/internal/recovery/broker"
 	runtimeagent "github.com/hollis-labs/nanite/internal/runtime/agent"
+	"github.com/hollis-labs/nanite/internal/skillvendor"
 	"github.com/hollis-labs/nanite/internal/store"
 )
 
@@ -69,6 +70,15 @@ type AgentDepsConfig struct {
 	// path entirely (Refresh returns an error and the broker escalates
 	// to Permanent).
 	Providers *provider.Registry
+
+	// SkillVendor is the content-addressed vendored skill store
+	// (internal/skillvendor.Store) — TASKS/skills/10 wires this onto
+	// runtimeagent.Dependencies.SkillVendor so CLI-hosted agents can plant
+	// their granted skills' vendored files into their native boot-dir
+	// skill location. nil disables skill planting entirely (the container
+	// already tolerates a nil skill vendor store elsewhere — see
+	// container.go's own skillVendorErr handling).
+	SkillVendor *skillvendor.Store
 }
 
 // AgentDepsBundle aggregates the artifacts BuildAgentDependencies returns.
@@ -199,6 +209,24 @@ func BuildAgentDependencies(cfg AgentDepsConfig) (AgentDepsBundle, error) {
 		CLIWritableRoots:   cfg.CLIWritableRoots,
 		Telemetry:          telemetry,
 		SandboxBaseProfile: cfg.SandboxBaseProf,
+		// TASKS/skills/10: cfg.Store satisfies runtimeagent.SkillStore
+		// (GetSkillBySlug + ListAgentKnownSkills) directly — no adapter
+		// needed, same as several other Dependencies fields backed
+		// straight by *store.Store elsewhere in this file.
+		Skills: cfg.Store,
+	}
+	// cfg.SkillVendor is a *skillvendor.Store — a nil *skillvendor.Store
+	// assigned directly into the SkillVendorReader interface field would
+	// produce a non-nil interface wrapping a nil pointer (the classic Go
+	// "typed nil" trap), which skillFilesForProvider's own `!= nil` guard
+	// would then treat as "wired" and panic on the first ReadFiles call.
+	// Guarding the assignment keeps deps.SkillVendor a genuine nil
+	// interface when the container's skill vendor store construction
+	// failed (container.go's own skillVendorErr fallback) — skill
+	// planting degrades to a clean no-op in that case, matching how
+	// install/sync already degrades to unavailable rather than crashing.
+	if cfg.SkillVendor != nil {
+		deps.SkillVendor = cfg.SkillVendor
 	}
 	// CW-20260518-0085, revised by TASKS/agent-host-acp/06: orphan sweep +
 	// periodic reaper consult the in-process session registry to

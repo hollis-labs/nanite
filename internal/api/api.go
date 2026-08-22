@@ -396,21 +396,44 @@ func (a *API) RegisterRoutes(mux *http.ServeMux) {
 	// Skills
 	mux.HandleFunc("GET /api/skills", a.handleListSkills)
 	mux.HandleFunc("POST /api/skills", a.handleCreateSkill)
-	mux.HandleFunc("GET /api/skills/{id}", a.handleGetSkill)
+	// TASKS/skills/12: {slug} (renamed from {id}) — see
+	// internal/api/skills.go's resolveSkillRef doc comment for why a bare
+	// index-row ID still resolves too. GET and DELETE share this task's
+	// slug-primary addressing; PUT (task 02's pre-existing bare admin-CRUD
+	// edit, unchanged/out of this task's scope) stays ID-only — a distinct
+	// HTTP method, so no route-pattern conflict with the two above.
+	mux.HandleFunc("GET /api/skills/{slug}", a.handleGetSkill)
 	mux.HandleFunc("PUT /api/skills/{id}", a.handleUpdateSkill)
-	mux.HandleFunc("DELETE /api/skills/{id}", a.handleDeleteSkill)
-	// E1 (CW-20260428-0016): dev-mode "fork to user override" — copies an
-	// internal skill body into ~/.nanite/skills/<slug>.md.
-	mux.HandleFunc("POST /api/skills/{id}/fork-to-user", a.handleForkSkillToUser)
+	mux.HandleFunc("DELETE /api/skills/{slug}", a.handleDeleteSkill)
+	// TASKS/skills/05: install/sync REST surface — the operator-facing
+	// trigger for task 04's internal/skillinstall.Installer pipeline. See
+	// internal/api/skills.go's doc comment above handleInstallSkill.
+	mux.HandleFunc("POST /api/skills/install", a.handleInstallSkill)
+	mux.HandleFunc("POST /api/skills/{slug}/sync", a.handleSyncSkill)
+	// TASKS/skills/12: invoke/preview materialization outside a live agent
+	// turn — see internal/api/skills.go's handlePreviewSkill doc comment.
+	mux.HandleFunc("POST /api/skills/{slug}/preview", a.handlePreviewSkill)
+	// TASKS/skills/02: the dev-mode "fork to user override" route
+	// (POST /api/skills/{id}/fork-to-user) is removed along with
+	// handleForkSkillToUser and ForkSkillToUserRequest — see
+	// internal/api/skills.go's doc comment at the old handler's site.
 	mux.HandleFunc("GET /api/dev-mode", a.handleGetDevMode)
 	mux.HandleFunc("GET /api/agents/{id}/skills", a.handleListAgentSkills)
 	mux.HandleFunc("POST /api/agents/{id}/skills", a.handleAssignAgentSkill)
 	mux.HandleFunc("DELETE /api/agents/{id}/skills/{skillId}", a.handleRemoveAgentSkill)
+	// TASKS/skills/12: the actual capability grant/revoke action, distinct
+	// from the bare-assignment pair immediately above — see
+	// internal/api/skills.go's doc comment above handleGrantAgentSkill for
+	// why this is a separate route family rather than folded into either
+	// the bare-assignment pair or agent_capabilities.go's known-skills CRUD.
+	mux.HandleFunc("POST /api/agents/{id}/skills/{slug}/grant", a.handleGrantAgentSkill)
+	mux.HandleFunc("GET /api/agents/{id}/skills/{slug}/grant", a.handleGetAgentSkillGrant)
+	mux.HandleFunc("DELETE /api/agents/{id}/skills/{slug}/grant", a.handleRevokeAgentSkillGrant)
 
 	// Roles (Phase 1 item 01: TASKS/phase-1/01-add-roles-table-and-cascade-
 	// resolution.md) -- the reusable persona/behavior template an Agent
 	// composition is built from. DB-authoritative from creation; no
-	// file-import route (contrast with Skills' fork-to-user).
+	// file-import route (see internal/api/roles.go's doc comment).
 	mux.HandleFunc("GET /api/roles", a.handleListRoles)
 	mux.HandleFunc("POST /api/roles", a.handleCreateRole)
 	mux.HandleFunc("GET /api/roles/{id}", a.handleGetRole)

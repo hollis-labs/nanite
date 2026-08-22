@@ -114,6 +114,19 @@ func opencodePlantSpec(params SetupParams) (plant.Spec, error) {
 		files[relPath] = content
 	}
 
+	// TASKS/skills/10: plant this agent's plantable skill set at opencode's
+	// native skill convention(s) — see skill_plant.go's package doc for
+	// why opencode gets two candidate destination prefixes. No-op when
+	// params carries no skill wiring or the agent has no plantable
+	// skills.
+	skillFiles, err := skillFilesForProvider(context.Background(), "opencode", params)
+	if err != nil {
+		return plant.Spec{}, err
+	}
+	for relPath, content := range skillFiles {
+		files[relPath] = content
+	}
+
 	mcp, err := mcpConfigBytes(params)
 	if err != nil {
 		return plant.Spec{}, err

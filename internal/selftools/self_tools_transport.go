@@ -29,6 +29,8 @@ import (
 	"github.com/hollis-labs/nanite/internal/reminders"
 	"github.com/hollis-labs/nanite/internal/selftools/reactions"
 	"github.com/hollis-labs/nanite/internal/service/install"
+	"github.com/hollis-labs/nanite/internal/skillinstall"
+	"github.com/hollis-labs/nanite/internal/skillvendor"
 	"github.com/hollis-labs/nanite/internal/store"
 	"github.com/hollis-labs/nanite/internal/subagent"
 )
@@ -98,6 +100,13 @@ type SelfToolsTransport struct {
 	Messaging *messaging.Service
 	// Subagent is set post-construction from the container; nil-safe.
 	Subagent *subagent.Service
+	// SkillVendor is the content-addressed vendored skill store (internal/
+	// skillvendor, TASKS/skills/03) skill_get reads a granted skill's
+	// vendored SKILL.md content from — the same *skillvendor.Store instance
+	// service.Container.SkillVendor wires everywhere else it's needed. Set
+	// post-construction from main.go; nil-safe (skill_get returns a clear
+	// errorResult when unwired). TASKS/skills/11.
+	SkillVendor *skillvendor.Store
 	// Background is the P9 background-job dispatch service. Set post-
 	// construction from the container; nil-safe (callers receive an
 	// errorResult for the nanite_background_* tools when unset).
@@ -418,14 +427,12 @@ const messageCallTimeout = 30 * time.Second
 // MCP stream indefinitely (F06).
 func (st *SelfToolsTransport) CallTool(ctx context.Context, name string, args map[string]any) (*mcp.ToolResult, error) {
 	switch name {
-	case "skill_create":
-		return st.callCreateSkill(args)
 	case "skill_list":
 		return st.callListSkills(args)
-	case "skill_update":
-		return st.callUpdateSkill(args)
 	case "skill_delete":
 		return st.callDeleteSkill(args)
+	case "skill_get":
+		return st.callSkillGet(ctx, args)
 	case "agent_create":
 		return st.callCreateAgent(args)
 	case "agent_list":
@@ -576,31 +583,17 @@ func (st *SelfToolsTransport) CallTool(ctx context.Context, name string, args ma
 }
 
 // --- skill handlers ---
-
-func (st *SelfToolsTransport) callCreateSkill(args map[string]any) (*mcp.ToolResult, error) {
-	name, _ := args["name"].(string)
-	slug, _ := args["slug"].(string)
-	desc, _ := args["description"].(string)
-	if name == "" || slug == "" || desc == "" {
-		return mcp.ErrorResult("name, slug, and description are required"), nil
-	}
-
-	sk := &store.Skill{
-		Name:         name,
-		Slug:         slug,
-		Description:  desc,
-		Category:     strArg(args, "category", "custom"),
-		ToolBindings: strArg(args, "tool_bindings", "[]"),
-		InputSchema:  strArg(args, "input_schema", "{}"),
-	}
-
-	if err := st.Store.CreateSkill(sk); err != nil {
-		return mcp.ErrorResult(fmt.Sprintf("create skill: %v", err)), nil
-	}
-
-	out, _ := json.Marshal(sk)
-	return mcp.TextResult(fmt.Sprintf("Created skill %q (id=%s)\n%s", sk.Name, sk.ID, string(out))), nil
-}
+//
+// TASKS/skills/01: callCreateSkill/callUpdateSkill (the skill_create/
+// skill_update handlers) are deleted along with their tool definitions and
+// dispatch cases — see docs/engineering/architecture/20-skills.md's "Scope:
+// skills are authored packages only" section. store.CreateSkill/UpdateSkill
+// themselves are kept per this task's own instruction to check for a
+// remaining caller first: CreateSkill still has one (the entity_builder
+// wizard's internal/builders/skill_builder.go, out of this task's scope),
+// UpdateSkill still has one (internal/service/skill.go's SkillService.Update,
+// also out of scope) — only the ad-hoc, flat-field self-tool wrapper around
+// them is gone here.
 
 func (st *SelfToolsTransport) callListSkills(args map[string]any) (*mcp.ToolResult, error) {
 	skills, err := st.Store.ListSkills()
@@ -623,64 +616,76 @@ func (st *SelfToolsTransport) callListSkills(args map[string]any) (*mcp.ToolResu
 		return mcp.TextResult("No skills found."), nil
 	}
 
+	// TASKS/skills/02: rendering updated for the index-only Skill shape —
+	// no more Prompt to omit, no more ToolBindings to list. source_tier/
+	// version/enabled are the new columns worth surfacing here (whether a
+	// package has actually been installed/vendored yet is content_hash's
+	// job, not this listing's).
 	var sb strings.Builder
 	fmt.Fprintf(&sb, "Found %d skill(s):\n\n", len(skills))
 	for _, sk := range skills {
-		fmt.Fprintf(&sb, "- %s (id=%s, slug=%s, category=%s)\n  %s\n",
-			sk.Name, sk.ID, sk.Slug, sk.Category, sk.Description)
+		status := "enabled"
+		if !sk.Enabled {
+			status = "disabled"
+		}
+		fmt.Fprintf(&sb, "- %s (id=%s, slug=%s, category=%s, source=%s, v%d, %s)\n  %s\n",
+			sk.Name, sk.ID, sk.Slug, sk.Category, sk.SourceTier, sk.Version, status, sk.Description)
 	}
 	return mcp.TextResult(sb.String()), nil
 }
 
-func (st *SelfToolsTransport) callUpdateSkill(args map[string]any) (*mcp.ToolResult, error) {
-	id := strArg(args, "id", "")
-	if id == "" {
-		return mcp.ErrorResult("id is required"), nil
-	}
-
-	sk, err := st.Store.GetSkill(id)
-	if err != nil {
-		return mcp.ErrorResult(fmt.Sprintf("get skill: %v", err)), nil
-	}
-	if sk == nil {
-		return mcp.ErrorResult(fmt.Sprintf("skill %q not found", id)), nil
-	}
-
-	if v, ok := args["name"].(string); ok && v != "" {
-		sk.Name = v
-	}
-	if v, ok := args["slug"].(string); ok && v != "" {
-		sk.Slug = v
-	}
-	if v, ok := args["description"].(string); ok && v != "" {
-		sk.Description = v
-	}
-	if v, ok := args["category"].(string); ok && v != "" {
-		sk.Category = v
-	}
-	if v, ok := args["tool_bindings"].(string); ok && v != "" {
-		sk.ToolBindings = v
-	}
-	if v, ok := args["input_schema"].(string); ok && v != "" {
-		sk.InputSchema = v
-	}
-
-	if err := st.Store.UpdateSkill(sk); err != nil {
-		return mcp.ErrorResult(fmt.Sprintf("update skill: %v", err)), nil
-	}
-	return mcp.TextResult(fmt.Sprintf("Updated skill %q (id=%s)", sk.Name, sk.ID)), nil
-}
-
+// callDeleteSkill implements skill_delete — TASKS/skills/12's forward
+// pointer from task 01: this now performs a real uninstall (vendored copy
+// + index row, via skillinstall.Uninstaller) rather than the old flat
+// index-row-only st.Store.DeleteSkill(id) call, and shares that exact
+// uninstall implementation with DELETE /api/skills/{slug}
+// (internal/api/skills.go's handleDeleteSkill) — see Uninstaller's own doc
+// comment in internal/skillinstall/uninstall.go. Accepts either "slug"
+// (this batch's addressing convention throughout the rest of the skill
+// self-tools — skill_get, install/sync) or the older "id" argument
+// (skill_list still surfaces both; kept working for any existing caller
+// that only has an ID).
 func (st *SelfToolsTransport) callDeleteSkill(args map[string]any) (*mcp.ToolResult, error) {
-	id := strArg(args, "id", "")
-	if id == "" {
-		return mcp.ErrorResult("id is required"), nil
+	ref := strArg(args, "slug", "")
+	if ref == "" {
+		ref = strArg(args, "id", "")
+	}
+	if ref == "" {
+		return mcp.ErrorResult("slug or id is required"), nil
 	}
 
-	if err := st.Store.DeleteSkill(id); err != nil {
+	sk, err := st.Store.GetSkillBySlug(ref)
+	if err != nil {
 		return mcp.ErrorResult(fmt.Sprintf("delete skill: %v", err)), nil
 	}
-	return mcp.TextResult(fmt.Sprintf("Deleted skill %s", id)), nil
+	if sk == nil {
+		sk, err = st.Store.GetSkill(ref)
+		if err != nil {
+			return mcp.ErrorResult(fmt.Sprintf("delete skill: %v", err)), nil
+		}
+	}
+	if sk == nil {
+		return mcp.ErrorResult(fmt.Sprintf("skill %q not found", ref)), nil
+	}
+
+	// st.SkillVendor is a *skillvendor.Store that may itself be a nil
+	// pointer when unwired (e.g. this package's own test harness,
+	// newSelfTools). It must never be assigned directly into the
+	// UninstallVendorer interface field in that case — see
+	// internal/api/skills.go's handleDeleteSkill for the full "typed nil"
+	// reasoning this mirrors.
+	var vendor skillinstall.UninstallVendorer
+	if st.SkillVendor != nil {
+		vendor = st.SkillVendor
+	}
+	u := &skillinstall.Uninstaller{Vendor: vendor, Index: st.Store}
+	result, err := u.Uninstall(sk)
+	if err != nil {
+		return mcp.ErrorResult(fmt.Sprintf("delete skill: %v", err)), nil
+	}
+	return mcp.TextResult(fmt.Sprintf(
+		"Deleted skill %s (slug=%s, vendor_deleted=%t)", result.Skill.ID, result.Skill.Slug, result.VendorDeleted,
+	)), nil
 }
 
 // --- agent handlers ---

@@ -1,0 +1,158 @@
+=== Symbol Results ===
+
+Vulnerability #1: GO-2026-6218
+    Avoid quadratic complexity in resolvePath in net/url
+  More info: https://pkg.go.dev/vuln/GO-2026-6218
+  Standard library
+    Found in: net/url@go1.26.2
+    Fixed in: net/url@go1.26.6
+    Example traces found:
+      #1: internal/chat/activity.go:96:26: chat.ActivityEmitter.Emit calls http.Client.Do, which eventually calls url.URL.Parse
+      #2: internal/envelope/validator.go:484:35: envelope.ValidateAgainstSchema calls jsonschema.Compiler.Compile, which eventually calls url.URL.ResolveReference
+
+Vulnerability #2: GO-2026-6091
+    Fix Javascript regexp context tracking in html/template
+  More info: https://pkg.go.dev/vuln/GO-2026-6091
+  Standard library
+    Found in: html/template@go1.26.2
+    Fixed in: html/template@go1.26.6
+    Example traces found:
+      #1: internal/plugin/httpmux.go:98:17: plugin.MutablePluginMux.ServeHTTP calls http.ServeMux.ServeHTTP, which eventually calls template.Template.Execute
+      #2: internal/plugin/httpmux.go:98:17: plugin.MutablePluginMux.ServeHTTP calls http.ServeMux.ServeHTTP, which eventually calls template.Template.ExecuteTemplate
+
+Vulnerability #3: GO-2026-6090
+    Limit handshake messages we are willing to accept post-handshake in
+    crypto/tls
+  More info: https://pkg.go.dev/vuln/GO-2026-6090
+  Standard library
+    Found in: crypto/tls@go1.26.2
+    Fixed in: crypto/tls@go1.26.6
+    Example traces found:
+      #1: internal/server/server.go:174:31: server.Server.ListenAndServe calls http.Server.ListenAndServe, which eventually calls tls.Conn.HandshakeContext
+      #2: internal/plugin/catalog.go:264:22: plugin.VerifyChecksum calls io.Copy, which eventually calls tls.Conn.Read
+      #3: internal/learnings/learnings.go:489:13: learnings.SystemPromptBlock calls fmt.Fprintf, which calls tls.Conn.Write
+      #4: internal/chat/activity.go:96:26: chat.ActivityEmitter.Emit calls http.Client.Do, which eventually calls tls.Dialer.DialContext
+
+Vulnerability #4: GO-2026-6089
+    Apply ReadHeaderTimeout when doing unencrypted HTTP/2 check in net/http
+  More info: https://pkg.go.dev/vuln/GO-2026-6089
+  Standard library
+    Found in: net/http@go1.26.2
+    Fixed in: net/http@go1.26.6
+    Example traces found:
+      #1: internal/server/server.go:174:31: server.Server.ListenAndServe calls http.Server.ListenAndServe
+      #2: internal/sandbox/proxy.go:163:27: sandbox.Start calls http.Server.Serve
+
+Vulnerability #5: GO-2026-5972
+    Enforce maximum recursion depth in encoding/asn1
+  More info: https://pkg.go.dev/vuln/GO-2026-5972
+  Standard library
+    Found in: encoding/asn1@go1.26.2
+    Fixed in: encoding/asn1@go1.26.6
+    Example traces found:
+      #1: internal/plugin/catalog/trustedkeys.go:62:37: catalog.parseEd25519PublicKeyPEM calls x509.ParsePKIXPublicKey, which calls asn1.Unmarshal
+
+Vulnerability #6: GO-2026-5856
+    Invoking Encrypted Client Hello privacy leak in crypto/tls
+  More info: https://pkg.go.dev/vuln/GO-2026-5856
+  Standard library
+    Found in: crypto/tls@go1.26.2
+    Fixed in: crypto/tls@go1.26.5
+    Example traces found:
+      #1: internal/server/server.go:174:31: server.Server.ListenAndServe calls http.Server.ListenAndServe, which eventually calls tls.Conn.HandshakeContext
+      #2: internal/plugin/catalog.go:264:22: plugin.VerifyChecksum calls io.Copy, which eventually calls tls.Conn.Read
+      #3: internal/learnings/learnings.go:489:13: learnings.SystemPromptBlock calls fmt.Fprintf, which calls tls.Conn.Write
+      #4: internal/chat/activity.go:96:26: chat.ActivityEmitter.Emit calls http.Client.Do, which eventually calls tls.Dialer.DialContext
+
+Vulnerability #7: GO-2026-5039
+    Arbitrary inputs are included in errors without any escaping in
+    net/textproto
+  More info: https://pkg.go.dev/vuln/GO-2026-5039
+  Standard library
+    Found in: net/textproto@go1.26.2
+    Fixed in: net/textproto@go1.26.4
+    Example traces found:
+      #1: internal/mcpserver/self_proxy.go:84:24: mcpserver.selfToolProxy.CallTool calls io.ReadAll, which eventually calls textproto.Reader.ReadMIMEHeader
+
+Vulnerability #8: GO-2026-5037
+    Inefficient candidate hostname parsing in crypto/x509
+  More info: https://pkg.go.dev/vuln/GO-2026-5037
+  Standard library
+    Found in: crypto/x509@go1.26.2
+    Fixed in: crypto/x509@go1.26.4
+    Example traces found:
+      #1: internal/server/server.go:174:31: server.Server.ListenAndServe calls http.Server.ListenAndServe, which eventually calls x509.Certificate.Verify
+      #2: internal/server/server.go:174:31: server.Server.ListenAndServe calls http.Server.ListenAndServe, which eventually calls x509.Certificate.VerifyHostname
+      #3: internal/dispatcher/agent_run.go:189:47: dispatcher.LogOutcome calls errors.joinError.Error, which calls x509.HostnameError.Error
+
+Vulnerability #9: GO-2026-5026
+    Invoking failure to reject ASCII-only Punycode-encoded labels in
+    golang.org/x/net/idna
+  More info: https://pkg.go.dev/vuln/GO-2026-5026
+  Standard library
+    Found in: net/http@go1.26.2
+    Fixed in: net/http@go1.26.6
+    Example traces found:
+      #1: internal/chat/activity.go:96:26: chat.ActivityEmitter.Emit calls http.Client.Do
+      #2: scripts/verify-catalog/main.go:61:29: verify.fetch calls http.Client.Get
+
+Vulnerability #10: GO-2026-4985
+    Oversized OTLP HTTP response bodies can cause memory exhaustion in
+    go.opentelemetry.io/otel/exporters/otlp
+  More info: https://pkg.go.dev/vuln/GO-2026-4985
+  Module: go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracehttp
+    Found in: go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracehttp@v1.41.0
+    Fixed in: go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracehttp@v1.43.0
+    Example traces found:
+      #1: internal/otel/otel.go:64:20: otel.Init calls otel.Init, which calls otlptracehttp.New
+      #2: internal/otel/otel.go:64:20: otel.Init calls otel.Init, which eventually calls otlptracehttp.client.UploadTraces
+
+Vulnerability #11: GO-2026-4982
+    Bypass of meta content URL escaping causes XSS in html/template
+  More info: https://pkg.go.dev/vuln/GO-2026-4982
+  Standard library
+    Found in: html/template@go1.26.2
+    Fixed in: html/template@go1.26.3
+    Example traces found:
+      #1: internal/plugin/httpmux.go:98:17: plugin.MutablePluginMux.ServeHTTP calls http.ServeMux.ServeHTTP, which eventually calls template.Template.Execute
+      #2: internal/plugin/httpmux.go:98:17: plugin.MutablePluginMux.ServeHTTP calls http.ServeMux.ServeHTTP, which eventually calls template.Template.ExecuteTemplate
+
+Vulnerability #12: GO-2026-4980
+    Escaper bypass leads to XSS in html/template
+  More info: https://pkg.go.dev/vuln/GO-2026-4980
+  Standard library
+    Found in: html/template@go1.26.2
+    Fixed in: html/template@go1.26.3
+    Example traces found:
+      #1: internal/plugin/httpmux.go:98:17: plugin.MutablePluginMux.ServeHTTP calls http.ServeMux.ServeHTTP, which eventually calls template.Template.Execute
+      #2: internal/plugin/httpmux.go:98:17: plugin.MutablePluginMux.ServeHTTP calls http.ServeMux.ServeHTTP, which eventually calls template.Template.ExecuteTemplate
+
+Vulnerability #13: GO-2026-4971
+    Panic in Dial and LookupPort when handling NUL byte on Windows in net
+  More info: https://pkg.go.dev/vuln/GO-2026-4971
+  Standard library
+    Found in: net@go1.26.2
+    Fixed in: net@go1.26.3
+    Example traces found:
+      #1: internal/runtime/agent/agent_acp.go:118:25: agent.bootACP calls copilotacp.Client.Launch, which eventually calls net.DialTimeout
+      #2: internal/sandbox/proxy.go:290:22: sandbox.Proxy.innerDial calls net.Dialer.DialContext
+      #3: internal/sandbox/proxy.go:147:23: sandbox.Proxy.Start calls net.Listen
+      #4: internal/sandbox/proxy.go:27:37: sandbox.defaultProxyResolver calls net.Resolver.LookupIP
+
+Vulnerability #14: GO-2026-4918
+    Infinite loop in HTTP/2 transport when given bad SETTINGS_MAX_FRAME_SIZE in
+    net/http/internal/http2 in golang.org/x/net
+  More info: https://pkg.go.dev/vuln/GO-2026-4918
+  Standard library
+    Found in: net/http@go1.26.2
+    Fixed in: net/http@go1.26.3
+    Example traces found:
+      #1: internal/chat/activity.go:96:26: chat.ActivityEmitter.Emit calls http.Client.Do
+      #2: scripts/verify-catalog/main.go:61:29: verify.fetch calls http.Client.Get
+
+Your code is affected by 14 vulnerabilities from 1 module and the Go standard library.
+This scan also found 6 vulnerabilities in packages you import and 2
+vulnerabilities in modules you require, but your code doesn't appear to call
+these vulnerabilities.
+Use '-show verbose' for more details.
+EXIT:0

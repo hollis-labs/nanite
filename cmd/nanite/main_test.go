@@ -1,18 +1,23 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"io"
 	"log/slog"
+	"os"
 	"path/filepath"
 	"slices"
 	"strings"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/hollis-labs/go-providers/provider"
+	"github.com/hollis-labs/nanite/internal/mcp"
 	naniteotel "github.com/hollis-labs/nanite/internal/otel"
 	"github.com/hollis-labs/nanite/internal/slogx"
+	"github.com/hollis-labs/nanite/internal/store"
 )
 
 type countingCloser struct {
@@ -62,6 +67,108 @@ func TestCmdServeStartupFailureReturns(t *testing.T) {
 	}
 	if got := otelCleanupCalls.Load(); got != 1 {
 		t.Errorf("OTel cleanup calls = %d, want 1", got)
+	}
+}
+
+func TestLoadPersistedMCPServersMalformedJSON(t *testing.T) {
+	tests := []struct {
+		name        string
+		argsJSON    string
+		envJSON     string
+		warningText string
+	}{
+		{
+			name:        "args",
+			argsJSON:    `["leaked-arg", 7]`,
+			envJSON:     `[]`,
+			warningText: "mcp: malformed args json — ignoring",
+		},
+		{
+			name:        "env",
+			argsJSON:    `[]`,
+			envJSON:     `["MCP_CONFIG_SENTINEL=leaked", 7]`,
+			warningText: "mcp: malformed env json — ignoring",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			dir := t.TempDir()
+			scriptPath := filepath.Join(dir, "mcp-server.sh")
+			capturePath := scriptPath + ".capture"
+			const script = `#!/bin/sh
+printf 'argc=%s\n' "$#" > "${0}.capture"
+if [ "${MCP_CONFIG_SENTINEL+x}" = x ]; then
+  printf 'sentinel=%s\n' "$MCP_CONFIG_SENTINEL" >> "${0}.capture"
+else
+  printf 'sentinel=<unset>\n' >> "${0}.capture"
+fi
+IFS= read -r request
+printf '%s\n' '{"jsonrpc":"2.0","id":1,"result":{"tools":[]}}'
+`
+			if err := os.WriteFile(scriptPath, []byte(script), 0o755); err != nil {
+				t.Fatalf("write MCP test server: %v", err)
+			}
+
+			s, err := store.New(context.Background(), filepath.Join(dir, "nanite.db"))
+			if err != nil {
+				t.Fatalf("open store: %v", err)
+			}
+			t.Cleanup(func() {
+				if err := s.Close(context.Background()); err != nil {
+					t.Errorf("close store: %v", err)
+				}
+			})
+
+			serverName := "malformed-" + tt.name
+			cfg := &store.MCPServerConfig{
+				Name:          serverName,
+				TransportType: "stdio",
+				Command:       scriptPath,
+				Args:          tt.argsJSON,
+				Env:           tt.envJSON,
+				EnvAllowlist:  `[]`,
+				Enabled:       true,
+				TrustTier:     store.TrustTierPluginStdio,
+			}
+			if err := s.CreateMCPServer(context.Background(), cfg); err != nil {
+				t.Fatalf("create MCP server config: %v", err)
+			}
+
+			var logs bytes.Buffer
+			oldLogger := slog.Default()
+			slog.SetDefault(slog.New(slog.NewJSONHandler(&logs, &slog.HandlerOptions{Level: slog.LevelWarn})))
+			t.Cleanup(func() { slog.SetDefault(oldLogger) })
+
+			manager := mcp.NewManager()
+			t.Cleanup(manager.Close)
+			loadPersistedMCPServers(s, manager)
+
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			if _, err := manager.DiscoverServerTools(ctx, serverName); err != nil {
+				t.Fatalf("start persisted MCP server: %v", err)
+			}
+
+			capture, err := os.ReadFile(capturePath)
+			if err != nil {
+				t.Fatalf("read MCP subprocess capture: %v", err)
+			}
+			if got, want := string(capture), "argc=0\nsentinel=<unset>\n"; got != want {
+				t.Errorf("MCP subprocess received partially decoded config:\n got %q\nwant %q", got, want)
+			}
+
+			logOutput := logs.String()
+			if !strings.Contains(logOutput, tt.warningText) {
+				t.Errorf("warning log missing field-specific message %q: %s", tt.warningText, logOutput)
+			}
+			if !strings.Contains(logOutput, serverName) {
+				t.Errorf("warning log missing server name %q: %s", serverName, logOutput)
+			}
+			if !strings.Contains(logOutput, `"err"`) {
+				t.Errorf("warning log missing decode error: %s", logOutput)
+			}
+		})
 	}
 }
 

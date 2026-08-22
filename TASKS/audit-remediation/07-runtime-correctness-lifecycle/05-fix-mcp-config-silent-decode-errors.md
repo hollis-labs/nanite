@@ -1,7 +1,7 @@
 # Fix `loadPersistedMCPServers` silently discarding Args/Env JSON decode errors
 
 **Phase:** Wave 2 — Correctness, lifecycle, concurrency
-**Status:** not-started
+**Status:** implemented
 **Depends on:** none
 **Touches:** `cmd/nanite/main.go` (`loadPersistedMCPServers`, lines 1233-1277). No other files need changes.
 
@@ -104,7 +104,12 @@ Very low risk — purely additive logging plus an explicit (already-implicit) ze
 
 ## Work log
 
-<!-- Worker fills in: what was actually done, any deviation from plan and why. -->
+- Re-derived `loadPersistedMCPServers` after task `07/02`: the function now starts at `cmd/nanite/main.go:1318`, with the stdio JSON-decode branch at lines 1331-1355 before this edit.
+- Added the same checked-decode, field-specific warning, server name, error, and explicit `nil` fallback used by `EnvAllowlist` to both `Args` and `Env`. The SSE/default branches and `AddStdioServer` error path are unchanged.
+- Added `TestLoadPersistedMCPServersMalformedJSON` in `cmd/nanite/main_test.go`. The test persists separate malformed Args and Env rows, captures structured WARN output, then starts the real registered stdio transport against a temporary MCP subprocess. The subprocess records the actual argv and environment it receives, proving partially decoded data does not cross the runtime boundary.
+- Pre-fix proof: the Args case failed with `argc=2` (the partial `"leaked-arg"` plus a zero-value second element), the Env case failed with `sentinel=leaked`, and neither case emitted its expected warning. After the fix, both cases pass with `argc=0`, `sentinel=<unset>`, and warning output containing the field-specific message, server name, and decode error.
+- Verification passed: focused test once verbose; focused race test 5 repetitions; `go build ./cmd/nanite/...`; `go vet ./cmd/nanite/...`; `go test ./cmd/nanite/... -count=1`; `go vet ./...`; and `go test ./... -count=1`. `errcheck ./cmd/nanite/...` no longer reports either `json.Unmarshal` site; it remains non-zero on the repository's pre-existing unchecked-error backlog elsewhere in `cmd/nanite` (including unrelated `main.go` sites).
+- Deviation: the task's `Touches` line named only `main.go`, but the required regression coverage necessarily adds the test to the existing `cmd/nanite/main_test.go`; no production file beyond `main.go` changed.
 
 ## Review notes
 

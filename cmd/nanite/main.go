@@ -1330,11 +1330,19 @@ func loadPersistedMCPServers(s *store.Store, m *mcp.Manager) {
 		case "stdio":
 			var args []string
 			if cfg.Args != "" && cfg.Args != "[]" {
-				json.Unmarshal([]byte(cfg.Args), &args)
+				if err := json.Unmarshal([]byte(cfg.Args), &args); err != nil {
+					slog.Warn("mcp: malformed args json — ignoring",
+						"name", cfg.Name, "err", err)
+					args = nil
+				}
 			}
 			var envVars []string
 			if cfg.Env != "" && cfg.Env != "[]" {
-				json.Unmarshal([]byte(cfg.Env), &envVars)
+				if err := json.Unmarshal([]byte(cfg.Env), &envVars); err != nil {
+					slog.Warn("mcp: malformed env json — ignoring",
+						"name", cfg.Name, "err", err)
+					envVars = nil
+				}
 			}
 			var envAllowlist []string
 			if cfg.EnvAllowlist != "" && cfg.EnvAllowlist != "[]" {

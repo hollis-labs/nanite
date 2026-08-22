@@ -18,6 +18,24 @@ type WorkflowRunRow struct {
 	StartedAt      time.Time
 	CompletedAt    time.Time
 	UpdatedAt      time.Time
+
+	// LoopRunID scopes this WorkflowRun to one loop_runs.id when it was
+	// launched as one iteration of a Loop (docs/engineering/architecture/
+	// 21-loops.md's schema-ledger line, migration 140,
+	// TASKS/loops/05-workflow-runs-loop-scoping-columns.md). REFERENCES
+	// loop_runs(id). nil for every ordinary, non-loop-launched run --
+	// which is every run today: nothing in this codebase sets this field
+	// yet (task 08's LoopEngine is the first intended writer, via
+	// UpdateWorkflowRunLoopScope below, not via CreateWorkflowRun's normal
+	// insert path -- see that function's doc comment for why).
+	LoopRunID *string
+
+	// LoopIteration is the iteration number within LoopRunID this run
+	// represents. Only meaningful when LoopRunID is non-nil; nil
+	// otherwise. A pointer (not a bare int) because 0 is a legitimate
+	// iteration number and can't double as an "unset" sentinel the way an
+	// empty string can for LoopRunID.
+	LoopIteration *int
 }
 
 // WorkflowRunStepRow is the persisted per-step status/output row a later
@@ -44,11 +62,24 @@ type WorkflowRunStepRow struct {
 // ErrWorkflowRunNotFound signals an unknown workflow_runs.id.
 var ErrWorkflowRunNotFound = errors.New("workflow_runs: not found")
 
-const workflowRunColumns = `id, definition_name, status, input_json, error, started_at, completed_at, updated_at`
+const workflowRunColumns = `id, definition_name, status, input_json, error, started_at, completed_at, updated_at, loop_run_id, loop_iteration`
 
 // CreateWorkflowRun persists a new run row. row.ID must already be set by
 // the caller (the engine generates it up front so it can stamp
 // WorkflowRunID onto every step request before the row exists).
+//
+// row.LoopRunID/row.LoopIteration are threaded straight through to the
+// INSERT for a caller that already knows them, but as of this task nothing
+// in this codebase actually sets them on the WorkflowRunRow passed here --
+// BuiltinWorkflowEngine.Run (the only real caller,
+// internal/service/workflow_engine.go) constructs its WorkflowRunRow from
+// agentworkflow.WorkflowInput, a shared type every WorkflowEngine
+// implementation (built-in and external) consumes, and does not carry a
+// loop-scoping concept. Extending that shared, engine-agnostic type would
+// be a much larger change than this task's scope. Task 08's LoopEngine is
+// expected to call UpdateWorkflowRunLoopScope (below) right after
+// WorkflowLauncher.Launch returns its WorkflowLaunchResult.RunID instead --
+// see this task's Work Log for the full reasoning.
 func (s *Store) CreateWorkflowRun(row *WorkflowRunRow) error {
 	if row == nil {
 		return errors.New("CreateWorkflowRun: nil row")
@@ -69,13 +100,51 @@ func (s *Store) CreateWorkflowRun(row *WorkflowRunRow) error {
 
 	_, err := s.DB.Exec(
 		`INSERT INTO workflow_runs (`+workflowRunColumns+`)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		row.ID, row.DefinitionName, row.Status, row.InputJSON, row.Error,
 		formatTimeRFC3339Nano(row.StartedAt), formatTimeRFC3339NanoOrEmpty(row.CompletedAt),
 		formatTimeRFC3339Nano(row.UpdatedAt),
+		row.LoopRunID, row.LoopIteration,
 	)
 	if err != nil {
 		return fmt.Errorf("create workflow_runs row %s: %w", row.ID, err)
+	}
+	return nil
+}
+
+// UpdateWorkflowRunLoopScope sets loop_run_id/loop_iteration on an existing
+// workflow_runs row -- the follow-up narrow updater TASKS/loops/
+// 05-workflow-runs-loop-scoping-columns.md's own "Done means" calls for,
+// since WorkflowLaunchRequest/WorkflowLauncher.Launch has no natural
+// pass-through for these two values (see CreateWorkflowRun's doc comment
+// above for why). Intended caller: task 08's LoopEngine, immediately after
+// WorkflowLauncher.Launch returns a WorkflowLaunchResult for one loop
+// iteration's run. loopRunID must be non-empty (mirrors
+// CreateWorkflowRun's own required-id check) -- this updater exists
+// specifically to stamp a run as loop-scoped, so an empty loopRunID is
+// always a caller bug, not a valid "clear the scope" request. Returns
+// ErrWorkflowRunNotFound when id doesn't match any row, matching this
+// file's SetWorkflowRunStatus convention.
+func (s *Store) UpdateWorkflowRunLoopScope(id, loopRunID string, loopIteration int) error {
+	if id == "" {
+		return errors.New("UpdateWorkflowRunLoopScope: empty id")
+	}
+	if loopRunID == "" {
+		return errors.New("UpdateWorkflowRunLoopScope: empty loop_run_id")
+	}
+	res, err := s.DB.Exec(
+		`UPDATE workflow_runs SET loop_run_id = ?, loop_iteration = ?, updated_at = ? WHERE id = ?`,
+		loopRunID, loopIteration, formatTimeRFC3339Nano(time.Now().UTC()), id,
+	)
+	if err != nil {
+		return fmt.Errorf("update workflow_runs loop scope %s: %w", id, err)
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("update workflow_runs loop scope %s: rows affected: %w", id, err)
+	}
+	if n == 0 {
+		return ErrWorkflowRunNotFound
 	}
 	return nil
 }
@@ -122,13 +191,26 @@ func (s *Store) GetWorkflowRun(id string) (*WorkflowRunRow, error) {
 func scanWorkflowRunRow(scanner interface{ Scan(...any) error }) (*WorkflowRunRow, error) {
 	r := &WorkflowRunRow{}
 	var startedAt, completedAt, updatedAt string
-	err := scanner.Scan(&r.ID, &r.DefinitionName, &r.Status, &r.InputJSON, &r.Error, &startedAt, &completedAt, &updatedAt)
+	var loopRunID sql.NullString
+	var loopIteration sql.NullInt64
+	err := scanner.Scan(
+		&r.ID, &r.DefinitionName, &r.Status, &r.InputJSON, &r.Error, &startedAt, &completedAt, &updatedAt,
+		&loopRunID, &loopIteration,
+	)
 	if err != nil {
 		return nil, err
 	}
 	r.StartedAt = parseTimeRFC3339Nano(startedAt)
 	r.CompletedAt = parseTimeRFC3339Nano(completedAt)
 	r.UpdatedAt = parseTimeRFC3339Nano(updatedAt)
+	if loopRunID.Valid {
+		v := loopRunID.String
+		r.LoopRunID = &v
+	}
+	if loopIteration.Valid {
+		v := int(loopIteration.Int64)
+		r.LoopIteration = &v
+	}
 	return r, nil
 }
 

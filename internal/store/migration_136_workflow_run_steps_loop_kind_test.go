@@ -218,6 +218,19 @@ func TestRealBackupWorkflowRunStepsSurviveLoopKindMigration(t *testing.T) {
 	// then replay forward past 136 — this is the actual "flex row already
 	// present when the widening migration's rebuild runs" scenario the
 	// Done-means describes.
+	//
+	// The flexRunID parent workflow_runs row is created *before* DownTo(134)
+	// runs, while rs is still at head schema (via CreateWorkflowRun, which
+	// is coupled to the current WorkflowRunRow shape) — TASKS/loops/
+	// 05-workflow-runs-loop-scoping-columns.md's migration 140 added
+	// workflow_runs.loop_run_id/loop_iteration after this task's own
+	// migration 136 landed, so CreateWorkflowRun can no longer be called
+	// against a schema rolled back below 140 (it unconditionally inserts
+	// those two columns). ALTER TABLE ... DROP COLUMN (140's Down) removes
+	// only those two columns, not the row itself, so the row survives
+	// DownTo(134) intact and is still a valid FK target for the
+	// workflow_run_steps insert below, which is unaffected either way
+	// (migration 136 never touches workflow_runs).
 	migrationsDir, err := fs.Sub(migrationsFS, "migrations")
 	if err != nil {
 		t.Fatalf("sub migrations fs: %v", err)
@@ -226,15 +239,17 @@ func TestRealBackupWorkflowRunStepsSurviveLoopKindMigration(t *testing.T) {
 	if err != nil {
 		t.Fatalf("construct goose provider: %v", err)
 	}
-	if _, err := provider.DownTo(ctx, 134); err != nil {
-		t.Fatalf("goose DownTo 134 (reverse migration 136 on real backup copy): %v", err)
-	}
 
 	const flexRunID = "real-backup-pre-136-flex-run"
 	const flexStepID = "flex-step-pre-136"
 	if err := rs.CreateWorkflowRun(&WorkflowRunRow{ID: flexRunID, DefinitionName: "pre-136-flex-check", Status: "waiting_on_flex"}); err != nil {
 		t.Fatalf("CreateWorkflowRun (pre-136 flex probe) on real backup copy: %v", err)
 	}
+
+	if _, err := provider.DownTo(ctx, 134); err != nil {
+		t.Fatalf("goose DownTo 134 (reverse migration 136 on real backup copy): %v", err)
+	}
+
 	if err := rs.UpsertWorkflowRunStep(&WorkflowRunStepRow{
 		WorkflowRunID: flexRunID,
 		StepID:        flexStepID,
@@ -245,8 +260,13 @@ func TestRealBackupWorkflowRunStepsSurviveLoopKindMigration(t *testing.T) {
 		t.Fatalf("UpsertWorkflowRunStep(kind=flex) on real backup copy at schema version 134: %v", err)
 	}
 
-	if _, err := provider.UpTo(ctx, 136); err != nil {
-		t.Fatalf("goose UpTo 136 (replay migration 136 over real backup copy + synthetic flex row): %v", err)
+	// Replay all the way back to this worktree's head (not just UpTo(136))
+	// so the "new capability" CreateWorkflowRun call below (which needs
+	// migration 140's columns) succeeds too — none of 137-140 touch
+	// workflow_run_steps, so this doesn't weaken the 136-rebuild-specific
+	// assertions that follow.
+	if _, err := provider.Up(ctx); err != nil {
+		t.Fatalf("goose Up (replay forward past migration 136 over real backup copy + synthetic flex row): %v", err)
 	}
 
 	// Every real, pre-existing row must still be there, with a valid kind
